@@ -10,6 +10,7 @@ import { log } from "../obs/log.ts";
 import { evento, eventoDeRotina, exigir, textoRotinaAtiva } from "./apoio-l7.ts";
 import { concederAcessosDaRotina } from "./conceder-acessos-da-rotina.ts";
 import { autoriaDeQuemConfirma, fecharDecisaoDaProposta, type PorRegra } from "./confirmar-pelo-modo.ts";
+import { invalidarCardDeRitmo } from "./ritmo-card.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
 
 /** `obsoleta` (NOD-159): a rotina mudou depois da proposta; nada foi aplicado e a proposta saiu recusada. */
@@ -132,6 +133,10 @@ export const aplicarAtualizacaoRotina: CasoDeUso<{ propostaId: string; porRegra?
     acessos: p.acessos,
   });
   if (!rotina) throw new ErroDeDominio("nao_permitido", { cause: "só a dona atualiza a rotina" });
+  // NOD-313 (2026-10-23): editar a rotina zera a contagem de execuções sem novidade e fecha o card aberto como inválido
+  // (a trava da rotina vem antes).
+  await deps.repos.rotinaRitmo.contar(rotina.id, "zera");
+  const ritmo = await invalidarCardDeRitmo(deps, rotina);
   const autoria = autoriaDeQuemConfirma(deps, proposta.agenteId, input.porRegra);
   await deps.repos.mensagens.criar({
     conversaId: rotina.conversaId,
@@ -143,6 +148,7 @@ export const aplicarAtualizacaoRotina: CasoDeUso<{ propostaId: string; porRegra?
   });
   const events: RuntimeEvent[] = [
     evento(deps, "rotina_atualizada", autoria, { rotinaId: rotina.id, propostaId: proposta.id, proximaExecucao: rotina.proximaExecucao, fusoIana: rotina.fusoIana }, { conversaId: rotina.conversaId }),
+    ...ritmo,
   ];
   // definido em 2026-09-24 (emenda da ADR-044, "rotina nasce com o acesso"): a mudança que traz `acessos`
   // concede, na mesma transação, o que ainda não estava concedido — o que já estava não vira mensagem
@@ -179,6 +185,7 @@ export const aplicarExclusaoRotina: CasoDeUso<{ propostaId: string; porRegra?: P
   await confirmarOuAbortar(deps, proposta.id);
   const rotina = await deps.repos.rotinas.excluir(p.rotinaId, agora);
   if (!rotina) throw new ErroDeDominio("nao_permitido", { cause: "só a dona exclui a rotina" });
+  const ritmo = await invalidarCardDeRitmo(deps, rotina); // NOD-313: o card de ritmo aberto fecha sem aplicar nada.
   const autoria = autoriaDeQuemConfirma(deps, proposta.agenteId, input.porRegra);
   await deps.repos.mensagens.criar({
     conversaId: rotina.conversaId,
@@ -190,6 +197,7 @@ export const aplicarExclusaoRotina: CasoDeUso<{ propostaId: string; porRegra?: P
   });
   const events: RuntimeEvent[] = [
     evento(deps, "rotina_excluida", autoria, { rotinaId: rotina.id, propostaId: proposta.id }, { conversaId: rotina.conversaId }),
+    ...ritmo,
   ];
   const { decisao, sincronizar } = await fecharDecisaoDaProposta(deps, proposta.id, agora, input.porRegra);
   if (decisao) events.push(evento(deps, "decisao_decidida", autoria, { decisaoId: decisao.id, tipo: "rotina_exclusao" }, { conversaId: rotina.conversaId }), ...sincronizar);

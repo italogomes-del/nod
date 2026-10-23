@@ -7,6 +7,7 @@ import { assertUuid } from "../../../use-cases/apoio-l7.ts";
 import { criarRotinaPelaPessoa } from "../../../use-cases/criar-rotina.ts";
 import { listarExecucoes, listarRotinas } from "../../../use-cases/listar-rotinas.ts";
 import { pausarRotina } from "../../../use-cases/pausar-rotina.ts";
+import { decidirRitmoRotina } from "../../../use-cases/ritmo-rotina.ts";
 import type { CasoDeUso, Deps, Services, UseCasesNod } from "../../../use-cases/tipos.ts";
 import type { Rota } from "../roteador.ts";
 import { executarRotinaAgora } from "../../../use-cases/executar-rotina-agora.ts";
@@ -23,6 +24,7 @@ export type DepsRotasL7 = {
   services: Services;
   useCases: UseCasesNod;
   agora: Relogio;
+  fusoPadrao?: string;
 };
 
 /** Roda um caso de uso numa tx escopada e grava os eventos na MESMA tx (events + outbox). */
@@ -30,7 +32,7 @@ export async function executar<I, O>(deps: DepsRotasL7, escopo: Escopo, caso: Ca
   const tx = deps.txPara(escopo);
   return tx(async (trx: Tx) => {
     const repos = criarRepos(trx, escopo);
-    const d: Deps = { repos, services: deps.services, useCases: deps.useCases, tx, escopo, agora: deps.agora };
+    const d: Deps = { repos, services: deps.services, useCases: deps.useCases, tx, escopo, agora: deps.agora, fusoPadrao: deps.fusoPadrao };
     const r = await caso(d, input);
     const events: RuntimeEvent[] = r.events ?? [];
     if (events.length > 0) await repos.events.gravarComOutbox(events);
@@ -125,6 +127,19 @@ export function criarRotasRotinas(deps: DepsRotasL7): Rota[] {
       async handler(ctx) {
         const { rotina } = await executar(deps, ctx.escopo, pausarRotina, { rotinaId: uuid(ctx.params.id, "id"), estado: "ativa" });
         const resposta: RespostaMutacao = { ok: true, ids: { rotinaId: rotina.id } };
+        ctx.json(200, resposta);
+      },
+    },
+    {
+      // NOD-313 (2026-10-23): o clique da pessoa no card de ritmo — a ÚNICA porta que muda a rotina a partir da sugestão.
+      metodo: "POST",
+      padrao: /^\/rotinas\/(?<id>[^/]+)\/ritmo$/,
+      async handler(ctx) {
+        const corpo = corpoObjeto(await ctx.corpo());
+        const opcao = corpo.opcao;
+        if (opcao !== "espacar" && opcao !== "uteis" && opcao !== "pausar" && opcao !== "deixar" && opcao !== "desfazer") throw new ErroDeDominio("entrada_invalida", { cause: "campo opcao" });
+        const r = await executar(deps, ctx.escopo, decidirRitmoRotina, { rotinaId: uuid(ctx.params.id, "id"), mensagemId: uuid(corpo.mensagemId, "mensagemId"), opcao });
+        const resposta: RespostaMutacao = { ok: true, ids: { rotinaId: ctx.params.id ?? "", aplicada: String(r.aplicada), ...(r.motivo ? { motivo: r.motivo } : {}) } };
         ctx.json(200, resposta);
       },
     },

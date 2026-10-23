@@ -20,6 +20,7 @@ import type { EstadoExecutor, IdExecutor } from "../../src/contracts/executor.ts
 import type { Inventario } from "../../src/contracts/inventario.ts";
 import type { IasDaPessoa, InteligenciaBot, PedidoInteligencia } from "../../src/contracts/inteligencia.ts";
 import type { DecisaoDaPessoa } from "../../src/contracts/troca-de-ia.ts";
+import type { OpcaoRitmo } from "../../src/contracts/rotina-ritmo.ts";
 import type { UsoDoPlanoDto } from "../../src/contracts/uso-do-plano.ts";
 import type { IdHarness } from "../../src/contracts/harness.ts";
 import type { Memoria, TipoMemoria } from "../../src/contracts/memoria.ts";
@@ -358,6 +359,8 @@ export function criarApi(escopo: Escopo) {
     // ADR-108 (R4/R6): a escolha no aviso de troca de IA do bot.
     /** Revisão do PR 2 (I2): `trocaId` diz qual aviso (o bot pode ter um por IA). */
     decidirTrocaDeIa: (agenteId: string, decisao: DecisaoDaPessoa, trocaId?: string) => post<{ decisao: string; aplicada: boolean; tasks: number }>(`agentes/${encodeURIComponent(agenteId)}/troca-de-ia`, { decisao, ...(trocaId ? { trocaId } : {}) }),
+    // NOD-313: o clique no card de ritmo da rotina (a única coisa que muda a rotina a partir da sugestão).
+    decidirRitmoRotina: (rotinaId: string, mensagemId: string, opcao: OpcaoRitmo | "desfazer") => post<{ ok: true; ids: { rotinaId: string; aplicada: string; motivo?: string } }>(`rotinas/${encodeURIComponent(rotinaId)}/ritmo`, { mensagemId, opcao }),
     pedirLogin: (maquinaId: string, p: { ia: IaComConta; contaId?: string; apelido?: string | null }) => post<LoginNaMaquina>(`maquinas/${encodeURIComponent(maquinaId)}/logins`, p),
     verLogin: (maquinaId: string, loginId: string) => get<LoginNaMaquina>(`maquinas/${encodeURIComponent(maquinaId)}/logins/${encodeURIComponent(loginId)}`),
     colarCodigoLogin: (maquinaId: string, loginId: string, cifrado: CodigoCifrado) => post<{ ok: true }>(`maquinas/${encodeURIComponent(maquinaId)}/logins/${encodeURIComponent(loginId)}/codigo`, { cifrado }),

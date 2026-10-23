@@ -4,6 +4,7 @@ import { ErroDeDominio } from "../domain/erro.ts";
 import { proximaJanela } from "../domain/rotina-janela.ts";
 import { autoriaPessoa, evento, eventoDeRotina, exigir, textoRotinaAtiva } from "./apoio-l7.ts";
 import { registrarDesfechoRotina } from "./disparar-rotina.ts";
+import { invalidarCardDeRitmo } from "./ritmo-card.ts";
 import type { CasoDeUso } from "./tipos.ts";
 
 /**
@@ -18,7 +19,7 @@ import type { CasoDeUso } from "./tipos.ts";
  * `texto` (definido em 2026-09-24, emenda da ADR-044): quem pausa por regra diz POR QUÊ — o varredor,
  * quando ninguém liberou o acesso da rotina no prazo. Ausente, a linha de sempre.
  */
-export const pausarRotina: CasoDeUso<{ rotinaId: string; estado: EstadoRotina; autoria?: Autoria; texto?: string }, { rotina: Rotina }> = async (deps, input) => {
+export const pausarRotina: CasoDeUso<{ rotinaId: string; estado: EstadoRotina; autoria?: Autoria; texto?: string; semLinha?: true }, { rotina: Rotina; corte?: { cortados: number; rodando: boolean } }> = async (deps, input) => {
   const atual = exigir(await deps.repos.rotinas.buscar(input.rotinaId), "nao_encontrado", "rotina");
   if (atual.estado === input.estado) return { data: { rotina: atual } };
   const agora = deps.agora();
@@ -29,6 +30,11 @@ export const pausarRotina: CasoDeUso<{ rotinaId: string; estado: EstadoRotina; a
   const rotina = await deps.repos.rotinas.atualizarEstado(atual.id, input.estado);
   if (!rotina) throw new ErroDeDominio("nao_permitido", { cause: "só a dona pausa/ativa" });
   const corte = rotina.estado === "pausada" ? await cortarFila(deps, rotina.id) : { events: [], cortados: 0, rodando: false };
+  // NOD-313 (2026-10-23): o card de ritmo é a própria linha da pausa ("✓ … pausada · desfazer"); quem o fecha escreve a
+  // frase do corte nele, sem uma segunda linha.
+  if (input.semLinha) return { data: { rotina, corte: { cortados: corte.cortados, rodando: corte.rodando } }, events: corte.events };
+  // NOD-313: a pausa por outro caminho (tela, agente, regra) fecha o card de ritmo aberto sem aplicar nada.
+  const ritmo = rotina.estado === "pausada" ? await invalidarCardDeRitmo(deps, rotina) : [];
   await deps.repos.mensagens.criar({
     conversaId: rotina.conversaId,
     autoria: input.autoria ?? autoriaPessoa(deps.escopo.pessoaId),
@@ -41,7 +47,7 @@ export const pausarRotina: CasoDeUso<{ rotinaId: string; estado: EstadoRotina; a
     payload: eventoDeRotina(rotina, rotina.estado === "ativa" ? "ativada" : "pausada"),
     confianca: "confiavel",
   });
-  return { data: { rotina }, events: corte.events };
+  return { data: { rotina }, events: [...corte.events, ...ritmo] };
 };
 
 /** definido em 2026-10-16 (NOD-272): quem segura a fila entra na mensagem — o que foi cancelado e o que ainda termina. */

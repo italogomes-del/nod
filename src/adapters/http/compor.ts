@@ -295,6 +295,7 @@ export function comporApp(o: OpcoesCompor): App {
   const semCriarBots = env.NOD_CRIAR_BOTS?.trim() === "0";
   const compartilhado = env.NOD_MODO === "compartilhado";
   const relogio: Relogio = o.relogio ?? (() => Date.now());
+  const fusoPadrao = env.NOD_FUSO_PADRAO ?? "America/Sao_Paulo";
   // Executor da máquina: nasce de NOD_EXECUTOR e muda pelo interruptor (trocarExecutor). Quem precisa dele lê o valor VIVO
   // (getter/closure), nunca uma cópia — senão a troca pela interface não chega ao plano do turno seguinte.
   // NOD-160: valor desconhecido é 'local' com o claude-cli (que o boot não registra), para o turno cair em
@@ -352,7 +353,7 @@ export function comporApp(o: OpcoesCompor): App {
 
   const useCases: UseCasesNod = { lembrar, atualizarPerfil, pedirAcesso, criarRotina, listarRotinasDoAgente, pausarRotinaPeloAgente, reativarRotinaPeloAgente, atualizarRotinaPeloAgente, excluirRotinaPeloAgente, pedirAprovacao, pedirAPessoa, passar, encaminhar, semNovidade, pedirABot, verColegas, publicarArtefato, lerArtefato, iniciarTarefa, desligar, anotarEntrevista, concluirEntrevista, proporBot, abrirTask, mandarParaTask, meChameAs, esperarComando, abrirFrentes, mandarParaFrente, devolverResumo, gerirBots, verAppsConectados, registrarRelatoDoNod, criarBots, responderPedido };
 
-  const depsDe = (trx: Tx, escopo: Escopo): Deps => ({ repos: criarRepos(trx, escopo), services, useCases, tx: (fn) => fn(trx), escopo, agora: relogio });
+  const depsDe = (trx: Tx, escopo: Escopo): Deps => ({ repos: criarRepos(trx, escopo), services, useCases, tx: (fn) => fn(trx), escopo, agora: relogio, fusoPadrao });
   const depsSobre = (trx: Tx): Deps => depsDe(trx, escopoDoContexto());
   const gravar = async (trx: Tx, events: RuntimeEvent[]): Promise<void> => {
     if (events.length) await criarRepos(trx, escopoDoContexto()).events.gravarComOutbox(events);
@@ -1193,7 +1194,7 @@ export function comporApp(o: OpcoesCompor): App {
     },
     ...(compartilhado ? { harnessesDaPessoa: (pessoaId: string) => ponteHttp.harnessesDaPessoa(pessoaId) } : {}),
   };
-  const depsL7: DepsRotasL7 = { executor: () => executorAtual, txPara: (escopo) => abrirTxEscopada(db, escopo), services, useCases, agora: relogio };
+  const depsL7: DepsRotasL7 = { executor: () => executorAtual, txPara: (escopo) => abrirTxEscopada(db, escopo), services, useCases, agora: relogio, fusoPadrao };
   const rotas: Rota[] = [
     ...criarRotasFrota(depsRotas),
     criarRotaInventario({ inventario }),

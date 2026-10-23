@@ -694,6 +694,17 @@ function decidirTroca(el: HTMLElement, decisao: "esperar" | "levar" | "outra_ia"
   });
 }
 
+const OPCOES_DO_CARD_RITMO = ["espacar", "uteis", "pausar", "deixar", "desfazer"] as const;
+function decidirRitmo(el: HTMLElement): Promise<void> {
+  return agir(async () => {
+    const opcao = OPCOES_DO_CARD_RITMO.find((o) => o === el.dataset.opcao);
+    if (!opcao) return;
+    await api!.decidirRitmoRotina(el.dataset.rotina ?? "", el.dataset.mensagem ?? "", opcao);
+    const conversaId = el.dataset.conversa;
+    dispatch({ tipo: "invalidar", quais: [...(conversaId ? [`conversa:${conversaId}` as Invalidacao] : []), "rotinas"] });
+  });
+}
+
 /** Roda uma mutação: marca ocupado, traduz o erro em código fechado (nunca err.message cru). */
 async function agir(fn: () => Promise<void>): Promise<void> {
   // O que nasce do próprio clique ela já sabe: nenhum aviso nos próximos 5 s (web/lib/avisador.ts).
@@ -3525,6 +3536,8 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   "troca-esperar": (el) => decidirTroca(el, "esperar"),
   "troca-levar": (el) => decidirTroca(el, "levar"),
   "troca-outra-ia": (el) => decidirTroca(el, "outra_ia"),
+  // NOD-313: as pílulas e o "desfazer" do card de ritmo da rotina. A linha relê pela conversa (o servidor a reescreve).
+  "ritmo-rotina": (el) => decidirRitmo(el),
   // NOD-284: o passo leva o turno da nota; quando o servidor não refaz, a tela diz por quê (nunca "seguindo" sem seguir).
   "cl-seguir": (el) => agir(async () => {
     const conversaId = el.dataset.conversa ?? "";

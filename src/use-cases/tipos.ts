@@ -18,6 +18,8 @@ export interface Deps {
   tx: Transacao;
   escopo: Escopo;
   agora: Relogio;
+  /** Fuso da pessoa enquanto ainda não há preferência individual persistida. */
+  fusoPadrao?: string;
 }
 
 export type UseCasesNod = UseCasesNodContrato<Deps>;

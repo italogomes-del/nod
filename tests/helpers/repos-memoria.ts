@@ -47,6 +47,7 @@ import type { ItemOutbox } from "../../src/repositories/outbox.repo.ts";
 import type { ExtrasTrabalho } from "../../src/repositories/trabalhos.repo.ts";
 import type { Espera } from "../../src/contracts/espera.ts";
 import type { TrocaDeIa } from "../../src/contracts/troca-de-ia.ts";
+import type { RitmoRotina } from "../../src/contracts/rotina-ritmo.ts";
 import type { Parada } from "../../src/repositories/paradas.repo.ts";
 import type { Pessoa } from "../../src/repositories/pessoas.repo.ts";
 import type { JanelaReivindicada } from "../../src/repositories/rotina-janelas.repo.ts";
@@ -88,6 +89,8 @@ export type BancoMemoria = {
   contasIa: EstadoContasIaMemoria;
   /** 0080 (ADR-108): os avisos de troca de IA (o comportamento completo se prova no Postgres). */
   trocasDeIa: (TrocaDeIa & { tenantId: string; ownerId: string })[];
+  /** NOD-313: rotina_ritmo (a trava e a corrida se provam no Postgres). */
+  rotinaRitmo: (RitmoRotina & { tenantId: string; ownerId: string })[];
   /** ADR-102: turnos.conta_id e conversas/trabalhos.sessao_conta_id ("conversa:<id>" / "trabalho:<id>"). */
   contaDoTurno: Map<string, string | null>;
   /** NOD-280: a máquina "desta vez" de cada turno (o fake não a aplica no reivindicar; os testes a leem daqui). */
@@ -178,6 +181,7 @@ export function criarBancoMemoria(): { banco: BancoMemoria; repos(escopo?: Escop
     esperas: [],
     contasIa: estadoContasIaMemoria(),
     trocasDeIa: [],
+    rotinaRitmo: [],
     contaDoTurno: new Map(),
     maquinaDestaVez: new Map(),
     contaDaSessao: new Map(),
@@ -907,6 +911,48 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
     },
 
     contasIa: contasIaMemoria(b.contasIa, escopo),
+    rotinaRitmo: (() => {
+      const da = (rotinaId: string) => b.rotinaRitmo.find((x) => x.tenantId === escopo.tenantId && x.ownerId === escopo.pessoaId && x.rotinaId === rotinaId);
+      const sem = ({ tenantId: _t, ownerId: _o, ...r }: RitmoRotina & { tenantId: string; ownerId: string }): RitmoRotina => ({ ...r });
+      return {
+        async buscar(rotinaId: string) {
+          const r = da(rotinaId);
+          return r ? sem(r) : null;
+        },
+        async tentarTravarParaDesfazer(rotinaId: string) {
+          const r = da(rotinaId);
+          return r ? sem(r) : null;
+        },
+        async contar(rotinaId: string, efeito: "soma" | "zera") {
+          let r = da(rotinaId);
+          if (!r && efeito === "zera") return null;
+          if (!r) {
+            r = { tenantId: escopo.tenantId, ownerId: escopo.pessoaId, rotinaId, semNovidadeSeguidas: 0, sugestaoMensagemId: null, sugeridaEm: null, silenciadaAte: null, desfazer: null };
+            b.rotinaRitmo.push(r);
+          }
+          r.semNovidadeSeguidas = efeito === "soma" ? r.semNovidadeSeguidas + 1 : 0;
+          return sem(r);
+        },
+        async reivindicarCard(rotinaId: string, agora: number, minimo: number) {
+          const r = da(rotinaId);
+          if (!r || r.sugeridaEm !== null || r.semNovidadeSeguidas < minimo || (r.silenciadaAte !== null && r.silenciadaAte > agora)) return false;
+          r.sugeridaEm = agora;
+          return true;
+        },
+        async fixarCard(rotinaId: string, mensagemId: string) {
+          const r = da(rotinaId);
+          if (r) Object.assign(r, { sugestaoMensagemId: mensagemId, desfazer: null });
+        },
+        async fecharCard(rotinaId: string, campos: { silenciadaAte: number | null; desfazer: RitmoRotina["desfazer"] }) {
+          const r = da(rotinaId);
+          if (r) Object.assign(r, { sugeridaEm: null, semNovidadeSeguidas: 0, silenciadaAte: campos.silenciadaAte ?? r.silenciadaAte, desfazer: campos.desfazer });
+        },
+        async reabrirCard(rotinaId: string, agora: number) {
+          const r = da(rotinaId);
+          if (r) Object.assign(r, { sugeridaEm: agora, desfazer: null });
+        },
+      };
+    })(),
     trocasDeIa: (() => {
       const minhas = () => b.trocasDeIa.filter((x) => x.tenantId === escopo.tenantId && x.ownerId === escopo.pessoaId);
       const sem = ({ tenantId: _t, ownerId: _o, ...t }: TrocaDeIa & { tenantId: string; ownerId: string }): TrocaDeIa => ({ ...t });

@@ -1,4 +1,5 @@
 import type { Executor, RuntimeEvent } from "../contracts/evento.ts";
+import { contarRitmo } from "./ritmo-rotina.ts";
 import type { DesfechoRotina, MotivoAdiada, MotivoBloqueioRotina, MotivoFalha, MotivoInterrupcaoRotina, MotivoNaoRodouRotina, MotivoSemNovidade } from "../contracts/motivos.ts";
 import { TIPOS_GATE_ROTINA, TIPOS_QUE_SEGURAM_A_EXECUCAO } from "../contracts/pedido.ts";
 import type { ExecucaoRotina, Rotina } from "../contracts/rotina.ts";
@@ -418,6 +419,15 @@ export type SaidaDesfecho =
  * ainda pendente para o mesmo turno NÃO conta: a rotina só executou quando o efeito saiu.
  */
 export async function registrarDesfechoRotina(deps: Pick<Deps, "repos" | "escopo" | "agora">, input: EntradaDesfecho): Promise<{ data: SaidaDesfecho; events?: RuntimeEvent[] }> {
+  const r = await registrarDesfecho(deps, input);
+  // NOD-313 (2026-10-23): a contagem sem novidade só anda quando o desfecho da janela MUDOU — o mesmo desfecho de novo
+  // (`inalterado`) e as janelas ainda abertas (`ignorado`) não contam. Ela só sugere: nunca altera a rotina.
+  if (!("execucao" in r.data) || r.data.inalterado) return r;
+  const ritmo = await contarRitmo(deps, r.data.rotina, r.data.execucao.desfecho, null);
+  return ritmo.length === 0 ? r : { ...r, events: [...(r.events ?? []), ...ritmo] };
+}
+
+async function registrarDesfecho(deps: Pick<Deps, "repos" | "escopo" | "agora">, input: EntradaDesfecho): Promise<{ data: SaidaDesfecho; events?: RuntimeEvent[] }> {
   const ligacao = await rotinaDoTurno(deps.repos, input.turnoId);
   if (!ligacao) return { data: { ignorado: "nao_e_rotina" } };
   const { rotina, turnoDisparado, instanteAgendado } = ligacao;

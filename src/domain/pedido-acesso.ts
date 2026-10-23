@@ -79,7 +79,7 @@ export function normalizarPedidoAcesso(entrada: {
   return { conector: pedido.conector, capacidades, nivel: escrita.length > 0 ? "escrita" : pedido.nivel, naoPedido, ...paraDoPedido(pedido) };
 }
 
-function nomeDaRotina(instrucao: string): string {
+export function nomeDaRotina(instrucao: string): string {
   const linha = (instrucao.trim().split("\n")[0] ?? "").replace(/\s+/g, " ");
   if (linha.length <= NOME_DA_ROTINA_NA_FRASE) return linha;
   const corte = linha.slice(0, NOME_DA_ROTINA_NA_FRASE);

@@ -9,7 +9,7 @@ import type { CausaNativa } from "./negacao.ts";
 import type { EstadoTrabalho, OrigemTrabalho } from "./trabalho.ts";
 import type { ContaNoLimite, OrigemTurno } from "./turno.ts";
 import type { PayloadTrocaDeIa } from "./troca-de-ia.ts";
-import type { PayloadRotinaEvento } from "./rotina.ts";
+import type { PayloadRotinaEvento, PayloadRotinaRitmo } from "./rotina.ts";
 import type { Destino } from "./destino-no-chat.ts";
 import type { PayloadPedidoRespondido, PayloadPeerPedido } from "./troca-entre-bots.ts";
 import type { AncoraDoConsentimento, PayloadPropostaDecidida, PayloadRegraPermanente } from "./cartao-encolhido.ts";
@@ -94,7 +94,7 @@ export type PayloadMensagem =
    * definido em 2026-10-16 (ADR-108 R4/R6): a IA das tasks do bot chegou ao limite e elas esperam — o aviso com a
    * recomendação ("esperar" ou "levar") e, no bot fixo, os dois caminhos. Um por bot; aberto, é atualizado.
    */
-  | PayloadTrocaDeIa
+  | PayloadTrocaDeIa | PayloadRotinaRitmo // RotinaRitmo: NOD-313 (2026-10-23), o card que sugere espaçar ou pausar a rotina.
   /** ADR-102: a pessoa escolheu "Seguir com <conta>" e o turno foi refeito nela. */
   | { kind: "conta_escolhida"; contaId: string; apelido: string; ia: IaComConta }
   /**

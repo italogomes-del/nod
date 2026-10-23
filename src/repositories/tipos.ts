@@ -43,6 +43,7 @@ import type { esperasRepo } from "./esperas.repo.ts";
 import type { contasIaRepo } from "./contas-ia.repo.ts";
 import type { esperasDaCotaRepo } from "./esperas-da-cota.repo.ts";
 import type { trocasDeIaRepo } from "./trocas-de-ia.repo.ts";
+import type { rotinaRitmoRepo } from "./rotina-ritmo.repo.ts";
 import type { turnoCredenciaisRepo } from "./turno-credenciais.repo.ts";
 import type { acoesPeloModoRepo } from "./acoes-pelo-modo.repo.ts";
 import type { preferenciasRepo, raioXRepo } from "./raio-x.repo.ts";
@@ -98,6 +99,8 @@ export interface Repos {
   esperasDaCota: ReturnType<typeof esperasDaCotaRepo>;
   /** 0080 (ADR-108): os avisos de troca de IA das tasks no limite, um aberto por bot. */
   trocasDeIa: ReturnType<typeof trocasDeIaRepo>;
+  /** NOD-313: a contagem sem novidade e o card de sugestão de ritmo da rotina. */
+  rotinaRitmo: ReturnType<typeof rotinaRitmoRepo>;
   /** 0073 (NOD-214): a credencial do turno despachado (hash do token), para atravessar o reinício do servidor. */
   turnoCredenciais: ReturnType<typeof turnoCredenciaisRepo>;
   /** ADR-115 (0093): o que o modo decidiu sem a pessoa (o revisor do Automático). */

@@ -121,3 +121,4 @@ export type PayloadRotinaEvento = { kind: "rotina_evento"; rotinaId: string; aca
  * nenhuma máquina Linux viva). `maquina` null em "qualquer" = a primeira Linux viva leva; sem Linux nem Mac, "seu Mac".
  */
 export type OndeRodaDto = { modo: "maquina" | "qualquer"; maquina: { id: string; nome: string; plataforma: PlataformaMaquina | null } | null; dependeDoMac: boolean };
+export type { PayloadRotinaRitmo } from "./rotina-ritmo.ts";

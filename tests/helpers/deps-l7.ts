@@ -105,7 +105,7 @@ export function useCasesFalsos(): UseCasesNod {
   };
 }
 
-export type OpcoesDeps = { escopo?: Escopo; agora?: () => number; interromper?: (turnoId: string) => Promise<boolean> };
+export type OpcoesDeps = { escopo?: Escopo; agora?: () => number; fusoPadrao?: string; interromper?: (turnoId: string) => Promise<boolean> };
 
 /** Deps sobre os repos EM MEMÓRIA (tests/unit): tx = `(fn) => fn({} as never)` (Práticas §1). */
 export function depsMemoria(opcoes: OpcoesDeps = {}): { deps: Deps; banco: BancoMemoria; chamadas: Chamadas; comEscopo(escopo: Escopo): Deps } {
@@ -121,6 +121,7 @@ export function depsMemoria(opcoes: OpcoesDeps = {}): { deps: Deps; banco: Banco
       tx: (fn) => fn({} as never),
       escopo: e,
       agora,
+      fusoPadrao: opcoes.fusoPadrao,
     };
     return deps;
   };
@@ -139,6 +140,7 @@ export function depsSobre(trx: Tx, escopo: Escopo, opcoes: OpcoesDeps = {}): { d
     tx: (fn) => fn(trx),
     escopo,
     agora,
+    fusoPadrao: opcoes.fusoPadrao,
   };
   return { deps, repos, chamadas };
 }

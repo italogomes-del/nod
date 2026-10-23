@@ -158,6 +158,15 @@ body.ocupado { cursor: progress; }
 .troca-opcao small { color: var(--ink-3); font-size: 12.5px; line-height: 18px; }
 .troca-opcao-tit { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; font-weight: 500; }
 .troca-reco { font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--line); color: var(--ink-2); font-weight: 400; }
+/* NOD-313 (2026-10-23): o card que sugere espaçar ou pausar a rotina — cara de mensagem, borda fina, sem fundo, pílulas vazadas. */
+.ritmo-card { max-width: 620px; margin: 2px auto 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: none; font-size: 14px; line-height: 20px; color: var(--ink); }
+.ritmo-card p { margin: 0; }
+.ritmo-card b { font-weight: 500; }
+.ritmo-sub { margin-top: 2px; color: var(--ink-2); }
+.ritmo-opcoes { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.ritmo-pilula { padding: 4px 12px; border: 1px solid var(--line); border-radius: 999px; background: none; color: var(--ink); font: inherit; font-size: 13px; line-height: 20px; cursor: pointer; }
+.ritmo-pilula:hover, .ritmo-pilula:focus-visible { border-color: var(--line-strong); }
+.ritmo-pilula:disabled { opacity: .5; cursor: default; }
 .troca-rodape { display: block; margin-top: 10px; color: var(--ink-3); font-size: 12.5px; }
 .aviso-estado-detalhes { margin-top: 4px; color: var(--ink-2); font-size: 12px; }
 .aviso-estado-detalhes > summary { cursor: pointer; width: fit-content; color: var(--ink-3); }

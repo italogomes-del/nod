@@ -50,6 +50,8 @@ export async function limparPessoaE2E(db: Db, dbDono: Db, escopo: Escopo, ids: {
     await trx`delete from ligacao_falas where owner_id = ${p}`;
     await trx`delete from ligacoes where owner_id = ${p}`;
     await trx`delete from preferencias where owner_id = ${p}`;
+    // 0108 (NOD-313): a contagem e o card de ritmo apontam para a rotina — saem antes dela (a FK também cascateia).
+    await trx`delete from rotina_ritmo where owner_id = ${p}`;
     await trx`delete from rotinas where owner_id = ${p}`;
     await trx`delete from sala_membros where owner_id = ${p}`;
     await trx`delete from salas where owner_id = ${p}`;

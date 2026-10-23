@@ -44,6 +44,7 @@ import { esperasRepo } from "./esperas.repo.ts";
 import { contasIaRepo } from "./contas-ia.repo.ts";
 import { esperasDaCotaRepo } from "./esperas-da-cota.repo.ts";
 import { trocasDeIaRepo } from "./trocas-de-ia.repo.ts";
+import { rotinaRitmoRepo } from "./rotina-ritmo.repo.ts";
 import { turnoCredenciaisRepo } from "./turno-credenciais.repo.ts";
 import { acoesPeloModoRepo } from "./acoes-pelo-modo.repo.ts";
 import { preferenciasRepo, raioXRepo } from "./raio-x.repo.ts";
@@ -81,6 +82,7 @@ export function criarRepos(conn: Conn, escopo: Escopo): Repos {
     contasIa: contasIaRepo(conn, escopo),
     esperasDaCota: esperasDaCotaRepo(conn, escopo),
     trocasDeIa: trocasDeIaRepo(conn, escopo),
+    rotinaRitmo: rotinaRitmoRepo(conn, escopo),
     turnoCredenciais: turnoCredenciaisRepo(conn, escopo),
     acoesPeloModo: acoesPeloModoRepo(conn, escopo),
     decisoes: decisoesRepo(conn, escopo),

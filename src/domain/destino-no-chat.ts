@@ -150,7 +150,9 @@ export function assuntoDe(kind: KindMensagem, payload: PayloadMensagem | null, a
         return "proposta.resultado";
       case "rotina_execucao":
         return payload.desfecho === "falhou" || payload.desfecho === "bloqueada" || payload.desfecho === "interrompida" ? "rotina.falhou" : "rotina.execucao";
+      // NOD-313: o card que sugere espaçar ou pausar a rotina fica no chat, como as linhas da rotina.
       case "rotina_evento":
+      case "rotina_ritmo":
         return "rotina.evento";
       case "resultado_aprovacao":
         return "aprovacao.recibo";
