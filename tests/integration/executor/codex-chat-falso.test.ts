@@ -160,6 +160,14 @@ it("X2: o turn/start que levaria a mensagem é recusado — ela nunca é confirm
   expect(r.desfecho).toBeDefined();
 });
 
+it("NOD-293 (C20, QA): o primeiro turn/start recusado sai com a causa turno_recusado no resultado do driver", async () => {
+  cfg.env.TESTE_NOD_RECUSAR_TURNO = "1";
+  const instance = await criarCodexCliDriver(lig).create(cfg);
+  const r = await instance.adapter(planoHarness({ texto: "oi" })).rodarTurno({ sinal: async () => {}, delta: () => {}, evento: () => {} });
+  expect(r.desfecho).not.toBe("sucesso");
+  expect(r.causa).toBe("turno_recusado");
+});
+
 it("NOD-293 (B7): o turn/start recusado de cara grava o erro do Codex como erroCru, com o segredo redigido", async () => {
   const segredo = "sk-proj-AAAAAAAAAAAAAAAAAAAAAAAA";
   cfg.env.TESTE_NOD_RECUSAR_TURNO = "1";

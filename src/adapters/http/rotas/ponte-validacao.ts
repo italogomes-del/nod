@@ -339,7 +339,9 @@ export function entrega(v: unknown, machineId: string, agora: number = Date.now(
   // quando ele mesmo classifica o turno como limite (assentar-turno).
   const contaNoLimite = typeof r.motivoFalha === "string" ? contaNoLimiteValida(r.contaNoLimite, agora) : undefined;
   // NOD-264 (C20): a causa do turno sem result, só em forma de código; fora disso some e a entrega segue.
-  const causaDoFim = r.desfecho === "interrompido" ? causaDaEntrega(r.causa) : null;
+  // NOD-293 (C20): o turno falho também leva (`falha:<subtype>`, `turno_recusado`): ele vira `trabalho_incompleto` quando o
+  // modelo já tinha escrito, e chegava sem causa. Sucesso nunca leva.
+  const causaDoFim = r.desfecho !== "sucesso" ? causaDaEntrega(r.causa) : null;
   // Revisão do épico (S19, 2026-10-08): o que o CLI recebeu e não foi confirmado numa renovação.
   const entregues = idsDeMensagens(e.mensagensEntregues);
   return { turnoId: uuid(e.turnoId), machineId, seqLocal: Number(e.seqLocal), fala: f as Entrega["fala"], ...(entregues?.length ? { mensagensEntregues: entregues } : {}), resultado: {

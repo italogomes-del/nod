@@ -184,7 +184,7 @@ export function criarCatcherDriver(o: OpcoesCatcher = {}): Driver {
                   erroCru: falha,
                 });
               }
-              const resultado = classificarResultado({ eventos: emitidos, exitCode: interrompido ? 143 : 0, signal: null, stderr: "", interrompidoPeloDriver: interrompido, falaDoMeio: meio });
+              const resultado = classificarResultado({ eventos: emitidos, exitCode: interrompido ? 143 : 0, signal: null, stderr: "", interrompidoPeloDriver: interrompido, falaDoMeio: meio, driver: "catcher" });
               registrar("resultado", { desfecho: resultado.desfecho, custoUsd: resultado.custoUsd, ferramentasChamadas: resultado.ferramentasChamadas, interrompido });
               return resultado;
             },
@@ -293,5 +293,5 @@ async function rodarLigacaoCatcher(c: {
     { tipo: "result", sucesso: true, subtype: "success", sessaoCli: null, texto: resumo, custoUsd: 0, tokens: TOKENS_ZERADOS, numTurnos: 1, negacoesPermissao: [], erroCru: null },
   ];
   for (const ev of eventos) sinks.evento(ev);
-  return classificarResultado({ eventos, exitCode: c.interrompido() ? 143 : 0, signal: null, stderr: "", interrompidoPeloDriver: c.interrompido() });
+  return classificarResultado({ eventos, exitCode: c.interrompido() ? 143 : 0, signal: null, stderr: "", interrompidoPeloDriver: c.interrompido(), driver: "catcher" });
 }

@@ -303,6 +303,7 @@ export async function rodarLigacaoClaude(c: ContextoLigacaoClaude): Promise<Resu
       stderr: fim.stderr,
       sinais,
       interrompidoPeloDriver: proc.interrompido(),
+      driver: "claude-ligacao",
       // Só a volta do resumo vai na entrega: as outras já foram faladas na ligação.
       rodadasJaFaladas: pedindoResumo ? Math.max(0, rodadas - 1) : rodadas,
     });

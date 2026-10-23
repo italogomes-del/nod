@@ -9,26 +9,33 @@ import { HARNESSES, type IdHarness } from "../contracts/harness.ts";
  * mudam sem aviso; o que não casa fica `desconhecido`, e o pior caso é a frase de antes. Sem classe para crédito: sem
  * fixture confiável (fora de escopo na NOD-174; o limite do plano é a NOD-171). A rede entrou no `transitorio` (NOD-309).
  */
-export const CLASSES_ERRO_FORNECEDOR = ["login_expirado", "limite_de_uso", "contexto_cheio", "transitorio", "desconhecido"] as const;
+export const CLASSES_ERRO_FORNECEDOR = ["login_expirado", "teto_de_gasto", "limite_de_uso", "contexto_cheio", "autocompactacao", "transitorio", "desconhecido"] as const;
 export type ClasseErroFornecedor = (typeof CLASSES_ERRO_FORNECEDOR)[number];
 
 /**
  * definido em 2026-10-20 (NOD-309): `transitorio` (antes `sobrecarga`) é o erro do provedor que passa sozinho — sobrecarga,
- * 5xx e corte de rede. Só ele ganha nova tentativa no trabalho de fundo (domain/espera-no-fundo.ts). `contexto_cheio` e
- * `login_expirado` NUNCA repetem: repetir dá o mesmo, e a frase diz na hora o que a pessoa precisa fazer.
+ * 5xx e corte de rede. Só ele ganha nova tentativa no trabalho de fundo (domain/espera-no-fundo.ts). `contexto_cheio`,
+ * `autocompactacao`, `teto_de_gasto` e `login_expirado` NUNCA repetem: repetir dá o mesmo, e a frase diz na hora o que a
+ * pessoa precisa fazer.
  */
 export function ehErroTransitorio(erroCru: string | null | undefined): boolean {
   return classificarErroFornecedor(erroCru) === "transitorio";
 }
 
 /**
- * Ordem fixa login > limite > contexto > transitório: um texto que bate em duas classes fica com a que a pessoa resolve.
+ * Ordem fixa login > teto > limite > contexto > autocompactação > transitório: um texto que bate em duas classes fica com a que a pessoa resolve.
  * NOD-171: o limite do plano no Codex só chega em texto ("You've hit your usage limit", `usage_limit_reached`); no
  * Claude Code o motivo `limite_do_plano` vem do protocolo, e a classe só cobre o turno em que o `rate_limit` faltou.
  * "Rate limit" sozinho é o 429 da API, não o plano: fica de fora. Amostras
  * do Claude Code ("Invalid API key · Please run /login", "OAuth token has expired", "Prompt is too long", "API Error:
  * 529 … overloaded_error") e do Codex (`turn.failed.error.message`, evento `error`: "401 Unauthorized", "Your access
  * token could not be refreshed", "context_length_exceeded", "exceeds the context window").
+ *
+ * NOD-293 (C19, definido em 2026-10-20): o Claude Code passou a dizer o limite do plano por janela ("You've hit your
+ * session limit · resets 3pm", "Weekly limit reached"), e duas mensagens novas chegavam como `desconhecido`: o teto de
+ * gasto do mês ("You've hit your monthly spend limit") e a autocompactação em laço ("Autocompact is thrashing"). O teto
+ * vem ANTES do limite: é da organização, e trocar de conta ou de IA não resolve (assentar-turno só troca no
+ * `limite_de_uso`).
  */
 const PADROES: readonly (readonly [Exclude<ClasseErroFornecedor, "desconhecido">, readonly RegExp[]])[] = [
   ["login_expirado", [
@@ -42,16 +49,25 @@ const PADROES: readonly (readonly [Exclude<ClasseErroFornecedor, "desconhecido">
     /access token could not be refreshed/i,
     /refresh token (?:has )?(?:expired|been (?:revoked|used))/i,
   ]],
+  ["teto_de_gasto", [
+    /monthly spend limit/i,
+  ]],
   ["limite_de_uso", [
     /usage limit/i,
     /usage_limit_reached/i,
     /hit your (?:usage )?limit/i,
+    /(?:session|weekly) limit/i,
+    // Qualquer janela do plano ("session", "weekly", "opus"), menos "rate": "hit your rate limit" é o 429 por minuto.
+    /hit your (?!rate\b)\w+ limit/i,
   ]],
   ["contexto_cheio", [
     /prompt is too long/i,
     /context[_ ]length[_ ]exceeded/i,
     /exceeds? the (?:model'?s? )?context (?:window|length)/i,
     /maximum context length/i,
+  ]],
+  ["autocompactacao", [
+    /autocompact is thrashing/i,
   ]],
   // NOD-309: sobrecarga, 5xx e rede. O 5xx só com contexto de HTTP ("API Error: 502", "status 503", o nome do status):
   // um "500" solto pode ser contagem de tokens. Rede: os códigos do Node e do undici e o corte do stream do Codex.
@@ -85,13 +101,16 @@ export function classificarErroFornecedor(erroCru: string | null | undefined): C
 /**
  * A frase de cada classe, com a ação que resolve. Entra no `{motivo}` de "Turno interrompido: {motivo}." — por isso
  * começa em minúscula e não fecha com ponto. `{do}`/`{o}` levam o artigo junto do nome que a pessoa lê ("do Claude
- * Code", "o Codex"; sem harness, "da sua IA"). `{confira}` é onde a pessoa vê o plano (o Codex usa o do ChatGPT).
+ * Code", "o Codex"; sem harness, "da sua IA"; `{no}`: "no Claude Code", "na sua IA"). `{confira}` é onde a pessoa vê o plano (o Codex usa o do ChatGPT).
  * `desconhecido` não tem frase: quem chama fica com o motivo de sempre.
  */
 export const FRASE_ERRO_FORNECEDOR: Readonly<Record<Exclude<ClasseErroFornecedor, "desconhecido">, string>> = {
   login_expirado: "sua conta {do} saiu deste Mac; use Conectar IA para entrar de novo",
+  teto_de_gasto: "a organização atingiu o teto de gasto do mês {no}; peça a quem administra a conta para subir o teto",
   limite_de_uso: "seu plano {do} atingiu o limite de uso; {confira}",
   contexto_cheio: "a conversa ficou longa demais para {o}; use /compactar e peça de novo",
+  // Compactar de novo não ajuda: o histórico volta a encher logo depois de resumido. Recomeçar a sessão resolve.
+  autocompactacao: "o histórico enche de novo logo depois de resumido e {o} parou; use /nova-sessao e peça de novo",
   transitorio: "o serviço {do} está instável ou fora do ar; tente de novo em alguns minutos",
 };
 
@@ -103,6 +122,7 @@ export function fraseDoErroFornecedor(harness: IdHarness | null | undefined, err
   return FRASE_ERRO_FORNECEDOR[classe]
     .replace("{do}", nome ? `do ${nome}` : "da sua IA")
     .replace("{o}", nome ? `o ${nome}` : "a sua IA")
+    .replace("{no}", nome ? `no ${nome}` : "na sua IA")
     .replace("{confira}", harness === "codex-cli" ? "confira seu plano no ChatGPT" : "espere o uso renovar e tente de novo");
 }
 

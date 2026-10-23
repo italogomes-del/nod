@@ -93,6 +93,18 @@ describe("assentarTurno: a IA chegou ao limite da assinatura", () => {
     expect((await c.deps.repos.preferencias.buscar()).iasNoLimite?.["claude-cli"]).toBeDefined();
   });
 
+  it("NOD-293 (C19): o teto de gasto do mês é da organização — não grava limite, não troca de IA e o aviso diz o teto", async () => {
+    const c = await cenario();
+    const teto: ResultadoTurno = { ...base, desfecho: "falha", motivoFalha: "erro_execucao", erroCru: "success | You've hit your monthly spend limit" };
+    const r = await c.entregar(teto, "claude-cli");
+    expect(r.data.limiteMudou).toBeFalsy();
+    expect((await c.deps.repos.preferencias.buscar()).iasNoLimite ?? {}).toEqual({});
+    expect(c.banco.turnos).toHaveLength(1);
+    const novas = c.banco.mensagens.slice(c.antes);
+    expect(novas.map((m) => m.payload?.kind ?? null)).not.toContain("ia_trocada");
+    expect(novas.at(-1)?.texto).toContain("teto de gasto do mês no Claude Code");
+  });
+
   it("um turno que dá certo na IA a tira do limite antes do prazo", async () => {
     const c = await cenario();
     await c.deps.repos.preferencias.registrarLimite("claude-cli", { renovaEm: T0 + DUAS_HORAS, desde: T0 });

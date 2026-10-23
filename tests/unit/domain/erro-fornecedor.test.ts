@@ -20,6 +20,19 @@ const AMOSTRAS: Record<(typeof CLASSES_ERRO_FORNECEDOR)[number], string[]> = {
     "You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), or try again in 2 days 3 hours 12 minutes.",
     'unexpected status 429 Too Many Requests: {"error":{"type":"usage_limit_reached","message":"The usage limit has been reached"}}',
     "success | Claude AI usage limit reached|1791306000",
+    // NOD-293 (C19): as frases novas do Claude Code para o limite do plano (sessão de 5 h e semanal).
+    "success | You've hit your session limit · resets 3pm (America/Sao_Paulo)",
+    "success | Weekly limit reached ∙ resets Oct 27, 9am",
+    "success | You've hit your weekly limit · resets Mon 9am",
+    "success | You've hit your opus limit · resets 3pm",
+  ],
+  teto_de_gasto: [
+    "success | You've hit your monthly spend limit · raise it in Settings > Usage",
+    "API Error: 400 Your organization has reached its monthly spend limit",
+  ],
+  autocompactacao: [
+    "success | Autocompact is thrashing: the context refilled to the limit within 3 turns of the previous compact",
+    "error_during_execution | Autocompact is thrashing",
   ],
   contexto_cheio: [
     "success | Prompt is too long",
@@ -45,6 +58,9 @@ const AMOSTRAS: Record<(typeof CLASSES_ERRO_FORNECEDOR)[number], string[]> = {
     "success | Credit balance is too low",
     // 429 da API não é o plano: sem "usage limit", fica a frase de sempre.
     'API Error: 429 {"type":"error","error":{"type":"rate_limit_error","message":"Number of request tokens has exceeded your per-minute rate limit"}}',
+    // NOD-293 (QA): "hit your rate limit" é o 429 por minuto, não o plano — não pode disparar a troca de conta.
+    "success | You've hit your rate limit. Please wait a moment and try again.",
+    "API Error: 429 You have hit your rate limit for requests per minute",
     "error_max_turns",
     // "500" solto (contagem de tokens) não é 5xx.
     "prompt used 500 tokens of cache",
@@ -60,6 +76,14 @@ describe("erro do fornecedor em classe fechada (NOD-174)", () => {
       for (const a of amostras) expect(classificarErroFornecedor(a), a).toBe(classe);
     });
   }
+
+  it("NOD-293 (C19): o teto de gasto não é o limite do plano (é da organização: trocar de conta não resolve)", () => {
+    expect(classificarErroFornecedor("You've hit your monthly spend limit")).toBe("teto_de_gasto");
+    expect(classificarErroFornecedor("You've hit your session limit")).toBe("limite_de_uso");
+    expect(fraseDoErroFornecedor("claude-cli", AMOSTRAS.teto_de_gasto[0])).toBe("a organização atingiu o teto de gasto do mês no Claude Code; peça a quem administra a conta para subir o teto");
+    expect(fraseDoErroFornecedor(null, AMOSTRAS.teto_de_gasto[1])).toBe("a organização atingiu o teto de gasto do mês na sua IA; peça a quem administra a conta para subir o teto");
+    expect(fraseDoErroFornecedor("claude-cli", AMOSTRAS.autocompactacao[0])).toBe("o histórico enche de novo logo depois de resumido e o Claude Code parou; use /nova-sessao e peça de novo");
+  });
 
   it("vazio, nulo e só espaço são desconhecido, sem frase", () => {
     for (const v of [null, undefined, "", "   "]) {

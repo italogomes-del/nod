@@ -164,7 +164,7 @@ export function criarCodexCliDriver(lig: LigacaoClaudeCli): Driver {
           proc.escrever(pergunta); proc.fecharStdin();
           const relogio = setTimeout(() => { void proc.interromper(); }, TIMEOUT_TESTE_MS);
           const fim = await proc.fim.finally(() => clearTimeout(relogio));
-          const r = classificarResultado({ eventos, ...fim, sinais: { ...SINAIS_ZERADOS, attempted: true }, interrompidoPeloDriver: proc.interrompido() });
+          const r = classificarResultado({ eventos, ...fim, sinais: { ...SINAIS_ZERADOS, attempted: true }, interrompidoPeloDriver: proc.interrompido(), driver: "codex-cli" });
           const resposta = r.desfecho === "sucesso" ? respostaDoTeste(r.texto, RESPOSTA_TESTE_IA_MAX) : null;
           log("info", "teste_codex_cli", { estado: resposta ? "pronto" : "nao_autenticado", causa: resposta ? null : "teste_falhou" });
           if (resposta) return { inventario, resposta };
@@ -283,7 +283,7 @@ export function criarCodexCliDriver(lig: LigacaoClaudeCli): Driver {
                 }
                 const fim = await proc.fim;
                 await Promise.all(pendentes);
-                const r = classificarResultado({ eventos, ...fim, sinais, interrompidoPeloDriver: proc.interrompido() });
+                const r = classificarResultado({ eventos, ...fim, sinais, interrompidoPeloDriver: proc.interrompido(), driver: "codex-cli" });
                 // definido em 2026-10-05: turno que não deu certo leva o motivo cru para o diagnóstico (o `turn.failed`
                 // do Codex, senão o último erro que ele emitiu, senão a última linha do stderr). Antes o `erro_cru`
                 // do Codex era sempre nulo e um turno que morria em 5 s não deixava pista.

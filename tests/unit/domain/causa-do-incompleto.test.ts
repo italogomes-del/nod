@@ -1,18 +1,75 @@
+import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
+import { entrega as validarEntrega } from "../../../src/adapters/http/rotas/ponte-validacao.ts";
+import type { EventoStream, ResultadoTurno } from "../../../src/contracts/turno.ts";
 import { resumoSemChamada, TEXTO_PERGUNTA_VENCIDA } from "../../../src/domain/frente.ts";
 import { motivoDaFrente, respostaAoColega } from "../../../src/domain/retorno-do-lote.ts";
-import { causaDaEntrega, classificarResultado, fimDoStderr, LINHAS_DO_STDERR } from "../../../src/domain/stream-json.ts";
+import { causaDaEntrega, causaDoCodexChat, classificarResultado, classificarSessao, fimDoStderr, LINHAS_DO_STDERR } from "../../../src/domain/stream-json.ts";
 import { estadoDoTrabalho, MOTIVO_PERGUNTA_VENCIDA, type FatosTrabalho } from "../../../src/domain/trabalho.ts";
 
 /** NOD-264 (C20 e C21): a causa do `trabalho_incompleto` e a pergunta que venceu sem resposta. */
 
 describe("C20: a causa do turno que acabou sem result", () => {
-  it("o driver interrompeu, o sinal ou o exit viram a causa; exit 0 sem result não tem causa", () => {
+  it("o driver interrompeu, o sinal ou o exit viram a causa", () => {
     expect(classificarResultado({ eventos: [], exitCode: 143, signal: null, stderr: "", interrompidoPeloDriver: true }).causa).toBe("interrompido_pelo_driver");
     const sigterm = classificarResultado({ eventos: [], exitCode: null, signal: "SIGTERM", stderr: "boom" });
     expect(sigterm).toMatchObject({ desfecho: "interrompido", causa: "sinal:SIGTERM" });
     expect(classificarResultado({ eventos: [], exitCode: 137, signal: null, stderr: "" }).causa).toBe("exit:137");
-    expect(classificarResultado({ eventos: [], exitCode: 0, signal: null, stderr: "" }).causa).toBeUndefined();
+  });
+
+  // NOD-293 (C20): o exit 0 sem result era o buraco que sobrava (turno_interrompido sem causa em produção).
+  const init: EventoStream = { tipo: "init", sessaoCli: "s", ferramentas: [], modelo: "m", versaoCli: "v", apiKeySource: "none" };
+  const delta: EventoStream = { tipo: "delta", texto: "Vou conferir" };
+  const result = (sucesso: boolean, subtype: string): EventoStream => ({ tipo: "result", sucesso, subtype, sessaoCli: "s", texto: "", custoUsd: 0, tokens: { entrada: 0, saida: 0, cacheLeitura: 0, cacheCriacao: 0 }, numTurnos: 1, negacoesPermissao: [], erroCru: sucesso ? null : "x" });
+
+  it("exit 0 sem result: a causa é sem_result:<driver> (sem driver, :desconhecido)", () => {
+    expect(classificarResultado({ eventos: [init, delta], exitCode: 0, signal: null, stderr: "", driver: "claude-cli" })).toMatchObject({ desfecho: "interrompido", causa: "sem_result:claude-cli" });
+    expect(classificarResultado({ eventos: [], exitCode: 0, signal: null, stderr: "", driver: "codex-chat" }).causa).toBe("sem_result:codex-chat");
+    expect(classificarResultado({ eventos: [init, delta], exitCode: 0, signal: null, stderr: "" }).causa).toBe("sem_result:desconhecido");
+    // O exit diferente de 0 e o sinal continuam dizendo o que foram.
+    expect(classificarResultado({ eventos: [init, delta], exitCode: 1, signal: null, stderr: "", driver: "claude-cli" }).causa).toBe("exit:1");
+    expect(causaDaEntrega("sem_result:claude-cli")).toBe("sem_result:claude-cli");
+    expect(causaDaEntrega("sem_result:codex-chat")).toBe("sem_result:codex-chat");
+  });
+
+  it("o result com erro leva a causa falha:<subtype>; o sucesso não leva causa", () => {
+    expect(classificarResultado({ eventos: [init, delta, result(false, "error_during_execution")], exitCode: 0, signal: null, stderr: "" })).toMatchObject({ desfecho: "falha", causa: "falha:error_during_execution" });
+    expect(classificarResultado({ eventos: [init, delta, result(false, "success")], exitCode: 1, signal: null, stderr: "" }).causa).toBe("falha:success");
+    expect(classificarResultado({ eventos: [init, delta, result(true, "success")], exitCode: 0, signal: null, stderr: "" }).causa).toBeUndefined();
+    // Subtype fora da forma de código não vira causa crua.
+    expect(classificarResultado({ eventos: [init, result(false, "Erro: algo deu errado")], exitCode: 0, signal: null, stderr: "" }).causa).toBe("falha:desconhecido");
+    expect(causaDaEntrega("falha:error_during_execution")).toBe("falha:error_during_execution");
+  });
+
+  it("Codex app-server: turno_recusado, exit:N e sinal:X no fechamento; sucesso sem causa", () => {
+    const recusado = classificarSessao({ eventos: [init, result(false, "error_during_execution")], exitCode: 0, signal: null, stderr: "", driver: "codex-chat" });
+    expect(causaDoCodexChat(recusado, { turnoRecusado: true, exitCode: 0, signal: null })).toBe("turno_recusado");
+    const caiu = classificarSessao({ eventos: [init, delta], exitCode: 1, signal: null, stderr: "", driver: "codex-chat" });
+    expect(causaDoCodexChat(caiu, { turnoRecusado: false, exitCode: 1, signal: null })).toBe("exit:1");
+    const morto = classificarSessao({ eventos: [init, delta], exitCode: null, signal: "SIGKILL", stderr: "", driver: "codex-chat" });
+    expect(causaDoCodexChat(morto, { turnoRecusado: false, exitCode: null, signal: "SIGKILL" })).toBe("sinal:SIGKILL");
+    // A volta que falhou e o processo saiu com erro: o exit diz mais que o subtype genérico.
+    const falhouESaiu = classificarSessao({ eventos: [init, delta, result(false, "error_during_execution")], exitCode: 2, signal: null, stderr: "", driver: "codex-chat" });
+    expect(causaDoCodexChat(falhouESaiu, { turnoRecusado: false, exitCode: 2, signal: null })).toBe("exit:2");
+    // O Parar continua sendo do driver (o laço ainda pode trocar pela causa dele).
+    const parado = classificarSessao({ eventos: [init, delta], exitCode: 143, signal: null, stderr: "", interrompidoPeloDriver: true, driver: "codex-chat" });
+    expect(causaDoCodexChat(parado, { turnoRecusado: false, exitCode: 143, signal: null })).toBe("interrompido_pelo_driver");
+    const semResult = classificarSessao({ eventos: [init, delta], exitCode: 0, signal: null, stderr: "", driver: "codex-chat" });
+    expect(causaDoCodexChat(semResult, { turnoRecusado: false, exitCode: 0, signal: null })).toBe("sem_result:codex-chat");
+    const ok = classificarSessao({ eventos: [init, delta, result(true, "success")], exitCode: 0, signal: null, stderr: "", driver: "codex-chat" });
+    expect(causaDoCodexChat(ok, { turnoRecusado: false, exitCode: 0, signal: null })).toBeUndefined();
+    for (const c of ["turno_recusado", "exit:1", "sinal:SIGKILL"]) expect(causaDaEntrega(c)).toBe(c);
+  });
+
+  it("a rota da máquina deixa a causa passar também no turno falho (antes só no interrompido)", () => {
+    const resultado: ResultadoTurno = {
+      desfecho: "falha", motivoFalha: "erro_execucao", erroCru: "x", texto: "", sessaoCli: null, custoUsd: null, causa: "turno_recusado",
+      sinais: { attempted: true, rejected: false, promptSubmitted: true, producedOutput: true },
+      tokens: { entrada: 0, saida: 0, cacheLeitura: 0, cacheCriacao: 0 }, ferramentasChamadas: [], negacoesPermissao: [],
+    };
+    const e = { turnoId: randomUUID(), seqLocal: 1, fala: { tipo: "texto", texto: "" }, resultado };
+    expect(validarEntrega(JSON.parse(JSON.stringify(e)), "m1").resultado.causa).toBe("turno_recusado");
+    expect(validarEntrega(JSON.parse(JSON.stringify({ ...e, resultado: { ...resultado, desfecho: "sucesso", motivoFalha: undefined } })), "m1").resultado.causa).toBeUndefined();
   });
 
   it("a entrega só aceita a causa com forma de código, curta", () => {

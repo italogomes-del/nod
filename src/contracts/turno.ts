@@ -124,6 +124,8 @@ export type ResultadoTurno = {
   /**
    * NOD-264 (C20): por que o turno acabou sem `result` — `renovacao_negada:<motivo>`, `interrompido_pelo_driver`,
    * `reinicio_do_motor`, `sinal:<SIG>` ou `exit:<n>`. Só código (nunca texto do CLI); vai em `turno_interrompido.dados.causa`.
+   * NOD-293: também `sem_result:<driver>` (exit 0 sem result), `falha:<subtype>` (result com erro) e `turno_recusado`
+   * (o app-server do Codex recusou a volta); o turno falho passa a levar causa.
    */
   causa?: string;
   /** Motivo cru da falha, só para diagnóstico em log (0005: antes o `erro_execucao` chegava sem causa). */

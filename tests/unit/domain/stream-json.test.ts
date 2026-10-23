@@ -63,6 +63,18 @@ describe("interpretarLinhaStreamJson", () => {
     s = reduzirSinais(s, { tipo: "delta", texto: "a" });
     expect(s.producedOutput).toBe(true);
   });
+
+  it("NOD-293 (N6): o result com is_error não é saída — o erro do CLI não liga producedOutput; o result de sucesso liga", () => {
+    const init = interpretarLinhaStreamJson(JSON.stringify({ type: "system", subtype: "init", session_id: "s", tools: [], model: "m" }));
+    const erro = interpretarLinhaStreamJson(JSON.stringify({ type: "result", subtype: "success", is_error: true, result: "Credit balance is too low", session_id: "s", num_turns: 1 }));
+    const ok = interpretarLinhaStreamJson(JSON.stringify({ type: "result", subtype: "success", is_error: false, result: "Pronto.", session_id: "s", num_turns: 1 }));
+    const comInit = reduzirSinais(SINAIS_ZERADOS, init);
+    expect(reduzirSinais(comInit, erro)).toEqual({ attempted: true, rejected: false, promptSubmitted: true, producedOutput: false });
+    expect(reduzirSinais(SINAIS_ZERADOS, erro)).toMatchObject({ attempted: true, producedOutput: false });
+    expect(reduzirSinais(comInit, ok).producedOutput).toBe(true);
+    // No classificar: init + result de erro, sem nada do modelo, não é trabalho feito (vira sem_progresso, não trabalho_incompleto).
+    expect(classificarResultado({ eventos: [init, erro], exitCode: 1, signal: null, stderr: "" }).sinais.producedOutput).toBe(false);
+  });
 });
 
 describe("classificarResultado (ADR-009: estado de protocolo, nunca string de erro)", () => {

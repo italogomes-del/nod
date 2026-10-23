@@ -312,6 +312,7 @@ export async function rodarLigacaoCodex(c: ContextoLigacaoCodex): Promise<Result
       stderr: fim.stderr,
       sinais,
       interrompidoPeloDriver: proc.interrompido() && !cliente.fechando(),
+      driver: "codex-ligacao",
     });
     // Thread efêmera: nada a retomar depois.
     return { ...resultado, sessaoCli: null };

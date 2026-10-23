@@ -21,7 +21,7 @@ import { ultimaLinhaUtil } from "../../../domain/codex-stream.ts";
 import { criarFalaDoMeio } from "../../../domain/mensagem-no-meio.ts";
 import { ehPastaDeTask, NATIVA_MCP_DA_PESSOA } from "../../../domain/nativas.ts";
 import { redigirECortar } from "../../../domain/segredos.ts";
-import { classificarSessao, reduzirSinais, SINAIS_ZERADOS, textoDaRodada } from "../../../domain/stream-json.ts";
+import { causaDoCodexChat, classificarSessao, reduzirSinais, SINAIS_ZERADOS, textoDaRodada } from "../../../domain/stream-json.ts";
 import { log } from "../../../obs/log.ts";
 import { ESPERA_APROVACAO_NO_TURNO_MS, VARIAVEL_CONFIG_HOOK } from "../../../shared/constantes.ts";
 import { baixarAnexos, entradaCodex } from "../anexos-turno.ts";
@@ -207,6 +207,8 @@ async function rodarUmaVez(c: ContextoChatCodex, comTerminal: boolean): Promise<
     let totalAtual = TOKENS_ZERADOS;
     let totalAnterior = TOKENS_ZERADOS;
     let ultimoErro: string | null = null;
+    // NOD-293 (C20): a última volta fechada foi recusada pelo app-server (vira a causa `turno_recusado`).
+    let turnoRecusado = false;
     const ferramentasAbertas = new Map<string, string>();
     // ADR-103: a pasta do turno já tinha `[projects]` na config da pessoa antes? Se não, o nod tira a entrada no fim.
     let pastaReal: string | null = null;
@@ -296,6 +298,7 @@ async function rodarUmaVez(c: ContextoChatCodex, comTerminal: boolean): Promise<
       aoEvento: tratar,
       aoTurnoConcluido(ev) {
         ultimoErro = ev.erro ?? ultimoErro;
+        turnoRecusado = false;
         fecharRodada(ev.status === "completed", ev.status === "completed" ? "success" : ev.status === "interrupted" ? "error_interrupted" : "error_during_execution", ev.erro);
         void decidir();
       },
@@ -355,6 +358,7 @@ async function rodarUmaVez(c: ContextoChatCodex, comTerminal: boolean): Promise<
           log("aviso", "codex_chat_turno_recusado", { turno_id: plano.turnoId, codigo: r.tipo === "resposta_erro" ? r.codigo : null });
           // X2: a volta que levava as mensagens não abriu — elas voltam para a fila do servidor (viram turno próprio).
           devolver(ids);
+          turnoRecusado = true;
           // NOD-293 (B7, 2026-10-20): o erro que o Codex deu ao recusar o turno (login vencido, modelo indisponível) é o
           // que explica a falha; vai como erroCru, redigido, em vez do "turno_recusado" genérico que o escondia.
           fecharRodada(false, "error_during_execution", r.tipo === "resposta_erro" ? (redigirECortar(r.mensagem, 500)?.trim() || "turno_recusado") : null);
@@ -464,13 +468,15 @@ async function rodarUmaVez(c: ContextoChatCodex, comTerminal: boolean): Promise<
       interrompidoPeloDriver: proc.interrompido() && !cliente.fechando(),
       rodadasJaFaladas: rodadasFaladas,
       falaDoMeio: meio,
+      driver: "codex-chat",
     });
+    const causa = causaDoCodexChat(r, { turnoRecusado, exitCode: fim.erroSpawn ? null : fim.exitCode, signal: fim.erroSpawn ? null : fim.signal });
     const erroCru = r.desfecho === "sucesso" ? r.erroCru : r.erroCru ?? ultimoErro ?? ultimaLinhaUtil(fim.stderr);
     // ADR-103: o comando que o hook barrou não vira item no stream do Codex; a causa vem do arquivo que o hook anotou.
     const negacoesDoNod = terminal ? await lerNegacoes(arquivoNegacoes) : [];
     // ADR-103: a thread persiste no Codex da conta; o id é a sessão que o próximo turno continua.
     const sessaoCli = cliente.threadId() || null;
-    return { ...r, erroCru, sessaoCli, ...(negacoesDoNod.length > 0 ? { negacoesDoNod: [...(r.negacoesDoNod ?? []), ...negacoesDoNod] } : {}) };
+    return { ...r, erroCru, sessaoCli, ...(causa ? { causa } : {}), ...(negacoesDoNod.length > 0 ? { negacoesDoNod: [...(r.negacoesDoNod ?? []), ...negacoesDoNod] } : {}) };
   } finally {
     if (timerSaida) clearTimeout(timerSaida);
     // X2: o que ficou na fila ou com o steer no ar quando a sessão acabou não entrou: volta para a fila do servidor.

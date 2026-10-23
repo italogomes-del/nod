@@ -213,8 +213,11 @@ export function reduzirSinais(sinais: SinaisTurno, ev: EventoStream): SinaisTurn
     case "texto_bloco":
     case "tool_use":
     case "tool_result":
-    case "result":
       return { ...sinais, attempted: true, producedOutput: true };
+    // NOD-293 (N6, definido em 2026-10-20): o result com is_error é o erro do CLI, não saída do modelo (NOD-174: nem
+    // entra na fala). Ligar producedOutput por ele fazia o turno que só falhou virar `trabalho_incompleto`.
+    case "result":
+      return ev.sucesso ? { ...sinais, attempted: true, producedOutput: true } : { ...sinais, attempted: true };
     default:
       return sinais;
   }
@@ -298,6 +301,8 @@ export function classificarResultado(entrada: {
   /** true quando o driver chamou interromper() (SIGTERM) — antes ou depois do init. */
   interrompidoPeloDriver?: boolean;
   falaDoMeio?: FalaDoMeioNoTurno;
+  /** NOD-293 (C20): o id do driver (`claude-cli`, `codex-chat`…) para a causa `sem_result:<driver>`. */
+  driver?: string;
 }): ResultadoTurno {
   let sinais: SinaisTurno = { ...SINAIS_ZERADOS, ...entrada.sinais };
   let init: Extract<EventoStream, { tipo: "init" }> | null = null;
@@ -381,10 +386,12 @@ export function classificarResultado(entrada: {
     if (result.sucesso) return { desfecho: "sucesso", ...base };
     // NOD-171: o CLI barrou pelo plano (`rejected`) e a rodada fechou com erro. Pelo estado, nunca pelo texto do result.
     // Com o overage em uso o pedido seguiu apesar do `rejected`: o erro é outro. O max_turns diz o próprio motivo.
+    // NOD-293 (C20): o turno falho também diz a causa em código (o subtype do result); texto do CLI nunca.
+    const causa = `falha:${/^[A-Za-z0-9_-]{1,32}$/.test(result.subtype) ? result.subtype : "desconhecido"}`;
     if (rateLimitDoResult?.status === "rejected" && !rateLimitDoResult.usandoOverage && result.subtype !== "error_max_turns") {
-      return { desfecho: "falha", motivoFalha: "limite_do_plano", limiteVoltaEm: rateLimitDoResult.voltaEm ?? null, erroCru: result.erroCru, ...base };
+      return { desfecho: "falha", motivoFalha: "limite_do_plano", limiteVoltaEm: rateLimitDoResult.voltaEm ?? null, erroCru: result.erroCru, ...base, causa };
     }
-    return { desfecho: "falha", motivoFalha: result.subtype === "error_max_turns" ? "erro_max_turns" : "erro_execucao", erroCru: result.erroCru, ...base };
+    return { desfecho: "falha", motivoFalha: result.subtype === "error_max_turns" ? "erro_max_turns" : "erro_execucao", erroCru: result.erroCru, ...base, causa };
   }
 
   const texto = blocos.length > 0 ? juntarBlocos([...todos, textoAberto]) : deltas;
@@ -393,7 +400,16 @@ export function classificarResultado(entrada: {
   // Agora sai com os tokens das chamadas e `custoDesconhecido` (a tela diz "custo desconhecido"; o total, "parcial").
   const gastou = tokensDasChamadas.entrada + tokensDasChamadas.saida + tokensDasChamadas.cacheLeitura + tokensDasChamadas.cacheCriacao > 0;
   // NOD-264 (C20): a causa da entrega sem result, só em código — o driver interrompeu, o sinal que chegou ou o exit.
-  const causa = entrada.interrompidoPeloDriver === true ? "interrompido_pelo_driver" : entrada.signal !== null ? `sinal:${entrada.signal}` : entrada.exitCode !== null && entrada.exitCode !== 0 ? `exit:${entrada.exitCode}` : null;
+  // NOD-293 (C20): o exit 0 sem result também (era o turno_interrompido sem causa que sobrava): `sem_result:<driver>`.
+  const causa = entrada.interrompidoPeloDriver === true
+    ? "interrompido_pelo_driver"
+    : entrada.signal !== null
+      ? `sinal:${entrada.signal}`
+      : entrada.exitCode === null
+        ? null
+        : entrada.exitCode !== 0
+          ? `exit:${entrada.exitCode}`
+          : `sem_result:${entrada.driver && /^[A-Za-z0-9_-]{1,32}$/.test(entrada.driver) ? entrada.driver : "desconhecido"}`;
   const base = { texto, sessaoCli, custoUsd: null, tokens: gastou ? tokensDasChamadas : tokensZerados, ...(gastou ? { custoDesconhecido: true } : {}), ferramentasChamadas, negacoesPermissao: [] as string[], ...(negacoesDoNod.length > 0 ? { negacoesDoNod } : {}), ...(causa ? { causa } : {}) };
   if (entrada.interrompidoPeloDriver === true || entrada.signal !== null || init) return { desfecho: "interrompido", ...base, sinais };
   if (entrada.exitCode === null) {
@@ -411,6 +427,21 @@ export function classificarResultado(entrada: {
  */
 export function causaDaEntrega(causa: unknown): string | null {
   return typeof causa === "string" && causa.length <= 64 && /^[a-z_]+(:[A-Za-z0-9_-]{1,32})?$/.test(causa) ? causa : null;
+}
+
+/**
+ * NOD-293 (C20): a causa do turno do Codex app-server (codex-chat.ts) que não deu certo. A volta que o app-server recusou
+ * (`turn/start` com erro) fecha como `result` de erro e vira `turno_recusado`; o processo que saiu com erro ou morreu por
+ * sinal diz mais que o subtype genérico da volta (`exit:N`, `sinal:X`); o Parar fica `interrompido_pelo_driver` (o laço
+ * ainda troca pela causa dele). Sucesso não tem causa.
+ */
+export function causaDoCodexChat(r: Pick<ResultadoTurno, "desfecho" | "causa">, fim: { turnoRecusado: boolean; exitCode: number | null; signal: string | null }): string | undefined {
+  if (r.desfecho === "sucesso") return undefined;
+  if (r.causa === "interrompido_pelo_driver") return r.causa;
+  if (fim.turnoRecusado) return "turno_recusado";
+  if (fim.signal !== null) return `sinal:${fim.signal}`;
+  if (fim.exitCode !== null && fim.exitCode !== 0) return `exit:${fim.exitCode}`;
+  return r.causa;
 }
 
 /** NOD-264 (C20): quantas linhas do fim do stderr vão para o log local quando o turno acaba sem result. */
