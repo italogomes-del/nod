@@ -803,3 +803,65 @@ describeIntegracao("NOD-331: ligação viva e um tick preso — o que a outra co
     });
   });
 });
+
+/**
+ * NOD-331 (item 2): o turno que a outra cor assentou deixa de segurar a drenagem. A cada `PODA_TOKENS_MS` o processo
+ * velho confere no banco os tokens que espera e poda o que já não está `despachando`. A poda roda sem await: presa, ela
+ * não segura a checagem do prazo.
+ */
+describeIntegracao("NOD-331: a drenagem poda pelo banco o token do turno assentado em outro processo", () => {
+  let m: Awaited<ReturnType<typeof compartilhadoComMaquina>>;
+  beforeAll(async () => {
+    m = await compartilhadoComMaquina({ NOD_LONGPOLL_MS: "20" });
+  });
+  afterAll(async () => {
+    await m?.limpar();
+  });
+
+  it("turno assentado no banco: a drenagem termina com turnos 0, sem vencer o prazo, em menos de 7 s", async () => {
+    const { srv, pedir, bot } = m;
+    const conversa = await bot("Bot poda");
+    await srv.json<RespostaMutacao>("POST", `conversas/${conversa}/mensagens`, { texto: "Antes do deploy" });
+    const { plano } = (await (await pedir("puxar")).json()) as { plano: PlanoTurno };
+    expect(srv.app.tokens.ativos({ semSobrevive: true })).toBe(1);
+    // A outra cor (a ativa) assentou o turno; a memória deste processo não sabe.
+    await srv.db.begin(async (tx) => {
+      await vincularEscopo(tx, srv.pessoa);
+      await tx`update turnos set estado = 'interrompido', motivo_interrupcao = 'reinicio_servidor' where id = ${plano.turnoId}`;
+    });
+    const inicio = Date.now();
+    const r = await srv.drenar({ prazoMs: 30_000, intervaloMs: 50 });
+    expect(Date.now() - inicio).toBeLessThan(7_000);
+    expect(r).toMatchObject({ turnos: 0, prazo_vencido: false });
+    expect(srv.app.tokens.credencialDe(plano.turnoId)).toBeNull();
+  });
+});
+
+describeIntegracao("NOD-331: poda presa não segura o prazo da drenagem", () => {
+  let m: Awaited<ReturnType<typeof compartilhadoComMaquina>>;
+  beforeAll(async () => {
+    m = await compartilhadoComMaquina({ NOD_LONGPOLL_MS: "20" });
+  });
+  afterAll(async () => {
+    await m?.limpar();
+  });
+
+  it("com a consulta da poda que nunca volta, drenar({prazoMs: 500}) resolve no prazo com prazo_vencido", async () => {
+    const { srv, pedir, bot } = m;
+    const conversa = await bot("Bot poda presa");
+    await srv.json<RespostaMutacao>("POST", `conversas/${conversa}/mensagens`, { texto: "Antes do deploy" });
+    const { plano } = (await (await pedir("puxar")).json()) as { plano: PlanoTurno };
+    let chamadas = 0;
+    srv.app.tokens.podarPeloBanco = () => {
+      chamadas += 1;
+      return new Promise<number>(() => undefined);
+    };
+    const inicio = Date.now();
+    const r = await srv.drenar({ prazoMs: 500, intervaloMs: 50 });
+    expect(Date.now() - inicio).toBeLessThan(2_000);
+    expect(r).toMatchObject({ turnos: 1, prazo_vencido: true });
+    // Uma em voo por vez: presa, a próxima não sai.
+    expect(chamadas).toBe(1);
+    srv.app.tokens.revogar(plano.turnoId);
+  });
+});

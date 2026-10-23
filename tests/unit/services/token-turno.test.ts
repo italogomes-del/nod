@@ -224,3 +224,57 @@ describe("NOD-218: modo só banco (drenagem do deploy azul/verde)", () => {
     expect(await tokens.autorizarComBanco("lixo")).toBeNull();
   });
 });
+
+/**
+ * NOD-331 (item 2): na drenagem, o token cujo turno a outra cor já assentou (fora de `despachando` no banco) é podado
+ * da memória e deixa de segurar o deploy até o teto. Erro do banco mantém a entrada; o da máquina que atravessa o
+ * reinício nem é consultado.
+ */
+describe("NOD-331: podarPeloBanco", () => {
+  const relogio = () => 1_000;
+
+  it("buscar null → cai; buscar acha → fica; buscar lança → fica; sobrevive não é consultado", async () => {
+    const consultados: string[] = [];
+    const respostas: Record<string, "null" | "acha" | "lança"> = { t1: "null", t2: "acha", t3: "lança" };
+    const tokens = criarTokenTurno({
+      agora: relogio,
+      buscar: async (_escopo, hash) => {
+        const turnoId = ["t1", "t2", "t3", "t4"].find((id) => tokens.credencialDe(id)?.tokenHash.equals(hash))!;
+        consultados.push(turnoId);
+        if (respostas[turnoId] === "lança") throw new Error("banco fora");
+        if (respostas[turnoId] === "null") return null;
+        const c = tokens.credencialDe(turnoId)!;
+        return { turnoId, tokenHash: c.tokenHash, epoch: c.epoch, identidade: c.identidade, sobreviveReinicio: false };
+      },
+    });
+    for (const id of ["t1", "t2", "t3", "t4"]) tokens.cunhar(id, identidade);
+    tokens.marcarSobrevive("t4");
+    expect(tokens.ativos({ semSobrevive: true })).toBe(3);
+
+    expect(await tokens.podarPeloBanco()).toBe(1);
+    expect(consultados.sort()).toEqual(["t1", "t2", "t3"]);
+    expect(tokens.ativos({ semSobrevive: true })).toBe(2);
+    expect(tokens.credencialDe("t1")).toBeNull();
+    expect(tokens.credencialDe("t2")).not.toBeNull();
+    expect(tokens.credencialDe("t3")).not.toBeNull();
+    expect(tokens.credencialDe("t4")).not.toBeNull();
+  });
+
+  it("sem buscar → 0 e nada sai", async () => {
+    const tokens = criarTokenTurno({ agora: relogio });
+    tokens.cunhar("t1", identidade);
+    expect(await tokens.podarPeloBanco()).toBe(0);
+    expect(tokens.ativos()).toBe(1);
+  });
+
+  it("o turno recunhado enquanto a consulta estava em voo não é apagado (só a entrada consultada)", async () => {
+    let soltar: (v: null) => void = () => undefined;
+    const tokens = criarTokenTurno({ agora: relogio, buscar: () => new Promise((r) => { soltar = r; }) });
+    tokens.cunhar("t1", identidade);
+    const poda = tokens.podarPeloBanco();
+    const novo = tokens.cunhar("t1", identidade);
+    soltar(null);
+    expect(await poda).toBe(0);
+    expect(tokens.autorizar(novo)?.turnoId).toBe("t1");
+  });
+});

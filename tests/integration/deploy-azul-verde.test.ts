@@ -39,6 +39,8 @@ if [ "$1" = compose ]; then
     run)
       case "$*" in *"test -f scripts/ligacoes-orfas.ts"*) [ -n "\${IMAGEM_PRE_218:-}" ] && exit 1 ;; esac
       case "$*" in *migrate.ts*) [ -n "\${FALHA_MIGRA:-}" ] && { echo "migração falhou" >&2; exit 1; } ;; esac
+      # NOD-331: o banco fora na hora de fechar as órfãs.
+      case "$*" in *"ligacoes-orfas.ts --instancia"*) [ -n "\${FALHA_ORFAS:-}" ] && { echo "órfãs: banco fora" >&2; exit 1; } ;; esac
       exit 0 ;;
     up)
       if [ "$servico" = caddy ]; then
@@ -486,5 +488,70 @@ describe("deploy.sh: Caddyfile em estágio (NOD-331)", () => {
   it("o workflow marca o estágio com a tag do deploy", async () => {
     const yml = await readFile(fileURLToPath(new URL("../../.github/workflows/deploy.yml", import.meta.url)), "utf8");
     expect(yml).toContain("echo '$SHA' | sudo tee /opt/nod/Caddyfile.novo.tag >/dev/null");
+  });
+});
+
+/** NOD-331 (item 3): as órfãs têm 3 tentativas; falhando, a pendência fica gravada e o próximo deploy a retoma. */
+describe("deploy.sh: ligações órfãs pendentes (NOD-331)", () => {
+  const orfasDe = (log: string[], instancia: string) => log.filter((l) => l.includes(`ligacoes-orfas.ts --instancia ${instancia}`));
+
+  it("o banco fora nas 3 tentativas: o deploy termina 0 e a pendência da velha fica gravada (0644)", async () => {
+    await noAr("azul");
+    const r = deploy({ FALHA_ORFAS: "1" });
+    expect(r.status).toBe(0);
+    expect(r.stderr).toMatch(/não fechou as ligações órfãs da cor azul em 3 tentativas/);
+    expect(orfasDe(await chamadas(), "azul")).toHaveLength(3);
+    expect(await ler("estado/orfas-pendentes")).toBe("azul\n");
+    const { statSync } = await import("node:fs");
+    expect(statSync(join(dir, "estado/orfas-pendentes")).mode & 0o777).toBe(0o644);
+  });
+
+  it("2º deploy com o banco de volta: a pendência roda antes do up da cor nova, com a imagem da ativa, e o arquivo some", async () => {
+    await noAr("azul");
+    expect(deploy({ FALHA_ORFAS: "1" }).status).toBe(0);
+    expect(await marcador()).toBe("verde");
+    await writeFile(join(dir, "docker.log"), "");
+    const r = deploy();
+    expect(r.status).toBe(0);
+    const log = await chamadas();
+    const retomada = log.findIndex((l) => l.includes("run --rm --no-deps -T nod-verde node scripts/ligacoes-orfas.ts --instancia azul"));
+    expect(retomada).toBeGreaterThanOrEqual(0);
+    expect(retomada).toBeLessThan(indice(log, "up -d --no-deps nod-azul"));
+    expect(existsSync(join(dir, "estado/orfas-pendentes"))).toBe(false);
+  });
+
+  it("pendência da própria cor ativa é descartada sem rodar", async () => {
+    await noAr("azul");
+    await writeFile(join(dir, "estado/orfas-pendentes"), "azul\n");
+    const r = deploy();
+    expect(r.status).toBe(0);
+    expect(r.stdout).toMatch(/órfãs pendentes da azul descartadas/);
+    // Só a chamada normal de depois da troca (a velha, azul, saindo), pela verde.
+    const log = await chamadas();
+    expect(orfasDe(log, "azul")).toHaveLength(1);
+    expect(orfasDe(log, "azul")[0]).toContain("nod-verde");
+    expect(indice(log, "--instancia azul")).toBeGreaterThan(indice(log, "up -d --no-deps nod-verde"));
+    expect(existsSync(join(dir, "estado/orfas-pendentes"))).toBe(false);
+  });
+
+  it("transição: as órfãs do legado falham, ficam com --transicao e voltam com a flag no deploy seguinte", async () => {
+    await writeFile(join(dir, "run", "legado"), "");
+    expect(deploy({ FALHA_ORFAS: "1" }).status).toBe(0);
+    expect(await ler("estado/orfas-pendentes")).toBe("legado --transicao\n");
+    await writeFile(join(dir, "docker.log"), "");
+    expect(deploy().status).toBe(0);
+    const log = await chamadas();
+    const retomada = indice(log, "nod-azul node scripts/ligacoes-orfas.ts --instancia legado --transicao");
+    expect(retomada).toBeGreaterThanOrEqual(0);
+    expect(retomada).toBeLessThan(indice(log, "up -d --no-deps nod-verde"));
+    expect(existsSync(join(dir, "estado/orfas-pendentes"))).toBe(false);
+  });
+
+  it("falha de novo na retomada: a linha não duplica", async () => {
+    await noAr("azul");
+    expect(deploy({ FALHA_ORFAS: "1" }).status).toBe(0);
+    expect(deploy({ FALHA_ORFAS: "1" }).status).toBe(0);
+    // A azul (pendente) segue pendente e a verde (a velha deste 2º deploy) entra.
+    expect(await ler("estado/orfas-pendentes")).toBe("azul\nverde\n");
   });
 });

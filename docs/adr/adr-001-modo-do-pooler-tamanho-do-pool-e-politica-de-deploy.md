@@ -59,6 +59,6 @@ Consequências:
 - Pool: as duas cores juntas usam ~2×15 + dono ≈ 31 das 100 conexões do Cloud SQL.
 - Por até 15 s há dois despachantes; o SKIP LOCKED e as janelas UNIQUE (ADR-011) mantêm cada turno e cada rotina rodando uma vez.
 - Memória: dois Node na `e2-medium`. Se o pico passar de 80% no ensaio, `NOD_DRENAGEM_MAX_MS=300000` antes de subir a VM.
-- NOD-331: o Caddyfile chega em estágio (`Caddyfile.novo`) e só é promovido na troca, com a cor nova saudável; se a troca não confirma, o anterior volta (na transição, confirmado pelo Caddy antes de parar a azul). Na transição, o `nod` legado sai com `stop -t 30` (`NOD_TRANSICAO_STOP_S`), não 660: depois do recreate do Caddy ninguém mais o alcança. A drenagem para todos os laços juntos, com prazo de 15 s.
+- NOD-331: o Caddyfile chega em estágio (`Caddyfile.novo`) e só é promovido na troca, com a cor nova saudável; se a troca não confirma, o anterior volta (na transição, confirmado pelo Caddy antes de parar a azul). Na transição, o `nod` legado sai com `stop -t 30` (`NOD_TRANSICAO_STOP_S`), não 660: depois do recreate do Caddy ninguém mais o alcança. A drenagem para todos os laços juntos, com prazo de 15 s, e solta a cada 5 s os tokens dos turnos que a ativa já assentou. As ligações órfãs que não fecharem em 3 tentativas ficam em `estado/orfas-pendentes` para o deploy seguinte.
 
 Gatilho de reversão: se o ensaio ou dois deploys seguidos mostrarem queda vista pela sonda do Caddy, ou se a memória não couber nem com o teto de 5 min, volta o recreate até a causa ser resolvida.

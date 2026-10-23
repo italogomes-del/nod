@@ -92,6 +92,11 @@ export type ResultadoDrenagem = { vivas: number; turnos: number; duracao_ms: num
  * e o tick preso termina sozinho ou morre no teto do fechar() (server.ts, FECHAMENTO_MAX_MS).
  */
 export const PRAZO_PARAR_LACOS_MS = 15_000;
+/**
+ * definido em 2026-10-22 (NOD-331): na drenagem do compartilhado, a cada 5 s os tokens que seguram a espera são
+ * conferidos no banco (`podarPeloBanco`): o turno que a outra cor já assentou deixa de segurar o deploy até o teto.
+ */
+export const PODA_TOKENS_MS = 5_000;
 
 /** Corrida com prazo (padrão de rotas/saude.ts): "prazo" se `p` não resolveu em `ms`; o timer sempre é limpo. */
 async function comPrazo(p: Promise<unknown>, ms: number): Promise<"ok" | "prazo"> {
@@ -418,7 +423,16 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
       // A drenagem espera só os outros (app antigo, a ponte interna), as reservas em voo e as ligações; o teto segue.
       const turnos = () => (app.compartilhado ? app.tokens.ativos({ semSobrevive: true }) + app.reservasEmVoo() : 0);
       const pendente = () => app.voz.vivas() > 0 || turnos() > 0;
+      // NOD-331: a poda roda SEM await e uma por vez: uma consulta presa nunca segura a checagem do prazo.
+      let podando: Promise<unknown> | null = null;
+      let ultimaPoda = Number.NEGATIVE_INFINITY;
+      const podar = () => {
+        if (!app.compartilhado || podando || agora() - ultimaPoda < PODA_TOKENS_MS) return;
+        ultimaPoda = agora();
+        podando = app.tokens.podarPeloBanco().catch(() => undefined).finally(() => { podando = null; });
+      };
       while (pendente() && agora() - inicio < prazoMs) {
+        podar();
         await new Promise((r) => setTimeout(r, Math.min(intervaloMs, Math.max(1, prazoMs - (agora() - inicio)))));
       }
       const r: ResultadoDrenagem = { vivas: app.voz.vivas(), turnos: turnos(), duracao_ms: agora() - inicio, prazo_vencido: pendente(), lacos_prazo_vencido: lacos === "prazo" };

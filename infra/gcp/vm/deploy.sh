@@ -70,9 +70,53 @@ gravar_imagens() {
     > imagens.env.novo && mv imagens.env.novo imagens.env
 }
 # As ligações vivas da cor que saiu: o orquestrador delas morreu com ela (a outra cor não as conhece).
+# NOD-331: 3 tentativas (5 s entre elas). Falhou as 3: a pendência fica em estado/orfas-pendentes (uma linha
+# "<cor> [--transicao]", sem duplicar) e o próximo deploy a retoma (retomar_orfas). Deu certo: a linha sai.
+PENDENTES=estado/orfas-pendentes
+pendencia_tirar() {
+  [ -f "$PENDENTES" ] || return 0
+  grep -vxF -- "$1" "$PENDENTES" > "$PENDENTES.novo" || true
+  if [ -s "$PENDENTES.novo" ]; then chmod 0644 "$PENDENTES.novo" && mv "$PENDENTES.novo" "$PENDENTES"; else rm -f "$PENDENTES" "$PENDENTES.novo"; fi
+}
+pendencia_por() {
+  grep -qxF -- "$1" "$PENDENTES" 2>/dev/null && return 0
+  mkdir -p estado
+  { cat "$PENDENTES" 2>/dev/null || true; printf '%s\n' "$1"; } > "$PENDENTES.novo"
+  chmod 0644 "$PENDENTES.novo" && mv "$PENDENTES.novo" "$PENDENTES"
+}
 orfas() {
-  dc run --rm --no-deps -T "nod-$1" node scripts/ligacoes-orfas.ts --instancia "$2" ${3:-} \
-    || echo "aviso: não fechou as ligações órfãs da cor $2; o próximo deploy tenta de novo" >&2
+  local linha="$2${3:+ $3}" t
+  for t in 1 2 3; do
+    # shellcheck disable=SC2086 # ${3:-} vazio não vira argumento
+    if dc run --rm --no-deps -T "nod-$1" node scripts/ligacoes-orfas.ts --instancia "$2" ${3:-} </dev/null; then
+      pendencia_tirar "$linha"
+      return 0
+    fi
+    if [ "$t" -lt 3 ]; then sleep 5; fi
+  done
+  echo "aviso: não fechou as ligações órfãs da cor $2 em 3 tentativas; pendência em $PENDENTES, o próximo deploy retoma" >&2
+  pendencia_por "$linha"
+}
+# NOD-331: antes de subir a cor nova, retoma as órfãs que um deploy anterior não fechou, com a imagem da ativa. A
+# pendência da PRÓPRIA ativa é descartada: o boot dela já fechou as dela, e as vivas agora são legítimas. Sem ativa, fica.
+retomar_orfas() {
+  [ -s "$PENDENTES" ] || return 0
+  if [ -z "$ATIVA" ]; then
+    echo "aviso: há ligações órfãs pendentes ($PENDENTES), mas nenhuma cor ativa para fechá-las; ficam para o próximo deploy" >&2
+    return 0
+  fi
+  local pendentes cor flag
+  pendentes="$(cat "$PENDENTES")"
+  while read -r cor flag <&3; do
+    [ -n "$cor" ] || continue
+    if [ "$cor" = "$ATIVA" ]; then
+      echo "órfãs pendentes da $cor descartadas: é a cor ativa (o boot dela já fechou as dela)"
+      pendencia_tirar "$cor${flag:+ $flag}"
+      continue
+    fi
+    echo "retomando as ligações órfãs pendentes da cor $cor"
+    orfas "$ATIVA" "$cor" "$flag"
+  done 3<<< "$pendentes"
 }
 
 # O compose carrega os dois env_file e as duas imagens em qualquer comando: o que ainda não existe nasce aqui. A cor
@@ -103,6 +147,7 @@ if [ -n "$ATIVA" ] && roda "$(outra "$ATIVA")"; then
   dc stop -t 660 "nod-$(outra "$ATIVA")"
   orfas "$ATIVA" "$(outra "$ATIVA")"
 fi
+retomar_orfas
 
 if [ -n "$ATIVA" ]; then
   NOVA="$(outra "$ATIVA")"

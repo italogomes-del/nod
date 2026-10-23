@@ -44,7 +44,11 @@ na branch `main`, pode usar as duas últimas.
       Se não: o marcador volta para a velha, o `Caddyfile.anterior` volta (com recreate do Caddy), a nova
       para, exit 1. Confirmou: o `Caddyfile.anterior` é apagado.
    7. Para a velha com `stop -t 660` (drenagem de até 10 min, `NOD_DRENAGEM_MAX_MS`) e fecha as ligações
-      de voz que ficaram com `instancia` = cor velha (`scripts/ligacoes-orfas.ts`).
+      de voz que ficaram com `instancia` = cor velha (`scripts/ligacoes-orfas.ts`). São 3 tentativas, 5 s entre
+      elas (NOD-331). Falhando as 3, o deploy segue (exit 0) e grava a pendência em
+      `/opt/nod/estado/orfas-pendentes` (uma linha `<cor> [--transicao]`). O deploy seguinte a retoma logo
+      depois da reconciliação, antes de subir a cor nova, com a imagem da ativa; a pendência da própria cor
+      ativa é descartada (o boot dela já fechou as dela).
 
    O env leva as duas URLs: `DATABASE_URL` (nod_app, das requisições) e `DATABASE_URL_DONO`, que o
    boot usa só para criar as partições de `events` (ADR-006) e fecha em seguida.
@@ -52,7 +56,8 @@ na branch `main`, pode usar as duas últimas.
 O deploy não derruba o nod (ADR-001, emenda de 2026-10-22). O Caddy (`lb_policy first`, health check
 a cada 1 s em `/api/saude/lb`) manda tudo para a cor ativa; a velha drena sem receber pedido novo. Ao
 drenar, a velha para os laços, fecha os SSE (o navegador reconecta na nova e reidrata) e aceita o token
-de turno só se o banco disser que o turno segue `despachando`. Os Macs são reconhecidos pela nova pelo
+de turno só se o banco disser que o turno segue `despachando`. A cada 5 s ela confere no banco os tokens que
+ainda espera e solta os dos turnos que a cor ativa já assentou (NOD-331): esses não seguram o deploy até o teto. Os Macs são reconhecidos pela nova pelo
 409 de sempre (reanunciam). Desde a NOD-214, o turno que um Mac atualizado está rodando segue rodando: o
 processo novo o reconhece pelo token de turno (o hash fica em `turno_credenciais`). Só a ligação de voz
 com mais de 10 min cai, com a linha "A ligação caiu porque o nod foi atualizado. Ligue de novo." Um

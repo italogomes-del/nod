@@ -2,6 +2,7 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import type { PlanoTurno } from "../contracts/plano-turno.ts";
 import type { IdentidadeDeTurno, IdentidadeSemTurno, ServicesNod } from "../contracts/servicos.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
+import { log } from "../obs/log.ts";
 import type { Escopo, Relogio } from "../shared/types.ts";
 import { escopoAlegado } from "./token-maquina.ts";
 
@@ -55,6 +56,13 @@ export type TokenTurno = ServicesNod<unknown>["tokenTurno"] & {
    * no banco deixa de autorizar aqui também. Não tem volta (o processo está saindo).
    */
   modoSoBanco(): void;
+  /**
+   * definido em 2026-10-22 (NOD-331, drenagem): consulta no banco cada token que segura a drenagem (sem `sobrevive`) e
+   * apaga o que o banco já não reconhece (turno fora de `despachando`: a outra cor o assentou). Coerente com o
+   * `modoSoBanco`: esse token já não autoriza aqui. Erro do banco mantém a entrada (loga `token_poda_falhou` uma vez).
+   * Devolve quantos podou; sem `buscar`, nada.
+   */
+  podarPeloBanco(): Promise<number>;
   /** NOD-214: o plano guardado ou, do turno adotado depois de um reinício, recomposto (sem cunhar token novo). */
   planoOuRecompor(turnoId: string): Promise<PlanoTurno | null>;
 };
@@ -93,6 +101,7 @@ export function criarTokenTurno(opcoes: OpcoesTokenTurno): TokenTurno {
   const porHash = new Map<string, string>();
   const recompondo = new Map<string, Promise<PlanoTurno | null>>();
   let soBanco = false;
+  let podaFalhouLogada = false;
 
   function apagar(turnoId: string): void {
     const e = porTurno.get(turnoId);
@@ -152,6 +161,31 @@ export function criarTokenTurno(opcoes: OpcoesTokenTurno): TokenTurno {
 
     modoSoBanco() {
       soBanco = true;
+    },
+
+    async podarPeloBanco() {
+      const buscar = opcoes.buscar;
+      if (!buscar) return 0;
+      const alvos = [...porTurno.entries()].filter(([, e]) => !e.sobrevive);
+      let podados = 0;
+      await Promise.all(
+        alvos.map(async ([turnoId, e]) => {
+          try {
+            const c = await buscar({ tenantId: e.identidade.tenantId, pessoaId: e.identidade.pessoaId }, e.hash);
+            // Só apaga a MESMA entrada consultada (um cunhar ou adotar no meio troca a entrada do turno).
+            if (c === null && porTurno.get(turnoId) === e) {
+              apagar(turnoId);
+              podados++;
+            }
+          } catch (erro) {
+            if (!podaFalhouLogada) {
+              podaFalhouLogada = true;
+              log("aviso", "token_poda_falhou", { erro: erro instanceof Error ? erro.name : "erro" });
+            }
+          }
+        }),
+      );
+      return podados;
     },
 
     async autorizarComBanco(token) {
