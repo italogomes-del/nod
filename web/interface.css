@@ -352,9 +352,26 @@
 .computador-dialog .computador-fechar:hover{background:var(--surface-selected)}
 .computador-dialog .computador-acao{border:0;border-radius:999px;background:var(--action);color:var(--on-action);font-size:13px;padding:7px 14px}
 .computador-dialog .computador-acao:hover{filter:brightness(1.08)}
-.computador-acao[hidden],.computador-velo[hidden]{display:none!important}
-.computador-dialog .computador-velo{position:absolute;z-index:2;left:50%;bottom:16px;width:max-content;transform:translateX(-50%);border:0;border-radius:999px;background:#2c2c2e;color:#f4f4f5;padding:8px 16px;box-shadow:0 8px 28px #0006} /* cor-fixa: pílula sobre a tela */
-.computador-dev .computador-uso{display:none!important}
+.computador-acao[hidden],.computador-pilula[hidden],.computador-fechar-dica[hidden]{display:none!important}
+/* NOD-97: a pílula de vidro sobre a tela (Assistindo · Clique para assumir → Assumindo… → Você está no controle · Parar). */
+.computador-pilula{position:absolute;z-index:2;left:50%;bottom:16px;display:flex;align-items:center;gap:8px;width:max-content;max-width:calc(100% - 24px);transform:translateX(-50%);border-radius:999px;background:#1c1c1ecc;backdrop-filter:blur(12px);color:#f4f4f5;padding:7px 14px;font-size:13px;box-shadow:0 8px 28px #0006} /* cor-fixa: pílula sobre a tela */
+.computador-pilula-ponto{width:7px;height:7px;border-radius:50%;background:#a1a1aa} /* cor-fixa: pílula sobre a tela */
+.computador-pilula[data-fase=controle] .computador-pilula-ponto{background:#34c759} /* cor-fixa: pílula sobre a tela */
+.computador-pilula[data-fase=assumindo] .computador-pilula-ponto{background:#f4f4f5;animation:computador-pulso 1s ease-in-out infinite} /* cor-fixa: pílula sobre a tela */
+@keyframes computador-pulso{50%{opacity:.3}}
+.computador-pilula-sep{opacity:.5}
+.computador-dialog .computador-pilula-bt{border:0;background:transparent;color:inherit;padding:0;font-weight:600;border-radius:4px}
+.computador-dialog .computador-pilula-bt:hover:enabled{background:transparent;text-decoration:underline;text-underline-offset:3px}
+/* A dica de assumir aparece no hover da tela (ou com o foco); no toque fica fixa e diz "Toque". */
+.computador-pilula .dica-toque{display:none}
+.computador-pilula[data-fase=assistindo] .computador-pilula-sep,.computador-pilula[data-fase=assistindo] .computador-pilula-dica{opacity:0;transition:opacity .15s}
+.computador-viewport:hover .computador-pilula[data-fase=assistindo] :is(.computador-pilula-sep,.computador-pilula-dica),.computador-pilula[data-fase=assistindo]:focus-within :is(.computador-pilula-sep,.computador-pilula-dica),.computador-viewport:has(img:focus-visible) .computador-pilula[data-fase=assistindo] :is(.computador-pilula-sep,.computador-pilula-dica){opacity:1}
+@media (pointer:coarse){.computador-pilula .dica-clique{display:none}.computador-pilula .dica-toque{display:inline}.computador-pilula[data-fase=assistindo] :is(.computador-pilula-sep,.computador-pilula-dica){opacity:1}}
+.computador-dialog.computador-assistindo .computador-viewport img{cursor:pointer}
+/* "Seu clique só assumiu": linha discreta no topo da tela, some sozinha. */
+.computador-assumiu{position:absolute;z-index:2;top:10px;left:50%;transform:translateX(-50%);margin:0;max-width:calc(100% - 24px);padding:5px 12px;border-radius:999px;background:#1c1c1ecc;color:#f4f4f5;font-size:12px;opacity:0;pointer-events:none;transition:opacity .2s} /* cor-fixa: aviso sobre a tela */
+.computador-assumiu.visivel{opacity:1}
+.computador-fechar-dica{font-size:12px;color:var(--ink-3)}
 .computador-dev-selo{font-size:11px;letter-spacing:.4px;text-transform:uppercase;color:var(--ink-3)}
 .computador-browser-dialog:not([hidden]){position:absolute;z-index:3;left:12px;right:12px;bottom:12px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:12px;border-radius:12px;background:var(--surface);color:var(--ink);box-shadow:var(--shadow-pop)}
 .computador-browser-dialog p{margin:0;flex:1;min-width:160px;font-size:13px}

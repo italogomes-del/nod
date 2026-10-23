@@ -198,7 +198,8 @@ export function computadorPadrao(agenteId: string): ComputadorVisto {
  * "Abrir computador" no lugar de pedir a senha no chat.
  */
 export const PREFIXO_PEDIDO_DE_TELA = "Abra meu computador para concluir este passo: ";
-export const SUFIXO_PEDIDO_DE_TELA = ". Use Assumir controle; depois, Devolver ao bot. Não envie senha ou código aqui.";
+// NOD-97: a tela assume no primeiro clique e "Parar" devolve; os botões Assumir/Devolver ficaram só no Modo dev.
+export const SUFIXO_PEDIDO_DE_TELA = ". Abra a tela e clique nela para assumir; quando terminar, toque em Parar. Não envie senha ou código aqui.";
 
 export function textoPedidoDeTela(motivo: string): string {
   return `${PREFIXO_PEDIDO_DE_TELA}${motivo}${SUFIXO_PEDIDO_DE_TELA}`;

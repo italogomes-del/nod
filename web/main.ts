@@ -2,6 +2,7 @@ import "./lib/mascote-elemento.ts";
 import { abrirCapturaAmpliada } from "./telas/captura-ampliada.ts";
 import { abrirPreviaArquivo } from "./telas/previa-arquivo.ts";
 import { abrirComputador, aplicarModoDevNoComputador } from "./telas/computador.ts";
+import { marcarTelaFechadaNaAjuda } from "./lib/computador.ts";
 import { definirTelaDoBot } from "./telas/tela-do-bot.ts";
 import { abrirWorkspace } from "./telas/workspace.ts";
 import { listaDoQuePodem, rotuloPermitir, type EscolhaLiberar } from "./telas/card-liberar.ts";
@@ -3074,7 +3075,14 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   "ampliar-captura": (el) => { abrirCapturaAmpliada(el); },
   // NOD-327: o card de CSV/PDF abre a prévia num modal claro sobre a conversa.
   "previa-arquivo": (el) => { abrirPreviaArquivo(el); },
-  "abrir-computador": (el) => { const a = botGerido(el.dataset.id); if (a && api && a.ownerId === estado.sessao?.pessoaId) abrirComputador(api, a, { assumir: el.dataset.assumir === "1", dev: () => estado.modoDev.ligado }); },
+  "abrir-computador": (el) => { const a = botGerido(el.dataset.id); if (a && api && a.ownerId === estado.sessao?.pessoaId) abrirComputador(api, a, { assumir: el.dataset.assumir === "1", dev: () => estado.modoDev.ligado, aoFechar: render }); },
+  // NOD-97: "Terminei" no cartão do pedido de tela (a pessoa fechou a tela com a ajuda aberta) devolve ao bot, como o Parar.
+  "terminei-computador": (el) => agir(async () => {
+    const id = el.dataset.id ?? "";
+    await api!.configurarComputador(id, "devolver");
+    marcarTelaFechadaNaAjuda(id, null);
+    render();
+  }),
   // definido em 2026-09-24 (emenda da ADR-037): "Tentar de novo" é o mesmo ligar do computador; falhou, a
   // frota relê e o cartão continua dizendo o motivo.
   "religar-computador": (el) => agir(async () => {

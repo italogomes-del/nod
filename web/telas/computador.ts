@@ -1,6 +1,6 @@
 import type { AcaoComputador, ComputadorDto, ResultadoComputador, TelaComputador } from "../../src/contracts/computador.ts";
 import type { Api } from "../lib/api.ts";
-import { agruparAtividade, estadoEmPalavras, foraDoAr, htmlDialogoComputador, mensagemDoLimite, MOTIVO_FALHA_TEXTO, rotuloDaAtividade, rotuloDoEstado, tituloDaFalha } from "../lib/computador.ts";
+import { agruparAtividade, aoFecharATela, AVISO_CLIQUE_SO_ASSUMIU, criarCliqueQueAssume, esperaParaAssumir, estadoEmPalavras, falhaQuePassaAoAssumir, foraDoAr, htmlDialogoComputador, htmlPilula, marcarTelaFechadaNaAjuda, mensagemDoLimite, MOTIVO_FALHA_TEXTO, rotuloDaAtividade, rotuloDoEstado, rotuloDoFechar, tituloDaFalha, type FaseDaPilula, type OrigemDoAssumir } from "../lib/computador.ts";
 import { dataHora, esc } from "../lib/render.ts";
 import { lembrarTela } from "./tela-do-bot.ts";
 
@@ -9,7 +9,7 @@ export function aplicarModoDevNoComputador(ligado: boolean): void {
   document.querySelector(".computador-dialog")?.classList.toggle("computador-dev", ligado);
 }
 
-export function abrirComputador(api: Api, agente: { id: string; nome: string }, opcoes: { assumir?: boolean; dev?: () => boolean } = {}): void {
+export function abrirComputador(api: Api, agente: { id: string; nome: string }, opcoes: { assumir?: boolean; dev?: () => boolean; aoFechar?: () => void } = {}): void {
   document.querySelector<HTMLDialogElement>(".computador-dialog")?.close();
   const dialog = document.createElement("dialog");
   dialog.className = "computador-dialog";
@@ -30,6 +30,11 @@ export function abrirComputador(api: Api, agente: { id: string; nome: string }, 
   let teclas = "";
   let timerTeclas: number | undefined;
   let timerClique: number | undefined;
+  let timerAviso: number | undefined;
+  let avisou = false;
+  let fasePintada: FaseDaPilula | null = null;
+  // Aberta de novo pelo cartão: enquanto a tela está aberta, o cartão não diz "Você fechou a tela".
+  marcarTelaFechadaNaAjuda(agente.id, null);
   const erro = (texto: string) => { q(".computador-erro").textContent = texto; };
   const controla = () => dto?.computador.controle === "pessoa" && dto.ativo && !foraDoAr(dto);
   /**
@@ -57,12 +62,11 @@ export function abrirComputador(api: Api, agente: { id: string; nome: string }, 
     const c = dto.computador;
     const fora = foraDoAr(dto);
     const pessoa = Boolean(controla());
-    const vivo = Boolean(dto.ativo && !fora && !operando);
-    for (const b of dialog.querySelectorAll<HTMLButtonElement>(".computador-uso")) b.hidden = b.dataset.c === "devolver" ? !pessoa : !(vivo && !pessoa);
+    pintarPilula(Boolean(dto.ativo && !fora), pessoa);
     q(".computador-status").textContent = estadoEmPalavras(dto, Date.now(), configuracao);
     if (!q<HTMLImageElement>("img").getAttribute("src")) q(".computador-vazio").innerHTML = configuracao === "iniciar" ? `Abrindo a tela de ${esc(agente.nome)}.<small>O desktop deste bot está ligando.</small>` : `Um espaço de trabalho só deste bot.<small>Ligue o computador para abrir a tela.</small>`;
     q(".computador-status").classList.toggle("fora-do-ar", fora);
-    q(".computador-ajuda").textContent = fora ? "Tirei o computador das próximas execuções até você religá-lo." : mensagemDoLimite(dto) ?? (c.falhasSeguidas > 0 && c.falhaMotivo ? `A última tentativa falhou: ${MOTIVO_FALHA_TEXTO[c.falhaMotivo]}.` : dto.motivo ?? c.ajuda ?? "Entre nos seus apps uma vez neste computador. Use Devolver ao bot quando terminar.");
+    q(".computador-ajuda").textContent = fora ? "Tirei o computador das próximas execuções até você religá-lo." : mensagemDoLimite(dto) ?? (c.falhasSeguidas > 0 && c.falhaMotivo ? `A última tentativa falhou: ${MOTIVO_FALHA_TEXTO[c.falhaMotivo]}.` : dto.motivo ?? c.ajuda ?? "Entre nos seus apps uma vez neste computador. Toque em Parar quando terminar.");
     q<HTMLSelectElement>("select").value = c.politica;
     pintarForaDoAr(dto);
     const barra = (cmd: string) => q<HTMLButtonElement>(`.computador-toolbar [data-c="${cmd}"]`);
@@ -79,6 +83,76 @@ export function abrirComputador(api: Api, agente: { id: string; nome: string }, 
       return `<li class="atividade-${esc(l.estado)}"><b>${l.autor === "pessoa" ? "Você" : esc(agente.nome)}</b> · ${esc(rotuloDaAtividade(l.tipo))} <span class="tag ${l.estado === "falhou" ? "tag-vermelha" : "tag-cinza"}">${esc(rotuloDoEstado(l.estado))}${l.n > 1 ? ` ×${l.n}` : ""}</span><small>${esc(quando)}${esc(motivo)}</small></li>`;
     }).join("") || "<li>Nenhuma ação ainda.</li>";
   }
+  /** A pílula (NOD-97): o HTML só troca quando a fase muda, para o foco do leitor de tela não pular a cada 2 s. */
+  function pintarPilula(viva: boolean, pessoa: boolean) {
+    const fase: FaseDaPilula = portao.assumindo() ? "assumindo" : pessoa ? "controle" : "assistindo";
+    if (fase !== fasePintada) {
+      // Quem acionou a pílula pelo teclado não perde o foco quando o nó é trocado: vai ao botão novo ou à tela.
+      const tinhaFoco = q(".computador-pilula").contains(document.activeElement);
+      q(".computador-pilula").outerHTML = htmlPilula(agente.nome, fase);
+      fasePintada = fase;
+      if (tinhaFoco) (dialog.querySelector<HTMLElement>(".computador-pilula button") ?? imagem).focus();
+    }
+    q(".computador-pilula").hidden = !viva;
+    dialog.classList.toggle("computador-assistindo", viva && fase === "assistindo");
+    // No controle, o ✕ avisa que fechar devolve; com o pedido de ajuda aberto, que o pedido continua (protótipo v1.1).
+    const fechar = q(".computador-fechar");
+    const { rotulo, dica } = rotuloDoFechar(agente.nome, viva && pessoa, dto?.computador.ajudaDecisaoId ?? null);
+    fechar.setAttribute("aria-label", rotulo); fechar.title = rotulo;
+    const dicaFechar = q(".computador-fechar-dica");
+    dicaFechar.textContent = dica ?? "";
+    dicaFechar.hidden = dica === null;
+  }
+  /** Uma vez por abertura: o gesto que assumiu não chegou ao site. Some sozinho; aria-live lê. */
+  function avisarQueSoAssumiu() {
+    if (avisou || terminou) return;
+    avisou = true;
+    const aviso = q(".computador-assumiu");
+    aviso.textContent = AVISO_CLIQUE_SO_ASSUMIU;
+    aviso.classList.add("visivel");
+    timerAviso = window.setTimeout(() => { aviso.classList.remove("visivel"); aviso.textContent = ""; }, 5000);
+  }
+  /**
+   * definido em 2026-10-22 (NOD-97): assumir pelo clique (ou pela pílula, ou pelo Abrir do cartão). A falha que passa
+   * sozinha (bot no meio de uma ação, rede, 5xx) não vira erro: a pílula fica em "Assumindo…" e tenta de novo em 0,5 s,
+   * 1 s, 2 s e daí a cada 4 s. Para quando assume, quando a tela fecha ou quando o computador cai (o cartão fora do ar).
+   */
+  async function assumirComInsistencia(origem: OrigemDoAssumir) {
+    pintarEstado();
+    let falhou = false;
+    let assumiu = false;
+    for (let n = 0; !terminou; n++) {
+      try {
+        await api.configurarComputador(agente.id, "assumir", origem);
+        assumiu = true;
+        break;
+      } catch (e) {
+        if (!falhaQuePassaAoAssumir(e)) { falhou = true; break; }
+        await new Promise<void>((r) => window.setTimeout(r, esperaParaAssumir(n)));
+        if (terminou) break;
+        await atualizar().catch(() => undefined);
+        if (!dto?.ativo || foraDoAr(dto) || dto.computador.controle === "pessoa") break;
+      }
+    }
+    await atualizar().catch(() => undefined);
+    portao.concluiu();
+    if (terminou) {
+      // A tela fechou no meio do "Assumindo…" e o assumir chegou depois: o close já passou sem controle, então aplica
+      // aqui o mesmo efeito de fechar (sem isso o controle ficava com a pessoa e a máquina sem dormir).
+      if (assumiu) fecharNoControle();
+      return;
+    }
+    pintarEstado();
+    if (falhou && !controla()) erro("Não foi possível assumir o controle. Atualize a tela e tente de novo.");
+    if (controla()) {
+      imagem.focus();
+      if (origem === "clique") avisarQueSoAssumiu();
+    }
+  }
+  const portao = criarCliqueQueAssume({
+    assistindo: () => Boolean(dto?.ativo && !foraDoAr(dto) && dto.computador.controle !== "pessoa"),
+    assumir: (origem) => { void assumirComInsistencia(origem); },
+  });
   function resultado(r: ResultadoComputador) {
     if (terminou) return;
     if (r.tela) {
@@ -112,7 +186,9 @@ export function abrirComputador(api: Api, agente: { id: string; nome: string }, 
   }
   async function acao(a: AcaoComputador) { resultado(await api.acaoComputador(agente.id, a)); }
   async function interagir(a: AcaoComputador) {
-    if (!controla()) { erro("Use Assumir controle antes de interagir."); return; }
+    // Em Assistindo o portão do clique já assumiu ou descartou o gesto da imagem; o que chega aqui sem controle vem dos
+    // campos do Modo dev (digitar, Enter, diálogo), que avisam em vez de perder a entrada calados.
+    if (!controla()) { erro("Assuma o controle antes de interagir: clique na tela ou use Assumir controle."); return; }
     fila = fila.then(async () => {
       while (ocupado && !terminou) await new Promise<void>(r => window.setTimeout(r,30));
       if (terminou || !controla()) return;
@@ -126,8 +202,11 @@ export function abrirComputador(api: Api, agente: { id: string; nome: string }, 
   const imagem = q<HTMLImageElement>("img");
   const ponto = (e: MouseEvent) => { const b = imagem.getBoundingClientRect(); return { x: Math.min(1279,Math.max(0,Math.floor((e.clientX-b.left)*1280/b.width))), y: Math.min(799,Math.max(0,Math.floor((e.clientY-b.top)*800/b.height))) }; };
   let inicio: { x: number; y: number } | undefined;
-  imagem.addEventListener("mousedown", e => { e.preventDefault(); imagem.focus(); inicio = ponto(e); });
+  // NOD-97: em Assistindo, o primeiro mousedown assume e é consumido com o mouseup do mesmo gesto; durante o
+  // "Assumindo…" tudo é descartado. O próximo clique já chega ao site.
+  imagem.addEventListener("mousedown", e => { e.preventDefault(); imagem.focus(); if (portao.apertar()) { inicio = undefined; return; } inicio = ponto(e); });
   imagem.addEventListener("mouseup", e => {
+    if (portao.soltar()) { inicio = undefined; return; }
     if (!tela || !inicio) return;
     const fim = ponto(e); const ini = inicio; inicio = undefined;
     if (Math.abs(fim.x-ini.x)+Math.abs(fim.y-ini.y)>8) void interagir({ tipo:"arrastar",...ini,destinoX:fim.x,destinoY:fim.y,quadro:tela.quadro });
@@ -138,8 +217,11 @@ export function abrirComputador(api: Api, agente: { id: string; nome: string }, 
     }
   });
   imagem.addEventListener("contextmenu", e => e.preventDefault());
-  imagem.addEventListener("wheel", e => {if(!controla() || document.activeElement !== imagem)return;e.preventDefault();if(tela)void interagir({tipo:"rolar",delta:Math.max(-2000,Math.min(2000,e.deltaY)),quadro:tela.quadro});},{passive:false});
+  imagem.addEventListener("wheel", e => {if(portao.rolar()){e.preventDefault();return;}if(!controla() || document.activeElement !== imagem)return;e.preventDefault();if(tela)void interagir({tipo:"rolar",delta:Math.max(-2000,Math.min(2000,e.deltaY)),quadro:tela.quadro});},{passive:false});
   imagem.addEventListener("keydown", e => {
+    // Tab, Shift+Tab, Esc e as modificadoras sozinhas não assumem (teclaAssume). Esc fecha a tela (e devolve).
+    if (portao.tecla(e)) { e.preventDefault(); return; }
+    if (e.key === "Escape") return;
     if (!tela || !controla() || ["Control","Meta","Alt","Shift"].includes(e.key)) return;
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v") return;
     e.preventDefault();
@@ -155,6 +237,8 @@ export function abrirComputador(api: Api, agente: { id: string; nome: string }, 
     const el = (e.target as HTMLElement).closest<HTMLElement>("button"); if (!el) return;
     const cmd = el.dataset.c;
     if (cmd === "fechar") dialog.close();
+    // A pílula em Assistindo: o mesmo assumir do clique, sem gesto a engolir.
+    else if (cmd === "assumir" && el.closest(".computador-pilula")) portao.botao();
     else if (cmd === "parar") { configuracao="parar";pintarEstado();void api.configurarComputador(agente.id,"parar").then(atualizar).catch(()=>erro("Não foi possível desligar o computador.")).finally(()=>{configuracao=null;pintarEstado();}); }
     else if ((cmd === "aceitar-dialogo" || cmd === "recusar-dialogo") && tela) void interagir({tipo:"dialogo",aceitar:cmd === "aceitar-dialogo",texto:q<HTMLInputElement>(".computador-browser-dialog input").value,quadro:tela.quadro});
     else if (cmd === "atualizar") void fazer(async()=>{await atualizar();if(dto?.ativo && !foraDoAr(dto))await acao({tipo:"observar"});});
@@ -181,7 +265,23 @@ export function abrirComputador(api: Api, agente: { id: string; nome: string }, 
     proximaLeitura=Date.now()+2000;
     void fazer(async()=>{await atualizar();if(dto?.ativo && (dto.computador.ocupadoAte ?? 0) <= Date.now()) await acao({tipo:"observar"});},true);
   },2000);
-  dialog.addEventListener("close",()=>{terminou=true;window.clearInterval(timer);if(timerTeclas)window.clearTimeout(timerTeclas);if(timerClique)window.clearTimeout(timerClique);teclas="";if(audioUrl)URL.revokeObjectURL(audioUrl);dialog.remove();});
+  /**
+   * definido em 2026-10-22 (NOD-97): fechar a tela no controle devolve ao bot (keepalive: a aba pode estar saindo). Com o
+   * pedido de ajuda aberto, não: o bot espera a pessoa, e o cartão da conversa ganha Abrir e Terminei.
+   */
+  function fecharNoControle() {
+    const efeito = aoFecharATela(Boolean(controla()), dto?.computador.ajudaDecisaoId ?? null);
+    if (efeito === "devolver") api.devolverComputadorAoSair(agente.id);
+    // Fora do close (o assumir chegou depois), o cartão da conversa ainda não repintou: repinta aqui.
+    else if (efeito === "esperar") { marcarTelaFechadaNaAjuda(agente.id, dto?.computador.ajudaDecisaoId ?? null); if (terminou) opcoes.aoFechar?.(); }
+  }
+  const devolverAoSair = () => { if (aoFecharATela(Boolean(controla()), dto?.computador.ajudaDecisaoId ?? null) === "devolver") api.devolverComputadorAoSair(agente.id); };
+  window.addEventListener("pagehide", devolverAoSair);
+  dialog.addEventListener("close",()=>{
+    window.removeEventListener("pagehide", devolverAoSair);
+    fecharNoControle();
+    if(timerAviso)window.clearTimeout(timerAviso);
+    terminou=true;window.clearInterval(timer);if(timerTeclas)window.clearTimeout(timerTeclas);if(timerClique)window.clearTimeout(timerClique);teclas="";if(audioUrl)URL.revokeObjectURL(audioUrl);dialog.remove();opcoes.aoFechar?.();});
   // definido em 2026-10-16: Abrir liga o computador se estiver desligado (ou fora do ar) e, no cartão da
   // conversa, assume o controle — a pessoa entra na tela sem um passo extra de "Ligar".
   void fazer(async () => {
@@ -193,10 +293,8 @@ export function abrirComputador(api: Api, agente: { id: string; nome: string }, 
       finally { configuracao = null; }
       await atualizar();
     }
-    if (opcoes.assumir && dto?.ativo && !foraDoAr(dto) && dto.computador.controle !== "pessoa") {
-      await api.configurarComputador(agente.id, "assumir");
-      await atualizar();
-    }
+    // O Abrir do cartão entra já no controle, pelo mesmo assumir com insistência da pílula.
+    if (opcoes.assumir) portao.botao();
     if (dto?.ativo && !foraDoAr(dto)) await acao({ tipo: "observar" });
     if (controla()) imagem.focus();
   });

@@ -176,7 +176,13 @@ export function criarApi(escopo: Escopo) {
     revogarWorkspace: (id: string) => del(`conversas/${id}/workspace`),
     permitirPasta: (propostaId: string, pasta: string) => post(`propostas/${propostaId}/permitir-pasta`, { pasta }),
     computador: (id: string) => get<ComputadorDto>(`agentes/${encodeURIComponent(id)}/computador`),
-    configurarComputador: (id: string, operacao: string) => post<{ ok: true }>(`agentes/${encodeURIComponent(id)}/computador`, { operacao }),
+    /** NOD-97: `origem` diz de onde veio a troca de controle (o servidor de antes ignora o campo). */
+    configurarComputador: (id: string, operacao: string, origem?: "botao" | "clique" | "fechou_tela") => post<{ ok: true }>(`agentes/${encodeURIComponent(id)}/computador`, origem === undefined ? { operacao } : { operacao, origem }),
+    /**
+     * NOD-97: fechar a tela (ou a aba) no controle devolve ao bot. keepalive deixa o POST terminar depois de a página sair;
+     * o que falhar aqui se perde, sem aviso (a ociosidade do controle cobre).
+     */
+    devolverComputadorAoSair: (id: string) => pedir<{ ok: true }>("POST", `${base}/agentes/${encodeURIComponent(id)}/computador`, { operacao: "devolver", origem: "fechou_tela" }, { keepalive: true, silencioso: true }).then(() => undefined, () => undefined),
     acaoComputador: (id: string, acao: AcaoComputador) => post<ResultadoComputador>(`agentes/${encodeURIComponent(id)}/computador/acoes`, acao),
     urlEventos: `${base}/eventos`,
     frota: () => get<FrotaDto>("frota"),

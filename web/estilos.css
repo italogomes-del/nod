@@ -281,7 +281,8 @@ body.ocupado { cursor: progress; }
 .msg-computador .mc-cab { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
 .msg-computador .mc-cab b { font-weight: 600; }
 .msg-computador p { margin: 8px 0 0; line-height: 1.5; }
-.msg-computador .mcf-acoes { display: flex; gap: 8px; margin-top: 12px; }
+.msg-computador .mcf-acoes { display: flex; gap: 8px; margin-top: 12px; align-items: center; }
+.msg-computador .mc-sub { color: var(--ink-2); font-size: 13px; }
 .detalhe-computador-fora { display: flex; flex-direction: column; gap: 6px; padding: 12px; border: 1px solid var(--danger-line); background: var(--danger-soft); border-radius: 10px; }
 .detalhe-computador-fora .tag { align-self: flex-start; }
 .detalhe-computador-fora p { margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--ink); }

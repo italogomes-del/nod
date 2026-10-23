@@ -72,14 +72,18 @@ describe("computador do bot: erro real e aviso único na web (emenda da ADR-037)
 
   it("diálogo: a pessoa vê a tela; terminal, arquivos e ligar ficam no modo dev", () => {
     const html = htmlDialogoComputador("Nina");
-    expect(html).toContain(">Assumir controle</button>");
-    expect(html).toContain(">Devolver ao bot</button>");
-    expect(html).toContain('class="computador-velo computador-uso"');
+    // NOD-97: Assumir controle e Devolver ao bot só na toolbar do Modo dev; a pessoa usa a pílula sobre a tela.
+    const toolbar = html.slice(html.indexOf("computador-toolbar"), html.indexOf("computador-ajuda"));
+    expect(toolbar).toContain(">Assumir controle</button>");
+    expect(toolbar).toContain(">Devolver ao bot</button>");
+    expect(html.match(/>Assumir controle</g)).toHaveLength(1);
+    expect(html).toContain('class="computador-pilula"');
+    expect(html).toContain('aria-label="Assumir o controle"');
     expect(html).toContain('class="computador-toolbar computador-dev-only"');
     expect(html).toContain('class="computador-lateral computador-dev-only"');
     expect(html).toContain("<summary>Terminal</summary>");
     expect(html).toContain("Abrindo a tela de Nina.");
-    expect(html.indexOf("computador-velo")).toBeLessThan(html.indexOf("computador-lateral"));
+    expect(html.indexOf("computador-pilula")).toBeLessThan(html.indexOf("computador-lateral"));
   });
 
   it("painel: a tela do bot fica no topo, com Abrir e as rotinas logo abaixo; o cartão vermelho só fora do ar", () => {
