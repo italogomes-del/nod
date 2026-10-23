@@ -48,6 +48,10 @@ o que a saúde enxerga e quem age:
 Gatilho de reversão desta parte: se o watchdog reiniciar o processo sem incidente real (falso positivo) mais de uma vez
 num mês, sobe o limite de 4 falhas ou o de 3 intervalos — não se desliga o watchdog.
 
+## Emenda (2026-10-22, NOD-218): dois processos vivos só durante o deploy
+
+O "container único" vira "um processo ativo". Durante o deploy azul/verde (ADR-001, emenda de 2026-10-22) há dois containers do nod na VM, por até ~11 min: a cor nova, ativa, e a velha, drenando. Quem é ativo decide só o marcador `cor-ativa`, nunca a ordem de subida. O estado em memória continua de um processo: a cor passiva não liga laços, e a velha, ao drenar, fecha os SSE e passa a autorizar o token de turno pelo banco (revogado = o turno já não está `despachando`). A ponte das máquinas continua em memória: o Mac reconecta na nova pelo 409 de sempre. O que é por processo e mora no disco compartilhado (`/data`) leva a cor: o arquivo de grupos órfãos do executor tem `NOD_COR` no hash, e as ligações gravam `instancia` (a cor), para o boot de uma cor não encerrar o que é da outra. O alarme externo segue no `/api/saude` via Caddy, que só chega à cor ativa; o watchdog não age durante a drenagem.
+
 ## Gatilho de reversão
 
 Reabrir (segundo container ou métricas de infraestrutura) se o executor de servidor passar a competir por CPU com o long-poll a ponto de o `puxar` estourar o teto de 20 s medido, ou se alguma das sete métricas ficar dois meses sem gerar decisão operacional — aí ela sai, não entra outra.

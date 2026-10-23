@@ -96,8 +96,9 @@ export async function tick(db: Db, opcoes: OpcoesTick, laco: OpcoesLaco = {}): P
  * definido em 2026-10-15 (NOD-267): `aoBater` ao TERMINAR cada tick (sucesso ou erro) e no tick que só espera a
  * ADR-045 — o tick pulado por `rodando` não bate: é o laço preso que a saúde precisa ver.
  */
-export function iniciarScheduler(db: Db, opcoes: OpcoesTick & { intervaloMs?: number; aoBater?: () => void }, laco: OpcoesLaco = {}): { parar(): void } {
+export function iniciarScheduler(db: Db, opcoes: OpcoesTick & { intervaloMs?: number; aoBater?: () => void }, laco: OpcoesLaco = {}): { parar(): Promise<void> } {
   let rodando = false;
+  let emVoo: Promise<unknown> | null = null;
   let relogio: RelogioDoAgendador = { ultimoTick: null, esperarAte: 0 };
   const intervaloMs = opcoes.intervaloMs ?? INTERVALO_SCHEDULER_MS;
   const timer = setInterval(() => {
@@ -112,14 +113,22 @@ export function iniciarScheduler(db: Db, opcoes: OpcoesTick & { intervaloMs?: nu
     }
     rodando = true;
     const inicio = opcoes.agora();
-    tick(db, opcoes, laco)
+    emVoo = tick(db, opcoes, laco)
       .catch((e: unknown) => log("erro", "scheduler_tick_falhou", { erro: e instanceof Error ? e.name : "desconhecido" }))
       .finally(() => {
         rodando = false;
         logarTickLento("agendador", opcoes.agora() - inicio, intervaloMs);
         opcoes.aoBater?.();
+        emVoo = null;
       });
   }, intervaloMs);
   timer.unref();
-  return { parar: () => clearInterval(timer) };
+  // NOD-218: `parar()` espera o tick em voo — a drenagem do deploy azul/verde não deixa um tick pela metade quando a
+  // outra cor já assumiu.
+  return {
+    async parar() {
+      clearInterval(timer);
+      if (emVoo) await emVoo;
+    },
+  };
 }

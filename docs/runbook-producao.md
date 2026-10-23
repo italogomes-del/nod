@@ -24,7 +24,7 @@ gcloud sql instances describe nod-pg-restaurada-AAAAMMDD \
 3. Em [`infra/gcp/config.env`](../infra/gcp/config.env), troque `SQL_IP` pelo IP novo e
    `SQL_INSTANCIA` pelo nome novo. O `vm/deploy.sh` monta `DATABASE_URL` e `DATABASE_URL_DONO` a
    partir de `SQL_IP`.
-4. Commit no `main` → o deploy leva o `config.env` para a VM e recria o container. Sem esperar o CI:
+4. Commit no `main` → o deploy leva o `config.env` para a VM e troca a cor (azul/verde, sem queda). Sem esperar o CI:
    Actions → deploy → Run workflow.
 5. Confira `https://<domínio>/api/saude` (a saúde inclui o banco) e entre no nod.
 6. Na instância nova, confira que a proteção contra exclusão e os backups com PITR estão ligados
@@ -142,8 +142,8 @@ O cadastro é manual e fica com o dono da conta (não faz parte da NOD-267):
 3. Contato de alerta: e-mail do Marlon.
 4. Status esperado: 200. Qualquer outro (o 503 `{ok:false}` incluso) é queda.
 
-**Como testar o monitor.** Pare o container por 3 min (`sudo docker compose -f /opt/nod/compose.yml stop nod`), confira
-que o e-mail chegou depois da 2ª falha e suba de novo (`... start nod`). Para ver o watchdog agir sem derrubar a VM,
+**Como testar o monitor.** Pare a cor ativa por 3 min (`sudo docker compose --env-file /opt/nod/imagens.env -f /opt/nod/compose.yml stop nod-$(cat /opt/nod/estado/cor-ativa)`),
+confira que o e-mail chegou depois da 2ª falha e suba de novo (`... start nod-<cor>`). Para ver o watchdog agir sem derrubar a VM,
 os testes `tests/concurrency/watchdog-boot.test.ts` e `tests/integration/servidor-saude.test.ts` (pool esgotado)
 reproduzem o tick travado e o pool esgotado.
 

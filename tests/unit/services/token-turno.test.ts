@@ -200,3 +200,27 @@ describe("NOD-214: o token de turno atravessa o reinício do servidor (hash no b
     expect(chamadas).toBe(3);
   });
 });
+
+describe("NOD-218: modo só banco (drenagem do deploy azul/verde)", () => {
+  const identidade = { tenantId: "00000000-0000-4000-8000-0000000000a1", pessoaId: "00000000-0000-4000-8000-0000000000b1", agenteId: "a1" };
+
+  it("token na memória mas fora do banco (a outra cor assentou o turno) deixa de autorizar; o do banco segue", async () => {
+    let noBanco = true;
+    const tokens = criarTokenTurno({ agora: () => 1_000, buscar: async (_e, hash) => (noBanco && tokens.credencialDe("t1")?.tokenHash.equals(hash) ? { turnoId: "t1", ...tokens.credencialDe("t1")!, sobreviveReinicio: false } : null) });
+    const t = tokens.cunhar("t1", identidade);
+    expect(tokens.autorizar(t)?.turnoId).toBe("t1");
+    tokens.modoSoBanco();
+    expect(tokens.autorizar(t)).toBeNull();
+    expect(await tokens.autorizarComBanco(t)).toEqual({ turnoId: "t1", ...identidade });
+    noBanco = false; // revogado pelo banco
+    expect(await tokens.autorizarComBanco(t)).toBeNull();
+  });
+
+  it("sem buscar ou com token sem escopo: null", async () => {
+    const tokens = criarTokenTurno({ agora: () => 1_000 });
+    const t = tokens.cunhar("t1", identidade);
+    tokens.modoSoBanco();
+    expect(await tokens.autorizarComBanco(t)).toBeNull();
+    expect(await tokens.autorizarComBanco("lixo")).toBeNull();
+  });
+});

@@ -353,6 +353,18 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
             return { id, eventoId, tipo, dados, tentativas, criadoEm, conversaId: ev?.conversaId ?? null, turnoId: ev?.turnoId ?? null };
           });
       },
+      async paraPublicar(p: { desde: Date; excluir: readonly string[]; limite?: number }) {
+        const excluir = new Set(p.excluir);
+        const desde = p.desde.getTime();
+        return doTenant(b.outbox)
+          .filter((o) => o.ownerId === escopo.pessoaId && (o.entregueEm === null || o.entregueEm >= desde) && o.abandonadoEm === null && o.canceladoEm === null && !excluir.has(o.id))
+          .sort((x, y) => Date.parse(x.criadoEm) - Date.parse(y.criadoEm))
+          .slice(0, p.limite ?? 100)
+          .map(({ id, eventoId, tipo, dados, tentativas, criadoEm }) => {
+            const ev = b.events.find((e) => e.id === eventoId);
+            return { id, eventoId, tipo, dados, tentativas, criadoEm, conversaId: ev?.conversaId ?? null, turnoId: ev?.turnoId ?? null };
+          });
+      },
       async marcarEntregue(id: string) {
         const o = doTenant(b.outbox).find((x) => x.id === id && x.entregueEm === null);
         if (!o) return false;

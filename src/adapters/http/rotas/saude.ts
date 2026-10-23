@@ -102,23 +102,70 @@ export function criarVerificacaoSaude(p: { verificarBanco?: () => Promise<unknow
 }
 
 /**
+ * definido em 2026-10-22 (NOD-218, deploy azul/verde): o estado do processo que as rotas de saúde olham ANTES do banco.
+ * `pronto` = o boot terminou e o servidor está ouvindo; `ativa` = o marcador `cor-ativa` diz a cor deste processo
+ * (sempre true sem `NOD_COR`); `drenando` = recebeu SIGTERM e está drenando.
+ */
+export type EstadoSaude = { pronto(): boolean; ativa(): boolean; drenando(): boolean; readonly cor: string | null };
+export type MotivoEstado = "boot" | "drenando" | "inativa";
+
+function criarLogPorEstado(): (motivo: string | null) => void {
+  // Um `saude_falhou` por mudança de estado: o Caddy bate no /api/saude/lb a cada 1 s e a cor passiva responderia 503
+  // a cada batida. A falha do banco/laço segue logando a cada chamada (é a que importa ver repetida).
+  const deEstado = new Set<string>(["boot", "drenando", "inativa"]);
+  let ultimo: string | null = null;
+  return (motivo) => {
+    const repetido = motivo !== null && deEstado.has(motivo) && motivo === ultimo;
+    if (motivo !== null && !repetido) log("aviso", "saude_falhou", { motivo });
+    ultimo = motivo;
+  };
+}
+
+/**
  * `GET /api/saude`. Com `verificar` (o boot passa a verificação de saúde), responde 200 só se ela passou; senão 503
  * `{ok:false}`, sem detalhe no corpo — o motivo vai só para o log `saude_falhou`. Sem `verificar` (testes do roteador),
- * 200 como antes.
+ * 200 como antes. Com `estado` (NOD-218): 503 no boot (antes de `pronto`) e na drenagem, sem chamar `verificar`; NÃO
+ * olha a cor — é o healthcheck do compose e o watchdog: a cor passiva está saudável, só não atende.
  */
-export function criarRotaSaude(verificar?: VerificacaoSaude): Rota {
+export function criarRotaSaude(verificar?: VerificacaoSaude, estado?: EstadoSaude): Rota {
+  const registrar = criarLogPorEstado();
   return {
     metodo: "GET",
     padrao: /^\/saude$/,
     publica: true,
     async handler(ctx) {
-      const motivo = verificar ? await verificar() : null;
+      const doEstado: MotivoEstado | null = !estado ? null : !estado.pronto() ? "boot" : estado.drenando() ? "drenando" : null;
+      const motivo = doEstado ?? (verificar ? await verificar() : null);
+      registrar(motivo);
       if (motivo === null) {
         ctx.json(200, { ok: true });
         return;
       }
-      log("aviso", "saude_falhou", { motivo });
       ctx.json(503, { ok: false });
+    },
+  };
+}
+
+/**
+ * `GET /api/saude/lb` (NOD-218): o health check do Caddy (`lb_policy first` com as duas cores). 200 `{ok:true,cor}` só
+ * quando `pronto && ativa && !drenando && banco ok`; senão 503 `{ok:false,cor,motivo}`. O motivo aqui vai no corpo (só
+ * boot/drenando/inativa/indisponivel, sem detalhe do banco): o deploy.sh confirma a virada lendo a `cor` pelo domínio.
+ */
+export function criarRotaSaudeLb(verificar: VerificacaoSaude | undefined, estado: EstadoSaude): Rota {
+  const registrar = criarLogPorEstado();
+  return {
+    metodo: "GET",
+    padrao: /^\/saude\/lb$/,
+    publica: true,
+    async handler(ctx) {
+      const doEstado: MotivoEstado | null = !estado.pronto() ? "boot" : estado.drenando() ? "drenando" : !estado.ativa() ? "inativa" : null;
+      const motivo = doEstado ?? (verificar ? await verificar() : null);
+      registrar(motivo);
+      if (motivo === null) {
+        ctx.json(200, { ok: true, cor: estado.cor });
+        return;
+      }
+      ctx.json(503, { ok: false, cor: estado.cor, motivo: doEstado ?? "indisponivel" });
     },
   };
 }

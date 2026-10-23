@@ -47,6 +47,8 @@ export type ContextoLigacao = {
   inicioDoDia: number;
   provedorStt: string;
   provedorTts: string;
+  /** NOD-218: a cor deste processo (`NOD_COR`), gravada na ligação. Ausente = sem cor (Mac, local). */
+  instancia?: string | null;
   /** NOD_VOZ_LEITURA=1 (NOD-180): ouvir as respostas fora da ligação. Ausente = desligada. */
   leituraHabilitada?: boolean;
 };
@@ -180,6 +182,7 @@ export const ligar: CasoDeUso<{ agenteId: string; contexto: ContextoLigacao; exe
     provedorStt: input.contexto.provedorStt,
     provedorTts: input.contexto.provedorTts,
     voz,
+    instancia: input.contexto.instancia ?? null,
   });
   if (!ligacao) throw new ErroDeDominio("estado_invalido", { cause: "ja_em_ligacao" });
   const autoria = autoriaPessoa(deps.escopo, input.executor ?? "catcher");

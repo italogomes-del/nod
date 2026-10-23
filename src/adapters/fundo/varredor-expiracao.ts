@@ -239,18 +239,27 @@ export async function varrer(db: Db, opcoes: OpcoesVarredor, laco: OpcoesLaco = 
   );
 }
 
-export function iniciarVarredorExpiracao(db: Db, opcoesIniciais: OpcoesVarredor & { intervaloMs?: number }, laco: OpcoesLaco = {}): { parar(): void } {
+export function iniciarVarredorExpiracao(db: Db, opcoesIniciais: OpcoesVarredor & { intervaloMs?: number }, laco: OpcoesLaco = {}): { parar(): Promise<void> } {
   const opcoes = { ...opcoesIniciais, pedidosAdiados: opcoesIniciais.pedidosAdiados ?? new Map<string, number>(), turnosObservados: opcoesIniciais.turnosObservados ?? new Map<string, number>() };
   let rodando = false;
+  let emVoo: Promise<unknown> | null = null;
   const timer = setInterval(() => {
     if (rodando) return;
     rodando = true;
-    varrer(db, opcoes, laco)
+    emVoo = varrer(db, opcoes, laco)
       .catch((e: unknown) => log("erro", "varredor_tick_falhou", { erro: e instanceof Error ? e.name : "desconhecido" }))
       .finally(() => {
         rodando = false;
+        emVoo = null;
       });
   }, opcoes.intervaloMs ?? INTERVALO_VARREDOR_MS);
   timer.unref();
-  return { parar: () => clearInterval(timer) };
+  // NOD-218: `parar()` espera o tick em voo — a drenagem do deploy azul/verde não deixa um tick pela metade quando a
+  // outra cor já assumiu.
+  return {
+    async parar() {
+      clearInterval(timer);
+      if (emVoo) await emVoo;
+    },
+  };
 }

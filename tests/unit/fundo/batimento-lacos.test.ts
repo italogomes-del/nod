@@ -137,4 +137,21 @@ describe("NOD-267: batimento dos laços", () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(logs).toContainEqual(expect.objectContaining({ evento: "laco_tick_lento", laco: "agendador" }));
   });
+
+  it("NOD-218: parar() do agendador e do varredor de lease espera o tick em voo terminar", async () => {
+    let soltarS: (v: { tenantId: string; id: string }[]) => void = () => undefined;
+    let soltarV: (v: { tenantId: string; id: string }[]) => void = () => undefined;
+    const s = iniciarScheduler(SEM_BANCO, opcoesTick(30_000, () => undefined), { listarPessoas: () => new Promise((r) => { soltarS = r; }) });
+    const v = iniciarVarredorLease({ db: SEM_BANCO, intervaloMs: 15_000, opcoes: { listarPessoas: () => new Promise((r) => { soltarV = r; }) } });
+    await vi.advanceTimersByTimeAsync(30_000);
+    let parados = 0;
+    void s.parar().then(() => parados++);
+    void v.parar().then(() => parados++);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(parados).toBe(0);
+    soltarS([]);
+    soltarV([]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(parados).toBe(2);
+  });
 });

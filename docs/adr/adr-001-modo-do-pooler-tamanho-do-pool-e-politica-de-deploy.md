@@ -47,3 +47,18 @@ Decisão:
 
 Consequência: um app lento deixa lento só o bot que o chamou. Se o servidor cair entre as fases, o item fica sem desfecho e nada é reenviado (limpeza: NOD-261). Custo: uma tx a mais por chamada que falha e por lote automático.
 
+
+## Emenda de 2026-10-22 — Recreate vira azul/verde (NOD-218, aprovada pelo Marlon em 19/10)
+
+O deploy deixa de ser recreate. A VM tem duas cores do mesmo serviço, `nod-azul` e `nod-verde`, e o Caddy na frente das duas com `lb_policy first` e health check em `/api/saude/lb`. Continua não sendo rolling: há no máximo uma cor **ativa**, e a única chave da troca é o marcador `/opt/nod/estado/cor-ativa` (um arquivo, gravado por `tmp` + `mv`, montado só leitura em `/data/estado` e relido a cada 500 ms). Quem não é a cor do marcador responde 503 `inativa` no `/api/saude/lb`, não liga os laços (despachante, outbox, agendador, varredores) e só atende HTTP. Não é advisory lock porque, com o pooler, uma trava de sessão não é confiável.
+
+O `deploy.sh`: migra com a imagem nova, sobe a cor parada, espera o healthcheck, troca o marcador, confirma 3 vezes pelo Caddy local que a cor nova responde e só então para a velha (`stop -t 660`, a drenagem de até 10 min) e fecha as ligações órfãs dela. Se o Caddy não confirmar em 15 s, o marcador volta e a nova para. A velha, ao drenar, para os laços, fecha os SSE (o navegador reconecta na nova), autoriza o token de turno só pelo banco e despacha só ligações.
+
+Consequências:
+- Migração precisa ser compatível com a versão anterior (N-1): a velha roda sobre o esquema novo durante até 10 min. Coluna nova com default ou nula; remoção em dois deploys.
+- Pool: as duas cores juntas usam ~2×15 + dono ≈ 31 das 100 conexões do Cloud SQL.
+- Por até 15 s há dois despachantes; o SKIP LOCKED e as janelas UNIQUE (ADR-011) mantêm cada turno e cada rotina rodando uma vez.
+- Memória: dois Node na `e2-medium`. Se o pico passar de 80% no ensaio, `NOD_DRENAGEM_MAX_MS=300000` antes de subir a VM.
+- NOD-331: o Caddyfile chega em estágio (`Caddyfile.novo`) e só é promovido na troca, com a cor nova saudável; se a troca não confirma, o anterior volta (na transição, confirmado pelo Caddy antes de parar a azul). Na transição, o `nod` legado sai com `stop -t 30` (`NOD_TRANSICAO_STOP_S`), não 660: depois do recreate do Caddy ninguém mais o alcança. A drenagem para todos os laços juntos, com prazo de 15 s.
+
+Gatilho de reversão: se o ensaio ou dois deploys seguidos mostrarem queda vista pela sonda do Caddy, ou se a memória não couber nem com o teto de 5 min, volta o recreate até a causa ser resolvida.

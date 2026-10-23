@@ -50,6 +50,8 @@ export type OpcoesServidorCompleto = {
   envolverListarPessoas?: (listar: () => Promise<{ tenantId: string; id: string }[]>) => () => Promise<{ tenantId: string; id: string }[]>;
   /** NOD-267: o watchdog do compartilhado com intervalo, carência e saída de teste. */
   watchdog?: OpcoesBoot["watchdog"];
+  /** NOD-218: o marcador da cor ativa (arquivo temporário do teste) e o intervalo de releitura. Vale com `env.NOD_COR`. */
+  corAtiva?: OpcoesBoot["corAtiva"];
 };
 
 /**
@@ -102,6 +104,7 @@ export async function servidorCompleto(o: OpcoesServidorCompleto = {}): Promise<
     redeMs: o.redeMs,
     // NOD-267: o `process.exit` do watchdog derrubaria o worker do vitest numa suíte lenta; o teste que quer ver a saída injeta.
     watchdog: { sair: () => undefined, ...o.watchdog },
+    corAtiva: o.corAtiva,
   });
 
   const sessaoDe = (e: Escopo): SessaoDeTeste => ({ cookie: `nod_sessao=${cunharCookie(e, SEGREDO_DE_TESTE)}`, tenantId: e.tenantId, pessoaId: e.pessoaId });

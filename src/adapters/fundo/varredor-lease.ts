@@ -87,10 +87,11 @@ export function iniciarVarredorLease(p: {
   aoInterromper?: (turnoIds: string[]) => void;
   /** NOD-267: chamado ao TERMINAR cada tick (sucesso ou erro); o tick pulado por `rodando` não bate. */
   aoBater?: () => void;
-}): { parar(): void } {
+}): { parar(): Promise<void> } {
   const relogio = p.relogio ?? (() => Date.now());
   const intervaloMs = p.intervaloMs ?? INTERVALO_VARREDOR_LEASE_MS;
   let rodando = false;
+  let emVoo: Promise<unknown> | null = null;
   const tick = async () => {
     if (rodando) return;
     rodando = true;
@@ -108,8 +109,20 @@ export function iniciarVarredorLease(p: {
   // NOD-267: sem o catch, um erro do tick (listarPessoas com o banco fora, por exemplo) virava unhandledRejection e
   // derrubava o processo — o agendador e o varredor de expiração já logam e seguem.
   const timer = setInterval(() => {
-    tick().catch((e: unknown) => log("erro", "varredor_lease_tick_falhou", { erro: e instanceof Error ? e.name : "desconhecido" }));
+    if (rodando) return;
+    emVoo = tick()
+      .catch((e: unknown) => log("erro", "varredor_lease_tick_falhou", { erro: e instanceof Error ? e.name : "desconhecido" }))
+      .finally(() => {
+        emVoo = null;
+      });
   }, intervaloMs);
   timer.unref();
-  return { parar: () => clearInterval(timer) };
+  // NOD-218: `parar()` espera o tick em voo — a drenagem do deploy azul/verde não deixa um tick pela metade quando a
+  // outra cor já assumiu.
+  return {
+    async parar() {
+      clearInterval(timer);
+      if (emVoo) await emVoo;
+    },
+  };
 }

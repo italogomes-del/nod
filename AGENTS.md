@@ -361,6 +361,15 @@ não troque isso por "mostrar mensagem e esperar a pessoa reabrir". No encerrame
 ociosas na hora e as ativas em 5 s (`ESPERA_CONEXOES_ATIVAS_MS`); sem isso o keep-alive do Caddy segurava o processo
 até o SIGKILL do compose, meio servindo por 5 min.
 
+Deploy azul/verde (NOD-218, ADR-001 e ADR-017 emendadas): em produção há duas cores (`nod-azul`, `nod-verde`) e o
+marcador `/opt/nod/estado/cor-ativa` é a única chave de quem está ativo (`src/adapters/http/cor-ativa.ts`). Não decida
+"quem é ativo" por ordem de subida, lock ou variável de ambiente. Laço novo (despachante, outbox, agendador, varredor)
+liga em `aoAtivar` e para em `pararLacos`, nunca no corpo do `boot`; a cor passiva só atende HTTP. Estado por processo
+que mora em `/data` (compartilhado) leva a cor (`NOD_COR`), como o arquivo de grupos órfãos e `ligacoes.instancia`.
+Migração tem de ser compatível com a versão anterior: a velha roda sobre o esquema novo por até 10 min. Testes:
+`tests/concurrency/deploy-dois-processos.test.ts`, `tests/concurrency/drenagem-deploy.test.ts` e
+`tests/integration/deploy-azul-verde.test.ts` (o `deploy.sh` com docker/curl falsos).
+
 Anúncio remoto de harnesses é validado e vinculado ao escopo da chave; a fila só entrega a uma máquina
 tarefas compatíveis. O fluxo com seleção de harness não reutiliza sessões nativas: reconstrói contexto
 com histórico e memória do nod. Harness explicitamente escolhido e indisponível nunca muda para outro

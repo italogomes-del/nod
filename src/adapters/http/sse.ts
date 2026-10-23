@@ -42,8 +42,44 @@ export function lerSince(req: IncomingMessage): Since | null {
   return interpretarSince(url.searchParams.get("since"));
 }
 
+/**
+ * definido em 2026-10-22 (NOD-218, deploy azul/verde): as conexões SSE abertas deste processo. Na drenagem,
+ * `recusarNovas()` faz o `/eventos` responder 503 `{codigo:"drenando"}` (o EventSource tenta de novo em `retry` e o Caddy
+ * já manda para a cor nova) e `encerrarTodas()` fecha as abertas — o navegador reconecta com `Last-Event-ID` na outra
+ * cor, que retoma pelo outbox (ADR-016). Sem isto, cada aba seguraria a cor velha até o `docker stop` vencer.
+ */
+export type ConexoesSse = {
+  abertas(): number;
+  recusarNovas(): void;
+  recusando(): boolean;
+  encerrarTodas(): void;
+  /** Uso interno do handler. */
+  registrar(res: { end(): void }): () => void;
+};
+
+export function criarConexoesSse(): ConexoesSse {
+  const vivas = new Set<{ end(): void }>();
+  let recusando = false;
+  return {
+    abertas: () => vivas.size,
+    recusarNovas() {
+      recusando = true;
+    },
+    recusando: () => recusando,
+    encerrarTodas() {
+      for (const r of [...vivas]) r.end();
+      vivas.clear();
+    },
+    registrar(res) {
+      vivas.add(res);
+      return () => vivas.delete(res);
+    },
+  };
+}
+
 export interface OpcoesSse {
   metricas?: Metricas;
+  conexoes?: ConexoesSse;
   pingMs?: number;
   retryMs?: number;
 }
@@ -64,6 +100,10 @@ export function criarHandlerSse(barramento: Barramento, opcoes: OpcoesSse = {}):
 
   return async (ctx) => {
     const { req, res, escopo } = ctx;
+    if (opcoes.conexoes?.recusando()) {
+      ctx.json(503, { codigo: "drenando", mensagem: "servidor trocando de versão; tente de novo" });
+      return;
+    }
     const since = lerSince(req);
     res.writeHead(200, {
       "content-type": "text/event-stream; charset=utf-8",
@@ -83,6 +123,7 @@ export function criarHandlerSse(barramento: Barramento, opcoes: OpcoesSse = {}):
     escrever(frameDeRetomada(escopo.pessoaId, retomada));
     const cancelar = barramento.inscrever(escopo.pessoaId, escrever);
     contar(escopo.tenantId, escopo.pessoaId, +1);
+    const soltar = opcoes.conexoes?.registrar(res);
 
     const ping = setInterval(() => {
       if (!res.writableEnded && !res.destroyed) res.write(PING_SSE);
@@ -92,6 +133,7 @@ export function criarHandlerSse(barramento: Barramento, opcoes: OpcoesSse = {}):
     // `res` 'close' numa resposta que nunca termina = a conexão caiu (aba fechada, rede, abort).
     res.on("close", () => {
       cancelar();
+      soltar?.();
       clearInterval(ping);
       contar(escopo.tenantId, escopo.pessoaId, -1);
     });

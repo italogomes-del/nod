@@ -97,7 +97,7 @@ export type EntradaRota = { metodo: MetodoHttp; caminho: string; lane: "L1" | "L
  * escreve o handler fino da sua rota contra o roteador da L1; a posse é a coluna `lane`.
  */
 export const ROTAS = [
-  { metodo: "GET", caminho: "/api/saude", lane: "L1" },
+  { metodo: "GET", caminho: "/api/saude", lane: "L1" }, { metodo: "GET", caminho: "/api/saude/lb", lane: "L1" }, // lb: Caddy, NOD-218
   /** Só com NOD_LOGIN=stub (desenvolvimento, loopback): entra como uma pessoa do cadastro (ADR-030). */
   { metodo: "POST", caminho: "/api/sessao/entrar", lane: "L1" },
   { metodo: "GET", caminho: "/api/sessao", lane: "L1" },

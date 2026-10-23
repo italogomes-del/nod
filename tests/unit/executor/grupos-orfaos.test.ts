@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -198,6 +199,18 @@ describe("quais grupos anotados são candidatos (puro)", () => {
     expect(new Set([diario, temporaria, outraPorta]).size).toBe(3);
     expect(diario).toMatch(/^\/h\/\.nod\/grupos-vivos\/servidor-[0-9a-f]{16}\.json$/);
     expect(diario).not.toContain("segredo");
+  });
+
+  it("NOD-218: NOD_COR entra no hash só quando definida — azul e verde não dividem o arquivo; sem cor, o nome de antes", () => {
+    const base = { DATABASE_URL: "postgres://nod_app:segredo@db:5432/nod", NOD_API_PORT: "8888" };
+    const semCor = arquivoDeGruposDoServidor("/data", base);
+    const azul = arquivoDeGruposDoServidor("/data", { ...base, NOD_COR: "azul" });
+    const verde = arquivoDeGruposDoServidor("/data", { ...base, NOD_COR: "verde" });
+    expect(new Set([semCor, azul, verde]).size).toBe(3);
+    // A chave sem cor é a mesma de antes da NOD-218 (sha256 de "url|porta"): quem já roda não perde o arquivo.
+    const antes = createHash("sha256").update(`${base.DATABASE_URL}|${base.NOD_API_PORT}`).digest("hex").slice(0, 16);
+    expect(semCor).toBe(`/data/grupos-vivos/servidor-${antes}.json`);
+    expect(arquivoDeGruposDoServidor("/data", { ...base, NOD_COR: "" })).toBe(semCor);
   });
 });
 

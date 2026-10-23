@@ -33,6 +33,7 @@ import { identidadeDoEmail } from "../../domain/identidade-do-email.ts";
 import { encerrarLigacao } from "../../use-cases/ligacoes.ts";
 import { criarBatimentos, criarVerificacaoSaude, INTERVALOS_ATE_LACO_PARADO } from "./rotas/saude.ts";
 import { listen } from "./servidor.ts";
+import { iniciarCorAtiva, type CorAtiva } from "./cor-ativa.ts";
 import { iniciarWatchdog, type Watchdog } from "./watchdog.ts";
 import { opcoesSessaoDoEnv } from "./sessao.ts";
 
@@ -40,7 +41,8 @@ import { opcoesSessaoDoEnv } from "./sessao.ts";
  * Boot do servidor (ADR-006/012, EMENDA 3): partições → compor → listen → registry (claude-cli só é
  * padrão se a sonda disser 'pronto'; catcher sempre pronto) → inventário persistido por pessoa →
  * orquestrador com o laço da L4 injetado → scheduler 30 s → varredor de lease 15 s → varredor de
- * expiração 30 s → despachante do outbox. `fechar()` desfaz na ordem inversa e fecha conectores
+ * expiração 30 s → despachante do outbox (NOD-218: os laços só quando a cor está ativa, `aoAtivar`; a drenagem os
+ * para antes de esperar). `fechar()` desfaz na ordem inversa e fecha conectores
  * vivos, SSE e pools. A ordem "listen antes do registry" existe porque o driver catcher chama as
  * rotas internas pela URL do próprio servidor (porta 0 nos testes, EMENDA 34).
  */
@@ -72,9 +74,38 @@ export type OpcoesBoot = {
    * a carência do lease (90 s) e `process.exit`.
    */
   watchdog?: { intervaloMs?: number; carenciaMs?: number; sair?: (codigo: number) => void; lacoParadoMinimoMs?: number };
+  /**
+   * NOD-218 (deploy azul/verde): o marcador da cor ativa. Default: `/data/estado/cor-ativa` relido a cada 500 ms, só com
+   * `NOD_COR` no env (sem ela, a cor é sempre ativa). Os testes passam o arquivo e o intervalo.
+   */
+  corAtiva?: { arquivo?: string; intervaloMs?: number };
+  /** Só em teste: o intervalo do varredor de presença das máquinas (default 15 s). */
+  varredorMaquinasMs?: number;
 };
 
-export type ResultadoDrenagem = { vivas: number; turnos: number; duracao_ms: number; prazo_vencido: boolean };
+/** `lacos_prazo_vencido` (NOD-331): parar os laços de fundo passou de `PRAZO_PARAR_LACOS_MS` e a drenagem seguiu. */
+export type ResultadoDrenagem = { vivas: number; turnos: number; duracao_ms: number; prazo_vencido: boolean; lacos_prazo_vencido: boolean };
+
+/**
+ * definido em 2026-10-22 (NOD-331): teto para parar os laços de fundo na drenagem. Um tick preso (banco lento, muitas
+ * pessoas) não segura a drenagem até o SIGKILL: vencido, loga e segue; nenhum laço reagenda (todos já pararam o timer),
+ * e o tick preso termina sozinho ou morre no teto do fechar() (server.ts, FECHAMENTO_MAX_MS).
+ */
+export const PRAZO_PARAR_LACOS_MS = 15_000;
+
+/** Corrida com prazo (padrão de rotas/saude.ts): "prazo" se `p` não resolveu em `ms`; o timer sempre é limpo. */
+async function comPrazo(p: Promise<unknown>, ms: number): Promise<"ok" | "prazo"> {
+  let t: ReturnType<typeof setTimeout> | undefined;
+  return Promise.race([
+    p.then(() => "ok" as const),
+    new Promise<"prazo">((r) => {
+      t = setTimeout(() => r("prazo"), ms);
+    }),
+  ]).finally(() => clearTimeout(t));
+}
+
+/** NOD-218: o estado que as rotas de saúde e o deploy azul/verde olham. */
+export type EstadoProcesso = { pronto: boolean; drenando: boolean; ativa: boolean; cor: string | null; lacosLigados: boolean };
 
 export type ServidorNod = {
   app: App;
@@ -83,12 +114,14 @@ export type ServidorNod = {
   port: number;
   machineId: string;
   inventario: Inventario;
+  /** NOD-218: pronto/drenando/ativa/cor e se os laços de fundo já foram ligados (a cor passiva não liga). */
+  estado(): EstadoProcesso;
   /**
    * Drenagem do SIGTERM (ADR-071, emenda NOD-175): recusa ligação nova, para a ponte de máquina de entregar turno novo e
    * espera as ligações vivas e, no modo compartilhado, os turnos com token vivo e as reservas em voo — até `prazoMs`. Não
    * fecha nada nem revoga o que sobrar: o próximo boot assenta como `reinicio_servidor` pelo varredor de lease (ADR-045).
    */
-  drenar(o: { prazoMs: number; intervaloMs?: number }): Promise<ResultadoDrenagem>;
+  drenar(o: { prazoMs: number; intervaloMs?: number; /** Só em teste: o teto para parar os laços (default PRAZO_PARAR_LACOS_MS, limitado a `prazoMs`). */ prazoLacosMs?: number }): Promise<ResultadoDrenagem>;
   fechar(): Promise<void>;
 };
 
@@ -159,6 +192,12 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
   // verificação, para compartilharem o `select 1` em voo.
   const batimentos = criarBatimentos({ agora, minimoMs: o.watchdog?.lacoParadoMinimoMs });
   const verificarSaude = criarVerificacaoSaude({ verificarBanco: () => db`select 1`, ...(app.compartilhado ? { batimentos } : {}) });
+  // NOD-218 (deploy azul/verde): `pronto` no fim do boot, `drenando` no SIGTERM, `ativa` pelo marcador cor-ativa. A cor
+  // nova sobe passiva (só HTTP) e liga os laços de fundo quando o deploy.sh a marca como ativa.
+  const corAtiva: CorAtiva = await iniciarCorAtiva({ cor: env.NOD_COR || null, arquivo: o.corAtiva?.arquivo, intervaloMs: o.corAtiva?.intervaloMs });
+  let pronto = false;
+  let drenando = false;
+  const estadoSaude = { pronto: () => pronto, ativa: () => corAtiva.ativa(), drenando: () => drenando, cor: corAtiva.cor };
   const srv = await listen(o.porta ?? Number(env.NOD_API_PORT ?? 8888), o.host ?? env.NOD_HOST ?? "127.0.0.1", {
     rotas: app.rotas,
     segredoSessao: o.segredoSessao ?? env.NOD_SESSAO_SEGREDO,
@@ -169,6 +208,7 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
     autorizarMaquina: app.autorizarMaquina,
     sessao,
     verificarSaude,
+    estadoSaude,
     // ADR-071: os canais WebSocket da ligação (mídia e cérebro) no mesmo servidor.
     upgrade: (server, resolverEscopo) => {
       canaisVoz = app.anexarVoz(server, resolverEscopo);
@@ -226,7 +266,9 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
   for (const p of await listar()) {
     const escopo = { tenantId: p.tenantId, pessoaId: p.id };
     await app.dentro(escopo, async (d) => {
-      for (const l of await d.repos.ligacoes.vivas()) {
+      // NOD-218: com NOD_COR, só as da própria cor — as da outra cor ainda têm orquestrador (no outro processo), e as da
+      // cor que saiu o deploy.sh fecha com scripts/ligacoes-orfas.ts depois do docker stop.
+      for (const l of await d.repos.ligacoes.vivas(corAtiva.cor ? { instancia: corAtiva.cor } : {})) {
         const r = await encerrarLigacao(d, { ligacaoId: l.id, motivo: "reinicio_servidor" });
         if (r.events?.length) await d.repos.events.gravarComOutbox(r.events);
       }
@@ -236,66 +278,109 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
   batimentos.soltar("boot");
 
   // 6. laços de fundo, todos por paraCadaPessoa (EMENDA 3).
+  // revisto em 2026-10-22 (NOD-218, deploy azul/verde): só quando a cor fica ativa (`aoAtivar`; na hora, sem NOD_COR). A
+  // cor passiva atende HTTP mas não despacha outbox, não dispara rotina, não varre nem orquestra. A drenagem para tudo,
+  // esperando o tick em curso.
   const iv = o.intervalos ?? {};
-  const orquestrador: Pick<Orquestrador, "parar"> = app.compartilhado ? { parar: async () => undefined } : await iniciarOrquestrador({
-    db,
-    registry,
-    machineId,
-    ponte: app.ponte,
-    iniciarLaco: app.iniciarLaco,
-    // valor VIVO como o scheduler abaixo: `executor: app.idDriver` avaliava o getter UMA vez e
-    // congelava o driver do boot. Hoje só alimenta o anúncio inicial à ponte (que trocar()
-    // re-anuncia em compor.ts), mas a cópia é a forma que o §Composição do AGENTS.md proíbe — e
-    // basta alguém passar a ler o.executor depois do início para virar bug silencioso.
-    get executor() {
-      return app.idDriver;
-    },
-    relogio: agora,
-    intervaloMs: iv.orquestradorMs,
-    listarPessoas: o.listarPessoas,
-    // #218: a sonda do passo 4 vale para o primeiro anúncio (sem um segundo `auth status` segundos depois).
-    inventarioInicial: inventarios[app.idDriver],
-  });
-  const scheduler = iniciarScheduler(
-    db,
-    {
-      machineId,
-      // valor VIVO: rotina disparada depois de uma troca pelo interruptor nasce com o executor novo.
-      get executor() {
-        return app.executor;
+  type Laco = { parar(): Promise<void> | void };
+  const nada: Laco = { parar: () => undefined };
+  let orquestrador: Pick<Orquestrador, "parar"> = { parar: async () => undefined };
+  let scheduler: Laco = nada;
+  let varredorLease: Laco = nada;
+  let varredorExpiracao: Laco = nada;
+  let varredorOciosidade: Laco = nada;
+  let varredorMaquinas: Laco = nada;
+  let despachante: DespachanteOutbox | null = null;
+  let lacosLigados = false;
+  let ligando: Promise<void> | null = null;
+  const ligarLacos = async (): Promise<void> => {
+    if (lacosLigados || drenando || fechado) return;
+    lacosLigados = true;
+    log("info", "lacos_ligados", { cor: corAtiva.cor });
+    if (!app.compartilhado) {
+      orquestrador = await iniciarOrquestrador({
+        db,
+        registry,
+        machineId,
+        ponte: app.ponte,
+        iniciarLaco: app.iniciarLaco,
+        // valor VIVO como o scheduler abaixo: `executor: app.idDriver` avaliava o getter UMA vez e
+        // congelava o driver do boot. Hoje só alimenta o anúncio inicial à ponte (que trocar()
+        // re-anuncia em compor.ts), mas a cópia é a forma que o §Composição do AGENTS.md proíbe — e
+        // basta alguém passar a ler o.executor depois do início para virar bug silencioso.
+        get executor() {
+          return app.idDriver;
+        },
+        relogio: agora,
+        intervaloMs: iv.orquestradorMs,
+        listarPessoas: o.listarPessoas,
+        // #218: a sonda do passo 4 vale para o primeiro anúncio (sem um segundo `auth status` segundos depois).
+        inventarioInicial: inventarios[app.idDriver],
+      });
+    }
+    scheduler = iniciarScheduler(
+      db,
+      {
+        machineId,
+        // valor VIVO: rotina disparada depois de uma troca pelo interruptor nasce com o executor novo.
+        get executor() {
+          return app.executor;
+        },
+        services: app.services,
+        useCases: app.useCases,
+        agora,
+        intervaloMs: iv.schedulerMs,
+        aoBater: batimentos.registrar("agendador", iv.schedulerMs ?? INTERVALO_SCHEDULER_MS),
       },
-      services: app.services,
-      useCases: app.useCases,
-      agora,
-      intervaloMs: iv.schedulerMs,
-      aoBater: batimentos.registrar("agendador", iv.schedulerMs ?? INTERVALO_SCHEDULER_MS),
-    },
-    { listarPessoas: o.listarPessoas },
-  );
-  const varredorLease = iniciarVarredorLease({
-    db,
-    relogio: agora,
-    intervaloMs: iv.leaseMs,
-    opcoes: {
-      listarPessoas: o.listarPessoas,
-      prazoDecisaoMs: Number(env.NOD_PRAZO_DECISAO_MS) || undefined,
-      // Só no compartilhado: no modo local o servidor É o nod no Mac — reiniciar é "nod fechado".
-      ...(app.compartilhado ? { inicioDoProcesso, ultimoContato: (id: string) => app.ultimoContatoDaMaquina(id) } : {}),
-    },
-    // ADR-067: o token sem relógio some junto com o turno que o lease encerrou.
-    aoInterromper: (ids) => { for (const id of ids) app.services.tokenTurno.revogar(id); },
-    aoBater: batimentos.registrar("varredor_lease", iv.leaseMs ?? INTERVALO_VARREDOR_LEASE_MS),
+      { listarPessoas: o.listarPessoas },
+    );
+    varredorLease = iniciarVarredorLease({
+      db,
+      relogio: agora,
+      intervaloMs: iv.leaseMs,
+      opcoes: {
+        listarPessoas: o.listarPessoas,
+        prazoDecisaoMs: Number(env.NOD_PRAZO_DECISAO_MS) || undefined,
+        // Só no compartilhado: no modo local o servidor É o nod no Mac — reiniciar é "nod fechado".
+        ...(app.compartilhado ? { inicioDoProcesso, ultimoContato: (id: string) => app.ultimoContatoDaMaquina(id) } : {}),
+      },
+      // ADR-067: o token sem relógio some junto com o turno que o lease encerrou.
+      aoInterromper: (ids) => { for (const id of ids) app.services.tokenTurno.revogar(id); },
+      aoBater: batimentos.registrar("varredor_lease", iv.leaseMs ?? INTERVALO_VARREDOR_LEASE_MS),
+    });
+    varredorExpiracao = iniciarVarredorExpiracao(db, { services: app.services, useCases: app.useCases, agora, intervaloMs: iv.expiracaoMs }, { listarPessoas: o.listarPessoas });
+    // NOD-170: só com computadores ligados; NOD_COMPUTADOR_OCIOSO_MIN=0 não sobe o laço.
+    if (app.computadores) varredorOciosidade = iniciarVarredorOciosidade({ db, computadores: app.computadores, ociosoMin: limiteDoAmbiente(env).ociosoMin, intervaloMs: iv.ociosidadeMs, opcoes: { listarPessoas: o.listarPessoas } });
+    despachante = iniciarDespachanteOutbox(db, app.barramento, { intervaloMs: iv.outboxMs, listarPessoas: o.listarPessoas, presenca: app.services.maquinas });
+    varredorMaquinas = app.iniciarVarredorMaquinas(o.varredorMaquinasMs);
+  };
+  // Idempotente: a drenagem para e o fechar() chama de novo (que só repete o parar do despachante, para o modo "só
+  // ligações" que a drenagem pode ter ligado depois). O orquestrador (só existe no modo local) para só no fechar(): no
+  // Mac, os turnos da ligação rodam nele, e a drenagem espera a ligação acabar.
+  // NOD-331: todos param AO MESMO TEMPO, despachante incluído (um varredor preso não deixa o despachante marcando
+  // entregue com o SSE já fechado). Com ligação viva, o despachante passa direto ao modo "só ligações" (ele mesmo para
+  // o laço normal); a decisão vale no início porque a voz já recusa ligação nova.
+  let parandoLacos: Promise<void> | null = null;
+  const pararLacos = (o: { soLigacoes?: boolean } = {}): Promise<void> =>
+    (parandoLacos ??= (async () => {
+      await ligando?.catch(() => undefined);
+      const pararDespachante = o.soLigacoes ? despachante?.soLigacoes(() => app.voz.pessoasComLigacao()) : despachante?.parar();
+      await Promise.all([scheduler.parar(), varredorLease.parar(), varredorExpiracao.parar(), varredorOciosidade.parar(), varredorMaquinas.parar(), pararDespachante]);
+      // Não religa: ligarLacos() já recusa com drenando/fechado; o estado() passa a dizer a verdade.
+      lacosLigados = false;
+    })());
+  let fechado = false;
+  // Sem NOD_COR, ativa desde já: liga aqui, antes do "no ar", como antes do azul/verde.
+  if (corAtiva.ativa()) await ligarLacos();
+  else log("info", "cor_passiva", { cor: corAtiva.cor });
+  corAtiva.aoAtivar(() => {
+    ligando = ligarLacos();
+    return ligando;
   });
-  const varredorExpiracao = iniciarVarredorExpiracao(db, { services: app.services, useCases: app.useCases, agora, intervaloMs: iv.expiracaoMs }, { listarPessoas: o.listarPessoas });
-  // NOD-170: só com computadores ligados; NOD_COMPUTADOR_OCIOSO_MIN=0 não sobe o laço.
-  const varredorOciosidade = app.computadores
-    ? iniciarVarredorOciosidade({ db, computadores: app.computadores, ociosoMin: limiteDoAmbiente(env).ociosoMin, intervaloMs: iv.ociosidadeMs, opcoes: { listarPessoas: o.listarPessoas } })
-    : { parar: () => undefined };
-  const despachante: DespachanteOutbox = iniciarDespachanteOutbox(db, app.barramento, { intervaloMs: iv.outboxMs, listarPessoas: o.listarPessoas, presenca: app.services.maquinas });
+  pronto = true;
 
   log("info", "nod_no_ar", { url, machine_id: machineId, executor: app.idDriver, inventario: inventario.estado });
 
-  let fechado = false;
   return {
     app,
     registry,
@@ -303,12 +388,29 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
     port: srv.port,
     machineId,
     inventario,
-    async drenar({ prazoMs, intervaloMs = 1_000 }) {
+    estado: () => ({ pronto, drenando, ativa: corAtiva.ativa(), cor: corAtiva.cor, lacosLigados }),
+    async drenar({ prazoMs, intervaloMs = 1_000, prazoLacosMs = PRAZO_PARAR_LACOS_MS }) {
       const inicio = agora();
       // NOD-267: um SIGTERM nunca vira exit(1) no meio da drenagem — o watchdog para antes de esperar.
       watchdog.parar();
+      // NOD-218 (deploy azul/verde), na ordem do plano (revista na NOD-331: SSE e token antes dos laços):
+      // 1. drenando: /api/saude e /api/saude/lb dão 503 (o Caddy tira esta cor); a ponte não reserva turno novo; a voz
+      //    recusa ligação nova.
+      drenando = true;
       app.voz.iniciarDrenagem();
       app.drenarPonte();
+      // 2. SSE: recusa o novo (503 drenando) e fecha os abertos — o navegador reconecta pelo Caddy na cor ativa e
+      //    reidrata por REST (ADR-016). O token de turno vale só pelo banco: quem assenta e revoga turnos agora é a
+      //    outra cor. Os dois vêm antes dos laços: um tick preso não segura nem o navegador nem a revogação.
+      app.sse.recusarNovas();
+      app.sse.encerrarTodas();
+      app.tokens.modoSoBanco();
+      // 3. para os laços de fundo (a cor ativa é quem despacha, dispara e varre agora), com teto (NOD-331). Ligação viva
+      //    aqui: as decisões e o fim de tarefa ainda chegam a ela pelo outbox, publicado só no barramento local e sem
+      //    marcar entregue (quem marca é a ativa). O orquestrador do modo local fica para o fechar().
+      const tetoLacos = Math.min(prazoLacosMs, prazoMs);
+      const lacos = await comPrazo(pararLacos({ soLigacoes: app.voz.vivas() > 0 }), tetoLacos);
+      if (lacos === "prazo") log("aviso", "drenagem_lacos_prazo_vencido", { prazo_ms: tetoLacos });
       // definido em 2026-10-05 (NOD-175): só o compartilhado espera tokens — no modo local o turno roda neste processo e
       // o Ctrl+C do `npm start` não pode travar 10 min; o servidor local espera só as ligações, como antes.
       // revisto em 2026-10-12 (NOD-214, emenda à ADR-071): o turno da máquina que atravessa o reinício (`sobreviveReinicio`
@@ -319,7 +421,7 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
       while (pendente() && agora() - inicio < prazoMs) {
         await new Promise((r) => setTimeout(r, Math.min(intervaloMs, Math.max(1, prazoMs - (agora() - inicio)))));
       }
-      const r: ResultadoDrenagem = { vivas: app.voz.vivas(), turnos: turnos(), duracao_ms: agora() - inicio, prazo_vencido: pendente() };
+      const r: ResultadoDrenagem = { vivas: app.voz.vivas(), turnos: turnos(), duracao_ms: agora() - inicio, prazo_vencido: pendente(), lacos_prazo_vencido: lacos === "prazo" };
       log("info", "drenagem_concluida", r);
       return r;
     },
@@ -327,11 +429,9 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
       if (fechado) return;
       fechado = true;
       watchdog.parar();
-      scheduler.parar();
-      varredorLease.parar();
-      varredorExpiracao.parar();
-      varredorOciosidade.parar();
-      await despachante.parar();
+      corAtiva.parar();
+      await pararLacos();
+      await despachante?.parar();
       await orquestrador.parar();
       await app.fechar();
       await canaisVoz?.fechar();

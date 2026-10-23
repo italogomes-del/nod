@@ -207,9 +207,14 @@ export function gravarArquivoDeGrupos(arquivo: string, conteudo: ArquivoDeGrupos
  * O arquivo de UMA instância do servidor (definido em 2026-10-09): o diário e uma instância temporária de teste podem
  * rodar juntos no mesmo Mac com o mesmo ~/.nod, e o boot de uma não pode matar os bots da outra. A instância é o banco e
  * a porta da API; o hash não deixa a senha do DATABASE_URL no nome do arquivo.
+ *
+ * revisto em 2026-10-22 (NOD-218, deploy azul/verde): as duas cores dividem o NOD_HOME, o banco e a porta interna, e
+ * vivem juntas na drenagem. O boot da cor nova não pode matar os bots da velha: `NOD_COR` entra no hash quando definida.
+ * Sem ela (Mac, local) a chave fica a de antes, e o arquivo de quem já roda não muda de nome.
  */
-export function arquivoDeGruposDoServidor(dirNod: string, env: { DATABASE_URL?: string; NOD_API_PORT?: string }): string {
-  const chave = createHash("sha256").update(`${env.DATABASE_URL ?? ""}|${env.NOD_API_PORT ?? "8888"}`).digest("hex").slice(0, 16);
+export function arquivoDeGruposDoServidor(dirNod: string, env: { DATABASE_URL?: string; NOD_API_PORT?: string; NOD_COR?: string }): string {
+  const base = `${env.DATABASE_URL ?? ""}|${env.NOD_API_PORT ?? "8888"}`;
+  const chave = createHash("sha256").update(env.NOD_COR ? `${base}|${env.NOD_COR}` : base).digest("hex").slice(0, 16);
   return join(dirNod, "grupos-vivos", `servidor-${chave}.json`);
 }
 

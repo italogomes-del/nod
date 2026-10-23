@@ -78,6 +78,11 @@ export type NovaLigacao = {
   provedorStt: string;
   provedorTts: string;
   voz: string;
+  /**
+   * NOD-218: a cor do processo que abre a ligação (`NOD_COR`); null fora do azul/verde (Mac, local). O boot de uma cor
+   * fecha só as vivas dela, e `scripts/ligacoes-orfas.ts` as da cor que saiu.
+   */
+  instancia?: string | null;
 };
 
 /** O que o orquestrador mediu na ligação; gravado uma vez, no fim. */
@@ -102,8 +107,8 @@ export function ligacoesRepo(conn: Conn, escopo: Escopo) {
   return {
     async criar(n: NovaLigacao): Promise<Ligacao | null> {
       const linhas = await conn<Linha[]>`
-        insert into ligacoes (tenant_id, owner_id, agente_id, conversa_id, iniciada_por, harness, modelo, provedor_stt, provedor_tts, voz)
-        values (${escopo.tenantId}, ${escopo.pessoaId}, ${n.agenteId}, ${n.conversaId}, ${n.iniciadaPor}, ${n.harness}, ${n.modelo}, ${n.provedorStt}, ${n.provedorTts}, ${n.voz})
+        insert into ligacoes (tenant_id, owner_id, agente_id, conversa_id, iniciada_por, harness, modelo, provedor_stt, provedor_tts, voz, instancia)
+        values (${escopo.tenantId}, ${escopo.pessoaId}, ${n.agenteId}, ${n.conversaId}, ${n.iniciadaPor}, ${n.harness}, ${n.modelo}, ${n.provedorStt}, ${n.provedorTts}, ${n.voz}, ${n.instancia ?? null})
         on conflict do nothing
         returning ${conn.unsafe(COLUNAS)}`;
       const [l] = linhas;
@@ -123,11 +128,17 @@ export function ligacoesRepo(conn: Conn, escopo: Escopo) {
       return l ? paraLigacao(l) : null;
     },
 
-    /** Ligações vivas de qualquer bot desta pessoa — o boot fecha as que não têm mais orquestrador em memória. */
-    async vivas(): Promise<Ligacao[]> {
+    /**
+     * Ligações vivas de qualquer bot desta pessoa — o boot fecha as que não têm mais orquestrador em memória.
+     * NOD-218: com `instancia`, só as abertas por aquela cor; com `semInstancia`, também as de instância nula (as da
+     * imagem anterior ao azul/verde, na transição). Sem filtro, todas (Mac, local).
+     */
+    async vivas(f: { instancia?: string; semInstancia?: boolean } = {}): Promise<Ligacao[]> {
+      const filtro =
+        f.instancia === undefined ? conn`` : f.semInstancia ? conn`and (instancia = ${f.instancia} or instancia is null)` : conn`and instancia = ${f.instancia}`;
       const linhas = await conn<Linha[]>`
         select ${conn.unsafe(COLUNAS)} from ligacoes
-        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and estado in ('chamando', 'em_curso')`;
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and estado in ('chamando', 'em_curso') ${filtro}`;
       return linhas.map(paraLigacao);
     },
 

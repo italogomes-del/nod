@@ -5,7 +5,7 @@ import { log } from "../../obs/log.ts";
 import { criarEstatico } from "./estatico.ts";
 import { criarRoteador, type DepsRoteador, type Rota } from "./roteador.ts";
 import { responderMetricas } from "./rotas/metricas.ts";
-import { criarRotaSaude, type VerificacaoSaude } from "./rotas/saude.ts";
+import { criarRotaSaude, criarRotaSaudeLb, type EstadoSaude, type VerificacaoSaude } from "./rotas/saude.ts";
 import { criarSessao, exigirConfiguracaoSegura, segredoEfetivo, type OpcoesSessao } from "./sessao.ts";
 
 /**
@@ -37,12 +37,19 @@ export interface OpcoesServidor {
    * `criarVerificacaoSaude`. Sem isto, a saúde responde 200 sem olhar o banco.
    */
   verificarSaude?: VerificacaoSaude;
+  /**
+   * definido em 2026-10-22 (NOD-218): pronto/ativa/drenando/cor deste processo. Com isto, `/api/saude` dá 503 no boot e na
+   * drenagem e `/api/saude/lb` (o health check do Caddy) só dá 200 na cor ativa. Sem isto, `/api/saude/lb` responde
+   * como se o processo fosse a única cor, pronta.
+   */
+  estadoSaude?: EstadoSaude;
 }
 
 export function criarServidor(opcoes: OpcoesServidor = {}) {
   const opcoesSessao = opcoes.sessao ?? { modo: "stub" };
   const sessao = criarSessao(segredoEfetivo(opcoesSessao.modo, opcoes.segredoSessao ?? process.env.NOD_SESSAO_SEGREDO), opcoesSessao);
-  const rotas: Rota[] = [criarRotaSaude(opcoes.verificarSaude), ...sessao.rotas, ...(opcoes.rotas ?? [])];
+  const estadoLb: EstadoSaude = opcoes.estadoSaude ?? { pronto: () => true, ativa: () => true, drenando: () => false, cor: null };
+  const rotas: Rota[] = [criarRotaSaude(opcoes.verificarSaude, opcoes.estadoSaude), criarRotaSaudeLb(opcoes.verificarSaude, estadoLb), ...sessao.rotas, ...(opcoes.rotas ?? [])];
   const roteador = criarRoteador(rotas, {
     resolverEscopo: sessao.resolverEscopo,
     autorizarTokenTurno: opcoes.autorizarTokenTurno,

@@ -48,6 +48,13 @@ export type TokenTurno = ServicesNod<unknown>["tokenTurno"] & {
    * token mais novo (epoch maior) que já esteja na memória. false = não adotou.
    */
   adotar(token: string, c: CredencialGuardada): boolean;
+  /**
+   * definido em 2026-10-22 (NOD-218, drenagem do deploy azul/verde): daqui em diante o token vale só pelo banco. A outra
+   * cor já é a ativa e é ela quem assenta e revoga turnos; a memória deste processo não fica sabendo. `autorizar`
+   * (síncrono, só memória) passa a devolver null e `autorizarComBanco` ignora a memória: turno que saiu de `despachando`
+   * no banco deixa de autorizar aqui também. Não tem volta (o processo está saindo).
+   */
+  modoSoBanco(): void;
   /** NOD-214: o plano guardado ou, do turno adotado depois de um reinício, recomposto (sem cunhar token novo). */
   planoOuRecompor(turnoId: string): Promise<PlanoTurno | null>;
 };
@@ -85,6 +92,7 @@ export function criarTokenTurno(opcoes: OpcoesTokenTurno): TokenTurno {
   const porTurno = new Map<string, Entrada>();
   const porHash = new Map<string, string>();
   const recompondo = new Map<string, Promise<PlanoTurno | null>>();
+  let soBanco = false;
 
   function apagar(turnoId: string): void {
     const e = porTurno.get(turnoId);
@@ -139,10 +147,22 @@ export function criarTokenTurno(opcoes: OpcoesTokenTurno): TokenTurno {
     },
 
     autorizar(token) {
-      return daMemoria(token);
+      return soBanco ? null : daMemoria(token);
+    },
+
+    modoSoBanco() {
+      soBanco = true;
     },
 
     async autorizarComBanco(token) {
+      if (soBanco) {
+        if (!opcoes.buscar || typeof token !== "string") return null;
+        const escopo = escopoAlegado(token);
+        if (!escopo) return null;
+        const c = await opcoes.buscar(escopo, hashDe(token));
+        if (!c || !casa(c.tokenHash, hashDe(token)) || c.identidade.tenantId !== escopo.tenantId || c.identidade.pessoaId !== escopo.pessoaId) return null;
+        return { turnoId: c.turnoId, ...c.identidade };
+      }
       const naMemoria = daMemoria(token);
       if (naMemoria || !opcoes.buscar || typeof token !== "string") return naMemoria;
       const escopo = escopoAlegado(token);

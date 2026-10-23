@@ -25,9 +25,10 @@ export async function varrerOciosos(db: Db, computadores: Pick<Computadores, "li
  * definido em 2026-10-05 (NOD-170): o computador sem atividade há `ociosoMin` desliga sozinho (os volumes ficam;
  * a próxima ação do bot religa). `ociosoMin = 0` (NOD_COMPUTADOR_OCIOSO_MIN=0): o laço nem sobe.
  */
-export function iniciarVarredorOciosidade(p: { db: Db; computadores: Pick<Computadores, "ligados" | "desligarOciosos">; ociosoMin: number; intervaloMs?: number; opcoes?: OpcoesLaco }): { parar(): void } {
-  if (p.ociosoMin <= 0) return { parar: () => undefined };
+export function iniciarVarredorOciosidade(p: { db: Db; computadores: Pick<Computadores, "ligados" | "desligarOciosos">; ociosoMin: number; intervaloMs?: number; opcoes?: OpcoesLaco }): { parar(): Promise<void> } {
+  if (p.ociosoMin <= 0) return { parar: async () => undefined };
   let rodando = false;
+  let emVoo: Promise<unknown> | null = null;
   const tick = async () => {
     if (rodando) return;
     rodando = true;
@@ -39,6 +40,18 @@ export function iniciarVarredorOciosidade(p: { db: Db; computadores: Pick<Comput
       rodando = false;
     }
   };
-  const timer = setInterval(() => void tick(), p.intervaloMs ?? INTERVALO_VARREDOR_OCIOSIDADE_MS);
-  return { parar: () => clearInterval(timer) };
+  const timer = setInterval(() => {
+    if (rodando) return;
+    emVoo = tick().finally(() => {
+      emVoo = null;
+    });
+  }, p.intervaloMs ?? INTERVALO_VARREDOR_OCIOSIDADE_MS);
+  // NOD-218: `parar()` espera o tick em voo — a drenagem do deploy azul/verde não deixa um tick pela metade quando a
+  // outra cor já assumiu.
+  return {
+    async parar() {
+      clearInterval(timer);
+      if (emVoo) await emVoo;
+    },
+  };
 }

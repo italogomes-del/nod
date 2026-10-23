@@ -32,8 +32,8 @@ const entregaDe = (plano: PlanoTurno, machineId: string, seqLocal: number): Entr
 });
 
 /** Servidor compartilhado + uma máquina conectada pela ponte HTTP, e o que a limpeza precisa apagar. */
-async function compartilhadoComMaquina(env: Record<string, string> = {}) {
-  const srv = await servidorCompleto({ env: { NOD_MODO: "compartilhado", ...env } });
+async function compartilhadoComMaquina(env: Record<string, string> = {}, extra: Pick<Parameters<typeof servidorCompleto>[0] & object, "envolverListarPessoas"> = {}) {
+  const srv = await servidorCompleto({ ...extra, env: { NOD_MODO: "compartilhado", ...env } });
   const criados = { agentes: [] as string[], conversas: [] as string[] };
   const { chave, dados } = await srv.json<{ chave: string; dados: { id: string } }>("POST", "maquinas/chaves", { nome: "Mac" });
   const pedir = (nome: string, body: unknown = {}) => fetch(`${srv.url}/api/maquina/${nome}`, {
@@ -96,8 +96,14 @@ describeIntegracao("NOD-175: drenagem com turno em execução", () => {
     expect(await drenagem).toMatchObject({ vivas: 0, turnos: 0, prazo_vencido: false });
     expect((await srv.json<{ turno: { estado: string } }>("GET", `turnos/${plano.turnoId}`)).turno.estado).toBe("concluido");
     expect((await srv.json<{ turno: { estado: string } }>("GET", `turnos/${enviadaB.ids.turno}`)).turno.estado).toBe("pendente");
-    // /api/saude segue 200 durante a drenagem.
-    expect((await fetch(`${srv.url}/api/saude`)).status).toBe(200);
+    // NOD-218: /api/saude passa a 503 na drenagem (o healthcheck do compose não deve marcar a cor velha como saudável),
+    // e /api/saude/lb também, com o motivo — o Caddy tira a cor do balanceamento.
+    const saude = await fetch(`${srv.url}/api/saude`);
+    expect(saude.status).toBe(503);
+    expect(await saude.json()).toMatchObject({ ok: false });
+    const lb = await fetch(`${srv.url}/api/saude/lb`);
+    expect(lb.status).toBe(503);
+    expect(await lb.json()).toMatchObject({ ok: false, motivo: "drenando" });
   });
 });
 
@@ -541,4 +547,259 @@ describeIntegracao("NOD-245/NOD-252: a entrega adotada depois do deploy assenta 
     expect(await linhaDoTurno(cortado.turnoId)).toEqual({ estado: "interrompido", motivo_interrupcao: "reinicio_servidor" });
     expect(await decisoes(cortado.turnoId)).toEqual([{ tipo: "retomar_turno", estado: "pendente" }]);
   }, 30_000);
+});
+
+/** Abre o SSE e junta o texto; `ids()` devolve os `id:` lidos e `terminou` resolve quando o servidor fecha o stream. */
+async function abrirSse(url: string, sessao: { tenantId: string; cookie: string }, since?: string) {
+  const abort = new AbortController();
+  const res = await fetch(`${url}/api/t/${sessao.tenantId}/eventos`, { headers: { cookie: sessao.cookie, ...(since ? { "last-event-id": since } : {}) }, signal: abort.signal });
+  let texto = "";
+  const terminou = (async () => {
+    if (res.status !== 200 || !res.body) return;
+    const leitor = res.body.getReader();
+    const dec = new TextDecoder();
+    try {
+      for (;;) {
+        const { done, value } = await leitor.read();
+        if (done) return;
+        texto += dec.decode(value, { stream: true });
+      }
+    } catch { /* abortado pelo teste */ }
+  })();
+  const retomadas = () => [...texto.matchAll(/^id: (\S+)\nevent: resumed\ndata: (.+)$/gm)].map((m) => ({ id: m[1]!, resumed: (JSON.parse(m[2]!) as { dados: { resumed: boolean } }).dados.resumed }));
+  return { res, terminou, retomadas, fechar: () => abort.abort() };
+}
+
+describeIntegracao("NOD-218: drenar() para os laços, fecha o SSE e autoriza o token só pelo banco", () => {
+  let m: Awaited<ReturnType<typeof compartilhadoComMaquina>>;
+  let novo: ServidorCompleto | null = null;
+  beforeAll(async () => {
+    m = await compartilhadoComMaquina({ NOD_LONGPOLL_MS: "20" });
+  });
+  afterAll(async () => {
+    await novo?.fechar();
+    await novo?.desligar();
+    await m?.limpar();
+  });
+
+  it("laços parados, outbox novo intocado, SSE encerrado e recusado, retomada no 2º servidor sem resumed e token revogado negado", async () => {
+    const { srv, pedir, bot } = m;
+    expect(srv.estado()).toMatchObject({ pronto: true, drenando: false, ativa: true, cor: null, lacosLigados: true });
+
+    // SSE aberto antes: a retomada no MESMO processo dá resumed:true (o anel tem o stream); vale como controle.
+    const sse = await abrirSse(srv.url, srv.pessoa);
+    expect(sse.res.status).toBe(200);
+    await srv.esperar(async () => sse.retomadas().length > 0, { nome: "resumed inicial" });
+    const cabeca = sse.retomadas()[0]!.id;
+    const controle = await abrirSse(srv.url, srv.pessoa, cabeca);
+    await srv.esperar(async () => controle.retomadas().length > 0, { nome: "resumed do controle" });
+    expect(controle.retomadas()[0]!.resumed).toBe(true);
+    controle.fechar();
+
+    // Turno na máquina: o token segura a drenagem; ele nasce na memória e em turno_credenciais.
+    const conversa = await bot("Bot NOD-218");
+    await srv.json<RespostaMutacao>("POST", `conversas/${conversa}/mensagens`, { texto: "Antes do deploy" });
+    const { plano } = (await (await pedir("puxar")).json()) as { plano: PlanoTurno };
+    expect(srv.app.tokens.autorizar(plano.tokenDeTurno)?.turnoId).toBe(plano.turnoId);
+
+    const drenagem = srv.drenar({ prazoMs: 3_000, intervaloMs: 50 });
+    // O stream aberto termina pelo servidor; SSE novo recebe 503 drenando.
+    await sse.terminou;
+    const recusado = await fetch(`${srv.url}/api/t/${srv.pessoa.tenantId}/eventos`, { headers: { cookie: srv.pessoa.cookie } });
+    expect(recusado.status).toBe(503);
+    expect(await recusado.json()).toMatchObject({ codigo: "drenando" });
+    expect(srv.app.sse.abertas()).toBe(0);
+    expect(srv.estado()).toMatchObject({ drenando: true });
+    // NOD-331: o SSE fecha ANTES de parar os laços; eles param logo depois (nada preso aqui).
+    await srv.esperar(async () => !srv.estado().lacosLigados, { nome: "laços parados" });
+
+    // O token só vale pelo banco. Turno ainda despachando → autoriza; assentado por outro processo → nega,
+    // mesmo com a cópia na memória daqui.
+    expect(srv.app.tokens.autorizar(plano.tokenDeTurno)).toBeNull();
+    expect((await srv.app.tokens.autorizarComBanco(plano.tokenDeTurno))?.turnoId).toBe(plano.turnoId);
+    await srv.db.begin(async (tx) => {
+      await vincularEscopo(tx, srv.pessoa);
+      await tx`update turnos set estado = 'interrompido', motivo_interrupcao = 'reinicio_servidor' where id = ${plano.turnoId}`;
+    });
+    expect(await srv.app.tokens.autorizarComBanco(plano.tokenDeTurno)).toBeNull();
+
+    // O despachante parou. Uma mensagem gravada agora deixa outbox pendente que ESTE processo não marca.
+    const { marco } = (await srv.dbDono<{ marco: Date }[]>`select clock_timestamp() as marco`)[0]!;
+    const depois = await srv.json<RespostaMutacao>("POST", `conversas/${conversa}/mensagens`, { texto: "Durante o deploy" });
+    await new Promise((r) => setTimeout(r, 400)); // 10× o outboxMs do servidor de teste
+    const pendentes = await srv.db.begin(async (tx) => {
+      await vincularEscopo(tx, srv.pessoa);
+      return tx<{ n: number; entregues: number }[]>`select count(*)::int as n, count(entregue_em)::int as entregues from events_outbox
+        where owner_id = ${srv.pessoa.pessoaId} and criado_em >= ${marco}`;
+    });
+    expect(pendentes[0]!.n).toBeGreaterThan(0);
+    expect(pendentes[0]!.entregues).toBe(0);
+    expect((await srv.json<{ turno: { estado: string } }>("GET", `turnos/${depois.ids.turno}`)).turno.estado).toBe("pendente");
+
+    // O navegador reconecta no processo novo com o Last-Event-ID do velho: o anel lá não tem o stream → resumed:false
+    // (o cliente reidrata por REST).
+    srv.app.tokens.revogar(plano.turnoId);
+    await drenagem;
+    novo = await servidorCompleto({ pessoaId: srv.pessoa.pessoaId, env: { NOD_MODO: "compartilhado", NOD_LONGPOLL_MS: "20" } });
+    const n = novo;
+    const noNovo = await abrirSse(n.url, srv.pessoa, cabeca);
+    expect(noNovo.res.status).toBe(200);
+    await n.esperar(async () => noNovo.retomadas().length > 0, { nome: "resumed no novo" });
+    expect(noNovo.retomadas()[0]!.resumed).toBe(false);
+    noNovo.fechar();
+    // E o processo novo, ativo, entrega o outbox que o velho deixou.
+    await n.esperar(async () => {
+      const r = await n.db.begin(async (tx) => {
+        await vincularEscopo(tx, n.pessoa);
+        return tx<{ n: number }[]>`select count(*)::int as n from events_outbox where owner_id = ${n.pessoa.pessoaId} and entregue_em is null and abandonado_em is null and cancelado_em is null`;
+      });
+      return r[0]!.n === 0;
+    }, { nome: "outbox entregue pelo novo" });
+  });
+});
+
+/**
+ * NOD-331: trava a fonte das pessoas só para o varredor de expiração (pela pilha da chamada: o laço chama `listarPessoas`
+ * de forma síncrona a partir do `varrer`). É um tick preso num laço só; o despachante e os outros seguem livres.
+ */
+function portaoDoVarredor() {
+  type Pessoas = { tenantId: string; id: string }[];
+  let travado = false;
+  const presos: (() => void)[] = [];
+  return {
+    envolver: (listar: () => Promise<Pessoas>) => (): Promise<Pessoas> => {
+      if (travado && (new Error().stack ?? "").includes("varredor-expiracao")) return new Promise<Pessoas>((r) => { presos.push(() => void listar().then(r)); });
+      return listar();
+    },
+    travar: () => { travado = true; },
+    soltar: () => {
+      travado = false;
+      for (const p of presos.splice(0)) p();
+    },
+    presos: () => presos.length,
+  };
+}
+
+describeIntegracao("NOD-331: drenagem com um tick preso (prazo para parar os laços, SSE e token antes)", () => {
+  let m: Awaited<ReturnType<typeof compartilhadoComMaquina>>;
+  const portao = portaoDoVarredor();
+  beforeAll(async () => {
+    m = await compartilhadoComMaquina({ NOD_LONGPOLL_MS: "20" }, { envolverListarPessoas: portao.envolver });
+  });
+  afterAll(async () => {
+    portao.soltar();
+    await m?.limpar();
+  });
+
+  it("o tick preso não segura a drenagem além do prazo; SSE e token pelo banco vêm antes; o despachante para junto", async () => {
+    const { srv, pedir, bot } = m;
+    const sse = await abrirSse(srv.url, srv.pessoa);
+    await srv.esperar(async () => sse.retomadas().length > 0, { nome: "resumed inicial" });
+    const conversa = await bot("Bot NOD-331");
+    await srv.json<RespostaMutacao>("POST", `conversas/${conversa}/mensagens`, { texto: "Antes do deploy" });
+    const { plano } = (await (await pedir("puxar")).json()) as { plano: PlanoTurno };
+
+    portao.travar();
+    await srv.esperar(async () => portao.presos() > 0, { nome: "varredor preso" });
+    const inicio = Date.now();
+    let resultado: Awaited<ReturnType<typeof srv.drenar>> | null = null;
+    const drenagem = srv.drenar({ prazoMs: 5_000, intervaloMs: 50, prazoLacosMs: 1_500 }).then((r) => (resultado = r));
+
+    // (a) Com os laços ainda parando (o varredor preso): o SSE aberto já terminou, o novo dá 503 e o token vale só pelo
+    // banco — assentado lá, é negado mesmo com a cópia na memória daqui.
+    await sse.terminou;
+    const recusado = await fetch(`${srv.url}/api/t/${srv.pessoa.tenantId}/eventos`, { headers: { cookie: srv.pessoa.cookie } });
+    expect(recusado.status).toBe(503);
+    expect(srv.app.tokens.autorizar(plano.tokenDeTurno)).toBeNull();
+    await srv.db.begin(async (tx) => {
+      await vincularEscopo(tx, srv.pessoa);
+      await tx`update turnos set estado = 'interrompido', motivo_interrupcao = 'reinicio_servidor' where id = ${plano.turnoId}`;
+    });
+    expect(await srv.app.tokens.autorizarComBanco(plano.tokenDeTurno)).toBeNull();
+
+    // (b) O despachante parou junto (não esperou o varredor): o outbox gravado agora não é marcado por este processo.
+    const { marco } = (await srv.dbDono<{ marco: Date }[]>`select clock_timestamp() as marco`)[0]!;
+    await srv.json<RespostaMutacao>("POST", `conversas/${conversa}/mensagens`, { texto: "Durante o deploy" });
+    await new Promise((r) => setTimeout(r, 400)); // 10× o outboxMs do servidor de teste
+    expect(resultado).toBeNull();
+    expect(portao.presos()).toBeGreaterThan(0);
+    const entregues = async () => (await srv.db.begin(async (tx) => {
+      await vincularEscopo(tx, srv.pessoa);
+      return tx<{ n: number; entregues: number }[]>`select count(*)::int as n, count(entregue_em)::int as entregues from events_outbox
+        where owner_id = ${srv.pessoa.pessoaId} and criado_em >= ${marco}`;
+    }))[0]!;
+    expect((await entregues()).n).toBeGreaterThan(0);
+    expect((await entregues()).entregues).toBe(0);
+
+    // O turno da máquina sai da memória (a outra cor o assentou); só o prazo dos laços segura a drenagem.
+    srv.app.tokens.revogar(plano.turnoId);
+    expect(await drenagem).toMatchObject({ turnos: 0, prazo_vencido: false, lacos_prazo_vencido: true });
+    expect(Date.now() - inicio).toBeLessThan(2_500);
+    expect(portao.presos()).toBeGreaterThan(0); // o tick segue preso: a drenagem não esperou por ele
+    expect((await entregues()).entregues).toBe(0);
+  });
+});
+
+describeIntegracao("NOD-331: ligação viva e um tick preso — o que a outra cor entregou chega à ligação", () => {
+  let srv: ServidorCompleto;
+  const portao = portaoDoVarredor();
+  const criados = { agentes: [] as string[], conversas: [] as string[] };
+  beforeAll(async () => {
+    srv = await servidorCompleto({ env: { NOD_LIGACAO: "todas" }, envolverListarPessoas: portao.envolver });
+  });
+  afterAll(async () => {
+    portao.soltar();
+    if (!srv) return;
+    await srv.fechar();
+    await limparPessoaE2E(srv.db, srv.dbDono, srv.pessoa, criados);
+    await srv.desligar();
+  });
+
+  it("o modo só ligações começa junto com a parada (desde antecipado) e publica no barramento local o que a ativa marcou", async () => {
+    const { agente, conversa } = await srv.json<{ agente: Agente; conversa: Conversa }>("POST", "agentes", { dono: "pessoa", nome: "Nina" });
+    criados.agentes.push(agente.id);
+    criados.conversas.push(conversa.id);
+    await srv.json("POST", "voz/consentimento", { versao: VERSAO_CONSENTIMENTO_VOZ });
+    const { ligacao } = await srv.json<{ ligacao: Ligacao }>("POST", "ligacoes", { agenteId: agente.id });
+    const host = new URL(srv.url).host;
+    const ws = new WebSocket(`${srv.url.replace("http", "ws")}/api/t/${srv.pessoa.tenantId}/voz/v1/midia`, { headers: { cookie: srv.pessoa.cookie, origin: `http://${host}` } });
+    ws.on("message", (dados, binario) => {
+      if (binario) ws.send(JSON.stringify({ t: "tocou-fim", utt: (dados as Buffer).readUInt16LE(5) }));
+    });
+    await new Promise<void>((r, j) => {
+      ws.once("open", () => r());
+      ws.once("error", j);
+    });
+    ws.send(JSON.stringify({ t: "ola", v: 1, ligacaoId: ligacao.id, entrada: "pcm16", saida: "pcm16" }));
+    await srv.esperar(async () => srv.app.voz.vivas() === 1, { nome: "ligação viva" });
+
+    const eventos: unknown[] = [];
+    const sair = srv.app.barramento.inscrever(srv.pessoa.pessoaId, (f) => eventos.push(f.dados.eventoId));
+    portao.travar();
+    await srv.esperar(async () => portao.presos() > 0, { nome: "varredor preso" });
+    let resultado: Awaited<ReturnType<typeof srv.drenar>> | null = null;
+    const drenagem = srv.drenar({ prazoMs: 30_000, intervaloMs: 50, prazoLacosMs: 20_000 }).then((r) => (resultado = r));
+    await new Promise((r) => setTimeout(r, 200));
+
+    // A outra cor grava e já marca entregue (ela ganha sempre a corrida dos pendentes) enquanto o varredor daqui segue preso.
+    const eventoId = randomUUID();
+    await srv.db.begin(async (tx) => {
+      await vincularEscopo(tx, srv.pessoa);
+      await tx`insert into events_outbox (id, owner_id, evento_id, tipo, entregue_em)
+        values (${randomUUID()}, ${srv.pessoa.pessoaId}, ${eventoId}, 'negacao', clock_timestamp())`;
+    });
+    await srv.esperar(async () => eventos.includes(eventoId), { nome: "frame da outra cor no barramento local" });
+    expect(resultado).toBeNull();
+    expect(portao.presos()).toBeGreaterThan(0);
+
+    portao.soltar();
+    ws.send(JSON.stringify({ t: "tchau" }));
+    expect(await drenagem).toMatchObject({ vivas: 0, prazo_vencido: false, lacos_prazo_vencido: false });
+    sair();
+    ws.close();
+    await srv.db.begin(async (tx) => {
+      await vincularEscopo(tx, srv.pessoa);
+      await tx`delete from events_outbox where evento_id = ${eventoId}`;
+    });
+  });
 });

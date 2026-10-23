@@ -28,6 +28,12 @@ import { paraCadaPessoa, type OpcoesLaco } from "./escopos-de-fundo.ts";
  * (Parar, E8.3) nunca sai: `pendentes()` já o exclui.
  */
 
+/**
+ * definido em 2026-10-22 (QA NOD-331): sem a hora do banco no `soLigacoes`, o `desde` é o relógio local menos esta folga
+ * (cobre a diferença de relógio entre a VM e o banco e o tick em voo). Republicar é aceito ("pelo menos uma vez").
+ */
+export const DESDE_SEM_BANCO_FOLGA_MS = 60_000;
+
 /** Tabela TOTAL kind → frame: um kind fora dela é linha envenenada e segue o caminho de falha/abandono. */
 export const FRAME_POR_EVENTO: Record<KindEvento, TipoFrame> = {
   mensagem_criada: "mensagem.nova",
@@ -92,6 +98,13 @@ export interface OpcoesDespacho {
    * "esperando" com a frente presa a máquina sem contato. Ausente = o estado de antes.
    */
   presenca?: Pick<ServicoDasMaquinas, "conectada" | "macDoServidor" | "identificar">;
+  /**
+   * definido em 2026-10-22 (NOD-218): modo "só ligações" da drenagem azul/verde. Publica no barramento local SEM marcar
+   * entregue (nem contar tentativa, nem varrer abandono): quem marca é só a cor ativa, e os navegadores dela não perdem
+   * nada. Cada item sai uma vez por processo (`vistos`, por id do outbox). Lê também o que a ativa já entregou desde
+   * `desde` (hora do banco no início do modo): ela marca na hora e ganharia sempre a corrida dos pendentes.
+   */
+  soPublicar?: { vistos: Set<string>; desde: Date };
 }
 
 /** Uma pessoa, uma conexão já escopada: é a unidade que os testes exercitam sob withRollback. */
@@ -102,23 +115,34 @@ export async function despacharPessoa(conn: Conn, escopo: Escopo, barramento: Ba
   const resultado: ResultadoPassada = { publicados: 0, falhas: 0, abandonadosAgora: 0 };
 
   const donos: CacheDosDonos = { estados: new Map(), escopo, ...(opcoes.presenca ? { servico: opcoes.presenca } : {}) };
-  for (const item of await repos.outbox.pendentes(opcoes.limite)) {
+  const soPublicar = opcoes.soPublicar;
+  const itens = soPublicar
+    ? await repos.outbox.paraPublicar({ desde: soPublicar.desde, excluir: [...soPublicar.vistos], limite: opcoes.limite })
+    : await repos.outbox.pendentes(opcoes.limite);
+  for (const item of itens) {
+    if (soPublicar?.vistos.has(item.id)) continue;
     try {
       // ADR-099 (I10, definido em 2026-10-12): o `trabalho.mudou` leva o estado do dono do bot, lido na hora de publicar
       // (depois do commit de quem mudou): a web atualiza a linha do bot sem refazer a lista. Um por bot por passada.
       const extra = item.tipo === "trabalho_mudou" ? await estadoDoDonoNoFrame(conn, repos, agora, item.dados.agenteId, donos) : {};
       // conversaId/turnoId do evento vão no frame: é como a web sabe qual conversa reidratar (definido em 2026-09-16, L9).
       barramento.publicar(escopo.pessoaId, frameDoEvento(item.tipo), { ...item.dados, ...extra, kind: item.tipo, eventoId: item.eventoId, conversaId: item.conversaId, turnoId: item.turnoId });
-      await repos.outbox.marcarEntregue(item.id);
+      if (soPublicar) soPublicar.vistos.add(item.id);
+      else await repos.outbox.marcarEntregue(item.id);
       resultado.publicados += 1;
     } catch (e) {
+      if (soPublicar) {
+        soPublicar.vistos.add(item.id);
+        resultado.falhas += 1;
+        continue;
+      }
       await repos.outbox.incrementarTentativa(item.id);
       resultado.falhas += 1;
       log("aviso", "outbox_publicar_falhou", { outbox_id: item.id, tipo: item.tipo, tentativas: item.tentativas + 1, erro: e instanceof Error ? e.name : "desconhecido" });
     }
   }
 
-  if (opcoes.varrerAbandono ?? true) {
+  if (!soPublicar && (opcoes.varrerAbandono ?? true)) {
     resultado.abandonadosAgora = await repos.outbox.abandonar({ teto: opcoes.teto ?? OUTBOX_TETO_TENTATIVAS, idadeMinMs: opcoes.idadeMinMs ?? OUTBOX_IDADE_MIN_MS, agora });
     if (resultado.abandonadosAgora > 0) log("aviso", "outbox_abandonado", { n: resultado.abandonadosAgora });
     metricas.registrar({ metrica: "outbox_abandonados", tenant_id: escopo.tenantId, pessoa_id: escopo.pessoaId }, await repos.outbox.contarAbandonados());
@@ -205,7 +229,15 @@ export interface OpcoesLacoOutbox extends OpcoesDespacho, Pick<OpcoesLaco, "list
 export interface DespachanteOutbox {
   /** Uma passada completa por todas as pessoas (o laço chama; o teste pode chamar direto). */
   passada(): Promise<void>;
+  /** Para o laço; espera a passada em voo. Também para o modo "só ligações". Definitivo: nada religa depois dele. */
   parar(): Promise<void>;
+  /**
+   * NOD-218 (drenagem azul/verde): para o laço normal (esperando a passada em voo) e passa a varrer só as pessoas de
+   * `pessoas()`, publicando sem marcar entregue e sem repetir o id. Para de vez no `parar()`.
+   * NOD-331: o `desde` é a hora do banco ANTES de esperar a passada em voo, e um `parar()` que chegou durante essa
+   * espera vence (não liga o modo "só ligações").
+   */
+  soLigacoes(pessoas: () => { tenantId: string; id: string }[]): Promise<void>;
 }
 
 /**
@@ -222,6 +254,9 @@ export function iniciarDespachanteOutbox(db: Db, barramento: Barramento, opcoes:
   const metricas = opcoes.metricas ?? registroPadrao;
   let ultimaVarredura = 0;
   let parado = false;
+  // NOD-331: `parar()` é definitivo. Um `soLigacoes` que acorda depois dele (a drenagem venceu o prazo e o fechar()
+  // chegou) não religa nada.
+  let encerrado = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let timerVenceEm = 0;
   let emVoo: Promise<void> | null = null;
@@ -281,14 +316,76 @@ export function iniciarDespachanteOutbox(db: Db, barramento: Barramento, opcoes:
   });
   agendarEm(intervaloMs);
 
+  let pararSoLigacoes: (() => Promise<void>) | null = null;
+  const pararLaco = async (): Promise<void> => {
+    parado = true;
+    pararDeOuvir();
+    if (timer) clearTimeout(timer);
+    timer = null;
+    if (emVoo) await emVoo;
+  };
+
   return {
     passada,
     async parar() {
-      parado = true;
-      pararDeOuvir();
-      if (timer) clearTimeout(timer);
-      timer = null;
-      if (emVoo) await emVoo;
+      encerrado = true;
+      await pararLaco();
+      await pararSoLigacoes?.();
+    },
+    async soLigacoes(pessoas) {
+      if (encerrado) return;
+      // Hora do banco (a mesma do `entregue_em`), lida ANTES de esperar a passada em voo (NOD-331): o que a outra cor
+      // entregou enquanto este processo esperava o tick também entra no `paraPublicar`. Um id que este processo mesmo
+      // publicou nesse meio pode sair mais uma vez: é o mesmo "pelo menos uma vez" do despacho normal (ver o topo).
+      // QA NOD-331: o banco falhando aqui (soluço na hora do SIGTERM) não pode rejeitar: o laço normal seguiria marcando
+      // entregue e a drenagem cairia em exit(1) sem esperar a ligação. Sem a hora do banco, vale o relógio local com
+      // folga (DESDE_SEM_BANCO_FOLGA_MS): sai algum frame repetido, nunca um a menos.
+      const desde = await db<{ desde: Date }[]>`select now() as desde`.then(
+        ([r]) => r?.desde ?? new Date(),
+        (e: unknown) => {
+          log("aviso", "despachante_so_ligacoes_sem_hora_do_banco", { erro: e instanceof Error ? e.name : "desconhecido" });
+          return new Date(Date.now() - DESDE_SEM_BANCO_FOLGA_MS);
+        },
+      );
+      await pararLaco();
+      if (encerrado || pararSoLigacoes) return;
+      const vistos = new Set<string>();
+      let fim = false;
+      let t: ReturnType<typeof setTimeout> | null = null;
+      let voo: Promise<unknown> | null = null;
+      const uma = async (): Promise<void> => {
+        const lista = pessoas();
+        if (!lista.length) return;
+        await paraCadaPessoa(
+          db,
+          async (escopo, tx) => {
+            await tx(async (trx) => {
+              await despacharPessoa(trx, escopo, barramento, { ...opcoes, metricas, soPublicar: { vistos, desde } });
+            });
+          },
+          { listarPessoas: async () => lista, aoFalhar: opcoes.aoFalhar },
+        );
+      };
+      const proxima = (): void => {
+        if (fim) return;
+        t = setTimeout(() => {
+          t = null;
+          voo = uma()
+            .catch((e: unknown) => log("erro", "despachante_so_ligacoes_falhou", { erro: e instanceof Error ? e.name : "desconhecido" }))
+            .finally(() => {
+              voo = null;
+              proxima();
+            });
+        }, intervaloMs);
+        t.unref();
+      };
+      log("info", "despachante_so_ligacoes", { pessoas: pessoas().length });
+      proxima();
+      pararSoLigacoes = async () => {
+        fim = true;
+        if (t) clearTimeout(t);
+        if (voo) await voo;
+      };
     },
   };
 }

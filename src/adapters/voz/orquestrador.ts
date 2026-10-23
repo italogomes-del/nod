@@ -179,6 +179,8 @@ export interface ServicoVoz {
   /** Aviso do sistema ao cérebro (resultado de tarefa, decisão): vira `[nod] …`; com `falar`, o bot responde em voz numa brecha. */
   nota(ligacaoId: string, texto: string, confiavel: boolean, falar?: boolean): void;
   vivas(): number;
+  /** NOD-218: as pessoas com ligação viva neste processo (o despachante "só ligações" da drenagem azul/verde). */
+  pessoasComLigacao(): { tenantId: string; id: string }[];
   /** ADR-074: um card pendente na conversa da ligação — o bot o lê e abre a janela de aprovação por voz. */
   pedirAprovacao(ligacaoId: string, p: PedidoAprovacaoVoz): void;
   /** A rota de decisão confere (e gasta) o comando de voz antes de decidir: só vale uma vez, por 10 s. */
@@ -2110,6 +2112,11 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
       return null;
     },
     vivas: () => [...ligacoes.values()].filter((l) => !l.encerrada()).length,
+    pessoasComLigacao() {
+      const porId = new Map<string, { tenantId: string; id: string }>();
+      for (const l of ligacoes.values()) if (!l.encerrada()) porId.set(l.registro.pessoaId, { tenantId: l.registro.tenantId, id: l.registro.pessoaId });
+      return [...porId.values()];
+    },
     async drenar(motivo = "drenagem") {
       emDrenagem = true;
       await Promise.all([...ligacoes.values()].map((l) => l.encerrar(motivo)));

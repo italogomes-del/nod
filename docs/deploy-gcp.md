@@ -8,7 +8,7 @@ estão em [`infra/gcp/`](../infra/gcp/) e a configuração não secreta em
 
 | Peça | Recurso | Por quê |
 |---|---|---|
-| Servidor | VM `nod-vm` (Compute Engine, `e2-medium`, Debian 12) com Docker: o container do nod e o Caddy | Uma instância com estado em memória, long-poll de até 35 s e SSE (ADR-001, ADR-017, ADR-021) descartam Cloud Run |
+| Servidor | VM `nod-vm` (Compute Engine, `e2-medium`, Debian 12) com Docker: as duas cores do nod (`nod-azul`, `nod-verde`; uma ativa) e o Caddy | Uma instância com estado em memória, long-poll de até 35 s e SSE (ADR-001, ADR-017, ADR-021) descartam Cloud Run |
 | HTTPS | Caddy, certificado automático | Único processo com porta aberta para a internet (80/443) |
 | Banco | Cloud SQL `nod-pg`, PostgreSQL 16, só IP privado, backup diário e PITR de 7 dias | RLS forçada e três papéis (ADR-003); conexão direta, pool de 5 (ADR-001) |
 | Segredos | Secret Manager (`nod-*`) | Senhas do banco, segredo da sessão, chave do cofre (ADR-015, ADR-031) e o cliente OAuth |
@@ -25,18 +25,93 @@ na branch `main`, pode usar as duas últimas.
 
 1. Push no `main` → o `ci` roda → se passou, o `deploy` começa.
 2. O workflow gera a imagem do `Dockerfile` e publica `nod:<sha>`.
-3. Copia `config.env`, `compose.yml`, `Caddyfile` e `deploy.sh` para `/opt/nod` na VM.
-4. `deploy.sh` monta `/opt/nod/nod.env` a partir do Secret Manager, roda as migrações como
-   `nod_dono` com a imagem nova e recria o container do nod. Espera o healthcheck (`/api/saude`).
-   A saúde inclui o banco: `select 1` com prazo de 2 s, senão 503 (NOD-175).
+3. Copia `config.env`, `compose.yml` e `deploy.sh` para `/opt/nod` na VM. O `Caddyfile` vai em estágio, como
+   `/opt/nod/Caddyfile.novo` (NOD-331): um restart do Caddy ou da VM antes da troca relê o Caddyfile em uso.
+   A tag do deploy vai junto em `Caddyfile.novo.tag`: o `deploy.sh` só promove o estágio da própria tag.
+4. `deploy.sh` (NOD-218, azul/verde) faz, nesta ordem:
+   1. Reconcilia um deploy interrompido: se as duas cores estão de pé, drena a que não é a do marcador;
+      se o marcador aponta para uma cor parada e a outra roda, o marcador passa à que roda.
+   2. Escolhe a cor **nova** (a parada) e grava `/opt/nod/nod-<nova>.env` a partir do Secret Manager.
+      O env da cor velha, que ainda drena, não é tocado. As imagens de cada cor ficam em `/opt/nod/imagens.env`.
+   3. `pull` e migrações como `nod_dono` com a imagem nova; se a migração falha, sai antes de subir nada.
+   4. Sobe a cor nova e espera o healthcheck (`/api/saude`, até 90 s). A saúde inclui o banco: `select 1`
+      com prazo de 2 s, senão 503 (NOD-175). Se não ficar saudável: logs, para a nova, marcador intocado.
+   5. Troca o marcador `/opt/nod/estado/cor-ativa` (`tmp` + `mv`). Em até 500 ms a nova liga os laços e
+      passa a responder 200 em `/api/saude/lb`; a velha passa a 503 `inativa`. Se o `Caddyfile.novo` difere do
+      em uso, ele é promovido agora (o em uso vira `Caddyfile.anterior`) e o Caddy é recriado; se é igual, só
+      some o estágio, sem recreate.
+   6. Confirma pelo Caddy local, 3 vezes seguidas em até 15 s, que `/api/saude/lb` responde a cor nova.
+      Se não: o marcador volta para a velha, o `Caddyfile.anterior` volta (com recreate do Caddy), a nova
+      para, exit 1. Confirmou: o `Caddyfile.anterior` é apagado.
+   7. Para a velha com `stop -t 660` (drenagem de até 10 min, `NOD_DRENAGEM_MAX_MS`) e fecha as ligações
+      de voz que ficaram com `instancia` = cor velha (`scripts/ligacoes-orfas.ts`).
+
    O env leva as duas URLs: `DATABASE_URL` (nod_app, das requisições) e `DATABASE_URL_DONO`, que o
    boot usa só para criar as partições de `events` (ADR-006) e fecha em seguida.
 
-O deploy é recreate: o nod fica fora do ar alguns segundos. Os Macs reconectam sozinhos (o
-long-poll recomeça). Desde a NOD-214, o turno que um Mac atualizado está rodando segue rodando no
-deploy: a drenagem não o espera, e o processo novo o reconhece pelo token de turno (o hash fica em
-`turno_credenciais`) quando a máquina renova ou entrega. Mac com app antigo ainda segura a drenagem
-até 10 min (ADR-071). Um deploy manual: Actions → deploy → Run workflow.
+O deploy não derruba o nod (ADR-001, emenda de 2026-10-22). O Caddy (`lb_policy first`, health check
+a cada 1 s em `/api/saude/lb`) manda tudo para a cor ativa; a velha drena sem receber pedido novo. Ao
+drenar, a velha para os laços, fecha os SSE (o navegador reconecta na nova e reidrata) e aceita o token
+de turno só se o banco disser que o turno segue `despachando`. Os Macs são reconhecidos pela nova pelo
+409 de sempre (reanunciam). Desde a NOD-214, o turno que um Mac atualizado está rodando segue rodando: o
+processo novo o reconhece pelo token de turno (o hash fica em `turno_credenciais`). Só a ligação de voz
+com mais de 10 min cai, com a linha "A ligação caiu porque o nod foi atualizado. Ligue de novo." Um
+deploy manual: Actions → deploy → Run workflow.
+
+**Migração compatível com N-1.** A versão velha roda sobre o esquema novo por até 10 min. Coluna nova
+entra nula ou com default; renomear ou remover leva dois deploys (primeiro o código para de usar, depois
+a migração remove). Migração que quebra a versão anterior derruba a cor que drena.
+
+### Qual cor está no ar
+
+```bash
+cat /opt/nod/estado/cor-ativa                         # a cor do marcador
+curl -s https://<domínio>/api/saude/lb                # {"ok":true,"cor":"verde"}: o que o Caddy enxerga
+sudo docker compose --env-file /opt/nod/imagens.env -f /opt/nod/compose.yml ps   # quem roda
+cat /opt/nod/imagens.env                              # a imagem de cada cor
+```
+
+### Rollback
+
+Volte para a tag anterior (o sha do commit, que está em `imagens.env` na cor parada):
+`sudo /opt/nod/deploy.sh <tag-anterior>`. É um deploy normal, sem queda: sobe a tag velha na cor parada
+e troca. Migração não volta sozinha: por isso a regra do N-1. Uma tag de antes da NOD-218 (sem
+`/api/saude/lb`) é recusada pelo `deploy.sh` antes de migrar: o Caddy nunca a escolheria e o boot dela
+fecharia as ligações vivas da cor ativa. Para voltar a ela, use "Reverter a transição" abaixo.
+Um `Caddyfile.novo` que sobrou de um deploy que falhou antes da troca é de outra tag (`Caddyfile.novo.tag`):
+o rollback não o promove (avisa e segue com o Caddyfile em uso, sem recreate do Caddy); o próximo deploy do
+workflow o substitui.
+
+### Deploy de transição (o primeiro depois da NOD-218)
+
+O primeiro deploy encontra o container antigo `nod` (serviço único) e nenhum marcador. Ele sobe a
+`nod-azul` ao lado, recria o Caddy uma vez com o Caddyfile novo (alguns segundos de queda: faça fora do
+horário de ligação), confirma a azul e só então para e remove o `nod` antigo e fecha as ligações dele
+(`--instancia legado --transicao`). O `nod` antigo sai com `stop -t 30` (`NOD_TRANSICAO_STOP_S`, NOD-331), não
+660: depois do recreate do Caddy ninguém mais o alcança, e drenar 10 min só deixaria os laços dele rodando em
+dobro com os da azul. O `/opt/nod/nod.env` antigo fica, sem uso.
+
+### Reverter a transição
+
+Se a transição falhar na confirmação, o script desfaz sozinho (NOD-331): devolve o Caddyfile anterior,
+recria o Caddy, confirma 3 vezes por ele que o `nod` antigo responde `/api/saude` e só então para a azul e
+apaga o marcador (o próximo deploy refaz a transição). Sai com erro "transição desfeita".
+
+Se o recreate falhar ou o `nod` antigo não responder pelo Caddy, o script deixa a azul, o marcador e o `nod`
+antigo de pé e sai com erro apontando esta seção. O plano B, manual, na VM:
+
+```bash
+# 1. No seu computador, com o checkout no commit anterior à NOD-218:
+git checkout <sha-anterior>
+gcloud compute scp infra/gcp/vm/{compose.yml,Caddyfile,deploy.sh} nod-vm:/tmp/ \
+  --zone=southamerica-east1-b --tunnel-through-iap --project=nod-producao
+# 2. Na VM:
+cd /opt/nod
+sudo docker compose --env-file imagens.env stop -t 660 nod-azul caddy
+sudo docker compose --env-file imagens.env rm -f nod-azul caddy
+sudo rm -f estado/cor-ativa .caddyfile.sha Caddyfile.novo Caddyfile.novo.tag Caddyfile.anterior
+sudo cp /tmp/compose.yml /tmp/Caddyfile /tmp/deploy.sh . && sudo /opt/nod/deploy.sh <sha-anterior>
+```
 
 ## Estado em 2026-10-02
 
@@ -167,11 +242,10 @@ Para recriar do zero: apague a VM, remova os runners dela em Settings › Action
 # Entrar na VM (pelo IAP)
 gcloud compute ssh nod-vm --zone=southamerica-east1-b --tunnel-through-iap --project=nod-producao
 # Logs: Cloud Logging, ou na VM
-sudo docker compose -f /opt/nod/compose.yml logs -f nod
+sudo docker compose --env-file /opt/nod/imagens.env -f /opt/nod/compose.yml logs -f nod-azul nod-verde
 # Seed (só com o banco sem pessoas): cria o dono com o e-mail do login Google
-sudo bash -c 'cd /opt/nod && export NOD_DOMINIO=34-39-164-139.sslip.io \
-  NOD_IMAGEM="$(docker ps --filter label=com.docker.compose.service=nod --format "{{.Image}}")" &&
-  docker compose run --rm --no-deps -T -e NOD_SEED_EMAIL=voce@exemplo.com nod node scripts/seed.ts'
+sudo bash -c 'cd /opt/nod && cor="$(cat estado/cor-ativa)" &&
+  docker compose --env-file imagens.env run --rm --no-deps -T -e NOD_SEED_EMAIL=voce@exemplo.com "nod-$cor" node scripts/seed.ts'
 ```
 
 Restaurar o banco (PITR, plano B, segredos) e o ensaio de restauração: [runbook-producao.md](runbook-producao.md).

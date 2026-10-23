@@ -110,6 +110,7 @@ import { lerConfigRevisor, renovacaoDoLacoLocal } from "../../domain/revisor.ts"
 import { assentarRevisao } from "../../use-cases/revisar-acao.ts";
 import { criarRotaDev } from "./rotas/dev.ts";
 import { criarRotaEventos } from "./rotas/eventos.ts";
+import { criarConexoesSse, type ConexoesSse } from "./sse.ts";
 import type { DepsRotas } from "./rotas/executar-caso.ts";
 import { criarRotasExecutor } from "./rotas/executor.ts";
 import { criarRotasIas } from "./rotas/ias.ts";
@@ -230,6 +231,10 @@ export type App = {
   voz: ServicoVoz;
   /** NOD-175: a ponte de máquina para de entregar turno novo (drenagem do SIGTERM); renovar e entregar seguem. */
   drenarPonte(): void;
+  /** NOD-218: liga o varredor de presença das máquinas (o boot, ao ficar ativo); idempotente. */
+  iniciarVarredorMaquinas(intervaloMs?: number): { parar(): Promise<void> };
+  /** NOD-218: as conexões SSE abertas — a drenagem recusa as novas e encerra as abertas. */
+  sse: ConexoesSse;
   /** NOD-175: `puxar` da ponte de máquina em voo — reserva que ainda pode virar token vivo. */
   reservasEmVoo(): number;
   /** NOD-170: os computadores dos bots, só quando ligados (NOD_COMPUTADORES=docker ou driver injetado); o boot liga o varredor de ociosidade. */
@@ -937,6 +942,8 @@ export function comporApp(o: OpcoesCompor): App {
       drenando: voz.drenando(),
       vozDisponivel: vozConfigurada,
       vivasNoServidor: voz.vivas(),
+      // NOD-218: a cor deste processo no azul/verde; o boot da outra cor não fecha esta ligação.
+      instancia: env.NOD_COR || null,
       maxSimultaneas,
       limiteDiarioMs,
       inicioDoDia: inicioDoDiaSp(relogio()),
@@ -947,10 +954,31 @@ export function comporApp(o: OpcoesCompor): App {
   }
 
   // ADR-092: também no modo local, para as máquinas da ponte (a VM) saírem da lista quando param de falar.
-  const varredorMaquinas = setInterval(() => {
-    void ponteHttp.varrer().catch(() => log("aviso", "presenca_maquinas_falhou", {}));
-  }, 15_000);
-  varredorMaquinas.unref();
+  // revisto em 2026-10-22 (NOD-218): virou laço que o boot liga ao ficar ativo (a cor passiva não conhece as máquinas e
+  // as tiraria da lista) e que a drenagem para, esperando a varredura em voo.
+  let varredorMaquinas: { parar(): Promise<void> } | null = null;
+  const iniciarVarredorMaquinas = (intervaloMs = 15_000): { parar(): Promise<void> } => {
+    if (varredorMaquinas) return varredorMaquinas;
+    let emVoo: Promise<unknown> | null = null;
+    const timer = setInterval(() => {
+      if (emVoo) return;
+      emVoo = ponteHttp
+        .varrer()
+        .catch(() => log("aviso", "presenca_maquinas_falhou", {}))
+        .finally(() => {
+          emVoo = null;
+        });
+    }, intervaloMs);
+    timer.unref();
+    varredorMaquinas = {
+      async parar() {
+        clearInterval(timer);
+        if (emVoo) await emVoo;
+      },
+    };
+    return varredorMaquinas;
+  };
+  const conexoesSse = criarConexoesSse();
 
   // Inventário por pessoa (ADR-019): a sonda é da MÁQUINA (uma por TTL, compartilhada entre pessoas);
   // definido em 2026-09-18: descoberta consulta instalação/login sem prompt e persiste por pessoa.
@@ -1213,7 +1241,7 @@ export function comporApp(o: OpcoesCompor): App {
         return executorAtual;
       },
     }),
-    criarRotaEventos(barramento),
+    criarRotaEventos(barramento, { conexoes: conexoesSse }),
     criarRotaMetricas(),
     criarRotaDev(dentro, {
       get executor() {
@@ -1330,6 +1358,8 @@ export function comporApp(o: OpcoesCompor): App {
     tenantDe,
     voz,
     drenarPonte: () => ponteHttp.iniciarDrenagem(),
+    iniciarVarredorMaquinas,
+    sse: conexoesSse,
     reservasEmVoo: () => ponteHttp.reservasEmVoo(),
     anexarVoz(server, resolverEscopo) {
       return anexarCanaisVoz(server, {
@@ -1346,7 +1376,7 @@ export function comporApp(o: OpcoesCompor): App {
       await ditado.fechar();
       await voz.fechar();
       await provedoresVoz.encerrar();
-      clearInterval(varredorMaquinas);
+      await varredorMaquinas?.parar();
       await conectoresVivos.fechar();
     },
   };
