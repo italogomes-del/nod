@@ -81,6 +81,13 @@ export type PedidoDeInstalacao = {
 };
 
 /**
+ * O que a tela cifra (JSON, ADR-102) para a instaladora. Método `chave`: `chave` (a privada, OpenSSH ou PEM) e `frase`
+ * se ela tiver. Método `senha`: `senha`. `sudo`: a senha do sudo quando ele pede uma — ausente no método senha = a
+ * própria senha do login. Nenhum campo tem quebra de linha, exceto `chave`.
+ */
+export type CredencialSsh = { chave?: string; frase?: string; senha?: string; sudo?: string };
+
+/**
  * O progresso relatado pela instaladora: `etapa` ou `erro`. `conferencia` = conectou e roda a conferência; `pronta` = o
  * script terminou (o pedido fica `pareando` até a máquina nova parear, ou já é `pronta` se ela pareou antes).
  * `impressao`: a host key que a máquina mostrou (no erro `chave_do_servidor_mudou`, é a nova).
