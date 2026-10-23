@@ -64,6 +64,10 @@ jobs:
       - name: Preflight da release
         run: node scripts/desktop/release-preflight.mjs
       - run: npm ci
+      # NOD-93 (ADR-123): o Lima e o docker CLI da VM local, fixados e conferidos por sha256. Desligado, o app sai sem eles.
+      - name: Binários da VM local
+        if: vars.NOD_VM_LOCAL == '1'
+        run: node scripts/desktop/vm-local-binarios.ts --arch "$ARCH"
       - run: npm run desktop:build
       # NOD-187: antes do empacotamento, para falhar cedo sem gastar assinatura e notarização.
       # Sem prazo, um Electron travado (GPU/viz sob carga) prenderia o job até o limite de 6 h do runner.

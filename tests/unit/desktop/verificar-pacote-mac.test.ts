@@ -73,8 +73,8 @@ const esperado: EsperadoPacote = { teamId: TEAM, arch: "arm64", entitlements: ES
 const falhasCom = (mudanca: Partial<SaidasPacote>, outro: Partial<EsperadoPacote> = {}) => formatarFalhas(conferirPacote({ ...saidasCertas(), ...mudanca }, { ...esperado, ...outro }));
 
 describe("verificar-pacote-mac.mjs (NOD-203)", () => {
-  it("as esperadas saem da fonte: as 2 entitlements do plist e o texto do yml", () => {
-    expect(ESPERADAS).toEqual(["com.apple.security.cs.allow-jit", "com.apple.security.device.audio-input"]);
+  it("as esperadas saem da fonte: as 3 entitlements do plist e o texto do yml", () => {
+    expect(ESPERADAS).toEqual(["com.apple.security.cs.allow-jit", "com.apple.security.device.audio-input", "com.apple.security.virtualization"]);
     // O texto é microcopy e muda com o produto (o ditado, ADR-095, trocou a frase); o teste confere que ele
     // saiu da linha do yml, não a frase em si — fixar a frase aqui deixou a main vermelha no merge do #247.
     const linha = readFileSync("electron-builder.yml", "utf8")
@@ -139,12 +139,12 @@ describe("verificar-pacote-mac.mjs (NOD-203)", () => {
 
   it("entitlement a mais no app reprova", () => {
     expect(falhasCom({ entitlementsApp: entXml([...ESPERADAS, "com.apple.security.cs.disable-library-validation"]) })).toEqual([
-      "entitlements (nod.app): esperava com.apple.security.cs.allow-jit, com.apple.security.device.audio-input, veio com.apple.security.cs.allow-jit, com.apple.security.cs.disable-library-validation, com.apple.security.device.audio-input (a mais: com.apple.security.cs.disable-library-validation)",
+      "entitlements (nod.app): esperava com.apple.security.cs.allow-jit, com.apple.security.device.audio-input, com.apple.security.virtualization, veio com.apple.security.cs.allow-jit, com.apple.security.cs.disable-library-validation, com.apple.security.device.audio-input, com.apple.security.virtualization (a mais: com.apple.security.cs.disable-library-validation)",
     ]);
   });
 
   it("entitlement a menos no app reprova", () => {
-    expect(falhasCom({ entitlementsApp: entXml(["com.apple.security.cs.allow-jit"]) })).toEqual([expect.stringContaining("(a menos: com.apple.security.device.audio-input)")]);
+    expect(falhasCom({ entitlementsApp: entXml(ESPERADAS.filter((e) => e !== "com.apple.security.device.audio-input")) })).toEqual([expect.stringContaining("(a menos: com.apple.security.device.audio-input)")]);
   });
 
   it("entitlement a mais ou a menos num helper reprova, citando o helper", () => {

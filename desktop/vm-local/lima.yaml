@@ -1,0 +1,70 @@
+# NOD-93 (PR 2, ADR-123): a VM do computador do bot no Mac. Modelo: `desktop/vm-local/runtime.ts` troca os marcadores (ARCH, IMAGEM, CPUS, MEMORIA, DISCO, SOCKET)
+# e grava a configuração da instância; o resto ({{.User}}, {{.Dir}}) é do Lima. Escrito para o Lima 2.2.1 (o boot de verdade é UAT no Mac).
+# Regras (tests/unit/desktop/vm-local-runtime.test.ts): vz, sem Rosetta, sem mounts do Mac, nenhuma porta no host;
+# o único canal é o socket do dockerd, num caminho só do nod.
+minimumLimaVersion: 2.2.0
+vmType: vz
+os: Linux
+arch: @@ARCH@@
+images:
+  - location: "@@IMAGEM@@"
+    arch: @@ARCH@@
+cpus: @@CPUS@@
+memory: "@@MEMORIA@@"
+disk: "@@DISCO@@"
+mounts: []
+additionalDisks:
+  # Containers, volumes e logins (daemon.json do disco base): sobrevive a Atualizar e Redefinir.
+  - name: nod-dados
+    format: true
+    fsType: ext4
+containerd:
+  system: false
+  user: false
+vmOpts:
+  vz:
+    rosetta:
+      enabled: false
+      binfmt: false
+video:
+  display: none
+ssh:
+  loadDotSSHPubKeys: false
+  forwardAgent: false
+  forwardX11: false
+upgradePackages: false
+provision:
+  # O socket do dockerd é do usuário que o Lima cria: é por ele que o encaminhamento abaixo lê.
+  - mode: yq
+    path: /etc/systemd/system/docker.socket.d/override.conf
+    format: ini
+    expression: .Socket.SocketUser="{{.User}}"
+  # No 1º boot de cada disco base o docker.socket já subiu (root:docker) antes do override acima, que só vale do
+  # próximo boot em diante: sem isso, o probe e o encaminhamento do socket (ambos como o usuário) não teriam acesso.
+  - mode: system
+    script: |
+      #!/bin/bash
+      set -eu -o pipefail
+      systemctl daemon-reload
+      if [ -S /var/run/docker.sock ]; then chown "{{.User}}" /var/run/docker.sock; fi
+probes:
+  - script: |
+      #!/bin/bash
+      set -eu -o pipefail
+      if ! timeout 60s bash -c "until test -S /var/run/docker.sock && docker info >/dev/null 2>&1; do sleep 2; done"; then
+        echo >&2 "dockerd não respondeu (disco nod-dados montado?)"
+        exit 1
+      fi
+    hint: Veja /var/log/cloud-init-output.log e journalctl -u docker no convidado
+portForwards:
+  - guestSocket: /var/run/docker.sock
+    hostSocket: "@@SOCKET@@"
+  # Nenhuma porta TCP/UDP do convidado chega ao Mac.
+  - guestIP: 0.0.0.0
+    guestPortRange: [1, 65535]
+    proto: any
+    ignore: true
+  - guestIP: 127.0.0.1
+    guestPortRange: [1, 65535]
+    proto: any
+    ignore: true

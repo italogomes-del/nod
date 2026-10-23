@@ -64,3 +64,11 @@ bundle includes code from mermaid's runtime dependencies, under their own licens
 - Unlicense: `robust-predicates`.
 
 Full license texts are in each package under `node_modules/` at the versions pinned in `package-lock.json`.
+
+## Lima and Docker CLI (local VM on macOS)
+
+When built with `NOD_VM_LOCAL=1` (NOD-93, ADR-123), the macOS app bundles, in `Contents/Resources/vm-local`,
+[Lima](https://github.com/lima-vm/lima) 2.2.1 (`limactl` and the Linux guest agent), Copyright The Lima Authors, and the
+static [Docker CLI](https://github.com/docker/cli) 29.9.2, Copyright Docker, Inc. Both are licensed under the Apache
+License 2.0 and are redistributed unmodified (re-signed for notarization). Pinned by sha256 in
+`scripts/desktop/vm-local-binarios.ts`. Full license: `Contents/Resources/vm-local/LICENSE`.

@@ -28,6 +28,12 @@ extraResources:
     to: npm/node_modules
     filter:
       - '**/*'
+  # NOD-93 (ADR-123): limactl, guest agent, docker CLI e lima.yaml da VM local, montados por
+  # scripts/desktop/vm-local-binarios.ts só quando NOD_VM_LOCAL=1 no release; sem a pasta, o app sai sem a VM.
+  - from: dist/vm-local/${arch}
+    to: vm-local
+    filter:
+      - '**/*'
 npmRebuild: false
 artifactName: nod-${version}-${os}-${arch}.${ext}
 mac:
