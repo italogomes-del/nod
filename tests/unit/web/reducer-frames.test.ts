@@ -90,6 +90,7 @@ describe("aplicarFrame por TipoFrame", () => {
       ultimaFerramenta: "Alterou Gmail",
       tarefas: [],
       vigia: null,
+      subagentes: null,
     });
   });
 

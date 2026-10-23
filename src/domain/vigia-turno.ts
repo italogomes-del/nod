@@ -106,8 +106,9 @@ export function criarVigiaTurno(inicio: number): VigiaTurno {
       } else if (ev.tipo === "tool_result") {
         abertas.delete(ev.toolUseId);
       } else if (ev.tipo === "tarefa_fundo") {
-        if (ev.estado === "iniciada") emFundo.add(ev.id);
-        else emFundo.delete(ev.id);
+        // NOD-350: o subagente em primeiro plano não segura a sessão viva (e fica fora da lista da task).
+        if (ev.estado === "terminada") emFundo.delete(ev.id);
+        else if (ev.emFundo !== false) emFundo.add(ev.id);
       }
       return repetiu || saiuDoSilencio ? aviso(0) : null;
     },

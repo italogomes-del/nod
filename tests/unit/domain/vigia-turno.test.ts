@@ -35,6 +35,15 @@ describe("vigia do turno: sem novidade (NOD-73)", () => {
     expect(v.avaliar(2 * SILENCIO_MS)).toEqual({ mudoMs: SILENCIO_MS, aberta: "Read", emFundo: 0 });
   });
 
+  it("NOD-350: subagente em primeiro plano não conta como segundo plano; o de fundo conta até terminar", () => {
+    const v = criarVigiaTurno(0);
+    v.registrar({ tipo: "tarefa_fundo", id: "a1", estado: "iniciada", natureza: "agente", descricao: "Ler", emFundo: false }, 1);
+    v.registrar({ tipo: "tarefa_fundo", id: "a2", estado: "iniciada", natureza: "agente", descricao: "Ler" }, 2);
+    expect(v.avaliar(SILENCIO_MS + 2)).toMatchObject({ emFundo: 1 });
+    v.registrar({ tipo: "tarefa_fundo", id: "a2", estado: "terminada", final: "falhou" }, SILENCIO_MS + 3);
+    expect(v.avaliar(2 * SILENCIO_MS + 3)).toMatchObject({ emFundo: 0 });
+  });
+
   it("evento ignorado não conta como novidade", () => {
     const v = criarVigiaTurno(0);
     expect(v.registrar({ tipo: "ignorado" } as EventoStream, 9 * MIN)).toBeNull();

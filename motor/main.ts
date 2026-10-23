@@ -6,6 +6,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { setTimeout as esperar } from "node:timers/promises";
 import { criarAcompanhanteDeTarefas } from "../src/adapters/executor/acompanhar-tarefas.ts";
+import { criarAcompanhanteDeSubagentes } from "../src/adapters/executor/acompanhar-subagentes.ts";
 import { criarAmostradorMemoria } from "../src/adapters/executor/amostrador-memoria.ts";
 import { resolverBinario } from "../src/adapters/executor/caminho.ts";
 import { criarClaudeCliDriver } from "../src/adapters/executor/drivers/claude-cli.ts";
@@ -213,11 +214,13 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
   const subirLaco = (reg: Registry) => {
     if (papel === "computador") { log("info", "motor_so_computador", { machine_id: dados.machineId }); return; }
     const tarefasVivas = criarAcompanhanteDeTarefas((turnoId, tarefas) => ponteHttp.tarefas(turnoId, tarefas));
+    // NOD-350: a ponte já junta os trechos até a renovação (1 s), então aqui toda mudança vai para ela.
+    const subagentesVivos = criarAcompanhanteDeSubagentes((turnoId, lista, ocioso) => ponteHttp.subagentes(turnoId, lista, ocioso), { intervaloMs: 0 });
     laco = iniciarPoolDeLacos((ponte) => iniciarLaco({ ponte, registry: reg, pessoaId: dados.escopo.pessoaId, machineId: dados.machineId, relogio: () => Date.now(), renovacaoMs: 1_000, esperaVaziaMs: 1000, memoria, registroDaConta,
       aoDelta: (p, t) => ponteHttp.delta(p.turnoId, t),
-      aoEvento: (p, ev) => { if (ev.tipo === "tool_use") ponteHttp.ferramenta(p.turnoId, ev.nome); tarefasVivas.evento(p.turnoId, ev); },
+      aoEvento: (p, ev) => { if (ev.tipo === "tool_use") ponteHttp.ferramenta(p.turnoId, ev.nome); tarefasVivas.evento(p.turnoId, ev); subagentesVivos.evento(p.turnoId, ev); },
       aoIniciarTurno: (p) => { planosAqui.set(p.turnoId, p); },
-      aoTerminarTurno: (p) => { tarefasVivas.esquecer(p.turnoId); planosAqui.delete(p.turnoId); },
+      aoTerminarTurno: (p) => { tarefasVivas.esquecer(p.turnoId); subagentesVivos.parar(p.turnoId); subagentesVivos.esquecer(p.turnoId); planosAqui.delete(p.turnoId); },
       aoVigia: (p, aviso) => ponteHttp.vigia(p.turnoId, aviso),
       aoResultado: (p, r) => {
         const ia = lerIaDesktop(driverDoPlano(p));

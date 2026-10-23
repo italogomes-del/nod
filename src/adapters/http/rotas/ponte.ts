@@ -5,7 +5,7 @@ import type { Inventario } from "../../../contracts/inventario.ts";
 import type { PlanoTurno } from "../../../contracts/plano-turno.ts";
 import type { LeituraMemoria } from "../../../contracts/trabalho.ts";
 import { PAPEIS_MAQUINA, PLATAFORMAS_MAQUINA, type AnuncioMaquina, type PapelMaquina, type PlataformaMaquina, type VigiaVivo } from "../../../contracts/ponte.ts";
-import type { TarefaDoBot } from "../../../contracts/turno.ts";
+import type { SubagenteVivo, TarefaDoBot } from "../../../contracts/turno.ts";
 import type { ContaAnunciada, ProgressoDoLogin, PuxadaDeContas } from "../../../contracts/contas-ia.ts";
 import type { PedidoDeInstalacao, ProgressoDeInstalacao } from "../../../contracts/instalacoes-ssh.ts";
 import type { Escopo } from "../../../shared/types.ts";
@@ -82,6 +82,8 @@ export function criarPonteHttpServidor(d: {
   tarefas(plano: PlanoTurno, tarefas: TarefaDoBot[]): void;
   /** ADR-067: uma fala da sessão viva foi gravada — a tela troca o texto ao vivo pela mensagem. */
   fala?(plano: PlanoTurno): void;
+  /** NOD-350: a lista inteira dos subagentes do turno quando muda — publica turno.subagentes e guarda o resumo. */
+  subagentes?(plano: PlanoTurno, subagentes: SubagenteVivo[], principalOcioso?: boolean): void;
   /** NOD-73: o vigia do turno avisou (só nome e números) — publica turno.vigia e registra no log. */
   vigia?(plano: PlanoTurno, aviso: VigiaVivo): void;
   longpollMs?: number;
@@ -392,6 +394,7 @@ export function criarPonteHttpServidor(d: {
         if ("ferramenta" in t) d.ferramenta(plano, t.ferramenta);
         else if ("tarefas" in t) d.tarefas(plano, t.tarefas);
         else if ("vigia" in t) d.vigia?.(plano, t.vigia);
+        else if ("subagentes" in t) d.subagentes?.(plano, t.subagentes, t.ocioso);
         else if (t.texto) d.delta(plano, t.texto);
       }
       ctx.json(200, r);

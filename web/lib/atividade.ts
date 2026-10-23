@@ -1,4 +1,4 @@
-import type { TarefaDoBot } from "../../src/contracts/turno.ts";
+import type { SubagenteVivo, TarefaDoBot } from "../../src/contracts/turno.ts";
 
 /**
  * Turno vivo como cartão de atividade (definido em 2026-09-24): o balão é o que o agente DIZ, o cartão
@@ -15,6 +15,15 @@ export type Etapa = { texto: string; ferramentas: number };
  */
 export type VigiaDaAtividade = { mudoDesde: number | null; aberta: string | null; emFundo: number; repeticao: { rotulo: string; vezes: number } | null };
 
+/**
+ * NOD-350: um subagente (ou comando) em segundo plano como a tela o guarda. `recebidoEm` é quando a duração chegou (o
+ * tempo anda a partir dela entre um frame e outro); `fimEm` é quando a tela o viu terminar (a hora à direita da linha).
+ */
+export type SubagenteNaTela = SubagenteVivo & { recebidoEm: number; fimEm: number | null };
+
+/** NOD-350: os subagentes do turno e a linha pronta do servidor ("2 subagentes trabalhando · 1 não terminou"). */
+export type SubagentesDoTurno = { lista: SubagenteNaTela[]; resumo: string | null };
+
 export type AtividadeTurno = {
   /** Texto desde a última ferramenta (ou desde o início, se ainda não houve nenhuma). */
   atual: string;
@@ -27,14 +36,68 @@ export type AtividadeTurno = {
   tarefas: TarefaDoBot[];
   /** O último aviso do vigia do turno (turno.vigia); null enquanto não houve nenhum. */
   vigia: VigiaDaAtividade | null;
+  /** NOD-350: sobrevive à fala do bot (os subagentes seguem depois do `result` do turno principal). */
+  subagentes: SubagentesDoTurno | null;
 };
 
 export const ETAPAS_GUARDADAS = 200;
 
-export const ATIVIDADE_VAZIA: AtividadeTurno = { atual: "", etapas: [], totalEtapas: 0, ferramentas: 0, ultimaFerramenta: null, tarefas: [], vigia: null };
+export const ATIVIDADE_VAZIA: AtividadeTurno = { atual: "", etapas: [], totalEtapas: 0, ferramentas: 0, ultimaFerramenta: null, tarefas: [], vigia: null, subagentes: null };
 
 export function comTarefas(a: AtividadeTurno | undefined, tarefas: TarefaDoBot[]): AtividadeTurno {
   return { ...(a ?? ATIVIDADE_VAZIA), tarefas };
+}
+
+/** O frame `turno.subagentes` substitui a lista; quem já tinha terminado guarda a hora em que a tela viu o fim. */
+export function comSubagentes(a: AtividadeTurno | undefined, lista: readonly SubagenteVivo[], resumo: string | null, agora: number): AtividadeTurno {
+  const base = a ?? ATIVIDADE_VAZIA;
+  const antes = new Map((base.subagentes?.lista ?? []).map((s) => [s.id, s]));
+  const nova = lista.map((s): SubagenteNaTela => ({ ...s, recebidoEm: agora, fimEm: s.estado === "trabalhando" ? null : (antes.get(s.id)?.fimEm ?? agora) }));
+  return { ...base, subagentes: nova.length ? { lista: nova, resumo } : null };
+}
+
+/**
+ * Parar (ou o turno que acabou com algum ainda trabalhando): quem trabalhava vira parado na hora, e a linha de cima é
+ * refeita aqui (só este caso; enquanto rodam, a linha vem pronta do servidor, src/domain/subagentes.ts).
+ */
+export function subagentesParados(s: SubagentesDoTurno | null, agora: number): SubagentesDoTurno | null {
+  if (!s || !s.lista.some((x) => x.estado === "trabalhando")) return s;
+  const lista = s.lista.map((x): SubagenteNaTela => (x.estado === "trabalhando" ? { ...x, estado: "parado", passo: null, duracaoMs: x.duracaoMs + Math.max(0, agora - x.recebidoEm), recebidoEm: agora, fimEm: agora } : x));
+  const agentes = lista.filter((x) => x.natureza === "agente");
+  const parados = agentes.filter((x) => x.estado === "parado").length;
+  const naoTerminou = parados + agentes.filter((x) => x.estado === "falhou").length;
+  const resumo = agentes.length === 0
+    ? null
+    : parados === agentes.length
+      ? (parados === 1 ? "1 subagente parado" : `${parados} subagentes parados`)
+      : `${agentes.length === 1 ? "O subagente voltou" : `Os ${agentes.length} subagentes voltaram`} · ${naoTerminou === 1 ? "1 não terminou" : `${naoTerminou} não terminaram`}`;
+  return { lista, resumo };
+}
+
+/** Algum subagente ou comando ainda trabalha: o cabeçalho do bloco pulsa (depois da fala) e a contagem vale como "agora". */
+export function subagenteTrabalhando(a: AtividadeTurno | undefined): boolean {
+  return !!a?.subagentes?.lista.some((s) => s.estado === "trabalhando");
+}
+
+/**
+ * ADR-067: a fala do bot apaga o cartão ao vivo para a próxima volta — menos os subagentes, que seguem trabalhando depois
+ * dela (é o que deixava "Rodou um comando…" pulsando sozinho na task). null = não sobra nada a guardar.
+ */
+export function soSubagentes(a: AtividadeTurno | undefined): AtividadeTurno | null {
+  if (!a?.subagentes) return null;
+  // Critério 2: a última ferramenta do bot fica como ✓ ("Rodou um comando" deixa de pulsar), sem a narração, que já
+  // virou a mensagem da fala.
+  const ultimo = a.ultimaFerramenta ?? a.etapas[a.etapas.length - 1]?.texto ?? null;
+  return { ...ATIVIDADE_VAZIA, etapas: ultimo ? [{ texto: ultimo, ferramentas: 0 }] : [], totalEtapas: ultimo ? 1 : 0, subagentes: a.subagentes };
+}
+
+/**
+ * A volta do bot acabou (`result`), com ou sem fala: nada dele fica no "agora". A ferramenta já está numa etapa
+ * (comFerramenta) e deixa de ser o "agora"; o texto em streaming também sai — no Mac, os últimos deltas da volta viajam na
+ * mesma renovação da fala e chegam DEPOIS do `turno.fala`, recriando uma bolha com cursor que já está na conversa.
+ */
+export function semFerramentaAberta(a: AtividadeTurno): AtividadeTurno {
+  return a.ferramentas === 0 && a.ultimaFerramenta === null && a.atual === "" ? a : { ...a, atual: "", ferramentas: 0, ultimaFerramenta: null };
 }
 
 export function comVigia(a: AtividadeTurno | undefined, vigia: VigiaDaAtividade): AtividadeTurno {
@@ -65,7 +128,7 @@ export function comFerramenta(a: AtividadeTurno | undefined, rotulo: string): At
     etapas = [{ texto: rotulo, ferramentas: 1 }];
     totalEtapas += 1;
   }
-  return { atual: "", etapas: etapas.slice(-ETAPAS_GUARDADAS), totalEtapas, ferramentas: base.ferramentas + 1, ultimaFerramenta: rotulo, tarefas: base.tarefas, vigia: base.vigia };
+  return { atual: "", etapas: etapas.slice(-ETAPAS_GUARDADAS), totalEtapas, ferramentas: base.ferramentas + 1, ultimaFerramenta: rotulo, tarefas: base.tarefas, vigia: base.vigia, subagentes: base.subagentes };
 }
 
 /**
@@ -98,5 +161,8 @@ function primeiraFrase(limpo: string, max: number): string {
 export function linhaAtual(a: AtividadeTurno): string {
   const narracao = resumoEtapa(a.atual);
   if (narracao) return narracao.replace(/[.:]$/, "…");
-  return a.ultimaFerramenta ? `${a.ultimaFerramenta}…` : "Começando…";
+  if (a.ultimaFerramenta) return `${a.ultimaFerramenta}…`;
+  // NOD-350 (critério 3): depois da fala, o "agora" é a linha dos subagentes ("2 subagentes trabalhando", ou "Os 2
+  // subagentes voltaram" até o bot recomeçar a volta), não "Começando…".
+  return a.subagentes?.resumo ?? "Começando…";
 }

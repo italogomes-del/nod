@@ -342,12 +342,20 @@ describe("sessão viva (ADR-067)", () => {
   it("comando em segundo plano: task_started (is_backgrounded) abre; task_updated e task_notification com status final fecham", () => {
     const tarefas = s7().filter((e) => e.tipo === "tarefa_fundo");
     expect(tarefas).toEqual([
-      { tipo: "tarefa_fundo", id: "bcwaxdzy5", estado: "iniciada" },
-      { tipo: "tarefa_fundo", id: "bcwaxdzy5", estado: "terminada" },
-      { tipo: "tarefa_fundo", id: "bcwaxdzy5", estado: "terminada" },
+      { tipo: "tarefa_fundo", id: "bcwaxdzy5", estado: "iniciada", natureza: "comando" },
+      { tipo: "tarefa_fundo", id: "bcwaxdzy5", estado: "terminada", final: "concluido" },
+      { tipo: "tarefa_fundo", id: "bcwaxdzy5", estado: "terminada", final: "concluido" },
     ]);
-    // Subagente em primeiro plano também abre task_started, mas não segura a sessão.
+    // Comando em primeiro plano segue ignorado; subagente em primeiro plano entra na lista, mas não segura a sessão (NOD-350).
     expect(interpretarLinhaStreamJson(JSON.stringify({ type: "system", subtype: "task_started", task_id: "a1", is_backgrounded: false })).tipo).toBe("ignorado");
+    expect(interpretarLinhaStreamJson(JSON.stringify({ type: "system", subtype: "task_started", task_id: "a2", is_backgrounded: false, task_type: "local_agent", description: "Ler" }))).toEqual({
+      tipo: "tarefa_fundo",
+      id: "a2",
+      estado: "iniciada",
+      natureza: "agente",
+      descricao: "Ler",
+      emFundo: false,
+    });
     expect(interpretarLinhaStreamJson(JSON.stringify({ type: "system", subtype: "task_updated", task_id: "a1", patch: { status: "running" } })).tipo).toBe("ignorado");
     expect(interpretarLinhaStreamJson(JSON.stringify({ type: "system", subtype: "task_updated", task_id: "a1", patch: { status: "killed" } }))).toMatchObject({ estado: "terminada" });
   });
@@ -406,5 +414,104 @@ describe("sessão viva (ADR-067)", () => {
   it("textoDaRodada compõe a fala de uma volta como o fim do turno", () => {
     const evs = s7();
     expect(textoDaRodada(evs.slice(0, evs.findIndex((e) => e.tipo === "result") + 1))).toBe("Disparado\n\n4");
+  });
+});
+
+/**
+ * NOD-350: fixture REAL do CLI 2.1.296 (2026-10-23, haiku), filtrada e com o 2º agente editado para `failed` (LEIA-ME).
+ * Dois `Agent` em segundo plano; as linhas assistant/user deles chegam no stream principal com `parent_tool_use_id`.
+ */
+describe("subagentes no stream principal (NOD-350)", () => {
+  const s8 = () => eventosDe("s8-subagentes.jsonl");
+  const A1 = "ae5ad90904c8b0ae8";
+  const A2 = "a3a699a434ffdd5ca";
+
+  it("as linhas dos subagentes viram ignorado/subagente: o Bash do subagente não é ferramenta do bot", () => {
+    const evs = s8();
+    expect(evs.filter((e) => e.tipo === "ignorado" && e.razao === "subagente").length).toBeGreaterThan(5);
+    const ferramentas = evs.filter((e): e is Extract<EventoStream, { tipo: "tool_use" }> => e.tipo === "tool_use").map((e) => e.nome);
+    expect(ferramentas).toEqual(["Agent", "Agent"]);
+    expect(evs.filter((e) => e.tipo === "tool_result")).toHaveLength(2);
+    // O texto final do subagente não vira bloco da fala do bot.
+    const blocos = evs.filter((e): e is Extract<EventoStream, { tipo: "texto_bloco" }> => e.tipo === "texto_bloco").map((e) => e.texto);
+    expect(blocos).toHaveLength(3);
+    expect(blocos.join(" ")).not.toMatch(/tem \*\*3 linhas\*\*|Os dois comandos rodaram/);
+  });
+
+  it("task_started abre cada agente com a descrição; o fim traz concluido e falhou; comando nenhum", () => {
+    const tarefas = s8().filter((e) => e.tipo === "tarefa_fundo");
+    expect(tarefas.filter((t) => t.estado === "iniciada")).toEqual([
+      { tipo: "tarefa_fundo", id: A1, estado: "iniciada", natureza: "agente", descricao: "Contar linhas do um.txt" },
+      { tipo: "tarefa_fundo", id: A2, estado: "iniciada", natureza: "agente", descricao: "Falhar de propósito" },
+    ]);
+    const fins = tarefas.filter((t) => t.estado === "terminada").map((t) => [t.id, t.final]);
+    expect(new Set(fins.map((f) => f.join(":")))).toEqual(new Set([`${A1}:concluido`, `${A2}:falhou`]));
+  });
+
+  it("task_progress vira tarefa_progresso só com contagem, nome cru da ferramenta e duração (sem summary nem description)", () => {
+    const prog = s8().filter((e) => e.tipo === "tarefa_progresso");
+    expect(prog[0]).toEqual({ tipo: "tarefa_progresso", id: A1, chamadas: 1, ultimaFerramenta: "Read", duracaoMs: 898 });
+    for (const p of prog) expect(Object.keys(p).sort()).toEqual(["chamadas", "duracaoMs", "id", "tipo", "ultimaFerramenta"]);
+    expect(JSON.stringify(prog)).not.toMatch(/Reading|Running|nao-existe/);
+    // QA: summary e description de uma palavra (passariam pela regex do nome) não viram o passo, nem campo nenhum.
+    const linha = { type: "system", subtype: "task_progress", task_id: "a", description: "Segredo1", summary: "Segredo2", last_tool_name: "Bash", usage: { tool_uses: 2, duration_ms: 10 } };
+    const ev = interpretarLinhaStreamJson(JSON.stringify(linha));
+    expect(ev).toEqual({ tipo: "tarefa_progresso", id: "a", chamadas: 2, ultimaFerramenta: "Bash", duracaoMs: 10 });
+    expect(interpretarLinhaStreamJson(JSON.stringify({ ...linha, last_tool_name: undefined }))).toMatchObject({ ultimaFerramenta: null });
+  });
+
+  it("a sessão fecha certo: três voltas, texto final do bot, sem a fala do subagente", () => {
+    const evs = s8().filter((e) => e.tipo !== "ignorado");
+    const r = classificarSessao({ eventos: evs, exitCode: 0, signal: null, stderr: "" });
+    expect(r.desfecho).toBe("sucesso");
+    expect(evs.filter((e) => e.tipo === "result")).toHaveLength(3);
+    expect(r.ferramentasChamadas).toEqual(["Agent", "Agent"]);
+  });
+
+  it("delta de stream_event com parent_tool_use_id é do subagente; message_delta segue como chamada (subagente: true)", () => {
+    const delta = { type: "stream_event", parent_tool_use_id: "toolu_x", event: { type: "content_block_delta", delta: { type: "text_delta", text: "oi" } } };
+    expect(interpretarLinhaStreamJson(JSON.stringify(delta))).toMatchObject({ tipo: "ignorado", razao: "subagente" });
+    expect(interpretarLinhaStreamJson(JSON.stringify({ ...delta, parent_tool_use_id: null }))).toEqual({ tipo: "delta", texto: "oi" });
+    const md = { type: "stream_event", parent_tool_use_id: "toolu_x", event: { type: "message_delta", usage: { output_tokens: 3 } } };
+    expect(interpretarLinhaStreamJson(JSON.stringify(md))).toMatchObject({ tipo: "chamada", subagente: true });
+  });
+
+  it("descrição do modelo (QA): sem sobra de ANSI nem bidi, e o corte não parte emoji", () => {
+    const desc = (d: string) => (interpretarLinhaStreamJson(JSON.stringify({ type: "system", subtype: "task_started", task_id: "a", task_type: "local_agent", description: d })) as { descricao?: string }).descricao;
+    expect(desc("Extra\u0007\u001b[31m<b>x</b>\u001b[0m fim")).toBe("Extra <b>x</b> fim");
+    expect(desc("a\u202Eb\u2066c")).toBe("a b c");
+    const comEmoji = desc(`${"x".repeat(78)}😀😀`)!;
+    expect(comEmoji).toBe(`${"x".repeat(78)}…`);
+    expect(comEmoji).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
+  });
+
+  it("descrição do modelo: uma linha, sem controle, redigida e com até 80 caracteres", () => {
+    const longa = `Linha um\n\tdois\u0007 ${"x".repeat(120)}`;
+    const ev = interpretarLinhaStreamJson(JSON.stringify({ type: "system", subtype: "task_started", task_id: "a", is_backgrounded: true, task_type: "local_agent", description: longa }));
+    const d = (ev as Extract<EventoStream, { tipo: "tarefa_fundo" }>).descricao!;
+    expect(d.length).toBeLessThanOrEqual(80);
+    expect(d).toMatch(/^Linha um dois x+…$/);
+    const segredo = interpretarLinhaStreamJson(JSON.stringify({ type: "system", subtype: "task_started", task_id: "b", is_backgrounded: true, task_type: "local_agent", description: "usar sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789" }));
+    expect((segredo as Extract<EventoStream, { tipo: "tarefa_fundo" }>).descricao).not.toMatch(/abcdefghijklmnop/);
+    const vazia = interpretarLinhaStreamJson(JSON.stringify({ type: "system", subtype: "task_started", task_id: "c", is_backgrounded: true, task_type: "local_agent" }));
+    expect((vazia as Extract<EventoStream, { tipo: "tarefa_fundo" }>).descricao).toBe("Subagente");
+  });
+
+  it("comando em segundo plano: nunca leva a description (é o próprio comando)", () => {
+    const ev = interpretarLinhaStreamJson(JSON.stringify({ type: "system", subtype: "task_started", task_id: "b1", is_backgrounded: true, task_type: "local_bash", description: "rm -rf /tmp/x" }));
+    expect(ev).toEqual({ tipo: "tarefa_fundo", id: "b1", estado: "iniciada", natureza: "comando" });
+  });
+
+  it("killed e stopped param; progresso com usage estranho não quebra", () => {
+    for (const status of ["killed", "stopped", "cancelled"]) {
+      expect(interpretarLinhaStreamJson(JSON.stringify({ type: "system", subtype: "task_notification", task_id: "a", status }))).toMatchObject({ final: "parado" });
+    }
+    expect(interpretarLinhaStreamJson(JSON.stringify({ type: "system", subtype: "task_progress", task_id: "a", usage: { tool_uses: -3, duration_ms: "x" } }))).toEqual({
+      tipo: "tarefa_progresso",
+      id: "a",
+      chamadas: 0,
+      ultimaFerramenta: null,
+      duracaoMs: null,
+    });
   });
 });

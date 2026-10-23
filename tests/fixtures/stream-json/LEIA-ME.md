@@ -28,3 +28,10 @@ Origem: scratchpad/sondas da sessão de 2026-09-16 (mapa-cli.json descreve cada 
   mensagem no limite da ferramenta; a linha dela não aparece porque o stdout não a ecoa sem `--replay-user-messages`) e
   o modelo responde numa frase curta ("O prazo é sexta-feira, dia 9.") antes de chamar `lembrar` e fechar. Sem a regra
   da mensagem do meio, essa resposta (< 280 caracteres antes de uma ferramenta) era narração e sumia.
+- `s8-subagentes.jsonl` — REAL, FILTRADO e EDITADO (2026-10-23, CLI 2.1.296, haiku, NOD-350): stdin aberto, o modelo
+  chamou dois `Agent` com `run_in_background` ("Contar linhas do um.txt" e "Falhar de propósito"). As linhas
+  `assistant`/`user` DOS SUBAGENTES chegam no stream principal com `parent_tool_use_id` = o id do `Agent`; o progresso
+  vem em `system/task_progress` (`usage.tool_uses`, `last_tool_name`). Três voltas: "lancei", a volta quando o 1º
+  terminou e a final. Ficaram só init, assistant, user, result e system/task_*; o init foi reduzido; caminhos viraram
+  `/tmp/nod-turno`. EDITADO: o 2º agente voltou `completed` na captura (o modelo não falha de propósito) e foi trocado
+  para `failed` no `task_updated` e no `task_notification`, para cobrir a falha.

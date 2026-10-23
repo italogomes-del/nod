@@ -2,7 +2,7 @@ import type { ProgressoDoLogin, PuxadaDeContas } from "../../contracts/contas-ia
 import type { AnuncioMaquina, PastaParaLimpar, PonteInterna, RespostaRenovar, TrechoVivo, VigiaVivo } from "../../contracts/ponte.ts";
 import type { EsperaParaRodar } from "../../contracts/espera.ts";
 import type { PlanoTurno } from "../../contracts/plano-turno.ts";
-import type { TarefaDoBot } from "../../contracts/turno.ts";
+import type { SubagenteVivo, TarefaDoBot } from "../../contracts/turno.ts";
 import { versaoAceita } from "../../domain/versao-app.ts";
 import { log } from "../../obs/log.ts";
 import { ENTREGA_ESPERA_INICIAL_MS, ENTREGA_ESPERA_MAX_MS, ENTREGA_PERSISTENCIA_MS, LEASE_MS, TOLERANCIA_REINICIO_MS } from "../../shared/constantes.ts";
@@ -76,6 +76,8 @@ export function criarPonteHttp(o: { url: string; chave: string; versao: string; 
    * num servidor antigo NÃO cai no `conectar`, que recusaria ou limparia os planos do servidor.
    */
   const emAndamento = new Set<string>();
+  /** NOD-350: a entrega pode tentar por até 120 s; nesse meio a lista republicada não recria a fila que ela limpou. */
+  const entregando = new Set<string>();
   /**
    * NOD-199: já houve um `conectar` aceito — daí em diante o anúncio vai sempre pela rota de inventário. Um 409 de outra
    * rota (o `conectar` recusado com turno rodando, um `puxar` concorrente) NÃO volta a mandar o anúncio pelo `conectar`:
@@ -203,6 +205,7 @@ export function criarPonteHttp(o: { url: string; chave: string; versao: string; 
      */
     async entregar(e) {
       trechos.delete(e.turnoId);
+      entregando.add(e.turnoId);
       const inicio = agora();
       let espera = ENTREGA_ESPERA_INICIAL_MS;
       try {
@@ -224,7 +227,7 @@ export function criarPonteHttp(o: { url: string; chave: string; versao: string; 
             if (erro.codigo === "reconectar" && anuncio) await reconectar(anuncio).catch(() => undefined);
           }
         }
-      } finally { emAndamento.delete(e.turnoId); primeiraFalha.delete(e.turnoId); tokens.delete(e.turnoId); } // entregue ou abandonado: o turno deixou de rodar neste Mac.
+      } finally { entregando.delete(e.turnoId); emAndamento.delete(e.turnoId); primeiraFalha.delete(e.turnoId); tokens.delete(e.turnoId); } // entregue ou abandonado: o turno deixou de rodar neste Mac.
     },
     async desconectar() { await chamar("desconectar", {}); },
     /**
@@ -333,6 +336,14 @@ export function criarPonteHttp(o: { url: string; chave: string; versao: string; 
     tarefas(turnoId: string, lista: TarefaDoBot[]) { trechos.set(turnoId, [...(trechos.get(turnoId) ?? []).filter((t) => !("tarefas" in t)), { tarefas: lista }]); aparar(turnoId); },
     /** O vigia do turno (NOD-73): como as tarefas, o aviso mais novo substitui o que ainda não saiu — só ele importa. */
     vigia(turnoId: string, aviso: VigiaVivo) { trechos.set(turnoId, [...(trechos.get(turnoId) ?? []).filter((t) => !("vigia" in t)), { vigia: aviso }]); aparar(turnoId); },
+    /** NOD-350: a lista dos subagentes, como as tarefas: a mais nova substitui a que ainda não saiu (a renovação é ≤1/s). */
+    subagentes(turnoId: string, lista: SubagenteVivo[], ocioso?: boolean) {
+      // O `parar` do fim do turno publica depois do `entregar` (que já limpou os trechos): sem o turno em andamento, a
+      // entrada recriada nunca mais sairia nem seria apagada. A web marca os parados sozinha no fim do turno.
+      if (!emAndamento.has(turnoId) || entregando.has(turnoId)) return;
+      trechos.set(turnoId, [...(trechos.get(turnoId) ?? []).filter((t) => !("subagentes" in t)), ocioso === undefined ? { subagentes: lista } : { subagentes: lista, ocioso }]);
+      aparar(turnoId);
+    },
     cancelar() { for (const c of ativos) c.abort(); },
   };
 }

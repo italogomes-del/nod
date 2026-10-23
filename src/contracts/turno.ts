@@ -176,6 +176,9 @@ export const ESTADOS_DA_TAREFA = ["pendente", "andamento", "feita"] as const;
 export type EstadoDaTarefa = (typeof ESTADOS_DA_TAREFA)[number];
 export type TarefaDoBot = { id: string; titulo: string; estado: EstadoDaTarefa };
 
+/** O subagente em segundo plano mora em subagente.ts (NOD-350, gatilho de 200 linhas). */
+export { ESTADOS_DO_SUBAGENTE, type EstadoDoSubagente, type SubagenteVivo } from "./subagente.ts";
+
 /** O evento do stream do CLI mora em evento-stream.ts (dividido em 2026-10-11, gatilho de 200 linhas da EMENDA 26). */
 export type { EventoStream } from "./evento-stream.ts";
 

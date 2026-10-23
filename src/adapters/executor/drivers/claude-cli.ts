@@ -634,8 +634,9 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
                     if (ev.tipo === "result") entreVoltas = true;
                     else if (ev.tipo === "delta" || ev.tipo === "texto_bloco" || ev.tipo === "tool_use" || ev.tipo === "init") entreVoltas = false;
                     if (ev.tipo === "tarefa_fundo") {
-                      if (ev.estado === "iniciada") emFundo.add(ev.id);
-                      else emFundo.delete(ev.id);
+                      // NOD-350: o subagente em primeiro plano não segura a sessão viva (e fica fora da lista da task).
+                      if (ev.estado === "terminada") emFundo.delete(ev.id);
+                      else if (ev.emFundo !== false) emFundo.add(ev.id);
                     }
                     if (ev.tipo === "result") {
                       rodadas.push(eventos.slice(inicioDaRodada));

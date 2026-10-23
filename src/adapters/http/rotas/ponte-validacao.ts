@@ -25,8 +25,9 @@ import {
   type ExecucaoRaioX,
   type FerramentaNaChamada,
 } from "../../../contracts/raio-x.ts";
-import { ESTADOS_DA_TAREFA, type SinaisTurno, type TarefaDoBot } from "../../../contracts/turno.ts";
+import { ESTADOS_DA_TAREFA, ESTADOS_DO_SUBAGENTE, type SinaisTurno, type SubagenteVivo, type TarefaDoBot } from "../../../contracts/turno.ts";
 import { TETO_TAREFAS, TETO_TITULO_TAREFA } from "../../../domain/tarefas-do-bot.ts";
+import { NOME_DE_FERRAMENTA, TETO_DESCRICAO_SUBAGENTE, TETO_SUBAGENTES } from "../../../domain/subagentes.ts";
 import { LIMIARES_REPETICAO } from "../../../domain/vigia-turno.ts";
 import { usoDoPlanoValido } from "../../../domain/uso-do-plano.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
@@ -55,6 +56,12 @@ export function trechos(v: unknown): TrechoVivo[] {
   for (const t of v) {
     if (!t || typeof t !== "object" || Array.isArray(t)) continue;
     const o = t as Record<string, unknown>;
+    // NOD-350: o único trecho com duas chaves — a lista e se a volta do principal acabou (`ocioso`, opcional).
+    if (Array.isArray(o.subagentes) && Object.keys(o).every((k) => k === "subagentes" || k === "ocioso") && (o.ocioso === undefined || typeof o.ocioso === "boolean")) {
+      const s = subagentesDoTrecho(o.subagentes);
+      if (s) saida.push(o.ocioso === undefined ? { subagentes: s } : { subagentes: s, ocioso: o.ocioso });
+      continue;
+    }
     if (Object.keys(o).length !== 1) continue;
     if (texto(o.texto, 16_000)) { total += o.texto.length; saida.push({ texto: o.texto }); }
     else if (texto(o.ferramenta, 200) && /^[A-Za-z0-9_.-]+$/.test(o.ferramenta)) saida.push({ ferramenta: o.ferramenta });
@@ -140,6 +147,36 @@ function vigiaDoTrecho(v: unknown): VigiaVivo | null {
     repeticao = { nome: ro.nome, vezes: ro.vezes as number };
   }
   return { mudoMs: o.mudoMs, ...(o.aberta !== undefined ? { aberta: o.aberta } : {}), emFundo: o.emFundo, ...(repeticao ? { repeticao } : {}) };
+}
+const CHAVES_SUBAGENTE = ["chamadas", "descricao", "duracaoMs", "estado", "id", "natureza", "passo"].join();
+const ID_TAREFA = /^[A-Za-z0-9_-]{1,40}$/;
+// Uma linha, sem controle: o que a tela mostra. A descrição vem do modelo (redigida no Mac); o passo é um rótulo do nod.
+// eslint-disable-next-line no-control-regex
+const SEM_CONTROLE = /^[^\u0000-\u001f\u007f-\u009f\u2028\u2029]*$/;
+const SETE_DIAS_MS = 7 * 24 * 3_600_000;
+/**
+ * NOD-350 (definido em 2026-10-23): a lista dos subagentes num trecho vivo, estrita como o vigia — só as chaves do
+ * contrato, `descricao` ≤80 (vazia no comando), `passo` só o nome cru da ferramenta (o servidor faz o rótulo), estados do enum, inteiros ≥0 e o teto de 20. Um `summary`,
+ * um `prompt`, args ou qualquer chave a mais descartam o trecho inteiro.
+ */
+function subagentesDoTrecho(v: unknown[]): SubagenteVivo[] | null {
+  if (v.length > TETO_SUBAGENTES) return null;
+  const saida: SubagenteVivo[] = [];
+  const ids = new Set<string>();
+  for (const bruto of v) {
+    if (!bruto || typeof bruto !== "object" || Array.isArray(bruto)) return null;
+    const s = bruto as Record<string, unknown>;
+    if (Object.keys(s).sort().join() !== CHAVES_SUBAGENTE) return null;
+    if (typeof s.id !== "string" || !ID_TAREFA.test(s.id) || ids.has(s.id)) return null;
+    if (s.natureza !== "agente" && s.natureza !== "comando") return null;
+    if (!texto(s.descricao, TETO_DESCRICAO_SUBAGENTE) || !SEM_CONTROLE.test(s.descricao) || (s.natureza === "comando" && s.descricao !== "")) return null;
+    if (!ESTADOS_DO_SUBAGENTE.some((e) => e === s.estado)) return null;
+    if (s.passo !== null && (typeof s.passo !== "string" || !NOME_DE_FERRAMENTA.test(s.passo))) return null;
+    if (!inteiroAte(s.chamadas, 1_000_000) || !inteiroAte(s.duracaoMs, SETE_DIAS_MS)) return null;
+    ids.add(s.id);
+    saida.push({ id: s.id, natureza: s.natureza, descricao: s.descricao, estado: s.estado as SubagenteVivo["estado"], passo: s.passo, chamadas: s.chamadas, duracaoMs: s.duracaoMs });
+  }
+  return saida;
 }
 /** A lista de tarefas do bot num trecho vivo: fora do formato ou acima dos tetos, o trecho some sozinho. */
 function tarefasDoTrecho(v: unknown[]): TarefaDoBot[] | null {

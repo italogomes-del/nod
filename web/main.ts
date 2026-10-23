@@ -122,7 +122,7 @@ import type { EstadoTrabalho, TipoLinha } from "../src/contracts/trabalho.ts";
 import { aberto, abertosDoBot, leituraDoMac, listaPararTasks, telaAoFechar, telaDaTask, textoPararTasks, trabalhoPorId, trabalhosConhecidos } from "./lib/trabalhos.ts";
 import { criarTelemetria } from "./lib/telemetria-linhas.ts";
 import { chaveDaAtividade, criarVigiaDaAtividade, diaLocal, fusoLocal, type FiltroAtividade } from "./lib/atividade-do-bot.ts";
-import { blocosAoVivoDaTask, blocosDoHistoricoDaTask, htmlAcoesDaTask, renderIconeTrabalhos, renderTelaLinha, renderTodosOsTrabalhos, renderTopoTrabalho } from "./telas/trabalhos.ts";
+import { anuncioDosSubagentes, blocosAoVivoDaTask, blocosDoHistoricoDaTask, htmlAcoesDaTask, renderIconeTrabalhos, renderTelaLinha, renderTodosOsTrabalhos, renderTopoTrabalho } from "./telas/trabalhos.ts";
 import { renderTrabalhosPorBot, sinalDoBot } from "./telas/linha-do-dono.ts";
 import { temDonos } from "./lib/dono.ts";
 import { executarRotinaComConfirmacao } from "./lib/executar-rotina.ts";
@@ -1215,6 +1215,7 @@ function renderPrincipal(): void {
       cabecalho = renderTopoTrabalho(estado, t.id);
       // Por blocos como a conversa (definido em 2026-10-08, revisão W1, ADR-061): o texto ao vivo só mexe na parte ao vivo.
       partes = partesDaTask(t.id);
+      anunciarSubagentes(t.id);
       corpo = CASCA_TIMELINE_TASK;
       composer = { chave: `trabalho:${t.id}`, html: htmlComposer("Escreva para esta task…") + htmlAcoesDaTask(t.id) };
       break;
@@ -1323,6 +1324,22 @@ const CASCA_TIMELINE = '<div class="timeline"><div id="timeline-historico" class
 
 /** A casca da tela da task: as mesmas duas partes da conversa, com o desenho da task (`tk-timeline`). */
 const CASCA_TIMELINE_TASK = '<div class="timeline tk-timeline"><div id="timeline-historico" class="timeline-parte"></div><div id="timeline-ao-vivo" class="timeline-parte"></div></div>';
+
+/**
+ * NOD-350: a região viva própria dos subagentes (#anuncio-subagentes, separada da de "Ouvir") diz a linha deles quando
+ * ela MUDA nesta task — a contagem, cada fim; nunca as chamadas nem o último passo. Abrir a task só registra a linha.
+ */
+const anunciosDeSubagentes = new Map<string, string | null>();
+function anunciarSubagentes(id: string): void {
+  const texto = anuncioDosSubagentes(estado, id);
+  const conhecida = anunciosDeSubagentes.has(id);
+  const antes = anunciosDeSubagentes.get(id) ?? null;
+  anunciosDeSubagentes.set(id, texto);
+  if (anunciosDeSubagentes.size > 50) anunciosDeSubagentes.delete(anunciosDeSubagentes.keys().next().value!);
+  if (!conhecida || texto === antes || !texto) return;
+  const anuncio = document.getElementById("anuncio-subagentes");
+  if (anuncio) anuncio.textContent = texto;
+}
 
 /** A tela da task em duas partes: o histórico lembrado (só muda com mensagem nova) e o ao vivo do turno do trabalho. */
 function partesDaTask(id: string): PartesDaTimeline {

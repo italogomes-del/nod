@@ -61,6 +61,26 @@ function textoDoConteudo(content: unknown): string {
     .join("");
 }
 
+const DESCRICAO_TAREFA_MAX = 80;
+
+/** A `description` do subagente vem do modelo: uma linha, sem controle, redigida e com até 80 caracteres (NOD-350). */
+function descricaoDaTarefa(v: unknown): string {
+  // QA: a sequência ANSI inteira sai ("\x1b[31m"), não só o ESC — sobrava "[31m" na tela.
+  // eslint-disable-next-line no-control-regex
+  const semAnsi = str(v).replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/g, " ");
+  // eslint-disable-next-line no-control-regex
+  const limpa = semAnsi.replace(/[\u0000-\u001f\u007f-\u009f\u200e\u200f\u2028-\u202e\u2066-\u2069]+/g, " ").replace(/\s+/g, " ").trim();
+  const redigida = (redigirECortar(limpa, 400) ?? "").replace(/\s+/g, " ").trim();
+  const corte = /[\uD800-\uDBFF]$/.test(redigida.slice(0, DESCRICAO_TAREFA_MAX - 1)) ? DESCRICAO_TAREFA_MAX - 2 : DESCRICAO_TAREFA_MAX - 1;
+  const curta = redigida.length > DESCRICAO_TAREFA_MAX ? `${redigida.slice(0, corte).trimEnd()}…` : redigida;
+  return curta || "Subagente";
+}
+
+/** `completed` conclui; `failed` falha; `killed`/`stopped`/`cancelled` param (o Parar da pessoa ou do CLI). */
+function finalDaTarefa(status: string): "concluido" | "falhou" | "parado" {
+  return status === "completed" ? "concluido" : status === "failed" ? "falhou" : "parado";
+}
+
 export function interpretarLinhaStreamJson(linha: string): EventoStream {
   const bruta = linha.trim();
   if (bruta === "") return { tipo: "ignorado", razao: "linha_vazia", tipoBruto: null };
@@ -105,13 +125,37 @@ export function interpretarLinhaStreamJson(linha: string): EventoStream {
     };
   }
   // ADR-067: comando em segundo plano (Bash com run_in_background, Monitor). Só o que roda em segundo plano segura a
-  // sessão viva; um subagente em primeiro plano também abre `task_started`, mas termina antes do `result`.
-  if (type === "system" && subtype === "task_started" && o["is_backgrounded"] === true && str(o["task_id"]) !== "") {
-    return { tipo: "tarefa_fundo", id: str(o["task_id"]), estado: "iniciada" };
+  // sessão viva. NOD-350: o subagente (local_agent) em primeiro plano também abre `task_started` e entra na lista da task
+  // com `emFundo: false`; um comando em primeiro plano segue ignorado.
+  if (type === "system" && subtype === "task_started" && str(o["task_id"]) !== "") {
+    const agente = o["task_type"] === "local_agent";
+    const emFundo = o["is_backgrounded"] === true;
+    if (!emFundo && !agente) return { tipo: "ignorado", razao: "tipo_desconhecido", tipoBruto };
+    return {
+      tipo: "tarefa_fundo",
+      id: str(o["task_id"]),
+      estado: "iniciada",
+      natureza: agente ? "agente" : "comando",
+      ...(agente ? { descricao: descricaoDaTarefa(o["description"]) } : {}),
+      ...(emFundo ? {} : { emFundo: false as const }),
+    };
   }
   if (type === "system" && (subtype === "task_updated" || subtype === "task_notification") && str(o["task_id"]) !== "") {
     const status = subtype === "task_updated" ? str(obj(o["patch"])?.["status"]) : str(o["status"]);
-    if (ESTADOS_FINAIS_DE_TAREFA.includes(status)) return { tipo: "tarefa_fundo", id: str(o["task_id"]), estado: "terminada" };
+    if (ESTADOS_FINAIS_DE_TAREFA.includes(status)) return { tipo: "tarefa_fundo", id: str(o["task_id"]), estado: "terminada", final: finalDaTarefa(status) };
+  }
+  if (type === "system" && subtype === "task_progress" && str(o["task_id"]) !== "") {
+    const usage = obj(o["usage"]);
+    const chamadas = num(usage?.["tool_uses"]);
+    const duracao = num(usage?.["duration_ms"]);
+    const nome = str(o["last_tool_name"]).slice(0, 80);
+    return {
+      tipo: "tarefa_progresso",
+      id: str(o["task_id"]),
+      chamadas: chamadas !== null && chamadas >= 0 ? Math.floor(chamadas) : 0,
+      ultimaFerramenta: nome || null,
+      duracaoMs: duracao !== null && duracao >= 0 ? Math.floor(duracao) : null,
+    };
   }
   if (type === "rate_limit_event") {
     const info = obj(o["rate_limit_info"]);
@@ -130,8 +174,13 @@ export function interpretarLinhaStreamJson(linha: string): EventoStream {
       ...(info?.["isUsingOverage"] === true ? { usandoOverage: true } : {}),
     };
   }
+  // NOD-350 (medido no 2.1.296): as linhas assistant/user dos subagentes chegam no stream principal com
+  // `parent_tool_use_id` = o id do `Agent` que os chamou. Não são do turno do bot: nem passo, nem fala, nem ferramenta
+  // aberta no vigia. O progresso deles chega pelo `task_progress`. Só a `chamada` (custo, Raio-X) segue contando.
+  const doSubagente = typeof o["parent_tool_use_id"] === "string" && o["parent_tool_use_id"] !== "";
   if (type === "stream_event") {
     const ev = obj(o["event"]);
+    if (doSubagente && ev?.["type"] !== "message_delta") return { tipo: "ignorado", razao: "subagente", tipoBruto: `${type} ev=${str(ev?.["type"], "?")}` };
     if (ev?.["type"] === "content_block_delta") {
       const delta = obj(ev["delta"]);
       if (delta?.["type"] === "text_delta") return { tipo: "delta", texto: str(delta["text"]) };
@@ -152,6 +201,7 @@ export function interpretarLinhaStreamJson(linha: string): EventoStream {
     }
     return { tipo: "ignorado", razao: "tipo_desconhecido", tipoBruto: `${type} ev=${str(ev?.["type"], "?")}` };
   }
+  if ((type === "assistant" || type === "user") && doSubagente) return { tipo: "ignorado", razao: "subagente", tipoBruto: type };
   if (type === "assistant") {
     // NOD-174: o erro da API vem também como `assistant` com model "<synthetic>" e o mesmo texto do `result` ("Credit
     // balance is too low"). É do CLI, nunca do modelo: não vira bloco da fala. O cru segue no `erroCru` do result.

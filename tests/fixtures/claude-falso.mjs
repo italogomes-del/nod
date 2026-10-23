@@ -238,6 +238,39 @@ if (process.env.NOD_FALSO_CENARIO === "mensagem-no-meio") {
 // Este cenário imita a medição M1 (01/10/2026, 2.1.286): a 1ª mensagem põe um comando em segundo plano e responde;
 // quando ele termina, o CLI volta sozinho ("Testes verdes."); cada mensagem seguinte ganha uma resposta; o processo
 // sai quando o stdin fecha e nada roda em segundo plano. SIGTERM: sai 143 sem `result`, como no s6.
+// NOD-350: dois subagentes em segundo plano (Agent com run_in_background), como a sonda s8 gravou no 2.1.296. A 1ª
+// mensagem reemite a fixture inteira: a 1ª volta termina com os dois ainda rodando, as linhas deles chegam com
+// parent_tool_use_id, um conclui e o outro falha, cada fim abre uma volta sozinha. Sai quando o stdin fecha depois disso.
+if (process.env.NOD_FALSO_CENARIO === "subagentes-fundo") {
+  const sessaoSub = valor("--session-id") ?? valor("--resume") ?? "00000000-0000-4000-8000-000000000000";
+  const linhasSub = readFileSync(join(FIXTURES, "s8-subagentes.jsonl"), "utf8")
+    .split("\n")
+    .filter((l) => l.trim() !== "")
+    .map((l) => l.replaceAll(/"session_id": ?"[0-9a-f-]{36}"/g, `"session_id":"${sessaoSub}"`));
+  let acabou = false;
+  let fechada = false;
+  let comecou = false;
+  const talvezSair = () => { if (fechada && acabou) process.exit(0); };
+  process.on("SIGTERM", () => process.exit(143));
+  process.stdin.setEncoding("utf8");
+  process.stdin.on("data", async () => {
+    if (comecou) return;
+    comecou = true;
+    // Espaço entre linhas só imita o streaming; a ordem é a da fixture.
+    for (const l of linhasSub) {
+      // O driver fechou o stdin com os dois ainda rodando: o CLI real sairia sem as voltas seguintes — o teste vê.
+      if (fechada) process.exit(0);
+      process.stdout.write(`${l}\n`);
+      await dormir(5);
+    }
+    acabou = true;
+    talvezSair();
+  });
+  process.stdin.on("end", () => {
+    fechada = true;
+    talvezSair();
+  });
+} else
 if (process.env.NOD_FALSO_CENARIO === "sessao-viva") {
   const sessaoViva = valor("--session-id") ?? valor("--resume") ?? "00000000-0000-4000-8000-000000000000";
   const out = (o) => process.stdout.write(`${JSON.stringify(o)}\n`);

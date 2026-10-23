@@ -203,6 +203,60 @@ describe("desktop: fronteiras HTTP", () => {
       { texto: "ok" },
     ])).toEqual([{ texto: "ok" }]);
   });
+  it("subagentes (NOD-350, critério 6): a lista nova substitui a que não saiu; o servidor só aceita o contrato estrito", async () => {
+    const f = vi.fn<typeof fetch>().mockImplementation(async (url) => new Response(JSON.stringify(String(url).endsWith("/puxar") ? { plano: { turnoId: "x" } } : { ativo: true, versaoMinimaApp: "0.1.0" })));
+    const c = criarPonteHttp({ url: "https://nod.example", chave: "k", versao: "0.1.0", fetchImpl: f });
+    const um = { id: "ae5ad90904c8b0ae8", natureza: "agente" as const, descricao: "Contar linhas do um.txt", estado: "trabalhando" as const, passo: "Read", chamadas: 1, duracaoMs: 898 };
+    const sinais = { attempted: true, rejected: false, promptSubmitted: true, producedOutput: true };
+    // Turno que este Mac não está rodando (nunca puxou, ou já entregou): a lista não entra na fila.
+    c.subagentes("x", [um]);
+    await c.ponte.puxar("p");
+    c.subagentes("x", [um]); c.delta("x", "oi"); c.subagentes("x", [{ ...um, chamadas: 2 }], true);
+    await c.ponte.renovar({ turnoId: "x", machineId: "y", sinais, eventos: [] });
+    expect(JSON.parse(String(f.mock.calls[1]?.[1]?.body)).trechos).toEqual([{ texto: "oi" }, { subagentes: [{ ...um, chamadas: 2 }], ocioso: true }]);
+    // O `parar` do fim do turno chega depois do `entregar`: não recria a fila do turno (nunca mais sairia nem seria apagada).
+    let soltar!: () => void;
+    f.mockImplementationOnce(() => new Promise((ok) => { soltar = () => ok(new Response("{}")); }));
+    const entrega = c.ponte.entregar({ turnoId: "x" } as never);
+    // A lista que sai a cada 5 s cai no meio da entrega (que pode tentar por 120 s): não recria a fila.
+    c.subagentes("x", [{ ...um, estado: "parado" }]);
+    soltar();
+    await entrega;
+    c.subagentes("x", [{ ...um, estado: "parado" }]);
+    await c.ponte.renovar({ turnoId: "x", machineId: "y", sinais, eventos: [] });
+    expect(JSON.parse(String(f.mock.calls.at(-1)?.[1]?.body)).trechos ?? []).toEqual([]);
+    // `ocioso` é a única segunda chave aceita, e só booleana.
+    expect(trechos([{ subagentes: [um], ocioso: false }])).toEqual([{ subagentes: [um], ocioso: false }]);
+    expect(trechos([{ subagentes: [um], ocioso: "sim" }, { subagentes: [um], resumo: "x" }, { texto: "ok" }])).toEqual([{ texto: "ok" }]);
+
+    const comando = { id: "b1", natureza: "comando", descricao: "", estado: "concluido", passo: null, chamadas: 0, duracaoMs: 0 };
+    expect(trechos([{ subagentes: [um, comando] }])).toEqual([{ subagentes: [um, comando] }]);
+    expect(trechos([{ subagentes: [] }])).toEqual([{ subagentes: [] }]);
+    const ruins: unknown[] = [
+      { ...um, summary: "Li o arquivo e achei 3 linhas" },
+      { ...um, prompt: "Leia um.txt" },
+      { ...um, input: { command: "cat .env" } },
+      { ...um, descricao: "d".repeat(81) },
+      { ...um, descricao: "linha\nquebrada" },
+      { ...comando, descricao: "rm -rf /tmp/x" },
+      { ...um, estado: "rodando" },
+      { ...um, natureza: "bash" },
+      { ...um, passo: "p".repeat(81) },
+      { ...um, passo: "" },
+      { ...um, passo: "Leu um arquivo" },
+      { ...um, passo: "<img src=x onerror=alert(1)>" },
+      { ...um, chamadas: -1 },
+      { ...um, chamadas: 1.5 },
+      { ...um, duracaoMs: 8 * 24 * 3_600_000 },
+      { ...um, id: "../x" },
+      (({ passo: _p, ...r }) => r)(um),
+      "x",
+    ];
+    for (const ruim of ruins) expect(trechos([{ subagentes: [ruim] }, { texto: "ok" }])).toEqual([{ texto: "ok" }]);
+    expect(trechos([{ subagentes: [um, um] }])).toEqual([]);
+    expect(trechos([{ subagentes: Array.from({ length: 21 }, (_, i) => ({ ...um, id: `a${i}` })) }])).toEqual([]);
+    expect(trechos([{ subagentes: Array.from({ length: 20 }, (_, i) => ({ ...um, id: `a${i}` })) }])[0]).toBeDefined();
+  });
   it("fila acima de 16k de texto descarta o mais antigo", async () => {
     const f = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ ativo: true, versaoMinimaApp: "0.1.0" })));
     const c = criarPonteHttp({ url: "https://nod.example", chave: "k", versao: "0.1.0", fetchImpl: f });

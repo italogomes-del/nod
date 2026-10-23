@@ -84,6 +84,7 @@ const TIPOS: Record<TipoFrame, true> = {
   "turno.delta": true,
   "turno.atividade": true,
   "turno.tarefas": true,
+  "turno.subagentes": true,
   "turno.fala": true,
   "turno.vigia": true,
   "turno.encerrado": true,

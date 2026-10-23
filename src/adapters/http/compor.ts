@@ -22,7 +22,7 @@ import type { EstadoExecutor, IdExecutor } from "../../contracts/executor.ts";
 import { CAUSAS_DO_MAC, type CausaDoMac, type Inventario } from "../../contracts/inventario.ts";
 import { sondaFoiLenta } from "../../domain/sonda-lenta.ts";
 import type { PlanoTurno } from "../../contracts/plano-turno.ts";
-import type { EventoStream } from "../../contracts/turno.ts";
+import type { EventoStream, SubagenteVivo } from "../../contracts/turno.ts";
 import { chaveDe, cifrar, decifrar } from "../../db/cifra.ts";
 import { abrirTxEscopada, exigirForaDaTx, txEscopadaOuDoContexto } from "../../db/tx.ts";
 import { ErroDeDominio } from "../../domain/erro.ts";
@@ -78,6 +78,8 @@ import type { Deps, Services, UseCasesNod } from "../../use-cases/tipos.ts";
 import type { RegistroCatcher } from "../executor/drivers/catcher.ts";
 import { iniciarLaco } from "../executor/laco.ts";
 import { criarAcompanhanteDeTarefas } from "../executor/acompanhar-tarefas.ts";
+import { criarAcompanhanteDeSubagentes } from "../executor/acompanhar-subagentes.ts";
+import { comRotulos, haSubagenteTrabalhando, resumoSubagentes } from "../../domain/subagentes.ts";
 import { iniciarPoolDeLacos } from "../executor/pool-lacos.ts";
 import { criarAmostradorMemoria } from "../executor/amostrador-memoria.ts";
 import { criarExecutarComando, iniciarLimpezaDasTasks, modoDaLimpeza } from "../executor/limpeza-das-tasks.ts";
@@ -722,6 +724,7 @@ export function comporApp(o: OpcoesCompor): App {
     delta: (plano, texto) => publicarDoPlano(plano, "turno.delta", { texto }),
     ferramenta: (plano, nome) => publicarDoPlano(plano, "turno.atividade", { nome, rotulo: rotuloFerramenta(nome) }),
     tarefas: (plano, tarefas) => publicarDoPlano(plano, "turno.tarefas", { tarefas }),
+    subagentes: (plano, subagentes, principalOcioso) => publicarDoPlano(plano, "turno.subagentes", { subagentes, principalOcioso: principalOcioso === true }),
     fala: (plano) => publicarDoPlano(plano, "turno.fala", {}),
     vigia: (plano, aviso) => avisoDoVigia(plano, aviso),
     longpollMs: env.NOD_LONGPOLL_MS ? numero(env.NOD_LONGPOLL_MS, 20_000) : undefined,
@@ -1339,9 +1342,18 @@ export function comporApp(o: OpcoesCompor): App {
     }),
   ];
 
-  function publicarDoPlano(plano: PlanoTurno, tipo: "turno.delta" | "turno.atividade" | "turno.tarefas" | "turno.fala" | "turno.vigia", dados: Record<string, unknown>): void {
+  function publicarDoPlano(plano: PlanoTurno, tipo: "turno.delta" | "turno.atividade" | "turno.tarefas" | "turno.subagentes" | "turno.fala" | "turno.vigia", dados: Record<string, unknown>): void {
     // ADR-083: o "último passo" da faixa de Trabalhos é o rótulo da última ferramenta do turno vivo.
     if (tipo === "turno.atividade" && typeof dados.rotulo === "string") trabalhosVivos.ferramenta(plano.turnoId, dados.rotulo);
+    // NOD-350: e, enquanto algum subagente trabalha, a contagem deles (critérios 3 e 9).
+    // O frame leva a mesma linha pronta: a web só importa tipos de src, e o texto não pode divergir entre as telas.
+    if (tipo === "turno.subagentes" && Array.isArray(dados.subagentes)) {
+      // O `passo` chega como o nome cru da ferramenta (validado na ponte): o rótulo da tela sai daqui, nunca do Mac.
+      const lista = comRotulos(dados.subagentes as SubagenteVivo[]);
+      const resumo = resumoSubagentes(lista);
+      trabalhosVivos.subagentes(plano.turnoId, resumo, haSubagenteTrabalhando(lista));
+      dados = { ...dados, subagentes: lista, resumo };
+    }
     barramento.publicar(plano.autoria.conta_de_execucao, tipo, { turnoId: plano.turnoId, conversaId: plano.conversaId, agenteId: plano.agenteId, executor: plano.executor, machineId: plano.machineId, ...dados });
   }
   // NOD-73: o vigia do turno (só avisa), igual para o app do Mac e o modo servidor — frame e log saem do mesmo lugar.
@@ -1361,6 +1373,11 @@ export function comporApp(o: OpcoesCompor): App {
     const plano = planosVivos.get(turnoId);
     if (plano) publicarDoPlano(plano, "turno.tarefas", { tarefas });
   });
+  // NOD-350: os subagentes, agrupados em no máximo uma publicação por segundo (aqui não há a renovação para juntar).
+  const subagentesVivos = criarAcompanhanteDeSubagentes((turnoId, subagentes, principalOcioso) => {
+    const plano = planosVivos.get(turnoId);
+    if (plano) publicarDoPlano(plano, "turno.subagentes", { subagentes, principalOcioso });
+  }, { relogio });
   // definido em 2026-10-07 (ADR-083 §4, #194): a memória desta máquina (o executor local roda aqui), um amostrador só
   // para todos os pools. revisto em 2026-10-08 (ADR-085): no macOS ele amostra desde o primeiro `puxar` (a leitura da
   // máquina vai em cada um); fora do macOS, sem NOD_SIMULAR_*, não lê nada e o puxar vai sem leitura.
@@ -1382,9 +1399,10 @@ export function comporApp(o: OpcoesCompor): App {
         if (ev.tipo === "catcher") aoRegistrarCatcher({ turnoId: plano.turnoId, tipo: ev.subtipo, dados: ev.dados });
         else if (ev.tipo === "tool_use") publicarDoPlano(plano, "turno.atividade", { nome: ev.nome, rotulo: rotuloFerramenta(ev.nome) });
         tarefasVivas.evento(plano.turnoId, ev);
+        subagentesVivos.evento(plano.turnoId, ev);
       },
       aoIniciarTurno: (plano, adapter) => { interruptor.registrar(plano.turnoId, () => adapter.interromper()); planosVivos.set(plano.turnoId, plano); },
-      aoTerminarTurno: (plano) => { interruptor.esquecer(plano.turnoId); tarefasVivas.esquecer(plano.turnoId); planosVivos.delete(plano.turnoId); },
+      aoTerminarTurno: (plano) => { interruptor.esquecer(plano.turnoId); tarefasVivas.esquecer(plano.turnoId); subagentesVivos.parar(plano.turnoId); subagentesVivos.esquecer(plano.turnoId); planosVivos.delete(plano.turnoId); },
     }), p.ponte);
   // definido em 2026-10-09 (ADR-088): no modo local o servidor É o executor do Mac, e a limpeza das pastas de task roda
   // aqui, uma por pessoa ao lado do pool (as passadas entram numa fila só do processo, revisão do #225).

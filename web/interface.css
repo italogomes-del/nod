@@ -1893,3 +1893,18 @@ span.pilula-memoria { padding-right: 12px; cursor: default; }
 
 /* Chat limpo (ADR-114, PR 2): os botões da task pedida (Fazer aqui, Fazer depois) no topo da tela dela. */
 .tk-topo .linha-acoes { justify-content: flex-start; margin-top: 8px; }
+
+/* NOD-350 · subagentes em segundo plano (protótipo aprovado, nod-prototipos d224881). Embaixo dos passos do bot da task,
+   a linha "2 subagentes trabalhando" e uma linha por subagente, com as peças reais (.passo, .ponto-trabalho, .progresso).
+   Um ponto pulsa por tela: o do cabeçalho; os ícones das linhas ficam cheios e parados. Nenhum azul: o azul é da moldura. */
+.p350-subs { display: flex; flex-direction: column; align-items: center; gap: 6px; margin: 2px 0 10px; }
+.p350-cab { align-items: center; }
+.p350-cab .ponto-trabalho { flex: none; }
+.p350-cab .p350-quadrado { font-size: 10px; color: var(--ink-3); text-align: center; }
+.p350-lista { width: min(100%, 520px); box-sizing: border-box; margin: 0; list-style: none; gap: 2px; }
+.p350-lista .progresso-ic.rodando::before { animation: none; }
+.p350-lista .progresso-titulo { cursor: default; }
+.p350-lista .progresso-titulo:hover { text-decoration: none; }
+.p350-lista .progresso-passo { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.p350-lista .progresso-item.falhou .p350-passo { color: var(--ink-2); }
+@media (max-width: 640px) { .p350-lista .progresso-titulo { min-height: 0; } }

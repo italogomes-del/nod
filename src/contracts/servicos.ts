@@ -58,6 +58,8 @@ export interface ServicesNod<Trx> {
    */
   trabalhosVivos?: {
     ultimaFerramenta(turnoId: string): string | null;
+    /** NOD-350: "2 subagentes trabalhando · 1 não terminou" (ou "Os 2 subagentes voltaram"); ganha da ferramenta no último passo. */
+    resumoSubagentes?(turnoId: string): string | null;
     /**
      * ADR-085: com o pior processador e a maior carga por núcleo entre os Macs vivos dela (null = nenhum mandou). #219: e
      * o pior disco, com a histerese, e se algum app o mede. ADR-091: o maior uso da CPU e a pior fila (null = sem app novo).

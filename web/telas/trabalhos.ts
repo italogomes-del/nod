@@ -1,7 +1,7 @@
 import type { Mensagem } from "../../src/contracts/mensagem.ts";
 import type { TrabalhoDto } from "../../src/contracts/trabalho.ts";
 import type { Estado, FiltroTrabalhos, Tela } from "../estado/reducer.ts";
-import { linhaAtual, resumoEtapa, type AtividadeTurno } from "../lib/atividade.ts";
+import { linhaAtual, resumoEtapa, type AtividadeTurno, type SubagenteNaTela, type SubagentesDoTurno } from "../lib/atividade.ts";
 import { ICONE } from "../lib/icones.ts";
 import { botao, esc, hora, iconeAgente } from "../lib/render.ts";
 import { duracaoCurta } from "../lib/relogio.ts";
@@ -376,14 +376,81 @@ export function blocosDoHistoricoDaTask(estado: Estado, id: string): BlocoDaTime
   return [{ chave: "abertura", html: aberturaDaTask(t, estado) }, ...mensagens];
 }
 
-/** O AO VIVO da tela da task: os passos feitos, o de agora (ou o texto que o bot escreve) e a linha do fim. */
+/**
+ * NOD-350: os subagentes da task — os do turno vivo ou, com ela terminada, a lista final que a tela guardou do turno dela
+ * (por algum turnoId das mensagens; recarregar perde, sem migração).
+ */
+function subagentesDaTask(estado: Estado, t: TrabalhoDto, a: AtividadeTurno | undefined): SubagentesDoTurno | null {
+  if (a?.subagentes) return a.subagentes;
+  // Com um turno vivo, só os dele: a lista final do turno anterior não aparece no meio dos passos do novo.
+  if (t.turnoVivoId) return estado.subagentesDoFim[t.turnoVivoId] ?? null;
+  // Terminada: a do turno mais recente que deixou lista.
+  const mensagens = estado.trabalhoDetalhe[t.id]?.mensagens ?? [];
+  for (let i = mensagens.length - 1; i >= 0; i--) {
+    const turnoId = mensagens[i]!.turnoId;
+    if (turnoId && estado.subagentesDoFim[turnoId]) return estado.subagentesDoFim[turnoId]!;
+  }
+  return null;
+}
+
+/** O bot principal ainda trabalha nesta volta (texto ou ferramenta depois da última fala)? Então o pulso é dele. */
+function principalAtivo(a: AtividadeTurno | undefined): boolean {
+  return !!a && (a.ferramentas > 0 || a.atual.trim() !== "");
+}
+
+const P350_CLASSE = { trabalhando: "rodando", concluido: "pronta", falhou: "falhou", parado: "parada" } as const;
+const P350_ESTADO = { trabalhando: "trabalhando", concluido: "concluído", falhou: "não terminou", parado: "parado" } as const;
+const P350_OK = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>';
+
+function linhaDoSubagente(s: SubagenteNaTela, agora: number): string {
+  const classe = P350_CLASSE[s.estado];
+  const ic = s.estado === "concluido" ? `<span class="progresso-ic pronta">${P350_OK}</span>` : `<span class="progresso-ic ${classe}" aria-hidden="true">${s.estado === "falhou" ? "!" : ""}</span>`;
+  const passo = s.estado === "trabalhando" ? (s.passo ?? "começando") : P350_ESTADO[s.estado];
+  const tempoMs = s.estado === "trabalhando" ? s.duracaoMs + Math.max(0, agora - s.recebidoEm) : s.duracaoMs;
+  const fim = s.estado === "trabalhando" || s.fimEm === null ? (tempoMs < 60_000 ? "agora" : duracaoCurta(tempoMs)) : hora(s.fimEm);
+  return `<li class="progresso-item ${classe}" data-p350-sub="${esc(s.id)}">${ic}<span class="progresso-corpo"><span class="progresso-titulo p350-desc">${esc(s.descricao || "Subagente")}</span><span class="sr-only"> (${P350_ESTADO[s.estado]})</span><span class="progresso-passo"><span class="p350-passo">${esc(passo)}</span> · <span class="p350-n">${s.chamadas}</span> ${s.chamadas === 1 ? "chamada" : "chamadas"}</span></span><span class="progresso-fim">${esc(fim)}</span></li>`;
+}
+
+/**
+ * NOD-350 (protótipo aprovado, d224881): embaixo dos passos do bot, a linha "2 subagentes trabalhando" e uma linha por
+ * subagente. Um ponto pulsa por tela: o do cabeçalho, só quando o bot principal já falou e só os subagentes trabalham;
+ * enquanto o bot ainda trabalha, o pulso é dele e o ponto daqui fica parado. Comando em segundo plano só conta.
+ */
+function blocoDosSubagentes(subs: SubagentesDoTurno, a: AtividadeTurno | undefined, cor: string, agora: number): string {
+  const resumo = subs.resumo;
+  if (!resumo) return "";
+  const trabalhando = subs.lista.some((s) => s.estado === "trabalhando");
+  const agentes = subs.lista.filter((s) => s.natureza === "agente");
+  const todosParados = agentes.length > 0 && agentes.every((s) => s.estado === "parado");
+  const ic = trabalhando
+    ? `<span class="ponto-trabalho ${esc(cor)}${principalAtivo(a) ? "" : " pulso-trab"}" aria-hidden="true"></span>`
+    : todosParados ? '<span class="passo-ok p350-quadrado" aria-hidden="true">■</span>' : '<span class="passo-ok" aria-hidden="true">✓</span>';
+  const cab = `<div class="passo${trabalhando && !principalAtivo(a) ? " passo-agora" : ""} p350-cab">${ic}<span class="p350-cab-txt">${esc(resumo)}</span></div>`;
+  const lista = agentes.length ? `<ul class="progresso p350-lista">${agentes.map((s) => linhaDoSubagente(s, agora)).join("")}</ul>` : "";
+  return `<section class="p350-subs" aria-label="Subagentes">${cab}${lista}</section>`;
+}
+
+/**
+ * NOD-350: o que a região viva diz da task: a linha dos subagentes (a contagem e cada fim mudam o texto; as chamadas e o
+ * último passo não). main.ts só escreve quando o texto muda.
+ */
+export function anuncioDosSubagentes(estado: Estado, id: string): string | null {
+  const t = estado.trabalhoDetalhe[id]?.trabalho ?? trabalhoPorId(estado, id);
+  return t ? (subagentesDaTask(estado, t, atividadeDe(estado, t))?.resumo ?? null) : null;
+}
+
+/** O AO VIVO da tela da task: os passos feitos, os subagentes, o de agora (ou o texto que o bot escreve) e a linha do fim. */
 export function blocosAoVivoDaTask(estado: Estado, id: string): BlocoDaTimeline[] {
   const t = estado.trabalhoDetalhe[id]?.trabalho ?? trabalhoPorId(estado, id);
   if (!t) return [];
   const bot = agente(estado, t.agenteId);
   const a = atividadeDe(estado, t);
+  const subs = subagentesDaTask(estado, t, a);
+  // O bot já falou e só os subagentes ficaram: o "agora" é o cabeçalho deles, sem segunda linha pulsando (critério 2) —
+  // nem "Começando…" quando todos voltaram e o bot ainda não recomeçou.
+  const soEles = !!a?.subagentes && !principalAtivo(a);
   const feitos = (a?.etapas ?? []).map((e) => `<div class="passo"><span class="passo-ok" aria-hidden="true">✓</span><span>${esc(resumoEtapa(e.texto))}</span></div>`).join("");
-  const agora = t.estado === "rodando" && a
+  const agora = soEles ? "" : t.estado === "rodando" && a
     ? a.atual.trim() && a.ferramentas === 0
       ? `<article class="message bot streaming ao-vivo">${bot ? iconeAgente(bot, "md", "trabalhando") : ""}<div class="bubble-wrap"><div class="bubble">${textoFormatado(a.atual, { chave: `task:${t.id}`, aoVivo: true })}<span class="cursor">▍</span></div></div></article>`
       : `<div class="passo passo-agora"><span class="ponto-trabalho ${esc(bot?.cor ?? "")} pulso-trab" aria-hidden="true"></span><span>${esc(linhaAtual(a))}</span></div>`
@@ -391,7 +458,8 @@ export function blocosAoVivoDaTask(estado: Estado, id: string): BlocoDaTimeline[
       ? `<div class="passo passo-agora"><span class="ponto-trabalho ${esc(bot?.cor ?? "")} pulso-trab" aria-hidden="true"></span><span>${esc(t.ultimoPasso ?? "trabalhando…")}</span></div>`
       : "";
   const fim = !aberto(t) ? `<div class="linha-centro-wrap"><span class="linha-centro estatica"><span class="linha-ok" aria-hidden="true">${t.estado === "terminado" ? "✓" : "■"}</span><b>${esc(t.titulo)}</b><span>${esc(situacaoDe(t))} · ${esc(tempoDe(t, estado.agora))}${custoDaFrente(t) !== null ? ` · ${esc(custoDaFrente(t))}` : ""}</span></span></div>` : "";
-  return [{ chave: "passos", html: feitos }, { chave: "agora", html: agora }, { chave: "fim", html: fim }].filter((b) => b.html !== "");
+  const subagentes = subs ? blocoDosSubagentes(subs, a, bot?.cor ?? "", estado.agora) : "";
+  return [{ chave: "passos", html: feitos }, { chave: "subagentes", html: subagentes }, { chave: "agora", html: agora }, { chave: "fim", html: fim }].filter((b) => b.html !== "");
 }
 
 /** Os botões embaixo do campo da task: Parar task (só com ela aberta; main.ts esconde ao terminar) e Fechar. */

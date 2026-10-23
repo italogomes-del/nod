@@ -9,11 +9,12 @@ import { PRAZO_TESTE_FALSO_MS, prazoSondaDoTeste } from "../../helpers/prazo-fal
 import { configDosDrivers } from "../../../src/adapters/executor/registry.ts";
 import type { ConfigDriver, Driver, Instance, SinksTurno } from "../../../src/adapters/executor/spi.ts";
 import type { PlanoTurno } from "../../../src/contracts/plano-turno.ts";
-import type { EventoStream, SinaisTurno } from "../../../src/contracts/turno.ts";
+import type { EventoStream, SinaisTurno, SubagenteVivo } from "../../../src/contracts/turno.ts";
 import type { VigiaVivo } from "../../../src/contracts/ponte.ts";
 import { criarVigiaTurno } from "../../../src/domain/vigia-turno.ts";
 import { molduraMensagemNoMeio } from "../../../src/domain/mensagem-no-meio.ts";
 import { capacidadesDe } from "../../../src/domain/harness.ts";
+import { criarAcompanhanteDeSubagentes } from "../../../src/adapters/executor/acompanhar-subagentes.ts";
 
 /**
  * Spawn REAL do binário falso (tests/fixtures/claude-falso.mjs, L3) por trás de um `claude` de
@@ -556,6 +557,43 @@ describe("driver claude-cli contra o binário falso (contrato empírico 2026-09-
       expect(r.env.BASH_MAX_TIMEOUT_MS).toBe("2147483647");
       const entradas = (await readFile(stdin, "utf8")).trim().split("\n").map((l) => JSON.parse(l) as { type: string; message: { content: { type: string; text: string }[] } });
       expect(entradas.map((e) => e.message.content[0]?.text)).toEqual([expect.stringContaining("Some 17 e 25"), "quanto é 2+2?"]);
+    });
+
+    it("NOD-350: dois subagentes em segundo plano seguram a sessão; um conclui, outro falha, e a task termina", async () => {
+      const { instance } = await instanciar("subagentes-fundo", {}, HELP);
+      const adapter = instance.adapter(planoDeTeste(dir));
+      const falas: string[] = [];
+      const espiao = sinksEspiao({});
+      const publicadas: SubagenteVivo[][] = [];
+      const ociosos: boolean[] = [];
+      const acompanhante = criarAcompanhanteDeSubagentes((_t, l, ocioso) => { publicadas.push(l); ociosos.push(ocioso); }, { intervaloMs: 0 });
+      const resultado = await adapter.rodarTurno({
+        ...espiao.sinks,
+        evento: (e) => {
+          espiao.eventos.push(e);
+          acompanhante.evento("t", e);
+        },
+        falaIntermediaria: (t) => falas.push(t),
+        ocioso: async () => false,
+      });
+
+      expect(resultado.desfecho).toBe("sucesso");
+      // As ferramentas dos subagentes (com parent_tool_use_id) não viram ferramenta do bot: só o Agent do principal.
+      expect(espiao.eventos.filter((e) => e.tipo === "tool_use").map((e) => (e as { nome: string }).nome)).toEqual(["Agent", "Agent"]);
+      // Durante: os dois apareceram trabalhando e com progresso (chamadas > 0).
+      expect(publicadas.some((l) => l.length === 2 && l.every((s) => s.estado === "trabalhando"))).toBe(true);
+      expect(publicadas.some((l) => l.some((s) => s.estado === "trabalhando" && s.chamadas > 0))).toBe(true);
+      // Fim: um concluído, outro com falha, e ninguém mais trabalhando.
+      const final = publicadas.at(-1)!;
+      expect(final.map((s) => s.estado).sort()).toEqual(["concluido", "falhou"]);
+      expect(final.map((s) => s.descricao)).toContain("Contar linhas do um.txt");
+      // As voltas do principal viraram fala ou entrega; o texto dos subagentes ("Os dois comandos rodaram…", "A leitura mostrou…") nunca.
+      // A última volta é a entrega do turno.
+      expect(falas).toEqual(["lancei", "Um dos agentes já terminou; aguardando o segundo."]);
+      expect(resultado.texto).toMatch(/^O `um\.txt` tem 3 linhas/);
+      expect([...falas, resultado.texto].join("\n")).not.toMatch(/Os dois comandos rodaram|A leitura mostrou/);
+      // A volta do principal acabou com eles rodando: o acompanhante avisou a tela (sem depender de fala).
+      expect(ociosos.some((o) => o)).toBe(true);
     });
 
     it("sem o laço da sessão (sinks antigos): fecha na primeira volta sem nada em segundo plano, como antes", async () => {

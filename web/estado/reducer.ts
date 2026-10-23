@@ -21,13 +21,13 @@ import type { ExecucaoRotina } from "../../src/contracts/rotina.ts";
 import type { Experimentos, RaioXConversa, UsoDoMac } from "../../src/contracts/raio-x.ts";
 import type { Relato } from "../../src/contracts/relato.ts";
 import type { MembroSala, Sala } from "../../src/contracts/sala.ts";
-import type { EstadoDaTarefa, FaixaParada, TarefaDoBot } from "../../src/contracts/turno.ts";
+import type { EstadoDaTarefa, EstadoDoSubagente, FaixaParada, SubagenteVivo, TarefaDoBot } from "../../src/contracts/turno.ts";
 import type { DonoDto, EstadoDoDono } from "../../src/contracts/dono.ts";
 import type { NivelPressao, TaxaDeAbertura, TrabalhoDetalheDto, TrabalhosDto } from "../../src/contracts/trabalho.ts";
 import type { CustoDoDiaDto } from "../../src/contracts/cota.ts";
 import type { Escopo } from "../../src/shared/types.ts";
 import type { LeituraAtual } from "../lib/ouvir.ts";
-import { comFerramenta, comTarefas, comTexto, comVigia, type AtividadeTurno, type VigiaDaAtividade } from "../lib/atividade.ts";
+import { ATIVIDADE_VAZIA, comFerramenta, comSubagentes, comTarefas, comTexto, comVigia, semFerramentaAberta, soSubagentes, subagentesParados, type AtividadeTurno, type SubagentesDoTurno, type VigiaDaAtividade } from "../lib/atividade.ts";
 import { chaveDaAtividade, diaLocal, type VistaDaAtividade } from "../lib/atividade-do-bot.ts";
 import type { EstadoConexao } from "../lib/live-events.ts";
 import { ehErroDeRede, type ErroNaTela } from "../lib/erro-da-tela.ts";
@@ -219,6 +219,11 @@ export type Estado = {
    * bot ficava "Trabalhando" para sempre. Só os mais recentes (`ENCERRADOS_GUARDADOS`).
    */
   turnosEncerrados: readonly string[];
+  /**
+   * NOD-350: os subagentes do turno que acabou (turnoId → lista final), para a task terminada ainda dizer quem concluiu,
+   * falhou ou parou (critérios 4 e 5). Só na memória da tela, os mais recentes; recarregar perde (sem migração).
+   */
+  subagentesDoFim: Readonly<Record<string, SubagentesDoTurno>>;
   /**
    * NOD-216 (revisão): os turnos que uma leitura tirou (turnoId → quando a leitura saiu). A resposta MAIS VELHA que chega
    * depois não os traz de volta — sem isto, o GET conversa que saiu antes do GET trabalhos devolvia o fantasma.
@@ -488,6 +493,7 @@ export const estadoInicial: Estado = {
   atividades: {},
   turnosVivos: {},
   turnosEncerrados: [],
+  subagentesDoFim: {},
   turnosDesmentidos: {},
   cancelando: {},
   salas: [],
@@ -564,6 +570,20 @@ function tarefasDoFrame(v: unknown): TarefaDoBot[] {
       ? [{ id: o.id, titulo: o.titulo, estado: o.estado as EstadoDaTarefa }]
       : [];
   }).slice(0, 50);
+}
+
+const ESTADOS_SUBAGENTE: Record<EstadoDoSubagente, true> = { trabalhando: true, concluido: true, falhou: true, parado: true };
+
+/** NOD-350: o servidor já validou (ponte-validacao.ts); aqui só não deixa um frame torto quebrar a tela. */
+function subagentesDoFrame(v: unknown): SubagenteVivo[] {
+  if (!Array.isArray(v)) return [];
+  const num = (n: unknown) => (typeof n === "number" && Number.isFinite(n) && n >= 0 ? n : 0);
+  return v.flatMap((t): SubagenteVivo[] => {
+    const o = (t && typeof t === "object" ? t : {}) as Record<string, unknown>;
+    if (typeof o.id !== "string" || typeof o.estado !== "string" || !(o.estado in ESTADOS_SUBAGENTE)) return [];
+    if (o.natureza !== "agente" && o.natureza !== "comando") return [];
+    return [{ id: o.id, natureza: o.natureza, descricao: typeof o.descricao === "string" ? o.descricao.slice(0, 80) : "", estado: o.estado as EstadoDoSubagente, passo: typeof o.passo === "string" && o.passo !== "" ? o.passo.slice(0, 60) : null, chamadas: num(o.chamadas), duracaoMs: num(o.duracaoMs) }];
+  }).slice(0, 20);
 }
 
 function texto(v: unknown): string | null {
@@ -700,8 +720,30 @@ function semDelta(estado: Estado, conversaId: string | null, turnoId: string | n
   const daConversa = estado.atividades[conversaId];
   if (!daConversa || !(turnoId in daConversa)) return estado;
   const restantes = { ...daConversa };
-  delete restantes[turnoId];
+  // NOD-350: a fala recomeça o cartão, mas os subagentes seguem trabalhando depois dela.
+  const fica = soSubagentes(daConversa[turnoId]);
+  if (fica) restantes[turnoId] = fica;
+  else delete restantes[turnoId];
   return { ...estado, atividades: { ...estado.atividades, [conversaId]: restantes } };
+}
+
+export const SUBAGENTES_DO_FIM_GUARDADOS = 50;
+
+/**
+ * NOD-350: o turno acabou (ou foi parado). Quem ainda trabalhava vira parado (critério 5) e a lista final fica guardada
+ * por turnoId para a task terminada; o cartão ao vivo some em seguida (semDelta + o delete abaixo).
+ */
+function fimDosSubagentes(estado: Estado, conversaId: string | null, turnoId: string | null, agora: number): Estado {
+  if (!conversaId || !turnoId) return estado;
+  const daConversa = estado.atividades[conversaId];
+  const final = subagentesParados(daConversa?.[turnoId]?.subagentes ?? null, agora);
+  if (!daConversa || !(turnoId in daConversa)) return estado;
+  const restantes = { ...daConversa };
+  delete restantes[turnoId];
+  const atividades = { ...estado.atividades, [conversaId]: restantes };
+  if (!final) return { ...estado, atividades };
+  const guardados = Object.entries({ ...estado.subagentesDoFim, [turnoId]: final }).slice(-SUBAGENTES_DO_FIM_GUARDADOS);
+  return { ...estado, atividades, subagentesDoFim: Object.fromEntries(guardados) };
 }
 
 function semConversa(atividades: Estado["atividades"], conversaId: string): Estado["atividades"] {
@@ -870,6 +912,28 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
     if (!turnoId || !conversaId || !guardaAoVivo(e, conversaId)) return e;
     return { ...e, atividades: comAtividade(e, conversaId, turnoId, (a) => comTarefas(a, tarefasDoFrame(f.dados.tarefas))) };
   },
+  // NOD-350: a lista inteira dos subagentes do turno (o servidor manda no máximo ~1 por segundo) e a linha pronta.
+  "turno.subagentes": (e, f, agora) => {
+    if (turnoDeLigacao(f.dados)) return e;
+    const turnoId = texto(f.dados.turnoId);
+    const conversaId = texto(f.dados.conversaId);
+    if (!turnoId || !conversaId || !guardaAoVivo(e, conversaId)) return e;
+    // A descarga do último frame pode chegar depois do fim: não ressuscita o cartão, só acerta a lista final.
+    if (e.turnosEncerrados.includes(turnoId)) {
+      const fim = e.subagentesDoFim[turnoId];
+      if (!fim) return e;
+      // A base é a lista final guardada: quem já tinha terminado mantém a hora em que a tela viu o fim.
+      const lista = subagentesParados(comSubagentes({ ...ATIVIDADE_VAZIA, subagentes: fim }, subagentesDoFrame(f.dados.subagentes), texto(f.dados.resumo), agora).subagentes, agora);
+      return lista ? { ...e, subagentesDoFim: { ...e.subagentesDoFim, [turnoId]: lista } } : e;
+    }
+    // `principalOcioso`: a volta do bot acabou, com ou sem fala (sala, ou só disparou os subagentes) — a última
+    // ferramenta dele vira ✓ e deixa de pulsar no "agora" (critério 2).
+    const ocioso = f.dados.principalOcioso === true;
+    return { ...e, atividades: comAtividade(e, conversaId, turnoId, (a) => {
+      const nova = comSubagentes(a, subagentesDoFrame(f.dados.subagentes), texto(f.dados.resumo), agora);
+      return ocioso ? semFerramentaAberta(nova) : nova;
+    }) };
+  },
   // NOD-73: o vigia só avisa. Guarda o aviso no turno vivo; a ligação não mostra nada disso (ADR-071).
   "turno.vigia": (e, f, agora) => {
     if (turnoDeLigacao(f.dados)) return e;
@@ -890,8 +954,8 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
   // quando um turno termina (uma leitura por turno, sem relógio novo); fora da conversa a falta espera a tela pedir. O turno
   // interrompido também gastou a janela (e é o que acaba quando a conta bate no limite): relê igual (revisão do PR 1).
   // NOD-12: e a lista de contas, que carrega a leitura por conta.
-  "turno.encerrado": (e, f) => invalidar(semDelta(encerrado(semTurnoVivo(e, texto(f.dados.turnoId)), texto(f.dados.turnoId)), texto(f.dados.conversaId), texto(f.dados.turnoId)), conv(f), "frota", usoPlano(e), contasDoTurno(e), ...trabalhosDoTurno(f)),
-  "turno.interrompido": (e, f) => invalidar(semDelta(encerrado(semTurnoVivo(e, texto(f.dados.turnoId)), texto(f.dados.turnoId)), texto(f.dados.conversaId), texto(f.dados.turnoId)), conv(f), "frota", "sua-vez", usoPlano(e), contasDoTurno(e), ...trabalhosDoTurno(f)),
+  "turno.encerrado": (e, f, agora) => invalidar(fimDosSubagentes(encerrado(semTurnoVivo(e, texto(f.dados.turnoId)), texto(f.dados.turnoId)), texto(f.dados.conversaId), texto(f.dados.turnoId), agora), conv(f), "frota", usoPlano(e), contasDoTurno(e), ...trabalhosDoTurno(f)),
+  "turno.interrompido": (e, f, agora) => invalidar(fimDosSubagentes(encerrado(semTurnoVivo(e, texto(f.dados.turnoId)), texto(f.dados.turnoId)), texto(f.dados.conversaId), texto(f.dados.turnoId), agora), conv(f), "frota", "sua-vez", usoPlano(e), contasDoTurno(e), ...trabalhosDoTurno(f)),
   "decisao.nova": (e, f) => invalidar(e, "sua-vez", conv(f)),
   "decisao.decidida": (e, f) => invalidar(e, "sua-vez", conv(f)),
   "decisao.vencida": (e, f) => invalidar(e, "sua-vez", conv(f)),

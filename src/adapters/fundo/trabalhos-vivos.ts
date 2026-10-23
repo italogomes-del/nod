@@ -54,6 +54,12 @@ function piorDisco(a: LeituraGuardada | null, b: LeituraGuardada): LeituraGuarda
 
 export function criarTrabalhosVivos(agora: () => number = Date.now) {
   const ferramentas = new Map<string, string>();
+  /**
+   * NOD-350: a linha curta dos subagentes do turno ("2 subagentes trabalhando", "Os 2 subagentes voltaram"). Com todos de
+   * volta ela fica até o bot usar outra ferramenta (a volta dele recomeçou) — antes disso o último passo seria o
+   * "Chamou um subagente" de minutos atrás.
+   */
+  const subagentes = new Map<string, { resumo: string; trabalhando: boolean }>();
   const maquinas = new Map<string, LeituraGuardada>();
   const vistoPorPessoa = new Map<string, Visto>();
   /** ADR-085: quando a pessoa trocou o "uso do Mac" pela última vez (o cache do puxar lido antes disso não vale). */
@@ -142,10 +148,22 @@ export function criarTrabalhosVivos(agora: () => number = Date.now) {
     ferramenta(turnoId: string, nome: string): void {
       ferramentas.delete(turnoId);
       ferramentas.set(turnoId, nome);
+      if (subagentes.get(turnoId)?.trabalhando === false) subagentes.delete(turnoId);
       if (ferramentas.size > TURNOS_GUARDADOS) ferramentas.delete(ferramentas.keys().next().value!);
     },
     esquecerTurno(turnoId: string): void {
       ferramentas.delete(turnoId);
+      subagentes.delete(turnoId);
+    },
+    /** NOD-350: null = lista vazia (o último passo volta a ser a ferramenta ou a fala). */
+    subagentes(turnoId: string, resumo: string | null, trabalhando = true): void {
+      subagentes.delete(turnoId);
+      if (resumo === null) return;
+      subagentes.set(turnoId, { resumo, trabalhando });
+      if (subagentes.size > TURNOS_GUARDADOS) subagentes.delete(subagentes.keys().next().value!);
+    },
+    resumoSubagentes(turnoId: string): string | null {
+      return subagentes.get(turnoId)?.resumo ?? null;
     },
     ultimaFerramenta(turnoId: string): string | null {
       return ferramentas.get(turnoId) ?? null;

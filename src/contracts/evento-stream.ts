@@ -58,7 +58,27 @@ export type EventoStream =
    * novo sozinho. Medido no 2.1.286: `system/task_started` (is_backgrounded) abre; `task_updated` com status final
    * ou `task_notification` fecha.
    */
-  | { tipo: "tarefa_fundo"; id: string; estado: "iniciada" | "terminada" }
-  | { tipo: "ignorado"; razao: "linha_vazia" | "json_invalido" | "tipo_desconhecido" | "sintetico"; tipoBruto: string | null }
+  | {
+      tipo: "tarefa_fundo";
+      id: string;
+      estado: "iniciada" | "terminada";
+      /**
+       * NOD-350 (definido em 2026-10-23, medido no 2.1.296), tudo opcional e aditivo: `natureza` pelo `task_type`
+       * (local_agent = subagente, local_bash = comando); `descricao` só do subagente (no comando a description É o
+       * comando, e não sai daqui), normalizada, redigida e com até 80 caracteres; `emFundo: false` é o subagente em
+       * primeiro plano (não entra na lista da task nem segura a sessão viva); `final` é como a tarefa terminou.
+       */
+      natureza?: "agente" | "comando";
+      descricao?: string;
+      emFundo?: false;
+      final?: "concluido" | "falhou" | "parado";
+    }
+  /**
+   * NOD-350: `system/task_progress` de uma tarefa. Só a contagem de chamadas, o NOME cru da última ferramenta (o rótulo
+   * sai do rotulo-ferramenta) e a duração; nunca o `summary` nem a `description` do passo (resumos do modelo).
+   */
+  | { tipo: "tarefa_progresso"; id: string; chamadas: number; ultimaFerramenta: string | null; duracaoMs: number | null }
+  /** `subagente` (NOD-350): linha assistant/user/delta de um subagente (`parent_tool_use_id`), que não é do turno do bot. */
+  | { tipo: "ignorado"; razao: "linha_vazia" | "json_invalido" | "tipo_desconhecido" | "sintetico" | "subagente"; tipoBruto: string | null }
   /** Passo do driver catcher (Práticas §11): `subtipo` snake_case (CHECK catcher_registros_tipo); o servidor persiste em catcher_registros. */
   | { tipo: "catcher"; subtipo: string; dados: Record<string, unknown> };

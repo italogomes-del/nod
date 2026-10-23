@@ -6,6 +6,8 @@ export type TipoFrame =
   | "turno.atividade"
   /** A lista de tarefas do bot no turno vivo (TaskCreate/TaskUpdate): {tarefas: TarefaDoBot[]}, a lista inteira. */
   | "turno.tarefas"
+  /** NOD-350: {subagentes: SubagenteVivo[] (passo já rotulado), resumo, principalOcioso} — a lista inteira, ≤1/s. */
+  | "turno.subagentes"
   /**
    * Sessão viva (ADR-067): uma volta do modelo foi gravada como mensagem com o turno ainda rodando. A tela troca o texto
    * ao vivo daquele turno pela mensagem (relê a conversa e zera o trecho), e o turno segue "rodando".

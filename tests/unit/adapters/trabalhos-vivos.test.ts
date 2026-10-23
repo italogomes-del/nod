@@ -164,6 +164,33 @@ describe("trabalhos vivos: memória do Mac (#194)", () => {
     expect(v.ultimaFerramenta("t1")).toBeNull();
   });
 
+  it("NOD-350: o resumo dos subagentes que trabalham fica por turno; null o apaga, e some quando o turno acaba", () => {
+    const v = criarTrabalhosVivos(() => 0);
+    expect(v.resumoSubagentes("t1")).toBeNull();
+    v.subagentes("t1", "2 subagentes trabalhando");
+    v.subagentes("t2", "1 comando rodando");
+    v.ferramenta("t1", "Leu um arquivo");
+    expect(v.resumoSubagentes("t1")).toBe("2 subagentes trabalhando");
+    v.subagentes("t1", null);
+    expect(v.resumoSubagentes("t1")).toBeNull();
+    // A ferramenta não some junto: o "fez ferramenta" do turno depende dela.
+    expect(v.ultimaFerramenta("t1")).toBe("Leu um arquivo");
+    v.esquecerTurno("t2");
+    expect(v.resumoSubagentes("t2")).toBeNull();
+  });
+
+  it("NOD-350 (QA): com todos de volta a linha fica até o bot usar outra ferramenta; enquanto trabalham, a ferramenta não a tira", () => {
+    const v = criarTrabalhosVivos(() => 0);
+    v.ferramenta("t1", "Chamou um subagente");
+    v.subagentes("t1", "Os 2 subagentes voltaram · 1 não terminou", false);
+    expect(v.resumoSubagentes("t1")).toBe("Os 2 subagentes voltaram · 1 não terminou");
+    v.ferramenta("t1", "Leu um arquivo");
+    expect(v.resumoSubagentes("t1")).toBeNull();
+    v.subagentes("t1", "1 subagente trabalhando", true);
+    v.ferramenta("t1", "Editou um arquivo");
+    expect(v.resumoSubagentes("t1")).toBe("1 subagente trabalhando");
+  });
+
   it("soltar a espera por memória: só sob amarela ou vermelha, e só passados 5 min", () => {
     const desde = 0;
     expect(soltarPorMemoria({ nivel: "amarela", esperandoDesde: desde, agora: FECHAR_OCIOSA_SOB_PRESSAO_MS + 1 })).toBe(true);
