@@ -178,3 +178,9 @@ O que a implementação mudou em relação ao texto acima:
   (~400 MB), janela da régua sustentada (3 min) e ordem da fila (o que a pessoa pediu na conversa primeiro, depois a
   ordem de chegada). A distribuição entre máquinas (o nod escolhe ou o usuário move) se decide quando chegar a vez dela.
 - Ficam para depois: a fila do Codex e os detalhes das telas (fase 3).
+
+## Emenda de 2026-10-22 — a VM do computador no Mac (NOD-93)
+
+No Mac, a VM do computador (ADR-123) entra como um bloco na fatia dos bots e segue o modo de uso: Pouco 2 GiB,
+Equilibrado 3 GiB, Livre 4 GiB, com teto de 25% da RAM (suposição até medir). Sem memória para ligá-la, é espera
+(`esperando_memoria`), não erro.

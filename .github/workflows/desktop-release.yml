@@ -127,9 +127,64 @@ jobs:
             release/*.dmg
             release/SHA256-*.txt
           if-no-files-found: error
+  # NOD-93 (PR 1): o disco da VM local do Mac, um por arquitetura, do mesmo Dockerfile do computador do Linux
+  # (infra/vm-local/construir-disco.sh). Cada disco nasce num runner da própria arquitetura: o virt-customize roda o
+  # apt do convidado. Atrás da variável de repositório NOD_VM_LOCAL=1, como o app (a flag de mesmo nome): sem ela o
+  # release segue só com os DMGs.
+  vm-local:
+    needs: verify
+    if: vars.NOD_VM_LOCAL == '1'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+          - arch: amd64
+            runner: ubuntu-24.04
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    env:
+      ARCH: ${{ matrix.arch }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24.19.0'
+      - name: Ferramentas do disco
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libguestfs-tools qemu-utils zstd
+          # O libguestfs do Ubuntu lê o kernel do host para montar o appliance; ele vem 0600.
+          sudo chmod 0644 /boot/vmlinuz-*
+      - name: Imagem do computador (só a desta arquitetura)
+        run: |
+          set -euo pipefail
+          VERSAO=$(node -p "require('./package.json').version")
+          echo "VERSAO=$VERSAO" >> "$GITHUB_ENV"
+          node scripts/computador/build.ts --plataformas "linux/$ARCH" --versao "$VERSAO" --saida dist/vm-local
+      - name: Disco da VM
+        run: sudo -E bash infra/vm-local/construir-disco.sh "$ARCH" "$VERSAO" "dist/vm-local/nod-computador-$ARCH.tar" release
+      - name: Conferir o disco
+        run: |
+          set -euo pipefail
+          cd release
+          sha256sum -c "nod-vm-$VERSAO-$ARCH.img.zst.sha256"
+          zstd -t "nod-vm-$VERSAO-$ARCH.img.zst"
+          ls -la
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: nod-vm-${{ matrix.arch }}
+          path: |
+            release/nod-vm-*.img.zst
+            release/nod-vm-*.img.zst.sha256
+          if-no-files-found: error
+          compression-level: 0
   draft:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: mac
+    # O vm-local pulado (sem NOD_VM_LOCAL) não segura o rascunho; falho, segura.
+    if: ${{ !cancelled() && startsWith(github.ref, 'refs/tags/v') && needs.mac.result == 'success' && (needs.vm-local.result == 'success' || needs.vm-local.result == 'skipped') }}
+    needs: [mac, vm-local]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -137,11 +192,15 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          pattern: nod-mac-*
+          pattern: nod-*
           path: release
           merge-multiple: true
       - name: Criar release em rascunho para aceite nos dois Macs
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
-        run: gh release create "$TAG" release/*.dmg release/SHA256-*.txt --verify-tag --draft --title "nod $TAG" --notes-file desktop/release-notes.md
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          arquivos=(release/*.dmg release/SHA256-*.txt release/nod-vm-*.img.zst release/nod-vm-*.img.zst.sha256)
+          gh release create "$TAG" "${arquivos[@]}" --verify-tag --draft --title "nod $TAG" --notes-file desktop/release-notes.md

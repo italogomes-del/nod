@@ -93,3 +93,8 @@ cada 70 min. A regra "nenhum turno é interrompido" continua valendo.
 **Gatilho de reversão desta emenda.** O motor não se atualizar em 24 h numa máquina que nunca fica ociosa (o
 `drenagem_desistiu` se repetindo o dia todo). Nesse caso, a saída é deixar a fala da pessoa passar durante a drenagem,
 ou drenar só à noite.
+
+## Emenda de 2026-10-22 — a VM do Mac atualiza com o app (NOD-93)
+
+O runtime (Lima) e o disco da VM do computador no Mac (ADR-123) saem no mesmo release do app, com o sha256 fixo no app.
+Atualizar o app troca o disco base e mantém o disco de dados. O motor não atualiza nada disso.

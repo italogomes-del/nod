@@ -1,0 +1,12 @@
+# NOD-93: carrega a imagem do computador que veio dentro do disco base, sem rede, quando a do docker não é a desta
+# versão (rótulo app.nod.computador.versao). Roda a cada boot; com a imagem certa, sai na hora.
+[Unit]
+Description=nod: imagem do computador pre-carregada
+Requires=docker.service
+After=docker.service
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/nod/carregar-imagem.sh
+RemainAfterExit=yes
+[Install]
+WantedBy=multi-user.target

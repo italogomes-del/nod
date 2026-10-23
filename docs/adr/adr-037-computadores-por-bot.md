@@ -158,3 +158,9 @@ com os volumes preservados é passo de operação, fora do código.
 - Qualquer relato de login ou arquivo perdido depois de `computador_imagem_recriada`: a recriação não preserva o volume como suposto; voltar a recriar só à mão.
 
 **Validação.** Concorrência `computador-ociosidade`; unit `computador-docker` (teto, proxies, imagem), `computador-saude`, web `computador` e `computadores-orfaos`; conformidade `motivos-enum`; smoke com `docker restart`.
+
+## Emenda de 2026-10-22 — o computador também mora no Mac (NOD-93)
+
+Com `NOD_VM_LOCAL=1`, o computador da pessoa pode morar numa VM Linux que o app do Mac liga (Lima/vz, ADR-123). É o
+mesmo driver Docker, apontado para o dockerd da VM por `DOCKER_HOST`/`DOCKER_CONFIG` próprios. A imagem passa a sair
+em `linux/arm64` e `linux/amd64` (`npm run computador:build`). Limites, ciclo de vida e órfãos não mudam.

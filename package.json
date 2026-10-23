@@ -53,7 +53,7 @@
     "desktop:mac": "node scripts/desktop/release-preflight.mjs && npm run desktop:build && electron-builder --mac --publish never --config.forceCodeSigning=true",
     "desktop:pack": "npm run desktop:build && electron-builder --mac --dir --publish never",
     "release:mac": "bash scripts/desktop/release-mac.sh",
-    "computador:build": "docker build -t nod-computador:1 infra/computador",
+    "computador:build": "node scripts/computador/build.ts",
     "computador:orfaos": "node scripts/computadores-orfaos.ts"
   },
   "simple-git-hooks": {
