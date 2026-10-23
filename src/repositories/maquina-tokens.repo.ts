@@ -1,5 +1,5 @@
 import type { ChaveMaquinaDto } from "../contracts/api.ts";
-import type { PlataformaMaquina } from "../contracts/ponte.ts";
+import type { PapelMaquina, PlataformaMaquina } from "../contracts/ponte.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
 import { data, ms, msOuNull } from "./conversao.ts";
 
@@ -10,12 +10,13 @@ interface Linha {
   criado_em: Date;
   ultimo_uso_em: Date | null;
   revogado_em: Date | null;
+  papel: PapelMaquina;
 }
 
 /** definido em 2026-10-20 (NOD-293 A8): `ultimo_uso_em` atrasa até isto; a tela mostra o uso em minutos. */
 export const MARCAR_USO_A_CADA_MS = 30_000;
 
-const paraDto = (l: Linha): ChaveMaquinaDto => ({ id: l.id, nome: l.nome, prefixo: l.prefixo, criadaEm: ms(l.criado_em), ultimoUsoEm: msOuNull(l.ultimo_uso_em), revogadaEm: msOuNull(l.revogado_em) });
+const paraDto = (l: Linha): ChaveMaquinaDto => ({ id: l.id, nome: l.nome, prefixo: l.prefixo, criadaEm: ms(l.criado_em), ultimoUsoEm: msOuNull(l.ultimo_uso_em), revogadaEm: msOuNull(l.revogado_em), papel: l.papel });
 
 /**
  * Chaves de máquina da pessoa (ADR-031). Guarda só o hash; NENHUM método devolve o hash para fora
@@ -24,19 +25,32 @@ const paraDto = (l: Linha): ChaveMaquinaDto => ({ id: l.id, nome: l.nome, prefix
  */
 export function maquinaTokensRepo(conn: Conn, escopo: Escopo) {
   return {
-    async criar(e: { nome: string; prefixo: string; hash: Buffer }): Promise<ChaveMaquinaDto | null> {
+    /** NOD-94: `papel` ausente = `motor`. O índice `maquina_tokens_um_computador` recusa (23505) o 2º só-computador vivo. */
+    async criar(e: { nome: string; prefixo: string; hash: Buffer; papel?: PapelMaquina }): Promise<ChaveMaquinaDto | null> {
       const [l] = await conn<Linha[]>`
-        insert into maquina_tokens (tenant_id, owner_id, nome, prefixo, hash)
-        values (${escopo.tenantId}, ${escopo.pessoaId}, ${e.nome}, ${e.prefixo}, ${e.hash})
-        returning id, nome, prefixo, criado_em, ultimo_uso_em, revogado_em`;
+        insert into maquina_tokens (tenant_id, owner_id, nome, prefixo, hash, papel)
+        values (${escopo.tenantId}, ${escopo.pessoaId}, ${e.nome}, ${e.prefixo}, ${e.hash}, ${e.papel ?? "motor"})
+        returning id, nome, prefixo, criado_em, ultimo_uso_em, revogado_em, papel`;
       return l ? paraDto(l) : null;
+    },
+
+    /**
+     * NOD-94 (0105): a máquina só-computador viva da pessoa, depois de revogar (na data em que venceu) a que venceu sem
+     * confirmação — ela ainda seguraria a vaga do índice único. null = a vaga está livre.
+     */
+    async computadorVivo(agora: number): Promise<{ id: string; nome: string } | null> {
+      await conn`update maquina_tokens set revogado_em = expira_em
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and papel = 'computador' and revogado_em is null and expira_em <= ${data(agora)}`;
+      const [l] = await conn<{ id: string; nome: string }[]>`select id, nome from maquina_tokens
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and papel = 'computador' and revogado_em is null`;
+      return l ?? null;
     },
 
     async listar(): Promise<ChaveMaquinaDto[]> {
       // ADR-102 (revisão do PR #306): a chave que venceu (o "Desconectar" sem confirmação) conta como cancelada na data
       // em que venceu — a tela, a escolha de máquina dos bots e as contas a veem como as revogadas.
       const linhas = await conn<Linha[]>`
-        select id, nome, prefixo, criado_em, ultimo_uso_em,
+        select id, nome, prefixo, criado_em, ultimo_uso_em, papel,
           coalesce(revogado_em, case when expira_em <= now() then expira_em end) as revogado_em
         from maquina_tokens
         where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId}
@@ -47,12 +61,13 @@ export function maquinaTokensRepo(conn: Conn, escopo: Escopo) {
     /**
      * NOD-89 (corte 1): as chaves vivas (não revogadas e não vencidas) com o sistema que cada máquina anunciou — a linha
      * "Roda em" da rotina. Mesma ordem e mesmo filtro por dona do `listar()`.
+     * NOD-94 (emenda 11 da ADR-090): sem a só-computador — ela nunca pega turno, então não segura o "qualquer máquina".
      */
     async vivasComPlataforma(): Promise<{ id: string; nome: string; plataforma: PlataformaMaquina | null }[]> {
       return conn<{ id: string; nome: string; plataforma: PlataformaMaquina | null }[]>`
         select id, nome, plataforma from maquina_tokens
         where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId}
-          and revogado_em is null and (expira_em is null or expira_em > now())
+          and revogado_em is null and (expira_em is null or expira_em > now()) and papel = 'motor'
         order by criado_em desc`.then((ls) => ls.map((l) => ({ id: l.id, nome: l.nome, plataforma: l.plataforma ?? null })));
     },
 
@@ -94,9 +109,9 @@ export function maquinaTokensRepo(conn: Conn, escopo: Escopo) {
      * Nome e sistema de uma chave, revogada ou não (o aviso de uma queda antiga ainda a nomeia). null = não é chave da
      * pessoa — no modo local, o Mac que roda o servidor não tem chave.
      */
-    async identificar(id: string): Promise<{ nome: string; plataforma: PlataformaMaquina | null } | null> {
-      const [l] = await conn<{ nome: string; plataforma: PlataformaMaquina | null }[]>`
-        select nome, plataforma from maquina_tokens where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id}`;
+    async identificar(id: string): Promise<{ nome: string; plataforma: PlataformaMaquina | null; papel: PapelMaquina } | null> {
+      const [l] = await conn<{ nome: string; plataforma: PlataformaMaquina | null; papel: PapelMaquina }[]>`
+        select nome, plataforma, papel from maquina_tokens where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id}`;
       return l ?? null;
     },
 

@@ -31,15 +31,20 @@ function nomeDaMaquina(v: unknown): string {
   return nome;
 }
 
-/** ADR-090: a chave existe, é da pessoa do escopo e não foi revogada — só assim um bot pode ser preso a ela. */
+/**
+ * ADR-090: a chave existe, é da pessoa do escopo e não foi revogada — só assim um bot pode ser preso a ela. NOD-94: a
+ * máquina só-computador nunca pega turno, então não é escolha de onde o bot trabalha (404, como a inexistente).
+ */
 async function exigirChaveViva(d: Deps, id: unknown): Promise<string> {
   if (typeof id !== "string") throw new ErroDeDominio("entrada_invalida", { cause: "máquina" });
-  const viva = (await d.repos.maquinaTokens.listar()).find((c) => c.id === id && c.revogadaEm === null);
+  const viva = (await d.repos.maquinaTokens.listar()).find((c) => c.id === id && c.revogadaEm === null && c.papel !== "computador");
   if (!viva) throw new ErroDeDominio("nao_encontrado", { cause: "máquina" });
   return viva.id;
 }
 
-export function rotasMaquinas(deps: { dentro: DentroDeTx; pareamento: PareamentoMaquina; dispositivo: PareamentoDispositivo; maquinasVivas?: (escopo: Escopo) => MaquinaConectada[]; servidorNoMac?: { api: string }; nuvem?: boolean }): Rota[] {
+export function rotasMaquinas(deps: { dentro: DentroDeTx; pareamento: PareamentoMaquina; dispositivo: PareamentoDispositivo; maquinasVivas?: (escopo: Escopo) => MaquinaConectada[]; servidorNoMac?: { api: string }; nuvem?: boolean;
+  /** NOD-94: a máquina do convite `convite` pareou — a instalação por SSH que o criou fica `pronta` com ela. */
+  pareadaPorConvite?: (e: { escopo: Escopo; convite: string; maquinaId: string }) => void }): Rota[] {
   /** ADR-121: só com NOD_MAQUINA_NUVEM=gcp (compor.ts). Sem a flag, o DTO sai igual ao de antes. */
   const nuvemDa = async (d: Deps): Promise<Map<string, MaquinaNuvemDto>> =>
     new Map(
@@ -116,6 +121,7 @@ export function rotasMaquinas(deps: { dentro: DentroDeTx; pareamento: Pareamento
         // ADR-102: o convite do comando de instalação (opcional; inválido = o pareamento de sempre, com o código).
         const pedido = deps.dispositivo.pedir({ nome: nomeDaMaquina(corpo.nome), plataforma, ...(typeof corpo.convite === "string" ? { convite: corpo.convite } : {}) });
         if (!pedido) { ctx.json(429, { codigo: "muitos_pedidos", mensagem: "Pedidos de pareamento demais agora. Tente de novo em alguns minutos." }); return; }
+        if (pedido === "convite_usado") { ctx.json(401, { codigo: "convite_usado", mensagem: "Este convite já foi usado. Gere outro no nod." }); return; }
         ctx.json(201, pedido);
       },
     },
@@ -129,9 +135,10 @@ export function rotasMaquinas(deps: { dentro: DentroDeTx; pareamento: Pareamento
         const r = typeof corpo.codigoDispositivo === "string" ? deps.dispositivo.trocar({ codigoDispositivo: corpo.codigoDispositivo }) : { estado: "invalido" as const };
         if (r.estado === "pendente") { ctx.json(202, { estado: "pendente" }); return; }
         if (r.estado === "invalido") { ctx.json(400, { codigo: "pareamento_invalido" }); return; }
+        // NOD-94: o papel (e o "Substituir") vem do convite que o servidor criou, nunca do corpo da máquina.
         const nuvemId = r.maquinaNuvemId;
         const emitida = await deps.dentro(r.escopo, async (d) => {
-          const e = await executar(d, emitirChaveMaquina, { nome: r.nome });
+          const e = await executar(d, emitirChaveMaquina, { nome: r.nome, papel: r.papel, substituir: r.substituir });
           if (!nuvemId) return e;
           // ADR-121 (PR 2): a VM que o nod criou. A chave nova vira a máquina dela; a anterior não confirmada sai.
           const v = await d.repos.maquinasNuvem.vincularCriada(nuvemId, e.dados.id);
@@ -139,8 +146,9 @@ export function rotasMaquinas(deps: { dentro: DentroDeTx; pareamento: Pareamento
           if (v.anterior) await d.repos.maquinaTokens.revogar(v.anterior, d.agora());
           return e;
         });
-        log("info", "maquina_pareada_por_codigo", { pessoa_id: r.escopo.pessoaId, chave_id: emitida.dados.id, ...(nuvemId ? { maquina_nuvem_id: nuvemId } : {}) });
-        ctx.json(201, { chave: emitida.chave, machineId: emitida.dados.id });
+        log("info", "maquina_pareada_por_codigo", { pessoa_id: r.escopo.pessoaId, chave_id: emitida.dados.id, papel: r.papel, ...(nuvemId ? { maquina_nuvem_id: nuvemId } : {}) });
+        if (r.convite) deps.pareadaPorConvite?.({ escopo: r.escopo, convite: r.convite, maquinaId: emitida.dados.id });
+        ctx.json(201, { chave: emitida.chave, machineId: emitida.dados.id, papel: r.papel });
       },
     },
     {
@@ -171,7 +179,7 @@ export function rotasMaquinas(deps: { dentro: DentroDeTx; pareamento: Pareamento
         const maquinas: MaquinaDto[] = chaves.filter((c) => c.revogadaEm === null).map((c) => {
           const viva = vivas.get(c.id);
           // ADR-102 (R2 da revisão): o nome da chave, que a pessoa pode trocar; o hostname anunciado só o batiza no pareamento.
-          return { id: c.id, nome: c.nome, prefixo: c.prefixo, criadaEm: c.criadaEm, ultimoUsoEm: c.ultimoUsoEm, conectada: !!viva, plataforma: viva?.plataforma ?? null, ias: viva?.ias ?? {}, gh: viva?.gh ?? false, ...(nuvem.has(c.id) ? { nuvem: nuvem.get(c.id) } : {}) };
+          return { id: c.id, nome: c.nome, prefixo: c.prefixo, criadaEm: c.criadaEm, ultimoUsoEm: c.ultimoUsoEm, conectada: !!viva, plataforma: viva?.plataforma ?? null, ias: viva?.ias ?? {}, gh: viva?.gh ?? false, papel: c.papel ?? "motor", ...(nuvem.has(c.id) ? { nuvem: nuvem.get(c.id) } : {}) };
         });
         // ADR-092: com o servidor no Mac (modo local), o bot sem máquina roda neste Mac ("Este Mac" na tela), e a VM chega à
         // API deste Mac por um túnel SSH — a tela mostra o endereço da API, que é o que o motor guarda.

@@ -19,10 +19,13 @@ import { data } from "./conversao.ts";
  * sem contato), e por isso vence a sessão — senão o botão não tiraria a frente do Mac sem contato, que é onde a sessão
  * está. Sessão numa chave que não vale mais, ou trabalho sem sessão, cai na regra de antes. Quem monta um `t` sem turno
  * de verdade passa `trabalho_id`.
+ *
+ * NOD-94 (emenda 11 da ADR-090): a máquina só-computador não vale como alvo em nível nenhum (nunca pega turno); um bot que
+ * a tivesse escolhida passa ao padrão, e depois a qualquer máquina.
  */
 export function alvoDoTurno(sql: Conn, agora: number) {
   const viva = (id: ReturnType<typeof sql>, comoTexto = false) => sql`(select k.id::text from maquina_tokens k where k.tenant_id = t.tenant_id and k.owner_id = t.owner_id
-    and ${comoTexto ? sql`k.id::text` : sql`k.id`} = ${id} and k.revogado_em is null and (k.expira_em is null or k.expira_em > ${data(agora)}))`;
+    and ${comoTexto ? sql`k.id::text` : sql`k.id`} = ${id} and k.revogado_em is null and (k.expira_em is null or k.expira_em > ${data(agora)}) and k.papel = 'motor')`;
   // sessao_maquina_id é text (0079): compara pelo texto, sem cast que quebraria num valor fora de uuid.
   return sql`coalesce(${viva(sql`t.maquina_desta_vez`)},
     ${viva(sql`(select w.sessao_maquina_id from trabalhos w where w.tenant_id = t.tenant_id and w.id = t.trabalho_id)`, true)},

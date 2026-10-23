@@ -1,4 +1,5 @@
 import type { ChaveEmitidaDto } from "../contracts/api.ts";
+import type { PapelMaquina } from "../contracts/ponte.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { cunharChaveMaquina } from "../services/token-maquina.ts";
 import { removerMaquina } from "./interromper-por-maquina.ts";
@@ -12,11 +13,22 @@ const NOME_MAX = 60;
  * o banco recebe o hash, o log não recebe nada. Emitir de novo NÃO cancela as anteriores — quem quer
  * trocar revoga a velha (revogarChaveMaquina).
  */
-export const emitirChaveMaquina: CasoDeUso<{ nome: unknown }, ChaveEmitidaDto> = async (deps, input) => {
+/**
+ * NOD-94 (emenda 11 da ADR-090): `papel` vem do SERVIDOR (o convite do pedido de instalação), nunca do corpo de quem pede
+ * a chave. A pessoa tem no máximo um só-computador vivo: sem `substituir`, o segundo é `estado_invalido` (409); com ele,
+ * o anterior é revogado na mesma tx, antes de gravar o novo.
+ */
+export const emitirChaveMaquina: CasoDeUso<{ nome: unknown; papel?: PapelMaquina; substituir?: boolean }, ChaveEmitidaDto> = async (deps, input) => {
   const nome = typeof input.nome === "string" ? input.nome.trim() : "";
   if (nome.length === 0 || nome.length > NOME_MAX) throw new ErroDeDominio("entrada_invalida", { cause: "nome da chave" });
+  const papel = input.papel ?? "motor";
+  if (papel === "computador") {
+    const anterior = await deps.repos.maquinaTokens.computadorVivo(deps.agora());
+    if (anterior && input.substituir !== true) throw new ErroDeDominio("estado_invalido", { cause: "já há uma máquina só computador" });
+    if (anterior) await deps.repos.maquinaTokens.revogar(anterior.id, deps.agora());
+  }
   const cunhada = cunharChaveMaquina(deps.escopo);
-  const dados = await deps.repos.maquinaTokens.criar({ nome, prefixo: cunhada.prefixo, hash: cunhada.hash });
+  const dados = await deps.repos.maquinaTokens.criar({ nome, prefixo: cunhada.prefixo, hash: cunhada.hash, papel });
   if (!dados) throw new ErroDeDominio("estado_invalido", { cause: "chave não gravada" });
   return { data: { chave: cunhada.chave, dados } };
 };

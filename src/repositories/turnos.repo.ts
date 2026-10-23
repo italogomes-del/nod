@@ -309,6 +309,11 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
     async reivindicar(p: { machineId: string; agora: number; harnessesProntos?: readonly string[]; harnessesAuto?: readonly string[]; harnessesProntosPessoa?: readonly string[]; aceitaLigacao?: boolean; segurarFundo?: boolean; espacarFundo?: boolean; segurarNovo?: boolean; fundoSemPrazo?: boolean; soComoAlvo?: boolean; cota?: PortaoDaCota | null; declinio?: { ias: readonly string[]; auto: boolean } | null }): Promise<Turno | null> {
       const dentro = async (trx: Conn): Promise<Turno | null> => {
         await trx`select pg_advisory_xact_lock(hashtext(${`${escopo.tenantId}:${escopo.pessoaId}`}))`;
+        // NOD-94 (emenda 11 da ADR-090): a máquina só-computador nunca pega turno, venha o puxar de onde vier (o papel é o
+        // gravado no pareamento, não o anunciado). `id::text`: no modo local o Mac do servidor não tem chave (nem uuid).
+        const [soComputador] = await trx`select 1 from maquina_tokens where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId}
+          and id::text = ${p.machineId} and papel = 'computador'`;
+        if (soComputador) return null;
         // ADR-090: a máquina-alvo do turno `t` (alvo-da-maquina.ts; a lista de trabalhos usa a mesma regra).
         const alvo = alvoDoTurno(trx, p.agora);
         // definido em 2026-10-12 (ADR-099 §7): o portão da cota. A IA do turno: a fixada, ou (Automático) a regra das IAs que

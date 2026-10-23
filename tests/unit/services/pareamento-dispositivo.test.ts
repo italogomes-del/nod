@@ -4,10 +4,12 @@ import { criarPareamentoDispositivo, formatarCodigoPessoa, MAX_CONVITES_POR_PESS
 const MARLON = { tenantId: "t1", pessoaId: "p-marlon" };
 const ANA = { tenantId: "t1", pessoaId: "p-ana" };
 
-function pedir(p: PareamentoDispositivo, nome = "vm-sp") {
-  const pedido = p.pedir({ nome, plataforma: "linux" });
-  if (!pedido) throw new Error("cheio");
+function aberto<T>(pedido: T | null | "convite_usado"): T {
+  if (!pedido || pedido === "convite_usado") throw new Error("pedido recusado");
   return pedido;
+}
+function pedir(p: PareamentoDispositivo, nome = "vm-sp") {
+  return aberto(p.pedir({ nome, plataforma: "linux" }));
 }
 
 describe("pareamento por código (ADR-090)", () => {
@@ -20,7 +22,7 @@ describe("pareamento por código (ADR-090)", () => {
     agora += 125_000;
     expect(p.ver({ codigoPessoa: pedido.codigoPessoa.toLowerCase().replace("-", " "), escopo: MARLON })).toEqual({ nome: "vm-sp", plataforma: "linux", pedidoHaS: 125 });
     expect(p.aprovar({ codigoPessoa: pedido.codigoPessoa, escopo: MARLON })).toBe(true);
-    expect(p.trocar({ codigoDispositivo: pedido.codigoDispositivo })).toEqual({ estado: "aprovado", escopo: MARLON, nome: "vm-sp" });
+    expect(p.trocar({ codigoDispositivo: pedido.codigoDispositivo })).toEqual({ estado: "aprovado", escopo: MARLON, nome: "vm-sp", papel: "motor", substituir: false, convite: null });
     expect(p.trocar({ codigoDispositivo: pedido.codigoDispositivo })).toEqual({ estado: "invalido" });
   });
 
@@ -83,7 +85,7 @@ describe("convite de uso único no comando de instalação (ADR-102)", () => {
     expect(p.verConvite({ convite, escopo: MARLON })).toEqual({ estado: "pendente" });
     expect(p.verConvite({ convite, escopo: ANA })).toEqual({ estado: "invalido" });
     agora += 3_000;
-    const pedido = p.pedir({ nome: "vm-bots", plataforma: "linux", convite })!;
+    const pedido = aberto(p.pedir({ nome: "vm-bots", plataforma: "linux", convite }));
     const visto = p.verConvite({ convite, escopo: MARLON });
     expect(visto).toEqual({ estado: "chegou", codigo: pedido.codigoPessoa, pedido: { nome: "vm-bots", plataforma: "linux", pedidoHaS: 0 } });
     if (visto.estado !== "chegou") throw new Error("não chegou");
@@ -96,8 +98,8 @@ describe("convite de uso único no comando de instalação (ADR-102)", () => {
   it("revisão do PR #306: um segundo pedido com o mesmo convite o derruba (a tela avisa); o código de cada um segue valendo", () => {
     const p = criarPareamentoDispositivo(() => 1_000);
     const { convite } = p.criarConvite(MARLON);
-    const pedido = p.pedir({ nome: "vm-bots", plataforma: "linux", convite })!;
-    const segundo = p.pedir({ nome: "vm-bots", plataforma: "linux", convite })!;
+    const pedido = aberto(p.pedir({ nome: "vm-bots", plataforma: "linux", convite }));
+    const segundo = aberto(p.pedir({ nome: "vm-bots", plataforma: "linux", convite }));
     expect(p.verConvite({ convite, escopo: MARLON })).toEqual({ estado: "conflito" });
     expect(segundo.codigoPessoa).not.toBe(pedido.codigoPessoa);
     // Quem estava no terminal da máquina certa ainda pareia pelo código dela.
@@ -126,23 +128,57 @@ describe("convite de uso único no comando de instalação (ADR-102)", () => {
   });
 });
 
+describe("convite do pedido de instalação por SSH (NOD-94)", () => {
+  it("nasce aprovado no escopo de quem criou e leva o papel e o substituir para a troca", () => {
+    const p = criarPareamentoDispositivo(() => 1_000);
+    const { convite } = p.criarConvite(MARLON, { papel: "computador", autoAprovar: true, substituir: true });
+    const pedido = aberto(p.pedir({ nome: "vm-computador", plataforma: "linux", convite }));
+    expect(p.trocar({ codigoDispositivo: pedido.codigoDispositivo })).toEqual({ estado: "aprovado", escopo: MARLON, nome: "vm-computador", papel: "computador", substituir: true, convite });
+  });
+
+  it("vale para um pedido só: o segundo com o mesmo convite é recusado, não vira pareamento por código", () => {
+    const p = criarPareamentoDispositivo(() => 1_000);
+    const { convite } = p.criarConvite(MARLON, { papel: "computador", autoAprovar: true });
+    aberto(p.pedir({ nome: "vm-1", plataforma: "linux", convite }));
+    expect(p.pedir({ nome: "vm-2", plataforma: "linux", convite })).toBe("convite_usado");
+  });
+
+  it("sem opções, o convite é o de sempre: papel motor e a pessoa ainda aprova", () => {
+    const p = criarPareamentoDispositivo(() => 1_000);
+    const { convite } = p.criarConvite(MARLON);
+    const pedido = aberto(p.pedir({ nome: "vm-bots", plataforma: "linux", convite }));
+    expect(p.trocar({ codigoDispositivo: pedido.codigoDispositivo })).toEqual({ estado: "pendente" });
+    expect(p.aprovar({ codigoPessoa: pedido.codigoPessoa, escopo: MARLON })).toBe(true);
+    expect(p.trocar({ codigoDispositivo: pedido.codigoDispositivo })).toMatchObject({ estado: "aprovado", papel: "motor", substituir: false, convite });
+  });
+
+  it("o convite vencido não aprova sozinho: o pedido cai no pareamento por código, com papel motor", () => {
+    let agora = 1_000;
+    const p = criarPareamentoDispositivo(() => agora);
+    const { convite } = p.criarConvite(MARLON, { papel: "computador", autoAprovar: true });
+    agora += PRAZO_CONVITE_MS;
+    const pedido = aberto(p.pedir({ nome: "vm", plataforma: "linux", convite }));
+    expect(p.trocar({ codigoDispositivo: pedido.codigoDispositivo })).toEqual({ estado: "pendente" });
+  });
+});
+
 describe("convite da VM criada pelo nod (ADR-121, PR 2)", () => {
   const CONVITE = "b".repeat(32);
   it("o motor da VM com o hostname certo chega já aprovado e a troca leva o id da máquina na nuvem", () => {
     const p = criarPareamentoDispositivo(() => 1_000);
     p.registrarConviteNuvem(CONVITE, { escopo: MARLON, nome: "nod-g-abc123", maquinaNuvemId: "mn-1", ate: 60_000 });
-    const pedido = p.pedir({ nome: "nod-g-abc123.c.proj.internal", plataforma: "linux", convite: CONVITE })!;
-    expect(p.trocar({ codigoDispositivo: pedido.codigoDispositivo })).toEqual({ estado: "aprovado", escopo: MARLON, nome: "nod-g-abc123.c.proj.internal", maquinaNuvemId: "mn-1" });
+    const pedido = aberto(p.pedir({ nome: "nod-g-abc123.c.proj.internal", plataforma: "linux", convite: CONVITE }));
+    expect(p.trocar({ codigoDispositivo: pedido.codigoDispositivo })).toEqual({ estado: "aprovado", escopo: MARLON, nome: "nod-g-abc123.c.proj.internal", papel: "motor", substituir: false, convite: null, maquinaNuvemId: "mn-1" });
   });
 
   it("outro nome com o mesmo convite não é pré-aprovado; vencido também não", () => {
     let agora = 1_000;
     const p = criarPareamentoDispositivo(() => agora);
     p.registrarConviteNuvem(CONVITE, { escopo: MARLON, nome: "nod-g-abc123", maquinaNuvemId: "mn-1", ate: 60_000 });
-    const intruso = p.pedir({ nome: "outra", plataforma: "linux", convite: CONVITE })!;
+    const intruso = aberto(p.pedir({ nome: "outra", plataforma: "linux", convite: CONVITE }));
     expect(p.trocar({ codigoDispositivo: intruso.codigoDispositivo })).toEqual({ estado: "pendente" });
     agora = 60_000;
-    const tarde = p.pedir({ nome: "nod-g-abc123", plataforma: "linux", convite: CONVITE })!;
+    const tarde = aberto(p.pedir({ nome: "nod-g-abc123", plataforma: "linux", convite: CONVITE }));
     expect(p.trocar({ codigoDispositivo: tarde.codigoDispositivo })).toEqual({ estado: "pendente" });
   });
 });

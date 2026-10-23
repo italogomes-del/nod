@@ -1,6 +1,6 @@
 import { conviteValido } from "../shared/convite.ts";
 import { randomBytes, randomInt } from "node:crypto";
-import { PLATAFORMAS_MAQUINA, type PlataformaMaquina } from "../contracts/ponte.ts";
+import { PLATAFORMAS_MAQUINA, type PapelMaquina, type PlataformaMaquina } from "../contracts/ponte.ts";
 import type { Escopo } from "../shared/types.ts";
 
 /**
@@ -17,17 +17,27 @@ import type { Escopo } from "../shared/types.ts";
  */
 /** `pedidoHaS`: há quantos segundos a máquina pediu — a confirmação mostra, para a pessoa notar um pedido que não é dela. */
 export type PedidoDispositivo = { nome: string; plataforma: PlataformaMaquina; pedidoHaS: number };
+/**
+ * `papel`/`substituir` (NOD-94): vêm do convite que o servidor criou para o pedido de instalação por SSH, nunca da máquina.
+ * `convite`: o convite com que o pedido chegou — quem acompanha a instalação reconhece o pareamento por ele.
+ */
 /** `maquinaNuvemId`: o pedido veio da VM que o nod criou (ADR-121, PR 2); a rota liga a chave nova a ela. */
-export type TrocaDispositivo = { estado: "pendente" } | { estado: "aprovado"; escopo: Escopo; nome: string; maquinaNuvemId?: string } | { estado: "invalido" };
+export type TrocaDispositivo = { estado: "pendente" } | { estado: "aprovado"; escopo: Escopo; nome: string; papel: PapelMaquina; substituir: boolean; convite: string | null; maquinaNuvemId?: string } | { estado: "invalido" };
+/**
+ * NOD-94 (emenda 11 da ADR-090): o convite do pedido de instalação por SSH. `autoAprovar`: o envio do formulário já é o
+ * consentimento da pessoa, então o pedido que chega com ele nasce aprovado (sem digitar código). Por isso esse convite vale
+ * para UM pedido: o segundo é recusado (`convite_usado`, 401), em vez de cair no pareamento por código.
+ */
+export type OpcoesConvite = { papel?: PapelMaquina; autoAprovar?: boolean; substituir?: boolean };
 
 export interface PareamentoDispositivo {
   /**
    * null = cheio (pedidos demais abertos): quem chama responde 429, e nenhum pedido válido é despejado. Com `convite`
    * válido (ADR-102), o pedido fica ligado a ele: a tela de quem criou o convite o vê sem a pessoa digitar o código.
    */
-  pedir(e: { nome: string; plataforma: PlataformaMaquina; convite?: string }): { codigoDispositivo: string; codigoPessoa: string; intervaloS: number; prazoS: number } | null;
-  /** ADR-102: o convite de uso único que vai no comando de instalação (30 min). */
-  criarConvite(escopo: Escopo): { convite: string; expiraEm: number };
+  pedir(e: { nome: string; plataforma: PlataformaMaquina; convite?: string }): { codigoDispositivo: string; codigoPessoa: string; intervaloS: number; prazoS: number } | null | "convite_usado";
+  /** ADR-102: o convite de uso único que vai no comando de instalação (30 min). NOD-94: com papel e aprovação automática. */
+  criarConvite(escopo: Escopo, opcoes?: OpcoesConvite): { convite: string; expiraEm: number };
   /**
    * O pedido que chegou com o convite, para a tela confirmar ("A vm-bots apareceu. Conectar?"). `pendente` = ainda não
    * chegou; `invalido` = não existe, venceu ou é de outra pessoa.
@@ -76,13 +86,13 @@ export function lerPlataforma(v: unknown): PlataformaMaquina | null {
   return PLATAFORMAS_MAQUINA.find((p) => p === v) ?? null;
 }
 
-type Pedido = { nome: string; plataforma: PlataformaMaquina; codigoPessoa: string; criado: number; ate: number; aprovadoPor: Escopo | null; maquinaNuvemId?: string };
+type Pedido = { nome: string; plataforma: PlataformaMaquina; codigoPessoa: string; criado: number; ate: number; aprovadoPor: Escopo | null; papel: PapelMaquina; substituir: boolean; convite: string | null; maquinaNuvemId?: string };
 
 export function criarPareamentoDispositivo(agora: () => number = Date.now): PareamentoDispositivo {
   const porDispositivo = new Map<string, Pedido>();
   const porPessoa = new Map<string, string>();
   const erros = new Map<string, { n: number; desde: number }>();
-  const convites = new Map<string, { escopo: Escopo; ate: number; codigoPessoa: string | null; conflito: boolean }>();
+  const convites = new Map<string, { escopo: Escopo; ate: number; codigoPessoa: string | null; conflito: boolean; papel: PapelMaquina; autoAprovar: boolean; substituir: boolean }>();
   const convitesNuvem = new Map<string, { escopo: Escopo; nome: string; maquinaNuvemId: string; ate: number }>();
   const varrer = () => {
     const t = agora();
@@ -125,29 +135,32 @@ export function criarPareamentoDispositivo(agora: () => number = Date.now): Pare
       // no Google). Já aprovado: ninguém precisa digitar código.
       const n = conviteValido(convite) ? convitesNuvem.get(convite) : undefined;
       if (n && nome.split(".")[0] === n.nome) {
-        porDispositivo.set(codigoDispositivo, { nome, plataforma, codigoPessoa, criado: agora(), ate: agora() + PRAZO_DISPOSITIVO_MS, aprovadoPor: n.escopo, maquinaNuvemId: n.maquinaNuvemId });
+        porDispositivo.set(codigoDispositivo, { nome, plataforma, codigoPessoa, criado: agora(), ate: agora() + PRAZO_DISPOSITIVO_MS, aprovadoPor: n.escopo, papel: "motor", substituir: false, convite: null, maquinaNuvemId: n.maquinaNuvemId });
         porPessoa.set(codigoPessoa, codigoDispositivo);
         return { codigoDispositivo, codigoPessoa: formatarCodigoPessoa(codigoPessoa), intervaloS: INTERVALO_DISPOSITIVO_S, prazoS: PRAZO_DISPOSITIVO_MS / 1000 };
       }
       // ADR-102: o convite válido e ainda não usado liga este pedido à tela de quem o criou; inválido, o pedido segue
       // como o de sempre (o código no terminal), e a pessoa ainda pode digitá-lo.
       const v = conviteValido(convite) ? convites.get(convite) : undefined;
+      // NOD-94: o convite que aprova sozinho vale para um pedido só — o segundo não vira pareamento por código.
+      if (v?.autoAprovar && v.codigoPessoa !== null) return "convite_usado";
       // Revisão do PR #306: o convite anda em URL (log de proxy, histórico do shell). Um segundo pedido com o mesmo
       // convite o derruba: a tela avisa e a pessoa gera outro, em vez de aprovar sem saber qual máquina chegou primeiro.
       if (v && v.codigoPessoa !== null) v.conflito = true;
       if (v && v.codigoPessoa === null) v.codigoPessoa = codigoPessoa;
-      porDispositivo.set(codigoDispositivo, { nome, plataforma, codigoPessoa, criado: agora(), ate: agora() + PRAZO_DISPOSITIVO_MS, aprovadoPor: null });
+      // NOD-94: com o convite do pedido de instalação, o papel e a aprovação vêm dele (o escopo de quem o criou).
+      porDispositivo.set(codigoDispositivo, { nome, plataforma, codigoPessoa, criado: agora(), ate: agora() + PRAZO_DISPOSITIVO_MS, aprovadoPor: v?.autoAprovar ? v.escopo : null, papel: v?.papel ?? "motor", substituir: v?.substituir ?? false, convite: v && convite ? convite : null });
       porPessoa.set(codigoPessoa, codigoDispositivo);
       return { codigoDispositivo, codigoPessoa: formatarCodigoPessoa(codigoPessoa), intervaloS: INTERVALO_DISPOSITIVO_S, prazoS: PRAZO_DISPOSITIVO_MS / 1000 };
     },
-    criarConvite(escopo) {
+    criarConvite(escopo, opcoes = {}) {
       varrer();
       const dela = [...convites].filter(([, v]) => chaveDe(v.escopo) === chaveDe(escopo));
       if (dela.length >= MAX_CONVITES_POR_PESSOA) convites.delete(dela[0]![0]);
       if (convites.size >= MAX_CONVITES) convites.delete(convites.keys().next().value!);
       const convite = randomBytes(24).toString("base64url");
       const expiraEm = agora() + PRAZO_CONVITE_MS;
-      convites.set(convite, { escopo, ate: expiraEm, codigoPessoa: null, conflito: false });
+      convites.set(convite, { escopo, ate: expiraEm, codigoPessoa: null, conflito: false, papel: opcoes.papel ?? "motor", autoAprovar: opcoes.autoAprovar === true, substituir: opcoes.substituir === true });
       return { convite, expiraEm };
     },
     verConvite({ convite, escopo }) {
@@ -181,7 +194,7 @@ export function criarPareamentoDispositivo(agora: () => number = Date.now): Pare
       if (!p.aprovadoPor) return { estado: "pendente" };
       porDispositivo.delete(codigoDispositivo);
       porPessoa.delete(p.codigoPessoa);
-      return { estado: "aprovado", escopo: p.aprovadoPor, nome: p.nome, ...(p.maquinaNuvemId ? { maquinaNuvemId: p.maquinaNuvemId } : {}) };
+      return { estado: "aprovado", escopo: p.aprovadoPor, nome: p.nome, papel: p.papel, substituir: p.substituir, convite: p.convite, ...(p.maquinaNuvemId ? { maquinaNuvemId: p.maquinaNuvemId } : {}) };
     },
     registrarConviteNuvem(convite, e) {
       if (!conviteValido(convite) || e.ate <= agora()) return;

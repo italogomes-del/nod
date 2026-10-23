@@ -1,7 +1,7 @@
 import type { IdHarness } from "./harness.ts";
 import type { EpochMs } from "./ids.ts";
 import type { Inventario } from "./inventario.ts";
-import type { PlataformaMaquina } from "./ponte.ts";
+import type { PapelMaquina, PlataformaMaquina } from "./ponte.ts";
 import type { MaquinaNuvemDto } from "./provedor-nuvem.ts";
 import type { DiscoDoMac, LeituraDisco, MotivoEsperaMac, NivelPressao } from "./trabalho.ts";
 // ADR-099 §7 (2026-10-12): a cota da IA segura trabalho como a máquina; trabalho.ts lê os campos daqui (teto de 200 linhas).
@@ -21,6 +21,8 @@ export type MaquinaDto = {
   plataforma: PlataformaMaquina | null;
   ias: Partial<Record<IdHarness, Inventario["estado"]>>;
   gh: boolean;
+  /** NOD-94: `computador` = "· só computador" na tela; fica fora dos seletores de onde o bot trabalha. Ausente = `motor`. */
+  papel?: PapelMaquina;
   /** ADR-121 (NOD-92): a máquina que dorme e acorda pelo Google. Ausente sem `NOD_MAQUINA_NUVEM=gcp` ou fora da nuvem. */
   nuvem?: MaquinaNuvemDto;
 };

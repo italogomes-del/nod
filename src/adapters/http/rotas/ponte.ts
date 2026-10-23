@@ -4,7 +4,7 @@ import { setTimeout as esperar } from "node:timers/promises";
 import type { Inventario } from "../../../contracts/inventario.ts";
 import type { PlanoTurno } from "../../../contracts/plano-turno.ts";
 import type { LeituraMemoria } from "../../../contracts/trabalho.ts";
-import { PLATAFORMAS_MAQUINA, type AnuncioMaquina, type PlataformaMaquina, type VigiaVivo } from "../../../contracts/ponte.ts";
+import { PAPEIS_MAQUINA, PLATAFORMAS_MAQUINA, type AnuncioMaquina, type PapelMaquina, type PlataformaMaquina, type VigiaVivo } from "../../../contracts/ponte.ts";
 import type { TarefaDoBot } from "../../../contracts/turno.ts";
 import type { ContaAnunciada, ProgressoDoLogin, PuxadaDeContas } from "../../../contracts/contas-ia.ts";
 import type { Escopo } from "../../../shared/types.ts";
@@ -27,7 +27,7 @@ import { relatoValido } from "../../../use-cases/limpeza-das-tasks.ts";
  * `rebaixada` (definido em 2026-10-15, auditoria A2): o varredor deu o inventário por `ausente` depois de 60 s de silêncio
  * e só o próximo anúncio (`conectar`/`inventario`) o devolve — até lá o puxar responde 409 para a máquina se reanunciar.
  */
-type Conexao = { escopo: Escopo; ponte: PonteInternaNod; inv: Inventario; ultimo: number; puxando: boolean; planos: Map<string, PlanoTurno>; recebidas: Map<string, number>; gh: boolean; nome: string; plataforma: PlataformaMaquina; anuncio: AnuncioMaquina | null; rebaixada: boolean };
+type Conexao = { escopo: Escopo; ponte: PonteInternaNod; inv: Inventario; ultimo: number; puxando: boolean; planos: Map<string, PlanoTurno>; recebidas: Map<string, number>; gh: boolean; nome: string; plataforma: PlataformaMaquina; anuncio: AnuncioMaquina | null; rebaixada: boolean; papel: PapelMaquina };
 
 /**
  * NOD-199: o que um anúncio da máquina diz das IAs dela, lido com os mesmos filtros nas duas rotas que o recebem
@@ -97,6 +97,11 @@ export function criarPonteHttpServidor(d: {
   /** ADR-102 (R2): o nome que a pessoa deu à chave (Renomear em Máquinas); null = sem nome guardado (vale o anunciado). */
   nomeDaChave?(escopo: Escopo, chaveId: string): Promise<string | null>;
   /**
+   * NOD-94 (emenda 11 da ADR-090): o papel GRAVADO na chave no pareamento — quem decide é o servidor, o anunciado só é
+   * conferido. Ausente (modo local) ou null = `motor`.
+   */
+  papelDaChave?(escopo: Escopo, chaveId: string): Promise<PapelMaquina | null>;
+  /**
    * definido em 2026-10-10 (plano das IAs, PR 2): o que as máquinas da pessoa dizem das IAs mudou num `conectar` ou num
    * reanúncio — a composição publica `inventario.mudou` e a tela relê sem recarregar (antes só a troca do interruptor
    * local avisava).
@@ -134,7 +139,8 @@ export function criarPonteHttpServidor(d: {
   let reservando = 0;
   const ausente = (): Inventario => ({ estado: "ausente", motivo: "Abra o app nod e conecte sua conta de IA no seu computador", em: d.agora() });
   function atual(pessoaId: string): Inventario {
-    const vivas = [...conexoes.values()].filter((c) => c.escopo.pessoaId === pessoaId && d.agora() - c.ultimo < 60_000);
+    // NOD-94: a máquina só-computador não roda IA da pessoa — o inventário dela não conta.
+    const vivas = [...conexoes.values()].filter((c) => c.escopo.pessoaId === pessoaId && c.papel === "motor" && d.agora() - c.ultimo < 60_000);
     return vivas.find((c) => c.inv.estado === "pronto")?.inv ?? vivas[0]?.inv ?? ausente();
   }
   async function persistir(c: Conexao) { await d.persistir(c.escopo, atual(c.escopo.pessoaId)); }
@@ -196,7 +202,9 @@ export function criarPonteHttpServidor(d: {
   const rotas = [
     rota("sessao", async (ctx) => {
       ctx.res.setHeader("set-cookie", cabecalhoCookieSessao(ctx.escopo, d.segredo, d.seguro));
-      ctx.json(200, { escopo: ctx.escopo, machineId: ctx.params.chaveId });
+      // NOD-94: o papel da chave vai junto — a máquina só-computador não sobe o laço de turnos.
+      const papel = (await d.papelDaChave?.(ctx.escopo, ctx.params.chaveId!)) ?? "motor";
+      ctx.json(200, { escopo: ctx.escopo, machineId: ctx.params.chaveId, papel });
     }),
     rota("conectar", async (ctx, b) => {
       exigir(b.versaoContrato === 1 && texto(b.nome, 100) && b.nome.trim());
@@ -207,7 +215,7 @@ export function criarPonteHttpServidor(d: {
       const plataforma = PLATAFORMAS_MAQUINA.find((x) => x === b.plataforma) ?? "darwin";
       let c = conexoes.get(id);
       if (!c) {
-        c = { escopo: ctx.escopo, ponte: d.criar(ctx.escopo), inv: ausente(), ultimo: d.agora(), puxando: false, planos: new Map(), recebidas: new Map(), gh: false, nome, plataforma, anuncio: null, rebaixada: false };
+        c = { escopo: ctx.escopo, ponte: d.criar(ctx.escopo), inv: ausente(), ultimo: d.agora(), puxando: false, planos: new Map(), recebidas: new Map(), gh: false, nome, plataforma, anuncio: null, rebaixada: false, papel: "motor" };
         conexoes.set(id, c);
       }
       if (c.planos.size > 0) {
@@ -225,7 +233,13 @@ export function criarPonteHttpServidor(d: {
       // Revisão do PR #306: o prompt e "Rodar no X" usam o mesmo nome da tela (o da chave), não o hostname anunciado.
       c.nome = (await d.nomeDaChave?.(ctx.escopo, id).catch(() => null)) ?? nome;
       c.plataforma = plataforma;
-      c.anuncio = { machineId: id, nome: b.nome, plataforma: c.plataforma, inventario: c.inv, versaoContrato: 1, harnesses: a.harnessesAusente ? { "claude-cli": c.inv } : a.motores, ligacao: b.ligacao === true, ...(a.semLacoDeVoz.length > 0 ? { semLacoDeVoz: a.semLacoDeVoz } : {}), ...(a.capacidades ? { capacidades: a.capacidades } : {}), ...(a.sobreviveReinicio ? { sobreviveReinicio: true } : {}) };
+      // NOD-94: o papel é o da chave (pareamento), não o anunciado; a diferença só vira log (app antigo não anuncia).
+      c.papel = (await d.papelDaChave?.(ctx.escopo, id).catch(() => null)) ?? "motor";
+      const anunciado = PAPEIS_MAQUINA.find((p) => p === b.papel) ?? null;
+      if (anunciado && anunciado !== c.papel) log("aviso", "papel_anunciado_difere", { machine_id: id, anunciado, gravado: c.papel });
+      // O só-computador não pega turno: sem gh nem laço de voz, nada da fila nem dos itens locais chega a ele.
+      if (c.papel === "computador") c.gh = false;
+      c.anuncio = { machineId: id, nome: b.nome, plataforma: c.plataforma, inventario: c.inv, versaoContrato: 1, harnesses: a.harnessesAusente ? { "claude-cli": c.inv } : a.motores, ligacao: b.ligacao === true && c.papel === "motor", papel: c.papel, ...(a.semLacoDeVoz.length > 0 ? { semLacoDeVoz: a.semLacoDeVoz } : {}), ...(a.capacidades ? { capacidades: a.capacidades } : {}), ...(a.sobreviveReinicio ? { sobreviveReinicio: true } : {}) };
       await c.ponte.conectar(c.anuncio);
       await persistir(c);
       await d.registrarPlataforma?.(ctx.escopo, id, plataforma);
@@ -238,7 +252,7 @@ export function criarPonteHttpServidor(d: {
       presencaAvisada.set(id, { escopo: ctx.escopo, viva: true });
       if (!estava?.viva) d.inventarioMudou?.(ctx.escopo, "presenca");
       else avisarSeMudou(ctx.escopo, antes);
-      ctx.json(200, { machineId: id, escopo: ctx.escopo, ...(d.contas ? { contasIa: true } : {}) });
+      ctx.json(200, { machineId: id, escopo: ctx.escopo, papel: c.papel, ...(d.contas ? { contasIa: true } : {}) });
     }),
     /**
      * NOD-199 (emenda à ADR-021): anúncio SÓ de inventário, para a máquina já conectada — a IA que ficou pronta (ou caiu)
@@ -252,11 +266,11 @@ export function criarPonteHttpServidor(d: {
       exigir(b.versaoContrato === 1);
       const antes = assinaturaDasIas(ctx.escopo.pessoaId);
       const a = lerAnuncio(b, d.agora());
-      c.inv = a.inv; c.ultimo = d.agora(); c.gh = a.gh; c.rebaixada = false;
+      c.inv = a.inv; c.ultimo = d.agora(); c.gh = a.gh && c.papel === "motor"; c.rebaixada = false;
       // A conexão só nasce no `conectar`, que grava o anúncio: daqui saem o nome e o laço de voz, que não mudam aqui.
       // ADR-090: a plataforma também é do `conectar` — o motor na VM Linux não vira "darwin" ao reanunciar.
       const { nome, ligacao } = c.anuncio ?? { nome: c.nome, ligacao: false };
-      c.anuncio = { machineId: ctx.params.chaveId!, nome, plataforma: c.plataforma, inventario: c.inv, versaoContrato: 1, harnesses: a.harnessesAusente ? { "claude-cli": c.inv } : a.motores, ligacao, ...(a.semLacoDeVoz.length > 0 ? { semLacoDeVoz: a.semLacoDeVoz } : {}), ...(a.capacidades ? { capacidades: a.capacidades } : {}), ...(a.sobreviveReinicio ? { sobreviveReinicio: true } : {}) };
+      c.anuncio = { machineId: ctx.params.chaveId!, nome, plataforma: c.plataforma, inventario: c.inv, versaoContrato: 1, harnesses: a.harnessesAusente ? { "claude-cli": c.inv } : a.motores, ligacao, papel: c.papel, ...(a.semLacoDeVoz.length > 0 ? { semLacoDeVoz: a.semLacoDeVoz } : {}), ...(a.capacidades ? { capacidades: a.capacidades } : {}), ...(a.sobreviveReinicio ? { sobreviveReinicio: true } : {}) };
       // O `conectar` da ponte interna só registra o anúncio da máquina (idempotente): seguro com turno rodando.
       await c.ponte.conectar(c.anuncio);
       await persistir(c);
@@ -310,7 +324,8 @@ export function criarPonteHttpServidor(d: {
           if (!identidade) { ctx.json(401, { codigo: "nao_permitido" }); return; }
           c.ultimo = d.agora();
           if (drenando) break;
-          if (c.inv.estado === "pronto") {
+          // NOD-94: a máquina só-computador espera o longpoll e volta `{plano:null}` (o motor dela nem sobe o laço).
+          if (c.inv.estado === "pronto" && c.papel === "motor") {
             reservando++;
             // Revisão do #209: a leitura entra uma vez por pedido. Repetida a cada 250 ms durante a espera de até 20 s,
             // ela passava por cima da mais nova que a renovação trouxe e o nível ia e voltava na tela.
@@ -502,7 +517,8 @@ export function criarPonteHttpServidor(d: {
   }
   function harnesses(escopo: Escopo, machineId: string): Partial<Record<IdHarness, Inventario>> {
     const c = conexoes.get(machineId);
-    if (!c || c.escopo.pessoaId !== escopo.pessoaId || c.escopo.tenantId !== escopo.tenantId || d.agora() - c.ultimo >= 60_000) return {};
+    // NOD-94: as IAs da máquina só-computador não contam para a pessoa (harnessesProntosPessoa, prontos por máquina).
+    if (!c || c.papel !== "motor" || c.escopo.pessoaId !== escopo.pessoaId || c.escopo.tenantId !== escopo.tenantId || d.agora() - c.ultimo >= 60_000) return {};
     return c.ponte.maquinasConectadas().find((m) => m.machineId === machineId)?.harnesses ?? { "claude-cli": c.inv };
   }
   function harnessesDaPessoa(pessoaId: string): Partial<Record<IdHarness, Inventario>> {

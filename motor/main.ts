@@ -20,6 +20,7 @@ import { prepararGruposDaMaquina } from "../src/adapters/executor/grupos-da-maqu
 import { criarExecutarComando, iniciarLimpezaDasTasks, modoDaLimpeza, type LimpezaDasTasks } from "../src/adapters/executor/limpeza-das-tasks.ts";
 import { iniciarEsperas, type Esperas } from "../src/adapters/executor/esperas.ts";
 import type { PlanoTurno } from "../src/contracts/plano-turno.ts";
+import { PAPEIS_MAQUINA } from "../src/contracts/ponte.ts";
 import { configDosDrivers, criarRegistryDetalhado } from "../src/adapters/executor/registry.ts";
 import { prazoSondaDoEnv } from "../src/adapters/executor/sonda.ts";
 import type { ConfigDriver, Driver, Registry, RegistroDriver } from "../src/adapters/executor/spi.ts";
@@ -95,8 +96,11 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
   if (r.status === 426 || (minima && !versaoAceita(versao, minima))) throw new FalhaPonte("atualize_app");
   if (r.status === 401 || r.status === 403) throw new FalhaPonte("chave_invalida");
   if (!r.ok) throw new FalhaPonte("servidor_fora");
-  const dados = (await r.json()) as { escopo: { pessoaId: string }; machineId: string };
+  const dados = (await r.json()) as { escopo: { pessoaId: string }; machineId: string; papel?: unknown };
   if (!dados.escopo?.pessoaId || !dados.machineId) throw new FalhaPonte("resposta_invalida");
+  // NOD-94 (emenda 11 da ADR-090): a máquina só-computador hospeda o computador do bot e nunca pega turno — sem laço e
+  // sem itens do gh. Servidor antigo (sem papel) = motor. O servidor também recusa o puxar dela (segunda camada).
+  const papel = PAPEIS_MAQUINA.find((p) => p === dados.papel) ?? "motor";
 
   let fim: (motivo: FalhaPonte["codigo"] | "parado" | "desconectada") => void = () => undefined;
   const terminou = new Promise<FalhaPonte["codigo"] | "parado" | "desconectada">((resolver) => { fim = resolver; });
@@ -171,9 +175,9 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
   // ADR-099 (I5): a frente que terminou sem trabalho sai na hora (a resposta do entregar traz a pasta).
   const ponteHttp = criarPonteHttp({ url: c.url, chave: c.chave, versao, aoFalhar, aoLimparAgora: (pastas) => void limpeza?.limparAgora(pastas) });
   const gh = await criarDetectorGh({ ambiente: process.env }).logado();
-  const anuncio = { machineId: dados.machineId, nome: hostname(), versaoContrato: 1, github: { gh }, ligacao: true, plataforma: "linux" } as const;
+  const anuncio = { machineId: dados.machineId, nome: hostname(), versaoContrato: 1, github: { gh: gh && papel === "motor" }, ligacao: papel === "motor", plataforma: "linux", papel } as const;
 
-  if (gh) {
+  if (gh && papel === "motor") {
     const relatos = new Map<string, "executado" | "falhou_na_execucao">();
     const relatar = async (itemId: string, desfecho: "executado" | "falhou_na_execucao") => {
       relatos.set(itemId, desfecho);
@@ -207,6 +211,7 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
   esperas = iniciarEsperas({ ponte: ponteHttp.ponte, pessoaId: dados.escopo.pessoaId, machineId: dados.machineId, home: cfg.env.HOME ?? homedir(), env: cfg.env });
 
   const subirLaco = (reg: Registry) => {
+    if (papel === "computador") { log("info", "motor_so_computador", { machine_id: dados.machineId }); return; }
     const tarefasVivas = criarAcompanhanteDeTarefas((turnoId, tarefas) => ponteHttp.tarefas(turnoId, tarefas));
     laco = iniciarPoolDeLacos((ponte) => iniciarLaco({ ponte, registry: reg, pessoaId: dados.escopo.pessoaId, machineId: dados.machineId, relogio: () => Date.now(), renovacaoMs: 1_000, esperaVaziaMs: 1000, memoria, registroDaConta,
       aoDelta: (p, t) => ponteHttp.delta(p.turnoId, t),

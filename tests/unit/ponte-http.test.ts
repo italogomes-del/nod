@@ -264,11 +264,12 @@ describe("NOD-175: ponte do servidor na drenagem", () => {
   const LONGPOLL_MS = 2_000;
   const plano = { turnoId: "00000000-0000-4000-8000-000000000003" } as PlanoTurno;
 
-  function montar(puxar: PonteInternaNod["puxar"]) {
+  function montar(puxar: PonteInternaNod["puxar"], papel: "motor" | "computador" | null = null) {
     const ponte: PonteInternaNod = { conectar: async () => undefined, puxar, renovar: async () => ({ ativo: true, versaoMinimaApp: VERSAO_MINIMA_APP }), entregar: async () => undefined, desconectar: async () => undefined, maquinasConectadas: () => [], escopoDoTurno: () => null };
     const p = criarPonteHttpServidor({
       criar: () => ponte, persistir: async () => undefined, autorizar: async () => ({ ...escopo, chaveId: "m1" }),
       segredo: "s", seguro: false, agora: () => Date.now(), delta: () => undefined, ferramenta: () => undefined, tarefas: () => undefined, longpollMs: LONGPOLL_MS,
+      ...(papel ? { papelDaChave: async () => papel } : {}),
     });
     const chamar = async (nome: string, corpo: unknown = {}) => {
       const rota = p.rotas.find((r) => r.padrao.test(`/${nome}`));
@@ -292,6 +293,23 @@ describe("NOD-175: ponte do servidor na drenagem", () => {
     soltar(plano);
     expect(await puxando).toEqual({ status: 200, body: { plano } });
     expect(p.reservasEmVoo()).toBe(0);
+  });
+
+  it("NOD-94: a máquina só-computador conecta, mas nunca reserva turno — o puxar espera e volta {plano:null}; a sessão diz o papel", async () => {
+    const puxar = vi.fn<PonteInternaNod["puxar"]>().mockResolvedValue(plano);
+    const { p, chamar } = montar(puxar, "computador");
+    expect(await chamar("sessao")).toMatchObject({ status: 200, body: { papel: "computador" } });
+    expect(await chamar("conectar", { ...conectar, papel: "motor" })).toMatchObject({ status: 200, body: { papel: "computador" } });
+    expect(await chamar("puxar")).toEqual({ status: 200, body: { plano: null } });
+    expect(puxar).not.toHaveBeenCalled();
+    expect(p.reservasEmVoo()).toBe(0);
+  });
+
+  it("NOD-94: sem o papel da chave (servidor de teste, chave antiga) a sessão e o conectar dizem motor", async () => {
+    const { chamar } = montar(vi.fn<PonteInternaNod["puxar"]>().mockResolvedValue(plano));
+    expect(await chamar("sessao")).toMatchObject({ body: { papel: "motor" } });
+    expect(await chamar("conectar", conectar)).toMatchObject({ body: { papel: "motor" } });
+    expect(await chamar("puxar")).toEqual({ status: 200, body: { plano } });
   });
 
   it("ADR-085: o puxar leva a leitura do Mac (com o processador) até a ponte; app antigo manda {} e a ponte recebe undefined", async () => {

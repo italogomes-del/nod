@@ -22,8 +22,8 @@ export type ModoSessaoDto = { modo: "google" } | { modo: "stub"; pessoas: { id: 
 
 export type AmbienteBancoDto = { regime: "persistente" | "efemero" | "desconhecido"; porta: number | null };
 
-/** Chave de máquina como a dona a vê na lista (ADR-031): NUNCA traz a chave nem o hash. */
-export type ChaveMaquinaDto = { id: string; nome: string; prefixo: string; criadaEm: EpochMs; ultimoUsoEm: EpochMs | null; revogadaEm: EpochMs | null };
+/** Chave de máquina como a dona a vê na lista (ADR-031): NUNCA traz a chave nem o hash. `papel` (NOD-94): PapelMaquina; ausente = motor. */
+export type ChaveMaquinaDto = { id: string; nome: string; prefixo: string; criadaEm: EpochMs; ultimoUsoEm: EpochMs | null; revogadaEm: EpochMs | null; papel?: "motor" | "computador" };
 
 /** Resposta da emissão: a chave crua aparece AQUI e em mais lugar nenhum. */
 export type ChaveEmitidaDto = { chave: string; dados: ChaveMaquinaDto };

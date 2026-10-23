@@ -155,7 +155,7 @@ export type BancoMemoria = {
   catcher: { tenantId: string; id: string; turnoId: string; tipo: string; dados: Record<string, unknown>; em: number }[];
   events: (EventoGravavel & { tenantId: string; id: string; createdAt: number })[];
   outbox: (ItemOutbox & { tenantId: string; ownerId: string; entregueEm: number | null; abandonadoEm: number | null; canceladoEm: number | null })[];
-  maquinaTokens: { tenantId: string; ownerId: string; id: string; nome: string; prefixo: string; hash: Buffer; criadaEm: number; ultimoUsoEm: number | null; expiraEm: number | null; revogadaEm: number | null; plataforma?: "darwin" | "linux" | null }[];
+  maquinaTokens: { tenantId: string; ownerId: string; id: string; nome: string; prefixo: string; hash: Buffer; criadaEm: number; ultimoUsoEm: number | null; expiraEm: number | null; revogadaEm: number | null; plataforma?: "darwin" | "linux" | null; papel?: "motor" | "computador" }[];
   /** NOD-94 (0105): máquinas instaladas por SSH. */
   maquinasSsh: (MaquinaSsh & { tenantId: string; ownerId: string })[];
   /** 0071 (ADR-099, partes 3/4): os lotes de frentes, com a dona (o comportamento completo se prova no Postgres). */
@@ -1528,6 +1528,8 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         return doTenant(b.turnos).find((t) => t.id === id) ?? null;
       },
       async reivindicar(p) {
+        // NOD-94: a máquina só-computador nunca pega turno (como o turnos.repo.ts).
+        if (b.maquinaTokens.some((k) => k.tenantId === escopo.tenantId && k.ownerId === escopo.pessoaId && k.id === p.machineId && k.papel === "computador")) return null;
         const cota = p.cota;
         const fimDaFila = (t: Turno) => ["rotina", "delegacao", "peer"].includes(t.origem) || ["rotina", "colega"].includes(doTenant(b.trabalhos).find((x) => x.id === t.trabalhoId)?.origem ?? "");
         const vivos = doTenant(b.turnos);
@@ -2802,19 +2804,28 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
     },
     maquinaTokens: {
       async criar(e) {
-        const l = { tenantId: escopo.tenantId, ownerId: escopo.pessoaId, id: randomUUID(), nome: e.nome, prefixo: e.prefixo, hash: e.hash, criadaEm: agora(), ultimoUsoEm: null as number | null, expiraEm: null as number | null, revogadaEm: null as number | null };
+        const papel = e.papel ?? "motor";
+        // O índice único parcial da 0105 (maquina_tokens_um_computador), como no Postgres.
+        if (papel === "computador" && b.maquinaTokens.some((x) => x.tenantId === escopo.tenantId && x.ownerId === escopo.pessoaId && x.papel === "computador" && x.revogadaEm === null)) throw Object.assign(new Error("23505"), { code: "23505" });
+        const l = { tenantId: escopo.tenantId, ownerId: escopo.pessoaId, id: randomUUID(), nome: e.nome, prefixo: e.prefixo, hash: e.hash, criadaEm: agora(), ultimoUsoEm: null as number | null, expiraEm: null as number | null, revogadaEm: null as number | null, papel };
         b.maquinaTokens.push(l);
-        return { id: l.id, nome: l.nome, prefixo: l.prefixo, criadaEm: l.criadaEm, ultimoUsoEm: null, revogadaEm: null };
+        return { id: l.id, nome: l.nome, prefixo: l.prefixo, criadaEm: l.criadaEm, ultimoUsoEm: null, revogadaEm: null, papel };
+      },
+      async computadorVivo(em) {
+        const dela = b.maquinaTokens.filter((x) => x.tenantId === escopo.tenantId && x.ownerId === escopo.pessoaId && x.papel === "computador" && x.revogadaEm === null);
+        for (const x of dela) if (x.expiraEm !== null && x.expiraEm <= em) x.revogadaEm = x.expiraEm;
+        const viva = dela.find((x) => x.revogadaEm === null);
+        return viva ? { id: viva.id, nome: viva.nome } : null;
       },
       async listar() {
         return b.maquinaTokens
           .filter((l) => l.tenantId === escopo.tenantId && l.ownerId === escopo.pessoaId)
           .sort((x, y) => y.criadaEm - x.criadaEm)
-          .map(({ id, nome, prefixo, criadaEm, ultimoUsoEm, revogadaEm, expiraEm }) => ({ id, nome, prefixo, criadaEm, ultimoUsoEm, revogadaEm: revogadaEm ?? (expiraEm !== null && expiraEm <= Date.now() ? expiraEm : null) }));
+          .map(({ id, nome, prefixo, criadaEm, ultimoUsoEm, revogadaEm, expiraEm, papel }) => ({ id, nome, prefixo, criadaEm, ultimoUsoEm, revogadaEm: revogadaEm ?? (expiraEm !== null && expiraEm <= Date.now() ? expiraEm : null), papel: papel ?? "motor" }));
       },
       async vivasComPlataforma() {
         return b.maquinaTokens
-          .filter((l) => l.tenantId === escopo.tenantId && l.ownerId === escopo.pessoaId && l.revogadaEm === null && (l.expiraEm === null || l.expiraEm > Date.now()))
+          .filter((l) => l.tenantId === escopo.tenantId && l.ownerId === escopo.pessoaId && l.revogadaEm === null && (l.expiraEm === null || l.expiraEm > Date.now()) && (l.papel ?? "motor") === "motor")
           .sort((x, y) => y.criadaEm - x.criadaEm)
           .map((l) => ({ id: l.id, nome: l.nome, plataforma: l.plataforma ?? null }));
       },
@@ -2858,7 +2869,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       },
       async identificar(id) {
         const l = b.maquinaTokens.find((x) => x.tenantId === escopo.tenantId && x.ownerId === escopo.pessoaId && x.id === id);
-        return l ? { nome: l.nome, plataforma: l.plataforma ?? null } : null;
+        return l ? { nome: l.nome, plataforma: l.plataforma ?? null, papel: l.papel ?? "motor" } : null;
       },
     },
     maquinasSsh: {
