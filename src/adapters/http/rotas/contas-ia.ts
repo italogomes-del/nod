@@ -110,6 +110,21 @@ export function rotasContasIa(deps: DepsRotasContas): Rota[] {
       },
     },
     {
+      // NOD-293 C11 (definido em 2026-10-20): o que para se a pessoa sair da conta (numa máquina) ou removê-la. Só lê.
+      metodo: "GET",
+      padrao: /^\/contas-ia\/(?<id>[^/]+)\/frentes-ativas$/,
+      async handler(ctx) {
+        const id = assertUuid(ctx.params.id, "conta");
+        const bruto = new URL(ctx.req.url ?? "/", "http://127.0.0.1").searchParams.get("maquinaId");
+        const maquinaId = bruto === null ? null : assertUuid(bruto, "máquina");
+        const lista = await deps.dentro(ctx.escopo, async (d) => {
+          if (!(await d.repos.contasIa.buscar(id))) throw new ErroDeDominio("nao_encontrado", { cause: "conta" });
+          return d.repos.contasIa.frentesAtivas(id, maquinaId);
+        });
+        ctx.json(200, lista);
+      },
+    },
+    {
       metodo: "DELETE",
       padrao: /^\/contas-ia\/(?<id>[^/]+)$/,
       async handler(ctx) {

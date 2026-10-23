@@ -48,6 +48,8 @@ export const CONTAS_DA_PESSOA_MAX = 24;
 
 export type MaquinaDaConta = { maquinaId: string; nome: string; estado: EstadoContaNaMaquina };
 
+export type { FrenteAtivaDaConta } from "./frentes-da-conta.ts";
+
 export type ContaIa = {
   id: string;
   ia: IaComConta;

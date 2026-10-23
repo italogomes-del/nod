@@ -1,4 +1,4 @@
-import type { ContaIa, ContasIaDto, IaComConta, LoginNaMaquina } from "../../src/contracts/contas-ia.ts";
+import type { ContaIa, ContasIaDto, FrenteAtivaDaConta, IaComConta, LoginNaMaquina } from "../../src/contracts/contas-ia.ts";
 import type { DetalheDaConta, DetalhesDasContas } from "../../src/contracts/desktop.ts";
 import type { CausaFalhaLogin, ResultadoColarCodigo } from "../../src/contracts/estado-ia.ts";
 import type { MaquinaDto } from "../../src/contracts/maquina.ts";
@@ -19,9 +19,13 @@ import { planoNaTela } from "./contas-ia.ts";
  * linhas que dizem como o Nod age quando uma conta acaba.
  */
 
+/**
+ * NOD-293 C11 (definido em 2026-10-20): `frentes` = o que roda agora com a conta (na máquina, ou em todas na remoção);
+ * null = a busca falhou (a tela pergunta se sai mesmo assim); ausente ou vazia = nada roda, o texto de sempre.
+ */
 export type ConfirmacaoContas =
-  | { tipo: "sair"; contaId: string; maquinaId: string }
-  | { tipo: "remover"; contaId: string };
+  | { tipo: "sair"; contaId: string; maquinaId: string; frentes?: FrenteAtivaDaConta[] | null }
+  | { tipo: "remover"; contaId: string; frentes?: FrenteAtivaDaConta[] | null };
 
 /** O login de uma conta numa máquina aberto na tela: o da VM (pela API) ou o do Mac (pela ponte do app). */
 export type LoginNaTela =
@@ -346,6 +350,28 @@ function semMaquina(x: ContextoContas): string {
     </div>`;
 }
 
+/** "A", "A e B", "A, B e C". */
+const emLista = (itens: readonly string[]): string => (itens.length < 2 ? itens.join("") : `${itens.slice(0, -1).join(", ")} e ${itens.at(-1)!}`);
+
+/**
+ * NOD-293 C11 (definido em 2026-10-20): antes de sair ou remover, o diálogo diz quais frentes param. A conversa sem frente
+ * aparece como "a conversa com {bot}"; na remoção (várias máquinas), a máquina vai entre parênteses. Sem conferir (a busca
+ * falhou), o aviso diz o risco e não bloqueia: a pessoa decide. Os quatro estados ficam em role="status".
+ */
+function avisoDasFrentes(x: ContextoContas, frentes: readonly FrenteAtivaDaConta[] | null | undefined, acao: "sair" | "remover"): string {
+  if (frentes === undefined) return `<p class="cl-caixa" role="status">Conferindo as frentes que usam esta conta…</p>`;
+  if (frentes === null) return `<p class="cl-caixa cl-caixa-aviso" role="status">Não deu para conferir se alguma frente usa esta conta. Se houver alguma, ela para ao ${acao}.</p>`;
+  if (!frentes.length) return `<p class="cl-caixa" role="status">Nenhuma frente usa esta conta agora.</p>`;
+  const itens = frentes.map((f) => {
+    const rotulo = `<b>${esc(f.titulo ?? `a conversa com ${f.agente}`)}</b>`;
+    if (acao === "sair") return rotulo;
+    const m = x.maquinas.find((y) => y.id === f.maquinaId);
+    const onde = m ? nomeCurto(m, x.maquinas) : f.maquina;
+    return onde ? `${rotulo} (${esc(onde)})` : rotulo;
+  });
+  return `<p class="cl-caixa" role="status">Vão parar: ${emLista(itens)}.</p>`;
+}
+
 /** As confirmações (G1-P5 Sair, G1-P6 Remover) num diálogo sobre a tela. */
 function confirmacao(x: ContextoContas): string {
   const q = x.ui.confirmar;
@@ -363,16 +389,16 @@ function confirmacao(x: ContextoContas): string {
     const outrasContas = x.contas.contas.filter((o) => o.id !== c.id && prontaEm(o, q.maquinaId)).map(nomeDaContaNaTela);
     const bots = x.botsNaMaquina(q.maquinaId);
     titulo = `Sair da ${nome} na ${nm}?`;
-    corpo = `<p>A ${esc(nm)} esquece o login desta conta.${outrasMaqs.length ? ` Na ${esc(outrasMaqs.join(", "))} ela continua.` : ""}</p>
+    corpo = `${avisoDasFrentes(x, q.frentes, "sair")}<p>A ${esc(nm)} esquece o login desta conta.${outrasMaqs.length ? ` Na ${esc(outrasMaqs.join(", "))} ela continua.` : ""}</p>
       ${bots.length ? `<div class="cl-caixa">${outrasContas.length
         ? `Os bots da ${esc(nm)} (${esc(bots.join(", "))}) seguem com as outras contas logadas lá: ${outrasContas.map((o) => `<b>${esc(o)}</b>`).join(" e ")}.`
         : `A ${esc(nm)} fica sem conta de IA: os bots dela (${esc(bots.join(", "))}) esperam até você entrar numa conta lá.`}</div>` : ""}`;
-    botao = `<button type="button" class="bt perigo" data-act="cl-confirmar">Sair da ${esc(nm)}</button>`;
+    botao = `<button type="button" class="bt perigo" data-act="cl-confirmar"${q.frentes === undefined ? " disabled aria-busy=\"true\"" : ""}>Sair da ${esc(nm)}</button>`;
   } else {
     const nomes = c.maquinas.map((v) => { const o = x.maquinas.find((y) => y.id === v.maquinaId); return o ? nomeCurto(o, x.maquinas) : v.nome; });
     titulo = `Remover a ${nome}?`;
-    corpo = `<p>${nomes.length ? `O nod sai desta conta ${nomes.length === 1 ? "na" : "no"} ${esc(nomes.join(" e na "))} e apaga a pasta dela${nomes.length > 1 ? ` nas ${nomes.length === 2 ? "duas" : nomes.length}` : ""}. ` : ""}Ela some da lista; as outras continuam.</p><p class="mudo sm">Para usar de novo, é só adicionar a conta outra vez.</p>`;
-    botao = `<button type="button" class="bt perigo" data-act="cl-confirmar">${nomes.length > 1 ? `Remover das ${nomes.length} máquinas` : "Remover"}</button>`;
+    corpo = `${avisoDasFrentes(x, q.frentes, "remover")}<p>${nomes.length ? `O nod sai desta conta ${nomes.length === 1 ? "na" : "no"} ${esc(nomes.join(" e na "))} e apaga a pasta dela${nomes.length > 1 ? ` nas ${nomes.length === 2 ? "duas" : nomes.length}` : ""}. ` : ""}Ela some da lista; as outras continuam.</p><p class="mudo sm">Para usar de novo, é só adicionar a conta outra vez.</p>`;
+    botao = `<button type="button" class="bt perigo" data-act="cl-confirmar"${q.frentes === undefined ? " disabled aria-busy=\"true\"" : ""}>${nomes.length > 1 ? `Remover das ${nomes.length} máquinas` : "Remover"}</button>`;
   }
   return `<div class="cl-fundo" data-act="cl-confirmar-fechar"></div><div class="cl-dialogo" role="dialog" aria-modal="true" aria-labelledby="cl-dialogo-tit"><h3 id="cl-dialogo-tit">${esc(titulo)}</h3>${corpo}<div class="cl-dialogo-acoes"><button type="button" class="bt" data-act="cl-confirmar-fechar" data-cl-autofoco>Cancelar</button>${botao}</div></div>`;
 }

@@ -1,5 +1,5 @@
 import { CONTAS_DA_PESSOA_MAX } from "../contracts/contas-ia.ts";
-import type { ContaAnunciada, EstadoContaNaMaquina, IaComConta, ModoDasContas } from "../contracts/contas-ia.ts";
+import type { ContaAnunciada, EstadoContaNaMaquina, FrenteAtivaDaConta, IaComConta, ModoDasContas } from "../contracts/contas-ia.ts";
 import { apelidoPadrao, decidirAnuncio, vinculoSegueSemAcesso, ehIaComConta, type ContaDaPessoa, type VinculoDaConta } from "../domain/contas-da-pessoa.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
 import { data, msOuNull } from "./conversao.ts";
@@ -88,6 +88,27 @@ export function contasIaRepo(conn: Conn, escopo: Escopo) {
     async buscar(id: string): Promise<ContaGuardadaNoServidor | null> {
       const [l] = await conn<LinhaConta[]>`select ${conn.unsafe(COLUNAS)} from contas_ia where ${doDono()} and id = ${id}`;
       return l ? paraConta(l) : null;
+    },
+
+    /**
+     * NOD-293 C11 (definido em 2026-10-20): os turnos `despachando` com esta conta (na máquina dada, ou em todas), do mais
+     * antigo ao mais novo. Só lê; os joins casam pelo tenant e o turno é da pessoa (RLS e `owner_id`).
+     */
+    async frentesAtivas(contaId: string, maquinaId: string | null): Promise<FrenteAtivaDaConta[]> {
+      const linhas = await conn<{ trabalho_id: string | null; titulo: string | null; agente: string; conversa_id: string; machine_id: string; maquina: string | null }[]>`
+        select t.trabalho_id, k.titulo, a.nome as agente, t.conversa_id, t.machine_id, m.nome as maquina
+        from turnos t
+        join agentes a on a.tenant_id = t.tenant_id and a.id = t.agente_id
+        left join trabalhos k on k.tenant_id = t.tenant_id and k.id = t.trabalho_id
+        left join maquina_tokens m on m.tenant_id = t.tenant_id and m.id = t.machine_id
+        where t.tenant_id = ${escopo.tenantId} and t.owner_id = ${escopo.pessoaId} and t.conta_id = ${contaId}
+          and t.estado = 'despachando' and t.machine_id is not null
+          ${maquinaId === null ? conn`` : conn`and t.machine_id = ${maquinaId}`}
+        order by t.criado_em, t.id`;
+      return linhas.map((l) => ({
+        trabalhoId: l.trabalho_id, titulo: l.trabalho_id === null ? null : l.titulo, agente: l.agente,
+        conversaId: l.conversa_id, maquinaId: l.machine_id, maquina: l.maquina,
+      }));
     },
 
     /**

@@ -3454,8 +3454,10 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   "cl-renomear": (el) => { contasDaPessoa.renomear(el.dataset.id ?? null); focarNovo(); },
   "cl-renomear-fechar": () => contasDaPessoa.renomear(null),
   "cl-detalhe": (el) => contasDaPessoa.detalhe(el.dataset.id ?? ""),
-  "cl-sair": (el) => { contasDaPessoa.pedirSaida(el.dataset.id ?? "", el.dataset.maquina ?? ""); focarNovo(); },
-  "cl-remover": (el) => { contasDaPessoa.pedirRemocao(el.dataset.id ?? ""); focarNovo(); },
+  // Revisor do PR #429: o diálogo abre na hora (a busca das frentes leva até 5 s); o foco vai ao "Cancelar" já ao abrir e
+  // de novo quando a lista chega e o diálogo é redesenhado.
+  "cl-sair": (el) => { const p = contasDaPessoa.pedirSaida(el.dataset.id ?? "", el.dataset.maquina ?? ""); focarNovo(); void p.then(focarNovo); },
+  "cl-remover": (el) => { const p = contasDaPessoa.pedirRemocao(el.dataset.id ?? ""); focarNovo(); void p.then(focarNovo); },
   "cl-confirmar": async () => { const volta = gatilhoDoDialogo(); await contasDaPessoa.confirmar(); focarGatilho(volta); },
   "cl-confirmar-fechar": () => { const volta = gatilhoDoDialogo(); contasDaPessoa.fecharConfirmacao(); focarGatilho(volta); },
   "cl-entrar": (el) => contasDaPessoa.entrar(el.dataset.id ?? "", el.dataset.maquina ?? ""),

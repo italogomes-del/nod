@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
-import { readFile, rename, writeFile } from "node:fs/promises";
+import { readFile, rename, stat, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import type { ContaAnunciada, EstadoContaNaMaquina } from "../src/contracts/contas-ia.ts";
 import { CAUSAS_SEM_IA, type Inventario } from "../src/contracts/inventario.ts";
 import { IAS_DESKTOP, type DetalheDaConta, type IaDesktop } from "../src/contracts/desktop.ts";
@@ -22,8 +23,13 @@ export type ContaLocal = {
   ia: IaDesktop;
   /** O apelido que a pessoa deu ao pedir a conta (vai como sugestão no anúncio da conta nova). */
   apelido: string | null;
-  /** Quando a pasta ganhou o login atual (R4: conta removida só volta com login mais novo que a remoção). */
+  /**
+   * Quando a pasta ganhou o login atual (R4: conta removida só volta com login mais novo que a remoção). NOD-293 C10: no
+   * login detectado, é o maior entre a data do arquivo da credencial e `armadaEm`; nunca a hora da leitura.
+   */
   logadaEm: number;
+  /** NOD-293 C10: quando o nod abriu um login nesta pasta (`pastaParaLogin`, `armar`); 0 = nenhum pendente. */
+  armadaEm: number;
   /** A impressão da última conta lida nesta pasta; null = nunca logou. */
   impressao: string | null;
   plano: string | null;
@@ -81,8 +87,10 @@ export function criarContasLocais(d: DepsContasLocais) {
   let contas: ContaLocal[] = [];
   /** E-mail e organização por impressão: vão ao anúncio (ADR-105), nunca ao arquivo. */
   const detalhes = new Map<string, DetalheDaContaLocal>();
+  /** NOD-293 C10: o login armado pelo app do Mac antes de a conta nova existir na lista (`armar` sem id). Só na memória. */
+  const armadaDaIa = new Map<IaDesktop, number>();
 
-  const padraoDe = (ia: IaDesktop): ContaLocal => ({ id: ID_CONTA_PADRAO, ia, apelido: null, logadaEm: 0, impressao: null, plano: null, estado: "sem_login", lidaEm: 0 });
+  const padraoDe = (ia: IaDesktop): ContaLocal => ({ id: ID_CONTA_PADRAO, ia, apelido: null, logadaEm: 0, armadaEm: armadaDaIa.get(ia) ?? 0, impressao: null, plano: null, estado: "sem_login", lidaEm: 0 });
 
   let fila: Promise<unknown> = Promise.resolve();
   /**
@@ -103,6 +111,17 @@ export function criarContasLocais(d: DepsContasLocais) {
     return ambienteDaConta(d.base, c.ia, c.id);
   }
 
+  /**
+   * NOD-293 C10 (definido em 2026-10-20): a data do arquivo da credencial da conta (`.credentials.json` do Claude,
+   * `auth.json` do Codex) — só a data, o nod não abre o arquivo (ADR-019). Sem arquivo (Keychain do Mac, keyring), 0.
+   */
+  async function dataDaCredencial(c: ContaLocal): Promise<number> {
+    const pasta = c.id === ID_CONTA_PADRAO ? d.padrao(c.ia) : pastaDaConta(d.base, c.ia, c.id);
+    if (!pasta) return 0;
+    const s = await stat(join(pasta, c.ia === "claude-cli" ? ".credentials.json" : "auth.json")).catch(() => null);
+    return s ? Math.floor(s.mtimeMs) : 0;
+  }
+
   async function lerUma(c: ContaLocal): Promise<boolean> {
     const id = await d.lerIdentidade(c.ia, ambiente(c)).catch(() => undefined);
     c.lidaEm = d.agora();
@@ -111,7 +130,12 @@ export function criarContasLocais(d: DepsContasLocais) {
     if (id.logado && id.email) {
       const impressao = createHash("sha256").update(textoDaImpressaoDaConta({ pessoaId: d.pessoaId, ia: c.ia, email: id.email, orgId: id.orgId })).digest("hex");
       const novoLogin = impressao !== c.impressao;
-      if (novoLogin) c.logadaEm = d.agora();
+      // NOD-293 C10: a hora da leitura fazia a conta removida voltar na primeira leitura de uma máquina (app reinstalado).
+      // A data da credencial só vale aqui, no login detectado: a renovação do token reescreve o arquivo depois.
+      if (novoLogin) {
+        c.logadaEm = Math.max(await dataDaCredencial(c), c.armadaEm);
+        c.armadaEm = 0;
+      }
       c.impressao = impressao;
       c.plano = id.plano;
       // NOD-283 (2026-10-15): a conta que o turno achou sem acesso continua assim com o mesmo login (o CLI segue logado,
@@ -150,7 +174,7 @@ export function criarContasLocais(d: DepsContasLocais) {
           const o = x as Partial<ContaLocal>;
           if (typeof o.id !== "string" || !IAS_DESKTOP.includes(o.ia as IaDesktop)) continue;
           if (o.id !== ID_CONTA_PADRAO && !pastaDaConta(d.base, o.ia as IaDesktop, o.id)) continue;
-          lidas.push({ id: o.id, ia: o.ia as IaDesktop, apelido: apelidoValido(o.apelido) ?? null, logadaEm: Number(o.logadaEm) || 0, impressao: typeof o.impressao === "string" ? o.impressao : null, plano: typeof o.plano === "string" ? o.plano : null, estado: o.estado === "pronta" || o.estado === "sem_acesso" ? o.estado : "sem_login", lidaEm: 0 });
+          lidas.push({ id: o.id, ia: o.ia as IaDesktop, apelido: apelidoValido(o.apelido) ?? null, logadaEm: Number(o.logadaEm) || 0, armadaEm: Number(o.armadaEm) || 0, impressao: typeof o.impressao === "string" ? o.impressao : null, plano: typeof o.plano === "string" ? o.plano : null, estado: o.estado === "pronta" || o.estado === "sem_acesso" ? o.estado : "sem_login", lidaEm: 0 });
         }
       } catch { /* arquivo quebrado: recomeça com as contas de sempre */ }
       contas = lidas;
@@ -173,21 +197,47 @@ export function criarContasLocais(d: DepsContasLocais) {
       const livre = padrao && padrao.estado !== "pronta" ? padrao : contas.find((c) => c.ia === ia && c.id !== ID_CONTA_PADRAO && c.estado !== "pronta");
       if (livre && livre !== padrao) {
         livre.apelido = apelido;
+        livre.armadaEm = d.agora();
         await gravar();
         return livre;
       }
       if (padrao && padrao.estado !== "pronta") {
         padrao.apelido = apelido;
+        padrao.armadaEm = d.agora();
         // O arquivo passa a existir já aqui: o serviço percebe o login do terminal pela data dele.
         await gravar();
         return padrao;
       }
       if (contas.filter((c) => c.ia === ia).length >= CONTAS_POR_IA_MAX) return null;
-      const nova: ContaLocal = { id: novoIdDeConta(), ia, apelido, logadaEm: 0, impressao: null, plano: null, estado: "sem_login", lidaEm: 0 };
+      const nova: ContaLocal = { id: novoIdDeConta(), ia, apelido, logadaEm: 0, armadaEm: d.agora(), impressao: null, plano: null, estado: "sem_login", lidaEm: 0 };
       await prepararPastaDaConta({ base: d.base, ia, id: nova.id, padrao: d.padrao(ia) });
       contas.push(nova);
       await gravar();
       return nova;
+    },
+
+    /**
+     * NOD-293 C10: o nod vai abrir um login nesta IA (a tela do app do Mac, o login pedido pela tela numa conta que já
+     * existe): o login que aparecer a seguir é de propósito e conta desta hora, mesmo sem arquivo de credencial (Keychain).
+     * Sem `id`, vale para todas as contas da IA e para a conta nova que a lista do app trouxer depois.
+     */
+    async armar(ia: IaDesktop, id?: string): Promise<void> {
+      const agora = d.agora();
+      if (id === undefined) armadaDaIa.set(ia, agora);
+      for (const c of contas) if (c.ia === ia && (id === undefined || c.id === id)) c.armadaEm = agora;
+      await gravar();
+    },
+
+    /** O marcador vale para uma tentativa de login. Sucesso, falha e cancelamento sempre o consomem. */
+    async desarmar(ia: IaDesktop, id?: string): Promise<void> {
+      armadaDaIa.delete(ia);
+      let mudou = false;
+      for (const c of contas) {
+        if (c.ia !== ia || (id !== undefined && c.id !== id) || c.armadaEm === 0) continue;
+        c.armadaEm = 0;
+        mudou = true;
+      }
+      if (mudou) await gravar();
     },
 
     /** Relê a identidade (todas, ou só as vencidas). true = algo mudou (o motor reanuncia). */
@@ -257,7 +307,7 @@ export function criarContasLocais(d: DepsContasLocais) {
         if (c.id === ID_CONTA_PADRAO) {
           // Revisão do PR #306: sem logout, a conta continua logada aqui — a saída fica pendente (o servidor pede de novo).
           if (!(await d.logout(c.ia, {}).catch(() => false))) throw new Error("logout_falhou");
-          Object.assign(c, { impressao: null, plano: null, estado: "sem_login", logadaEm: 0, apelido: null });
+          Object.assign(c, { impressao: null, plano: null, estado: "sem_login", logadaEm: 0, armadaEm: 0, apelido: null });
         } else {
           await removerPastaDaConta({ base: d.base, ia: c.ia, id: c.id, logout: (env) => d.logout(c.ia, env) });
           contas = contas.filter((x) => x !== c);
@@ -282,7 +332,7 @@ export function criarContasLocais(d: DepsContasLocais) {
         const apelido = apelidoValido(x.apelido) ?? null;
         if (c) { if (c.apelido !== apelido) { c.apelido = apelido; mudou = true; } continue; }
         if (x.id !== ID_CONTA_PADRAO && !pastaDaConta(d.base, x.ia, x.id)) continue;
-        contas.push({ id: x.id, ia: x.ia, apelido, logadaEm: 0, impressao: null, plano: null, estado: "sem_login", lidaEm: 0 });
+        contas.push({ id: x.id, ia: x.ia, apelido, logadaEm: 0, armadaEm: armadaDaIa.get(x.ia) ?? 0, impressao: null, plano: null, estado: "sem_login", lidaEm: 0 });
         mudou = true;
       }
       if (mudou) await gravar();

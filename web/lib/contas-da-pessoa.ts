@@ -1,4 +1,4 @@
-import type { CodigoCifrado, ContasIaDto, IaComConta, LoginNaMaquina } from "../../src/contracts/contas-ia.ts";
+import type { CodigoCifrado, ContasIaDto, FrenteAtivaDaConta, IaComConta, LoginNaMaquina } from "../../src/contracts/contas-ia.ts";
 import type { DetalhesDasContas } from "../../src/contracts/desktop.ts";
 import type { MaquinaDto } from "../../src/contracts/maquina.ts";
 import { contaDoLogin, idDoLogin, maquinaDoLogin, type LoginNaTela, type UiContas } from "../telas/contas-lista.ts";
@@ -16,6 +16,8 @@ export type ApiContas = {
   mudarConta(id: string, corpo: { apelido?: string; entraNaTrocaAutomatica?: boolean }): Promise<unknown>;
   sairDaConta(id: string, maquinaId: string): Promise<unknown>;
   removerConta(id: string): Promise<unknown>;
+  /** NOD-293 C11: o que roda agora com a conta (na máquina dada, ou em todas). */
+  frentesAtivas(id: string, maquinaId?: string, signal?: AbortSignal): Promise<FrenteAtivaDaConta[]>;
   pedirLogin(maquinaId: string, p: { ia: IaComConta; contaId?: string; apelido?: string | null }): Promise<LoginNaMaquina>;
   verLogin(maquinaId: string, loginId: string): Promise<LoginNaMaquina>;
   colarCodigoLogin(maquinaId: string, loginId: string, cifrado: CodigoCifrado): Promise<unknown>;
@@ -39,12 +41,15 @@ export type DepsContasDaPessoa = {
   cifrar: (chavePublica: string, codigo: string) => Promise<CodigoCifrado>;
   agendar: (fn: () => void, ms: number) => void;
   agora: () => number;
+  /** Injetável no teste; em produção a busca nunca segura a confirmação além deste prazo. */
+  prazoFrentesMs?: number;
 };
 
 /** definido em 2026-10-13: a tela confere o login aberto numa VM a cada segundo (a máquina puxa a cada 1 s com login). */
 export const INTERVALO_LOGIN_TELA_MS = 1_000;
 /** O "✓ Entrou" fica à vista por um tempo antes de o bloco sair (a pílula da máquina já apareceu na linha). */
 export const PRONTO_VISIVEL_MS = 6_000;
+export const PRAZO_FRENTES_MS = 5_000;
 
 const FINAIS = new Set(["pronto", "falhou", "cancelado"]);
 
@@ -61,6 +66,7 @@ export function ligarPedeAvisoDosTermos(contas: ContasIaDto, id: string): boolea
 
 export function criarContasDaPessoa(d: DepsContasDaPessoa) {
   let conferindo = false;
+  const buscandoFrentes = new Set<string>();
   const logins = () => d.ui().logins;
   const trocarLogin = (id: string, fn: (l: LoginNaTela) => LoginNaTela | null) => {
     d.mudar({ logins: logins().flatMap((l) => (idDoLogin(l) === id ? [fn(l)].filter((x): x is LoginNaTela => x !== null) : [l])) });
@@ -111,6 +117,28 @@ export function criarContasDaPessoa(d: DepsContasDaPessoa) {
       conferir();
     } catch (e) {
       d.mudar({ nota: erroCurto(e, `Não deu para começar o login na ${m.nome}. Confira se ela está conectada e tente de novo.`) });
+    }
+  }
+
+  /** NOD-293 C11: as frentes rodando com a conta; null = não deu para conferir. */
+  async function frentesDaConta(id: string, maquinaId?: string): Promise<FrenteAtivaDaConta[] | null> {
+    const api = d.api();
+    if (!api) return null;
+    return api.frentesAtivas(id, maquinaId, AbortSignal.timeout(d.prazoFrentesMs ?? PRAZO_FRENTES_MS)).catch(() => null);
+  }
+
+  async function prepararConfirmacao(q: Extract<UiContas["confirmar"], object>): Promise<void> {
+    const chave = q.tipo === "sair" ? `sair:${q.contaId}:${q.maquinaId}` : `remover:${q.contaId}`;
+    // Reabrir durante a busca mostra o diálogo de novo; a busca em curso o preenche (a guarda abaixo compara com o atual).
+    d.mudar({ confirmar: q, menu: null });
+    if (buscandoFrentes.has(chave)) return;
+    buscandoFrentes.add(chave);
+    try {
+      const frentes = await frentesDaConta(q.contaId, q.tipo === "sair" ? q.maquinaId : undefined);
+      const atual = d.ui().confirmar;
+      if (atual?.tipo === q.tipo && atual.contaId === q.contaId && (q.tipo === "remover" || (atual.tipo === "sair" && atual.maquinaId === q.maquinaId))) d.mudar({ confirmar: { ...q, frentes } });
+    } finally {
+      buscandoFrentes.delete(chave);
     }
   }
 
@@ -171,14 +199,20 @@ export function criarContasDaPessoa(d: DepsContasDaPessoa) {
       await d.api()?.ordemContas(nova.map((x) => x.id)).catch(() => d.mudar({ nota: "Não deu para salvar a ordem. Tente de novo." }));
       d.invalidar();
     },
-    pedirSaida(id: string, maquinaId: string): void { d.mudar({ confirmar: { tipo: "sair", contaId: id, maquinaId }, menu: null }); },
-    pedirRemocao(id: string): void { d.mudar({ confirmar: { tipo: "remover", contaId: id }, menu: null }); },
+    // NOD-293 C11 (definido em 2026-10-20): antes de perguntar, a lista do que para; se a busca falhar (null), a tela
+    // pergunta se sai mesmo assim, sem bloquear.
+    async pedirSaida(id: string, maquinaId: string): Promise<void> {
+      await prepararConfirmacao({ tipo: "sair", contaId: id, maquinaId });
+    },
+    async pedirRemocao(id: string): Promise<void> {
+      await prepararConfirmacao({ tipo: "remover", contaId: id });
+    },
     fecharConfirmacao(): void { d.mudar({ confirmar: null }); },
     async confirmar(): Promise<void> {
       const q = d.ui().confirmar;
       const api = d.api();
+      if (!q || q.frentes === undefined || !api) return;
       d.mudar({ confirmar: null });
-      if (!q || !api) return;
       try {
         if (q.tipo === "sair") {
           await api.sairDaConta(q.contaId, q.maquinaId);

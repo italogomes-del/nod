@@ -97,6 +97,7 @@ describe("contas do motor (ADR-102)", { timeout: 20_000 }, () => {
     await m.esperar(() => m.progresso.some((p) => p.fase === "falhou"));
     expect(m.progresso.at(-1)).toMatchObject({ fase: "falhou" });
     expect(m.contas.anuncio()).toEqual([]);
+    expect(await readFile(m.arquivo, "utf8")).toContain('"armadaEm":0');
   });
 
   it("sair desta máquina: logout na pasta da conta, o servidor fica sabendo e a conta some do anúncio", async () => {

@@ -115,6 +115,30 @@ describe("lista única de contas (ADR-102)", () => {
     expect(remover).toContain("Remover das 2 máquinas");
   });
 
+  it("NOD-293 C11: o diálogo diz quais frentes vão parar; sem frente, diz que nenhuma usa; sem conferir, avisa o risco; os quatro estados são anunciados", () => {
+    const safari = { trabalhoId: "t-1", titulo: "Login no Safari", agente: "Ada", conversaId: "c-1", maquinaId: VM, maquina: "vm-bots" };
+    const conversa = { trabalhoId: null, titulo: null, agente: "Ze 1", conversaId: "c-2", maquinaId: MAC, maquina: "MacBook" };
+    const sair = renderListaDeContas(ctx({ ui: { confirmar: { tipo: "sair", contaId: PESSOAL.id, maquinaId: VM, frentes: [safari] } } }));
+    expect(sair).toContain('<p class="cl-caixa" role="status">Vão parar: <b>Login no Safari</b>.</p>');
+    expect(sair).toContain("A vm-bots esquece o login desta conta.");
+    const remover = renderListaDeContas(ctx({ ui: { confirmar: { tipo: "remover", contaId: PESSOAL.id, frentes: [safari, conversa] } } }));
+    expect(remover).toContain("Vão parar: <b>Login no Safari</b> (vm-bots) e <b>a conversa com Ze 1</b> (Mac).");
+    const nenhuma = renderListaDeContas(ctx({ ui: { confirmar: { tipo: "sair", contaId: PESSOAL.id, maquinaId: VM, frentes: [] } } }));
+    expect(nenhuma).not.toContain("Vão parar");
+    expect(nenhuma).toContain('<p class="cl-caixa" role="status">Nenhuma frente usa esta conta agora.</p>');
+    expect(nenhuma).toContain("A vm-bots fica sem conta de IA");
+    const semConferir = renderListaDeContas(ctx({ ui: { confirmar: { tipo: "sair", contaId: PESSOAL.id, maquinaId: VM, frentes: null } } }));
+    expect(semConferir).toContain('<p class="cl-caixa cl-caixa-aviso" role="status">Não deu para conferir se alguma frente usa esta conta. Se houver alguma, ela para ao sair.</p>');
+    expect(semConferir).toContain('data-act="cl-confirmar"');
+    const removerSemConferir = renderListaDeContas(ctx({ ui: { confirmar: { tipo: "remover", contaId: PESSOAL.id, frentes: null } } }));
+    expect(removerSemConferir).toContain("Se houver alguma, ela para ao remover.");
+    const pendente = renderListaDeContas(ctx({ ui: { confirmar: { tipo: "sair", contaId: PESSOAL.id, maquinaId: VM } } }));
+    expect(pendente).toContain('<p class="cl-caixa" role="status">Conferindo as frentes que usam esta conta…</p>');
+    expect(pendente).toContain('data-act="cl-confirmar" disabled aria-busy="true"');
+    // Revisor do PR #429: o foco vai ao "Cancelar" já ao abrir, durante a busca (até 5 s).
+    expect(pendente).toContain('data-act="cl-confirmar-fechar" data-cl-autofoco>Cancelar</button>');
+  });
+
   it("login na VM pela tela: link oficial, campo do código e o aviso de que vai cifrado; o terminal fica escondido", () => {
     const html = renderListaDeContas(ctx({ ui: { logins: [{ onde: "vm", login: login(), codigo: "", enviando: false, erroEnvio: null }] } }));
     expect(html).toContain("Abrir a página da Anthropic");
@@ -244,7 +268,7 @@ describe("Provedores e Máquinas com a lista (ADR-102)", () => {
 });
 
 describe("controlador da lista (ADR-102)", () => {
-  function montar(api: Partial<ApiContas> = {}, termos: { aceita: boolean } = { aceita: true }) {
+  function montar(api: Partial<ApiContas> = {}, termos: { aceita: boolean } = { aceita: true }, prazoFrentesMs = 5_000) {
     let estado = reduzir({ ...estadoInicial, maquinas: { maquinas: MAQUINAS, padraoId: null } }, { tipo: "hidratar-contas", contas: CONTAS, detalhes: null });
     const pendentes: (() => void)[] = [];
     const chamadas: string[] = [];
@@ -258,6 +282,7 @@ describe("controlador da lista (ADR-102)", () => {
         verLogin: async () => login(),
         colarCodigoLogin: async () => { chamadas.push("codigo"); return { ok: true }; },
         cancelarLogin: async () => ({ ok: true }),
+        frentesAtivas: async () => [],
         ...api,
       }),
       ui: () => estado.contasUi,
@@ -272,6 +297,7 @@ describe("controlador da lista (ADR-102)", () => {
       cifrar: async (chave, codigo) => ({ chave, iv: "aXY=", dados: btoa(codigo) }),
       agendar: (fn) => { pendentes.push(fn); },
       agora: () => AGORA,
+      prazoFrentesMs,
     });
     const rodar = async () => { for (const fn of pendentes.splice(0)) fn(); await new Promise((r) => setTimeout(r, 0)); };
     return { c, chamadas, rodar, get estado() { return estado; } };
@@ -299,12 +325,68 @@ describe("controlador da lista (ADR-102)", () => {
 
   it("sair e remover passam pela confirmação", async () => {
     const m = montar();
-    m.c.pedirSaida(PESSOAL.id, VM);
+    await m.c.pedirSaida(PESSOAL.id, VM);
     await m.c.confirmar();
-    m.c.pedirRemocao(LEAPY.id);
+    await m.c.pedirRemocao(LEAPY.id);
     await m.c.confirmar();
     expect(m.chamadas).toEqual(expect.arrayContaining([`sair:${PESSOAL.id}:${VM}`, `remover:${LEAPY.id}`]));
     expect(m.estado.contasIa?.contas.some((c) => c.id === LEAPY.id)).toBe(false);
+  });
+
+  // NOD-293 C11 (2026-10-20): a confirmação conta antes quais frentes param; a busca que falha não impede a saída.
+  it("NOD-293 C11: sair e remover buscam as frentes da conta antes de perguntar; sem resposta, perguntam do mesmo jeito", async () => {
+    const pedidas: string[] = [];
+    const frente = { trabalhoId: "t-1", titulo: "Login no Safari", agente: "Ada", conversaId: "c-1", maquinaId: VM, maquina: "vm-bots" };
+    const m = montar({ frentesAtivas: async (id, maquinaId) => { pedidas.push(`${id}:${maquinaId ?? "todas"}`); return [frente]; } });
+    await m.c.pedirSaida(PESSOAL.id, VM);
+    expect(pedidas).toEqual([`${PESSOAL.id}:${VM}`]);
+    expect(m.estado.contasUi.confirmar).toEqual({ tipo: "sair", contaId: PESSOAL.id, maquinaId: VM, frentes: [frente] });
+    m.c.fecharConfirmacao();
+    await m.c.pedirRemocao(LEAPY.id);
+    expect(pedidas).toEqual([`${PESSOAL.id}:${VM}`, `${LEAPY.id}:todas`]);
+    expect(m.estado.contasUi.confirmar).toMatchObject({ tipo: "remover", contaId: LEAPY.id, frentes: [frente] });
+    const falha = montar({ frentesAtivas: async () => { throw new Error("rede"); } });
+    await falha.c.pedirSaida(PESSOAL.id, VM);
+    expect(falha.estado.contasUi.confirmar).toEqual({ tipo: "sair", contaId: PESSOAL.id, maquinaId: VM, frentes: null });
+    await falha.c.confirmar();
+    expect(falha.chamadas).toContain(`sair:${PESSOAL.id}:${VM}`);
+  });
+
+  it("NOD-293 C11: mostra pendente na hora, ignora clique duplicado e timeout cai em frentes=null", async () => {
+    const frente = { trabalhoId: "t-1", titulo: "Login no Safari", agente: "Ada", conversaId: "c-1", maquinaId: VM, maquina: "vm-bots" };
+    let resolver!: (v: typeof frente[]) => void;
+    let chamadas = 0;
+    const m = montar({ frentesAtivas: async () => { chamadas += 1; return new Promise((r) => { resolver = r; }); } });
+    const primeira = m.c.pedirSaida(PESSOAL.id, VM);
+    const duplicada = m.c.pedirSaida(PESSOAL.id, VM);
+    expect(m.estado.contasUi.confirmar).toEqual({ tipo: "sair", contaId: PESSOAL.id, maquinaId: VM });
+    expect(chamadas).toBe(1);
+    await m.c.confirmar();
+    expect(m.chamadas).not.toContain(`sair:${PESSOAL.id}:${VM}`);
+    resolver([frente]);
+    await Promise.all([primeira, duplicada]);
+    expect(m.estado.contasUi.confirmar).toMatchObject({ frentes: [frente] });
+
+    const timeout = montar({ frentesAtivas: async (_id, _maquina, signal) => new Promise((_r, rejeitar) => signal?.addEventListener("abort", () => rejeitar(signal.reason), { once: true })) }, { aceita: true }, 1);
+    await timeout.c.pedirRemocao(LEAPY.id);
+    expect(timeout.estado.contasUi.confirmar).toEqual({ tipo: "remover", contaId: LEAPY.id, frentes: null });
+  });
+
+  it("NOD-293 C11 (Gil): abrir, fechar e reabrir durante a busca mostra o diálogo de novo e a busca em curso o preenche", async () => {
+    const frente = { trabalhoId: "t-1", titulo: "Login no Safari", agente: "Ada", conversaId: "c-1", maquinaId: VM, maquina: "vm-bots" };
+    let resolver!: (v: typeof frente[]) => void;
+    let chamadas = 0;
+    const m = montar({ frentesAtivas: async () => { chamadas += 1; return new Promise((r) => { resolver = r; }); } });
+    const abrir = m.c.pedirSaida(PESSOAL.id, VM);
+    expect(m.estado.contasUi.confirmar).toEqual({ tipo: "sair", contaId: PESSOAL.id, maquinaId: VM });
+    m.c.fecharConfirmacao();
+    expect(m.estado.contasUi.confirmar).toBeFalsy();
+    const reabrir = m.c.pedirSaida(PESSOAL.id, VM);
+    expect(m.estado.contasUi.confirmar).toEqual({ tipo: "sair", contaId: PESSOAL.id, maquinaId: VM });
+    expect(chamadas).toBe(1);
+    resolver([frente]);
+    await Promise.all([abrir, reabrir]);
+    expect(m.estado.contasUi.confirmar).toEqual({ tipo: "sair", contaId: PESSOAL.id, maquinaId: VM, frentes: [frente] });
   });
 
   it("ADR-108: ligar a corporativa como 2ª da IA pede os termos; recusado, nada muda; aceito, liga", async () => {

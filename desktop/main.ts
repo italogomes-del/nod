@@ -34,6 +34,7 @@ import { criarContasDoApp } from "./contas-no-app.ts";
 import { ID_CONTA_PADRAO } from "../src/domain/contas-da-ia.ts";
 import { estadoDaMaquina } from "../src/domain/harness.ts";
 import { criarContasLocais, inventariosComContas, type ContasLocais } from "./contas-locais.ts";
+import { concluirLoginArmado } from "./login-armado.ts";
 import { iniciarContasNoServidor } from "./contas-no-servidor.ts";
 import { lerIdentidadeNoCli, type ClisDoMotor } from "../motor/contas.ts";
 import { estadoDaIa } from "../src/domain/estado-ia.ts";
@@ -591,20 +592,37 @@ async function conectar(c: Config) {
  * "Entrar" num card de IA (ADR-077): o login do próprio CLI, sem shell, desanexado e com o ambiente limpo dos drivers
  * (ia-mac.ts). Ele abre o navegador; o nod nunca lê o token — a sonda de 3 s percebe quando ficou pronto.
  */
+/**
+ * NOD-293 C10 (definido em 2026-10-20): o login aberto pelo app conta da hora do pedido (R4: a conta removida volta).
+ * Sem isso, no Mac (Keychain, sem arquivo de credencial) o login novo ficaria com logadaEm 0 e a conta seguiria removida.
+ */
+async function armarLogin(ia: IaDesktop): Promise<void> {
+  await contasLocais?.armar(ia).catch(() => undefined);
+}
+/** O marcador vale para uma tentativa: sai em todo término (sucesso depois da leitura; falha na hora). */
+async function desarmarLogin(ia: IaDesktop): Promise<void> {
+  await contasLocais?.desarmar(ia).catch(() => undefined);
+}
+
 async function entrarNaIa(ia: IaDesktop): Promise<ResultadoIaDesktop> {
   const cfg = await cfgAtual();
   const home = cfg.env.HOME ?? "";
   const { nome, args } = comandoDeLogin(ia);
   const bin = await resolverBinario(ia === "claude-cli" ? cfg.bin : cfg.bins?.["codex-cli"], cfg.env.PATH ?? "", home, nome);
-  if (!bin) return { ok: false, motivo: "nao_instalado" };
+  // NOD-293 C10 (revisor do PR #429): o `iaEntrar` armou o marcador; sem login (não instalado, erro, saída ≠ 0) ele sai.
+  if (!bin) { await desarmarLogin(ia); return { ok: false, motivo: "nao_instalado" }; }
   return new Promise((resolver) => {
+    const falhou = (): void => { void desarmarLogin(ia); resolver({ ok: false, motivo: "falhou" }); };
     try {
       const filho = spawn(bin, args, { cwd: home || undefined, env: ambienteDaIa(ia, cfg), detached: true, stdio: "ignore", shell: false });
       filho.once("spawn", () => { filho.unref(); resolver({ ok: true }); });
       // definido em 2026-10-05: o login terminou bem — se esta IA estava reprovada, a conta nova é testada agora.
-      filho.once("exit", (codigo) => { if (codigo === 0) void vigiaIas?.contaMudou(ia).catch(() => undefined); });
-      filho.once("error", () => resolver({ ok: false, motivo: "falhou" }));
-    } catch { resolver({ ok: false, motivo: "falhou" }); }
+      filho.once("exit", (codigo) => {
+        if (codigo === 0) void vigiaIas?.contaMudou(ia).catch(() => undefined);
+        else void desarmarLogin(ia);
+      });
+      filho.once("error", falhou);
+    } catch { falhou(); }
   });
 }
 /**
@@ -863,19 +881,26 @@ function aoMudarLogin(ia: IaDesktop, login: LoginDaIa): void {
   if (login.fase === "sucesso" && contasDoApp.adicionando(ia)) {
     // ADR-101: a conta nova entrou — lida NA pasta dela, entra no fim da lista; depois o cartão volta à conta em uso.
     contaPendente.add(ia);
-    void (async () => {
-      const conta = await lerConta(ia, { naContaNova: true }).catch(() => undefined);
-      await contasDoApp.concluirAdicao(ia, conta ?? null);
-      contaLidaEm.delete(ia);
-      await atualizarConta(ia, true);
-    })();
+    // NOD-293 C10 (revisor do PR #429): a sincronização lê a conta nova com o marcador armado; só depois ele sai.
+    void concluirLoginArmado({
+      antes: async () => {
+        const conta = await lerConta(ia, { naContaNova: true }).catch(() => undefined);
+        await contasDoApp.concluirAdicao(ia, conta ?? null);
+        contaLidaEm.delete(ia);
+        await atualizarConta(ia, true);
+      },
+      sincronizar: () => sincronizarContas({ ia }),
+      desarmar: () => desarmarLogin(ia),
+    }).catch(() => undefined);
   } else if (login.fase === "sucesso") {
     contaPendente.add(ia);
-    void atualizarConta(ia, true);
-    void sincronizarContas({ ia });
+    void concluirLoginArmado({ antes: () => atualizarConta(ia, true), sincronizar: () => sincronizarContas({ ia }), desarmar: () => desarmarLogin(ia) }).catch(() => undefined);
   } else if ((login.fase === "falhou" || login.fase === "expirou" || login.fase === "cancelado") && contasDoApp.adicionando(ia)) {
     // QA do NOD-211: falhou ou expirou fica na tela com "Tentar de novo"; cancelado pela pessoa, não.
     void contasDoApp.cancelarAdicao(ia, { falhou: login.fase !== "cancelado" }).then(() => atualizarConta(ia, true));
+    void desarmarLogin(ia);
+  } else if (login.fase === "falhou" || login.fase === "expirou" || login.fase === "cancelado") {
+    void desarmarLogin(ia);
   }
   emitirEstados();
 }
@@ -1123,7 +1148,7 @@ else {
       validarRemetenteWeb(e);
       const lida = lerIaDesktop(ia);
       if (!lida) throw new Error("entrada_invalida");
-      return entrarNaIa(lida);
+      return armarLogin(lida).then(() => entrarNaIa(lida));
     });
     ipcMain.handle(CANAIS_DESKTOP.iaInstalar, async (e, ia: unknown): Promise<ResultadoIaDesktop> => {
       validarRemetenteWeb(e);
@@ -1160,6 +1185,7 @@ else {
     });
     ipcMain.handle(CANAIS_DESKTOP.iaEntrarNoApp, async (e, ia: unknown): Promise<EstadoIa> => {
       const lida = iaDoPedido(e, ia);
+      await armarLogin(lida);
       await loginIas.entrar(lida);
       return estadoAtual(lida);
     });
@@ -1199,6 +1225,7 @@ else {
       if (loginIas.estado(lida)?.fase === "aguardando") return false;
       if (!(await contasDoApp.comecarAdicao(lida, apelido))) return false;
       contaPendente.add(lida);
+      await armarLogin(lida);
       await loginIas.entrar(lida);
       return true;
     });

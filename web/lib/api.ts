@@ -8,7 +8,7 @@ import type { Agente, FormaAgente, CorAgente, ModoAprovacao } from "../../src/co
 import type { AmbienteBancoDto, ChaveEmitidaDto, ChaveMaquinaDto, ConversaDto, FrotaDto, ModoSessaoDto, RespostaMutacao, RotinaDto, SuaVezDto } from "../../src/contracts/api.ts";
 import type { Concessao } from "../../src/contracts/concessao.ts";
 import type { MaquinasDto } from "../../src/contracts/maquina.ts";
-import type { CodigoCifrado, ContasIaDto, IaComConta, LoginNaMaquina, ModoDasContas, MotivoDaNota } from "../../src/contracts/contas-ia.ts";
+import type { CodigoCifrado, ContasIaDto, FrenteAtivaDaConta, IaComConta, LoginNaMaquina, ModoDasContas, MotivoDaNota } from "../../src/contracts/contas-ia.ts";
 import type { EntradaRelato, Relato } from "../../src/contracts/relato.ts";
 import type { Experimentos, Preferencias, RaioXConversa, RaioXTurno } from "../../src/contracts/raio-x.ts";
 import type { ComandosDto } from "../../src/contracts/comandos.ts";
@@ -66,7 +66,7 @@ export function observarRede(o: ObservadorDeRede | null): void {
  * `silencioso`: chamada de fundo que a pessoa não fez (o lote da telemetria, inclusive o do `pagehide`): a falha dela
  * não acende o "Reconectando…" (revisão NOD-215) — quem chama já engole o erro.
  */
-type OpcoesPedido = { keepalive?: true; silencioso?: true };
+type OpcoesPedido = { keepalive?: true; silencioso?: true; signal?: AbortSignal };
 
 async function pedir<T>(metodo: string, url: string, corpo?: unknown, opcoesPedido: OpcoesPedido = {}): Promise<T> {
   const rota = rotaDe(metodo, url);
@@ -342,6 +342,8 @@ export function criarApi(escopo: Escopo) {
     mudarConta: (id: string, corpo: { apelido?: string; entraNaTrocaAutomatica?: boolean }) => patch<null>(`contas-ia/${encodeURIComponent(id)}`, corpo),
     sairDaConta: (id: string, maquinaId: string) => post<{ ok: true }>(`contas-ia/${encodeURIComponent(id)}/sair`, { maquinaId }),
     removerConta: (id: string) => del<{ ok: true }>(`contas-ia/${encodeURIComponent(id)}`),
+    frentesAtivas: (id: string, maquinaId?: string, signal?: AbortSignal) =>
+      pedir<FrenteAtivaDaConta[]>("GET", `${base}/contas-ia/${encodeURIComponent(id)}/frentes-ativas${maquinaId ? `?maquinaId=${encodeURIComponent(maquinaId)}` : ""}`, undefined, { signal }),
     seguirComConta: (id: string, conversaId: string, turnoId?: string) =>
       post<{ turnoId?: string | null; motivo?: MotivoDaNota | null }>(`contas-ia/${encodeURIComponent(id)}/seguir`, { conversaId, ...(turnoId ? { turnoId } : {}) }),
     tentarDeNovoConta: (id: string, p: { conversaId?: string; turnoId?: string }) =>

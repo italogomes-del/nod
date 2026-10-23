@@ -138,6 +138,9 @@ export function iniciarContasDoMotor(d: DepsContasDoMotor): { parar(): void } {
   async function terminar(l: LoginEmCurso, p: Omit<ProgressoDoLogin, "loginId"> | null): Promise<void> {
     if (l.fim) return;
     l.fim = true;
+    // NOD-293 C10: `armadaEm`/`armadaDaIa` é consumível. Sem isto uma tentativa falha ou cancelada fazia uma leitura
+    // futura parecer um login novo iniciado pelo nod e podia ressuscitar uma conta removida.
+    await d.contas.desarmar(l.conta.ia, l.conta.id).catch(() => undefined);
     logins.delete(l.pedido.id);
     // Fica marcado até a puxada deixar de trazer o login (a puxada em voo ainda o traz e não pode reabri-lo).
     terminados.set(l.pedido.id, p ?? "entregue");
@@ -181,6 +184,8 @@ export function iniciarContasDoMotor(d: DepsContasDoMotor): { parar(): void } {
     const existente = p.impressao ? d.contas.porImpressao(p.impressao) : null;
     const conta = existente ?? (await d.contas.pastaParaLogin(p.ia, p.apelido));
     if (!conta) { await d.ponte.progresso({ loginId: p.id, fase: "falhou", erro: "contas_demais" }); return; }
+    // NOD-293 C10: o login pedido pela tela numa conta que já existe também conta desta hora (pastaParaLogin já arma a sua).
+    if (existente) await d.contas.armar(existente.ia, existente.id).catch(() => undefined);
     const env = d.contas.ambiente(conta);
     const l: LoginEmCurso = {
       pedido: p, conta, par: p.ia === "claude-cli" ? gerarParDoLogin() : null, relatado: "", fim: false, nova: !existente && conta.impressao === null,

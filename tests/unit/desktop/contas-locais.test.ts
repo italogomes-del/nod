@@ -1,13 +1,15 @@
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { criarContasLocais, inventariosComContas, type IdentidadeDaConta } from "../../../desktop/contas-locais.ts";
 import { iniciarContasNoServidor } from "../../../desktop/contas-no-servidor.ts";
+import { concluirLoginArmado } from "../../../desktop/login-armado.ts";
 import type { IaDesktop } from "../../../src/contracts/desktop.ts";
 import type { ContaAnunciada, PuxadaDeContas } from "../../../src/contracts/contas-ia.ts";
 import type { Inventario } from "../../../src/contracts/inventario.ts";
 import { estadoDaMaquina } from "../../../src/domain/harness.ts";
+import { decidirAnuncio } from "../../../src/domain/contas-da-pessoa.ts";
 
 /**
  * ADR-102 no app do Mac (2026-10-13): a lista que vai ao servidor segue a do app (contas.json, ADR-101), o e-mail e a
@@ -128,6 +130,165 @@ describe("contas locais no app do Mac (ADR-102)", () => {
     await m.contas.sincronizar([{ ia: "claude-cli", id: "padrao", apelido: null }, { ia: "claude-cli", id: "c-1", apelido: null }]);
     await m.contas.ler();
     expect(m.contas.anuncio()).toHaveLength(1);
+  });
+});
+
+/**
+ * NOD-293 C10 (definido em 2026-10-20): a conta removida pela tela voltava sozinha quando uma máquina a lia pela primeira
+ * vez (app reinstalado, `contas-locais.json` perdido): o `logadaEm` era a hora da leitura, sempre depois da remoção, e o
+ * servidor a devolvia à lista. Agora o login conta da data do arquivo da credencial (só na primeira leitura) ou da hora em
+ * que o nod armou o login (`pastaParaLogin`, `armar`); sem arquivo e sem login pelo nod, 0.
+ */
+describe("NOD-293 C10: quando a conta foi logada", () => {
+  const HORA = 3_600_000;
+  const REMOVIDA = Date.UTC(2026, 9, 20, 12, 0);
+
+  async function montarComRelogio(identidades: Record<string, IdentidadeDaConta>, raizDada?: string) {
+    const raiz = raizDada ?? await mkdtemp(join(tmpdir(), "nod-contas-c10-"));
+    const relogio = { agora: REMOVIDA + HORA };
+    const criar = () => criarContasLocais({
+      base: raiz,
+      arquivo: join(raiz, "contas-locais.json"),
+      pessoaId: "pessoa-1",
+      padrao: (ia) => join(raiz, ia),
+      lerIdentidade: async (ia: IaDesktop, env) => identidades[`${ia}:${Object.values(env)[0]?.split("/").at(-1) ?? "padrao"}`] ?? { logado: false, email: null, orgId: null, plano: null },
+      logout: async () => true,
+      agora: () => relogio.agora,
+    });
+    const contas = criar();
+    await contas.carregar();
+    return { contas, raiz, relogio, criar };
+  }
+
+  /** A credencial em arquivo do Claude na conta de sempre (Linux; no Mac ela mora no Keychain e não há arquivo). */
+  async function credencial(raiz: string, mtime: number, ia: IaDesktop = "claude-cli"): Promise<string> {
+    await mkdir(join(raiz, ia), { recursive: true });
+    const arquivo = join(raiz, ia, ia === "claude-cli" ? ".credentials.json" : "auth.json");
+    await writeFile(arquivo, "{}");
+    await utimes(arquivo, new Date(mtime), new Date(mtime));
+    return arquivo;
+  }
+
+  it("removida em T, credencial gravada antes de T, primeira leitura: o servidor pede a saída (não devolve a conta)", async () => {
+    const m = await montarComRelogio({ "claude-cli:padrao": LEAPY });
+    await credencial(m.raiz, REMOVIDA - 2 * HORA);
+    await m.contas.ler({ forcar: true });
+    const [a] = m.contas.anuncio();
+    expect(a!.logadaEm).toBe(REMOVIDA - 2 * HORA);
+    expect(decidirAnuncio({ removidaEm: REMOVIDA }, a!.logadaEm)).toBe("sair");
+  });
+
+  it("o Codex usa o auth.json da pasta da conta", async () => {
+    const m = await montarComRelogio({ "codex-cli:padrao": PESSOAL });
+    await credencial(m.raiz, REMOVIDA - HORA, "codex-cli");
+    await m.contas.ler({ forcar: true });
+    expect(m.contas.anuncio().find((c) => c.ia === "codex-cli")?.logadaEm).toBe(REMOVIDA - HORA);
+  });
+
+  it("a renovação do token reescreve o arquivo depois da remoção: o login continua contando da primeira leitura", async () => {
+    const m = await montarComRelogio({ "claude-cli:padrao": LEAPY });
+    const arquivo = await credencial(m.raiz, REMOVIDA - 2 * HORA);
+    await m.contas.ler({ forcar: true });
+    // O CLI renovou o token depois da remoção: o arquivo ganha data nova, a conta é a mesma.
+    await utimes(arquivo, new Date(REMOVIDA + 30 * 60_000), new Date(REMOVIDA + 30 * 60_000));
+    m.relogio.agora += 2 * HORA;
+    await m.contas.ler({ forcar: true });
+    expect(decidirAnuncio({ removidaEm: REMOVIDA }, m.contas.anuncio()[0]!.logadaEm)).toBe("sair");
+    // E o app reaberto (lê o arquivo de contas) também.
+    const reaberta = m.criar();
+    await reaberta.carregar();
+    await reaberta.ler({ forcar: true });
+    expect(decidirAnuncio({ removidaEm: REMOVIDA }, reaberta.anuncio()[0]!.logadaEm)).toBe("sair");
+  });
+
+  it("sem arquivo de credencial (Keychain do Mac) e sem login pelo nod: logadaEm 0", async () => {
+    const m = await montarComRelogio({ "claude-cli:padrao": LEAPY });
+    await m.contas.ler({ forcar: true });
+    expect(m.contas.anuncio()[0]!.logadaEm).toBe(0);
+  });
+
+  it("entrar de novo pelo `nod-motor entrar` (outro processo) depois da remoção: a conta volta de propósito", async () => {
+    const ids: Record<string, IdentidadeDaConta> = {};
+    const m = await montarComRelogio(ids);
+    // O `nod-motor entrar` escolhe a pasta (arma o login) e grava; o login em si é do CLI, no terminal.
+    const entrar = m.criar();
+    await entrar.carregar();
+    expect((await entrar.pastaParaLogin("claude-cli", null))?.id).toBe("padrao");
+    expect(await readFile(join(m.raiz, "contas-locais.json"), "utf8")).toContain(`"armadaEm":${REMOVIDA + HORA}`);
+    // O serviço relê o arquivo de contas e acha o login; a credencial veio com uma data qualquer (antes da remoção).
+    ids["claude-cli:padrao"] = LEAPY;
+    await credencial(m.raiz, REMOVIDA - 5 * HORA);
+    m.relogio.agora += 60_000;
+    await m.contas.carregar();
+    await m.contas.ler({ forcar: true });
+    expect(decidirAnuncio({ removidaEm: REMOVIDA }, m.contas.anuncio()[0]!.logadaEm)).toBe("voltar");
+  });
+
+  it("login pela tela do app do Mac (`armar` antes do login): a conta nova da lista do app volta; sem armar, não", async () => {
+    const ids: Record<string, IdentidadeDaConta> = { "claude-cli:c-1": LEAPY };
+    const m = await montarComRelogio(ids);
+    await mkdir(join(m.raiz, "claude-cli", "c-1"), { recursive: true });
+    await m.contas.armar("claude-cli");
+    // A conta nova entra pela lista do app depois do login (sincronizar) e é lida.
+    m.relogio.agora += 60_000;
+    await m.contas.sincronizar([{ ia: "claude-cli", id: "c-1", apelido: null }]);
+    await m.contas.ler({ forcar: true });
+    expect(decidirAnuncio({ removidaEm: REMOVIDA }, m.contas.anuncio()[0]!.logadaEm)).toBe("voltar");
+    // Outra máquina (outro app), sem login pelo nod: a mesma conta lida pela primeira vez não volta.
+    const outra = await montarComRelogio({ "claude-cli:c-1": LEAPY });
+    await mkdir(join(outra.raiz, "claude-cli", "c-1"), { recursive: true });
+    await outra.contas.sincronizar([{ ia: "claude-cli", id: "c-1", apelido: null }]);
+    await outra.contas.ler({ forcar: true });
+    expect(decidirAnuncio({ removidaEm: REMOVIDA }, outra.contas.anuncio()[0]!.logadaEm)).toBe("sair");
+  });
+  /** Revisor do PR #429: a conta re-adicionada pela tela do Mac (Keychain, sem arquivo) só volta se a leitura vier antes do desarme. */
+  it("conta adicionada com sucesso: a sincronização lê a conta com o marcador armado e só depois ele sai", async () => {
+    const ids: Record<string, IdentidadeDaConta> = {};
+    const m = await montarComRelogio(ids);
+    await mkdir(join(m.raiz, "claude-cli", "c-1"), { recursive: true });
+    await m.contas.armar("claude-cli");
+    ids["claude-cli:c-1"] = LEAPY;
+    m.relogio.agora += 60_000;
+    const ordem: string[] = [];
+    await concluirLoginArmado({
+      antes: async () => { ordem.push("antes"); },
+      sincronizar: async () => { ordem.push("sincronizar"); await m.contas.sincronizar([{ ia: "claude-cli", id: "c-1", apelido: null }]); await m.contas.ler({ forcar: true }); },
+      desarmar: async () => { ordem.push("desarmar"); await m.contas.desarmar("claude-cli"); },
+    });
+    expect(ordem).toEqual(["antes", "sincronizar", "desarmar"]);
+    expect(decidirAnuncio({ removidaEm: REMOVIDA }, m.contas.anuncio()[0]!.logadaEm)).toBe("voltar");
+    expect(await readFile(join(m.raiz, "contas-locais.json"), "utf8")).not.toMatch(/"armadaEm":[1-9]/);
+  });
+
+  it("a ordem antiga (desarmar antes da sincronização) deixava a conta re-adicionada removida", async () => {
+    const m = await montarComRelogio({ "claude-cli:c-1": LEAPY });
+    await mkdir(join(m.raiz, "claude-cli", "c-1"), { recursive: true });
+    await m.contas.armar("claude-cli");
+    m.relogio.agora += 60_000;
+    await m.contas.desarmar("claude-cli");
+    await m.contas.sincronizar([{ ia: "claude-cli", id: "c-1", apelido: null }]);
+    await m.contas.ler({ forcar: true });
+    expect(decidirAnuncio({ removidaEm: REMOVIDA }, m.contas.anuncio()[0]!.logadaEm)).toBe("sair");
+  });
+
+  it("a sincronização falhou: o marcador sai do mesmo jeito", async () => {
+    const m = await montarComRelogio({});
+    await m.contas.armar("claude-cli", "padrao");
+    await expect(concluirLoginArmado({ sincronizar: async () => { throw new Error("x"); }, desarmar: () => m.contas.desarmar("claude-cli") })).rejects.toThrow("x");
+    expect(await readFile(join(m.raiz, "contas-locais.json"), "utf8")).not.toMatch(/"armadaEm":[1-9]/);
+  });
+
+  // Revisor do PR #429: o `iaEntrar` arma e o login não acontece (CLI não instalado, erro ao abrir, saída ≠ 0): desarma.
+  it("armar → desarmar (login que não aconteceu) → o login que aparecer depois por fora não volta a conta", async () => {
+    const ids: Record<string, IdentidadeDaConta> = {};
+    const m = await montarComRelogio(ids);
+    await m.contas.armar("claude-cli");
+    await m.contas.desarmar("claude-cli");
+    // Mais tarde, a pessoa entra pelo terminal (Keychain, sem arquivo): não foi pedido pelo nod.
+    ids["claude-cli:padrao"] = LEAPY;
+    m.relogio.agora += 60_000;
+    await m.contas.ler({ forcar: true });
+    expect(decidirAnuncio({ removidaEm: REMOVIDA }, m.contas.anuncio()[0]!.logadaEm)).toBe("sair");
   });
 });
 

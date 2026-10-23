@@ -29,6 +29,8 @@ export function contasIaMemoria(e: EstadoContasIaMemoria, escopo: Escopo): Retur
       return { contas: [...minhas()].sort((a, b) => a.posicao - b.posicao).map((c) => sem(c) as ContaGuardadaNoServidor), vinculos: meusVinculos().map((v) => sem(v) as VinculoDaConta) };
     },
     async buscar(id) { const c = minhas().find((x) => x.id === id); return c ? (sem(c) as ContaGuardadaNoServidor) : null; },
+    // NOD-293 C11: os turnos não vivem na memória; a rota real é coberta em tests/integration/contas-ia-frentes-ativas.test.ts.
+    async frentesAtivas() { return []; },
     async doAnuncio(maquinaId: string, anunciadas: readonly ContaAnunciada[], agora: number): Promise<ResultadoDoAnuncio> {
       const sair: string[] = [];
       const vistas: string[] = [];
