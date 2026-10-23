@@ -2,6 +2,7 @@ import { contasIaMemoria, estadoContasIaMemoria, type EstadoContasIaMemoria } fr
 import type { ConfigGithubApp } from "../../src/repositories/github-app.repo.ts";
 import type { MimeAnexo } from "../../src/contracts/anexo.ts";
 import type { LinhaOnboarding } from "../../src/repositories/onboarding.repo.ts";
+import type { MaquinaSsh } from "../../src/repositories/maquinas-ssh.repo.ts";
 import type { ComposicaoRaioX, ExecucaoRaioX, Preferencias } from "../../src/contracts/raio-x.ts";
 import type { CatalogoDeComandos } from "../../src/contracts/comandos.ts";
 import type { UsoDoPlano } from "../../src/contracts/uso-do-plano.ts";
@@ -155,6 +156,8 @@ export type BancoMemoria = {
   events: (EventoGravavel & { tenantId: string; id: string; createdAt: number })[];
   outbox: (ItemOutbox & { tenantId: string; ownerId: string; entregueEm: number | null; abandonadoEm: number | null; canceladoEm: number | null })[];
   maquinaTokens: { tenantId: string; ownerId: string; id: string; nome: string; prefixo: string; hash: Buffer; criadaEm: number; ultimoUsoEm: number | null; expiraEm: number | null; revogadaEm: number | null; plataforma?: "darwin" | "linux" | null }[];
+  /** NOD-94 (0105): máquinas instaladas por SSH. */
+  maquinasSsh: (MaquinaSsh & { tenantId: string; ownerId: string })[];
   /** 0071 (ADR-099, partes 3/4): os lotes de frentes, com a dona (o comportamento completo se prova no Postgres). */
   lotes: (LoteDeFrentes & { tenantId: string; ownerId: string })[];
 };
@@ -230,6 +233,7 @@ export function criarBancoMemoria(): { banco: BancoMemoria; repos(escopo?: Escop
     events: [],
     outbox: [],
     maquinaTokens: [],
+    maquinasSsh: [],
     lotes: [],
   };
   return { banco, repos: (escopo = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON }) => reposSobre(banco, escopo) };
@@ -2855,6 +2859,42 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async identificar(id) {
         const l = b.maquinaTokens.find((x) => x.tenantId === escopo.tenantId && x.ownerId === escopo.pessoaId && x.id === id);
         return l ? { nome: l.nome, plataforma: l.plataforma ?? null } : null;
+      },
+    },
+    maquinasSsh: {
+      async registrar(e, em) {
+        const minha = (x: { tenantId: string; ownerId: string }) => x.tenantId === escopo.tenantId && x.ownerId === escopo.pessoaId;
+        const ja = b.maquinasSsh.find((x) => minha(x) && x.host.toLowerCase() === e.host.toLowerCase() && x.porta === e.porta);
+        if (ja) {
+          Object.assign(ja, { maquinaId: e.maquinaId, usuario: e.usuario, impressaoHost: e.impressaoHost, atualizadoEm: em });
+          const { tenantId: _t, ownerId: _o, ...dto } = ja;
+          return dto;
+        }
+        const l = { tenantId: escopo.tenantId, ownerId: escopo.pessoaId, id: randomUUID(), ...e, criadoEm: em, atualizadoEm: em };
+        b.maquinasSsh.push(l);
+        const { tenantId: _t, ownerId: _o, ...dto } = l;
+        return dto;
+      },
+      async doEndereco(host, porta) {
+        const l = b.maquinasSsh.find((x) => x.tenantId === escopo.tenantId && x.ownerId === escopo.pessoaId && x.host.toLowerCase() === host.toLowerCase() && x.porta === porta);
+        if (!l) return null;
+        const { tenantId: _t, ownerId: _o, ...dto } = l;
+        return dto;
+      },
+      async trocarImpressao(host, porta, impressaoHost, em) {
+        const l = b.maquinasSsh.find((x) => x.tenantId === escopo.tenantId && x.ownerId === escopo.pessoaId && x.host.toLowerCase() === host.toLowerCase() && x.porta === porta);
+        if (!l) return false;
+        l.impressaoHost = impressaoHost;
+        l.atualizadoEm = em;
+        return true;
+      },
+      async daMaquina(maquinaId) {
+        const l = b.maquinasSsh
+          .filter((x) => x.tenantId === escopo.tenantId && x.ownerId === escopo.pessoaId && x.maquinaId === maquinaId)
+          .sort((x, y) => y.atualizadoEm - x.atualizadoEm)[0];
+        if (!l) return null;
+        const { tenantId: _t, ownerId: _o, ...dto } = l;
+        return dto;
       },
     },
     // ADR-121: a máquina na nuvem só existe no Postgres (os testes dela são de integração); aqui a pessoa não tem nenhuma.

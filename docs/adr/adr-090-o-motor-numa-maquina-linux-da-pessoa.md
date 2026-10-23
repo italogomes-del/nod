@@ -149,3 +149,25 @@ do ar ganhar o aviso único (hoje ela espera e vence pela regra de sempre), o ca
   com o atalho "Rodar em <outra> desta vez" (refaz o turno uma vez). Rotina: execução `nao_rodou` com
   `maquina_sem_contato`, sem linha no chat (resolve o "aviso único" que estava pendente acima). Pedido de colega: quem
   pediu recebe um aviso de falha.
+
+## Emenda 11 (2026-10-22, NOD-94): a máquina "só computador", instalada por SSH
+
+Cita a [ADR-102](adr-102-contas-da-pessoa-em-todas-as-maquinas.md) (a cifra do navegador para a máquina) e a
+[ADR-021](adr-021-a-ponte-de-execucao-o-app-local-puxa-o-servidor-nunca-di.md) (o servidor nunca disca).
+
+- **Máquina "só computador".** Uma máquina Linux da pessoa pode ser pareada com papel `computador`
+  (`maquina_tokens.papel`, migração 0105). Ela não pega turno e só hospeda o computador do bot da pessoa (o roteamento
+  do computador para ela é a Fase B, depois da NOD-96). Atualiza sozinha pela ADR-100. No máximo uma viva por pessoa
+  (`maquina_tokens_um_computador`); "Substituir" revoga a anterior.
+- **Quem decide o papel é o servidor.** O convite criado pelo pedido de instalação leva `papel: "computador"` e é
+  aprovado automaticamente (o envio do formulário já é o consentimento); o pareamento grava o papel na chave. O
+  `papel` que a máquina anuncia é só conferido.
+- **Instalação por SSH, uma vez, a partir de outra máquina da pessoa** (o motor de uma VM ou o app do Mac). A
+  credencial (chave, senha ou frase-senha) é cifrada no navegador com a cifra da ADR-102, repassada pelo servidor em
+  memória, entregue uma única vez à instaladora e nunca guardada. O servidor guarda só host, porta, usuário e a
+  impressão da host key (`maquinas_ssh`), para travar a reinstalação com `StrictHostKeyChecking=yes`.
+- **O servidor continua sem discar** para máquina nenhuma (ADR-021). Por isso a alternativa rejeitada "servidor alcançar
+  a VM por SSH" continua rejeitada: quem abre o SSH é a instaladora, e depois disso a outra máquina disca para o nod como
+  qualquer motor.
+- **Gatilho de reversão:** se a maioria das instalações cair na saída manual (o `curl … | sh` com o convite), ou se
+  surgir hospedagem gerenciada, a instalação por SSH sai e fica só o comando.
