@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import type { IncomingMessage } from "node:http";
 import { log } from "../../obs/log.ts";
 import type { Escopo } from "../../shared/types.ts";
 import type { Rota } from "./roteador.ts";
@@ -52,6 +53,19 @@ export type ConfigGoogle = {
    * null quando o domínio não é admitido. Ausente = só entra quem já está no cadastro.
    */
   admitirPorDominio?(email: string): Promise<(Escopo & { criada: boolean }) | null>;
+  /** NOD-345: com NOD_CONTAS, o cookie leva o id de uma sessão revogável criada aqui. Ausente = cookie de antes. */
+  cookiePara?(escopo: Escopo, req: IncomingMessage, maxAgeS?: number): Promise<string>;
+  /**
+   * NOD-345 (ADR-124 §2): a volta do Google com intenção de CONTA. `bilhete` é o que `GET /sessao/google?conta=…`
+   * recebeu (assinado por quem chamou); a função confere, decide e devolve o cookie (se entrou) e a página de destino.
+   * Ausente = o `?conta=` é ignorado e o login segue o de antes (allowlist).
+   */
+  conta?: {
+    bilheteDoNavegador(bilhete: string, req: IncomingMessage): boolean;
+    aoVoltar(bilhete: string, g: { iss: string; sub: string; email: string; autoridade: boolean }, req: IncomingMessage): Promise<{ setCookie: string | null; pagina: string }>;
+    /** Sem bilhete: a conta cujo Google (iss+sub) é este entra; null = segue o login de antes (allowlist). */
+    entrarSemBilhete(g: { iss: string; sub: string }, req: IncomingMessage): Promise<{ setCookie: string; pagina: string } | null>;
+  };
   /** Injetáveis para o teste nunca falar com o Google. */
   fetchImpl?: typeof fetch;
   agora?: () => number;
@@ -73,19 +87,54 @@ export const DESTINO_RECUSA = "/?entrar=recusado";
  * 302, a página do app nascia de uma navegação entre sites, e o Safari (iPhone e app instalado) pode segurar o cookie
  * Strict até a próxima navegação — a pessoa voltaria à tela de entrada. Saindo daqui, a ida a "/" é do próprio site.
  */
-export const PAGINA_ENTROU = '<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="refresh" content="0;url=/"><title>nod</title></head><body><p><a href="/">Entrando no Nod…</a></p><script>location.replace("/")</script></body></html>';
+const PAGINA_MODELO = '<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="refresh" content="0;url=__DESTINO__"><title>nod</title></head><body><p><a href="__DESTINO__">Entrando no Nod…</a></p><script>location.replace("__DESTINO__")</script></body></html>';
+
+/** A página da própria origem que segue para `destino` (caminho local, sempre começando com "/"). */
+export function paginaIndoPara(destino: string): string {
+  const d = destino.startsWith("/") && !destino.startsWith("//") ? destino.replace(/[^A-Za-z0-9/?=&_-]/g, "") : "/";
+  return PAGINA_MODELO.replaceAll("__DESTINO__", d);
+}
+export const PAGINA_ENTROU = paginaIndoPara("/");
 
 export type MotivoRecusa = "cancelado" | "state" | "sem_code" | "troca" | "id_token" | "emissor" | "audiencia" | "expirado" | "dominio" | "email_nao_verificado" | "sem_pessoa";
 
 // ---------------------------------------------------------------------------------------------
 // state anti-CSRF sem tabela: nonce + instante assinados; a MESMA string vai na URL e no cookie.
 
-export function cunharState(segredo: string, agora: number, nonce = randomBytes(16).toString("base64url")): string {
-  const payload = Buffer.from(JSON.stringify({ n: nonce, t: agora }), "utf8").toString("base64url");
+export function cunharState(segredo: string, agora: number, nonce = randomBytes(16).toString("base64url"), bilhete?: string): string {
+  const payload = Buffer.from(JSON.stringify(bilhete ? { n: nonce, t: agora, c: bilhete } : { n: nonce, t: agora }), "utf8").toString("base64url");
   return `${payload}.${assinar(payload, segredo)}`;
 }
 
 /** true só com: assinatura válida, idade dentro da validade, e o state da URL igual ao do cookie. */
+/** O bilhete de conta que foi junto no state (já validado por `stateValido`). */
+export function bilheteDoState(state: string, segredo: string): string | null {
+  const payload = lerAssinado(state, segredo);
+  if (!payload) return null;
+  try {
+    const obj = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as { c?: unknown };
+    return typeof obj.c === "string" ? obj.c : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * NOD-345: as claims para CONTA. Qualquer Google com e-mail verificado (Gmail e Workspace, ADR-124 §2); a identidade é
+ * iss+sub. `autoridade` diz se o Google responde pelo e-mail (Gmail ou o próprio domínio Workspace): só assim o e-mail
+ * pode achar uma conta que já existe.
+ */
+export function validarClaimsConta(claims: Record<string, unknown>, p: { clientId: string; agora: number }): { ok: true; iss: string; sub: string; email: string; autoridade: boolean } | { ok: false; motivo: MotivoRecusa } {
+  if (typeof claims.iss !== "string" || !EMISSORES.has(claims.iss)) return { ok: false, motivo: "emissor" };
+  const aud = claims.aud;
+  if (!(aud === p.clientId || (Array.isArray(aud) && aud.includes(p.clientId)))) return { ok: false, motivo: "audiencia" };
+  if (typeof claims.exp !== "number" || claims.exp * 1000 <= p.agora) return { ok: false, motivo: "expirado" };
+  if (claims.email_verified !== true) return { ok: false, motivo: "email_nao_verificado" };
+  if (typeof claims.email !== "string" || typeof claims.sub !== "string" || claims.sub === "" || claims.sub.length > 255) return { ok: false, motivo: "id_token" };
+  const email = claims.email.toLowerCase();
+  return { ok: true, iss: "https://accounts.google.com", sub: claims.sub, email, autoridade: googleEhAutoridade(email, claims.hd) };
+}
+
 export function stateValido(daUrl: string | undefined, doCookie: string | undefined, segredo: string, agora: number): boolean {
   if (!daUrl || !doCookie || !iguaisEmTempoConstante(daUrl, doCookie)) return false;
   const payload = lerAssinado(daUrl, segredo);
@@ -164,14 +213,23 @@ export function rotasGoogle(segredo: string, cfg: ConfigGoogle): Rota[] {
       padrao: /^\/sessao\/google$/,
       publica: true,
       async handler(ctx) {
-        const state = cunharState(segredo, agora());
+        const pedido = new URL(ctx.req.url ?? "/", "http://127.0.0.1").searchParams.get("conta");
+        const bilhete = cfg.conta && pedido && pedido.length <= 600 && cfg.conta.bilheteDoNavegador(pedido, ctx.req) ? pedido : undefined;
+        // Bilhete de outro navegador (um link recebido) ou vencido: não vira login de antes por engano.
+        if (pedido !== null && !bilhete) {
+          ctx.res.writeHead(302, { location: "/?conta=recusado", "cache-control": "no-store" });
+          ctx.res.end();
+          return;
+        }
+        const state = cunharState(segredo, agora(), undefined, bilhete);
         const url = new URL(cfg.urlAutorizacao ?? "https://accounts.google.com/o/oauth2/v2/auth");
         url.searchParams.set("client_id", cfg.clientId);
         url.searchParams.set("redirect_uri", cfg.redirectUri);
         url.searchParams.set("response_type", "code");
         url.searchParams.set("scope", "openid email");
-        // `hd` na URL só pré-filtra a tela do Google; a validação de verdade é a claim, no callback.
-        if (dominio) url.searchParams.set("hd", dominio);
+        // `hd` na URL só pré-filtra a tela do Google; a validação de verdade é a claim, no callback. Conta: qualquer Google.
+        // Com contas, a tela de entrada também serve quem entra com Gmail: sem `hd`.
+        if (dominio && !bilhete && !cfg.conta) url.searchParams.set("hd", dominio);
         url.searchParams.set("prompt", "select_account");
         url.searchParams.set("state", state);
         ctx.res.writeHead(302, {
@@ -217,6 +275,24 @@ export function rotasGoogle(segredo: string, cfg: ConfigGoogle): Rota[] {
 
         const claims = claimsDoIdToken(idToken);
         if (!claims) return recusar("id_token");
+        const bilhete = cfg.conta ? bilheteDoState(q.get("state") ?? "", segredo) : null;
+        if (bilhete && cfg.conta) {
+          const g = validarClaimsConta(claims, { clientId: cfg.clientId, agora: agora() });
+          if (!g.ok) return recusar(g.motivo);
+          const r = await cfg.conta.aoVoltar(bilhete, g, ctx.req);
+          ctx.res.writeHead(200, { "content-type": "text/html; charset=utf-8", "set-cookie": r.setCookie ? [r.setCookie, apagarState] : [apagarState], "cache-control": "no-store" });
+          ctx.res.end(r.pagina);
+          return;
+        }
+        if (cfg.conta) {
+          const g = validarClaimsConta(claims, { clientId: cfg.clientId, agora: agora() });
+          const r = g.ok ? await cfg.conta.entrarSemBilhete(g, ctx.req) : null;
+          if (r) {
+            ctx.res.writeHead(200, { "content-type": "text/html; charset=utf-8", "set-cookie": [r.setCookie, apagarState], "cache-control": "no-store" });
+            ctx.res.end(r.pagina);
+            return;
+          }
+        }
         const v = validarClaims(claims, { clientId: cfg.clientId, dominio, agora: agora() });
         if (!v.ok) return recusar(v.motivo);
 
@@ -234,7 +310,8 @@ export function rotasGoogle(segredo: string, cfg: ConfigGoogle): Rota[] {
         if (!escopo) return recusar("sem_pessoa");
 
         log("info", "login_google", { tenant_id: escopo.tenantId, pessoa_id: escopo.pessoaId });
-        ctx.res.writeHead(200, { "content-type": "text/html; charset=utf-8", "set-cookie": [cabecalhoCookieSessao(escopo, segredo, seguro, PERMANENCIA_SESSAO_S), apagarState], "cache-control": "no-store" });
+        const cookie = cfg.cookiePara ? await cfg.cookiePara(escopo, ctx.req, PERMANENCIA_SESSAO_S) : cabecalhoCookieSessao(escopo, segredo, seguro, PERMANENCIA_SESSAO_S);
+        ctx.res.writeHead(200, { "content-type": "text/html; charset=utf-8", "set-cookie": [cookie, apagarState], "cache-control": "no-store" });
         ctx.res.end(PAGINA_ENTROU);
       },
     },

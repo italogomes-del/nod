@@ -7,7 +7,9 @@ import type { PreferenciaHarness } from "../../src/contracts/harness.ts";
 import type { Agente, FormaAgente, CorAgente, ModoAprovacao } from "../../src/contracts/agente.ts";
 import type { AmbienteBancoDto, ChaveEmitidaDto, ChaveMaquinaDto, ConversaDto, FrotaDto, ModoSessaoDto, RespostaMutacao, RotinaDto, SuaVezDto } from "../../src/contracts/api.ts";
 import type { Concessao } from "../../src/contracts/concessao.ts";
+import { cabecalhosDoApp } from "./desafio-app.ts";
 import type { MaquinasDto } from "../../src/contracts/maquina.ts";
+import type { CadastroDto, EntrarDto, EsperaPareamentoDto, EstadoContaDto, EstadoPareamentoDto, ImportarDto, PareamentoAbertoDto, PedirPareamentoDto, RedefinirDto, SessoesDto, TrocarSenhaDto, VerificarDto } from "../../src/contracts/conta.ts";
 import type { ContaNuvemDto, DormirAposMin, MaquinaCriandoDto, TamanhoMaquinaNuvem } from "../../src/contracts/provedor-nuvem.ts";
 import type { CodigoCifrado, ContasIaDto, FrenteAtivaDaConta, IaComConta, LoginNaMaquina, ModoDasContas, MotivoDaNota } from "../../src/contracts/contas-ia.ts";
 import type { EntradaRelato, Relato } from "../../src/contracts/relato.ts";
@@ -68,17 +70,17 @@ export function observarRede(o: ObservadorDeRede | null): void {
  * `silencioso`: chamada de fundo que a pessoa não fez (o lote da telemetria, inclusive o do `pagehide`): a falha dela
  * não acende o "Reconectando…" (revisão NOD-215) — quem chama já engole o erro.
  */
-type OpcoesPedido = { keepalive?: true; silencioso?: true; signal?: AbortSignal };
+type OpcoesPedido = { keepalive?: true; silencioso?: true; signal?: AbortSignal; cabecalhos?: Record<string, string> };
 
 async function pedir<T>(metodo: string, url: string, corpo?: unknown, opcoesPedido: OpcoesPedido = {}): Promise<T> {
   const rota = rotaDe(metodo, url);
-  const { silencioso, ...opcoes } = opcoesPedido;
+  const { silencioso, cabecalhos, ...opcoes } = opcoesPedido;
   const obs = silencioso ? null : observador;
   let r: Response;
   try {
     r = await fetch(url, {
       method: metodo,
-      headers: corpo === undefined ? {} : { "content-type": "application/json" },
+      headers: { ...(corpo === undefined ? {} : { "content-type": "application/json" }), ...cabecalhos },
       body: corpo === undefined ? undefined : JSON.stringify(corpo),
       ...opcoes,
     });
@@ -401,4 +403,38 @@ export const sessao = {
   modo: () => pedirDeNovoSeCair<ModoSessaoDto>("GET", "/api/sessao/modo"),
   entrar: (pessoaId: string) => pedir<Escopo>("POST", "/api/sessao/entrar", { pessoaId }),
   urlGoogle: "/api/sessao/google",
+};
+
+/**
+ * NOD-345 (ADR-124): as contas. Públicas no servidor (a sessão, quando há, vem do cookie). Os valores dos campos do
+ * cartão (e-mail, senha, código) vão SÓ aqui, direto ao nod — nunca por mensagem, turno ou memória.
+ */
+/**
+ * No app, os pedidos que podem trocar de conta levam o desafio do segredo do processo principal (estilo PKCE): só assim
+ * o servidor devolve o código de troca, e só o processo principal consegue trocá-lo pela chave. No navegador, nada.
+ */
+const doApp = (): Promise<OpcoesPedido> => cabecalhosDoApp(typeof window === "undefined" ? undefined : window.nodDesktop);
+
+export const contaApi = {
+  estado: () => pedir<EstadoContaDto>("GET", "/api/conta"),
+  provisorioWeb: (verificador: string) => pedir<{ novo: boolean }>("POST", "/api/conta/provisorio", { verificador, forma: "web" }),
+  cadastrar: (email: string, senha: string) => pedir<CadastroDto>("POST", "/api/conta/cadastro", { email, senha }),
+  reenviar: () => pedir<CadastroDto>("POST", "/api/conta/reenviar", {}),
+  verificar: (codigo: string) => pedir<VerificarDto>("POST", "/api/conta/verificar", { codigo }),
+  entrar: async (email: string, senha: string) => pedir<EntrarDto>("POST", "/api/conta/entrar", { email, senha }, await doApp()),
+  importar: async () => pedir<ImportarDto>("POST", "/api/conta/importar", {}, await doApp()),
+  outra: () => pedir<{ ok: true }>("POST", "/api/conta/outra", {}),
+  cancelar: () => pedir<{ ok: true }>("POST", "/api/conta/cancelar", {}),
+  recuperar: (email: string) => pedir<{ ok: true }>("POST", "/api/conta/recuperar", { email }),
+  redefinir: async (token: string, senha: string) => pedir<RedefinirDto>("POST", "/api/conta/redefinir", { token, senha }, await doApp()),
+  trocarSenha: (atual: string, nova: string) => pedir<TrocarSenhaDto>("POST", "/api/conta/senha", { atual, nova }),
+  sessoes: () => pedir<SessoesDto>("GET", "/api/conta/sessoes"),
+  sairDasOutras: () => pedir<{ encerradas: number }>("POST", "/api/conta/sair-das-outras", {}),
+  sair: () => pedir<unknown>("POST", "/api/sessao/sair", {}),
+  gerarPareamento: () => pedir<{ codigo: string; expiraEm: number }>("POST", "/api/conta/parear", {}),
+  pareamento: () => pedir<{ pareamento: PareamentoAbertoDto }>("GET", "/api/conta/parear"),
+  decidirPareamento: (confirmar: boolean) => pedir<{ estado: EstadoPareamentoDto }>("POST", "/api/conta/parear/decidir", { confirmar }),
+  pedirPareamento: (codigo: string) => pedir<PedirPareamentoDto>("POST", "/api/conta/parear/pedir", { codigo }),
+  esperarPareamento: async () => pedir<EsperaPareamentoDto>("GET", "/api/conta/parear/pedido", undefined, await doApp()),
+  google: (app: boolean) => pedir<{ url: string }>("POST", "/api/conta/google", { app }),
 };

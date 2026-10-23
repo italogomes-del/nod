@@ -39,6 +39,7 @@ remotas — `server/vps-computer.ts`), nunca o modelo em que o turno inteiro emi
 |---|---|---|---|
 | [01](jornada-01/office-hours.md) | O bot ganha mãos — controle de computador e capacidades de operador ([épicos](jornada-01/epicos.md), [issues](jornada-01/issues.md)) | Ponto 1 (desktop na nuvem, controle da máquina local) + Ponto 2 (shell, arquivo, desktop, browser, conectores estilo Composio, permission broker) | **rascunho — detalhada** |
 | [02](jornada-02-bots-se-chamam.md) | Bots se chamam — delegação, @menção e workflows entre bots ([épicos](jornada-02-epicos.md)) | Multi-bot interativo (referência: Grok Bot; o OMB só tem channels). **nod já tem o motor; falta a experiência.** | **rascunho — detalhada** |
+| [Conta J1–J3](jornadas-de-identidade-e-conta.md) | Entrar sem login, criar e recuperar conta, trazer o time e cuidar dos próprios dados | J1 e J3 priorizadas; J2 especificada para depois | **proposta — detalhada** |
 
 > As evidências que motivam as jornadas ficam em [evidencias/](evidencias/README.md).
 >

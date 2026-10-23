@@ -57,6 +57,9 @@ const ponte: NodDesktop = {
   iaTestar: (pedido?: { nome?: string; ia?: IaDesktop }) => ipcRenderer.invoke(CANAIS_DESKTOP.iaTestar, pedido),
   ias,
   contas,
+  // NOD-345: o código de troca vai ao processo principal, que fala com o servidor sem Origin.
+  trocarConta: (codigo: string) => ipcRenderer.invoke(CANAIS_DESKTOP.trocarConta, codigo),
+  desafioConta: () => ipcRenderer.invoke(CANAIS_DESKTOP.desafioConta),
   aoAbrir: (fn: (alvo: AlvoAviso) => void) => {
     // Um ouvinte só (a página registra uma vez; recarregar recria o preload). O evento do IPC não vai à página.
     ipcRenderer.removeAllListeners(CANAIS_DESKTOP.abrir);

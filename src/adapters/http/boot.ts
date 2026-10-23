@@ -33,6 +33,7 @@ import { identidadeDoEmail } from "../../domain/identidade-do-email.ts";
 import { encerrarLigacao } from "../../use-cases/ligacoes.ts";
 import { criarBatimentos, criarVerificacaoSaude, INTERVALOS_ATE_LACO_PARADO } from "./rotas/saude.ts";
 import { listen } from "./servidor.ts";
+import { recusasDasFlagsDeConta } from "./compor-contas.ts";
 import { iniciarCorAtiva, type CorAtiva } from "./cor-ativa.ts";
 import { iniciarWatchdog, type Watchdog } from "./watchdog.ts";
 import { opcoesSessaoDoEnv } from "./sessao.ts";
@@ -172,6 +173,9 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
     },
     pessoas: () => listarTodas(db),
   });
+  // NOD-345: combinação inválida das flags de conta impede o boot, antes de qualquer efeito.
+  const recusasConta = recusasDasFlagsDeConta(env);
+  if (recusasConta.length) throw new Error(`boot: ${recusasConta.join("; ")}`);
   // NOD-164: o modelo da ligação (NOD_MODELO_LIGACAO_CLAUDE/_CODEX) inválido também impede o boot, antes de qualquer efeito.
   lerModelosLigacao(env);
   // NOD_ADMISSAO_DOMINIOS inválido também impede o boot (um domínio digitado errado deixaria o time de fora em silêncio).
@@ -211,7 +215,8 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
     autorizarTokenTurno: app.tokens.autorizarComBanco,
     // ADR-092: também no modo local — a VM da pessoa (o motor da ADR-090) puxa turnos deste Mac pela ponte.
     autorizarMaquina: app.autorizarMaquina,
-    sessao,
+    sessao: sessao.modo === "google" && app.contas ? { ...sessao, google: { ...sessao.google, ...(app.contas.google ? { conta: app.contas.google } : {}) } } : sessao,
+    ...(app.contas ? { contas: { guarda: app.contas.guarda, google: app.contas.google !== null, bootstrap: app.contas.bootstrap, rotas: app.contas.rotas } } : {}),
     verificarSaude,
     estadoSaude,
     // ADR-071: os canais WebSocket da ligação (mídia e cérebro) no mesmo servidor.

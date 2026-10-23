@@ -90,6 +90,8 @@ import type { IniciarLaco } from "../fundo/orquestrador-turnos.ts";
 import { criarPonteInterna, type PonteInternaNod } from "../fundo/ponte-interna.ts";
 import { autorizarChaveMaquina } from "./autorizar-chave-maquina.ts";
 import { segredoEfetivo } from "./sessao.ts";
+import { comporContas, type ContasMontadas } from "./compor-contas.ts";
+import type { EnviadorEmail } from "../email/enviador.ts";
 import { criarPonteHttpServidor } from "./rotas/ponte.ts";
 import type { Rota } from "./roteador.ts";
 import { criarRotasAgentes } from "./rotas/agentes.ts";
@@ -206,6 +208,8 @@ export type OpcoesCompor = {
   inicioDoProcesso?: number;
   /** ADR-121: só em teste — a conta falsa e o fetch da troca do OAuth da nuvem. Default: Google de verdade. */
   nuvem?: { conta?: ContaNuvem; fetchImpl?: typeof fetch; provedor?: ProvedorNuvem };
+  /** NOD-345: só em teste — o enviador de e-mail da conta. Default: Resend (google) ou a caixa local (stub). */
+  enviadorEmail?: EnviadorEmail;
 };
 
 export type App = {
@@ -215,6 +219,8 @@ export type App = {
   depsDe(trx: Tx, escopo: Escopo): Deps;
   ponte: PonteInternaNod;
   rotas: Rota[];
+  /** NOD-345: as contas (NOD_CONTAS); null desligadas. O boot passa ao servidor (sessão revogável + rotas). */
+  contas: ContasMontadas | null;
   barramento: Barramento;
   interruptor: InterruptorNod;
   tokens: TokenTurno;
@@ -252,7 +258,7 @@ export type App = {
   /** NOD-170: os computadores dos bots, só quando ligados (NOD_COMPUTADORES=docker ou driver injetado); o boot liga o varredor de ociosidade. */
   computadores: Computadores | null;
   /** Liga os dois canais WebSocket da ligação ao servidor HTTP (boot, depois do listen). */
-  anexarVoz(server: Server, resolverEscopo: (req: IncomingMessage) => Escopo | null): CanaisVoz;
+  anexarVoz(server: Server, resolverEscopo: (req: IncomingMessage) => Escopo | null | Promise<Escopo | null>): CanaisVoz;
   fechar(): Promise<void>;
 };
 
@@ -521,6 +527,8 @@ export function comporApp(o: OpcoesCompor): App {
   };
 
   const dentro: DentroDeTx = (escopo, fn) => abrirTxEscopada(db, escopo)((trx) => fn(depsDe(trx, escopo)));
+  // NOD-345 (ADR-124): contas atrás de NOD_CONTAS/NOD_BOOTSTRAP/NOD_CONTAS_GOOGLE (compor-contas.ts). Desligadas = null.
+  const contas = comporContas({ db, env, dentro, agora: relogio, ...(o.enviadorEmail ? { enviador: o.enviadorEmail } : {}) });
 
   /**
    * ADR-115 (2026-10-18, plano dos modos de aprovação, PR 3a): o revisor do Automático. A chave `NOD_REVISOR` (ligado ou
@@ -703,6 +711,7 @@ export function comporApp(o: OpcoesCompor): App {
     // ADR-090 (0067): nos dois modos — no local, a VM também cai, e o aviso a nomeia.
     registrarPlataforma: (escopo, chaveId, plataforma) => dentro(escopo, (d) => d.repos.maquinaTokens.registrarPlataforma(chaveId, plataforma)),
     nomeDaChave: (escopo, chaveId) => dentro(escopo, async (d) => (await d.repos.maquinaTokens.identificar(chaveId))?.nome ?? null),
+    ...(contas ? { sessaoDaMaquina: async (escopo: Escopo, chaveId: string) => contas.sessaoDaMaquina(escopo, chaveId, await dentro(escopo, async (d) => (await d.repos.maquinaTokens.identificar(chaveId))?.nome ?? null)) } : {}),
     papelDaChave: (escopo, chaveId) => dentro(escopo, async (d) => (await d.repos.maquinaTokens.identificar(chaveId))?.papel ?? null),
     // NOD-300: "presenca" quando uma máquina perde ou recupera o contato (o varrer da ponte).
     inventarioMudou: (escopo, motivo) => { barramento.publicar(escopo.pessoaId, "inventario.mudou", { motivo: motivo ?? "anuncio" }); },
@@ -1403,6 +1412,7 @@ export function comporApp(o: OpcoesCompor): App {
     depsDe,
     ponte,
     rotas,
+    contas,
     barramento,
     interruptor,
     tokens,

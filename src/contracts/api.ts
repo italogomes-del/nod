@@ -17,8 +17,8 @@ import type { TrocasNaConversa } from "./troca-entre-bots.ts";
 /** Mutação devolve ids; o estado chega por SSE (ADR-016). */
 export type RespostaMutacao = { ok: true; ids: Record<string, string> };
 
-/** Tela de entrada (ADR-030): `google` mostra "Entrar com Google"; `stub` (só desenvolvimento, em 127.0.0.1) lista as pessoas. */
-export type ModoSessaoDto = { modo: "google" } | { modo: "stub"; pessoas: { id: string; nome: string }[] };
+/** Tela de entrada (ADR-030): `google` mostra "Entrar com Google"; `stub` (dev) lista as pessoas. `contas` (NOD-345) só com NOD_CONTAS. */
+export type ModoSessaoDto = ({ modo: "google" } | { modo: "stub"; pessoas: { id: string; nome: string }[] }) & { contas?: { google: boolean; bootstrap: boolean } };
 
 export type AmbienteBancoDto = { regime: "persistente" | "efemero" | "desconhecido"; porta: number | null };
 

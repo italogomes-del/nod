@@ -7,7 +7,7 @@ import { criarEstatico } from "./estatico.ts";
 import { criarRoteador, type DepsRoteador, type Rota } from "./roteador.ts";
 import { responderMetricas } from "./rotas/metricas.ts";
 import { criarRotaSaude, criarRotaSaudeLb, type EstadoSaude, type VerificacaoSaude } from "./rotas/saude.ts";
-import { criarSessao, exigirConfiguracaoSegura, segredoEfetivo, type OpcoesSessao } from "./sessao.ts";
+import { criarSessao, exigirConfiguracaoSegura, segredoEfetivo, type ContasNaSessao, type OpcoesSessao } from "./sessao.ts";
 
 /**
  * Servidor: roteador + saúde + sessão (google ou stub de desenvolvimento, ADR-030) + estático + as rotas compostas (compor.ts). Sem
@@ -27,11 +27,13 @@ export interface OpcoesServidor {
   autorizarTokenTurno?: DepsRoteador["autorizarTokenTurno"];
   /** Modo de login (ADR-030). Default `stub`, que só escuta em loopback; o boot SEMPRE passa o do NOD_LOGIN. */
   sessao?: OpcoesSessao;
+  /** NOD-345 (ADR-124): com NOD_CONTAS, a sessão revogável, as rotas de conta e o que o modo anuncia. */
+  contas?: ContasNaSessao;
   /**
    * definido em 2026-10-04 (ADR-071): quem trata o upgrade de WebSocket (os canais da ligação por voz), com a mesma
    * resolução de sessão do roteador. Sem isto, nenhum upgrade é aceito.
    */
-  upgrade?: (server: Server, resolverEscopo: (req: IncomingMessage) => Escopo | null) => void;
+  upgrade?: (server: Server, resolverEscopo: (req: IncomingMessage) => Escopo | null | Promise<Escopo | null>) => void;
   /**
    * definido em 2026-10-05 (NOD-175), revisto em 2026-10-15 (NOD-267): a verificação do `/api/saude` (o `select 1` com
    * prazo e, no compartilhado, o batimento dos laços), a mesma que o watchdog usa — o boot passa a de
@@ -48,7 +50,7 @@ export interface OpcoesServidor {
 
 export function criarServidor(opcoes: OpcoesServidor = {}) {
   const opcoesSessao = opcoes.sessao ?? { modo: "stub" };
-  const sessao = criarSessao(segredoEfetivo(opcoesSessao.modo, opcoes.segredoSessao ?? process.env.NOD_SESSAO_SEGREDO), opcoesSessao);
+  const sessao = criarSessao(segredoEfetivo(opcoesSessao.modo, opcoes.segredoSessao ?? process.env.NOD_SESSAO_SEGREDO), opcoesSessao, opcoes.contas);
   const estadoLb: EstadoSaude = opcoes.estadoSaude ?? { pronto: () => true, ativa: () => true, drenando: () => false, cor: null };
   const rotas: Rota[] = [criarRotaSaude(opcoes.verificarSaude, opcoes.estadoSaude), criarRotaSaudeLb(opcoes.verificarSaude, estadoLb), ...sessao.rotas, ...(opcoes.rotas ?? [])];
   const roteador = criarRoteador(rotas, {

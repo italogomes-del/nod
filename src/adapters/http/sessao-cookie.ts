@@ -26,21 +26,35 @@ export function lerAssinado(valor: string | undefined, segredo: string): string 
   return iguaisEmTempoConstante(assinatura, assinar(payload, segredo)) ? payload : null;
 }
 
-export function cunharCookie(escopo: Escopo, segredo: string): string {
-  const payload = Buffer.from(JSON.stringify({ tenantId: escopo.tenantId, pessoaId: escopo.pessoaId }), "utf8").toString("base64url");
+/**
+ * NOD-345 (ADR-124 §4): com `sid`, o cookie aponta uma linha de `sessoes` e só vale enquanto ela não for revogada. Sem
+ * `sid` é o cookie de antes (e o dos testes), que vale até o corte da pessoa (sessoes_corte).
+ */
+export function cunharCookie(escopo: Escopo, segredo: string, sid?: string | null): string {
+  const corpo: { tenantId: string; pessoaId: string; sid?: string } = { tenantId: escopo.tenantId, pessoaId: escopo.pessoaId };
+  if (sid) corpo.sid = sid;
+  const payload = Buffer.from(JSON.stringify(corpo), "utf8").toString("base64url");
   return `${payload}.${assinar(payload, segredo)}`;
 }
 
-export function lerCookieSessao(valor: string | undefined, segredo: string): Escopo | null {
+const UUID_SID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** O cookie inteiro: escopo e o sid (null = cookie sem sessão no banco). */
+export function lerSessaoDoCookie(valor: string | undefined, segredo: string): { escopo: Escopo; sid: string | null } | null {
   const payload = lerAssinado(valor, segredo);
   if (!payload) return null;
   try {
-    const obj = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as Partial<Escopo>;
+    const obj = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as Partial<Escopo> & { sid?: unknown };
     if (typeof obj.tenantId !== "string" || typeof obj.pessoaId !== "string" || !obj.tenantId || !obj.pessoaId) return null;
-    return { tenantId: obj.tenantId, pessoaId: obj.pessoaId };
+    if (obj.sid !== undefined && (typeof obj.sid !== "string" || !UUID_SID.test(obj.sid))) return null;
+    return { escopo: { tenantId: obj.tenantId, pessoaId: obj.pessoaId }, sid: typeof obj.sid === "string" ? obj.sid : null };
   } catch {
     return null;
   }
+}
+
+export function lerCookieSessao(valor: string | undefined, segredo: string): Escopo | null {
+  return lerSessaoDoCookie(valor, segredo)?.escopo ?? null;
 }
 
 /**
@@ -52,7 +66,12 @@ export function lerCookieSessao(valor: string | undefined, segredo: string): Esc
 export const PERMANENCIA_SESSAO_S = 30 * 24 * 60 * 60;
 
 /** Cabeçalho Set-Cookie da sessão. `seguro` = só HTTPS (modo google com redirect https); `maxAgeS` = guardar no aparelho. */
-export function cabecalhoCookieSessao(escopo: Escopo, segredo: string, seguro: boolean, maxAgeS?: number): string {
-  return `${COOKIE_SESSAO}=${cunharCookie(escopo, segredo)}; HttpOnly; SameSite=Strict; Path=/${maxAgeS ? `; Max-Age=${maxAgeS}` : ""}${seguro ? "; Secure" : ""}`;
+export function cabecalhoCookieSessao(escopo: Escopo, segredo: string, seguro: boolean, maxAgeS?: number, sid?: string | null): string {
+  return `${COOKIE_SESSAO}=${cunharCookie(escopo, segredo, sid)}; HttpOnly; SameSite=Strict; Path=/${maxAgeS ? `; Max-Age=${maxAgeS}` : ""}${seguro ? "; Secure" : ""}`;
 }
 
+
+/** Apaga o cookie de sessão (sair). Mesmos atributos do que cunha, para o navegador casar o cookie. */
+export function cabecalhoApagarSessao(seguro: boolean): string {
+  return `${COOKIE_SESSAO}=; Max-Age=0; HttpOnly; SameSite=Strict; Path=/${seguro ? "; Secure" : ""}`;
+}

@@ -133,6 +133,14 @@ export type NodDesktop = {
   ias?: PonteIas;
   /** ADR-101: as várias contas de cada IA. Opcional: o app instalado antes de 2026-10-12 não tem. */
   contas?: PonteContas;
+  /**
+   * NOD-345 (ADR-124): a pessoa entrou numa conta pela janela do app; a página passa o código de troca de uso único e o
+   * processo principal o troca pela chave do espaço novo e reconecta. `false` = código recusado (a página segue na sessão
+   * web). Opcional: o app instalado antes desta versão não tem, e a página então só pede para reconectar o app.
+   */
+  trocarConta?(codigo: string): Promise<boolean>;
+  /** O desafio (SHA-256) do segredo de troca do processo principal: a página o manda no login para receber o código. */
+  desafioConta?(): Promise<string>;
   /** Chamado quando a pessoa clica num aviso: a web abre o alvo. */
   aoAbrir(fn: (alvo: AlvoAviso) => void): void;
 };
@@ -173,6 +181,9 @@ export const CANAIS_DESKTOP = {
   contasMudaram: "nod:contas-mudaram",
   // ADR-102 (2026-10-13): e-mail e organização das contas deste Mac, para a lista única da tela.
   contasDetalhes: "nod:contas-detalhes",
+  // NOD-345 (ADR-124): a troca de espaço depois de entrar numa conta pela janela do app.
+  trocarConta: "nod:trocar-conta",
+  desafioConta: "nod:desafio-conta",
 } as const;
 
 /** Tetos do que a página pode mandar ao macOS (o corpo que a web redige tem até 140). */

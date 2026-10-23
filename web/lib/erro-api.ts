@@ -49,3 +49,14 @@ export function erroDaResposta(status: number, lido: unknown, rota: string): Err
   return new ErroApi(status, e.codigo ?? "falha_interna", e.mensagem ?? FALHA_SEM_FRASE, e.correlation_id ?? null, rota);
 }
 
+
+/**
+ * NOD-345 (revisão do PR 504): o app do Mac de antes não tem a ponte que troca a chave de máquina. Entrar numa conta por
+ * ele deixaria a tela numa conta e o executor na outra; o pedido nem sai, e a pessoa é chamada a atualizar o app.
+ */
+export class AppDesatualizado extends Error {
+  constructor() {
+    super("app sem a ponte de troca de conta");
+    this.name = "AppDesatualizado";
+  }
+}

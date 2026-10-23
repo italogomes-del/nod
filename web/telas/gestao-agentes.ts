@@ -80,7 +80,7 @@ export function pedirGestao(titulo: string, corpo: string, confirmar: string, sa
 }
 
 /** O menu da conta (web/telas/menu-conta.ts) sobre o mesmo diálogo dos menus do bot. */
-export function abrirMenuConta(ancora: HTMLElement, dados: DadosMenuConta, acoes: { secao(s: SecaoEspaco): void; modoDev(): Promise<boolean>; experimento?(chave: keyof Experimentos): Promise<boolean>; onboarding?(): void }): void {
+export function abrirMenuConta(ancora: HTMLElement, dados: DadosMenuConta, acoes: { secao(s: SecaoEspaco): void; modoDev(): Promise<boolean>; experimento?(chave: keyof Experimentos): Promise<boolean>; onboarding?(): void; conta?(qual: string): void }): void {
   const d = dialogo(htmlMenuConta(dados), true);
   d.classList.add("menu-conta");
   // Nasce acima do avatar, alinhado à esquerda da barra (a largura dela menos as margens).
@@ -93,6 +93,9 @@ export function abrirMenuConta(ancora: HTMLElement, dados: DadosMenuConta, acoes
     if (secao) { d.close(); acoes.secao(secao); return; }
     // ADR-077: "Ver o onboarding de novo" volta ao "olá".
     if (alvo.closest("[data-onboarding]")) { d.close(); acoes.onboarding?.(); return; }
+    // NOD-345: os itens da conta abrem o cartão na conversa do Nod (ou saem da sessão).
+    const conta = alvo.closest<HTMLElement>("[data-conta]")?.dataset.conta;
+    if (conta) { d.close(); acoes.conta?.(conta); return; }
     const chave = alvo.closest<HTMLElement>("[data-modo-dev]");
     if (chave) { void acoes.modoDev().then((ligado) => chave.setAttribute("aria-checked", String(ligado))); return; }
     // ADR-111: as chaves de experimento, do mesmo jeito.

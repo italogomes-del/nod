@@ -125,8 +125,14 @@ export function criarHandlerSse(barramento: Barramento, opcoes: OpcoesSse = {}):
     contar(escopo.tenantId, escopo.pessoaId, +1);
     const soltar = opcoes.conexoes?.registrar(res);
 
+    // NOD-345: a cada ping, a sessão é reconferida; revogada (sair, sair das outras, senha nova), o canal fecha e a
+    // reconexão do navegador recebe 401.
     const ping = setInterval(() => {
-      if (!res.writableEnded && !res.destroyed) res.write(PING_SSE);
+      if (res.writableEnded || res.destroyed) return;
+      res.write(PING_SSE);
+      void ctx.sessaoAindaVale?.().then((vale) => {
+        if (!vale && !res.writableEnded) res.end();
+      });
     }, pingMs);
     ping.unref();
 

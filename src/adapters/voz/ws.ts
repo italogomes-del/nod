@@ -31,7 +31,7 @@ export interface CanalVoz {
 export type IdentidadeCerebro = Escopo & { turnoId: string; agenteId: string };
 
 export type DepsCanaisVoz = {
-  resolverEscopo(req: IncomingMessage): Escopo | null;
+  resolverEscopo(req: IncomingMessage): Escopo | null | Promise<Escopo | null>;
   /** revisto em 2026-10-12 (NOD-214): pode ir ao banco (turno adotado depois de um reinício). */
   autorizarTokenTurno(token: string): IdentidadeCerebro | null | Promise<IdentidadeCerebro | null>;
   /** A ligação do turno-cérebro (do plano guardado com o token); null = o turno não é de ligação. */
@@ -41,11 +41,15 @@ export type DepsCanaisVoz = {
   anexarCerebro(p: { identidade: IdentidadeCerebro; ligacaoId: string; canal: CanalVoz }): number | null;
   /** ADR-095: o `ola` do ditado chegou; a composição autoriza (permissão, consentimento) e abre o ditado ou recusa. */
   anexarDitado(p: { escopo: Escopo; canal: CanalVoz }): void;
+  /** Teste: encurta a reconferência da sessão (RECONFERIR_SESSAO_MS). */
+  reconferirSessaoMs?: number;
 };
 
 const MIDIA = /^\/api\/t\/([^/]+)\/voz\/v1\/midia$/;
 const CEREBRO = /^\/api\/interno\/voz\/v1\/cerebro$/;
 const DITADO = /^\/api\/t\/([^/]+)\/voz\/v1\/ditado$/;
+/** definido em 2026-10-23 (NOD-345): de quanto em quanto a sessão de um WebSocket aberto é reconferida. */
+export const RECONFERIR_SESSAO_MS = 15_000;
 /** definido em 2026-10-04: o `ola` da mídia tem de chegar em 5 s, senão a conexão fecha. */
 export const PRAZO_OLA_MS = 5_000;
 
@@ -110,21 +114,24 @@ export function anexarCanaisVoz(server: Server, deps: DepsCanaisVoz): CanaisVoz 
     const caminho = new URL(req.url ?? "/", "http://127.0.0.1").pathname;
     const midia = MIDIA.exec(caminho);
     if (midia) {
-      const escopo = deps.resolverEscopo(req);
-      if (!escopo) return recusar(socket, 401);
-      if (escopo.tenantId !== midia[1]) return recusar(socket, 404);
-      if (!origemDoMesmoHost(req)) return recusar(socket, 403);
-      wss.handleUpgrade(req, socket, head, (ws) => aceitarMidia(ws, escopo));
+      // NOD-345: a sessão revogável vai ao banco; o erro dela recusa o upgrade em vez de derrubar o processo.
+      void Promise.resolve().then(() => deps.resolverEscopo(req)).catch(() => null).then((escopo) => {
+        if (!escopo) return recusar(socket, 401);
+        if (escopo.tenantId !== midia[1]) return recusar(socket, 404);
+        if (!origemDoMesmoHost(req)) return recusar(socket, 403);
+        wss.handleUpgrade(req, socket, head, (ws) => { vigiarSessao(ws, req, escopo); aceitarMidia(ws, escopo); });
+      });
       return;
     }
     // ADR-095: o ditado é rota de tenant como a mídia — mesmas três conferências.
     const ditado = DITADO.exec(caminho);
     if (ditado) {
-      const escopo = deps.resolverEscopo(req);
-      if (!escopo) return recusar(socket, 401);
-      if (escopo.tenantId !== ditado[1]) return recusar(socket, 404);
-      if (!origemDoMesmoHost(req)) return recusar(socket, 403);
-      wss.handleUpgrade(req, socket, head, (ws) => aceitarDitado(ws, escopo));
+      void Promise.resolve().then(() => deps.resolverEscopo(req)).catch(() => null).then((escopo) => {
+        if (!escopo) return recusar(socket, 401);
+        if (escopo.tenantId !== ditado[1]) return recusar(socket, 404);
+        if (!origemDoMesmoHost(req)) return recusar(socket, 403);
+        wss.handleUpgrade(req, socket, head, (ws) => { vigiarSessao(ws, req, escopo); aceitarDitado(ws, escopo); });
+      });
       return;
     }
     if (CEREBRO.test(caminho)) {
@@ -147,6 +154,19 @@ export function anexarCanaisVoz(server: Server, deps: DepsCanaisVoz): CanaisVoz 
     }
     recusar(socket, 404);
   });
+
+  /** NOD-345: sessão revogada (sair, sair das outras, senha nova) fecha o socket aberto com 4401. */
+  function vigiarSessao(ws: WebSocket, req: IncomingMessage, escopo: Escopo): void {
+    const vigia = setInterval(() => {
+      // Erro ao conferir (banco fora por um instante) não derruba a ligação: só a resposta "não vale" fecha.
+      void Promise.resolve().then(() => deps.resolverEscopo(req)).then((agora) => {
+        if (agora && agora.tenantId === escopo.tenantId && agora.pessoaId === escopo.pessoaId) return;
+        if (ws.readyState === ws.OPEN || ws.readyState === ws.CONNECTING) ws.close(FECHAMENTOS_VOZ.sessao, "sessao encerrada");
+      }, () => undefined);
+    }, deps.reconferirSessaoMs ?? RECONFERIR_SESSAO_MS);
+    vigia.unref();
+    ws.on("close", () => clearInterval(vigia));
+  }
 
   function aceitarMidia(ws: WebSocket, escopo: Escopo): void {
     const canal = canalDeSocket(ws);

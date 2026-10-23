@@ -1,0 +1,34 @@
+/* NOD-345 (ADR-124, protótipo do Gil): os cartões da conta na conversa e a tela de entrada com e-mail. Só tokens. */
+.cc-bloco { width: min(560px, 100%); margin: 8px auto 16px; display: flex; flex-direction: column; gap: 10px; }
+.cc-cartao { background: var(--surface); border: 1px solid var(--line); border-radius: 20px; padding: 20px; display: flex; flex-direction: column; gap: 12px; }
+.tela.entrar .cc-cartao { width: min(420px, 100%); margin-top: 16px; text-align: left; }
+.cc-selo { align-self: flex-start; font-size: 12px; font-weight: 600; color: var(--ink-3); background: var(--surface-raised); border-radius: 999px; padding: 3px 10px; }
+.cc-titulo { margin: 0; font-size: 18px; font-weight: 600; color: var(--ink); }
+.cc-texto, .cc-dica { margin: 0; font-size: 15px; line-height: 1.5; color: var(--ink-2); }
+.cc-dica { font-size: 13px; color: var(--ink-3); }
+.cc-form { display: flex; flex-direction: column; gap: 12px; }
+.cc-campo { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--ink-2); }
+.cc-campo input { border: 1px solid var(--line-strong); border-radius: 12px; padding: 11px 14px; font: inherit; font-size: 15px; color: var(--ink); background: var(--surface); }
+.cc-campo input:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.cc-senha { display: flex; gap: 6px; align-items: center; }
+.cc-senha input { flex: 1; min-width: 0; }
+.cc-mostrar { border: 0; background: none; color: var(--ink-2); font: inherit; font-size: 13px; padding: 8px; border-radius: 8px; cursor: pointer; }
+.cc-mostrar:hover { background: var(--surface-raised); color: var(--ink); }
+.cc-codigo { font-family: var(--font-mono); font-size: 22px; letter-spacing: .3em; text-align: center; }
+.cc-codigo-grande { margin: 4px 0; font-family: var(--font-mono); font-size: 36px; font-weight: 600; letter-spacing: .18em; text-align: center; color: var(--ink); }
+.cc-simbolos { margin: 4px 0; display: flex; justify-content: center; gap: 18px; font-size: 34px; }
+.cc-acoes { display: flex; justify-content: flex-end; align-items: center; gap: 8px; flex-wrap: wrap; }
+.cc-acoes.cc-coluna { flex-direction: column; align-items: stretch; }
+.cc-rodape { margin: 0; display: flex; justify-content: center; gap: 4px; flex-wrap: wrap; }
+.cc-link.bt { border: 0; background: none; color: var(--ink-2); font-size: 14px; }
+.cc-link.bt:hover { background: var(--surface-raised); color: var(--ink); }
+.cc-erro { margin: 0; font-size: 14px; color: var(--danger); }
+.cc-ok { margin: 0; font-size: 14px; color: var(--success); }
+.cc-resolvida { align-self: center; margin: 0; font-size: 13px; color: var(--ink-3); text-align: center; }
+.cc-sessoes { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; }
+.cc-sessoes li { display: flex; justify-content: space-between; gap: 12px; font-size: 14px; color: var(--ink); padding: 8px 10px; border-radius: 10px; background: var(--surface-raised); }
+.cc-sessoes .cc-meta { color: var(--ink-3); white-space: nowrap; }
+.cc-sessoes .cc-atual { background: var(--surface-selected); }
+.cc-lembrete { background: var(--surface-raised); border-radius: 20px; padding: 14px 18px; display: flex; flex-direction: column; gap: 10px; font-size: 15px; line-height: 1.5; color: var(--ink); }
+.cc-lembrete p { margin: 0; }
+.mc-conta { margin: 4px 12px 2px; font-size: 13px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

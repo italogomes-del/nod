@@ -4,6 +4,7 @@
  * preserva texto, foco e cursor entre frames). Sem framework: strings + delegação de eventos por
  * `data-act` em main.ts. ADR-029 (render por classe): estados de falha viram texto com relógio.
  */
+import { levarCampos } from "./levar-campos.ts";
 import { seletoresDoFoco } from "./foco-do-bloco.ts";
 
 const ultimoHtml = new Map<string, string>();
@@ -63,6 +64,7 @@ export function regiaoPorBlocos(id: string, blocos: readonly Bloco[]): void {
     const el = document.createElement("div");
     el.className = "bloco";
     el.innerHTML = b.html;
+    if (antes) levarCampos(antes.el, el);
     return { ...b, el };
   });
   const ficam = new Set(novos.map((b) => b.el));
@@ -78,6 +80,9 @@ export function regiaoPorBlocos(id: string, blocos: readonly Bloco[]): void {
   // O botão focado morava num bloco refeito (o chip ou a barra da fala que acabou de reagir): o foco volta ao mesmo
   // botão no bloco novo, em vez de cair no <body> e perder o lugar na conversa (revisão do PR 392, em 2026-10-18).
   if (focado && !focado.isConnected) {
+    const nome = focado instanceof HTMLInputElement || focado instanceof HTMLTextAreaElement ? focado.name : "";
+    const campo = nome ? [...raiz.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("input[name], textarea[name]")].find((c) => c.name === nome) : undefined;
+    if (campo) { campo.focus({ preventScroll: true }); return; }
     for (const seletor of seletoresDoFoco(focado.dataset)) {
       const alvo = raiz.querySelector<HTMLElement>(seletor);
       if (alvo) { alvo.focus({ preventScroll: true }); break; }

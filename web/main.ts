@@ -36,7 +36,10 @@ import type { Experimentos } from "../src/contracts/raio-x.ts";
 import type { Escopo } from "../src/shared/types.ts";
 import type { FrameSse } from "../src/contracts/frame.ts";
 import { agenteDaTela, conversaAbertaTemNotaDeContas, conversaDaTela, estadoInicial, invalidacoesAoReconectar, invalidacoesAoRetomar, invalidacoesDaTela, mudouNaTela, reduzir, type Acao, type Estado, type Invalidacao, type NivelGaveta, type SecaoEspaco, type Tela } from "./estado/reducer.ts";
-import { criarApi, ErroApi, observarRede, sessao as sessaoApi, type Api } from "./lib/api.ts";
+import { contaApi, criarApi, ErroApi, observarRede, sessao as sessaoApi, type Api } from "./lib/api.ts";
+import { criarContaNoChat, fraseDoErro as fraseDoErroDeConta } from "./telas/conta-no-chat.ts";
+import { deveLembrar, htmlLembrete, jaFalou, marcarFalou } from "./telas/lembrete-conta.ts";
+import type { EstadoContaDto } from "../src/contracts/conta.ts";
 import { acaoDoErro, criarRegistroDeErros, detalhesDoErro, ehErroDeRede, erroDaAcao, erroDe as traduzirErro, erroParaRelatar, type ErroNaTela } from "./lib/erro-da-tela.ts";
 import { criarSondaDeRede } from "./lib/sonda-de-rede.ts";
 import { criarReleituraAdiada } from "./lib/releitura-adiada.ts";
@@ -214,7 +217,14 @@ function taskLembrada(): Extract<Tela, { tipo: "trabalho" }> | null {
   }
 }
 /** Tela de entrada (ADR-030): o modo vem do servidor; `recusado` vem do redirect do callback do Google. */
-let entrada: { modo: ModoSessaoDto | null; recusado: boolean } = { modo: null, recusado: false };
+let entrada: {
+  modo: ModoSessaoDto | null;
+  recusado: boolean;
+  /** NOD-345: entrar com e-mail (ou pedir o link) sem sessão; os valores digitados ficam só no DOM. */
+  conta?: { etapa: "entrar" | "recuperar"; erro: string | null; enviadoPara: string | null; ocupado: boolean };
+  /** NOD-345: a página do link de recuperação (`#redefinir=<token>`); o token sai da URL na hora. */
+  redefinir?: { token: string; erro: string | null; vencido: boolean; ocupado: boolean } | null;
+} = { modo: null, recusado: false };
 
 // definido em 2026-09-24 (revisão da interface): a tela principal é o chat; quem esconde o painel do
 // bot espera achá-lo escondido na próxima conversa e no próximo carregamento.
@@ -445,6 +455,49 @@ const telaOnboarding = criarTelaOnboarding({
   erro: (e) => mostrarErro(e),
   aoMudar: () => render(),
 });
+
+/**
+ * NOD-345 (ADR-124): a conta no nod como cartões na conversa. `contas` vem de /api/sessao/modo (ausente = servidor sem
+ * contas: nada disto aparece); `contaAtual` é o GET /api/conta (null = não lido). Nenhum dos dois guarda senha nem código.
+ */
+/** O app não conseguiu trocar a chave de máquina: não recarrega com a conta nova na tela e o executor na antiga. */
+const FALHA_TROCA_APP = "O app não conseguiu trocar de conta. Feche e abra o nod para tentar de novo.";
+let contas: { google: boolean; bootstrap: boolean } | null = null;
+let contaAtual: EstadoContaDto | null = null;
+const conversaDoNod = () => {
+  const nod = (estado.frota?.agentes ?? []).find((a) => a.papel === "nod" && a.ownerId === estado.sessao?.pessoaId);
+  return nod ? { conversaId: nod.conversaId, agenteId: nod.id } : null;
+};
+const telaConta = criarContaNoChat({
+  api: () => contaApi,
+  conversaDoNod,
+  conversaDaTela: () => conversaDaTela(estado)?.conversa.id ?? null,
+  irParaConversa: (conversaId, agenteId) => navegar({ tipo: "conversa", conversaId, agenteId }),
+  aoMudar: () => render(),
+  // No app, o Google abre no navegador do sistema, sem a sessão do app: o Google para conta ainda não vale lá.
+  google: () => (contas?.google ?? false) && window.nodDesktop === undefined,
+  noApp: () => window.nodDesktop !== undefined,
+  async entrou(trocaApp) {
+    // O app troca a chave de máquina pela do espaço novo e se reconecta; a web já tem o cookie novo e só recarrega.
+    if (trocaApp && window.nodDesktop?.trocarConta) {
+      if (await window.nodDesktop.trocarConta(trocaApp).catch(() => false)) return;
+      mostrarErro(new Error(FALHA_TROCA_APP));
+      return;
+    }
+    window.location.reload();
+  },
+  contaMudou: (e) => { contaAtual = e; render(); },
+  abrirUrl: (url) => { if (window.nodDesktop) window.open(url, "_blank", "noopener"); else window.location.assign(url); },
+  agora: () => Date.now(),
+  campo: (form, nome) => String(new FormData(form as HTMLFormElement).get(nome) ?? ""),
+});
+/** A fala única do lembrete (opção 2 do Gil): na conversa do Nod, uma vez por instalação, depois da primeira rotina. */
+function blocoDoLembrete(conversaId: string): string | null {
+  if (conversaDoNod()?.conversaId !== conversaId) return null;
+  const storage = (() => { try { return window.localStorage; } catch { return null; } })();
+  const lembrar = deveLembrar({ contas: contas !== null, temConta: contaAtual ? contaAtual.conta !== null || !!contaAtual.legado : null, rotinas: estado.rotinas.length, jaFalou: jaFalou(storage) });
+  return lembrar ? htmlLembrete() : null;
+}
 /** A ligação viva que a página achou ao abrir (recarregada no meio dela): volta como pílula quando o bot chegar na frota. */
 let ligacaoParaRetomar: Ligacao | null = null;
 
@@ -1280,7 +1333,18 @@ function partesDaTimeline(): PartesDaTimeline | null {
   });
   // ADR-077: os cards da configuração guiada entram como um bloco ao vivo na conversa da guia.
   const guia = telaOnboarding.blocoNaConversa(c.conversa.id);
-  return { historico, aoVivo: guia ? [...blocosAoVivo(c, estado), { chave: "onboarding", html: guia }] : blocosAoVivo(c, estado) };
+  // NOD-345: os cartões da conta e a fala única do lembrete, também ao vivo (nunca viram mensagem do transcript).
+  const conta = telaConta.blocoNaConversa(c.conversa.id);
+  const lembrete = blocoDoLembrete(c.conversa.id);
+  return {
+    historico,
+    aoVivo: [
+      ...blocosAoVivo(c, estado),
+      ...(guia ? [{ chave: "onboarding", html: guia }] : []),
+      ...(lembrete ? [{ chave: "conta-lembrete", html: lembrete }] : []),
+      ...(conta ? [{ chave: "conta", html: conta }] : []),
+    ],
+  };
 }
 
 /**
@@ -1536,8 +1600,98 @@ function esquecerPedido(): void {
   try { window.sessionStorage.removeItem(CHAVE_GUARDADA); } catch { /* sem storage, nada guardado */ }
 }
 
+/** NOD-345: a tela sem sessão com contas — entrar com e-mail, pedir o link e a página do link (senha nova duas vezes). */
+function htmlEntradaConta(): string {
+  const r = entrada.redefinir;
+  const senha = (nome: string, rotulo: string, nova: boolean) => `<label class="cc-campo">${rotulo}<span class="cc-senha"><input name="${nome}" type="password" autocomplete="${nova ? "new-password" : "current-password"}" required${nova ? ' minlength="12"' : ""} maxlength="128"><button type="button" class="cc-mostrar" data-act="conta-mostrar" aria-pressed="false">Mostrar</button></span></label>`;
+  const enviar = (rotulo: string, ocupado: boolean) => `<button type="submit" class="bt pri"${ocupado ? ' disabled aria-busy="true"' : ""}>${esc(ocupado ? "Conferindo…" : rotulo)}</button>`;
+  const erro = (t: string | null) => (t ? `<p class="cc-erro" role="alert">${esc(t)}</p>` : "");
+  if (r) {
+    if (r.vencido) return `<div class="cc-cartao"><h3 class="cc-titulo">Esse link não vale mais</h3><p class="cc-texto">Ele vale por 30 minutos e uma vez só.</p><div class="cc-acoes">${botao("entrada-ir", "Pedir outro link", { classe: "pri", dados: { etapa: "recuperar" } })}</div></div>`;
+    return `<form class="cc-cartao cc-form" data-form="entrada-redefinir"><h3 class="cc-titulo">Crie uma senha nova</h3>${senha("nova", "Senha nova", true)}${senha("nova2", "Repita a senha nova", true)}<p class="cc-dica">Pelo menos 12 caracteres. As outras sessões saem.</p>${erro(r.erro)}<div class="cc-acoes">${enviar("Salvar senha", r.ocupado)}</div></form>`;
+  }
+  const c = entrada.conta ?? { etapa: "entrar" as const, erro: null, enviadoPara: null, ocupado: false };
+  const email = (rotulo = "E-mail") => `<label class="cc-campo">${rotulo}<input name="email" type="email" autocomplete="email" required maxlength="254" spellcheck="false" autocapitalize="off"></label>`;
+  if (c.etapa === "recuperar") {
+    return c.enviadoPara
+      ? `<div class="cc-cartao"><p class="cc-texto" role="status">Se existir uma conta com <b>${esc(c.enviadoPara)}</b>, mandamos um link para criar uma senha nova. Ele vale por 30 minutos e uma vez só.</p><div class="cc-acoes">${botao("entrada-ir", "Voltar", { classe: "cc-link", dados: { etapa: "entrar" } })}</div></div>`
+      : `<form class="cc-cartao cc-form" data-form="entrada-recuperar"><h3 class="cc-titulo">Recuperar a senha</h3>${email("E-mail da conta")}${erro(c.erro)}<div class="cc-acoes">${botao("entrada-ir", "Voltar", { classe: "cc-link", dados: { etapa: "entrar" } })}${enviar("Mandar link", c.ocupado)}</div></form>`;
+  }
+  return `<form class="cc-cartao cc-form" data-form="entrada-conta"><h3 class="cc-titulo">Entrar com e-mail</h3>${email()}${senha("senha", "Senha", false)}${erro(c.erro)}<div class="cc-acoes">${botao("entrada-ir", "Esqueci a senha", { classe: "cc-link", dados: { etapa: "recuperar" } })}${enviar("Entrar", c.ocupado)}</div></form>`;
+}
+
+async function trabalharNaEntrada(fn: () => Promise<void>): Promise<void> {
+  const ocupado = entrada.redefinir ?? entrada.conta;
+  if (ocupado?.ocupado) return;
+  const marcar = (v: boolean) => {
+    if (entrada.redefinir) entrada = { ...entrada, redefinir: { ...entrada.redefinir, ocupado: v } };
+    else entrada = { ...entrada, conta: { ...(entrada.conta ?? { etapa: "entrar", erro: null, enviadoPara: null }), ocupado: v } };
+    render();
+  };
+  marcar(true);
+  try { await fn(); } finally { marcar(false); }
+}
+const contaDaEntrada = (m: Partial<NonNullable<typeof entrada.conta>>) => { entrada = { ...entrada, conta: { ...(entrada.conta ?? { etapa: "entrar", erro: null, enviadoPara: null, ocupado: false }), ...m } }; render(); };
+
+function entrarPelaTela(form: HTMLFormElement): Promise<void> {
+  const d = new FormData(form);
+  return trabalharNaEntrada(async () => {
+    try {
+      const r = await contaApi.entrar(String(d.get("email") ?? "").trim(), String(d.get("senha") ?? ""));
+      if (r.resultado === "recusado") return contaDaEntrada({ erro: "E-mail ou senha não conferem." });
+      if (r.resultado === "entrou" && r.trocaApp && window.nodDesktop?.trocarConta) {
+        if (await window.nodDesktop.trocarConta(r.trocaApp).catch(() => false)) return;
+        return contaDaEntrada({ erro: FALHA_TROCA_APP });
+      }
+      window.location.reload();
+    } catch (e) {
+      contaDaEntrada({ erro: fraseDoErroDeConta(e) });
+    }
+  });
+}
+function recuperarPelaTela(form: HTMLFormElement): Promise<void> {
+  const email = String(new FormData(form).get("email") ?? "").trim();
+  return trabalharNaEntrada(async () => {
+    try { await contaApi.recuperar(email); contaDaEntrada({ etapa: "recuperar", enviadoPara: email, erro: null }); } catch (e) { contaDaEntrada({ erro: fraseDoErroDeConta(e) }); }
+  });
+}
+function redefinirPelaTela(form: HTMLFormElement): Promise<void> {
+  const d = new FormData(form);
+  const r = entrada.redefinir;
+  if (!r) return Promise.resolve();
+  const nova = String(d.get("nova") ?? "");
+  if (nova !== String(d.get("nova2") ?? "")) { entrada = { ...entrada, redefinir: { ...r, erro: "As duas senhas não são iguais." } }; render(); return Promise.resolve(); }
+  return trabalharNaEntrada(async () => {
+    try {
+      const x = await contaApi.redefinir(r.token, nova);
+      if (x.resultado === "invalido") { entrada = { ...entrada, redefinir: { ...r, vencido: true } }; return; }
+      // Vinha de um espaço provisório: a senha já mudou, e a escolha (levar o trabalho ou não) abre ao recarregar.
+      if (x.resultado === "escolher") { window.location.replace("/"); return; }
+      if (x.trocaApp && window.nodDesktop?.trocarConta) {
+        if (await window.nodDesktop.trocarConta(x.trocaApp).catch(() => false)) return;
+        entrada = { ...entrada, redefinir: { ...r, erro: FALHA_TROCA_APP } };
+        return;
+      }
+      window.location.replace("/");
+    } catch (e) {
+      entrada = { ...entrada, redefinir: { ...r, erro: fraseDoErroDeConta(e) } };
+    }
+  });
+}
+
+/** NOD-345: o que o menu da conta pede — "Sair" sai desta sessão; o resto abre o cartão na conversa do Nod. */
+async function abrirDoMenuConta(qual: string): Promise<void> {
+  if (qual !== "sair") return telaConta.abrir(qual, true);
+  await contaApi.sair().catch(() => undefined);
+  // Quem sai cai na tela de entrada, não num espaço provisório novo; e este navegador esquece o verificador.
+  try { window.localStorage.removeItem(CHAVE_VERIFICADOR); } catch { /* sem storage */ }
+  window.location.replace("/?saiu=1");
+}
+
 function renderEntrada(): string {
   const m = entrada.modo;
+  // NOD-345: a página do link de recuperação vale com ou sem modo lido.
+  if (entrada.redefinir) return `<section class="tela entrar"><h1>nod</h1>${htmlEntradaConta()}</section>`;
   const pedido = pedidoPendente();
   const doMac = pedido ? `<p class="mudo">Depois de entrar, você confirma a conexão do Mac <b>${esc(pedido.nome)}</b>.</p>` : "";
   const recusa = entrada.recusado
@@ -1545,12 +1699,13 @@ function renderEntrada(): string {
     : "";
   if (!m) return `<section class="tela entrar"><h1>nod</h1><p class="mudo">carregando…</p></section>`;
   if (m.modo === "google") {
-    return `<section class="tela entrar"><h1>nod</h1><p>Entre com a sua conta Google.</p>${doMac}${recusa}<a class="bt pri" href="${esc(sessaoApi.urlGoogle)}">Entrar com Google</a></section>`;
+    // NOD-345: com contas, quem não é da equipe entra com o e-mail (o Google da equipe continua aqui).
+    return `<section class="tela entrar"><h1>nod</h1><p>Entre com a sua conta Google.</p>${doMac}${recusa}<a class="bt pri" href="${esc(sessaoApi.urlGoogle)}">Entrar com Google</a>${m.contas ? htmlEntradaConta() : ""}</section>`;
   }
   const pessoas = m.pessoas.length
     ? m.pessoas.map((p, i) => botao("entrar", `Entrar como ${esc(p.nome)}`, { classe: i === 0 ? "pri" : undefined, dados: { pessoa: p.id } })).join(" ")
     : '<p class="mudo">Nenhuma pessoa no cadastro. Rode <code>npm run db:seed</code>.</p>';
-  return `<section class="tela entrar"><h1>nod</h1><p>Login de desenvolvimento (só nesta máquina): entre como uma pessoa do cadastro.</p>${pessoas}</section>`;
+  return `<section class="tela entrar"><h1>nod</h1><p>Login de desenvolvimento (só nesta máquina): entre como uma pessoa do cadastro.</p>${pessoas}${m.contas ? htmlEntradaConta() : ""}</section>`;
 }
 
 /**
@@ -1744,6 +1899,8 @@ async function iniciarSessao(escopo: Escopo): Promise<void> {
   // Outra sessão: a ligação da anterior sai da tela (o servidor a encerra se ninguém voltar em 10 s).
   telaLigacao.descartar();
   telaOnboarding.descartar();
+  telaConta.descartar();
+  contaAtual = null;
   ligacaoParaRetomar = null;
   void api.ligacaoViva().then(({ ligacao }) => {
     if (ligacao && (ligacao.estado === "chamando" || ligacao.estado === "em_curso")) { ligacaoParaRetomar = ligacao; render(); }
@@ -1764,6 +1921,7 @@ async function iniciarSessao(escopo: Escopo): Promise<void> {
       const voltou = ev.estado === "aberto" && estado.conexao.estado === "reconectando";
       dispatch({ tipo: "conexao", estado: ev.estado, tentativa: ev.tentativa, proximaEmMs: ev.proximaEmMs });
       if (voltou) dispatch({ tipo: "invalidar", quais: invalidacoesAoReconectar(estado) });
+      if (ev.estado === "reconectando" && ev.proximaEmMs !== null) conferirSessaoAoCair();
     }
   });
   live.connect();
@@ -1773,6 +1931,27 @@ async function iniciarSessao(escopo: Escopo): Promise<void> {
   // #195: a task que estava aberta antes de recarregar volta aberta.
   const task = taskLembrada();
   if (task) navegar(task);
+}
+
+/**
+ * NOD-345 (revisão do PR 504): o canal ao vivo caiu. Se foi porque a sessão foi encerrada (sair das outras, senha nova
+ * em outro aparelho), a página volta à tela de entrar em vez de ficar reconectando para sempre. Rede fora não conta.
+ */
+let conferindoSessao = false;
+function conferirSessaoAoCair(): void {
+  if (conferindoSessao) return;
+  conferindoSessao = true;
+  sessaoApi.atual().then(
+    (escopo) => {
+      conferindoSessao = false;
+      // O cookie mudou de conta (outra aba entrou, importou ou trocou): esta aba recomeça na conta nova.
+      if (estado.sessao && (escopo.tenantId !== estado.sessao.tenantId || escopo.pessoaId !== estado.sessao.pessoaId)) window.location.reload();
+    },
+    (e: unknown) => {
+      conferindoSessao = false;
+      if (e instanceof ErroApi && e.status === 401) window.location.reload();
+    },
+  );
 }
 
 /**
@@ -1854,21 +2033,79 @@ async function boot(): Promise<void> {
     url.searchParams.delete("entrar");
     window.history.replaceState(null, "", url.pathname + url.search + url.hash);
   }
+  // NOD-345: a volta do Google para conta (`/?conta=convertida|escolher|recusado|entrou`) e o link de recuperação
+  // (`/#redefinir=<token>`). Os dois saem da URL na hora; o token não fica no histórico.
+  const voltaDaConta = url.searchParams.get("conta");
+  const saiu = url.searchParams.get("saiu") === "1";
+  if (voltaDaConta !== null || saiu) {
+    url.searchParams.delete("conta");
+    url.searchParams.delete("saiu");
+    window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+  }
+  const tokenRedefinir = /^#redefinir=([A-Za-z0-9_-]{20,100})$/.exec(window.location.hash)?.[1] ?? null;
+  if (window.location.hash.startsWith("#redefinir=")) window.history.replaceState(null, "", url.pathname + url.search);
+  if (tokenRedefinir || window.location.hash.startsWith("#redefinir=")) {
+    entrada = { ...entrada, redefinir: tokenRedefinir ? { token: tokenRedefinir, erro: null, vencido: false, ocupado: false } : { token: "", erro: null, vencido: true, ocupado: false } };
+    render();
+    entrada = { ...entrada, modo: await sessaoApi.modo().catch(() => null) };
+    return render();
+  }
   try {
     await iniciarSessao(await sessaoApi.atual());
     abrirCodigoDeMaquinaGuardado();
     abrirVoltaDaNuvemGuardada();
+    await lerContas(voltaDaConta);
   } catch (e) {
     if (e instanceof ErroApi && e.status === 401) {
       render();
       try {
-        entrada = { ...entrada, modo: await sessaoApi.modo() };
+        const modo = await sessaoApi.modo();
+        entrada = { ...entrada, modo };
+        // NOD-345: com o espaço provisório ligado, a primeira visita chega à conversa sem cadastro: o verificador desta
+        // instalação (localStorage) pede o espaço e volta ao mesmo espaço depois. Fora isso, a tela de entrada de antes.
+        // No app, o espaço provisório vem pelo processo principal (com a chave de máquina); aqui seria um espaço só da
+        // tela, sem executor. Sessão do app que caiu volta à tela de entrar.
+        if (!saiu && modo.contas?.bootstrap && window.nodDesktop === undefined && (await provisorioDaWeb())) {
+          await iniciarSessao(await sessaoApi.atual());
+          await lerContas(voltaDaConta);
+          return;
+        }
         render();
       } catch (e2) {
         mostrarErroDoBoot(e2);
       }
     } else mostrarErroDoBoot(e);
   }
+}
+
+/** NOD-345: o verificador desta instalação na web (aleatório, guardado; perder = um espaço novo, o antigo fica). */
+const CHAVE_VERIFICADOR = "nod-instalacao";
+async function provisorioDaWeb(): Promise<boolean> {
+  let v: string | null = null;
+  try { v = window.localStorage.getItem(CHAVE_VERIFICADOR); } catch { /* sem storage: um verificador por visita */ }
+  if (!v || !/^[A-Za-z0-9_-]{32,128}$/.test(v)) {
+    const b = crypto.getRandomValues(new Uint8Array(32));
+    v = btoa(String.fromCharCode(...b)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    try { window.localStorage.setItem(CHAVE_VERIFICADOR, v); } catch { /* idem */ }
+  }
+  try {
+    await contaApi.provisorioWeb(v);
+    return true;
+  } catch (e) {
+    // Muitos espaços novos da mesma rede (NAT de escritório, CGNAT): a tela de entrada diz por quê, em vez de só aparecer.
+    if (e instanceof ErroApi && e.status === 429) entrada = { ...entrada, conta: { etapa: "entrar", enviadoPara: null, ocupado: false, ...entrada.conta, erro: LIMITE_PROVISORIO } };
+    return false;
+  }
+}
+const LIMITE_PROVISORIO = "Muitos espaços novos foram abertos desta rede agora. Entre com uma conta ou tente de novo em alguns minutos.";
+
+/** NOD-345: com sessão, o que as contas dizem (o menu, o lembrete, o cartão que ficou aberto, a volta do Google). */
+async function lerContas(volta: string | null): Promise<void> {
+  const modo = entrada.modo ?? (await sessaoApi.modo().catch(() => null));
+  contas = modo?.contas ?? null;
+  if (!contas) return;
+  if (volta) await telaConta.aoVoltarDoGoogle(volta);
+  else await telaConta.retomar();
 }
 
 /** Revisão NOD-215: sem sessão, a falha de rede do boot fica no "Reconectando…" e a página recarrega quando o nod voltar. */
@@ -2810,6 +3047,19 @@ const timersCopiarCodigo = new WeakMap<HTMLElement, number>();
 
 const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   ...telaOnboarding.acoes,
+  ...telaConta.acoes,
+  "conta-abrir": (el) => { try { marcarFalou(window.localStorage); } catch { /* sem storage */ } return telaConta.acoes["conta-abrir"]?.(el); },
+  "entrada-ir": (el) => { entrada = { ...entrada, conta: { etapa: el.dataset.etapa === "recuperar" ? "recuperar" : "entrar", erro: null, enviadoPara: null, ocupado: false }, redefinir: null }; render(); },
+  // NOD-345: "Mostrar" a senha troca o tipo do campo ali mesmo (o valor nunca sai do DOM).
+  "conta-mostrar": (el) => {
+    const input = el.parentElement?.querySelector<HTMLInputElement>("input");
+    if (!input) return;
+    const mostrar = input.type === "password";
+    input.type = mostrar ? "text" : "password";
+    el.textContent = mostrar ? "Esconder" : "Mostrar";
+    el.setAttribute("aria-pressed", String(mostrar));
+  },
+  "conta-lembrete-ok": () => { try { marcarFalou(window.localStorage); } catch { /* sem storage */ } render(); },
   "abrir-raio-x": (el) => {
     const t = estado.tela;
     const nome = t.tipo === "conversa" ? botGerido(t.agenteId)?.nome ?? "agente" : "sala";
@@ -2927,7 +3177,7 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     else if (tela === "gestao") abrirEspaco("agentes");
     else if (tela === "espaco") abrirEspaco("conexao");
   },
-  "menu-conta": (el) => abrirMenuConta(el, dadosMenuConta(), { secao: abrirEspaco, modoDev: async () => { await agir(alternarModoDev); return estado.modoDev.ligado; }, experimento: async (chave) => { await agir(() => alternarExperimento(chave)); return estado.experimentos[chave]; }, onboarding: () => void telaOnboarding.deNovo() }),
+  "menu-conta": (el) => abrirMenuConta(el, dadosMenuConta(), { secao: abrirEspaco, modoDev: async () => { await agir(alternarModoDev); return estado.modoDev.ligado; }, experimento: async (chave) => { await agir(() => alternarExperimento(chave)); return estado.experimentos[chave]; }, onboarding: () => void telaOnboarding.deNovo(), conta: (qual) => void abrirDoMenuConta(qual) }),
   "secao-espaco": (el) => abrirEspaco((el.dataset.secao as SecaoEspaco | undefined) ?? "conexao"),
   // definido em 2026-10-05 (ia-fora.ts): os botões do aviso "a conta da IA não serve". Só existem dentro do app do Mac;
   // o login abre no navegador e o app percebe sozinho quando termina (testa a conta nova e reanuncia).
@@ -3796,6 +4046,10 @@ const FORMS: Record<string, (form: HTMLFormElement) => Promise<void>> = {
     if (ehIa(ia)) await contasDoMac.adicionar(ia, String(new FormData(form).get("apelido") ?? ""));
   },
   "onboarding-bot": async (form) => { await telaOnboarding.forms["onboarding-bot"]?.(form); },
+  ...telaConta.forms,
+  "entrada-conta": (form) => entrarPelaTela(form),
+  "entrada-recuperar": (form) => recuperarPelaTela(form),
+  "entrada-redefinir": (form) => redefinirPelaTela(form),
   // O teclado da ligação: o texto entra como uma vez da pessoa, sem passar pelo STT.
   "ligacao-texto": async (form) => {
     const campo = form.elements.namedItem("texto") as HTMLInputElement | null;
@@ -4602,6 +4856,8 @@ function dadosMenuConta(): DadosMenuConta {
     banco: banco ? { texto: banco, regime: ambienteBanco?.regime ?? "desconhecido" } : null,
     // #219: com o disco quase cheio, o menu diz o disco (é o que pede a mão da pessoa).
     // Revisto em 2026-10-09 (a tela fala por máquina): só a leitura do Mac — a VM ocupada não diz "Ocupado" em Este Mac.
+    // NOD-345: com contas no servidor, o topo do menu é a conta (ou o convite, no espaço provisório).
+    ...(contas && contaAtual ? { conta: { email: contaAtual.conta?.email ?? contaAtual.legado?.email ?? null, senha: contaAtual.conta?.senha ?? false, legado: !contaAtual.conta && !!contaAtual.legado } } : {}),
     esteMac: ((m) => (m.motivoEspera === "disco" ? "Disco quase cheio" : m.motivoEspera ? "Ocupado" : (USOS.find((u) => u.id === estado.usoDoMac)?.nome ?? "")))(leituraDoMac(estado.trabalhos)),
   };
 }

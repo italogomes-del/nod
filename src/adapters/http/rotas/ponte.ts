@@ -73,6 +73,8 @@ export function criarPonteHttpServidor(d: {
   autorizar(token: string): Promise<(Escopo & { chaveId: string }) | null>;
   segredo: string;
   seguro: boolean;
+  /** NOD-345: com NOD_CONTAS, o cookie do app leva o id de uma sessão revogável "maquina" (uma por chave). */
+  sessaoDaMaquina?(escopo: Escopo, chaveId: string): Promise<string>;
   agora(): number;
   delta(plano: PlanoTurno, texto: string): void;
   ferramenta(plano: PlanoTurno, nome: string): void;
@@ -210,7 +212,8 @@ export function criarPonteHttpServidor(d: {
   }
   const rotas = [
     rota("sessao", async (ctx) => {
-      ctx.res.setHeader("set-cookie", cabecalhoCookieSessao(ctx.escopo, d.segredo, d.seguro));
+      const sid = d.sessaoDaMaquina ? await d.sessaoDaMaquina(ctx.escopo, ctx.params.chaveId!) : undefined;
+      ctx.res.setHeader("set-cookie", cabecalhoCookieSessao(ctx.escopo, d.segredo, d.seguro, undefined, sid));
       // NOD-94: o papel da chave vai junto — a máquina só-computador não sobe o laço de turnos.
       const papel = (await d.papelDaChave?.(ctx.escopo, ctx.params.chaveId!)) ?? "motor";
       ctx.json(200, { escopo: ctx.escopo, machineId: ctx.params.chaveId, papel });

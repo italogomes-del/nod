@@ -19,6 +19,11 @@ export interface Ctx {
   params: Record<string, string>;
   corpo(): Promise<unknown>;
   json(status: number, body: unknown): void;
+  /**
+   * NOD-345: a sessão do cookie deste pedido ainda vale para o mesmo escopo? Para conexões longas (SSE) reconferirem: a
+   * sessão revogada (sair, sair das outras, senha nova) derruba o canal aberto. Ausente = pedido sem sessão de cookie.
+   */
+  sessaoAindaVale?(): Promise<boolean>;
 }
 
 export type CtxPublico = Omit<Ctx, "escopo"> & { escopo: Escopo | null };
@@ -36,7 +41,8 @@ export interface IdentidadeDeTurno extends Escopo {
 }
 
 export interface DepsRoteador {
-  resolverEscopo(req: IncomingMessage): Escopo | null;
+  /** NOD-345: assíncrono quando a sessão é revogável (NOD_CONTAS confere o sid no banco). */
+  resolverEscopo(req: IncomingMessage): Escopo | null | Promise<Escopo | null>;
   /** revisto em 2026-10-12 (NOD-214): pode ir ao banco (o token de um turno adotado depois de um reinício). */
   autorizarTokenTurno?(token: string): IdentidadeDeTurno | null | Promise<IdentidadeDeTurno | null>;
   autorizarMaquina?(token: string): Promise<(Escopo & { chaveId: string }) | null>;
@@ -135,7 +141,7 @@ export function criarRoteador(rotas: Rota[], deps: DepsRoteador): (req: Incoming
 
     const escopado = PREFIXO_TENANT.exec(caminho);
     if (escopado) {
-      const escopo = deps.resolverEscopo(req);
+      const escopo = await deps.resolverEscopo(req);
       if (!escopo) {
         json(res, 401, { codigo: "nao_permitido", mensagem: "Sua sessão terminou. Entre de novo para continuar." });
         return;
@@ -149,7 +155,13 @@ export function criarRoteador(rotas: Rota[], deps: DepsRoteador): (req: Incoming
         json(res, 404, { codigo: "nao_encontrado", mensagem: "rota não encontrada" });
         return;
       }
-      await (achado.rota.handler as (c: CtxPublico) => Promise<void>)(montarCtx(req, res, escopo, achado.params));
+      const ctx = montarCtx(req, res, escopo, achado.params);
+      ctx.sessaoAindaVale = async () => {
+        // Erro ao conferir não fecha o canal (o próximo ping confere de novo): só a resposta "não vale" fecha.
+        const agora = await Promise.resolve(deps.resolverEscopo(req)).catch(() => escopo);
+        return agora !== null && agora.tenantId === escopo.tenantId && agora.pessoaId === escopo.pessoaId;
+      };
+      await (achado.rota.handler as (c: CtxPublico) => Promise<void>)(ctx);
       return;
     }
 
@@ -157,7 +169,7 @@ export function criarRoteador(rotas: Rota[], deps: DepsRoteador): (req: Incoming
     if (publico) {
       const achado = casar(rotas, metodo, publico[1] ?? "/", (r) => r.publica === true);
       if (achado) {
-        await achado.rota.handler(montarCtx(req, res, deps.resolverEscopo(req), achado.params) as Ctx);
+        await achado.rota.handler(montarCtx(req, res, await deps.resolverEscopo(req), achado.params) as Ctx);
         return;
       }
       json(res, 404, { codigo: "nao_encontrado", mensagem: "rota não encontrada" });

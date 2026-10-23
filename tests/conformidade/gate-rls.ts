@@ -18,6 +18,18 @@ export const EXCECOES: Record<string, string> = {
   pessoas: "catálogo de identidade sem dado pessoal; lido para enumerar donos dos laços de fundo",
   dominios_admitidos:
     "lista de domínios do login (0052), sem dado de pessoa; nod_app não tem privilégio nenhum nela (tests/conformidade/admissao-por-dominio.test.ts): só nod_dono escreve e só a função nod_admitir_pessoa lê",
+  // NOD-345 (ADR-124 §1): a conta é identidade GLOBAL, acima dos tenants, e é lida ANTES de existir escopo (entrar,
+  // resolver o cookie). Os privilégios exatos do nod_app em cada uma são conferidos em tests/conformidade/contas.test.ts.
+  contas: "identidade global de acesso (0109, ADR-124 §1), lida antes de existir escopo; nod_app só SELECT/INSERT",
+  identidades_conta: "formas de entrar de uma conta (0109): google iss+sub e hash Argon2id; lida no login, sem escopo; nod_app sem DELETE",
+  conta_pessoas: "vínculo conta → pessoa de cada tenant (0109): é ele que diz em que escopo a conta entra; nod_app só SELECT/INSERT",
+  sessoes: "sessão revogável (0109, ADR-124 §4): resolvida pelo sid do cookie antes de existir escopo; nod_app sem DELETE",
+  sessoes_corte: "corte dos cookies antigos sem sid (0109): consultado ao resolver o cookie, antes do escopo",
+  codigos_conta: "códigos e tokens de uso único só em hash (0109): verificados antes de existir escopo (recuperar senha)",
+  entradas_conta: "escolha pendente entre dois espaços (0109): liga a sessão de origem à pessoa de destino, de tenants diferentes",
+  pareamentos_conta: "conectar outro computador (0109): o código é digitado num computador que ainda não está no escopo da pessoa",
+  bootstrap_instalacoes: "instalação que criou um espaço provisório (0109): consultada no bootstrap público, antes do escopo",
+  limites_conta: "contadores de limite contra abuso (0109), por HMAC de IP/e-mail, sem dado de pessoa",
 };
 
 /**

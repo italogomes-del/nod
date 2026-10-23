@@ -4,7 +4,7 @@ import { spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { createWriteStream, existsSync } from "node:fs";
 import { readFile, writeFile, mkdir, rename, stat } from "node:fs/promises";
-import { homedir, hostname, tmpdir } from "node:os";
+import { homedir, hostname, tmpdir, userInfo } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { criarClaudeCliDriver } from "../src/adapters/executor/drivers/claude-cli.ts";
@@ -49,6 +49,7 @@ import { focarJanela, LARGURA_MINIMA, lerEstadoJanela, medirEstadoJanela, resolv
 import { estadoDoMicrofone, lerEmLigacao, permitirChecagemDeMidia, permitirPedidoDeMidia, TEXTO_FECHAR_EM_LIGACAO } from "./permissoes-midia.ts";
 import type { EstadoMicrofone } from "../src/contracts/desktop.ts";
 import { criarDetectorGh, executarGithubNaMaquina } from "../src/adapters/conectores-locais/github/maquina.ts";
+import { pedirProvisorio, segredoDeTroca, servidorOfereceProvisorio, trocarChaveDoApp, verificadorNovo, verificadorValido } from "./conta-provisoria.ts";
 import { FalhaPareamento, parearPeloNavegador } from "./parear.ts";
 import { IDIOMA_DO_APP, templateDoMenu } from "./menu.ts";
 import { criarArquivoDeLog, escreverDiagnostico, instalarOuvintesDeQueda, lerCaudaDoLog, MAX_BYTES_LOG } from "./diagnostico.ts";
@@ -291,6 +292,35 @@ async function guardar(c: Config) {
   const tmp = `${caminhoConfig()}.tmp`;
   await writeFile(tmp, safeStorage.encryptString(JSON.stringify(c)), { mode: 0o600 });
   await rename(tmp, caminhoConfig());
+}
+/**
+ * NOD-345 (ADR-124): o verificador desta instalação, cifrado como a conexão e guardado à parte (sobrevive a desconectar):
+ * é ele que devolve o mesmo espaço provisório. Sem o safeStorage, nada de provisório (a tela de conexão de antes).
+ */
+async function verificadorDaInstalacao(): Promise<string | null> {
+  if (!safeStorage.isEncryptionAvailable()) return null;
+  const arquivo = join(app.getPath("userData"), "instalacao.enc");
+  try {
+    const v = safeStorage.decryptString(await readFile(arquivo));
+    if (verificadorValido(v)) return v;
+  } catch { /* primeira abertura */ }
+  const novo = verificadorNovo();
+  await mkdir(app.getPath("userData"), { recursive: true });
+  await writeFile(`${arquivo}.tmp`, safeStorage.encryptString(novo), { mode: 0o600 });
+  await rename(`${arquivo}.tmp`, arquivo);
+  return novo;
+}
+/** Primeira abertura sem chave: o espaço provisório, se o servidor padrão oferece. null = segue a tela de conexão. */
+async function configProvisoria(): Promise<Config | null> {
+  if (!SERVIDOR_PADRAO) return null;
+  const url = urlServidor(SERVIDOR_PADRAO, !app.isPackaged);
+  if (!(await servidorOfereceProvisorio(url))) return null;
+  const verificador = await verificadorDaInstalacao().catch(() => null);
+  if (!verificador) return null;
+  const chave = await pedirProvisorio({ servidor: url, verificador, nome: userInfo().username, versao: app.getVersion() });
+  if (!chave) return null;
+  log("info", "espaco_provisorio_no_app", {});
+  return { url, chave };
 }
 async function ler(): Promise<Config | null> {
   try {
@@ -1268,7 +1298,24 @@ else {
       finally { conectando = false; }
       return { mensagem };
     });
-    configuracao = await ler();
+    // NOD-345: a troca de espaço depois de entrar numa conta pela janela do app (o código é de uso único). A página só
+    // vê o desafio; a prova fica aqui.
+    const troca = segredoDeTroca();
+    ipcMain.handle(CANAIS_DESKTOP.desafioConta, (e): string => {
+      validarRemetenteWeb(e);
+      return troca.desafio;
+    });
+    ipcMain.handle(CANAIS_DESKTOP.trocarConta, async (e, codigo: unknown): Promise<boolean> => {
+      validarRemetenteWeb(e);
+      if (!configuracao || conectando) return false;
+      const chave = await trocarChaveDoApp({ servidor: configuracao.url, codigo, prova: troca.prova });
+      if (!chave) return false;
+      conectando = true;
+      try { await conectar({ url: configuracao.url, chave }); return true; }
+      catch (erro) { mensagem = erro instanceof FalhaPonte ? mensagens[erro.codigo]! : "Conecte novamente para continuar."; await mostrarSetup(); return false; }
+      finally { conectando = false; }
+    });
+    configuracao = await ler() ?? await configProvisoria().catch(() => null);
     await mostrarSetup();
     if (configuracao) {
       conectando = true;
