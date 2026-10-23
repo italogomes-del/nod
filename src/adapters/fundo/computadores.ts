@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import type { AcaoComputador, Computador, ComputadorDto, DriverComputador, ResultadoComputador } from "../../contracts/computador.ts";
+import type { AcaoComputador, Computador, ComputadorDto, DriverComputador, OrigemControle, ResultadoComputador } from "../../contracts/computador.ts";
 import { FERRAMENTAS_COMPUTADOR } from "../../contracts/ferramentas-computador.ts";
 import type { MotivoFalhaComputador } from "../../contracts/motivos.ts";
 import type { PlanoTurno } from "../../contracts/plano-turno.ts";
@@ -162,6 +162,18 @@ export function criarComputadores(o: Opcoes) {
     if (m) await d.repos.events.gravarComOutbox([evento(d.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: conversa.id, turnoId: null, dados: { mensagem_id: m.id, kind: "sistema" } })]);
   }
 
+  /** NOD-97: a linha cinza "Você fechou a tela…" na conversa própria do bot, no padrão do aviso de fora do ar. */
+  async function avisarTelaFechada(d: Deps, c: Computador): Promise<void> {
+    const agente = await d.repos.agentes.buscar(c.agenteId);
+    const conversa = agente ? await d.repos.conversas.buscarPropriaDoAgente(agente.id) : null;
+    if (!agente || !conversa) return;
+    const agora = d.agora();
+    const autoria = autoriaAgente({ agenteId: agente.id, contaDeExecucao: d.escopo.pessoaId, executor: o.executor(), decididoPor: "regra:tela_fechada" });
+    const texto = redigir("computador-tela-fechada", agora, { agente: agente.nome });
+    const m = await d.repos.mensagens.criar({ conversaId: conversa.id, turnoId: null, autoria, kind: "sistema", texto, payload: { kind: "computador_tela_fechada", agenteId: agente.id }, confianca: "confiavel" });
+    if (m) await d.repos.events.gravarComOutbox([evento(d.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: conversa.id, turnoId: null, dados: { mensagem_id: m.id, kind: "sistema" } })]);
+  }
+
   /**
    * A saúde anda com o registro da ação, na MESMA transação e com a linha travada. Só a máquina sem
    * responder conta (CONTA_PARA_SAUDE); qualquer resposta dela zera a sequência. Computador desligado
@@ -279,12 +291,22 @@ export function criarComputadores(o: Opcoes) {
       if (!c) return { computador: computadorPadrao(agenteId), ativo: false, atividade: [], ...await o.driver.ambiente() };
       return { ...c, ...await o.driver.estado(c.computador.id) };
     },
-    async configurar(escopo: Escopo, agenteId: string, operacao: string): Promise<void> {
+    /**
+     * revisto em 2026-10-22 (NOD-97, parte 3): `origem` diz de onde veio a troca (ORIGENS_CONTROLE; sem ela, "botao").
+     * `devolver` com `fechou_tela` é o fetch keepalive da web ao fechar a tela no controle: vira no-op (sem registro,
+     * sem linha no chat) com pedido de ajuda aberto, com o controle já do bot ou com o computador desligado — o
+     * close e o pagehide mandam a mesma chamada duas vezes. Ele não espera a reserva (`livre`): é a última chance de
+     * devolver, e a ação da pessoa em curso só termina. Devolvido, grava a linha cinza no chat e a máquina volta a
+     * poder dormir (`ociosos()` só olha controle = 'bot').
+     */
+    async configurar(escopo: Escopo, agenteId: string, operacao: string, origem: OrigemControle = "botao"): Promise<void> {
       const operacaoId = randomUUID();
       let registroId: string | undefined;
+      const fechouTela = operacao === "devolver" && origem === "fechou_tela";
       const c = await o.dentro(escopo, async (d) => {
         const c = await obter(d, agenteId);
-        if (operacao !== "parar") livre(c, d.agora());
+        if (fechouTela && (c.ajudaDecisaoId !== null || c.controle === "bot" || !c.habilitado)) return null;
+        if (operacao !== "parar" && !fechouTela) livre(c, d.agora());
         if (operacao === "assumir") await d.repos.computadores.configurar(c.id, { controle: "pessoa", atividadeEm: d.agora() });
         else if (operacao === "devolver") {
           await d.repos.computadores.configurar(c.id, { controle: "bot", ajuda: null, ajudaDecisaoId: null, atividadeEm: d.agora() });
@@ -303,8 +325,10 @@ export function criarComputadores(o: Opcoes) {
         else throw new ErroDeDominio("entrada_invalida");
         if (operacao === "iniciar") await d.repos.computadores.ocupar(c.id, operacaoId, d.agora() + LEASE_MS);
         registroId = (await d.repos.computadores.registrar({ computadorId: c.id, autor: "pessoa", tipo: operacao, estado: operacao === "iniciar" || operacao === "parar" ? "executando" : "concluida" })).id;
+        if (fechouTela) await avisarTelaFechada(d, c);
         return c;
       });
+      if (!c) return;
       // NOD-161: a tela mudou fora do bot; a próxima observação do turno vai completa.
       if (operacao === "assumir" || operacao === "devolver" || operacao === "parar") esquecerComputador(c.id);
       let sucesso = false;

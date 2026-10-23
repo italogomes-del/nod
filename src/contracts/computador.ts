@@ -3,6 +3,13 @@ import type { MotivoFalhaComputador } from "./motivos.ts";
 
 export type ControleComputador = "bot" | "pessoa" | "aguardando_pessoa";
 export type PoliticaComputador = "supervisionado" | "autonomo";
+/**
+ * definido em 2026-10-22 (NOD-97, parte 3): de onde veio a troca de controle. `botao`: os botões (padrão, como antes);
+ * `clique`: o primeiro clique ou tecla na tela em Assistindo; `fechou_tela`: a pessoa fechou a tela no controle
+ * (fetch keepalive da web), que devolve ao bot — menos no pedido de ajuda.
+ */
+export const ORIGENS_CONTROLE = ["botao", "clique", "fechou_tela"] as const;
+export type OrigemControle = typeof ORIGENS_CONTROLE[number];
 export type Computador = {
   id: string;
   agenteId: string;

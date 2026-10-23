@@ -39,6 +39,7 @@ const CASOS: readonly { nome: string; kind: KindMensagem; payload: PayloadMensag
   { nome: "conta escolhida", kind: "sistema", payload: { kind: "conta_escolhida", contaId: "c", apelido: "C", ia: "claude-cli" }, assunto: "conta.escolhida" },
   { nome: "pedido na fila da cota", kind: "sistema", payload: { kind: "pedido_na_fila_da_cota", turnoId: "t", agenteId: "a", ia: "claude-cli", voltaEm: null }, assunto: "cota.pedido_na_fila" },
   { nome: "computador fora", kind: "sistema", payload: { kind: "computador_fora_do_ar", agenteId: "a", desde: 1, motivo: "sem_resposta" }, assunto: "computador.fora_do_ar" },
+  { nome: "tela fechada", kind: "sistema", payload: { kind: "computador_tela_fechada", agenteId: "a" }, assunto: "computador.tela_fechada" },
   { nome: "artefato", kind: "artefato", payload: { kind: "artefato", artefatoId: "x", versao: 1, titulo: "t" }, assunto: "artefato" },
   { nome: "ligação", kind: "sistema", payload: { kind: "ligacao", ligacaoId: "l", duracaoMs: null, estado: "encerrada" }, assunto: "ligacao" },
   { nome: "trabalho aberto", kind: "sistema", payload: { kind: "trabalho_aberto", trabalhoId: "t", titulo: "x", origem: "pessoa" }, assunto: "trabalho.aberto" },

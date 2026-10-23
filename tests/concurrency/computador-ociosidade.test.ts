@@ -118,6 +118,72 @@ describeIntegracao("computador ocioso desliga sozinho; o teto do host é neutro 
     expect(chamadas).toEqual([`parar ${c.id}`]);
   });
 
+  it("NOD-97: fechar a tela no controle devolve ao bot, grava a linha cinza uma vez e a máquina volta a poder dormir", async () => {
+    const c = await linha();
+    const linhas = () => srv.app.dentro(srv.pessoa, async (d) => (await d.repos.mensagens.listarDaConversa(bot.conversa.id, 200)).filter((m) => m.payload?.kind === "computador_tela_fechada"));
+    const fechar = () => srv.chamar("POST", `agentes/${bot.agente.id}/computador`, { operacao: "devolver", origem: "fechou_tela" });
+    expect((await srv.chamar("POST", `agentes/${bot.agente.id}/computador`, { operacao: "assumir", origem: "clique" })).status).toBe(200);
+    expect((await linha()).controle).toBe("pessoa");
+    await envelhecer(c.id, 20);
+    // No controle da pessoa a máquina não dorme (era o "acordada para sempre" de antes da NOD-97).
+    expect(await computadores().desligarOciosos(srv.pessoa, await computadores().ligados(), QUINZE_MIN)).toBe(0);
+    // Com uma ação da pessoa em curso, o keepalive devolve do mesmo jeito (é a última chance).
+    await mudar(c.id, { ocupadoAte: new Date(Date.now() + 60_000) });
+    expect((await fechar()).status).toBe(200);
+    await mudar(c.id, { ocupadoAte: null });
+    expect(await linha()).toMatchObject({ controle: "bot", ajudaDecisaoId: null });
+    const [aviso, ...resto] = await linhas();
+    expect(resto).toEqual([]);
+    expect(aviso).toMatchObject({ kind: "sistema", confianca: "confiavel", texto: `Você fechou a tela. ${bot.agente.nome} voltou a usar o computador do bot.`, payload: { kind: "computador_tela_fechada", agenteId: bot.agente.id } });
+    // O close e o pagehide mandam a mesma chamada: a 2ª é no-op, sem outra linha.
+    expect((await fechar()).status).toBe(200);
+    expect(await linhas()).toHaveLength(1);
+    await envelhecer(c.id, 20);
+    expect(await computadores().desligarOciosos(srv.pessoa, await computadores().ligados(), QUINZE_MIN)).toBe(1);
+    // origem fora do enum é entrada inválida.
+    expect((await srv.chamar("POST", `agentes/${bot.agente.id}/computador`, { operacao: "devolver", origem: "outra" })).status).toBe(400);
+  });
+
+  it("NOD-97: com pedido de ajuda aberto, fechar a tela não devolve nem grava linha", async () => {
+    const c = await linha();
+    const decisaoId = randomUUID();
+    const linhas = () => srv.app.dentro(srv.pessoa, async (d) => (await d.repos.mensagens.listarDaConversa(bot.conversa.id, 200)).filter((m) => m.payload?.kind === "computador_tela_fechada"));
+    const antes = (await linhas()).length;
+    await srv.app.dentro(srv.pessoa, (d) => d.tx(async (trx) => { await trx`update computadores set controle = 'aguardando_pessoa', ajuda = 'Entre no Gmail', ajuda_decisao_id = ${decisaoId} where id = ${c.id}`; }));
+    expect((await srv.chamar("POST", `agentes/${bot.agente.id}/computador`, { operacao: "assumir" })).status).toBe(200);
+    expect((await srv.chamar("POST", `agentes/${bot.agente.id}/computador`, { operacao: "devolver", origem: "fechou_tela" })).status).toBe(200);
+    expect(await linha()).toMatchObject({ controle: "pessoa", ajudaDecisaoId: decisaoId });
+    expect(await linhas()).toHaveLength(antes);
+    await srv.app.dentro(srv.pessoa, (d) => d.tx(async (trx) => { await trx`update computadores set ajuda = null, ajuda_decisao_id = null where id = ${c.id}`; }));
+  });
+
+  it("NOD-97: com o computador desligado (Parar), fechar a tela é no-op: não devolve nem grava linha", async () => {
+    const c = await linha();
+    const linhas = () => srv.app.dentro(srv.pessoa, async (d) => (await d.repos.mensagens.listarDaConversa(bot.conversa.id, 200)).filter((m) => m.payload?.kind === "computador_tela_fechada"));
+    const antes = (await linhas()).length;
+    expect((await configurar("parar")).status).toBe(200);
+    expect(await linha()).toMatchObject({ habilitado: false, controle: "pessoa" });
+    expect((await srv.chamar("POST", `agentes/${bot.agente.id}/computador`, { operacao: "devolver", origem: "fechou_tela" })).status).toBe(200);
+    expect(await linha()).toMatchObject({ habilitado: false, controle: "pessoa" });
+    expect(await linhas()).toHaveLength(antes);
+    expect(chamadas).toEqual([`parar ${c.id}`]);
+  });
+
+  // Regression: só `devolver` com `fechou_tela` é o atalho do keepalive; `assumir` com essa origem segue a regra
+  // comum (espera a reserva, assume e não grava a linha cinza). Found by /qa (mutante) on 2026-10-22.
+  it("NOD-97: assumir com origem fechou_tela não vira o atalho do keepalive", async () => {
+    const c = await linha();
+    const linhas = () => srv.app.dentro(srv.pessoa, async (d) => (await d.repos.mensagens.listarDaConversa(bot.conversa.id, 200)).filter((m) => m.payload?.kind === "computador_tela_fechada"));
+    const antes = (await linhas()).length;
+    const assumir = () => srv.chamar("POST", `agentes/${bot.agente.id}/computador`, { operacao: "assumir", origem: "fechou_tela" });
+    await mudar(c.id, { ocupadoAte: new Date(Date.now() + 60_000) });
+    expect((await assumir()).status).toBe(409);
+    await mudar(c.id, { ocupadoAte: null });
+    expect((await assumir()).status).toBe(200);
+    expect((await linha()).controle).toBe("pessoa");
+    expect(await linhas()).toHaveLength(antes);
+  });
+
   // Regression: ISSUE-001 — computador fora do ar e ligado nunca desligava: a ação do bot não vai ao Docker e
   // nada mais o para, então segurava 2 GiB e uma vaga do teto para sempre (3 deles travavam o host no limite).
   // Found by /qa on 2026-10-05
