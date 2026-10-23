@@ -1,6 +1,7 @@
 import type { ChaveEmitidaDto } from "../contracts/api.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { cunharChaveMaquina } from "../services/token-maquina.ts";
+import { removerMaquina } from "./interromper-por-maquina.ts";
 import type { CasoDeUso } from "./tipos.ts";
 
 /** definido em 2026-09-16: nome para a pessoa reconhecer o computador na lista ("MacBook do trabalho"). */
@@ -20,9 +21,13 @@ export const emitirChaveMaquina: CasoDeUso<{ nome: unknown }, ChaveEmitidaDto> =
   return { data: { chave: cunhada.chave, dados } };
 };
 
-/** Revoga uma chave da própria pessoa. A de outra pessoa é indistinguível de inexistente (404). */
+/**
+ * Revoga uma chave da própria pessoa. A de outra pessoa é indistinguível de inexistente (404).
+ * NOD-293 A7: o aviso "sem contato" em curso daquela máquina sai junto, na mesma trava do varredor (removerMaquina); os
+ * turnos que ela rodava o varredor de lease assenta como `maquina_removida`, sem aviso novo.
+ */
 export const revogarChaveMaquina: CasoDeUso<{ id: string }, { ok: true }> = async (deps, input) => {
-  const revogou = await deps.repos.maquinaTokens.revogar(input.id, deps.agora());
+  const { revogou } = await removerMaquina(deps, input.id);
   if (!revogou) throw new ErroDeDominio("nao_encontrado", { cause: "chave de máquina" });
   return { data: { ok: true } };
 };

@@ -38,6 +38,7 @@ import type { Conector } from "../../contracts/conector.ts";
 import { COMANDO_GITHUB_NATIVO } from "../../contracts/github.ts";
 import { executarGithubNaMaquina } from "../conectores-locais/github/maquina.ts";
 import { concluirItemNaMaquina, itensParaAMaquina } from "../../use-cases/itens-na-maquina.ts";
+import { removerMaquina } from "../../use-cases/interromper-por-maquina.ts";
 import { repetirBarradosPorIa } from "../../use-cases/repetir-barrados-por-ia.ts";
 import { configGithubNativo, criarDetectorGh, sondaGithubNativa, type DetectorGh } from "../conectores-locais/github/nativo.ts";
 import { criarSubidaComposio } from "../integracoes/arquivo-composio.ts";
@@ -715,8 +716,9 @@ export function comporApp(o: OpcoesCompor): App {
       saiu: async (escopo: Escopo, chaveId: string, impressoes: string[], desconectada: boolean) => {
         await dentro(escopo, async (d) => {
           await d.repos.contasIa.saiu(chaveId, impressoes);
-          // "Desconectar com sair das contas": a máquina confirmou — agora a chave dela é revogada.
-          if (desconectada && logins.concluirDesconexao(escopo, chaveId)) await d.repos.maquinaTokens.revogar(chaveId, d.agora());
+          // "Desconectar com sair das contas": a máquina confirmou — agora a chave dela é revogada. Pelo removerMaquina (A7,
+          // QA): o aviso "sem contato" em curso dela sai dispensado, como no revogar da tela, e não fecha como "voltou".
+          if (desconectada && logins.concluirDesconexao(escopo, chaveId)) await removerMaquina(d, chaveId);
         });
         avisarContas(escopo, "saiu");
       },

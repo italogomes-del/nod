@@ -62,6 +62,32 @@ describeIntegracao("maquina_tokens: só a dona vê, acha e revoga (ADR-031)", ()
     });
   });
 
+  it("NOD-293 A8: 10 autorizações em 5 s gravam ultimo_uso_em uma vez só; passados 30 s grava de novo", async () => {
+    const dona = { tenantId: TENANT_PADRAO, pessoaId: randomUUID() };
+    await withRollback(dona, async (trx) => {
+      const repo = maquinaTokensRepo(trx, dona);
+      const c = cunharChaveMaquina(dona);
+      const criada = await repo.criar({ nome: "MacBook", prefixo: c.prefixo, hash: c.hash });
+      const id = criada?.id ?? "";
+      // Relógio fake: o que `autorizarChaveMaquina` faz a cada pedido da máquina (buscar viva + marcarUso), 10 vezes em 5 s.
+      const t0 = Date.parse("2026-10-20T12:00:00Z");
+      const gravou: unknown[] = [];
+      for (let i = 0; i < 10; i++) {
+        const agora = t0 + i * 500;
+        expect(await repo.buscarVivaPorHash(c.hash, agora)).toMatchObject({ id });
+        gravou.push(await repo.marcarUso(id, agora));
+      }
+      // Um UPDATE só: o valor gravado é o do primeiro uso, não o do último.
+      expect((await repo.listar())[0]?.ultimoUsoEm).toBe(t0);
+      expect(gravou.filter((g) => g === true)).toHaveLength(1);
+      // Exatamente 30 s depois ainda não grava; um ms depois, grava.
+      expect(await repo.marcarUso(id, t0 + 30_000)).toBe(false);
+      expect((await repo.listar())[0]?.ultimoUsoEm).toBe(t0);
+      expect(await repo.marcarUso(id, t0 + 30_001)).toBe(true);
+      expect((await repo.listar())[0]?.ultimoUsoEm).toBe(t0 + 30_001);
+    });
+  });
+
   it("hash único por tenant e com 32 bytes; nome vazio recusado pelo banco", async () => {
     const dona = { tenantId: TENANT_PADRAO, pessoaId: randomUUID() };
     await withRollback(dona, async (trx) => {

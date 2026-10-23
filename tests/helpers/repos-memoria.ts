@@ -7,6 +7,7 @@ import type { CatalogoDeComandos } from "../../src/contracts/comandos.ts";
 import type { UsoDoPlano } from "../../src/contracts/uso-do-plano.ts";
 import { ESTADO_MAX_BYTES_ARTEFATO, type Artefato, type EstadoArtefato, type VersaoArtefato } from "../../src/contracts/artefato.ts";
 import { randomUUID } from "node:crypto";
+import { MARCAR_USO_A_CADA_MS } from "../../src/repositories/maquina-tokens.repo.ts";
 import type { Agente } from "../../src/contracts/agente.ts";
 import type { PermissaoPermanente } from "../../src/contracts/permissao-permanente.ts";
 import type { Concessao, Procuracao } from "../../src/contracts/concessao.ts";
@@ -1605,6 +1606,12 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         t.leaseAte = null;
         return t;
       },
+      async reclassificarInterrupcao(id, de, para) {
+        const t = doTenant(b.turnos).find((x) => x.id === id && x.estado === "interrompido" && x.motivoInterrupcao === de);
+        if (!t) return null;
+        t.motivoInterrupcao = para;
+        return t;
+      },
       async delegacoesPendentesDoAgente(agenteId, limite = 20) {
         return doTenant(b.turnos).filter((t) => t.agenteId === agenteId && t.origem === "delegacao" && t.estado === "pendente").sort((x, y) => x.criadoEm - y.criadoEm || x.id.localeCompare(y.id)).slice(0, limite);
       },
@@ -2754,7 +2761,10 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       },
       async marcarUso(id, em) {
         const l = b.maquinaTokens.find((x) => x.tenantId === escopo.tenantId && x.ownerId === escopo.pessoaId && x.id === id);
-        if (l) l.ultimoUsoEm = em;
+        // Como o repo real (NOD-293 A8): grava no máximo a cada MARCAR_USO_A_CADA_MS.
+        if (!l || (l.ultimoUsoEm !== null && l.ultimoUsoEm >= em - MARCAR_USO_A_CADA_MS)) return false;
+        l.ultimoUsoEm = em;
+        return true;
       },
       async renomear(id, nome) {
         const l = b.maquinaTokens.find((x) => x.tenantId === escopo.tenantId && x.ownerId === escopo.pessoaId && x.id === id && x.revogadaEm === null);
@@ -2765,6 +2775,10 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async registrarPlataforma(id, plataforma) {
         const l = b.maquinaTokens.find((x) => x.tenantId === escopo.tenantId && x.ownerId === escopo.pessoaId && x.id === id);
         if (l) l.plataforma = plataforma;
+      },
+      async removida(id, em) {
+        const l = b.maquinaTokens.find((x) => x.tenantId === escopo.tenantId && x.ownerId === escopo.pessoaId && x.id === id);
+        return l !== undefined && (l.revogadaEm !== null || (l.expiraEm !== null && l.expiraEm <= em));
       },
       async identificar(id) {
         const l = b.maquinaTokens.find((x) => x.tenantId === escopo.tenantId && x.ownerId === escopo.pessoaId && x.id === id);

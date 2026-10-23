@@ -11,6 +11,8 @@ import { desdeQuando, horaMinuto, listaDeJanelas, quandoCurto, quandoVoltaNoFuso
 const MOTIVO_HUMANO: Readonly<Record<string, string>> = {
   maquina_sem_contato: "seu Mac parou de responder",
   reinicio_servidor: "o servidor reiniciou",
+  // NOD-293 A7: a pessoa revogou a chave da máquina com a execução rodando nela.
+  maquina_removida: "a máquina foi removida",
   // definido em 2026-09-24: o pedido da execução foi dispensado ainda aberto (dispensar-decisao.ts).
   pedido_dispensado: "o pedido foi dispensado sem resposta",
   // definido em 2026-09-24 (fio da pergunta): a pergunta da execução venceu sem resposta (varredor-expiracao.ts).

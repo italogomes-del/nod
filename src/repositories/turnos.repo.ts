@@ -951,6 +951,19 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
     },
 
     /**
+     * definido em 2026-10-20 (NOD-293 A7, revisão do PR #425): o varredor classificou a queda antes da trava por pessoa
+     * dos incidentes e, sob ela, viu a chave já revogada — o turno que ESTA transação assentou troca de motivo. Só de
+     * `de` para `para`: nada além do motivo muda. null = não estava assentado com `de`.
+     */
+    async reclassificarInterrupcao(id: string, de: MotivoInterrupcao, para: MotivoInterrupcao): Promise<Turno | null> {
+      const [l] = await conn<Linha[]>`
+        update turnos set motivo_interrupcao = ${para}
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and estado = 'interrompido' and motivo_interrupcao = ${de}
+        returning ${conn.unsafe(COLUNAS)}`;
+      return l ? paraTurno(l) : null;
+    },
+
+    /**
      * definido em 2026-10-15 (NOD-262): o turno de conversa ou sala que respondeu ao pedido de um colega (responder_pedido)
      * tira da fila o turno `delegacao` do pedido — interrompido/'absorvido' apontando para ele, como na fila lida junta.
      * Só o que ainda está 'pendente': o que já começou a rodar responde sozinho; null = não absorveu.

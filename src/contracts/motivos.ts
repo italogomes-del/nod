@@ -1,6 +1,5 @@
-// Enum único de motivos (ADR-004): cada união vira `CREATE TYPE ... AS ENUM` na 0002 e
-// tests/conformidade/motivos-enum.test.ts (L3) compara pg_enum com estas listas `as const`.
-// Nenhum campo `motivo text` livre existe em trilha/turno/sala: só estes valores.
+// Enum único de motivos (ADR-004): cada união vira `CREATE TYPE ... AS ENUM` na 0002 e tests/conformidade/motivos-enum.test.ts
+// (L3) compara pg_enum com estas listas `as const`. Nenhum campo `motivo text` livre existe em trilha/turno/sala.
 
 export const MOTIVOS_PASSE = ["passei_sem_nada_a_dizer", "negado_fail_closed", "ausente_offline", "cota_esgotada"] as const;
 export type MotivoPasse = (typeof MOTIVOS_PASSE)[number];
@@ -40,6 +39,7 @@ export const MOTIVOS_INTERRUPCAO = [
   "absorvido",
   /** 2026-10-15 (NOD-243): turno de rotina pendente, nunca começado, além de max(período, 30 min); a janela seguinte o encerra. */
   "vencido",
+  "maquina_removida", // 2026-10-20 (NOD-293 A7, 0099): a pessoa revogou a chave da máquina com o turno rodando; sem "sem contato".
 ] as const;
 export type MotivoInterrupcao = (typeof MOTIVOS_INTERRUPCAO)[number];
 

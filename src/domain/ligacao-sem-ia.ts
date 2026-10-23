@@ -21,7 +21,8 @@ export type FimDoTurnoCerebro = { sucesso: boolean; motivo?: string | null; caus
  * o caminho que já existia (o canal do cérebro cai, a ligação espera a volta e encerra com `cerebro_caiu`): oferecer
  * "continuar com outra IA" num Mac que não responde seria prometer o que não dá para cumprir.
  */
-const FORA_DA_REDE: ReadonlySet<string> = new Set(["parado_pela_pessoa", "maquina_sem_contato", "reinicio_servidor", "absorvido"]);
+// NOD-293 A7: a máquina removida (chave revogada) também — a outra IA estaria na mesma máquina que saiu.
+const FORA_DA_REDE: ReadonlySet<string> = new Set(["parado_pela_pessoa", "maquina_sem_contato", "reinicio_servidor", "absorvido", "maquina_removida"]);
 
 /**
  * A causa em código, ou null quando a rede de segurança não se aplica. Um turno-cérebro que termina "com sucesso" com

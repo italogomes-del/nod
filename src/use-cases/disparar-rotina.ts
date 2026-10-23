@@ -355,7 +355,7 @@ async function abrirJanela(deps: Deps, input: EntradaDisparo, agente: Awaited<Re
 export type EntradaDesfecho = {
   turnoId: string;
   desfecho: DesfechoRotina;
-  motivo?: MotivoFalha | MotivoSemNovidade | MotivoAdiada | MotivoInterrupcaoRotina | "maquina_sem_contato" | "reinicio_servidor" | "ninguem_respondeu_o_gate" | "pedido_dispensado" | "pergunta_sem_resposta" | "voltas_sem_novidade" | "parado_pela_pessoa" | "parada_aberta" | MotivoNaoRodouRotina | null;
+  motivo?: MotivoFalha | MotivoSemNovidade | MotivoAdiada | MotivoInterrupcaoRotina | "maquina_sem_contato" | "reinicio_servidor" | "maquina_removida" | "ninguem_respondeu_o_gate" | "pedido_dispensado" | "pergunta_sem_resposta" | "voltas_sem_novidade" | "parado_pela_pessoa" | "parada_aberta" | MotivoNaoRodouRotina | null;
   /** A regra que interrompeu (autoria do evento de `interrompida`); sem ela, a do varredor de lease. NOD-219: `regra:turno-orfao`. */
   regra?: `regra:${string}`;
   /** NOD-274: 'nao_rodou' por cota — quando a cota volta (vai para o histórico). */

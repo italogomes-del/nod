@@ -40,8 +40,14 @@ export type SaidaQuedaDaMaquina = {
   incidenteId: string | null;
 };
 
+/**
+ * Por que o varredor assentou o turno: uma queda (MotivoDaQueda) ou, desde 2026-10-20 (NOD-293 A7), a máquina removida —
+ * a pessoa revogou a chave com o turno rodando. A removida tem Retomar como a queda, mas nenhum aviso de "sem contato".
+ */
+type MotivoDoVarredor = MotivoDaQueda | "maquina_removida";
+
 /** Um turno JÁ interrompido pela queda, com o que se sabe dela. */
-type Caido = { turno: Turno; motivo: MotivoDaQueda; perdidoDesde: number; maquinaPresente: boolean };
+type Caido = { turno: Turno; motivo: MotivoDoVarredor; perdidoDesde: number; maquinaPresente: boolean };
 
 /**
  * O que acontece com UM turno derrubado. Fundo (NOD-309, PR 3): volta para a fila sozinho (aposQuedaNoFundo); só o que a
@@ -102,6 +108,8 @@ async function consequencias(deps: DepsQueda, c: Caido & { rotinaId: string | nu
  */
 async function aposQuedaNoFundo(deps: DepsQueda, c: Caido & { rotinaId: string | null }, autoria: Autoria): Promise<{ dados: Record<string, string | number | null>; events: RuntimeEvent[] } | null> {
   const { turno, motivo } = c;
+  // NOD-293 A7: a máquina removida não volta a puxar — nada de esperar por ela no fundo; vale o Retomar de antes.
+  if (motivo === "maquina_removida") return null;
   if (turno.pararSolicitadoEm !== null || !(await fundoNaCadeia(deps, turno))) return null;
   const trabalho = turno.trabalhoId ? await deps.repos.trabalhos.buscar(turno.trabalhoId) : null;
   if (turno.trabalhoId && (!trabalho || !trabalhoAberto(trabalho.estado))) return null;
@@ -171,7 +179,7 @@ async function aplicar(deps: DepsQueda, caidos: readonly Caido[], prazoMs: numbe
   // Reinício do servidor não é culpa do Mac: nenhum aviso de queda (ADR-045).
   const ultimo = doMac.length > 0 ? await deps.repos.incidentes.travarUltimo("mac_sem_contato") : null;
   const classificados: (Caido & { rotinaId: string | null })[] = [];
-  for (const c of caidos) classificados.push({ ...c, rotinaId: (await rotinaDoTurno(deps.repos, c.turno.id))?.rotina.id ?? null });
+  for (const c of caidos) classificados.push({ ...(await reclassificarSobATrava(deps, c)), rotinaId: (await rotinaDoTurno(deps.repos, c.turno.id))?.rotina.id ?? null });
   const emOrdem = [...classificados.filter((c) => c.rotinaId === null), ...classificados.filter((c) => c.rotinaId !== null)];
   const quedas: QuedaDeMaquina[] = [];
   for (const c of emOrdem) {
@@ -192,13 +200,25 @@ async function aplicar(deps: DepsQueda, caidos: readonly Caido[], prazoMs: numbe
     // ADR-083: o trabalho do turno caído vira "precisa de você" (o card Retomar) ou "falhou" (rotina, sem retomada).
     events.push(...(await sincronizarDoTurno(deps, c.turno)));
     saida.interrompidos.push(c.turno.id);
-    saida.porMotivo[c.motivo] += 1;
+    if (c.motivo !== "maquina_removida") saida.porMotivo[c.motivo] += 1;
     if (r.decisaoId) saida.decisoes.push(r.decisaoId);
     if (r.rotinaId) saida.rotinas.push(r.rotinaId);
     if (c.motivo === "maquina_sem_contato") quedas.push({ perdidoDesde: c.perdidoDesde, notadoEm: deps.agora(), machineId: c.turno.machineId, agenteId: c.turno.agenteId, rotina: r.rotina, maquinaPresente: c.maquinaPresente });
   }
   saida.incidenteId = (await registrarIncidente(deps, ultimo, quedas))?.id ?? null;
   return { data: saida, events };
+}
+
+/**
+ * NOD-293 A7 (revisão do PR #425): "sem contato" foi classificado ANTES da trava por pessoa (a linha do turno vem antes
+ * dela). Sob a trava, a revogação (removerMaquina) já terminou ou ainda nem começou: relida aqui, a chave revogada nesse
+ * meio-tempo vira `maquina_removida` — sem incidente, que nunca fecharia. Se a revogação vier depois, ela acha o incidente.
+ */
+async function reclassificarSobATrava(deps: DepsQueda, c: Caido): Promise<Caido> {
+  if (c.motivo !== "maquina_sem_contato" || c.turno.machineId === null) return c;
+  if (!(await deps.repos.maquinaTokens.removida(c.turno.machineId, deps.agora()))) return c;
+  const turno = await deps.repos.turnos.reclassificarInterrupcao(c.turno.id, "maquina_sem_contato", "maquina_removida");
+  return turno ? { ...c, turno, motivo: "maquina_removida" } : c;
 }
 
 /** UM aviso por queda (src/domain/incidente.ts): mescla no último ou abre outro. */
@@ -242,7 +262,11 @@ export async function interromperPorMaquina(deps: DepsQueda, input: EntradaVarre
     // renovação o congelou (renovarLease) — com a máquina fora, ninguém entregou. O Parar vence a queda: o turno
     // termina `parado_pela_pessoa`, sem Retomar, sem aviso de queda e sem contar em `porMotivo`.
     const parado = vencido.pararSolicitadoEm !== null;
-    const motivo = parado ? "parado_pela_pessoa" : motivoDaQueda(vencido, agora, input.inicioDoProcesso ?? null);
+    // NOD-293 A7: a chave da máquina foi revogada (ou venceu) com o turno rodando — a máquina não caiu, foi removida. O
+    // turno sai `maquina_removida`, com Retomar (a retomada segue o alvo normal, que já ignora a chave morta) e sem
+    // incidente: o aviso "sem contato" de uma máquina que a pessoa tirou não teria volta.
+    const removida = !parado && vencido.machineId !== null && (await deps.repos.maquinaTokens.removida(vencido.machineId, agora));
+    const motivo: MotivoDoVarredor | "parado_pela_pessoa" = parado ? "parado_pela_pessoa" : removida ? "maquina_removida" : motivoDaQueda(vencido, agora, input.inicioDoProcesso ?? null);
     // NOD-241 (emenda da ADR-084): o último sinal vai para a linha — é a régua da retomada automática. `leaseVencidoEm`:
     // o turno que renovou o lease depois de `vencidos()` não é interrompido.
     const perdidoDesde = ultimoSinalDoTurno(vencido, agora);
@@ -257,8 +281,8 @@ export async function interromperPorMaquina(deps: DepsQueda, input: EntradaVarre
       if (sessao) await propagarSessaoDoTurno(deps, { turno, sessaoCli: sessao.sessaoCli, executor: cred.executor, harness: cred.harness, maquinaBifurca: false });
       await deps.repos.turnoCredenciais.apagar(turno.id);
     }
-    if (parado) parados.push({ turno, perdidoDesde });
-    else caidos.push({ turno, motivo: motivo as MotivoDaQueda, perdidoDesde, maquinaPresente: input.maquinaPresente ? input.maquinaPresente(vencido.machineId) : true });
+    if (motivo === "parado_pela_pessoa") parados.push({ turno, perdidoDesde });
+    else caidos.push({ turno, motivo, perdidoDesde, maquinaPresente: input.maquinaPresente ? input.maquinaPresente(vencido.machineId) : true });
   }
   const r = await aplicar(deps, caidos, input.prazoMs);
   // Depois das quedas: a mesma ordem de travas (a trava por pessoa dos incidentes antes das janelas de rotina).
@@ -292,6 +316,26 @@ export function aposQuedaDaMaquina(deps: DepsQueda, turno: Turno, p: { perdidoDe
 }
 
 /**
+ * NOD-293 A7: a pessoa removeu a máquina (revogou a chave). O aviso "sem contato" em curso daquela máquina nunca fecharia
+ * sozinho — a máquina não volta a puxar —, então fecha agora e sai da tela. Fechado E dispensado, a queda seguinte de
+ * outra máquina abre aviso próprio (destinoDaQueda) em vez de se esconder num aviso já dispensado. Idempotente.
+ * revisto em 2026-10-20 (revisão do PR #425): revogar, ler e dispensar correm DENTRO da trava por pessoa dos incidentes,
+ * a mesma em que o varredor relê a chave (reclassificarSobATrava) e registra a queda. Lidos fora dela, o varredor podia
+ * abrir o aviso logo depois de a revogação não achar nada, e o "sem contato" ficava para sempre. false = chave não achada.
+ */
+export async function removerMaquina(deps: DepsQueda, machineId: string): Promise<{ revogou: boolean; dispensados: string[] }> {
+  await deps.repos.incidentes.travarUltimo("mac_sem_contato");
+  const agora = deps.agora();
+  if (!(await deps.repos.maquinaTokens.revogar(machineId, agora))) return { revogou: false, dispensados: [] };
+  const dispensados: string[] = [];
+  for (const i of (await deps.repos.incidentes.emCurso()).filter((x) => x.machineId === machineId)) {
+    await deps.repos.incidentes.marcarVolta(i.id, agora);
+    if (await deps.repos.incidentes.dispensar(i.id, agora)) dispensados.push(i.id);
+  }
+  return { revogou: true, dispensados };
+}
+
+/**
  * Modo compartilhado: o aviso em curso fecha quando a máquina volta a puxar (ADR-045). No modo local
  * nunca há aviso em curso — o varredor roda no próprio Mac.
  */
@@ -301,9 +345,19 @@ export async function registrarVoltaDasMaquinas(deps: DepsQueda, maquinaPresente
   if (emCurso.length === 0) return fechados;
   // A mesma trava por pessoa de quem registra quedas: sem ela, fechar e mesclar correriam juntos.
   await deps.repos.incidentes.travarUltimo("mac_sem_contato");
+  const agora = deps.agora();
   for (const i of emCurso) {
-    if (!maquinaPresente(i.machineId)) continue;
-    if (await deps.repos.incidentes.marcarVolta(i.id, deps.agora())) fechados.push(i.id);
+    if (maquinaPresente(i.machineId)) {
+      if (await deps.repos.incidentes.marcarVolta(i.id, agora)) fechados.push(i.id);
+      continue;
+    }
+    // NOD-293 A7 (QA): a chave que VENCEU — o "Desconectar e sair das contas" com a máquina no ar só põe prazo nela
+    // (vencerEm) — é máquina removida como a revogada: ela não volta, e o aviso "sem contato" ficaria para sempre.
+    // Sai como no removerMaquina: fecha e dispensa.
+    if (i.machineId !== null && (await deps.repos.maquinaTokens.removida(i.machineId, agora))) {
+      await deps.repos.incidentes.marcarVolta(i.id, agora);
+      await deps.repos.incidentes.dispensar(i.id, agora);
+    }
   }
   return fechados;
 }

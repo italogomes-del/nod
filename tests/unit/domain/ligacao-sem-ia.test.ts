@@ -22,13 +22,13 @@ describe("a causa de o cérebro ter caído", () => {
     expect(causaDoCerebroCaido({ sucesso: true, motivo: null })).toBe("falhou");
   });
 
-  it("a pessoa parando o bot, o Mac sumindo e o servidor reiniciando não são 'a IA caiu'", () => {
-    for (const motivo of ["parado_pela_pessoa", "maquina_sem_contato", "reinicio_servidor", "absorvido"]) {
+  it("a pessoa parando o bot, o Mac sumindo ou removido e o servidor reiniciando não são 'a IA caiu'", () => {
+    for (const motivo of ["parado_pela_pessoa", "maquina_sem_contato", "reinicio_servidor", "absorvido", "maquina_removida"]) {
       expect(MOTIVOS_INTERRUPCAO as readonly string[]).toContain(motivo);
       expect(causaDoCerebroCaido({ sucesso: false, motivo, causaSemIa: "conta_sem_acesso" }), motivo).toBeNull();
     }
     // Todo outro motivo de interrupção aciona a rede.
-    for (const motivo of MOTIVOS_INTERRUPCAO.filter((m) => !["parado_pela_pessoa", "maquina_sem_contato", "reinicio_servidor", "absorvido"].includes(m))) {
+    for (const motivo of MOTIVOS_INTERRUPCAO.filter((m) => !["parado_pela_pessoa", "maquina_sem_contato", "reinicio_servidor", "absorvido", "maquina_removida"].includes(m))) {
       expect(causaDoCerebroCaido({ sucesso: false, motivo }), motivo).toBe("falhou");
     }
   });

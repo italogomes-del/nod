@@ -12,6 +12,9 @@ interface Linha {
   revogado_em: Date | null;
 }
 
+/** definido em 2026-10-20 (NOD-293 A8): `ultimo_uso_em` atrasa até isto; a tela mostra o uso em minutos. */
+export const MARCAR_USO_A_CADA_MS = 30_000;
+
 const paraDto = (l: Linha): ChaveMaquinaDto => ({ id: l.id, nome: l.nome, prefixo: l.prefixo, criadaEm: ms(l.criado_em), ultimoUsoEm: msOuNull(l.ultimo_uso_em), revogadaEm: msOuNull(l.revogado_em) });
 
 /**
@@ -97,14 +100,34 @@ export function maquinaTokensRepo(conn: Conn, escopo: Escopo) {
       return l ?? null;
     },
 
+    /**
+     * NOD-293 A7: a chave existe e não vale mais — revogada, ou vencida em `agora` (o "Desconectar" sem confirmação, como
+     * em `listar`). A mesma régua da chave viva de alvo-da-maquina.ts. false = viva ou não é chave da pessoa (o Mac do
+     * modo local não tem chave).
+     */
+    async removida(id: string, agora: number): Promise<boolean> {
+      const [l] = await conn<{ removida: boolean }[]>`
+        select (revogado_em is not null or (expira_em is not null and expira_em <= ${data(agora)})) as removida
+        from maquina_tokens where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id}`;
+      return l?.removida === true;
+    },
+
     /** ADR-102 (R2): o nome que a pessoa deu à máquina; a tela e as notas usam este, não o hostname anunciado. */
     async renomear(id: string, nome: string): Promise<boolean> {
       const r = await conn`update maquina_tokens set nome = ${nome} where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and revogado_em is null returning id`;
       return r.length > 0;
     },
 
-    async marcarUso(id: string, agora: number): Promise<void> {
-      await conn`update maquina_tokens set ultimo_uso_em = ${data(agora)} where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id}`;
+    /**
+     * definido em 2026-10-20 (NOD-293 A8): grava o uso no máximo uma vez a cada MARCAR_USO_A_CADA_MS. Cada pedido da
+     * máquina (puxar, renovar, entregar) passava aqui e fazia um UPDATE; quem lê `ultimo_uso_em` (a lista de chaves) tolera
+     * esse atraso. true = gravou.
+     */
+    async marcarUso(id: string, agora: number): Promise<boolean> {
+      const r = await conn`update maquina_tokens set ultimo_uso_em = ${data(agora)}
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id}
+          and (ultimo_uso_em is null or ultimo_uso_em < ${data(agora - MARCAR_USO_A_CADA_MS)}) returning id`;
+      return r.length > 0;
     },
   };
 }

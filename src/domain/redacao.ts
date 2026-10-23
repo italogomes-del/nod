@@ -174,6 +174,8 @@ const MOTIVO_EM_PORTUGUES: Readonly<Record<MotivoFalha | MotivoInterrupcao, stri
   sessao_rejeitada: "a IA recusou a conversa antes de começar",
   absorvido: "a mensagem foi lida junto com a seguinte",
   vencido: "a execução ficou na fila sem começar e a janela seguinte chegou",
+  // NOD-293 A7: a pessoa revogou a chave da máquina com o turno rodando nela.
+  maquina_removida: "a máquina foi removida; a frente parou",
   erro_max_turns: "o agente chegou ao limite de passos deste turno",
   erro_execucao: "a IA parou por um erro; tente de novo e, se repetir, relate o problema nesta mensagem",
   motor_ausente: "a IA não está instalada neste Mac",
