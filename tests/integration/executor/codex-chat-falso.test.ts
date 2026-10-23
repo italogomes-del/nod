@@ -160,6 +160,27 @@ it("X2: o turn/start que levaria a mensagem é recusado — ela nunca é confirm
   expect(r.desfecho).toBeDefined();
 });
 
+it("NOD-293 (B7): o turn/start recusado de cara grava o erro do Codex como erroCru, com o segredo redigido", async () => {
+  const segredo = "sk-proj-AAAAAAAAAAAAAAAAAAAAAAAA";
+  cfg.env.TESTE_NOD_RECUSAR_TURNO = "1";
+  cfg.env.TESTE_NOD_RECUSA_MENSAGEM = `Unauthorized: a chave ${segredo} foi recusada`;
+  const instance = await criarCodexCliDriver(lig).create(cfg);
+  const r = await instance.adapter(planoHarness({ texto: "oi" })).rodarTurno({ sinal: async () => {}, delta: () => {}, evento: () => {} });
+  expect(r.desfecho).toBe("falha");
+  expect(r.erroCru).toContain("Unauthorized");
+  expect(r.erroCru).toContain("«redigido");
+  expect(r.erroCru).not.toContain(segredo);
+});
+
+it("NOD-293 (B7, QA): a recusa com mensagem enorme vira erroCru cortado, que a ponte ainda aceita (e não some)", async () => {
+  cfg.env.TESTE_NOD_RECUSAR_TURNO = "1";
+  cfg.env.TESTE_NOD_RECUSA_MENSAGEM = `Unauthorized: ${"x".repeat(20_000)}`;
+  const instance = await criarCodexCliDriver(lig).create(cfg);
+  const r = await instance.adapter(planoHarness({ texto: "oi" })).rodarTurno({ sinal: async () => {}, delta: () => {}, evento: () => {} });
+  expect(r.erroCru).toMatch(/^Unauthorized: x+/);
+  expect(r.erroCru?.length).toBeLessThanOrEqual(501);
+});
+
 // revisto em 2026-10-14 (ADR-103): retomar e bifurcar também só com o app-server; terminal e pasta, com ele E o hook.
 it("X9: capacidades anunciadas — mensagem no meio, sessão e terminal só com o app-server achado pela sonda", async () => {
   const comAppServer = await criarCodexCliDriver(lig).create(cfg);

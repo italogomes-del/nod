@@ -112,7 +112,8 @@ else {
  *   conhece (`account/rateLimits/updated`) sai no primeiro turno.
  * - "[[chat-steer]]" no texto (chat do Codex, ADR-083 §6): fala "Começando.", chama `consultar`, que só termina com um
  *   turn/steer (ou turn/interrupt); com o steer, fala "Recebi: <texto do steer>", chama `lembrar` e fecha com "Terminei.".
- * - TESTE_NOD_RECUSAR_TURNO=N (X2, revisão do épico #188): o N-ésimo turn/start responde erro (o turno não abre).
+ * - TESTE_NOD_RECUSAR_TURNO=N (X2, revisão do épico #188): o N-ésimo turn/start responde erro (o turno não abre);
+ *   TESTE_NOD_RECUSA_MENSAGEM (NOD-293, B7) troca o texto do erro ("turno recusado" sem ela).
  * - stdin fechado: grava o registro (TESTE_NOD_REGISTRO) e sai 0.
  */
 async function appServer() {
@@ -365,7 +366,7 @@ async function appServer() {
           const imagens = (m.params.input ?? []).filter((i) => i.type === "localImage").map((i) => i.path);
           registro.turnos.push({ texto, effort: m.params.effort, ...(imagens.length ? { imagens } : {}) }); gravar();
           if (Number(process.env.TESTE_NOD_RECUSAR_TURNO) === registro.turnos.length) {
-            emit({ jsonrpc: "2.0", id: m.id, error: { code: -32603, message: "turno recusado" } });
+            emit({ jsonrpc: "2.0", id: m.id, error: { code: -32603, message: process.env.TESTE_NOD_RECUSA_MENSAGEM ?? "turno recusado" } });
             break;
           }
           const turnId = `turn_${proximoTurno++}`;

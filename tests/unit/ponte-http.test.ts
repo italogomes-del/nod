@@ -11,6 +11,10 @@ import { contasAnunciadas, entrega, falas, impressoes, inventario, memoria, prog
 import { CONTAS_ANUNCIADAS_MAX } from "../../src/contracts/contas-ia.ts";
 import { TEXTO_ENTREGA_MAX_CHARS } from "../../src/shared/constantes.ts";
 import { camposDoRelato, relatoValido } from "../../src/use-cases/limpeza-das-tasks.ts";
+import { criarAgente } from "../../src/use-cases/criar-agente.ts";
+import { despacharTurno } from "../../src/use-cases/despachar-turno.ts";
+import { definirInteligenciaDoBot } from "../../src/use-cases/inteligencia.ts";
+import { ANA, depsEmMemoria, executar, MARLON } from "../helpers/deps-l6.ts";
 
 describe("ADR-099 (parte 2): as esperas pela ponte HTTP", () => {
   const ID = "3f6b0d1e-2a4c-4b5d-8e9f-0a1b2c3d4e5f";
@@ -782,6 +786,81 @@ describe("NOD-245: a adoção que falha por exceção e a entrega grande", () =>
     expect(gravadas).toHaveLength(1000);
     expect(gravadas[0]).toBe("f1500");
     expect(gravadas.at(-1)).toBe("f2499");
+  });
+});
+
+/**
+ * NOD-293 (N18, conferido em 2026-10-20): o Codex é separado por máquina. A ponte guarda as IAs de cada máquina viva da
+ * pessoa em memória (`prontosPorMaquinaDaPessoa`, `harnesses`) e é isso que o despacho lê; `inventario_motores` é por
+ * pessoa e por motor, só a vitrine (frota, "sua vez") — o `persistir` da ponte recebe um inventário só, o melhor da
+ * pessoa, nunca o mapa por máquina.
+ */
+describe("NOD-293 (N18): as IAs prontas por máquina, não o inventário persistido, decidem o despacho", () => {
+  const MAC = "0f0e0d0c-0000-4000-8000-0000000000a1";
+  const VM = "0f0e0d0c-0000-4000-8000-0000000000b2";
+  const pronto = { estado: "pronto" as const, versao: "fake", em: 0 };
+  const semLogin = { estado: "nao_autenticado" as const, motivo: "entre", em: 0 };
+  function montar() {
+    const maquinas = new Map<string, AnuncioMaquina>();
+    const persistidos: unknown[] = [];
+    const ponte: PonteInternaNod = { conectar: async (m) => { maquinas.set(m.machineId, m); }, puxar: async () => null, renovar: async () => ({ ativo: true, versaoMinimaApp: VERSAO_MINIMA_APP }), entregar: async () => undefined, desconectar: async () => undefined, maquinasConectadas: () => [...maquinas.values()], escopoDoTurno: () => null };
+    const p = criarPonteHttpServidor({
+      criar: () => ponte, persistir: async (_e, inv) => { persistidos.push(inv); }, autorizar: async () => ({ ...MARLON, chaveId: MAC }),
+      segredo: "s", seguro: false, agora: () => Date.now(), delta: () => undefined, ferramenta: () => undefined, tarefas: () => undefined, longpollMs: 2_000,
+    });
+    const conectar = async (chaveId: string, corpo: unknown) => {
+      const rota = p.rotas.find((r) => r.padrao.test("/conectar"));
+      const req = new IncomingMessage(new Socket());
+      req.headers = { authorization: "Bearer k", "x-nod-versao": VERSAO_MINIMA_APP };
+      await rota!.handler({ req, res: new ServerResponse(req), escopo: MARLON, params: { chaveId }, corpo: async () => corpo, json: () => undefined });
+    };
+    return { p, conectar, persistidos };
+  }
+  const base = { versaoContrato: 1, inventario: pronto, ligacao: true };
+
+  it("o Codex pronto no Mac e sem login na VM: o mapa separa as duas máquinas e o persistido é um inventário só, sem o Codex", async () => {
+    const { p, conectar, persistidos } = montar();
+    await conectar(MAC, { ...base, nome: "Mac", harnesses: { "claude-cli": pronto, "codex-cli": pronto } });
+    await conectar(VM, { ...base, nome: "vm-bots", harnesses: { "claude-cli": pronto, "codex-cli": semLogin } });
+    expect(p.prontosPorMaquinaDaPessoa(MARLON.pessoaId)).toEqual({ [MAC]: ["claude-cli", "codex-cli"], [VM]: ["claude-cli"] });
+    // O plano da VM sai das IAs DELA (compor.ts, planos.emitir: `ponteHttp.harnesses(escopo, machineId)`).
+    expect(p.harnesses(MARLON, VM)["codex-cli"]?.estado).toBe("nao_autenticado");
+    expect(p.harnesses(MARLON, MAC)["codex-cli"]?.estado).toBe("pronto");
+    // Outra pessoa não vê as máquinas desta.
+    expect(p.prontosPorMaquinaDaPessoa(ANA.pessoaId)).toEqual({});
+    // A vitrine (inventario_motores, gravada pelo `persistir` como "claude-cli" em compor.ts) recebe UM inventário por vez.
+    expect(persistidos.length).toBeGreaterThan(0);
+    for (const inv of persistidos) expect(inv).toMatchObject({ estado: "pronto" });
+    for (const inv of persistidos) expect(inv).not.toHaveProperty("codex-cli");
+  });
+
+  it("o bot fixado no Codex: a VM sem o Codex recusa nomeando-o mesmo com a vitrine dizendo pronto, sem ler inventario_motores; o Mac recebe o plano", async () => {
+    const { p, conectar } = montar();
+    await conectar(MAC, { ...base, nome: "Mac", harnesses: { "claude-cli": pronto, "codex-cli": pronto } });
+    await conectar(VM, { ...base, nome: "vm-bots", harnesses: { "claude-cli": pronto, "codex-cli": semLogin } });
+    const { deps } = depsEmMemoria(MARLON);
+    // A vitrine mente a favor: o Codex "pronto" para a pessoa.
+    await deps.repos.inventario.registrar("codex-cli", pronto);
+    await deps.repos.inventario.registrar("claude-cli", pronto);
+    const { data: bot } = await executar(deps, criarAgente, { dono: "pessoa", nome: "Eng 1" });
+    await executar(deps, definirInteligenciaDoBot, { agenteId: bot.agente.id, pedido: { modo: "fixa", fixa: "codex-cli" } });
+    const agente = (await deps.repos.agentes.buscar(bot.agente.id))!;
+    expect(agente.harness).toBe("codex-cli");
+    const enfileirar = async () => (await deps.repos.turnos.enfileirar({ conversaId: bot.conversa.id, agenteId: agente.id, origem: "conversa", prazoEm: Date.now() + 86_400_000, profundidade: 0, entradaTexto: "oi", entradaConfianca: "confiavel", modelo: agente.modelo, harness: agente.harness, executor: "local" }))!;
+    // A entrada que ponte-interna.ts monta para a máquina que puxa: as IAs DELA, as da pessoa e o mapa por máquina.
+    const doPuxar = (machineId: string) => ( { machineId, executor: "local" as const, inventario: pronto, harnessesProntos: p.prontosPorMaquinaDaPessoa(MARLON.pessoaId)[machineId], harnessesDaPessoa: p.harnessesDaPessoa(MARLON.pessoaId), prontosPorMaquina: p.prontosPorMaquinaDaPessoa(MARLON.pessoaId) });
+    const buscar = vi.spyOn(deps.repos.inventario, "buscar");
+
+    const naVm = await enfileirar();
+    const r = await executar(deps, despacharTurno, doPuxar(VM));
+    expect(r.data).toMatchObject({ plano: null, motivo: "executor_indisponivel" });
+    expect(r.data.turno?.id).toBe(naVm.id);
+    expect(buscar).not.toHaveBeenCalled();
+
+    const noMac = await enfileirar();
+    const m = await executar(deps, despacharTurno, doPuxar(MAC));
+    expect(m.data.plano?.turnoId).toBe(noMac.id);
+    expect(m.data.plano?.machineId).toBe(MAC);
   });
 });
 

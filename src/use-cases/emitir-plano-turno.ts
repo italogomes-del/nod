@@ -19,7 +19,7 @@ import type { ModoTurno, PlanoTurno } from "../contracts/plano-turno.ts";
 import type { Conversa } from "../contracts/conversa.ts";
 import type { Agente, EsforcoAgente } from "../contracts/agente.ts";
 import type { EscolhasIa } from "../contracts/inteligencia.ts";
-import { iasNoLimite, inteligenciaDoAgente, ordemCompleta, ordemEfetiva } from "../domain/inteligencia.ts";
+import { iasNoLimite, inteligenciaDoAgente, ordemCompleta, ordemEfetiva, raciocinioValido } from "../domain/inteligencia.ts";
 import { contasPelaCota, cotaDasContas, cotaDasIasComContas, tipoParaCota } from "../domain/cota-da-ia.ts";
 import { temSessaoNaIa } from "../domain/troca-de-ia.ts";
 import type { Turno } from "../contracts/turno.ts";
@@ -366,6 +366,9 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   // revisto em 2026-10-10 (0068): o modelo escolhido para a IA na inteligência do Nod também vale (é escolha, não o padrão).
   const guiaNoMaisPotente = (ehNod(agente) || onb.guiaId === agente.id) && turno.modelo === "auto" && !(escolha && inteligencia.escolhas[escolha.harness]?.modelo);
   const modeloEscolhido = escolha ? (guiaNoMaisPotente ? modeloMaisPotente(escolha.harness) : null) ?? escolha.modelo : null;
+  // NOD-293 (B7, 2026-10-20): o raciocínio da escolha foi validado contra o modelo dela; trocado o modelo (a guia no mais
+  // potente), vale o que o modelo trocado aceita — o "max" do recomendado do Codex não existe no gpt-6-astra.
+  const raciocinio = escolha?.raciocinio && modeloEscolhido ? raciocinioValido(escolha.harness, modeloEscolhido, escolha.raciocinio) : escolha?.raciocinio;
   // NOD-315 (ADR-119): o repo da frente vai junto, para o clone da máquina.
   const dadosDoTrabalho = trabalho ? { titulo: trabalho.titulo, origem: trabalho.origem, trabalhoMaeId: trabalho.trabalhoMaeId, forma: formaEfetiva(trabalho), ...(trabalho.repo ? { repo: trabalho.repo } : {}) } : null;
   const parcial = montarPlano({
@@ -375,7 +378,7 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
     computadorFora,
     turno: { ...turno, sobProcuracaoDe, ...(modeloEscolhido ? { modelo: modeloEscolhido } : {}) },
     agente,
-    ...(escolha?.raciocinio ? { raciocinio: escolha.raciocinio } : {}),
+    ...(raciocinio ? { raciocinio } : {}),
     memorias,
     concessoes,
     conectores,
