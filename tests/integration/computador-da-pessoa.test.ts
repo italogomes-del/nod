@@ -1,0 +1,121 @@
+import { randomBytes, randomUUID } from "node:crypto";
+import { expect, it } from "vitest";
+import { agenteComConversa } from "../helpers/fabricas.ts";
+import { PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
+import { describeIntegracao } from "../helpers/integracao.ts";
+import { withRollback } from "../helpers/with-rollback.ts";
+
+/** NOD-96 (0106, ADR-122): o computador da pessoa no motor — um por pessoa, uma tela por bot, logins em comum. */
+const MARLON = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
+
+describeIntegracao("computador da pessoa no motor (0106)", () => {
+  it("um computador por pessoa; vários bots no mesmo; o legado por bot segue um por bot e é arquivado", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const a = await agenteComConversa(trx, MARLON);
+      const b = await agenteComConversa(trx, MARLON);
+      // O modo docker de hoje continua: um computador 'por_bot' para cada bot, mesmo com o motor na mesma pessoa.
+      const legadoA = (await a.repos.computadores.obter(a.agenteId))!;
+      const legadoB = (await a.repos.computadores.obter(b.agenteId))!;
+      expect(legadoA.id).not.toBe(legadoB.id);
+
+      expect(await a.repos.computadores.daPessoa()).toBeNull();
+      const c = await a.repos.computadores.obterDaPessoa();
+      expect(c).toMatchObject({ ownerId: PESSOA_MARLON, maquinaId: null, hospedeiraId: null, supervisorPub: null, operacao: null, falhasSeguidas: 0 });
+      expect((await a.repos.computadores.obterDaPessoa()).id).toBe(c.id);
+      expect((await a.repos.computadores.daPessoa())!.id).toBe(c.id);
+
+      expect((await a.repos.computadores.arquivarLegado(5000)).sort()).toEqual([legadoA.id, legadoB.id].sort());
+      expect(await a.repos.computadores.vincularBot(c.id, a.agenteId)).toBe(true);
+      expect(await a.repos.computadores.vincularBot(c.id, b.agenteId)).toBe(true);
+      expect(await a.repos.computadores.vincularBot(c.id, randomUUID())).toBe(false);
+      const vinculos = await trx<{ computador_id: string }[]>`select computador_id from agentes where id in (${a.agenteId}, ${b.agenteId})`;
+      expect(vinculos.map((v) => v.computador_id)).toEqual([c.id, c.id]);
+      // O legado não entra no computador da pessoa nem o contrário.
+      expect(await a.repos.computadores.travarDaPessoa(legadoA.id)).toBeNull();
+      await expect(trx`insert into computadores (tenant_id, owner_id, modelo) values (${MARLON.tenantId}, ${MARLON.pessoaId}, 'por_pessoa')`).rejects.toThrow(/computadores_um_por_pessoa/);
+    });
+  });
+
+  it("o supervisor é TOFU; Redefinir esquece a chave; uma operação de cada vez, com progresso entre 0 e 100", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const a = await agenteComConversa(trx, MARLON);
+      const c = await a.repos.computadores.obterDaPessoa();
+      const chave = new Uint8Array(32).fill(1);
+      expect(await a.repos.computadores.fixarSupervisor(c.id, chave)).toBe("gravada");
+      expect(await a.repos.computadores.fixarSupervisor(c.id, chave)).toBe("igual");
+      expect(await a.repos.computadores.fixarSupervisor(c.id, new Uint8Array(32).fill(2))).toBe("diferente");
+      expect((await a.repos.computadores.daPessoa())!.supervisorPub).toBe(Buffer.from(chave).toString("base64"));
+      await expect(a.repos.computadores.fixarSupervisor(c.id, new Uint8Array(31))).resolves.toBe("diferente");
+
+      expect(await a.repos.computadores.iniciarOperacao(c.id, "redefinir", 1000)).toBe(true);
+      expect(await a.repos.computadores.iniciarOperacao(c.id, "atualizar", 1100)).toBe(false);
+      expect(await a.repos.computadores.progredirOperacao(c.id, "atualizar", { pct: 50, etapa: "x" })).toBe(false);
+      expect(await a.repos.computadores.progredirOperacao(c.id, "redefinir", { pct: 140, etapa: "apagando o perfil" })).toBe(true);
+      expect((await a.repos.computadores.daPessoa())!.operacao).toEqual({ tipo: "redefinir", progresso: 100, etapa: "apagando o perfil", desde: 1000 });
+      await a.repos.computadores.esquecerSupervisor(c.id);
+      expect(await a.repos.computadores.terminarOperacao(c.id, "redefinir")).toBe(true);
+      expect(await a.repos.computadores.daPessoa()).toMatchObject({ operacao: null, supervisorPub: null });
+      expect(await a.repos.computadores.fixarSupervisor(c.id, new Uint8Array(32).fill(2))).toBe("gravada");
+    });
+  });
+
+  it("a máquina é uma chave da pessoa (contrato da NOD-94); nula = onde o nod roda", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const a = await agenteComConversa(trx, MARLON);
+      const chave = (await a.repos.maquinaTokens.criar({ nome: "Linux da sala", prefixo: randomBytes(4).toString("hex"), hash: randomBytes(32) }))!;
+      const c = await a.repos.computadores.obterDaPessoa(chave.id);
+      expect(c.maquinaId).toBe(chave.id);
+      await a.repos.computadores.fixarMaquina(c.id, { maquinaId: null, hospedeiraId: chave.id });
+      expect(await a.repos.computadores.daPessoa()).toMatchObject({ maquinaId: null, hospedeiraId: chave.id });
+      await expect(a.repos.computadores.fixarMaquina(c.id, { maquinaId: randomUUID() })).rejects.toThrow(/computadores_maquina_id_fkey/);
+    });
+  });
+
+  it("uma tela por bot; a fila da régua sai pela ordem de chegada; ações por bot e a tela some com o bot", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const a = await agenteComConversa(trx, MARLON);
+      const b = await agenteComConversa(trx, MARLON);
+      const c = await a.repos.computadores.obterDaPessoa();
+      const ta = (await a.repos.computadorTelas.obter(c.id, a.agenteId))!;
+      const tb = (await a.repos.computadorTelas.obter(c.id, b.agenteId))!;
+      expect(ta).toMatchObject({ estado: "fechada", controle: "bot", politica: "supervisionado", esperandoDesde: null, memoriaMb: null });
+      expect((await a.repos.computadorTelas.obter(c.id, a.agenteId))!.id).toBe(ta.id);
+      expect(await a.repos.computadorTelas.obter(c.id, randomUUID())).toBeNull();
+
+      expect(await a.repos.computadorTelas.mudarEstado(tb.id, "esperando", 2000)).toBe(true);
+      expect(await a.repos.computadorTelas.mudarEstado(ta.id, "esperando", 3000)).toBe(true);
+      expect(await a.repos.computadorTelas.mudarEstado(tb.id, "esperando", 9000)).toBe(true);
+      expect((await a.repos.computadorTelas.fila(c.id)).map((t) => [t.agenteId, t.esperandoDesde])).toEqual([[b.agenteId, 2000], [a.agenteId, 3000]]);
+      expect(await a.repos.computadorTelas.mudarEstado(tb.id, "aberta", 4000, ["fechada"])).toBe(false);
+      expect(await a.repos.computadorTelas.mudarEstado(tb.id, "abrindo", 4000, ["esperando"])).toBe(true);
+      expect((await a.repos.computadorTelas.fila(c.id)).map((t) => t.agenteId)).toEqual([a.agenteId]);
+      expect((await a.repos.computadorTelas.travar(tb.id))!.esperandoDesde).toBeNull();
+
+      await a.repos.computadorTelas.registrarFalha(tb.id, "nao_ficou_pronto");
+      expect((await a.repos.computadorTelas.travar(tb.id))!.falhaMotivo).toBe("nao_ficou_pronto");
+      expect(await a.repos.computadorTelas.mudarEstado(tb.id, "aberta", 5000)).toBe(true);
+      await a.repos.computadorTelas.relatar(tb.id, { memoriaMb: 512.4, ultimaAcaoEm: null });
+      await a.repos.computadorTelas.configurar(tb.id, { controle: "pessoa", ajuda: "entre no Gmail", atividadeEm: 6000 });
+      const lease = randomUUID();
+      await a.repos.computadorTelas.ocupar(tb.id, lease, 7000);
+      await a.repos.computadorTelas.liberar(tb.id, randomUUID());
+      expect(await a.repos.computadorTelas.travar(tb.id)).toMatchObject({ estado: "aberta", falhaMotivo: null, memoriaMb: 512, controle: "pessoa", ajuda: "entre no Gmail", operacaoId: lease, ocupadoAte: 7000 });
+      await a.repos.computadorTelas.liberar(tb.id, lease);
+      expect((await a.repos.computadorTelas.travar(tb.id))!.operacaoId).toBeNull();
+
+      await a.repos.computadores.registrar({ computadorId: c.id, autor: "bot", tipo: "navegar", estado: "concluida", agenteId: b.agenteId, telaId: tb.id });
+      await a.repos.computadores.registrar({ computadorId: c.id, autor: "pessoa", tipo: "clicar", estado: "concluida", telaId: tb.id });
+      await a.repos.computadores.registrar({ computadorId: c.id, autor: "bot", tipo: "navegar", estado: "concluida", agenteId: a.agenteId, telaId: ta.id });
+      expect((await a.repos.computadores.atividadeDoBot(c.id, b.agenteId)).map((r) => r.tipo)).toEqual(["navegar"]);
+      expect(await a.repos.computadores.atividade(c.id)).toHaveLength(3);
+
+      // A tela vai junto com o bot (ON DELETE CASCADE); a ação fica, sem bot e sem tela (SET NULL só da coluna).
+      const fks = await trx<{ def: string }[]>`select pg_get_constraintdef(oid) as def from pg_constraint
+        where conrelid in ('computador_telas'::regclass, 'computador_acoes'::regclass) and contype = 'f' and pg_get_constraintdef(oid) like '%agentes%'`;
+      expect(fks.map((f) => f.def).sort()).toEqual([
+        "FOREIGN KEY (tenant_id, agente_id) REFERENCES agentes(tenant_id, id) ON DELETE CASCADE",
+        "FOREIGN KEY (tenant_id, agente_id) REFERENCES agentes(tenant_id, id) ON DELETE SET NULL (agente_id)",
+      ]);
+    });
+  });
+});

@@ -1,9 +1,11 @@
+import type { AnuncioComputador } from "./computador-motor.ts";
 import type { ContaAnunciada } from "./contas-ia.ts";
 import type { EsperaParaRodar, RelatoEspera, RespostaRelatoEspera } from "./espera.ts";
 import type { CapacidadesHarness, IdHarness } from "./harness.ts";
 import type { RuntimeEvent } from "./evento.ts";
 import type { Inventario } from "./inventario.ts";
 import type { PastaParaLimpar, RelatoLimpeza } from "./limpeza.ts";
+import type { PapelMaquina, PlataformaMaquina } from "./maquina.ts";
 import type { MotivoPasse } from "./motivos.ts";
 import type { PlanoTurno } from "./plano-turno.ts";
 import type { PedidoRevisao, RelatoRevisao, RespostaRelatoRevisao } from "./revisao.ts";
@@ -53,19 +55,15 @@ export type AnuncioMaquina = {
   sobreviveReinicio?: boolean;
   /** ADR-102 (2026-10-13): as contas de IA logadas nesta máquina (impressão e, ADR-105, e-mail). Ausente = app antigo. */
   contas?: ContaAnunciada[];
+  /** NOD-96 (ADR-122): se roda o computador da pessoa pelo motor, ou o que falta. Ausente = não vai para ela. */
+  computador?: AnuncioComputador;
   /** NOD-9 (2026-10-23): atende o "Atualizar agora" pedido de outro aparelho. Ausente = o servidor recusa o pedido. */
   atualizaIas?: boolean;
   /** NOD-94: o papel com que foi pareada. Decide o servidor (`maquina_tokens.papel`); ausente = `motor` (app antigo). */
   papel?: PapelMaquina;
 };
-
-/** NOD-94 (ADR-090, emenda 11): `motor` pega turno; `computador` só hospeda o computador do bot, fora dos seletores. */
-export const PAPEIS_MAQUINA = ["motor", "computador"] as const;
-export type PapelMaquina = (typeof PAPEIS_MAQUINA)[number];
-
-/** ADR-090: as plataformas em que o motor roda — o app do Mac e o motor sem janela numa máquina Linux. */
-export const PLATAFORMAS_MAQUINA = ["darwin", "linux"] as const;
-export type PlataformaMaquina = (typeof PLATAFORMAS_MAQUINA)[number];
+// O papel e a plataforma da máquina moram em maquina.ts (teto de 200 linhas); reexportados para quem lê daqui.
+export { PAPEIS_MAQUINA, PLATAFORMAS_MAQUINA, type PapelMaquina, type PlataformaMaquina } from "./maquina.ts";
 
 /** Passe é CAMPO tipado, nunca regex sobre o texto do modelo (GRUPO.passe-tipado). */
 export type FalaEntrega = { tipo: "texto"; texto: string } | { tipo: "passe"; motivo: MotivoPasse };

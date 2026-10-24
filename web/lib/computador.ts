@@ -194,6 +194,11 @@ export const MOTIVO_FALHA_TEXTO: Readonly<Record<MotivoFalhaComputador, string>>
   tela_alterada: "a tela mudou desde a última observação",
   ocupado: "outra ação estava em andamento",
   limite_de_computadores: "este Mac já tem o máximo de computadores ligados",
+  maquina_sem_contato: "a máquina do computador não está respondendo",
+  faltam_pacotes: "faltam pacotes do computador na máquina",
+  sem_suporte: "a máquina não consegue rodar o computador",
+  nao_ficou_pronto: "o computador ligou mas não ficou pronto a tempo",
+  atualizando: "o computador está sendo atualizado",
 };
 
 /**

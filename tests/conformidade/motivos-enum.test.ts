@@ -14,6 +14,7 @@ import {
   MOTIVOS_PASSE,
   MOTIVOS_SEM_NOVIDADE,
 } from "../../src/contracts/motivos.ts";
+import { ESTADOS_TELA_COMPUTADOR, OPERACOES_COMPUTADOR } from "../../src/contracts/computador-motor.ts";
 import { TIPOS_INCIDENTE } from "../../src/contracts/incidente.ts";
 import { ESTADOS_MAQUINA_NUVEM, MOTIVOS_FALHA_NUVEM } from "../../src/contracts/provedor-nuvem.ts";
 import { ALCANCES_RELATO, CATEGORIAS_RELATO } from "../../src/contracts/relato.ts";
@@ -47,6 +48,9 @@ const MOTIVOS: Record<string, readonly string[]> = {
   tipo_incidente: TIPOS_INCIDENTE,
   // Emenda da ADR-037 (0022): a falha do computador do bot tem código fechado, no banco e no runtime.
   motivo_falha_computador: MOTIVOS_FALHA_COMPUTADOR,
+  // ADR-122 (0106): a tela do bot no computador da pessoa e a operação em curso no computador.
+  estado_tela_computador: ESTADOS_TELA_COMPUTADOR,
+  operacao_computador: OPERACOES_COMPUTADOR,
 };
 
 async function rotulos(tipo: string): Promise<string[]> {

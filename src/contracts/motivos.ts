@@ -187,5 +187,13 @@ export const MOTIVOS_FALHA_COMPUTADOR = [
   "ocupado",
   // NOD-170 (0051): o host já tem o máximo de computadores ligados. Não é a máquina nem a ação: neutro para a saúde.
   "limite_de_computadores",
+  // NOD-96 (0106, ADR-122): o computador da pessoa no motor. A máquina escolhida não responde à ponte; a máquina não tem
+  // os pacotes do computador (`falta` no anúncio); a máquina não suporta o computador (não é Linux com systemd/bwrap);
+  // o supervisor ligou mas não ficou pronto no prazo; uma operação (Atualizar, Redefinir) está em curso.
+  "maquina_sem_contato",
+  "faltam_pacotes",
+  "sem_suporte",
+  "nao_ficou_pronto",
+  "atualizando",
 ] as const;
 export type MotivoFalhaComputador = (typeof MOTIVOS_FALHA_COMPUTADOR)[number];

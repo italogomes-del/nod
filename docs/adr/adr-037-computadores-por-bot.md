@@ -159,6 +159,22 @@ com os volumes preservados é passo de operação, fora do código.
 
 **Validação.** Concorrência `computador-ociosidade`; unit `computador-docker` (teto, proxies, imagem), `computador-saude`, web `computador` e `computadores-orfaos`; conformidade `motivos-enum`; smoke com `docker restart`.
 
+## Emenda de 2026-10-22 — o computador da pessoa roda no motor (ADR-122, NOD-96)
+
+Com `NOD_COMPUTADORES=motor`, o computador deixa de ser um por bot num container do servidor e passa a ser **um por
+pessoa, na máquina dela, pelo motor**, com uma tela e um Chrome por bot e os logins em comum
+([ADR-122](adr-122-o-computador-da-pessoa-roda-no-motor.md)). Com a flag desligada ou em `docker`, esta ADR vale como
+está. No modelo do motor:
+
+- **Egress:** o isolamento de rede sai do proxy e vai para o kernel, com `IPAddressDeny` na unidade systemd. As portas
+  deixam de ser só 80/443; loopback, faixas privadas, CGNAT, link-local e a metadata (169.254/16) seguem bloqueados.
+- **Chrome:** volta ao sandbox próprio (o bwrap dá user namespaces), em vez de `--no-sandbox` dentro do container.
+- **`NOD_COMPUTADORES_MAX` não vale:** não há teto de computadores; as telas entram pela régua da máquina
+  (ADR-085/097), e a falta de memória é espera, não `limite_de_computadores`.
+- **Um bot não é mais dono do computador:** o UNIQUE `agentes (tenant_id, computador_id)` caiu (0106); o controle, a
+  política, a ajuda e a reserva passam para `computador_telas`. O computador por bot do legado é arquivado
+  (`arquivado_em`) quando a pessoa passa ao motor, sem migrar o volume.
+
 ## Emenda de 2026-10-22 — o computador também mora no Mac (NOD-93)
 
 Com `NOD_VM_LOCAL=1`, o computador da pessoa pode morar numa VM Linux que o app do Mac liga (Lima/vz, ADR-123). É o

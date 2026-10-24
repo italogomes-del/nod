@@ -1,5 +1,6 @@
 import { composioRepo } from "./composio.repo.ts";
 import { computadoresRepo } from "./computadores.repo.ts";
+import { computadorTelasRepo } from "./computador-telas.repo.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
 import { agentesRepo } from "./agentes.repo.ts";
 import { anexosRepo } from "./anexos.repo.ts";
@@ -62,6 +63,7 @@ import { nativasIdempotenciaRepo } from "./nativas-idempotencia.repo.ts";
 export function criarRepos(conn: Conn, escopo: Escopo): Repos {
   return {
     computadores: computadoresRepo(conn, escopo),
+    computadorTelas: computadorTelasRepo(conn, escopo),
     pessoas: pessoasRepo(conn, escopo),
     events: eventsRepo(conn, escopo),
     outbox: outboxRepo(conn, escopo),

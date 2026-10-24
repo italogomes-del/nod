@@ -1,5 +1,6 @@
 import type { composioRepo } from "./composio.repo.ts";
 import type { computadoresRepo } from "./computadores.repo.ts";
+import type { computadorTelasRepo } from "./computador-telas.repo.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
 import type { agentesRepo } from "./agentes.repo.ts";
 import type { anexosRepo } from "./anexos.repo.ts";
@@ -69,6 +70,7 @@ export type Fabrica<R> = (conn: Conn, escopo: Escopo) => R;
 
 export interface Repos {
   computadores: ReturnType<typeof computadoresRepo>;
+  computadorTelas: ReturnType<typeof computadorTelasRepo>;
   composio: ReturnType<typeof composioRepo>;
   githubApp: ReturnType<typeof githubAppRepo>;
   pessoas: ReturnType<typeof pessoasRepo>;

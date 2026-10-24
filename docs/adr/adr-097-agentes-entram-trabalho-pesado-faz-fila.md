@@ -179,6 +179,13 @@ O que a implementação mudou em relação ao texto acima:
   ordem de chegada). A distribuição entre máquinas (o nod escolhe ou o usuário move) se decide quando chegar a vez dela.
 - Ficam para depois: a fila do Codex e os detalhes das telas (fase 3).
 
+## Emenda de 2026-10-22 — as telas do computador fazem a mesma fila (ADR-122, NOD-96)
+
+As telas por bot do computador da pessoa ([ADR-122](adr-122-o-computador-da-pessoa-roda-no-motor.md)) seguem a regra
+desta ADR: o bot sempre entra; o que é pesado (abrir mais um Chrome) espera a régua. A fila é a tela em `esperando`,
+pela ordem de `esperando_desde` (`computador_telas`, 0106); a espera aparece com quem está usando a máquina e nunca é
+erro. A memória por tela (≈ 0,5 GB, estimada) é medida no PR 2 da NOD-96 e não entra na decisão.
+
 ## Emenda de 2026-10-22 — a VM do computador no Mac (NOD-93)
 
 No Mac, a VM do computador (ADR-123) entra como um bloco na fatia dos bots e segue o modo de uso: Pouco 2 GiB,

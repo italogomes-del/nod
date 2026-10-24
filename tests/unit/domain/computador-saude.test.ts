@@ -16,13 +16,22 @@ const doComputador = (p: ReturnType<typeof montarPlano>) => p.catalogo.ferrament
 
 describe("saúde do computador do bot (emenda da ADR-037)", () => {
   it("só a MÁQUINA sem responder conta; a ação que falhou numa máquina viva não conta", () => {
-    expect([...CONTA_PARA_SAUDE].sort()).toEqual(["cofre_invalido", "docker_indisponivel", "imagem_ausente", "nao_iniciou", "navegador_nao_abriu", "sem_resposta"]);
-    for (const m of ["acao_falhou", "tela_alterada", "ocupado", "limite_de_computadores"] as const) expect(CONTA_PARA_SAUDE.has(m)).toBe(false);
+    expect([...CONTA_PARA_SAUDE].sort()).toEqual(["cofre_invalido", "docker_indisponivel", "imagem_ausente", "maquina_sem_contato", "nao_ficou_pronto", "nao_iniciou", "navegador_nao_abriu", "sem_resposta"]);
+    // NOD-96 (ADR-122): faltar pacote, não ter suporte e estar atualizando são a máquina respondendo — não contam.
+    for (const m of ["acao_falhou", "tela_alterada", "ocupado", "limite_de_computadores", "faltam_pacotes", "sem_suporte", "atualizando"] as const) expect(CONTA_PARA_SAUDE.has(m)).toBe(false);
     expect(LIMITE_FALHAS_SEGUIDAS).toBe(3);
     const f = new FalhaComputador("navegador_nao_abriu", { detalhe: "Target page, context or browser has been closed", reinicios: 6 });
     expect(ehFalhaComputador(f)).toBe(true);
     expect(f).toMatchObject({ motivo: "navegador_nao_abriu", reinicios: 6, message: "navegador_nao_abriu" });
     expect(ehFalhaComputador(new Error("navegador_nao_abriu"))).toBe(false);
+  });
+
+  it("NOD-96: máquina sem os pacotes, sem suporte ou atualizando não se insiste neste turno e nada foi executado", () => {
+    for (const m of ["faltam_pacotes", "sem_suporte", "atualizando"] as const) {
+      expect(instrucaoDaFalha(m)).toContain("Nada foi executado");
+      expect(instrucaoDaFalha(m)).toContain("Não tente de novo neste turno");
+    }
+    expect(instrucaoDaFalha("maquina_sem_contato")).toContain("a máquina do computador não está respondendo");
   });
 
   it("a ferramenta devolve instrução de tabela: máquina fora não se insiste; tela velha se observa de novo", () => {

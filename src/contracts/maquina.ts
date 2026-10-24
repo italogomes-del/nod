@@ -1,11 +1,18 @@
 import type { IdHarness } from "./harness.ts";
 import type { EpochMs } from "./ids.ts";
 import type { CausaInventario, CausaSemIa, Inventario } from "./inventario.ts";
-import type { PapelMaquina, PlataformaMaquina } from "./ponte.ts";
 import type { MaquinaNuvemDto } from "./provedor-nuvem.ts";
 import type { DiscoDoMac, LeituraDisco, MotivoEsperaMac, NivelPressao } from "./trabalho.ts";
 // ADR-099 §7 (2026-10-12): a cota da IA segura trabalho como a máquina; trabalho.ts lê os campos daqui (teto de 200 linhas).
 export type { CotaNosTrabalhos, CotaNoTrabalho } from "./cota.ts";
+
+/** NOD-94 (ADR-090, emenda 11): `motor` pega turno; `computador` só hospeda o computador do bot, sem turno nem seletor. */
+export const PAPEIS_MAQUINA = ["motor", "computador"] as const;
+export type PapelMaquina = (typeof PAPEIS_MAQUINA)[number];
+
+/** ADR-090: as plataformas em que o motor roda — o app do Mac e o motor sem janela numa máquina Linux. */
+export const PLATAFORMAS_MAQUINA = ["darwin", "linux"] as const;
+export type PlataformaMaquina = (typeof PLATAFORMAS_MAQUINA)[number];
 
 /**
  * ADR-090: uma máquina da pessoa na tela "Máquinas" — a chave viva, com o que a máquina anunciou se está conectada agora

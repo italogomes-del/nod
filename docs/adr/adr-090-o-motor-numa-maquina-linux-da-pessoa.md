@@ -78,8 +78,9 @@ parear sem navegador, uma regra de qual máquina pega cada turno e os textos que
 9. **O uso da máquina vale fora do macOS** (estende a ADR-085). O amostrador lê memória e processador também no Linux,
    para "segurar trabalho novo em segundo plano" valer na VM. Em 2026-10-09 a tela passou a falar por máquina
    (emenda da ADR-085): o trabalho da VM diz "esperando <VM> aliviar", e não "o Mac".
-10. **Computadores dos bots (ADR-037) ficam fora.** A feature não está em uso. As opções estão documentadas no plano,
-    sem implementação.
+10. **O computador da pessoa roda no motor** (emenda de 2026-10-22, [ADR-122](adr-122-o-computador-da-pessoa-roda-no-motor.md)).
+    Com `NOD_COMPUTADORES=motor`, um computador por pessoa numa máquina Linux dela, com uma tela por bot. Antes
+    ficava fora: o computador por bot (ADR-037) não estava em uso.
 
 ## Por que não fere a ADR-028 nem a pré-ADR-030
 
@@ -171,3 +172,11 @@ Cita a [ADR-102](adr-102-contas-da-pessoa-em-todas-as-maquinas.md) (a cifra do n
   qualquer motor.
 - **Gatilho de reversão:** se a maioria das instalações cair na saída manual (o `curl … | sh` com o convite), ou se
   surgir hospedagem gerenciada, a instalação por SSH sai e fica só o comando.
+
+## Emenda de 2026-10-22 — o computador da pessoa entra (ADR-122, NOD-96)
+
+O item 10 deixa de ser "fora": com `NOD_COMPUTADORES=motor`, o computador é um por pessoa e roda numa máquina Linux
+dela pelo motor ([ADR-122](adr-122-o-computador-da-pessoa-roda-no-motor.md)). A máquina é `computadores.maquina_id`
+(chave da pessoa, como na escolha de onde o bot trabalha; nula = onde o nod roda); o motor anuncia
+`computador: pronto | faltam_pacotes | sem_suporte` no anúncio da máquina, e o Mac anuncia `sem_suporte`. Alvo:
+Debian 12, sem Docker; isolamento por uids, systemd, bwrap e comandos assinados.

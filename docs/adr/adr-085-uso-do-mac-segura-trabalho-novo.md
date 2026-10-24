@@ -261,3 +261,11 @@ limite: só o fundo novo para na reserva, por decisão do Marlon.
 Gatilho de reversão: a conversa com a pessoa receber "limite atingido" mais de uma vez por semana com o portão no ar
 (log `ia_no_limite` de turno de conversa logo depois de `cota_segura` com reserva). Nesse caso, a reserva ficou pequena
 para o que segue rodando, e o caminho é segurar também o fundo que já começou na reserva, não aumentar o 1%.
+
+## Emenda de 2026-10-22 — as telas do computador entram pela mesma régua (ADR-122, NOD-96)
+
+Abrir a tela de um bot no computador da pessoa ([ADR-122](adr-122-o-computador-da-pessoa-roda-no-motor.md)) é
+trabalho novo na máquina e passa pelo mesmo `deveSegurar(uso, memória, processador, regra)`, com a leitura local do
+motor e o modo de uso da pessoa. Se segura, o supervisor fecha a tela ociosa mais antiga e reavalia; sem ociosa, a tela
+fica em `esperando` (fila por ordem de chegada) e a ferramenta espera no turno. Em Livre nunca segura. Não há número
+fixo de telas.

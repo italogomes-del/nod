@@ -304,6 +304,17 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       registrarFalha: async () => null, registrarSucesso: async () => false,
       // Sem computador em memória, nenhum está fora do ar (a frota em memória segue igual).
       foraDoAr: async () => new Map(),
+      atividadeDoBot: async () => [],
+      // NOD-96: o computador da pessoa no motor só existe no banco (tests/integration/computador-da-pessoa.test.ts).
+      daPessoa: async () => null, travarDaPessoa: async () => null, vincularBot: async () => false,
+      obterDaPessoa: async () => { throw new Error("use o banco para testar o computador da pessoa"); },
+      fixarMaquina: async () => undefined, fixarSupervisor: async () => null, esquecerSupervisor: async () => undefined,
+      iniciarOperacao: async () => false, progredirOperacao: async () => false, terminarOperacao: async () => false, arquivarLegado: async () => [],
+    },
+    computadorTelas: {
+      buscar: async () => null, obter: async () => null, travar: async () => null, doComputador: async () => [], fila: async () => [],
+      mudarEstado: async () => false, configurar: async () => undefined, ocupar: async () => undefined, liberar: async () => undefined,
+      relatar: async () => undefined, registrarFalha: async () => undefined,
     },
     pessoas: {
       async buscar(id: string) {

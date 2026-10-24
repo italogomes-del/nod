@@ -1,10 +1,19 @@
 import type { Computador, ControleComputador, PoliticaComputador, RegistroComputador } from "../contracts/computador.ts";
+import type { ComputadorDaPessoa, OperacaoComputador } from "../contracts/computador-motor.ts";
 import type { MotivoFalhaComputador } from "../contracts/motivos.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
 
 type Linha = { id: string; agente_id: string; habilitado: boolean; controle: ControleComputador; politica: PoliticaComputador; ajuda: string | null; ajuda_decisao_id: string | null; ocupado_ate: Date | null; operacao_id: string | null; criado_em: Date; falhas_seguidas: number; falha_motivo: MotivoFalhaComputador | null; indisponivel_desde: Date | null };
 type LinhaAcao = { id: string; computador_id: string; turno_id: string | null; autor: RegistroComputador["autor"]; tipo: string; estado: RegistroComputador["estado"]; motivo: MotivoFalhaComputador | null; argumentos_cifrados: string | null; em: Date };
 const computador = (l: Linha): Computador => ({ id: l.id, agenteId: l.agente_id, habilitado: l.habilitado, controle: l.controle, politica: l.politica, ajuda: l.ajuda, ajudaDecisaoId: l.ajuda_decisao_id, ocupadoAte: l.ocupado_ate?.getTime() ?? null, operacaoId: l.operacao_id, criadoEm: l.criado_em.getTime(), falhasSeguidas: l.falhas_seguidas, falhaMotivo: l.falha_motivo, indisponivelDesde: l.indisponivel_desde?.getTime() ?? null });
+type LinhaDaPessoa = { id: string; owner_id: string; maquina_id: string | null; hospedeira_id: string | null; supervisor_pub: Buffer | null; operacao: OperacaoComputador | null; operacao_progresso: number | null; operacao_etapa: string | null; operacao_desde: Date | null; falhas_seguidas: number; falha_motivo: MotivoFalhaComputador | null; indisponivel_desde: Date | null; ultima_atividade_em: Date; criado_em: Date };
+const daPessoa = (l: LinhaDaPessoa): ComputadorDaPessoa => ({
+  id: l.id, ownerId: l.owner_id, maquinaId: l.maquina_id, hospedeiraId: l.hospedeira_id, supervisorPub: l.supervisor_pub ? l.supervisor_pub.toString("base64") : null,
+  operacao: l.operacao && l.operacao_desde ? { tipo: l.operacao, progresso: l.operacao_progresso, etapa: l.operacao_etapa, desde: l.operacao_desde.getTime() } : null,
+  falhasSeguidas: l.falhas_seguidas, falhaMotivo: l.falha_motivo, indisponivelDesde: l.indisponivel_desde?.getTime() ?? null, ultimaAtividadeEm: l.ultima_atividade_em.getTime(), criadoEm: l.criado_em.getTime(),
+});
+/** O resultado do primeiro contato do supervisor (TOFU, ADR-122): gravou agora, já era esta, ou é outra (recusar). */
+export type DesfechoSupervisor = "gravada" | "igual" | "diferente";
 const acao = (l: LinhaAcao): RegistroComputador => ({ id: l.id, computadorId: l.computador_id, turnoId: l.turno_id, autor: l.autor, tipo: l.tipo, estado: l.estado, motivo: l.motivo, em: l.em.getTime() });
 
 export function computadoresRepo(conn: Conn, escopo: Escopo) {
@@ -72,16 +81,110 @@ export function computadoresRepo(conn: Conn, escopo: Escopo) {
     async ociosos(limiteMs: number, agora: number, id?: string): Promise<Computador[]> {
       const linhas = await conn<Linha[]>`select c.*, a.id as agente_id from computadores c join agentes a on a.tenant_id = c.tenant_id and a.computador_id = c.id
         where c.tenant_id = ${escopo.tenantId} and c.owner_id = ${escopo.pessoaId} and (${id ?? null}::uuid is null or c.id = ${id ?? null}::uuid)
-          and c.habilitado and c.controle = 'bot'
+          and c.habilitado and c.controle = 'bot' and c.modelo = 'por_bot'
           and (c.ocupado_ate is null or c.ocupado_ate <= ${new Date(agora)})
           and c.ultima_atividade_em < ${new Date(agora - limiteMs)}
         order by c.ultima_atividade_em`;
       return linhas.map(computador);
     },
-    async registrar(e: { computadorId: string; turnoId?: string; autor: RegistroComputador["autor"]; tipo: string; estado: RegistroComputador["estado"]; argumentosCifrados?: string }): Promise<RegistroComputador> {
-      const [l] = await conn<LinhaAcao[]>`insert into computador_acoes (tenant_id, owner_id, computador_id, turno_id, autor, tipo, estado, argumentos_cifrados)
-        values (${escopo.tenantId}, ${escopo.pessoaId}, ${e.computadorId}, ${e.turnoId ?? null}, ${e.autor}, ${e.tipo}, ${e.estado}, ${e.argumentosCifrados ?? null}) returning *`;
+    /** NOD-96 (0106): no computador da pessoa, `agenteId` diz o bot (ausente = a pessoa) e `telaId` a tela dele. */
+    async registrar(e: { computadorId: string; turnoId?: string; autor: RegistroComputador["autor"]; tipo: string; estado: RegistroComputador["estado"]; argumentosCifrados?: string; agenteId?: string; telaId?: string }): Promise<RegistroComputador> {
+      const [l] = await conn<LinhaAcao[]>`insert into computador_acoes (tenant_id, owner_id, computador_id, turno_id, autor, tipo, estado, argumentos_cifrados, agente_id, tela_id)
+        values (${escopo.tenantId}, ${escopo.pessoaId}, ${e.computadorId}, ${e.turnoId ?? null}, ${e.autor}, ${e.tipo}, ${e.estado}, ${e.argumentosCifrados ?? null}, ${e.agenteId ?? null}, ${e.telaId ?? null}) returning *`;
       return acao(l!);
+    },
+    /** NOD-96: a Atividade de UM bot no computador da pessoa (índice computador_acoes_por_bot), com a mesma regra do observar. */
+    async atividadeDoBot(id: string, agenteId: string): Promise<RegistroComputador[]> {
+      const linhas = await conn<LinhaAcao[]>`select * from computador_acoes where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and computador_id = ${id} and agente_id = ${agenteId}
+        and (tipo <> 'observar' or estado = 'falhou') order by em desc limit 30`;
+      return linhas.map(acao);
+    },
+
+    // ---- NOD-96 (ADR-122): o computador da pessoa no motor, um por pessoa ('por_pessoa'). Só com NOD_COMPUTADORES=motor.
+
+    /** O computador vivo (não arquivado) desta pessoa no motor; null = ainda não tem. Só lê. */
+    async daPessoa(): Promise<ComputadorDaPessoa | null> {
+      const [l] = await conn<LinhaDaPessoa[]>`select * from computadores where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId}
+        and modelo = 'por_pessoa' and arquivado_em is null`;
+      return l ? daPessoa(l) : null;
+    },
+    /**
+     * O computador da pessoa, criado na primeira vez (índice único computadores_um_por_pessoa: duas chamadas
+     * concorrentes dão a mesma linha). `maquinaId` só vale na criação; nulo = "onde o nod roda" (NOD-94).
+     */
+    async obterDaPessoa(maquinaId: string | null = null): Promise<ComputadorDaPessoa> {
+      await conn`insert into computadores (tenant_id, owner_id, modelo, maquina_id) values (${escopo.tenantId}, ${escopo.pessoaId}, 'por_pessoa', ${maquinaId})
+        on conflict (tenant_id, owner_id) where arquivado_em is null and modelo = 'por_pessoa' do nothing`;
+      const [l] = await conn<LinhaDaPessoa[]>`select * from computadores where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId}
+        and modelo = 'por_pessoa' and arquivado_em is null`;
+      return daPessoa(l!);
+    },
+    async travarDaPessoa(id: string): Promise<ComputadorDaPessoa | null> {
+      const [l] = await conn<LinhaDaPessoa[]>`select * from computadores where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id}
+        and modelo = 'por_pessoa' and arquivado_em is null for update`;
+      return l ? daPessoa(l) : null;
+    },
+    /** O bot passa a usar o computador da pessoa (vários bots no mesmo: o UNIQUE caiu na 0106). Falso = bot que não é dela. */
+    async vincularBot(id: string, agenteId: string): Promise<boolean> {
+      const linhas = await conn`update agentes a set computador_id = c.id from computadores c
+        where a.tenant_id = ${escopo.tenantId} and a.owner_id = ${escopo.pessoaId} and a.id = ${agenteId} and a.excluido_em is null
+          and c.tenant_id = a.tenant_id and c.owner_id = ${escopo.pessoaId} and c.id = ${id} and c.modelo = 'por_pessoa' and c.arquivado_em is null
+        returning a.id`;
+      return linhas.length > 0;
+    },
+    /** A máquina em que o computador roda (NOD-94; nula = "onde o nod roda") e a hospedeira escolhida para ele. */
+    async fixarMaquina(id: string, m: { maquinaId: string | null; hospedeiraId?: string | null }): Promise<void> {
+      await conn`update computadores set maquina_id = ${m.maquinaId},
+        hospedeira_id = case when ${m.hospedeiraId !== undefined} then ${m.hospedeiraId ?? null}::uuid else hospedeira_id end
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and modelo = 'por_pessoa'`;
+    },
+    /**
+     * TOFU (ADR-122): a primeira chave X25519 que o supervisor mostra fica; outra depois disso é recusada até o
+     * Redefinir esquecê-la. Comparação no banco, na mesma linha: duas chaves concorrentes, só uma grava.
+     */
+    async fixarSupervisor(id: string, pub: Uint8Array): Promise<DesfechoSupervisor | null> {
+      const chave = Buffer.from(pub);
+      const gravou = await conn`update computadores set supervisor_pub = ${chave}
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and modelo = 'por_pessoa' and supervisor_pub is null returning id`;
+      if (gravou.length > 0) return "gravada";
+      const [l] = await conn<{ igual: boolean }[]>`select supervisor_pub = ${chave} as igual from computadores
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and modelo = 'por_pessoa'`;
+      if (!l) return null;
+      return l.igual ? "igual" : "diferente";
+    },
+    /** O Redefinir apaga o computador na máquina: o próximo supervisor mostra chave nova e ela é aceita (TOFU de novo). */
+    async esquecerSupervisor(id: string): Promise<void> {
+      await conn`update computadores set supervisor_pub = null where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and modelo = 'por_pessoa'`;
+    },
+    /** Começa Atualizar, Redefinir ou Sair de todos. Falso = já há uma operação em curso (uma de cada vez). */
+    async iniciarOperacao(id: string, tipo: OperacaoComputador, em: number): Promise<boolean> {
+      const linhas = await conn`update computadores set operacao = ${tipo}, operacao_desde = ${new Date(em)}, operacao_progresso = 0, operacao_etapa = null
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and modelo = 'por_pessoa' and operacao is null returning id`;
+      return linhas.length > 0;
+    },
+    /** O progresso que o supervisor relatou; só vale para a operação em curso. `pct` fica entre 0 e 100. */
+    async progredirOperacao(id: string, tipo: OperacaoComputador, p: { pct: number; etapa: string | null }): Promise<boolean> {
+      const pct = Math.max(0, Math.min(100, Math.round(p.pct)));
+      const etapa = p.etapa === null ? null : p.etapa.slice(0, 80);
+      const linhas = await conn`update computadores set operacao_progresso = ${pct}, operacao_etapa = ${etapa}
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and operacao = ${tipo} returning id`;
+      return linhas.length > 0;
+    },
+    async terminarOperacao(id: string, tipo: OperacaoComputador): Promise<boolean> {
+      const linhas = await conn`update computadores set operacao = null, operacao_desde = null, operacao_progresso = null, operacao_etapa = null
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and operacao = ${tipo} returning id`;
+      return linhas.length > 0;
+    },
+    /**
+     * ADR-122: ao passar ao motor, os computadores por bot (docker) da pessoa são arquivados — o do motor nasce do zero,
+     * sem migrar perfil. Os bots deixam de apontar para eles. Devolve os ids arquivados (para o driver docker apagar).
+     */
+    async arquivarLegado(em: number): Promise<string[]> {
+      const linhas = await conn<{ id: string }[]>`update computadores set arquivado_em = ${new Date(em)}
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and modelo = 'por_bot' and arquivado_em is null returning id`;
+      const ids = linhas.map((l) => l.id);
+      if (ids.length > 0) await conn`update agentes set computador_id = null where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and computador_id = any(${ids}::uuid[])`;
+      return ids;
     },
     /**
      * ADR-083 (S5): quem segura o computador agora — o título do trabalho do turno da ação em execução, ou "a conversa"

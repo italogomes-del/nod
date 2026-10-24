@@ -33,7 +33,7 @@ export function ehFalhaComputador(e: unknown): e is FalhaComputador {
 }
 
 /** Só a MÁQUINA sem responder conta para a saúde; a ação que falhou numa máquina viva não conta. */
-export const CONTA_PARA_SAUDE: ReadonlySet<MotivoFalhaComputador> = new Set<MotivoFalhaComputador>(["docker_indisponivel", "imagem_ausente", "nao_iniciou", "cofre_invalido", "navegador_nao_abriu", "sem_resposta"]);
+export const CONTA_PARA_SAUDE: ReadonlySet<MotivoFalhaComputador> = new Set<MotivoFalhaComputador>(["docker_indisponivel", "imagem_ausente", "nao_iniciou", "cofre_invalido", "navegador_nao_abriu", "sem_resposta", "maquina_sem_contato", "nao_ficou_pronto"]);
 
 /**
  * definido em 2026-09-24, NÃO medido: três falhas seguidas da máquina tiram o computador das próximas
@@ -54,6 +54,11 @@ export const MOTIVO_FALHA_EM_PORTUGUES: Readonly<Record<MotivoFalhaComputador, s
   tela_alterada: "a tela mudou desde a última observação",
   ocupado: "outra ação estava em andamento",
   limite_de_computadores: "este Mac já tem o máximo de computadores ligados",
+  maquina_sem_contato: "a máquina do computador não está respondendo",
+  faltam_pacotes: "faltam pacotes do computador na máquina",
+  sem_suporte: "a máquina não consegue rodar o computador",
+  nao_ficou_pronto: "o computador ligou mas não ficou pronto a tempo",
+  atualizando: "o computador está sendo atualizado",
 };
 
 /**
@@ -71,6 +76,8 @@ export function textoDoLimite(l: LimiteDeComputadores): string {
  */
 export function instrucaoDaFalha(motivo: MotivoFalhaComputador, limite: LimiteDeComputadores | null = null): string {
   if (motivo === "limite_de_computadores") return `${limite ? textoDoLimite(limite) : "Este Mac já tem o máximo de computadores ligados. Nada foi executado."} Não tente de novo neste turno; siga com os acessos que você tem e diga em uma frase o que ficou de fora.`;
+  if (motivo === "faltam_pacotes" || motivo === "sem_suporte") return `O computador não está disponível: ${MOTIVO_FALHA_EM_PORTUGUES[motivo]}. Nada foi executado. Não tente de novo neste turno; siga com os acessos que você tem e diga em uma frase o que ficou de fora.`;
+  if (motivo === "atualizando") return "O computador está sendo atualizado. Nada foi executado. Não tente de novo neste turno; siga com os acessos que você tem e diga em uma frase o que ficou de fora.";
   if (CONTA_PARA_SAUDE.has(motivo)) return `O computador não respondeu: ${MOTIVO_FALHA_EM_PORTUGUES[motivo]}. Não tente de novo neste turno; siga com os acessos que você tem e diga em uma frase o que ficou de fora.`;
   if (motivo === "tela_alterada") return "A tela mudou desde a sua observação. Observe de novo e reavalie antes de agir; nada foi executado.";
   if (motivo === "ocupado") return "Outra ação estava em andamento no computador. Observe a tela antes de tentar de novo; nada foi executado.";
