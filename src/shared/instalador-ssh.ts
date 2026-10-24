@@ -42,6 +42,11 @@ export type Sistema = {
   cano(caminho: string, segredo: string): Promise<() => void>;
   /** O script de instalação (GET no servidor). */
   baixar(url: string): Promise<string>;
+  /**
+   * O ambiente de quem roda (o do shell de login, no Mac): o modo apelido o usa inteiro (o agente, o chaveiro); os
+   * outros, só o PATH. Ausente = o do processo.
+   */
+  ambiente?: Readonly<Record<string, string | undefined>>;
 };
 
 export type PedidoSsh = {
@@ -178,9 +183,10 @@ export async function instalarPorSsh(pedido: PedidoSsh, credencial: CredencialSs
   // chaves padrão (IdentityFile=none em toda chamada, em `opcoes`). O HOME na pasta NÃO basta: o OpenSSH acha ~/.ssh/id_*
   // pela casa do passwd, não pelo $HOME (NOD-94, re-revisão). IdentitiesOnly=yes não entra: com IdentityFile=none ele
   // descartaria também a chave do agente, que é a única que o modo chave deve oferecer.
+  const ambiente = sistema.ambiente ?? process.env;
   const envBase: Record<string, string> = apelido
-    ? { ...Object.fromEntries(Object.entries(process.env).filter((e): e is [string, string] => typeof e[1] === "string")), LC_ALL: "C", LANG: "C" }
-    : { PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: pasta, LC_ALL: "C", LANG: "C" };
+    ? { ...Object.fromEntries(Object.entries(ambiente).filter((e): e is [string, string] => typeof e[1] === "string")), LC_ALL: "C", LANG: "C" }
+    : { PATH: ambiente.PATH ?? "/usr/bin:/bin", HOME: pasta, LC_ALL: "C", LANG: "C" };
   const controle = join(pasta, "c");
   const conhecidos = join(pasta, "known_hosts");
   const destino = apelido ? [...(pedido.usuario ? ["-l", pedido.usuario] : []), "--", pedido.host] : ["-l", pedido.usuario, "-p", String(pedido.porta), "--", pedido.host];
@@ -310,7 +316,7 @@ export async function instalarPorSsh(pedido: PedidoSsh, credencial: CredencialSs
 }
 
 /** O sistema de verdade: child_process, /dev/shm (ou o tmp do Mac), mkfifo e fetch. */
-export function sistemaDeVerdade(): Sistema {
+export function sistemaDeVerdade(ambiente?: Readonly<Record<string, string | undefined>>): Sistema {
   const executar: Executar = (programa, args, o) => new Promise((resolver) => {
     const p = spawn(programa, args, { env: o.env, stdio: ["pipe", "pipe", "pipe"] });
     let saida = "", erro = "", fim = false;
@@ -341,6 +347,7 @@ export function sistemaDeVerdade(): Sistema {
   });
   return {
     executar,
+    ...(ambiente ? { ambiente } : {}),
     async pastaPrivada() {
       const base = existsSync("/dev/shm") ? "/dev/shm" : tmpdir();
       const p = await mkdtemp(join(base, "nod-ssh-"));
@@ -354,7 +361,7 @@ export function sistemaDeVerdade(): Sistema {
     ler: (caminho) => readFile(caminho, "utf8"),
     apagar: (pasta) => rm(pasta, { recursive: true, force: true }),
     async cano(caminho, segredo) {
-      const r = await executar("mkfifo", ["-m", "600", caminho], { env: { PATH: process.env.PATH ?? "/usr/bin:/bin" }, prazoMs: 5_000 });
+      const r = await executar("mkfifo", ["-m", "600", caminho], { env: { PATH: (ambiente ?? process.env).PATH ?? "/usr/bin:/bin" }, prazoMs: 5_000 });
       if (r.codigo !== 0) throw new Error("mkfifo_falhou");
       // O_RDWR não bloqueia esperando o leitor; a linha fica no cano até o askpass ler (uma vez) ou a pasta sumir.
       const fd = openSync(caminho, constants.O_RDWR | constants.O_NONBLOCK);

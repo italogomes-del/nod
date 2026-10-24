@@ -37,6 +37,7 @@ import { estadoDaMaquina } from "../src/domain/harness.ts";
 import { criarContasLocais, inventariosComContas, type ContasLocais } from "./contas-locais.ts";
 import { concluirLoginArmado } from "./login-armado.ts";
 import { iniciarContasNoServidor } from "./contas-no-servidor.ts";
+import { iniciarInstalacoesNoServidor } from "./instalacoes-no-servidor.ts";
 import { lerIdentidadeNoCli, type ClisDoMotor } from "../motor/contas.ts";
 import { estadoDaIa } from "../src/domain/estado-ia.ts";
 import { ambienteDoLogin, comandoDeEstadoDoLogin, comandoDeLogin, comandoDeLoginNoApp, comandoDeLogout, contaPeloStatusClaude, lerIaDesktop, logadoPeloStatus, textoDaImpressao, textoDaImpressaoComConta, URL_INSTALAR_IA } from "./ia-mac.ts";
@@ -105,6 +106,8 @@ let maquinaIdAtual: string | null = null;
  */
 let contasLocais: ContasLocais | null = null;
 let contasNoServidor: { parar(): void } | null = null;
+/** NOD-94: este Mac como instaladora por SSH (só quando o servidor diz que aceita: `instalacoes: true` na conexão). */
+let instalacoesNoServidor: { parar(): void } | null = null;
 const driversPorConta = new Map<string, Promise<RegistroDriver | null>>();
 let sincronizandoContas: Promise<void> = Promise.resolve();
 let ghLogado: boolean | null = null;
@@ -400,6 +403,8 @@ async function parar() {
   vigiaIas = null;
   contasNoServidor?.parar();
   contasNoServidor = null;
+  instalacoesNoServidor?.parar();
+  instalacoesNoServidor = null;
   const anterior = laco; laco = null;
   cliente?.cancelar();
   if (anterior) await anterior.parar().catch(() => undefined);
@@ -452,7 +457,7 @@ async function conectar(c: Config) {
   if (r.status === 426 || (minima && !versaoAceita(app.getVersion(), minima))) throw new FalhaPonte("atualize_app");
   if (r.status === 401 || r.status === 403) throw new FalhaPonte("chave_invalida");
   if (!r.ok) throw new FalhaPonte("servidor_fora");
-  const dados = await r.json() as { escopo: { pessoaId: string }; machineId: string };
+  const dados = await r.json() as { escopo: { pessoaId: string }; machineId: string; instalacoes?: unknown };
   const cookie = r.headers.get("set-cookie")?.match(/(?:^|;\s*)nod_sessao=([^;]+)/)?.[1];
   if (!cookie || !dados.escopo?.pessoaId || !dados.machineId) throw new FalhaPonte("resposta_invalida");
   const web = session.fromPartition("nod-web");
@@ -591,6 +596,9 @@ async function conectar(c: Config) {
       agendar: agendarTimer,
       registrar: (evento, campos) => log("aviso", evento, campos),
     });
+    // NOD-94: a instalação por SSH de uma máquina "só computador", feita daqui (inclusive pelo apelido do ~/.ssh/config).
+    instalacoesNoServidor?.parar();
+    instalacoesNoServidor = dados.instalacoes === true ? iniciarInstalacoesNoServidor({ ponte: ponteHttp.instalacoes, env: cfg.env, agendar: agendarTimer }) : null;
   }
   const anterior = janela;
   // definido em 2026-09-24 ("aviso no Mac"): preload próprio da janela web — só `nodDesktop` (preload-web.ts).
