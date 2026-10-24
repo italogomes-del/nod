@@ -373,7 +373,11 @@ function avisoSemExecutor(m: Mensagem, estado: Estado): string {
   // limite, fora, ou só "indisponível" quando o catálogo não explica).
   if (aindaFora && alvo && "ia" in alvo && alvo.nomeia) return avisoHarnessFora(m, estado, { nomeDoBot: nome ?? null, agenteId: bot?.id ?? null, ia: alvo.ia, noApp });
   // NOD-8 (definido em 2026-10-22, protótipo v2.2): a IA voltou — o aviso some sozinho e fica a linha de sistema.
-  if (!aindaFora) return linhaIaVoltou(iaDoAlvo);
+  // NOD-8 passo 11: voltou porque o nod a atualizou (a sonda pronta traz o `sucesso` da NOD-9): a linha diz A → B.
+  if (!aindaFora) {
+    const a = iaDoAlvo ? inventarioDaIa(estado, iaDoAlvo)?.atualizacao : undefined;
+    return linhaIaVoltou(iaDoAlvo, a?.fase === "sucesso" && a.em > m.criadoEm ? a : null);
+  }
   return avisoDeEstado({
     tom: "erro",
     titulo: "Nenhum trabalho começou.",

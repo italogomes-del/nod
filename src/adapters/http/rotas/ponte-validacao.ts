@@ -511,8 +511,8 @@ export function progressoDoLogin(v: unknown): ProgressoDoLogin {
 const VERSAO_DO_PREPARO = /^\d{1,6}(\.\d{1,6}){1,3}([-+][0-9A-Za-z.-]{1,24})?$/;
 /** NOD-8: a etapa do preparo, uma linha curta (sem caracteres de controle). */
 const LINHA_DO_PREPARO = /^[^\p{Cc}]{1,80}$/u;
-const CAMPOS_DO_PREPARO = new Set(["acao", "linha", "antes", "depois"]);
-/** NOD-8 (definido em 2026-10-22): o passo 1 do login. Campo fora da lista ou fora do formato = 400 (o motor repete sem). */
+const CAMPOS_DO_PREPARO = new Set(["acao", "linha", "antes", "depois", "atualizacao"]);
+/** NOD-8 (definido em 2026-10-22; `atualizacao` no passo 9): o passo 1 do login. Campo fora da lista ou fora do formato = 400 (o motor repete sem). */
 export function preparoDoLogin(v: unknown): PreparoDoLogin {
   const o = objeto(v);
   exigir(Object.keys(o).every((k) => CAMPOS_DO_PREPARO.has(k)) && ACOES_DO_PREPARO.includes(o.acao as PreparoDoLogin["acao"]));
@@ -520,6 +520,8 @@ export function preparoDoLogin(v: unknown): PreparoDoLogin {
   if (o.linha !== undefined) { exigir(typeof o.linha === "string" && LINHA_DO_PREPARO.test(o.linha)); p.linha = o.linha; }
   if (o.antes !== undefined) { exigir(typeof o.antes === "string" && VERSAO_DO_PREPARO.test(o.antes)); p.antes = o.antes; }
   if (o.depois !== undefined) { exigir(typeof o.depois === "string" && VERSAO_DO_PREPARO.test(o.depois)); p.depois = o.depois; }
+  // Passo 9: a mesma leitura do anúncio da NOD-9; aqui fora do formato é 400 (o motor repete sem o preparo).
+  if (o.atualizacao !== undefined) { const a = atualizacaoAnunciada(o.atualizacao); exigir(a !== undefined); p.atualizacao = a; }
   return p;
 }
 

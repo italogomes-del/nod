@@ -45,6 +45,7 @@ import { iniciarContasDoMotor, lerIdentidadeNoCli, logoutNoCli, type ClisDoMotor
 import { arquivoDoPedido, atualizacaoLigada, iniciarAtualizacao, MARCA_DA_ATUALIZACAO, type Atualizador } from "./atualizacao.ts";
 import { anuncioDoComputador, sondaLocal } from "./computador.ts";
 import { arquivoDasAtualizacoes, arquivoDoEstadoDeIa, arquivoDoPedidoDeIa, ESPERA_DA_RESPOSTA_MS, ESPERA_DO_SERVICO_MS, gravarJson, IA_DO_TERMINAL, lerEstadoDoPedido, passoNpmLocal, vigiarPedidosDoTerminal } from "./atualizar-ias.ts";
+import { criarPreparoNoMotor } from "./preparo-do-login.ts";
 import { criarIasDoMotor, esperarNoTerminal, quemNaoPodeAtualizar } from "./ias-do-motor.ts";
 import { AJUDA, arquivoDaConexao, carregarConexao, comandoDeEntrar, guardarConexao, lerComando, pastaDoExecutor, pastaDoMotor, type ConexaoMotor } from "./conexao.ts";
 
@@ -167,14 +168,16 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
   // `configurado` (o nod não mexe); o resto é a instalação do motor em ~/.local, atualizada por cima com o npm do motor.
   let pedidosDoTerminal: ReturnType<typeof vigiarPedidosDoTerminal> | null = null;
   const lerVersao = (bin: string) => versaoDoBinario(bin, cfg.env);
+  const passoDaIa = (ia: IaDesktop) => passoNpmLocal({ ia, home: casaDasContas, pastaDoMotor: pasta, bin: () => clis.bin(ia), lerVersao, env: cfg.env, registrar: (evento, campos) => log("info", evento, campos) });
+  const configurado = (ia: IaDesktop) => (ia === "claude-cli" ? !!cfg.bin : !!cfg.bins?.["codex-cli"]);
   const ias = criarIasDoMotor({
     home: casaDasContas,
     bin: (ia) => clis.bin(ia),
-    configurado: (ia) => (ia === "claude-cli" ? !!cfg.bin : !!cfg.bins?.["codex-cli"]),
+    configurado,
     lerVersao,
     iasDosTurnos: () => [...planosAqui.values()].map((p) => lerIaDesktop(driverDoPlano(p))).filter((ia): ia is IaDesktop => ia !== null),
     motorOcupado: () => atualizador?.ocupado() ?? false,
-    passos: (ia) => [passoNpmLocal({ ia, home: casaDasContas, pastaDoMotor: pasta, bin: () => clis.bin(ia), lerVersao, env: cfg.env, registrar: (evento, campos) => log("info", evento, campos) })],
+    passos: (ia) => [passoDaIa(ia)],
     depois: () => { void vigia?.sondarAgora().catch(() => undefined); },
     aoMudar: (ia) => {
       pedidosDoTerminal?.aoMudar(ia);
@@ -369,6 +372,20 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
     },
     aoSairDaConta: descartarDriverDaConta,
     atualizar: (ia) => { void pedirAtualizacao(ia, "tela"); },
+    // NOD-8 passo 10: o login pela tela instala a IA que falta ou está abaixo do piso antes de abrir (mesmo npm_local).
+    preparo: criarPreparoNoMotor({
+      bin: (ia) => clis.bin(ia),
+      configurado,
+      lerVersao,
+      piso: (ia) => PISO_CLI[ia],
+      comparar: compararVersoes,
+      pastaLocal: join(casaDasContas, ".local"),
+      atualizador: atualizadorDasIas,
+      passo: passoDaIa,
+      sondar: () => vigiaAtual.sondarAgora(),
+      agora: Date.now,
+      registrar: (evento, campos) => log("info", evento, campos),
+    }),
     agora: Date.now,
     agendar: (fn, ms) => { const t = setTimeout(fn, ms); return { cancelar: () => clearTimeout(t) }; },
   });

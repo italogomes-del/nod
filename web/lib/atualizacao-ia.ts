@@ -7,8 +7,10 @@ import type { AtualizacaoDaIa } from "../../src/contracts/estado-ia.ts";
  * (src/contracts/estado-ia.ts); a saída do CLI nunca chega aqui. Sem frase = a fase não pede aviso (a tela segue como
  * estava).
  */
-export function fraseDaAtualizacao(a: AtualizacaoDaIa | null | undefined, nome: string): string | null {
+export function fraseDaAtualizacao(a: AtualizacaoDaIa | null | undefined, nome: string, verbo: "atualizar" | "instalar" = "atualizar"): string | null {
   if (!a) return null;
+  // QA do #511: o preparo do login que instala (a IA faltava) diz "instalar" nas falhas, não "atualizar".
+  const inst = verbo === "instalar";
   const versao = (v: string | undefined) => (v ? ` para a ${v}` : "");
   switch (a.fase) {
     case "esperando":
@@ -24,13 +26,13 @@ export function fraseDaAtualizacao(a: AtualizacaoDaIa | null | undefined, nome: 
     case "sucesso":
       return `${nome} atualizado${versao(a.depois)}.`;
     case "insuficiente":
-      return `Atualizamos o ${nome}${versao(a.depois)}, mas o nod precisa da ${a.alvo}, que ainda não saiu. Vamos tentar de novo amanhã.`;
+      return `${inst ? "Instalamos" : "Atualizamos"} o ${nome}${versao(a.depois)}, mas o nod precisa da ${a.alvo}, que ainda não saiu. Vamos tentar de novo amanhã.`;
     case "falhou":
       if (a.motivo === "recusou") return "Você não autorizou a atualização.";
       if (a.motivo === "configurado") return `Este ${nome} é o que você configurou para o nod usar; o nod não mexe nele. Atualize-o pelo terminal.`;
-      if (a.motivo === "sem_internet") return `Não deu para atualizar o ${nome}: sem conexão com a internet.`;
-      if (a.motivo === "sem_espaco") return a.espaco ? `Não deu para atualizar o ${nome}: falta espaço no disco (tem ${a.espaco.livreMb} MB livres e precisa de ${a.espaco.precisaMb} MB).` : `Não deu para atualizar o ${nome}: falta espaço no disco.`;
-      return "Não deu para atualizar sozinho.";
+      if (a.motivo === "sem_internet") return `Não deu para ${verbo} o ${nome}: sem conexão com a internet.`;
+      if (a.motivo === "sem_espaco") return a.espaco ? `Não deu para ${verbo} o ${nome}: falta espaço no disco (tem ${a.espaco.livreMb} MB livres e precisa de ${a.espaco.precisaMb} MB).` : `Não deu para ${verbo} o ${nome}: falta espaço no disco.`;
+      return inst ? `Não deu para instalar o ${nome} sozinho.` : "Não deu para atualizar sozinho.";
   }
 }
 

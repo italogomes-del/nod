@@ -109,3 +109,8 @@ PR 4 (2026-10-23): na VM a IA é reinstalada por cima em `~/.local` com o npm do
 trava de arquivo para o serviço e o terminal nunca rodarem juntos). As duas atualizações não se cruzam: com o motor
 drenando ou com o pedido ao root gravado, a IA não começa; com a IA atualizando, o motor conta um turno rodando e não
 reinicia.
+
+## Emenda de 2026-10-24 — o login na VM prepara a IA (NOD-8)
+
+O login na VM instala a IA que falta ou está abaixo do piso, pelo mesmo `npm_local`. Ele confere antes se há 2 GB livres
+em `~/.local` e, se não houver, para com `sem_espaco`.

@@ -247,6 +247,40 @@ describe("lista única de contas (ADR-102)", () => {
       expect(html).toContain('data-act="cl-login-de-novo"');
     });
 
+    it("passo 11: com o motivo, a falha do preparo diz a frase da atualização e, só agora, o terminal (recolhido)", () => {
+      const falha = { fase: "falhou", erro: "preparo_falhou", preparo: { acao: "instalar", atualizacao: { fase: "falhou", alvo: "0.159.0", motivo: "sem_espaco", em: 1, espaco: { livreMb: 1200, precisaMb: 2048 } } } } as Partial<LoginNaMaquina>;
+      const semEspaco = naTela(falha);
+      expect(semEspaco).toContain("falta espaço no disco (tem 1200 MB livres e precisa de 2048 MB)");
+      // Protótipo v2.2: o terminal num link discreto; o comando só depois do clique.
+      expect(semEspaco).toMatch(/data-act="cl-terminal" data-login="[^"]+">Prefere o terminal\?</);
+      expect(semEspaco).not.toContain("<code>nod-motor atualizar-ia codex</code>");
+      const aberto = renderListaDeContas(ctx({ ui: { terminal: login().id, logins: [{ onde: "vm", login: login({ ia: "codex-cli", contaId: null, apelido: "Pessoal", url: null, pedeCodigo: false, ...falha }), codigo: "", enviando: false, erroEnvio: null }] } }));
+      expect(aberto).toContain("<code>nod-motor atualizar-ia codex</code>");
+      expect(aberto).toMatch(/data-act="copiar-texto" data-texto="nod-motor atualizar-ia codex" aria-live="polite">Copiar</);
+      expect(naTela({ fase: "falhou", erro: "preparo_falhou", preparo: { acao: "instalar", atualizacao: { fase: "falhou", alvo: "0.159.0", motivo: "sem_internet", em: 1 } } })).toContain("sem conexão com a internet");
+      // QA #511: no "instalar" a frase diz instalar, não atualizar (a IA nem existia na máquina).
+      const instalar = (motivo: string, acao = "instalar") => naTela({ fase: "falhou", erro: "preparo_falhou", preparo: { acao, atualizacao: { fase: "falhou", alvo: "0.159.0", motivo, em: 1 } } } as Partial<LoginNaMaquina>);
+      expect(instalar("sem_internet")).toContain("Não deu para instalar o Codex: sem conexão com a internet.");
+      expect(instalar("falhou")).toContain("Não deu para instalar o Codex sozinho.");
+      expect(semEspaco).toContain("Não deu para instalar o Codex: falta espaço");
+      for (const m of ["sem_internet", "falhou", "sem_espaco"]) expect(instalar(m)).not.toContain("para atualizar");
+      expect(instalar("sem_internet", "atualizar")).toContain("Não deu para atualizar o Codex: sem conexão com a internet.");
+      // Antes da falha (preparando), nada de comando do terminal.
+      expect(naTela({ fase: "preparando", preparo: { acao: "instalar" } })).not.toContain("nod-motor atualizar-ia");
+    });
+
+    it("J5: na linha da conta, 'Atualizar o X' só com alvo pendente na VM conectada que atende o pedido", () => {
+      const com = (o: Partial<MaquinaDto>) => renderListaDeContas(ctx({ maquinas: [maquina(VM, "vm-bots", { atualizaIas: true, ...o }), MAQUINAS[1]!] }));
+      const antigo = { iasDetalhe: { "claude-cli": { causa: "cli_antigo" as const, versao: "2.0.1", minima: "2.1.150" } } };
+      expect(com(antigo)).toMatch(new RegExp(`data-act="cl-atualizar-maquina" data-maquina="${VM}" data-ia="claude-cli"[^>]*>Atualizar o Claude Code<`));
+      expect(com({ ...antigo, atualizaIas: false })).not.toContain("cl-atualizar-maquina");
+      expect(com({ ...antigo, conectada: false })).not.toContain("cl-atualizar-maquina");
+      expect(com({ iasDetalhe: { "claude-cli": { versao: "2.1.200" } } })).not.toContain("cl-atualizar-maquina");
+      // O Mac fica com o cartão da IA do #498.
+      const mac = renderListaDeContas(ctx({ maquinas: [MAQUINAS[0]!, maquina(MAC, "MacBook", { plataforma: "darwin", atualizaIas: true, ...antigo })] }));
+      expect(mac).not.toContain(`data-maquina="${MAC}" data-ia="claude-cli"`);
+    });
+
     it("Nova conta: na VM sem a IA, 'o nod instala o ChatGPT nela'; abaixo do piso, 'atualiza'; com ela, o de sempre", () => {
       const nova = { ia: "codex-cli" as const, apelido: "", maquinas: [] };
       const com = (o: Partial<MaquinaDto>) => renderListaDeContas(ctx({ maquinas: [maquina(VM, "vm-bots", o)], ui: { nova } }));

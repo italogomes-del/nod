@@ -52,7 +52,8 @@ describe("mostrarCopia (NOD-8)", () => {
     const ler = (f: string) => readFileSync(new URL(`../../../web/${f}`, import.meta.url), "utf8");
     expect(ler("telas/onboarding.ts")).toMatch(/data-act="onboarding-ia-copiar" data-texto="\$\{esc\(comando\)\}" \$\{VIVO\}>/);
     expect(ler("telas/cartao-ia.ts")).toMatch(/data-act="ia-copiar-codigo"[^>]*\$\{VIVO\}>/);
-    expect(ler("telas/contas-lista.ts").match(/data-act="copiar-texto"[^>]*\$\{VIVO\}>/g)).toHaveLength(2);
+    // NOD-8 passo 11: o terceiro é o comando do terminal no preparo_falhou.
+    expect(ler("telas/contas-lista.ts").match(/data-act="copiar-texto"[^>]*\$\{VIVO\}>/g)).toHaveLength(3);
     expect(ler("lib/texto-formatado.ts")).toMatch(/data-act="copiar-codigo" aria-label="Copiar código" \$\{VIVO\}>/);
   });
 });

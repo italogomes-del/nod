@@ -106,3 +106,9 @@ leitura de contas que ela já guarda por 30 s; o filtro é um predicado a mais n
 
 **Gatilho de reversão:** turno sem alvo que espera os 20 s e acaba na máquina sem conta (a outra não pegou) em mais de
 1 em cada 10 declínios em 14 dias — o prazo ou a leitura de "viva" está errado.
+
+## Emenda de 2026-10-24 — passo 1 Preparar no login (NOD-8)
+
+O login de uma conta ganha o passo 1 Preparar. Na fase `preparando`, a máquina instala ou atualiza a IA (ADR-100) e só
+depois abre a página. Se esse passo falhar, o login termina com `preparo_falhou`, e o motivo vem no `preparo.atualizacao`.
+Quando o servidor é antigo e recusa `preparando` com 400, o motor manda de novo como `abrindo` e segue.

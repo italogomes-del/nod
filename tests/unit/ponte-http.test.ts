@@ -844,6 +844,17 @@ describe("validação das contas anunciadas (ADR-102, revisão do PR #306)", () 
     expect(() => progressoDoLogin({ loginId, fase: "preparando", preparo: { acao: "atualizar", linha: "x".repeat(81) } })).toThrow();
     expect(() => progressoDoLogin({ loginId, fase: "preparando", preparo: "instalar" })).toThrow();
   });
+
+  it("NOD-8 passo 9: o preparo traz a atualização do orquestrador (motivo e espaço da J4); fora do formato = 400", () => {
+    const loginId = "11111111-1111-4111-8111-111111111111";
+    const atualizacao = { fase: "falhou", alvo: "2.1.290", motivo: "sem_espaco", caminho: "npm_local", em: 1_000, espaco: { livreMb: 1_200, precisaMb: 2_048 } };
+    expect(progressoDoLogin({ loginId, fase: "falhou", erro: "preparo_falhou", preparo: { acao: "instalar", atualizacao } })).toEqual({ loginId, fase: "falhou", erro: "preparo_falhou", preparo: { acao: "instalar", atualizacao } });
+    expect(progressoDoLogin({ loginId, fase: "preparando", preparo: { acao: "atualizar", atualizacao: { fase: "atualizando", alvo: "2.1.290", antes: "2.1.280", em: 5, lixo: 1 } } }).preparo?.atualizacao).toEqual({ fase: "atualizando", alvo: "2.1.290", antes: "2.1.280", em: 5 });
+    expect(progressoDoLogin({ loginId, fase: "falhou", erro: "preparo_falhou", preparo: { acao: "instalar", atualizacao: { fase: "falhou", alvo: "0.159.0", motivo: "sem_internet", em: 9 } } }).preparo?.atualizacao?.motivo).toBe("sem_internet");
+    expect(() => progressoDoLogin({ loginId, fase: "preparando", preparo: { acao: "instalar", atualizacao: { fase: "voando", alvo: "2.1.290", em: 1 } } })).toThrow();
+    expect(() => progressoDoLogin({ loginId, fase: "preparando", preparo: { acao: "instalar", atualizacao: { fase: "atualizando", alvo: "<b>", em: 1 } } })).toThrow();
+    expect(() => progressoDoLogin({ loginId, fase: "preparando", preparo: { acao: "instalar", atualizacao: "falhou" } })).toThrow();
+  });
 });
 
 describe("NOD-245: a adoção que falha por exceção e a entrega grande", () => {

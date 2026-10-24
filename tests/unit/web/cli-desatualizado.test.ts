@@ -120,16 +120,52 @@ const noApp = (sim: boolean) => { if (sim) (globalThis as Record<string, unknown
 afterEach(() => noApp(false));
 
 describe("conversa: o bot fixado numa IA que não está pronta", () => {
-  it("desatualizada: nomeia a IA, a versão e a mínima; 'Atualizar o Codex' e 'Trocar a IA do bot'", () => {
+  it("desatualizada (NOD-8 J3, protótipo v2.2): a pílula com 1 frase e 'Atualizar', sem cartão, terminal nem troca", () => {
     noApp(true);
     const html = renderMensagem(negacao("codex-cli"), com({ claude: PRONTO, codex: ANTIGO }));
-    expect(html).toContain("tom-erro");
-    expect(html).toContain("Gil não começou: o Codex deste Mac está desatualizado.");
-    expect(html).toContain("Gil usa o ChatGPT (Codex). A versão instalada é a 0.147.0, e o nod precisa da 0.159 ou mais nova.");
-    expect(html).toContain("Sua mensagem fica guardada");
-    expect(html).toMatch(/data-act="ia-atualizar" data-ia="codex-cli">Atualizar o Codex</);
-    expect(html).toMatch(/data-act="inteligencia" data-id="gil">Trocar a IA de Gil</);
+    expect(html).toContain('class="linha-centro-wrap linha-espera linha-ia-atualizar"');
+    expect(html).toContain("Gil precisa do Codex mais novo.");
+    expect(html).toMatch(/data-act="ia-atualizar" data-ia="codex-cli" data-agora="1">Atualizar</);
+    expect(html).not.toContain("aviso-estado");
+    expect(html).not.toContain("<code>"); // o comando do terminal só depois de uma falha
+    expect(html).not.toContain('data-act="inteligencia"'); // trocar a IA fica para quando o clique não resolve
     expect(html).not.toContain("Instalar");
+    // QA #511 (protótipo v2.2, j3-1): a pílula do Atualizar leva o cadeado, não o relógio da fila.
+    expect(html).toContain('<path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5"/>');
+    expect(html).not.toContain('<path d="M12 7.5V12l3 2"/>');
+  });
+
+  it("NOD-8 J2: na fase esperando, o chip 'Na fila'; sem comando do terminal", () => {
+    noApp(true);
+    const codex: Inventario = { ...ANTIGO, atualizacao: { fase: "esperando", alvo: "0.159.0", em: 1 } } as Inventario;
+    const html = renderMensagem(negacao("codex-cli"), com({ claude: PRONTO, codex }));
+    expect(html).toContain("linha-espera");
+    expect(html).toContain("Na fila · Vamos atualizar o Codex quando seus bots terminarem.");
+    expect(html).toContain('<path d="M12 7.5V12l3 2"/>'); // a fila segue com o relógio
+    expect(html).not.toContain('data-act="ia-atualizar"');
+    expect(html).not.toContain("<code>");
+  });
+
+  it("NOD-8 J3: depois de uma falha no app, a frase do motivo, 'Tentar de novo' e só então o comando", () => {
+    noApp(true);
+    const codex: Inventario = { ...ANTIGO, atualizacao: { fase: "falhou", alvo: "0.159.0", motivo: "sem_internet", em: 1 } } as Inventario;
+    const html = renderMensagem(negacao("codex-cli"), com({ claude: PRONTO, codex }));
+    expect(html).toContain("tom-erro");
+    expect(html).toMatch(/data-act="ia-atualizar" data-ia="codex-cli" data-agora="1">Tentar de novo</);
+    expect(html).toContain("Não deu para atualizar o Codex: sem conexão com a internet.");
+    expect(html).toMatch(/data-act="inteligencia" data-id="gil">Trocar a IA de Gil</);
+    // O terminal num link discreto embaixo do motivo (protótipo v2.2, "Prefere o terminal?").
+    expect(html).toMatch(/<details class="ia-terminal"[^>]*><summary class="cl-terminal-link">Prefere o terminal\?<\/summary>.*<code>/s);
+  });
+
+  it("NOD-8: a IA que o nod está atualizando: o chip em curso, sem botão de atualizar", () => {
+    noApp(true);
+    const codex: Inventario = { estado: "ausente", causa: "atualizando", versao: "0.147.0", minima: "0.159.0", motivo: "x", atualizacao: { fase: "atualizando", alvo: "0.159.0", em: 1 }, em: 0 } as Inventario;
+    const html = renderMensagem(negacao("codex-cli"), com({ claude: PRONTO, codex }));
+    expect(html).toContain("linha-espera");
+    expect(html).toContain("Atualizando o Codex…");
+    expect(html).toContain("ob-gira");
+    expect(html).not.toContain('data-act="ia-atualizar"');
   });
 
   it("revisão: desatualizada fora do app, o próprio aviso traz o comando com 'Copiar' (a Conexão só fala da IA em uso)", () => {
@@ -181,6 +217,16 @@ describe("conversa: o bot fixado numa IA que não está pronta", () => {
     expect(html).toContain('class="linha-centro-wrap linha-ia linha-ia-voltou"');
     expect(html).toContain("O Codex já voltou ·");
     expect(html).toContain("mande a mensagem de novo");
+  });
+
+  it("NOD-8 passo 11: voltou porque o nod atualizou: a linha de sistema diz de qual versão para qual", () => {
+    const codex: Inventario = { ...PRONTO, versao: "0.160.0", em: 2, atualizacao: { fase: "sucesso", alvo: "0.159.0", antes: "0.147.0", depois: "0.160.0", em: 2 } };
+    const html = renderMensagem(negacao("codex-cli"), com({ claude: PRONTO, codex }));
+    expect(html).toContain('<span class="linha-ok" aria-hidden="true">✓</span><span>Codex atualizado: 0.147.0 → 0.160.0 ·');
+    expect(html).toContain("mande a mensagem de novo");
+    // Um sucesso de antes da negação não é o que trouxe a IA de volta: fica a linha de sempre.
+    const velho: Inventario = { ...codex, atualizacao: { fase: "sucesso", alvo: "0.159.0", antes: "0.147.0", depois: "0.160.0", em: -1 } } as Inventario;
+    expect(renderMensagem(negacao("codex-cli"), com({ claude: PRONTO, codex: velho }))).toContain("O Codex já voltou ·");
   });
 
   it("revisão: fixado no Codex sem catálogo ou só lento, com o Claude pronto, nunca diz que a IA 'já voltou'", () => {
@@ -412,7 +458,7 @@ describe("NOD-220: o bot no Automático com o Codex fora nunca ouve 'já voltou'
 
   it("com o Codex sem login, no limite ou desatualizado, o aviso é o da IA que negou (o estado dela), nunca 'já voltou'", () => {
     const LIMITE: Inventario = { estado: "nao_autenticado", causa: "limite", motivo: "limite de uso", em: 10 };
-    const casos: [Inventario, string][] = [[SEM_LOGIN, "Gil não começou: falta entrar no Codex."], [LIMITE, "Gil não começou: a conta do ChatGPT chegou ao limite da assinatura."], [ANTIGO, "Gil não começou: o Codex deste Mac está desatualizado."]];
+    const casos: [Inventario, string][] = [[SEM_LOGIN, "Gil não começou: falta entrar no Codex."], [LIMITE, "Gil não começou: a conta do ChatGPT chegou ao limite da assinatura."], [ANTIGO, "Gil precisa do Codex mais novo."]];
     for (const [codex, titulo] of casos) {
       const html = renderMensagem(daAda({ ia: "codex-cli" }), auto({ claude: CLAUDE_NOVO, codex }));
       expect(html).toContain(titulo);

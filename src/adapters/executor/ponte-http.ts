@@ -305,8 +305,9 @@ export function criarPonteHttp(o: { url: string; chave: string; versao: string; 
           return e instanceof FalhaPonte && e.codigo === "rota_ausente" ? "sem_rota" : null;
         }
       },
-      async progresso(p: ProgressoDoLogin): Promise<boolean> {
-        try { await chamar("contas/progresso", p, { rota404: true }); return true; } catch { return false; }
+      /** NOD-8 passo 10: "recusado" = o servidor respondeu 400 (o de antes não conhece `preparando`): não adianta repetir. */
+      async progresso(p: ProgressoDoLogin): Promise<boolean | "recusado"> {
+        try { await chamar("contas/progresso", p, { rota404: true }); return true; } catch (e) { return e instanceof FalhaPonte && e.codigo === "entrada_invalida" ? "recusado" : false; }
       },
       async saiu(impressoes: string[], desconectada: boolean): Promise<boolean> {
         try { await chamar("contas/saiu", { impressoes, desconectada }, { rota404: true }); return true; } catch { return false; }

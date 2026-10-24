@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { IAS_DESKTOP } from "../../../src/contracts/desktop.ts";
+import { comandoDoTerminal } from "../../../web/lib/atualizacao-ia.ts";
+import { COMANDO_ATUALIZAR_IA } from "../../../web/telas/ia-fora.ts";
 import { ambienteDoLogin, comandoDeAtualizar, comandoDeEstadoDoLogin, comandoDeLogin, comandoDeLoginNoApp, INTERVALO_SONDA_IA_MS, lerIaDesktop, logadoPeloStatus, textoDaImpressao, URL_INSTALAR_IA } from "../../../desktop/ia-mac.ts";
 
 /**
@@ -83,5 +85,13 @@ describe("comandoDeAtualizar (NOD-9)", () => {
   it("o Claude Code tem `claude update`; o Codex não tem atualizador próprio", () => {
     expect(comandoDeAtualizar("claude-cli")).toEqual(["update"]);
     expect(comandoDeAtualizar("codex-cli")).toBeNull();
+  });
+
+  it("NOD-8 passo 12: o `codex update` só entra depois do UAT num Mac real; até lá o Codex fica nao_suportado e o terminal do Mac cai no npm", () => {
+    expect(comandoDeAtualizar("codex-cli")).toBeNull();
+    expect(comandoDoTerminal("mac", "codex-cli")).toBeNull();
+    expect(COMANDO_ATUALIZAR_IA["codex-cli"]).toBe("npm install -g @openai/codex@latest");
+    // Na VM o caminho é o npm_local do motor, com o comando do próprio nod.
+    expect(comandoDoTerminal("vm", "codex-cli")).toBe("nod-motor atualizar-ia codex");
   });
 });

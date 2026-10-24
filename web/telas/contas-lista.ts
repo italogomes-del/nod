@@ -5,6 +5,7 @@ import type { MaquinaDto } from "../../src/contracts/maquina.ts";
 import { ICONE } from "../lib/icones.ts";
 import { esc } from "../lib/render.ts";
 import { VIVO } from "../lib/copiar.ts";
+import { comandoDoTerminal, fraseDaAtualizacao } from "../lib/atualizacao-ia.ts";
 import { logoDaIa, PROVEDOR } from "./cartao-ia.ts";
 import { planoNaTela } from "./contas-ia.ts";
 import { quandoNaTela, usoDaConta } from "./uso-da-conta.ts";
@@ -118,7 +119,7 @@ function pilulas(c: ContaIa, x: ContextoContas): string {
     const v = c.maquinas.find((y) => y.maquinaId === m.id);
     const nome = nomeCurto(m, x.maquinas);
     const ic = m.plataforma === "darwin" ? ICONE.laptop : ICONE.servidor;
-    if (v?.estado === "pronta") return `<span class="cl-pil"><i class="cl-ponto${m.conectada ? "" : " fora"}" aria-hidden="true"></i>${ic}${esc(nome)}</span>`;
+    if (v?.estado === "pronta") return `<span class="cl-pil"><i class="cl-ponto${m.conectada ? "" : " fora"}" aria-hidden="true"></i>${ic}${esc(nome)}</span>${alvoPendente(c, m)}`;
     if (!m.conectada) return "";
     const entrando = x.ui.logins.some((l) => maquinaDoLogin(l) === m.id && contaDoLogin(l) === c.id);
     if (entrando) return `<span class="cl-pil tracejada"><span class="ob-gira" aria-hidden="true"></span>Entrando na ${esc(nome)}…</span>`;
@@ -129,6 +130,19 @@ function pilulas(c: ContaIa, x: ContextoContas): string {
       ? `<button type="button" class="cl-pil tracejada" data-act="cl-entrar" data-id="${esc(c.id)}" data-maquina="${esc(m.id)}">${ic}${esc(texto)}</button>`
       : `<span class="cl-pil tracejada mudo">${ic}${esc(`Entre pelo app do nod no ${nome}`)}</span>`;
   }).join("");
+}
+
+/**
+ * NOD-8 J5 (passo 11): na VM, a IA da conta abaixo do piso (o alvo pendente que a máquina anunciou em `iasDetalhe`) ganha
+ * "Atualizar" na linha da conta — só com a máquina conectada e que atende o pedido remoto (`atualizaIas`). "Há versão nova"
+ * (latest) fica fora. O Mac fica de fora: o cartão da IA do #498 já mostra o estado e o botão dele.
+ */
+function alvoPendente(c: ContaIa, m: MaquinaDto): string {
+  if (m.plataforma === "darwin" || !m.conectada || m.atualizaIas !== true) return "";
+  const d = m.iasDetalhe?.[c.ia];
+  if (d?.causa !== "cli_antigo" || !d.minima) return "";
+  const { cli } = PROVEDOR[c.ia];
+  return `<button type="button" class="cl-pil tracejada" data-act="cl-atualizar-maquina" data-maquina="${esc(m.id)}" data-ia="${esc(c.ia)}" title="${esc(`${cli} ${d.versao ?? ""} na ${m.nome}; o nod precisa da ${d.minima} ou mais nova`)}">${esc(`Atualizar o ${cli}`)}</button>`;
 }
 
 export const maquinaDoLogin = (l: LoginNaTela): string => (l.onde === "vm" ? l.login.maquinaId : l.maquinaId);
@@ -149,7 +163,7 @@ const ERROS_LOGIN: Partial<Record<CausaFalhaLogin | Exclude<ResultadoColarCodigo
   config_invalida: "A configuração da IA nessa máquina está com problema. Rode a instalação do motor de novo.",
   sem_login_aberto: "O login dessa máquina já tinha terminado. Tente de novo.",
   ja_enviado: "O código já foi enviado. Espere a máquina conferir.",
-  // NOD-8: o passo 1 (instalar ou atualizar a IA antes do login) não terminou; o motivo entra com a NOD-9 (passo 9).
+  // NOD-8: o passo 1 (instalar ou atualizar a IA antes do login) não terminou; com o motivo, a frase é a da atualização.
   preparo_falhou: "Não deu para preparar a IA nessa máquina. Tente de novo.",
 };
 const erroDoLogin = (e: string | null): string => (e ? (ERROS_LOGIN as Record<string, string | undefined>)[e] : undefined) ?? "O login não terminou. Tente de novo.";
@@ -195,7 +209,15 @@ function blocoDoLogin(l: LoginNaTela, x: ContextoContas, conta: ContaIa | null):
     const atualizar = podeAtualizar ? `<button type="button" class="bt pri sm" data-act="cl-atualizar-ia" data-login="${id}"${l.enviando ? " disabled" : ""}>Atualizar</button>` : "";
     const tentar = `${atualizar}<button type="button" class="bt sm" data-act="cl-login-de-novo" data-login="${id}">Tentar de novo</button><button type="button" class="ob-link" data-act="cl-login-fechar" data-login="${id}">Fechar</button>`;
     const nota = antiga && l.erroEnvio ? `<p class="mudo">${esc(l.erroEnvio)}</p>` : "";
-    return `<div class="cl-login erro" data-login="${id}" role="alert">${cab("")}<p class="cl-erro">${esc(g.fase === "cancelado" ? "Login cancelado." : antiga ? erroDeCliAntigo(g.ia, podeAtualizar) : erroDoLogin(g.erro))}</p>${nota}<div class="cl-login-acoes">${tentar}</div></div>`;
+    // NOD-8 passo 11: o preparo que falhou diz o motivo (sem internet, sem espaço…) e, só agora, o terminal — recolhido
+    // atrás de "Prefere o terminal?", como no resto do login (protótipo v2.2: "o terminal escondido").
+    const preparo = g.fase === "falhou" && g.erro === "preparo_falhou" ? fraseDaAtualizacao(g.preparo?.atualizacao, PROVEDOR[g.ia].cli, g.preparo?.acao === "instalar" ? "instalar" : "atualizar") : null;
+    const cmd = g.fase === "falhou" && g.erro === "preparo_falhou" ? comandoDoTerminal("vm", g.ia) : null;
+    const terminal = !cmd ? ""
+      : x.ui.terminal === g.id
+        ? `<p class="cl-terminal">No terminal da ${esc(nome)}: <code>${esc(cmd)}</code> <button type="button" class="ob-link" data-act="copiar-texto" data-texto="${esc(cmd)}" ${VIVO}>Copiar</button></p>`
+        : `<button type="button" class="cl-terminal-link" data-act="cl-terminal" data-login="${id}">Prefere o terminal?</button>`;
+    return `<div class="cl-login erro" data-login="${id}" role="alert">${cab("")}<p class="cl-erro">${esc(g.fase === "cancelado" ? "Login cancelado." : antiga ? erroDeCliAntigo(g.ia, podeAtualizar) : preparo ?? erroDoLogin(g.erro))}</p>${nota}${terminal}<div class="cl-login-acoes">${tentar}</div></div>`;
   }
   if (g.fase === "preparando") return blocoDoPreparo(g, nome, id, cab(cancelar));
   if (g.fase === "pedido" || g.fase === "abrindo" || !g.url) {

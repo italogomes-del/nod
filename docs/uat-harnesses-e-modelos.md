@@ -141,6 +141,22 @@ Na VM (motor): instale o Claude Code antigo como `nod` (`sudo -u nod /opt/nod-mo
 | HM-28 | Peça 4 vezes em menos de uma hora. | O 4º diz que já foram 3 pedidos na última hora. | P2 | Pendente |
 | HM-29 | No navegador, entre numa conta da VM com o Claude antigo. | O login falha com "desatualizada" e o botão **Atualizar**; clicado, a VM atualiza e o "Tentar de novo" entra. | P1 | Pendente |
 
+## Rodada F — preparar a IA no login e os avisos da conversa (NOD-8, PR 2)
+
+Use a `nod-motor-teste` (VM) e um Mac com o app. O HM-29 da rodada E muda: com o motor novo, o login não falha com
+"desatualizada"; ele atualiza no passo 1.
+
+| ID | Passos | Resultado esperado | Prioridade | Resultado |
+|---|---|---|---|---|
+| HM-30 | Na VM sem o Codex (`sudo -u nod rm -f /home/nod/.local/bin/codex`), abra Provedores de IA › Nova conta › ChatGPT na VM. | A Nova conta diz "o nod instala o ChatGPT nela". O login mostra o passo 1 "Preparar o ChatGPT na vm…" e o passo 2 "Começa sozinho…". Depois abre a página da OpenAI e termina com "✓ ChatGPT pronto na vm… · Codex X". | P0 | Pendente |
+| HM-31 | Na VM com o Claude Code abaixo do piso (como na rodada E), entre numa conta do Claude. | O passo 1 "Atualizar o Claude Code na vm…" vai de `A → B`, e o login abre depois, sem "desatualizada". | P0 | Pendente |
+| HM-32 | Na VM com menos de 2 GB livres em `/home/nod` (por exemplo `fallocate -l <n>G /home/nod/ocupa`), entre numa conta. | O login falha com "falta espaço no disco (tem X MB livres e precisa de 2048 MB)", o comando `nod-motor atualizar-ia …` e "Tentar de novo". O npm não roda. | P1 | Pendente |
+| HM-33 | Com um servidor antigo (sem `preparando`) e o motor novo, entre numa conta na VM sem a IA. | O preparo roda sem o texto do passo 1 (fica "Abrindo o login…"), e o login segue. No `journalctl`, nenhum erro de 400 repetido. | P1 | Pendente |
+| HM-34 | No Mac com o Codex abaixo do piso, mande uma mensagem a um bot fixado no Codex. | A pílula diz "Gil precisa do Codex mais novo.", com as versões e **Atualizar**, sem comando do terminal. Com um turno do Codex rodando, aparece o chip "Na fila". | P0 | Pendente |
+| HM-35 | Deixe a atualização do HM-34 falhar (sem rede). | A pílula diz o motivo, mostra "Tentar de novo" e, só agora, o comando do terminal. | P1 | Pendente |
+| HM-36 | Atualize a IA do HM-34 até o fim. | O aviso some e entra a linha "Codex atualizado: A → B · se a resposta não chegou, mande a mensagem de novo." | P0 | Pendente |
+| HM-37 | Com uma conta já logada na VM e o Claude Code abaixo do piso, abra Provedores de IA. | A linha da conta mostra **Atualizar o Claude Code** ao lado da VM. Clicado, a nota diz "Pedido enviado…". No Mac, esse botão não aparece (fica o cartão da IA). | P1 | Pendente |
+
 ## Registro da execução
 
 Preencha uma linha por ambiente usado. Não registre emails, tokens, caminhos de credenciais ou

@@ -314,6 +314,17 @@ export function criarContasDaPessoa(d: DepsContasDaPessoa) {
         trocarLogin(loginId, (x) => ({ ...x, enviando: false, erroEnvio: "A máquina não recebeu o pedido. Confira se ela está conectada e tente de novo." } as LoginNaTela));
       }
     },
+    /** NOD-8 J5: o "Atualizar o X" da linha da conta (VM abaixo do piso) pede à máquina que atualize; a nota diz o resultado. */
+    async atualizarNaMaquina(maquinaId: string, ia: IaComConta): Promise<void> {
+      try {
+        const api = d.api();
+        if (!api?.atualizarIaDaMaquina) throw new Error("sem_api");
+        await api.atualizarIaDaMaquina(maquinaId, ia);
+        d.mudar({ nota: "Pedido enviado. A máquina atualiza a IA quando os bots dela terminarem o que estão fazendo." });
+      } catch {
+        d.mudar({ nota: "A máquina não recebeu o pedido. Confira se ela está conectada e tente de novo." });
+      }
+    },
     /** Depois de recarregar a página: os logins da VM que estavam abertos voltam a ser conferidos. */
     conferir,
   };

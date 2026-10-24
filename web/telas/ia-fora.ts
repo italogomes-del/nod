@@ -5,6 +5,7 @@ import type { ContasIaDto, ContasNoLimite, MotivoDaNota } from "../../src/contra
 import type { PayloadTrocaDeIa } from "../../src/contracts/troca-de-ia.ts";
 import type { Estado } from "../estado/reducer.ts";
 import { avisoDeEstado } from "../lib/aviso-estado.ts";
+import { atualizacaoEmCurso, comandoDoTerminal, fraseDaAtualizacao } from "../lib/atualizacao-ia.ts";
 import { formatoData } from "../lib/formato-data.ts";
 import { botao, esc, hora, paragrafos } from "../lib/render.ts";
 import { LOGOS_IA } from "./onboarding-logos.ts";
@@ -131,14 +132,13 @@ export function avisoHarnessFora(m: Mensagem, estado: Pick<Estado, "executor">, 
   const botNoMeio = p.nomeDoBot ?? "o bot";
   const dados = { ia: p.ia };
   const antigo = desatualizado(inv);
+  if (inv && (antigo || (inv.estado === "ausente" && inv.causa === "atualizando"))) return avisoDaAtualizacao(m, inv, p);
   const conectar = botao("secao-espaco", "Conectar IA", { classe: "pri sm", dados: { secao: "conexao" } });
   // NOD-220: a IA segue fora sem estado que o catálogo explique (sonda "pronto" anterior à negação, sonda lenta ou servidor
   // sem catálogo): o aviso ainda nomeia a IA e diz o que conferir — nunca "sua conta de IA" sem dizer qual.
   const semEstado = !inv || inv.estado === "pronto" || inv.causa === "sonda_lenta";
   const [titulo, situacao, resolve] = semEstado
     ? ["Nenhum trabalho começou.", `${bot} não pôde começar: o ${cli} (${nome}) estava indisponível. Confira em Conexão se o ${cli} está instalado e com a conta conectada.`, conectar]
-    : antigo
-    ? [`${bot} não começou: o ${cli} deste Mac está desatualizado.`, `${bot} usa o ${nome} (${cli}). A versão instalada é a ${antigo.versao}, e o nod precisa da ${versaoLegivel(antigo.minima)} ou mais nova.`, p.noApp ? botao("ia-atualizar", `Atualizar o ${cli}`, { classe: "pri sm", dados }) : ""]
     // NOD-213: no limite da assinatura a IA está logada; "falta entrar" seria falso. Resolve trocando de IA (ou esperando).
     : inv.estado === "nao_autenticado" && inv.causa === "limite"
       ? [`${bot} não começou: a conta do ${nome} chegou ao limite da assinatura.`, `${bot} usa o ${nome} (${cli}), e a conta conectada está no limite de uso.`, ""]
@@ -152,9 +152,53 @@ export function avisoHarnessFora(m: Mensagem, estado: Pick<Estado, "executor">, 
     tom: "erro",
     titulo,
     texto: `${situacao} Sua mensagem fica guardada: quando o ${cli} estiver pronto, ${botNoMeio} responde sozinho.`,
-    extra: `${antigo ? linhaAtualizarIa(p.ia, false) : ""}${detalhes}`,
+    extra: detalhes,
     acao: `<span class="aviso-estado-acoes">${resolve}${trocar}</span>`,
     classe: "aviso-ia-fora",
+  });
+}
+
+const FILA: ReadonlySet<string> = new Set(["esperando", "aviso", "segurando"]);
+
+/**
+ * NOD-8 passo 11 (definido em 2026-10-24, protótipo v2.2 sobre o estado da NOD-9): o bot fixado numa IA abaixo do piso.
+ *  - J3: a pílula com uma frase ("Gil precisa do Claude Code mais novo.") e "Atualizar" (`iaAtualizar`, gatilho
+ *    clique, sem esperar os bots: data-agora="1");
+ *  - J2: na fila (`esperando`/`aviso`/`segurando`), a mesma pílula diz "Na fila · …"; rodando, gira;
+ *  - depois de uma falha (`falhou`/`insuficiente`), o cartão com o motivo, "Tentar de novo", "Trocar a IA" e o terminal
+ *    atrás de "Prefere o terminal?"; fora do app, onde não há botão, o cartão traz o comando aberto;
+ *  - no `sucesso` a sonda fica pronta e o aviso dá lugar à linha de sistema (linhaIaVoltou, com as versões).
+ */
+function avisoDaAtualizacao(m: Mensagem, inv: Inventario, p: { nomeDoBot: string | null; agenteId: string | null; ia: IdIa; noApp: boolean }): string {
+  const { cli } = PROVEDOR_DA_IA[p.ia];
+  const bot = p.nomeDoBot ?? "O bot";
+  const antigo = desatualizado(inv);
+  const a = inv.atualizacao;
+  const falhou = a?.fase === "falhou" || a?.fase === "insuficiente";
+  const frase = fraseDaAtualizacao(a, cli);
+  const versoes = antigo ? ` Este Mac tem a ${antigo.versao}, e o nod precisa da ${versaoLegivel(antigo.minima)} ou mais nova.` : "";
+  // Protótipo v2.2 (J2/J3): fora da falha, no lugar do cartão alto, uma pílula da família da linha de sistema — uma
+  // frase e uma ação. Trocar a IA e o terminal ficam para quando o clique não resolve (o cartão de falha, abaixo).
+  // QA do #511 (protótipo v2.2, j3-1): a pílula do "Atualizar" leva o cadeado; na fila e rodando, o relógio.
+  const pilula = (corpo: string, icone = ICONE_RELOGIO) => `<div class="linha-centro-wrap linha-espera linha-ia-atualizar" role="status" data-fica><span class="linha-centro estatica"><span class="linha-ic" aria-hidden="true">${icone}</span>${corpo}</span></div>`;
+  if (atualizacaoEmCurso(a) || (inv.estado === "ausente" && inv.causa === "atualizando")) return pilula(`<span>${esc(frase ?? `Atualizando o ${cli}…`)}</span>${GIRA_LINHA}`);
+  if (a && FILA.has(a.fase)) return pilula(`<span>${esc(`Na fila · ${frase ?? "atualiza quando os bots terminarem"}`)}</span>`);
+  if (!falhou && p.noApp) return pilula(`<span>${esc(`${bot} precisa do ${cli} mais novo.`)}</span>${botao("ia-atualizar", "Atualizar", { classe: "pri sm", dados: { ia: p.ia, agora: "1" } })}`, ICONE_CADEADO);
+  const resolve = p.noApp ? botao("ia-atualizar", "Tentar de novo", { classe: "pri sm", dados: { ia: p.ia, agora: "1" } }) : "";
+  const comando = comandoDoTerminal("mac", p.ia) ?? COMANDO_ATUALIZAR_IA[p.ia];
+  // Depois da falha, no app, o terminal fica num link discreto embaixo do motivo (protótipo v2.2, "Prefere o terminal?").
+  const terminal = p.noApp
+    ? `<details class="ia-terminal" data-disclosure="ia-terminal-${esc(m.id)}"><summary class="cl-terminal-link">Prefere o terminal?</summary>${linhaAtualizarIa(p.ia, false, comando)}</details>`
+    : linhaAtualizarIa(p.ia, false, comando);
+  const trocar = p.agenteId ? botao("inteligencia", p.nomeDoBot ? `Trocar a IA de ${esc(p.nomeDoBot)}` : "Trocar a IA", { classe: "sm", id: p.agenteId }) : "";
+  const detalhes = `<details class="aviso-estado-detalhes" data-disclosure="negacao-${esc(m.id)}"><summary>Detalhes técnicos</summary>${paragrafos(m.texto)}</details>`;
+  return avisoDeEstado({
+    tom: falhou ? "erro" : "info",
+    titulo: `${bot} precisa do ${cli} mais novo.`,
+    texto: `${falhou && frase ? `${frase} ` : ""}${versoes.trim()} Sua mensagem fica guardada: quando o ${cli} estiver pronto, ${p.nomeDoBot ?? "o bot"} responde sozinho.`.trim(),
+    extra: `${terminal}${detalhes}`,
+    acao: `<span class="aviso-estado-acoes">${resolve}${trocar}</span>`,
+    classe: "aviso-ia-fora aviso-ia-atualizar",
   });
 }
 
@@ -164,7 +208,13 @@ export function avisoHarnessFora(m: Mensagem, estado: Pick<Estado, "executor">, 
  * Uma linha de sistema, na largura do texto; sem IA nomeável (o catcher), "A IA". A linha com a versão de antes e a de
  * depois ("atualizado na vm: A → B") vem com a atualização da NOD-9.
  */
-export function linhaIaVoltou(ia: IdIa | null): string {
+export function linhaIaVoltou(ia: IdIa | null, atualizada?: { antes?: string; depois?: string } | null): string {
+  // NOD-8 passo 11: a IA voltou porque o nod a atualizou — a linha diz de qual versão para qual.
+  if (ia && atualizada?.depois) {
+    const de = atualizada.antes ? `${atualizada.antes} → ` : "";
+    // Protótipo v2.2: a linha do sucesso leva o ✓ (linha-ok), não o logo da IA.
+    return `<div class="linha-centro-wrap linha-ia linha-ia-voltou"><span class="linha-centro estatica"><span class="linha-ok" aria-hidden="true">✓</span><span>${esc(`${PROVEDOR_DA_IA[ia].cli} atualizado: ${de}${atualizada.depois}`)} ·</span><span>se a resposta não chegou, mande a mensagem de novo.</span></span></div>`;
+  }
   return `<div class="linha-centro-wrap linha-ia linha-ia-voltou"><span class="linha-centro estatica">${ia ? logo(ia) : ""}<span>${esc(ia ? `O ${PROVEDOR_DA_IA[ia].cli}` : "A IA")} já voltou ·</span><span>se a resposta não chegou, mande a mensagem de novo.</span></span></div>`;
 }
 
@@ -422,6 +472,7 @@ export function linhaContaTrocada(m: Mensagem): string | null {
   return `<div class="linha-centro-wrap linha-ia"><span class="linha-centro estatica"><span class="linha-ic" aria-hidden="true">↻</span><span>${esc(m.texto)}</span></span></div>`;
 }
 
+const ICONE_CADEADO = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="10.5" width="14" height="9.5" rx="2"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5"/></svg>';
 const ICONE_RELOGIO = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><path d="M12 7.5V12l3 2"/></svg>';
 const GIRA_LINHA = '<span class="ob-gira" aria-hidden="true"></span>';
 
@@ -473,8 +524,7 @@ function quandoVolta(voltaEm: number, agora: number): string {
 }
 
 /** NOD-171: o comando que atualiza a IA, com "Copiar"; no app do Mac, "Atualizar" abre a página oficial. */
-export function linhaAtualizarIa(ia: IdIa, noApp: boolean): string {
-  const comando = COMANDO_ATUALIZAR_IA[ia];
+export function linhaAtualizarIa(ia: IdIa, noApp: boolean, comando: string = COMANDO_ATUALIZAR_IA[ia]): string {
   const abrir = noApp ? botao("ia-atualizar", `Atualizar o ${PROVEDOR_DA_IA[ia].cli}`, { classe: "pri sm", dados: { ia } }) : "";
   return `<div class="ia-atualizar"><p>No Terminal deste Mac, rode:</p><div class="ia-comando"><code>${esc(comando)}</code>${botao("copiar-texto", "Copiar", { classe: "sm", dados: { texto: comando }, vivo: true })}</div><p class="mudo">O nod percebe sozinho quando a versão nova estiver instalada.</p>${abrir}</div>`;
 }

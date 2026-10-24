@@ -12,6 +12,7 @@ import { contaDoCodex } from "../desktop/conta-codex.ts";
 import type { ContaLocal, ContasLocais, IdentidadeDaConta } from "../desktop/contas-locais.ts";
 import { ambienteDoLogin, comandoDeEstadoDoLogin, comandoDeLoginNoApp, comandoDeLogout, logadoPeloStatus, textoDaImpressao } from "../desktop/ia-mac.ts";
 import { criarLoginDasIas, type ProcessoDeLogin, type StatusDoLogin } from "../desktop/login-ia.ts";
+import type { PassoDoPreparo, PreparoNoMotor } from "./preparo-do-login.ts";
 
 /**
  * As contas de IA no motor da VM (definido em 2026-10-13, ADR-102): a puxada do que a tela pediu (logins, saídas,
@@ -29,7 +30,8 @@ export const TENTATIVAS_DE_SAIR = 3;
 
 export type PonteDeContas = {
   puxar(): Promise<PuxadaDeContas | null | "sem_rota">;
-  progresso(p: ProgressoDoLogin): Promise<boolean>;
+  /** true = recebido; false = sem resposta (tenta de novo); "recusado" = 400 (servidor de antes, NOD-8 passo 10). */
+  progresso(p: ProgressoDoLogin): Promise<boolean | "recusado">;
   saiu(impressoes: string[], desconectada: boolean): Promise<boolean>;
 };
 
@@ -106,13 +108,29 @@ export type DepsContasDoMotor = {
   desconectar(): Promise<void>;
   /** NOD-9 PR4: a tela pediu para atualizar a IA desta máquina (o botão "Atualizar"); quem atualiza aplica o limite. */
   atualizar?(ia: IaComConta): void;
+  /**
+   * NOD-8 passo 10: o passo 1 do login (a IA que falta é instalada; a abaixo do piso, atualizada) antes do `auth login`.
+   * Sem `preparo`, o login abre direto (como antes).
+   */
+  preparo?: PreparoNoMotor;
   /** Uma conta saiu desta máquina: o driver guardado dela é descartado. */
   aoSairDaConta?(conta: ContaLocal): Promise<void>;
   agora(): number;
   agendar(fn: () => void, ms: number): { cancelar(): void };
 };
 
-type LoginEmCurso = { pedido: LoginPendente; conta: ContaLocal; par: ParDoLogin | null; login: ReturnType<typeof criarLoginDasIas>; relatado: string; fim: boolean; nova: boolean; pendente?: Omit<ProgressoDoLogin, "loginId"> };
+/**
+ * Revisão do PR #511: o relato que o servidor de antes recusa (400) por causa do preparo, sem ele. `preparando` vira
+ * `abrindo`; o resto perde só o campo `preparo`. null = não há preparo a tirar (a recusa é de outra coisa).
+ */
+function semOPreparo(p: Omit<ProgressoDoLogin, "loginId">): Omit<ProgressoDoLogin, "loginId"> | null {
+  if (p.fase === "preparando") return { fase: "abrindo" };
+  if (p.preparo === undefined) return null;
+  const { preparo: _preparo, ...resto } = p;
+  return resto;
+}
+
+type LoginEmCurso = { pedido: LoginPendente; conta: ContaLocal; par: ParDoLogin | null; login: ReturnType<typeof criarLoginDasIas>; relatado: string; fim: boolean; nova: boolean; pendente?: Omit<ProgressoDoLogin, "loginId">; semPreparo?: boolean; preparando?: boolean };
 
 export function iniciarContasDoMotor(d: DepsContasDoMotor): { parar(): void } {
   const logins = new Map<string, LoginEmCurso>();
@@ -132,7 +150,15 @@ export function iniciarContasDoMotor(d: DepsContasDoMotor): { parar(): void } {
   async function relatar(l: LoginEmCurso, p: Omit<ProgressoDoLogin, "loginId">): Promise<boolean> {
     const chave = JSON.stringify(p);
     if (chave === l.relatado) return true;
-    const ok = await d.ponte.progresso({ loginId: l.pedido.id, ...p }).catch(() => false);
+    const r = await d.ponte.progresso({ loginId: l.pedido.id, ...p }).catch(() => false);
+    const sem = r === "recusado" ? semOPreparo(p) : null;
+    if (sem) {
+      // Servidor de antes (não conhece `preparando`, ou o `preparo`/`atualizacao` dele): a tela segue em "abrindo"
+      // enquanto a máquina prepara, e o fim (falhou/pronto) vai sem o preparo, em vez de ficar pendente para sempre.
+      l.semPreparo = true;
+      return relatar(l, sem);
+    }
+    const ok = r === true;
     if (ok) { l.relatado = chave; delete l.pendente; } else l.pendente = p;
     return ok;
   }
@@ -147,6 +173,7 @@ export function iniciarContasDoMotor(d: DepsContasDoMotor): { parar(): void } {
     // Fica marcado até a puxada deixar de trazer o login (a puxada em voo ainda o traz e não pode reabri-lo).
     terminados.set(l.pedido.id, p ?? "entregue");
     if (p && (await relatar(l, p))) terminados.set(l.pedido.id, "entregue");
+    else if (p && l.pendente) terminados.set(l.pedido.id, l.pendente); // o que sobrou para repetir (sem o preparo, se recusado)
     await l.login.parar().catch(() => undefined);
   }
 
@@ -203,9 +230,27 @@ export function iniciarContasDoMotor(d: DepsContasDoMotor): { parar(): void } {
       registrar: (evento, campos) => log("info", evento, { ...campos, login_id: p.id }),
     });
     logins.set(p.id, l);
-    await relatar(l, { fase: "abrindo" });
-    const inicial = await l.login.entrar(p.ia);
+    const passo = d.preparo ? await d.preparo.precisa(p.ia).catch(() => null) : null;
+    if (!passo) { await abrir(l); return; }
+    // O preparo leva minutos: roda fora da volta, para a puxada seguir (cancelar, outros logins, relatos).
+    await relatar(l, { fase: "preparando", preparo: passo });
+    l.preparando = true;
+    void preparar(l, passo).finally(() => { l.preparando = false; }).catch((e) => log("aviso", "motor_preparo_login_erro", { login_id: p.id, erro: e instanceof Error ? e.name : "desconhecido" }));
+  }
+
+  async function abrir(l: LoginEmCurso, extra: Pick<ProgressoDoLogin, "preparo"> = {}): Promise<void> {
+    await relatar(l, { fase: "abrindo", ...(l.semPreparo ? {} : extra) });
+    const inicial = await l.login.entrar(l.conta.ia);
     if (inicial.fase === "falhou") await aoMudar(l, inicial);
+  }
+
+  async function preparar(l: LoginEmCurso, passo: PassoDoPreparo): Promise<void> {
+    const fim = await d.preparo!.rodar(l.conta.ia, passo);
+    if (l.fim) return; // cancelado enquanto preparava
+    const preparo = { ...passo, ...(fim.depois ? { depois: fim.depois } : {}), atualizacao: fim.atualizacao };
+    if (fim.ok) { await abrir(l, { preparo }); return; }
+    if (l.nova) await d.contas.descartar(l.conta);
+    await terminar(l, { fase: "falhou", erro: "preparo_falhou", ...(l.semPreparo ? {} : { preparo }) });
   }
 
   async function colar(l: LoginEmCurso, cifrado: CodigoCifrado): Promise<void> {
@@ -219,7 +264,11 @@ export function iniciarContasDoMotor(d: DepsContasDoMotor): { parar(): void } {
   async function repetirRelatos(listados: ReadonlySet<string>): Promise<void> {
     for (const [id, p] of [...terminados]) {
       if (!listados.has(id)) { terminados.delete(id); continue; }
-      if (p !== "entregue" && (await d.ponte.progresso({ loginId: id, ...p }).catch(() => false))) terminados.set(id, "entregue");
+      if (p === "entregue") continue;
+      const r = await d.ponte.progresso({ loginId: id, ...p }).catch(() => false);
+      const sem = r === "recusado" ? semOPreparo(p) : null;
+      if (r === true) terminados.set(id, "entregue");
+      else if (sem) terminados.set(id, sem); // servidor de antes: vai sem o preparo na próxima puxada
     }
   }
 
@@ -293,7 +342,12 @@ export function iniciarContasDoMotor(d: DepsContasDoMotor): { parar(): void } {
     for (const p of r.logins) {
       if (terminados.has(p.id)) continue;
       const l = logins.get(p.id);
-      if (p.cancelado) { if (l) await l.login.cancelar(l.conta.ia).catch(() => undefined); continue; }
+      if (p.cancelado) {
+        // Cancelado no preparo: o `auth login` nem abriu; o npm termina sozinho (a trava o protege) e o login acaba aqui.
+        if (l?.preparando) { if (l.nova) await d.contas.descartar(l.conta); await terminar(l, null); continue; }
+        if (l) await l.login.cancelar(l.conta.ia).catch(() => undefined);
+        continue;
+      }
       if (!l) { await comecar(p).catch((e) => log("aviso", "motor_login_falhou_ao_comecar", { login_id: p.id, erro: e instanceof Error ? e.name : "desconhecido" })); continue; }
       if (p.codigo) await colar(l, p.codigo);
     }

@@ -160,7 +160,7 @@ export function criarLoginsNaMaquina(agora: () => number = Date.now): LoginsNaMa
         l.chavePublica = p.chavePublica;
       }
       if (p.pedeCodigo !== undefined) l.pedeCodigo = p.pedeCodigo;
-      if (p.preparo !== undefined) l.preparo = { ...p.preparo };
+      if (p.preparo !== undefined) l.preparo = structuredClone(p.preparo);
       if (p.erro !== undefined) {
         if (!ERRO.test(p.erro)) return { aceito: false, login: publico(l) };
         l.erro = p.erro;

@@ -100,6 +100,18 @@ describe("logins na máquina", () => {
     expect(logins.pendentes(MARLON, VM).map((p) => p.id)).not.toContain(f.id);
   });
 
+  it("NOD-8 passo 9: o motivo da falha do preparo (preparo.atualizacao) vai do motor ao login que a web lê", () => {
+    const { logins } = montar();
+    const l = logins.pedir({ escopo: MARLON, maquinaId: VM, ia: "codex-cli", contaId: null, impressao: null, apelido: null })!;
+    const atualizacao = { fase: "falhou" as const, alvo: "0.159.0", motivo: "sem_espaco" as const, caminho: "npm_local" as const, em: 1, espaco: { livreMb: 1_200, precisaMb: 2_048 } };
+    expect(logins.progresso(MARLON, VM, { loginId: l.id, fase: "falhou", erro: "preparo_falhou", preparo: { acao: "instalar", atualizacao } }).aceito).toBe(true);
+    const visto = logins.ver(MARLON, l.id)!;
+    expect(visto).toMatchObject({ fase: "falhou", erro: "preparo_falhou", preparo: { acao: "instalar", atualizacao } });
+    // Cópia: mexer no relato depois não muda o guardado.
+    atualizacao.espaco.livreMb = 0;
+    expect(logins.ver(MARLON, l.id)?.preparo?.atualizacao?.espaco?.livreMb).toBe(1_200);
+  });
+
   it("a desconexão pedida aparece até a máquina confirmar e vence em 10 min", () => {
     const { logins, passar } = montar();
     logins.pedirDesconexao(MARLON, VM);
