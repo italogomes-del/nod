@@ -317,6 +317,18 @@ describe("driver motor: operações da pessoa (NOD-96 PR 5)", () => {
     expect(m.vistos.map((c) => c.tipo)).toEqual(["iniciar", "sair_de_todos"]);
   });
 
+  it("esquecer senhas (NOD-97 PR 6) também liga o computador antes e não manda tela; ok volta sem extra", async () => {
+    const m = mundo({ loc: { agenteId: null }, responder: (c) => ({ id: c.id, desfecho: "ok", ...(c.tipo === "esquecer_senhas" ? { relancados: 2 } : {}) }) });
+    await expect(m.driver.operar!(ID, "esquecer_senhas")).resolves.toEqual({});
+    expect(m.vistos.map((c) => c.tipo)).toEqual(["iniciar", "esquecer_senhas"]);
+    expect(m.vistos.at(-1)?.agenteId).toBeUndefined();
+  });
+
+  it("esquecer senhas que falha no supervisor (não apagou) vira acao_falhou", async () => {
+    const m = mundo({ loc: { agenteId: null }, responder: (c) => (c.tipo === "esquecer_senhas" ? { id: c.id, desfecho: "falhou", motivo: "acao_falhou" } : { id: c.id, desfecho: "ok" }) });
+    expect((await falha(m.driver.operar!(ID, "esquecer_senhas"))).motivo).toBe("acao_falhou");
+  });
+
   it("sem resposta em 10 min: sem_resposta e o comando sai da fila", async () => {
     const m = mundo({ loc: { agenteId: null, maquinaId: "vm" }, responder: () => null });
     const antes = m.agora();

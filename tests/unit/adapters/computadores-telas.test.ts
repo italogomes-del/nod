@@ -394,6 +394,39 @@ it("Sair de todos: não avisa 'Fechei a tela' nem marca as telas como fechadas (
   expect(registros.find((r) => r.tipo === "sair_de_todos")).toMatchObject({ autor: "pessoa", estado: "concluida" });
 });
 
+it("Esquecer senhas (NOD-97 PR 6): avisa no chat de cada bot com tela aberta, não marca as telas fechadas e registra a pessoa", async () => {
+  mudar("tela-a", { estado: "aberta" });
+  let soltar!: () => void;
+  operar = () => new Promise((r) => { soltar = () => r({}); });
+  const { concluida } = await computadores.operarDaPessoa(MARLON, "esquecer_senhas");
+  expect(operacoes).toEqual(["esquecer_senhas"]);
+  expect(pessoa.operacao).toMatchObject({ tipo: "esquecer_senhas" });
+  // Só o bot com tela aberta é avisado (a tela do Beto está fechada).
+  expect(avisos).toEqual([{ conversaId: "conversa-a", texto: expect.stringMatching(/Fechei a tela de Ana Bot.*esquecer as senhas salvas/), payload: { kind: "computador_em_operacao", agenteId: A, operacao: "esquecer_senhas" } }]);
+  // Uma por vez: com Esquecer senhas viva, outra operação (ou a mesma) é recusada (409 na rota).
+  await expect(computadores.operarDaPessoa(MARLON, "esquecer_senhas")).rejects.toMatchObject({ codigo: "estado_invalido" });
+  await expect(computadores.operarDaPessoa(MARLON, "redefinir")).rejects.toMatchObject({ codigo: "estado_invalido" });
+  soltar();
+  await concluida;
+  // O supervisor fecha e religa as telas: o banco não as marca fechadas (a foto reconcilia).
+  expect(telas.get("tela-a")!.estado).toBe("aberta");
+  expect(telas.get("tela-b")!.estado).toBe("fechada");
+  expect(pessoa.operacao).toBeNull();
+  expect(registros.filter((r) => r.tipo === "esquecer_senhas")).toEqual([expect.objectContaining({ autor: "pessoa", estado: "concluida", computadorId: "pessoa-1" })]);
+});
+
+it("Esquecer senhas com outra operação em curso é recusado; a que falha no supervisor fica registrada como falhou", async () => {
+  pessoa = { ...pessoa, operacao: { tipo: "atualizar", progresso: 40, etapa: "Reiniciando", desde: T0 } };
+  await expect(computadores.operarDaPessoa(MARLON, "esquecer_senhas")).rejects.toMatchObject({ codigo: "estado_invalido" });
+  expect(operacoes).toEqual([]);
+  pessoa = { ...pessoa, operacao: null };
+  const { FalhaComputador } = await import("../../../src/domain/computador.ts");
+  operar = async () => { throw new FalhaComputador("acao_falhou"); };
+  await (await computadores.operarDaPessoa(MARLON, "esquecer_senhas")).concluida;
+  expect(pessoa.operacao).toBeNull();
+  expect(registros.find((r) => r.tipo === "esquecer_senhas")).toMatchObject({ autor: "pessoa", estado: "falhou", motivo: "acao_falhou" });
+});
+
 it("ociosidade: operação presa além do teto (o servidor caiu no meio) não impede a máquina de dormir", async () => {
   const limite = 15 * 60_000;
   agora = T0 + 2 * limite;

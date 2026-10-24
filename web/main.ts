@@ -3590,16 +3590,16 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     if (!estado.computadorPessoa) return abrirComputador(sessao, a, { assumir: el.dataset.assumir === "1", dev: () => estado.modoDev.ligado, aoFechar: render });
     abrirTelaCheia(sessao, a, { assumir: el.dataset.assumir === "1", pedido: el.dataset.pedido ?? null, aoMudar: () => void lerComputadorAgora(), antigo: estado.modoDev.ligado ? () => abrirComputador(sessao, a, { assumir: false, dev: () => estado.modoDev.ligado }) : null });
   },
-  // NOD-96 (v2): as operações do computador da pessoa. Redefinir e Sair de todos pedem confirmação; o resto vai direto.
+  // NOD-96 (v2): as operações do computador da pessoa. Redefinir, Sair de todos e Esquecer senhas pedem confirmação; o resto vai direto.
   "operar-computador": (el) => {
     const op = el.dataset.op as OperacaoPessoa | undefined;
     if (!op || !OPERACOES_PESSOA.includes(op)) return;
-    if (op === "redefinir" || op === "sair_de_todos") { dispatch({ tipo: "computador-ui", ui: { confirmar: op } }); focarNovo(); return; }
+    if (op === "redefinir" || op === "sair_de_todos" || op === "esquecer_senhas") { dispatch({ tipo: "computador-ui", ui: { confirmar: op } }); focarNovo(); return; }
     return operarComputador(op);
   },
   "pc-confirmar": (el) => {
     const op = el.dataset.op;
-    if (op !== "redefinir" && op !== "sair_de_todos") return;
+    if (op !== "redefinir" && op !== "sair_de_todos" && op !== "esquecer_senhas") return;
     return operarComputador(op);
   },
   "pc-cancelar": () => {
@@ -5167,7 +5167,7 @@ async function pulsoDoComputador(minha: number): Promise<void> {
   computadorTimer = window.setTimeout(() => void pulsoDoComputador(minha), ms);
 }
 function operarComputador(op: OperacaoPessoa): Promise<void> {
-  const longa = op === "atualizar" || op === "redefinir" || op === "sair_de_todos";
+  const longa = op === "atualizar" || op === "redefinir" || op === "sair_de_todos" || op === "esquecer_senhas";
   dispatch({ tipo: "computador-ui", ui: { confirmar: null, realce: null, etapasAbertas: longa && estado.espaco?.secao === "computador-do-bot" } });
   // Uma leitura que saiu antes do POST chegaria sem a operação e apagaria o diálogo de etapas: a geração nova a descarta.
   window.clearTimeout(computadorTimer);

@@ -4,10 +4,12 @@ import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { assinarComando, chaveDaLoja, chaveDaMaquina, chavesDeAssinatura, selar } from "../../../infra/computador/chaves.mjs";
+import { assinarComando, chaveDaLoja, chaveDaMaquina, chaveDoStorage, chavesDeAssinatura, selar } from "../../../infra/computador/chaves.mjs";
 import { fundir, gravarLoja, lerLoja, lojaVazia, cookiesVivos } from "../../../infra/computador/loja-cookies.mjs";
+import { gravarOrigem, hashDosDados, lerTudo, pastaDoStorage } from "../../../infra/computador/login-storage.mjs";
 import { criarSupervisor, escutarControle, servirControle, type Supervisor } from "../../../infra/computador/supervisor.mjs";
 import { criarServidorTerminal, escutar } from "../../../infra/computador/terminal.mjs";
+import { ETAPAS } from "../../../web/lib/computador-pessoa.ts";
 
 const CRED = "b".repeat(64);
 const ID = "pc1";
@@ -101,8 +103,15 @@ describe("supervisor", () => {
     const arquivo = join(dir, "raiz", ID, "logins", "principal", "cookies.enc");
     const chave = chaveDaLoja(chaveDaMaquina(CRED, ID));
     await gravarLoja(arquivo, chave, fundir(lojaVazia(), { postos: [{ name: "s", value: "1", domain: ".a.com", path: "/" }], removidos: [] }, Date.now()).loja);
+    // NOD-97 PR 6: o storage em comum também sai no Sair de todos.
+    const storage = pastaDoStorage(join(dir, "raiz", ID, "logins"));
+    const chaveSt = chaveDoStorage(chaveDaMaquina(CRED, ID));
+    const dados = { localStorage: [["k", "v"]], indexedDB: [], pulados: [] };
+    await gravarOrigem(storage, chaveSt, { origem: "https://a.com", em: Date.now(), hash: hashDosDados(dados), dados });
+    expect((await lerTudo(storage, chaveSt)).itens).toHaveLength(1);
     expect((await sup.tratar(cmd({ tipo: "sair_de_todos" }))).desfecho).toBe("ok");
     expect(cookiesVivos(await lerLoja(arquivo, chave))).toHaveLength(0);
+    expect((await lerTudo(storage, chaveSt)).itens).toHaveLength(0);
     const antes = sup.estados()[0]?.supervisorPub;
     await mkdir(join(dir, "raiz", ID, "perfis", "bot1"), { recursive: true });
     const r = await sup.tratar(cmd({ tipo: "redefinir" }));
@@ -116,6 +125,80 @@ describe("supervisor", () => {
     await expect(stat(join(dir, "raiz", ID, "perfil-base"))).resolves.toBeTruthy();
     // A chave do servidor fixada continua: o próximo comando assinado entra.
     expect((await sup.tratar(cmd({ tipo: "fechar_tela", agenteId: "bot1" }))).desfecho).toBe("ok");
+  });
+
+  it("esquecer senhas apaga a loja de senhas e o Login Data de cada perfil, e o computador segue ligado", async () => {
+    const { sup, dir } = await montar();
+    await iniciar(sup);
+    const raiz = join(dir, "raiz", ID);
+    const senhas = join(raiz, "logins", "principal", "senhas.enc");
+    const loginData = (p: string) => join(raiz, p, "Default", "Login Data");
+    await mkdir(join(raiz, "logins", "principal"), { recursive: true });
+    await writeFile(senhas, "cifrado");
+    for (const p of ["perfil-base", "perfis/bot1"]) {
+      await mkdir(join(raiz, p, "Default"), { recursive: true });
+      await writeFile(loginData(p), "sqlite");
+      await writeFile(`${loginData(p)}-journal`, "j");
+    }
+    const r = await sup.tratar(cmd({ tipo: "esquecer_senhas" }));
+    expect(r).toMatchObject({ desfecho: "ok", progresso: { pct: 100, etapa: "pronto" }, relancados: 0 });
+    await expect(stat(senhas)).rejects.toThrow();
+    await expect(stat(loginData("perfil-base"))).rejects.toThrow();
+    await expect(stat(loginData("perfis/bot1"))).rejects.toThrow();
+    await expect(stat(`${loginData("perfis/bot1")}-journal`)).rejects.toThrow();
+    // Os perfis e os logins (cookies) ficam; só as senhas saem.
+    await expect(stat(join(raiz, "perfis", "bot1"))).resolves.toBeTruthy();
+    expect(sup.estados()[0]?.ligado).toBe(true);
+    // A chave do servidor segue fixada: o próximo comando entra.
+    expect((await sup.tratar(cmd({ tipo: "fechar_tela", agenteId: "bot1" }))).desfecho).toBe("ok");
+  });
+
+  it("esquecer senhas que não consegue apagar um Login Data falha (não diz que esqueceu) e o computador segue de pé", async () => {
+    const { sup, dir, logs } = await montar();
+    await iniciar(sup);
+    const pasta = join(dir, "raiz", ID, "perfis", "bot1", "Default");
+    await mkdir(pasta, { recursive: true });
+    await writeFile(join(pasta, "Login Data"), "sqlite");
+    await chmod(pasta, 0o500); // o rm do Login Data falha (EACCES)
+    limpar.push(() => chmod(pasta, 0o700));
+    const r = await sup.tratar(cmd({ tipo: "esquecer_senhas" }));
+    expect(r).toMatchObject({ desfecho: "falhou", motivo: "acao_falhou" });
+    expect(logs.some((l) => l.startsWith("esquecer_senhas:"))).toBe(true);
+    await chmod(pasta, 0o700);
+    // A fila da máquina não ficou presa na falha: a próxima operação roda e apaga.
+    expect((await sup.tratar(cmd({ tipo: "esquecer_senhas" }))).desfecho).toBe("ok");
+    await expect(stat(join(pasta, "Login Data"))).rejects.toThrow();
+    expect(sup.estados()[0]).toMatchObject({ ligado: true, operacao: null });
+  });
+
+  it("sair de todos que não consegue apagar o storage guardado falha (não diz que saiu) e a fila segue viva", async () => {
+    const { sup, dir } = await montar();
+    await iniciar(sup);
+    const storage = pastaDoStorage(join(dir, "raiz", ID, "logins"));
+    const chaveSt = chaveDoStorage(chaveDaMaquina(CRED, ID));
+    const dados = { localStorage: [["k", "v"]], indexedDB: [], pulados: [] };
+    await gravarOrigem(storage, chaveSt, { origem: "https://a.com", em: Date.now(), hash: hashDosDados(dados), dados });
+    await chmod(storage, 0o500);
+    limpar.push(() => chmod(storage, 0o700));
+    expect(await sup.tratar(cmd({ tipo: "sair_de_todos" }))).toMatchObject({ desfecho: "falhou", motivo: "acao_falhou" });
+    await chmod(storage, 0o700);
+    expect((await sup.tratar(cmd({ tipo: "sair_de_todos" }))).desfecho).toBe("ok");
+    expect((await lerTudo(storage, chaveSt)).itens).toHaveLength(0);
+  });
+
+  it("as etapas que o supervisor emite em Sair de todos e Esquecer senhas são as que a web lista (ETAPAS)", async () => {
+    const { sup } = await montar();
+    await iniciar(sup);
+    const vistas: Record<string, string[]> = {};
+    sup.ouvir((m) => {
+      const f = m as { tipo: string; operacao?: { tipo: string; etapa: string } | null };
+      if (f.tipo === "estado" && f.operacao && f.operacao.etapa !== "pronto") (vistas[f.operacao.tipo] ??= []).push(f.operacao.etapa);
+    });
+    for (const tipo of ["sair_de_todos", "esquecer_senhas"] as const) {
+      expect((await sup.tratar(cmd({ tipo }))).desfecho).toBe("ok");
+      expect(vistas[tipo]?.length, tipo).toBeGreaterThan(0);
+      for (const e of vistas[tipo]!) expect(ETAPAS[tipo], `${tipo}: ${e}`).toContain(e);
+    }
   });
 
   it("as operações relatam o progresso em etapas e, durante elas, os outros comandos esperam (atualizando)", async () => {

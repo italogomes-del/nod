@@ -21,10 +21,10 @@ import { esc } from "./escape.ts";
  */
 export const ESTADOS_COMPUTADOR_PESSOA = ["dormindo", "ligando", "pronto", "fora_do_ar", "operando"] as const;
 export type EstadoComputadorPessoa = (typeof ESTADOS_COMPUTADOR_PESSOA)[number];
-export const OPERACOES_PESSOA = ["acordar", "dormir", "atualizar", "redefinir", "sair_de_todos", "tentar_de_novo"] as const;
+export const OPERACOES_PESSOA = ["acordar", "dormir", "atualizar", "redefinir", "sair_de_todos", "esquecer_senhas", "tentar_de_novo"] as const;
 export type OperacaoPessoa = (typeof OPERACOES_PESSOA)[number];
 /** As operações longas, que têm progresso e etapas. */
-export type OperacaoLonga = "atualizar" | "redefinir" | "sair_de_todos";
+export type OperacaoLonga = "atualizar" | "redefinir" | "sair_de_todos" | "esquecer_senhas";
 
 export type TelaDaPessoa = {
   agenteId: string;
@@ -62,7 +62,7 @@ export type ComputadorPessoaDto = {
  * O que a pessoa marcou no painel: a ação sugerida por um aviso, o diálogo de confirmação aberto, as etapas da operação
  * e (NOD-93) a janela de primeiro uso da VM local, que o app abre quando o primeiro download começa.
  */
-export type ComputadorUi = { realce: OperacaoPessoa | null; confirmar: "redefinir" | "sair_de_todos" | null; etapasAbertas: boolean; preparoAberto: boolean };
+export type ComputadorUi = { realce: OperacaoPessoa | null; confirmar: "redefinir" | "sair_de_todos" | "esquecer_senhas" | null; etapasAbertas: boolean; preparoAberto: boolean };
 export const UI_INICIAL: ComputadorUi = { realce: null, confirmar: null, etapasAbertas: false, preparoAberto: false };
 
 type BotVisto = Pick<Agente, "id" | "nome" | "cor" | "forma">;
@@ -129,6 +129,7 @@ const NOME_OPERACAO: Readonly<Record<OperacaoLonga, { gerundio: string; infiniti
   atualizar: { gerundio: "Atualizando", infinitivo: "atualizar" },
   redefinir: { gerundio: "Redefinindo", infinitivo: "redefinir" },
   sair_de_todos: { gerundio: "Saindo dos sites", infinitivo: "sair dos sites" },
+  esquecer_senhas: { gerundio: "Esquecendo as senhas", infinitivo: "esquecer as senhas" },
 };
 
 /** As etapas de cada operação, na ordem. A etapa do servidor que não estiver aqui aparece como a atual, pelo nome. */
@@ -136,6 +137,8 @@ export const ETAPAS: Readonly<Record<OperacaoLonga, readonly string[]>> = {
   redefinir: ["Preparando", "Apagando seus dados", "Criando", "Iniciando", "Limpando", "Reconectando"],
   atualizar: ["Preparando", "Baixando a versão nova", "Reiniciando", "Reconectando"],
   sair_de_todos: ["Saindo das contas", "Limpando"],
+  // Os mesmos nomes que o supervisor emite (infra/computador/supervisor.mjs, case esquecer_senhas).
+  esquecer_senhas: ["Esquecendo senhas", "Apagando senhas salvas", "Reabrindo"],
 };
 
 export function pctDaOperacao(dto: ComputadorPessoaDto): number {
@@ -447,6 +450,7 @@ const ACOES_PAINEL: readonly { op: OperacaoPessoa; grupo: "Manutenção" | "Logi
   { op: "atualizar", grupo: "Manutenção", titulo: "Atualizar", texto: "Reinicia o computador com a versão mais nova. Arquivos e logins ficam.", botao: "Atualizar" },
   { op: "redefinir", grupo: "Manutenção", titulo: "Redefinir", texto: "Recria o computador do zero: apaga os arquivos e o que foi instalado. Os logins ficam.", botao: "Redefinir…", perigo: true },
   { op: "sair_de_todos", grupo: "Logins", titulo: "Sair de todos os sites", texto: "Seus bots saem de todas as contas em que entraram neste computador.", botao: "Sair de todos…", perigo: true },
+  { op: "esquecer_senhas", grupo: "Logins", titulo: "Esquecer senhas salvas", texto: "Apaga as senhas que o Chrome guardou. Os bots deixam de entrar sozinhos quando a sessão expirar.", botao: "Esquecer senhas…", perigo: true },
 ];
 
 /**
@@ -521,7 +525,10 @@ export function htmlDialogoDoPainel(dto: ComputadorPessoaDto, bots: readonly Bot
     return `<div class="cl-fundo" data-act="pc-cancelar"></div><div class="cl-dialogo" role="dialog" aria-modal="true" aria-labelledby="pc-red-tit"><h3 id="pc-red-tit">Redefinir o computador?</h3><p>Ele é recriado do zero: os arquivos dos seus bots e o que foi instalado são apagados. Os logins continuam.</p><div class="cl-caixa">${esc(fecham)}</div><p class="mudo pc-obs">Para sair das contas, use Sair de todos os sites.</p>${acoes("redefinir", "Redefinir")}</div>`;
   }
   if (ui.confirmar === "sair_de_todos") {
-    return `<div class="cl-fundo" data-act="pc-cancelar"></div><div class="cl-dialogo" role="dialog" aria-modal="true" aria-labelledby="pc-sair-tit"><h3 id="pc-sair-tit">Sair de todos os sites?</h3><p>Todos os seus bots saem de todas as contas em que entraram neste computador. Os arquivos ficam.</p><div class="cl-caixa">Da próxima vez que um bot precisar de um site com login, ele pede para você entrar de novo.</div>${acoes("sair_de_todos", "Sair de todos")}</div>`;
+    return `<div class="cl-fundo" data-act="pc-cancelar"></div><div class="cl-dialogo" role="dialog" aria-modal="true" aria-labelledby="pc-sair-tit"><h3 id="pc-sair-tit">Sair de todos os sites?</h3><p>Todos os seus bots saem de todas as contas em que entraram neste computador. Os arquivos ficam.</p><div class="cl-caixa">Da próxima vez que um bot precisar de um site com login, ele pede para você entrar de novo.</div><p class="mudo pc-obs">Para que eles não entrem de novo, use também Esquecer senhas salvas.</p>${acoes("sair_de_todos", "Sair de todos")}</div>`;
+  }
+  if (ui.confirmar === "esquecer_senhas") {
+    return `<div class="cl-fundo" data-act="pc-cancelar"></div><div class="cl-dialogo" role="dialog" aria-modal="true" aria-labelledby="pc-senhas-tit"><h3 id="pc-senhas-tit">Esquecer as senhas salvas?</h3><p>Apaga as senhas que o Chrome guardou neste computador. Os bots deixam de entrar sozinhos quando a sessão expirar.</p><div class="cl-caixa">As telas abertas fecham e religam agora. Para sair das contas em uso, use também Sair de todos os sites.</div>${acoes("esquecer_senhas", "Esquecer senhas")}</div>`;
   }
   if (ui.etapasAbertas && dto.operacao) {
     const pct = pctDaOperacao(dto);

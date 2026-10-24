@@ -129,7 +129,7 @@ export interface DriverComputador {
   ligados(): Promise<Set<string>>;
   // NOD-96 PR 5 (só o driver motor): as operações do computador da pessoa, o perfil do bot excluído e a máquina dele.
   /** Atualizar, Redefinir ou Sair de todos os sites; no Redefinir devolve a X25519 nova do supervisor. */
-  operar?(id: string, tipo: "atualizar" | "redefinir" | "sair_de_todos", escopo?: EscopoDoDriver): Promise<{ supervisorPub?: string }>;
+  operar?(id: string, tipo: "atualizar" | "redefinir" | "sair_de_todos" | "esquecer_senhas", escopo?: EscopoDoDriver): Promise<{ supervisorPub?: string }>;
   /** Fecha a tela do bot e apaga o perfil do Chrome dele (bot excluído); os logins em comum ficam. */
   apagarPerfil?(id: string, agenteId: string, escopo?: EscopoDoDriver): Promise<void>;
   /**

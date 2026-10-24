@@ -165,6 +165,28 @@ describe("painel e menu", () => {
     expect(htmlItemMenu(pc({ estado: "dormindo" }))).toContain("Dormindo");
   });
 
+  it("Esquecer senhas salvas é uma ação de Logins, confirma e vira operação com etapas", () => {
+    const dto = pc({ telas: [tela("a")] });
+    const painel = htmlPainelComputadorDoBot(dto, BOTS as never, UI_INICIAL, 0);
+    expect(painel).toContain("Esquecer senhas salvas");
+    expect(painel).toContain('data-op="esquecer_senhas"');
+    const conf = htmlPainelComputadorDoBot(dto, BOTS as never, { ...UI_INICIAL, confirmar: "esquecer_senhas" }, 0);
+    expect(conf).toContain("Esquecer as senhas salvas?");
+    expect(conf).toContain('data-act="pc-confirmar" data-op="esquecer_senhas"');
+    const op = pc({ estado: "operando", operacao: { tipo: "esquecer_senhas", pct: 50, etapa: "Apagando senhas salvas" } });
+    expect(htmlItemMenu(op)).toContain("Esquecendo as senhas · 50%");
+    // Com o nome que o supervisor emite, a lista avança: a etapa anterior feita, a atual marcada, nada inventado antes.
+    const etapas = htmlPainelComputadorDoBot(op, BOTS as never, { ...UI_INICIAL, etapasAbertas: true }, 0);
+    expect(etapas).toMatch(/<li class="feita">.*Esquecendo senhas<\/li><li class="atual" aria-current="step">.*Apagando senhas salvas/);
+    expect(/<ol class="pc-etapas">(.*?)<\/ol>/.exec(etapas)?.[1]?.match(/<li/g)).toHaveLength(3);
+  });
+
+  it("a confirmação de Sair de todos aponta Esquecer senhas salvas com o texto do plano (NOD-97 PR 6)", () => {
+    const conf = htmlPainelComputadorDoBot(pc({ telas: [tela("a")] }), BOTS as never, { ...UI_INICIAL, confirmar: "sair_de_todos" }, 0);
+    expect(conf).toContain("Sair de todos os sites?");
+    expect(conf).toContain("Para que eles não entrem de novo, use também Esquecer senhas salvas.");
+  });
+
   it("o aviso de recriação pede para entrar nos sites de novo uma vez, até a pessoa dispensar", () => {
     const dto = pc({ aviso_recriado: true });
     expect(htmlPainelComputadorDoBot(dto, BOTS as never, UI_INICIAL, 0)).toContain("Entre nos sites de novo uma vez");

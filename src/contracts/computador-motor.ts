@@ -14,8 +14,8 @@ export type ModeloComputador = (typeof MODELOS_COMPUTADOR)[number];
 /** Mesma ordem do enum estado_tela_computador (0106); o gate motivos-enum compara. */
 export const ESTADOS_TELA_COMPUTADOR = ["fechada", "esperando", "abrindo", "aberta", "fechando"] as const;
 export type EstadoTelaComputador = (typeof ESTADOS_TELA_COMPUTADOR)[number];
-/** Mesma ordem do enum operacao_computador (0106). */
-export const OPERACOES_COMPUTADOR = ["atualizar", "redefinir", "sair_de_todos"] as const;
+/** Mesma ordem do enum operacao_computador (0106; `esquecer_senhas` acrescentado ao fim na 0112, NOD-97 PR 6). */
+export const OPERACOES_COMPUTADOR = ["atualizar", "redefinir", "sair_de_todos", "esquecer_senhas"] as const;
 export type OperacaoComputador = (typeof OPERACOES_COMPUTADOR)[number];
 
 /** A operação em curso no computador da pessoa (Atualizar, Redefinir, Sair de todos os sites), com o progresso relatado. */
@@ -56,7 +56,7 @@ export type TelaComputadorBot = {
   criadoEm: EpochMs;
 };
 
-export const TIPOS_COMANDO_COMPUTADOR = ["iniciar", "abrir_tela", "acao", "fechar_tela", "parar", "atualizar", "redefinir", "sair_de_todos", "apagar_perfil"] as const;
+export const TIPOS_COMANDO_COMPUTADOR = ["iniciar", "abrir_tela", "acao", "fechar_tela", "parar", "atualizar", "redefinir", "sair_de_todos", "esquecer_senhas", "apagar_perfil"] as const;
 export type TipoComandoComputador = (typeof TIPOS_COMANDO_COMPUTADOR)[number];
 
 /**
@@ -173,5 +173,5 @@ export type ComputadorDaPessoaDto = {
  * As operações do `POST /computador` (NOD-96 PR 5). `dispensar_aviso` é extensão deste PR: marca o
  * `aviso_recriado` como visto (a web chama ao fechar o aviso).
  */
-export const OPERACOES_DA_PESSOA = ["acordar", "dormir", "atualizar", "redefinir", "sair_de_todos", "tentar_de_novo", "dispensar_aviso"] as const;
+export const OPERACOES_DA_PESSOA = ["acordar", "dormir", "atualizar", "redefinir", "sair_de_todos", "esquecer_senhas", "tentar_de_novo", "dispensar_aviso"] as const;
 export type OperacaoDaPessoa = (typeof OPERACOES_DA_PESSOA)[number];

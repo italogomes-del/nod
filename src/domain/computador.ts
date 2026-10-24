@@ -277,7 +277,7 @@ const ATIVIDADE_EM_PORTUGUES: Readonly<Record<string, string>> = {
   assumir: "assumiu a tela", devolver: "devolveu a tela", parar: "fechou a tela", iniciar: "ligou a tela",
   supervisionado: "pediu para aprovar as ações", autonomo: "liberou as ações", acordar: "ligou o computador",
   dormir: "pôs o computador para dormir", tentar_de_novo: "tentou ligar de novo", atualizar: "atualizou o computador",
-  redefinir: "redefiniu o computador", sair_de_todos: "saiu de todos os sites",
+  redefinir: "redefiniu o computador", sair_de_todos: "saiu de todos os sites", esquecer_senhas: "esqueceu as senhas salvas",
 };
 export function textoDaAtividade(tipo: string, estado: string): string {
   const texto = ATIVIDADE_EM_PORTUGUES[tipo] ?? "usou o computador";

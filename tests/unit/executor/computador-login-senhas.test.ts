@@ -12,7 +12,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { chaveDaLoja, chaveDasSenhas, chaveDoStorage } from "../../../infra/computador/chaves.mjs";
 import { gravarLoja } from "../../../infra/computador/loja-cookies.mjs";
 import {
-  chaveDaLinha, exportarDoPerfil, fundirSenhas, importarNoPerfil, instanteDaLinha, lerSenhas, loginDataDo, realmDe, recolherSenhas, senhasVazias,
+  chaveDaLinha, esquecerSenhas, exportarDoPerfil, fundirSenhas, importarNoPerfil, instanteDaLinha, lerSenhas, loginDataDo, realmDe, recolherSenhas, senhasVazias,
 } from "../../../infra/computador/login-senhas.mjs";
 
 const pastas: string[] = [];
@@ -155,6 +155,25 @@ describe("senhas salvas: no Login Data sintético", () => {
     expect(Object.keys((await lerSenhas(arq, CHAVE)).linhas).length).toBe(2);
     // Sem marcas (quem chama não guarda), lê sempre, como antes.
     expect(await recolherSenhas(arq, CHAVE, perfil, tmp, 4000)).toBe("igual");
+  });
+
+  it("esquecer apaga a loja, o Login Data e o Login Data For Account (com journal) de cada perfil (NOD-97 PR 6)", async () => {
+    const { writeFile, mkdir } = await import("node:fs/promises");
+    const perfis = [await pasta(), await pasta()];
+    const arq = join(await pasta(), "senhas.enc");
+    await writeFile(arq, "x");
+    const nomes = ["Login Data", "Login Data-journal", "Login Data For Account", "Login Data For Account-journal", "Cookies"];
+    for (const perfil of perfis) {
+      await mkdir(join(perfil, "Default"), { recursive: true });
+      for (const n of nomes) await writeFile(join(perfil, "Default", n), "x");
+    }
+    await esquecerSenhas(arq, perfis);
+    expect(existsSync(arq)).toBe(false);
+    for (const perfil of perfis) {
+      for (const n of nomes.slice(0, 4)) expect(existsSync(join(perfil, "Default", n)), n).toBe(false);
+      // Os cookies ficam: só as senhas são esquecidas.
+      expect(existsSync(join(perfil, "Default", "Cookies"))).toBe(true);
+    }
   });
 });
 

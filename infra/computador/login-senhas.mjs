@@ -207,10 +207,15 @@ export function importarNoPerfil(perfil, loja) {
   }
 }
 
-/** Apaga a loja de senhas e o `Login Data` de todos os perfis dados (Esquecer senhas salvas). */
+/**
+ * Apaga a loja de senhas e, em todos os perfis dados, o `Login Data` e o `Login Data For Account` (a segunda loja do
+ * Chrome, das senhas ligadas a uma conta) com journal/WAL (Esquecer senhas salvas). Os cookies ficam.
+ */
 export async function esquecerSenhas(arquivoLoja, perfis) {
   await rm(arquivoLoja, { force: true });
   for (const perfil of perfis) {
-    for (const sufixo of ['', '-journal', '-wal', '-shm']) await rm(loginDataDo(perfil) + sufixo, { force: true });
+    for (const base of [loginDataDo(perfil), loginDataDo(perfil) + ' For Account']) {
+      for (const sufixo of ['', '-journal', '-wal', '-shm']) await rm(base + sufixo, { force: true });
+    }
   }
 }

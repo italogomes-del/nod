@@ -6,7 +6,7 @@
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { randomBytes } from 'node:crypto';
-import { access, chmod, cp, mkdir, readFile, readdir, realpath, rm, stat, unlink, writeFile } from 'node:fs/promises';
+import { access, chmod, cp, mkdir, readFile, readdir, realpath, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { URL, pathToFileURL } from 'node:url';
 import process from 'node:process';
@@ -65,6 +65,137 @@ export async function forkDoPerfil(perfilBase, perfil) {
   for (const nome of TRAVAS_DO_PERFIL) await unlink(path.join(perfil, nome)).catch(() => {});
   await perfilSaiuLimpo(perfil);
 }
+
+/** NOD-97 PR 6: o storage de site que o Chrome guarda no perfil (o que o Sair de todos apaga, além dos cookies). */
+export const STORAGE_DO_PERFIL = ['Default/Local Storage', 'Default/Session Storage', 'Default/IndexedDB', 'nod-storage.json', 'nod-origens.json'];
+const ARQUIVO_DA_GERACAO = 'nod-storage-geracao';
+/** As origens que as abas deste perfil já abriram (o que o Sair de todos apaga numa tela aberta). */
+export const ARQUIVO_DAS_ORIGENS = 'nod-origens.json';
+const TETO_DE_ORIGENS = 5000;
+
+/**
+ * NOD-97 PR 6 (revisão do #515): grava `conteudo()` em `arquivo` em fila, uma gravação por vez, e de forma atômica
+ * (temporário + rename). writeFile concorrente no mesmo arquivo intercala as escritas e deixa um JSON inválido, que ao
+ * reabrir a tela vira [] e esquece as origens. `conteudo` é lido na hora em que a gravação roda, então a última da fila
+ * grava o estado atual. A promessa devolvida nunca rejeita.
+ */
+export function gravadorEmFila(arquivo, conteudo) {
+  let fila = Promise.resolve();
+  let seq = 0;
+  return () =>
+    (fila = fila.then(async () => {
+      const tmp = `${arquivo}.${process.pid}.${++seq}.tmp`;
+      try {
+        await writeFile(tmp, conteudo(), { mode: 0o600 });
+        await rename(tmp, arquivo);
+      } catch {
+        await rm(tmp, { force: true }).catch(() => {});
+      }
+    }));
+}
+
+/**
+ * QA do #515 @3c77fab4: a tela morta no meio de uma gravação (o supervisor dá SIGKILL depois de 15 s) deixa o temporário
+ * do gravadorEmFila no perfil, com as origens visitadas, e nada o apagava (nem o Sair de todos). Sai ao subir a tela e
+ * junto com o storage do perfil.
+ */
+export async function apagarTemporariosDasOrigens(perfil) {
+  const nomes = await readdir(perfil).catch(() => []);
+  const sobras = nomes.filter((n) => n.startsWith(`${ARQUIVO_DAS_ORIGENS}.`) && n.endsWith('.tmp'));
+  await Promise.all(sobras.map((n) => rm(path.join(perfil, n), { force: true }).catch(() => {})));
+}
+
+/** A geração do storage em comum que este perfil já aplicou (0 se nunca). */
+export async function geracaoDoPerfil(perfil) {
+  const n = Number((await readFile(path.join(perfil, ARQUIVO_DA_GERACAO), 'utf8').catch(() => '0')).trim());
+  return Number.isSafeInteger(n) && n >= 0 ? n : 0;
+}
+
+export const gravarGeracaoDoPerfil = (perfil, geracao) => writeFile(path.join(perfil, ARQUIVO_DA_GERACAO), String(geracao), { mode: 0o600 });
+
+/**
+ * NOD-97 PR 6: o Sair de todos sobe a geração do storage em comum. O perfil de uma tela que estava fechada ainda tem o
+ * Local Storage/IndexedDB no disco: ao subir com uma geração mais nova que a dele, apaga esse storage ANTES do Chrome
+ * abrir e grava a geração. Devolve true se apagou.
+ */
+export async function aplicarGeracaoNoPerfil(perfil, geracao) {
+  if (!Number.isSafeInteger(geracao) || geracao <= (await geracaoDoPerfil(perfil))) return false;
+  for (const nome of STORAGE_DO_PERFIL) await rm(path.join(perfil, nome), { recursive: true, force: true });
+  await apagarTemporariosDasOrigens(perfil);
+  await gravarGeracaoDoPerfil(perfil, geracao);
+  return true;
+}
+
+/** NOD-97 PR 6: apaga pelo CDP (Storage.clearDataForOrigin) o storage das origens dadas, abertas numa aba ou não. */
+export async function limparOrigensNoChrome(context, origens) {
+  const lista = [...new Set(origens)].filter((o) => origemDe(o) === o);
+  if (!lista.length || !context) return;
+  const { cdp, temporaria } = await sessaoQueResponde(context);
+  try {
+    // Prazo por chamada (QA do #515): uma chamada presa não pode segurar a tela até o supervisor matá-la em 15 s; a
+    // limpeza falha a tempo e as origens ficam guardadas para o próximo Sair de todos.
+    for (const origin of lista) {
+      const r = await comPrazo(cdp.send('Storage.clearDataForOrigin', { origin, storageTypes: 'local_storage,indexeddb,websql,cache_storage,service_workers,file_systems' }), PRAZO_DO_CDP_MS, VENCEU);
+      if (r === VENCEU) throw new Error('limpeza_sem_resposta');
+    }
+  } finally {
+    await comPrazo(cdp.detach().catch(() => {}), PRAZO_DO_CDP_MS);
+    if (temporaria) await comPrazo(temporaria.close().catch(() => {}), PRAZO_DO_CDP_MS);
+  }
+}
+
+/**
+ * QA do #515: a sessão CDP abre numa aba que responde. A aba presa (página em laço infinito, diálogo de beforeunload)
+ * segura o newCDPSession para sempre; as que já foram a about:blank vêm primeiro e, se nenhuma responde, uma aba nova
+ * temporária faz a limpeza (o Storage.clearDataForOrigin vale para o navegador inteiro, de qualquer aba).
+ */
+async function sessaoQueResponde(context) {
+  const abas = context.pages().filter((x) => !x.isClosed());
+  abas.sort((a, b) => Number(b.url() === 'about:blank') - Number(a.url() === 'about:blank'));
+  for (const p of abas) {
+    const pedido = context.newCDPSession(p).catch(() => null);
+    const cdp = await comPrazo(pedido, PRAZO_DO_CDP_MS, VENCEU);
+    if (cdp === VENCEU) { pedido.then((s) => s?.detach().catch(() => {})); continue; }
+    if (cdp) return { cdp, temporaria: null };
+  }
+  const temporaria = await comPrazo(context.newPage(), PRAZO_DO_CDP_MS * 2, VENCEU);
+  if (temporaria === VENCEU) throw new Error('limpeza_sem_resposta');
+  const cdp = await comPrazo(context.newCDPSession(temporaria), PRAZO_DO_CDP_MS, VENCEU);
+  if (cdp === VENCEU) { await temporaria.close().catch(() => {}); throw new Error('limpeza_sem_resposta'); }
+  return { cdp, temporaria };
+}
+
+/**
+ * NOD-97 PR 6 (QA do #515): o Sair de todos numa tela ABERTA. A página viva guarda a sessão na memória e pode regravá-la
+ * no storage (o SPA que renova o token): as abas saem para about:blank ANTES de apagar, os cookies saem de novo (o que a
+ * página gravou ao sair), o storage de cada origem sai pelo CDP e as abas voltam ao endereço em que estavam, deslogadas.
+ */
+export async function sairDasAbas(context, origens, pendente = null, aoAceitar = () => {}) {
+  if (!context) return;
+  const abas = context.pages().filter((p) => !p.isClosed());
+  const enderecos = abas.map((p) => [p, p.url()]);
+  // QA do #515: o site que pede "sair da página?" (beforeunload, comum em editor e formulário) prende a aba no diálogo: a
+  // ida a about:blank não acontece, o SPA segue vivo com a sessão na memória e a sessão CDP da aba trava. No Sair de todos
+  // a página sai de qualquer jeito: o diálogo é aceito, o que já estava aberto e os que a ida a about:blank abrir.
+  // aoAceitar avisa a tela, que também ouve o 'dialog' da aba e guardaria o diálogo já aceito (revisão do #521).
+  const aceitar = (d) => { if (d.type() === 'beforeunload') { d.accept().catch(() => {}); aoAceitar(d); } };
+  if (pendente?.type?.() === 'beforeunload') await pendente.accept().catch(() => {});
+  for (const p of abas) p.on('dialog', aceitar);
+  try {
+    // Em paralelo e com prazo curto: o supervisor mata a tela que não responde a limpar_storage em 15 s, e uma aba num
+    // site lento não pode segurar o Sair de todos (revisão do #518). A volta só espera o commit; a página carrega depois.
+    await Promise.all(abas.map((p) => p.goto('about:blank', { timeout: 3000 }).catch(() => {})));
+  } finally {
+    for (const p of abas) p.off('dialog', aceitar);
+  }
+  await context.clearCookies();
+  await limparOrigensNoChrome(context, [...origens, ...enderecos.map(([, u]) => origemDe(u)).filter(Boolean)]);
+  await Promise.all(enderecos.filter(([, url]) => origemDe(url)).map(([p, url]) => p.goto(url, { waitUntil: 'commit', timeout: 4000 }).catch(() => {})));
+}
+
+/** Prazo de cada chamada ao CDP na limpeza (QA do #515): 5000 origens levam ~3 s no total; uma só nunca leva 2 s. */
+const PRAZO_DO_CDP_MS = 2000;
+const VENCEU = Symbol('venceu');
 
 /** Igual ao runtime: sem isto o Chromium abre "Restore pages?" depois de uma tela morta. JSON inválido fica. */
 export async function perfilSaiuLimpo(perfil) {
@@ -252,6 +383,20 @@ export function criarTela(config, avisar) {
   const arquivoDeVersoes = path.join(config.perfil, 'nod-storage.json');
   let versoes = {};
   const pendentes = new Map();
+  /**
+   * NOD-97 PR 6 (QA do #515): toda origem que um frame desta tela abriu, com login rastreado ou não (o site que guarda a
+   * sessão só em IndexedDB, sem cookie, também sai no Sair de todos). Gravada no perfil para valer depois de reabrir.
+   */
+  const arquivoDasOrigens = path.join(config.perfil, ARQUIVO_DAS_ORIGENS);
+  let visitadas = new Set();
+  // Em fila e atômica (gravadorEmFila): as gravações concorrentes de anotarOrigem/limparStorage corrompiam o arquivo.
+  const gravarOrigens = gravadorEmFila(arquivoDasOrigens, () => JSON.stringify([...visitadas]));
+  function anotarOrigem(url) {
+    const o = origemDe(url);
+    if (!o || visitadas.has(o) || visitadas.size >= TETO_DE_ORIGENS) return;
+    visitadas.add(o);
+    gravarOrigens();
+  }
   const ritmo = ritmoDeColeta({ aoVencer: () => { mandarStorage().catch(() => {}); } });
   // NOD-97 PR 5: origens cujo preenchimento de senha já foi avisado, para não repetir o aviso a cada observação.
   const senhasAvisadas = new Set();
@@ -290,6 +435,8 @@ export function criarTela(config, avisar) {
     await mkdir(ambienteX.HOME, { recursive: true, mode: 0o700 });
     await mkdir(config.workspace, { recursive: true });
     await forkDoPerfil(config.perfilBase, config.perfil);
+    // NOD-97 PR 6: houve um Sair de todos enquanto esta tela estava fechada: o storage do perfil sai antes do Chrome.
+    await aplicarGeracaoNoPerfil(config.perfil, config.geracao);
     // NOD-97 PR 5: as senhas salvas em comum entram no perfil ANTES do Chrome abrir (ele trava o Login Data em uso).
     // Falha de importação nunca impede a tela de subir: o login manual continua valendo.
     if (config.senhas) {
@@ -331,8 +478,12 @@ export function criarTela(config, avisar) {
     if (config.cookies?.length) await context.addCookies(config.cookies);
     conhecidos = new Map((await context.cookies()).map((c) => [chaveDoCookie(c), c]));
     page = context.pages()[0] ?? (await context.newPage());
+    await apagarTemporariosDasOrigens(config.perfil); // antes da 1ª gravação desta tela: só sobra de tela morta
     versoes = await readFile(arquivoDeVersoes, 'utf8').then((t) => JSON.parse(t), () => ({}));
     if (!versoes || typeof versoes !== 'object' || Array.isArray(versoes)) versoes = {};
+    const lidas = await readFile(arquivoDasOrigens, 'utf8').then((t) => JSON.parse(t), () => []);
+    visitadas = new Set((Array.isArray(lidas) ? lidas : []).filter((o) => typeof o === 'string' && origemDe(o) === o).slice(0, TETO_DE_ORIGENS));
+    for (const p of context.pages()) anotarOrigem(p.url());
     for (const item of config.storage ?? []) receberStorage(item);
     await aplicarPendentes(page, [...pendentes.keys()]).catch(() => {});
     await exec(config.bin.xdotool, ['search', '--onlyvisible', '--class', 'Chromium', 'windowmove', '0', '0', 'windowsize', '1280', '800'], { timeout: 4000, env: ambienteX }).catch(() => {});
@@ -346,6 +497,7 @@ export function criarTela(config, avisar) {
 
   function acompanhar(p) {
     p.on('framenavigated', (f) => {
+      anotarOrigem(f.url());
       if (f === p.mainFrame()) mudar();
     });
     p.on('close', mudar);
@@ -391,8 +543,10 @@ export function criarTela(config, avisar) {
    */
   async function olharSenha(p) {
     const origem = origemDe(p.isClosed() ? '' : p.url());
-    if (!origem) return null;
-    const tem = await p.evaluate(temSenhaPreenchida).catch(() => false);
+    // Re-QA do #515: com um diálogo aberto (beforeunload, alert) o evaluate só volta quando ele fecha, e o observar
+    // travava sem mostrar o diálogo ao bot. Com diálogo não há o que olhar; aba travada também não segura o observar.
+    if (!origem || dialogo) return null;
+    const tem = await comPrazo(p.evaluate(temSenhaPreenchida).catch(() => false), 1000, false);
     if (!tem || senhasAvisadas.has(origem)) return null;
     senhasAvisadas.add(origem);
     return origem;
@@ -497,6 +651,34 @@ export function criarTela(config, avisar) {
     conhecidos = new Map();
   }
 
+  /** NOD-97 PR 6 (Sair de todos os sites): esquece o storage em comum e apaga o das abas abertas. */
+  async function limparStorage(geracao) {
+    // As origens que este perfil conhece saem ANTES de zerar o índice: o CDP apaga também as que não estão numa aba, e as
+    // visitadas cobrem o site que guarda a sessão só no storage, sem cookie de login (QA do #515).
+    const origens = [...Object.keys(versoes), ...pendentes.keys(), ...visitadas];
+    // Zera antes de sair das abas: as que voltam ao endereço em que estavam são anotadas de novo. Se a limpeza falha, as
+    // origens voltam ao arquivo (revisão do #518): o próximo Sair de todos ainda precisa apagá-las.
+    const antes = visitadas;
+    visitadas = new Set();
+    // O diálogo de beforeunload que estava aberto é aceito no sairDasAbas: a tela deixa de mostrá-lo.
+    const pendente = dialogo?.type() === 'beforeunload' ? dialogo : null;
+    if (pendente) { dialogo = null; mudar(); }
+    try {
+      // O diálogo que a ida a about:blank abre e o sairDasAbas aceita não fica na tela como se ainda estivesse aberto.
+      await sairDasAbas(context, origens, pendente, (d) => { if (dialogo === d) { dialogo = null; mudar(); } });
+    } catch (e) {
+      visitadas = new Set([...antes, ...visitadas].slice(0, TETO_DE_ORIGENS));
+      await gravarOrigens();
+      throw e;
+    }
+    await gravarOrigens();
+    conhecidos = new Map();
+    versoes = {};
+    pendentes.clear();
+    await gravarVersoes();
+    if (Number.isSafeInteger(geracao)) await gravarGeracaoDoPerfil(config.perfil, geracao);
+  }
+
   async function acao(a) {
     const observado = quadros.get(a.quadro);
     if ('quadro' in a && (!observado || observado.revision !== revision || Date.now() - observado.em > 120000)) throw new Error('tela_alterada');
@@ -569,6 +751,7 @@ export function criarTela(config, avisar) {
     observar,
     receberCookies,
     limparCookies,
+    limparStorage,
     receberStorage,
     async executar(a) {
       try {
@@ -619,6 +802,9 @@ async function principal() {
         tela?.receberStorage(m);
       } else if (m.tipo === 'limpar_cookies') {
         await tela?.limparCookies();
+        enviar({ tipo: 'resposta', id: m.id, resultado: {} });
+      } else if (m.tipo === 'limpar_storage') {
+        await tela?.limparStorage(m.geracao);
         enviar({ tipo: 'resposta', id: m.id, resultado: {} });
       } else if (m.tipo === 'fechar') {
         await tela?.fechar();

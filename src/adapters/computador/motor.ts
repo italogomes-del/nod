@@ -261,8 +261,9 @@ export function criarDriverMotor(o: OpcoesDriverMotor): DriverComputador & { mot
     async operar(idDoPortao, tipo, escopo) {
       const loc = await localizar(idDoPortao, escopo);
       const id = loc.computadorId ?? idDoPortao;
-      // Sair de todos os sites limpa os cookies das telas abertas: o supervisor exige o computador ligado.
-      if (tipo === "sair_de_todos") await iniciar(idDoPortao, escopo);
+      // Sair de todos os sites limpa os cookies das telas abertas e Esquecer senhas apaga as senhas e religa as
+      // telas: o supervisor exige o computador ligado nas duas.
+      if (tipo === "sair_de_todos" || tipo === "esquecer_senhas") await iniciar(idDoPortao, escopo);
       const maquina = await maquinaViva(id, loc);
       ultimaAcao.set(maquina.machineId, agora());
       const r = await enviar(idDoPortao, loc, maquina, tipo, agora() + PRAZO_RESPOSTA_OPERACAO_MS, () => new FalhaComputador("sem_resposta", { maquina: maquina.nome }));

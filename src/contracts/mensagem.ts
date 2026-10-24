@@ -114,7 +114,7 @@ export type PayloadMensagem =
    */
   | { kind: "peer_ask"; agenteId: string; nome: string; naoSupervisionado: true; tarefaId: string; turnoOrigemId?: string; delegada?: true; falhou?: true; trabalhoId?: string; paradoPelaPessoa?: true }
   /** definido em 2026-09-24 (emenda da ADR-037): o aviso ÚNICO de que o computador saiu do ar. NOD-96 PR 5: `acao` = a ação do painel que resolve; `computador_em_operacao` = a pessoa pediu Atualizar/Redefinir/Sair de todos e a tela fechou. NOD-97: a linha cinza de que a pessoa fechou a tela no controle e o computador voltou ao bot. */
-  | { kind: "computador_fora_do_ar"; agenteId: string; desde: EpochMs; motivo: MotivoFalhaComputador; acao?: { op: "atualizar" | "tentar_de_novo"; rotulo: string } } | { kind: "computador_em_operacao"; agenteId: string; operacao: "atualizar" | "redefinir" | "sair_de_todos" } | { kind: "computador_tela_fechada"; agenteId: string } | { kind: "computador_senha_preenchida"; agenteId: string; origem: string }
+  | { kind: "computador_fora_do_ar"; agenteId: string; desde: EpochMs; motivo: MotivoFalhaComputador; acao?: { op: "atualizar" | "tentar_de_novo"; rotulo: string } } | { kind: "computador_em_operacao"; agenteId: string; operacao: "atualizar" | "redefinir" | "sair_de_todos" | "esquecer_senhas" } | { kind: "computador_tela_fechada"; agenteId: string } | { kind: "computador_senha_preenchida"; agenteId: string; origem: string }
   /**
    * definido em 2026-09-24 (emenda da ADR-045): a fala do agente que É a pergunta de pedir_a_pessoa; `opcoes` são as
    * respostas prontas (pedido.ts), e o toque manda o texto da opção como a resposta. revisto em 2026-10-18 (plano "pergunta

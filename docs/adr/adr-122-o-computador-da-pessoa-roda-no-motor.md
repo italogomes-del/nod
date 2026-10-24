@@ -260,6 +260,74 @@ já tinha feito. Agora o `Login Data` é um só entre as telas, pelo mesmo camin
   - concorrência no supervisor: a senha de um bot vai para a loja e para a tela do outro, e a marcadora não aparece
     nos resultados, nos logs nem no disco.
 
+## Emenda 2026-10-24 (NOD-97 PR 5 e PR 6): senhas salvas em comum e as operações que as esquecem
+
+**PR 5 — senhas em comum.** O Chrome guarda as senhas no `Login Data` (SQLite) de cada perfil; o campo de valor fica
+cifrado pelo Safe Storage do keyring da máquina (v11, a mesma chave em todos os forks). Ninguém aqui decifra esse
+campo: o supervisor copia as linhas como estão (BLOB em base64) para `logins/principal/senhas.enc` (cifra própria,
+HKDF `login:principal:senhas-v1`) e as põe no `Login Data` de um perfil antes do Chrome dele abrir.
+
+- **Chave única** da linha = o UNIQUE do Chrome (`origin_url`, `username_element`, `username_value`,
+  `password_element`, `signon_realm`); **LWW** por `date_password_modified` (sem ela, `date_created`). O esquema do
+  `Login Data` só é recriado quando o perfil ainda não tem o arquivo.
+- **Exportação** lê uma cópia parada (Chrome fechado, journal vazio); **importação** só com o Chrome fechado.
+- **Máscara:** a tela nunca manda o valor da senha; um `addInitScript` marca os campos de senha e a observação só diz
+  se a origem **tem** uma senha preenchida (`senhaPreenchida: { origem }`), nunca o valor.
+
+**PR 6 — esquecer e limpar.** Duas operações da pessoa, no mesmo padrão de Atualizar/Redefinir/Sair de todos (enum
+`operacao_computador`, estendido na migração 0112; progresso e etapas; aviso no chat por tela aberta):
+
+- **Esquecer senhas salvas** (`esquecer_senhas`): espera as telas que estão abrindo, fecha as abertas, apaga
+  `senhas.enc`, o `Login Data` e o `Login Data For Account` (com journal/WAL) de cada perfil (base e por bot) e
+  religa as telas que estavam abertas. Os cookies e o storage ficam. A foto do supervisor reconcilia o estado das telas
+  religadas (o banco não as marca fechadas). Se o `rm` falha, as telas são religadas mesmo assim e a operação termina
+  `falhou` (`acao_falhou`), sem deixar a fila da máquina travada.
+- **Sair de todos os sites** passa a levar também o **storage** em comum. `limparStorage` sobe a **geração** do
+  storage (gravada no índice) e zera o índice. Como a pessoa pode sair com telas fechadas e origens fora da aba, a
+  limpeza não depende de cada aba aberta:
+  - a tela aberta recebe `limpar_storage {geracao}`, limpa por CDP (`Storage.clearDataForOrigin`) todas as origens
+    que ela conhece (as abertas, as pendentes, as que já foram para o índice e todas as que um frame dela visitou,
+    anotadas em `nod-origens.json` no perfil, com teto de 5000) e grava a geração no perfil (`nod-storage-geracao`).
+    As visitadas cobrem o site que guarda a sessão só em IndexedDB/localStorage, sem cookie de login, que não entra
+    no índice. Para a página viva não regravar a sessão que tem na memória (o SPA que renova o token), as abas vão
+    para `about:blank` antes da limpeza e voltam ao endereço em que estavam depois, já deslogadas; as idas e voltas
+    são em paralelo e com prazo curto (a volta espera só o commit), para a tela responder dentro dos 15 s do
+    supervisor mesmo com abas em sites lentos. Se a limpeza falha, as origens visitadas continuam anotadas para o
+    próximo Sair de todos. O storage particionado de iframes de terceiros não é coberto;
+  - a tela que abre depois recebe a geração no config e, se o perfil é de uma geração mais velha, apaga
+    `Local Storage`, `Session Storage` e `IndexedDB` do perfil antes do Chrome subir.
+
+  A tela responde a `limpar_cookies` e a `limpar_storage` (antes `limpar_cookies` não respondia e o supervisor só
+  não travava porque matava a tela no timeout — corrigido). A operação termina `falhou` (`acao_falhou`) quando
+  qualquer limpeza não acontece: a loja de cookies não grava, `limparStorage` falha, ou uma tela aberta responde
+  `erro` (ou não responde em 15 s) a `limpar_cookies` ou a `limpar_storage`. Mesmo assim o resto segue: as outras
+  telas são limpas, cada erro vai para o log com o bot, e a fila da máquina não fica travada.
+- **Etapas:** a primeira etapa de cada operação é a da lista que o painel mostra ("Saindo das contas",
+  "Esquecendo senhas"), não um "Preparando" genérico.
+- **Desvio do plano (PR 6).** O plano pedia uma rota própria, `POST /computador/esquecer-senhas {confirmar:true}`,
+  que devolvia `relancados`, sem migração, e uma linha "Senhas salvas esquecidas" no chat. O PR fez outra coisa:
+  - **operação do computador**, como Atualizar/Redefinir/Sair de todos: `POST /computador` com
+    `operacao: "esquecer_senhas"`, sob o escopo da pessoa, `travarDaPessoa` e RLS. Ganha progresso, etapas, registro
+    com autor `pessoa` e a recusa de uma segunda operação em curso. O bot não tem ferramenta para dispará-la;
+  - **confirmação só na UI**, igual a Redefinir e Sair de todos: a API não pede `confirmar:true`;
+  - **sem `relancados` na API**: o motor devolve `{}`. Quantas telas religaram só aparece no supervisor e no estado
+    das telas;
+  - **aviso por tela aberta** no chat (o mesmo de Sair de todos), no lugar da linha "Senhas salvas esquecidas";
+  - **migração 0112**, que estende o enum `operacao_computador`, contra o "nenhuma migração" do plano.
+
+  Motivo: um caminho só para as quatro operações da pessoa (trava, auditoria, idempotência e painel) em vez de uma
+  rota com regras próprias. Gatilho de reversão: uma integração fora do painel precisar disparar o esquecer com
+  confirmação no servidor ou ler `relancados`.
+- **Teste:**
+  - supervisor apaga senhas e `Login Data` e segue ligado; falha no `rm` ou na limpeza vira `acao_falhou` e a fila
+    segue;
+  - esquecer espera a tela que estava abrindo e a religa;
+  - Sair de todos zera a loja e o storage, e a tela fechada reabre sem o storage (Chromium real);
+  - CDP limpa uma origem que não está aberta em nenhuma aba (Chromium real);
+  - `esquecerSenhas` apaga `Login Data For Account`;
+  - `operarDaPessoa`/motor de `esquecer_senhas`;
+  - painel com a ação Esquecer senhas, a confirmação (texto literal do plano) e as etapas.
+
 ## Fora
 
 Compartilhar por workspace (bots de colegas); mais de uma máquina por pessoa; compartilhar

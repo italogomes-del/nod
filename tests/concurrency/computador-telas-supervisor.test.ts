@@ -8,7 +8,7 @@ import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { assinarComando, chaveDaLoja, chaveDaMaquina, chaveDasSenhas, chaveDoStorage, chavesDeAssinatura, selar } from "../../infra/computador/chaves.mjs";
 import { arquivoDasSenhas, lerSenhas } from "../../infra/computador/login-senhas.mjs";
 import { lerEstado, lerTudo } from "../../infra/computador/login-storage.mjs";
@@ -24,7 +24,7 @@ const limpar: Array<() => Promise<unknown> | unknown> = [];
 afterEach(async () => { for (const f of limpar.splice(0).reverse()) await f(); });
 
 type Nivel = "verde" | "amarela" | "vermelha";
-type Tela = { url: string; titulo: string; texto: string; storage?: string; senhas?: number };
+type Tela = { url: string; titulo: string; texto: string; storage?: string; senhas?: number; geracao?: number | null };
 type Resultado = { desfecho: string; motivo?: string; quem?: string[]; supervisorPub?: string; resultado?: { tela?: Tela } };
 
 async function montar(o: { ambienteTela?: Record<string, string> } = {}) {
@@ -91,6 +91,17 @@ async function montar(o: { ambienteTela?: Record<string, string> } = {}) {
 }
 
 const MAIL = "https://mail.exemplo.com/";
+
+/** O Chrome de um bot "salva" uma senha: grava o Login Data no perfil (o BLOB carrega `valor` em claro, o pior caso). */
+async function salvarSenhaNoPerfil(perfil: string, valor: string, url = "https://portal.exemplo.com/") {
+  await mkdir(join(perfil, "Default"), { recursive: true });
+  const db = new DatabaseSync(join(perfil, "Default", "Login Data"));
+  db.exec("CREATE TABLE meta(key LONGVARCHAR NOT NULL UNIQUE PRIMARY KEY, value LONGVARCHAR); INSERT INTO meta VALUES ('version', '43');");
+  db.exec("CREATE TABLE logins (origin_url VARCHAR NOT NULL, username_element VARCHAR, username_value VARCHAR, password_element VARCHAR, password_value BLOB, signon_realm VARCHAR NOT NULL, date_created INTEGER NOT NULL, date_password_modified INTEGER NOT NULL DEFAULT 0, id INTEGER PRIMARY KEY AUTOINCREMENT, UNIQUE (origin_url, username_element, username_value, password_element, signon_realm))");
+  db.prepare("INSERT INTO logins (origin_url, username_element, username_value, password_element, password_value, signon_realm, date_created, date_password_modified) VALUES (?, 'u', 'ana', 'p', ?, ?, ?, ?)")
+    .run(url, Buffer.from(valor), url, 13_380_000_000_000_000n, 13_380_000_000_000_000n);
+  db.close();
+}
 
 describe("computador da pessoa: várias telas no supervisor real (NOD-96 PR 7)", () => {
   it("login em comum: o que um bot entra vale nas telas abertas e no bot criado depois; sair também", async () => {
@@ -245,6 +256,44 @@ describe("computador da pessoa: várias telas no supervisor real (NOD-96 PR 7)",
     const arquivos = await readdir(m.pastaStorage);
     expect(arquivos.filter((a) => a.endsWith(".enc"))).toHaveLength(2);
     for (const a of arquivos.filter((x) => x.endsWith(".enc"))) expect((await readFile(join(m.pastaStorage, a))).toString("latin1")).not.toContain("token");
+    // NOD-97 PR 6: Sair de todos leva o storage em comum junto com os cookies, nas telas abertas e no que fica no disco.
+    expect((await m.tratar({ tipo: "sair_de_todos" })).desfecho).toBe("ok");
+    expect(await m.storageEm("ana", MAIL)).toEqual({});
+    expect(await m.storageEm("duda", MAIL)).toEqual({});
+    expect((await readdir(m.pastaStorage)).some((a) => a !== "estado.enc" && a.endsWith(".enc"))).toBe(false);
+    // A geração nova chega à tela aberta (limpar_storage) e à que estava fechada (config): esta apaga o storage do
+    // perfil no disco antes de o Chrome subir (aplicarGeracaoNoPerfil, testado num Chromium de verdade).
+    expect((await m.navegar("ana", MAIL)).resultado?.tela?.geracao).toBe(1);
+    expect((await m.navegar("beto", MAIL)).resultado?.tela?.geracao).toBe(1);
+  });
+
+  it.each(["cookies", "storage"])("Sair de todos (NOD-97 PR 6): a tela que falha ao limpar %s faz a operação falhar, e a fila segue", async (qual) => {
+    const m = await montar({ ambienteTela: { NOD_TELA_FALSA_LIMPAR_FALHA: qual } });
+    await m.iniciar();
+    await m.navegar("ana", `${MAIL}?entrar=sid:abc&guardar=token:1`);
+    await m.assentar();
+    const r = await m.tratar({ tipo: "sair_de_todos" });
+    expect(r.desfecho).toBe("falhou");
+    expect(r.motivo).toBe("acao_falhou");
+    expect(m.logs.some((l) => l.includes(`limpar_${qual}`) && l.includes("ana"))).toBe(true);
+    expect((await m.navegar("beto", MAIL)).desfecho).toBe("ok");
+  });
+
+  it("Sair de todos (NOD-97 PR 6): a loja de cookies que não grava faz a operação falhar sem envenenar a fila da máquina", async () => {
+    const m = await montar();
+    await m.iniciar();
+    await m.navegar("ana", `${MAIL}?entrar=sid:abc`);
+    await m.assentar();
+    const arquivo = join(m.dir, "raiz", ID, "logins", "principal", "cookies.enc");
+    await writeFile(arquivo, "corrompida");
+    const r = await m.tratar({ tipo: "sair_de_todos" });
+    expect(r.desfecho).toBe("falhou");
+    expect(r.motivo).toBe("acao_falhou");
+    // A fila continua: com a loja de volta, o login de um bot chega à tela do outro.
+    await rm(arquivo, { force: true });
+    await m.navegar("beto", `${MAIL}?entrar=sid:novo`);
+    await m.assentar();
+    expect(await m.cookiesEm("caio", MAIL)).toEqual({ sid: "novo" });
   });
 
   it("storage ao mesmo tempo (NOD-97 PR 4): dois bots logando juntos 100 vezes, o store sempre decifra e o LWW vence", async () => {
@@ -317,6 +366,28 @@ describe("computador da pessoa: várias telas no supervisor real (NOD-96 PR 7)",
     expect(disco).not.toContain(MARCADORA);
     expect(disco).not.toContain(b64);
     expect(m.logs.filter((l) => l.startsWith("senhas:"))).toEqual([]);
+  });
+
+  it("esquecer senhas (NOD-97 PR 6): fecha e reabre as telas abertas e a que estava abrindo, e nenhuma fica com a senha", async () => {
+    const m = await montar({ ambienteTela: { NOD_TELA_FALSA_ATRASO_MS: "300" } });
+    await m.iniciar();
+    const PORTAL = "https://portal.exemplo.com/";
+    await m.navegar("ana", PORTAL);
+    await salvarSenhaNoPerfil(m.perfilDe("ana"), "MARCADORA-ESQUECER");
+    await m.navegar("ana", `${PORTAL}entrar`);
+    await m.assentar();
+    expect(Object.keys((await m.senhas()).linhas)).toHaveLength(1);
+    // A tela do Caio está abrindo (o config dela já levou a senha) quando a pessoa pede Esquecer senhas salvas.
+    const caio = m.navegar("caio", PORTAL);
+    await vi.waitFor(() => expect(m.telas().caio).toBe("abrindo"));
+    const r = await m.tratar({ tipo: "esquecer_senhas" });
+    expect(r).toMatchObject({ desfecho: "ok", relancados: 2 });
+    await caio;
+    expect(Object.keys((await m.senhas()).linhas)).toHaveLength(0);
+    // As duas reabriram sem senha nenhuma no config, e nada a devolveu à loja ao fechar.
+    for (const bot of ["ana", "caio"]) expect((await m.navegar(bot, PORTAL)).resultado?.tela?.senhas, bot).toBe(0);
+    await m.assentar();
+    expect(Object.keys((await m.senhas()).linhas)).toHaveLength(0);
   });
 
   it("instalação limpa: a sonda sem assinatura é recusada, mas o computador novo é relatado na hora com a X25519", async () => {

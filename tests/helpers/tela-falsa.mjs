@@ -9,6 +9,8 @@
 // resposta traz `storage` = o localStorage da origem atual em JSON.
 // NOD-97 PR 5: a resposta traz `senhas` = quantas senhas salvas a tela recebeu no config (só a contagem, nunca o valor).
 // NOD_TELA_FALSA_ATRASO_MS segura o `pronta` (o boot lento); NOD_TELA_FALSA_ACAO_MS segura cada ação.
+// NOD_TELA_FALSA_LIMPAR_FALHA=cookies|storage faz o limpar_cookies ou o limpar_storage responder com erro (o CDP que
+// falha na tela real), sem limpar.
 import { randomBytes } from 'node:crypto';
 import process from 'node:process';
 import { setTimeout } from 'node:timers';
@@ -19,6 +21,7 @@ import { hashDosDados, origemDe, origemTemLogin } from '../../infra/computador/l
 const esperar = (ms) => new Promise((r) => setTimeout(r, ms));
 const ATRASO_ABRIR = Number(process.env.NOD_TELA_FALSA_ATRASO_MS ?? 0);
 const ATRASO_ACAO = Number(process.env.NOD_TELA_FALSA_ACAO_MS ?? 0);
+const LIMPAR_FALHA = process.env.NOD_TELA_FALSA_LIMPAR_FALHA ?? '';
 
 let config = null;
 let url = 'about:blank';
@@ -28,6 +31,7 @@ let conhecidos = new Map();
 const enviar = (m) => process.send?.(m);
 /** origem → [[nome, valor]] (o localStorage); versões que a tela tem e as pendentes, como na tela real. */
 const storage = new Map();
+let geracao = null;
 const versoes = new Map();
 const pendentes = new Map();
 
@@ -60,6 +64,8 @@ function tela() {
     texto: JSON.stringify(doHost.sort((a, b) => a.name.localeCompare(b.name))), abas: [{ url, titulo: h, ativa: true }],
     storage: JSON.stringify(storage.get(origemDe(url)) ?? []),
     senhas: Object.keys(config?.senhas?.linhas ?? {}).length,
+    // NOD-97 PR 6: a geração do storage em comum que este perfil aplicou (no config ao abrir ou no limpar_storage).
+    geracao,
   };
 }
 
@@ -102,6 +108,7 @@ process.on('message', async (m) => {
   try {
     if (m.tipo === 'abrir') {
       config = m.config;
+      geracao = config.geracao ?? null;
       for (const c of config.cookies ?? []) pote.set(chaveDoCookie(c), c);
       conhecidos = new Map(pote);
       for (const item of config.storage ?? []) receberStorage(item);
@@ -126,9 +133,17 @@ process.on('message', async (m) => {
       for (const c of m.postos ?? []) { pote.set(chaveDoCookie(c), c); conhecidos.set(chaveDoCookie(c), c); }
     } else if (m.tipo === 'storage') {
       receberStorage(m);
+    } else if ((m.tipo === 'limpar_cookies' && LIMPAR_FALHA === 'cookies') || (m.tipo === 'limpar_storage' && LIMPAR_FALHA === 'storage')) {
+      enviar({ tipo: 'resposta', id: m.id, erro: 'acao_falhou', detalhe: 'limpeza falhou (tela falsa)' });
     } else if (m.tipo === 'limpar_cookies') {
       pote = new Map();
       conhecidos = new Map();
+      enviar({ tipo: 'resposta', id: m.id, resultado: {} });
+    } else if (m.tipo === 'limpar_storage') {
+      storage.clear();
+      if (Number.isSafeInteger(m.geracao)) geracao = m.geracao;
+      versoes.clear();
+      pendentes.clear();
       enviar({ tipo: 'resposta', id: m.id, resultado: {} });
     } else if (m.tipo === 'fechar') {
       mandarCookies();

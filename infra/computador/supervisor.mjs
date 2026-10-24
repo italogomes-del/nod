@@ -23,13 +23,13 @@ import { createPrivateKey, randomUUID } from 'node:crypto';
 import { abrirSelo, chaveDaLoja, chaveDasSenhas, chaveDoStorage, conferirComando, novoParX25519, publicaX25519, senhaSafeStorage } from './chaves.mjs';
 import { atualizarLoja, cookiesVivos, fundir, lerLoja, zerar } from './loja-cookies.mjs';
 import { decidirAbertura, leituraLocal } from './regua.mjs';
-import { gravarOrigem, lerEstado, lerTudo, pastaDoStorage } from './login-storage.mjs';
-import { arquivoDasSenhas, lerSenhas, recolherSenhas } from './login-senhas.mjs';
+import { gravarOrigem, lerEstado, lerTudo, limparStorage, pastaDoStorage } from './login-storage.mjs';
+import { arquivoDasSenhas, esquecerSenhas, lerSenhas, recolherSenhas } from './login-senhas.mjs';
 import { RESOLV_DO_STUB } from './isolamento.mjs';
 
 const AQUI = path.dirname(fileURLToPath(import.meta.url));
 export const ID_VALIDO = /^[A-Za-z0-9_-]{1,64}$/;
-export const TIPOS = ['iniciar', 'abrir_tela', 'acao', 'fechar_tela', 'parar', 'atualizar', 'redefinir', 'sair_de_todos', 'apagar_perfil'];
+export const TIPOS = ['iniciar', 'abrir_tela', 'acao', 'fechar_tela', 'parar', 'atualizar', 'redefinir', 'sair_de_todos', 'esquecer_senhas', 'apagar_perfil'];
 /** Os comandos que dizem a tela (levam `agenteId`). */
 export const TIPOS_DA_TELA = ['abrir_tela', 'acao', 'fechar_tela', 'apagar_perfil'];
 export const PRAZO_ABRIR_TELA_MS = 60_000;
@@ -334,7 +334,7 @@ export function criarSupervisor(op) {
     const display = novoDisplay();
     if (display === null) return { esperando: [...c.telas.keys()].filter((k) => k !== agenteId) };
     const proc = fork(op.tela ?? process.env.NOD_PC_TELA ?? path.join(AQUI, 'tela.mjs'), [], { stdio: ['ignore', 'inherit', 'inherit', 'ipc'], env: { ...process.env, ...(op.ambienteTela ?? {}) } });
-    t = { estado: 'abrindo', proc, display, ocupada: false, ultimaAcaoEm: agora(), pendentes: new Map() };
+    t = { estado: 'abrindo', proc, display, ocupada: false, uso, ultimaAcaoEm: agora(), pendentes: new Map() };
     c.telas.set(agenteId, t);
     relatarEstado(c);
     proc.on('message', (m) => {
@@ -358,7 +358,7 @@ export function criarSupervisor(op) {
         config: {
           agenteId, display, raiz, run, ocultar: [path.dirname(terminal)], resolv, resolvEm, perfil: path.join(c.d.perfis, agenteId), perfilBase: c.d.perfilBase, workspace: path.join(c.d.workspace, agenteId),
           logins: c.d.logins, tmp: path.join(c.d.run, 'telas', agenteId), x11, bus: c.d.bus, busEndereco: c.busEndereco, bin, sandbox: op.sandbox !== false,
-          xvfbArgs: op.xvfbArgs, cookies: cookiesVivos(loja, agora()), storage: storage.itens, senhas,
+          xvfbArgs: op.xvfbArgs, cookies: cookiesVivos(loja, agora()), storage: storage.itens, geracao: storage.geracao, senhas,
         },
       });
       const m = await esperarDoFilho(proc, (x) => x?.tipo === 'pronta' || x?.tipo === 'falhou', PRAZO_ABRIR_TELA_MS);
@@ -449,6 +449,18 @@ export function criarSupervisor(op) {
     }
   }
 
+  /** NOD-97 PR 6: espera as telas em 'abrindo' terminarem de abrir (ou desistirem), para a operação as alcançar. */
+  async function esperarAsQueAbrem(c) {
+    await Promise.all([...c.telas.values()].filter((t) => t.estado === 'abrindo' && t.abrindo).map((t) => t.abrindo.catch(() => {})));
+  }
+
+  /** Roda `fn` na fila da máquina e devolve o resultado (ou a falha); a fila segue viva mesmo se `fn` falhar. */
+  function naFila(c, fn) {
+    const p = c.fila.then(fn);
+    c.fila = p.catch(() => {});
+    return p;
+  }
+
   async function fecharTodas(c, de, ate) {
     const abertas = [...c.telas.keys()];
     for (const [i, agenteId] of abertas.entries()) {
@@ -535,11 +547,48 @@ export function criarSupervisor(op) {
       case 'sair_de_todos': {
         if (!c.ligado) return falhou(cmd.id, 'nao_iniciou');
         etapa(c, 20, 'Saindo das contas');
-        await (c.fila = c.fila.then(() => atualizarLoja(c.d.loja, c.chaveLoja, (loja) => zerar(loja, agora(), agora()))));
-        const abertas = [...c.telas.values()].filter((t) => t.estado === 'aberta');
+        let falha = null;
+        // Na fila da máquina pelo naFila: a loja que não grava marca a falha sem deixar a fila rejeitada para as outras.
+        await naFila(c, () => atualizarLoja(c.d.loja, c.chaveLoja, (loja) => zerar(loja, agora(), agora()))).catch((e) => { falha = e; log(`loja de cookies: ${e?.message}`); });
+        // NOD-97 PR 6: o storage em comum também sai. A geração nova zera o índice; as telas abertas apagam o do perfil
+        // (CDP, cada origem conhecida) e as fechadas o apagam do disco ao subir com essa geração.
+        let geracao;
+        if (c.chaveStorage) geracao = await naFila(c, () => limparStorage(c.d.storage, c.chaveStorage)).catch((e) => { falha ??= e; log(`storage: ${e?.message}`); });
+        await esperarAsQueAbrem(c); // as que estão abrindo levaram os cookies e o storage antigos no config
+        const abertas = [...c.telas.entries()].filter(([, t]) => t.estado === 'aberta');
         etapa(c, 50, 'Limpando');
-        for (const t of abertas) await pedirATela(t, { tipo: 'limpar_cookies' }, 15_000);
+        for (const [agenteId, t] of abertas) {
+          // Tela que não limpou (erro ou sem resposta) ainda tem a sessão: a operação falha, mas as outras seguem.
+          for (const pedido of [{ tipo: 'limpar_cookies' }, { tipo: 'limpar_storage', geracao }]) {
+            const r = await pedirATela(t, pedido, 15_000);
+            if (r?.erro) {
+              falha ??= new Error(r.erro);
+              log(`${pedido.tipo} em ${agenteId}: ${r.erro}${r.detalhe ? ` (${r.detalhe})` : ''}`);
+            }
+          }
+        }
+        // O storage guardado ou o de uma tela aberta não saiu: a pessoa não pode ver "saiu de todos" com a sessão viva.
+        if (falha) return falhou(cmd.id, 'acao_falhou');
         return resultado(cmd.id, 'ok', { progresso: { pct: 100, etapa: 'pronto' } });
+      }
+      case 'esquecer_senhas': {
+        if (!c.ligado) return falhou(cmd.id, 'nao_iniciou');
+        etapa(c, 15, 'Esquecendo senhas');
+        // Os Chromes abertos seguram o Login Data e o reescrevem ao sair; fecha todos antes de apagar e reabre depois.
+        // A tela que está abrindo já levou as senhas no config: espera ela ficar aberta e entra na mesma conta.
+        await esperarAsQueAbrem(c);
+        const abertas = [...c.telas.entries()].filter(([, t]) => t.estado === 'aberta').map(([agenteId, t]) => ({ agenteId, uso: t.uso }));
+        for (const { agenteId } of abertas) await fecharTela(c, agenteId);
+        etapa(c, 50, 'Apagando senhas salvas');
+        const perfis = [c.d.perfilBase, ...(await readdir(c.d.perfis).catch(() => [])).map((n) => path.join(c.d.perfis, n))];
+        let falha = null;
+        await naFila(c, () => esquecerSenhas(c.d.senhas, perfis)).catch((e) => { falha = e; log(`esquecer_senhas: ${e?.message}`); });
+        etapa(c, 75, 'Reabrindo');
+        let relancados = 0;
+        for (const { agenteId, uso } of abertas) { const r = await abrirTela(c, agenteId, uso); if (r?.ok) relancados++; }
+        // As telas voltam de qualquer jeito; mas, se alguma senha ficou no disco, a operação falha (não diz "esqueceu").
+        if (falha) return falhou(cmd.id, 'acao_falhou');
+        return resultado(cmd.id, 'ok', { progresso: { pct: 100, etapa: 'pronto' }, relancados });
       }
       case 'atualizar':
         // Os binários novos vêm do instalador do motor; aqui fecha tudo (perfis, logins e workspace ficam) para o
@@ -561,7 +610,9 @@ export function criarSupervisor(op) {
     }
   }
 
-  const OPERACOES = new Set(['atualizar', 'redefinir', 'sair_de_todos']);
+  const OPERACOES = new Set(['atualizar', 'redefinir', 'sair_de_todos', 'esquecer_senhas']);
+  // A primeira etapa de cada operação, com o nome que a web lista (web/lib/computador-pessoa.ts, ETAPAS).
+  const PRIMEIRA_ETAPA = { sair_de_todos: 'Saindo das contas', esquecer_senhas: 'Esquecendo senhas' };
 
   /** Trata um ComandoComputador e devolve o ResultadoComandoComputador. Nunca lança. */
   async function tratar(cmd) {
@@ -589,7 +640,7 @@ export function criarSupervisor(op) {
       }
       if (c.operacao && cmd.tipo !== 'parar') return falhou(id, 'atualizando');
       if (OPERACOES.has(cmd.tipo)) {
-        c.operacao = { tipo: cmd.tipo, pct: 0, etapa: 'Preparando' };
+        c.operacao = { tipo: cmd.tipo, pct: 0, etapa: PRIMEIRA_ETAPA[cmd.tipo] ?? 'Preparando' };
         relatarEstado(c);
       }
       try {

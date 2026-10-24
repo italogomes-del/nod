@@ -89,6 +89,7 @@ const OPERACAO_NO_AVISO: Record<OperacaoComputador, string> = {
   atualizar: "você pediu para atualizar o computador",
   redefinir: "você pediu para redefinir o computador",
   sair_de_todos: "você pediu para sair de todos os sites",
+  esquecer_senhas: "você pediu para esquecer as senhas salvas",
 };
 function esperandoTelaParaAgente(quem: string[]): string {
   const uso = quem.length ? ` ${quem.join(", ")} ${quem.length === 1 ? "está" : "estão"} usando o computador agora.` : "";
@@ -979,7 +980,8 @@ export function criarComputadores(o: Opcoes) {
         } finally {
           await o.dentro(escopo, async (d) => {
             // Atualizar e Redefinir fecham as telas no supervisor (Sair de todos não); o banco acompanha sem esperar o relato.
-            if (op !== "sair_de_todos") for (const t of await d.repos.computadorTelas.doComputador(plano.id)) if (t.estado !== "fechada" && t.estado !== "esperando") await d.repos.computadorTelas.mudarEstado(t.id, "fechada", d.agora(), ["aberta", "abrindo", "fechando"]);
+            // Esquecer senhas fecha e religa as telas: o banco não as marca fechadas — a foto do supervisor reconcilia.
+            if (op !== "sair_de_todos" && op !== "esquecer_senhas") for (const t of await d.repos.computadorTelas.doComputador(plano.id)) if (t.estado !== "fechada" && t.estado !== "esperando") await d.repos.computadorTelas.mudarEstado(t.id, "fechada", d.agora(), ["aberta", "abrindo", "fechando"]);
             await d.repos.computadores.terminarOperacao(plano.id, op);
             await d.repos.computadores.concluir(plano.registroId, sucesso ? "concluida" : "falhou", falha?.motivo ?? null);
           }).catch((e: unknown) => log("erro", "computador_operacao_nao_encerrada", { computador_id: plano.id, tipo: op, erro: e instanceof Error ? e.name : "desconhecido" }));
