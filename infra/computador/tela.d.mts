@@ -3,6 +3,8 @@ export function urlPermitida(url: unknown): boolean;
 export const ganchos: Record<string, (...a: unknown[]) => unknown>;
 export function forkDoPerfil(perfilBase: string, perfil: string): Promise<void>;
 export function perfilSaiuLimpo(perfil: string): Promise<boolean>;
+export function arquivoXauthority(display: number | string, cookie?: Buffer): Buffer;
+export function argsDoXvfb(display: number | string, xauthority: string, extras?: string[]): string[];
 export function caminhoNoWorkspace(raiz: string, c: unknown, novo?: boolean): Promise<string>;
 export function criarTela(config: Record<string, unknown>, avisar: (m: unknown) => void): {
   subir(): Promise<void>; observar(): Promise<unknown>; receberCookies(d: unknown): Promise<void>; limparCookies(): Promise<void>; executar(a: unknown): Promise<unknown>; fechar(): Promise<void>;

@@ -81,6 +81,29 @@ export async function perfilSaiuLimpo(perfil) {
   await writeFile(arquivo, JSON.stringify(prefs));
 }
 
+/**
+ * NOD-97 PR 3 (ADR-122 §4, emenda): o arquivo Xauthority de uma tela, com um cookie MIT-MAGIC-COOKIE-1 só dela. Uma
+ * entrada FamilyWild (vale para qualquer host) no número do display: sem ela o Xvfb aceita qualquer processo da
+ * máquina que alcance o socket (o abstrato `@/tmp/.X11-unix/X1NN` é por network namespace, não some no PrivateTmp nem no
+ * bwrap: o motor, os CLIs dos bots e o terminal o alcançariam). Gerado aqui, em Node, para não depender do `xauth`.
+ */
+export function arquivoXauthority(display, cookie = randomBytes(16)) {
+  if (!Buffer.isBuffer(cookie) || cookie.length !== 16) throw new Error('cookie_x');
+  const campo = (b) => {
+    const t = Buffer.alloc(2);
+    t.writeUInt16BE(b.length);
+    return Buffer.concat([t, b]);
+  };
+  const familia = Buffer.alloc(2);
+  familia.writeUInt16BE(0xffff);
+  return Buffer.concat([familia, campo(Buffer.alloc(0)), campo(Buffer.from(String(display))), campo(Buffer.from('MIT-MAGIC-COOKIE-1')), campo(cookie)]);
+}
+
+/** Os argumentos do Xvfb: só o socket do caminho (sem TCP nem o abstrato) e só com o cookie (`-auth`). */
+export function argsDoXvfb(display, xauthority, extras = []) {
+  return [`:${display}`, '-screen', '0', '1280x800x24', '-nolisten', 'tcp', '-nolisten', 'local', '-auth', xauthority, ...extras];
+}
+
 const OPENBOX_XML = `<?xml version="1.0" encoding="UTF-8"?>
 <openbox_config xmlns="http://openbox.org/3.4/rc">
   <applications>
@@ -127,7 +150,9 @@ export function criarTela(config, avisar) {
   /** A última foto dos cookies que a loja conhece (o que a tela mandou e o que recebeu). */
   let conhecidos = new Map();
   const DISPLAY = `:${config.display}`;
-  const ambienteX = { ...process.env, DISPLAY, DBUS_SESSION_BUS_ADDRESS: config.busEndereco ?? '', TMPDIR: config.tmp, HOME: path.join(config.perfil, '..', `casa-${config.agenteId}`) };
+  // O cookie do X fica no tmp desta tela (0600, some no bwrap das outras): só os filhos dela abrem o DISPLAY.
+  const XAUTHORITY = path.join(config.tmp, 'Xauthority');
+  const ambienteX = { ...process.env, DISPLAY, XAUTHORITY, DBUS_SESSION_BUS_ADDRESS: config.busEndereco ?? '', TMPDIR: config.tmp, HOME: path.join(config.perfil, '..', `casa-${config.agenteId}`) };
   const run = (bin, args, opcoes = {}) => exec(bin, args, { timeout: 25000, maxBuffer: 8 * 1024 * 1024, env: ambienteX, ...opcoes });
   const mudar = () => {
     revision = randomBytes(32).toString('hex');
@@ -161,7 +186,9 @@ export function criarTela(config, avisar) {
     await forkDoPerfil(config.perfilBase, config.perfil);
     const socketX = path.join(config.x11, `X${config.display}`);
     await unlink(socketX).catch(() => {});
-    iniciar(await noBwrap('xvfb', config.bin.xvfb, false), [DISPLAY, '-screen', '0', '1280x800x24', '-nolisten', 'tcp', ...(config.xvfbArgs ?? [])]);
+    await writeFile(XAUTHORITY, arquivoXauthority(config.display), { mode: 0o600 });
+    await chmod(XAUTHORITY, 0o600);
+    iniciar(await noBwrap('xvfb', config.bin.xvfb, false), argsDoXvfb(config.display, XAUTHORITY, config.xvfbArgs ?? []));
     for (let i = 0; i < 100; i++) {
       if (await access(socketX).then(() => true, () => false)) break;
       if (i === 99) throw falhaDe('nao_iniciou', 'o Xvfb não abriu');

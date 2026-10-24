@@ -133,6 +133,25 @@ As colunas de `computadores` que passam a ser da tela (controle, política, ajud
 - Endurecimento das units: além do plano, `ProtectKernelLogs` e `ProtectControlGroups`. As units ainda não rodaram
   sob systemd numa VM limpa: a primeira instalação de verdade é o smoke do PR 7.
 
+## Emenda 2026-10-24 (NOD-97 PR 3): o DISPLAY de cada tela tem cookie
+
+O §4 diz que o terminal "não tem `DISPLAY`", mas não ter a variável não fecha o servidor X. O Xvfb também escuta no
+socket abstrato `@/tmp/.X11-unix/X1NN`, que é por network namespace: não some no `PrivateTmp` nem no bwrap, e nenhuma
+das camadas isola a rede local. Sem `-auth`, o Xvfb aceitava qualquer processo da máquina, inclusive o motor, os
+CLIs dos bots (uid `nod`), o terminal (`nod-pc-term`) e a tela de outro bot. Quem abrisse o DISPLAY via a tela, digitava
+nela e lia o clipboard, sem passar pelos comandos assinados.
+
+- **Cada tela tem um cookie `MIT-MAGIC-COOKIE-1` só dela**, de 16 bytes aleatórios, novo a cada subida. Fica em
+  `<run>/<id>/telas/<agente>/Xauthority` (0600, uid `nod-pc`): o run é 0700 e, no bwrap, o tmp das outras telas
+  fica sob `--tmpfs`. O arquivo é escrito em Node (`arquivoXauthority`, uma entrada FamilyWild no número do display)
+  para não depender do pacote `xauth`.
+- **O Xvfb sobe com `-auth <arquivo>` e `-nolisten local`** (`argsDoXvfb`), além do `-nolisten tcp` de antes: fica só o
+  socket do caminho, que o bwrap monta em `/tmp/.X11-unix`. Openbox, Chromium, xdotool, xclip e scrot recebem
+  `XAUTHORITY`.
+- **Teste:** com Xvfb de verdade (pula se a máquina não o tem), sem o cookie ou com outro cookie a conexão é recusada,
+  com o cookie é aceita e o socket abstrato não existe. O que já era garantido segue coberto: o terminal não vê
+  `logins/`, os perfis e o keyring (0700, outro uid) e roda sem `DISPLAY`.
+
 ## Fora
 
 Compartilhar por workspace (bots de colegas); mais de uma máquina por pessoa; compartilhar senhas, storage e

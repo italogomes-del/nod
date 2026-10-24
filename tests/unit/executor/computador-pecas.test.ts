@@ -1,6 +1,7 @@
 // NOD-96 PR 2 (ADR-122): as peças puras do supervisor do computador por pessoa.
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import path, { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -11,7 +12,7 @@ import {
 import { argsDoBwrap, RESOLV_DO_STUB, scriptDoBwrap } from "../../../infra/computador/isolamento.mjs";
 import { atualizarLoja, cookiesVivos, diffDeCookies, fundir, lerLoja, lojaVazia, zerar, type Cookie } from "../../../infra/computador/loja-cookies.mjs";
 import { decidirAbertura, leituraLocal, OCIOSA_APOS_MS } from "../../../infra/computador/regua.mjs";
-import { caminhoNoWorkspace, urlPermitida } from "../../../infra/computador/tela.mjs";
+import { argsDoXvfb, arquivoXauthority, caminhoNoWorkspace, urlPermitida } from "../../../infra/computador/tela.mjs";
 import { rodarComando } from "../../../infra/computador/terminal.mjs";
 import { destinoDoResolv } from "../../../infra/computador/supervisor.mjs";
 
@@ -27,6 +28,28 @@ async function pasta() {
 const bwrapIsola = spawnSync("bwrap", ["--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--unshare-pid", "true"], { timeout: 5000, stdio: "ignore" }).status === 0;
 
 const CRED = "a".repeat(64);
+
+/** O Xvfb desta máquina (na CI pode faltar). */
+const temXvfb = spawnSync("sh", ["-c", "command -v Xvfb"], { stdio: "ignore" }).status === 0;
+
+/** Abre a conexão X11 no `alvo` (caminho ou "\0abstrato") com o cookie, ou sem nada; devolve 1 (aceita), 0 (recusa) ou o erro. */
+function apertoX11(alvo: string, cookie?: Buffer): Promise<number | string> {
+  return new Promise((resolve) => {
+    const nome = cookie ? Buffer.from("MIT-MAGIC-COOKIE-1") : Buffer.alloc(0);
+    const dado = cookie ?? Buffer.alloc(0);
+    const pad = (b: Buffer) => Buffer.concat([b, Buffer.alloc((4 - (b.length % 4)) % 4)]);
+    const cab = Buffer.alloc(12);
+    cab.write("l", 0);
+    cab.writeUInt16LE(11, 2);
+    cab.writeUInt16LE(0, 4);
+    cab.writeUInt16LE(nome.length, 6);
+    cab.writeUInt16LE(dado.length, 8);
+    const s = connect(alvo);
+    s.on("connect", () => s.write(Buffer.concat([cab, pad(nome), pad(dado)])));
+    s.once("data", (d: Buffer) => { resolve(d[0] ?? "vazio"); s.destroy(); });
+    s.on("error", (e: NodeJS.ErrnoException) => resolve(e.code ?? "erro"));
+  });
+}
 const ck = (name: string, value: string, extra: Partial<Cookie> = {}): Cookie => ({ name, value, domain: ".exemplo.com", path: "/", expires: -1, ...extra });
 
 describe("chaves", () => {
@@ -221,6 +244,47 @@ describe("isolamento e tela", () => {
       expect(r.stdout).not.toContain("entrada");
     } finally {
       await rm(base, { recursive: true, force: true });
+    }
+  });
+
+  it("o Xauthority da tela tem uma entrada FamilyWild com o cookie MIT de 16 bytes, no número do display", () => {
+    const cookie = Buffer.alloc(16, 7);
+    const x = arquivoXauthority(142, cookie);
+    expect(x.readUInt16BE(0)).toBe(0xffff);
+    expect(x.readUInt16BE(2)).toBe(0); // endereço vazio
+    expect(x.readUInt16BE(4)).toBe(3);
+    expect(x.subarray(6, 9).toString()).toBe("142");
+    expect(x.readUInt16BE(9)).toBe(18);
+    expect(x.subarray(11, 29).toString()).toBe("MIT-MAGIC-COOKIE-1");
+    expect(x.readUInt16BE(29)).toBe(16);
+    expect(x.subarray(31)).toEqual(cookie);
+    expect(arquivoXauthority(142).subarray(31)).not.toEqual(arquivoXauthority(142).subarray(31));
+    expect(() => arquivoXauthority(1, Buffer.alloc(8))).toThrow("cookie_x");
+  });
+
+  it("o Xvfb sobe sem TCP, sem o socket abstrato e com -auth", () => {
+    const a = argsDoXvfb(142, "/t/Xauthority", ["-extra"]);
+    expect(a[0]).toBe(":142");
+    expect(a.join(" ")).toContain("-nolisten tcp -nolisten local -auth /t/Xauthority");
+    expect(a.at(-1)).toBe("-extra");
+  });
+
+  it.skipIf(!temXvfb)("no Xvfb de verdade, quem não tem o cookie não abre o DISPLAY e o socket abstrato não existe", async () => {
+    const dir = await pasta();
+    const display = 190 + Math.floor(Math.random() * 60);
+    const cookie = Buffer.alloc(16, 9);
+    const arq = join(dir, "Xauthority");
+    await writeFile(arq, arquivoXauthority(display, cookie), { mode: 0o600 });
+    const x = spawn("Xvfb", argsDoXvfb(display, arq), { stdio: "ignore" });
+    try {
+      const socket = `/tmp/.X11-unix/X${display}`;
+      for (let i = 0; i < 100 && (await apertoX11(socket, cookie)) !== 1; i++) await new Promise((r) => setTimeout(r, 100));
+      expect(await apertoX11(socket, cookie)).toBe(1);
+      expect(await apertoX11(socket)).toBe(0);
+      expect(await apertoX11(socket, Buffer.alloc(16, 1))).toBe(0);
+      expect(await apertoX11(`\0${socket}`, cookie)).toBe("ECONNREFUSED");
+    } finally {
+      x.kill("SIGKILL");
     }
   });
 
