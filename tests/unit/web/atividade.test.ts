@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { comFerramenta, comTexto, ETAPAS_GUARDADAS, linhaAtual, resumoEtapa } from "../../../web/lib/atividade.ts";
+import { ATIVIDADE_VAZIA, comFerramenta, comTexto, estadoDaFala, ETAPAS_GUARDADAS, linhaAtual, resumoEtapa } from "../../../web/lib/atividade.ts";
 
 describe("atividade do turno vivo", () => {
   it("ferramenta sem narração antes abre etapa com o rótulo; seguidas somam na mesma etapa", () => {
@@ -54,5 +54,29 @@ describe("atividade do turno vivo", () => {
     expect(linhaAtual(comTexto(undefined, "Categorizando lote de 11 e-mails."))).toBe("Categorizando lote de 11 e-mails…");
     expect(linhaAtual(comFerramenta(undefined, "Consultou Gmail"))).toBe("Consultou Gmail…");
     expect(linhaAtual(comTexto(undefined, ""))).toBe("Começando…");
+  });
+});
+
+// NOD-348: o estado da fala viva, no presente, e o mascote de cada um (decisão da Ada: atento, não "thinking").
+describe("estadoDaFala", () => {
+  it("sem nada é Pensando, atento", () => {
+    expect(estadoDaFala(undefined)).toEqual({ chave: "pensando", texto: "Pensando", mascote: { state: "idle", expression: "attentif" } });
+    expect(estadoDaFala(ATIVIDADE_VAZIA).chave).toBe("pensando");
+  });
+  it("texto chegando é Escrevendo, atento", () => {
+    expect(estadoDaFala(comTexto(undefined, "Oi"))).toEqual({ chave: "escrevendo", texto: "Escrevendo", mascote: { state: "idle", expression: "attentif" } });
+  });
+  it("ferramenta em uso diz o nome e o mascote trabalha; espaço solto não volta a Escrevendo", () => {
+    const a = comFerramenta(comTexto(undefined, "Vou ver."), "Consultou Linear", { texto: "Usando Linear", frentes: false });
+    expect(estadoDaFala(a)).toEqual({ chave: "ferramenta", texto: "Usando Linear", mascote: { state: "orbit", expression: null } });
+    expect(estadoDaFala(comTexto(a, " \n")).texto).toBe("Usando Linear");
+    expect(estadoDaFala(comTexto(a, "Achei.")).chave).toBe("escrevendo");
+  });
+  it("sem o nome da ferramenta (servidor antigo) diz Usando uma ferramenta", () => {
+    expect(estadoDaFala(comFerramenta(undefined, "Usou algo")).texto).toBe("Usando uma ferramenta");
+  });
+  it("trocar de ferramenta troca o texto; abrir frentes tem estado próprio", () => {
+    const a = comFerramenta(comFerramenta(undefined, "Rodou um comando", { texto: "Rodando um comando", frentes: false }), "Começou frentes", { texto: "Abrindo frentes", frentes: true });
+    expect(estadoDaFala(a)).toEqual({ chave: "frentes", texto: "Abrindo frentes", mascote: { state: "orbit", expression: null } });
   });
 });

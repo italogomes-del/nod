@@ -61,6 +61,7 @@ import { estadoMascoteNaConversa, mascoteComAviso, proximaViradaDoMascote } from
 import { lembrar } from "./lib/lembrar.ts";
 import { atualizarGaveta } from "./lib/gaveta-render.ts";
 import { blocosMudariam, esquecerRegiao, regiao, regiaoMudaria, regiaoPorBlocos } from "./lib/regioes.ts";
+import { criarAnunciador, criarRelogioDaFala, escreverTempos, lerFalasNaTela, type FalaNaTela } from "./lib/fala-viva.ts";
 import { criarRascunhos } from "./lib/rascunhos.ts";
 import { criarRolagem } from "./lib/rolagem-na-tela.ts";
 import { anunciosDeFim, aoEsconder, aoSumir, SEM_PROGRESSO, teclaNaPilula, type ProgressoNaTela } from "./lib/pilula.ts";
@@ -646,7 +647,34 @@ function renderNoQuadro(): void {
   });
 }
 
+/**
+ * NOD-348: o relógio da linha viva (1 s, só o texto de `[data-desde]`) e o anúncio do turno ao leitor de tela, em
+ * `#anuncio-turno` — separado do `#anuncio-pergunta`, para um não apagar o outro.
+ */
+const agendarNaJanela = (fn: () => void, ms: number): (() => void) => {
+  const t = window.setTimeout(fn, ms);
+  return () => window.clearTimeout(t);
+};
+const relogioDaFala = criarRelogioDaFala(() => escreverTempos(document.getElementById("timeline-ao-vivo"), Date.now()), agendarNaJanela, () => document.hidden);
+let anuncioPendente = 0;
+const anunciadorDoTurno = criarAnunciador((texto) => {
+  const anuncio = document.getElementById("anuncio-turno");
+  if (!anuncio) return;
+  // Duas falas em menos de 60 ms: a segunda substitui a primeira, sem a primeira apagar a segunda depois.
+  window.clearTimeout(anuncioPendente);
+  anuncio.textContent = "";
+  anuncioPendente = window.setTimeout(() => { anuncio.textContent = texto; }, 60);
+}, agendarNaJanela);
+document.addEventListener("visibilitychange", () => relogioDaFala.tocar());
+
+/** As falas vivas à vista (o que o anunciador acompanha). */
+function falasNaTela(): FalaNaTela[] {
+  return lerFalasNaTela(document.getElementById("timeline-ao-vivo"));
+}
+
 function receberFrame(frame: FrameSse): void {
+  // Antes do reducer: no fim, o anunciador ainda sabe quem falava (o turno sai do estado no mesmo frame).
+  anunciadorDoTurno.frame(frame.tipo, frame.dados);
   const antes = estado;
   estado = reduzir(estado, { tipo: "frame", frame, agora: Date.now() });
   if (mudouNaTela(antes, estado)) renderNoQuadro();
@@ -1273,6 +1301,9 @@ function renderPrincipal(): void {
   // Chat limpo (PR 7; QA do PR 398): o progresso das frentes muda só o bloco dele, dentro da fala, sem regravá-la. O bloco
   // trocado é medido de novo antes da pílula (PR 8): ela some com o bloco à vista, e a frente nova do lote muda o bloco.
   if (progressoNaTela.desenhar(conversaDaTela(estado), estado, memoriaNaFala()) > 0) rolagem.progressoTrocado();
+  // NOD-348: o tempo da fala viva é escrito logo depois do render (a parte trocada nasce vazia) e o anunciador vê o estado novo.
+  relogioDaFala.tocar();
+  anunciadorDoTurno.observar(falasNaTela());
   // ADR-083 (#195): a faixa de Trabalhos fica colada em cima do campo, só na conversa e só com trabalho aberto do bot.
   // ADR-099 (parte 5): virou a linha do dono; chat limpo (PR 8): virou a pílula que se alarga, que some com a fala à vista.
   // Depois da timeline (revisão do PR 400): a medida do progresso na fala é a da timeline que acabou de ser desenhada

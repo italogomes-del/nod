@@ -248,8 +248,9 @@
 @media (hover: none) and (pointer: coarse) and (max-width: 600px), (hover: none) and (pointer: coarse) and (max-height: 500px) {
   .progresso-resumo { min-height: 40px; }
   .progresso-titulo { min-height: 32px; }
-  .atividade-linha > summary { min-height: 40px; }
+  .fala-viva-etapas > summary { min-height: 44px; }
   .message.ao-vivo { padding-left: 35px; }
+  .message.ao-vivo.fala-viva, .message.fala-viva { padding-left: 0; }
 }
 
 /* NOD-327 (j4-10): no celular a prévia sobe da base como folha, com a conversa visível em cima (tocar nela fecha), os

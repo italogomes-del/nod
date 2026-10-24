@@ -36,13 +36,21 @@ export type AtividadeTurno = {
   tarefas: TarefaDoBot[];
   /** O último aviso do vigia do turno (turno.vigia); null enquanto não houve nenhum. */
   vigia: VigiaDaAtividade | null;
+  /** NOD-348: a ferramenta que o bot usa agora (do NOME do frame), até o próximo texto; null = nenhuma desde o texto. */
+  emUso: FerramentaEmUso | null;
+  /** NOD-348 (QA 2 do #508): os blocos de narração já fechados por ferramentas desde a última fala (para `textoDaFala`). */
+  antes?: string[];
   /** NOD-350: sobrevive à fala do bot (os subagentes seguem depois do `result` do turno principal). */
   subagentes: SubagentesDoTurno | null;
 };
 
+/** NOD-348: o que a fala viva diz da ferramenta (o servidor manda pronto no frame, `ferramentaEmUso` do domínio). */
+export type FerramentaEmUso = { texto: string; frentes: boolean };
+export const SEM_NOME_DA_FERRAMENTA: FerramentaEmUso = { texto: "Usando uma ferramenta", frentes: false };
+
 export const ETAPAS_GUARDADAS = 200;
 
-export const ATIVIDADE_VAZIA: AtividadeTurno = { atual: "", etapas: [], totalEtapas: 0, ferramentas: 0, ultimaFerramenta: null, tarefas: [], vigia: null, subagentes: null };
+export const ATIVIDADE_VAZIA: AtividadeTurno = { atual: "", etapas: [], totalEtapas: 0, ferramentas: 0, ultimaFerramenta: null, tarefas: [], vigia: null, emUso: null, subagentes: null };
 
 export function comTarefas(a: AtividadeTurno | undefined, tarefas: TarefaDoBot[]): AtividadeTurno {
   return { ...(a ?? ATIVIDADE_VAZIA), tarefas };
@@ -106,14 +114,15 @@ export function comVigia(a: AtividadeTurno | undefined, vigia: VigiaDaAtividade)
 
 export function comTexto(a: AtividadeTurno | undefined, trecho: string): AtividadeTurno {
   const base = a ?? ATIVIDADE_VAZIA;
-  return { ...base, atual: base.atual + trecho };
+  // NOD-348: texto de verdade chegando é "Escrevendo"; espaço solto entre ferramentas não troca o estado.
+  return { ...base, atual: base.atual + trecho, emUso: trecho.trim() ? null : base.emUso };
 }
 
 /**
  * Narração antes da ferramenta vira etapa com 1 ferramenta; ferramentas seguidas sem narração somam na
  * última etapa; ferramenta sem etapa nenhuma antes abre uma etapa com o próprio rótulo.
  */
-export function comFerramenta(a: AtividadeTurno | undefined, rotulo: string): AtividadeTurno {
+export function comFerramenta(a: AtividadeTurno | undefined, rotulo: string, emUso: FerramentaEmUso = SEM_NOME_DA_FERRAMENTA): AtividadeTurno {
   const base = a ?? ATIVIDADE_VAZIA;
   const narracao = base.atual.trim();
   const ultima = base.etapas[base.etapas.length - 1];
@@ -128,7 +137,43 @@ export function comFerramenta(a: AtividadeTurno | undefined, rotulo: string): At
     etapas = [{ texto: rotulo, ferramentas: 1 }];
     totalEtapas += 1;
   }
-  return { atual: "", etapas: etapas.slice(-ETAPAS_GUARDADAS), totalEtapas, ferramentas: base.ferramentas + 1, ultimaFerramenta: rotulo, tarefas: base.tarefas, vigia: base.vigia, subagentes: base.subagentes };
+  return { atual: "", etapas: etapas.slice(-ETAPAS_GUARDADAS), totalEtapas, ferramentas: base.ferramentas + 1, ultimaFerramenta: rotulo, tarefas: base.tarefas, vigia: base.vigia, emUso, subagentes: base.subagentes, antes: narracao ? [...(base.antes ?? []), base.atual].slice(-ETAPAS_GUARDADAS) : base.antes };
+}
+
+/**
+ * A regra do `comporFala` (src/domain/stream-json.ts) na web, que não importa do domínio (ADR-018, ADR-020): os blocos
+ * de antes da última ferramenta com mais de 280 caracteres que o final não contém, mais o final. Revisão 4 do #508: a
+ * fala parada mostra o que a fala gravada vai mostrar. Um teste trava a paridade com a do domínio.
+ */
+export const NARRACAO_MAX_CHARS_WEB = 280;
+const normalizarFala = (s: string) => s.replace(/\s+/g, " ").trim();
+
+export function comporFalaWeb(antes: readonly string[], final: string): string {
+  const alvo = normalizarFala(final);
+  const relatorios: string[] = [];
+  for (const bloco of antes) {
+    const t = bloco.trim();
+    if (t.length <= NARRACAO_MAX_CHARS_WEB) continue;
+    const n = normalizarFala(t);
+    if (alvo.includes(n) || relatorios.some((r) => normalizarFala(r).includes(n))) continue;
+    relatorios.push(t);
+  }
+  if (relatorios.length === 0) return final;
+  return [...relatorios, final].map((p) => p.trim()).filter((p) => p !== "").join("\n\n");
+}
+
+/**
+ * NOD-348 (QA 2 e revisões 4 a 6 do #508): o texto do balão, viva e parada, pela mesma regra da fala gravada
+ * (`comporFala`: os relatórios longos antes da última ferramenta + o texto final), para o fim do turno e a troca pela
+ * gravada não mudarem a altura. Sem texto depois da última ferramenta, o último bloco faz de final: a ferramenta não
+ * esvazia o balão. O texto que volta substitui a narração curta, que fica em "ver etapas" (de uma linha para outra).
+ */
+export function textoDaFala(a: AtividadeTurno | undefined): string {
+  if (!a) return "";
+  const blocos = a.antes ?? [];
+  if (a.atual.trim()) return comporFalaWeb(blocos, a.atual);
+  const ultimo = blocos.length - 1;
+  return ultimo < 0 ? "" : comporFalaWeb(blocos.slice(0, ultimo), blocos[ultimo]!);
 }
 
 /**
@@ -165,4 +210,21 @@ export function linhaAtual(a: AtividadeTurno): string {
   // NOD-350 (critério 3): depois da fala, o "agora" é a linha dos subagentes ("2 subagentes trabalhando", ou "Os 2
   // subagentes voltaram" até o bot recomeçar a volta), não "Começando…".
   return a.subagentes?.resumo ?? "Começando…";
+}
+
+/**
+ * NOD-348 (definido em 2026-10-23; protótipo v2 e decisões da Ada): o estado da fala viva, no presente. Texto chegando
+ * é "Escrevendo"; ferramenta em uso, o nome dela ("Usando Linear") ou "Abrindo frentes"; antes de tudo, "Pensando".
+ * Mascote: Pensando e Escrevendo ficam atentos (idle + attentif, não `thinking`); ferramenta e frentes, `orbit`.
+ */
+export type ChaveDaFala = "pensando" | "escrevendo" | "ferramenta" | "frentes";
+export type EstadoDaFala = { chave: ChaveDaFala; texto: string; mascote: { state: "idle" | "orbit"; expression: "attentif" | null } };
+
+const ATENTO = { state: "idle", expression: "attentif" } as const;
+const FAZENDO = { state: "orbit", expression: null } as const;
+
+export function estadoDaFala(a: AtividadeTurno | undefined): EstadoDaFala {
+  if (a?.atual.trim()) return { chave: "escrevendo", texto: "Escrevendo", mascote: ATENTO };
+  if (a?.emUso) return { chave: a.emUso.frentes ? "frentes" : "ferramenta", texto: a.emUso.texto, mascote: FAZENDO };
+  return { chave: "pensando", texto: "Pensando", mascote: ATENTO };
 }

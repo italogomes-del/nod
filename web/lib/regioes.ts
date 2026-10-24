@@ -6,6 +6,18 @@
  */
 import { levarCampos } from "./levar-campos.ts";
 import { seletoresDoFoco } from "./foco-do-bloco.ts";
+import { aplicarMorph, decidirBloco, type Morph, type NoDoMorph } from "./morph.ts";
+
+/**
+ * NOD-348 (gatilho da ADR-114): `nod.medir=1` grava `nod:fala:morph` e `nod:fala:recriada` (performance.measure, que o
+ * scripts/carga-tela agrega) para cada fala viva trocada; `nod.semMorph=1` força a recriação, a outra ponta da
+ * comparação. Desligados, nada é medido (o buffer de medidas não cresce num turno longo).
+ */
+function flag(nome: string): boolean {
+  try { return localStorage.getItem(nome) === "1"; } catch { return false; }
+}
+const MEDIR = typeof localStorage !== "undefined" && flag("nod.medir");
+const SEM_MORPH = typeof localStorage !== "undefined" && flag("nod.semMorph");
 
 const ultimoHtml = new Map<string, string>();
 
@@ -31,7 +43,7 @@ export function esquecerRegiao(id: string): void {
   blocosAplicados.delete(id);
 }
 
-type Bloco = { chave: string; html: string };
+type Bloco = { chave: string; html: string; morfar?: Morph };
 type BlocoNaTela = Bloco & { el: Element };
 const blocosAplicados = new Map<string, BlocoNaTela[]>();
 
@@ -60,11 +72,18 @@ export function regiaoPorBlocos(id: string, blocos: readonly Bloco[]): void {
     // Chave repetida não reaproveita nada: o segundo bloco com a mesma chave sempre nasce de novo.
     const antes = vistos.has(b.chave) ? undefined : porChave.get(b.chave);
     vistos.add(b.chave);
-    if (antes && antes.html === b.html) return { ...b, el: antes.el };
+    const decisao = decidirBloco(antes, b, SEM_MORPH);
+    if (decisao.tipo === "manter" && antes) return { ...b, el: antes.el };
+    const medir = MEDIR && antes && b.morfar ? performance.now() : null;
+    if (decisao.tipo === "morfar" && antes && aplicarMorph(antes.el as unknown as NoDoMorph, decisao.plano, criarDoHtml)) {
+      if (medir !== null) performance.measure("nod:fala:morph", { start: medir, end: performance.now() });
+      return { ...b, el: antes.el };
+    }
     const el = document.createElement("div");
     el.className = "bloco";
     el.innerHTML = b.html;
     if (antes) levarCampos(antes.el, el);
+    if (medir !== null && antes) { antes.el.replaceWith(el); performance.measure("nod:fala:recriada", { start: medir, end: performance.now() }); }
     return { ...b, el };
   });
   const ficam = new Set(novos.map((b) => b.el));
@@ -88,4 +107,10 @@ export function regiaoPorBlocos(id: string, blocos: readonly Bloco[]): void {
       if (alvo) { alvo.focus({ preventScroll: true }); break; }
     }
   }
+}
+
+function criarDoHtml(html: string): NoDoMorph | null {
+  const t = document.createElement("template");
+  t.innerHTML = html;
+  return t.content.childElementCount === 1 ? (t.content.firstElementChild as unknown as NoDoMorph) : null;
 }

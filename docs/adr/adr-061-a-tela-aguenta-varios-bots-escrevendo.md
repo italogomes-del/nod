@@ -46,7 +46,8 @@ Os números acima e abaixo são do `scripts/carga-tela`, salvo quando dito.
 3. **A timeline tem duas regiões por blocos com chave**: o histórico e o que está ao vivo (`regiaoPorBlocos` em
    `web/lib/regioes.ts`). Cada mensagem, fio, grupo de avisos, proposta e o bloco de decisões tem chave estável. A
    mensagem nova entra sem regravar as outras: os mascotes, os `<details>` abertos e os campos com texto das que
-   ficam não são tocados. No ao vivo, só o bloco do turno que escreveu é regravado.
+   ficam não são tocados. No ao vivo, só o bloco do turno que escreveu é regravado. (Emendado pela ADR-114, Emenda da
+   NOD-348: a fala viva do turno não é regravada inteira — só as partes que mudaram, com o mascote no lugar.)
 4. **Histórico, barra lateral e painel de detalhes são lembrados** (`lembrar` em `web/lib/lembrar.ts`). O desenho
    recebe o estado por um Proxy que anota as chaves do primeiro nível que leu, e a string só é refeita quando uma delas
    ganha referência nova. Ler a mais custa um redesenho a mais; nunca deixa a tela velha.

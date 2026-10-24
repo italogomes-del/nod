@@ -5,6 +5,7 @@ import type { TrabalhosDto } from "../../../src/contracts/trabalho.ts";
 import { aplicarFrame, estadoInicial, invalidacoesAoReconectar, reduzir, type Estado, type TurnoVivo } from "../../../web/estado/reducer.ts";
 import { JANELA_PENSANDO_MS, estadoMascoteNaConversa, htmlMascote, mascoteComAviso, proximaViradaDoMascote, turnosVivosDaConversa } from "../../../web/lib/mascote.ts";
 import { blocosAoVivo, renderCabecalhoConversa } from "../../../web/telas/conversa.ts";
+import { FALA_SAINDO_MS } from "../../../web/lib/fala-viva.ts";
 
 /**
  * NOD-216: mascote animado e "na fila · há 6h" por turnos que o servidor já não tem. Só o turno rodando anima; a fila
@@ -167,6 +168,12 @@ describe("revisão do PR #302 (NOD-216)", () => {
     expect(h.turnosVivos.t2?.origem).toBe("rotina");
   });
 
+  it("NOD-348 (revisão do #508): a recarga guarda o bot do turno — na sala, a fala viva volta com o mascote de quem fala", () => {
+    const h = reduzir(base(), leitura([{ id: "t2", estado: "despachando", desde: AGORA, mensagemId: null, agenteId: "bot-gil" }, { id: "t3", estado: "pendente", desde: AGORA, mensagemId: null }]));
+    expect(h.turnosVivos.t2?.agenteId).toBe("bot-gil");
+    expect(h.turnosVivos.t3?.agenteId).toBeNull();
+  });
+
   it("a resposta mais velha não traz de volta o turno que uma leitura mais nova desmentiu", () => {
     const e = base({ t1: vivo("t1", { estado: "rodando", vistoEm: AGORA - H }) });
     const desmentido = reduzir(e, { tipo: "hidratar-trabalhos", trabalhos: trabalhos([dono("a")]), agora: AGORA });
@@ -201,6 +208,13 @@ describe("revisão do PR #302 (NOD-216)", () => {
     const e = base({ a1: vivo("a1", { chegouEm: AGORA - 1000 }), a2: vivo("a2", { chegouEm: AGORA - 3000 }), velho: vivo("velho"), roda: vivo("roda", { estado: "rodando", chegouEm: AGORA }) });
     expect(proximaViradaDoMascote(e, AGORA)).toBe(AGORA - 3000 + JANELA_PENSANDO_MS);
     expect(proximaViradaDoMascote(base({ velho: vivo("velho") }), AGORA)).toBeNull();
+  });
+
+  it("revisão 4 do #508: proximaViradaDoMascote também acorda quando a fala parada vence os 15 s", () => {
+    const e = { ...base({ velho: vivo("velho") }), falasSaindo: { [C]: { k: { turnoId: "t1", em: AGORA - 5000, texto: "x" } } } } as unknown as Estado;
+    expect(proximaViradaDoMascote(e, AGORA)).toBe(AGORA - 5000 + FALA_SAINDO_MS);
+    const vencida = { ...e, falasSaindo: { [C]: { k: { turnoId: "t1", em: AGORA - FALA_SAINDO_MS - 1, texto: "x" } } } } as unknown as Estado;
+    expect(proximaViradaDoMascote(vencida, AGORA)).toBeNull();
   });
 
   it("o stream que volta com a tela da task aberta relê a task", () => {

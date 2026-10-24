@@ -64,15 +64,55 @@ describe("aplicarFrame por TipoFrame", () => {
     expect(e.invalidacoes).toEqual([`conversa:${CONVERSA}`, "trabalhos", "frota", "uso-plano"]);
   });
 
+  it("revisão 7 do #508: a chave da fala parada não sobrescreve uma que já existe com o mesmo instante", () => {
+    let e = aplicarFrame(comConversa(), frame("turno.iniciado", { conversaId: CONVERSA, turnoId: TURNO, kind: "turno_despachado" }), AGORA);
+    e = aplicarFrame(e, frame("turno.delta", { conversaId: CONVERSA, turnoId: TURNO, texto: "Nova." }), AGORA);
+    const velha = { turno: e.turnosVivos[TURNO]!, atividade: e.atividades[CONVERSA]![TURNO]!, em: AGORA };
+    e = { ...e, falasSaindo: { [CONVERSA]: { [`${TURNO}:${AGORA}:0`]: velha } } };
+    e = aplicarFrame(e, frame("turno.fala", { conversaId: CONVERSA, turnoId: TURNO }), AGORA);
+    expect(Object.keys(e.falasSaindo?.[CONVERSA] ?? {})).toHaveLength(2);
+    e = { ...e, falasSaindo: { [CONVERSA]: { [`${TURNO}:${AGORA}:1`]: velha } } };
+    e = aplicarFrame(e, frame("turno.delta", { conversaId: CONVERSA, turnoId: TURNO, texto: "Outra." }), AGORA);
+    e = aplicarFrame(e, frame("turno.fala", { conversaId: CONVERSA, turnoId: TURNO }), AGORA);
+    expect(Object.keys(e.falasSaindo?.[CONVERSA] ?? {})).toEqual([`${TURNO}:${AGORA}:1`, `${TURNO}:${AGORA}:2`]);
+  });
+
   it("ADR-067: turno.fala troca o texto ao vivo pela mensagem gravada — o cartão recomeça vazio e o turno segue rodando", () => {
     let e = aplicarFrame(comConversa(), frame("turno.iniciado", { conversaId: CONVERSA, turnoId: TURNO, kind: "turno_despachado" }), AGORA);
     e = aplicarFrame(e, frame("turno.delta", { conversaId: CONVERSA, turnoId: TURNO, texto: "Disparei os testes." }), AGORA);
     e = aplicarFrame(e, frame("turno.fala", { conversaId: CONVERSA, turnoId: TURNO }), AGORA);
-    expect(e.atividades[CONVERSA]).toEqual({});
+    // NOD-348 (revisão 3 do #508): zera só o texto (o resto da atividade segue) e o texto fica como fala parada até a releitura.
+    expect(e.atividades[CONVERSA]?.[TURNO]?.atual).toBe("");
+    expect(Object.values(e.falasSaindo?.[CONVERSA] ?? {})[0]?.atividade.atual).toBe("Disparei os testes.");
     expect(e.turnosVivos[TURNO]?.estado).toBe("rodando");
     expect(e.invalidacoes).toContain(`conversa:${CONVERSA}`);
     e = aplicarFrame(e, frame("turno.delta", { conversaId: CONVERSA, turnoId: TURNO, texto: "Testes verdes." }), AGORA);
     expect(e.atividades[CONVERSA]?.[TURNO]?.atual).toBe("Testes verdes.");
+  });
+
+  // NOD-348: a fala viva diz a ferramenta pelo NOME do frame; sem ele (servidor antigo), "Usando uma ferramenta".
+  it("turno.atividade guarda a ferramenta em uso (emUso do frame, conferido), e o texto seguinte a limpa", () => {
+    let e = aplicarFrame(comConversa(), frame("turno.iniciado", { conversaId: CONVERSA, turnoId: TURNO, kind: "turno_criado" }), AGORA);
+    e = aplicarFrame(e, frame("turno.atividade", { conversaId: CONVERSA, turnoId: TURNO, nome: "mcp__nod__linear__LINEAR_LIST_ISSUES", rotulo: "Consultou Linear", emUso: { texto: "Usando Linear", frentes: false } }), AGORA);
+    expect(e.atividades[CONVERSA]?.[TURNO]?.emUso).toEqual({ texto: "Usando Linear", frentes: false });
+    e = aplicarFrame(e, frame("turno.atividade", { conversaId: CONVERSA, turnoId: TURNO, rotulo: "Começou frentes", emUso: { texto: "Abrindo frentes", frentes: true } }), AGORA);
+    expect(e.atividades[CONVERSA]?.[TURNO]?.emUso).toEqual({ texto: "Abrindo frentes", frentes: true });
+    e = aplicarFrame(e, frame("turno.atividade", { conversaId: CONVERSA, turnoId: TURNO, rotulo: "X", emUso: { texto: 3 } }), AGORA);
+    expect(e.atividades[CONVERSA]?.[TURNO]?.emUso?.texto).toBe("Usando uma ferramenta");
+    e = aplicarFrame(e, frame("turno.atividade", { conversaId: CONVERSA, turnoId: TURNO, rotulo: "Usou algo" }), AGORA);
+    expect(e.atividades[CONVERSA]?.[TURNO]?.emUso?.texto).toBe("Usando uma ferramenta");
+    e = aplicarFrame(e, frame("turno.delta", { conversaId: CONVERSA, turnoId: TURNO, texto: "Pronto." }), AGORA);
+    expect(e.atividades[CONVERSA]?.[TURNO]?.emUso).toBeNull();
+  });
+
+  it("turno.iniciado guarda o bot do turno (agente_id ou agenteId da sala) e o despacho sem ele não o apaga", () => {
+    let e = aplicarFrame(comConversa(), frame("turno.iniciado", { conversaId: CONVERSA, turnoId: TURNO, kind: "turno_criado", agenteId: "bot-sala" }), AGORA);
+    expect(e.turnosVivos[TURNO]?.agenteId).toBe("bot-sala");
+    e = aplicarFrame(e, frame("turno.iniciado", { conversaId: CONVERSA, turnoId: TURNO, kind: "turno_despachado" }), AGORA);
+    expect(e.turnosVivos[TURNO]?.agenteId).toBe("bot-sala");
+    const outro = aplicarFrame(comConversa(), frame("turno.iniciado", { conversaId: CONVERSA, turnoId: "t2", kind: "turno_criado", agente_id: "bot-a" }), AGORA);
+    expect(outro.turnosVivos.t2?.agenteId).toBe("bot-a");
+    expect(aplicarFrame(comConversa(), frame("turno.iniciado", { conversaId: CONVERSA, turnoId: "t3", kind: "turno_criado" }), AGORA).turnosVivos.t3?.agenteId).toBeNull();
   });
 
   it("turno.atividade fecha a narração numa etapa: o texto de antes e o de depois da ferramenta nunca se colam ('lote.44')", () => {
@@ -84,12 +124,14 @@ describe("aplicarFrame por TipoFrame", () => {
     e = aplicarFrame(e, frame("turno.delta", { conversaId: CONVERSA, turnoId: TURNO, texto: "44 processados." }), AGORA);
     expect(e.atividades[CONVERSA]?.[TURNO]).toEqual({
       atual: "44 processados.",
+      antes: ["Continuando com o próximo lote."],
       etapas: [{ texto: "Continuando com o próximo lote.", ferramentas: 2 }],
       totalEtapas: 1,
       ferramentas: 2,
       ultimaFerramenta: "Alterou Gmail",
       tarefas: [],
       vigia: null,
+      emUso: null,
       subagentes: null,
     });
   });

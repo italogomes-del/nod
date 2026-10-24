@@ -28,7 +28,7 @@ import { abrirTxEscopada, exigirForaDaTx, txEscopadaOuDoContexto } from "../../d
 import { ErroDeDominio } from "../../domain/erro.ts";
 import { iaAtualDoCatalogo, opcoesDoCatalogo } from "../../domain/harness.ts";
 import { iaDoAutomatico, iasNoLimite, inteligenciaDoAgente, ordemEfetiva } from "../../domain/inteligencia.ts";
-import { rotuloFerramenta } from "../../domain/rotulo-ferramenta.ts";
+import { frameDaFerramenta } from "../../domain/rotulo-ferramenta.ts";
 import { criarAvisoDoVigia } from "./aviso-vigia.ts";
 import { lerModelosLigacao } from "../../domain/modelo-ligacao.ts";
 import { contextoAtual } from "../../obs/contexto.ts";
@@ -722,7 +722,8 @@ export function comporApp(o: OpcoesCompor): App {
     seguro: env.NOD_LOGIN === "google",
     agora: relogio,
     delta: (plano, texto) => publicarDoPlano(plano, "turno.delta", { texto }),
-    ferramenta: (plano, nome) => publicarDoPlano(plano, "turno.atividade", { nome, rotulo: rotuloFerramenta(nome) }),
+    // NOD-348: `emUso` é o que a fala viva diz agora ("Usando Linear", "Abrindo frentes"); a web não lê o domínio (ADR-018).
+    ferramenta: (plano, nome) => publicarDoPlano(plano, "turno.atividade", frameDaFerramenta(nome)),
     tarefas: (plano, tarefas) => publicarDoPlano(plano, "turno.tarefas", { tarefas }),
     subagentes: (plano, subagentes, principalOcioso) => publicarDoPlano(plano, "turno.subagentes", { subagentes, principalOcioso: principalOcioso === true }),
     fala: (plano) => publicarDoPlano(plano, "turno.fala", {}),
@@ -1397,7 +1398,8 @@ export function comporApp(o: OpcoesCompor): App {
       aoVigia: (plano, aviso) => avisoDoVigia(plano, aviso),
       aoEvento: (plano, ev: EventoStream) => {
         if (ev.tipo === "catcher") aoRegistrarCatcher({ turnoId: plano.turnoId, tipo: ev.subtipo, dados: ev.dados });
-        else if (ev.tipo === "tool_use") publicarDoPlano(plano, "turno.atividade", { nome: ev.nome, rotulo: rotuloFerramenta(ev.nome) });
+        // NOD-348 (QA do #508): o laço local manda o mesmo frame da ponte, com o `emUso` da fala viva.
+        else if (ev.tipo === "tool_use") publicarDoPlano(plano, "turno.atividade", frameDaFerramenta(ev.nome));
         tarefasVivas.evento(plano.turnoId, ev);
         subagentesVivos.evento(plano.turnoId, ev);
       },

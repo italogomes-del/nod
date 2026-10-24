@@ -77,6 +77,8 @@ describeIntegracao("emitirPlanoTurno (ADR-024): interseção, profundidade e tok
 
       expect(r.events?.map((e) => e.kind)).toEqual(["turno_despachado"]);
       expect(r.events?.[0]?.autoria.decidido_por).toBe("regra:montagem-ferramentas");
+      // NOD-348: o despacho diz o bot do turno (a fala viva da sala, mesmo sem o turno_criado antes).
+      expect(r.events?.[0]?.dados).toMatchObject({ agente_id: agenteId });
       const gravado = await repos.events.gravarComOutbox(r.events ?? []);
       expect(gravado.ids).toHaveLength(1);
     });

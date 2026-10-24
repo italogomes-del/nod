@@ -1,6 +1,7 @@
 import type { Agente, FormaAgente } from "../../src/contracts/agente.ts";
 import type { Estado, TurnoVivo } from "../estado/reducer.ts";
 import { esc } from "./escape.ts";
+import { FALA_SAINDO_MS } from "./fala-viva.ts";
 
 /**
  * Adaptador do motor SVG temporário Bloub/GrokBot.
@@ -72,13 +73,12 @@ export const filaRecente = (turno: Pick<TurnoVivo, "estado" | "desde" | "chegouE
  * Revisão NOD-216: o instante em que o primeiro pedido "pensando" passa a "na fila" (null = nenhum). O relógio da web só
  * anda no tick de 15 s; sem um re-render aqui, o mascote ficava pensando de 5 a 20 s. A main agenda um timer só para ele.
  */
-export function proximaViradaDoMascote(estado: Pick<Estado, "turnosVivos">, agora: number): number | null {
+export function proximaViradaDoMascote(estado: Pick<Estado, "turnosVivos" | "falasSaindo">, agora: number): number | null {
   let proxima: number | null = null;
-  for (const t of Object.values(estado.turnosVivos)) {
-    if (t.estado !== "na_fila") continue;
-    const fim = inicioDaJanela(t) + JANELA_PENSANDO_MS;
-    if (fim > agora && (proxima === null || fim < proxima)) proxima = fim;
-  }
+  const considerar = (fim: number) => { if (fim > agora && (proxima === null || fim < proxima)) proxima = fim; };
+  for (const t of Object.values(estado.turnosVivos)) if (t.estado === "na_fila") considerar(inicioDaJanela(t) + JANELA_PENSANDO_MS);
+  // NOD-348 (revisão 4 do #508): a fala parada sai aos 15 s mesmo sem releitura, e não no tick seguinte (até 30 s).
+  for (const daConversa of Object.values(estado.falasSaindo ?? {})) for (const s of Object.values(daConversa)) considerar(s.em + FALA_SAINDO_MS);
   return proxima;
 }
 

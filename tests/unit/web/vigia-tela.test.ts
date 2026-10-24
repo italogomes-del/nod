@@ -46,8 +46,8 @@ describe("vigia do turno na tela (NOD-73)", () => {
     expect(html).toContain('class="bt aviso" data-act="parar-conversa"');
     expect(html).not.toContain("perigo");
     expect(html.match(/class="vigia-ic"/g)).toHaveLength(1);
-    expect(html).toContain('class="atividade-pulso parado"');
-    // Chat limpo (PR 7): o cartão virou a linha "… está trabalhando · ver etapas", e o vigia fica à vista, fora do recolhido.
+    // NOD-348: a linha viva para de brilhar no silêncio; o vigia fica à vista, fora do "ver etapas".
+    expect(html).toMatch(/class="fala-viva-linha (autor|rodape) parado"/);
     expect(html.indexOf("</details>")).toBeLessThan(html.indexOf('class="atividade-vigia"'));
     expect(renderCabecalhoConversa(e, "a")).toContain("sem novidade há 12 min");
     // O relógio da tela anda sem frame novo.
@@ -73,16 +73,16 @@ describe("vigia do turno na tela (NOD-73)", () => {
     // Repetição sem silêncio: o ponto segue pulsando.
     const so = cenario({ mudoDesde: null, aberta: null, emFundo: 0, repeticao: { rotulo: "Gmail", vezes: 5 } });
     expect(corpo(so.e, so.c)).toContain("Repetiu a mesma ação 5 vezes");
-    expect(corpo(so.e, so.c)).not.toContain("parado");
+    expect(corpo(so.e, so.c)).not.toContain(" parado");
   });
 
-  it("sem cartão: segunda linha 'sem novidade há N min · o bot não responde · Parar' abaixo da de trabalhando", () => {
+  it("NOD-348: sem ferramenta, o mesmo aviso âmbar dentro da fala viva, embaixo da linha viva, com o Parar", () => {
     const { e, c } = cenario({ mudoDesde: AGORA - 20 * MIN, aberta: null, emFundo: 0, repeticao: null }, false);
     const html = corpo(e, c);
-    // O protótipo pede uma SEGUNDA linha em âmbar: a de "trabalhando · executor · há X" continua em cima.
-    expect(html.indexOf("trabalhando")).toBeGreaterThanOrEqual(0);
-    expect(html.indexOf("trabalhando")).toBeLessThan(html.indexOf("sem novidade há"));
-    expect(html).toContain("sem novidade há 20 min · o bot não responde · ");
+    expect(html.indexOf('data-parte="viva"')).toBeLessThan(html.indexOf('data-parte="vigia"'));
+    expect(html).toContain("Sem novidade há 20 min");
+    expect(html).toContain("O bot não responde.");
     expect(html).toContain('class="bt aviso" data-act="parar-conversa"');
+    expect(html).not.toContain("trabalhando ·");
   });
 });

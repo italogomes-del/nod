@@ -2,7 +2,7 @@
 
 Status: proposto; parte do servidor no PR 1 do [plano do chat limpo](../plano-chat-limpo.md) (PR #390), a tela, a janela
 e os gatilhos no PR 2 (ver **Emenda do PR 2**), a troca agrupada no PR 3 (ver **Emenda do PR 3**), o cartão encolhido no
-PR 4 (ver **Emenda do PR 4**), as etiquetas e os divisores de data no PR 6 (ver **Emenda do PR 6**), o progresso na fala no PR 7 (ver **Emenda do PR 7**), a pílula que se alarga no PR 8 (ver **Emenda do PR 8**) · Data: 2026-10-18 · Migração 0091. A regra da tela, a janela que conta só o chat e os gatilhos de reversão entram no PR 2, junto da primeira
+PR 4 (ver **Emenda do PR 4**), as etiquetas e os divisores de data no PR 6 (ver **Emenda do PR 6**), o progresso na fala no PR 7 (ver **Emenda do PR 7**), a pílula que se alarga no PR 8 (ver **Emenda do PR 8**), a fala viva na NOD-348 (ver **Emenda da NOD-348**) · Data: 2026-10-18 · Migração 0091. A regra da tela, a janela que conta só o chat e os gatilhos de reversão entram no PR 2, junto da primeira
 mudança visível, com as emendas das ADR-029, ADR-041, ADR-083 e ADR-110. Era a ADR-113 com a migração 0090; renumerada
 em 2026-10-18 porque o PR B da Fase 2 (#392, reações e citação) entra antes com a ADR-113 e a `0090_reacoes.sql`.
 
@@ -173,7 +173,8 @@ depois do já encolhido. "Preciso da sua decisão para continuar" continua só p
 
 **Foco e anúncio.** O cartão encolhido nasce num desenho depois do frame e da releitura, quando o botão clicado já não
 existe: o clique **na conversa** guarda o id decidido (`web/lib/foco-do-encolhido.ts`, 2 min) e, no primeiro desenho do
-cartão com ele, o foco vai ao título (`tabindex="-1"`) e a região `aria-live` única da conversa (`#anuncio-pergunta`)
+cartão com ele, o foco vai ao título (`tabindex="-1"`) e a região `aria-live` única da conversa (`#anuncio-pergunta`;
+desde a NOD-348 há também `#anuncio-turno`, do estado do turno)
 diz "Aprovado: …"; com o foco já no campo, só o anúncio. Decidido em "Sua vez" ou em outra aba, nada. Só esse cartão
 anima o encolher, uma vez, e `prefers-reduced-motion` desliga.
 
@@ -291,7 +292,8 @@ trocado sozinho, a fala não é regravada nenhuma vez: o bloco é trocado 12 a 2
 reversão: se o lugar trocado sozinho custar mais que regravar a fala no `carga-tela` (`nod:progresso`), o bloco vira um
 `BlocoDaTimeline` próprio embaixo da fala.
 
-**O cartão ao vivo vira linha.** O turno que já chamou ferramenta é "Clarice está trabalhando · ver etapas", com o ponto
+**O cartão ao vivo vira linha** (emendado pela NOD-348: o mascote e o relógio voltam à linha; ver **Emenda da
+NOD-348**). O turno que já chamou ferramenta é "Clarice está trabalhando · ver etapas", com o ponto
 que pulsa (protótipo "Conversa típica"); "ver etapas" abre o que o cartão grande mostrava (o passo de agora, a lista de
 tarefas do bot, a contagem e as etapas). O vigia fica à vista, embaixo da linha, porque pede ação. Sai o cabeçalho
 "● ao vivo" (mascote, nome e hora, num bloco `vivo-cab:` à parte); o balão em streaming fica, alinhado às falas. Sem
@@ -365,6 +367,45 @@ sem o dono (anterior ao I10) continua com a faixa de tasks de antes. `scripts/ca
 **Gatilho de reversão.** 3 relatos em 14 dias (ADR-041) de "não vi que o bot ainda estava trabalhando" com a fala fora da
 vista e a pílula escondida, ou de "a pílula cobre a conversa": a pílula volta a ficar sempre à vista, em fluxo, como a
 linha do dono.
+
+## Emenda da NOD-348 (2026-10-23) — a fala viva: mascote e relógio na linha
+
+Protótipo v2 do Gil (nod-prototipos/nod-348) e decisões da Ada; emenda o parágrafo "O cartão ao vivo vira linha" da
+**Emenda do PR 7**. O turno vivo é uma fala só (`renderFalaViva` em `web/telas/conversa.ts`): o mascote do bot em
+`<nod-mascote>` ("trabalhando" com ferramenta, "disponível" pensando ou escrevendo), o nome e a linha viva com o estado
+("Pensando", "Escrevendo", "Usando Linear", "Abrindo frentes") e o tempo ("12 s", "1 min 4 s"). O texto em streaming
+fica no balão e a linha desce para o rodapé; sem texto, a linha fica ao lado do nome. Com ferramenta, as etapas e as
+tarefas vão para "ver etapas" — e o balão continua (revisão 2 do #508: a resposta final de um turno com ferramenta não
+fica escondida no recolhido), com a narração de antes da ferramenta (`antes`, QA 2 do #508: a ferramenta que chega não
+esvazia o balão, que encolhia e crescia de novo, e o texto que volta substitui a narração curta, que fica em "ver etapas", e o balão pode encolher até ~8 linhas no celular nessa troca, de propósito: segurar a altura levaria o pulo para a troca pela gravada; revisões 5 a 7; a viva e a parada mostram o que a fala gravada vai mostrar, pela regra do `comporFala`: narração curta fica de fora, a longa entra; revisão 4). Quando o texto vira mensagem — no fim do turno ou num `turno.fala` no meio dele — a fala
+fica parada ("Respondeu · 12 s", sem o "ver etapas", uma entrada de `falasSaindo` por fala no estado) até a releitura que saiu depois
+dela trazer a fala gravada, por no máximo 15 s: sem isso a conversa ficava um quadro sem fala e pulava ~95 px
+(QA do #508). Cada `turno.fala` é uma parada própria, e o `turno.interrompido` não as tira (revisão 4). Fica
+registrado: a releitura que já estava no ar quando o frame chegou mostra a fala duas vezes até o GET seguinte (médio,
+revisão 4). "Na fila" fica como estava, sem mascote. Emenda também o item 3 da ADR-061 (no ao vivo, o
+bloco do turno que escreveu não é mais regravado inteiro: só as partes que mudaram) e a frase "a região `aria-live` única
+da conversa (`#anuncio-pergunta`)" da **Emenda do PR 4**: agora há duas, a das ações e a do turno.
+
+1. **O mascote volta para dentro da fala.** O motivo do PR 7 (o bloco que muda a cada etapa reiniciaria a animação) cai
+   com o morph: `regiaoPorBlocos` aceita `morfar` no bloco, e quando a raiz e as partes (`[data-parte]`) batem, troca só
+   as partes cujo HTML mudou e copia a classe da raiz e os atributos do mascote, que nunca sai do documento
+   (`decidirBloco`, `planoDoMorph` e `aplicarMorph` em `web/lib/morph.ts`, usados por `web/lib/regioes.ts`). O bloco é
+   recriado, o caminho de antes, quando o mascote aparece ou some, quando há chave de parte repetida ou quando a fala na
+   tela não tem a forma esperada (raiz `[data-morfar]`, `.bubble-wrap`, o mascote). A cor e a forma do bot não entram
+   no morph (mudam com a frota relida, o caso raro).
+2. **O relógio volta para a linha.** O PR 7 o tirava porque o histórico seria refeito a cada segundo; aqui o tempo não
+   passa pelo estado: `criarRelogioDaFala` (`web/lib/fala-viva.ts`) reescreve só o texto de `[data-desde]` a cada 1 s,
+   para quando não há fala viva e com a aba escondida.
+3. **Leitor de tela.** A linha viva não é região viva; `#anuncio-turno` diz o estado depois de 1 s estável ("Ada está
+   pensando") e "Ada respondeu" uma vez quando o turno encerrado deixou fala. Interrompido não anuncia.
+4. **NOD-216 segue:** o mascote só anima com trabalho real (o turno rodando); movimento reduzido desliga a entrada, a troca e
+   o brilho do texto, e o relógio continua.
+
+**Gatilho de reversão.** Medido no `carga-tela` (`scripts/carga-tela/medir.ts` agrega toda medida `nod:`) com
+`localStorage nod.medir=1`: `regiaoPorBlocos` grava `nod:fala:morph` em cada fala trocada no lugar e
+`nod:fala:recriada` em cada fala recriada; `nod.semMorph=1` força a recriação. Se, no mesmo cenário, a média de
+`nod:fala:morph` passar a de `nod:fala:recriada` com `nod.semMorph=1`, ou se o mascote reiniciar a animação a cada etapa (visto no QA ou
+em 3 relatos em 14 dias, ADR-041), a fala viva volta ao ponto que pulsa do PR 7, sem relógio (reverter o PR #508).
 
 ## Gatilhos de reversão (PR 2)
 

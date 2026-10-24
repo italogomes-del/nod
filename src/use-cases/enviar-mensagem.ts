@@ -223,7 +223,7 @@ export const lerConversa: CasoDeUso<{ conversaId: string; limite?: number }, Con
     .map((t) => ({ id: t.id, mensagemId: t.mensagemOrigemId as string }));
   const turnosEmCurso = vivos
     .filter((t): t is typeof t & { estado: "pendente" | "despachando" } => t.estado === "pendente" || t.estado === "despachando")
-    .map((t) => ({ id: t.id, estado: t.estado, desde: t.criadoEm, mensagemId: t.mensagemOrigemId ?? null, trabalhoId: t.trabalhoId ?? null, origem: t.origem, despachadoEm: t.despachadoEm ?? null, maquinaDestaVez: t.maquinaDestaVez ?? null }));
+    .map((t) => ({ id: t.id, estado: t.estado, desde: t.criadoEm, mensagemId: t.mensagemOrigemId ?? null, trabalhoId: t.trabalhoId ?? null, origem: t.origem, despachadoEm: t.despachadoEm ?? null, maquinaDestaVez: t.maquinaDestaVez ?? null, agenteId: t.agenteId }));
   const fios = await fiosDaConversa(deps.repos, mensagens);
   const doBot = conversa.tipo === "propria" ? conversa.agenteId : null;
   // Os abertos do bot da conversa (a faixa, ADR-083); conversa de sala não tem bot próprio: lista vazia.

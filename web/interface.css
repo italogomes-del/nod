@@ -487,30 +487,61 @@
 @media (max-width: 640px) { .msg-captura-bt { width: min(240px, 100%); height: auto; aspect-ratio: 16 / 10; } }
 @media (max-width: 640px) { .anexo-chip { min-width: 0; max-width: 100%; flex: 1 1 100%; } .msg-anexo-img { width: 132px; height: 88px; } }
 
-/* O turno vivo com ferramenta (revisto em 2026-10-18, chat limpo, PR 7; protótipo "Conversa típica"): o cartão grande virou
-   uma linha, "Clarice está trabalhando · ver etapas", com o ponto que pulsa; "ver etapas" abre o que o cartão mostrava. */
-.atividade .bubble-wrap { width: min(100%, 600px); }
-.atividade-linha > summary { display: inline-flex; align-items: center; gap: 8px; min-height: 32px; font-size: 13px; color: var(--ink-3); cursor: pointer; list-style: none; border-radius: 8px; }
-.atividade-linha > summary::-webkit-details-marker { display: none; }
-.atividade-linha > summary:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
-.atividade-pulso { width: 8px; height: 8px; border-radius: 50%; background: var(--mascote-cor, var(--ink-3)); flex: none; animation: pulsa 1.4s ease-in-out infinite; }
-.atividade-ver, .atividade-recolher { white-space: nowrap; color: var(--ink-2); text-decoration: underline; text-decoration-color: var(--line-strong); text-underline-offset: 3px; }
-.atividade-recolher, .atividade-linha[open] > summary .atividade-ver { display: none; }
-.atividade-linha[open] > summary .atividade-recolher { display: inline; }
+/* A fala viva (NOD-348, emenda da ADR-114; protótipo v2 do Gil): o turno rodando é a fala do bot — mascote, nome e, no lugar
+   da hora, "‹Estado› · ‹tempo›" com um brilho que corre (2 s, linear). Sem cartão, sem fundo chapado e sem botão cheio.
+   Sem texto, a linha fica ao lado do nome; com texto, desce para o rodapé e mora na margem de 25 px da .message (height
+   25 px; margin-bottom −25 px): quando a fala final entra no lugar, a conversa não muda de altura. */
+/* `.ao-vivo` junto: a regra antiga `.message.ao-vivo { padding-left: 52px }` vem depois e venceria (a fala pularia 52 px no fim). */
+.message.ao-vivo.fala-viva, .message.fala-viva { padding-left: 0; animation: fala-entra .32s cubic-bezier(.2, .7, .2, 1) both; }
+.message.fala-viva .bubble-wrap { width: min(100%, 600px); }
+.message.fala-viva.com-texto .bubble-wrap { width: auto; }
+.fala-viva:not(.com-texto) .bubble-wrap { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 10px; }
+.fala-viva:not(.com-texto) .bubble-wrap > :not(.msg-autor, .fala-viva-linha) { flex: 1 1 100%; }
+.fala-viva .msg-autor { min-width: 0; max-width: 100%; }
+.fala-viva .msg-autor b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fala-viva-linha { display: flex; align-items: baseline; min-width: 0; font-size: 12px; color: var(--ink-2); white-space: nowrap; animation: fala-troca .16s ease-out both; }
+.fala-viva-linha.autor { margin: 0 0 6px; }
+.fala-viva-linha.rodape { box-sizing: border-box; height: 25px; margin-bottom: -25px; padding-top: 7px; line-height: 18px; }
+.fala-viva-estado { min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  background: linear-gradient(90deg, var(--ink-2) 0 35%, var(--ink) 50%, var(--ink-2) 65% 100%);
+  background-size: 250% 100%; background-position: 100% 0;
+  -webkit-background-clip: text; background-clip: text; color: transparent; -webkit-text-fill-color: transparent;
+  animation: fala-brilho 2s linear infinite; }
+.fala-viva-sep, .fala-viva-tempo { flex: none; color: var(--ink-3); white-space: pre; }
+.fala-viva-tempo { font-variant-numeric: tabular-nums; }
+.fala-viva-tempo:empty, .fala-viva-sep:has(+ .fala-viva-tempo:empty) { display: none; }
+/* NOD-73: no silêncio do vigia o brilho para — a linha não finge trabalho; o aviso âmbar embaixo diz o resto. */
+.fala-viva-linha.parado .fala-viva-estado { animation: none; background: none; color: var(--ink-2); -webkit-text-fill-color: currentColor; }
+/* "ver etapas": link de texto ink-2, sem fundo; abre o que o cartão grande mostrava, até a NOD-353 redesenhar o resumo. */
+.fala-viva-etapas { margin: 0 0 4px; font-size: 13px; color: var(--ink-2); }
+.fala-viva-etapas > summary { display: inline-flex; align-items: center; min-height: 24px; cursor: pointer; list-style: none; border-radius: 6px; }
+.fala-viva-etapas > summary::-webkit-details-marker { display: none; }
+.fala-viva-etapas > summary:hover { color: var(--ink); }
+.fala-viva-etapas > summary:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.fala-viva-ver, .fala-viva-ocultar { white-space: nowrap; text-decoration: underline; text-decoration-color: var(--line-strong); text-underline-offset: 3px; }
+.fala-viva-ocultar, .fala-viva-etapas[open] > summary .fala-viva-ver { display: none; }
+.fala-viva-etapas[open] > summary .fala-viva-ocultar { display: inline; }
+/* Alto contraste: o texto recortado no gradiente sumiria; volta à cor do sistema. */
+@media (forced-colors: active) { .fala-viva-estado { background: none; color: CanvasText; -webkit-text-fill-color: currentColor; animation: none; } }
+@keyframes fala-entra { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes fala-troca { from { opacity: .3; } to { opacity: 1; } }
+@keyframes fala-brilho { from { background-position: 100% 0; } to { background-position: 0 0; } }
+/* Menos movimento: nada corre nem sobe; o estado e o tempo continuam escritos (o mascote já para sozinho). */
+@media (prefers-reduced-motion: reduce) {
+  .message.fala-viva, .fala-viva-linha { animation: none; }
+  .fala-viva-estado { animation: none; background: none; color: var(--ink-2); -webkit-text-fill-color: currentColor; }
+}
 .atividade-etapas { margin: 6px 0 0; padding: 10px 14px 4px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
 .atividade-agora { margin: 0 0 8px; font-size: 14px; line-height: 1.45; color: var(--ink); overflow-wrap: anywhere; }
 .atividade-conta { margin: 0; font-size: 12px; color: var(--ink-3); }
-/* Vigia do turno (2026-10-05, NOD-73, protótipo do Gil): só aviso, em âmbar, com o Parar; o ponto para de pulsar. Fica à
-   vista embaixo da linha (chat limpo, PR 7), porque pede ação. */
-.atividade-pulso.parado { animation: none; background: var(--warning); }
+/* Vigia do turno (2026-10-05, NOD-73, protótipo do Gil): só aviso, em âmbar, com o Parar. Fica à vista na fala viva, fora
+   do "ver etapas" (NOD-348), porque pede ação. */
 .atividade-vigia { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 6px 0 0; padding: 10px 12px; background: var(--warning-soft); border: 1px solid var(--warning-line); border-radius: 10px; color: var(--warning); font-size: 13px; line-height: 1.45; }
 .atividade-vigia p { flex: 1 1 100%; margin: 0; }
 .atividade-vigia p > b:first-child { display: block; font-weight: 600; }
 .atividade-vigia p > span { color: var(--ink-2); }
 .vigia-ic { display: inline-flex; vertical-align: -1px; margin-right: 6px; }
 .atividade-vigia .bt { margin-left: auto; }
-.vigia-linha { color: var(--warning); }
-.vigia-linha .bt { margin-left: 4px; vertical-align: baseline; }
 .bt.aviso { color: var(--warning); border-color: var(--warning-line); background: var(--surface); }
 .bt.aviso:hover { border-color: var(--warning); background: var(--warning-soft); }
 .atividade-etapas ol { list-style: none; margin: 4px 0 0; padding: 0; }

@@ -67,8 +67,26 @@ function titulo(slug: string): string {
   return limpo ? limpo[0]!.toUpperCase() + limpo.slice(1) : "uma ferramenta";
 }
 
+/**
+ * Sem o nome da IA em nenhum rótulo (critério 8 da NOD-348; QA 2 e revisão 4 do #508): o conector do próprio CLI
+ * (`mcp__claude_ai_Linear__…`) é o app; outro servidor com nome de IA (`claude-in-chrome`, `codex`) vira o navegador,
+ * se for um, ou fica sem nome.
+ */
+function semIaNoNome(nomeCli: string): string {
+  const semPrefixo = nomeCli.replace(/^mcp__claude_ai_(?=[^_])/, "mcp__");
+  const m = /^mcp__(.+?)__/.exec(semPrefixo);
+  if (!m || !SERVIDOR_DE_IA.test(m[1]!)) return semPrefixo;
+  return semPrefixo.replace(/^mcp__.+?__/, `mcp__${/chrome|browser|navegador/i.test(m[1]!) ? "navegador" : "ferramenta"}__`);
+}
+
+/**
+ * Revisão 5 do #508: sem exigir separador, para pegar os colados (`openaiDeveloperDocs`, `claudeCode`). Um servidor que
+ * só contenha as letras (`decodex`) também fica sem nome: melhor "uma ferramenta" do que o nome da IA na tela.
+ */
+const SERVIDOR_DE_IA = /claude|codex|openai|anthropic|gemini|gpt/i;
+
 export function rotuloFerramenta(nomeCli: string): string {
-  const m = /^mcp__([^_]+(?:_[^_]+)*?)__(.+)$/.exec(nomeCli);
+  const m = /^mcp__([^_]+(?:_[^_]+)*?)__(.+)$/.exec(semIaNoNome(nomeCli));
   if (!m) return NATIVAS[nomeCli] ?? (nomeCli ? `Usou ${nomeCli}` : "Usou uma ferramenta");
   const nome = m[2]!;
   const nod = NOD[nome];
@@ -80,8 +98,11 @@ export function rotuloFerramenta(nomeCli: string): string {
     // Composio repete o app no nome da capacidade (gmail__GMAIL_FETCH_EMAILS): o verbo vem depois dele.
     const slug = conector[1]!;
     const cap = conector[2]!.toLowerCase().startsWith(`${slug.toLowerCase()}_`) ? conector[2]!.slice(slug.length + 1) : conector[2]!;
-    return `${LEITURA.test(cap) ? "Consultou" : "Alterou"} ${titulo(slug)}`;
+    // Revisão 7 do #508: um conector do nod com nome de IA (`mcp__nod__openai__…`) também fica sem nome.
+    return `${LEITURA.test(cap) ? "Consultou" : "Alterou"} ${SERVIDOR_DE_IA.test(slug) ? "uma ferramenta" : titulo(slug)}`;
   }
+  if (m[1] === "navegador") return "Usou o navegador";
+  if (m[1] === "ferramenta") return "Usou uma ferramenta";
   return `Usou ${titulo(m[1] === "nod" ? nome : m[1]!)}`;
 }
 
@@ -112,12 +133,39 @@ const NATIVAS_NOME: Record<string, string> = {
  * "Computador". Como o rótulo, só lê o NOME que o CLI viu.
  */
 export function nomeDaFerramenta(nomeCli: string): string {
-  const m = /^mcp__([^_]+(?:_[^_]+)*?)__(.+)$/.exec(nomeCli);
+  const m = /^mcp__([^_]+(?:_[^_]+)*?)__(.+)$/.exec(semIaNoNome(nomeCli));
   if (!m) return NATIVAS_NOME[nomeCli] ?? (nomeCli || "uma ferramenta");
   const nome = m[2]!;
   if (nome.startsWith("computador_")) return "Computador";
   if (nome.startsWith("workspace_")) return "Pasta de trabalho";
   const conector = /^(.+?)__(.+)$/.exec(nome);
-  if (conector) return titulo(conector[1]!);
+  if (conector) return SERVIDOR_DE_IA.test(conector[1]!) ? "uma ferramenta" : titulo(conector[1]!);
+  if (m[1] === "ferramenta") return "uma ferramenta";
   return titulo(m[1] === "nod" ? nome : m[1]!);
+}
+
+/**
+ * NOD-348 (definido em 2026-10-23): o que a fala viva diz AGORA — "Usando ‹ferramenta›", com o mesmo nome do vigia
+ * (`nomeDaFerramenta`), e "Abrindo frentes" quando o bot abre ou manda para frentes. Os verbos no presente ("Rodando um
+ * comando") são da NOD-352; aqui só o nome que já existe (revisão do #508). Como o rótulo, só lê o NOME que o CLI viu.
+ */
+export type FerramentaEmUso = { texto: string; frentes: boolean };
+
+const FRENTES = new Set(["abrir_frentes", "mandar_para_frente"]);
+
+export function ferramentaEmUso(nomeCli: string): FerramentaEmUso {
+  const m = /^mcp__([^_]+(?:_[^_]+)*?)__(.+)$/.exec(nomeCli);
+  if (!m) return { texto: `Usando ${NATIVAS_NOME[nomeCli] ?? "uma ferramenta"}`, frentes: false };
+  if (m[1] === "nod" && FRENTES.has(m[2]!)) return { texto: "Abrindo frentes", frentes: true };
+  // O conector do próprio CLI (`claude_ai_Linear`) não mostra o nome da IA na tela (critério 8 da NOD-348).
+  const semIa = semIaNoNome(nomeCli);
+  if (semIa.startsWith("mcp__navegador__")) return { texto: "Usando o navegador", frentes: false };
+  if (semIa.startsWith("mcp__ferramenta__")) return { texto: "Usando uma ferramenta", frentes: false };
+  const nome = m[1] === "nod" && !/^(computador_|workspace_)/.test(m[2]!) && !/__/.test(m[2]!) ? "o nod" : nomeDaFerramenta(semIa);
+  return { texto: `Usando ${nome}`, frentes: false };
+}
+
+/** O frame `turno.atividade` de uma ferramenta: o mesmo nos dois caminhos (ponte HTTP e laço local). */
+export function frameDaFerramenta(nomeCli: string): { nome: string; rotulo: string; emUso: FerramentaEmUso } {
+  return { nome: nomeCli, rotulo: rotuloFerramenta(nomeCli), emUso: ferramentaEmUso(nomeCli) };
 }

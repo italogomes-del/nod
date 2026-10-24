@@ -1,8 +1,12 @@
 export type TipoFrame =
   | "mensagem.nova"
+  /** O turno começou ou saiu da fila. NOD-348: traz `agente_id` (o bot do turno; na sala, cada turno é de um bot). */
   | "turno.iniciado"
   | "turno.delta"
-  /** Ferramenta chamada no turno vivo: só {nome, rotulo}, nunca input/resultado. Separa as etapas do cartão de atividade. */
+  /**
+   * Ferramenta chamada no turno vivo: só {nome, rotulo, emUso}, nunca input/resultado (`frameDaFerramenta` em
+   * src/domain/rotulo-ferramenta.ts). Separa as etapas da atividade; `emUso` é a linha viva ("Usando Linear", NOD-348).
+   */
   | "turno.atividade"
   /** A lista de tarefas do bot no turno vivo (TaskCreate/TaskUpdate): {tarefas: TarefaDoBot[]}, a lista inteira. */
   | "turno.tarefas"
