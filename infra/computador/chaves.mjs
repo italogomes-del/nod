@@ -32,6 +32,11 @@ export function chaveDaLoja(chaveMaquina) {
   return hkdf(hexDaChave(chaveMaquina), 'login:principal:cookies-v1');
 }
 
+/** NOD-97 PR 4: a chave AES-256 do storage por origem `logins/principal/storage/` (outra info, outra chave). */
+export function chaveDoStorage(chaveMaquina) {
+  return hkdf(hexDaChave(chaveMaquina), 'login:principal:storage-v1');
+}
+
 /** Ed25519 do servidor para um computador: semente HKDF(NOD_CREDENTIAL_KEY, "nod-computador-assina:"+id). */
 export function chavesDeAssinatura(credencial, computadorId) {
   const semente = hkdf(hexDaChave(credencial), `nod-computador-assina:${computadorId}`);

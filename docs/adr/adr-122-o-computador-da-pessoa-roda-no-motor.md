@@ -152,9 +152,73 @@ nela e lia o clipboard, sem passar pelos comandos assinados.
   com o cookie é aceita e o socket abstrato não existe. O que já era garantido segue coberto: o terminal não vê
   `logins/`, os perfis e o keyring (0700, outro uid) e roda sem `DISPLAY`.
 
+## Emenda 2026-10-24 (NOD-97 PR 4): o storage das origens com login é em comum
+
+Só cookies não bastam: muitos sites guardam a sessão em `localStorage` ou IndexedDB. Agora o storage dessas origens
+também é um só entre as telas, como a loja de cookies do §2.
+
+- **Só as origens com login.** Uma origem é "com login" quando há cookie httpOnly vivo que vai para o host dela. O resto
+  do storage fica no perfil de cada bot.
+- **A tela coleta na própria aba** (`coletarNaPagina`, via `page.evaluate`):
+  - no máximo uma vez a cada 10 s por origem, depois de cada ação; a coleta que o ritmo segura não se perde, agenda
+    uma rodada para o fim da janela da origem;
+  - de forma forçada antes de `navegar` (a origem que a aba deixa), ao fechar e no SIGTERM;
+  - com prazo de 5 s por aba: página cujo `indexedDB.databases()` não resolve fica fora da rodada sem segurar a
+    resposta da ação;
+  - manda `{tipo:'storage', origem, em, hash, dados}`, e só quando o hash muda.
+  - Fica fora o que não cabe no JSON: um banco com Blob, File ou CryptoKey sai inteiro e vai para `pulados`. O
+    `pulados` não entra no hash (muda de perfil para perfil sem o conteúdo compartilhado mudar); sem isso, dois bots
+    trocavam versões do mesmo conteúdo.
+- **O supervisor grava e repassa:**
+  - faz LWW por origem (`em` maior vence; o mesmo hash não regrava);
+  - cifra em `logins/principal/storage/<sha256(origem)>.enc` com AES-256-GCM e HKDF `login:principal:storage-v1`;
+  - grava o índice cifrado `estado.enc {geracao, versoes}`. O plano dizia `estado.json`, mas a lista de origens já
+    revela onde a pessoa tem conta;
+  - repassa às outras telas abertas e manda tudo no config de cada tela nova;
+  - recusa origem acima de 5 MB (fica só no bot).
+  - **Desvio do plano:** o plano previa um lockfile `O_EXCL` na pasta do storage. O único processo que escreve ali é o
+    supervisor, e ele já serializa as mensagens de storage na fila da máquina (a mesma dos cookies), então o lock
+    virou essa fila. A leitura da tela que abre não entra na fila: como a origem é gravada antes do índice, `lerTudo`
+    aceita o arquivo da origem uma versão à frente do `estado.enc`. Gatilho de reversão: um segundo escritor (outro
+    processo ou outra máquina) na mesma pasta traz o lockfile de volta.
+- **A tela aplica só onde não quebra o site.** O que chega fica pendente e é aplicado em dois momentos:
+  - na subida;
+  - ao navegar para a origem, quando nenhuma aba está nela.
+
+  A aplicação vai a uma página vazia da origem (`page.route`, com o service worker desligado por CDP) e roda
+  `restaurarOrigem`. Trocar sob o site vivo o deixaria pela metade, então uma origem aberta noutra aba espera.
+- **Regra da restauração: só troca o que veio.** Corrigido na rodada 3 do #515: a versão anterior apagava todo banco
+  local fora dos `pulados` do remetente, e o receptor perdia os próprios bancos (inclusive os com Blob).
+  - O `localStorage` da origem é trocado inteiro.
+  - Um banco IndexedDB só é apagado e regravado quando está no snapshot (`dados.indexedDB`). Banco do receptor que
+    não veio, inclusive os `pulados` do remetente, fica como está.
+  - Antes de restaurar, o receptor coleta a própria aba. Os bancos que ele não consegue coletar (os `pulados` dele,
+    ex.: com Blob) não são apagados nem substituídos, mesmo que o snapshot traga um banco de mesmo nome: a versão
+    local ganha, porque não teria como voltar. Sem essa coleta (prazo vencido), a origem não é restaurada.
+  - Depois, o receptor coleta de novo e guarda como versão da origem o hash do que ficou, não o do snapshot. Com o
+    hash do snapshot, o banco que ficou só no receptor faria a próxima coleta parecer mudança, e os dois bots
+    trocariam versões sem fim.
+  - Consequência aceita: um banco apagado num bot não some dos outros por esta via; "Sair de todos os sites" é o
+    caminho para limpar. Gatilho de reversão: um site cujo logout depende de apagar um banco IndexedDB e que deixe
+    os outros bots logados.
+- **Sem `storageState`/`setStorageState` do Playwright:**
+  - o `storageState` abre uma aba escondida por origem a cada coleta;
+  - o `setStorageState` limpa os cookies e o storage do contexto inteiro.
+
+  Os scripts seguem o formato do StorageScript do 1.63, por origem.
+- **Teste:**
+  - unitário, das regras (login, LWW, teto, cifra);
+  - ida e volta no Chromium de verdade, com `localStorage` e IndexedDB com índice, chave composta, Date, Map, Set,
+    BigInt e Uint8Array (pula sem Chromium);
+  - no Chromium de verdade, o receptor com um banco que não veio e um banco com Blob de mesmo nome do snapshot
+    mantém os dois intactos;
+  - concorrência no supervisor: repasse, tela nova, origem sem login fica no bot, LWW com a origem aberta pendente,
+    reabrir mantém, disco cifrado; e dois bots gravando a mesma origem 100 vezes ao mesmo tempo, com um leitor que
+    confere a cada passo que o índice e a origem decifram e, no fim, que o LWW ficou com a última volta.
+
 ## Fora
 
-Compartilhar por workspace (bots de colegas); mais de uma máquina por pessoa; compartilhar senhas, storage e
+Compartilhar por workspace (bots de colegas); mais de uma máquina por pessoa; compartilhar senhas e
 extensões (NOD-97); tela ao vivo (NOD-95); rotear o navegador pelo Mac da pessoa; computador no Mac (NOD-93) e na
 nuvem gerenciada (NOD-92/NOD-89).
 

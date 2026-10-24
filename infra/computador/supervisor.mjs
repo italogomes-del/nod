@@ -20,9 +20,10 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { setTimeout as esperar } from 'node:timers/promises';
 import { spawn } from 'node:child_process';
 import { createPrivateKey, randomUUID } from 'node:crypto';
-import { abrirSelo, chaveDaLoja, conferirComando, novoParX25519, publicaX25519, senhaSafeStorage } from './chaves.mjs';
+import { abrirSelo, chaveDaLoja, chaveDoStorage, conferirComando, novoParX25519, publicaX25519, senhaSafeStorage } from './chaves.mjs';
 import { atualizarLoja, cookiesVivos, fundir, lerLoja, zerar } from './loja-cookies.mjs';
 import { decidirAbertura, leituraLocal } from './regua.mjs';
+import { gravarOrigem, lerEstado, lerTudo, pastaDoStorage } from './login-storage.mjs';
 import { RESOLV_DO_STUB } from './isolamento.mjs';
 
 const AQUI = path.dirname(fileURLToPath(import.meta.url));
@@ -142,13 +143,13 @@ export function criarSupervisor(op) {
     const d = path.join(raiz, id);
     return {
       raiz: d, estado: path.join(d, 'estado'), perfis: path.join(d, 'perfis'), perfilBase: path.join(d, 'perfil-base'),
-      logins: path.join(d, 'logins'), loja: path.join(d, 'logins', 'principal', 'cookies.enc'), keyring: path.join(d, 'keyring'),
+      logins: path.join(d, 'logins'), loja: path.join(d, 'logins', 'principal', 'cookies.enc'), storage: pastaDoStorage(path.join(d, 'logins')), keyring: path.join(d, 'keyring'),
       workspace: path.join(d, 'workspace'), run: path.join(run, id), bus: path.join(run, id, 'bus'),
     };
   };
 
   async function prepararPastas(d) {
-    for (const p of [d.raiz, d.estado, d.perfis, d.perfilBase, d.logins, path.dirname(d.loja), d.keyring, d.run, d.bus]) await mkdir(p, { recursive: true, mode: 0o700 });
+    for (const p of [d.raiz, d.estado, d.perfis, d.perfilBase, d.logins, path.dirname(d.loja), d.storage, d.keyring, d.run, d.bus]) await mkdir(p, { recursive: true, mode: 0o700 });
     await mkdir(d.workspace, { recursive: true, mode: 0o2770 });
     // O umask 077 do serviço come o modo do mkdir. O terminal (outro uid, mesmo grupo nod-pc-arquivos) só atravessa a
     // pasta do computador (--x) e lê/grava o workspace; perfis, logins, estado e keyring seguem 0700 do nod-pc.
@@ -173,7 +174,7 @@ export function criarSupervisor(op) {
     await prepararPastas(d);
     const privX = await chaveDoSupervisor(d);
     const servidorPub = await readFile(path.join(d.estado, 'servidor.pub'), 'utf8').then((s) => s.trim(), () => null);
-    c = { id, d, privX, pubX: publicaX25519(privX), servidorPub, vistos: new Map(), ligado: false, chaveLoja: null, busEndereco: null, procs: [], telas: new Map(), operacao: null, fila: Promise.resolve() };
+    c = { id, d, privX, pubX: publicaX25519(privX), servidorPub, vistos: new Map(), ligado: false, chaveLoja: null, chaveStorage: null, busEndereco: null, procs: [], telas: new Map(), operacao: null, fila: Promise.resolve() };
     computadores.set(id, c);
     return c;
   }
@@ -235,6 +236,9 @@ export function criarSupervisor(op) {
     if (!gravou) throw Object.assign(new Error('o keyring não destravou'), { codigo: 'cofre_invalido' });
     c.chaveLoja = chaveDaLoja(chaveMaquina);
     await lerLoja(c.d.loja, c.chaveLoja).catch((e) => { throw Object.assign(e, { codigo: 'cofre_invalido' }); });
+    c.chaveStorage = chaveDoStorage(chaveMaquina);
+    // Storage ilegível não impede a máquina de ligar (os cookies são o login): fica no log, e a tela abre sem ele.
+    await lerEstado(c.d.storage, c.chaveStorage).catch((e) => log(`storage: ${e?.message}`));
     c.ligado = true;
     c.ligadoDesde = agora();
   }
@@ -246,6 +250,7 @@ export function criarSupervisor(op) {
     }
     c.ligado = false;
     c.chaveLoja = null;
+    c.chaveStorage = null;
     c.busEndereco = null;
   }
 
@@ -262,6 +267,7 @@ export function criarSupervisor(op) {
   }
 
   function aoMensagemDaTela(c, agenteId, m) {
+    if (m?.tipo === 'storage') return aoStorageDaTela(c, agenteId, m);
     if (m?.tipo !== 'cookies') return;
     c.fila = c.fila.then(async () => {
       if (!c.chaveLoja) return;
@@ -269,6 +275,18 @@ export function criarSupervisor(op) {
       if (!efetivo.postos.length && !efetivo.removidos.length) return;
       for (const [outro, t] of c.telas) if (outro !== agenteId && t.estado === 'aberta') t.proc.send({ tipo: 'repasse', ...efetivo });
     }).catch((e) => log(`loja de cookies: ${e?.message}`));
+  }
+
+  /** NOD-97 PR 4: a versão de uma origem que uma tela mandou: grava se vence (LWW) e repassa às outras telas abertas. */
+  function aoStorageDaTela(c, agenteId, m) {
+    c.fila = c.fila.then(async () => {
+      if (!c.chaveStorage) return;
+      const item = { origem: m.origem, em: m.em, hash: m.hash, dados: m.dados };
+      const r = await gravarOrigem(c.d.storage, c.chaveStorage, item);
+      if (r === 'grande') log(`storage de ${agenteId}: origem acima do teto, fica só no perfil`);
+      if (r !== 'gravou') return;
+      for (const [outro, t] of c.telas) if (outro !== agenteId && t.estado === 'aberta') t.proc.send({ tipo: 'storage', ...item });
+    }).catch((e) => log(`storage: ${e?.message}`));
   }
 
   async function abrirTela(c, agenteId, uso) {
@@ -304,12 +322,13 @@ export function criarSupervisor(op) {
     });
     t.abrindo = (async () => {
       const loja = await lerLoja(c.d.loja, c.chaveLoja);
+      const storage = await lerTudo(c.d.storage, c.chaveStorage).catch((e) => { log(`storage: ${e?.message}`); return { itens: [] }; });
       proc.send({
         tipo: 'abrir',
         config: {
           agenteId, display, raiz, run, ocultar: [path.dirname(terminal)], resolv, resolvEm, perfil: path.join(c.d.perfis, agenteId), perfilBase: c.d.perfilBase, workspace: path.join(c.d.workspace, agenteId),
           logins: c.d.logins, tmp: path.join(c.d.run, 'telas', agenteId), x11, bus: c.d.bus, busEndereco: c.busEndereco, bin, sandbox: op.sandbox !== false,
-          xvfbArgs: op.xvfbArgs, cookies: cookiesVivos(loja, agora()),
+          xvfbArgs: op.xvfbArgs, cookies: cookiesVivos(loja, agora()), storage: storage.itens,
         },
       });
       const m = await esperarDoFilho(proc, (x) => x?.tipo === 'pronta' || x?.tipo === 'falhou', PRAZO_ABRIR_TELA_MS);

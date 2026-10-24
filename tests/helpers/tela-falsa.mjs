@@ -4,12 +4,16 @@
 //
 // O "site" é a URL: `?entrar=nome:valor` grava o cookie no host (o login), `?sair=nome` apaga. A resposta de toda ação
 // é a tela, com `texto` = os cookies do host atual em JSON — é assim que o teste vê se a tela está logada.
+// NOD-97 PR 4: `?guardar=nome:valor` grava no localStorage da origem; a tela manda o storage da origem com login
+// depois de cada ação (como mandarStorage), guarda o que o supervisor repassa e aplica ao navegar para a origem; a
+// resposta traz `storage` = o localStorage da origem atual em JSON.
 // NOD_TELA_FALSA_ATRASO_MS segura o `pronta` (o boot lento); NOD_TELA_FALSA_ACAO_MS segura cada ação.
 import { randomBytes } from 'node:crypto';
 import process from 'node:process';
 import { setTimeout } from 'node:timers';
 import { URL } from 'node:url';
 import { chaveDoCookie, diffDeCookies } from '../../infra/computador/loja-cookies.mjs';
+import { hashDosDados, origemDe, origemTemLogin } from '../../infra/computador/login-storage.mjs';
 
 const esperar = (ms) => new Promise((r) => setTimeout(r, ms));
 const ATRASO_ABRIR = Number(process.env.NOD_TELA_FALSA_ATRASO_MS ?? 0);
@@ -21,6 +25,27 @@ let url = 'about:blank';
 let pote = new Map();
 let conhecidos = new Map();
 const enviar = (m) => process.send?.(m);
+/** origem → [[nome, valor]] (o localStorage); versões que a tela tem e as pendentes, como na tela real. */
+const storage = new Map();
+const versoes = new Map();
+const pendentes = new Map();
+
+function mandarStorage() {
+  const origem = origemDe(url);
+  if (!origem || !origemTemLogin(origem, [...pote.values()])) return;
+  const dados = { localStorage: storage.get(origem) ?? [], indexedDB: [], pulados: [] };
+  const hash = hashDosDados(dados);
+  if (versoes.get(origem)?.hash === hash) return;
+  const em = Math.max(Date.now(), (versoes.get(origem)?.em ?? 0) + 1);
+  versoes.set(origem, { em, hash });
+  enviar({ tipo: 'storage', origem, em, hash, dados });
+}
+
+function receberStorage({ origem, em, hash, dados }) {
+  const v = versoes.get(origem);
+  if (v && (v.hash === hash || v.em >= em)) return;
+  pendentes.set(origem, { em, hash, dados });
+}
 
 function host() {
   try { return new URL(url).hostname; } catch { return ''; }
@@ -32,6 +57,7 @@ function tela() {
   return {
     quadro: randomBytes(32).toString('hex'), imagem: 'iVBORw0KGgo=', largura: 1280, altura: 800, url, titulo: `${h || 'about:blank'} (${config?.agenteId})`,
     texto: JSON.stringify(doHost.sort((a, b) => a.name.localeCompare(b.name))), abas: [{ url, titulo: h, ativa: true }],
+    storage: JSON.stringify(storage.get(origemDe(url)) ?? []),
   };
 }
 
@@ -46,7 +72,19 @@ function mandarCookies() {
 function navegar(destino) {
   const u = new URL(destino);
   if (!['http:', 'https:'].includes(u.protocol)) throw new Error('url');
+  const p = pendentes.get(u.origin);
+  if (p && origemDe(url) !== u.origin) {
+    storage.set(u.origin, p.dados.localStorage);
+    versoes.set(u.origin, { em: p.em, hash: p.hash });
+    pendentes.delete(u.origin);
+  }
   url = u.toString();
+  const guardar = u.searchParams.get('guardar');
+  if (guardar) {
+    const [nome, valor] = guardar.split(':');
+    const ls = (storage.get(u.origin) ?? []).filter(([n]) => n !== nome);
+    storage.set(u.origin, [...ls, [nome, valor]]);
+  }
   const entrar = u.searchParams.get('entrar');
   if (entrar) {
     const [name, value] = entrar.split(':');
@@ -64,6 +102,7 @@ process.on('message', async (m) => {
       config = m.config;
       for (const c of config.cookies ?? []) pote.set(chaveDoCookie(c), c);
       conhecidos = new Map(pote);
+      for (const item of config.storage ?? []) receberStorage(item);
       await esperar(ATRASO_ABRIR);
       enviar({ tipo: 'pronta' });
     } else if (m.tipo === 'acao') {
@@ -78,16 +117,20 @@ process.on('message', async (m) => {
         resposta = { tipo: 'resposta', id: m.id, erro: 'acao_falhou', detalhe: String(e?.message) };
       }
       mandarCookies();
+      mandarStorage();
       enviar(resposta);
     } else if (m.tipo === 'repasse') {
       for (const r of m.removidos ?? []) { pote.delete(chaveDoCookie(r)); conhecidos.delete(chaveDoCookie(r)); }
       for (const c of m.postos ?? []) { pote.set(chaveDoCookie(c), c); conhecidos.set(chaveDoCookie(c), c); }
+    } else if (m.tipo === 'storage') {
+      receberStorage(m);
     } else if (m.tipo === 'limpar_cookies') {
       pote = new Map();
       conhecidos = new Map();
       enviar({ tipo: 'resposta', id: m.id, resultado: {} });
     } else if (m.tipo === 'fechar') {
       mandarCookies();
+      mandarStorage();
       enviar({ tipo: 'fechada' });
       setTimeout(() => process.exit(0), 20);
     }

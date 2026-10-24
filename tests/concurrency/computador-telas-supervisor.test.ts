@@ -3,12 +3,13 @@
 // loja de cookies é a real (cifrada no disco). O que precisa de Xvfb/Chromium/systemd de verdade é o smoke na VM
 // (scripts/e2e-computador-vm.sh); aqui fica o que é do supervisor: login em comum, telas sem vazar, cookies ao mesmo
 // tempo, a régua (fila e ociosa) e Atualizar/Redefinir sem perder os logins.
-import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { assinarComando, chaveDaLoja, chaveDaMaquina, chavesDeAssinatura, selar } from "../../infra/computador/chaves.mjs";
+import { assinarComando, chaveDaLoja, chaveDaMaquina, chaveDoStorage, chavesDeAssinatura, selar } from "../../infra/computador/chaves.mjs";
+import { lerEstado, lerTudo } from "../../infra/computador/login-storage.mjs";
 import { cookiesVivos, lerLoja } from "../../infra/computador/loja-cookies.mjs";
 import { OCIOSA_APOS_MS } from "../../infra/computador/regua.mjs";
 import { criarSupervisor, type Supervisor } from "../../infra/computador/supervisor.mjs";
@@ -21,7 +22,7 @@ const limpar: Array<() => Promise<unknown> | unknown> = [];
 afterEach(async () => { for (const f of limpar.splice(0).reverse()) await f(); });
 
 type Nivel = "verde" | "amarela" | "vermelha";
-type Tela = { url: string; titulo: string; texto: string };
+type Tela = { url: string; titulo: string; texto: string; storage?: string };
 type Resultado = { desfecho: string; motivo?: string; quem?: string[]; supervisorPub?: string; resultado?: { tela?: Tela } };
 
 async function montar(o: { ambienteTela?: Record<string, string> } = {}) {
@@ -74,7 +75,14 @@ async function montar(o: { ambienteTela?: Record<string, string> } = {}) {
   };
   const telas = () => Object.fromEntries((sup.estados()[0]?.telas ?? []).map((t) => [t.agenteId, t.estado]));
   const loja = async () => cookiesVivos(await lerLoja(join(dir, "raiz", ID, "logins", "principal", "cookies.enc"), chaveDaLoja(chaveDaMaquina(CRED, ID))));
-  return { sup, maquina, tratar, iniciar, navegar, cookiesEm, telas, loja, logs, assentar: () => (sup as Supervisor).assentar() };
+  /** O localStorage que a tela do bot vê na origem da URL (navega até ela). */
+  const storageEm = async (agenteId: string, url: string) => {
+    const r = await navegar(agenteId, url);
+    expect(r.desfecho, JSON.stringify(r)).toBe("ok");
+    return Object.fromEntries(JSON.parse(r.resultado!.tela!.storage ?? "[]") as [string, string][]);
+  };
+  const pastaStorage = join(dir, "raiz", ID, "logins", "principal", "storage");
+  return { sup, maquina, tratar, iniciar, navegar, cookiesEm, storageEm, pastaStorage, telas, loja, logs, assentar: () => (sup as Supervisor).assentar() };
 }
 
 const MAIL = "https://mail.exemplo.com/";
@@ -208,6 +216,72 @@ describe("computador da pessoa: várias telas no supervisor real (NOD-96 PR 7)",
     expect(await m.cookiesEm("ana", MAIL)).toEqual({});
     expect(await m.cookiesEm("duda", MAIL)).toEqual({});
   });
+
+  it("storage em comum (NOD-97 PR 4): a origem com login vale nas telas abertas e nas novas; sem login fica no bot", async () => {
+    const m = await montar();
+    await m.iniciar();
+    // A Ana fica aberta noutra origem: o repasse entra quando ela navega para o mail.
+    expect(await m.storageEm("ana", "https://outro.exemplo.com/")).toEqual({});
+    await m.navegar("beto", `${MAIL}?entrar=sid:abc&guardar=token:1`);
+    await m.navegar("beto", "https://semlogin.exemplo.org/?guardar=x:1");
+    await m.assentar();
+    expect(await m.storageEm("ana", MAIL)).toEqual({ token: "1" });
+    expect(await m.storageEm("caio", MAIL)).toEqual({ token: "1" });
+    expect(await m.storageEm("caio", "https://semlogin.exemplo.org/")).toEqual({});
+    // Último a escrever vence; a Ana está no mail (a origem aberta) e só pega ao voltar para ela.
+    await m.navegar("caio", `${MAIL}?guardar=token:2`);
+    await m.assentar();
+    expect(await m.storageEm("ana", MAIL)).toEqual({ token: "1" });
+    await m.navegar("ana", "https://outro.exemplo.com/");
+    expect(await m.storageEm("ana", MAIL)).toEqual({ token: "2" });
+    // Fechar e reabrir a tela mantém a versão (vem da loja); o disco é cifrado.
+    await m.tratar({ tipo: "fechar_tela", agenteId: "beto" });
+    expect(await m.storageEm("beto", MAIL)).toEqual({ token: "2" });
+    const arquivos = await readdir(m.pastaStorage);
+    expect(arquivos.filter((a) => a.endsWith(".enc"))).toHaveLength(2);
+    for (const a of arquivos.filter((x) => x.endsWith(".enc"))) expect((await readFile(join(m.pastaStorage, a))).toString("latin1")).not.toContain("token");
+  });
+
+  it("storage ao mesmo tempo (NOD-97 PR 4): dois bots logando juntos 100 vezes, o store sempre decifra e o LWW vence", async () => {
+    const m = await montar();
+    await m.iniciar();
+    const chave = chaveDoStorage(chaveDaMaquina(CRED, ID));
+    const bots = ["ana", "beto"];
+    for (const b of bots) expect((await m.navegar(b, `${MAIL}?entrar=sid-${b}:1`)).desfecho).toBe("ok");
+    const VOLTAS = 100;
+    let escrevendo = true;
+    let leituras = 0;
+    // Enquanto os dois escrevem, um leitor confere sem parar que o índice e cada origem decifram (a gravação é atômica).
+    const leitor = (async () => {
+      while (escrevendo) {
+        const estado = await lerEstado(m.pastaStorage, chave);
+        const tudo = await lerTudo(m.pastaStorage, chave);
+        expect(tudo.itens.length).toBe(Object.keys(estado.versoes).length > 0 ? 1 : 0);
+        leituras++;
+        await new Promise((r) => setTimeout(r, 1));
+      }
+    })();
+    await Promise.all(bots.map(async (b) => {
+      for (let v = 0; v < VOLTAS; v++) expect((await m.navegar(b, `${MAIL}?guardar=token:${b}-${v}`)).desfecho).toBe("ok");
+    }));
+    await m.assentar();
+    escrevendo = false;
+    await leitor;
+    expect(leituras).toBeGreaterThan(0);
+    const estado = await lerEstado(m.pastaStorage, chave);
+    const { itens } = await lerTudo(m.pastaStorage, chave);
+    expect(itens).toHaveLength(1);
+    const vencedor = itens[0]!;
+    expect(vencedor.origem).toBe(new URL(MAIL).origin);
+    expect(estado.versoes[vencedor.origem]).toEqual({ em: vencedor.em, hash: vencedor.hash });
+    // O último a escrever vence: a última volta de algum dos dois (cada bot escreve com `em` crescente).
+    const token = Object.fromEntries(vencedor.dados.localStorage).token;
+    expect(token).toMatch(new RegExp(`^(ana|beto)-${VOLTAS - 1}$`));
+    // Na pasta só o índice e a origem (decifrados acima; nenhum temporário largado) e uma tela nova nasce com o vencedor.
+    expect((await readdir(m.pastaStorage)).sort()).toHaveLength(2);
+    expect(await m.storageEm("caio", MAIL)).toEqual({ token });
+    expect(m.logs.filter((l) => l.startsWith("storage"))).toEqual([]);
+  }, 60_000);
 
   it("instalação limpa: a sonda sem assinatura é recusada, mas o computador novo é relatado na hora com a X25519", async () => {
     const m = await montar();

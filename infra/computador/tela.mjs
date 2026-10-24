@@ -16,6 +16,7 @@ import { lerTexto, gravarTexto } from './texto.mjs';
 import { codigoDaAcao, falhaDe, primeiraLinha, PRAZO_NAVEGADOR_MS, TRAVAS_DO_PERFIL } from './falhas.mjs';
 import { argsDoBwrap, scriptDoBwrap } from './isolamento.mjs';
 import { chaveDoCookie, diffDeCookies } from './loja-cookies.mjs';
+import { coletarNaPagina, comPrazo, hashDosDados, origemDe, origemTemLogin, PRAZO_COLETA_MS, restaurarOrigem, ritmoDeColeta, TETO_STORAGE_BYTES } from './login-storage.mjs';
 
 const exec = promisify(execFile);
 
@@ -149,6 +150,16 @@ export function criarTela(config, avisar) {
   let dialogo = null;
   /** A última foto dos cookies que a loja conhece (o que a tela mandou e o que recebeu). */
   let conhecidos = new Map();
+  /**
+   * NOD-97 PR 4: o storage por origem. `versoes` (origem → { em, hash }) é o que este perfil já tem (mandou ou aplicou),
+   * gravado no perfil para a próxima subida; `pendentes` é o que outra tela mandou e ainda não entrou (entra quando
+   * esta tela navega para a origem e nenhuma aba está nela); `ritmo` segura a coleta a uma por origem a cada 10 s e
+   * agenda a rodada do fim da janela para a coleta segurada não se perder.
+   */
+  const arquivoDeVersoes = path.join(config.perfil, 'nod-storage.json');
+  let versoes = {};
+  const pendentes = new Map();
+  const ritmo = ritmoDeColeta({ aoVencer: () => { mandarStorage().catch(() => {}); } });
   const DISPLAY = `:${config.display}`;
   // O cookie do X fica no tmp desta tela (0600, some no bwrap das outras): só os filhos dela abrem o DISPLAY.
   const XAUTHORITY = path.join(config.tmp, 'Xauthority');
@@ -214,6 +225,10 @@ export function criarTela(config, avisar) {
     if (config.cookies?.length) await context.addCookies(config.cookies);
     conhecidos = new Map((await context.cookies()).map((c) => [chaveDoCookie(c), c]));
     page = context.pages()[0] ?? (await context.newPage());
+    versoes = await readFile(arquivoDeVersoes, 'utf8').then((t) => JSON.parse(t), () => ({}));
+    if (!versoes || typeof versoes !== 'object' || Array.isArray(versoes)) versoes = {};
+    for (const item of config.storage ?? []) receberStorage(item);
+    await aplicarPendentes(page, [...pendentes.keys()]).catch(() => {});
     await exec(config.bin.xdotool, ['search', '--onlyvisible', '--class', 'Chromium', 'windowmove', '0', '0', 'windowsize', '1280', '800'], { timeout: 4000, env: ambienteX }).catch(() => {});
     context.pages().forEach(acompanhar);
     context.on('page', (p) => {
@@ -282,6 +297,79 @@ export function criarTela(config, avisar) {
     for (const c of postos) conhecidos.set(chaveDoCookie(c), c);
   }
 
+  const gravarVersoes = () => writeFile(arquivoDeVersoes, JSON.stringify(versoes), { mode: 0o600 }).catch(() => {});
+
+  /**
+   * Manda ao supervisor o storage das origens com login abertas nas abas (ou só nas `paginas`), se mudou: no máximo
+   * uma vez a cada 10 s por origem, salvo `forcar`. A coleta de cada aba tem prazo (PRAZO_COLETA_MS): aba que não
+   * responde fica de fora desta rodada, sem segurar a resposta da ação.
+   */
+  async function mandarStorage(forcar = false, paginas = null) {
+    if (!context) return;
+    const cookies = await context.cookies();
+    const vistas = new Set();
+    let mudou = false;
+    for (const p of paginas ?? context.pages()) {
+      const origem = origemDe(p.isClosed() ? '' : p.url());
+      if (!origem || vistas.has(origem)) continue;
+      vistas.add(origem);
+      if (!origemTemLogin(origem, cookies)) continue;
+      if (!ritmo.liberar(origem, forcar)) continue;
+      const dados = await comPrazo(p.evaluate(coletarNaPagina).catch(() => null), PRAZO_COLETA_MS);
+      if (!dados) continue;
+      const hash = hashDosDados(dados);
+      if (versoes[origem]?.hash === hash) continue;
+      if (Buffer.byteLength(JSON.stringify(dados)) > TETO_STORAGE_BYTES) continue;
+      const em = Math.max(Date.now(), (versoes[origem]?.em ?? 0) + 1);
+      versoes[origem] = { em, hash };
+      pendentes.delete(origem);
+      mudou = true;
+      avisar({ tipo: 'storage', origem, em, hash, dados });
+    }
+    if (mudou) await gravarVersoes();
+  }
+
+  /** O supervisor repassou (ou trouxe na subida) a versão de uma origem: fica pendente se é mais nova que a daqui. */
+  function receberStorage({ origem, em, hash, dados }) {
+    if (!origemDe(origem) || typeof em !== 'number') return;
+    const v = versoes[origem];
+    if (v && (v.hash === hash || v.em >= em)) return;
+    pendentes.set(origem, { em, hash, dados });
+  }
+
+  /**
+   * Aplica numa aba as versões pendentes das origens pedidas: a aba vai a uma página vazia da origem (page.route, sem
+   * passar pelo service worker do site, que poderia servir a página de verdade), restaura e volta a ficar sem rota.
+   * Origem aberta em outra aba fica pendente: trocar o storage sob o site vivo o deixaria pela metade.
+   */
+  async function aplicarPendentes(p, origens) {
+    const abertas = new Set(context.pages().filter((x) => !x.isClosed()).map((x) => origemDe(x.url())));
+    const itens = origens.filter((o) => pendentes.has(o) && !abertas.has(o));
+    if (!itens.length) return;
+    const vazia = (r) => r.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><html></html>' }).catch(() => {});
+    const cdp = await context.newCDPSession(p).catch(() => null);
+    await cdp?.send('Network.setBypassServiceWorker', { bypass: true }).catch(() => {});
+    await p.route('**/*', vazia);
+    try {
+      for (const origem of itens) {
+        const item = pendentes.get(origem);
+        try {
+          await p.goto(`${origem}/`, { waitUntil: 'domcontentloaded', timeout: 10000 });
+          // A versão guardada é a do que ficou na aba (o banco só deste perfil fica), para não haver ping-pong.
+          versoes[origem] = { em: item.em, hash: await restaurarOrigem(p, item.dados) };
+        } catch {
+          // a origem que não restaura segue com o storage do perfil; a próxima versão tenta de novo
+        }
+        pendentes.delete(origem);
+      }
+    } finally {
+      await p.unroute('**/*', vazia).catch(() => {});
+      await cdp?.send('Network.setBypassServiceWorker', { bypass: false }).catch(() => {});
+      await cdp?.detach().catch(() => {});
+      await gravarVersoes();
+    }
+  }
+
   async function limparCookies() {
     if (!context) return;
     await context.clearCookies();
@@ -306,7 +394,8 @@ export function criarTela(config, avisar) {
     switch (a.tipo) {
       case 'observar': break;
       case 'dialogo': { if (!dialogo) throw new Error('dialogo'); const d = dialogo; dialogo = null; mudar(); if (a.aceitar) await d.accept(a.texto); else await d.dismiss(); break; }
-      case 'navegar': await rodar(ganchos.antesDeNavegar, a.url, config); mudar(); await p.goto(a.url, { waitUntil: 'domcontentloaded', timeout: 20000 }); await p.bringToFront(); break;
+      // Antes de sair da origem atual, coleta o que ela tem agora (o login gravado dentro da janela de 10 s não se perde).
+      case 'navegar': await rodar(ganchos.antesDeNavegar, a.url, config); await mandarStorage(true, [p]).catch(() => {}); await aplicarPendentes(p, [origemDe(a.url)].filter(Boolean)).catch(() => {}); mudar(); await p.goto(a.url, { waitUntil: 'domcontentloaded', timeout: 20000 }); await p.bringToFront(); break;
       case 'abas': if (a.aba !== undefined) { page = context.pages()[a.aba]; if (!page) throw new Error('aba'); mudar(); await page.bringToFront(); } break;
       case 'clicar': mudar(); await run(config.bin.xdotool, ['mousemove', '--sync', String(a.x), String(a.y), 'click', '--repeat', String(a.vezes ?? 1), String(a.botao ?? 1)]); break;
       case 'arrastar': mudar(); await run(config.bin.xdotool, ['mousemove', '--sync', String(a.x), String(a.y), 'mousedown', '1', 'mousemove', '--sync', String(a.destinoX), String(a.destinoY), 'mouseup', '1']); break;
@@ -334,6 +423,10 @@ export function criarTela(config, avisar) {
     try {
       await mandarCookies();
     } catch { /* segue */ }
+    ritmo.parar();
+    try {
+      await mandarStorage(true);
+    } catch { /* segue */ }
     await rodar(ganchos.aoFecharChrome, config).catch(() => {});
     await context?.close().catch(() => {});
     for (const p of filhos.reverse()) {
@@ -355,6 +448,7 @@ export function criarTela(config, avisar) {
     observar,
     receberCookies,
     limparCookies,
+    receberStorage,
     async executar(a) {
       try {
         const resultado = await acao(a);
@@ -362,6 +456,7 @@ export function criarTela(config, avisar) {
         return resultado;
       } finally {
         await mandarCookies().catch(() => {});
+        await mandarStorage().catch(() => {});
       }
     },
     fechar,
@@ -373,6 +468,11 @@ async function principal() {
   let tela = null;
   const enviar = (m) => process.send?.(m);
   process.on('disconnect', async () => {
+    await tela?.fechar().catch(() => {});
+    process.exit(0);
+  });
+  // NOD-97 PR 4: o SIGTERM (supervisor parando, systemd) também fecha direito, para o storage e os cookies saírem.
+  process.on('SIGTERM', async () => {
     await tela?.fechar().catch(() => {});
     process.exit(0);
   });
@@ -394,6 +494,8 @@ async function principal() {
         }
       } else if (m.tipo === 'repasse') {
         await tela?.receberCookies(m);
+      } else if (m.tipo === 'storage') {
+        tela?.receberStorage(m);
       } else if (m.tipo === 'limpar_cookies') {
         await tela?.limparCookies();
         enviar({ tipo: 'resposta', id: m.id, resultado: {} });
