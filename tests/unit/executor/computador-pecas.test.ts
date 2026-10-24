@@ -275,7 +275,10 @@ describe("isolamento e tela", () => {
     const cookie = Buffer.alloc(16, 9);
     const arq = join(dir, "Xauthority");
     await writeFile(arq, arquivoXauthority(display, cookie), { mode: 0o600 });
-    const x = spawn("Xvfb", argsDoXvfb(display, arq), { stdio: "ignore" });
+    // -noreset: aqui não há cliente fixo (na tela, o openbox fica conectado). Sem ele, cada aperto que fecha deixa o
+    // Xvfb sem clientes, ele regenera e, com a máquina carregada, o próximo aperto cai na regeneração e vê ECONNRESET
+    // em vez da recusa (0) — falso vermelho visto no QA da NOD-97.
+    const x = spawn("Xvfb", argsDoXvfb(display, arq, ["-noreset"]), { stdio: "ignore" });
     try {
       const socket = `/tmp/.X11-unix/X${display}`;
       for (let i = 0; i < 100 && (await apertoX11(socket, cookie)) !== 1; i++) await new Promise((r) => setTimeout(r, 100));
