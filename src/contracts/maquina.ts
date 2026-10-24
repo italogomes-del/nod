@@ -1,6 +1,6 @@
 import type { IdHarness } from "./harness.ts";
 import type { EpochMs } from "./ids.ts";
-import type { Inventario } from "./inventario.ts";
+import type { CausaInventario, CausaSemIa, Inventario } from "./inventario.ts";
 import type { PapelMaquina, PlataformaMaquina } from "./ponte.ts";
 import type { MaquinaNuvemDto } from "./provedor-nuvem.ts";
 import type { DiscoDoMac, LeituraDisco, MotivoEsperaMac, NivelPressao } from "./trabalho.ts";
@@ -20,6 +20,12 @@ export type MaquinaDto = {
   conectada: boolean;
   plataforma: PlataformaMaquina | null;
   ias: Partial<Record<IdHarness, Inventario["estado"]>>;
+  /**
+   * NOD-8 (definido em 2026-10-22): a causa e a versão de cada IA anunciada, ao lado de `ias` (que segue só com o estado,
+   * para quem já a lê). A "Nova conta" usa para dizer "o nod instala nela" ou "atualiza para X". Opcional: o servidor de
+   * antes não manda, e a tela cai no texto genérico.
+   */
+  iasDetalhe?: Partial<Record<IdHarness, DetalheDaIaNaMaquina>>;
   gh: boolean;
   /** NOD-9 (2026-10-23): a máquina conectada atende o "Atualizar agora" da tela. Ausente = não atende (ou servidor antigo). */
   atualizaIas?: boolean;
@@ -28,6 +34,8 @@ export type MaquinaDto = {
   /** ADR-121 (NOD-92): a máquina que dorme e acorda pelo Google. Ausente sem `NOD_MAQUINA_NUVEM=gcp` ou fora da nuvem. */
   nuvem?: MaquinaNuvemDto;
 };
+/** NOD-8: o que a tela lê de uma IA anunciada além do estado (`cli_antigo` traz a `versao` instalada e a `minima`). */
+export type DetalheDaIaNaMaquina = { causa?: CausaInventario | CausaSemIa | "limite"; versao?: string; minima?: string };
 /**
  * `servidorNoMac` (ADR-092): o Nod roda no modo local, com o servidor no Mac da pessoa. O bot sem máquina escolhida roda
  * neste Mac, e as máquinas da lista só pegam os bots escolhidos para elas. `api` é o endereço da API neste Mac (o que a VM

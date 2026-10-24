@@ -1,4 +1,5 @@
 import { esc } from "./escape.ts";
+import { VIVO } from "./copiar.ts";
 import { aparaUrl, chipDoLink, lerLink, linkComNome } from "./links.ts";
 
 /**
@@ -113,7 +114,7 @@ const ROTULO = /^([A-Za-z0-9_+#.-]{1,20})\n/;
 
 function cardDoCodigo(codigo: string, linguagem: string, fechado: boolean): string {
   const rotulo = linguagem ? `<span class="md-codigo-ling">${esc(linguagem)}</span>` : "";
-  const copiar = fechado ? `<button type="button" data-act="copiar-codigo" aria-label="Copiar código">${ICONE_COPIAR}<span class="md-codigo-estado">Copiar</span></button>` : "";
+  const copiar = fechado ? `<button type="button" data-act="copiar-codigo" aria-label="Copiar código" ${VIVO}>${ICONE_COPIAR}<span class="md-codigo-estado">Copiar</span></button>` : "";
   return `<div class="md-codigo"><div class="md-codigo-topo">${rotulo}${copiar}</div><pre><code>${esc(codigo)}</code></pre></div>`;
 }
 

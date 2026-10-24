@@ -213,6 +213,51 @@ describe("lista única de contas (ADR-102)", () => {
     expect(linhaDa(LEAPY.id)).toContain("Fora da fila");
   });
 
+  describe("NOD-8: o passo 1 do login (a máquina instala ou atualiza a IA antes)", () => {
+    const naTela = (o: Partial<LoginNaMaquina>) => renderListaDeContas(ctx({ ui: { logins: [{ onde: "vm", login: login({ ia: "codex-cli", contaId: null, apelido: "Pessoal", url: null, pedeCodigo: false, ...o }), codigo: "", enviando: false, erroEnvio: null }] } }));
+
+    it("preparando: passo 1 instalando (com a linha do npm), passo 2 'começa sozinho' e o Cancelar", () => {
+      const html = naTela({ fase: "preparando", preparo: { acao: "instalar", linha: "added 1 package in 9s" } });
+      expect(html).toContain("Preparar o ChatGPT na vm-bots");
+      expect(html).toContain("Entrar na conta da OpenAI");
+      expect(html).toContain("added 1 package in 9s");
+      expect(html).toContain("Começa sozinho quando a instalação terminar.");
+      expect(html).toContain('data-act="cl-login-cancelar"');
+      expect(html).not.toContain("Abrindo o login");
+      expect(naTela({ fase: "preparando", preparo: { acao: "instalar" } })).toContain("Instalando o Codex · leva até 2 minutos");
+      expect(naTela({ fase: "preparando", preparo: null })).toContain("Preparando…");
+    });
+
+    it("atualizar mostra 'antes → depois'", () => {
+      expect(naTela({ fase: "preparando", preparo: { acao: "atualizar", antes: "0.158.0", depois: "0.159.0" } })).toContain("0.158.0 → 0.159.0 · leva até 2 minutos");
+      expect(naTela({ fase: "preparando", preparo: { acao: "atualizar", antes: "0.158.0", depois: "0.159.0" } })).toContain("Atualizar o Codex na vm-bots");
+      expect(naTela({ fase: "preparando", preparo: { acao: "atualizar" } })).toContain("Começa sozinho quando a atualização terminar.");
+    });
+
+    it("concluído com o preparo: '✓ ChatGPT pronto na vm-bots · Codex X'; sem preparo, o '✓ Entrou' de sempre", () => {
+      expect(naTela({ fase: "pronto", preparo: { acao: "instalar", depois: "0.160.0" } })).toContain("✓ ChatGPT pronto na vm-bots · Codex 0.160.0");
+      const daMaquina = renderListaDeContas(ctx({ maquinas: [maquina(VM, "vm-bots", { iasDetalhe: { "codex-cli": { versao: "0.161.0" } } })], ui: { logins: [{ onde: "vm", login: login({ ia: "codex-cli", contaId: null, fase: "pronto", preparo: { acao: "instalar" } }), codigo: "", enviando: false, erroEnvio: null }] } }));
+      expect(daMaquina).toContain("✓ ChatGPT pronto na vm-bots · Codex 0.161.0");
+      expect(naTela({ fase: "pronto", preparo: null })).toContain("✓ Entrou");
+    });
+
+    it("a falha do preparo diz o que houve e oferece Tentar de novo", () => {
+      const html = naTela({ fase: "falhou", erro: "preparo_falhou", preparo: { acao: "instalar" } });
+      expect(html).toContain("Não deu para preparar a IA nessa máquina. Tente de novo.");
+      expect(html).toContain('data-act="cl-login-de-novo"');
+    });
+
+    it("Nova conta: na VM sem a IA, 'o nod instala o ChatGPT nela'; abaixo do piso, 'atualiza'; com ela, o de sempre", () => {
+      const nova = { ia: "codex-cli" as const, apelido: "", maquinas: [] };
+      const com = (o: Partial<MaquinaDto>) => renderListaDeContas(ctx({ maquinas: [maquina(VM, "vm-bots", o)], ui: { nova } }));
+      expect(com({ ias: { "codex-cli": "ausente" } })).toContain("o nod instala o ChatGPT nela e o login aparece aqui");
+      expect(com({ ias: { "codex-cli": "ausente" }, iasDetalhe: { "codex-cli": { causa: "cli_antigo", versao: "0.158.0", minima: "0.159.0" } } })).toContain("o nod atualiza o ChatGPT nela");
+      expect(com({ ias: { "codex-cli": "nao_autenticado" } })).toContain("o login aparece aqui na tela");
+      expect(com({ ias: {} })).toContain("o login aparece aqui na tela");
+      expect(com({ ias: { "codex-cli": "ausente" }, iasDetalhe: { "codex-cli": { causa: "sonda_lenta" } } })).not.toContain("o nod instala");
+    });
+  });
+
   describe("PR #306: Adicionar conta sem máquina que receba o login", () => {
     const nova = { ia: "claude-cli" as const, apelido: "", maquinas: [] };
 
@@ -291,7 +336,7 @@ describe("Provedores e Máquinas com a lista (ADR-102)", () => {
 });
 
 describe("controlador da lista (ADR-102)", () => {
-  function montar(api: Partial<ApiContas> = {}, termos: { aceita: boolean } = { aceita: true }, prazoFrentesMs = 5_000) {
+  function montar(api: Partial<ApiContas> = {}, termos: { aceita: boolean } = { aceita: true }, noMac?: () => Promise<boolean | { erro: string }>, prazoFrentesMs = 5_000) {
     let estado = reduzir({ ...estadoInicial, maquinas: { maquinas: MAQUINAS, padraoId: null } }, { tipo: "hidratar-contas", contas: CONTAS, detalhes: null });
     const pendentes: (() => void)[] = [];
     const chamadas: string[] = [];
@@ -313,9 +358,9 @@ describe("controlador da lista (ADR-102)", () => {
       contas: () => estado.contasIa,
       trocarContas: (contas) => { estado = reduzir(estado, { tipo: "trocar-contas", contas }); },
       maquinas: () => estado.maquinas?.maquinas ?? [],
-      detalhes: () => estado.detalhesContas,
+      detalhes: () => (noMac ? { maquinaId: MAC, contas: [] } : estado.detalhesContas),
       invalidar: () => chamadas.push("invalidar"),
-      entrarNoMac: async () => true,
+      entrarNoMac: noMac ?? (async () => true),
       avisarTermos: async (ia) => { chamadas.push(`termos:${ia}`); return termos.aceita; },
       cifrar: async (chave, codigo) => ({ chave, iv: "aXY=", dados: btoa(codigo) }),
       agendar: (fn) => { pendentes.push(fn); },
@@ -344,6 +389,16 @@ describe("controlador da lista (ADR-102)", () => {
     expect(m.chamadas).toContain("codigo");
     const depois = m.estado.contasUi.logins[0]!;
     expect(depois.onde === "vm" && depois.login.codigoEnviado).toBe(true);
+  });
+
+  it("NOD-8 (regressão, crítico): no Mac, a instalação que falhou não abre o cartão do login; a nota mostra o erro", async () => {
+    const m = montar({}, { aceita: true }, async () => ({ erro: "Não deu para instalar: sem conexão com a internet." }));
+    await m.c.novaNaMaquina("codex-cli", MAC);
+    expect(m.estado.contasUi.logins).toEqual([]);
+    expect(m.estado.contasUi.nota).toBe("Não deu para instalar: sem conexão com a internet.");
+    const ok = montar({}, { aceita: true }, async () => true);
+    await ok.c.novaNaMaquina("codex-cli", MAC);
+    expect(ok.estado.contasUi.logins.map((l) => l.onde)).toEqual(["mac"]);
   });
 
   it("sair e remover passam pela confirmação", async () => {
@@ -390,7 +445,7 @@ describe("controlador da lista (ADR-102)", () => {
     await Promise.all([primeira, duplicada]);
     expect(m.estado.contasUi.confirmar).toMatchObject({ frentes: [frente] });
 
-    const timeout = montar({ frentesAtivas: async (_id, _maquina, signal) => new Promise((_r, rejeitar) => signal?.addEventListener("abort", () => rejeitar(signal.reason), { once: true })) }, { aceita: true }, 1);
+    const timeout = montar({ frentesAtivas: async (_id, _maquina, signal) => new Promise((_r, rejeitar) => signal?.addEventListener("abort", () => rejeitar(signal.reason), { once: true })) }, { aceita: true }, undefined, 1);
     await timeout.c.pedirRemocao(LEAPY.id);
     expect(timeout.estado.contasUi.confirmar).toEqual({ tipo: "remover", contaId: LEAPY.id, frentes: null });
   });

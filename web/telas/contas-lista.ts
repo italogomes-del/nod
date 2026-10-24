@@ -4,6 +4,7 @@ import type { CausaFalhaLogin, ResultadoColarCodigo } from "../../src/contracts/
 import type { MaquinaDto } from "../../src/contracts/maquina.ts";
 import { ICONE } from "../lib/icones.ts";
 import { esc } from "../lib/render.ts";
+import { VIVO } from "../lib/copiar.ts";
 import { logoDaIa, PROVEDOR } from "./cartao-ia.ts";
 import { planoNaTela } from "./contas-ia.ts";
 import { quandoNaTela, usoDaConta } from "./uso-da-conta.ts";
@@ -135,7 +136,7 @@ export const contaDoLogin = (l: LoginNaTela): string | null => (l.onde === "vm" 
 export const idDoLogin = (l: LoginNaTela): string => (l.onde === "vm" ? l.login.id : l.id);
 
 /** Revisão do PR #306: os códigos que o motor manda de verdade (motor/contas.ts, CausaFalhaLogin, ResultadoColarCodigo). */
-const ERROS_LOGIN: Partial<Record<CausaFalhaLogin | Exclude<ResultadoColarCodigo, { ok: true }>["motivo"] | "tempo_esgotado" | "codigo_ilegivel" | "contas_demais", string>> = {
+const ERROS_LOGIN: Partial<Record<CausaFalhaLogin | Exclude<ResultadoColarCodigo, { ok: true }>["motivo"] | "tempo_esgotado" | "codigo_ilegivel" | "contas_demais" | "preparo_falhou", string>> = {
   tempo_esgotado: "O login demorou demais e foi cancelado. Tente de novo.",
   codigo_ilegivel: "A máquina não conseguiu ler o código. Gere outro na página e cole de novo.",
   contas_demais: "Essa máquina já tem contas demais dessa IA. Saia de uma antes.",
@@ -148,6 +149,8 @@ const ERROS_LOGIN: Partial<Record<CausaFalhaLogin | Exclude<ResultadoColarCodigo
   config_invalida: "A configuração da IA nessa máquina está com problema. Rode a instalação do motor de novo.",
   sem_login_aberto: "O login dessa máquina já tinha terminado. Tente de novo.",
   ja_enviado: "O código já foi enviado. Espere a máquina conferir.",
+  // NOD-8: o passo 1 (instalar ou atualizar a IA antes do login) não terminou; o motivo entra com a NOD-9 (passo 9).
+  preparo_falhou: "Não deu para preparar a IA nessa máquina. Tente de novo.",
 };
 const erroDoLogin = (e: string | null): string => (e ? (ERROS_LOGIN as Record<string, string | undefined>)[e] : undefined) ?? "O login não terminou. Tente de novo.";
 /**
@@ -175,13 +178,14 @@ function blocoDoLogin(l: LoginNaTela, x: ContextoContas, conta: ContaIa | null):
   const empresa = PROVEDOR[g.ia].empresa;
   const cancelar = `<button type="button" class="ob-link" data-act="cl-login-cancelar" data-login="${id}">Cancelar</button>`;
   if (g.fase === "pronto") {
+    const pronto = g.preparo ? `✓ ${PROVEDOR[g.ia].nome} pronto na ${nome}${versaoNova(g, m) ? ` · ${PROVEDOR[g.ia].cli} ${versaoNova(g, m)}` : ""}` : "✓ Entrou";
     const outra = g.contaId && g.contaFinalId && g.contaFinalId !== g.contaId;
     // QA do PR #306 (ISSUE-003): a "conta nova" era uma conta que já estava na lista — a tela diz qual, em vez de só sumir.
     const jaNaLista = !g.contaId && g.contaFinalId ? x.contas.contas.find((c) => c.id === g.contaFinalId) : undefined;
     const aviso = outra
       ? `<p class="cl-aviso">Você entrou com outra conta, não a ${esc(conta ? nomeDaContaNaTela(conta) : "pedida")}. Ela entrou na lista como uma conta nova.</p>`
       : jaNaLista ? `<p class="cl-aviso">Essa conta já estava na lista: <b>${esc(nomeDaContaNaTela(jaNaLista))}</b>. A ${esc(nome)} ficou com ela. <button type="button" class="ob-link" data-act="cl-login-fechar" data-login="${id}">Fechar</button></p>` : "";
-    return `<div class="cl-login ok" data-login="${id}">${cab(`<span class="cl-ok">✓ Entrou</span>`)}${aviso}</div>`;
+    return `<div class="cl-login ok" data-login="${id}">${cab(`<span class="cl-ok">${esc(pronto)}</span>`)}${aviso}</div>`;
   }
   if (g.fase === "falhou" || g.fase === "cancelado") {
     // NOD-9 PR4: com a IA abaixo do piso, o "Atualizar" pede à máquina que atualize (POST .../ias/:ia/atualizar).
@@ -193,13 +197,14 @@ function blocoDoLogin(l: LoginNaTela, x: ContextoContas, conta: ContaIa | null):
     const nota = antiga && l.erroEnvio ? `<p class="mudo">${esc(l.erroEnvio)}</p>` : "";
     return `<div class="cl-login erro" data-login="${id}" role="alert">${cab("")}<p class="cl-erro">${esc(g.fase === "cancelado" ? "Login cancelado." : antiga ? erroDeCliAntigo(g.ia, podeAtualizar) : erroDoLogin(g.erro))}</p>${nota}<div class="cl-login-acoes">${tentar}</div></div>`;
   }
+  if (g.fase === "preparando") return blocoDoPreparo(g, nome, id, cab(cancelar));
   if (g.fase === "pedido" || g.fase === "abrindo" || !g.url) {
     return `<div class="cl-login" data-login="${id}" role="status">${cab(cancelar)}<p class="cl-passo-txt"><span class="ob-gira" aria-hidden="true"></span>Abrindo o login na ${esc(nome)}…${m && !m.conectada ? " A máquina está sem contato; o login começa quando ela voltar." : ""}</p></div>`;
   }
   const conferindo = g.fase === "conferindo" || g.codigoEnviado;
   const passo1 = `<li class="feito"><span class="cl-n" aria-hidden="true">✓</span><div><b>Entre na página da ${esc(empresa)} com ${conta ? `a conta ${esc(conta.apelido)}` : "a conta que quer usar"}</b><a class="cl-link" href="${esc(g.url)}" target="_blank" rel="noopener noreferrer">Abrir a página da ${esc(empresa)} ↗</a></div></li>`;
   const passo2 = g.codigoDispositivo
-    ? `<li><span class="cl-n" aria-hidden="true">2</span><div><b>Digite este código na página</b><div class="ia-codigo"><code>${esc(g.codigoDispositivo)}</code><button type="button" class="ob-link" data-act="copiar-texto" data-texto="${esc(g.codigoDispositivo)}">Copiar</button></div><small class="mudo">A ${esc(nome)} percebe sozinha quando terminar.</small></div></li>`
+    ? `<li><span class="cl-n" aria-hidden="true">2</span><div><b>Digite este código na página</b><div class="ia-codigo"><code>${esc(g.codigoDispositivo)}</code><button type="button" class="ob-link" data-act="copiar-texto" data-texto="${esc(g.codigoDispositivo)}" ${VIVO}>Copiar</button></div><small class="mudo">A ${esc(nome)} percebe sozinha quando terminar.</small></div></li>`
     : g.pedeCodigo
       ? `<li><span class="cl-n" aria-hidden="true">2</span><div><b>Cole aqui o código que a página mostrar</b>${conferindo
         ? `<p class="cl-passo-txt"><span class="ob-gira" aria-hidden="true"></span>Conferindo na ${esc(nome)}…</p>`
@@ -209,10 +214,29 @@ function blocoDoLogin(l: LoginNaTela, x: ContextoContas, conta: ContaIa | null):
   // ADR-102 (2A): o caminho do terminal fica escondido, uma linha só, para quem prefere.
   const terminal = g.ia === "claude-cli"
     ? x.ui.terminal === g.id
-      ? `<p class="cl-terminal">No terminal da ${esc(nome)}: <code>nod-motor entrar claude</code> <button type="button" class="ob-link" data-act="copiar-texto" data-texto="nod-motor entrar claude">Copiar</button></p>`
+      ? `<p class="cl-terminal">No terminal da ${esc(nome)}: <code>nod-motor entrar claude</code> <button type="button" class="ob-link" data-act="copiar-texto" data-texto="nod-motor entrar claude" ${VIVO}>Copiar</button></p>`
       : `<button type="button" class="cl-terminal-link" data-act="cl-terminal" data-login="${id}">Prefere o terminal?</button>`
     : "";
   return `<div class="cl-login" data-login="${id}">${cab(cancelar)}<ol class="cl-passos">${passo1}${passo2}</ol>${terminal}</div>`;
+}
+
+/** A versão que a máquina ficou depois do passo 1: a do preparo ou, sem ela, a que a máquina anunciou (`iasDetalhe`). */
+const versaoNova = (g: LoginNaMaquina, m: MaquinaDto | undefined): string | null => g.preparo?.depois ?? m?.iasDetalhe?.[g.ia]?.versao ?? null;
+
+/**
+ * NOD-8 (definido em 2026-10-22, protótipo v2.2): o passo 1 do login, quando a máquina instala ou atualiza a IA antes de
+ * abrir a página (a fase `preparando`). O 2 espera e começa sozinho; o Cancelar para o preparo.
+ */
+function blocoDoPreparo(g: LoginNaMaquina, nome: string, id: string, cab: string): string {
+  const { nome: ia, cli, empresa } = PROVEDOR[g.ia];
+  const p = g.preparo;
+  const atualizar = p?.acao === "atualizar";
+  const titulo = atualizar ? `Atualizar o ${cli} na ${nome}` : `Preparar o ${ia} na ${nome}`;
+  const versoes = atualizar && p.antes && p.depois ? `${p.antes} → ${p.depois}` : null;
+  const linha = p?.linha || versoes || (p ? (atualizar ? `Atualizando o ${cli}` : `Instalando o ${cli}`) : "Preparando…");
+  const passo1 = `<li><span class="cl-n" aria-hidden="true">1</span><div><b>${esc(titulo)}</b><p class="cl-passo-txt"><span class="ob-gira" aria-hidden="true"></span>${esc(p ? `${linha} · leva até 2 minutos` : linha)}</p></div></li>`;
+  const passo2 = `<li class="mudo"><span class="cl-n" aria-hidden="true">2</span><div><b>Entrar na conta da ${esc(empresa)}</b><small class="mudo">Começa sozinho quando a ${atualizar ? "atualização" : "instalação"} terminar.</small></div></li>`;
+  return `<div class="cl-login" data-login="${id}" role="status">${cab}<ol class="cl-passos">${passo1}${passo2}</ol></div>`;
 }
 
 function menu(c: ContaIa, x: ContextoContas): string {
@@ -327,7 +351,7 @@ function formNova(x: ContextoContas): string {
   const maqs = x.maquinas.filter((m) => m.conectada).map((m) => {
     const mac = m.plataforma === "darwin";
     const pode = !mac || ehEsteMac(m, x);
-    const dica = mac ? (pode ? "abre o navegador" : "abra o app do nod nesse Mac") : "o login aparece aqui na tela";
+    const dica = mac ? (pode ? "abre o navegador" : "abra o app do nod nesse Mac") : preparoNaNova(m, n.ia) ?? "o login aparece aqui na tela";
     return `<label class="cl-maq${pode ? "" : " mudo"}"><input type="checkbox" value="${esc(m.id)}" data-cl-nova-maq${n.maquinas.includes(m.id) && pode ? " checked" : ""}${pode ? "" : " disabled"}>${mac ? ICONE.laptop : ICONE.servidor}<span><b>${esc(mac && pode ? "Este Mac" : m.nome)}</b><small>${esc(dica)}</small></span></label>`;
   }).join("");
   const marcadas = n.maquinas.filter((id) => x.maquinas.some((m) => m.id === id && m.conectada)).length;
@@ -340,6 +364,17 @@ function formNova(x: ContextoContas): string {
       <div class="cl-maqs-form">${maqs}</div>
       <div class="cl-nova-acoes"><button type="button" class="bt" data-act="cl-nova-fechar">Cancelar</button><button type="submit" class="bt pri"${marcadas === 0 ? " disabled" : ""}>${marcadas > 1 ? `Entrar nas ${marcadas} máquinas` : "Entrar"}</button></div>
     </form>`;
+}
+
+/**
+ * NOD-8 (definido em 2026-10-22): na VM sem a IA (ou abaixo do piso), a Nova conta avisa que o nod instala (ou atualiza)
+ * antes do login, lendo o que a máquina anunciou (`MaquinaDto.ias`/`iasDetalhe`). null = a IA já está lá (ou não se sabe).
+ */
+function preparoNaNova(m: MaquinaDto, ia: IaComConta): string | null {
+  if (m.ias[ia] !== "ausente") return null;
+  const causa = m.iasDetalhe?.[ia]?.causa;
+  if (causa === "sonda_lenta" || causa === "sem_node" || causa === "config_invalida") return null;
+  return `o nod ${causa === "cli_antigo" ? "atualiza" : "instala"} o ${PROVEDOR[ia].nome} nela e o login aparece aqui`;
 }
 
 /** "Adicionar conta" sem nenhuma máquina que receba o login: diz por que e leva a conectar uma. */

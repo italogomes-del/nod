@@ -1,5 +1,6 @@
 import type { CotaDaContaDto } from "./cota-da-conta.ts";
 import type { EpochMs } from "./ids.ts";
+import type { PreparoDoLogin } from "./preparo-do-login.ts";
 
 /**
  * As contas de IA da pessoa em todas as máquinas (definido em 2026-10-13, ADR-102). O servidor guarda a lista (apelido,
@@ -87,7 +88,7 @@ export type ContaDoPlano = { id: string; impressao: string; apelido: string };
 
 // ── Login de uma conta numa máquina pela tela (ADR-102 item 3) ──────────────────────────────────────────────────────
 
-export type FaseLogin = "pedido" | "abrindo" | "aguardando_pessoa" | "conferindo" | "pronto" | "falhou" | "cancelado";
+export type FaseLogin = "pedido" | "preparando" | "abrindo" | "aguardando_pessoa" | "conferindo" | "pronto" | "falhou" | "cancelado";
 export const FASES_LOGIN_FINAIS: readonly FaseLogin[] = ["pronto", "falhou", "cancelado"];
 
 export type LoginNaMaquina = {
@@ -115,6 +116,7 @@ export type LoginNaMaquina = {
   erro: string | null;
   /** A conta que entrou (pronto). Diferente de `contaId` = a pessoa entrou com outra conta (a tela avisa). */
   contaFinalId: string | null;
+  preparo?: PreparoDoLogin | null; // NOD-8: o passo 1 (null = sem passo 1; ausente = servidor de antes)
   criadoEm: EpochMs;
   atualizadoEm: EpochMs;
 };
@@ -153,8 +155,8 @@ export type ProgressoDoLogin = {
   pedeCodigo?: boolean;
   chavePublica?: string;
   erro?: string;
-  /** pronto: a impressão da conta que entrou (o anúncio seguinte a registra, com o plano). */
-  impressao?: string;
+  impressao?: string; // pronto: a impressão da conta que entrou (o anúncio seguinte a registra, com o plano)
+  preparo?: PreparoDoLogin; // NOD-8: o passo 1, com `preparando` antes de `abrindo` (src/contracts/preparo-do-login.ts)
 };
 
 // ── O limite de uma conta na conversa (payload `limite_do_plano.contas`) ─────────────────────────────────────────────

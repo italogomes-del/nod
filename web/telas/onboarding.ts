@@ -1,6 +1,7 @@
 import type { CamposEntrevista, EstadoOnboarding, IaNoMac, ModeloDeBot, TamanhoTime } from "../../src/contracts/onboarding.ts";
 import type { IaDesktop, ResultadoIaDesktop, TesteDeIa } from "../../src/contracts/desktop.ts";
 import { botao, esc, iconeAgente } from "../lib/render.ts";
+import { VIVO } from "../lib/copiar.ts";
 import { COMANDO_ATUALIZAR_IA, desatualizado, versaoLegivel } from "./ia-fora.ts";
 import { LOGOS_IA } from "./onboarding-logos.ts";
 import { IAS_MAC, logoDaIa, renderCartaoIa, vistaDaIa, type ContextoCartao, type UiIas } from "./cartao-ia.ts";
@@ -448,7 +449,7 @@ function htmlProva(nome: string | null, nomeIa: string, resposta: string | null)
  */
 function htmlComandoDeAtualizar(ia: IaDesktop, comando: string): string {
   const cli = NOME_CLI[ia];
-  return `<div class="ob-ia-explica ob-ia-atualizar"><p>“Atualizar” abre a página oficial do ${esc(cli)} no navegador. No Terminal deste Mac, rode:</p><div class="ob-comando"><code>${esc(comando)}</code><button type="button" class="ob-link" data-act="onboarding-ia-copiar" data-texto="${esc(comando)}">Copiar</button></div><p>O nod percebe sozinho quando a versão nova estiver instalada.</p></div>`;
+  return `<div class="ob-ia-explica ob-ia-atualizar"><p>“Atualizar” abre a página oficial do ${esc(cli)} no navegador. No Terminal deste Mac, rode:</p><div class="ob-comando"><code>${esc(comando)}</code><button type="button" class="ob-link" data-act="onboarding-ia-copiar" data-texto="${esc(comando)}" ${VIVO}>Copiar</button></div><p>O nod percebe sozinho quando a versão nova estiver instalada.</p></div>`;
 }
 
 function htmlCardIa(p: ProvedorIa & { ia: IaDesktop }, s: EstadoCardIa, nome: string | null, opcoes: { menor?: boolean } = {}): string {
@@ -470,7 +471,8 @@ function htmlCardIa(p: ProvedorIa & { ia: IaDesktop }, s: EstadoCardIa, nome: st
 const comIa = (p: ProvedorIa): p is ProvedorIa & { ia: IaDesktop } => p.ia !== null;
 const cabecaIa = (titulo: string, texto: string): string => `<div class="ob-cabeca"><h1 tabindex="-1">${esc(titulo)}</h1><p>${esc(texto)}</p></div>`;
 const SEM_SENHA = "O nod nunca vê sua senha nem sua chave.";
-const DEPOIS_EM_AJUSTES = "Dá para trocar ou adicionar outra IA depois, em Ajustes.";
+/** NOD-8 (definido em 2026-10-22): aponta para onde a IA se troca de fato; "Ajustes" não existe no menu. */
+const DEPOIS_EM_AJUSTES = "Dá para trocar ou adicionar outra IA depois, em Seu espaço › Provedores de IA.";
 
 /** "A IA dos seus bots" enquanto o teste roda e "Falta conectar uma IA" quando nenhuma respondeu. */
 function htmlListaDeIas(e: TelaExecutor, t: TesteNaTela, tela: "testando" | "sem_ia"): string {
@@ -548,7 +550,7 @@ export function htmlExecutor(e: TelaExecutor): string {
     }
     return htmlCardIa(c, estadoDoCardIa(c.ia, e.dados.executor.ias, e.iaEntrando), null);
   }).join("");
-  const nota = e.notaIa ?? "Dá para trocar ou adicionar outra depois, em Ajustes.";
+  const nota = e.notaIa ?? "Dá para trocar ou adicionar outra depois, em Seu espaço › Provedores de IA.";
   return `<section class="ob-tela ob-executor" aria-label="A IA dos seus bots">${cabeca}<div class="ob-cards-ia">${cards}</div><p class="ob-nota" role="status">${esc(nota)}</p></section>`;
 }
 

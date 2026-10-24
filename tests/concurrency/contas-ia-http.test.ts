@@ -108,6 +108,18 @@ describeIntegracao("contas de IA pela ponte e pela tela (ADR-102, HTTP real)", (
     expect((await pedir("contas/progresso", { loginId: login.id, fase: "falhou", erro: "codigo_invalido" })).status).toBe(200);
   });
 
+  it("NOD-8: o passo 1 (`preparando` + preparo) vai da máquina ao GET da tela; campo estranho = 400; a falha leva preparo_falhou", async () => {
+    const r = await srv.chamar("POST", `maquinas/${machineId}/logins`, { ia: "codex-cli", apelido: "Trabalho" });
+    expect(r.status).toBe(201);
+    const login = (await r.json()) as LoginNaMaquina;
+    expect(login.preparo).toBeNull();
+    expect((await pedir("contas/progresso", { loginId: login.id, fase: "preparando", preparo: { acao: "instalar", sudo: true } })).status).toBe(400);
+    expect((await pedir("contas/progresso", { loginId: login.id, fase: "preparando", preparo: { acao: "instalar", linha: "Baixando o Codex" } })).status).toBe(200);
+    expect(await srv.json<LoginNaMaquina>("GET", `maquinas/${machineId}/logins/${login.id}`)).toMatchObject({ fase: "preparando", preparo: { acao: "instalar", linha: "Baixando o Codex" } });
+    expect((await pedir("contas/progresso", { loginId: login.id, fase: "falhou", erro: "preparo_falhou" })).status).toBe(200);
+    expect(await srv.json<LoginNaMaquina>("GET", `maquinas/${machineId}/logins/${login.id}`)).toMatchObject({ fase: "falhou", erro: "preparo_falhou", preparo: { acao: "instalar" } });
+  });
+
   it("NOD-9: atualizar a IA pela tela — a máquina no ar recebe o pedido uma vez; sem contato é 409; outra pessoa não acha", async () => {
     expect((await pedir("contas")).status).toBe(200);
     expect((await srv.chamar("POST", `maquinas/${machineId}/ias/gemini/atualizar`)).status).toBe(400);

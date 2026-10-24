@@ -80,6 +80,26 @@ describe("logins na máquina", () => {
     expect(logins.ver(MARLON, l.id)).toMatchObject({ fase: "pronto", contaFinalId: "conta-nova", codigoDispositivo: "QX7R-2MLA" });
   });
 
+  it("NOD-8: `preparando` antes de `abrindo` guarda o passo 1; o preparo fica no concluído e a falha leva preparo_falhou", () => {
+    const { logins } = montar();
+    const l = logins.pedir({ escopo: MARLON, maquinaId: VM, ia: "codex-cli", contaId: null, impressao: null, apelido: "Pessoal" })!;
+    expect(l.preparo).toBeNull();
+    expect(logins.progresso(MARLON, VM, { loginId: l.id, fase: "preparando", preparo: { acao: "instalar", linha: "Baixando o Codex" } }).aceito).toBe(true);
+    expect(logins.ver(MARLON, l.id)).toMatchObject({ fase: "preparando", preparo: { acao: "instalar", linha: "Baixando o Codex" } });
+    // O fim do preparo traz a versão que ficou; o relato seguinte sem preparo não o apaga.
+    expect(logins.progresso(MARLON, VM, { loginId: l.id, fase: "abrindo", preparo: { acao: "instalar", depois: "0.162.0" } }).aceito).toBe(true);
+    expect(logins.progresso(MARLON, VM, { loginId: l.id, fase: "aguardando_pessoa", url: "https://auth.openai.com/codex/device", codigoDispositivo: "QX7R-2MLA" }).aceito).toBe(true);
+    expect(logins.progresso(MARLON, VM, { loginId: l.id, fase: "pronto", impressao: IMP }).aceito).toBe(true);
+    expect(logins.ver(MARLON, l.id)).toMatchObject({ fase: "pronto", preparo: { acao: "instalar", depois: "0.162.0" } });
+
+    const f = logins.pedir({ escopo: MARLON, maquinaId: VM, ia: "claude-cli", contaId: null, impressao: null, apelido: null })!;
+    expect(logins.progresso(MARLON, VM, { loginId: f.id, fase: "preparando", preparo: { acao: "atualizar", antes: "2.1.280" } }).aceito).toBe(true);
+    expect(logins.progresso(MARLON, VM, { loginId: f.id, fase: "falhou", erro: "preparo_falhou" }).aceito).toBe(true);
+    expect(logins.ver(MARLON, f.id)).toMatchObject({ fase: "falhou", erro: "preparo_falhou", preparo: { acao: "atualizar", antes: "2.1.280" } });
+    // A máquina não puxa mais o login que falhou no preparo.
+    expect(logins.pendentes(MARLON, VM).map((p) => p.id)).not.toContain(f.id);
+  });
+
   it("a desconexão pedida aparece até a máquina confirmar e vence em 10 min", () => {
     const { logins, passar } = montar();
     logins.pedirDesconexao(MARLON, VM);

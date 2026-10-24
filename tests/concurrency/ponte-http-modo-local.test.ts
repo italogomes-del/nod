@@ -43,10 +43,14 @@ describeIntegracao("ponte HTTP com o servidor no Mac (modo local) e uma VM", () 
   });
 
   it("a chave da máquina vale no modo local: a VM conecta e aparece em Máquinas, com o endereço da API do Mac", async () => {
-    expect((await pedir("conectar", { nome: "vm-teste", plataforma: "linux", versaoContrato: 1, inventario: pronto, harnesses: { "claude-cli": pronto } })).status).toBe(200);
+    // NOD-8: o Codex abaixo do piso vai com a causa e as versões em `iasDetalhe` (a "Nova conta" diz "atualiza para X").
+    const codexAntigo = { estado: "ausente", motivo: "do Mac", causa: "cli_antigo", versao: "0.158.9", minima: "0.159.0", em: 0 };
+    expect((await pedir("conectar", { nome: "vm-teste", plataforma: "linux", versaoContrato: 1, inventario: pronto, harnesses: { "claude-cli": pronto, "codex-cli": codexAntigo } })).status).toBe(200);
     const m = await srv.json<MaquinasDto>("GET", "maquinas");
     expect(m.servidorNoMac?.api).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
-    expect(m.maquinas.find((x) => x.id === vmId)).toMatchObject({ conectada: true, plataforma: "linux", ias: { "claude-cli": "pronto" } });
+    const vm = m.maquinas.find((x) => x.id === vmId);
+    expect(vm).toMatchObject({ conectada: true, plataforma: "linux", ias: { "claude-cli": "pronto", "codex-cli": "ausente" } });
+    expect(vm?.iasDetalhe).toEqual({ "claude-cli": { versao: "fake-sem-custo" }, "codex-cli": { causa: "cli_antigo", versao: "0.158.9", minima: "0.159.0" } });
     // O seletor de IA continua sendo o deste Mac (no compartilhado ele vira o das máquinas).
     expect((await srv.chamar("POST", "executor", { id: "catcher" })).status).toBe(200);
   });

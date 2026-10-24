@@ -1,5 +1,6 @@
 import type { IaDesktop, NodDesktop, TesteDeIa } from "../../src/contracts/desktop.ts";
 import type { EstadoIa } from "../../src/contracts/estado-ia.ts";
+import { COPIADO_MS } from "./copiar.ts";
 import { NOTA_CONTA_FORA_DO_APP, notaDaTroca, PROVEDOR, type TrocaDeConta, type UiIas } from "../telas/cartao-ia.ts";
 
 /**
@@ -33,6 +34,9 @@ export type DepsIasDoMac = {
   aoComecarTroca?: (ia: IaDesktop) => void;
   aoFimDaTroca?: (ia: IaDesktop, trocou: boolean) => void;
 };
+
+/** NOD-8: o que `instalar` e `entrar` devolvem: o login começou, ou o erro (o mesmo da nota do cartão). */
+export type ResultadoNoMac = { ok: true } | { ok: false; erro: string };
 
 export const NOTA_FORA_DO_APP = { entrar: "Para entrar, abra o app do nod no seu Mac.", instalar: "Para instalar, abra o app do nod no seu Mac." } as const;
 
@@ -116,8 +120,12 @@ export function criarIasDoMac(d: DepsIasDoMac) {
     if (antes?.estado !== e.estado) d.aoMudarNoMac();
   }
 
-  /** "Instalar e entrar" (e "Atualizar"): instala na pasta do nod e, se terminou bem, abre o login na sequência. */
-  async function instalar(ia: IaDesktop): Promise<void> {
+  /**
+   * "Instalar e entrar" (e "Atualizar"): instala na pasta do nod e, se terminou bem, abre o login na sequência.
+   * NOD-8 (definido em 2026-10-22): devolve se o login começou; a instalação que falhou para no passo 1 (sem `entrar`) e
+   * devolve o erro, para quem chamou (o "Entrar no Mac" da lista de contas) mostrar em vez de seguir.
+   */
+  async function instalar(ia: IaDesktop): Promise<ResultadoNoMac> {
     const mac = d.mac();
     const { cli } = PROVEDOR[ia];
     if (mac?.ias) {
@@ -125,19 +133,27 @@ export function criarIasDoMac(d: DepsIasDoMac) {
       try {
         const e = await mac.ias.instalar(ia);
         guardarEstado(e);
-        if (e.estado === "falta_entrar" && e.instalacao?.fase === "sucesso") await entrar(ia, true);
-        else if (e.estado === "pronta" && d.testeAqui() && mac.iaTestar) await testar(ia);
+        if (e.estado === "falta_entrar" && e.instalacao?.fase === "sucesso") return await entrar(ia, true);
+        if (e.estado === "pronta") {
+          if (d.testeAqui() && mac.iaTestar) await testar(ia);
+          return { ok: true };
+        }
+        return { ok: false, erro: e.instalacao?.mensagem || `Não deu para instalar o ${cli}. Tente de novo.` };
       } catch {
-        d.mudar(comNota(ia, `Não deu para instalar o ${cli} agora. Tente de novo.`));
+        return falhou(ia, `Não deu para instalar o ${cli} agora. Tente de novo.`);
       }
-      return;
     }
     if (mac?.iaInstalar) {
       const r = await mac.iaInstalar(ia).catch(() => ({ ok: false as const, motivo: "falhou" as const }));
-      d.mudar(comNota(ia, r.ok ? `Abrimos a página do ${cli}. Instale e volte: o nod percebe sozinho quando ele aparecer neste Mac.` : `Não deu para abrir a página do ${cli}. Atualize o app do nod para instalar por aqui.`));
-      return;
+      return falhou(ia, r.ok ? `Abrimos a página do ${cli}. Instale e volte: o nod percebe sozinho quando ele aparecer neste Mac.` : `Não deu para abrir a página do ${cli}. Atualize o app do nod para instalar por aqui.`);
     }
-    d.mudar(comNota(ia, NOTA_FORA_DO_APP.instalar));
+    return falhou(ia, NOTA_FORA_DO_APP.instalar);
+  }
+
+  /** A nota embaixo do cartão, devolvida também como o erro de quem chamou. */
+  function falhou(ia: IaDesktop, nota: string): ResultadoNoMac {
+    d.mudar(comNota(ia, nota));
+    return { ok: false, erro: nota };
   }
 
   /**
@@ -157,7 +173,7 @@ export function criarIasDoMac(d: DepsIasDoMac) {
   }
 
   /** "Entrar" (e "Entrar com outra conta"): abre o login do CLI no app; o link e o código chegam por `aoMudar`. */
-  async function entrar(ia: IaDesktop, depoisDeInstalar = false, troca = false): Promise<void> {
+  async function entrar(ia: IaDesktop, depoisDeInstalar = false, troca = false): Promise<ResultadoNoMac> {
     const mac = d.mac();
     const { nome, cli } = PROVEDOR[ia];
     if (mac?.ias) {
@@ -167,18 +183,19 @@ export function criarIasDoMac(d: DepsIasDoMac) {
         const e = await mac.ias.entrar(ia);
         guardarEstado(e);
         conferirTroca(e);
+        return { ok: true };
       } catch {
-        d.mudar(comNota(ia, `Não deu para abrir o login do ${nome}. Tente de novo.`));
+        const r = falhou(ia, `Não deu para abrir o login do ${nome}. Tente de novo.`);
         if (troca) { d.mudar({ ...semFluxo(ia), ...comTroca(ia, null) }); d.aoFimDaTroca?.(ia, false); }
+        return r;
       }
-      return;
     }
     if (mac?.iaEntrar) {
       const r = await mac.iaEntrar(ia).catch(() => ({ ok: false as const, motivo: "falhou" as const }));
-      d.mudar(comNota(ia, r.ok ? `Abrimos o navegador. Entre no ${nome} e volte: o nod percebe sozinho.` : r.motivo === "nao_instalado" ? `O ${cli} não está neste Mac. Atualize o app do nod para instalar por aqui.` : `Não deu para abrir o login do ${nome}. Tente de novo.`));
-      return;
+      if (r.ok) { d.mudar(comNota(ia, `Abrimos o navegador. Entre no ${nome} e volte: o nod percebe sozinho.`)); return { ok: true }; }
+      return falhou(ia, r.motivo === "nao_instalado" ? `O ${cli} não está neste Mac. Atualize o app do nod para instalar por aqui.` : `Não deu para abrir o login do ${nome}. Tente de novo.`);
     }
-    d.mudar(comNota(ia, NOTA_FORA_DO_APP.entrar));
+    return falhou(ia, NOTA_FORA_DO_APP.entrar);
   }
 
   /**
@@ -234,13 +251,16 @@ export function criarIasDoMac(d: DepsIasDoMac) {
     d.mudar({ codigo: codigos, ...comNota(ia, r.ok ? null : NOTA_DO_CODIGO[r.motivo]) });
   }
 
-  async function copiarCodigo(ia: IaDesktop, codigo: string): Promise<void> {
+  /** Devolve se copiou: o cartão é renderizado de novo, então quem chama anuncia o resultado numa região viva estável. */
+  async function copiarCodigo(ia: IaDesktop, codigo: string): Promise<boolean> {
     try {
       await d.copiar(codigo);
       d.mudar({ copiado: ia });
-      d.agendar(() => { if (d.ui().copiado === ia) d.mudar({ copiado: null }); }, 1_500);
+      d.agendar(() => { if (d.ui().copiado === ia) d.mudar({ copiado: null }); }, COPIADO_MS);
+      return true;
     } catch {
       d.mudar(comNota(ia, "Não deu para copiar. Digite o código na página."));
+      return false;
     }
   }
 

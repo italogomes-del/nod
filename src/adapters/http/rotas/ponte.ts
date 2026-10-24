@@ -2,6 +2,7 @@ import { HARNESSES } from "../../../contracts/harness.ts";
 import type { CapacidadesHarness, IdHarness } from "../../../contracts/harness.ts";
 import { setTimeout as esperar } from "node:timers/promises";
 import type { Inventario } from "../../../contracts/inventario.ts";
+import type { DetalheDaIaNaMaquina } from "../../../contracts/maquina.ts";
 import type { PlanoTurno } from "../../../contracts/plano-turno.ts";
 import type { LeituraMemoria } from "../../../contracts/trabalho.ts";
 import { PAPEIS_MAQUINA, PLATAFORMAS_MAQUINA, type AnuncioMaquina, type PapelMaquina, type PlataformaMaquina, type VigiaVivo } from "../../../contracts/ponte.ts";
@@ -55,7 +56,16 @@ function lerAnuncio(b: Record<string, unknown>, agora: number): LeituraAnuncio {
 }
 
 /** ADR-090: uma máquina conectada da pessoa, como a tela "Máquinas" a mostra (sem credencial nem inventário bruto). */
-export type MaquinaConectada = { machineId: string; nome: string; plataforma: PlataformaMaquina; ias: Partial<Record<IdHarness, Inventario["estado"]>>; gh: boolean; /** NOD-9: atende o "Atualizar agora" remoto. */ atualizaIas: boolean };
+export type MaquinaConectada = { machineId: string; nome: string; plataforma: PlataformaMaquina; ias: Partial<Record<IdHarness, Inventario["estado"]>>; iasDetalhe: Partial<Record<IdHarness, DetalheDaIaNaMaquina>>; gh: boolean; /** NOD-9: atende o "Atualizar agora" remoto. */ atualizaIas: boolean };
+
+/** NOD-8: a causa e as versões de uma IA anunciada, sem o motivo (a frase é da tela) nem o instante. */
+function detalheDaIa(inv: Inventario): DetalheDaIaNaMaquina {
+  const d: DetalheDaIaNaMaquina = {};
+  if ("causa" in inv && inv.causa) d.causa = inv.causa;
+  if (inv.versao) d.versao = inv.versao;
+  if ("minima" in inv && inv.minima) d.minima = inv.minima;
+  return d;
+}
 
 /** Um item aprovado que roda no Mac da dona (ADR-048): o que a máquina recebe ao puxar `itens-locais`. */
 export type ItemLocal = { itemId: string; capacidade: string; argumentos: Record<string, unknown> };
@@ -623,8 +633,10 @@ export function criarPonteHttpServidor(d: {
   function maquinasDaPessoa(escopo: Escopo): MaquinaConectada[] {
     return [...conexoes.entries()].flatMap(([id, c]) => {
       if (c.escopo.pessoaId !== escopo.pessoaId || c.escopo.tenantId !== escopo.tenantId || d.agora() - c.ultimo >= 60_000) return [];
-      const ias = Object.fromEntries(Object.entries(harnesses(c.escopo, id)).map(([h, inv]) => [h, inv?.estado])) as MaquinaConectada["ias"];
-      return [{ machineId: id, nome: c.nome, plataforma: c.plataforma, ias, gh: c.gh, atualizaIas: c.anuncio?.atualizaIas === true }];
+      const anunciadas = Object.entries(harnesses(c.escopo, id));
+      const ias = Object.fromEntries(anunciadas.map(([h, inv]) => [h, inv?.estado])) as MaquinaConectada["ias"];
+      const iasDetalhe = Object.fromEntries(anunciadas.flatMap(([h, inv]) => (inv ? [[h, detalheDaIa(inv)]] : []))) as MaquinaConectada["iasDetalhe"];
+      return [{ machineId: id, nome: c.nome, plataforma: c.plataforma, ias, iasDetalhe, gh: c.gh, atualizaIas: c.anuncio?.atualizaIas === true }];
     });
   }
   /** ADR-102: a pessoa renomeou a máquina; a conexão viva passa a usar o nome novo. */

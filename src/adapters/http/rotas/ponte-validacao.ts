@@ -1,6 +1,7 @@
 import { causaDaEntrega } from "../../../domain/stream-json.ts";
 import { apelidoValido, contaNoLimiteValida } from "../../../domain/contas-da-ia.ts";
 import { CONTAS_ANUNCIADAS_MAX, ESTADOS_CONTA_NA_MAQUINA, type ContaAnunciada, type EstadoContaNaMaquina, type ProgressoDoLogin } from "../../../contracts/contas-ia.ts";
+import { ACOES_DO_PREPARO, type PreparoDoLogin } from "../../../contracts/preparo-do-login.ts";
 import { ehIaComConta, IMPRESSAO } from "../../../domain/contas-da-pessoa.ts";
 import { emailDaConta, organizacaoDaConta } from "../../../domain/estado-ia.ts";
 import type { RelatoEspera } from "../../../contracts/espera.ts";
@@ -488,7 +489,7 @@ export function contasAnunciadas(v: unknown, agora: number): ContaAnunciada[] | 
   return saida;
 }
 
-const FASES_DO_PROGRESSO: readonly ProgressoDoLogin["fase"][] = ["abrindo", "aguardando_pessoa", "conferindo", "pronto", "falhou"];
+const FASES_DO_PROGRESSO: readonly ProgressoDoLogin["fase"][] = ["preparando", "abrindo", "aguardando_pessoa", "conferindo", "pronto", "falhou"];
 /** O progresso de um login relatado pela máquina; o conteúdo (link oficial, código, chave) é conferido no serviço. */
 export function progressoDoLogin(v: unknown): ProgressoDoLogin {
   const o = objeto(v);
@@ -500,6 +501,23 @@ export function progressoDoLogin(v: unknown): ProgressoDoLogin {
   if (o.chavePublica !== undefined) { exigir(texto(o.chavePublica, 2_048)); p.chavePublica = o.chavePublica; }
   if (o.erro !== undefined) { exigir(texto(o.erro, 40)); p.erro = o.erro; }
   if (o.impressao !== undefined) { exigir(typeof o.impressao === "string" && IMPRESSAO.test(o.impressao)); p.impressao = o.impressao; }
+  if (o.preparo !== undefined) p.preparo = preparoDoLogin(o.preparo);
+  return p;
+}
+
+/** NOD-8: a versão de um CLI no preparo ("2.1.304", "0.159.0-alpha.2"); nada que vire marcação ou caminho. */
+const VERSAO_DO_PREPARO = /^\d{1,6}(\.\d{1,6}){1,3}([-+][0-9A-Za-z.-]{1,24})?$/;
+/** NOD-8: a etapa do preparo, uma linha curta (sem caracteres de controle). */
+const LINHA_DO_PREPARO = /^[^\p{Cc}]{1,80}$/u;
+const CAMPOS_DO_PREPARO = new Set(["acao", "linha", "antes", "depois"]);
+/** NOD-8 (definido em 2026-10-22): o passo 1 do login. Campo fora da lista ou fora do formato = 400 (o motor repete sem). */
+export function preparoDoLogin(v: unknown): PreparoDoLogin {
+  const o = objeto(v);
+  exigir(Object.keys(o).every((k) => CAMPOS_DO_PREPARO.has(k)) && ACOES_DO_PREPARO.includes(o.acao as PreparoDoLogin["acao"]));
+  const p: PreparoDoLogin = { acao: o.acao as PreparoDoLogin["acao"] };
+  if (o.linha !== undefined) { exigir(typeof o.linha === "string" && LINHA_DO_PREPARO.test(o.linha)); p.linha = o.linha; }
+  if (o.antes !== undefined) { exigir(typeof o.antes === "string" && VERSAO_DO_PREPARO.test(o.antes)); p.antes = o.antes; }
+  if (o.depois !== undefined) { exigir(typeof o.depois === "string" && VERSAO_DO_PREPARO.test(o.depois)); p.depois = o.depois; }
   return p;
 }
 

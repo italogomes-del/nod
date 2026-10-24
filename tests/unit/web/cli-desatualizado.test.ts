@@ -136,6 +136,7 @@ describe("conversa: o bot fixado numa IA que não está pronta", () => {
     const html = renderMensagem(negacao("codex-cli"), com({ claude: PRONTO, codex: ANTIGO }));
     expect(html).toContain("<code>npm install -g @openai/codex@latest</code>");
     expect(html).toContain('data-act="copiar-texto"');
+    expect(html).toMatch(/data-act="copiar-texto"[^>]*aria-live="polite"/); // NOD-8: o "✓ Copiado" é lido.
     expect(html).not.toContain('data-act="ia-atualizar"');
     expect(html).toMatch(/data-act="inteligencia" data-id="gil">Trocar a IA de Gil</);
   });
@@ -173,9 +174,12 @@ describe("conversa: o bot fixado numa IA que não está pronta", () => {
     expect(html).not.toContain('data-act="ia-atualizar"');
   });
 
-  it("a IA do bot já voltou (sonda mais nova que a negação): fica o aviso de sempre ('mande de novo')", () => {
+  it("NOD-8: a IA do bot já voltou (sonda mais nova que a negação): o aviso some e fica a linha de sistema ('mande de novo')", () => {
     const html = renderMensagem(negacao("codex-cli"), com({ claude: PRONTO, codex: { ...PRONTO, em: 1 } }));
-    expect(html).toContain("Nenhum trabalho começou.");
+    expect(html).not.toContain("Nenhum trabalho começou.");
+    expect(html).not.toContain("aviso-estado");
+    expect(html).toContain('class="linha-centro-wrap linha-ia linha-ia-voltou"');
+    expect(html).toContain("O Codex já voltou ·");
     expect(html).toContain("mande a mensagem de novo");
   });
 
@@ -418,7 +422,7 @@ describe("NOD-220: o bot no Automático com o Codex fora nunca ouve 'já voltou'
 
   it("'já voltou' só com a IA QUE NEGOU pronta numa sonda posterior à negação", () => {
     const voltou = renderMensagem(daAda({ ia: "codex-cli" }), auto({ claude: SEM_LOGIN, codex: { ...PRONTO, em: NEGADA_EM + 1 } }));
-    expect(voltou).toContain("O Codex já voltou: se a resposta não chegou, mande a mensagem de novo.");
+    expect(voltou).toContain("O Codex já voltou ·</span><span>se a resposta não chegou, mande a mensagem de novo.");
     // A sonda da mesma hora (ou anterior) não prova a volta; a do Claude, mais nova, também não.
     for (const estado of [auto({ claude: CLAUDE_NOVO, codex: { ...PRONTO, em: NEGADA_EM } }), auto({ claude: CLAUDE_NOVO, codex: CODEX_DE_ANTES })]) {
       expect(renderMensagem(daAda({ ia: "codex-cli" }), estado)).not.toContain("já voltou");
@@ -460,15 +464,21 @@ describe("NOD-220: o bot no Automático com o Codex fora nunca ouve 'já voltou'
   it("bot fixado no Codex + negação do executor (nome claude-cli, sem `ia`): Codex de volta diz 'O Codex já voltou'", () => {
     const m = { ...negacao("claude-cli"), criadoEm: NEGADA_EM };
     const html = renderMensagem(m, com({ claude: AUSENTE, codex: { ...PRONTO, em: NEGADA_EM + 1 }, harnessDoGil: "codex-cli" }));
-    expect(html).toContain("O Codex já voltou: se a resposta não chegou, mande a mensagem de novo.");
+    expect(html).toContain("O Codex já voltou ·</span><span>se a resposta não chegou, mande a mensagem de novo.");
   });
 
   // Achado 3: o bot que antes negou no Codex e foi fixado no Claude depende só do Claude (NOD-171: a IA DELE).
   it("bot fixado no Claude + negação antiga do Codex: decide e nomeia pelo Claude, nunca pelo Codex", () => {
     const estado = com({ claude: CLAUDE_NOVO, codex: SEM_LOGIN, harnessDoGil: "claude-cli" });
     const html = renderMensagem(daAda({ ia: "codex-cli" }), estado);
-    expect(html).toContain("O Claude Code já voltou");
+    // NOD-8: a IA do bot foi trocada depois da recusa e a nova está pronta — o aviso some e fica a linha da troca.
+    expect(html).toContain("IA de Gil trocada ·</span><b>respondendo pelo Claude</b>");
+    expect(html).not.toContain("aviso-estado");
     expect(html).not.toContain("falta entrar no Codex");
+    // A nova IA ainda fora: o aviso é dela (o de sempre), nunca da antiga.
+    const claudeFora = renderMensagem(daAda({ ia: "codex-cli" }), com({ claude: SEM_LOGIN, codex: SEM_LOGIN, harnessDoGil: "claude-cli" }));
+    expect(claudeFora).toContain("falta entrar no Claude Code");
+    expect(claudeFora).not.toContain("trocada");
   });
 
   // Achado 5: no Automático, o turno roteado ao Claude Code que recusou grava ia = claude-cli e o aviso o nomeia (a web não
@@ -496,7 +506,7 @@ describe("NOD-220: o bot no Automático com o Codex fora nunca ouve 'já voltou'
       return { ...e, executor: { ...e.executor!, atual: "catcher", opcoes: [{ id: "catcher", inventario: catcher }] as unknown as NonNullable<Estado["executor"]>["opcoes"] } };
     };
     const m = { ...negacao("catcher"), criadoEm: NEGADA_EM };
-    expect(renderMensagem(m, comCatcher({ ...PRONTO, em: NEGADA_EM + 1 }))).toContain("Ela já voltou");
+    expect(renderMensagem(m, comCatcher({ ...PRONTO, em: NEGADA_EM + 1 }))).toContain("A IA já voltou");
     expect(renderMensagem(m, comCatcher({ ...PRONTO, em: NEGADA_EM }))).not.toContain("já voltou");
     expect(renderMensagem(m, comCatcher({ ...AUSENTE, em: 10 }))).not.toContain("já voltou");
   });

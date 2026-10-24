@@ -10,9 +10,12 @@ import type { Escopo } from "../shared/types.ts";
  * pessoa a apertar "Tentar de novo".
  *
  *   tela: pedir(máquina, IA, conta) ──► a máquina puxa (a cada 3 s; 1 s com login aberto) e roda o CLI na pasta da conta
- *   máquina: progresso(abrindo → aguardando_pessoa com o link oficial e, no Claude, a chave pública)
+ *   máquina: progresso([preparando →] abrindo → aguardando_pessoa com o link oficial e, no Claude, a chave pública)
  *   tela: colarCodigo(cifrado com a chave pública da máquina) ──► a máquina recebe UMA vez, decifra e entrega ao CLI
  *   máquina: progresso(pronto com a impressão | falhou com o código do erro)
+ *
+ * NOD-8 (2026-10-22): `preparando` é o passo 1, quando a máquina instala ou atualiza a IA antes de abrir o login; o
+ * `preparo` do último relato que o trouxe fica no login (a tela mostra a versão também no concluído).
  *
  * O código do Claude chega aqui só cifrado e sai na próxima puxada: nunca fica em claro no servidor, nem em log nem em
  * banco. A cifra não protege contra o próprio servidor comprometido (ele serve o JS que cifra): R5 da revisão.
@@ -108,7 +111,7 @@ export function criarLoginsNaMaquina(agora: () => number = Date.now): LoginsNaMa
       const t = agora();
       const l: Login = {
         id: randomUUID(), maquinaId: e.maquinaId, ia: e.ia, contaId: e.contaId, apelido: e.apelido, fase: "pedido", url: null, codigoDispositivo: null, pedeCodigo: false,
-        chavePublica: null, codigoEnviado: false, erro: null, contaFinalId: null, criadoEm: t, atualizadoEm: t,
+        chavePublica: null, codigoEnviado: false, erro: null, contaFinalId: null, preparo: null, criadoEm: t, atualizadoEm: t,
         escopo: e.escopo, impressaoEsperada: e.impressao, codigo: null, avisarCancelamento: false, ate: t + PRAZO_LOGIN_MS,
       };
       logins.set(l.id, l);
@@ -157,6 +160,7 @@ export function criarLoginsNaMaquina(agora: () => number = Date.now): LoginsNaMa
         l.chavePublica = p.chavePublica;
       }
       if (p.pedeCodigo !== undefined) l.pedeCodigo = p.pedeCodigo;
+      if (p.preparo !== undefined) l.preparo = { ...p.preparo };
       if (p.erro !== undefined) {
         if (!ERRO.test(p.erro)) return { aceito: false, login: publico(l) };
         l.erro = p.erro;

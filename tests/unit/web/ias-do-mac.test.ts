@@ -65,6 +65,21 @@ describe("instalar e entrar pelo app do Mac", () => {
     expect(ui().estados["codex-cli"]?.instalacao?.fase).toBe("falhou");
   });
 
+  it("NOD-8 (regressão, crítico): a instalação que falhou para no passo 1, não chama `entrar` e devolve o erro", async () => {
+    const feito: string[] = [];
+    const { c } = montar({ ponte: {
+      instalar: async (ia) => { feito.push("instalar"); return e(ia, "nao_instalada", { instalacao: { fase: "falhou", linha: null, tentativa: 1, causa: "sem_internet", mensagem: "Não deu para instalar: sem conexão com a internet." } }); },
+      entrar: async (ia) => { feito.push("entrar"); return e(ia, "entrando"); },
+    } });
+    expect(await c.instalar("claude-cli")).toEqual({ ok: false, erro: "Não deu para instalar: sem conexão com a internet." });
+    expect(feito).toEqual(["instalar"]);
+    const lancou = montar({ ponte: { instalar: async () => { throw new Error("ipc"); }, entrar: async (ia) => { feito.push("entrar"); return e(ia, "entrando"); } } });
+    expect(await lancou.c.instalar("codex-cli")).toEqual({ ok: false, erro: "Não deu para instalar o Codex agora. Tente de novo." });
+    expect(feito).toEqual(["instalar"]);
+    const ok = montar({ ponte: { instalar: async (ia) => e(ia, "falta_entrar", { instalacao: { fase: "sucesso", linha: null, tentativa: 1, mensagem: "" } }) } });
+    expect(await ok.c.instalar("codex-cli")).toEqual({ ok: true });
+  });
+
   it("a ponte que lança vira nota escrita embaixo do cartão, nunca silêncio", async () => {
     const { c, ui } = montar({ ponte: { entrar: async () => { throw new Error("ipc"); } } });
     await c.entrar("codex-cli");
@@ -110,7 +125,7 @@ describe("instalar e entrar pelo app do Mac", () => {
     const { c, ui, chamadas } = montar({ ponte: { abrirLink: async () => false } });
     await c.abrirLink("codex-cli");
     expect(ui().nota["codex-cli"]).toContain("ainda não está pronto");
-    await c.copiarCodigo("codex-cli", "NP6Z-V3598");
+    expect(await c.copiarCodigo("codex-cli", "NP6Z-V3598")).toBe(true);
     expect(chamadas).toContain("copiou NP6Z-V3598");
     expect(ui().copiado).toBe("codex-cli");
   });

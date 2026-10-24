@@ -830,6 +830,20 @@ describe("validação das contas anunciadas (ADR-102, revisão do PR #306)", () 
     expect(() => impressoes(["nao-hex"])).toThrow();
     expect(impressoes([imp])).toEqual([imp]);
   });
+
+  it("NOD-8: `preparando` e o preparo do passo 1 passam; campo estranho, ação fora da lista ou versão fora do formato = 400", () => {
+    const loginId = "11111111-1111-4111-8111-111111111111";
+    const preparo = { acao: "atualizar", linha: "Baixando o Claude Code", antes: "2.1.280", depois: "2.1.304" };
+    expect(progressoDoLogin({ loginId, fase: "preparando", preparo })).toEqual({ loginId, fase: "preparando", preparo });
+    expect(progressoDoLogin({ loginId, fase: "abrindo", preparo: { acao: "instalar", depois: "0.159.0-alpha.2" } })).toEqual({ loginId, fase: "abrindo", preparo: { acao: "instalar", depois: "0.159.0-alpha.2" } });
+    expect(progressoDoLogin({ loginId, fase: "falhou", erro: "preparo_falhou", preparo: { acao: "instalar" } })).toMatchObject({ erro: "preparo_falhou", preparo: { acao: "instalar" } });
+    expect(() => progressoDoLogin({ loginId, fase: "preparando", preparo: { acao: "instalar", sudo: true } })).toThrow();
+    expect(() => progressoDoLogin({ loginId, fase: "preparando", preparo: { acao: "remover" } })).toThrow();
+    expect(() => progressoDoLogin({ loginId, fase: "preparando", preparo: { acao: "atualizar", antes: "<b>1</b>" } })).toThrow();
+    expect(() => progressoDoLogin({ loginId, fase: "preparando", preparo: { acao: "atualizar", linha: "a\nb" } })).toThrow();
+    expect(() => progressoDoLogin({ loginId, fase: "preparando", preparo: { acao: "atualizar", linha: "x".repeat(81) } })).toThrow();
+    expect(() => progressoDoLogin({ loginId, fase: "preparando", preparo: "instalar" })).toThrow();
+  });
 });
 
 describe("NOD-245: a adoção que falha por exceção e a entrega grande", () => {

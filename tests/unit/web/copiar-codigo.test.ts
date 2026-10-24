@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { stripTypeScriptTypes } from "node:module";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { COPIADO_MS, ROTULO_COPIADO } from "../../../web/lib/copiar.ts";
 
 /**
  * NOD-45: o Copiar do card do bloco de código (`"copiar-codigo"` no ACOES do main.ts). O main.ts não é importável no
@@ -8,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
  * ACOES e o roda com um botão de mentira, sem criar seam no código de produção.
  * QA da NOD-45 (Tarsila, 16/10): sem este teste, trocar o <code> pelo card, os textos dos estados, o 1,5 s ou o
  * clearTimeout (a correção do 6d98c71f) não quebrava nada.
+ * NOD-8 (definido em 2026-10-22): "✓ Copiado" por 2 s (web/lib/copiar.ts); antes "Copiado" por 1,5 s.
  */
 const fonte = readFileSync(new URL("../../../web/main.ts", import.meta.url), "utf8");
 const inicio = fonte.indexOf('"copiar-codigo": async (el) => {');
@@ -17,11 +19,13 @@ const js = `${stripTypeScriptTypes(`const handler = (${corpo});`)}\nreturn handl
 
 type Handler = (el: unknown) => Promise<void>;
 const criar = (writeText: (t: string) => Promise<void>): Handler =>
-  new Function("navigator", "window", "timersCopiarCodigo", "clearTimeout", js)(
+  new Function("navigator", "window", "timersCopiarCodigo", "clearTimeout", "ROTULO_COPIADO", "COPIADO_MS", js)(
     { clipboard: { writeText } },
     globalThis,
     new WeakMap(),
     (id: unknown) => clearTimeout(id as ReturnType<typeof setTimeout>),
+    ROTULO_COPIADO,
+    COPIADO_MS,
   ) as Handler;
 
 function botao(codigo: string) {
@@ -46,15 +50,15 @@ describe("Copiar do bloco de código (main.ts, NOD-45)", () => {
     expect(fim).toBeGreaterThan(inicio);
   });
 
-  it("copia o textContent do <code> do próprio card, mostra Copiado e volta ao Copiar em 1,5 s", async () => {
+  it("copia o textContent do <code> do próprio card, mostra ✓ Copiado e volta ao Copiar em 2 s", async () => {
     const copiados: string[] = [];
     const { el, estado, attrs } = botao('const a = "<b>"\n');
     await criar(async (t) => { copiados.push(t); })(el);
     expect(copiados).toEqual(['const a = "<b>"\n']);
-    expect(estado.textContent).toBe("Copiado");
+    expect(estado.textContent).toBe("✓ Copiado");
     expect(attrs["aria-label"]).toBe("Código copiado");
-    vi.advanceTimersByTime(1499);
-    expect(estado.textContent).toBe("Copiado");
+    vi.advanceTimersByTime(1999);
+    expect(estado.textContent).toBe("✓ Copiado");
     vi.advanceTimersByTime(1);
     expect(estado.textContent).toBe("Copiar");
     expect(attrs["aria-label"]).toBe("Copiar código");
@@ -65,7 +69,7 @@ describe("Copiar do bloco de código (main.ts, NOD-45)", () => {
     await criar(async () => { throw new Error("negado"); })(el);
     expect(estado.textContent).toBe("Não copiou");
     expect(attrs["aria-label"]).toBe("Não copiou o código");
-    vi.advanceTimersByTime(1500);
+    vi.advanceTimersByTime(2000);
     expect(estado.textContent).toBe("Copiar");
     expect(attrs["aria-label"]).toBe("Copiar código");
   });
@@ -76,8 +80,8 @@ describe("Copiar do bloco de código (main.ts, NOD-45)", () => {
     await h(el);
     vi.advanceTimersByTime(1000);
     await h(el);
-    vi.advanceTimersByTime(600);
-    expect(estado.textContent).toBe("Copiado");
+    vi.advanceTimersByTime(1100);
+    expect(estado.textContent).toBe("✓ Copiado");
     expect(attrs["aria-label"]).toBe("Código copiado");
     vi.advanceTimersByTime(900);
     expect(estado.textContent).toBe("Copiar");

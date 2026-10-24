@@ -21,6 +21,7 @@
  */
 import { CONVITE } from "../../shared/convite.ts";
 import { ARQUIVOS_DO_MOTOR } from "../../domain/atualizacao-do-motor.ts";
+import { PISO_CLI } from "../executor/flag-floors.ts";
 
 export { ARQUIVOS_DO_MOTOR, type ArquivoDoMotor } from "../../domain/atualizacao-do-motor.ts";
 
@@ -142,12 +143,14 @@ ${etapa("usuario")}if ! id "$USUARIO" >/dev/null 2>&1; then
 fi
 passo "usuário $USUARIO"
 ${comp ? "" : `
-como_nod npm install -g --prefix "$CASA/.local" --no-fund --no-audit --loglevel=error @anthropic-ai/claude-code >/dev/null
+# NOD-8 (definido em 2026-10-22): os dois pacotes pedem o piso (>=PISO_CLI), como o instalador do Mac (ADR-093): a VM
+# nunca recebe uma versão que o motor recusaria (cli_antigo).
+como_nod npm install -g --prefix "$CASA/.local" --no-fund --no-audit --loglevel=error @anthropic-ai/claude-code@">=${PISO_CLI["claude-cli"]}" >/dev/null
 passo "Claude Code"
 # ADR-102: o Codex vem sempre (antes só com NOD_COM_CODEX=1); NOD_SEM_CODEX=1 desliga.
 if [ "\${NOD_SEM_CODEX:-0}" != "1" ]; then
   # Revisão do PR #306: o Codex não derruba a instalação (nem a atualização de uma VM que já roda só com o Claude).
-  if como_nod npm install -g --prefix "$CASA/.local" --no-fund --no-audit --loglevel=error @openai/codex >/dev/null; then passo "Codex"
+  if como_nod npm install -g --prefix "$CASA/.local" --no-fund --no-audit --loglevel=error @openai/codex@">=${PISO_CLI["codex-cli"]}" >/dev/null; then passo "Codex"
   else printf 'Aviso: o Codex não instalou agora. Rode a instalação de novo depois para tentar outra vez.\\n'; fi
 fi
 `}

@@ -3,6 +3,7 @@ import type { Ligacao } from "../../src/contracts/ligacao.ts";
 import type { CamposEntrevista, EstadoOnboarding, EtapaOnboarding } from "../../src/contracts/onboarding.ts";
 import type { Api } from "../lib/api.ts";
 import { esc } from "../lib/render.ts";
+import { mostrarCopia, type RelogioDoCopiar } from "../lib/copiar.ts";
 import { dialogo } from "./gestao-agentes.ts";
 import { TEXTO_CONSENTIMENTO, VERSAO_CONSENTIMENTO } from "./ligacao.ts";
 import { criarTesteDeIas } from "./onboarding-teste.ts";
@@ -371,6 +372,8 @@ export function criarTelaOnboarding(deps: DepsOnboarding) {
     deps.aoMudar();
   }
 
+  /** NOD-8: o relógio do "✓ Copiado" do botão que copia o comando de atualizar o CLI. */
+  const relogioDoCopiar: RelogioDoCopiar = { agendar: (fn, ms) => window.setTimeout(fn, ms), cancelar: (id) => clearTimeout(id), timers: new WeakMap() };
   const iaDoClique = (el: HTMLElement): IaDesktop => (el.dataset.ia === "codex-cli" ? "codex-cli" : "claude-cli");
 
   const acoes: Record<string, (el: HTMLElement) => Promise<void> | void> = {
@@ -381,8 +384,10 @@ export function criarTelaOnboarding(deps: DepsOnboarding) {
     "onboarding-ia-testar": (el) => testarIa(iaDoClique(el)),
     "onboarding-ia-como-liberar": (el) => comoLiberar(iaDoClique(el)),
     // NOD-171: o comando que atualiza o CLI desatualizado vai para a área de transferência; o botão diz se copiou.
+    // NOD-8: "✓ Copiado" por 2 s e volta (web/lib/copiar.ts); antes ficava "Copiado" para sempre.
     "onboarding-ia-copiar": async (el) => {
-      try { await navigator.clipboard.writeText(el.dataset.texto ?? ""); el.textContent = "Copiado"; } catch { el.textContent = "Não copiou"; }
+      const ok = await navigator.clipboard.writeText(el.dataset.texto ?? "").then(() => true, () => false);
+      mostrarCopia(el, ok, relogioDoCopiar);
     },
     "onboarding-ia-pagina": (el) => teste.abrirInstalacao(iaDoClique(el)),
     "onboarding-ia-login": (el) => teste.abrirLogin(iaDoClique(el)),

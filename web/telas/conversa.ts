@@ -41,7 +41,7 @@ import { HTML_SELETOR_IA } from "./seletor-ia.ts";
 import { avisoDeEstado } from "../lib/aviso-estado.ts";
 import { inventarioEmUso } from "./frota.ts";
 import { cartaoRitmoRotina } from "./ritmo-rotina.ts";
-import { avisoContaSemAcesso, avisoHarnessFora, avisoModeloRecusado, ehIa, inventarioDaIa, cartaoTrocaDeIa, linhaContaSeguiu, linhaContaTrocada, linhaIaTrocada, linhaLimiteSemOutra, prontaDepois, PROVEDOR_DA_IA, type IdIa } from "./ia-fora.ts";
+import { avisoContaSemAcesso, avisoHarnessFora, avisoModeloRecusado, ehIa, inventarioDaIa, cartaoTrocaDeIa, linhaContaSeguiu, linhaContaTrocada, linhaIaDoBotTrocada, linhaIaTrocada, linhaIaVoltou, linhaLimiteSemOutra, prontaDepois, type IdIa } from "./ia-fora.ts";
 import { escolhaEfetiva, iasDaTela, inteligenciaDoBot } from "./inteligencia.ts";
 import { htmlBotaoDitado, htmlPilulaDitado } from "./ditado.ts";
 import { renderLinhaLigacao } from "./ligacao.ts";
@@ -355,6 +355,11 @@ function avisoSemExecutor(m: Mensagem, estado: Estado): string {
       acao: botao("secao-espaco", "Conectar IA", { classe: "pri sm", dados: { secao: "conexao" } }),
     });
   }
+  // NOD-8 (definido em 2026-10-22): a pessoa trocou a IA do bot fixado depois da recusa (a IA do turno, `ia`, é outra) e a
+  // nova está pronta: o aviso da IA antiga sai sozinho e fica a linha da troca. Só com `ia` explícito: o `nome` das
+  // negações antigas mistura motor e harness (NOD-220).
+  const recusou = negacao && ehIa(negacao.ia) ? negacao.ia : null;
+  if (fixado && recusou && fixado !== recusou && inventarioDaIa(estado, fixado)?.estado === "pronto") return linhaIaDoBotTrocada(nome ?? null, fixado);
   // definido em 2026-10-05: a IA estava logada e a conta não serviu — aviso próprio, com a causa e os botões (ia-fora.ts).
   // Esse aviso não diz que a IA "voltou": diz que JÁ HÁ UMA IA PRONTA. No Automático (sem IA fixada) o bot pega a IA em
   // uso, então vale a sonda dela, mais nova que a negação (NOD-213); o bot fixado segue a regra da IA dele.
@@ -364,15 +369,14 @@ function avisoSemExecutor(m: Mensagem, estado: Estado): string {
   // NOD-171/NOD-220: a IA do alvo, nomeável e ainda fora — o aviso diz QUAL e o estado dela (desatualizada, sem login, no
   // limite, fora, ou só "indisponível" quando o catálogo não explica).
   if (aindaFora && alvo && "ia" in alvo && alvo.nomeia) return avisoHarnessFora(m, estado, { nomeDoBot: nome ?? null, agenteId: bot?.id ?? null, ia: alvo.ia, noApp });
-  const voltou = iaDoAlvo ? `O ${PROVEDOR_DA_IA[iaDoAlvo].cli} já voltou` : "Ela já voltou";
+  // NOD-8 (definido em 2026-10-22, protótipo v2.2): a IA voltou — o aviso some sozinho e fica a linha de sistema.
+  if (!aindaFora) return linhaIaVoltou(iaDoAlvo);
   return avisoDeEstado({
     tom: "erro",
     titulo: "Nenhum trabalho começou.",
-    texto: aindaFora
-      ? `${nome ?? "O bot"} não pôde começar: nenhuma IA está pronta agora. Sua mensagem fica guardada: quando a IA voltar, ${nome ?? "o bot"} responde sozinho.`
-      : `${nome ?? "O bot"} não pôde começar porque a sua conta de IA estava desconectada. ${voltou}: se a resposta não chegou, mande a mensagem de novo.`,
+    texto: `${nome ?? "O bot"} não pôde começar: nenhuma IA está pronta agora. Sua mensagem fica guardada: quando a IA voltar, ${nome ?? "o bot"} responde sozinho.`,
     extra: detalhes,
-    acao: aindaFora ? botao("secao-espaco", "Conectar IA", { classe: "pri sm", dados: { secao: "conexao" } }) : undefined,
+    acao: botao("secao-espaco", "Conectar IA", { classe: "pri sm", dados: { secao: "conexao" } }),
   });
 }
 

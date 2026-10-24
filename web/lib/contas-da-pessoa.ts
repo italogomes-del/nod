@@ -37,8 +37,11 @@ export type DepsContasDaPessoa = {
   detalhes: () => DetalhesDasContas | null;
   /** Relê a lista (e as máquinas) do servidor. */
   invalidar: () => void;
-  /** O login no Mac pelo app: a conta de sempre se ainda sem login, senão uma pasta nova (ADR-101). */
-  entrarNoMac: (ia: IaComConta, apelido: string | null) => Promise<boolean>;
+  /**
+   * O login no Mac pelo app: a conta de sempre se ainda sem login, senão uma pasta nova (ADR-101). NOD-8: `{ erro }` = a
+   * instalação (o passo 1) ou a abertura do login falhou, e o login não começou; a nota mostra o erro.
+   */
+  entrarNoMac: (ia: IaComConta, apelido: string | null) => Promise<boolean | { erro: string }>;
   avisarTermos: (ia: IaComConta) => Promise<boolean>;
   cifrar: (chavePublica: string, codigo: string) => Promise<CodigoCifrado>;
   agendar: (fn: () => void, ms: number) => void;
@@ -106,6 +109,7 @@ export function criarContasDaPessoa(d: DepsContasDaPessoa) {
     if (m.plataforma === "darwin") {
       if (d.detalhes()?.maquinaId !== maquinaId) { d.mudar({ nota: "Para entrar no Mac, abra o app do nod nele." }); return; }
       const ok = await d.entrarNoMac(ia, apelido);
+      if (typeof ok === "object") { d.mudar({ nota: ok.erro }); return; }
       if (!ok) { d.mudar({ nota: "Não deu para começar o login no Mac: termine o login aberto no app ou saia de uma conta." }); return; }
       const antes = (d.contas()?.contas ?? []).filter((c) => c.ia === ia && c.maquinas.some((v) => v.maquinaId === maquinaId && v.estado === "pronta")).map((c) => c.id);
       d.mudar({ nota: null, logins: [...logins(), { onde: "mac", id: `mac-${ia}-${d.agora()}`, maquinaId, ia, contaId, apelido, desde: d.agora(), antes }] });

@@ -63,6 +63,7 @@ import { enterEnvia } from "./lib/celular.ts";
 import { criarCelular } from "./lib/gaveta-bots.ts";
 import "./pwa.ts";
 import { botao, esc, iconeAgente } from "./lib/render.ts";
+import { COPIADO_MS, mostrarCopia, ROTULO_COPIADO, type RelogioDoCopiar } from "./lib/copiar.ts";
 import { avisoDeEstado } from "./lib/aviso-estado.ts";
 import { aplicarTema } from "./lib/tema.ts";
 import { estadoMascoteNaConversa, mascoteComAviso, proximaViradaDoMascote } from "./lib/mascote.ts";
@@ -3075,11 +3076,12 @@ const contasDaPessoa = criarContasDaPessoa({
   detalhes: () => estado.detalhesContas,
   invalidar: () => dispatch({ tipo: "invalidar", quais: ["contas", "maquinas"] }),
   // No Mac, o login é o do app: a conta de sempre, se ainda sem login; senão uma pasta nova (ADR-101).
+  // NOD-8 (definido em 2026-10-22): a instalação (o passo 1) que falhou para aqui e devolve o erro, sem abrir o login.
   entrarNoMac: async (ia, apelido) => {
     const e = estado.iasMac.estados[ia];
     if (!e?.conta) {
-      await (pedeInstalar(inventarioDaIa(estado, ia)) ? iasDoMac.instalar(ia) : iasDoMac.entrar(ia));
-      return true;
+      const r = await (pedeInstalar(inventarioDaIa(estado, ia)) ? iasDoMac.instalar(ia) : iasDoMac.entrar(ia));
+      return r.ok ? true : { erro: r.erro };
     }
     const ponte = window.nodDesktop?.contas;
     return ponte ? ponte.adicionar(ia, apelido ?? "").catch(() => false) : false;
@@ -3225,6 +3227,8 @@ function filtrarBots(texto: string, raiz = "#sidebar"): void {
 
 /** NOD-45: o timer que devolve o Copiar do card do bloco de código ao repouso, por botão. */
 const timersCopiarCodigo = new WeakMap<HTMLElement, number>();
+/** NOD-8: o relógio do "✓ Copiado" dos outros botões de copiar (web/lib/copiar.ts). */
+const relogioDoCopiar: RelogioDoCopiar = { agendar: (fn, ms) => window.setTimeout(fn, ms), cancelar: (id) => clearTimeout(id), timers: new WeakMap() };
 
 const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   ...telaOnboarding.acoes,
@@ -3400,7 +3404,7 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   // No onboarding, o teste é o dele (onboarding-teste.ts): é o veredito dele que libera o Continuar.
   "ia-testar": (el) => { const ia = el.dataset.ia; if (ehIa(ia)) void (el.closest("#onboarding") ? telaOnboarding.acoes["onboarding-ia-testar"]?.(el) : iasDoMac.testar(ia)); },
   "ia-abrir-link": (el) => { const ia = el.dataset.ia; if (ehIa(ia)) void iasDoMac.abrirLink(ia); },
-  "ia-copiar-codigo": (el) => { const ia = el.dataset.ia; if (ehIa(ia)) void iasDoMac.copiarCodigo(ia, el.dataset.texto ?? ""); },
+  "ia-copiar-codigo": (el) => { const ia = el.dataset.ia; if (ehIa(ia)) void iasDoMac.copiarCodigo(ia, el.dataset.texto ?? "").then((ok) => { if (ok) anunciar("Código copiado"); }); },
   "ia-ajuda": (el) => iasDoMac.alternarAjuda(`${el.dataset.ia ?? ""}:${el.dataset.passo ?? ""}`),
   "ia-detalhe": (el) => { const ia = el.dataset.ia; if (ehIa(ia)) iasDoMac.alternarDetalhe(ia); },
   // 2A: o menu de Inteligência dentro do cartão da gaveta; um clique grava (Automático, ou Uma IA só naquele modelo).
@@ -3433,10 +3437,10 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     else if (ehIa(ia) && mac?.iaInstalar) void mac.iaInstalar(ia).catch(() => undefined);
     else abrirEspaco("conexao");
   },
+  // NOD-8: "✓ Copiado" por 2 s (web/lib/copiar.ts).
   "copiar-texto": async (el) => {
-    const antes = el.textContent ?? "";
-    try { await navigator.clipboard.writeText(el.dataset.texto ?? ""); el.textContent = "Copiado"; } catch { el.textContent = "Não copiou"; }
-    setTimeout(() => { el.textContent = antes; }, 1500);
+    const ok = await navigator.clipboard.writeText(el.dataset.texto ?? "").then(() => true, () => false);
+    mostrarCopia(el, ok, relogioDoCopiar);
   },
   // NOD-45: o Copiar do card do bloco de código (texto-formatado.ts cardDoCodigo). Lê o textContent do <code> do mesmo
   // card, e não um data-*: sai o código que a pessoa vê, sem crases, sem a linha da linguagem e sem a última quebra.
@@ -3451,12 +3455,12 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     };
     try {
       await navigator.clipboard.writeText(el.closest(".md-codigo")?.querySelector("code")?.textContent ?? "");
-      mostrar("Copiado", "Código copiado");
+      mostrar(ROTULO_COPIADO, "Código copiado");
     } catch {
       mostrar("Não copiou", "Não copiou o código");
     }
     clearTimeout(timersCopiarCodigo.get(el));
-    timersCopiarCodigo.set(el, window.setTimeout(() => mostrar("Copiar", "Copiar código"), 1500));
+    timersCopiarCodigo.set(el, window.setTimeout(() => mostrar("Copiar", "Copiar código"), COPIADO_MS));
   },
   "fechar-espaco": () => fecharEspaco(),
   // definido em 2026-09-25 (jornadas de conexão): "Conectar" abre o login NA HORA — no card do chat, no

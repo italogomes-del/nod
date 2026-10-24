@@ -159,6 +159,21 @@ export function avisoHarnessFora(m: Mensagem, estado: Pick<Estado, "executor">, 
 }
 
 /**
+ * NOD-8 (definido em 2026-10-22, protótipo v2.2: "todo aviso de IA fora do ar some sozinho quando a condição deixa de
+ * valer, e no lugar fica só a linha do que mudou"): a IA que recusou voltou (sonda pronta e mais nova que a negação).
+ * Uma linha de sistema, na largura do texto; sem IA nomeável (o catcher), "A IA". A linha com a versão de antes e a de
+ * depois ("atualizado na vm: A → B") vem com a atualização da NOD-9.
+ */
+export function linhaIaVoltou(ia: IdIa | null): string {
+  return `<div class="linha-centro-wrap linha-ia linha-ia-voltou"><span class="linha-centro estatica">${ia ? logo(ia) : ""}<span>${esc(ia ? `O ${PROVEDOR_DA_IA[ia].cli}` : "A IA")} já voltou ·</span><span>se a resposta não chegou, mande a mensagem de novo.</span></span></div>`;
+}
+
+/** NOD-8 (copy nova da v2.2): a pessoa trocou a IA do bot depois da recusa, e a nova está pronta; o aviso da antiga sai. */
+export function linhaIaDoBotTrocada(nomeDoBot: string | null, para: IdIa): string {
+  return `<div class="linha-centro-wrap linha-ia linha-ia-do-bot"><span class="linha-centro estatica">${logo(para)}<span>${esc(nomeDoBot ? `IA de ${nomeDoBot} trocada` : "IA do bot trocada")} ·</span><b>respondendo pelo ${esc(PROVEDOR_DA_IA[para].nome)}</b></span></div>`;
+}
+
+/**
  * NOD-171: a IA do bot está pronta, mas não aceita o modelo escolhido no agente (payload `modelo` da negação). Trocar a
  * IA não resolve e esperar também não: o aviso pede outro modelo e a mensagem de novo, nunca "a IA já voltou".
  */
@@ -461,7 +476,7 @@ function quandoVolta(voltaEm: number, agora: number): string {
 export function linhaAtualizarIa(ia: IdIa, noApp: boolean): string {
   const comando = COMANDO_ATUALIZAR_IA[ia];
   const abrir = noApp ? botao("ia-atualizar", `Atualizar o ${PROVEDOR_DA_IA[ia].cli}`, { classe: "pri sm", dados: { ia } }) : "";
-  return `<div class="ia-atualizar"><p>No Terminal deste Mac, rode:</p><div class="ia-comando"><code>${esc(comando)}</code>${botao("copiar-texto", "Copiar", { classe: "sm", dados: { texto: comando } })}</div><p class="mudo">O nod percebe sozinho quando a versão nova estiver instalada.</p>${abrir}</div>`;
+  return `<div class="ia-atualizar"><p>No Terminal deste Mac, rode:</p><div class="ia-comando"><code>${esc(comando)}</code>${botao("copiar-texto", "Copiar", { classe: "sm", dados: { texto: comando }, vivo: true })}</div><p class="mudo">O nod percebe sozinho quando a versão nova estiver instalada.</p>${abrir}</div>`;
 }
 
 /**

@@ -121,6 +121,10 @@ describe("instalar → entrar → testar dentro do cartão", () => {
     expect(v.passos?.map((p) => [p.id, p.marca])).toEqual([["instalar", "girando"], ["entrar", "depois"], ["testar", "depois"]]);
     expect(v.passos?.[0]?.log).toBe("added 1 package in 9s");
     expect(v.botao?.rotulo).toBe("Cancelar");
+    // NOD-8: sem linha do npm ainda, o passo 1 diz "Instalando…"; o 2 diz que começa sozinho.
+    const semLinha = vistaDaIa("codex-cli", comFluxo(mac("codex-cli", "instalando", { instalacao: { fase: "instalando", linha: null, tentativa: 1, mensagem: "" } })));
+    expect(semLinha.passos?.[0]?.log).toBe("Instalando…");
+    expect(semLinha.passos?.[1]?.texto).toBe("Começa sozinho quando a instalação terminar.");
   });
 
   it("a instalação falhou: passo âmbar com a frase, 'Tentar de novo' e o detalhe atrás de um link", () => {
@@ -132,6 +136,8 @@ describe("instalar → entrar → testar dentro do cartão", () => {
     expect(p?.marca).toBe("erro");
     expect(p?.acoes.map((a) => a.rotulo)).toEqual(["Tentar de novo", "Ver detalhe"]);
     expect(p?.detalhe).toBeNull();
+    // NOD-8: com o passo 1 falhado, o 2 para (não diz que começa sozinho).
+    expect(v.passos?.[1]?.texto).toBeNull();
     v = vistaDaIa("codex-cli", comFluxo(falhou, { detalhe: "codex-cli" }));
     expect(v.passos?.[0]?.detalhe).toBe("Registro da instalação: ~/Library/Logs/nod/instalar-codex-1.log");
     const html = renderCartaoIa(v, UI_IAS_INICIAL);
@@ -144,7 +150,7 @@ describe("instalar → entrar → testar dentro do cartão", () => {
     expect(entrar?.codigo).toBe("NP6Z-V3598");
     const html = renderCartaoIa(v, UI_IAS_INICIAL);
     expect(html).toContain("<code>NP6Z-V3598</code>");
-    expect(html).toContain('data-act="ia-copiar-codigo" data-ia="codex-cli" data-texto="NP6Z-V3598">Copiar');
+    expect(html).toContain('data-act="ia-copiar-codigo" data-ia="codex-cli" data-texto="NP6Z-V3598" aria-live="polite">Copiar');
     expect(html).toContain('data-act="ia-abrir-link" data-ia="codex-cli">Abrir a página da OpenAI');
     expect(html).toContain("Esperando você entrar…");
     // O instalar ficou feito; o entrar é o passo atual.

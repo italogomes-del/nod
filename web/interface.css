@@ -1925,6 +1925,11 @@ span.pilula-memoria { padding-right: 12px; cursor: default; }
 /* Chat limpo (ADR-114, PR 2): os botões da task pedida (Fazer aqui, Fazer depois) no topo da tela dela. */
 .tk-topo .linha-acoes { justify-content: flex-start; margin-top: 8px; }
 
+/* NOD-8 (definido em 2026-10-22): o "✓ Copiado" não muda a largura do botão de copiar (web/lib/copiar.ts). */
+/* content-box: o padding do .bt fica fora dos 10ch, senão "✓ Copiado" ainda alarga o botão. */
+[data-act="copiar-texto"], [data-act="ia-copiar-codigo"], [data-act="onboarding-ia-copiar"] { box-sizing: content-box; min-width: 10ch; text-align: center; }
+.md-codigo-estado { display: inline-block; min-width: 9ch; text-align: left; }
+
 /* NOD-323 (ADR-126, protótipo v3.1): a mídia que o bot anexou, ABAIXO do balão da fala, na ordem anexada. Sem moldura
    nem legenda na conversa (cara de mensagem, como no Grok); a tela cheia (.luz) mostra o nome. Só tokens, exceto o
    escuro fixo sobre a mídia (o mesmo nos dois temas, marcado com cor-fixa). */

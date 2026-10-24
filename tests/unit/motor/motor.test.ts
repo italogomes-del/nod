@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { ERROS_DO_SCRIPT, ETAPAS_DO_SCRIPT, papelDoScript, scriptDeInstalacao, servidorParaScript } from "../../../src/adapters/http/motor-instalacao.ts";
+import { PISO_CLI } from "../../../src/adapters/executor/flag-floors.ts";
 import { arquivoDaConexao, carregarConexao, comandoDeEntrar, guardarConexao, lerComando, lerConexao, pastaDoMotor } from "../../../motor/conexao.ts";
 
 describe("motor sem janela (ADR-090)", () => {
@@ -71,6 +72,16 @@ describe("motor sem janela (ADR-090)", () => {
     // Convite fora do formato nunca entra no shell.
     expect(scriptDeInstalacao({ servidor: "https://nod.exemplo.com", versao: "0.4.0", convite: '"; rm -rf / #' })).toContain('NOD_CONVITE=""');
     expect(execFileSync("sh", ["-n"], { input: comConvite }).toString()).toBe("");
+  });
+
+  it("NOD-8: o script instala os dois CLIs a partir do piso (>=PISO_CLI), como o instalador do Mac", () => {
+    const script = scriptDeInstalacao({ servidor: "https://nod.exemplo.com", versao: "0.4.0" });
+    expect(script).toContain(`@anthropic-ai/claude-code@">=${PISO_CLI["claude-cli"]}"`);
+    expect(script).toContain(`@openai/codex@">=${PISO_CLI["codex-cli"]}"`);
+    // Sem o piso não sobra nenhum pedido solto (o npm instalaria o que o registry entregar).
+    expect(script).not.toMatch(/@anthropic-ai\/claude-code\s/);
+    expect(script).not.toMatch(/@openai\/codex\s/);
+    execFileSync("sh", ["-n"], { input: script });
   });
 
   it("NOD-94: o script só-computador pula gh e as IAs, anuncia as etapas em ordem e diz o motivo de cada falha conhecida", () => {

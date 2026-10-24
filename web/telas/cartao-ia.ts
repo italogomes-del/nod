@@ -4,6 +4,7 @@ import { comandoDoTerminal, fraseDaAtualizacao } from "../lib/atualizacao-ia.ts"
 import type { IaDaPessoa } from "../../src/contracts/inteligencia.ts";
 import type { CausaSemIa } from "../../src/contracts/inventario.ts";
 import { esc, hora } from "../lib/render.ts";
+import { ROTULO_COPIADO, VIVO } from "../lib/copiar.ts";
 import { haQuanto } from "../lib/relogio.ts";
 import { LOGOS_IA } from "./onboarding-logos.ts";
 
@@ -275,7 +276,7 @@ export function passosDaIa(ia: IaMac, e: EstadoNaTela, c: ContextoCartao): Passo
 
   if (aberto.instalar) {
     const titulo = `Instalar o ${cli}`;
-    if (e.estado === "instalando") lista.push(passo("instalar", titulo, { marca: "girando", log: inst?.linha || "Começando…" }));
+    if (e.estado === "instalando") lista.push(passo("instalar", titulo, { marca: "girando", log: inst?.linha || "Instalando…" }));
     else if (instalacaoFalhou) {
       lista.push(passo("instalar", titulo, {
         marca: "erro",
@@ -292,7 +293,8 @@ export function passosDaIa(ia: IaMac, e: EstadoNaTela, c: ContextoCartao): Passo
   const naTroca: Partial<PassoIa> = trocando ? { contaAtual: troca.antes ? contaCurta(troca.antes) : null, dica: DICA_DA_TROCA[ia] } : {};
   const outra = trocando ? " com a outra conta" : "";
   const antesDeEntrar = e.estado === "instalando" || instalacaoFalhou || e.estado === "nao_instalada" || e.estado === "sem_node" || e.estado === "desatualizada";
-  if (antesDeEntrar) lista.push(passo("entrar", tituloEntrar));
+  // NOD-8 (definido em 2026-10-22): enquanto o passo 1 corre, o 2 diz que começa sozinho; com a instalação falhada, ele espera.
+  if (antesDeEntrar) lista.push(passo("entrar", tituloEntrar, instalacaoFalhou ? {} : { texto: "Começa sozinho quando a instalação terminar." }));
   else if (e.estado === "entrando" && login) {
     if (login.verificarDeNovo) {
       lista.push(passo("entrar", tituloEntrar, { marca: "ativo", texto: "Ainda não vimos o login terminar. Se você já entrou, confira de novo.", abrir: login.host !== null, acoes: [{ act: "ia-verificar", rotulo: "Verificar de novo", contorno: true }] }));
@@ -542,7 +544,7 @@ function htmlPasso(v: VistaIa, p: PassoIa, n: number, ui: UiIas): string {
   }
   if (p.texto) partes.push(`<span class="${p.marca === "erro" ? "ia-erro-txt" : ""}">${esc(p.texto)}</span>`);
   if (p.log) partes.push(`<span class="ia-log">${esc(p.log)}</span>`);
-  if (p.codigo) partes.push(`<div class="ia-codigo"><code>${esc(p.codigo)}</code><button type="button" class="ob-link" data-act="ia-copiar-codigo" data-ia="${v.ia}" data-texto="${esc(p.codigo)}">${ui.copiado === v.ia ? "Copiado" : "Copiar"}</button></div>`);
+  if (p.codigo) partes.push(`<div class="ia-codigo"><code>${esc(p.codigo)}</code><button type="button" class="ob-link" data-act="ia-copiar-codigo" data-ia="${v.ia}" data-texto="${esc(p.codigo)}" ${VIVO}>${ui.copiado === v.ia ? ROTULO_COPIADO : "Copiar"}</button></div>`);
   if (p.dica) partes.push(`<div class="ia-troca-dica">${ICONE_IA.aviso}<p>${esc(p.dica)}</p></div>`);
   if (p.abrir || p.esperando) {
     const abrir = p.abrir ? `<button type="button" class="ob-link" data-act="ia-abrir-link" data-ia="${v.ia}">Abrir a página da ${esc(empresa)}${ICONE_IA.abrir}</button>` : "";

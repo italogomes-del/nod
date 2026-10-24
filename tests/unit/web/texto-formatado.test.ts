@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { soLinks, tabelaComo, textoFormatado } from "../../../web/lib/texto-formatado.ts";
 
 /** NOD-45: o card do bloco de código. `codigo` já vem escapado; o Copiar só aparece com a cerca fechada. */
-const COPIAR = '<button type="button" data-act="copiar-codigo" aria-label="Copiar código"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 5.5V3.5a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2"/></svg><span class="md-codigo-estado">Copiar</span></button>';
+const COPIAR = '<button type="button" data-act="copiar-codigo" aria-label="Copiar código" aria-live="polite"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 5.5V3.5a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2"/></svg><span class="md-codigo-estado">Copiar</span></button>';
 const card = (codigo: string, linguagem = "", fechado = true): string =>
   `<div class="md-codigo"><div class="md-codigo-topo">${linguagem ? `<span class="md-codigo-ling">${linguagem}</span>` : ""}${fechado ? COPIAR : ""}</div><pre><code>${codigo}</code></pre></div>`;
 
@@ -343,7 +343,7 @@ describe("card do bloco de código (NOD-45)", () => {
   it("bloco ts fechado vira card com rótulo, botão Copiar e código sem a última quebra", () => {
     const html = textoFormatado("```ts\nconst a = 1\n```");
     expect(html).toBe(card("const a = 1", "ts"));
-    expect(html).toContain('<button type="button" data-act="copiar-codigo" aria-label="Copiar código">');
+    expect(html).toContain('<button type="button" data-act="copiar-codigo" aria-label="Copiar código" aria-live="polite">');
     expect(html).toContain("<pre><code>const a = 1</code></pre>");
   });
 

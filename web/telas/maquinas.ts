@@ -365,7 +365,7 @@ function renderConectar(estado: Estado, c: ConectarMaquina): string {
     const cmd = `curl -fsSL "${origem}/motor?convite=${c.convite}" | sh`;
     corpo = `<h3>Rode este comando na sua máquina Linux</h3>
       <p>Debian ou Ubuntu, em qualquer provedor (2 vCPU e 4 GB para começar; 4 vCPU e 8 GB com vários bots). Ele instala o motor com o Claude Code e o Codex. A máquina não precisa de porta aberta: é ela que procura trabalho no Nod.</p>
-      <div class="cx-cmd"><code>${esc(cmd)}</code>${botao("copiar-texto", "Copiar", { classe: "sm", dados: { texto: cmd } })}</div>
+      <div class="cx-cmd"><code>${esc(cmd)}</code>${botao("copiar-texto", "Copiar", { classe: "sm", dados: { texto: cmd }, vivo: true })}</div>
       <div class="cx-espera" role="status"><span class="ob-gira" aria-hidden="true"></span><span>Esperando a máquina aparecer…</span><small>o convite vale ${c.conviteAte ? `até ${esc(hora(c.conviteAte))}` : "por 30 min"} e uma vez</small></div>
       ${erro}
       <div class="cx-rodape">${fechar}<span class="cx-segue">Esta tela segue sozinha · ${botao("passo-conectar-maquina", "apareceu um código?", { classe: "link", dados: { passo: "codigo" } })}</span></div>`;
@@ -381,9 +381,9 @@ function renderConectar(estado: Estado, c: ConectarMaquina): string {
     corpo = `<h3>Rode este comando na sua máquina Linux</h3>
       <p>Debian ou Ubuntu, em qualquer provedor. Para começar, 2 vCPU e 4 GB; com vários bots rodando testes e builds, 4 vCPU e 8 GB. Ela não precisa de porta aberta: é a máquina que procura trabalho no Nod. Use a máquina só para o Nod.</p>
       ${noMac ? `<p>Este Nod roda no seu Mac. Antes, abra no Mac um túnel SSH para a VM e deixe-o aberto: com ele a VM enxerga o Nod em ${esc(noMac.api)}, só ela e sem porta aberta na internet.</p>
-      <div class="cx-cmd"><code>${esc(tunel)}</code>${botao("copiar-texto", "Copiar", { classe: "sm", dados: { texto: tunel } })}</div>
+      <div class="cx-cmd"><code>${esc(tunel)}</code>${botao("copiar-texto", "Copiar", { classe: "sm", dados: { texto: tunel }, vivo: true })}</div>
       <p>Depois, no terminal da VM:</p>` : ""}
-      <div class="cx-cmd"><code>${esc(cmd)}</code>${botao("copiar-texto", "Copiar", { classe: "sm", dados: { texto: cmd } })}</div>
+      <div class="cx-cmd"><code>${esc(cmd)}</code>${botao("copiar-texto", "Copiar", { classe: "sm", dados: { texto: cmd }, vivo: true })}</div>
       <p class="cx-nota">Ele instala o motor, cria o usuário nod e, no fim, mostra um código.</p>
       <div class="cx-rodape">${fechar}${botao("passo-conectar-maquina", "Apareceu um código", { classe: "pri", dados: { passo: "codigo" } })}</div>`;
   } else if (c.passo === "codigo") {

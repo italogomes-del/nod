@@ -88,7 +88,7 @@ describe("abertura e a IA do Mac", () => {
     expect(h).toContain('data-act="onboarding-ia-entrar" data-ia="claude-cli"');
     expect(h).toContain("Codex não está neste Mac");
     expect(h).toContain('data-act="onboarding-ia-instalar" data-ia="codex-cli"');
-    expect(h).toContain("Dá para trocar ou adicionar outra depois, em Ajustes.");
+    expect(h).toContain("Dá para trocar ou adicionar outra depois, em Seu espaço › Provedores de IA.");
   });
 
   it("card clicado: 'Termine no navegador…' e 'Esperando' com a roda; pronto vira 'Conectado' sem clique", () => {
@@ -285,7 +285,7 @@ describe("teste de verdade: 'Falta conectar uma IA'", () => {
     expect(h).toContain('data-act="onboarding-ia-como-liberar" data-ia="claude-cli">Como liberar</button>');
     expect(h).toContain('data-act="onboarding-ia-instalar" data-ia="codex-cli">Instalar e entrar</button>');
     expect(h.match(/Em breve/g)).toHaveLength(2);
-    expect(h).toContain("O nod nunca vê sua senha nem sua chave. Dá para trocar ou adicionar outra IA depois, em Ajustes.");
+    expect(h).toContain("O nod nunca vê sua senha nem sua chave. Dá para trocar ou adicionar outra IA depois, em Seu espaço › Provedores de IA.");
   });
 
   it("o aviso não fica só na cor (ícone + frase) e tudo que se clica é <button>", () => {
@@ -405,7 +405,7 @@ describe("teste de verdade: 'Seus bots já têm uma IA'", () => {
     expect(h).toContain('class="ob-pilula contorno" data-act="onboarding-ia-entrar" data-ia="claude-cli">Entrar com outra conta</button>');
     // O bloco de explicação fica na lista; aqui o outro provedor é uma linha só.
     expect(h).not.toContain("ob-ia-explica");
-    expect(h).toContain("Dá para trocar ou adicionar outra IA depois, em Ajustes.");
+    expect(h).toContain("Dá para trocar ou adicionar outra IA depois, em Seu espaço › Provedores de IA.");
   });
 
   it("sem a resposta (app antigo), só 'Conectado'", () => {
