@@ -176,6 +176,8 @@
     top: var(--topo-visivel, 0px); box-sizing: border-box;
     padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
   .gv-icone { width: 44px; height: 44px; }
+  .gvb-menu { width: 44px; height: 44px; margin-right: 2px; opacity: 1; }
+  .gvb-mostrar { min-height: 44px; }
   .gv-lado { width: auto; min-width: 92px; }
 
   /* ---- Seu espaço: a lista de seções em cima, o conteúdo embaixo ---- */

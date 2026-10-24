@@ -31,7 +31,12 @@ export function abrirPreviaArquivo(origem: HTMLElement): HTMLDialogElement | nul
     html: htmlPreviaArquivo({ nome, url }),
     origem,
     // A conversa pode re-renderizar com o modal aberto: o foco volta ao card novo do mesmo anexo.
-    reencontrar: () => document.querySelector<HTMLElement>(`[data-act="previa-arquivo"][data-id="${CSS.escape(id)}"]`),
+    // NOD-326: o mesmo anexo está no chat e na Biblioteca; o foco volta à casa de onde a prévia abriu.
+    reencontrar: () => {
+      const sel = `[data-act="previa-arquivo"][data-id="${CSS.escape(id)}"]`;
+      const casa = origem.closest<HTMLElement>("[data-biblioteca]")?.dataset.biblioteca;
+      return document.querySelector<HTMLElement>(casa !== undefined ? `[data-biblioteca="${CSS.escape(casa)}"] ${sel}` : `${sel}:not([data-biblioteca] *)`);
+    },
     seletorFechar: '[data-previa="fechar"]',
     aoFechar: () => ctrl.abort(new DOMException("fechou", "AbortError")),
   });

@@ -1,7 +1,8 @@
 import type { RespostaMutacao } from "../../../contracts/api.ts";
 import { TAMANHO_MAX_ANEXO } from "../../../contracts/anexo.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
-import { lerAnexo, lerFaixaDoAnexo, localDaMidia, receberAnexo } from "../../../use-cases/anexos.ts";
+import { lerAnexo, lerBiblioteca, lerFaixaDoAnexo, localDaMidia, receberAnexo } from "../../../use-cases/anexos.ts";
+import { lerCursor, limiteDaBiblioteca } from "../../../domain/biblioteca.ts";
 import { enviarMensagem, lerConversa } from "../../../use-cases/enviar-mensagem.ts";
 import { parar } from "../../../use-cases/parar.ts";
 import { reagir } from "../../../use-cases/reagir.ts";
@@ -109,6 +110,20 @@ export function criarRotasConversas(d: DepsRotas): Rota[] {
       padrao: new RegExp(`^/conversas/${ID}/anexos/(?<aid>[^/]+)/local$`),
       async handler(ctx) {
         ctx.json(200, await executar(ctx.escopo, localDaMidia, { conversaId: ctx.params.id ?? "", anexoId: ctx.params.aid ?? "" }));
+      },
+    },
+    {
+      // NOD-326: a Biblioteca da gaveta do bot (a mídia que o bot anexou nesta conversa), paginada por `?antes=<cursor>`.
+      metodo: "GET",
+      padrao: new RegExp(`^/conversas/${ID}/biblioteca$`),
+      async handler(ctx) {
+        const q = new URL(ctx.req.url ?? "/", "http://x").searchParams;
+        const textoAntes = q.get("antes");
+        const antes = textoAntes === null || textoAntes === "" ? null : lerCursor(textoAntes);
+        if (textoAntes && !antes) throw new ErroDeDominio("entrada_invalida", { cause: "biblioteca: cursor" });
+        const limite = limiteDaBiblioteca(q.get("limite"));
+        if (limite === null) throw new ErroDeDominio("entrada_invalida", { cause: "biblioteca: limite" });
+        ctx.json(200, await executar(ctx.escopo, lerBiblioteca, { conversaId: ctx.params.id ?? "", antes, limite }));
       },
     },
     {

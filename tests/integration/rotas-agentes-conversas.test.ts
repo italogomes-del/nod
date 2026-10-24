@@ -259,4 +259,26 @@ describeIntegracao("rotas agentes/conversas/propostas/turnos/frota (L6) com serv
       trxAtual = null;
     });
   });
+
+  it("NOD-326: GET da Biblioteca pela rota — 200 vazia na conversa nova, 404 para Ana e para id que não é uuid, 400 para cursor e limite inválidos", async () => {
+    await withRollback(MARLON, async (trx) => {
+      trxAtual = trx;
+      const marlon = await servidor.entrar("marlon");
+      const ana = await servidor.entrar("ana");
+      const { conversa } = (await (await servidor.chamar(marlon, "POST", "agentes", { dono: "pessoa" })).json()) as { agente: Agente; conversa: Conversa };
+      // Upload da pessoa não entra na Biblioteca.
+      const subido = await fetch(`${servidor.url}/api/t/${marlon.tenantId}/conversas/${conversa.id}/anexos`, { method: "POST", headers: { cookie: marlon.cookie, "content-type": "image/png", "x-nod-nome": "a.png" }, body: png(4, 4) });
+      expect(subido.status).toBe(201);
+      const ok = await servidor.chamar(marlon, "GET", `conversas/${conversa.id}/biblioteca`);
+      expect(ok.status).toBe(200);
+      expect(await ok.json()).toEqual({ itens: [], proximo: null });
+      expect((await servidor.chamar(ana, "GET", `conversas/${conversa.id}/biblioteca`)).status).toBe(404);
+      expect((await servidor.chamar(marlon, "GET", `conversas/${randomUUID()}/biblioteca`)).status).toBe(404);
+      expect((await servidor.chamar(marlon, "GET", "conversas/nao-e-uuid/biblioteca")).status).toBe(404);
+      expect((await servidor.chamar(marlon, "GET", `conversas/${conversa.id}/biblioteca?antes=lixo`)).status).toBe(400);
+      expect((await servidor.chamar(marlon, "GET", `conversas/${conversa.id}/biblioteca?limite=201`)).status).toBe(400);
+      expect((await servidor.chamar(marlon, "GET", `conversas/${conversa.id}/biblioteca?limite=200&antes=${encodeURIComponent(`2026-10-24T03:32:00.123456Z_${randomUUID()}`)}`)).status).toBe(200);
+      trxAtual = null;
+    });
+  });
 });

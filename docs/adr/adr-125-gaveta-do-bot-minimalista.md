@@ -24,8 +24,8 @@ em abas e num nível de ajustes.
    valor vence) e a frota relida no meio não desfaz na tela o que ainda vai sair. Gerar e Enviar imagem ficam para a
    NOD-355.
 4. **Abas** (padrão da NOD-326): Detalhes, Biblioteca e Computador, com a última aba lembrada por bot neste navegador. O
-   bot de outra pessoa não tem a aba Computador. Até a NOD-326 entrar, a aba Biblioteca fica atrás da chave
-   `BIBLIOTECA_NA_GAVETA` (desligada).
+   bot de outra pessoa não tem a aba Computador. A aba Biblioteca entrou com a NOD-326 (a chave `BIBLIOTECA_NA_GAVETA`
+   saiu; ver a emenda no fim).
 5. **Detalhes** mostra o onboarding, as Rotinas e uma linha "Ajustes ›". **Computador** mostra a miniatura e os estados
    ligado, dormindo, sem computador e fora do ar, este como linha neutra (ícone em `--danger`) e um ponto na aba que
    vem só da frota. Todos os estados têm Abrir computador; ambiente indisponível e falha de leitura dizem isso.
@@ -33,7 +33,7 @@ em abas e num nível de ajustes.
    Acessos e Ambiente, e no fim o que é do Modo dev. O ‹ dos níveis abertos dali volta para Ajustes; o da rotina volta à
    visão geral. Missão e voz é o antigo Editar perfil sem forma, cor, nome e título.
 7. **Saem:** Colabora com (qualquer bot colabora com qualquer bot) e a Pasta de trabalho, cujo destino é a Biblioteca;
-   enquanto `BIBLIOTECA_NA_GAVETA` estiver desligada, a Pasta fica em Ajustes › Ambiente, para nada sumir sem destino. Planejar e Pedir ajuda viram os dois primeiros itens do "/" do campo ("Atalhos de <bot>").
+   desde a NOD-326 a Pasta mora no topo da aba Biblioteca (antes, em Ajustes › Ambiente, para nada sumir sem destino). Planejar e Pedir ajuda viram os dois primeiros itens do "/" do campo ("Atalhos de <bot>").
 8. **Erros sem cor de fundo:** nenhum cartão, tag ou botão cheio vermelho ou âmbar na visão geral; só o ícone tem cor.
 
 ## Alternativas descartadas
@@ -51,3 +51,18 @@ em abas e num nível de ajustes.
   só no celular.
 - Se o nome for apagado por engano (relato de nome trocado sem querer) mais de uma vez, a edição inline passa a pedir
   um clique em "Renomear" antes de virar campo.
+
+## Emenda (2026-10-24, NOD-326): a aba Biblioteca
+
+- A chave `BIBLIOTECA_NA_GAVETA` foi removida: as abas são Detalhes · Biblioteca · Computador (o bot de outra pessoa,
+  Detalhes · Biblioteca).
+- A Pasta de trabalho sai de Ajustes › Ambiente e fica no topo da aba Biblioteca, só no bot da pessoa.
+- A aba lista a mídia que o bot criou e prendeu a uma fala desta conversa (`GET /conversas/:id/biblioteca`, cursor por
+  instante e id, 60 por página), em Hoje, Últimos 7 dias e Mais antigos no relógio da pessoa, 5 por grupo e mais 5 a
+  cada "Mostrar mais". Imagem e vídeo abrem na tela cheia; o arquivo com prévia, na prévia; o resto (áudio também)
+  baixa. O "…" tem Baixar e Ir para a mensagem, este só quando a fala está desenhada no chat: o chat carrega uma janela
+  das últimas falas e ainda não pagina para trás; sem a fala, o "…" mostra "A mensagem está mais acima no chat." (o ir
+  até a fala antiga fica para a paginação do histórico). A lista só é lida com a aba aberta e se relê ao vivo quando
+  chega fala nova do bot, e ao reconectar ou retomar o stream.
+- Gatilho de reversão: se a leitura da Biblioteca passar de 200 ms no p95 com o índice parcial `anexos_da_biblioteca`,
+  a lista passa a vir junto com a conversa em vez de uma rota própria.

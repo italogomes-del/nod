@@ -25,6 +25,9 @@ import { criarIasDoMac } from "./lib/ias-do-mac.ts";
 import { instalarOrdemArrastavel } from "./lib/ordem-arrastavel.ts";
 import { abrirMenu, abrirMenuCompartilhar, abrirMenuConta, dialogo, pedirGestao, textoDuplicar, type BotGerido, type AcaoGestao } from "./telas/gestao-agentes.ts";
 import { abrirLuz } from "./telas/luz.ts";
+import { baixarUrl } from "./telas/luz-html.ts";
+import { htmlDoMenuDaBiblioteca } from "./telas/biblioteca.ts";
+import { lerSeAindaVale } from "./lib/biblioteca.ts";
 import { acaoDoAlvo, indiceNaLuz } from "./lib/link-anexo.ts";
 import { alternarAudio, alternarGif, instalarMidiaDom, irNoAudio, mostrarNoFinder, tentarDeNovo, velocidadeDoAudio, type OpcoesMidiaDom } from "./lib/midia-dom.ts";
 import { baixaveis } from "./lib/midia.ts";
@@ -40,7 +43,7 @@ import type { AlvoAviso } from "../src/contracts/desktop.ts";
 import type { Experimentos } from "../src/contracts/raio-x.ts";
 import type { Escopo } from "../src/shared/types.ts";
 import type { FrameSse } from "../src/contracts/frame.ts";
-import { agenteDaTela, conversaAbertaTemNotaDeContas, conversaDaTela, estadoInicial, invalidacoesAoReconectar, invalidacoesAoRetomar, invalidacoesDaTela, mudouNaTela, reduzir, type Acao, type Estado, type Invalidacao, type NivelGaveta, type SecaoEspaco, type Tela } from "./estado/reducer.ts";
+import { agenteDaTela, bibliotecaAberta, conversaAbertaTemNotaDeContas, conversaDaTela, estadoInicial, invalidacoesAoReconectar, invalidacoesAoRetomar, invalidacoesDaTela, mudouNaTela, reduzir, type Acao, type Estado, type Invalidacao, type NivelGaveta, type SecaoEspaco, type Tela } from "./estado/reducer.ts";
 import { contaApi, criarApi, minhaContaApi, ErroApi, observarRede, sessao as sessaoApi, type Api } from "./lib/api.ts";
 import { criarContaNoChat, fraseDoErro as fraseDoErroDeConta } from "./telas/conta-no-chat.ts";
 import { criarMinhaConta } from "./telas/minha-conta.ts";
@@ -619,7 +622,8 @@ const releituraAtividade = criarReleituraAdiada(JANELA_ATIVIDADE_MS, (fn, ms) =>
   const t = window.setTimeout(fn, ms);
   return () => window.clearTimeout(t);
 }, () => void reidratar());
-const daAtividade = (q: Invalidacao): boolean => q.startsWith("atividade:") || q.startsWith("atividade-hoje:");
+// NOD-326: a releitura ao vivo da Biblioteca vai na mesma janela (a rajada de falas de um turno vira uma leitura só).
+const daAtividade = (q: Invalidacao): boolean => q.startsWith("atividade:") || q.startsWith("atividade-hoje:") || q.startsWith("biblioteca:");
 
 /**
  * ADR-125: o que foi escolhido e ainda não voltou confirmado, por bot: a frota relida no meio não desfaz na tela.
@@ -948,6 +952,15 @@ async function buscar(q: Invalidacao): Promise<Acao | null> {
     const total = await api.contagemAtividade(agenteId, dia, fusoLocal()).then((c) => c.total, () => null);
     return { tipo: "hidratar-atividade-hoje", agenteId, dia, total };
   }
+  // NOD-326: a 1ª página da Biblioteca. Qualquer falha vira o estado de erro da aba (com Tentar de novo), sem faixa vermelha.
+  if (q.startsWith("biblioteca:")) {
+    const conversaId = q.slice(11);
+    const sessao = estado.sessao;
+    const cliente = api;
+    // Revisão 1: a resposta de outra sessão (trocou a pessoa no caminho) não entra.
+    const r = await lerSeAindaVale(() => cliente.biblioteca(conversaId), () => estado.sessao === sessao && api === cliente);
+    return r.vale ? { tipo: "hidratar-biblioteca", conversaId, pagina: r.valor, seguinte: false } : null;
+  }
   return null;
 }
 
@@ -1064,6 +1077,8 @@ function relevante(q: Invalidacao): boolean {
   if (q.startsWith("execucoes:")) return t.tipo === "rotinas" || t.tipo === "conversa";
   // ADR-114: o "N hoje" só com o painel do bot à vista; a página, só com a Atividade dele aberta naquele dia.
   if (q.startsWith("atividade-hoje:")) return t.tipo === "conversa" && t.agenteId === q.slice(15) && painelVisivel();
+  // NOD-326: só com a aba Biblioteca aberta, na visão geral da gaveta deste bot, e o painel à vista.
+  if (q.startsWith("biblioteca:")) return t.tipo === "conversa" && t.conversaId === q.slice(11) && bibliotecaAberta(estado) && painelVisivel();
   if (q.startsWith("atividade:")) {
     const v = estado.atividadeVista;
     return t.tipo === "conversa" && estado.gaveta?.nivel.tipo === "atividade" && !!v && q.slice(10) === chaveDaAtividade(v.agenteId, v.dia);
@@ -3568,6 +3583,10 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   // ADR-125 (NOD-349): o topo da gaveta, as abas e o popover do avatar.
   "gaveta-compartilhar": (el) => { const a = botGerido(el.dataset.id); if (a) abrirMenuCompartilhar(a, el, (acao) => acaoDoBot(a, acao)); },
   "gaveta-aba": (el) => escolherAba(el.dataset.id ?? "", el.dataset.aba ?? ""),
+  // NOD-326: a aba Biblioteca.
+  "biblioteca-mais": (el) => void mostrarMaisNaBiblioteca(el.dataset.id ?? "", el.dataset.grupo ?? ""),
+  "biblioteca-tentar": (el) => dispatch({ tipo: "biblioteca-tentar", conversaId: el.dataset.id ?? "" }),
+  "biblioteca-menu": (el) => abrirMenuDaBiblioteca(el),
   "gaveta-avatar": (el) => {
     const a = estado.frota?.agentes.find((b) => b.id === el.dataset.id);
     if (!a) return;
@@ -5166,6 +5185,80 @@ function ligarComputador(agenteId: string, tipo: "acordar" | "religar"): Promise
 
 /** ADR-125: a última aba por bot, lembrada neste navegador (`nod.gaveta.aba`; sem storage, só nesta aba). */
 const CHAVE_ABA_GAVETA = "nod.gaveta.aba";
+/**
+ * NOD-326: "Mostrar mais" num grupo da Biblioteca — mais 5 do que já foi lido ou, no último grupo, a próxima página. O
+ * foco vai para o primeiro item novo (o botão clicado some ou é redesenhado).
+ */
+async function mostrarMaisNaBiblioteca(conversaId: string, grupo: string): Promise<void> {
+  if (grupo !== "hoje" && grupo !== "semana" && grupo !== "antigos") return;
+  const antes = document.querySelectorAll(`#detalhes #gvb-${grupo} ~ .gvb-itens > li.gvb-item`).length;
+  const antesDoClique = estado.bibliotecaDoBot[conversaId];
+  dispatch({ tipo: "biblioteca-mais", conversaId, grupo });
+  const b = estado.bibliotecaDoBot[conversaId];
+  // Revisão 3: só busca quem ligou o "carregando" neste clique (o outro grupo, com a página a caminho, não repete o GET).
+  const pediu = !antesDoClique?.carregandoMais && b?.carregandoMais === true;
+  if (pediu && !api) dispatch({ tipo: "hidratar-biblioteca", conversaId, pagina: null, seguinte: true });
+  if (pediu && b && api) {
+    const sessao = estado.sessao;
+    const cliente = api;
+    const r = await lerSeAindaVale(() => cliente.biblioteca(conversaId, b.proximo ?? undefined), () => estado.sessao === sessao && api === cliente);
+    // Revisão 1: trocou a sessão no caminho — a página é da de antes e não entra; o botão (se a lista ficou) volta.
+    if (!r.vale) { dispatch({ tipo: "hidratar-biblioteca", conversaId, pagina: null, seguinte: true }); return; }
+    if (!r.valor) anunciar("Não deu para carregar mais arquivos. Tente de novo.");
+    dispatch({ tipo: "hidratar-biblioteca", conversaId, pagina: r.valor, seguinte: true });
+  }
+  // Revisão 2: o foco só anda se a pessoa ainda está no botão (ou ele sumiu); se ela foi para outro lugar, fica lá.
+  const ativo = document.activeElement;
+  if (ativo && ativo !== document.body && !ativo.matches(".gvb-mostrar")) return;
+  // O primeiro item novo do grupo; se a página trouxe só itens de outro grupo, o primeiro do grupo seguinte; senão o botão.
+  const doGrupo = document.querySelectorAll<HTMLElement>(`#detalhes #gvb-${grupo} ~ .gvb-itens > li.gvb-item`)[antes];
+  const alvo = doGrupo ?? document.querySelector<HTMLElement>(`#detalhes .gvb-grupo:has(#gvb-${grupo}) ~ .gvb-grupo li.gvb-item`) ?? document.querySelector<HTMLElement>(`#detalhes #gvb-${grupo} ~ .gvb-itens .gvb-mostrar`);
+  (alvo?.matches(".gvb-mostrar") ? alvo : alvo?.querySelector<HTMLElement>(".gvb-abrir, .gvb-menu"))?.focus();
+}
+
+/**
+ * NOD-326: o "…" de um item da Biblioteca — Baixar (só com os bytes no nod) e Ir para a mensagem (só com a fala desenhada
+ * no chat: a conversa carrega uma janela). No celular, a gaveta sobreposta fecha antes de levar à mensagem.
+ */
+function abrirMenuDaBiblioteca(ancora: HTMLElement): void {
+  const { url, nome = "arquivo", mensagemDe = "" } = ancora.dataset;
+  const fala = mensagemDe ? document.querySelector<HTMLElement>(`#timeline [data-mensagem="${CSS.escape(mensagemDe)}"], [data-mensagem="${CSS.escape(mensagemDe)}"]:not(#detalhes *)`) : null;
+  const d = dialogo(htmlDoMenuDaBiblioteca({ nome, baixar: Boolean(url), fala: fala !== null }), true);
+  d.setAttribute("aria-label", `Ações de ${nome}`);
+  d.classList.add("menu-compartilhar");
+  ancora.setAttribute("aria-expanded", "true");
+  d.addEventListener("close", () => ancora.setAttribute("aria-expanded", "false"));
+  const r = ancora.getBoundingClientRect();
+  d.style.left = `${Math.max(12, Math.min(r.right - d.offsetWidth, window.innerWidth - d.offsetWidth - 12))}px`;
+  d.style.top = `${Math.max(12, Math.min(r.bottom + 6, window.innerHeight - d.offsetHeight - 12))}px`;
+  d.addEventListener("click", (e) => {
+    const acao = (e.target as HTMLElement).closest<HTMLElement>("[data-gestao]")?.dataset.gestao;
+    if (!acao) return;
+    d.close();
+    if (acao === "baixar" && url) {
+      const a = document.createElement("a");
+      a.href = baixarUrl(url);
+      a.download = nome;
+      a.click();
+    } else if (acao === "ir" && fala?.isConnected) {
+      if (window.matchMedia("(max-width: 1099px)").matches) {
+        document.querySelector(".app")?.classList.remove("detalhes-abertos");
+        marcarPainelNaPilula();
+      }
+      levarAo(fala);
+    }
+  });
+  d.addEventListener("keydown", (e) => {
+    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) return;
+    e.preventDefault();
+    const bts = [...d.querySelectorAll<HTMLButtonElement>("button")];
+    const atual = bts.indexOf(document.activeElement as HTMLButtonElement);
+    const proximo = e.key === "Home" ? 0 : e.key === "End" ? bts.length - 1 : (atual + (e.key === "ArrowDown" ? 1 : -1) + bts.length) % bts.length;
+    bts[proximo]?.focus();
+  });
+  (d.querySelector<HTMLElement>('[role="menuitem"]') ?? d.querySelector<HTMLElement>(".menu-nota"))?.focus();
+}
+
 function escolherAba(agenteId: string, aba: string): void {
   if (aba !== "detalhes" && aba !== "biblioteca" && aba !== "computador") return;
   dispatch({ tipo: "aba-gaveta", agenteId, aba });

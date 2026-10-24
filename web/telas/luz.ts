@@ -23,7 +23,10 @@ export function abrirLuz(origem: HTMLElement, o: OpcoesLuz = {}): HTMLDialogElem
   }
   let i = o.indice ?? Number(origem.dataset.i ?? "0");
   if (!Number.isInteger(i) || !itens[i]) return null;
-  const mensagem = origem.closest<HTMLElement>("[data-mensagem]")?.dataset.mensagem ?? "";
+  // A casa da lista: a fala no chat ou (NOD-326) a Biblioteca da gaveta — o foco volta ao botão dela depois do redesenho.
+  const mensagem = origem.closest<HTMLElement>("[data-mensagem]")?.dataset.mensagem;
+  const biblioteca = mensagem === undefined ? origem.closest<HTMLElement>("[data-biblioteca]")?.dataset.biblioteca : undefined;
+  const casa = biblioteca !== undefined ? `[data-biblioteca="${CSS.escape(biblioteca)}"]` : `[data-mensagem="${CSS.escape(mensagem ?? "")}"]`;
   const anexoDe = (k: number): string => itens[k]?.id ?? "";
   const esteMac = o.finder ? lembrancaDaMidia.esteMac : null;
   const dialog = abrirSobreposicao({
@@ -32,8 +35,8 @@ export function abrirLuz(origem: HTMLElement, o: OpcoesLuz = {}): HTMLDialogElem
     html: htmlDaLuz(itens, i, esteMac),
     origem,
     // A conversa redesenhou com a tela aberta: o foco volta ao botão da mídia que está à vista agora.
-    reencontrar: () => document.querySelector<HTMLElement>(`[data-mensagem="${CSS.escape(mensagem)}"] [data-act="midia-abrir"][data-anexo-id="${CSS.escape(anexoDe(i))}"]`)
-      ?? document.querySelector<HTMLElement>(`[data-mensagem="${CSS.escape(mensagem)}"] [data-act="midia-abrir"]`),
+    reencontrar: () => document.querySelector<HTMLElement>(`${casa} [data-act="midia-abrir"][data-anexo-id="${CSS.escape(anexoDe(i))}"]`)
+      ?? document.querySelector<HTMLElement>(`${casa} [data-act="midia-abrir"]`),
     seletorFechar: '[data-luz="fechar"]',
     aoFechar: () => dialog.querySelectorAll("video").forEach((v) => v.pause()),
   });

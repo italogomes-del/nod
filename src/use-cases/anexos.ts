@@ -1,4 +1,6 @@
 import type { AnexoMeta } from "../contracts/anexo.ts";
+import type { PaginaDaBiblioteca } from "../contracts/biblioteca.ts";
+import { codificarCursor, type CursorBiblioteca } from "../domain/biblioteca.ts";
 import { ehMimeAnexo, nomeSeguro, recusaDoArquivo } from "../domain/anexo.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import type { AnexoGuardado } from "../repositories/anexos.repo.ts";
@@ -55,4 +57,15 @@ export const lerFaixaDoAnexo: CasoDeUso<
   const pedaco = await deps.repos.anexos.faixa(meta.id, f.inicio, f.fim);
   if (!pedaco) throw new ErroDeDominio("nao_encontrado", { cause: "anexo" });
   return { data: { meta, bytes: pedaco, faixa: { ...f, total: meta.tamanho } } };
+};
+
+/**
+ * NOD-326: a Biblioteca da gaveta do bot. Conversa que a pessoa não enxerga (outra pessoa, outro tenant) é nao_encontrado
+ * pela RLS, como em qualquer rota; o repo ainda filtra pela conversa, então nunca sai anexo de outra.
+ */
+export const lerBiblioteca: CasoDeUso<{ conversaId: string; antes: CursorBiblioteca | null; limite: number }, PaginaDaBiblioteca> = async (deps, input) => {
+  const conversa = await deps.repos.conversas.buscar(input.conversaId);
+  if (!conversa) throw new ErroDeDominio("nao_encontrado", { cause: "conversa" });
+  const r = await deps.repos.anexos.daBiblioteca(conversa.id, input.antes, input.limite);
+  return { data: { itens: r.itens, proximo: r.temMais && r.ultimo ? codificarCursor(r.ultimo) : null } };
 };

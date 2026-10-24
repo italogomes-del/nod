@@ -162,8 +162,14 @@ async function conferirLocal(card: HTMLElement, o: OpcoesMidiaDom): Promise<void
   const existe = caminho ? await o.ponte.existe(caminho).catch(() => true) : true;
   if (existe) return;
   lembrancaDaMidia.sumiram.add(id);
-  const nome = card.querySelector(".anexo-info b")?.textContent ?? "";
-  card.outerHTML = cartaoSumiu(nome, card.dataset.bot || undefined);
+  // NOD-326: o mesmo anexo pode estar no chat e na Biblioteca. O cartão do chat vira o "saiu da pasta" na hora; o item
+  // da Biblioteca não é trocado (a lista se redesenha pela lembrança, com o nome e o "…").
+  const cartoes = [card, ...document.querySelectorAll<HTMLElement>(`[data-midia-local][data-anexo-id="${CSS.escape(id)}"]`)];
+  for (const c of new Set(cartoes)) {
+    if (!c.isConnected || c.closest("[data-biblioteca]")) continue;
+    const nome = c.querySelector(".anexo-info b")?.textContent ?? "";
+    c.outerHTML = cartaoSumiu(nome, c.dataset.bot || undefined);
+  }
   o.redesenhar();
 }
 

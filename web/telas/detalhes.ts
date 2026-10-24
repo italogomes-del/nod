@@ -22,6 +22,8 @@ import { textoMotivo } from "./negacao.ts";
 import { renderGavetaTrabalhos } from "./trabalhos.ts";
 import { abertosDoBot } from "../lib/trabalhos.ts";
 import { renderAtividade } from "./atividade.ts";
+import { renderListaBiblioteca } from "./biblioteca.ts";
+import { lembrancaDaMidia } from "../lib/midia.ts";
 
 /**
  * O "N hoje" da linha "Atividade" (ADR-114, chat limpo, PR 2; decisão tomada 1: o dia inteiro). Antes de a contagem chegar
@@ -54,15 +56,12 @@ export function paiDoNivel(nivel: NivelGaveta): NivelGaveta | null {
   return nivel.tipo === "rotina" || nivel.tipo === "nova-rotina" || nivel.tipo === "ajustes" ? null : { tipo: "ajustes" };
 }
 
-/** ADR-125: a aba Biblioteca entra com a NOD-326; até lá a chave fica desligada e a gaveta tem Detalhes e Computador. */
-export const BIBLIOTECA_NA_GAVETA = false;
-
 /** ADR-125: as abas que o bot tem. O bot de outra pessoa não tem Computador; com uma aba só, a gaveta não mostra abas. */
-export function abasDoBot(dona: boolean, biblioteca = BIBLIOTECA_NA_GAVETA): AbaGaveta[] {
-  return ["detalhes", ...(biblioteca ? (["biblioteca"] as const) : []), ...(dona ? (["computador"] as const) : [])];
+export function abasDoBot(dona: boolean): AbaGaveta[] {
+  return ["detalhes", "biblioteca", ...(dona ? (["computador"] as const) : [])];
 }
 
-/** A aba aberta: a lembrada, se ela ainda existe para este bot (a chave e o D15 tiram abas); senão, Detalhes. */
+/** A aba aberta: a lembrada, se ela ainda existe para este bot (o D15 tira o Computador); senão, Detalhes. */
 export function abaAberta(estado: Pick<Estado, "abaGaveta">, agenteId: string, abas: readonly AbaGaveta[]): AbaGaveta {
   const lembrada = estado.abaGaveta[agenteId];
   return lembrada && abas.includes(lembrada) ? lembrada : "detalhes";
@@ -226,16 +225,24 @@ function abaComputador(estado: Estado, a: Bot): string {
   return `<section class="gv-secao gv-tela" data-comp-bot="${esc(a.id)}"${visto === null ? ' aria-busy="true"' : ""}>${corpo}</section>`;
 }
 
-/** ADR-125: a aba Biblioteca chega com a NOD-326 (atrás de `BIBLIOTECA_NA_GAVETA`). */
-// Revisão 2 da NOD-349: a Pasta sai de Ajustes e vem para cá quando a chave liga (nada some sem destino).
+/**
+ * NOD-326 (ADR-125): a aba Biblioteca — no bot da pessoa, a Pasta de trabalho no topo (saiu de Ajustes › Ambiente); embaixo,
+ * os arquivos e mídias que o bot criou nesta conversa (web/telas/biblioteca.ts).
+ */
 export function abaBiblioteca(estado: Estado, a: Bot, dona: boolean): string {
-  const pasta = dona ? `<div class="gv-cartao">${linhaDaPasta(estado, a)}</div>` : "";
-  return `${pasta}<p class="gvn-vazio">Os arquivos de ${esc(a.nome)} aparecem aqui.</p>`;
+  const pasta = dona ? `<div class="gv-cartao gvb-pasta">${linhaDaPasta(estado, a)}</div>` : "";
+  const tenant = estado.sessao?.tenantId;
+  if (!tenant) return pasta;
+  // Revisão 2: a mesma conversa que a busca e a releitura usam (a da tela).
+  const conversaId = estado.tela.tipo === "conversa" ? estado.tela.conversaId : a.conversaId;
+  const url = (id: string) => `/api/t/${encodeURIComponent(tenant)}/conversas/${encodeURIComponent(conversaId)}/anexos/${encodeURIComponent(id)}`;
+  const lista = renderListaBiblioteca(estado.bibliotecaDoBot[conversaId], { conversaId, url, bot: a.nome, sumiram: lembrancaDaMidia.sumiram, esteMac: lembrancaDaMidia.esteMac, agora: estado.agora > 0 ? estado.agora : Date.now() });
+  return `${pasta}<section class="gv-secao gvb">${lista}</section>`;
 }
 
 /**
  * ADR-125 (emenda ADR-060 item 5): o nível Ajustes — Atalhos (Ligar, Memória, Trabalhos, Atividade), Perfil (Missão e
- * voz), Acessos, Ambiente e, no fim, o que é do Modo dev. Colabora com saiu; a Pasta fica em Ambiente até a Biblioteca.
+ * voz), Acessos, Ambiente e, no fim, o que é do Modo dev. Colabora saiu; a Pasta foi para a aba Biblioteca (NOD-326).
  */
 function nivelAjustes(estado: Estado, a: Bot, dona: boolean): Nivel {
   const grupos = gruposDeAcesso(estado, a.id);
@@ -261,7 +268,6 @@ function nivelAjustes(estado: Estado, a: Bot, dona: boolean): Nivel {
   const ambiente = dona
     ? `<div class="gv-cartao">
         ${estado.modoDev.ligado ? linha(`${ICONE.monitor}<span class="gv-linha-txt">Computador do bot</span>`, `data-act="abrir-computador" data-id="${esc(a.id)}" title="O computador próprio do bot (ADR-037), não o seu Mac"`) : ""}
-        ${pastaDaDona(estado, a)}
         ${renderLinhaInteligencia(a, contextoInteligencia(estado), estado.menuIa === a.id)}
         ${linha(`${ICONE.escudo}<span class="gv-linha-txt">Aprovações</span><span class="gv-meta">${esc(modo.curto)}</span>`, `data-act="modo-aprovacao" data-id="${esc(a.id)}" title="${esc(`${modo.titulo}: ${modo.descricao}`)}"`)}
       </div>`
@@ -271,10 +277,6 @@ function nivelAjustes(estado: Estado, a: Bot, dona: boolean): Nivel {
   return { titulo: "Ajustes", corpo: atalhos + perfil + acessosHtml + ambienteHtml + dev };
 }
 
-/** A Pasta de trabalho vai para a Biblioteca (NOD-326); até ela chegar, fica em Ajustes › Ambiente (ADR-125: nada some sem destino). */
-export function pastaDaDona(estado: Estado, a: Bot, biblioteca = BIBLIOTECA_NA_GAVETA): string {
-  return biblioteca ? "" : linhaDaPasta(estado, a);
-}
 function linhaDaPasta(estado: Estado, a: Bot): string {
   return linha(`${ICONE.pasta}<span class="gv-linha-txt">Pasta de trabalho${mostraCaminhoDaPasta(estado.executor?.harnesses, a.harness) ? `<small><code>${esc(caminhoDaPastaDoBot(a.nome))}</code></small>` : ""}</span>`, `data-act="abrir-workspace" data-id="${esc(a.id)}"`);
 }

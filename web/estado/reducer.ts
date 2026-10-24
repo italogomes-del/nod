@@ -32,6 +32,8 @@ import type { LeituraAtual } from "../lib/ouvir.ts";
 import { FALA_SAINDO_MS } from "../lib/fala-viva.ts";
 import { ATIVIDADE_VAZIA, comFerramenta, comSubagentes, comTarefas, comTexto, comVigia, SEM_NOME_DA_FERRAMENTA, semFerramentaAberta, soSubagentes, subagentesParados, textoDaFala, type AtividadeTurno, type FerramentaEmUso, type SubagentesDoTurno, type VigiaDaAtividade } from "../lib/atividade.ts";
 import { chaveDaAtividade, diaLocal, type VistaDaAtividade } from "../lib/atividade-do-bot.ts";
+import type { PaginaDaBiblioteca } from "../../src/contracts/biblioteca.ts";
+import { gruposVisiveis, juntarPagina, POR_VEZ, type BibliotecaDaConversa, type GrupoBiblioteca } from "../lib/biblioteca.ts";
 import type { EstadoConexao } from "../lib/live-events.ts";
 import { ehErroDeRede, type ErroNaTela } from "../lib/erro-da-tela.ts";
 import { conversasComPergunta } from "../lib/perguntas.ts";
@@ -166,7 +168,7 @@ export type NivelGaveta =
   /** ADR-125 (NOD-349): Atalhos, Perfil (Missão e voz), Acessos, Ambiente e o Modo dev, fora da visão geral. */
   | { tipo: "ajustes" };
 
-/** ADR-125: as abas da visão geral da gaveta. A Biblioteca fica atrás de `BIBLIOTECA_NA_GAVETA` até a NOD-326. */
+/** ADR-125: as abas da visão geral da gaveta (a Biblioteca chegou com a NOD-326). */
 export type AbaGaveta = "detalhes" | "biblioteca" | "computador";
 
 /** ADR-125: o que a aba Computador mostra, lido de `GET agentes/:id/computador` (web/lib/computador.ts). */
@@ -221,7 +223,7 @@ export type EscolhaComposer = { outroAssunto: boolean; alvoId: string | null };
  */
 export type CitacaoNoCampo = { mensagemId: string; trecho: string };
 
-export type Invalidacao = "onboarding" | "ligacao" | "trabalhos" | "custo" | `trabalho:${string}` | `disponibilidade:${string}` | "gestao" | "frota" | "sua-vez" | "nao-lidos" | "rotinas" | "conectores" | "inventario" | "executor" | "ias" | "uso-plano" | "salas" | "chaves" | "maquinas" | "nuvem" | "contas" | "relatos" | `conversa:${string}` | `vivos:${string}` | `memoria:${string}` | `concessoes:${string}` | `execucoes:${string}` | `atividade:${string}` | `atividade-hoje:${string}`;
+export type Invalidacao = "onboarding" | "ligacao" | "trabalhos" | "custo" | `trabalho:${string}` | `disponibilidade:${string}` | "gestao" | "frota" | "sua-vez" | "nao-lidos" | "rotinas" | "conectores" | "inventario" | "executor" | "ias" | "uso-plano" | "salas" | "chaves" | "maquinas" | "nuvem" | "contas" | "relatos" | `conversa:${string}` | `vivos:${string}` | `memoria:${string}` | `concessoes:${string}` | `execucoes:${string}` | `atividade:${string}` | `atividade-hoje:${string}` | `biblioteca:${string}`;
 
 export type Estado = {
   sessao: Escopo | null;
@@ -334,6 +336,11 @@ export type Estado = {
   atividadeDoBot: Record<string, AtividadeDto | null>;
   atividadeHoje: Record<string, { dia: string; total: number | null }>;
   atividadeVista: VistaDaAtividade | null;
+  /**
+   * NOD-326: a Biblioteca da gaveta, por `conversaId` — as páginas lidas, o cursor, o erro e quantos itens cada grupo
+   * mostra. Ausente = ainda não lida (a falta `biblioteca:<id>` só existe com a aba aberta na visão geral).
+   */
+  bibliotecaDoBot: Record<string, BibliotecaDaConversa>;
   avisoConexao: string | null;
   concessoes: Record<string, Concessao[]>;
   /**
@@ -449,6 +456,9 @@ export type Acao =
   | { tipo: "agente-local"; agenteId: string; mudanca: { nome?: string; titulo?: string; forma?: FormaAgente; cor?: CorAgente } }
   | { tipo: "hidratar-atividade"; agenteId: string; dia: string; atividade: AtividadeDto | null }
   | { tipo: "hidratar-atividade-hoje"; agenteId: string; dia: string; total: number | null }
+  | { tipo: "hidratar-biblioteca"; conversaId: string; pagina: PaginaDaBiblioteca | null; seguinte: boolean }
+  | { tipo: "biblioteca-mais"; conversaId: string; grupo: GrupoBiblioteca }
+  | { tipo: "biblioteca-tentar"; conversaId: string }
   | { tipo: "atividade-vista"; mudanca: Partial<Pick<VistaDaAtividade, "dia" | "filtro" | "aberta">> }
   | { tipo: "aviso-conexao"; texto: string | null }
   | { tipo: "sessao"; escopo: Escopo | null }
@@ -569,6 +579,7 @@ export const estadoInicial: Estado = {
   computadorVisto: {},
   computadorAcao: null,
   atividadeDoBot: {},
+  bibliotecaDoBot: {},
   atividadeHoje: {},
   atividadeVista: null,
   avisoConexao: null,
@@ -947,6 +958,15 @@ function atividadeDoFrame(e: Estado, f: FrameSse): Invalidacao[] {
   return quais;
 }
 
+/**
+ * NOD-326: a fala nova e o fim do turno (a mídia do bot se prende à fala final) releem a 1ª página da Biblioteca da
+ * conversa — só se ela já foi lida; a releitura junta o novo ao que a pessoa já carregou (web/lib/biblioteca.ts).
+ */
+function bibliotecaDoFrame(e: Estado, f: FrameSse): Invalidacao[] {
+  const conversaId = texto(f.dados.conversaId);
+  return conversaId && e.bibliotecaDoBot[conversaId] ? [`biblioteca:${conversaId}`] : [];
+}
+
 /** O turno da ligação não é trabalho do bot (ADR-072): não relê Trabalhos. */
 const trabalhosDoTurno = (f: FrameSse): Invalidacao[] => (turnoDeLigacao(f.dados) || f.dados.modo === "ligacao" || f.dados.origem === "ligacao" ? [] : ["trabalhos"]);
 
@@ -959,7 +979,7 @@ function emUsoDoFrame(v: unknown): FerramentaEmUso {
 
 const POR_FRAME: Record<TipoFrame, Handler> = {
   // definido em 2026-09-29 (0039): a mensagem nova também relê os não lidos (o ponto da barra e o ícone do topo).
-  "mensagem.nova": (e, f) => (conv(f) ? invalidar(e, conv(f), "nao-lidos", ...atividadeDoFrame(e, f)) : e),
+  "mensagem.nova": (e, f) => (conv(f) ? invalidar(e, conv(f), "nao-lidos", ...atividadeDoFrame(e, f), ...bibliotecaDoFrame(e, f)) : e),
   "turno.iniciado": (e, f, agora) => {
     // definido em 2026-10-04 (ADR-072): o turno-cérebro da ligação não é trabalho do bot — nada de "trabalhando", fila ou Parar.
     if (f.dados.modo === "ligacao" || f.dados.origem === "ligacao") return e;
@@ -1047,8 +1067,8 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
   // quando um turno termina (uma leitura por turno, sem relógio novo); fora da conversa a falta espera a tela pedir. O turno
   // interrompido também gastou a janela (e é o que acaba quando a conta bate no limite): relê igual (revisão do PR 1).
   // NOD-12: e a lista de contas, que carrega a leitura por conta.
-  "turno.encerrado": (e, f, agora) => invalidar(fimDosSubagentes(encerrado(semTurnoVivo(comFalaSaindo(e, texto(f.dados.turnoId), agora), texto(f.dados.turnoId)), texto(f.dados.turnoId)), texto(f.dados.conversaId), texto(f.dados.turnoId), agora), conv(f), "frota", usoPlano(e), contasDoTurno(e), ...trabalhosDoTurno(f)),
-  "turno.interrompido": (e, f, agora) => invalidar(fimDosSubagentes(encerrado(semTurnoVivo(e, texto(f.dados.turnoId)), texto(f.dados.turnoId)), texto(f.dados.conversaId), texto(f.dados.turnoId), agora), conv(f), "frota", "sua-vez", usoPlano(e), contasDoTurno(e), ...trabalhosDoTurno(f)),
+  "turno.encerrado": (e, f, agora) => invalidar(fimDosSubagentes(encerrado(semTurnoVivo(comFalaSaindo(e, texto(f.dados.turnoId), agora), texto(f.dados.turnoId)), texto(f.dados.turnoId)), texto(f.dados.conversaId), texto(f.dados.turnoId), agora), conv(f), "frota", usoPlano(e), contasDoTurno(e), ...trabalhosDoTurno(f), ...bibliotecaDoFrame(e, f)),
+  "turno.interrompido": (e, f, agora) => invalidar(fimDosSubagentes(encerrado(semTurnoVivo(e, texto(f.dados.turnoId)), texto(f.dados.turnoId)), texto(f.dados.conversaId), texto(f.dados.turnoId), agora), conv(f), "frota", "sua-vez", usoPlano(e), contasDoTurno(e), ...trabalhosDoTurno(f), ...bibliotecaDoFrame(e, f)),
   "decisao.nova": (e, f) => invalidar(e, "sua-vez", conv(f)),
   "decisao.decidida": (e, f) => invalidar(e, "sua-vez", conv(f)),
   "decisao.vencida": (e, f) => invalidar(e, "sua-vez", conv(f)),
@@ -1149,7 +1169,9 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
         disponibilidadeLigacao: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.disponibilidadeLigacao : {},
         leitura: acao.escopo?.pessoaId === estado.sessao?.pessoaId && acao.escopo?.tenantId === estado.sessao?.tenantId ? estado.leitura : null,
         falhaLeitura: acao.escopo?.pessoaId === estado.sessao?.pessoaId && acao.escopo?.tenantId === estado.sessao?.tenantId ? estado.falhaLeitura : null,
-        ...(acao.escopo?.pessoaId === estado.sessao?.pessoaId ? {} : { onboarding: undefined, onboardingAberto: false, onboardingResolvido: false, trabalhos: null, trabalhoDetalhe: {}, pressao: null, atividadeDoBot: {}, atividadeHoje: {}, atividadeVista: null }) };
+        // NOD-326 (revisão 3): a Biblioteca também some na troca de tenant (não fica dado de um tenant no outro).
+        ...(acao.escopo?.tenantId === estado.sessao?.tenantId ? {} : { bibliotecaDoBot: {} }),
+        ...(acao.escopo?.pessoaId === estado.sessao?.pessoaId ? {} : { onboarding: undefined, onboardingAberto: false, onboardingResolvido: false, trabalhos: null, trabalhoDetalhe: {}, pressao: null, atividadeDoBot: {}, atividadeHoje: {}, atividadeVista: null, bibliotecaDoBot: {} }) };
     case "navegar": {
       // definido em 2026-10-08 (revisão W5): reabrir uma task já vista relê as mensagens dela (o detalhe guardado é de
       // quando ela foi aberta da última vez); W11: sair da tela da task de um bot cuja conversa não está carregada apaga o
@@ -1326,6 +1348,32 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
     }
     case "hidratar-atividade-hoje":
       return { ...estado, atividadeHoje: { ...estado.atividadeHoje, [acao.agenteId]: { dia: acao.dia, total: acao.total } } };
+    case "hidratar-biblioteca": {
+      const antes = estado.bibliotecaDoBot[acao.conversaId];
+      // Revisão 1 da NOD-326: a página seguinte só entra se ainda é esperada (a lista não foi trocada por erro nem por
+      // "Tentar de novo" enquanto ela vinha); a releitura que falha mantém a lista que estava boa.
+      if (acao.seguinte && (!antes || antes.erro || !antes.carregandoMais)) return estado;
+      let nova: BibliotecaDaConversa;
+      if (acao.pagina) nova = juntarPagina(antes?.erro ? undefined : antes, acao.pagina, acao.seguinte);
+      else if (acao.seguinte && antes) nova = { ...antes, carregandoMais: false, falhouMais: true };
+      else if (antes && !antes.erro) return estado;
+      else nova = { itens: [], proximo: null, erro: true, carregandoMais: false, mostrando: antes?.mostrando ?? {} };
+      return { ...estado, bibliotecaDoBot: { ...estado.bibliotecaDoBot, [acao.conversaId]: nova } };
+    }
+    case "biblioteca-mais": {
+      const b = estado.bibliotecaDoBot[acao.conversaId];
+      if (!b) return estado;
+      const g = gruposVisiveis(b, estado.agora > 0 ? estado.agora : Date.now()).find((v) => v.grupo === acao.grupo);
+      if (!g || (!g.maisLocal && !g.maisNoServidor)) return estado;
+      // Revisão 3: com uma página a caminho, só o "mais" do que já foi lido anda (outro grupo); o do servidor espera.
+      if (b.carregandoMais && !g.maisLocal) return estado;
+      const mostrando = { ...b.mostrando, [acao.grupo]: g.itens.length + POR_VEZ };
+      return { ...estado, bibliotecaDoBot: { ...estado.bibliotecaDoBot, [acao.conversaId]: { ...b, mostrando, carregandoMais: b.carregandoMais || g.maisNoServidor, falhouMais: false } } };
+    }
+    case "biblioteca-tentar": {
+      const { [acao.conversaId]: _fora, ...resto } = estado.bibliotecaDoBot;
+      return { ...estado, bibliotecaDoBot: resto };
+    }
     case "atividade-vista":
       return estado.atividadeVista ? { ...estado, atividadeVista: { ...estado.atividadeVista, ...acao.mudanca } } : estado;
     case "lista-de-pasta":
@@ -1529,6 +1577,14 @@ export function resolverInicio(entrada: Estado): Estado {
 }
 
 /** O que a tela atual precisa ter carregado (o main busca o que faltar). */
+/** NOD-326: a conversa de um bot na tela, a gaveta dele na visão geral (sem nível aberto) e a aba Biblioteca escolhida. */
+export function bibliotecaAberta(estado: Pick<Estado, "tela" | "gaveta" | "abaGaveta">): boolean {
+  const t = estado.tela;
+  if (t.tipo !== "conversa") return false;
+  const nivel = estado.gaveta?.agenteId === t.agenteId ? estado.gaveta.nivel : null;
+  return nivel === null && estado.abaGaveta[t.agenteId] === "biblioteca";
+}
+
 export function invalidacoesDaTela(estado: Estado): Invalidacao[] {
   const t = estado.tela;
   const faltas: Invalidacao[] = [];
@@ -1559,6 +1615,8 @@ export function invalidacoesDaTela(estado: Estado): Invalidacao[] {
     const lida = estado.atividadeHoje[t.agenteId];
     if (!lida || (estado.agora > 0 && lida.dia < diaLocal(estado.agora))) faltas.push(`atividade-hoje:${t.agenteId}`);
   }
+  // NOD-326: a Biblioteca, só com ela aberta na visão geral da gaveta deste bot (o main ainda pede o painel à vista).
+  if (t.tipo === "conversa" && bibliotecaAberta(estado) && !estado.bibliotecaDoBot[t.conversaId]) faltas.push(`biblioteca:${t.conversaId}`);
   // definido em 2026-09-25: o marketplace diz quais bots usam cada app, então precisa das concessões de todos os bots da pessoa.
   if (t.tipo === "conectores") for (const a of estado.frota?.agentes ?? []) if (a.ownerId === estado.sessao?.pessoaId && !estado.concessoes[a.id]) faltas.push(`concessoes:${a.id}`);
   // definido em 2026-09-18: as rotinas do bot moram no painel Detalhes da conversa, então precisam
@@ -1601,7 +1659,8 @@ export function invalidacoesAoReconectar(estado: Estado): Invalidacao[] {
   if (!estado.sessao) return [];
   // Revisão: a tela da task aberta também — é a leitura dela que tira o turno fantasma da task (hidratar-trabalho).
   const t = estado.tela;
-  return ["trabalhos", ...Object.keys(estado.conversas).map((id): Invalidacao => `conversa:${id}`), ...(t.tipo === "trabalho" ? [`trabalho:${t.id}` as Invalidacao] : [])];
+  // NOD-326 (revisão 2): a Biblioteca já lida também — o stream que caiu pode ter perdido o frame do arquivo novo.
+  return ["trabalhos", ...Object.keys(estado.conversas).map((id): Invalidacao => `conversa:${id}`), ...Object.keys(estado.bibliotecaDoBot).map((id): Invalidacao => `biblioteca:${id}`), ...(t.tipo === "trabalho" ? [`trabalho:${t.id}` as Invalidacao] : [])];
 }
 
 /**
@@ -1616,6 +1675,7 @@ export function invalidacoesAoRetomar(estado: Estado): Invalidacao[] {
   const todas: Invalidacao[] = [
     "frota", "sua-vez", "nao-lidos", "inventario", "executor", "ias", "uso-plano", "salas", "rotinas", "ligacao", "trabalhos",
     ...Object.keys(estado.conversas).map((id): Invalidacao => `conversa:${id}`),
+    ...Object.keys(estado.bibliotecaDoBot).map((id): Invalidacao => `biblioteca:${id}`),
     ...(t.tipo === "conversa" || t.tipo === "sala" || t.tipo === "linha" ? [`conversa:${t.conversaId}` as Invalidacao] : []),
     ...(t.tipo === "trabalho" ? [`trabalho:${t.id}` as Invalidacao] : []),
   ];

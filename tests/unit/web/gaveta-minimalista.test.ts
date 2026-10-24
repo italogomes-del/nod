@@ -3,11 +3,11 @@ import { describe, expect, it } from "vitest";
 import type { FrotaDto } from "../../../src/contracts/api.ts";
 import { estadoInicial, reduzir, type Estado } from "../../../web/estado/reducer.ts";
 import { estadoDoComputador } from "../../../web/lib/computador.ts";
-import { abaAberta, abaBiblioteca, abasDoBot, identidadeEditavel, nivelDaGaveta, nomeEditavel, paiDoNivel, pastaDaDona, renderDetalhes } from "../../../web/telas/detalhes.ts";
+import { abaAberta, abaBiblioteca, abasDoBot, identidadeEditavel, nivelDaGaveta, nomeEditavel, paiDoNivel, renderDetalhes } from "../../../web/telas/detalhes.ts";
 
 /**
  * ADR-125 (NOD-349): a gaveta do bot minimalista. Topo só com Compartilhar e Fechar; nome, subtítulo e avatar editáveis
- * ali; abas Detalhes | (Biblioteca) | Computador; o resto no nível Ajustes. Os critérios da issue, um bloco cada.
+ * ali; abas Detalhes | Biblioteca | Computador; o resto no nível Ajustes. Os critérios da issue, um bloco cada.
  */
 type AgenteFrota = FrotaDto["agentes"][number];
 const nina = (extra: Partial<AgenteFrota> = {}): AgenteFrota => ({ tenantId: "t", id: "a1", ownerId: "p", visibility: "privado", nome: "Nina", titulo: "Assistente de e-mail", descricao: "Cuida da caixa", dono: "pessoa", forma: "shape-square", cor: "c-purple", fixado: false, oculto: false, confirmado: true, modelo: "m", duplicadoDe: null, criadoEm: 0, conversaId: "c1", descricaoEstado: "", computadorForaDoAr: null, ultimaMensagem: null, ...extra });
@@ -96,14 +96,17 @@ describe("5: o popover do avatar", () => {
 });
 
 describe("6: as abas", () => {
-  it("tablist com Detalhes e Computador (Biblioteca atrás da flag), tabindex roving e o painel ligado à aba", () => {
+  it("tablist com Detalhes, Biblioteca e Computador (NOD-326), tabindex roving e o painel ligado à aba", () => {
     const html = renderDetalhes(com(nina()));
     expect(html).toContain('role="tablist" aria-label="Seções do painel"');
     expect(html).toContain('role="tab" class="gv-aba" id="gv-aba-detalhes" aria-controls="gv-painel-detalhes" aria-selected="true" tabindex="0"');
     expect(html).toContain('id="gv-aba-computador" aria-controls="gv-painel-computador" aria-selected="false" tabindex="-1"');
-    expect(html).not.toContain('data-aba="biblioteca"');
+    expect(html).toContain('id="gv-aba-biblioteca" aria-controls="gv-painel-biblioteca" aria-selected="false" tabindex="-1"');
+    expect(html.indexOf('data-aba="detalhes"')).toBeLessThan(html.indexOf('data-aba="biblioteca"'));
+    expect(html.indexOf('data-aba="biblioteca"')).toBeLessThan(html.indexOf('data-aba="computador"'));
     expect(html).toContain('role="tabpanel" id="gv-painel-detalhes" aria-labelledby="gv-aba-detalhes"');
-    expect(abasDoBot(true, true)).toEqual(["detalhes", "biblioteca", "computador"]);
+    expect(abasDoBot(true)).toEqual(["detalhes", "biblioteca", "computador"]);
+    expect(abasDoBot(false)).toEqual(["detalhes", "biblioteca"]);
   });
 
   it("a aba é lembrada por bot; a lembrada que não existe mais (bot da equipe) cai em Detalhes", () => {
@@ -128,27 +131,25 @@ describe("7: Detalhes com as Rotinas e a linha Ajustes", () => {
 });
 
 describe("8–9: o nível Ajustes", () => {
-  it("Atalhos, Perfil, Acessos e Ambiente, nesta ordem; o Modo dev no fim; sem Colabora com; a Pasta em Ambiente até a Biblioteca", () => {
+  it("Atalhos, Perfil, Acessos e Ambiente, nesta ordem; o Modo dev no fim; sem Colabora com; a Pasta não mora mais em Ajustes", () => {
     const html = renderDetalhes(ajustes(com(nina())));
     const ordem = ["<h3>Atalhos</h3>", "<h3>Perfil</h3>", "<h3>Acessos</h3>", "<h3>Ambiente</h3>"].map((s) => html.indexOf(s));
     expect(ordem.every((i) => i >= 0)).toBe(true);
     expect(ordem).toEqual([...ordem].sort((a, b) => a - b));
     expect(html).toContain("Missão e voz");
     expect(html).not.toContain("Colabora com");
-    // Revisão: a Pasta não pode morar só no Modo dev (critério 16); com a Biblioteca desligada, fica em Ambiente.
-    expect(html.indexOf("Pasta de trabalho")).toBeGreaterThan(html.indexOf("<h3>Ambiente</h3>"));
-    expect(renderDetalhes(ajustes(com(nina({ ownerId: "outra" }))))).not.toContain("Pasta de trabalho");
+    // NOD-326: a Pasta foi para a aba Biblioteca (nem em Ambiente, nem no Modo dev).
+    expect(html).not.toContain("Pasta de trabalho");
     const dev = renderDetalhes({ ...ajustes(com(nina())), modoDev: { ...estadoInicial.modoDev, ligado: true } });
-    expect(dev.match(/Pasta de trabalho/g)).toHaveLength(1);
-    expect(dev.indexOf("<h3>Modo dev</h3>")).toBeGreaterThan(dev.indexOf("Pasta de trabalho"));
+    expect(dev).not.toContain("Pasta de trabalho");
   });
 
-  it("com a Biblioteca ligada, a Pasta sai de Ambiente e vai para a aba Biblioteca (nada some sem destino)", () => {
+  it("NOD-326: a Pasta fica no topo da aba Biblioteca, só no bot da pessoa (nada some sem destino)", () => {
     const e = com(nina());
     const a = e.frota!.agentes[0]! as never;
-    expect(pastaDaDona(e, a, false)).toContain('data-act="abrir-workspace"');
-    expect(pastaDaDona(e, a, true)).toBe("");
-    expect(abaBiblioteca(e, a, true)).toContain('data-act="abrir-workspace"');
+    const html = abaBiblioteca(e, a, true);
+    expect(html).toContain('data-act="abrir-workspace"');
+    expect(html.indexOf("abrir-workspace")).toBeLessThan(html.indexOf('class="gv-secao gvb"'));
     expect(abaBiblioteca(e, a, false)).not.toContain("abrir-workspace");
   });
 });
@@ -217,7 +218,9 @@ describe("13: bot de outra pessoa e o Nod", () => {
     expect(html).toContain('<h2 class="gvn-nome-fixo" title="Nina">Nina</h2>');
     expect(html).not.toContain('id="gvn-nome"');
     expect(html).not.toContain('data-act="gaveta-avatar"');
-    expect(html).not.toContain('role="tablist"');
+    // NOD-326: Detalhes · Biblioteca (a conversa com o bot da equipe também tem arquivos), sem Computador.
+    expect(html).toContain('data-aba="biblioteca"');
+    expect(html).not.toContain('data-aba="computador"');
     expect(html).not.toContain('data-comp-bot');
     expect(html).not.toContain('data-act="gaveta" data-nivel="nova-rotina"');
   });

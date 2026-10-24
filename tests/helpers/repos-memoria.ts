@@ -744,6 +744,26 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         }
         return saida;
       },
+      // NOD-326: o espelho do Postgres (ms × 1000 viram os µs do instante; a ordem e o cursor são os mesmos).
+      async daBiblioteca(conversaId, antes, limite) {
+        const instante = (ms: number) => new Date(ms).toISOString().replace("Z", "000Z");
+        const chave = (l: { criadoEm: number; id: string }) => `${instante(l.criadoEm)}|${l.id}`;
+        const todos = doTenant(b.anexos)
+          .filter((l) => l.conversaId === conversaId && l.origem === "bot" && l.mensagemId !== null)
+          .sort((x, y) => (chave(y) < chave(x) ? -1 : chave(y) > chave(x) ? 1 : 0))
+          .filter((l) => !antes || chave(l) < `${antes.criadoEm}|${antes.id}`);
+        const pagina = todos.slice(0, limite);
+        const itens = pagina.map((l) => ({
+          id: l.id, nome: l.nome, mime: l.mime, tamanho: l.tamanho ?? l.bytes.byteLength, origem: "bot" as const,
+          ...(l.largura !== undefined ? { largura: l.largura } : {}),
+          ...(l.altura !== undefined ? { altura: l.altura } : {}),
+          ...(l.duracaoMs !== undefined ? { duracaoMs: l.duracaoMs } : {}),
+          ...(l.semBytes ? { semBytes: true as const } : {}),
+          mensagemId: l.mensagemId!, criadoEm: instante(l.criadoEm),
+        }));
+        const u = pagina.at(-1);
+        return { itens, ultimo: u ? { criadoEm: instante(u.criadoEm), id: u.id } : null, temMais: todos.length > limite };
+      },
       async apagarSoltosDoBot(antesDe) {
         const antes = b.anexos.length;
         const vivo = (turnoId: string | null | undefined) => doTenant(b.turnos).some((t) => t.id === turnoId && (t.estado === "pendente" || t.estado === "despachando"));

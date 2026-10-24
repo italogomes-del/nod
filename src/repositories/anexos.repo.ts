@@ -1,4 +1,6 @@
 import type { AnexoDaConversa, AnexoMeta, MimeAnexo, MimeMidia, OrigemAnexo } from "../contracts/anexo.ts";
+import type { ItemDaBiblioteca } from "../contracts/biblioteca.ts";
+import type { CursorBiblioteca } from "../domain/biblioteca.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
 
 interface Linha {
@@ -173,6 +175,27 @@ export function anexosRepo(conn: Conn, escopo: Escopo) {
         saida.set(l.mensagem_id, [...(saida.get(l.mensagem_id) ?? []), daConversa(l)]);
       }
       return saida;
+    },
+
+    /**
+     * NOD-326: a Biblioteca — a mídia que o bot anexou nesta conversa (presa a uma fala; a solta é de turno em curso ou lixo
+     * do varredor), da mais recente à mais antiga, pela chave (criado_em, id). Traz `limite + 1` para saber se há mais. O
+     * instante sai como texto com µs (o cursor não pode perder precisão). A conversa é filtrada explicitamente, além da RLS.
+     */
+    async daBiblioteca(conversaId: string, antes: CursorBiblioteca | null, limite: number): Promise<{ itens: ItemDaBiblioteca[]; ultimo: CursorBiblioteca | null; temMais: boolean }> {
+      const linhas = await conn<(LinhaCompleta & { criado_em_txt: string })[]>`
+        select ${conn.unsafe(META_COMPLETA)}, to_char(a.criado_em at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as criado_em_txt
+        from anexos a
+        left join maquinas m on m.tenant_id = a.tenant_id and m.id = a.machine_id
+        where a.tenant_id = ${escopo.tenantId} and a.conversa_id = ${conversaId} and a.origem = 'bot' and a.mensagem_id is not null
+          ${antes ? conn`and (a.criado_em, a.id) < (${antes.criadoEm}::text::timestamptz, ${antes.id}::uuid)` : conn``}
+        order by a.criado_em desc, a.id desc
+        limit ${limite + 1}`;
+      const temMais = linhas.length > limite;
+      const pagina = linhas.slice(0, limite);
+      const itens = pagina.map((l) => ({ ...daConversa(l), mensagemId: l.mensagem_id!, criadoEm: l.criado_em_txt }));
+      const u = pagina.at(-1);
+      return { itens, ultimo: u ? { criadoEm: u.criado_em_txt, id: u.id } : null, temMais };
     },
 
     /**

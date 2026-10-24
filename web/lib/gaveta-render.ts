@@ -1,6 +1,7 @@
 import type { Estado } from "../estado/reducer.ts";
 import { renderDetalhes } from "../telas/detalhes.ts";
 import { lembrar } from "./lembrar.ts";
+import { lembrancaDaMidia } from "./midia.ts";
 import { preservandoCampo, reaplicarAviso } from "./gaveta-identidade.ts";
 import { regiao, regiaoMudaria } from "./regioes.ts";
 
@@ -32,7 +33,8 @@ export function atualizarGaveta(estado: Estado, gavetaSuja: string | null): void
   // ADR-125 (NOD-349): com o foco no nome ou no subtítulo, o resto da gaveta redesenha, mas o campo é o mesmo nó (o que a
   // pessoa digita, o cursor e o foco ficam). Revisão 2: antes o frame inteiro era pulado e a gaveta congelava.
   const campo = typeof (ativo as Element | null)?.matches === "function" && ativo!.matches("#detalhes .gvn-nome, #detalhes .gvn-sub") ? (ativo as HTMLInputElement) : null;
-  const html = lembrar("detalhes", estado, [], renderDetalhes);
+  // NOD-326: a Biblioteca lê a lembrança da mídia (o que saiu da pasta, este Mac), que mora fora do estado.
+  const html = lembrar("detalhes", estado, [lembrancaDaMidia.sumiram.size, lembrancaDaMidia.esteMac], renderDetalhes);
   if (!regiaoMudaria("detalhes", html)) return;
   if (campo) {
     const seletor = `[data-campo="${CSS.escape(campo.dataset.campo ?? "")}"][data-id="${CSS.escape(campo.dataset.id ?? "")}"]`;
