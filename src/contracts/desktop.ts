@@ -1,6 +1,7 @@
 import type { EstadoIa, ResultadoColarCodigo } from "./estado-ia.ts";
 import type { CausaDoMac, CausaInventario, CausaSemIa } from "./inventario.ts";
 import type { PonteContas } from "./contas-desktop.ts";
+import type { PonteMidia } from "./midia-desktop.ts";
 
 /**
  * Ponte da JANELA WEB do app desktop (definido em 2026-09-24, "aviso no Mac"): o que o preload dela
@@ -133,6 +134,8 @@ export type NodDesktop = {
   ias?: PonteIas;
   /** ADR-101: as várias contas de cada IA. Opcional: o app instalado antes de 2026-10-12 não tem. */
   contas?: PonteContas;
+  /** NOD-323: a mídia do bot que ficou no Mac (Mostrar no Finder). Opcional: o app anterior não tem. */
+  midia?: PonteMidia;
   /**
    * NOD-345 (ADR-124): a pessoa entrou numa conta pela janela do app; a página passa o código de troca de uso único e o
    * processo principal o troca pela chave do espaço novo e reconecta. `false` = código recusado (a página segue na sessão

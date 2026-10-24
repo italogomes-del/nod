@@ -268,3 +268,14 @@ describe("o foco depois de reagir (revisão do PR 392)", () => {
     expect(seletoresDoFoco({ act: 'x"y' })).toEqual(['[data-act="x\\"y"]']);
   });
 });
+
+describe("Baixar tudo no ⋯ (NOD-323, J2)", () => {
+  const anexo = (id: string, extra: Record<string, unknown> = {}) => ({ id, nome: `${id}.png`, mime: "image/png", tamanho: 10, origem: "bot", ...extra });
+  it("aparece com duas ou mais mídias do bot no nod; não conta a da pessoa nem a que ficou no Mac", () => {
+    const duas = msg("m9", "prontas", { anexos: [anexo("a"), anexo("b")] } as never);
+    // Primeiro item do ⋯, como no protótipo (p7_menu) — QA do #507.
+    expect(itensDoMenu(duas, cenario([duas])).map((i) => i.acao)[0]).toBe("baixar-tudo");
+    const uma = msg("m9", "pronta", { anexos: [anexo("a"), anexo("b", { origem: "pessoa" }), anexo("c", { semBytes: true })] } as never);
+    expect(itensDoMenu(uma, cenario([uma])).map((i) => i.acao)).not.toContain("baixar-tudo");
+  });
+});

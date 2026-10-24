@@ -288,4 +288,18 @@ describe("montarPlano: o onboarding por ligação (ADR-077)", () => {
     for (const modo of ["criacao", "rotina", "delegacao"] as const) expect(nomes(montarPlano({ ...base, modo, terminal: true }))).toContain("esperar_comando");
     for (const modo of ["sala", "ligacao", "peer"] as const) expect(nomes(montarPlano({ ...base, modo, terminal: true }))).not.toContain("esperar_comando");
   });
+
+  it("NOD-323: anexar_midia só com pasta do bot e Bash, e o prompt manda usá-la em vez de caminho na fala", () => {
+    const semTerminal = montarPlano(base);
+    expect(semTerminal.pastaDoBot).toBeUndefined();
+    expect(nomes(semTerminal)).not.toContain("anexar_midia");
+    expect(semTerminal.promptSistema).not.toContain("Mídia:");
+    const comTerminal = montarPlano({ ...base, terminal: true });
+    expect(comTerminal.pastaDoBot).toBeTruthy();
+    expect(nomes(comTerminal)).toContain("anexar_midia");
+    expect(comTerminal.catalogo.ferramentas.find((f) => f.nome === "anexar_midia")?.origem).toBe("proxy");
+    expect(comTerminal.promptSistema).toContain("vai para o chat com anexar_midia");
+    // Na sala a fala vai por postarNaSala, que não prende a mídia: a ferramenta não entra (o bot não diria "Anexei abaixo.").
+    expect(nomes(montarPlano({ ...base, modo: "sala", terminal: true }))).not.toContain("anexar_midia");
+  });
 });

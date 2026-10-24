@@ -59,6 +59,13 @@ describeIntegracao("harness por agente", () => {
         expect(antigo.promptSistema).not.toContain("terminal e os arquivos do Codex");
       }
       expect((await plano()).nativas).toContain("Bash");
+      // NOD-323 (revisão 3 do #507): anexar_midia só para a máquina que anunciou o proxy novo; "não sei" segue com ela.
+      const comMidia = (p: Awaited<ReturnType<typeof plano>>) => p.catalogo.ferramentas.some((f) => f.nome === "anexar_midia");
+      expect(comMidia(comTerminal)).toBe(true);
+      const semProxyNovo = await plano({ "codex-cli": { ...CAPACIDADES_HARNESS["codex-cli"], terminal: true, anexarMidia: false } });
+      expect(comMidia(semProxyNovo)).toBe(false);
+      expect(semProxyNovo.promptSistema).not.toContain("anexar_midia");
+      expect(comMidia(await plano())).toBe(true);
     });
   });
 

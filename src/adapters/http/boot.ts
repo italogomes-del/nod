@@ -226,6 +226,7 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
     },
   });
   const url = `http://127.0.0.1:${srv.port}`;
+  app.ligarUrlLocal(url);
   // NOD-267: o Docker só reinicia processo morto; travado, o processo do compartilhado se derruba (exit 1) e o
   // `unless-stopped` sobe outro. Liga logo depois do listen (revisão do PR): o registry, o inventário e o fechamento das
   // ligações abaixo vão ao banco, e um boot pendurado no pool esgotado também precisa reiniciar. O próprio boot é um

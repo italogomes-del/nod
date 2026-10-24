@@ -25,6 +25,34 @@ export const receberAnexo: CasoDeUso<EntradaReceberAnexo, AnexoMeta> = async (de
 /** Bytes para a tela (miniatura, abrir o PDF). Só de anexo desta conversa: o id sozinho não basta. */
 export const lerAnexo: CasoDeUso<{ conversaId: string; anexoId: string }, { meta: AnexoGuardado; bytes: Buffer }> = async (deps, input) => {
   const r = await deps.repos.anexos.conteudo(input.anexoId);
-  if (!r || r.meta.conversaId !== input.conversaId) throw new ErroDeDominio("nao_encontrado", { cause: "anexo" });
+  // NOD-323: a mídia do bot "sem bytes" (passou do limite) ficou na máquina; não há o que servir.
+  if (!r || r.meta.conversaId !== input.conversaId || r.meta.semBytes) throw new ErroDeDominio("nao_encontrado", { cause: "anexo" });
   return { data: r };
+};
+
+/** NOD-323 (J5): onde está a mídia do bot, para o app do Mac daquela máquina mostrar no Finder. Nunca o caminho absoluto. */
+export const localDaMidia: CasoDeUso<{ conversaId: string; anexoId: string }, { caminhoRelativo: string; maquinaId: string }> = async (deps, input) => {
+  const r = await deps.repos.anexos.localDoBot(input.anexoId);
+  if (!r || r.conversaId !== input.conversaId) throw new ErroDeDominio("nao_encontrado", { cause: "anexo" });
+  return { data: { caminhoRelativo: r.caminhoRelativo, maquinaId: r.machineId } };
+};
+
+export type FaixaDoAnexo = { meta: AnexoGuardado; bytes: Buffer; faixa: { inicio: number; fim: number; total: number } };
+
+/**
+ * NOD-323: uma fatia dos bytes (o Range que o player de vídeo e áudio pede para buscar). `faixa` recebe o tamanho total
+ * e devolve a fatia pedida, "invalida" (416) ou null (sem Range: o arquivo inteiro, como `lerAnexo`).
+ */
+export const lerFaixaDoAnexo: CasoDeUso<
+  { conversaId: string; anexoId: string; faixa: (total: number) => { inicio: number; fim: number } | "invalida" | null },
+  FaixaDoAnexo | { invalida: number } | null
+> = async (deps, input) => {
+  const meta = await deps.repos.anexos.buscar(input.anexoId);
+  if (!meta || meta.conversaId !== input.conversaId || meta.semBytes) throw new ErroDeDominio("nao_encontrado", { cause: "anexo" });
+  const f = input.faixa(meta.tamanho);
+  if (f === null) return { data: null };
+  if (f === "invalida") return { data: { invalida: meta.tamanho } };
+  const pedaco = await deps.repos.anexos.faixa(meta.id, f.inicio, f.fim);
+  if (!pedaco) throw new ErroDeDominio("nao_encontrado", { cause: "anexo" });
+  return { data: { meta, bytes: pedaco, faixa: { ...f, total: meta.tamanho } } };
 };

@@ -67,10 +67,12 @@ export type CapacidadesHarness = {
   anexos: readonly TipoAnexo[];
   comandosDoCli: boolean;
   pastaDeTrabalho: boolean;
+  /** NOD-323 (revisão 3 do #507): o proxy desta versão atende `anexar_midia`; o app anterior não anuncia e não a recebe. */
+  anexarMidia: boolean;
 };
 
 /** Harness desconhecido ou em preparação: nenhuma capacidade, todo caminho cai no "sem a capacidade". */
-export const SEM_CAPACIDADES: CapacidadesHarness = { mensagemNoMeio: false, retomaSessao: false, bifurcaSessao: false, processoProprio: false, terminal: false, anexos: [], comandosDoCli: false, pastaDeTrabalho: false };
+export const SEM_CAPACIDADES: CapacidadesHarness = { mensagemNoMeio: false, retomaSessao: false, bifurcaSessao: false, processoProprio: false, terminal: false, anexos: [], comandosDoCli: false, pastaDeTrabalho: false, anexarMidia: false };
 
 /**
  * definido em 2026-10-07 (ADR-083): o Codex do chat roda no app-server quando a sonda o acha (`turn/steer`), mas
@@ -80,8 +82,8 @@ export const SEM_CAPACIDADES: CapacidadesHarness = { mensagemNoMeio: false, reto
  * a máquina não consegue ligar o hook, o driver roda isolado e avisa o modelo, como o Claude sem o hook.
  */
 export const CAPACIDADES_HARNESS: Record<IdHarness, CapacidadesHarness> = {
-  "claude-cli": { mensagemNoMeio: true, retomaSessao: true, bifurcaSessao: true, processoProprio: true, terminal: true, anexos: ["imagem", "pdf", "texto"], comandosDoCli: true, pastaDeTrabalho: true },
-  "codex-cli": { mensagemNoMeio: true, retomaSessao: true, bifurcaSessao: true, processoProprio: true, terminal: true, anexos: ["imagem", "texto"], comandosDoCli: false, pastaDeTrabalho: true },
+  "claude-cli": { mensagemNoMeio: true, retomaSessao: true, bifurcaSessao: true, processoProprio: true, terminal: true, anexos: ["imagem", "pdf", "texto"], comandosDoCli: true, pastaDeTrabalho: true, anexarMidia: true },
+  "codex-cli": { mensagemNoMeio: true, retomaSessao: true, bifurcaSessao: true, processoProprio: true, terminal: true, anexos: ["imagem", "texto"], comandosDoCli: false, pastaDeTrabalho: true, anexarMidia: true },
   "cursor-cli": SEM_CAPACIDADES,
   hermes: SEM_CAPACIDADES,
 };

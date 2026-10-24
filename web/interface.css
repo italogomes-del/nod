@@ -1925,6 +1925,139 @@ span.pilula-memoria { padding-right: 12px; cursor: default; }
 /* Chat limpo (ADR-114, PR 2): os botões da task pedida (Fazer aqui, Fazer depois) no topo da tela dela. */
 .tk-topo .linha-acoes { justify-content: flex-start; margin-top: 8px; }
 
+/* NOD-323 (ADR-126, protótipo v3.1): a mídia que o bot anexou, ABAIXO do balão da fala, na ordem anexada. Sem moldura
+   nem legenda na conversa (cara de mensagem, como no Grok); a tela cheia (.luz) mostra o nome. Só tokens, exceto o
+   escuro fixo sobre a mídia (o mesmo nos dois temas, marcado com cor-fixa). */
+.msg-midias { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; width: fit-content; max-width: 100%; margin: 8px 0 0; }
+.msg-midias figure { margin: 0; }
+.msg-midia-bt { position: relative; display: block; padding: 0; border: 0; border-radius: 10px; overflow: hidden; background: var(--surface-raised); cursor: zoom-in; }
+.msg-midia-bt img { position: relative; display: block; width: 100%; height: 100%; object-fit: contain; }
+.msg-midia-img .msg-midia-bt { width: var(--w); max-width: 100%; aspect-ratio: var(--ar); height: auto; }
+.msg-midia-bt:focus-visible, .msg-midia-cel:focus-visible, .msg-midia-vid:focus-visible, .msg-midia-bt.voltou, .msg-midia-cel.voltou, .msg-midia-vid.voltou { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+/* Carregando: a caixa já tem o tamanho final (a conversa não pula) e o giro do nod atrás da imagem, até ela cobrir. */
+.msg-midia-giro { position: absolute; inset: 0; display: grid; place-items: center; color: var(--ink-3); pointer-events: none; }
+.msg-midia-giro .ob-gira { width: 16px; height: 16px; }
+.carregou > .msg-midia-giro, .msg-midia-bt:has(> img[data-ok]) > .msg-midia-giro, .msg-midia-cel:has(> img[data-ok]) > .msg-midia-giro { display: none; }
+/* Erro: o mesmo lugar e o mesmo tamanho, com o motivo e Tentar de novo. */
+.msg-midia-erro { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 6px; padding: 10px; text-align: center; background: var(--surface-raised); color: var(--ink-2); font-size: 12px; line-height: 1.35; cursor: default; }
+.msg-midia-erro svg { color: var(--ink-3); }
+.msg-midia-erro .bt.link { font-size: 12px; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+/* Lado a lado: 2 ou 3 de mesma proporção em quadrados de até 180 px; 4 ou mais, a 3ª com "+N". */
+.msg-midia-grade { display: grid; grid-template-columns: repeat(var(--k), minmax(0, 180px)); gap: 6px; max-width: 100%; }
+.msg-midia-cel { position: relative; display: block; padding: 0; border: 0; border-radius: 10px; aspect-ratio: 1; background: var(--surface-raised); cursor: zoom-in; overflow: hidden; }
+.msg-midia-cel img { position: relative; display: block; width: 100%; height: 100%; object-fit: cover; object-position: 50% 30%; }
+.msg-midia-mais { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(9, 9, 11, .5); color: #fff; font-size: 24px; font-weight: 600; letter-spacing: -.01em; } /* cor-fixa: véu sobre a foto, igual nos dois temas */
+/* Proporções diferentes: na altura de 180 px, cada uma na sua proporção, sem recorte; a linha encolhe junta. */
+.msg-midia-linha { display: flex; gap: 8px; width: calc(180px * var(--soma) + 8px * (var(--n) - 1)); max-width: 100%; }
+.msg-midia-linha > * { flex: var(--r) 1 0; min-width: 0; width: auto; }
+.msg-midia-linha .msg-midia-bt { width: 100%; aspect-ratio: var(--ar); border-radius: 20px; }
+.msg-midia-linha .msg-midia-bt img { object-fit: cover; }
+.msg-midia-linha .msg-midia-gif { width: auto; }
+.msg-midia-borda::after { content: ""; position: absolute; inset: 0; border-radius: inherit; box-shadow: inset 0 0 0 1px var(--line); pointer-events: none; }
+/* GIF: anima e tem Pausar (WCAG 2.2.2); parado, o 1º quadro num canvas por cima. */
+.msg-midia-gif { position: relative; width: var(--w); max-width: 100%; }
+.msg-midia-gif .msg-midia-bt { width: 100%; aspect-ratio: var(--ar); }
+.msg-midia-quadro { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: none; pointer-events: none; }
+.msg-midia-cel .msg-midia-quadro { object-fit: cover; object-position: 50% 30%; }
+.parado .msg-midia-quadro[data-pronto], .parado.msg-midia-cel > .msg-midia-quadro[data-pronto] { display: block; }
+.msg-midia-gif-ctl { position: absolute; left: 8px; bottom: 8px; display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px 0 8px; border: 0; border-radius: 999px; background: rgba(24, 24, 27, .72); color: #fff; font: 500 11.5px var(--font-sans); cursor: pointer; } /* cor-fixa: controle sobre a mídia */
+.msg-midia-gif-ctl b { font-weight: 700; letter-spacing: .04em; font-size: 10.5px; opacity: .9; }
+.msg-midia-gif-ctl:focus-visible { outline: 2px solid #fff; outline-offset: 2px; } /* cor-fixa: contorno sobre a mídia */
+/* Vídeo: na conversa só a capa, o ▶ e a duração; o player é o da tela cheia. */
+.msg-midia-vid { position: relative; display: block; width: 320px; max-width: 100%; aspect-ratio: var(--ar); padding: 0; border: 0; border-radius: 10px; overflow: hidden; background: #000; cursor: pointer; } /* cor-fixa: fundo de vídeo */
+.msg-midia-vid video { display: block; width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
+.msg-midia-play { position: absolute; left: 50%; top: 50%; width: 48px; height: 48px; margin: -24px 0 0 -24px; display: grid; place-items: center; border-radius: 50%; background: rgba(9, 9, 11, .82); color: #fff; transition: transform .15s ease; } /* cor-fixa: ▶ sobre o vídeo */
+.msg-midia-play svg { margin-left: 2px; }
+.msg-midia-vid:hover .msg-midia-play { transform: scale(1.06); }
+.msg-midia-dur { position: absolute; right: 8px; bottom: 8px; padding: 2px 6px; border-radius: 6px; background: rgba(9, 9, 11, .72); color: #fff; font: 500 11.5px/1.45 var(--font-sans); font-variant-numeric: tabular-nums; } /* cor-fixa: sobre o vídeo */
+/* Áudio: o memo de voz (pílula [▶ | 1×], a trilha e o tempo). A onda real fica para a NOD-329. */
+.msg-memo { position: relative; width: 400px; max-width: 100%; box-sizing: border-box; padding: 7px 12px 7px 7px; border-radius: 23px; background: var(--surface-raised); color: var(--ink); }
+.memo-linha { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.memo-pilula { flex: none; display: flex; align-items: stretch; height: 32px; border-radius: 999px; background: color-mix(in srgb, var(--ink) 7%, var(--surface-raised)); }
+.memo-pilula button { display: grid; place-items: center; padding: 0; border: 0; background: transparent; color: var(--ink-2); font: 500 13.5px/1 var(--font-sans); font-variant-numeric: tabular-nums; cursor: pointer; }
+.memo-play { width: 36px; border-radius: 999px 0 0 999px; }
+.memo-pilula .memo-vel { min-width: 38px; padding: 0 9px 0 7px; border-left: 1px solid color-mix(in srgb, var(--ink) 9%, transparent); border-radius: 0 999px 999px 0; }
+.memo-pilula button:hover { color: var(--ink); background: color-mix(in srgb, var(--ink) 5%, transparent); }
+.memo-trilha { flex: 1; min-width: 40px; height: 28px; margin: 0; background: transparent; -webkit-appearance: none; appearance: none; cursor: pointer; }
+.memo-trilha::-webkit-slider-runnable-track { height: 3px; border-radius: 2px; background: linear-gradient(to right, var(--action) var(--p, 0%), color-mix(in srgb, var(--ink-3) 32%, transparent) var(--p, 0%)); }
+.memo-trilha::-moz-range-track { height: 3px; border-radius: 2px; background: linear-gradient(to right, var(--action) var(--p, 0%), color-mix(in srgb, var(--ink-3) 32%, transparent) var(--p, 0%)); }
+.memo-trilha::-webkit-slider-thumb { -webkit-appearance: none; width: 10px; height: 10px; margin-top: -3.5px; border: 0; border-radius: 50%; background: var(--action); }
+.memo-trilha::-moz-range-thumb { width: 10px; height: 10px; border: 0; border-radius: 50%; background: var(--action); }
+.memo-tempo { flex: none; min-width: 34px; font-size: 13.5px; color: var(--ink-2); font-variant-numeric: tabular-nums; text-align: right; }
+.msg-memo :focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+/* Cartões da mídia do bot: o card de arquivo, à esquerda (é do bot), empilhado. Grande demais: em mais linhas; sumiu: tracejado. */
+.msg-midias .msg-arquivos { display: flex; flex-direction: column; gap: 8px; }
+.msg-midias .msg-arquivo { align-self: flex-start; width: 340px; }
+.msg-arquivo.alto { height: auto; min-height: 56px; }
+.msg-arquivo.alto .msg-arquivo-abrir { align-items: flex-start; padding: 12px 14px 12px 10px; cursor: default; }
+.msg-arquivo.alto .anexo-info span { white-space: normal; line-height: 1.4; }
+.msg-arquivo.alto .msg-midia-card-acao { align-self: flex-start; margin-top: 4px; padding: 0; font-size: 12px; color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
+.msg-arquivo.alto .msg-midia-card-onde { margin-top: 2px; }
+.msg-arquivo.mudo { border-style: dashed; }
+.msg-arquivo.mudo .arq-ic { opacity: .5; }
+.msg-arquivo.mudo .anexo-info b { color: var(--ink-2); }
+/* Arquivo que não entrou: linha discreta sob a fala, sem caminho. */
+.msg-midia-recusado { display: flex; align-items: center; gap: 6px; margin: 6px 0 0; padding: 2px 6px 2px 2px; font-size: 12px; color: var(--ink-3); }
+.msg-midia-recusado svg { flex: none; width: 14px; height: 14px; }
+/* O link da fala para um anexo do bot (J6, nod-anexo:<id>): parece link, abre a mídia. */
+.md-midia-link { display: inline; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+/* Fala com mídia: o balão fica do tamanho do texto e a coluna não passa do ponto em que a barra de ações some. */
+@media (min-width: 641px) { .message.bot .bubble-wrap:has(> .msg-midias) { max-width: min(86%, 760px, calc(100% - 184px)); } }
+.bubble-wrap:has(> .msg-midias) > .bubble { width: fit-content; max-width: 100%; box-sizing: border-box; }
+@media (prefers-reduced-motion: reduce) { .msg-midia-play { transition: none; } .msg-midia-giro .ob-gira { animation: none; } }
+
+/* NOD-323 (protótipo v3.1): a barra mínima do vídeo em tela cheia (play, trilha fina, tempo, velocidade), branca no escuro. */
+.ctl { --trilha: rgba(255, 255, 255, .28); --cheio: #fff; --pilula: rgba(255, 255, 255, .1); display: flex; align-items: center; gap: 10px; min-width: 0; color: #fff; } /* cor-fixa: a tela cheia é sempre escura, nos dois temas */
+.ctl button { display: grid; place-items: center; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.ctl-play { flex: none; width: 28px; height: 28px; border-radius: 50%; }
+.ctl-play:hover { background: var(--pilula); }
+.ctl-trilha { flex: 1; min-width: 40px; height: 18px; margin: 0; background: transparent; -webkit-appearance: none; appearance: none; cursor: pointer; }
+.ctl-trilha::-webkit-slider-runnable-track { height: 2px; border-radius: 2px; background: linear-gradient(to right, var(--cheio) var(--p, 0%), var(--trilha) var(--p, 0%)); }
+.ctl-trilha::-moz-range-track { height: 2px; border-radius: 2px; background: linear-gradient(to right, var(--cheio) var(--p, 0%), var(--trilha) var(--p, 0%)); }
+.ctl-trilha::-webkit-slider-thumb { -webkit-appearance: none; width: 10px; height: 10px; margin-top: -4px; border: 0; border-radius: 50%; background: var(--cheio); }
+.ctl-trilha::-moz-range-thumb { width: 10px; height: 10px; border: 0; border-radius: 50%; background: var(--cheio); }
+.ctl-tempo { flex: none; min-width: 30px; padding: 3px 6px; border-radius: 6px; background: var(--pilula); font: 500 11.5px/1.3 var(--font-sans); font-variant-numeric: tabular-nums; text-align: center; }
+.ctl .ctl-vel { display: inline-flex; align-items: center; height: 22px; padding: 0 7px; border-radius: 6px; background: var(--pilula); font-size: 11.5px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.ctl :focus-visible { outline: 2px solid var(--cheio); outline-offset: 2px; border-radius: 6px; }
+
+/* A tela cheia: um <dialog> modal de borda a borda, a conversa escurecida atrás, a mídia ao centro, três botões redondos
+   no canto e, com várias, as miniaturas no pé. Clicar fora da mídia fecha. */
+dialog.luz { position: fixed; inset: 0; width: 100%; height: 100%; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; border-radius: 0; box-shadow: none; display: grid; grid-template-rows: minmax(0, 1fr) auto; background: rgba(9, 9, 11, .9); color: #fff; font-family: var(--font-sans); } /* cor-fixa: a tela cheia é sempre escura, nos dois temas */
+dialog.luz:not([open]) { display: none; }
+dialog.luz::backdrop { background: transparent; }
+.luz.entra { animation: luz-entra .16s ease-out; }
+@keyframes luz-entra { from { opacity: 0; } }
+.luz-palco { position: relative; min-height: 0; container-type: size; touch-action: pan-y pinch-zoom; }
+.luz-palco > [data-luz="item"] { position: absolute; inset: 0; }
+.luz-fig { position: absolute; inset: 64px 72px 12px; margin: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; }
+img.luz-midia { display: block; flex: none; width: min(var(--w), calc(100cqw - 144px), calc((100cqh - 108px) * var(--ar))); height: auto; aspect-ratio: var(--ar); border-radius: 6px; cursor: zoom-in; user-select: none; -webkit-user-drag: none; }
+.luz-video { flex: none; display: flex; flex-direction: column; gap: 10px; width: min(calc(100cqw - 144px), calc((100cqh - 150px) * var(--ar))); }
+.luz-video video { display: block; width: 100%; aspect-ratio: var(--ar); border-radius: 6px; background: #000; cursor: pointer; } /* cor-fixa: a tela cheia é sempre escura, nos dois temas */
+.luz-legenda { flex: none; max-width: 100%; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; line-height: 1.4; color: rgba(255, 255, 255, .72); font-variant-numeric: tabular-nums; } /* cor-fixa: a tela cheia é sempre escura, nos dois temas */
+.luz-topo { position: absolute; top: 14px; right: 14px; z-index: 2; display: flex; gap: 8px; }
+.luz-bt { width: 40px; height: 40px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%; background: rgba(255, 255, 255, .08); color: #fff; cursor: pointer; text-decoration: none; } /* cor-fixa: a tela cheia é sempre escura, nos dois temas */
+.luz-bt:hover { background: rgba(255, 255, 255, .16); } /* cor-fixa: a tela cheia é sempre escura, nos dois temas */
+.luz-bt[hidden] { display: none; }
+.luz-seta { position: absolute; top: 50%; z-index: 1; width: 44px; height: 44px; margin-top: -22px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%; background: rgba(255, 255, 255, .08); color: #fff; cursor: pointer; opacity: 0; transition: opacity .15s ease; } /* cor-fixa: a tela cheia é sempre escura, nos dois temas */
+.luz-seta.ant { left: 14px; }
+.luz-seta.prox { right: 14px; }
+.luz-palco:hover .luz-seta, .luz-seta:focus-visible { opacity: 1; }
+.luz-seta:hover { background: rgba(255, 255, 255, .16); } /* cor-fixa: a tela cheia é sempre escura, nos dois temas */
+.luz-minis { display: flex; gap: 8px; padding: 10px 16px 18px; overflow-x: auto; scrollbar-width: none; }
+.luz-minis::-webkit-scrollbar { display: none; }
+.luz-mini { flex: none; width: 52px; height: 52px; padding: 0; border: 0; border-radius: 8px; overflow: hidden; background: #222; opacity: .55; cursor: pointer; transition: opacity .15s ease; } /* cor-fixa: a tela cheia é sempre escura, nos dois temas */
+.luz-mini:first-child { margin-left: auto; }
+.luz-mini:last-child { margin-right: auto; }
+.luz-mini:hover { opacity: .85; }
+.luz-mini[aria-current] { opacity: 1; outline: 2px solid #fff; outline-offset: 1px; } /* cor-fixa: a tela cheia é sempre escura, nos dois temas */
+.luz-mini img, .luz-mini video { display: block; width: 100%; height: 100%; object-fit: cover; }
+.luz :focus-visible { outline: 2px solid #fff; outline-offset: 2px; } /* cor-fixa: a tela cheia é sempre escura, nos dois temas */
+/* Tamanho real (duplo clique na imagem): a imagem no tamanho do arquivo, e o palco rola. */
+.luz.cem .luz-palco { overflow: auto; }
+.luz.cem .luz-palco > [data-luz="item"] { position: static; }
+.luz.cem .luz-fig { position: static; width: max-content; margin: 0 auto; padding: 64px 72px 24px; }
+.luz.cem img.luz-midia { width: var(--w); max-width: none; cursor: zoom-out; }
+@media (prefers-reduced-motion: reduce) { .luz.entra { animation: none; } .luz-seta, .luz-mini { transition: none; } }
 /* NOD-350 · subagentes em segundo plano (protótipo aprovado, nod-prototipos d224881). Embaixo dos passos do bot da task,
    a linha "2 subagentes trabalhando" e uma linha por subagente, com as peças reais (.passo, .ponto-trabalho, .progresso).
    Um ponto pulsa por tela: o do cabeçalho; os ícones das linhas ficam cheios e parados. Nenhum azul: o azul é da moldura. */

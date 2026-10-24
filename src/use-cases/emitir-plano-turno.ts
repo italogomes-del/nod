@@ -424,6 +424,9 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
     trabalhosAbertos,
     pedidosPendentes,
     harness: escolha?.harness ?? null,
+    // NOD-323 (revisão 3 do #507): a máquina que anunciou capacidades sem `anexarMidia` é o app anterior — o proxy dele
+    // trataria a ferramenta como ler_mais. "Não sei" (undefined: modo local ou máquina ainda reconectando) segue com ela.
+    ...(executor === "local" && escolha && input.capacidadesDaMaquina !== undefined && input.capacidadesDaMaquina[escolha.harness]?.anexarMidia !== true ? { semAnexarMidia: true } : {}),
     agora,
   });
 

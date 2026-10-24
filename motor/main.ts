@@ -220,7 +220,7 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
     const tarefasVivas = criarAcompanhanteDeTarefas((turnoId, tarefas) => ponteHttp.tarefas(turnoId, tarefas));
     // NOD-350: a ponte já junta os trechos até a renovação (1 s), então aqui toda mudança vai para ela.
     const subagentesVivos = criarAcompanhanteDeSubagentes((turnoId, lista, ocioso) => ponteHttp.subagentes(turnoId, lista, ocioso), { intervaloMs: 0 });
-    laco = iniciarPoolDeLacos((ponte) => iniciarLaco({ ponte, registry: reg, pessoaId: dados.escopo.pessoaId, machineId: dados.machineId, relogio: () => Date.now(), renovacaoMs: 1_000, esperaVaziaMs: 1000, memoria, registroDaConta,
+    laco = iniciarPoolDeLacos((ponte) => iniciarLaco({ ponte, registry: reg, pessoaId: dados.escopo.pessoaId, machineId: dados.machineId, relogio: () => Date.now(), renovacaoMs: 1_000, esperaVaziaMs: 1000, memoria, registroDaConta, urlNod: lig.urlNod,
       aoDelta: (p, t) => ponteHttp.delta(p.turnoId, t),
       aoEvento: (p, ev) => { if (ev.tipo === "tool_use") ponteHttp.ferramenta(p.turnoId, ev.nome); tarefasVivas.evento(p.turnoId, ev); subagentesVivos.evento(p.turnoId, ev); },
       aoIniciarTurno: (p) => { planosAqui.set(p.turnoId, p); },

@@ -76,7 +76,9 @@ import { lerArtefato, publicarArtefato } from "../../use-cases/artefatos.ts";
 import { servicoSala } from "../../use-cases/servico-sala.ts";
 import type { Deps, Services, UseCasesNod } from "../../use-cases/tipos.ts";
 import type { RegistroCatcher } from "../executor/drivers/catcher.ts";
+import { criarClienteNod } from "../executor/cliente-nod.ts";
 import { iniciarLaco } from "../executor/laco.ts";
+import { anexarLinksDaFala } from "../executor/midia-local.ts";
 import { criarAcompanhanteDeTarefas } from "../executor/acompanhar-tarefas.ts";
 import { criarAcompanhanteDeSubagentes } from "../executor/acompanhar-subagentes.ts";
 import { comRotulos, haSubagenteTrabalhando, resumoSubagentes } from "../../domain/subagentes.ts";
@@ -238,6 +240,8 @@ export type App = {
   autorizarMaquina(token: string): ReturnType<typeof autorizarChaveMaquina>;
   /** Liga o registry sondado (boot), os snapshots das sondas por driver e quem liga um driver DEPOIS do boot (interruptor). */
   ligarRegistry(registry: Registry, inventarios?: Partial<Record<IdDriver, Inventario>>, ativar?: AtivarDriver): void;
+  /** NOD-323 (J6): a URL deste servidor, que só existe depois do listen — o laço local sobe por ela a mídia da fala. */
+  ligarUrlLocal(url: string): void;
   /** Interruptor de executor (definido em 2026-09-16): estado escrito da máquina e troca em tempo de execução, serializada. */
   estadoExecutor(): EstadoExecutor;
   trocarExecutor(id: IdExecutor): Promise<EstadoExecutor>;
@@ -1384,6 +1388,10 @@ export function comporApp(o: OpcoesCompor): App {
   // máquina vai em cada um); fora do macOS, sem NOD_SIMULAR_*, não lê nada e o puxar vai sem leitura.
   const memoriaDaMaquina = criarAmostradorMemoria({ env });
   // Pool elástico por pessoa (2026-09-24): um laço ocioso sempre puxando, mais um por turno rodando.
+  // NOD-323 (J6, Codex no #507): no modo local o laço também anexa a mídia citada na fala, pela rota interna deste servidor.
+  let urlLocal: string | null = null;
+  const midiaDaFalaLocal = (plano: PlanoTurno, texto: string, sinal: AbortSignal): Promise<string> =>
+    urlLocal && plano.pastaDoBot ? anexarLinksDaFala(texto, { cliente: criarClienteNod({ url: urlLocal, token: plano.tokenDeTurno }), pastaDoBot: plano.pastaDoBot, sinal }) : Promise.resolve(texto);
   const iniciarLacoDaPessoa: IniciarLaco = (p) =>
     iniciarPoolDeLacos((ponte) => iniciarLaco({
       ...p,
@@ -1393,6 +1401,7 @@ export function comporApp(o: OpcoesCompor): App {
       // (revisão do PR 3a): desligada, nenhum pedido sai, e a batida fica a de hoje (30 s), sem 30× renovações no banco.
       ...renovacaoDoLacoLocal(configRevisor),
       memoria: memoriaDaMaquina,
+      midiaDaFala: midiaDaFalaLocal,
       aoDelta: (plano, texto) => publicarDoPlano(plano, "turno.delta", { texto }),
       aoFalaGravada: (plano) => publicarDoPlano(plano, "turno.fala", {}),
       aoVigia: (plano, aviso) => avisoDoVigia(plano, aviso),
@@ -1459,6 +1468,9 @@ export function comporApp(o: OpcoesCompor): App {
       ativarDriver = ativar ?? null;
       sondaCompartilhada = null;
       ligarRegistryResolvido();
+    },
+    ligarUrlLocal(url) {
+      urlLocal = url;
     },
     estadoExecutor,
     trocarExecutor,

@@ -17,6 +17,9 @@ import { estadoDoGit } from "./estado-do-git.ts";
 import { criarExecutarComando } from "./limpeza-das-tasks.ts";
 import { trocarNoPrompt } from "../../domain/clone-da-maquina.ts";
 import { prepararCloneDaMaquina, type ResultadoPreparo } from "./clone-da-maquina.ts";
+import { FERRAMENTA_ANEXAR_MIDIA } from "../../contracts/ferramentas-proxy.ts";
+import { criarClienteNod } from "./cliente-nod.ts";
+import { anexarLinksDaFala } from "./midia-local.ts";
 
 /**
  * Laço puxar → rodar → renovar → entregar (ADR-021: o app puxa, o servidor nunca disca) sobre uma
@@ -88,7 +91,19 @@ export type OpcoesLaco = {
    * `~/nod/.clones` (clone-da-maquina.ts), só no Linux; injetável no teste.
    */
   prepararClone?: (repo: string, signal: AbortSignal) => Promise<ResultadoPreparo>;
+  /**
+   * NOD-323 J6 (ADR-126): o servidor nod que recebe a mídia da fala (o mesmo do proxy). Presente, a fala final que aponta
+   * `![](caminho)`/`[texto](caminho)` para a pasta do bot vira anexo antes da entrega. Ausente = a fala vai como veio.
+   */
+  urlNod?: string;
+  /** Injetável no teste: quem anexa os links da fala (default anexarLinksDaFala com o cliente do turno). */
+  midiaDaFala?: (plano: PlanoTurno, texto: string, sinal: AbortSignal) => Promise<string>;
+  /** O prazo total da J6 (default PRAZO_MIDIA_DA_FALA_MS); estourou, a fala vai como veio. Injetável no teste. */
+  prazoMidiaDaFalaMs?: number;
 };
+
+/** NOD-323 J6: o teto da mídia da fala inteira (até 10 arquivos); o lease bate enquanto isso. */
+export const PRAZO_MIDIA_DA_FALA_MS = 5 * 60_000;
 
 const estadoDoGitPadrao = (plano: PlanoTurno): Promise<string | null> =>
   estadoDoGit(join(homedir(), "nod", plano.pastaDoBot!), criarExecutarComando(process.env, homedir()));
@@ -132,6 +147,32 @@ export function driverDoPlano(plano: PlanoTurno): IdDriver {
 }
 
 export function iniciarLaco(o: OpcoesLaco): Laco {
+  /** NOD-323 J6: nunca derruba a entrega — falhou, a fala vai como veio (o link fica, a imagem sem anexo vira o alt). */
+  // O turno parado (Parar, renovação negada) entrega como veio: não sobe nada (revisão 2 do #507, M4). O prazo e o
+  // `aborto` (que a renovação negada dispara) cancelam o upload em curso, não só a espera.
+  const midiaDaFala = async (plano: PlanoTurno, r: ResultadoTurno, aborto: AbortController): Promise<ResultadoTurno> => {
+    const anexar = o.midiaDaFala ?? (o.urlNod ? (p: PlanoTurno, t: string, sinal: AbortSignal) => anexarLinksDaFala(t, { cliente: criarClienteNod({ url: o.urlNod!, token: p.tokenDeTurno }), pastaDoBot: p.pastaDoBot!, sinal }) : null);
+    if (!anexar || !plano.pastaDoBot || !r.texto || !plano.catalogo.ferramentas.some((f) => f.nome === FERRAMENTA_ANEXAR_MIDIA.nome)) return r;
+    if (r.desfecho === "interrompido" || aborto.signal.aborted) return r;
+    let prazo: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const estourou = new Promise<null>((ok) => {
+        prazo = setTimeout(() => { aborto.abort(); ok(null); }, o.prazoMidiaDaFalaMs ?? PRAZO_MIDIA_DA_FALA_MS);
+        aborto.signal.addEventListener("abort", () => ok(null), { once: true });
+      });
+      const texto = await Promise.race([anexar(plano, r.texto, aborto.signal), estourou]);
+      if (texto === null) {
+        log("aviso", "laco_midia_da_fala_prazo", { turno_id: plano.turnoId });
+        return r;
+      }
+      return texto === r.texto ? r : { ...r, texto };
+    } catch (erro) {
+      log("aviso", "laco_midia_da_fala_falhou", { turno_id: plano.turnoId, erro: erro instanceof Error ? erro.name : "desconhecido" });
+      return r;
+    } finally {
+      clearTimeout(prazo);
+    }
+  };
   const dormir = o.dormir ?? dormirPadrao;
   const aleatorio = o.aleatorio ?? Math.random;
   const esperaVaziaMs = o.esperaVaziaMs ?? 1_000;
@@ -159,6 +200,8 @@ export function iniciarLaco(o: OpcoesLaco): Laco {
     turnoAtual = plano.turnoId;
     let sinais: SinaisTurno = { ...SINAIS_ZERADOS };
     let entregue = false;
+    /** A entrega começou (a J6 sobe a mídia com o lease ainda batendo): uma segunda chamada não entrega de novo. */
+    let entregando = false;
     let renovando: Promise<void> | null = null;
     // ADR-067, sessão viva: falas ainda não confirmadas pelo servidor (reenviadas até ele confirmar; ele grava cada
     // `seq` uma vez), quantas mensagens novas da pessoa entraram, e se ainda pedimos mensagens ao servidor.
@@ -186,6 +229,8 @@ export function iniciarLaco(o: OpcoesLaco): Laco {
     let renovarLogo: ReturnType<typeof setTimeout> | null = null;
     // NOD-264 (C20): por que o laço mandou o CLI parar (renovação negada ou o motor parando); vira a causa da entrega.
     let causaDoLaco: string | null = null;
+    /** NOD-323 J6: cancela a mídia da fala (renovação negada ou prazo). */
+    const abortoMidia = new AbortController();
     causaDoTurno = null;
 
     const renovar = async (): Promise<void> => {
@@ -265,6 +310,7 @@ export function iniciarLaco(o: OpcoesLaco): Laco {
             causaDoLaco ??= `renovacao_negada:${r.motivo ?? "desconhecido"}`;
             log("aviso", "renovacao_negada", { turno_id: plano.turnoId, motivo: r.motivo ?? "desconhecido" });
             preparoAtual?.abort();
+            abortoMidia.abort();
             if (adapterAtual) await adapterAtual.interromper();
           }
           // NOD-245: sem resposta (`indefinido`), a próxima tentativa sai em 10 s — o servidor recém-subido adota o turno
@@ -316,17 +362,21 @@ export function iniciarLaco(o: OpcoesLaco): Laco {
     const observacao = setInterval(() => avisar(vigia.avaliar(o.relogio())), vigiaMs);
     observacao.unref?.();
     const entregar = async (bruto: ResultadoTurno): Promise<void> => {
-      if (entregue) return;
+      if (entregue || entregando) return;
+      entregando = true;
       // A última fala intermediária vai antes da final: senão a conversa as mostraria fora de ordem. As mensagens
       // escritas na sessão também: confirmadas antes da entrega, nunca viram turno de novo.
       if (falas.length || aConfirmar()) {
         if (renovando) await renovando;
         await renovar();
       }
+      // NOD-323 J6 (revisão do #507): a mídia da fala sobe ANTES de `entregue` — a batida do lease segue enquanto o upload
+      // anda (vídeo grande no uplink de casa passa dos 90 s), e o prazo total da J6 é bem menor que o do turno.
+      const comMidia = await midiaDaFala(plano, bruto, abortoMidia);
       entregue = true;
       seqLocal += 1;
-      const resultado = bruto.texto.length > TEXTO_ENTREGA_MAX_CHARS ? { ...bruto, texto: cortarTexto(bruto.texto) } : bruto;
-      if (resultado !== bruto) log("aviso", "entrega_cortada", { turno_id: plano.turnoId, chars: bruto.texto.length, teto: TEXTO_ENTREGA_MAX_CHARS });
+      const resultado = comMidia.texto.length > TEXTO_ENTREGA_MAX_CHARS ? { ...comMidia, texto: cortarTexto(comMidia.texto) } : comMidia;
+      if (resultado !== comMidia) log("aviso", "entrega_cortada", { turno_id: plano.turnoId, chars: comMidia.texto.length, teto: TEXTO_ENTREGA_MAX_CHARS });
       const entrega: Entrega = {
         turnoId: plano.turnoId,
         machineId: o.machineId,

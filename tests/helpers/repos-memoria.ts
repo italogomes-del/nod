@@ -1,6 +1,6 @@
 import { contasIaMemoria, estadoContasIaMemoria, type EstadoContasIaMemoria } from "./contas-ia-memoria.ts";
 import type { ConfigGithubApp } from "../../src/repositories/github-app.repo.ts";
-import type { MimeAnexo } from "../../src/contracts/anexo.ts";
+import type { AnexoDaConversa, MimeAnexo, RecusasMidia } from "../../src/contracts/anexo.ts";
 import type { LinhaOnboarding } from "../../src/repositories/onboarding.repo.ts";
 import type { MaquinaSsh } from "../../src/repositories/maquinas-ssh.repo.ts";
 import type { ComposicaoRaioX, ExecucaoRaioX, Preferencias } from "../../src/contracts/raio-x.ts";
@@ -75,7 +75,12 @@ export type BancoMemoria = {
   mensagens: Mensagem[];
   /** NOD-156: `tenant:conversa:idEnvio` → id da mensagem (a coluna id_envio não sai em Mensagem). */
   idsDeEnvio: Map<string, string>;
-  anexos: { tenantId: string; ownerId: string; id: string; conversaId: string; mensagemId: string | null; nome: string; mime: MimeAnexo; bytes: Buffer; criadoEm: number }[];
+  anexos: {
+    tenantId: string; ownerId: string; id: string; conversaId: string; mensagemId: string | null; nome: string; mime: MimeAnexo; bytes: Buffer; criadoEm: number;
+    // NOD-323: a mídia do bot.
+    origem?: "bot"; turnoId?: string; sha256?: string; semBytes?: boolean; caminhoRelativo?: string; machineId?: string | null; tamanho?: number; largura?: number; altura?: number; duracaoMs?: number;
+  }[];
+  midiaRecusas: Map<string, { motivo: string; n: number }[]>;
   /** ADR-051 (0031): artefato, versões e o estado por pessoa (UNIQUE tenant+artefato+owner reproduzido). */
   artefatos: (Artefato & { tenantId: string; ownerId: string })[];
   artefatoVersoes: (VersaoArtefato & { tenantId: string; ownerId: string })[];
@@ -175,6 +180,7 @@ export function criarBancoMemoria(): { banco: BancoMemoria; repos(escopo?: Escop
     mensagens: [],
     idsDeEnvio: new Map(),
     anexos: [],
+    midiaRecusas: new Map(),
     artefatos: [],
     artefatoVersoes: [],
     artefatoEstados: [],
@@ -278,7 +284,9 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
     const aberto = !m.turnoId ? doTenant(b.turnos).filter((x) => x.mensagemOrigemId === m.id).sort((x, y) => x.criadoEm - y.criadoEm)[0] : undefined;
     const falaDoBot = (x: Mensagem) => x.kind === "texto" && x.autoria.autor_tipo === "agente";
     const ultima = t ? lista.filter((x) => x.turnoId === t.id && falaDoBot(x)).at(-1) : undefined;
-    return { ...m, origemTurno: t?.origem ?? null, trabalhoId: t?.trabalhoId ?? aberto?.trabalhoId ?? null, fimDoTurno: Boolean(t && (t.estado === "concluido" || t.estado === "interrompido") && falaDoBot(m) && ultima?.id === m.id) };
+    const fimDoTurno = Boolean(t && (t.estado === "concluido" || t.estado === "interrompido") && falaDoBot(m) && ultima?.id === m.id);
+    const recusas = fimDoTurno && t ? (b.midiaRecusas.get(t.id) as RecusasMidia | undefined) ?? [] : [];
+    return { ...m, origemTurno: t?.origem ?? null, trabalhoId: t?.trabalhoId ?? aberto?.trabalhoId ?? null, fimDoTurno, ...(recusas.length ? { midiaRecusas: recusas } : {}) };
   });
   const minhasCredenciais = () => b.credenciais.filter((x) => x.tenantId === escopo.tenantId && x.ownerId === escopo.pessoaId);
   const minhasEsperas = () => b.esperas.filter((x) => x.tenantId === escopo.tenantId && x.ownerId === escopo.pessoaId);
@@ -670,7 +678,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       },
       async prender(ids, p) {
         return ids.flatMap((id) => {
-          const l = doTenant(b.anexos).find((x) => x.id === id && x.ownerId === escopo.pessoaId && x.conversaId === p.conversaId && x.mensagemId === null);
+          const l = doTenant(b.anexos).find((x) => x.id === id && x.ownerId === escopo.pessoaId && x.conversaId === p.conversaId && x.mensagemId === null && x.origem !== "bot");
           if (!l) return [];
           l.mensagemId = p.mensagemId;
           return [{ id: l.id, nome: l.nome, mime: l.mime, tamanho: l.bytes.byteLength }];
@@ -689,6 +697,58 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           const l = doTenant(b.anexos).find((x) => x.id === id);
           return l ? [{ id: l.id, nome: l.nome, mime: l.mime, tamanho: l.bytes.byteLength }] : [];
         });
+      },
+      async faixa(id, inicio, fim) {
+        const l = doTenant(b.anexos).find((x) => x.id === id);
+        return l ? l.bytes.subarray(inicio, fim + 1) : null;
+      },
+      async criarDoBot(a) {
+        const ja = doTenant(b.anexos).find((x) => x.origem === "bot" && x.turnoId === a.turnoId && x.sha256 === a.sha256);
+        const l = ja ?? {
+          tenantId: escopo.tenantId, ownerId: escopo.pessoaId, id: randomUUID(), conversaId: a.conversaId, mensagemId: null, nome: a.nome,
+          mime: a.mime as MimeAnexo, bytes: Buffer.from(a.conteudo), criadoEm: Date.now(), origem: "bot" as const, turnoId: a.turnoId, sha256: a.sha256,
+          semBytes: a.semBytes, tamanho: a.tamanho, largura: a.largura, altura: a.altura, duracaoMs: a.duracaoMs,
+          caminhoRelativo: a.caminhoRelativo, machineId: a.machineId,
+        };
+        if (!ja) b.anexos.push(l);
+        return { anexo: { id: l.id, nome: l.nome, mime: l.mime, tamanho: l.tamanho ?? l.bytes.byteLength, conversaId: l.conversaId, mensagemId: l.mensagemId, origem: "bot", semBytes: !!l.semBytes }, novo: !ja };
+      },
+      async localDoBot(id) {
+        const l = doTenant(b.anexos).find((x) => x.id === id && x.origem === "bot" && x.ownerId === escopo.pessoaId);
+        return l?.caminhoRelativo && l.machineId ? { conversaId: l.conversaId, caminhoRelativo: l.caminhoRelativo, machineId: l.machineId } : null;
+      },
+      async doBotPorSha(turnoId, sha256) {
+        return doTenant(b.anexos).find((x) => x.origem === "bot" && x.turnoId === turnoId && x.sha256 === sha256)?.id ?? null;
+      },
+      async contarDoTurno(turnoId) {
+        return doTenant(b.anexos).filter((x) => x.origem === "bot" && x.turnoId === turnoId).length;
+      },
+      async prenderDoTurno(turnoId, mensagemId) {
+        const soltos = doTenant(b.anexos).filter((x) => x.origem === "bot" && x.turnoId === turnoId && x.mensagemId === null);
+        for (const l of soltos) l.mensagemId = mensagemId;
+        return soltos.map((l) => l.id);
+      },
+      async daConversa(ids) {
+        const saida = new Map<string, AnexoDaConversa[]>();
+        for (const l of doTenant(b.anexos)) {
+          if (!l.mensagemId || !ids.includes(l.mensagemId)) continue;
+          const a: AnexoDaConversa = {
+            id: l.id, nome: l.nome, mime: l.mime, tamanho: l.tamanho ?? l.bytes.byteLength,
+            ...(l.origem ? { origem: l.origem } : {}),
+            ...(l.largura !== undefined ? { largura: l.largura } : {}),
+            ...(l.altura !== undefined ? { altura: l.altura } : {}),
+            ...(l.duracaoMs !== undefined ? { duracaoMs: l.duracaoMs } : {}),
+            ...(l.semBytes ? { semBytes: true as const } : {}),
+          };
+          saida.set(l.mensagemId, [...(saida.get(l.mensagemId) ?? []), a]);
+        }
+        return saida;
+      },
+      async apagarSoltosDoBot(antesDe) {
+        const antes = b.anexos.length;
+        const vivo = (turnoId: string | null | undefined) => doTenant(b.turnos).some((t) => t.id === turnoId && (t.estado === "pendente" || t.estado === "despachando"));
+        b.anexos = b.anexos.filter((x) => !(x.tenantId === escopo.tenantId && x.origem === "bot" && x.mensagemId === null && x.criadoEm < antesDe.getTime() && !vivo(x.turnoId)));
+        return antes - b.anexos.length;
       },
     },
 
@@ -1308,6 +1368,17 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
     },
 
     turnos: {
+      async somarRecusasDeMidia(id, recusas) {
+        const t = b.turnos.find((x) => x.id === id);
+        if (!t || t.estado !== "despachando") return false;
+        const soma = new Map((b.midiaRecusas.get(id) ?? []).map((r) => [r.motivo, r.n]));
+        for (const r of recusas) soma.set(r.motivo, Math.min(1000, (soma.get(r.motivo) ?? 0) + r.n));
+        b.midiaRecusas.set(id, [...soma].sort(([x], [y]) => x.localeCompare(y)).map(([motivo, n]) => ({ motivo, n })));
+        return true;
+      },
+      async recusasDeMidia(id) {
+        return (b.midiaRecusas.get(id) as RecusasMidia | undefined) ?? null;
+      },
       // NOD-219: os órfãos se provam no Postgres (tests/integration/turnos-orfaos.test.ts) — a geração do agente vive na
       // tabela e no trigger da 0012, que a memória não tem.
       async orfaosCandidatos() {

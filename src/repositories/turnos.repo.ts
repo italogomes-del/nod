@@ -1,6 +1,7 @@
 import type { MotivoRenovacaoNegada } from "../contracts/ponte.ts";
 import { HARNESS_LEGADO, type IdHarness, type PreferenciaHarness } from "../contracts/harness.ts";
 import type { TurnoPendenteDto } from "../contracts/api.ts";
+import type { RecusasMidia } from "../contracts/anexo.ts";
 import type { Executor } from "../contracts/evento.ts";
 import type { Confianca } from "../contracts/mensagem.ts";
 import type { MotivoFalha, MotivoInterrupcao, MotivoLocalidade, MotivoSemNovidade } from "../contracts/motivos.ts";
@@ -488,6 +489,29 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
       const coluna = { attempted: "attempted", rejected: "rejected", promptSubmitted: "prompt_submitted", producedOutput: "produced_output" }[sinal];
       const r = await conn`update turnos set ${conn(coluna)} = true where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id}`;
       return r.count === 1;
+    },
+
+    /**
+     * NOD-323: soma as recusas de mídia do proxy (código e contagem, nunca caminho) às que o turno já tinha, num UPDATE
+     * só (sem ler antes): dois relatos ao mesmo tempo não se perdem. Turno que já assentou não muda.
+     */
+    async somarRecusasDeMidia(id: string, recusas: RecusasMidia): Promise<boolean> {
+      const r = await conn`
+        update turnos set midia_recusas = (
+          select jsonb_agg(jsonb_build_object('motivo', q.motivo, 'n', least(q.n, 1000)) order by q.motivo)
+          from (
+            select x->>'motivo' as motivo, sum((x->>'n')::int)::int as n
+            from jsonb_array_elements(coalesce(midia_recusas, '[]'::jsonb) || ${conn.json(recusas)}::jsonb) as x
+            group by 1
+          ) q)
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and estado = 'despachando'`;
+      return r.count === 1;
+    },
+
+    /** NOD-323: as recusas de mídia do turno, para a linha discreta abaixo da fala final. */
+    async recusasDeMidia(id: string): Promise<RecusasMidia | null> {
+      const [l] = await conn<{ midia_recusas: RecusasMidia | null }[]>`select midia_recusas from turnos where tenant_id = ${escopo.tenantId} and id = ${id}`;
+      return l?.midia_recusas ?? null;
     },
 
     /**

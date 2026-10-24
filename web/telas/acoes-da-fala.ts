@@ -1,6 +1,7 @@
 import type { Mensagem } from "../../src/contracts/mensagem.ts";
 import type { ReacaoNaFala } from "../../src/contracts/reacao.ts";
 import type { CitacaoNoCampo, Estado } from "../estado/reducer.ts";
+import { baixaveis } from "../lib/midia.ts";
 import { inicioDaPergunta } from "../lib/perguntas.ts";
 import { esc } from "../lib/render.ts";
 
@@ -65,6 +66,7 @@ export const ICONE_DA_FALA = {
   copiar: svg('<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/>'),
   task: svg('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9h6M7 13h10M7 17h4"/>'),
   lembrar: svg('<path d="M6 3h12v18l-6-4-6 4Z"/>'),
+  baixar: svg('<path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 19h14"/>'),
   raioX: svg('<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>'),
   fechar: svg('<path d="M18 6 6 18M6 6l12 12"/>'),
 } as const;
@@ -150,11 +152,13 @@ export function htmlSeletorDeReacao(m: Mensagem, estado: Estado, todas = false):
   return `<div role="menu" aria-label="Reagir a esta mensagem">${linhaDeEmojis(m, estado, todas)}</div>`;
 }
 
-type ItemDoMenu = { acao: "copiar" | "abrir-task" | "lembrar" | "raio-x"; icone: string; texto: string };
+type ItemDoMenu = { acao: "copiar" | "abrir-task" | "lembrar" | "raio-x" | "baixar-tudo"; icone: string; texto: string };
 
 /** Os itens do ⋯ que valem para esta fala, na ordem do protótipo. */
 export function itensDoMenu(m: Mensagem, estado: Estado): ItemDoMenu[] {
   const itens: ItemDoMenu[] = [];
+  // NOD-323 (J2): com duas ou mais mídias do bot que estão no nod, uma por uma para a pasta de downloads. No topo (p7_menu).
+  if (baixaveis(m.anexos ?? []).length >= 2) itens.push({ acao: "baixar-tudo", icone: ICONE_DA_FALA.baixar, texto: "Baixar tudo" });
   if (m.texto.trim() !== "") itens.push({ acao: "copiar", icone: ICONE_DA_FALA.copiar, texto: "Copiar texto" });
   if (podeResponder(m, estado) && botDaFala(m, estado)) itens.push({ acao: "abrir-task", icone: ICONE_DA_FALA.task, texto: "Abrir task com isto" });
   // A fala não confiável (de conector ou de outro bot, ADR-062) não vira memória num clique: a memória entra em todo prompt

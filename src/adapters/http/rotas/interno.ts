@@ -6,7 +6,7 @@ import { ErroDeDominio } from "../../../domain/erro.ts";
 import { esperaEmLaco, motivoDaEsperaNegada } from "../../../domain/espera-em-laco.ts";
 import { REGRA_MODO_AUTOMATICO, REGRA_MODO_TOTAL, REGRA_REVISOR, VERSAO_MODO_AUTOMATICO, VERSAO_MODO_AUTOMATICO_COM_REVISOR, VERSAO_MODO_TOTAL, VERSAO_REGRA_REVISOR } from "../../../domain/modo-aprovacao.ts";
 import { NATIVA_MCP_DA_PESSOA, NATIVAS_QUE_CONTAMINAM } from "../../../domain/nativas.ts";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { contextoAtual, executarComContexto } from "../../../obs/contexto.ts";
 import { log } from "../../../obs/log.ts";
 import type { TokenTurno } from "../../../services/token-turno.ts";
@@ -22,7 +22,9 @@ import { chamarFerramentaFase1, concluirChamada, executarEfeito, REGRA_CHAMADA, 
 import { nomeParaTrilha, registrarNegacao } from "../../../use-cases/registrar-negacao.ts";
 import { assentarComNovaTentativa, TENTATIVAS_FASE2 } from "../../../use-cases/liberar-no-app.ts";
 import type { Rota } from "../roteador.ts";
-import { bytes } from "../util.ts";
+import { TAMANHO_MAX_MIDIA, TETO_CABECALHO_MIDIA, type CabecalhoMidia } from "../../../contracts/anexo.ts";
+import { receberMidiaDoBot, registrarRecusasDeMidia } from "../../../use-cases/midia-do-bot.ts";
+import { bytes, lerBruto } from "../util.ts";
 import { executar, type DentroDeTx } from "./dentro-de-tx.ts";
 
 export type DepsRotasInternas = {
@@ -44,7 +46,53 @@ export type DepsRotasInternas = {
   pressao?: (pessoaId: string) => NivelPressao | null;
   /** ADR-115: onde o pedido de revisão entra DEPOIS do commit da fase 1 (a caixa do processo, caixa-revisoes.ts). */
   revisor?: { enfileirar(p: PedidoNaCaixa): void };
+  /** NOD-323: ociosidade do corpo do upload de mídia (teste encurta). */
+  ociosoMidiaMs?: number;
+  /** NOD-323 (revisão 3): quanto o upload espera a vaga antes do 503, e o prazo total do corpo (teste encurta). */
+  esperaVagaMidiaMs?: number;
+  prazoCorpoMidiaMs?: (bytes: number) => number;
 };
+
+/** NOD-323: no máximo 2 uploads de mídia ao mesmo tempo no processo (50 MiB cada na memória); o terceiro é 503 e o proxy tenta de novo. */
+export const UPLOADS_DE_MIDIA_SIMULTANEOS = 2;
+/** NOD-323 (revisão 2, M2): o corpo parado por mais que isso solta a vaga (o socket é derrubado). */
+export const OCIOSO_UPLOAD_MIDIA_MS = 30_000;
+/**
+ * NOD-323 (revisão 3 do #507, M3): a segunda mídia do mesmo turno (o proxy despacha as chamadas em paralelo) ou a que
+ * chega com as vagas cheias espera a vez em vez de cair no 503 na hora; e o corpo tem prazo total — 1 byte a cada 29 s
+ * passa da ociosidade, não da taxa mínima (60 s + 128 KiB/s: 50 MiB em até ~7 min).
+ */
+export const ESPERA_VAGA_MIDIA_MS = 20_000;
+export const prazoCorpoMidiaPadrao = (bytes: number): number => 60_000 + Math.ceil(bytes / (128 * 1024)) * 1_000;
+
+const STATUS_DA_RECUSA = { turno_encerrado: 409, tipo_nao_suportado: 415, limite_por_turno: 429, vazio: 400, entrada_invalida: 400 } as const;
+
+/** O cabeçalho `x-nod-midia` (JSON url-encoded). Tudo que não for do formato é null (400). */
+export function lerCabecalhoMidia(v: unknown): CabecalhoMidia | null {
+  if (typeof v !== "string") return null;
+  let c: unknown;
+  try {
+    c = JSON.parse(decodeURIComponent(v));
+  } catch {
+    return null;
+  }
+  if (!c || typeof c !== "object") return null;
+  const o = c as Record<string, unknown>;
+  const num = (k: string) => o[k] === undefined || (typeof o[k] === "number" && Number.isSafeInteger(o[k]));
+  if (typeof o.nome !== "string" || o.nome.length === 0 || o.nome.length > 255) return null;
+  if (typeof o.caminhoRelativo !== "string" || typeof o.sha256 !== "string" || typeof o.mime !== "string") return null;
+  if (!num("largura") || !num("altura") || !num("duracaoMs") || !num("tamanhoReal")) return null;
+  return {
+    nome: o.nome,
+    caminhoRelativo: o.caminhoRelativo,
+    sha256: o.sha256.toLowerCase(),
+    mime: o.mime,
+    ...(o.largura !== undefined ? { largura: o.largura as number } : {}),
+    ...(o.altura !== undefined ? { altura: o.altura as number } : {}),
+    ...(o.duracaoMs !== undefined ? { duracaoMs: o.duracaoMs as number } : {}),
+    ...(o.tamanhoReal !== undefined ? { tamanhoReal: o.tamanhoReal as number } : {}),
+  };
+}
 
 const CLASSES: readonly ClasseNegacao[] = ["ferramenta_negada", "conector_indisponivel", "plano_ausente"];
 
@@ -61,6 +109,13 @@ export { assentarComNovaTentativa, TENTATIVAS_FASE2 };
  * conexão do banco); POST negacoes registra uma negação decidida localmente pelo proxy.
  */
 export function rotasInternas(deps: DepsRotasInternas): Rota[] {
+  let uploadsEmCurso = 0;
+  // Um upload por turno de cada vez: um turno sozinho não segura as duas vagas do processo.
+  const turnosSubindo = new Set<string>();
+  const ociosoMidiaMs = deps.ociosoMidiaMs ?? OCIOSO_UPLOAD_MIDIA_MS;
+  const esperaVagaMidiaMs = deps.esperaVagaMidiaMs ?? ESPERA_VAGA_MIDIA_MS;
+  const prazoCorpoMidia = deps.prazoCorpoMidiaMs ?? prazoCorpoMidiaPadrao;
+  const vagaLivre = (turnoId: string) => uploadsEmCurso < UPLOADS_DE_MIDIA_SIMULTANEOS && !turnosSubindo.has(turnoId);
   const dormir = deps.dormir ?? dormirPadrao;
   const teto = deps.longpollMs ?? LONGPOLL_APROVACAO_MS;
   const intervalo = deps.intervaloMs ?? 1_000;
@@ -303,6 +358,89 @@ export function rotasInternas(deps: DepsRotasInternas): Rota[] {
         });
         if (paraACaixa.revisao) deps.revisor?.enfileirar(paraACaixa.revisao);
         ctx.json(200, resultado);
+      },
+    },
+    {
+      // NOD-323 (ADR-126): a mídia que o bot gerou na pasta dele. Corpo BINÁRIO (os bytes; vazio = só o cartão, o arquivo
+      // passou do limite da família) e os metadados em `x-nod-midia`. O servidor refareja o tipo e confere o sha256: o
+      // proxy é da máquina da pessoa, não é confiável. 201 {id, familia, exibicao, semBytes}; recusa = código fechado.
+      metodo: "POST",
+      padrao: /^\/midias$/,
+      interno: true,
+      async handler(ctx) {
+        const bruto = ctx.req.headers["x-nod-midia"];
+        if (typeof bruto === "string" && bruto.length > TETO_CABECALHO_MIDIA) {
+          ctx.json(431, { codigo: "entrada_invalida", mensagem: "cabeçalho x-nod-midia grande demais" });
+          return;
+        }
+        const cabecalho = lerCabecalhoMidia(bruto);
+        if (!cabecalho) {
+          ctx.json(400, { codigo: "entrada_invalida", mensagem: "x-nod-midia inválido" });
+          return;
+        }
+        const declarado = Number(ctx.req.headers["content-length"] ?? "0");
+        if (!Number.isFinite(declarado) || declarado > TAMANHO_MAX_MIDIA) {
+          ctx.json(413, { codigo: "entrada_invalida", mensagem: "arquivo grande demais" });
+          return;
+        }
+        // O plano antes do corpo: turno sem plano não ocupa vaga nem memória com 50 MiB que vão para o lixo.
+        const turnoId = ctx.params.turnoId ?? "";
+        const plano = await deps.tokens.planoOuRecompor(turnoId);
+        if (!plano) {
+          ctx.json(404, { codigo: "nao_encontrado", mensagem: "plano de turno ausente" });
+          return;
+        }
+        // Espera a vez (sem ler o corpo: o TCP segura o resto); quem desistiu no meio não pega vaga.
+        const desde = Date.now();
+        while (!vagaLivre(turnoId) && Date.now() - desde < esperaVagaMidiaMs && !ctx.req.destroyed) await dormirPadrao(50);
+        if (ctx.req.destroyed) return;
+        if (!vagaLivre(turnoId)) {
+          ctx.res.setHeader("retry-after", "2");
+          ctx.json(503, { codigo: "ocupado", mensagem: "outro envio em curso; tente de novo" });
+          return;
+        }
+        uploadsEmCurso++;
+        turnosSubindo.add(turnoId);
+        try {
+          let conteudo: Buffer;
+          // Ociosidade (não prazo total): um corpo que para no meio derruba o socket e solta a vaga.
+          ctx.req.setTimeout(ociosoMidiaMs, () => ctx.req.destroy(new Error("upload de mídia ocioso")));
+          const prazo = setTimeout(() => ctx.req.destroy(new Error("upload de mídia lento demais")), prazoCorpoMidia(declarado));
+          try {
+            conteudo = await lerBruto(ctx.req, TAMANHO_MAX_MIDIA);
+          } catch (e) {
+            if (e instanceof RangeError) {
+              ctx.json(413, { codigo: "entrada_invalida", mensagem: "arquivo grande demais" });
+              return;
+            }
+            if (ctx.req.destroyed) return;
+            throw e;
+          } finally {
+            ctx.req.setTimeout(0);
+            clearTimeout(prazo);
+          }
+          const sha256Recebido = conteudo.byteLength > 0 ? createHash("sha256").update(conteudo).digest("hex") : null;
+          const r = await deps.dentro(ctx.escopo, (d) => executar(d, receberMidiaDoBot, { plano, cabecalho, conteudo, sha256Recebido }));
+          if (!r.ok) {
+            ctx.json(STATUS_DA_RECUSA[r.motivo], { codigo: r.motivo });
+            return;
+          }
+          ctx.json(r.novo ? 201 : 200, { id: r.id, familia: r.familia, exibicao: r.exibicao, semBytes: r.semBytes });
+        } finally {
+          uploadsEmCurso--;
+          turnosSubindo.delete(turnoId);
+        }
+      },
+    },
+    {
+      // NOD-323: o que o proxy não anexou (código e contagem; nunca o caminho), para a linha discreta abaixo da fala.
+      metodo: "POST",
+      padrao: /^\/midias\/recusas$/,
+      interno: true,
+      async handler(ctx) {
+        const c = (await ctx.corpo()) as { recusas?: unknown } | null;
+        const turnoId = ctx.params.turnoId ?? "";
+        ctx.json(200, await deps.dentro(ctx.escopo, (d) => executar(d, registrarRecusasDeMidia, { turnoId, recusas: c?.recusas })));
       },
     },
     {

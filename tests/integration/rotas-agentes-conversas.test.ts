@@ -14,6 +14,7 @@ import { vincularEscopo } from "../../src/db/tx.ts";
 import { criarRepos } from "../../src/repositories/index.ts";
 import type { Escopo, Tx } from "../../src/shared/types.ts";
 import { atualizarPerfil } from "../../src/use-cases/atualizar-perfil.ts";
+import { png } from "../fixtures/midia/construir.ts";
 import { idDaProposta } from "../helpers/perfil.ts";
 import { depsSobreTrx, executar, MARLON, servicosDeTeste, useCasesDeTeste } from "../helpers/deps-l6.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
@@ -224,6 +225,37 @@ describeIntegracao("rotas agentes/conversas/propostas/turnos/frota (L6) com serv
       const copia = (await (await servidor.chamar(marlon, "POST", `agentes/${agente.id}/duplicar`)).json()) as { agente: Agente };
       expect(copia.agente.modoAprovacao).toBe("automatico");
       expect((await modo({ modo: "automatico" })).status).toBe(200);
+      trxAtual = null;
+    });
+  });
+
+  it("NOD-323 (QA 2 e revisão 4 do #507): GET do anexo pela rota — faixa 206, fora do arquivo 416, sem Range o inteiro", async () => {
+    await withRollback(MARLON, async (trx) => {
+      trxAtual = trx;
+      const marlon = await servidor.entrar("marlon");
+      const { conversa } = (await (await servidor.chamar(marlon, "POST", "agentes", { dono: "pessoa" })).json()) as { agente: Agente; conversa: Conversa };
+      const arquivo = png(40, 30);
+      const base = `${servidor.url}/api/t/${marlon.tenantId}/conversas/${conversa.id}/anexos`;
+      const subido = await fetch(base, { method: "POST", headers: { cookie: marlon.cookie, "content-type": "image/png", "x-nod-nome": "a.png" }, body: arquivo });
+      expect(subido.status).toBe(201);
+      const { id } = (await subido.json()) as { id: string };
+      const faixa = await fetch(`${base}/${id}`, { headers: { cookie: marlon.cookie, range: "bytes=0-9" } });
+      expect(faixa.status).toBe(206);
+      expect(faixa.headers.get("content-range")).toBe(`bytes 0-9/${arquivo.byteLength}`);
+      expect(new Uint8Array(await faixa.arrayBuffer())).toEqual(arquivo.subarray(0, 10));
+      const fora = await fetch(`${base}/${id}`, { headers: { cookie: marlon.cookie, range: `bytes=${arquivo.byteLength}-` } });
+      expect(fora.status).toBe(416);
+      await fora.arrayBuffer();
+      // A vaga da faixa volta depois do 416: 7 seguidos (mais que as 6 por pessoa) e a faixa ainda sai.
+      for (let i = 0; i < 7; i++) expect((await fetch(`${base}/${id}`, { headers: { cookie: marlon.cookie, range: `bytes=${arquivo.byteLength}-` } })).status).toBe(416);
+      expect((await fetch(`${base}/${id}`, { headers: { cookie: marlon.cookie, range: "bytes=0-0" } })).status).toBe(206);
+      // Várias faixas: o arquivo inteiro (200).
+      const varias = await fetch(`${base}/${id}`, { headers: { cookie: marlon.cookie, range: "bytes=0-1,5-6" } });
+      expect(varias.status).toBe(200);
+      expect((await varias.arrayBuffer()).byteLength).toBe(arquivo.byteLength);
+      const inteiro = await fetch(`${base}/${id}`, { headers: { cookie: marlon.cookie } });
+      expect(inteiro.status).toBe(200);
+      expect((await inteiro.arrayBuffer()).byteLength).toBe(arquivo.byteLength);
       trxAtual = null;
     });
   });

@@ -16,6 +16,9 @@ import type { Escopo, Tx } from "../shared/types.ts";
  *
  * Idempotente pela linha de `importacoes` (destino, origem): a segunda chamada devolve a contagem da primeira.
  */
+/** NOD-323 (Codex no #507): o link `nod-anexo:<uuid>` no texto da fala aponta para o anexo — ganha o id novo junto. */
+const LINK_ANEXO_NO_TEXTO = /nod-anexo:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/gi;
+
 export type ContagemImportacao = { bots: number; conversas: number; mensagens: number; rotinas: number; artefatos: number };
 
 /** Colunas que apontam para o que NÃO vem junto: viram null na cópia. */
@@ -23,7 +26,8 @@ const SOLTAR: Record<string, readonly string[]> = {
   agentes: ["computador_id", "maquina_id", "duplicado_de", "excluido_em"],
   conversas: ["sala_id", "sessao_cli", "sessao_executor", "sessao_harness", "sessao_em", "sessao_conta_id", "sessao_maquina_id", "recomeco_em"],
   mensagens: ["turno_id", "machine_id", "id_envio"],
-  anexos: [],
+  // NOD-323: a mídia do bot aponta para o turno e a máquina da origem (que não vêm); o caminho só vale naquela máquina.
+  anexos: ["turno_id", "machine_id", "caminho_relativo"],
   rotinas: ["acessos", "excluido_em"],
   artefato_versoes: [],
   artefato_estados: [],
@@ -112,7 +116,7 @@ export async function importarEspaco(trx: Tx, origem: Escopo, destino: Escopo): 
 
   /** Troca os ids conhecidos em qualquer profundidade (colunas jsonb como `mensagens.payload`). */
   const remapear = (v: unknown): unknown => {
-    if (typeof v === "string") return mapa.get(v) ?? v;
+    if (typeof v === "string") return mapa.get(v) ?? v.replace(LINK_ANEXO_NO_TEXTO, (t, id: string) => { const novo = mapa.get(id.toLowerCase()); return novo ? `nod-anexo:${novo}` : t; });
     if (Array.isArray(v)) return v.map(remapear);
     if (v && typeof v === "object") return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, remapear(x)]));
     return v;

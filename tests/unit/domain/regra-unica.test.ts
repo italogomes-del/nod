@@ -6,6 +6,7 @@ import type { ModoTurno } from "../../../src/contracts/plano-turno.ts";
 import type { Turno } from "../../../src/contracts/turno.ts";
 import { NATIVAS_DO_TERMINAL } from "../../../src/domain/nativas.ts";
 import { montarPlano, type EntradaPlano } from "../../../src/domain/plano-turno.ts";
+import { FERRAMENTA_ANEXAR_MIDIA } from "../../../src/contracts/ferramentas-proxy.ts";
 
 /**
  * ADR-066, "o bot tem o que você deu; o modo decide": o Marlon pediu para GARANTIR que o bot tem as ferramentas no
@@ -24,10 +25,14 @@ const github: Conector = { tenantId: "t", id: "k1", ownerId: "p", visibility: "p
 const concessoes: Concessao[] = ["pr_ver", "pr_comentar", "pr_merge"].map((capacidade, i) => ({ tenantId: "t", id: `g${i}`, ownerId: "p", agenteId: "a1", conectorId: "k1", capacidade, mensagemId: "m", criadoEm: 0 }));
 const base: EntradaPlano = { turno, agente, memorias: [], concessoes, conectores: [github], modo: "conversa", confianca: "confiavel", profundidade: 0, inventario: { estado: "pronto", versao: "2.1.285", em: agora }, executor: "local", sessaoCli: null, pessoaNome: "Marlon", agora, computador: true, workspace: true, workspaceVinculado: true, terminal: true };
 
-/** Tudo o que o bot tem no turno e não é ferramenta do próprio nod. */
+/**
+ * Tudo o que o bot tem no turno e não é ferramenta do próprio nod. anexar_midia (NOD-323, ADR-126) é do nod, servida pelo
+ * proxy: mostra no chat o que o bot gerou e muda com o modo (fora da sala, cuja fala não prende mídia).
+ */
 function doQueVoceDeu(e: Partial<EntradaPlano>) {
   const p = montarPlano({ ...base, ...e });
-  return { apps: p.catalogo.ferramentas.filter((f) => f.origem !== "nod").map((f) => f.nome).sort(), nativas: [...(p.nativas ?? [])].sort() };
+  const doNod = (f: { origem: string; nome: string }) => f.origem === "nod" || f.nome === FERRAMENTA_ANEXAR_MIDIA.nome;
+  return { apps: p.catalogo.ferramentas.filter((f) => !doNod(f)).map((f) => f.nome).sort(), nativas: [...(p.nativas ?? [])].sort() };
 }
 
 describe("ADR-066: o bot tem o que você deu, em toda origem de turno", () => {

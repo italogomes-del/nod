@@ -1,5 +1,5 @@
 import type { ContasNoLimite, IaComConta } from "./contas-ia.ts";
-import type { AnexoMeta, TipoAnexo } from "./anexo.ts";
+import type { AnexoDaConversa, RecusasMidia, TipoAnexo } from "./anexo.ts";
 import type { PayloadLinhaLigacao } from "./ligacao.ts";
 import type { Autoria } from "./evento.ts";
 import type { IdHarness } from "./harness.ts";
@@ -177,8 +177,8 @@ export type Mensagem = {
   /** Turno interrompido no meio do streaming deixa a fala parcial marcada (ADR-010). */
   parcial: boolean;
   criadoEm: EpochMs;
-  /** ADR-046: arquivos que a pessoa mandou com esta mensagem (só metadados; bytes por rota própria). */
-  anexos?: AnexoMeta[];
+  anexos?: AnexoDaConversa[]; // ADR-046 (só metadados); na fala do bot, a captura (NOD-200) e a mídia dele (ADR-126)
+  midiaRecusas?: RecusasMidia; // NOD-323: o que o bot não conseguiu anexar (código e contagem), na fala final
   /**
    * definido em 2026-10-07 (ADR-083, épico #188): de onde veio o turno que gravou a mensagem, para a web agrupar sem
    * adivinhar. `origemTurno`: a origem do turno (null = sem turno, como a fala da pessoa); `trabalhoId`: o trabalho do

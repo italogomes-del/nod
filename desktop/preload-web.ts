@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from "electron";
 import { CANAIS_DESKTOP, type AlvoAviso, type AvisoDesktop, type ContasNaTela, type IaDesktop, type NodDesktop, type PonteContas, type PonteIas, type TemaDesktop } from "../src/contracts/desktop.ts";
 import type { EstadoIa } from "../src/contracts/estado-ia.ts";
+import { CANAIS_MIDIA, type PonteMidia } from "../src/contracts/midia-desktop.ts";
 
 /**
  * Preload da JANELA WEB (definido em 2026-09-24, "aviso no Mac"): a página é remota, então a ponte é a
@@ -39,6 +40,12 @@ const contas: PonteContas = {
     ipcRenderer.on(CANAIS_DESKTOP.contasMudaram, (_evento, lista: ContasNaTela[]) => fn(lista));
   },
 };
+/** NOD-323 (J5): a mídia do bot que ficou neste Mac; o processo principal confere o caminho de novo. */
+const midia: PonteMidia = {
+  maquina: () => ipcRenderer.invoke(CANAIS_MIDIA.maquina),
+  existe: (caminhoRelativo: string) => ipcRenderer.invoke(CANAIS_MIDIA.existe, caminhoRelativo),
+  mostrarNoFinder: (caminhoRelativo: string) => ipcRenderer.invoke(CANAIS_MIDIA.mostrarNoFinder, caminhoRelativo),
+};
 const ponte: NodDesktop = {
   avisar: (aviso: AvisoDesktop) => ipcRenderer.invoke(CANAIS_DESKTOP.avisar, aviso),
   contador: (n: number) => ipcRenderer.invoke(CANAIS_DESKTOP.contador, n),
@@ -57,6 +64,7 @@ const ponte: NodDesktop = {
   iaTestar: (pedido?: { nome?: string; ia?: IaDesktop }) => ipcRenderer.invoke(CANAIS_DESKTOP.iaTestar, pedido),
   ias,
   contas,
+  midia,
   // NOD-345: o código de troca vai ao processo principal, que fala com o servidor sem Origin.
   trocarConta: (codigo: string) => ipcRenderer.invoke(CANAIS_DESKTOP.trocarConta, codigo),
   desafioConta: () => ipcRenderer.invoke(CANAIS_DESKTOP.desafioConta),

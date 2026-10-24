@@ -88,18 +88,19 @@ const NUVEM = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" strok
  * (`<a download>`, a mesma rota de anexos) aparece no hover e fica sempre à mostra no celular. CSV e PDF abrem a prévia
  * (`data-act="previa-arquivo"`, `web/telas/previa-arquivo.ts`); txt, md e json ficam como card só com Baixar.
  */
-export function renderCardArquivo(a: Pick<AnexoMeta, "id" | "nome" | "mime" | "tamanho">, url: string): string {
+export function renderCardArquivo(a: Pick<AnexoMeta, "id" | "nome" | "tamanho"> & { mime: string }, url: string): string {
   const icone = iconeDoArquivo(familiaDoArquivo(a.mime, a.nome));
   const info = `${icone}<span class="anexo-info"><b>${esc(a.nome)}</b><span>${esc(tamanhoHumano(a.tamanho))}</span></span>`;
   const baixar = `<a class="msg-arquivo-baixar" href="${esc(url)}" download="${esc(a.nome)}" aria-label="Baixar ${esc(a.nome)}" title="Baixar">${NUVEM}</a>`;
   const abrir = formatoDaPrevia(a.mime, a.nome)
     ? `<button type="button" class="msg-arquivo-abrir" data-act="previa-arquivo" data-id="${esc(a.id)}" data-url="${esc(url)}" data-nome="${esc(a.nome)}" data-mime="${esc(a.mime)}" aria-haspopup="dialog" aria-label="Abrir prévia de ${esc(a.nome)}, ${esc(tamanhoHumano(a.tamanho))}">${info}</button>`
     : `<span class="msg-arquivo-abrir sem-previa">${info}</span>`;
-  return `<div class="msg-arquivo">${abrir}${baixar}</div>`;
+  // `data-anexo-id`: o link nod-anexo da fala do bot acha o cartão (PDF, zip) — Codex no #507.
+  return `<div class="msg-arquivo" data-anexo-id="${esc(a.id)}">${abrir}${baixar}</div>`;
 }
 
 /** Anexos de uma mensagem já enviada: miniatura para imagem, card de arquivo (NOD-327) para o resto. */
-export function renderAnexosDaMensagem(anexos: readonly AnexoMeta[], url: (id: string) => string): string {
+export function renderAnexosDaMensagem(anexos: readonly (Pick<AnexoMeta, "id" | "nome" | "tamanho"> & { mime: string })[], url: (id: string) => string): string {
   if (anexos.length === 0) return "";
   return `<div class="msg-anexos">${anexos.map((a) => ehImagem(a.mime)
     ? `<a class="msg-anexo-img" href="${esc(url(a.id))}" target="_blank" rel="noopener"><img src="${esc(url(a.id))}" alt="${esc(a.nome)}" loading="lazy" /></a>`

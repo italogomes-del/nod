@@ -1,4 +1,5 @@
 import type { Confianca } from "../../contracts/mensagem.ts";
+import type { CabecalhoMidia, RecusasMidia } from "../../contracts/anexo.ts";
 import type { DesfechoItem } from "../../contracts/motivos.ts";
 import type { Negacao } from "../../contracts/negacao.ts";
 import type { PlanoTurno } from "../../contracts/plano-turno.ts";
@@ -51,6 +52,14 @@ export interface ClienteNod {
   negacao(n: Negacao): Promise<void>;
   /** ADR-048: desfecho (código fechado) de uma ferramenta executada nesta máquina, para a trilha. */
   execucaoLocal?(nome: string, codigo: string): Promise<void>;
+  /**
+   * NOD-323: sobe uma mídia da pasta do bot (corpo binário cru; vazio = só o cartão). `status` é o do servidor: 201/200
+   * com {id, familia, exibicao, semBytes}; 415/429/409/400 com {codigo}; 503 = ocupado, tente de novo.
+   */
+  /** `sinal` cancela o envio (a J6 parou); `retryAposS` é o retry-after do 503. */
+  midia?(cabecalho: CabecalhoMidia, corpo: Uint8Array, sinal?: AbortSignal): Promise<{ status: number; json: unknown; retryAposS?: number } | FalhaTransporte>;
+  /** NOD-323: o que não foi anexado, só código e contagem (nunca o caminho). */
+  recusasMidia?(recusas: RecusasMidia): Promise<void>;
   /** Atalho do catcher: ferramenta + (aguardar) + negação resolvidos em texto, isError quando negado/fora. */
   chamarFerramenta(nome: string, argumentos: Record<string, unknown>): Promise<ConteudoFerramenta>;
 }
@@ -65,6 +74,8 @@ export type OpcoesClienteNod = {
 };
 
 export const TIMEOUT_CLIENTE_NOD_MS = 5_000;
+/** NOD-323: 50 MiB numa rede de casa leva tempo; 2 min antes de desistir (o proxy tenta uma vez de novo). */
+export const PRAZO_UPLOAD_MIDIA_MS = 120_000;
 
 function ehFalha(x: unknown): x is FalhaTransporte {
   return typeof x === "object" && x !== null && "transporte" in x;
@@ -149,6 +160,41 @@ export function criarClienteNod(opcoes: OpcoesClienteNod): ClienteNod {
 
     async execucaoLocal(nome, codigo) {
       await chamar("POST", "/api/interno/execucoes-locais", { nome, codigo });
+    },
+
+    async midia(cabecalho, corpo, sinal) {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), opcoes.timeoutMs ?? PRAZO_UPLOAD_MIDIA_MS);
+      const parar = () => ctrl.abort();
+      if (sinal?.aborted) ctrl.abort();
+      else sinal?.addEventListener("abort", parar, { once: true });
+      try {
+        const r = await f(`${base}/api/interno/midias`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${opcoes.token}`, "content-type": "application/octet-stream", "x-nod-midia": encodeURIComponent(JSON.stringify(cabecalho)) },
+          body: corpo as Uint8Array<ArrayBuffer>,
+          signal: ctrl.signal,
+        });
+        const texto = await r.text();
+        let json: unknown = null;
+        try {
+          json = texto === "" ? null : JSON.parse(texto);
+        } catch {
+          json = null;
+        }
+        const retry = Number(r.headers.get("retry-after") ?? "");
+        return { status: r.status, json, ...(Number.isFinite(retry) && retry > 0 ? { retryAposS: retry } : {}) };
+      } catch (e) {
+        if (e instanceof Error && e.name === "AbortError") return { transporte: "timeout", status: null };
+        return { transporte: "servidor_fora", status: null };
+      } finally {
+        clearTimeout(t);
+        sinal?.removeEventListener("abort", parar);
+      }
+    },
+
+    async recusasMidia(recusas) {
+      await chamar("POST", "/api/interno/midias/recusas", { recusas });
     },
 
     async chamarFerramenta(nome, argumentos) {

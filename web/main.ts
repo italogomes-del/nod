@@ -23,6 +23,10 @@ import type { Mensagem } from "../src/contracts/mensagem.ts";
 import { criarIasDoMac } from "./lib/ias-do-mac.ts";
 import { instalarOrdemArrastavel } from "./lib/ordem-arrastavel.ts";
 import { abrirMenu, abrirMenuCompartilhar, abrirMenuConta, dialogo, pedirGestao, textoDuplicar, type BotGerido, type AcaoGestao } from "./telas/gestao-agentes.ts";
+import { abrirLuz } from "./telas/luz.ts";
+import { acaoDoAlvo, indiceNaLuz } from "./lib/link-anexo.ts";
+import { alternarAudio, alternarGif, instalarMidiaDom, irNoAudio, mostrarNoFinder, tentarDeNovo, velocidadeDoAudio, type OpcoesMidiaDom } from "./lib/midia-dom.ts";
+import { baixaveis } from "./lib/midia.ts";
 import { botDaFala, citacaoDaFala, htmlMenuDaFala, htmlSeletorDeReacao, linhaDeEmojis, reacoesDaFala, textoAbrirTask, textoParaLembrar } from "./telas/acoes-da-fala.ts";
 import { renderChipModo } from "./telas/aprovacoes.ts";
 import { abrirMenuModo } from "./lib/menu-modo.ts";
@@ -2762,6 +2766,20 @@ function acaoDoMenuDaFala(fala: Mensagem, acao: string, ancora: HTMLElement): vo
     void navigator.clipboard.writeText(fala.texto).then(() => anunciar("Texto copiado"), () => anunciar("Não deu para copiar o texto"));
     return;
   }
+  if (acao === "baixar-tudo" && api) {
+    // NOD-323 (J2): um download por vez, com folga (o navegador barra vários de uma vez).
+    const urls = baixaveis(fala.anexos ?? []).map((x) => ({ url: `${api!.urlAnexo(fala.conversaId, x.id)}?baixar=1`, nome: x.nome }));
+    urls.forEach((u, k) => window.setTimeout(() => {
+      const a = document.createElement("a");
+      a.href = u.url;
+      a.download = u.nome;
+      document.body.append(a);
+      a.click();
+      a.remove();
+    }, k * 400));
+    anunciar(`Baixando ${urls.length} arquivos`);
+    return;
+  }
   if (acao === "raio-x" && api && fala.turnoId) {
     const t = estado.tela;
     void abrirRaioX(api, fala.turnoId, t.tipo === "conversa" ? botGerido(t.agenteId)?.nome ?? "agente" : "sala", ancora, ondeDoTurno(fala, estado.conversas[fala.conversaId]?.mensagens ?? []));
@@ -3050,6 +3068,40 @@ const contasDaPessoa = criarContasDaPessoa({
   agendar: (fn, ms) => { window.setTimeout(fn, ms); },
   agora: Date.now,
 });
+// NOD-323: a mídia do bot na conversa (carga, GIF, áudio) e, no app do Mac, o Mostrar no Finder.
+const midiaDom: OpcoesMidiaDom = {
+  ...(window.nodDesktop?.midia ? { ponte: window.nodDesktop.midia } : {}),
+  local: async (url) => (api ? (await api.localDaMidia(url)).caminhoRelativo : null),
+  redesenhar: () => render(),
+};
+instalarMidiaDom(midiaDom);
+const opcoesDaLuz = midiaDom.ponte ? { finder: (it: { url: string }) => { void mostrarNoFinder(it.url, midiaDom).then((ok) => { if (!ok) anunciar("O arquivo não está mais na pasta do bot"); }); } } : {};
+/** Abre a mídia na tela cheia; pelo link `nod-anexo:` do texto, acha a mídia da mesma fala (ou o cartão do arquivo). */
+function abrirMidia(el: HTMLElement): void {
+  // A mídia que não carregou: o próprio botão é o "Tentar de novo" (clique, Enter ou espaço).
+  if (el.closest(".msg-midias")) { if (el.closest(".falhou")) tentarDeNovo(el); else abrirLuz(el, opcoesDaLuz); return; }
+  const id = el.dataset.anexoId ?? "";
+  const grupo = el.closest("[data-mensagem]")?.querySelector<HTMLElement>(".msg-midias");
+  const alvo = grupo?.querySelector<HTMLElement>(`[data-anexo-id="${CSS.escape(id)}"]`);
+  if (alvo && acaoDoAlvo(alvo.dataset.act, false, false) === "luz") { abrirLuz(alvo, opcoesDaLuz); return; }
+  // Na tela cheia, mas sem botão à vista (atrás do "+N"): abre nela a partir da primeira mídia da fala.
+  const k = indiceNaLuz(grupo?.dataset.luz, id);
+  const primeira = grupo?.querySelector<HTMLElement>('[data-act="midia-abrir"]');
+  if (k >= 0 && primeira) { abrirLuz(primeira, { ...opcoesDaLuz, indice: k }); return; }
+  if (!alvo) return anunciar("Esse arquivo não está nesta mensagem");
+  const previa = alvo.querySelector<HTMLElement>('[data-act="previa-arquivo"]');
+  const link = alvo.querySelector<HTMLAnchorElement>("a[href]");
+  const acao = acaoDoAlvo(alvo.dataset.act, previa !== null, link !== null);
+  if (acao === "tocar") {
+    // Revisão 4 do #507: o link abre (toca); se o memo já está tocando, não pausa.
+    alvo.scrollIntoView({ block: "nearest" });
+    alvo.focus();
+    if (alvo.closest(".msg-memo")?.querySelector("audio")?.paused !== false) alvo.click();
+  }
+  else if (acao === "previa") previa?.click();
+  else if (acao === "link") link?.click();
+  else { alvo.scrollIntoView({ block: "nearest" }); (alvo.matches("button") ? alvo : alvo.querySelector<HTMLElement>("button"))?.focus(); }
+}
 // O app do Mac anterior a 2026-10-13 (sem a ponte `contas.detalhes`) mostra a tela de antes, com a faixa (suposição 8).
 if (window.nodDesktop?.contas && !window.nodDesktop.contas.detalhes) dispatch({ tipo: "contas-ui", mudanca: { appAntigo: true } });
 /** O "Criar de novo" (id da VM) que abriu o painel Criar; null = o botão do topo. */
@@ -3128,6 +3180,16 @@ const timersCopiarCodigo = new WeakMap<HTMLElement, number>();
 
 const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   ...telaOnboarding.acoes,
+  // NOD-323: a mídia do bot.
+  "midia-abrir": abrirMidia,
+  "midia-gif": alternarGif,
+  "midia-audio": alternarAudio,
+  "midia-audio-vel": velocidadeDoAudio,
+  "midia-tentar": tentarDeNovo,
+  "midia-finder": (el) => {
+    const url = el.closest<HTMLElement>("[data-midia-url]")?.dataset.midiaUrl;
+    if (url) void mostrarNoFinder(url, midiaDom).then((ok) => { if (!ok) anunciar("O arquivo não está mais na pasta do bot"); });
+  },
   ...telaConta.acoes,
   ...(telaMinhaConta.acoes as Record<string, (el: HTMLElement) => Promise<void> | void>),
   "conta-abrir": (el) => { try { marcarFalou(window.localStorage); } catch { /* sem storage */ } return telaConta.acoes["conta-abrir"]?.(el); },
@@ -4499,6 +4561,7 @@ document.addEventListener("keydown", (ev) => {
 
 document.addEventListener("input", (ev) => {
   const ta = ev.target as HTMLTextAreaElement;
+  if ((ta as HTMLElement).dataset?.actInput === "midia-audio-ir") { irNoAudio(ta as unknown as HTMLInputElement); return; }
   // O código do Claude atravessa o redesenho do cartão (o foco volta pelo `manterFocoDoCodigo`).
   const iaDoCodigo = (ta as HTMLElement).dataset?.iaCodigo;
   if (ehIa(iaDoCodigo)) { dispatch({ tipo: "ias-mac", mudanca: { codigo: { ...estado.iasMac.codigo, [iaDoCodigo]: ta.value } } }); return; }

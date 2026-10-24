@@ -161,6 +161,14 @@ describeIntegracao("conta (NOD-345): provisório, cadastro, escolha, recuperaç�
       await trx`update mensagens set payload = ${trx.json({ artefatoId: art!.id })} where tenant_id = ${o.tenantId} and id = ${msg!.id}`;
       await trx`insert into anexos (tenant_id, owner_id, conversa_id, mensagem_id, nome, mime, tamanho, conteudo)
         values (${o.tenantId}, ${o.pessoaId}, ${bot.conversa.id}, ${msg!.id}, 'nota.txt', 'text/plain', 3, ${Buffer.from("abc")})`;
+      // NOD-323: a mídia do bot aponta para o turno e a máquina da origem, que não vêm junto (sem soltar, o FK estoura).
+      const [mac] = await trx<{ id: string }[]>`insert into maquinas (tenant_id, owner_id, nome) values (${o.tenantId}, ${o.pessoaId}, 'MacBook') returning id`;
+      const [tu] = await trx<{ id: string }[]>`insert into turnos (tenant_id, owner_id, conversa_id, agente_id, origem, estado, prazo_em, entrada_texto, entrada_confianca, modelo)
+        values (${o.tenantId}, ${o.pessoaId}, ${bot.conversa.id}, ${bot.agente.id}, 'conversa', 'concluido', now() + interval '1 day', 'p', 'confiavel', 'sonnet') returning id`;
+      const [demo] = await trx<{ id: string }[]>`insert into anexos (tenant_id, owner_id, conversa_id, mensagem_id, nome, mime, tamanho, conteudo, origem, turno_id, machine_id, caminho_relativo, sha256, sem_bytes)
+        values (${o.tenantId}, ${o.pessoaId}, ${bot.conversa.id}, ${msg!.id}, 'demo.mp4', 'video/mp4', 90000000, ${Buffer.alloc(0)}, 'bot', ${tu!.id}, ${mac!.id}, 'Bot/demo.mp4', ${"a".repeat(64)}, true) returning id`;
+      // O link da J6 no texto aponta para o anexo: no destino, para o id novo (Codex no #507).
+      await trx`update mensagens set texto = ${`com anexo e artefato [o vídeo](nod-anexo:${demo!.id.toUpperCase()}) e [outro](nod-anexo:00000000-0000-4000-8000-000000000000)`} where tenant_id = ${o.tenantId} and id = ${msg!.id}`;
       // Uma versão publicada fora do que vem junto (aqui, na conversa do bot excluído): o conteúdo vem, a referência solta.
       const [fora] = await trx<{ id: string }[]>`select id from mensagens where tenant_id = ${o.tenantId} and conversa_id = ${excluido.conversa.id} limit 1`;
       await trx`insert into artefato_versoes (tenant_id, owner_id, artefato_id, versao, html, mensagem_id) values (${o.tenantId}, ${o.pessoaId}, ${art!.id}, 1, '<p>v1</p>', ${msg!.id}), (${o.tenantId}, ${o.pessoaId}, ${art!.id}, 2, '<p>v2</p>', ${fora!.id})`;
@@ -175,11 +183,14 @@ describeIntegracao("conta (NOD-345): provisório, cadastro, escolha, recuperaç�
 
       const d = dono.escopo!;
       await vincularEscopo(trx, d);
-      const [copia] = await trx<{ id: string; payload: { artefatoId: string } }[]>`select id, payload from mensagens where tenant_id = ${d.tenantId} and texto = 'com anexo e artefato'`;
+      const [copia] = await trx<{ id: string; texto: string; payload: { artefatoId: string } }[]>`select id, texto, payload from mensagens where tenant_id = ${d.tenantId} and texto like 'com anexo e artefato%'`;
       expect(copia!.payload.artefatoId).not.toBe(art!.id);
       expect((await trx`select 1 from artefatos where tenant_id = ${d.tenantId} and id = ${copia!.payload.artefatoId}`).length).toBe(1);
-      const anexos = await trx<{ conteudo: Buffer; conversa_id: string }[]>`select conteudo, conversa_id from anexos where tenant_id = ${d.tenantId} and mensagem_id = ${copia!.id}`;
+      const anexos = await trx<{ conteudo: Buffer; conversa_id: string }[]>`select conteudo, conversa_id from anexos where tenant_id = ${d.tenantId} and mensagem_id = ${copia!.id} and origem <> 'bot'`;
       expect(anexos.map((a) => a.conteudo.toString())).toEqual(["abc"]);
+      const doBot = await trx<{ id: string }[]>`select id, nome, turno_id, machine_id, caminho_relativo, sem_bytes from anexos where tenant_id = ${d.tenantId} and mensagem_id = ${copia!.id} and origem = 'bot'`;
+      expect(doBot).toEqual([{ id: expect.any(String), nome: "demo.mp4", turno_id: null, machine_id: null, caminho_relativo: null, sem_bytes: true }]);
+      expect(copia!.texto).toBe(`com anexo e artefato [o vídeo](nod-anexo:${doBot[0]!.id}) e [outro](nod-anexo:00000000-0000-4000-8000-000000000000)`);
       expect(anexos[0]!.conversa_id).not.toBe(bot.conversa.id);
       expect((await trx`select 1 from mensagens where tenant_id = ${d.tenantId} and texto = 'do bot que saiu'`).length).toBe(0);
       const versoes = await trx<{ versao: number; mensagem_id: string | null }[]>`select versao, mensagem_id from artefato_versoes where tenant_id = ${d.tenantId} and artefato_id = ${copia!.payload.artefatoId} order by versao`;

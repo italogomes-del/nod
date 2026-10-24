@@ -6,6 +6,8 @@ import type { PlanoTurno } from "../../contracts/plano-turno.ts";
 import { ESPERA_APROVACAO_NO_TURNO_MS, LONGPOLL_APROVACAO_MS, ORCAMENTO_RESULTADO_CHARS } from "../../shared/constantes.ts";
 import type { Relogio } from "../../shared/types.ts";
 import { ferramentaDoPlano, ferramentasMcp, validadeDoPlano } from "./catalogo.ts";
+import { FERRAMENTA_ANEXAR_MIDIA } from "../../contracts/ferramentas-proxy.ts";
+import { anexarMidias, respostaAnexar } from "../executor/midia-local.ts";
 import { criarClienteNod, ehFalhaTransporte, type ClienteNod } from "../executor/cliente-nod.ts";
 import { PROTOCOLO_MCP } from "./cliente-mcp.ts";
 import { executarGithubNaMaquina } from "../conectores-locais/github/maquina.ts";
@@ -40,6 +42,8 @@ export type OpcoesProxy = {
   executarNaMaquina?: typeof executarGithubNaMaquina;
   /** Fatias de espera por uma aprovação no mesmo turno (default ESPERA_APROVACAO_NO_TURNO_MS / LONGPOLL_APROVACAO_MS). */
   fatiasAprovacao?: number;
+  /** NOD-323: o HOME onde fica `~/nod` (default o do processo). Injetável no teste. */
+  home?: string;
 };
 
 export type Proxy = {
@@ -169,6 +173,13 @@ export function criarProxy(opcoes: OpcoesProxy): Proxy {
       return resposta(id, conteudoNegado(n, agora()));
     }
     const orcamento = v.plano.politicaExecucao.orcamentoResultadoChars || ORCAMENTO_RESULTADO_CHARS;
+    if (ferramenta.origem === "proxy" && ferramenta.nome === FERRAMENTA_ANEXAR_MIDIA.nome) {
+      // NOD-323 (ADR-126): o arquivo é lido AQUI, na máquina, contra a pasta do bot do plano; o servidor confere de novo.
+      if (!v.plano.pastaDoBot) return resposta(id, { content: [{ type: "text", text: "anexar_midia: este turno não tem pasta" }], isError: true });
+      const r = respostaAnexar(await anexarMidias(argumentos.caminhos, { cliente, pastaDoBot: v.plano.pastaDoBot, ...(opcoes.home ? { home: opcoes.home } : {}) }));
+      diag("anexar_midia", { erro: r.isError });
+      return resposta(id, { content: [{ type: "text", text: r.texto }], ...(r.isError ? { isError: true } : {}) });
+    }
     if (ferramenta.origem === "proxy") return resposta(id, lerMais(argumentos, orcamento));
     const r = await cliente.ferramenta(nome, argumentos);
     if (ehFalhaTransporte(r)) {

@@ -1,15 +1,24 @@
 import type { RespostaMutacao } from "../../../contracts/api.ts";
 import { TAMANHO_MAX_ANEXO } from "../../../contracts/anexo.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
-import { lerAnexo, receberAnexo } from "../../../use-cases/anexos.ts";
+import { lerAnexo, lerFaixaDoAnexo, localDaMidia, receberAnexo } from "../../../use-cases/anexos.ts";
 import { enviarMensagem, lerConversa } from "../../../use-cases/enviar-mensagem.ts";
 import { parar } from "../../../use-cases/parar.ts";
 import { reagir } from "../../../use-cases/reagir.ts";
 import { UUID, type Rota } from "../roteador.ts";
-import { bytes, lerBruto } from "../util.ts";
+import { bytesVigiados, criarFilaDeLeitura, faixaInvalida, faixaPedida, lerBruto, RESPOSTA_PARADA_MS } from "../util.ts";
+
 import { corpoObjeto, criarExecutor, texto, type DepsRotas } from "./executar-caso.ts";
 
 const ID = "(?<id>[^/]+)";
+
+/**
+ * NOD-323 (revisão do #507, A2/M3; revisões 3 e 4): as leituras inteiras de anexo (até 50 MiB cada) vão no máximo 4
+ * por vez, 2 por pessoa; as faixas (até 2 MiB), 16 por vez, 6 por pessoa. A vaga volta quando a resposta saiu ou o
+ * cliente foi embora; a resposta vai em pedaços e a que fica 120 s sem um drain (o cliente que não lê) é derrubada — o buffer não fica preso.
+ */
+const leituraInteira = criarFilaDeLeitura({ max: 4, porChave: 2 });
+const leituraDeFaixa = criarFilaDeLeitura({ max: 16, porChave: 6 });
 
 /**
  * Conversas (lane L6): GET mensagens (ConversaDto com turnosPendentes, EMENDA 13), POST mensagem
@@ -72,8 +81,34 @@ export function criarRotasConversas(d: DepsRotas): Rota[] {
       metodo: "GET",
       padrao: new RegExp(`^/conversas/${ID}/anexos/(?<aid>[^/]+)$`),
       async handler(ctx) {
-        const r = await executar(ctx.escopo, lerAnexo, { conversaId: ctx.params.id ?? "", anexoId: ctx.params.aid ?? "" });
-        bytes(ctx.res, r.meta.mime, r.meta.nome, r.bytes);
+        const alvo = { conversaId: ctx.params.id ?? "", anexoId: ctx.params.aid ?? "" };
+        const baixar = new URL(ctx.req.url ?? "/", "http://x").searchParams.get("baixar") === "1";
+        const range = ctx.req.headers.range;
+        // NOD-323: vídeo e áudio pedem faixas (Range de faixa única); 206 só com a fatia, lida no banco por substring.
+        const pessoa = `${ctx.escopo.tenantId}:${ctx.escopo.pessoaId}`;
+        const desistiu = () => ctx.res.destroyed || ctx.req.destroyed;
+        if (range) {
+          const servida = await leituraDeFaixa(pessoa, desistiu, async () => {
+            const f = await executar(ctx.escopo, lerFaixaDoAnexo, { ...alvo, faixa: (total: number) => faixaPedida(range, total) });
+            if (f && "invalida" in f) { faixaInvalida(ctx.res, f.invalida); return true; }
+            if (!f) return false;
+            await bytesVigiados(ctx.res, f.meta.mime, f.meta.nome, f.bytes, { baixar, faixa: f.faixa, paradoMs: RESPOSTA_PARADA_MS });
+            return true;
+          });
+          if (servida !== false) return;
+        }
+        await leituraInteira(pessoa, desistiu, async () => {
+          const r = await executar(ctx.escopo, lerAnexo, alvo);
+          await bytesVigiados(ctx.res, r.meta.mime, r.meta.nome, r.bytes, { baixar, aceitaFaixas: r.meta.mime.startsWith("video/") || r.meta.mime.startsWith("audio/"), paradoMs: RESPOSTA_PARADA_MS });
+        });
+      },
+    },
+    {
+      // NOD-323 (J5): o caminho da mídia do bot na máquina, para o Mostrar no Finder do app do Mac (que confere de novo).
+      metodo: "GET",
+      padrao: new RegExp(`^/conversas/${ID}/anexos/(?<aid>[^/]+)/local$`),
+      async handler(ctx) {
+        ctx.json(200, await executar(ctx.escopo, localDaMidia, { conversaId: ctx.params.id ?? "", anexoId: ctx.params.aid ?? "" }));
       },
     },
     {

@@ -1,4 +1,5 @@
 import { renderAnexosDaMensagem, type Aceita } from "../lib/anexos.ts";
+import { lembrancaDaMidia, linhaRecusas, renderMidiasDoBot } from "../lib/midia.ts";
 import type { FrotaDto, SuaVezDto } from "../../src/contracts/api.ts";
 import type { Proposta } from "../../src/contracts/conversa.ts";
 import type { Decisao } from "../../src/contracts/decisao.ts";
@@ -389,12 +390,12 @@ function urlDoAnexo(tenant: string, m: Mensagem, id: string): string {
  * NOD-56: a fala do bot só ganha anexo de imagem pela captura da tela ao fim do turno (NOD-200, `assentar-turno.ts`).
  * Ela sai de `msg-anexos` (acima do balão, à direita, desenhado para a pessoa) e vira o rodapé do balão.
  */
-const ehCaptura = (m: Mensagem, mime: string): boolean => m.autoria.autor_tipo !== "pessoa" && mime.startsWith("image/");
+const ehCaptura = (m: Mensagem, a: { mime: string; origem?: string }): boolean => m.autoria.autor_tipo !== "pessoa" && a.origem !== "bot" && a.mime.startsWith("image/");
 
-/** ADR-046: arquivos que a pessoa mandou, acima do balão. A captura do bot não entra aqui (NOD-56). */
+/** ADR-046: arquivos que a pessoa mandou, acima do balão. A captura (NOD-56) e a mídia do bot (NOD-323) não entram aqui. */
 function anexosDe(m: Mensagem, estado: Estado): string {
   const tenant = estado.sessao?.tenantId;
-  const anexos = (m.anexos ?? []).filter((a) => !ehCaptura(m, a.mime));
+  const anexos = (m.anexos ?? []).filter((a) => !ehCaptura(m, a) && a.origem !== "bot");
   if (!anexos.length || !tenant) return "";
   return renderAnexosDaMensagem(anexos, (id) => urlDoAnexo(tenant, m, id));
 }
@@ -411,7 +412,7 @@ export function htmlCapturaAmpliada(src: string, legenda: string): string {
  */
 export function capturaDoTurno(m: Mensagem, estado: Estado): string {
   const tenant = estado.sessao?.tenantId;
-  const captura = m.anexos?.find((a) => ehCaptura(m, a.mime));
+  const captura = m.anexos?.find((a) => ehCaptura(m, a));
   if (!captura || !tenant) return "";
   const url = esc(urlDoAnexo(tenant, m, captura.id));
   const legenda = `Tela do computador ao fim do turno · ${hora(m.criadoEm)}`;
@@ -421,6 +422,20 @@ export function capturaDoTurno(m: Mensagem, estado: Estado): string {
   const legendaAmpliada = `Tela do computador ${deQuem} ao fim do turno · ${hora(m.criadoEm)}`;
   return `<figure class="msg-captura"><button type="button" class="msg-captura-bt" data-act="ampliar-captura" data-src="${url}" data-legenda="${esc(legendaAmpliada)}" aria-label="Ampliar tela do computador ao fim do turno" aria-haspopup="dialog"><img src="${url}" alt="${esc(`Tela do computador ${deQuem} ao fim do turno`)}" loading="lazy" width="240" height="150" /></button><figcaption>${esc(legenda)}</figcaption></figure>`;
 }
+
+/**
+ * NOD-323 (ADR-126): a mídia que o bot anexou, abaixo do balão, e a linha do que não entrou. Puro: o que muda entre
+ * redesenhos (GIF pausado, este Mac) vem de `lembrancaDaMidia`, mantida por `midia-dom.ts`.
+ */
+export function midiasDoBot(m: Mensagem, estado: Estado): string {
+  const tenant = estado.sessao?.tenantId;
+  if (m.autoria.autor_tipo === "pessoa" || !tenant) return "";
+  const bot = agenteDe(estado, m.autoria.autor_id)?.nome;
+  const midias = renderMidiasDoBot(m.anexos ?? [], { url: (id) => urlDoAnexo(tenant, m, id), ...(bot ? { bot } : {}), ...lembrancaDaMidia });
+  return midias + linhaRecusas(m.midiaRecusas, bot);
+}
+
+const temMidiaDoBot = (m: Mensagem): boolean => m.autoria.autor_tipo !== "pessoa" && (m.anexos ?? []).some((a) => a.origem === "bot");
 
 /**
  * `destaVez` (ADR-090, protótipo "Nod — Motor na VM", tela 4c): a máquina do bot está sem contato e há outra conectada —
@@ -553,9 +568,9 @@ export function renderMensagem(m: Mensagem, estado: Estado, sala = false, opcoes
   // terminou perguntando), embaixo dele — o cartão não tem onde recebê-lo, e sem isso o bloco sumia (revisão do PR 398).
   const progressoDentro = !ehPessoa && !pergunta ? (opcoes.progresso ?? "") : "";
   const progressoFora = ehPessoa || pergunta ? (opcoes.progresso ?? "") : "";
-  const balao = motivoTela !== null ? htmlCartaoTela(motivoTela, agente?.id ?? "", telaAberta, agente?.nome, pergunta?.decisaoId) : pergunta ? cartaoDaPergunta(m, estado) : ehPessoa && m.texto.trim() === "" && m.anexos?.length ? "" : `<div class="bubble${progressoDentro ? " com-progresso" : ""}">${ehPessoa ? comChipDeComando(m.texto) : textoFormatado(m.texto, { chave: m.id, diagramas: opcoes.diagramas === true })}${metaTags}${progressoDentro}</div>`;
+  const balao = motivoTela !== null ? htmlCartaoTela(motivoTela, agente?.id ?? "", telaAberta, agente?.nome, pergunta?.decisaoId) : pergunta ? cartaoDaPergunta(m, estado) : (ehPessoa ? m.anexos?.length : temMidiaDoBot(m) && !progressoDentro) && m.texto.trim() === "" ? "" : `<div class="bubble${progressoDentro ? " com-progresso" : ""}">${ehPessoa ? comChipDeComando(m.texto) : textoFormatado(m.texto, { chave: m.id, diagramas: opcoes.diagramas === true })}${metaTags}${progressoDentro}</div>`;
   return `<article class="${classes}" data-mensagem="${esc(m.id)}"${pergunta ? ` data-pergunta="${esc(pergunta.decisaoId)}"` : ""}>
-    ${!ehPessoa && agente ? iconeAgente(agente, "md") : ""}<div class="bubble-wrap">${acoesDaMensagem(m, estado, sala)}${sender}${resposta ? rotuloDaResposta(m) : ""}${ehPessoa ? citacaoAcimaDoBalao(m) : ""}${anexosDe(m, estado)}${balao}${progressoFora}${ehPessoa ? "" : avisoDeLeitura(m, estado)}${ehPessoa ? "" : capturaDoTurno(m, estado)}${contextoDelegado}${chipsDeReacao(m, estado)}${fila ? renderSituacaoFila(fila, fila.turnoId) : ""}${faixaDaMensagem(m, estado)}</div>
+    ${!ehPessoa && agente ? iconeAgente(agente, "md") : ""}<div class="bubble-wrap">${acoesDaMensagem(m, estado, sala)}${sender}${resposta ? rotuloDaResposta(m) : ""}${ehPessoa ? citacaoAcimaDoBalao(m) : ""}${anexosDe(m, estado)}${balao}${ehPessoa ? "" : midiasDoBot(m, estado)}${progressoFora}${ehPessoa ? "" : avisoDeLeitura(m, estado)}${ehPessoa ? "" : capturaDoTurno(m, estado)}${contextoDelegado}${chipsDeReacao(m, estado)}${fila ? renderSituacaoFila(fila, fila.turnoId) : ""}${faixaDaMensagem(m, estado)}</div>
   </article>${resposta ? linhaDaRetomada(m, estado) : ""}`;
 }
 

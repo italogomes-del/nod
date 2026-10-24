@@ -47,6 +47,8 @@ import { ambienteDoBinarioDoNod, ativarPrefixo, candidatosDoNod, descartarPrefix
 import { criarVigiaDasIas, type Veredito, type VigiaDasIas } from "./vigia-ias.ts";
 import { lerAviso, lerContador, lerPreferencias, lerTemaDesktop, opcoesDoAviso, origemDe, remetenteWebValido } from "./avisos-mac.ts";
 import { abreNoNavegador } from "./links-externos.ts";
+import { arquivoDaMidia } from "./midia-mac.ts";
+import { CANAIS_MIDIA } from "../src/contracts/midia-desktop.ts";
 import { focarJanela, LARGURA_MINIMA, lerEstadoJanela, medirEstadoJanela, resolverEstadoJanela, type EstadoJanela } from "./janela.ts";
 import { estadoDoMicrofone, lerEmLigacao, permitirChecagemDeMidia, permitirPedidoDeMidia, TEXTO_FECHAR_EM_LIGACAO } from "./permissoes-midia.ts";
 import type { EstadoMicrofone } from "../src/contracts/desktop.ts";
@@ -528,7 +530,7 @@ async function conectar(c: Config) {
     const tarefasVivas = criarAcompanhanteDeTarefas((turnoId, tarefas) => cliente?.tarefas(turnoId, tarefas));
     // NOD-350: a ponte já junta os trechos até a renovação (1 s), então aqui toda mudança vai para ela.
     const subagentesVivos = criarAcompanhanteDeSubagentes((turnoId, lista, ocioso) => cliente?.subagentes(turnoId, lista, ocioso), { intervaloMs: 0 });
-    laco = iniciarPoolDeLacos((ponte) => iniciarLaco({ ponte, registry: reg, pessoaId: dados.escopo.pessoaId, machineId: dados.machineId, relogio: () => Date.now(), renovacaoMs: 1_000, esperaVaziaMs: 1000, memoria: memoriaDoMac, registroDaConta, aoDelta: (p, t) => cliente?.delta(p.turnoId, t), aoEvento: (p, ev) => { if (ev.tipo === "tool_use") cliente?.ferramenta(p.turnoId, ev.nome); tarefasVivas.evento(p.turnoId, ev); subagentesVivos.evento(p.turnoId, ev); }, aoIniciarTurno: (p) => { planosNoMac.set(p.turnoId, p); }, aoTerminarTurno: (p) => { tarefasVivas.esquecer(p.turnoId); subagentesVivos.parar(p.turnoId); subagentesVivos.esquecer(p.turnoId); planosNoMac.delete(p.turnoId); },
+    laco = iniciarPoolDeLacos((ponte) => iniciarLaco({ ponte, registry: reg, pessoaId: dados.escopo.pessoaId, machineId: dados.machineId, relogio: () => Date.now(), renovacaoMs: 1_000, esperaVaziaMs: 1000, memoria: memoriaDoMac, registroDaConta, urlNod: lig.urlNod, aoDelta: (p, t) => cliente?.delta(p.turnoId, t), aoEvento: (p, ev) => { if (ev.tipo === "tool_use") cliente?.ferramenta(p.turnoId, ev.nome); tarefasVivas.evento(p.turnoId, ev); subagentesVivos.evento(p.turnoId, ev); }, aoIniciarTurno: (p) => { planosNoMac.set(p.turnoId, p); }, aoTerminarTurno: (p) => { tarefasVivas.esquecer(p.turnoId); subagentesVivos.parar(p.turnoId); subagentesVivos.esquecer(p.turnoId); planosNoMac.delete(p.turnoId); },
       // NOD-73: o vigia do turno só avisa — o aviso vai como trecho vivo, só nome e números (os argumentos ficam no Mac).
       aoVigia: (p, aviso) => cliente?.vigia(p.turnoId, aviso),
       // definido em 2026-10-05: o turno disse que a conta desta IA não serve — o veredito fica guardado e o Mac reanuncia.
@@ -1249,6 +1251,17 @@ else {
         await vigiaIas?.sondarAgora().catch(() => undefined);
       }
       return estadoAtual(lida);
+    });
+    // NOD-323 (J5, ADR-126): a mídia do bot que ficou neste Mac. O caminho vem da página (dado de fora): arquivoDaMidia
+    // confere tudo de novo contra ~/nod/<pasta do bot>; o Finder só abre com o arquivo selecionado (nada é executado).
+    const homeDaMidia = () => cfgExecutor?.env.HOME ?? homedir();
+    ipcMain.handle(CANAIS_MIDIA.maquina, (e): string | null => { validarRemetenteWeb(e); return maquinaIdAtual; });
+    ipcMain.handle(CANAIS_MIDIA.existe, async (e, caminho: unknown): Promise<boolean> => { validarRemetenteWeb(e); return (await arquivoDaMidia(caminho, homeDaMidia())) !== null; });
+    ipcMain.handle(CANAIS_MIDIA.mostrarNoFinder, async (e, caminho: unknown): Promise<boolean> => {
+      validarRemetenteWeb(e);
+      const real = await arquivoDaMidia(caminho, homeDaMidia());
+      if (real) shell.showItemInFolder(real);
+      return real !== null;
     });
     // definido em 2026-10-12 (ADR-101): as várias contas. A página escolhe a IA e a posição; o resto é validado aqui.
     ipcMain.handle(CANAIS_DESKTOP.contasListar, (e): ContasNaTela[] => { validarRemetenteWeb(e); return contasDoApp.listar(); });

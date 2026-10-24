@@ -220,6 +220,8 @@ export function criarApi(escopo: Escopo) {
     /** ADR-046: o arquivo sobe cru (não em JSON) e volta como metadado; progresso só existe no XHR. */
     subirAnexo: (conversaId: string, arquivo: File, mime: string, aoProgresso?: (fracao: number) => void) => subir(`${base}/conversas/${conversaId}/anexos`, arquivo, mime, aoProgresso),
     urlAnexo: (conversaId: string, anexoId: string) => `${base}/conversas/${encodeURIComponent(conversaId)}/anexos/${encodeURIComponent(anexoId)}`,
+    /** NOD-323 (J5): onde a mídia do bot está na máquina (o caminho relativo à ~/nod), para o Mostrar no Finder. */
+    localDaMidia: (urlDoAnexo: string) => pedir<{ caminhoRelativo: string; maquinaId: string }>("GET", `${urlDoAnexo}/local`, undefined, { silencioso: true }),
     pararConversa: (conversaId: string) => post<FaixaParada>(`conversas/${conversaId}/parar`),
     pararTudo: () => post<FaixaParada>("parar"),
     turno: (id: string) => get<{ turno: Turno }>(`turnos/${id}`),

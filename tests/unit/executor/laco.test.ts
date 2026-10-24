@@ -1030,3 +1030,101 @@ describe("NOD-315: o clone da máquina antes do adapter", () => {
     expect(interrupcoes()).toBeGreaterThanOrEqual(1);
   });
 });
+
+// NOD-323 J6: no fim do turno o laço anexa os links locais da fala (só com pasta do bot e anexar_midia no catálogo);
+// a falha da rede de segurança nunca derruba a entrega.
+describe("J6: mídia citada na fala (NOD-323)", () => {
+  const comAnexar = (p: PlanoTurno): PlanoTurno => ({ ...p, pastaDoBot: "Xumbrega", catalogo: { ferramentas: [{ nome: "anexar_midia", descricao: "", schema: {}, origem: "proxy" } as never], servidores: [] } });
+  const rodar = async (plano: PlanoTurno, midiaDaFala: (p: PlanoTurno, t: string) => Promise<string>) => {
+    const ponte = ponteFalsa([plano]);
+    const chamadas: string[] = [];
+    const laco = iniciarLaco({
+      ponte, registry: await registryCom(driverFalso()), pessoaId: "p", machineId: "m1", relogio: Date.now, renovacaoMs: 10_000, dormir: async () => new Promise((r) => setTimeout(r, 1)),
+      midiaDaFala: async (p, t) => { chamadas.push(t); return midiaDaFala(p, t); },
+    });
+    await esperarAte(() => ponte.entregas.length === 1);
+    await laco.parar();
+    return { entrega: ponte.entregas[0]!, chamadas };
+  };
+
+  it("reescreve a fala antes da entrega", async () => {
+    const { entrega, chamadas } = await rodar(comAnexar(planoDeTeste("t-j6", "[[texto: veja ![g](g.png)]]")), async () => "veja");
+    expect(chamadas).toEqual(["veja ![g](g.png)"]);
+    expect(entrega.fala).toEqual({ tipo: "texto", texto: "veja" });
+    expect(entrega.resultado.texto).toBe("veja");
+  });
+
+  it("falhou: a fala vai como veio", async () => {
+    const { entrega } = await rodar(comAnexar(planoDeTeste("t-j6b", "[[texto: veja ![g](g.png)]]")), async () => { throw new Error("rede"); });
+    expect(entrega.fala).toEqual({ tipo: "texto", texto: "veja ![g](g.png)" });
+  });
+
+  it("o lease segue batendo enquanto a mídia da fala sobe (vídeo grande passa dos 90 s)", async () => {
+    const ponte = ponteFalsa([comAnexar(planoDeTeste("t-j6d", "[[texto: veja ![v](v.mp4)]]"))]);
+    let liberar!: (t: string) => void;
+    let renovacoesNoInicio = -1;
+    const laco = iniciarLaco({
+      ponte, registry: await registryCom(driverFalso()), pessoaId: "p", machineId: "m1", relogio: Date.now, renovacaoMs: 5, dormir: async () => new Promise((r) => setTimeout(r, 1)),
+      midiaDaFala: () => { renovacoesNoInicio = ponte.renovacoes.length; return new Promise((ok) => { liberar = ok; }); },
+    });
+    await esperarAte(() => renovacoesNoInicio >= 0);
+    await esperarAte(() => ponte.renovacoes.length >= renovacoesNoInicio + 3);
+    expect(ponte.entregas).toHaveLength(0);
+    liberar("veja");
+    await esperarAte(() => ponte.entregas.length === 1);
+    await laco.parar();
+    expect(ponte.entregas[0]!.fala).toEqual({ tipo: "texto", texto: "veja" });
+  });
+
+  it("estourou o prazo da J6: a fala vai como veio", async () => {
+    let sinal: AbortSignal | undefined;
+    const ponte = ponteFalsa([comAnexar(planoDeTeste("t-j6e", "[[texto: veja ![v](v.mp4)]]"))]);
+    const laco = iniciarLaco({
+      ponte, registry: await registryCom(driverFalso()), pessoaId: "p", machineId: "m1", relogio: Date.now, renovacaoMs: 10_000, dormir: async () => new Promise((r) => setTimeout(r, 1)),
+      midiaDaFala: (_p, _t, s) => { sinal = s; return new Promise(() => undefined); }, prazoMidiaDaFalaMs: 20,
+    });
+    await esperarAte(() => ponte.entregas.length === 1);
+    await laco.parar();
+    expect(ponte.entregas[0]!.fala).toEqual({ tipo: "texto", texto: "veja ![v](v.mp4)" });
+    // O upload em curso é cancelado, não só a espera (revisão 2 do #507, M4).
+    expect(sinal?.aborted).toBe(true);
+  });
+
+  it("a renovação negada no meio da J6 cancela o upload e entrega como veio (revisão 2 do #507, M4)", async () => {
+    let subindo = false;
+    let sinal: AbortSignal | undefined;
+    const ponte = ponteFalsa([comAnexar(planoDeTeste("t-j6f", "[[texto: veja ![v](v.mp4)]]"))], () => !subindo);
+    const laco = iniciarLaco({
+      ponte, registry: await registryCom(driverFalso()), pessoaId: "p", machineId: "m1", relogio: Date.now, renovacaoMs: 5, dormir: async () => new Promise((r) => setTimeout(r, 1)),
+      midiaDaFala: (_p, _t, s) => { subindo = true; sinal = s; return new Promise(() => undefined); }, prazoMidiaDaFalaMs: 60_000,
+    });
+    await esperarAte(() => ponte.entregas.length === 1);
+    await laco.parar();
+    expect(sinal?.aborted).toBe(true);
+    expect(ponte.entregas[0]!.fala).toEqual({ tipo: "texto", texto: "veja ![v](v.mp4)" });
+  });
+
+  it("turno interrompido (Parar) não sobe a mídia da fala (revisão 2 do #507, M4)", async () => {
+    let chamou = false;
+    const muitosDeltas = Array.from({ length: 200 }, (_, i) => `[[delta: ${i}]]`).join(" ");
+    const ponte = ponteFalsa([comAnexar(planoDeTeste("t-j6g", `${muitosDeltas} [[texto: veja ![v](v.mp4)]]`))]);
+    ponte.renovar = async (p) => {
+      ponte.renovacoes.push(p);
+      return { ativo: p.sinais.producedOutput !== true, versaoMinimaApp: "0.1.0" };
+    };
+    const laco = iniciarLaco({
+      ponte, registry: await registryCom(driverFalso({ atrasoMs: 5 })), pessoaId: "p", machineId: "m1", relogio: Date.now, renovacaoMs: 20, dormir: async () => new Promise((r) => setTimeout(r, 1)),
+      midiaDaFala: async (_p, t) => { chamou = true; return t; },
+    });
+    await esperarAte(() => ponte.entregas.length === 1, 10_000);
+    await laco.parar();
+    expect(ponte.entregas[0]?.resultado.desfecho).toBe("interrompido");
+    expect(chamou).toBe(false);
+  });
+
+  it("sem anexar_midia no catálogo (sala, sem pasta) não toca a fala", async () => {
+    const { entrega, chamadas } = await rodar({ ...planoDeTeste("t-j6c", "[[texto: ![g](g.png)]]"), pastaDoBot: "Xumbrega" }, async () => "x");
+    expect(chamadas).toEqual([]);
+    expect(entrega.fala).toEqual({ tipo: "texto", texto: "![g](g.png)" });
+  });
+});

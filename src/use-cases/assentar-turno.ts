@@ -148,6 +148,18 @@ async function anexarCaptura(deps: Deps, p: { turnoId: string; conversaId: strin
   }
 }
 
+/**
+ * NOD-323 (ADR-126): a mídia que o bot anexou no turno (soltas, na ordem em que chegaram) vai para a fala final, em todo
+ * ramo que grava fala de texto — concluído, interrompido (parcial) ou tardio. Turno sem fala de texto deixa a mídia solta,
+ * e o varredor a apaga.
+ */
+async function prenderMidiaDoTurno(deps: Deps, turnoId: string, mensagem: Mensagem): Promise<Mensagem> {
+  const presos = await deps.repos.anexos.prenderDoTurno(turnoId, mensagem.id);
+  if (presos.length === 0) return mensagem;
+  const anexos = (await deps.repos.anexos.daConversa([mensagem.id])).get(mensagem.id) ?? [];
+  return { ...mensagem, anexos };
+}
+
 type Desfecho = { estado: "concluido" | "interrompido"; motivoInterrupcao: MotivoInterrupcao | null; motivoFalha: MotivoFalha | null };
 
 /**
@@ -276,7 +288,16 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
     });
     falaDoBot = !tardia;
   }
+  // NOD-323 (ADR-126): o bot anexou mídia e não escreveu nada — a fala entra vazia, só para levar a mídia.
+  const podeFalar = entrega.fala.tipo === "texto" && !resultado.causaSemIa && !silencioso && !rotinaCaida && turno.origem !== "sala" && comandoDoTurno !== "compactar";
+  if (!mensagem && podeFalar && (await deps.repos.anexos.contarDoTurno(turno.id)) > 0) {
+    mensagem = await deps.repos.mensagens.criar({ conversaId: turno.conversaId, turnoId: turno.id, autoria, kind: "texto", texto: "", payload: null, confianca: turno.entradaConfianca, parcial: interrompido });
+    falaDoBot = !tardia;
+  }
   if (captura && falaDoBot && mensagem) await anexarCaptura(deps, { turnoId: turno.id, conversaId: turno.conversaId, mensagemId: mensagem.id, bytes: captura, agora });
+  // NOD-323: a mídia solta do turno prende à fala final. A sala não tem anexar_midia nesta PR (plano-turno.ts); turno sem
+  // fala não ganha post vazio, e a mídia solta o varredor apaga depois de um dia.
+  if (mensagem && mensagem.kind === "texto") mensagem = await prenderMidiaDoTurno(deps, turno.id, mensagem);
   // /compactar não tem fala: a conversa ganha a linha com quanto o histórico ocupava e quanto sobrou.
   const compactacao = resultado.execucao?.compactacoes.at(-1);
   if (!mensagem && !tardia && comandoDoTurno === "compactar" && resultado.desfecho === "sucesso") {

@@ -30,7 +30,7 @@ import { ehNod } from "./nod.ts";
 import { FERRAMENTA_RESPONDER_PEDIDO, temPedidosNoTurno, type PedidoPendenteNoPrompt } from "./pedidos-pendentes.ts";
 import { partesDoPromptSistema, trechoComClone, trechoDoClone, type EntradaPromptSistema, type RotinaNoPrompt, type TrabalhoNoPrompt } from "./prompt-sistema.ts";
 import { FERRAMENTAS_COMPUTADOR } from "../contracts/ferramentas-computador.ts";
-import { FERRAMENTA_LER_MAIS } from "../contracts/ferramentas-proxy.ts";
+import { FERRAMENTA_ANEXAR_MIDIA, FERRAMENTA_LER_MAIS } from "../contracts/ferramentas-proxy.ts";
 import type { ComputadorFora } from "./prompt-sistema.ts";
 import { FERRAMENTAS_WORKSPACE } from "../contracts/ferramentas-workspace.ts";
 
@@ -209,6 +209,8 @@ export type EntradaPlano = {
   pastasAutorizadas?: boolean;
   /** O harness do turno tem o hook do nod (ADR-052; o Codex desde a ADR-103): libera o kit do terminal. */
   terminal?: boolean;
+  /** NOD-323: a máquina do turno anunciou que não atende `anexar_midia` (app anterior): a ferramenta e a linha do prompt ficam fora. */
+  semAnexarMidia?: boolean;
   /** A IA que roda o turno; ausente ou null = Claude Code (catcher, legado). Decide a tradução dos comandos da conversa. */
   harness?: IdHarness | null;
   /**
@@ -320,6 +322,9 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
 
   const prazoMs = Math.max(0, entrada.turno.prazoEm - entrada.agora);
   const pasta = nativas.includes("Bash") ? (entrada.pastaTrabalho ?? pastaDoBot(entrada.agente.nome)) : undefined;
+  // NOD-323 (ADR-126): quem tem pasta e terminal gera arquivos; `anexar_midia` os mostra no chat (atendida pelo proxy).
+  // A sala fica fora nesta PR (a fala da sala vai por postarNaSala, que não prende a mídia).
+  if (pasta && modo !== "sala" && entrada.semAnexarMidia !== true) ferramentas = [...ferramentas, FERRAMENTA_ANEXAR_MIDIA];
   const prompt = promptEmPartes({ agente: entrada.agente, memorias: entrada.memorias, ferramentas, nativas, pastaDoBot: pasta, pessoaNome: entrada.pessoaNome, modo, colegas: entrada.colegas, contextoConversa: entrada.contextoConversa, conectores: entrada.conectores, rotinas: entrada.rotinasDoAgente, computadorFora: temComputador ? entrada.computadorFora ?? null : null, delegacao: modo === "delegacao" ? entrada.delegacao ?? null : null, profundidade: entrada.profundidade, semTerminal: motivoSemTerminal({ modo, confianca: entrada.confianca, terminal: entrada.terminal === true }), harness: entrada.harness ?? null, trabalho: entrada.trabalho ?? null, trabalhosAbertos: podeAbrirTask(entrada.trabalho ?? null) ? entrada.trabalhosAbertos ?? [] : [], ...(comPedidos ? { pedidosPendentes: entrada.pedidosPendentes } : {}), ...(ehNod(entrada.agente) ? { manualDoNod: MANUAL_DO_NOD } : {}), ...(entrada.maquina ? { maquina: entrada.maquina } : {}), ...(entrada.calibracao ? { calibracao: true } : {}), ...(entrada.whatsapp ? { whatsapp: true } : {}), ...(entrada.revisor ? { revisor: true } : {}), ...(entrada.sobreMim ? { sobreMim: entrada.sobreMim } : {}) });
   const clone = cloneDaMaquina(entrada, pasta, ferramentas, prompt.promptSistema);
   return {

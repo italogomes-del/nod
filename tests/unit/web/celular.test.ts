@@ -7,6 +7,8 @@ describe("celular", () => {
   it("é celular pelo toque, não pela largura: a mesma consulta no CSS e no código", () => {
     const css = readFileSync(new URL("../../../web/mobile.css", import.meta.url), "utf8");
     expect(css).toContain(`@media ${CONSULTA_CELULAR} {`);
+    // Toda regra de celular entra na consulta canônica, nunca num max-width solto (Codex no #507).
+    for (const m of css.matchAll(/@media ([^{]+)\{/g)) expect(m[1]!.trim()).toBe(CONSULTA_CELULAR);
     // Cada ramo da consulta exige toque sem hover: janela estreita no Mac nunca vira celular.
     for (const ramo of CONSULTA_CELULAR.split(",")) expect(ramo).toMatch(/\(hover: none\) and \(pointer: coarse\)/);
     expect(ehCelular((q) => ({ matches: q === CONSULTA_CELULAR }))).toBe(true);

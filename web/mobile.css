@@ -263,3 +263,39 @@
   .previa-bt { width: 44px; height: 44px; }
   .pv-csv-dica-bt { width: 44px; height: 44px; }
 }
+
+/* NOD-323: no celular a mídia do bot ocupa a coluna do balão, e os controles têm alvo de 44 px. */
+@media (hover: none) and (pointer: coarse) and (max-width: 600px), (hover: none) and (pointer: coarse) and (max-height: 500px) {
+  .msg-midias { width: 100%; }
+  .msg-midia-img .msg-midia-bt { max-height: 360px; width: min(var(--w), 100%); }
+  .msg-midia-grade { grid-template-columns: repeat(var(--k), 1fr); width: 100%; }
+  .msg-midia-vid, .msg-memo, .msg-midia-linha { width: 100%; }
+  .msg-memo { padding: 5px 10px 5px 5px; border-radius: 27px; }
+  .memo-linha { gap: 6px; }
+  .memo-pilula { height: 44px; }
+  .memo-play { width: 44px; }
+  .memo-pilula .memo-vel { min-width: 44px; }
+  .memo-trilha { height: 44px; }
+  .msg-midia-gif-ctl { height: 36px; }
+  .msg-midias .msg-arquivo { width: 100%; }
+  .msg-arquivo.alto .msg-midia-card-acao { min-height: 44px; }
+}
+
+@media (hover: none) and (pointer: coarse) and (max-width: 600px), (hover: none) and (pointer: coarse) and (max-height: 500px) {
+  /* NOD-323: a tela cheia de borda a borda no celular, com alvos de 44 px. */
+  .ctl-play { width: 44px; height: 44px; }
+  .ctl .ctl-vel { height: 32px; padding: 0 10px; }
+  .ctl-trilha { height: 32px; }
+  .luz-fig { inset: 60px 0 8px; }
+  img.luz-midia { width: min(var(--w), 100cqw, calc((100cqh - 68px) * var(--ar))); border-radius: 0; }
+  .luz-video { width: min(100cqw, calc((100cqh - 126px) * var(--ar))); }
+  .luz-video video { border-radius: 0; }
+  .luz-video .ctl { padding: 0 8px; }
+  .luz-legenda { padding: 0 16px; }
+  .luz-topo { top: 8px; right: 8px; }
+  .luz-bt { width: 44px; height: 44px; }
+  .luz-seta { display: none; }
+  .luz-minis { gap: 6px; padding: 8px 12px calc(12px + env(safe-area-inset-bottom)); }
+  .luz-mini { width: 44px; height: 44px; }
+  .luz.cem .luz-fig { padding: 60px 0 16px; }
+}

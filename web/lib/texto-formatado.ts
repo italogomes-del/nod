@@ -241,6 +241,9 @@ function quebras(texto: string): string {
   return esc(texto).replaceAll("\n", "<br>");
 }
 
+/** Cópia de LINK_ANEXO (src/domain/midia.ts; a web só importa tipos de src/): tests/unit/web/midia.test.ts confere. */
+export const LINK_ANEXO_WEB = /^nod-anexo:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
+
 function token(t: string, opcoes: OpcoesTexto, dentroDeEnfase: boolean): string {
   if (t.startsWith("`")) return `<code>${esc(t.slice(1, -1))}</code>`;
   if (t.startsWith("<")) {
@@ -250,8 +253,12 @@ function token(t: string, opcoes: OpcoesTexto, dentroDeEnfase: boolean): string 
   if (t.startsWith("[")) {
     const meio = t.indexOf("](");
     const url = lerLink(t.slice(meio + 2, -1));
+    if (url) return linkComNome(t.slice(1, meio), url, opcoes.agora);
+    // NOD-323 (J6): o link para um arquivo da pasta do bot virou `nod-anexo:<id>` — abre a mídia anexada nesta fala.
+    const anexo = LINK_ANEXO_WEB.exec(t.slice(meio + 2, -1));
+    if (anexo) return `<button type="button" class="md-midia-link" data-act="midia-abrir" data-anexo-id="${esc(anexo[1]!.toLowerCase())}">${esc(t.slice(1, meio))}</button>`;
     // Só http(s) vira link; o resto ([abrir](javascript:…), file:, mailto:) fica como o bot escreveu.
-    return url ? linkComNome(t.slice(1, meio), url, opcoes.agora) : quebras(t);
+    return quebras(t);
   }
   if (/^https?:\/\//.test(t)) {
     const url = lerLink(t);
