@@ -358,6 +358,8 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   // produto iniciou com o onboarding em curso (a da guia) ganha as ferramentas e o roteiro do onboarding.
   const onb = await deps.repos.onboarding.buscar();
   const pessoaNome = onb.campos.apelido ?? pessoa?.nome ?? "a pessoa";
+  // NOD-346 (ADR-126): o "Sobre mim" vale só nos bots da própria pessoa; bot de empresa ou de outra pessoa não o lê.
+  const sobreMim = agente.dono === "pessoa" && agente.ownerId === deps.escopo.pessoaId ? await deps.repos.perfil.sobreMim() : null;
   const ligacaoDoTurno = modo === "ligacao" && turno.ligacaoId ? await deps.repos.ligacoes.buscar(turno.ligacaoId) : null;
   const onboarding = ligacaoDoTurno?.iniciadaPor === "produto" && onb.guiaId === agente.id && (onb.etapa === "chamando" || onb.etapa === "entrevista" || onb.etapa === "configurando");
   // definido em 2026-10-04: a guia no "auto" roda no mais potente do harness (MODELO_MAIS_POTENTE) no chat; um modelo
@@ -395,6 +397,7 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
     ...(deps.services.revisor?.config.ligado ? { revisor: true } : {}),
     contextoConversa,
     pessoaNome,
+    ...(sobreMim ? { sobreMim } : {}),
     maquina: input.maquina ?? null,
     colegas: visiveis.filter((a) => ehColega(agente, a)),
     rotinasDoAgente,

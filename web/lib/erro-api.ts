@@ -16,6 +16,8 @@ export class ErroApi extends Error {
   readonly correlationId: string | null;
   /** Método + caminho sem o tenant e sem query (NOD-215): vai para "Detalhes", nunca para a frase. */
   readonly rota: string | null;
+  /** NOD-346: o porquê, quando o servidor manda um da lista branca (ex.: `reautenticar`); nunca vai para a frase. */
+  motivo: string | null = null;
   constructor(status: number, codigo: string, mensagem: string, correlationId: string | null = null, rota: string | null = null) {
     super(mensagem);
     this.name = "ErroApi";
@@ -44,9 +46,11 @@ export function falhaDeTransporte(rota: string): ErroApi {
 
 /** Resposta de erro → ErroApi. 502/503/504 sem o corpo do nod viram servidor fora; com corpo, o código do servidor manda. */
 export function erroDaResposta(status: number, lido: unknown, rota: string): ErroApi {
-  const e = (typeof lido === "object" && lido !== null ? lido : {}) as { codigo?: string; mensagem?: string; correlation_id?: string | null };
+  const e = (typeof lido === "object" && lido !== null ? lido : {}) as { codigo?: string; mensagem?: string; correlation_id?: string | null; motivo?: unknown };
   if (e.codigo === undefined && STATUS_DE_PROXY.has(status)) return new ErroApi(status, "servidor_indisponivel", FRASE_SERVIDOR_INDISPONIVEL, null, rota);
-  return new ErroApi(status, e.codigo ?? "falha_interna", e.mensagem ?? FALHA_SEM_FRASE, e.correlation_id ?? null, rota);
+  const erro = new ErroApi(status, e.codigo ?? "falha_interna", e.mensagem ?? FALHA_SEM_FRASE, e.correlation_id ?? null, rota);
+  if (typeof e.motivo === "string") erro.motivo = e.motivo;
+  return erro;
 }
 
 

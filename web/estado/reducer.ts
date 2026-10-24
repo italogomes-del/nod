@@ -102,7 +102,7 @@ export type ConectarMaquina = {
   conviteAte?: number | null;
 };
 
-export type SecaoEspaco = "conexao" | "avisos" | "preferencias" | "este-mac" | "maquinas" | "computadores" | "agentes" | "relatos";
+export type SecaoEspaco = "conta" | "conexao" | "avisos" | "preferencias" | "este-mac" | "maquinas" | "computadores" | "agentes" | "relatos";
 
 /**
  * A gaveta do bot por níveis (definido em 2026-09-30, canvas "Menu, sidebar e gaveta"): o que é do bot abre DENTRO dela,

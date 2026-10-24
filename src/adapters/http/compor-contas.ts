@@ -4,6 +4,9 @@ import { rotuloDoAparelho } from "../../domain/conta.ts";
 import type { Db, Escopo } from "../../shared/types.ts";
 import { emitirChaveMaquina } from "../../use-cases/chaves-maquina.ts";
 import { servicoConta, type ServicoConta } from "../../use-cases/conta.ts";
+import { servicoMinhaConta, type ServicoMinhaConta } from "../../use-cases/minha-conta.ts";
+import * as repoMinhaConta from "../../repositories/minha-conta.repo.ts";
+import { perfilRepo } from "../../repositories/perfil.repo.ts";
 import type { Rota } from "./roteador.ts";
 import { contaNoGoogle, rotaCaixaDev, rotasConta } from "./rotas/conta.ts";
 import { executar, type DentroDeTx } from "./rotas/dentro-de-tx.ts";
@@ -14,12 +17,16 @@ import { criarGuardaSessao, type GuardaSessao } from "./sessao-revogavel.ts";
  * Composição das contas (NOD-345, ADR-124). As flags são lidas SÓ aqui e em `recusasDasFlagsDeConta` (boot):
  *  - NOD_CONTAS=1: sessão revogável, cadastro/entrada por e-mail e senha, recuperação, sessões e pareamento;
  *  - NOD_BOOTSTRAP=1 (exige NOD_CONTAS): o espaço provisório por instalação, sem cadastro;
- *  - NOD_CONTAS_GOOGLE=1 (exige NOD_LOGIN=google e o client OAuth EXTERNO): "Continuar com Google" para Gmail e Workspace.
+ *  - NOD_CONTAS_GOOGLE=1 (exige NOD_LOGIN=google e o client OAuth EXTERNO): "Continuar com Google" para Gmail e Workspace;
+ *  - NOD_MINHA_CONTA=1 (exige NOD_CONTAS, NOD-346): a seção Minha conta (`/api/conta/eu/*`) e o laço da exportação;
+ *  - NOD_PURGA_CONTA=1 (exige NOD_MINHA_CONTA): a purga de verdade 30 dias depois da exclusão (revisão LGPD pendente).
  * Desligadas (o padrão), nada daqui existe e o servidor é o de antes.
  */
 export type ContasMontadas = {
   guarda: GuardaSessao;
   servico: ServicoConta;
+  /** NOD_MINHA_CONTA=1 (NOD-346): perfil, formas de entrada, e-mail, exportação e exclusão. */
+  minhaConta: ServicoMinhaConta | null;
   caixa: CaixaLocal | null;
   rotas: Rota[];
   bootstrap: boolean;
@@ -36,6 +43,8 @@ export function recusasDasFlagsDeConta(env: Env): string[] {
   const contas = env.NOD_CONTAS === "1";
   if (env.NOD_BOOTSTRAP === "1" && !contas) r.push("NOD_BOOTSTRAP=1 exige NOD_CONTAS=1");
   if (env.NOD_CONTAS_GOOGLE === "1" && !contas) r.push("NOD_CONTAS_GOOGLE=1 exige NOD_CONTAS=1");
+  if (env.NOD_MINHA_CONTA === "1" && !contas) r.push("NOD_MINHA_CONTA=1 exige NOD_CONTAS=1");
+  if (env.NOD_PURGA_CONTA === "1" && env.NOD_MINHA_CONTA !== "1") r.push("NOD_PURGA_CONTA=1 exige NOD_MINHA_CONTA=1");
   if (env.NOD_CONTAS_GOOGLE === "1" && env.NOD_LOGIN !== "google") r.push("NOD_CONTAS_GOOGLE=1 exige NOD_LOGIN=google");
   if (contas && env.NOD_LOGIN === "google" && (!env.NOD_RESEND_API_KEY || !env.NOD_EMAIL_REMETENTE)) r.push("NOD_CONTAS=1 com NOD_LOGIN=google exige NOD_RESEND_API_KEY e NOD_EMAIL_REMETENTE");
   if (contas && env.NOD_LOGIN === "google" && !env.NOD_URL_PUBLICA) r.push("NOD_CONTAS=1 com NOD_LOGIN=google exige NOD_URL_PUBLICA (o link de recuperação)");
@@ -64,13 +73,19 @@ export function comporContas(p: { db: Db; env: Env; dentro: DentroDeTx; agora: (
   });
   const bootstrap = env.NOD_BOOTSTRAP === "1";
   const googleLigado = env.NOD_CONTAS_GOOGLE === "1";
-  const rotas = rotasConta({ servico, guarda, segredo, seguro, bootstrap, caixa, google: googleLigado, agora: p.agora });
+  const urlBase = (env.NOD_URL_PUBLICA ?? `http://127.0.0.1:${env.NOD_API_PORT ?? "8888"}`).replace(/\/$/, "");
+  const minhaConta =
+    env.NOD_MINHA_CONTA === "1"
+      ? servicoMinhaConta({ transacao: (fn) => p.db.begin(fn) as never, segredo, enviador, urlBase, agora: p.agora, repo: repoContas, mc: repoMinhaConta, perfil: perfilRepo, purgaLigada: env.NOD_PURGA_CONTA === "1", aoEncerrarSessoes: (escopos) => escopos.forEach((e) => guarda.esquecer?.(e)) })
+      : null;
+  const rotas = rotasConta({ servico, guarda, segredo, seguro, bootstrap, caixa, google: googleLigado, agora: p.agora, minhaConta });
   if (caixa) rotas.push(rotaCaixaDev(caixa));
 
   const daMaquina = new Map<string, string>();
   return {
     guarda,
     servico,
+    minhaConta,
     caixa,
     rotas,
     bootstrap,

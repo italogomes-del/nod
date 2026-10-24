@@ -3342,6 +3342,14 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       trabalhos: soNoPostgres,
       contarTrabalhos: soNoPostgres,
     },
+    // NOD-346: o "Sobre mim" é do Postgres (tests/integration/minha-conta.test.ts); aqui fica vazio.
+    perfil: {
+      buscar: async () => ({ apelido: null, sobreMim: null, temFoto: false }),
+      sobreMim: async () => null,
+      atualizar: soNoPostgres,
+      foto: async () => null,
+      definirFoto: soNoPostgres,
+    },
   } satisfies Repos;
 
   return repos;

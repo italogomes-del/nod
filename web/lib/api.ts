@@ -28,6 +28,7 @@ import type { IdHarness } from "../../src/contracts/harness.ts";
 import type { Memoria, TipoMemoria } from "../../src/contracts/memoria.ts";
 import type { ReacaoNaFala } from "../../src/contracts/reacao.ts";
 import type { AppComLogo } from "../../src/contracts/marketplace.ts";
+import type { ConfirmarEmailDto, ExportacaoDto, FormasDto, MinhaContaDto, PerfilDto, ReautenticarDto } from "../../src/contracts/minha-conta.ts";
 import type { ExecucaoRotina } from "../../src/contracts/rotina.ts";
 import type { MembroSala, Sala } from "../../src/contracts/sala.ts";
 import type { FaixaParada, Turno } from "../../src/contracts/turno.ts";
@@ -437,4 +438,48 @@ export const contaApi = {
   pedirPareamento: (codigo: string) => pedir<PedirPareamentoDto>("POST", "/api/conta/parear/pedir", { codigo }),
   esperarPareamento: async () => pedir<EsperaPareamentoDto>("GET", "/api/conta/parear/pedido", undefined, await doApp()),
   google: (app: boolean) => pedir<{ url: string }>("POST", "/api/conta/google", { app }),
+};
+
+/** NOD-346 (ADR-126): Minha conta. As ações de risco voltam 403 com `motivo: reautenticar` até a pessoa confirmar quem é. */
+export const minhaContaApi = {
+  estado: () => pedir<MinhaContaDto>("GET", "/api/conta/eu"),
+  salvarPerfil: (p: { nome: string; sobreMim: string }) => pedir<PerfilDto>("POST", "/api/conta/eu/perfil", p),
+  definirFoto: (base64: string | null) => pedir<PerfilDto>("POST", "/api/conta/eu/foto", { base64 }),
+  reautenticarComSenha: (senha: string) => pedir<ReautenticarDto>("POST", "/api/conta/eu/reautenticar", { senha }),
+  enviarCodigo: () => pedir<{ enviado: boolean; expiraEm: number }>("POST", "/api/conta/eu/reautenticar/codigo", {}),
+  reautenticarComCodigo: (codigo: string) => pedir<ReautenticarDto>("POST", "/api/conta/eu/reautenticar", { codigo }),
+  removerGoogle: () => pedir<{ formas: FormasDto }>("POST", "/api/conta/eu/google/remover", {}),
+  pedirTrocaEmail: (email: string) => pedir<{ enviado: boolean; para: string; expiraEm: number }>("POST", "/api/conta/eu/email", { email }),
+  cancelarTrocaEmail: () => pedir<unknown>("POST", "/api/conta/eu/email/cancelar", {}),
+  confirmarEmail: (token: string) => pedir<ConfirmarEmailDto>("POST", "/api/conta/eu/email/confirmar", { token }),
+  trocarSenha: contaApi.trocarSenha,
+  pedirExportacao: () => pedir<ExportacaoDto>("POST", "/api/conta/eu/exportacao", {}),
+  /** O zip vem como arquivo: baixa pelo blob. Erro (403 reautenticar, 404) volta como ErroApi, igual ao resto. */
+  async baixarExportacao(id: string): Promise<void> {
+    const url = `/api/conta/eu/exportacao/${encodeURIComponent(id)}`;
+    let r: Response;
+    try {
+      r = await fetch(url);
+    } catch (e) {
+      if (ehAbort(e)) throw e;
+      throw falhaDeTransporte(rotaDe("GET", url));
+    }
+    if (!r.ok) {
+      let lido: unknown = null;
+      try { lido = await r.json(); } catch { lido = null; }
+      throw erroDaResposta(r.status, lido, rotaDe("GET", url));
+    }
+    const blob = await r.blob();
+    const nome = /filename="?([^";]+)"?/.exec(r.headers.get("content-disposition") ?? "")?.[1] ?? "nod-meus-dados.zip";
+    const href = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = href;
+    a.download = nome;
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(href), 10_000);
+  },
+  excluir: () => pedir<{ pedidaEm: number; purgarEm: number }>("POST", "/api/conta/eu/excluir", {}),
+  desfazerExclusao: () => pedir<{ desfeita: boolean }>("POST", "/api/conta/eu/excluir/desfazer", {}),
 };

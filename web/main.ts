@@ -36,8 +36,10 @@ import type { Experimentos } from "../src/contracts/raio-x.ts";
 import type { Escopo } from "../src/shared/types.ts";
 import type { FrameSse } from "../src/contracts/frame.ts";
 import { agenteDaTela, conversaAbertaTemNotaDeContas, conversaDaTela, estadoInicial, invalidacoesAoReconectar, invalidacoesAoRetomar, invalidacoesDaTela, mudouNaTela, reduzir, type Acao, type Estado, type Invalidacao, type NivelGaveta, type SecaoEspaco, type Tela } from "./estado/reducer.ts";
-import { contaApi, criarApi, ErroApi, observarRede, sessao as sessaoApi, type Api } from "./lib/api.ts";
+import { contaApi, criarApi, minhaContaApi, ErroApi, observarRede, sessao as sessaoApi, type Api } from "./lib/api.ts";
 import { criarContaNoChat, fraseDoErro as fraseDoErroDeConta } from "./telas/conta-no-chat.ts";
+import { criarMinhaConta } from "./telas/minha-conta.ts";
+import { reduzirFoto } from "./lib/reduzir-foto.ts";
 import { deveLembrar, htmlLembrete, jaFalou, marcarFalou } from "./telas/lembrete-conta.ts";
 import type { EstadoContaDto } from "../src/contracts/conta.ts";
 import { acaoDoErro, criarRegistroDeErros, detalhesDoErro, ehErroDeRede, erroDaAcao, erroDe as traduzirErro, erroParaRelatar, type ErroNaTela } from "./lib/erro-da-tela.ts";
@@ -463,7 +465,7 @@ const telaOnboarding = criarTelaOnboarding({
  */
 /** O app não conseguiu trocar a chave de máquina: não recarrega com a conta nova na tela e o executor na antiga. */
 const FALHA_TROCA_APP = "O app não conseguiu trocar de conta. Feche e abra o nod para tentar de novo.";
-let contas: { google: boolean; bootstrap: boolean } | null = null;
+let contas: { google: boolean; bootstrap: boolean; minhaConta?: boolean } | null = null;
 let contaAtual: EstadoContaDto | null = null;
 const conversaDoNod = () => {
   const nod = (estado.frota?.agentes ?? []).find((a) => a.papel === "nod" && a.ownerId === estado.sessao?.pessoaId);
@@ -491,6 +493,21 @@ const telaConta = criarContaNoChat({
   abrirUrl: (url) => { if (window.nodDesktop) window.open(url, "_blank", "noopener"); else window.location.assign(url); },
   agora: () => Date.now(),
   campo: (form, nome) => String(new FormData(form as HTMLFormElement).get(nome) ?? ""),
+});
+/** NOD-346: Minha conta em Seu espaço (só com NOD_MINHA_CONTA: o modo da sessão diz `contas.minhaConta`). */
+const telaMinhaConta = criarMinhaConta({
+  api: () => minhaContaApi,
+  aoMudar: () => render(),
+  agora: () => Date.now(),
+  campo: (form, nome) => String(new FormData(form as HTMLFormElement).get(nome) ?? ""),
+  lerFoto: async (el) => {
+    const input = el as unknown as HTMLInputElement;
+    const arquivo = input.files?.[0];
+    input.value = "";
+    return arquivo ? reduzirFoto(arquivo) : null;
+  },
+  agendar: (fn, ms) => { const id = window.setInterval(fn, ms); return () => window.clearInterval(id); },
+  focar: (seletor) => document.querySelector<HTMLElement>(seletor.split(",").map((x) => `#espaco ${x.trim()}`).join(", "))?.focus(),
 });
 /** A fala única do lembrete (opção 2 do Gil): na conversa do Nod, uma vez por instalação, depois da primeira rotina. */
 function blocoDoLembrete(conversaId: string): string | null {
@@ -1663,7 +1680,7 @@ function entrarPelaTela(form: HTMLFormElement): Promise<void> {
   return trabalharNaEntrada(async () => {
     try {
       const r = await contaApi.entrar(String(d.get("email") ?? "").trim(), String(d.get("senha") ?? ""));
-      if (r.resultado === "recusado") return contaDaEntrada({ erro: "E-mail ou senha não conferem." });
+      if (r.resultado === "recusado") return contaDaEntrada({ erro: ERRO_ENTRAR });
       if (r.resultado === "entrou" && r.trocaApp && window.nodDesktop?.trocarConta) {
         if (await window.nodDesktop.trocarConta(r.trocaApp).catch(() => false)) return;
         return contaDaEntrada({ erro: FALHA_TROCA_APP });
@@ -1777,7 +1794,7 @@ function render(): void {
   if (!arrastandoBot) redesenharSidebar();
   const codigo = codigoComFoco();
   // Seu espaço é uma camada por cima: a tela de baixo continua montada e fica inerte (nem foco, nem clique) enquanto ela está aberta.
-  regiaoReabrindo("espaco", estado.espaco ? renderEspaco(estado, ambienteBanco, canalAvisos.estado(), voltaDaTela(estado, estado.tela)) : "");
+  regiaoReabrindo("espaco", estado.espaco ? renderEspaco(estado, ambienteBanco, canalAvisos.estado(), voltaDaTela(estado, estado.tela), contas?.minhaConta ? telaMinhaConta.render() : null) : "");
   document.getElementById("espaco")?.toggleAttribute("hidden", !estado.espaco);
   // A ligação em tela cheia também deixa a .app (e Seu espaço) inerte; a pílula não: a pessoa usa o nod com a ligação aberta.
   // O onboarding por cima (olá, IA do Mac, "está te ligando") também deixa a .app inerte (ADR-077).
@@ -1987,7 +2004,9 @@ function regiaoReabrindo(id: string, html: string): void {
   const raiz = document.getElementById(id);
   if (!raiz || !regiaoMudaria(id, html)) return regiao(id, html);
   // ADR-102: o campo marcado (o código do login, o apelido) volta com o foco e o cursor depois de redesenhar.
-  const campo = document.activeElement instanceof HTMLInputElement && raiz.contains(document.activeElement) ? document.activeElement : null;
+  // NOD-346: o "Sobre mim" é textarea e também volta com o foco.
+  const ativoCampo = document.activeElement;
+  const campo = (ativoCampo instanceof HTMLInputElement || ativoCampo instanceof HTMLTextAreaElement) && raiz.contains(ativoCampo) ? ativoCampo : null;
   const manter = campo?.dataset.manterFoco ? { chave: campo.dataset.manterFoco, valor: campo.value, ini: campo.selectionStart, fim: campo.selectionEnd } : null;
   const abertos = new Set([...raiz.querySelectorAll<HTMLDetailsElement>("details[data-disclosure][open]")].map((el) => el.dataset.disclosure));
   const ativo = document.activeElement instanceof HTMLElement && raiz.contains(document.activeElement) ? document.activeElement.closest<HTMLDetailsElement>("details[data-disclosure]")?.dataset.disclosure ?? null : null;
@@ -1996,7 +2015,7 @@ function regiaoReabrindo(id: string, html: string): void {
     if (abertos.has(el.dataset.disclosure)) el.open = true;
     if (ativo !== null && el.dataset.disclosure === ativo) el.querySelector("summary")?.focus();
   }
-  const volta = manter ? raiz.querySelector<HTMLInputElement>(`input[data-manter-foco="${CSS.escape(manter.chave)}"]`) : null;
+  const volta = manter ? raiz.querySelector<HTMLInputElement | HTMLTextAreaElement>(`input[data-manter-foco="${CSS.escape(manter.chave)}"], textarea[data-manter-foco="${CSS.escape(manter.chave)}"]`) : null;
   if (volta && manter) {
     volta.value = manter.valor;
     volta.focus();
@@ -2067,6 +2086,11 @@ async function boot(): Promise<void> {
     url.searchParams.delete("saiu");
     window.history.replaceState(null, "", url.pathname + url.search + url.hash);
   }
+  // NOD-346: o link do e-mail novo (`/#confirmar-email=<token>`) confirma a troca e abre Minha conta com o resultado.
+  const linkConfirmar = window.location.hash.startsWith("#confirmar-email=");
+  const tokenConfirmar = /^#confirmar-email=([A-Za-z0-9_-]{20,100})$/.exec(window.location.hash)?.[1] ?? null;
+  if (linkConfirmar) window.history.replaceState(null, "", url.pathname + url.search);
+  const confirmando = linkConfirmar ? telaMinhaConta.confirmarEmail(tokenConfirmar) : null;
   const tokenRedefinir = /^#redefinir=([A-Za-z0-9_-]{20,100})$/.exec(window.location.hash)?.[1] ?? null;
   if (window.location.hash.startsWith("#redefinir=")) window.history.replaceState(null, "", url.pathname + url.search);
   if (tokenRedefinir || window.location.hash.startsWith("#redefinir=")) {
@@ -2080,6 +2104,7 @@ async function boot(): Promise<void> {
     abrirCodigoDeMaquinaGuardado();
     abrirVoltaDaNuvemGuardada();
     await lerContas(voltaDaConta);
+    if (confirmando) { await confirmando; if (contas?.minhaConta) abrirEspaco("conta"); }
   } catch (e) {
     if (e instanceof ErroApi && e.status === 401) {
       render();
@@ -2122,6 +2147,8 @@ async function provisorioDaWeb(): Promise<boolean> {
     return false;
   }
 }
+/** NOD-346: o servidor não diz se a conta existiu (sem enumeração); a dica cobre quem excluiu e voltou depois do prazo. */
+const ERRO_ENTRAR = "E-mail ou senha não conferem. Se você excluiu a conta há mais de 30 dias, ela e os dados foram apagados.";
 const LIMITE_PROVISORIO = "Muitos espaços novos foram abertos desta rede agora. Entre com uma conta ou tente de novo em alguns minutos.";
 
 /** NOD-345: com sessão, o que as contas dizem (o menu, o lembrete, o cartão que ficou aberto, a volta do Google). */
@@ -3071,6 +3098,7 @@ const timersCopiarCodigo = new WeakMap<HTMLElement, number>();
 const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   ...telaOnboarding.acoes,
   ...telaConta.acoes,
+  ...(telaMinhaConta.acoes as Record<string, (el: HTMLElement) => Promise<void> | void>),
   "conta-abrir": (el) => { try { marcarFalou(window.localStorage); } catch { /* sem storage */ } return telaConta.acoes["conta-abrir"]?.(el); },
   "entrada-ir": (el) => { entrada = { ...entrada, conta: { etapa: el.dataset.etapa === "recuperar" ? "recuperar" : "entrar", erro: null, enviadoPara: null, ocupado: false }, redefinir: null }; render(); },
   // NOD-345: "Mostrar" a senha troca o tipo do campo ali mesmo (o valor nunca sai do DOM).
@@ -4082,6 +4110,7 @@ const FORMS: Record<string, (form: HTMLFormElement) => Promise<void>> = {
   },
   "onboarding-bot": async (form) => { await telaOnboarding.forms["onboarding-bot"]?.(form); },
   ...telaConta.forms,
+  ...(telaMinhaConta.forms as Record<string, (form: HTMLFormElement) => Promise<void>>),
   "entrada-conta": (form) => entrarPelaTela(form),
   "entrada-recuperar": (form) => recuperarPelaTela(form),
   "entrada-redefinir": (form) => redefinirPelaTela(form),
@@ -4223,7 +4252,8 @@ document.addEventListener("click", (ev) => {
 }, true);
 document.addEventListener("keydown", (ev) => {
   // O Tab fica dentro do diálogo aberto (Sair, Remover, Desconectar), como na gaveta de conectores.
-  const dialogo = ev.key === "Tab" ? document.querySelector<HTMLElement>("#espaco .cl-dialogo") : null;
+  // NOD-346: a janela "Confirme que é você" de Minha conta também prende o Tab.
+  const dialogo = ev.key === "Tab" ? document.querySelector<HTMLElement>("#espaco .cl-dialogo, #espaco .conta-modal") : null;
   if (dialogo) {
     const focaveis = [...dialogo.querySelectorAll<HTMLElement>("button:not([disabled]), input:not([disabled])")];
     const primeiro = focaveis[0];
@@ -4236,6 +4266,13 @@ document.addEventListener("keydown", (ev) => {
     return;
   }
   if (ev.key !== "Escape" || !estado.espaco) return;
+  // NOD-346: o Esc com a janela "Confirme que é você" aberta fecha só ela, não Seu espaço inteiro.
+  if (contas?.minhaConta && telaMinhaConta.janelaAberta()) {
+    ev.stopPropagation();
+    ev.preventDefault();
+    telaMinhaConta.fecharJanela();
+    return;
+  }
   if (estado.nuvem.sonoMenu || estado.nuvem.conectar || estado.nuvem.excluir || estado.nuvem.criar) {
     ev.stopPropagation();
     const volta = estado.nuvem.sonoMenu || estado.nuvem.conectar ? null : gatilhoDoDialogo();
@@ -4263,6 +4300,8 @@ document.addEventListener("submit", (ev) => {
 // Contador ao vivo da aprovação em lista e autocomplete de @menção.
 document.addEventListener("change", (ev) => {
   const cb = ev.target as HTMLInputElement;
+  // NOD-346: a foto escolhida na Minha conta.
+  if (cb.dataset.actChange === "mc-foto-escolhida") { void telaMinhaConta.acoes["mc-foto-escolhida"]?.(cb); return; }
   if (cb.id === "composer-arquivos") {
     adicionarArquivos([...(cb.files ?? [])]);
     cb.value = "";
@@ -4433,6 +4472,9 @@ document.addEventListener("input", (ev) => {
   const iaDoCodigo = (ta as HTMLElement).dataset?.iaCodigo;
   if (ehIa(iaDoCodigo)) { dispatch({ tipo: "ias-mac", mudanca: { codigo: { ...estado.iasMac.codigo, [iaDoCodigo]: ta.value } } }); return; }
   // ADR-102: o código do login na VM e o apelido da conta nova ficam guardados sem redesenhar a cada tecla.
+  // NOD-346: o rascunho do perfil atravessa os redesenhos (a releitura da exportação, o tick).
+  const rascunho = (ta as HTMLElement).dataset?.mcRascunho;
+  if (rascunho) { telaMinhaConta.digitou(rascunho, ta.value); return; }
   const loginDoCodigo = (ta as HTMLElement).dataset?.clCodigo;
   if (loginDoCodigo) { contasDaPessoa.digitarCodigo(loginDoCodigo, ta.value); return; }
   if ((ta as HTMLElement).matches?.("[data-cl-nova-apelido]") && estado.contasUi.nova) { estado.contasUi.nova.apelido = ta.value; return; }
@@ -4845,6 +4887,8 @@ function abrirEspaco(secao: SecaoEspaco): void {
   // O menu "Avisos no Mac" muda a preferência sem passar por aqui: a seção relê ao abrir.
   if (secao === "avisos") void canalAvisos.reler();
   const jaAberto = !!estado.espaco;
+  if (secao === "conta") telaMinhaConta.abrir();
+  else if (estado.espaco?.secao === "conta") telaMinhaConta.fechar();
   dispatch({ tipo: "espaco", secao });
   document.querySelector<HTMLElement>(jaAberto ? `#espaco [data-secao="${secao}"]` : "#espaco .espaco-voltar")?.focus();
 }
@@ -4852,6 +4896,7 @@ function abrirEspaco(secao: SecaoEspaco): void {
 /** Volta exatamente para onde estava: a tela de baixo nunca saiu do lugar. O que chegou enquanto isso ganha a linha "Novas". */
 function fecharEspaco(): void {
   if (!estado.espaco) return;
+  if (estado.espaco.secao === "conta") telaMinhaConta.fechar();
   dispatch({ tipo: "espaco", secao: null });
   const t = estado.tela;
   if (t.tipo === "conversa" || t.tipo === "sala") linhaEm = t.conversaId;

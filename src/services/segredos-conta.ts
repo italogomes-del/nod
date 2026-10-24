@@ -5,7 +5,7 @@ import { createHmac, randomBytes, randomInt } from "node:crypto";
  * sessão como pepper: uma cópia do banco sem o segredo não vira código válido, e um código de 6 dígitos não se acha por
  * força bruta offline. O texto em claro existe só na resposta (ou no e-mail) e nunca vai para log.
  */
-export type FinalidadeCodigo = "verificacao" | "recuperacao" | "troca_app" | "pareamento";
+export type FinalidadeCodigo = "verificacao" | "recuperacao" | "troca_app" | "pareamento" | "troca_email" | "reautenticacao";
 
 export function hmacConta(segredo: string, ...partes: string[]): Buffer {
   const h = createHmac("sha256", segredo);

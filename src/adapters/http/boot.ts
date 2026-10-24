@@ -23,6 +23,7 @@ import { garantirParticoes } from "../fundo/particoes.ts";
 import { sincronizarDominiosAdmitidos } from "../fundo/dominios-admitidos.ts";
 import { INTERVALO_SCHEDULER_MS, iniciarScheduler } from "../fundo/scheduler-rotina.ts";
 import { iniciarVarredorOciosidade } from "../fundo/varredor-ociosidade.ts";
+import { iniciarLacoMinhaConta } from "../fundo/laco-minha-conta.ts";
 import { limiteDoAmbiente } from "../../domain/computador.ts";
 import { iniciarVarredorExpiracao } from "../fundo/varredor-expiracao.ts";
 import { INTERVALO_VARREDOR_LEASE_MS, iniciarVarredorLease } from "../fundo/varredor-lease.ts";
@@ -216,7 +217,7 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
     // ADR-092: também no modo local — a VM da pessoa (o motor da ADR-090) puxa turnos deste Mac pela ponte.
     autorizarMaquina: app.autorizarMaquina,
     sessao: sessao.modo === "google" && app.contas ? { ...sessao, google: { ...sessao.google, ...(app.contas.google ? { conta: app.contas.google } : {}) } } : sessao,
-    ...(app.contas ? { contas: { guarda: app.contas.guarda, google: app.contas.google !== null, bootstrap: app.contas.bootstrap, rotas: app.contas.rotas } } : {}),
+    ...(app.contas ? { contas: { guarda: app.contas.guarda, google: app.contas.google !== null, bootstrap: app.contas.bootstrap, minhaConta: !!app.contas.minhaConta, rotas: app.contas.rotas } } : {}),
     verificarSaude,
     estadoSaude,
     // ADR-071: os canais WebSocket da ligação (mídia e cérebro) no mesmo servidor.
@@ -300,6 +301,7 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
   let varredorExpiracao: Laco = nada;
   let varredorOciosidade: Laco = nada;
   let varredorMaquinas: Laco = nada;
+  let lacoMinhaConta: Laco = nada;
   let despachante: DespachanteOutbox | null = null;
   let lacosLigados = false;
   let ligando: Promise<void> | null = null;
@@ -363,6 +365,8 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
     if (app.computadores) varredorOciosidade = iniciarVarredorOciosidade({ db, computadores: app.computadores, ociosoMin: limiteDoAmbiente(env).ociosoMin, intervaloMs: iv.ociosidadeMs, opcoes: { listarPessoas: o.listarPessoas } });
     despachante = iniciarDespachanteOutbox(db, app.barramento, { intervaloMs: iv.outboxMs, listarPessoas: o.listarPessoas, presenca: app.services.maquinas });
     varredorMaquinas = app.iniciarVarredorMaquinas(o.varredorMaquinasMs);
+    // NOD-346: só com NOD_MINHA_CONTA (a exportação e, com NOD_PURGA_CONTA, a purga).
+    if (app.contas?.minhaConta) lacoMinhaConta = iniciarLacoMinhaConta({ db, servico: app.contas.minhaConta, opcoes: { listarPessoas: o.listarPessoas } });
   };
   // Idempotente: a drenagem para e o fechar() chama de novo (que só repete o parar do despachante, para o modo "só
   // ligações" que a drenagem pode ter ligado depois). O orquestrador (só existe no modo local) para só no fechar(): no
@@ -375,7 +379,7 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
     (parandoLacos ??= (async () => {
       await ligando?.catch(() => undefined);
       const pararDespachante = o.soLigacoes ? despachante?.soLigacoes(() => app.voz.pessoasComLigacao()) : despachante?.parar();
-      await Promise.all([scheduler.parar(), varredorLease.parar(), varredorExpiracao.parar(), varredorOciosidade.parar(), varredorMaquinas.parar(), pararDespachante]);
+      await Promise.all([scheduler.parar(), varredorLease.parar(), varredorExpiracao.parar(), varredorOciosidade.parar(), varredorMaquinas.parar(), lacoMinhaConta.parar(), pararDespachante]);
       // Não religa: ligarLacos() já recusa com drenando/fechado; o estado() passa a dizer a verdade.
       lacosLigados = false;
     })());

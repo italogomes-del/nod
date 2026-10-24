@@ -1,5 +1,5 @@
 import type { Db, Escopo } from "../../shared/types.ts";
-import { corteDaPessoa, criarSessaoConta, revogarOutrasSessoes, revogarSessao, sessaoViva, tocarSessao, type OrigemSessao } from "../../repositories/contas.repo.ts";
+import { corteDaPessoa, criarSessaoConta, pessoaExiste, revogarOutrasSessoes, revogarSessao, sessaoViva, tocarSessao, type OrigemSessao } from "../../repositories/contas.repo.ts";
 
 /**
  * Sessões revogáveis (NOD-345, ADR-124 §4). Só existe com NOD_CONTAS ligada; desligada, o cookie vale como sempre e
@@ -17,6 +17,8 @@ export type GuardaSessao = {
   revogar(escopo: Escopo, sid: string): Promise<boolean>;
   /** Revoga todas menos `manter` (null = todas) e corta os cookies sem sid. */
   revogarOutras(escopo: Escopo, manter: string | null): Promise<number>;
+  /** NOD-346: a revogação feita por outro caminho (troca de e-mail) esquece o cache da pessoa na hora. */
+  esquecer?(escopo: Escopo): void;
 };
 
 /** definido em 2026-10-23: 3 s de cache — no máximo uma consulta por cookie a cada 3 s, e a revogação vista em 3 s. */
@@ -45,7 +47,8 @@ export function criarGuardaSessao(db: Db, agora: () => number = Date.now): Guard
         ok = viva !== null;
         if (viva && t - viva.ultimoUsoEm > TOCAR_A_CADA_MS) await tocarSessao(db, sid, TOCAR_A_CADA_MS);
       } else {
-        ok = (await corteDaPessoa(db, escopo)) === null;
+        // Revisão do PR 506: depois da purga não sobra corte nem pessoa; sem a pessoa, o cookie antigo não vale.
+        ok = (await corteDaPessoa(db, escopo)) === null && (await pessoaExiste(db, escopo));
       }
       if (cache.size >= CACHE_MAX) cache.clear();
       cache.set(k, { ok, ate: t + CACHE_MS });
@@ -64,5 +67,6 @@ export function criarGuardaSessao(db: Db, agora: () => number = Date.now): Guard
       esquecerPessoa(escopo);
       return ids.length;
     },
+    esquecer: esquecerPessoa,
   };
 }

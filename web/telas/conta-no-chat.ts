@@ -449,7 +449,7 @@ export function criarContaNoChat(deps: DepsConta) {
     "conta-entrar": (form) => trabalhar(async () => {
       await comErro(async () => {
         const r = await deps.api().entrar(campo(form, "email").trim(), campo(form, "senha"));
-        if (r.resultado === "recusado") return mudar({ tipo: "entrar", erro: "E-mail ou senha não conferem." });
+        if (r.resultado === "recusado") return mudar({ tipo: "entrar", erro: "E-mail ou senha não conferem. Se você excluiu a conta há mais de 30 dias, ela e os dados foram apagados." });
         if (r.resultado === "escolher") return irParaEscolha(r.email, false);
         resolver("Você entrou na sua conta.");
         await deps.entrou(r.trocaApp);

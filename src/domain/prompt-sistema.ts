@@ -1,3 +1,4 @@
+import { linhaSobreAPessoa, PREFIXO_SOBRE_A_PESSOA } from "./minha-conta.ts";
 import { APPS_MARKETPLACE } from "../contracts/marketplace.ts";
 import type { Conector } from "../contracts/conector.ts";
 import type { Agente, ModoAprovacao } from "../contracts/agente.ts";
@@ -256,6 +257,11 @@ export type EntradaPromptSistema = {
   whatsapp?: boolean;
   /** ADR-115 (2026-10-18): o revisor do Automático ligado (`NOD_REVISOR`); só muda o texto do Automático no Claude. */
   revisor?: boolean;
+  /**
+   * NOD-346 (ADR-126): o "Sobre mim" da pessoa, só quando o bot é dela (quem chama confere). Entra na parte estável,
+   * numa linha só, depois do que o bot faz. Ausente ou vazio = sem a linha.
+   */
+  sobreMim?: string | null;
 };
 
 /**
@@ -315,6 +321,8 @@ export function partesDoPromptSistema(entrada: EntradaPromptSistema): { estavel:
   if (entrada.calibracao) linhas.push(LINHA_CALIBRACAO);
   const queFaz = linhaDoQueFaz(entrada.agente.descricao);
   if (queFaz) linhas.push(queFaz);
+  const sobre = linhaSobreAPessoa(entrada.sobreMim);
+  if (sobre) linhas.push(sobre);
   if (entrada.manualDoNod) linhas.push(entrada.manualDoNod);
   const pede = entrada.ferramentas.some((f) => f.nome === "pedir_a_bot");
   // A linha da delegação traz o nome de quem pediu: vai para a parte volátil. Os outros modos são poucos valores fixos.
@@ -496,7 +504,7 @@ export function partesDoPromptSistema(entrada: EntradaPromptSistema): { estavel:
 const PREFIXOS_DAS_SECOES: readonly (readonly [SecaoDoPrompt, readonly string[]])[] = [
   // definido em 2026-10-04 (ADR-072): "Fala:", "Ligação:", "Primeira ligação:", "Colegas no nod" e "Apps conectados" são
   // do prompt de voz (prompt-ligacao.ts); o de texto nunca começa linha assim.
-  ["identidade", ["Você é ", "Responda sempre em", "Formatação:", "Tom:", "Calibração:", "O que você faz:", "Fala:"]],
+  ["identidade", ["Você é ", "Responda sempre em", "Formatação:", "Tom:", "Calibração:", "O que você faz:", `${PREFIXO_SOBRE_A_PESSOA} (`, "Fala:"]],
   ["modo", [...Object.values(INSTRUCAO_MODO).map((t) => t.slice(0, 40)), "Modo de pedido de colega:", "Aprovações:", "Ligação:", "Primeira ligação:"]],
   ["computador", ["Seu computador está", "Você tem um computador", "Pastas do computador"]],
   ["colegas", ["Colaboração:", "Diretório de colegas", "Limite da corrente:", "Quem receber um pedido seu", "Colegas no nod"]],

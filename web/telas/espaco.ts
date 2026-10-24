@@ -19,6 +19,8 @@ import { renderRelatos } from "./relatos.ts";
  * veio>" (mais o Esc), que diz para onde a pessoa volta. Sem ×: os dois fariam a mesma coisa.
  */
 export const SECOES_ESPACO: readonly { id: SecaoEspaco; nome: string; icone: string }[] = [
+  // NOD-346: "Minha conta" (perfil, acesso e dados) abre a lista, mas só aparece com NOD_MINHA_CONTA ligada.
+  { id: "conta", nome: "Minha conta", icone: ICONE.pessoa },
   // definido em 2026-10-10 (plano das IAs, protótipo Main): "Conexão" vira "Provedores de IA", com os logos das IAs.
   { id: "conexao", nome: "Provedores de IA", icone: pilhaDeAvatares(true) },
   { id: "avisos", nome: "Avisos", icone: ICONE.sino },
@@ -38,9 +40,11 @@ export function textoAmbiente(ambiente: Ambiente): string | null {
   return `${regime}${ambiente.porta ? ` · porta ${ambiente.porta}` : ""}`;
 }
 
-export function renderEspaco(estado: Estado, ambiente: Ambiente, avisos: EstadoAvisos, volta: Volta): string {
-  const secao = estado.espaco?.secao ?? "conexao";
-  const nav = SECOES_ESPACO.map((s) => `<button type="button" class="espaco-item" data-act="secao-espaco" data-secao="${s.id}"${s.id === secao ? ' aria-current="page"' : ""}>${s.icone}<span>${esc(s.nome)}</span></button>`).join("");
+/** `minhaConta`: o HTML da seção Minha conta (web/telas/minha-conta.ts); null = flag desligada e a seção nem aparece. */
+export function renderEspaco(estado: Estado, ambiente: Ambiente, avisos: EstadoAvisos, volta: Volta, minhaConta: string | null = null): string {
+  const pedida = estado.espaco?.secao ?? "conexao";
+  const secao = pedida === "conta" && minhaConta === null ? "conexao" : pedida;
+  const nav = SECOES_ESPACO.filter((s) => s.id !== "conta" || minhaConta !== null).map((s) => `<button type="button" class="espaco-item" data-act="secao-espaco" data-secao="${s.id}"${s.id === secao ? ' aria-current="page"' : ""}>${s.icone}<span>${esc(s.nome)}</span></button>`).join("");
   const banco = textoAmbiente(ambiente);
   return `<div class="espaco" role="dialog" aria-modal="true" aria-labelledby="espaco-titulo">
     <nav class="espaco-nav" aria-label="Seções de Seu espaço">
@@ -49,12 +53,14 @@ export function renderEspaco(estado: Estado, ambiente: Ambiente, avisos: EstadoA
       <div class="espaco-itens">${nav}</div>
       ${banco ? `<p class="espaco-banco banco-${esc(ambiente?.regime ?? "desconhecido")}"><span aria-hidden="true"></span>${esc(banco)}</p>` : ""}
     </nav>
-    <main class="espaco-conteudo">${conteudo(estado, secao, avisos)}</main>
+    <main class="espaco-conteudo">${secao === "conta" ? minhaConta ?? "" : conteudo(estado, secao, avisos)}</main>
   </div>`;
 }
 
 function conteudo(estado: Estado, secao: SecaoEspaco, avisos: EstadoAvisos): string {
   switch (secao) {
+    case "conta":
+      return "";
     case "conexao":
       return renderProvedores(estado);
     case "avisos":

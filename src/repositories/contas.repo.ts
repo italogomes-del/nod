@@ -10,7 +10,7 @@ import { data, ms, msOuNull } from "./conversao.ts";
 
 export type OrigemSessao = "web" | "maquina";
 export type SessaoDto = { id: string; origem: OrigemSessao; aparelho: string; criadaEm: number; ultimoUsoEm: number; revogadaEm: number | null };
-export type FinalidadeGuardada = "verificacao" | "recuperacao" | "troca_app";
+export type FinalidadeGuardada = "verificacao" | "recuperacao" | "troca_app" | "troca_email" | "reautenticacao";
 export type CodigoAberto = { id: string; chave: string; tentativas: number; dados: Record<string, unknown>; expiraEm: number };
 export type IdentidadeNova = { tipo: "senha"; senhaHash: string } | { tipo: "google"; iss: string; sub: string };
 export type EntradaPendente = {
@@ -87,6 +87,12 @@ export async function revogarOutrasSessoes(conn: Conn, escopo: Escopo, manter: s
 }
 
 /** Desde quando cookie sem sid desta pessoa deixou de valer (null = nunca cortado). */
+/** A pessoa do cookie ainda existe? (Depois da purga, nada dela fica: nem pessoa, nem corte.) */
+export async function pessoaExiste(conn: Conn, escopo: Escopo): Promise<boolean> {
+  const [l] = await conn<{ ok: boolean }[]>`select nod_pessoa_existe(${escopo.tenantId}, ${escopo.pessoaId}) as ok`;
+  return l?.ok === true;
+}
+
 export async function corteDaPessoa(conn: Conn, escopo: Escopo): Promise<number | null> {
   const [l] = await conn<{ cortado_em: Date }[]>`select cortado_em from sessoes_corte where tenant_id = ${escopo.tenantId} and pessoa_id = ${escopo.pessoaId}`;
   return l ? ms(l.cortado_em) : null;

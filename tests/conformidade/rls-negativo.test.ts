@@ -23,6 +23,7 @@ describeIntegracao("gate: teste negativo", () => {
         "_sem_rls: sem policy PERMISSIVE nod_pessoa_update (FOR UPDATE)",
         "_sem_rls: sem policy PERMISSIVE nod_pessoa_delete (FOR DELETE)",
         "_sem_rls: sem policy RESTRICTIVE nod_tenant",
+        "_sem_rls: sem policy PERMISSIVE nod_purga",
       ]);
       // Só a tabela de propósito viola: o resto do banco continua verde.
       expect(violacoes.filter((v) => !v.startsWith("_sem_rls:"))).toEqual([]);

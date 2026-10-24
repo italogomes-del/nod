@@ -212,6 +212,10 @@ vários bots rodam `npm run check` ao mesmo tempo sem um contaminar o tenant pad
   RECUSA segredo de sessão curto ou o de exemplo; `stub` = login de desenvolvimento que lista as pessoas
   do cadastro, só em 127.0.0.1. Sem `NOD_LOGIN` o servidor não sobe. Os testes nunca usam nenhum dos
   dois: cunham o cookie com `cunharCookie` (`servidorDeTeste.entrar`, `servidorCompleto.sessaoDe`).
+- **Minha conta atrás de flag** (ADR-126, NOD-346): `NOD_MINHA_CONTA=1` (exige `NOD_CONTAS`) liga `/api/conta/eu/*`, o
+  laço da exportação e a seção em Seu espaço (o modo da sessão diz `contas.minhaConta`); `NOD_PURGA_CONTA=1` (exige a
+  anterior) liga a purga 30 dias depois da exclusão. Em produção a purga fica desligada até a revisão LGPD: a exclusão
+  fica programada e a tela diz isso.
 
 ## Cloud Agents e gstack
 

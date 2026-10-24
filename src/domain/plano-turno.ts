@@ -192,6 +192,8 @@ export type EntradaPlano = {
   whatsapp?: boolean;
   /** ADR-115: o revisor do Automático ligado (`NOD_REVISOR`); só muda o texto do Automático no prompt. Ausente = desligado. */
   revisor?: boolean;
+  /** NOD-346: o "Sobre mim" da pessoa, só quando o bot é dela (emitir-plano-turno confere). Ausente = sem a linha. */
+  sobreMim?: string | null;
   pessoaNome: string;
   /** ADR-090: a máquina que roda o turno (nome e plataforma, do anúncio); ausente = o texto do Mac de sempre. */
   maquina?: { nome: string; plataforma: PlataformaMaquina } | null;
@@ -318,7 +320,7 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
 
   const prazoMs = Math.max(0, entrada.turno.prazoEm - entrada.agora);
   const pasta = nativas.includes("Bash") ? (entrada.pastaTrabalho ?? pastaDoBot(entrada.agente.nome)) : undefined;
-  const prompt = promptEmPartes({ agente: entrada.agente, memorias: entrada.memorias, ferramentas, nativas, pastaDoBot: pasta, pessoaNome: entrada.pessoaNome, modo, colegas: entrada.colegas, contextoConversa: entrada.contextoConversa, conectores: entrada.conectores, rotinas: entrada.rotinasDoAgente, computadorFora: temComputador ? entrada.computadorFora ?? null : null, delegacao: modo === "delegacao" ? entrada.delegacao ?? null : null, profundidade: entrada.profundidade, semTerminal: motivoSemTerminal({ modo, confianca: entrada.confianca, terminal: entrada.terminal === true }), harness: entrada.harness ?? null, trabalho: entrada.trabalho ?? null, trabalhosAbertos: podeAbrirTask(entrada.trabalho ?? null) ? entrada.trabalhosAbertos ?? [] : [], ...(comPedidos ? { pedidosPendentes: entrada.pedidosPendentes } : {}), ...(ehNod(entrada.agente) ? { manualDoNod: MANUAL_DO_NOD } : {}), ...(entrada.maquina ? { maquina: entrada.maquina } : {}), ...(entrada.calibracao ? { calibracao: true } : {}), ...(entrada.whatsapp ? { whatsapp: true } : {}), ...(entrada.revisor ? { revisor: true } : {}) });
+  const prompt = promptEmPartes({ agente: entrada.agente, memorias: entrada.memorias, ferramentas, nativas, pastaDoBot: pasta, pessoaNome: entrada.pessoaNome, modo, colegas: entrada.colegas, contextoConversa: entrada.contextoConversa, conectores: entrada.conectores, rotinas: entrada.rotinasDoAgente, computadorFora: temComputador ? entrada.computadorFora ?? null : null, delegacao: modo === "delegacao" ? entrada.delegacao ?? null : null, profundidade: entrada.profundidade, semTerminal: motivoSemTerminal({ modo, confianca: entrada.confianca, terminal: entrada.terminal === true }), harness: entrada.harness ?? null, trabalho: entrada.trabalho ?? null, trabalhosAbertos: podeAbrirTask(entrada.trabalho ?? null) ? entrada.trabalhosAbertos ?? [] : [], ...(comPedidos ? { pedidosPendentes: entrada.pedidosPendentes } : {}), ...(ehNod(entrada.agente) ? { manualDoNod: MANUAL_DO_NOD } : {}), ...(entrada.maquina ? { maquina: entrada.maquina } : {}), ...(entrada.calibracao ? { calibracao: true } : {}), ...(entrada.whatsapp ? { whatsapp: true } : {}), ...(entrada.revisor ? { revisor: true } : {}), ...(entrada.sobreMim ? { sobreMim: entrada.sobreMim } : {}) });
   const clone = cloneDaMaquina(entrada, pasta, ferramentas, prompt.promptSistema);
   return {
     tenantId: entrada.turno.tenantId,

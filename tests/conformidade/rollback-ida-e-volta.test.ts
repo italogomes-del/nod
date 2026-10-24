@@ -152,6 +152,29 @@ describeIntegracao("NOD-195: o ROLLBACK de cada migração nova volta o schema e
     }
   }, 300_000);
 
+  // Revisão do PR 506: o ida-e-volta roda com as tabelas vazias. Com um código 'troca_email' ou 'reautenticacao' vivo, o
+  // rollback da 0110 recriaria o CHECK antigo e falharia; ele tem de apagar esses códigos antes. Transação descartada.
+  it("o rollback da 0110 com códigos de troca de e-mail e de reautenticação pendentes passa e os leva", async () => {
+    if (!sql) throw new Error("banco descartável não foi criado");
+    const ler = (nome: string) => readFile(new URL(nome, DIR), "utf8");
+    const DESCARTA = Symbol("descarta");
+    const depois = (await readdir(DIR)).filter((f) => f.endsWith(".sql") && f > "0110_minha_conta.sql").sort().reverse();
+    await sql
+      .begin(async (trx) => {
+        const t = trx as unknown as Sql;
+        for (const nome of depois) await t.unsafe(trechoDeRollback(await ler(nome)) ?? "");
+        await t.unsafe(`insert into codigos_conta (finalidade, chave, hash, expira_em) values
+          ('troca_email', 'conta-x', decode(repeat('ab', 32), 'hex'), now() + interval '1 hour'),
+          ('reautenticacao', 'sid-x', decode(repeat('cd', 32), 'hex'), now() + interval '1 hour'),
+          ('verificacao', 'conta-y', decode(repeat('ef', 32), 'hex'), now() + interval '1 hour')`);
+        await t.unsafe(trechoDeRollback(await ler("0110_minha_conta.sql")) ?? "");
+        const linhas = await t.unsafe<{ finalidade: string }[]>(`select finalidade from codigos_conta order by finalidade`);
+        expect(linhas.map((l) => l.finalidade)).toEqual(["verificacao"]);
+        throw DESCARTA;
+      })
+      .catch((e: unknown) => { if (e !== DESCARTA) throw e; });
+  }, 60_000);
+
   // Regressão (QA NOD-195): a foto em si. Roda depois do teste acima, no mesmo banco, num schema próprio.
   it("a foto aceita o rollback certo de GRANT em ACL nula e acusa UNLOGGED/opções esquecidos", async () => {
     if (!sql) throw new Error("banco descartável não foi criado");

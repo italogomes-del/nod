@@ -1,6 +1,6 @@
 # ADR-004 — Trilha imutável por TRIGGER, sem texto livre, prosa em tabela irmã apagável
 
-**Status** mantido
+**Status** mantido · Emendada pela [ADR-126](adr-126-minha-conta-reautenticacao-exportacao-e-purga-no-beta.md) (2026-10-23): o DELETE da purga da conta é a única exceção
 
 ## Decisão
 

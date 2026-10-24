@@ -4,6 +4,8 @@ import { rotuloDoAparelho } from "../../../domain/conta.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
 import type { Escopo } from "../../../shared/types.ts";
 import type { Quem, ServicoConta, SessaoNova } from "../../../use-cases/conta.ts";
+import type { ServicoMinhaConta } from "../../../use-cases/minha-conta.ts";
+import { TABELA_ERROS } from "../erros.ts";
 import type { CtxPublico, Metodo, Rota } from "../roteador.ts";
 import { assinar, cabecalhoCookieSessao, COOKIE_SESSAO, lerAssinado, lerSessaoDoCookie, PERMANENCIA_SESSAO_S } from "../sessao-cookie.ts";
 import { paginaIndoPara } from "../sessao-google.ts";
@@ -28,7 +30,15 @@ export type DepsRotasConta = {
   /** Google para conta ligado (NOD_LOGIN=google com client externo). */
   google: boolean;
   agora(): number;
+  /** NOD_MINHA_CONTA=1 (NOD-346): as rotas `/conta/eu/*`. Ausente, elas não existem. */
+  minhaConta?: ServicoMinhaConta | null;
 };
+
+/**
+ * NOD-346: os motivos que a tela da Minha conta precisa distinguir (abrir a janela de confirmar, dizer que o e-mail é de
+ * outra conta…). Só estes saem no corpo, como `motivo`; qualquer outra causa continua só no log.
+ */
+const MOTIVOS_MINHA_CONTA = new Set(["reautenticar", "ultima_forma_de_entrada", "email_em_uso", "email_igual", "conta_de_equipe", "exclusao_programada", "sem conta", "email", "nome:nome_vazio", "nome:nome_longo", "nome:tipo", "sobreMim:sobre_mim_longo", "sobreMim:tipo", "foto:formato", "foto:tamanho", "foto:tipo"]);
 
 /** definido em 2026-10-23: o bilhete do Google vale o mesmo que o state (10 min). */
 const BILHETE_MS = 600_000;
@@ -174,6 +184,8 @@ export function rotasConta(d: DepsRotasConta): Rota[] {
     }),
   ];
 
+  if (d.minhaConta) rotas.push(...rotasMinhaConta(d.minhaConta, rota));
+
   if (d.bootstrap) {
     rotas.push(
       rota("POST", "/provisorio", async (ctx, q, b) => {
@@ -188,6 +200,50 @@ export function rotasConta(d: DepsRotasConta): Rota[] {
     );
   }
   return rotas;
+}
+
+type FazRota = (metodo: Metodo, caminho: string, fn: (ctx: CtxPublico, q: Quem, corpo: Record<string, unknown>) => Promise<void>) => Rota;
+
+/** NOD-346 (ADR-126): Minha conta. Mesmo Origin, no-store e leitura de sessão das rotas de conta. */
+function rotasMinhaConta(s: ServicoMinhaConta, rota: FazRota): Rota[] {
+  /** O erro de domínio com um motivo conhecido sai com `motivo`; o resto segue para o tratador geral. */
+  const comMotivo = (fn: (ctx: CtxPublico, q: Quem, b: Record<string, unknown>) => Promise<void>) => async (ctx: CtxPublico, q: Quem, b: Record<string, unknown>) => {
+    try {
+      await fn(ctx, q, b);
+    } catch (erro) {
+      const causa = erro instanceof ErroDeDominio && typeof erro.cause === "string" ? erro.cause : null;
+      if (!(erro instanceof ErroDeDominio) || !causa || !MOTIVOS_MINHA_CONTA.has(causa)) throw erro;
+      const { status, mensagem } = TABELA_ERROS[erro.codigo];
+      ctx.json(status, { codigo: erro.codigo, mensagem, motivo: causa === "sem conta" ? "sem_conta" : causa });
+    }
+  };
+  const r = (metodo: Metodo, caminho: string, fn: (ctx: CtxPublico, q: Quem, b: Record<string, unknown>) => Promise<void>) => rota(metodo, `/eu${caminho}`, comMotivo(fn));
+  return [
+    r("GET", "", async (ctx, q) => ctx.json(200, await s.estado(q))),
+    r("POST", "/perfil", async (ctx, q, b) => ctx.json(200, await s.salvarPerfil(q, { nome: b.nome, sobreMim: b.sobreMim }))),
+    r("GET", "/foto", async (ctx, q) => {
+      const f = await s.foto(q);
+      if (!f) throw new ErroDeDominio("nao_encontrado", { cause: "sem foto" });
+      ctx.res.writeHead(200, { "content-type": f.tipo, "content-length": String(f.bytes.byteLength), "x-content-type-options": "nosniff", "content-security-policy": "default-src 'none'" });
+      ctx.res.end(Buffer.from(f.bytes));
+    }),
+    r("POST", "/foto", async (ctx, q, b) => ctx.json(200, await s.definirFoto(q, { base64: b.base64 === undefined ? undefined : b.base64 }))),
+    r("POST", "/reautenticar", async (ctx, q, b) => ctx.json(200, b.codigo !== undefined ? await s.reautenticarComCodigo(q, { codigo: b.codigo }) : await s.reautenticarComSenha(q, { senha: b.senha }))),
+    r("POST", "/reautenticar/codigo", async (ctx, q) => ctx.json(200, await s.enviarCodigo(q))),
+    r("POST", "/google/remover", async (ctx, q) => ctx.json(200, await s.removerGoogle(q))),
+    r("POST", "/email", async (ctx, q, b) => ctx.json(200, await s.pedirTrocaEmail(q, { email: b.email }))),
+    r("POST", "/email/cancelar", async (ctx, q) => ctx.json(200, await s.cancelarTrocaEmail(q))),
+    r("POST", "/email/confirmar", async (ctx, q, b) => ctx.json(200, await s.confirmarTrocaEmail(q, { token: b.token }))),
+    r("POST", "/exportacao", async (ctx, q) => ctx.json(200, await s.pedirExportacao(q))),
+    r("GET", "/exportacao/([0-9a-fA-F-]{36})", async (ctx, q) => {
+      const id = /\/exportacao\/([0-9a-fA-F-]{36})$/.exec((ctx.req.url ?? "").split("?")[0] ?? "")?.[1];
+      const zip = await s.baixarExportacao(q, id);
+      ctx.res.writeHead(200, { "content-type": "application/zip", "content-length": String(zip.byteLength), "content-disposition": 'attachment; filename="meus-dados-nod.zip"', "x-content-type-options": "nosniff" });
+      ctx.res.end(Buffer.from(zip.buffer, zip.byteOffset, zip.byteLength));
+    }),
+    r("POST", "/excluir", async (ctx, q) => ctx.json(200, await s.excluir(q))),
+    r("POST", "/excluir/desfazer", async (ctx, q) => ctx.json(200, await s.desfazerExclusao(q))),
+  ];
 }
 
 /** A caixa de e-mail do stub (só loopback): para testar o cadastro e a recuperação sem provedor. */

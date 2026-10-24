@@ -3,7 +3,8 @@
 Status: aceita · Data: 2026-10-23 · Issue: NOD-345 · Substitui a decisão central da
 [ADR-030](adr-030-identidade-de-login-allowlist-por-email-semeada-nunca-provi.md), emenda a
 [ADR-031](adr-031-a-chave-de-maquina-persiste-carrega-o-proprio-escopo-e-e-rev.md) e a
-[ADR-069](adr-069-o-mac-se-conecta-pelo-navegador.md).
+[ADR-069](adr-069-o-mac-se-conecta-pelo-navegador.md). Emendada pela
+[ADR-126](adr-126-minha-conta-reautenticacao-exportacao-e-purga-no-beta.md) (troca de e-mail, desligar forma de entrada).
 
 ## Contexto
 

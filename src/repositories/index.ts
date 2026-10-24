@@ -49,6 +49,7 @@ import { rotinaRitmoRepo } from "./rotina-ritmo.repo.ts";
 import { turnoCredenciaisRepo } from "./turno-credenciais.repo.ts";
 import { acoesPeloModoRepo } from "./acoes-pelo-modo.repo.ts";
 import { preferenciasRepo, raioXRepo } from "./raio-x.repo.ts";
+import { perfilRepo } from "./perfil.repo.ts";
 import { onboardingRepo } from "./onboarding.repo.ts";
 import { comandosRepo } from "./comandos.repo.ts";
 import { usoDoPlanoRepo } from "./uso-do-plano.repo.ts";
@@ -116,6 +117,7 @@ export function criarRepos(conn: Conn, escopo: Escopo): Repos {
     ligacoes: ligacoesRepo(conn, escopo),
     liberacoesDispensadas: liberacoesDispensadasRepo(conn, escopo),
     onboarding: onboardingRepo(conn, escopo),
+    perfil: perfilRepo(conn, escopo),
     nativasIdempotencia: nativasIdempotenciaRepo(conn, escopo),
   };
 }

@@ -121,6 +121,9 @@ const CENARIOS: Record<string, EntradaPromptSistema> = {
   // ADR-112: a chave "Modo WhatsApp" ligada — a mesma conversa manual com a linha "Tom:" no lugar da "Formatação:" e o
   // fecho do "Progresso:" sem o relatório completo.
   "conversa-whatsapp": { ...conversa("manual"), whatsapp: true },
+  // NOD-346 (ADR-126): o bot é da pessoa e ela escreveu o "Sobre mim" — uma linha a mais na parte estável, numa linha só
+  // mesmo com quebra no texto.
+  "conversa-sobre-mim": { ...conversa("manual"), sobreMim: "Sou designer e mãe de dois.\nPrefiro respostas curtas." },
   // 3. Pedido de colega em profundidade 1 e no limite da corrente (ADR-063).
   "colega-profundidade-1": pedidoDeColega(1),
   "colega-profundidade-3": pedidoDeColega(3),

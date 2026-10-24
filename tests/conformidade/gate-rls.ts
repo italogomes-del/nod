@@ -20,8 +20,8 @@ export const EXCECOES: Record<string, string> = {
     "lista de domínios do login (0052), sem dado de pessoa; nod_app não tem privilégio nenhum nela (tests/conformidade/admissao-por-dominio.test.ts): só nod_dono escreve e só a função nod_admitir_pessoa lê",
   // NOD-345 (ADR-124 §1): a conta é identidade GLOBAL, acima dos tenants, e é lida ANTES de existir escopo (entrar,
   // resolver o cookie). Os privilégios exatos do nod_app em cada uma são conferidos em tests/conformidade/contas.test.ts.
-  contas: "identidade global de acesso (0109, ADR-124 §1), lida antes de existir escopo; nod_app só SELECT/INSERT",
-  identidades_conta: "formas de entrar de uma conta (0109): google iss+sub e hash Argon2id; lida no login, sem escopo; nod_app sem DELETE",
+  contas: "identidade global de acesso (0109, ADR-124 §1), lida antes de existir escopo; nod_app SELECT/INSERT e UPDATE (email) desde 0110",
+  identidades_conta: "formas de entrar de uma conta (0109): google iss+sub e hash Argon2id; lida no login, sem escopo; DELETE do nod_app (0110) barrado na última por trigger",
   conta_pessoas: "vínculo conta → pessoa de cada tenant (0109): é ele que diz em que escopo a conta entra; nod_app só SELECT/INSERT",
   sessoes: "sessão revogável (0109, ADR-124 §4): resolvida pelo sid do cookie antes de existir escopo; nod_app sem DELETE",
   sessoes_corte: "corte dos cookies antigos sem sid (0109): consultado ao resolver o cookie, antes do escopo",
@@ -29,6 +29,7 @@ export const EXCECOES: Record<string, string> = {
   entradas_conta: "escolha pendente entre dois espaços (0109): liga a sessão de origem à pessoa de destino, de tenants diferentes",
   pareamentos_conta: "conectar outro computador (0109): o código é digitado num computador que ainda não está no escopo da pessoa",
   bootstrap_instalacoes: "instalação que criou um espaço provisório (0109): consultada no bootstrap público, antes do escopo",
+  exclusoes_conta: "exclusão programada da conta (0110, ADR-126 §5): global como a conta; o prazo nasce no banco e o trigger só deixa o nod_app ir de programada a desfeita",
   limites_conta: "contadores de limite contra abuso (0109), por HMAC de IP/e-mail, sem dado de pessoa",
 };
 
@@ -43,6 +44,9 @@ export const POLICIES_BASE: Record<string, { permissiva: boolean; cmd: "r" | "a"
   nod_pessoa_update: { permissiva: true, cmd: "w" },
   nod_pessoa_delete: { permissiva: true, cmd: "d" },
   nod_tenant: { permissiva: false, cmd: "*" },
+  // NOD-346 (ADR-126 §6): a purga da conta. TO nod_dono e só com o GUC nod.purga_tenant (o papel e o USING são
+  // conferidos em tests/conformidade/minha-conta.test.ts); sem ela em uma tabela, a purga deixaria dado para trás.
+  nod_purga: { permissiva: true, cmd: "*" },
 };
 
 /**
