@@ -40,6 +40,7 @@ describe("o estado do servidor é o mesmo do app do Mac", () => {
     { estado: "ausente", causa: "sem_node", motivo: "x", em: 0 },
     { estado: "ausente", causa: "config_invalida", motivo: "x", em: 0 },
     { estado: "ausente", causa: "sonda_lenta", motivo: "x", em: 0 },
+    { estado: "ausente", causa: "atualizando", motivo: "x", em: 0 },
     { estado: "nao_autenticado", causa: "conta_sem_acesso", motivo: "x", em: 0 },
     { estado: "nao_autenticado", causa: "teste_falhou", motivo: "x", em: 0 },
   ];

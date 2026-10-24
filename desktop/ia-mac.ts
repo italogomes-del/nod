@@ -32,6 +32,15 @@ export function comandoDeLogin(ia: IaDesktop): { nome: "claude" | "codex"; args:
 }
 
 /**
+ * O atualizador oficial do CLI (definido em 2026-10-23, NOD-9, plano do Arquiteto de 20/10, passo 5): o Claude Code tem
+ * `claude update` (o nativo e o do npm); o Codex não tem atualizador próprio conhecido até a NOD-8 (null = só a reserva
+ * pelo instalador do nod, ADR-093).
+ */
+export function comandoDeAtualizar(ia: IaDesktop): string[] | null {
+  return ia === "claude-cli" ? ["update"] : null;
+}
+
+/**
  * O login DENTRO do app (definido em 2026-10-09, desktop/login-ia.ts): o app lê a saída e mostra o link e o código.
  * Codex: o login por código de dispositivo (existe na 0.147.0, conferido no `codex login --help`). Claude: a
  * assinatura (`--claudeai`, o padrão da 2.1.296, dito explicitamente para nunca cair no login da Console paga por API).

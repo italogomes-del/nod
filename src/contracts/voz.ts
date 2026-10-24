@@ -79,9 +79,10 @@ export type EstadoIaDaLigacao = {
   estado: (typeof ESTADOS_IA_DA_LIGACAO)[number];
   /**
    * NOD-178: o CLI só demorou para responder à sonda; a tela não pede "Instalar" nem "Entrar". NOD-171: `cli_antigo` é
-   * o CLI instalado abaixo do piso (`ausente`); `versao` e `minima` vão junto, para o card dizer "Atualize".
+   * o CLI instalado abaixo do piso (`ausente`); `versao` e `minima` vão junto, para o card dizer "Atualize". NOD-9
+   * (definido em 2026-10-23): `atualizando` é o nod trocando o CLI por um mais novo; a tela só espera.
    */
-  causa?: "sonda_lenta" | "cli_antigo";
+  causa?: "sonda_lenta" | "cli_antigo" | "atualizando";
   versao?: string;
   minima?: string;
 };

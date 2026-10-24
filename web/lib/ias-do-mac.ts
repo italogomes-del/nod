@@ -140,6 +140,22 @@ export function criarIasDoMac(d: DepsIasDoMac) {
     d.mudar(comNota(ia, NOTA_FORA_DO_APP.instalar));
   }
 
+  /**
+   * "Atualizar" (NOD-9): o app do Mac roda o atualizador do próprio CLI (e a reserva pelo instalador do nod). App antigo,
+   * sem a ponte nova: o caminho de antes (reinstalar pela pasta do nod).
+   */
+  async function atualizar(ia: IaDesktop, opcoes?: { agora?: boolean }): Promise<void> {
+    const mac = d.mac();
+    const { cli } = PROVEDOR[ia];
+    if (!mac?.ias?.atualizar) { await instalar(ia); return; }
+    d.mudar(comNota(ia, null));
+    try {
+      guardarEstado(await mac.ias.atualizar(ia, opcoes));
+    } catch {
+      d.mudar(comNota(ia, `Não deu para atualizar o ${cli} agora. Tente de novo.`));
+    }
+  }
+
   /** "Entrar" (e "Entrar com outra conta"): abre o login do CLI no app; o link e o código chegam por `aoMudar`. */
   async function entrar(ia: IaDesktop, depoisDeInstalar = false, troca = false): Promise<void> {
     const mac = d.mac();
@@ -243,5 +259,5 @@ export function criarIasDoMac(d: DepsIasDoMac) {
   const alternarAjuda = (chave: string) => d.mudar({ ajuda: d.ui().ajuda === chave ? null : chave });
   const alternarDetalhe = (ia: IaDesktop) => d.mudar({ detalhe: d.ui().detalhe === ia ? null : ia });
 
-  return { iniciar, aoMudar, instalar, entrar: (ia: IaDesktop) => entrar(ia), trocar, cancelar, verificar, abrirLink, colarCodigo, copiarCodigo, testar, alternarAjuda, alternarDetalhe };
+  return { iniciar, aoMudar, instalar, atualizar, entrar: (ia: IaDesktop) => entrar(ia), trocar, cancelar, verificar, abrirLink, colarCodigo, copiarCodigo, testar, alternarAjuda, alternarDetalhe };
 }

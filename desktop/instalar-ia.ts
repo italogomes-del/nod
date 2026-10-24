@@ -2,7 +2,7 @@ import { stripVTControlCharacters } from "node:util";
 import type { IaDesktop } from "../src/contracts/desktop.ts";
 import type { CausaFalhaInstalacao, InstalacaoDaIa } from "../src/contracts/estado-ia.ts";
 import { conferirPisoCli, extrairVersao, PISO_CLI } from "../src/adapters/executor/flag-floors.ts";
-import { faltaNode } from "../src/domain/saida-do-cli.ts";
+import { falhaPorPermissao, faltaNode } from "../src/domain/saida-do-cli.ts";
 import type { PastasFerramentas } from "./ferramentas.ts";
 
 /**
@@ -108,7 +108,7 @@ export function linhaDoProgresso(texto: string): string | null {
 export function classificarFalhaNpm(saida: string): { causa: CausaFalhaInstalacao; passageira: boolean } {
   const t = stripVTControlCharacters(saida);
   if (/\bENOSPC\b|no space left/i.test(t)) return { causa: "sem_espaco", passageira: false };
-  if (/\bEACCES\b|\bEPERM\b|permission denied/i.test(t)) return { causa: "sem_permissao", passageira: false };
+  if (falhaPorPermissao(t)) return { causa: "sem_permissao", passageira: false };
   if (/\bE404\b|\bETARGET\b|404 Not Found|No matching version/i.test(t)) return { causa: "pacote_indisponivel", passageira: false };
   if (faltaNode(t)) return { causa: "sem_npm", passageira: false };
   if (/\bENOTFOUND\b|\bEAI_AGAIN\b|\bENETUNREACH\b|\bECONNREFUSED\b|\bECONNRESET\b|\bETIMEDOUT\b|\bESOCKETTIMEDOUT\b|socket hang up|network (request|error)|getaddrinfo/i.test(t)) return { causa: "sem_internet", passageira: true };

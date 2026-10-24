@@ -440,6 +440,8 @@ function acaoSemOutra(ia: IdIa, p: { agenteId: string | null; agora: number; ui:
     }
     case "testando":
       return { html: `<span>${esc(nome)} conectado · testando</span>${GIRA_LINHA}`, substitui: true };
+    case "atualizando":
+      return { html: `<span>Atualizando o ${esc(cli)}…</span>${GIRA_LINHA}`, substitui: true };
     case "no_limite":
       return { html: `<span>${esc(nome)} também está no limite</span>`, substitui: true };
     case "procurando":

@@ -6,7 +6,7 @@ import type { Inventario } from "../../../src/contracts/inventario.ts";
 import { inteligenciaDoAgente, raciocinioValido as raciocinioDoDominio } from "../../../src/domain/inteligencia.ts";
 import { UI_IAS_INICIAL } from "../../../web/telas/cartao-ia.ts";
 import {
-  inteligenciaDoBot, motivoDoInventario, mudarRascunho, NIVEIS, pedidoDoMenu, pedidoDoRascunho, raciocinioValido, rascunhoDe, renderInteligencia,
+  inteligenciaDoBot, motivoDoInventario, precisaDoCli, mudarRascunho, NIVEIS, pedidoDoMenu, pedidoDoRascunho, raciocinioValido, rascunhoDe, renderInteligencia,
   renderLinhaInteligencia, resumoDoAutomatico, rotuloInteligencia, type ContextoInteligencia,
 } from "../../../web/telas/inteligencia.ts";
 
@@ -97,6 +97,35 @@ describe("2A: a linha Inteligência e o menu dentro do cartão", () => {
     const a = clarice({ inteligencia: { modo: "auto", fixa: null, ordem: null, escolhas: { "claude-cli": { raciocinio: "high" } } } });
     expect(pedidoDoMenu(a, { modo: "auto" })).toEqual({ modo: "auto" });
     expect(pedidoDoMenu(a, { ia: "claude-cli", modelo: "sonnet" })).toEqual({ modo: "fixa", fixa: "claude-cli", escolhas: { "claude-cli": { raciocinio: "high", modelo: "sonnet" } } });
+  });
+});
+
+describe("NOD-9: o modelo que pede um Claude Code mais novo", () => {
+  // O catálogo de hoje não traz `versaoMinima`: o teste põe uma no Sonnet e o Claude Code instalado abaixo dela.
+  const comMinima = (versao: string): ContextoInteligencia => {
+    const c = ctx({ claude: { estado: "pronto", versao, em: 0 } });
+    return { ...c, ias: c.ias.map((x) => (x.id === "claude-cli" ? { ...x, modelos: x.modelos.map((m) => (m.id === "sonnet" ? { ...m, versaoMinima: "2.1.300" } : m)) } : x)) };
+  };
+
+  it("menu rápido: fica na lista, aria-disabled, com 'Precisa do Claude Code Y'; os outros seguem normais", () => {
+    const html = renderLinhaInteligencia(clarice(), comMinima("2.1.290"), true);
+    expect(html).toMatch(/data-ia="claude-cli" data-modelo="sonnet" aria-disabled="true"><span class="ia-op-txt"><b>Sonnet<\/b><small>Precisa do Claude Code 2.1.300<\/small>/);
+    expect(html).not.toMatch(/data-modelo="opus"[^>]*aria-disabled/);
+    expect(precisaDoCli(comMinima("2.1.290").ias.find((x) => x.id === "claude-cli")!, { versaoMinima: "2.1.300" }, comMinima("2.1.290"))).toBe("2.1.300");
+  });
+
+  it("instalada igual ou acima da mínima, ou versão desconhecida: escolhível", () => {
+    expect(renderLinhaInteligencia(clarice(), comMinima("2.1.300"), true)).not.toContain("aria-disabled");
+    expect(renderLinhaInteligencia(clarice(), comMinima("2.1.310"), true)).not.toContain("Precisa do Claude Code");
+    const semVersao = ctx({ claude: { estado: "nao_autenticado", motivo: "x", em: 0 } });
+    expect(precisaDoCli(semVersao.ias.find((x) => x.id === "claude-cli")!, { versaoMinima: "2.1.300" }, semVersao)).toBeNull();
+  });
+
+  it("a pílula da 2B também marca o modelo aria-disabled com a frase", () => {
+    const c = comMinima("2.1.290");
+    const r = mudarRascunho(rascunhoDe(clarice()), { tipo: "pilula", ia: "claude-cli" }, c);
+    const html = renderInteligencia(r, "Clarice", c, ["claude-cli", "codex-cli"]);
+    expect(html).toMatch(/role="radio" aria-checked="false" aria-disabled="true" data-act="int-modelo" data-ia="claude-cli" data-modelo="sonnet">.*?<small>Precisa do Claude Code 2.1.300<\/small>/s);
   });
 });
 

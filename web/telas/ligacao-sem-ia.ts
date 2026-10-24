@@ -116,6 +116,10 @@ function cardDaIa(ia: IaDaLigacao, s: EstadoSemIa): string {
     // NOD-178: o CLI só demorou para responder; nem "Instalar" nem "Entrar", o app do Mac sonda de novo sozinho.
     texto = `O ${cli} demorou para responder; o Mac está carregado. A ligação percebe quando ficar pronto.`;
     acao = "";
+  } else if (daIa?.causa === "atualizando") {
+    // NOD-9: o nod está trocando o CLI por um mais novo; nem "Instalar" nem "não está neste Mac".
+    texto = `Atualizando o ${cli} deste Mac. A ligação percebe quando ficar pronto.`;
+    acao = "";
   } else if (daIa?.causa === "cli_antigo" && daIa.versao && daIa.minima) {
     // NOD-171: o CLI está no Mac, abaixo do piso. Nem "Instalar" nem "não está neste Mac": a versão, a mínima e o comando.
     texto = `O ${cli} deste Mac está na versão ${daIa.versao}; o nod precisa da ${versaoLegivel(daIa.minima)} ou mais nova. A ligação percebe quando ficar pronto.`;

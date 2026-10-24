@@ -23,7 +23,7 @@ export function rotuloExecutor(id: IdExecutor): string {
 /** Uma linha por opção do interruptor: o que a sonda disse, escrito (ADR-029) — "pronto" ou o motivo de não estar. */
 function estadoDaOpcao(inv: Inventario): string {
   if (inv.estado === "pronto") return `pronto${inv.versao === "catcher" ? "" : ` (${inv.versao})`}`;
-  return `${inv.causa === "sonda_lenta" ? "demorou para responder" : inv.estado === "nao_autenticado" ? "não autenticado" : inv.causa === "cli_antigo" ? "desatualizado" : "ausente"} — ${inv.motivo}`;
+  return `${inv.causa === "sonda_lenta" ? "demorou para responder" : inv.estado === "nao_autenticado" ? "não autenticado" : inv.causa === "cli_antigo" ? "desatualizado" : inv.causa === "atualizando" ? "atualizando" : "ausente"} — ${inv.motivo}`;
 }
 
 /**

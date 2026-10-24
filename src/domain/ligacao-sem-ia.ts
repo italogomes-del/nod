@@ -49,6 +49,7 @@ export function iaQuePodeAssumir(caiu: IaDaLigacao | null, ias: readonly EstadoI
  */
 export function estadoIaDaLigacao(id: IaDaLigacao, inv: Inventario): EstadoIaDaLigacao {
   if (sondaFoiLenta(inv)) return { id, estado: inv.estado, causa: "sonda_lenta" };
+  if (inv.estado === "ausente" && inv.causa === "atualizando") return { id, estado: inv.estado, causa: "atualizando" };
   if (inv.estado === "ausente" && inv.causa === "cli_antigo" && inv.versao && inv.minima) return { id, estado: inv.estado, causa: "cli_antigo", versao: inv.versao, minima: inv.minima };
   return { id, estado: inv.estado };
 }

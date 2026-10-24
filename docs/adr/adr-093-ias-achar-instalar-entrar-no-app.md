@@ -94,3 +94,11 @@ O Marlon: "aqui não podemos errar; conferir o link, conferir que leva à págin
   O conteúdo da página e os casos de conta Business/organização exigem o teste humano antes da release.
 - Mudou o endereço que um CLI imprime: o login falha com `link_nao_oficial` (o log diz só o host) até a lista ser
   atualizada aqui, com a medida nova.
+
+## Emenda de 2026-10-23 — atualizar dentro do app (NOD-9)
+
+O cartão da IA desatualizada ganha "Atualizar" (`iaAtualizar` na ponte). O caminho oficial é o atualizador do CLI; o
+instalador desta ADR vira a reserva quando ele falha por permissão, versão ilegível ou falta de atualizador. Uma
+atualização por vez no app inteiro; o estado (`atualizacao` em `EstadoIa`) leva só códigos, e as frases são da web
+(`web/lib/atualizacao-ia.ts`). Gatilho de reversão: o `claude update` deixar de existir ou de respeitar o prefixo de
+quem instalou — volta a ser só o instalador.

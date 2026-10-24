@@ -220,3 +220,9 @@ leitura passou a ser gravada por conta (0077). O Codex não informava o uso.
 **Gatilho de reversão.** Se o app-server do Codex mudar o formato ou deixar de responder, a conta fica sem leitura nova
 e a tela diz que o ChatGPT não informou; o turno não depende dela. Se o âmbar em 90% virar ruído (a faixa aparecendo
 sem que as rotinas esperem de fato), volta-se a 95% no domínio e no anel juntos.
+
+## Emenda (2026-10-23): a mínima do modelo puxa a atualização (NOD-9)
+
+O alvo da atualização automática é o maior entre `PISO_CLI` e a mínima do modelo pedido (`alvoDaAtualizacao`,
+`src/domain/atualizacao-automatica.ts`). A recusa "desatualizado" só sai quando a atualização não chegou ao alvo
+(`insuficiente`) ou não pôde rodar; o fornecedor nunca troca sozinho por isso.

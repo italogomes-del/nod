@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { IAS_DESKTOP } from "../../../src/contracts/desktop.ts";
-import { ambienteDoLogin, comandoDeEstadoDoLogin, comandoDeLogin, comandoDeLoginNoApp, INTERVALO_SONDA_IA_MS, lerIaDesktop, logadoPeloStatus, textoDaImpressao, URL_INSTALAR_IA } from "../../../desktop/ia-mac.ts";
+import { ambienteDoLogin, comandoDeAtualizar, comandoDeEstadoDoLogin, comandoDeLogin, comandoDeLoginNoApp, INTERVALO_SONDA_IA_MS, lerIaDesktop, logadoPeloStatus, textoDaImpressao, URL_INSTALAR_IA } from "../../../desktop/ia-mac.ts";
 
 /**
  * Os cards de IA do onboarding no Mac (definido em 2026-10-04, ADR-077): a página remota só escolhe UMA das IAs
@@ -76,5 +76,12 @@ describe("login dentro do app (2026-10-09)", () => {
     expect(logadoPeloStatus("codex-cli", 0, "Logged in using ChatGPT", "")).toBe(true);
     expect(logadoPeloStatus("codex-cli", 1, "Not logged in", "")).toBe(false);
     expect(logadoPeloStatus("codex-cli", 0, "Not logged in", "")).toBe(false);
+  });
+});
+
+describe("comandoDeAtualizar (NOD-9)", () => {
+  it("o Claude Code tem `claude update`; o Codex não tem atualizador próprio", () => {
+    expect(comandoDeAtualizar("claude-cli")).toEqual(["update"]);
+    expect(comandoDeAtualizar("codex-cli")).toBeNull();
   });
 });

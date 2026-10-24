@@ -18,6 +18,8 @@ const ias: PonteIas = {
   colarCodigo: (ia: IaDesktop, codigo: string) => ipcRenderer.invoke(CANAIS_DESKTOP.iaColarCodigo, ia, codigo),
   cancelar: (ia: IaDesktop) => ipcRenderer.invoke(CANAIS_DESKTOP.iaCancelar, ia),
   verificar: (ia: IaDesktop) => ipcRenderer.invoke(CANAIS_DESKTOP.iaVerificar, ia),
+  // NOD-9: o "Atualizar" (só a IA e se é agora; o comando é do processo principal).
+  atualizar: (ia: IaDesktop, opcoes?: { agora?: boolean }) => ipcRenderer.invoke(CANAIS_DESKTOP.iaAtualizar, ia, { agora: opcoes?.agora === true }),
   aoMudar: (fn: (estado: EstadoIa) => void) => {
     ipcRenderer.removeAllListeners(CANAIS_DESKTOP.iaMudou);
     ipcRenderer.on(CANAIS_DESKTOP.iaMudou, (_evento, estado: EstadoIa) => fn(estado));

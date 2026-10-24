@@ -7,6 +7,7 @@ import { ICONE } from "../lib/icones.ts";
 import { esc } from "../lib/render.ts";
 import { ehIaMac, estadoNaTela, logoDaIa, ordemDasIas, PROVEDOR, type IaMac, type UiIas } from "./cartao-ia.ts";
 import { desatualizado, versaoLegivel } from "./ia-fora.ts";
+import { versaoAbaixo } from "../lib/atualizacao-ia.ts";
 
 /**
  * A inteligência de um bot na gaveta (definido em 2026-10-10, plano "IAs: conexão, troca e escolha de modelo", PR 3;
@@ -153,6 +154,16 @@ export function modelosDoMenu(ia: IaDaPessoa, escolhido: string | null): IaDaPes
 }
 
 /**
+ * NOD-9: a versão do CLI que falta para o modelo — a `versaoMinima` do catálogo acima da versão instalada que a tela
+ * conhece (a do Mac no app ou a do anúncio). Sem versão conhecida, null (o turno decide e pede a atualização).
+ */
+export function precisaDoCli(ia: IaDaPessoa, modelo: { versaoMinima?: string }, c: ContextoInteligencia): string | null {
+  if (!ehIaMac(ia.id) || !modelo.versaoMinima) return null;
+  const instalada = estadoNaTela(ia.id, ia, c.ui, c.agora).versao;
+  return instalada && versaoAbaixo(instalada, modelo.versaoMinima) ? modelo.versaoMinima : null;
+}
+
+/**
  * 2A: a linha "Inteligência" da gaveta e, aberta, o menu dentro do cartão. Só a dona muda: para quem não é, a linha
  * mostra o rótulo e não abre nada.
  */
@@ -163,15 +174,20 @@ export function renderLinhaInteligencia(a: Pick<Agente, "id" | "nome" | "harness
   if (!aberto) return `<div class="ia-linha-wrap">${linha}</div>`;
   const i = inteligenciaDoBot(a);
   const auto = i.modo === "auto";
-  const item = (dados: string, titulo: string, sub: string, marcado: boolean, desabilitado = false) =>
-    `<button type="button" class="ia-op${dados.includes("data-modelo") ? " ia-op-modelo" : ""}" role="menuitemradio" aria-checked="${marcado}" ${dados}${desabilitado ? " disabled" : ""}><span class="ia-op-txt"><b>${esc(titulo)}</b><small>${esc(sub)}</small></span>${marcado ? CHECK : ""}</button>`;
+  // `precisa` (NOD-9): o modelo pede um CLI mais novo — fica no menu, focável e com a frase, mas aria-disabled.
+  const item = (dados: string, titulo: string, sub: string, marcado: boolean, desabilitado = false, precisa = false) =>
+    `<button type="button" class="ia-op${dados.includes("data-modelo") ? " ia-op-modelo" : ""}" role="menuitemradio" aria-checked="${marcado}" ${dados}${desabilitado ? " disabled" : ""}${precisa ? ' aria-disabled="true"' : ""}><span class="ia-op-txt"><b>${esc(titulo)}</b><small>${esc(sub)}</small></span>${marcado ? CHECK : ""}</button>`;
   const grupos = iasDoBot(c.ias, i.ordem).filter((ia) => ehIaMac(ia.id)).map((ia) => {
     const id = ia.id as IaMac;
     const serve = conectada(ia, c);
     const escolhido = !auto && i.fixa === id ? escolhaEfetiva(ia, i.escolhas).modelo : null;
     const conectar = serve ? "" : `<button type="button" class="ia-grupo-link" data-act="secao-espaco" data-secao="conexao">Conectar ›</button>`;
     const cab = `<div class="ia-grupo">${avatar(id)}<span>${esc(PROVEDOR[id].nome)}</span>${serve ? "" : '<span class="ia-grupo-estado">· não conectado</span>'}${conectar}</div>`;
-    const modelos = modelosDoMenu(ia, escolhido).map((m) => item(`data-act="inteligencia-escolher" data-id="${esc(a.id)}" data-ia="${id}" data-modelo="${esc(m.id)}"`, m.nome, m.descricao, escolhido === m.id, !serve)).join("");
+    const modelos = modelosDoMenu(ia, escolhido).map((m) => {
+      const precisa = serve ? precisaDoCli(ia, m, c) : null;
+      const sub = precisa ? `Precisa do ${PROVEDOR[id].cli} ${versaoLegivel(precisa)}` : m.descricao;
+      return item(`data-act="inteligencia-escolher" data-id="${esc(a.id)}" data-ia="${id}" data-modelo="${esc(m.id)}"`, m.nome, sub, escolhido === m.id, !serve, precisa !== null);
+    }).join("");
     return cab + modelos;
   }).join("");
   const menu = `<div class="ia-menu" role="menu" aria-label="Inteligência de ${esc(a.nome)}">
@@ -271,7 +287,7 @@ export function renderInteligencia(r: RascunhoInteligencia, nomeDoBot: string, c
     const emUso = uso?.id === id ? '<span class="int-uso" title="em uso agora" aria-label="em uso agora"></span>' : "";
     const resumo = `${nomeDoModelo(ia, modelo)}${raciocinio ? ` · ${nomeDoNivel(raciocinio)}` : ""}`;
     const pilula = `<button type="button" class="int-escolha" data-act="int-pilula" data-ia="${id}" aria-expanded="${aberta}">${esc(resumo)}${SETA_BAIXO(12, "")}</button>`;
-    const painel = aberta ? painelDaIa(ia, modelo, raciocinio) : "";
+    const painel = aberta ? painelDaIa(ia, modelo, raciocinio, c) : "";
     const classe = `int-ia${!auto && !escolhida ? " apagada" : ""}`;
     return `<div class="${classe}" data-ordem-item="${id}"><div class="int-linha">${alca}${radioFixa}${logoDaIa(id, "ia-logo")}<span class="int-nome">${esc(nome)}${emUso}</span>${pilula}</div>${painel}</div>`;
   }).join("");
@@ -291,12 +307,15 @@ export function renderInteligencia(r: RascunhoInteligencia, nomeDoBot: string, c
 const ALCA = '<svg width="10" height="14" viewBox="0 0 12 16" fill="currentColor" aria-hidden="true"><circle cx="3.5" cy="3" r="1.4"/><circle cx="8.5" cy="3" r="1.4"/><circle cx="3.5" cy="8" r="1.4"/><circle cx="8.5" cy="8" r="1.4"/><circle cx="3.5" cy="13" r="1.4"/><circle cx="8.5" cy="13" r="1.4"/></svg>';
 
 /** A pílula aberta: os modelos (rádio, com a frase) e os níveis de raciocínio do modelo, com a frase do escolhido. */
-function painelDaIa(ia: IaDaPessoa, modelo: string, raciocinio: EsforcoAgente | null): string {
+function painelDaIa(ia: IaDaPessoa, modelo: string, raciocinio: EsforcoAgente | null, c: ContextoInteligencia): string {
   const id = ia.id;
   const nome = ehIaMac(id) ? PROVEDOR[id].nome : ia.nome;
   const modelos = modelosNaOrdem(ia).map((m) => {
     const on = m.id === modelo;
-    return `<button type="button" class="int-mod" role="radio" aria-checked="${on}" data-act="int-modelo" data-ia="${id}" data-modelo="${esc(m.id)}"><span class="int-radio${on ? " on" : ""}" aria-hidden="true"></span><span><b>${esc(m.nome)}${m.recomendado ? " · recomendado" : ""}</b><small>${esc(m.descricao)}</small></span></button>`;
+    // NOD-9: o modelo que pede um CLI mais novo fica visível, aria-disabled, com "Precisa do Claude Code Y".
+    const precisa = precisaDoCli(ia, m, c);
+    const sub = precisa && ehIaMac(id) ? `Precisa do ${PROVEDOR[id].cli} ${versaoLegivel(precisa)}` : m.descricao;
+    return `<button type="button" class="int-mod" role="radio" aria-checked="${on}"${precisa ? ' aria-disabled="true"' : ""} data-act="int-modelo" data-ia="${id}" data-modelo="${esc(m.id)}"><span class="int-radio${on ? " on" : ""}" aria-hidden="true"></span><span><b>${esc(m.nome)}${m.recomendado ? " · recomendado" : ""}</b><small>${esc(sub)}</small></span></button>`;
   }).join("");
   const niveis = niveisDoModelo(ia, modelo);
   const nivel = NIVEIS.find((n) => n.id === raciocinio);

@@ -90,6 +90,26 @@ casos é a seção H de [aceite-desktop.md](aceite-desktop.md).
 
 **No servidor.** Faça backup do Postgres e valide as migrações em uma cópia antes de atualizar o servidor. Se falhar, preserve logs sem segredos, suspenda a indicação da candidata e restaure o servidor pelo backup testado ou por migração corretiva; reinstalar o DMG antigo não desfaz o banco.
 
+## O Claude Code se atualiza pelo app (NOD-9)
+
+Definido em 2026-10-23 (plano do Arquiteto de 20/10, PR 2). O app confere a versão do CLI escolhido contra o piso testado
+(`PISO_CLI`) e contra a mínima do modelo que um turno pediu. Abaixo disso:
+
+- **Sozinho, na brecha.** Sem turno daquele provedor e sem ligação, o app roda o `claude update` (ambiente limpo, prazo
+  de 3 min). Uma tentativa automática por alvo por dia; o registro fica em `atualizacoes-ia.json`, na pasta de dados do
+  app. Sem brecha, o cartão diz "Vamos atualizar o Claude Code quando seus bots terminarem."; com 23 h avisa e com 24 h
+  os pedidos novos daquele provedor esperam (no máximo 10 min, depois roda com o turno aberto). A ligação nunca é
+  interrompida.
+- **No clique.** "Atualizar", no cartão da IA desatualizada, roda na hora (e não conta para o limite do dia); com turno
+  rodando, a atualização espera o turno terminar.
+- **Reserva.** Se o atualizador oficial falhar (sem permissão, versão ilegível, sem atualizador), o app instala a versão
+  do nod pelo npm embutido, como no "Instalar". O Codex vai direto à reserva (até a NOD-8).
+- **Não mexe.** Binário apontado por `NOD_CLAUDE_BIN`/`NOD_CODEX_BIN` (`configurado`): o cartão manda atualizar pelo
+  terminal.
+
+No navegador, o cartão manda abrir o app e dá o comando (`claude update`). A elevação com a senha do Mac (CLI instalado
+como root) é o PR 3; a VM do motor, o PR 4.
+
 ## Diagnóstico para suporte (NOD-138)
 
 Quando o app não conecta, não acha o Claude ou o Codex, ou cai, peça à pessoa **nod › Exportar diagnóstico…**. O app

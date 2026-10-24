@@ -3393,7 +3393,8 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   "inteligencia-escolher": (el) => {
     const a = estado.frota?.agentes.find((b) => b.id === el.dataset.id);
     const ia = el.dataset.ia;
-    if (!a) return;
+    // NOD-9: o modelo que pede um CLI mais novo fica no menu (aria-disabled, "Precisa do Claude Code Y") e não grava.
+    if (!a || el.getAttribute("aria-disabled") === "true") return;
     const pedido = el.dataset.modo === "auto" ? pedidoDoMenu(a, { modo: "auto" }) : ehIaMac(ia) && el.dataset.modelo ? pedidoDoMenu(a, { ia, modelo: el.dataset.modelo }) : null;
     if (!pedido) return;
     dispatch({ tipo: "menu-ia", agenteId: null });
@@ -3403,15 +3404,18 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   "int-modo": (el) => mudarInteligencia(undefined, () => ({ tipo: "modo", modo: el.dataset.modo === "fixa" ? "fixa" : "auto" })),
   "int-fixa": (el) => mudarInteligencia(undefined, () => (ehIaMac(el.dataset.ia) ? { tipo: "fixa", ia: el.dataset.ia } : null)),
   "int-pilula": (el) => mudarInteligencia(undefined, () => (ehIaMac(el.dataset.ia) ? { tipo: "pilula", ia: el.dataset.ia } : null)),
-  "int-modelo": (el) => mudarInteligencia(undefined, () => { const ia = iaDaTela(el.dataset.ia); return ia && el.dataset.modelo ? { tipo: "modelo", ia, modelo: el.dataset.modelo } : null; }),
+  "int-modelo": (el) => mudarInteligencia(undefined, () => { const ia = iaDaTela(el.dataset.ia); return ia && el.dataset.modelo && el.getAttribute("aria-disabled") !== "true" ? { tipo: "modelo", ia, modelo: el.dataset.modelo } : null; }),
   "int-raciocinio": (el) => mudarInteligencia(undefined, () => { const ia = iaDaTela(el.dataset.ia); const r = el.dataset.raciocinio; return ia && (r === "low" || r === "medium" || r === "high" || r === "xhigh" || r === "max") ? { tipo: "raciocinio", ia, raciocinio: r } : null; }),
   "int-ordem-pessoa": () => mudarInteligencia(undefined, () => ({ tipo: "ordem-da-pessoa" })),
   // NOD-171: "Atualizar" do CLI abaixo do piso. No app do Mac abre a página oficial (o mesmo `iaInstalar`; quem atualiza é a
   // pessoa, no Terminal); fora dele, a seção Conexão, que mostra o comando.
+  // NOD-9: no app com a ponte nova, o "Atualizar" roda o atualizador do CLI no Mac (data-agora="1" = sem esperar os bots
+  // terminarem); app antigo: a página oficial, como antes (NOD-171).
   "ia-atualizar": (el) => {
     const ia = el.dataset.ia;
     const mac = window.nodDesktop;
-    if (ehIa(ia) && mac?.iaInstalar) void mac.iaInstalar(ia).catch(() => undefined);
+    if (ehIa(ia) && mac?.ias?.atualizar) { verCartaoDaIa(el); void iasDoMac.atualizar(ia, { agora: el.dataset.agora === "1" }); }
+    else if (ehIa(ia) && mac?.iaInstalar) void mac.iaInstalar(ia).catch(() => undefined);
     else abrirEspaco("conexao");
   },
   "copiar-texto": async (el) => {

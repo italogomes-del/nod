@@ -19,9 +19,10 @@ import type { CausaSemIa } from "./inventario.ts";
  *  - sem_acesso: logada, mas a conta não respondeu ao teste (`causa`: conta_sem_acesso ou teste_falhou);
  *  - no_limite: a assinatura chegou ao limite até `ate` (o Mac ainda não sabe disso; vem com o PR do servidor);
  *  - config_invalida: o CLI recusou a configuração da pessoa (separado de falta_entrar: entrar não resolve);
- *  - lenta: a sonda estourou o prazo (Mac carregado); o app tenta de novo sozinho.
+ *  - lenta: a sonda estourou o prazo (Mac carregado); o app tenta de novo sozinho;
+ *  - atualizando (NOD-9, definido em 2026-10-23): o nod está atualizando o CLI; instalado, nunca "Instalar".
  */
-export const ESTADOS_IA = ["procurando", "nao_instalada", "instalando", "desatualizada", "sem_node", "falta_entrar", "entrando", "testando", "pronta", "sem_acesso", "no_limite", "config_invalida", "lenta"] as const;
+export const ESTADOS_IA = ["procurando", "nao_instalada", "instalando", "desatualizada", "sem_node", "falta_entrar", "entrando", "testando", "pronta", "sem_acesso", "no_limite", "config_invalida", "lenta", "atualizando"] as const;
 export type EstadoDaIa = (typeof ESTADOS_IA)[number];
 
 /** De onde veio o binário que o nod usa (o "detalhe" do suporte): configurado (NOD_*_BIN) ou a camada do PATH aumentado. */

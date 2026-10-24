@@ -98,3 +98,9 @@ ou drenar só à noite.
 
 O runtime (Lima) e o disco da VM do computador no Mac (ADR-123) saem no mesmo release do app, com o sha256 fixo no app.
 Atualizar o app troca o disco base e mantém o disco de dados. O motor não atualiza nada disso.
+
+## Emenda de 2026-10-23 — a IA do Mac também (NOD-9)
+
+A regra da brecha desta ADR vale para o CLI de IA no Mac: atualiza sem turno e sem ligação; sem brecha, espera, avisa
+em 23 h e segura os pedidos novos em 24 h (teto de 10 min segurando). Uma tentativa automática por alvo por dia.
+A VM do motor ganha o mesmo no PR 4 da NOD-9 (`nod-motor atualizar-ia`).

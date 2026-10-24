@@ -14,6 +14,14 @@ export function faltaNode(texto: string): boolean {
 }
 
 /**
+ * O sistema não deixou gravar onde o CLI está instalado (NOD-9): o npm sem acesso à pasta global, o `claude update` de
+ * uma instalação do sistema. Vale para o instalador do nod e para a atualização; é o que leva ao passo seguinte.
+ */
+export function falhaPorPermissao(texto: string): boolean {
+  return /\bEACCES\b|\bEPERM\b|permission denied|(?:isn't|not) writable/i.test(texto);
+}
+
+/**
  * O CLI recusou a configuração da pessoa (não é falta de login). A recusa de uma chave passada pelo próprio nod
  * ("… in -c/--config override", a negociação de codex-comum.ts) não conta: essa é do nod, não da pessoa.
  */

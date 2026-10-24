@@ -80,6 +80,11 @@ export type PonteIas = {
   colarCodigo(ia: IaDesktop, codigo: string): Promise<ResultadoColarCodigo>;
   cancelar(ia: IaDesktop): Promise<EstadoIa>;
   verificar(ia: IaDesktop): Promise<EstadoIa>;
+  /**
+   * NOD-9: atualiza o CLI (o clique; `agora` passa à frente dos bots que rodam). Resolve quando termina; a fase vem em
+   * `atualizacao`. Opcional: o app instalado antes desta versão não tem, e a web mostra o comando do terminal.
+   */
+  atualizar?(ia: IaDesktop, opcoes?: { agora?: boolean }): Promise<EstadoIa>;
   /** Um ouvinte só (registrar de novo troca o anterior). */
   aoMudar(fn: (estado: EstadoIa) => void): void;
 };
@@ -170,6 +175,7 @@ export const CANAIS_DESKTOP = {
   iaColarCodigo: "nod:ia-colar-codigo",
   iaCancelar: "nod:ia-cancelar",
   iaVerificar: "nod:ia-verificar",
+  iaAtualizar: "nod:ia-atualizar", // NOD-9 (2026-10-23): atualizar o CLI pelo app.
   iaMudou: "nod:ia-mudou",
   // definido em 2026-10-12 (ADR-101): as várias contas; `contasMudaram` vai do processo principal à página.
   contasListar: "nod:contas-listar",

@@ -21,7 +21,8 @@ import { iniciarEsperas, type Esperas } from "../src/adapters/executor/esperas.t
 import type { PlanoTurno } from "../src/contracts/plano-turno.ts";
 import { configDosDrivers, criarRegistryDetalhado } from "../src/adapters/executor/registry.ts";
 import { lerPathDoShell, resolverBinario, resolverBinarioDetalhado } from "../src/adapters/executor/caminho.ts";
-import { extrairVersao } from "../src/adapters/executor/flag-floors.ts";
+import { compararVersoes, extrairVersao, PISO_CLI } from "../src/adapters/executor/flag-floors.ts";
+import { atualizarCli } from "../src/adapters/executor/atualizar-cli.ts";
 import { prazoSondaDoEnv } from "../src/adapters/executor/sonda.ts";
 import type { ConfigDriver, Driver, RegistroDriver } from "../src/adapters/executor/spi.ts";
 import { criarPonteHttp, FalhaPonte, urlServidor } from "../src/adapters/executor/ponte-http.ts";
@@ -40,9 +41,10 @@ import { iniciarContasNoServidor } from "./contas-no-servidor.ts";
 import { iniciarInstalacoesNoServidor } from "./instalacoes-no-servidor.ts";
 import { lerIdentidadeNoCli, type ClisDoMotor } from "../motor/contas.ts";
 import { estadoDaIa } from "../src/domain/estado-ia.ts";
-import { ambienteDoLogin, comandoDeEstadoDoLogin, comandoDeLogin, comandoDeLoginNoApp, comandoDeLogout, contaPeloStatusClaude, lerIaDesktop, logadoPeloStatus, textoDaImpressao, textoDaImpressaoComConta, URL_INSTALAR_IA } from "./ia-mac.ts";
+import { ambienteDoLogin, comandoDeAtualizar, comandoDeEstadoDoLogin, comandoDeLogin, comandoDeLoginNoApp, comandoDeLogout, contaPeloStatusClaude, lerIaDesktop, logadoPeloStatus, textoDaImpressao, textoDaImpressaoComConta, URL_INSTALAR_IA } from "./ia-mac.ts";
 import { criarLoginDasIas, type ProcessoDeLogin, type StatusDoLogin } from "./login-ia.ts";
-import { ambienteDoNpm, criarInstaladorDeIas, scriptNodeDoNod, type ProcessoNpm } from "./instalar-ia.ts";
+import { ambienteDoNpm, criarInstaladorDeIas, PACOTE_DA_IA, scriptNodeDoNod, type ProcessoNpm } from "./instalar-ia.ts";
+import { criarAtualizadorDeIas, fimDaInstalacao, inventarioComAtualizacao, passosPelaOrigem, type PassoAtualizar } from "./atualizador-ias.ts";
 import { ambienteDoBinarioDoNod, ativarPrefixo, candidatosDoNod, descartarPrefixo, escolherBinario, nomeDaVersao, pastasFerramentas, prefixoAtivo, prepararPrefixoNovo, type Candidato } from "./ferramentas.ts";
 import { criarVigiaDasIas, type Veredito, type VigiaDasIas } from "./vigia-ias.ts";
 import { lerAviso, lerContador, lerPreferencias, lerTemaDesktop, opcoesDoAviso, origemDe, remetenteWebValido } from "./avisos-mac.ts";
@@ -367,6 +369,8 @@ let emLigacao = false;
 let bloqueioDeSuspensao: number | null = null;
 function definirEmLigacao(ativa: boolean) {
   emLigacao = ativa;
+  // NOD-9: a ligação acabou — a brecha para atualizar o CLI pode ter chegado.
+  if (!ativa) void atualizador.verificar().catch(() => undefined);
   const w = janelaWeb();
   if (ativa && bloqueioDeSuspensao === null) bloqueioDeSuspensao = powerSaveBlocker.start("prevent-app-suspension");
   if (!ativa && bloqueioDeSuspensao !== null) { powerSaveBlocker.stop(bloqueioDeSuspensao); bloqueioDeSuspensao = null; }
@@ -469,7 +473,8 @@ async function conectar(c: Config) {
   // ADR-052: o hook do nod vai empacotado ao lado do proxy; sem ele o kit do terminal não liga.
   const lig = { urlNod: c.url, proxyPath: app.isPackaged ? join(process.resourcesPath, "app.asar.unpacked", "dist", "desktop", "proxy.mjs") : join(dir, "proxy.mjs"), hookPath: app.isPackaged ? join(process.resourcesPath, "app.asar.unpacked", "dist", "desktop", "hook-nativas.mjs") : join(dir, "hook-nativas.mjs"), nodePath: process.execPath, electronComoNode: true, sondaSemTurno: true, prazoSondaMs: prazoSondaDoEnv(process.env), filaDoForno: process.env.NOD_FILA_DO_FORNO !== "0" };
   const envExecutor = { ...process.env, NOD_HOME: join(app.getPath("userData"), "executor") };
-  const drivers: Driver[] = [criarClaudeCliDriver(lig), criarCodexCliDriver(lig)];
+  // NOD-9: o turno do Claude espera o portão da atualização e pede a versão que o modelo exige.
+  const drivers: Driver[] = [criarClaudeCliDriver({ ...lig, aguardarAtualizacao: () => atualizador.aguardar("claude-cli"), aoPrecisarDeVersao: (m) => atualizador.pedirVersao("claude-cli", m) }), criarCodexCliDriver(lig)];
   const cfg = await montarCfg(envExecutor);
   cfgExecutor = cfg;
   const criado = await criarRegistryDetalhado(envExecutor, drivers, { cfg });
@@ -530,7 +535,7 @@ async function conectar(c: Config) {
     const tarefasVivas = criarAcompanhanteDeTarefas((turnoId, tarefas) => cliente?.tarefas(turnoId, tarefas));
     // NOD-350: a ponte já junta os trechos até a renovação (1 s), então aqui toda mudança vai para ela.
     const subagentesVivos = criarAcompanhanteDeSubagentes((turnoId, lista, ocioso) => cliente?.subagentes(turnoId, lista, ocioso), { intervaloMs: 0 });
-    laco = iniciarPoolDeLacos((ponte) => iniciarLaco({ ponte, registry: reg, pessoaId: dados.escopo.pessoaId, machineId: dados.machineId, relogio: () => Date.now(), renovacaoMs: 1_000, esperaVaziaMs: 1000, memoria: memoriaDoMac, registroDaConta, urlNod: lig.urlNod, aoDelta: (p, t) => cliente?.delta(p.turnoId, t), aoEvento: (p, ev) => { if (ev.tipo === "tool_use") cliente?.ferramenta(p.turnoId, ev.nome); tarefasVivas.evento(p.turnoId, ev); subagentesVivos.evento(p.turnoId, ev); }, aoIniciarTurno: (p) => { planosNoMac.set(p.turnoId, p); }, aoTerminarTurno: (p) => { tarefasVivas.esquecer(p.turnoId); subagentesVivos.parar(p.turnoId); subagentesVivos.esquecer(p.turnoId); planosNoMac.delete(p.turnoId); },
+    laco = iniciarPoolDeLacos((ponte) => iniciarLaco({ ponte, registry: reg, pessoaId: dados.escopo.pessoaId, machineId: dados.machineId, relogio: () => Date.now(), renovacaoMs: 1_000, esperaVaziaMs: 1000, memoria: memoriaDoMac, registroDaConta, urlNod: lig.urlNod, aoDelta: (p, t) => cliente?.delta(p.turnoId, t), aoEvento: (p, ev) => { if (ev.tipo === "tool_use") cliente?.ferramenta(p.turnoId, ev.nome); tarefasVivas.evento(p.turnoId, ev); subagentesVivos.evento(p.turnoId, ev); }, aoIniciarTurno: (p) => { planosNoMac.set(p.turnoId, p); }, aoTerminarTurno: (p) => { tarefasVivas.esquecer(p.turnoId); subagentesVivos.parar(p.turnoId); subagentesVivos.esquecer(p.turnoId); planosNoMac.delete(p.turnoId); void atualizador.verificar().catch(() => undefined); },
       // NOD-73: o vigia do turno só avisa — o aviso vai como trecho vivo, só nome e números (os argumentos ficam no Mac).
       aoVigia: (p, aviso) => cliente?.vigia(p.turnoId, aviso),
       // definido em 2026-10-05: o turno disse que a conta desta IA não serve — o veredito fica guardado e o Mac reanuncia.
@@ -567,9 +572,9 @@ async function conectar(c: Config) {
       return refeito;
     },
     impressao: (ia) => impressaoDoLogin(ia, cfgExecutor ?? cfg),
-    aoInventarios: (inventarios) => { if (cliente !== ponteHttp) return; inventariosDaVigia = inventarios; emitirEstados(); conferirContas(inventarios); void sincronizarContas(); },
+    aoInventarios: (inventarios) => { if (cliente !== ponteHttp) return; inventariosDaVigia = inventarios; emitirEstados(); conferirContas(inventarios); void sincronizarContas(); void atualizador.verificar().catch(() => undefined); },
     aoTestando: (ias) => { if (cliente !== ponteHttp) return; testandoAgora = ias; emitirEstados(); },
-    anunciar: async (inventarios, principal, semLacoDeVoz, capacidades) => { if (cliente !== ponteHttp) return; inventariosAtuais = inventarios; const contas = contasLocais?.anuncio() ?? []; const comContas = inventariosComContas(inventarios, contas, contasLocais?.impressoesDaPadrao()); await ponteHttp.ponte.anunciarInventario({ ...anuncio, inventario: estadoDaMaquina(principal, comContas), harnesses: comContas, semLacoDeVoz, capacidades, contas }); if (!lacoNoAr && contas.some((c) => c.estado === "pronta")) { lacoNoAr = true; subirLaco(registryDoLaco); } },
+    anunciar: async (inventarios, principal, semLacoDeVoz, capacidades) => { if (cliente !== ponteHttp) return; inventariosAtuais = inventarios; const contas = contasLocais?.anuncio() ?? []; const comContas = inventariosComContas(comAtualizacao(inventarios), contas, contasLocais?.impressoesDaPadrao()); await ponteHttp.ponte.anunciarInventario({ ...anuncio, inventario: estadoDaMaquina(principal, comContas), harnesses: comContas, semLacoDeVoz, capacidades, contas }); if (!lacoNoAr && contas.some((c) => c.estado === "pronta")) { lacoNoAr = true; subirLaco(registryDoLaco); } },
     aoRegistry: (novo, algumaPronta) => {
       if (cliente !== ponteHttp) return;
       Object.assign(registryDoLaco, novo);
@@ -800,7 +805,7 @@ async function escolherBinarios(cfg: ConfigDriver): Promise<ConfigDriver> {
 }
 function estadoAtual(ia: IaDesktop): EstadoIa {
   const b = escolhaDasIas.get(ia)?.escolhido;
-  return estadoDaIa({ ia, inventario: inventariosDaVigia?.[ia] ?? null, instalacao: instalador.estado(ia), login: loginIas.estado(ia), testando: testandoAgora.includes(ia), binario: b ? { caminho: comTil(b.caminho), origem: b.origem } : null, conta: contaPendente.has(ia) ? null : contasDasIas.get(ia) ?? null, agora: Date.now() });
+  return estadoDaIa({ ia, inventario: inventariosDaVigia?.[ia] ?? null, instalacao: instalador.estado(ia), login: loginIas.estado(ia), testando: testandoAgora.includes(ia), binario: b ? { caminho: comTil(b.caminho), origem: b.origem } : null, conta: contaPendente.has(ia) ? null : contasDasIas.get(ia) ?? null, atualizacao: atualizador.estado(ia), agora: Date.now() });
 }
 const ultimosEstados = new Map<IaDesktop, string>();
 /** Manda à janela web o estado de cada IA que mudou (o instante da montagem não conta como mudança). */
@@ -1103,6 +1108,73 @@ const instalador = criarInstaladorDeIas({
   agora: Date.now,
   registrar: (evento, campos) => log("info", evento, campos),
 });
+// NOD-9 (plano do Arquiteto de 20/10, passos 7′ e 8′): a atualização dos CLIs no Mac. O binário é o escolhido
+// (escolhaDasIas); o do nod só se atualiza pela reserva (o instalador, ADR-093); o de fora tenta o atualizador oficial
+// primeiro e a reserva depois. Enquanto atualiza, a IA é anunciada como `ausente` + `atualizando`.
+const arquivoAtualizacoes = () => join(app.getPath("userData"), "atualizacoes-ia.json");
+async function passosDaAtualizacao(ia: IaDesktop): Promise<PassoAtualizar[]> {
+  const escolhido = escolhaDasIas.get(ia)?.escolhido ?? null;
+  const cfg = await cfgAtual();
+  const envVersao = ambienteDoLogin({ ...cfg.env, ...(cfg.envPorDriver?.[ia] ?? {}) });
+  const reserva: PassoAtualizar = {
+    tipo: "reserva",
+    rodar: async (alvo) => {
+      const antes = escolhido ? await versaoDe(escolhido.caminho, envVersao) : null;
+      return fimDaInstalacao(await instalador.instalar(ia), antes, alvo, compararVersoes);
+    },
+  };
+  return passosPelaOrigem({
+    origem: escolhido?.origem ?? null,
+    args: comandoDeAtualizar(ia),
+    reserva,
+    oficial: (args) => ({
+      tipo: "oficial",
+      rodar: (alvo) => atualizarCli({ bin: escolhido?.caminho ?? "", args, env: { ...process.env, ...cfg.env }, alvo, lerVersao: (bin) => versaoDe(bin, envVersao) }),
+    }),
+  });
+}
+const passosPreparados = new Map<IaDesktop, PassoAtualizar[]>();
+const atualizador = criarAtualizadorDeIas({
+  binario: async (ia) => {
+    const escolhido = escolhaDasIas.get(ia)?.escolhido ?? null;
+    if (!escolhido) return { versao: null, origem: null };
+    const cfg = await cfgAtual();
+    // Os passos são montados aqui (a função `passos` é síncrona): a mesma leitura do binário que decidiu.
+    passosPreparados.set(ia, await passosDaAtualizacao(ia));
+    return { versao: await versaoDe(escolhido.caminho, ambienteDoLogin({ ...cfg.env, ...(cfg.envPorDriver?.[ia] ?? {}) })), origem: escolhido.origem };
+  },
+  piso: (ia) => PISO_CLI[ia],
+  comparar: compararVersoes,
+  turnos: (ia) => [...planosNoMac.values()].filter((p) => lerIaDesktop(driverDoPlano(p)) === ia).length,
+  emLigacao: () => emLigacao,
+  passos: (ia) => passosPreparados.get(ia) ?? [],
+  depois: () => { void vigiaIas?.sondarAgora().catch(() => undefined); },
+  aoMudar: () => {
+    emitirEstados();
+    void vigiaIas?.reanunciar().catch(() => undefined);
+  },
+  ler: async () => JSON.parse(await readFile(arquivoAtualizacoes(), "utf8")) as unknown,
+  gravar: async (disco) => {
+    await mkdir(app.getPath("userData"), { recursive: true });
+    const tmp = `${arquivoAtualizacoes()}.tmp`;
+    await writeFile(tmp, `${JSON.stringify(disco)}\n`, { mode: 0o600 });
+    await rename(tmp, arquivoAtualizacoes());
+  },
+  agora: Date.now,
+  hoje: (t) => { const d = new Date(t); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; },
+  agendar: agendarTimer,
+  // Um erro (o disco ilegível, um passo que lançou) sai como aviso; o resto, como info.
+  registrar: (evento, campos) => log(campos.erro !== undefined || campos.venceu === true ? "aviso" : "info", evento, campos),
+});
+/** O inventário de cada IA com a fase da atualização (enquanto atualiza, `ausente` + `atualizando`). */
+function comAtualizacao(inventarios: Partial<Record<IdDriver, Inventario>>): Partial<Record<IdDriver, Inventario>> {
+  const saida: Partial<Record<IdDriver, Inventario>> = { ...inventarios };
+  for (const ia of IAS_DESKTOP) {
+    const inv = inventarios[ia];
+    if (inv) saida[ia] = inventarioComAtualizacao(inv, atualizador.estado(ia), PACOTE_DA_IA[ia].nome);
+  }
+  return saida;
+}
 function validarRemetente(event: IpcMainInvokeEvent) {
   if (event.senderFrame?.url !== setupUrl || event.sender !== janela?.webContents) throw new Error("origem_invalida");
 }
@@ -1136,7 +1208,7 @@ else {
     void Promise.all([parar(), gravacaoJanela]).finally(() => app.quit());
   });
   // ADR-089: o `exit` do Node também leva os grupos, mas o will-quit é o fim garantido do app (Cmd+Q, SIGTERM, SIGHUP).
-  app.on("will-quit", () => encerrarGruposVivos());
+  app.on("will-quit", () => { atualizador.parar(); encerrarGruposVivos(); });
   void app.whenReady().then(async () => {
     // ADR-101: o contas.json antes de qualquer config dos drivers (a conta em uso vai no ambiente deles).
     await contasDoApp.iniciar().catch((erro: unknown) => log("erro", "contas_ler_falhou", { erro: erro instanceof Error ? erro.name : "desconhecido" }));
@@ -1149,6 +1221,9 @@ else {
     // é reescrito com o caminho atual do app, antes da primeira sonda.
     void lerPathDoShell(process.env.SHELL, 0);
     await garantirNodeDoNod().catch((erro: unknown) => log("aviso", "node_do_nod_falhou", { erro: erro instanceof Error ? erro.name : "desconhecido" }));
+    // NOD-9: o registro do dia das atualizações e o timer de 1 min (a brecha, o aviso e o segurar).
+    await atualizador.carregar().catch(() => undefined);
+    atualizador.iniciar();
     await carregarPreferencias();
     await carregarEstadoJanela();
     aplicarTemaNativo();
@@ -1224,6 +1299,13 @@ else {
     ipcMain.handle(CANAIS_DESKTOP.iaInstalarNoApp, async (e, ia: unknown): Promise<EstadoIa> => {
       const lida = iaDoPedido(e, ia);
       await instalador.instalar(lida);
+      return estadoAtual(lida);
+    });
+    // NOD-9: o "Atualizar" da tela. A página só escolhe a IA e se é agora; o binário e o comando são decididos aqui.
+    ipcMain.handle(CANAIS_DESKTOP.iaAtualizar, async (e, ia: unknown, opcoes: unknown): Promise<EstadoIa> => {
+      const lida = iaDoPedido(e, ia);
+      const agora = typeof opcoes === "object" && opcoes !== null && "agora" in opcoes && opcoes.agora === true;
+      await atualizador.atualizar(lida, { agora });
       return estadoAtual(lida);
     });
     ipcMain.handle(CANAIS_DESKTOP.iaEntrarNoApp, async (e, ia: unknown): Promise<EstadoIa> => {

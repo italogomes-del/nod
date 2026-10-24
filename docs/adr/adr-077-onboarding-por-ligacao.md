@@ -126,3 +126,9 @@ quantas…"; "Então: você é…" virou "Então, você é…").
 
 **Gatilho de reversão.** Se a guia passar a repetir perguntas, pular a anotação de campos ou falar o "ok" em ligações
 reais, volta a ordem antiga (anotar e depois perguntar) e o ganho fica só com a voz em streaming.
+
+## Emenda 2026-10-23 — "atualizando" não é falta de IA (NOD-9)
+
+Enquanto o app atualiza o CLI, o inventário sai `ausente` com a causa `atualizando`. O onboarding mostra "procurando",
+e o aviso da ligação diz "Atualizando o Claude Code deste Mac. A ligação percebe quando ficar pronto." — nunca
+"Instalar" nem "não está neste Mac".

@@ -37,3 +37,10 @@ cwd do processo, quando o turno não tem pasta do bot nem projeto, passou a ser 
 por bot, como o da ligação (`ligacao-<agenteId>`). O CLI grava o cwd em cada turno do transcrito e o reenvia no
 `--resume`: um cwd novo por turno reescrevia o histórico e derrubava o cache da conversa longa. Medição e decisão na
 emenda da NOD-188 da ADR-080.
+
+## Emenda de 2026-10-23 — o nod atualiza o CLI (NOD-9)
+
+Abaixo do piso, o CLI deixa de ser só recusa: o app do Mac roda o atualizador do próprio fornecedor (`claude update`,
+`src/adapters/executor/atualizar-cli.ts`) na brecha ou no clique, com a reserva do instalador do nod (ADR-093). O turno
+que chega durante a atualização espera (`aguardarAtualizacao`) em vez de ser negado; o que pede um modelo acima da
+versão instalada dispara a atualização (`aoPrecisarDeVersao`). Binário configurado (`NOD_*_BIN`) continua intocado.

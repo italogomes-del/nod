@@ -58,4 +58,19 @@ describe("o que a saída do CLI diz sobre o próprio CLI (2026-10-09)", () => {
     expect(configInvalida("Error loading config.toml: unknown configuration field `x` in -c/--config override")).toBe(false);
     expect(configInvalida("Not logged in")).toBe(false);
   });
+
+  it("NOD-9: a reserva da atualização roda pelo instalador — a tela diz Atualizando…, e a falha dela é da atualização, não da instalação", () => {
+    const inv: Inventario = { estado: "pronto", versao: "2.1.200", em: T };
+    const reservaRodando = { fase: "atualizando" as const, alvo: "2.1.300", antes: "2.1.200", caminho: "reserva" as const, em: T };
+    const e = de(inv, { instalacao: INSTALANDO, atualizacao: reservaRodando });
+    expect(e).toMatchObject({ estado: "atualizando", versao: "2.1.200" });
+    expect(e.instalacao).toBeUndefined();
+    const falhaDaReserva: InstalacaoDaIa = { fase: "falhou", linha: null, tentativa: 3, mensagem: "Não deu para instalar.", causa: "sem_internet" };
+    const fim = de(inv, { instalacao: falhaDaReserva, atualizacao: { fase: "falhou", alvo: "2.1.300", antes: "2.1.200", motivo: "sem_internet", caminho: "reserva", em: T } });
+    expect(fim).toMatchObject({ estado: "pronta", atualizacao: { fase: "falhou", motivo: "sem_internet" } });
+    expect(fim.instalacao).toBeUndefined();
+    // Uma instalação de verdade (a pessoa clicou Instalar) depois de uma atualização pelo oficial continua indo junto.
+    expect(de(inv, { instalacao: falhaDaReserva, atualizacao: { fase: "falhou", alvo: "2.1.300", motivo: "sem_permissao", caminho: "oficial", em: T } }).instalacao).toEqual(falhaDaReserva);
+    expect(de(inv, { instalacao: INSTALANDO }).estado).toBe("instalando");
+  });
 });

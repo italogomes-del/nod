@@ -1,5 +1,6 @@
 import type { ContasNaTela, IaDesktop } from "../../src/contracts/desktop.ts";
-import type { ContaDaIa, EstadoDaIa, EstadoIa } from "../../src/contracts/estado-ia.ts";
+import type { AtualizacaoDaIa, ContaDaIa, EstadoDaIa, EstadoIa } from "../../src/contracts/estado-ia.ts";
+import { comandoDoTerminal, fraseDaAtualizacao } from "../lib/atualizacao-ia.ts";
 import type { IaDaPessoa } from "../../src/contracts/inteligencia.ts";
 import type { CausaSemIa } from "../../src/contracts/inventario.ts";
 import { esc, hora } from "../lib/render.ts";
@@ -95,6 +96,8 @@ export type EstadoNaTela = {
   /** Quando foi verificado (o `em` do Mac ou do inventário). */
   em?: number;
   mac?: EstadoIa;
+  /** NOD-9: a atualização do CLI (a em curso ou a última), do Mac ou do inventário da máquina. */
+  atualizacao?: AtualizacaoDaIa;
 };
 
 /**
@@ -104,12 +107,13 @@ export type EstadoNaTela = {
 export function estadoDoServidor(ia: IaDaPessoa | undefined): EstadoNaTela {
   if (!ia) return { estado: "procurando" };
   const inv = ia.inventario;
-  const em = { em: inv.em };
+  const em = { em: inv.em, ...(inv.atualizacao ? { atualizacao: inv.atualizacao } : {}) };
   if (inv.estado === "pronto") return { estado: "pronta", versao: inv.versao, ...em };
   const versao = inv.versao ? { versao: inv.versao } : {};
   if (inv.causa === "sonda_lenta") return { estado: "lenta", ...versao, ...em };
   if (inv.estado === "ausente") {
     if (inv.causa === "cli_antigo") return { estado: "desatualizada", ...versao, ...(inv.minima ? { minima: inv.minima } : {}), ...em };
+    if (inv.causa === "atualizando") return { estado: "atualizando", ...versao, ...em };
     if (inv.causa === "sem_node") return { estado: "sem_node", ...em };
     if (inv.causa === "config_invalida") return { estado: "config_invalida", ...em };
     return { estado: "nao_instalada", ...em };
@@ -127,15 +131,16 @@ export function estadoNaTela(ia: IaMac, servidor: IaDaPessoa | undefined, ui: Ui
     const e = estadoDoServidor(servidor);
     return e.estado === "pronta" && limite ? { ...e, estado: "no_limite", ate: limite.renovaEm } : e;
   }
-  const base: EstadoNaTela = { estado: mac.estado, ...(mac.versao ? { versao: mac.versao } : {}), ...(mac.minima ? { minima: mac.minima } : {}), ...(mac.causa ? { causa: mac.causa } : {}), ...(mac.ate ? { ate: mac.ate } : {}), em: mac.em, mac };
+  const base: EstadoNaTela = { estado: mac.estado, ...(mac.versao ? { versao: mac.versao } : {}), ...(mac.minima ? { minima: mac.minima } : {}), ...(mac.causa ? { causa: mac.causa } : {}), ...(mac.ate ? { ate: mac.ate } : {}), em: mac.em, mac, ...(mac.atualizacao ? { atualizacao: mac.atualizacao } : {}) };
   if (mac.estado === "pronta" && limite) return { ...base, estado: "no_limite", ate: limite.renovaEm };
   return base;
 }
 
 // ---- a vista do cartão --------------------------------------------------------------------------------------------------
 
-export type AcaoIa = "ia-instalar" | "ia-entrar" | "ia-trocar" | "ia-cancelar" | "ia-testar" | "ia-verificar" | "ia-abrir-link" | "ia-colar-codigo" | "ia-copiar-codigo" | "ia-ajuda" | "ia-detalhe" | "secao-espaco";
-export type BotaoIa = { act: AcaoIa; rotulo: string; destaque: boolean };
+export type AcaoIa = "ia-instalar" | "ia-atualizar" | "ia-entrar" | "ia-trocar" | "ia-cancelar" | "ia-testar" | "ia-verificar" | "ia-abrir-link" | "ia-colar-codigo" | "ia-copiar-codigo" | "ia-ajuda" | "ia-detalhe" | "secao-espaco";
+/** `agora` (NOD-9): o "Atualizar agora" do aviso e da espera segurada — roda já, sem esperar a brecha dos turnos. */
+export type BotaoIa = { act: AcaoIa; rotulo: string; destaque: boolean; agora?: boolean };
 
 export type IdPasso = "instalar" | "entrar" | "testar";
 export type PassoIa = {
@@ -183,6 +188,8 @@ export type VistaIa = {
   conta: string | null;
   /** "Trocar conta": um link no onboarding, um botão de contorno em Provedores de IA. */
   trocar: "link" | "botao" | null;
+  /** NOD-9: o comando de atualizar, recolhido em "Prefere o terminal?"; só depois de uma falha (ADR-102, 2A). */
+  terminal?: string | null;
 };
 
 export type ContextoCartao = {
@@ -322,6 +329,23 @@ export function passosDaIa(ia: IaMac, e: EstadoNaTela, c: ContextoCartao): Passo
 }
 
 /** O estado do cartão: a frase, o tom, o botão e o fluxo. */
+/**
+ * NOD-9: fora do app, o caminho é o app do Mac — só isso. O comando do terminal aparece no app, recolhido em "Prefere o
+ * terminal?", e só depois de uma falha (ADR-102, 2A); no navegador, o rodapé da NOD-171 já dá o comando com Copiar.
+ */
+const NOTA_ATUALIZAR_FORA_DO_APP = "Para atualizar, abra o app do nod no seu Mac.";
+
+/** Quanto tempo o "atualizado para a X." fica no cartão pronto depois do sucesso. */
+export const AVISO_SUCESSO_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * "Prefere o terminal?" no app: o `claude update` só faz sentido para um binário de fora. O que o próprio nod instalou
+ * (origem `nod`) se atualiza pela reserva do instalador; o comando mexeria em outro `claude` do PATH.
+ */
+function terminalDaAtualizacao(ia: IaMac, e: EstadoNaTela): string | null {
+  return e.mac?.detalhe?.origem === "nod" ? null : comandoDoTerminal("mac", ia);
+}
+
 export function vistaDaIa(ia: IaMac, c: ContextoCartao): VistaIa {
   const { nome, cli } = PROVEDOR[ia];
   const porId = new Map((c.servidor ?? []).map((s) => [s.id, s]));
@@ -361,8 +385,23 @@ export function vistaDaIa(ia: IaMac, c: ContextoCartao): VistaIa {
       return vista(`O ${cli} demorou para responder · tentando de novo`, "mudo", { girando: true });
     case "nao_instalada":
       return vista(`Não está ${onde}`, "mudo", noApp ? { botao: b("ia-instalar", "Instalar e entrar") } : { nota: c.ui.nota[ia] ?? `Para instalar, abra o app do nod no seu Mac.` });
-    case "desatualizada":
-      return vista(e.versao && e.minima ? `${cli} ${e.versao} · o nod precisa da ${legivel(e.minima)} ou mais nova` : `${cli} desatualizado`, "aviso", noApp ? { botao: b("ia-instalar", "Atualizar") } : { nota: c.ui.nota[ia] ?? "Para atualizar, abra o app do nod no seu Mac." });
+    case "desatualizada": {
+      // NOD-9: o "Atualizar" roda o atualizador do próprio CLI no Mac (com a reserva do instalador do nod); a frase da
+      // última tentativa (ou da espera) vai no explica.
+      const frase = fraseDaAtualizacao(e.atualizacao, cli);
+      const explica = frase ? { explica: frase } : {};
+      const texto = e.versao && e.minima ? `${cli} ${e.versao} · o nod precisa da ${legivel(e.minima)} ou mais nova` : `${cli} desatualizado`;
+      // Depois de uma falha (ou da recusa da senha), o comando fica recolhido em "Prefere o terminal?"; antes, nunca.
+      const a = e.atualizacao;
+      const falhou = a?.fase === "falhou" || a?.fase === "insuficiente";
+      // Esperando a brecha dos turnos: já está na fila, sem botão. No aviso e com os pedidos segurados: "Atualizar
+      // agora" (roda já, sem esperar os turnos abertos). Depois de "subiu pouco" ou da recusa: "Tentar de novo".
+      const rotulo = a?.fase === "insuficiente" || (a?.fase === "falhou" && a.motivo === "recusou") ? "Tentar de novo" : "Atualizar";
+      const botao = a?.fase === "esperando" ? null : a?.fase === "aviso" || a?.fase === "segurando" ? { ...b("ia-atualizar", "Atualizar agora"), agora: true } : b("ia-atualizar", rotulo);
+      return vista(texto, "aviso", noApp ? { botao, ...explica, terminal: falhou ? terminalDaAtualizacao(ia, e) : null } : { nota: c.ui.nota[ia] ?? NOTA_ATUALIZAR_FORA_DO_APP, ...explica });
+    }
+    case "atualizando":
+      return vista(fraseDaAtualizacao(e.atualizacao, cli) ?? `Atualizando o ${cli}…`, "mudo", { girando: e.atualizacao?.fase !== "pedindo_aprovacao", podeVerificar: false });
     case "sem_node":
       return vista(`O ${cli} ${onde} precisa do Node.js`, "aviso", noApp ? { botao: b("ia-instalar", "Instalar") } : { nota: c.ui.nota[ia] ?? "Para instalar a versão do nod, abra o app do nod no seu Mac." });
     case "config_invalida":
@@ -393,7 +432,14 @@ export function vistaDaIa(ia: IaMac, c: ContextoCartao): VistaIa {
       const respondeu = teste !== null && typeof teste === "object" && "resposta" in teste;
       // No onboarding, o Continuar só libera com o teste: sem veredito ainda, a IA está achada, não "conectada".
       if (c.onde === "onboarding" && !respondeu) return vista(`Encontrado ${onde} · falta testar`, "mudo", noApp ? { botao: b("ia-testar", "Testar", false), ...trocar } : trocar);
-      return vista(textoPronta(ia, c, estados), "ok", trocar);
+      // NOD-9: pronta, mas um modelo pediu CLI mais novo — a espera (ou o que deu errado) vai no explica; o sucesso
+      // ("atualizado para a X.") fica um dia. Depois de "subiu pouco" ou de uma falha, "Tentar de novo" e o terminal.
+      const a = e.atualizacao;
+      const aviso = a && (a.fase !== "sucesso" || c.agora - a.em < AVISO_SUCESSO_MS) ? fraseDaAtualizacao(a, cli) : null;
+      const deNovo = noApp && a && (a.fase === "insuficiente" || (a.fase === "falhou" && a.motivo !== "configurado"))
+        ? { botao: b("ia-atualizar", "Tentar de novo", false), terminal: terminalDaAtualizacao(ia, e) }
+        : {};
+      return vista(textoPronta(ia, c, estados), "ok", { ...trocar, ...(aviso ? { explica: aviso } : {}), ...deNovo });
     }
   }
 }
@@ -534,7 +580,7 @@ export function renderCartaoIa(v: VistaIa, ui: UiIas, opcoes: { arrastar?: { pos
     ? `<button type="button" class="prov-alca" data-alca-ordem aria-label="Mover o ${esc(v.nome)} na ordem (setas para cima e para baixo)">${ICONE_IA.alca}</button><span class="prov-pos" aria-hidden="true">${opcoes.arrastar.pos}</span>`
     : "";
   const gira = v.girando ? GIRA : "";
-  const botao = v.botao ? `<button type="button" class="ob-pilula${v.botao.destaque ? "" : " contorno"}" data-act="${v.botao.act}" data-ia="${v.ia}">${esc(v.botao.rotulo)}</button>` : "";
+  const botao = v.botao ? `<button type="button" class="ob-pilula${v.botao.destaque ? "" : " contorno"}" data-act="${v.botao.act}" data-ia="${v.ia}"${v.botao.agora ? ' data-agora="1"' : ""}>${esc(v.botao.rotulo)}</button>` : "";
   const trocar = v.trocar ? `<button type="button" class="${v.trocar === "link" ? "ob-link ia-trocar" : "ob-pilula contorno"}" data-act="ia-trocar" data-ia="${v.ia}" aria-label="Trocar a conta do ${esc(v.nome)}">Trocar conta</button>` : "";
   const conta = v.conta ? `<span class="ia-conta" title="${esc(v.conta)}">${ICONE_IA.pessoa}<span class="ia-conta-txt"><span class="sr-only">Conta: </span>${esc(v.conta)}</span></span>` : "";
   const verificar = opcoes.verificar !== false && v.podeVerificar
@@ -542,7 +588,10 @@ export function renderCartaoIa(v: VistaIa, ui: UiIas, opcoes: { arrastar?: { pos
     : "";
   const linha = `<div class="ia-linha">${alca}${logoDaIa(v.ia)}<div class="ob-ia-txt"><b>${esc(v.nome)}</b><span${classeEstado} role="status">${marca}${esc(v.texto)}</span>${conta}</div>${gira}${trocar}${botao}${verificar}</div>`;
   const fluxo = v.passos ? `<ol class="ia-fluxo" aria-live="polite">${v.passos.map((p, i) => htmlPasso(v, p, i + 1, ui)).join("")}</ol>` : "";
-  const explica = v.explica ? `<div class="ia-explica"><p>${esc(v.explica)}</p></div>` : "";
+  const explica = v.explica ? `<div class="ia-explica" role="status"><p>${esc(v.explica)}</p></div>` : "";
   const nota = v.nota ? `<p class="ia-aviso-nota" role="status">${esc(v.nota)}</p>` : "";
-  return linha + fluxo + explica + nota;
+  const terminal = v.terminal
+    ? `<details class="ia-terminal"><summary class="cl-terminal-link">Prefere o terminal?</summary><p class="cl-terminal">No Terminal deste Mac: <code>${esc(v.terminal)}</code> <button type="button" class="ob-link" data-act="copiar-texto" data-texto="${esc(v.terminal)}">Copiar</button></p></details>`
+    : "";
+  return linha + fluxo + explica + nota + terminal;
 }

@@ -17,7 +17,7 @@ import { log } from "../../../obs/log.ts";
 import { baixarAnexos, mensagemClaude } from "../anexos-turno.ts";
 import { rodarLigacaoClaude } from "./claude-ligacao.ts";
 import { classificarSessao, fimDoStderr, interpretarLinhaStreamJson, reduzirSinais, SINAIS_ZERADOS, textoDaRodada } from "../../../domain/stream-json.ts";
-import { capacidadesDe } from "../../../domain/harness.ts";
+import { capacidadesDe, versaoMinimaDoModelo } from "../../../domain/harness.ts";
 import { criarFalaDoMeio } from "../../../domain/mensagem-no-meio.ts";
 import { caminhoAumentado, resolverBinario } from "../caminho.ts";
 import { compararVersoes, conferirFloors, conferirPisoCli, FLAG_FLOORS, inventarioAbaixoDoPiso, type FlagComPiso } from "../flag-floors.ts";
@@ -69,6 +69,18 @@ export type LigacaoClaudeCli = {
    * Produção não passa nada.
    */
   sigtermParaSigkillMs?: number;
+  /**
+   * NOD-9 (definido em 2026-10-23): o portão da atualização. O turno espera aqui antes de ler a versão enquanto o app
+   * atualiza o Claude Code (ou segura os pedidos novos); resolve `true` só quando o portão segurou e uma atualização
+   * terminou (a versão é relida); com o portão livre ou o prazo vencido, `false`. Quem implementa põe o prazo (180 s):
+   * depois dele o turno segue com o que houver.
+   */
+  aguardarAtualizacao?(): Promise<boolean>;
+  /**
+   * NOD-9: o modelo do turno pede uma versão acima da instalada. O app atualiza agora (o próprio turno não conta como
+   * ocupado) e resolve quando acaba: `true` = uma atualização terminou (a versão é relida), `false` = nada rodou.
+   */
+  aoPrecisarDeVersao?(minima: string): Promise<boolean>;
 };
 
 export { MODELO_SONDA_PADRAO } from "../../../contracts/modelos.ts";
@@ -343,6 +355,9 @@ export function montarEnvDoFilho(env: Record<string, string>, home: string, praz
   };
 }
 
+/** NOD-9: o retrato do CLI que um turno usa do começo ao fim. */
+type LeituraDoCli = { binario: string; versao: string; flags: string[] };
+
 const chavesSinais: readonly (keyof SinaisTurno)[] = ["attempted", "rejected", "promptSubmitted", "producedOutput"];
 
 export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
@@ -363,21 +378,50 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
       let catalogoEntregue: string | null = null;
       let flagsNoHelp: string[] | null = null;
 
-      /** `--version` + `--help` sem gastar turno; a sonda completa também preenche. */
-      async function garantirVersao(): Promise<{ binario: string; versao: string }> {
-        if (binario && versao) return { binario, versao };
-        binario ??= await resolverBinario(cfg.bin, path, home);
-        if (!binario) throw new ErroDeDominio("executor_indisponivel", { cause: "motor_ausente" });
-        const v = await lerVersao(binario, envBase, prazoSondaMs);
-        if ("erro" in v) throw new ErroDeDominio("executor_indisponivel", { cause: v.erro });
-        if (flagsNoHelp === null) {
-          // NOD-178: help lento não vira "sem flags" (que daria "Atualize"); a versão também não fica guardada, e a próxima chamada lê de novo.
-          const help = await lerFlagsDoHelp(binario, envBase, prazoSondaMs);
-          if ("erro" in help) throw new ErroDeDominio("executor_indisponivel", { cause: help.erro });
-          flagsNoHelp = help.flags;
+      /** A releitura forçada em curso (NOD-9): dois turnos que saem do portão juntos leem o binário uma vez só. */
+      let relendo: Promise<LeituraDoCli> | null = null;
+
+      /**
+       * `--version` + `--help` sem gastar turno; a sonda completa também preenche. Devolve um retrato (binário, versão e
+       * flags juntos) que o turno usa do começo ao fim. `forcar` (NOD-9, depois de uma atualização): resolve o binário de
+       * novo e lê tudo outra vez; o estado da instância só troca no fim, inteiro — um turno que já tinha o seu retrato não
+       * vê um meio-termo, e quem chega durante a releitura espera a mesma.
+       */
+      async function garantirVersao(opcoes: { forcar?: boolean } = {}): Promise<LeituraDoCli> {
+        if (opcoes.forcar) {
+          relendo ??= lerDoZero().finally(() => { relendo = null; });
+          return relendo;
         }
+        if (relendo) return relendo;
+        if (binario && versao) return { binario, versao, flags: flagsNoHelp ?? [] };
+        const b = binario ?? await resolverBinario(cfg.bin, path, home);
+        if (!b) throw new ErroDeDominio("executor_indisponivel", { cause: "motor_ausente" });
+        const v = await lerVersao(b, envBase, prazoSondaMs);
+        if ("erro" in v) throw new ErroDeDominio("executor_indisponivel", { cause: v.erro });
+        // NOD-178: help lento não vira "sem flags" (que daria "Atualize"); a versão também não fica guardada, e a próxima chamada lê de novo.
+        let flags = flagsNoHelp;
+        if (flags === null) {
+          const help = await lerFlagsDoHelp(b, envBase, prazoSondaMs);
+          if ("erro" in help) throw new ErroDeDominio("executor_indisponivel", { cause: help.erro });
+          flags = help.flags;
+        }
+        binario = b;
         versao = v.versao;
-        return { binario, versao };
+        flagsNoHelp = flags;
+        return { binario: b, versao: v.versao, flags: flags ?? [] };
+      }
+
+      async function lerDoZero(): Promise<LeituraDoCli> {
+        const b = await resolverBinario(cfg.bin, path, home);
+        if (!b) throw new ErroDeDominio("executor_indisponivel", { cause: "motor_ausente" });
+        const v = await lerVersao(b, envBase, prazoSondaMs);
+        if ("erro" in v) throw new ErroDeDominio("executor_indisponivel", { cause: v.erro });
+        const help = await lerFlagsDoHelp(b, envBase, prazoSondaMs);
+        if ("erro" in help) throw new ErroDeDominio("executor_indisponivel", { cause: help.erro });
+        binario = b;
+        versao = v.versao;
+        flagsNoHelp = help.flags;
+        return { binario: b, versao: v.versao, flags: help.flags ?? [] };
       }
 
       return {
@@ -387,7 +431,7 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
               const v = await garantirVersao();
               const antigo = inventarioAbaixoDoPiso("claude-cli", v.versao, "Claude Code", Date.now());
               if (antigo) return antigo;
-              const pisos = conferirFloors({ versao: v.versao, flags: FLAGS_DO_TURNO, flagsNoHelp });
+              const pisos = conferirFloors({ versao: v.versao, flags: FLAGS_DO_TURNO, flagsNoHelp: v.flags });
               if (!pisos.ok) return { estado: "ausente", motivo: "Atualize o Claude Code para continuar.", em: Date.now() };
               const r = await executarColetando({ bin: v.binario, args: ["auth", "status"], env: envBase, cwd: home, timeoutMs: prazoSondaMs });
               // NOD-178: o gate continua fechado, mas a pessoa lê que o Claude demorou, não que precisa entrar na conta.
@@ -430,7 +474,7 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
         // CLI instalado — sem `--fork-session` no help o turno de cópia é recusado (rodarTurno), e sem `--input-format` a
         // sessão não fica viva. Sem conseguir ler o help, fecha as duas (o servidor cai no caminho sem a capacidade).
         async capacidades() {
-          const flags = await garantirVersao().then(() => flagsNoHelp ?? [], () => [] as string[]);
+          const flags = await garantirVersao().then((l) => l.flags, () => [] as string[]);
           return {
             ...capacidadesDoDriver,
             bifurcaSessao: capacidadesDoDriver.bifurcaSessao && flags.includes("--fork-session"),
@@ -471,22 +515,31 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
               // receber o init enquanto um `await sinks.sinal` ainda está pendente) não o repetir.
               let sinais: SinaisTurno = { ...SINAIS_ZERADOS, attempted: true };
               await sinks.sinal("attempted");
-              const { binario: bin, versao: v } = await garantirVersao();
+              // NOD-9: o turno espera a atualização em curso; se uma terminou, lê o CLI de novo. O retrato (binário, versão e
+              // flags) é deste turno: outro turno que relê depois não o troca no meio.
+              let cli = (await lig.aguardarAtualizacao?.()) ? await garantirVersao({ forcar: true }) : await garantirVersao();
+              // NOD-9: o modelo pede um Claude Code mais novo — o app atualiza já e o turno espera o fim antes de conferir.
+              const minimaDoModelo = versaoMinimaDoModelo("claude-cli", plano.entrada.modelo);
+              if (minimaDoModelo && compararVersoes(cli.versao, minimaDoModelo) < 0 && lig.aoPrecisarDeVersao) {
+                if (await lig.aoPrecisarDeVersao(minimaDoModelo)) cli = await garantirVersao({ forcar: true });
+                if (compararVersoes(cli.versao, minimaDoModelo) < 0) throw new ErroDeDominio("executor_indisponivel", { cause: "modelo_requer_cli" });
+              }
+              const { binario: bin, versao: v, flags: flagsDoTurno } = cli;
               if (!conferirPisoCli("claude-cli", v).ok) throw new ErroDeDominio("executor_indisponivel", { cause: "cli_antigo" });
-              const floors = conferirFloors({ versao: v, flags: FLAGS_DO_TURNO, flagsNoHelp });
+              const floors = conferirFloors({ versao: v, flags: FLAGS_DO_TURNO, flagsNoHelp: flagsDoTurno });
               if (!floors.ok) throw new ErroDeDominio("executor_indisponivel", { cause: floors.motivo });
               // #193: a cópia da sessão exige a flag; sem ela o turno é recusado em vez de continuar a original.
               const bifurcar = plano.entrada.bifurcar === true && plano.entrada.sessaoCli !== null;
-              if (bifurcar && !(flagsNoHelp ?? []).includes("--fork-session")) throw new ErroDeDominio("executor_indisponivel", { cause: "cli_sem_fork_session" });
+              if (bifurcar && !flagsDoTurno.includes("--fork-session")) throw new ErroDeDominio("executor_indisponivel", { cause: "cli_sem_fork_session" });
 
               // ADR-072: o turno-cérebro de uma ligação é um laço de voz, não um turno de chat.
               if (plano.modoTurno === "ligacao" && plano.ligacaoVoz) {
-                if (!(flagsNoHelp ?? []).includes("--input-format")) throw new ErroDeDominio("executor_indisponivel", { cause: "CLI sem --input-format: atualize o Claude Code para ligar" });
+                if (!flagsDoTurno.includes("--input-format")) throw new ErroDeDominio("executor_indisponivel", { cause: "CLI sem --input-format: atualize o Claude Code para ligar" });
                 return await rodarLigacaoClaude({
                   plano,
                   sinks,
                   bin,
-                  flagsNoHelp: flagsNoHelp ?? [],
+                  flagsNoHelp: flagsDoTurno,
                   env: montarEnvDoFilho(cfg.env, home, plano.politicaExecucao.prazoMs),
                   cwdBase: cfg.cwdBase,
                   urlNod: lig.urlNod,
@@ -503,7 +556,7 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
 
               // Fail-closed: sem --restricted comprovado no help, não se aponta o cwd para a pasta
               // da pessoa — antes o turno cai para o diretório temporário e as nativas desligadas.
-              const confinavel = (flagsNoHelp ?? []).includes("--restricted");
+              const confinavel = flagsDoTurno.includes("--restricted");
               const pastas = confinavel ? plano.workspacePastas ?? null : null;
               await mkdir(cfg.cwdBase, { recursive: true });
               const tmpdir = await mkdtemp(join(cfg.cwdBase, "turno-"));
@@ -559,22 +612,22 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
                 };
                 const mcpJson = await escreverMcpConfig(tmpdir, { url: lig.urlNod, tokenDeTurno: plano.tokenDeTurno, proxyPath: lig.proxyPath, nodePath: lig.nodePath, electronComoNode: lig.electronComoNode });
                 // Fail-closed: sem --autocompact no help da versão instalada, o turno roda sem ela.
-                const compactar = (flagsNoHelp ?? []).includes("--autocompact");
+                const compactar = flagsDoTurno.includes("--autocompact");
                 // Fail-closed como --autocompact: sem --input-format no help, o turno segue só com o texto e
                 // uma linha por anexo dizendo que não foi lido — nunca some com o arquivo em silêncio.
                 const anexos = plano.entrada.anexos?.length ? await baixarAnexos(plano, lig.urlNod) : [];
                 // ADR-067: a sessão viva precisa da entrada em stream-json. O comando da conversa (/uso, /contexto,
                 // /compactar) segue de uma vez só, pelo texto, como o CLI o reconhece desde a 0038.
                 const comandoDaBarra = comecaComBarra(plano.entrada.texto);
-                const temEntradaJson = (flagsNoHelp ?? []).includes("--input-format");
+                const temEntradaJson = flagsDoTurno.includes("--input-format");
                 const viva = temEntradaJson && !comandoDaBarra;
                 const streamJson = temEntradaJson && (viva || anexos.length > 0);
                 // Sem o kit (sem hook nesta máquina), o prompt não pode prometer Bash e web: a linha que corrige vai junto.
                 // NOD-183: a linha vai também no fim da parte volátil, depois do marcador, para não quebrar o cache.
                 const semKit = pedeTerminal && !terminal ? comAvisoSemTerminal(plano) : {};
-                const esforco = (flagsNoHelp ?? []).includes("--effort");
-                const systemPrompt = usaSystemPrompt(flagsNoHelp, v);
-                const snapshotOff = usaSnapshotOff(flagsNoHelp, v);
+                const esforco = flagsDoTurno.includes("--effort");
+                const systemPrompt = usaSystemPrompt(flagsDoTurno, v);
+                const snapshotOff = usaSnapshotOff(flagsDoTurno, v);
                 const planoDoTurno = { ...plano, ...semKit };
                 // NOD-188: a parte volátil abre a mensagem do turno (o sistema leva só a estável).
                 const texto = volatilNaMensagem(planoDoTurno, systemPrompt, plano.entrada.texto);

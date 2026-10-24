@@ -14,6 +14,8 @@ import type { VigiaVivo } from "../../../src/contracts/ponte.ts";
 import { criarVigiaTurno } from "../../../src/domain/vigia-turno.ts";
 import { molduraMensagemNoMeio } from "../../../src/domain/mensagem-no-meio.ts";
 import { capacidadesDe } from "../../../src/domain/harness.ts";
+import { VERSAO_MINIMA_POR_APELIDO } from "../../../src/contracts/modelos.ts";
+import { PISO_CLI } from "../../../src/adapters/executor/flag-floors.ts";
 import { criarAcompanhanteDeSubagentes } from "../../../src/adapters/executor/acompanhar-subagentes.ts";
 
 /**
@@ -385,6 +387,124 @@ describe("driver claude-cli contra o binário falso (contrato empírico 2026-09-
       await expect(instance.adapter(planoDeTeste(dir)).rodarTurno(espiao.sinks)).rejects.toMatchObject({ codigo: "executor_indisponivel", cause: "cli_antigo" });
       expect(espiao.sinais).toEqual(["attempted"]);
       await expect(stat(stdin)).rejects.toMatchObject({ code: "ENOENT" });
+    });
+  });
+
+  describe("NOD-9: o portão da atualização e a versão que o modelo pede", () => {
+    const apelidos = VERSAO_MINIMA_POR_APELIDO["claude-cli"] as Record<string, string>;
+    beforeAll(() => { apelidos["teste-nod9"] = "2.1.999"; });
+    afterAll(() => { delete apelidos["teste-nod9"]; });
+
+    /**
+     * Um `claude` que a "atualização" troca: a versão sai de um arquivo (o teste o reescreve como o npm reescreveria o
+     * binário) e cada `--version` fica num log — é ele que mostra quantas vezes o driver releu.
+     */
+    async function cliQueAtualiza(versao: string, ligacao: Parameters<typeof criarClaudeCliDriver>[0]) {
+      const id = Math.random().toString(36).slice(2, 8);
+      const sessoes = join(dir, `sessoes-nod9-${id}`);
+      const base = await shim(dir, `claude-nod9-base-${id}`, { NOD_FALSO_CENARIO: "s3-mcp-ok", NOD_FALSO_SESSOES: sessoes });
+      const arqVersao = join(dir, `versao-${id}`);
+      const log = join(dir, `versoes-lidas-${id}`);
+      await writeFile(arqVersao, versao);
+      await writeFile(log, "");
+      const bin = join(dir, `claude-nod9-${id}`);
+      await writeFile(bin, `#!/bin/sh\ncase " $* " in *" --version "*) echo v >> ${JSON.stringify(log)};; esac\nNOD_FALSO_VERSAO="$(cat ${JSON.stringify(arqVersao)})" exec ${JSON.stringify(base)} "$@"\n`);
+      await chmod(bin, 0o755);
+      const instance = await criarClaudeCliDriver(ligacao).create({ ...cfgBase, bin, env: { ...cfgBase.env } });
+      return {
+        instance,
+        atualizarPara: (v: string) => writeFile(arqVersao, v),
+        leituras: async () => (await readFile(log, "utf8")).split("\n").filter(Boolean).length,
+      };
+    }
+
+    it("portão livre (false): o turno segue com a versão que já tinha, sem reler", async () => {
+      let portoes = 0;
+      const cli = await cliQueAtualiza("2.1.290", { ...lig, aguardarAtualizacao: async () => { portoes++; return false; } });
+      expect((await cli.instance.adapter(planoDeTeste(dir)).rodarTurno(sinksEspiao().sinks)).desfecho).toBe("sucesso");
+      expect((await cli.instance.adapter(planoDeTeste(dir)).rodarTurno(sinksEspiao().sinks)).desfecho).toBe("sucesso");
+      expect(portoes).toBe(2);
+      expect(await cli.leituras()).toBe(1);
+    });
+
+    it("dois turnos saem juntos do portão depois de uma atualização: uma releitura só, e nenhum vê o estado pela metade", async () => {
+      let atualizou = false;
+      const cli = await cliQueAtualiza("2.1.290", { ...lig, aguardarAtualizacao: async () => atualizou });
+      expect((await cli.instance.adapter(planoDeTeste(dir)).rodarTurno(sinksEspiao().sinks)).desfecho).toBe("sucesso");
+      expect(await cli.leituras()).toBe(1);
+      await cli.atualizarPara("2.1.300");
+      atualizou = true;
+      const [r1, r2] = await Promise.all([
+        cli.instance.adapter(planoDeTeste(dir)).rodarTurno(sinksEspiao().sinks),
+        cli.instance.adapter(planoDeTeste(dir)).rodarTurno(sinksEspiao().sinks),
+      ]);
+      expect([r1.desfecho, r2.desfecho]).toEqual(["sucesso", "sucesso"]);
+      expect(await cli.leituras()).toBe(2);
+      // O turno seguinte, com o portão livre, usa o retrato novo sem reler.
+      atualizou = false;
+      expect((await cli.instance.adapter(planoDeTeste(dir)).rodarTurno(sinksEspiao().sinks)).desfecho).toBe("sucesso");
+      expect(await cli.leituras()).toBe(2);
+    });
+
+    it("modelo acima da versão instalada: pede a atualização e, sem ela (false), recusa com modelo_requer_cli antes do prompt", async () => {
+      const pedidos: string[] = [];
+      const cli = await cliQueAtualiza("2.1.290", { ...lig, aoPrecisarDeVersao: async (m) => { pedidos.push(m); return false; }, aguardarAtualizacao: async () => false });
+      const espiao = sinksEspiao();
+      await expect(cli.instance.adapter(planoDeTeste(dir, { modelo: "teste-nod9" })).rodarTurno(espiao.sinks)).rejects.toMatchObject({ codigo: "executor_indisponivel", cause: "modelo_requer_cli" });
+      expect(pedidos).toEqual(["2.1.999"]);
+      expect(await cli.leituras()).toBe(1);
+    });
+
+    it("modelo acima da versão instalada: o turno espera a atualização de verdade, relê e roda", async () => {
+      let cliRef: Awaited<ReturnType<typeof cliQueAtualiza>> | null = null;
+      const cli = await cliQueAtualiza("2.1.290", {
+        ...lig,
+        aguardarAtualizacao: async () => false,
+        aoPrecisarDeVersao: async (m) => {
+          // A atualização demora: o turno só segue depois que ela acaba.
+          await new Promise((r) => setTimeout(r, 50));
+          await cliRef?.atualizarPara(m);
+          return true;
+        },
+      });
+      cliRef = cli;
+      const r = await cli.instance.adapter(planoDeTeste(dir, { modelo: "teste-nod9" })).rodarTurno(sinksEspiao().sinks);
+      expect(r.desfecho).toBe("sucesso");
+      expect(await cli.leituras()).toBe(2);
+    });
+
+    it("sem o gancho (servidor, VM antiga), o modelo segue como antes", async () => {
+      const { instance } = await instanciar("s3-mcp-ok");
+      const r = await instance.adapter(planoDeTeste(dir, { modelo: "teste-nod9" })).rodarTurno(sinksEspiao().sinks);
+      expect(r.desfecho).toBe("sucesso");
+    });
+
+    describe("fable (2.1.289) com o piso rebaixado — hoje o piso 2.1.290 já cobre o fable, então a regra só vale com um piso abaixo", () => {
+      const pisos = PISO_CLI as Record<string, string>;
+      let pisoReal = "";
+      beforeAll(() => { pisoReal = pisos["claude-cli"] ?? ""; pisos["claude-cli"] = "2.1.270"; });
+      afterAll(() => { pisos["claude-cli"] = pisoReal; });
+
+      it("fable no 2.1.280 sem atualização: recusa com modelo_requer_cli", async () => {
+        const pedidos: string[] = [];
+        const cli = await cliQueAtualiza("2.1.280", { ...lig, aguardarAtualizacao: async () => false, aoPrecisarDeVersao: async (m) => { pedidos.push(m); return false; } });
+        await expect(cli.instance.adapter(planoDeTeste(dir, { modelo: "fable" })).rodarTurno(sinksEspiao().sinks)).rejects.toMatchObject({ cause: "modelo_requer_cli" });
+        expect(pedidos).toEqual(["2.1.289"]);
+      });
+
+      it("fable no 2.1.289: roda sem pedir nada", async () => {
+        const pedidos: string[] = [];
+        const cli = await cliQueAtualiza("2.1.289", { ...lig, aguardarAtualizacao: async () => false, aoPrecisarDeVersao: async (m) => { pedidos.push(m); return false; } });
+        expect((await cli.instance.adapter(planoDeTeste(dir, { modelo: "fable" })).rodarTurno(sinksEspiao().sinks)).desfecho).toBe("sucesso");
+        expect(pedidos).toEqual([]);
+      });
+
+      it("fable no 2.1.280 com a atualização para o 2.1.289: espera, relê e roda", async () => {
+        let cliRef: Awaited<ReturnType<typeof cliQueAtualiza>> | null = null;
+        const cli = await cliQueAtualiza("2.1.280", { ...lig, aguardarAtualizacao: async () => false, aoPrecisarDeVersao: async (m) => { await cliRef?.atualizarPara(m); return true; } });
+        cliRef = cli;
+        expect((await cli.instance.adapter(planoDeTeste(dir, { modelo: "fable" })).rodarTurno(sinksEspiao().sinks)).desfecho).toBe("sucesso");
+      });
     });
   });
 

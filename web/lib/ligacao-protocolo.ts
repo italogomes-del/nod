@@ -135,7 +135,9 @@ function lerIas(v: unknown): EstadoIaDaLigacao[] | null {
     if (!ehIa(i.id) || !estado || ias.some((y) => y.id === i.id)) return null;
     // NOD-171: o CLI abaixo do piso passa com as duas versões; versão fora do formato derruba só a causa.
     const antigo = estado === "ausente" && i.causa === "cli_antigo" && ehVersao(i.versao) && ehVersao(i.minima) ? { causa: "cli_antigo" as const, versao: i.versao, minima: i.minima } : {};
-    ias.push({ id: i.id, estado, ...(i.causa === "sonda_lenta" ? { causa: "sonda_lenta" as const } : antigo) });
+    const lenta = i.causa === "sonda_lenta" ? { causa: "sonda_lenta" as const } : null;
+    const atualizando = estado === "ausente" && i.causa === "atualizando" ? { causa: "atualizando" as const } : null;
+    ias.push({ id: i.id, estado, ...(lenta ?? atualizando ?? antigo) });
   }
   return ias;
 }

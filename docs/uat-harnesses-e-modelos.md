@@ -114,6 +114,19 @@ completa (60 execuções) depende do ok do Marlon no orçamento medido.
 e CLI falso (`tests/unit/domain/stream-json.test.ts`, `tests/integration/turnos-fila.test.ts` e
 `tests/unit/web/cli-desatualizado.test.ts`), para não esgotar a assinatura de propósito.
 
+## Rodada E — atualizar o CLI pelo app (NOD-9)
+
+Prepare um Mac com o Claude Code abaixo do piso (`npm install -g @anthropic-ai/claude-code@<versão antiga>`) e o app
+aberto.
+
+| ID | Passos | Resultado esperado | Prioridade | Resultado |
+|---|---|---|---|---|
+| HM-20 | Sem bot rodando e sem ligação, abra o app. | Em até 1 min o cartão passa por "Atualizando o Claude Code…" e termina "Claude Code atualizado para a X."; nenhum turno falha. | P0 | Pendente |
+| HM-21 | Com um bot rodando no Claude, clique em **Atualizar**. | O cartão diz "Vamos atualizar o Claude Code quando seus bots terminarem."; o turno termina normal e a atualização roda em seguida. | P0 | Pendente |
+| HM-22 | Durante a atualização, mande uma tarefa para um bot no Claude. | A tarefa espera e roda depois, na versão nova; nada de "desatualizado" nem troca para o Codex. | P0 | Pendente |
+| HM-23 | Aponte `NOD_CLAUDE_BIN` para um binário antigo. | Nada roda sozinho; o cartão diz para atualizar pelo terminal. | P1 | Pendente |
+| HM-24 | Abra Provedores de IA no navegador com o CLI antigo. | Sem botão; a nota manda abrir o app e dá "claude update". | P1 | Pendente |
+
 ## Registro da execução
 
 Preencha uma linha por ambiente usado. Não registre emails, tokens, caminhos de credenciais ou

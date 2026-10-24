@@ -1,5 +1,5 @@
 import type { EpochMs } from "../contracts/ids.ts";
-import type { ContaDaIa, EstadoDaIa, EstadoIa, InstalacaoDaIa, LoginDaIa, OrigemDoBinario } from "../contracts/estado-ia.ts";
+import type { AtualizacaoDaIa, ContaDaIa, EstadoDaIa, EstadoIa, InstalacaoDaIa, LoginDaIa, OrigemDoBinario } from "../contracts/estado-ia.ts";
 import type { Inventario } from "../contracts/inventario.ts";
 
 /**
@@ -7,7 +7,7 @@ import type { Inventario } from "../contracts/inventario.ts";
  * src/contracts/estado-ia.ts). Puro: o app do Mac junta o que sabe e chama `estadoDaIa`; a web, quando só tem o
  * inventário do servidor, chama com o resto vazio.
  *
- * Precedência (a primeira que vale ganha): instalando (o app está mexendo no CLI) › entrando (login aberto) › testando
+ * Precedência (a primeira que vale ganha): atualizando (NOD-9) › instalando (o app está mexendo no CLI) › entrando (login aberto) › testando
  * › procurando (sem sonda ainda) › no_limite › o que o inventário diz. Uma instalação ou um login já terminados não
  * mudam o estado — vão junto, para a tela mostrar o resultado.
  */
@@ -23,6 +23,8 @@ export type EntradaEstadoIa = {
   binario?: { caminho: string; origem: OrigemDoBinario } | null;
   /** A conta que o CLI disse estar logada (NOD-209); vai junto em todo estado, para o cartão mostrar. */
   conta?: ContaDaIa | null;
+  /** NOD-9: a atualização do CLI (a em curso ou a última); vai junto em todo estado, a tela escolhe pela fase. */
+  atualizacao?: AtualizacaoDaIa | null;
   agora: EpochMs;
 };
 
@@ -41,6 +43,7 @@ export const MENSAGEM_DO_ESTADO: Record<EstadoDaIa, string> = {
   no_limite: "A assinatura chegou ao limite.",
   config_invalida: "A configuração tem um erro.",
   lenta: "Demorou para responder; tentando de novo.",
+  atualizando: "Atualizando…",
 };
 
 function doInventario(inv: Inventario): Pick<EstadoIa, "estado" | "mensagem" | "versao" | "minima" | "causa"> {
@@ -53,6 +56,8 @@ function doInventario(inv: Inventario): Pick<EstadoIa, "estado" | "mensagem" | "
       const frase = inv.versao && inv.minima ? `A versão deste Mac (${inv.versao}) é antiga; o nod precisa da ${inv.minima} ou mais nova.` : MENSAGEM_DO_ESTADO.desatualizada;
       return { estado: "desatualizada", mensagem: frase, ...versao, ...minima };
     }
+    // NOD-9: o CLI está lá, sendo trocado por um mais novo (o motivo já traz a frase com o nome da IA).
+    if (inv.causa === "atualizando") return { estado: "atualizando", mensagem: inv.motivo || MENSAGEM_DO_ESTADO.atualizando, ...versao };
     if (inv.causa === "sem_node") return { estado: "sem_node", mensagem: MENSAGEM_DO_ESTADO.sem_node };
     if (inv.causa === "config_invalida") return { estado: "config_invalida", mensagem: MENSAGEM_DO_ESTADO.config_invalida };
     return { estado: "nao_instalada", mensagem: MENSAGEM_DO_ESTADO.nao_instalada };
@@ -63,13 +68,22 @@ function doInventario(inv: Inventario): Pick<EstadoIa, "estado" | "mensagem" | "
 }
 
 export function estadoDaIa(e: EntradaEstadoIa): EstadoIa {
+  // NOD-9: a reserva da atualização roda pelo instalador. Enquanto ela roda, a tela diz "Atualizando…" (nunca
+  // "Instalando…"); terminada, o fim é o da atualização — a instalação que a reserva fez não vai junto, para uma falha
+  // da reserva não aparecer como "a instalação falhou" (com o botão Instalar de um CLI que continua instalado).
+  const atualizandoAgora = !!e.atualizacao && (e.atualizacao.fase === "atualizando" || e.atualizacao.fase === "pedindo_aprovacao");
+  const instalacaoDaReserva = e.atualizacao?.caminho === "reserva" && (atualizandoAgora || e.instalacao?.fase !== "instalando");
   const extras: Partial<EstadoIa> = {
     ...(e.binario ? { detalhe: { binario: e.binario.caminho, origem: e.binario.origem } } : {}),
-    ...(e.instalacao ? { instalacao: e.instalacao } : {}),
+    ...(e.instalacao && !instalacaoDaReserva ? { instalacao: e.instalacao } : {}),
     ...(e.login ? { login: e.login } : {}),
     ...(e.conta ? { conta: e.conta } : {}),
+    ...(e.atualizacao ? { atualizacao: e.atualizacao } : {}),
   };
   const base = (estado: EstadoDaIa, mensagem = MENSAGEM_DO_ESTADO[estado]): EstadoIa => ({ ia: e.ia, estado, mensagem, ...extras, em: e.agora });
+  // NOD-9: a atualização do CLI rodando (ou a janela de senha aberta) vale por cima da instalação (a reserva usa o
+  // instalador) e do inventário da última sonda.
+  if (atualizandoAgora && e.atualizacao) return { ...base("atualizando"), ...(e.atualizacao.antes ? { versao: e.atualizacao.antes } : {}) };
   if (e.instalacao?.fase === "instalando") return base("instalando", e.instalacao.mensagem || MENSAGEM_DO_ESTADO.instalando);
   if (e.login?.fase === "aguardando") return base("entrando", e.login.mensagem || MENSAGEM_DO_ESTADO.entrando);
   if (e.testando) return base("testando");
