@@ -27,7 +27,7 @@ import { conviteValido } from "./convite.ts";
  */
 
 export type Execucao = { codigo: number | null; saida: string; erro: string };
-export type OpcoesExecucao = { env: Record<string, string>; entrada?: string; prazoMs: number; aoLinha?: (linha: string) => void };
+export type OpcoesExecucao = { env: Record<string, string>; entrada?: string; prazoMs: number; aoLinha?: (linha: string) => void; sinal?: AbortSignal };
 export type Executar = (programa: string, args: string[], o: OpcoesExecucao) => Promise<Execucao>;
 
 /** O que o instalador pede ao sistema — injetado para o teste rodar com um SSH falso. */
@@ -153,7 +153,12 @@ export function linhasSemSegredo(linhas: string[], segredos: string[]): string[]
   return linhas.slice(-MAX_LINHAS).map((l) => s.reduce((acc, x) => acc.split(x).join("•••"), l).slice(0, MAX_LINHA));
 }
 
-export async function instalarPorSsh(pedido: PedidoSsh, credencial: CredencialSsh, sistema: Sistema, aoProgresso: (p: ProgressoSsh) => void = () => {}): Promise<ResultadoSsh> {
+/**
+ * `sinal`: a pessoa cancelou — o passo em andamento é morto e nada mais roda (a limpeza do `finally` roda sempre). O
+ * resultado de uma instalação cancelada não importa: o pedido já está `cancelada` no servidor.
+ */
+export async function instalarPorSsh(pedido: PedidoSsh, credencial: CredencialSsh, sistemaBase: Sistema, aoProgresso: (p: ProgressoSsh) => void = () => {}, sinal?: AbortSignal): Promise<ResultadoSsh> {
+  const sistema: Sistema = { ...sistemaBase, executar: (programa, args, o) => (sinal?.aborted ? Promise.resolve({ codigo: null, saida: "", erro: "cancelada" }) : sistemaBase.executar(programa, args, sinal ? { ...o, sinal } : o).then((r) => (sinal?.aborted ? { codigo: null, saida: "", erro: "cancelada" } : r))) };
   const segredos = [credencial.senha, credencial.frase, credencial.sudo, pedido.convite].filter((x): x is string => !!x);
   const falha = (motivo: MotivoInstalacao, linhas: string[] = [], impressao?: string): ResultadoSsh => ({ ok: false, motivo, linhas: linhasSemSegredo(linhas, segredos), ...(impressao ? { impressao } : {}) });
   const linhasDe = (e: Execucao) => `${e.erro}\n${e.saida}`.split("\n").map((l) => l.trimEnd()).filter((l) => l.length > 0);
@@ -298,9 +303,9 @@ export async function instalarPorSsh(pedido: PedidoSsh, credencial: CredencialSs
     return falha("instalacao_falhou", linhas);
   } finally {
     for (const f of fechar) { try { f(); } catch { /* já fechado */ } }
-    if (mestre) await sistema.executar("ssh", [...opcoes(["-O", "exit"]), ...destino], { env: envBase, prazoMs: PRAZOS_SSH.sair }).catch(() => undefined);
-    if (agentePid) await sistema.executar("ssh-agent", ["-k"], { env: { ...envBase, SSH_AGENT_PID: agentePid }, prazoMs: PRAZOS_SSH.sair }).catch(() => undefined);
-    await sistema.apagar(pasta).catch(() => undefined);
+    if (mestre) await sistemaBase.executar("ssh", [...opcoes(["-O", "exit"]), ...destino], { env: envBase, prazoMs: PRAZOS_SSH.sair }).catch(() => undefined);
+    if (agentePid) await sistemaBase.executar("ssh-agent", ["-k"], { env: { ...envBase, SSH_AGENT_PID: agentePid }, prazoMs: PRAZOS_SSH.sair }).catch(() => undefined);
+    await sistemaBase.apagar(pasta).catch(() => undefined);
   }
 }
 
@@ -321,10 +326,13 @@ export function sistemaDeVerdade(): Sistema {
     p.stdin.on("error", () => undefined);
     p.stdin.end(o.entrada ?? "");
     const prazo = setTimeout(() => { p.kill("SIGKILL"); acabar(null); }, o.prazoMs);
+    const cancelar = () => { p.kill("SIGTERM"); acabar(null); };
+    o.sinal?.addEventListener("abort", cancelar, { once: true });
     const acabar = (codigo: number | null) => {
       if (fim) return;
       fim = true;
       clearTimeout(prazo);
+      o.sinal?.removeEventListener("abort", cancelar);
       if (o.aoLinha) for (const r of [restos.saida, restos.erro]) if (r) o.aoLinha(r);
       resolver({ codigo, saida, erro });
     };

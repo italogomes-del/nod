@@ -283,6 +283,16 @@ describe("instalarPorSsh", () => {
     expect(f.chamadas.some((c) => c.programa === "ssh-keygen" || c.programa === "ssh-keyscan")).toBe(false);
   });
 
+  it("cancelada no meio: nada mais roda depois do passo abortado, mas a limpeza roda", async () => {
+    const ctrl = new AbortController();
+    const f = sistemaFalso((c) => { if (c.args.at(-1) === "sh -s") ctrl.abort(); return undefined; });
+    await instalarPorSsh(pedido(), { senha: SENHA }, f.sistema, () => undefined, ctrl.signal);
+    expect(f.baixadas).toEqual([]);
+    expect(f.chamadas.some((c) => /instalar\.sh/.test(c.args.at(-1) ?? ""))).toBe(false);
+    expect(f.chamadas.at(-1)!.args).toEqual(expect.arrayContaining(["-O", "exit"]));
+    expect(f.apagadas).toHaveLength(1);
+  });
+
   // NOD-94 (QA): no apelido a host key é a do known_hosts do Mac; "Confiar na nova" não tem o que trocar ali.
   it("apelido com host desconhecido (ou trocado) no known_hosts do Mac: instalacao_falhou dizendo o que fazer, não chave_do_servidor_mudou", async () => {
     const f = sistemaFalso((c) => (c.args.includes("ControlMaster=yes") ? { codigo: 255, erro: "No ED25519 host key is known for minha-vm and you have requested strict checking.\nHost key verification failed.\n" } : undefined));
@@ -331,6 +341,11 @@ describe.runIf(process.platform === "linux" && existsSync("/dev/shm"))("sistemaD
     expect(ok.codigo).toBe(0);
     expect(linhas.sort()).toEqual(["dois", "tres", "um"]);
     expect((await s.executar("sleep", ["5"], { env: { PATH: process.env.PATH ?? "/usr/bin:/bin" }, prazoMs: 100 })).codigo).toBeNull();
+    const ctrl = new AbortController();
+    setTimeout(() => ctrl.abort(), 50);
+    const t0 = Date.now();
+    expect((await s.executar("sleep", ["5"], { env: { PATH: process.env.PATH ?? "/usr/bin:/bin" }, prazoMs: 5_000, sinal: ctrl.signal })).codigo).toBeNull();
+    expect(Date.now() - t0).toBeLessThan(2_000);
   });
 
   // NOD-94 (QA): o ssh-add pede a frase de novo quando ela está errada; o askpass não pode travar no cano já lido.

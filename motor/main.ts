@@ -22,6 +22,8 @@ import { criarExecutarComando, iniciarLimpezaDasTasks, modoDaLimpeza, type Limpe
 import { iniciarEsperas, type Esperas } from "../src/adapters/executor/esperas.ts";
 import type { PlanoTurno } from "../src/contracts/plano-turno.ts";
 import { PAPEIS_MAQUINA } from "../src/contracts/ponte.ts";
+import { iniciarInstaladora, type Instaladora } from "../src/shared/instaladora.ts";
+import { sistemaDeVerdade } from "../src/shared/instalador-ssh.ts";
 import { configDosDrivers, criarRegistryDetalhado } from "../src/adapters/executor/registry.ts";
 import { prazoSondaDoEnv } from "../src/adapters/executor/sonda.ts";
 import type { ConfigDriver, Driver, Registry, RegistroDriver } from "../src/adapters/executor/spi.ts";
@@ -97,7 +99,7 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
   if (r.status === 426 || (minima && !versaoAceita(versao, minima))) throw new FalhaPonte("atualize_app");
   if (r.status === 401 || r.status === 403) throw new FalhaPonte("chave_invalida");
   if (!r.ok) throw new FalhaPonte("servidor_fora");
-  const dados = (await r.json()) as { escopo: { pessoaId: string }; machineId: string; papel?: unknown };
+  const dados = (await r.json()) as { escopo: { pessoaId: string }; machineId: string; papel?: unknown; instalacoes?: unknown };
   if (!dados.escopo?.pessoaId || !dados.machineId) throw new FalhaPonte("resposta_invalida");
   // NOD-94 (emenda 11 da ADR-090): a máquina só-computador hospeda o computador do bot e nunca pega turno — sem laço e
   // sem itens do gh. Servidor antigo (sem papel) = motor. O servidor também recusa o puxar dela (segunda camada).
@@ -111,6 +113,8 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
   /** ADR-088 (limpeza das tasks, #225): as pastas de task encerradas nesta máquina; os turnos rodando nunca são mexidos. */
   let limpeza: LimpezaDasTasks | null = null;
   let esperas: Esperas | null = null;
+  /** NOD-94: a instaladora por SSH (só no papel motor e com o servidor que aceita). */
+  let instaladora: Instaladora | null = null;
   const planosAqui = new Map<string, PlanoTurno>();
   let ultimoReanuncio = 0;
   let encerrado = false;
@@ -299,9 +303,15 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
     agendar: (fn, ms) => { const t = setTimeout(fn, ms); return { cancelar: () => clearTimeout(t) }; },
   });
 
+  // NOD-94 (emenda 11 da ADR-090): esta máquina instala a "só computador" da pessoa por SSH, quando a tela pede.
+  if (papel === "motor" && dados.instalacoes === true) {
+    instaladora = iniciarInstaladora({ ponte: ponteHttp.instalacoes, sistema: sistemaDeVerdade(), agendar: (fn, ms) => { const t = setTimeout(fn, ms); return { cancelar: () => clearTimeout(t) }; } });
+  }
+
   async function parar() {
     if (encerrado) return;
     encerrado = true;
+    instaladora?.parar();
     atualizador?.parar();
     contasDoMotor?.parar();
     for (const reg of porConta.values()) if (reg.estado === "pronto") await reg.instance.dispose().catch(() => undefined);

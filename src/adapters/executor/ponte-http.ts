@@ -1,4 +1,5 @@
 import type { ProgressoDoLogin, PuxadaDeContas } from "../../contracts/contas-ia.ts";
+import type { PedidoDeInstalacao, ProgressoDeInstalacao } from "../../contracts/instalacoes-ssh.ts";
 import type { AnuncioMaquina, PastaParaLimpar, PonteInterna, RespostaRenovar, TrechoVivo, VigiaVivo } from "../../contracts/ponte.ts";
 import type { EsperaParaRodar } from "../../contracts/espera.ts";
 import type { PlanoTurno } from "../../contracts/plano-turno.ts";
@@ -306,6 +307,23 @@ export function criarPonteHttp(o: { url: string; chave: string; versao: string; 
       },
       async saiu(impressoes: string[], desconectada: boolean): Promise<boolean> {
         try { await chamar("contas/saiu", { impressoes, desconectada }, { rota404: true }); return true; } catch { return false; }
+      },
+    },
+    /**
+     * NOD-94 (emenda 11 da ADR-090): os pedidos de instalação por SSH desta máquina (instaladora). Mesma convenção das
+     * contas: null = sem resposta; "sem_rota" = servidor sem instalações (404). O corpo leva só a chave pública.
+     */
+    instalacoes: {
+      async puxar(chavePublica: string): Promise<PedidoDeInstalacao[] | null | "sem_rota"> {
+        try {
+          const r = await chamar<{ pedidos?: unknown }>("instalacoes", { chavePublica }, { rota404: true });
+          return Array.isArray(r.pedidos) ? (r.pedidos as PedidoDeInstalacao[]) : [];
+        } catch (e) {
+          return e instanceof FalhaPonte && e.codigo === "rota_ausente" ? "sem_rota" : null;
+        }
+      },
+      async progresso(p: ProgressoDeInstalacao): Promise<boolean> {
+        try { await chamar("instalacoes/progresso", p, { rota404: true }); return true; } catch { return false; }
       },
     },
     /**
