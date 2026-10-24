@@ -44,7 +44,8 @@ import { estadoDaIa } from "../src/domain/estado-ia.ts";
 import { ambienteDoLogin, comandoDeAtualizar, comandoDeEstadoDoLogin, comandoDeLogin, comandoDeLoginNoApp, comandoDeLogout, contaPeloStatusClaude, lerIaDesktop, logadoPeloStatus, textoDaImpressao, textoDaImpressaoComConta, URL_INSTALAR_IA } from "./ia-mac.ts";
 import { criarLoginDasIas, type ProcessoDeLogin, type StatusDoLogin } from "./login-ia.ts";
 import { ambienteDoNpm, criarInstaladorDeIas, PACOTE_DA_IA, scriptNodeDoNod, type ProcessoNpm } from "./instalar-ia.ts";
-import { criarAtualizadorDeIas, fimDaInstalacao, inventarioComAtualizacao, passosPelaOrigem, type PassoAtualizar } from "./atualizador-ias.ts";
+import { criarAtualizadorDeIas, diaLocal, fimDaInstalacao, inventarioComAtualizacao, passosPelaOrigem, type GatilhoAtualizar, type PassoAtualizar } from "./atualizador-ias.ts";
+import { cabeAprovacao, criarElevador, depsReaisDoElevador } from "./elevar-mac.ts";
 import { ambienteDoBinarioDoNod, ativarPrefixo, candidatosDoNod, descartarPrefixo, escolherBinario, nomeDaVersao, pastasFerramentas, prefixoAtivo, prepararPrefixoNovo, type Candidato } from "./ferramentas.ts";
 import { criarVigiaDasIas, type Veredito, type VigiaDasIas } from "./vigia-ias.ts";
 import { lerAviso, lerContador, lerPreferencias, lerTemaDesktop, opcoesDoAviso, origemDe, remetenteWebValido } from "./avisos-mac.ts";
@@ -1112,7 +1113,16 @@ const instalador = criarInstaladorDeIas({
 // (escolhaDasIas); o do nod só se atualiza pela reserva (o instalador, ADR-093); o de fora tenta o atualizador oficial
 // primeiro e a reserva depois. Enquanto atualiza, a IA é anunciada como `ausente` + `atualizando`.
 const arquivoAtualizacoes = () => join(app.getPath("userData"), "atualizacoes-ia.json");
-async function passosDaAtualizacao(ia: IaDesktop): Promise<PassoAtualizar[]> {
+// NOD-9 PR3: a janela de senha do macOS, último passo de um clique (só binário de root, só com a janela do nod em foco).
+const elevador = criarElevador(depsReaisDoElevador({
+  home: homedir(),
+  lerVersao: async (bin) => {
+    const cfg = await cfgAtual();
+    return versaoDe(bin, ambienteDoLogin(cfg.env));
+  },
+  registrar: (evento, campos) => log("info", evento, campos),
+}));
+async function passosDaAtualizacao(ia: IaDesktop, gatilho: GatilhoAtualizar): Promise<PassoAtualizar[]> {
   const escolhido = escolhaDasIas.get(ia)?.escolhido ?? null;
   const cfg = await cfgAtual();
   const envVersao = ambienteDoLogin({ ...cfg.env, ...(cfg.envPorDriver?.[ia] ?? {}) });
@@ -1123,24 +1133,33 @@ async function passosDaAtualizacao(ia: IaDesktop): Promise<PassoAtualizar[]> {
       return fimDaInstalacao(await instalador.instalar(ia), antes, alvo, compararVersoes);
     },
   };
-  return passosPelaOrigem({
+  const args = comandoDeAtualizar(ia);
+  // A origem `nod` (sem binário de fora) e a IA sem atualizador próprio: só a reserva (passosPelaOrigem).
+  const base = passosPelaOrigem({
     origem: escolhido?.origem ?? null,
-    args: comandoDeAtualizar(ia),
+    args,
     reserva,
-    oficial: (args) => ({
+    oficial: (a) => ({
       tipo: "oficial",
-      rodar: (alvo) => atualizarCli({ bin: escolhido?.caminho ?? "", args, env: { ...process.env, ...cfg.env }, alvo, lerVersao: (bin) => versaoDe(bin, envVersao) }),
+      rodar: (alvo) => atualizarCli({ bin: escolhido?.caminho ?? "", args: a, env: { ...process.env, ...cfg.env }, alvo, lerVersao: (bin) => versaoDe(bin, envVersao) }),
     }),
   });
+  if (base.length === 1 || !escolhido || !args || gatilho !== "clique" || process.platform !== "darwin") return base;
+  const aprovacao: PassoAtualizar = {
+    tipo: "aprovacao",
+    cabe: (anteriores) => cabeAprovacao(anteriores) && !elevador.aberta() && janela?.isFocused() === true,
+    rodar: (alvo) => elevador.atualizar({ ia, bin: escolhido.caminho, args, alvo }),
+  };
+  return [...base, aprovacao];
 }
 const passosPreparados = new Map<IaDesktop, PassoAtualizar[]>();
 const atualizador = criarAtualizadorDeIas({
-  binario: async (ia) => {
+  binario: async (ia, gatilho) => {
     const escolhido = escolhaDasIas.get(ia)?.escolhido ?? null;
     if (!escolhido) return { versao: null, origem: null };
     const cfg = await cfgAtual();
     // Os passos são montados aqui (a função `passos` é síncrona): a mesma leitura do binário que decidiu.
-    passosPreparados.set(ia, await passosDaAtualizacao(ia));
+    passosPreparados.set(ia, await passosDaAtualizacao(ia, gatilho));
     return { versao: await versaoDe(escolhido.caminho, ambienteDoLogin({ ...cfg.env, ...(cfg.envPorDriver?.[ia] ?? {}) })), origem: escolhido.origem };
   },
   piso: (ia) => PISO_CLI[ia],
@@ -1161,7 +1180,7 @@ const atualizador = criarAtualizadorDeIas({
     await rename(tmp, arquivoAtualizacoes());
   },
   agora: Date.now,
-  hoje: (t) => { const d = new Date(t); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; },
+  hoje: diaLocal,
   agendar: agendarTimer,
   // Um erro (o disco ilegível, um passo que lançou) sai como aviso; o resto, como info.
   registrar: (evento, campos) => log(campos.erro !== undefined || campos.venceu === true ? "aviso" : "info", evento, campos),

@@ -107,8 +107,16 @@ Definido em 2026-10-23 (plano do Arquiteto de 20/10, PR 2). O app confere a vers
 - **Não mexe.** Binário apontado por `NOD_CLAUDE_BIN`/`NOD_CODEX_BIN` (`configurado`): o cartão manda atualizar pelo
   terminal.
 
-No navegador, o cartão manda abrir o app e dá o comando (`claude update`). A elevação com a senha do Mac (CLI instalado
-como root) é o PR 3; a VM do motor, o PR 4.
+- **Com a senha do Mac (PR 3).** CLI instalado como root (ex.: `sudo npm i -g` em `/usr/local`): se no clique o oficial
+  e a reserva falharem por permissão (ou a reserva sem npm), o app abre a janela de senha do macOS ("O nod precisa da
+  sua senha para atualizar o Claude Code."). Só com a janela do nod em foco, uma por vez, e no máximo 2 recusas por dia
+  (contadas em `atualizacoes-ia.json`). O script do `osascript` é fixo; o comando vai em argv como
+  `/usr/bin/env -i HOME=<pasta nova> PATH=<pastas de root> <realpath do claude> update`. Só eleva se o binário e todas
+  as pastas acima forem do root e não graváveis por outros; caso contrário o cartão fica em "sem permissão" com o
+  comando do terminal. Cancelar a janela vira "Tentar de novo"; 5 min sem resposta viram `tempo_esgotado`. Nada da
+  saída do `osascript` vai à tela; o log `ia_atualizacao` traz `caminho: "aprovacao"`.
+
+No navegador, o cartão manda abrir o app e dá o comando (`claude update`). A VM do motor é o PR 4.
 
 ## Diagnóstico para suporte (NOD-138)
 

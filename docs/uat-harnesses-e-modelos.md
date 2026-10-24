@@ -126,6 +126,9 @@ aberto.
 | HM-22 | Durante a atualização, mande uma tarefa para um bot no Claude. | A tarefa espera e roda depois, na versão nova; nada de "desatualizado" nem troca para o Codex. | P0 | Pendente |
 | HM-23 | Aponte `NOD_CLAUDE_BIN` para um binário antigo. | Nada roda sozinho; o cartão diz para atualizar pelo terminal. | P1 | Pendente |
 | HM-24 | Abra Provedores de IA no navegador com o CLI antigo. | Sem botão; a nota manda abrir o app e dá "claude update". | P1 | Pendente |
+| HM-25 | Num Mac com o Claude Code instalado por `sudo npm i -g` (versão antiga), clique em **Atualizar** com o app em foco. | Abre a janela de senha do macOS com "O nod precisa da sua senha para atualizar o Claude Code."; com a senha, o cartão termina "Claude Code atualizado para a X."; `~/.claude` continua seu (`ls -ld ~/.claude`). Confirme também que o `osascript` consome o `--` (o argv do script começa em `/bin/sh`, não em `--`): no Console.app, o log `ia_atualizacao` com `caminho: "aprovacao"` tem `elevou: true` e `codigo: 0`, e `ls /tmp/nod-atualizar.*` não acha pasta sobrando. Se a janela abrir e o cartão falhar com o código 127 ou "--: not found", o `--` chegou ao script e a elevação está quebrada no Mac real. | P0 | Pendente |
+| HM-26 | Repita o HM-25 e cancele a janela de senha; clique de novo e cancele outra vez; clique uma 3ª vez. | Cada cancelamento mostra "Tentar de novo" e nada abre sozinho; na 3ª vez no mesmo dia a janela não abre e o cartão oferece o comando do terminal. | P0 | Pendente |
+| HM-27 | Deixe o app em segundo plano (outra janela em foco) com o CLI de root antigo e espere a atualização automática. | A janela de senha nunca abre sem um clique; o cartão segue com "Atualizar". | P1 | Pendente |
 
 ## Registro da execução
 

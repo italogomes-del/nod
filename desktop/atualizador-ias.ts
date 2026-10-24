@@ -17,7 +17,8 @@ import type { ResultadoAtualizar } from "../src/adapters/executor/atualizar-cli.
  *    3 min; depois disso segue (o turno nunca fica preso). Quem espera no portão não conta como turno rodando;
  *  - o clique sem `agora`, com turno rodando, espera a brecha; com `agora`, roda já (o turno aberto continua no processo
  *    que abriu);
- *  - só a tentativa automática conta para o limite do dia (o registro vai ao disco, `atualizacoes-ia.json`).
+ *  - só a tentativa automática conta para o limite do dia (o registro vai ao disco, `atualizacoes-ia.json`);
+ *  - a janela de senha do macOS (passo `aprovacao`, PR3) só abre num clique e some do dia depois de 2 recusas.
  */
 export const PRAZO_PORTAO_MS = 180_000;
 /** definido em 2026-10-23: a cada minuto o app olha se a brecha chegou ou se é hora de avisar/segurar. */
@@ -31,12 +32,26 @@ export type FimDoPasso = {
   atende: boolean;
   espaco?: { livreMb: number; precisaMb: number };
 };
-export type PassoAtualizar = { tipo: CaminhoAtualizacao; rodar(alvo: string): Promise<FimDoPasso> };
+export type PassoFeito = { tipo: CaminhoAtualizacao; fim: FimDoPasso };
+export type PassoAtualizar = {
+  tipo: CaminhoAtualizacao;
+  rodar(alvo: string): Promise<FimDoPasso>;
+  /** Roda só se os passos anteriores deixarem (a janela de senha, NOD-9 PR3); sem `cabe`, sempre roda. */
+  cabe?(anteriores: readonly PassoFeito[]): boolean;
+};
+/** definido em 2026-10-23 (NOD-9, PR3): duas recusas da janela de senha no dia e o app não a abre mais até amanhã. */
+export const MAX_RECUSAS_DIA = 2;
+export type RecusasDoDia = { dia: string; n: number };
+/** O dia no fuso da máquina (AAAA-MM-DD): "até amanhã" é o amanhã da pessoa, não o do UTC. */
+export function diaLocal(t: number): string {
+  const d = new Date(t);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
 export type GatilhoAtualizar = "auto" | "clique";
 
 export type DepsAtualizador = {
   /** A versão e a origem do binário que o nod usa agora (versão null = não instalado ou ilegível). */
-  binario(ia: IaDesktop): Promise<{ versao: string | null; origem: OrigemDoBinario | null }>;
+  binario(ia: IaDesktop, gatilho: GatilhoAtualizar): Promise<{ versao: string | null; origem: OrigemDoBinario | null }>;
   piso(ia: IaDesktop): string;
   comparar(a: string, b: string): -1 | 0 | 1;
   /** Os turnos daquele provedor rodando no Mac agora. */
@@ -60,7 +75,7 @@ export type DepsAtualizador = {
 export type UltimaAtualizacao = { resultado: AtualizacaoDaIa["fase"]; antes: string | null; depois: string | null; em: number };
 export type DiscoAtualizacoes = {
   v: 1;
-  ias: Partial<Record<IaDesktop, { registro: RegistroDoDia | null; precisaDesde: number | null; ultimo: UltimaAtualizacao | null }>>;
+  ias: Partial<Record<IaDesktop, { registro: RegistroDoDia | null; precisaDesde: number | null; ultimo: UltimaAtualizacao | null; recusas?: RecusasDoDia | null }>>;
 };
 
 export type AtualizadorDeIas = {
@@ -96,6 +111,7 @@ type Memoria = {
   seguraDesde: number | null;
   minimaPedida: string | null;
   ultimo: UltimaAtualizacao | null;
+  recusas: RecusasDoDia | null;
   cliquePendente: boolean;
   rodando: boolean;
   noPortao: number;
@@ -121,7 +137,9 @@ export function lerDiscoAtualizacoes(bruto: unknown): DiscoAtualizacoes | null {
     const ultimo = ul && typeof ul === "object" && "resultado" in ul && "em" in ul && typeof ul.resultado === "string" && typeof ul.em === "number"
       ? { resultado: faseOuFalhou(ul.resultado), antes: "antes" in ul && typeof ul.antes === "string" ? ul.antes : null, depois: "depois" in ul && typeof ul.depois === "string" ? ul.depois : null, em: ul.em }
       : null;
-    ias[ia] = { registro, precisaDesde, ultimo };
+    const rc = "recusas" in e ? e.recusas : null;
+    const recusas = rc && typeof rc === "object" && "dia" in rc && "n" in rc && typeof rc.dia === "string" && typeof rc.n === "number" ? { dia: rc.dia, n: rc.n } : null;
+    ias[ia] = { registro, precisaDesde, ultimo, recusas };
   }
   return { v: 1, ias };
 }
@@ -138,7 +156,7 @@ function motivoDoFim(f: FimDoPasso): MotivoAtualizacao {
 
 export function criarAtualizadorDeIas(d: DepsAtualizador): AtualizadorDeIas {
   const prazoPortao = d.prazoPortaoMs ?? PRAZO_PORTAO_MS;
-  const mem = new Map<IaDesktop, Memoria>(IAS_DESKTOP.map((ia) => [ia, { atual: null, registro: null, precisaDesde: null, seguraDesde: null, minimaPedida: null, ultimo: null, cliquePendente: false, rodando: false, noPortao: 0, liberar: new Set(), fins: 0 }]));
+  const mem = new Map<IaDesktop, Memoria>(IAS_DESKTOP.map((ia) => [ia, { atual: null, registro: null, precisaDesde: null, seguraDesde: null, minimaPedida: null, ultimo: null, recusas: null, cliquePendente: false, rodando: false, noPortao: 0, liberar: new Set(), fins: 0 }]));
   const m = (ia: IaDesktop): Memoria => mem.get(ia) ?? (() => { throw new Error(`ia desconhecida: ${ia}`); })();
   /** Uma por vez no Mac: cada atualização entra no fim desta fila. */
   let fila: Promise<unknown> = Promise.resolve();
@@ -168,9 +186,30 @@ export function criarAtualizadorDeIas(d: DepsAtualizador): AtualizadorDeIas {
     const ias: DiscoAtualizacoes["ias"] = {};
     for (const ia of IAS_DESKTOP) {
       const e = m(ia);
-      ias[ia] = { registro: e.registro, precisaDesde: e.precisaDesde, ultimo: e.ultimo };
+      ias[ia] = { registro: e.registro, precisaDesde: e.precisaDesde, ultimo: e.ultimo, recusas: e.recusas };
     }
     await d.gravar({ v: 1, ias }).catch((err: unknown) => d.registrar("ia_atualizacao_disco", { erro: err instanceof Error ? err.message : String(err) }));
+  }
+
+  function recusasHoje(ia: IaDesktop): number {
+    const r = m(ia).recusas;
+    return r && r.dia === d.hoje(d.agora()) ? r.n : 0;
+  }
+
+  function contarRecusa(ia: IaDesktop): void {
+    m(ia).recusas = { dia: d.hoje(d.agora()), n: recusasHoje(ia) + 1 };
+  }
+
+  /** A janela de senha só abre num clique, até MAX_RECUSAS_DIA recusas no dia, e quando o passo diz que cabe. */
+  function cabeOPasso(ia: IaDesktop, passo: PassoAtualizar, gatilho: GatilhoAtualizar, feitos: readonly PassoFeito[]): boolean {
+    if (passo.tipo === "aprovacao") {
+      if (gatilho !== "clique") return false;
+      if (recusasHoje(ia) >= MAX_RECUSAS_DIA) {
+        d.registrar("ia_atualizacao_passo", { ia, caminho: passo.tipo, pulado: "recusas_do_dia" });
+        return false;
+      }
+    }
+    return passo.cabe ? passo.cabe(feitos) : true;
   }
 
   async function rodar(ia: IaDesktop, alvo: string, antes: string | null, gatilho: GatilhoAtualizar): Promise<void> {
@@ -188,7 +227,9 @@ export function criarAtualizadorDeIas(d: DepsAtualizador): AtualizadorDeIas {
     }
     try {
       const passos = d.passos(ia, gatilho);
+      const feitos: PassoFeito[] = [];
       for (const passo of passos) {
+        if (!cabeOPasso(ia, passo, gatilho, feitos)) continue;
         caminho = passo.tipo;
         mudar(ia, { fase: passo.tipo === "aprovacao" ? "pedindo_aprovacao" : "atualizando", alvo, ...(antes ? { antes } : {}), caminho, em: d.agora() });
         fim = await passo.rodar(alvo).catch((err: unknown): FimDoPasso => {
@@ -196,6 +237,8 @@ export function criarAtualizadorDeIas(d: DepsAtualizador): AtualizadorDeIas {
           return { resultado: "falhou", antes, depois: null, atende: false };
         });
         d.registrar("ia_atualizacao_passo", { ia, caminho: passo.tipo, resultado: fim.resultado, atende: fim.atende });
+        feitos.push({ tipo: passo.tipo, fim });
+        if (fim.resultado === "recusou") contarRecusa(ia);
         if (fim.atende || !SEGUE_PARA_O_PROXIMO.has(fim.resultado)) break;
       }
     } catch (err) {
@@ -247,7 +290,7 @@ export function criarAtualizadorDeIas(d: DepsAtualizador): AtualizadorDeIas {
   async function avaliar(ia: IaDesktop, gatilho: GatilhoAtualizar, agoraMesmo: boolean): Promise<void> {
     const e = m(ia);
     if (e.rodando) return;
-    const b = await d.binario(ia).catch(() => ({ versao: null, origem: null }));
+    const b = await d.binario(ia, gatilho === "clique" || e.cliquePendente ? "clique" : "auto").catch(() => ({ versao: null, origem: null }));
     if (e.rodando) return;
     const agora = d.agora();
     const clique = gatilho === "clique" || e.cliquePendente;
@@ -361,6 +404,7 @@ export function criarAtualizadorDeIas(d: DepsAtualizador): AtualizadorDeIas {
         e.registro = salvo.registro;
         e.precisaDesde = salvo.precisaDesde;
         e.ultimo = salvo.ultimo;
+        e.recusas = salvo.recusas ?? null;
       }
     },
     verificar,
