@@ -55,6 +55,7 @@ const ROTULO: Readonly<Record<Assunto, string>> = {
   "cota.espera": "Esperando a cota",
   "fundo.espera": "Esperando para tentar de novo",
   "computador.fora_do_ar": "Computador fora do ar",
+  "computador.em_operacao": "Computador em manutenção",
   "computador.tela_fechada": "Fechou a tela do computador",
   "trabalho.aberto": "Abriu uma task",
   "frentes.abertas": "Começou frentes",

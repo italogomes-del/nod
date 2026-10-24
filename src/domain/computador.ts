@@ -101,16 +101,37 @@ export function textoDeLigar(motivo: MotivoFalhaComputador, maquina: string | nu
 }
 
 /**
+ * definido em 2026-10-22 (NOD-96 PR 5): o erro acionável. A falha que a pessoa resolve no painel do computador leva a
+ * ação sugerida (a web abre o painel com ela marcada, `data-realce`): máquina sem contato, sem rede ou que não ficou
+ * pronta → "⚙ Atualizar o computador"; as outras falhas da máquina → "Tentar de novo". null = nada a fazer no painel.
+ */
+export type AcaoDaFalha = { op: "atualizar" | "tentar_de_novo"; rotulo: string };
+export function acaoDaFalha(motivo: MotivoFalhaComputador): AcaoDaFalha | null {
+  if (motivo === "maquina_sem_contato" || motivo === "sem_resposta" || motivo === "nao_ficou_pronto") return { op: "atualizar", rotulo: "⚙ Atualizar o computador" };
+  if (CONTA_PARA_SAUDE.has(motivo)) return { op: "tentar_de_novo", rotulo: "Tentar de novo" };
+  return null;
+}
+/** A frase para o bot repassar à pessoa, com o caminho no painel. */
+function caminhoParaAPessoa(motivo: MotivoFalhaComputador): string {
+  const a = acaoDaFalha(motivo);
+  return a ? ` Diga à pessoa que dá para resolver em "${a.rotulo}", no painel do computador.` : "";
+}
+
+/**
  * O que a FERRAMENTA devolve ao agente em cada falha (tabela fixa, sem catch-all). Máquina fora do
  * ar: não insistir neste turno. Ação que falhou: observar antes de repetir.
  */
+/** NOD-96 PR 5: a ação do bot que encontra o computador numa operação da pessoa. Nada foi executado; não é falha. */
+export const TEXTO_ATUALIZANDO = "O computador está atualizando; tento de novo quando terminar. Nada foi executado e não é erro: chame a mesma ferramenta de novo daqui a pouco e siga esperando; não diga que o computador está fora do ar.";
+
 export function instrucaoDaFalha(motivo: MotivoFalhaComputador, limite: LimiteDeComputadores | null = null, maquina: string | null = null): string {
   const ligar = textoDeLigar(motivo, maquina);
-  if (ligar) return `${ligar}. Nada foi executado. Não tente de novo neste turno; siga com os acessos que você tem e diga em uma frase o que ficou de fora.`;
+  if (ligar) return `${ligar}. Nada foi executado. Não tente de novo neste turno; siga com os acessos que você tem e diga em uma frase o que ficou de fora.${caminhoParaAPessoa(motivo)}`;
   if (motivo === "limite_de_computadores") return `${limite ? textoDoLimite(limite) : "Este Mac já tem o máximo de computadores ligados. Nada foi executado."} Não tente de novo neste turno; siga com os acessos que você tem e diga em uma frase o que ficou de fora.`;
   if (motivo === "faltam_pacotes" || motivo === "sem_suporte") return `O computador não está disponível: ${MOTIVO_FALHA_EM_PORTUGUES[motivo]}. Nada foi executado. Não tente de novo neste turno; siga com os acessos que você tem e diga em uma frase o que ficou de fora.`;
-  if (motivo === "atualizando") return "O computador está sendo atualizado. Nada foi executado. Não tente de novo neste turno; siga com os acessos que você tem e diga em uma frase o que ficou de fora.";
-  if (CONTA_PARA_SAUDE.has(motivo)) return `O computador não respondeu: ${MOTIVO_FALHA_EM_PORTUGUES[motivo]}. Não tente de novo neste turno; siga com os acessos que você tem e diga em uma frase o que ficou de fora.`;
+  // NOD-96 PR 5: a operação da pessoa (Atualizar, Redefinir, Sair de todos) é espera, não erro.
+  if (motivo === "atualizando") return TEXTO_ATUALIZANDO;
+  if (CONTA_PARA_SAUDE.has(motivo)) return `O computador não respondeu: ${MOTIVO_FALHA_EM_PORTUGUES[motivo]}. Não tente de novo neste turno; siga com os acessos que você tem e diga em uma frase o que ficou de fora.${caminhoParaAPessoa(motivo)}`;
   if (motivo === "tela_alterada") return "A tela mudou desde a sua observação. Observe de novo e reavalie antes de agir; nada foi executado.";
   if (motivo === "ocupado") return "Outra ação estava em andamento no computador. Observe a tela antes de tentar de novo; nada foi executado.";
   return "A ação falhou. Observe a tela antes de tentar novamente; não afirme que executou.";
@@ -242,4 +263,23 @@ export const SUFIXO_PEDIDO_DE_TELA = ". Abra a tela e clique nela para assumir; 
 
 export function textoPedidoDeTela(motivo: string): string {
   return `${PREFIXO_PEDIDO_DE_TELA}${motivo}${SUFIXO_PEDIDO_DE_TELA}`;
+}
+
+/**
+ * definido em 2026-10-22 (NOD-96 PR 5): a linha da Atividade do painel do computador ("<bot ou Você> <texto>"). Texto
+ * fixo por tipo, sem argumentos (a URL, o texto digitado e o comando não aparecem); tipo desconhecido vira o genérico.
+ */
+const ATIVIDADE_EM_PORTUGUES: Readonly<Record<string, string>> = {
+  observar: "olhou a tela", navegar: "abriu uma página", clicar: "clicou", arrastar: "arrastou", dialogo: "respondeu um diálogo",
+  audio: "ouviu o áudio", digitar: "digitou", tecla: "apertou uma tecla", rolar: "rolou a página", abas: "trocou de aba",
+  arquivos: "olhou os arquivos", ler_arquivo: "leu um arquivo", ler_texto: "leu um arquivo", gravar_texto: "editou um arquivo",
+  gravar_arquivo: "gravou um arquivo", anexar: "anexou um arquivo", terminal: "rodou um comando", pedir_ajuda: "pediu ajuda",
+  assumir: "assumiu a tela", devolver: "devolveu a tela", parar: "fechou a tela", iniciar: "ligou a tela",
+  supervisionado: "pediu para aprovar as ações", autonomo: "liberou as ações", acordar: "ligou o computador",
+  dormir: "pôs o computador para dormir", tentar_de_novo: "tentou ligar de novo", atualizar: "atualizou o computador",
+  redefinir: "redefiniu o computador", sair_de_todos: "saiu de todos os sites",
+};
+export function textoDaAtividade(tipo: string, estado: string): string {
+  const texto = ATIVIDADE_EM_PORTUGUES[tipo] ?? "usou o computador";
+  return estado === "falhou" ? `${texto} (não deu certo)` : texto;
 }

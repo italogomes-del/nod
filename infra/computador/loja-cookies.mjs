@@ -88,9 +88,43 @@ export function zerar(loja, em, agora = Date.now()) {
 const ESPERA_TRAVA_MS = 5_000;
 const TRAVA_VELHA_MS = 10_000;
 
-/** Trava por arquivo (O_EXCL). Trava com mais de 10 s é de um processo que morreu: sai. */
+/**
+ * Fila do próprio processo, por trava. NOD-96 PR 5: sem ela, N escritas concorrentes do mesmo processo disputavam o
+ * arquivo de trava por polling e a última esperava N × (escrita + fsync) — com fsync lento (CI) passava dos 5 s e
+ * lançava `loja_travada` (o teste das 20 escritas falhava às vezes). Com a fila, dentro do processo a vez é por ordem
+ * de chegada e sem prazo; o prazo de 5 s vale só para esperar OUTRO processo (a trava O_EXCL abaixo).
+ */
+const filas = new Map();
+
+/** Trava por arquivo: fila no processo, depois O_EXCL entre processos. Devolve a função que solta. */
 async function travar(arquivo) {
   const trava = `${arquivo}.lock`;
+  const anterior = filas.get(trava) ?? Promise.resolve();
+  let liberar;
+  const minha = new Promise((r) => { liberar = r; });
+  const cauda = anterior.then(() => minha);
+  filas.set(trava, cauda);
+  await anterior;
+  let soltarArquivo;
+  try {
+    soltarArquivo = await travarArquivo(trava);
+  } catch (e) {
+    liberar();
+    if (filas.get(trava) === cauda) filas.delete(trava);
+    throw e;
+  }
+  return async () => {
+    try {
+      await soltarArquivo();
+    } finally {
+      liberar();
+      if (filas.get(trava) === cauda) filas.delete(trava);
+    }
+  };
+}
+
+/** Trava entre processos (O_EXCL). Trava com mais de 10 s é de um processo que morreu: sai. */
+async function travarArquivo(trava) {
   const limite = Date.now() + ESPERA_TRAVA_MS;
   for (;;) {
     try {

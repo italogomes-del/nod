@@ -4,14 +4,15 @@
 // anti-replay), abre e fecha as telas (tela.mjs, um processo por bot) pela régua de memória, funde os cookies na loja
 // única e repassa às outras telas, e relata o estado (RelatoComputador) a quem estiver ligado no socket.
 //
-// Protocolo do socket: uma linha JSON por mensagem, nos dois sentidos. Entra ComandoComputador; sai
+// Protocolo do socket: uma linha JSON por mensagem, nos dois sentidos. Entra MensagemAoSupervisor
+// ({tipo:"comando", comando} ou {tipo:"pedir_estado"}; o ComandoComputador cru também vale); sai
 // {tipo:"resultado", ...ResultadoComandoComputador} para cada comando e {tipo:"estado", ...EstadoComputadorRelatado} ao
 // conectar, a cada mudança de tela e a cada batimento.
 import { clearInterval, clearTimeout, setInterval, setTimeout } from 'node:timers';
 import { fork } from 'node:child_process';
 import { mkdir, readFile, readdir, rm, writeFile, chmod } from 'node:fs/promises';
 import { existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
-import { availableParallelism } from 'node:os';
+import { availableParallelism, totalmem } from 'node:os';
 import net from 'node:net';
 import path from 'node:path';
 import process from 'node:process';
@@ -26,7 +27,9 @@ import { RESOLV_DO_STUB } from './isolamento.mjs';
 
 const AQUI = path.dirname(fileURLToPath(import.meta.url));
 export const ID_VALIDO = /^[A-Za-z0-9_-]{1,64}$/;
-export const TIPOS = ['iniciar', 'abrir_tela', 'acao', 'fechar_tela', 'parar', 'atualizar', 'redefinir', 'sair_de_todos'];
+export const TIPOS = ['iniciar', 'abrir_tela', 'acao', 'fechar_tela', 'parar', 'atualizar', 'redefinir', 'sair_de_todos', 'apagar_perfil'];
+/** Os comandos que dizem a tela (levam `agenteId`). */
+export const TIPOS_DA_TELA = ['abrir_tela', 'acao', 'fechar_tela', 'apagar_perfil'];
 export const PRAZO_ABRIR_TELA_MS = 60_000;
 export const PRAZO_ACAO_MS = 55_000;
 export const BATIMENTO_MS = 30_000;
@@ -178,11 +181,20 @@ export function criarSupervisor(op) {
   function estadoDe(c) {
     return {
       computadorId: c.id, ligado: c.ligado, supervisorPub: c.pubX,
-      telas: [...c.telas.entries()].map(([agenteId, t]) => ({ agenteId, estado: t.estado, ultimaAcaoEm: t.ultimaAcaoEm ?? null, memoriaMb: t.estado === 'aberta' ? memoriaDaArvore(t.proc?.pid) : null })),
+      ligadoDesde: c.ligado ? c.ligadoDesde ?? null : null, memoriaTotalMb: Math.round(totalmem() / 1048576),
+      operacao: c.operacao ? { tipo: c.operacao.tipo, pct: c.operacao.pct, etapa: c.operacao.etapa } : null,
+      telas: [...c.telas.entries()].map(([agenteId, t]) => ({ agenteId, estado: t.estado, ultimaAcaoEm: t.ultimaAcaoEm ?? null, titulo: t.titulo ?? null, memoriaMb: t.estado === 'aberta' ? memoriaDaArvore(t.proc?.pid) : null })),
     };
   }
   const relatar = (m) => { for (const f of ouvintes) { try { f(m); } catch { /* segue */ } } };
   const relatarEstado = (c) => relatar({ tipo: 'estado', ...estadoDe(c) });
+  /** Avança o progresso da operação em curso e relata a foto (o servidor grava em computadores.operacao_*). */
+  const etapa = (c, pct, nome) => {
+    if (!c.operacao) return;
+    c.operacao.pct = pct;
+    c.operacao.etapa = nome;
+    relatarEstado(c);
+  };
 
   // --- máquina: dbus + keyring + Safe Storage ---
   function iniciarProc(binario, args, env, stdin) {
@@ -224,6 +236,7 @@ export function criarSupervisor(op) {
     c.chaveLoja = chaveDaLoja(chaveMaquina);
     await lerLoja(c.d.loja, c.chaveLoja).catch((e) => { throw Object.assign(e, { codigo: 'cofre_invalido' }); });
     c.ligado = true;
+    c.ligadoDesde = agora();
   }
 
   async function desligarMaquina(c) {
@@ -375,6 +388,7 @@ export function criarSupervisor(op) {
         log(`ação ${cmd.acao.tipo} de ${cmd.agenteId}: ${m.erro} ${m.detalhe ?? ''}`);
         return falhou(cmd.id, ['tela_alterada', 'sem_resposta'].includes(m.erro) ? m.erro : 'acao_falhou');
       }
+      if (typeof m.resultado?.titulo === 'string') t.titulo = m.resultado.titulo.slice(0, 200);
       return resultado(cmd.id, 'ok', { resultado: { ...extra, ...m.resultado } });
     } finally {
       t.ocupada = false;
@@ -382,14 +396,38 @@ export function criarSupervisor(op) {
     }
   }
 
+  async function fecharTodas(c, de, ate) {
+    const abertas = [...c.telas.keys()];
+    for (const [i, agenteId] of abertas.entries()) {
+      await fecharTela(c, agenteId);
+      etapa(c, Math.round(de + ((ate - de) * (i + 1)) / abertas.length), 'Preparando');
+    }
+  }
+
+  /** Redefinir: apaga tudo menos os logins (e o estado, onde fica a chave do servidor), recria o perfil-base e gera a X25519 nova. */
   async function redefinir(c) {
+    etapa(c, 10, 'Preparando');
+    await fecharTodas(c, 10, 30);
+    etapa(c, 35, 'Preparando');
     await desligarMaquina(c);
+    etapa(c, 50, 'Apagando seus dados');
     for (const nome of await readdir(c.d.raiz)) if (nome !== 'logins' && nome !== 'estado') await rm(path.join(c.d.raiz, nome), { recursive: true, force: true });
     await rm(path.join(c.d.estado, 'supervisor.key'), { force: true });
+    etapa(c, 75, 'Criando');
     await prepararPastas(c.d);
+    c.telas.clear();
+    etapa(c, 90, 'Iniciando');
     c.privX = await chaveDoSupervisor(c.d, true);
     c.pubX = publicaX25519(c.privX);
-    c.telas.clear();
+  }
+
+  /** O bot foi excluído: fecha a tela dele e apaga o perfil do Chrome (os logins em comum ficam). */
+  async function apagarPerfil(c, agenteId) {
+    await fecharTela(c, agenteId);
+    c.telas.delete(agenteId);
+    await rm(path.join(c.d.perfis, agenteId), { recursive: true, force: true });
+    await rm(path.join(c.d.run, 'telas', agenteId), { recursive: true, force: true });
+    relatarEstado(c);
   }
 
   async function executar(c, cmd) {
@@ -426,22 +464,33 @@ export function criarSupervisor(op) {
         await desligarMaquina(c);
         relatarEstado(c);
         return resultado(cmd.id, 'ok');
+      case 'apagar_perfil':
+        await apagarPerfil(c, cmd.agenteId);
+        return resultado(cmd.id, 'ok');
       case 'sair_de_todos': {
         if (!c.ligado) return falhou(cmd.id, 'nao_iniciou');
+        etapa(c, 20, 'Saindo das contas');
         await (c.fila = c.fila.then(() => atualizarLoja(c.d.loja, c.chaveLoja, (loja) => zerar(loja, agora(), agora()))));
-        for (const t of c.telas.values()) if (t.estado === 'aberta') await pedirATela(t, { tipo: 'limpar_cookies' }, 15_000);
+        const abertas = [...c.telas.values()].filter((t) => t.estado === 'aberta');
+        etapa(c, 50, 'Limpando');
+        for (const t of abertas) await pedirATela(t, { tipo: 'limpar_cookies' }, 15_000);
         return resultado(cmd.id, 'ok', { progresso: { pct: 100, etapa: 'pronto' } });
       }
       case 'atualizar':
         // Os binários novos vêm do instalador do motor; aqui fecha tudo (perfis, logins e workspace ficam) para o
         // serviço reiniciar com eles.
+        etapa(c, 10, 'Preparando');
+        await fecharTodas(c, 10, 60);
+        etapa(c, 70, 'Reiniciando');
         await desligarMaquina(c);
-        relatarEstado(c);
+        // Reinicia o serviço depois de responder, para o systemd (ativado por socket) carregar os arquivos novos do disco.
+        if (op.aoAtualizar) setTimeout(op.aoAtualizar, 200).unref?.();
         return resultado(cmd.id, 'ok', { progresso: { pct: 100, etapa: 'pronto' } });
       case 'redefinir':
         await redefinir(c);
-        relatarEstado(c);
-        return resultado(cmd.id, 'ok', { progresso: { pct: 100, etapa: 'pronto' } });
+        // A X25519 nova vai na resposta deste comando, que veio assinado com a chave do servidor: é assim que o
+        // servidor troca a supervisor_pub fixada (TOFU) sem aceitar uma chave diferente vinda de uma foto qualquer.
+        return resultado(cmd.id, 'ok', { progresso: { pct: 100, etapa: 'pronto' }, supervisorPub: c.pubX });
       default:
         return falhou(cmd.id, 'acao_falhou');
     }
@@ -455,7 +504,7 @@ export function criarSupervisor(op) {
     try {
       if (!cmd || typeof cmd !== 'object' || !ID_VALIDO.test(String(cmd.computadorId ?? '')) || !TIPOS.includes(cmd.tipo)) return falhou(id, 'acao_falhou');
       if (cmd.agenteId !== undefined && !ID_VALIDO.test(String(cmd.agenteId))) return falhou(id, 'acao_falhou');
-      if (['abrir_tela', 'acao', 'fechar_tela'].includes(cmd.tipo) && !cmd.agenteId) return falhou(id, 'acao_falhou');
+      if (TIPOS_DA_TELA.includes(cmd.tipo) && !cmd.agenteId) return falhou(id, 'acao_falhou');
       const c = await obter(cmd.computadorId);
       // A chave do servidor fica fixada no primeiro `iniciar` (TOFU, como a do supervisor do lado de lá).
       const fixar = !c.servidorPub && cmd.tipo === 'iniciar' && typeof cmd.servidorPub === 'string';
@@ -470,11 +519,17 @@ export function criarSupervisor(op) {
         c.servidorPub = publica;
       }
       if (c.operacao && cmd.tipo !== 'parar') return falhou(id, 'atualizando');
-      if (OPERACOES.has(cmd.tipo)) c.operacao = cmd.tipo;
+      if (OPERACOES.has(cmd.tipo)) {
+        c.operacao = { tipo: cmd.tipo, pct: 0, etapa: 'Preparando' };
+        relatarEstado(c);
+      }
       try {
         return await executar(c, cmd);
       } finally {
-        if (OPERACOES.has(cmd.tipo)) c.operacao = null;
+        if (OPERACOES.has(cmd.tipo)) {
+          c.operacao = null;
+          relatarEstado(c);
+        }
       }
     } catch (e) {
       log(`comando ${id}: ${e?.message}`);
@@ -524,8 +579,11 @@ export function servirControle(supervisor) {
         const linha = buf.slice(0, i).trim();
         buf = buf.slice(i + 1);
         if (!linha) continue;
-        let cmd;
-        try { cmd = JSON.parse(linha); } catch { escrever({ tipo: 'resultado', id: '', desfecho: 'falhou', motivo: 'acao_falhou' }); continue; }
+        let m;
+        try { m = JSON.parse(linha); } catch { escrever({ tipo: 'resultado', id: '', desfecho: 'falhou', motivo: 'acao_falhou' }); continue; }
+        // MensagemAoSupervisor (NOD-96 PR 3) é o envelope do motor; o comando cru segue aceito.
+        if (m?.tipo === 'pedir_estado') { for (const e of supervisor.estados()) escrever({ tipo: 'estado', ...e }); continue; }
+        const cmd = m?.tipo === 'comando' && m.comando && typeof m.comando === 'object' ? m.comando : m;
         void supervisor.tratar(cmd).then((r) => escrever({ tipo: 'resultado', ...r }));
       }
     });
@@ -546,7 +604,9 @@ export async function escutarControle(servidor, caminho) {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   process.umask(0o077);
-  const supervisor = criarSupervisor({ raiz: process.env.NOD_PC_RAIZ, run: process.env.NOD_PC_RUN, terminal: process.env.NOD_PC_TERMINAL });
+  // Depois do Atualizar o processo sai e o systemd (Restart=always) o sobe de novo com os arquivos do disco.
+  const aoAtualizar = () => void supervisor.encerrar().finally(() => process.exit(0));
+  const supervisor = criarSupervisor({ raiz: process.env.NOD_PC_RAIZ, run: process.env.NOD_PC_RUN, terminal: process.env.NOD_PC_TERMINAL, aoAtualizar });
   await supervisor.carregar();
   const servidor = servirControle(supervisor);
   await escutarControle(servidor, process.env.NOD_PC_SOCKET ?? '/run/nod-computador/ctl.sock');

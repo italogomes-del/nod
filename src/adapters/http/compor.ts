@@ -622,6 +622,8 @@ export function comporApp(o: OpcoesCompor): App {
     const desfecho = await dentro(escopo, async (d) => {
       if ((await d.repos.computadores.daPessoa())?.id !== relato.computadorId) return null;
       await reconciliarTelas(d, relato.computadorId, relato);
+      // NOD-96 PR 5: o progresso da operação em curso (o painel o lê no GET /computador); só vale com a mesma operação.
+      if (relato.operacao) await d.repos.computadores.progredirOperacao(relato.computadorId, relato.operacao.tipo, { pct: relato.operacao.pct, etapa: relato.operacao.etapa });
       return d.repos.computadores.fixarSupervisor(relato.computadorId, Buffer.from(relato.supervisorPub, "base64"));
     });
     if (desfecho === "diferente") log("aviso", "computador_supervisor_diferente", { computador_id: relato.computadorId, maquina_id: maquinaId });

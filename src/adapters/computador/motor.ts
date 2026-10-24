@@ -61,9 +61,14 @@ export const PRAZO_RESPOSTA_ACAO_MS = 90_000;
 /** definido em 2026-10-22: o `parar` não segura quem chamou; sem resposta em 30 s, segue (a ociosidade da máquina desliga). */
 const PRAZO_RESPOSTA_PARAR_MS = 30_000;
 /** Os comandos que falam de uma tela (o `agenteId` vai junto); os outros são do computador inteiro. */
-const TIPOS_DA_TELA = new Set<TipoComandoComputador>(["abrir_tela", "acao", "fechar_tela"]);
+const TIPOS_DA_TELA = new Set<TipoComandoComputador>(["abrir_tela", "acao", "fechar_tela", "apagar_perfil"]);
 /** A cada quanto o driver confere se a máquina ainda tem contato enquanto espera. */
 const PASSO_MS = 250;
+/**
+ * definido em 2026-10-22 (NOD-96 PR 5): Atualizar, Redefinir e Sair de todos esperam até 10 min pela resposta (fechar
+ * as telas e apagar perfis demora). O comando continua valendo 2 min para sair da fila; só a espera é longa.
+ */
+export const PRAZO_RESPOSTA_OPERACAO_MS = 10 * 60_000;
 
 export function criarDriverMotor(o: OpcoesDriverMotor): DriverComputador & { motivoParaFicarAcordada(maquinaId: string): boolean } {
   const agora = o.agora ?? Date.now;
@@ -161,6 +166,14 @@ export function criarDriverMotor(o: OpcoesDriverMotor): DriverComputador & { mot
     throw new FalhaComputador(r.motivo ?? "nao_iniciou", { maquina: maquina.nome });
   }
 
+  function iniciar(id: string, escopo?: Escopo): Promise<void> {
+    const emCurso = iniciando.get(id);
+    if (emCurso) return emCurso;
+    const p = ligar(id, escopo).finally(() => iniciando.delete(id));
+    iniciando.set(id, p);
+    return p;
+  }
+
   return {
     async ambiente(): Promise<AmbienteComputador> {
       return credencialOk ? { disponivel: true, motivo: null } : { disponivel: false, motivo: "NOD_CREDENTIAL_KEY precisa ser hex de 64 para o cofre dos computadores" };
@@ -176,13 +189,7 @@ export function criarDriverMotor(o: OpcoesDriverMotor): DriverComputador & { mot
       if (viva.computador !== "pronto") return { disponivel: false, ativo, motivo: viva.computador === "faltam_pacotes" ? `Falta instalar pacotes do computador em ${viva.nome}` : `${viva.nome} não consegue rodar o computador` };
       return { disponivel: true, ativo, motivo: null };
     },
-    iniciar(id, escopo) {
-      const emCurso = iniciando.get(id);
-      if (emCurso) return emCurso;
-      const p = ligar(id, escopo).finally(() => iniciando.delete(id));
-      iniciando.set(id, p);
-      return p;
-    },
+    iniciar,
     async parar(id, escopo) {
       const loc = await acharLoc(id, escopo);
       if (!loc || !credencialOk) return;
@@ -217,6 +224,54 @@ export function criarDriverMotor(o: OpcoesDriverMotor): DriverComputador & { mot
         for (const [doPortao, agenteId] of idsDoPortao.get(c) ?? []) if (!agenteId || telas.has(`${c}:${agenteId}`)) ids.add(doPortao);
       }
       return ids;
+    },
+    async operar(idDoPortao, tipo, escopo) {
+      const loc = await localizar(idDoPortao, escopo);
+      const id = loc.computadorId ?? idDoPortao;
+      // Sair de todos os sites limpa os cookies das telas abertas: o supervisor exige o computador ligado.
+      if (tipo === "sair_de_todos") await iniciar(idDoPortao, escopo);
+      const maquina = await maquinaViva(id, loc);
+      ultimaAcao.set(maquina.machineId, agora());
+      const r = await enviar(idDoPortao, loc, maquina, tipo, agora() + PRAZO_RESPOSTA_OPERACAO_MS, () => new FalhaComputador("sem_resposta", { maquina: maquina.nome }));
+      ultimaAcao.set(maquina.machineId, agora());
+      if (r.desfecho !== "ok") throw new FalhaComputador(r.motivo ?? "acao_falhou", { maquina: maquina.nome });
+      log("info", "computador_operacao_concluida", { computador_id: id, tipo, maquina_id: maquina.machineId });
+      return r.supervisorPub ? { supervisorPub: r.supervisorPub } : {};
+    },
+    async apagarPerfil(idDoPortao, agenteId, escopo) {
+      const loc = await acharLoc(idDoPortao, escopo);
+      if (!loc || !credencialOk) return;
+      const id = loc.computadorId ?? idDoPortao;
+      const alvo = escolherMaquina({ maquinaId: loc.maquinaId, hospedeiraId: loc.hospedeiraId, padraoId: loc.padraoId, conectadas: o.maquinas(loc.escopo) });
+      const viva = alvo ? o.maquinas(loc.escopo).find((m) => m.machineId === alvo) : undefined;
+      // Sem contato o perfil fica na máquina até o Redefinir (a tela some do banco do mesmo jeito).
+      if (!viva) {
+        log("aviso", "computador_perfil_nao_apagado", { computador_id: id, agente_id: agenteId, motivo: "maquina_sem_contato" });
+        return;
+      }
+      try {
+        const r = await enviar(idDoPortao, loc, viva, "apagar_perfil", agora() + PRAZO_RESPOSTA_PARAR_MS, () => new FalhaComputador("sem_resposta", { maquina: viva.nome }), { agenteId });
+        if (r.desfecho !== "ok") log("aviso", "computador_perfil_nao_apagado", { computador_id: id, agente_id: agenteId, motivo: r.motivo ?? "desconhecido" });
+      } catch (e) {
+        log("aviso", "computador_perfil_nao_apagado", { computador_id: id, agente_id: agenteId, motivo: ehFalhaComputador(e) ? e.motivo : "desconhecido" });
+      }
+    },
+    async maquinaDoComputador(id, escopo) {
+      const loc = await acharLoc(id, escopo);
+      if (!loc) return null;
+      const conectadas = o.maquinas(loc.escopo);
+      const alvo = escolherMaquina({ maquinaId: loc.maquinaId, hospedeiraId: loc.hospedeiraId, padraoId: loc.padraoId, conectadas }) ?? loc.maquinaId ?? loc.hospedeiraId;
+      if (!alvo) return null;
+      const viva = conectadas.find((m) => m.machineId === alvo);
+      if (!viva) return { id: alvo, nome: (await o.nomeDaMaquina(loc.escopo, alvo).catch(() => null)) ?? "a máquina do computador", contato: null, foto: null };
+      const f = o.canal.foto(loc.escopo, alvo);
+      const foto = f?.computadorId === id
+        ? { ligadoDesde: f.ligadoDesde ?? null, memoriaTotalMb: f.memoriaTotalMb ?? null, titulos: Object.fromEntries(f.telas.map((t) => [t.agenteId, t.titulo ?? null])) }
+        : null;
+      return { id: alvo, nome: viva.nome, contato: viva.ultimoContato, foto };
+    },
+    ligando(id) {
+      return iniciando.has(id);
     },
     motivoParaFicarAcordada(maquinaId: string): boolean {
       const foto = o.canal.fotoDaMaquina(maquinaId);

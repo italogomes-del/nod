@@ -124,6 +124,15 @@ describe("loja de cookies", () => {
     expect(bruto.includes(Buffer.from("valor-em-claro-"))).toBe(false);
     await expect(lerLoja(arquivo, chaveDaLoja(chaveDaMaquina(CRED, "pc2")))).rejects.toThrow("loja_invalida");
   });
+
+  it("muitas escritas do mesmo processo entram em fila e não estouram o prazo da trava (NOD-96 PR 5: era instável na CI)", async () => {
+    const dir = await pasta();
+    const arquivo = join(dir, "cookies.enc");
+    const chave = chaveDaLoja(chaveDaMaquina(CRED, "pc1"));
+    // Antes da fila, ~300 escritas aqui (ou 20 com fsync lento) passavam dos 5 s de espera e lançavam loja_travada.
+    await Promise.all(Array.from({ length: 300 }, (_, i) => atualizarLoja(arquivo, chave, (l) => fundir(l, { postos: [ck(`k${i}`, "v")], removidos: [] }, 100 + i))));
+    expect(cookiesVivos(await lerLoja(arquivo, chave))).toHaveLength(300);
+  }, 30_000);
 });
 
 describe("régua", () => {

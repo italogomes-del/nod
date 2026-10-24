@@ -1,5 +1,5 @@
 // NOD-96 PR 2 (ADR-122): o supervisor como processo comum, com dbus/keyring/secret-tool falsos e sem telas reais.
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -14,7 +14,7 @@ const ID = "pc1";
 const limpar: Array<() => Promise<unknown> | unknown> = [];
 afterEach(async () => { for (const f of limpar.splice(0).reverse()) await f(); });
 
-async function montar(leitura = () => ({ memoria: "verde" as unknown, processador: "verde" as unknown })) {
+async function montar(leitura = () => ({ memoria: "verde" as unknown, processador: "verde" as unknown }), aoAtualizar?: () => void) {
   const dir = await mkdtemp(join(tmpdir(), "nod-supervisor-test-"));
   limpar.push(() => rm(dir, { recursive: true, force: true }));
   const bin = async (nome: string, corpo: string) => {
@@ -38,7 +38,7 @@ async function montar(leitura = () => ({ memoria: "verde" as unknown, processado
   await escutar(st, terminal);
   limpar.push(() => new Promise((r) => st.close(r)));
   const logs: string[] = [];
-  const sup = criarSupervisor({ raiz: join(dir, "raiz"), run: join(dir, "run"), terminal, bin: binarios, leitura, log: (m) => logs.push(m) });
+  const sup = criarSupervisor({ raiz: join(dir, "raiz"), run: join(dir, "run"), terminal, bin: binarios, leitura, log: (m) => logs.push(m), aoAtualizar });
   limpar.push(() => sup.encerrar());
   return { dir, sup, registro, logs, terminal };
 }
@@ -104,10 +104,59 @@ describe("supervisor", () => {
     expect((await sup.tratar(cmd({ tipo: "sair_de_todos" }))).desfecho).toBe("ok");
     expect(cookiesVivos(await lerLoja(arquivo, chave))).toHaveLength(0);
     const antes = sup.estados()[0]?.supervisorPub;
-    expect((await sup.tratar(cmd({ tipo: "redefinir" }))).desfecho).toBe("ok");
-    expect(sup.estados()[0]).toMatchObject({ ligado: false });
+    await mkdir(join(dir, "raiz", ID, "perfis", "bot1"), { recursive: true });
+    const r = await sup.tratar(cmd({ tipo: "redefinir" }));
+    expect(r).toMatchObject({ desfecho: "ok", progresso: { pct: 100 } });
+    expect(sup.estados()[0]).toMatchObject({ ligado: false, operacao: null });
     expect(sup.estados()[0]?.supervisorPub).not.toBe(antes);
+    // A chave nova volta na resposta do comando assinado (o servidor troca a fixada por ela).
+    expect(r.supervisorPub).toBe(sup.estados()[0]?.supervisorPub);
     await expect(lerLoja(arquivo, chave)).resolves.toBeTruthy();
+    await expect(stat(join(dir, "raiz", ID, "perfis", "bot1"))).rejects.toThrow();
+    await expect(stat(join(dir, "raiz", ID, "perfil-base"))).resolves.toBeTruthy();
+    // A chave do servidor fixada continua: o próximo comando assinado entra.
+    expect((await sup.tratar(cmd({ tipo: "fechar_tela", agenteId: "bot1" }))).desfecho).toBe("ok");
+  });
+
+  it("as operações relatam o progresso em etapas e, durante elas, os outros comandos esperam (atualizando)", async () => {
+    let reiniciou = 0;
+    const { sup } = await montar(undefined, () => { reiniciou++; });
+    await iniciar(sup);
+    const fotos: Array<{ tipo: string; operacao?: { tipo: string; pct: number; etapa: string } | null }> = [];
+    let durante: Promise<{ motivo?: string }> | null = null;
+    sup.ouvir((m) => {
+      const f = m as (typeof fotos)[number];
+      if (f.tipo !== "estado") return;
+      fotos.push(f);
+      if (f.operacao && !durante) durante = sup.tratar(cmd({ tipo: "acao", agenteId: "bot1", acao: { tipo: "observar" } }));
+    });
+    const r = await sup.tratar(cmd({ tipo: "atualizar" }));
+    expect(r).toMatchObject({ desfecho: "ok", progresso: { pct: 100, etapa: "pronto" } });
+    const pcts = fotos.flatMap((f) => (f.operacao ? [f.operacao.pct] : []));
+    expect(pcts.length).toBeGreaterThanOrEqual(3);
+    expect(pcts).toEqual([...pcts].sort((a, b) => a - b));
+    expect(fotos.at(-1)?.operacao).toBeNull();
+    expect(await durante).toMatchObject({ desfecho: "falhou", motivo: "atualizando" });
+    expect(sup.estados()[0]).toMatchObject({ ligado: false });
+    // As etapas têm os nomes que a web mostra (ETAPAS.atualizar do #494).
+    const etapas = new Set(fotos.flatMap((f) => (f.operacao ? [f.operacao.etapa] : [])));
+    expect([...etapas].every((e) => ["Preparando", "Baixando a versão nova", "Reiniciando", "Reconectando"].includes(e))).toBe(true);
+    await new Promise((r) => setTimeout(r, 300));
+    expect(reiniciou).toBe(1);
+  });
+
+  it("apagar_perfil apaga o perfil do bot e deixa os outros e os logins", async () => {
+    const { sup, dir } = await montar();
+    await iniciar(sup);
+    const raiz = join(dir, "raiz", ID);
+    await mkdir(join(raiz, "perfis", "bot1"), { recursive: true });
+    await mkdir(join(raiz, "perfis", "bot2"), { recursive: true });
+    expect((await sup.tratar(cmd({ tipo: "apagar_perfil" }))).desfecho).toBe("falhou");
+    expect((await sup.tratar(cmd({ tipo: "apagar_perfil", agenteId: "../x" }))).desfecho).toBe("falhou");
+    expect((await sup.tratar(cmd({ tipo: "apagar_perfil", agenteId: "bot1" }))).desfecho).toBe("ok");
+    await expect(stat(join(raiz, "perfis", "bot1"))).rejects.toThrow();
+    await expect(stat(join(raiz, "perfis", "bot2"))).resolves.toBeTruthy();
+    await expect(stat(join(raiz, "logins"))).resolves.toBeTruthy();
   });
 
   it("o socket de controle fala NDJSON: estado ao conectar e resultado por comando", async () => {
@@ -131,5 +180,12 @@ describe("supervisor", () => {
     s.write(`${JSON.stringify(c)}\nlixo\n`);
     expect(await chegou((m) => m.tipo === "resultado" && m.id === c.id)).toMatchObject({ desfecho: "ok" });
     expect(await chegou((m) => m.tipo === "resultado" && m.id === "")).toMatchObject({ desfecho: "falhou" });
+    // O envelope do motor (MensagemAoSupervisor): comando embrulhado e pedido da foto.
+    const e = cmd({ tipo: "fechar_tela", agenteId: "bot8" });
+    s.write(`${JSON.stringify({ tipo: "comando", comando: e })}\n`);
+    expect(await chegou((m) => m.tipo === "resultado" && m.id === e.id)).toMatchObject({ desfecho: "ok" });
+    const fotosAntes = linhas.filter((m) => m.tipo === "estado").length;
+    s.write(`${JSON.stringify({ tipo: "pedir_estado" })}\n`);
+    await chegou(() => linhas.filter((m) => m.tipo === "estado").length > fotosAntes);
   });
 });

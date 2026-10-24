@@ -124,4 +124,38 @@ describeIntegracao("computador da pessoa no motor (0106)", () => {
       ]);
     });
   });
+
+  it("PR 5: Redefinir troca a chave só com a operação viva; aviso de recriado uma vez; atividade do painel; tela apagada", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const a = await agenteComConversa(trx, MARLON);
+      await a.repos.computadores.obter(a.agenteId);
+      await a.repos.computadores.arquivarLegado(5000);
+      expect((await a.repos.computadores.legadosArquivados()).map((l) => l.arquivadoEm)).toEqual([5000]);
+      const c = await a.repos.computadores.obterDaPessoa();
+      await a.repos.computadores.fixarSupervisor(c.id, new Uint8Array(32).fill(1));
+      const nova = new Uint8Array(32).fill(9);
+      expect(await a.repos.computadores.trocarSupervisor(c.id, nova)).toBe(false);
+      expect(await a.repos.computadores.iniciarOperacao(c.id, "redefinir", 1000)).toBe(true);
+      expect(await a.repos.computadores.trocarSupervisor(c.id, nova)).toBe(true);
+      expect((await a.repos.computadores.daPessoa())!.supervisorPub).toBe(Buffer.from(nova).toString("base64"));
+
+      // O aviso "Entre nos sites de novo uma vez": a pessoa tinha computador por bot arquivado e ainda não o dispensou.
+      expect(await a.repos.computadores.avisoRecriado(c.id)).toBe(true);
+      await a.repos.computadores.registrar({ computadorId: c.id, autor: "pessoa", tipo: "aviso_recriado", estado: "concluida" });
+      expect(await a.repos.computadores.avisoRecriado(c.id)).toBe(false);
+
+      await a.repos.computadores.vincularBot(c.id, a.agenteId);
+      const t = (await a.repos.computadorTelas.obter(c.id, a.agenteId))!;
+      await a.repos.computadores.registrar({ computadorId: c.id, autor: "bot", tipo: "navegar", estado: "concluida", agenteId: a.agenteId, telaId: t.id });
+      await a.repos.computadores.registrar({ computadorId: c.id, autor: "bot", tipo: "observar", estado: "concluida", agenteId: a.agenteId, telaId: t.id });
+      await a.repos.computadores.registrar({ computadorId: c.id, autor: "pessoa", tipo: "atualizar", estado: "falhou" });
+      const atividade = await a.repos.computadores.atividadeDaPessoa(c.id);
+      expect(atividade.map((x) => [x.tipo, x.agenteId]).sort()).toEqual([["atualizar", null], ["navegar", a.agenteId]]);
+
+      // Bot excluído: a tela sai do banco; a ação fica, sem tela.
+      await a.repos.computadorTelas.apagar(t.id);
+      expect(await a.repos.computadorTelas.porId(t.id)).toBeNull();
+      expect((await a.repos.computadores.atividadeDaPessoa(c.id)).map((x) => x.tipo).sort()).toEqual(["atualizar", "navegar"]);
+    });
+  });
 });

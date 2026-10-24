@@ -103,6 +103,14 @@ export type AmbienteComputador = { disponivel: boolean; motivo: string | null; l
 /** O escopo de quem chama (o mesmo formato de `Escopo` em shared/types; contracts é fechado). */
 type EscopoDoDriver = { tenantId: string; pessoaId: string };
 
+/** NOD-96 PR 5: a máquina do computador da pessoa, como o driver motor a vê. */
+export type MaquinaDoComputador = {
+  id: string;
+  nome: string;
+  contato: number | null;
+  foto: { ligadoDesde: number | null; memoriaTotalMb: number | null; titulos: Record<string, string | null> } | null;
+};
+
 export interface DriverComputador {
   /** NOD-192: o painel de um bot sem computador mostra só o ambiente — não há container para inspecionar. */
   ambiente(): Promise<AmbienteComputador>;
@@ -114,4 +122,17 @@ export interface DriverComputador {
   executar(id: string, acao: AcaoComputador, escopo?: EscopoDoDriver): Promise<ResultadoComputador>;
   /** NOD-170: os ids dos computadores ligados NESTE host (de qualquer pessoa; os proxies nod-egress-* não contam). */
   ligados(): Promise<Set<string>>;
+  // NOD-96 PR 5 (só o driver motor): as operações do computador da pessoa, o perfil do bot excluído e a máquina dele.
+  /** Atualizar, Redefinir ou Sair de todos os sites; no Redefinir devolve a X25519 nova do supervisor. */
+  operar?(id: string, tipo: "atualizar" | "redefinir" | "sair_de_todos", escopo?: EscopoDoDriver): Promise<{ supervisorPub?: string }>;
+  /** Fecha a tela do bot e apaga o perfil do Chrome dele (bot excluído); os logins em comum ficam. */
+  apagarPerfil?(id: string, agenteId: string, escopo?: EscopoDoDriver): Promise<void>;
+  /**
+   * A máquina onde o computador roda (ou rodaria): `contato` é o último contato (nulo = sem contato agora) e `foto` o
+   * que a foto viva do supervisor diz (desde quando está ligado, a memória total e o título de cada tela); null =
+   * nenhuma máquina escolhida.
+   */
+  maquinaDoComputador?(id: string, escopo?: EscopoDoDriver): Promise<MaquinaDoComputador | null>;
+  /** O `iniciar` deste computador está em curso. */
+  ligando?(id: string): boolean;
 }

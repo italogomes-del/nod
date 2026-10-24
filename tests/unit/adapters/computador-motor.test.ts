@@ -250,3 +250,60 @@ describe("canal: a puxada só entrega à máquina e à pessoa do comando", () =>
     expect(canal.puxar(escopo, "vm")).toHaveLength(0);
   });
 });
+
+describe("driver motor: operações da pessoa (NOD-96 PR 5)", () => {
+  it("atualizar e redefinir vão sem tela; o redefinir devolve a X25519 nova; a espera passa dos 2 min do comando", async () => {
+    const nova = gerarParX25519().publica;
+    let pedidoEm = 0;
+    let pendente: ComandoComputador | null = null;
+    const m = mundo({
+      loc: { agenteId: null, maquinaId: "vm" },
+      responder: (c, t) => { if (c.tipo === "redefinir") { pedidoEm = t; pendente = c; return null; } return { id: c.id, desfecho: "ok" }; },
+      aoPasso: (t, canal) => { if (pendente && t - pedidoEm >= 5 * 60_000) { canal.resultado(escopo, "vm", { id: pendente.id, desfecho: "ok", supervisorPub: nova }); pendente = null; } },
+    });
+    await expect(m.driver.operar!(ID, "atualizar")).resolves.toEqual({});
+    expect(m.vistos.at(-1)).toMatchObject({ tipo: "atualizar" });
+    expect(m.vistos.at(-1)?.agenteId).toBeUndefined();
+    await expect(m.driver.operar!(ID, "redefinir")).resolves.toEqual({ supervisorPub: nova });
+    const r = m.vistos.find((c) => c.tipo === "redefinir")!;
+    expect(r.prazoMs - pedidoEm).toBeLessThanOrEqual(120_000);
+  });
+
+  it("sair de todos liga o computador antes; falhou vira o motivo (atualizando)", async () => {
+    const m = mundo({ loc: { agenteId: null }, responder: (c) => (c.tipo === "sair_de_todos" ? { id: c.id, desfecho: "falhou", motivo: "atualizando" } : { id: c.id, desfecho: "ok" }) });
+    const e = await falha(m.driver.operar!(ID, "sair_de_todos"));
+    expect(e.motivo).toBe("atualizando");
+    expect(m.vistos.map((c) => c.tipo)).toEqual(["iniciar", "sair_de_todos"]);
+  });
+
+  it("sem resposta em 10 min: sem_resposta e o comando sai da fila", async () => {
+    const m = mundo({ loc: { agenteId: null, maquinaId: "vm" }, responder: () => null });
+    const antes = m.agora();
+    expect((await falha(m.driver.operar!(ID, "atualizar"))).motivo).toBe("sem_resposta");
+    expect(m.agora() - antes).toBeGreaterThanOrEqual(10 * 60_000);
+    expect(m.canal.pendentes()).toEqual([]);
+  });
+
+  it("apagar_perfil leva o bot excluído; sem contato não lança", async () => {
+    const m = mundo({ loc: { agenteId: null, maquinaId: "vm" } });
+    await m.driver.apagarPerfil!(ID, "bot-9");
+    expect(m.vistos.at(-1)).toMatchObject({ tipo: "apagar_perfil", agenteId: "bot-9" });
+    const s = mundo({ conectada: false, loc: { agenteId: null, maquinaId: "vm" } });
+    await expect(s.driver.apagarPerfil!(ID, "bot-9")).resolves.toBeUndefined();
+    expect(s.vistos).toEqual([]);
+  });
+
+  it("maquinaDoComputador diz o nome e o contato; ligando enquanto o iniciar corre", async () => {
+    const m = mundo({ loc: { agenteId: null } });
+    expect(await m.driver.maquinaDoComputador!(ID)).toEqual({ id: "vm", nome: "vm-1", contato: expect.any(Number), foto: null });
+    m.canal.relatarEstado(escopo, "vm", { computadorId: ID, ligado: true, supervisorPub: m.sup.publica, ligadoDesde: 5, memoriaTotalMb: 8000, telas: [{ agenteId: "bot-1", estado: "aberta", ultimaAcaoEm: null, memoriaMb: 300, titulo: "Caixa de entrada" }] });
+    expect((await m.driver.maquinaDoComputador!(ID))?.foto).toEqual({ ligadoDesde: 5, memoriaTotalMb: 8000, titulos: { "bot-1": "Caixa de entrada" } });
+    const s = mundo({ conectada: false, loc: { agenteId: null, maquinaId: "vm" } });
+    expect(await s.driver.maquinaDoComputador!(ID)).toEqual({ id: "vm", nome: "vm-1", contato: null, foto: null });
+    expect(await mundo({ conectada: false, loc: { agenteId: null } }).driver.maquinaDoComputador!(ID)).toBeNull();
+    const p = m.driver.iniciar(ID);
+    expect(m.driver.ligando!(ID)).toBe(true);
+    await p;
+    expect(m.driver.ligando!(ID)).toBe(false);
+  });
+});

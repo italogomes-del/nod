@@ -163,6 +163,26 @@ export function computadoresRepo(conn: Conn, escopo: Escopo) {
     async esquecerSupervisor(id: string): Promise<void> {
       await conn`update computadores set supervisor_pub = null where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and modelo = 'por_pessoa'`;
     },
+    /**
+     * NOD-96 PR 5: o Redefinir trocou a X25519 do supervisor. A chave nova veio na resposta do comando `redefinir`, que
+     * foi assinado com a chave do servidor; por isso só vale com o Redefinir em curso (nunca por uma foto qualquer).
+     */
+    async trocarSupervisor(id: string, pub: Uint8Array): Promise<boolean> {
+      const linhas = await conn`update computadores set supervisor_pub = ${Buffer.from(pub)}
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and modelo = 'por_pessoa' and operacao = 'redefinir' returning id`;
+      return linhas.length > 0;
+    },
+    /**
+     * NOD-96 PR 5: a pessoa tinha computadores por bot (modo antigo, arquivados pelo `computador:legado`) e ainda não
+     * dispensou o "Entre nos sites de novo uma vez" (registro 'aviso_recriado' no computador dela).
+     */
+    async avisoRecriado(id: string): Promise<boolean> {
+      const [l] = await conn<{ mostrar: boolean }[]>`select
+          exists (select 1 from computadores where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and modelo = 'por_bot' and arquivado_em is not null)
+          and not exists (select 1 from computador_acoes where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and computador_id = ${id} and tipo = 'aviso_recriado')
+          as mostrar`;
+      return l?.mostrar === true;
+    },
     /** Começa Atualizar, Redefinir ou Sair de todos. Falso = já há uma operação em curso (uma de cada vez). */
     async iniciarOperacao(id: string, tipo: OperacaoComputador, em: number): Promise<boolean> {
       const linhas = await conn`update computadores set operacao = ${tipo}, operacao_desde = ${new Date(em)}, operacao_progresso = 0, operacao_etapa = null
@@ -192,6 +212,12 @@ export function computadoresRepo(conn: Conn, escopo: Escopo) {
       const ids = linhas.map((l) => l.id);
       if (ids.length > 0) await conn`update agentes set computador_id = null where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and computador_id = any(${ids}::uuid[])`;
       return ids;
+    },
+    /** NOD-96 PR 5 (`npm run computador:legado`): os computadores por bot já arquivados, com a data do arquivamento. */
+    async legadosArquivados(): Promise<{ id: string; arquivadoEm: number }[]> {
+      const linhas = await conn<{ id: string; arquivado_em: Date }[]>`select id, arquivado_em from computadores
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and modelo = 'por_bot' and arquivado_em is not null order by arquivado_em`;
+      return linhas.map((l) => ({ id: l.id, arquivadoEm: l.arquivado_em.getTime() }));
     },
     /**
      * ADR-083 (S5): quem segura o computador agora — o título do trabalho do turno da ação em execução, ou "a conversa"
@@ -233,6 +259,19 @@ export function computadoresRepo(conn: Conn, escopo: Escopo) {
     /** `motivo` só na ação que falhou (CHECK computador_acao_motivo_so_na_falha, 0022). */
     async concluir(id: string, estado: RegistroComputador["estado"], motivo: MotivoFalhaComputador | null = null): Promise<void> {
       await conn`update computador_acoes set estado = ${estado}, motivo = ${estado === "falhou" ? motivo : null}, argumentos_cifrados = null where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id}`;
+    },
+    /**
+     * NOD-96 PR 5: a atividade do computador da pessoa para o painel, com o bot (o da ação ou o dono da tela) e sem os
+     * observar que deram certo. Mais nova primeiro.
+     */
+    async atividadeDaPessoa(id: string, limite = 8): Promise<{ agenteId: string | null; autor: RegistroComputador["autor"]; tipo: string; estado: RegistroComputador["estado"]; em: number }[]> {
+      const linhas = await conn<{ agente_id: string | null; autor: RegistroComputador["autor"]; tipo: string; estado: RegistroComputador["estado"]; em: Date }[]>`
+        select coalesce(a.agente_id, t.agente_id) as agente_id, a.autor, a.tipo, a.estado, a.em from computador_acoes a
+        left join computador_telas t on t.id = a.tela_id
+        where a.tenant_id = ${escopo.tenantId} and a.owner_id = ${escopo.pessoaId} and a.computador_id = ${id}
+          and (a.tipo <> 'observar' or a.estado = 'falhou') and a.tipo <> 'aviso_recriado' and a.estado <> 'pendente'
+        order by a.em desc limit ${limite}`;
+      return linhas.map((l) => ({ agenteId: l.autor === "bot" ? l.agente_id : null, autor: l.autor, tipo: l.tipo, estado: l.estado, em: l.em.getTime() }));
     },
     /**
      * definido em 2026-09-24 (emenda da ADR-037): o observar que DEU CERTO continua fora (a tela é

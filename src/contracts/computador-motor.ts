@@ -55,7 +55,7 @@ export type TelaComputadorBot = {
   criadoEm: EpochMs;
 };
 
-export const TIPOS_COMANDO_COMPUTADOR = ["iniciar", "abrir_tela", "acao", "fechar_tela", "parar", "atualizar", "redefinir", "sair_de_todos"] as const;
+export const TIPOS_COMANDO_COMPUTADOR = ["iniciar", "abrir_tela", "acao", "fechar_tela", "parar", "atualizar", "redefinir", "sair_de_todos", "apagar_perfil"] as const;
 export type TipoComandoComputador = (typeof TIPOS_COMANDO_COMPUTADOR)[number];
 
 /**
@@ -95,6 +95,8 @@ export type ResultadoComandoComputador = {
   motivo?: MotivoFalhaComputador;
   quem?: string[];
   progresso?: { pct: number; etapa: string };
+  /** Só no `ok` do `redefinir`: a X25519 nova do supervisor, que o servidor fixa no lugar da antiga (NOD-96 PR 5). */
+  supervisorPub?: string;
 };
 
 /** A foto do computador que o supervisor manda sem ser perguntado (ao ligar, a cada mudança de tela e no batimento). */
@@ -103,7 +105,12 @@ export type EstadoComputadorRelatado = {
   ligado: boolean;
   /** X25519 em base64. */
   supervisorPub: string;
-  telas: { agenteId: string; estado: EstadoTelaComputador; ultimaAcaoEm: EpochMs | null; memoriaMb: number | null }[];
+  telas: { agenteId: string; estado: EstadoTelaComputador; ultimaAcaoEm: EpochMs | null; memoriaMb: number | null; titulo?: string | null }[];
+  /** Desde quando está ligado e a memória total da máquina (NOD-96 PR 5); ausentes = supervisor antigo. */
+  ligadoDesde?: EpochMs | null;
+  memoriaTotalMb?: number | null;
+  /** A operação em curso e o progresso dela (NOD-96 PR 5); `null` = nenhuma; ausente = supervisor antigo. */
+  operacao?: { tipo: OperacaoComputador; pct: number; etapa: string } | null;
 };
 
 /** O que sobe do supervisor ao servidor: a resposta de um comando ou a foto do computador. */
@@ -122,3 +129,46 @@ export type AnuncioComputador = { estado: EstadoAnuncioComputador; falta?: strin
  * `computadorId: ""`: o servidor só aprende a X25519 dele para selar o `iniciar`.
  */
 export type MensagemAoSupervisor = { tipo: "comando"; comando: ComandoComputador } | { tipo: "pedir_estado" };
+
+/**
+ * definido em 2026-10-22 (NOD-96 PR 5): o computador da pessoa como a web o vê (`GET /computador`). `estado`:
+ * dormindo (desligado), ligando, pronto, fora_do_ar (falhas seguidas ou máquina sem contato) e operando (Atualizar,
+ * Redefinir ou Sair de todos em curso, com `operacao`). `maquina` nula = ainda sem máquina escolhida. `esperando`: os
+ * bots que esperam a vez de uma tela. `aviso_recriado`: a pessoa tinha computadores por bot (modo antigo) e ainda não
+ * viu o "Entre nos sites de novo uma vez".
+ */
+export const ESTADOS_COMPUTADOR_DA_PESSOA = ["dormindo", "ligando", "pronto", "fora_do_ar", "operando"] as const;
+export type EstadoComputadorDaPessoa = (typeof ESTADOS_COMPUTADOR_DA_PESSOA)[number];
+export type ComputadorDaPessoaDto = {
+  estado: EstadoComputadorDaPessoa;
+  /** `contato`: último contato da máquina (epoch ms); nulo = sem contato agora. */
+  maquina: { id: string; nome: string; contato: EpochMs | null } | null;
+  /** `ultimaAcaoEm` vira "ativo agora"/"parado há" na web; `titulo` é o da página aberta, quando o supervisor relata. */
+  telas: {
+    agenteId: string;
+    estado: EstadoTelaComputador;
+    controle: ControleComputador;
+    memoriaMb: number | null;
+    titulo?: string | null;
+    ultimaAcaoEm?: EpochMs | null;
+    ajuda?: string | null;
+  }[];
+  esperando: string[];
+  /** `etapa` com os nomes que a web conhece (Preparando, Apagando seus dados, Criando, Iniciando, Reconectando...). */
+  operacao?: { tipo: OperacaoComputador; pct: number | null; etapa: string | null } | null;
+  /** Em `fora_do_ar`: o motivo e desde quando (para a web dizer o porquê e oferecer Tentar de novo). */
+  falha?: { motivo: MotivoFalhaComputador; desde: EpochMs } | null;
+  /** Soma da memória das telas; `totalMb` nulo enquanto o supervisor não relata o total da máquina. */
+  memoria?: { usadaMb: number; totalMb: number | null } | null;
+  ligadoDesde?: EpochMs | null;
+  /** As últimas ações no computador, mais nova primeiro; `agenteId` nulo = a pessoa. */
+  atividade?: { agenteId: string | null; texto: string; em: EpochMs }[];
+  aviso_recriado?: boolean;
+};
+
+/**
+ * As operações do `POST /computador` (NOD-96 PR 5). `dispensar_aviso` é extensão deste PR: marca o
+ * `aviso_recriado` como visto (a web chama ao fechar o aviso).
+ */
+export const OPERACOES_DA_PESSOA = ["acordar", "dormir", "atualizar", "redefinir", "sair_de_todos", "tentar_de_novo", "dispensar_aviso"] as const;
+export type OperacaoDaPessoa = (typeof OPERACOES_DA_PESSOA)[number];

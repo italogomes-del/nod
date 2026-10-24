@@ -1,10 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { AcaoComputador, Computador, ComputadorDto, ControleComputador, DriverComputador, OrigemControle, PoliticaComputador, RegistroComputador, ResultadoComputador } from "../../contracts/computador.ts";
-import type { ComputadorDaPessoa, EstadoComputadorRelatado, TelaComputadorBot } from "../../contracts/computador-motor.ts";
+import type { ComputadorDaPessoa, ComputadorDaPessoaDto, EstadoComputadorDaPessoa, EstadoComputadorRelatado, OperacaoComputador, OperacaoDaPessoa, TelaComputadorBot } from "../../contracts/computador-motor.ts";
 import { FERRAMENTAS_COMPUTADOR } from "../../contracts/ferramentas-computador.ts";
 import type { MotivoFalhaComputador } from "../../contracts/motivos.ts";
 import type { PlanoTurno } from "../../contracts/plano-turno.ts";
-import { alteraComputador, computadorPadrao, CONTA_PARA_SAUDE, ehEsperandoTela, ehFalhaComputador, type FalhaComputador, instrucaoDaFalha, LIMITE_FALHAS_SEGUIDAS, MOTIVO_FALHA_EM_PORTUGUES, resumirDetalhe, resumoAcaoComputador, textoPedidoDeTela, validarAcaoComputador } from "../../domain/computador.ts";
+import { acaoDaFalha, alteraComputador, computadorPadrao, CONTA_PARA_SAUDE, ehEsperandoTela, ehFalhaComputador, type FalhaComputador, instrucaoDaFalha, LIMITE_FALHAS_SEGUIDAS, MOTIVO_FALHA_EM_PORTUGUES, resumirDetalhe, resumoAcaoComputador, TEXTO_ATUALIZANDO, textoDaAtividade, textoPedidoDeTela, validarAcaoComputador } from "../../domain/computador.ts";
 import { ehErroDeDominio, ErroDeDominio } from "../../domain/erro.ts";
 import { deduplicarObservacao, type HashesObservacao } from "../../domain/observacao-computador.ts";
 import { decidirPeloModo, semRevisor } from "../../domain/modo-aprovacao.ts";
@@ -71,6 +71,25 @@ class EsperaEsgotada extends Error {
     this.quem = quem;
   }
 }
+/**
+ * definido em 2026-10-22 (NOD-96 PR 5): durante Atualizar, Redefinir ou Sair de todos a ação do bot espera a operação
+ * acabar, na mesma janela da fila de telas; passada a janela, o bot recebe "o computador está atualizando" (espera,
+ * não erro) e chama de novo. Operação que ficou mais de 15 min sem terminar (servidor caiu no meio) não segura ninguém:
+ * a próxima operação da pessoa a encerra.
+ */
+const TETO_OPERACAO_MS = 15 * 60_000;
+const operacaoViva = (p: ComputadorDaPessoa | null, agora: number): boolean => Boolean(p?.operacao && agora - p.operacao.desde < TETO_OPERACAO_MS);
+class EsperaOperacao extends Error {
+  constructor() { super("espera_operacao"); }
+}
+const atualizandoParaAgente = () => JSON.stringify({ estado: "atualizando", instrucao: TEXTO_ATUALIZANDO });
+const ehAtualizando = (e: unknown) => e instanceof EsperaOperacao || (ehFalhaComputador(e) && e.motivo === "atualizando");
+/** O que o aviso no chat diz de cada operação (a pessoa lê). */
+const OPERACAO_NO_AVISO: Record<OperacaoComputador, string> = {
+  atualizar: "você pediu para atualizar o computador",
+  redefinir: "você pediu para redefinir o computador",
+  sair_de_todos: "você pediu para sair de todos os sites",
+};
 function esperandoTelaParaAgente(quem: string[]): string {
   const uso = quem.length ? ` ${quem.join(", ")} ${quem.length === 1 ? "está" : "estão"} usando o computador agora.` : "";
   return JSON.stringify({ estado: "esperando_tela", quem, instrucao: `Ainda esperando uma tela livre no computador; seu lugar na fila continua.${uso} Chame a mesma ferramenta de novo para seguir esperando; não diga que o computador está fora do ar.` });
@@ -282,8 +301,24 @@ export function criarComputadores(o: Opcoes) {
     if (!agente || !conversa) return;
     const agora = d.agora();
     const autoria = autoriaAgente({ agenteId: agente.id, contaDeExecucao: d.escopo.pessoaId, executor: o.executor(), decididoPor: "regra:saude_computador" });
-    const texto = redigir("computador-fora-do-ar", agora, { agente: agente.nome, motivo: MOTIVO_FALHA_EM_PORTUGUES[motivo] });
-    const m = await d.repos.mensagens.criar({ conversaId: conversa.id, turnoId: null, autoria, kind: "sistema", texto, payload: { kind: "computador_fora_do_ar", agenteId: agente.id, desde: desde ?? agora, motivo }, confianca: "confiavel" });
+    // NOD-96 PR 5: no computador da pessoa o aviso diz a ação do painel que resolve (erro acionável).
+    const acao = porPessoa ? acaoDaFalha(motivo) : null;
+    const texto = acao
+      ? redigir("computador-fora-do-ar-com-acao", agora, { agente: agente.nome, motivo: MOTIVO_FALHA_EM_PORTUGUES[motivo], acao: acao.rotulo })
+      : redigir("computador-fora-do-ar", agora, { agente: agente.nome, motivo: MOTIVO_FALHA_EM_PORTUGUES[motivo] });
+    const m = await d.repos.mensagens.criar({ conversaId: conversa.id, turnoId: null, autoria, kind: "sistema", texto, payload: { kind: "computador_fora_do_ar", agenteId: agente.id, desde: desde ?? agora, motivo, ...(acao ? { acao } : {}) }, confianca: "confiavel" });
+    if (m) await d.repos.events.gravarComOutbox([evento(d.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: conversa.id, turnoId: null, dados: { mensagem_id: m.id, kind: "sistema" } })]);
+  }
+
+  /** NOD-96 PR 5: a tela do bot fechou por uma operação que a pessoa pediu; o aviso vai à conversa dele. */
+  async function avisarOperacao(d: Deps, agenteId: string, operacao: OperacaoComputador): Promise<void> {
+    const agente = await d.repos.agentes.buscar(agenteId);
+    const conversa = agente ? await d.repos.conversas.buscarPropriaDoAgente(agente.id) : null;
+    if (!agente || !conversa) return;
+    const agora = d.agora();
+    const autoria = autoriaAgente({ agenteId: agente.id, contaDeExecucao: d.escopo.pessoaId, executor: o.executor(), decididoPor: "regra:operacao_computador" });
+    const texto = redigir("computador-em-operacao", agora, { agente: agente.nome, operacao: OPERACAO_NO_AVISO[operacao] });
+    const m = await d.repos.mensagens.criar({ conversaId: conversa.id, turnoId: null, autoria, kind: "sistema", texto, payload: { kind: "computador_em_operacao", agenteId: agente.id, operacao }, confianca: "confiavel" });
     if (m) await d.repos.events.gravarComOutbox([evento(d.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: conversa.id, turnoId: null, dados: { mensagem_id: m.id, kind: "sistema" } })]);
   }
 
@@ -362,27 +397,62 @@ export function criarComputadores(o: Opcoes) {
     }
   }
 
+  /**
+   * NOD-96 PR 5: com Atualizar, Redefinir ou Sair de todos em curso, a ação do bot espera (renovando a reserva e
+   * conferindo, a cada fatia, se ainda pode). Sem operação, uma leitura só. `fatiaAntes`: o supervisor já respondeu
+   * "atualizando" e o banco ainda não sabe (o relato vem depois); espera uma fatia antes de tentar de novo.
+   */
+  async function esperarOperacao(escopo: Escopo, r: Reserva, fatiaAntes = false): Promise<void> {
+    for (let volta = 0; ; volta++) {
+      if (volta > 0 || fatiaAntes) {
+        if (agora() >= (r.esperaAte ?? 0)) throw new EsperaOperacao();
+        await dormir(FATIA_ESPERA_TELA_MS);
+      }
+      const viva = await o.dentro(escopo, async (d) => {
+        if (!operacaoViva(await d.repos.computadores.daPessoa(), d.agora())) return false;
+        const atual = await aindaPermitido(d, r);
+        if (!atual.permitido || !atual.vaga) return null;
+        await lugar.ocupar(d, atual.vaga, r.operacao, d.agora() + LEASE_MS);
+        return true;
+      });
+      if (viva === null) throw new ErroDeDominio("nao_permitido");
+      if (!viva) return;
+    }
+  }
+
   async function executar(escopo: Escopo, r: Reserva): Promise<ResultadoComputador> {
     let estado: "concluida" | "falhou" = "falhou";
     let falha: FalhaComputador | null = null;
     let motivoSemFalha: MotivoFalhaComputador | null = null;
     let respondeu = false;
     let abriu = false;
+    // NOD-96 PR 5: só a ação do bot na tela (com janela de espera) espera a operação; a da pessoa recebe "atualizando".
+    const esperaOperacao = r.esperaAte !== undefined && r.computador.telaId !== null;
     /** Esta ação pôs a tela na fila (esperarVez gravou 'esperando'). */
     let esperou = false;
     /** A janela acabou com o lugar guardado de propósito (EsperaEsgotada): a tela fica na fila. */
     let guardouLugar = false;
     try {
-      await o.driver.iniciar(r.computador.id, escopo);
-      respondeu = true;
-      const estadoAtual = await o.dentro(escopo, (d) => aindaPermitido(d, r));
-      if (!estadoAtual.permitido) { if (estadoAtual.desligar) await o.driver.parar(r.computador.id, escopo); throw new ErroDeDominio("nao_permitido"); }
       let resultado: ResultadoComputador;
+      let ligado = false;
+      let fatiaAntes = false;
       for (;;) {
         try {
+          if (esperaOperacao) await esperarOperacao(escopo, r, fatiaAntes);
+          fatiaAntes = false;
+          if (!ligado) {
+            await o.driver.iniciar(r.computador.id, escopo);
+            respondeu = true;
+            const estadoAtual = await o.dentro(escopo, (d) => aindaPermitido(d, r));
+            if (!estadoAtual.permitido) { if (estadoAtual.desligar) await o.driver.parar(r.computador.id, escopo); throw new ErroDeDominio("nao_permitido"); }
+            ligado = true;
+          }
           resultado = await o.driver.executar(r.computador.id, r.acao, escopo);
           break;
         } catch (e) {
+          // A operação começou entre a leitura e o comando: o supervisor responde "atualizando"; espera e tenta de novo
+          // (o Atualizar reinicia o supervisor, então o iniciar vai de novo).
+          if (esperaOperacao && ehFalhaComputador(e) && e.motivo === "atualizando") { fatiaAntes = true; ligado = false; continue; }
           // Sem memória para a tela (régua, ADR-085/097): o bot espera a vez; a pessoa recebe "ocupado" na hora.
           if (!ehEsperandoTela(e) || r.esperaAte === undefined) throw e;
           esperou = true;
@@ -398,6 +468,8 @@ export function criarComputadores(o: Opcoes) {
       // aprovada que esgota a espera (não volta à fila sozinha) não foram executadas: falhou/ocupado, e a tela sai da fila.
       if (e instanceof EsperaEsgotada && !r.aprovado) { estado = "concluida"; guardouLugar = true; }
       else if (e instanceof EsperaEsgotada || ehEsperandoTela(e)) motivoSemFalha = "ocupado";
+      // NOD-96 PR 5 (à parte da fila): a janela acabou esperando a operação (Atualizar/Redefinir): falhou, "atualizando".
+      if (e instanceof EsperaOperacao) motivoSemFalha = "atualizando";
       if (ehFalhaComputador(e)) {
         falha = e;
         // A ação falhou numa máquina que RESPONDEU (tela alterada, ocupado…): ela está viva. O teto do host
@@ -450,7 +522,8 @@ export function criarComputadores(o: Opcoes) {
       const fechando = new Set(fechar.map((t) => t.id));
       const telas = await d.repos.computadorTelas.doComputador(p.id);
       const segura = (t: TelaComputadorBot) => !fechando.has(t.id) && (ocupada(t) || t.ultimaAtividadeEm >= agora - limiteMs || (t.estado !== "fechada" && t.controle !== "bot"));
-      const deveDormir = ligados.has(p.id) && p.operacao === null && !telas.some(segura);
+      // Operação presa (o servidor caiu no meio, passou do teto) não segura a máquina acordada.
+      const deveDormir = ligados.has(p.id) && !operacaoViva(p, agora) && !telas.some(segura);
       return { p, fechar, deveDormir, abertas: telas.filter((t) => t.estado !== "fechada" && t.estado !== "esperando").map((t) => t.id) };
     });
     if (!plano) return 0;
@@ -538,14 +611,18 @@ export function criarComputadores(o: Opcoes) {
           await d.repos.computadorTelas.travar(t.id);
           await d.repos.computadorTelas.configurar(t.id, { controle: "pessoa" });
           await d.repos.computadorTelas.mudarEstado(t.id, "fechando", d.agora());
-          return { id: t.id, telaId: t.id };
+          return { id: t.id, telaId: t.id, computadorId: p.id };
         }
         const c = await d.repos.computadores.buscarVinculo(agenteId);
         if (c) await d.repos.computadores.configurar(c.id, { habilitado: false, controle: "pessoa" });
         return c;
       });
       if (c) await o.driver.parar(c.id, escopo);
-      if (c && "telaId" in c) await o.dentro(escopo, (d) => d.repos.computadorTelas.mudarEstado(c.telaId, "fechada", d.agora(), ["fechando"]));
+      if (c && "telaId" in c) {
+        // NOD-96 PR 5: o perfil do bot (perfis/<agente>) sai da máquina e a tela sai do banco; os logins em comum ficam.
+        await o.driver.apagarPerfil?.(c.computadorId, agenteId, escopo).catch((e: unknown) => log("aviso", "computador_perfil_nao_apagado", { computador_id: c.computadorId, agente_id: agenteId, motivo: ehFalhaComputador(e) ? e.motivo : "desconhecido" }));
+        await o.dentro(escopo, (d) => d.repos.computadorTelas.apagar(c.telaId));
+      }
       o.mudou(escopo, agenteId);
     },
     /**
@@ -651,6 +728,7 @@ export function criarComputadores(o: Opcoes) {
         if (!c.habilitado || (acao.tipo !== "observar" && acao.tipo !== "arquivos" && acao.tipo !== "ler_arquivo" && acao.tipo !== "ler_texto" && acao.tipo !== "audio" && c.controle !== "pessoa")) throw new ErroDeDominio("nao_permitido");
         // Fora do ar: só "Tentar de novo" (iniciar) religa; a ação não vai ao Docker.
         if (c.indisponivelDesde !== null) throw new ErroDeDominio("estado_invalido", { cause: "computador fora do ar" });
+        if (c.telaId && operacaoViva(await d.repos.computadores.daPessoa(), d.agora())) throw new ErroDeDominio("estado_invalido", { cause: "atualizando" });
         return reservar(d, c, acao, "pessoa");
       });
       return executar(escopo, r).catch((e: unknown) => { throw comoErroDeDominio(e); });
@@ -745,8 +823,149 @@ export function criarComputadores(o: Opcoes) {
       } catch (e) {
         // NOD-96 PR 4: a vez não chegou na janela; não é erro (o bot chama de novo e segue na fila).
         if (e instanceof EsperaEsgotada) return { ok: true, conteudo: esperandoTelaParaAgente(e.quem), confianca: "confiavel" };
+        // NOD-96 PR 5: o computador está numa operação da pessoa; é espera, não erro (o bot chama de novo).
+        if (ehAtualizando(e)) return { ok: true, conteudo: atualizandoParaAgente(), confianca: "confiavel" };
         return { ok: true, isError: true, conteudo: JSON.stringify(erroDaFerramenta(nome, e)), confianca: "confiavel" };
       }
+    },
+    /**
+     * definido em 2026-10-22 (NOD-96 PR 5): o computador da pessoa como a web o vê (`GET /computador`). Só lê: sem criar
+     * a linha nem travar. Estado: operando (operação viva) > fora do ar (falhas seguidas ou máquina sem contato) >
+     * ligando > pronto > dormindo. A memória só vai com o total da máquina (a web não desenha barra sem ele).
+     */
+    async consultarDaPessoa(escopo: Escopo): Promise<ComputadorDaPessoaDto> {
+      if (!porPessoa) throw new ErroDeDominio("nao_encontrado");
+      const lido = await o.dentro(escopo, async (d) => {
+        const p = await d.repos.computadores.daPessoa();
+        if (!p) return null;
+        return {
+          p, telas: await d.repos.computadorTelas.doComputador(p.id), fila: await d.repos.computadorTelas.fila(p.id),
+          atividade: await d.repos.computadores.atividadeDaPessoa(p.id), aviso: await d.repos.computadores.avisoRecriado(p.id),
+        };
+      });
+      if (!lido) return { estado: "dormindo", maquina: null, telas: [], esperando: [], operacao: null, falha: null, memoria: null, ligadoDesde: null, atividade: [], aviso_recriado: false };
+      const { p, telas, fila } = lido;
+      const m = (await o.driver.maquinaDoComputador?.(p.id, escopo)) ?? null;
+      const ativo = (await o.driver.estado(p.id, escopo)).ativo;
+      const agoraMs = agora();
+      const operando = operacaoViva(p, agoraMs);
+      const semContato = m !== null && m.contato === null;
+      const estado: EstadoComputadorDaPessoa = operando ? "operando" : p.indisponivelDesde !== null || semContato ? "fora_do_ar" : o.driver.ligando?.(p.id) ? "ligando" : ativo ? "pronto" : "dormindo";
+      const titulos = m?.foto?.titulos ?? {};
+      const usadaMb = telas.reduce((soma, t) => soma + (t.estado === "fechada" || t.estado === "esperando" ? 0 : t.memoriaMb ?? 0), 0);
+      const totalMb = m?.foto?.memoriaTotalMb ?? null;
+      return {
+        estado,
+        maquina: m && { id: m.id, nome: m.nome, contato: m.contato },
+        telas: telas.map((t) => ({ agenteId: t.agenteId, estado: t.estado, controle: t.controle, memoriaMb: t.memoriaMb, titulo: titulos[t.agenteId] ?? null, ultimaAcaoEm: t.ultimaAtividadeEm, ajuda: t.ajuda })),
+        esperando: fila.map((t) => t.agenteId),
+        operacao: operando && p.operacao ? { tipo: p.operacao.tipo, pct: p.operacao.progresso, etapa: p.operacao.etapa } : null,
+        falha: estado === "fora_do_ar" ? { motivo: p.indisponivelDesde !== null ? p.falhaMotivo ?? "sem_resposta" : "maquina_sem_contato", desde: p.indisponivelDesde ?? agoraMs } : null,
+        memoria: totalMb && totalMb > 0 ? { usadaMb, totalMb } : null,
+        ligadoDesde: ativo ? m?.foto?.ligadoDesde ?? null : null,
+        atividade: lido.atividade.map((a) => ({ agenteId: a.agenteId, texto: textoDaAtividade(a.tipo, a.estado), em: a.em })),
+        aviso_recriado: lido.aviso,
+      };
+    },
+    /**
+     * definido em 2026-10-22 (NOD-96 PR 5): as ações do painel do computador da pessoa (`POST /computador`). Acordar e
+     * Tentar de novo ligam (e zeram ou somam a saúde, como o "Ligar" do bot); Dormir desliga a máquina inteira.
+     * Atualizar, Redefinir e Sair de todos marcam a operação (uma por vez), avisam no chat de cada bot com tela aberta e
+     * rodam em segundo plano: a resposta volta na hora e o progresso chega pelo relato do supervisor. `concluida`
+     * resolve quando a operação acaba (nunca rejeita); a rota não espera por ela.
+     */
+    async operarDaPessoa(escopo: Escopo, op: OperacaoDaPessoa): Promise<{ concluida: Promise<void> }> {
+      if (!porPessoa) throw new ErroDeDominio("nao_encontrado");
+      const pronta = { concluida: Promise.resolve() };
+      if (op === "dispensar_aviso") {
+        await o.dentro(escopo, async (d) => {
+          const p = await d.repos.computadores.daPessoa();
+          if (p) await d.repos.computadores.registrar({ computadorId: p.id, autor: "pessoa", tipo: "aviso_recriado", estado: "concluida" });
+        });
+        return pronta;
+      }
+      if (op === "acordar" || op === "tentar_de_novo") {
+        const { id, registroId } = await o.dentro(escopo, async (d) => {
+          const p = (await d.repos.computadores.travarDaPessoa((await d.repos.computadores.obterDaPessoa()).id))!;
+          if (operacaoViva(p, d.agora())) throw new ErroDeDominio("estado_invalido", { cause: "atualizando" });
+          return { id: p.id, registroId: (await d.repos.computadores.registrar({ computadorId: p.id, autor: "pessoa", tipo: op, estado: "executando" })).id };
+        });
+        let falha: FalhaComputador | null = null;
+        let ligou = false;
+        try {
+          await o.driver.iniciar(id, escopo);
+          ligou = true;
+        } catch (e) {
+          if (ehFalhaComputador(e)) falha = e;
+          throw comoErroDeDominio(e);
+        } finally {
+          const saude = await o.dentro(escopo, async (d) => {
+            await d.repos.computadores.concluir(registroId, ligou ? "concluida" : "falhou", falha?.motivo ?? null);
+            if (!await d.repos.computadores.travarDaPessoa(id)) return false;
+            if (ligou) return d.repos.computadores.registrarSucesso(id);
+            if (!falha || !CONTA_PARA_SAUDE.has(falha.motivo)) return false;
+            return Boolean((await d.repos.computadores.registrarFalha(id, { motivo: falha.motivo, em: d.agora(), limite: LIMITE_FALHAS_SEGUIDAS }))?.virouIndisponivel);
+          });
+          o.mudou(escopo, "", saude);
+        }
+        return pronta;
+      }
+      if (op === "dormir") {
+        const lido = await o.dentro(escopo, async (d) => {
+          const p0 = await d.repos.computadores.daPessoa();
+          const p = p0 && await d.repos.computadores.travarDaPessoa(p0.id);
+          if (!p) return null;
+          if (operacaoViva(p, d.agora())) throw new ErroDeDominio("estado_invalido", { cause: "atualizando" });
+          return { id: p.id, registroId: (await d.repos.computadores.registrar({ computadorId: p.id, autor: "pessoa", tipo: op, estado: "executando" })).id };
+        });
+        if (!lido) return pronta;
+        await o.driver.parar(lido.id, escopo);
+        await o.dentro(escopo, async (d) => {
+          for (const t of await d.repos.computadorTelas.doComputador(lido.id)) if (t.estado !== "fechada" && t.estado !== "esperando") await d.repos.computadorTelas.mudarEstado(t.id, "fechada", d.agora(), ["aberta", "abrindo", "fechando"]);
+          await d.repos.computadores.concluir(lido.registroId, "concluida", null);
+        });
+        o.mudou(escopo, "");
+        return pronta;
+      }
+      const operar = o.driver.operar?.bind(o.driver);
+      if (!operar) throw new ErroDeDominio("estado_invalido");
+      const plano = await o.dentro(escopo, async (d) => {
+        const p = (await d.repos.computadores.travarDaPessoa((await d.repos.computadores.obterDaPessoa()).id))!;
+        // A operação que passou do teto (o servidor caiu no meio) não segura a nova.
+        if (p.operacao && !operacaoViva(p, d.agora())) await d.repos.computadores.terminarOperacao(p.id, p.operacao.tipo);
+        if (!await d.repos.computadores.iniciarOperacao(p.id, op, d.agora())) throw new ErroDeDominio("estado_invalido", { cause: "atualizando" });
+        const registroId = (await d.repos.computadores.registrar({ computadorId: p.id, autor: "pessoa", tipo: op, estado: "executando" })).id;
+        // Sair de todos só apaga os cookies: as telas seguem abertas, então não há tela fechada para avisar.
+        if (op !== "sair_de_todos") for (const t of await d.repos.computadorTelas.doComputador(p.id)) if (t.estado !== "fechada") await avisarOperacao(d, t.agenteId, op);
+        return { id: p.id, registroId };
+      });
+      o.mudou(escopo, "", true);
+      log("info", "computador_operacao_iniciada", { computador_id: plano.id, tipo: op });
+      const concluida = (async () => {
+        let falha: FalhaComputador | null = null;
+        let sucesso = false;
+        try {
+          const r = await operar(plano.id, op, escopo);
+          // Redefinir: o supervisor nasce com uma X25519 nova; o servidor troca a fixada (só com a operação viva) ou,
+          // supervisor antigo sem a chave na resposta, esquece a fixada para aprender a nova no próximo contato.
+          if (op === "redefinir") await o.dentro(escopo, async (d) => {
+            if (!r.supervisorPub || !await d.repos.computadores.trocarSupervisor(plano.id, Buffer.from(r.supervisorPub, "base64"))) await d.repos.computadores.esquecerSupervisor(plano.id);
+          });
+          sucesso = true;
+        } catch (e) {
+          if (ehFalhaComputador(e)) falha = e;
+          log("aviso", "computador_operacao_falhou", { computador_id: plano.id, tipo: op, motivo: ehFalhaComputador(e) ? e.motivo : "desconhecido" });
+        } finally {
+          await o.dentro(escopo, async (d) => {
+            // Atualizar e Redefinir fecham as telas no supervisor (Sair de todos não); o banco acompanha sem esperar o relato.
+            if (op !== "sair_de_todos") for (const t of await d.repos.computadorTelas.doComputador(plano.id)) if (t.estado !== "fechada" && t.estado !== "esperando") await d.repos.computadorTelas.mudarEstado(t.id, "fechada", d.agora(), ["aberta", "abrindo", "fechando"]);
+            await d.repos.computadores.terminarOperacao(plano.id, op);
+            await d.repos.computadores.concluir(plano.registroId, sucesso ? "concluida" : "falhou", falha?.motivo ?? null);
+          }).catch((e: unknown) => log("erro", "computador_operacao_nao_encerrada", { computador_id: plano.id, tipo: op, erro: e instanceof Error ? e.name : "desconhecido" }));
+          o.mudou(escopo, "", true);
+        }
+      })();
+      return { concluida };
     },
     /** NOD-200: a última tela guardada do turno (base64), sem esquecer; null se não há. */
     ultimaTela,
@@ -782,6 +1001,10 @@ export function criarComputadores(o: Opcoes) {
           // A ação aprovada não volta à fila sozinha: o turno recebe "ainda esperando" e o bot a pede de novo.
           await guardar(JSON.parse(esperandoTelaParaAgente(e.quem)));
           throw new ErroDeDominio("estado_invalido", { cause: "esperando_tela" });
+        }
+        if (ehAtualizando(e)) {
+          await guardar(JSON.parse(atualizandoParaAgente()));
+          throw new ErroDeDominio("estado_invalido", { cause: "atualizando" });
         }
         await guardar(erroDaFerramenta(`computador_${tipo}`, e));
         throw e;

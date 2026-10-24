@@ -60,6 +60,7 @@ export const ASSUNTOS = [
   // NOD-309: o fundo que espera por outra queda (erro do provedor, máquina, reinício) e volta sozinho.
   "fundo.espera",
   "computador.fora_do_ar",
+  "computador.em_operacao",
   // NOD-97: a pessoa fechou a tela no controle e o bot voltou a usar o computador.
   "computador.tela_fechada",
   // Frentes e tasks: a web precisa delas na janela para desenhar outra coisa (anexo).

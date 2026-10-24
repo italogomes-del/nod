@@ -25,6 +25,12 @@ let paradas: string[];
 /** Quantas vezes o supervisor ainda responde esperando_tela (Infinity = nunca abre). */
 let semMemoria: number;
 let dormiu: number;
+/** NOD-96 PR 5: o que o driver.operar faz (resolve, rejeita ou segura) e os avisos no chat. */
+let operar: (tipo: string) => Promise<{ supervisorPub?: string }>;
+let operacoes: string[];
+let avisos: { conversaId: string; texto: string; payload: unknown }[];
+let perfisApagados: string[];
+let supervisor: { trocado: string | null; esquecido: boolean };
 /** Roda a cada fatia da espera (o relógio já andou). */
 let aoDormir: (() => void | Promise<void>) | null;
 /** A ação pendente (aprovação) que executarAprovado lê e o resultado que ela guarda para o turno. */
@@ -47,6 +53,9 @@ const driver: DriverComputador = {
   iniciar: async (id) => { iniciados.push(id); },
   parar: async (id) => { paradas.push(id); },
   ligados: async () => new Set<string>(),
+  operar: async (_id, tipo) => { operacoes.push(tipo); return operar(tipo); },
+  apagarPerfil: async (id, agenteId) => { perfisApagados.push(`${id}:${agenteId}`); },
+  maquinaDoComputador: async () => ({ id: "maq-1", nome: "Servidor de casa", contato: T0, foto: { ligadoDesde: T0 - 60_000, memoriaTotalMb: 8000, titulos: { [A]: "Gmail" } } }),
   executar: async (id, acao): Promise<ResultadoComputador> => {
     enviadas.push({ id, acao });
     if (semMemoria > 0) { semMemoria--; throw new EsperandoTela([B, "nao-e-uuid"]); }
@@ -67,6 +76,12 @@ const deps = () => ({
       registrarFalha: async () => null,
       emUsoPor: async () => ({ titulo: "outra tarefa", deFora: false }),
       atividadeDaTela: async () => [],
+      iniciarOperacao: async (_id: string, tipo: "atualizar", em: number) => { if (pessoa.operacao) return false; pessoa = { ...pessoa, operacao: { tipo, progresso: 0, etapa: null, desde: em } }; return true; },
+      terminarOperacao: async (_id: string, tipo: string) => { if (pessoa.operacao?.tipo !== tipo) return false; pessoa = { ...pessoa, operacao: null }; return true; },
+      trocarSupervisor: async (_id: string, pub: Uint8Array) => { if (pessoa.operacao?.tipo !== "redefinir") return false; supervisor.trocado = Buffer.from(pub).toString("base64"); return true; },
+      esquecerSupervisor: async () => { supervisor.esquecido = true; },
+      atividadeDaPessoa: async () => [{ agenteId: A, autor: "bot", tipo: "navegar", estado: "concluida", em: T0 - 1000 }, { agenteId: null, autor: "pessoa", tipo: "atualizar", estado: "falhou", em: T0 - 2000 }],
+      avisoRecriado: async () => true,
       buscarAcao: async (id: string) => (pendente?.id === id ? pendente : null),
       gravarResultado: async (_id: string, cifrado: string) => { guardado = cifrado; },
     },
@@ -90,6 +105,7 @@ const deps = () => ({
       liberar: async (id: string, operacaoId: string, em?: number) => {
         if (telas.get(id)?.operacaoId === operacaoId) mudar(id, { operacaoId: null, ocupadoAte: null, ...(em !== undefined ? { ultimaAtividadeEm: em } : {}) });
       },
+      apagar: async (id: string) => { telas.delete(id); },
       relatar: async (id: string, r: { memoriaMb: number | null; ultimaAcaoEm: number | null }) => mudar(id, { memoriaMb: r.memoriaMb, ...(r.ultimaAcaoEm ? { ultimaAtividadeEm: r.ultimaAcaoEm } : {}) }),
     },
     turnos: {
@@ -101,6 +117,8 @@ const deps = () => ({
       execucaoBloqueada: async () => false,
     },
     paradas: { ativa: async () => false },
+    conversas: { buscarPropriaDoAgente: async (agenteId: string) => ({ id: `conversa-${agenteId.slice(-1)}` }) },
+    mensagens: { criar: async (m: { conversaId: string; texto: string; payload: unknown }) => { avisos.push({ conversaId: m.conversaId, texto: m.texto, payload: m.payload }); return { id: `msg-${avisos.length}` }; } },
     events: { gravarComOutbox: async () => {} },
   },
 });
@@ -129,6 +147,11 @@ beforeEach(() => {
   semMemoria = 0;
   dormiu = 0;
   aoDormir = null;
+  operar = async () => ({});
+  operacoes = [];
+  avisos = [];
+  perfisApagados = [];
+  supervisor = { trocado: null, esquecido: false };
   pendente = null;
   guardado = null;
   iniciados = [];
@@ -285,7 +308,9 @@ it("excluir o bot fecha só a tela dele; a máquina e a outra tela seguem", asyn
   excluidos.add(A);
   await computadores.desligarExcluido(MARLON, A);
   expect(paradas).toEqual(["tela-a"]);
-  expect(telas.get("tela-a")).toMatchObject({ estado: "fechada", controle: "pessoa" });
+  // NOD-96 PR 5: o perfil do bot sai da máquina e a tela sai do banco.
+  expect(perfisApagados).toEqual([`pessoa-1:${A}`]);
+  expect(telas.has("tela-a")).toBe(false);
   expect(telas.get("tela-b")).toMatchObject({ estado: "aberta", controle: "bot" });
 });
 
@@ -334,4 +359,129 @@ it("reconciliar: o banco segue a foto do supervisor; 'esperando' do servidor nã
   await reconciliarTelas(deps() as never, "pessoa-1", { computadorId: "pessoa-1", ligado: false, supervisorPub: "x", telas: [] });
   expect(telas.get("tela-a")!.estado).toBe("fechada");
   expect(telas.get("tela-b")!.estado).toBe("esperando");
+});
+
+// ---- NOD-96 PR 5: operações do computador da pessoa ----
+
+it("Atualizar: marca a operação, avisa no chat de cada bot com tela aberta, roda em segundo plano e fecha as telas", async () => {
+  mudar("tela-a", { estado: "aberta" });
+  let soltar!: () => void;
+  operar = () => new Promise((r) => { soltar = () => r({}); });
+  const { concluida } = await computadores.operarDaPessoa(MARLON, "atualizar");
+  expect(pessoa.operacao).toMatchObject({ tipo: "atualizar" });
+  expect(operacoes).toEqual(["atualizar"]);
+  expect(avisos).toEqual([{ conversaId: "conversa-a", texto: expect.stringMatching(/Fechei a tela de Ana Bot.*atualizar o computador.*tenta de novo sozinho/), payload: { kind: "computador_em_operacao", agenteId: A, operacao: "atualizar" } }]);
+  // Uma por vez: a segunda operação é recusada enquanto a primeira vive.
+  await expect(computadores.operarDaPessoa(MARLON, "sair_de_todos")).rejects.toMatchObject({ codigo: "estado_invalido" });
+  expect((await computadores.consultarDaPessoa(MARLON)).estado).toBe("operando");
+  soltar();
+  await concluida;
+  expect(pessoa.operacao).toBeNull();
+  expect(telas.get("tela-a")!.estado).toBe("fechada");
+  expect(registros.find((r) => r.tipo === "atualizar")).toMatchObject({ autor: "pessoa", estado: "concluida" });
+});
+
+it("Sair de todos: não avisa 'Fechei a tela' nem marca as telas como fechadas (só limpa os cookies)", async () => {
+  mudar("tela-a", { estado: "aberta" });
+  mudar("tela-b", { estado: "abrindo" });
+  operar = async () => ({});
+  await (await computadores.operarDaPessoa(MARLON, "sair_de_todos")).concluida;
+  expect(operacoes).toEqual(["sair_de_todos"]);
+  expect(avisos).toEqual([]);
+  expect(telas.get("tela-a")!.estado).toBe("aberta");
+  expect(telas.get("tela-b")!.estado).toBe("abrindo");
+  expect(pessoa.operacao).toBeNull();
+  expect(registros.find((r) => r.tipo === "sair_de_todos")).toMatchObject({ autor: "pessoa", estado: "concluida" });
+});
+
+it("ociosidade: operação presa além do teto (o servidor caiu no meio) não impede a máquina de dormir", async () => {
+  const limite = 15 * 60_000;
+  agora = T0 + 2 * limite;
+  mudar("tela-a", { estado: "fechada", ultimaAtividadeEm: T0 - 1 });
+  mudar("tela-b", { estado: "fechada", ultimaAtividadeEm: T0 - 1 });
+  // Viva (dentro do teto): segura a máquina acordada.
+  pessoa = { ...pessoa, operacao: { tipo: "atualizar", progresso: 40, etapa: "Reiniciando", desde: agora - 60_000 } };
+  expect(await computadores.desligarOciosos(MARLON, new Set(["pessoa-1"]), limite)).toBe(0);
+  expect(paradas).toEqual([]);
+  // Vencida (passou dos 15 min): a máquina dorme.
+  pessoa = { ...pessoa, operacao: { tipo: "atualizar", progresso: 40, etapa: "Reiniciando", desde: agora - limite - 1 } };
+  expect(await computadores.desligarOciosos(MARLON, new Set(["pessoa-1"]), limite)).toBe(1);
+  expect(paradas).toEqual(["pessoa-1"]);
+});
+
+it("Redefinir: troca a X25519 fixada pela que o supervisor novo devolveu; falha encerra a operação do mesmo jeito", async () => {
+  operar = async () => ({ supervisorPub: "bm92YQ==" });
+  await (await computadores.operarDaPessoa(MARLON, "redefinir")).concluida;
+  expect(supervisor.trocado).toBe("bm92YQ==");
+  expect(pessoa.operacao).toBeNull();
+
+  const { FalhaComputador } = await import("../../../src/domain/computador.ts");
+  operar = async () => { throw new FalhaComputador("sem_resposta"); };
+  await (await computadores.operarDaPessoa(MARLON, "redefinir")).concluida;
+  expect(pessoa.operacao).toBeNull();
+  expect(registros.filter((r) => r.tipo === "redefinir").map((r) => r.estado)).toEqual(["concluida", "falhou"]);
+});
+
+it("durante a operação a ação do bot espera (sem erro); a operação acaba e a ação sai", async () => {
+  pessoa = { ...pessoa, operacao: { tipo: "atualizar", progresso: 40, etapa: "Reiniciando", desde: T0 } };
+  aoDormir = () => { if (dormiu === 2) pessoa = { ...pessoa, operacao: null }; };
+  const r = await observar(A);
+  expect("isError" in r && r.isError).toBeFalsy();
+  expect(JSON.parse((r as { conteudo: string }).conteudo).tela.url).toBe("https://example.com");
+  expect(dormiu).toBe(2);
+  expect(enviadas).toHaveLength(1);
+});
+
+it("operação que não acaba na janela: o bot recebe 'o computador está atualizando' (espera, não erro)", async () => {
+  pessoa = { ...pessoa, operacao: { tipo: "redefinir", progresso: 10, etapa: "Preparando", desde: T0 } };
+  const r = await observar(A);
+  expect(r).toMatchObject({ ok: true, confianca: "confiavel" });
+  expect("isError" in r && r.isError).toBeFalsy();
+  const corpo = JSON.parse((r as { conteudo: string }).conteudo);
+  expect(corpo.estado).toBe("atualizando");
+  expect(corpo.instrucao).toMatch(/atualizando; tento de novo quando terminar/);
+  expect(enviadas).toHaveLength(0);
+  expect(registros[0]).toMatchObject({ estado: "falhou", motivo: "atualizando" });
+});
+
+it("o supervisor responde 'atualizando' antes de o banco saber: o bot espera uma fatia e tenta de novo", async () => {
+  const { FalhaComputador } = await import("../../../src/domain/computador.ts");
+  let vezes = 0;
+  const executar = driver.executar;
+  driver.executar = async (id, acao) => { if (vezes++ === 0) throw new FalhaComputador("atualizando"); return executar(id, acao); };
+  try {
+    const r = await observar(A);
+    expect("isError" in r && r.isError).toBeFalsy();
+    expect(dormiu).toBe(1);
+  } finally { driver.executar = executar; }
+});
+
+it("GET /computador: estado, máquina, telas com título, fila, memória com o total, atividade em português e o aviso", async () => {
+  mudar("tela-a", { estado: "aberta", memoriaMb: 600 });
+  mudar("tela-b", { estado: "esperando", esperandoDesde: T0 });
+  const dto = await computadores.consultarDaPessoa(MARLON);
+  expect(dto).toMatchObject({
+    estado: "pronto", maquina: { id: "maq-1", nome: "Servidor de casa", contato: T0 }, esperando: [B], operacao: null, falha: null,
+    memoria: { usadaMb: 600, totalMb: 8000 }, ligadoDesde: T0 - 60_000, aviso_recriado: true,
+    atividade: [{ agenteId: A, texto: expect.any(String), em: T0 - 1000 }, { agenteId: null, texto: "atualizou o computador (não deu certo)", em: T0 - 2000 }],
+  });
+  expect(dto.telas.find((t) => t.agenteId === A)).toMatchObject({ titulo: "Gmail", memoriaMb: 600, controle: "bot", ultimaAcaoEm: T0 });
+
+  pessoa = { ...pessoa, falhasSeguidas: 3, falhaMotivo: "sem_resposta", indisponivelDesde: T0 - 5000 };
+  expect(await computadores.consultarDaPessoa(MARLON)).toMatchObject({ estado: "fora_do_ar", falha: { motivo: "sem_resposta", desde: T0 - 5000 } });
+});
+
+it("fora do ar no computador da pessoa: o aviso no chat traz a ação do painel que resolve", async () => {
+  const { FalhaComputador } = await import("../../../src/domain/computador.ts");
+  const executar = driver.executar;
+  driver.executar = async () => { throw new FalhaComputador("sem_resposta"); };
+  try {
+    const comFalha = criarComputadores({
+      executor: () => "catcher", porPessoa: true, driver, cifrar: (s) => s, decifrar: (s) => s, mudou: () => {}, agora: () => agora,
+      dentro: async <T>(_e: unknown, fn: (d: never) => Promise<T>) => { const d = deps(); (d.repos.computadores as Record<string, unknown>).registrarFalha = async () => ({ computador: { indisponivelDesde: T0 }, virouIndisponivel: true }); return fn(d as never); },
+      dormir: async (ms) => { agora += ms; },
+    });
+    await comFalha.chamar(MARLON, plano(A), "computador_observar", {});
+    expect(avisos).toEqual([expect.objectContaining({ texto: expect.stringMatching(/use "⚙ Atualizar o computador" no painel do computador/), payload: expect.objectContaining({ kind: "computador_fora_do_ar", acao: { op: "atualizar", rotulo: "⚙ Atualizar o computador" } }) })]);
+  } finally { driver.executar = executar; }
 });

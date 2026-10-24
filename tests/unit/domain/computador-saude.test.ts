@@ -3,7 +3,7 @@ import { CODIGOS_RUNTIME, codigoDaAcao, codigoDaSubida, falhaDe, primeiraLinha, 
 import type { Agente } from "../../../src/contracts/agente.ts";
 import { MOTIVOS_FALHA_COMPUTADOR } from "../../../src/contracts/motivos.ts";
 import type { Turno } from "../../../src/contracts/turno.ts";
-import { CONTA_PARA_SAUDE, FalhaComputador, ehFalhaComputador, instrucaoDaFalha, LIMITE_FALHAS_SEGUIDAS, limiteDoAmbiente, MOTIVO_FALHA_EM_PORTUGUES, resumirDetalhe, textoDoLimite } from "../../../src/domain/computador.ts";
+import { acaoDaFalha, CONTA_PARA_SAUDE, FalhaComputador, ehFalhaComputador, instrucaoDaFalha, LIMITE_FALHAS_SEGUIDAS, limiteDoAmbiente, MOTIVO_FALHA_EM_PORTUGUES, resumirDetalhe, textoDoLimite } from "../../../src/domain/computador.ts";
 import { montarPlano, type EntradaPlano } from "../../../src/domain/plano-turno.ts";
 import { redigir } from "../../../src/domain/redacao.ts";
 import { MOTIVO_FALHA_TEXTO, textoDoLimite as textoDoLimiteWeb } from "../../../web/lib/computador.ts";
@@ -26,13 +26,25 @@ describe("saúde do computador do bot (emenda da ADR-037)", () => {
     expect(ehFalhaComputador(new Error("navegador_nao_abriu"))).toBe(false);
   });
 
-  it("NOD-96: máquina sem os pacotes, sem suporte ou atualizando não se insiste neste turno e nada foi executado", () => {
-    for (const m of ["faltam_pacotes", "sem_suporte", "atualizando"] as const) {
+  it("NOD-96: máquina sem os pacotes ou sem suporte não se insiste neste turno e nada foi executado", () => {
+    for (const m of ["faltam_pacotes", "sem_suporte"] as const) {
       expect(instrucaoDaFalha(m)).toContain("Nada foi executado");
       expect(instrucaoDaFalha(m)).toContain("Não tente de novo neste turno");
     }
+    // NOD-96 PR 5: atualizando é espera: o bot tenta de novo quando a operação acabar.
+    expect(instrucaoDaFalha("atualizando")).toContain("o computador está atualizando; tento de novo quando terminar".replace(/^o/, "O"));
+    expect(instrucaoDaFalha("atualizando")).not.toContain("Não tente de novo");
     expect(instrucaoDaFalha("maquina_sem_contato", null, "vm-1")).toContain("Não consegui ligar o computador: vm-1 está sem contato. Nada foi executado. Não tente de novo neste turno");
     expect(instrucaoDaFalha("nao_ficou_pronto")).toContain("Não consegui ligar o computador: ");
+  });
+
+  it("NOD-96 PR 5: o erro acionável aponta a ação no painel do computador", () => {
+    for (const m of ["maquina_sem_contato", "sem_resposta", "nao_ficou_pronto"] as const) {
+      expect(acaoDaFalha(m)).toEqual({ op: "atualizar", rotulo: "⚙ Atualizar o computador" });
+      expect(instrucaoDaFalha(m)).toContain("⚙ Atualizar o computador");
+    }
+    expect(acaoDaFalha("navegador_nao_abriu")).toEqual({ op: "tentar_de_novo", rotulo: "Tentar de novo" });
+    for (const m of ["tela_alterada", "acao_falhou", "atualizando", "limite_de_computadores"] as const) expect(acaoDaFalha(m)).toBeNull();
   });
 
   it("a ferramenta devolve instrução de tabela: máquina fora não se insiste; tela velha se observa de novo", () => {

@@ -5,7 +5,7 @@ import { ACOES_DO_PREPARO, type PreparoDoLogin } from "../../../contracts/prepar
 import { ehIaComConta, IMPRESSAO } from "../../../domain/contas-da-pessoa.ts";
 import { emailDaConta, organizacaoDaConta } from "../../../domain/estado-ia.ts";
 import type { RelatoEspera } from "../../../contracts/espera.ts";
-import { DESFECHOS_COMANDO_COMPUTADOR, ESTADOS_ANUNCIO_COMPUTADOR, ESTADOS_TELA_COMPUTADOR, type AnuncioComputador, type EstadoComputadorRelatado, type ResultadoComandoComputador } from "../../../contracts/computador-motor.ts";
+import { DESFECHOS_COMANDO_COMPUTADOR, ESTADOS_ANUNCIO_COMPUTADOR, ESTADOS_TELA_COMPUTADOR, OPERACOES_COMPUTADOR, type AnuncioComputador, type EstadoComputadorRelatado, type ResultadoComandoComputador } from "../../../contracts/computador-motor.ts";
 import type { ResultadoComputador } from "../../../contracts/computador.ts";
 import type { ProgressoDeInstalacao } from "../../../contracts/instalacoes-ssh.ts";
 import { FALHAS_DO_LACO, SAIDA_REVISOR_MAX, type FalhaDoLaco, type RelatoRevisao } from "../../../contracts/revisao.ts";
@@ -619,6 +619,8 @@ export function resultadoComandoComputador(v: unknown): ResultadoComandoComputad
     const p = objeto(r.progresso);
     if (typeof p.pct === "number" && p.pct >= 0 && p.pct <= 100 && texto(p.etapa, 200)) saida.progresso = { pct: p.pct, etapa: p.etapa };
   }
+  // NOD-96 PR 5: a X25519 nova do supervisor depois do Redefinir.
+  if (desfecho === "ok" && typeof r.supervisorPub === "string" && B64_CHAVE.test(r.supervisorPub)) saida.supervisorPub = r.supervisorPub;
   return saida;
 }
 /** A foto do computador. `computadorId` vazio = supervisor ainda sem computador (só a X25519 importa). */
@@ -635,5 +637,12 @@ export function estadoComputadorRelatado(v: unknown): EstadoComputadorRelatado {
     exigir(estado);
     return { agenteId: o.agenteId, estado, ultimaAcaoEm: numero(o.ultimaAcaoEm), memoriaMb: numero(o.memoriaMb) };
   });
-  return { computadorId: r.computadorId, ligado: r.ligado, supervisorPub: r.supervisorPub, telas };
+  const foto: EstadoComputadorRelatado = { computadorId: r.computadorId, ligado: r.ligado, supervisorPub: r.supervisorPub, telas };
+  // NOD-96 PR 5: a operação em curso (Atualizar, Redefinir, Sair de todos). Fora do formato vira ausente.
+  if (r.operacao && typeof r.operacao === "object" && !Array.isArray(r.operacao)) {
+    const o = r.operacao as Record<string, unknown>;
+    const tipo = OPERACOES_COMPUTADOR.find((x) => x === o.tipo);
+    if (tipo && typeof o.pct === "number" && Number.isFinite(o.pct) && o.pct >= 0 && o.pct <= 100 && typeof o.etapa === "string" && o.etapa.length <= 200) foto.operacao = { tipo, pct: o.pct, etapa: o.etapa };
+  } else if (r.operacao === null) foto.operacao = null;
+  return foto;
 }

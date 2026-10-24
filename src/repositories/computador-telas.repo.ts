@@ -98,6 +98,10 @@ export function computadorTelasRepo(conn: Conn, escopo: Escopo) {
         ultima_atividade_em = greatest(ultima_atividade_em, coalesce(${r.ultimaAcaoEm === null ? null : new Date(r.ultimaAcaoEm)}::timestamptz, ultima_atividade_em))
         where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id}`;
     },
+    /** NOD-96 PR 5: o bot foi excluído e o perfil dele apagado; a tela some (o registro das ações fica, sem a tela). */
+    async apagar(id: string): Promise<void> {
+      await conn`delete from computador_telas where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id}`;
+    },
     /** Por que a tela não abriu (ou caiu); a próxima abertura que der certo limpa. */
     async registrarFalha(id: string, motivo: MotivoFalhaComputador): Promise<void> {
       await conn`update computador_telas set falha_motivo = ${motivo} where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id}`;

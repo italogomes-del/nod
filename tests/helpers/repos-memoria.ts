@@ -310,12 +310,13 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       daPessoa: async () => null, travarDaPessoa: async () => null, vincularBot: async () => false,
       obterDaPessoa: async () => { throw new Error("use o banco para testar o computador da pessoa"); },
       fixarMaquina: async () => undefined, fixarSupervisor: async () => null, esquecerSupervisor: async () => undefined,
-      iniciarOperacao: async () => false, progredirOperacao: async () => false, terminarOperacao: async () => false, arquivarLegado: async () => [],
+      iniciarOperacao: async () => false, progredirOperacao: async () => false, terminarOperacao: async () => false, arquivarLegado: async () => [], legadosArquivados: async () => [],
+      trocarSupervisor: async () => false, avisoRecriado: async () => false, atividadeDaPessoa: async () => [],
     },
     computadorTelas: {
       buscar: async () => null, porId: async () => null, obter: async () => null, travar: async () => null, doComputador: async () => [], fila: async () => [],
       mudarEstado: async () => false, configurar: async () => undefined, ocupar: async () => undefined, liberar: async () => undefined,
-      relatar: async () => undefined, registrarFalha: async () => undefined,
+      relatar: async () => undefined, registrarFalha: async () => undefined, apagar: async () => undefined,
     },
     pessoas: {
       async buscar(id: string) {
