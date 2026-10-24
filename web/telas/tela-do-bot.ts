@@ -81,7 +81,7 @@ function aplicar(): void {
 }
 
 async function pulso(): Promise<void> {
-  if (!alvo || emCurso || !abaAVista() || document.querySelector(".computador-dialog")) return;
+  if (!alvo || emCurso || !abaAVista() || document.querySelector(".computador-dialog, dialog.cb-veu")) return;
   const { api, agenteId } = alvo;
   emCurso = true;
   try {

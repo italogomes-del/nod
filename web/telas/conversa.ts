@@ -23,6 +23,7 @@ import { estadoMascoteNaConversa, mascoteAnimado, turnosVivosDaConversa } from "
 import { renderFaixaParada } from "./faixa-parada.ts";
 import type { Morph } from "../lib/morph.ts";
 import { htmlCartaoTela, motivoDoPedidoDeTela } from "../lib/computador.ts";
+import { htmlAvisoForaDoArRegistrado, htmlFio, htmlLinhaDoChat, htmlPedidoDeTela } from "../lib/computador-pessoa.ts";
 import { cartaoDaPergunta, desenharFios, linhaDaRetomada, respostaPorOpcao, rotuloDaResposta, tempoDasLinhas, type LinhaDaConversa } from "./pergunta.ts";
 import { comDivisores, type TempoDoBloco } from "./divisores-de-data.ts";
 import { linhaNaoRodaram } from "../lib/execucao.ts";
@@ -193,6 +194,8 @@ function corpoMensagem(m: Mensagem, estado: Estado): string {
     // definido em 2026-09-24 (emenda da ADR-037): o aviso ÚNICO vira cartão de estado, com a hora local e
     // as duas saídas; depois que o computador volta, o cartão fica como registro, sem botões.
     const bot = agenteDe(estado, p.agenteId);
+    // NOD-96 (v2): o card leve, com "Tentar de novo · Ver computador do bot"; o computador é da pessoa, não do bot.
+    if (estado.computadorPessoa && bot?.ownerId === estado.sessao?.pessoaId) return htmlAvisoForaDoArRegistrado(estado.computadorPessoa);
     const aindaFora = Boolean(bot?.computadorForaDoAr);
     const dono = bot?.ownerId === estado.sessao?.pessoaId;
     const acoes = aindaFora && dono ? `<div class="mcf-acoes">${botao("religar-computador", "Tentar de novo", { id: p.agenteId, classe: "pri sm" })}${botao("abrir-computador", "Abrir computador", { id: p.agenteId, classe: "sm" })}</div>` : bot && !aindaFora ? '<p class="mudo sm">O computador voltou a responder.</p>' : "";
@@ -572,7 +575,7 @@ export function renderMensagem(m: Mensagem, estado: Estado, sala = false, opcoes
   // terminou perguntando), embaixo dele — o cartão não tem onde recebê-lo, e sem isso o bloco sumia (revisão do PR 398).
   const progressoDentro = !ehPessoa && !pergunta ? (opcoes.progresso ?? "") : "";
   const progressoFora = ehPessoa || pergunta ? (opcoes.progresso ?? "") : "";
-  const balao = motivoTela !== null ? htmlCartaoTela(motivoTela, agente?.id ?? "", telaAberta, agente?.nome, pergunta?.decisaoId) : pergunta ? cartaoDaPergunta(m, estado) : (ehPessoa ? m.anexos?.length : temMidiaDoBot(m) && !progressoDentro) && m.texto.trim() === "" ? "" : `<div class="bubble${progressoDentro ? " com-progresso" : ""}">${ehPessoa ? comChipDeComando(m.texto) : textoFormatado(m.texto, { chave: m.id, diagramas: opcoes.diagramas === true })}${metaTags}${progressoDentro}</div>`;
+  const balao = motivoTela !== null ? (estado.computadorPessoa ? htmlPedidoDeTela(motivoTela, agente?.id ?? "", telaAberta) : htmlCartaoTela(motivoTela, agente?.id ?? "", telaAberta, agente?.nome, pergunta?.decisaoId)) : pergunta ? cartaoDaPergunta(m, estado) : (ehPessoa ? m.anexos?.length : temMidiaDoBot(m) && !progressoDentro) && m.texto.trim() === "" ? "" : `<div class="bubble${progressoDentro ? " com-progresso" : ""}">${ehPessoa ? comChipDeComando(m.texto) : textoFormatado(m.texto, { chave: m.id, diagramas: opcoes.diagramas === true })}${metaTags}${progressoDentro}</div>`;
   return `<article class="${classes}" data-mensagem="${esc(m.id)}"${pergunta ? ` data-pergunta="${esc(pergunta.decisaoId)}"` : ""}>
     ${!ehPessoa && agente ? iconeAgente(agente, "md") : ""}<div class="bubble-wrap">${acoesDaMensagem(m, estado, sala)}${sender}${resposta ? rotuloDaResposta(m) : ""}${ehPessoa ? citacaoAcimaDoBalao(m) : ""}${anexosDe(m, estado)}${balao}${ehPessoa ? "" : midiasDoBot(m, estado)}${progressoFora}${ehPessoa ? "" : avisoDeLeitura(m, estado)}${ehPessoa ? "" : capturaDoTurno(m, estado)}${contextoDelegado}${chipsDeReacao(m, estado)}${fila ? renderSituacaoFila(fila, fila.turnoId) : ""}${faixaDaMensagem(m, estado)}</div>
   </article>${resposta ? linhaDaRetomada(m, estado) : ""}`;
@@ -1044,9 +1047,25 @@ export function blocosAoVivo(c: ConversaEstado, estado: Estado): BlocoDaTimeline
   const blocos: BlocoDaTimeline[] = [
     ...paradas((s) => !vivosIds.has(s.turno.turnoId)),
     ...vivos.flatMap((t) => [...paradas((s) => s.turno.turnoId === t.turnoId), ...blocosDoTurnoVivo(t, c, estado)]),
+    { chave: "computador", html: linhaDoComputador(c, estado) },
     { chave: "faixa", html: renderFaixaParada(estado.faixaParada) },
   ];
   return blocos.filter((b) => b.html !== "");
+}
+
+/**
+ * NOD-96 (v2): a linha do computador do bot abaixo do turno — "Ligando o computador…", "Esperando uma tela livre", a tela
+ * que uma operação fechou, o ✓ quando a espera acaba e o erro com o caminho. Só no chat de um bot da pessoa.
+ */
+function linhaDoComputador(c: ConversaEstado, estado: Estado): string {
+  const id = c.conversa.agenteId;
+  const dto = estado.computadorPessoa;
+  if (!id || !dto || agenteDe(estado, id)?.ownerId !== estado.sessao?.pessoaId) return "";
+  const nomes = Object.fromEntries((estado.frota?.agentes ?? []).map((a) => [a.id, a.nome]));
+  // O aviso de fora do ar que o servidor já deixou na conversa vale pelo card ao vivo: um só na tela.
+  const jaAvisou = c.mensagens.slice(-30).some((m) => m.payload?.kind === "computador_fora_do_ar");
+  if (jaAvisou && dto.estado === "fora_do_ar") return "";
+  return htmlLinhaDoChat(dto, estado.computadorMemoria, id, nomes, estado.agora);
 }
 
 export function renderHistoricoDaTimeline(c: ConversaEstado, estado: Estado): string {
@@ -1207,7 +1226,7 @@ export function renderCabecalhoConversa(estado: Estado, agenteId: string): strin
   const disponivel = texto === "Disponível";
   const rotulo = `${nome} · ${texto}`;
   const sub = disponivel ? "" : `<span class="pilula-sub" aria-hidden="true">${html}</span>`;
-  return `<button type="button" class="pilula-bot" data-act="alternar-detalhes" aria-controls="detalhes" aria-label="${esc(`Painel de ${rotulo}`)}" title="${esc(rotulo)}">${a ? iconeAgente(a, "sm", estadoMascoteNaConversa(estado, a.conversaId)) : ""}<span class="pilula-nome">${esc(nome)}</span><span class="presenca${ativa ? " ativa" : ""}" aria-hidden="true"></span><span class="pilula-seta" aria-hidden="true">›</span></button>${sub}`;
+  return `<button type="button" class="pilula-bot" data-act="alternar-detalhes" aria-controls="detalhes" aria-label="${esc(`Painel de ${rotulo}`)}" title="${esc(rotulo)}">${a ? iconeAgente(a, "sm", estadoMascoteNaConversa(estado, a.conversaId)) : ""}<span class="pilula-nome">${esc(nome)}</span><span class="presenca${ativa ? " ativa" : ""}" aria-hidden="true"></span><span class="pilula-seta" aria-hidden="true">›</span>${a?.ownerId === estado.sessao?.pessoaId ? htmlFio(estado.computadorPessoa) : ""}</button>${sub}`;
 }
 
 /**

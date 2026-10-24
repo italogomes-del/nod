@@ -2,6 +2,9 @@ import "./lib/mascote-elemento.ts";
 import { abrirCapturaAmpliada } from "./telas/captura-ampliada.ts";
 import { abrirPreviaArquivo } from "./telas/previa-arquivo.ts";
 import { abrirComputador, aplicarModoDevNoComputador } from "./telas/computador.ts";
+import { abrirTelaCheia } from "./telas/tela-cheia.ts";
+import { htmlItemMenu, OPERACOES_PESSOA, type OperacaoPessoa } from "./lib/computador-pessoa.ts";
+import { CHAVE_AVISO_RECRIADO } from "./telas/espaco.ts";
 import { marcarTelaFechadaNaAjuda } from "./lib/computador.ts";
 import { aoVerComputador, definirTelaDoBot } from "./telas/tela-do-bot.ts";
 import { abrirWorkspace } from "./telas/workspace.ts";
@@ -2024,6 +2027,7 @@ async function iniciarSessao(escopo: Escopo): Promise<void> {
   });
   live.connect();
   dispatch({ tipo: "invalidar", quais: ["frota", "sua-vez", "nao-lidos", "salas", "executor", "rotinas"] });
+  void lerComputadorAgora();
   const pedido = pedidoPendente();
   if (pedido) abrirPareamento(api, pedido, esquecerPedido);
   // #195: a task que estava aberta antes de recarregar volta aberta.
@@ -3571,7 +3575,43 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   "ampliar-captura": (el) => { abrirCapturaAmpliada(el); },
   // NOD-327: o card de CSV/PDF abre a prévia num modal claro sobre a conversa.
   "previa-arquivo": (el) => { abrirPreviaArquivo(el); },
-  "abrir-computador": (el) => { const a = botGerido(el.dataset.id); if (a && api && a.ownerId === estado.sessao?.pessoaId) abrirComputador(api, a, { assumir: el.dataset.assumir === "1", dev: () => estado.modoDev.ligado, aoFechar: render }); },
+  // NOD-96 (v2): Abrir leva à tela cheia em Assistindo (no pedido de ajuda, já no controle). Sem v2, o diálogo de antes.
+  "abrir-computador": (el) => {
+    const a = botGerido(el.dataset.id);
+    if (!a || !api || a.ownerId !== estado.sessao?.pessoaId) return;
+    const sessao = api;
+    if (!estado.computadorPessoa) return abrirComputador(sessao, a, { assumir: el.dataset.assumir === "1", dev: () => estado.modoDev.ligado, aoFechar: render });
+    abrirTelaCheia(sessao, a, { assumir: el.dataset.assumir === "1", pedido: el.dataset.pedido ?? null, aoMudar: () => void lerComputadorAgora(), antigo: estado.modoDev.ligado ? () => abrirComputador(sessao, a, { assumir: false, dev: () => estado.modoDev.ligado }) : null });
+  },
+  // NOD-96 (v2): as operações do computador da pessoa. Redefinir e Sair de todos pedem confirmação; o resto vai direto.
+  "operar-computador": (el) => {
+    const op = el.dataset.op as OperacaoPessoa | undefined;
+    if (!op || !OPERACOES_PESSOA.includes(op)) return;
+    if (op === "redefinir" || op === "sair_de_todos") { dispatch({ tipo: "computador-ui", ui: { confirmar: op } }); focarNovo(); return; }
+    return operarComputador(op);
+  },
+  "pc-confirmar": (el) => {
+    const op = el.dataset.op;
+    if (op !== "redefinir" && op !== "sair_de_todos") return;
+    return operarComputador(op);
+  },
+  "pc-cancelar": () => {
+    const op = estado.computadorUi.confirmar;
+    dispatch({ tipo: "computador-ui", ui: { confirmar: null } });
+    if (op) document.querySelector<HTMLElement>(`#espaco [data-pc-acao="${op}"] button`)?.focus();
+  },
+  "pc-segundo-plano": () => dispatch({ tipo: "computador-ui", ui: { etapasAbertas: false } }),
+  // O link do erro (e o "ver telas" da espera) abre o painel; do erro, com a ação sugerida marcada e com o foco nela.
+  "ver-computador-do-bot": (el) => {
+    const realce = (el.dataset.realce as OperacaoPessoa | undefined) ?? null;
+    dispatch({ tipo: "computador-ui", ui: { realce } });
+    abrirEspaco("computador-do-bot");
+    if (realce) document.querySelector<HTMLElement>(`#espaco [data-pc-acao="${realce}"] button`)?.focus();
+  },
+  "entendi-computador": () => {
+    try { localStorage.setItem(CHAVE_AVISO_RECRIADO, "1"); } catch { /* sem storage: a faixa volta na próxima visita */ }
+    render();
+  },
   // NOD-97: "Terminei" no cartão do pedido de tela (a pessoa fechou a tela com a ajuda aberta) devolve ao bot, como o Parar.
   "terminei-computador": (el) => agir(async () => {
     const id = el.dataset.id ?? "";
@@ -4449,6 +4489,14 @@ document.addEventListener("keydown", (ev) => {
     telaMinhaConta.fecharJanela();
     return;
   }
+  // NOD-96: a confirmação do painel do computador fecha no Esc; as etapas vão para segundo plano.
+  if (estado.computadorUi.confirmar || estado.computadorUi.etapasAbertas) {
+    ev.stopPropagation();
+    const op = estado.computadorUi.confirmar;
+    dispatch({ tipo: "computador-ui", ui: { confirmar: null, etapasAbertas: false } });
+    if (op) document.querySelector<HTMLElement>(`#espaco [data-pc-acao="${op}"] button`)?.focus();
+    return;
+  }
   // NOD-94: no progresso, o Esc é o "Continuar em segundo plano"; no formulário, fecha (e os segredos somem).
   if (estado.instalarSsh && !estado.instalarSsh.segundoPlano) {
     ev.stopPropagation();
@@ -4737,6 +4785,8 @@ function aoVoltarParaFrente(): void {
 }
 window.addEventListener("focus", aoVoltarParaFrente);
 document.addEventListener("visibilitychange", aoVoltarParaFrente);
+// NOD-96: de volta à aba, o computador do bot relê na hora (escondida, a leitura para).
+document.addEventListener("visibilitychange", () => { if (!document.hidden && estado.computadorPessoa) void lerComputadorAgora(); });
 // ADR-094: voltar ao app (celular desbloqueado, aba à frente, janela em foco, rede de volta) só reabre o stream se ele
 // caiu de fato ou ficou mudo além do prazo (NOD-254); o que se perdeu chega pelo replay do `since` ou, sem replay
 // possível, pela releitura do aoReidratar. `focus` porque no Mac a janela coberta pode voltar sem `visibilitychange`.
@@ -5082,6 +5132,47 @@ function atualizarConectar(p: Partial<NonNullable<typeof estado.conectarMaquina>
   if (c) dispatch({ tipo: "conectar-maquina", conectar: { ...c, ...p } });
 }
 
+// ---- NOD-96: o computador do bot v2 (um computador por pessoa) ----------------------------------------------------------
+/**
+ * A web lê GET /computador sozinha: 5 s normalmente, 1 s com operação ou ligando, 60 s quando a rota não existe
+ * (NOD_COMPUTADORES desligado: tudo fica como antes). Com a aba escondida, não lê. Sem frame próprio no SSE (o PR 5
+ * pode trazer um; aí basta invalidar daqui).
+ */
+let computadorTimer = 0;
+let computadorGeracao = 0;
+function lerComputadorAgora(): Promise<void> {
+  window.clearTimeout(computadorTimer);
+  const minha = ++computadorGeracao;
+  return pulsoDoComputador(minha).catch(() => undefined);
+}
+async function pulsoDoComputador(minha: number): Promise<void> {
+  if (minha !== computadorGeracao || !api) return;
+  if (!document.hidden) {
+    const dto = await api.computadorDaPessoa();
+    if (minha !== computadorGeracao) return;
+    dispatch({ tipo: "hidratar-computador-pessoa", dto, agora: Date.now() });
+  }
+  const c = estado.computadorPessoa;
+  const ms = !c ? 60_000 : c.operacao || c.estado === "ligando" ? 1_000 : 5_000;
+  computadorTimer = window.setTimeout(() => void pulsoDoComputador(minha), ms);
+}
+function operarComputador(op: OperacaoPessoa): Promise<void> {
+  const longa = op === "atualizar" || op === "redefinir" || op === "sair_de_todos";
+  dispatch({ tipo: "computador-ui", ui: { confirmar: null, realce: null, etapasAbertas: longa && estado.espaco?.secao === "computador-do-bot" } });
+  // Uma leitura que saiu antes do POST chegaria sem a operação e apagaria o diálogo de etapas: a geração nova a descarta.
+  window.clearTimeout(computadorTimer);
+  ++computadorGeracao;
+  return agir(async () => {
+    try {
+      await api!.operarComputador(op);
+    } finally {
+      // O diálogo de etapas só existe quando a leitura traz a operação: o foco vai para ele depois dela.
+      await lerComputadorAgora();
+      if (longa) focarNovo();
+    }
+  });
+}
+
 // ---- Seu espaço e o menu da conta (definido em 2026-09-30, canvas "Menu, sidebar e gaveta") -----------------------------
 function abrirEspaco(secao: SecaoEspaco): void {
   celular.fecharBots();
@@ -5132,6 +5223,9 @@ function dadosMenuConta(): DadosMenuConta {
     // NOD-345: com contas no servidor, o topo do menu é a conta (ou o convite, no espaço provisório).
     ...(contas && contaAtual ? { conta: { email: contaAtual.conta?.email ?? contaAtual.legado?.email ?? null, senha: contaAtual.conta?.senha ?? false, legado: !contaAtual.conta && !!contaAtual.legado } } : {}),
     esteMac: ((m) => (m.motivoEspera === "disco" ? "Disco quase cheio" : m.motivoEspera ? "Ocupado" : (USOS.find((u) => u.id === estado.usoDoMac)?.nome ?? "")))(leituraDoMac(estado.trabalhos)),
+
+    // NOD-96: o item do computador do bot (v2), com o anel durante uma operação; o ✓ quando ela acaba.
+    ...(estado.computadorPessoa ? { computadorDoBot: htmlItemMenu(estado.computadorPessoa, estado.computadorMemoria.okMenuAte > estado.agora) } : {}),
   };
 }
 

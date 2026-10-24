@@ -4,6 +4,7 @@ import type { AbaGaveta, Estado, EstadoComputadorBot, NivelGaveta } from "../est
 import { botao, dataHora, esc, iconeAgente } from "../lib/render.ts";
 import { ICONE } from "../lib/icones.ts";
 import { MOTIVO_FALHA_TEXTO } from "../lib/computador.ts";
+import { htmlGavetaTela } from "../lib/computador-pessoa.ts";
 import { ATALHO_SEMPRE_LIGADA, botaoDaParada, desdeDaParada, linhaOndeRoda, pedeAtalhoNaExecucao, rotuloExecucao } from "../lib/execucao.ts";
 import { CORES_MASCOTE, FORMAS_MASCOTE } from "../lib/mascote.ts";
 import { botaoLigar, htmlLinhaLigar, VELOCIDADES, VOZES } from "./ligacao.ts";
@@ -200,6 +201,10 @@ export function estadoDoComputadorNaGaveta(estado: Pick<Estado, "computadorVisto
  * entra por web/telas/tela-do-bot.ts, que só observa com esta aba à vista (`data-comp-bot`), sem regravar a gaveta.
  */
 function abaComputador(estado: Estado, a: Bot): string {
+  // NOD-96 (v2): com o computador da pessoa, a aba mostra a miniatura com Abrir, "não está usando o navegador",
+  // dormindo/Acordar e o fora do ar com o caminho — o estado vem do computador da pessoa, não do pulso deste bot.
+  const v2 = estado.computadorPessoa;
+  if (v2) return htmlGavetaTela(v2, a);
   const visto = estadoDoComputadorNaGaveta(estado, a);
   const acao = estado.computadorAcao?.agenteId === a.id ? estado.computadorAcao.tipo : null;
   const legenda = `<p class="tela-legenda">Tela de ${esc(a.nome)}</p>`;

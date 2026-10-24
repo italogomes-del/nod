@@ -36,6 +36,7 @@ import type { PaginaDaBiblioteca } from "../../src/contracts/biblioteca.ts";
 import { gruposVisiveis, juntarPagina, POR_VEZ, type BibliotecaDaConversa, type GrupoBiblioteca } from "../lib/biblioteca.ts";
 import type { EstadoConexao } from "../lib/live-events.ts";
 import { ehErroDeRede, type ErroNaTela } from "../lib/erro-da-tela.ts";
+import { lembrarComputador, MEMORIA_INICIAL, UI_INICIAL as UI_COMPUTADOR_INICIAL, type ComputadorPessoaDto, type ComputadorUi, type MemoriaDoComputador } from "../lib/computador-pessoa.ts";
 import { conversasComPergunta } from "../lib/perguntas.ts";
 import { UI_IAS_INICIAL, type UiIas } from "../telas/cartao-ia.ts";
 import { UI_CONTAS_INICIAL, type UiContas } from "../telas/contas-lista.ts";
@@ -146,7 +147,7 @@ export type ConectarMaquina = {
   conviteAte?: number | null;
 };
 
-export type SecaoEspaco = "conta" | "conexao" | "avisos" | "preferencias" | "este-mac" | "maquinas" | "computadores" | "agentes" | "relatos";
+export type SecaoEspaco = "conta" | "conexao" | "avisos" | "preferencias" | "este-mac" | "maquinas" | "computador-do-bot" | "computadores" | "agentes" | "relatos";
 
 /**
  * A gaveta do bot por níveis (definido em 2026-09-30, canvas "Menu, sidebar e gaveta"): o que é do bot abre DENTRO dela,
@@ -354,6 +355,14 @@ export type Estado = {
   chaves: ChaveMaquinaDto[] | null;
   /** ADR-090: as máquinas da pessoa (chaves vivas + o que as conectadas anunciaram) e o padrão de onde os bots trabalham. */
   maquinas: MaquinasDto | null;
+  /**
+   * NOD-96 (computador do bot v2): o computador da pessoa. null = a rota não existe (NOD_COMPUTADORES desligado) ou
+   * ainda não leu — a web fica no modelo de antes. `computadorMemoria` é o que a web lembra entre leituras (esperas,
+   * ✓, telas fechadas por uma operação); `computadorUi`, o realce e o diálogo do painel.
+   */
+  computadorPessoa: ComputadorPessoaDto | null;
+  computadorMemoria: MemoriaDoComputador;
+  computadorUi: ComputadorUi;
   /** ADR-090: o "Conectar uma máquina" aberto em Seu espaço › Máquinas (passo, código digitado, o pedido visto). */
   conectarMaquina: ConectarMaquina | null;
   /** NOD-94: a instalação por SSH aberta (o diálogo ou a linha em segundo plano); null = nenhuma. */
@@ -497,6 +506,8 @@ export type Acao =
   | { tipo: "hidratar-salas"; salas: { sala: Sala; membros: MembroSala[] }[] }
   | { tipo: "hidratar-chaves"; chaves: ChaveMaquinaDto[] }
   | { tipo: "hidratar-maquinas"; maquinas: MaquinasDto }
+  | { tipo: "hidratar-computador-pessoa"; dto: ComputadorPessoaDto | null; agora: number }
+  | { tipo: "computador-ui"; ui: Partial<ComputadorUi> }
   | { tipo: "conectar-maquina"; conectar: ConectarMaquina | null }
   | { tipo: "instalar-ssh"; instalar: InstalarSsh | null }
   | { tipo: "hidratar-contas"; contas: ContasIaDto; detalhes: DetalhesDasContas | null }
@@ -588,6 +599,9 @@ export const estadoInicial: Estado = {
   memorias: {},
   chaves: null,
   maquinas: null,
+  computadorPessoa: null,
+  computadorMemoria: MEMORIA_INICIAL,
+  computadorUi: UI_COMPUTADOR_INICIAL,
   conectarMaquina: null,
   instalarSsh: null,
   contasIa: null,
@@ -1159,7 +1173,7 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
     case "sessao":
       // Trocou a pessoa: chaves E relatos somem. Relato carrega correlationId, machineId e o erro
       // cru do fornecedor — não pode ficar na tela da próxima sessão (ADR-002).
-      return { ...estado, sessao: acao.escopo, chaves: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.chaves : null, maquinas: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.maquinas : null, instalarSsh: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.instalarSsh : null, contasIa: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.contasIa : null, detalhesContas: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.detalhesContas : null, relatos: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.relatos : null, chaveEmitida: null,
+      return { ...estado, sessao: acao.escopo, chaves: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.chaves : null, maquinas: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.maquinas : null, computadorPessoa: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.computadorPessoa : null, instalarSsh: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.instalarSsh : null, contasIa: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.contasIa : null, detalhesContas: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.detalhesContas : null, relatos: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.relatos : null, chaveEmitida: null,
         modoDev: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.modoDev : { ligado: false, raioX: {} },
         naoLidos: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.naoLidos : null, novasDesde: {},
         citacoes: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.citacoes : {},
@@ -1397,6 +1411,15 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
       return { ...estado, chaves: acao.chaves };
     case "hidratar-maquinas":
       return { ...estado, maquinas: acao.maquinas };
+    case "hidratar-computador-pessoa": {
+      if (!acao.dto) return estado.computadorPessoa ? { ...estado, computadorPessoa: null, computadorMemoria: MEMORIA_INICIAL, computadorUi: UI_COMPUTADOR_INICIAL } : estado;
+      const computadorMemoria = lembrarComputador(estado.computadorPessoa, acao.dto, estado.computadorMemoria, acao.agora);
+      // A operação acabou: as etapas fecham sozinhas.
+      const computadorUi = !acao.dto.operacao && estado.computadorUi.etapasAbertas ? { ...estado.computadorUi, etapasAbertas: false } : estado.computadorUi;
+      return { ...estado, computadorPessoa: acao.dto, computadorMemoria, computadorUi };
+    }
+    case "computador-ui":
+      return { ...estado, computadorUi: { ...estado.computadorUi, ...acao.ui } };
     case "conectar-maquina":
       return { ...estado, conectarMaquina: acao.conectar };
     case "instalar-ssh":

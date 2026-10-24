@@ -7,6 +7,6 @@
     "moduleResolution": "Bundler",
     "jsx": "preserve"
   },
-  "include": ["web/**/*.ts", "src/contracts/**/*.ts", "src/shared/types.ts"],
+  "include": ["web/**/*.ts", "src/contracts/**/*.ts", "src/shared/types.ts", "tests/unit/web/tela-cheia.test.ts"],
   "exclude": ["web/**/*.test.ts"]
 }

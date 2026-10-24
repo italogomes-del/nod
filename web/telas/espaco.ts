@@ -11,6 +11,7 @@ import { renderProvedores } from "./provedores.ts";
 import { renderEsteMac } from "./este-mac.ts";
 import { renderMaquinas } from "./maquinas.ts";
 import { renderRelatos } from "./relatos.ts";
+import { ICONE_CB, htmlPainelComputadorDoBot } from "../lib/computador-pessoa.ts";
 
 /**
  * "Seu espaço" (definido em 2026-09-18): o que é da CONTA, não de um bot. definido em 2026-09-30 (canvas "Menu, sidebar e
@@ -32,6 +33,28 @@ export const SECOES_ESPACO: readonly { id: SecaoEspaco; nome: string; icone: str
   { id: "relatos", nome: "Relatos", icone: ICONE.bandeira },
 ];
 
+/**
+ * NOD-96 (computador do bot v2, só com NOD_COMPUTADORES=motor): a seção "Computador do bot" entra depois de Máquinas, e
+ * "Computadores" (as chaves das máquinas) passa a se chamar "Chaves" — "computador" agora é o do bot. Sem v2, igual a antes.
+ */
+export function secoesDoEspaco(v2: boolean): readonly { id: SecaoEspaco; nome: string; icone: string }[] {
+  if (!v2) return SECOES_ESPACO;
+  return SECOES_ESPACO.flatMap((s) => s.id === "maquinas"
+    ? [s, { id: "computador-do-bot" as const, nome: "Computador do bot", icone: ICONE_CB.pcBot }]
+    : s.id === "computadores" ? [{ ...s, nome: "Chaves" }] : [s]);
+}
+
+/** O Entendi da faixa "entre nos sites de novo uma vez" fica neste navegador. */
+export const CHAVE_AVISO_RECRIADO = "nod.computador.aviso-recriado";
+
+function avisoRecriadoDispensado(): boolean {
+  try {
+    return typeof localStorage !== "undefined" && localStorage.getItem(CHAVE_AVISO_RECRIADO) === "1";
+  } catch {
+    return false;
+  }
+}
+
 export type Ambiente = { regime: string; porta?: number | null } | null;
 
 export function textoAmbiente(ambiente: Ambiente): string | null {
@@ -42,9 +65,10 @@ export function textoAmbiente(ambiente: Ambiente): string | null {
 
 /** `minhaConta`: o HTML da seção Minha conta (web/telas/minha-conta.ts); null = flag desligada e a seção nem aparece. */
 export function renderEspaco(estado: Estado, ambiente: Ambiente, avisos: EstadoAvisos, volta: Volta, minhaConta: string | null = null): string {
+  const v2 = Boolean(estado.computadorPessoa);
   const pedida = estado.espaco?.secao ?? "conexao";
-  const secao = pedida === "conta" && minhaConta === null ? "conexao" : pedida;
-  const nav = SECOES_ESPACO.filter((s) => s.id !== "conta" || minhaConta !== null).map((s) => `<button type="button" class="espaco-item" data-act="secao-espaco" data-secao="${s.id}"${s.id === secao ? ' aria-current="page"' : ""}>${s.icone}<span>${esc(s.nome)}</span></button>`).join("");
+  const secao = (pedida === "conta" && minhaConta === null) || (pedida === "computador-do-bot" && !v2) ? "conexao" : pedida;
+  const nav = secoesDoEspaco(v2).filter((s) => s.id !== "conta" || minhaConta !== null).map((s) => `<button type="button" class="espaco-item" data-act="secao-espaco" data-secao="${s.id}"${s.id === secao ? ' aria-current="page"' : ""}>${s.icone}<span>${esc(s.nome)}</span></button>`).join("");
   const banco = textoAmbiente(ambiente);
   return `<div class="espaco" role="dialog" aria-modal="true" aria-labelledby="espaco-titulo">
     <nav class="espaco-nav" aria-label="Seções de Seu espaço">
@@ -71,8 +95,10 @@ function conteudo(estado: Estado, secao: SecaoEspaco, avisos: EstadoAvisos): str
       return renderEsteMac(estado);
     case "maquinas":
       return renderMaquinas(estado);
+    case "computador-do-bot":
+      return estado.computadorPessoa ? htmlPainelComputadorDoBot(estado.computadorPessoa, estado.frota?.agentes ?? [], estado.computadorUi, estado.agora, avisoRecriadoDispensado()) : "";
     case "computadores":
-      return `<section class="espaco-secao"><h2>Computadores</h2><p class="intro">Uma chave por computador. Perdeu ou trocou de computador? Cancele a chave dele aqui e gere outra.</p>${renderChaves(estado, false)}</section>`;
+      return `<section class="espaco-secao"><h2>${estado.computadorPessoa ? "Chaves" : "Computadores"}</h2><p class="intro">Uma chave por computador. Perdeu ou trocou de computador? Cancele a chave dele aqui e gere outra.</p>${renderChaves(estado, false)}</section>`;
     case "agentes":
       return renderGestao(estado.gestao ?? null, estado.sessao?.pessoaId);
     case "relatos":

@@ -2,6 +2,7 @@ import type { MaquinaDto } from "../../src/contracts/maquina.ts";
 import type { Agente } from "../../src/contracts/agente.ts";
 import type { ConectarMaquina, Estado } from "../estado/reducer.ts";
 import { ICONE } from "../lib/icones.ts";
+import { ICONE_CB, resumoDasTelas } from "../lib/computador-pessoa.ts";
 import { botao, esc, hora, iconeAgente } from "../lib/render.ts";
 import { maquinasDe, memoriaLegivel, seguradoPeloMac } from "../lib/trabalhos.ts";
 import { discoLegivel, NOME_FILA, NOME_MEMORIA, NOME_PROCESSADOR, tempoAteAcabar } from "./este-mac.ts";
@@ -221,7 +222,15 @@ function cartao(estado: Estado, m: MaquinaDto): string {
     ${nuvemNoCartao(estado, m)}
     ${formConectarNuvem(estado, m)}
     <div class="maq-quem"><span class="maq-avatares">${aqui.slice(0, 6).map((b) => iconeAgente(b, "sm")).join("")}</span><span>${esc(quem)}</span></div>`}
+    ${telasNaMaquina(estado, m)}
   </div>`;
+}
+
+/** NOD-96 (v2): a máquina que hospeda o computador do bot diz as telas abertas nele, com o caminho para o painel. */
+function telasNaMaquina(estado: Estado, m: MaquinaDto): string {
+  const pc = estado.computadorPessoa;
+  if (!pc || pc.maquina?.id !== m.id) return "";
+  return `<div class="maq-quem pc-na-maquina"><span class="maq-avatares" aria-hidden="true">${ICONE_CB.pcBot}</span><span>${esc(resumoDasTelas(pc, botsDaPessoa(estado)))}</span><button type="button" class="cb-link" data-act="ver-computador-do-bot">Ver</button></div>`;
 }
 
 function seletor(rotulo: string, act: string, dados: Record<string, string>, atual: string | null, maquinas: MaquinaDto[], noMac: boolean): string {

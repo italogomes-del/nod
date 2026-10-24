@@ -179,6 +179,15 @@ describe("12: a aba Computador", () => {
     expect(e.computadorVisto).toEqual({ a1: "ligado" });
     expect(reduzir(e, { tipo: "computador-visto", agenteId: "a1", estado: "ligado" })).toBe(e);
   });
+
+  it("NOD-96 (v2): com o computador da pessoa, a aba mostra o estado dele (não o pulso do bot) e segue observável", () => {
+    const v2 = { estado: "dormindo", maquina: null, telas: [], esperando: [] } as unknown as Estado["computadorPessoa"];
+    const html = renderDetalhes({ ...naAba(nina(), "ocupado"), computadorPessoa: v2 });
+    expect(html).toContain('data-gaveta-computador="dormindo"');
+    expect(html).toContain('data-comp-bot="a1"');
+    expect(html).toContain('data-op="acordar"');
+    expect(html).not.toContain("Ligado · usando a tela agora");
+  });
 });
 
 describe("12 (revisão): o computador não prende o alarme nem fica sem saída", () => {

@@ -23,6 +23,11 @@ export type DadosMenuConta = {
   /** ADR-085: o que o item Este Mac diz à direita ("Equilibrado", ou "Ocupado" quando segura trabalho novo). */
   esteMac?: string;
   /**
+   * NOD-96 (computador do bot v2): o item "Computador do bot" já montado (com o anel e a dica durante uma operação). Com
+   * ele, "Computadores" vira "Chaves". Ausente = o modelo de antes.
+   */
+  computadorDoBot?: string;
+  /**
    * NOD-345 (ADR-124): ausente = servidor sem contas (o menu de antes). `email: null` = espaço provisório: a linha fixa
    * "Criar conta ou entrar · Seu espaço está só neste computador" (o lembrete permanente, opção 2 do Gil).
    */
@@ -116,7 +121,8 @@ export function htmlMenuConta(d: DadosMenuConta): string {
     <button type="button" role="menuitemcheckbox" aria-checked="${d.modoDev}" data-modo-dev>${ICONE.codigo}<span class="mc-nome">Modo dev</span><kbd>⌘⇧D</kbd><span class="mc-chave" aria-hidden="true"><span></span></span></button>
     ${EXPERIMENTOS.map((e) => `<button type="button" role="menuitemcheckbox" aria-checked="${d.experimentos?.[e.chave] ?? false}" data-experimento="${e.chave}" title="${esc(e.dica)}">${e.icone}<span class="mc-nome">${esc(e.nome)}</span><span class="mc-chave" aria-hidden="true"><span></span></span></button>`).join("")}
     ${item("este-mac", ICONE.medidor, "Este Mac", d.esteMac ?? "")}
-    ${item("computadores", ICONE.monitor, "Computadores")}
+    ${d.computadorDoBot ?? ""}
+    ${item("computadores", ICONE.monitor, d.computadorDoBot ? "Chaves" : "Computadores")}
     <hr>
     ${item("agentes", ICONE.agentes, "Gerenciar agentes")}
     ${item("relatos", ICONE.bandeira, "Relatos")}

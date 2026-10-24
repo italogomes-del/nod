@@ -3,6 +3,7 @@ import type { PaginaDaBiblioteca } from "../../src/contracts/biblioteca.ts";
 import type { AnexoMeta } from "../../src/contracts/anexo.ts";
 import type { ArtefatoDto } from "../../src/contracts/artefato.ts";
 import type { AcaoComputador, ComputadorDto, ResultadoComputador } from "../../src/contracts/computador.ts";
+import { lerComputadorPessoa, type ComputadorPessoaDto, type OperacaoPessoa } from "./computador-pessoa.ts";
 import type { DisponibilidadeDitado } from "../../src/contracts/ditado.ts";
 import type { PreferenciaHarness } from "../../src/contracts/harness.ts";
 import type { Agente, FormaAgente, CorAgente, ModoAprovacao } from "../../src/contracts/agente.ts";
@@ -191,6 +192,18 @@ export function criarApi(escopo: Escopo) {
      */
     devolverComputadorAoSair: (id: string) => pedir<{ ok: true }>("POST", `${base}/agentes/${encodeURIComponent(id)}/computador`, { operacao: "devolver", origem: "fechou_tela" }, { keepalive: true, silencioso: true }).then(() => undefined, () => undefined),
     acaoComputador: (id: string, acao: AcaoComputador) => post<ResultadoComputador>(`agentes/${encodeURIComponent(id)}/computador/acoes`, acao),
+    /**
+     * Computador do bot v2 (NOD-96): o computador da pessoa, uma tela por bot. null = a rota não existe ou respondeu
+     * fora do contrato (NOD_COMPUTADORES desligado): a web fica no modelo de antes. Sem nova tentativa: é sondagem.
+     */
+    computadorDaPessoa: async (): Promise<ComputadorPessoaDto | null> => {
+      try {
+        return lerComputadorPessoa(await pedir<unknown>("GET", `${base}/computador`));
+      } catch {
+        return null;
+      }
+    },
+    operarComputador: (operacao: OperacaoPessoa) => post<unknown>("computador", { operacao }),
     urlEventos: `${base}/eventos`,
     frota: () => get<FrotaDto>("frota"),
     gestaoAgentes: () => get<FrotaDto>("gestao-agentes"),
