@@ -430,11 +430,23 @@ export function criarSupervisor(op) {
     relatarEstado(c);
   }
 
+  /**
+   * NOD-96 PR 7 (definido em 2026-10-22): o servidor sela `{ chaveMaquina, confia }` (src/adapters/computador/selo.ts);
+   * o texto cru (só a chave em hex) segue aceito. `confia` tem de ser a Ed25519 já fixada (a do `servidorPub`).
+   */
+  function chaveDoSelo(c, texto) {
+    if (!texto.startsWith('{')) return texto;
+    const s = JSON.parse(texto);
+    if (typeof s?.chaveMaquina !== 'string') throw new Error('selo_invalido');
+    if (s.confia !== undefined && s.confia !== c.servidorPub) throw new Error('selo_de_outro_servidor');
+    return s.chaveMaquina;
+  }
+
   async function executar(c, cmd) {
     switch (cmd.tipo) {
       case 'iniciar': {
         let chave;
-        try { chave = abrirSelo(c.privX, cmd.segredoSelado); } catch { return falhou(cmd.id, 'cofre_invalido'); }
+        try { chave = chaveDoSelo(c, abrirSelo(c.privX, cmd.segredoSelado)); } catch { return falhou(cmd.id, 'cofre_invalido'); }
         if (!/^[a-f0-9]{64}$/.test(chave)) return falhou(cmd.id, 'cofre_invalido');
         if (c.ligado) return resultado(cmd.id, 'ok');
         try {
@@ -505,7 +517,11 @@ export function criarSupervisor(op) {
       if (!cmd || typeof cmd !== 'object' || !ID_VALIDO.test(String(cmd.computadorId ?? '')) || !TIPOS.includes(cmd.tipo)) return falhou(id, 'acao_falhou');
       if (cmd.agenteId !== undefined && !ID_VALIDO.test(String(cmd.agenteId))) return falhou(id, 'acao_falhou');
       if (TIPOS_DA_TELA.includes(cmd.tipo) && !cmd.agenteId) return falhou(id, 'acao_falhou');
+      const novo = !computadores.has(cmd.computadorId);
       const c = await obter(cmd.computadorId);
+      // NOD-96 PR 7 (definido em 2026-10-22): o computador que nasce aqui (instalação limpa, a sonda do driver) é
+      // relatado na hora — o servidor só manda o `iniciar` depois de ver a X25519 dele.
+      if (novo) relatarEstado(c);
       // A chave do servidor fica fixada no primeiro `iniciar` (TOFU, como a do supervisor do lado de lá).
       const fixar = !c.servidorPub && cmd.tipo === 'iniciar' && typeof cmd.servidorPub === 'string';
       const publica = c.servidorPub ?? (fixar ? cmd.servidorPub : null);

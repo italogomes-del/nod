@@ -77,6 +77,9 @@ export function selar(supervisorPub: string, dados: Buffer): string {
   const chave = chaveDoSelo(diffieHellman({ privateKey: efemera.privateKey, publicKey: destino.chave }), epk, destino.cru);
   const iv = randomBytes(12);
   const cifra = createCipheriv("aes-256-gcm", chave, iv);
+  // NOD-96 PR 7 (definido em 2026-10-22): a pública do destino entra no AAD, como no supervisor (infra/computador/chaves.mjs);
+  // sem ela a tag do GCM não batia e todo `iniciar` voltava `cofre_invalido`.
+  cifra.setAAD(destino.cru);
   const corpo = Buffer.concat([cifra.update(dados), cifra.final()]);
   return Buffer.concat([epk, iv, cifra.getAuthTag(), corpo]).toString("base64");
 }
@@ -106,6 +109,7 @@ export function abrirSelo(privada: string, selo: string): Buffer {
   const tag = bruto.subarray(44, 60);
   const chave = chaveDoSelo(diffieHellman({ privateKey: chavePrivada, publicKey: publicaX25519(epk.toString("base64")).chave }), epk, pub);
   const decifra = createDecipheriv("aes-256-gcm", chave, iv);
+  decifra.setAAD(pub);
   decifra.setAuthTag(tag);
   return Buffer.concat([decifra.update(bruto.subarray(60)), decifra.final()]);
 }

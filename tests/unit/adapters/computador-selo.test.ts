@@ -37,3 +37,26 @@ describe("selo X25519", () => {
     expect(Buffer.from(seloDoIniciar(chave, id, sup.publica), "base64").toString("hex")).not.toContain(chaveDaMaquina(chave, id));
   });
 });
+
+/**
+ * NOD-96 PR 7 (definido em 2026-10-22): o lado do servidor (este arquivo) e o do supervisor (infra/computador/chaves.mjs)
+ * nasceram em PRs diferentes e não se falavam — o selo sem AAD e o `iniciar` sem `servidorPub`. Daqui em diante um
+ * conversa com o outro aqui, sem precisar da pilha inteira (essa está em tests/concurrency/computador-motor-e2e.test.ts).
+ */
+describe("servidor ↔ supervisor (os dois lados de verdade)", () => {
+  it("o supervisor confere a assinatura do servidor e abre o selo do servidor", async () => {
+    const sup = await import("../../../infra/computador/chaves.mjs");
+    const par = sup.novoParX25519();
+    const aberto = JSON.parse(sup.abrirSelo(par.privadaPem, seloDoIniciar(chave, id, par.publica))) as { chaveMaquina: string; confia: string };
+    expect(aberto).toEqual({ chaveMaquina: sup.chaveDaMaquina(chave, id), confia: sup.chavesDeAssinatura(chave, id).publica });
+    const agora = Date.now();
+    const assinado = assinarComando(chave, { ...comando, prazoMs: agora + 60_000 });
+    expect(sup.conferirComando(assinado, publicaDeAssinatura(chave, id), new Map(), agora)).toBeNull();
+    expect(sup.conferirComando({ ...assinado, agenteId: "outro" }, publicaDeAssinatura(chave, id), new Map(), agora)).toBe("assinatura_invalida");
+  });
+  it("o servidor abre o que o supervisor sela (a mesma cripto nos dois sentidos)", async () => {
+    const sup = await import("../../../infra/computador/chaves.mjs");
+    const par = gerarParX25519();
+    expect(abrirSelo(par.privada, sup.selar(par.publica, "segredo")).toString()).toBe("segredo");
+  });
+});

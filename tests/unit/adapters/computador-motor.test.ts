@@ -15,18 +15,22 @@ const outra = { tenantId: "t1", pessoaId: "p2" };
  * Um mundo falso: relógio que só anda no `dormir`, uma máquina "vm" da pessoa e um motor falso que, a cada passo,
  * puxa a fila e responde pelo `responder` (null = não responde).
  */
-function mundo(o: { conectada?: boolean; anuncio?: MaquinaDaPessoa["computador"]; loc?: Partial<ComputadorLocalizado>; relataPub?: boolean; aoPasso?: (t: number, canal: ReturnType<typeof criarCanalComputador>, estado: { conectada: boolean }) => void; responder?: (c: ComandoComputador, t: number) => Parameters<ReturnType<typeof criarCanalComputador>["resultado"]>[2] | null } = {}) {
+function mundo(o: { conectada?: boolean; anuncio?: MaquinaDaPessoa["computador"]; loc?: Partial<ComputadorLocalizado>; relataPub?: boolean | "apos_sonda"; aoPasso?: (t: number, canal: ReturnType<typeof criarCanalComputador>, estado: { conectada: boolean }) => void; responder?: (c: ComandoComputador, t: number) => Parameters<ReturnType<typeof criarCanalComputador>["resultado"]>[2] | null } = {}) {
   let t = 1_000_000;
   const sup = gerarParX25519();
   const canal = criarCanalComputador({ agora: () => t });
   const vistos: ComandoComputador[] = [];
+  /** NOD-96 PR 7: as sondas sem assinatura (o supervisor só conhece o computador depois de um comando com o id). */
+  const sondas: ComandoComputador[] = [];
   const estado = { conectada: o.conectada ?? true, hospedeira: null as string | null, supervisor: null as string | null };
   const maquinas = (e: typeof escopo): MaquinaDaPessoa[] => e.pessoaId === "p1" && estado.conectada ? [{ machineId: "vm", nome: "vm-1", plataforma: "linux", computador: o.anuncio === undefined ? "pronto" : o.anuncio, ultimoContato: t }] : [];
   const passo = () => {
     o.aoPasso?.(t, canal, estado);
     if (!estado.conectada) return;
-    if (o.relataPub !== false) canal.relatarEstado(escopo, "vm", { computadorId: "", ligado: false, supervisorPub: sup.publica, telas: [] });
+    if (o.relataPub === true || o.relataPub === undefined || (o.relataPub === "apos_sonda" && sondas.length > 0)) canal.relatarEstado(escopo, "vm", { computadorId: "", ligado: false, supervisorPub: sup.publica, telas: [] });
     for (const c of canal.puxar(escopo, "vm")) {
+      // Como o supervisor real: a sonda sem assinatura é recusada.
+      if (c.assinatura === "") { sondas.push(c); canal.resultado(escopo, "vm", { id: c.id, desfecho: "falhou", motivo: "acao_falhou" }); continue; }
       vistos.push(c);
       const r = o.responder ? o.responder(c, t) : { id: c.id, desfecho: "ok" as const };
       if (r) canal.resultado(escopo, "vm", r);
@@ -44,7 +48,7 @@ function mundo(o: { conectada?: boolean; anuncio?: MaquinaDaPessoa["computador"]
     dormir: async (ms) => { t += ms; passo(); await Promise.resolve(); },
     novoId: (() => { let n = 0; return () => `cmd-${++n}`; })(),
   });
-  return { driver, canal, sup, vistos, estado, agora: () => t, avancar: (ms: number) => { t += ms; } };
+  return { driver, canal, sup, vistos, sondas, estado, agora: () => t, avancar: (ms: number) => { t += ms; } };
 }
 
 async function falha(p: Promise<unknown>) {
@@ -125,6 +129,25 @@ describe("driver motor: iniciar", () => {
     expect(m.agora() - antes).toBeLessThan(TETO_PRONTO_MS + 1_000);
     expect(m.canal.pendentes()).toEqual([]);
     expect(instrucaoDaFalha(e.motivo, null, e.maquina)).toContain("Não consegui ligar o computador: o computador ligou mas não ficou pronto a tempo");
+  });
+
+  it("instalação limpa (NOD-96 PR 7): a sonda sem assinatura faz o supervisor relatar a chave; liga bem antes dos 60 s", async () => {
+    const m = mundo({ relataPub: "apos_sonda" });
+    const antes = m.agora();
+    await m.driver.iniciar(ID);
+    expect(m.agora() - antes).toBeLessThan(5_000);
+    expect(m.sondas).toHaveLength(1);
+    expect(m.sondas[0]).toMatchObject({ computadorId: ID, tipo: "parar", assinatura: "" });
+    expect(m.vistos.map((c) => c.tipo)).toEqual(["iniciar"]);
+    expect(m.estado.supervisor).toBe(m.sup.publica);
+    expect(m.canal.pendentes()).toEqual([]);
+  });
+
+  it("chave já fixada ou já relatada: nenhuma sonda", async () => {
+    const m = mundo();
+    m.canal.relatarEstado(escopo, "vm", { computadorId: ID, ligado: false, supervisorPub: m.sup.publica, telas: [] });
+    await m.driver.iniciar(ID);
+    expect(m.sondas).toEqual([]);
   });
 
   it("ação no meio do boot espera o iniciar (20 s) e conclui", async () => {

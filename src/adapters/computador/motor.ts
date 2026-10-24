@@ -7,7 +7,7 @@ import { ehFalhaComputador, EsperandoTela, FalhaComputador } from "../../domain/
 import { log } from "../../obs/log.ts";
 import type { Escopo } from "../../shared/types.ts";
 import type { CanalComputador } from "./canal.ts";
-import { assinarComando, seloDoIniciar } from "./selo.ts";
+import { assinarComando, publicaDeAssinatura, seloDoIniciar } from "./selo.ts";
 
 /**
  * O driver "motor" do computador (definido em 2026-10-22, NOD-96 PR 3, ADR-122): o computador da pessoa roda numa
@@ -144,8 +144,34 @@ export function criarDriverMotor(o: OpcoesDriverMotor): DriverComputador & { mot
     const foto = () => o.canal.foto(loc.escopo, maquina.machineId);
     if (foto()?.computadorId === id && foto()?.ligado) return;
     if (!loc.hospedeiraId && !loc.maquinaId) await o.fixarHospedeira(loc.escopo, id, maquina.machineId);
-    // A X25519 do supervisor: a fixada (TOFU) ou a que a máquina relata; sem nenhuma ainda, espera o primeiro estado.
     let pub = loc.supervisorPub;
+    // NOD-96 PR 7 (definido em 2026-10-22): numa instalação limpa o supervisor não conhece o computador e não relata
+    // nada dele; ele só cria a pasta e a X25519 ao receber um comando com o id. A sonda é esse comando SEM assinatura —
+    // sempre recusada (não liga nem desliga nada); o supervisor relata o computador novo na hora e a espera abaixo pega a
+    // chave. Sem a sonda, a primeira ação de toda máquina nova esperava os 60 s e falhava (achado do e2e do PR 7).
+    const sonda = !pub && !foto()?.supervisorPub ? { id: novoId(), computadorId: id, tipo: "parar" as const, uso: loc.uso, prazoMs: agora() + PRAZO_COMANDO_MS, assinatura: "" } : null;
+    if (sonda) o.canal.enviar(loc.escopo, maquina.machineId, sonda).catch(() => undefined);
+    try {
+      pub = await esperarChave(id, loc, maquina, ate, pub, foto);
+    } finally {
+      if (sonda) o.canal.cancelar(sonda.id, new FalhaComputador("nao_iniciou"));
+    }
+    const r = await enviar(idDoPortao, loc, maquina, "iniciar", ate, () => new FalhaComputador("nao_ficou_pronto", { maquina: maquina.nome }), {
+      segredoSelado: seloDoIniciar(credencial, id, pub),
+      // NOD-96 PR 7: o supervisor fixa a Ed25519 do servidor no primeiro `iniciar` (TOFU) por este campo; sem ele
+      // recusava o comando (`sem_chave_do_servidor`) e nenhuma máquina nova ligava.
+      servidorPub: publicaDeAssinatura(credencial, id),
+    });
+    if (r.desfecho === "ok") {
+      log("info", "computador_iniciado", { computador_id: id, maquina_id: maquina.machineId, driver: "motor" });
+      return;
+    }
+    throw new FalhaComputador(r.motivo ?? "nao_iniciou", { maquina: maquina.nome });
+  }
+
+  /** A X25519 do supervisor: a fixada (TOFU) ou a que a máquina relata; sem nenhuma ainda, espera o primeiro estado. */
+  async function esperarChave(id: string, loc: ComputadorLocalizado, maquina: MaquinaDaPessoa, ate: number, fixada: string | null, foto: () => ReturnType<CanalComputador["foto"]>): Promise<string> {
+    let pub = fixada;
     while (!pub) {
       const relatada = foto()?.supervisorPub;
       if (relatada) {
@@ -158,12 +184,7 @@ export function criarDriverMotor(o: OpcoesDriverMotor): DriverComputador & { mot
       if (!o.maquinas(loc.escopo).some((m) => m.machineId === maquina.machineId)) throw new FalhaComputador("maquina_sem_contato", { maquina: maquina.nome });
       await dormir(PASSO_MS);
     }
-    const r = await enviar(idDoPortao, loc, maquina, "iniciar", ate, () => new FalhaComputador("nao_ficou_pronto", { maquina: maquina.nome }), { segredoSelado: seloDoIniciar(credencial, id, pub) });
-    if (r.desfecho === "ok") {
-      log("info", "computador_iniciado", { computador_id: id, maquina_id: maquina.machineId, driver: "motor" });
-      return;
-    }
-    throw new FalhaComputador(r.motivo ?? "nao_iniciou", { maquina: maquina.nome });
+    return pub;
   }
 
   function iniciar(id: string, escopo?: Escopo): Promise<void> {
