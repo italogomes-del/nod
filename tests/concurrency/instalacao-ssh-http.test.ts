@@ -165,4 +165,11 @@ describeIntegracao("instalação por SSH pela tela e pela ponte (NOD-94, HTTP re
     expect((await srv.chamar("POST", `maquinas/ssh/${criado.id}/cancelar`, {})).status).toBe(204);
     expect((await publica("pareamento/dispositivo/trocar", { codigoDispositivo })).status).not.toBe(201);
   });
+
+  it("o comando manual (\"Prefere fazer você mesmo?\"): o convite com papel computador pareia sozinho como só computador", async () => {
+    const { convite } = await srv.json<{ convite: string }>("POST", "maquinas/convites", { papel: "computador", substituir: true });
+    const troca = await parear("vm-manual", convite);
+    expect(troca.status).toBe(201);
+    expect(troca.corpo).toMatchObject({ papel: "computador" });
+  });
 });

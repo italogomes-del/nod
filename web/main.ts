@@ -18,6 +18,7 @@ import { abrirRodarMaisUma } from "./telas/rodar-mais-uma-dialogo.ts";
 import { criarContasDoMac } from "./lib/contas-do-mac.ts";
 import { criarContasDaPessoa } from "./lib/contas-da-pessoa.ts";
 import { cifrarCodigo } from "./lib/cifra.ts";
+import { criarInstalarSsh, type CampoSegredo } from "./lib/instalar-ssh.ts";
 import type { ContasIaDto } from "../src/contracts/contas-ia.ts";
 import type { Mensagem } from "../src/contracts/mensagem.ts";
 import { criarIasDoMac } from "./lib/ias-do-mac.ts";
@@ -78,7 +79,7 @@ import { contextoInteligencia, nivelDaGaveta, paiDoNivel } from "./telas/detalhe
 import { avisarNaIdentidade, criarFilaDePerfil, criarSalvarAvatar, ERRO_AO_SALVAR, instalarIdentidade, sobreporPendentes } from "./lib/gaveta-identidade.ts";
 import { renderEspaco, situacaoCurtaAvisos, textoAmbiente } from "./telas/espaco.ts";
 import { USOS } from "./telas/este-mac.ts";
-import { botsDaPessoa, maquinaNova, nomeDeInstanciaSugerido } from "./telas/maquinas.ts";
+import { botsDaPessoa, maquinaNova, maquinasDeTrabalho, nomeDeInstanciaSugerido, soComputador } from "./telas/maquinas.ts";
 import { erroDoConectar, erroDoCriar, erroDoExcluir, recusaDoDormir, REGIAO_PADRAO, relerEnquantoCria, ZONA_PADRAO } from "./lib/maquina-nuvem.ts";
 import type { DormirAposMin, TamanhoMaquinaNuvem } from "../src/contracts/provedor-nuvem.ts";
 import { voltaDaTela } from "./lib/volta.ts";
@@ -802,6 +803,9 @@ function decidirTroca(el: HTMLElement, decisao: "esperar" | "levar" | "outra_ia"
     dispatch({ tipo: "invalidar", quais: [...(conversaId ? [`conversa:${conversaId}` as Invalidacao] : []), "trabalhos", "frota"] });
   });
 }
+
+/** NOD-94: o controlador SSH só existe depois de criado (o primeiro render vem antes). */
+let instalarSshPronto = false;
 
 const OPCOES_DO_CARD_RITMO = ["espacar", "uteis", "pausar", "deixar", "desfazer"] as const;
 function decidirRitmo(el: HTMLElement): Promise<void> {
@@ -1830,6 +1834,7 @@ function render(): void {
   const codigo = codigoComFoco();
   // Seu espaço é uma camada por cima: a tela de baixo continua montada e fica inerte (nem foco, nem clique) enquanto ela está aberta.
   regiaoReabrindo("espaco", estado.espaco ? renderEspaco(estado, ambienteBanco, canalAvisos.estado(), voltaDaTela(estado, estado.tela), contas?.minhaConta ? telaMinhaConta.render() : null) : "");
+  devolverSegredosSsh();
   document.getElementById("espaco")?.toggleAttribute("hidden", !estado.espaco);
   // A ligação em tela cheia também deixa a .app (e Seu espaço) inerte; a pílula não: a pessoa usa o nod com a ligação aberta.
   // O onboarding por cima (olá, IA do Mac, "está te ligando") também deixa a .app inerte (ADR-077).
@@ -3050,7 +3055,8 @@ const contasDaPessoa = criarContasDaPessoa({
   mudar: (mudanca) => dispatch({ tipo: "contas-ui", mudanca }),
   contas: () => estado.contasIa,
   trocarContas: (contas) => dispatch({ tipo: "trocar-contas", contas }),
-  maquinas: () => estado.maquinas?.maquinas ?? [],
+  // NOD-94: a só-computador não tem conta de IA (nenhum bot trabalha nela).
+  maquinas: () => maquinasDeTrabalho(estado.maquinas?.maquinas ?? []),
   detalhes: () => estado.detalhesContas,
   invalidar: () => dispatch({ tipo: "invalidar", quais: ["contas", "maquinas"] }),
   // No Mac, o login é o do app: a conta de sempre, se ainda sem login; senão uma pasta nova (ADR-101).
@@ -3068,6 +3074,33 @@ const contasDaPessoa = criarContasDaPessoa({
   agendar: (fn, ms) => { window.setTimeout(fn, ms); },
   agora: Date.now,
 });
+/**
+ * NOD-94: "Usar uma máquina só para o computador" (instalação por SSH). Os segredos ficam na memória do controlador;
+ * o estado só tem o que a tela mostra.
+ */
+const instalarSsh = criarInstalarSsh({
+  api: { instaladorasSsh: () => api!.instaladorasSsh(), pedirInstalacaoSsh: (p) => api!.pedirInstalacaoSsh(p), verInstalacaoSsh: (id) => api!.verInstalacaoSsh(id),
+    credencialSsh: (id, c) => api!.credencialSsh(id, c), confiarNaNovaSsh: (id) => api!.confiarNaNovaSsh(id), cancelarInstalacaoSsh: (id) => api!.cancelarInstalacaoSsh(id),
+    criarConvite: (c) => api!.criarConvite(c) },
+  cifrar: (chave, texto) => cifrarCodigo(chave, texto),
+  ler: () => estado.instalarSsh,
+  gravar: (i) => dispatch({ tipo: "instalar-ssh", instalar: i }),
+  agendar: (fn, ms) => { const t = window.setTimeout(fn, ms); return { cancelar: () => window.clearTimeout(t) }; },
+  origem: location.origin,
+  computadorAtual: () => estado.maquinas?.maquinas.find(soComputador)?.nome ?? null,
+  aoFicarPronta: () => dispatch({ tipo: "invalidar", quais: ["maquinas"] }),
+});
+/**
+ * Os campos de frase, senha e sudo saem do HTML sem valor: depois de redesenhar, o valor volta da memória do controlador
+ * (o campo com foco já mantém o dele). Sem instalação aberta, os segredos que sobraram (troca de pessoa) somem.
+ */
+function devolverSegredosSsh(): void {
+  if (!estado.instalarSsh) { if (instalarSshPronto) instalarSsh.descartar(); return; }
+  for (const el of document.querySelectorAll<HTMLInputElement>("#espaco [data-ssh-segredo]")) {
+    if (el !== document.activeElement) el.value = instalarSsh.valorDoSegredo(el.dataset.sshSegredo as CampoSegredo);
+  }
+}
+instalarSshPronto = true;
 // NOD-323: a mídia do bot na conversa (carga, GIF, áudio) e, no app do Mac, o Mostrar no Finder.
 const midiaDom: OpcoesMidiaDom = {
   ...(window.nodDesktop?.midia ? { ponte: window.nodDesktop.midia } : {}),
@@ -4068,6 +4101,25 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     if (criado) void esperarConvite(criado.convite, criado.expiraEm);
   }),
   "fechar-conectar-maquina": () => dispatch({ tipo: "conectar-maquina", conectar: null }),
+  // NOD-94: "Usar uma máquina só para o computador".
+  "ssh-abrir": () => agir(async () => { await instalarSsh.abrir(); focarNovo(); }),
+  "ssh-metodo": (el) => { instalarSsh.metodo(el.dataset.metodo as "chave" | "senha" | "apelido"); },
+  "ssh-trocar-chave": () => { instalarSsh.trocarChave(); document.querySelector<HTMLElement>("#espaco [data-ssh-chave]")?.focus(); },
+  "ssh-tem-frase": () => { instalarSsh.temFrase(true); document.querySelector<HTMLElement>('#espaco [data-ssh-segredo="frase"]')?.focus(); },
+  "ssh-trocar-origem": () => instalarSsh.trocarOrigem(true),
+  "ssh-origem": (el) => instalarSsh.escolherOrigem(el.dataset.id ?? ""),
+  "ssh-substituir-sim": () => agir(async () => { await instalarSsh.confirmarSubstituir(); focarNovo(); }),
+  "ssh-substituir-nao": () => instalarSsh.desistirDeSubstituir(),
+  "ssh-tentar": (el) => agir(async () => { await instalarSsh.tentarDeNovo(el.dataset.origem); focarNovo(); }),
+  "ssh-conferir": () => { instalarSsh.voltarAoFormulario(); focarNovo(); },
+  "ssh-confiar": () => agir(() => instalarSsh.confiarNaNova()),
+  "ssh-manual": () => agir(() => instalarSsh.abrirManual()),
+  "ssh-sudo-mostrar": () => { instalarSsh.mostrarSudo(!estado.instalarSsh?.mostrarSudo); document.querySelector<HTMLElement>('#espaco [data-ssh-segredo="sudo"]')?.focus(); },
+  "ssh-segundo-plano": () => { instalarSsh.segundoPlano(); document.querySelector<HTMLElement>('#espaco [data-act="ssh-reabrir"]')?.focus(); },
+  "ssh-reabrir": () => { instalarSsh.reabrir(); focarNovo(); },
+  "ssh-esc": () => instalarSsh.fechar(),
+  "ssh-fechar": () => { instalarSsh.fechar(); document.querySelector<HTMLElement>('#espaco [data-act="ssh-abrir"]')?.focus(); },
+  "ssh-cancelar": () => agir(() => instalarSsh.cancelar()),
   "passo-conectar-maquina": (el) => {
     const passo = el.dataset.passo as NonNullable<typeof estado.conectarMaquina>["passo"];
     // Na escolha dos bots, todos começam marcados: quem conecta uma VM quer tirar o trabalho do Mac.
@@ -4147,6 +4199,9 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
 };
 
 const FORMS: Record<string, (form: HTMLFormElement) => Promise<void>> = {
+  // NOD-94: o formulário do SSH e a senha do sudo (os valores já estão no controlador, pelo `input`).
+  "instalar-ssh": () => agir(async () => { await instalarSsh.enviar(); focarNovo(); }),
+  "ssh-sudo": () => agir(async () => { await instalarSsh.enviarSudo(); focarNovo(); }),
   // ADR-102: a lista única de contas e o nome da máquina.
   "cl-nova": async (form) => {
     const ia = form.querySelector<HTMLInputElement>('input[name="ia"]:checked')?.value;
@@ -4348,7 +4403,7 @@ document.addEventListener("keydown", (ev) => {
   // NOD-346: a janela "Confirme que é você" de Minha conta também prende o Tab.
   const dialogo = ev.key === "Tab" ? document.querySelector<HTMLElement>("#espaco .cl-dialogo, #espaco .conta-modal") : null;
   if (dialogo) {
-    const focaveis = [...dialogo.querySelectorAll<HTMLElement>("button:not([disabled]), input:not([disabled])")];
+    const focaveis = [...dialogo.querySelectorAll<HTMLElement>("button:not([disabled]), input:not([disabled]):not([hidden]), textarea:not([disabled]), summary")];
     const primeiro = focaveis[0];
     const ultimo = focaveis.at(-1);
     const dentro = dialogo.contains(document.activeElement);
@@ -4364,6 +4419,13 @@ document.addEventListener("keydown", (ev) => {
     ev.stopPropagation();
     ev.preventDefault();
     telaMinhaConta.fecharJanela();
+    return;
+  }
+  // NOD-94: no progresso, o Esc é o "Continuar em segundo plano"; no formulário, fecha (e os segredos somem).
+  if (estado.instalarSsh && !estado.instalarSsh.segundoPlano) {
+    ev.stopPropagation();
+    instalarSsh.fechar();
+    (document.querySelector<HTMLElement>('#espaco [data-act="ssh-reabrir"]') ?? document.querySelector<HTMLElement>('#espaco [data-act="ssh-abrir"]'))?.focus();
     return;
   }
   if (estado.nuvem.sonoMenu || estado.nuvem.conectar || estado.nuvem.excluir || estado.nuvem.criar) {
@@ -4423,6 +4485,13 @@ document.addEventListener("change", (ev) => {
     return;
   }
   if (cb.matches("[data-cl-nova-apelido]")) { contasDaPessoa.mudarNova({ apelido: cb.value }); return; }
+  // NOD-94: "Escolher arquivo…" da chave SSH: lida aqui, vira a linha resumida (o texto não fica no input).
+  if (cb.matches("[data-ssh-arquivo]")) {
+    const arquivo = cb.files?.[0];
+    cb.value = "";
+    if (arquivo) void instalarSsh.chaveDoArquivo(arquivo);
+    return;
+  }
   if (cb.matches("[data-maq-sair-contas]")) {
     const q = estado.contasUi.desconectar;
     if (q) dispatch({ tipo: "contas-ui", mudanca: { desconectar: { ...q, sair: cb.checked } } });
@@ -4572,6 +4641,16 @@ document.addEventListener("input", (ev) => {
   const loginDoCodigo = (ta as HTMLElement).dataset?.clCodigo;
   if (loginDoCodigo) { contasDaPessoa.digitarCodigo(loginDoCodigo, ta.value); return; }
   if ((ta as HTMLElement).matches?.("[data-cl-nova-apelido]") && estado.contasUi.nova) { estado.contasUi.nova.apelido = ta.value; return; }
+  // NOD-94: o endereço e o usuário vão para o estado sem redesenhar; frase, senha e sudo só para a memória do controlador.
+  const sshCampo = (ta as HTMLElement).dataset?.sshCampo;
+  if (sshCampo === "endereco" || sshCampo === "usuario") { instalarSsh.campo(sshCampo, ta.value); return; }
+  const sshSegredo = (ta as HTMLElement).dataset?.sshSegredo;
+  if (sshSegredo === "frase" || sshSegredo === "senha" || sshSegredo === "sudo") { instalarSsh.segredo(sshSegredo, ta.value); return; }
+  // A chave colada: quando o bloco fecha (ou é uma .pub), vira a linha com o tipo e a impressão.
+  if ((ta as HTMLElement).matches?.("[data-ssh-chave]")) {
+    if (/-----END [A-Z ]*PRIVATE KEY-----/.test(ta.value) || /^(ssh-|ecdsa-|sk-)\S+ [A-Za-z0-9+/=]{20,}/.test(ta.value.trim())) { const texto = ta.value; ta.value = ""; void instalarSsh.colarChave(texto); }
+    return;
+  }
   // ADR-121 (NOD-92): os campos do "Dormir e acordar pelo Google" atravessam a releitura de Máquinas (a cada 30 s).
   const campoNuvem = (ta as HTMLElement).dataset?.nuvemCampo;
   if ((campoNuvem === "projeto" || campoNuvem === "zona" || campoNuvem === "nome") && estado.nuvem.conectar) { estado.nuvem.conectar[campoNuvem] = ta.value; return; }

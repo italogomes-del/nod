@@ -2,6 +2,8 @@ import type { Agente, CorAgente, FormaAgente } from "../../src/contracts/agente.
 import type { AtividadeDto } from "../../src/contracts/atividade.ts";
 import type { ChaveEmitidaDto, ChaveMaquinaDto, ConversaDto, FrotaDto, RotinaDto, SuaVezDto } from "../../src/contracts/api.ts";
 import type { MaquinasDto } from "../../src/contracts/maquina.ts";
+import type { InstalacaoSshDto, MetodoSsh } from "../../src/contracts/instalacoes-ssh.ts";
+import type { ResumoDaChave } from "../lib/chave-ssh.ts";
 import type { ContasIaDto } from "../../src/contracts/contas-ia.ts";
 import type { DetalhesDasContas } from "../../src/contracts/desktop.ts";
 import type { Concessao } from "../../src/contracts/concessao.ts";
@@ -90,6 +92,45 @@ export type FiltroTrabalhos = "todos" | "voce" | "rotinas" | "bots";
  * ADR-090: o "Conectar uma máquina" (protótipo "Nod — Motor na VM", prancha 2): o comando, o código, a confirmação
  * ("Conectar vm-sp?"), o login das IAs e a escolha dos bots. `chavesAntes`: as chaves que já existiam, para achar a nova.
  */
+/** NOD-94: uma máquina da pessoa que pode instalar por SSH agora (o Mac ou um motor que puxou há pouco). */
+export type InstaladoraSsh = { id: string; nome: string; plataforma: string };
+
+/**
+ * NOD-94: o "Usar uma máquina só para o computador" (instalação por SSH, emenda 11 da ADR-090). A chave, a frase, a
+ * senha e a do sudo NUNCA ficam aqui: moram só na memória do controlador (web/lib/instalar-ssh.ts) enquanto o diálogo
+ * está aberto, e só saem cifradas para a instaladora. Aqui fica o que a tela mostra.
+ */
+export type InstalarSsh = {
+  fase: "form" | "progresso";
+  /** O que a pessoa digitou no Endereço: `host`, `host:porta` ou, no Mac, o apelido do ~/.ssh/config. */
+  endereco: string;
+  usuario: string;
+  metodo: MetodoSsh;
+  /** A chave colada, resumida (tipo e impressão); null = ainda não colou. */
+  chave: ResumoDaChave | null;
+  temFrase: boolean;
+  /** null = carregando. */
+  instaladoras: InstaladoraSsh[] | null;
+  origemId: string | null;
+  trocarOrigem: boolean;
+  /** 409 `ja_tem_computador`: a tela pergunta "Substituir?"; `confirmado` = a pessoa disse sim. */
+  substituir: { nome: string; confirmado: boolean } | null;
+  pedido: InstalacaoSshDto | null;
+  /** O erro que mora num campo (aria-invalid + aria-describedby). */
+  campoErro: { campo: "endereco" | "usuario" | "acesso" | "sudo"; texto: string } | null;
+  /** O erro geral, em âmbar (sem instaladora, falha de rede). */
+  erro: string | null;
+  /** `sem_sudo` com chave: a etapa Conferindo para e pede a senha do sudo no diálogo. */
+  pedeSudo: boolean;
+  mostrarSudo: boolean;
+  /** "Prefere fazer você mesmo?": o comando com o convite (criado ao abrir). null = fechado. */
+  manual: string | null;
+  segundoPlano: boolean;
+  enviando: boolean;
+  /** As origens que já tentaram e não acharam rota (o "Tentar a partir de" oferece as outras). */
+  tentadas: string[];
+};
+
 export type ConectarMaquina = {
   passo: "comando" | "codigo" | "confirmar" | "ias" | "bots";
   codigo: string;
@@ -308,6 +349,8 @@ export type Estado = {
   maquinas: MaquinasDto | null;
   /** ADR-090: o "Conectar uma máquina" aberto em Seu espaço › Máquinas (passo, código digitado, o pedido visto). */
   conectarMaquina: ConectarMaquina | null;
+  /** NOD-94: a instalação por SSH aberta (o diálogo ou a linha em segundo plano); null = nenhuma. */
+  instalarSsh: InstalarSsh | null;
   /** ADR-102: as contas de IA da pessoa em todas as máquinas; null = ainda não carregou. */
   contasIa: ContasIaDto | null;
   /** ADR-102: e-mail e organização das contas que este Mac conhece (só no app do Mac); null = fora do app ou app antigo. */
@@ -445,6 +488,7 @@ export type Acao =
   | { tipo: "hidratar-chaves"; chaves: ChaveMaquinaDto[] }
   | { tipo: "hidratar-maquinas"; maquinas: MaquinasDto }
   | { tipo: "conectar-maquina"; conectar: ConectarMaquina | null }
+  | { tipo: "instalar-ssh"; instalar: InstalarSsh | null }
   | { tipo: "hidratar-contas"; contas: ContasIaDto; detalhes: DetalhesDasContas | null }
   | { tipo: "trocar-contas"; contas: ContasIaDto }
   | { tipo: "contas-ui"; mudanca: Partial<UiContas> }
@@ -534,6 +578,7 @@ export const estadoInicial: Estado = {
   chaves: null,
   maquinas: null,
   conectarMaquina: null,
+  instalarSsh: null,
   contasIa: null,
   detalhesContas: null,
   contasUi: UI_CONTAS_INICIAL,
@@ -1094,7 +1139,7 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
     case "sessao":
       // Trocou a pessoa: chaves E relatos somem. Relato carrega correlationId, machineId e o erro
       // cru do fornecedor — não pode ficar na tela da próxima sessão (ADR-002).
-      return { ...estado, sessao: acao.escopo, chaves: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.chaves : null, maquinas: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.maquinas : null, contasIa: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.contasIa : null, detalhesContas: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.detalhesContas : null, relatos: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.relatos : null, chaveEmitida: null,
+      return { ...estado, sessao: acao.escopo, chaves: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.chaves : null, maquinas: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.maquinas : null, instalarSsh: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.instalarSsh : null, contasIa: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.contasIa : null, detalhesContas: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.detalhesContas : null, relatos: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.relatos : null, chaveEmitida: null,
         modoDev: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.modoDev : { ligado: false, raioX: {} },
         naoLidos: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.naoLidos : null, novasDesde: {},
         citacoes: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.citacoes : {},
@@ -1306,6 +1351,8 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
       return { ...estado, maquinas: acao.maquinas };
     case "conectar-maquina":
       return { ...estado, conectarMaquina: acao.conectar };
+    case "instalar-ssh":
+      return { ...estado, instalarSsh: acao.instalar };
     case "hidratar-contas":
       return { ...estado, contasIa: acao.contas, detalhesContas: acao.detalhes };
     case "trocar-contas":

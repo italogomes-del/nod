@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { MaquinaDto } from "../../../src/contracts/maquina.ts";
 import { estadoInicial, type ConectarMaquina, type Estado } from "../../../web/estado/reducer.ts";
-import { maquinaDoBot, maquinaNova, renderMaquinas } from "../../../web/telas/maquinas.ts";
+import { COMANDO_DESLIGAR_COMPUTADOR, maquinaDoBot, maquinaNova, maquinasDeTrabalho, renderMaquinas } from "../../../web/telas/maquinas.ts";
 
 /** ADR-090: Seu espaço › Máquinas e o "Conectar uma máquina" (protótipo "Nod — Motor na VM"). */
 const maquina = (id: string, nome: string, o: Partial<MaquinaDto> = {}): MaquinaDto => ({ id, nome, prefixo: "abcd1234", criadaEm: 1, ultimoUsoEm: null, conectada: true, plataforma: "linux", ias: { "claude-cli": "pronto" }, gh: false, ...o });
@@ -70,4 +70,29 @@ describe("Seu espaço › Máquinas (ADR-090)", () => {
     const bots = renderMaquinas(com([maquina("mac", "MacBook"), maquina("vm", "vm-sp")], { noMac: true, conectar: conectar({ passo: "bots", chavesAntes: ["mac"], marcados: ["a"] }) }));
     expect(bots).toContain("Os outros, e bot novo, continuam neste Mac");
   });
+
+describe("Máquinas: a só-computador (NOD-94)", () => {
+  const comp = maquina("comp", "vm-computador", { papel: "computador" });
+
+  it("aparece na lista com o rótulo, mas fica fora dos seletores e nunca é a máquina do bot", () => {
+    const e = com([maquina("vm", "vm-sp"), comp], { padraoId: "comp" });
+    expect(maquinasDeTrabalho(e.maquinas!.maquinas).map((m) => m.id)).toEqual(["vm"]);
+    const html = renderMaquinas(e);
+    expect(html).toContain("vm-computador");
+    expect(html).toContain("só computador");
+    expect(html).toContain("Hospeda o computador dos seus bots e não pega trabalho");
+    expect(html).not.toMatch(/data-act="maquina-do-bot" data-maquina="comp"/);
+    expect(maquinaDoBot(e, { maquinaId: "comp" })).toBeNull();
+    expect(maquinaNova(com([comp], { conectar: conectar({ chavesAntes: [] }) }), conectar({ chavesAntes: [] }))).toBeNull();
+  });
+
+  it("o atalho para instalar por SSH aparece no servidor e some no modo local", () => {
+    expect(renderMaquinas(com([maquina("vm", "vm-sp")]))).toContain('data-act="ssh-abrir"');
+    expect(renderMaquinas(com([maquina("vm", "vm-sp")], { noMac: true }))).not.toContain('data-act="ssh-abrir"');
+  });
+
+  it("desligar a só-computador é um comando que existe", () => {
+    expect(COMANDO_DESLIGAR_COMPUTADOR).toBe("sudo systemctl disable --now nod-motor");
+  });
+});
 });

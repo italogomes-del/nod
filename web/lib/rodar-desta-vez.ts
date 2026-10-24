@@ -12,5 +12,6 @@ export type EstadoDoDestaVez = { maquinas: { maquinas: MaquinaDto[] } | null; co
 export function outraMaquinaDestaVez(estado: EstadoDoDestaVez, excluir: string | null | undefined, ia?: string | null): MaquinaDto | null {
   const contas = (estado.contasIa?.contas ?? []).filter((c) => !ia || c.ia === ia);
   const temConta = (maquinaId: string) => contas.some((c) => (c.noLimiteAte === null || c.noLimiteAte <= estado.agora) && c.maquinas.some((m) => m.maquinaId === maquinaId && m.estado === "pronta"));
-  return (estado.maquinas?.maquinas ?? []).find((m) => m.conectada && m.id !== excluir && Object.values(m.ias).includes("pronto") && temConta(m.id)) ?? null;
+  // NOD-94 (QA): a "só computador" não pega turno (o servidor a exclui), como em conversa.ts.
+  return (estado.maquinas?.maquinas ?? []).find((m) => m.conectada && m.papel !== "computador" && m.id !== excluir && Object.values(m.ias).includes("pronto") && temConta(m.id)) ?? null;
 }

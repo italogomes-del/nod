@@ -288,7 +288,12 @@ export function rotasContasIa(deps: DepsRotasContas): Rota[] {
       metodo: "POST",
       padrao: /^\/maquinas\/convites$/,
       async handler(ctx) {
-        ctx.json(201, deps.dispositivo.criarConvite(ctx.escopo));
+        // NOD-94: `{papel: "computador"}` = o comando manual da instalação por SSH ("Prefere fazer você mesmo?"): a máquina
+        // pareia como só computador, sem a tela confirmar (o convite é de uso único e só a pessoa o vê). `substituir` só
+        // quando ela já disse "Substituir" na tela. Sem corpo, o convite de sempre (ADR-102).
+        const corpo = (await ctx.corpo()) as Record<string, unknown> | null;
+        const computador = corpo?.papel === "computador";
+        ctx.json(201, deps.dispositivo.criarConvite(ctx.escopo, computador ? { papel: "computador", autoAprovar: true, substituir: corpo?.substituir === true } : undefined));
       },
     },
     {

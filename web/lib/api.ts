@@ -9,6 +9,7 @@ import type { AmbienteBancoDto, ChaveEmitidaDto, ChaveMaquinaDto, ConversaDto, F
 import type { Concessao } from "../../src/contracts/concessao.ts";
 import { cabecalhosDoApp } from "./desafio-app.ts";
 import type { MaquinasDto } from "../../src/contracts/maquina.ts";
+import type { InstalacaoCriadaDto, InstalacaoSshDto, MetodoSsh } from "../../src/contracts/instalacoes-ssh.ts";
 import type { CadastroDto, EntrarDto, EsperaPareamentoDto, EstadoContaDto, EstadoPareamentoDto, ImportarDto, PareamentoAbertoDto, PedirPareamentoDto, RedefinirDto, SessoesDto, TrocarSenhaDto, VerificarDto } from "../../src/contracts/conta.ts";
 import type { ContaNuvemDto, DormirAposMin, MaquinaCriandoDto, TamanhoMaquinaNuvem } from "../../src/contracts/provedor-nuvem.ts";
 import type { CodigoCifrado, ContasIaDto, FrenteAtivaDaConta, IaComConta, LoginNaMaquina, ModoDasContas, MotivoDaNota } from "../../src/contracts/contas-ia.ts";
@@ -372,7 +373,14 @@ export function criarApi(escopo: Escopo) {
     cancelarLogin: (maquinaId: string, loginId: string) => post<{ ok: true }>(`maquinas/${encodeURIComponent(maquinaId)}/logins/${encodeURIComponent(loginId)}/cancelar`),
     renomearMaquina: (id: string, nome: string) => patch<{ id: string; nome: string }>(`maquinas/${encodeURIComponent(id)}`, { nome }),
     desconectarMaquina: (id: string, sairDasContas: boolean) => post<{ ok: true; contas: number; aguardandoMaquina: boolean }>(`maquinas/${encodeURIComponent(id)}/desconectar`, { sairDasContas }),
-    criarConvite: () => post<{ convite: string; expiraEm: number }>("maquinas/convites"),
+    criarConvite: (computador?: { substituir: boolean }) => post<{ convite: string; expiraEm: number }>("maquinas/convites", computador ? { papel: "computador", substituir: computador.substituir } : undefined),
+    // NOD-94: a máquina só computador instalada por SSH. A credencial só sai daqui cifrada para a instaladora.
+    instaladorasSsh: () => get<{ instaladoras: { id: string; nome: string; plataforma: string }[] }>("maquinas/ssh/instaladoras"),
+    pedirInstalacaoSsh: (p: { host: string; porta: number; usuario: string; metodo: MetodoSsh; origemId: string | null; substituir: boolean }) => post<InstalacaoCriadaDto>("maquinas/ssh", p),
+    verInstalacaoSsh: (id: string) => get<InstalacaoSshDto>(`maquinas/ssh/${encodeURIComponent(id)}`),
+    credencialSsh: (id: string, cifrado: CodigoCifrado) => post<null>(`maquinas/ssh/${encodeURIComponent(id)}/credencial`, { cifrado }),
+    confiarNaNovaSsh: (id: string) => post<null>(`maquinas/ssh/${encodeURIComponent(id)}/confiar-nova`),
+    cancelarInstalacaoSsh: (id: string) => post<null>(`maquinas/ssh/${encodeURIComponent(id)}/cancelar`),
     // ADR-121 (NOD-92): a máquina na nuvem que dorme e acorda pelo Google. Sem NOD_MAQUINA_NUVEM, as rotas dão 404.
     contaNuvem: () => get<ContaNuvemDto>("nuvem/conta"),
     /** O OAuth do Google começa aqui: a resposta traz a `url` para onde a página vai (desvio 1 da NOD-92). */

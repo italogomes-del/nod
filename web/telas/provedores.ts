@@ -4,7 +4,7 @@ import { haQuanto } from "../lib/relogio.ts";
 import { ordemDasIas, pilhaDeAvatares, renderCartaoIa, UI_IAS_INICIAL, vistaDaIa, type ContextoCartao } from "./cartao-ia.ts";
 import { renderContasDaIa } from "./contas-ia.ts";
 import { nomeCurto, renderListaDeContas } from "./contas-lista.ts";
-import { botsDaPessoa, maquinaDoBot } from "./maquinas.ts";
+import { botsDaPessoa, maquinaDoBot, maquinasDeTrabalho } from "./maquinas.ts";
 import { renderExecutor } from "./frota.ts";
 import { logoApp } from "./marketplace.ts";
 import { renderNegacoes, textoMotivo } from "./negacao.ts";
@@ -48,7 +48,8 @@ export function renderProvedores(estado: Estado): string {
 function renderProvedoresContas(estado: Estado): string {
   const ui = estado.iasMac ?? UI_IAS_INICIAL;
   const contexto: ContextoCartao = { servidor: estado.ias?.ias ?? null, ui, agora: estado.agora, onde: "provedores" };
-  const maquinas = estado.maquinas?.maquinas ?? [];
+  // NOD-94: a só-computador não tem conta de IA (nenhum bot trabalha nela).
+  const maquinas = maquinasDeTrabalho(estado.maquinas?.maquinas ?? []);
   const filtro = estado.contasUi.filtro ? maquinas.find((m) => m.id === estado.contasUi.filtro) ?? null : null;
   const lista = renderListaDeContas({
     contas: estado.contasIa!,

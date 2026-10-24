@@ -481,7 +481,7 @@ export function situacaoNaFila(m: Mensagem, estado: Estado): (SituacaoFila & { t
   const semIa = !!doBot && doBot.conectada && !Object.values(doBot.ias).includes("pronto");
   if (doBot && semIa) return { tipo: "na_fila", turnoId: emCurso.id, texto: `Na fila · ${doBot.nome} está sem IA pronta (no terminal dela: nod-motor entrar claude ou codex)` };
   if (doBot && !doBot.conectada) {
-    const outra = (estado.maquinas?.maquinas ?? []).find((m) => m.conectada && m.id !== doBot.id && Object.values(m.ias).includes("pronto"));
+    const outra = (estado.maquinas?.maquinas ?? []).find((m) => m.conectada && m.papel !== "computador" && m.id !== doBot.id && Object.values(m.ias).includes("pronto"));
     return { tipo: "na_fila", turnoId: emCurso.id, texto: `Na fila · ${doBot.nome} não responde${doBot.ultimoUsoEm ? ` desde ${hora(doBot.ultimoUsoEm)}` : ""}`, ...(outra ? { destaVez: { conversaId: c.conversa.id, maquinaId: outra.id, nome: outra.nome } } : {}) };
   }
   const outra = c.turnosPendentes.find((p) => p.id === emCurso.id && p.conversaId !== c.conversa.id);
