@@ -100,6 +100,13 @@ export function computadoresRepo(conn: Conn, escopo: Escopo) {
       return linhas.map(acao);
     },
 
+    /** NOD-96 PR 4: a Atividade da tela de um bot (as ações dele e as da pessoa nela), com a mesma regra do observar. */
+    async atividadeDaTela(id: string, telaId: string): Promise<RegistroComputador[]> {
+      const linhas = await conn<LinhaAcao[]>`select * from computador_acoes where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and computador_id = ${id} and tela_id = ${telaId}
+        and (tipo <> 'observar' or estado = 'falhou') order by em desc limit 30`;
+      return linhas.map(acao);
+    },
+
     // ---- NOD-96 (ADR-122): o computador da pessoa no motor, um por pessoa ('por_pessoa'). Só com NOD_COMPUTADORES=motor.
 
     /** O computador vivo (não arquivado) desta pessoa no motor; null = ainda não tem. Só lê. */
@@ -194,7 +201,7 @@ export function computadoresRepo(conn: Conn, escopo: Escopo) {
      * Quem segura o computador agora. revisto em 2026-10-08 (revisão do épico, S24): `deFora` quando o título é de uma
      * task de colega ou de uma que leu conteúdo de fora — quem repassa o título ao modelo o marca não confiável.
      */
-    async emUsoPor(id: string): Promise<{ titulo: string; deFora: boolean } | null> {
+    async emUsoPor(id: string, telaId?: string): Promise<{ titulo: string; deFora: boolean } | null> {
       const [l] = await conn<{ autor: string; turno_id: string | null; titulo: string | null; de_fora: boolean | null }[]>`
         select a.autor, a.turno_id, w.titulo,
           (w.origem = 'colega' or exists (select 1 from turnos x where x.tenant_id = w.tenant_id and x.trabalho_id = w.id
@@ -203,6 +210,7 @@ export function computadoresRepo(conn: Conn, escopo: Escopo) {
         left join turnos t on t.tenant_id = a.tenant_id and t.id = a.turno_id
         left join trabalhos w on w.tenant_id = t.tenant_id and w.id = t.trabalho_id
         where a.tenant_id = ${escopo.tenantId} and a.computador_id = ${id} and a.estado = 'executando'
+          and (${telaId ?? null}::uuid is null or a.tela_id = ${telaId ?? null}::uuid)
         order by a.em desc limit 1`;
       if (!l) return null;
       return l.titulo ? { titulo: l.titulo, deFora: l.de_fora === true } : { titulo: l.turno_id ? "a conversa" : "a pessoa", deFora: false };

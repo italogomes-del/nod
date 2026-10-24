@@ -2,14 +2,18 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Rota } from "../roteador.ts";
+import { ARQUIVOS_DO_COMPUTADOR } from "../computador-instalacao.ts";
 import { ARQUIVOS_DO_MOTOR, papelDoScript, scriptDeInstalacao, servidorParaScript } from "../motor-instalacao.ts";
 
 /**
  * ADR-090: o servidor distribui o motor da própria versão. `GET /api/motor/instalar` (e `/motor`, que redireciona para
  * cá) devolve o script com o endereço deste servidor; `GET /api/motor/arquivos/<nome>` devolve os três arquivos de
  * dist/motor. Públicas e sem segredo: o motor só vale depois do pareamento, que exige a pessoa logada aprovando o código.
+ * `computador` (NOD-96, ADR-122, NOD_COMPUTADORES=motor): o script instala também o computador da pessoa e as rotas
+ * servem os arquivos dele; sem a flag, nada muda.
  */
-export function rotasMotor(o: { pasta: string; versao: string; urlPublica?: string }): Rota[] {
+export function rotasMotor(o: { pasta: string; versao: string; urlPublica?: string; computador?: boolean }): Rota[] {
+  const servidos: readonly string[] = o.computador ? [...ARQUIVOS_DO_MOTOR, ...ARQUIVOS_DO_COMPUTADOR] : ARQUIVOS_DO_MOTOR;
   return [
     {
       metodo: "GET",
@@ -24,7 +28,7 @@ export function rotasMotor(o: { pasta: string; versao: string; urlPublica?: stri
         // ADR-102: o convite de uso único do comando que a tela mostra (inválido = o script de sempre, com o código).
         // NOD-94: `papel=computador` instala a máquina só computador (sem IAs, com as linhas NOD-ETAPA/NOD-ERRO).
         const busca = new URL(ctx.req.url ?? "/", "http://x").searchParams;
-        ctx.res.end(scriptDeInstalacao({ servidor, versao: o.versao, convite: busca.get("convite"), papel: papelDoScript(busca.get("papel")) }));
+        ctx.res.end(scriptDeInstalacao({ servidor, versao: o.versao, convite: busca.get("convite"), papel: papelDoScript(busca.get("papel")), ...(o.computador ? { computador: true } : {}) }));
       },
     },
     {
@@ -50,7 +54,7 @@ export function rotasMotor(o: { pasta: string; versao: string; urlPublica?: stri
       padrao: /^\/motor\/arquivos\/(?<nome>[^/]+)$/,
       publica: true,
       async handler(ctx) {
-        const nome = ARQUIVOS_DO_MOTOR.find((a) => a === ctx.params.nome);
+        const nome = servidos.find((a) => a === ctx.params.nome);
         if (!nome) { ctx.json(404, { codigo: "nao_encontrado" }); return; }
         let corpo: Buffer;
         try { corpo = await readFile(join(o.pasta, nome)); }

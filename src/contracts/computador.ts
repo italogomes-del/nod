@@ -100,13 +100,18 @@ export type ComputadorDto = {
 };
 /** O ambiente do servidor (Docker, cofre, imagem), sem olhar nenhuma máquina. */
 export type AmbienteComputador = { disponivel: boolean; motivo: string | null; limite?: { maximo: number; ociosoMin: number } };
+/** O escopo de quem chama (o mesmo formato de `Escopo` em shared/types; contracts é fechado). */
+type EscopoDoDriver = { tenantId: string; pessoaId: string };
+
 export interface DriverComputador {
   /** NOD-192: o painel de um bot sem computador mostra só o ambiente — não há container para inspecionar. */
   ambiente(): Promise<AmbienteComputador>;
-  estado(id: string): Promise<{ disponivel: boolean; ativo: boolean; motivo: string | null; reinicios?: number | null; limite?: { maximo: number; ociosoMin: number } }>;
-  iniciar(id: string): Promise<void>;
-  parar(id: string): Promise<void>;
-  executar(id: string, acao: AcaoComputador): Promise<ResultadoComputador>;
+  // NOD-96 PR 3: o escopo de quem chama vai junto — o driver motor localiza o computador e a máquina da pessoa por ele
+  // (RLS); o docker ignora.
+  estado(id: string, escopo?: EscopoDoDriver): Promise<{ disponivel: boolean; ativo: boolean; motivo: string | null; reinicios?: number | null; limite?: { maximo: number; ociosoMin: number } }>;
+  iniciar(id: string, escopo?: EscopoDoDriver): Promise<void>;
+  parar(id: string, escopo?: EscopoDoDriver): Promise<void>;
+  executar(id: string, acao: AcaoComputador, escopo?: EscopoDoDriver): Promise<ResultadoComputador>;
   /** NOD-170: os ids dos computadores ligados NESTE host (de qualquer pessoa; os proxies nod-egress-* não contam). */
   ligados(): Promise<Set<string>>;
 }

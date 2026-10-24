@@ -108,6 +108,12 @@ describeIntegracao("computador da pessoa no motor (0106)", () => {
       await a.repos.computadores.registrar({ computadorId: c.id, autor: "bot", tipo: "navegar", estado: "concluida", agenteId: a.agenteId, telaId: ta.id });
       expect((await a.repos.computadores.atividadeDoBot(c.id, b.agenteId)).map((r) => r.tipo)).toEqual(["navegar"]);
       expect(await a.repos.computadores.atividade(c.id)).toHaveLength(3);
+      // PR 4: a Atividade da tela traz as ações do bot e as da pessoa nela; "em uso por" olha só a tela pedida.
+      expect((await a.repos.computadores.atividadeDaTela(c.id, tb.id)).map((r) => r.tipo).sort()).toEqual(["clicar", "navegar"]);
+      expect((await a.repos.computadorTelas.porId(tb.id))!.agenteId).toBe(b.agenteId);
+      await a.repos.computadores.registrar({ computadorId: c.id, autor: "pessoa", tipo: "digitar", estado: "executando", telaId: ta.id });
+      expect(await a.repos.computadores.emUsoPor(c.id, ta.id)).toEqual({ titulo: "a pessoa", deFora: false });
+      expect(await a.repos.computadores.emUsoPor(c.id, tb.id)).toBeNull();
 
       // A tela vai junto com o bot (ON DELETE CASCADE); a ação fica, sem bot e sem tela (SET NULL só da coluna).
       const fks = await trx<{ def: string }[]>`select pg_get_constraintdef(oid) as def from pg_constraint

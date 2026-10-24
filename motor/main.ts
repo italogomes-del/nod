@@ -20,6 +20,7 @@ import { encerrarFugitivosDaInstancia } from "../src/adapters/executor/fugitivos
 import { prepararGruposDaMaquina } from "../src/adapters/executor/grupos-da-maquina.ts";
 import { criarExecutarComando, iniciarLimpezaDasTasks, modoDaLimpeza, type LimpezaDasTasks } from "../src/adapters/executor/limpeza-das-tasks.ts";
 import { iniciarEsperas, type Esperas } from "../src/adapters/executor/esperas.ts";
+import { iniciarComputador, type LacoComputador } from "../src/adapters/executor/computador.ts";
 import type { PlanoTurno } from "../src/contracts/plano-turno.ts";
 import { PAPEIS_MAQUINA } from "../src/contracts/ponte.ts";
 import { iniciarInstaladora, type Instaladora } from "../src/shared/instaladora.ts";
@@ -42,6 +43,7 @@ import { ID_CONTA_PADRAO } from "../src/domain/contas-da-ia.ts";
 import { estadoDaMaquina } from "../src/domain/harness.ts";
 import { iniciarContasDoMotor, lerIdentidadeNoCli, logoutNoCli, type ClisDoMotor } from "./contas.ts";
 import { arquivoDoPedido, atualizacaoLigada, iniciarAtualizacao, MARCA_DA_ATUALIZACAO, type Atualizador } from "./atualizacao.ts";
+import { anuncioDoComputador, sondaLocal } from "./computador.ts";
 import { arquivoDasAtualizacoes, arquivoDoEstadoDeIa, arquivoDoPedidoDeIa, ESPERA_DA_RESPOSTA_MS, ESPERA_DO_SERVICO_MS, gravarJson, IA_DO_TERMINAL, lerEstadoDoPedido, passoNpmLocal, vigiarPedidosDoTerminal } from "./atualizar-ias.ts";
 import { criarIasDoMotor, esperarNoTerminal, quemNaoPodeAtualizar } from "./ias-do-motor.ts";
 import { AJUDA, arquivoDaConexao, carregarConexao, comandoDeEntrar, guardarConexao, lerComando, pastaDoExecutor, pastaDoMotor, type ConexaoMotor } from "./conexao.ts";
@@ -132,6 +134,8 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
   /** ADR-088 (limpeza das tasks, #225): as pastas de task encerradas nesta máquina; os turnos rodando nunca são mexidos. */
   let limpeza: LimpezaDasTasks | null = null;
   let esperas: Esperas | null = null;
+  /** NOD-96 PR 3: o fio entre a ponte e o supervisor do computador desta máquina. */
+  let computador: LacoComputador | null = null;
   /** NOD-94: a instaladora por SSH (só no papel motor e com o servidor que aceita). */
   let instaladora: Instaladora | null = null;
   const planosAqui = new Map<string, PlanoTurno>();
@@ -231,6 +235,12 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
   const ponteHttp = criarPonteHttp({ url: c.url, chave: c.chave, versao, aoFalhar, aoLimparAgora: (pastas) => void limpeza?.limparAgora(pastas) });
   const gh = await criarDetectorGh({ ambiente: process.env }).logado();
   const anuncio = { machineId: dados.machineId, nome: hostname(), versaoContrato: 1, github: { gh: gh && papel === "motor" }, ligacao: papel === "motor", plataforma: "linux", papel, atualizaIas: true } as const;
+  // NOD-96 PR 2/3 (ADR-122): o computador da pessoa nesta máquina (só quando a instalação o trouxe). Relido a cada
+  // reanúncio (a instalação pode ter terminado depois); a prova do bwrap roda uma vez só (não muda com o motor no ar).
+  const sonda = sondaLocal();
+  let isola: boolean | undefined;
+  const sondaComCache = { ...sonda, bwrapIsola: () => (isola ??= sonda.bwrapIsola()) };
+  const comComputador = () => { const a = anuncioDoComputador(sondaComCache); return a ? { computador: a } : {}; };
 
   if (gh && papel === "motor") {
     const relatos = new Map<string, "executado" | "falhou_na_execucao">();
@@ -264,6 +274,9 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
   // ADR-099 (parte 2): as esperas de comando desta máquina (o puxar, a cada 5 s). O comando roda fora do CLI, com o
   // ambiente dos drivers; a reconexão não o derruba (o estado mora no módulo, esperas.ts).
   esperas = iniciarEsperas({ ponte: ponteHttp.ponte, pessoaId: dados.escopo.pessoaId, machineId: dados.machineId, home: cfg.env.HOME ?? homedir(), env: cfg.env });
+  // NOD-96 PR 3 (ADR-122): o computador da pessoa. Puxa os comandos e repassa ao supervisor; servidor sem a flag (404)
+  // deixa o laço quieto, tentando de novo a cada 10 min.
+  computador = iniciarComputador({ canal: ponteHttp.computador });
 
   const subirLaco = (reg: Registry) => {
     if (papel === "computador") { log("info", "motor_so_computador", { machine_id: dados.machineId }); return; }
@@ -309,7 +322,7 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
       // de 90 s, limparia os planos do turno que roda. O primeiro anúncio e o que segue um 409 caem no `conectar` no cliente.
       const contas = contasLocais.anuncio();
       const comContas = inventariosComContas(comAtualizacao(inventarios), contas, contasLocais.impressoesDaPadrao());
-      await ponteHttp.ponte.anunciarInventario({ ...anuncio, inventario: estadoDaMaquina(principal, comContas), harnesses: comContas, semLacoDeVoz, capacidades, contas });
+      await ponteHttp.ponte.anunciarInventario({ ...anuncio, ...comComputador(), inventario: estadoDaMaquina(principal, comContas), harnesses: comContas, semLacoDeVoz, capacidades, contas });
       subirSeTemConta();
       log("info", "motor_anunciou", { ias: Object.entries(inventarios).map(([h, i]) => `${h}:${i?.estado ?? "?"}`).join(",") });
     },
@@ -378,6 +391,7 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
     if (itens) clearInterval(itens);
     limpeza?.parar();
     esperas?.parar();
+    computador?.parar();
     vigia?.parar();
     ponteHttp.cancelar();
     const anterior = laco; laco = null;

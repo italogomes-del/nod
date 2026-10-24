@@ -21,6 +21,7 @@
  */
 import { CONVITE } from "../../shared/convite.ts";
 import { ARQUIVOS_DO_MOTOR } from "../../domain/atualizacao-do-motor.ts";
+import { blocoDoComputador } from "./computador-instalacao.ts";
 import { PISO_CLI } from "../executor/flag-floors.ts";
 
 export { ARQUIVOS_DO_MOTOR, type ArquivoDoMotor } from "../../domain/atualizacao-do-motor.ts";
@@ -54,7 +55,11 @@ export function papelDoScript(v: string | null | undefined): "computador" | null
   return v === "computador" ? "computador" : null;
 }
 
-export function scriptDeInstalacao(o: { servidor: string; versao: string; convite?: string | null; papel?: "computador" | null }): string {
+/**
+ * `computador` (NOD-96 PR 2, ADR-122): o servidor roda com NOD_COMPUTADORES=motor e a máquina recebe também o
+ * computador da pessoa (computador-instalacao.ts). Sem ele o script é o mesmo de antes, byte a byte.
+ */
+export function scriptDeInstalacao(o: { servidor: string; versao: string; convite?: string | null; papel?: "computador" | null; computador?: boolean }): string {
   if (!/^https?:\/\/[a-z0-9.:-]+$/.test(o.servidor) || !/^[0-9A-Za-z.+-]+$/.test(o.versao)) throw new Error("servidor_ou_versao_invalida");
   const convite = o.convite && CONVITE_NO_SCRIPT.test(o.convite) ? o.convite : "";
   const comp = o.papel === "computador";
@@ -164,7 +169,7 @@ for ARQUIVO in ${ARQUIVOS_DO_MOTOR.join(" ")}; do
 done
 rm -rf "$BAIXADOS"
 passo "motor $NOD_VERSAO"
-
+${o.computador ? blocoDoComputador() : ""}
 # ADR-097 (fase 0b): sem swap, um pico de memória trava a máquina por minutos (medido na VM dos bots em 11/10: ~20 min
 # trocando páginas). Swap comprimido em memória (zram), o padrão do Fedora: metade da memória, até 8 GB. Sem o módulo
 # zram no kernel, um arquivo de swap de 4 GB no disco, se sobra espaço. Só quando não há swap nenhum: quem já tem o seu

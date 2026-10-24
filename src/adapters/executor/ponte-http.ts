@@ -1,3 +1,4 @@
+import type { ComandoComputador, EstadoComputadorRelatado, ResultadoComandoComputador } from "../../contracts/computador-motor.ts";
 import { IAS_COM_CONTA, type IaComConta, type ProgressoDoLogin, type PuxadaDeContas } from "../../contracts/contas-ia.ts";
 import type { PedidoDeInstalacao, ProgressoDeInstalacao } from "../../contracts/instalacoes-ssh.ts";
 import type { AnuncioMaquina, PastaParaLimpar, PonteInterna, RespostaRenovar, TrechoVivo, VigiaVivo } from "../../contracts/ponte.ts";
@@ -309,6 +310,27 @@ export function criarPonteHttp(o: { url: string; chave: string; versao: string; 
       },
       async saiu(impressoes: string[], desconectada: boolean): Promise<boolean> {
         try { await chamar("contas/saiu", { impressoes, desconectada }, { rota404: true }); return true; } catch { return false; }
+      },
+    },
+    /**
+     * NOD-96 PR 3 (definido em 2026-10-22, ADR-122): o canal do computador da pessoa. `puxar` é long-poll (até 20 s);
+     * null = sem resposta (rede, servidor fora, a conexão ainda não existe); "sem_rota" = servidor sem o computador no
+     * motor (404: flag desligada ou servidor antigo) — o laço espera e tenta de novo bem depois.
+     */
+    computador: {
+      async puxar(): Promise<ComandoComputador[] | null | "sem_rota"> {
+        try {
+          const r = await chamar<{ comandos?: unknown }>("computador/puxar", {}, { rota404: true });
+          return Array.isArray(r.comandos) ? (r.comandos as ComandoComputador[]) : [];
+        } catch (e) {
+          return e instanceof FalhaPonte && e.codigo === "rota_ausente" ? "sem_rota" : null;
+        }
+      },
+      async resultado(r: ResultadoComandoComputador): Promise<boolean> {
+        try { await chamar("computador/resultado", r, { rota404: true }); return true; } catch { return false; }
+      },
+      async estado(e: EstadoComputadorRelatado): Promise<boolean> {
+        try { await chamar("computador/estado", e, { rota404: true }); return true; } catch { return false; }
       },
     },
     /**

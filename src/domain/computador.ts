@@ -15,13 +15,16 @@ export class FalhaComputador extends Error {
   readonly reinicios: number | null;
   /** Só em limite_de_computadores (NOD-170): o teto do host e a ociosidade, para a instrução dizer os números. */
   readonly limite: LimiteDeComputadores | null;
-  constructor(motivo: MotivoFalhaComputador, extra: { detalhe?: string | null; reinicios?: number | null; limite?: LimiteDeComputadores | null } = {}) {
+  /** NOD-96 (ADR-122): o nome da máquina do computador no motor, para "Não consegui ligar o computador: <máquina>…". */
+  readonly maquina: string | null;
+  constructor(motivo: MotivoFalhaComputador, extra: { detalhe?: string | null; reinicios?: number | null; limite?: LimiteDeComputadores | null; maquina?: string | null } = {}) {
     super(motivo);
     this.name = "FalhaComputador";
     this.motivo = motivo;
     this.detalhe = extra.detalhe ?? null;
     this.reinicios = extra.reinicios ?? null;
     this.limite = extra.limite ?? null;
+    this.maquina = extra.maquina ?? null;
   }
 }
 
@@ -30,6 +33,23 @@ export type LimiteDeComputadores = { maximo: number; ociosoMin: number };
 
 export function ehFalhaComputador(e: unknown): e is FalhaComputador {
   return e instanceof FalhaComputador;
+}
+
+/**
+ * definido em 2026-10-22 (NOD-96 PR 4, ADR-122): o supervisor não abriu a tela do bot porque a régua da pessoa
+ * (ADR-085/097) segura e não há tela ociosa para fechar. Não é falha: a tela entra na fila e a ação espera a vez.
+ * `quem` são os bots cujas telas ocupam o computador.
+ */
+export class EsperandoTela extends Error {
+  readonly quem: string[];
+  constructor(quem: string[]) {
+    super("esperando_tela");
+    this.name = "EsperandoTela";
+    this.quem = quem;
+  }
+}
+export function ehEsperandoTela(e: unknown): e is EsperandoTela {
+  return e instanceof EsperandoTela;
 }
 
 /** Só a MÁQUINA sem responder conta para a saúde; a ação que falhou numa máquina viva não conta. */
@@ -71,10 +91,22 @@ export function textoDoLimite(l: LimiteDeComputadores): string {
 }
 
 /**
+ * definido em 2026-10-22 (NOD-96, ADR-122): o computador no motor que não ligou, nas palavras do plano — "Não consegui
+ * ligar o computador: <motivo>". Só a máquina sem contato e a que não ficou pronta; null = outro motivo.
+ */
+export function textoDeLigar(motivo: MotivoFalhaComputador, maquina: string | null = null): string | null {
+  if (motivo === "maquina_sem_contato") return `Não consegui ligar o computador: ${maquina ? `${maquina} está sem contato` : "nenhuma máquina conectada roda o computador"}`;
+  if (motivo === "nao_ficou_pronto") return `Não consegui ligar o computador: ${MOTIVO_FALHA_EM_PORTUGUES[motivo]}`;
+  return null;
+}
+
+/**
  * O que a FERRAMENTA devolve ao agente em cada falha (tabela fixa, sem catch-all). Máquina fora do
  * ar: não insistir neste turno. Ação que falhou: observar antes de repetir.
  */
-export function instrucaoDaFalha(motivo: MotivoFalhaComputador, limite: LimiteDeComputadores | null = null): string {
+export function instrucaoDaFalha(motivo: MotivoFalhaComputador, limite: LimiteDeComputadores | null = null, maquina: string | null = null): string {
+  const ligar = textoDeLigar(motivo, maquina);
+  if (ligar) return `${ligar}. Nada foi executado. Não tente de novo neste turno; siga com os acessos que você tem e diga em uma frase o que ficou de fora.`;
   if (motivo === "limite_de_computadores") return `${limite ? textoDoLimite(limite) : "Este Mac já tem o máximo de computadores ligados. Nada foi executado."} Não tente de novo neste turno; siga com os acessos que você tem e diga em uma frase o que ficou de fora.`;
   if (motivo === "faltam_pacotes" || motivo === "sem_suporte") return `O computador não está disponível: ${MOTIVO_FALHA_EM_PORTUGUES[motivo]}. Nada foi executado. Não tente de novo neste turno; siga com os acessos que você tem e diga em uma frase o que ficou de fora.`;
   if (motivo === "atualizando") return "O computador está sendo atualizado. Nada foi executado. Não tente de novo neste turno; siga com os acessos que você tem e diga em uma frase o que ficou de fora.";

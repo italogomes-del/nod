@@ -31,7 +31,8 @@ describe("saúde do computador do bot (emenda da ADR-037)", () => {
       expect(instrucaoDaFalha(m)).toContain("Nada foi executado");
       expect(instrucaoDaFalha(m)).toContain("Não tente de novo neste turno");
     }
-    expect(instrucaoDaFalha("maquina_sem_contato")).toContain("a máquina do computador não está respondendo");
+    expect(instrucaoDaFalha("maquina_sem_contato", null, "vm-1")).toContain("Não consegui ligar o computador: vm-1 está sem contato. Nada foi executado. Não tente de novo neste turno");
+    expect(instrucaoDaFalha("nao_ficou_pronto")).toContain("Não consegui ligar o computador: ");
   });
 
   it("a ferramenta devolve instrução de tabela: máquina fora não se insiste; tela velha se observa de novo", () => {

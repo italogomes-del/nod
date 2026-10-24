@@ -8,7 +8,10 @@ import type { ProgressoDeInstalacao } from "../../contracts/instalacoes-ssh.ts";
 import type { PlataformaMaquina } from "../../contracts/ponte.ts";
 import type { DriverComputador } from "../../contracts/computador.ts";
 import { criarDriverDocker } from "../computador/docker.ts";
-import { type Computadores, criarComputadores } from "../fundo/computadores.ts";
+import { criarCanalComputador } from "../computador/canal.ts";
+import { criarDriverMotor } from "../computador/motor.ts";
+import type { EstadoComputadorRelatado } from "../../contracts/computador-motor.ts";
+import { type Computadores, criarComputadores, reconciliarTelas } from "../fundo/computadores.ts";
 import { rotasComputadores } from "./rotas/computadores.ts";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -589,11 +592,46 @@ export function comporApp(o: OpcoesCompor): App {
 
   // NOD-200: a chave liga o guardador e o serviço juntos; desligada, nada fica em memória e `tomar` é sempre null.
   const capturaNoTranscript = capturaLigada(env);
-  const computadores = criarComputadores({ dentro, driver: o.computador ?? criarDriverDocker(env), executor: () => executorAtual, guardarTelas: capturaNoTranscript,
+  /**
+   * NOD-96 PR 3 (ADR-122): `NOD_COMPUTADORES=motor` — o computador roda numa máquina da pessoa, pelo motor; a flag é lida
+   * só aqui. O portão (fundo/computadores.ts) segue falando do computador do bot; o driver acha o da pessoa (`por_pessoa`,
+   * o do supervisor) e a máquina dela. Desligada: nada disto existe e as rotas `computador/*` da ponte dão 404.
+   */
+  const computadorNoMotor = !o.computador && env.NOD_COMPUTADORES === "motor";
+  const canalComputador = computadorNoMotor ? criarCanalComputador({ agora: relogio }) : null;
+  const driverMotor = canalComputador ? criarDriverMotor({
+    env,
+    canal: canalComputador,
+    // NOD-96 PR 4: o portão fala da tela do bot (o id dela) ou do computador da pessoa inteiro (a máquina, sem bot).
+    localizar: (id, escopo) => escopo ? dentro(escopo, async (d) => {
+      const [daPessoa, tela] = await Promise.all([d.repos.computadores.daPessoa(), d.repos.computadorTelas.porId(id)]);
+      if (!daPessoa || (tela ? tela.computadorId !== daPessoa.id : id !== daPessoa.id)) return null;
+      const preferencias = await d.repos.preferencias.buscar();
+      return { escopo, computadorId: daPessoa.id, agenteId: tela?.agenteId ?? null, maquinaId: daPessoa.maquinaId, hospedeiraId: daPessoa.hospedeiraId, supervisorPub: daPessoa.supervisorPub,
+        padraoId: preferencias.maquinaPadraoId ?? null, uso: preferencias.usoDoMac ?? "equilibrado" };
+    }) : Promise.resolve(null),
+    // Lazy: a ponte nasce depois (ela recebe o canal).
+    maquinas: (escopo) => ponteHttp.maquinasComComputador(escopo),
+    nomeDaMaquina: (escopo, maquinaId) => dentro(escopo, async (d) => (await d.repos.maquinaTokens.identificar(maquinaId))?.nome ?? null),
+    fixarHospedeira: (escopo, id, maquinaId) => dentro(escopo, (d) => d.repos.computadores.fixarMaquina(id, { maquinaId: null, hospedeiraId: maquinaId })),
+    fixarSupervisor: (escopo, id, pub) => dentro(escopo, (d) => d.repos.computadores.fixarSupervisor(id, Buffer.from(pub, "base64"))),
+  }) : null;
+  /** A foto do supervisor: a primeira X25519 que ele mostra fica (TOFU); outra é só registrada — o `iniciar` recusa. */
+  async function reconciliarComputador(escopo: Escopo, maquinaId: string, relato: EstadoComputadorRelatado): Promise<void> {
+    if (!relato.computadorId) return;
+    const desfecho = await dentro(escopo, async (d) => {
+      if ((await d.repos.computadores.daPessoa())?.id !== relato.computadorId) return null;
+      await reconciliarTelas(d, relato.computadorId, relato);
+      return d.repos.computadores.fixarSupervisor(relato.computadorId, Buffer.from(relato.supervisorPub, "base64"));
+    });
+    if (desfecho === "diferente") log("aviso", "computador_supervisor_diferente", { computador_id: relato.computadorId, maquina_id: maquinaId });
+  }
+  const computadores = criarComputadores({ dentro, driver: o.computador ?? driverMotor ?? criarDriverDocker(env), executor: () => executorAtual, guardarTelas: capturaNoTranscript,
+    porPessoa: computadorNoMotor,
     cifrar: (s) => cifrar(s, chave), decifrar: (s) => decifrar(s, chave),
     // `saude` (emenda da ADR-037): o computador entrou ou saiu do ar — a web relê a frota só nesse caso.
     mudou: (escopo, agenteId, saude) => { barramento.publicar(escopo.pessoaId, "computador.mudou", { agenteId, ...(saude ? { saude: true } : {}) }); } });
-  if (o.computador || env.NOD_COMPUTADORES === "docker") services.computadores = computadores;
+  if (o.computador || env.NOD_COMPUTADORES === "docker" || computadorNoMotor) services.computadores = computadores;
   services.capturas = criarCapturas({ ligado: capturaNoTranscript, fonte: computadores });
   // definido em 2026-09-18: login web remoto não autoriza o filesystem do host; stub só escuta loopback.
   const workspaces = compartilhado || env.NOD_LOGIN !== "stub" ? undefined : criarWorkspaces({ dentro, machineId, imagem: env.NOD_COMPUTADOR_IMAGEM, ...(env.NOD_BUSCA_BASE ? { baseBusca: env.NOD_BUSCA_BASE } : {}), raiz: join(expandirTil(env.NOD_HOME ?? "~/.nod", homedir()), "workspaces") });
@@ -733,6 +771,7 @@ export function comporApp(o: OpcoesCompor): App {
     fala: (plano) => publicarDoPlano(plano, "turno.fala", {}),
     vigia: (plano, aviso) => avisoDoVigia(plano, aviso),
     longpollMs: env.NOD_LONGPOLL_MS ? numero(env.NOD_LONGPOLL_MS, 20_000) : undefined,
+    ...(canalComputador ? { computador: { canal: canalComputador, reconciliar: reconciliarComputador } } : {}),
     // ADR-048: itens aprovados que rodam no gh do Mac da dona — a máquina puxa, executa e relata. No modo local o item roda
     // neste Mac na hora (executarNaMaquina) e nenhuma máquina da ponte o puxa (ADR-092).
     // definido em 2026-10-05: uma IA ficou pronta no Mac — as falas barradas por falta de IA são repetidas sozinhas. No modo
@@ -1313,7 +1352,7 @@ export function comporApp(o: OpcoesCompor): App {
     ...rotasConectores({ dentro, cifrar: (t) => cifrar(t, chave), decifrar: (t) => decifrar(t, chave) }),
     ...rotasTrilha({ dentro }),
     // ADR-090: o motor sem janela da versão deste servidor (dist/motor) e o script que o instala numa máquina Linux.
-    ...rotasMotor({ pasta: env.NOD_MOTOR_DIR ?? resolve("dist/motor"), versao: versaoDoServidor(), ...(env.NOD_URL_PUBLICA ? { urlPublica: env.NOD_URL_PUBLICA } : {}) }),
+    ...rotasMotor({ pasta: env.NOD_MOTOR_DIR ?? resolve("dist/motor"), versao: versaoDoServidor(), ...(env.NOD_COMPUTADORES === "motor" ? { computador: true } : {}), ...(env.NOD_URL_PUBLICA ? { urlPublica: env.NOD_URL_PUBLICA } : {}) }),
     ...rotasContasIa({ dentro, logins, dispositivo, compartilhado, avisar: avisarContas, maquinaViva: (escopo, id) => ponteHttp.maquinasDaPessoa(escopo).some((m) => m.machineId === id), maquinaAtualizaIas: (escopo, id) => ponteHttp.maquinasDaPessoa(escopo).some((m) => m.machineId === id && m.atualizaIas), aoRenomear: (escopo, id, nome) => ponteHttp.renomear(escopo, id, nome) }),
     ...(compartilhado ? rotasInstalacoesSsh({ dentro, instalacoes, dispositivo, ...(env.NOD_URL_PUBLICA ? { urlPublica: env.NOD_URL_PUBLICA } : {}) }) : []),
     ...rotasMaquinas({ dentro, pareamento: criarPareamentoMaquina(relogio), dispositivo, maquinasVivas: (escopo) => ponteHttp.maquinasDaPessoa(escopo), pareadaPorConvite, ...(compartilhado ? {} : { servidorNoMac: { api: `http://127.0.0.1:${numero(env.NOD_API_PORT, 8888)}` } }) , nuvem: nuvemLigada }),
@@ -1437,7 +1476,7 @@ export function comporApp(o: OpcoesCompor): App {
     services,
     useCases,
     dentro,
-    computadores: o.computador || env.NOD_COMPUTADORES === "docker" ? computadores : null,
+    computadores: o.computador || env.NOD_COMPUTADORES === "docker" || computadorNoMotor ? computadores : null,
     depsDe,
     ponte,
     rotas,

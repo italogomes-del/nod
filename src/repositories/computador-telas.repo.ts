@@ -41,6 +41,11 @@ export function computadorTelasRepo(conn: Conn, escopo: Escopo) {
         on conflict (tenant_id, computador_id, agente_id) do nothing`;
       return this.buscar(computadorId, agenteId);
     },
+    /** A tela pelo id, sem travar (o driver localiza o computador e o bot por ela). */
+    async porId(id: string): Promise<TelaComputadorBot | null> {
+      const [l] = await conn<Linha[]>`select * from computador_telas where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id}`;
+      return l ? tela(l) : null;
+    },
     async travar(id: string): Promise<TelaComputadorBot | null> {
       const [l] = await conn<Linha[]>`select * from computador_telas where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} for update`;
       return l ? tela(l) : null;

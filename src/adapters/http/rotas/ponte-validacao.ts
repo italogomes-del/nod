@@ -5,6 +5,8 @@ import { ACOES_DO_PREPARO, type PreparoDoLogin } from "../../../contracts/prepar
 import { ehIaComConta, IMPRESSAO } from "../../../domain/contas-da-pessoa.ts";
 import { emailDaConta, organizacaoDaConta } from "../../../domain/estado-ia.ts";
 import type { RelatoEspera } from "../../../contracts/espera.ts";
+import { DESFECHOS_COMANDO_COMPUTADOR, ESTADOS_ANUNCIO_COMPUTADOR, ESTADOS_TELA_COMPUTADOR, type AnuncioComputador, type EstadoComputadorRelatado, type ResultadoComandoComputador } from "../../../contracts/computador-motor.ts";
+import type { ResultadoComputador } from "../../../contracts/computador.ts";
 import type { ProgressoDeInstalacao } from "../../../contracts/instalacoes-ssh.ts";
 import { FALHAS_DO_LACO, SAIDA_REVISOR_MAX, type FalhaDoLaco, type RelatoRevisao } from "../../../contracts/revisao.ts";
 import { SAIDA_ESPERA_MAX } from "../../../domain/espera-comando.ts";
@@ -13,7 +15,7 @@ import type { LeituraDisco, LeituraMemoria, NivelPressao } from "../../../contra
 import { motivoAtualizando, motivoCliAntigo } from "../../../domain/cli-antigo.ts";
 import { CAMINHOS_ATUALIZACAO, FASES_ATUALIZACAO, MOTIVOS_ATUALIZACAO, type AtualizacaoDaIa } from "../../../contracts/estado-ia.ts";
 import { motivoSondaLenta } from "../../../domain/sonda-lenta.ts";
-import { MOTIVOS_FALHA, MOTIVOS_INTERRUPCAO, MOTIVOS_PASSE } from "../../../contracts/motivos.ts";
+import { MOTIVOS_FALHA, MOTIVOS_FALHA_COMPUTADOR, MOTIVOS_INTERRUPCAO, MOTIVOS_PASSE } from "../../../contracts/motivos.ts";
 import type { Entrega, FalaIntermediaria, TrechoVivo, VigiaVivo } from "../../../contracts/ponte.ts";
 import { TETO_COMANDOS, TETO_DESCRICAO_COMANDO, TETO_SO_DO_TERMINAL, type CatalogoDeComandos, type ComandoDoMac } from "../../../contracts/comandos.ts";
 import {
@@ -587,4 +589,51 @@ export function camposDoRevisor(b: Record<string, unknown>): { revisa?: true; se
     ...(typeof b.segredoRevisao === "string" && b.segredoRevisao.length <= 256 ? { segredoRevisao: b.segredoRevisao } : {}),
     ...(recebidas?.length ? { revisoesRecebidas: recebidas } : {}),
   };
+}
+
+/**
+ * NOD-96 PR 3 (definido em 2026-10-22): o anúncio `computador` da máquina. Fora do formato vira ausente (o computador não
+ * vai para ela) — nunca derruba o `conectar`. `falta` só com nomes curtos de pacote.
+ */
+export function anuncioComputador(v: unknown): AnuncioComputador | undefined {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return undefined;
+  const r = v as Record<string, unknown>;
+  const estado = ESTADOS_ANUNCIO_COMPUTADOR.find((e) => e === r.estado);
+  if (!estado) return undefined;
+  const falta = Array.isArray(r.falta) ? r.falta.filter((x): x is string => typeof x === "string" && /^[a-z0-9][a-z0-9.+-]{0,63}$/.test(x)).slice(0, 20) : [];
+  return falta.length > 0 ? { estado, falta } : { estado };
+}
+const ID_COMANDO = /^[A-Za-z0-9_-]{1,64}$/;
+const B64_CHAVE = /^[A-Za-z0-9+/]{43}=$/;
+/** A resposta do supervisor a um comando. O `resultado` vai ao agente como veio (o supervisor é da pessoa, como o motor). */
+export function resultadoComandoComputador(v: unknown): ResultadoComandoComputador {
+  const r = objeto(v);
+  exigir(typeof r.id === "string" && ID_COMANDO.test(r.id));
+  const desfecho = DESFECHOS_COMANDO_COMPUTADOR.find((x) => x === r.desfecho);
+  exigir(desfecho);
+  const saida: ResultadoComandoComputador = { id: r.id, desfecho };
+  if (desfecho === "ok" && r.resultado !== undefined) saida.resultado = objeto(r.resultado) as ResultadoComputador;
+  if (desfecho === "falhou") saida.motivo = MOTIVOS_FALHA_COMPUTADOR.find((m) => m === r.motivo) ?? "acao_falhou";
+  if (desfecho === "esperando_tela") saida.quem = Array.isArray(r.quem) ? r.quem.filter((x): x is string => typeof x === "string" && UUID.test(x)).slice(0, 32) : [];
+  if (r.progresso !== undefined) {
+    const p = objeto(r.progresso);
+    if (typeof p.pct === "number" && p.pct >= 0 && p.pct <= 100 && texto(p.etapa, 200)) saida.progresso = { pct: p.pct, etapa: p.etapa };
+  }
+  return saida;
+}
+/** A foto do computador. `computadorId` vazio = supervisor ainda sem computador (só a X25519 importa). */
+export function estadoComputadorRelatado(v: unknown): EstadoComputadorRelatado {
+  const r = objeto(v);
+  exigir(typeof r.computadorId === "string" && (r.computadorId === "" || UUID.test(r.computadorId)));
+  exigir(typeof r.ligado === "boolean" && typeof r.supervisorPub === "string" && B64_CHAVE.test(r.supervisorPub));
+  exigir(Array.isArray(r.telas) && r.telas.length <= 64);
+  const numero = (x: unknown) => (typeof x === "number" && Number.isFinite(x) && x >= 0 ? x : null);
+  const telas = (r.telas as unknown[]).map((t) => {
+    const o = objeto(t);
+    exigir(typeof o.agenteId === "string" && UUID.test(o.agenteId));
+    const estado = ESTADOS_TELA_COMPUTADOR.find((e) => e === o.estado);
+    exigir(estado);
+    return { agenteId: o.agenteId, estado, ultimaAcaoEm: numero(o.ultimaAcaoEm), memoriaMb: numero(o.memoriaMb) };
+  });
+  return { computadorId: r.computadorId, ligado: r.ligado, supervisorPub: r.supervisorPub, telas };
 }

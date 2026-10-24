@@ -73,6 +73,12 @@ export type ComandoComputador = {
   acao?: AcaoComputador;
   uso: UsoDoMac;
   segredoSelado?: string;
+  /**
+   * Chave pública Ed25519 do servidor (base64, crua). Só no `iniciar`: o supervisor não tem a NOD_CREDENTIAL_KEY e fixa
+   * esta chave no primeiro `iniciar` (TOFU, ADR-122); depois disso o campo é ignorado.
+   */
+  servidorPub?: string;
+  /** Epoch em ms até quando o comando vale (no máximo 2 min à frente). */
   prazoMs: number;
   /** Ed25519 em base64 sobre a forma canônica do comando sem este campo. */
   assinatura: string;
@@ -107,3 +113,12 @@ export const ESTADOS_ANUNCIO_COMPUTADOR = ["pronto", "faltam_pacotes", "sem_supo
 export type EstadoAnuncioComputador = (typeof ESTADOS_ANUNCIO_COMPUTADOR)[number];
 /** Parte do anúncio da máquina (AnuncioMaquina.computador): se ela roda o computador e, se não, o que falta instalar. */
 export type AnuncioComputador = { estado: EstadoAnuncioComputador; falta?: string[] };
+
+/**
+ * definido em 2026-10-22 (NOD-96 PR 3): o que o motor fala com o supervisor pelo socket `/run/nod-computador/ctl.sock`,
+ * uma mensagem JSON por linha. O motor manda o comando assinado como veio do servidor (não abre, não reassina) e pede a
+ * foto a cada 15 s; o supervisor responde com `RelatoComputador` (o resultado de um comando, pelo id, ou a foto, também
+ * sem ser perguntado quando algo muda). O supervisor ainda sem computador (antes do primeiro `iniciar`) manda a foto com
+ * `computadorId: ""`: o servidor só aprende a X25519 dele para selar o `iniciar`.
+ */
+export type MensagemAoSupervisor = { tipo: "comando"; comando: ComandoComputador } | { tipo: "pedir_estado" };
