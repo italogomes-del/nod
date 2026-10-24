@@ -59,6 +59,8 @@ export type TelaComputador = {
   texto: string;
   dialogo?: { tipo: string; mensagem: string };
   abas: { titulo: string; url: string; ativa: boolean }[];
+  /** NOD-97 PR 5: o Chrome preencheu uma senha salva nesta origem (uma vez por origem). O valor nunca vem; só a origem. */
+  senhaPreenchida?: { origem: string };
 };
 export type ArquivoComputador = { nome: string; caminho: string; tamanho: number; diretorio: boolean };
 export type ResultadoComputador = {

@@ -17,6 +17,7 @@ import { codigoDaAcao, falhaDe, primeiraLinha, PRAZO_NAVEGADOR_MS, TRAVAS_DO_PER
 import { argsDoBwrap, scriptDoBwrap } from './isolamento.mjs';
 import { chaveDoCookie, diffDeCookies } from './loja-cookies.mjs';
 import { coletarNaPagina, comPrazo, hashDosDados, origemDe, origemTemLogin, PRAZO_COLETA_MS, restaurarOrigem, ritmoDeColeta, TETO_STORAGE_BYTES } from './login-storage.mjs';
+import { importarNoPerfil } from './login-senhas.mjs';
 
 const exec = promisify(execFile);
 
@@ -105,6 +106,98 @@ export function argsDoXvfb(display, xauthority, extras = []) {
   return [`:${display}`, '-screen', '0', '1280x800x24', '-nolisten', 'tcp', '-nolisten', 'local', '-auth', xauthority, ...extras];
 }
 
+/**
+ * NOD-97 PR 5: roda na página (context.addInitScript, em TODA navegação e em todo frame, antes do script do site) para
+ * o bot nunca ver a senha que o Chrome preenche. Marca com `data-nod-senha` todo input que já foi type=password e
+ * injeta um CSS que troca o texto por bolinhas (`-webkit-text-security`), inclusive se o site trocar o input para
+ * type=text para "mostrar senha". O valor continua no campo (o site funciona); só não aparece no screenshot nem no
+ * innerText que a tela manda ao bot.
+ *
+ * Shadow DOM: o CSS do documento não atravessa a fronteira de um shadow root. Por isso o `attachShadow` é embrulhado
+ * (pega também os roots `closed`, que de fora ninguém alcança), e cada root ganha o mesmo <style> e o mesmo
+ * observador; root aberto que já existia (shadow DOM declarativo) é coberto quando aparece na árvore. O <style> volta se
+ * o site trocar o conteúdo do root. Fica de fora só o shadow DOM declarativo `closed` (não passa pelo attachShadow nem
+ * é alcançável): registrado na ADR-122.
+ */
+/* eslint-disable no-undef */
+export function mascaraDeSenha() {
+  const CSS = 'input:-webkit-autofill, input[data-nod-senha]{-webkit-text-security:disc !important;}';
+  const cobertas = new Map();
+  const opcoes = { childList: true, subtree: true, attributes: true, attributeFilter: ['type'] };
+  let obs = null;
+  const garantirEstilo = (raiz) => {
+    const atual = cobertas.get(raiz);
+    if (atual && atual.parentNode === raiz) return;
+    const s = document.createElement('style');
+    s.setAttribute('data-nod-mascara-senha', '');
+    s.textContent = CSS;
+    raiz.appendChild(s);
+    cobertas.set(raiz, s);
+  };
+  const cobrir = (raiz) => {
+    if (!raiz || cobertas.has(raiz)) return;
+    garantirEstilo(raiz);
+    marcar(raiz);
+    obs?.observe(raiz, opcoes);
+  };
+  function marcar(raiz) {
+    if (!raiz || !raiz.querySelectorAll) return;
+    if (raiz.tagName === 'INPUT' && raiz.type === 'password') raiz.setAttribute('data-nod-senha', '');
+    if (raiz.shadowRoot) cobrir(raiz.shadowRoot);
+    for (const el of raiz.querySelectorAll('*')) {
+      if (el.tagName === 'INPUT' && el.type === 'password') el.setAttribute('data-nod-senha', '');
+      if (el.shadowRoot) cobrir(el.shadowRoot);
+    }
+  }
+  const original = typeof Element !== 'undefined' ? Element.prototype.attachShadow : null;
+  if (original) {
+    Element.prototype.attachShadow = function attachShadow(...args) {
+      const raiz = original.apply(this, args);
+      try { cobrir(raiz); } catch { /* a máscara nunca quebra o site */ }
+      return raiz;
+    };
+  }
+  const estiloDoDocumento = () => {
+    const cabeca = document.head || document.documentElement;
+    if (cabeca && !document.getElementById('nod-mascara-senha')) {
+      const s = document.createElement('style');
+      s.id = 'nod-mascara-senha';
+      s.textContent = CSS;
+      cabeca.appendChild(s);
+    }
+  };
+  obs = new MutationObserver((muts) => {
+    for (const m of muts) {
+      for (const n of m.addedNodes) if (n.nodeType === 1) marcar(n);
+      if (m.type === 'attributes' && m.target.tagName === 'INPUT' && m.target.type === 'password') m.target.setAttribute('data-nod-senha', '');
+      const raiz = m.target.getRootNode?.();
+      if (raiz && raiz !== document && cobertas.has(raiz)) garantirEstilo(raiz);
+    }
+    // Só o que entrou é varrido (acima); aqui só confere que o <style> do documento continua lá.
+    estiloDoDocumento();
+  });
+  // Roots criados antes do documentElement (raro) já estão em `cobertas`, mas sem observador.
+  for (const raiz of cobertas.keys()) obs.observe(raiz, opcoes);
+  const iniciar = () => { estiloDoDocumento(); marcar(document); obs.observe(document.documentElement, opcoes); };
+  if (document.documentElement) iniciar();
+  else document.addEventListener('DOMContentLoaded', iniciar);
+}
+
+/**
+ * Roda na página: há um campo de senha preenchido pelo Chrome? Devolve só true/false, nunca o valor. Olha também
+ * dentro dos shadow roots abertos.
+ */
+export function temSenhaPreenchida() {
+  const SELETOR = 'input[data-nod-senha]:-webkit-autofill, input:-webkit-autofill[type="password"]';
+  const olhar = (raiz) => {
+    if (raiz.querySelector(SELETOR)) return true;
+    for (const el of raiz.querySelectorAll('*')) if (el.shadowRoot && olhar(el.shadowRoot)) return true;
+    return false;
+  };
+  return olhar(document);
+}
+/* eslint-enable no-undef */
+
 const OPENBOX_XML = `<?xml version="1.0" encoding="UTF-8"?>
 <openbox_config xmlns="http://openbox.org/3.4/rc">
   <applications>
@@ -160,6 +253,8 @@ export function criarTela(config, avisar) {
   let versoes = {};
   const pendentes = new Map();
   const ritmo = ritmoDeColeta({ aoVencer: () => { mandarStorage().catch(() => {}); } });
+  // NOD-97 PR 5: origens cujo preenchimento de senha já foi avisado, para não repetir o aviso a cada observação.
+  const senhasAvisadas = new Set();
   const DISPLAY = `:${config.display}`;
   // O cookie do X fica no tmp desta tela (0600, some no bwrap das outras): só os filhos dela abrem o DISPLAY.
   const XAUTHORITY = path.join(config.tmp, 'Xauthority');
@@ -195,6 +290,15 @@ export function criarTela(config, avisar) {
     await mkdir(ambienteX.HOME, { recursive: true, mode: 0o700 });
     await mkdir(config.workspace, { recursive: true });
     await forkDoPerfil(config.perfilBase, config.perfil);
+    // NOD-97 PR 5: as senhas salvas em comum entram no perfil ANTES do Chrome abrir (ele trava o Login Data em uso).
+    // Falha de importação nunca impede a tela de subir: o login manual continua valendo.
+    if (config.senhas) {
+      try {
+        importarNoPerfil(config.perfil, config.senhas);
+      } catch {
+        // falha de importação não impede a tela de subir: o login manual continua valendo
+      }
+    }
     const socketX = path.join(config.x11, `X${config.display}`);
     await unlink(socketX).catch(() => {});
     await writeFile(XAUTHORITY, arquivoXauthority(config.display), { mode: 0o600 });
@@ -222,6 +326,8 @@ export function criarTela(config, avisar) {
       throw falhaDe('navegador_nao_abriu', e);
     }
     context.setDefaultTimeout(15000);
+    // NOD-97 PR 5: em toda página, esconde o que o Chrome preenche nos campos de senha (ver mascaraDeSenha).
+    await context.addInitScript(mascaraDeSenha).catch(() => {});
     if (config.cookies?.length) await context.addCookies(config.cookies);
     conhecidos = new Map((await context.cookies()).map((c) => [chaveDoCookie(c), c]));
     page = context.pages()[0] ?? (await context.newPage());
@@ -268,13 +374,28 @@ export function criarTela(config, avisar) {
     const quadro = randomBytes(32).toString('hex');
     quadros.set(quadro, { revision, em: Date.now() });
     for (const [id, q] of quadros) if (Date.now() - q.em > 120000 || quadros.size > 256) quadros.delete(id);
+    const senhaPreenchida = await olharSenha(p);
     return {
       quadro, imagem: (await readFile(png)).toString('base64'), largura: 1280, altura: 800, url: p.url(),
       titulo: dialogo ? 'Diálogo do navegador' : await p.title().catch(() => ''),
       dialogo: dialogo ? { tipo: dialogo.type(), mensagem: dialogo.message() } : undefined,
       texto: dialogo ? dialogo.message() : (await p.locator('body').innerText({ timeout: 1000 }).catch(() => '')).slice(0, 12000),
       abas: await Promise.all(context.pages().map(async (t) => ({ url: t.url(), titulo: dialogo ? 'Navegador' : await t.title().catch(() => ''), ativa: t === p }))),
+      ...(senhaPreenchida ? { senhaPreenchida: { origem: senhaPreenchida } } : {}),
     };
+  }
+
+  /**
+   * NOD-97 PR 5: a página tem um campo de senha preenchido pelo Chrome? Devolve a origem (uma vez por origem, para o
+   * servidor avisar a pessoa no chat do bot) ou null. Nunca lê o valor: só pergunta se o autofill aconteceu.
+   */
+  async function olharSenha(p) {
+    const origem = origemDe(p.isClosed() ? '' : p.url());
+    if (!origem) return null;
+    const tem = await p.evaluate(temSenhaPreenchida).catch(() => false);
+    if (!tem || senhasAvisadas.has(origem)) return null;
+    senhasAvisadas.add(origem);
+    return origem;
   }
 
   /** Manda ao supervisor o que mudou nos cookies desde a última foto conhecida. */

@@ -7,6 +7,7 @@
 // NOD-97 PR 4: `?guardar=nome:valor` grava no localStorage da origem; a tela manda o storage da origem com login
 // depois de cada ação (como mandarStorage), guarda o que o supervisor repassa e aplica ao navegar para a origem; a
 // resposta traz `storage` = o localStorage da origem atual em JSON.
+// NOD-97 PR 5: a resposta traz `senhas` = quantas senhas salvas a tela recebeu no config (só a contagem, nunca o valor).
 // NOD_TELA_FALSA_ATRASO_MS segura o `pronta` (o boot lento); NOD_TELA_FALSA_ACAO_MS segura cada ação.
 import { randomBytes } from 'node:crypto';
 import process from 'node:process';
@@ -58,6 +59,7 @@ function tela() {
     quadro: randomBytes(32).toString('hex'), imagem: 'iVBORw0KGgo=', largura: 1280, altura: 800, url, titulo: `${h || 'about:blank'} (${config?.agenteId})`,
     texto: JSON.stringify(doHost.sort((a, b) => a.name.localeCompare(b.name))), abas: [{ url, titulo: h, ativa: true }],
     storage: JSON.stringify(storage.get(origemDe(url)) ?? []),
+    senhas: Object.keys(config?.senhas?.linhas ?? {}).length,
   };
 }
 

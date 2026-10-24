@@ -20,10 +20,11 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { setTimeout as esperar } from 'node:timers/promises';
 import { spawn } from 'node:child_process';
 import { createPrivateKey, randomUUID } from 'node:crypto';
-import { abrirSelo, chaveDaLoja, chaveDoStorage, conferirComando, novoParX25519, publicaX25519, senhaSafeStorage } from './chaves.mjs';
+import { abrirSelo, chaveDaLoja, chaveDasSenhas, chaveDoStorage, conferirComando, novoParX25519, publicaX25519, senhaSafeStorage } from './chaves.mjs';
 import { atualizarLoja, cookiesVivos, fundir, lerLoja, zerar } from './loja-cookies.mjs';
 import { decidirAbertura, leituraLocal } from './regua.mjs';
 import { gravarOrigem, lerEstado, lerTudo, pastaDoStorage } from './login-storage.mjs';
+import { arquivoDasSenhas, lerSenhas, recolherSenhas } from './login-senhas.mjs';
 import { RESOLV_DO_STUB } from './isolamento.mjs';
 
 const AQUI = path.dirname(fileURLToPath(import.meta.url));
@@ -143,7 +144,7 @@ export function criarSupervisor(op) {
     const d = path.join(raiz, id);
     return {
       raiz: d, estado: path.join(d, 'estado'), perfis: path.join(d, 'perfis'), perfilBase: path.join(d, 'perfil-base'),
-      logins: path.join(d, 'logins'), loja: path.join(d, 'logins', 'principal', 'cookies.enc'), storage: pastaDoStorage(path.join(d, 'logins')), keyring: path.join(d, 'keyring'),
+      logins: path.join(d, 'logins'), loja: path.join(d, 'logins', 'principal', 'cookies.enc'), storage: pastaDoStorage(path.join(d, 'logins')), senhas: arquivoDasSenhas(path.join(d, 'logins')), keyring: path.join(d, 'keyring'),
       workspace: path.join(d, 'workspace'), run: path.join(run, id), bus: path.join(run, id, 'bus'),
     };
   };
@@ -174,7 +175,7 @@ export function criarSupervisor(op) {
     await prepararPastas(d);
     const privX = await chaveDoSupervisor(d);
     const servidorPub = await readFile(path.join(d.estado, 'servidor.pub'), 'utf8').then((s) => s.trim(), () => null);
-    c = { id, d, privX, pubX: publicaX25519(privX), servidorPub, vistos: new Map(), ligado: false, chaveLoja: null, chaveStorage: null, busEndereco: null, procs: [], telas: new Map(), operacao: null, fila: Promise.resolve() };
+    c = { id, d, privX, pubX: publicaX25519(privX), servidorPub, vistos: new Map(), ligado: false, chaveLoja: null, chaveStorage: null, chaveSenhas: null, marcasSenhas: new Map(), busEndereco: null, procs: [], telas: new Map(), operacao: null, fila: Promise.resolve() };
     computadores.set(id, c);
     return c;
   }
@@ -239,6 +240,9 @@ export function criarSupervisor(op) {
     c.chaveStorage = chaveDoStorage(chaveMaquina);
     // Storage ilegível não impede a máquina de ligar (os cookies são o login): fica no log, e a tela abre sem ele.
     await lerEstado(c.d.storage, c.chaveStorage).catch((e) => log(`storage: ${e?.message}`));
+    c.chaveSenhas = chaveDasSenhas(chaveMaquina);
+    // Senhas ilegíveis também não impedem ligar: fica no log, e a tela abre sem as senhas salvas em comum.
+    await lerSenhas(c.d.senhas, c.chaveSenhas).catch((e) => log(`senhas: ${e?.message}`));
     c.ligado = true;
     c.ligadoDesde = agora();
   }
@@ -251,6 +255,8 @@ export function criarSupervisor(op) {
     c.ligado = false;
     c.chaveLoja = null;
     c.chaveStorage = null;
+    c.chaveSenhas = null;
+    c.marcasSenhas.clear();
     c.busEndereco = null;
   }
 
@@ -289,6 +295,21 @@ export function criarSupervisor(op) {
     }).catch((e) => log(`storage: ${e?.message}`));
   }
 
+  /**
+   * NOD-97 PR 5: recolhe o `Login Data` do perfil de um bot para a loja (LWW). Serializa na fila da máquina (a mesma dos
+   * cookies e do storage). Uma senha nova salva numa tela entra no perfil das OUTRAS na próxima vez que elas abrirem.
+   * Só copia o arquivo quando o mtime ou o tamanho mudou desde a última leitura (marcasSenhas).
+   */
+  function recolherDaTela(c, agenteId) {
+    c.fila = c.fila.then(async () => {
+      if (!c.chaveSenhas) return;
+      const perfil = path.join(c.d.perfis, agenteId);
+      const r = await recolherSenhas(c.d.senhas, c.chaveSenhas, perfil, c.d.run, agora(), c.marcasSenhas);
+      if (r === 'gravou') log(`senhas de ${agenteId}: recolhidas`);
+    }).catch((e) => log(`senhas: ${e?.message}`));
+    return c.fila;
+  }
+
   async function abrirTela(c, agenteId, uso) {
     let t = c.telas.get(agenteId);
     if (t?.estado === 'aberta') return { ok: true };
@@ -323,12 +344,15 @@ export function criarSupervisor(op) {
     t.abrindo = (async () => {
       const loja = await lerLoja(c.d.loja, c.chaveLoja);
       const storage = await lerTudo(c.d.storage, c.chaveStorage).catch((e) => { log(`storage: ${e?.message}`); return { itens: [] }; });
+      // NOD-97 PR 5: as senhas salvas em comum viajam no config (o valor já vem cifrado pelo Safe Storage); a tela as
+      // importa no perfil ANTES de abrir o Chrome. Senhas ilegíveis não seguram a tela (abre sem elas).
+      const senhas = await lerSenhas(c.d.senhas, c.chaveSenhas).catch((e) => { log(`senhas: ${e?.message}`); return null; });
       proc.send({
         tipo: 'abrir',
         config: {
           agenteId, display, raiz, run, ocultar: [path.dirname(terminal)], resolv, resolvEm, perfil: path.join(c.d.perfis, agenteId), perfilBase: c.d.perfilBase, workspace: path.join(c.d.workspace, agenteId),
           logins: c.d.logins, tmp: path.join(c.d.run, 'telas', agenteId), x11, bus: c.d.bus, busEndereco: c.busEndereco, bin, sandbox: op.sandbox !== false,
-          xvfbArgs: op.xvfbArgs, cookies: cookiesVivos(loja, agora()), storage: storage.itens,
+          xvfbArgs: op.xvfbArgs, cookies: cookiesVivos(loja, agora()), storage: storage.itens, senhas,
         },
       });
       const m = await esperarDoFilho(proc, (x) => x?.tipo === 'pronta' || x?.tipo === 'falhou', PRAZO_ABRIR_TELA_MS);
@@ -358,6 +382,8 @@ export function criarSupervisor(op) {
       if (m.tipo === 'prazo') { try { t.proc.kill('SIGKILL'); } catch { /* segue */ } }
     }
     await c.fila;
+    // NOD-97 PR 5: o Chrome fechou e soltou o Login Data; recolhe a senha que a tela possa ter salvado nesta sessão.
+    if (c.ligado) await recolherDaTela(c, agenteId);
     c.telas.set(agenteId, { estado: 'fechada', ultimaAcaoEm: t.ultimaAcaoEm });
     relatarEstado(c);
   }
@@ -412,6 +438,8 @@ export function criarSupervisor(op) {
     } finally {
       t.ocupada = false;
       t.ultimaAcaoEm = agora();
+      // Uma ação pode ter salvado uma senha no Chrome; recolhe sem segurar a resposta.
+      recolherDaTela(c, cmd.agenteId);
     }
   }
 

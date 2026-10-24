@@ -3,12 +3,14 @@
 // loja de cookies é a real (cifrada no disco). O que precisa de Xvfb/Chromium/systemd de verdade é o smoke na VM
 // (scripts/e2e-computador-vm.sh); aqui fica o que é do supervisor: login em comum, telas sem vazar, cookies ao mesmo
 // tempo, a régua (fila e ociosa) e Atualizar/Redefinir sem perder os logins.
-import { chmod, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { assinarComando, chaveDaLoja, chaveDaMaquina, chaveDoStorage, chavesDeAssinatura, selar } from "../../infra/computador/chaves.mjs";
+import { assinarComando, chaveDaLoja, chaveDaMaquina, chaveDasSenhas, chaveDoStorage, chavesDeAssinatura, selar } from "../../infra/computador/chaves.mjs";
+import { arquivoDasSenhas, lerSenhas } from "../../infra/computador/login-senhas.mjs";
 import { lerEstado, lerTudo } from "../../infra/computador/login-storage.mjs";
 import { cookiesVivos, lerLoja } from "../../infra/computador/loja-cookies.mjs";
 import { OCIOSA_APOS_MS } from "../../infra/computador/regua.mjs";
@@ -22,7 +24,7 @@ const limpar: Array<() => Promise<unknown> | unknown> = [];
 afterEach(async () => { for (const f of limpar.splice(0).reverse()) await f(); });
 
 type Nivel = "verde" | "amarela" | "vermelha";
-type Tela = { url: string; titulo: string; texto: string; storage?: string };
+type Tela = { url: string; titulo: string; texto: string; storage?: string; senhas?: number };
 type Resultado = { desfecho: string; motivo?: string; quem?: string[]; supervisorPub?: string; resultado?: { tela?: Tela } };
 
 async function montar(o: { ambienteTela?: Record<string, string> } = {}) {
@@ -82,7 +84,10 @@ async function montar(o: { ambienteTela?: Record<string, string> } = {}) {
     return Object.fromEntries(JSON.parse(r.resultado!.tela!.storage ?? "[]") as [string, string][]);
   };
   const pastaStorage = join(dir, "raiz", ID, "logins", "principal", "storage");
-  return { sup, maquina, tratar, iniciar, navegar, cookiesEm, storageEm, pastaStorage, telas, loja, logs, assentar: () => (sup as Supervisor).assentar() };
+  const perfilDe = (agenteId: string) => join(dir, "raiz", ID, "perfis", agenteId);
+  const arquivoSenhas = arquivoDasSenhas(join(dir, "raiz", ID, "logins"));
+  const senhas = () => lerSenhas(arquivoSenhas, chaveDasSenhas(chaveDaMaquina(CRED, ID)));
+  return { sup, perfilDe, arquivoSenhas, senhas, dir, maquina, tratar, iniciar, navegar, cookiesEm, storageEm, pastaStorage, telas, loja, logs, assentar: () => (sup as Supervisor).assentar() };
 }
 
 const MAIL = "https://mail.exemplo.com/";
@@ -282,6 +287,37 @@ describe("computador da pessoa: várias telas no supervisor real (NOD-96 PR 7)",
     expect(await m.storageEm("caio", MAIL)).toEqual({ token });
     expect(m.logs.filter((l) => l.startsWith("storage"))).toEqual([]);
   }, 60_000);
+
+  it("senhas salvas (NOD-97 PR 5): o Login Data de um bot vai para a loja e para a tela do outro, e a senha nunca sai para o bot", async () => {
+    const m = await montar();
+    await m.iniciar();
+    // A tela da Ana abre (cria o perfil); o Chrome dela "salva" uma senha: o BLOB carrega a marcadora em claro, o pior caso.
+    await m.navegar("ana", "https://portal.exemplo.com/");
+    const MARCADORA = "MARCADORA-SENHA-7f3a";
+    await mkdir(join(m.perfilDe("ana"), "Default"), { recursive: true });
+    const db = new DatabaseSync(join(m.perfilDe("ana"), "Default", "Login Data"));
+    db.exec("CREATE TABLE meta(key LONGVARCHAR NOT NULL UNIQUE PRIMARY KEY, value LONGVARCHAR); INSERT INTO meta VALUES ('version', '43');");
+    db.exec("CREATE TABLE logins (origin_url VARCHAR NOT NULL, username_element VARCHAR, username_value VARCHAR, password_element VARCHAR, password_value BLOB, signon_realm VARCHAR NOT NULL, date_created INTEGER NOT NULL, date_password_modified INTEGER NOT NULL DEFAULT 0, id INTEGER PRIMARY KEY AUTOINCREMENT, UNIQUE (origin_url, username_element, username_value, password_element, signon_realm))");
+    db.prepare("INSERT INTO logins (origin_url, username_element, username_value, password_element, password_value, signon_realm, date_created, date_password_modified) VALUES (?, 'u', 'ana', 'p', ?, ?, ?, ?)")
+      .run("https://portal.exemplo.com/", Buffer.from(MARCADORA), "https://portal.exemplo.com/", 13_380_000_000_000_000n, 13_380_000_000_000_000n);
+    db.close();
+    // A próxima ação recolhe; a tela do Beto, aberta depois, recebe a senha no config.
+    const resultados: unknown[] = [await m.navegar("ana", "https://portal.exemplo.com/entrar")];
+    await m.assentar();
+    expect(Object.keys((await m.senhas()).linhas)).toHaveLength(1);
+    const beto = await m.navegar("beto", "https://portal.exemplo.com/");
+    resultados.push(beto);
+    expect(beto.resultado?.tela?.senhas).toBe(1);
+    // Nada que volta ao bot ou fica no log tem a senha, nem em claro nem em base64; a loja no disco é cifrada.
+    const b64 = Buffer.from(MARCADORA).toString("base64");
+    const visto = JSON.stringify(resultados) + m.logs.join("\n");
+    expect(visto).not.toContain(MARCADORA);
+    expect(visto).not.toContain(b64);
+    const disco = (await readFile(m.arquivoSenhas)).toString("latin1");
+    expect(disco).not.toContain(MARCADORA);
+    expect(disco).not.toContain(b64);
+    expect(m.logs.filter((l) => l.startsWith("senhas:"))).toEqual([]);
+  });
 
   it("instalação limpa: a sonda sem assinatura é recusada, mas o computador novo é relatado na hora com a X25519", async () => {
     const m = await montar();

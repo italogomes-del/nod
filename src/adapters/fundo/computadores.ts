@@ -335,6 +335,21 @@ export function criarComputadores(o: Opcoes) {
   }
 
   /**
+   * NOD-97 PR 5: a linha cinza "O Chrome preencheu a senha salva…" na conversa própria do bot, uma vez por origem (a
+   * tela só reporta `senhaPreenchida` na primeira observação de cada origem). O valor da senha nunca chega aqui.
+   */
+  async function avisarSenhaPreenchida(d: Deps, agenteId: string, origem: string): Promise<void> {
+    const agente = await d.repos.agentes.buscar(agenteId);
+    const conversa = agente ? await d.repos.conversas.buscarPropriaDoAgente(agente.id) : null;
+    if (!agente || !conversa) return;
+    const agora = d.agora();
+    const autoria = autoriaAgente({ agenteId: agente.id, contaDeExecucao: d.escopo.pessoaId, executor: o.executor(), decididoPor: "regra:senha_preenchida" });
+    const texto = redigir("computador-senha-preenchida", agora, { agente: agente.nome });
+    const m = await d.repos.mensagens.criar({ conversaId: conversa.id, turnoId: null, autoria, kind: "sistema", texto, payload: { kind: "computador_senha_preenchida", agenteId: agente.id, origem }, confianca: "confiavel" });
+    if (m) await d.repos.events.gravarComOutbox([evento(d.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: conversa.id, turnoId: null, dados: { mensagem_id: m.id, kind: "sistema" } })]);
+  }
+
+  /**
    * A saúde anda com o registro da ação, na MESMA transação e com a linha travada. Só a máquina sem
    * responder conta (CONTA_PARA_SAUDE); qualquer resposta dela zera a sequência. Computador desligado
    * pela pessoa no meio não conta — quem parou foi ela. Devolve se a frota precisa reler.
@@ -818,6 +833,11 @@ export function criarComputadores(o: Opcoes) {
           // `texto` é descartado pelo log (dado pessoal); por isso imagem_igual/texto_igual.
           if (dedup.omitirImagem || dedup.omitirTexto) log("info", "computador_observacao_deduplicada", { computador_id: resultado.computador.id, imagem_igual: dedup.omitirImagem, texto_igual: dedup.omitirTexto, bytes_poupados: (dedup.omitirImagem ? r.tela.imagem.length : 0) + (dedup.omitirTexto ? r.tela.texto.length : 0) });
           if (r.tela.imagem) lembrarObservacao(chave, dedup.entregue);
+        }
+        // NOD-97 PR 5: o Chrome preencheu uma senha salva (uma vez por origem); a linha cinza avisa na conversa do bot.
+        if (r.tela?.senhaPreenchida && resultado.computador.controle === "bot") {
+          const origem = r.tela.senhaPreenchida.origem;
+          await o.dentro(escopo, (d) => avisarSenhaPreenchida(d, plano.agenteId, origem)).catch((e) => log("aviso", "computador_senha_aviso_falhou", { computador_id: resultado.computador.id, erro: e instanceof Error ? e.name : "desconhecido" }));
         }
         return { ok: true, isError, conteudo: JSON.stringify({ ...r, audio: undefined, ...(tela ? { tela } : {}), ...(aviso ? { aviso } : {}) }), confianca: "nao_confiavel", ...(r.audio ? { audio: r.audio } : {}), ...(imagem ? { imagem: { mimeType: "image/png" as const, data: imagem } } : {}) };
       } catch (e) {

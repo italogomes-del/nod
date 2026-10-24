@@ -291,3 +291,7 @@ dialog.cb-veu::backdrop { background: var(--backdrop); }
   .cb-dica { border: 1px solid CanvasText; }
   .cb-bt-ghost { border: 1px solid ButtonText; }
 }
+
+/* NOD-97 PR 5: o selo do cadeado na linha "Entrou de novo com a senha salva" ("‹bot› não vê a senha"). */
+.at-sigilo { display: inline-flex; align-items: center; gap: 4px; margin-left: 6px; padding: 1px 7px; border-radius: 999px; background: var(--surface-selected); color: var(--ink-3); font-style: normal; font-size: 11px; white-space: nowrap; vertical-align: 1px; }
+.at-sigilo svg { flex: none; }

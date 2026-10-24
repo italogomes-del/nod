@@ -78,6 +78,8 @@ export const DESTINO: Readonly<Record<Assunto, RegraDeDestino>> = {
   "computador.em_operacao": { destino: "chat", categoria: "maquina_ia" },
   // NOD-97 (protótipo v1.1): fechar a tela no controle deixa uma linha cinza no chat, para a pessoa saber que o bot retomou.
   "computador.tela_fechada": { destino: "chat", categoria: "maquina_ia" },
+  // NOD-97 PR 5: o Chrome preencheu a senha salva; a linha cinza no chat avisa que o bot não vê o que está escrito.
+  "computador.senha_preenchida": { destino: "chat", categoria: "maquina_ia" },
   "trabalho.aberto": { destino: "anexo", categoria: "frentes" },
   "frentes.abertas": { destino: "anexo", categoria: "frentes" },
   "frentes.terminadas": { destino: "anexo", categoria: "frentes" },
@@ -181,6 +183,8 @@ export function assuntoDe(kind: KindMensagem, payload: PayloadMensagem | null, a
         return "computador.em_operacao";
       case "computador_tela_fechada":
         return "computador.tela_fechada";
+      case "computador_senha_preenchida":
+        return "computador.senha_preenchida";
       case "turno_preso":
         return "turno.orfao";
       case "artefato":

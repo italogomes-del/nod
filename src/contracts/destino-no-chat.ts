@@ -63,6 +63,8 @@ export const ASSUNTOS = [
   "computador.em_operacao",
   // NOD-97: a pessoa fechou a tela no controle e o bot voltou a usar o computador.
   "computador.tela_fechada",
+  // NOD-97 PR 5: o Chrome preencheu uma senha salva; o bot não vê o que está escrito.
+  "computador.senha_preenchida",
   // Frentes e tasks: a web precisa delas na janela para desenhar outra coisa (anexo).
   "trabalho.aberto",
   "frentes.abertas",

@@ -3,6 +3,7 @@ export function chaveDaMaquina(credencial: string, computadorId: string): string
 export function senhaSafeStorage(chaveMaquina: string): string;
 export function chaveDaLoja(chaveMaquina: string): Buffer;
 export function chaveDoStorage(chaveMaquina: string): Buffer;
+export function chaveDasSenhas(chaveMaquina: string): Buffer;
 export function chavesDeAssinatura(credencial: string, computadorId: string): { privada: KeyObject; publica: string };
 export function canonico(valor: unknown): string;
 export function assinarComando<T extends object>(comando: T, privada: KeyObject): T & { assinatura: string };

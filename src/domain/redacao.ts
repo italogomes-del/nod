@@ -62,6 +62,7 @@ export type ChaveRedacao =
   | "computador-fora-do-ar-com-acao"
   | "computador-em-operacao"
   | "computador-tela-fechada"
+  | "computador-senha-preenchida"
   | "rotina-pausada-sem-acesso";
 
 /** Textos de sistema FIXOS em português; nunca vêm do modelo. `{chave}` é preenchido com params. */
@@ -159,6 +160,8 @@ const CATALOGO: Record<ChaveRedacao, string> = {
   "computador-em-operacao": "Fechei a tela de {agente} no computador: {operacao}. Quando terminar, {agente} tenta de novo sozinho.",
   // definido em 2026-10-22 (NOD-97, protótipo v1.1): a linha cinza quando a pessoa fecha a tela no controle.
   "computador-tela-fechada": "Você fechou a tela. {agente} voltou a usar o computador do bot.",
+  // definido em 2026-10-24 (NOD-97 PR 5): o Chrome preencheu a senha salva numa tela; o bot não enxerga o valor.
+  "computador-senha-preenchida": "Entrou de novo com a senha salva. {agente} não vê a senha.",
   // definido em 2026-09-24 (emenda da ADR-044): a linha ÚNICA quando o pedido de acesso da rotina vence —
   // no lugar do "este pedido venceu"; {prazo} é o da decisão ("24h"), {app} o nome que a pessoa lê.
   "rotina-pausada-sem-acesso": "Rotina pausada: ninguém liberou o acesso ao {app} em {prazo}. Reative quando quiser.",

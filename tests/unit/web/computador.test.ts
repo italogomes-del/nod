@@ -4,7 +4,7 @@ import type { ComputadorDto, RegistroComputador } from "../../../src/contracts/c
 import type { Mensagem } from "../../../src/contracts/mensagem.ts";
 import { estadoInicial, reduzir, type Estado } from "../../../web/estado/reducer.ts";
 import { computadorPadrao, textoPedidoDeTela } from "../../../src/domain/computador.ts";
-import { agruparAtividade, estadoEmPalavras, foraDoAr, htmlCartaoTela, htmlDialogoComputador, mensagemDoLimite, motivoDoPedidoDeTela, rotuloDaAtividade, tituloDaFalha } from "../../../web/lib/computador.ts";
+import { agruparAtividade, estadoEmPalavras, foraDoAr, htmlCartaoTela, htmlDialogoComputador, htmlSeloSigilo, mensagemDoLimite, motivoDoPedidoDeTela, rotuloDaAtividade, tituloDaFalha } from "../../../web/lib/computador.ts";
 import { renderCabecalhoConversa, renderMensagem } from "../../../web/telas/conversa.ts";
 import { renderDetalhes } from "../../../web/telas/detalhes.ts";
 
@@ -151,6 +151,16 @@ describe("computador do bot: erro real e aviso único na web (emenda da ADR-037)
     const voltou = renderMensagem(m, comFrota(nina(null)));
     expect(voltou).toContain("O computador voltou a responder.");
     expect(voltou).not.toContain('data-act="religar-computador"');
+  });
+
+  it("senha salva (NOD-97 PR 5): a linha cinza diz 'Entrou de novo com a senha salva' com o selo '‹bot› não vê a senha'", () => {
+    const m: Mensagem = { tenantId: "t", id: "m2", conversaId: "c1", turnoId: null, autoria: { autor_tipo: "agente", autor_id: "a1", sob_procuracao_de: null, conta_de_execucao: "p", executor: "catcher", locality: "local", locality_reason: "tudo_local_nesta_rodada", machine_id: null, decidido_por: "regra:senha_preenchida", regra_versao: 1 }, kind: "sistema", texto: "Entrou de novo com a senha salva. Nina não vê a senha.", payload: { kind: "computador_senha_preenchida", agenteId: "a1", origem: "https://portal.exemplo.com" }, confianca: "confiavel", parcial: false, criadoEm: T0 };
+    const html = renderMensagem(m, comFrota(nina(null)));
+    expect(html).toContain("Entrou de novo com a senha salva");
+    expect(html).toContain('<i class="at-sigilo">');
+    expect(html).toContain("Nina não vê a senha");
+    expect(html).not.toContain("portal.exemplo.com");
+    expect(htmlSeloSigilo("<b>")).toContain("&lt;b&gt; não vê a senha");
   });
 
   it("SSE: só a mudança de SAÚDE relê a frota; as ações comuns do computador não", () => {

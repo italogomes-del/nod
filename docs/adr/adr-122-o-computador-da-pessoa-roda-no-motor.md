@@ -216,9 +216,53 @@ também é um só entre as telas, como a loja de cookies do §2.
     reabrir mantém, disco cifrado; e dois bots gravando a mesma origem 100 vezes ao mesmo tempo, com um leitor que
     confere a cada passo que o índice e a origem decifram e, no fim, que o LWW ficou com a última volta.
 
+## Emenda 2026-10-24 (NOD-97 PR 5): as senhas salvas do Chrome são em comum
+
+Com cookies e storage em comum, faltava a senha que o Chrome salva: sem ela, cada bot pedia de novo o login que outro
+já tinha feito. Agora o `Login Data` é um só entre as telas, pelo mesmo caminho da loja de cookies do §2.
+
+- **Ninguém decifra a senha.** O campo `password_value` vem cifrado pelo Safe Storage do keyring da máquina (§3, a
+  mesma chave em todos os perfis) e viaja como BLOB em base64, byte a byte igual. O nod nunca tem a senha em claro.
+- **O supervisor recolhe e funde:**
+  - lê uma cópia do `Login Data` do perfil do bot (com `integrity_check`) depois de cada ação e quando a tela fecha;
+  - só copia quando o mtime ou o tamanho do arquivo mudou desde a última leitura (`marcasSenhas`, que zera ao
+    desligar a máquina);
+  - funde por linha única do Chrome (`origin_url`, `username_element`, `username_value`, `password_element`,
+    `signon_realm`) em LWW por `date_password_modified` (ou `date_created`, na linha antiga);
+  - cifra em `logins/principal/senhas.enc` com AES-256-GCM e HKDF `login:principal:senhas-v1`, junto com o esquema e
+    a `meta` do arquivo de origem.
+- **A tela importa antes de abrir o Chrome.** As senhas vão no config da tela, e ela as grava no `Login Data` do perfil
+  antes do Chrome subir (ele trava o arquivo em uso). Se o perfil não tem o arquivo, ele é criado pelo esquema que
+  veio na loja. A importação é upsert com LWW: a linha local mais nova (ainda não recolhida, por exemplo depois de uma
+  queda do supervisor) não é sobrescrita.
+- **Datas do Chrome acima de 2^53.** As datas são microssegundos desde 1601 (~1,3e16). São lidas como BigInt
+  (`setReadBigInts`), viajam no JSON como `{big: "..."}` e voltam BigInt ao gravar. Sem isso, a leitura de um
+  `Login Data` real lançava `RangeError` e nenhuma senha era recolhida.
+- **O bot não vê a senha.** Um init script em toda página (`mascaraDeSenha`) põe `-webkit-text-security: disc` nos
+  campos que o Chrome preenche e nos que já foram `type=password`, e continua cobrindo quando o site troca o campo para
+  `type=text` ("mostrar senha"). O valor fica no campo (o site funciona); só não aparece no screenshot nem no texto. O
+  CSS não atravessa shadow DOM, então o `attachShadow` é embrulhado e cada root ganha o mesmo estilo e observador.
+  Quando o Chrome preenche, a tela avisa uma vez por origem, e o chat mostra a linha cinza com o selo "‹bot› não vê a
+  senha".
+- **Desvio do plano: sem relançar o Chrome ocioso.** O plano relançava o Chrome de outro bot, ocioso, quando chegasse
+  uma senha mais nova, para ela valer já. O PR só aplica a senha na próxima abertura da tela daquele bot: relançar sob
+  o bot fecha as abas dele e perde o estado da página, e a tela ociosa já fecha sozinha (o servidor manda `fechar_tela` aos 15 min). Gatilho de
+  reversão: um bot pedir de novo uma senha que outro já salvou, com a tela aberta, em mais de 1 de cada 10 logins
+  em 14 dias de log.
+- **Fica de fora o shadow DOM declarativo `closed`.** Ele não passa pelo `attachShadow` e ninguém de fora o alcança;
+  a máscara não chega lá. O shadow DOM aberto, o declarativo aberto e o `closed` criado por script são cobertos.
+- **Teste:**
+  - unitário, das regras (LWW, esquema, datas BigInt, upsert sem sobrescrever a linha local mais nova, recolher só
+    quando o mtime muda);
+  - ida e volta no Chromium de verdade: exporta de um perfil, cria o `Login Data` noutro e o BLOB volta igual;
+  - máscara no Chromium de verdade: `type` trocado para `text`, campo criado depois, shadow DOM aberto e fechado, e
+    uma senha marcadora que não aparece no texto, no título nem no screenshot (com controle sem a máscara);
+  - concorrência no supervisor: a senha de um bot vai para a loja e para a tela do outro, e a marcadora não aparece
+    nos resultados, nos logs nem no disco.
+
 ## Fora
 
-Compartilhar por workspace (bots de colegas); mais de uma máquina por pessoa; compartilhar senhas e
+Compartilhar por workspace (bots de colegas); mais de uma máquina por pessoa; compartilhar
 extensões (NOD-97); tela ao vivo (NOD-95); rotear o navegador pelo Mac da pessoa; computador no Mac (NOD-93) e na
 nuvem gerenciada (NOD-92/NOD-89).
 

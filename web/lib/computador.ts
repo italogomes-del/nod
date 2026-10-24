@@ -321,3 +321,16 @@ export function estadoDoComputador(dto: Pick<ComputadorDto, "computador" | "ativ
   if (!dto.ativo) return "dormindo";
   return (dto.computador.ocupadoAte ?? 0) > agora ? "ocupado" : "ligado";
 }
+
+/**
+ * NOD-97 PR 5 (plano v1.1): quando o Chrome preenche a senha salva, a linha cinza do chat diz "Entrou de novo com a
+ * senha salva" com o selo do cadeado "‹bot› não vê a senha". O selo é só aviso: a senha nunca chega à web.
+ */
+export const TEXTO_SENHA_SALVA = "Entrou de novo com a senha salva";
+const CADEADO = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>';
+export function htmlSeloSigilo(nome: string): string {
+  return `<i class="at-sigilo">${CADEADO}${esc(nome)} não vê a senha</i>`;
+}
+export function htmlLinhaSenhaSalva(nome: string): string {
+  return `<div class="msg-sistema msg-senha-salva" role="status">${TEXTO_SENHA_SALVA} ${htmlSeloSigilo(nome)}</div>`;
+}

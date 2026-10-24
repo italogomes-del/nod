@@ -37,6 +37,11 @@ export function chaveDoStorage(chaveMaquina) {
   return hkdf(hexDaChave(chaveMaquina), 'login:principal:storage-v1');
 }
 
+/** NOD-97 PR 5: a chave AES-256 da loja de senhas `logins/principal/senhas.enc` (outra info, outra chave). */
+export function chaveDasSenhas(chaveMaquina) {
+  return hkdf(hexDaChave(chaveMaquina), 'login:principal:senhas-v1');
+}
+
 /** Ed25519 do servidor para um computador: semente HKDF(NOD_CREDENTIAL_KEY, "nod-computador-assina:"+id). */
 export function chavesDeAssinatura(credencial, computadorId) {
   const semente = hkdf(hexDaChave(credencial), `nod-computador-assina:${computadorId}`);
