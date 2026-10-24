@@ -22,6 +22,8 @@ export type ApiContas = {
   verLogin(maquinaId: string, loginId: string): Promise<LoginNaMaquina>;
   colarCodigoLogin(maquinaId: string, loginId: string, cifrado: CodigoCifrado): Promise<unknown>;
   cancelarLogin(maquinaId: string, loginId: string): Promise<unknown>;
+  /** NOD-9 PR4: pede à máquina que atualize a IA (opcional: os testes antigos não o montam). */
+  atualizarIaDaMaquina?(maquinaId: string, ia: IaComConta): Promise<unknown>;
 };
 
 export type DepsContasDaPessoa = {
@@ -293,6 +295,20 @@ export function criarContasDaPessoa(d: DepsContasDaPessoa) {
       if (!l || l.onde !== "vm") return;
       trocarLogin(loginId, () => null);
       await entrarNaMaquina(l.login.maquinaId, l.login.ia, l.login.contaId, l.login.apelido);
+    },
+    /** NOD-9 PR4: o login falhou com `cli_antigo` — pede à máquina que atualize a IA; a frase do resultado fica no bloco. */
+    async atualizarIa(loginId: string): Promise<void> {
+      const l = logins().find((x) => idDoLogin(x) === loginId);
+      if (!l || l.onde !== "vm") return;
+      trocarLogin(loginId, (x) => ({ ...x, enviando: true, erroEnvio: null } as LoginNaTela));
+      try {
+        const api = d.api();
+        if (!api?.atualizarIaDaMaquina) throw new Error("sem_api");
+        await api.atualizarIaDaMaquina(l.login.maquinaId, l.login.ia);
+        trocarLogin(loginId, (x) => ({ ...x, enviando: false, erroEnvio: "Pedido enviado. A máquina atualiza a IA quando os bots dela terminarem o que estão fazendo; depois, clique em Tentar de novo." } as LoginNaTela));
+      } catch {
+        trocarLogin(loginId, (x) => ({ ...x, enviando: false, erroEnvio: "A máquina não recebeu o pedido. Confira se ela está conectada e tente de novo." } as LoginNaTela));
+      }
     },
     /** Depois de recarregar a página: os logins da VM que estavam abertos voltam a ser conferidos. */
     conferir,

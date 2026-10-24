@@ -1,4 +1,4 @@
-import type { ProgressoDoLogin, PuxadaDeContas } from "../../contracts/contas-ia.ts";
+import { IAS_COM_CONTA, type IaComConta, type ProgressoDoLogin, type PuxadaDeContas } from "../../contracts/contas-ia.ts";
 import type { PedidoDeInstalacao, ProgressoDeInstalacao } from "../../contracts/instalacoes-ssh.ts";
 import type { AnuncioMaquina, PastaParaLimpar, PonteInterna, RespostaRenovar, TrechoVivo, VigiaVivo } from "../../contracts/ponte.ts";
 import type { EsperaParaRodar } from "../../contracts/espera.ts";
@@ -297,7 +297,9 @@ export function criarPonteHttp(o: { url: string; chave: string; versao: string; 
       async puxar(): Promise<PuxadaDeContas | null | "sem_rota"> {
         try {
           const r = await chamar<Partial<PuxadaDeContas>>("contas", {}, { rota404: true });
-          return { logins: Array.isArray(r.logins) ? r.logins : [], sair: Array.isArray(r.sair) ? r.sair.filter((x): x is string => typeof x === "string") : [], desconectar: r.desconectar === true };
+          // NOD-9 PR4: as IAs que a tela pediu para atualizar (só as conhecidas; o servidor antigo não manda o campo).
+          const atualizar = Array.isArray(r.atualizar) ? r.atualizar.filter((x): x is IaComConta => (IAS_COM_CONTA as readonly unknown[]).includes(x)) : [];
+          return { logins: Array.isArray(r.logins) ? r.logins : [], sair: Array.isArray(r.sair) ? r.sair.filter((x): x is string => typeof x === "string") : [], desconectar: r.desconectar === true, ...(atualizar.length > 0 ? { atualizar } : {}) };
         } catch (e) {
           return e instanceof FalhaPonte && e.codigo === "rota_ausente" ? "sem_rota" : null;
         }

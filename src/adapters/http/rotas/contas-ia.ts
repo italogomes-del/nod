@@ -28,6 +28,8 @@ export type DepsRotasContas = {
   avisar(escopo: Escopo, motivo: string, loginId?: string): void;
   /** A máquina está conectada agora (a ponte a ouviu no último minuto)? */
   maquinaViva(escopo: Escopo, id: string): boolean;
+  /** NOD-9 (2026-10-23): a máquina conectada anunciou que atende o "Atualizar agora" remoto (o motor da VM). */
+  maquinaAtualizaIas?(escopo: Escopo, id: string): boolean;
   /** A conexão viva da máquina passa a usar o nome novo (o prompt e "Rodar no X"). */
   aoRenomear?(escopo: Escopo, id: string, nome: string): void;
 };
@@ -237,6 +239,11 @@ export function rotasContasIa(deps: DepsRotasContas): Rota[] {
         const maquina = await deps.dentro(ctx.escopo, (d) => exigirMaquina(d, ctx.params.id));
         if (!deps.maquinaViva(ctx.escopo, maquina.id)) {
           ctx.json(409, { codigo: "maquina_sem_contato", mensagem: `${maquina.nome} não está conectada agora. Abra o nod nela e tente de novo.` });
+          return;
+        }
+        // Só quem anunciou `atualizaIas` puxa o pedido; para os outros ele ficaria em memória sem ninguém atender.
+        if (!deps.maquinaAtualizaIas?.(ctx.escopo, maquina.id)) {
+          ctx.json(409, { codigo: "maquina_sem_atualizacao", mensagem: `${maquina.nome} não atualiza a IA por aqui. Atualize no próprio aparelho.` });
           return;
         }
         deps.logins.pedirAtualizacao(ctx.escopo, maquina.id, ia);

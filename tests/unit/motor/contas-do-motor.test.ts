@@ -35,6 +35,7 @@ async function montar(o: { logoutFalha?: boolean } = {}) {
   const respostas: (PuxadaDeContas | "sem_rota")[] = [];
   let reanuncios = 0;
   let desconectou = false;
+  const atualizar: string[] = [];
   const motor = iniciarContasDoMotor({
     ponte: {
       puxar: async () => respostas.shift() ?? { logins: [], sair: [], desconectar: false },
@@ -44,6 +45,7 @@ async function montar(o: { logoutFalha?: boolean } = {}) {
     contas, clis, arquivo,
     reanunciar: async () => { reanuncios++; },
     desconectar: async () => { desconectou = true; },
+    atualizar: (ia) => { atualizar.push(ia); },
     agora: Date.now,
     agendar: (fn, ms) => { const t = setTimeout(fn, ms <= 3_000 ? 15 : ms); return { cancelar: () => clearTimeout(t) }; },
   });
@@ -52,7 +54,7 @@ async function montar(o: { logoutFalha?: boolean } = {}) {
     const ate = Date.now() + ms;
     while (!cond()) { if (Date.now() > ate) throw new Error("tempo"); await new Promise((r) => setTimeout(r, 20)); }
   };
-  return { contas, progresso, saidas, respostas, esperar, arquivo, get reanuncios() { return reanuncios; }, get desconectou() { return desconectou; } };
+  return { contas, progresso, saidas, respostas, esperar, arquivo, atualizar, get reanuncios() { return reanuncios; }, get desconectou() { return desconectou; } };
 }
 
 /** Um login completo pela tela (o código certo), até o `pronto`. */
@@ -111,6 +113,14 @@ describe("contas do motor (ADR-102)", { timeout: 20_000 }, () => {
     await m.esperar(() => m.saidas.length > 0);
     expect(m.saidas[0]).toEqual({ impressoes: [impressaoEsperada], desconectada: false });
     expect(m.contas.anuncio()).toEqual([]);
+  });
+
+  it("NOD-9 PR4: o Atualizar da tela chega na puxada e vai ao atualizador da máquina, uma vez", async () => {
+    const m = await montar();
+    m.respostas.push({ logins: [], sair: [], desconectar: false, atualizar: ["claude-cli"] });
+    await m.esperar(() => m.atualizar.length > 0);
+    await new Promise((r) => setTimeout(r, 100));
+    expect(m.atualizar).toEqual(["claude-cli"]);
   });
 
   it("desconectar com 'sair das contas': sai de todas, confirma ao servidor e para o motor", async () => {

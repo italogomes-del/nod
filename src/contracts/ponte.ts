@@ -53,14 +53,13 @@ export type AnuncioMaquina = {
   sobreviveReinicio?: boolean;
   /** ADR-102 (2026-10-13): as contas de IA logadas nesta máquina (impressão e, ADR-105, e-mail). Ausente = app antigo. */
   contas?: ContaAnunciada[];
+  /** NOD-9 (2026-10-23): atende o "Atualizar agora" pedido de outro aparelho. Ausente = o servidor recusa o pedido. */
+  atualizaIas?: boolean;
   /** NOD-94: o papel com que foi pareada. Decide o servidor (`maquina_tokens.papel`); ausente = `motor` (app antigo). */
   papel?: PapelMaquina;
 };
 
-/**
- * NOD-94 (emenda 11 da ADR-090): `motor` pega turno (o de sempre); `computador` só hospeda o computador do bot da pessoa e
- * nunca reivindica turno, nem entra nos seletores de máquina.
- */
+/** NOD-94 (ADR-090, emenda 11): `motor` pega turno; `computador` só hospeda o computador do bot, fora dos seletores. */
 export const PAPEIS_MAQUINA = ["motor", "computador"] as const;
 export type PapelMaquina = (typeof PAPEIS_MAQUINA)[number];
 

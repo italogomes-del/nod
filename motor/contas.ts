@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import type { CodigoCifrado, LoginPendente, ProgressoDoLogin, PuxadaDeContas } from "../src/contracts/contas-ia.ts";
+import type { CodigoCifrado, IaComConta, LoginPendente, ProgressoDoLogin, PuxadaDeContas } from "../src/contracts/contas-ia.ts";
 import type { IaDesktop } from "../src/contracts/desktop.ts";
 import type { LoginDaIa } from "../src/contracts/estado-ia.ts";
 import { emailDaConta, organizacaoDaConta, planoLegivel } from "../src/domain/estado-ia.ts";
@@ -104,6 +104,8 @@ export type DepsContasDoMotor = {
   reanunciar(): Promise<void>;
   /** A pessoa desconectou a máquina pedindo para sair das contas: depois de sair, o motor apaga a conexão e para. */
   desconectar(): Promise<void>;
+  /** NOD-9 PR4: a tela pediu para atualizar a IA desta máquina (o botão "Atualizar"); quem atualiza aplica o limite. */
+  atualizar?(ia: IaComConta): void;
   /** Uma conta saiu desta máquina: o driver guardado dela é descartado. */
   aoSairDaConta?(conta: ContaLocal): Promise<void>;
   agora(): number;
@@ -280,6 +282,7 @@ export function iniciarContasDoMotor(d: DepsContasDoMotor): { parar(): void } {
       await d.desconectar();
       return "parar";
     }
+    for (const ia of r.atualizar ?? []) d.atualizar?.(ia);
     if (r.sair.length > 0) {
       const feitas = await sairDe(r.sair);
       if (await d.ponte.saiu(feitas, false)) await d.reanunciar().catch(() => undefined);

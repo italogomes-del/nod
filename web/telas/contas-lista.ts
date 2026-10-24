@@ -145,12 +145,21 @@ const ERROS_LOGIN: Partial<Record<CausaFalhaLogin | Exclude<ResultadoColarCodigo
   login_por_codigo_bloqueado: "A conta não permite entrar por código. Entre pelo terminal da máquina.",
   sem_link: "A máquina não conseguiu abrir o login. Tente de novo.",
   link_nao_oficial: "O login abriu um endereço que não é o oficial e foi cancelado por segurança.",
-  cli_antigo: "A IA dessa máquina está desatualizada. Rode a instalação do motor de novo.",
   config_invalida: "A configuração da IA nessa máquina está com problema. Rode a instalação do motor de novo.",
   sem_login_aberto: "O login dessa máquina já tinha terminado. Tente de novo.",
   ja_enviado: "O código já foi enviado. Espere a máquina conferir.",
 };
 const erroDoLogin = (e: string | null): string => (e ? (ERROS_LOGIN as Record<string, string | undefined>)[e] : undefined) ?? "O login não terminou. Tente de novo.";
+/**
+ * `cli_antigo` (devolução do #501, 2026-10-23): o comando é o da IA do login (`codex` para o Codex) e o "Clique em
+ * Atualizar" só aparece quando a máquina anunciou que atende o pedido remoto (`atualizaIas`).
+ */
+export function erroDeCliAntigo(ia: "claude-cli" | "codex-cli", comBotao: boolean): string {
+  const cmd = `nod-motor atualizar-ia ${ia === "codex-cli" ? "codex" : "claude"}`;
+  return comBotao
+    ? `A IA dessa máquina está desatualizada. Clique em Atualizar, ou rode ${cmd} no terminal dela.`
+    : `A IA dessa máquina está desatualizada. Rode ${cmd} no terminal dela.`;
+}
 
 /** O bloco de um login aberto (G1-P3): os passos da VM, ou o cartão do Mac com os passos do app. */
 function blocoDoLogin(l: LoginNaTela, x: ContextoContas, conta: ContaIa | null): string {
@@ -175,8 +184,14 @@ function blocoDoLogin(l: LoginNaTela, x: ContextoContas, conta: ContaIa | null):
     return `<div class="cl-login ok" data-login="${id}">${cab(`<span class="cl-ok">✓ Entrou</span>`)}${aviso}</div>`;
   }
   if (g.fase === "falhou" || g.fase === "cancelado") {
-    const tentar = `<button type="button" class="bt sm" data-act="cl-login-de-novo" data-login="${id}">Tentar de novo</button><button type="button" class="ob-link" data-act="cl-login-fechar" data-login="${id}">Fechar</button>`;
-    return `<div class="cl-login erro" data-login="${id}" role="alert">${cab("")}<p class="cl-erro">${esc(g.fase === "cancelado" ? "Login cancelado." : erroDoLogin(g.erro))}</p><div class="cl-login-acoes">${tentar}</div></div>`;
+    // NOD-9 PR4: com a IA abaixo do piso, o "Atualizar" pede à máquina que atualize (POST .../ias/:ia/atualizar).
+    const antiga = g.fase === "falhou" && g.erro === "cli_antigo";
+    // O botão só com a máquina conectada e que atende o pedido remoto: senão o pedido ficaria guardado para ninguém.
+    const podeAtualizar = antiga && m?.conectada === true && m.atualizaIas === true;
+    const atualizar = podeAtualizar ? `<button type="button" class="bt pri sm" data-act="cl-atualizar-ia" data-login="${id}"${l.enviando ? " disabled" : ""}>Atualizar</button>` : "";
+    const tentar = `${atualizar}<button type="button" class="bt sm" data-act="cl-login-de-novo" data-login="${id}">Tentar de novo</button><button type="button" class="ob-link" data-act="cl-login-fechar" data-login="${id}">Fechar</button>`;
+    const nota = antiga && l.erroEnvio ? `<p class="mudo">${esc(l.erroEnvio)}</p>` : "";
+    return `<div class="cl-login erro" data-login="${id}" role="alert">${cab("")}<p class="cl-erro">${esc(g.fase === "cancelado" ? "Login cancelado." : antiga ? erroDeCliAntigo(g.ia, podeAtualizar) : erroDoLogin(g.erro))}</p>${nota}<div class="cl-login-acoes">${tentar}</div></div>`;
   }
   if (g.fase === "pedido" || g.fase === "abrindo" || !g.url) {
     return `<div class="cl-login" data-login="${id}" role="status">${cab(cancelar)}<p class="cl-passo-txt"><span class="ob-gira" aria-hidden="true"></span>Abrindo o login na ${esc(nome)}…${m && !m.conectada ? " A máquina está sem contato; o login começa quando ela voltar." : ""}</p></div>`;

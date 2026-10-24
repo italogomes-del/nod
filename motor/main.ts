@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFile, rm, utimes, writeFile } from "node:fs/promises";
+import { readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { homedir, hostname, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -29,6 +29,9 @@ import { prazoSondaDoEnv } from "../src/adapters/executor/sonda.ts";
 import type { ConfigDriver, Driver, Registry, RegistroDriver } from "../src/adapters/executor/spi.ts";
 import { criarDetectorGh, executarGithubNaMaquina } from "../src/adapters/conectores-locais/github/maquina.ts";
 import type { IaDesktop } from "../src/contracts/desktop.ts";
+import { compararVersoes, extrairVersao, PISO_CLI } from "../src/adapters/executor/flag-floors.ts";
+import type { AtualizadorDeIas } from "../desktop/atualizador-ias.ts";
+import { PACOTE_DA_IA } from "../desktop/instalar-ia.ts";
 import { versaoAceita } from "../src/domain/versao-app.ts";
 import { log } from "../src/obs/log.ts";
 import { ambienteDoLogin, comandoDeEstadoDoLogin, lerIaDesktop, textoDaImpressao } from "../desktop/ia-mac.ts";
@@ -39,6 +42,8 @@ import { ID_CONTA_PADRAO } from "../src/domain/contas-da-ia.ts";
 import { estadoDaMaquina } from "../src/domain/harness.ts";
 import { iniciarContasDoMotor, lerIdentidadeNoCli, logoutNoCli, type ClisDoMotor } from "./contas.ts";
 import { arquivoDoPedido, atualizacaoLigada, iniciarAtualizacao, MARCA_DA_ATUALIZACAO, type Atualizador } from "./atualizacao.ts";
+import { arquivoDasAtualizacoes, arquivoDoEstadoDeIa, arquivoDoPedidoDeIa, ESPERA_DA_RESPOSTA_MS, ESPERA_DO_SERVICO_MS, gravarJson, IA_DO_TERMINAL, lerEstadoDoPedido, passoNpmLocal, vigiarPedidosDoTerminal } from "./atualizar-ias.ts";
+import { criarIasDoMotor, esperarNoTerminal, quemNaoPodeAtualizar } from "./ias-do-motor.ts";
 import { AJUDA, arquivoDaConexao, carregarConexao, comandoDeEntrar, guardarConexao, lerComando, pastaDoExecutor, pastaDoMotor, type ConexaoMotor } from "./conexao.ts";
 
 /**
@@ -81,6 +86,20 @@ const ESPERA_RECUSA_MS = 60_000;
 /** O 409 do puxar (o servidor reiniciou e esqueceu a máquina) reanuncia, no máximo a cada 10 s (como no Mac). */
 const ESPERA_REANUNCIO_MS = 10_000;
 
+/** `--version` de um binário (o atualizador lê antes e depois). */
+async function versaoDoBinario(bin: string, env: Record<string, string>): Promise<string | null> {
+  const r = await executarColetando({ bin, args: ["--version"], env: ambienteDoLogin(env), cwd: tmpdir(), timeoutMs: 15_000 }).catch(() => null);
+  return r && r.exitCode === 0 ? extrairVersao(r.stdout) : null;
+}
+
+/** O dia local (AAAA-MM-DD): o limite de uma tentativa automática por dia. */
+function diaLocal(t: number): string {
+  const d = new Date(t);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+const agendarTimer = (fn: () => void, ms: number) => { const t = setTimeout(fn, ms); return { cancelar: () => clearTimeout(t) }; };
+
 async function impressaoDoLogin(ia: IaDesktop, cfg: ConfigDriver): Promise<string | null> {
   const home = cfg.env.HOME ?? "";
   const { nome, args } = comandoDeEstadoDoLogin(ia);
@@ -120,11 +139,14 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
   let encerrado = false;
   /** ADR-100: o pedido de atualização ao root, quando o motor ficar diferente do servidor (só com a instalação nova). */
   let atualizador: Atualizador | null = null;
+  /** NOD-9 PR4: a atualização das IAs desta máquina (npm do motor no ~/.local); criada depois dos drivers. */
+  let atualizadorIas: AtualizadorDeIas | null = null;
 
   const lig = { urlNod: c.url, proxyPath: caminhoAoLado("proxy.mjs", "proxy.ts"), hookPath: caminhoAoLado("hook-nativas.mjs", "hook-nativas.ts"), nodePath: process.execPath, electronComoNode: false, sondaSemTurno: true, prazoSondaMs: prazoSondaDoEnv(process.env), filaDoForno: process.env.NOD_FILA_DO_FORNO !== "0" };
   // A pasta do executor (sessões e turnos do CLI) fica fora da pasta da chave (pastaDoExecutor): um turno não está a um `../` dela.
   const envExecutor = { ...process.env, NOD_HOME: executor };
-  const drivers: Driver[] = [criarClaudeCliDriver(lig), criarCodexCliDriver(lig)];
+  // NOD-9 PR4: o mesmo portão do Mac (desktop/main.ts): o turno do Claude espera a atualização e pede a versão do modelo.
+  const drivers: Driver[] = [criarClaudeCliDriver({ ...lig, aguardarAtualizacao: () => atualizadorIas?.aguardar("claude-cli") ?? Promise.resolve(true), aoPrecisarDeVersao: (m) => atualizadorIas?.pedirVersao("claude-cli", m) ?? Promise.resolve(false) }), criarCodexCliDriver(lig)];
   const cfg = await configDosDrivers(envExecutor);
   const criado = await criarRegistryDetalhado(envExecutor, drivers, { cfg });
   // ADR-102 (2026-10-13): as contas de IA desta máquina, uma pasta por conta (CLAUDE_CONFIG_DIR/CODEX_HOME); o servidor
@@ -137,6 +159,34 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
     versao,
   };
   const arquivoContas = join(executor, "contas-locais.json");
+  // NOD-9 PR4 (plano de 22/10, passo 12): o orquestrador do Mac com o passo `npm_local`. O binário de NOD_*_BIN é
+  // `configurado` (o nod não mexe); o resto é a instalação do motor em ~/.local, atualizada por cima com o npm do motor.
+  let pedidosDoTerminal: ReturnType<typeof vigiarPedidosDoTerminal> | null = null;
+  const lerVersao = (bin: string) => versaoDoBinario(bin, cfg.env);
+  const ias = criarIasDoMotor({
+    home: casaDasContas,
+    bin: (ia) => clis.bin(ia),
+    configurado: (ia) => (ia === "claude-cli" ? !!cfg.bin : !!cfg.bins?.["codex-cli"]),
+    lerVersao,
+    iasDosTurnos: () => [...planosAqui.values()].map((p) => lerIaDesktop(driverDoPlano(p))).filter((ia): ia is IaDesktop => ia !== null),
+    motorOcupado: () => atualizador?.ocupado() ?? false,
+    passos: (ia) => [passoNpmLocal({ ia, home: casaDasContas, pastaDoMotor: pasta, bin: () => clis.bin(ia), lerVersao, env: cfg.env, registrar: (evento, campos) => log("info", evento, campos) })],
+    depois: () => { void vigia?.sondarAgora().catch(() => undefined); },
+    aoMudar: (ia) => {
+      pedidosDoTerminal?.aoMudar(ia);
+      void vigia?.reanunciar().catch(() => undefined);
+    },
+    ler: async () => JSON.parse(await readFile(arquivoDasAtualizacoes(pasta), "utf8")) as unknown,
+    gravar: (disco) => gravarJson(arquivoDasAtualizacoes(pasta), disco),
+    agora: Date.now,
+    hoje: diaLocal,
+    agendar: agendarTimer,
+    registrar: (evento, campos) => log("info", evento, campos),
+    log: (nivel, evento, campos) => log(nivel, evento, campos),
+  });
+  const atualizadorDasIas = ias.atualizador;
+  atualizadorIas = atualizadorDasIas;
+  const { iasAtualizando, pedirAtualizacao, comAtualizacao } = ias;
   const contasLocais = criarContasLocais({ base: executor, arquivo: arquivoContas, pessoaId: dados.escopo.pessoaId, padrao: (ia) => diretorioPadrao(ia, cfg.env, casaDasContas), lerIdentidade: (ia, env) => lerIdentidadeNoCli(clis, ia, env), logout: (ia, env) => logoutNoCli(clis, ia, env), agora: Date.now });
   await contasLocais.carregar();
   await contasLocais.ler({ forcar: true }).catch(() => false);
@@ -180,7 +230,7 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
   // ADR-099 (I5): a frente que terminou sem trabalho sai na hora (a resposta do entregar traz a pasta).
   const ponteHttp = criarPonteHttp({ url: c.url, chave: c.chave, versao, aoFalhar, aoLimparAgora: (pastas) => void limpeza?.limparAgora(pastas) });
   const gh = await criarDetectorGh({ ambiente: process.env }).logado();
-  const anuncio = { machineId: dados.machineId, nome: hostname(), versaoContrato: 1, github: { gh: gh && papel === "motor" }, ligacao: papel === "motor", plataforma: "linux", papel } as const;
+  const anuncio = { machineId: dados.machineId, nome: hostname(), versaoContrato: 1, github: { gh: gh && papel === "motor" }, ligacao: papel === "motor", plataforma: "linux", papel, atualizaIas: true } as const;
 
   if (gh && papel === "motor") {
     const relatos = new Map<string, "executado" | "falhou_na_execucao">();
@@ -224,7 +274,7 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
       aoDelta: (p, t) => ponteHttp.delta(p.turnoId, t),
       aoEvento: (p, ev) => { if (ev.tipo === "tool_use") ponteHttp.ferramenta(p.turnoId, ev.nome); tarefasVivas.evento(p.turnoId, ev); subagentesVivos.evento(p.turnoId, ev); },
       aoIniciarTurno: (p) => { planosAqui.set(p.turnoId, p); },
-      aoTerminarTurno: (p) => { tarefasVivas.esquecer(p.turnoId); subagentesVivos.parar(p.turnoId); subagentesVivos.esquecer(p.turnoId); planosAqui.delete(p.turnoId); },
+      aoTerminarTurno: (p) => { tarefasVivas.esquecer(p.turnoId); subagentesVivos.parar(p.turnoId); subagentesVivos.esquecer(p.turnoId); planosAqui.delete(p.turnoId); void atualizadorIas?.verificar().catch(() => undefined); },
       aoVigia: (p, aviso) => ponteHttp.vigia(p.turnoId, aviso),
       aoResultado: (p, r) => {
         const ia = lerIaDesktop(driverDoPlano(p));
@@ -238,7 +288,8 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
     if (import.meta.url.endsWith(".mjs")) {
       void atualizacaoLigada({ url: c.url }).then((ligada) => {
         if (!ligada || encerrado || atualizador) return;
-        atualizador = iniciarAtualizacao({ url: c.url, dir, pastaDoMotor: pasta, turnosRodando: () => laco?.turnosAtuais().length ?? 0, drenar: (sim) => laco?.drenar(sim) });
+        // NOD-9 PR4: a atualização de uma IA conta como um turno rodando (o motor não reinicia no meio do npm).
+        atualizador = iniciarAtualizacao({ url: c.url, dir, pastaDoMotor: pasta, turnosRodando: () => (laco?.turnosAtuais().length ?? 0) + (iasAtualizando() ? 1 : 0), drenar: (sim) => laco?.drenar(sim) });
       });
     }
   };
@@ -257,7 +308,7 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
       // NOD-199: como no app do Mac, o reanúncio vai pela rota só de inventário — o `conectar` recusaria (409) ou, depois
       // de 90 s, limparia os planos do turno que roda. O primeiro anúncio e o que segue um 409 caem no `conectar` no cliente.
       const contas = contasLocais.anuncio();
-      const comContas = inventariosComContas(inventarios, contas, contasLocais.impressoesDaPadrao());
+      const comContas = inventariosComContas(comAtualizacao(inventarios), contas, contasLocais.impressoesDaPadrao());
       await ponteHttp.ponte.anunciarInventario({ ...anuncio, inventario: estadoDaMaquina(principal, comContas), harnesses: comContas, semLacoDeVoz, capacidades, contas });
       subirSeTemConta();
       log("info", "motor_anunciou", { ias: Object.entries(inventarios).map(([h, i]) => `${h}:${i?.estado ?? "?"}`).join(",") });
@@ -282,6 +333,11 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
     await parar();
     throw e;
   }
+  await atualizadorDasIas.carregar().catch(() => undefined);
+  atualizadorDasIas.iniciar();
+  void atualizadorDasIas.verificar().catch(() => undefined);
+  // O `nod-motor atualizar-ia` grava o pedido; o serviço o pega aqui e devolve a fase num arquivo.
+  pedidosDoTerminal = vigiarPedidosDoTerminal({ pastaDoMotor: pasta, pedir: (ia) => pedirAtualizacao(ia, "terminal"), estado: (ia) => atualizadorDasIas.estado(ia), agendar: agendarTimer, registrar: (evento, campos) => log("info", evento, campos) });
   log("info", "motor_conectado", { servidor: c.url, machine_id: dados.machineId, nome: anuncio.nome, contas: contasLocais.anuncio().length });
   // ADR-102: o que a tela pede a esta máquina (logins pela tela, saídas, desconexão), a cada 3 s.
   contasDoMotor = iniciarContasDoMotor({
@@ -299,6 +355,7 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
       void parar();
     },
     aoSairDaConta: descartarDriverDaConta,
+    atualizar: (ia) => { void pedirAtualizacao(ia, "tela"); },
     agora: Date.now,
     agendar: (fn, ms) => { const t = setTimeout(fn, ms); return { cancelar: () => clearTimeout(t) }; },
   });
@@ -313,6 +370,8 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
     encerrado = true;
     instaladora?.parar();
     atualizador?.parar();
+    atualizadorDasIas.parar();
+    pedidosDoTerminal?.parar();
     contasDoMotor?.parar();
     for (const reg of porConta.values()) if (reg.estado === "pronto") await reg.instance.dispose().catch(() => undefined);
     porConta.clear();
@@ -467,6 +526,45 @@ async function entrar(ia: "claude" | "codex" | "github"): Promise<number> {
   });
 }
 
+/**
+ * `nod-motor atualizar-ia claude|codex` (NOD-9 PR4): grava o pedido para o serviço e mostra a fase até 5 min. Sem
+ * resposta do serviço em 15 s (parado, antigo), roda o npm daqui mesmo, com a mesma trava (nunca dois npm juntos).
+ */
+async function atualizarIa(nome: "claude" | "codex"): Promise<number> {
+  const pasta = pastaDoMotor(process.env);
+  const ia = IA_DO_TERMINAL[nome];
+  const nomeDaIa = PACOTE_DA_IA[ia].nome;
+  // Com sudo (ou outro usuário), o npm iria para o ~/.local de outra casa e a trava/estado nasceriam de root.
+  const donoDaPasta = await stat(pasta).then((x) => x.uid, () => null);
+  const proibido = quemNaoPodeAtualizar({ uid: process.getuid?.() ?? null, euid: process.geteuid?.() ?? null }, donoDaPasta);
+  if (proibido) { process.stderr.write(`${proibido}\n`); return 1; }
+  const em = Date.now();
+  await gravarJson(arquivoDoPedidoDeIa(pasta), { ia, em, pid: process.pid });
+  const r = await esperarNoTerminal({
+    nome: nomeDaIa, ia, pedidoEm: em,
+    lerEstado: async () => lerEstadoDoPedido(await readFile(arquivoDoEstadoDeIa(pasta), "utf8").catch(() => "")),
+    esperar, agora: Date.now,
+    escrever: (t) => process.stdout.write(t), erro: (t) => process.stderr.write(t),
+    esperaDaRespostaMs: ESPERA_DA_RESPOSTA_MS, esperaDoServicoMs: ESPERA_DO_SERVICO_MS,
+  });
+  if (r !== "direto") return r;
+  await rm(arquivoDoPedidoDeIa(pasta), { force: true });
+  process.stdout.write("O serviço do motor não respondeu: atualizando daqui mesmo.\n");
+  const cfg = await configDosDrivers({ ...process.env, NOD_HOME: pastaDoExecutor(process.env) });
+  const home = cfg.env.HOME ?? homedir();
+  if (ia === "claude-cli" ? cfg.bin : cfg.bins?.["codex-cli"]) { process.stderr.write(`${nomeDaIa} vem de NOD_${nome.toUpperCase()}_BIN: o nod não mexe nele.\n`); return 1; }
+  const bin = () => resolverBinario(ia === "claude-cli" ? cfg.bin : cfg.bins?.["codex-cli"], cfg.env.PATH ?? "", home, nome);
+  const lerVersao = (b: string) => versaoDoBinario(b, cfg.env);
+  const atual = await bin();
+  const antes = atual ? await lerVersao(atual) : null;
+  if (antes && compararVersoes(antes, PISO_CLI[ia]) >= 0) { process.stdout.write(`${nomeDaIa} já está em dia (${antes}).\n`); return 0; }
+  process.stdout.write(`${nomeDaIa}: atualizando${antes ? ` (de ${antes})` : ""}…\n`);
+  const fim = await passoNpmLocal({ ia, home, pastaDoMotor: pasta, bin, lerVersao, env: cfg.env, registrar: (evento, campos) => log("info", evento, campos) }).rodar(PISO_CLI[ia]);
+  if (fim.atende) { process.stdout.write(`✓ ${nomeDaIa} atualizado${fim.depois ? ` para ${fim.depois}` : ""}.\n`); return 0; }
+  process.stderr.write(`${nomeDaIa} não atualizou (${fim.resultado === "ok" ? "insuficiente" : fim.resultado}).\n`);
+  return 1;
+}
+
 async function estado(): Promise<number> {
   const pasta = pastaDoMotor(process.env);
   const c = await carregarConexao(pasta);
@@ -492,6 +590,7 @@ const saida =
   : comando.tipo === "parear" ? parear(comando.servidor, comando.nome, comando.convite)
   : comando.tipo === "entrar" ? entrar(comando.ia)
   : comando.tipo === "estado" ? estado()
+  : comando.tipo === "atualizar-ia" ? atualizarIa(comando.ia)
   : comando.tipo === "versao" ? versaoDoMotor().then((v) => { process.stdout.write(`${v}\n`); return 0; })
   : Promise.resolve((process.stdout.write(`${comando.erro ? `${comando.erro}\n\n` : ""}${AJUDA}`), comando.erro ? 1 : 0));
 saida.then((codigo) => process.exit(codigo), (e: unknown) => { process.stderr.write(`${e instanceof Error ? e.message : String(e)}\n`); process.exit(1); });

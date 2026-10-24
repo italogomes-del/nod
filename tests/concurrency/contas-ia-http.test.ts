@@ -113,6 +113,14 @@ describeIntegracao("contas de IA pela ponte e pela tela (ADR-102, HTTP real)", (
     expect((await srv.chamar("POST", `maquinas/${machineId}/ias/gemini/atualizar`)).status).toBe(400);
     expect((await srv.chamar("POST", `maquinas/${randomUUID()}/ias/claude-cli/atualizar`)).status).toBe(404);
     expect((await srv.chamar("POST", `maquinas/${machineId}/ias/claude-cli/atualizar`, undefined, outraPessoa())).status).toBe(404);
+    // Devolução do #501: sem anunciar `atualizaIas` (o app do Mac, um motor antigo), 409 — o pedido não fica para ninguém.
+    expect((await pedir("conectar", { nome: "vm-bots", plataforma: "linux", versaoContrato: 1, inventario })).status).toBe(200);
+    const semCapacidade = await srv.chamar("POST", `maquinas/${machineId}/ias/claude-cli/atualizar`);
+    expect(semCapacidade.status).toBe(409);
+    expect(await semCapacidade.json()).toMatchObject({ codigo: "maquina_sem_atualizacao" });
+    expect((await srv.json<{ maquinas: { id: string; atualizaIas?: boolean }[] }>("GET", "maquinas")).maquinas.find((m) => m.id === machineId)?.atualizaIas).toBeUndefined();
+    expect((await pedir("conectar", { nome: "vm-bots", plataforma: "linux", versaoContrato: 1, inventario, atualizaIas: true })).status).toBe(200);
+    expect((await srv.json<{ maquinas: { id: string; atualizaIas?: boolean }[] }>("GET", "maquinas")).maquinas.find((m) => m.id === machineId)?.atualizaIas).toBe(true);
     expect((await srv.chamar("POST", `maquinas/${machineId}/ias/claude-cli/atualizar`)).status).toBe(202);
     const puxada = (await (await pedir("contas")).json()) as PuxadaDeContas;
     expect(puxada.atualizar).toEqual(["claude-cli"]);

@@ -93,6 +93,12 @@ O que muda em relação ao compartilhado:
 ## Atualizar e desligar
 
 - Atualizar: rode o mesmo `curl … | sh`. Ele troca os arquivos e mantém a conexão e os logins.
+- Atualizar a IA (NOD-9, definido em 2026-10-23): o motor atualiza sozinho o Claude Code e o Codex que ficarem abaixo
+  da versão que o nod precisa, quando a IA não tem turno rodando. Para pedir na hora: `nod-motor atualizar-ia claude`
+  (ou `codex`), como o usuário `nod`: `sudo -u nod nod-motor atualizar-ia claude`. Ele espera os turnos daquela IA,
+  mostra o andamento e sai com 0 quando terminou. Também dá para pedir pela tela (o **Atualizar** no login que falhou
+  por IA desatualizada). Sem sudo: a IA é reinstalada por cima em `~/.local` com o npm do motor. No máximo 3 pedidos
+  por hora por IA. Se a IA vem de `NOD_CLAUDE_BIN`/`NOD_CODEX_BIN`, o nod não mexe nela.
 - Desconectar: em **Computadores**, cancele a chave da VM. Os bots presos a ela voltam a rodar em qualquer máquina.
 - Remover da VM: `sudo systemctl disable --now nod-motor` e apague `/opt/nod-motor` e o usuário `nod`.
 

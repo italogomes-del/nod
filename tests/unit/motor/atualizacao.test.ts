@@ -113,8 +113,11 @@ describe("o motor se atualiza sozinho (ADR-100): no motor", () => {
     const { dir, pasta, buscar } = await montar("// motor novo\n");
     const drenos: boolean[] = [];
     const a = iniciarAtualizacao({ url: "https://nod", dir, pastaDoMotor: pasta, turnosRodando: () => 0, drenar: (s) => drenos.push(s), buscar, intervaloMs: 3_600_000, esperaDoPuxarMs: 0, relogio: () => 42 });
+    expect(a.ocupado()).toBe(false);
     await a.agora();
     expect(drenos).toEqual([true]);
+    // NOD-9 PR4: com o pedido ao root gravado, a atualização das IAs não começa.
+    expect(a.ocupado()).toBe(true);
     expect(JSON.parse(await readFile(arquivoDoPedido(pasta), "utf8"))).toEqual({ versao: "0.5.0", em: 42 });
     a.parar();
     expect(drenos).toEqual([true, false]);

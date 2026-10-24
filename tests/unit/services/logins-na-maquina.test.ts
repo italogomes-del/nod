@@ -109,4 +109,16 @@ describe("logins na máquina", () => {
     passar(PRAZO_PEDIDO_ATUALIZAR_MS);
     expect(logins.atualizacoesPedidas(MARLON, VM)).toEqual([]);
   });
+
+  it("devolução do #501: os pedidos vencidos de máquinas que nunca mais puxaram saem no próximo pedido", () => {
+    const { logins, passar } = montar();
+    for (let i = 0; i < 50; i++) logins.pedirAtualizacao(MARLON, `00000000-0000-4000-8000-${String(i).padStart(12, "0")}`, "claude-cli");
+    logins.pedirAtualizacao(ANA, VM, "codex-cli");
+    expect(logins.pedidosDeAtualizacaoGuardados()).toBe(51);
+    passar(PRAZO_PEDIDO_ATUALIZAR_MS);
+    logins.pedirAtualizacao(MARLON, VM, "claude-cli");
+    expect(logins.pedidosDeAtualizacaoGuardados()).toBe(1);
+    expect(logins.atualizacoesPedidas(MARLON, VM)).toEqual(["claude-cli"]);
+    expect(logins.pedidosDeAtualizacaoGuardados()).toBe(0);
+  });
 });

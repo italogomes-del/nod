@@ -55,7 +55,7 @@ function lerAnuncio(b: Record<string, unknown>, agora: number): LeituraAnuncio {
 }
 
 /** ADR-090: uma máquina conectada da pessoa, como a tela "Máquinas" a mostra (sem credencial nem inventário bruto). */
-export type MaquinaConectada = { machineId: string; nome: string; plataforma: PlataformaMaquina; ias: Partial<Record<IdHarness, Inventario["estado"]>>; gh: boolean };
+export type MaquinaConectada = { machineId: string; nome: string; plataforma: PlataformaMaquina; ias: Partial<Record<IdHarness, Inventario["estado"]>>; gh: boolean; /** NOD-9: atende o "Atualizar agora" remoto. */ atualizaIas: boolean };
 
 /** Um item aprovado que roda no Mac da dona (ADR-048): o que a máquina recebe ao puxar `itens-locais`. */
 export type ItemLocal = { itemId: string; capacidade: string; argumentos: Record<string, unknown> };
@@ -253,7 +253,7 @@ export function criarPonteHttpServidor(d: {
       if (anunciado && anunciado !== c.papel) log("aviso", "papel_anunciado_difere", { machine_id: id, anunciado, gravado: c.papel });
       // O só-computador não pega turno: sem gh nem laço de voz, nada da fila nem dos itens locais chega a ele.
       if (c.papel === "computador") c.gh = false;
-      c.anuncio = { machineId: id, nome: b.nome, plataforma: c.plataforma, inventario: c.inv, versaoContrato: 1, harnesses: a.harnessesAusente ? { "claude-cli": c.inv } : a.motores, ligacao: b.ligacao === true && c.papel === "motor", papel: c.papel, ...(a.semLacoDeVoz.length > 0 ? { semLacoDeVoz: a.semLacoDeVoz } : {}), ...(a.capacidades ? { capacidades: a.capacidades } : {}), ...(a.sobreviveReinicio ? { sobreviveReinicio: true } : {}) };
+      c.anuncio = { machineId: id, nome: b.nome, plataforma: c.plataforma, inventario: c.inv, versaoContrato: 1, harnesses: a.harnessesAusente ? { "claude-cli": c.inv } : a.motores, ligacao: b.ligacao === true && c.papel === "motor", papel: c.papel, ...(a.semLacoDeVoz.length > 0 ? { semLacoDeVoz: a.semLacoDeVoz } : {}), ...(a.capacidades ? { capacidades: a.capacidades } : {}), ...(a.sobreviveReinicio ? { sobreviveReinicio: true } : {}), ...(b.atualizaIas === true ? { atualizaIas: true } : {}) };
       await c.ponte.conectar(c.anuncio);
       await persistir(c);
       await d.registrarPlataforma?.(ctx.escopo, id, plataforma);
@@ -284,8 +284,8 @@ export function criarPonteHttpServidor(d: {
       c.inv = a.inv; c.ultimo = d.agora(); c.gh = a.gh && c.papel === "motor"; c.rebaixada = false;
       // A conexão só nasce no `conectar`, que grava o anúncio: daqui saem o nome e o laço de voz, que não mudam aqui.
       // ADR-090: a plataforma também é do `conectar` — o motor na VM Linux não vira "darwin" ao reanunciar.
-      const { nome, ligacao } = c.anuncio ?? { nome: c.nome, ligacao: false };
-      c.anuncio = { machineId: ctx.params.chaveId!, nome, plataforma: c.plataforma, inventario: c.inv, versaoContrato: 1, harnesses: a.harnessesAusente ? { "claude-cli": c.inv } : a.motores, ligacao, papel: c.papel, ...(a.semLacoDeVoz.length > 0 ? { semLacoDeVoz: a.semLacoDeVoz } : {}), ...(a.capacidades ? { capacidades: a.capacidades } : {}), ...(a.sobreviveReinicio ? { sobreviveReinicio: true } : {}) };
+      const { nome, ligacao, atualizaIas } = c.anuncio ?? { nome: c.nome, ligacao: false, atualizaIas: false };
+      c.anuncio = { machineId: ctx.params.chaveId!, nome, plataforma: c.plataforma, inventario: c.inv, versaoContrato: 1, harnesses: a.harnessesAusente ? { "claude-cli": c.inv } : a.motores, ligacao, papel: c.papel, ...(a.semLacoDeVoz.length > 0 ? { semLacoDeVoz: a.semLacoDeVoz } : {}), ...(a.capacidades ? { capacidades: a.capacidades } : {}), ...(a.sobreviveReinicio ? { sobreviveReinicio: true } : {}), ...(atualizaIas ? { atualizaIas: true } : {}) };
       // O `conectar` da ponte interna só registra o anúncio da máquina (idempotente): seguro com turno rodando.
       await c.ponte.conectar(c.anuncio);
       await persistir(c);
@@ -624,7 +624,7 @@ export function criarPonteHttpServidor(d: {
     return [...conexoes.entries()].flatMap(([id, c]) => {
       if (c.escopo.pessoaId !== escopo.pessoaId || c.escopo.tenantId !== escopo.tenantId || d.agora() - c.ultimo >= 60_000) return [];
       const ias = Object.fromEntries(Object.entries(harnesses(c.escopo, id)).map(([h, inv]) => [h, inv?.estado])) as MaquinaConectada["ias"];
-      return [{ machineId: id, nome: c.nome, plataforma: c.plataforma, ias, gh: c.gh }];
+      return [{ machineId: id, nome: c.nome, plataforma: c.plataforma, ias, gh: c.gh, atualizaIas: c.anuncio?.atualizaIas === true }];
     });
   }
   /** ADR-102: a pessoa renomeou a máquina; a conexão viva passa a usar o nome novo. */

@@ -16,7 +16,7 @@ const AGORA = Date.UTC(2026, 9, 13, 15, 0);
 const VM = "11111111-1111-4111-8111-111111111111";
 const MAC = "22222222-2222-4222-8222-222222222222";
 const maquina = (id: string, nome: string, o: Partial<MaquinaDto> = {}): MaquinaDto => ({ id, nome, prefixo: "abcd1234", criadaEm: 1, ultimoUsoEm: null, conectada: true, plataforma: "linux", ias: {}, gh: false, ...o });
-const MAQUINAS = [maquina(VM, "vm-bots"), maquina(MAC, "MacBook", { plataforma: "darwin" })];
+const MAQUINAS = [maquina(VM, "vm-bots", { atualizaIas: true }), maquina(MAC, "MacBook", { plataforma: "darwin" })];
 const conta = (id: string, ia: ContaIa["ia"], apelido: string, maquinas: string[], o: Partial<ContaIa> = {}): ContaIa => ({
   id, ia, impressao: id.replace(/-/g, "").padEnd(64, "a").slice(0, 64), apelido, email: null, organizacao: null, plano: "Max", corporativa: false, posicao: 1, entraNaTrocaAutomatica: false, noLimiteAte: null,
   maquinas: maquinas.map((m) => ({ maquinaId: m, nome: m === VM ? "vm-bots" : "MacBook", estado: "pronta" as const })), ...o,
@@ -148,6 +148,29 @@ describe("lista única de contas (ADR-102)", () => {
     expect(html).not.toContain("nod-motor entrar claude");
     const aberto = renderListaDeContas(ctx({ ui: { terminal: login().id, logins: [{ onde: "vm", login: login(), codigo: "", enviando: false, erroEnvio: null }] } }));
     expect(aberto).toContain("nod-motor entrar claude");
+  });
+
+  it("NOD-9 PR4: login que falhou com a IA desatualizada mostra o Atualizar; outra falha, não", () => {
+    const html = renderListaDeContas(ctx({ ui: { logins: [{ onde: "vm", login: login({ fase: "falhou", erro: "cli_antigo" }), codigo: "", enviando: false, erroEnvio: null }] } }));
+    expect(html).toContain('data-act="cl-atualizar-ia"');
+    expect(html).toContain("nod-motor atualizar-ia claude");
+    const enviado = renderListaDeContas(ctx({ ui: { logins: [{ onde: "vm", login: login({ fase: "falhou", erro: "cli_antigo" }), codigo: "", enviando: false, erroEnvio: "Pedido enviado." }] } }));
+    expect(enviado).toContain("Pedido enviado.");
+    const outra = renderListaDeContas(ctx({ ui: { logins: [{ onde: "vm", login: login({ fase: "falhou", erro: "codigo_invalido" }), codigo: "", enviando: false, erroEnvio: null }] } }));
+    expect(outra).not.toContain("cl-atualizar-ia");
+  });
+
+  it("devolução do #501: cli_antigo do Codex cita `atualizar-ia codex`; sem a capacidade (ou sem contato), sem o botão", () => {
+    const falhou = (ia: "claude-cli" | "codex-cli") => ({ ui: { logins: [{ onde: "vm" as const, login: login({ ia, fase: "falhou", erro: "cli_antigo" }), codigo: "", enviando: false, erroEnvio: null }] } });
+    const codex = renderListaDeContas(ctx(falhou("codex-cli")));
+    expect(codex).toContain("nod-motor atualizar-ia codex");
+    expect(codex).not.toContain("nod-motor atualizar-ia claude");
+    const semCapacidade = renderListaDeContas(ctx({ ...falhou("claude-cli"), maquinas: MAQUINAS.map((m) => ({ ...m, atualizaIas: false })) }));
+    expect(semCapacidade).not.toContain('data-act="cl-atualizar-ia"');
+    expect(semCapacidade).not.toContain("Clique em Atualizar");
+    expect(semCapacidade).toContain("Rode nod-motor atualizar-ia claude no terminal dela.");
+    const semContato = renderListaDeContas(ctx({ ...falhou("claude-cli"), maquinas: MAQUINAS.map((m) => ({ ...m, conectada: false })) }));
+    expect(semContato).not.toContain('data-act="cl-atualizar-ia"');
   });
 
   it("Codex na VM: o código do aparelho para digitar na página da OpenAI", () => {

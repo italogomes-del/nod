@@ -61,6 +61,8 @@ export interface LoginsNaMaquina {
   pedirAtualizacao(escopo: Escopo, maquinaId: string, ia: IaComConta): void;
   /** As IAs com pedido de atualizar nesta máquina; cada pedido sai UMA vez (a puxada o consome). */
   atualizacoesPedidas(escopo: Escopo, maquinaId: string): IaComConta[];
+  /** Quantos pedidos de atualização estão guardados agora (os testes conferem que os vencidos saem). */
+  pedidosDeAtualizacaoGuardados(): number;
 }
 
 export function cifradoValido(v: unknown): CodigoCifrado | null {
@@ -198,10 +200,20 @@ export function criarLoginsNaMaquina(agora: () => number = Date.now): LoginsNaMa
       return desconexoes.delete(chaveMaquina(escopo, maquinaId));
     },
     pedirAtualizacao(escopo, maquinaId, ia) {
+      // Devolução do #501 (2026-10-23): a máquina que nunca mais puxou deixava o pedido no mapa para sempre — cada
+      // pedido novo varre os vencidos (de qualquer máquina) antes de guardar o seu.
+      const t = agora();
+      for (const [k, porIa] of atualizacoes) {
+        for (const [x, ate] of porIa) if (ate <= t) porIa.delete(x);
+        if (porIa.size === 0) atualizacoes.delete(k);
+      }
       const chave = chaveMaquina(escopo, maquinaId);
       const pedidos = atualizacoes.get(chave) ?? new Map<IaComConta, number>();
       pedidos.set(ia, agora() + PRAZO_PEDIDO_ATUALIZAR_MS);
       atualizacoes.set(chave, pedidos);
+    },
+    pedidosDeAtualizacaoGuardados() {
+      return [...atualizacoes.values()].reduce((n, m) => n + m.size, 0);
     },
     atualizacoesPedidas(escopo, maquinaId) {
       const chave = chaveMaquina(escopo, maquinaId);

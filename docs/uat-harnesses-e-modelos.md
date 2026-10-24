@@ -130,6 +130,17 @@ aberto.
 | HM-26 | Repita o HM-25 e cancele a janela de senha; clique de novo e cancele outra vez; clique uma 3ª vez. | Cada cancelamento mostra "Tentar de novo" e nada abre sozinho; na 3ª vez no mesmo dia a janela não abre e o cartão oferece o comando do terminal. | P0 | Pendente |
 | HM-27 | Deixe o app em segundo plano (outra janela em foco) com o CLI de root antigo e espere a atualização automática. | A janela de senha nunca abre sem um clique; o cartão segue com "Atualizar". | P1 | Pendente |
 
+Na VM (motor): instale o Claude Code antigo como `nod` (`sudo -u nod /opt/nod-motor/node/bin/npm install -g --prefix
+/home/nod/.local @anthropic-ai/claude-code@<versão antiga>`).
+
+| ID | Passos | Resultado esperado | Prioridade | Resultado |
+|---|---|---|---|---|
+| HM-25 | Sem bot rodando na VM, reinicie o serviço. | Em até 1 min o `journalctl -u nod-motor` mostra a atualização; `sudo -u nod claude --version` fica no piso ou acima. | P0 | Pendente |
+| HM-26 | Com um bot rodando no Claude da VM, rode `sudo -u nod nod-motor atualizar-ia claude`. | Mostra "esperando os turnos dessa IA terminarem…", depois "atualizando…" e "✓ Claude Code atualizado para X."; o turno termina normal. | P0 | Pendente |
+| HM-27 | Pare o serviço e rode `sudo -u nod nod-motor atualizar-ia claude`. | Em 15 s diz que o serviço não respondeu e atualiza direto. | P1 | Pendente |
+| HM-28 | Peça 4 vezes em menos de uma hora. | O 4º diz que já foram 3 pedidos na última hora. | P2 | Pendente |
+| HM-29 | No navegador, entre numa conta da VM com o Claude antigo. | O login falha com "desatualizada" e o botão **Atualizar**; clicado, a VM atualiza e o "Tentar de novo" entra. | P1 | Pendente |
+
 ## Registro da execução
 
 Preencha uma linha por ambiente usado. Não registre emails, tokens, caminhos de credenciais ou

@@ -21,6 +21,8 @@ export type MaquinaDto = {
   plataforma: PlataformaMaquina | null;
   ias: Partial<Record<IdHarness, Inventario["estado"]>>;
   gh: boolean;
+  /** NOD-9 (2026-10-23): a máquina conectada atende o "Atualizar agora" da tela. Ausente = não atende (ou servidor antigo). */
+  atualizaIas?: boolean;
   /** NOD-94: `computador` = "· só computador" na tela; fica fora dos seletores de onde o bot trabalha. Ausente = `motor`. */
   papel?: PapelMaquina;
   /** ADR-121 (NOD-92): a máquina que dorme e acorda pelo Google. Ausente sem `NOD_MAQUINA_NUVEM=gcp` ou fora da nuvem. */

@@ -45,7 +45,11 @@ export async function atualizacaoLigada(o: { url?: string; marca?: string; servi
   return doRoot === o.url;
 }
 
-export type Atualizador = { parar(): void; agora(): Promise<void> };
+/**
+ * `ocupado`: o motor está drenando ou já gravou o pedido ao root (NOD-9 PR4, emenda da ADR-100): a atualização de uma IA
+ * não começa enquanto o motor vai reiniciar, e o motor conta a atualização de IA como um turno rodando.
+ */
+export type Atualizador = { parar(): void; agora(): Promise<void>; ocupado(): boolean };
 
 export function iniciarAtualizacao(o: {
   url: string;
@@ -105,5 +109,6 @@ export function iniciarAtualizacao(o: {
   return {
     parar() { clearInterval(t); if (estado.drenando) o.drenar(false); },
     agora: passo,
+    ocupado: () => estado.drenando || estado.pedidoEm !== null,
   };
 }

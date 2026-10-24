@@ -3993,6 +3993,7 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   "cl-login-fechar": (el) => contasDaPessoa.fecharLogin(el.dataset.login ?? ""),
   "cl-login-de-novo": (el) => contasDaPessoa.deNovo(el.dataset.login ?? ""),
   "cl-terminal": (el) => contasDaPessoa.terminal(el.dataset.login ?? ""),
+  "cl-atualizar-ia": (el) => void contasDaPessoa.atualizarIa(el.dataset.login ?? ""),
   // ADR-102: os passos da linha "conta no limite" do chat (o login abre em Provedores de IA, onde a linha mostra os passos).
   // ADR-108 (R4/R6): a escolha no aviso de troca de IA do bot. A linha relê pela conversa (o servidor grava o desfecho nela).
   "troca-esperar": (el) => decidirTroca(el, "esperar"),

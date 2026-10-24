@@ -104,3 +104,8 @@ Atualizar o app troca o disco base e mantém o disco de dados. O motor não atua
 A regra da brecha desta ADR vale para o CLI de IA no Mac: atualiza sem turno e sem ligação; sem brecha, espera, avisa
 em 23 h e segura os pedidos novos em 24 h (teto de 10 min segurando). Uma tentativa automática por alvo por dia.
 A VM do motor ganha o mesmo no PR 4 da NOD-9 (`nod-motor atualizar-ia`).
+
+PR 4 (2026-10-23): na VM a IA é reinstalada por cima em `~/.local` com o npm do motor (`npm_local`, sem sudo, uma
+trava de arquivo para o serviço e o terminal nunca rodarem juntos). As duas atualizações não se cruzam: com o motor
+drenando ou com o pedido ao root gravado, a IA não começa; com a IA atualizando, o motor conta um turno rodando e não
+reinicia.

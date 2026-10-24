@@ -186,7 +186,7 @@ export function rotasMaquinas(deps: { dentro: DentroDeTx; pareamento: Pareamento
         const maquinas: MaquinaDto[] = chaves.filter((c) => c.revogadaEm === null).map((c) => {
           const viva = vivas.get(c.id);
           // ADR-102 (R2 da revisão): o nome da chave, que a pessoa pode trocar; o hostname anunciado só o batiza no pareamento.
-          return { id: c.id, nome: c.nome, prefixo: c.prefixo, criadaEm: c.criadaEm, ultimoUsoEm: c.ultimoUsoEm, conectada: !!viva, plataforma: viva?.plataforma ?? null, ias: viva?.ias ?? {}, gh: viva?.gh ?? false, papel: c.papel ?? "motor", ...(nuvem.has(c.id) ? { nuvem: nuvem.get(c.id) } : {}) };
+          return { id: c.id, nome: c.nome, prefixo: c.prefixo, criadaEm: c.criadaEm, ultimoUsoEm: c.ultimoUsoEm, conectada: !!viva, plataforma: viva?.plataforma ?? null, ias: viva?.ias ?? {}, gh: viva?.gh ?? false, papel: c.papel ?? "motor", ...(viva?.atualizaIas ? { atualizaIas: true } : {}), ...(nuvem.has(c.id) ? { nuvem: nuvem.get(c.id) } : {}) };
         });
         // ADR-092: com o servidor no Mac (modo local), o bot sem máquina roda neste Mac ("Este Mac" na tela), e a VM chega à
         // API deste Mac por um túnel SSH — a tela mostra o endereço da API, que é o que o motor guarda.
