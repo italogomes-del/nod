@@ -60,8 +60,8 @@ O computador por bot (ADR-037) está desligado em produção (sem `NOD_COMPUTADO
    fatias, como a aprovação; em Livre nunca segura. Falta de memória é espera, nunca erro.
 6. **Onde roda.** `computadores.maquina_id` (contrato da NOD-94; nulo = "onde o nod roda") e `hospedeira_id` (onde o
    disco está agora). O despachante escolhe `maquina_id`, senão `hospedeira_id`, senão a única máquina Linux que anuncia
-   `computador: pronto`, senão a máquina padrão, senão a de contato mais recente; nunca a máquina do turno. Mac anuncia
-   `sem_suporte` (NOD-93). O motor anuncia `AnuncioComputador` (`pronto | faltam_pacotes | sem_suporte`, com `falta`).
+   `computador: pronto`, senão a máquina padrão, senão a de contato mais recente; nunca a máquina do turno. Mac com VM local
+   anuncia computador (ADR-127). O motor anuncia `AnuncioComputador` (`pronto | faltam_pacotes | sem_suporte`, com `falta`).
 7. **Atualizar, Redefinir e Sair de todos os sites** são da máquina inteira, uma de cada vez
    (`computadores.operacao*`, com progresso de 0 a 100 e a etapa). Atualizar troca binários e preserva workspace,
    perfis e logins; Redefinir apaga tudo menos `logins/`, recria `perfil-base` e esquece a chave do supervisor; Sair de

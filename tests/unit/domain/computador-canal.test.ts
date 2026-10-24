@@ -26,7 +26,16 @@ describe("escolherMaquina", () => {
   });
   it("sem nenhuma pronta, a que anuncia o computador (para dizer o motivo); sem nenhuma, null", () => {
     expect(escolherMaquina({ ...base, conectadas: [m("a", { computador: "faltam_pacotes" })] })).toBe("a");
-    expect(escolherMaquina({ ...base, conectadas: [m("mac", { plataforma: "darwin" })] })).toBeNull();
+    expect(escolherMaquina({ ...base, conectadas: [m("mac", { plataforma: "darwin", computador: null })] })).toBeNull();
+  });
+  it("ADR-127 §5: sem Linux anunciando, o Mac que anuncia a VM local; com Linux, o Mac não entra", () => {
+    const mac = m("mac", { plataforma: "darwin", ultimoContato: 50 });
+    expect(escolherMaquina({ ...base, conectadas: [mac, m("velho", { computador: null })] })).toBe("mac");
+    expect(escolherMaquina({ ...base, conectadas: [mac, m("a", { computador: "faltam_pacotes" })] })).toBe("a");
+    const macs = [m("m1", { plataforma: "darwin", ultimoContato: 10 }), m("m2", { plataforma: "darwin", ultimoContato: 20 })];
+    expect(escolherMaquina({ ...base, padraoId: "m1", conectadas: macs })).toBe("m1");
+    expect(escolherMaquina({ ...base, conectadas: macs })).toBe("m2");
+    expect(escolherMaquina({ ...base, conectadas: [m("m3", { plataforma: "darwin", computador: "faltam_pacotes" })] })).toBe("m3");
   });
 });
 

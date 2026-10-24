@@ -15,7 +15,7 @@ const outra = { tenantId: "t1", pessoaId: "p2" };
  * Um mundo falso: relógio que só anda no `dormir`, uma máquina "vm" da pessoa e um motor falso que, a cada passo,
  * puxa a fila e responde pelo `responder` (null = não responde).
  */
-function mundo(o: { conectada?: boolean; anuncio?: MaquinaDaPessoa["computador"]; loc?: Partial<ComputadorLocalizado>; relataPub?: boolean | "apos_sonda"; aoPasso?: (t: number, canal: ReturnType<typeof criarCanalComputador>, estado: { conectada: boolean }) => void; responder?: (c: ComandoComputador, t: number) => Parameters<ReturnType<typeof criarCanalComputador>["resultado"]>[2] | null } = {}) {
+function mundo(o: { mac?: MaquinaDaPessoa["vmLocal"]; conectada?: boolean; anuncio?: MaquinaDaPessoa["computador"]; loc?: Partial<ComputadorLocalizado>; relataPub?: boolean | "apos_sonda"; aoPasso?: (t: number, canal: ReturnType<typeof criarCanalComputador>, estado: { conectada: boolean }) => void; responder?: (c: ComandoComputador, t: number) => Parameters<ReturnType<typeof criarCanalComputador>["resultado"]>[2] | null } = {}) {
   let t = 1_000_000;
   const sup = gerarParX25519();
   const canal = criarCanalComputador({ agora: () => t });
@@ -23,7 +23,7 @@ function mundo(o: { conectada?: boolean; anuncio?: MaquinaDaPessoa["computador"]
   /** NOD-96 PR 7: as sondas sem assinatura (o supervisor só conhece o computador depois de um comando com o id). */
   const sondas: ComandoComputador[] = [];
   const estado = { conectada: o.conectada ?? true, hospedeira: null as string | null, supervisor: null as string | null };
-  const maquinas = (e: typeof escopo): MaquinaDaPessoa[] => e.pessoaId === "p1" && estado.conectada ? [{ machineId: "vm", nome: "vm-1", plataforma: "linux", computador: o.anuncio === undefined ? "pronto" : o.anuncio, ultimoContato: t }] : [];
+  const maquinas = (e: typeof escopo): MaquinaDaPessoa[] => e.pessoaId === "p1" && estado.conectada ? [{ machineId: "vm", nome: "vm-1", plataforma: o.mac ? "darwin" : "linux", computador: o.anuncio === undefined ? "pronto" : o.anuncio, ultimoContato: t, ...(o.mac ? { vmLocal: o.mac } : {}) }] : [];
   const passo = () => {
     o.aoPasso?.(t, canal, estado);
     if (!estado.conectada) return;
@@ -129,6 +129,24 @@ describe("driver motor: iniciar", () => {
     expect(m.agora() - antes).toBeLessThan(TETO_PRONTO_MS + 1_000);
     expect(m.canal.pendentes()).toEqual([]);
     expect(instrucaoDaFalha(e.motivo, null, e.maquina)).toContain("Não consegui ligar o computador: o computador ligou mas não ficou pronto a tempo");
+  });
+
+  it("NOD-93: o Mac responde esperando_tela (VM local preparando): o servidor pede de novo e liga quando ela fica pronta", async () => {
+    let inicio: number | null = null;
+    const m = mundo({ responder: (c, t) => {
+      inicio ??= t;
+      return t - inicio < 10_000 ? { id: c.id, desfecho: "esperando_tela", progresso: { pct: 50, etapa: "baixando" } } : { id: c.id, desfecho: "ok" };
+    } });
+    await m.driver.iniciar(ID);
+    expect(m.vistos.filter((c) => c.tipo === "iniciar").length).toBeGreaterThan(1);
+  });
+
+  it("NOD-93: esperando_tela até o TETO_PRONTO_MS: nao_ficou_pronto", async () => {
+    const m = mundo({ responder: (c) => ({ id: c.id, desfecho: "esperando_tela", progresso: { pct: 10, etapa: "baixando" } }) });
+    const antes = m.agora();
+    expect((await falha(m.driver.iniciar(ID))).motivo).toBe("nao_ficou_pronto");
+    expect(m.agora() - antes).toBeGreaterThanOrEqual(TETO_PRONTO_MS);
+    expect(m.canal.pendentes()).toEqual([]);
   });
 
   it("instalação limpa (NOD-96 PR 7): a sonda sem assinatura faz o supervisor relatar a chave; liga bem antes dos 60 s", async () => {
@@ -314,6 +332,12 @@ describe("driver motor: operações da pessoa (NOD-96 PR 5)", () => {
     const s = mundo({ conectada: false, loc: { agenteId: null, maquinaId: "vm" } });
     await expect(s.driver.apagarPerfil!(ID, "bot-9")).resolves.toBeUndefined();
     expect(s.vistos).toEqual([]);
+  });
+
+  it("maquinaDoComputador traz o preparo da VM local quando a máquina é um Mac (NOD-93)", async () => {
+    const preparo = { estado: "baixando" as const, bytes: 870, total: 1100, desde: 1 };
+    expect((await mundo({ mac: preparo, loc: { agenteId: null } }).driver.maquinaDoComputador!(ID))?.preparo).toEqual(preparo);
+    expect((await mundo({ loc: { agenteId: null } }).driver.maquinaDoComputador!(ID))).not.toHaveProperty("preparo");
   });
 
   it("maquinaDoComputador diz o nome e o contato; ligando enquanto o iniciar corre", async () => {

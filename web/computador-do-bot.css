@@ -265,6 +265,59 @@ dialog.cb-veu::backdrop { background: var(--backdrop); }
   .cl-dialogo-acoes .bt { min-height: 44px; }
 }
 
+/* ---------- Preparando o computador (NOD-93): o mascote monta o computador, uma cena por etapa ---------- */
+/* Portado de _nod/computador-do-bot.css do protótipo v2 (nod-prototipos b605727); o mascote é o <nod-mascote> real. */
+.cb-cena { position: relative; width: min(100%, 300px); aspect-ratio: 300 / 150; margin: 0 auto 8px; overflow: hidden; --mascote-cor: var(--agent-bleu); }
+.cb-cena > svg.cb-cena-fundo { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.cb-cena .cb-cena-mon { fill: var(--surface); stroke: var(--ink-2); stroke-width: 2.5; stroke-linejoin: round; }
+.cb-cena .cb-cena-pe { fill: none; stroke: var(--ink-2); stroke-width: 2.5; stroke-linecap: round; }
+.cb-cena .cb-cena-chao { stroke: var(--line); stroke-width: 2; stroke-linecap: round; }
+.cb-cena .cb-cena-tela { fill: var(--surface-raised); }
+.cb-cena .cb-cena-enche { fill: var(--signal-soft); }
+.cb-cena .cb-cena-enche-borda { fill: var(--signal); }
+.cb-cena .cb-cena-luz { fill: var(--signal-soft); opacity: 0; }
+.cb-cena .cb-cena-botao { fill: var(--ink-3); }
+.cb-cena .cb-cena-nav { opacity: 0; }
+.cb-cena .cb-cena-nav rect.janela { fill: var(--surface); stroke: var(--line-strong); stroke-width: 1.5; }
+.cb-cena .cb-cena-nav .barra { fill: var(--surface-raised); }
+.cb-cena .cb-cena-nav .linha { fill: var(--line-strong); }
+.cb-cena .cb-cena-nav .ponto { fill: var(--ink-3); }
+.cb-cena .cb-peca { opacity: 0; }
+.cb-cena .cb-peca.p1 { fill: var(--agent-turquoise); }
+.cb-cena .cb-peca.p2 { fill: var(--agent-violet); }
+.cb-cena .cb-peca.p3 { fill: var(--agent-ambre); }
+.cb-cena-masc { position: absolute; left: 12%; bottom: 12%; display: grid; width: 23%; aspect-ratio: 1; }
+.cb-cena-masc > nod-mascote { grid-area: 1 / 1; width: 100%; height: 100%; transform-origin: 50% 95%; }
+.cb-cena-caixa { position: absolute; left: 24%; top: -20%; width: 52%; height: 32%; box-sizing: border-box; border: 2px solid var(--ink-2); border-radius: 4px; background: var(--warning-soft); }
+.cb-cena-caixa::after { content: ""; position: absolute; left: 50%; top: -2px; bottom: -2px; width: 2px; margin-left: -1px; background: var(--ink-2); opacity: .5; }
+.cb-cena-mao { position: absolute; right: -4%; top: -10%; width: 15%; height: 46%; border-radius: 999px; background: var(--mascote-cor); opacity: 0; transform: rotate(24deg); transform-origin: 50% 92%; }
+/* Baixando: anda carregando a caixa; as peças caem no monitor, que enche com o progresso. */
+.cb-cena[data-etapa="baixando"] .cb-cena-masc > nod-mascote, .cb-cena[data-etapa="baixando"] .cb-cena-caixa { animation: cb-passo .8s ease-in-out infinite; }
+.cb-cena[data-etapa="baixando"] .cb-peca { animation: cb-cai 2.4s ease-in infinite; }
+.cb-cena[data-etapa="baixando"] .cb-peca.p2 { animation-delay: .8s; }
+.cb-cena[data-etapa="baixando"] .cb-peca.p3 { animation-delay: 1.6s; }
+/* Ligando: aperta o botão, o monitor acende e ele se anima. */
+.cb-cena[data-etapa="ligando"] .cb-cena-masc { animation: cb-aperta 2.8s ease-in-out infinite; }
+.cb-cena[data-etapa="ligando"] .cb-cena-botao { animation: cb-botao 2.8s ease-in-out infinite; }
+.cb-cena[data-etapa="ligando"] .cb-cena-luz { animation: cb-acende 2.8s ease-in-out infinite; }
+.cb-cena[data-etapa="ligando"] .cb-cena-masc > nod-mascote { animation: cb-pulo 2.8s ease-in-out infinite; }
+/* Abrindo a tela: um navegador abre no monitor e ele acena. */
+.cb-cena[data-etapa="abrindo"] .cb-cena-luz { opacity: 1; }
+.cb-cena[data-etapa="abrindo"] .cb-cena-nav { animation: cb-abre 2.6s ease-out infinite; transform-box: fill-box; transform-origin: 50% 50%; }
+.cb-cena[data-etapa="abrindo"] .cb-cena-mao { opacity: 1; animation: cb-aceno 1.3s ease-in-out infinite; }
+@keyframes cb-passo { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4%); } }
+@keyframes cb-cai { 0% { opacity: 0; transform: translateY(-40px); } 15% { opacity: 1; } 70% { opacity: 1; transform: translateY(18px); } 85%, 100% { opacity: 0; transform: translateY(22px); } }
+@keyframes cb-aperta { 0%, 20% { transform: none; } 34%, 42% { transform: translateX(26%); } 56%, 100% { transform: none; } }
+@keyframes cb-botao { 0%, 34% { fill: var(--ink-3); } 38%, 100% { fill: var(--success); } }
+@keyframes cb-acende { 0%, 38% { opacity: 0; } 52%, 92% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes cb-pulo { 0%, 56% { transform: none; } 64% { transform: translateY(-12%) scale(.94, 1.08); } 72% { transform: scale(1.06, .94); } 80%, 100% { transform: none; } }
+@keyframes cb-abre { 0%, 8% { opacity: 0; transform: scale(.6); } 26%, 90% { opacity: 1; transform: none; } 100% { opacity: 0; } }
+@keyframes cb-aceno { 0%, 100% { transform: rotate(12deg); } 50% { transform: rotate(38deg); } }
+.pc-primeiro-uso h3 { text-align: center; }
+.pc-primeiro-uso .pc-lead { text-align: center; }
+.pc-primeiro-uso .cl-dialogo-acoes { justify-content: center; }
+.pc-et-sub { color: var(--ink-3); font-size: 12px; }
+
 /* ---------- Movimento reduzido: tudo parado ---------- */
 @media (prefers-reduced-motion: reduce) {
   .cb-sono .cb-respira, .cb-zzz i, .cb-estrelas i, .cb-ao-vivo i, .cb-aguarda .cb-ponto { animation: none; }
@@ -274,6 +327,10 @@ dialog.cb-veu::backdrop { background: var(--backdrop); }
   .cb-acordando .cb-sono { animation: none; opacity: 0; visibility: hidden; }
   .cb-acordando .tela-preview, .cb-acordando .cb-sono-masc { animation: none; }
   /* Cenas: uma imagem parada por etapa. */
+  .cb-cena *, .cb-cena-masc > nod-mascote { animation: none !important; }
+  .cb-cena[data-etapa="baixando"] .cb-peca.p1 { opacity: 1; transform: translateY(6px); }
+  .cb-cena[data-etapa="ligando"] .cb-cena-luz, .cb-cena[data-etapa="abrindo"] .cb-cena-luz, .cb-cena[data-etapa="abrindo"] .cb-cena-nav, .cb-cena[data-etapa="abrindo"] .cb-cena-mao { opacity: 1; }
+  .cb-cena[data-etapa="ligando"] .cb-cena-botao { fill: var(--success); }
   .cb-item-ok .cb-ok-v, .cb-item-ok .cb-ic-pc, .cb-fio.cb-fio-fim > i { animation-duration: .01s; }
   .cb-dica, .tela-preview.cb-mini .tela-abrir, .cb-login-mini .cb-abrir, .cb-anel .cb-anel-valor, .cb-fio > i, .pc-barra i { transition: none; }
   .cb-linha-ic .ob-gira, .cb-pilula .ob-gira, .pc-et-ic .ob-gira, .maq-estado .ob-gira { animation-duration: 2.4s; }

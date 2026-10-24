@@ -21,7 +21,7 @@ import { cabecalhoCookieSessao } from "../sessao-cookie.ts";
 import type { CanalComputador } from "../../computador/canal.ts";
 import type { EstadoComputadorRelatado } from "../../../contracts/computador-motor.ts";
 import type { MaquinaDaPessoa } from "../../computador/motor.ts";
-import { anuncioComputador, estadoComputadorRelatado, resultadoComandoComputador, camposDoRevisor, capacidadesAnunciadas, contasAnunciadas, entrega, impressoes, progressoDoLogin, progressoDeInstalacao, exigir, falas, idsDeMensagens, inventario, memoria, objeto, relatoEspera, relatoRevisao, sessaoDaRenovacao, sinais, texto, trechos, turnosEmAndamento, uuid } from "./ponte-validacao.ts";
+import { anuncioComputador, anuncioVmLocal, estadoComputadorRelatado, resultadoComandoComputador, camposDoRevisor, capacidadesAnunciadas, contasAnunciadas, entrega, impressoes, progressoDoLogin, progressoDeInstalacao, exigir, falas, idsDeMensagens, inventario, memoria, objeto, relatoEspera, relatoRevisao, sessaoDaRenovacao, sinais, texto, trechos, turnosEmAndamento, uuid } from "./ponte-validacao.ts";
 import { versaoAceita } from "../../../domain/versao-app.ts";
 import { relatoValido } from "../../../use-cases/limpeza-das-tasks.ts";
 
@@ -38,7 +38,7 @@ type Conexao = { escopo: Escopo; ponte: PonteInternaNod; inv: Inventario; ultimo
  * NOD-199: o que um anúncio da máquina diz das IAs dela, lido com os mesmos filtros nas duas rotas que o recebem
  * (`conectar` e `inventario`): só ids integrados, `semLacoDeVoz` só de harness pronto neste anúncio, capacidades validadas.
  */
-type LeituraAnuncio = { computador: ReturnType<typeof anuncioComputador>; inv: Inventario; gh: boolean; motores: Partial<Record<IdHarness, Inventario>>; harnessesAusente: boolean; semLacoDeVoz: IdHarness[]; capacidades: ReturnType<typeof capacidadesAnunciadas>; sobreviveReinicio: boolean };
+type LeituraAnuncio = { computador: ReturnType<typeof anuncioComputador>; vmLocal: ReturnType<typeof anuncioVmLocal>; inv: Inventario; gh: boolean; motores: Partial<Record<IdHarness, Inventario>>; harnessesAusente: boolean; semLacoDeVoz: IdHarness[]; capacidades: ReturnType<typeof capacidadesAnunciadas>; sobreviveReinicio: boolean };
 function lerAnuncio(b: Record<string, unknown>, agora: number): LeituraAnuncio {
   // ADR-048: o gh desta máquina (app ≥ 2026-09-24). Ausente = app antigo = sem gh.
   const gh = objeto(b.github ?? {}).gh === true;
@@ -56,7 +56,8 @@ function lerAnuncio(b: Record<string, unknown>, agora: number): LeituraAnuncio {
   const capacidades = capacidadesAnunciadas(b.capacidades);
   // NOD-214: o cliente com o laço que atravessa o reinício do servidor (só o booleano conta; app antigo não manda).
   // NOD-96 PR 3: se a máquina roda o computador da pessoa (fora do formato = ausente, o computador não vai para ela).
-  return { computador: anuncioComputador(b.computador), inv, gh, motores, harnessesAusente: b.harnesses === undefined, semLacoDeVoz, capacidades, sobreviveReinicio: b.sobreviveReinicio === true };
+  // NOD-93: o preparo da VM local do Mac (fora do formato = ausente).
+  return { computador: anuncioComputador(b.computador), vmLocal: anuncioVmLocal(b.vmLocal), inv, gh, motores, harnessesAusente: b.harnesses === undefined, semLacoDeVoz, capacidades, sobreviveReinicio: b.sobreviveReinicio === true };
 }
 
 /** ADR-090: uma máquina conectada da pessoa, como a tela "Máquinas" a mostra (sem credencial nem inventário bruto). */
@@ -275,7 +276,7 @@ export function criarPonteHttpServidor(d: {
       if (anunciado && anunciado !== c.papel) log("aviso", "papel_anunciado_difere", { machine_id: id, anunciado, gravado: c.papel });
       // O só-computador não pega turno: sem gh nem laço de voz, nada da fila nem dos itens locais chega a ele.
       if (c.papel === "computador") c.gh = false;
-      c.anuncio = { machineId: id, nome: b.nome, plataforma: c.plataforma, inventario: c.inv, versaoContrato: 1, harnesses: a.harnessesAusente ? { "claude-cli": c.inv } : a.motores, ligacao: b.ligacao === true && c.papel === "motor", papel: c.papel, ...(a.semLacoDeVoz.length > 0 ? { semLacoDeVoz: a.semLacoDeVoz } : {}), ...(a.capacidades ? { capacidades: a.capacidades } : {}), ...(a.sobreviveReinicio ? { sobreviveReinicio: true } : {}), ...(a.computador ? { computador: a.computador } : {}), ...(b.atualizaIas === true ? { atualizaIas: true } : {}) };
+      c.anuncio = { machineId: id, nome: b.nome, plataforma: c.plataforma, inventario: c.inv, versaoContrato: 1, harnesses: a.harnessesAusente ? { "claude-cli": c.inv } : a.motores, ligacao: b.ligacao === true && c.papel === "motor", papel: c.papel, ...(a.semLacoDeVoz.length > 0 ? { semLacoDeVoz: a.semLacoDeVoz } : {}), ...(a.capacidades ? { capacidades: a.capacidades } : {}), ...(a.sobreviveReinicio ? { sobreviveReinicio: true } : {}), ...(a.computador ? { computador: a.computador } : {}), ...(a.vmLocal ? { vmLocal: a.vmLocal } : {}), ...(b.atualizaIas === true ? { atualizaIas: true } : {}) };
       await c.ponte.conectar(c.anuncio);
       await persistir(c);
       await d.registrarPlataforma?.(ctx.escopo, id, plataforma);
@@ -307,7 +308,7 @@ export function criarPonteHttpServidor(d: {
       // A conexão só nasce no `conectar`, que grava o anúncio: daqui saem o nome e o laço de voz, que não mudam aqui.
       // ADR-090: a plataforma também é do `conectar` — o motor na VM Linux não vira "darwin" ao reanunciar.
       const { nome, ligacao, atualizaIas } = c.anuncio ?? { nome: c.nome, ligacao: false, atualizaIas: false };
-      c.anuncio = { machineId: ctx.params.chaveId!, nome, plataforma: c.plataforma, inventario: c.inv, versaoContrato: 1, harnesses: a.harnessesAusente ? { "claude-cli": c.inv } : a.motores, ligacao, papel: c.papel, ...(a.semLacoDeVoz.length > 0 ? { semLacoDeVoz: a.semLacoDeVoz } : {}), ...(a.capacidades ? { capacidades: a.capacidades } : {}), ...(a.sobreviveReinicio ? { sobreviveReinicio: true } : {}), ...(a.computador ? { computador: a.computador } : {}), ...(atualizaIas ? { atualizaIas: true } : {}) };
+      c.anuncio = { machineId: ctx.params.chaveId!, nome, plataforma: c.plataforma, inventario: c.inv, versaoContrato: 1, harnesses: a.harnessesAusente ? { "claude-cli": c.inv } : a.motores, ligacao, papel: c.papel, ...(a.semLacoDeVoz.length > 0 ? { semLacoDeVoz: a.semLacoDeVoz } : {}), ...(a.capacidades ? { capacidades: a.capacidades } : {}), ...(a.sobreviveReinicio ? { sobreviveReinicio: true } : {}), ...(a.computador ? { computador: a.computador } : {}), ...(a.vmLocal ? { vmLocal: a.vmLocal } : {}), ...(atualizaIas ? { atualizaIas: true } : {}) };
       // O `conectar` da ponte interna só registra o anúncio da máquina (idempotente): seguro com turno rodando.
       await c.ponte.conectar(c.anuncio);
       await persistir(c);
@@ -701,7 +702,7 @@ export function criarPonteHttpServidor(d: {
   function maquinasComComputador(escopo: Escopo): MaquinaDaPessoa[] {
     return [...conexoes.entries()].flatMap(([id, c]) => {
       if (c.escopo.pessoaId !== escopo.pessoaId || c.escopo.tenantId !== escopo.tenantId || d.agora() - c.ultimo >= 60_000) return [];
-      return [{ machineId: id, nome: c.nome, plataforma: c.plataforma, computador: c.anuncio?.computador?.estado ?? null, ultimoContato: c.ultimo }];
+      return [{ machineId: id, nome: c.nome, plataforma: c.plataforma, computador: c.anuncio?.computador?.estado ?? null, ultimoContato: c.ultimo, ...(c.anuncio?.vmLocal ? { vmLocal: c.anuncio.vmLocal } : {}) }];
     });
   }
   /** ADR-102: a pessoa renomeou a máquina; a conexão viva passa a usar o nome novo. */

@@ -1,5 +1,7 @@
 # ADR-123 — O computador do bot no Mac mora numa VM Linux embutida no app
 
+> Itens 1 a 5 substituídos pela ADR-127 (2026-10-24).
+
 Status: proposta, atrás de `NOD_VM_LOCAL=1` · Data: 2026-10-22 · Issue: NOD-93 · Emenda a
 [ADR-037](adr-037-computadores-por-bot.md) (computadores), [ADR-097](adr-097-agentes-entram-trabalho-pesado-faz-fila.md)
 (memória no Mac) e [ADR-100](adr-100-o-motor-se-atualiza-sozinho.md) (quem atualiza o quê).

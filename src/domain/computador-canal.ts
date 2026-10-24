@@ -39,7 +39,7 @@ export function textoAssinado(c: Omit<ComandoComputador, "assinatura">): string 
 export type MaquinaCandidata = {
   machineId: string;
   plataforma: PlataformaMaquina;
-  /** Ausente = o motor não anuncia o computador (versão antiga, Mac). */
+  /** Ausente = o motor não anuncia o computador (versão antiga, Mac sem a VM local). */
   computador: EstadoAnuncioComputador | null;
   ultimoContato: number;
 };
@@ -49,18 +49,21 @@ export type MaquinaCandidata = {
  * disco está), senão a única máquina Linux que anuncia `computador: pronto`, senão a máquina padrão da pessoa, senão a
  * de contato mais recente. Nunca a máquina do turno. As duas primeiras valem mesmo sem contato: o disco é daquela
  * máquina, e quem chama diz "sem contato" em vez de ligar outra. null = nenhuma máquina conectada serve.
+ * ADR-127 §5: sem nenhuma Linux que anuncie o computador, valem os Macs que anunciam (o supervisor na VM local), pelas
+ * mesmas regras; com uma Linux anunciando, o Mac não entra.
  */
 export function escolherMaquina(p: { maquinaId: string | null; hospedeiraId: string | null; padraoId: string | null; conectadas: readonly MaquinaCandidata[] }): string | null {
   if (p.maquinaId) return p.maquinaId;
   if (p.hospedeiraId) return p.hospedeiraId;
   const linux = p.conectadas.filter((m) => m.plataforma === "linux" && m.computador !== null);
-  const prontas = linux.filter((m) => m.computador === "pronto");
+  const grupo = linux.length ? linux : p.conectadas.filter((m) => m.plataforma === "darwin" && m.computador !== null);
+  const prontas = grupo.filter((m) => m.computador === "pronto");
   if (prontas.length === 1) return prontas[0]!.machineId;
   const padrao = p.padraoId ? prontas.find((m) => m.machineId === p.padraoId) : undefined;
   if (padrao) return padrao.machineId;
   const recente = (l: readonly MaquinaCandidata[]) => [...l].sort((a, b) => b.ultimoContato - a.ultimoContato)[0]?.machineId ?? null;
   // Sem nenhuma pronta, a que anuncia o computador (faltam pacotes, sem suporte): quem chama devolve o motivo dela.
-  return recente(prontas) ?? recente(linux);
+  return recente(prontas) ?? recente(grupo);
 }
 
 /**

@@ -1,5 +1,5 @@
 import { criarCodexCliDriver } from "../src/adapters/executor/drivers/codex-cli.ts";
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, Notification, powerSaveBlocker, safeStorage, screen, session, shell, systemPreferences, type IpcMainInvokeEvent } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, Notification, powerMonitor, powerSaveBlocker, safeStorage, screen, session, shell, systemPreferences, type IpcMainInvokeEvent } from "electron";
 import { spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { createWriteStream, existsSync } from "node:fs";
@@ -52,7 +52,7 @@ import { lerAviso, lerContador, lerPreferencias, lerTemaDesktop, opcoesDoAviso, 
 import { abreNoNavegador } from "./links-externos.ts";
 import { arquivoDaMidia } from "./midia-mac.ts";
 import { CANAIS_MIDIA } from "../src/contracts/midia-desktop.ts";
-import { focarJanela, LARGURA_MINIMA, lerEstadoJanela, medirEstadoJanela, resolverEstadoJanela, type EstadoJanela } from "./janela.ts";
+import { abrirPrimeiroUsoDaVm, focarJanela, LARGURA_MINIMA, lerEstadoJanela, medirEstadoJanela, resolverEstadoJanela, type EstadoJanela } from "./janela.ts";
 import { estadoDoMicrofone, lerEmLigacao, permitirChecagemDeMidia, permitirPedidoDeMidia, TEXTO_FECHAR_EM_LIGACAO } from "./permissoes-midia.ts";
 import type { EstadoMicrofone } from "../src/contracts/desktop.ts";
 import { criarDetectorGh, executarGithubNaMaquina } from "../src/adapters/conectores-locais/github/maquina.ts";
@@ -60,6 +60,7 @@ import { pedirProvisorio, segredoDeTroca, servidorOfereceProvisorio, trocarChave
 import { FalhaPareamento, parearPeloNavegador } from "./parear.ts";
 import { IDIOMA_DO_APP, templateDoMenu } from "./menu.ts";
 import { criarArquivoDeLog, escreverDiagnostico, instalarOuvintesDeQueda, lerCaudaDoLog, MAX_BYTES_LOG } from "./diagnostico.ts";
+import { montarVmLocal, type VmLocalDoApp } from "./vm-local/ligar.ts";
 import { montarDiagnostico, nomeArquivoDiagnostico, TETO_REGISTROS_BYTES, type EntradaDiagnostico } from "../src/domain/diagnostico-app.ts";
 import { definirDestinoDoLog, log } from "../src/obs/log.ts";
 import type { Inventario } from "../src/contracts/inventario.ts";
@@ -81,7 +82,23 @@ let laco: PoolDeLacos | null = null;
  * por grupo de processos), compartilhado por todos os laços do pool; cada renovação leva a última leitura.
  * `NOD_SIMULAR_PRESSAO=1|2|4` no ambiente do app força o nível (UAT). O timer não segura o app aberto.
  */
-const memoriaDoMac = criarAmostradorMemoria({ env: process.env });
+/** NOD-93 (ADR-127): a VM local do Mac; null sem `NOD_VM_LOCAL=1` (padrão) ou fora do Mac. */
+let vmLocal: VmLocalDoApp | null = null;
+let faseVmAnterior: string | null = null;
+let primeiroUsoAberto = false;
+/** NOD-93 (passo 10): o download do disco começou — traz a janela e abre o painel do computador, uma vez por sessão. */
+function primeiroUsoDaVm(estado: string): void {
+  const abrir = abrirPrimeiroUsoDaVm(faseVmAnterior, estado, primeiroUsoAberto);
+  faseVmAnterior = estado;
+  if (!abrir) return;
+  const web = janelaWeb();
+  if (!web) return;
+  primeiroUsoAberto = true;
+  focarJanela(web);
+  web.webContents.send(CANAIS_DESKTOP.abrir, { tipo: "computador-do-bot", primeiroUso: true } satisfies AlvoAviso);
+}
+// NOD-93 passo 10: a VM ligada entra como um bloco no total da memória do Mac.
+const memoriaDoMac = criarAmostradorMemoria({ env: process.env, bloco: () => vmLocal?.memoriaMb() ?? 0 });
 let registry: Registry | null = null;
 let cliente: ReturnType<typeof criarPonteHttp> | null = null;
 let mensagem = "";
@@ -412,6 +429,7 @@ async function parar() {
   contasNoServidor = null;
   instalacoesNoServidor?.parar();
   instalacoesNoServidor = null;
+  vmLocal?.desconectar();
   const anterior = laco; laco = null;
   cliente?.cancelar();
   if (anterior) await anterior.parar().catch(() => undefined);
@@ -493,6 +511,8 @@ async function conectar(c: Config) {
   if (cliente === ponteHttp) ghLogado = gh; // um parar() durante o await já zerou: não ressuscita o valor velho
   const anuncio = { machineId: dados.machineId, nome: hostname(), versaoContrato: 1, github: { gh }, ligacao: true } as const;
   if (gh) vigiarItensGithub(ponteHttp);
+  // NOD-93 (ADR-127 §3): com a VM local, o Mac também puxa os comandos do computador e os passa à VM.
+  if (cliente === ponteHttp) vmLocal?.conectar(ponteHttp.computador);
   if (cliente === ponteHttp) {
     // ADR-088: o PATH do shell de login (o mesmo dos drivers) — as ferramentas de onde a pessoa as instalou.
     limpezaDasTasks?.parar();
@@ -575,7 +595,7 @@ async function conectar(c: Config) {
     impressao: (ia) => impressaoDoLogin(ia, cfgExecutor ?? cfg),
     aoInventarios: (inventarios) => { if (cliente !== ponteHttp) return; inventariosDaVigia = inventarios; emitirEstados(); conferirContas(inventarios); void sincronizarContas(); void atualizador.verificar().catch(() => undefined); },
     aoTestando: (ias) => { if (cliente !== ponteHttp) return; testandoAgora = ias; emitirEstados(); },
-    anunciar: async (inventarios, principal, semLacoDeVoz, capacidades) => { if (cliente !== ponteHttp) return; inventariosAtuais = inventarios; const contas = contasLocais?.anuncio() ?? []; const comContas = inventariosComContas(comAtualizacao(inventarios), contas, contasLocais?.impressoesDaPadrao()); await ponteHttp.ponte.anunciarInventario({ ...anuncio, inventario: estadoDaMaquina(principal, comContas), harnesses: comContas, semLacoDeVoz, capacidades, contas }); if (!lacoNoAr && contas.some((c) => c.estado === "pronta")) { lacoNoAr = true; subirLaco(registryDoLaco); } },
+    anunciar: async (inventarios, principal, semLacoDeVoz, capacidades) => { if (cliente !== ponteHttp) return; inventariosAtuais = inventarios; const contas = contasLocais?.anuncio() ?? []; const comContas = inventariosComContas(comAtualizacao(inventarios), contas, contasLocais?.impressoesDaPadrao()); await ponteHttp.ponte.anunciarInventario({ ...anuncio, ...(vmLocal?.anuncio() ?? {}), inventario: estadoDaMaquina(principal, comContas), harnesses: comContas, semLacoDeVoz, capacidades, contas }); if (!lacoNoAr && contas.some((c) => c.estado === "pronta")) { lacoNoAr = true; subirLaco(registryDoLaco); } },
     aoRegistry: (novo, algumaPronta) => {
       if (cliente !== ponteHttp) return;
       Object.assign(registryDoLaco, novo);
@@ -1224,7 +1244,7 @@ else {
     encerrando = true;
     // Cmd+Q: as janelas só fecham depois deste evento, então o estado é capturado aqui e a gravação entra na espera.
     if (w) capturarEstadoJanela(w);
-    void Promise.all([parar(), gravacaoJanela]).finally(() => app.quit());
+    void Promise.all([parar(), gravacaoJanela, vmLocal?.parar()]).finally(() => app.quit());
   });
   // ADR-089: o `exit` do Node também leva os grupos, mas o will-quit é o fim garantido do app (Cmd+Q, SIGTERM, SIGHUP).
   app.on("will-quit", () => { atualizador.parar(); encerrarGruposVivos(); });
@@ -1235,6 +1255,9 @@ else {
     definirDestinoDoLog(criarArquivoDeLog({ dir: app.getPath("logs"), maxBytes: MAX_BYTES_LOG }));
     instalarOuvintesDeQueda({ app, processo: process, registrar: (campos) => log("erro", "app_processo_caiu", campos), encerrando: () => encerrando, ehJanelaPrincipal: (conteudo) => !!janela && !janela.isDestroyed() && conteudo === janela.webContents });
     log("info", "app_iniciado", { versao: app.getVersion(), empacotado: app.isPackaged, arquitetura: process.arch });
+    // NOD-93 (ADR-127): a VM local (só com NOD_VM_LOCAL=1 num Mac). A fase vai no anúncio, no máximo 1/s.
+    vmLocal = montarVmLocal({ ambiente: process.env, plataforma: process.platform, arch: process.arch, versaoApp: app.getVersion(), macos: process.getSystemVersion(), dadosApp: app.getPath("userData"), recursos: process.resourcesPath, leitura: () => memoriaDoMac.daMaquina?.(), aoMudar: (v) => { void vigiaIas?.reanunciar().catch(() => undefined); primeiroUsoDaVm(v.estado); } });
+    if (vmLocal) powerMonitor.on("resume", () => void vmLocal?.aoAcordarDoMac().catch(() => undefined));
     void limparOrfaosUmaVez();
     // definido em 2026-10-09: o PATH do shell real começa a ser lido já (em segundo plano, até 10 s), e o "node do nod"
     // é reescrito com o caminho atual do app, antes da primeira sonda.
@@ -1258,6 +1281,8 @@ else {
       if (lido !== null) { contadorAtual = lido; aplicarContador(); }
     });
     ipcMain.handle(CANAIS_DESKTOP.preferencias, (e) => { validarRemetenteWeb(e); return estadoPreferencias(); });
+    // NOD-93 (ADR-127): o "tentar agora" do download pausado; sem a VM local (flag desligada), não faz nada.
+    ipcMain.handle(CANAIS_DESKTOP.vmTentarAgora, (e) => { validarRemetenteWeb(e); vmLocal?.preparador.tentarAgora(); });
     ipcMain.handle(CANAIS_DESKTOP.definirAvisos, (e, ligado: unknown) => {
       validarRemetenteWeb(e);
       if (typeof ligado !== "boolean") throw new Error("entrada_invalida");

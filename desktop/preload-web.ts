@@ -70,6 +70,8 @@ const ponte: NodDesktop = {
   // NOD-345: o código de troca vai ao processo principal, que fala com o servidor sem Origin.
   trocarConta: (codigo: string) => ipcRenderer.invoke(CANAIS_DESKTOP.trocarConta, codigo),
   desafioConta: () => ipcRenderer.invoke(CANAIS_DESKTOP.desafioConta),
+  // NOD-93 (ADR-127): o "tentar agora" do download pausado da VM local.
+  vmTentarAgora: () => ipcRenderer.invoke(CANAIS_DESKTOP.vmTentarAgora),
   aoAbrir: (fn: (alvo: AlvoAviso) => void) => {
     // Um ouvinte só (a página registra uma vez; recarregar recria o preload). O evento do IPC não vai à página.
     ipcRenderer.removeAllListeners(CANAIS_DESKTOP.abrir);

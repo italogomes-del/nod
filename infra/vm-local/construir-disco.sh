@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
-# NOD-93 (PR 1): o disco base da VM local do Mac, um por arquitetura: Debian 12 genericcloud + dockerd + chrony + a
-# imagem do computador dentro (carregada sem rede no 1º boot, nod-imagem.service). Sai
+# NOD-93 (ADR-127): o disco base da VM local do Mac, um por arquitetura: Debian 12 genericcloud + chrony + o computador
+# da pessoa da ADR-122 (pacotes, usuários, units, o node do motor e o Chromium do Playwright), pelo MESMO
+# blocoDoComputador do instalador, com os arquivos locais e sem ligar a unit. Sem dockerd e sem imagem. Sai
 #   <saida>/nod-vm-<versao>-<arch>.img.zst  (raw comprimido)  e  <saida>/nod-vm-<versao>-<arch>.img.zst.sha256
 # O app baixa esse arquivo (Range + sha256, desktop/vm-local/download.ts) e o Lima (vmType vz) liga a VM com ele.
-# Containers, volumes e logins moram no disco de dados `nod-dados` (daemon.json), não neste: trocar o disco base a
-# cada versão do app não apaga nada da pessoa.
+# Perfis, cookies e chaves do supervisor (/var/lib/nod-computador) moram no disco de dados `nod-dados`
+# (nod-dados.service), não neste: trocar o disco base a cada versão do app não apaga nada da pessoa.
 #
 # Roda no workflow desktop-release (job vm-local) num runner Linux da MESMA arquitetura do disco: o virt-customize
 # executa o apt do convidado, e convidado de outra arquitetura exigiria emulação. Precisa de root (libguestfs),
-# libguestfs-tools, qemu-utils, zstd, curl e sha512sum.
+# libguestfs-tools, qemu-utils, zstd, curl e sha512sum/sha256sum.
 #
 # Uso:
-#   construir-disco.sh [--simular] <arm64|amd64> <versao> <imagem-docker.tar> <saida>
-# A imagem é o `docker save` de `npm run computador:build -- --saida <dir>` (nod-computador-<arch>.tar), com o rótulo
-# app.nod.computador.versao=<versao>.
+#   construir-disco.sh [--simular] <arm64|amd64> <versao> <origem> <saida>
+# <origem> é a pasta de `node scripts/vm-local/origem-do-disco.ts` (computador-*.mjs, computador.sh, node.versao).
 # --simular: imprime os comandos externos em vez de executá-los (sem download, sem root).
 set -euo pipefail
 DIR_VM="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -21,7 +21,6 @@ DIR_VM="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$DIR_VM/base.env"
 
 SIMULAR="${SIMULAR:-0}"
-TAG_IMAGEM="${TAG_IMAGEM:-nod-computador:1}"
 exec 3>&1
 
 ext() { # comando externo; na simulação só imprime (no fd 3, para aparecer mesmo dentro de $(...))
@@ -42,6 +41,17 @@ sha512_da_base() { # arch
 }
 nome_da_base() { echo "debian-12-genericcloud-$1-$DEBIAN_DATA.qcow2"; }
 nome_do_disco() { echo "nod-vm-$2-$1.img.zst"; } # arch versao
+arq_do_node() { [ "$1" = arm64 ] && echo arm64 || echo x64; }
+
+baixar_node() { # arch versao destino: o node do motor, conferido pelo SHASUMS256.txt do próprio release do Node
+  local nome="node-v$2-linux-$(arq_do_node "$1").tar.xz" destino="$3" url="https://nodejs.org/dist/v$2"
+  ext curl -fsSL --retry 3 -o "$destino/$nome" "$url/$nome"
+  ext curl -fsSL --retry 3 -o "$destino/SHASUMS256.txt" "$url/SHASUMS256.txt"
+  if [ "$SIMULAR" = 1 ]; then echo "[simular] conferir sha256 $nome" >&3; else
+    (cd "$destino" && grep " $nome\$" SHASUMS256.txt | sha256sum -c --status) || { echo "sha256 do node não confere ($nome)" >&2; return 1; }
+  fi
+  mv "$destino/$nome" "$destino/node.tar.xz" 2>/dev/null || true
+}
 
 baixar_base() { # arch destino
   local arch="$1" destino="$2" esperado
@@ -51,14 +61,18 @@ baixar_base() { # arch destino
   echo "$esperado  $destino" | sha512sum -c --status || { echo "sha512 da base Debian não confere ($destino)" >&2; return 1; }
 }
 
-construir() { # arch versao imagem saida
-  local arch="$1" versao="$2" imagem="$3" saida="$4" trab raw disco
+construir() { # arch versao origem saida
+  local arch="$1" versao="$2" origem="$3" saida="$4" trab raw disco node_versao a
   arch_valida "$arch" || { echo "arquitetura inválida: '$arch' (arm64 ou amd64)" >&2; return 2; }
   versao_valida "$versao" || { echo "versão inválida: '$versao'" >&2; return 2; }
   if [ "$SIMULAR" != 1 ]; then
-    [ -f "$imagem" ] || { echo "imagem do computador não existe: $imagem" >&2; return 2; }
+    for a in computador-supervisor.mjs computador-tela.mjs computador-terminal.mjs computador.sh node.versao; do
+      [ -f "$origem/$a" ] || { echo "a origem do disco não tem $a: $origem" >&2; return 2; }
+    done
     [ "$(uname -m)" = "$([ "$arch" = arm64 ] && echo aarch64 || echo x86_64)" ] || { echo "o disco $arch precisa de um host $arch (este é $(uname -m))" >&2; return 2; }
   fi
+  node_versao="$(cat "$origem/node.versao" 2>/dev/null || echo "${NODE_VERSAO_SIMULADA:-24.19.0}")"
+  [[ "$node_versao" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "versão do node inválida: '$node_versao'" >&2; return 2; }
   trab="$(mktemp -d)"
   # shellcheck disable=SC2064
   trap "rm -rf '$trab'" RETURN
@@ -69,33 +83,33 @@ construir() { # arch versao imagem saida
   passo "base Debian $DEBIAN_SERIE $DEBIAN_DATA ($arch)"
   baixar_base "$arch" "$trab/base.qcow2"
   # O qcow2 vem com a raiz de ~2 GB: o virt-resize copia para um raw de DISCO_TAMANHO e estica a raiz (sda1 no
-  # genericcloud; 14 e 15 são BIOS e EFI) antes do apt e da imagem.
+  # genericcloud; 14 e 15 são BIOS e EFI) antes do apt e do Chromium.
   ext qemu-img create -f raw "$raw" "$DISCO_TAMANHO"
   ext virt-resize --expand /dev/sda1 "$trab/base.qcow2" "$raw"
 
-  passo "imagem do computador (comprimida no disco)"
-  ext zstd -q -T0 -10 -o "$trab/imagem.tar.zst" "$imagem"
-  printf '%s\n' "$versao" > "$trab/imagem.versao"
-  printf '%s\n' "$TAG_IMAGEM" > "$trab/imagem.tag"
+  passo "node $node_versao do motor"
+  mkdir -p "$trab/origem"
+  baixar_node "$arch" "$node_versao" "$trab/origem"
+  [ "$SIMULAR" = 1 ] || cp "$origem"/computador-*.mjs "$origem/computador.sh" "$trab/origem/"
 
-  passo "docker, chrony e os arquivos do nod no convidado"
+  passo "chrony, o computador da pessoa (ADR-122) e os arquivos do nod no convidado"
   ext virt-customize -a "$raw" --network \
-    --install docker.io,chrony,zstd \
+    --install chrony,curl,ca-certificates,xz-utils \
     --mkdir /var/lib/nod \
-    --copy-in "$trab/imagem.tar.zst:/var/lib/nod" \
-    --copy-in "$trab/imagem.versao:/var/lib/nod" \
-    --copy-in "$trab/imagem.tag:/var/lib/nod" \
-    --copy-in "$DIR_VM/arquivos/etc/docker/daemon.json:/etc/docker" \
-    --mkdir /etc/systemd/system/docker.service.d \
-    --copy-in "$DIR_VM/arquivos/etc/systemd/system/docker.service.d/nod-dados.conf:/etc/systemd/system/docker.service.d" \
-    --copy-in "$DIR_VM/arquivos/etc/systemd/system/nod-imagem.service:/etc/systemd/system" \
+    --copy-in "$trab/origem:/var/lib/nod" \
+    --run-command 'mkdir -p /opt/nod-motor/node && tar --no-same-owner -xJf /var/lib/nod/origem/node.tar.xz -C /opt/nod-motor/node --strip-components=1 && chown -R root:root /opt/nod-motor/node' \
+    --run-command 'ORIGEM=/var/lib/nod/origem sh /var/lib/nod/origem/computador.sh' \
+    --mkdir /etc/systemd/system/nod-computador.service.d \
+    --copy-in "$DIR_VM/arquivos/etc/systemd/system/nod-computador.service.d/nod-dados.conf:/etc/systemd/system/nod-computador.service.d" \
+    --mkdir /etc/systemd/system/nod-computador-terminal.service.d \
+    --copy-in "$DIR_VM/arquivos/etc/systemd/system/nod-computador-terminal.service.d/nod-dados.conf:/etc/systemd/system/nod-computador-terminal.service.d" \
+    --copy-in "$DIR_VM/arquivos/etc/systemd/system/nod-dados.service:/etc/systemd/system" \
     --mkdir /etc/chrony/conf.d \
     --copy-in "$DIR_VM/arquivos/etc/chrony/conf.d/nod.conf:/etc/chrony/conf.d" \
     --mkdir /usr/local/lib/nod \
     --copy-in "$DIR_VM/arquivos/usr/local/lib/nod/esperar-dados.sh:/usr/local/lib/nod" \
-    --copy-in "$DIR_VM/arquivos/usr/local/lib/nod/carregar-imagem.sh:/usr/local/lib/nod" \
-    --run-command 'chmod 0755 /usr/local/lib/nod/*.sh && systemctl enable docker.service nod-imagem.service chrony.service' \
-    --run-command 'apt-get clean && rm -rf /var/lib/apt/lists/*' \
+    --run-command 'chmod 0755 /usr/local/lib/nod/*.sh && systemctl enable nod-dados.service chrony.service' \
+    --run-command 'rm -rf /var/lib/nod/origem && apt-get clean && rm -rf /var/lib/apt/lists/*' \
     --truncate /etc/machine-id
 
   passo "compactar e publicar"
@@ -107,7 +121,7 @@ construir() { # arch versao imagem saida
 
 main() {
   if [ "${1:-}" = --simular ]; then SIMULAR=1; shift; fi
-  [ "$#" -eq 4 ] || { echo "uso: construir-disco.sh [--simular] <arm64|amd64> <versao> <imagem-docker.tar> <saida>" >&2; return 2; }
+  [ "$#" -eq 4 ] || { echo "uso: construir-disco.sh [--simular] <arm64|amd64> <versao> <origem> <saida>" >&2; return 2; }
   construir "$@"
 }
 

@@ -57,6 +57,12 @@ describe("memória por grupo (ps -A -o pgid=,rss=)", () => {
     expect(leituraDoTurno({ nivel: "amarela", rssPorGrupo: rss, gruposVivos: [101, 202], turnoId: "t1", grupo: 101 })).toEqual({ nivel: "amarela", totalMb: 4, porTurno: [{ turnoId: "t1", mb: 3 }] });
   });
 
+  it("NOD-93: a VM local ligada entra no total como um bloco (3 GiB = 3072 MB); desligada (0), nada", () => {
+    const rss = somarPorGrupo(PS);
+    expect(leituraDoTurno({ nivel: "verde", rssPorGrupo: rss, gruposVivos: [101], turnoId: null, grupo: null, blocoMb: 3072 }).totalMb).toBe(3 + 3072);
+    expect(leituraDoTurno({ nivel: "verde", rssPorGrupo: rss, gruposVivos: [101], turnoId: null, grupo: null, blocoMb: 0 }).totalMb).toBe(3);
+  });
+
   it("turno sem grupo (harness sem processo próprio) leva só o nível e o total; grupo que o ps não viu também", () => {
     const rss = somarPorGrupo(PS);
     expect(leituraDoTurno({ nivel: "verde", rssPorGrupo: rss, gruposVivos: [101], turnoId: "t2", grupo: null })).toEqual({ nivel: "verde", totalMb: 3, porTurno: [] });

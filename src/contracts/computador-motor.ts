@@ -2,6 +2,7 @@ import type { AcaoComputador, ControleComputador, PoliticaComputador, ResultadoC
 import type { EpochMs } from "./ids.ts";
 import type { MotivoFalhaComputador } from "./motivos.ts";
 import type { UsoDoMac } from "./raio-x.ts";
+import type { VmLocalAnunciada } from "./vm-local.ts";
 
 /**
  * definido em 2026-10-22 (NOD-96, ADR-122): o computador da pessoa roda no motor, numa máquina dela, atrás de
@@ -160,6 +161,8 @@ export type ComputadorDaPessoaDto = {
   falha?: { motivo: MotivoFalhaComputador; desde: EpochMs } | null;
   /** Soma da memória das telas; `totalMb` nulo enquanto o supervisor não relata o total da máquina. */
   memoria?: { usadaMb: number; totalMb: number | null } | null;
+  /** NOD-93 (passo 9): o preparo da VM local quando a máquina escolhida é o Mac. Ausente = Linux ou app antigo. */
+  preparo?: VmLocalAnunciada | null;
   ligadoDesde?: EpochMs | null;
   /** As últimas ações no computador, mais nova primeiro; `agenteId` nulo = a pessoa. */
   atividade?: { agenteId: string | null; texto: string; em: EpochMs }[];

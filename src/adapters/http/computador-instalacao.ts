@@ -143,8 +143,20 @@ const DESTINO: Record<ArquivoDoComputador, string> = {
   "computador-terminal.mjs": "terminal.mjs",
 };
 
+/**
+ * Como o bloco pega os arquivos e trata as units (ADR-127 §1). `servidor` (padrão) baixa de `$NOD_SERVIDOR`; `locais`
+ * copia de `$ORIGEM` (o disco da VM do Mac, construído sem servidor). `ligar: false` só habilita as units, sem
+ * daemon-reload, `--now` nem try-restart: funciona num chroot sem systemd de pé.
+ */
+export interface OpcoesDoBloco {
+  arquivos?: "servidor" | "locais";
+  ligar?: boolean;
+}
+
 /** O trecho de shell do script do motor (roda dentro de principal(), depois dos arquivos do motor). */
-export function blocoDoComputador(): string {
+export function blocoDoComputador(o: OpcoesDoBloco = {}): string {
+  const locais = o.arquivos === "locais";
+  const ligar = o.ligar !== false;
   const unidades = Object.entries(UNIDADES_DO_COMPUTADOR)
     .map(([nome, conteudo]) => `$SUDO tee /etc/systemd/system/${nome} >/dev/null <<'NODUNIDADE'\n${conteudo}NODUNIDADE`)
     .join("\n");
@@ -172,13 +184,7 @@ id nod-pc-term >/dev/null 2>&1 || $SUDO useradd --system --no-create-home --home
 $SUDO usermod -aG ${GRUPO_DO_TERMINAL} nod-pc
 $SUDO install -d -o nod-pc -g nod-pc-arquivos -m 2750 /var/lib/nod-computador
 $SUDO mkdir -p "$PASTA/computador"
-BAIXADOS=$(mktemp -d)
-for ARQUIVO in ${ARQUIVOS_DO_COMPUTADOR.join(" ")}; do
-  curl -fsSL "$NOD_SERVIDOR/api/motor/arquivos/$ARQUIVO" -o "$BAIXADOS/$ARQUIVO"
-done
-${ARQUIVOS_DO_COMPUTADOR.map((a) => `$SUDO install -o root -g root -m 644 "$BAIXADOS/${a}" "$PASTA/computador/${DESTINO[a]}"`).join("\n")}
-rm -rf "$BAIXADOS"
-if [ ! -f "$PASTA/computador/node_modules/playwright-core/package.json" ] || ! grep -q '"version": "${PLAYWRIGHT_DO_COMPUTADOR}"' "$PASTA/computador/node_modules/playwright-core/package.json"; then
+${locais ? copiaLocal() : baixaDoServidor()}if [ ! -f "$PASTA/computador/node_modules/playwright-core/package.json" ] || ! grep -q '"version": "${PLAYWRIGHT_DO_COMPUTADOR}"' "$PASTA/computador/node_modules/playwright-core/package.json"; then
   echo '{"name":"nod-computador","private":true,"type":"module"}' | $SUDO tee "$PASTA/computador/package.json" >/dev/null
   $SUDO env PATH="$PASTA/node/bin:$PATH" "$PASTA/node/bin/npm" install --prefix "$PASTA/computador" --no-fund --no-audit --ignore-scripts --loglevel=error playwright-core@${PLAYWRIGHT_DO_COMPUTADOR} >/dev/null
 fi
@@ -186,10 +192,31 @@ $SUDO env PLAYWRIGHT_BROWSERS_PATH="$PASTA/chromium" "$PASTA/node/bin/node" "$PA
 $SUDO chmod -R a+rX "$PASTA/chromium" "$PASTA/computador"
 passo "Chromium do computador"
 ${unidades}
-$SUDO systemctl daemon-reload
+${ligar ? LIGAR_UNITS : HABILITAR_UNITS}
+passo "computador da pessoa (nod-computador)"
+`;
+}
+
+const LIGAR_UNITS = `$SUDO systemctl daemon-reload
 $SUDO systemctl enable --now nod-computador-terminal.socket nod-computador.socket >/dev/null 2>&1
 # Arquivos novos valem no próximo comando: o serviço reinicia se já estava de pé (as telas fecham; os dados ficam).
-$SUDO systemctl try-restart nod-computador.service nod-computador-terminal.service >/dev/null 2>&1 || true
-passo "computador da pessoa (nod-computador)"
+$SUDO systemctl try-restart nod-computador.service nod-computador-terminal.service >/dev/null 2>&1 || true`;
+
+/** No chroot (disco da VM do Mac): só os links do enable; a unit sobe no primeiro boot da VM. */
+const HABILITAR_UNITS = `$SUDO systemctl enable nod-computador-terminal.socket nod-computador.socket >/dev/null 2>&1`;
+
+function baixaDoServidor(): string {
+  return `BAIXADOS=$(mktemp -d)
+for ARQUIVO in ${ARQUIVOS_DO_COMPUTADOR.join(" ")}; do
+  curl -fsSL "$NOD_SERVIDOR/api/motor/arquivos/$ARQUIVO" -o "$BAIXADOS/$ARQUIVO"
+done
+${ARQUIVOS_DO_COMPUTADOR.map((a) => `$SUDO install -o root -g root -m 644 "$BAIXADOS/${a}" "$PASTA/computador/${DESTINO[a]}"`).join("\n")}
+rm -rf "$BAIXADOS"
+`;
+}
+
+/** `$ORIGEM` tem os mesmos nomes de dist/motor (computador-*.mjs). */
+function copiaLocal(): string {
+  return `${ARQUIVOS_DO_COMPUTADOR.map((a) => `$SUDO install -o root -g root -m 644 "$ORIGEM/${a}" "$PASTA/computador/${DESTINO[a]}"`).join("\n")}
 `;
 }

@@ -885,6 +885,7 @@ export function criarComputadores(o: Opcoes) {
         ligadoDesde: ativo ? m?.foto?.ligadoDesde ?? null : null,
         atividade: lido.atividade.map((a) => ({ agenteId: a.agenteId, texto: textoDaAtividade(a.tipo, a.estado), em: a.em })),
         aviso_recriado: lido.aviso,
+        ...(m?.preparo ? { preparo: m.preparo } : {}),
       };
     },
     /**

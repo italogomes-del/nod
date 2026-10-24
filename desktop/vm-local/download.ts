@@ -67,7 +67,8 @@ function mensagem(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-function passageiro(status: number): boolean {
+/** HTTP que passa sozinho (5xx, 408, 429): entra no backoff. Os outros 4xx são terminais (`falhou`, com o motivo). */
+export function passageiro(status: number): boolean {
   return status >= 500 || status === 408 || status === 429;
 }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { focarJanela, lerEstadoJanela, medirEstadoJanela, resolverEstadoJanela, type Area, type EstadoJanela, type JanelaFocavel, type JanelaMedivel } from "../../../desktop/janela.ts";
+import { abrirPrimeiroUsoDaVm, focarJanela, lerEstadoJanela, medirEstadoJanela, resolverEstadoJanela, type Area, type EstadoJanela, type JanelaFocavel, type JanelaMedivel } from "../../../desktop/janela.ts";
 
 /**
  * Instância única e estado da janela web (definido em 2026-10-05, NOD-137): abrir de novo traz a janela para a frente,
@@ -190,5 +190,15 @@ describe("resolverEstadoJanela", () => {
     const telas = { principal: deslocado, todas: [principal, deslocado] };
     expect(resolverEstadoJanela(null, telas, padrao)).toEqual({ x: -1600, y: -90, largura: 1280, altura: 860, maximizada: false });
     expect(resolverEstadoJanela(estado({ x: -2100, y: -300 }), telas, padrao)).toEqual({ x: -1920, y: -200, largura: 1280, altura: 860, maximizada: false });
+  });
+});
+
+describe("abrirPrimeiroUsoDaVm (NOD-93)", () => {
+  it("abre quando o download começa, uma vez por sessão; progresso e outros estados não abrem", () => {
+    expect(abrirPrimeiroUsoDaVm(null, "baixando", false)).toBe(true);
+    expect(abrirPrimeiroUsoDaVm("pausado_sem_internet", "baixando", false)).toBe(true);
+    expect(abrirPrimeiroUsoDaVm("baixando", "baixando", false)).toBe(false);
+    expect(abrirPrimeiroUsoDaVm(null, "baixando", true)).toBe(false);
+    expect(abrirPrimeiroUsoDaVm(null, "pronto", false)).toBe(false);
   });
 });

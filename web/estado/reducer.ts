@@ -1414,8 +1414,10 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
     case "hidratar-computador-pessoa": {
       if (!acao.dto) return estado.computadorPessoa ? { ...estado, computadorPessoa: null, computadorMemoria: MEMORIA_INICIAL, computadorUi: UI_COMPUTADOR_INICIAL } : estado;
       const computadorMemoria = lembrarComputador(estado.computadorPessoa, acao.dto, estado.computadorMemoria, acao.agora);
-      // A operação acabou: as etapas fecham sozinhas.
-      const computadorUi = !acao.dto.operacao && estado.computadorUi.etapasAbertas ? { ...estado.computadorUi, etapasAbertas: false } : estado.computadorUi;
+      // A operação acabou: as etapas fecham sozinhas. NOD-93: o preparo acabou (pronto, falhou): a janela de primeiro uso também.
+      const fimDaOperacao = !acao.dto.operacao && estado.computadorUi.etapasAbertas;
+      const fimDoPreparo = estado.computadorUi.preparoAberto && !acao.dto.preparo?.estado.match(/^(baixando|pausado_sem_internet|preparando|ligando|esperando_memoria)$/);
+      const computadorUi = fimDaOperacao || fimDoPreparo ? { ...estado.computadorUi, ...(fimDaOperacao ? { etapasAbertas: false } : {}), ...(fimDoPreparo ? { preparoAberto: false } : {}) } : estado.computadorUi;
       return { ...estado, computadorPessoa: acao.dto, computadorMemoria, computadorUi };
     }
     case "computador-ui":

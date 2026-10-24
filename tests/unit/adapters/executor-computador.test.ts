@@ -85,4 +85,46 @@ describe("laço do computador no motor", () => {
     expect(sonos[0]).toBe(600_000);
   });
 
+
+  describe("ganchos (NOD-93, ADR-127 §3)", () => {
+    it("antesDeRepassar: null segue ao supervisor; resposta volta na hora sem tocar o socket; erro vira nao_iniciou", async () => {
+      const sock = pasta();
+      const sup = await supervisorFalso(sock, (m, s) => {
+        if (m.tipo === "comando") s.write(`${JSON.stringify({ tipo: "resultado", id: m.comando.id, desfecho: "ok" })}\n`);
+      });
+      const p = ponteFalsa([[comando("segue"), comando("segura"), comando("quebra")]]);
+      const vistos: string[] = [];
+      laco(iniciarComputador({
+        canal: p.canal, socket: sock, batimentoMs: 60_000, dormir: async () => undefined,
+        antesDeRepassar: async (c) => {
+          vistos.push(c.id);
+          if (c.id === "segura") return { desfecho: "esperando_tela", progresso: { pct: 79, etapa: "baixando" } };
+          if (c.id === "quebra") throw new Error("x");
+          return null;
+        },
+      }));
+      await esperarAte(() => p.resultados.length === 3);
+      expect(vistos).toEqual(["segue", "segura", "quebra"]);
+      expect(sup.recebidas.filter((m) => m.tipo === "comando").map((m) => m.tipo === "comando" && m.comando.id)).toEqual(["segue"]);
+      // A resposta do supervisor chega pelo socket, depois das que o gancho deu na hora: a ordem não importa.
+      expect([...p.resultados].sort((x, y) => x.id.localeCompare(y.id))).toEqual([
+        { id: "quebra", desfecho: "falhou", motivo: "nao_iniciou" },
+        { id: "segue", desfecho: "ok" },
+        { id: "segura", desfecho: "esperando_tela", progresso: { pct: 79, etapa: "baixando" } },
+      ]);
+    });
+
+    it("aoRelato vê cada foto do supervisor (sem o tipo) e a foto ainda sobe; erro no gancho não para o fio", async () => {
+      const sock = pasta();
+      const foto = { tipo: "estado", computadorId: "c", ligado: true, supervisorPub: "p", telas: [] };
+      await supervisorFalso(sock, (m, s) => { if (m.tipo === "pedir_estado") s.write(`${JSON.stringify(foto)}\n`); });
+      const p = ponteFalsa([]);
+      const fotos: EstadoComputadorRelatado[] = [];
+      const l = laco(iniciarComputador({ canal: p.canal, socket: sock, batimentoMs: 60_000, dormir: async () => undefined, aoRelato: (e) => { fotos.push(e); throw new Error("x"); } }));
+      await esperarAte(() => p.estados.length === 1);
+      await l.batimento();
+      await esperarAte(() => p.estados.length === 2);
+      expect(fotos).toEqual([{ computadorId: "c", ligado: true, supervisorPub: "p", telas: [] }, { computadorId: "c", ligado: true, supervisorPub: "p", telas: [] }]);
+    });
+  });
 });

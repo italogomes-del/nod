@@ -19,7 +19,13 @@ import {
   resumoDasTelas,
   type ComputadorPessoaDto,
   type TelaDaPessoa,
+  dicaDoPreparo,
+  htmlLinhaDoPreparo,
+  htmlDialogoDoPainel,
+  tamanhoEmPalavras,
 } from "../../../web/lib/computador-pessoa.ts";
+import { htmlCenaDoPreparo } from "../../../web/lib/cena-do-preparo.ts";
+import { readFileSync } from "node:fs";
 import { estadoInicial, reduzir } from "../../../web/estado/reducer.ts";
 import { secoesDoEspaco } from "../../../web/telas/espaco.ts";
 import { htmlMenuConta } from "../../../web/telas/menu-conta.ts";
@@ -193,5 +199,99 @@ describe("pedido de ajuda (login leve)", () => {
   it("sem miniatura, o Abrir fica sempre à vista", () => {
     expect(htmlLogin({ agenteId: "a", titulo: "entrar no Gmail" })).toContain('class="cb-login-mini sem-imagem"');
     expect(htmlLogin({ agenteId: "a", titulo: "entrar no Gmail", src: "data:image/png;base64,AA" })).toContain('class="cb-login-mini"');
+  });
+});
+
+describe("preparo da VM local (NOD-93, passo 10)", () => {
+  const MB = 1024 ** 2;
+  const baixando = { estado: "baixando" as const, bytes: 870 * MB, total: 1126 * MB, desde: 1 };
+  it("tamanho e dica do anel: 870 MB de 1,1 GB · 77%; pausado diz pausado; fora do download, sem dica", () => {
+    expect(tamanhoEmPalavras(870 * MB)).toBe("870 MB");
+    expect(tamanhoEmPalavras(1126 * MB)).toBe("1,1 GB");
+    expect(dicaDoPreparo(baixando)).toBe("Preparando · 870 MB de 1,1 GB · 77%");
+    expect(dicaDoPreparo({ ...baixando, estado: "pausado_sem_internet" })).toMatch(/^Download pausado · /);
+    expect(dicaDoPreparo({ estado: "pronto", desde: 1 })).toBeNull();
+  });
+
+  it("menu: o anel com a dica durante o download; pronto volta ao ícone", () => {
+    expect(htmlItemMenu(pc({ preparo: baixando }))).toContain("Preparando · 870 MB de 1,1 GB · 77%");
+    expect(htmlItemMenu(pc({ preparo: { estado: "pronto", desde: 1 } }))).not.toContain("cb-dica");
+  });
+
+  it("chat: pausado com tentar agora; macOS antigo vira o card com Conectar uma VM; falhou é aviso", () => {
+    const pausado = htmlLinhaDoPreparo({ ...baixando, estado: "pausado_sem_internet" });
+    expect(pausado).toContain("Download pausado em 77% · sem internet");
+    expect(pausado).toContain('data-act="vm-tentar-agora"');
+    const antigo = htmlLinhaDoPreparo({ estado: "macos_antigo", desde: 1 });
+    expect(antigo).toContain("macOS 13 ou mais novo");
+    expect(antigo).toContain('data-act="conectar-sempre-ligada"');
+    expect(htmlLinhaDoPreparo({ estado: "falhou", desde: 1 })).toContain("Não consegui preparar o computador");
+    expect(htmlLinhaDoPreparo({ estado: "ligando", desde: 1 })).toContain("Esperando o computador ficar pronto");
+  });
+
+  it("painel: a barra do download com os MB; macOS antigo mostra a faixa e esconde telas e manutenção", () => {
+    const painel = htmlPainelComputadorDoBot(pc({ preparo: baixando }), BOTS as never, UI_INICIAL, 0);
+    expect(painel).toContain('aria-label="Baixando o computador"');
+    expect(painel).toContain('aria-valuenow="77"');
+    const antigo = htmlPainelComputadorDoBot(pc({ estado: "sem_suporte" as never, preparo: { estado: "macos_antigo", desde: 1 } }), BOTS as never, UI_INICIAL, 0);
+    expect(antigo).toContain("Conectar uma VM");
+    expect(antigo).not.toContain("Manutenção");
+  });
+});
+
+describe("janela de primeiro uso da VM local (NOD-93, protótipo v2; revisão do #516 item 4)", () => {
+  const MB = 1024 ** 2;
+  const baixando = { estado: "baixando" as const, bytes: 870 * MB, total: 1126 * MB, desde: 1 };
+  const aberta = { ...UI_INICIAL, preparoAberto: true };
+
+  it("a cena muda por etapa: o monitor enche com o % no download, liga e abre; o mascote é decorativo", () => {
+    const b = htmlCenaDoPreparo("baixando", "<nod-mascote></nod-mascote>", 50);
+    expect(b).toContain('data-etapa="baixando"');
+    expect(b).toContain('role="img"');
+    expect(b).toContain('class="cb-cena-masc" aria-hidden="true"');
+    expect(b).toContain('class="cb-cena-enche" x="157" y="57" width="116" height="35"');
+    expect(b).toContain("cb-peca p1");
+    const l = htmlCenaDoPreparo("ligando", "");
+    expect(l).toContain('data-etapa="ligando"');
+    expect(l).not.toContain("cb-cena-enche");
+    expect(htmlCenaDoPreparo("abrindo", "")).toContain("cb-cena-mao");
+  });
+
+  it("aberta pelo app no primeiro download: a cena com o mascote, a barra, as etapas e o ghost Continuar em segundo plano com o foco", () => {
+    const j = htmlDialogoDoPainel(pc({ preparo: baixando }), BOTS as never, aberta);
+    expect(j).toContain('role="dialog"');
+    expect(j).toContain("Preparando o computador no seu Mac");
+    expect(j).toContain('class="cb-cena" data-etapa="baixando"');
+    expect(j).toContain("nod-mascote");
+    expect(j).toContain("Só da primeira vez: 1,1 GB. Depois, ele liga em segundos.");
+    expect(j).toContain('aria-valuenow="77"');
+    expect(j).toContain("870 MB de 1,1 GB");
+    expect(j).toMatch(/<button type="button" class="cb-bt-ghost" data-act="pc-segundo-plano" data-cl-autofoco>Continuar em segundo plano<\/button>/);
+    expect(j).toContain('<div class="cl-fundo" data-act="pc-segundo-plano"></div>');
+  });
+
+  it("ligando muda a cena; pausado diz que continua sozinho, com tentar agora; sem preparo, falhou ou fechada, nada", () => {
+    expect(htmlDialogoDoPainel(pc({ preparo: { estado: "preparando", desde: 1 } }), BOTS as never, aberta)).toContain('data-etapa="ligando"');
+    const pausado = htmlDialogoDoPainel(pc({ preparo: { ...baixando, estado: "pausado_sem_internet" } }), BOTS as never, aberta);
+    expect(pausado).toContain("Download pausado em 77% · sem internet. Continua sozinho quando a conexão voltar.");
+    expect(pausado).toContain('data-act="vm-tentar-agora"');
+    expect(htmlDialogoDoPainel(pc({ preparo: { estado: "falhou", desde: 1 } }), BOTS as never, aberta)).toBe("");
+    expect(htmlDialogoDoPainel(pc({ preparo: { estado: "pronto", desde: 1 } }), BOTS as never, aberta)).toBe("");
+    expect(htmlDialogoDoPainel(pc({ preparo: baixando }), BOTS as never, UI_INICIAL)).toBe("");
+  });
+
+  it("o reducer abre a janela e a fecha sozinho quando o preparo acaba", () => {
+    let e = reduzir(estadoInicial, { tipo: "computador-ui", ui: { preparoAberto: true } } as never);
+    e = reduzir(e, { tipo: "hidratar-computador-pessoa", dto: pc({ preparo: baixando }), agora: 1 } as never);
+    expect(e.computadorUi.preparoAberto).toBe(true);
+    e = reduzir(e, { tipo: "hidratar-computador-pessoa", dto: pc({ preparo: { estado: "pronto", desde: 2 } }), agora: 2 } as never);
+    expect(e.computadorUi.preparoAberto).toBe(false);
+  });
+
+  it("prefers-reduced-motion: cada etapa vira uma imagem parada", () => {
+    const css = readFileSync(new URL("../../../web/computador-do-bot.css", import.meta.url), "utf8");
+    const reduzido = css.slice(css.indexOf("@media (prefers-reduced-motion: reduce)"));
+    expect(css).toMatch(/\.cb-cena\[data-etapa="baixando"\] \.cb-peca \{ animation: cb-cai/);
+    expect(reduzido).toContain(".cb-cena *, .cb-cena-masc > nod-mascote { animation: none !important; }");
   });
 });

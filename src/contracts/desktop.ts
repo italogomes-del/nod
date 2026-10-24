@@ -14,7 +14,7 @@ import type { PonteMidia } from "./midia-desktop.ts";
  */
 
 /** Para onde o clique no aviso leva: a conversa do pedido (um só) ou "Sua vez" (vários). */
-export type AlvoAviso = { tipo: "conversa"; conversaId: string; agenteId: string } | { tipo: "sua-vez" };
+export type AlvoAviso = { tipo: "conversa"; conversaId: string; agenteId: string } | { tipo: "sua-vez" } | { tipo: "computador-do-bot"; primeiroUso?: boolean };
 
 /** Um aviso já redigido pela web (web/lib/avisos.ts): o Mac só mostra. */
 export type AvisoDesktop = { titulo: string; corpo: string; alvo: AlvoAviso };
@@ -144,11 +144,11 @@ export type NodDesktop = {
   /**
    * NOD-345 (ADR-124): a pessoa entrou numa conta pela janela do app; a página passa o código de troca de uso único e o
    * processo principal o troca pela chave do espaço novo e reconecta. `false` = código recusado (a página segue na sessão
-   * web). Opcional: o app instalado antes desta versão não tem, e a página então só pede para reconectar o app.
-   */
+   * web). Opcional: o app instalado antes desta versão não tem, e a página então só pede para reconectar o app. */
   trocarConta?(codigo: string): Promise<boolean>;
-  /** O desafio (SHA-256) do segredo de troca do processo principal: a página o manda no login para receber o código. */
-  desafioConta?(): Promise<string>;
+  desafioConta?(): Promise<string>; // O desafio (SHA-256) do segredo de troca: a página o manda no login para receber o código.
+  /** NOD-93: retoma já o download pausado da VM local (app sem a VM: não faz nada). Ausente = app antigo. */
+  vmTentarAgora?(): Promise<void>;
   /** Chamado quando a pessoa clica num aviso: a web abre o alvo. */
   aoAbrir(fn: (alvo: AlvoAviso) => void): void;
 };
@@ -190,9 +190,9 @@ export const CANAIS_DESKTOP = {
   contasMudaram: "nod:contas-mudaram",
   // ADR-102 (2026-10-13): e-mail e organização das contas deste Mac, para a lista única da tela.
   contasDetalhes: "nod:contas-detalhes",
-  // NOD-345 (ADR-124): a troca de espaço depois de entrar numa conta pela janela do app.
-  trocarConta: "nod:trocar-conta",
+  trocarConta: "nod:trocar-conta", // NOD-345 (ADR-124): a troca de espaço depois de entrar numa conta pela janela do app.
   desafioConta: "nod:desafio-conta",
+  vmTentarAgora: "nod:vm-tentar-agora", // NOD-93 (ADR-127): o "tentar agora" do download pausado da VM local.
 } as const;
 
 /** Tetos do que a página pode mandar ao macOS (o corpo que a web redige tem até 140). */

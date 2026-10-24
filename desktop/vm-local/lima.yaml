@@ -1,7 +1,7 @@
-# NOD-93 (PR 2, ADR-123): a VM do computador do bot no Mac. Modelo: `desktop/vm-local/runtime.ts` troca os marcadores (ARCH, IMAGEM, CPUS, MEMORIA, DISCO, SOCKET)
+# NOD-93 (ADR-123, ADR-127): a VM do computador do bot no Mac, com o supervisor da ADR-122 no próprio disco. Modelo: `desktop/vm-local/runtime.ts` troca os marcadores (ARCH, IMAGEM, CPUS, MEMORIA, DISCO, SOCKET)
 # e grava a configuração da instância; o resto ({{.User}}, {{.Dir}}) é do Lima. Escrito para o Lima 2.2.1 (o boot de verdade é UAT no Mac).
 # Regras (tests/unit/desktop/vm-local-runtime.test.ts): vz, sem Rosetta, sem mounts do Mac, nenhuma porta no host;
-# o único canal é o socket do dockerd, num caminho só do nod.
+# o único canal é o socket de controle do supervisor (/run/nod-computador/ctl.sock), num caminho só do nod.
 minimumLimaVersion: 2.2.0
 vmType: vz
 os: Linux
@@ -14,7 +14,7 @@ memory: "@@MEMORIA@@"
 disk: "@@DISCO@@"
 mounts: []
 additionalDisks:
-  # Containers, volumes e logins (daemon.json do disco base): sobrevive a Atualizar e Redefinir.
+  # Perfis, cookies e chaves do supervisor (/var/lib/nod-computador, nod-dados.service): sobrevive a Atualizar e Redefinir.
   - name: nod-dados
     format: true
     fsType: ext4
@@ -34,30 +34,24 @@ ssh:
   forwardX11: false
 upgradePackages: false
 provision:
-  # O socket do dockerd é do usuário que o Lima cria: é por ele que o encaminhamento abaixo lê.
-  - mode: yq
-    path: /etc/systemd/system/docker.socket.d/override.conf
-    format: ini
-    expression: .Socket.SocketUser="{{.User}}"
-  # No 1º boot de cada disco base o docker.socket já subiu (root:docker) antes do override acima, que só vale do
-  # próximo boot em diante: sem isso, o probe e o encaminhamento do socket (ambos como o usuário) não teriam acesso.
+  # ADR-127 §2: o socket de controle é root:nod 0660; o Lima encaminha como o usuário dele, que entra no grupo.
   - mode: system
     script: |
       #!/bin/bash
       set -eu -o pipefail
-      systemctl daemon-reload
-      if [ -S /var/run/docker.sock ]; then chown "{{.User}}" /var/run/docker.sock; fi
+      getent group nod >/dev/null || groupadd --system nod
+      usermod -aG nod "{{.User}}"
 probes:
   - script: |
       #!/bin/bash
       set -eu -o pipefail
-      if ! timeout 60s bash -c "until test -S /var/run/docker.sock && docker info >/dev/null 2>&1; do sleep 2; done"; then
-        echo >&2 "dockerd não respondeu (disco nod-dados montado?)"
+      if ! timeout 60s bash -c "until test -S /run/nod-computador/ctl.sock; do sleep 2; done"; then
+        echo >&2 "o supervisor do computador não abriu o socket (disco nod-dados montado?)"
         exit 1
       fi
-    hint: Veja /var/log/cloud-init-output.log e journalctl -u docker no convidado
+    hint: Veja journalctl -u nod-dados -u nod-computador.socket -u nod-computador no convidado
 portForwards:
-  - guestSocket: /var/run/docker.sock
+  - guestSocket: /run/nod-computador/ctl.sock
     hostSocket: "@@SOCKET@@"
   # Nenhuma porta TCP/UDP do convidado chega ao Mac.
   - guestIP: 0.0.0.0

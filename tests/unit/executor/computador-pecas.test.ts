@@ -14,7 +14,7 @@ import { atualizarLoja, cookiesVivos, diffDeCookies, fundir, lerLoja, lojaVazia,
 import { decidirAbertura, leituraLocal, OCIOSA_APOS_MS } from "../../../infra/computador/regua.mjs";
 import { argsDoXvfb, arquivoXauthority, caminhoNoWorkspace, urlPermitida } from "../../../infra/computador/tela.mjs";
 import { rodarComando } from "../../../infra/computador/terminal.mjs";
-import { destinoDoResolv } from "../../../infra/computador/supervisor.mjs";
+import { chromiumDoPlaywright, destinoDoResolv } from "../../../infra/computador/supervisor.mjs";
 
 const pastas: string[] = [];
 afterEach(async () => { for (const p of pastas.splice(0)) await rm(p, { recursive: true, force: true }); });
@@ -316,5 +316,22 @@ describe("isolamento e tela", () => {
     expect(r.saida).toContain("d=nada");
     const lento = await rodarComando({ workspace: ws, comando: "sleep 5", prazoMs: 200 });
     expect(lento.saida).toContain("Limite");
+  });
+});
+
+describe("chromiumDoPlaywright (ADR-127 §4)", () => {
+  it("acha o chrome-linux64 do x64 e o chrome-linux do arm64; sem pasta, cai no chromium do PATH", async () => {
+    const base = await mkdtemp(join(tmpdir(), "pw-"));
+    try {
+      expect(chromiumDoPlaywright({ PLAYWRIGHT_BROWSERS_PATH: join(base, "nao") })).toBe("chromium");
+      await mkdir(join(base, "chromium-1200", "chrome-linux"), { recursive: true });
+      await writeFile(join(base, "chromium-1200", "chrome-linux", "chrome"), "");
+      expect(chromiumDoPlaywright({ PLAYWRIGHT_BROWSERS_PATH: base })).toBe(join(base, "chromium-1200", "chrome-linux", "chrome"));
+      await mkdir(join(base, "chromium-1200", "chrome-linux64"), { recursive: true });
+      await writeFile(join(base, "chromium-1200", "chrome-linux64", "chrome"), "");
+      expect(chromiumDoPlaywright({ PLAYWRIGHT_BROWSERS_PATH: base })).toBe(join(base, "chromium-1200", "chrome-linux64", "chrome"));
+    } finally {
+      await rm(base, { recursive: true, force: true });
+    }
   });
 });

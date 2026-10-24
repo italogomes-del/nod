@@ -155,4 +155,16 @@ describe("anúncio do computador no motor", () => {
     expect(anuncioDoComputador(sonda({ sem: ["/opt/nod-motor/chromium/chromium-1200/chrome-linux64/chrome"] }))).toEqual({ estado: "faltam_pacotes", falta: ["chromium"] });
     expect(anuncioDoComputador(sonda({ isola: false }))).toEqual({ estado: "sem_suporte" });
   });
+
+  it("no arm64 o Chromium do Playwright vem em chrome-linux (ADR-127 §4)", () => {
+    const x64 = "/opt/nod-motor/chromium/chromium-1200/chrome-linux64/chrome";
+    tudo.delete(x64);
+    tudo.add("/opt/nod-motor/chromium/chromium-1200/chrome-linux/chrome");
+    try {
+      expect(anuncioDoComputador(sonda())).toEqual({ estado: "pronto" });
+    } finally {
+      tudo.delete("/opt/nod-motor/chromium/chromium-1200/chrome-linux/chrome");
+      tudo.add(x64);
+    }
+  });
 });

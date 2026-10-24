@@ -15,6 +15,11 @@ import { log } from "../../obs/log.ts";
  * Supervisor fora do ar (socket ausente ou recusou): o comando volta na hora como `falhou` com `nao_iniciou` — quem
  * espera no servidor não fica parado até o teto. O relato que a ponte não aceitou (servidor fora) fica guardado e vai na
  * volta seguinte; o servidor ignora a repetição (idempotente pelo id).
+ *
+ * Ganchos (NOD-93, ADR-127 §3): o app do Mac usa o mesmo fio com o supervisor na VM local. `antesDeRepassar` decide
+ * antes de cada comando se ele segue ao socket (null) ou volta na hora com a resposta que o gancho der (VM baixando,
+ * macOS antigo, memória apertada); `aoRelato` vê cada foto do supervisor (para dormir a VM ociosa). Sem os ganchos, o
+ * motor do Linux fica como antes.
  */
 
 export const SOCKET_SUPERVISOR = "/run/nod-computador/ctl.sock";
@@ -33,9 +38,18 @@ export type CanalDoMotor = {
   estado(e: EstadoComputadorRelatado): Promise<boolean>;
 };
 
+/** A resposta que o gancho dá no lugar do supervisor; o id é o do comando. */
+export type RespostaDoGancho = Omit<ResultadoComandoComputador, "id">;
+
+export type GanchosDoComputador = {
+  /** null = segue ao supervisor; senão, o comando volta na hora com esta resposta. Erro conta como `nao_iniciou`. */
+  antesDeRepassar?: (c: ComandoComputador) => Promise<RespostaDoGancho | null>;
+  aoRelato?: (e: EstadoComputadorRelatado) => void;
+};
+
 export type LacoComputador = { parar(): void; /** Só testes: uma volta do pedido de estado e do reenvio. */ batimento(): Promise<void> };
 
-export function iniciarComputador(o: { canal: CanalDoMotor; socket?: string; batimentoMs?: number; dormir?: (ms: number) => Promise<void> }): LacoComputador {
+export function iniciarComputador(o: { canal: CanalDoMotor; socket?: string; batimentoMs?: number; dormir?: (ms: number) => Promise<void> } & GanchosDoComputador): LacoComputador {
   const caminho = o.socket ?? SOCKET_SUPERVISOR;
   const dormir = o.dormir ?? ((ms: number) => new Promise<void>((r) => { const t = setTimeout(r, ms); t.unref?.(); }));
   let parado = false;
@@ -64,6 +78,10 @@ export function iniciarComputador(o: { canal: CanalDoMotor; socket?: string; bat
     let r: RelatoComputador;
     try { r = JSON.parse(linha) as RelatoComputador; } catch { log("aviso", "computador_linha_invalida", {}); return; }
     if (r?.tipo !== "resultado" && r?.tipo !== "estado") { log("aviso", "computador_linha_invalida", {}); return; }
+    if (r.tipo === "estado" && o.aoRelato) {
+      const { tipo: _t, ...foto } = r;
+      try { o.aoRelato(foto); } catch (e) { log("aviso", "computador_gancho_falhou", { gancho: "aoRelato", erro: String(e) }); }
+    }
     void relatar(r);
   }
 
@@ -94,6 +112,13 @@ export function iniciarComputador(o: { canal: CanalDoMotor; socket?: string; bat
   }
 
   async function repassar(c: ComandoComputador) {
+    if (o.antesDeRepassar) {
+      const resposta = await o.antesDeRepassar(c).catch((e: unknown): RespostaDoGancho => {
+        log("aviso", "computador_gancho_falhou", { gancho: "antesDeRepassar", comando_id: c.id, erro: String(e) });
+        return { desfecho: "falhou", motivo: "nao_iniciou" };
+      });
+      if (resposta) { await relatar({ tipo: "resultado", ...resposta, id: c.id }); return; }
+    }
     if (await mandar({ tipo: "comando", comando: c })) return;
     log("aviso", "computador_supervisor_fora", { comando_id: c.id, tipo: c.tipo });
     await relatar({ tipo: "resultado", id: c.id, desfecho: "falhou", motivo: "nao_iniciou" });

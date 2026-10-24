@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { AcaoComputador, AmbienteComputador, DriverComputador, ResultadoComputador } from "../../contracts/computador.ts";
 import type { ComandoComputador, ResultadoComandoComputador, TipoComandoComputador } from "../../contracts/computador-motor.ts";
 import type { UsoDoMac } from "../../contracts/raio-x.ts";
+import type { VmLocalAnunciada } from "../../contracts/vm-local.ts";
 import { escolherMaquina, type MaquinaCandidata, motivoParaFicarAcordada, PRAZO_COMANDO_MS, TETO_PRONTO_MS } from "../../domain/computador-canal.ts";
 import { ehFalhaComputador, EsperandoTela, FalhaComputador } from "../../domain/computador.ts";
 import { log } from "../../obs/log.ts";
@@ -35,7 +36,8 @@ export type ComputadorLocalizado = {
   padraoId: string | null;
   uso: UsoDoMac;
 };
-export type MaquinaDaPessoa = MaquinaCandidata & { nome: string };
+/** `vmLocal`: o preparo da VM local que o Mac anuncia (NOD-93); ausente nas Linux e no app antigo. */
+export type MaquinaDaPessoa = MaquinaCandidata & { nome: string; vmLocal?: VmLocalAnunciada };
 
 export type OpcoesDriverMotor = {
   env: Record<string, string | undefined>;
@@ -64,6 +66,8 @@ const PRAZO_RESPOSTA_PARAR_MS = 30_000;
 const TIPOS_DA_TELA = new Set<TipoComandoComputador>(["abrir_tela", "acao", "fechar_tela", "apagar_perfil"]);
 /** A cada quanto o driver confere se a máquina ainda tem contato enquanto espera. */
 const PASSO_MS = 250;
+/** NOD-93: o intervalo entre os `iniciar` enquanto o Mac responde esperando_tela (preparo da VM local). */
+const PASSO_ESPERANDO_MS = 1_000;
 /**
  * definido em 2026-10-22 (NOD-96 PR 5): Atualizar, Redefinir e Sair de todos esperam até 10 min pela resposta (fechar
  * as telas e apagar perfis demora). O comando continua valendo 2 min para sair da fila; só a espera é longa.
@@ -156,12 +160,20 @@ export function criarDriverMotor(o: OpcoesDriverMotor): DriverComputador & { mot
     } finally {
       if (sonda) o.canal.cancelar(sonda.id, new FalhaComputador("nao_iniciou"));
     }
-    const r = await enviar(idDoPortao, loc, maquina, "iniciar", ate, () => new FalhaComputador("nao_ficou_pronto", { maquina: maquina.nome }), {
+    const pedirIniciar = () => enviar(idDoPortao, loc, maquina, "iniciar", ate, () => new FalhaComputador("nao_ficou_pronto", { maquina: maquina.nome }), {
       segredoSelado: seloDoIniciar(credencial, id, pub),
       // NOD-96 PR 7: o supervisor fixa a Ed25519 do servidor no primeiro `iniciar` (TOFU) por este campo; sem ele
       // recusava o comando (`sem_chave_do_servidor`) e nenhuma máquina nova ligava.
       servidorPub: publicaDeAssinatura(credencial, id),
     });
+    let r = await pedirIniciar();
+    // definido em 2026-10-24 (NOD-93, ADR-127 §3): o Mac responde esperando_tela enquanto a VM local baixa, prepara ou
+    // espera memória; o servidor segura e pede de novo até o TETO_PRONTO_MS (estourou: nao_ficou_pronto).
+    while (r.desfecho === "esperando_tela") {
+      if (agora() >= ate) throw new FalhaComputador("nao_ficou_pronto", { maquina: maquina.nome, detalhe: r.progresso?.etapa });
+      await dormir(PASSO_ESPERANDO_MS);
+      r = await pedirIniciar();
+    }
     if (r.desfecho === "ok") {
       log("info", "computador_iniciado", { computador_id: id, maquina_id: maquina.machineId, driver: "motor" });
       return;
@@ -289,7 +301,8 @@ export function criarDriverMotor(o: OpcoesDriverMotor): DriverComputador & { mot
       const foto = f?.computadorId === id
         ? { ligadoDesde: f.ligadoDesde ?? null, memoriaTotalMb: f.memoriaTotalMb ?? null, titulos: Object.fromEntries(f.telas.map((t) => [t.agenteId, t.titulo ?? null])) }
         : null;
-      return { id: alvo, nome: viva.nome, contato: viva.ultimoContato, foto };
+      // NOD-93 (passo 9): a máquina escolhida é o Mac com a VM local — o preparo vai junto para a tela.
+      return { id: alvo, nome: viva.nome, contato: viva.ultimoContato, foto, ...(viva.plataforma === "darwin" && viva.vmLocal ? { preparo: viva.vmLocal } : {}) };
     },
     ligando(id) {
       return iniciando.has(id);

@@ -1,15 +1,16 @@
 import { execFile } from "node:child_process";
+import { createConnection } from "node:net";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 /**
- * definido em 2026-10-22 (NOD-93, PR 2, ADR-123): a VM local do Mac. O app leva o Lima (só o `limactl` e o guest
- * agent) e o docker CLI estático em Contents/Resources/vm-local, e liga uma VM vz com o disco do release
- * (infra/vm-local/). Tudo mora em `<userData>/vm` (no Mac, ~/Library/Application Support/nod/vm):
+ * definido em 2026-10-22 (NOD-93, PR 2, ADR-123; canal trocado pela ADR-127 em 2026-10-24): a VM local do Mac. O app
+ * leva o Lima (só o `limactl` e o guest agent) em Contents/Resources/vm-local e liga uma VM vz com o disco do release
+ * (infra/vm-local/), que já traz o supervisor do computador da ADR-122. Tudo mora em `<userData>/vm` (no Mac,
+ * ~/Library/Application Support/nod/vm):
  *
  *   vm/lima          LIMA_HOME próprio (nunca ~/.lima): a instância `nod` e o disco `nod-dados` (_disks/)
- *   vm/docker.sock   o único canal com a VM: o dockerd do convidado, encaminhado pelo Lima
- *   vm/docker-config DOCKER_CONFIG próprio (nunca ~/.docker, nem `docker context`, nem /var/run/docker.sock)
+ *   vm/ctl.sock      o único canal com a VM: o /run/nod-computador/ctl.sock do supervisor, encaminhado pelo Lima
  *   vm/cache         o disco baixado (desktop/vm-local/download.ts, PR 3)
  *
  * Atrás de NOD_VM_LOCAL=1 até o aceite nos dois Macs. Este módulo é o spike: monta o ambiente, gera o lima.yaml e
@@ -19,7 +20,7 @@ import { join } from "node:path";
 
 export const INSTANCIA = "nod";
 export const DISCO_DADOS = "nod-dados";
-/** definido em 2026-10-22: o disco de dados nasce com 64 GiB (raw esparso: ocupa só o que o docker grava). */
+/** definido em 2026-10-22: o disco de dados nasce com 64 GiB (raw esparso: ocupa só o que o supervisor grava). */
 export const DADOS_GIB = 64;
 /** definido em 2026-10-22: a raiz do convidado; o disco base é de 8 GiB (infra/vm-local/base.env) e cresce no boot. */
 export const DISCO_GIB = 12;
@@ -34,7 +35,7 @@ export function vmLocalLigada(env: Record<string, string | undefined>): boolean 
   return env.NOD_VM_LOCAL === "1";
 }
 
-export type CaminhosVmLocal = { raiz: string; limaHome: string; socket: string; dockerConfig: string; cache: string; yaml: string; registro: string; instancia: string; discoDados: string };
+export type CaminhosVmLocal = { raiz: string; limaHome: string; socket: string; cache: string; yaml: string; registro: string; instancia: string; discoDados: string };
 
 export function caminhosVmLocal(dadosApp: string): CaminhosVmLocal {
   const raiz = join(dadosApp, "vm");
@@ -42,8 +43,7 @@ export function caminhosVmLocal(dadosApp: string): CaminhosVmLocal {
   return {
     raiz,
     limaHome,
-    socket: join(raiz, "docker.sock"),
-    dockerConfig: join(raiz, "docker-config"),
+    socket: join(raiz, "ctl.sock"),
     cache: join(raiz, "cache"),
     yaml: join(raiz, `${INSTANCIA}.yaml`),
     registro: join(raiz, "instancia.json"),
@@ -52,16 +52,16 @@ export function caminhosVmLocal(dadosApp: string): CaminhosVmLocal {
   };
 }
 
-export type BinariosVmLocal = { limactl: string; docker: string; modelo: string };
+export type BinariosVmLocal = { limactl: string; modelo: string };
 
 /** O layout que scripts/desktop/vm-local-binarios.ts monta e o electron-builder copia para Resources/vm-local. */
 export function binariosVmLocal(recursos: string): BinariosVmLocal {
   const base = join(recursos, "vm-local");
-  return { limactl: join(base, "lima", "bin", "limactl"), docker: join(base, "docker"), modelo: join(base, "lima.yaml") };
+  return { limactl: join(base, "lima", "bin", "limactl"), modelo: join(base, "lima.yaml") };
 }
 
 /**
- * Os sockets que o Lima cria (ssh.sock, ha.sock) ficam em <limaHome>/nod; o do docker, em vm/. Num nome de usuário
+ * Os sockets que o Lima cria (ssh.sock, ha.sock) ficam em <limaHome>/nod; o do supervisor, em vm/. Num nome de usuário
  * comprido o caminho passa do limite e o Lima recusa: melhor saber antes de baixar 1 GB.
  */
 export function socketsCabem(c: CaminhosVmLocal): boolean {
@@ -69,7 +69,7 @@ export function socketsCabem(c: CaminhosVmLocal): boolean {
   return maior.every((s) => Buffer.byteLength(s) < SOCKET_MAX_BYTES);
 }
 
-/** Só o que o processo precisa; nada de LIMA_INSTANCE, DOCKER_HOST, http_proxy ou PATH da pessoa. */
+/** Só o que o processo precisa; nada de LIMA_INSTANCE, http_proxy ou PATH da pessoa. */
 const HERDADAS = ["HOME", "USER", "LOGNAME", "TMPDIR", "LANG"] as const;
 const PATH_DO_SISTEMA = "/usr/bin:/bin:/usr/sbin:/sbin";
 
@@ -84,11 +84,6 @@ function herdar(base: Record<string, string | undefined>): Record<string, string
 
 export function ambienteLima(c: CaminhosVmLocal, base: Record<string, string | undefined>): Record<string, string> {
   return { ...herdar(base), LIMA_HOME: c.limaHome };
-}
-
-/** O docker do nod só fala com a VM do nod: socket, config e contexto próprios, venha o que vier do ambiente. */
-export function ambienteDocker(c: CaminhosVmLocal, base: Record<string, string | undefined>): Record<string, string> {
-  return { ...herdar(base), DOCKER_HOST: `unix://${c.socket}`, DOCKER_CONFIG: c.dockerConfig, DOCKER_CLI_HINTS: "false" };
 }
 
 /** `versao` é o process.getSystemVersion() do Electron ("13.6.1"). Ilegível conta como não suportado. */
@@ -160,6 +155,28 @@ export type RegistroInstancia = { versao: string; arch: ArchMac; memoriaGiB: num
 export type Resultado = { codigo: number; saida: string; erro: string };
 export type Executar = (bin: string, args: readonly string[], env: Record<string, string>) => Promise<Resultado>;
 
+/** Pergunta ao socket e fecha: true se o supervisor devolveu uma linha dentro do prazo. */
+export type Conectar = (socket: string, prazoMs: number) => Promise<boolean>;
+
+/** definido em 2026-10-24 (ADR-127 §2): 2 s para o supervisor responder no socket encaminhado. */
+export const PRAZO_SUPERVISOR_MS = 2_000;
+
+/**
+ * QA da NOD-93: aceitar o connect não prova nada. O encaminhamento do Lima (ssh) e o .socket do systemd aceitam com o
+ * supervisor morto ou congelado. Por isso a sonda manda uma linha que não é JSON; o supervisor responde com um
+ * `resultado` falhou, sem log e sem efeito (servirControle), e só essa resposta conta.
+ */
+export const conectarSocket: Conectar = (socket, prazoMs) =>
+  new Promise((resolve) => {
+    const s = createConnection(socket);
+    const fim = (ok: boolean) => { clearTimeout(t); s.destroy(); resolve(ok); };
+    const t = setTimeout(() => fim(false), prazoMs);
+    s.once("connect", () => s.write("sonda\n"));
+    s.once("data", () => fim(true));
+    s.once("error", () => fim(false));
+    s.once("close", () => fim(false));
+  });
+
 export const executarProcesso: Executar = (bin, args, env) =>
   new Promise((resolve) => {
     execFile(bin, [...args], { env, maxBuffer: 8 * 1024 * 1024, timeout: 15 * 60_000 }, (erro, saida, err) => {
@@ -174,6 +191,7 @@ export type DepsRuntime = {
   /** process.env: só HOME, USER, LOGNAME, TMPDIR e LANG passam adiante. */
   ambiente: Record<string, string | undefined>;
   executar?: Executar;
+  conectar?: Conectar;
 };
 
 export type PedidoLigar = { imagem: string; versao: string; arch: ArchMac; memoriaGiB: number; cpus: number };
@@ -222,11 +240,10 @@ export function criarRuntimeVmLocal(deps: DepsRuntime) {
     async ligar(p: PedidoLigar): Promise<void> {
       if (!socketsCabem(c)) throw new FalhaVmLocal("caminho", `a pasta ${c.limaHome} é longa demais para os sockets do Lima`);
       await mkdir(c.limaHome, { recursive: true });
-      await mkdir(c.dockerConfig, { recursive: true });
       let atual = await status();
       const registro = await lerRegistro(c.registro);
       if (atual !== "ausente" && (registro?.versao !== p.versao || registro.arch !== p.arch || atual === "quebrada")) {
-        // Disco base novo: a instância é refeita; o nod-dados (containers, volumes, logins) só é desanexado.
+        // Disco base novo: a instância é refeita; o nod-dados (perfis, cookies, chaves) só é desanexado.
         if (atual === "ligada") await limactl("parar", "stop", INSTANCIA);
         await limactl("apagar", "delete", "--force", INSTANCIA);
         atual = "ausente";
@@ -251,10 +268,9 @@ export function criarRuntimeVmLocal(deps: DepsRuntime) {
       if ((await status()) === "ligada") await limactl("parar", "stop", INSTANCIA);
     },
 
-    /** O dockerd do convidado responde pelo socket do nod? */
-    async dockerResponde(): Promise<boolean> {
-      const r = await executar(b.docker, ["version", "--format", "{{.Server.Version}}"], ambienteDocker(c, deps.ambiente));
-      return r.codigo === 0 && r.saida.trim().length > 0;
+    /** O supervisor do convidado aceita conexão no socket encaminhado (vm/ctl.sock) em até 2 s? */
+    async supervisorResponde(): Promise<boolean> {
+      return (deps.conectar ?? conectarSocket)(c.socket, PRAZO_SUPERVISOR_MS);
     },
   };
 }

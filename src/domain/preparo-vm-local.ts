@@ -13,6 +13,7 @@
  */
 
 import type { UsoDoMac } from "../contracts/raio-x.ts";
+import type { VmLocalAnunciada } from "../contracts/vm-local.ts";
 
 /** definido em 2026-10-22 (plano da NOD-93): a espera depois de cada queda de rede dobra de 2 s até 60 s, sem limite de tentativas. */
 export const BACKOFF_MIN_MS = 2_000;
@@ -87,7 +88,9 @@ export type Evento =
   | { tipo: "tentar_agora" }
   | { tipo: "tela_abriu" }
   | { tipo: "tela_fechou" }
-  | { tipo: "tick" };
+  | { tipo: "tick" }
+  /** O uso da pessoa mudou (chega em cada comando do computador): memória e régua novas; no Livre a espera acaba. */
+  | { tipo: "uso"; modo: ModoMemoria; memoriaGiB: number };
 
 export type Efeito =
   | { tipo: "baixar" }
@@ -202,10 +205,25 @@ export function transicao(p: Preparo, e: Evento, agora: number): Passo {
       if (f.tipo === "esperando_memoria") return com(p, { fase: { tipo: "ligando", pediuLigar: false } }, { tipo: "medir_memoria" });
       return ficar(p);
 
+    case "uso":
+      if (e.modo === p.modo && e.memoriaGiB === p.memoriaGiB) return ficar(p);
+      if (f.tipo === "esperando_memoria") return com(p, { modo: e.modo, memoriaGiB: e.memoriaGiB, fase: { tipo: "ligando", pediuLigar: false } }, { tipo: "medir_memoria" });
+      return com(p, { modo: e.modo, memoriaGiB: e.memoriaGiB });
+
     case "tick":
       if (f.tipo === "pausado_sem_internet" && agora >= f.retomaEm) return com(p, { fase: retomar(f) }, { tipo: "baixar" });
       if (f.tipo === "esperando_memoria" && agora >= f.remedeEm) return com(p, { fase: { tipo: "ligando", pediuLigar: false } }, { tipo: "medir_memoria" });
       if (venceuOSono(f, p.telas, agora)) return com(p, { fase: { tipo: "dormindo" } }, { tipo: "desligar" });
       return ficar(p);
   }
+}
+
+/**
+ * definido em 2026-10-24 (NOD-93, passo 9): o que o app anuncia da fase (`ConexaoAnuncio.vmLocal`). `desde` vem de quem
+ * acompanha a mudança de fase (o tipo mudou, o relógio recomeça); `bytes`/`total` só no download, `motivo` só na falha.
+ */
+export function anuncioDaFase(f: Fase, desde: number): VmLocalAnunciada {
+  if (f.tipo === "baixando" || f.tipo === "pausado_sem_internet") return { estado: f.tipo, bytes: f.recebidos, ...(f.total !== null ? { total: f.total } : {}), desde };
+  if (f.tipo === "falhou") return { estado: "falhou", motivo: f.motivo, desde };
+  return { estado: f.tipo, desde };
 }

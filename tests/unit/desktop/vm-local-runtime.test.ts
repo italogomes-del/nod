@@ -1,12 +1,14 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
+import { servirControle } from "../../../infra/computador/supervisor.mjs";
 import {
-  ambienteDocker,
   ambienteLima,
   binariosVmLocal,
   caminhosVmLocal,
+  conectarSocket,
   criarRuntimeVmLocal,
   FalhaVmLocal,
   gerarLimaYaml,
@@ -24,12 +26,12 @@ const tmp = mkdtempSync(join(tmpdir(), "vm-local-rt-"));
 afterAll(() => rmSync(tmp, { recursive: true, force: true }));
 
 const APP = "/Users/ana/Library/Application Support/nod";
-const campos = { imagem: `${APP}/vm/cache/nod-vm-1.0.0-arm64.img.zst`, arch: "arm64" as const, memoriaGiB: 3, cpus: 4, socket: `${APP}/vm/docker.sock` };
+const campos = { imagem: `${APP}/vm/cache/nod-vm-1.0.0-arm64.img.zst`, arch: "arm64" as const, memoriaGiB: 3, cpus: 4, socket: `${APP}/vm/ctl.sock` };
 
 describe("desktop/vm-local/lima.yaml (NOD-93)", () => {
   const yaml = gerarLimaYaml(MODELO, campos);
 
-  it("vz, sem Rosetta, sem mounts do Mac e sem portas: o único canal é o socket do docker do nod", () => {
+  it("vz, sem Rosetta, sem mounts do Mac e sem portas: o único canal é o socket do supervisor (ADR-127)", () => {
     expect(yaml).toMatch(/^vmType: vz$/m);
     expect(yaml).toMatch(/^mounts: \[\]$/m);
     expect(yaml).toMatch(/rosetta:\n\s+enabled: false\n\s+binfmt: false/);
@@ -37,8 +39,9 @@ describe("desktop/vm-local/lima.yaml (NOD-93)", () => {
     expect(yaml).not.toMatch(/^\s*(location|mountPoint): "?~/m);
     // Duas regras ignore cobrindo todas as portas, nos dois endereços do convidado.
     expect(yaml.match(/guestPortRange: \[1, 65535\]\n\s+proto: any\n\s+ignore: true/g)).toHaveLength(2);
-    expect(yaml).toContain(`guestSocket: /var/run/docker.sock\n    hostSocket: "${campos.socket}"`);
-    expect(yaml).not.toContain("/var/run/docker.sock\"");
+    expect(yaml).toContain(`guestSocket: /run/nod-computador/ctl.sock\n    hostSocket: "${campos.socket}"`);
+    expect(yaml.match(/guestSocket:/g)).toHaveLength(1);
+    expect(yaml).not.toMatch(/docker/i);
   });
 
   it("nada da pessoa: sem chave ssh, agente, X11, containerd ou tela", () => {
@@ -50,11 +53,11 @@ describe("desktop/vm-local/lima.yaml (NOD-93)", () => {
     expect(yaml).toMatch(/video:\n\s+display: none/);
   });
 
-  it("o socket do dockerd é do usuário do Lima já no 1º boot (override para os próximos, chown para o atual)", () => {
-    expect(yaml).toContain('expression: .Socket.SocketUser="{{.User}}"');
-    const sistema = yaml.indexOf("- mode: system");
-    expect(sistema).toBeGreaterThan(yaml.indexOf("- mode: yq"));
-    expect(yaml.slice(sistema, yaml.indexOf("probes:"))).toMatch(/systemctl daemon-reload\n\s+if \[ -S \/var\/run\/docker\.sock \]; then chown "\{\{\.User\}\}" \/var\/run\/docker\.sock; fi/);
+  it("o usuário do Lima entra no grupo nod (dono do ctl.sock) e o probe espera o socket do supervisor", () => {
+    const sistema = yaml.slice(yaml.indexOf("- mode: system"), yaml.indexOf("probes:"));
+    expect(sistema).toContain('usermod -aG nod "{{.User}}"');
+    expect(yaml).not.toContain("mode: yq");
+    expect(yaml.slice(yaml.indexOf("probes:"), yaml.indexOf("portForwards:"))).toContain("test -S /run/nod-computador/ctl.sock");
   });
 
   it("troca todos os campos; o disco de dados nod-dados é o adicional", () => {
@@ -71,7 +74,7 @@ describe("desktop/vm-local/lima.yaml (NOD-93)", () => {
   it("valor estranho ou campo desconhecido é erro, nunca um yaml torto", () => {
     expect(() => gerarLimaYaml(MODELO, { ...campos, imagem: "relativo.img" })).toThrow(/imagem/);
     expect(() => gerarLimaYaml(MODELO, { ...campos, socket: '/a"b' })).toThrow(/socket/);
-    expect(() => gerarLimaYaml(MODELO, { ...campos, socket: "/a/{{.Home}}/docker.sock" })).toThrow(/socket/);
+    expect(() => gerarLimaYaml(MODELO, { ...campos, socket: "/a/{{.Home}}/ctl.sock" })).toThrow(/socket/);
     expect(() => gerarLimaYaml(MODELO, { ...campos, imagem: "/a/{x}.img" })).toThrow(/imagem/);
     expect(() => gerarLimaYaml(MODELO, { ...campos, memoriaGiB: 2.5 })).toThrow(/memória/);
     expect(() => gerarLimaYaml(MODELO, { ...campos, cpus: 0 })).toThrow(/cpus/);
@@ -112,21 +115,47 @@ describe("desktop/vm-local/runtime.ts (NOD-93)", () => {
 
   it("tudo mora em <userData>/vm, com LIMA_HOME próprio", () => {
     const c = caminhosVmLocal(APP);
-    expect(c).toMatchObject({ limaHome: `${APP}/vm/lima`, socket: `${APP}/vm/docker.sock`, dockerConfig: `${APP}/vm/docker-config`, cache: `${APP}/vm/cache`, discoDados: `${APP}/vm/lima/_disks/nod-dados` });
+    expect(c).toMatchObject({ limaHome: `${APP}/vm/lima`, socket: `${APP}/vm/ctl.sock`, cache: `${APP}/vm/cache`, discoDados: `${APP}/vm/lima/_disks/nod-dados` });
+    expect(c).not.toHaveProperty("dockerConfig");
     expect(binariosVmLocal("/A/nod.app/Contents/Resources")).toEqual({
       limactl: "/A/nod.app/Contents/Resources/vm-local/lima/bin/limactl",
-      docker: "/A/nod.app/Contents/Resources/vm-local/docker",
       modelo: "/A/nod.app/Contents/Resources/vm-local/lima.yaml",
     });
   });
 
-  it("o docker do nod nunca fala com o docker da pessoa: socket, config e PATH próprios", () => {
+  it("o limactl nunca herda o LIMA_HOME, a instância, o proxy ou o PATH da pessoa", () => {
     const c = caminhosVmLocal(APP);
-    const pessoa = { HOME: "/Users/ana", PATH: "/opt/homebrew/bin:/usr/bin", DOCKER_HOST: "tcp://1.2.3.4:2375", DOCKER_CONTEXT: "colima", DOCKER_CONFIG: "/Users/ana/.docker", LIMA_HOME: "/Users/ana/.lima", LIMA_INSTANCE: "default", http_proxy: "http://p" };
-    const d = ambienteDocker(c, pessoa);
-    expect(d).toEqual({ HOME: "/Users/ana", PATH: "/usr/bin:/bin:/usr/sbin:/sbin", DOCKER_HOST: `unix://${APP}/vm/docker.sock`, DOCKER_CONFIG: `${APP}/vm/docker-config`, DOCKER_CLI_HINTS: "false" });
-    expect(JSON.stringify(d)).not.toMatch(/\.docker|colima|\/var\/run\/docker\.sock/);
+    const pessoa = { HOME: "/Users/ana", PATH: "/opt/homebrew/bin:/usr/bin", DOCKER_HOST: "tcp://1.2.3.4:2375", LIMA_HOME: "/Users/ana/.lima", LIMA_INSTANCE: "default", http_proxy: "http://p" };
     expect(ambienteLima(c, pessoa)).toEqual({ HOME: "/Users/ana", PATH: "/usr/bin:/bin:/usr/sbin:/sbin", LIMA_HOME: `${APP}/vm/lima` });
+  });
+
+  it("conectarSocket: true só quando o supervisor de verdade responde; false sem socket", async () => {
+    const sock = join(tmp, "ctl.sock");
+    const supervisor = { estados: () => [], ouvir: () => () => undefined, tratar: async () => ({ id: "", desfecho: "ok" }) } as unknown as Parameters<typeof servirControle>[0];
+    const srv = servirControle(supervisor);
+    await new Promise<void>((ok) => srv.listen(sock, ok));
+    try {
+      expect(await conectarSocket(sock, 2_000)).toBe(true);
+    } finally {
+      await new Promise((ok) => srv.close(ok));
+    }
+    expect(await conectarSocket(join(tmp, "nao-existe.sock"), 2_000)).toBe(false);
+  });
+
+  it("conectarSocket: aceitar o connect e calar (encaminhamento do Lima, .socket do systemd, supervisor congelado) não conta (QA)", async () => {
+    const mudo = join(tmp, "mudo.sock");
+    const fecha = join(tmp, "fecha.sock");
+    const srvMudo = createServer(() => undefined);
+    const srvFecha = createServer((s) => s.end());
+    await new Promise<void>((ok) => srvMudo.listen(mudo, ok));
+    await new Promise<void>((ok) => srvFecha.listen(fecha, ok));
+    try {
+      expect(await conectarSocket(mudo, 300)).toBe(false);
+      expect(await conectarSocket(fecha, 2_000)).toBe(false);
+    } finally {
+      srvMudo.close();
+      srvFecha.close();
+    }
   });
 
   it("macOS 13 ou mais; 12 (e versão ilegível) fica de fora", () => {
@@ -162,29 +191,30 @@ describe("desktop/vm-local/runtime.ts (NOD-93)", () => {
       writeFileSync(join(recursos, "vm-local/lima.yaml"), MODELO);
       const c = caminhosVmLocal(dadosApp);
       let status: "Running" | "Stopped" | "Broken" = "Stopped";
-      let versaoDocker = "29.0.0\n";
+      let supervisorDe = true;
       const chamadas: string[] = [];
       const envs: Array<Record<string, string>> = [];
       const executar: Executar = async (bin, args, env) => {
         envs.push(env);
         const cmd = args.join(" ");
-        if (!cmd.startsWith("list")) chamadas.push(`${bin.endsWith("limactl") ? "limactl" : "docker"} ${cmd}`);
+        if (!cmd.startsWith("list")) chamadas.push(`${bin.endsWith("limactl") ? "limactl" : bin} ${cmd}`);
         if (args[0] === "list") return { codigo: 0, saida: `${JSON.stringify({ name: "nod", status })}\n`, erro: "" };
         if (args[0] === "create") mkdirSync(c.instancia, { recursive: true });
         if (args[0] === "delete") rmSync(c.instancia, { recursive: true, force: true });
         if (args[0] === "disk") mkdirSync(c.discoDados, { recursive: true });
         if (args[0] === "start") status = "Running";
         if (args[0] === "stop") status = "Stopped";
-        if (args[0] === "version") return { codigo: status === "Running" ? 0 : 1, saida: status === "Running" ? versaoDocker : "", erro: "" };
         return { codigo: 0, saida: "", erro: "" };
       };
-      const rt = criarRuntimeVmLocal({ dadosApp, recursos, ambiente: { HOME: "/h", DOCKER_HOST: "tcp://x" }, executar });
-      return { rt, c, chamadas, envs, quebrar: () => { status = "Broken"; }, semVersao: () => { versaoDocker = ""; }, setFalha: (f: Executar) => criarRuntimeVmLocal({ dadosApp, recursos, ambiente: {}, executar: f }) };
+      const conexoes: Array<[string, number]> = [];
+      const conectar = async (socket: string, prazoMs: number) => { conexoes.push([socket, prazoMs]); return status === "Running" && supervisorDe; };
+      const rt = criarRuntimeVmLocal({ dadosApp, recursos, ambiente: { HOME: "/h", DOCKER_HOST: "tcp://x" }, executar, conectar });
+      return { rt, c, chamadas, envs, conexoes, quebrar: () => { status = "Broken"; }, supervisorCaiu: () => { supervisorDe = false; }, setFalha: (f: Executar) => criarRuntimeVmLocal({ dadosApp, recursos, ambiente: {}, executar: f }) };
     }
     const pedido = { imagem: "/cache/nod-vm-1.0.0-arm64.img.zst", versao: "1.0.0", arch: "arm64" as const, memoriaGiB: 3, cpus: 4 };
 
     it("1ª vez: cria o disco de dados, grava o yaml, cria e liga; o limactl só vê o LIMA_HOME do nod", async () => {
-      const { rt, c, chamadas, envs } = cenario();
+      const { rt, c, chamadas, envs, conexoes } = cenario();
       await rt.ligar(pedido);
       expect(chamadas).toEqual([
         "limactl disk create nod-dados --size 64GiB --format raw",
@@ -194,7 +224,8 @@ describe("desktop/vm-local/runtime.ts (NOD-93)", () => {
       expect(readFileSync(c.yaml, "utf8")).toContain(`hostSocket: "${c.socket}"`);
       for (const env of envs) expect(env).toEqual({ HOME: "/h", PATH: "/usr/bin:/bin:/usr/sbin:/sbin", LIMA_HOME: c.limaHome });
       expect(await rt.status()).toBe("ligada");
-      expect(await rt.dockerResponde()).toBe(true);
+      expect(await rt.supervisorResponde()).toBe(true);
+      expect(conexoes).toEqual([[c.socket, 2_000]]);
     });
 
     it("já ligada e na versão: não faz nada; parar desliga e mantém tudo", async () => {
@@ -252,11 +283,12 @@ describe("desktop/vm-local/runtime.ts (NOD-93)", () => {
       expect(chamadas).toEqual(["limactl stop nod", "limactl edit --tty=false --memory=3 --cpus=2 nod", "limactl start --tty=false nod"]);
     });
 
-    it("docker que sai 0 sem versão do servidor não conta como respondendo (QA)", async () => {
-      const { rt, semVersao } = cenario();
+    it("VM ligada com o supervisor fora do ar não conta como respondendo; parada também não", async () => {
+      const { rt, supervisorCaiu } = cenario();
+      expect(await rt.supervisorResponde()).toBe(false);
       await rt.ligar(pedido);
-      semVersao();
-      expect(await rt.dockerResponde()).toBe(false);
+      supervisorCaiu();
+      expect(await rt.supervisorResponde()).toBe(false);
     });
 
     it("pasta longa demais para os sockets: erro de caminho antes de chamar o limactl (QA)", async () => {

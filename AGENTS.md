@@ -277,6 +277,11 @@ principal, que confere remetente e argumentos (`desktop/avisos-mac.ts`). A voz d
 renderer (web/lib/ligacao.ts), nunca pelo processo principal: é a referência do AEC do Chromium.
 `electron scripts/desktop/smoke-window.mjs` (depois de `desktop:build`) confere as duas pontes sem empacotar.
 
+Definido em 2026-10-24 (NOD-93, ADR-127): a VM local do Mac só existe com `NOD_VM_LOCAL=1` (no app e na variável de
+repositório do `desktop-release`). O disco vem de `NOD_VM_DISCO_URL` (só `https:`; padrão o release do repo) e é
+conferido pelo sha256 embutido no app (`<Resources>/vm-local/disco.sha256`, gravado no release por
+`scripts/vm-local/digest-do-disco.ts`), nunca por um `.sha256` baixado da mesma origem.
+
 Definido em 2026-10-09 (ADR-093): o app acha, instala e entra nas IAs sozinho. O PATH vem em camadas
 (`caminho.ts`: processo, instaladores, todas as versões do nvm, `$SHELL -l` em segundo plano) e nunca leva nada do
 nod nem `ELECTRON_RUN_AS_NODE`. Instalar = o npm que o app leva (`extraResources`) rodando no Electron como node, com

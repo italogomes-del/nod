@@ -11,6 +11,17 @@ export type Area = { x: number; y: number; width: number; height: number };
 export type JanelaFocavel = { isDestroyed(): boolean; isMinimized(): boolean; restore(): void; show(): void; focus(): void };
 export type JanelaMedivel = { isDestroyed(): boolean; isMinimized(): boolean; isFullScreen(): boolean; isMaximized(): boolean; getNormalBounds(): Area };
 
+/**
+ * NOD-93 (passo 10): a janela de primeiro uso da VM local. Quando o download do disco começa (o disco desta versão não
+ * está no cache: a primeira vez, ou depois de atualizar o app), o app traz a janela e abre o painel do computador com a
+ * janela de primeiro uso do protótipo v2 (`primeiroUso`: a cena do mascote por etapa, parada com prefers-reduced-motion,
+ * a barra com os MB e o ghost "Continuar em segundo plano"; web/lib/computador-pessoa.ts htmlJanelaDoPreparo), uma vez
+ * por sessão. Em segundo plano, o download segue e o progresso fica no anel do menu.
+ */
+export function abrirPrimeiroUsoDaVm(anterior: string | null, atual: string, jaAbriu: boolean): boolean {
+  return !jaAbriu && atual === "baixando" && anterior !== "baixando";
+}
+
 /** O minWidth da janela web; numa tela mais estreita, vale a largura da tela. */
 export const LARGURA_MINIMA = 900;
 

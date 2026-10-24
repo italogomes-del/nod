@@ -6,13 +6,13 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 /**
- * definido em 2026-10-22 (NOD-93, PR 2, ADR-123): baixa o Lima e o docker CLI fixados, confere o sha256 e monta
+ * definido em 2026-10-22 (NOD-93, PR 2, ADR-123; sem o docker CLI desde a ADR-127): baixa o Lima fixado, confere o
+ * sha256 e monta
  *
  *   dist/vm-local/<arch>/lima/bin/limactl
  *   dist/vm-local/<arch>/lima/share/lima/lima-guestagent.Linux-<aarch64|x86_64>.gz
- *   dist/vm-local/<arch>/docker
  *   dist/vm-local/<arch>/lima.yaml
- *   dist/vm-local/<arch>/LICENSE         Apache-2.0 do Lima, a mesma licença do docker CLI (THIRD_PARTY_NOTICES.md)
+ *   dist/vm-local/<arch>/LICENSE         Apache-2.0 do Lima (THIRD_PARTY_NOTICES.md)
  *
  * que o electron-builder copia para Contents/Resources/vm-local (extraResources, `${arch}` = arm64 | x64) e assina
  * com o desktop/entitlements.mac.plist (o `com.apple.security.virtualization` é o que deixa o limactl usar o vz).
@@ -24,15 +24,13 @@ import { fileURLToPath } from "node:url";
  */
 
 export const LIMA_VERSAO = "2.2.1";
-export const DOCKER_VERSAO = "29.9.2";
 
 export type ArchMac = "arm64" | "x64";
 export type Pacote = { nome: string; url: string; sha256: string; /** origem no tarball → destino em dist/vm-local/<arch> */ copiar: Array<[string, string]> };
 
-/** Conferidos em 2026-10-22 contra os .sha256sum do release do Lima e os .tgz de download.docker.com. */
+/** Conferidos em 2026-10-22 contra os .sha256sum do release do Lima. */
 const SHA = {
   lima: { arm64: "9e9eacce88f37e185c346bad73aa6136f738d8cdf8c3bb23cd42b071824bc66e", x64: "6b776e4bc41f358e6ee01fefcc78e2eb26f11635a0fcff632234af77a566c6c4" },
-  docker: { arm64: "ea8a2ce5ac31f9f5f3fb711a7a485e1e46cc7a69798a629a70306f6e6af25b7a", x64: "089c3f618df88bdef4f1257d9d604499136a1ec5168b67d194c260acad2b522f" },
 } as const;
 
 export function lerArch(texto: string | undefined): ArchMac {
@@ -43,7 +41,6 @@ export function lerArch(texto: string | undefined): ArchMac {
 export function pacotes(arch: ArchMac): Pacote[] {
   const lima = arch === "arm64" ? "arm64" : "x86_64";
   const linux = arch === "arm64" ? "aarch64" : "x86_64";
-  const docker = arch === "arm64" ? "aarch64" : "x86_64";
   const agente = `share/lima/lima-guestagent.Linux-${linux}.gz`;
   return [
     {
@@ -51,12 +48,6 @@ export function pacotes(arch: ArchMac): Pacote[] {
       url: `https://github.com/lima-vm/lima/releases/download/v${LIMA_VERSAO}/lima-${LIMA_VERSAO}-Darwin-${lima}.tar.gz`,
       sha256: SHA.lima[arch],
       copiar: [["bin/limactl", "lima/bin/limactl"], [agente, `lima/${agente}`], ["share/doc/lima/LICENSE", "LICENSE"]],
-    },
-    {
-      nome: `docker ${DOCKER_VERSAO}`,
-      url: `https://download.docker.com/mac/static/stable/${docker}/docker-${DOCKER_VERSAO}.tgz`,
-      sha256: SHA.docker[arch],
-      copiar: [["docker/docker", "docker"]],
     },
   ];
 }

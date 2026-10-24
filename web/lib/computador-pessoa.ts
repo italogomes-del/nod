@@ -2,6 +2,8 @@ import type { Agente } from "../../src/contracts/agente.ts";
 import type { ControleComputador } from "../../src/contracts/computador.ts";
 import type { EstadoTelaComputador } from "../../src/contracts/computador-motor.ts";
 import type { MotivoFalhaComputador } from "../../src/contracts/motivos.ts";
+import type { VmLocalAnunciada } from "../../src/contracts/vm-local.ts";
+import { htmlCenaDoPreparo } from "./cena-do-preparo.ts";
 import { htmlMascote } from "./mascote.ts";
 import { esc } from "./escape.ts";
 
@@ -52,11 +54,16 @@ export type ComputadorPessoaDto = {
   memoria?: { usadaMb: number; totalMb: number } | null;
   ligadoDesde?: number | null;
   atividade?: AtividadeDaPessoa[];
+  /** NOD-93 (ADR-127): o preparo da VM local quando o computador mora no Mac (baixando, pausado, macOS antigo...). */
+  preparo?: VmLocalAnunciada | null;
 };
 
-/** O que a pessoa marcou no painel: a ação sugerida por um aviso e o diálogo de confirmação aberto. */
-export type ComputadorUi = { realce: OperacaoPessoa | null; confirmar: "redefinir" | "sair_de_todos" | null; etapasAbertas: boolean };
-export const UI_INICIAL: ComputadorUi = { realce: null, confirmar: null, etapasAbertas: false };
+/**
+ * O que a pessoa marcou no painel: a ação sugerida por um aviso, o diálogo de confirmação aberto, as etapas da operação
+ * e (NOD-93) a janela de primeiro uso da VM local, que o app abre quando o primeiro download começa.
+ */
+export type ComputadorUi = { realce: OperacaoPessoa | null; confirmar: "redefinir" | "sair_de_todos" | null; etapasAbertas: boolean; preparoAberto: boolean };
+export const UI_INICIAL: ComputadorUi = { realce: null, confirmar: null, etapasAbertas: false, preparoAberto: false };
 
 type BotVisto = Pick<Agente, "id" | "nome" | "cor" | "forma">;
 
@@ -156,12 +163,85 @@ export function htmlEtapas(tipo: OperacaoLonga, etapa: string | null, pct: numbe
       : `<li><span class="pc-et-ic"><i></i></span>${esc(n)}</li>`).join("")}</ol>`;
 }
 
+// ---- preparo da VM local (NOD-93) ------------------------------------------------------------------------------------
+
+/** "870 MB", "1,1 GB": como o protótipo da NOD-93 escreve o download. */
+export function tamanhoEmPalavras(bytes: number): string {
+  const mb = bytes / 1024 ** 2;
+  if (mb < 1000) return `${Math.max(0, Math.round(mb))} MB`;
+  return `${(mb / 1024).toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} GB`;
+}
+
+/** O % do download (0 sem total). */
+export function pctDoPreparo(p: VmLocalAnunciada): number {
+  return p.total ? Math.max(0, Math.min(100, Math.floor(((p.bytes ?? 0) / p.total) * 100))) : 0;
+}
+
+/** O preparo que ainda segura o computador (o download e a primeira ligada); pronto, dormindo ou sem preparo = null. */
+export function preparoAtivo(dto: ComputadorPessoaDto | null): VmLocalAnunciada | null {
+  const p = dto?.preparo;
+  return p && (p.estado === "baixando" || p.estado === "pausado_sem_internet" || p.estado === "preparando" || p.estado === "ligando" || p.estado === "esperando_memoria" || p.estado === "macos_antigo" || p.estado === "falhou") ? p : null;
+}
+
+/** "Preparando · 870 MB de 1,1 GB · 79%": a dica do anel no menu (sem toast). Só no download, em curso ou pausado. */
+export function dicaDoPreparo(p: VmLocalAnunciada): string | null {
+  if (p.estado !== "baixando" && p.estado !== "pausado_sem_internet") return null;
+  const quanto = p.total ? ` · ${tamanhoEmPalavras(p.bytes ?? 0)} de ${tamanhoEmPalavras(p.total)} · ${pctDoPreparo(p)}%` : "";
+  return `${p.estado === "pausado_sem_internet" ? "Download pausado" : "Preparando"}${quanto}`;
+}
+
+const ETAPAS_DO_PREPARO = ["Baixando o computador", "Ligando o computador", "Abrindo a tela"] as const;
+const MASCOTE_NOD = { nome: "nod", cor: "c-blue", forma: "shape-circle" } as const satisfies Pick<Agente, "nome" | "cor" | "forma">;
+
+/**
+ * A janela de primeiro uso da VM local (protótipo v2 da NOD-93): "Preparando o computador no seu Mac", com a cena do
+ * mascote por etapa no topo (web/lib/cena-do-preparo.ts; parada com prefers-reduced-motion), o texto enxuto, a barra,
+ * as 3 etapas e o ghost "Continuar em segundo plano" com o foco (o progresso segue no anel do menu e na linha de 2 px).
+ * Só no download e na primeira ligada; pronto, falhou ou macOS antigo não têm janela (o painel e o card dizem).
+ */
+export function htmlJanelaDoPreparo(dto: ComputadorPessoaDto, bots: readonly BotVisto[]): string {
+  const p = preparoAtivo(dto);
+  if (!p) return "";
+  const noDownload = p.estado === "baixando" || p.estado === "pausado_sem_internet";
+  const ligando = p.estado === "preparando" || p.estado === "ligando" || p.estado === "esperando_memoria";
+  if (!noDownload && !ligando) return "";
+  const pct = noDownload ? pctDoPreparo(p) : 100;
+  const quem = bots.find((b) => b.id === dto.esperando[0]) ?? bots[0] ?? MASCOTE_NOD;
+  const mascote = htmlMascote(quem, "", "disponivel", 'aria-hidden="true"').replace(' role="img"', "");
+  const cena = htmlCenaDoPreparo(noDownload ? "baixando" : "ligando", mascote, pct);
+  const mb = noDownload && p.total ? `${tamanhoEmPalavras(p.bytes ?? 0)} de ${tamanhoEmPalavras(p.total)}` : "";
+  const lead = p.estado === "pausado_sem_internet"
+    ? `<p class="pc-lead">${esc(`Download pausado em ${pct}% · sem internet. Continua sozinho quando a conexão voltar.`)}</p><p class="cb-acoes">${link("tentar agora", 'data-act="vm-tentar-agora"')}</p>`
+    : `<p class="pc-lead">${esc(`Só da primeira vez${p.total ? `: ${tamanhoEmPalavras(p.total)}` : ""}. Depois, ele liga em segundos.`)}</p>`;
+  const atual = noDownload ? 0 : 1;
+  const etapas = `<ol class="pc-etapas">${ETAPAS_DO_PREPARO.map((n, i) => i < atual
+    ? `<li class="feita"><span class="pc-et-ic">${ICONE_CB.ok}</span>${esc(n)}</li>`
+    : i === atual
+      ? `<li class="atual" aria-current="step"><span class="pc-et-ic">${GIRO}</span>${esc(n)}${mb ? ` <span class="pc-et-sub">${esc(mb)}</span>` : ""}${noDownload ? `<span class="pc-pct">${pct}%</span>` : ""}</li>`
+      : `<li><span class="pc-et-ic"><i></i></span>${esc(n)}</li>`).join("")}</ol>`;
+  const barra = `<div class="pc-barra" role="progressbar" aria-label="Preparando o computador" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}" aria-valuetext="${esc(`${ETAPAS_DO_PREPARO[atual]}${mb ? `, ${mb}` : ""}, ${pct}%`)}"><i style="width:${pct}%"></i></div>`;
+  return `<div class="cl-fundo" data-act="pc-segundo-plano"></div><div class="cl-dialogo pc-progresso pc-primeiro-uso" role="dialog" aria-modal="true" aria-labelledby="pc-prep-tit">${cena}<h3 id="pc-prep-tit">Preparando o computador no seu Mac</h3>${lead}${barra}${etapas}<div class="cl-dialogo-acoes"><button type="button" class="cb-bt-ghost" data-act="pc-segundo-plano" data-cl-autofoco>Continuar em segundo plano</button></div></div>`;
+}
+
+/** A linha cinza do preparo abaixo do turno (protótipo v2 da NOD-93). macOS antigo vira o card sutil, nunca toast. */
+export function htmlLinhaDoPreparo(p: VmLocalAnunciada): string {
+  const verComputador = link("ver computador do bot", 'data-act="ver-computador-do-bot"');
+  if (p.estado === "pausado_sem_internet") {
+    return htmlLinha({ segmentos: [`Download pausado em ${pctDoPreparo(p)}% · sem internet. Continua sozinho quando a conexão voltar.`], links: [link("tentar agora", 'data-act="vm-tentar-agora"'), verComputador], icone: "relogio" });
+  }
+  if (p.estado === "macos_antigo") return htmlAviso({ titulo: "O computador do bot pede macOS 13 ou mais novo", apoio: "Este Mac não roda o computador do bot. Numa VM Linux sempre ligada, ele roda.", acoes: [link("Conectar uma VM", 'data-act="conectar-sempre-ligada"')], tom: "neutro" });
+  if (p.estado === "falhou") return htmlAviso({ titulo: "Não consegui preparar o computador", apoio: "O computador do bot no Mac não ficou pronto.", acoes: [link("tentar agora", 'data-act="vm-tentar-agora"'), verComputador] });
+  return htmlLinha({ segmentos: ["Esperando o computador ficar pronto…"], icone: "giro" });
+}
+
 // ---- item do menu da conta e fio do cabeçalho -----------------------------------------------------------------------
 
 /** O item "Computador do bot" no menu da conta: o ícone, ou o anel com a dica durante uma operação (sem toast). */
 export function htmlItemMenu(dto: ComputadorPessoaDto | null, ok = false): string {
-  const dica = dto ? dicaDaOperacao(dto) : null;
-  const ic = dica && dto ? htmlAnel(pctDaOperacao(dto)) : ok ? `<span class="cb-ok-v" aria-hidden="true">${ICONE_CB.ok}</span>${ICONE_CB.pcBot}` : ICONE_CB.pcBot;
+  const prep = preparoAtivo(dto);
+  const dicaPrep = !dto?.operacao && prep ? dicaDoPreparo(prep) : null;
+  const dica = dto ? dicaDaOperacao(dto) ?? dicaPrep : null;
+  const ic = dicaPrep && prep ? htmlAnel(pctDoPreparo(prep)) : dica && dto ? htmlAnel(pctDaOperacao(dto)) : ok ? `<span class="cb-ok-v" aria-hidden="true">${ICONE_CB.ok}</span>${ICONE_CB.pcBot}` : ICONE_CB.pcBot;
   // Durante a operação o % já está na dica (e o anel o desenha): não repete no meta.
   const meta = !dica && dto?.estado === "dormindo" ? "Dormindo" : "";
   const aria = `Computador do bot${dica ? ` · ${dica}` : ""}`;
@@ -170,8 +250,10 @@ export function htmlItemMenu(dto: ComputadorPessoaDto | null, ok = false): strin
 
 /** A linha de 2 px dentro da pílula do cabeçalho do chat, durante uma operação. */
 export function htmlFio(dto: ComputadorPessoaDto | null): string {
-  if (!dto?.operacao) return "";
-  return `<span class="cb-fio" aria-hidden="true"><i style="width:${pctDaOperacao(dto)}%"></i></span>`;
+  const prep = preparoAtivo(dto);
+  const pct = dto?.operacao ? pctDaOperacao(dto) : prep && (prep.estado === "baixando" || prep.estado === "pausado_sem_internet") ? pctDoPreparo(prep) : null;
+  if (pct === null) return "";
+  return `<span class="cb-fio" aria-hidden="true"><i style="width:${pct}%"></i></span>`;
 }
 
 
@@ -248,7 +330,7 @@ export function htmlAvisoDeFalha(dto: ComputadorPessoaDto): string | null {
 /** Depois de ~10 min esperando memória, a linha encurta para "Ainda esperando…". */
 export const MS_AINDA_ESPERANDO = 10 * 60_000;
 
-export type MotivoDaEspera = "ligando" | "memoria" | "operacao";
+export type MotivoDaEspera = "ligando" | "memoria" | "operacao" | "preparo";
 
 /** Por que este bot espera o computador agora, ou null. Falta de memória é espera cinza, nunca erro. */
 export function motivoDaEspera(dto: ComputadorPessoaDto, agenteId: string): MotivoDaEspera | null {
@@ -256,6 +338,7 @@ export function motivoDaEspera(dto: ComputadorPessoaDto, agenteId: string): Moti
   const espera = dto.esperando.includes(agenteId) || tela?.estado === "esperando" || tela?.estado === "abrindo";
   if (!espera) return null;
   if (dto.operacao) return "operacao";
+  if (preparoAtivo(dto)) return "preparo";
   if (dto.estado === "ligando") return "ligando";
   return dto.esperando.includes(agenteId) || tela?.estado === "esperando" ? "memoria" : null;
 }
@@ -268,6 +351,8 @@ export function htmlLinhaDeEspera(dto: ComputadorPessoaDto, agenteId: string, no
   const motivo = motivoDaEspera(dto, agenteId);
   const nome = nomes[agenteId] ?? "O bot";
   const verTelas = link("ver telas", 'data-act="ver-computador-do-bot"');
+  const prep = motivo === "preparo" ? preparoAtivo(dto) : null;
+  if (prep) return htmlLinhaDoPreparo(prep);
   if (motivo === "ligando") return htmlLinha({ segmentos: ["Ligando o computador…", `${nome} continua assim que ele estiver pronto`], icone: "giro" });
   if (motivo === "operacao" && dto.operacao) return htmlLinha({ segmentos: [`Esperando o computador terminar de ${NOME_OPERACAO[dto.operacao.tipo].infinitivo}…`], icone: "giro" });
   if (motivo !== "memoria") return "";
@@ -387,8 +472,16 @@ export function htmlPainelComputadorDoBot(dto: ComputadorPessoaDto, bots: readon
   const progresso = dto.operacao
     ? `<div class="pc-prog-inline"><div class="pc-mem-cab"><span>${esc(NOME_OPERACAO[dto.operacao.tipo].gerundio)} o computador</span><span>${pctDaOperacao(dto)}%</span></div><div class="pc-barra grande" role="progressbar" aria-label="Progresso" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pctDaOperacao(dto)}"><i style="width:${pctDaOperacao(dto)}%"></i></div>${htmlEtapas(dto.operacao.tipo, dto.operacao.etapa, pctDaOperacao(dto))}</div>`
     : "";
+  // NOD-93: o download da VM local (o primeiro uso no Mac), com a barra e os MB; pausado diz que continua sozinho.
+  const prep = preparoAtivo(dto);
+  const baixando = prep && (prep.estado === "baixando" || prep.estado === "pausado_sem_internet") ? prep : null;
+  const preparo = baixando && !dto.operacao
+    ? `<div class="pc-prog-inline"><div class="pc-mem-cab"><span>${esc(baixando.estado === "pausado_sem_internet" ? "Download pausado · sem internet" : "Baixando o computador")}${baixando.total ? ` · ${esc(tamanhoEmPalavras(baixando.bytes ?? 0))} de ${esc(tamanhoEmPalavras(baixando.total))}` : ""}</span><span>${pctDoPreparo(baixando)}%</span></div><div class="pc-barra grande" role="progressbar" aria-label="Baixando o computador" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pctDoPreparo(baixando)}"><i style="width:${pctDoPreparo(baixando)}%"></i></div>${baixando.estado === "pausado_sem_internet" ? `<p class="cb-acoes">${link("tentar agora", 'data-act="vm-tentar-agora"')}</p>` : ""}</div>`
+    : "";
+  const antigo = prep?.estado === "macos_antigo";
+  const faixaMacos = antigo ? `<div class="pc-faixa" role="status">${ICONE_CB.info}<div><b>O computador do bot pede macOS 13 ou mais novo</b><p>Este Mac não roda o computador do bot. Numa VM Linux sempre ligada, ele roda.</p></div>${link("Conectar uma VM", 'data-act="conectar-sempre-ligada"')}</div>` : "";
   const acordar = dto.estado === "dormindo" ? `<div class="pc-acao"><span class="pc-acao-txt"><b>Dormindo</b><span>Acorda sozinho quando um bot precisar.</span></span>${ghost("Acordar", 'data-act="operar-computador" data-op="acordar"')}</div>` : "";
-  const cartao = `<div class="espaco-cartao pc-cartao"><div class="maq-cab"><span class="maq-ic" aria-hidden="true">${ICONE_CB.pcBot}</span><span class="maq-id"><b>Computador do bot</b><small>${esc(`${dto.maquina?.nome ?? "Linux"} · Chrome${ligado}`)}</small></span>${rotuloDoEstadoPc(dto)}</div>${memoria}${progresso}${acordar ? `<div class="pc-memoria">${acordar}</div>` : ""}</div>`;
+  const cartao = `<div class="espaco-cartao pc-cartao"><div class="maq-cab"><span class="maq-ic" aria-hidden="true">${ICONE_CB.pcBot}</span><span class="maq-id"><b>Computador do bot</b><small>${esc(`${dto.maquina?.nome ?? "Linux"} · Chrome${ligado}`)}</small></span>${rotuloDoEstadoPc(dto)}</div>${memoria}${progresso}${preparo}${acordar ? `<div class="pc-memoria">${acordar}</div>` : ""}</div>`;
 
   const linhaTela = (t: TelaDaPessoa) => {
     const b = bot(t.agenteId);
@@ -416,7 +509,7 @@ export function htmlPainelComputadorDoBot(dto: ComputadorPessoaDto, bots: readon
   }).join("");
   const atividadeHtml = atividade ? `<h3 class="espaco-subtitulo">Atividade</h3><ol class="espaco-cartao pc-atividade">${atividade}</ol>` : "";
 
-  return `<section class="espaco-secao seu-pc" aria-labelledby="pc-titulo">${faixa}${fora}<h2 id="pc-titulo">Computador do bot</h2><p class="intro">Um computador para todos os seus bots. Cada bot tem a própria tela e o próprio navegador, e um login feito aqui vale para todos.</p>${cartao}${telas}${grupo("Manutenção")}${grupo("Logins")}${atividadeHtml}${htmlDialogoDoPainel(dto, bots, ui)}</section>`;
+  return `<section class="espaco-secao seu-pc" aria-labelledby="pc-titulo">${faixa}${fora}${faixaMacos}<h2 id="pc-titulo">Computador do bot</h2><p class="intro">Um computador para todos os seus bots. Cada bot tem a própria tela e o próprio navegador, e um login feito aqui vale para todos.</p>${cartao}${antigo ? "" : `${telas}${grupo("Manutenção")}${grupo("Logins")}`}${atividadeHtml}${htmlDialogoDoPainel(dto, bots, ui)}</section>`;
 }
 
 /** Os diálogos do painel: a confirmação (o foco começa em Cancelar) e as etapas, sem Cancelar no meio. */
@@ -435,6 +528,7 @@ export function htmlDialogoDoPainel(dto: ComputadorPessoaDto, bots: readonly Bot
     const nome = NOME_OPERACAO[dto.operacao.tipo].gerundio;
     return `<div class="cl-fundo" data-act="pc-segundo-plano"></div><div class="cl-dialogo pc-progresso" role="dialog" aria-modal="true" aria-labelledby="pc-prog-tit"><h3 id="pc-prog-tit">${esc(nome)} o computador</h3><p class="pc-lead">Leva alguns minutos. Dá para fechar e seguir usando o nod.</p><div class="pc-barra grande" role="progressbar" aria-label="Progresso" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}" aria-valuetext="${esc(`${dto.operacao.etapa ?? nome}, ${pct}%`)}"><i style="width:${pct}%"></i></div>${htmlEtapas(dto.operacao.tipo, dto.operacao.etapa, pct)}<div class="cl-dialogo-acoes"><button type="button" class="cb-bt-ghost" data-act="pc-segundo-plano" data-cl-autofoco>Continuar em segundo plano</button></div></div>`;
   }
+  if (ui.preparoAberto) return htmlJanelaDoPreparo(dto, bots);
   return "";
 }
 

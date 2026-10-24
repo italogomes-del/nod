@@ -1,5 +1,6 @@
 import type { EpochMs } from "./ids.ts";
 import type { MotivoFalhaComputador } from "./motivos.ts";
+import type { VmLocalAnunciada } from "./vm-local.ts";
 
 export type ControleComputador = "bot" | "pessoa" | "aguardando_pessoa";
 export type PoliticaComputador = "supervisionado" | "autonomo";
@@ -111,6 +112,8 @@ export type MaquinaDoComputador = {
   nome: string;
   contato: number | null;
   foto: { ligadoDesde: number | null; memoriaTotalMb: number | null; titulos: Record<string, string | null> } | null;
+  /** NOD-93: o preparo da VM local, quando a máquina é o Mac. */
+  preparo?: VmLocalAnunciada;
 };
 
 export interface DriverComputador {

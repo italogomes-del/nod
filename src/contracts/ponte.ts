@@ -57,6 +57,8 @@ export type AnuncioMaquina = {
   contas?: ContaAnunciada[];
   /** NOD-96 (ADR-122): se roda o computador da pessoa pelo motor, ou o que falta. Ausente = não vai para ela. */
   computador?: AnuncioComputador;
+  /** NOD-93 (ADR-127 §4): o preparo da VM local do Mac (src/contracts/vm-local.ts). Ausente = sem VM. */
+  vmLocal?: import("./vm-local.ts").VmLocalAnunciada;
   /** NOD-9 (2026-10-23): atende o "Atualizar agora" pedido de outro aparelho. Ausente = o servidor recusa o pedido. */
   atualizaIas?: boolean;
   /** NOD-94: o papel com que foi pareada. Decide o servidor (`maquina_tokens.papel`); ausente = `motor` (app antigo). */
@@ -64,6 +66,7 @@ export type AnuncioMaquina = {
 };
 // O papel e a plataforma da máquina moram em maquina.ts (teto de 200 linhas); reexportados para quem lê daqui.
 export { PAPEIS_MAQUINA, PLATAFORMAS_MAQUINA, type PapelMaquina, type PlataformaMaquina } from "./maquina.ts";
+export { ESTADOS_VM_LOCAL, type EstadoVmLocal, type VmLocalAnunciada } from "./vm-local.ts";
 
 /** Passe é CAMPO tipado, nunca regex sobre o texto do modelo (GRUPO.passe-tipado). */
 export type FalaEntrega = { tipo: "texto"; texto: string } | { tipo: "passe"; motivo: MotivoPasse };

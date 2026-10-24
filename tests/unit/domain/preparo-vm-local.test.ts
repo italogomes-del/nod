@@ -129,6 +129,13 @@ describe("preparo da VM local (NOD-93)", () => {
       expect(livre.trilha[2]!.efeitos).toEqual([{ tipo: "ligar", memoriaGiB: 2 }]);
     });
 
+    it("o uso muda para Livre esperando memória: mede de novo e liga com a memória do Livre", () => {
+      const { trilha, p } = rodar([[iniciar({ discoNoCache: true }), T0], [{ tipo: "preparado" }, T0], [memoria(1), T0], [{ tipo: "uso", modo: "livre", memoriaGiB: 4 }, T0 + 1], [memoria(1), T0 + 1]]);
+      expect(trilha[3]).toEqual({ fase: "ligando", efeitos: [{ tipo: "medir_memoria" }] });
+      expect(trilha[4]!.efeitos).toEqual([{ tipo: "ligar", memoriaGiB: 4 }]);
+      expect(p.modo).toBe("livre");
+    });
+
     it("esperando memória, Tentar agora mede de novo na hora", () => {
       const { trilha } = rodar([[iniciar({ discoNoCache: true }), T0], [{ tipo: "preparado" }, T0], [memoria(1), T0], [{ tipo: "tentar_agora" }, T0 + 1]]);
       expect(trilha[3]).toEqual({ fase: "ligando", efeitos: [{ tipo: "medir_memoria" }] });

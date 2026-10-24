@@ -77,7 +77,7 @@ const executarPadrao: Executar = (bin, args) =>
     execFile(bin, [...args], { timeout: PRAZO_COMANDO_MS, maxBuffer: 8 * 1024 * 1024 }, (erro, stdout) => (erro ? rejeitar(erro) : resolver(String(stdout))));
   });
 
-export function criarAmostradorMemoria(o: { env: Record<string, string | undefined>; intervaloMs?: number; executar?: Executar; medirDisco?: MedirDisco; nucleos?: number; plataforma?: NodeJS.Platform; lerNoLinux?: boolean; lerArquivo?: (caminho: string) => Promise<string>; cargaLinux?: () => number; temposCpu?: () => TemposCpu; esperar?: (ms: number) => Promise<void>; agora?: () => number; marcas?: () => ReadonlyMap<string, number>; ambientes?: (pids: readonly number[]) => Promise<Map<number, string>> }): AmostradorMemoria {
+export function criarAmostradorMemoria(o: { env: Record<string, string | undefined>; intervaloMs?: number; executar?: Executar; medirDisco?: MedirDisco; nucleos?: number; plataforma?: NodeJS.Platform; lerNoLinux?: boolean; lerArquivo?: (caminho: string) => Promise<string>; cargaLinux?: () => number; temposCpu?: () => TemposCpu; esperar?: (ms: number) => Promise<void>; agora?: () => number; marcas?: () => ReadonlyMap<string, number>; ambientes?: (pids: readonly number[]) => Promise<Map<number, string>>; bloco?: () => number }): AmostradorMemoria {
   const nucleos = o.nucleos ?? availableParallelism();
   // ADR-085: a leitura da máquina só existe no macOS (ou simulada); fora dele seria um "verde" que ninguém mediu.
   // ADR-090: o motor numa máquina Linux também lê (memória pelo /proc/meminfo, processador pelo os.loadavg). Só quando
@@ -261,13 +261,13 @@ export function criarAmostradorMemoria(o: { env: Record<string, string | undefin
       comecar();
       // Grupo novo: a próxima amostra já o mede, sem esperar a batida de 30 s.
       if (novo && !rss.has(grupo)) void amostrar();
-      return leituraDoTurno({ nivel, rssPorGrupo: rss, gruposVivos: [...grupos.values()], turnoId, grupo, processador, disco: daMaquinaLe ? disco : undefined });
+      return leituraDoTurno({ nivel, rssPorGrupo: rss, gruposVivos: [...grupos.values()], turnoId, grupo, processador, disco: daMaquinaLe ? disco : undefined, blocoMb: o.bloco?.() ?? 0 });
     },
     daMaquina() {
       if (!daMaquinaLe) return undefined;
       comecar();
       if (!amostrou) return undefined;
-      return leituraDoTurno({ nivel, rssPorGrupo: rss, gruposVivos: [...grupos.values()], turnoId: null, grupo: null, processador, disco: daMaquinaLe ? disco : undefined });
+      return leituraDoTurno({ nivel, rssPorGrupo: rss, gruposVivos: [...grupos.values()], turnoId: null, grupo: null, processador, disco: daMaquinaLe ? disco : undefined, blocoMb: o.bloco?.() ?? 0 });
     },
     soltar(turnoId) {
       grupos.delete(turnoId);

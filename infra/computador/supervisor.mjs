@@ -84,12 +84,18 @@ export function binariosDoAmbiente(env = process.env) {
   };
 }
 
+/** As pastas do Chromium do Playwright no Linux: chrome-linux64 no x64, chrome-linux no arm64 (a VM do Mac, ADR-127 §4). */
+export const PASTAS_DO_CHROME = ['chrome-linux64', 'chrome-linux'];
+
 /** O Chromium fixado pelo Playwright em PLAYWRIGHT_BROWSERS_PATH (o instalador usa /opt/nod-motor/chromium). */
 export function chromiumDoPlaywright(env = process.env) {
   const base = env.PLAYWRIGHT_BROWSERS_PATH ?? '/opt/nod-motor/chromium';
   try {
     const dir = readdirSync(base).filter((d) => /^chromium-\d+$/.test(d)).sort().at(-1);
-    if (dir) return path.join(base, dir, 'chrome-linux64', 'chrome');
+    if (dir) {
+      const achado = PASTAS_DO_CHROME.map((p) => path.join(base, dir, p, 'chrome')).find((c) => existsSync(c));
+      return achado ?? path.join(base, dir, PASTAS_DO_CHROME[0], 'chrome');
+    }
   } catch { /* segue */ }
   return 'chromium';
 }

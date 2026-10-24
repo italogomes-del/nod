@@ -2379,6 +2379,13 @@ function acaoDoBot(a: BotGerido, acao: AcaoGestao): void {
  */
 function abrirAlvoDoAviso(alvo: AlvoAviso): void {
   if (!estado.sessao) return;
+  // NOD-93: o primeiro download da VM local abre o painel do computador com a janela de primeiro uso (a cena do
+  // mascote, a barra com os MB e o "Continuar em segundo plano").
+  if (alvo.tipo === "computador-do-bot") {
+    abrirEspaco("computador-do-bot");
+    if (alvo.primeiroUso) dispatch({ tipo: "computador-ui", ui: { preparoAberto: true } });
+    return;
+  }
   const conversaId = alvo.tipo === "conversa" ? alvo.conversaId : null;
   const agente = estado.frota?.agentes.find((a) => a.conversaId === conversaId && a.ownerId === estado.sessao?.pessoaId);
   const sala = estado.salas.find((s) => s.sala.conversaId === conversaId);
@@ -3600,7 +3607,9 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     dispatch({ tipo: "computador-ui", ui: { confirmar: null } });
     if (op) document.querySelector<HTMLElement>(`#espaco [data-pc-acao="${op}"] button`)?.focus();
   },
-  "pc-segundo-plano": () => dispatch({ tipo: "computador-ui", ui: { etapasAbertas: false } }),
+  "pc-segundo-plano": () => dispatch({ tipo: "computador-ui", ui: { etapasAbertas: false, preparoAberto: false } }),
+  // NOD-93 (ADR-127): o download pausado da VM local retoma já (o app decide; sem a VM ou app antigo, não faz nada).
+  "vm-tentar-agora": () => { void window.nodDesktop?.vmTentarAgora?.().catch(() => undefined); },
   // O link do erro (e o "ver telas" da espera) abre o painel; do erro, com a ação sugerida marcada e com o foco nela.
   "ver-computador-do-bot": (el) => {
     const realce = (el.dataset.realce as OperacaoPessoa | undefined) ?? null;
@@ -4491,10 +4500,10 @@ document.addEventListener("keydown", (ev) => {
     return;
   }
   // NOD-96: a confirmação do painel do computador fecha no Esc; as etapas vão para segundo plano.
-  if (estado.computadorUi.confirmar || estado.computadorUi.etapasAbertas) {
+  if (estado.computadorUi.confirmar || estado.computadorUi.etapasAbertas || estado.computadorUi.preparoAberto) {
     ev.stopPropagation();
     const op = estado.computadorUi.confirmar;
-    dispatch({ tipo: "computador-ui", ui: { confirmar: null, etapasAbertas: false } });
+    dispatch({ tipo: "computador-ui", ui: { confirmar: null, etapasAbertas: false, preparoAberto: false } });
     if (op) document.querySelector<HTMLElement>(`#espaco [data-pc-acao="${op}"] button`)?.focus();
     return;
   }

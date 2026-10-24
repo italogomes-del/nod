@@ -67,7 +67,7 @@ export function lerOpcoes(argv: string[]): Opcoes {
 const dormir = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const log = (s: string) => process.stderr.write(`${s}\n`);
 
-class Api {
+export class Api {
   private cookie = "";
   tenant = "";
   pessoa = "";

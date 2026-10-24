@@ -94,13 +94,15 @@ const kibParaMb = (kib: number) => Math.round(kib / 1024);
  * A leitura de um turno: o nível, o total dos grupos dos turnos vivos desta máquina e a linha do turno que renova
  * (só se ele tem grupo medido). Turno sem grupo (harness sem `processoProprio`) leva só o nível e o total.
  * ADR-085: `turnoId` null é a leitura da máquina (a do `puxar`), sem linha de turno; o processador vai junto.
+ * NOD-93 (ADR-127, definido em 2026-10-24): `blocoMb` é a memória da VM local ligada (2/3/4 GiB pelo modo, teto de 25%
+ * da RAM; `memoriaDaVm`). Entra no total como um bloco: com a VM ligada, a memória dela sai do disponível do Mac.
  */
-export function leituraDoTurno(p: { nivel: NivelPressao; rssPorGrupo: ReadonlyMap<number, number>; gruposVivos: readonly number[]; turnoId: string | null; grupo: number | null; processador?: LeituraProcessador | null; disco?: LeituraDisco | null }): LeituraMemoria {
+export function leituraDoTurno(p: { nivel: NivelPressao; rssPorGrupo: ReadonlyMap<number, number>; gruposVivos: readonly number[]; turnoId: string | null; grupo: number | null; processador?: LeituraProcessador | null; disco?: LeituraDisco | null; blocoMb?: number }): LeituraMemoria {
   const totalKib = [...new Set(p.gruposVivos)].reduce((t, g) => t + (p.rssPorGrupo.get(g) ?? 0), 0);
   const doTurno = p.grupo !== null ? p.rssPorGrupo.get(p.grupo) : undefined;
   return {
     nivel: p.nivel,
-    totalMb: kibParaMb(totalKib),
+    totalMb: kibParaMb(totalKib) + Math.max(0, Math.round(p.blocoMb ?? 0)),
     porTurno: doTurno !== undefined && p.turnoId !== null ? [{ turnoId: p.turnoId, mb: kibParaMb(doTurno) }] : [],
     ...(p.processador ? { processador: p.processador } : {}),
     // Revisão do #224: `null` vai junto (o app mede e não conseguiu); `undefined` (fora do macOS) não.

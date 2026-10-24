@@ -7,6 +7,7 @@ import { emailDaConta, organizacaoDaConta } from "../../../domain/estado-ia.ts";
 import type { RelatoEspera } from "../../../contracts/espera.ts";
 import { DESFECHOS_COMANDO_COMPUTADOR, ESTADOS_ANUNCIO_COMPUTADOR, ESTADOS_TELA_COMPUTADOR, OPERACOES_COMPUTADOR, type AnuncioComputador, type EstadoComputadorRelatado, type ResultadoComandoComputador } from "../../../contracts/computador-motor.ts";
 import type { ResultadoComputador } from "../../../contracts/computador.ts";
+import { ESTADOS_VM_LOCAL, type VmLocalAnunciada } from "../../../contracts/vm-local.ts";
 import type { ProgressoDeInstalacao } from "../../../contracts/instalacoes-ssh.ts";
 import { FALHAS_DO_LACO, SAIDA_REVISOR_MAX, type FalhaDoLaco, type RelatoRevisao } from "../../../contracts/revisao.ts";
 import { SAIDA_ESPERA_MAX } from "../../../domain/espera-comando.ts";
@@ -604,6 +605,23 @@ export function anuncioComputador(v: unknown): AnuncioComputador | undefined {
   if (!estado) return undefined;
   const falta = Array.isArray(r.falta) ? r.falta.filter((x): x is string => typeof x === "string" && /^[a-z0-9][a-z0-9.+-]{0,63}$/.test(x)).slice(0, 20) : [];
   return falta.length > 0 ? { estado, falta } : { estado };
+}
+/**
+ * NOD-93 (ADR-127 §4): o `vmLocal` do Mac. Fora do formato vira ausente (o Mac segue sem preparo na tela), nunca derruba
+ * o `conectar`. Números inteiros não negativos; `motivo` curto, sem quebra de linha.
+ */
+export function anuncioVmLocal(v: unknown): VmLocalAnunciada | undefined {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return undefined;
+  const r = v as Record<string, unknown>;
+  const estado = ESTADOS_VM_LOCAL.find((e) => e === r.estado);
+  const inteiro = (x: unknown): x is number => typeof x === "number" && Number.isSafeInteger(x) && x >= 0;
+  if (!estado || !inteiro(r.desde)) return undefined;
+  return {
+    estado, desde: r.desde,
+    ...(inteiro(r.bytes) ? { bytes: r.bytes } : {}),
+    ...(inteiro(r.total) ? { total: r.total } : {}),
+    ...(typeof r.motivo === "string" && r.motivo.length <= 300 && !/[\r\n]/.test(r.motivo) ? { motivo: r.motivo } : {}),
+  };
 }
 const ID_COMANDO = /^[A-Za-z0-9_-]{1,64}$/;
 const B64_CHAVE = /^[A-Za-z0-9+/]{43}=$/;
