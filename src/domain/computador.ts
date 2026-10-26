@@ -283,3 +283,14 @@ export function textoDaAtividade(tipo: string, estado: string): string {
   const texto = ATIVIDADE_EM_PORTUGUES[tipo] ?? "usou o computador";
   return estado === "falhou" ? `${texto} (não deu certo)` : texto;
 }
+
+/**
+ * NOD-96 (ADR-122): o modelo de computador que vale no modo atual. No docker só o 'por_bot'; no motor só o
+ * 'por_pessoa'. O vínculo de um bot com o outro modelo (sobra de uma troca de modo) conta como "sem computador":
+ * o plano dá as ferramentas e a 1ª ação refaz o vínculo; a saúde da outra máquina não vale para ele.
+ * `undefined` (serviço sem modo declarado) não filtra.
+ */
+export type ModeloComputador = "por_bot" | "por_pessoa";
+export function modeloDoModo(porPessoa: boolean | undefined): ModeloComputador | null {
+  return porPessoa === undefined ? null : porPessoa ? "por_pessoa" : "por_bot";
+}

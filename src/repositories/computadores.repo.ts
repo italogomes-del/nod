@@ -1,6 +1,7 @@
 import type { Computador, ControleComputador, PoliticaComputador, RegistroComputador } from "../contracts/computador.ts";
 import type { ComputadorDaPessoa, OperacaoComputador } from "../contracts/computador-motor.ts";
 import type { MotivoFalhaComputador } from "../contracts/motivos.ts";
+import type { ModeloComputador } from "../domain/computador.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
 
 type Linha = { id: string; agente_id: string; habilitado: boolean; controle: ControleComputador; politica: PoliticaComputador; ajuda: string | null; ajuda_decisao_id: string | null; ocupado_ate: Date | null; operacao_id: string | null; criado_em: Date; falhas_seguidas: number; falha_motivo: MotivoFalhaComputador | null; indisponivel_desde: Date | null };
@@ -18,28 +19,43 @@ const acao = (l: LinhaAcao): RegistroComputador => ({ id: l.id, computadorId: l.
 
 export function computadoresRepo(conn: Conn, escopo: Escopo) {
   return {
-    async buscarVinculo(agenteId: string): Promise<Computador | null> {
+    /**
+     * `modelo` (NOD-96, `modeloDoModo`): o vínculo com o computador do outro modo (sobra de uma troca de modo) é
+     * "sem computador" — o plano dá as ferramentas e a 1ª ação refaz o vínculo; a saúde da outra máquina não vale.
+     */
+    async buscarVinculo(agenteId: string, modelo: ModeloComputador | null = null): Promise<Computador | null> {
       const [l] = await conn<Linha[]>`select c.*, a.id as agente_id from computadores c join agentes a on a.tenant_id = c.tenant_id and a.computador_id = c.id
-        where c.tenant_id = ${escopo.tenantId} and c.owner_id = ${escopo.pessoaId} and a.owner_id = ${escopo.pessoaId} and a.id = ${agenteId}`;
+        where c.tenant_id = ${escopo.tenantId} and c.owner_id = ${escopo.pessoaId} and a.owner_id = ${escopo.pessoaId} and a.id = ${agenteId}
+          and (${modelo}::text is null or c.modelo = ${modelo})`;
       return l ? computador(l) : null;
     },
     /**
      * NOD-192: o painel só lê — sem FOR UPDATE e sem insert. `undefined` = agente inexistente, excluído ou de
-     * outra pessoa (o mesmo 404 de `obter`); `null` = o agente ainda não tem computador.
+     * outra pessoa (o mesmo 404 de `obter`); `null` = o agente ainda não tem computador. Só o painel do docker por bot
+     * chama: o bot vinculado ao computador da pessoa (NOD-96) aparece sem computador (o docker cria um na 1ª ação).
      */
     async buscarDoAgente(agenteId: string): Promise<Computador | null | undefined> {
-      const [l] = await conn<(Partial<Linha> & { dono_agente_id: string; vinculo: string | null })[]>`select c.*, a.id as dono_agente_id, a.computador_id as vinculo from agentes a
+      const [l] = await conn<(Partial<Linha> & { dono_agente_id: string; vinculo: string | null; modelo: string | null })[]>`select c.*, a.id as dono_agente_id, a.computador_id as vinculo from agentes a
         left join computadores c on c.tenant_id = a.tenant_id and c.id = a.computador_id and c.owner_id = ${escopo.pessoaId}
         where a.tenant_id = ${escopo.tenantId} and a.owner_id = ${escopo.pessoaId} and a.id = ${agenteId} and a.excluido_em is null`;
       if (!l) return undefined;
       // Vínculo para uma linha que esta pessoa não vê: o mesmo 404 que `obter` daria.
       if (l.vinculo && !l.id) return undefined;
+      // Vinculado ao computador da pessoa (o modo motor): no docker ele ainda não tem computador; o `obter` do docker cria.
+      if (l.id && l.modelo !== "por_bot") return null;
       return l.id ? computador({ ...l, agente_id: l.dono_agente_id } as Linha) : null;
     },
-    async obter(agenteId: string): Promise<Computador | null> {
-      const [agente] = await conn<{ id: string; computador_id: string | null }[]>`select id, computador_id from agentes where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${agenteId} and excluido_em is null for update`;
+    /**
+     * `docker` (NOD-96, ADR-122): o portão do docker por bot pede o computador 'por_bot'. O bot que estava no computador
+     * da pessoa (o modo motor, antes de voltar ao docker) ganha um 'por_bot' novo e o vínculo passa a ele; o motor o
+     * revincula ao da pessoa na 1ª ação (vincularBot). Sem `docker` (pedir_aprovacao), segue o vínculo que houver.
+     */
+    async obter(agenteId: string, docker = false): Promise<Computador | null> {
+      const [agente] = await conn<{ id: string; computador_id: string | null; modelo: string | null }[]>`select a.id, a.computador_id, c.modelo from agentes a
+        left join computadores c on c.tenant_id = a.tenant_id and c.id = a.computador_id
+        where a.tenant_id = ${escopo.tenantId} and a.owner_id = ${escopo.pessoaId} and a.id = ${agenteId} and a.excluido_em is null for update of a`;
       if (!agente) return null;
-      if (!agente.computador_id) {
+      if (!agente.computador_id || (docker && agente.modelo !== null && agente.modelo !== "por_bot")) {
         const [novo] = await conn<{ id: string }[]>`insert into computadores (tenant_id, owner_id) values (${escopo.tenantId}, ${escopo.pessoaId}) returning id`;
         await conn`update agentes set computador_id = ${novo!.id} where tenant_id = ${escopo.tenantId} and id = ${agenteId}`;
       }
@@ -47,8 +63,13 @@ export function computadoresRepo(conn: Conn, escopo: Escopo) {
         where c.tenant_id = ${escopo.tenantId} and c.owner_id = ${escopo.pessoaId} and a.id = ${agenteId} and a.excluido_em is null`;
       return l ? computador(l) : null;
     },
+    /**
+     * NOD-96 (ADR-122): só o computador do docker por bot. O da pessoa ('por_pessoa') tem vários bots e se trava por
+     * `travarDaPessoa`; sem o filtro, o modo docker ligaria, configuraria ou desligaria a máquina da pessoa como se
+     * fosse de um bot só. `obter`, `buscarVinculo` e `foraDoAr` só filtram quando pedem (`docker`/`modelo`): o modo motor os usa sem filtro.
+     */
     async travar(id: string): Promise<Computador | null> {
-      const [l] = await conn<Linha[]>`select c.*, a.id as agente_id from computadores c join agentes a on a.tenant_id = c.tenant_id and a.computador_id = c.id where c.tenant_id = ${escopo.tenantId} and c.owner_id = ${escopo.pessoaId} and c.id = ${id} for update of c`;
+      const [l] = await conn<Linha[]>`select c.*, a.id as agente_id from computadores c join agentes a on a.tenant_id = c.tenant_id and a.computador_id = c.id where c.tenant_id = ${escopo.tenantId} and c.owner_id = ${escopo.pessoaId} and c.id = ${id} and c.modelo = 'por_bot' for update of c`;
       return l ? computador(l) : null;
     },
     /** `atividadeEm` (NOD-170): iniciar, assumir e devolver contam como atividade e adiam o desligamento por ociosidade. */
@@ -284,7 +305,8 @@ export function computadoresRepo(conn: Conn, escopo: Escopo) {
     /**
      * Uma falha da MÁQUINA (só as que contam para a saúde). Na `limite`-ésima seguida o computador sai
      * do ar; `virouIndisponivel` é verdadeiro SÓ nessa transição — é ela que escreve a mensagem única.
-     * A trava da linha (travar) é de quem chama; o UPDATE lê o valor anterior no mesmo comando.
+     * A trava da linha (travar) é de quem chama; o UPDATE lê o valor anterior no mesmo comando. NOD-96: o computador
+     * da pessoa tem vários bots ou nenhum (Acordar antes do 1º bot); a falha conta igual e `agenteId` é um deles ou ''.
      */
     async registrarFalha(id: string, p: { motivo: MotivoFalhaComputador; em: number; limite: number }): Promise<{ computador: Computador; virouIndisponivel: boolean } | null> {
       const [l] = await conn<(Linha & { antes: Date | null })[]>`
@@ -302,8 +324,8 @@ export function computadoresRepo(conn: Conn, escopo: Escopo) {
         )
         select u.*, g.id as agente_id, a.antes from atualizado u
         join anterior a on a.id = u.id
-        join agentes g on g.tenant_id = u.tenant_id and g.computador_id = u.id`;
-      return l ? { computador: computador(l), virouIndisponivel: l.antes === null && l.indisponivel_desde !== null } : null;
+        left join lateral (select id from agentes where tenant_id = u.tenant_id and computador_id = u.id order by (excluido_em is not null), id limit 1) g on true`;
+      return l ? { computador: computador({ ...l, agente_id: l.agente_id ?? "" }), virouIndisponivel: l.antes === null && l.indisponivel_desde !== null } : null;
     },
     /** A máquina respondeu: a sequência de falhas acaba e o computador volta às execuções. */
     async registrarSucesso(id: string): Promise<boolean> {
@@ -311,12 +333,13 @@ export function computadoresRepo(conn: Conn, escopo: Escopo) {
         where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and falhas_seguidas > 0 returning id`;
       return linhas.length > 0;
     },
-    /** Os computadores fora do ar desta pessoa, por agente (a frota diz sem abrir cada um). */
-    async foraDoAr(): Promise<Map<string, { desde: number; motivo: MotivoFalhaComputador }>> {
+    /** Os computadores fora do ar desta pessoa, por agente (a frota diz sem abrir cada um). `modelo`: como em buscarVinculo. */
+    async foraDoAr(modelo: ModeloComputador | null = null): Promise<Map<string, { desde: number; motivo: MotivoFalhaComputador }>> {
       const linhas = await conn<{ agente_id: string; indisponivel_desde: Date; falha_motivo: MotivoFalhaComputador }[]>`
         select a.id as agente_id, c.indisponivel_desde, c.falha_motivo from computadores c
         join agentes a on a.tenant_id = c.tenant_id and a.computador_id = c.id
-        where c.tenant_id = ${escopo.tenantId} and c.owner_id = ${escopo.pessoaId} and c.indisponivel_desde is not null`;
+        where c.tenant_id = ${escopo.tenantId} and c.owner_id = ${escopo.pessoaId} and c.indisponivel_desde is not null
+          and (${modelo}::text is null or c.modelo = ${modelo})`;
       return new Map(linhas.map((l) => [l.agente_id, { desde: l.indisponivel_desde.getTime(), motivo: l.falha_motivo }]));
     },
   };

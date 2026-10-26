@@ -188,9 +188,12 @@ type Lugar = {
 };
 const lugarDocker: Lugar = {
   async obter(d, agenteId) {
-    const c = await d.repos.computadores.obter(agenteId);
+    // NOD-96: `obter(…, true)` dá ao bot vinculado ao computador da pessoa um 'por_bot' próprio; `travar` só devolve o 'por_bot'.
+    const c = await d.repos.computadores.obter(agenteId, true);
     if (!c) throw new ErroDeDominio("nao_encontrado");
-    return doDocker((await d.repos.computadores.travar(c.id))!);
+    const travado = await d.repos.computadores.travar(c.id);
+    if (!travado) throw new ErroDeDominio("nao_encontrado");
+    return doDocker(travado);
   },
   async travar(d, v) {
     const c = await d.repos.computadores.travar(v.id);
@@ -573,6 +576,8 @@ export function criarComputadores(o: Opcoes) {
   }
 
   return {
+    /** NOD-96: o modelo em uso (motor = computador da pessoa; senão, docker por bot). O plano e a frota leem o vínculo por ele. */
+    porPessoa,
     /** NOD-170: os computadores ligados neste host, lidos UMA vez por volta do varredor e fora de transação. */
     ligados: (): Promise<Set<string>> => o.driver.ligados(),
     /**
@@ -629,7 +634,9 @@ export function criarComputadores(o: Opcoes) {
           await d.repos.computadorTelas.mudarEstado(t.id, "fechando", d.agora());
           return { id: t.id, telaId: t.id, computadorId: p.id };
         }
-        const c = await d.repos.computadores.buscarVinculo(agenteId);
+        // NOD-96: `travar` só devolve o 'por_bot'; excluir um bot no modo docker não desliga o computador da pessoa.
+        const v = await d.repos.computadores.buscarVinculo(agenteId);
+        const c = v && await d.repos.computadores.travar(v.id);
         if (c) await d.repos.computadores.configurar(c.id, { habilitado: false, controle: "pessoa" });
         return c;
       });

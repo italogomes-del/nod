@@ -13,6 +13,7 @@ import { afterAll, beforeAll, expect, it } from "vitest";
 import { criarSupervisor, escutarControle, servirControle, type Supervisor } from "../../infra/computador/supervisor.mjs";
 import { criarServidorTerminal, escutar } from "../../infra/computador/terminal.mjs";
 import type { Agente } from "../../src/contracts/agente.ts";
+import type { FrotaDto } from "../../src/contracts/api.ts";
 import type { Conversa } from "../../src/contracts/conversa.ts";
 import type { PlanoTurno } from "../../src/contracts/plano-turno.ts";
 import type { ResultadoChamada } from "../../src/use-cases/chamar-ferramenta.ts";
@@ -235,5 +236,37 @@ describeIntegracao("computador da pessoa: servidor → ponte → motor → super
     }
     // No banco, sob a RLS da outra pessoa, o computador da pessoa não existe.
     expect(await srv.app.dentro({ tenantId: srv.pessoa.tenantId, pessoaId: outraPessoa.pessoaId }, (d) => d.repos.computadores.daPessoa())).toBeNull();
+  }, 30000);
+
+  it("NOD-96: no motor, a máquina da pessoa fora do ar tira o computador do plano e a frota mostra", async () => {
+    const [, auto] = bots;
+    await srv.app.dentro(srv.pessoa, async (d) => {
+      const c = (await d.repos.computadores.daPessoa())!;
+      expect((await d.repos.computadores.buscarVinculo(auto!.agente.id))?.id).toBe(c.id);
+      await d.repos.computadores.registrarFalha(c.id, { motivo: "sem_resposta", em: Date.now(), limite: 1 });
+    });
+    const p = await srv.app.dentro(srv.pessoa, async (d) => {
+      const t = await d.repos.turnos.enfileirar({ executor: "catcher", agenteId: auto!.agente.id, conversaId: auto!.conversa.id, origem: "conversa", prazoEm: Date.now() + 600000, profundidade: 0, entradaTexto: "Use seu computador", entradaConfianca: "confiavel", modelo: "auto", harness: "auto" });
+      return (await emitirPlanoTurno(d, { turnoId: t!.id, machineId: randomUUID(), executor: "catcher" })).data;
+    });
+    expect(p.catalogo.ferramentas.filter((f) => f.origem === "computador")).toEqual([]);
+    expect(p.promptSistema).toContain("fora do ar");
+    expect((await srv.json<FrotaDto>("GET", "frota")).agentes.find((a) => a.id === auto!.agente.id)?.computadorForaDoAr).toMatchObject({ motivo: "sem_resposta" });
+  }, 30000);
+
+  it("NOD-96: no motor, o bot preso a um 'por_bot' antigo fora do ar recebe as ferramentas e a frota não o mostra fora do ar", async () => {
+    const b = await srv.json<Bot>("POST", "agentes", { dono: "pessoa", interativo: true });
+    bots.push(b);
+    await srv.app.dentro(srv.pessoa, async (d) => {
+      const velho = (await d.repos.computadores.obter(b.agente.id, true))!;
+      expect(await d.repos.computadores.travar(velho.id)).not.toBeNull(); // é um 'por_bot'
+      await d.repos.computadores.registrarFalha(velho.id, { motivo: "nao_iniciou", em: Date.now(), limite: 1 });
+      // O da pessoa volta ao ar (o caso anterior o derrubou): só a saúde do por_bot antigo poderia tirar as ferramentas.
+      await d.tx(async (trx) => { await trx`update computadores set indisponivel_desde = null, falha_motivo = null, falhas_seguidas = 0 where modelo = 'por_pessoa'`; });
+    });
+    const p = await plano(b);
+    expect(p.catalogo.ferramentas.filter((f) => f.origem === "computador").map((f) => f.nome)).toContain("computador_observar");
+    expect(p.promptSistema).not.toContain("fora do ar");
+    expect((await srv.json<FrotaDto>("GET", "frota")).agentes.find((a) => a.id === b.agente.id)?.computadorForaDoAr).toBeNull();
   }, 30000);
 });

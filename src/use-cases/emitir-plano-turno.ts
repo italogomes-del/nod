@@ -23,7 +23,7 @@ import { iasNoLimite, inteligenciaDoAgente, ordemCompleta, ordemEfetiva, racioci
 import { contasPelaCota, cotaDasContas, cotaDasIasComContas, tipoParaCota } from "../domain/cota-da-ia.ts";
 import { temSessaoNaIa } from "../domain/troca-de-ia.ts";
 import type { Turno } from "../contracts/turno.ts";
-import { MOTIVO_FALHA_EM_PORTUGUES } from "../domain/computador.ts";
+import { MOTIVO_FALHA_EM_PORTUGUES, modeloDoModo } from "../domain/computador.ts";
 import { COMANDO_GITHUB_NATIVO, SLUG_GITHUB } from "../contracts/github.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { ehNod } from "../domain/nod.ts";
@@ -340,8 +340,8 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
 
   // definido em 2026-09-24 (emenda da ADR-037): o computador que ainda não existe nasce ligado (as
   // ferramentas entram); o que existe só entra ligado e respondendo — desligado ou fora do ar, o plano
-  // sai sem computador_* e o prompt diz por quê.
-  const computadorDoAgente = deps.services.computadores ? await deps.repos.computadores.buscarVinculo(agente.id) : null;
+  // sai sem computador_* e o prompt diz por quê. NOD-96: o vínculo que sobrou do outro modo é "ainda não existe".
+  const computadorDoAgente = deps.services.computadores ? await deps.repos.computadores.buscarVinculo(agente.id, modeloDoModo(deps.services.computadores.porPessoa)) : null;
   const computadorFora: ComputadorFora | null = !computadorDoAgente ? null
     : !computadorDoAgente.habilitado ? { estado: "desligado" }
       : computadorDoAgente.indisponivelDesde !== null ? { estado: "fora_do_ar", motivo: MOTIVO_FALHA_EM_PORTUGUES[computadorDoAgente.falhaMotivo ?? "sem_resposta"] }

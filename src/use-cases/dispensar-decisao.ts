@@ -1,6 +1,7 @@
 import { TIPOS_DISPENSAVEIS_ABERTOS, type Decisao, type TipoDecisao } from "../contracts/decisao.ts";
 import type { RuntimeEvent } from "../contracts/evento.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
+import { ajudaDoComputador } from "./ajuda-do-computador.ts";
 import { autoriaPessoa, evento } from "./autoria-evento.ts";
 import { registrarDesfechoRotina } from "./disparar-rotina.ts";
 import { avisarFalhaDelegacao } from "./entregar-resposta-peer.ts";
@@ -88,11 +89,12 @@ export async function depoisDeDispensar(deps: DepsSuaVez, input: { decisao: Deci
  */
 async function devolverComputador(deps: DepsSuaVez, d: Decisao): Promise<boolean> {
   if (d.tipo !== "pergunta") return false;
-  const c = await deps.repos.computadores.buscarVinculo(d.agenteId);
+  // NOD-96: no computador da pessoa o pedido de ajuda é da tela do bot (ajudaDoComputador).
+  const c = await ajudaDoComputador(deps.repos, d.agenteId);
   if (!c || c.ajudaDecisaoId !== d.id) return false;
   const devolver = c.controle === "aguardando_pessoa";
-  await deps.repos.computadores.configurar(c.id, devolver ? { controle: "bot", ajuda: null, ajudaDecisaoId: null, atividadeEm: deps.agora() } : { ajuda: null, ajudaDecisaoId: null });
-  if (devolver) await deps.repos.computadores.registrar({ computadorId: c.id, autor: "pessoa", tipo: "devolver", estado: "concluida" });
+  await c.configurar(devolver ? { controle: "bot", ajuda: null, ajudaDecisaoId: null, atividadeEm: deps.agora() } : { ajuda: null, ajudaDecisaoId: null });
+  if (devolver) await c.registrarDevolver();
   return devolver;
 }
 

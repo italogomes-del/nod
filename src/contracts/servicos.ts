@@ -42,6 +42,8 @@ export interface ServicesNod<Trx> {
     executarNaMaquina?(escopo: { tenantId: string; pessoaId: string }, capacidade: string, argumentos: Record<string, unknown>): Promise<{ conteudo: string; isError: boolean } | null>;
   };
   computadores?: {
+    /** NOD-96 (ADR-122): true = o computador da pessoa no motor; false = o docker por bot (só o vínculo 'por_bot' vale). */
+    porPessoa?: boolean;
     executarAprovado(p: { tenantId: string; pessoaId: string; agenteId: string; turnoId: string; acaoId: string }): Promise<void>;
     /** ADR-083 (S5): o título do trabalho (ou "a conversa") que segura o computador que este turno pediu; null = não espera. */
     esperandoPor?(turnoId: string): string | null;

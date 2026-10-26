@@ -4,6 +4,7 @@ import { expect, it, vi } from "vitest";
 import { criarRotasDecisoes } from "../../src/adapters/http/rotas/decisoes.ts";
 import { ErroDeDominio } from "../../src/domain/erro.ts";
 import { pedirAjudaDoComputador, pedirAPessoa } from "../../src/use-cases/pedir-a-pessoa.ts";
+import { dispensarDecisao } from "../../src/use-cases/dispensar-decisao.ts";
 import { fecharComResposta } from "../../src/use-cases/responder-decisao.ts";
 import { depsSobre } from "../helpers/deps-l7.ts";
 import { agenteComConversa } from "../helpers/fabricas.ts";
@@ -119,6 +120,30 @@ describeIntegracao("perguntas viram conversa: a pergunta é fala ligada à decis
       await repos.computadores.configurar(c.id, { controle: "bot", ajuda: null, ajudaDecisaoId: null });
       const { decisao } = (await fecharComResposta(deps, { decisaoId, texto: "Concluí o passo no computador e devolvi o controle." })).data;
       expect(decisao.estado).toBe("decidida");
+    });
+  });
+
+  // NOD-96 (ADR-122): no computador da pessoa o pedido de ajuda é da tela do bot, não da máquina (que é de todos).
+  it("NOD-96: no computador da pessoa, a resposta em texto ao pedido de ajuda da tela é recusada e dispensar devolve a tela ao bot", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { agenteId, conversaId } = await agenteComConversa(trx, MARLON, { nome: "Cecília" });
+      const { deps, repos } = depsSobre(trx, MARLON, { agora: () => AGORA });
+      const turno = await repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem: "conversa", prazoEm: AGORA + 60_000, profundidade: 0, entradaTexto: "entre no banco", entradaConfianca: "confiavel", modelo: "claude-haiku-4-5-20251001" });
+      if (!turno) throw new Error("turno");
+      const p = await repos.computadores.obterDaPessoa();
+      expect(await repos.computadores.vincularBot(p.id, agenteId)).toBe(true);
+      const t = (await repos.computadorTelas.obter(p.id, agenteId))!;
+      const pedir = async () => (await pedirAjudaDoComputador(deps, { turnoId: turno.id, conversaId, agenteId, tipo: "pergunta", texto: "Abra meu computador para concluir este passo: login no banco." })).data.decisao_id;
+      const decisaoId = await pedir();
+      await repos.computadorTelas.configurar(t.id, { controle: "aguardando_pessoa", ajuda: "login no banco", ajudaDecisaoId: decisaoId });
+
+      await expect(fecharComResposta(deps, { decisaoId, texto: "pronto, entrei" })).rejects.toMatchObject({ codigo: "estado_invalido" });
+      expect((await repos.decisoes.buscar(decisaoId))?.estado).toBe("pendente");
+
+      await dispensarDecisao(deps, { decisaoId });
+      expect(await repos.computadorTelas.buscar(p.id, agenteId)).toMatchObject({ controle: "bot", ajuda: null, ajudaDecisaoId: null });
+      const devolveu = await trx<{ tela_id: string | null; agente_id: string | null }[]>`select tela_id, agente_id from computador_acoes where computador_id = ${p.id} and tipo = 'devolver'`;
+      expect(devolveu).toEqual([{ tela_id: t.id, agente_id: null }]);
     });
   });
 });

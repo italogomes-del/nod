@@ -113,4 +113,30 @@ describeIntegracao("computador do bot fora do ar: três falhas, um aviso, plano 
     expect(p3.promptSistema).not.toContain("fora do ar");
     expect(await avisos()).toHaveLength(1);
   }, 60000);
+
+  it("NOD-96: de volta ao docker, o bot que ficou no computador da pessoa (fora do ar) recebe as ferramentas e ganha um por_bot próprio", async () => {
+    quebrado = false;
+    const pessoaId = await srv.app.dentro(srv.pessoa, async (d) => {
+      const c = await d.repos.computadores.obterDaPessoa();
+      await d.repos.computadores.registrarFalha(c.id, { motivo: "sem_resposta", em: Date.now(), limite: 1 });
+      expect(await d.repos.computadores.vincularBot(c.id, bot.agente.id)).toBe(true);
+      return c.id;
+    });
+    // A saúde da máquina da pessoa não vale no docker: o plano dá as ferramentas e a frota não diz fora do ar.
+    const p = await plano();
+    expect(doComputador(p)).toContain("computador_observar");
+    expect(p.promptSistema).not.toContain("fora do ar");
+    expect((await srv.json<FrotaDto>("GET", "frota")).agentes.find((a) => a.id === bot.agente.id)?.computadorForaDoAr).toBeNull();
+    expect((await consultar()).computador).toMatchObject({ falhasSeguidas: 0, indisponivelDesde: null });
+    // A 1ª ação dá ao bot um 'por_bot' próprio; a máquina da pessoa segue intacta.
+    const r = await fetch(`${srv.url}/api/interno/ferramentas/computador_observar`, { method: "POST", headers: { authorization: `Bearer ${p.tokenDeTurno}`, "content-type": "application/json" }, body: JSON.stringify({ argumentos: {} }) });
+    expect(r.status).toBe(200);
+    expect(await r.json()).toMatchObject({ ok: true, isError: false });
+    await srv.app.dentro(srv.pessoa, async (d) => {
+      const v = (await d.repos.computadores.buscarVinculo(bot.agente.id))!;
+      expect(v.id).not.toBe(pessoaId);
+      expect(await d.repos.computadores.travar(v.id)).not.toBeNull();
+      expect((await d.repos.computadores.daPessoa())!.falhasSeguidas).toBe(1);
+    });
+  }, 60000);
 });

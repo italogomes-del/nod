@@ -2,6 +2,7 @@ import type { FrotaDto } from "../contracts/api.ts";
 import type { Inventario } from "../contracts/inventario.ts";
 import type { Negacao } from "../contracts/negacao.ts";
 import { descricaoEstado, previaDaMensagem } from "../domain/descricao-agente.ts";
+import { modeloDoModo } from "../domain/computador.ts";
 import { inventarioAusente } from "./autoria-evento.ts";
 import type { CasoDeUso } from "./tipos.ts";
 
@@ -20,7 +21,7 @@ export const listarFrota: CasoDeUso<{ agora?: number; gerenciar?: boolean }, Fro
   const agora = deps.agora();
   const agentes = await deps.repos.agentes.listar(input.gerenciar ? { incluirOcultos: true, incluirExcluidos: true } : {});
   // definido em 2026-09-24 (emenda da ADR-037): uma consulta para a frota inteira, não uma por agente.
-  const foraDoAr = await deps.repos.computadores.foraDoAr();
+  const foraDoAr = await deps.repos.computadores.foraDoAr(modeloDoModo(deps.services.computadores?.porPessoa));
   // definido em 2026-09-29 (0039): "não lido" sai do "lido até" da conversa, não da coluna agentes.nao_lido.
   const comNovas = new Set((await deps.repos.leituras.resumo()).map((r) => r.conversaId));
   const agenteIds = agentes.map((a) => a.id);

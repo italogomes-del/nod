@@ -113,13 +113,40 @@ describe("dispensar a pergunta do computador (NOD-170)", () => {
     const pergunta = await d.deps.repos.decisoes.criar({ tipo: "pergunta", agenteId: agente?.id ?? "", conversaId: conversa?.id ?? "", prazoDecisaoEm: AGORA + DIA, frase: "faça o login no Gmail" });
     const configurar = vi.fn(async () => undefined);
     const registrar = vi.fn(async () => undefined);
+    const c1 = { id: "c1", controle: "aguardando_pessoa", ajudaDecisaoId: pergunta?.id };
     Object.assign(d.deps.repos.computadores, {
-      buscarVinculo: async () => ({ id: "c1", controle: "aguardando_pessoa", ajudaDecisaoId: pergunta?.id }),
+      buscarVinculo: async () => c1,
+      daPessoa: async () => null,
+      travar: async (id: string) => (id === "c1" ? c1 : null),
       configurar,
       registrar,
     });
     await dispensarDecisao(d.deps, { decisaoId: pergunta?.id ?? "" });
     expect(configurar).toHaveBeenCalledWith("c1", { controle: "bot", ajuda: null, ajudaDecisaoId: null, atividadeEm: AGORA });
     expect(registrar).toHaveBeenCalledWith(expect.objectContaining({ computadorId: "c1", tipo: "devolver" }));
+  });
+
+  it("NOD-96: no computador da pessoa, dispensar devolve a TELA do bot (o pedido de ajuda é da tela), não a máquina", async () => {
+    const d = depsMemoria({ agora: () => AGORA });
+    const agente = await d.deps.repos.agentes.criar({ nome: "Vera", dono: "pessoa", forma: "shape-hex", cor: "c-purple", modelo: "claude-haiku-4-5-20251001" });
+    const conversa = await d.deps.repos.conversas.criar({ tipo: "propria", agenteId: agente?.id ?? "" });
+    const pergunta = await d.deps.repos.decisoes.criar({ tipo: "pergunta", agenteId: agente?.id ?? "", conversaId: conversa?.id ?? "", prazoDecisaoEm: AGORA + DIA, frase: "faça o login no Gmail" });
+    const configurarComputador = vi.fn(async () => undefined);
+    const configurarTela = vi.fn(async () => undefined);
+    const registrar = vi.fn(async () => undefined);
+    const t1 = { id: "t1", computadorId: "p1", agenteId: agente?.id, controle: "aguardando_pessoa", ajudaDecisaoId: pergunta?.id };
+    // A linha do computador da pessoa não guarda o pedido de ajuda: ele é da tela.
+    Object.assign(d.deps.repos.computadores, {
+      buscarVinculo: async () => ({ id: "p1", controle: "bot", ajudaDecisaoId: null }),
+      daPessoa: async () => ({ id: "p1" }),
+      travar: async () => null,
+      configurar: configurarComputador,
+      registrar,
+    });
+    Object.assign(d.deps.repos, { computadorTelas: { buscar: async () => t1, travar: async (id: string) => (id === "t1" ? t1 : null), configurar: configurarTela } });
+    await dispensarDecisao(d.deps, { decisaoId: pergunta?.id ?? "" });
+    expect(configurarTela).toHaveBeenCalledWith("t1", { controle: "bot", ajuda: null, ajudaDecisaoId: null, atividadeEm: AGORA });
+    expect(configurarComputador).not.toHaveBeenCalled();
+    expect(registrar).toHaveBeenCalledWith({ computadorId: "p1", telaId: "t1", autor: "pessoa", tipo: "devolver", estado: "concluida" });
   });
 });

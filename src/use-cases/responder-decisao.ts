@@ -7,6 +7,7 @@ import type { Turno } from "../contracts/turno.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { historicoDoFio, mensagensDoFio, rodadaNoFio } from "../domain/fio-da-pergunta.ts";
 import { opcaoRespondida } from "../domain/opcoes-da-pergunta.ts";
+import { ajudaDoComputador } from "./ajuda-do-computador.ts";
 import { rotinaDoTurno } from "./apoio-l7.ts";
 import { autoriaPessoa, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
 import { enfileirarRetomada } from "./enfileirar-retomada.ts";
@@ -36,7 +37,7 @@ export const fecharComResposta: CasoDeUso<{ decisaoId: string; texto: string }, 
   // ao bot". A web já não o responde pelo campo; aqui fecha a porta para o bundle antigo em cache e o POST direto, que
   // fechavam a ajuda e deixavam o controle em `aguardando_pessoa`. O "Devolver ao bot" passa: ele limpa
   // `ajudaDecisaoId` na mesma tx antes de chamar esta fase (adapters/fundo/computadores.ts).
-  if (atual.tipo === "pergunta" && (await deps.repos.computadores.buscarVinculo(atual.agenteId))?.ajudaDecisaoId === atual.id) {
+  if (atual.tipo === "pergunta" && (await ajudaDoComputador(deps.repos, atual.agenteId))?.ajudaDecisaoId === atual.id) {
     throw new ErroDeDominio("estado_invalido", { cause: "pedido de ajuda do computador: resolve-se com Assumir controle e Devolver ao bot" });
   }
   const agora = deps.agora();

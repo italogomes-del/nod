@@ -36,6 +36,58 @@ describeIntegracao("computador da pessoa no motor (0106)", () => {
     });
   });
 
+  it("NOD-96: o docker por bot não trava o computador da pessoa; o modo motor segue achando o vínculo do bot", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const a = await agenteComConversa(trx, MARLON);
+      const c = await a.repos.computadores.obterDaPessoa();
+      expect(await a.repos.computadores.vincularBot(c.id, a.agenteId)).toBe(true);
+      // `travar` é só do 'por_bot': sem o filtro, o modo docker ligaria ou desligaria a máquina da pessoa. O painel do docker o vê sem computador.
+      expect(await a.repos.computadores.travar(c.id)).toBeNull();
+      expect(await a.repos.computadores.buscarDoAgente(a.agenteId)).toBeNull();
+      // Sem `docker`, `obter` e `buscarVinculo` seguem achando o da pessoa (pedir_aprovacao e o plano do modo motor) e não criam nada.
+      expect((await a.repos.computadores.obter(a.agenteId))!.id).toBe(c.id);
+      expect((await a.repos.computadores.buscarVinculo(a.agenteId))!.id).toBe(c.id);
+      // No docker (`soPorBot`), o vínculo e a saúde da máquina da pessoa não contam para o bot.
+      expect(await a.repos.computadores.buscarVinculo(a.agenteId, "por_bot")).toBeNull();
+      await a.repos.computadores.registrarFalha(c.id, { motivo: "sem_resposta", em: 1000, limite: 1 });
+      expect((await a.repos.computadores.foraDoAr()).has(a.agenteId)).toBe(true);
+      expect((await a.repos.computadores.foraDoAr("por_bot")).has(a.agenteId)).toBe(false);
+      const vinculo = async () => (await trx<{ computador_id: string }[]>`select computador_id from agentes where id = ${a.agenteId}`)[0]!.computador_id;
+      expect(await vinculo()).toBe(c.id);
+      // De volta ao docker: o portão pede `obter(…, true)` e o bot ganha um 'por_bot' próprio, que trava; o da pessoa fica intacto.
+      const proprio = (await a.repos.computadores.obter(a.agenteId, true))!;
+      expect(proprio.id).not.toBe(c.id);
+      expect(await vinculo()).toBe(proprio.id);
+      expect((await a.repos.computadores.travar(proprio.id))!.agenteId).toBe(a.agenteId);
+      expect((await a.repos.computadores.obter(a.agenteId, true))!.id).toBe(proprio.id);
+      // E o motor o leva de volta ao da pessoa na 1ª ação.
+      expect(await a.repos.computadores.vincularBot(c.id, a.agenteId)).toBe(true);
+      expect(await vinculo()).toBe(c.id);
+      // O 'por_bot' de outro bot segue travando e aparecendo no painel.
+      const b = await agenteComConversa(trx, MARLON);
+      const legado = (await a.repos.computadores.obter(b.agenteId))!;
+      expect((await a.repos.computadores.travar(legado.id))!.agenteId).toBe(b.agenteId);
+      expect((await a.repos.computadores.buscarDoAgente(b.agenteId))!.id).toBe(legado.id);
+    });
+  });
+
+  it("NOD-96: a falha do computador da pessoa conta mesmo sem bot vinculado e com vários bots", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const a = await agenteComConversa(trx, MARLON);
+      const b = await agenteComConversa(trx, MARLON);
+      const c = await a.repos.computadores.obterDaPessoa();
+      // Acordar antes do 1º bot: sem vínculo, a transição para fora do ar ainda é devolvida.
+      const r = await a.repos.computadores.registrarFalha(c.id, { motivo: "sem_resposta", em: 1000, limite: 1 });
+      expect(r).toMatchObject({ virouIndisponivel: true, computador: { falhasSeguidas: 1, agenteId: "" } });
+      expect(await a.repos.computadores.registrarSucesso(c.id)).toBe(true);
+      expect(await a.repos.computadores.vincularBot(c.id, a.agenteId)).toBe(true);
+      expect(await a.repos.computadores.vincularBot(c.id, b.agenteId)).toBe(true);
+      const r2 = (await a.repos.computadores.registrarFalha(c.id, { motivo: "sem_resposta", em: 2000, limite: 3 }))!;
+      expect(r2.computador.falhasSeguidas).toBe(1);
+      expect([a.agenteId, b.agenteId]).toContain(r2.computador.agenteId);
+    });
+  });
+
   it("o supervisor é TOFU; Redefinir esquece a chave; uma operação de cada vez, com progresso entre 0 e 100", async () => {
     await withRollback(MARLON, async (trx) => {
       const a = await agenteComConversa(trx, MARLON);
