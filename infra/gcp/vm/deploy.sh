@@ -21,8 +21,8 @@ set -euo pipefail
 TAG="${1:?uso: deploy.sh <tag>}"
 cd /opt/nod
 # Sem aspas, `NOD_MODELO_LIGACAO_CLAUDE=modelo esforco=low` são duas atribuições no `source`: as opções cairiam em silêncio.
-if grep -Eq "^NOD_MODELO_(LIGACAO|REVISOR)_[A-Z]+=[^\"' #]+[[:blank:]]+[^[:blank:]#]" config.env; then
-  echo "NOD_MODELO_LIGACAO_* com opções precisa estar entre aspas no config.env, e NOD_MODELO_REVISOR_* também (ex.: \"claude-sonnet-5-5 esforco=low\")" >&2
+if grep -Eq "^NOD_MODELO_LIGACAO_[A-Z]+=[^\"' #]+[[:blank:]]+[^[:blank:]#]" config.env; then
+  echo "NOD_MODELO_LIGACAO_* com opções precisa estar entre aspas no config.env (ex.: \"claude-sonnet-5-5 esforco=low\")" >&2
   exit 1
 fi
 source ./config.env
@@ -166,6 +166,13 @@ PG_SENHA_APP="$(segredo nod-pg-senha-app)"
 PG_SENHA_DONO="$(segredo nod-pg-senha-dono)"
 SESSAO_SEGREDO="$(segredo nod-sessao-segredo)"
 CREDENTIAL_KEY="$(segredo nod-credential-key)"
+# ADR-115 (revisor no servidor, 2026-10-25): a chave da API da Anthropic da conta do Nod, só com o revisor ligado. Ligado
+# e sem o segredo, o gcloud falha aqui e o deploy para antes de qualquer cor subir; desligado, nem é lido.
+# O valor passa pelo mesmo critério do servidor (`lerConfigRevisor` tira os espaços das pontas): `" ligado "` ou um
+# config.env salvo com CRLF (`ligado\r`) ligam aqui também, e o env da cor nova leva o valor já limpo.
+NOD_REVISOR="$(printf '%s' "${NOD_REVISOR:-}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+REVISOR_CHAVE=""
+if [ "$NOD_REVISOR" = ligado ]; then REVISOR_CHAVE="$(segredo nod-anthropic-revisor)"; fi
 
 # Só o env da cor nova muda: a velha, que ainda drena, nunca recebe config nova.
 cat >"nod-$NOVA.env.novo" <<EOF
@@ -197,8 +204,11 @@ NOD_ONBOARDING_VOZ=${NOD_ONBOARDING_VOZ:-0}
 NOD_MODELO_LIGACAO_CLAUDE=${NOD_MODELO_LIGACAO_CLAUDE:-}
 NOD_MODELO_LIGACAO_CODEX=${NOD_MODELO_LIGACAO_CODEX:-}
 NOD_REVISOR=${NOD_REVISOR:-}
-NOD_MODELO_REVISOR_CLAUDE=${NOD_MODELO_REVISOR_CLAUDE:-}
+NOD_REVISOR_CHAVE=$REVISOR_CHAVE
+NOD_MODELO_REVISOR=${NOD_MODELO_REVISOR:-}
 NOD_REVISOR_TETO_DIA=${NOD_REVISOR_TETO_DIA:-}
+NOD_REVISOR_TETO_GLOBAL_USD=${NOD_REVISOR_TETO_GLOBAL_USD:-}
+NOD_REVISOR_TETO_PESSOA_USD=${NOD_REVISOR_TETO_PESSOA_USD:-}
 # NOD-167: sem a linha no config.env, produção fica com a ligação Codex DESLIGADA (o padrão do código é ligada).
 NOD_LIGACAO_CODEX=${NOD_LIGACAO_CODEX:-0}
 # Teto de pedidos de TTS por minuto deste processo, abaixo da cota de 200/min do projeto (emenda da ADR-071, NOD-166).

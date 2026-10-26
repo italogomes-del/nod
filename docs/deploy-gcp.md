@@ -203,6 +203,28 @@ Entra quem tem e-mail na tabela `pessoas` e, desde 2026-10-05, qualquer conta Go
 abrir ou fechar um domínio, edite a linha e rode o deploy; o boot iguala a tabela `dominios_admitidos` à variável.
 Fechar um domínio não tira quem já entrou. `NOD_GOOGLE_DOMINIO` não é usado em produção.
 
+### Chave da API do revisor do Automático (ADR-115)
+
+Desde 2026-10-25 o revisor do Automático roda no servidor, com o Claude Haiku 4.5 na conta do Nod. Com
+`NOD_REVISOR=ligado` no `config.env`, o deploy lê o segredo `nod-anthropic-revisor` para `NOD_REVISOR_CHAVE`; sem
+versão nele, o deploy para antes de subir a cor nova, e o servidor também não sobe sem a chave. Desligado, o segredo
+nem é lido. Para ligar (depois da política de privacidade citar o envio do pedido redigido à Anthropic):
+
+```bash
+# Uma chave de API de um workspace da organização do Nod, com limite de gasto no console da Anthropic.
+gcloud secrets describe nod-anthropic-revisor --project=nod-producao >/dev/null 2>&1 || \
+  gcloud secrets create nod-anthropic-revisor --replication-policy=user-managed --locations=southamerica-east1 --project=nod-producao
+gcloud secrets add-iam-policy-binding nod-anthropic-revisor --member="serviceAccount:nod-vm@nod-producao.iam.gserviceaccount.com" \
+  --role=roles/secretmanager.secretAccessor --project=nod-producao
+printf %s 'sk-ant-…' | gcloud secrets versions add nod-anthropic-revisor --data-file=- --project=nod-producao
+```
+
+O teto do gasto do dia (UTC), somando todas as contas, é `NOD_REVISOR_TETO_GLOBAL_USD` (padrão US$ 10); o gasto
+corrente mora em `limites_conta`, chave `revisor:gasto_microdolares`, em microdólares. Cada pessoa tem ainda a sua cota
+do dia, `NOD_REVISOR_TETO_PESSOA_USD` (padrão US$ 1), na mesma tabela, chave `revisor_gasto:<HMAC do id da pessoa>`
+(com o segredo da sessão; trocar o `nod-sessao-segredo` zera as cotas do dia, não o total). Acima da cota, só as
+revisões daquela pessoa viram cartão.
+
 ## Máquina na nuvem que dorme e acorda (NOD-92, ADR-121)
 
 Com `NOD_MAQUINA_NUVEM=gcp`, a pessoa conecta a conta Google Cloud dela em Máquinas, e o nod liga e desliga a VM

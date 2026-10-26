@@ -13,7 +13,7 @@ import { errosDoSchema } from "../domain/schema-args.ts";
 import { ehErroDeInfraDaTx } from "../db/tx.ts";
 import { rotinaDoTurno } from "./apoio-l7.ts";
 import { JANELA_CONVERSA_DE_FORA_MS, medirRevisao } from "./medir-revisao.ts";
-import { revisarAcaoFase1, type PedidoNaCaixa } from "./revisar-acao.ts";
+import { revisarAcaoFase1, type PedidoNaFila } from "./revisar-acao.ts";
 import { normalizarPedidoAPessoa } from "./pedir-a-pessoa.ts";
 import { assentarLoteAutomatico, pedirAprovacaoFase1, type LoteAutomatico } from "./pedir-aprovacao.ts";
 import { semprePermitirVivo } from "./regras-vivas.ts";
@@ -65,9 +65,9 @@ export type EfeitoPendente =
 
 /**
  * `emRevisao` (ADR-115, PR 5 dos modos de aprovação): a ação foi ao revisor — a rota responde `{ aguardar }` ao proxy (que
- * já espera como espera a pessoa) e só DEPOIS do commit põe o pedido na caixa do turno (`caixa` nulo = cartão na hora).
+ * já espera como espera a pessoa) e só DEPOIS do commit entrega o pedido ao executor do revisor (`fila` nulo = cartão na hora).
  */
-export type SaidaFase1Chamada = ResultadoChamada | { efeito: EfeitoPendente } | { emRevisao: { aguardar: string; caixa: PedidoNaCaixa | null } };
+export type SaidaFase1Chamada = ResultadoChamada | { efeito: EfeitoPendente } | { emRevisao: { aguardar: string; fila: PedidoNaFila | null } };
 
 type RespostaConector = Awaited<ReturnType<Services["conectores"]["chamar"]>>;
 
@@ -260,8 +260,8 @@ export const chamarFerramentaFase1: CasoDeUso<EntradaChamarFerramenta, SaidaFase
     if (plano.executor === "catcher") await deps.repos.catcher.registrar({ turnoId: input.turnoId, tipo: "tool_call", dados: { nome: input.nome, origem: "nod" } });
     // ADR-083: a ferramenta que abre uma decisão põe a task do turno em "precisa de você" na hora.
     // Em revisão a tela não vê nada: a task só vai a "precisa de você" se o revisor pedir (assentarRevisao). Sem pedido
-    // à caixa (Codex, teto, repetida, longo), o cartão já nasceu pendente: sincroniza na hora, como o pendente de sempre.
-    if (FERRAMENTAS_QUE_PEDEM_A_PESSOA.has(ferramenta.nome) && !("emRevisao" in r.resultado && r.resultado.emRevisao.caixa !== null)) r.events.push(...(await sincronizarTrabalho(deps, (await deps.repos.turnos.buscar(input.turnoId))?.trabalhoId)));
+    // ao executor (teto, repetida, longo, revisor indisponível), o cartão já nasceu pendente: sincroniza na hora, como o pendente de sempre.
+    if (FERRAMENTAS_QUE_PEDEM_A_PESSOA.has(ferramenta.nome) && !("emRevisao" in r.resultado && r.resultado.emRevisao.fila !== null)) r.events.push(...(await sincronizarTrabalho(deps, (await deps.repos.turnos.buscar(input.turnoId))?.trabalhoId)));
     return { data: r.resultado, events: [...events, ...r.events] };
   }
 
@@ -332,10 +332,10 @@ export const chamarFerramentaFase1: CasoDeUso<EntradaChamarFerramenta, SaidaFase
       frase: `${agente?.nome ?? "O bot"} quer usar ${conector.nome}`,
       agente: agente ? { nome: agente.nome, titulo: agente.titulo, descricao: agente.descricao } : null,
     });
-    // Sem pedido à caixa o cartão já nasceu pendente: a task vai a "precisa de você" na hora (ADR-083), como o
+    // Sem pedido ao executor o cartão já nasceu pendente: a task vai a "precisa de você" na hora (ADR-083), como o
     // pedir_aprovacao que esta chamada substitui. Com pedido, só se o revisor pedir (assentarRevisao).
     const daTask = r.data.revisao === null ? await sincronizarTrabalho(deps, (await deps.repos.turnos.buscar(input.turnoId))?.trabalhoId) : [];
-    return { data: { emRevisao: { aguardar: r.data.aguardar, caixa: r.data.revisao } }, events: [...events, ...(r.events ?? []), ...daTask] };
+    return { data: { emRevisao: { aguardar: r.data.aguardar, fila: r.data.revisao } }, events: [...events, ...(r.events ?? []), ...daTask] };
   }
 
   await registrarChamada(conectorId);
@@ -424,7 +424,7 @@ export const concluirChamada: CasoDeUso<EntradaConcluirChamada, ResultadoChamada
 export const chamarFerramenta: CasoDeUso<EntradaChamarFerramenta, ResultadoChamada> = async (deps, input) => {
   const f1 = await chamarFerramentaFase1(deps, input);
   const data = f1.data;
-  // Em revisão: a resposta do proxy (o pedido à caixa é da rota; quem testa a revisão chama a fase 1 e enfileira).
+  // Em revisão: a resposta do proxy (entregar o pedido ao executor é da rota; quem testa a revisão chama a fase 1 e enfileira).
   if ("emRevisao" in data) return { data: { aguardar: data.emRevisao.aguardar }, events: f1.events ?? [] };
   if (!("efeito" in data)) return { data, events: f1.events ?? [] };
   const desfecho = await executarEfeito(deps.services, data.efeito);

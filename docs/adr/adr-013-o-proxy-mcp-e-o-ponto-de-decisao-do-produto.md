@@ -36,3 +36,11 @@ Reabrir (mover a autoridade para o servidor) se aparecer um incidente em que o A
 - **`ler_mais {ref}`, ferramenta de origem `proxy`:** o proxy guarda o resto durante o turno e o entrega em partes, com a mesma moldura. Ela não vai ao servidor: o resto já passou pela decisão do servidor na chamada original. É leitura pura, então fica também no catálogo reduzido.
 - **O servidor GitHub nativo e o `gh` da máquina deixam de cortar antes.** O corte duplo perdia a marca.
 - **Contra o desvio para arquivo, que o bot não lê** (`--tools ""`): o filho recebe `MAX_MCP_OUTPUT_TOKENS` com o dobro do orçamento, e o `tools/list` anota `_meta.anthropic/maxResultSizeChars`. Medido com o CLI real em `scripts/sonda-saida-mcp.ts`.
+
+## Emenda de 2026-10-25 — o revisor do Automático no servidor (ADR-115)
+
+O revisor do Automático passou a rodar no servidor do Nod, chamando a API da Anthropic na conta do Nod enquanto o hook
+espera ([ADR-115](adr-115-automatico-com-revisor-na-ia-da-pessoa.md), "Revisor no servidor"). É uma dependência remota
+síncrona do Nod, **aceita**: vale só para o que já ia ao revisor no Automático; a queda dela é o cartão (o comportamento
+de antes), nunca negação nem liberação; e a decisão continua do servidor, que o hook já consulta desde a ADR-055. O que
+esta ADR recusou — o proxy consultar o servidor a cada `tools/call` com fail-closed — continua recusado.

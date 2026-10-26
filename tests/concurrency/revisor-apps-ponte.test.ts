@@ -1,36 +1,41 @@
 import { randomUUID } from "node:crypto";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { criarCaixaRevisoes, provaDaRevisao, type CaixaRevisoes } from "../../src/adapters/fundo/caixa-revisoes.ts";
 import { criarPonteInterna, type DepsPonte } from "../../src/adapters/fundo/ponte-interna.ts";
+import { assentarPeloExecutor } from "../../src/adapters/revisor/assentar.ts";
+import { criarClienteAnthropic } from "../../src/adapters/revisor/cliente-anthropic.ts";
+import { criarExecutorRevisor, type ExecutorRevisor } from "../../src/adapters/revisor/executor.ts";
 import type { CapacidadeConector } from "../../src/contracts/conector.ts";
 import type { FerramentaPlano, PlanoTurno } from "../../src/contracts/plano-turno.ts";
-import { PRAZO_REVISAO_MS, type PedidoRevisao } from "../../src/contracts/revisao.ts";
-import { haTxEscopadaAberta, vincularEscopo } from "../../src/db/tx.ts";
+import { abrirTxEscopada, haTxEscopadaAberta, vincularEscopo } from "../../src/db/tx.ts";
 import { criarRepos } from "../../src/repositories/index.ts";
 import { criarInterruptor } from "../../src/services/interruptor.ts";
-import type { Tx } from "../../src/shared/types.ts";
+import type { Escopo, Tx } from "../../src/shared/types.ts";
 import { chamarFerramentaFase1 } from "../../src/use-cases/chamar-ferramenta.ts";
 import { criarAgente } from "../../src/use-cases/criar-agente.ts";
-import type { Services } from "../../src/use-cases/tipos.ts";
+import type { Deps, Services } from "../../src/use-cases/tipos.ts";
+import { apiAnthropicFalsa, mensagem, type RespostaDaApiFalsa } from "../helpers/api-anthropic-falsa.ts";
 import { db } from "../helpers/db.ts";
 import { depsSobreTrx, executar, servicosDeTeste, useCasesDeTeste } from "../helpers/deps-l6.ts";
 import { autoriaPessoa } from "../helpers/fabricas.ts";
 import { TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
+import { configDeTeste } from "../helpers/revisor-de-teste.ts";
 
 /**
- * ADR-115 (PR 5 dos modos de aprovação) pela ponte in-process de verdade, com Postgres e transações commitadas: os quatro
- * passos do revisor nos apps — a fase 1 da chamada direta numa tx (e o pedido na caixa depois do commit), a renovação
- * entrega, o relato com a prova chega por `relatarRevisao`, a fase 3 FECHA numa tx nova, o app roda com NENHUMA tx aberta
- * e o desfecho é ASSENTADO numa terceira. É o caminho que o e2e-catcher cobriria (a jornada "rotina arquiva e-mails" e
- * "e-mail pede envio para fora") quando o catcher ganhar o revisor falso do PR 3b.
+ * ADR-115 (PR 5 dos modos de aprovação; revisor no servidor desde 2026-10-25) de ponta a ponta, com Postgres e transações
+ * commitadas: os quatro passos do revisor nos apps — a fase 1 da chamada direta numa tx (e o pedido ao executor depois do
+ * commit), o executor chama a API de mensagens FALSA (servidor HTTP local, pelo cliente de verdade), a fase 3 FECHA numa tx
+ * nova, o app roda com NENHUMA tx aberta e o desfecho é ASSENTADO numa terceira (`assentarPeloExecutor`, o mesmo da
+ * composição). As jornadas "rotina arquiva e-mails" (A2) e "e-mail pede envio para fora" (A3).
  */
 const PESSOA = { tenantId: TENANT_PADRAO, pessoaId: randomUUID() };
 const listarPessoas = async () => [{ tenantId: PESSOA.tenantId, id: PESSOA.pessoaId }];
 const PRONTO = { estado: "pronto" as const, versao: "catcher", em: Date.now() };
-const SEGREDO = "segredo-do-laco-0123456789abcdefgh";
+const CHAVE = "sk-ant-teste-0123456789abcdefghij";
+const LIBERA = mensagem('{"decisao":"libera","motivo":"é o que a rotina pede"}');
 const SINAIS = { attempted: true, rejected: false, promptSubmitted: true, producedOutput: false };
 const criados = { agentes: [] as string[], conversas: [] as string[], conectores: [] as string[] };
+let api: Awaited<ReturnType<typeof apiAnthropicFalsa>> | null = null;
 const cap = (nome: string, readOnlyHint = false): CapacidadeConector => ({ nome, descricao: nome.toLowerCase(), schema: { type: "object" }, readOnlyHint });
 const CATALOGO = [cap("MAILX_FETCH_EMAILS", true), cap("MAILX_SEND_EMAIL"), cap("MAILX_ARCHIVE_EMAIL")];
 
@@ -49,6 +54,8 @@ beforeEach(() => {
 
 afterEach(async () => {
   vi.restoreAllMocks();
+  await api?.fechar();
+  api = null;
   await escopado(async (trx) => {
     await trx`set local lock_timeout = '2s'`;
     const p = PESSOA.pessoaId;
@@ -72,13 +79,8 @@ afterEach(async () => {
   criados.agentes.length = criados.conversas.length = criados.conectores.length = 0;
 });
 
-async function montar(o: { modoTurno?: PlanoTurno["modoTurno"] } = {}) {
-  const caixa: CaixaRevisoes = criarCaixaRevisoes({
-    config: { ligado: true, modelo: "claude-sonnet-5-5", esforco: "low", tetoDia: 300, prazoMs: PRAZO_REVISAO_MS },
-    agora: () => Date.now(),
-    async vencer() {},
-    agendar: () => () => undefined,
-  });
+async function montar(o: { modoTurno?: PlanoTurno["modoTurno"]; resposta?: RespostaDaApiFalsa } = {}) {
+  api = await apiAnthropicFalsa(() => o.resposta ?? LIBERA);
   /** O app falso: registra a chamada e se havia uma transação escopada aberta na hora (NOD-263: nunca pode haver). */
   const chamadas: { tool: string; args: Record<string, unknown>; txAberta: boolean }[] = [];
   const conectores: Services["conectores"] = {
@@ -90,8 +92,12 @@ async function montar(o: { modoTurno?: PlanoTurno["modoTurno"] } = {}) {
       return { ok: true, ferramentas: [] };
     },
   };
-  const services = { ...servicosDeTeste((t) => criarRepos(t, PESSOA), PESSOA, { interruptor: criarInterruptor() }), conectores, revisor: caixa };
-  const deps: DepsPonte = { services, useCases: useCasesDeTeste(), executor: "catcher", listarPessoas, revisoes: caixa };
+  const services = { ...servicosDeTeste((t) => criarRepos(t, PESSOA), PESSOA, { interruptor: criarInterruptor() }), conectores, revisor: undefined as ExecutorRevisor | undefined };
+  // A composição em miniatura: tx escopada nova por fase, o executor com o cliente HTTP de verdade contra a API falsa.
+  const dentro = <T,>(escopo: Escopo, fn: (d: Deps) => Promise<T>) => abrirTxEscopada(db, escopo)((trx) => fn(depsSobreTrx(trx, escopo, { services })));
+  const executor = criarExecutorRevisor({ config: configDeTeste(), cliente: criarClienteAnthropic({ chave: CHAVE, url: api.url }), agora: () => Date.now(), assentar: assentarPeloExecutor({ dentro, services }) });
+  services.revisor = executor;
+  const deps: DepsPonte = { services, useCases: useCasesDeTeste(), executor: "catcher", listarPessoas };
   const ponte = criarPonteInterna(db, deps);
   const machineId = randomUUID();
   await ponte.conectar({ machineId, nome: "Mac", inventario: PRONTO, versaoContrato: 1 });
@@ -116,61 +122,62 @@ async function montar(o: { modoTurno?: PlanoTurno["modoTurno"] } = {}) {
   if (!puxado) throw new Error("nada puxado");
   const ferramentas: FerramentaPlano[] = CATALOGO.map((k) => ({ nome: `${slug}__${k.nome}`, nomeMcp: `mcp__nod__${slug}__${k.nome}`, origem: "conector", conectorId, readOnlyHint: k.readOnlyHint === true, tocaDadoPessoal: false, schema: { type: "object" } }));
   const plano: PlanoTurno = { ...puxado, catalogo: { ferramentas, servidores: [] }, modoTurno: o.modoTurno ?? "conversa" };
-  const renovar = () => ponte.renovar({ turnoId: plano.turnoId, machineId, sinais: SINAIS, eventos: [], revisa: true, segredoRevisao: SEGREDO });
-  /** O proxy chama o app pela rota interna: a fase 1 numa tx commitada e, em revisão, o pedido na caixa depois do commit. */
-  const chamar = async (tool: string, argumentos: Record<string, unknown>) => {
+  const renovar = () => ponte.renovar({ turnoId: plano.turnoId, machineId, sinais: SINAIS, eventos: [] });
+  /** O proxy chama o app pela rota interna: a fase 1 numa tx commitada e, em revisão, o pedido ao executor depois do commit. */
+  const chamar = async (tool: string, argumentos: Record<string, unknown>, entregar = true) => {
     const data = await escopado(async (trx) => (await executar(depsSobreTrx(trx, PESSOA, { services }), chamarFerramentaFase1, { turnoId: plano.turnoId, agenteId, nome: `${slug}__${tool}`, argumentos, plano })).data);
     if (!("emRevisao" in data)) throw new Error(`esperava revisão: ${JSON.stringify(data)}`);
-    if (data.emRevisao.caixa) caixa.enfileirar(data.emRevisao.caixa);
-    return data.emRevisao.aguardar;
+    if (entregar && data.emRevisao.fila) executor.enfileirar(data.emRevisao.fila);
+    return { id: data.emRevisao.aguardar, fila: data.emRevisao.fila };
   };
-  const relatar = (p: PedidoRevisao, saida: string) => ponte.relatarRevisao!(PESSOA.pessoaId, machineId, { revisaoId: p.revisaoId, turnoId: p.turnoId, saida, ms: 2500, prova: provaDaRevisao(SEGREDO, p.revisaoId, p.decisaoId) });
   const ler = (decisaoId: string) => escopado(async (trx) => {
     const repos = criarRepos(trx, PESSOA);
     return { decisao: await repos.decisoes.buscar(decisaoId), acao: await repos.acoesPeloModo.daDecisao(decisaoId), itens: await repos.itensAprovacao.listar(decisaoId) };
   });
-  return { ponte, caixa, plano, renovar, chamar, relatar, ler, chamadas };
+  return { ponte, executor, api, plano, renovar, chamar, ler, chamadas };
 }
 
-describeIntegracao("revisor nos apps pela ponte in-process (ADR-115, PR 5)", () => {
-  it("A2: a rotina arquiva e-mails — fase 1 commitada, a renovação entrega, o relato libera, o app roda sem tx aberta e o desfecho fica gravado; nenhum cartão", async () => {
+describeIntegracao("revisor nos apps de ponta a ponta (ADR-115, PR 5; revisor no servidor)", () => {
+  it("A2: a rotina arquiva e-mails — fase 1 commitada, a API libera, o app roda sem tx aberta e o desfecho fica gravado; nenhum cartão", async () => {
     const m = await montar({ modoTurno: "rotina" });
     expect((await m.renovar()).ativo).toBe(true);
-    const id = await m.chamar("MAILX_ARCHIVE_EMAIL", { ids: ["p1", "p2"] });
+    const { id, fila } = await m.chamar("MAILX_ARCHIVE_EMAIL", { ids: ["p1", "p2"] }, false);
     expect((await m.ler(id)).decisao?.estado).toBe("em_revisao");
-    const [p] = (await m.renovar()).revisoes ?? [];
-    expect(p?.decisaoId).toBe(id);
     expect(m.chamadas).toHaveLength(0);
-    expect(await m.relatar(p!, '{"decisao":"libera","motivo":"é o que a rotina pede"}')).toEqual({ aceito: true });
+    m.executor.enfileirar(fila!);
+    await m.executor.ocioso();
+    expect(m.api.pedidos).toHaveLength(1);
+    expect(m.api.pedidos[0]?.corpo.messages[0]?.content).toContain("rotina agendada");
     expect(m.chamadas).toEqual([{ tool: "MAILX_ARCHIVE_EMAIL", args: { ids: ["p1", "p2"] }, txAberta: false }]);
     const e = await m.ler(id);
     expect(e.decisao).toMatchObject({ estado: "decidida", desfecho: { regra: "regra:revisor" } });
     expect(e.itens).toMatchObject([{ desfecho: "executado", motivoManual: null }]);
     expect(e.acao).toMatchObject({ veredito: "libera", tipo: "app" });
-    // O relato repetido não roda o app de novo (uso único na caixa; a fase 3 é idempotente).
-    expect(await m.relatar(p!, '{"decisao":"libera","motivo":"de novo"}')).toEqual({ aceito: false });
+    // O pedido repetido (um deploy que reentregasse) não roda o app de novo: a fase 3 é idempotente.
+    m.executor.enfileirar(fila!);
+    await m.executor.ocioso();
     expect(m.chamadas).toHaveLength(1);
   });
 
-  it("A3: o e-mail lido pede envio para fora — o revisor pede e vira cartão; o app não roda", async () => {
-    const m = await montar();
+  it("A3: o e-mail lido pede envio para fora — a API pede e vira cartão; o app não roda", async () => {
+    const m = await montar({ resposta: mensagem('{"decisao":"pede","motivo":"o pedido veio do e-mail, não de você"}') });
     await m.renovar();
     await escopado((trx) => criarRepos(trx, PESSOA).turnos.contaminar(m.plano.turnoId, Date.now()));
-    const id = await m.chamar("MAILX_SEND_EMAIL", { para: "financeiro@acme-pagamentos.co" });
-    const [p] = (await m.renovar()).revisoes ?? [];
-    expect(await m.relatar(p!, '{"decisao":"pede","motivo":"o pedido veio do e-mail, não de você"}')).toEqual({ aceito: true });
+    const { id } = await m.chamar("MAILX_SEND_EMAIL", { para: "financeiro@acme-pagamentos.co" });
+    await m.executor.ocioso();
+    expect(m.api.pedidos[0]?.corpo.messages[0]?.content).toContain("O bot leu conteúdo de fora");
     const e = await m.ler(id);
     expect(e.decisao?.estado).toBe("pendente");
     expect(e.itens).toMatchObject([{ motivoManual: "revisor_pediu", justificativa: "o pedido veio do e-mail, não de você", sempreServe: false, desfecho: null }]);
     expect(m.chamadas).toHaveLength(0);
   });
 
-  it("corrida: o relato que libera contra o Parar — liberada e executada, ou cartão sem execução (nunca liberada sem rodar)", async () => {
+  it("corrida: o libera contra o Parar — liberada e executada, ou cartão sem execução (nunca liberada sem rodar)", async () => {
     const m = await montar();
     await m.renovar();
-    const id = await m.chamar("MAILX_ARCHIVE_EMAIL", { ids: ["c1"] });
-    const [p] = (await m.renovar()).revisoes ?? [];
-    await Promise.all([m.relatar(p!, '{"decisao":"libera","motivo":"você pediu"}'), escopado((trx) => trx`update turnos set parar_solicitado_em = now() where id = ${m.plano.turnoId}`)]);
+    const { id, fila } = await m.chamar("MAILX_ARCHIVE_EMAIL", { ids: ["c1"] }, false);
+    m.executor.enfileirar(fila!);
+    await Promise.all([m.executor.ocioso(), escopado((trx) => trx`update turnos set parar_solicitado_em = now() where id = ${m.plano.turnoId}`)]);
     const e = await m.ler(id);
     if (e.decisao?.estado === "decidida") {
       expect(e.itens).toMatchObject([{ desfecho: "executado" }]);

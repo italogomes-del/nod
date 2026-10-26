@@ -1,13 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { afterEach, beforeEach, expect, it, vi, type MockInstance } from "vitest";
-import { criarCaixaRevisoes, provaDaRevisao, type CaixaRevisoes } from "../../src/adapters/fundo/caixa-revisoes.ts";
+import type { ChamadaRevisor, ResultadoCliente } from "../../src/adapters/revisor/cliente-anthropic.ts";
 import type { ModoAprovacao } from "../../src/contracts/agente.ts";
 import type { CapacidadeConector } from "../../src/contracts/conector.ts";
 import { FERRAMENTAS_NOD } from "../../src/contracts/ferramentas-nod.ts";
 import type { FerramentaPlano, PlanoTurno } from "../../src/contracts/plano-turno.ts";
-import { PRAZO_REVISAO_MS, type PedidoRevisao, type RelatoRevisao } from "../../src/contracts/revisao.ts";
 import { NATIVA_MCP_DA_PESSOA, NATIVAS_DO_TERMINAL } from "../../src/domain/nativas.ts";
-import { FRASE_DA_FALHA, FRASE_SEM_REVISOR_NO_CODEX } from "../../src/domain/revisor.ts";
+import { FRASE_DA_FALHA } from "../../src/domain/revisor.ts";
 import { ErroBancoOcupado } from "../../src/db/tx.ts";
 import type { Tx } from "../../src/shared/types.ts";
 import { autorizarComando } from "../../src/use-cases/autorizar-comando.ts";
@@ -15,24 +14,24 @@ import { chamarFerramentaFase1, concluirChamada, executarEfeito, respostaSemFase
 import { executarLiberacao, type EntradaExecutarLiberacao } from "../../src/use-cases/liberar-no-app.ts";
 import { mudarModoAprovacao } from "../../src/use-cases/mudar-modo-aprovacao.ts";
 import { permitirSempre, podeVirarRegra } from "../../src/use-cases/permitir-sempre.ts";
-import { assentarRevisao } from "../../src/use-cases/revisar-acao.ts";
+import { assentarRevisao, type SaidaAssentarRevisao } from "../../src/use-cases/revisar-acao.ts";
 import type { Deps } from "../../src/use-cases/tipos.ts";
 import { agenteComConversa, autoriaPessoa } from "../helpers/fabricas.ts";
 import { TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { depsSobre, servicosDeTeste, type ChamadaConector } from "../helpers/l5.ts";
+import { falhaDaApi, revisorDeTeste, texto } from "../helpers/revisor-de-teste.ts";
 import { withRollback } from "../helpers/with-rollback.ts";
 
 /**
  * PR 5 do plano dos modos de aprovação (ADR-115): o revisor nos apps — a chamada direta a um conector, o lote do
- * `pedir_aprovacao` e o MCP da pessoa —, com Postgres de verdade e a MÁQUINA FALSA do PR 3a (lê o pedido da renovação e
- * responde com a prova do segredo do turno). Os quatro passos: a fase 1 pede; a fase 3 fecha; o efeito roda fora da
+ * `pedir_aprovacao` e o MCP da pessoa —, com Postgres de verdade e o EXECUTOR do revisor no servidor com uma API falsa que
+ * o teste responde (revisto em 2026-10-25, ADR-115 "Revisor no servidor"). Os quatro passos: a fase 1 pede; a fase 3 fecha; o efeito roda fora da
  * transação (aqui, com o conector falso da L5, que registra a chamada); o assentamento grava o desfecho. As fases rodam na
  * mesma transação do teste (`withRollback`); a ponte com transações de verdade mora em tests/concurrency.
  */
 const MARLON = { tenantId: TENANT_PADRAO, pessoaId: randomUUID() };
 const MAQUINA = randomUUID();
-const SEGREDO = "segredo-do-turno-0123456789abcdef";
 const LIBERA = '{"decisao":"libera","motivo":"você pediu para apagar"}';
 const PEDE = '{"decisao":"pede","motivo":"manda a lista de clientes a um endereço que você não citou"}';
 
@@ -48,18 +47,35 @@ const cap = (nome: string, readOnlyHint = false): CapacidadeConector => ({ nome,
 /** Ler (só leitura), enviar (manda para fora), apagar e arquivar (o grupo "apagar"). */
 const CATALOGO = [cap("MAILX_FETCH_EMAILS", true), cap("MAILX_SEND_EMAIL"), cap("MAILX_DELETE_EMAIL"), cap("MAILX_ARCHIVE_EMAIL"), cap("MAILX_ADD_LABEL")];
 
-type Opcoes = { modo?: ModoAprovacao; ligado?: boolean; plano?: Partial<PlanoTurno>; revisa?: boolean; semNoPlano?: string[]; comTrabalho?: boolean };
+type Opcoes = { modo?: ModoAprovacao; ligado?: boolean; plano?: Partial<PlanoTurno>; comCliente?: boolean; semNoPlano?: string[]; comTrabalho?: boolean };
+type Liberar = Partial<Pick<EntradaExecutarLiberacao, "services" | "dentro" | "dormir">>;
 
 async function cenario(trx: Tx, o: Opcoes = {}) {
   const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON, { nome: "Ada" });
   const chamadas: ChamadaConector[] = [];
-  const caixa: CaixaRevisoes = criarCaixaRevisoes({
-    config: { ligado: o.ligado ?? true, modelo: "claude-sonnet-5-5", esforco: "low", tetoDia: 300, prazoMs: PRAZO_REVISAO_MS },
-    agora: () => Date.now(),
-    async vencer() {},
-    agendar: () => () => undefined,
+  const saidas: SaidaAssentarRevisao[] = [];
+  const erros: unknown[] = [];
+  const ref: { deps?: Deps; liberar: Liberar } = { liberar: {} };
+  // A entrega do executor: a fase 3 e, liberado, a execução fora e o desfecho (executarLiberacao), como a composição faz
+  // (adapters/revisor/assentar.ts), aqui na transação do teste e com as trocas que cada caso pede.
+  const revisor = revisorDeTeste({
+    config: { ligado: o.ligado ?? true },
+    ...(o.comCliente === false ? { comCliente: false } : {}),
+    async assentar(p) {
+      try {
+        const d = ref.deps!;
+        const r = await assentarRevisao(d, { decisaoId: p.decisaoId, resultado: p.resultado });
+        if (r.events?.length) await repos.events.gravarComOutbox(r.events);
+        saidas.push(r.data);
+        if (r.data.lote) await executarLiberacao({ escopo: MARLON, services: d.services, lote: r.data.lote, dentro: (fn) => fn(d), ...ref.liberar });
+      } catch (e) {
+        erros.push(e);
+        throw e;
+      }
+    },
   });
-  const deps: Deps = depsSobre(repos, MARLON, { services: { ...servicosDeTeste({ chamadas }), revisor: caixa }, trx });
+  const deps: Deps = depsSobre(repos, MARLON, { services: { ...servicosDeTeste({ chamadas }), revisor: revisor.executor }, trx });
+  ref.deps = deps;
   const slug = `mailx-${randomUUID().slice(0, 8)}`;
   const conector = await repos.conectores.criar({ nome: "Mailx", slug, transporte: "stdio", comando: "node", declaracao: "toca" });
   const sondado = await repos.conectores.registrarSonda(conector?.id ?? "", { ok: true, catalogo: CATALOGO, agora: Date.now() });
@@ -84,15 +100,14 @@ async function cenario(trx: Tx, o: Opcoes = {}) {
     politicaExecucao: { prazoMs: 1, orcamentoResultadoChars: 8000 }, semprePermitir: [], tokenDeTurno: "tok",
     expiraEm: Date.now() + 60_000, nativas: [...NATIVAS_DO_TERMINAL, NATIVA_MCP_DA_PESSOA], modoTurno: "conversa", ...o.plano,
   };
-  if (o.revisa !== false) caixa.naRenovacao({ turnoId: turno.id, machineId: MAQUINA, revisa: true, amarraSegredo: true, segredo: SEGREDO });
 
-  /** O proxy chama a ferramenta pela rota interna: a fase 1; o pedido à caixa depois do "commit"; o efeito fora e a fase 2. */
+  /** O proxy chama a ferramenta pela rota interna: a fase 1; o pedido ao executor depois do "commit"; o efeito fora e a fase 2. */
   const chamar = async (nome: string, argumentos: unknown, p: PlanoTurno = plano): Promise<ResultadoChamada> => {
     const f1 = await chamarFerramentaFase1(deps, { turnoId: p.turnoId, agenteId, nome: nome.includes("__") || nome === "pedir_aprovacao" ? nome : `${slug}__${nome}`, argumentos, plano: p });
     if (f1.events?.length) await repos.events.gravarComOutbox(f1.events);
     const data = f1.data;
     if ("emRevisao" in data) {
-      if (data.emRevisao.caixa) caixa.enfileirar(data.emRevisao.caixa);
+      if (data.emRevisao.fila) revisor.executor.enfileirar(data.emRevisao.fila);
       return { aguardar: data.emRevisao.aguardar };
     }
     if (!("efeito" in data)) return data;
@@ -105,22 +120,17 @@ async function cenario(trx: Tx, o: Opcoes = {}) {
   };
   const pedirAprovacao = (itens: { texto: string; ferramenta: string; argumentos?: Record<string, unknown> }[], resumo = "Apagar os e-mails de propaganda") =>
     chamar("pedir_aprovacao", { resumo, itens: itens.map((i) => ({ texto: i.texto, destino: { conector: slug, ferramenta: i.ferramenta, argumentos: i.argumentos ?? {} } })) });
-  /** A máquina falsa responde; a "ponte" assenta (fase 3) e, liberado, executa fora e assenta o desfecho (executarLiberacao). */
-  const maquina = async (responder: (p: PedidoRevisao) => Partial<RelatoRevisao>, liberar: Partial<Pick<EntradaExecutarLiberacao, "services" | "dentro" | "dormir">> = {}) => {
-    const pedidos = caixa.naRenovacao({ turnoId: turno.id, machineId: MAQUINA, revisa: true, amarraSegredo: true, segredo: SEGREDO });
-    const saidas = [];
-    for (const p of pedidos) {
-      const aceito = caixa.relatar(MAQUINA, { revisaoId: p.revisaoId, turnoId: p.turnoId, ms: 2800, prova: provaDaRevisao(SEGREDO, p.revisaoId, p.decisaoId), ...responder(p) });
-      if (!aceito.aceito) throw new Error(`relato recusado: ${aceito.motivo}`);
-      const r = await assentarRevisao(deps, { decisaoId: aceito.decisaoId, resultado: aceito.resultado });
-      if (r.events?.length) await repos.events.gravarComOutbox(r.events);
-      if (r.data.lote) await executarLiberacao({ escopo: MARLON, services: deps.services, lote: r.data.lote, dentro: (fn) => fn(deps), ...liberar });
-      saidas.push(r.data);
-    }
-    return { pedidos, saidas };
+  /** A API falsa responde; o executor assenta (fase 3) e, liberado, executa fora e assenta o desfecho. */
+  const revisar = async (responder: (c: ChamadaRevisor) => ResultadoCliente, liberar: Liberar = {}) => {
+    ref.liberar = liberar;
+    const antes = saidas.length;
+    const pedidos = await revisor.revisar(responder);
+    ref.liberar = {};
+    return { pedidos, saidas: saidas.slice(antes) };
   };
+  const naFila = () => revisor.executor.emMemoria().esperando + revisor.executor.emMemoria().emVoo;
   const ler = async (decisaoId: string) => ({ decisao: await repos.decisoes.buscar(decisaoId), itens: await repos.itensAprovacao.listar(decisaoId), acao: await repos.acoesPeloModo.daDecisao(decisaoId) });
-  return { trx, repos, deps, caixa, chamadas, slug, conectorId: sondado.id, agenteId, conversaId, turno, trabalho, plano, chamar, pedirAprovacao, maquina, ler };
+  return { trx, repos, deps, naFila, erros, chamadas, slug, conectorId: sondado.id, agenteId, conversaId, turno, trabalho, plano, chamar, pedirAprovacao, revisar, ler };
 }
 
 function aguardarDe(r: ResultadoChamada): string {
@@ -137,15 +147,16 @@ describeIntegracao("revisor nos apps (PR 5 dos modos de aprovação, ADR-115)", 
       expect(e.decisao?.estado).toBe("em_revisao");
       expect(e.itens).toHaveLength(1);
       expect(e.itens[0]).toMatchObject({ destino: { conector: c.slug, ferramenta: "MAILX_DELETE_EMAIL", argumentos: { id: "m-1" } }, motivoManual: "revisor_falhou", sempreServe: true, desfecho: null });
-      expect(e.acao).toMatchObject({ tipo: "app", gatilho: "arriscado", risco: "apaga ou arquiva num app", veredito: null, revisorMaquina: MAQUINA });
+      expect(e.acao).toMatchObject({ tipo: "app", gatilho: "arriscado", risco: "apaga ou arquiva num app", veredito: null, revisorMaquina: null, revisorHarness: "servidor" });
       expect(c.chamadas).toHaveLength(0);
       // Nem a trilha de chamada nem o frame da decisão: nada rodou e a tela não vê a revisão.
       expect(await trx`select 1 from trilha where turno_id = ${c.turno.id} and kind = 'tool_call'`).toHaveLength(0);
       expect(await trx`select 1 from events where turno_id = ${c.turno.id} and kind = 'decisao_criada'`).toHaveLength(0);
 
-      const { pedidos, saidas } = await c.maquina(() => ({ saida: LIBERA }));
+      const { pedidos, saidas } = await c.revisar(() => texto(LIBERA));
       expect(pedidos[0]?.entrada).toContain("- apaga os e-mails de propaganda da semana");
-      expect(pedidos[0]?.entrada).toContain(`<<<DADO\nApp ${c.slug}, ferramenta MAILX_DELETE_EMAIL, argumentos: {"id":"m-1"}`);
+      expect(pedidos[0]?.entrada).toMatch(/<<<DADO-[A-Za-z0-9_-]{24}\n/);
+      expect(pedidos[0]?.entrada).toContain(`\n│ App ${c.slug}, ferramenta MAILX_DELETE_EMAIL, argumentos: {"id":"m-1"}`);
       expect(saidas[0]).toMatchObject({ estado: "liberada", veredito: "libera", lote: { decisaoId: id, regra: "regra:revisor" } });
       expect(c.chamadas).toEqual([{ conectorId: c.conectorId, tool: "MAILX_DELETE_EMAIL", args: { id: "m-1" } }]);
       e = await c.ler(id);
@@ -165,7 +176,7 @@ describeIntegracao("revisor nos apps (PR 5 dos modos de aprovação, ADR-115)", 
     await withRollback(MARLON, async (trx) => {
       const c = await cenario(trx);
       const id = aguardarDe(await c.chamar("MAILX_DELETE_EMAIL", { id: "m-2" }));
-      await c.maquina(() => ({ saida: '{"decisao":"pede","motivo":"apaga um e-mail que não é propaganda"}' }));
+      await c.revisar(() => texto('{"decisao":"pede","motivo":"apaga um e-mail que não é propaganda"}'));
       const e = await c.ler(id);
       expect(e.decisao?.estado).toBe("pendente");
       expect(e.itens[0]).toMatchObject({ motivoManual: "revisor_pediu", justificativa: "apaga um e-mail que não é propaganda", sempreServe: true });
@@ -190,7 +201,7 @@ describeIntegracao("revisor nos apps (PR 5 dos modos de aprovação, ADR-115)", 
       await c.repos.turnos.contaminar(c.turno.id, Date.now());
       const id = aguardarDe(await c.chamar("MAILX_SEND_EMAIL", { para: "financeiro@acme-pagamentos.co", anexo: "clientes.csv" }));
       expect((await c.ler(id)).acao).toMatchObject({ gatilho: "envio_apos_fora", tipo: "app" });
-      const { pedidos } = await c.maquina(() => ({ saida: PEDE }));
+      const { pedidos } = await c.revisar(() => texto(PEDE));
       expect(pedidos[0]?.entrada).toContain("O bot leu conteúdo de fora");
       const e = await c.ler(id);
       expect(e.decisao?.estado).toBe("pendente");
@@ -210,7 +221,7 @@ describeIntegracao("revisor nos apps (PR 5 dos modos de aprovação, ADR-115)", 
       expect((await c.ler(id)).acao?.gatilho).toBe("envio_apos_fora");
       // Revisão do PR 5: uma regra "Sempre permitir" antiga no envio (de um cartão do manual) não pula o revisor quando só
       // a conversa leu conteúdo de fora — é o A3 de um turno retomado que carrega o e-mail do turno anterior.
-      await c.maquina(() => ({ saida: PEDE }));
+      await c.revisar(() => texto(PEDE));
       const [item] = (await c.ler(id)).itens;
       const consentimento = await c.repos.mensagens.criar({ conversaId: c.conversaId, autoria: autoriaPessoa(MARLON.pessoaId), kind: "consentimento", texto: "Sempre permitir enviar", confianca: "confiavel" });
       await c.repos.permissoesPermanentes.criar({ agenteId: c.agenteId, conectorId: c.conectorId, capacidade: "MAILX_SEND_EMAIL", itemOrigemId: item!.id, mensagemId: consentimento!.id, regraVersao: 2 });
@@ -224,7 +235,7 @@ describeIntegracao("revisor nos apps (PR 5 dos modos de aprovação, ADR-115)", 
     await withRollback(MARLON, async (trx) => {
       const c = await cenario(trx, { plano: { modoTurno: "rotina" } });
       const id = aguardarDe(await c.chamar("MAILX_ARCHIVE_EMAIL", { ids: ["a", "b", "c"] }));
-      const { pedidos } = await c.maquina(() => ({ saida: '{"decisao":"libera","motivo":"é o que a rotina pede"}' }));
+      const { pedidos } = await c.revisar(() => texto('{"decisao":"libera","motivo":"é o que a rotina pede"}'));
       expect(pedidos[0]?.entrada).toContain("rotina agendada");
       expect((await c.ler(id)).decisao?.estado).toBe("decidida");
       expect(c.chamadas.map((x) => x.tool)).toEqual(["MAILX_ARCHIVE_EMAIL"]);
@@ -236,14 +247,14 @@ describeIntegracao("revisor nos apps (PR 5 dos modos de aprovação, ADR-115)", 
     await withRollback(MARLON, async (trx) => {
       const c = await cenario(trx);
       const id = aguardarDe(await c.chamar("MAILX_DELETE_EMAIL", { id: "m-9" }));
-      await c.maquina(() => ({ falha: "cli" }));
+      await c.revisar(() => falhaDaApi(429));
       const e = await c.ler(id);
-      expect(e.itens[0]).toMatchObject({ motivoManual: "revisor_falhou", justificativa: FRASE_DA_FALHA.cli, sempreServe: false });
+      expect(e.itens[0]).toMatchObject({ motivoManual: "revisor_falhou", justificativa: FRASE_DA_FALHA.api, sempreServe: false });
       expect(podeVirarRegra(e.itens[0]!)).toBe(false);
       // Liberou, mas o turno parou: cartão, e nada roda (a fase 3 não devolve lote).
       const outra = aguardarDe(await c.chamar("MAILX_DELETE_EMAIL", { id: "m-10" }));
       await trx`update turnos set parar_solicitado_em = now() where id = ${c.turno.id}`;
-      const { saidas } = await c.maquina(() => ({ saida: LIBERA }));
+      const { saidas } = await c.revisar(() => texto(LIBERA));
       expect(saidas[0]).toEqual({ estado: "cartao", veredito: "libera" });
       expect((await c.ler(outra)).itens[0]).toMatchObject({ motivoManual: "revisor_falhou", justificativa: FRASE_DA_FALHA.turno, desfecho: null });
       expect(c.chamadas).toHaveLength(0);
@@ -254,7 +265,7 @@ describeIntegracao("revisor nos apps (PR 5 dos modos de aprovação, ADR-115)", 
     await withRollback(MARLON, async (trx) => {
       const c = await cenario(trx);
       aguardarDe(await c.chamar("MAILX_DELETE_EMAIL", { id: "x", pasta: "inbox" }));
-      await c.maquina(() => ({ saida: PEDE }));
+      await c.revisar(() => texto(PEDE));
       // Mesmos argumentos em outra ordem: a mesma ação (jsonb compara pelo valor).
       const denovo = aguardarDe(await c.chamar("MAILX_DELETE_EMAIL", { pasta: "inbox", id: "x" }));
       expect(await c.ler(denovo)).toMatchObject({ decisao: { estado: "pendente" }, acao: { falha: "repetida", veredito: "nao_revisado" } });
@@ -271,7 +282,7 @@ describeIntegracao("revisor nos apps (PR 5 dos modos de aprovação, ADR-115)", 
       expect(e.decisao).toMatchObject({ estado: "em_revisao", frase: "Limpar a caixa: 1 apagar, 1 etiqueta" });
       expect(e.itens.map((i) => [i.textoOriginal, i.sempreServe])).toEqual([["Apagar a newsletter da Loja X", true], ["Etiquetar como lido", false]]);
       expect(e.acao).toMatchObject({ tipo: "app", gatilho: "arriscado" });
-      const { pedidos } = await c.maquina(() => ({ saida: LIBERA }));
+      const { pedidos } = await c.revisar(() => texto(LIBERA));
       expect(pedidos).toHaveLength(1);
       expect(pedidos[0]?.entrada).toContain("Resumo que o bot escreveu: Limpar a caixa: 1 apagar, 1 etiqueta");
       expect(pedidos[0]?.entrada).toContain("2 ações, que rodam juntas ou nenhuma");
@@ -286,39 +297,43 @@ describeIntegracao("revisor nos apps (PR 5 dos modos de aprovação, ADR-115)", 
     await withRollback(MARLON, async (trx) => {
       const c = await cenario(trx, { semNoPlano: ["MAILX_ADD_LABEL"] });
       const id = aguardarDe(await c.pedirAprovacao([{ texto: "Apagar", ferramenta: "MAILX_DELETE_EMAIL" }, { texto: "Enviar resumo", ferramenta: "MAILX_SEND_EMAIL" }]));
-      await c.maquina(() => ({ saida: PEDE }));
+      await c.revisar(() => texto(PEDE));
       expect((await c.ler(id)).itens.map((i) => i.motivoManual)).toEqual(["revisor_pediu", "revisor_pediu"]);
       const misto = aguardarDe(await c.pedirAprovacao([{ texto: "Apagar", ferramenta: "MAILX_DELETE_EMAIL", argumentos: { id: "z" } }, { texto: "Etiquetar", ferramenta: "MAILX_ADD_LABEL" }]));
       const e = await c.ler(misto);
       expect(e.decisao?.estado).toBe("pendente");
       expect(e.itens.map((i) => i.motivoManual)).toEqual(["acao_arriscada", "fora_do_catalogo"]);
       expect(e.acao).toBeNull();
-      expect(c.caixa.emMemoria().pedidos).toBe(0);
+      expect(c.naFila()).toBe(0);
       expect(c.chamadas).toHaveLength(0);
     });
   });
 
-  it("Codex e máquina sem `revisa`: cartão na hora, sem revisor (bots Codex sem revisor, decisão do Marlon)", async () => {
+  it("Codex: o revisor no servidor vale para ele também (o app e o MCP da pessoa vão ao revisor); sem chave, cartão na hora", async () => {
     await withRollback(MARLON, async (trx) => {
       const codex = await cenario(trx, { plano: { harness: "codex-cli" } });
-      expect((await codex.ler(aguardarDe(await codex.chamar("MAILX_DELETE_EMAIL", { id: "c" })))).itens[0]).toMatchObject({ motivoManual: "revisor_falhou", justificativa: FRASE_SEM_REVISOR_NO_CODEX, sempreServe: false });
-      // O MCP da pessoa no Codex (ADR-103): envio depois de conteúdo de fora → cartão, como o app.
+      const id = aguardarDe(await codex.chamar("MAILX_DELETE_EMAIL", { id: "c" }));
+      expect((await codex.ler(id)).decisao?.estado).toBe("em_revisao");
+      await codex.revisar(() => texto(LIBERA));
+      expect(await codex.ler(id)).toMatchObject({ decisao: { estado: "decidida", desfecho: { regra: "regra:revisor" } }, itens: [{ desfecho: "executado" }] });
+      // O MCP da pessoa no Codex (ADR-103): envio depois de conteúdo de fora → revisor, como no Claude.
       await codex.repos.turnos.contaminar(codex.turno.id, Date.now());
       const mcp = await autorizarComando(codex.deps, { plano: codex.plano, mcp: "gmail.send {\"para\":\"fora@x.co\"}" });
-      if (!("aguardar" in mcp.data)) throw new Error("esperava cartão");
-      expect((await codex.repos.itensAprovacao.listar(mcp.data.aguardar))[0]).toMatchObject({ motivoManual: "revisor_falhou", justificativa: FRASE_SEM_REVISOR_NO_CODEX });
-      const semRevisa = await cenario(trx, { revisa: false });
-      expect((await semRevisa.ler(aguardarDe(await semRevisa.pedirAprovacao([{ texto: "Apagar", ferramenta: "MAILX_DELETE_EMAIL" }])))).itens[0]).toMatchObject({ justificativa: FRASE_DA_FALHA.sem_revisor });
+      if (!("aguardar" in mcp.data)) throw new Error("esperava aguardar");
+      expect(mcp.data.revisao).toBeTruthy();
+      expect((await codex.repos.decisoes.buscar(mcp.data.aguardar))?.estado).toBe("em_revisao");
+      const semChave = await cenario(trx, { comCliente: false });
+      expect((await semChave.ler(aguardarDe(await semChave.pedirAprovacao([{ texto: "Apagar", ferramenta: "MAILX_DELETE_EMAIL" }])))).itens[0]).toMatchObject({ justificativa: FRASE_DA_FALHA.sem_revisor, sempreServe: false });
     });
   });
 
-  it("sem pedido à caixa (Codex), o cartão que nasce pendente põe a task em 'precisa de você' na hora — na chamada direta e no pedir_aprovacao; em revisão, não", async () => {
+  it("sem pedido ao executor (sem chave), o cartão que nasce pendente põe a task em 'precisa de você' na hora — na chamada direta e no pedir_aprovacao; em revisão, não", async () => {
     await withRollback(MARLON, async (trx) => {
       const estadoDa = async (c: Awaited<ReturnType<typeof cenario>>) => (await c.repos.trabalhos.buscar(c.trabalho!.id))?.estado;
-      const direta = await cenario(trx, { plano: { harness: "codex-cli" }, comTrabalho: true });
+      const direta = await cenario(trx, { comCliente: false, comTrabalho: true });
       aguardarDe(await direta.chamar("MAILX_DELETE_EMAIL", { id: "c" }));
       expect(await estadoDa(direta)).toBe("precisa_de_voce");
-      const lote = await cenario(trx, { plano: { harness: "codex-cli" }, comTrabalho: true });
+      const lote = await cenario(trx, { comCliente: false, comTrabalho: true });
       aguardarDe(await lote.pedirAprovacao([{ texto: "Apagar", ferramenta: "MAILX_DELETE_EMAIL" }]));
       expect(await estadoDa(lote)).toBe("precisa_de_voce");
       // Em revisão a tela não vê nada: a task só muda se o revisor pedir.
@@ -335,7 +350,7 @@ describeIntegracao("revisor nos apps (PR 5 dos modos de aprovação, ADR-115)", 
       let tentativas = 0;
       const quebrado = { ...c.deps.services, conectores: { ...c.deps.services.conectores, async chamar() { tentativas += 1; throw new Error("app fora do ar"); } } };
       const falhou = aguardarDe(await c.chamar("MAILX_DELETE_EMAIL", { id: "f-1" }));
-      await c.maquina(() => ({ saida: LIBERA }), { services: quebrado });
+      await c.revisar(() => texto(LIBERA), { services: quebrado });
       expect(tentativas).toBe(1);
       expect(await c.ler(falhou)).toMatchObject({ decisao: { estado: "decidida", desfecho: { regra: "regra:revisor" } }, itens: [{ desfecho: "falhou_na_execucao" }] });
 
@@ -343,13 +358,15 @@ describeIntegracao("revisor nos apps (PR 5 dos modos de aprovação, ADR-115)", 
       let ocupado = 2;
       const dentro: EntradaExecutarLiberacao["dentro"] = (fn) => (ocupado-- > 0 ? Promise.reject(new ErroBancoOcupado("c", 100)) : fn(c.deps));
       const repetiu = aguardarDe(await c.chamar("MAILX_DELETE_EMAIL", { id: "f-2" }));
-      await c.maquina(() => ({ saida: LIBERA }), { dentro, dormir: async () => undefined });
+      await c.revisar(() => texto(LIBERA), { dentro, dormir: async () => undefined });
       expect(c.chamadas.filter((k) => k.args["id"] === "f-2")).toHaveLength(1);
       expect((await c.ler(repetiu)).itens).toMatchObject([{ desfecho: "executado" }]);
 
-      // Esgotou as tentativas: relança, o app rodou uma vez e o item fica liberado sem desfecho (ADR-115, risco aceito).
+      // Esgotou as tentativas: relança (a composição loga), o app rodou uma vez e o item fica liberado sem desfecho (ADR-115,
+      // risco aceito).
       const esgotou = aguardarDe(await c.chamar("MAILX_DELETE_EMAIL", { id: "f-3" }));
-      await expect(c.maquina(() => ({ saida: LIBERA }), { dentro: () => Promise.reject(new ErroBancoOcupado("c", 100)), dormir: async () => undefined })).rejects.toBeInstanceOf(ErroBancoOcupado);
+      await c.revisar(() => texto(LIBERA), { dentro: () => Promise.reject(new ErroBancoOcupado("c", 100)), dormir: async () => undefined });
+      expect(c.erros.at(-1)).toBeInstanceOf(ErroBancoOcupado);
       expect(c.chamadas.filter((k) => k.args["id"] === "f-3")).toHaveLength(1);
       expect(await c.ler(esgotou)).toMatchObject({ decisao: { estado: "decidida" }, itens: [{ desfecho: null }] });
     });
@@ -360,7 +377,7 @@ describeIntegracao("revisor nos apps (PR 5 dos modos de aprovação, ADR-115)", 
       const c = await cenario(trx);
       const plano = { ...c.plano, catalogo: { ...c.plano.catalogo, ferramentas: c.plano.catalogo.ferramentas.map((f) => (f.nome.endsWith("MAILX_DELETE_EMAIL") ? { ...f, execucao: "maquina" as const } : f)) } };
       const id = aguardarDe(await c.chamar("MAILX_DELETE_EMAIL", { id: "gh" }, plano));
-      await c.maquina(() => ({ saida: LIBERA }));
+      await c.revisar(() => texto(LIBERA));
       expect(c.chamadas).toHaveLength(0);
       const e = await c.ler(id);
       expect(e.decisao?.estado).toBe("decidida");
@@ -383,7 +400,7 @@ describeIntegracao("revisor nos apps (PR 5 dos modos de aprovação, ADR-115)", 
       const card = aguardarDe(await rotina.pedirAprovacao([{ texto: "Apagar", ferramenta: "MAILX_DELETE_EMAIL", argumentos: { id: "3" } }]));
       expect(await rotina.ler(card)).toMatchObject({ decisao: { estado: "pendente" }, itens: [{ motivoManual: "acao_arriscada" }], acao: null });
       expect((await rotina.ler(card)).itens[0]?.sempreServe).toBeUndefined();
-      expect(c.caixa.emMemoria().pedidos + rotina.caixa.emMemoria().pedidos).toBe(0);
+      expect(c.naFila() + rotina.naFila()).toBe(0);
       expect(await c.repos.acoesPeloModo.doTurno(c.turno.id)).toEqual([]);
     });
   });
@@ -396,7 +413,7 @@ describeIntegracao("revisor nos apps (PR 5 dos modos de aprovação, ADR-115)", 
       await total.repos.turnos.contaminar(total.turno.id, Date.now());
       expect(await total.chamar("MAILX_DELETE_EMAIL", { id: "1" })).toMatchObject({ ok: true });
       expect(await total.chamar("MAILX_SEND_EMAIL", { para: "fora@x.co" })).toMatchObject({ ok: true });
-      expect(manual.caixa.emMemoria().pedidos + total.caixa.emMemoria().pedidos).toBe(0);
+      expect(manual.naFila() + total.naFila()).toBe(0);
     });
   });
 });

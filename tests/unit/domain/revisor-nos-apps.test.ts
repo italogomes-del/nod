@@ -242,6 +242,7 @@ describe("pedidoDoRevisor com o lote de apps (PR 5)", () => {
     mensagensDaPessoa: ["apaga as 14 planilhas velhas"],
     bot: { nome: "Ada", titulo: "", descricao: "" },
     jaPediuNoTurno: 0,
+    marca: "MarcaDeTesteDoLote_0123456",
   };
 
   it("todos os itens e o resumo do bot vão na parte não confiável, com os argumentos redigidos", () => {

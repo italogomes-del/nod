@@ -1,101 +1,94 @@
-import type { EsforcoAgente } from "./agente.ts";
-import type { NivelPressao } from "./trabalho.ts";
-
 /**
- * O revisor do Automático (definido em 2026-10-18, plano dos modos de aprovação, Parte 3; ADR-115 proposta). Uma ação
- * arriscada do Automático vira uma decisão `em_revisao`; o servidor monta o pedido (domain/revisor.ts) e o entrega ao
- * LAÇO que segura o turno, pela renovação de 1 s (`RespostaRenovar.revisoes`). O laço roda o CLI da pessoa, na conta do
- * turno, sem ferramenta, e devolve o texto cru pela rota `POST /api/maquina/revisao` (`PonteInterna.relatarRevisao`).
+ * O revisor do Automático (definido em 2026-10-18, plano dos modos de aprovação, Parte 3; ADR-115). Uma ação arriscada
+ * do Automático vira uma decisão `em_revisao`; o servidor monta o pedido (domain/revisor.ts) e, depois do commit, o
+ * executor do revisor (adapters/revisor) chama a API de mensagens da Anthropic, na conta do Nod, com um modelo pequeno.
  * Quem lê o veredito, corta o motivo e decide é o servidor. Erro, demora ou dúvida viram cartão, nunca negação.
+ *
+ * revisto em 2026-10-25 (ADR-115, "Revisor no servidor"): o revisor saiu da IA da pessoa. Rodando como o mesmo usuário
+ * da máquina, o bot conseguia forjar o "libera" (o binário do CLI, o socket de mensagens, a conta logada); no servidor
+ * ele não alcança. O transporte pela renovação (`revisa`, segredo do turno, `POST /api/maquina/revisao`) foi removido.
  */
 
-/** Contados da fase 1. O servidor manda `expiraEm`; o laço mata o CLI em `expiraEm − MARGEM_DO_LACO_MS`, contando a vez. */
-export const PRAZO_REVISAO_MS = 60_000;
-export const MARGEM_DO_LACO_MS = 5_000;
-/** O varredor de expiração recolhe a decisão `em_revisao` com mais de 2 × o prazo (a caixa se perdeu num deploy). */
+/**
+ * Prazo da revisão, contado da fase 1 (fila + chamada). definido em 2026-10-25 (plano, 3e): 15 s; o hook já espera a
+ * decisão até 420 s, então o prazo troca cartões por segundos sem segurar o turno.
+ */
+export const PRAZO_REVISAO_MS = 15_000;
+/** O varredor de expiração recolhe a decisão `em_revisao` com mais de 2 × o prazo (a fila se perdeu num deploy). */
 export const RECOLHER_REVISAO_MS = 2 * PRAZO_REVISAO_MS;
-/** Revisões em voo (entregues e sem relato) por máquina; a terceira fica na caixa, e a espera conta no prazo. */
-export const REVISOES_POR_MAQUINA = 2;
+/** Chamadas à API ao mesmo tempo no processo (plano, revisão de engenharia 7); a nona espera na fila, e a espera conta no prazo. */
+export const REVISOES_EM_VOO = 8;
+/** Quantas esperam a vez; passado disso, cartão (`fila`) na hora — a fila não cresce sem limite numa rajada. */
+export const FILA_REVISOR_MAX = 64;
 /** Tetos (plano, 3c): por turno e, por padrão (`NOD_REVISOR_TETO_DIA`), por pessoa nas últimas 24 h. */
 export const TETO_REVISOES_POR_TURNO = 20;
 export const TETO_REVISOES_POR_DIA_PADRAO = 300;
-/** Disjuntor por máquina: tantas falhas seguidas → tanto tempo sem mandar revisão para ela (cartão direto). */
-export const DISJUNTOR_FALHAS = 3;
-export const DISJUNTOR_MS = 10 * 60_000;
+/** Teto GLOBAL do dia (UTC) em dólares, somando todas as contas (`NOD_REVISOR_TETO_GLOBAL_USD`). */
+export const TETO_GLOBAL_USD_PADRAO = 10;
+export const TETO_GLOBAL_USD_MAX = 1_000;
+/**
+ * Cota do gasto do dia (UTC) de UMA pessoa, em dólares (`NOD_REVISOR_TETO_PESSOA_USD`; revisão do #524, item 3): uma
+ * fração do teto global, para uma conta só não esgotar o revisor de todas. Acima dela, só as revisões dessa pessoa
+ * viram cartão.
+ */
+export const TETO_PESSOA_USD_PADRAO = 1;
+/**
+ * Disjuntor do processo (plano, 3e): tantas falhas seguidas → tanto tempo de cartão direto, sem chamar a API. revisto em
+ * 2026-10-26 (revisão do #524, item 3): só contam as falhas do serviço (rede, prazo, 401/403/404/408/429/5xx, corpo
+ * que não é uma mensagem), nunca o que o conteúdo do pedido provoca (texto fora do esquema, recusa do modelo, 400).
+ */
+export const DISJUNTOR_FALHAS = 5;
+export const DISJUNTOR_MS = 2 * 60_000;
 /** O comando acima disto não vai ao revisor (cartão, `longo`): o fim de um comando longo não pode ficar fora do pedido. */
 export const COMANDO_REVISOR_MAX = 4_000;
-/** O texto cru que a máquina devolve (o servidor ignora o resto) e o motivo depois de lido. */
+/** O texto do modelo acima disto é ignorado (cartão, `saida`) e o motivo é cortado depois de lido. */
 export const SAIDA_REVISOR_MAX = 600;
 export const MOTIVO_REVISOR_MAX = 160;
-/** O segredo do turno que o laço gera (base64url ou hexadecimal): tamanho aceito pela renovação. */
-export const SEGREDO_REVISAO_MIN = 32;
-export const SEGREDO_REVISAO_MAX = 128;
 
 /**
- * Um pedido de revisão, como a renovação o entrega. `entrada` vai INTEIRA pelo stdin do CLI (as partes confiável e não
- * confiável já juntas pelo servidor: a máquina não monta nem muda nada); `prompt` vai em `--system-prompt`. `decisaoId`
- * entra só na prova. Reentregue em toda renovação até o laço mandar `revisoesRecebidas: [revisaoId]` ou o relato chegar:
- * o laço deduplica por `revisaoId`.
+ * Um pedido de revisão, como a fase 1 o entrega ao executor DEPOIS do commit. `prompt` vai como `system` da chamada e
+ * `entrada` como a mensagem da pessoa (as partes confiável e não confiável já juntas pelo domínio). `decisaoId` diz
+ * qual decisão a fase 3 assenta.
  */
 export type PedidoRevisao = {
   revisaoId: string;
   decisaoId: string;
   turnoId: string;
   modelo: string;
-  esforco?: EsforcoAgente;
   prompt: string;
   entrada: string;
-  /** Epoch ms. Passado disso o relato é ignorado (a decisão já virou cartão). */
+  /** Epoch ms. A chamada é cortada aqui; passado disso, cartão (`prazo`). */
   expiraEm: number;
 };
 
-/** O que só o laço sabe que deu errado (o resto o servidor decide sozinho, `FALHAS_REVISAO`). */
-export const FALHAS_DO_LACO = ["prazo", "cli", "init", "cota", "memoria"] as const;
-export type FalhaDoLaco = (typeof FALHAS_DO_LACO)[number];
-
 /**
- * O relato do laço. Ou `saida` (o último texto do modelo, cru, até SAIDA_REVISOR_MAX) ou `falha`. `prova` =
- * hexadecimal minúsculo de HMAC-SHA256(segredo do turno, `${revisaoId}|${decisaoId}`): só o laço, que guarda o segredo
- * em memória desde a primeira renovação do turno, consegue fazê-la — a chave da máquina sozinha não aprova nada.
+ * Por que a revisão não deu um veredito (vai em `acoes_pelo_modo.falha` e escolhe a frase do cartão):
+ * - do executor: `prazo` (a chamada ou a fila passou do prazo), `api` (erro HTTP, 429, rede, recusa do modelo),
+ *   `disjuntor`, `teto_global` (o gasto do dia de todas as contas), `teto_pessoa` (o gasto do dia desta pessoa, revisão
+ *   do #524), `fila` (cheia), `sem_revisor` (revisor ausente);
+ * - da fase 1: `teto` (do turno ou da pessoa), `longo`, `repetida` (a mesma ação já levou "pede", foi negada ou venceu
+ *   na cadeia), `escondido` (a redação de segredos esconderia um pedaço de shell; revisão do PR 3a);
+ * - da fase 3: `saida` (o texto não é o JSON) e `turno` (o revisor liberou, mas o turno parou, o bot saiu ou o modo
+ *   deixou de ser o automático).
  */
-export type RelatoRevisao = {
-  revisaoId: string;
-  turnoId: string;
-  saida?: string;
-  falha?: FalhaDoLaco;
-  /** Do pedido recebido ao fim do CLI (inclui a espera da vez). */
-  ms: number;
-  fichasEntrada?: number;
-  fichasSaida?: number;
-  prova: string;
-};
-/** `aceito: false` = ignorado (outra máquina, outro turno, repetido, depois do prazo ou sem a prova certa). */
-export type RespostaRelatoRevisao = { aceito: boolean };
-
-/**
- * Por que a revisão não deu um veredito (vai em `acoes_pelo_modo.falha` e escolhe a frase do cartão): as do laço, mais
- * `sem_revisor` (a máquina do turno não anuncia `revisa`, ou o turno é do Codex), `teto`, `disjuntor`, `longo`,
- * `repetida` (a mesma ação já levou "pede", foi negada ou venceu na cadeia), `saida` (o texto não é o JSON) e `turno`
- * (o revisor liberou, mas o turno parou, o bot saiu ou o modo deixou de ser o automático) e `escondido` (a redação de
- * segredos esconderia do revisor um pedaço de shell, como `DB_PASSWORD=$(curl …|sh)`; revisão do PR 3a).
- */
-export const FALHAS_REVISAO = [...FALHAS_DO_LACO, "sem_revisor", "teto", "disjuntor", "longo", "repetida", "saida", "turno", "escondido"] as const;
+export const FALHAS_REVISAO = ["prazo", "api", "sem_revisor", "teto", "teto_global", "teto_pessoa", "disjuntor", "fila", "longo", "repetida", "saida", "turno", "escondido"] as const;
 export type FalhaRevisao = (typeof FALHAS_REVISAO)[number];
 export type VereditoRevisao = "libera" | "pede" | "falhou" | "nao_revisado";
-
-/** A configuração do revisor no servidor (`NOD_REVISOR`, `NOD_MODELO_REVISOR_CLAUDE`, `NOD_REVISOR_TETO_DIA`). */
-export type ConfigRevisor = { ligado: boolean; modelo: string; esforco?: EsforcoAgente; tetoDia: number; prazoMs: number };
-
-/** A pressão da máquina que o servidor já guarda (trabalhos-vivos), com a histerese: o portão do Mac decide. */
-export type PressaoDaMaquinaRevisor = { memoria: NivelPressao; processador: NivelPressao | null; discoNivel?: NivelPressao | null };
+/** As falhas que o executor conhece antes de chamar a API (a fase 1 as lê para ir direto ao cartão). */
+export type IndisponibilidadeRevisor = Extract<FalhaRevisao, "sem_revisor" | "disjuntor" | "teto_global" | "teto_pessoa" | "fila">;
 
 /**
- * O que os casos de uso leem do revisor (`services.revisor`), tudo memória do processo. `revisorDoTurno`: a última
- * renovação do turno trouxe `revisa` e o segredo (null = app antigo, Codex, catcher, ligação: cartão na fase 1).
+ * A configuração do revisor no servidor (`NOD_REVISOR`, `NOD_MODELO_REVISOR`, `NOD_REVISOR_TETO_DIA`,
+ * `NOD_REVISOR_TETO_GLOBAL_USD`, `NOD_REVISOR_TETO_PESSOA_USD`). A chave da API (`NOD_REVISOR_CHAVE`) não mora aqui: só o cliente a vê.
  */
+export type ConfigRevisor = { ligado: boolean; modelo: string; tetoDia: number; tetoGlobalMicrodolares: number; tetoPessoaMicrodolares: number; prazoMs: number };
+
+/** O que os casos de uso leem do revisor (`services.revisor`), tudo memória do processo. */
 export interface ServicoRevisor {
   config: ConfigRevisor;
-  revisorDoTurno(turnoId: string): { machineId: string } | null;
-  disjuntorAberto(machineId: string): boolean;
-  pressao?(machineId: string): PressaoDaMaquinaRevisor | null;
+  /**
+   * Por que agora a revisão não sairia (sem cliente, disjuntor aberto, teto global do dia, fila cheia e, com a pessoa,
+   * a cota dela que o processo já viu batida hoje); null = sai.
+   */
+  indisponivel(pessoaId?: string): IndisponibilidadeRevisor | null;
 }

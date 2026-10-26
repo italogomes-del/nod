@@ -15,7 +15,7 @@ import { errosDoSchema } from "../domain/schema-args.ts";
 import { rotinaDoTurno } from "./apoio-l7.ts";
 import { executarItens, type DesfechoExecutado, type ItemAExecutar } from "./decidir.ts";
 import { JANELA_CONVERSA_DE_FORA_MS, medirRevisao } from "./medir-revisao.ts";
-import { revisarAcaoFase1, type PedidoNaCaixa } from "./revisar-acao.ts";
+import { revisarAcaoFase1, type PedidoNaFila } from "./revisar-acao.ts";
 import { PRAZO_DECISAO_MS } from "./pedir-a-pessoa.ts";
 import { semprePermitirVivo } from "./regras-vivas.ts";
 import { autoriaDoAgente } from "./registrar-negacao.ts";
@@ -72,9 +72,9 @@ type SaidaPedido = Awaited<ReturnType<CasoNod<Deps, "pedir_aprovacao">>>;
 
 /**
  * A fase 1 devolve a saída final (pendente, recusada), o lote automático a executar fora da tx ou (ADR-115, PR 5) o lote
- * EM REVISÃO: a decisão `em_revisao` e o pedido que a rota põe na caixa do turno depois do commit (nulo = cartão na hora).
+ * EM REVISÃO: a decisão `em_revisao` e o pedido que a rota entrega ao executor do revisor depois do commit (nulo = cartão na hora).
  */
-export type SaidaFase1Pedido = { saida: SaidaPedido } | { lote: LoteAutomatico } | { revisao: { aguardar: string; caixa: PedidoNaCaixa | null }; events: RuntimeEvent[] };
+export type SaidaFase1Pedido = { saida: SaidaPedido } | { lote: LoteAutomatico } | { revisao: { aguardar: string; fila: PedidoNaFila | null }; events: RuntimeEvent[] };
 
 /** `comRevisor`: só o caminho da ferramenta (a rota interna sabe esperar a revisão e enfileirar o pedido); os outros, como hoje. */
 const montarFase1 = (computador: boolean, comRevisor = false) => async (deps: Deps, input: EntradaPedido): Promise<SaidaFase1Pedido> => {
@@ -179,7 +179,7 @@ const montarFase1 = (computador: boolean, comRevisor = false) => async (deps: De
       frase: input.resumo,
       agente: agente ? { nome: agente.nome, titulo: agente.titulo, descricao: agente.descricao } : null,
     });
-    return { revisao: { aguardar: r.data.aguardar, caixa: r.data.revisao }, events: r.events ?? [] };
+    return { revisao: { aguardar: r.data.aguardar, fila: r.data.revisao }, events: r.events ?? [] };
   }
 
   const decisao = await deps.repos.decisoes.criar({

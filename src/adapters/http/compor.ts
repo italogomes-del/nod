@@ -123,10 +123,13 @@ import { rotasConectores } from "./rotas/conectores.ts";
 import { criarRotasConversas } from "./rotas/conversas.ts";
 import { criarRotasRelatos } from "./rotas/relatos.ts";
 import { criarRotasDecisoes } from "./rotas/decisoes.ts";
-import { executar, type DentroDeTx } from "./rotas/dentro-de-tx.ts";
-import { criarCaixaRevisoes } from "../fundo/caixa-revisoes.ts";
-import { lerConfigRevisor, renovacaoDoLacoLocal } from "../../domain/revisor.ts";
-import { assentarRevisao } from "../../use-cases/revisar-acao.ts";
+import type { DentroDeTx } from "./rotas/dentro-de-tx.ts";
+import { criarClienteAnthropic } from "../revisor/cliente-anthropic.ts";
+import { criarExecutorRevisor, type ExecutorRevisor } from "../revisor/executor.ts";
+import { lerConfigRevisor, VAR_REVISOR_CHAVE } from "../../domain/revisor.ts";
+import { gastoDaPessoaNoDia, gastoDoRevisorNoDia, PREFIXO_GASTO_PESSOA, somarGastoDoRevisor } from "../../repositories/gasto-revisor.repo.ts";
+import { chaveDeLimite } from "../../services/segredos-conta.ts";
+import { assentarPeloExecutor } from "../revisor/assentar.ts";
 import { criarRotaDev } from "./rotas/dev.ts";
 import { criarRotaEventos } from "./rotas/eventos.ts";
 import { criarConexoesSse, type ConexoesSse } from "./sse.ts";
@@ -217,6 +220,8 @@ export type OpcoesCompor = {
   nuvem?: { conta?: ContaNuvem; fetchImpl?: typeof fetch; provedor?: ProvedorNuvem };
   /** NOD-345: só em teste — o enviador de e-mail da conta. Default: Resend (google) ou a caixa local (stub). */
   enviadorEmail?: EnviadorEmail;
+  /** ADR-115 (revisor no servidor): só em teste — a API falsa (url ou fetch) e quantas chamadas em voo. Default: a da Anthropic. */
+  revisor?: { url?: string; fetchImpl?: typeof fetch; emVoo?: number };
 };
 
 export type App = {
@@ -228,6 +233,8 @@ export type App = {
   rotas: Rota[];
   /** NOD-345: as contas (NOD_CONTAS); null desligadas. O boot passa ao servidor (sessão revogável + rotas). */
   contas: ContasMontadas | null;
+  /** ADR-115: o executor do revisor no servidor (uma fila por processo). Os testes esperam `ocioso()`. */
+  revisor: ExecutorRevisor;
   barramento: Barramento;
   interruptor: InterruptorNod;
   tokens: TokenTurno;
@@ -541,25 +548,32 @@ export function comporApp(o: OpcoesCompor): App {
 
   /**
    * ADR-115 (2026-10-18, plano dos modos de aprovação, PR 3a): o revisor do Automático. A chave `NOD_REVISOR` (ligado ou
-   * não) e o modelo (`NOD_MODELO_REVISOR_CLAUDE`) vêm do ambiente; inválido impede o boot. A caixa de pedidos é uma por
-   * processo, dividida por todas as pontes e pelas rotas internas; o prazo de cada pedido vira cartão por aqui.
+   * não), o modelo (`NOD_MODELO_REVISOR`) e os tetos vêm do ambiente; inválido impede o boot, e ligado sem
+   * `NOD_REVISOR_CHAVE` também. revisto em 2026-10-25 ("Revisor no servidor"): o executor chama a API da Anthropic na conta
+   * do Nod, fora de transação, e entrega à fase 3 numa transação nova da dona; o item de app liberado roda fora dela e o
+   * desfecho entra numa terceira (`executarLiberacao`, os quatro passos do PR 5). O gasto do dia de todas as contas mora
+   * em `limites_conta` (gasto-revisor.repo.ts), lido e somado fora de escopo, como os limites das contas. revisto em
+   * 2026-10-26 (revisão do #524, item 3): o gasto de cada pessoa também, numa chave com o HMAC do id dela (o segredo da
+   * sessão, como as chaves das contas; trocar o segredo zera as cotas do dia, nunca o total).
    */
   const configRevisor = lerConfigRevisor(env);
-  const caixaRevisoes = criarCaixaRevisoes({
+  const chaveGastoDaPessoa = (pessoaId: string) => chaveDeLimite(segredoEfetivo(env.NOD_LOGIN === "google" ? "google" : "stub", env.NOD_SESSAO_SEGREDO), PREFIXO_GASTO_PESSOA, pessoaId);
+  const chaveRevisor = (env[VAR_REVISOR_CHAVE] ?? "").trim();
+  const revisor = criarExecutorRevisor({
     config: configRevisor,
+    cliente: chaveRevisor ? criarClienteAnthropic({ chave: chaveRevisor, ...(o.revisor?.url ? { url: o.revisor.url } : {}), ...(o.revisor?.fetchImpl ? { fetchImpl: o.revisor.fetchImpl } : {}) }) : null,
     agora: relogio,
-    pressao: (id) => trabalhosVivos.daMaquina(id),
-    async vencer({ escopo, decisaoId, resultado }) {
-      try {
-        await dentro(escopo, (d) => executar(d, assentarRevisao, { decisaoId, resultado }));
-      } catch (e) {
-        // A decisão fica `em_revisao`: o varredor de expiração a recolhe em até 2 × o prazo.
-        log("erro", "revisao_vencer_falhou", { decisao_id: decisaoId, erro: e instanceof Error ? e.name : "desconhecido" });
-      }
+    ...(o.revisor?.emVoo ? { emVoo: o.revisor.emVoo } : {}),
+    gasto: {
+      ler: (inicio) => db.begin((trx) => gastoDoRevisorNoDia(trx, inicio)) as Promise<number>,
+      lerDaPessoa: (inicio, pessoaId) => db.begin((trx) => gastoDaPessoaNoDia(trx, chaveGastoDaPessoa(pessoaId), inicio)) as Promise<number>,
+      somar: (inicio, n, pessoaId) => db.begin((trx) => somarGastoDoRevisor(trx, inicio, n, chaveGastoDaPessoa(pessoaId))) as Promise<{ total: number; pessoa: number }>,
     },
+    assentar: assentarPeloExecutor({ dentro, services }),
   });
-  services.revisor = caixaRevisoes;
-  log("info", "revisor_modo", { ligado: configRevisor.ligado, modelo: configRevisor.modelo, esforco: configRevisor.esforco ?? null, teto_dia: configRevisor.tetoDia });
+  if (configRevisor.ligado) void revisor.atualizarGasto();
+  services.revisor = revisor;
+  log("info", "revisor_modo", { ligado: configRevisor.ligado, modelo: configRevisor.modelo, com_chave: chaveRevisor !== "", teto_dia: configRevisor.tetoDia, teto_global_microdolares: configRevisor.tetoGlobalMicrodolares, teto_pessoa_microdolares: configRevisor.tetoPessoaMicrodolares });
 
   /**
    * definido em 2026-10-12 (NOD-214): o plano do turno adotado depois de um reinício, recomposto pelo emitir do despacho
@@ -685,7 +699,6 @@ export function comporApp(o: OpcoesCompor): App {
     },
     ...(o.redeMs !== undefined ? { redeMs: o.redeMs } : {}),
     fundoLinuxSoVermelha,
-    revisoes: caixaRevisoes,
     async depoisDeAssentar(d, { entrega, saida }) {
       const turno = saida.turno;
       if (!turno || saida.tardia) return [];
@@ -1363,7 +1376,7 @@ export function comporApp(o: OpcoesCompor): App {
     // definido em 2026-09-16: NOD_LONGPOLL_MS encurta a fatia do long-poll de aprovação (testes/e2e); default LONGPOLL_APROVACAO_MS.
     ...rotasComputadores(computadores),
     ...rotasWorkspaces(workspaces, dentro),
-    ...rotasInternas({ dentro, computadores, workspaces, tokens, agora: relogio, revisor: caixaRevisoes, pressao: (pessoaId) => trabalhosVivos.memoria(pessoaId)?.nivel ?? null, longpollMs: env.NOD_LONGPOLL_MS ? numero(env.NOD_LONGPOLL_MS, 20_000) : undefined }),
+    ...rotasInternas({ dentro, computadores, workspaces, tokens, agora: relogio, revisor, pressao: (pessoaId) => trabalhosVivos.memoria(pessoaId)?.nivel ?? null, longpollMs: env.NOD_LONGPOLL_MS ? numero(env.NOD_LONGPOLL_MS, 20_000) : undefined }),
     ...criarRotasRotinas(depsL7),
     ...criarRotasSalas(depsL7),
     ...criarRotasSuaVez(dentro),
@@ -1438,10 +1451,6 @@ export function comporApp(o: OpcoesCompor): App {
     iniciarPoolDeLacos((ponte) => iniciarLaco({
       ...p,
       ponte,
-      // ADR-115 (plano dos modos de aprovação, redesenho 6): o modo local renova a 1 s, como o app do Mac e o motor — é a
-      // batida que entrega o pedido de revisão ao laço; a 30 s ele estouraria o prazo de 60 s. Só com a chave ligada
-      // (revisão do PR 3a): desligada, nenhum pedido sai, e a batida fica a de hoje (30 s), sem 30× renovações no banco.
-      ...renovacaoDoLacoLocal(configRevisor),
       memoria: memoriaDaMaquina,
       midiaDaFala: midiaDaFalaLocal,
       aoDelta: (plano, texto) => publicarDoPlano(plano, "turno.delta", { texto }),
@@ -1484,6 +1493,7 @@ export function comporApp(o: OpcoesCompor): App {
     ponte,
     rotas,
     contas,
+    revisor,
     barramento,
     interruptor,
     tokens,

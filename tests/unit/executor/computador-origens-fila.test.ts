@@ -15,7 +15,9 @@ afterEach(async () => {
 });
 
 describe("gravadorEmFila (nod-origens.json)", () => {
-  it("gravações concorrentes deixam o JSON válido e com o estado final, sem perder origens", async () => {
+  // 60 rodadas × 44 gravações por temporário + rename: no runner carregado do CI passava dos 5 s padrão do projeto
+  // `unit` (timeout duas vezes seguidas em 26/10, sem regressão). O prazo não esconde defeito: o teste confere o JSON.
+  it("gravações concorrentes deixam o JSON válido e com o estado final, sem perder origens", { timeout: 30_000 }, async () => {
     const pasta = await mkdtemp(join(tmpdir(), "nod-origens-"));
     pastas.push(pasta);
     const arquivo = join(pasta, "nod-origens.json");

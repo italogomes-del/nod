@@ -3,12 +3,13 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { rotasInternas } from "../../src/adapters/http/rotas/interno.ts";
 import type { DentroDeTx } from "../../src/adapters/http/rotas/dentro-de-tx.ts";
 import { FERRAMENTAS_NOD } from "../../src/contracts/ferramentas-nod.ts";
-import { PRAZO_REVISAO_MS, type ServicoRevisor } from "../../src/contracts/revisao.ts";
+import type { ServicoRevisor } from "../../src/contracts/revisao.ts";
 import { criarTokenTurno } from "../../src/services/token-turno.ts";
-import type { PedidoNaCaixa } from "../../src/use-cases/revisar-acao.ts";
+import type { PedidoNaFila } from "../../src/use-cases/revisar-acao.ts";
 import type { Services } from "../../src/use-cases/tipos.ts";
 import { PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 import { dentroEmMemoria, planoDeTeste, servicosDeTeste, type ChamadaConector } from "../helpers/l5.ts";
+import { configDeTeste } from "../helpers/revisor-de-teste.ts";
 import { servidorDeTeste, type ServidorDeTeste } from "../helpers/servidor-de-teste.ts";
 
 const MARLON = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
@@ -16,7 +17,7 @@ const MARLON = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
 /**
  * ADR-115 (PR 5 dos modos de aprovação) pela rota interna de verdade (`POST /api/interno/ferramentas/:nome`), com `dentro`
  * em memória que conta as transações abertas: a chamada direta e o `pedir_aprovacao` que vão ao revisor respondem ao proxy o
- * `{ aguardar }` de sempre, e o pedido só entra na caixa do turno DEPOIS que a transação da fase 1 fechou.
+ * `{ aguardar }` de sempre, e o pedido só entra no executor do revisor DEPOIS que a transação da fase 1 fechou.
  */
 describe("rota interna: a ação de app que vai ao revisor responde aguardar e enfileira depois do commit (PR 5)", () => {
   const agora = () => Date.now();
@@ -24,9 +25,8 @@ describe("rota interna: a ação de app que vai ao revisor responde aguardar e e
   const tx = { abertas: 0 };
   const chamadas: ChamadaConector[] = [];
   const revisor: ServicoRevisor = {
-    config: { ligado: true, modelo: "claude-sonnet-5-5", esforco: "low", tetoDia: 300, prazoMs: PRAZO_REVISAO_MS },
-    revisorDoTurno: () => ({ machineId: "mac-1" }),
-    disjuntorAberto: () => false,
+    config: configDeTeste(),
+    indisponivel: () => null,
   };
   const services: Services = { ...servicosDeTeste({ agora, tokens, chamadas }), revisor };
   const memoria = dentroEmMemoria({ services, agora });
@@ -38,7 +38,7 @@ describe("rota interna: a ação de app que vai ao revisor responde aguardar e e
       tx.abertas--;
     }
   };
-  const enfileirados: { pedido: PedidoNaCaixa; txAbertas: number }[] = [];
+  const enfileirados: { pedido: PedidoNaFila; txAbertas: number }[] = [];
   let srv: ServidorDeTeste;
   let agenteId: string;
   let conversaId: string;
@@ -83,14 +83,14 @@ describe("rota interna: a ação de app que vai ao revisor responde aguardar e e
     };
   }
 
-  it("chamada direta: 200 { aguardar } (o mesmo corpo do pendente), a decisão em_revisao e o pedido na caixa com zero tx aberta; o app não roda", async () => {
+  it("chamada direta: 200 { aguardar } (o mesmo corpo do pendente), a decisão em_revisao e o pedido no executor com zero tx aberta; o app não roda", async () => {
     const chamar = await turno();
     const antes = enfileirados.length;
     const r = await chamar("email__apagar", { id: "e1" });
     expect(r.status).toBe(200);
     expect(Object.keys(r.corpo)).toEqual(["aguardar"]);
     expect(enfileirados.slice(antes)).toHaveLength(1);
-    expect(enfileirados[antes]).toMatchObject({ txAbertas: 0, pedido: { machineId: "mac-1", pedido: { decisaoId: r.corpo.aguardar } } });
+    expect(enfileirados[antes]).toMatchObject({ txAbertas: 0, pedido: { escopo: MARLON, pedido: { decisaoId: r.corpo.aguardar } } });
     expect(memoria.banco.decisoes.find((d) => d.id === r.corpo.aguardar)?.estado).toBe("em_revisao");
     expect(chamadas).toHaveLength(0);
   });

@@ -17,7 +17,7 @@ import { soltarPorMemoria } from "../../../domain/trabalho.ts";
 import { fecharPorMemoria } from "../../../use-cases/trabalhos.ts";
 import { autorizarComando } from "../../../use-cases/autorizar-comando.ts";
 import { ehUuid } from "../../../use-cases/apoio-l7.ts";
-import type { PedidoNaCaixa } from "../../../use-cases/revisar-acao.ts";
+import type { PedidoNaFila } from "../../../use-cases/revisar-acao.ts";
 import { chamarFerramentaFase1, concluirChamada, executarEfeito, REGRA_CHAMADA, registrarExecucaoLocal, respostaSemFase2, VERSAO_REGRA_CHAMADA, type SaidaFase1Chamada } from "../../../use-cases/chamar-ferramenta.ts";
 import { nomeParaTrilha, registrarNegacao } from "../../../use-cases/registrar-negacao.ts";
 import { assentarComNovaTentativa, TENTATIVAS_FASE2 } from "../../../use-cases/liberar-no-app.ts";
@@ -44,8 +44,8 @@ export type DepsRotasInternas = {
   dormir?: (ms: number) => Promise<void>;
   /** ADR-083 (#194): a pressão de memória dos Macs da pessoa; amarela ou pior solta a espera longa de uma task. */
   pressao?: (pessoaId: string) => NivelPressao | null;
-  /** ADR-115: onde o pedido de revisão entra DEPOIS do commit da fase 1 (a caixa do processo, caixa-revisoes.ts). */
-  revisor?: { enfileirar(p: PedidoNaCaixa): void };
+  /** ADR-115: onde o pedido de revisão entra DEPOIS do commit da fase 1 (o executor do revisor, adapters/revisor). */
+  revisor?: { enfileirar(p: PedidoNaFila): void };
   /** NOD-323: ociosidade do corpo do upload de mídia (teste encurta). */
   ociosoMidiaMs?: number;
   /** NOD-323 (revisão 3): quanto o upload espera a vaga antes do 503, e o prazo total do corpo (teste encurta). */
@@ -192,10 +192,10 @@ export function rotasInternas(deps: DepsRotasInternas): Rota[] {
             plano,
           });
         });
-        // ADR-115 (PR 5): a ação foi ao revisor. O pedido entra na caixa do turno só agora, depois do commit da fase 1 — o
-        // laço não pode responder por uma decisão que o banco ainda não tem; o proxy recebe o `aguardar` de sempre.
+        // ADR-115 (PR 5): a ação foi ao revisor. O pedido entra no executor só agora, depois do commit da fase 1 — o
+        // revisor não pode responder por uma decisão que o banco ainda não tem; o proxy recebe o `aguardar` de sempre.
         if ("emRevisao" in fase1) {
-          if (fase1.emRevisao.caixa) deps.revisor?.enfileirar(fase1.emRevisao.caixa);
+          if (fase1.emRevisao.fila) deps.revisor?.enfileirar(fase1.emRevisao.fila);
           ctx.json(200, { aguardar: fase1.emRevisao.aguardar });
           return;
         }
@@ -330,9 +330,9 @@ export function rotasInternas(deps: DepsRotasInternas): Rota[] {
         // (`credencial: "permitida"`): o hook não aceita um `{ ok: true }` cru, que é o que o servidor antigo responde.
         // Só nas nativas em que o hook a manda; noutra (o Bash), o campo é ignorado e o comando segue a decisão de sempre.
         const credencial = typeof c?.credencial === "string" && NATIVAS_COM_CREDENCIAL.includes(ferramenta) ? c.credencial : null;
-        // ADR-115: o pedido ao revisor só entra na caixa depois do commit — o laço não pode responder por uma decisão que
-        // o banco ainda não tem.
-        const paraACaixa: { revisao?: PedidoNaCaixa; negar?: string } = {};
+        // ADR-115: o pedido ao revisor só entra no executor depois do commit — o revisor não pode responder por uma decisão
+        // que o banco ainda não tem.
+        const paraOExecutor: { revisao?: PedidoNaFila; negar?: string } = {};
         const resultado = await deps.dentro(ctx.escopo, async (d) => {
           if (chave) {
             const anterior = await d.repos.nativasIdempotencia.travar(turnoId, chave);
@@ -348,11 +348,11 @@ export function rotasInternas(deps: DepsRotasInternas): Rota[] {
             const r = await executar(d, autorizarComando, credencial !== null ? { plano, credencial, ferramenta } : arquivo !== null ? { plano, arquivo } : mcp !== null ? { plano, mcp } : { plano, comando: String(c?.comando) });
             if ("negar" in r) {
               // Sem chave guardada: a negação não grava nada, e o reenvio (NOD-293) só decide de novo.
-              paraACaixa.negar = r.negar;
+              paraOExecutor.negar = r.negar;
               return null;
             }
             if ("aguardar" in r) {
-              if (r.revisao) paraACaixa.revisao = r.revisao;
+              if (r.revisao) paraOExecutor.revisao = r.revisao;
               const resposta = { aguardar: r.aguardar };
               if (chave) await d.repos.nativasIdempotencia.registrar(turnoId, chave, resposta);
               return resposta;
@@ -370,11 +370,11 @@ export function rotasInternas(deps: DepsRotasInternas): Rota[] {
           if (chave) await d.repos.nativasIdempotencia.registrar(turnoId, chave, resposta);
           return resposta;
         });
-        if (paraACaixa.negar !== undefined) {
-          ctx.json(403, { codigo: "nao_permitido", mensagem: paraACaixa.negar });
+        if (paraOExecutor.negar !== undefined) {
+          ctx.json(403, { codigo: "nao_permitido", mensagem: paraOExecutor.negar });
           return;
         }
-        if (paraACaixa.revisao) deps.revisor?.enfileirar(paraACaixa.revisao);
+        if (paraOExecutor.revisao) deps.revisor?.enfileirar(paraOExecutor.revisao);
         ctx.json(200, resultado);
       },
     },

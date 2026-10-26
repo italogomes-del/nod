@@ -20,9 +20,11 @@ export type NovaAcaoDoModo = {
   veredito?: VereditoRevisao | null;
   falha?: FalhaRevisao | null;
   motivo?: string | null;
+  /** O modelo a que o pedido foi; null = cartão direto, sem revisor. Os tetos contam só as linhas com modelo. */
   revisorModelo?: string | null;
+  /** `servidor` desde 2026-10-25 (ADR-115, "Revisor no servidor"). */
   revisorHarness?: string | null;
-  /** A máquina a que o pedido foi; null = cartão direto, sem revisor. Os tetos contam só as linhas com máquina. */
+  /** A máquina do laço no desenho anterior (revisor na IA da pessoa); o revisor no servidor deixa nula. */
   revisorMaquina?: string | null;
 };
 
@@ -136,10 +138,10 @@ export function acoesPeloModoRepo(conn: Conn, escopo: Escopo) {
       return r.count === 1;
     },
 
-    /** Quantas revisões o turno já mandou a uma máquina (o teto de 20, plano 3c). */
+    /** Quantas revisões o turno já mandou ao revisor (o teto de 20, plano 3c). */
     async revisoesDoTurno(turnoId: string): Promise<number> {
       const [l] = await conn<{ n: number }[]>`
-        select count(*)::int as n from acoes_pelo_modo where tenant_id = ${escopo.tenantId} and turno_id = ${turnoId} and revisor_maquina is not null`;
+        select count(*)::int as n from acoes_pelo_modo where tenant_id = ${escopo.tenantId} and turno_id = ${turnoId} and revisor_modelo is not null`;
       return l?.n ?? 0;
     },
 
@@ -151,13 +153,13 @@ export function acoesPeloModoRepo(conn: Conn, escopo: Escopo) {
     },
 
     /**
-     * Quantas revisões a pessoa mandou a máquinas desde `desde` (o teto do dia). Na tx escopada dela a RLS mostra todas as
+     * Quantas revisões a pessoa mandou ao revisor desde `desde` (o teto do dia). Na tx escopada dela a RLS mostra todas as
      * linhas dela — de todos os bots e de todas as contas de IA —, que é exatamente o que o teto conta.
      */
     async revisoesDaPessoaDesde(desde: number): Promise<number> {
       const [l] = await conn<{ n: number }[]>`
         select count(*)::int as n from acoes_pelo_modo
-        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and criado_em >= ${data(desde)} and revisor_maquina is not null`;
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and criado_em >= ${data(desde)} and revisor_modelo is not null`;
       return l?.n ?? 0;
     },
 

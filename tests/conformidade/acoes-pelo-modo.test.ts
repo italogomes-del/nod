@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { expect, it } from "vitest";
 import { vincularEscopo } from "../../src/db/tx.ts";
 import { criarRepos } from "../../src/repositories/index.ts";
@@ -36,7 +35,7 @@ describeIntegracao("gate: acoes_pelo_modo (0093)", () => {
     await withRollback(MARLON, async (trx) => {
       const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON);
       const turno = await repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem: "conversa", prazoEm: Date.now() + 60_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
-      const id = await repos.acoesPeloModo.registrar({ agenteId, conversaId, turnoId: turno!.id, decisaoId: null, modo: "automatico", tipo: "comando", resumo: "git push --force", gatilho: "arriscado", risco: "push forçado", revisorMaquina: randomUUID() });
+      const id = await repos.acoesPeloModo.registrar({ agenteId, conversaId, turnoId: turno!.id, decisaoId: null, modo: "automatico", tipo: "comando", resumo: "git push --force", gatilho: "arriscado", risco: "push forçado", revisorModelo: "claude-haiku-4-5-20251001", revisorHarness: "servidor" });
       expect((await repos.acoesPeloModo.doTurno(turno!.id)).map((a) => a.id)).toEqual([id]);
       await vincularEscopo(trx, ANA);
       const daAna = criarRepos(trx, ANA);

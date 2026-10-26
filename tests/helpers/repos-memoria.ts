@@ -1169,13 +1169,13 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         return true;
       },
       async revisoesDoTurno(turnoId) {
-        return b.acoesPeloModo.filter((a) => a.turnoId === turnoId && a.revisorMaquina !== null).length;
+        return b.acoesPeloModo.filter((a) => a.turnoId === turnoId && a.revisorModelo !== null).length;
       },
       async pedidasNoTurno(turnoId) {
         return b.acoesPeloModo.filter((a) => a.turnoId === turnoId && a.veredito === "pede").length;
       },
       async revisoesDaPessoaDesde(desde) {
-        return b.acoesPeloModo.filter((a) => a.criadoEm >= desde && a.revisorMaquina !== null).length;
+        return b.acoesPeloModo.filter((a) => a.criadoEm >= desde && a.revisorModelo !== null).length;
       },
       async registrarDesfechoPessoa(decisaoId, desfecho) {
         const a = b.acoesPeloModo.find((x) => x.decisaoId === decisaoId && x.desfechoPessoa === null);
@@ -1707,7 +1707,6 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         if (!t) return { ativo: false, motivo: "lease_vencido" as const };
         // NOD-214: como o repo real — lease vencido só passa na adoção dentro da carência (a sessão do turno não é modelada aqui).
         if (!((t.leaseAte ?? 0) > em || (o.aceitaVencido === true && t.estado === "despachando"))) return { ativo: false, motivo: "lease_vencido" as const };
-        const promptAntes = t.sinais.promptSubmitted;
         t.sinais = {
           attempted: t.sinais.attempted || !!sinais.attempted,
           rejected: t.sinais.rejected || !!sinais.rejected,
@@ -1716,8 +1715,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         };
         const ativo = t.estado === "despachando" && t.pararSolicitadoEm === null;
         if (ativo) t.leaseAte = em + LEASE_MS;
-        const antes = o.comPromptAntes ? { promptAntes } : {};
-        return ativo ? { ativo, ...antes } : { ativo, motivo: "parado" as const, ...antes };
+        return ativo ? { ativo } : { ativo, motivo: "parado" as const };
       },
       async marcarSinal(id, sinal) {
         const t = doTenant(b.turnos).find((x) => x.id === id);

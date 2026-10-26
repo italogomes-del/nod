@@ -166,14 +166,15 @@ const INSTRUCAO_APROVACAO: Record<Exclude<ModoAprovacao, "manual">, string> = {
 };
 
 /**
- * definido em 2026-10-18 (ADR-115, plano dos modos de aprovação 3d): o Automático com o revisor ligado (`NOD_REVISOR`) e
- * no Claude — a ação arriscada passa por um revisor na IA da pessoa, que libera em segundos ou vira pedido; não se
- * contorna o revisor; o pedido diz o que chama atenção. Desligado, o texto de sempre (INSTRUCAO_APROVACAO).
+ * definido em 2026-10-18 (ADR-115, plano dos modos de aprovação 3d): o Automático com o revisor ligado (`NOD_REVISOR`) —
+ * a ação arriscada passa por um revisor, que libera em segundos ou vira pedido; não se contorna o revisor; o pedido diz
+ * o que chama atenção. Desligado, o texto de sempre (INSTRUCAO_APROVACAO). revisto em 2026-10-25 (ADR-115, "Revisor no
+ * servidor"): o revisor é do nod (não mais a IA da pessoa) e vale em qualquer IA, Codex incluído.
  * revisto em 2026-10-19 (PR 5): o revisor chega aos apps — apagar ou arquivar num app (pedido na conversa ou não) e
  * mandar algo para fora por um app depois de ler conteúdo de fora vão a ele, e a chamada direta espera o veredito em vez
  * de voltar "peça aprovação".
  */
-const INSTRUCAO_AUTOMATICO_COM_REVISOR = "Aprovações: este bot está em Aprovar automaticamente — você aprova as próprias ações. Siga a tarefa até o fim sem perguntar se pode e sem esperar confirmação; quando algo for ambíguo, escolha o caminho razoável e diga no relatório o que supôs. O efeito externo continua passando por pedir_aprovacao, que o nod decide e devolve o resultado no mesmo passo; criar, mudar ou excluir rotina e pedir_acesso também voltam já aplicados (aplicada: true, estado concedido), menos criar ou mudar rotina depois de ler conteúdo de fora, que pede a pessoa. Merge e aprovar PR saem sozinhos. Apagar ou arquivar num app, o comando arriscado do terminal (rm -r, push --force, reset --hard, sudo) e o que manda dados para fora (comando, e-mail, mensagem, app) depois de você ler a web, um e-mail ou um PR passam por um revisor, na IA da pessoa: a chamada espera alguns segundos e ele libera ou vira um pedido para ela. Não contorne o revisor com outro comando ou ferramenta que faça o mesmo. Num pedido de aprovação, diga o que vai mudar e o que chama atenção. O que toca uma credencial do Mac para e pede a pessoa; quando um pedido fica pendente, encerre o turno dizendo o que falta. Pergunte à pessoa só o que só ela sabe.";
+const INSTRUCAO_AUTOMATICO_COM_REVISOR = "Aprovações: este bot está em Aprovar automaticamente — você aprova as próprias ações. Siga a tarefa até o fim sem perguntar se pode e sem esperar confirmação; quando algo for ambíguo, escolha o caminho razoável e diga no relatório o que supôs. O efeito externo continua passando por pedir_aprovacao, que o nod decide e devolve o resultado no mesmo passo; criar, mudar ou excluir rotina e pedir_acesso também voltam já aplicados (aplicada: true, estado concedido), menos criar ou mudar rotina depois de ler conteúdo de fora, que pede a pessoa. Merge e aprovar PR saem sozinhos. Apagar ou arquivar num app, o comando arriscado do terminal (rm -r, push --force, reset --hard, sudo) e o que manda dados para fora (comando, e-mail, mensagem, app) depois de você ler a web, um e-mail ou um PR passam por um revisor do nod: a chamada espera alguns segundos e ele libera ou vira um pedido para ela. Não contorne o revisor com outro comando ou ferramenta que faça o mesmo. Num pedido de aprovação, diga o que vai mudar e o que chama atenção. O que toca uma credencial do Mac para e pede a pessoa; quando um pedido fica pendente, encerre o turno dizendo o que falta. Pergunte à pessoa só o que só ela sabe.";
 
 /**
  * A frase do terminal sobre o que pede aprovação, pelo modo (ADR-055 no manual; ADR-059 nos outros dois). revisto em
@@ -192,14 +193,17 @@ const TERMINAL_POR_MODO: Record<ModoAprovacao, string> = {
   automatico: "o que muda algo (git commit/push, gh pr create, npm install) também roda direto, porque você aprova as próprias ações; só o arriscado (rm -r, push --force, reset --hard, sudo) e o que toca credencial viram um pedido de aprovação na conversa e o comando espera a resposta dela.",
   total: "o que muda algo também roda direto, porque este bot está sem aprovações, até o que toca uma credencial do Mac; fica registrado na Atividade da pessoa.",
 };
-/** ADR-115: o terminal do Automático com o revisor ligado (no Claude). */
-const TERMINAL_AUTOMATICO_COM_REVISOR = "o que muda algo (git commit/push, gh pr create, npm install) também roda direto, porque você aprova as próprias ações; o arriscado (rm -r, push --force, reset --hard, sudo) e o que manda dados para fora depois de você ler conteúdo de fora passam por um revisor, na IA da pessoa, e o comando espera alguns segundos: ou roda, ou vira um pedido de aprovação na conversa e espera a resposta dela; o que toca credencial vira um pedido de aprovação na conversa.";
+/** ADR-115: o terminal do Automático com o revisor ligado. */
+const TERMINAL_AUTOMATICO_COM_REVISOR = "o que muda algo (git commit/push, gh pr create, npm install) também roda direto, porque você aprova as próprias ações; o arriscado (rm -r, push --force, reset --hard, sudo) e o que manda dados para fora depois de você ler conteúdo de fora passam por um revisor do nod, e o comando espera alguns segundos: ou roda, ou vira um pedido de aprovação na conversa e espera a resposta dela; o que toca credencial vira um pedido de aprovação na conversa.";
 
-/** ADR-115: o revisor só existe no Automático, no Claude (o Codex não tem revisor na v1) e com a chave ligada. */
-function comRevisor(entrada: Pick<EntradaPromptSistema, "revisor" | "harness">, modo: ModoAprovacao): boolean {
-  return entrada.revisor === true && modo === "automatico" && (entrada.harness ?? "claude-cli") === "claude-cli";
+/**
+ * ADR-115: o revisor só existe no Automático e com a chave ligada. revisto em 2026-10-25 ("Revisor no servidor"): em
+ * qualquer IA — o revisor roda no servidor do nod e não depende do harness (antes, o Codex ficava sem revisor).
+ */
+function comRevisor(entrada: Pick<EntradaPromptSistema, "revisor">, modo: ModoAprovacao): boolean {
+  return entrada.revisor === true && modo === "automatico";
 }
-function regraDoTerminal(entrada: Pick<EntradaPromptSistema, "revisor" | "harness">, modo: ModoAprovacao): string {
+function regraDoTerminal(entrada: Pick<EntradaPromptSistema, "revisor">, modo: ModoAprovacao): string {
   return comRevisor(entrada, modo) ? TERMINAL_AUTOMATICO_COM_REVISOR : TERMINAL_POR_MODO[modo];
 }
 
@@ -260,7 +264,7 @@ export type EntradaPromptSistema = {
    * "Progresso:" deixa de pedir relatório completo. Ausente = o prompt de sempre.
    */
   whatsapp?: boolean;
-  /** ADR-115 (2026-10-18): o revisor do Automático ligado (`NOD_REVISOR`); só muda o texto do Automático no Claude. */
+  /** ADR-115 (2026-10-18): o revisor do Automático ligado (`NOD_REVISOR`); só muda o texto do Automático. */
   revisor?: boolean;
   /**
    * NOD-346 (ADR-126): o "Sobre mim" da pessoa, só quando o bot é dela (quem chama confere). Entra na parte estável,

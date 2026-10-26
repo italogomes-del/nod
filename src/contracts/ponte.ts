@@ -8,7 +8,6 @@ import type { PastaParaLimpar, RelatoLimpeza } from "./limpeza.ts";
 import type { PapelMaquina, PlataformaMaquina } from "./maquina.ts";
 import type { MotivoPasse } from "./motivos.ts";
 import type { PlanoTurno } from "./plano-turno.ts";
-import type { PedidoRevisao, RelatoRevisao, RespostaRelatoRevisao } from "./revisao.ts";
 import type { LeituraMemoria } from "./trabalho.ts";
 import type { ResultadoTurno, SinaisTurno, SubagenteVivo, TarefaDoBot } from "./turno.ts";
 
@@ -114,15 +113,6 @@ export type PedidoRenovar = {
    * servidor a grava cedo: se a entrega se perder num reinício, a volta retoma a mesma sessão em vez de abrir outra.
    */
   sessaoCli?: string;
-  /**
-   * ADR-115 (2026-10-18, revisao.ts): `revisa: true` só quando o driver do turno sabe revisar (flags conferidas no
-   * `--help`); a renovação sem o campo tira o turno do revisor (cartão na fase 1). `segredoRevisao` vai em TODA
-   * renovação, desde a do `promptSubmitted`: o servidor só o amarra enquanto o turno não tinha `prompt_submitted` no banco,
-   * e dois segredos diferentes tiram o turno do revisor (caixa-revisoes.ts). `revisoesRecebidas` confirma os recebidos.
-   */
-  revisa?: true;
-  segredoRevisao?: string;
-  revisoesRecebidas?: string[];
 };
 /**
  * O que a renovação devolve. `mensagens`: as falas da pessoa que entraram neste turno vivo, na ordem (ADR-067).
@@ -140,7 +130,7 @@ export type PedidoRenovar = {
  */
 export const MOTIVOS_RENOVACAO_NEGADA = ["sem_plano", "parado", "agente_excluido", "lease_vencido"] as const;
 export type MotivoRenovacaoNegada = (typeof MOTIVOS_RENOVACAO_NEGADA)[number];
-export type RespostaRenovar = { ativo: boolean | "indefinido"; versaoMinimaApp: string; motivo?: MotivoRenovacaoNegada; mensagens?: string[]; mensagensIds?: string[]; mensagensSemMoldura?: string[]; ligacaoEncerrada?: boolean; revisoes?: PedidoRevisao[] };
+export type RespostaRenovar = { ativo: boolean | "indefinido"; versaoMinimaApp: string; motivo?: MotivoRenovacaoNegada; mensagens?: string[]; mensagensIds?: string[]; mensagensSemMoldura?: string[]; ligacaoEncerrada?: boolean };
 
 /**
  * O que o app desktop viu do turno vivo desde a última renovação, NA ORDEM: texto do modelo e nomes
@@ -194,6 +184,4 @@ export interface PonteInterna {
   esperas?(pessoaId: string, machineId: string): Promise<EsperaParaRodar[] | null>;
   /** ADR-099: o relato de uma espera (começou, terminou, não deu). null = sem resposta: a máquina guarda e manda de novo. */
   relatarEspera?(pessoaId: string, machineId: string, relato: RelatoEspera): Promise<RespostaRelatoEspera | null>;
-  /** ADR-115: o relato de uma revisão (revisao.ts). null = sem resposta (servidor antigo: 404); o pedido vira cartão. */
-  relatarRevisao?(pessoaId: string, machineId: string, relato: RelatoRevisao): Promise<RespostaRelatoRevisao | null>;
 }

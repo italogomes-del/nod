@@ -30,7 +30,7 @@ export const EXCECOES: Record<string, string> = {
   pareamentos_conta: "conectar outro computador (0109): o código é digitado num computador que ainda não está no escopo da pessoa",
   bootstrap_instalacoes: "instalação que criou um espaço provisório (0109): consultada no bootstrap público, antes do escopo",
   exclusoes_conta: "exclusão programada da conta (0110, ADR-126 §5): global como a conta; o prazo nasce no banco e o trigger só deixa o nod_app ir de programada a desfeita",
-  limites_conta: "contadores de limite contra abuso (0109), por HMAC de IP/e-mail, sem dado de pessoa",
+  limites_conta: "contadores de limite contra abuso (0109), por HMAC de IP/e-mail, sem dado de pessoa; desde 2026-10-25 também o gasto do dia do revisor no servidor, somando todas as contas (chave fixa revisor:gasto_microdolares, ADR-115), e desde 2026-10-26 o de cada pessoa (chave revisor_gasto:<HMAC do id>, sem id em claro)",
 };
 
 /**

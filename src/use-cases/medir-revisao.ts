@@ -74,8 +74,8 @@ async function medir(deps: Deps, plano: Plano, modo: ModoAprovacao | undefined, 
     ...(m.via ? { via: m.via } : {}),
     modo: modo ?? "manual",
     modo_turno: plano.modoTurno ?? null,
-    // Revisão do PR #402 (a Parte 1 do plano pede): o Codex não tem revisor na v1 e vira cartão; é o número da decisão
-    // em aberto 9.
+    // Revisão do PR #402 (a Parte 1 do plano pede): o harness de cada medida. Com o revisor no servidor (ADR-115,
+    // 2026-10-25) o Codex também vai ao revisor; o campo segue para comparar o volume por IA.
     harness: plano.harness ?? null,
     contaminado: m.contaminado,
     contaminado_conversa: contaminadoConversa,

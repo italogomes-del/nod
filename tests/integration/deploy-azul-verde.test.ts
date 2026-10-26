@@ -570,3 +570,46 @@ describe("deploy.sh: ligações órfãs pendentes (NOD-331)", () => {
     expect(await ler("estado/orfas-pendentes")).toBe("azul\nverde\n");
   });
 });
+
+describe("deploy.sh e a chave do revisor no servidor (ADR-115, 2026-10-25)", () => {
+  const comRevisor = (valor: string) => writeFile(join(dir, "config.env"), `PROJETO=projeto-teste\nREGISTRO=registro-teste\nSQL_IP=10.0.0.1\nNOD_DOMINIO=teste.local\nNOD_REVISOR=${valor}\n`);
+
+  it("ligado e sem o segredo nod-anthropic-revisor: sai antes de gravar o env e de subir qualquer cor", async () => {
+    await noAr("azul");
+    await comRevisor("ligado");
+    const r = deploy({ FALHA_SEGREDO: "nod-anthropic-revisor" });
+    expect(r.status).not.toBe(0);
+    expect(await ler("nod-verde.env")).toBe("");
+    expect((await chamadas()).some((l) => l.includes("up -d") || l.includes("migrate.ts"))).toBe(false);
+    expect(await marcador()).toBe("azul");
+  });
+
+  it("ligado: a chave vai ao env da cor nova; desligado, o segredo nem é lido e a chave vai vazia", async () => {
+    await noAr("azul");
+    await comRevisor("ligado");
+    expect(deploy().status).toBe(0);
+    const ligado = await ler("nod-verde.env");
+    expect(ligado).toMatch(/^NOD_REVISOR=ligado$/m);
+    expect(ligado).toMatch(/^NOD_REVISOR_CHAVE=segredo-falso$/m);
+    await comRevisor("desligado");
+    // O segredo do revisor "falha" no Secret Manager falso: desligado, o deploy não o lê e segue.
+    expect(deploy({ FALHA_SEGREDO: "nod-anthropic-revisor" }).status).toBe(0);
+    const desligado = await ler("nod-azul.env");
+    expect(desligado).toMatch(/^NOD_REVISOR=desligado$/m);
+    expect(desligado).toMatch(/^NOD_REVISOR_CHAVE=$/m);
+  });
+
+  it("espaço em volta de 'ligado' (ou o CRLF de um config.env do Windows) liga como no servidor, que faz trim", async () => {
+    await noAr("azul");
+    for (const valor of ['" ligado "', '"\tligado"', "ligado\r"]) {
+      await comRevisor(valor);
+      // Ligado: o segredo é lido — sem ele, o deploy para antes de subir a cor, como com o 'ligado' exato.
+      expect(deploy({ FALHA_SEGREDO: "nod-anthropic-revisor" }).status, JSON.stringify(valor)).not.toBe(0);
+    }
+    await comRevisor('" ligado "');
+    expect(deploy().status).toBe(0);
+    const env = await ler("nod-verde.env");
+    expect(env).toMatch(/^NOD_REVISOR=ligado$/m);
+    expect(env).toMatch(/^NOD_REVISOR_CHAVE=segredo-falso$/m);
+  });
+});

@@ -9,7 +9,7 @@ import { resumoDeTexto, RISCO_DO_GATILHO } from "../domain/revisor.ts";
 import type { GatilhoAcaoDoModo, TipoAcaoDoModo } from "../repositories/acoes-pelo-modo.repo.ts";
 import { terminalLiberadoNaTarefa } from "./liberar-na-tarefa.ts";
 import { avaliarRevisao, medirRevisao, type OrigemDaRevisao } from "./medir-revisao.ts";
-import { revisarAcaoFase1, type PedidoNaCaixa } from "./revisar-acao.ts";
+import { revisarAcaoFase1, type PedidoNaFila } from "./revisar-acao.ts";
 import { PRAZO_DECISAO_MS } from "./pedir-a-pessoa.ts";
 import { autoriaDoAgente } from "./registrar-negacao.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
@@ -20,14 +20,14 @@ export const DESTINO_TERMINAL = { conector: "terminal", ferramenta: "bash" } as 
 /**
  * Por que o comando rodou sem card — vai à trilha e aos testes, nunca ao modelo como permissão. `revisor` (ADR-115): a
  * segunda consulta do hook achou a ação liberada pelo revisor (a trilha leva `regra:revisor`). `revisao`: o pedido que a
- * rota põe na caixa do turno depois do commit (a decisão `em_revisao`).
+ * rota entrega ao executor do revisor depois do commit (a decisão `em_revisao`).
  */
 export type PorqueRoda = "leitura" | "aprovado" | "revisor" | "liberado_na_tarefa" | "modo_automatico" | "modo_total";
 /**
  * `negar` (PR 6 dos modos de aprovação): o arquivo de credencial no manual — o manual não muda, e a frase é a que o hook
  * dizia sozinho antes. Só o pedido de credencial nega por aqui; o resto que o modo não aprova vira cartão.
  */
-export type SaidaAutorizarComando = { permitir: true; porque: PorqueRoda } | { aguardar: string; revisao?: PedidoNaCaixa } | { negar: string };
+export type SaidaAutorizarComando = { permitir: true; porque: PorqueRoda } | { aguardar: string; revisao?: PedidoNaFila } | { negar: string };
 
 /**
  * Cada comando do terminal do Mac da pessoa (definido em 2026-09-28, ADR-055, "terminal de verdade, como o

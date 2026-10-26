@@ -1,16 +1,12 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import type { Decisao } from "../contracts/decisao.ts";
 import type { RuntimeEvent } from "../contracts/evento.ts";
 import type { DestinoItem, ItemAprovacao } from "../contracts/item-aprovacao.ts";
 import type { PlanoTurno } from "../contracts/plano-turno.ts";
-import { USO_DO_MAC_PADRAO } from "../contracts/raio-x.ts";
 import { COMANDO_REVISOR_MAX, TETO_REVISOES_POR_TURNO, type FalhaRevisao, type PedidoRevisao } from "../contracts/revisao.ts";
-import { cotaDasContas, cotaDasIas, situacaoDaIa } from "../domain/cota-da-ia.ts";
-import { portaoDoMac } from "../domain/memoria-mac.ts";
 import { REGRA_REVISOR, VERSAO_REGRA_REVISOR, type GatilhoDeRevisao } from "../domain/modo-aprovacao.ts";
 import {
   FRASE_DA_FALHA,
-  FRASE_SEM_REVISOR_NO_CODEX,
   FRASE_TETO_DO_TURNO,
   MENSAGENS_DA_PESSOA_MAX,
   lerVeredito,
@@ -36,12 +32,13 @@ import type { LoteAutomatico } from "./pedir-aprovacao.ts";
  * como o NOD-263:
  *
  *  1. `revisarAcaoFase1`, NA tx do pedido: cria a decisão `em_revisao` com o item (o mesmo do cartão) e a linha em
- *     `acoes_pelo_modo`, e devolve o pedido que a rota põe na caixa do turno DEPOIS do commit. Antes de criar, vai direto
- *     ao cartão (pendente, `revisor_falhou`, frase da causa) quando o revisor não pode rodar: Codex ou outra IA sem
- *     revisor; a mesma ação já levou "pede", foi negada ou venceu na cadeia; teto do turno (20) ou do dia; a última
- *     renovação do turno não trouxe `revisa` e o segredo; o disjuntor da máquina; a conta do turno no limite; a memória
- *     da máquina no nível que segura trabalho novo; comando longo demais.
- *  2. Na máquina (o laço do turno, PR 3b): a renovação entrega, o laço roda o CLI e relata pela rota `revisao`.
+ *     `acoes_pelo_modo`, e devolve o pedido que a rota entrega ao executor DEPOIS do commit. Antes de criar, vai direto
+ *     ao cartão (pendente, `revisor_falhou`, frase da causa) quando o revisor não pode rodar: a mesma ação já levou
+ *     "pede", foi negada ou venceu na cadeia; teto do turno (20) ou do dia da pessoa; o executor indisponível (sem
+ *     chave, disjuntor aberto, teto global do dia, fila cheia); comando longo demais.
+ *  2. No executor do servidor (adapters/revisor, revisto em 2026-10-25, ADR-115 "Revisor no servidor"): a chamada à API
+ *     da Anthropic na conta do Nod, fora de transação. Vale para qualquer IA do turno (Claude, Codex): o revisor não
+ *     depende do harness.
  *  3. `assentarRevisao`, numa tx NOVA, sob a trava do turno (`buscarTravado`, como decidir.ts): libera só com o turno
  *     `despachando`, sem Parar pedido, o bot vivo e o modo ATUAL automático; senão — e no "pede", na falha e no prazo —
  *     a decisão vira o cartão `pendente` de sempre. Idempotente (`where estado = 'em_revisao'`).
@@ -51,8 +48,8 @@ import type { LoteAutomatico } from "./pedir-aprovacao.ts";
  * fora da transação e assenta numa nova (`executarLiberacao`, liberar-no-app.ts) — quatro passos, como o NOD-263.
  */
 
-/** O que a rota guarda na caixa do turno depois do commit da fase 1. */
-export type PedidoNaCaixa = { escopo: Escopo; machineId: string; pedido: PedidoRevisao };
+/** O que a rota entrega ao executor do revisor depois do commit da fase 1. */
+export type PedidoNaFila = { escopo: Escopo; pedido: PedidoRevisao };
 
 /**
  * Um item da decisão em revisão (o mesmo que o cartão teria). No terminal, um só: `texto` é o comando, `Gravar …` ou o
@@ -73,9 +70,13 @@ export type EntradaRevisarAcao = {
   agente: { nome: string; titulo: string; descricao: string } | null;
 };
 
-export type SaidaRevisarAcao = { aguardar: string; revisao: PedidoNaCaixa | null };
+export type SaidaRevisarAcao = { aguardar: string; revisao: PedidoNaFila | null };
 
 const DIA_MS = 24 * 60 * 60_000;
+/** O `revisor_harness` (0093) de uma revisão feita pelo servidor do Nod (ADR-115, "Revisor no servidor"). */
+export const REVISOR_NO_SERVIDOR = "servidor";
+/** Os bytes da marca aleatória de cada pedido ao revisor (24 caracteres em base64url). */
+const MARCA_BYTES = 18;
 /** Quantas mensagens da pessoa a fase 1 lê para o pedido (o corte de 600 caracteres vem depois, no domínio). */
 const MENSAGENS_LIDAS = 12;
 
@@ -91,28 +92,6 @@ function origemDoTurno(plano: PlanoTurno): OrigemParaRevisor {
     default:
       return "conversa";
   }
-}
-
-/** ADR-102/NOD-253: a conta da lista que o turno usa no limite; sem conta da lista, a IA do turno no limite. */
-async function contaNoLimite(deps: Deps, plano: PlanoTurno): Promise<boolean> {
-  const agora = deps.agora();
-  if (plano.conta) {
-    if (cotaDasContas({ usos: await deps.repos.usoDoPlano.listarPorConta(), agora }).get(plano.conta.id)?.situacao === "limite") return true;
-    const conta = (await deps.repos.contasIa.listar()).contas.find((c) => c.id === plano.conta!.id);
-    return (conta?.noLimiteAte ?? 0) > agora;
-  }
-  const preferencias = await deps.repos.preferencias.buscar();
-  const cota = cotaDasIas({ usos: await deps.repos.usoDoPlano.listar(), limites: preferencias.iasNoLimite, agora });
-  return situacaoDaIa(cota, plano.harness ?? "claude-cli") === "limite";
-}
-
-/** A memória (ou o disco) da máquina no nível que segura trabalho novo (`portaoDoMac`, com o "uso do Mac" da pessoa). */
-async function memoriaApertada(deps: Deps, machineId: string): Promise<boolean> {
-  const pressao = deps.services.revisor?.pressao?.(machineId) ?? null;
-  if (!pressao) return false;
-  const uso = (await deps.repos.preferencias.buscar()).usoDoMac ?? USO_DO_MAC_PADRAO;
-  const portao = portaoDoMac(uso, pressao);
-  return portao.tudoNovo !== null || portao.semPrazo;
 }
 
 /**
@@ -131,25 +110,20 @@ export async function rotinaParaRevisor(deps: Deps, turnoId: string): Promise<{ 
 
 type NaoVai = { falha: FalhaRevisao; frase: string };
 
-/** Por que a fase 1 não manda ao revisor, ou a máquina a que manda; na ordem: o mais barato e o mais seguro primeiro. */
-async function paraOndeVai(deps: Deps, e: EntradaRevisarAcao): Promise<{ naoVai: NaoVai } | { machineId: string }> {
+/** Por que a fase 1 não manda ao revisor; na ordem: o mais barato e o mais seguro primeiro. */
+async function naoVaiAoRevisor(deps: Deps, e: EntradaRevisarAcao): Promise<NaoVai | null> {
   const servico = deps.services.revisor;
-  const harness = e.plano.harness ?? "claude-cli";
-  if (!servico || harness !== "claude-cli") return { naoVai: { falha: "sem_revisor", frase: harness === "codex-cli" ? FRASE_SEM_REVISOR_NO_CODEX : FRASE_DA_FALHA.sem_revisor } };
+  if (!servico) return { falha: "sem_revisor", frase: FRASE_DA_FALHA.sem_revisor };
   // No app o corte é o do pedido montado (cada texto em 400, o total em 4.000: `longo` sai de pedidoDoRevisor).
-  if (e.tipo !== "app" && e.itens.some((i) => i.texto.length > COMANDO_REVISOR_MAX)) return { naoVai: { falha: "longo", frase: FRASE_DA_FALHA.longo } };
+  if (e.tipo !== "app" && e.itens.some((i) => i.texto.length > COMANDO_REVISOR_MAX)) return { falha: "longo", frase: FRASE_DA_FALHA.longo };
   // A mesma ação já recusada na cadeia: no terminal, pelo texto; no app, pelo destino (qualquer item do lote).
   for (const i of e.itens) {
-    if (await deps.repos.itensAprovacao.recusadoNaCadeia(e.plano.turnoId, e.tipo === "app" ? i.destino : i.texto)) return { naoVai: { falha: "repetida", frase: FRASE_DA_FALHA.repetida } };
+    if (await deps.repos.itensAprovacao.recusadoNaCadeia(e.plano.turnoId, e.tipo === "app" ? i.destino : i.texto)) return { falha: "repetida", frase: FRASE_DA_FALHA.repetida };
   }
-  if ((await deps.repos.acoesPeloModo.revisoesDoTurno(e.plano.turnoId)) >= TETO_REVISOES_POR_TURNO) return { naoVai: { falha: "teto", frase: FRASE_TETO_DO_TURNO } };
-  if ((await deps.repos.acoesPeloModo.revisoesDaPessoaDesde(deps.agora() - DIA_MS)) >= servico.config.tetoDia) return { naoVai: { falha: "teto", frase: FRASE_DA_FALHA.teto } };
-  const maquina = servico.revisorDoTurno(e.plano.turnoId);
-  if (!maquina) return { naoVai: { falha: "sem_revisor", frase: FRASE_DA_FALHA.sem_revisor } };
-  if (servico.disjuntorAberto(maquina.machineId)) return { naoVai: { falha: "disjuntor", frase: FRASE_DA_FALHA.disjuntor } };
-  if (await contaNoLimite(deps, e.plano)) return { naoVai: { falha: "cota", frase: FRASE_DA_FALHA.cota } };
-  if (await memoriaApertada(deps, maquina.machineId)) return { naoVai: { falha: "memoria", frase: FRASE_DA_FALHA.memoria } };
-  return { machineId: maquina.machineId };
+  if ((await deps.repos.acoesPeloModo.revisoesDoTurno(e.plano.turnoId)) >= TETO_REVISOES_POR_TURNO) return { falha: "teto", frase: FRASE_TETO_DO_TURNO };
+  if ((await deps.repos.acoesPeloModo.revisoesDaPessoaDesde(deps.agora() - DIA_MS)) >= servico.config.tetoDia) return { falha: "teto", frase: FRASE_DA_FALHA.teto };
+  const fora = servico.indisponivel(deps.escopo.pessoaId);
+  return fora ? { falha: fora, frase: FRASE_DA_FALHA[fora] } : null;
 }
 
 function eventoDecisaoCriada(deps: Deps, decisao: Pick<Decisao, "id" | "agenteId" | "conversaId" | "turnoId">, itens: number): RuntimeEvent {
@@ -169,7 +143,7 @@ function eventoDecisaoCriada(deps: Deps, decisao: Pick<Decisao, "id" | "agenteId
 /** FASE 1 (na tx do pedido). Só é chamada com o revisor ligado e o desfecho "revisar" do modo. */
 export const revisarAcaoFase1: CasoDeUso<EntradaRevisarAcao, SaidaRevisarAcao> = async (deps, e) => {
   const agora = deps.agora();
-  const destino = await paraOndeVai(deps, e);
+  const naoVaiAntes = await naoVaiAoRevisor(deps, e);
   const resumo = resumoDaAcao(e.acao);
   const base = { agenteId: e.plano.agenteId, conversaId: e.plano.conversaId, turnoId: e.plano.turnoId, modo: "automatico" as const, tipo: e.tipo, resumo, gatilho: e.gatilho, risco: e.risco };
   // A montagem só lê o que o pedido precisa (mensagens, rotina, pedidas no turno) quando ele vai mesmo sair.
@@ -178,8 +152,8 @@ export const revisarAcaoFase1: CasoDeUso<EntradaRevisarAcao, SaidaRevisarAcao> =
   // fora (plano, 3b). No arriscado o gatilho não depende disso, e a marca que chegava era só a do turno: a sessão do CLI
   // retomada carrega o e-mail do turno anterior, e o pedido dizia "não leu conteúdo de fora". A leitura que falha conta
   // como lida (o lado seguro).
-  const contaminado = "naoVai" in destino || e.contaminado ? e.contaminado : await deps.repos.turnos.conversaLeuDeFora(e.plano.conversaId, { agora, janelaMs: JANELA_CONVERSA_DE_FORA_MS }).catch(() => true);
-  const montado = "naoVai" in destino ? null : pedidoDoRevisor({
+  const contaminado = naoVaiAntes || e.contaminado ? e.contaminado : await deps.repos.turnos.conversaLeuDeFora(e.plano.conversaId, { agora, janelaMs: JANELA_CONVERSA_DE_FORA_MS }).catch(() => true);
+  const montado = naoVaiAntes ? null : pedidoDoRevisor({
     acao: e.acao,
     gatilho: e.gatilho,
     risco: e.risco,
@@ -190,8 +164,10 @@ export const revisarAcaoFase1: CasoDeUso<EntradaRevisarAcao, SaidaRevisarAcao> =
     pedidoDeColega: modo === "peer" || modo === "delegacao" ? e.plano.entrada.texto.slice(0, MENSAGENS_DA_PESSOA_MAX * 2) : null,
     bot: e.agente ?? { nome: "O bot", titulo: "", descricao: "" },
     jaPediuNoTurno: await deps.repos.acoesPeloModo.pedidasNoTurno(e.plano.turnoId),
+    // Revisão do #524, item 1: 18 bytes sorteados por pedido delimitam a parte não confiável (o bot não os vê).
+    marca: randomBytes(MARCA_BYTES).toString("base64url"),
   });
-  const naoVai: NaoVai | null = "naoVai" in destino ? destino.naoVai : montado && montado.tipo !== "pedido" ? { falha: montado.tipo, frase: FRASE_DA_FALHA[montado.tipo] } : null;
+  const naoVai: NaoVai | null = naoVaiAntes ?? (montado && montado.tipo !== "pedido" ? { falha: montado.tipo, frase: FRASE_DA_FALHA[montado.tipo] } : null);
 
   const decisao = await deps.repos.decisoes.criar({
     tipo: "aprovacao",
@@ -203,7 +179,7 @@ export const revisarAcaoFase1: CasoDeUso<EntradaRevisarAcao, SaidaRevisarAcao> =
     ...(naoVai ? {} : { estado: "em_revisao" as const }),
   });
   if (!decisao) throw new ErroDeDominio("estado_invalido", { cause: "decisão não criada" });
-  // O item nasce com o motivo de quando o revisor NÃO responde: se a fase 3 nunca vier (caixa perdida num deploy), o
+  // O item nasce com o motivo de quando o revisor NÃO responde: se a fase 3 nunca vier (fila perdida num deploy), o
   // cartão que o varredor solta já diz a verdade. A fase 3 troca pelo motivo certo.
   // `sempreServe` (0094): o cartão de falha nunca oferece "Sempre permitir"; o que a fase 3 abre por "pede" fica com a marca.
   await deps.repos.itensAprovacao.criarLote(decisao.id, e.itens.map((i, idx) => ({
@@ -211,29 +187,30 @@ export const revisarAcaoFase1: CasoDeUso<EntradaRevisarAcao, SaidaRevisarAcao> =
     ...(i.sempreServe === undefined ? {} : { sempreServe: naoVai ? false : i.sempreServe }),
   })));
 
-  if (naoVai || "naoVai" in destino || montado?.tipo !== "pedido") {
+  if (naoVai || montado?.tipo !== "pedido") {
     const causa = naoVai ?? { falha: "sem_revisor" as const, frase: FRASE_DA_FALHA.sem_revisor };
     await deps.repos.acoesPeloModo.registrar({ ...base, decisaoId: decisao.id, veredito: "nao_revisado", falha: causa.falha, motivo: causa.frase });
     log("info", "revisao_sem_revisor", { turno_id: e.plano.turnoId, decisao_id: decisao.id, gatilho: e.gatilho, falha: causa.falha });
     return { data: { aguardar: decisao.id, revisao: null }, events: [eventoDecisaoCriada(deps, decisao, e.itens.length)] };
   }
   const config = deps.services.revisor!.config;
-  await deps.repos.acoesPeloModo.registrar({ ...base, decisaoId: decisao.id, revisorModelo: config.modelo, revisorHarness: "claude-cli", revisorMaquina: destino.machineId });
+  // `revisor_modelo` preenchido = a revisão foi mandada (os tetos contam por ele). `revisor_harness = 'servidor'`: o revisor
+  // roda no servidor do Nod; `revisor_maquina` fica nula (era a máquina do laço, no desenho anterior).
+  await deps.repos.acoesPeloModo.registrar({ ...base, decisaoId: decisao.id, revisorModelo: config.modelo, revisorHarness: REVISOR_NO_SERVIDOR });
   const pedido: PedidoRevisao = {
     revisaoId: randomUUID(),
     decisaoId: decisao.id,
     turnoId: e.plano.turnoId,
     modelo: config.modelo,
-    ...(config.esforco ? { esforco: config.esforco } : {}),
     prompt: montado.prompt,
     entrada: montado.entrada,
     expiraEm: agora + config.prazoMs,
   };
-  log("info", "revisao_pedida", { turno_id: e.plano.turnoId, decisao_id: decisao.id, revisao_id: pedido.revisaoId, gatilho: e.gatilho, machine_id: destino.machineId });
-  return { data: { aguardar: decisao.id, revisao: { escopo: deps.escopo, machineId: destino.machineId, pedido } } };
+  log("info", "revisao_pedida", { turno_id: e.plano.turnoId, decisao_id: decisao.id, revisao_id: pedido.revisaoId, gatilho: e.gatilho, modelo: config.modelo });
+  return { data: { aguardar: decisao.id, revisao: { escopo: deps.escopo, pedido } } };
 };
 
-/** O que chegou para a fase 3: o texto cru do laço, ou a falha (do laço, do prazo ou do varredor). */
+/** O que chegou para a fase 3: o texto cru do modelo, ou a falha (do executor, do prazo ou do varredor). */
 export type ResultadoRevisao =
   | { tipo: "saida"; saida: string; ms?: number; fichasEntrada?: number; fichasSaida?: number; entregueEm?: number | null }
   | { tipo: "falha"; falha: FalhaRevisao; ms?: number; entregueEm?: number | null };
@@ -312,7 +289,7 @@ async function loteLiberado(deps: Deps, decisao: Pick<Decisao, "id" | "agenteId"
 
 /**
  * O passo novo do varredor de expiração: a decisão `em_revisao` mais velha que `recolherMs` (2 × o prazo) vira cartão
- * (`prazo`). É o que recolhe a revisão de uma caixa perdida num deploy (a caixa e o segredo do turno são memória).
+ * (`prazo`). É o que recolhe a revisão de uma fila perdida num deploy (a fila do executor é memória).
  */
 export async function recolherRevisoesVelhas(deps: Deps, p: { recolherMs: number }): Promise<{ recolhidas: number; events: RuntimeEvent[] }> {
   const events: RuntimeEvent[] = [];

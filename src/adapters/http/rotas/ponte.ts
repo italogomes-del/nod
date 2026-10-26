@@ -21,7 +21,7 @@ import { cabecalhoCookieSessao } from "../sessao-cookie.ts";
 import type { CanalComputador } from "../../computador/canal.ts";
 import type { EstadoComputadorRelatado } from "../../../contracts/computador-motor.ts";
 import type { MaquinaDaPessoa } from "../../computador/motor.ts";
-import { anuncioComputador, anuncioVmLocal, estadoComputadorRelatado, resultadoComandoComputador, camposDoRevisor, capacidadesAnunciadas, contasAnunciadas, entrega, impressoes, progressoDoLogin, progressoDeInstalacao, exigir, falas, idsDeMensagens, inventario, memoria, objeto, relatoEspera, relatoRevisao, sessaoDaRenovacao, sinais, texto, trechos, turnosEmAndamento, uuid } from "./ponte-validacao.ts";
+import { anuncioComputador, anuncioVmLocal, estadoComputadorRelatado, resultadoComandoComputador, capacidadesAnunciadas, contasAnunciadas, entrega, impressoes, progressoDoLogin, progressoDeInstalacao, exigir, falas, idsDeMensagens, inventario, memoria, objeto, relatoEspera, sessaoDaRenovacao, sinais, texto, trechos, turnosEmAndamento, uuid } from "./ponte-validacao.ts";
 import { versaoAceita } from "../../../domain/versao-app.ts";
 import { relatoValido } from "../../../use-cases/limpeza-das-tasks.ts";
 
@@ -410,9 +410,7 @@ export function criarPonteHttpServidor(d: {
       const entregues = idsDeMensagens(b.mensagensEntregues), devolvidas = idsDeMensagens(b.mensagensDevolvidas);
       // ADR-083 (#194): a memória do Mac, amostrada uma vez por máquina e mandada em cada renovação.
       const mem = memoria(b.memoria);
-      const r = await c.ponte.renovar({ turnoId, machineId: ctx.params.chaveId!, sinais: s, eventos: [], ...(fs.length ? { falas: fs } : {}), ...(b.aceitaMensagens === true ? { aceitaMensagens: true } : {}), ...(entregues ? { mensagensEntregues: entregues } : {}), ...(devolvidas?.length ? { mensagensDevolvidas: devolvidas } : {}), ...(mem ? { memoria: mem } : {}), ...(sessaoCli ? { sessaoCli } : {}),
-        // ADR-115: remontado campo a campo como o resto — sem isto o campo novo sumiria calado na rota HTTP.
-        ...camposDoRevisor(b) });
+      const r = await c.ponte.renovar({ turnoId, machineId: ctx.params.chaveId!, sinais: s, eventos: [], ...(fs.length ? { falas: fs } : {}), ...(b.aceitaMensagens === true ? { aceitaMensagens: true } : {}), ...(entregues ? { mensagensEntregues: entregues } : {}), ...(devolvidas?.length ? { mensagensDevolvidas: devolvidas } : {}), ...(mem ? { memoria: mem } : {}), ...(sessaoCli ? { sessaoCli } : {}) });
       if (fs.length && r.ativo) d.fala?.(plano);
       if (r.ativo && texto(b.delta, 16_000) && b.delta) d.delta(plano, b.delta);
       if (r.ativo) for (const t of trechos(b.trechos)) {
@@ -568,17 +566,6 @@ export function criarPonteHttpServidor(d: {
       c.ultimo = d.agora();
       const r = await c.ponte.relatarEspera?.(ctx.escopo.pessoaId, ctx.params.chaveId!, relatoEspera(b.relato));
       ctx.json(200, r ?? { seguir: false });
-    }),
-    /**
-     * ADR-115 (2026-10-18): o laço que segura o turno relata a revisão (o texto cru do revisor ou a falha), com a prova do
-     * segredo do turno. A máquina é a da chave, nunca do corpo; a prova é o que a chave sozinha não dá. Servidor antigo
-     * responde 404 e o laço deixa a revisão vencer (cartão).
-     */
-    rota("revisao", async (ctx, b) => {
-      const c = conexao(ctx);
-      c.ultimo = d.agora();
-      const r = await c.ponte.relatarRevisao?.(ctx.escopo.pessoaId, ctx.params.chaveId!, relatoRevisao(b));
-      ctx.json(200, r ?? { aceito: false });
     }),
     rota("desconectar", async (ctx) => {
       const c = conexao(ctx);
