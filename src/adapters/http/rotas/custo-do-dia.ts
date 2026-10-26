@@ -4,8 +4,8 @@ import type { Rota } from "../roteador.ts";
 import { criarExecutor, type DepsRotas } from "./executar-caso.ts";
 
 /**
- * O custo de cada bot hoje (definido em 2026-10-12, ADR-099 §7): leitura só. O servidor não guarda o fuso da pessoa — a web
- * manda o dela (`?fuso=America/Sao_Paulo`); sem ou inválido, o padrão do servidor.
+ * O custo de cada bot hoje (definido em 2026-10-12, ADR-099 §7): leitura só. Sem consumidor na UI desde o NOD-369. O servidor
+ * não guarda o fuso da pessoa — quem chama manda o dela (`?fuso=America/Sao_Paulo`); sem ou inválido, o padrão do servidor.
  */
 export function criarRotasCustoDoDia(d: DepsRotas & { fusoPadrao: string }): Rota[] {
   const executar = criarExecutor(d);

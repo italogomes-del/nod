@@ -10,7 +10,7 @@ import { aberto, abertosDoBot, acoesDeFazer, agrupar, dicaSemContato, emEspera, 
 import { renderMensagem, type BlocoDaTimeline } from "./conversa.ts";
 import { outraMaquinaDestaVez } from "../lib/rodar-desta-vez.ts";
 import { horariosDaRotina } from "./linhas-do-chat.ts";
-import { custoDaFrente, PARCIAL, tokensLegiveis, usd } from "./modo-dev.ts";
+import { custoDaFrente } from "./modo-dev.ts";
 
 /**
  * As telas dos trabalhos (ADR-083, épico #188; protótipo "Chat limpo", pranchas K1–K9 e M1–M3): a faixa de Trabalhos em
@@ -183,40 +183,6 @@ function resumoDosTrabalhos(g: GruposTrabalhos, memoria: string): string {
   return partes.filter(Boolean).join(" · ");
 }
 
-/**
- * O custo de hoje no topo de Trabalhos (definido em 2026-10-12, ADR-099 §7: "custo visível, sem teto"). À vista, só o total
- * e, quando algum bot passou do ritmo, "acima do normal" — o Marlon quer a tela limpa. O clique abre quanto cada bot gastou
- * e quem passou do ritmo (a regra: src/domain/custo-do-dia.ts). Sem leitura (servidor anterior), nada.
- */
-const SEM_BASE = "Menos de 3 dias com gasto nos últimos 7: ainda não dá para comparar.";
-
-export function custoDoTopo(estado: Estado): string {
-  const c = estado.custoHoje;
-  if (!c) return "";
-  const aberto = estado.custoAberto;
-  const aviso = c.foraDoRitmo ? '<span class="tt-custo-aviso" aria-hidden="true"></span>' : "";
-  // NOD-276 (D10): o total que deixou de fora turno sem custo conhecido diz "parcial".
-  const rotulo = `${usd(c.totalUsd)} hoje${c.parcial ? " (parcial)" : ""}${c.foraDoRitmo ? " · acima do normal" : ""}`;
-  const botao = `<button type="button" class="tt-custo${c.foraDoRitmo ? " fora" : ""}" data-act="custo-hoje" aria-expanded="${aberto}" title="Ver quanto cada bot gastou hoje">${aviso}${esc(rotulo)}${ICONE.abrir}</button>`;
-  if (!aberto) return botao;
-  const vezes = (v: number | null) => (v === null ? "" : `${v.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}× o normal`);
-  const linhas = c.bots.map((b) => {
-    const bot = agente(estado, b.agenteId);
-    return `<li class="tt-custo-bot${b.foraDoRitmo ? " fora" : ""}">${bot ? iconeAgente(bot, "sm") : ""}<span class="tt-custo-nome">${esc(bot?.nome ?? "bot")}</span>${b.foraDoRitmo ? `<small>${esc(vezes(b.vezes))}</small>` : b.ritmo === "sem base" ? `<small title="${SEM_BASE}">sem base</small>` : ""}${valorDoBot(b)}</li>`;
-  }).join("");
-  return `${botao}<div class="tt-custo-detalhe" role="group" aria-label="Custo de hoje por bot"><ul>${linhas || '<li class="mudo">Nenhum gasto hoje.</li>'}</ul><p>Desde a meia-noite. "Acima do normal" é mais que o dobro da média dos dias com gasto nos últimos 7 (precisa de pelo menos 3) até este horário.${c.parcial ? ` ${PARCIAL} O Codex não informa custo: o que roda nele aparece em tokens.` : ""}</p></div>`;
-}
-
-/**
- * revisto em 2026-10-15 (NOD-273): o valor de um bot no detalhe. Só dólar: o valor. Só tokens (o Codex não informa custo):
- * "13 mil tokens · o Codex não informa custo". Os dois: o valor com "(parcial)" e os tokens de quem não informou.
- */
-function valorDoBot(b: { hojeUsd: number; tokens: number; parcial: boolean }): string {
-  if (b.parcial && b.hojeUsd <= 0) return `<small class="tt-custo-sem">o Codex não informa custo</small><b class="tt-custo-tokens">${esc(tokensLegiveis(b.tokens))}</b>`;
-  if (b.parcial) return `<b>${esc(usd(b.hojeUsd))} (parcial)</b>`;
-  return `<b>${esc(usd(b.hojeUsd))}</b>`;
-}
-
 const FILTROS: { id: FiltroTrabalhos; nome: string }[] = [
   { id: "todos", nome: "Todos" },
   { id: "voce", nome: "De você" },
@@ -256,7 +222,7 @@ export function renderTodosOsTrabalhos(estado: Estado, filtro: FiltroTrabalhos =
   const secoes = GRUPOS.filter((g) => grupos[g.chave].length > 0).map((g) => `<section class="tt-grupo" data-grupo="${g.chave}"><h2>${g.titulo} · ${grupos[g.chave].length}${g.chave === "trabalhando" && grupos.trabalhando.some((t) => t.memoriaMb !== null) ? " · os que mais usam memória primeiro" : ""}</h2><div class="tt-lista">${grupos[g.chave].map(linha).join("")}</div></section>`).join("");
   const vazio = filtro === "todos" ? "Nenhum bot está trabalhando agora. Quando um bot abrir uma task, rodar uma rotina ou atender um colega, aparece aqui." : "Nada com este filtro hoje.";
   return `<section class="tela-trabalhos" aria-label="Todos os trabalhos">
-    <header class="tt-cab"><div><h1>Trabalhos</h1><p>${esc(resumoDosTrabalhos(agrupar(todos, estado.agora), memoriaDosBots(estado.trabalhos)))}</p>${custoDoTopo(estado)}</div><div class="tt-filtros" role="group" aria-label="Filtrar trabalhos">${filtros}</div></header>
+    <header class="tt-cab"><div><h1>Trabalhos</h1><p>${esc(resumoDosTrabalhos(agrupar(todos, estado.agora), memoriaDosBots(estado.trabalhos)))}</p></div><div class="tt-filtros" role="group" aria-label="Filtrar trabalhos">${filtros}</div></header>
     ${pilulaDaCota(estado.trabalhos.cota, todos, estado.agora, estado.trabalhos.pedidosNaFila)}${pilula}
     ${secoes || `<p class="tt-vazio">${vazio}</p>`}
   </section>`;

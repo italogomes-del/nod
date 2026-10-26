@@ -36,7 +36,6 @@ import type { ExecucaoRotina } from "../../src/contracts/rotina.ts";
 import type { MembroSala, Sala } from "../../src/contracts/sala.ts";
 import type { FaixaParada, Turno } from "../../src/contracts/turno.ts";
 import type { EventoLinha, TaxaDeAbertura, TrabalhoDetalheDto, TrabalhosDto } from "../../src/contracts/trabalho.ts";
-import type { CustoDoDiaDto } from "../../src/contracts/cota.ts";
 import type { DisponibilidadeLigacao, FalaLigacao, Ligacao, LigacaoCriada } from "../../src/contracts/ligacao.ts";
 import type { IaDaLigacao } from "../../src/contracts/voz.ts";
 import type { AcaoComandoVoz } from "../../src/contracts/voz.ts";
@@ -256,8 +255,6 @@ export function criarApi(escopo: Escopo) {
     // ADR-083 §8 (definido em 2026-10-07): os trabalhos (tasks) dos bots, a tela da task e o que se faz nela.
     trabalhos: (agenteId?: string) => get<TrabalhosDto>(agenteId ? `trabalhos?agenteId=${encodeURIComponent(agenteId)}` : "trabalhos"),
     trabalho: (id: string) => get<TrabalhoDetalheDto>(`trabalhos/${encodeURIComponent(id)}`),
-    // ADR-099 §7 (definido em 2026-10-12): quanto cada bot gastou hoje, no fuso da pessoa (o servidor não o guarda).
-    custoHoje: (fuso: string) => get<CustoDoDiaDto>(`custo-hoje?fuso=${encodeURIComponent(fuso)}`),
     escreverNoTrabalho: (id: string, texto: string) => post<RespostaMutacao>(`trabalhos/${encodeURIComponent(id)}/mensagens`, { texto }),
     pararTrabalho: (id: string) => post<RespostaMutacao>(`trabalhos/${encodeURIComponent(id)}/parar`),
     trabalhoDepois: (id: string, depoisDe: string) => post<RespostaMutacao>(`trabalhos/${encodeURIComponent(id)}/depois`, { depoisDe }),

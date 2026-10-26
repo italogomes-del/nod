@@ -1,11 +1,15 @@
 import { describe, expect, it } from "vitest";
-import type { CustoDoDiaDto } from "../../../src/contracts/cota.ts";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import type { FrameSse } from "../../../src/contracts/frame.ts";
 import type { TrabalhoDto, TrabalhosDto } from "../../../src/contracts/trabalho.ts";
-import { estadoInicial, invalidacoesDaTela, reduzir, type Estado } from "../../../web/estado/reducer.ts";
+import { aplicarFrame, estadoInicial, invalidacoesDaTela, type Estado } from "../../../web/estado/reducer.ts";
 import { pilulaDaCota, situacaoDe } from "../../../web/lib/trabalhos.ts";
-import { custoDoTopo, renderTodosOsTrabalhos } from "../../../web/telas/trabalhos.ts";
+import { renderTodosOsTrabalhos, renderTopoTrabalho } from "../../../web/telas/trabalhos.ts";
 
-/** ADR-099 §7 (definido em 2026-10-12): a cota da IA na tela Trabalhos e o custo de cada bot hoje, atrás de um clique. */
+/** ADR-099 §7 (definido em 2026-10-12): a cota da IA na tela Trabalhos. NOD-369: o custo de hoje saiu do topo. */
+
+const WEB = join(import.meta.dirname, "../../../web");
 
 const HORA = 3_600_000;
 const AGORA = new Date(2026, 9, 12, 15, 0).getTime();
@@ -27,14 +31,6 @@ function estadoCom(trabalhos: Partial<TrabalhosDto>, extra: Partial<Estado> = {}
     ...extra,
   };
 }
-
-const custo: CustoDoDiaDto = {
-  fuso: "America/Sao_Paulo", desde: AGORA - 15 * HORA, ate: AGORA, totalUsd: 21.4, foraDoRitmo: true, parcial: false,
-  bots: [
-    { agenteId: "ze", hojeUsd: 18.2, mediaUsd: 6, vezes: 3.03, foraDoRitmo: true, tokens: 0, parcial: false },
-    { agenteId: "ana", hojeUsd: 3.2, mediaUsd: 3, vezes: 1.07, foraDoRitmo: false, tokens: 0, parcial: false },
-  ],
-};
 
 describe("a cota da IA na tela", () => {
   it("a linha da task diz que espera a cota", () => {
@@ -59,57 +55,60 @@ describe("a cota da IA na tela", () => {
   });
 });
 
-describe("o custo de hoje, atrás de um clique", () => {
-  it("fechado: só o total e o aviso discreto; nenhum bot à vista", () => {
-    const html = custoDoTopo(estadoCom({}, { custoHoje: custo }));
-    expect(html).toContain('data-act="custo-hoje"');
-    expect(html).toContain('aria-expanded="false"');
-    expect(html).toContain("US$ 21,40 hoje · acima do normal");
-    expect(html).toContain("tt-custo-aviso");
-    expect(html).not.toContain("Ze 1");
+// NOD-369 (2026-10-26, emenda à ADR-099 item 7): o custo de hoje saiu do topo de Trabalhos. O servidor segue calculando
+// (`GET custo-hoje`); a web não mostra nem pede.
+describe("NOD-369: o topo de Trabalhos sem o custo de hoje", () => {
+  const semUsdNoTopo = (html: string) => {
+    const topo = html.slice(html.indexOf('<header class="tt-cab">'), html.indexOf("</header>") + 9);
+    expect(topo).toContain("<h1>Trabalhos</h1>");
+    expect(topo).not.toContain("US$");
+    expect(topo).not.toContain("tt-custo");
+    expect(topo).not.toContain("custo-hoje");
+    expect(topo).not.toContain("acima do normal");
+    expect(html).not.toContain("tt-custo");
+  };
+
+  it("Todos os trabalhos: sem botão nem valor, com gasto de task e com ou sem trabalho", () => {
+    semUsdNoTopo(renderTodosOsTrabalhos(estadoCom({})));
+    semUsdNoTopo(renderTodosOsTrabalhos(estadoCom({ trabalhos: [trabalho("cara", { custoUsd: 18.2, estado: "rodando", iniciadoEm: AGORA - HORA })] })));
   });
 
-  it("sem bot fora do ritmo, sem aviso", () => {
-    const html = custoDoTopo(estadoCom({}, { custoHoje: { ...custo, foraDoRitmo: false, bots: custo.bots.map((b) => ({ ...b, foraDoRitmo: false })) } }));
-    expect(html).not.toContain("acima do normal");
-    expect(html).not.toContain("tt-custo-aviso");
+  it("um dado de custo que sobre no estado (servidor velho, cache) não volta à tela", () => {
+    const comSobra = { ...estadoCom({}), custoHoje: { totalUsd: 21.4, foraDoRitmo: true, parcial: true, bots: [{ agenteId: "ze", hojeUsd: 18.2, foraDoRitmo: true }] } } as Estado;
+    semUsdNoTopo(renderTodosOsTrabalhos(comSobra));
   });
 
-  it("aberto: cada bot com o gasto de hoje; quem passou do ritmo diz quantas vezes o normal", () => {
-    const html = custoDoTopo(estadoCom({}, { custoHoje: custo, custoAberto: true }));
-    expect(html).toContain('aria-expanded="true"');
-    expect(html).toMatch(/Ze 1<\/span><small>3× o normal<\/small><b>US\$ 18,20<\/b>/);
-    expect(html).toMatch(/Ana<\/span><b>US\$ 3,20<\/b>/);
-    expect(html).toContain("mais que o dobro da média dos dias com gasto nos últimos 7 (precisa de pelo menos 3) até este horário");
-    expect(html).not.toContain("Parcial:");
-  });
-
-  it("revisão do Gil no #336: o bot sem base diz 'sem base'; o total parcial explica o que ficou de fora", () => {
-    const semBase = { ...custo, parcial: true, bots: custo.bots.map((b) => (b.agenteId === "ana" ? { ...b, ritmo: "sem base" as const } : b)) };
-    const html = custoDoTopo(estadoCom({}, { custoHoje: semBase, custoAberto: true }));
-    expect(html).toMatch(/Ana<\/span><small title="Menos de 3 dias com gasto nos últimos 7: ainda não dá para comparar.">sem base<\/small><b>US\$ 3,20<\/b>/);
-    expect(html).toContain("(parcial)");
-    expect(html).toContain("Parcial: algum turno caiu antes de informar o custo e ficou fora da soma.");
-  });
-
-  it("sem leitura (servidor anterior ou ainda carregando), nada", () => {
-    expect(custoDoTopo(estadoCom({}))).toBe("");
-    expect(custoDoTopo(estadoCom({}, { custoHoje: null }))).toBe("");
-  });
-
-  it("a tela Trabalhos pede o custo uma vez; abrir o detalhe relê", () => {
+  it("abrir Trabalhos não pede o custo do dia, nem um frame de trabalho o relê", () => {
     const e = estadoCom({});
-    expect(invalidacoesDaTela(e)).toContain("custo");
-    const lido = reduzir(e, { tipo: "hidratar-custo", custo });
-    expect(invalidacoesDaTela(lido)).not.toContain("custo");
-    const aberto = reduzir(lido, { tipo: "custo-aberto", aberto: true });
-    expect(aberto.custoAberto).toBe(true);
-    expect(aberto.invalidacoes).toContain("custo");
-    expect(reduzir(aberto, { tipo: "custo-aberto", aberto: false }).custoAberto).toBe(false);
+    expect(invalidacoesDaTela(e)).not.toContain("custo");
+    expect(invalidacoesDaTela({ ...e, tela: { tipo: "trabalhos", filtro: "voce" } } as Estado)).not.toContain("custo");
+    const frame = { tipo: "trabalho.mudou", dados: { trabalhoId: "a", agenteId: "ze", conversaId: "c-ze", estado: "rodando" } } as unknown as FrameSse;
+    const depois = aplicarFrame(e, frame, AGORA);
+    expect(depois.invalidacoes).toContain("trabalhos");
+    expect(depois.invalidacoes).not.toContain("custo");
   });
 
-  it("trocar de pessoa esquece o custo da anterior", () => {
-    const lido = reduzir(estadoCom({}), { tipo: "hidratar-custo", custo });
-    expect(reduzir(lido, { tipo: "sessao", escopo: { tenantId: "t", pessoaId: "outra" } }).custoHoje).toBeUndefined();
+  it("QA NOD-369: abrir Trabalhos pede só o que já pedia, sem nada de custo (pega invalidação nova com outro nome)", () => {
+    // Lista exata de propósito: quem fizer Trabalhos buscar algo novo ao abrir decide aqui, à vista, se é custo.
+    expect(invalidacoesDaTela(estadoCom({}))).toEqual(["onboarding", "sua-vez", "nao-lidos"]);
+  });
+
+  it("QA NOD-369: sem gasto de task, nenhum US$ em lugar nenhum da tela (não só no header)", () => {
+    expect(renderTodosOsTrabalhos(estadoCom({}))).not.toContain("US$");
+    expect(renderTodosOsTrabalhos(estadoCom({ trabalhos: [trabalho("sem custo", { estado: "rodando", iniciadoEm: AGORA - HORA })] }))).not.toContain("US$");
+  });
+
+  it("o custo por task continua no topo da task (fora do escopo, não pode regredir)", () => {
+    const e = estadoCom({ trabalhos: [trabalho("t1", { custoUsd: 0.88, estado: "rodando", iniciadoEm: AGORA - HORA })] });
+    expect(renderTopoTrabalho(e, "t1")).toContain("US$ 0,88 até agora");
+    const semCusto = estadoCom({ trabalhos: [trabalho("t2", { estado: "rodando", iniciadoEm: AGORA - HORA })] });
+    expect(renderTopoTrabalho(semCusto, "t2")).not.toContain("até agora");
+  });
+
+  it("a web não chama mais a rota do custo do dia (o endpoint fica, sem consumidor na UI)", () => {
+    const fontes = readdirSync(WEB, { recursive: true, encoding: "utf8" }).filter((f) => /\.(ts|css|html)$/.test(f));
+    expect(fontes.length).toBeGreaterThan(10);
+    const achados = fontes.filter((f) => /custo-hoje|CustoDoDiaDto|custoDoTopo|custoAberto|custoHoje|hidratar-custo|\.tt-custo|tt-custo/.test(readFileSync(join(WEB, f), "utf8")));
+    expect(achados).toEqual([]);
   });
 });

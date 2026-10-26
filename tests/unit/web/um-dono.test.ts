@@ -190,10 +190,13 @@ describe("Trabalhos com uma linha por bot (quadro 05)", () => {
     expect(renderTrabalhosPorBot(vivo)).toContain('<span class="tt-titulo">Trabalhando na conversa</span>');
   });
 
-  it("o custo de hoje e a pílula da memória continuam no topo", () => {
-    const html = renderTrabalhosPorBot(base({ custoHoje: { totalUsd: 4.2, foraDoRitmo: false, bots: [] } as never, pressao: "amarela" }));
-    expect(html).toContain("hoje");
-    expect(html).toContain('class="tt-custo');
+  it("NOD-369: o topo por bot fica sem o custo de hoje (mesmo com um que sobre no estado); a pílula da memória continua", () => {
+    const html = renderTrabalhosPorBot({ ...base({ pressao: "amarela" }), custoHoje: { totalUsd: 4.2, foraDoRitmo: true, bots: [] } } as Estado);
+    const topo = html.slice(html.indexOf('<header class="tt-cab">'), html.indexOf("</header>"));
+    expect(topo).not.toContain("US$");
+    expect(html).not.toContain("tt-custo");
+    expect(html).not.toContain("custo-hoje");
+    expect(renderTrabalhosPorBot(base())).not.toContain("US$");
     expect(html).toContain("Pouca memória no seu Mac");
   });
 });

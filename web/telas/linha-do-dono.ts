@@ -6,7 +6,7 @@ import { ICONE } from "../lib/icones.ts";
 import { duracaoCurta } from "../lib/relogio.ts";
 import { esc, hora, iconeAgente } from "../lib/render.ts";
 import { aberto, abertosDoBot, maquinasDe, meiaNoiteDe, memoriaDosBots, naFilaDaCota, pilulaDaCota, textoNaFilaDaCota, pilulaDasMaquinas, pilulaMac, pilulaMemoria, leituraDoMac, pontoTrabalho, seguradoPeloMac, situacaoDe, tempoDe, tituloCurto } from "../lib/trabalhos.ts";
-import { agente, chipTrabalhosDoBot, custoDoTopo } from "./trabalhos.ts";
+import { agente, chipTrabalhosDoBot } from "./trabalhos.ts";
 
 /**
  * O dono de cada bot na tela (definido em 2026-10-12, ADR-099 item 10, parte 5; protótipo docs/prototipos/um-dono-por-bot/,
@@ -107,7 +107,8 @@ function resumoPorBot(linhas: readonly LinhaDoBot[], memoria: string): string {
 /**
  * Trabalhos com uma linha por bot (ADR-099 item 10): Precisa de você, Trabalhando e Esperando (pelo sinal da linha do
  * dono), e "Livres: …" numa linha no fim. Cada linha: ponto, mascote, nome, a frase e o detalhe curto, o tempo; o clique
- * abre as frentes do bot embaixo dela (quadro 05). O custo de hoje e as pílulas da cota e das máquinas ficam no topo.
+ * abre as frentes do bot embaixo dela (quadro 05). As pílulas da cota e das máquinas ficam no topo
+ * (NOD-369: o custo de hoje saiu).
  */
 export function renderTrabalhosPorBot(estado: Estado): string {
   if (!estado.trabalhos) return '<section class="tela-trabalhos"><p class="mudo">carregando…</p></section>';
@@ -133,7 +134,7 @@ export function renderTrabalhosPorBot(estado: Estado): string {
   const livresHtml = nomesLivres.length ? `<p class="tb-livres">Livres: ${esc(nomesLivres.join(", "))}</p>` : "";
   const vazio = linhas.length ? "" : `<p class="tt-vazio">Nenhum bot está trabalhando agora. Quando um bot começar uma frente, esperar algo ou precisar de você, aparece aqui.</p>`;
   return `<section class="tela-trabalhos" aria-label="Trabalhos">
-    <header class="tt-cab"><div><h1>Trabalhos</h1><p>${esc(resumoPorBot(linhas, memoriaDosBots(estado.trabalhos)))}</p>${custoDoTopo(estado)}</div></header>
+    <header class="tt-cab"><div><h1>Trabalhos</h1><p>${esc(resumoPorBot(linhas, memoriaDosBots(estado.trabalhos)))}</p></div></header>
     ${pilulaDaCota(estado.trabalhos.cota, todos, estado.agora, estado.trabalhos.pedidosNaFila)}${pilulaDoTopo(estado)}
     ${secoes}${vazio}${livresHtml}
   </section>`;

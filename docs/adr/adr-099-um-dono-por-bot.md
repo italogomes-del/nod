@@ -98,6 +98,7 @@ frentes que devolvem o resultado ao dono. A pessoa fala com o bot, não com as f
    - **Recursos de fora** (fila da CI, limites de API do GitHub, ClickUp, Gmail) não aparecem na máquina: o Nod mede o tempo
      de fila e os erros de limite e mostra; não há trava automática por eles.
    - **Custo visível, sem teto:** quanto cada bot gastou hoje, e um aviso quando o ritmo do dia sai do normal.
+     (revisto em 2026-10-26, NOD-369: sai do topo de Trabalhos; ver a emenda.)
 8. **Entre bots.**
    - `pedir_a_bot` vira pedido na fila do dono do outro bot. A resposta imediata diz o que aconteceu: começou, ou espera
      por falta de recurso, ou espera porque depende de outro trabalho (e de qual); o bot pode sugerir um colega livre.
@@ -225,6 +226,17 @@ frentes que devolvem o resultado ao dono. A pessoa fala com o bot, não com as f
   tela da frente. O dono é a voz única: a pessoa vê só a resposta do retorno do lote, uma vez, com uma ou N frentes.
 - **Fica no chat:** o `pedido_a_pessoa` da frente; a fala da pessoa; a frente sem lote (forma efetiva task) e a task.
 - **Limite:** se o lote for apagado (`lote_id` vira null), a fala volta ao chat. O relato (`janelaAte`) segue a mesma regra.
+
+## Emenda (2026-10-26, NOD-369) — item 7
+
+- **O custo de hoje sai do topo de Trabalhos.** Decisão do Marlon (26/10): a tela fica mais limpa sem o botão
+  "US$ X hoje" e o painel por bot ("acima do normal", "sem base", nota do Codex). A web não lê mais `GET custo-hoje`.
+- **Fica:** o cálculo (`src/domain/custo-do-dia.ts`, `src/use-cases/custo-do-dia.ts`) e o endpoint `GET custo-hoje`;
+  o custo por turno e o "Hoje com X" do modo dev (ADR-054). O endpoint fica sem consumidor na UI, mantido de propósito
+  para uma volta do aviso em outro lugar.
+- **Limite:** o custo segue visível por task (topo da task e a linha "terminou") e no modo dev/Raio-X; o total do dia
+  por bot e o aviso de ritmo fora do normal não aparecem mais na tela. Gatilho para rever: gasto fora do ritmo que a
+  pessoa só descobre na fatura.
 
 ## Alternativas rejeitadas
 

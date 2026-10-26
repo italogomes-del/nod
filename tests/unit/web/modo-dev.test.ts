@@ -5,7 +5,7 @@ import type { RaioXConversa } from "../../../src/contracts/raio-x.ts";
 import { estadoInicial, reduzir, type Estado } from "../../../web/estado/reducer.ts";
 import { renderCabecalhoConversa, renderMensagem } from "../../../web/telas/conversa.ts";
 import { renderDetalhes } from "../../../web/telas/detalhes.ts";
-import { mil, renderFaixaDev, usd } from "../../../web/telas/modo-dev.ts";
+import { custoDaFrente, mil, renderFaixaDev, usd } from "../../../web/telas/modo-dev.ts";
 
 const C = "c1";
 const bot = (id: string, turnoId: string | null, kind: Mensagem["kind"] = "texto"): Mensagem => ({
@@ -65,5 +65,15 @@ describe("modo dev na web", () => {
 
     // Desligar esquece os resumos; religar busca de novo.
     expect(reduzir(ligado, { tipo: "modo-dev", ligado: false }).modoDev).toEqual({ ligado: false, raioX: {} });
+  });
+});
+
+// NOD-273 (movido do teste do topo no NOD-369): o custo da frente segue na task e na linha "terminou".
+describe("o custo da frente", () => {
+  it("(parcial) com turno do Codex; só Codex diz por quê; sem nada, nada", () => {
+    expect(custoDaFrente({ custoUsd: 0.88 })).toBe("US$ 0,88");
+    expect(custoDaFrente({ custoUsd: 0.88, custoParcial: true })).toBe("US$ 0,88 (parcial)");
+    expect(custoDaFrente({ custoUsd: null, custoParcial: true })).toBe("custo não informado pelo Codex");
+    expect(custoDaFrente({ custoUsd: null })).toBeNull();
   });
 });

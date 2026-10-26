@@ -3,7 +3,8 @@ import type { EpochMs } from "../contracts/ids.ts";
 
 /**
  * O custo de cada bot hoje e o aviso de ritmo (definido em 2026-10-12, ADR-099 §7: "custo visível, sem teto"). Puro: `agora`
- * e o fuso por parâmetro. Nada aqui segura trabalho — é só o que a tela Trabalhos mostra atrás de um clique.
+ * e o fuso por parâmetro. Nada aqui segura trabalho. Sem consumidor na UI desde
+ * o NOD-369 (emenda à ADR-099 item 7): o topo de Trabalhos não mostra mais.
  *
  * A regra do aviso: o gasto de HOJE até agora passa de 2× a média dos 7 dias anteriores, cada um somado da meia-noite
  * até o MESMO horário (no fuso da pessoa), e passa do piso de US$ 1.
