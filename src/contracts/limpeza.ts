@@ -72,6 +72,7 @@ export type RelatoLimpeza = {
  * e ela só sai guardando antes) e `clone_em_uso` (a pasta tem um clone com worktree viva, travada ou num disco que não
  * está montado fora dela; a pasta fica). NOD-295 A (2026-10-19): `clone` conta os clones achados na pasta que NÃO
  * provaram ser idênticos ao remoto (o detalhe vai no log `limpeza_clone_fica`); o clone provado sai e conta em
- * `clonesApagados`.
+ * `clonesApagados`. ADR-128 (2026-10-26): `sem_espaco` (guardar levaria o disco abaixo do vermelho de 3 GB; a pasta fica
+ * até sobrar espaço).
  */
-export type MotivoPuladaLimpeza = "suja" | "travada" | "montagem" | "pr_nao_mergeado" | "clone" | "fora_da_pasta" | "aninhado" | "ignorado_valioso" | "head_solto" | "em_uso" | "nao_reconfirmada" | "erro" | "processo_vivo" | "grande_demais" | "sem_prova" | "clone_sumiu" | "clone_em_uso";
+export type MotivoPuladaLimpeza = "suja" | "travada" | "montagem" | "pr_nao_mergeado" | "clone" | "fora_da_pasta" | "aninhado" | "ignorado_valioso" | "head_solto" | "em_uso" | "nao_reconfirmada" | "erro" | "processo_vivo" | "grande_demais" | "sem_prova" | "clone_sumiu" | "clone_em_uso" | "sem_espaco";

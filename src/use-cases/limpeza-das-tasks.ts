@@ -36,7 +36,7 @@ export async function pastaSemTrabalhoDoTurno(deps: Deps, turnoId: string): Prom
   return pasta && quandoLimpar(c, agora) === "sem_trabalho" ? { trabalhoId: c.id, pasta, quando: "sem_trabalho" } : null;
 }
 
-const MOTIVOS: readonly (keyof RelatoLimpeza["puladas"])[] = ["suja", "travada", "montagem", "pr_nao_mergeado", "clone", "fora_da_pasta", "aninhado", "ignorado_valioso", "head_solto", "em_uso", "nao_reconfirmada", "erro", "processo_vivo", "grande_demais", "sem_prova", "clone_sumiu", "clone_em_uso"];
+const MOTIVOS: readonly (keyof RelatoLimpeza["puladas"])[] = ["suja", "travada", "montagem", "pr_nao_mergeado", "clone", "fora_da_pasta", "aninhado", "ignorado_valioso", "head_solto", "em_uso", "nao_reconfirmada", "erro", "processo_vivo", "grande_demais", "sem_prova", "clone_sumiu", "clone_em_uso", "sem_espaco"];
 const inteiro = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.min(Math.floor(v), Number.MAX_SAFE_INTEGER) : 0);
 
 /**

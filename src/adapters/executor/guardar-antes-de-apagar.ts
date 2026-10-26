@@ -5,8 +5,9 @@ import type { MotivoPuladaLimpeza } from "../../contracts/ponte.ts";
 import { algumCwdDentro, caminhoDoRemotoLocal, EXCLUSOES_MAX, lerLsRemote, prerequisitosDoBundle, saiDoGuardado } from "../../domain/clone-refazivel.ts";
 import { FORA_DO_GUARDADO, GUARDADO_MAX_BYTES, guardadoVencido, pedacoDeRef } from "../../domain/guardado.ts";
 import { classificarIgnorado, protegidoPorMontagem } from "../../domain/limpeza-das-tasks.ts";
+import { DISCO_CRITICO_MB } from "../../domain/memoria-mac.ts";
 import { log } from "../../obs/log.ts";
-import type { ExecutarComando } from "./limpeza-das-tasks.ts";
+import type { ExecutarComando, ResultadoComando } from "./limpeza-das-tasks.ts";
 
 /**
  * Guardar antes de apagar (ADR-096 §4, definido em 2026-10-11). A limpeza da ADR-088 só tirava a worktree que o git
@@ -27,6 +28,17 @@ const PRAZO_GUARDAR_MS = 20 * 60_000;
 const PRAZO_REMOVER_MS = 10 * 60_000;
 /** Até onde se procura `*.pid` dentro da pasta (fora de node_modules): `<slug>/pg/postmaster.pid` é 2. */
 const PID_PROFUNDIDADE = 4;
+/**
+ * ADR-128 (definido em 2026-10-26): medido na VM dos bots, 73 pastas `grande_demais` voltavam ao `tar` a cada passada
+ * apertada (30 min), e cada uma escrevia GBs antes de desistir. A que deu grande demais fica um dia sem novo `tar`; o
+ * motor que reinicia (a atualização) esquece e tenta de novo.
+ */
+const GRANDE_ESPERA_MS = 24 * 3_600_000;
+/** Revisão do #528 (achado médio): a pasta que o disco cheio cortou também espera antes de novo `tar` (menos: o disco libera). */
+const SEM_ESPACO_ESPERA_MS = 6 * 3_600_000;
+const VIGIA_MS = 2_000;
+/** ADR-128: o guardar nunca leva o disco abaixo do vermelho da ADR-085. */
+const PISO_DO_DISCO_BYTES = DISCO_CRITICO_MB * 1_048_576;
 
 export type OpcoesGuardar = {
   /** `~/nod` (a raiz das pastas dos bots). */
@@ -46,6 +58,13 @@ export type OpcoesGuardar = {
    * `refs/nod/guardado/…` do passo 1 ficam no clone: apontam para commits que existem, e a próxima passada as reescreve.
    */
   antesDeApagar?: () => Promise<MotivoPuladaLimpeza | null>;
+  /**
+   * ADR-128: as pastas que deram `grande_demais` (ou cujo `tar` o disco cheio cortou) e até quando ficam sem novo `tar`
+   * (o instante, no relógio `agora`; a entrada guarda também o motivo devolvido enquanto espera).
+   */
+  grandes?: Map<string, { ate: number; motivo: "grande_demais" | "sem_espaco" }>;
+  /** ADR-128: de quanto em quanto o tamanho do `.parcial` é lido durante o `tar`; padrão VIGIA_MS (injetável nos testes). */
+  vigiaMs?: number;
 };
 
 export type ResultadoGuardar = { motivo: MotivoPuladaLimpeza | null; guardadoBytes: number; liberadoBytes: number; worktrees: number };
@@ -334,6 +353,11 @@ export type ProvaNoRemoto =
  *   pelo id, sem gravar ref nenhuma (`--refmap=`, sem FETCH_HEAD) e sem manutenção — o clone não muda de forma visível;
  * - `fora`: `git rev-list --all --reflog --not <base>` não vazio (inclui `refs/remotes/*` velhas e o stash);
  * - `tagLocal`: ponta local que não é commit (tag anotada) e cujo objeto o remoto não anunciou.
+ *
+ * ADR-128 (revisto em 2026-10-26): no clone RASO (`.git/shallow`) não há fetch. Lá ele trazia o histórico inteiro das
+ * branches que não passam pela fronteira — medido na VM dos bots: ~500 MB por passada, sem ref nenhuma que os
+ * segurasse, e a passada seguinte baixava de novo (6 clones do gamefik de ~1 GB a 14–18 GB, 39–65 pacotes cada). Sem
+ * as pontas que faltam, a base é menor e `fora` só pode dar sim a mais: o clone é guardado, nunca apagado a mais.
  */
 export async function provaNoRemoto(clone: string, executar: ExecutarComando): Promise<ProvaNoRemoto> {
   const r = await executar("git", ["-C", clone, "remote"]);
@@ -366,7 +390,7 @@ export async function provaNoRemoto(clone: string, executar: ExecutarComando): P
   if (base === null) return { motivo: "erro" };
   let fora = await foraDe(base);
   if (fora === null) return { motivo: "erro" };
-  if (fora && base.length < deQuem.size) {
+  if (fora && base.length < deQuem.size && (await ausente(join(clone, ".git", "shallow")))) {
     const tem = new Set(base);
     const faltam = new Map<string, string[]>();
     for (const [c, nome] of deQuem) if (!tem.has(c)) faltam.set(nome, [...(faltam.get(nome) ?? []), c]);
@@ -394,7 +418,10 @@ const LEIA_DO_GUARDADO = "NOD-GUARDADO-LEIA.txt";
  * remoto e `git fetch .git/nod-guardado.bundle 'refs/*:refs/guardado/*'` (o LEIA ao lado diz isso).
  *
  * Só quando é certeza que nada se perde — senão o `.git` vai inteiro, como antes:
- * - os remotos refazem o clone (`remotosRefazem`), sem `shallow` nem `alternates`;
+ * - os remotos refazem o clone (`remotosRefazem`), sem `alternates`. ADR-128 (revisto em 2026-10-26): o clone raso
+ *   (`shallow`) também — a fronteira só corta o histórico que veio do remoto, e o bundle conferido (pré-requisitos sob a
+ *   base) leva o que nenhuma ponta do remoto alcança; antes ele ia com `.git/objects` inteiro e cada clone do gamefik da
+ *   VM (14–18 GB) dava `grande_demais` para sempre;
  * - nada no índice (o conteúdo só preparado mora só nos objetos);
  * - nenhum commit que só o reflog alcança (fora de toda ref e de todo remoto).
  * Devolve as exclusões do `tar` (relativas a `-C <bot>`) e os arquivos criados (saem se a pasta ficar).
@@ -402,8 +429,10 @@ const LEIA_DO_GUARDADO = "NOD-GUARDADO-LEIA.txt";
 async function cloneSemObjetos(clone: string, base: string, prefixo: string, executar: ExecutarComando): Promise<{ excluir: string[]; criados: string[] }> {
   const nada = { excluir: [], criados: [] };
   const git = join(clone, ".git");
-  if (!(await ausente(join(git, "shallow"))) || !(await ausente(join(git, "objects", "info", "alternates")))) return nada;
+  if (!(await ausente(join(git, "objects", "info", "alternates")))) return nada;
   if ((await remotosRefazem(clone, base, executar)) !== null) return nada;
+  const fronteiras = await lerFronteiras(git);
+  if (fronteiras === null) return nada;
   // QA do #413 (achado médio): o índice de uma worktree ligada também mora só nos objetos — com alguma, vai tudo.
   const wts = await executar("git", ["-C", clone, "worktree", "list", "--porcelain"]);
   if (wts.codigo !== 0 || wts.stdout.split("\n").filter((l) => l.startsWith("worktree ")).length !== 1) return nada;
@@ -421,6 +450,15 @@ async function cloneSemObjetos(clone: string, base: string, prefixo: string, exe
   // o `.git` inteiro.
   const prova = await provaNoRemoto(clone, executar);
   if ("motivo" in prova) return nada;
+  // Revisão do #528 (bloqueante): no clone raso o commit da fronteira parece não ter pai, e o bundle não exige o pai dele.
+  // Se a fronteira não está sob uma ponta do remoto (branch apagada ou reescrita no servidor depois do squash), o clone
+  // novo não tem esse pai e o `git fetch` do bundle falha — o não enviado se perderia. Só vai sem objetos quando toda
+  // fronteira o remoto alcança; senão, `.git/objects` inteiro, como antes.
+  if (fronteiras.length > 0) {
+    if (prova.base.length === 0) return nada;
+    const solta = await executar("git", ["-C", clone, "rev-list", "-n1", ...fronteiras, "--not", ...prova.base], { prazoMs: PRAZO_REMOVER_MS, fundo: true });
+    if (solta.codigo !== 0 || solta.stdout.trim() !== "") return nada;
+  }
   const fora = await executar("git", ["-C", clone, "rev-list", "-n1", "--all", "--not", ...prova.base], { prazoMs: PRAZO_REMOVER_MS, fundo: true });
   if (fora.codigo !== 0) return nada;
   const criados: string[] = [];
@@ -446,6 +484,19 @@ async function cloneSemObjetos(clone: string, base: string, prefixo: string, exe
   await writeFile(leia, `Guardado pelo nod (NOD-295) sem .git/objects: o remoto já tem esses objetos.\nPara refazer: git clone <remoto> e, se houver ${PACOTE_DO_GUARDADO} aqui, git fetch .git/${PACOTE_DO_GUARDADO} 'refs/*:refs/guardado/*' (o HEAD solto, se havia, vem em refs/guardado/nod/guardado-head-solto).\nRemotos:\n${urls}\n`, { mode: 0o600 });
   criados.push(leia);
   return { excluir: [`${prefixo}/.git/objects`], criados };
+}
+
+/**
+ * Revisão do #528: os commits da fronteira do clone raso (`.git/shallow`, um id por linha); [] no clone completo, null
+ * se não deu para ler ou se veio linha que não é id (aí o `.git` vai inteiro).
+ */
+async function lerFronteiras(git: string): Promise<string[] | null> {
+  const arquivo = join(git, "shallow");
+  if (await ausente(arquivo)) return [];
+  const texto = await readFile(arquivo, "utf8").catch(() => null);
+  if (texto === null) return null;
+  const linhas = texto.split("\n").map((l) => l.trim()).filter((l) => l !== "");
+  return linhas.every((l) => /^[0-9a-f]{40,64}$/.test(l)) ? linhas : null;
 }
 
 /** QA do #413 (bug 2): os pré-requisitos do bundle (cabeçalho até a linha em branco) estão todos sob `base`? */
@@ -512,6 +563,8 @@ export async function guardarEApagar(base: string, rotulo: string, o: OpcoesGuar
   const baseReal = await realpath(base).catch(() => null);
   const raizReal = await realpath(o.raiz).catch(() => null);
   if (baseReal === null || raizReal === null || !dentroDe(baseReal, raizReal) || baseReal === raizReal) return vazio("fora_da_pasta");
+  const espera = o.grandes?.get(base);
+  if (espera !== undefined && o.agora() < espera.ate) return vazio(espera.motivo);
   if (protegidoPorMontagem(base, o.montagens) || protegidoPorMontagem(baseReal, o.montagens)) return vazio("montagem");
   if (await temProcessoVivo(base)) return vazio("processo_vivo");
 
@@ -558,6 +611,17 @@ export async function guardarEApagar(base: string, rotulo: string, o: OpcoesGuar
     return { motivo: null, guardadoBytes: 0, liberadoBytes: 0, worktrees };
   }
 
+  // ADR-128: o guardado nunca leva o disco abaixo do vermelho — o teto é o menor entre o máximo e a folga acima do piso.
+  // Em 26/10 os `tar` das pastas grandes encheram o disco da VM, e os turnos dos bots morreram com "erro".
+  // Revisão do #528 (achado baixo): sem leitura do livre (erro, NaN) não há como garantir o piso — a pasta fica.
+  const maximo = o.maxBytes ?? GUARDADO_MAX_BYTES;
+  const folga = async (): Promise<number | null> => {
+    const livre = await o.livre(o.raiz).catch(() => null);
+    return typeof livre === "number" && Number.isFinite(livre) ? livre - PISO_DO_DISCO_BYTES : null;
+  };
+  const folgaAntes = await folga();
+  if (folgaAntes === null || Math.min(maximo, folgaAntes) <= 0) return vazio("sem_espaco");
+
   // 1. Cada HEAD ganha uma referência no clone: o commit que só o HEAD solto alcança não se perde.
   for (const [dirComum, lista] of porClone) {
     for (const wt of lista) {
@@ -590,19 +654,60 @@ export async function guardarEApagar(base: string, rotulo: string, o: OpcoesGuar
     }
   }
   const excluir = [...FORA_DO_GUARDADO, ...enxuto.slice(0, EXCLUSOES_MAX)].map((x) => `--exclude=${x}`);
-  const tar = await o.executar("tar", ["-czf", parcial, ...excluir, "-C", bot, nome], { prazoMs: PRAZO_GUARDAR_MS, fundo: true });
+  // Revisão do #528 (achado alto): os bundles acima já escreveram no disco — o teto do `tar` é medido depois deles.
+  const folgaDoTar = await folga();
+  const teto = folgaDoTar === null ? 0 : Math.min(maximo, folgaDoTar);
+  if (teto <= 0) {
+    await desfazer();
+    o.grandes?.set(base, { ate: o.agora() + SEM_ESPACO_ESPERA_MS, motivo: "sem_espaco" });
+    return vazio("sem_espaco");
+  }
+  // ADR-128: o `tar` é cortado assim que o `.parcial` passa do teto — antes ia até o fim (GBs de um clone de 15 GB) e só
+  // então se via que não cabia.
+  // Revisão do #528 (achado médio): o vigia também lê o livre — os bots seguem escrevendo durante o `tar` (até 20 min), e
+  // o disco que cai abaixo do piso corta o `tar` mesmo com o `.parcial` abaixo do teto.
+  const corte = new AbortController();
+  let semFolga = false;
+  let vigiando = false;
+  const vigiar = async () => {
+    // Revisão 2 do #528: um `statfs` lento não empilha leituras.
+    if (vigiando) return;
+    vigiando = true;
+    try { await lerOParcial(); } finally { vigiando = false; }
+  };
+  const lerOParcial = async () => {
+    const s = await stat(parcial).catch(() => null);
+    if (s !== null && s.size > teto) corte.abort();
+    else if (!corte.signal.aborted) {
+      const f = await folga();
+      if (f === null || f <= 0) { semFolga = true; corte.abort(); }
+    }
+  };
+  const vigia = setInterval(() => void vigiar().catch(() => undefined), o.vigiaMs ?? VIGIA_MS);
+  let tar: ResultadoComando;
+  try {
+    tar = await o.executar("tar", ["-czf", parcial, ...excluir, "-C", bot, nome], { prazoMs: PRAZO_GUARDAR_MS, fundo: true, sinal: corte.signal });
+  } finally {
+    clearInterval(vigia);
+  }
   const tamanho = await stat(parcial).then((s) => s.size, () => -1);
+  if (corte.signal.aborted || tamanho > teto) {
+    await unlink(parcial).catch(() => undefined);
+    await desfazer();
+    // Passou só da folga do disco (teto abaixo do máximo, ou o livre caiu no meio): não é a pasta que é grande, é o disco
+    // que está cheio agora. As duas esperam antes de novo `tar` (a do disco cheio, menos).
+    const motivo = semFolga || teto < maximo ? "sem_espaco" : "grande_demais";
+    o.grandes?.set(base, { ate: o.agora() + (motivo === "grande_demais" ? GRANDE_ESPERA_MS : SEM_ESPACO_ESPERA_MS), motivo });
+    log("info", "limpeza_guardado_passou_do_teto", { caminho: relative(o.raiz, base), motivo, teto_mb: Math.round(teto / 1_048_576), cortado: corte.signal.aborted });
+    return vazio(motivo);
+  }
   if (tar.codigo !== 0 || tamanho <= 0) {
     await unlink(parcial).catch(() => undefined);
     await desfazer();
-    log("aviso", "limpeza_guardar_falhou", { caminho: relative(o.raiz, base), codigo: tar.codigo });
+    log("aviso", "limpeza_guardar_falhou", { caminho: relative(o.raiz, base), codigo: tar.codigo, erro: tar.stderr.trim().slice(-300) });
     return vazio("erro");
   }
-  if (tamanho > (o.maxBytes ?? GUARDADO_MAX_BYTES)) {
-    await unlink(parcial).catch(() => undefined);
-    await desfazer();
-    return vazio("grande_demais");
-  }
+  o.grandes?.delete(base);
   // Conferido: o arquivo se lê inteiro (o gzip e o tar fecham).
   const confere = await o.executar("tar", ["-tzf", parcial], { prazoMs: PRAZO_GUARDAR_MS, fundo: true });
   if (confere.codigo !== 0) {

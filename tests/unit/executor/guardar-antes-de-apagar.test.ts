@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readdir, realpath, rm, utimes, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, readdir, realpath, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -38,7 +38,7 @@ afterEach(async () => {
 
 /** Sem o prefixo de prioridade baixa: o teste é da lógica, não do escalonador da máquina. */
 const executarReal = (): ExecutarComando => criarExecutarComando(ENV_GIT, home, []);
-const opcoes = (o: Partial<OpcoesGuardar> = {}): OpcoesGuardar => ({ raiz, executar: executarReal(), montagens: [], livre: async () => 0, agora: () => 1, ...o });
+const opcoes = (o: Partial<OpcoesGuardar> = {}): OpcoesGuardar => ({ raiz, executar: executarReal(), montagens: [], livre: async () => 100 * 1024 ** 3, agora: () => 1, ...o });
 
 async function worktree(rel: string, branch: string): Promise<string> {
   const destino = join(raiz, rel);
@@ -69,6 +69,156 @@ describe("ADR-096 §4: guardar antes de apagar", () => {
     expect(r.motivo).toBe("grande_demais");
     expect(existsSync(join(pasta, "dados.bin"))).toBe(true);
     expect(await readdir(join(raiz, ".guardado", "Ze 1"))).toEqual([]);
+  });
+
+  it("ADR-128: o guardado nunca leva o disco abaixo de 3 GB — sem folga, nem compacta; com pouca, passa a ser `sem_espaco`", async () => {
+    const pasta = join(raiz, "Ze 1", "apertada-dddddd");
+    await mkdir(pasta, { recursive: true });
+    await writeFile(join(pasta, "dados.bin"), "x".repeat(50_000));
+    const real = executarReal();
+    const tars: string[] = [];
+    const executar: ExecutarComando = async (bin, args, o) => { if (bin === "tar") tars.push(args[0]!); return real(bin, args, o); };
+    const tresGb = 3 * 1024 ** 3;
+    expect((await guardarEApagar(pasta, "t-4", opcoes({ executar, livre: async () => tresGb }))).motivo).toBe("sem_espaco");
+    expect(tars).toEqual([]);
+    // 10 bytes de folga: o `tar` roda, passa dela e sai; não é a pasta que é grande — fica 6 h (não um dia) sem novo `tar`.
+    const grandes: NonNullable<OpcoesGuardar["grandes"]> = new Map();
+    expect((await guardarEApagar(pasta, "t-4", opcoes({ executar, livre: async () => tresGb + 10, grandes }))).motivo).toBe("sem_espaco");
+    expect(tars).toEqual(["-czf"]);
+    expect(grandes.get(pasta)).toEqual({ ate: 1 + 6 * 3_600_000, motivo: "sem_espaco" });
+    expect(existsSync(join(pasta, "dados.bin"))).toBe(true);
+    expect(await readdir(join(raiz, ".guardado", "Ze 1"))).toEqual([]);
+  });
+
+  it("ADR-128: o `tar` é cortado assim que o `.parcial` passa do teto, sem esperar acabar", async () => {
+    const pasta = join(raiz, "Ze 1", "enorme-eeeeee");
+    await mkdir(pasta, { recursive: true });
+    await writeFile(join(pasta, "dados.bin"), "x");
+    const real = executarReal();
+    let cortado = false;
+    // Um `tar` lento que escreve 1 KB a cada 5 ms por até 10 s, até o sinal chegar.
+    const executar: ExecutarComando = async (bin, args, o) => {
+      if (bin !== "tar" || args[0] !== "-czf") return real(bin, args, o);
+      const destino = args[1]!;
+      for (let i = 0; i < 2_000; i++) {
+        if (o?.sinal?.aborted) { cortado = true; return { codigo: -2, stdout: "", stderr: "" }; }
+        await appendFile(destino, "y".repeat(1024));
+        await new Promise((r) => setTimeout(r, 5));
+      }
+      return { codigo: 0, stdout: "", stderr: "" };
+    };
+    const inicio = Date.now();
+    const r = await guardarEApagar(pasta, "t-5", opcoes({ executar, maxBytes: 20 * 1024, vigiaMs: 10 }));
+    expect(r.motivo).toBe("grande_demais");
+    expect(cortado).toBe(true);
+    expect(Date.now() - inicio).toBeLessThan(5_000);
+    expect(await readdir(join(raiz, ".guardado", "Ze 1"))).toEqual([]);
+  });
+
+  it("ADR-128: a pasta que deu `grande_demais` fica um dia sem novo `tar`", async () => {
+    const pasta = join(raiz, "Ze 1", "grande-ffffff");
+    await mkdir(pasta, { recursive: true });
+    await writeFile(join(pasta, "dados.bin"), "x".repeat(50_000));
+    const real = executarReal();
+    let tars = 0;
+    const executar: ExecutarComando = async (bin, args, o) => { if (bin === "tar" && args[0] === "-czf") tars++; return real(bin, args, o); };
+    const grandes: NonNullable<OpcoesGuardar["grandes"]> = new Map();
+    let agora = 1_000;
+    const o = opcoes({ executar, maxBytes: 10, grandes, agora: () => agora });
+    expect((await guardarEApagar(pasta, "t-6", o)).motivo).toBe("grande_demais");
+    agora += DIA - 1;
+    expect((await guardarEApagar(pasta, "t-6", o)).motivo).toBe("grande_demais");
+    expect(tars).toBe(1);
+    agora += 1;
+    expect((await guardarEApagar(pasta, "t-6", o)).motivo).toBe("grande_demais");
+    expect(tars).toBe(2);
+  });
+
+  it("revisão do #528: sem leitura do livre (erro ou NaN) não há `tar` — `sem_espaco`", async () => {
+    const pasta = join(raiz, "Ze 1", "semlivre-gggggg");
+    await mkdir(pasta, { recursive: true });
+    await writeFile(join(pasta, "dados.bin"), "x");
+    const real = executarReal();
+    let tars = 0;
+    const executar: ExecutarComando = async (bin, args, o) => { if (bin === "tar") tars++; return real(bin, args, o); };
+    expect((await guardarEApagar(pasta, "t-7", opcoes({ executar, livre: async () => Number.NaN }))).motivo).toBe("sem_espaco");
+    expect((await guardarEApagar(pasta, "t-7", opcoes({ executar, livre: async () => { throw new Error("statfs"); } }))).motivo).toBe("sem_espaco");
+    expect(tars).toBe(0);
+    expect(existsSync(join(pasta, "dados.bin"))).toBe(true);
+  });
+
+  it("revisão do #528 (achado alto): o teto do `tar` é medido depois dos bundles — se eles comeram a folga, nem compacta", async () => {
+    const pasta = join(raiz, "Ze 1", "bundle-hhhhhh");
+    await mkdir(pasta, { recursive: true });
+    await writeFile(join(pasta, "dados.bin"), "x");
+    const real = executarReal();
+    let tars = 0;
+    const executar: ExecutarComando = async (bin, args, o) => { if (bin === "tar") tars++; return real(bin, args, o); };
+    const leituras = [100 * 1024 ** 3, 3 * 1024 ** 3];
+    const livre = async () => leituras.shift() ?? 0;
+    const grandes: NonNullable<OpcoesGuardar["grandes"]> = new Map();
+    expect((await guardarEApagar(pasta, "t-8", opcoes({ executar, livre, grandes }))).motivo).toBe("sem_espaco");
+    expect(tars).toBe(0);
+    expect(grandes.get(pasta)?.motivo).toBe("sem_espaco");
+    expect(existsSync(join(pasta, "dados.bin"))).toBe(true);
+  });
+
+  it("revisão do #528 (achado médio): o vigia corta o `tar` quando o disco cai abaixo do piso no meio, e a pasta espera 6 h", async () => {
+    const pasta = join(raiz, "Ze 1", "caiu-iiiiii");
+    await mkdir(pasta, { recursive: true });
+    await writeFile(join(pasta, "dados.bin"), "x");
+    const real = executarReal();
+    let cortado = false;
+    let tarComecou = false;
+    const executar: ExecutarComando = async (bin, args, o) => {
+      if (bin !== "tar" || args[0] !== "-czf") return real(bin, args, o);
+      tarComecou = true;
+      for (let i = 0; i < 2_000; i++) {
+        if (o?.sinal?.aborted) { cortado = true; return { codigo: -2, stdout: "", stderr: "" }; }
+        await appendFile(args[1]!, "y");
+        await new Promise((r) => setTimeout(r, 5));
+      }
+      return { codigo: 0, stdout: "", stderr: "" };
+    };
+    // Folga de sobra até o `tar` começar; depois, outro bot enche o disco.
+    const livre = async () => (tarComecou ? 2 * 1024 ** 3 : 100 * 1024 ** 3);
+    const grandes: NonNullable<OpcoesGuardar["grandes"]> = new Map();
+    const r = await guardarEApagar(pasta, "t-9", opcoes({ executar, livre, vigiaMs: 10, grandes }));
+    expect(r.motivo).toBe("sem_espaco");
+    expect(cortado).toBe(true);
+    expect(grandes.get(pasta)?.motivo).toBe("sem_espaco");
+    expect(existsSync(join(pasta, "dados.bin"))).toBe(true);
+    expect(await readdir(join(raiz, ".guardado", "Ze 1"))).toEqual([]);
+  });
+
+  it.runIf(process.platform === "linux")("revisão do #528: o sinal mata o programa de verdade, também atrás do prefixo de prioridade baixa", async () => {
+    const marca = `${30 + Math.floor(Math.random() * 1000) / 1000}`;
+    const corte = new AbortController();
+    setTimeout(() => corte.abort(), 100);
+    const r = await criarExecutarComando(ENV_GIT, home)("sleep", [marca], { prazoMs: 60_000, fundo: true, sinal: corte.signal });
+    expect(r.codigo).toBe(-2);
+    await new Promise((res) => setTimeout(res, 200));
+    const vivos = (() => { try { return execFileSync("pgrep", ["-f", `sleep ${marca}`]).toString().trim(); } catch { return ""; } })();
+    expect(vivos).toBe("");
+  });
+
+  it("revisão 2 do #528: a pasta que passou da espera e foi guardada sai do mapa", async () => {
+    const pasta = join(raiz, "Ze 1", "voltou-jjjjjj");
+    await mkdir(pasta, { recursive: true });
+    await writeFile(join(pasta, "dados.bin"), "x");
+    const grandes: NonNullable<OpcoesGuardar["grandes"]> = new Map([[pasta, { ate: 0, motivo: "grande_demais" }]]);
+    expect((await guardarEApagar(pasta, "t-10", opcoes({ grandes }))).motivo).toBeNull();
+    expect(grandes.has(pasta)).toBe(false);
+    expect(existsSync(pasta)).toBe(false);
+  });
+
+  it("ADR-128: o executor corta o programa pelo sinal (código -2)", async () => {
+    const corte = new AbortController();
+    setTimeout(() => corte.abort(), 50);
+    const inicio = Date.now();
+    const r = await executarReal()("sleep", ["30"], { prazoMs: 60_000, sinal: corte.signal });
+    expect(r.codigo).toBe(-2);
+    expect(Date.now() - inicio).toBeLessThan(5_000);
   });
 
   it("o `tar` que falha (ou um guardado que não se lê) não apaga nada nem deixa `.parcial`", async () => {
@@ -142,7 +292,7 @@ describe("ADR-096 §4: guardar antes de apagar", () => {
 });
 
 describe("ADR-096 §4: as órfãs da raiz do bot", () => {
-  const o = (extra: Partial<Parameters<typeof limparOrfas>[0]> = {}) => ({ home, executar: executarReal(), montagens: async () => [], livre: async () => 0, ...extra });
+  const o = (extra: Partial<Parameters<typeof limparOrfas>[0]> = {}) => ({ home, executar: executarReal(), montagens: async () => [], livre: async () => 100 * 1024 ** 3, ...extra });
 
   it("parada há 30 dias: a limpa sai pelo git (a branch fica); a suja é guardada antes; a recente fica", async () => {
     const limpa = await worktree("Tarsila/qa-194", "qa/194");

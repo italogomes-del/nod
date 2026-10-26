@@ -11,7 +11,7 @@ import { classificarIgnorado, motivoDaRecusa, ORFA_PARADA_MS, PASTAS_DA_MAQUINA_
 import { acabaEmMs, comPonto, discoDoStatfs, nivelDoDisco, type PontoDoDisco } from "../../domain/memoria-mac.ts";
 import { log } from "../../obs/log.ts";
 import { caminhoAumentado } from "./caminho.ts";
-import { cloneSumiu, guardarEApagar, provaNoRemoto, remotosRefazem, temProcessoVivo, vencerGuardados } from "./guardar-antes-de-apagar.ts";
+import { cloneSumiu, guardarEApagar, provaNoRemoto, remotosRefazem, temProcessoVivo, vencerGuardados, type OpcoesGuardar } from "./guardar-antes-de-apagar.ts";
 
 /**
  * A limpeza das pastas de task no Mac (definido em 2026-10-09, ADR-088, issue #216). O servidor diz quais tasks
@@ -28,10 +28,11 @@ import { cloneSumiu, guardarEApagar, provaNoRemoto, remotosRefazem, temProcessoV
 
 export type ResultadoComando = { codigo: number; stdout: string; stderr: string };
 /**
- * Roda um programa sem shell. `codigo` -1 = não achou o programa (ENOENT); -2 = estourou o prazo. `fundo` (ADR-096) =
- * comando pesado da limpeza: roda com prioridade baixa de CPU e de disco (`prefixoDeFundo`).
+ * Roda um programa sem shell. `codigo` -1 = não achou o programa (ENOENT); -2 = estourou o prazo ou foi cortado pelo
+ * `sinal`. `fundo` (ADR-096) = comando pesado da limpeza: roda com prioridade baixa de CPU e de disco (`prefixoDeFundo`).
+ * `sinal` (ADR-128) = corta o programa no meio (o `tar` do guardado que passou do teto).
  */
-export type ExecutarComando = (bin: string, args: readonly string[], o?: { cwd?: string; prazoMs?: number; fundo?: boolean }) => Promise<ResultadoComando>;
+export type ExecutarComando = (bin: string, args: readonly string[], o?: { cwd?: string; prazoMs?: number; fundo?: boolean; sinal?: AbortSignal }) => Promise<ResultadoComando>;
 
 /**
  * ADR-096 (definido em 2026-10-11): o que a limpeza roda de pesado (`git status` numa worktree grande, `git worktree
@@ -100,14 +101,14 @@ export function criarExecutarComando(env: Readonly<Record<string, string | undef
     new Promise((resolver) => {
       const prefixo = o?.fundo === true ? fundo : [];
       const [programa, ...resto] = [...prefixo, bin, ...args];
-      execFile(programa!, resto, { cwd: o?.cwd, env: ambiente, timeout: o?.prazoMs ?? PRAZO_CURTO_MS, maxBuffer: 16 * 1024 * 1024 }, (erro, stdout, stderr) => {
+      execFile(programa!, resto, { cwd: o?.cwd, env: ambiente, timeout: o?.prazoMs ?? PRAZO_CURTO_MS, maxBuffer: 16 * 1024 * 1024, signal: o?.sinal }, (erro, stdout, stderr) => {
         if (!erro) { resolver({ codigo: 0, stdout: String(stdout), stderr: String(stderr) }); return; }
         const e = erro as NodeJS.ErrnoException & { killed?: boolean; code?: unknown };
         // O prefixo que não acha o programa é o mesmo "não achou" do ENOENT: `nice`/`ionice` saem com 127 e o `taskpolicy`
         // com 66 (medido em 2026-10-11 no macOS 14: "taskpolicy: posix_spawn: No such file or directory"), os dois com o
         // texto do errno no stderr.
         const naoAchou = prefixo.length > 0 && ((e.code as unknown) === 127 || (e.code as unknown) === 66) && /No such file or directory/.test(String(stderr ?? ""));
-        const codigo = e.code === "ENOENT" || naoAchou ? -1 : e.killed ? -2 : typeof e.code === "number" ? e.code : 1;
+        const codigo = e.code === "ENOENT" || naoAchou ? -1 : e.killed || e.name === "AbortError" ? -2 : typeof e.code === "number" ? e.code : 1;
         resolver({ codigo, stdout: String(stdout ?? ""), stderr: String(stderr ?? "") });
       });
     });
@@ -160,6 +161,8 @@ export type OpcoesLimpeza = {
   reconfirmar?: (p: PastaParaLimpar) => Promise<boolean>;
   /** ADR-096 §4: o relógio do nome do guardado (injetável nos testes). */
   agora?: () => number;
+  /** ADR-128: as pastas que deram `grande_demais` e quando (o guardar não as compacta de novo por um dia). */
+  grandes?: OpcoesGuardar["grandes"];
 };
 
 /**
@@ -615,7 +618,7 @@ export async function limparPastas(pastas: readonly PastaParaLimpar[], o: Opcoes
     }
     // ADR-106 (revisão do #320): de novo logo antes de apagar — a compactação pode levar 20 min.
     const antesDeApagar = async (): Promise<MotivoPuladaLimpeza | null> => (o.emUso?.(rel) ? "em_uso" : o.reconfirmar && !(await o.reconfirmar(p)) ? "nao_reconfirmada" : null);
-    const g = await guardarEApagar(base, p.trabalhoId, { raiz, executar: o.executar, montagens, simular, livre, agora: o.agora ?? Date.now, antesDeApagar });
+    const g = await guardarEApagar(base, p.trabalhoId, { raiz, executar: o.executar, montagens, simular, livre, agora: o.agora ?? Date.now, antesDeApagar, grandes: o.grandes });
     if (g.motivo) {
       pular(g.motivo);
       log("aviso", "limpeza_pasta_pulada", { trabalho_id: p.trabalhoId, motivo: g.motivo });
@@ -723,7 +726,7 @@ export async function limparOrfas(o: OpcoesLimpeza, agora: number, apertado: boo
         log("info", "limpeza_orfa_removida", { caminho: relative(raiz, wt), liberado_mb: Math.round(liberado / 1_048_576) });
         continue;
       }
-      const g = await guardarEApagar(wt, "orfa", { raiz, executar: o.executar, montagens, simular: o.simular, livre, agora: () => agora, antesDeApagar: async () => (o.emUso?.(b.name) ? "em_uso" : null) });
+      const g = await guardarEApagar(wt, "orfa", { raiz, executar: o.executar, montagens, simular: o.simular, livre, agora: () => agora, antesDeApagar: async () => (o.emUso?.(b.name) ? "em_uso" : null), grandes: o.grandes });
       if (g.motivo) { pular(g.motivo); continue; }
       relato.guardadas++;
       relato.guardadoBytes += g.guardadoBytes;
@@ -896,6 +899,8 @@ export async function pastasNoDisco(home: string): Promise<{ pastas: string[]; c
  */
 export function iniciarLimpezaDasTasks(o: OpcoesLimpeza & { ponte: Pick<PonteInterna, "pastasParaLimpar" | "relatarLimpeza">; pessoaId: string; machineId?: string; agora?: () => number; primeiraMs?: number; intervaloMs?: number; disco?: (caminho: string) => Promise<LeituraDisco | null>; vigiaDoDiscoMs?: number }): LimpezaDasTasks {
   const agora = o.agora ?? Date.now;
+  // ADR-128: vive enquanto o motor vive; a pasta grande demais não volta ao `tar` a cada passada.
+  const grandes: NonNullable<OpcoesGuardar["grandes"]> = o.grandes ?? new Map();
   let rodando = false;
   let parado = false;
   async function umaPassada(apertado: boolean): Promise<RelatoLimpeza | null> {
@@ -910,10 +915,10 @@ export function iniciarLimpezaDasTasks(o: OpcoesLimpeza & { ponte: Pick<PonteInt
       const noDisco = await pastasNoDisco(o.home);
       const pastas = await pastasParaLimpar(o.pessoaId, { ...pedido, codigos: noDisco.pastas.map(codigoDaPasta) });
       const reconfirmar = o.reconfirmar ?? reconfirmarPela(pastasParaLimpar, o.pessoaId, pedido);
-      const relato = await limparPastas(pastas, { ...o, reconfirmar, agora });
+      const relato = await limparPastas(pastas, { ...o, reconfirmar, agora, grandes });
       if (!relato.adiada) {
         // ADR-096 §4: as órfãs paradas e os guardados vencidos.
-        const orfas = await limparOrfas(o, agora(), apertado);
+        const orfas = await limparOrfas({ ...o, grandes }, agora(), apertado);
         relato.orfasRemovidas = orfas.removidas;
         relato.guardadas = (relato.guardadas ?? 0) + orfas.guardadas;
         relato.guardadoBytes = (relato.guardadoBytes ?? 0) + orfas.guardadoBytes;
@@ -949,7 +954,7 @@ export function iniciarLimpezaDasTasks(o: OpcoesLimpeza & { ponte: Pick<PonteInt
         if (!soltar) { log("info", "limpeza_adiada", { pessoa_id: o.pessoaId, motivo: "outra_passada", imediata: true }); return null; }
         try {
           const inicio = agora();
-          const relato = await limparPastas(so, { ...o, reconfirmar: o.reconfirmar ?? reconfirmarPela(pastasParaLimpar, o.pessoaId), agora });
+          const relato = await limparPastas(so, { ...o, reconfirmar: o.reconfirmar ?? reconfirmarPela(pastasParaLimpar, o.pessoaId), agora, grandes });
           relato.imediata = true;
           relato.duracaoMs = Math.max(0, agora() - inicio);
           await o.ponte.relatarLimpeza?.(o.pessoaId, relato, o.machineId);

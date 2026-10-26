@@ -26,7 +26,7 @@ function executor(): ExecutarComando {
     return real(bin, args, op);
   };
 }
-const opcoes = (o: Partial<OpcoesLimpeza> = {}): OpcoesLimpeza => ({ home, executar: executor(), montagens: async () => [], livre: async () => 0, ...o });
+const opcoes = (o: Partial<OpcoesLimpeza> = {}): OpcoesLimpeza => ({ home, executar: executor(), montagens: async () => [], livre: async () => 100 * 1024 ** 3, ...o });
 const encerrada = (pasta: string): PastaParaLimpar => ({ trabalhoId: "t-1", pasta, quando: "encerrada" });
 const semTrabalho = (pasta: string): PastaParaLimpar => ({ trabalhoId: "t-1", pasta, quando: "sem_trabalho" });
 const guardado = (bot: string, slug: string) => join(home, "nod", ".guardado", bot, `${slug}.tar.gz`);

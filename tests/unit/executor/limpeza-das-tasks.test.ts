@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import { cp, mkdir, mkdtemp, readdir, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -50,7 +50,7 @@ function executor(o: { merged?: Record<string, string>; montagens?: string[] | n
 }
 
 /** As opções de sempre: Docker sem montagens (o teste do Docker passa as dele) e o espaço livre fixo. */
-const opcoes = (o: Partial<OpcoesLimpeza> & { executar: ExecutarComando }): OpcoesLimpeza => ({ home, montagens: async () => [], livre: async () => 0, ...o });
+const opcoes = (o: Partial<OpcoesLimpeza> & { executar: ExecutarComando }): OpcoesLimpeza => ({ home, montagens: async () => [], livre: async () => 100 * 1024 ** 3, ...o });
 
 /** Uma worktree do clone em `~/nod/<rel>`, com um node_modules ignorado dentro (o peso real da #216). */
 async function worktree(rel: string, branch: string): Promise<string> {
@@ -379,6 +379,25 @@ describe("limpeza das pastas de task no Mac (ADR-088)", () => {
     const antiga = iniciarLimpezaDasTasks({ ...opcoes(executor()), ponte: {}, pessoaId: "p", primeiraMs: 10 ** 9 });
     expect(await antiga.passada()).toBeNull();
     antiga.parar();
+  });
+});
+
+describe("ADR-128 (QA do #528): a espera da pasta que não coube vale entre passadas", () => {
+  it("a passada e a seguinte dividem o mesmo mapa: um só `tar` para a pasta cortada por falta de espaço", async () => {
+    const wt = await worktree("Dev 1/apertada-999999/acme", "feat/999");
+    await writeFile(join(wt, "rascunho.bin"), randomBytes(64 * 1024));
+    const base = executor();
+    let tars = 0;
+    const executar: ExecutarComando = async (bin, args, op) => { if (bin === "tar" && args[0] === "-czf") tars++; return base.executar(bin, args, op); };
+    const ponte: Pick<PonteInterna, "pastasParaLimpar" | "relatarLimpeza"> = { pastasParaLimpar: async () => [encerrada("Dev 1/apertada-999999")], relatarLimpeza: async () => {} };
+    // 1 KB acima do piso de 3 GB: o `tar` roda, passa do teto e a pasta fica `sem_espaco`.
+    const limpeza = iniciarLimpezaDasTasks({ ...opcoes({ executar }), livre: async () => 3 * 1024 ** 3 + 1024, ponte, pessoaId: "p", primeiraMs: 10 ** 9 });
+    try {
+      expect((await limpeza.passada())?.puladas).toMatchObject({ sem_espaco: 1 });
+      expect((await limpeza.passada())?.puladas).toMatchObject({ sem_espaco: 1 });
+    } finally { limpeza.parar(); }
+    expect(tars).toBe(1);
+    expect(existsSync(join(wt, "rascunho.bin"))).toBe(true);
   });
 });
 

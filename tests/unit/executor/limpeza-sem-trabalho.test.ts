@@ -29,7 +29,7 @@ function executor(falhar?: (args: readonly string[]) => boolean): ExecutarComand
   };
 }
 
-const opcoes = (o: Partial<OpcoesLimpeza> = {}): OpcoesLimpeza => ({ home, executar: executor(), montagens: async () => [], livre: async () => 0, ...o });
+const opcoes = (o: Partial<OpcoesLimpeza> = {}): OpcoesLimpeza => ({ home, executar: executor(), montagens: async () => [], livre: async () => 100 * 1024 ** 3, ...o });
 const semTrabalho = (pasta: string, trabalhoId = "t-1"): PastaParaLimpar => ({ trabalhoId, pasta, quando: "sem_trabalho" });
 
 /** Uma worktree da frente, numa branch nova a partir de origin/main, com node_modules e dist (que se refazem). */

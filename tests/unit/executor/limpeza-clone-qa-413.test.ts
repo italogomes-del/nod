@@ -26,7 +26,7 @@ function executor(): ExecutarComando {
     return real(bin, args, op);
   };
 }
-const opcoes = (o: Partial<OpcoesLimpeza> = {}): OpcoesLimpeza => ({ home, executar: executor(), montagens: async () => [], livre: async () => 0, ...o });
+const opcoes = (o: Partial<OpcoesLimpeza> = {}): OpcoesLimpeza => ({ home, executar: executor(), montagens: async () => [], livre: async () => 100 * 1024 ** 3, ...o });
 const encerrada = (pasta: string): PastaParaLimpar => ({ trabalhoId: "t-1", pasta, quando: "encerrada" });
 const semTrabalho = (pasta: string): PastaParaLimpar => ({ trabalhoId: "t-1", pasta, quando: "sem_trabalho" });
 const guardado = (bot: string, slug: string) => join(home, "nod", ".guardado", bot, `${slug}.tar.gz`);
@@ -358,16 +358,6 @@ describe("QA #413 — quando o guardado leva o .git inteiro", () => {
     expect(objetosNoTar("Ada", "rl-1")).toBe(true);
   });
 
-  it("clone raso (shallow), sujo → .git/objects vai", async () => {
-    const dentro = join(home, "nod", "Ada", "raso-1", "acme");
-    await mkdir(join(dentro, ".."), { recursive: true });
-    git(home, "clone", "-q", "--depth", "1", `file://${remoto}`, dentro);
-    git(dentro, "commit", "-q", "--allow-empty", "-m", "local");
-    await writeFile(join(dentro, "solto.txt"), "x\n");
-    await limparPastas([encerrada("Ada/raso-1")], opcoes());
-    expect(objetosNoTar("Ada", "raso-1")).toBe(true);
-  });
-
   it("bundle que não passa no verify → .git/objects vai", async () => {
     const c = await clonar("Ada", "vf-1");
     git(c, "commit", "-q", "--allow-empty", "-m", "local");
@@ -376,5 +366,110 @@ describe("QA #413 — quando o guardado leva o .git inteiro", () => {
     const executar: ExecutarComando = async (bin, args, op) => (bin === "git" && args.includes("bundle") && args.includes("verify") ? { codigo: 1, stdout: "", stderr: "falso" } : base(bin, args, op));
     await limparPastas([encerrada("Ada/vf-1")], opcoes({ executar }));
     expect(objetosNoTar("Ada", "vf-1")).toBe(true);
+  });
+});
+
+describe("ADR-128 — o clone raso", () => {
+  const objetosNoTar = (bot: string, slug: string) => execFileSync("tar", ["-tzf", guardado(bot, slug)]).toString().split("\n").some((l) => l.includes("/.git/objects/"));
+  async function clonarRaso(bot: string, slug: string): Promise<string> {
+    const dentro = join(home, "nod", bot, slug, "acme");
+    await mkdir(join(dentro, ".."), { recursive: true });
+    git(home, "clone", "-q", "--depth", "1", `file://${remoto}`, dentro);
+    return dentro;
+  }
+
+  it("sujo, com commit local: vai sem .git/objects e o bundle refaz o commit (antes ia inteiro e dava grande_demais)", async () => {
+    const c = await clonarRaso("Ada", "raso-1");
+    git(c, "commit", "-q", "--allow-empty", "-m", "local");
+    const sha = git(c, "rev-parse", "HEAD").trim();
+    await writeFile(join(c, "solto.txt"), "x\n");
+    await limparPastas([encerrada("Ada/raso-1")], opcoes());
+    expect(existsSync(c)).toBe(false);
+    expect(objetosNoTar("Ada", "raso-1")).toBe(false);
+    const { refeito, volta, erro } = await refazer("Ada", "raso-1");
+    expect(erro).toBeNull();
+    expect(temObjeto(refeito, sha)).toBe(true);
+    expect(existsSync(join(volta, "raso-1", "acme", "solto.txt"))).toBe(true);
+  });
+
+  it("revisão do #528 (bloqueante): a branch do clone raso foi squashada e apagada no remoto → .git/objects vai inteiro", async () => {
+    // A fronteira do clone raso (pai sumido) não está sob ponta nenhuma do remoto: o bundle não exigiria esse pai, e o
+    // clone novo do LEIA não o tem — o `git fetch` do bundle falharia e o commit local se perderia.
+    const outro = join(home, "code", "outro-sq");
+    git(home, "clone", "-q", remoto, outro);
+    git(outro, "checkout", "-q", "-b", "feat");
+    git(outro, "commit", "-q", "--allow-empty", "-m", "feat 1");
+    git(outro, "commit", "-q", "--allow-empty", "-m", "feat 2");
+    git(outro, "push", "-q", "origin", "feat");
+    const dentro = join(home, "nod", "Ada", "raso-sq", "acme");
+    await mkdir(join(dentro, ".."), { recursive: true });
+    git(home, "clone", "-q", "--depth", "1", "--branch", "feat", `file://${remoto}`, dentro);
+    git(dentro, "commit", "-q", "--allow-empty", "-m", "local nao enviado");
+    const sha = git(dentro, "rev-parse", "HEAD").trim();
+    await writeFile(join(dentro, "solto.txt"), "x\n");
+    git(outro, "checkout", "-q", "main");
+    git(outro, "commit", "-q", "--allow-empty", "-m", "squash da feat");
+    git(outro, "push", "-q", "origin", "main");
+    git(outro, "push", "-q", "origin", "--delete", "feat");
+    git(remoto, "reflog", "expire", "--expire=now", "--all");
+    git(remoto, "gc", "-q", "--prune=now");
+    await limparPastas([encerrada("Ada/raso-sq")], opcoes());
+    expect(existsSync(dentro)).toBe(false);
+    expect(objetosNoTar("Ada", "raso-sq")).toBe(true);
+    const volta = join(home, "volta-sq");
+    await mkdir(volta);
+    execFileSync("tar", ["-xzf", guardado("Ada", "raso-sq"), "-C", volta]);
+    expect(temObjeto(join(volta, "raso-sq", "acme"), sha)).toBe(true);
+  });
+
+  it("QA do #528 (alto): o remoto reescreveu a main por baixo do clone raso (force-push) → .git/objects vai inteiro", async () => {
+    const c = await clonarRaso("Ada", "raso-fp");
+    git(c, "commit", "-q", "--allow-empty", "-m", "local nao enviado");
+    const sha = git(c, "rev-parse", "HEAD").trim();
+    await writeFile(join(c, "solto.txt"), "x\n");
+    const outro = join(home, "code", "outro-fp");
+    git(home, "clone", "-q", remoto, outro);
+    git(outro, "checkout", "-q", "--orphan", "nova");
+    git(outro, "commit", "-q", "--allow-empty", "-m", "raiz nova");
+    git(outro, "push", "-q", "-f", "origin", "nova:main");
+    git(remoto, "reflog", "expire", "--expire=now", "--all");
+    git(remoto, "gc", "-q", "--prune=now");
+    await limparPastas([encerrada("Ada/raso-fp")], opcoes());
+    expect(existsSync(c)).toBe(false);
+    expect(objetosNoTar("Ada", "raso-fp")).toBe(true);
+    const volta = join(home, "volta-fp");
+    await mkdir(volta);
+    execFileSync("tar", ["-xzf", guardado("Ada", "raso-fp"), "-C", volta]);
+    expect(temObjeto(join(volta, "raso-fp", "acme"), sha)).toBe(true);
+  });
+
+  it("revisão 2 do #528: o remoto só andou (push normal) e há commit local → .git/objects vai inteiro e o commit volta", async () => {
+    const c = await clonarRaso("Ada", "raso-andou");
+    git(c, "commit", "-q", "--allow-empty", "-m", "local nao enviado");
+    const sha = git(c, "rev-parse", "HEAD").trim();
+    const outro = join(home, "code", "outro-andou");
+    git(home, "clone", "-q", remoto, outro);
+    git(outro, "commit", "-q", "--allow-empty", "-m", "novo no remoto");
+    git(outro, "push", "-q", "origin", "main");
+    await limparPastas([encerrada("Ada/raso-andou")], opcoes());
+    expect(existsSync(c)).toBe(false);
+    expect(objetosNoTar("Ada", "raso-andou")).toBe(true);
+    const volta = join(home, "volta-andou");
+    await mkdir(volta);
+    execFileSync("tar", ["-xzf", guardado("Ada", "raso-andou"), "-C", volta]);
+    expect(temObjeto(join(volta, "raso-andou", "acme"), sha)).toBe(true);
+  });
+
+  it("o remoto andou: a prova não busca nada no clone raso (era ~500 MB por passada na VM) e o clone fica", async () => {
+    const c = await clonarRaso("Ada", "raso-2");
+    const outro = join(home, "code", "outro");
+    git(home, "clone", "-q", remoto, outro);
+    git(outro, "commit", "-q", "--allow-empty", "-m", "novo no remoto");
+    git(outro, "push", "-q", "origin", "main");
+    const novo = git(outro, "rev-parse", "HEAD").trim();
+    const r = await limparPastas([semTrabalho("Ada/raso-2")], opcoes());
+    expect(r.clonesApagados).toBeUndefined();
+    expect(existsSync(c)).toBe(true);
+    expect(temObjeto(c, novo)).toBe(false);
   });
 });
