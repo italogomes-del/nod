@@ -424,12 +424,12 @@ describe("memória (#196, M1/M2/M3)", () => {
     expect(pilulaMemoria(null, 3)).toBe("");
     const amarela = pilulaMemoria("amarela", 18);
     expect(amarela).toMatch(/^<div class="linha-centro-wrap"/);
-    expect(amarela).toContain("<b>Pouca memória no seu Mac</b><span class=\"pm-detalhe\">· 18 trabalhos abertos</span><span class=\"pm-ver\">Ver ›</span>");
+    expect(amarela).toContain("<b>Pouca memória no seu Mac</b><span class=\"pm-detalhe\">· 18 rodando aqui</span><span class=\"pm-ver\">Ver ›</span>");
     // QA × pranchas M1–M3 (2026-10-08): a pílula abre com o chip de memória, nas duas cores.
     expect(amarela).toMatch(/data-tela="trabalhos"><svg class="pm-icone"/);
     expect(pilulaMemoria("vermelha", 24, false)).toMatch(/<span class="pilula-memoria vermelha"><svg class="pm-icone"/);
     expect(amarela).toContain('data-act="navegar" data-tela="trabalhos"');
-    expect(pilulaMemoria("vermelha", 24)).toContain("<b>Seu Mac está quase sem memória</b><span class=\"pm-detalhe\">· pode travar; 24 trabalhos abertos</span>");
+    expect(pilulaMemoria("vermelha", 24)).toContain("<b>Seu Mac está quase sem memória</b><span class=\"pm-detalhe\">· pode travar; 24 rodando aqui</span>");
   });
 
   it("no topo de 'Todos os trabalhos' sob pressão", () => {

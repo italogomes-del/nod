@@ -205,6 +205,30 @@ describe("tasks na conversa (#195)", () => {
     expect(itens(alerta.c, alerta.e)[1]!.html).toContain("Pouca memória no seu Mac");
   });
 
+  // NOD-372: com as máquinas no DTO, a pílula embaixo da "Abriu a task" só com trabalho rodando no Mac (de qualquer
+  // conversa), e contando só esses; o que roda na VM, na fila sem máquina ou em espera não conta.
+  it("NOD-372: na 'Abriu a task', a memória só com trabalho rodando no Mac ('N rodando aqui'); só na VM, nada", () => {
+    const MAC = { id: "mac", nome: "Este Mac", ehMac: true };
+    const VM = { id: "vm", nome: "nod-motor-teste", ehMac: false };
+    const leitura = (m: typeof MAC, pressao: "verde" | "amarela" | "vermelha") => ({ ...m, pressao, memoriaBotsMb: 0, processador: "verde" as const, usoProcessador: 0.2, cargaProcessador: 0.2, fila: "verde" as const, disco: null, discoSuportado: true, motivoEspera: null, seguraTudoNovo: false });
+    const msgs = [aberta("tb-1", "Migrar relatórios", t0), aberta("tb-2", "Dashboard de churn Q3", t0 + 10 * MIN)];
+    const comTrabalhos = (ts: TrabalhoDto[], pressao: "amarela" | "vermelha") => cenario(msgs, { pressao, trabalhos: { trabalhos: ts, pressao, memoriaTotalMb: null, maquinas: [leitura(MAC, pressao), leitura(VM, "verde")] } });
+    const ultima = (x: { c: ConversaEstado; e: Estado }) => itens(x.c, x.e)[1]!.html;
+    const naVm = [trabalho("tb-1", { maquina: VM }), trabalho("tb-2", { maquina: VM, criadoEm: t0 + 10 * MIN })];
+    expect(ultima(comTrabalhos(naVm, "amarela"))).not.toContain("pilula-memoria");
+    expect(ultima(comTrabalhos(naVm, "vermelha"))).not.toContain("pilula-memoria");
+    const naFila = [trabalho("tb-1", { maquina: VM }), trabalho("tb-2", { estado: "na_fila", maquina: null, criadoEm: t0 + 10 * MIN })];
+    expect(ultima(comTrabalhos(naFila, "amarela"))).not.toContain("pilula-memoria");
+    const misto = [trabalho("tb-1", { maquina: MAC }), trabalho("tb-2", { maquina: VM, criadoEm: t0 + 10 * MIN })];
+    const html = ultima(comTrabalhos(misto, "amarela"));
+    expect(html).toContain('class="pilula-memoria amarela"');
+    expect(html).toContain("· 1 rodando aqui");
+    expect(ultima(comTrabalhos(misto, "vermelha"))).toContain("· pode travar; 1 rodando aqui");
+    // A conta da "Abriu a task" é de qualquer conversa, como a de antes (QA do PR #537): outro bot rodando no Mac conta.
+    const outroNoMac = [...naVm, trabalho("tb-outro", { maquina: MAC, agenteId: "chico", conversaId: "outra" })];
+    expect(ultima(comTrabalhos(outroNoMac, "amarela"))).toContain("· 1 rodando aqui");
+  });
+
   it("o ao vivo de um turno de task não entra no chat (fica na tela da task)", () => {
     const { e: base, c } = cenario([daPessoa("p1", t0)]);
     const e: Estado = { ...base, turnosVivos: { tt: { turnoId: "tt", conversaId: C, estado: "rodando", executor: null, machineId: null, desde: AGORA, trabalhoId: "tb-1" }, tc: { turnoId: "tc", conversaId: C, estado: "rodando", executor: null, machineId: null, desde: AGORA } } };

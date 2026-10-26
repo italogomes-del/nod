@@ -302,6 +302,29 @@ export function noMac(t: Pick<TrabalhoDto, "maquina">): boolean {
 }
 
 /**
+ * NOD-372 (2026-10-26): os trabalhos que ocupam o Mac agora — `rodando`, fora de espera (colega, comando, hora marcada,
+ * máquina sem contato) e numa máquina que é Mac. Diferente de `noMac`, a `maquina` null (na fila, qualquer uma) não conta:
+ * ainda não roda em lugar nenhum. É o que decide e conta a pílula de memória do Mac.
+ */
+export function rodandoNoMac<T extends TrabalhoDto>(lista: readonly T[]): T[] {
+  return lista.filter((t) => t.estado === "rodando" && !emEspera(t) && t.maquina?.ehMac === true);
+}
+
+/**
+ * NOD-372 (revisão do PR #537): as máquinas que entram na pílula do topo depois da de memória. O Mac que segura por
+ * memória sem nada rodando nele nem esperando por ele sai: sem ele, o "Seu Mac está ocupado" tomaria o lugar da pílula de
+ * memória que sumiu, com tudo na VM. As outras máquinas e os outros motivos do Mac seguem como antes.
+ */
+export function maquinasDoAviso(maquinas: readonly LeituraDeMaquinaDto[], trabalhos: readonly TrabalhoDto[]): LeituraDeMaquinaDto[] {
+  const rodando = rodandoNoMac(trabalhos);
+  return maquinas.filter((m) => {
+    if (!m.ehMac || m.motivoEspera !== "memoria") return true;
+    const daqui = (t: TrabalhoDto): boolean => !t.maquina || t.maquina.id === m.id;
+    return rodando.some(daqui) || trabalhos.some((t) => seguradoPeloMac(t, false) && daqui(t));
+  });
+}
+
+/**
  * A pílula por máquina (2026-10-09, a tela fala por máquina): quem segura trabalho novo agora, pelo nome.
  * - Só o Mac: "Seu Mac está ocupado" (ou o disco), como antes, com o "Ver" para Este Mac.
  * - Só uma outra máquina: "nod-motor-teste está ocupada · 4 trabalhos esperam ela aliviar", com o "Ver" para Máquinas.
@@ -484,12 +507,25 @@ export function resumoDaPilula(lista: readonly TrabalhoDto[]): { ponto: "precisa
 const ICONE_MEMORIA = '<svg class="pm-icone" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><rect x="3.5" y="3.5" width="9" height="9" rx="2"></rect><path d="M6 1.5v2M10 1.5v2M6 12.5v2M10 12.5v2M1.5 6h2M1.5 10h2M12.5 6h2M12.5 10h2"></path></svg>';
 
 /**
- * A pílula de memória (#196): amarela "Pouca memória no seu Mac · N trabalhos abertos · Ver" e vermelha "Seu Mac está
- * quase sem memória · pode travar". Centralizada; o "Ver" abre "Todos os trabalhos". Verde ou sem leitura, nada.
+ * O que a pílula de memória conta: "rodando" (NOD-372, com as máquinas no DTO: os trabalhos rodando no Mac, "N rodando
+ * aqui") ou "abertos" (o servidor anterior, sem `maquinas`: todos os abertos, como antes).
  */
-export function pilulaMemoria(nivel: NivelPressao | null, abertos: number, comVer = true): string {
+export type RotuloMemoria = "rodando" | "abertos";
+
+export function textoDaContagemDeMemoria(n: number, rotulo: RotuloMemoria): string {
+  return rotulo === "rodando" ? `${n} rodando aqui` : `${n} ${n === 1 ? "trabalho aberto" : "trabalhos abertos"}`;
+}
+
+/**
+ * A pílula de memória (#196): amarela "Pouca memória no seu Mac · N rodando aqui · Ver" e vermelha "Seu Mac está
+ * quase sem memória · pode travar; N rodando aqui". NOD-372: só com trabalho rodando no Mac (`rodandoNoMac`).
+ * Centralizada; o "Ver" abre "Todos os trabalhos". Verde ou sem leitura, nada.
+ */
+export function pilulaMemoria(nivel: NivelPressao | null, contagem: number, comVer = true, rotulo: RotuloMemoria = "rodando"): string {
   if (nivel !== "amarela" && nivel !== "vermelha") return "";
-  const n = `${abertos} ${abertos === 1 ? "trabalho aberto" : "trabalhos abertos"}`;
+  // NOD-372: com as máquinas no DTO, a pílula conta e exige os trabalhos rodando no Mac; sem nenhum, nada.
+  if (rotulo === "rodando" && contagem <= 0) return "";
+  const n = textoDaContagemDeMemoria(contagem, rotulo);
   const miolo = nivel === "amarela"
     ? `<b>Pouca memória no seu Mac</b><span class="pm-detalhe">· ${n}</span>`
     : `<b>Seu Mac está quase sem memória</b><span class="pm-detalhe">· pode travar; ${n}</span>`;

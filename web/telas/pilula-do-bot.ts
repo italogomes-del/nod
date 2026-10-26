@@ -146,7 +146,10 @@ export function pilulaDoBot(estado: Estado, agenteId: string): Pilula | null {
   return { agenteId, nome, sinal: l.sinal === "vivo" ? "vivo" : l.sinal, texto: l.texto, resto: l.extras, grupos: [], esperas, fila, memoria, abertas: [] };
 }
 
-/** A memória do Mac como a pílula a mostra: só na conversa limpa e com trabalho aberto do bot (como o ponto do PR 2). */
+/**
+ * A memória do Mac como a pílula a mostra: só na conversa limpa e com trabalho aberto do bot (como o ponto do PR 2). A
+ * memória em si só vem com trabalho do bot rodando no Mac (NOD-372, em memoriaDoMac); o disco cheio, com qualquer aberto.
+ */
 export function memoriaNaPilula(estado: Estado, agenteId: string, conversaId: string | null | undefined): (MemoriaNoProgresso & { alvo: string }) | null {
   const c = conversaId ? estado.conversas[conversaId] : undefined;
   if (!c?.mensagens || !conversaLimpa(c.mensagens)) return null;

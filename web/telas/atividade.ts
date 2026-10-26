@@ -40,9 +40,9 @@ export function renderAtividade(estado: Estado, bot: Bot): string {
 }
 
 /**
- * "Agora · Pouca memória no seu Mac · 2 trabalhos abertos · ver": a linha do estado de agora (não vem da rota). Como o ponto
- * da linha do dono, a memória só entra quando o bot tem trabalho aberto (QA do PR 2: sem ele, a linha dizia "0 trabalhos
- * abertos"); o disco cheio que segura tudo entra sempre, porque nenhuma task nova começa.
+ * "Agora · Pouca memória no seu Mac · 2 rodando aqui · ver": a linha do estado de agora (não vem da rota). Como o ponto da
+ * linha do dono, a memória só entra quando o bot tem trabalho rodando no Mac (NOD-372; QA do PR 2: sem ele, a linha dizia
+ * "0 trabalhos abertos"); o disco cheio que segura tudo entra sempre, porque nenhuma task nova começa.
  */
 function linhaAgora(estado: Estado, bot: Bot): string {
   const m = memoriaDoMac(estado, bot.id, bot.conversaId);

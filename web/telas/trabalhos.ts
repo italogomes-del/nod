@@ -6,7 +6,7 @@ import { ICONE } from "../lib/icones.ts";
 import { botao, esc, hora, iconeAgente } from "../lib/render.ts";
 import { duracaoCurta } from "../lib/relogio.ts";
 import { textoFormatado } from "../lib/texto-formatado.ts";
-import { aberto, abertosDoBot, acoesDeFazer, agrupar, dicaSemContato, emEspera, esperaDaContaDe, esperandoColega, esperandoMaquina, etiquetaOrigem, quandoVolta, textoDaEsperaDaConta, voltaMarcada, filtrar, leituraDoMac, maquinasDe, memoriaDosBots, memoriaLegivel, pilulaDaCota, pilulaDasMaquinas, pilulaMac, pilulaMemoria, pontoTrabalho, resumoDaPilula, seguradoPeloMac, situacaoDe, tempoDe, temposDaTask, tituloCurto, trabalhoPorId, trabalhosConhecidos, type GruposTrabalhos } from "../lib/trabalhos.ts";
+import { aberto, abertosDoBot, acoesDeFazer, agrupar, dicaSemContato, emEspera, esperaDaContaDe, esperandoColega, esperandoMaquina, etiquetaOrigem, quandoVolta, textoDaEsperaDaConta, voltaMarcada, filtrar, leituraDoMac, maquinasDe, memoriaDosBots, memoriaLegivel, pilulaDaCota, pilulaDasMaquinas, pilulaMac, pilulaMemoria, pontoTrabalho, maquinasDoAviso, rodandoNoMac, resumoDaPilula, seguradoPeloMac, situacaoDe, tempoDe, temposDaTask, tituloCurto, trabalhoPorId, trabalhosConhecidos, type GruposTrabalhos } from "../lib/trabalhos.ts";
 import { renderMensagem, type BlocoDaTimeline } from "./conversa.ts";
 import { outraMaquinaDestaVez } from "../lib/rodar-desta-vez.ts";
 import { horariosDaRotina } from "./linhas-do-chat.ts";
@@ -205,11 +205,12 @@ export function renderTodosOsTrabalhos(estado: Estado, filtro: FiltroTrabalhos =
   // #219: uma pílula só; o disco quase cheio vai na frente da de memória (é o que pede a mão da pessoa).
   const motivo = estado.trabalhos.motivoEspera ?? null;
   const esperam = todos.filter((t) => seguradoPeloMac(t, segurando)).length;
-  // Revisto em 2026-10-09 (a tela fala por máquina): a pílula nomeia quem segura (o Mac ou a VM); a de memória é só do Mac.
+  // Revisto em 2026-10-09 (a tela fala por máquina): a pílula nomeia quem segura (o Mac ou a VM); a de memória é só do Mac
+  // e, desde a NOD-372, só com trabalho rodando nele (contando só esses).
   const maquinas = maquinasDe(estado.trabalhos);
   const pilula = maquinas
-    ? pilulaDasMaquinas(maquinas.filter((m) => m.motivoEspera === "disco"), todos) || pilulaMemoria(leituraDoMac(estado.trabalhos).pressao, abertos, false) || pilulaDasMaquinas(maquinas, todos)
-    : (motivo === "disco" ? pilulaMac(segurando, esperam, true, motivo) : "") || pilulaMemoria(estado.pressao, abertos, false) || pilulaMac(segurando, esperam, true, motivo);
+    ? pilulaDasMaquinas(maquinas.filter((m) => m.motivoEspera === "disco"), todos) || pilulaMemoria(leituraDoMac(estado.trabalhos).pressao, rodandoNoMac(todos).length, false) || pilulaDasMaquinas(maquinasDoAviso(maquinas, todos), todos)
+    : (motivo === "disco" ? pilulaMac(segurando, esperam, true, motivo) : "") || pilulaMemoria(estado.pressao, abertos, false, "abertos") || pilulaMac(segurando, esperam, true, motivo);
   const linha = (t: TrabalhoDto): string => {
     const bot = agente(estado, t.agenteId);
     const mem = aberto(t) && t.memoriaMb !== null ? ` · ${memoriaLegivel(t.memoriaMb)}` : "";

@@ -5,7 +5,7 @@ import { conversaViva, esperaNaTela, fraseDoDono, frentesDoBot, grupoDaLinha, li
 import { ICONE } from "../lib/icones.ts";
 import { duracaoCurta } from "../lib/relogio.ts";
 import { esc, hora, iconeAgente } from "../lib/render.ts";
-import { aberto, abertosDoBot, maquinasDe, meiaNoiteDe, memoriaDosBots, naFilaDaCota, pilulaDaCota, textoNaFilaDaCota, pilulaDasMaquinas, pilulaMac, pilulaMemoria, leituraDoMac, pontoTrabalho, seguradoPeloMac, situacaoDe, tempoDe, tituloCurto } from "../lib/trabalhos.ts";
+import { aberto, abertosDoBot, maquinasDe, meiaNoiteDe, memoriaDosBots, naFilaDaCota, pilulaDaCota, textoNaFilaDaCota, pilulaDasMaquinas, pilulaMac, pilulaMemoria, leituraDoMac, maquinasDoAviso, rodandoNoMac, textoDaContagemDeMemoria, pontoTrabalho, seguradoPeloMac, situacaoDe, tempoDe, tituloCurto } from "../lib/trabalhos.ts";
 import { agente, chipTrabalhosDoBot } from "./trabalhos.ts";
 
 /**
@@ -27,19 +27,25 @@ function decisoesDoBot(estado: Estado, agenteId: string): { id: string; frase: s
  * O estado da memória (ou do disco cheio que segura tudo) do Mac agora, com a frase, a cor e para onde leva: o ponto da
  * pílula do bot e do progresso na fala (PR 8) e a linha "Agora" da Atividade (ADR-114) leem daqui. null = nada pede a pessoa.
  */
-export function memoriaDoMac(estado: Estado, agenteId: string, conversaId: string | null | undefined): { texto: string; nivel: "amarela" | "vermelha"; alvo: string; abertos: number; disco: boolean } | null {
-  const abertos = abertosDoBot(estado, agenteId, conversaId).length;
+export function memoriaDoMac(estado: Estado, agenteId: string, conversaId: string | null | undefined): { texto: string; nivel: "amarela" | "vermelha"; alvo: string; abertos: number; rodandoAqui: number; disco: boolean } | null {
   const maquinas = maquinasDe(estado.trabalhos);
+  // NOD-372: com as máquinas no DTO, a memória conta só os trabalhos do bot rodando no Mac (sem nenhum, ela some); o
+  // servidor anterior segue com os abertos. `abertos` segue sendo os abertos do bot: é por ele que a pílula e a fala
+  // mostram o disco cheio, que vale mesmo sem nada rodando no Mac (a fila parada é justamente o caso dele).
+  const doBot = abertosDoBot(estado, agenteId, conversaId);
+  const abertos = doBot.length;
+  const rodandoAqui = maquinas ? rodandoNoMac(doBot).length : abertos;
   const legado = estado.trabalhos?.motivoEspera === "disco" && estado.trabalhos.seguraTudoNovo === true;
   const disco = maquinas ? maquinas.find((m) => m.motivoEspera === "disco" && m.seguraTudoNovo) : legado ? { ehMac: true, nome: "seu Mac" } : undefined;
   const nivel = maquinas ? leituraDoMac(estado.trabalhos).pressao : estado.pressao;
-  const n = `${abertos} ${abertos === 1 ? "trabalho aberto" : "trabalhos abertos"}`;
+  const n = textoDaContagemDeMemoria(rodandoAqui, maquinas ? "rodando" : "abertos");
+  const semMemoria = maquinas !== undefined && rodandoAqui === 0;
   const alvo = disco ? `data-act="secao-espaco" data-secao="${disco.ehMac ? "este-mac" : "maquinas"}"` : 'data-act="navegar" data-tela="trabalhos"';
   const texto = disco
     ? `${disco.ehMac ? "Pouco espaço no disco do seu Mac" : `Pouco espaço no disco em ${disco.nome}`} · nenhuma task nova começa`
-    : nivel === "amarela" ? `Pouca memória no seu Mac · ${n}` : nivel === "vermelha" ? `Seu Mac está quase sem memória · pode travar; ${n}` : null;
+    : semMemoria ? null : nivel === "amarela" ? `Pouca memória no seu Mac · ${n}` : nivel === "vermelha" ? `Seu Mac está quase sem memória · pode travar; ${n}` : null;
   if (!texto) return null;
-  return { texto, nivel: disco || nivel === "vermelha" ? "vermelha" : "amarela", alvo, abertos, disco: Boolean(disco) };
+  return { texto, nivel: disco || nivel === "vermelha" ? "vermelha" : "amarela", alvo, abertos, rodandoAqui, disco: Boolean(disco) };
 }
 
 // ---- a barra lateral (quadro 01 × o desenho) ----------------------------------------------------------------------------
@@ -148,10 +154,10 @@ function pilulaDoTopo(estado: Estado): string {
   const abertos = todos.filter(aberto).length;
   const segurando = dto.segurando === true;
   const maquinas = maquinasDe(dto);
-  if (maquinas) return pilulaDasMaquinas(maquinas.filter((m) => m.motivoEspera === "disco"), todos) || pilulaMemoria(leituraDoMac(dto).pressao, abertos, false) || pilulaDasMaquinas(maquinas, todos);
+  if (maquinas) return pilulaDasMaquinas(maquinas.filter((m) => m.motivoEspera === "disco"), todos) || pilulaMemoria(leituraDoMac(dto).pressao, rodandoNoMac(todos).length, false) || pilulaDasMaquinas(maquinasDoAviso(maquinas, todos), todos);
   const motivo = dto.motivoEspera ?? null;
   const esperam = todos.filter((t) => seguradoPeloMac(t, segurando)).length;
-  return (motivo === "disco" ? pilulaMac(segurando, esperam, true, motivo) : "") || pilulaMemoria(estado.pressao, abertos, false) || pilulaMac(segurando, esperam, true, motivo);
+  return (motivo === "disco" ? pilulaMac(segurando, esperam, true, motivo) : "") || pilulaMemoria(estado.pressao, abertos, false, "abertos") || pilulaMac(segurando, esperam, true, motivo);
 }
 
 function linhaDoBot(estado: Estado, x: LinhaDoBot, todos: readonly TrabalhoDto[]): string {

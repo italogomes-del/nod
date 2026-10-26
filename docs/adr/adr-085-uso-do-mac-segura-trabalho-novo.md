@@ -269,3 +269,17 @@ trabalho novo na máquina e passa pelo mesmo `deveSegurar(uso, memória, process
 motor e o modo de uso da pessoa. Se segura, o supervisor fecha a tela ociosa mais antiga e reavalia; sem ociosa, a tela
 fica em `esperando` (fila por ordem de chegada) e a ferramenta espera no turno. Em Livre nunca segura. Não há número
 fixo de telas.
+
+## Emenda de 2026-10-26 — a memória do Mac só com trabalho rodando nele (NOD-372)
+
+O Marlon via "Pouca memória no seu Mac · 3 trabalhos abertos" com tudo rodando na nod-motor-teste. Com as máquinas no
+DTO, a pílula de memória (amarela e vermelha) só aparece com ≥ 1 trabalho `rodando`, fora de espera e numa máquina que é
+Mac (`rodandoNoMac`, web/lib/trabalhos.ts), e conta só esses: "· 2 rodando aqui". Vale no topo de Trabalhos, no topo da
+linha do dono, na "Abriu a task", na pílula do bot e na linha "Agora" da Atividade (ADR-114). O "Seu Mac está ocupado"
+por memória, sem nada rodando no Mac nem esperando por ele, também sai do topo (`maquinasDoAviso`): senão ele tomaria o
+lugar da pílula que sumiu. O disco que segura tudo e as outras pílulas das máquinas seguem como antes. O servidor
+anterior, sem `maquinas`, segue com "N trabalhos abertos".
+
+Gatilho de reversão: se a pessoa travar o Mac por memória sem aviso do nod com um trabalho dele de fato rodando no Mac
+(o `maquina` do DTO veio de outra máquina ou null), a regra leu o dado errado: corrigir o `ondeRoda`, não voltar a contar
+todos os abertos.

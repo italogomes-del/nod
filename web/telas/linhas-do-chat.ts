@@ -4,7 +4,7 @@ import type { PedidoDeColega } from "../../src/contracts/troca-entre-bots.ts";
 import type { Estado } from "../estado/reducer.ts";
 import { ICONE } from "../lib/icones.ts";
 import { esc, hora, iconeAgente } from "../lib/render.ts";
-import { aberto, acoesDeFazer, juntar, leituraDoMac, maquinasDe, pilulaDasMaquinas, pilulaMac, pilulaMemoria, seguradoPeloMac, tempoDe, trabalhosConhecidos } from "../lib/trabalhos.ts";
+import { aberto, acoesDeFazer, juntar, leituraDoMac, maquinasDe, pilulaDasMaquinas, pilulaMac, pilulaMemoria, rodandoNoMac, seguradoPeloMac, tempoDe, trabalhosConhecidos } from "../lib/trabalhos.ts";
 import { limiteVigente } from "./ia-fora.ts";
 import { custoDaFrente } from "./modo-dev.ts";
 import { linhaDaFila } from "../lib/fila-do-pedido.ts";
@@ -340,12 +340,13 @@ export function planejarLinhas(mensagens: readonly Mensagem[], estado: Estado): 
     // A pílula de memória entra embaixo da task que abriu sob pressão (#196): a mais recente que ainda está aberta. #219:
     // com o disco crítico (nenhuma task nova começa, nem a que a pessoa pediu), a do disco no lugar dela, com o "Ver" para
     // Este Mac. Com o disco só em alerta a task da pessoa começa: o aviso fica em "Todos os trabalhos" e Este Mac.
-    // Revisto em 2026-10-09 (a tela fala por máquina): o disco crítico de qual máquina, e a memória só do Mac.
+    // Revisto em 2026-10-09 (a tela fala por máquina): o disco crítico de qual máquina, e a memória só do Mac — desde a
+    // NOD-372, só com trabalho rodando nele (de qualquer conversa, como a conta de antes), contando só esses.
     const maquinas = maquinasDe(estado.trabalhos);
     const disco = (): string => maquinas
       ? pilulaDasMaquinas(maquinas.filter((x) => x.motivoEspera === "disco" && x.seguraTudoNovo), lista)
       : (estado.trabalhos?.motivoEspera === "disco" && estado.trabalhos.seguraTudoNovo === true ? pilulaMac(true, lista.filter((x) => seguradoPeloMac(x, true)).length, true, "disco") : "");
-    const memoria = m === ultimaAbertura ? disco() || pilulaMemoria(maquinas ? leituraDoMac(estado.trabalhos).pressao : estado.pressao, lista.filter(aberto).length) : "";
+    const memoria = m === ultimaAbertura ? disco() || pilulaMemoria(maquinas ? leituraDoMac(estado.trabalhos).pressao : estado.pressao, maquinas ? rodandoNoMac(lista).length : lista.filter(aberto).length, true, maquinas ? "rodando" : "abertos") : "";
     planos.set(m.id, {
       tipo: "linha",
       chave: `linha:${m.id}`,
