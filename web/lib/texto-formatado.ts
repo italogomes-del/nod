@@ -142,8 +142,8 @@ export function soLinks(texto: string, agora?: Date): string {
  * "######" viram uma linha de título (um tamanho só: o balão não tem hierarquia de documento). O texto sem lista nem
  * título segue o caminho de sempre, byte a byte.
  */
-const ITEM_DE_LISTA = /^ {0,3}([-*+]|\d{1,3}[.)])\s+(\S.*)$/;
-const TITULO = /^ {0,3}#{1,6}\s+(.+?)(?:\s+#+)?\s*$/;
+export const ITEM_DE_LISTA = /^ {0,3}([-*+]|\d{1,3}[.)])\s+(\S.*)$/;
+export const TITULO = /^ {0,3}#{1,6}\s+(.+?)(?:\s+#+)?\s*$/;
 
 function comListas(texto: string, opcoes: OpcoesTexto): string {
   const linhas = texto.split("\n");

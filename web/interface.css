@@ -545,6 +545,15 @@
   .message.fala-viva, .fala-viva-linha { animation: none; }
   .fala-viva-estado { animation: none; background: none; color: var(--ink-2); -webkit-text-fill-color: currentColor; }
 }
+/* NOD-358 (emenda da ADR-114; protótipo .p348-baloes): a resposta em vários balões, um por parágrafo, como no WhatsApp.
+   Cada balão tem a largura do próprio texto e 6 px até o seguinte; o do progresso continua largo. O balão novo da fala
+   viva entra subindo 4 px (240 ms) uma vez: o morph faz o balão que cresce mudar por dentro (data-no-lugar), sem nó novo
+   que recomece ou corte a animação; com menos movimento, só aparece. */
+.bubble-wrap > .bubble[data-balao]:not(.com-progresso) { width: fit-content; max-width: 100%; box-sizing: border-box; }
+.bubble-wrap > .bubble[data-balao] + .bubble[data-balao] { margin-top: 6px; }
+.bubble.balao-entra { animation: balao-entra .24s ease-out both; }
+@keyframes balao-entra { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .bubble.balao-entra { animation: none; } }
 .atividade-etapas { margin: 6px 0 0; padding: 10px 14px 4px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
 .atividade-agora { margin: 0 0 8px; font-size: 14px; line-height: 1.45; color: var(--ink); overflow-wrap: anywhere; }
 .atividade-conta { margin: 0; font-size: 12px; color: var(--ink-3); }

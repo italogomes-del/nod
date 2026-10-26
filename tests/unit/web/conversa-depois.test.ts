@@ -72,7 +72,7 @@ describe("2. a parte ao vivo é a Ada falando", () => {
     // Sem o nome da IA, sem "digitando", sem cursor, sem a linha antiga e sem o ponto que pulsa.
     for (const fora of ["catcher", "Claude", "digitando", 'class="cursor"', "está trabalhando", "atividade-pulso", "trabalhando ·"]) expect(html).not.toContain(fora);
     // QA 2 do #508: a narração de antes da ferramenta fica no balão (a fala gravada a tem); o estado diz a ferramenta.
-    expect(html).toContain('<div class="bubble" data-parte="balao">');
+    expect(html).toContain('<div class="bubble" data-parte="balao" data-no-lugar>');
     // NOD-353: nada terminou ainda — sem resumo; a ação em uso está na linha viva ("Usando GitHub").
     expect(blocos[0]!.morfar!.partes.map((p) => p.chave)).toEqual(["nome", "balao", "viva"]);
     expect(html).not.toContain("fala-acoes");
@@ -87,8 +87,9 @@ describe("2. a parte ao vivo é a Ada falando", () => {
     const narrando = blocosAoVivo(c, { ...e, atividades: { [C]: { t1: { ...atividade, atual: "Abrindo https://github.com/acme/loja/pull/481 agora" } } } })[0]!;
     expect(narrando.html).toContain('<span class="fala-viva-estado">Escrevendo</span>');
     expect(narrando.html).toContain('state="idle"');
-    expect(narrando.morfar?.partes.map((p) => p.chave)).toEqual(["nome", "balao", "viva"]);
-    expect(narrando.html).toMatch(/<div class="bubble" data-parte="balao">.*Abrindo <a [^>]*href="https:\/\/github\.com\/acme\/loja\/pull\/481"/s);
+    // NOD-358: a narração nova depois de outras curtas é outra geração de balões (`balao-gN`, revisão 2 do PR #522).
+    expect(narrando.morfar?.partes.map((p) => p.chave.replace(/-g\d+$/, ""))).toEqual(["nome", "balao", "viva"]);
+    expect(narrando.html).toMatch(/<div class="bubble" data-parte="balao(?:-g\d+)?" data-no-lugar>.*Abrindo <a [^>]*href="https:\/\/github\.com\/acme\/loja\/pull\/481"/s);
     expect(narrando.html).toContain('class="fala-viva-linha rodape"');
   });
 
@@ -150,7 +151,7 @@ describe("2. a parte ao vivo é a Ada falando", () => {
     const blocos = blocosAoVivo(c, e);
     const html = blocos[0]!.html;
     expect(html).toContain('class="message bot fala-viva ao-vivo com-texto"');
-    expect(html).toContain('<div class="bubble" data-parte="balao">');
+    expect(html).toContain('<div class="bubble" data-parte="balao" data-no-lugar>');
     expect(html).not.toContain('class="cursor"');
     expect(blocos[0]!.morfar?.partes.map((p) => p.chave)).toEqual(["nome", "balao", "viva"]);
     expect(html).toContain('<div class="fala-viva-linha rodape" data-parte="viva" data-estado-fala="escrevendo"><span class="fala-viva-estado">Escrevendo</span>');
@@ -286,23 +287,29 @@ describe("2. a parte ao vivo é a Ada falando", () => {
     const segunda = comTexto(usando, "Está aprovado.");
     // Revisão 6: o texto que volta substitui a narração curta (a gravada também a deixa de fora), e a viva já é a parada: o fim
     // do turno não muda o balão.
-    const balaoVivo = (e: Estado) => blocosAoVivo(c, e)[0]!.morfar!.partes.find((p) => p.chave === "balao")!.html;
+    const balaoVivo = (e: Estado) => blocosAoVivo(c, e)[0]!.morfar!.partes.find((p) => p.chave.startsWith("balao"))!.html;
     expect(balaoVivo(comA(comTexto(usando, "Es")))).not.toContain("Vou olhar o PR.");
+    // NOD-358 (revisão 2 do PR #522): o texto que substitui a narração é outra geração de balões (outra chave): o balão
+    // da narração sai e o novo entra, em vez de o balão mostrado trocar de conteúdo.
+    expect(chaves(comA(comTexto(usando, "Es")))).toEqual(["nome", "acoes", "balao-g1", "viva"]);
     expect(balaoVivo(comA(segunda))).toContain("Está aprovado.");
     const outra = comFerramenta(segunda, "Consultou Linear", { texto: "Usando Linear", frentes: false });
     expect(balaoVivo(comA(outra))).toContain("Está aprovado.");
     expect(balaoVivo(comA(outra))).not.toContain("Vou olhar o PR.");
     const fim = reduzir(comA(segunda), { tipo: "frame", frame: { tipo: "turno.encerrado", dados: { turnoId: "t1", conversaId: C } } as never, agora: AGORA });
     // Revisão 4: a parada segue a fala gravada (`comporFala`): a narração curta fica de fora, a longa entra.
-    const balao = (e: Estado) => blocosAoVivo(e.conversas[C]!, e)[0]!.morfar!.partes.find((p) => p.chave === "balao")!.html;
+    const balao = (e: Estado) => blocosAoVivo(e.conversas[C]!, e)[0]!.morfar!.partes.find((p) => p.chave.startsWith("balao"))!.html;
     expect(balao(fim)).toContain("Está aprovado.");
     expect(balao(fim)).not.toContain("Vou olhar o PR.");
     expect(balao(fim)).toBe(balaoVivo(comA(segunda)));
     const relatorio = `Relatório: ${"setembro fechou acima da meta. ".repeat(12)}`;
     const longa = comTexto(comFerramenta(comTexto(ATIVIDADE_VAZIA, relatorio), "Consultou GitHub", { texto: "Usando GitHub", frentes: false }), "Está aprovado.");
     const fimLonga = reduzir(comA(longa), { tipo: "frame", frame: { tipo: "turno.encerrado", dados: { turnoId: "t1", conversaId: C } } as never, agora: AGORA });
-    expect(balao(fimLonga)).toContain("setembro fechou acima da meta.");
-    expect(balao(fimLonga)).toContain("Está aprovado.");
+    // NOD-358: o relatório e o fim são dois parágrafos, dois balões (partes "balao" e "balao-1").
+    const baloes = (e: Estado) => blocosAoVivo(e.conversas[C]!, e)[0]!.morfar!.partes.filter((p) => p.chave.startsWith("balao")).map((p) => p.html);
+    expect(baloes(fimLonga)).toHaveLength(2);
+    expect(baloes(fimLonga)[0]).toContain("setembro fechou acima da meta.");
+    expect(baloes(fimLonga)[1]).toContain("Está aprovado.");
     // O turno.fala no meio leva as duas partes e a fala viva recomeça sem elas.
     const meio = reduzir(comA(segunda), { tipo: "frame", frame: { tipo: "turno.fala", dados: { turnoId: "t1", conversaId: C } } as never, agora: AGORA });
     expect(meio.atividades[C]!.t1).toMatchObject({ atual: "", antes: [] });

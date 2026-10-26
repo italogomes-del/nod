@@ -291,6 +291,16 @@ describe("a frente da rede e a frente única", () => {
   });
 });
 
+describe("NOD-358 (revisão 6 do PR #522): a fala em vários balões", () => {
+  it("o progresso vai só no último balão", () => {
+    const ms = conversaDoHero().map((m) => (m.id === "b1" ? { ...m, texto: "Abri 5 frentes.\n\nTe aviso quando saírem." } : m));
+    const { e, c } = diaDoPrototipoCom(ms);
+    const b1 = doBloco(c, e, "b1");
+    expect(b1.split("com-progresso").length - 1).toBe(1);
+    expect(b1).toContain('<div class="bubble com-progresso" data-balao="1">');
+  });
+});
+
 describe("a fala que abriu as frentes é uma pergunta", () => {
   it("o turno abriu frentes e terminou perguntando: o bloco entra embaixo do cartão da pergunta, não some", () => {
     const ms = conversaDoHero().map((m) => (m.id === "b1" ? { ...m, texto: "Abri 5 frentes. Enquanto isso: qual paleta?", payload: { kind: "pedido_a_pessoa" as const, decisaoId: "d1", opcoes: ["Clara", "Escura"] } } : m));

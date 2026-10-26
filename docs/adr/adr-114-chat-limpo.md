@@ -2,7 +2,7 @@
 
 Status: proposto; parte do servidor no PR 1 do [plano do chat limpo](../plano-chat-limpo.md) (PR #390), a tela, a janela
 e os gatilhos no PR 2 (ver **Emenda do PR 2**), a troca agrupada no PR 3 (ver **Emenda do PR 3**), o cartão encolhido no
-PR 4 (ver **Emenda do PR 4**), as etiquetas e os divisores de data no PR 6 (ver **Emenda do PR 6**), o progresso na fala no PR 7 (ver **Emenda do PR 7**), a pílula que se alarga no PR 8 (ver **Emenda do PR 8**), a fala viva na NOD-348 (ver **Emenda da NOD-348**), o resumo das ações na NOD-353 (ver **Emenda da NOD-353**) · Data: 2026-10-18 · Migração 0091. A regra da tela, a janela que conta só o chat e os gatilhos de reversão entram no PR 2, junto da primeira
+PR 4 (ver **Emenda do PR 4**), as etiquetas e os divisores de data no PR 6 (ver **Emenda do PR 6**), o progresso na fala no PR 7 (ver **Emenda do PR 7**), a pílula que se alarga no PR 8 (ver **Emenda do PR 8**), a fala viva na NOD-348 (ver **Emenda da NOD-348**), o resumo das ações na NOD-353 (ver **Emenda da NOD-353**), os vários balões na NOD-358 (ver **Emenda da NOD-358**) · Data: 2026-10-18 · Migração 0091. A regra da tela, a janela que conta só o chat e os gatilhos de reversão entram no PR 2, junto da primeira
 mudança visível, com as emendas das ADR-029, ADR-041, ADR-083 e ADR-110. Era a ADR-113 com a migração 0090; renumerada
 em 2026-10-18 porque o PR B da Fase 2 (#392, reações e citação) entra antes com a ADR-113 e a `0090_reacoes.sql`.
 
@@ -433,6 +433,65 @@ que deu erro com **Falhou** em `--danger`. O resumo nasce quando a primeira aç�
 Fica registrado: a tarefa do bot (checklist) segue dentro do aberto só na fala viva, até a NOD-359; o desktop antigo degrada sem
 Falhou. **Gatilho de reversão:** 3 relatos em 14 dias (ADR-041) de "o resumo atrapalha a leitura" ou de Falhou que não
 aconteceu: o resumo volta a ser só da fala viva (o payload fica gravado, sem tela).
+
+## Emenda da NOD-358 (2026-10-26) — um balão por parágrafo
+
+A resposta do bot sai em vários balões, um por parágrafo, como uma pessoa manda no WhatsApp (protótipo `.p348-baloes`,
+tela j3-2). O mascote, o nome e a hora continuam aparecendo uma vez por fala, e copiar, ouvir, responder, reagir e buscar
+continuam valendo para a mensagem inteira: todos já leem `fala.texto` e o `[data-mensagem]`, não o balão. A fala da
+pessoa, o cartão da pergunta e o de tela não se dividem.
+
+1. **A regra** (`dividirEmBaloes`, em `web/lib/baloes.ts`, pura). O corte só acontece em linha em branco da prosa, então
+   o código (a linha em branco dentro da cerca é código) e a tabela ficam inteiros. Não há corte quando:
+   - o bloco de cima termina em ":", também dentro da ênfase (`**Próximos passos:**`) ou seguido de emoji: a frase que
+     apresenta uma lista fica com ela;
+   - a lista ou a citação continua embaixo (lista solta, linha recuada e o passo a passo com código entre os itens);
+   - já apareceu um título `#` no balão: dali até o fim é documento;
+   - já há 5 balões.
+
+   O texto sem nenhuma fronteira sai num balão só, com o HTML de antes. Cada balão é um pedaço exato do texto; com
+   divisão, o último perde as quebras do fim (na fala viva e na gravada, para a troca não ganhar uma linha). CRLF
+   separa como LF (e o texto com CRLF sai com LF, ao vivo e no final). A divisão de cada texto fica numa memória de 400 entradas, porque a timeline é redesenhada a cada
+   quadro. medido em 2026-10-26: 2,35 ms → 0,5 ms por redesenho de 200 falas típicas (bancada em Node da revisão 1 do
+   PR #522, antes e depois da memória e da leitura de trás para frente). A guarda é `razaoDeCrescimento` (NOD-194),
+   também para a lista com continuações recuadas: cada corte lê só o último bloco (revisão 4 do PR #522; o mutante que
+   relê o balão inteiro dá razão ~17, acima do teto de 8). O código logo depois de um item é do passo a passo, com ou
+   sem ":" no item. O ":" e o título são lidos sem regex quadrática (só o fim aparado da linha; revisão 5). O recuo da continuação e o começo do texto também são lidos sem varredura repetida (revisão 7). Limitação aceita (revisão 8): depois de 200 narrações guardadas, quando um relatório longo sai da lista, os balões
+   seguintes ganham chave nova e entram de novo com a animação, uma vez.
+
+   Limitações conhecidas, aceitas: a cerca `~~~` e a de quatro crases não são vistas como código (uma linha em branco
+   dentro delas pode cortar; o `textoFormatado` também só conhece a de três crases); e a fala de um parágrafo que termina
+   em quebra de linha mostra a quebra na fala parada e na gravada, mas não ao vivo (como antes da NOD-358, a gravada
+   fica byte a byte); e a explicação sem recuo entre itens numerados ("1. **A**\n\nExplicação.\n\n2. **B**") divide a
+   lista, porque no markdown ela já são duas listas (o `start` do segundo item fica) e, ao vivo, juntar exigiria segurar
+   o parágrafo até o próximo item decidir (revisão 3 do PR #522); o código recuado com 4 espaços depois de prosa, a
+   citação ou a tabela no meio de uma lista e o marcador "•" (que o texto formatado também não lê como lista) dividem
+   (revisão 4 e QA); e um "```" no meio da frase abre código, como no `textoFormatado` (a mesma regex de cerca: dividir
+   de outro jeito faria o balão e o desenho discordarem). Com o morph desligado (`nod.semMorph`), cada pedaço recria
+   o bloco e os balões depois do primeiro repetem a entrada: é a medida de comparação, não o caminho normal.
+2. **Ao vivo** (`parcial`). Na fala viva, o começo do bloco seguinte que ainda pode continuar a lista de cima ("1",
+   "-", "``") espera decidir antes de aparecer. Assim os balões só crescem: o anterior não muda, nada se junta de volta,
+   e o morph da NOD-348 troca só a parte `balao-N` que cresceu. O balão é `data-no-lugar`: o `aplicarMorph` muda o
+   conteúdo e os atributos do nó que já está na tela (`trocarConteudo`, em `web/lib/morph.ts`), sem nó novo, para a animação
+   de entrada não recomeçar nem ser cortada a cada pedaço (revisão 2 do PR #522). O balão único ao vivo fica como a fala
+   de um parágrafo gravada (sem `data-balao`, a largura de antes, para o fim do turno não pular; revisão 3 do PR #522):
+   quando o segundo nasce, o primeiro passa à largura do texto uma vez. O texto que volta depois da
+   ferramenta e substitui a narração curta não cresce, é outro: a geração entra na chave das partes (`balao-gN`):
+   cada trecho guarda a geração em que foi escrito (quantas narrações curtas vieram antes dele, `falaComposta`), e o
+   balão leva a do trecho onde começa. Os balões da narração saem enquanto os novos entram, e os do relatório longo
+   mantêm a chave quando ele passa de texto final a relatório (revisão 4 do PR #522); o balão dele que puxa o texto seguinte
+   (título, BALOES_MAX, ":", lista, citação ou código aberto) muda no lugar quando a narração puxada é substituída, e o
+   relatório guardado perde as quebras do começo: aceito, a fala gravada é esse mesmo texto (revisão 6). A contagem inclui as narrações que já saíram da lista
+   guardada (`curtasDescartadas`), para a geração não cair depois de 200 ferramentas (revisão 5). Quando o texto final
+   repete um relatório, o relatório sai do texto composto (a regra de `comporFala`) e os balões mudam no lugar: aceito,
+   é o mesmo texto da fala gravada. O balão novo entra com opacidade e 4 px de subida em
+   240 ms; com movimento reduzido, ele só aparece. A fala parada (`saindo`) divide como a gravada, para a troca não pular.
+3. **Medidas.** Com 2 balões ou mais, cada um tem a largura do próprio texto (`fit-content`), com 6 px entre eles. As
+   tags ("parcial", "não confiável") e o progresso vão no último. O balão 0 guarda a chave da mensagem na memória do
+   texto formatado; os outros usam `id~i`.
+
+**Gatilho de reversão.** Se em 14 dias chegarem 3 relatos (ADR-041) de resposta picada no meio de uma ideia, ou de lista
+ou código dividido, a fala volta a um balão só (`dividirEmBaloes` devolvendo `[texto]`).
 
 ## Gatilhos de reversão (PR 2)
 

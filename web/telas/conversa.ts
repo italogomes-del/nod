@@ -14,11 +14,12 @@ import { botao, dataHora, esc, hora, iconeAgente, paragrafos } from "../lib/rend
 import { maquinaDoBot } from "./maquinas.ts";
 import { outraMaquinaDestaVez } from "../lib/rodar-desta-vez.ts";
 import { acordandoNaFila, motivoLegivel } from "../lib/maquina-nuvem.ts";
-import { estadoDaFala, fraseDasAcoes, linhasDoResumo, textoDaFala, type AtividadeTurno, type LinhaDoResumo, type VigiaDaAtividade } from "../lib/atividade.ts";
+import { estadoDaFala, falaComposta, fraseDasAcoes, geracaoDoBalao, linhasDoResumo, textoEmLf, type AtividadeTurno, type LinhaDoResumo, type VigiaDaAtividade } from "../lib/atividade.ts";
 import { linhaDaFila } from "../lib/fila-do-pedido.ts";
 import { haQuanto } from "../lib/relogio.ts";
 import { FALA_SAINDO_MS, tempoDaFala } from "../lib/fala-viva.ts";
 import { textoFormatado } from "../lib/texto-formatado.ts";
+import { dividirEmBaloes } from "../lib/baloes.ts";
 import { estadoMascoteNaConversa, mascoteAnimado, turnosVivosDaConversa } from "../lib/mascote.ts";
 import { renderFaixaParada } from "./faixa-parada.ts";
 import type { Morph } from "../lib/morph.ts";
@@ -584,10 +585,26 @@ export function renderMensagem(m: Mensagem, estado: Estado, sala = false, opcoes
   // terminou perguntando), embaixo dele — o cartão não tem onde recebê-lo, e sem isso o bloco sumia (revisão do PR 398).
   const progressoDentro = !ehPessoa && !pergunta ? (opcoes.progresso ?? "") : "";
   const progressoFora = ehPessoa || pergunta ? (opcoes.progresso ?? "") : "";
-  const balao = motivoTela !== null ? (estado.computadorPessoa ? htmlPedidoDeTela(motivoTela, agente?.id ?? "", telaAberta) : htmlCartaoTela(motivoTela, agente?.id ?? "", telaAberta, agente?.nome, pergunta?.decisaoId)) : pergunta ? cartaoDaPergunta(m, estado) : (ehPessoa ? m.anexos?.length : temMidiaDoBot(m) && !progressoDentro) && m.texto.trim() === "" ? "" : `<div class="bubble${progressoDentro ? " com-progresso" : ""}">${ehPessoa ? comChipDeComando(m.texto) : textoFormatado(m.texto, { chave: m.id, diagramas: opcoes.diagramas === true })}${metaTags}${progressoDentro}</div>`;
+  const balao = motivoTela !== null ? (estado.computadorPessoa ? htmlPedidoDeTela(motivoTela, agente?.id ?? "", telaAberta) : htmlCartaoTela(motivoTela, agente?.id ?? "", telaAberta, agente?.nome, pergunta?.decisaoId)) : pergunta ? cartaoDaPergunta(m, estado) : (ehPessoa ? m.anexos?.length : temMidiaDoBot(m) && !progressoDentro) && m.texto.trim() === "" ? "" : ehPessoa
+      ? `<div class="bubble">${comChipDeComando(m.texto)}${metaTags}</div>`
+      : baloesDoBot(m.texto, m.id, opcoes.diagramas === true, `${metaTags}${progressoDentro}`, progressoDentro !== "");
   return `<article class="${classes}" data-mensagem="${esc(m.id)}"${pergunta ? ` data-pergunta="${esc(pergunta.decisaoId)}"` : ""}>
     ${!ehPessoa && agente ? iconeAgente(agente, "md") : ""}<div class="bubble-wrap">${acoesDaMensagem(m, estado, sala)}${sender}${ehPessoa ? "" : resumoDaMensagem(m)}${resposta ? rotuloDaResposta(m) : ""}${ehPessoa ? citacaoAcimaDoBalao(m) : ""}${anexosDe(m, estado)}${balao}${ehPessoa ? "" : midiasDoBot(m, estado)}${progressoFora}${ehPessoa ? "" : (opcoes.linhaDoModo ?? "")}${ehPessoa ? "" : avisoDeLeitura(m, estado)}${ehPessoa ? "" : capturaDoTurno(m, estado)}${contextoDelegado}${chipsDeReacao(m, estado)}${fila ? renderSituacaoFila(fila, fila.turnoId) : ""}${faixaDaMensagem(m, estado)}</div>
   </article>${resposta ? linhaDaRetomada(m, estado) : ""}`;
+}
+
+/**
+ * NOD-358 (emenda da ADR-114): a fala do bot sai em um balão por parágrafo (./lib/baloes.ts); mascote, nome e hora
+ * continuam uma vez só. O que é da fala inteira (tags, progresso) vai no último balão. O balão 0 guarda a chave da
+ * mensagem na memória do texto formatado; os outros, `id~i`. Com um balão só, o HTML é o de antes.
+ */
+function baloesDoBot(texto: string, chave: string, diagramas: boolean, depois: string, comProgresso: boolean): string {
+  const baloes = dividirEmBaloes(texto);
+  if (baloes.length <= 1) return `<div class="bubble${comProgresso ? " com-progresso" : ""}">${textoFormatado(texto, { chave, diagramas })}${depois}</div>`;
+  return baloes.map((b, i) => {
+    const ultimo = i === baloes.length - 1;
+    return `<div class="bubble${ultimo && comProgresso ? " com-progresso" : ""}" data-balao="${i}">${textoFormatado(b, { chave: i === 0 ? chave : `${chave}~${i}`, diagramas })}${ultimo ? depois : ""}</div>`;
+  }).join("");
 }
 
 function renderProposta(p: Proposta, estado: Estado, propostas: readonly Proposta[]): string {
@@ -704,7 +721,7 @@ export type FalaViva = { html: string; morfar: Morph };
 export function renderFalaViva(t: TurnoVivo, a: AtividadeTurno | undefined, agente: Pick<AgenteDaFala, "nome" | "cor" | "forma"> | undefined, estado: Estado, parar: string, saindo?: { em: number; chave: string }): FalaViva {
   const nome = agente?.nome ?? "O agente";
   const fala = saindo ? { chave: "respondeu", texto: "Respondeu", mascote: { state: "idle" } as { state: string; expression?: string } } : estadoDaFala(a);
-  const texto = textoDaFala(a);
+  const { texto, trechos } = falaComposta(a);
   // A chave do cache do texto formatado e das tabelas: a fala parada do meio do turno tem a sua (revisão 4 do #508).
   const chave = saindo?.chave ?? `vivo:${t.turnoId}`;
   // NOD-73: no silêncio do vigia o brilho para (a linha não finge trabalho); o aviso âmbar diz o resto. A fala saindo também para.
@@ -718,7 +735,25 @@ export function renderFalaViva(t: TurnoVivo, a: AtividadeTurno | undefined, agen
   const resumo = a && (!saindo || chave === `vivo:${t.turnoId}`) ? renderResumoDasAcoes(t.turnoId, linhasDoResumo(a.acoes, !!saindo), saindo ? [] : a.tarefas, "acoes") : "";
   if (resumo) partes.push({ chave: "acoes", html: resumo });
   if (!texto) partes.push({ chave: "viva", html: viva("autor") });
-  if (texto) partes.push({ chave: "balao", html: `<div class="bubble" data-parte="balao">${textoFormatado(texto, { chave, aoVivo: true })}</div>` });
+  // NOD-358: um balão por parágrafo, como a fala gravada vai mostrar. Ao vivo (`parcial`), o próximo só aparece quando
+  // decide que não continua a lista de cima, e entra subindo (`balao-entra`); os anteriores não mudam, e o balão que
+  // cresce muda por dentro (`data-no-lugar`), sem nó novo. O balão único fica como a fala de um parágrafo gravada (sem
+  // `data-balao`, com a largura de antes; revisão 3 do PR #522): quando o segundo nasce, o primeiro passa à largura do
+  // texto uma vez. A geração do trecho onde o balão começa (`falaComposta`) entra na chave quando o texto depois da
+  // ferramenta substitui a narração curta: os balões dela saem e os novos entram; os do relatório longo ficam.
+  const baloes = texto ? dividirEmBaloes(texto, { parcial: !saindo }) : [];
+  const emLf = textoEmLf(texto);
+  let pos = 0;
+  baloes.forEach((b, i) => {
+    const achado = emLf.indexOf(b, pos);
+    const de = achado >= 0 ? achado : pos;
+    pos = achado >= 0 ? achado + b.length : emLf.length;
+    const g = geracaoDoBalao(trechos, de);
+    const parte = `balao${g > 0 ? `-g${g}` : ""}${i === 0 ? "" : `-${i}`}`;
+    const chaveDoTexto = i === 0 && g === 0 ? chave : `${chave}~${g}~${i}`;
+    const balao = baloes.length > 1 ? ` data-balao="${i}"` : "";
+    partes.push({ chave: parte, html: `<div class="bubble${i > 0 ? " balao-entra" : ""}" data-parte="${parte}"${balao} data-no-lugar>${textoFormatado(b, { chave: chaveDoTexto, aoVivo: true })}</div>` });
+  });
   const vigia = a && !saindo ? renderAvisoDoVigia(a, estado.agora, parar, "vigia") : "";
   if (vigia) partes.push({ chave: "vigia", html: vigia });
   if (texto) partes.push({ chave: "viva", html: viva("rodape") });

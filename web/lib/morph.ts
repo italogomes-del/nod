@@ -59,9 +59,12 @@ export type NoDoMorph = {
   readonly firstElementChild: NoDoMorph | null;
   readonly nextElementSibling: NoDoMorph | null;
   readonly parentNode: unknown;
+  readonly childNodes: ArrayLike<unknown> & Iterable<unknown>;
   getAttribute(nome: string): string | null;
+  getAttributeNames(): string[];
   setAttribute(nome: string, valor: string): void;
   removeAttribute(nome: string): void;
+  replaceChildren(...nos: never[]): void;
   querySelector(seletor: string): NoDoMorph | null;
   insertBefore(no: NoDoMorph, antes: NoDoMorph | null): unknown;
   remove(): void;
@@ -85,14 +88,22 @@ export function aplicarMorph(bloco: NoDoMorph, plano: PlanoDoMorph, criar: (html
     if (chave !== null && !naTela.has(chave)) naTela.set(chave, no);
   }
   const novos: NoDoMorph[] = [];
+  const noLugar: [NoDoMorph, NoDoMorph][] = [];
   for (const p of plano.partes) {
     const ficou = p.html === null ? naTela.get(p.chave) : undefined;
     const no = ficou ?? criar(p.html ?? "");
     if (!no) return false;
-    novos.push(no);
+    // NOD-358 (revisão 2 do PR #522): a parte `data-no-lugar` (o balão que cresce) muda por dentro e o nó fica, para a
+    // animação de entrada (`.balao-entra`) não ser cortada no meio por um nó novo a cada pedaço do streaming.
+    const velho = ficou ? undefined : naTela.get(p.chave);
+    if (velho && velho.getAttribute("data-no-lugar") !== null && no.getAttribute("data-no-lugar") !== null) {
+      noLugar.push([velho, no]);
+      novos.push(velho);
+    } else novos.push(no);
   }
   // Daqui para baixo a tela muda: tudo o que podia falhar já foi conferido.
   if (plano.raiz !== null) raiz.className = plano.raiz;
+  for (const [velho, novo] of noLugar) trocarConteudo(velho, novo);
   if (mascote) {
     for (const [k, v] of Object.entries(plano.mascote.definir)) mascote.setAttribute(k, v);
     for (const k of plano.mascote.remover) mascote.removeAttribute(k);
@@ -107,4 +118,14 @@ export function aplicarMorph(bloco: NoDoMorph, plano: PlanoDoMorph, criar: (html
     else wrap.insertBefore(no, cursor);
   }
   return true;
+}
+
+/** NOD-358: a parte `data-no-lugar` recebe os atributos e os filhos da nova, e o nó (com a animação em curso) fica. */
+export function trocarConteudo(velho: NoDoMorph, novo: NoDoMorph): void {
+  for (const nome of velho.getAttributeNames()) if (novo.getAttribute(nome) === null) velho.removeAttribute(nome);
+  for (const nome of novo.getAttributeNames()) {
+    const valor = novo.getAttribute(nome) ?? "";
+    if (velho.getAttribute(nome) !== valor) velho.setAttribute(nome, valor);
+  }
+  velho.replaceChildren(...([...novo.childNodes] as never[]));
 }

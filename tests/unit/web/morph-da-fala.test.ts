@@ -12,7 +12,12 @@ class No implements NoDoMorph {
   pai: No | null = null;
   attrs = new Map<string, string>();
   readonly html: string;
-  constructor(html: string, attrs: Record<string, string> = {}) { this.html = html; for (const [k, v] of Object.entries(attrs)) this.attrs.set(k, v); }
+  /** O conteúdo de dentro (os nós de texto e de elemento), que o `trocarConteudo` leva de um nó para outro. */
+  conteudo: unknown[];
+  constructor(html: string, attrs: Record<string, string> = {}) { this.html = html; this.conteudo = [html]; for (const [k, v] of Object.entries(attrs)) this.attrs.set(k, v); }
+  get childNodes(): unknown[] { return this.conteudo; }
+  getAttributeNames() { return [...this.attrs.keys()]; }
+  replaceChildren(...nos: never[]) { this.conteudo = nos; }
   get parentNode() { return this.pai; }
   get firstElementChild(): No | null { return this.filhos[0] ?? null; }
   get nextElementSibling(): No | null { const irmaos = this.pai?.filhos ?? []; return irmaos[irmaos.indexOf(this) + 1] ?? null; }
@@ -43,14 +48,23 @@ function naTela(m: Morph): { bloco: No; raiz: No; mascote: No | null; wrap: No }
   const mascote = m.mascote ? new No("<nod-mascote>", { "data-parte": "mascote", ...m.mascote }) : null;
   const wrap = new No("wrap");
   wrap.className = "bubble-wrap";
-  wrap.com(...m.partes.map((p) => new No(p.html, { "data-parte": p.chave })));
+  wrap.com(...m.partes.map((p) => new No(p.html, { ...atributos(p.html), "data-parte": p.chave })));
   const raiz = new No("article", { "data-morfar": "" });
   raiz.className = m.raiz;
   if (mascote) raiz.com(mascote);
   raiz.com(wrap);
   return { bloco: new No("bloco").com(raiz), raiz, mascote, wrap };
 }
-const criar = (html: string) => new No(html, { "data-parte": /data-parte="(\w+)"/.exec(html)?.[1] ?? "" });
+/** Os atributos do HTML de uma parte (o bastante para os testes: `nome="valor"` e o `data-no-lugar` sem valor). */
+const atributos = (html: string): Record<string, string> => {
+  const abre = /^<\w+([^>]*)>/.exec(html)?.[1] ?? "";
+  const r: Record<string, string> = {};
+  for (const m of abre.matchAll(/([\w-]+)(?:="([^"]*)")?/g)) r[m[1]!] = m[2] ?? "";
+  return r;
+};
+const criar = (html: string) => new No(html, atributos(html));
+/** O conteúdo que está na tela: o de dentro de cada parte. */
+const conteudos = (wrap: No) => wrap.filhos.map((f) => f.conteudo.join(""));
 const htmls = (wrap: No) => wrap.filhos.map((f) => f.html);
 
 const NOME = parte("nome", '<div data-parte="nome"><b>Ada</b></div>');
@@ -105,6 +119,53 @@ describe("aplicarMorph (DOM falso)", () => {
     expect(tela.raiz.filhos[0]).toBe(mascote);
     expect(tela.raiz.className).toBe("message bot fala-viva ao-vivo com-texto");
     expect(htmls(tela.wrap)).toEqual([NOME.html, balao.html, rodape.html]);
+  });
+
+  it("NOD-358 (revisões 2 e 3 do PR #522): o balão data-no-lugar que cresce é o mesmo nó, com o conteúdo e os atributos novos; o novo nasce", () => {
+    const b0 = parte("balao", '<div data-parte="balao" data-no-lugar>Um.</div>');
+    const antes = fala([NOME, parte("balao", '<div data-parte="balao" data-no-lugar>U</div>')]);
+    const tela = naTela(antes);
+    const primeiro = tela.wrap.filhos[1]!;
+    // O balão único vira o primeiro de dois: ganha data-balao, por dentro, e o segundo entra.
+    const com0 = parte("balao", '<div data-parte="balao" data-balao="0" data-no-lugar>Um.</div>');
+    const b1 = parte("balao-1", '<div data-parte="balao-1" data-balao="1" data-no-lugar>D</div>');
+    expect(aplicarMorph(tela.bloco, planoDoMorph(antes, fala([NOME, com0, b1]))!, criar)).toBe(true);
+    expect(tela.wrap.filhos[1]).toBe(primeiro);
+    expect(primeiro.getAttribute("data-balao")).toBe("0");
+    expect(primeiro.conteudo.join("")).toBe(com0.html);
+    const segundo = tela.wrap.filhos[2]!;
+    // Volta a ser único (a fala parada junta tudo): o atributo que a parte nova não tem sai do nó que fica.
+    const cresceu = parte("balao-1", '<div data-parte="balao-1" data-balao="1" data-no-lugar>Dois.</div>');
+    expect(aplicarMorph(tela.bloco, planoDoMorph(fala([NOME, com0, b1]), fala([NOME, b0, cresceu]))!, criar)).toBe(true);
+    expect(tela.wrap.filhos[1]).toBe(primeiro);
+    expect(tela.wrap.filhos[2]).toBe(segundo);
+    expect(primeiro.getAttribute("data-balao")).toBeNull();
+    expect(conteudos(tela.wrap).slice(1)).toEqual([b0.html, cresceu.html]);
+  });
+
+  it("NOD-358: sem data-no-lugar nos dois lados, a parte trocada é um nó novo, como antes", () => {
+    const antes = fala([NOME, LINEAR]);
+    const tela = naTela(antes);
+    const viva = tela.wrap.filhos[1];
+    expect(aplicarMorph(tela.bloco, planoDoMorph(antes, fala([NOME, GMAIL]))!, criar)).toBe(true);
+    expect(tela.wrap.filhos[1]).not.toBe(viva);
+    for (const [velho, novo] of [['<div data-parte="balao">U</div>', '<div data-parte="balao" data-no-lugar>Um</div>'], ['<div data-parte="balao" data-no-lugar>U</div>', '<div data-parte="balao">Um</div>']] as const) {
+      const de = fala([NOME, parte("balao", velho)]);
+      const t = naTela(de);
+      const no = t.wrap.filhos[1];
+      expect(aplicarMorph(t.bloco, planoDoMorph(de, fala([NOME, parte("balao", novo)]))!, criar)).toBe(true);
+      expect(t.wrap.filhos[1]).not.toBe(no);
+      expect(t.wrap.filhos[1]?.html).toBe(novo);
+    }
+  });
+
+  it("NOD-358: se uma parte não pode ser criada, nenhum balão é trocado por dentro (a tela fica como estava)", () => {
+    const b = parte("balao", '<div data-parte="balao" data-no-lugar>Um</div>');
+    const tela = naTela(fala([NOME, b]));
+    const plano = planoDoMorph(fala([NOME, b]), fala([NOME, parte("balao", '<div data-parte="balao" data-balao="0" data-no-lugar>Um.</div>'), PENSANDO]))!;
+    expect(aplicarMorph(tela.bloco, plano, (html) => (html.includes("Pensando") ? null : criar(html)))).toBe(false);
+    expect(conteudos(tela.wrap)).toEqual([NOME.html, b.html]);
+    expect(tela.wrap.filhos[1]?.getAttribute("data-balao")).toBeNull();
   });
 
   it("a parte que sai (o vigia) é tirada; a que fica muda de lugar sem ser recriada", () => {

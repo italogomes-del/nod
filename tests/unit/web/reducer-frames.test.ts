@@ -77,6 +77,15 @@ describe("aplicarFrame por TipoFrame", () => {
     expect(Object.keys(e.falasSaindo?.[CONVERSA] ?? {})).toEqual([`${TURNO}:${AGORA}:1`, `${TURNO}:${AGORA}:2`]);
   });
 
+  it("NOD-358 (QA do PR #522): turno.fala zera também as narrações descartadas (a geração dos balões recomeça)", () => {
+    let e = aplicarFrame(comConversa(), frame("turno.iniciado", { conversaId: CONVERSA, turnoId: TURNO, kind: "turno_despachado" }), AGORA);
+    e = aplicarFrame(e, frame("turno.delta", { conversaId: CONVERSA, turnoId: TURNO, texto: "Oi." }), AGORA);
+    const a = e.atividades[CONVERSA]![TURNO]!;
+    e = { ...e, atividades: { [CONVERSA]: { [TURNO]: { ...a, curtasDescartadas: 7 } } } };
+    e = aplicarFrame(e, frame("turno.fala", { conversaId: CONVERSA, turnoId: TURNO }), AGORA);
+    expect(e.atividades[CONVERSA]?.[TURNO]?.curtasDescartadas ?? 0).toBe(0);
+  });
+
   it("ADR-067: turno.fala troca o texto ao vivo pela mensagem gravada — o cartão recomeça vazio e o turno segue rodando", () => {
     let e = aplicarFrame(comConversa(), frame("turno.iniciado", { conversaId: CONVERSA, turnoId: TURNO, kind: "turno_despachado" }), AGORA);
     e = aplicarFrame(e, frame("turno.delta", { conversaId: CONVERSA, turnoId: TURNO, texto: "Disparei os testes." }), AGORA);

@@ -40,6 +40,11 @@ export type AtividadeTurno = {
   emUso: FerramentaEmUso | null;
   /** NOD-348 (QA 2 do #508): os blocos de narração já fechados por ferramentas desde a última fala (para `textoDaFala`). */
   antes?: string[];
+  /**
+   * NOD-358 (revisão 5 do PR #522): as narrações curtas que já saíram de `antes` (que guarda só as últimas
+   * ETAPAS_GUARDADAS). A geração dos balões conta a partir delas, para não cair quando a lista cheia anda.
+   */
+  curtasDescartadas?: number;
   /** NOD-350: sobrevive à fala do bot (os subagentes seguem depois do `result` do turno principal). */
   subagentes: SubagentesDoTurno | null;
   /** NOD-353: cada chamada do turno inteiro, na ordem (o resumo das ações); sobrevive às falas do meio. */
@@ -153,7 +158,7 @@ export function comFerramenta(a: AtividadeTurno | undefined, rotulo: string, emU
     etapas = [{ texto: rotulo, ferramentas: 1 }];
     totalEtapas += 1;
   }
-  return { atual: "", etapas: etapas.slice(-ETAPAS_GUARDADAS), totalEtapas, ferramentas: base.ferramentas + 1, ultimaFerramenta: rotulo, tarefas: base.tarefas, vigia: base.vigia, emUso, subagentes: base.subagentes, antes: narracao ? [...(base.antes ?? []), base.atual].slice(-ETAPAS_GUARDADAS) : base.antes, acoes: comAcao(narracao ? acoesFechadas(base.acoes) : base.acoes, rotulo, emUso, id) };
+  return { atual: "", etapas: etapas.slice(-ETAPAS_GUARDADAS), totalEtapas, ferramentas: base.ferramentas + 1, ultimaFerramenta: rotulo, tarefas: base.tarefas, vigia: base.vigia, emUso, subagentes: base.subagentes, ...depoisDaFerramenta(base, narracao !== ""), acoes: comAcao(narracao ? acoesFechadas(base.acoes) : base.acoes, rotulo, emUso, id) };
 }
 
 /** As que rodavam viram feitas (o texto voltou, a volta acabou, o turno acabou); devolve a mesma lista se nada mudou. */
@@ -249,6 +254,18 @@ function noPlural(objeto: string): string {
   return `${plural}${m[2]}`;
 }
 
+function depoisDaFerramenta(base: AtividadeTurno, narracao: boolean): Pick<AtividadeTurno, "antes" | "curtasDescartadas"> {
+  // Só aparece quando alguma saiu (a forma da atividade de um turno curto não muda).
+  const comDescartadas = (n: number) => (n > 0 ? { curtasDescartadas: n } : {});
+  const guardadas = base.curtasDescartadas ?? 0;
+  if (!narracao) return { antes: base.antes, ...comDescartadas(guardadas) };
+  const todas = [...(base.antes ?? []), base.atual];
+  const saem = todas.slice(0, Math.max(0, todas.length - ETAPAS_GUARDADAS));
+  return { antes: todas.slice(-ETAPAS_GUARDADAS), ...comDescartadas(guardadas + saem.filter(ehCurta).length) };
+}
+
+const ehCurta = (b: string): boolean => b.trim().length <= NARRACAO_MAX_CHARS_WEB;
+
 /**
  * A regra do `comporFala` (src/domain/stream-json.ts) na web, que não importa do domínio (ADR-018, ADR-020): os blocos
  * de antes da última ferramenta com mais de 280 caracteres que o final não contém, mais o final. Revisão 4 do #508: a
@@ -258,17 +275,30 @@ export const NARRACAO_MAX_CHARS_WEB = 280;
 const normalizarFala = (s: string) => s.replace(/\s+/g, " ").trim();
 
 export function comporFalaWeb(antes: readonly string[], final: string): string {
-  const alvo = normalizarFala(final);
-  const relatorios: string[] = [];
-  for (const bloco of antes) {
-    const t = bloco.trim();
-    if (t.length <= NARRACAO_MAX_CHARS_WEB) continue;
-    const n = normalizarFala(t);
-    if (alvo.includes(n) || relatorios.some((r) => normalizarFala(r).includes(n))) continue;
-    relatorios.push(t);
-  }
+  return juntarFala(relatoriosDaFala(antes, final), final);
+}
+
+function juntarFala(relatorios: readonly string[], final: string): string {
   if (relatorios.length === 0) return final;
   return [...relatorios, final].map((p) => p.trim()).filter((p) => p !== "").join("\n\n");
+}
+
+function relatoriosDaFala(antes: readonly string[], final: string): string[] {
+  return relatoriosComPosicao(antes, final).map((r) => r.texto);
+}
+
+/** Os relatórios longos e onde cada um estava em `antes` (para a geração dos balões, NOD-358). */
+function relatoriosComPosicao(antes: readonly string[], final: string): { texto: string; indice: number }[] {
+  const alvo = normalizarFala(final);
+  const relatorios: { texto: string; indice: number }[] = [];
+  antes.forEach((bloco, indice) => {
+    const t = bloco.trim();
+    if (t.length <= NARRACAO_MAX_CHARS_WEB) return;
+    const n = normalizarFala(t);
+    if (alvo.includes(n) || relatorios.some((r) => normalizarFala(r.texto).includes(n))) return;
+    relatorios.push({ texto: t, indice });
+  });
+  return relatorios;
 }
 
 /**
@@ -278,11 +308,55 @@ export function comporFalaWeb(antes: readonly string[], final: string): string {
  * esvazia o balão. O texto que volta substitui a narração curta, que a gravada também deixa de fora (de uma linha para outra).
  */
 export function textoDaFala(a: AtividadeTurno | undefined): string {
-  if (!a) return "";
+  return falaComposta(a).texto;
+}
+
+/** Um trecho da fala composta: até onde vai (no texto com CRLF trocado por LF) e a geração em que foi escrito. */
+export interface TrechoDaFala {
+  fim: number;
+  geracao: number;
+}
+
+/**
+ * NOD-358 (revisões 2 a 4 do PR #522): o texto da fala e os seus trechos, cada um com a geração em que foi escrito — quantas
+ * narrações curtas vieram antes dele em `antes`. O texto que volta depois da ferramenta troca a narração curta
+ * (`textoDaFala`): o texto não cresce, é outro. Com a geração na chave dos balões, os da narração saem e os do texto
+ * novo entram, em vez de um balão mostrado mudar de conteúdo; e o relatório longo guarda a geração de quando foi escrito,
+ * então os balões dele não mudam de chave quando ele passa de texto final a relatório (revisão 4).
+ */
+export function falaComposta(a: AtividadeTurno | undefined): { texto: string; trechos: TrechoDaFala[] } {
+  if (!a) return { texto: "", trechos: [] };
   const blocos = a.antes ?? [];
-  if (a.atual.trim()) return comporFalaWeb(blocos, a.atual);
   const ultimo = blocos.length - 1;
-  return ultimo < 0 ? "" : comporFalaWeb(blocos.slice(0, ultimo), blocos[ultimo]!);
+  const [antes, final] = a.atual.trim() ? [blocos, a.atual] : ultimo < 0 ? [[], ""] : [blocos.slice(0, ultimo), blocos[ultimo]!];
+  const curtasAte = (fim: number): number => (a.curtasDescartadas ?? 0) + antes.slice(0, fim).filter(ehCurta).length;
+  const relatorios = relatoriosComPosicao(antes, final);
+  const texto = juntarFala(relatorios.map((r) => r.texto), final);
+  const geracaoFinal = curtasAte(antes.length);
+  if (relatorios.length === 0) return { texto, trechos: [{ fim: Infinity, geracao: geracaoFinal }] };
+  const trechos: TrechoDaFala[] = [];
+  let fim = -2;
+  for (const r of relatorios) {
+    fim += 2 + paraLf(r.texto).length;
+    trechos.push({ fim, geracao: curtasAte(r.indice) });
+  }
+  trechos.push({ fim: Infinity, geracao: geracaoFinal });
+  return { texto, trechos };
+}
+
+const paraLf = (t: string): string => (t.includes("\r") ? t.replace(/\r\n?/g, "\n") : t);
+
+/**
+ * A geração do balão que começa em `de` (no texto com LF): a do trecho onde ele começa. O balão do relatório que puxa o
+ * texto seguinte (título, BALOES_MAX, ":") guarda a chave e muda só na cauda, no lugar (revisão 5 do PR #522).
+ */
+export function geracaoDoBalao(trechos: readonly TrechoDaFala[], de: number): number {
+  return (trechos.find((t) => de < t.fim) ?? trechos.at(-1))?.geracao ?? 0;
+}
+
+/** O texto com CRLF trocado por LF, como saem os balões (`dividirEmBaloes`). */
+export function textoEmLf(texto: string): string {
+  return paraLf(texto);
 }
 
 /**

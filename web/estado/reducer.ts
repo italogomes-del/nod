@@ -869,7 +869,7 @@ function semTexto(estado: Estado, conversaId: string | null, turnoId: string | n
   if (!a || !conversaId || !turnoId) return estado;
   // NOD-350: com subagentes, o cartão recomeça só com eles (e a última ferramenta como ✓); eles seguem depois da fala.
   // NOD-353: as ações seguem (o resumo é do turno inteiro); a volta acabou, então nenhuma roda mais.
-  const proxima = soSubagentes(a) ?? { ...a, atual: "", antes: [], acoes: acoesFechadas(a.acoes) };
+  const proxima = soSubagentes(a) ?? { ...a, atual: "", antes: [], curtasDescartadas: undefined, acoes: acoesFechadas(a.acoes) };
   return { ...estado, atividades: { ...estado.atividades, [conversaId]: { ...estado.atividades[conversaId], [turnoId]: proxima } } };
 }
 
