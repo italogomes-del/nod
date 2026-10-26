@@ -7,6 +7,6 @@
     "moduleResolution": "NodeNext"
   },
   "include": ["src/**/*.ts", "tests/**/*.ts", "scripts/**/*.ts"],
-  "//": "o teste da tela cheia importa código de DOM: quem o checa é o tsconfig.web.json",
-  "exclude": ["tests/unit/web/tela-cheia.test.ts"]
+  "//": "os testes da tela cheia e do confirmar da NOD-370 importam código de DOM: quem o checa é o tsconfig.web.json",
+  "exclude": ["tests/unit/web/tela-cheia.test.ts", "tests/unit/web/nod370-confirmar.test.ts"]
 }

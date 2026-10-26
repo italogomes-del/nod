@@ -159,7 +159,10 @@ describe("sobreporPendentes (revisão 2: a frota relida pelo SSE não desfaz a e
   it("main.ts passa toda ação de frota por ele: no dispatch e na releitura (reidratar reduz direto)", () => {
     const main = readFileSync(new URL("../../../web/main.ts", import.meta.url), "utf8");
     expect(main).toContain("estado = reduzir(estado, sobreporPendentes(acao, perfilPendente));");
-    expect(main).toContain("if (acao) estado = reduzir(estado, sobreporPendentes(acao, perfilPendente));");
+    // NOD-370: o dispatch e a releitura passam por `reduzirVendoSaida`, que reduz com `sobreporPendentes`.
+    expect(main).toMatch(/function reduzirVendoSaida\(acao: Acao\): boolean \{\s*const antes = estado\.tela;\s*estado = reduzir\(estado, sobreporPendentes\(acao, perfilPendente\)\);/);
+    expect(main).toContain("if (acao && reduzirVendoSaida(acao)) saiu = true;");
+    expect(main).toContain("const saiu = reduzirVendoSaida(acao);");
     expect(main.match(/reduzir\(estado, acao\)/g) ?? []).toEqual([]);
   });
   it("perfilPendente é declarado antes do dispatch e do primeiro dispatch do carregamento (QA: TDZ derrubava o boot)", () => {

@@ -1257,28 +1257,15 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
       // definido em 2026-10-08 (revisão W5): reabrir uma task já vista relê as mensagens dela (o detalhe guardado é de
       // quando ela foi aberta da última vez); W11: sair da tela da task de um bot cuja conversa não está carregada apaga o
       // ao vivo dela — os frames dessa conversa param de ser guardados, e voltar juntaria o texto com um buraco no meio.
-      const saindo = conversaIdNaTela(estado);
-      const atividades = saindo && !estado.conversas[saindo] && estado.atividades[saindo] && conversaIdNaTela({ ...estado, tela: acao.tela }) !== saindo
-        ? semConversa(estado.atividades, saindo)
-        : estado.atividades;
       const navegado = resolverInicio({
         ...estado,
-        atividades,
-        tela: acao.tela,
+        ...aoTrocarDeTela(estado, acao.tela),
         // Ir a outro lugar (o clique num aviso, por exemplo) fecha Seu espaço: a pessoa foi para onde pediu.
         espaco: null,
         configUi: CONFIG_UI_INICIAL,
         erro: null,
-        // Revisão da NOD-349: o popover do avatar não reabre sozinho ao voltar ao bot.
-        avatarAberto: null,
-        // A gaveta só continua num nível interno se a conversa é do mesmo bot; outro bot abre na visão geral.
-        gaveta: acao.tela.tipo === "conversa" && estado.gaveta?.agenteId === acao.tela.agenteId ? estado.gaveta : null,
-        faixaParada: acao.tela.tipo === estado.tela.tipo ? estado.faixaParada : null,
         // Saiu de Computadores: a chave crua some da memória (ela aparece uma vez só).
         chaveEmitida: null,
-        // A linha "Novas" vale enquanto a pessoa está na conversa; saiu, ela some.
-        novasDesde: {},
-        faixaTrabalhosAberta: faixaAbertaAoNavegar(estado.faixaTrabalhosAberta, estado.tela, acao.tela),
       });
       if (acao.tela.tipo === "trabalho") return invalidar(navegado, `trabalho:${acao.tela.id}`);
       // NOD-260 (definido em 2026-10-15): abrir Trabalhos (vindo de outra tela) sempre relê — a lista guardada é de
@@ -1322,13 +1309,17 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
     }
     case "frame":
       return aplicarFrame(estado, acao.frame, acao.agora);
-    case "hidratar-gestao":
-      return { ...estado, gestao: acao.gestao };
+    case "hidratar-gestao": {
+      // NOD-370: a gestão traz os excluídos; a conversa de baixo do bot excluído vai para Início (Seu espaço fica).
+      const excluidos = new Set(acao.gestao.agentes.filter((a) => a.excluidoEm).map((a) => a.id));
+      return semBotsQueSairam(estado, excluidos, { gestao: acao.gestao }) ?? { ...estado, gestao: acao.gestao };
+    }
     case "hidratar-frota": {
       // Revisão da NOD-349: o computador que a frota diz que voltou deixa de valer como "fora" lido num pulso antigo.
       const voltaram = acao.frota.agentes.filter((a) => !a.computadorForaDoAr && estado.computadorVisto[a.id] === "fora").map((a) => a.id);
       const computadorVisto = voltaram.length ? Object.fromEntries(Object.entries(estado.computadorVisto).filter(([id]) => !voltaram.includes(id))) : estado.computadorVisto;
-      return comConversasDosDonos(resolverInicio({ ...estado, frota: acao.frota, inventario: acao.frota.inventario, computadorVisto }));
+      const proximo = { ...estado, frota: acao.frota, inventario: acao.frota.inventario, computadorVisto };
+      return comConversasDosDonos(resolverInicio(semBotsQueSairam(proximo, botsQueSairam(estado, acao.frota), {}) ?? proximo));
     }
     case "hidratar-inventario":
       return { ...estado, inventario: acao.inventario };
@@ -1655,6 +1646,71 @@ export function conversaDaTela(estado: Estado): ConversaEstado | null {
  * (fixados primeiro, na ordem da barra lateral) e, sem nenhum, em "Novo bot". Enquanto a frota não chega
  * a tela fica "inicio" (vazia); qualquer navegação para "inicio" resolve do mesmo jeito.
  */
+/** O que troca junto com a tela, por `navegar` ou quando o bot da conversa sai da frota (NOD-370). */
+function aoTrocarDeTela(estado: Estado, tela: Tela): Pick<Estado, "tela" | "atividades" | "avatarAberto" | "gaveta" | "faixaParada" | "novasDesde" | "faixaTrabalhosAberta"> {
+  const saindo = conversaIdNaTela(estado);
+  const atividades = saindo && !estado.conversas[saindo] && estado.atividades[saindo] && conversaIdNaTela({ ...estado, tela }) !== saindo
+    ? semConversa(estado.atividades, saindo)
+    : estado.atividades;
+  return {
+    tela,
+    atividades,
+    // Revisão da NOD-349: o popover do avatar não reabre sozinho ao voltar ao bot.
+    avatarAberto: null,
+    // A gaveta só continua num nível interno se a conversa é do mesmo bot; outro bot abre na visão geral.
+    gaveta: tela.tipo === "conversa" && estado.gaveta?.agenteId === tela.agenteId ? estado.gaveta : null,
+    faixaParada: tela.tipo === estado.tela.tipo ? estado.faixaParada : null,
+    // A linha "Novas" vale enquanto a pessoa está na conversa; saiu, ela some.
+    novasDesde: {},
+    faixaTrabalhosAberta: faixaAbertaAoNavegar(estado.faixaTrabalhosAberta, estado.tela, tela),
+  };
+}
+
+/**
+ * NOD-370: os bots que estavam na frota e sumiram da nova (excluídos ou ocultos). Só a saída conta: um bot recém-criado
+ * que ainda não está numa frota velha não tira a pessoa da conversa dele.
+ */
+function botsQueSairam(estado: Estado, nova: FrotaDto): Set<string> {
+  if (!estado.frota) return new Set();
+  const ficam = new Set(nova.agentes.map((a) => a.id));
+  return new Set(estado.frota.agentes.filter((a) => !ficam.has(a.id)).map((a) => a.id));
+}
+
+/**
+ * NOD-370: a tela que depende de um bot que saiu. A conversa dele vai para Início; a tela que volta para ela (a task, o
+ * Marketplace, a linha) passa a voltar para Início. null = nada na tela depende deles.
+ */
+function semBotsQueSairam(estado: Estado, saiu: ReadonlySet<string>, extra: Partial<Estado>): Estado | null {
+  if (saiu.size === 0) return null;
+  const t = estado.tela;
+  if (t.tipo === "conversa") return saiu.has(t.agenteId) ? semConversaDoBot(estado, extra) : null;
+  const tela = voltarSemBot(t, saiu);
+  return tela === t ? null : { ...estado, ...extra, tela };
+}
+
+/** O "voltar" (de qualquer altura: Conectores › task › conversa) que dava na conversa de um bot que saiu passa a dar em Início. */
+function voltarSemBot(t: Tela, saiu: ReadonlySet<string>): Tela {
+  const voltar = "voltar" in t ? t.voltar : undefined;
+  if (!voltar) return t;
+  if (voltar.tipo === "conversa" && saiu.has(voltar.agenteId)) return { ...t, voltar: { tipo: "inicio" } } as Tela;
+  const dentro = voltarSemBot(voltar as Tela, saiu);
+  return dentro === voltar ? t : ({ ...t, voltar: dentro } as Tela);
+}
+
+/**
+ * NOD-370: tira a conversa do bot que saiu de baixo de Seu espaço — a tela vai para Início (o primeiro bot que ficou),
+ * com o que `navegar` também limpa (gaveta, avatar, "Novas", faixas); o `espaco` aberto por cima continua onde estava.
+ */
+function semConversaDoBot(estado: Estado, extra: Partial<Estado>): Estado {
+  const t = estado.tela;
+  if (t.tipo !== "conversa") return { ...estado, ...extra };
+  const saiu = t.agenteId;
+  // A frota ainda pode ser a de antes (a gestão chegou primeiro): o Início não escolhe o próprio bot que saiu.
+  const frota = estado.frota ? { ...estado.frota, agentes: estado.frota.agentes.filter((a) => a.id !== saiu) } : estado.frota;
+  const resolvido = resolverInicio({ ...estado, ...extra, ...aoTrocarDeTela(estado, { tipo: "inicio" }), frota });
+  return { ...resolvido, frota: estado.frota };
+}
+
 export function resolverInicio(entrada: Estado): Estado {
   let estado = entrada;
   // definido em 2026-10-04 (ADR-077): quem não concluiu o onboarding abre nele (a camada #onboarding por cima do app). A

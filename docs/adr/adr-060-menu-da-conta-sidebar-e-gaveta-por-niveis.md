@@ -1,6 +1,6 @@
 # ADR-060 — Menu da conta, sidebar arrastável e a gaveta do bot por níveis
 
-Status: aceito · Data: 2026-09-30 · Emendada pela ADR-125 (itens 3 e 5, 2026-10-23) · Emenda ADR-032 (painel do bot) e a regra de 2026-09-18 de "Seu espaço". Canvas "Nod —
+Status: aceito · Data: 2026-09-30 · Emendada pela ADR-125 (itens 3 e 5, 2026-10-23) e pela NOD-370 (2026-10-26, a conversa do bot que saiu) · Emenda ADR-032 (painel do bot) e a regra de 2026-09-18 de "Seu espaço". Canvas "Nod —
 tela do agente", página "Menu, sidebar e gaveta".
 
 ## Contexto
@@ -74,3 +74,13 @@ O Marlon comparou o nod com o Grok bot e pediu quatro mudanças. Conferido na te
   não cabem em 380 px.
 - **Reordenar seções:** elas seguem em ordem alfabética. Só os bots se arrastam.
 - **O catálogo de estados do mascote** saiu do perfil e não foi para lugar nenhum.
+
+## Emenda de 2026-10-26 — A conversa do bot que saiu (NOD-370)
+
+"Sair devolve a conversa exata" tem uma exceção: sempre que o bot da conversa de baixo sai da frota (excluído ou ocultado
+aqui, pela barra lateral ou em outro aparelho), a tela de baixo vai para Início, que abre o primeiro bot que ficou (Novo bot
+se não sobrou nenhum); um "voltar" que dava nessa conversa passa a dar em Início. Seu espaço, se estava aberto, continua na
+mesma seção, e "‹ <de onde veio>" e Esc levam a essa tela. Excluir e Ocultar não abrem mais Configurações › Agentes por
+conta própria. Com Agentes aberto, a lista fica na mesma rolagem e o foco vai para o ⋯ da linha seguinte do mesmo time
+(a anterior se era a última; com o time vazio, a mais próxima da lista); pela barra lateral, para a linha vizinha. O
+leitor de tela ouve "‹nome› foi para Excluídos/Ocultos." numa região viva fora da `.app`.

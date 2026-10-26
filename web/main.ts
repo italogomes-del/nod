@@ -6,6 +6,8 @@ import { abrirTelaCheia } from "./telas/tela-cheia.ts";
 import { avisoDoComputador, OPERACOES_PESSOA, type OperacaoPessoa } from "./lib/computador-pessoa.ts";
 import { CHAVE_AVISO_RECRIADO } from "./telas/espaco.ts";
 import { marcarTelaFechadaNaAjuda } from "./lib/computador.ts";
+import { anunciarEm, criarFocoPendente, guardarPosicao, planejarSaidaDaLista, reporPosicao, type ElDaLista, type RaizDaLista } from "./lib/posicao-da-lista.ts";
+import { criarUltimaLeitura } from "./lib/ultima-leitura.ts";
 import { aoVerComputador, definirTelaDoBot } from "./telas/tela-do-bot.ts";
 import { abrirWorkspace } from "./telas/workspace.ts";
 import { listaDoQuePodem, rotuloPermitir, type EscolhaLiberar } from "./telas/card-liberar.ts";
@@ -458,7 +460,8 @@ const telaOnboarding = criarTelaOnboarding({
   garantirAgente: async (agenteId) => {
     for (let i = 0; i < 6 && api; i++) {
       if (botGerido(agenteId)) return true;
-      dispatch({ tipo: "hidratar-frota", frota: await api.frota() });
+      const lida = await buscarFrota();
+      if (lida) dispatch(lida);
       if (botGerido(agenteId)) return true;
       await new Promise((r) => window.setTimeout(r, 400));
     }
@@ -636,6 +639,14 @@ const releituraAtividade = criarReleituraAdiada(JANELA_ATIVIDADE_MS, (fn, ms) =>
 const daAtividade = (q: Invalidacao): boolean => q.startsWith("atividade:") || q.startsWith("atividade-hoje:") || q.startsWith("biblioteca:");
 
 /**
+ * NOD-370: o destino do foco depois de excluir ou ocultar (web/lib/posicao-da-lista.ts); um clique ou uma tecla o descartam.
+ * Declarado antes do `dispatch` (o `render` o aplica e o boot já desenha).
+ */
+const focoPendente = criarFocoPendente({ get activeElement() { return document.activeElement; }, get body() { return document.body; }, querySelector: (s) => document.querySelector<HTMLElement>(s) as unknown as ElDaLista | null }, () => Date.now());
+document.addEventListener("pointerdown", () => focoPendente.descartar(), true);
+document.addEventListener("keydown", () => focoPendente.descartar(), true);
+
+/**
  * ADR-125: o que foi escolhido e ainda não voltou confirmado, por bot: a frota relida no meio não desfaz na tela.
  * Declarado antes do `dispatch` (QA da NOD-349): o carregamento já despacha (as abas lidas) e o `let` mais abaixo caía
  * na zona morta temporal, derrubando o app no boot.
@@ -646,9 +657,31 @@ function dispatch(acao: Acao): void {
   if (acao.tipo === "navegar" && acao.tela.tipo === "trabalhos") releituraTrabalhos.cancelar();
   // NOD-106: a ligação que aparece (até a de outro aparelho) para a leitura; o botão passa a explicar por que não lê.
   if (acao.tipo === "ligacao-viva" && acao.viva && tocador.atual()) tocador.parar("ligacao");
-  estado = reduzir(estado, sobreporPendentes(acao, perfilPendente));
+  const saiu = reduzirVendoSaida(acao);
   render();
+  if (saiu) depoisDeSair();
   void reidratar();
+}
+
+/**
+ * NOD-370: aplica a ação e, se a frota ou a gestão tirou a pessoa da conversa (o bot dela saiu), faz o que `navegar` faria
+ * fora do reducer. Devolve se trocou, para quem chama ler a conversa nova depois de desenhar.
+ */
+function reduzirVendoSaida(acao: Acao): boolean {
+  const antes = estado.tela;
+  estado = reduzir(estado, sobreporPendentes(acao, perfilPendente));
+  if ((acao.tipo !== "hidratar-frota" && acao.tipo !== "hidratar-gestao") || antes.tipo !== "conversa" || estado.tela === antes) return false;
+  if (estado.tela.tipo === "conversa" && estado.tela.conversaId === antes.conversaId) return false;
+  celular.fecharBots();
+  aoTrocarDeTela(antes, estado.tela);
+  lembrarTaskAberta(estado.tela);
+  return true;
+}
+
+/** NOD-370: depois de desenhar a tela para onde a saída do bot levou, o mesmo que `navegar` faz depois do dispatch. */
+function depoisDeSair(): void {
+  lerConversaDaTela();
+  if (rolaAoTopoAoNavegar(estado.tela.tipo)) document.getElementById("timeline")?.scrollTo({ top: 0 });
 }
 
 /**
@@ -859,11 +892,24 @@ async function agir(fn: () => Promise<void>): Promise<void> {
 let contasFalharamEm: number | null = null;
 const ESPERA_CONTAS_MS = 60_000;
 
+/**
+ * NOD-370: a frota e a gestão lidas fora de ordem. A frota de uma leitura que começou antes da última aplicada é velha:
+ * aplicá-la tiraria da tela o bot recém-criado (e, com a saída da conversa, levaria a pessoa para Início).
+ */
+const leituraDaFrota = criarUltimaLeitura();
+const leituraDaGestao = criarUltimaLeitura();
+async function buscarFrota(): Promise<Acao | null> {
+  if (!api) return null;
+  const vez = leituraDaFrota.comecar();
+  const frota = await api.frota();
+  return vez() ? { tipo: "hidratar-frota", frota } : null;
+}
+
 async function buscar(q: Invalidacao): Promise<Acao | null> {
   if (!api) return null;
   const agora = Date.now();
-  if (q === "gestao") return { tipo: "hidratar-gestao", gestao: await api.gestaoAgentes() };
-  if (q === "frota") return { tipo: "hidratar-frota", frota: await api.frota() };
+  if (q === "gestao") { const vez = leituraDaGestao.comecar(); const gestao = await api.gestaoAgentes(); return vez() ? { tipo: "hidratar-gestao", gestao } : null; }
+  if (q === "frota") return buscarFrota();
   if (q === "inventario") return { tipo: "hidratar-inventario", inventario: await api.inventario() };
   if (q === "executor") return { tipo: "hidratar-executor", executor: await api.executor() };
   // Plano das IAs (2026-10-10): servidor sem a rota (404, versão anterior) fica sem `ias`; a tela usa o catálogo do executor.
@@ -1025,13 +1071,14 @@ async function reidratar(): Promise<void> {
   const telaAntes = estado.tela;
   reidratando = true;
   let lerDepois = false;
+  let saiu = false;
   try {
     // definido em 2026-09-17: consumir antes do GET preserva frames recebidos durante a busca.
     estado = reduzir(estado, { tipo: "invalidacoes-tratadas", quais: relevantes });
     for (const [i, q] of relevantes.entries()) {
       try {
         const acao = await buscar(q);
-        if (acao) estado = reduzir(estado, sobreporPendentes(acao, perfilPendente));
+        if (acao && reduzirVendoSaida(acao)) saiu = true;
         if (acao?.tipo === "hidratar-sua-vez") canalAvisos.contador(avisador.atualizar(acao.suaVez));
         if (acao?.tipo === "hidratar-nao-lidos") lerDepois = true;
         if (acao?.tipo === "trabalho-sumiu") lembrarTaskAberta(estado.tela);
@@ -1054,7 +1101,8 @@ async function reidratar(): Promise<void> {
   } finally {
     reidratando = false;
   }
-  if (lerDepois) lerConversaDaTela();
+  if (saiu) depoisDeSair();
+  else if (lerDepois) lerConversaDaTela();
   // definido em 2026-09-28: a tela que mudou DURANTE a busca (clicar num bot com a primeira carga em andamento) também
   // pede o que lhe falta; antes a conversa esperava o próximo tique (15 s). Só quando a tela mudou: há falta que não se
   // resolve buscando (sem nenhuma sala, "salas" continua faltando) e voltaria a buscar sem parar.
@@ -1860,7 +1908,7 @@ function render(): void {
     conta: dadosConta(),
     contaPagina: contas?.minhaConta && estado.configUi.abertos.includes("conta-pagina") ? telaMinhaConta.render() : null,
     tema: lerTema(),
-  }) : "");
+  }) : "", { seletor: ".espaco-conteudo", chave: estado.espaco?.secao === "agentes" ? "agentes" : null });
   devolverSegredosSsh();
   document.getElementById("espaco")?.toggleAttribute("hidden", !estado.espaco);
   // A ligação em tela cheia também deixa a .app (e Seu espaço) inerte; a pílula não: a pessoa usa o nod com a ligação aberta.
@@ -1881,6 +1929,7 @@ function render(): void {
   renderPrincipal();
   prenderFocoNaGaveta(gavetaDoApp);
   codigo?.();
+  focoPendente.aplicar();
 }
 
 /**
@@ -2064,13 +2113,21 @@ function conferirSessaoAoCair(): void {
   );
 }
 
+/** NOD-370: a seção de cada região rolável na última pintura (a rolagem só volta na mesma seção). */
+const chaveDaRolagem = new Map<string, string | null>();
+
 /**
  * Revisão do #228 (2026-10-09): regrava a região e reabre os `<details data-disclosure>` que estavam abertos, devolvendo
  * o foco ao que o tinha. Este Mac é relida a cada 30 s (ADR-091), e o "porquê" aberto pela pessoa fechava sozinho.
  */
-function regiaoReabrindo(id: string, html: string): void {
+function regiaoReabrindo(id: string, html: string, rolagem?: { seletor: string; chave: string | null }): void {
   const raiz = document.getElementById(id);
+  const chaveAntes = chaveDaRolagem.get(id) ?? null;
+  if (rolagem) chaveDaRolagem.set(id, rolagem.chave);
   if (!raiz || !regiaoMudaria(id, html)) return regiao(id, html);
+  // NOD-370: a lista redesenhada (Agentes depois de excluir ou ocultar) fica na rolagem em que estava e o botão focado
+  // (o ⋯ da linha) volta com o foco quando o elemento foi trocado.
+  const posicao = guardarPosicao(raiz as unknown as RaizDaLista, document.activeElement instanceof HTMLButtonElement ? document.activeElement : null, rolagem ? { seletor: rolagem.seletor, chaveAntes } : null);
   // ADR-102: o campo marcado (o código do login, o apelido) volta com o foco e o cursor depois de redesenhar.
   // NOD-346: o "Sobre mim" é textarea e também volta com o foco.
   const ativoCampo = document.activeElement;
@@ -2095,6 +2152,7 @@ function regiaoReabrindo(id: string, html: string): void {
     volta.focus();
     volta.setSelectionRange(manter.ini, manter.fim);
   }
+  reporPosicao(raiz as unknown as RaizDaLista, posicao, rolagem ?? null);
 }
 
 /** ADR-090: o código de pareamento da máquina que veio na URL, guardado até a sessão existir. */
@@ -2302,6 +2360,15 @@ function propostaDoEstado(id: string): Proposta | null {
 function navegar(tela: Tela): void {
   const antes = estado.tela;
   celular.fecharBots();
+  aoTrocarDeTela(antes, tela);
+  dispatch({ tipo: "navegar", tela });
+  lembrarTaskAberta(tela);
+  lerConversaDaTela();
+  if (rolaAoTopoAoNavegar(tela.tipo)) document.getElementById("timeline")?.scrollTo({ top: 0 });
+}
+
+/** O que muda fora do reducer quando a tela troca: por `navegar` ou, na NOD-370, quando o bot da conversa saiu da frota. */
+function aoTrocarDeTela(antes: Tela, tela: Tela): void {
   // A gaveta aberta só para um nível (ou a sobreposta, na janela estreita) fecha quando a conversa muda.
   if (tela.tipo !== "conversa" || antes.tipo !== "conversa" || antes.conversaId !== tela.conversaId) {
     painelAbertoNaHora = false;
@@ -2313,10 +2380,6 @@ function navegar(tela: Tela): void {
   levaContada.clear();
   // NOD-106: sair da conversa para a leitura (a resposta some da tela).
   if (tocador.atual() && (tela.tipo !== "conversa" || antes.tipo !== "conversa" || antes.conversaId !== tela.conversaId)) tocador.parar("saiu");
-  dispatch({ tipo: "navegar", tela });
-  lembrarTaskAberta(tela);
-  lerConversaDaTela();
-  if (rolaAoTopoAoNavegar(tela.tipo)) document.getElementById("timeline")?.scrollTo({ top: 0 });
 }
 
 /**
@@ -2346,6 +2409,16 @@ async function mudarGestao(fn: () => Promise<unknown>): Promise<void> {
   } catch (e) { mostrarErro(e); throw e; }
 }
 
+/** NOD-370: depois de excluir ou ocultar, o anúncio e o foco na lista em que a pessoa estava (web/lib/posicao-da-lista.ts). */
+function depoisDeTirarDaLista(a: BotGerido, grupo: "Excluídos" | "Ocultos"): (dialogoAindaAberto: boolean) => void {
+  return planejarSaidaDaLista({ doc: document as unknown as RaizDaLista, ativo: () => document.activeElement, agentesAberto: estado.espaco?.secao === "agentes", id: a.id, nome: a.nome, grupo, anunciar: anunciarGestao, lembrarFoco: (seletor) => focoPendente.lembrar(seletor) });
+}
+
+/** NOD-370: a região viva fica fora da `.app`, que está inerte (fora da árvore de acessibilidade) com Seu espaço aberto. */
+function anunciarGestao(texto: string): void {
+  anunciarEm(document.getElementById("anuncio-gestao"), texto, (fn) => window.setTimeout(fn, 50));
+}
+
 function acaoDoBot(a: BotGerido, acao: AcaoGestao): void {
   const executar = (fn: () => Promise<unknown>) => void agir(async () => { await mudarGestao(fn); });
   if (acao === "perfil") { abrirNivel(a.id, { tipo: "perfil" }); return; }
@@ -2365,16 +2438,17 @@ function acaoDoBot(a: BotGerido, acao: AcaoGestao): void {
   }
   if (acao === "excluir") {
     pedirGestao(`Excluir ${a.nome}?`, "<p>O bot vai para Excluídos. Novos trabalhos serão bloqueados, rotinas pausadas e acessos revogados. Trabalhos em andamento receberão um pedido de interrupção; ações externas já realizadas não podem ser desfeitas.</p><p>Você pode recuperar o perfil e o histórico em Configurações › Agentes.</p>", "Excluir agente", async () => {
-      await mudarGestao(() => api!.excluirAgente(a.id)); abrirEspaco("agentes");
-    }, true); return;
+      // NOD-370: a pessoa fica onde estava (Seu espaço só continua aberto se ela já estava nele).
+      await mudarGestao(() => api!.excluirAgente(a.id));
+    }, true, depoisDeTirarDaLista(a, "Excluídos")); return;
   }
   if (acao === "copiar") {
     void navigator.clipboard.writeText(a.conversaId).then(() => pedirGestao("ID copiado", `<p>ID da conversa copiado para a área de transferência.</p><input aria-label="ID da conversa" readonly value="${esc(a.conversaId)}" />`, "Concluir", async () => {})).catch(() => pedirGestao("ID da conversa", `<p>Selecione e copie o ID abaixo.</p><input aria-label="ID da conversa" readonly value="${esc(a.conversaId)}" />`, "Concluir", async () => {})); return;
   }
   if (acao === "ocultar" && !a.oculto) {
     pedirGestao("Ocultar da barra lateral?", "<p>O bot e suas rotinas continuam funcionando. Para trazê-lo de volta, abra Configurações › Agentes › Ocultos.</p>", "Ocultar", async () => {
-      await mudarGestao(() => api!.ocultar(a.id, true)); abrirEspaco("agentes");
-    }); return;
+      await mudarGestao(() => api!.ocultar(a.id, true));
+    }, false, depoisDeTirarDaLista(a, "Ocultos")); return;
   }
   if (acao === "nao-lido") {
     // definido em 2026-09-29 (0039): o menu vale pelo "lido até". Marcar a conversa aberta como não lida não pode ser
@@ -4755,7 +4829,9 @@ document.addEventListener("keydown", (ev) => {
   if (ev.key === "Escape" && telaLigacao.cheia() && !(ev.target as HTMLElement).closest?.("dialog")) { ev.preventDefault(); telaLigacao.encolher(); return; }
   // Chat limpo (PR 8): Esc dentro da pílula alargada fecha e devolve o foco a ela (web/lib/pilula-na-tela.ts).
   if (teclaNaPilula(ev.key, estado.faixaTrabalhosAberta !== null) === "fechar" && (ev.target as HTMLElement).closest?.("#faixa-trabalhos")) { ev.preventDefault(); dispatch({ tipo: "faixa-trabalhos", agenteId: null }); return; }
-  if (ev.key === "Escape" && estado.espaco && !(ev.target as HTMLElement).closest?.("dialog")) { ev.preventDefault(); fecharEspaco(); return; }
+  // QA da NOD-370: com o confirmar aberto e o pedido andando, os botões dele ficam desativados e o foco cai no <body>; o Esc
+  // não fecha Seu espaço por trás do diálogo.
+  if (ev.key === "Escape" && estado.espaco && !(ev.target as HTMLElement).closest?.("dialog") && !document.querySelector("dialog[open]")) { ev.preventDefault(); fecharEspaco(); return; }
   // definido em 2026-09-25 (revisão do PR #68): Esc fecha a gaveta do app e o "+ Dar acesso" do painel.
   if (ev.key === "Escape" && estado.tela.tipo === "conectores" && estado.tela.gaveta) { ev.preventDefault(); void ACOES["fechar-gaveta"]?.(document.body); return; }
   // NOD-122: com a gaveta aberta o Tab dá a volta nela, em vez de sair para a barra do navegador.

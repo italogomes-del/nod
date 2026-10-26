@@ -91,7 +91,12 @@ export function abrirMenuCompartilhar(a: BotGerido, ancora: HTMLElement, executa
   d.querySelector<HTMLButtonElement>("button")?.focus();
 }
 
-export function pedirGestao(titulo: string, corpo: string, confirmar: string, salvar: (dados: FormData) => Promise<void>, perigo = false): void {
+/**
+ * NOD-370: `depois` roda logo depois de fechar, já fora do diálogo (ex.: pôr o foco na linha que ficou no lugar). Ele
+ * recebe se o diálogo ainda estava aberto (a pessoa pode ter saído com Esc com o pedido em andamento); um erro nele não
+ * vira o erro do salvar.
+ */
+export function pedirGestao(titulo: string, corpo: string, confirmar: string, salvar: (dados: FormData) => Promise<void>, perigo = false, depois?: (dialogoAindaAberto: boolean) => void): void {
   const d = dialogo(`<form><h2>${esc(titulo)}</h2>${corpo}<p class="dialogo-erro" role="alert"></p><div class="acoes"><button class="bt" type="button" data-cancelar>Cancelar</button><button class="bt ${perigo ? "danger" : "pri"}" type="submit">${esc(confirmar)}</button></div></form>`);
   d.querySelector("[data-cancelar]")?.addEventListener("click", () => d.close());
   d.querySelector("form")!.addEventListener("submit", (e) => {
@@ -99,7 +104,12 @@ export function pedirGestao(titulo: string, corpo: string, confirmar: string, sa
     const form = e.currentTarget as HTMLFormElement;
     const dados = new FormData(form);
     for (const b of form.querySelectorAll<HTMLButtonElement>("button")) b.disabled = true;
-    void salvar(dados).then(() => d.close()).catch(() => {
+    void salvar(dados).then(() => {
+      const aberto = d.open;
+      d.close();
+      // O erro do `depois` sobe à parte (window.onerror): a ação já foi feita e o diálogo não mostra falha.
+      try { depois?.(aberto); } catch (erro) { queueMicrotask(() => { throw erro; }); }
+    }, () => {
       d.querySelector(".dialogo-erro")!.textContent = "Não foi possível concluir. Confira o aviso da página e tente novamente.";
       for (const b of form.querySelectorAll<HTMLButtonElement>("button")) b.disabled = false;
     });

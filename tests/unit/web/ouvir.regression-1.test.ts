@@ -157,7 +157,11 @@ describe("regressão /qa #381: fiação em main.ts e nos diálogos", () => {
 
   // M47, M49, M48, M63: sair da conversa, fechar a página, ligação em outro aparelho e troca de sessão param a leitura.
   it("as quatro saídas param a leitura", () => {
-    expect(main).toMatch(/antes\.conversaId !== tela\.conversaId\)\) tocador\.parar\("saiu"\);\s*dispatch\(\{ tipo: "navegar", tela \}\)/);
+    // NOD-370: a parada saiu para `aoTrocarDeTela`, chamado por `navegar` antes do dispatch e por `reidratar` quando o
+    // bot da conversa sai da frota.
+    expect(main).toMatch(/antes\.conversaId !== tela\.conversaId\)\) tocador\.parar\("saiu"\);/);
+    expect(main).toMatch(/aoTrocarDeTela\(antes, tela\);\s*dispatch\(\{ tipo: "navegar", tela \}\)/);
+    expect(main).toMatch(/function reduzirVendoSaida[\s\S]*?aoTrocarDeTela\(antes, estado\.tela\);/);
     expect(main).toContain('window.addEventListener("pagehide", () => tocador.parar("saiu"));');
     expect(main).toContain('if (acao.tipo === "ligacao-viva" && acao.viva && tocador.atual()) tocador.parar("ligacao");');
     expect(main).toMatch(/escopo\.tenantId !== estado\.sessao\?\.tenantId \|\| escopo\.pessoaId !== estado\.sessao\?\.pessoaId\) tocador\.parar\("saiu"\)/);
