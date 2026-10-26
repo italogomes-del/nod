@@ -49,6 +49,8 @@ export function objeto(v: unknown): Record<string, unknown> {
   return v as Record<string, unknown>;
 }
 export function texto(v: unknown, max = TEXTO_ENTREGA_MAX_CHARS): v is string { return typeof v === "string" && v.length <= max; }
+/** NOD-353: o id do tool_use (Claude `toolu_…`, Codex `call_…`): só letras, dígitos, `_` e `-`. */
+const idDaChamada = (v: unknown): v is string => typeof v === "string" && /^[A-Za-z0-9_-]{1,100}$/.test(v);
 /**
  * Trechos do turno vivo. São efêmeros: um item fora do formato é descartado sozinho e uma lista acima
  * dos tetos vira vazia, sem nunca derrubar a renovação (que é o lease do turno).
@@ -66,9 +68,19 @@ export function trechos(v: unknown): TrechoVivo[] {
       if (s) saida.push(o.ocioso === undefined ? { subagentes: s } : { subagentes: s, ocioso: o.ocioso });
       continue;
     }
+    // NOD-353: a ferramenta com o id da chamada e o fim dela — os outros trechos de duas chaves.
+    if (Object.keys(o).length === 2 && "ferramenta" in o && "id" in o) {
+      // id fora do formato: a ferramenta segue sem id (fecha na próxima, como no app antigo).
+      if (nomeDeFerramenta(o.ferramenta)) saida.push(idDaChamada(o.id) ? { ferramenta: o.ferramenta, id: o.id } : { ferramenta: o.ferramenta });
+      continue;
+    }
+    if (Object.keys(o).length === 2 && "fim" in o && "falhou" in o) {
+      if (idDaChamada(o.fim) && typeof o.falhou === "boolean") saida.push({ fim: o.fim, falhou: o.falhou });
+      continue;
+    }
     if (Object.keys(o).length !== 1) continue;
     if (texto(o.texto, 16_000)) { total += o.texto.length; saida.push({ texto: o.texto }); }
-    else if (texto(o.ferramenta, 200) && /^[A-Za-z0-9_.-]+$/.test(o.ferramenta)) saida.push({ ferramenta: o.ferramenta });
+    else if (nomeDeFerramenta(o.ferramenta)) saida.push({ ferramenta: o.ferramenta });
     else if (Array.isArray(o.tarefas)) { const t = tarefasDoTrecho(o.tarefas); if (t) saida.push({ tarefas: t }); }
     else if (o.vigia !== undefined) { const v = vigiaDoTrecho(o.vigia); if (v) saida.push({ vigia: v }); }
   }
@@ -386,6 +398,16 @@ function negacoesDoNod(v: unknown): { nome: string; motivo: string }[] | undefin
 /** NOD-245: quantas ferramentas chamadas (e negações) a entrega guarda — as últimas; o resto é cortado, não recusado. */
 export const LISTA_DA_ENTREGA_MAX = 1000;
 
+/**
+ * NOD-353: os índices das chamadas que falharam, extra como o uso do plano — fora do formato some e a entrega segue. Os
+ * índices andam junto com o corte das `LISTA_DA_ENTREGA_MAX` últimas chamadas.
+ */
+export function ferramentasFalharam(v: unknown, total: number): number[] {
+  if (!Array.isArray(v) || v.length > total || !v.every((i) => Number.isSafeInteger(i) && i >= 0 && i < total)) return [];
+  const corte = Math.max(0, total - LISTA_DA_ENTREGA_MAX);
+  return [...new Set(v as number[])].filter((i) => i >= corte).map((i) => i - corte).sort((a, b) => a - b);
+}
+
 export function entrega(v: unknown, machineId: string, agora: number = Date.now()): Entrega {
   const e = objeto(v), r = objeto(e.resultado), f = objeto(e.fala), t = objeto(r.tokens);
   exigir(Number.isSafeInteger(e.seqLocal) && Number(e.seqLocal) > 0);
@@ -425,10 +447,11 @@ export function entrega(v: unknown, machineId: string, agora: number = Date.now(
   const causaDoFim = r.desfecho !== "sucesso" ? causaDaEntrega(r.causa) : null;
   // Revisão do épico (S19, 2026-10-08): o que o CLI recebeu e não foi confirmado numa renovação.
   const entregues = idsDeMensagens(e.mensagensEntregues);
+  const falharam = ferramentasFalharam(r.ferramentasFalharam, (r.ferramentasChamadas as string[]).length);
   return { turnoId: uuid(e.turnoId), machineId, seqLocal: Number(e.seqLocal), fala: f as Entrega["fala"], ...(entregues?.length ? { mensagensEntregues: entregues } : {}), resultado: {
     desfecho: r.desfecho as Entrega["resultado"]["desfecho"], texto: r.texto, sessaoCli: r.sessaoCli as string | null,
     custoUsd: r.custoUsd as number | null, ...(r.custoDesconhecido === true && r.custoUsd === null ? { custoDesconhecido: true } : {}), sinais: validados, tokens: t as Entrega["resultado"]["tokens"],
-    ferramentasChamadas: (r.ferramentasChamadas as string[]).slice(-LISTA_DA_ENTREGA_MAX), negacoesPermissao: (r.negacoesPermissao as string[]).slice(-LISTA_DA_ENTREGA_MAX),
+    ferramentasChamadas: (r.ferramentasChamadas as string[]).slice(-LISTA_DA_ENTREGA_MAX), ...(falharam.length > 0 ? { ferramentasFalharam: falharam } : {}), negacoesPermissao: (r.negacoesPermissao as string[]).slice(-LISTA_DA_ENTREGA_MAX),
     motivoFalha: r.motivoFalha as Entrega["resultado"]["motivoFalha"], motivoInterrupcao: r.motivoInterrupcao as Entrega["resultado"]["motivoInterrupcao"],
     ...(raioX ? { execucao: raioX } : {}),
     ...(catalogo ? { comandos: catalogo } : {}),

@@ -5,7 +5,7 @@
  * `data-act` em main.ts. ADR-029 (render por classe): estados de falha viram texto com relógio.
  */
 import { levarCampos } from "./levar-campos.ts";
-import { seletoresDoFoco } from "./foco-do-bloco.ts";
+import { alvoDoFoco } from "./foco-do-bloco.ts";
 import { aplicarMorph, decidirBloco, type Morph, type NoDoMorph } from "./morph.ts";
 
 /**
@@ -102,10 +102,8 @@ export function regiaoPorBlocos(id: string, blocos: readonly Bloco[]): void {
     const nome = focado instanceof HTMLInputElement || focado instanceof HTMLTextAreaElement ? focado.name : "";
     const campo = nome ? [...raiz.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("input[name], textarea[name]")].find((c) => c.name === nome) : undefined;
     if (campo) { campo.focus({ preventScroll: true }); return; }
-    for (const seletor of seletoresDoFoco(focado.dataset)) {
-      const alvo = raiz.querySelector<HTMLElement>(seletor);
-      if (alvo) { alvo.focus({ preventScroll: true }); break; }
-    }
+    const disclosure = focado.tagName === "SUMMARY" ? focado.closest<HTMLElement>("details[data-disclosure]")?.dataset.disclosure : undefined;
+    alvoDoFoco<HTMLElement>(disclosure ? { disclosure } : focado.dataset, raiz, document)?.focus({ preventScroll: true });
   }
 }
 

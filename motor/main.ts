@@ -34,6 +34,7 @@ import { compararVersoes, extrairVersao, PISO_CLI } from "../src/adapters/execut
 import type { AtualizadorDeIas } from "../desktop/atualizador-ias.ts";
 import { PACOTE_DA_IA } from "../desktop/instalar-ia.ts";
 import { versaoAceita } from "../src/domain/versao-app.ts";
+import { repassarAcaoDoEvento } from "../src/domain/rotulo-ferramenta.ts";
 import { log } from "../src/obs/log.ts";
 import { ambienteDoLogin, comandoDeEstadoDoLogin, lerIaDesktop, textoDaImpressao } from "../desktop/ia-mac.ts";
 import { criarVigiaDasIas, type Veredito, type VigiaDasIas } from "../desktop/vigia-ias.ts";
@@ -288,7 +289,7 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
     const subagentesVivos = criarAcompanhanteDeSubagentes((turnoId, lista, ocioso) => ponteHttp.subagentes(turnoId, lista, ocioso), { intervaloMs: 0 });
     laco = iniciarPoolDeLacos((ponte) => iniciarLaco({ ponte, registry: reg, pessoaId: dados.escopo.pessoaId, machineId: dados.machineId, relogio: () => Date.now(), renovacaoMs: 1_000, esperaVaziaMs: 1000, memoria, registroDaConta, urlNod: lig.urlNod,
       aoDelta: (p, t) => ponteHttp.delta(p.turnoId, t),
-      aoEvento: (p, ev) => { if (ev.tipo === "tool_use") ponteHttp.ferramenta(p.turnoId, ev.nome); tarefasVivas.evento(p.turnoId, ev); subagentesVivos.evento(p.turnoId, ev); },
+      aoEvento: (p, ev) => { repassarAcaoDoEvento(ponteHttp, p.turnoId, ev); tarefasVivas.evento(p.turnoId, ev); subagentesVivos.evento(p.turnoId, ev); },
       aoIniciarTurno: (p) => { planosAqui.set(p.turnoId, p); },
       aoTerminarTurno: (p) => { tarefasVivas.esquecer(p.turnoId); subagentesVivos.parar(p.turnoId); subagentesVivos.esquecer(p.turnoId); planosAqui.delete(p.turnoId); void atualizadorIas?.verificar().catch(() => undefined); },
       aoVigia: (p, aviso) => ponteHttp.vigia(p.turnoId, aviso),

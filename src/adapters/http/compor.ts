@@ -31,7 +31,7 @@ import { abrirTxEscopada, exigirForaDaTx, txEscopadaOuDoContexto } from "../../d
 import { ErroDeDominio } from "../../domain/erro.ts";
 import { iaAtualDoCatalogo, opcoesDoCatalogo } from "../../domain/harness.ts";
 import { iaDoAutomatico, iasNoLimite, inteligenciaDoAgente, ordemEfetiva } from "../../domain/inteligencia.ts";
-import { frameDaFerramenta } from "../../domain/rotulo-ferramenta.ts";
+import { frameDaFerramenta, frameVivoDoEvento } from "../../domain/rotulo-ferramenta.ts";
 import { criarAvisoDoVigia } from "./aviso-vigia.ts";
 import { lerModelosLigacao } from "../../domain/modelo-ligacao.ts";
 import { contextoAtual } from "../../obs/contexto.ts";
@@ -767,7 +767,8 @@ export function comporApp(o: OpcoesCompor): App {
     agora: relogio,
     delta: (plano, texto) => publicarDoPlano(plano, "turno.delta", { texto }),
     // NOD-348: `emUso` é o que a fala viva diz agora ("Usando Linear", "Abrindo frentes"); a web não lê o domínio (ADR-018).
-    ferramenta: (plano, nome) => publicarDoPlano(plano, "turno.atividade", frameDaFerramenta(nome)),
+    ferramenta: (plano, nome, id) => publicarDoPlano(plano, "turno.atividade", frameDaFerramenta(nome, id)),
+    fimDaFerramenta: (plano, id, falhou) => publicarDoPlano(plano, "turno.acao_fim", { id, falhou }),
     tarefas: (plano, tarefas) => publicarDoPlano(plano, "turno.tarefas", { tarefas }),
     subagentes: (plano, subagentes, principalOcioso) => publicarDoPlano(plano, "turno.subagentes", { subagentes, principalOcioso: principalOcioso === true }),
     fala: (plano) => publicarDoPlano(plano, "turno.fala", {}),
@@ -1388,7 +1389,7 @@ export function comporApp(o: OpcoesCompor): App {
     }),
   ];
 
-  function publicarDoPlano(plano: PlanoTurno, tipo: "turno.delta" | "turno.atividade" | "turno.tarefas" | "turno.subagentes" | "turno.fala" | "turno.vigia", dados: Record<string, unknown>): void {
+  function publicarDoPlano(plano: PlanoTurno, tipo: "turno.delta" | "turno.atividade" | "turno.acao_fim" | "turno.tarefas" | "turno.subagentes" | "turno.fala" | "turno.vigia", dados: Record<string, unknown>): void {
     // ADR-083: o "último passo" da faixa de Trabalhos é o rótulo da última ferramenta do turno vivo.
     if (tipo === "turno.atividade" && typeof dados.rotulo === "string") trabalhosVivos.ferramenta(plano.turnoId, dados.rotulo);
     // NOD-350: e, enquanto algum subagente trabalha, a contagem deles (critérios 3 e 9).
@@ -1449,7 +1450,7 @@ export function comporApp(o: OpcoesCompor): App {
       aoEvento: (plano, ev: EventoStream) => {
         if (ev.tipo === "catcher") aoRegistrarCatcher({ turnoId: plano.turnoId, tipo: ev.subtipo, dados: ev.dados });
         // NOD-348 (QA do #508): o laço local manda o mesmo frame da ponte, com o `emUso` da fala viva.
-        else if (ev.tipo === "tool_use") publicarDoPlano(plano, "turno.atividade", frameDaFerramenta(ev.nome));
+        else { const f = frameVivoDoEvento(ev); if (f) publicarDoPlano(plano, f.tipo, f.dados); }
         tarefasVivas.evento(plano.turnoId, ev);
         subagentesVivos.evento(plano.turnoId, ev);
       },

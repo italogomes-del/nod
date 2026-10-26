@@ -16,7 +16,7 @@ import { lerCatalogoDoMac } from "../catalogo-comandos.ts";
 import { log } from "../../../obs/log.ts";
 import { baixarAnexos, mensagemClaude } from "../anexos-turno.ts";
 import { rodarLigacaoClaude } from "./claude-ligacao.ts";
-import { classificarSessao, fimDoStderr, interpretarLinhaStreamJson, reduzirSinais, SINAIS_ZERADOS, textoDaRodada } from "../../../domain/stream-json.ts";
+import { classificarSessao, fimDoStderr, eventosDaLinhaStreamJson, reduzirSinais, SINAIS_ZERADOS, textoDaRodada } from "../../../domain/stream-json.ts";
 import { capacidadesDe, versaoMinimaDoModelo } from "../../../domain/harness.ts";
 import { criarFalaDoMeio } from "../../../domain/mensagem-no-meio.ts";
 import { caminhoAumentado, resolverBinario } from "../caminho.ts";
@@ -675,7 +675,10 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
                   cwd: diretorio,
                   sigtermParaSigkillMs: lig.sigtermParaSigkillMs,
                   aoLinha(linha) {
-                    const ev = interpretarLinhaStreamJson(linha);
+                    for (const ev of eventosDaLinhaStreamJson(linha)) aoEvento(ev);
+                  },
+                });
+                function aoEvento(ev: EventoStream): void {
                     if (ev.tipo === "ignorado") return;
                     eventos.push(ev);
                     momentos.push(Date.now() - inicio);
@@ -701,8 +704,7 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
                       if (depois[k] && !sinais[k]) pendentes.push(sinks.sinal(k));
                     }
                     sinais = depois;
-                  },
-                });
+                }
                 processo = proc;
                 if (interromperPedido) await proc.interromper();
 

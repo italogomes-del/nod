@@ -30,7 +30,7 @@ import type { CustoDoDiaDto } from "../../src/contracts/cota.ts";
 import type { Escopo } from "../../src/shared/types.ts";
 import type { LeituraAtual } from "../lib/ouvir.ts";
 import { FALA_SAINDO_MS } from "../lib/fala-viva.ts";
-import { ATIVIDADE_VAZIA, comFerramenta, comSubagentes, comTarefas, comTexto, comVigia, SEM_NOME_DA_FERRAMENTA, semFerramentaAberta, soSubagentes, subagentesParados, textoDaFala, type AtividadeTurno, type FerramentaEmUso, type SubagentesDoTurno, type VigiaDaAtividade } from "../lib/atividade.ts";
+import { acoesFechadas, ATIVIDADE_VAZIA, linhasDoResumo, comFerramenta, comFimDaAcao, comSubagentes, comTarefas, comTexto, comVigia, SEM_NOME_DA_FERRAMENTA, semFerramentaAberta, soSubagentes, subagentesParados, textoDaFala, type AtividadeTurno, type FerramentaEmUso, type SubagentesDoTurno, type VigiaDaAtividade } from "../lib/atividade.ts";
 import { chaveDaAtividade, diaLocal, type VistaDaAtividade } from "../lib/atividade-do-bot.ts";
 import type { PaginaDaBiblioteca } from "../../src/contracts/biblioteca.ts";
 import { gruposVisiveis, juntarPagina, POR_VEZ, type BibliotecaDaConversa, type GrupoBiblioteca } from "../lib/biblioteca.ts";
@@ -689,17 +689,52 @@ const usoPlano = (e: Estado): Invalidacao | null => (e.usoDoPlano === null ? nul
 const contasDoTurno = (e: Estado): Invalidacao | null => (e.contasIa === null ? null : "contas");
 
 /** NOD-348: guarda a fala viva do turno que vira mensagem com texto, na conversa aberta (não o da task, sem fala viva). */
-function comFalaSaindo(estado: Estado, turnoId: string | null, agora: number): Estado {
+function comFalaSaindo(estado: Estado, turnoId: string | null, agora: number, fim = false): Estado {
   const turno = turnoId ? estado.turnosVivos[turnoId] : undefined;
   if (!turno || turno.estado !== "rodando" || turno.trabalhoId || !estado.conversas[turno.conversaId]) return estado;
   const atividade = estado.atividades[turno.conversaId]?.[turno.turnoId];
-  if (!atividade || !textoDaFala(atividade)) return estado;
+  if (!atividade) return estado;
+  if (!textoDaFala(atividade)) return fim ? comAcoesNaUltimaSaindo(estado, turno.conversaId, turno.turnoId, atividade.acoes) : estado;
   // Uma por fala (revisão 4 do #508): dois `turno.fala` antes da releitura não apagam o primeiro.
   const atuais = estado.falasSaindo?.[turno.conversaId] ?? {};
   let n = Object.keys(atuais).length;
   while (atuais[`${turno.turnoId}:${agora}:${n}`]) n++;
   const daConversa = { ...atuais, [`${turno.turnoId}:${agora}:${n}`]: { turno, atividade, em: agora } };
   return { ...estado, falasSaindo: { ...estado.falasSaindo, [turno.conversaId]: daConversa } };
+}
+
+/**
+ * NOD-353 (revisão do #523): o turno acabou sem fala final depois de um `turno.fala` — a última fala parada dele é a que
+ * guarda o resumo (o servidor grava nela, `acoesNaUltimaFalaDoTurno`), então o retrato dela passa a ter as ações do fim.
+ */
+function comAcoesNaUltimaSaindo(estado: Estado, conversaId: string, turnoId: string, acoes: AtividadeTurno["acoes"]): Estado {
+  const atuais = estado.falasSaindo?.[conversaId];
+  const chave = atuais ? Object.keys(atuais).filter((k) => atuais[k]?.turno.turnoId === turnoId).sort((a, b) => (atuais[a]?.em ?? 0) - (atuais[b]?.em ?? 0)).at(-1) : undefined;
+  const s = chave ? atuais?.[chave] : undefined;
+  if (!atuais || !chave || !s) return comAcoesNaUltimaGravada(estado, conversaId, turnoId, acoes);
+  if (s.atividade.acoes === acoes) return estado;
+  return { ...estado, falasSaindo: { ...estado.falasSaindo, [conversaId]: { ...atuais, [chave]: { ...s, atividade: { ...s.atividade, acoes } } } } };
+}
+
+/**
+ * NOD-353 (revisão 2 do #523): a releitura do `turno.fala` já trouxe a fala do meio gravada (e tirou o retrato) antes do
+ * encerrado — o resumo entra nela na hora, igual ao que o servidor grava (`acoesNaUltimaFalaDoTurno`), sem esperar a
+ * próxima releitura (o resumo sumia por um momento).
+ */
+function comAcoesNaUltimaGravada(estado: Estado, conversaId: string, turnoId: string, acoes: AtividadeTurno["acoes"]): Estado {
+  const c = estado.conversas[conversaId];
+  if (!c || acoes.length === 0) return estado;
+  let i = -1;
+  for (let k = c.mensagens.length - 1; k >= 0; k--) {
+    const m = c.mensagens[k];
+    if (m?.turnoId === turnoId && m.kind === "texto" && m.autoria.autor_tipo === "agente") { i = k; break; }
+  }
+  const m = c.mensagens[i];
+  if (!m || m.payload) return estado;
+  const payload = { kind: "acoes_do_turno" as const, acoes: linhasDoResumo(acoes, true).map((l) => ({ rotulo: l.rotulo, ...(l.estado === "falhou" ? { falhou: true as const } : {}), ...(l.vezes ? { vezes: l.vezes } : {}) })) };
+  const mensagens = [...c.mensagens];
+  mensagens[i] = { ...m, payload };
+  return { ...estado, conversas: { ...estado.conversas, [conversaId]: { ...c, mensagens } } };
 }
 
 /**
@@ -833,7 +868,8 @@ function semTexto(estado: Estado, conversaId: string | null, turnoId: string | n
   const a = conversaId && turnoId ? estado.atividades[conversaId]?.[turnoId] : undefined;
   if (!a || !conversaId || !turnoId) return estado;
   // NOD-350: com subagentes, o cartão recomeça só com eles (e a última ferramenta como ✓); eles seguem depois da fala.
-  const proxima = soSubagentes(a) ?? { ...a, atual: "", antes: [] };
+  // NOD-353: as ações seguem (o resumo é do turno inteiro); a volta acabou, então nenhuma roda mais.
+  const proxima = soSubagentes(a) ?? { ...a, atual: "", antes: [], acoes: acoesFechadas(a.acoes) };
   return { ...estado, atividades: { ...estado.atividades, [conversaId]: { ...estado.atividades[conversaId], [turnoId]: proxima } } };
 }
 
@@ -984,6 +1020,9 @@ function bibliotecaDoFrame(e: Estado, f: FrameSse): Invalidacao[] {
 /** O turno da ligação não é trabalho do bot (ADR-072): não relê Trabalhos. */
 const trabalhosDoTurno = (f: FrameSse): Invalidacao[] => (turnoDeLigacao(f.dados) || f.dados.modo === "ligacao" || f.dados.origem === "ligacao" ? [] : ["trabalhos"]);
 
+/** NOD-353: o id da chamada no frame (o mesmo formato que a ponte aceita); fora dele, a ação fica sem id. */
+const idDaAcao = (v: unknown): string | null => (typeof v === "string" && /^[A-Za-z0-9_-]{1,100}$/.test(v) ? v : null);
+
 /** NOD-348: o `emUso` do frame, conferido; o servidor antigo não o manda e a fala diz "Usando uma ferramenta". */
 function emUsoDoFrame(v: unknown): FerramentaEmUso {
   if (!v || typeof v !== "object") return SEM_NOME_DA_FERRAMENTA;
@@ -1029,7 +1068,18 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
     const rotulo = texto(f.dados.rotulo) ?? "Usou uma ferramenta";
     const vivo = e.turnosVivos[turnoId];
     const turnosVivos = vivo && vivo.estado !== "rodando" ? { ...e.turnosVivos, [turnoId]: { ...vivo, estado: "rodando" as const } } : e.turnosVivos;
-    return { ...e, turnosVivos, atividades: comAtividade(e, conversaId, turnoId, (a) => comFerramenta(a, rotulo, emUsoDoFrame(f.dados.emUso))) };
+    return { ...e, turnosVivos, atividades: comAtividade(e, conversaId, turnoId, (a) => comFerramenta(a, rotulo, emUsoDoFrame(f.dados.emUso), idDaAcao(f.dados.id))) };
+  },
+  // NOD-353: a chamada terminou (feita ou Falhou, de tool_result.isError); fim de turno ou id desconhecido não muda nada.
+  "turno.acao_fim": (e, f) => {
+    if (turnoDeLigacao(f.dados)) return e;
+    const turnoId = texto(f.dados.turnoId);
+    const conversaId = texto(f.dados.conversaId);
+    const id = idDaAcao(f.dados.id);
+    if (!turnoId || !conversaId || !id || !guardaAoVivo(e, conversaId)) return e;
+    const a = e.atividades[conversaId]?.[turnoId];
+    const nova = comFimDaAcao(a, id, f.dados.falhou === true);
+    return !nova || nova === a ? e : { ...e, atividades: { ...e.atividades, [conversaId]: { ...e.atividades[conversaId], [turnoId]: nova } } };
   },
   "turno.tarefas": (e, f) => {
     if (turnoDeLigacao(f.dados)) return e;
@@ -1081,7 +1131,7 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
   // quando um turno termina (uma leitura por turno, sem relógio novo); fora da conversa a falta espera a tela pedir. O turno
   // interrompido também gastou a janela (e é o que acaba quando a conta bate no limite): relê igual (revisão do PR 1).
   // NOD-12: e a lista de contas, que carrega a leitura por conta.
-  "turno.encerrado": (e, f, agora) => invalidar(fimDosSubagentes(encerrado(semTurnoVivo(comFalaSaindo(e, texto(f.dados.turnoId), agora), texto(f.dados.turnoId)), texto(f.dados.turnoId)), texto(f.dados.conversaId), texto(f.dados.turnoId), agora), conv(f), "frota", usoPlano(e), contasDoTurno(e), ...trabalhosDoTurno(f), ...bibliotecaDoFrame(e, f)),
+  "turno.encerrado": (e, f, agora) => invalidar(fimDosSubagentes(encerrado(semTurnoVivo(comFalaSaindo(e, texto(f.dados.turnoId), agora, true), texto(f.dados.turnoId)), texto(f.dados.turnoId)), texto(f.dados.conversaId), texto(f.dados.turnoId), agora), conv(f), "frota", usoPlano(e), contasDoTurno(e), ...trabalhosDoTurno(f), ...bibliotecaDoFrame(e, f)),
   "turno.interrompido": (e, f, agora) => invalidar(fimDosSubagentes(encerrado(semTurnoVivo(e, texto(f.dados.turnoId)), texto(f.dados.turnoId)), texto(f.dados.conversaId), texto(f.dados.turnoId), agora), conv(f), "frota", "sua-vez", usoPlano(e), contasDoTurno(e), ...trabalhosDoTurno(f), ...bibliotecaDoFrame(e, f)),
   "decisao.nova": (e, f) => invalidar(e, "sua-vez", conv(f)),
   "decisao.decidida": (e, f) => invalidar(e, "sua-vez", conv(f)),

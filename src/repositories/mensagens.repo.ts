@@ -475,6 +475,20 @@ export function mensagensRepo(conn: Conn, escopo: Escopo) {
       return r.count === 1;
     },
 
+    /**
+     * NOD-353: turno cuja última fala saiu no meio (turno.fala) e acabou sem fala final — o resumo das ações vai na
+     * última fala de texto do bot nesse turno, a mesma que a tela mostrava viva. Só preenche: payload já gravado fica.
+     */
+    async acoesNaUltimaFalaDoTurno(turnoId: string, agenteId: string, payload: Extract<NonNullable<NovaMensagem["payload"]>, { kind: "acoes_do_turno" }>): Promise<boolean> {
+      const r = await conn`update mensagens set payload = ${conn.json(payload)}
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = (
+          select id from mensagens where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and turno_id = ${turnoId}
+            and autor_tipo = 'agente' and autor_id = ${agenteId} and kind = 'texto' and assunto is null
+          order by criado_em desc, id desc limit 1
+        ) and payload is null`;
+      return r.count === 1;
+    },
+
     /** Turno interrompido no meio do streaming: a fala já gravada fica marcada como parcial (ADR-010). */
     async marcarParciaisDoTurno(turnoId: string): Promise<number> {
       const r = await conn`update mensagens set parcial = true where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and turno_id = ${turnoId} and autor_tipo = 'agente'`;

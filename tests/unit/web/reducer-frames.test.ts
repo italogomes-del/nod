@@ -133,6 +133,8 @@ describe("aplicarFrame por TipoFrame", () => {
       vigia: null,
       emUso: null,
       subagentes: null,
+      // NOD-353: sem id (servidor antigo), a segunda fecha a primeira e o texto fecha a segunda.
+      acoes: [{ id: null, rotulo: "Consultou Gmail", estado: "feita", emUso: null }, { id: null, rotulo: "Alterou Gmail", estado: "feita", emUso: null }],
     });
   });
 

@@ -3,6 +3,7 @@
  * NOME que o CLI viu (mcp__nod__<nome>, mcp__<servidor>__<nome> no Codex, ou nativa como Bash) e
  * nunca input/resultado: o cartão diz o que o agente está fazendo, não o conteúdo que ele tocou.
  */
+import type { EventoStream } from "../contracts/turno.ts";
 const NOD: Record<string, string> = {
   lembrar: "Anotou na memória",
   atualizar_perfil: "Propôs mudança no perfil",
@@ -165,7 +166,24 @@ export function ferramentaEmUso(nomeCli: string): FerramentaEmUso {
   return { texto: `Usando ${nome}`, frentes: false };
 }
 
-/** O frame `turno.atividade` de uma ferramenta: o mesmo nos dois caminhos (ponte HTTP e laço local). */
-export function frameDaFerramenta(nomeCli: string): { nome: string; rotulo: string; emUso: FerramentaEmUso } {
-  return { nome: nomeCli, rotulo: rotuloFerramenta(nomeCli), emUso: ferramentaEmUso(nomeCli) };
+/** NOD-353: teto do rótulo da ação, o mesmo no frame ao vivo e no resumo gravado (a troca da viva pela gravada não muda o texto). */
+export const ROTULO_DA_ACAO_MAX = 120;
+
+/** O frame `turno.atividade` de uma ferramenta: o mesmo nos dois caminhos (ponte HTTP e laço local); `id` do tool_use (NOD-353). */
+export function frameVivoDoEvento(ev: EventoStream): { tipo: "turno.atividade"; dados: ReturnType<typeof frameDaFerramenta> } | { tipo: "turno.acao_fim"; dados: { id: string; falhou: boolean } } | null {
+  if (ev.tipo === "tool_use") return { tipo: "turno.atividade", dados: frameDaFerramenta(ev.nome, ev.id) };
+  // O fim de cada chamada leva só o Falhou de tool_result.isError (nunca o conteúdo do resultado).
+  if (ev.tipo === "tool_result") return { tipo: "turno.acao_fim", dados: { id: ev.toolUseId, falhou: ev.isError } };
+  return null;
+}
+
+/** NOD-353: o desktop e o motor repassam à ponte a chamada e o fim dela (o mesmo mapa nos dois). */
+export function repassarAcaoDoEvento(alvo: { ferramenta(turnoId: string, nome: string, id?: string): void; fimDaFerramenta(turnoId: string, id: string, falhou: boolean): void }, turnoId: string, ev: EventoStream): void {
+  if (ev.tipo === "tool_use") alvo.ferramenta(turnoId, ev.nome, ev.id);
+  else if (ev.tipo === "tool_result") alvo.fimDaFerramenta(turnoId, ev.toolUseId, ev.isError);
+}
+
+/** O laço local manda o mesmo frame da ponte, com o `emUso` da fala viva (NOD-348) e o fim de cada chamada (NOD-353). */
+export function frameDaFerramenta(nomeCli: string, id?: string): { nome: string; rotulo: string; emUso: FerramentaEmUso; id?: string } {
+  return { nome: nomeCli, rotulo: rotuloFerramenta(nomeCli).slice(0, ROTULO_DA_ACAO_MAX), emUso: ferramentaEmUso(nomeCli), ...(id ? { id } : {}) };
 }

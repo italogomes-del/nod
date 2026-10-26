@@ -496,7 +496,9 @@
 .message.fala-viva .bubble-wrap { width: min(100%, 600px); }
 .message.fala-viva.com-texto .bubble-wrap { width: auto; }
 .fala-viva:not(.com-texto) .bubble-wrap { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 10px; }
-.fala-viva:not(.com-texto) .bubble-wrap > :not(.msg-autor, .fala-viva-linha) { flex: 1 1 100%; }
+/* NOD-353 (revisão do PR 523): `order` põe o resumo das ações (e o resto em linha cheia) depois da linha viva — sem ele, o
+   resumo entre o nome e a linha empurrava a linha para baixo do nome. */
+.fala-viva:not(.com-texto) .bubble-wrap > :not(.msg-autor, .fala-viva-linha) { flex: 1 1 100%; order: 1; }
 .fala-viva .msg-autor { min-width: 0; max-width: 100%; }
 .fala-viva .msg-autor b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fala-viva-linha { display: flex; align-items: baseline; min-width: 0; font-size: 12px; color: var(--ink-2); white-space: nowrap; animation: fala-troca .16s ease-out both; }
@@ -512,15 +514,27 @@
 .fala-viva-tempo:empty, .fala-viva-sep:has(+ .fala-viva-tempo:empty) { display: none; }
 /* NOD-73: no silêncio do vigia o brilho para — a linha não finge trabalho; o aviso âmbar embaixo diz o resto. */
 .fala-viva-linha.parado .fala-viva-estado { animation: none; background: none; color: var(--ink-2); -webkit-text-fill-color: currentColor; }
-/* "ver etapas": link de texto ink-2, sem fundo; abre o que o cartão grande mostrava, até a NOD-353 redesenhar o resumo. */
-.fala-viva-etapas { margin: 0 0 4px; font-size: 13px; color: var(--ink-2); }
-.fala-viva-etapas > summary { display: inline-flex; align-items: center; min-height: 24px; cursor: pointer; list-style: none; border-radius: 6px; }
-.fala-viva-etapas > summary::-webkit-details-marker { display: none; }
-.fala-viva-etapas > summary:hover { color: var(--ink); }
-.fala-viva-etapas > summary:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
-.fala-viva-ver, .fala-viva-ocultar { white-space: nowrap; text-decoration: underline; text-decoration-color: var(--line-strong); text-underline-offset: 3px; }
-.fala-viva-ocultar, .fala-viva-etapas[open] > summary .fala-viva-ver { display: none; }
-.fala-viva-etapas[open] > summary .fala-viva-ocultar { display: inline; }
+/* NOD-353 (protótipo v2 do Gil, p348-acoes): o resumo das ações, recolhido, entre o nome e o balão. Texto ink-2, sem
+   fundo; a seta gira 90° ao abrir; aberto, uma ação por linha com um fio à esquerda, e Falhou em --danger. */
+.fala-acoes { margin: 0 0 8px; font-size: 13px; color: var(--ink-2); }
+.fala-acoes > summary { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; min-height: 24px; box-sizing: border-box;
+  position: relative; left: -6px; padding: 0 6px; border-radius: 6px; list-style: none; cursor: pointer; }
+.fala-acoes > summary::-webkit-details-marker { display: none; }
+.fala-acoes > summary:hover { color: var(--ink); }
+.fala-acoes > summary:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 0; }
+.fala-acoes-txt { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fala-acoes-seta { flex: none; display: inline-block; width: 10px; text-align: center; transition: transform .16s ease-out; }
+.fala-acoes-seta::before { content: "›"; }
+.fala-acoes[open] .fala-acoes-seta { transform: rotate(90deg); }
+.fala-acoes ol { margin: 4px 0 2px; padding: 0 0 0 12px; border-left: 1px solid var(--line); list-style: none; line-height: 22px; }
+.fala-acoes li { display: flex; gap: 8px; align-items: baseline; }
+.fala-acoes-falhou { flex: none; color: var(--danger); font-weight: 500; }
+.fala-acoes-vezes { flex: none; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.fala-acoes .atividade-tarefas { margin: 4px 0; }
+/* QA do PR 523: o balão fica do tamanho do texto (como hoje) quando o resumo é mais largo que ele; o recuo da seta é
+   `left`, não margem negativa, para a frase pedir a largura inteira e não sair cortada. */
+.bubble-wrap:has(> .fala-acoes) > .bubble { width: fit-content; max-width: 100%; box-sizing: border-box; }
+@media (prefers-reduced-motion: reduce) { .fala-acoes-seta { transition: none; } }
 /* Alto contraste: o texto recortado no gradiente sumiria; volta à cor do sistema. */
 @media (forced-colors: active) { .fala-viva-estado { background: none; color: CanvasText; -webkit-text-fill-color: currentColor; animation: none; } }
 @keyframes fala-entra { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }

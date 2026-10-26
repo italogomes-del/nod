@@ -145,8 +145,8 @@ export type RespostaRenovar = { ativo: boolean | "indefinido"; versaoMinimaApp: 
 /**
  * O que o app desktop viu do turno vivo desde a última renovação, NA ORDEM: texto do modelo e nomes
  * de ferramenta (nunca input/resultado). O servidor republica como turno.delta / turno.atividade.
- */
-export type TrechoVivo = { texto: string } | { ferramenta: string } | { tarefas: TarefaDoBot[] } | { vigia: VigiaVivo } | { subagentes: SubagenteVivo[]; ocioso?: boolean };
+ * NOD-353: `id` do tool_use (o app antigo não manda); `{fim, falhou}`: a chamada terminou, e se `tool_result.isError`. */
+export type TrechoVivo = { texto: string } | { ferramenta: string; id?: string } | { fim: string; falhou: boolean } | { tarefas: TarefaDoBot[] } | { vigia: VigiaVivo } | { subagentes: SubagenteVivo[]; ocioso?: boolean };
 
 /**
  * O vigia do turno (definido em 2026-10-05, NOD-73; src/domain/vigia-turno.ts): só AVISA, nunca corta. `mudoMs` > 0

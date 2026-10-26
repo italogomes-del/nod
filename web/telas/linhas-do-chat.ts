@@ -498,7 +498,7 @@ function mensagensRecebidas(u: Unidade, fontes: readonly Mensagem[], raiz: strin
   const nome = nomeDe(estado, quemPediu, pedido?.payload?.kind === "peer_pedido" ? pedido.payload.nome : undefined, u.trabalho?.pedidoPorNome, daRaiz?.nome);
   const abriramFrentes = new Set(u.mensagens.flatMap((m) => (m.payload?.kind === "frentes_abertas" && m.turnoId ? [m.turnoId] : [])));
   const temRespondido = fontes.some((m) => m.payload?.kind === "pedido_respondido");
-  const finais = fontes.filter((m) => m.kind === "texto" && !m.payload && m.autoria.autor_tipo === "agente" && (dono === null || m.autoria.autor_id === dono) && m.fimDoTurno === true && !(m.turnoId && abriramFrentes.has(m.turnoId)));
+  const finais = fontes.filter((m) => m.kind === "texto" && (!m.payload || m.payload.kind === "acoes_do_turno") && m.autoria.autor_tipo === "agente" && (dono === null || m.autoria.autor_id === dono) && m.fimDoTurno === true && !(m.turnoId && abriramFrentes.has(m.turnoId)));
   const entregue = temRespondido ? undefined : finais[finais.length - 1];
   const nomesDosPedidos = new Map(fontes.flatMap((m) => (m.payload?.kind === "peer_ask" ? [[m.payload.agenteId, m.payload.nome] as const] : [])));
   return fontes.flatMap((m): MensagemDaTroca[] => {

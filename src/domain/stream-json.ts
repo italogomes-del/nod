@@ -81,6 +81,21 @@ function finalDaTarefa(status: string): "concluido" | "falhou" | "parado" {
   return status === "completed" ? "concluido" : status === "failed" ? "falhou" : "parado";
 }
 
+/**
+ * NOD-353 (revisão 2 do #523): a linha `user` pode trazer mais de um `tool_result` (ferramentas paralelas); cada um vira
+ * um evento, para o fim de cada chamada (e o Falhou dela) chegar pelo id. As outras linhas dão um evento só.
+ */
+export function eventosDaLinhaStreamJson(linha: string): EventoStream[] {
+  const ev = interpretarLinhaStreamJson(linha);
+  if (ev.tipo !== "tool_result") return [ev];
+  const content = obj(obj(JSON.parse(linha.trim()))?.["message"])?.["content"];
+  const todos = (Array.isArray(content) ? content : []).flatMap((bloco): EventoStream[] => {
+    const b = obj(bloco);
+    return b?.["type"] === "tool_result" ? [{ tipo: "tool_result", toolUseId: str(b["tool_use_id"]), isError: b["is_error"] === true, texto: textoDoConteudo(b["content"]) }] : [];
+  });
+  return todos.length > 0 ? todos : [ev];
+}
+
 export function interpretarLinhaStreamJson(linha: string): EventoStream {
   const bruta = linha.trim();
   if (bruta === "") return { tipo: "ignorado", razao: "linha_vazia", tipoBruto: null };
@@ -361,6 +376,9 @@ export function classificarResultado(entrada: {
   let rateLimit: Extract<EventoStream, { tipo: "rate_limit" }> | null = null;
   let rateLimitDoResult: Extract<EventoStream, { tipo: "rate_limit" }> | null = null;
   const ferramentasChamadas: string[] = [];
+  // NOD-353: as chamadas cujo `tool_result` voltou com erro, pelo índice em `ferramentasChamadas` (o "Falhou" da fala).
+  const indicePorId = new Map<string, number>();
+  const ferramentasFalharam: number[] = [];
   let textoStream = "";
   // Deltas desde o último bloco completo: o trecho que um SIGTERM deixa sem o `assistant` que o fecharia.
   let textoAberto = "";
@@ -381,6 +399,8 @@ export function classificarResultado(entrada: {
     if (ev.tipo === "tool_result" && ev.isError) {
       const motivo = motivoDoHookDoNod(ev.texto);
       if (motivo !== null) negacoesDoNod.push({ nome: nomePorId.get(ev.toolUseId) ?? "", motivo: motivo.slice(0, 1000) });
+      const i = indicePorId.get(ev.toolUseId);
+      if (i !== undefined && !ferramentasFalharam.includes(i)) ferramentasFalharam.push(i);
     }
     if (ev.tipo === "chamada") tokensDasChamadas = somarTokens(tokensDasChamadas, { entrada: ev.entrada, saida: ev.saida, cacheLeitura: ev.cacheLido, cacheCriacao: ev.cacheNovo });
     if (ev.tipo === "init") init = ev;
@@ -390,6 +410,8 @@ export function classificarResultado(entrada: {
       rateLimitDoResult = rateLimit;
       rateLimit = null;
     } else if (ev.tipo === "tool_use") {
+      // Revisão 3 do #523: o id repetido no turno (o `item_N` do Codex a cada rodada) vale para a chamada mais recente.
+      if (ev.id) indicePorId.set(ev.id, ferramentasChamadas.length);
       ferramentasChamadas.push(ev.nome);
       ultimaFerramenta = posicao;
     } else if (ev.tipo === "delta") {
@@ -430,6 +452,7 @@ export function classificarResultado(entrada: {
       custoUsd: result.custoUsd,
       tokens: result.tokens,
       ferramentasChamadas,
+      ...(ferramentasFalharam.length > 0 ? { ferramentasFalharam } : {}),
       negacoesPermissao: result.negacoesPermissao,
       ...(negacoesDoNod.length > 0 ? { negacoesDoNod } : {}),
     };
@@ -460,7 +483,7 @@ export function classificarResultado(entrada: {
         : entrada.exitCode !== 0
           ? `exit:${entrada.exitCode}`
           : `sem_result:${entrada.driver && /^[A-Za-z0-9_-]{1,32}$/.test(entrada.driver) ? entrada.driver : "desconhecido"}`;
-  const base = { texto, sessaoCli, custoUsd: null, tokens: gastou ? tokensDasChamadas : tokensZerados, ...(gastou ? { custoDesconhecido: true } : {}), ferramentasChamadas, negacoesPermissao: [] as string[], ...(negacoesDoNod.length > 0 ? { negacoesDoNod } : {}), ...(causa ? { causa } : {}) };
+  const base = { texto, sessaoCli, custoUsd: null, tokens: gastou ? tokensDasChamadas : tokensZerados, ...(gastou ? { custoDesconhecido: true } : {}), ferramentasChamadas, ...(ferramentasFalharam.length > 0 ? { ferramentasFalharam } : {}), negacoesPermissao: [] as string[], ...(negacoesDoNod.length > 0 ? { negacoesDoNod } : {}), ...(causa ? { causa } : {}) };
   if (entrada.interrompidoPeloDriver === true || entrada.signal !== null || init) return { desfecho: "interrompido", ...base, sinais };
   if (entrada.exitCode === null) {
     return { desfecho: "interrompido", motivoInterrupcao: "lancamento_falhou", ...base, sinais };
@@ -567,8 +590,9 @@ export function classificarSessao(entrada: Parameters<typeof classificarResultad
   const geral = classificarResultado(entrada);
   if (cortado) {
     const init = entrada.eventos.find((e) => e.tipo === "init");
-    const interrompido = classificarResultado({ ...entrada, eventos: init ? [init, ...aberta] : aberta, interrompidoPeloDriver: true });
-    return { ...interrompido, texto, sessaoCli: geral.sessaoCli, ferramentasChamadas: geral.ferramentasChamadas, custoUsd: ultimo.custoUsd, tokens, negacoesPermissao, ...(geral.negacoesDoNod ? { negacoesDoNod: geral.negacoesDoNod } : {}) };
+    // NOD-353: os índices de falha da rodada aberta não valem para a lista do turno inteiro (a de `geral`).
+    const { ferramentasFalharam: _daRodada, ...interrompido } = classificarResultado({ ...entrada, eventos: init ? [init, ...aberta] : aberta, interrompidoPeloDriver: true });
+    return { ...interrompido, texto, sessaoCli: geral.sessaoCli, ferramentasChamadas: geral.ferramentasChamadas, ...(geral.ferramentasFalharam ? { ferramentasFalharam: geral.ferramentasFalharam } : {}), custoUsd: ultimo.custoUsd, tokens, negacoesPermissao, ...(geral.negacoesDoNod ? { negacoesDoNod: geral.negacoesDoNod } : {}) };
   }
   return { ...geral, texto, tokens, negacoesPermissao };
 }

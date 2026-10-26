@@ -1,6 +1,6 @@
 import type { Agente } from "../contracts/agente.ts";
 import type { Autoria, Executor, RuntimeEvent } from "../contracts/evento.ts";
-import type { Confianca, Mensagem } from "../contracts/mensagem.ts";
+import type { Confianca, Mensagem, PayloadMensagem } from "../contracts/mensagem.ts";
 import type { Negacao } from "../contracts/negacao.ts";
 import type { EstadoOrcamento, Sala } from "../contracts/sala.ts";
 import type { Turno } from "../contracts/turno.ts";
@@ -23,6 +23,8 @@ export type EntradaPost = {
   executor?: Executor;
   /** Post originado de turno de rotina é isento do orçamento (E5.5, E12.3). */
   eRotina?: boolean;
+  /** NOD-353: o resumo das ações do turno do bot que postou (a fala da sala o mostra como a da conversa própria). */
+  acoes?: Extract<PayloadMensagem, { kind: "acoes_do_turno" }> | null;
   /**
    * Presença do bot candidato (ADR-021: derivada do poll, sem heartbeat). Nesta rodada todos os
    * bots da sala rodam na máquina de quem a abriu, então o default é "online"; quem tiver a
@@ -76,6 +78,7 @@ export const postarNaSala: CasoDeUso<EntradaPost, SaidaPost> = async (deps, inpu
     autoria,
     kind: "texto",
     texto,
+    payload: input.acoes ?? null,
     confianca: input.confianca ?? (autoria.autor_tipo === "pessoa" ? "confiavel" : "nao_confiavel"),
   });
   if (!mensagem) throw new ErroDeDominio("estado_invalido", { cause: "mensagem não criada" });

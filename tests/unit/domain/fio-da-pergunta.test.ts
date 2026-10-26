@@ -75,6 +75,19 @@ describe("mensagens do fio", () => {
     expect(mensagensDoFio([d1], mensagens).map((m) => m.id)).toEqual(["p1", "r1"]);
   });
 
+  it("NOD-353 (revisão 2 do #523): a explicação da retomada que usou ferramentas (fala com resumo das ações) continua no fio e no histórico", () => {
+    const d1 = decisao("d1", { turnoId: "T0" });
+    const d2 = decisao("d2", { turnoId: "R1", fioId: "d1" });
+    const mensagens = [
+      mensagem("p1", "T0", "Posso arquivar o PR 7?", { kind: "pedido_a_pessoa", decisaoId: "d1" }),
+      mensagem("r1", "T0", "Ele passou na CI?", { kind: "resposta_a_pedido", decisaoId: "d1", agenteId: "a", perguntaEm: EM, retomada: true, turnoRetomadaId: "R1" }, true),
+      mensagem("e1", "R1", "Olhei: a CI está vermelha.", { kind: "acoes_do_turno", acoes: [{ rotulo: "Rodou um comando" }] }),
+      mensagem("p2", "R1", "Arquivo mesmo assim?", { kind: "pedido_a_pessoa", decisaoId: "d2" }),
+    ];
+    expect(mensagensDoFio([d1, d2], mensagens).map((m) => m.id)).toEqual(["p1", "r1", "e1", "p2"]);
+    expect(historicoDoFio(mensagensDoFio([d1, d2], mensagens), () => "Marlon").join("\n")).toContain("a CI está vermelha");
+  });
+
   it("o histórico da retomada leva só as últimas 10 mensagens, cada uma aparada, com quem falou", () => {
     const mensagens = Array.from({ length: 14 }, (_, i) =>
       i % 2 === 0 ? mensagem(`p${i}`, "T", `pergunta ${i}`, { kind: "pedido_a_pessoa", decisaoId: `d${i}` }) : mensagem(`r${i}`, "T", `resposta ${i} ${"x".repeat(HISTORICO_CARACTERES * 2)}`, { kind: "resposta_a_pedido", decisaoId: `d${i - 1}`, agenteId: "a", perguntaEm: EM, retomada: true }, true),

@@ -14,11 +14,11 @@ import { botao, dataHora, esc, hora, iconeAgente, paragrafos } from "../lib/rend
 import { maquinaDoBot } from "./maquinas.ts";
 import { outraMaquinaDestaVez } from "../lib/rodar-desta-vez.ts";
 import { acordandoNaFila, motivoLegivel } from "../lib/maquina-nuvem.ts";
-import { estadoDaFala, linhaAtual, resumoEtapa, textoDaFala, type AtividadeTurno, type VigiaDaAtividade } from "../lib/atividade.ts";
+import { estadoDaFala, fraseDasAcoes, linhasDoResumo, textoDaFala, type AtividadeTurno, type LinhaDoResumo, type VigiaDaAtividade } from "../lib/atividade.ts";
 import { linhaDaFila } from "../lib/fila-do-pedido.ts";
 import { haQuanto } from "../lib/relogio.ts";
 import { FALA_SAINDO_MS, tempoDaFala } from "../lib/fala-viva.ts";
-import { soLinks, textoFormatado } from "../lib/texto-formatado.ts";
+import { textoFormatado } from "../lib/texto-formatado.ts";
 import { estadoMascoteNaConversa, mascoteAnimado, turnosVivosDaConversa } from "../lib/mascote.ts";
 import { renderFaixaParada } from "./faixa-parada.ts";
 import type { Morph } from "../lib/morph.ts";
@@ -586,7 +586,7 @@ export function renderMensagem(m: Mensagem, estado: Estado, sala = false, opcoes
   const progressoFora = ehPessoa || pergunta ? (opcoes.progresso ?? "") : "";
   const balao = motivoTela !== null ? (estado.computadorPessoa ? htmlPedidoDeTela(motivoTela, agente?.id ?? "", telaAberta) : htmlCartaoTela(motivoTela, agente?.id ?? "", telaAberta, agente?.nome, pergunta?.decisaoId)) : pergunta ? cartaoDaPergunta(m, estado) : (ehPessoa ? m.anexos?.length : temMidiaDoBot(m) && !progressoDentro) && m.texto.trim() === "" ? "" : `<div class="bubble${progressoDentro ? " com-progresso" : ""}">${ehPessoa ? comChipDeComando(m.texto) : textoFormatado(m.texto, { chave: m.id, diagramas: opcoes.diagramas === true })}${metaTags}${progressoDentro}</div>`;
   return `<article class="${classes}" data-mensagem="${esc(m.id)}"${pergunta ? ` data-pergunta="${esc(pergunta.decisaoId)}"` : ""}>
-    ${!ehPessoa && agente ? iconeAgente(agente, "md") : ""}<div class="bubble-wrap">${acoesDaMensagem(m, estado, sala)}${sender}${resposta ? rotuloDaResposta(m) : ""}${ehPessoa ? citacaoAcimaDoBalao(m) : ""}${anexosDe(m, estado)}${balao}${ehPessoa ? "" : midiasDoBot(m, estado)}${progressoFora}${ehPessoa ? "" : (opcoes.linhaDoModo ?? "")}${ehPessoa ? "" : avisoDeLeitura(m, estado)}${ehPessoa ? "" : capturaDoTurno(m, estado)}${contextoDelegado}${chipsDeReacao(m, estado)}${fila ? renderSituacaoFila(fila, fila.turnoId) : ""}${faixaDaMensagem(m, estado)}</div>
+    ${!ehPessoa && agente ? iconeAgente(agente, "md") : ""}<div class="bubble-wrap">${acoesDaMensagem(m, estado, sala)}${sender}${ehPessoa ? "" : resumoDaMensagem(m)}${resposta ? rotuloDaResposta(m) : ""}${ehPessoa ? citacaoAcimaDoBalao(m) : ""}${anexosDe(m, estado)}${balao}${ehPessoa ? "" : midiasDoBot(m, estado)}${progressoFora}${ehPessoa ? "" : (opcoes.linhaDoModo ?? "")}${ehPessoa ? "" : avisoDeLeitura(m, estado)}${ehPessoa ? "" : capturaDoTurno(m, estado)}${contextoDelegado}${chipsDeReacao(m, estado)}${fila ? renderSituacaoFila(fila, fila.turnoId) : ""}${faixaDaMensagem(m, estado)}</div>
   </article>${resposta ? linhaDaRetomada(m, estado) : ""}`;
 }
 
@@ -688,16 +688,13 @@ function comDecisaoVencida(p: Proposta, estado: Estado): boolean {
   return estado.suaVez?.itens.some((i) => i.decisao.id === p.id && i.estadoColuna === "vencido") ?? false;
 }
 
-/** Etapas mostradas no cartão aberto; as anteriores viram "+N anteriores" (sem rolagem interna, que o re-render perderia). */
-const ETAPAS_VISIVEIS = 20;
-
 /**
  * A fala viva (NOD-348, emenda da ADR-114): o turno rodando é uma fala do bot, como a que vai ficar — o mascote md do
  * bot do turno, o nome e, no lugar da hora, a linha viva "‹Estado› · ‹N s›" (Pensando, Escrevendo, Usando Linear,
  * Abrindo frentes; sem "digitando" e sem o nome da IA). O texto chega num balão sem cursor e a linha desce para o
  * rodapé, na margem da mensagem: quando a fala final entra, a conversa não muda de altura. Com ferramenta, o balão
  * continua (revisão 2 do #508: a resposta final de um turno com ferramenta não fica escondida), e as etapas e a lista
- * de tarefas ficam num "ver etapas" discreto; o vigia (NOD-73), à vista, com o Parar.
+ * de tarefas ficam no resumo das ações (NOD-353); o vigia (NOD-73), à vista, com o Parar.
  * `saindo` (QA do #508): o turno acabou e a fala gravada ainda não chegou — a mesma fala, parada, até a releitura.
  * Cada pedaço é uma parte (`data-parte`) filha do `.bubble-wrap`: `regiaoPorBlocos` troca só a parte que mudou e copia
  * os atributos para o mesmo `<nod-mascote>`, que não reinicia a cada pedaço do streaming (`morfar`). O tempo da linha
@@ -707,7 +704,6 @@ export type FalaViva = { html: string; morfar: Morph };
 export function renderFalaViva(t: TurnoVivo, a: AtividadeTurno | undefined, agente: Pick<AgenteDaFala, "nome" | "cor" | "forma"> | undefined, estado: Estado, parar: string, saindo?: { em: number; chave: string }): FalaViva {
   const nome = agente?.nome ?? "O agente";
   const fala = saindo ? { chave: "respondeu", texto: "Respondeu", mascote: { state: "idle" } as { state: string; expression?: string } } : estadoDaFala(a);
-  const comFerramenta = (a?.ferramentas ?? 0) > 0;
   const texto = textoDaFala(a);
   // A chave do cache do texto formatado e das tabelas: a fala parada do meio do turno tem a sua (revisão 4 do #508).
   const chave = saindo?.chave ?? `vivo:${t.turnoId}`;
@@ -717,10 +713,12 @@ export function renderFalaViva(t: TurnoVivo, a: AtividadeTurno | undefined, agen
   const tempo = saindo ? `<span class="fala-viva-tempo" aria-hidden="true">${tempoDaFala(saindo.em - t.desde)}</span>` : `<span class="fala-viva-tempo" data-desde="${t.desde}" aria-hidden="true"></span>`;
   const viva = (lugar: "autor" | "rodape") => `<div class="fala-viva-linha ${lugar}${parado}" data-parte="viva" data-estado-fala="${fala.chave}"><span class="fala-viva-estado">${esc(fala.texto)}</span><span class="fala-viva-sep" aria-hidden="true"> · </span>${tempo}</div>`;
   const partes: { chave: string; html: string }[] = [{ chave: "nome", html: `<div class="msg-autor" data-parte="nome"><b>${esc(nome)}</b></div>` }];
+  // NOD-353: o resumo das ações, entre o nome e o balão, como na fala gravada. A fala do meio que saiu (`saindo:`) não o
+  // tem — a gravada dela também não —; a última de um turno acabado (`vivo:`) tem, igual à gravada, sem pulo na troca.
+  const resumo = a && (!saindo || chave === `vivo:${t.turnoId}`) ? renderResumoDasAcoes(t.turnoId, linhasDoResumo(a.acoes, !!saindo), saindo ? [] : a.tarefas, "acoes") : "";
+  if (resumo) partes.push({ chave: "acoes", html: resumo });
   if (!texto) partes.push({ chave: "viva", html: viva("autor") });
   if (texto) partes.push({ chave: "balao", html: `<div class="bubble" data-parte="balao">${textoFormatado(texto, { chave, aoVivo: true })}</div>` });
-  // Saindo, sem o "ver etapas": a fala gravada não o tem (a atividade não vai para o chat), e a troca não muda de altura.
-  if (a && comFerramenta && !saindo) partes.push({ chave: "etapas", html: renderEtapasDaFala(t, a, nome, !!texto) });
   const vigia = a && !saindo ? renderAvisoDoVigia(a, estado.agora, parar, "vigia") : "";
   if (vigia) partes.push({ chave: "vigia", html: vigia });
   if (texto) partes.push({ chave: "viva", html: viva("rodape") });
@@ -753,20 +751,27 @@ function mascoteDaFala(agente: Pick<AgenteDaFala, "nome" | "cor" | "forma">, att
   return base.replace(/ aria-label="[^"]*"/, rotulo("aria-label", attrs["aria-label"] ?? "")).replace(/ title="[^"]*"/, rotulo("title", attrs.title ?? ""));
 }
 
-/** O que o cartão grande mostrava (definido em 2026-09-24), num "ver etapas" de texto, sem fundo e sem botão: o que ele faz agora, as tarefas e as etapas. */
-function renderEtapasDaFala(t: TurnoVivo, a: AtividadeTurno, nome: string, textoNoBalao: boolean): string {
-  const visiveis = a.etapas.slice(-ETAPAS_VISIVEIS);
-  const anteriores = a.totalEtapas - visiveis.length;
-  const etapas = visiveis.map((e) => `<li title="${esc(e.texto)}"><span class="atividade-ok" aria-hidden="true">✓</span><span>${esc(resumoEtapa(e.texto))}</span><small>${e.ferramentas === 1 ? "1 ferramenta" : `${e.ferramentas} ferramentas`}</small></li>`).join("");
-  const contagem = `${a.totalEtapas === 1 ? "1 etapa" : `${a.totalEtapas} etapas`} · ${a.ferramentas === 1 ? "1 ferramenta" : `${a.ferramentas} ferramentas`}`;
-  return `<details class="fala-viva-etapas" data-parte="etapas" data-disclosure="atividade-${esc(t.turnoId)}"><summary><span class="fala-viva-ver">ver etapas</span><span class="fala-viva-ocultar">ocultar etapas</span></summary>
-      <div class="atividade-etapas" aria-label="Atividade de ${esc(nome)}" role="group">
-        <p class="atividade-agora">${soLinks(textoNoBalao ? linhaAtual({ ...a, atual: "" }) : linhaAtual(a))}</p>
-        ${renderTarefasDoBot(a.tarefas)}
-        <p class="atividade-conta">${contagem}</p>
-        <ol>${anteriores > 0 ? `<li class="atividade-anteriores">+ ${anteriores} ${anteriores === 1 ? "etapa anterior" : "etapas anteriores"}</li>` : ""}${etapas}</ol>
-      </div>
-    </details>`;
+/**
+ * NOD-353 (protótipo v2 do Gil, `p348-acoes`; emenda da ADR-114): o resumo das ações da fala, recolhido por padrão. A
+ * frase conta só as que terminaram ("Pesquisou na web e abriu uma página"); aberto, uma por linha, a que roda no
+ * presente ("Usando Gmail") e a que deu erro com **Falhou** na linha dela. Fora de região live: a troca do presente
+ * pelo passado não é anunciada. A mesma chave de disclosure na fala viva, na parada e na gravada (o aberto continua
+ * aberto na troca, e o foco volta pelo `data-disclosure`). Nada terminado ainda: não aparece.
+ * As tarefas do bot (o checklist) ficam dentro do aberto, só na fala viva, até a NOD-359.
+ */
+export function renderResumoDasAcoes(turnoId: string, linhas: readonly LinhaDoResumo[], tarefas: readonly TarefaDoBot[] = [], parte?: string): string {
+  const frase = fraseDasAcoes(linhas);
+  if (!frase) return "";
+  const itens = linhas.map((l) => `<li data-estado="${l.estado}"><span>${esc(l.estado === "rodando" ? (l.emUso ?? l.rotulo) : l.rotulo)}</span>${(l.vezes ?? 1) > 1 ? `<span class="fala-acoes-vezes">×${l.vezes}</span>` : ""}${l.estado === "falhou" ? '<span class="fala-acoes-falhou">Falhou</span>' : ""}</li>`).join("");
+  return `<details class="fala-acoes"${parte ? ` data-parte="${parte}"` : ""} data-disclosure="acoes-${esc(turnoId)}"><summary><span class="fala-acoes-txt">${esc(frase)}</span><span class="fala-acoes-seta" aria-hidden="true"></span></summary>${renderTarefasDoBot(tarefas)}<ol role="list">${itens}</ol></details>`;
+}
+
+/** NOD-353: o resumo gravado na fala final (payload `acoes_do_turno`), na forma das linhas da fala viva. */
+function resumoDaMensagem(m: Mensagem): string {
+  // Revisão do #523: payload gravado é dado (jsonb de outra versão) — fora da forma, sem resumo em vez de quebrar a tela.
+  if (m.payload?.kind !== "acoes_do_turno" || !Array.isArray(m.payload.acoes)) return "";
+  const linhas = m.payload.acoes.filter((x) => typeof x?.rotulo === "string").map((x): LinhaDoResumo => ({ rotulo: x.rotulo, estado: x.falhou ? "falhou" : "feita", emUso: null, ...(Number.isInteger(x.vezes) && x.vezes! > 1 ? { vezes: Math.min(x.vezes!, 9999) } : {}) }));
+  return renderResumoDasAcoes(m.turnoId ?? m.id, linhas);
 }
 
 /**

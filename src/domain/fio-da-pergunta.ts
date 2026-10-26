@@ -63,7 +63,8 @@ export function mensagensDoFio(rodadas: readonly Pick<Decisao, "id" | "turnoId">
   return mensagens.filter((m) => {
     const p = m.payload;
     if (p?.kind === "pedido_a_pessoa" || p?.kind === "resposta_a_pedido") return ids.has(p.decisaoId);
-    return p === null && m.kind === "texto" && m.autoria.autor_tipo === "agente" && m.turnoId !== null && turnos.has(m.turnoId);
+    // NOD-353: a fala com o resumo das ações (payload acoes_do_turno) continua fala — é a explicação da retomada que usou ferramentas.
+    return (p === null || p.kind === "acoes_do_turno") && m.kind === "texto" && m.autoria.autor_tipo === "agente" && m.turnoId !== null && turnos.has(m.turnoId);
   });
 }
 

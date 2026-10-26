@@ -227,8 +227,9 @@ describeIntegracao("mídia gerada pelo bot (NOD-323)", () => {
       const a = png(8, 8);
       const r = (await executar(deps, receberMidiaDoBot, { plano, cabecalho: cab(a), conteudo: a, sha256Recebido: sha(a) })).data;
       if (!r.ok) throw new Error("upload");
-      const s = (await executar(deps, assentarTurno, { turnoId, machineId: plano.machineId, seqLocal: 1, fala: { tipo: "texto", texto: "" }, resultado: resultado(""), executor: "catcher" })).data;
-      expect(s.mensagem).toMatchObject({ kind: "texto", texto: "" });
+      // NOD-353 (QA do #523): a fala vazia que leva a mídia também leva o resumo das ações do turno.
+      const s = (await executar(deps, assentarTurno, { turnoId, machineId: plano.machineId, seqLocal: 1, fala: { tipo: "texto", texto: "" }, resultado: { ...resultado(""), ferramentasChamadas: ["Write", "Bash"], ferramentasFalharam: [1] }, executor: "catcher" })).data;
+      expect(s.mensagem).toMatchObject({ kind: "texto", texto: "", payload: { kind: "acoes_do_turno", acoes: [{ rotulo: "Escreveu um arquivo" }, { rotulo: "Rodou um comando", falhou: true }] } });
       expect(s.mensagem?.anexos?.map((x) => x.id)).toEqual([r.id]);
     });
   });

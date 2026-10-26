@@ -118,6 +118,8 @@ export type ResultadoTurno = {
   custoDesconhecido?: boolean;
   tokens: TokensTurno;
   ferramentasChamadas: string[];
+  /** NOD-353: os índices (em `ferramentasChamadas`) das chamadas cujo resultado voltou com erro; ausente = nenhuma. */
+  ferramentasFalharam?: number[];
   /** permission_denials[].tool_name (negar NÃO é erro no CLI, s4b); `negacoesDoNod` (2026-10-11): o motivo do hook do nod. */
   negacoesPermissao: string[];
   negacoesDoNod?: { nome: string; motivo: string }[];

@@ -8,6 +8,8 @@ export type TipoFrame =
    * src/domain/rotulo-ferramenta.ts). Separa as etapas da atividade; `emUso` é a linha viva ("Usando Linear", NOD-348).
    */
   | "turno.atividade"
+  /** NOD-353: {id, falhou} — a chamada `id` (o mesmo do turno.atividade) terminou; `falhou` vem de tool_result.isError. */
+  | "turno.acao_fim"
   /** A lista de tarefas do bot no turno vivo (TaskCreate/TaskUpdate): {tarefas: TarefaDoBot[]}, a lista inteira. */
   | "turno.tarefas"
   /** NOD-350: {subagentes: SubagenteVivo[] (passo já rotulado), resumo, principalOcioso} — a lista inteira, ≤1/s. */

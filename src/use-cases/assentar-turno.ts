@@ -1,7 +1,7 @@
 import type { Autoria, Executor, RuntimeEvent } from "../contracts/evento.ts";
 import { HARNESSES, type IdHarness } from "../contracts/harness.ts";
 import { MOTIVO_DA_CAUSA, type CausaSemIa, type Inventario } from "../contracts/inventario.ts";
-import type { Mensagem } from "../contracts/mensagem.ts";
+import type { Mensagem, PayloadMensagem } from "../contracts/mensagem.ts";
 import type { MotivoFalha, MotivoInterrupcao } from "../contracts/motivos.ts";
 import type { Entrega } from "../contracts/ponte.ts";
 import type { ContaNoLimite, Turno } from "../contracts/turno.ts";
@@ -49,6 +49,7 @@ import { propagarSessaoDoTurno } from "./sessao-do-turno.ts";
 import { esperaAoAssentar } from "./esperar-comando.ts";
 import { voltaMarcadaAoAssentar } from "./me-chame-as.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
+import { acoesDoTurno } from "../domain/acoes-do-turno.ts";
 
 /** `harness`: o que rodou o turno (vem do plano puxado, nunca da máquina); grava o dono da sessão (0030). */
 /**
@@ -249,6 +250,9 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
   // /contexto anterior (o último texto que sobra na sessão compactada). Vale só a linha com os números, abaixo.
   const comandoDoTurno = comandoDaConversa(turno.entradaTexto)?.comando.nome;
   // definido em 2026-10-05: com `causaSemIa` não há fala — o que veio é a recusa do fornecedor, nunca texto do bot.
+  // NOD-353: o resumo das ações vai na fala final do bot (texto ou só mídia); turno sem ferramenta fica sem payload.
+  const listaDeAcoes = acoesDoTurno(resultado.ferramentasChamadas, resultado.ferramentasFalharam);
+  const acoes: Extract<PayloadMensagem, { kind: "acoes_do_turno" }> | null = listaDeAcoes.length > 0 ? { kind: "acoes_do_turno", acoes: listaDeAcoes } : null;
   const falaTexto = entrega.fala.tipo === "texto" && comandoDoTurno !== "compactar" && !resultado.causaSemIa ? traduzirSaidaDoComando(turno.entradaTexto, entrega.fala.texto, entrega.harness) : "";
   let mensagem: Mensagem | null = null;
   /** NOD-200: a fala de texto do bot fora de sala, não silenciada nem tardia — só ela leva a captura. */
@@ -272,7 +276,7 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
     // responders (menção) e o orçamento do canal rodarem na MESMA tx — nunca por mensagens.criar direto.
     const conversa = await deps.repos.conversas.buscar(turno.conversaId);
     if (!conversa?.salaId) throw new ErroDeDominio("estado_invalido", { cause: "turno de sala sem sala" });
-    const post = await postarNaSala(deps, { salaId: conversa.salaId, texto: falaTexto, autoria, confianca: turno.entradaConfianca, turnoId: turno.id, executor, eRotina: false });
+    const post = await postarNaSala(deps, { salaId: conversa.salaId, texto: falaTexto, autoria, confianca: turno.entradaConfianca, turnoId: turno.id, executor, eRotina: false, acoes });
     mensagem = post.data.mensagem;
     events.push(...(post.events ?? []).filter((ev) => ev.kind !== "mensagem_criada"));
   } else if (falaTexto.trim() !== "" && !silencioso && !rotinaCaida) {
@@ -282,7 +286,7 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
       autoria,
       kind: "texto",
       texto: falaTexto,
-      payload: null,
+      payload: acoes,
       confianca: turno.entradaConfianca,
       parcial: interrompido,
     });
@@ -291,9 +295,12 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
   // NOD-323 (ADR-126): o bot anexou mídia e não escreveu nada — a fala entra vazia, só para levar a mídia.
   const podeFalar = entrega.fala.tipo === "texto" && !resultado.causaSemIa && !silencioso && !rotinaCaida && turno.origem !== "sala" && comandoDoTurno !== "compactar";
   if (!mensagem && podeFalar && (await deps.repos.anexos.contarDoTurno(turno.id)) > 0) {
-    mensagem = await deps.repos.mensagens.criar({ conversaId: turno.conversaId, turnoId: turno.id, autoria, kind: "texto", texto: "", payload: null, confianca: turno.entradaConfianca, parcial: interrompido });
+    mensagem = await deps.repos.mensagens.criar({ conversaId: turno.conversaId, turnoId: turno.id, autoria, kind: "texto", texto: "", payload: acoes, confianca: turno.entradaConfianca, parcial: interrompido });
     falaDoBot = !tardia;
   }
+  // NOD-353 (revisão do #523): a última fala saiu no meio (turno.fala) e não veio fala final — o resumo vai nela, senão a
+  // fala parada some com o resumo que a tela mostrava.
+  if (!mensagem && acoes && podeFalar) await deps.repos.mensagens.acoesNaUltimaFalaDoTurno(turno.id, turno.agenteId, acoes);
   if (captura && falaDoBot && mensagem) await anexarCaptura(deps, { turnoId: turno.id, conversaId: turno.conversaId, mensagemId: mensagem.id, bytes: captura, agora });
   // NOD-323: a mídia solta do turno prende à fala final. A sala não tem anexar_midia nesta PR (plano-turno.ts); turno sem
   // fala não ganha post vazio, e a mídia solta o varredor apaga depois de um dia.

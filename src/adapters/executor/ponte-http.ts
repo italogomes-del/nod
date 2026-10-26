@@ -374,7 +374,10 @@ export function criarPonteHttp(o: { url: string; chave: string; versao: string; 
       trechos.set(turnoId, fila);
       aparar(turnoId);
     },
-    ferramenta(turnoId: string, nome: string) { trechos.set(turnoId, [...(trechos.get(turnoId) ?? []), { ferramenta: nome }]); aparar(turnoId); },
+    /** NOD-353: `id` é o do tool_use, para a tela fechar esta chamada quando o resultado voltar. */
+    ferramenta(turnoId: string, nome: string, id?: string) { trechos.set(turnoId, [...(trechos.get(turnoId) ?? []), id ? { ferramenta: nome, id } : { ferramenta: nome }]); aparar(turnoId); },
+    /** NOD-353: a chamada `id` terminou; `falhou` = tool_result.isError. */
+    fimDaFerramenta(turnoId: string, id: string, falhou: boolean) { trechos.set(turnoId, [...(trechos.get(turnoId) ?? []), { fim: id, falhou }]); aparar(turnoId); },
     /** A lista inteira substitui a que ainda não saiu: só a mais nova importa. */
     tarefas(turnoId: string, lista: TarefaDoBot[]) { trechos.set(turnoId, [...(trechos.get(turnoId) ?? []).filter((t) => !("tarefas" in t)), { tarefas: lista }]); aparar(turnoId); },
     /** O vigia do turno (NOD-73): como as tarefas, o aviso mais novo substitui o que ainda não saiu — só ele importa. */

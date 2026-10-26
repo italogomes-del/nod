@@ -205,6 +205,7 @@ export function assuntoDe(kind: KindMensagem, payload: PayloadMensagem | null, a
       case "pedido_respondido":
         return "pedido.respondido";
       case "boas_vindas":
+      case "acoes_do_turno": // NOD-353: a fala final com o resumo das ações continua fala.
       case "pedido_a_pessoa":
       case "resposta_a_pedido":
         return null;

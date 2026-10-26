@@ -17,7 +17,7 @@ import { colunaPrimeira, COLUNAS_MENSAGEM, paraMensagem, type LinhaMensagem } fr
  * - trabalhos: os do bot que começaram ou terminaram no dia (trabalhos_por_conversa), uma linha por começo e uma por fim.
  *
  * Linha sem assunto (de antes da 0091, que o backfill ainda não alcançou; chat limpo, PR 2): entra como candidata quando
- * não é fala (kind texto sem payload) e o assunto é resolvido na leitura, como o backfill faria (assuntoNaLeitura); fica
+ * não é fala (kind texto sem payload, ou com o resumo das ações da NOD-353) e o assunto é resolvido na leitura, como o backfill faria (assuntoNaLeitura); fica
  * se ele está entre os da Atividade. A contagem resolve as candidatas do mesmo jeito.
  *
  * As contagens usam os MESMOS filtros das listas: `contagem=1` e o `total` da página batem sempre. Os `coalesce` na não
@@ -47,7 +47,7 @@ export function atividadeRepo(conn: Conn, escopo: Escopo) {
 
   const filtroMensagens = (conversaId: string, f: Faixa, assuntos: readonly string[]) => conn`
     m.tenant_id = ${escopo.tenantId} and m.conversa_id = ${conversaId} and m.criado_em >= ${f.ini} and m.criado_em < ${f.fim}
-      and (m.assunto = any(${[...assuntos]}::text[]) or (m.assunto is null and (m.kind <> 'texto' or m.payload is not null)))
+      and (m.assunto = any(${[...assuntos]}::text[]) or (m.assunto is null and (m.kind <> 'texto' or coalesce(m.payload->>'kind', 'acoes_do_turno') <> 'acoes_do_turno')))
       and not (coalesce(m.payload->>'kind', '') = 'trabalho_aberto' and coalesce(m.payload->>'trabalhoId', '') in (select d.id::text from (${trabalhosDoDia(conversaId, f)}) d))
       and not (coalesce(m.payload->>'kind', '') in ('frentes_abertas', 'frentes_terminadas') and exists (
         select 1 from jsonb_array_elements(coalesce(m.payload->'frentes', '[]'::jsonb)) fr

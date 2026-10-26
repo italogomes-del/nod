@@ -110,7 +110,9 @@ describe("frameDaFerramenta (QA do #508)", () => {
   it("compor.ts: todo turno.atividade de ferramenta sai por frameDaFerramenta (a ponte e o laço local)", () => {
     const compor = readFileSync(new URL("../../../src/adapters/http/compor.ts", import.meta.url), "utf8");
     const publicacoes = [...compor.matchAll(/publicarDoPlano\(plano, "turno\.atividade", ([^)]*\)?)/g)].map((x) => x[1]);
-    expect(publicacoes.length).toBeGreaterThanOrEqual(2);
+    // Revisão 3 do #523: o laço local publica pelo `frameVivoDoEvento`, que monta o frame com o mesmo frameDaFerramenta.
+    expect(publicacoes.length).toBeGreaterThanOrEqual(1);
     for (const p of publicacoes) expect(p).toMatch(/^frameDaFerramenta\(/);
+    expect(compor).toMatch(/const f = frameVivoDoEvento\(ev\); if \(f\) publicarDoPlano\(plano, f\.tipo, f\.dados\)/);
   });
 });

@@ -2,7 +2,7 @@
 
 Status: proposto; parte do servidor no PR 1 do [plano do chat limpo](../plano-chat-limpo.md) (PR #390), a tela, a janela
 e os gatilhos no PR 2 (ver **Emenda do PR 2**), a troca agrupada no PR 3 (ver **Emenda do PR 3**), o cartão encolhido no
-PR 4 (ver **Emenda do PR 4**), as etiquetas e os divisores de data no PR 6 (ver **Emenda do PR 6**), o progresso na fala no PR 7 (ver **Emenda do PR 7**), a pílula que se alarga no PR 8 (ver **Emenda do PR 8**), a fala viva na NOD-348 (ver **Emenda da NOD-348**) · Data: 2026-10-18 · Migração 0091. A regra da tela, a janela que conta só o chat e os gatilhos de reversão entram no PR 2, junto da primeira
+PR 4 (ver **Emenda do PR 4**), as etiquetas e os divisores de data no PR 6 (ver **Emenda do PR 6**), o progresso na fala no PR 7 (ver **Emenda do PR 7**), a pílula que se alarga no PR 8 (ver **Emenda do PR 8**), a fala viva na NOD-348 (ver **Emenda da NOD-348**), o resumo das ações na NOD-353 (ver **Emenda da NOD-353**) · Data: 2026-10-18 · Migração 0091. A regra da tela, a janela que conta só o chat e os gatilhos de reversão entram no PR 2, junto da primeira
 mudança visível, com as emendas das ADR-029, ADR-041, ADR-083 e ADR-110. Era a ADR-113 com a migração 0090; renumerada
 em 2026-10-18 porque o PR B da Fase 2 (#392, reações e citação) entra antes com a ADR-113 e a `0090_reacoes.sql`.
 
@@ -375,7 +375,7 @@ Protótipo v2 do Gil (nod-prototipos/nod-348) e decisões da Ada; emenda o pará
 `<nod-mascote>` ("trabalhando" com ferramenta, "disponível" pensando ou escrevendo), o nome e a linha viva com o estado
 ("Pensando", "Escrevendo", "Usando Linear", "Abrindo frentes") e o tempo ("12 s", "1 min 4 s"). O texto em streaming
 fica no balão e a linha desce para o rodapé; sem texto, a linha fica ao lado do nome. Com ferramenta, as etapas e as
-tarefas vão para "ver etapas" — e o balão continua (revisão 2 do #508: a resposta final de um turno com ferramenta não
+tarefas vão para "ver etapas" (trocado pelo resumo das ações na NOD-353; ver **Emenda da NOD-353**) — e o balão continua (revisão 2 do #508: a resposta final de um turno com ferramenta não
 fica escondida no recolhido), com a narração de antes da ferramenta (`antes`, QA 2 do #508: a ferramenta que chega não
 esvazia o balão, que encolhia e crescia de novo, e o texto que volta substitui a narração curta, que fica em "ver etapas", e o balão pode encolher até ~8 linhas no celular nessa troca, de propósito: segurar a altura levaria o pulo para a troca pela gravada; revisões 5 a 7; a viva e a parada mostram o que a fala gravada vai mostrar, pela regra do `comporFala`: narração curta fica de fora, a longa entra; revisão 4). Quando o texto vira mensagem — no fim do turno ou num `turno.fala` no meio dele — a fala
 fica parada ("Respondeu · 12 s", sem o "ver etapas", uma entrada de `falasSaindo` por fala no estado) até a releitura que saiu depois
@@ -406,6 +406,33 @@ da conversa (`#anuncio-pergunta`)" da **Emenda do PR 4**: agora há duas, a das 
 `nod:fala:recriada` em cada fala recriada; `nod.semMorph=1` força a recriação. Se, no mesmo cenário, a média de
 `nod:fala:morph` passar a de `nod:fala:recriada` com `nod.semMorph=1`, ou se o mascote reiniciar a animação a cada etapa (visto no QA ou
 em 3 relatos em 14 dias, ADR-041), a fala viva volta ao ponto que pulsa do PR 7, sem relógio (reverter o PR #508).
+
+## Emenda da NOD-353 (2026-10-26) — o resumo das ações fica na fala
+
+Protótipo v2 do Gil (`p348-acoes`); emenda a **Emenda da NOD-348** e revoga, só para este resumo, "a atividade não vai
+para o chat": as ações do turno passam a ser **registro** da fala do bot. O "ver etapas" sai; no lugar, entre o nome e o
+balão, um `<details class="fala-acoes">` recolhido por padrão com a frase das ações que terminaram ("Pesquisou na web e
+abriu uma página"; `fraseDasAcoes` em `web/lib/atividade.ts`: únicas na ordem do primeiro uso, verbos seguidos do mesmo
+objeto juntos no plural). Aberto: uma ação por linha, a que roda no presente ("Usando Gmail"), as outras no passado, e a
+que deu erro com **Falhou** em `--danger`. O resumo nasce quando a primeira ação termina.
+
+1. **Fim de cada ação ao vivo.** O trecho da ponte `{ferramenta}` ganha `id` (o `tool_use.id`) e entra `{fim, falhou}`
+   (do `tool_result.isError`); o servidor republica `turno.atividade` com o `id` e o frame novo `turno.acao_fim`. Sem
+   `id` (app antigo), a ação fecha como feita na próxima ferramenta, no texto ou no fim do turno — nunca Falhou inventado.
+2. **Registro.** `ResultadoTurno.ferramentasFalharam` (índices em `ferramentasChamadas`) e a fala final grava
+   `payload {kind:"acoes_do_turno", acoes:[{rotulo, falhou?}]}` (`acoesDoTurno` em `src/domain/acoes-do-turno.ts`; teto
+   de 200 linhas, a mesma ação seguida com o mesmo desfecho numa linha só). Sem migração: `payload` já é jsonb. A fala
+   com o resumo continua fala (`assuntoDe` → null), e a resposta entregue ao colega a aceita (`linhas-do-chat.ts`).
+3. **Sem pulo.** A viva, a parada final (`vivo:`) e a gravada desenham o mesmo `details` com a mesma chave
+   (`data-disclosure="acoes-‹turno›"`): o aberto e o foco continuam na troca. O resumo é do turno inteiro e fica numa fala
+   só: a final; sem fala final (o texto já saiu numa fala do meio, `jaFalado`), a última fala do meio do turno o guarda
+   (`acoesNaUltimaFalaDoTurno`). As outras falas do meio ficam sem resumo.
+4. **Acessibilidade.** Summary com 24 px (44 px no celular), `:focus-visible` com `--focus-ring`, seta que gira em 160 ms
+   (sem transição com movimento reduzido). Fora de região viva: a troca do presente pelo passado não é anunciada.
+
+Fica registrado: a tarefa do bot (checklist) segue dentro do aberto só na fala viva, até a NOD-359; o desktop antigo degrada sem
+Falhou. **Gatilho de reversão:** 3 relatos em 14 dias (ADR-041) de "o resumo atrapalha a leitura" ou de Falhou que não
+aconteceu: o resumo volta a ser só da fala viva (o payload fica gravado, sem tela).
 
 ## Gatilhos de reversão (PR 2)
 

@@ -934,6 +934,12 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         Object.assign(x, { texto: m.texto, payload: m.payload, turnoId: x.turnoId ?? m.turnoId ?? null });
         return true;
       },
+      async acoesNaUltimaFalaDoTurno(turnoId, agenteId, payload) {
+        const x = doTenant(b.mensagens).filter((m) => m.turnoId === turnoId && m.autoria.autor_tipo === "agente" && m.autoria.autor_id === agenteId && m.kind === "texto").sort((p, q) => p.criadoEm - q.criadoEm).at(-1);
+        if (!x || x.payload) return false;
+        x.payload = payload;
+        return true;
+      },
       async marcarParciaisDoTurno(turnoId) {
         let n = 0;
         for (const m of doTenant(b.mensagens)) {

@@ -42,7 +42,20 @@ export type AtividadeTurno = {
   antes?: string[];
   /** NOD-350: sobrevive à fala do bot (os subagentes seguem depois do `result` do turno principal). */
   subagentes: SubagentesDoTurno | null;
+  /** NOD-353: cada chamada do turno inteiro, na ordem (o resumo das ações); sobrevive às falas do meio. */
+  acoes: AcaoNaTela[];
 };
+
+/**
+ * NOD-353: uma ação do turno na tela. `id` é o do tool_use (null no app antigo, que não o manda); `emUso` é a linha no
+ * presente enquanto ela roda ("Usando Gmail"). Fecha pelo frame `turno.acao_fim` (pelo id), pelo texto que volta, pelo
+ * fim do turno, e, sem id, pela próxima ferramenta. Falhou só vem do frame (tool_result.isError), nunca inventado.
+ */
+export type EstadoDaAcao = "rodando" | "feita" | "falhou";
+export type AcaoNaTela = { id: string | null; rotulo: string; estado: EstadoDaAcao; emUso: string | null; frentes?: true };
+/** Teto das chamadas guardadas por turno; o resumo mostra as primeiras `ACOES_DO_RESUMO_MAX` linhas (a regra da gravada). */
+export const ACOES_GUARDADAS = 2_000;
+export const ACOES_DO_RESUMO_MAX = 200;
 
 /** NOD-348: o que a fala viva diz da ferramenta (o servidor manda pronto no frame, `ferramentaEmUso` do domínio). */
 export type FerramentaEmUso = { texto: string; frentes: boolean };
@@ -50,7 +63,7 @@ export const SEM_NOME_DA_FERRAMENTA: FerramentaEmUso = { texto: "Usando uma ferr
 
 export const ETAPAS_GUARDADAS = 200;
 
-export const ATIVIDADE_VAZIA: AtividadeTurno = { atual: "", etapas: [], totalEtapas: 0, ferramentas: 0, ultimaFerramenta: null, tarefas: [], vigia: null, emUso: null, subagentes: null };
+export const ATIVIDADE_VAZIA: AtividadeTurno = { atual: "", etapas: [], totalEtapas: 0, ferramentas: 0, ultimaFerramenta: null, tarefas: [], vigia: null, emUso: null, subagentes: null, acoes: [] };
 
 export function comTarefas(a: AtividadeTurno | undefined, tarefas: TarefaDoBot[]): AtividadeTurno {
   return { ...(a ?? ATIVIDADE_VAZIA), tarefas };
@@ -96,7 +109,8 @@ export function soSubagentes(a: AtividadeTurno | undefined): AtividadeTurno | nu
   // Critério 2: a última ferramenta do bot fica como ✓ ("Rodou um comando" deixa de pulsar), sem a narração, que já
   // virou a mensagem da fala.
   const ultimo = a.ultimaFerramenta ?? a.etapas[a.etapas.length - 1]?.texto ?? null;
-  return { ...ATIVIDADE_VAZIA, etapas: ultimo ? [{ texto: ultimo, ferramentas: 0 }] : [], totalEtapas: ultimo ? 1 : 0, subagentes: a.subagentes };
+  // NOD-353: o resumo das ações é do turno inteiro — atravessa a fala do meio (a do bot já não roda: vira feita).
+  return { ...ATIVIDADE_VAZIA, etapas: ultimo ? [{ texto: ultimo, ferramentas: 0 }] : [], totalEtapas: ultimo ? 1 : 0, subagentes: a.subagentes, acoes: acoesFechadas(a.acoes) };
 }
 
 /**
@@ -105,7 +119,8 @@ export function soSubagentes(a: AtividadeTurno | undefined): AtividadeTurno | nu
  * mesma renovação da fala e chegam DEPOIS do `turno.fala`, recriando uma bolha com cursor que já está na conversa.
  */
 export function semFerramentaAberta(a: AtividadeTurno): AtividadeTurno {
-  return a.ferramentas === 0 && a.ultimaFerramenta === null && a.atual === "" ? a : { ...a, atual: "", ferramentas: 0, ultimaFerramenta: null };
+  const acoes = acoesFechadas(a.acoes);
+  return a.ferramentas === 0 && a.ultimaFerramenta === null && a.atual === "" && acoes === a.acoes ? a : { ...a, atual: "", ferramentas: 0, ultimaFerramenta: null, acoes };
 }
 
 export function comVigia(a: AtividadeTurno | undefined, vigia: VigiaDaAtividade): AtividadeTurno {
@@ -115,14 +130,15 @@ export function comVigia(a: AtividadeTurno | undefined, vigia: VigiaDaAtividade)
 export function comTexto(a: AtividadeTurno | undefined, trecho: string): AtividadeTurno {
   const base = a ?? ATIVIDADE_VAZIA;
   // NOD-348: texto de verdade chegando é "Escrevendo"; espaço solto entre ferramentas não troca o estado.
-  return { ...base, atual: base.atual + trecho, emUso: trecho.trim() ? null : base.emUso };
+  // NOD-353: o texto que volta quer dizer que as ferramentas responderam: as que rodavam viram feitas.
+  return { ...base, atual: base.atual + trecho, emUso: trecho.trim() ? null : base.emUso, acoes: trecho.trim() ? acoesFechadas(base.acoes) : base.acoes };
 }
 
 /**
  * Narração antes da ferramenta vira etapa com 1 ferramenta; ferramentas seguidas sem narração somam na
  * última etapa; ferramenta sem etapa nenhuma antes abre uma etapa com o próprio rótulo.
  */
-export function comFerramenta(a: AtividadeTurno | undefined, rotulo: string, emUso: FerramentaEmUso = SEM_NOME_DA_FERRAMENTA): AtividadeTurno {
+export function comFerramenta(a: AtividadeTurno | undefined, rotulo: string, emUso: FerramentaEmUso = SEM_NOME_DA_FERRAMENTA, id: string | null = null): AtividadeTurno {
   const base = a ?? ATIVIDADE_VAZIA;
   const narracao = base.atual.trim();
   const ultima = base.etapas[base.etapas.length - 1];
@@ -137,7 +153,100 @@ export function comFerramenta(a: AtividadeTurno | undefined, rotulo: string, emU
     etapas = [{ texto: rotulo, ferramentas: 1 }];
     totalEtapas += 1;
   }
-  return { atual: "", etapas: etapas.slice(-ETAPAS_GUARDADAS), totalEtapas, ferramentas: base.ferramentas + 1, ultimaFerramenta: rotulo, tarefas: base.tarefas, vigia: base.vigia, emUso, subagentes: base.subagentes, antes: narracao ? [...(base.antes ?? []), base.atual].slice(-ETAPAS_GUARDADAS) : base.antes };
+  return { atual: "", etapas: etapas.slice(-ETAPAS_GUARDADAS), totalEtapas, ferramentas: base.ferramentas + 1, ultimaFerramenta: rotulo, tarefas: base.tarefas, vigia: base.vigia, emUso, subagentes: base.subagentes, antes: narracao ? [...(base.antes ?? []), base.atual].slice(-ETAPAS_GUARDADAS) : base.antes, acoes: comAcao(narracao ? acoesFechadas(base.acoes) : base.acoes, rotulo, emUso, id) };
+}
+
+/** As que rodavam viram feitas (o texto voltou, a volta acabou, o turno acabou); devolve a mesma lista se nada mudou. */
+export function acoesFechadas(acoes: readonly AcaoNaTela[]): AcaoNaTela[] {
+  if (!acoes.some((x) => x.estado === "rodando")) return acoes as AcaoNaTela[];
+  return acoes.map((x) => (x.estado === "rodando" ? { ...x, estado: "feita", emUso: null } : x));
+}
+
+function comAcao(acoes: readonly AcaoNaTela[], rotulo: string, emUso: FerramentaEmUso, id: string | null): AcaoNaTela[] {
+  // App antigo (sem id): não há fim por chamada; a ferramenta seguinte fecha as que estavam sem id.
+  const base = id === null ? acoes.map((x) => (x.estado === "rodando" && x.id === null ? { ...x, estado: "feita" as const, emUso: null } : x)) : [...acoes];
+  if (base.length >= ACOES_GUARDADAS) return base;
+  return [...base, { id, rotulo, estado: "rodando", emUso: emUso.texto, ...(emUso.frentes ? { frentes: true as const } : {}) }];
+}
+
+/**
+ * NOD-353: o frame `turno.acao_fim`. Fecha a chamada `id` como feita ou Falhou; um fim que chega depois do texto (a ação
+ * já virou feita) ainda acerta o Falhou. Id desconhecido não muda nada.
+ */
+export function comFimDaAcao(a: AtividadeTurno | undefined, id: string, falhou: boolean): AtividadeTurno | undefined {
+  if (!a) return a;
+  // Revisão 3 do #523: com id repetido no turno, o fim é da chamada mais recente (lib ES2022: sem findLastIndex).
+  let i = -1;
+  for (let j = a.acoes.length - 1; j >= 0 && i < 0; j--) if (a.acoes[j]!.id === id) i = j;
+  const atual = a.acoes[i];
+  if (!atual) return a;
+  const estado: EstadoDaAcao = falhou ? "falhou" : atual.estado === "falhou" ? "falhou" : "feita";
+  if (estado === atual.estado && atual.emUso === null) return a;
+  const acoes = [...a.acoes];
+  acoes[i] = { ...atual, estado, emUso: null };
+  // Revisão do #523: com paralelas, a linha viva passa a dizer a última que ainda roda (não a que acabou). Sem nenhuma
+  // rodando, fica a última até o próximo texto ou ferramenta, como antes (sem piscar "Pensando" entre ferramentas).
+  const rodando = [...acoes].reverse().find((x) => x.estado === "rodando" && x.emUso !== null);
+  const emUso: FerramentaEmUso | null = rodando?.emUso ? { texto: rodando.emUso, frentes: rodando.frentes === true } : a.emUso;
+  return { ...a, acoes, emUso };
+}
+
+/** Uma linha do resumo (a forma da gravada, `AcaoDoTurno` do contrato), mais a em uso enquanto roda. */
+export type LinhaDoResumo = { rotulo: string; estado: EstadoDaAcao; emUso: string | null; vezes?: number };
+
+/**
+ * NOD-353: as linhas do resumo pela regra da fala gravada (`acoesDoTurno`, src/domain/acoes-do-turno.ts): a mesma ação
+ * seguida com o mesmo desfecho numa linha só, as primeiras `ACOES_DO_RESUMO_MAX`. A que roda não se junta a nada.
+ * `parado` (turno acabado): a que rodava conta como feita, como a gravada conta.
+ */
+export function linhasDoResumo(acoes: readonly AcaoNaTela[], parado = false): LinhaDoResumo[] {
+  const linhas: LinhaDoResumo[] = [];
+  for (const x of acoes) {
+    const estado: EstadoDaAcao = parado && x.estado === "rodando" ? "feita" : x.estado;
+    const ultima = linhas[linhas.length - 1];
+    if (estado !== "rodando" && ultima && ultima.estado === estado && ultima.rotulo === x.rotulo) { ultima.vezes = (ultima.vezes ?? 1) + 1; continue; }
+    if (linhas.length >= ACOES_DO_RESUMO_MAX) break;
+    linhas.push({ rotulo: x.rotulo, estado, emUso: estado === "rodando" ? x.emUso : null });
+  }
+  return linhas;
+}
+
+/**
+ * NOD-353: a frase do resumo recolhido, só com as ações que terminaram (feitas ou Falhou), cada uma uma vez, na ordem do
+ * primeiro uso. O rótulo é "Verbo objeto" (rotuloFerramenta); verbos seguidos com o mesmo objeto se juntam, e o objeto
+ * "um/uma X" vai para o plural quando junta verbos ou a ação se repetiu: "Leu, escreveu e editou arquivos e rodou um
+ * comando". Nada terminado ainda: "" (o resumo não aparece).
+ */
+export function fraseDasAcoes(linhas: readonly { rotulo: string; estado: EstadoDaAcao; vezes?: number }[]): string {
+  const vezes = new Map<string, number>();
+  for (const l of linhas) if (l.estado !== "rodando") vezes.set(l.rotulo, (vezes.get(l.rotulo) ?? 0) + (l.vezes ?? 1));
+  const grupos: { verbos: string[]; objeto: string; repetiu: boolean }[] = [];
+  for (const [rotulo, n] of vezes) {
+    const espaco = rotulo.indexOf(" ");
+    const verbo = espaco < 0 ? rotulo : rotulo.slice(0, espaco);
+    const objeto = espaco < 0 ? "" : rotulo.slice(espaco + 1);
+    const ultimo = grupos[grupos.length - 1];
+    if (ultimo && objeto && ultimo.objeto === objeto) { ultimo.verbos.push(verbo); ultimo.repetiu ||= n > 1; continue; }
+    grupos.push({ verbos: [verbo], objeto, repetiu: n > 1 });
+  }
+  const partes = grupos.map((g, i) => {
+    const verbos = g.verbos.map((v, j) => (i === 0 && j === 0 ? v : minuscula(v)));
+    const objeto = g.verbos.length > 1 || g.repetiu ? noPlural(g.objeto) : g.objeto;
+    return [juntar(verbos), objeto].filter(Boolean).join(" ");
+  });
+  return juntar(partes);
+}
+
+const minuscula = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
+const juntar = (xs: readonly string[]) => (xs.length <= 1 ? (xs[0] ?? "") : `${xs.slice(0, -1).join(", ")} e ${xs[xs.length - 1]}`);
+
+/** "um arquivo" → "arquivos", "uma página" → "páginas"; o resto (um nome, "na web") fica como é. */
+function noPlural(objeto: string): string {
+  const m = /^(?:um|uma) (\S+)(.*)$/.exec(objeto);
+  if (!m) return objeto;
+  const nome = m[1]!;
+  const plural = /ão$/.test(nome) ? nome.replace(/ão$/, "ões") : /[rzs]$/.test(nome) ? `${nome}es` : /m$/.test(nome) ? nome.replace(/m$/, "ns") : /l$/.test(nome) ? nome.replace(/l$/, "is") : `${nome}s`;
+  return `${plural}${m[2]}`;
 }
 
 /**
@@ -166,7 +275,7 @@ export function comporFalaWeb(antes: readonly string[], final: string): string {
  * NOD-348 (QA 2 e revisões 4 a 6 do #508): o texto do balão, viva e parada, pela mesma regra da fala gravada
  * (`comporFala`: os relatórios longos antes da última ferramenta + o texto final), para o fim do turno e a troca pela
  * gravada não mudarem a altura. Sem texto depois da última ferramenta, o último bloco faz de final: a ferramenta não
- * esvazia o balão. O texto que volta substitui a narração curta, que fica em "ver etapas" (de uma linha para outra).
+ * esvazia o balão. O texto que volta substitui a narração curta, que a gravada também deixa de fora (de uma linha para outra).
  */
 export function textoDaFala(a: AtividadeTurno | undefined): string {
   if (!a) return "";

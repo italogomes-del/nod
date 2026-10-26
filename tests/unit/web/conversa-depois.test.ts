@@ -1,9 +1,10 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import type { ConversaDto, SuaVezDto } from "../../../src/contracts/api.ts";
 import type { Mensagem } from "../../../src/contracts/mensagem.ts";
 import { estadoInicial, reduzir, type ConversaEstado, type Estado } from "../../../web/estado/reducer.ts";
-import { ATIVIDADE_VAZIA, comFerramenta, comTexto, comVigia } from "../../../web/lib/atividade.ts";
-import { blocosAoVivo, blocosDoHistorico, renderCabecalhoConversa, renderMensagem, renderTimeline } from "../../../web/telas/conversa.ts";
+import { ATIVIDADE_VAZIA, comFerramenta, comFimDaAcao, comTexto, comVigia } from "../../../web/lib/atividade.ts";
+import { blocosAoVivo, blocosDoHistorico, renderCabecalhoConversa, renderMensagem, renderResumoDasAcoes, renderTimeline } from "../../../web/telas/conversa.ts";
 import { renderCardArtefato } from "../../../web/telas/card-artefato.ts";
 import { renderTopoComposer } from "../../../web/telas/pergunta.ts";
 import { acaoHumana, previaDoItem } from "../../../web/telas/sua-vez.ts";
@@ -56,7 +57,7 @@ describe("1. o balão de quem escreve", () => {
 });
 
 describe("2. a parte ao vivo é a Ada falando", () => {
-  it("NOD-348: com ferramenta, a fala viva da Ada — mascote, nome, 'Usando GitHub · ‹tempo›' e o 'ver etapas' discreto", () => {
+  it("NOD-348: com ferramenta, a fala viva da Ada — mascote, nome, 'Usando GitHub · ‹tempo›' e o resumo das ações (NOD-353)", () => {
     const { e: base, c } = cenario([msg("m1", "pessoa", 1)]);
     const atividade = comFerramenta(comTexto(ATIVIDADE_VAZIA, "Lendo o PR https://github.com/acme/loja/pull/481."), "Consultou GitHub", { texto: "Usando GitHub", frentes: false });
     const e: Estado = { ...base, turnosVivos: { t1: { turnoId: "t1", conversaId: C, estado: "rodando", executor: "catcher", machineId: null, desde: AGORA - 60_000 } }, atividades: { [C]: { t1: atividade } } };
@@ -72,22 +73,21 @@ describe("2. a parte ao vivo é a Ada falando", () => {
     for (const fora of ["catcher", "Claude", "digitando", 'class="cursor"', "está trabalhando", "atividade-pulso", "trabalhando ·"]) expect(html).not.toContain(fora);
     // QA 2 do #508: a narração de antes da ferramenta fica no balão (a fala gravada a tem); o estado diz a ferramenta.
     expect(html).toContain('<div class="bubble" data-parte="balao">');
-    expect(blocos[0]!.morfar!.partes.map((p) => p.chave)).toEqual(["nome", "balao", "etapas", "viva"]);
-    const recolhido = html.slice(html.indexOf("</summary>"), html.indexOf("</details>"));
-    expect(recolhido).toContain("Lendo o PR");
-    expect(html).toContain('<details class="fala-viva-etapas" data-parte="etapas" data-disclosure="atividade-t1"><summary><span class="fala-viva-ver">ver etapas</span>');
-    expect(recolhido).toContain("1 etapa · 1 ferramenta");
+    // NOD-353: nada terminou ainda — sem resumo; a ação em uso está na linha viva ("Usando GitHub").
+    expect(blocos[0]!.morfar!.partes.map((p) => p.chave)).toEqual(["nome", "balao", "viva"]);
+    expect(html).not.toContain("fala-acoes");
+    expect(html).not.toContain("ver etapas");
     // O tempo é escrito pelo relógio da tela: o HTML não muda quando o tempo anda.
     expect(blocosAoVivo(c, { ...e, agora: AGORA + 120_000 })[0]!.html).toBe(html);
     // O morph sabe as partes e o que copiar para o mascote.
-    expect(blocos[0]!.morfar?.partes.map((p) => p.chave)).toEqual(["nome", "balao", "etapas", "viva"]);
+    expect(blocos[0]!.morfar?.partes.map((p) => p.chave)).toEqual(["nome", "balao", "viva"]);
     expect(blocos[0]!.morfar?.mascote).toMatchObject({ state: "orbit", "aria-label": "Ada · usando GitHub" });
     // Revisão 2 do #508: a narração entre ferramentas (e a resposta final de um turno com ferramenta) fica num balão, à
-    // vista, com "Escrevendo" no rodapé e o "ver etapas" entre os dois — não escondida no recolhido.
+    // vista, com "Escrevendo" no rodapé — não escondida no recolhido.
     const narrando = blocosAoVivo(c, { ...e, atividades: { [C]: { t1: { ...atividade, atual: "Abrindo https://github.com/acme/loja/pull/481 agora" } } } })[0]!;
     expect(narrando.html).toContain('<span class="fala-viva-estado">Escrevendo</span>');
     expect(narrando.html).toContain('state="idle"');
-    expect(narrando.morfar?.partes.map((p) => p.chave)).toEqual(["nome", "balao", "etapas", "viva"]);
+    expect(narrando.morfar?.partes.map((p) => p.chave)).toEqual(["nome", "balao", "viva"]);
     expect(narrando.html).toMatch(/<div class="bubble" data-parte="balao">.*Abrindo <a [^>]*href="https:\/\/github\.com\/acme\/loja\/pull\/481"/s);
     expect(narrando.html).toContain('class="fala-viva-linha rodape"');
   });
@@ -208,15 +208,18 @@ describe("2. a parte ao vivo é a Ada falando", () => {
     expect(reduzir(fim, { tipo: "tick", agora: AGORA + 15_000 }).falasSaindo).toEqual({});
   });
 
-  it("revisão 3 do #508: com ferramenta, a fala parada sai sem o 'ver etapas' (a gravada não o tem) e o recolhido não repete o balão", () => {
+  it("NOD-353: com ferramenta, a fala parada final leva o resumo das ações (a gravada também) e o aberto não repete o balão", () => {
     const { e: base, c } = cenario([msg("m1", "pessoa", 1)]);
     const a = comTexto(comFerramenta(ATIVIDADE_VAZIA, "Consultou GitHub", { texto: "Usando GitHub", frentes: false }), "Fechei o PR.");
     const comVivo: Estado = { ...base, turnosVivos: { t1: { turnoId: "t1", conversaId: C, estado: "rodando", executor: null, machineId: null, desde: AGORA } }, atividades: { [C]: { t1: a } } };
     const vivo = blocosAoVivo(c, comVivo)[0]!;
-    expect(vivo.morfar!.partes.map((p) => p.chave)).toEqual(["nome", "balao", "etapas", "viva"]);
-    expect(vivo.html.slice(vivo.html.indexOf("</summary>"))).not.toContain("Fechei o PR");
+    expect(vivo.morfar!.partes.map((p) => p.chave)).toEqual(["nome", "acoes", "balao", "viva"]);
+    expect(vivo.html.slice(vivo.html.indexOf("</summary>"), vivo.html.indexOf("</details>"))).not.toContain("Fechei o PR");
     const fim = reduzir(comVivo, { tipo: "frame", frame: { tipo: "turno.encerrado", dados: { turnoId: "t1", conversaId: C } } as never, agora: AGORA });
-    expect(blocosAoVivo(fim.conversas[C]!, fim)[0]!.morfar!.partes.map((p) => p.chave)).toEqual(["nome", "balao", "viva"]);
+    const parada = blocosAoVivo(fim.conversas[C]!, fim)[0]!;
+    expect(parada.morfar!.partes.map((p) => p.chave)).toEqual(["nome", "acoes", "balao", "viva"]);
+    // A parte do resumo é a mesma da viva: a troca não muda de altura nem fecha o aberto.
+    expect(parada.morfar!.partes.find((p) => p.chave === "acoes")!.html).toBe(vivo.morfar!.partes.find((p) => p.chave === "acoes")!.html);
   });
 
   it("revisão 3 do #508: turno.fala no meio do turno deixa a fala parada antes da fala viva do mesmo turno", () => {
@@ -228,8 +231,9 @@ describe("2. a parte ao vivo é a Ada falando", () => {
     expect(blocos.map((b) => b.chave)).toEqual([`saindo:t1:${AGORA}:0`, "vivo:t1"]);
     expect(blocos[0]!.html).toContain("Primeira parte.");
     expect(blocos[1]!.html).not.toContain("Primeira parte.");
-    // O turno segue com as etapas (o "ver etapas" continua na fala viva).
-    expect(blocos[1]!.morfar!.partes.map((p) => p.chave)).toContain("etapas");
+    // NOD-353: a fala do meio que saiu não tem o resumo (a gravada dela também não); a viva do turno segue com ele.
+    expect(blocos[0]!.html).not.toContain("fala-acoes");
+    expect(blocos[1]!.morfar!.partes.map((p) => p.chave)).toContain("acoes");
   });
 
   it("QA do #508: sem texto ou interrompido, nada fica saindo; o turno de outro bot não a tira", () => {
@@ -276,11 +280,11 @@ describe("2. a parte ao vivo é a Ada falando", () => {
     const primeira = comTexto(ATIVIDADE_VAZIA, "Vou olhar o PR.");
     const usando = comFerramenta(primeira, "Consultou GitHub", { texto: "Usando GitHub", frentes: false });
     const chaves = (e: Estado) => blocosAoVivo(c, e)[0]!.morfar!.partes.map((p) => p.chave);
-    expect(chaves(comA(usando))).toEqual(["nome", "balao", "etapas", "viva"]);
+    expect(chaves(comA(usando))).toEqual(["nome", "balao", "viva"]);
     expect(blocosAoVivo(c, comA(usando))[0]!.html).toContain("Usando GitHub");
     expect(blocosAoVivo(c, comA(usando))[0]!.html).toContain("Vou olhar o PR.");
     const segunda = comTexto(usando, "Está aprovado.");
-    // Revisão 6: o texto que volta substitui a narração curta (que fica em "ver etapas"), e a viva já é a parada: o fim
+    // Revisão 6: o texto que volta substitui a narração curta (a gravada também a deixa de fora), e a viva já é a parada: o fim
     // do turno não muda o balão.
     const balaoVivo = (e: Estado) => blocosAoVivo(c, e)[0]!.morfar!.partes.find((p) => p.chave === "balao")!.html;
     expect(balaoVivo(comA(comTexto(usando, "Es")))).not.toContain("Vou olhar o PR.");
@@ -552,5 +556,92 @@ describe("12. artefato: abrir em nova aba", () => {
     expect(ordem.every((i) => i > 0)).toBe(true);
     expect([...ordem].sort((a, b) => a - b)).toEqual(ordem);
     expect(html).toContain("Abrir em nova aba");
+  });
+});
+
+describe("NOD-353: o resumo das ações na fala (viva, parada e gravada)", () => {
+  const T = "22222222-2222-4222-8222-222222222222";
+  const usa = (a: ReturnType<typeof comTexto> | undefined, rotulo: string, emUso: string, id: string) => comFerramenta(a, rotulo, { texto: emUso, frentes: false }, id);
+  const vivoCom = (base: Estado, a: ReturnType<typeof comTexto>): Estado => ({ ...base, turnosVivos: { [T]: { turnoId: T, conversaId: C, estado: "rodando", executor: null, machineId: null, desde: AGORA } }, atividades: { [C]: { [T]: a } } });
+  const resumoDe = (html: string) => /<details class="fala-acoes"[\s\S]*?<\/details>/.exec(html)?.[0] ?? "";
+  it("revisão 2 do #523: a linha juntada mostra quantas vezes rodou, e a frase vai para o plural", () => {
+    const gravada = { ...msg("mv", "agente", 9), turnoId: T, payload: { kind: "acoes_do_turno", acoes: [{ rotulo: "Leu um arquivo", vezes: 5 }, { rotulo: "Rodou um comando" }] } } as Mensagem;
+    const html = resumoDe(renderMensagem(gravada, cenario([]).e));
+    expect(html).toContain('<span class="fala-acoes-txt">Leu arquivos e rodou um comando</span>');
+    expect(html).toContain('<li data-estado="feita"><span>Leu um arquivo</span><span class="fala-acoes-vezes">×5</span></li>');
+    expect(html).toContain('<li data-estado="feita"><span>Rodou um comando</span></li>');
+    // Fora da forma, a contagem cai (a linha fica).
+    const ruim = { ...gravada, payload: { kind: "acoes_do_turno", acoes: [{ rotulo: "Leu um arquivo", vezes: "<b>" }] } } as unknown as Mensagem;
+    expect(resumoDe(renderMensagem(ruim, cenario([]).e))).not.toContain("fala-acoes-vezes");
+  });
+  it("revisão do #523: payload de ações fora da forma não quebra a fala gravada", () => {
+    const ruim = { ...msg("mr", "agente", 9), turnoId: T, payload: { kind: "acoes_do_turno", acoes: "x" } } as unknown as Mensagem;
+    expect(() => renderMensagem(ruim, cenario([]).e)).not.toThrow();
+    expect(renderMensagem(ruim, cenario([]).e)).not.toContain("fala-acoes");
+  });
+  it("revisão do #523: na fala viva sem texto, o resumo (linha cheia) vai depois da linha viva, que fica ao lado do nome", () => {
+    const css = readFileSync(new URL("../../../web/interface.css", import.meta.url), "utf8");
+    expect(css).toMatch(/\.fala-viva:not\(\.com-texto\) \.bubble-wrap > :not\(\.msg-autor, \.fala-viva-linha\) \{ flex: 1 1 100%; order: 1; \}/);
+  });
+
+  it("nasce quando a primeira ação termina; aberto, a que roda no presente e a que falhou com Falhou", () => {
+    const { e: base, c } = cenario([msg("m1", "pessoa", 1)]);
+    let a = usa(undefined, "Pesquisou na web", "Pesquisando na web", "w1");
+    expect(resumoDe(blocosAoVivo(c, vivoCom(base, a))[0]!.html)).toBe("");
+    a = comFimDaAcao(a, "w1", false)!;
+    a = usa(a, "Abriu uma página", "Abrindo uma página", "w2");
+    a = comFimDaAcao(a, "w2", true)!;
+    a = usa(a, "Consultou Gmail", "Usando Gmail", "g1");
+    const html = resumoDe(blocosAoVivo(c, vivoCom(base, a))[0]!.html);
+    expect(html).toMatch(new RegExp(`^<details class="fala-acoes" data-parte="acoes" data-disclosure="acoes-${T}"><summary><span class="fala-acoes-txt">Pesquisou na web e abriu uma página</span>`));
+    expect(html).not.toContain(" open");
+    expect(html).toContain('<li data-estado="feita"><span>Pesquisou na web</span></li>');
+    expect(html).toContain('<li data-estado="falhou"><span>Abriu uma página</span><span class="fala-acoes-falhou">Falhou</span></li>');
+    expect(html).toContain('<li data-estado="rodando"><span>Usando Gmail</span></li>');
+    // Fora de região live: a troca do presente pelo passado não é anunciada.
+    expect(html).not.toMatch(/aria-live|role="status"/);
+    // Termina: a linha troca pelo passado e a frase ganha a ação.
+    const depois = resumoDe(blocosAoVivo(c, vivoCom(base, comFimDaAcao(a, "g1", false)!))[0]!.html);
+    expect(depois).toContain('<li data-estado="feita"><span>Consultou Gmail</span></li>');
+    expect(depois).toContain("Pesquisou na web, abriu uma página e consultou Gmail");
+  });
+
+  it("a gravada (payload acoes_do_turno) tem o mesmo resumo da parada final, na mesma chave de disclosure", () => {
+    const { e: base } = cenario([msg("m1", "pessoa", 1)]);
+    let a = usa(undefined, "Leu um arquivo", "Lendo um arquivo", "r1");
+    a = comFimDaAcao(a, "r1", false)!;
+    a = usa(a, "Rodou um comando", "Rodando um comando", "b1");
+    a = comFimDaAcao(a, "b1", true)!;
+    a = comTexto(a, "Pronto.");
+    const fim = reduzir(vivoCom(base, a), { tipo: "frame", frame: { tipo: "turno.encerrado", dados: { turnoId: T, conversaId: C } } as never, agora: AGORA });
+    const parada = resumoDe(blocosAoVivo(fim.conversas[C]!, fim)[0]!.html);
+    const gravada = renderMensagem(msg("m2", "agente", 2, { turnoId: T, texto: "Pronto.", payload: { kind: "acoes_do_turno", acoes: [{ rotulo: "Leu um arquivo" }, { rotulo: "Rodou um comando", falhou: true }] } } as Partial<Mensagem>), fim);
+    // A parada é uma parte do morph (data-parte); o resto é igual, letra a letra.
+    expect(resumoDe(gravada)).toBe(parada.replace(' data-parte="acoes"', ""));
+    // Entre o nome e o balão.
+    expect(gravada.indexOf("fala-acoes")).toBeLessThan(gravada.indexOf('class="bubble"'));
+    expect(gravada.indexOf("msg-autor")).toBeLessThan(gravada.indexOf("fala-acoes"));
+    // Sem payload, ou fala da pessoa: nada.
+    expect(renderMensagem(msg("m3", "agente", 3), fim)).not.toContain("fala-acoes");
+  });
+
+  it("escapa rótulo e id; nada terminado, nada desenhado", () => {
+    expect(renderResumoDasAcoes("t", [{ rotulo: "Rodou um comando", estado: "rodando", emUso: "Rodando" }])).toBe("");
+    const html = renderResumoDasAcoes('x"><b>', [{ rotulo: "Consultou <img src=x>", estado: "feita", emUso: null }]);
+    expect(html).not.toContain("<img");
+    expect(html).not.toContain('x"><b>');
+    expect(html).toContain("&lt;img");
+  });
+});
+
+describe("NOD-353 (QA do #523): a frase do resumo não sai cortada e o balão fica do tamanho do texto", () => {
+  const css = readFileSync(new URL("../../../web/interface.css", import.meta.url), "utf8");
+  it("o recuo do summary não é margem negativa (que tirava 6px da largura pedida e cortava a frase com reticências)", () => {
+    const summary = /\.fala-acoes > summary \{[^}]*\}/.exec(css)?.[0] ?? "";
+    expect(summary).not.toMatch(/margin-left:\s*-/);
+    expect(summary).toMatch(/position: relative; left: -6px/);
+  });
+  it("com o resumo mais largo que a resposta, o balão não estica (a resposta fica igual à de hoje)", () => {
+    expect(css).toContain(".bubble-wrap:has(> .fala-acoes) > .bubble { width: fit-content; max-width: 100%; box-sizing: border-box; }");
   });
 });

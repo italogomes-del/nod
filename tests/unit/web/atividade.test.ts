@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { ATIVIDADE_VAZIA, comFerramenta, comTexto, estadoDaFala, ETAPAS_GUARDADAS, linhaAtual, resumoEtapa } from "../../../web/lib/atividade.ts";
+import type { EventoStream } from "../../../src/contracts/turno.ts";
+import { classificarResultado } from "../../../src/domain/stream-json.ts";
+import { frameVivoDoEvento } from "../../../src/domain/rotulo-ferramenta.ts";
+import { ATIVIDADE_VAZIA, comFerramenta, comFimDaAcao, type AtividadeTurno, comTexto, estadoDaFala, ETAPAS_GUARDADAS, linhaAtual, resumoEtapa } from "../../../web/lib/atividade.ts";
 
 describe("atividade do turno vivo", () => {
   it("ferramenta sem narração antes abre etapa com o rótulo; seguidas somam na mesma etapa", () => {
@@ -78,5 +81,39 @@ describe("estadoDaFala", () => {
   it("trocar de ferramenta troca o texto; abrir frentes tem estado próprio", () => {
     const a = comFerramenta(comFerramenta(undefined, "Rodou um comando", { texto: "Rodando um comando", frentes: false }), "Começou frentes", { texto: "Abrindo frentes", frentes: true });
     expect(estadoDaFala(a)).toEqual({ chave: "frentes", texto: "Abrindo frentes", mascote: { state: "orbit", expression: null } });
+  });
+});
+
+describe("NOD-353: falhou vem do tool_result.isError", () => {
+  const uso = (id: string, nome: string): EventoStream => ({ tipo: "tool_use", id, nome, input: {} });
+  const fim = (id: string, isError: boolean): EventoStream => ({ tipo: "tool_result", toolUseId: id, isError, texto: "x" });
+  /** O caminho do laço local: evento do stream → frame (`frameVivoDoEvento`) → atividade da web. */
+  const aplicar = (a: AtividadeTurno | undefined, ev: EventoStream): AtividadeTurno | undefined => {
+    const f = frameVivoDoEvento(ev);
+    if (f?.tipo === "turno.atividade") return comFerramenta(a, f.dados.rotulo, f.dados.emUso, f.dados.id ?? null);
+    if (f?.tipo === "turno.acao_fim") return comFimDaAcao(a, f.dados.id, f.dados.falhou);
+    return a;
+  };
+
+  it("isError true vira falhou, false vira feita; id desconhecido não muda nada", () => {
+    let a: AtividadeTurno | undefined;
+    for (const ev of [uso("a", "WebFetch"), uso("b", "Bash"), fim("b", false), fim("a", true)]) a = aplicar(a, ev);
+    expect(a?.acoes.map((x) => x.estado)).toEqual(["falhou", "feita"]);
+    expect(aplicar(a, fim("zz", true))).toBe(a);
+  });
+
+  it("id repetido no turno (item_N do Codex): o fim é da chamada mais recente, nos dois lados", () => {
+    let a: AtividadeTurno | undefined;
+    for (const ev of [uso("item_0", "Read"), fim("item_0", false), uso("item_0", "Bash"), fim("item_0", true)]) a = aplicar(a, ev);
+    expect(a?.acoes.map((x) => x.estado)).toEqual(["feita", "falhou"]);
+    const init: EventoStream = { tipo: "init", sessaoCli: "s", ferramentas: [], modelo: "m", versaoCli: "v", apiKeySource: "none" };
+    const r = classificarResultado({ eventos: [init, uso("item_0", "Read"), fim("item_0", false), uso("item_0", "Bash"), fim("item_0", true)], exitCode: 0, signal: null, stderr: "" });
+    expect(r.ferramentasFalharam).toEqual([1]);
+  });
+
+  it("o gravado também vem do isError: índices em ferramentasChamadas", () => {
+    const init: EventoStream = { tipo: "init", sessaoCli: "s", ferramentas: [], modelo: "m", versaoCli: "v", apiKeySource: "none" };
+    const r = classificarResultado({ eventos: [init, uso("a", "Read"), fim("a", false), uso("b", "WebFetch"), fim("b", true)], exitCode: null, signal: "SIGTERM", stderr: "" });
+    expect(r.ferramentasFalharam).toEqual([1]);
   });
 });

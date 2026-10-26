@@ -14,7 +14,7 @@ import {
   acoesDaFala, chipsDeReacao, citacaoAcimaDoBalao, citacaoDaFala, EMOJIS_DE_REACAO, EMOJIS_RAPIDOS, htmlMenuDaFala, htmlSeletorDeReacao, itensDoMenu,
   linhaDeEmojis, MEMORIA_DA_FALA_MAX, renderCaixaCitacao, textoAbrirTask, textoParaLembrar, TRECHO_DA_CITACAO_MAX,
 } from "../../../web/telas/acoes-da-fala.ts";
-import { seletoresDoFoco } from "../../../web/lib/foco-do-bloco.ts";
+import { alvoDoFoco, seletoresDoFoco } from "../../../web/lib/foco-do-bloco.ts";
 import { renderTimeline } from "../../../web/telas/conversa.ts";
 import { renderTopoComposer } from "../../../web/telas/pergunta.ts";
 
@@ -264,8 +264,20 @@ describe("o foco depois de reagir (revisão do PR 392)", () => {
     expect(seletoresDoFoco({ act: "mais-da-fala", id: "m1" })).toEqual(['[data-act="mais-da-fala"][data-id="m1"]', 'button[data-id="m1"]']);
     expect(seletoresDoFoco({ act: "abrir-busca" })).toEqual(['[data-act="abrir-busca"]']);
     expect(seletoresDoFoco({})).toEqual([]);
+    // NOD-353 (revisão 2 do #523): o summary do resumo das ações volta ao summary do mesmo disclosure.
+    expect(seletoresDoFoco({ disclosure: "acoes-t1" })).toEqual(['details[data-disclosure="acoes-t1"] > summary']);
     // Aspas no valor não quebram o seletor.
     expect(seletoresDoFoco({ act: 'x"y' })).toEqual(['[data-act="x\\"y"]']);
+  });
+
+  it("QA do #523: no fim do turno o summary do resumo volta na fala gravada, que mora em outra região (a do histórico)", () => {
+    const sel = 'details[data-disclosure="acoes-t1"] > summary';
+    const vazia = { querySelector: () => null };
+    const historico = { querySelector: (s: string) => (s === sel ? "summary-gravado" : null) };
+    expect(alvoDoFoco({ disclosure: "acoes-t1" }, vazia, historico)).toBe("summary-gravado");
+    // Na mesma região, ela vem primeiro; os botões da fala não saem da região.
+    expect(alvoDoFoco({ disclosure: "acoes-t1" }, { querySelector: (s: string) => (s === sel ? "aqui" : null) }, historico)).toBe("aqui");
+    expect(alvoDoFoco({ act: "abrir-busca" }, vazia, { querySelector: () => "longe" })).toBeNull();
   });
 });
 
