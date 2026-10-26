@@ -1,6 +1,4 @@
 import type { ContaIa } from "../../src/contracts/contas-ia.ts";
-import type { Experimentos } from "../../src/contracts/raio-x.ts";
-import type { SecaoEspaco } from "../estado/reducer.ts";
 import { ICONE } from "../lib/icones.ts";
 import { esc } from "../lib/render.ts";
 import { pilhaDeAvatares, PROVEDOR } from "./cartao-ia.ts";
@@ -8,39 +6,34 @@ import { contaEmUso } from "./contas-lista.ts";
 import { ALERTA_USO, maiorUso, pctUsado, proximaDaFila, quandoNaTela } from "./uso-da-conta.ts";
 
 /**
- * Menu da conta (definido em 2026-09-30, canvas "Menu, sidebar e gaveta"): o avatar do rodapé abre este menu no lugar de
- * levar direto a Seu espaço, como no Grok. Cada item com › abre Seu espaço naquela seção; Modo dev liga ali mesmo. A faixa
- * do topo só existe quando algo precisa da pessoa — a IA desconectada ou um conector fora do ar (ADR-029: escrito).
+ * Menu da conta (definido em 2026-09-30, canvas "Menu, sidebar e gaveta"): o avatar do rodapé abre este menu.
+ * NOD-367 (protótipo v2 do Gil, aprovado em 2026-10-26): o menu fica enxuto — quem está logado (só texto), Provedores de
+ * IA, Configurações, Agentes, Enviar feedback, Ajuda e, por último, Sair. Os interruptores (Modo dev, experimentos), os
+ * avisos, as máquinas, o onboarding e o banco moram em Configurações. A faixa do topo só existe quando algo precisa da
+ * pessoa — a IA desconectada, um conector fora do ar ou o uso do plano (ADR-029: escrito) — e é uma linha discreta.
  */
 export type DadosMenuConta = {
   faixa: { texto: string; botao: string } | null;
   conexao: string;
-  avisos: string;
-  modoDev: boolean;
-  /** ADR-111: as chaves de experimento, logo abaixo do Modo dev (ADR-112: e o Modo WhatsApp). Ausente = todas desligadas. */
-  experimentos?: Experimentos;
-  banco: { texto: string; regime: string } | null;
-  /** ADR-085: o que o item Este Mac diz à direita ("Equilibrado", ou "Ocupado" quando segura trabalho novo). */
-  esteMac?: string;
+  /** NOD-367: o aviso das máquinas (o Este Mac sem disco ou ocupado, o computador do bot trabalhando), que abre Máquinas. */
+  maquina?: { texto: string; tom: "atencao" | "neutro" | "ok" } | null;
+  /** Quem está logado; null = servidor sem contas e sem nome conhecido (o bloco não aparece). */
+  quem?: { nome: string | null; email: string | null } | null;
   /**
-   * NOD-96 (computador do bot v2): o item "Computador do bot" já montado (com o anel e a dica durante uma operação). Com
-   * ele, "Computadores" vira "Chaves". Ausente = o modelo de antes.
-   */
-  computadorDoBot?: string;
-  /**
-   * NOD-345 (ADR-124): ausente = servidor sem contas (o menu de antes). `email: null` = espaço provisório: a linha fixa
-   * "Criar conta ou entrar · Seu espaço está só neste computador" (o lembrete permanente, opção 2 do Gil).
+   * NOD-345 (ADR-124): ausente = servidor sem contas (sem Sair). `email: null` = espaço provisório: no lugar de Sair, o
+   * convite "Criar conta ou entrar" (o lembrete permanente, opção 2 do Gil).
    */
   conta?: { email: string | null; senha: boolean; legado?: boolean };
 };
 
-/** NOD-345: o topo do menu com contas — sem conta, o convite; com conta, o e-mail e o que se faz com ela. */
-export function htmlSecaoConta(c: NonNullable<DadosMenuConta["conta"]>): string {
-  const item = (qual: string, nome: string, meta = "") => `<button type="button" role="menuitem" data-conta="${qual}">${ICONE.pessoa}<span class="mc-nome">${esc(nome)}</span>${meta ? `<span class="mc-meta">${esc(meta)}</span>` : ""}</button>`;
-  if (c.email === null) return `${item("inicio", "Criar conta ou entrar", "Seu espaço está só neste computador")}<hr>`;
-  // Pessoa de antes das contas (entrou pelo Google da lista): gerencia e encerra as sessões, sem senha nem pareamento.
-  if (c.legado) return `<p class="mc-conta">${esc(c.email)}</p>${item("sessoes", "Sessões")}${item("sair", "Sair")}<hr>`;
-  return `<p class="mc-conta">${esc(c.email)}</p>${c.senha ? item("senha", "Trocar senha") : ""}${item("sessoes", "Sessões")}${item("parear-gerar", "Conectar outro computador")}${item("sair", "Sair")}<hr>`;
+/** "AN" de "Ana"; sem nome, as duas primeiras letras do e-mail. */
+export function iniciaisDeQuem(nome: string | null, email: string | null): string {
+  const base = (nome ?? "").trim();
+  if (base) {
+    const partes = base.split(/\s+/).filter(Boolean);
+    return ((partes[0]?.[0] ?? "") + (partes.length > 1 ? partes[partes.length - 1]![0] ?? "" : partes[0]?.[1] ?? "")).toUpperCase();
+  }
+  return (email ?? "").slice(0, 2).toUpperCase();
 }
 
 /** "Gmail e ClickUp fora do ar"; com mais de três, os dois primeiros e quantos faltam. */
@@ -48,17 +41,6 @@ export function faixaDeConectores(nomes: readonly string[]): string {
   const lista = nomes.length > 3 ? [...nomes.slice(0, 2), `mais ${nomes.length - 2}`] : [...nomes];
   return `${new Intl.ListFormat("pt-BR", { style: "long", type: "conjunction" }).format(lista)} fora do ar`;
 }
-
-/**
- * definido em 2026-10-16 (ADR-111): as chaves de experimento, como a do Modo dev — ligam ali mesmo e valem para os turnos
- * seguintes de todos os bots da pessoa. O porquê fica no title (hover), não no menu; o Raio-X de cada turno diz o que valeu.
- */
-const EXPERIMENTOS: readonly { chave: keyof Experimentos; icone: string; nome: string; dica: string }[] = [
-  { chave: "calibracao", icone: ICONE.escudo, nome: "Calibração", dica: "Experimento: o bot diz que não achou em vez de afirmar que algo não existe." },
-  { chave: "memoriaLonga", icone: ICONE.livro, nome: "Memória longa", dica: "Experimento: sem sessão retomada, o bot recebe as falas recentes inteiras (até 8 mil caracteres) e os anexos de antes." },
-  // definido em 2026-10-17 (ADR-112): a terceira chave, logo abaixo das duas da ADR-111.
-  { chave: "whatsapp", icone: ICONE.balao, nome: "Modo WhatsApp", dica: "Experimento: respostas curtas, como no WhatsApp — uma a três frases, sem títulos nem listas." },
-];
 
 /** O uso do plano que segura as rotinas: o texto da faixa do menu e o resumo que entra no nome acessível do avatar. */
 export type AvisoDoUso = { texto: string; resumo: string };
@@ -112,21 +94,25 @@ export function faixaDoUso(contas: readonly ContaIa[], agora: number): AvisoDoUs
 }
 
 export function htmlMenuConta(d: DadosMenuConta): string {
-  const item = (secao: SecaoEspaco, icone: string, nome: string, meta = "") => `<button type="button" role="menuitem" data-secao="${secao}">${icone}<span class="mc-nome">${esc(nome)}</span>${meta ? `<span class="mc-meta">${esc(meta)}</span>` : ""}${ICONE.seta}</button>`;
-  const faixa = d.faixa ? `<div class="mc-faixa" role="status"><span>${esc(d.faixa.texto)}</span><button type="button" role="menuitem" data-secao="conexao">${esc(d.faixa.botao)}</button></div>` : "";
-  const banco = d.banco ? `<p class="mc-banco banco-${esc(d.banco.regime)}"><span aria-hidden="true"></span>${esc(d.banco.texto)}</p>` : "";
-  return `<div role="menu" aria-label="Menu da conta">${faixa}${d.conta ? htmlSecaoConta(d.conta) : ""}
+  const item = (secao: string, icone: string, nome: string, meta = "", extra = "") => `<button type="button" role="menuitem" data-secao="${secao}"${extra}>${icone}<span class="mc-nome">${esc(nome)}</span>${meta ? `<span class="mc-meta">${esc(meta)}</span>` : ""}</button>`;
+  const quem = d.quem && (d.quem.nome || d.quem.email)
+    ? `<div class="mc-quem"><span class="mc-av" aria-hidden="true">${esc(iniciaisDeQuem(d.quem.nome, d.quem.email))}</span><span class="mc-quem-txt"><b>${esc(d.quem.nome ?? d.quem.email ?? "")}</b>${d.quem.nome && d.quem.email ? `<small>${esc(d.quem.email)}</small>` : ""}</span></div>`
+    : "";
+  // As faixas ficam fora do role=menu (um status não é item de menu); as setas do diálogo passam pelos botões delas.
+  const faixa = d.faixa ? `<div class="mc-faixa" role="status"><i aria-hidden="true"></i><span>${esc(d.faixa.texto)}</span><button type="button" data-secao="conexao">${esc(d.faixa.botao)}</button></div>` : "";
+  const maquina = d.maquina ? `<div class="mc-faixa mc-faixa-${d.maquina.tom}" role="status"><i aria-hidden="true"></i><span>${esc(d.maquina.texto)}</span><button type="button" data-secao="maquinas">Ver</button></div>` : "";
+  const rotulo = d.quem?.nome ? `Menu da conta de ${d.quem.nome}` : "Menu da conta";
+  // Sair por último; no espaço provisório (sem conta ainda), o convite fica no lugar dele.
+  const fim = !d.conta ? ""
+    : d.conta.email === null
+      ? `<hr><button type="button" role="menuitem" data-conta="inicio">${ICONE.pessoa}<span class="mc-nome">Criar conta ou entrar</span><span class="mc-meta">Seu espaço está só neste computador</span></button>`
+      : `<hr><button type="button" role="menuitem" data-conta="sair">${ICONE.sair}<span class="mc-nome">Sair</span></button>`;
+  return `${quem}${faixa}${maquina}<div role="menu" aria-label="${esc(rotulo)}">
     ${item("conexao", pilhaDeAvatares(true), "Provedores de IA", d.conexao)}
-    ${item("avisos", ICONE.sino, "Avisos", d.avisos)}
-    <button type="button" role="menuitemcheckbox" aria-checked="${d.modoDev}" data-modo-dev>${ICONE.codigo}<span class="mc-nome">Modo dev</span><kbd>⌘⇧D</kbd><span class="mc-chave" aria-hidden="true"><span></span></span></button>
-    ${EXPERIMENTOS.map((e) => `<button type="button" role="menuitemcheckbox" aria-checked="${d.experimentos?.[e.chave] ?? false}" data-experimento="${e.chave}" title="${esc(e.dica)}">${e.icone}<span class="mc-nome">${esc(e.nome)}</span><span class="mc-chave" aria-hidden="true"><span></span></span></button>`).join("")}
-    ${item("este-mac", ICONE.medidor, "Este Mac", d.esteMac ?? "")}
-    ${d.computadorDoBot ?? ""}
-    ${item("computadores", ICONE.monitor, d.computadorDoBot ? "Chaves" : "Computadores")}
     <hr>
-    ${item("agentes", ICONE.agentes, "Gerenciar agentes")}
-    ${item("relatos", ICONE.bandeira, "Relatos")}
-    <button type="button" role="menuitem" data-onboarding>${ICONE.brilho}<span class="mc-nome">Ver o onboarding de novo</span></button>
-    ${banco ? `<hr>${banco}` : ""}
+    ${item("geral", ICONE.ajustes, "Configurações")}
+    ${item("agentes", ICONE.agentes, "Agentes")}
+    ${item("feedback", ICONE.bandeira, "Enviar feedback")}
+    ${item("ajuda", ICONE.info, "Ajuda")}${fim}
   </div>`;
 }

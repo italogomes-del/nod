@@ -2,7 +2,6 @@ import type { Mensagem } from "../../src/contracts/mensagem.ts";
 import type { ResumoRaioX } from "../../src/contracts/raio-x.ts";
 import type { Estado } from "../estado/reducer.ts";
 import { esc } from "../lib/render.ts";
-import { ESCOLHAS_TEMA, lerTema, type EscolhaTema } from "../lib/tema.ts";
 
 /**
  * Modo dev (definido em 2026-09-28, 0036; canvas "Nod — tela do agente", página modo-dev): em cada resposta, o
@@ -133,30 +132,5 @@ export function renderTaxasLinhas(estado: Estado): string {
   if (!estado.modoDev.ligado || !taxas?.length) return "";
   const partes = taxas.map((t) => `${t.tipo} ${t.taxa === null ? "—" : `${Math.round(t.taxa * 100)}%`}`).join(" · ");
   return `<span class="dev-hoje dev-linhas" title="Linhas do chat abertas nos últimos 14 dias (abertas / mostradas). Acima de 30% por 2 semanas, o tipo volta a ser balão (ADR-083).">Linhas abertas: ${esc(partes)}</span>`;
-}
-
-/**
- * Aparência (definido em 2026-10-04, design system do Nod): Sistema, Claro ou Escuro, deste computador. O clique
- * aplica na hora (web/lib/tema.ts) e marca o botão no próprio DOM: a escolha não mora no Estado.
- */
-export function renderEscolhaTema(atual: EscolhaTema): string {
-  const botoes = ESCOLHAS_TEMA.map((t) => `<button type="button" class="seg${t.id === atual ? " ativo" : ""}" data-act="escolher-tema" data-tema="${t.id}" aria-pressed="${t.id === atual}">${esc(t.nome)}</button>`).join("");
-  return `<h3 class="espaco-subtitulo">Aparência</h3>
-      <div class="segmentado escolha-tema" role="group" aria-label="Tema">${botoes}</div>
-      <p class="intro">Sistema acompanha o modo claro ou escuro do macOS. A escolha vale para este computador.</p>`;
-}
-
-/** Em "Seu espaço": Aparência e o interruptor do modo dev, com o mesmo desenho do de avisos. */
-export function renderPreferenciaModoDev(estado: Estado): string {
-  return `<section class="espaco-secao">
-      <h2>Preferências</h2>
-      ${renderEscolhaTema(lerTema())}
-      <h3 class="espaco-subtitulo">Modo dev</h3>
-      <div class="avisos-linha">
-        <button type="button" class="avisos-interruptor" data-act="alternar-modo-dev" role="switch" aria-checked="${estado.modoDev.ligado ? "true" : "false"}"><span class="avisos-trilho" aria-hidden="true"></span><span>Modo dev</span></button>
-        <span class="mudo">Atalho ⌘⇧D</span>
-      </div>
-      <p class="intro">Mostra, em cada resposta, o custo, os tokens e o que foi enviado ao modelo. Só você vê. O texto do que foi enviado fica guardado a partir dos turnos que rodarem com ele ligado.</p>
-    </section>`;
 }
 

@@ -104,11 +104,11 @@ describe("Este Mac é só do Mac", () => {
     expect(html).not.toContain("Seu Mac está ocupado");
     expect(html).not.toContain("Slack");
     expect(html).toContain("Nada esperando");
-    expect(html).toContain("Vale também para nod-motor-teste");
+    expect(html).toContain("vale também para nod-motor-teste");
   });
 
   it("sem outra máquina, sem a linha do 'vale também'", () => {
-    expect(renderEsteMac(estadoCom([doMac], [macFolgado]))).not.toContain("Vale também");
+    expect(renderEsteMac(estadoCom([doMac], [macFolgado]))).not.toContain("vale também");
   });
 });
 
@@ -116,7 +116,7 @@ describe("Máquinas: a leitura de cada uma no cartão", () => {
   it("o status curto à vista e os números atrás do clique", () => {
     const estado = estadoCom([daVm("Slack"), daVm("NOD-202"), doMac], [vmCheia, macFolgado]);
     const html = leituraNoCartao(estado, VM.id);
-    expect(html).toContain("<summary>");
+    expect(html).toContain('class="cfg-leitura"');
     expect(html).toContain("Ocupada · 2 trabalhos esperam ela aliviar");
     expect(html).toContain("processador cheio (100% do tempo ocupado)");
     expect(html).toContain("disco com 14 GB livres de 29 GB");

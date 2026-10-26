@@ -7,7 +7,7 @@ import {
   estadoDaGaveta,
   htmlAvisoDeFalha,
   htmlGavetaTela,
-  htmlItemMenu,
+  avisoDoComputador,
   htmlLinhaDoChat,
   htmlLogin,
   htmlPedidoDeTela,
@@ -26,8 +26,8 @@ import {
 } from "../../../web/lib/computador-pessoa.ts";
 import { htmlCenaDoPreparo } from "../../../web/lib/cena-do-preparo.ts";
 import { readFileSync } from "node:fs";
-import { estadoInicial, reduzir } from "../../../web/estado/reducer.ts";
-import { secoesDoEspaco } from "../../../web/telas/espaco.ts";
+import { estadoInicial, reduzir, secaoDoPedido } from "../../../web/estado/reducer.ts";
+import { SECOES_ESPACO } from "../../../web/telas/espaco.ts";
 import { htmlMenuConta } from "../../../web/telas/menu-conta.ts";
 
 /** NOD-96, PR 6: a web do computador do bot v2 (um computador por pessoa, uma tela por bot). */
@@ -44,24 +44,19 @@ describe("contrato e flag", () => {
     expect(lerComputadorPessoa({ estado: "dormindo" })).toEqual({ estado: "dormindo", maquina: null, telas: [], esperando: [] });
   });
 
-  it("Seu espaço ganha a seção depois de Máquinas só na v2; Computadores vira Chaves", () => {
-    const v1 = secoesDoEspaco(false).map((s) => s.id);
-    const v2 = secoesDoEspaco(true);
-    expect(v1).not.toContain("computador-do-bot");
-    const ids = v2.map((s) => s.id);
-    expect(ids.indexOf("computador-do-bot")).toBe(ids.indexOf("maquinas") + 1);
-    expect(v2.find((s) => s.id === "computadores")?.nome).toBe("Chaves");
-    expect(secoesDoEspaco(false).find((s) => s.id === "computadores")?.nome).not.toBe("Chaves");
+  // NOD-367: as Configurações têm 6 seções fixas; o computador do bot (v2) mora dentro de Máquinas.
+  it("a v2 não acrescenta seção às Configurações; o pedido antigo cai em Máquinas", () => {
+    expect(SECOES_ESPACO.map((s) => s.id)).toEqual(["conta", "geral", "conexao", "maquinas", "agentes", "feedback"]);
+    expect(secaoDoPedido("computador-do-bot")).toBe("maquinas");
+    expect(secaoDoPedido("computadores")).toBe("maquinas");
   });
 
-  it("sem v2 o menu da conta fica como hoje; com v2 o item novo entra e Computadores vira Chaves", () => {
-    const base = { faixa: null, conexao: "Conectada", avisos: "Ligados", modoDev: false, banco: null } as const;
-    const v1 = htmlMenuConta(base);
-    expect(v1).toContain("Computadores");
-    expect(v1).not.toContain("Computador do bot");
-    const v2 = htmlMenuConta({ ...base, computadorDoBot: htmlItemMenu(pc()) });
-    expect(v2).toContain("Computador do bot");
-    expect(v2).toContain("Chaves");
+  it("o menu da conta não lista máquinas nem o computador do bot", () => {
+    const menu = htmlMenuConta({ faixa: null, conexao: "Conectada" });
+    expect(menu).not.toContain("Computador do bot");
+    expect(menu).not.toContain("Computadores");
+    expect(menu).not.toContain("Máquinas");
+    expect(avisoDoComputador(pc())).toBeNull();
   });
 
   it("o reducer guarda o computador e o apaga quando a rota some", () => {
@@ -156,13 +151,15 @@ describe("painel e menu", () => {
     expect(etapas).toContain("Continuar em segundo plano");
   });
 
-  it("o progresso fica no item de menu (anel e dica), sem toast", () => {
-    const item = htmlItemMenu(pc({ estado: "operando", operacao: { tipo: "redefinir", pct: 34, etapa: null } }));
-    expect(item).toContain("Redefinindo · 34%");
-    expect(item).not.toContain('class="mc-meta"');
-    expect(item.match(/34%/g)).toHaveLength(2); // a dica e o aria-label, sem o meta repetido
-    expect(item).toContain('data-secao="computador-do-bot"');
-    expect(htmlItemMenu(pc({ estado: "dormindo" }))).toContain("Dormindo");
+  it("NOD-367: o progresso vira a linha discreta do menu (abre Máquinas); o ✓ logo depois; dormindo não avisa", () => {
+    const op = pc({ estado: "operando", operacao: { tipo: "redefinir", pct: 34, etapa: null } });
+    expect(avisoDoComputador(op)).toEqual({ texto: "Computador do bot · Redefinindo · 34%", tom: "neutro" });
+    expect(avisoDoComputador(pc({ estado: "dormindo" }))).toBeNull();
+    expect(avisoDoComputador(pc(), true)).toEqual({ texto: "Computador do bot pronto", tom: "ok" });
+    const menu = htmlMenuConta({ faixa: null, conexao: "Conectada", maquina: avisoDoComputador(op) });
+    expect(menu).toMatch(/class="mc-faixa mc-faixa-neutro" role="status">[\s\S]*Redefinindo · 34%[\s\S]*data-secao="maquinas">Ver</);
+    // fora do role=menu: um status não é item de menu
+    expect(menu.indexOf("mc-faixa-neutro")).toBeLessThan(menu.indexOf('role="menu"'));
   });
 
   it("Esquecer senhas salvas é uma ação de Logins, confirma e vira operação com etapas", () => {
@@ -174,7 +171,7 @@ describe("painel e menu", () => {
     expect(conf).toContain("Esquecer as senhas salvas?");
     expect(conf).toContain('data-act="pc-confirmar" data-op="esquecer_senhas"');
     const op = pc({ estado: "operando", operacao: { tipo: "esquecer_senhas", pct: 50, etapa: "Apagando senhas salvas" } });
-    expect(htmlItemMenu(op)).toContain("Esquecendo as senhas · 50%");
+    expect(avisoDoComputador(op)?.texto).toContain("Esquecendo as senhas · 50%");
     // Com o nome que o supervisor emite, a lista avança: a etapa anterior feita, a atual marcada, nada inventado antes.
     const etapas = htmlPainelComputadorDoBot(op, BOTS as never, { ...UI_INICIAL, etapasAbertas: true }, 0);
     expect(etapas).toMatch(/<li class="feita">.*Esquecendo senhas<\/li><li class="atual" aria-current="step">.*Apagando senhas salvas/);
@@ -235,9 +232,9 @@ describe("preparo da VM local (NOD-93, passo 10)", () => {
     expect(dicaDoPreparo({ estado: "pronto", desde: 1 })).toBeNull();
   });
 
-  it("menu: o anel com a dica durante o download; pronto volta ao ícone", () => {
-    expect(htmlItemMenu(pc({ preparo: baixando }))).toContain("Preparando · 870 MB de 1,1 GB · 77%");
-    expect(htmlItemMenu(pc({ preparo: { estado: "pronto", desde: 1 } }))).not.toContain("cb-dica");
+  it("menu: a linha com o download; pronto não avisa", () => {
+    expect(avisoDoComputador(pc({ preparo: baixando }))?.texto).toBe("Computador do bot · Preparando · 870 MB de 1,1 GB · 77%");
+    expect(avisoDoComputador(pc({ preparo: { estado: "pronto", desde: 1 } }))).toBeNull();
   });
 
   it("chat: pausado com tentar agora; macOS antigo vira o card com Conectar uma VM; falhou é aviso", () => {

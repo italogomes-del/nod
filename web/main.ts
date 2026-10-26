@@ -3,7 +3,7 @@ import { abrirCapturaAmpliada } from "./telas/captura-ampliada.ts";
 import { abrirPreviaArquivo } from "./telas/previa-arquivo.ts";
 import { abrirComputador, aplicarModoDevNoComputador } from "./telas/computador.ts";
 import { abrirTelaCheia } from "./telas/tela-cheia.ts";
-import { htmlItemMenu, OPERACOES_PESSOA, type OperacaoPessoa } from "./lib/computador-pessoa.ts";
+import { avisoDoComputador, OPERACOES_PESSOA, type OperacaoPessoa } from "./lib/computador-pessoa.ts";
 import { CHAVE_AVISO_RECRIADO } from "./telas/espaco.ts";
 import { marcarTelaFechadaNaAjuda } from "./lib/computador.ts";
 import { aoVerComputador, definirTelaDoBot } from "./telas/tela-do-bot.ts";
@@ -11,6 +11,8 @@ import { abrirWorkspace } from "./telas/workspace.ts";
 import { listaDoQuePodem, rotuloPermitir, type EscolhaLiberar } from "./telas/card-liberar.ts";
 import { CURTA } from "./telas/card-pasta.ts";
 import { abrirReportarBug } from "./telas/reportar-bug.ts";
+import { destinoDoFeedback } from "./telas/relatos.ts";
+import { proximoItemDoMenu } from "./lib/linha-config.ts";
 import { abrirRaioX } from "./telas/raio-x.ts";
 import { ondeDoTurno } from "./telas/modo-dev.ts";
 import { iasDaTela, mudarRascunho, ordemDaPessoa, destinoDoPedido, mudaAIaDoBot, pedidoDoMenu, pedidoDoRascunho, rascunhoDe, type MudancaRascunho, type RascunhoInteligencia } from "./telas/inteligencia.ts";
@@ -46,7 +48,7 @@ import type { AlvoAviso } from "../src/contracts/desktop.ts";
 import type { Experimentos } from "../src/contracts/raio-x.ts";
 import type { Escopo } from "../src/shared/types.ts";
 import type { FrameSse } from "../src/contracts/frame.ts";
-import { agenteDaTela, bibliotecaAberta, conversaAbertaTemNotaDeContas, conversaDaTela, estadoInicial, invalidacoesAoReconectar, invalidacoesAoRetomar, invalidacoesDaTela, mudouNaTela, reduzir, type Acao, type Estado, type Invalidacao, type NivelGaveta, type SecaoEspaco, type Tela } from "./estado/reducer.ts";
+import { agenteDaTela, bibliotecaAberta, conversaAbertaTemNotaDeContas, conversaDaTela, estadoInicial, invalidacoesAoReconectar, invalidacoesAoRetomar, invalidacoesDaTela, mudouNaTela, reduzir, secaoDoPedido, type Acao, type Estado, type Invalidacao, type NivelGaveta, type PedidoSecao, type SecaoEspaco, type Tela } from "./estado/reducer.ts";
 import { contaApi, criarApi, minhaContaApi, ErroApi, observarRede, sessao as sessaoApi, type Api } from "./lib/api.ts";
 import { criarContaNoChat, fraseDoErro as fraseDoErroDeConta } from "./telas/conta-no-chat.ts";
 import { criarMinhaConta } from "./telas/minha-conta.ts";
@@ -68,11 +70,13 @@ import "./pwa.ts";
 import { botao, esc, iconeAgente } from "./lib/render.ts";
 import { COPIADO_MS, mostrarCopia, ROTULO_COPIADO, type RelogioDoCopiar } from "./lib/copiar.ts";
 import { avisoDeEstado } from "./lib/aviso-estado.ts";
-import { aplicarTema } from "./lib/tema.ts";
+import { aplicarTema, lerTema, type EscolhaTema } from "./lib/tema.ts";
+import type { DadosConta } from "./telas/config-conta.ts";
 import { estadoMascoteNaConversa, mascoteComAviso, proximaViradaDoMascote } from "./lib/mascote.ts";
 import { lembrar } from "./lib/lembrar.ts";
 import { atualizarGaveta } from "./lib/gaveta-render.ts";
 import { blocosMudariam, esquecerRegiao, regiao, regiaoMudaria, regiaoPorBlocos } from "./lib/regioes.ts";
+import { mudancaSujaAGaveta, reporSeletor, salvarOuRepor } from "./lib/salvar-ou-repor.ts";
 import { criarAnunciador, criarRelogioDaFala, escreverTempos, lerFalasNaTela, type FalaNaTela } from "./lib/fala-viva.ts";
 import { criarRascunhos } from "./lib/rascunhos.ts";
 import { criarRolagem } from "./lib/rolagem-na-tela.ts";
@@ -84,7 +88,7 @@ import { renderNovoBot } from "./telas/novo-bot.ts";
 import { renderNovaRotina } from "./telas/nova-rotina.ts";
 import { contextoInteligencia, nivelDaGaveta, paiDoNivel } from "./telas/detalhes.ts";
 import { avisarNaIdentidade, criarFilaDePerfil, criarSalvarAvatar, ERRO_AO_SALVAR, instalarIdentidade, sobreporPendentes } from "./lib/gaveta-identidade.ts";
-import { renderEspaco, situacaoCurtaAvisos, textoAmbiente } from "./telas/espaco.ts";
+import { renderEspaco } from "./telas/espaco.ts";
 import { USOS } from "./telas/este-mac.ts";
 import { botsDaPessoa, maquinaNova, maquinasDeTrabalho, nomeDeInstanciaSugerido, soComputador } from "./telas/maquinas.ts";
 import { erroDoConectar, erroDoCriar, erroDoExcluir, recusaDoDormir, REGIAO_PADRAO, relerEnquantoCria, ZONA_PADRAO } from "./lib/maquina-nuvem.ts";
@@ -116,6 +120,7 @@ import type { ComandosDto } from "../src/contracts/comandos.ts";
 import { destinoDoEnvio, enviarPeloComposer, modoDoComposer, opcoesDaPergunta, proximaDoComposer, textoDaLetra } from "./lib/perguntas.ts";
 import { acharBotao, aplicarFocoDaFila, botaoEmFoco, proximoDaFila, VALIDADE_DO_FOCO_MS, type FocoDaFila } from "./lib/foco-da-fila.ts";
 import { aplicarEncolhidos, decididaNaConversa, type DecididaNestaAba } from "./lib/foco-do-encolhido.ts";
+import { seletorDoFocoNaRegiao } from "./lib/foco-do-bloco.ts";
 import { itensDaRecusa } from "./lib/recusa-da-aprovacao.ts";
 import { criarEnvios, enviarUmaVez } from "./lib/envio-idempotente.ts";
 import { iniciarMotorLigacao } from "./lib/ligacao.ts";
@@ -888,7 +893,8 @@ async function buscar(q: Invalidacao): Promise<Acao | null> {
   if (q === "chaves") return { tipo: "hidratar-chaves", chaves: (await api.chaves()).chaves };
   // ADR-090: servidor sem a rota (404, versão anterior) fica sem máquinas; nenhum erro sobe.
   if (q === "maquinas") return { tipo: "hidratar-maquinas", maquinas: await api.maquinas().catch((e: unknown) => { if (e instanceof ErroApi && e.status === 404) return { maquinas: [], padraoId: null }; throw e; }) };
-  if (q === "relatos") return { tipo: "hidratar-relatos", relatos: (await api.relatos()).relatos };
+  // NOD-367: a falha vira a linha "Tentar de novo" em Feedback, sem a faixa vermelha e sem pedir de novo a cada quadro.
+  if (q === "relatos") return await api.relatos().then((r): Acao => ({ tipo: "hidratar-relatos", relatos: r.relatos }), (): Acao => ({ tipo: "hidratar-relatos", relatos: null, erro: true }));
   // ADR-121 (NOD-92): sem NOD_MAQUINA_NUVEM a rota dá 404 e a seção fica como antes. Outra falha mantém a última leitura
   // (ou fecha, se não havia): a nuvem é um extra da seção, nunca a quebra.
   if (q === "nuvem") {
@@ -1065,11 +1071,11 @@ function relevante(q: Invalidacao): boolean {
   if (q === "gestao") return secao === "agentes";
   if (q === "rotinas") return t.tipo === "rotinas" || t.tipo === "conversa";
   if (q === "conectores") return t.tipo === "conectores" || t.tipo === "conversa" || t.tipo === "sala";
-  if (q === "chaves") return secao === "computadores";
-  if (q === "maquinas") return secao === "maquinas" || secao === "conexao" || t.tipo === "conversa" || t.tipo === "trabalho";
+  if (q === "chaves") return secao === "maquinas";
+  if (q === "maquinas") return secao === "maquinas" || secao === "agentes" || secao === "conexao" || t.tipo === "conversa" || t.tipo === "trabalho";
   if (q === "nuvem") return secao === "maquinas";
   if (q === "contas") return secao === "maquinas" || secao === "conexao" || ((t.tipo === "conversa" || t.tipo === "trabalho" || conversaAbertaTemNotaDeContas(estado)) && (contasFalharamEm === null || Date.now() - contasFalharamEm > ESPERA_CONTAS_MS));
-  if (q === "relatos") return secao === "relatos";
+  if (q === "relatos") return secao === "feedback";
   if (q.startsWith("conversa:")) return (t.tipo === "conversa" || t.tipo === "sala" || t.tipo === "linha") && t.conversaId === q.slice(9);
   if (q.startsWith("memoria:")) return t.tipo === "conversa" && estado.gaveta?.agenteId === q.slice(8) && estado.gaveta.nivel.tipo === "memoria";
   if (q.startsWith("concessoes:")) return t.tipo === "conversa" && t.agenteId === q.slice(11) ? true : t.tipo === "conectores";
@@ -1849,7 +1855,11 @@ function render(): void {
   if (!arrastandoBot) redesenharSidebar();
   const codigo = codigoComFoco();
   // Seu espaço é uma camada por cima: a tela de baixo continua montada e fica inerte (nem foco, nem clique) enquanto ela está aberta.
-  regiaoReabrindo("espaco", estado.espaco ? renderEspaco(estado, ambienteBanco, canalAvisos.estado(), voltaDaTela(estado, estado.tela), contas?.minhaConta ? telaMinhaConta.render() : null) : "");
+  regiaoReabrindo("espaco", estado.espaco ? renderEspaco(estado, ambienteBanco, canalAvisos.estado(), voltaDaTela(estado, estado.tela), {
+    conta: dadosConta(),
+    contaPagina: contas?.minhaConta && estado.configUi.abertos.includes("conta-pagina") ? telaMinhaConta.render() : null,
+    tema: lerTema(),
+  }) : "");
   devolverSegredosSsh();
   document.getElementById("espaco")?.toggleAttribute("hidden", !estado.espaco);
   // A ligação em tela cheia também deixa a .app (e Seu espaço) inerte; a pílula não: a pessoa usa o nod com a ligação aberta.
@@ -2067,7 +2077,13 @@ function regiaoReabrindo(id: string, html: string): void {
   const manter = campo?.dataset.manterFoco ? { chave: campo.dataset.manterFoco, valor: campo.value, ini: campo.selectionStart, fim: campo.selectionEnd } : null;
   const abertos = new Set([...raiz.querySelectorAll<HTMLDetailsElement>("details[data-disclosure][open]")].map((el) => el.dataset.disclosure));
   const ativo = document.activeElement instanceof HTMLElement && raiz.contains(document.activeElement) ? document.activeElement.closest<HTMLDetailsElement>("details[data-disclosure]")?.dataset.disclosure ?? null : null;
+  // NOD-367 (revisão 2): o botão, switch ou seletor focado volta ao mesmo controle no HTML novo (chave estável, não posição).
+  const focado = !manter && document.activeElement instanceof HTMLElement && raiz.contains(document.activeElement) ? document.activeElement : null;
+  const seletorFoco = focado ? seletorDoFocoNaRegiao(focado) : null;
   regiao(id, html);
+  if (focado && !focado.isConnected && seletorFoco) {
+    try { raiz.querySelector<HTMLElement>(seletorFoco)?.focus({ preventScroll: true }); } catch { /* um data-* que não vira seletor: o foco não volta, o render segue */ }
+  }
   for (const el of raiz.querySelectorAll<HTMLDetailsElement>("details[data-disclosure]")) {
     if (abertos.has(el.dataset.disclosure)) el.open = true;
     if (ativo !== null && el.dataset.disclosure === ativo) el.querySelector("summary")?.focus();
@@ -2098,7 +2114,7 @@ async function boot(): Promise<void> {
     // Revisto em 2026-10-11: com Máquinas aberta, a lista também. Máquina que cai ou volta não vira `inventario.mudou` (só a
     // mudança das IAs da pessoa vira), e o cartão ficava em "sem contato" com a VM já de volta e os bots trabalhando nela.
     // Desde a NOD-300 (2026-10-20) ela vira (motivo "presenca", no varrer da ponte); esta releitura fica como rede.
-    if (ticks % 2 === 0 && estado.sessao && (estado.espaco?.secao === "este-mac" || estado.espaco?.secao === "maquinas")) estado = reduzir(estado, { tipo: "invalidar", quais: estado.espaco?.secao === "maquinas" ? ["trabalhos", "maquinas"] : ["trabalhos"] });
+    if (ticks % 2 === 0 && estado.sessao && estado.espaco?.secao === "maquinas") estado = reduzir(estado, { tipo: "invalidar", quais: ["trabalhos", "maquinas"] });
     // ADR-121 (NOD-92): de volta do Google, o preparo da conta roda no servidor; a conta é relida até ele terminar.
     const conta = estado.nuvem.conta;
     if (estado.sessao && estado.nuvem.aviso === "preparando" && conta !== "desligada" && (conta === null || conta.preparando)) estado = reduzir(estado, { tipo: "invalidar", quais: ["nuvem", "maquinas"] });
@@ -2347,7 +2363,7 @@ function acaoDoBot(a: BotGerido, acao: AcaoGestao): void {
     }); return;
   }
   if (acao === "excluir") {
-    pedirGestao(`Excluir ${a.nome}?`, "<p>O bot vai para Excluídos. Novos trabalhos serão bloqueados, rotinas pausadas e acessos revogados. Trabalhos em andamento receberão um pedido de interrupção; ações externas já realizadas não podem ser desfeitas.</p><p>Você pode recuperar o perfil e o histórico em Gerenciar agentes.</p>", "Excluir agente", async () => {
+    pedirGestao(`Excluir ${a.nome}?`, "<p>O bot vai para Excluídos. Novos trabalhos serão bloqueados, rotinas pausadas e acessos revogados. Trabalhos em andamento receberão um pedido de interrupção; ações externas já realizadas não podem ser desfeitas.</p><p>Você pode recuperar o perfil e o histórico em Configurações › Agentes.</p>", "Excluir agente", async () => {
       await mudarGestao(() => api!.excluirAgente(a.id)); abrirEspaco("agentes");
     }, true); return;
   }
@@ -2355,7 +2371,7 @@ function acaoDoBot(a: BotGerido, acao: AcaoGestao): void {
     void navigator.clipboard.writeText(a.conversaId).then(() => pedirGestao("ID copiado", `<p>ID da conversa copiado para a área de transferência.</p><input aria-label="ID da conversa" readonly value="${esc(a.conversaId)}" />`, "Concluir", async () => {})).catch(() => pedirGestao("ID da conversa", `<p>Selecione e copie o ID abaixo.</p><input aria-label="ID da conversa" readonly value="${esc(a.conversaId)}" />`, "Concluir", async () => {})); return;
   }
   if (acao === "ocultar" && !a.oculto) {
-    pedirGestao("Ocultar da barra lateral?", "<p>O bot e suas rotinas continuam funcionando. Para trazê-lo de volta, abra Gerenciar agentes → Ocultos.</p>", "Ocultar", async () => {
+    pedirGestao("Ocultar da barra lateral?", "<p>O bot e suas rotinas continuam funcionando. Para trazê-lo de volta, abra Configurações › Agentes › Ocultos.</p>", "Ocultar", async () => {
       await mudarGestao(() => api!.ocultar(a.id, true)); abrirEspaco("agentes");
     }); return;
   }
@@ -3186,6 +3202,9 @@ function gatilhoDoDialogo(): string | null {
   if (x) return `[data-act="maq-menu"][data-maquina="${CSS.escape(x.id)}"], [data-act="nuvem-excluir"][data-id="${CSS.escape(x.id)}"]`;
   // Revisão NOD-92 (rodada 2): o foco volta ao "Criar" que abriu o painel — o do topo ou o "Criar de novo" daquela VM.
   if (estado.nuvem.criar) return criarAbertoPor ? `[data-act="nuvem-criar-abrir"][data-id="${CSS.escape(criarAbertoPor)}"]` : `[data-act="nuvem-criar-abrir"]:not([data-id])`;
+  // NOD-367 (revisão 3): o Esc no "…" aberto devolve o foco ao "…" que o abriu (da máquina ou da conta).
+  if (u.maquinaMenu) return `[data-act="maq-menu"][data-maquina="${CSS.escape(u.maquinaMenu)}"]`;
+  if (u.menu) return `[data-act="cl-menu"][data-id="${CSS.escape(u.menu)}"]`;
   return null;
 }
 function focarGatilho(seletor: string | null): void {
@@ -3315,16 +3334,7 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
       if (alvo) dispatch({ tipo: "invalidar", quais: [`conversa:${alvo.conversaId}`] });
     }, true);
   },
-  "escolher-tema": (el) => {
-    const escolha = el.dataset.tema === "claro" || el.dataset.tema === "escuro" ? el.dataset.tema : "sistema";
-    aplicarTema(escolha, document.documentElement);
-    // No app do Mac o localStorage some a cada conexão: o tema também vai para o processo principal (nativeTheme).
-    void window.nodDesktop?.definirTema?.(escolha).catch(() => undefined);
-    for (const b of el.parentElement?.querySelectorAll<HTMLElement>("[data-tema]") ?? []) {
-      b.classList.toggle("ativo", b === el);
-      b.setAttribute("aria-pressed", String(b === el));
-    }
-  },
+
   // ADR-113 (plano "pergunta com botões", Parte 5): as ações na fala — web/telas/acoes-da-fala.ts desenha, aqui se age.
   "reagir-fala": (el) => abrirMenuDaFala(el, "reagir"),
   "mais-da-fala": (el) => abrirMenuDaFala(el, "mais"),
@@ -3361,7 +3371,7 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     // do app inteiro — pode ser de outra chamada, de vinte minutos atrás, e some quando qualquer
     // agir() dá certo. Carimbar isso no relato mandaria quem investiga para a linha de log errada;
     // o turno e a mensagem já ligam o relato ao que aconteceu.
-    if (id && api) abrirReportarBug(api, id, __NOD_VERSAO__, null);
+    if (id && api) abrirReportarBug(api, id, __NOD_VERSAO__, null, () => dispatch({ tipo: "invalidar", quais: ["relatos"] }));
   },
   // ADR-051: o artefato numa janela grande (o mesmo documento, o mesmo estado) e o .html para guardar.
   "artefato-tela-cheia": (el) => agir(() => artefatos.telaCheia(el.dataset.mensagem ?? "")),
@@ -3393,8 +3403,31 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     else if (tela === "gestao") abrirEspaco("agentes");
     else if (tela === "espaco") abrirEspaco("conexao");
   },
-  "menu-conta": (el) => abrirMenuConta(el, dadosMenuConta(), { secao: abrirEspaco, modoDev: async () => { await agir(alternarModoDev); return estado.modoDev.ligado; }, experimento: async (chave) => { await agir(() => alternarExperimento(chave)); return estado.experimentos[chave]; }, onboarding: () => void telaOnboarding.deNovo(), conta: (qual) => void abrirDoMenuConta(qual) }),
+  "menu-conta": (el) => abrirMenuConta(el, dadosMenuConta(), { secao: abrirEspaco, conta: (qual) => void abrirDoMenuConta(qual) }),
   "secao-espaco": (el) => abrirEspaco((el.dataset.secao as SecaoEspaco | undefined) ?? "conexao"),
+  // NOD-367: as ações das Configurações (a linha recolhida, a conta, os experimentos e o onboarding).
+  "config-recolhe": (el) => { if (el.dataset.recolhe) dispatch({ tipo: "config-recolhe", id: el.dataset.recolhe }); },
+  "alternar-experimento": (el) => {
+    const chave = el.dataset.experimento;
+    if (chave === "calibracao" || chave === "memoriaLonga" || chave === "whatsapp") return agir(() => alternarExperimento(chave));
+  },
+  "ver-onboarding": () => { fecharEspaco(); void telaOnboarding.deNovo(); },
+  "cfg-conta": (el) => {
+    const qual = el.dataset.conta ?? "inicio";
+    // Sair fica aqui; o resto abre o cartão da conta na conversa do Nod (as rotas de antes): as Configurações fecham.
+    if (qual !== "sair") fecharEspaco();
+    void abrirDoMenuConta(qual);
+  },
+  "cfg-conta-pagina": (el) => {
+    dispatch({ tipo: "config-ui", mudanca: { abertos: [...estado.configUi.abertos.filter((x) => x !== "conta-pagina"), "conta-pagina"] } });
+    if (el.dataset.aba) void telaMinhaConta.acoes["mc-aba"]?.(el);
+    if (el.dataset.passo) void telaMinhaConta.acoes["mc-passo"]?.(el);
+    document.querySelector<HTMLElement>("#espaco .cfg-voltar")?.focus();
+  },
+  "cfg-conta-voltar": () => {
+    dispatch({ tipo: "config-ui", mudanca: { abertos: estado.configUi.abertos.filter((x) => x !== "conta-pagina") } });
+    document.querySelector<HTMLElement>("#espaco .cfg-perfil")?.focus();
+  },
   // definido em 2026-10-05 (ia-fora.ts): os botões do aviso "a conta da IA não serve". Só existem dentro do app do Mac;
   // o login abre no navegador e o app percebe sozinho quando termina (testa a conta nova e reanuncia).
   // revisto em 2026-10-10 (plano das IAs, teste do Breno: "clicava em Codex e nada acontecia"): todo clique termina no
@@ -3786,7 +3819,6 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     const vel = el.closest("form")?.querySelector<HTMLInputElement>('input[name="vozVelocidade"]:checked')?.value ?? "1";
     void new Audio(`/api/t/${encodeURIComponent(tenant)}/voz/amostra?voz=${encodeURIComponent(voz)}&velocidade=${encodeURIComponent(vel)}`).play().catch(() => undefined);
   },
-  "atualizar-gestao": () => dispatch({ tipo: "invalidar", quais: ["gestao"] }),
   "restaurar-agente": (el) => agir(async () => { await mudarGestao(() => api!.restaurarAgente(el.dataset.id ?? "")); }),
   "ir-perfil": (el) => abrirNivel(el.dataset.id ?? "", { tipo: "perfil" }),
   "ir-memoria": (el) => abrirNivel(el.dataset.id ?? "", { tipo: "memoria" }),
@@ -3973,12 +4005,19 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     await api!.decidir(id, { itens });
     dispatch({ tipo: "invalidar", quais: ["sua-vez"] });
   }),
-  // 0062: o filtro por tipo da tela Relatos é atributo na seção (o CSS esconde o resto); nada é redesenhado.
+  // NOD-367: o filtro de Feedback mora em configUi (os envios abertos ficam em configUi.abertos e sobrevivem ao redesenho).
   "filtrar-relatos": (el) => {
-    const secao = el.closest<HTMLElement>(".relatos");
-    if (!secao) return;
-    secao.dataset.filtro = el.dataset.filtroTipo ?? "todos";
-    for (const b of secao.querySelectorAll<HTMLButtonElement>("[data-act=filtrar-relatos]")) b.setAttribute("aria-pressed", String(b === el));
+    dispatch({ tipo: "config-ui", mudanca: { filtro: el.dataset.filtroTipo ?? "todos" } });
+    document.querySelector<HTMLElement>(`#espaco [data-act="filtrar-relatos"][data-filtro-tipo="${CSS.escape(el.dataset.filtroTipo ?? "todos")}"]`)?.focus();
+  },
+  "recarregar-relatos": () => dispatch({ tipo: "hidratar-relatos", relatos: null, erro: false }),
+  // NOD-367 (emenda da ADR-041): "Enviar feedback" não anexa conversa nenhuma; leva à conversa com o Nod, onde se conta
+  // um bug, uma ideia ou uma dúvida sem mensagem de referência (0062).
+  "enviar-feedback": () => {
+    const nod = destinoDoFeedback(estado);
+    if (!nod) return;
+    fecharEspaco();
+    navegar({ tipo: "conversa", conversaId: nod.conversaId, agenteId: nod.agenteId });
   },
   // ADR-082: o card do lote do Nod — manda os índices das ações que ficaram marcadas.
   "decidir-lote": (el) => agir(async () => {
@@ -4041,7 +4080,11 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     }),
   "revogar-chave": (el) => {
     if (!window.confirm(`Cancelar a chave "${el.dataset.nome ?? ""}"? O computador dela para de conseguir entrar na hora.`)) return;
-    return agir(async () => void (await api!.revogarChave(el.dataset.id ?? ""), dispatch({ tipo: "invalidar", quais: ["chaves"] })));
+    dispatch({ tipo: "contas-ui", mudanca: { maquinaMenu: null } });
+    // QA NOD-367: o item some com o menu; o foco volta ao "…" da máquina, não cai no body.
+    const gatilho = el.dataset.maquina ? `[data-act="maq-menu"][data-maquina="${CSS.escape(el.dataset.maquina)}"]` : null;
+    focarGatilho(gatilho);
+    return agir(async () => void (await api!.revogarChave(el.dataset.id ?? ""), dispatch({ tipo: "invalidar", quais: ["chaves", "maquinas", "frota"] }), focarGatilho(gatilho)));
   },
   "fechar-chave-emitida": () => dispatch({ tipo: "chave-emitida", emitida: null }),
   // ADR-102: a lista única de contas (Provedores de IA) e as ações da máquina (Máquinas).
@@ -4104,13 +4147,26 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     abrirEspaco("conexao");
     if (ia === "claude-cli" || ia === "codex-cli") void contasDaPessoa.entrar(el.dataset.id ?? "", el.dataset.maquina ?? "", { ia, apelido: el.dataset.apelido ?? "" });
   },
-  "maq-menu": (el) => dispatch({ tipo: "contas-ui", mudanca: { maquinaMenu: estado.contasUi.maquinaMenu === el.dataset.maquina ? null : el.dataset.maquina ?? null } }),
+  "maq-menu": (el) => {
+    dispatch({ tipo: "contas-ui", mudanca: { maquinaMenu: estado.contasUi.maquinaMenu === el.dataset.maquina ? null : el.dataset.maquina ?? null } });
+    // NOD-367 (a11y do "…"): aberto, o foco vai ao primeiro item.
+    if (estado.contasUi.maquinaMenu) document.querySelector<HTMLElement>(`#espaco [data-maquina-linha="${CSS.escape(estado.contasUi.maquinaMenu)}"] .cl-menu [role^="menuitem"]`)?.focus();
+  },
   "maq-renomear": (el) => { dispatch({ tipo: "contas-ui", mudanca: { maquinaRenomear: el.dataset.maquina ?? null, maquinaMenu: null } }); focarNovo(); },
+  // NOD-367: onde cada bot trabalha se escolhe na ficha dele; "Bots desta máquina" leva aos Agentes.
   "maq-bots": () => {
     dispatch({ tipo: "contas-ui", mudanca: { maquinaMenu: null } });
-    const alvo = document.getElementById("bots-das-maquinas");
-    alvo?.scrollIntoView({ behavior: "smooth", block: "start" });
-    alvo?.focus({ preventScroll: true });
+    abrirEspaco("agentes");
+  },
+  // NOD-367: o que abre embaixo da linha da máquina (os detalhes da chave, o que roda no Mac); o menu fecha e o foco vai lá.
+  "maq-abrir": (el) => {
+    const id = el.dataset.recolhe ?? "";
+    const linha = el.closest<HTMLElement>("[data-maquina-linha]")?.dataset.maquinaLinha ?? "";
+    dispatch({ tipo: "contas-ui", mudanca: { maquinaMenu: null } });
+    if (!id) return;
+    dispatch({ tipo: "config-recolhe", id });
+    const alvo = document.querySelector<HTMLElement>(`#espaco [data-maquina-linha="${CSS.escape(linha)}"] [role="region"]`);
+    if (alvo) { alvo.tabIndex = -1; alvo.focus(); } else document.querySelector<HTMLElement>(`#espaco [data-act="maq-menu"][data-maquina="${CSS.escape(linha)}"]`)?.focus();
   },
   "maq-renomear-fechar": () => dispatch({ tipo: "contas-ui", mudanca: { maquinaRenomear: null } }),
   "maq-desconectar": (el) => {
@@ -4261,14 +4317,6 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     }
     dispatch({ tipo: "conectar-maquina", conectar: null });
     dispatch({ tipo: "invalidar", quais: ["frota", "maquinas"] });
-  }),
-  "maquina-do-bot": (el) => agir(async () => {
-    await api!.maquinaDoBot(el.dataset.id ?? "", el.dataset.maquina || null);
-    dispatch({ tipo: "invalidar", quais: ["frota", "maquinas"] });
-  }),
-  "maquina-padrao": (el) => agir(async () => {
-    await api!.maquinaPadrao(el.dataset.maquina || null);
-    dispatch({ tipo: "invalidar", quais: ["maquinas"] });
   }),
   "rodar-desta-vez": (el) => agir(async () => {
     const conversaId = el.dataset.conversa ?? "";
@@ -4502,6 +4550,16 @@ document.addEventListener("click", (ev) => {
   if ((u.menu || u.maquinaMenu) && !(ev.target as HTMLElement).closest(".cl-mais")) dispatch({ tipo: "contas-ui", mudanca: { menu: null, maquinaMenu: null } });
   if (estado.nuvem.sonoMenu && !(ev.target as HTMLElement).closest(".nv-ajuste-wrap")) dispatch({ tipo: "nuvem-ui", mudanca: { sonoMenu: null } });
 }, true);
+// NOD-367: setas, Home e End no "…" das Configurações (o `.cl-menu` aberto), como no menu do avatar.
+document.addEventListener("keydown", (ev) => {
+  const menu = (ev.target as HTMLElement).closest?.<HTMLElement>("#espaco .cl-menu");
+  if (!menu) return;
+  const itens = [...menu.querySelectorAll<HTMLElement>('[role^="menuitem"]')];
+  const proximo = proximoItemDoMenu(itens.length, itens.indexOf(document.activeElement as HTMLElement), ev.key);
+  if (proximo === null) return;
+  ev.preventDefault();
+  itens[proximo]?.focus();
+});
 document.addEventListener("keydown", (ev) => {
   // O Tab fica dentro do diálogo aberto (Sair, Remover, Desconectar), como na gaveta de conectores.
   // NOD-346: a janela "Confirme que é você" de Minha conta também prende o Tab.
@@ -4569,6 +4627,8 @@ document.addEventListener("change", (ev) => {
   const cb = ev.target as HTMLInputElement;
   // NOD-346: a foto escolhida na Minha conta.
   if (cb.dataset.actChange === "mc-foto-escolhida") { void telaMinhaConta.acoes["mc-foto-escolhida"]?.(cb); return; }
+  // NOD-367: o seletor das Configurações (`select.lc-seletor`) troca pela ação de `data-act-change`, com o valor escolhido.
+  if (cb instanceof HTMLSelectElement && cb.dataset.actChange) { void ACOES_CHANGE[cb.dataset.actChange]?.(cb.value, cb); return; }
   if (cb.id === "composer-arquivos") {
     adicionarArquivos([...(cb.files ?? [])]);
     cb.value = "";
@@ -4740,6 +4800,23 @@ document.addEventListener("keydown", (ev) => {
   }
 });
 
+/**
+ * NOD-367 (revisão 3): a busca de Agentes redesenha a lista e diz o resultado num nó vivo FIXO do index.html — o
+ * role=status recriado pelo innerHTML a cada tecla não era anunciado com confiança.
+ */
+let anuncioDaBusca = 0;
+function buscarAgentes(valor: string): void {
+  dispatch({ tipo: "config-ui", mudanca: { busca: valor } });
+  const texto = document.querySelector("#espaco .cfg-agentes [data-contagem-busca]")?.textContent ?? "";
+  const vivo = document.getElementById("anuncio-config");
+  if (!vivo) return;
+  window.clearTimeout(anuncioDaBusca);
+  anuncioDaBusca = window.setTimeout(() => { vivo.textContent = texto; }, 400);
+}
+document.addEventListener("compositionend", (ev) => {
+  const el = ev.target;
+  if (el instanceof HTMLInputElement && el.matches("[data-config-busca]")) buscarAgentes(el.value);
+});
 document.addEventListener("input", (ev) => {
   const ta = ev.target as HTMLTextAreaElement;
   if ((ta as HTMLElement).dataset?.actInput === "midia-audio-ir") { irNoAudio(ta as unknown as HTMLInputElement); return; }
@@ -4766,7 +4843,11 @@ document.addEventListener("input", (ev) => {
   // ADR-121 (NOD-92): os campos do "Dormir e acordar pelo Google" atravessam a releitura de Máquinas (a cada 30 s).
   const campoNuvem = (ta as HTMLElement).dataset?.nuvemCampo;
   if ((campoNuvem === "projeto" || campoNuvem === "zona" || campoNuvem === "nome") && estado.nuvem.conectar) { estado.nuvem.conectar[campoNuvem] = ta.value; return; }
-  if (ta.closest?.("#detalhes") && estado.gaveta) gavetaSuja = chaveDaGaveta();
+  // NOD-367: a busca de Agentes redesenha a lista a cada tecla (o foco volta pelo data-manter-foco).
+  // Revisão 2: no meio de uma composição (acento, IME) o redesenho perderia o texto montado; a busca anda no compositionend.
+  if ((ta as HTMLElement).matches?.("[data-config-busca]")) { if (!(ev as InputEvent).isComposing) buscarAgentes(ta.value); return; }
+  // Revisão 4: o seletor que salva sozinho (data-act-change, a máquina do bot) não deixa a gaveta "suja" — salvou ou repôs.
+  if (ta.closest?.("#detalhes") && estado.gaveta && mudancaSujaAGaveta(ta)) gavetaSuja = chaveDaGaveta();
   if (ta.id === "busca-marketplace") {
     filtrarApps(ta.value);
     return;
@@ -5194,7 +5275,7 @@ async function pulsoDoComputador(minha: number): Promise<void> {
 }
 function operarComputador(op: OperacaoPessoa): Promise<void> {
   const longa = op === "atualizar" || op === "redefinir" || op === "sair_de_todos" || op === "esquecer_senhas";
-  dispatch({ tipo: "computador-ui", ui: { confirmar: null, realce: null, etapasAbertas: longa && estado.espaco?.secao === "computador-do-bot" } });
+  dispatch({ tipo: "computador-ui", ui: { confirmar: null, realce: null, etapasAbertas: longa && estado.espaco?.secao === "maquinas" } });
   // Uma leitura que saiu antes do POST chegaria sem a operação e apagaria o diálogo de etapas: a geração nova a descarta.
   window.clearTimeout(computadorTimer);
   ++computadorGeracao;
@@ -5209,22 +5290,52 @@ function operarComputador(op: OperacaoPessoa): Promise<void> {
   });
 }
 
+/** O tema escolhido no seletor de Configurações › Geral. */
+function escolherTema(valor: string | undefined): EscolhaTema {
+  const escolha: EscolhaTema = valor === "claro" || valor === "escuro" ? valor : "sistema";
+  aplicarTema(escolha, document.documentElement);
+  // No app do Mac o localStorage some a cada conexão: o tema também vai para o processo principal (nativeTheme).
+  void window.nodDesktop?.definirTema?.(escolha).catch(() => undefined);
+  return escolha;
+}
+
+/** NOD-367: as trocas dos seletores das Configurações (`data-act-change`), com o valor escolhido. */
+const ACOES_CHANGE: Record<string, (valor: string, el: HTMLSelectElement) => Promise<void> | void> = {
+  "escolher-tema": (valor) => { escolherTema(valor); },
+  // NOD-367: a máquina padrão (Máquinas) e a do bot (ficha dele), no mesmo seletor; "" = qualquer uma.
+  "maquina-padrao": (valor, el) => agir(salvarOuRepor(() => reporSeletor(el), async () => {
+    await api!.maquinaPadrao(valor || null);
+    dispatch({ tipo: "invalidar", quais: ["maquinas"] });
+  })),
+  "maquina-do-bot": (valor, el) => agir(salvarOuRepor(() => reporSeletor(el), async () => {
+    await api!.maquinaDoBot(el.dataset.id ?? "", valor || null);
+    dispatch({ tipo: "invalidar", quais: ["frota", "maquinas"] });
+  })),
+};
+
+
 // ---- Seu espaço e o menu da conta (definido em 2026-09-30, canvas "Menu, sidebar e gaveta") -----------------------------
-function abrirEspaco(secao: SecaoEspaco): void {
+function abrirEspaco(pedido: PedidoSecao): void {
   celular.fecharBots();
-  // O menu "Avisos no Mac" muda a preferência sem passar por aqui: a seção relê ao abrir.
-  if (secao === "avisos") void canalAvisos.reler();
+  // NOD-367: os pedidos de antes (avisos, este Mac, relatos…) caem na seção que os absorveu.
+  const secao = secaoDoPedido(pedido);
+  // O menu "Avisos no Mac" muda a preferência sem passar por aqui: Geral relê ao abrir.
+  if (secao === "geral") void canalAvisos.reler();
   const jaAberto = !!estado.espaco;
-  if (secao === "conta") telaMinhaConta.abrir();
-  else if (estado.espaco?.secao === "conta") telaMinhaConta.fechar();
+  if (secao === "conta" && contas?.minhaConta) telaMinhaConta.abrir();
+  else if (estado.espaco?.secao === "conta" && contas?.minhaConta) telaMinhaConta.fechar();
   dispatch({ tipo: "espaco", secao });
-  document.querySelector<HTMLElement>(jaAberto ? `#espaco [data-secao="${secao}"]` : "#espaco .espaco-voltar")?.focus();
+  // "Ajuda" abre Geral no bloco Ajuda.
+  const foco = pedido === "ajuda" ? "#espaco #ajuda" : jaAberto ? `#espaco [data-secao="${secao}"]` : "#espaco .espaco-voltar";
+  const alvo = document.querySelector<HTMLElement>(foco);
+  alvo?.focus();
+  if (pedido === "ajuda") alvo?.scrollIntoView({ block: "start" });
 }
 
 /** Volta exatamente para onde estava: a tela de baixo nunca saiu do lugar. O que chegou enquanto isso ganha a linha "Novas". */
 function fecharEspaco(): void {
   if (!estado.espaco) return;
-  if (estado.espaco.secao === "conta") telaMinhaConta.fechar();
+  if (estado.espaco.secao === "conta" && contas?.minhaConta) telaMinhaConta.fechar();
   dispatch({ tipo: "espaco", secao: null });
   const t = estado.tela;
   if (t.tipo === "conversa" || t.tipo === "sala") linhaEm = t.conversaId;
@@ -5246,22 +5357,39 @@ function dadosMenuConta(): DadosMenuConta {
     ? { texto: situacaoMotorFora(inv, estado.executor?.atual), botao: motorDesatualizado(estado) ? "Atualizar" : "Conectar" }
     : fora.length ? { texto: faixaDeConectores(fora), botao: "Ver" }
     : ((u) => (u ? { texto: u.texto, botao: "Ver contas" } : null))(avisoDoUso());
-  const banco = textoAmbiente(ambienteBanco);
   return {
     faixa,
     conexao: !estado.executor ? "Verificando" : falha ? "Desconectada" : estado.executor.atual === "catcher" ? "Simulação" : "Conectada",
-    avisos: situacaoCurtaAvisos(canalAvisos.estado()),
-    modoDev: estado.modoDev.ligado,
-    experimentos: estado.experimentos,
-    banco: banco ? { texto: banco, regime: ambienteBanco?.regime ?? "desconhecido" } : null,
-    // #219: com o disco quase cheio, o menu diz o disco (é o que pede a mão da pessoa).
-    // Revisto em 2026-10-09 (a tela fala por máquina): só a leitura do Mac — a VM ocupada não diz "Ocupado" em Este Mac.
-    // NOD-345: com contas no servidor, o topo do menu é a conta (ou o convite, no espaço provisório).
+    maquina: avisoDasMaquinas(),
+    quem: quemEsta(),
+    // NOD-345: com contas no servidor, Sair por último (ou o convite, no espaço provisório).
     ...(contas && contaAtual ? { conta: { email: contaAtual.conta?.email ?? contaAtual.legado?.email ?? null, senha: contaAtual.conta?.senha ?? false, legado: !contaAtual.conta && !!contaAtual.legado } } : {}),
-    esteMac: ((m) => (m.motivoEspera === "disco" ? "Disco quase cheio" : m.motivoEspera ? "Ocupado" : (USOS.find((u) => u.id === estado.usoDoMac)?.nome ?? "")))(leituraDoMac(estado.trabalhos)),
+  };
+}
 
-    // NOD-96: o item do computador do bot (v2), com o anel durante uma operação; o ✓ quando ela acaba.
-    ...(estado.computadorPessoa ? { computadorDoBot: htmlItemMenu(estado.computadorPessoa, estado.computadorMemoria.okMenuAte > estado.agora) } : {}),
+/** NOD-367: o que o menu dizia do Este Mac (#219) e do computador do bot (NOD-96), agora numa linha que abre Máquinas. */
+function avisoDasMaquinas(): DadosMenuConta["maquina"] {
+  const mac = leituraDoMac(estado.trabalhos).motivoEspera;
+  if (mac) return { texto: mac === "disco" ? "Este Mac com o disco quase cheio" : "Este Mac ocupado: trabalho novo espera", tom: "atencao" };
+  return estado.computadorPessoa ? avisoDoComputador(estado.computadorPessoa, estado.computadorMemoria.okMenuAte > estado.agora) : null;
+}
+
+/** NOD-367: quem está logado (o topo do menu e a seção Conta). O nome vem de Minha conta, quando já lido. */
+function quemEsta(): { nome: string | null; email: string | null } | null {
+  const nome = contas?.minhaConta ? telaMinhaConta.vista().dados?.perfil.nome ?? null : null;
+  const email = contaAtual?.conta?.email ?? contaAtual?.legado?.email ?? null;
+  return nome || email ? { nome, email } : null;
+}
+
+function dadosConta(): DadosConta {
+  const q = quemEsta();
+  return {
+    contas: !!contas && !!contaAtual,
+    minhaConta: !!contas?.minhaConta,
+    nome: q?.nome ?? null,
+    email: contaAtual ? contaAtual.conta?.email ?? contaAtual.legado?.email ?? null : q?.email ?? null,
+    senha: contaAtual?.conta?.senha ?? false,
+    legado: !contaAtual?.conta && !!contaAtual?.legado,
   };
 }
 

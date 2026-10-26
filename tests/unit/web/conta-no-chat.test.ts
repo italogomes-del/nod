@@ -387,14 +387,16 @@ describe("lembrete e menu (opção 2)", () => {
     expect(htmlLembrete()).toContain('data-act="conta-abrir"');
   });
 
-  it("menu: sem conta, a linha fixa; com conta, e-mail e as ações; sem contas no servidor, nada", () => {
-    const base = { faixa: null, conexao: "Conectada", avisos: "Ligados", modoDev: false, banco: null };
+  // NOD-367: o menu só tem Sair; senha, sessões e outro computador moram em Configurações › Conta.
+  it("menu: sem conta, a linha fixa; com conta, só Sair; sem contas no servidor, nada", () => {
+    const base = { faixa: null, conexao: "Conectada" };
     expect(htmlMenuConta(base)).not.toContain("data-conta=");
     const sem = htmlMenuConta({ ...base, conta: { email: null, senha: false } });
     expect(sem).toContain("Criar conta ou entrar");
     expect(sem).toContain("Seu espaço está só neste computador");
-    const com = htmlMenuConta({ ...base, conta: { email: "ana@x.com", senha: true } });
-    for (const t of ["ana@x.com", "Trocar senha", "Sessões", "Conectar outro computador", 'data-conta="sair"']) expect(com).toContain(t);
-    expect(htmlMenuConta({ ...base, conta: { email: "g@gmail.com", senha: false } })).not.toContain("Trocar senha");
+    const com = htmlMenuConta({ ...base, quem: { nome: null, email: "ana@x.com" }, conta: { email: "ana@x.com", senha: true } });
+    expect(com).toContain("ana@x.com");
+    expect([...com.matchAll(/data-conta="([^"]+)"/g)].map((m) => m[1])).toEqual(["sair"]);
+    for (const t of ["Trocar senha", "Sessões", "Conectar outro computador"]) expect(com).not.toContain(t);
   });
 });

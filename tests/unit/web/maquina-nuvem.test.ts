@@ -83,7 +83,7 @@ describe("o cartão da máquina na nuvem", () => {
     expect(html).toContain("Acorda sozinha quando um bot precisar.");
     expect(html).toMatch(/role="menuitemradio" aria-checked="true" data-act="nuvem-dormir-apos" data-maquina="vm" data-minutos="60"/);
     expect(html).toContain('data-minutos=""><span>Nunca dormir');
-    expect(renderMaquinas(com([m]))).toMatch(/maq-estado fora.*Dormindo desde \d\d:\d\d/);
+    expect(renderMaquinas(com([m]))).toMatch(/lc-status[^"]*neutro[\s\S]*?Dormindo desde \d\d:\d\d/);
   });
 
   it("a linha de falha mostra o motivo legível e a ação dele", () => {

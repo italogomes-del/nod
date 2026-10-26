@@ -150,3 +150,20 @@ relato é o que EXPLICA a mensagem: o que produziu a fala do bot; o que a fala d
 ou, se esse foi lido junto com outro (`absorvido`), o turno que respondeu por ele (`absorvido_por`, até 5 saltos). A fala
 de bot sem turno não busca por origem. O `relato_criado` leva `turno_via` (`mensagem`, `disparado`, `absorvedor`,
 `nenhum`); sem coluna nova — `relatos.turno_id` passa a guardar o turno-alvo.
+
+## Emenda (2026-10-26, NOD-367) — Feedback mostra o texto de quem escreveu, também no relato do botão
+
+A tela Relatos virou Configurações › Feedback, e quase todo relato aparecia como "Outra coisa": a categoria que pede
+texto é justamente a que não diz nada sozinha. A listagem (`relatos.listar`) passa a trazer o título e os 160 primeiros
+caracteres de `relato_prosa` também no relato do botão, e não só no contado ao Nod (0062). O título da linha é esse texto,
+até 80 caracteres; sem texto, a categoria. A privacidade não muda: o join filtra `p.owner_id` pela pessoa da sessão, além
+da RLS de `relato_prosa` (ADR-004), então o relato de outra pessoa continua sem prosa na lista — só a categoria, o tipo e
+o estado técnico. O teste de integração `relatos.test.ts` ("NOD-367: na listagem…") prova os dois lados.
+
+O "Enviar feedback" das Configurações não tem mensagem para apontar, então não anexa conversa nenhuma: leva à conversa
+com o Nod, e o relato sai com origem `nod`. O anexo (`mensagem` ou `janela`) continua só no "Reportar" de uma mensagem.
+
+Gatilho de reversão desta emenda: voltar ao título só pela categoria se aparecer prosa de uma pessoa na listagem de outra
+(o teste de integração quebra antes), ou se o texto cortado na linha passar a expor dado sensível que a pessoa não espera
+ver fora do detalhe — aí o título vira a categoria e o texto fica só ao abrir. O gatilho (a) acima passa a se medir pelo
+`relatos.categoria`, não pelo título da tela, que agora mostra o texto.

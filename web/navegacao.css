@@ -63,18 +63,6 @@
 .menu-conta .mc-meta { width: auto; font-size: 13px; color: var(--ink-3); }
 .menu-conta button > svg:last-child:not(:first-child) { width: 16px; height: 16px; color: var(--ink-3); }
 .menu-conta kbd { font: 12px var(--font-sans); color: var(--ink-3); }
-.mc-faixa { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; padding: 10px 10px 10px 14px; border-radius: 12px; background: var(--warning-soft); }
-.mc-faixa > span { flex: 1; font-size: 14px; color: var(--warning); }
-.menu-conta .mc-faixa button { width: auto; padding: 6px 14px; border-radius: 10px; background: var(--warning); color: var(--on-status); font-size: 13px; font-weight: 500; }
-.menu-conta .mc-faixa button:hover, .menu-conta .mc-faixa button:focus-visible { background: var(--warning); opacity: .88; }
-.mc-chave { position: relative; flex-shrink: 0; width: 40px !important; height: 24px; border-radius: 12px; background: var(--line-strong); }
-.mc-chave > span { position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: var(--surface); box-shadow: var(--shadow-knob); transition: left .12s; }
-[aria-checked="true"] > .mc-chave { background: var(--action); }
-[aria-checked="true"] > .mc-chave > span { left: 19px; }
-.mc-banco { display: flex; align-items: center; gap: 8px; margin: 0; padding: 6px 12px 4px; font-size: 12px; color: var(--ink-3); }
-.mc-banco > span, .espaco-banco > span { width: 7px; height: 7px; border-radius: 50%; background: var(--ink-3); }
-.mc-banco.banco-persistente > span, .espaco-banco.banco-persistente > span { background: var(--success); }
-.mc-banco.banco-efemero > span, .espaco-banco.banco-efemero > span { background: var(--warning); }
 
 /* ---- Seu espaço em tela cheia (canvas "Menu 2") --------------------------------------
    As seções na coluna da esquerda, no lugar da barra; um botão só para sair: "‹ <de onde veio>", mais o Esc. */
@@ -98,7 +86,6 @@
 .espaco-item > svg { color: var(--ink-2); }
 .espaco-item:hover, .espaco-item:focus-visible { background: var(--surface-raised); }
 .espaco-item[aria-current="page"] { background: var(--surface-selected); font-weight: 500; }
-.espaco-banco { display: flex; align-items: center; gap: 8px; margin: auto 0 0; padding: 0 12px; font-size: 12px; color: var(--ink-3); }
 .espaco-conteudo { flex: 1; min-width: 0; overflow: auto; padding: 64px 88px; }
 .espaco-conteudo > * { max-width: 720px; }
 .espaco-conteudo .tela { margin: 0; padding: 0; }
@@ -157,22 +144,12 @@ div.mac-medidor { padding-right: 36px; }
 .mac-grupo { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; padding: 14px 18px 6px; border-top: 1px solid var(--line);
   font-size: 12.5px; color: var(--ink-3); }
 .mac-grupo span:first-child { font-weight: 500; color: var(--ink); }
-.mac-bot { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 18px; border: 0; background: none; font: inherit; color: inherit;
-  text-align: left; cursor: pointer; }
-.mac-bot:hover, .mac-bot:focus-visible { background: var(--surface-raised); }
-.mac-bot-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.mac-bot-txt b { font-weight: 500; }
-.mac-bot-txt span { font-size: 12.5px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.mac-bot-fim { flex: none; font-size: 12.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
 @media (max-width: 760px) {
   .mac-agora { grid-template-columns: minmax(0, 1fr); }
   .mac-agora > div + div { border-left: 0; border-top: 1px solid var(--line); }
 }
 .espaco-cartao .conexao-avancada > :not(summary) { padding: 0 18px 12px; }
 .espaco-subtitulo { margin: 28px 0 10px; font-size: 13px; font-weight: 400; color: var(--ink-3); }
-/* Aparência em Preferências (definido em 2026-10-04): o seletor do tamanho das três opções, não da coluna. */
-.segmentado.escolha-tema, .segmentado.uso-do-mac { width: fit-content; margin-bottom: 8px; }
-.segmentado.escolha-tema .seg, .segmentado.uso-do-mac .seg { padding: 6px 14px; font-size: 13px; }
 .espaco-fora { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; padding: 12px 14px; border: 1px solid var(--warning-line); border-radius: 12px; background: var(--warning-soft); }
 .espaco-fora > div { flex: 1; min-width: 0; font-size: 14px; }
 .espaco-fora b { font-weight: 500; }
@@ -361,11 +338,7 @@ div.mac-medidor { padding-right: 36px; }
    com a gaveta aberta ou fechada (o clique alterna); as regras que escondiam o botão com a gaveta aberta saíram. */
 
 /* ADR-090: Seu espaço › Máquinas (protótipo "Nod — Motor na VM"). Só tokens (tests/unit/web/cores-por-token.test.ts). */
-.maquinas .maq-topo { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
-.maquinas .maq-topo .intro { margin: 0; max-width: 540px; }
-.maquinas .maq-topo .bt.pri { display: inline-flex; align-items: center; gap: 8px; flex: none; }
 .maq-lista { display: flex; flex-direction: column; gap: 12px; }
-.maq-vazio p { margin: 0; padding: 16px 18px; font-size: 14px; color: var(--ink-3); }
 .maq-cab { display: flex; align-items: center; gap: 12px; padding: 16px 18px; }
 .maq-ic { flex: none; width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; background: var(--surface-raised); color: var(--ink); }
 .maq-id { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
@@ -375,33 +348,13 @@ div.mac-medidor { padding-right: 36px; }
 .maq-estado.fora { color: var(--warning); }
 .maq-ponto { width: 8px; height: 8px; border-radius: 50%; background: var(--success); flex: none; }
 .maq-ponto.fora { background: transparent; border: 1.5px solid var(--warning); box-sizing: border-box; }
-.maq-ias { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 18px 14px 66px; }
-.maq-ia { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line); font-size: 12px; color: var(--ink-2); }
-.maq-ia i { width: 6px; height: 6px; border-radius: 50%; background: var(--success); display: inline-block; }
-.maq-ia.nao { color: var(--ink-3); }
-.maq-ia.nao i { background: var(--line-strong); }
 /* A tela fala por máquina (2026-10-09): a leitura da máquina no cartão, o status curto à vista e os números no clique. */
-.maq-leitura { border-top: 1px solid var(--line); }
-.maq-leitura > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 10px; padding: 11px 18px; font-size: 13px; color: var(--ink-2); }
-.maq-leitura > summary::-webkit-details-marker { display: none; }
-.maq-leitura > summary::after { content: "›"; margin-left: auto; font-size: 18px; line-height: 1; color: var(--ink-3); transition: transform .12s; }
-.maq-leitura[open] > summary::after { transform: rotate(90deg); }
-.maq-leitura > summary:hover, .maq-leitura > summary:focus-visible { background: var(--surface-raised); }
 .maq-nivel { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--success); }
 .maq-nivel.nivel-amarela { background: var(--warning); }
 .maq-nivel.nivel-vermelha { background: var(--danger); }
-@media (prefers-reduced-motion: reduce) { .maq-leitura > summary::after { transition: none; } }
 .maq-quem { display: flex; align-items: center; gap: 10px; padding: 12px 18px; border-top: 1px solid var(--line); font-size: 13px; color: var(--ink-3); }
 .maq-avatares { display: flex; }
 .maq-avatares .icon { margin-right: -5px; }
-.bots-cartao .bot-maq { display: flex; align-items: center; gap: 12px; padding: 10px 18px; }
-.bots-cartao .bot-maq + .bot-maq { border-top: 1px solid var(--line); }
-.bot-maq-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.bot-maq-txt b { font-weight: 500; font-size: 14px; }
-.bot-maq-txt span { font-size: 12.5px; color: var(--ink-3); }
-.segmentado.maq { width: fit-content; flex-wrap: wrap; }
-.segmentado.maq .seg { padding: 5px 12px; font-size: 12.5px; }
-.regras-maq { margin: 16px 0 0; padding-left: 18px; font-size: 13px; color: var(--ink-3); display: flex; flex-direction: column; gap: 6px; }
 /* ADR-121 (NOD-92): a máquina na nuvem no cartão — o sono, a falha com o motivo e a ação, e o "Dormir e acordar pelo Google". */
 .nv-sono { display: flex; flex-direction: column; gap: 8px; padding: 12px 18px 12px 66px; border-top: 1px solid var(--line); font-size: 13px; color: var(--ink-2); }
 .nv-sono:empty { display: none; }
@@ -419,8 +372,6 @@ div.mac-medidor { padding-right: 36px; }
 .nv-aviso { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; padding: 12px 18px; margin-bottom: 14px; font-size: 13px; color: var(--ink-2); }
 .nv-aviso .nv-acoes { margin-left: auto; }
 /* PR 2 (NOD-92): "Criar minha máquina na nuvem" e a VM em criação. */
-.maquinas .maq-topo-acoes { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; flex: none; }
-.maquinas .maq-topo .bt { display: inline-flex; align-items: center; gap: 8px; flex: none; }
 .nv-criar { display: flex; flex-direction: column; gap: 14px; padding: 20px 22px; margin-bottom: 18px; }
 .nv-criar-cab { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .nv-criar-cab h3 { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -.2px; }
@@ -548,10 +499,10 @@ div.mac-medidor { padding-right: 36px; }
 .prov-mini .prov-av svg { width: 10px; height: 10px; }
 .prov-ordem { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin: 0 2px 8px; font-size: 12.5px; color: var(--ink-3); }
 .prov-ordem span:first-child { font-weight: 600; color: var(--ink-2); }
-.prov-linha { transition: box-shadow .12s, opacity .12s; }
-.prov-linha + .prov-linha { border-top: 1px solid var(--line); }
-.prov-linha.arrastando, .int-ia.arrastando { opacity: .45; }
-.prov-linha.alvo { box-shadow: inset 0 3px 0 0 var(--action); }
+.prov-ia-item { transition: box-shadow .12s, opacity .12s; }
+.prov-ia-item + .prov-ia-item { border-top: 1px solid var(--line); }
+.prov-ia-item.arrastando, .int-ia.arrastando { opacity: .45; }
+.prov-ia-item.alvo { box-shadow: inset 0 3px 0 0 var(--action); }
 .prov-alca, .int-alca { flex: none; width: 22px; height: 32px; margin: 0 -4px; padding: 0; border: 0; border-radius: 6px; background: none;
   display: grid; place-items: center; color: var(--ink-3); cursor: grab; touch-action: none; }
 .prov-alca:hover, .int-alca:hover { color: var(--ink); background: var(--surface-raised); }
@@ -929,8 +880,6 @@ div.mac-medidor { padding-right: 36px; }
   .cx-trilha { flex-direction: row; overflow-x: auto; padding: 12px; border-right: 0; border-bottom: 1px solid var(--line); }
   .cx-trilha li { flex: none; }
   .cx-corpo { padding: 18px 16px; }
-  .maquinas .maq-topo { flex-direction: column; }
-  .maquinas .maq-topo-acoes { justify-content: flex-start; }
   .nv-criar { padding: 16px; }
   .nv-opcoes, .nv-provedores { grid-template-columns: minmax(0, 1fr); }
 }

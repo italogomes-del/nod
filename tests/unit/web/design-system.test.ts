@@ -5,7 +5,8 @@ import { estadoInicial, type Estado } from "../../../web/estado/reducer.ts";
 import { avisoDeEstado } from "../../../web/lib/aviso-estado.ts";
 import { aplicarTema, atributoDoTema, CHAVE_TEMA, lerTema } from "../../../web/lib/tema.ts";
 import { renderMensagem } from "../../../web/telas/conversa.ts";
-import { renderEscolhaTema } from "../../../web/telas/modo-dev.ts";
+import { renderGeral } from "../../../web/telas/config-geral.ts";
+import { CONFIG_UI_INICIAL } from "../../../web/estado/reducer.ts";
 
 /** Design system do Nod (definido em 2026-10-04): o aviso de estado, o erro de executor e a escolha de tema. */
 const autoria = { autor_tipo: "agente" as const, autor_id: "frida", sob_procuracao_de: null, conta_de_execucao: "marlon", executor: "local" as const, locality: "local" as const, locality_reason: "motor_ausente" as const, machine_id: null, decidido_por: "regra:localidade" as const, regra_versao: 1 };
@@ -100,9 +101,11 @@ describe("tema", () => {
     expect(html).toContain(`t === "claro" ? "${atributoDoTema("claro")}" : "${atributoDoTema("escuro")}"`);
   });
 
-  it("a escolha em Preferências marca o botão atual", () => {
-    const html = renderEscolhaTema("escuro");
-    expect(html).toContain('data-tema="escuro" aria-pressed="true"');
-    expect(html).toContain('data-tema="sistema" aria-pressed="false"');
+  // NOD-367: o tema é um seletor nativo em Configurações › Geral › Aparência.
+  it("a escolha em Geral marca a opção atual", () => {
+    const html = renderGeral({ tema: "escuro", avisos: { onde: "mac", situacao: "ligados" }, modoDev: false, experimentos: { calibracao: false, memoriaLonga: false, whatsapp: false }, banco: null }, CONFIG_UI_INICIAL);
+    expect(html).toContain('data-act-change="escolher-tema"');
+    expect(html).toContain('<option value="escuro" selected>');
+    expect(html).toContain('<option value="sistema">');
   });
 });

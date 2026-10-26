@@ -18,7 +18,7 @@ const MODO_HUMANO: Record<NonNullable<AcaoNoLote["modo"]>, string> = { manual: "
 function motivoDoLote(a: AcaoNoLote, motivo: Exclude<MotivoCardDoLote, "manual">): string {
   // Emenda de 2026-10-18 da ADR-059: ligar o total é sempre da pessoa, em qualquer modo do Nod.
   if (motivo === "ligar_total") return "Ignorar todas as aprovações só liga com o seu ok: o Nod nunca põe um bot nesse modo sozinho.";
-  if (motivo === "arriscada") return a.tipo === "excluir" ? "Excluir é arriscado: o Nod sempre pergunta antes. Dá para restaurar depois em Gerenciar agentes." : "Mudar o modo de um bot é arriscado: o Nod sempre pergunta antes.";
+  if (motivo === "arriscada") return a.tipo === "excluir" ? "Excluir é arriscado: o Nod sempre pergunta antes. Dá para restaurar depois em Configurações › Agentes." : "Mudar o modo de um bot é arriscado: o Nod sempre pergunta antes.";
   return a.tipo === "dar_acesso" ? "O Nod leu conteúdo de fora nesta conversa, então dar acesso a um app espera você." : "O Nod leu conteúdo de fora nesta conversa, então esta mudança espera você.";
 }
 
@@ -28,7 +28,7 @@ function detalheDaAcao(a: AcaoNoLote): string {
     case "duplicar": return "leva memória, acessos e rotinas do original; as rotinas vêm pausadas; começa em Aprovar automaticamente; mude em Aprovações";
     case "editar": return [a.nome ? `nome: ${a.nome}` : "", a.titulo !== undefined ? `título: ${a.titulo || "—"}` : "", a.modelo ? `modelo: ${a.modelo}` : "", a.esforco !== undefined ? `esforço: ${a.esforco || "padrão"}` : "", a.descricao ? "descrição nova" : ""].filter(Boolean).join(" · ");
     case "mover": return a.secao ? `para ${a.secao}` : "para fora da seção";
-    case "excluir": return "dá para restaurar depois em Gerenciar agentes";
+    case "excluir": return "dá para restaurar depois em Configurações › Agentes";
     case "criar_rotina": return [a.cron ? `${a.cron} (${a.fuso_iana ?? ""})` : "", a.instrucao ?? ""].filter(Boolean).join(" · ");
     case "dar_acesso": return `${a.app ?? ""}, ${a.nivel === "escrita" ? "ler e alterar" : "ler"}`;
     case "mudar_modo": return a.modo ? `para ${MODO_HUMANO[a.modo]}` : "";

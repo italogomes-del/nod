@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { MaquinaDto } from "../../../src/contracts/maquina.ts";
 import { estadoInicial, type ConectarMaquina, type Estado } from "../../../web/estado/reducer.ts";
+import { readFileSync } from "node:fs";
+import { proximoItemDoMenu } from "../../../web/lib/linha-config.ts";
+import { linhaMaquinaDoBot } from "../../../web/telas/detalhes.ts";
 import { COMANDO_DESLIGAR_COMPUTADOR, maquinaDoBot, maquinaNova, maquinasDeTrabalho, renderMaquinas } from "../../../web/telas/maquinas.ts";
 
 /** ADR-090: Seu espaço › Máquinas e o "Conectar uma máquina" (protótipo "Nod — Motor na VM"). */
@@ -13,20 +16,46 @@ function com(maquinas: MaquinaDto[], o: { padraoId?: string | null; conectar?: C
 }
 
 describe("Seu espaço › Máquinas (ADR-090)", () => {
-  it("lista as máquinas com o estado, as IAs e quem trabalha em cada uma; cada bot tem o seletor", () => {
+  it("NOD-367: uma lista só, com o status em ponto e texto, quantos bots em cada uma e o padrão num seletor", () => {
     const html = renderMaquinas(com([maquina("vm", "vm-sp"), maquina("mac", "MacBook", { plataforma: "darwin" }), maquina("velha", "vm-velha", { conectada: false, plataforma: null, ultimoUsoEm: Date.UTC(2026, 9, 9, 14, 32) })]));
     expect(html).toContain("vm-sp");
-    expect(html).toContain("Ze 1 trabalha aqui");
-    expect(html).toMatch(/sem contato desde \d\d:\d\d/);
-    expect(html).toContain("Claude Code pronto");
-    expect(html).toContain('data-act="maquina-do-bot"');
-    expect(html).toContain('data-act="maquina-padrao"');
-    expect(html).toMatch(/aria-pressed="true" data-act="maquina-do-bot" data-maquina="vm"/);
+    expect(html).toContain("1 bot aqui");
+    expect(html).toMatch(/Offline desde \d\d\/\d\d/);
+    expect(html).not.toContain("Claude Code pronto");
+    const aberto = renderMaquinas({ ...com([maquina("vm", "vm-sp")]), contasUi: { ...estadoInicial.contasUi, maquinaMenu: "vm" } } as Estado);
+    expect(aberto).toContain("Claude Code pronto");
+    // NOD-367 (a11y): todo texto do "…" é item desabilitado (o leitor de tela chega nele pelas setas), nunca um <p> solto
+    const menu = aberto.slice(aberto.indexOf('class="cl-menu"'));
+    expect(menu).toMatch(/<div class="cfg-leitura" role="menuitem" aria-disabled="true" tabindex="-1" data-menu-texto="contas-vm">Claude Code pronto/);
+    expect(menu).not.toMatch(/<p class="cfg-leitura"/);
+    expect(aberto).toContain('data-act="maq-desconectar"');
+    expect(aberto).toContain('role="menuitem"');
+    expect(html).toContain('data-act-change="maquina-padrao"');
+    // o seletor de cada bot saiu da tela: ele mora na ficha do bot
+    expect(html).not.toContain("maquina-do-bot");
+    for (const velho of ["mac-bot", "bot-maq", "lista chaves", "maq-topo"]) expect(html).not.toContain(velho);
+    expect(html.match(/data-maquina-linha=/g)).toHaveLength(3);
+  });
+
+  it("NOD-367: as chaves revogadas só aparecem com alguma, recolhidas; a chave da máquina abre pelo \"…\"", () => {
+    const ativa = { id: "vm", nome: "vm-sp", prefixo: "abcd1234", criadaEm: Date.UTC(2026, 9, 1, 12), ultimoUsoEm: null, revogadaEm: null };
+    const velha = { ...ativa, id: "x", nome: "vm-antiga", revogadaEm: Date.UTC(2026, 9, 3, 12) };
+    const base = com([maquina("vm", "vm-sp")]);
+    expect(renderMaquinas({ ...base, chaves: [ativa] } as Estado)).not.toContain("Chaves revogadas");
+    const comRevogada = renderMaquinas({ ...base, chaves: [ativa, velha] } as Estado);
+    expect(comRevogada).toContain("Chaves revogadas (1)");
+    expect(comRevogada).not.toContain("vm-antiga");
+    expect(renderMaquinas({ ...base, chaves: [ativa, velha], configUi: { ...base.configUi, abertos: ["revogadas"] } } as Estado)).toMatch(/vm-antiga[\s\S]*Revogada em \d\d\/\d\d/);
+    const menu = renderMaquinas({ ...base, chaves: [ativa], contasUi: { ...base.contasUi, maquinaMenu: "vm" } } as Estado);
+    expect(menu).toContain('data-act="revogar-chave" data-id="vm"');
+    expect(menu).toContain('data-recolhe="chave-vm"');
+    const detalhes = renderMaquinas({ ...base, chaves: [ativa], configUi: { ...base.configUi, abertos: ["chave-vm"] } } as Estado);
+    expect(detalhes).toMatch(/role="region"[\s\S]*Prefixo[\s\S]*abcd1234/);
   });
 
   it("sem máquinas, o vazio explica; carregando, diz que carrega", () => {
     expect(renderMaquinas(com([]))).toContain("Nenhuma máquina conectada ainda");
-    expect(renderMaquinas({ ...com([]), maquinas: null })).toContain("Carregando");
+    expect(renderMaquinas({ ...com([]), maquinas: null })).toContain("Verificando…");
   });
 
   it("a máquina do bot é a dele, senão o padrão da pessoa, senão nenhuma", () => {
@@ -62,7 +91,7 @@ describe("Seu espaço › Máquinas (ADR-090)", () => {
     const html = renderMaquinas(com([maquina("vm", "vm-sp")], { noMac: true }));
     expect(html).toContain(">Este Mac<");
     expect(html).not.toContain("Qualquer uma");
-    expect(html).toContain("Uma VM só pega o trabalho dos bots escolhidos para ela");
+    expect(html).toContain("uma VM só pega o trabalho dos bots escolhidos para ela");
     const comando = renderMaquinas(com([], { noMac: true, conectar: conectar() }));
     expect(comando).toContain("ssh -N -R 8888:127.0.0.1:8888");
     expect(comando).toContain("curl -fsSL http://127.0.0.1:8888/api/motor/instalar | sh");
@@ -80,8 +109,8 @@ describe("Máquinas: a só-computador (NOD-94)", () => {
     const html = renderMaquinas(e);
     expect(html).toContain("vm-computador");
     expect(html).toContain("só computador");
-    expect(html).toContain("Hospeda o computador dos seus bots e não pega trabalho");
-    expect(html).not.toMatch(/data-act="maquina-do-bot" data-maquina="comp"/);
+    expect(html).toContain("hospeda o computador dos seus bots e não pega trabalho");
+    expect(html).not.toMatch(/<option value="comp"/);
     expect(maquinaDoBot(e, { maquinaId: "comp" })).toBeNull();
     expect(maquinaNova(com([comp], { conectar: conectar({ chavesAntes: [] }) }), conectar({ chavesAntes: [] }))).toBeNull();
   });
@@ -95,4 +124,37 @@ describe("Máquinas: a só-computador (NOD-94)", () => {
     expect(COMANDO_DESLIGAR_COMPUTADOR).toBe("sudo systemctl disable --now nod-motor");
   });
 });
+});
+
+describe("NOD-367: a máquina na ficha do bot", () => {
+  it("o seletor mostra \"Qualquer uma\" e as máquinas vivas (mais a atual, mesmo offline) e chama PUT /agentes/:id/maquina", () => {
+    const e = com([maquina("vm", "vm-sp"), maquina("velha", "vm-velha", { conectada: false }), maquina("morta", "vm-morta", { conectada: false }), maquina("comp", "vm-comp", { papel: "computador" })]);
+    const html = linhaMaquinaDoBot(e, { id: "a", nome: "Ze 1", maquinaId: "velha" });
+    expect(html).toContain('data-act-change="maquina-do-bot"');
+    expect(html).toContain('data-id="a"');
+    expect(html).toContain(">Qualquer uma<");
+    expect(html).toContain(">vm-sp<");
+    expect(html).toMatch(/<option value="velha" selected>vm-velha \(offline\)</);
+    expect(html).not.toContain("vm-morta");
+    expect(html).not.toContain("vm-comp");
+    expect(linhaMaquinaDoBot(com([]), { id: "a", nome: "Ze 1", maquinaId: null })).toBe("");
+    const main = readFileSync(new URL("../../../web/main.ts", import.meta.url), "utf8");
+    expect(main).toMatch(/"maquina-do-bot": \(valor, el\) => [\s\S]{0,80}api!?\.maquinaDoBot\(el\.dataset\.id/);
+    const api = readFileSync(new URL("../../../web/lib/api.ts", import.meta.url), "utf8");
+    expect(api).toMatch(/maquinaDoBot: [^\n]*"PUT", `\$\{base\}\/agentes\/\$\{[^}]+\}\/maquina`/);
+  });
+
+  it("NOD-367 (a11y do \"…\"): setas andam em volta, Home e End vão às pontas, outra tecla não mexe", () => {
+    expect(proximoItemDoMenu(4, 0, "ArrowDown")).toBe(1);
+    expect(proximoItemDoMenu(4, 3, "ArrowDown")).toBe(0);
+    expect(proximoItemDoMenu(4, 0, "ArrowUp")).toBe(3);
+    expect(proximoItemDoMenu(4, -1, "ArrowDown")).toBe(0);
+    expect(proximoItemDoMenu(4, -1, "ArrowUp")).toBe(3);
+    expect(proximoItemDoMenu(4, 2, "Home")).toBe(0);
+    expect(proximoItemDoMenu(4, 0, "End")).toBe(3);
+    expect(proximoItemDoMenu(4, 1, "Tab")).toBeNull();
+    expect(proximoItemDoMenu(0, -1, "ArrowDown")).toBeNull();
+    const main = readFileSync(new URL("../../../web/main.ts", import.meta.url), "utf8");
+    expect(main).toMatch(/closest\?\.<HTMLElement>\("#espaco \.cl-menu"\)[\s\S]{0,300}proximoItemDoMenu\(/);
+  });
 });

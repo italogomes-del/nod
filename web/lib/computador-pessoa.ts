@@ -6,6 +6,7 @@ import type { VmLocalAnunciada } from "../../src/contracts/vm-local.ts";
 import { htmlCenaDoPreparo } from "./cena-do-preparo.ts";
 import { htmlMascote } from "./mascote.ts";
 import { esc } from "./escape.ts";
+import { linhaConfig } from "./linha-config.ts";
 
 /**
  * Computador do bot v2 (NOD-96, PR 6; ADR-122): um computador por pessoa, uma tela e um Chrome por bot, logins em comum.
@@ -239,16 +240,16 @@ export function htmlLinhaDoPreparo(p: VmLocalAnunciada): string {
 
 // ---- item do menu da conta e fio do cabeçalho -----------------------------------------------------------------------
 
-/** O item "Computador do bot" no menu da conta: o ícone, ou o anel com a dica durante uma operação (sem toast). */
-export function htmlItemMenu(dto: ComputadorPessoaDto | null, ok = false): string {
+/**
+ * NOD-367: o computador do bot saiu do menu da conta (mora em Configurações › Máquinas). O que o item dizia — o
+ * progresso de uma operação ou do preparo, e o ✓ logo depois — vira a linha discreta do menu, que abre Máquinas.
+ * Dormindo é normal e não aparece.
+ */
+export function avisoDoComputador(dto: ComputadorPessoaDto | null, ok = false): { texto: string; tom: "neutro" | "ok" } | null {
   const prep = preparoAtivo(dto);
-  const dicaPrep = !dto?.operacao && prep ? dicaDoPreparo(prep) : null;
-  const dica = dto ? dicaDaOperacao(dto) ?? dicaPrep : null;
-  const ic = dicaPrep && prep ? htmlAnel(pctDoPreparo(prep)) : dica && dto ? htmlAnel(pctDaOperacao(dto)) : ok ? `<span class="cb-ok-v" aria-hidden="true">${ICONE_CB.ok}</span>${ICONE_CB.pcBot}` : ICONE_CB.pcBot;
-  // Durante a operação o % já está na dica (e o anel o desenha): não repete no meta.
-  const meta = !dica && dto?.estado === "dormindo" ? "Dormindo" : "";
-  const aria = `Computador do bot${dica ? ` · ${dica}` : ""}`;
-  return `<button type="button" role="menuitem" class="cb-item${ok ? " cb-item-ok" : ""}" data-secao="computador-do-bot" aria-label="${esc(aria)}"><span class="cb-item-ic">${ic}</span><span class="mc-nome">Computador do bot</span>${meta ? `<span class="mc-meta">${esc(meta)}</span>` : ""}${dica ? `<span class="cb-dica" role="tooltip">${esc(dica)}</span>` : ""}<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></button>`;
+  const dica = dto ? dicaDaOperacao(dto) ?? (!dto.operacao && prep ? dicaDoPreparo(prep) : null) : null;
+  if (dica) return { texto: `Computador do bot · ${dica}`, tom: "neutro" };
+  return ok && dto ? { texto: "Computador do bot pronto", tom: "ok" } : null;
 }
 
 /** A linha de 2 px dentro da pílula do cabeçalho do chat, durante uma operação. */
@@ -492,11 +493,11 @@ export function htmlPainelComputadorDoBot(dto: ComputadorPessoaDto, bots: readon
     const nome = b?.nome ?? "Bot";
     const quando = t.controle === "pessoa" ? "você está no controle" : t.ultimaAcaoEm ? (agora - t.ultimaAcaoEm < 60_000 ? "ativo agora" : `parado ${haQuantoTempo(agora - t.ultimaAcaoEm)}`) : t.estado === "abrindo" ? "abrindo" : "aberta";
     const sub = [t.titulo ?? "", quando].filter(Boolean).join(" · ");
-    return `<div class="bot-maq pc-tela">${b ? htmlMascote(b, "sm") : ""}<span class="bot-maq-txt"><b>${esc(nome)}</b><span>${esc(sub)}</span></span><button type="button" class="bt sm" data-act="abrir-computador" data-id="${esc(t.agenteId)}" aria-label="Abrir a tela de ${esc(nome)}">Abrir</button></div>`;
+    return linhaConfig({ titulo: nome, detalhe: sub, classe: "pc-tela", ...(b ? { icone: htmlMascote(b, "sm") } : {}), controle: { tipo: "html", html: `<button type="button" class="bt sm" data-act="abrir-computador" data-id="${esc(t.agenteId)}" aria-label="Abrir a tela de ${esc(nome)}">Abrir</button>` } });
   };
   const esperando = dto.esperando.map((id) => bot(id)?.nome ?? "Bot");
   const telas = `<h3 class="espaco-subtitulo">Telas abertas</h3>${abertas.length
-    ? `<div class="espaco-cartao bots-cartao pc-telas">${abertas.map(linhaTela).join("")}</div>`
+    ? `<div class="lc-lista pc-telas">${abertas.map(linhaTela).join("")}</div>`
     : `<div class="espaco-cartao"><p class="pc-vazio">${dto.estado === "dormindo" ? "O computador está dormindo. Nenhuma tela aberta." : "Nenhum bot está usando o navegador agora."}</p></div>`}${esperando.length ? `<p class="mudo sm">${esc(`Esperando uma tela livre: ${listaDeNomes(esperando)}.`)}</p>` : ""}`;
 
   const emCurso = Boolean(dto.operacao);

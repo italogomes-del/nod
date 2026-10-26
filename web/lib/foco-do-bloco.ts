@@ -31,3 +31,23 @@ export function alvoDoFoco<T>(dados: { disclosure?: string; act?: string; id?: s
   }
   return null;
 }
+
+/**
+ * NOD-367 (revisão 2): a chave estável do controle focado numa região regravada por innerHTML (Seu espaço). A tela de
+ * Máquinas se relê sozinha a cada 30 s e o foco caía no <body> no meio do teclado. Os atributos de ação e de alvo dizem
+ * qual controle é, sem depender da posição; sem nenhum deles, nada volta.
+ */
+// Toda a identidade do controle (ação e alvo: data-act, data-id, data-maquina, data-experimento, data-conta…), para duas
+// linhas com a mesma ação não se confundirem (revisão 3: o foco saltava para o "…" da 1ª máquina). Ficam de fora os
+// atributos de estado, que mudam com o próprio clique.
+const ESTADO_DO_CONTROLE = new Set(["manterFoco", "clAutofoco", "estado", "ligado", "busca"]);
+export function seletorDoFocoNaRegiao(el: { tagName: string; dataset: Record<string, string | undefined>; getAttribute(n: string): string | null }): string | null {
+  const nome = el.getAttribute("name");
+  const chaves = Object.keys(el.dataset).filter((k) => !ESTADO_DO_CONTROLE.has(k) && el.dataset[k] !== undefined).sort();
+  const partes = chaves.map((k) => atributo(k.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`), el.dataset[k] ?? ""));
+  const esc = (v: string): string => v.replace(/["\\]/g, "\\$&");
+  if (nome && el.getAttribute("type") === "radio") partes.push(`[name="${esc(nome)}"][value="${esc(el.getAttribute("value") ?? "")}"]`);
+  else if (nome) partes.push(`[name="${esc(nome)}"]`);
+  if (!partes.length || !partes.some((p) => !p.startsWith("[data-id="))) return null;
+  return el.tagName.toLowerCase() + partes.join("");
+}

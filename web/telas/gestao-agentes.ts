@@ -1,5 +1,4 @@
-import type { Experimentos } from "../../src/contracts/raio-x.ts";
-import type { SecaoEspaco } from "../estado/reducer.ts";
+import type { PedidoSecao } from "../estado/reducer.ts";
 import { esc } from "../lib/render.ts";
 import type { AcaoGestao, BotGerido } from "./gestao.ts";
 import { htmlMenuConta, type DadosMenuConta } from "./menu-conta.ts";
@@ -108,8 +107,12 @@ export function pedirGestao(titulo: string, corpo: string, confirmar: string, sa
   d.querySelector<HTMLInputElement>("input")?.select();
 }
 
-/** O menu da conta (web/telas/menu-conta.ts) sobre o mesmo diálogo dos menus do bot. */
-export function abrirMenuConta(ancora: HTMLElement, dados: DadosMenuConta, acoes: { secao(s: SecaoEspaco): void; modoDev(): Promise<boolean>; experimento?(chave: keyof Experimentos): Promise<boolean>; onboarding?(): void; conta?(qual: string): void }): void {
+/**
+ * O menu da conta (web/telas/menu-conta.ts) sobre o mesmo diálogo dos menus do bot. NOD-367: cada item abre uma seção das
+ * Configurações (`secao` recebe o pedido: "geral", "agentes", "feedback", "ajuda", "conexao"); Sair e o convite da conta
+ * vão por `conta`.
+ */
+export function abrirMenuConta(ancora: HTMLElement, dados: DadosMenuConta, acoes: { secao(s: PedidoSecao): void; conta?(qual: string): void }): void {
   const d = dialogo(htmlMenuConta(dados), true);
   d.classList.add("menu-conta");
   // Nasce acima do avatar, alinhado à esquerda da barra (a largura dela menos as margens).
@@ -118,19 +121,11 @@ export function abrirMenuConta(ancora: HTMLElement, dados: DadosMenuConta, acoes
   d.style.top = `${Math.max(12, r.top - d.offsetHeight - 10)}px`;
   d.addEventListener("click", (e) => {
     const alvo = e.target as HTMLElement;
-    const secao = alvo.closest<HTMLElement>("[data-secao]")?.dataset.secao as SecaoEspaco | undefined;
+    const secao = alvo.closest<HTMLElement>("[data-secao]")?.dataset.secao as PedidoSecao | undefined;
     if (secao) { d.close(); acoes.secao(secao); return; }
-    // ADR-077: "Ver o onboarding de novo" volta ao "olá".
-    if (alvo.closest("[data-onboarding]")) { d.close(); acoes.onboarding?.(); return; }
-    // NOD-345: os itens da conta abrem o cartão na conversa do Nod (ou saem da sessão).
+    // NOD-345: Sair (e o convite do espaço provisório) saem da sessão ou abrem o cartão na conversa do Nod.
     const conta = alvo.closest<HTMLElement>("[data-conta]")?.dataset.conta;
-    if (conta) { d.close(); acoes.conta?.(conta); return; }
-    const chave = alvo.closest<HTMLElement>("[data-modo-dev]");
-    if (chave) { void acoes.modoDev().then((ligado) => chave.setAttribute("aria-checked", String(ligado))); return; }
-    // ADR-111: as chaves de experimento, do mesmo jeito.
-    const exp = alvo.closest<HTMLElement>("[data-experimento]");
-    const qual = exp?.dataset.experimento as keyof Experimentos | undefined;
-    if (exp && qual && acoes.experimento) void acoes.experimento(qual).then((ligado) => exp.setAttribute("aria-checked", String(ligado)));
+    if (conta) { d.close(); acoes.conta?.(conta); }
   });
   d.addEventListener("keydown", (e) => {
     if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) return;

@@ -3,7 +3,7 @@ import type { SuaVezDto } from "../../../src/contracts/api.ts";
 import type { TipoDecisao } from "../../../src/contracts/decisao.ts";
 import { estadoInicial } from "../../../web/estado/reducer.ts";
 import { contarAbertas, CORPO_MAX, novasAbertas, redigirAviso, type PedidoNovo } from "../../../web/lib/avisos.ts";
-import { renderAvisos } from "../../../web/telas/espaco.ts";
+import { renderAvisos } from "../../../web/telas/config-geral.ts";
 import { renderChamada } from "../../../web/telas/sua-vez.ts";
 
 /**
@@ -123,7 +123,7 @@ describe("redigirAviso", () => {
   });
 });
 
-describe("'Avisos' em Seu espaço", () => {
+describe("'Avisos' em Configurações › Geral (NOD-367)", () => {
   it("diz a situação e as regras; no navegador bloqueado o interruptor trava e diz onde liberar", () => {
     const mac = renderAvisos({ onde: "mac", situacao: "ligados" });
     expect(mac).toContain('role="switch" aria-checked="true"');
@@ -132,7 +132,7 @@ describe("'Avisos' em Seu espaço", () => {
     expect(mac).toContain("O número no ícone do Dock mostra quantos pedidos estão abertos.");
     expect(renderAvisos({ onde: "mac", situacao: "bloqueados" })).toContain("Bloqueados pelo macOS: libere em Ajustes do Sistema → Notificações → nod");
     const navegador = renderAvisos({ onde: "navegador", situacao: "bloqueados" });
-    expect(navegador).toContain('aria-checked="false" disabled');
+    expect(navegador).toMatch(/aria-checked="false"[^>]*data-act="alternar-avisos" disabled/);
     expect(navegador).toContain("Bloqueados pelo navegador");
     expect(navegador).toContain("O título da aba mostra quantos pedidos estão abertos.");
     expect(renderAvisos({ onde: "navegador", situacao: "desligados" })).toContain("Desligados");
@@ -150,7 +150,7 @@ describe("'Avisos' em Seu espaço", () => {
     expect(ligado).toContain("Desligado, o aviso aparece em silêncio: o banner e o número no Dock continuam.");
     // Logo abaixo do interruptor geral, antes das regras.
     expect(ligado.indexOf("alternar-avisos")).toBeLessThan(ligado.indexOf("alternar-som"));
-    expect(ligado.indexOf("alternar-som")).toBeLessThan(ligado.indexOf("avisos-regras"));
+    expect(ligado.indexOf("alternar-som")).toBeLessThan(ligado.indexOf("lc-nota"));
     expect(somDe(renderAvisos({ onde: "mac", situacao: "ligados", som: false }))).toContain('aria-checked="false"');
     // Bloqueado pelo macOS conta como ligado: o som segue escolhível.
     expect(somDe(renderAvisos({ onde: "mac", situacao: "bloqueados", som: true }))).not.toContain("disabled");
@@ -172,7 +172,7 @@ describe("'Avisos' em Seu espaço", () => {
       expect(html).not.toContain("alternar-som");
       expect(html).not.toContain("Tocar som");
       expect(html).toBe(renderAvisos({ ...a, som: undefined }));
-      expect(html).toMatch(/<\/div>\n {6}<ul class="avisos-regras">/);
+      expect(html).toContain('<p class="lc-nota">');
     }
   });
 });

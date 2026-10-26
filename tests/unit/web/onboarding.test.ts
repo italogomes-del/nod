@@ -3,10 +3,10 @@ import type { FrotaDto } from "../../../src/contracts/api.ts";
 import { RESPOSTA_TESTE_IA_MAX, type TesteDeIa } from "../../../src/contracts/desktop.ts";
 import type { EstadoOnboarding, IaNoMac, ModeloDeBot } from "../../../src/contracts/onboarding.ts";
 import { nomeParaOTeste as nomeDoDominio, perguntaDoTeste as perguntaDoDominio } from "../../../src/domain/conta-da-ia.ts";
-import { estadoInicial, invalidacoesDaTela, reduzir } from "../../../web/estado/reducer.ts";
+import { CONFIG_UI_INICIAL, estadoInicial, invalidacoesDaTela, reduzir } from "../../../web/estado/reducer.ts";
 import { lerMsgServidor } from "../../../web/lib/ligacao-protocolo.ts";
 import { partesDaLigacao, type EstadoTelaLigacao } from "../../../web/telas/ligacao.ts";
-import { htmlMenuConta } from "../../../web/telas/menu-conta.ts";
+import { renderGeral } from "../../../web/telas/config-geral.ts";
 import {
   conexaoDepoisDoLogin, conexaoDepoisDoVeredito, destinoAoFimDoOla, deveTestar, estadoDoCardIa, htmlCamada, htmlChamando, htmlExecutor, htmlGuia, htmlOla, htmlPainelEntrevista,
   iaDaLigacao, lerTestesDeIa, situacaoDaIa, linhasContou, linhasMontado, nomeParaOTeste, notaForaDoApp, passosDaConexao, perguntaDoTeste, proximoDaConexao, RESPOSTA_TESTE_MAX,
@@ -610,8 +610,12 @@ describe("reducer: resolverInicio e o onboarding", () => {
   });
 });
 
-describe("menu da conta", () => {
-  it("tem 'Ver o onboarding de novo'", () => {
-    expect(htmlMenuConta({ faixa: null, conexao: "", avisos: "", modoDev: false, banco: null })).toContain("Ver o onboarding de novo");
+// NOD-367: "Ver o onboarding de novo" saiu do menu e mora em Configurações › Geral › Ajuda.
+describe("Configurações › Geral", () => {
+  it("tem 'Ver o onboarding de novo' no bloco Ajuda", () => {
+    const html = renderGeral({ tema: "sistema", avisos: { onde: "mac", situacao: "ligados" }, modoDev: false, experimentos: { calibracao: false, memoriaLonga: false, whatsapp: false }, banco: null }, CONFIG_UI_INICIAL);
+    expect(html).toContain("Ver o onboarding de novo");
+    expect(html).toContain('data-act="ver-onboarding"');
+    expect(html.indexOf('id="ajuda"')).toBeLessThan(html.indexOf("Ver o onboarding de novo"));
   });
 });

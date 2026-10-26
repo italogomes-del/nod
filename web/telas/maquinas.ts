@@ -3,10 +3,12 @@ import type { Agente } from "../../src/contracts/agente.ts";
 import type { ConectarMaquina, Estado } from "../estado/reducer.ts";
 import { ICONE } from "../lib/icones.ts";
 import { ICONE_CB, resumoDasTelas } from "../lib/computador-pessoa.ts";
-import { botao, esc, hora, iconeAgente } from "../lib/render.ts";
+import { botao, dataHora, esc, hora, iconeAgente } from "../lib/render.ts";
+import { grupoConfig, itemMenu, linhaConfig, listaAninhada, textoNoMenu, type OpcaoSeletor, type TomStatus } from "../lib/linha-config.ts";
+import type { NivelPressao } from "../../src/contracts/trabalho.ts";
 import { maquinasDe, memoriaLegivel, seguradoPeloMac } from "../lib/trabalhos.ts";
-import { discoLegivel, NOME_FILA, NOME_MEMORIA, NOME_PROCESSADOR, tempoAteAcabar } from "./este-mac.ts";
-import { renderContasNaMaquina, resumoDasContasNaMaquina, type ContextoContas } from "./contas-lista.ts";
+import { discoLegivel, NOME_FILA, NOME_MEMORIA, NOME_PROCESSADOR, renderEsteMac, tempoAteAcabar, USOS } from "./este-mac.ts";
+import { renderContasNaMaquina, type ContextoContas } from "./contas-lista.ts";
 import { linhaEmSegundoPlano, renderInstalarSsh } from "./instalar-ssh.ts";
 import { acoesDaFalha, avisoDaConta, criandoDaConta, fraseDaCriacao, motivoLegivel, nomeDaZona, nuvemLigada, OPCOES_SONO, REGIOES_CRIAR, rotuloEstadoNuvem, rotuloSono, TAMANHOS_CRIAR, temLinhaDeFalha, urlConsoleGoogle } from "../lib/maquina-nuvem.ts";
 import type { MaquinaCriandoDto } from "../../src/contracts/provedor-nuvem.ts";
@@ -46,29 +48,37 @@ export function botsDaPessoa(estado: Estado): Agente[] {
   return (estado.frota?.agentes ?? []).filter((a) => a.ownerId === estado.sessao?.pessoaId && !a.excluidoEm);
 }
 
-function chipsDasIas(m: MaquinaDto): string {
-  const ias = Object.entries(m.ias).map(([id, est]) => `<span class="maq-ia${est === "pronto" ? "" : " nao"}"><i aria-hidden="true"></i>${esc(NOME_IA[id] ?? id)} ${est === "pronto" ? "pronto" : est === "nao_autenticado" ? "sem login" : "ausente"}</span>`);
-  if (m.gh) ias.push(`<span class="maq-ia"><i aria-hidden="true"></i>GitHub</span>`);
-  return ias.length ? `<div class="maq-ias">${ias.join("")}</div>` : "";
+/** As IAs que a máquina anunciou, em texto (sem a lista de contas do ADR-102). */
+function iasEmTexto(m: MaquinaDto): string {
+  const ias = Object.entries(m.ias).map(([id, est]) => `${NOME_IA[id] ?? id} ${est === "pronto" ? "pronto" : est === "nao_autenticado" ? "sem login" : "ausente"}`);
+  if (m.gh) ias.push("GitHub");
+  return ias.join(" · ");
 }
 
+export type LeituraDaMaquina = { curto: string; nivel: NivelPressao; status: { texto: string; tom: TomStatus }; texto: string };
+
 /**
- * A leitura da máquina no cartão (definido em 2026-10-09, a tela fala por máquina): o status curto à vista — se ela
- * segura trabalho novo agora e quantos esperam — e os números atrás do clique (memória `marlon-design-limpo-info-escondida`).
- * Sem leitura dela (motor anterior, ou sem contato), nada.
+ * A leitura da máquina (definido em 2026-10-09, a tela fala por máquina): o status curto vai para a linha (o ponto e o
+ * texto) e os números para o "…" (NOD-367: "Agora: memória … · processador … · disco … · os bots usam …"). Sem leitura
+ * dela (motor anterior, ou sem contato), null.
  */
-export function leituraNoCartao(estado: Pick<Estado, "trabalhos">, id: string): string {
+export function leituraDaMaquina(estado: Pick<Estado, "trabalhos">, id: string): LeituraDaMaquina | null {
   const l = maquinasDe(estado.trabalhos)?.find((x) => x.id === id);
-  if (!l) return "";
+  if (!l) return null;
   const esperam = (estado.trabalhos?.trabalhos ?? []).filter((t) => seguradoPeloMac(t, false) && t.maquina?.id === id).length;
   const oQue = l.motivoEspera === "disco" ? "espaço no disco" : l.motivoEspera === "memoria" ? "ela liberar memória" : "ela aliviar";
   // ADR-096 §6: o disco que acaba em menos de 24 h aparece antes de os bots pararem.
   const acaba = typeof l.disco?.acabaEmMs === "number" ? l.disco.acabaEmMs : null;
   const curto = l.motivoEspera === null ? (acaba !== null ? `Disco acaba em ${tempoAteAcabar(acaba)} no ritmo atual` : "Trabalho novo começa na hora")
     : `${l.motivoEspera === "disco" ? "Pouco espaço no disco" : l.motivoEspera === "memoria" ? "Pouca memória" : "Ocupada"} · ${esperam > 0 ? `${esperam} ${esperam === 1 ? "trabalho espera" : "trabalhos esperam"}` : "trabalho novo espera"} ${oQue}`;
-  const nivel = l.motivoEspera === null ? (acaba !== null ? "amarela" : "verde") : l.seguraTudoNovo || l.pressao === "vermelha" ? "vermelha" : "amarela";
+  const nivel: NivelPressao = l.motivoEspera === null ? (acaba !== null ? "amarela" : "verde") : l.seguraTudoNovo || l.pressao === "vermelha" ? "vermelha" : "amarela";
+  const status = l.motivoEspera === "memoria" ? { texto: l.pressao === "vermelha" ? "Memória crítica" : "Memória em alerta", tom: nivel === "vermelha" ? "erro" as const : "atencao" as const }
+    : l.motivoEspera === "disco" ? { texto: "Pouco espaço no disco", tom: nivel === "vermelha" ? "erro" as const : "atencao" as const }
+      : l.motivoEspera === "processador" ? { texto: "Ocupada", tom: "atencao" as const }
+        : acaba !== null ? { texto: "Disco acabando", tom: "atencao" as const }
+          : { texto: "Conectada", tom: "ok" as const };
   const numeros = [
-    `Memória ${NOME_MEMORIA[l.pressao]}`,
+    `memória ${NOME_MEMORIA[l.pressao]}`,
     l.processador ? `processador ${NOME_PROCESSADOR[l.processador]}${l.usoProcessador !== null ? ` (${Math.round(l.usoProcessador * 100)}% do tempo ocupado)` : ""}` : "processador sem leitura",
     l.fila && l.fila !== "verde" && l.cargaProcessador !== null ? `fila ${NOME_FILA[l.fila]} (${l.cargaProcessador.toLocaleString("pt-BR", { maximumFractionDigits: 1 })} processos por núcleo)` : "",
     l.disco ? `disco com ${discoLegivel(l.disco.livreMb)} livres de ${discoLegivel(l.disco.totalMb)}${acaba !== null ? ` (no ritmo atual, acaba em ${tempoAteAcabar(acaba)}; o Nod limpa o que dá)` : ""}` : "disco sem leitura",
@@ -77,24 +87,47 @@ export function leituraNoCartao(estado: Pick<Estado, "trabalhos">, id: string): 
   const porque = l.motivoEspera === null ? ""
     : l.seguraTudoNovo ? " Com o disco quase sem espaço, nenhuma task nova começa nela; as que já rodam continuam."
       : " Rotinas e pedidos entre bots que ainda não começaram esperam; o que você pede começa.";
-  return `<details class="maq-leitura" data-disclosure="maq-leitura-${esc(id)}"><summary><span class="maq-nivel nivel-${nivel}" aria-hidden="true"></span><span>${esc(curto)}</span></summary><p class="mac-det-txt">${esc(numeros)}.${esc(porque)} O quanto os bots podem usar (Este Mac) vale para todas as máquinas.</p></details>`;
+  return { curto, nivel, status, texto: `Agora: ${numeros}.${porque}` };
 }
 
-/** ADR-102 (G2-M3): o ⋯ da máquina — renomear, as contas dela e desconectar. */
-function menuDaMaquina(estado: Estado, m: MaquinaDto): string {
-  const aberto = estado.contasUi.maquinaMenu === m.id;
+/** A leitura no "…" da máquina: o status curto e os números. Sem leitura, nada. */
+export function leituraNoCartao(estado: Pick<Estado, "trabalhos">, id: string): string {
+  const l = leituraDaMaquina(estado, id);
+  return l ? textoNoMenu(`<span class="maq-nivel nivel-${l.nivel}" aria-hidden="true"></span>${esc(l.curto)}. ${esc(l.texto)}`, `leitura-${id}`) : "";
+}
+
+/** O quanto os bots podem usar (ADR-085): um valor só, no "…" do Mac (ou de cada máquina, sem Mac). */
+export function itensDoUso(estado: Estado): string {
+  const radios = USOS.map((u) => itemMenu("uso-do-mac", "", u.nome, { papel: "menuitemradio", marcado: u.id === estado.usoDoMac, dados: { uso: u.id }, nota: u.explicacao })).join("");
+  return `<div role="group" aria-labelledby="uso-tit"><span class="cl-menu-tit" id="uso-tit">Quanto os bots podem usar</span>${radios}</div>${textoNoMenu("Um valor só, o de hoje: vale para todas as máquinas. Cada uma segura trabalho novo pela própria leitura.", "uso-nota")}`;
+}
+
+/** ADR-102 (G2-M3) + NOD-367: o "…" da máquina — a leitura, o uso, renomear, contas, bots, a chave e desconectar. */
+function itensDaMaquina(estado: Estado, m: MaquinaDto, comUso: boolean, ehEsteMac: boolean): string {
   const bots = botsDaPessoa(estado).filter((b) => maquinaDoBot(estado, b)?.id === m.id).map((b) => b.nome);
-  const itens = aberto
-    ? `<div class="cl-menu" aria-label="${esc(m.nome)}">
-        <span class="cl-menu-tit">${esc(m.nome)}</span>
-        <button type="button" data-act="maq-renomear" data-maquina="${esc(m.id)}">${ICONE.lapis}<span>Renomear máquina</span></button>
-        ${estado.contasIa?.disponivel && !soComputador(m) ? `<button type="button" data-act="cl-gerenciar" data-maquina="${esc(m.id)}">${ICONE.info}<span>Gerenciar contas<small>abre Provedores de IA filtrado</small></span></button>` : ""}
-        ${soComputador(m) ? "" : `<button type="button" data-act="maq-bots" data-maquina="${esc(m.id)}">${ICONE.agentes}<span>Bots desta máquina<small>${esc(bots.length === 0 ? "nenhum bot trabalha só aqui" : `${bots.length} ${bots.length === 1 ? "bot" : "bots"}: ${bots.join(", ")}`)}</small></span></button>`}
-        ${podeDormirPeloGoogle(estado, m) ? `<button type="button" data-act="nuvem-conectar-abrir" data-maquina="${esc(m.id)}">${ICONE.servidor}<span>Dormir e acordar pelo Google<small>ela dorme parada e acorda quando chega trabalho</small></span></button>` : ""}
-        <hr>${m.nuvem?.criadaPeloNod ? `<button type="button" class="perigo" data-act="nuvem-excluir" data-id="${esc(m.id)}" data-nome="${esc(m.nome)}">${ICONE.lixo}<span>Excluir máquina<small>apaga a VM na sua conta Google</small></span></button>` : ""}<button type="button" class="perigo" data-act="maq-desconectar" data-maquina="${esc(m.id)}">${ICONE.sair}<span>Desconectar máquina</span></button>
-      </div>`
-    : "";
-  return `<div class="cl-mais"><button type="button" class="cl-mais-bt" data-act="maq-menu" data-maquina="${esc(m.id)}" aria-expanded="${aberto}" aria-label="Mais ações de ${esc(m.nome)}">${ICONE.pontos}</button>${itens}</div>`;
+  const chave = (estado.chaves ?? []).find((c) => c.id === m.id && !c.revogadaEm);
+  const contas = estado.contasIa?.disponivel ? "" : iasEmTexto(m);
+  return [
+    m.conectada ? leituraNoCartao(estado, m.id) : "",
+    contas ? textoNoMenu(esc(contas), `contas-${m.id}`) : "",
+    comUso && !soComputador(m) ? `${itensDoUso(estado)}<hr>` : "",
+    ehEsteMac ? itemMenu("maq-abrir", ICONE.monitor, "O que roda agora", { dados: { recolhe: "mac-agora" }, nota: "memória, processador, disco e quem está trabalhando" }) : "",
+    itemMenu("maq-renomear", ICONE.lapis, "Renomear máquina", { dados: { maquina: m.id } }),
+    estado.contasIa?.disponivel && !soComputador(m) ? itemMenu("cl-gerenciar", ICONE.info, "Gerenciar contas", { dados: { maquina: m.id }, nota: estado.contasIa ? textoDasContas(estado, m) : "" }) : "",
+    soComputador(m) ? "" : itemMenu("maq-bots", ICONE.agentes, "Bots desta máquina", { dados: { maquina: m.id }, nota: bots.length === 0 ? "nenhum bot trabalha só aqui" : `${bots.length} ${bots.length === 1 ? "bot" : "bots"}: ${bots.join(", ")}` }),
+    podeDormirPeloGoogle(estado, m) ? itemMenu("nuvem-conectar-abrir", ICONE.servidor, "Dormir e acordar pelo Google", { dados: { maquina: m.id }, nota: "ela dorme parada e acorda quando chega trabalho" }) : "",
+    itemMenu("maq-abrir", ICONE.cadeado, "Detalhes da chave", { dados: { recolhe: `chave-${m.id}` } }),
+    "<hr>",
+    m.nuvem?.criadaPeloNod ? itemMenu("nuvem-excluir", ICONE.lixo, "Excluir máquina", { perigo: true, dados: { id: m.id, nome: m.nome }, nota: "apaga a VM na sua conta Google" }) : "",
+    itemMenu("maq-desconectar", ICONE.sair, "Desconectar máquina", { perigo: true, dados: { maquina: m.id }, nota: "a chave é cancelada e os bots dela voltam para a padrão" }),
+    chave ? itemMenu("revogar-chave", ICONE.lixo, "Revogar chave", { perigo: true, dados: { id: chave.id, nome: chave.nome, maquina: m.id }, nota: m.plataforma === "darwin" ? "o Mac para de trabalhar pela sua conta" : "a máquina para de trabalhar pela sua conta" }) : "",
+  ].join("");
+}
+
+function textoDasContas(estado: Estado, m: MaquinaDto): string {
+  const contas = estado.contasIa?.contas ?? [];
+  const aqui = contas.filter((c) => c.maquinas.some((v) => v.maquinaId === m.id && v.estado === "pronta")).length;
+  return aqui === 0 ? "nenhuma conta de IA aqui ainda" : `${aqui} ${aqui === 1 ? "conta" : "contas"} de IA aqui · abre Provedores de IA`;
 }
 
 /**
@@ -127,15 +160,6 @@ function formConectarNuvem(estado: Estado, m: MaquinaDto): string {
 /** O valor inicial do campo "Nome da instância": o nome da máquina, quando é um nome válido no Google. */
 export function nomeDeInstanciaSugerido(m: Pick<MaquinaDto, "nome">): string {
   return NOME_INSTANCIA.test(m.nome) ? m.nome : "";
-}
-
-/** O estado da máquina na nuvem no lugar do "conectada / sem contato". Dormindo é normal: cinza, não erro. */
-export function estadoNuvemNoCartao(m: MaquinaDto): string {
-  const n = m.nuvem;
-  if (!n) return "";
-  const fora = n.estado !== "acordada";
-  const desde = n.estado === "dormindo" ? ` desde ${hora(n.estadoDesde)}` : "";
-  return `<span class="maq-estado${fora ? " fora" : ""}"><span class="maq-ponto${fora ? " fora" : ""}" aria-hidden="true"></span>${esc(rotuloEstadoNuvem(n.estado))}${esc(desde)}</span>`;
 }
 
 /**
@@ -202,28 +226,53 @@ function dialogoDesconectar(estado: Estado): string {
   return `<div class="cl-fundo" data-act="maq-desconectar-fechar"></div><div class="cl-dialogo" role="dialog" aria-modal="true" aria-labelledby="maq-desc-tit"><h3 id="maq-desc-tit">Desconectar ${pareceMac ? "o" : "a"} ${esc(m.nome)}?</h3>${corpo}<div class="cl-dialogo-acoes"><button type="button" class="bt" data-act="maq-desconectar-fechar" data-cl-autofoco>Cancelar</button><button type="button" class="bt perigo" data-act="maq-desconectar-confirmar">Desconectar ${esc(m.nome)}</button></div></div>`;
 }
 
-function cartao(estado: Estado, m: MaquinaDto): string {
+/** O status da linha: a nuvem manda (dormindo é normal, sem cor de erro); sem contato, "Offline desde"; senão, a leitura. */
+export function statusDaMaquina(estado: Pick<Estado, "trabalhos">, m: MaquinaDto): { texto: string; tom: TomStatus } {
+  const n = m.nuvem;
+  if (n && n.estado !== "acordada") {
+    const desde = n.estado === "dormindo" ? ` desde ${hora(n.estadoDesde)}` : "";
+    return { texto: `${rotuloEstadoNuvem(n.estado)}${desde}`, tom: n.estado === "dormindo" ? "neutro" : "atencao" };
+  }
+  if (!m.conectada) return { texto: m.ultimoUsoEm ? `Offline desde ${dataHora(m.ultimoUsoEm)}` : "Offline", tom: "erro" };
+  return leituraDaMaquina(estado, m.id)?.status ?? { texto: n ? "Acordada" : "Conectada", tom: "ok" };
+}
+
+/** "Este Mac · Mac · 11 bots aqui, 10 pela padrão" / "Google Cloud · São Paulo · 1 bot aqui" / "Linux · nenhum bot aqui". */
+function detalheDaMaquina(estado: Estado, m: MaquinaDto, ehEsteMac: boolean): string {
+  if (soComputador(m)) return `${nomePlataforma(m)} · hospeda o computador dos seus bots e não pega trabalho`;
   const aqui = botsDaPessoa(estado).filter((b) => maquinaDoBot(estado, b)?.id === m.id);
-  const quem = aqui.length === 0 ? "Nenhum bot trabalha só aqui" : aqui.length === 1 ? `${aqui[0]!.nome} trabalha aqui` : `${aqui.length} bots trabalham aqui: ${aqui.map((b) => b.nome).join(", ")}`;
-  const estadoTxt = m.nuvem ? estadoNuvemNoCartao(m) : m.conectada
-    ? `<span class="maq-estado"><span class="maq-ponto" aria-hidden="true"></span>conectada</span>`
-    : `<span class="maq-estado fora"><span class="maq-ponto fora" aria-hidden="true"></span>sem contato${m.ultimoUsoEm ? ` desde ${esc(hora(m.ultimoUsoEm))}` : ""}</span>`;
-  return `<div class="espaco-cartao maq-cartao">
-    <div class="maq-cab">
-      <span class="maq-ic" aria-hidden="true">${m.plataforma === "darwin" ? ICONE.laptop : ICONE.servidor}</span>
-      ${estado.contasUi.maquinaRenomear === m.id
-        ? `<form class="cl-renomear maq-renomear" data-form="maq-renomear" data-maquina="${esc(m.id)}"><input name="nome" maxlength="60" value="${esc(m.nome)}" aria-label="Nome da máquina" data-cl-autofoco data-manter-foco="maq-renomear"><button type="submit" class="bt pri sm">Salvar</button><button type="button" class="bt sm" data-act="maq-renomear-fechar">Cancelar</button></form>`
-        : `<span class="maq-id"><b>${esc(m.nome)}</b><small>${esc(m.nuvem ? `Google Cloud · ${nomeDaZona(m.nuvem.zona)}` : nomePlataforma(m))} · chave …${esc(m.prefixo)}</small></span>`}
-      ${estadoTxt}
-      ${menuDaMaquina(estado, m)}
-    </div>
-    ${soComputador(m) ? `<div class="maq-quem"><span>Hospeda o computador dos seus bots e não pega trabalho</span></div>` : `${estado.contasIa?.disponivel ? resumoDasContasNaMaquina(estado.contasIa, m) : chipsDasIas(m)}
-    ${m.conectada ? leituraNoCartao(estado, m.id) : ""}
-    ${nuvemNoCartao(estado, m)}
-    ${formConectarNuvem(estado, m)}
-    <div class="maq-quem"><span class="maq-avatares">${aqui.slice(0, 6).map((b) => iconeAgente(b, "sm")).join("")}</span><span>${esc(quem)}</span></div>`}
-    ${telasNaMaquina(estado, m)}
-  </div>`;
+  const pelaPadrao = aqui.filter((b) => !b.maquinaId || !(estado.maquinas?.maquinas ?? []).some((x) => x.id === b.maquinaId)).length;
+  const bots = aqui.length === 0 ? "nenhum bot aqui" : `${aqui.length} ${aqui.length === 1 ? "bot" : "bots"} aqui${pelaPadrao > 0 ? `, ${pelaPadrao} pela padrão` : ""}`;
+  const onde = m.nuvem ? `Google Cloud · ${nomeDaZona(m.nuvem.zona)}` : nomePlataforma(m);
+  return `${ehEsteMac ? "Este Mac · " : ""}${onde} · ${bots}`;
+}
+
+/** NOD-367: a chave da máquina, aberta pelo "Detalhes da chave" do "…" (a chave inteira só aparece ao criar). */
+function detalhesDaChave(estado: Estado, m: MaquinaDto): string {
+  if (!estado.configUi.abertos.includes(`chave-${m.id}`)) return "";
+  const c = (estado.chaves ?? []).find((x) => x.id === m.id);
+  const uso = c?.ultimoUsoEm ?? m.ultimoUsoEm;
+  return `<div class="cfg-chave" role="region" aria-label="Chave de ${esc(m.nome)}"><dl>
+      <dt>Prefixo</dt><dd><code>…${esc(m.prefixo)}</code></dd>
+      ${c ? `<dt>Criada em</dt><dd>${esc(dataHora(c.criadaEm))}</dd>` : ""}
+      <dt>Último uso</dt><dd>${uso ? esc(dataHora(uso)) : "nunca usada"}</dd>
+    </dl><p class="lc-nota">A chave inteira só aparece uma vez, quando é criada. Perdeu? Revogue esta e conecte de novo.</p></div>`;
+}
+
+/** Uma máquina: a linha (ícone, nome, detalhe, status e "…") e, embaixo, o que se abre dela. */
+function linhaDaMaquina(estado: Estado, m: MaquinaDto, comUso: boolean, ehEsteMac: boolean): string {
+  const renomear = estado.contasUi.maquinaRenomear === m.id
+    ? `<form class="cl-renomear maq-renomear" data-form="maq-renomear" data-maquina="${esc(m.id)}"><input name="nome" maxlength="60" value="${esc(m.nome)}" aria-label="Nome da máquina" data-cl-autofoco data-manter-foco="maq-renomear"><button type="submit" class="bt sm">Salvar</button><button type="button" class="bt link sm" data-act="maq-renomear-fechar">Cancelar</button></form>`
+    : "";
+  const linha = linhaConfig({
+    titulo: m.nome,
+    detalhe: detalheDaMaquina(estado, m, ehEsteMac),
+    icone: m.plataforma === "darwin" ? ICONE.laptop : ICONE.servidor,
+    status: statusDaMaquina(estado, m),
+    controle: { tipo: "menu", acao: "maq-menu", aberto: estado.contasUi.maquinaMenu === m.id, rotulo: m.nome, itens: itensDaMaquina(estado, m, comUso, ehEsteMac), dados: { maquina: m.id } },
+  });
+  const extras = soComputador(m) ? "" : `${nuvemNoCartao(estado, m)}${formConectarNuvem(estado, m)}`;
+  return `<div class="cfg-maq" data-maquina-linha="${esc(m.id)}">${linha}${renomear}${detalhesDaChave(estado, m)}${extras}${telasNaMaquina(estado, m)}${ehEsteMac ? oQueRodaNoMac(estado) : ""}</div>`;
 }
 
 /** NOD-96 (v2): a máquina que hospeda o computador do bot diz as telas abertas nele, com o caminho para o painel. */
@@ -233,13 +282,27 @@ function telasNaMaquina(estado: Estado, m: MaquinaDto): string {
   return `<div class="maq-quem pc-na-maquina"><span class="maq-avatares" aria-hidden="true">${ICONE_CB.pcBot}</span><span>${esc(resumoDasTelas(pc, botsDaPessoa(estado)))}</span><button type="button" class="cb-link" data-act="ver-computador-do-bot">Ver</button></div>`;
 }
 
-function seletor(rotulo: string, act: string, dados: Record<string, string>, atual: string | null, maquinas: MaquinaDto[], noMac: boolean): string {
-  // ADR-092: com o servidor no Mac, a opção sem máquina é o próprio Mac — a VM só pega os bots escolhidos para ela.
-  const opcoes = [{ id: "", nome: noMac ? "Este Mac" : "Qualquer uma" }, ...maquinas.map((m) => ({ id: m.id, nome: m.nome }))];
-  return `<div class="segmentado maq" role="group" aria-label="${esc(rotulo)}">${opcoes.map((o) => {
-    const ativo = (atual ?? "") === o.id;
-    return `<button type="button" class="seg${ativo ? " ativo" : ""}" aria-pressed="${ativo}" data-act="${esc(act)}" data-maquina="${esc(o.id)}"${Object.entries(dados).map(([k, v]) => ` data-${k}="${esc(v)}"`).join("")}>${esc(o.nome)}</button>`;
-  }).join("")}</div>`;
+/** ADR-085: o que roda no Mac agora (os medidores e quem trabalha ou espera), atrás do "O que roda agora" do "…". */
+function oQueRodaNoMac(estado: Estado): string {
+  return estado.configUi.abertos.includes("mac-agora") ? `<div class="cfg-mac-agora" role="region" aria-label="O que roda no Mac agora">${renderEsteMac(estado)}</div>` : "";
+}
+
+/** O Mac do servidor (ADR-092) sem chave: a linha "Este Mac" só com a leitura e o uso. */
+function linhaDoMacSemChave(estado: Estado, id: string, nome: string): string {
+  const l = leituraDaMaquina(estado, id);
+  const linha = linhaConfig({
+    titulo: nome,
+    detalhe: `Este Mac · ${detalheDosBotsNoMac(estado)}`,
+    icone: ICONE.laptop,
+    status: l?.status ?? { texto: "Conectada", tom: "ok" },
+    controle: { tipo: "menu", acao: "maq-menu", aberto: estado.contasUi.maquinaMenu === id, rotulo: nome, dados: { maquina: id }, itens: `${leituraNoCartao(estado, id)}${itensDoUso(estado)}<hr>${itemMenu("maq-abrir", ICONE.monitor, "O que roda agora", { dados: { recolhe: "mac-agora" }, nota: "memória, processador, disco e quem está trabalhando" })}` },
+  });
+  return `<div class="cfg-maq" data-maquina-linha="${esc(id)}">${linha}${oQueRodaNoMac(estado)}</div>`;
+}
+
+function detalheDosBotsNoMac(estado: Estado): string {
+  const n = botsDaPessoa(estado).filter((b) => maquinaDoBot(estado, b) === null).length;
+  return n === 0 ? "nenhum bot aqui" : `${n} ${n === 1 ? "bot" : "bots"} aqui`;
 }
 
 /** PR 2 (protótipo da NOD-92): "Criar minha máquina na nuvem" — provedor, região e tamanho; o Google pede a permissão. */
@@ -283,52 +346,115 @@ function dialogoExcluir(estado: Estado): string {
   return `<div class="cl-fundo" data-act="nuvem-excluir-fechar"></div><div class="cl-dialogo" role="dialog" aria-modal="true" aria-labelledby="nv-exc-tit"><h3 id="nv-exc-tit">Excluir a ${esc(q.nome)}?</h3><p>O nod apaga a VM na sua conta Google, com o disco e os arquivos dos bots que estão nela, e cancela a chave. Não dá para desfazer.</p>${erro}<div class="cl-dialogo-acoes"><button type="button" class="bt" data-act="nuvem-excluir-fechar" data-cl-autofoco>Cancelar</button><button type="button" class="bt perigo" data-act="nuvem-excluir-confirmar">Excluir ${esc(q.nome)}</button></div></div>`;
 }
 
-/** O topo: com a nuvem ligada, "Criar minha máquina na nuvem" é o principal e "Conectar uma máquina" vira secundário. */
-function botoesDoTopo(estado: Estado, maquinas: MaquinaDto[]): string {
-  const conectar = estado.conectarMaquina ? "" : botao("conectar-maquina", `${ICONE.mais}Conectar uma máquina`, { classe: nuvemLigada(estado.nuvem, maquinas) ? "" : "pri" });
-  const criar = nuvemLigada(estado.nuvem, maquinas) && !estado.nuvem.criar ? botao("nuvem-criar-abrir", `${ICONE.mais}Criar minha máquina na nuvem`, { classe: "pri" }) : "";
-  return criar || conectar ? `<span class="maq-topo-acoes">${criar}${conectar}</span>` : "";
-}
-
+/**
+ * NOD-367 (protótipo v2 do Gil, aprovado em 2026-10-26): Configurações › Máquinas é uma lista só, a partir de
+ * `GET /maquinas`. Primeiro a máquina padrão; depois uma linha por máquina, com o status (ponto e texto) e o "…" (a
+ * leitura, o uso do Mac, renomear, contas, bots, a chave, desconectar e revogar); por último as chaves revogadas,
+ * recolhidas, e os caminhos para conectar outra. Onde cada bot trabalha se escolhe na ficha dele.
+ */
 export function renderMaquinas(estado: Estado): string {
   const dados = estado.maquinas;
   const todas = dados?.maquinas ?? [];
   const maquinas = maquinasDeTrabalho(todas);
   const temComputador = todas.some(soComputador);
-  const bots = botsDaPessoa(estado);
   const noMac = !!dados?.servidorNoMac;
-  // NOD-94: o atalho só no modo compartilhado (no local o Mac já é o computador) e fora do Conectar.
-  const atalho = dados && !noMac && !estado.conectarMaquina && !estado.instalarSsh
-    ? `<p class="ssh-atalho"><span>Quer só um lugar para o computador do bot, sem terminal?</span>${botao("ssh-abrir", "Usar uma máquina só para o computador", { classe: "link" })}</p>`
-    : "";
+  const ui = estado.configUi;
+  const leituras = maquinasDe(estado.trabalhos) ?? [];
+  // O Mac do servidor que não tem chave (ADR-092) entra como "Este Mac", com a leitura dele.
+  const macSemChave = leituras.find((l) => l.ehMac && !todas.some((m) => m.id === l.id)) ?? null;
+  const idsDoMac = new Set(leituras.filter((l) => l.ehMac).map((l) => l.id));
+  const temMac = macSemChave !== null || todas.some((m) => idsDoMac.has(m.id));
+  const cab = `<h2>Máquinas</h2><p class="intro">Onde seus bots trabalham. Cada bot roda o Claude Code ou o Codex na máquina dele; a máquina de um bot se escolhe na ficha dele.</p>`;
   const conectar = estado.conectarMaquina ? renderConectar(estado, estado.conectarMaquina) : "";
-  const lista = !dados ? `<p class="intro">Carregando…</p>`
-    : todas.length === 0 ? `<div class="espaco-cartao maq-vazio"><p>${noMac ? "Nenhuma máquina conectada ainda. Os bots rodam neste Mac; conecte uma VM Linux para mandar bots para ela." : "Nenhuma máquina conectada ainda. Conecte o app do Mac ou uma VM Linux para os bots trabalharem nela."}</p></div>`
-    : todas.map((m) => cartao(estado, m)).join("");
-  const linhasBots = bots.map((b) => `<div class="bot-maq">${iconeAgente(b, "sm")}<span class="bot-maq-txt"><b>${esc(b.nome)}</b><span>${esc(b.titulo)}</span></span>${seletor(`Onde ${b.nome} trabalha`, "maquina-do-bot", { id: b.id }, b.maquinaId ?? null, maquinas, noMac)}</div>`).join("");
-  return `<section class="espaco-secao maquinas">
-    <h2>Máquinas</h2>
-    <div class="maq-topo"><p class="intro">Onde seus bots trabalham. A janela do Nod continua no Mac ou no navegador; cada bot roda o Claude Code ou o Codex na máquina escolhida para ele.</p>${botoesDoTopo(estado, todas)}</div>
-    ${atalho}
+  const regras = noMac
+    ? `"Este Mac": o bot roda aqui, onde o Nod está aberto; uma VM só pega o trabalho dos bots escolhidos para ela. Se a máquina de um bot ficar sem contato, a conversa espera por ela.`
+    : `"Qualquer uma": o primeiro computador conectado que estiver livre pega o trabalho. Se a máquina de um bot ficar sem contato, a conversa espera por ela; na mensagem você pode rodar em outra só daquela vez.`;
+  const padrao = maquinas.length > 0
+    ? grupoConfig(null, [linhaConfig({
+      titulo: "Máquina padrão",
+      detalhe: "Bot sem máquina escolhida (e bot novo) trabalha nela",
+      controle: { tipo: "seletor", acao: "maquina-padrao", rotulo: "Máquina padrão", opcoes: opcoesDeMaquina(maquinas, dados?.padraoId ?? null, noMac) },
+    })], { nota: `${regras} Rotinas não mudam de máquina sozinhas; os arquivos de cada bot ficam na máquina onde ele trabalha.${temComputador ? " Uma máquina só computador não entra aqui: ela só hospeda o computador do bot." : ""}` })
+    : "";
+  const linhas = [
+    ...(macSemChave ? [linhaDoMacSemChave(estado, macSemChave.id, macSemChave.nome)] : []),
+    ...todas.map((m) => linhaDaMaquina(estado, m, !temMac || idsDoMac.has(m.id), idsDoMac.has(m.id))),
+  ];
+  const suas = !dados
+    ? grupoConfig("Suas máquinas", [], { notaHtml: `<span role="status">Verificando…</span>` })
+    : linhas.length === 0
+      ? grupoConfig("Suas máquinas", [], { nota: noMac ? "Nenhuma máquina conectada ainda. Os bots rodam neste Mac; conecte uma VM Linux para mandar bots para ela." : "Nenhuma máquina conectada ainda. Conecte o app do Mac ou uma VM Linux para os bots trabalharem nela." })
+      : grupoConfig("Suas máquinas", linhas, { classe: "cfg-maquinas" });
+  return `<section class="espaco-secao cfg-secao cfg-maquinas-secao maquinas">
+    ${cab}
     ${avisoDaNuvem(estado)}
     ${painelCriar(estado)}
     ${conectar}
     ${linhaEmSegundoPlano(estado)}
-    <div class="maq-lista">${listaCriando(estado)}${lista}</div>
+    ${padrao}
+    ${listaCriando(estado) ? `<div class="maq-lista">${listaCriando(estado)}</div>` : ""}
+    ${suas}
+    ${grupoFinal(estado, todas, noMac, ui)}
     ${dialogoDesconectar(estado)}
     ${dialogoExcluir(estado)}
     ${renderInstalarSsh(estado)}
-    ${maquinas.length > 0 && bots.length > 0 ? `<h3 class="espaco-subtitulo" id="bots-das-maquinas" tabindex="-1">Onde cada bot trabalha</h3><div class="espaco-cartao bots-cartao">${linhasBots}</div>
-    <h3 class="espaco-subtitulo">Bot sem escolha (e bot novo) trabalha em</h3>${seletor("Onde trabalha o bot sem escolha", "maquina-padrao", {}, dados?.padraoId ?? null, maquinas, noMac)}` : ""}
-    <ul class="regras-maq">
-      ${noMac ? `<li>"Este Mac": o bot roda aqui, onde o Nod está aberto. Uma VM só pega o trabalho dos bots escolhidos para ela.</li>
-      <li>Se a máquina de um bot ficar sem contato, a conversa espera por ela. Para o bot voltar a rodar aqui, escolha "Este Mac" para ele.</li>`
-    : `<li>"Qualquer uma": o primeiro computador conectado que estiver livre pega o trabalho.</li>
-      <li>Se a máquina de um bot ficar sem contato, a conversa espera por ela; na mensagem você pode rodar em outra máquina só daquela vez.</li>`}
-      <li>Rotinas não mudam de máquina sozinhas. Os arquivos de cada bot ficam na máquina onde ele trabalha.</li>
-      ${temComputador ? `<li>Uma máquina só computador não aparece aqui: nenhum bot trabalha nela, ela só hospeda o computador do bot.</li>` : ""}
-    </ul>
   </section>`;
+}
+
+/** As opções do seletor de máquina: "Qualquer uma" (no servidor no Mac, "Este Mac") e as máquinas de trabalho. */
+export function opcoesDeMaquina(maquinas: readonly MaquinaDto[], atual: string | null, noMac: boolean): OpcaoSeletor[] {
+  const valor = atual && maquinas.some((m) => m.id === atual) ? atual : "";
+  return [{ id: "", nome: noMac ? "Este Mac" : "Qualquer uma" }, ...maquinas.map((m) => ({ id: m.id, nome: m.conectada ? m.nome : `${m.nome} (offline)` }))]
+    .map((o) => ({ valor: o.id, rotulo: o.nome, selecionado: o.id === valor }));
+}
+
+/** O fim da seção: as chaves revogadas (só com alguma), conectar outra máquina, a nuvem, o atalho do computador e a chave à mão. */
+function grupoFinal(estado: Estado, todas: readonly MaquinaDto[], noMac: boolean, ui: Estado["configUi"]): string {
+  const revogadas = (estado.chaves ?? []).filter((c) => c.revogadaEm !== null);
+  const linhaRevogada = (c: (typeof revogadas)[number]) => linhaConfig({
+    titulo: c.nome,
+    detalhe: `…${c.prefixo} · ${c.ultimoUsoEm ? `usada até ${dataHora(c.ultimoUsoEm)}` : "nunca usada"}`,
+    status: { texto: `Revogada em ${dataHora(c.revogadaEm!).split(",")[0]}`, tom: "neutro" },
+  });
+  const linhas: string[] = [];
+  if (revogadas.length > 0) {
+    linhas.push(linhaConfig({
+      titulo: `Chaves revogadas (${revogadas.length})`,
+      detalhe: "Não entram mais; ficam aqui para você saber quais foram",
+      icone: ICONE.cadeado,
+      controle: { tipo: "recolhe", id: "revogadas", acao: "config-recolhe", aberto: ui.abertos.includes("revogadas"), conteudo: listaAninhada(revogadas.map(linhaRevogada)) },
+    }));
+  }
+  if (nuvemLigada(estado.nuvem, todas) && !estado.nuvem.criar) {
+    linhas.push(linhaConfig({ titulo: "Criar minha máquina na nuvem", detalhe: "Uma VM na sua conta Google, que dorme parada e acorda quando chega trabalho", icone: ICONE.mais, controle: { tipo: "link", acao: "nuvem-criar-abrir" } }));
+  }
+  if (!estado.conectarMaquina) {
+    linhas.push(linhaConfig({ titulo: "Conectar outra máquina", detalhe: "Um Mac, uma VM ou um computador: o passo a passo gera a chave", icone: ICONE.mais, controle: { tipo: "link", acao: "conectar-maquina" } }));
+  }
+  // NOD-94: o atalho só no modo compartilhado (no local o Mac já é o computador) e fora do Conectar.
+  if (estado.maquinas && !noMac && !estado.conectarMaquina && !estado.instalarSsh) {
+    linhas.push(linhaConfig({ titulo: "Usar uma máquina só para o computador", detalhe: "Um lugar para o computador do bot, sem terminal", icone: ICONE.monitor, controle: { tipo: "link", acao: "ssh-abrir" } }));
+  }
+  // ADR-031: a chave gerada à mão (o app do Mac de antes do convite); a crua aparece uma vez.
+  const manual = `<form class="cfg-chave-form" data-form="emitir-chave"><label>Nome do computador <input name="nome" required maxlength="60" placeholder="ex.: MacBook do trabalho" data-manter-foco="emitir-chave-nome"></label><button class="bt" type="submit">Gerar chave</button></form>`;
+  linhas.push(linhaConfig({
+    titulo: "Gerar uma chave à mão",
+    detalhe: "Para um computador que pede a chave em vez do código",
+    icone: ICONE.cadeado,
+    controle: { tipo: "recolhe", id: "chave-manual", acao: "config-recolhe", aberto: ui.abertos.includes("chave-manual"), conteudo: `<div class="cfg-chave">${manual}</div>` },
+  }));
+  return `${chaveEmitida(estado)}${grupoConfig(null, linhas)}`;
+}
+
+/** A chave crua, logo depois de gerar (ADR-031): copie agora, ela não volta. */
+function chaveEmitida(estado: Estado): string {
+  const e = estado.chaveEmitida;
+  if (!e) return "";
+  return `<div class="cfg-chave chave-emitida" role="status">
+      <p><b>Chave do computador "${esc(e.dados.nome)}"</b>: copie agora. Ela <b>não será mostrada de novo</b>; o nod guarda só uma impressão digital dela.</p>
+      <code class="chave-crua">${esc(e.chave)}</code>
+      <div class="acoes">${botao("copiar-texto", "Copiar", { classe: "sm", dados: { texto: e.chave } })}${botao("fechar-chave-emitida", "Já copiei", { classe: "sm" })}</div>
+    </div>`;
 }
 
 function haQuantoPediu(s: number): string {

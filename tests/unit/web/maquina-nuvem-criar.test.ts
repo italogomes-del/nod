@@ -56,10 +56,10 @@ describe("criar: o que está sendo criado", () => {
 });
 
 describe("criar e excluir na tela de Máquinas", () => {
-  it("sem a nuvem ligada, só o \"Conectar uma máquina\" (principal)", () => {
+  it("sem a nuvem ligada, só o \"Conectar outra máquina\"", () => {
     const html = renderMaquinas(com([maquina("m1", "vm")]));
     expect(html).not.toContain("nuvem-criar-abrir");
-    expect(html).toMatch(/class="bt pri"[^>]*data-act="conectar-maquina"|data-act="conectar-maquina"[^>]*class="bt pri"/);
+    expect(html).toContain('data-act="conectar-maquina"');
   });
 
   it("com a conta conectada, \"Criar minha máquina na nuvem\" é o principal", () => {

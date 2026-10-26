@@ -146,7 +146,30 @@ export type ConectarMaquina = {
   conviteAte?: number | null;
 };
 
-export type SecaoEspaco = "conta" | "conexao" | "avisos" | "preferencias" | "este-mac" | "maquinas" | "computador-do-bot" | "computadores" | "agentes" | "relatos";
+/** NOD-367 (protótipo v2): as 6 seções das Configurações, nesta ordem na lateral. */
+export type SecaoEspaco = "conta" | "geral" | "conexao" | "maquinas" | "agentes" | "feedback";
+/**
+ * O que um ponto de entrada pode pedir: as 6 seções, as de antes da NOD-367 (avisos, preferências, este Mac,
+ * computadores, computador do bot, relatos), que caem na seção que as absorveu, e "ajuda" (Geral, no bloco Ajuda).
+ */
+export type PedidoSecao = SecaoEspaco | "avisos" | "preferencias" | "este-mac" | "computador-do-bot" | "computadores" | "relatos" | "ajuda";
+
+export function secaoDoPedido(p: PedidoSecao): SecaoEspaco {
+  switch (p) {
+    case "avisos": case "preferencias": case "ajuda": return "geral";
+    case "este-mac": case "computador-do-bot": case "computadores": return "maquinas";
+    case "relatos": return "feedback";
+    default: return p;
+  }
+}
+
+/**
+ * NOD-367: o estado de tela das Configurações — as linhas recolhidas abertas (Avançado, Chaves revogadas, Ocultos, o
+ * detalhe de uma chave ou de um envio), o "…" aberto e a busca de Agentes. Fechar as Configurações zera.
+ */
+/** `filtro`: o tipo escolhido em Feedback ("todos", "bug", "melhoria" ou "duvida"). */
+export type ConfigUi = { abertos: string[]; busca: string; filtro: string };
+export const CONFIG_UI_INICIAL: ConfigUi = { abertos: [], busca: "", filtro: "todos" };
 
 /**
  * A gaveta do bot por níveis (definido em 2026-09-30, canvas "Menu, sidebar e gaveta"): o que é do bot abre DENTRO dela,
@@ -230,6 +253,7 @@ export type Estado = {
   tela: Tela;
   /** Seu espaço aberto por cima da tela, na seção escolhida; null = fechado. */
   espaco: { secao: SecaoEspaco } | null;
+  configUi: ConfigUi;
   frota: FrotaDto | null;
   gestao?: FrotaDto | null;
   inventario: Inventario | null;
@@ -376,6 +400,8 @@ export type Estado = {
   nuvem: UiNuvem;
   /** Relatos de comportamento indesejado (ADR-041); null = ainda não carregou. */
   relatos: Relato[] | null;
+  /** NOD-367: a lista de Feedback não carregou (a seção mostra "Tentar de novo" em vez de pedir de novo sozinha). */
+  relatosErro?: boolean;
   /**
    * Modo dev (definido em 2026-09-28, 0036): a preferência vem do servidor (o app desktop limpa o localStorage)
    * e, ligada, cada conversa aberta traz o resumo do Raio-X de cada turno e o total do dia.
@@ -465,6 +491,9 @@ export type Acao =
   | { tipo: "sessao"; escopo: Escopo | null }
   | { tipo: "navegar"; tela: Tela }
   | { tipo: "espaco"; secao: SecaoEspaco | null }
+  | { tipo: "config-ui"; mudanca: Partial<ConfigUi> }
+  /** Abre ou fecha uma linha recolhida das Configurações. */
+  | { tipo: "config-recolhe"; id: string }
   | { tipo: "tick"; agora: number }
   | { tipo: "cancelando-turno"; turnoId: string; agora: number }
   | { tipo: "desfazer-cancelamento"; turnoId: string }
@@ -506,7 +535,7 @@ export type Acao =
   | { tipo: "trocar-contas"; contas: ContasIaDto }
   | { tipo: "contas-ui"; mudanca: Partial<UiContas> }
   | { tipo: "nuvem-ui"; mudanca: Partial<UiNuvem> }
-  | { tipo: "hidratar-relatos"; relatos: Relato[] }
+  | { tipo: "hidratar-relatos"; relatos: Relato[] | null; erro?: boolean }
   | { tipo: "modo-dev"; ligado: boolean }
   | { tipo: "hidratar-raio-x"; conversaId: string; raioX: RaioXConversa }
   | { tipo: "chave-emitida"; emitida: ChaveEmitidaDto | null }
@@ -548,6 +577,7 @@ export const estadoInicial: Estado = {
   sessao: null,
   tela: { tipo: "inicio" },
   espaco: null,
+  configUi: CONFIG_UI_INICIAL,
   frota: null,
   inventario: null,
   executor: null,
@@ -1170,7 +1200,7 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
     return invalidar({ ...e, faixaParada: faixa }, conv(f));
   },
   // O relato é registro, não estado vivo da conversa: nada na timeline muda, então nada se invalida.
-  // A tela de relatos recarrega quando é aberta (definido em 2026-09-21).
+  // A seção Feedback relê ao entrar (definido em 2026-09-21; NOD-367 zera a lista no "espaco").
   "relato.criado": (e) => e,
   // A linha "Chat de voz" da conversa e a ligação viva (a barra lateral marca o bot "Em ligação").
   "ligacao.mudou": (e, f) => invalidar(e, conv(f), "ligacao"),
@@ -1237,6 +1267,7 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
         tela: acao.tela,
         // Ir a outro lugar (o clique num aviso, por exemplo) fecha Seu espaço: a pessoa foi para onde pediu.
         espaco: null,
+        configUi: CONFIG_UI_INICIAL,
         erro: null,
         // Revisão da NOD-349: o popover do avatar não reabre sozinho ao voltar ao bot.
         avatarAberto: null,
@@ -1255,8 +1286,21 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
       return acao.tela.tipo === "trabalhos" && estado.tela.tipo !== "trabalhos" ? invalidar(navegado, "trabalhos") : navegado;
     }
     case "espaco":
-      // A chave crua só vive enquanto a pessoa está em Computadores; trocar de seção ou fechar a descarta.
-      return { ...estado, espaco: acao.secao ? { secao: acao.secao } : null, chaveEmitida: acao.secao === "computadores" ? estado.chaveEmitida : null, erro: null };
+      // A chave crua só vive enquanto a pessoa está em Máquinas; trocar de seção ou fechar a descarta. NOD-367: trocar de
+      // seção fecha o "…" e as linhas abertas; fechar as Configurações zera também a busca.
+      return {
+        ...estado, espaco: acao.secao ? { secao: acao.secao } : null, chaveEmitida: acao.secao === "maquinas" ? estado.chaveEmitida : null, erro: null,
+        configUi: !acao.secao ? CONFIG_UI_INICIAL : acao.secao === estado.espaco?.secao ? estado.configUi : { ...CONFIG_UI_INICIAL, busca: estado.configUi.busca },
+        // NOD-367 (revisão 2): o relato.criado não invalida nada (ADR-041), então entrar em Feedback relê "Seus envios" e
+        // esquece o erro de antes; o envio feito na conversa com o Nod aparece ao voltar.
+        ...(acao.secao === "feedback" && estado.espaco?.secao !== "feedback" ? { relatos: null, relatosErro: false } : {}),
+      };
+    case "config-ui":
+      return { ...estado, configUi: { ...estado.configUi, ...acao.mudanca } };
+    case "config-recolhe": {
+      const abertos = estado.configUi.abertos.includes(acao.id) ? estado.configUi.abertos.filter((x) => x !== acao.id) : [...estado.configUi.abertos, acao.id];
+      return { ...estado, configUi: { ...estado.configUi, abertos } };
+    }
     case "cancelando-turno":
       return { ...estado, cancelando: { ...estado.cancelando, [acao.turnoId]: acao.agora } };
     case "desfazer-cancelamento": {
@@ -1472,7 +1516,7 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
     case "nuvem-ui":
       return { ...estado, nuvem: { ...estado.nuvem, ...acao.mudanca } };
     case "hidratar-relatos":
-      return { ...estado, relatos: acao.relatos };
+      return { ...estado, relatos: acao.relatos, relatosErro: acao.erro === true };
     // Desligado, os resumos saem da memória: religar busca de novo, com o que mudou nesse meio-tempo.
     case "modo-dev":
       return { ...estado, modoDev: { ligado: acao.ligado, raioX: acao.ligado ? estado.modoDev.raioX : {} } };
@@ -1691,10 +1735,10 @@ export function invalidacoesDaTela(estado: Estado): Invalidacao[] {
   if (estado.sessao && !estado.trabalhos) faltas.push("trabalhos");
   if (t.tipo === "trabalho" && !estado.trabalhoDetalhe[t.id]) faltas.push(`trabalho:${t.id}`);
   if (t.tipo === "linha" && !estado.conversas[t.conversaId]) faltas.push(`conversa:${t.conversaId}`);
-  if (secao === "computadores" && !estado.chaves) faltas.push("chaves");
+  if (secao === "maquinas" && !estado.chaves) faltas.push("chaves");
   // ADR-090: a seção Máquinas e a conversa (a mensagem na fila diz quando a máquina do bot está fora do ar).
   // QA do NOD-314: a tela da task também lê a frota ("Rodar em <outra> desta vez" e a linha do turno preso).
-  if (estado.sessao && !estado.maquinas && (secao === "maquinas" || secao === "conexao" || t.tipo === "conversa" || t.tipo === "trabalho")) faltas.push("maquinas");
+  if (estado.sessao && !estado.maquinas && (secao === "maquinas" || secao === "agentes" || secao === "conexao" || t.tipo === "conversa" || t.tipo === "trabalho")) faltas.push("maquinas");
   // ADR-121 (NOD-92): a conta da nuvem em Máquinas (404 = sem a flag; a seção fica como antes).
   if (estado.sessao && estado.nuvem.conta === null && secao === "maquinas") faltas.push("nuvem");
   // ADR-102: a lista de contas em Provedores de IA e o resumo de contas de cada máquina.
@@ -1702,7 +1746,7 @@ export function invalidacoesDaTela(estado: Estado): Invalidacao[] {
   // NOD-280 (critério 9): e a sala/linha aberta com nota de limite de contas — a nota se recalcula com a lista.
   if (estado.sessao && !estado.contasIa && (secao === "maquinas" || secao === "conexao" || t.tipo === "conversa" || t.tipo === "trabalho" || conversaAbertaTemNotaDeContas(estado))) faltas.push("contas");
   // O frame relato.criado não invalida nada (é registro), então a seção busca quando ainda não tem.
-  if (secao === "relatos" && !estado.relatos) faltas.push("relatos");
+  if (secao === "feedback" && !estado.relatos && !estado.relatosErro) faltas.push("relatos");
   return faltas.filter((f) => !estado.invalidacoes.includes(f));
 }
 

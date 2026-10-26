@@ -37,7 +37,7 @@ const TETO_TEXTO = 2000;
  *
  * Nenhum metadado é pedido: o servidor já tem tipado tudo que explica a falha.
  */
-export function abrirReportarBug(api: Api, mensagemId: string, versaoApp: string | null, correlationId: string | null): void {
+export function abrirReportarBug(api: Api, mensagemId: string, versaoApp: string | null, correlationId: string | null, aoEnviar?: () => void): void {
   const dialog = document.createElement("dialog");
   dialog.className = "relato-dialogo";
   dialog.setAttribute("aria-labelledby", "relato-titulo");
@@ -133,6 +133,8 @@ export function abrirReportarBug(api: Api, mensagemId: string, versaoApp: string
       void api
         .relatar({ mensagemId, categoria, alcance, ...(texto ? { texto } : {}), ...(versaoApp ? { versaoApp } : {}), ...(correlationId ? { correlationId } : {}) })
         .then(() => {
+          // NOD-367: Feedback relê "Seus envios" (o frame relato.criado não invalida nada).
+          aoEnviar?.();
           // Sem soltar a trava o próprio guard do handler engoliria o clique no Fechar.
           enviando = false;
           q('[data-painel="escolha"]').hidden = true;

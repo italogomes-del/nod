@@ -25,6 +25,8 @@ import { abertosDoBot } from "../lib/trabalhos.ts";
 import { renderAtividade } from "./atividade.ts";
 import { renderListaBiblioteca } from "./biblioteca.ts";
 import { lembrancaDaMidia } from "../lib/midia.ts";
+import { seletorLinha } from "../lib/linha-config.ts";
+import { maquinasDeTrabalho, opcoesDeMaquina } from "./maquinas.ts";
 
 /**
  * O "N hoje" da linha "Atividade" (ADR-114, chat limpo, PR 2; decisão tomada 1: o dia inteiro). Antes de a contagem chegar
@@ -274,12 +276,25 @@ function nivelAjustes(estado: Estado, a: Bot, dona: boolean): Nivel {
     ? `<div class="gv-cartao">
         ${estado.modoDev.ligado ? linha(`${ICONE.monitor}<span class="gv-linha-txt">Computador do bot</span>`, `data-act="abrir-computador" data-id="${esc(a.id)}" title="O computador próprio do bot (ADR-037), não o seu Mac"`) : ""}
         ${renderLinhaInteligencia(a, contextoInteligencia(estado), estado.menuIa === a.id)}
+        ${linhaMaquinaDoBot(estado, a)}
         ${linha(`${ICONE.escudo}<span class="gv-linha-txt">Aprovações</span><span class="gv-meta">${esc(modo.curto)}</span>`, `data-act="modo-aprovacao" data-id="${esc(a.id)}" title="${esc(`${modo.titulo}: ${descricao(a.modoAprovacao ?? "manual", estado.frota?.revisor === true)}`)}"`)}
       </div>`
     : `<p class="mudo">Aprovações: ${esc(modo.titulo)}</p>`;
   const ambienteHtml = `<section class="gv-secao"><h3>Ambiente</h3>${ambiente}<p class="mudo gv-nota">${estado.executor?.atual === "catcher" ? "Simulação · respostas de teste" : "Sua conta de IA · computador conectado"}</p></section>`;
   const dev = estado.modoDev.ligado ? `<section class="gv-secao gv-dev"><h3>Modo dev</h3><div class="gv-dev-corpo">${renderSeloModoDev(estado, a.conversaId, a.nome)}</div></section>` : "";
   return { titulo: "Ajustes", corpo: atalhos + perfil + acessosHtml + ambienteHtml + dev };
+}
+
+/**
+ * NOD-367: onde o bot trabalha, na ficha dele (saiu de Máquinas): "Qualquer uma" (no servidor no Mac, "Este Mac") e as
+ * máquinas conectadas; a escolhida que ficou sem contato continua na lista, marcada. `PUT /agentes/:id/maquina`.
+ */
+export function linhaMaquinaDoBot(estado: Pick<Estado, "maquinas">, a: Pick<Bot, "id" | "nome" | "maquinaId">): string {
+  const todas = maquinasDeTrabalho(estado.maquinas?.maquinas ?? []);
+  const vivas = todas.filter((m) => m.conectada || m.id === a.maquinaId);
+  if (vivas.length === 0) return "";
+  const opcoes = opcoesDeMaquina(vivas, a.maquinaId ?? null, !!estado.maquinas?.servidorNoMac);
+  return `<div class="gv-linha gv-maquina cfg-maq-bot">${ICONE.servidor}<span class="gv-linha-txt">Máquina<small>Onde ${esc(a.nome)} roda o Claude Code ou o Codex</small></span>${seletorLinha({ tipo: "seletor", acao: "maquina-do-bot", rotulo: `Máquina de ${a.nome}`, opcoes, dados: { id: a.id } })}</div>`;
 }
 
 function linhaDaPasta(estado: Estado, a: Bot): string {

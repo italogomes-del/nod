@@ -3,6 +3,7 @@ import type { AcaoNoLote, PayloadPropostaLoteBots } from "../../../src/contracts
 import type { Relato } from "../../../src/contracts/relato.ts";
 import { listaDoLoteParaSuaVez, renderCardLote } from "../../../web/telas/card-lote.ts";
 import { renderRelatos } from "../../../web/telas/relatos.ts";
+import { CONFIG_UI_INICIAL } from "../../../web/estado/reducer.ts";
 
 /** O card do lote do Nod (ADR-082) e a tela Relatos com tipo e origem (0062). */
 const acao = (i: number, p: Partial<AcaoNoLote>): AcaoNoLote => ({ i, tipo: "criar", estado: "esperando", motivo: "manual", alvoNome: "Bot", botId: null, alvoDaAcao: null, ...p });
@@ -74,16 +75,17 @@ describe("Relatos com tipo e origem (0062)", () => {
   ];
 
   it("filtros só dos tipos presentes, o título do Nod e a origem; o do botão segue com a categoria", () => {
-    const h = renderRelatos({ relatos });
-    expect(h).toContain('data-filtro="todos"');
+    const h = renderRelatos({ relatos, configUi: CONFIG_UI_INICIAL });
     expect(h).toContain("Todos · 3");
     expect(h).toContain("Bugs · 2");
     expect(h).toContain("Melhorias · 1");
     expect(h).not.toContain("Dúvidas ·");
     expect(h).toContain("<b>Anexar não abre no Safari</b>");
     expect(h).toContain("conversa com o Nod");
-    expect(h).toContain("Tocar no clipe não faz nada.");
     expect(h).toContain("<b>Respondeu errado</b>");
     expect(h).toContain('data-tipo="melhoria"');
+    // o texto da pessoa fica no detalhe, que abre embaixo da linha
+    const aberto = renderRelatos({ relatos, configUi: { ...CONFIG_UI_INICIAL, abertos: ["relato-r1"] } });
+    expect(aberto).toContain("Tocar no clipe não faz nada.");
   });
 });

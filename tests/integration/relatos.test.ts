@@ -170,6 +170,30 @@ describeIntegracao("relato de comportamento indesejado (ADR-041)", () => {
     });
   });
 
+  it("NOD-367: na listagem, o relato do botão traz o texto para quem escreveu, e nada para outra pessoa", async () => {
+    await withRollback(escopo, async (trx) => {
+      const agora = Date.now();
+      const a = await agenteComConversa(trx, escopo);
+      const m = await a.repos.mensagens.criar({
+        conversaId: a.conversaId, autoria: autoriaPessoa(PESSOA_MARLON), kind: "texto",
+        texto: "conteúdo privado do Marlon", confianca: "confiavel",
+      });
+      const r = await registrarRelato(deps(trx, escopo, agora), {
+        mensagemId: m!.id, categoria: "outro", alcance: "mensagem", texto: "A Ada mandou o cronograma com as datas erradas",
+      });
+      const doMarlon = (await a.repos.relatos.listar()).find((x) => x.id === r.data.relato.id);
+      expect(doMarlon?.origem).toBe("botao");
+      expect(doMarlon?.resumo).toBe("A Ada mandou o cronograma com as datas erradas");
+
+      const ana = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_ANA };
+      await vincularEscopo(trx, ana);
+      const daAna = (await criarRepos(trx, ana).relatos.listar()).find((x) => x.id === r.data.relato.id);
+      expect(daAna).toBeDefined();
+      expect(daAna?.resumo ?? null).toBeNull();
+      expect(daAna?.titulo ?? null).toBeNull();
+    });
+  });
+
   it("a listagem traz o diagnóstico do turno — é o campo que a feature existe para resgatar", async () => {
     await withRollback(escopo, async (trx) => {
       const agora = Date.now();

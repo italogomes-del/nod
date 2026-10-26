@@ -4,6 +4,7 @@ import type { Estado } from "../estado/reducer.ts";
 import { esc, iconeAgente } from "../lib/render.ts";
 import { aberto, foraDoMac, leituraDoMac, maquinasDe, memoriaLegivel, noMac, pilulaMac, pontoTrabalho, seguradoPeloMac, situacaoDe, tempoDe, textoDaEspera } from "../lib/trabalhos.ts";
 import { agente } from "./trabalhos.ts";
+import { linhaConfig } from "../lib/linha-config.ts";
 
 /**
  * Seu espaço › Este Mac (definido em 2026-10-08, ADR-085; protótipo "Nod — Ritmo do Mac", prancha 3): quanto do Mac os
@@ -99,12 +100,19 @@ function detalheDoDisco(d: DiscoDoMac): string {
 
 function linhaBot(estado: Estado, t: TrabalhoDto, fim: string, segurando: boolean): string {
   const bot = agente(estado, t.agenteId);
-  return `<button type="button" class="mac-bot" data-act="abrir-trabalho" data-id="${esc(t.id)}">${pontoTrabalho(t, bot?.cor)}${bot ? iconeAgente(bot, "sm") : ""}<span class="mac-bot-txt"><b>${esc(bot?.nome ?? "bot")}</b><span>${esc(t.titulo)} · ${esc(situacaoDe(t, [], segurando, estado.agora))}</span></span><span class="mac-bot-fim">${esc(fim)}</span></button>`;
+  return linhaConfig({
+    titulo: bot?.nome ?? "bot",
+    detalhe: `${t.titulo} · ${situacaoDe(t, [], segurando, estado.agora)}`,
+    icone: `${pontoTrabalho(t, bot?.cor)}${bot ? iconeAgente(bot, "sm") : ""}`,
+    ...(fim ? { quando: fim } : {}),
+    classe: "mac-trabalho",
+    controle: { tipo: "link", acao: "abrir-trabalho", dados: { id: t.id } },
+  });
 }
 
 function grupo(titulo: string, legenda: string, linhas: string[]): string {
   if (linhas.length === 0) return "";
-  return `<div class="mac-grupo"><span>${esc(titulo)} · ${linhas.length}</span><span>${esc(legenda)}</span></div>${linhas.join("")}`;
+  return `<div class="mac-grupo"><span>${esc(titulo)} · ${linhas.length}</span><span>${esc(legenda)}</span></div><div class="lc-lista">${linhas.join("")}</div>`;
 }
 
 export function renderEsteMac(estado: Estado): string {
@@ -156,17 +164,10 @@ export function renderEsteMac(estado: Estado): string {
   const grupos = grupo("Trabalhando", "os que mais usam memória primeiro", trabalhando.map((t) => linhaBot(estado, t, t.memoriaMb ? memoriaLegivel(t.memoriaMb) : tempoDe(t, estado.agora), segurando)))
     + grupo(esperandoO.charAt(0).toUpperCase() + esperandoO.slice(1), "começam sozinhos, na ordem da fila", esperandoVez.map((t) => linhaBot(estado, t, "", segurando)))
     + grupo("Fora do Mac", "esperando sem ocupar o Mac; voltam sozinhas", fora.map((t) => linhaBot(estado, t, "", segurando)));
-  const uso = estado.usoDoMac;
-  const botoes = USOS.map((u) => `<button type="button" class="seg${u.id === uso ? " ativo" : ""}" data-act="uso-do-mac" data-uso="${u.id}" aria-pressed="${u.id === uso}">${esc(u.nome)}</button>`).join("");
-  const explicacao = USOS.find((u) => u.id === uso)?.explicacao ?? "";
-  return `<section class="espaco-secao este-mac">
-      <h2>Este Mac</h2>
-      <p class="intro">Quanto do seu Mac os bots podem usar. Não há limite de bots trabalhando: quando o Mac fica apertado, trabalho novo em segundo plano (rotinas e pedidos entre bots) espera um pouco. Com o disco quase sem espaço, nenhuma task nova começa. Conversa com você e ligação nunca esperam.</p>
+  // NOD-367: o quanto os bots podem usar mora no "…" da máquina; aqui fica só o que roda agora.
+  return `<div class="este-mac">
       ${pilulaMac(segurando, esperandoVez.length, false, motivo)}
       <div class="espaco-cartao mac-cartao">${resumo}${medidores}${grupos}</div>
-      <h3 class="espaco-subtitulo">Quanto os bots podem usar</h3>
-      <div class="segmentado uso-do-mac" role="group" aria-label="Quanto os bots podem usar do Mac">${botoes}</div>
-      <p class="intro" aria-live="polite">${esc(explicacao)}</p>
-      ${outras.length ? `<p class="intro">Vale também para ${outras.length === 1 ? esc(outras[0]!.nome) : "as outras máquinas"}: cada uma segura trabalho novo pela própria leitura, em Máquinas.</p>` : ""}
-    </section>`;
+      ${outras.length ? `<p class="lc-nota">O quanto os bots podem usar vale também para ${outras.length === 1 ? esc(outras[0]!.nome) : "as outras máquinas"}: cada uma segura trabalho novo pela própria leitura.</p>` : ""}
+    </div>`;
 }

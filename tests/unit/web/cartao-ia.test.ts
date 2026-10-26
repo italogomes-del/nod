@@ -234,7 +234,7 @@ describe("Provedores de IA (a seção que era Conexão)", () => {
 
   it("'Conexão' virou 'Provedores de IA' na navegação de Seu espaço e no menu da conta", () => {
     expect(SECOES_ESPACO.find((s) => s.id === "conexao")?.nome).toBe("Provedores de IA");
-    const menu = htmlMenuConta({ faixa: null, conexao: "Conectada", avisos: "Ligados", modoDev: false, banco: null });
+    const menu = htmlMenuConta({ faixa: null, conexao: "Conectada" });
     expect(menu).toContain('<span class="mc-nome">Provedores de IA</span>');
     expect(menu).not.toContain("Conexão");
   });

@@ -104,7 +104,7 @@ describe("a faixa do menu da conta (NOD-12)", () => {
   it("≥ 90% sem outra conta na fila: a faixa diz quanto, quando renova e que as rotinas esperam", () => {
     const f = faixaDoUso([conta("a", "Pessoal", { cota: cota(0.93) })], AGORA);
     expect(f).toEqual({ texto: `Claude · Pessoal em 93% da janela de 5 h, renova às ${hora(RENOVA)}. Sem outra conta na fila, as rotinas esperam até lá.`, resumo: "Claude perto do limite" });
-    const html = htmlMenuConta({ faixa: { texto: f!.texto, botao: "Ver contas" }, conexao: "Conectada", avisos: "", modoDev: false, banco: null });
+    const html = htmlMenuConta({ faixa: { texto: f!.texto, botao: "Ver contas" }, conexao: "Conectada" });
     expect(html).toContain('<div class="mc-faixa" role="status">');
     expect(html).toContain('data-secao="conexao">Ver contas</button>');
   });

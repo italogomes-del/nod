@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { renderAvisos } from "../../../web/telas/espaco.ts";
+import { renderAvisos } from "../../../web/telas/config-geral.ts";
 
 // Regression: ISSUE-001 — a ação "alternar-som" (web/main.ts) e as classes do "Tocar som" sem teste
 // Found by /qa on 2026-10-16 (QA por mutação do PR #370, NOD-115): tirar a chamada ao canal, renomear a
@@ -34,10 +34,9 @@ describe("'Tocar som': ação e estilo (NOD-115)", () => {
     expect(corpo.indexOf("await canalAvisos.alternarSom")).toBeLessThan(corpo.indexOf("if (comFoco)"));
   });
 
-  it("as classes do 'Tocar som' existem no interface.css", () => {
-    const css = ler("interface.css");
-    expect(css).toMatch(/^\.avisos-som \{[^}]*margin:[^}]*44px/m);
-    expect(css).toMatch(/^\.avisos-som-ajuda \{[^}]*44px/m);
-    expect(css).toMatch(/^\.avisos-som \.avisos-interruptor:disabled \.avisos-trilho \{/m);
+  // NOD-367: o "Tocar som" é uma linha de Geral (linhaConfig); o switch travado tem estilo próprio.
+  it("o switch das Configurações tem o estado travado no configuracoes.css", () => {
+    const css = ler("configuracoes.css");
+    expect(css).toMatch(/\.lc-switch:disabled/);
   });
 });

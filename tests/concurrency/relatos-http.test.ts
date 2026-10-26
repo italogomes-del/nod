@@ -47,8 +47,9 @@ describeIntegracao("relatos pelo HTTP real", () => {
     expect(r).toMatchObject({ categoria: "resposta_errada", alcance: "janela", mensagemId, conversaId: b.conversa.id });
     expect(r!.metadados.versaoApp).toBe("0.2.0-rc.1");
     expect(r!.mensagensAnexadas).toBeGreaterThanOrEqual(1);
-    // A listagem NÃO carrega a prosa: o texto da pessoa não viaja com o registro (ADR-002/004).
-    expect(JSON.stringify(relatos)).not.toContain("esperava que perguntasse antes");
+    // Emenda NOD-367 da ADR-041: a listagem traz à PRÓPRIA pessoa o resumo do que ela escreveu (o título da linha em
+    // Feedback); o relato de outra pessoa continua sem prosa (tests/integration/relatos.test.ts prova o outro lado).
+    expect(r!.resumo).toBe("esperava que perguntasse antes");
 
     // Categoria fora da união, alcance inválido e id malformado: 400 de entrada, nunca 500.
     for (const corpo of [

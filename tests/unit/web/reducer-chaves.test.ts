@@ -6,22 +6,22 @@ const emitida: ChaveEmitidaDto = { chave: "abc.segredo", dados: { id: "k1", nome
 
 // definido em 2026-09-30: as chaves moram na seção Computadores de Seu espaço (camada por cima da tela), não numa tela.
 describe("reducer: Minhas chaves (ADR-031)", () => {
-  it("a seção Computadores pede a lista quando ainda não carregou; depois de hidratar, não pede mais", () => {
-    const naSecao = reduzir(estadoInicial, { tipo: "espaco", secao: "computadores" });
+  it("a seção Máquinas pede a lista quando ainda não carregou; depois de hidratar, não pede mais", () => {
+    const naSecao = reduzir(estadoInicial, { tipo: "espaco", secao: "maquinas" });
     expect(invalidacoesDaTela(naSecao)).toContain("chaves");
     expect(invalidacoesDaTela(reduzir(estadoInicial, { tipo: "espaco", secao: "conexao" }))).not.toContain("chaves");
     const hidratado = reduzir(naSecao, { tipo: "hidratar-chaves", chaves: [emitida.dados] });
     expect(invalidacoesDaTela(hidratado)).not.toContain("chaves");
   });
 
-  it("a chave crua fica só enquanto a pessoa está em Computadores: some ao fechar, ao trocar de seção, ao navegar e ao trocar de sessão", () => {
-    const naSecao = reduzir(estadoInicial, { tipo: "espaco", secao: "computadores" });
+  it("a chave crua fica só enquanto a pessoa está em Máquinas: some ao fechar, ao trocar de seção, ao navegar e ao trocar de sessão", () => {
+    const naSecao = reduzir(estadoInicial, { tipo: "espaco", secao: "maquinas" });
     const comChave = reduzir(naSecao, { tipo: "chave-emitida", emitida });
     expect(comChave.chaveEmitida?.chave).toBe("abc.segredo");
     expect(comChave.invalidacoes).toContain("chaves");
-    expect(reduzir(comChave, { tipo: "espaco", secao: "computadores" }).chaveEmitida).not.toBeNull();
+    expect(reduzir(comChave, { tipo: "espaco", secao: "maquinas" }).chaveEmitida).not.toBeNull();
     expect(reduzir(comChave, { tipo: "chave-emitida", emitida: null }).chaveEmitida).toBeNull();
-    expect(reduzir(comChave, { tipo: "espaco", secao: "avisos" }).chaveEmitida).toBeNull();
+    expect(reduzir(comChave, { tipo: "espaco", secao: "geral" }).chaveEmitida).toBeNull();
     expect(reduzir(comChave, { tipo: "espaco", secao: null }).chaveEmitida).toBeNull();
     expect(reduzir(comChave, { tipo: "navegar", tela: { tipo: "rotinas" } }).chaveEmitida).toBeNull();
     expect(reduzir(comChave, { tipo: "sessao", escopo: { tenantId: "t", pessoaId: "outra" } }).chaveEmitida).toBeNull();

@@ -1,11 +1,12 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import type { TrabalhoDto, TrabalhosDto } from "../../../src/contracts/trabalho.ts";
-import { estadoInicial, reduzir, type Estado } from "../../../web/estado/reducer.ts";
+import { estadoInicial, reduzir, secaoDoPedido, type Estado } from "../../../web/estado/reducer.ts";
 import { pilulaMac, seguradoPeloMac, situacaoDe, textoDaEspera } from "../../../web/lib/trabalhos.ts";
 import { SECOES_ESPACO } from "../../../web/telas/espaco.ts";
 import { discoLegivel, renderEsteMac, USOS } from "../../../web/telas/este-mac.ts";
 import { htmlMenuConta } from "../../../web/telas/menu-conta.ts";
+import { itensDoUso } from "../../../web/telas/maquinas.ts";
 import { renderTodosOsTrabalhos } from "../../../web/telas/trabalhos.ts";
 
 /** ADR-085 (definido em 2026-10-08): Seu espaço › Este Mac, a pílula do Mac ocupado e "esperando o Mac aliviar". */
@@ -59,12 +60,12 @@ describe("quem espera o Mac aliviar", () => {
   });
 });
 
-describe("Seu espaço › Este Mac", () => {
-  it("a seção existe no Seu espaço e no menu da conta, com o que o item diz à direita", () => {
-    expect(SECOES_ESPACO.map((s) => s.id)).toContain("este-mac");
-    const menu = htmlMenuConta({ faixa: null, conexao: "Conectada", avisos: "Ligados", modoDev: false, banco: null, esteMac: "Equilibrado" });
-    expect(menu).toContain('data-secao="este-mac"');
-    expect(menu).toMatch(/Este Mac<\/span><span class="mc-meta">Equilibrado<\/span>/);
+describe("Configurações › Máquinas › Este Mac", () => {
+  // NOD-367: Este Mac mora dentro de Máquinas; o pedido antigo cai lá e o menu da conta não lista máquinas.
+  it("o pedido 'este-mac' abre Máquinas e o menu da conta não tem o item", () => {
+    expect(SECOES_ESPACO.map((s) => s.id)).not.toContain("este-mac");
+    expect(secaoDoPedido("este-mac")).toBe("maquinas");
+    expect(htmlMenuConta({ faixa: null, conexao: "Conectada" })).not.toContain('data-secao="este-mac"');
   });
 
   it("o resumo, a memória e o processador, quem trabalha (com a memória) e o uso escolhido", () => {
@@ -76,8 +77,10 @@ describe("Seu espaço › Este Mac", () => {
     expect(html).toMatch(/<b>Processador<\/b><span class="mac-barra nivel-verde" aria-hidden="true"><i style="width: 40%"><\/i><\/span><span>folgado<\/span>/);
     expect(html).toContain("Cecília");
     expect(html).toContain("420 MB");
-    expect(html).toContain('class="seg ativo" data-act="uso-do-mac" data-uso="equilibrado" aria-pressed="true"');
-    expect(html).toContain(USOS[1]!.explicacao);
+    // NOD-367: o uso escolhido mora no "…" do Mac, em itens de rádio
+    const uso = itensDoUso(estadoCom([]));
+    expect(uso).toMatch(/role="menuitemradio" aria-checked="true" data-act="uso-do-mac" data-uso="equilibrado"/);
+    expect(uso).toContain(USOS[1]!.explicacao);
   });
 
   it("com o Mac segurando: quem espera aparece, com a pílula; sem leitura do Mac, o texto diz isso", () => {
@@ -119,7 +122,7 @@ describe("Seu espaço › Este Mac", () => {
     const equilibrado = renderEsteMac(estadoCom([rodando], cheio));
     expect(equilibrado).toContain("nada espera por isso: no Equilibrado, só a memória e o disco seguram trabalho novo.");
     expect(equilibrado).not.toContain("esperam a fila baixar");
-    expect(equilibrado).toContain("Processador cheio só deixa tudo mais lento");
+    expect(itensDoUso(estadoCom([], cheio))).toContain("Processador cheio só deixa tudo mais lento");
     const pouco = renderEsteMac({ ...estadoCom([rodando], cheio), usoDoMac: "pouco" });
     expect(pouco).toContain("Rotinas e pedidos entre bots que ainda não começaram esperam; o que você pede começa.");
     expect(pouco).toContain("esperam a fila baixar");
@@ -129,7 +132,7 @@ describe("Seu espaço › Este Mac", () => {
     expect(estadoInicial.usoDoMac).toBe("equilibrado");
     const e = reduzir(estadoCom([]), { tipo: "uso-do-mac", uso: "pouco" });
     expect(e.usoDoMac).toBe("pouco");
-    expect(renderEsteMac(e)).toContain('data-uso="pouco" aria-pressed="true"');
+    expect(itensDoUso(e)).toMatch(/aria-checked="true" data-act="uso-do-mac" data-uso="pouco"/);
   });
 
   it("o CSS da seção existe e usa só tokens", () => {

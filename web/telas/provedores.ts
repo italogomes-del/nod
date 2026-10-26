@@ -29,10 +29,10 @@ export function renderProvedores(estado: Estado): string {
     const v = vistaDaIa(ia, c);
     // ADR-101 (NOD-211): as várias contas da IA, embaixo do cartão, só no app do Mac.
     const contas = renderContasDaIa(ia, ui, estado.agora, Boolean(ui.estados[ia]?.conta));
-    return `<div class="prov-linha" data-ordem-item="${ia}">${renderCartaoIa(v, ui, { arrastar: { pos: i + 1 } })}${contas}</div>`;
+    return `<div class="prov-ia-item" data-ordem-item="${ia}">${renderCartaoIa(v, ui, { arrastar: { pos: i + 1 } })}${contas}</div>`;
   }).join("");
   const executor = estado.executor && estado.executor.trocavel !== false ? `<div class="espaco-cartao prov-avancado">${renderExecutor(estado)}</div>` : "";
-  return `<section class="espaco-secao provedores">
+  return `<section class="espaco-secao cfg-secao provedores">
       <h2 class="prov-titulo">${pilhaDeAvatares()}Provedores de IA</h2>
       ${estado.contasIa?.disponivel ? '<p class="cl-faixa" role="status">Atualize o app do nod para ver e gerenciar as contas de todas as máquinas numa lista só.</p>' : ""}
       <p class="intro">As IAs que seus bots usam${ui.noApp ? " neste Mac" : ""}. No automático, eles seguem esta ordem: a primeira pronta responde e, se ela parar ou chegar ao limite, a próxima assume.</p>
@@ -66,7 +66,7 @@ function renderProvedoresContas(estado: Estado): string {
   const intro = filtro
     ? `Mostrando as contas d${filtro.plataforma === "darwin" ? "o" : "a"} ${esc(nomeCurto(filtro, maquinas))}. A ordem é a mesma em todas as máquinas: os bots dela pulam as que não estão logadas lá.`
     : "Suas contas de IA numa fila só. Quando uma acaba, o Nod passa para a próxima ligada, na máquina onde o bot trabalha. Arraste para mudar a ordem; desligue a que não deve entrar sozinha.";
-  return `<section class="espaco-secao provedores prov-contas">
+  return `<section class="espaco-secao cfg-secao provedores prov-contas">
       <h2 class="prov-titulo">${pilhaDeAvatares()}Provedores de IA</h2>
       <p class="intro">${intro}</p>
       ${lista}
