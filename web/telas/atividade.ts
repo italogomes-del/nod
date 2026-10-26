@@ -56,6 +56,7 @@ function linhaDoItem(i: ItemDeAtividade, aberta: string | null): string {
   const vezes = i.vezes && i.vezes > 1 ? ` <span class="atv-vezes">${i.vezes} vezes</span>` : "";
   // PR 6 dos modos de aprovação (tela Y3): o comando ou o caminho do que rodou sem aprovação vai em fonte de código.
   const corpo = `<span class="atv-hora">${esc(hora(i.em))}</span><span class="atv-texto"><span class="atv-titulo">${esc(i.titulo)}${vezes}</span>${i.detalhe ? `<span class="atv-detalhe${i.codigo ? " atv-codigo" : ""}"${i.codigo ? ` title="${esc(i.detalhe)}"` : ""}>${esc(i.detalhe)}</span>` : ""}</span>`;
+  if (i.revisor) return `<li class="atv-item atv-do-revisor"><div class="atv-botao estatico">${corpo}</div>${linhaDoRevisor(i.revisor)}</li>`;
   const alvo = i.alvo;
   if (alvo && "trabalhoId" in alvo) return `<li class="atv-item"><button type="button" class="atv-botao" data-act="abrir-trabalho" data-id="${esc(alvo.trabalhoId)}">${corpo}</button></li>`;
   if (alvo && "mensagemId" in alvo) {
@@ -65,4 +66,16 @@ function linhaDoItem(i: ItemDeAtividade, aberta: string | null): string {
     return `<li class="atv-item${aberto ? " aberto" : ""}"><button type="button" class="atv-botao" data-act="atividade-abrir" data-id="${esc(i.id)}" aria-expanded="${aberto}"${aberto ? ` aria-controls="atv-${esc(i.id)}"` : ""}>${corpo}</button>${inteiro}</li>`;
   }
   return `<li class="atv-item"><div class="atv-botao estatico">${corpo}</div></li>`;
+}
+
+/**
+ * PR 4 dos modos de aprovação: embaixo da ação que o revisor liberou, o motivo dele e "Devia ter perguntado". O clique grava
+ * a contestação (não desfaz nada) e a linha vira "Você marcou: devia ter perguntado". A hora fica alinhada à de cima.
+ */
+function linhaDoRevisor(r: NonNullable<ItemDeAtividade["revisor"]>): string {
+  const motivo = r.motivo ? `<span class="atv-revisor-motivo"><b>Revisor:</b> ${esc(r.motivo)}</span>` : "";
+  const acao = r.contestada
+    ? `<span class="atv-contestada" data-acao="${esc(r.acaoId)}" tabindex="-1">Você marcou: devia ter perguntado</span>`
+    : `<button type="button" class="atv-link atv-contestar" data-act="contestar-revisor" data-id="${esc(r.acaoId)}">Devia ter perguntado</button>`;
+  return `<div class="atv-revisor">${motivo}${acao}</div>`;
 }

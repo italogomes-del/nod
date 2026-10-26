@@ -292,6 +292,11 @@ describe("lerVeredito: parse estrito", () => {
     expect(v?.motivo.startsWith("linha 1 linha 2 ")).toBe(true);
     expect(limparMotivo("a b")).toBe("a b");
   });
+
+  it("motivo sem controle de direção nem largura zero (vai à linha embaixo da fala e à Atividade)", () => {
+    expect(limparMotivo("você pediu\u202e o push\u2066 forçado\u200b\u0085")).toBe("você pediu o push forçado");
+    expect(lerVeredito('{"decisao":"libera","motivo":"ok\\u202egnp.exe"}')?.motivo).toBe("ok gnp.exe");
+  });
 });
 
 describe("configuração e apoio", () => {

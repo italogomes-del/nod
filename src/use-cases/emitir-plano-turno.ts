@@ -483,6 +483,7 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
       apps: parcial.catalogo.servidores.map((s) => s.nome),
       modoAprovacao: agente.modoAprovacao ?? "manual",
       iniciarTarefa: parcial.catalogo.ferramentas.some((f) => f.nome === "iniciar_tarefa"),
+      ...(deps.services.revisor?.config.ligado ? { revisor: true } : {}),
       onboarding,
       ...(onboarding ? { roteiroOnboarding: linhasDoPromptOnboarding({ nomeGuia: agente.nome, campos: onb.campos, etapa: onb.etapa }) } : {}),
     });

@@ -22,12 +22,19 @@ export function rodouSemAprovacao(a: Pick<AcaoDoModoParaTexto, "modo" | "veredit
   return a.modo === "total" || a.veredito === "libera";
 }
 
+/** O revisor do Automático liberou a ação (veredito `libera`): a linha do revisor e o "Devia ter perguntado". */
+export function liberadaPeloRevisor(a: Pick<AcaoDoModoParaTexto, "modo" | "veredito">): boolean {
+  return a.modo === "automatico" && a.veredito === "libera";
+}
+
 /**
  * Entra na linha discreta embaixo da fala (plano, decisão 8): no total, só a credencial e o arriscado — o resto (gravar
- * fora da pasta, o comando comum) fica só na Atividade. A linha do revisor (Automático) entra com o PR 4.
+ * fora da pasta, o comando comum) fica só na Atividade. PR 4 (telas A1 e A2): no Automático, o que o revisor liberou.
+ * Devolve o grupo da linha (a credencial e o arriscado do total, ou o revisor), ou null.
  */
-export function entraNaFala<A extends Pick<AcaoDoModoParaTexto, "modo" | "gatilho">>(a: A): a is A & { gatilho: "credencial" | "arriscado" } {
-  return a.modo === "total" && (a.gatilho === "credencial" || a.gatilho === "arriscado");
+export function grupoNaFala(a: Pick<AcaoDoModoParaTexto, "modo" | "gatilho" | "veredito">): "credencial" | "arriscado" | "revisor" | null {
+  if (a.modo === "total") return a.gatilho === "credencial" || a.gatilho === "arriscado" ? a.gatilho : null;
+  return liberadaPeloRevisor(a) ? "revisor" : null;
 }
 
 /** O alvo do item sem o verbo que o servidor pôs na frente (`Ler `, `Gravar `). */
@@ -53,11 +60,52 @@ function verboDaCredencial(a: Pick<AcaoDoModoParaTexto, "tipo" | "resumo">): str
 }
 
 /**
+ * O texto que o bot ou o revisor escreveu, como vai à linha embaixo da fala e à Atividade (revisão do PR 4): sem controle
+ * nem formatação (Cf: direção U+202E e cia., largura zero), que mudariam o que a pessoa lê na frase pronta, e numa linha.
+ * O comando do bot e o motivo do modelo podem trazer conteúdo de fora; a web ainda escapa ao mostrar.
+ */
+export function semInvisiveis(texto: string): string {
+  return texto.replace(/[\p{Cc}\p{Cf}\u2028\u2029]+/gu, " ").replace(/\s+/g, " ").trim();
+}
+
+/** O que a linha do revisor diz que ele liberou: o comando (até 60), o arquivo, a ferramenta no app ou o pedido ao MCP. */
+const ALVO_MAX = 60;
+function alvoDoRevisor(a: Pick<AcaoDoModoParaTexto, "tipo" | "resumo">): string {
+  const curto = (t: string) => (t.length > ALVO_MAX ? `${t.slice(0, ALVO_MAX - 1).trimEnd()}…` : t);
+  const resumo = semInvisiveis(a.resumo);
+  if (a.tipo === "arquivo") return curto(comCasaAbreviada(resumo.replace(/^Gravar /, "gravar ")));
+  if (a.tipo === "app") {
+    // `resumoDaAcao`: "gmail · archive_messages" (um item) ou a lista separada por vírgula (o lote).
+    const itens = resumo.split(", ");
+    const [app = "", ferramenta = ""] = (itens[0] ?? "").split(" · ");
+    // O lote pode cruzar apps (revisão do PR 4): "num app" só quando é um app só.
+    const apps = new Set(itens.map((i) => i.split(" · ")[0] ?? ""));
+    if (itens.length > 1) return `${itens.length} ações ${apps.size === 1 ? "num app" : "em apps"}`;
+    return curto(`${ferramenta.replaceAll("_", " ")} no ${app}`);
+  }
+  return curto(comCasaAbreviada(resumo));
+}
+
+/**
+ * O motivo do revisor depois dos dois-pontos (tela A1: "…: você pediu"): texto de modelo, já cortado em 160 pelo servidor;
+ * sem o ponto final e com a primeira letra minúscula (menos numa sigla, "PR 7 é seu").
+ */
+function motivoNaLinha(motivo: string): string {
+  const m = semInvisiveis(motivo).replace(/[.。]+$/u, "");
+  return /^\p{Lu}\p{Ll}/u.test(m) ? m.charAt(0).toLowerCase() + m.slice(1) : m;
+}
+
+/**
  * A frase da linha embaixo da fala: "Usou o token do GitHub do seu Mac" (Y1), "Leu as credenciais da AWS do seu Mac"
  * (Y2); no arriscado, "Rodou um comando que reescreve ou apaga no remoto". `naMaquina` = o turno rodou numa máquina
- * Linux (ADR-090): a credencial é "desta máquina", não "do seu Mac".
+ * Linux (ADR-090): a credencial é "desta máquina", não "do seu Mac". PR 4 (A1 e A2): o que o revisor liberou, com o
+ * motivo dele — "Revisor liberou git push --force origin feat/login: você pediu".
  */
-export function fraseNaFala(a: Pick<AcaoDoModoParaTexto, "tipo" | "gatilho" | "resumo" | "risco">, naMaquina = false): string {
+export function fraseNaFala(a: Pick<AcaoDoModoParaTexto, "tipo" | "gatilho" | "resumo" | "risco"> & { modo?: AcaoDoModoParaTexto["modo"]; veredito?: AcaoDoModoParaTexto["veredito"]; motivo?: string | null }, naMaquina = false): string {
+  if (a.modo !== undefined && a.veredito !== undefined && liberadaPeloRevisor({ modo: a.modo, veredito: a.veredito })) {
+    const motivo = a.motivo ? motivoNaLinha(a.motivo) : "";
+    return `Revisor liberou ${alvoDoRevisor(a)}${motivo ? `: ${motivo}` : ""}`;
+  }
   if (a.gatilho === "credencial") return `${verboDaCredencial(a)} ${qualCredencial(a.resumo) ?? "uma credencial"} ${naMaquina ? "desta máquina" : "do seu Mac"}`;
   if (a.gatilho === "arriscado") return a.risco ? `Rodou um comando que ${a.risco}` : "Rodou um comando arriscado";
   return tituloNaAtividade(a);

@@ -53,5 +53,5 @@ export const listarFrota: CasoDeUso<{ agora?: number; gerenciar?: boolean }, Fro
     .filter((c) => c.ultimaFalha !== null)
     .map((c) => ({ classe: "conector_indisponivel", nome: c.slug, motivo: c.ultimaFalha?.motivo ?? "conector_indisponivel", desde: c.ultimaFalha?.em ?? agora, terminal: false }));
 
-  return { data: { agentes: linhas, inventario, negacoes } };
+  return { data: { agentes: linhas, inventario, negacoes, ...(deps.services.revisor?.config.ligado ? { revisor: true as const } : {}) } };
 };

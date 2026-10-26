@@ -402,3 +402,40 @@ processo (64) por instantes: cartão `fila`, o P3 da revisão, aceito.
 O `deploy.sh` tira os espaços das pontas de `NOD_REVISOR` antes de comparar, como o `lerConfigRevisor`. Valem
 `" ligado "`, o tab e o `ligado\r` de um config.env salvo com CRLF. O env da cor nova leva o valor limpo. O teste do
 azul/verde cobre os três casos: ligado, o segredo é lido, e sem ele o deploy para.
+
+## O que a pessoa vê do revisor (PR 4, 2026-10-26)
+
+**Decisão.** A tela do revisor entra pronta e **a chave continua desligada** (`NOD_REVISOR=desligado` no `config.env`):
+o Marlon liga depois de criar o segredo `nod-anthropic-revisor` e de a política de privacidade citar o envio do pedido
+redigido à Anthropic (seção "O dado que sai"). Isso substitui o "o PR 4 liga a chave e passa esta ADR a 'aceita'" do
+cabeçalho: a ADR passa a "aceita" no commit que ligar a chave.
+
+1. **O cartão compacto** (tela A3) para os itens `revisor_pediu`/`revisor_falhou`, na conversa e em Sua vez
+   (`web/telas/cartao-revisor.ts`): azul claro em tokens próprios (`--revisor*`, claro e escuro; `--signal` é só o que é
+   novo), o escudo, a pergunta numa linha, "Revisor:" e o motivo (texto de modelo, escapado e cortado em 160), o comando
+   em "ver comando", e Aprovar / Negar / Sempre permitir em pílula — este só onde `sempreServe` (PR 5). As ações são as
+   de hoje; o "Pode fazer e o resto desta tarefa" do terminal não está no cartão compacto (o protótipo não o tem, e ele
+   pularia o revisor no resto da tarefa). Decidido, encolhe; o recibo leva `revisor: true` e diz "Negado por você". O
+   cartão vencido volta à lista de sempre, com Reabrir.
+2. **A frase de queda sai do item liberado.** A fase 1 grava "O revisor não respondeu a tempo" no item para o caso de a
+   fase 3 não vir; a liberação agora limpa a `justificativa` (o motivo da liberação mora em `acoes_pelo_modo.motivo`).
+3. **A linha embaixo da fala** (A1, A2), pela mesma mecânica do PR 6 (`acoesDoModo`): "Revisor liberou git push --force
+   origin feat/login: você pediu · ver"; várias ações diferentes viram "Revisor liberou N ações". O que ele liberou é
+   dito pelo comando (até 60 caracteres), o arquivo ou a ferramenta no app, não por uma paráfrase de modelo como no
+   protótipo ("o push forçado na feat/login"). "ver" abre a Atividade no dia, no filtro Sem aprovação, e conta na
+   telemetria das linhas (`revisor`).
+4. **"Devia ter perguntado"** fica na Atividade, embaixo de cada liberação do revisor, com o motivo dele. `POST
+   acoes-do-modo/:id/contestar` grava `contestada_em` uma vez, não desfaz nada, só a dona e só a liberação do revisor;
+   log `revisor_contestado` só com ids e números. `scripts/medir-modos.ts` conta, por semana, o veredito, os cartões do
+   revisor que a pessoa negou e as liberadas contestadas.
+5. **Os textos do Automático** dizem o revisor só com a chave ligada (o menu, a dica do painel, a linha gravada na troca,
+   o manual do Nod, o prompt da ligação; o prompt de texto já dizia desde 25/10): "Roda o que você pediu. Um revisor
+   confere cada ação arriscada: libera sozinho ou pede o seu ok num cartão." Sem "na sua IA" nem "na sua conta", e a
+   Atividade não mostra "N revisões na sua conta" — o revisor é do Nod. Desligada, o texto de hoje, que é o que acontece.
+
+**Ligar.** (1) o segredo, como em docs/deploy-gcp.md ("Chave da API do revisor do Automático"); (2) a política de
+privacidade publicada; (3) `NOD_REVISOR=ligado` no `infra/gcp/config.env`, commit e deploy; (4) conferir o log
+`revisor_modo` com `ligado: true, com_chave: true` e uma revisão de ponta a ponta num bot de teste em Automático.
+**Reverter.** `NOD_REVISOR=desligado`, commit e deploy (minutos); as decisões `em_revisao` em voo viram cartão pelo
+varredor. Reverter o código do PR 4 com a chave ligada: desligue antes; o código anterior lê os cartões `revisor_*` com o
+cartão de antes, e `contestada_em` só fica sem tela.

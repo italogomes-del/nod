@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { MODOS_APROVACAO } from "../../../src/contracts/agente.ts";
-import { DESCRICAO_MODO, ROTULO_MODO } from "../../../src/domain/modo-aprovacao.ts";
-import { MODOS, PRAZO_CLIQUE_NA_CONFIRMACAO_MS, reagirMenuModo, renderChipModo, renderConfirmaTotal, renderMenuModo } from "../../../web/telas/aprovacoes.ts";
+import { DESCRICAO_AUTOMATICO_COM_REVISOR as DESCRICAO_REVISOR_DOMINIO, DESCRICAO_MODO, descricaoDoModo, ROTULO_MODO } from "../../../src/domain/modo-aprovacao.ts";
+import { DESCRICAO_AUTOMATICO_COM_REVISOR, MODOS, PRAZO_CLIQUE_NA_CONFIRMACAO_MS, reagirMenuModo, renderChipModo, renderConfirmaTotal, renderMenuModo } from "../../../web/telas/aprovacoes.ts";
 import { htmlComposer } from "../../../web/telas/conversa.ts";
 import { porqueDaPausa } from "../../../web/telas/sua-vez.ts";
 
@@ -60,6 +60,22 @@ describe("o botão de aprovações no campo (ADR-059; Fase 4, PR 2)", () => {
       expect(MODOS[m].titulo).toBe(ROTULO_MODO[m]);
       expect(MODOS[m].descricao).toBe(DESCRICAO_MODO[m]);
     }
+  });
+
+  it("PR 4: com o revisor ligado o Automático diz o texto do protótipo (Main), sem 'na sua IA' nem 'na sua conta'; desligado, o de hoje", () => {
+    expect(DESCRICAO_AUTOMATICO_COM_REVISOR).toBe("Roda o que você pediu. Um revisor confere cada ação arriscada: libera sozinho ou pede o seu ok num cartão.");
+    expect(DESCRICAO_AUTOMATICO_COM_REVISOR).toBe(DESCRICAO_REVISOR_DOMINIO);
+    expect(DESCRICAO_AUTOMATICO_COM_REVISOR).not.toMatch(/sua IA|sua conta/);
+    const ligado = renderMenuModo("Ze", "automatico", true);
+    expect(ligado).toContain(DESCRICAO_AUTOMATICO_COM_REVISOR);
+    expect(ligado).not.toContain(MODOS.automatico.descricao);
+    // Os outros dois não mudam com a chave.
+    expect(ligado).toContain(MODOS.manual.descricao);
+    expect(ligado).toContain(MODOS.total.descricao);
+    expect(renderMenuModo("Ze", "automatico")).not.toContain(DESCRICAO_AUTOMATICO_COM_REVISOR);
+    expect(descricaoDoModo("automatico", true)).toBe(DESCRICAO_AUTOMATICO_COM_REVISOR);
+    expect(descricaoDoModo("automatico", false)).toBe(DESCRICAO_MODO.automatico);
+    expect(descricaoDoModo("total", true)).toBe(DESCRICAO_MODO.total);
   });
 
   it("PR 6: o terceiro modo diz o texto do protótipo — até as credenciais, e o que fez fica na Atividade", () => {
@@ -121,7 +137,14 @@ describe("a regra do menu (reagirMenuModo)", () => {
 
 describe("o card que parou mesmo no automático diz por quê", () => {
   it("arriscado traz a frase do domínio; credencial e conteúdo de fora têm a sua; o resto não ganha linha", () => {
-    expect(porqueDaPausa({ motivoManual: "acao_arriscada", justificativa: "apaga pastas inteiras", origemSensivel: false })).toContain("Parou para você: apaga pastas inteiras. Na aprovação automática, o arriscado sempre pergunta.");
+    // PR 4: com a chave do revisor desligada, a frase de sempre (é o que acontece); ligada, "o arriscado sempre pergunta"
+    // deixa de ser verdade e fica só o risco.
+    expect(porqueDaPausa({ motivoManual: "acao_arriscada", justificativa: "apaga pastas inteiras", origemSensivel: false })).toContain("<span>Parou para você: apaga pastas inteiras. Na aprovação automática, o arriscado sempre pergunta.</span>");
+    expect(porqueDaPausa({ motivoManual: "acao_arriscada", justificativa: "apaga pastas inteiras", origemSensivel: false }, true)).toContain("<span>Parou para você: apaga pastas inteiras.</span>");
+    expect(porqueDaPausa({ motivoManual: "acao_arriscada", justificativa: "apaga pastas inteiras", origemSensivel: false }, true)).not.toContain("sempre pergunta");
+    // O cartão do revisor vencido volta à lista de sempre: o porquê diz o revisor, escapado.
+    expect(porqueDaPausa({ motivoManual: "revisor_pediu", justificativa: "<b>2</b> delas foram editadas", origemSensivel: false })).toContain("O revisor pediu o seu ok: &lt;b&gt;2&lt;/b&gt; delas foram editadas");
+    expect(porqueDaPausa({ motivoManual: "revisor_falhou", justificativa: "O revisor não respondeu a tempo; confira você.", origemSensivel: false })).toContain("O revisor não respondeu a tempo; confira você.");
     expect(porqueDaPausa({ motivoManual: "acao_arriscada", justificativa: null, origemSensivel: false })).toContain("é uma ação arriscada");
     expect(porqueDaPausa({ motivoManual: "toca_credencial", justificativa: null, origemSensivel: false })).toContain("toca uma credencial do Mac");
     expect(porqueDaPausa({ motivoManual: "regra_suspensa_conteudo_nao_confiavel", justificativa: null, origemSensivel: false })).toContain("conteúdo de fora");

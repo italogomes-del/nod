@@ -200,7 +200,7 @@ const telemetria = criarTelemetria((eventos) => api?.telemetriaLinhas(eventos) ?
 window.addEventListener("pagehide", () => telemetria.descarregar());
 // ADR-114 (chat limpo, PR 2): o gatilho da Atividade — cada abertura da conversa própria e a Atividade aberta até 60 s depois.
 const vigiaAtividade = criarVigiaDaAtividade(telemetria);
-const tipoLinha = (v: string | undefined): TipoLinha | null => (v === "rotina" || v === "bots" || v === "task" || v === "troca" || v === "frentes" ? v : null);
+const tipoLinha = (v: string | undefined): TipoLinha | null => (v === "rotina" || v === "bots" || v === "task" || v === "troca" || v === "frentes" || v === "revisor" ? v : null);
 
 /** As linhas que o histórico desenhou entram na telemetria (cada chave uma vez por carga). */
 function contarLinhasMostradas(): void {
@@ -1685,7 +1685,7 @@ function abrirModoAprovacao(el: HTMLElement): void {
   // O total só chega aqui com `confirmado` (o segundo clique do menu); a linha de sistema na conversa confirma a troca.
   abrirMenuModo(el, bot.nome, bot.modoAprovacao ?? "manual", (modo, confirmado) => {
     void agir(async () => { await mudarGestao(() => api!.mudarModoAprovacao(bot.id, modo, confirmado)); });
-  });
+  }, estado.frota?.revisor === true);
 }
 
 /**
@@ -2697,6 +2697,18 @@ function removerAnexo(chave: string): void {
   if (item?.previa) URL.revokeObjectURL(item.previa);
   anexosPendentes.set(alvo.conversaId, fila.filter((i) => i.chave !== chave));
   redesenharAnexos();
+}
+
+/**
+ * Põe o foco no elemento quando a releitura o desenhar (até 3 s), se a pessoa não tiver levado o foco para outro lugar
+ * nesse meio-tempo (definido em 2026-10-26, QA do PR 4: o "Devia ter perguntado" vira a marca "Você marcou…").
+ */
+function focarQuandoAparecer(seletor: string, origem: Element, ate = Date.now() + 3000): void {
+  const ativo = document.activeElement;
+  if (ativo && ativo !== document.body && ativo !== origem && document.contains(ativo)) return;
+  const el = document.querySelector<HTMLElement>(seletor);
+  if (el) { el.focus(); return; }
+  if (Date.now() < ate) window.setTimeout(() => focarQuandoAparecer(seletor, origem, ate), 100);
 }
 
 /** Fala oculta para quem lê a tela: a região viva da pergunta também serve às ações na fala (ADR-113), sem mexer no foco. */
@@ -3730,7 +3742,21 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   },
   // PR 6 dos modos de aprovação (tela Y3): "ver na Atividade" da linha embaixo da fala abre a Atividade do bot no dia da
   // ação, no filtro "Sem aprovação".
+  // PR 4 dos modos de aprovação: "Devia ter perguntado" grava a contestação (não desfaz nada) e relê a página do dia.
+  // QA do PR 4 (2026-10-26): o botão some na releitura e o foco caía no body sem nada dito; agora a região viva anuncia e o
+  // foco vai para a marca "Você marcou…" quando ela aparece.
+  "contestar-revisor": (el) => agir(async () => {
+    const acaoId = el.dataset.id ?? "";
+    await api!.contestarRevisor(acaoId);
+    anunciar("Marcado: devia ter perguntado. Nada foi desfeito.");
+    const vista = estado.atividadeVista;
+    if (vista) dispatch({ tipo: "invalidar", quais: [`atividade:${chaveDaAtividade(vista.agenteId, vista.dia)}`] });
+    focarQuandoAparecer(`.atv-contestada[data-acao="${CSS.escape(acaoId)}"]`, el);
+  }),
   "ver-sem-aprovacao": (el) => {
+    // PR 4: o "ver" da linha do revisor conta como aberta (TipoLinha "revisor"); o "ver na Atividade" do total não leva tipo.
+    const tipo = tipoLinha(el.dataset.linhaTipo);
+    if (tipo) telemetria.aberta({ tipo, agenteId: el.dataset.agente ?? "", chaveLinha: el.dataset.linhaChave ?? "" });
     const dia = el.dataset.dia ?? "";
     abrirNivel(el.dataset.agente ?? "", { tipo: "atividade" });
     if (estado.atividadeVista) dispatch({ tipo: "atividade-vista", mudanca: { filtro: "sem_aprovacao", ...(/^\d{4}-\d{2}-\d{2}$/.test(dia) ? { dia } : {}) } });

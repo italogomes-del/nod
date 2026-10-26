@@ -94,7 +94,10 @@ function daAprovacao(m: Mensagem, p: Payload<"resultado_aprovacao">, estado: Est
     ? `<ul class="recibo-itens">${p.itens.map((i) => `<li class="recibo-item-${feita(i.desfecho) ? "ok" : i.desfecho === "falhou_na_execucao" ? "falha" : "recusa"}"><span>${esc(i.texto ?? "")}</span><small>${esc(DESFECHO[i.desfecho] ?? i.desfecho.replaceAll("_", " "))}</small></li>`).join("")}</ul>`
     : `<p class="recibo-texto">${paragrafos(m.texto)}</p>`;
   const detalhes = { rotulo: "detalhes", html: itens, chave: `encolhido-${m.id}` };
-  if (aprovados === 0) return { decisaoId: p.decisaoId, titulo, resultado: `Recusado${quem}`, marca: null, anuncio: `Recusado: ${titulo}` };
+  // PR 4 dos modos de aprovação: o cartão do revisor tinha "Negar"; o encolhido usa o mesmo verbo.
+  if (aprovados === 0) return p.revisor
+    ? { decisaoId: p.decisaoId, titulo, resultado: `Negado${quem}`, marca: null, anuncio: `Negado: ${titulo}` }
+    : { decisaoId: p.decisaoId, titulo, resultado: `Recusado${quem}`, marca: null, anuncio: `Recusado: ${titulo}` };
   if (feitos === aprovados) {
     const resultado = total === 1 ? `Aprovado${quem} · feito ${hora(m.criadoEm)}` : `Aprovado${quem} · ${feitos} de ${total} ${feitos === 1 ? "feita" : "feitas"}`;
     // Um item que deu certo não tem o que abrir: a linha já diz tudo.

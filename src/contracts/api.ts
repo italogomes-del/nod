@@ -37,7 +37,7 @@ export type FrotaDto = {
    */
   agentes: (Agente & { conversaId: string; descricaoEstado: string; computadorForaDoAr: { desde: EpochMs; motivo: MotivoFalhaComputador } | null; ultimaMensagem: { previa: string; em: EpochMs } | null })[];
   inventario: Inventario;
-  negacoes: Negacao[];
+  /** `revisor` (ADR-115, modos PR 4): o revisor do Automático ligado (`NOD_REVISOR`); o menu diz o Automático com ele. */ negacoes: Negacao[]; revisor?: true;
 };
 
 /**

@@ -1269,7 +1269,7 @@ nod-mascote[data-aviso="pergunta"], nod-mascote[data-aviso="nao-lido"] { --nod-a
 .lista > li.aprov-card, .aprov-card { padding: 0; border: 1px solid var(--line) !important; border-left: 1px solid var(--line) !important; border-radius: 17px; border-top-left-radius: 8px; background: var(--surface); overflow: hidden; margin-bottom: 12px; }
 /* 52px = o mascote md (38px, .icon.md acima) + o gap de 14px da .message: o card começa onde o balão começa. */
 .decisoes-ancoradas { list-style: none; padding: 0; margin: -10px 0 25px 52px; width: min(600px, calc(100% - 52px)); }
-.decisoes-ancoradas > li.decisao:not(.aprov-card) { padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+.decisoes-ancoradas > li.decisao:not(.aprov-card):not(.cartao-revisor) { padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
 .aprov-cab { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 14px 18px 0; font-size: 13px; color: var(--ink-3); }
 .aprov-cab b { font-weight: 600; color: var(--ink-2); }
 .aprov-ponto { width: 8px; height: 8px; border-radius: 50%; background: var(--warning); flex: none; }
@@ -1294,6 +1294,49 @@ nod-mascote[data-aviso="pergunta"], nod-mascote[data-aviso="nao-lido"] { --nod-a
 .aprov-rodape .ap-detalhe[open] { flex-basis: 100%; margin-left: 0; }
 .aprov-rodape .ap-detalhe > summary { color: var(--ink); font-weight: 500; font-size: 12px; margin-left: auto; }
 .aprov-card.realce { box-shadow: 0 0 0 3px var(--warning-line); transition: box-shadow .2s ease; }
+/* O cartão compacto do revisor (modos de aprovação, PR 4; tela A3, web/telas/cartao-revisor.ts): azul claro, o escudo, a
+   pergunta numa linha com o motivo do revisor embaixo e os botões em pílula. O <li> não desenha nada (nem a borda âmbar
+   de .decisao); o cartão é o .cr. */
+.lista > li.cartao-revisor, li.cartao-revisor { padding: 0; border: 0 !important; border-left: 0 !important; border-radius: 0; background: none; margin-bottom: 12px; }
+.cr { display: flex; gap: 10px; padding: 12px 14px; border: 1px solid var(--revisor-line); border-radius: 14px; background: var(--revisor-soft); }
+/* O escudo num ladrilho de 28 px (A3): os botões começam onde o texto começa (28 + o gap de 10). */
+.cr-escudo { flex: none; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; background: var(--revisor-ladrilho); color: var(--revisor); }
+.cr-escudo svg { width: 16px; height: 16px; }
+.cr-corpo { flex: 1; min-width: 0; }
+.cr-cab { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 0 0 2px; font-size: 12.5px; color: var(--ink-3); }
+.cr-cab b { font-weight: 600; color: var(--ink-2); }
+.cr-pergunta { margin: 0; font-size: 14.5px; line-height: 1.4; font-weight: 500; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cr-motivo { margin: 3px 0 0; font-size: 13px; line-height: 1.45; color: var(--ink-2); overflow-wrap: anywhere; }
+.cr-motivo b { font-weight: 600; color: var(--ink-2); }
+.cr-detalhe { margin: 6px 0 0; font-size: 12.5px; color: var(--ink-2); }
+.cr-detalhe > summary { cursor: pointer; width: fit-content; color: var(--ink-2); text-decoration: underline; text-decoration-color: var(--line-strong); text-underline-offset: 2px; }
+.cr-detalhe > summary:hover { color: var(--ink); }
+.cr-detalhe-corpo { margin-top: 6px; }
+.cr-detalhe .ap-comando { background: var(--surface); }
+.cr-detalhe .ap-comando code { padding: 0; background: none; }
+.cr-item + .cr-item { margin-top: 8px; }
+.cr-item-txt { color: var(--ink); overflow-wrap: anywhere; }
+.cr-item-txt small { display: block; color: var(--ink-3); }
+.cr-item .aprov-previa { margin: 6px 0 0; }
+.cr-acoes { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; }
+.cr-acoes .bt { min-height: 32px; padding: 5px 14px; border-radius: 999px; font-size: 13px; }
+.cr-acoes .bt.cr-aprovar { border-color: var(--revisor); background: var(--revisor); color: var(--on-revisor); }
+.cr-acoes .bt.cr-aprovar:hover { opacity: .88; }
+.cr-acoes .bt.cr-negar { border-color: var(--revisor-line); background: var(--surface); color: var(--ink); }
+.cr-acoes .bt.cr-sempre { border-color: transparent; background: none; color: var(--ink-2); padding-left: 6px; padding-right: 6px; }
+.cr-acoes .bt.cr-sempre:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
+.cr-rodape { margin-top: 6px; }
+/* A dica do "Sempre permitir": no desktop fica no title (pairar); sem ponteiro que paire, vira texto embaixo dos botões. */
+.cr-sempre-dica { display: none; margin: 6px 0 0; font-size: 12.5px; line-height: 1.4; color: var(--ink-3); }
+@media (hover: none) { .cr-sempre-dica { display: block; } }
+.lista > li.cartao-revisor.realce .cr { box-shadow: 0 0 0 3px var(--revisor-line); transition: box-shadow .2s ease; }
+@media (forced-colors: active) {
+  .cr, .cr-acoes .bt { border: 1px solid CanvasText; }
+  .cr-escudo { color: CanvasText; background: none; }
+}
+/* A linha do revisor embaixo da fala (telas A1 e A2): a mesma linha discreta do total, com o escudo do visto no verde de
+   "deu certo" (A1; revisto em 2026-10-26 no QA do PR 4, era o azul do cartão). */
+.linha-revisor > svg { color: var(--success); }
 /* Cabeçalho: "Trabalhando · 2 esperam você" (renderCabecalhoConversa). */
 .presenca .presenca-sep { color: var(--ink-3); }
 .presenca b { font-weight: 600; color: var(--ink-2); }

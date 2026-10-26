@@ -56,6 +56,18 @@ export const DESCRICAO_MODO: Readonly<Record<ModoAprovacao, string>> = {
   total: "Faz tudo sem perguntar, até comandos com as credenciais do seu Mac. O que ele fez fica na Atividade.",
 };
 
+/**
+ * O Automático com o revisor ligado (definido em 2026-10-26, plano dos modos de aprovação, PR 4; tela "Main" do
+ * protótipo). Sem "na sua IA" nem "na sua conta": desde 25/10 o revisor roda no servidor do nod (ADR-115, "Revisor no
+ * servidor"). Com a chave desligada vale `DESCRICAO_MODO.automatico`, que é o que acontece de fato.
+ */
+export const DESCRICAO_AUTOMATICO_COM_REVISOR = "Roda o que você pediu. Um revisor confere cada ação arriscada: libera sozinho ou pede o seu ok num cartão.";
+
+/** A descrição do modo que vale agora: o Automático muda com a chave do revisor. */
+export function descricaoDoModo(modo: ModoAprovacao, revisor: boolean): string {
+  return modo === "automatico" && revisor ? DESCRICAO_AUTOMATICO_COM_REVISOR : DESCRICAO_MODO[modo];
+}
+
 export function ehModoAprovacao(x: unknown): x is ModoAprovacao {
   return typeof x === "string" && (MODOS_APROVACAO as readonly string[]).includes(x);
 }

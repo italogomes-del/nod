@@ -18,6 +18,14 @@ const base: EntradaPromptLigacao = {
 const mem = (id: string, criadoEm: number) => ({ id, tipo: "preferencia" as const, texto: `memória ${id}`, criadoEm });
 
 describe("montarPromptLigacao", () => {
+  it("PR 4 dos modos de aprovação: o Automático com o revisor ligado diz o revisor do nod; desligado e no total, a linha de sempre", () => {
+    const com = montarPromptLigacao({ ...base, modoAprovacao: "automatico", revisor: true });
+    expect(com).toContain("O arriscado passa por um revisor do nod, que libera em segundos ou vira um pedido para a pessoa");
+    expect(com).not.toContain("Só o arriscado e o que toca credencial ficam pendentes");
+    expect(montarPromptLigacao({ ...base, modoAprovacao: "automatico" })).toContain("Só o arriscado e o que toca credencial ficam pendentes");
+    expect(montarPromptLigacao({ ...base, modoAprovacao: "total", revisor: true })).not.toContain("revisor do nod");
+  });
+
   it("identidade, idioma, fala e ligação; sem a linha de Formatação do chat", () => {
     const p = montarPromptLigacao(base);
     expect(p.startsWith("Você é Vera, revisora de PRs, um agente do nod a serviço de Marlon.\nResponda sempre em português do Brasil.")).toBe(true);

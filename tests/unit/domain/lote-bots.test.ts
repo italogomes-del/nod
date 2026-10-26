@@ -4,7 +4,7 @@ import type { Turno } from "../../../src/contracts/turno.ts";
 import type { AcaoLote, AppConectado } from "../../../src/contracts/ferramentas-do-nod.ts";
 import { decidirLote, resolverBot, riscoDaAcao, validarLote, type BotDoLote } from "../../../src/domain/lote-bots.ts";
 import { FERRAMENTAS_DO_NOD, montarPlano, type EntradaPlano } from "../../../src/domain/plano-turno.ts";
-import { MANUAL_DO_NOD, TETO_MANUAL_DO_NOD } from "../../../src/domain/manual-do-nod.ts";
+import { MANUAL_DO_NOD, manualDoNod, TETO_MANUAL_DO_NOD } from "../../../src/domain/manual-do-nod.ts";
 
 /** ADR-082: o lote do Nod, puro — validar tudo antes, resolver alvos e "@ref", risco e modo. */
 const P = "pessoa";
@@ -164,6 +164,17 @@ describe("catálogo e prompt do Nod (ADR-081/082)", () => {
     }
     expect(linha).toContain("excluir e mudar o modo de um bot viram card sempre");
     expect(linha).toContain("Pôr um bot em Sem aprovações é sempre card, em qualquer modo seu.");
+  });
+
+  it("PR 4 dos modos de aprovação: com o revisor ligado, o manual diz o Automático com o revisor do nod (e não 'na sua IA'); desligado, o de hoje", () => {
+    const com = manualDoNod(true);
+    expect(manualDoNod(false)).toBe(MANUAL_DO_NOD);
+    expect(com).toContain("Automático roda o que a pessoa pediu, e um revisor do nod confere cada ação arriscada");
+    expect(com).toContain('"Devia ter perguntado"');
+    expect(com).not.toContain("Automático faz sozinho o que não for arriscado");
+    expect(com).not.toMatch(/sua IA|sua conta/);
+    expect(com.length).toBeLessThanOrEqual(TETO_MANUAL_DO_NOD);
+    expect(montarPlano({ ...base, revisor: true }).promptSistemaPartes?.estavel).toContain(com);
   });
 
   it("o manual do Nod vai na parte estável só do Nod, e cabe no teto", () => {

@@ -1153,7 +1153,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
     acoesPeloModo: {
       async registrar(a) {
         const id = randomUUID();
-        b.acoesPeloModo.push({ ...a, veredito: a.veredito ?? null, falha: a.falha ?? null, motivo: a.motivo ?? null, revisorModelo: a.revisorModelo ?? null, revisorHarness: a.revisorHarness ?? null, revisorMaquina: a.revisorMaquina ?? null, id, entregueEm: null, revisorMs: null, fichasEntrada: null, fichasSaida: null, desfechoPessoa: null, criadoEm: agora() });
+        b.acoesPeloModo.push({ ...a, veredito: a.veredito ?? null, falha: a.falha ?? null, motivo: a.motivo ?? null, revisorModelo: a.revisorModelo ?? null, revisorHarness: a.revisorHarness ?? null, revisorMaquina: a.revisorMaquina ?? null, id, entregueEm: null, revisorMs: null, fichasEntrada: null, fichasSaida: null, desfechoPessoa: null, contestadaEm: null, criadoEm: agora() });
         return id;
       },
       async daDecisao(decisaoId) {
@@ -1183,18 +1183,25 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       },
       async naFalaDosTurnos(turnoIds) {
         return b.acoesPeloModo
-          .filter((a) => turnoIds.includes(a.turnoId) && a.modo === "total" && (a.gatilho === "credencial" || a.gatilho === "arriscado"))
-          .map((a) => ({ id: a.id, turno_id: a.turnoId, tipo: a.tipo, gatilho: a.gatilho, resumo: a.resumo, risco: a.risco, criado_em: new Date(a.criadoEm), linux: false }));
+          .filter((a) => turnoIds.includes(a.turnoId) && ((a.modo === "total" && (a.gatilho === "credencial" || a.gatilho === "arriscado")) || (a.modo === "automatico" && a.veredito === "libera")))
+          .map((a) => ({ id: a.id, turno_id: a.turnoId, modo: a.modo, tipo: a.tipo, gatilho: a.gatilho, resumo: a.resumo, risco: a.risco, veredito: a.veredito ?? null, motivo: a.motivo ?? null, criado_em: new Date(a.criadoEm), linux: false }));
       },
       async semAprovacaoDoDia(agenteId, f, limite) {
         return b.acoesPeloModo
           .filter((a) => a.agenteId === agenteId && a.criadoEm >= f.ini.getTime() && a.criadoEm < f.fim.getTime() && (a.modo === "total" || a.veredito === "libera"))
           .sort((x, y) => y.criadoEm - x.criadoEm)
           .slice(0, limite)
-          .map((a) => ({ id: a.id, modo: a.modo, tipo: a.tipo, gatilho: a.gatilho, resumo: a.resumo, risco: a.risco, veredito: a.veredito ?? null, criado_em: new Date(a.criadoEm) }));
+          .map((a) => ({ id: a.id, modo: a.modo, tipo: a.tipo, gatilho: a.gatilho, resumo: a.resumo, risco: a.risco, veredito: a.veredito ?? null, motivo: a.motivo ?? null, contestada_em: a.contestadaEm === null ? null : new Date(a.contestadaEm), criado_em: new Date(a.criadoEm) }));
       },
       async contarSemAprovacaoDoDia(agenteId, f) {
         return b.acoesPeloModo.filter((a) => a.agenteId === agenteId && a.criadoEm >= f.ini.getTime() && a.criadoEm < f.fim.getTime() && (a.modo === "total" || a.veredito === "libera")).length;
+      },
+      async contestar(id) {
+        const a = b.acoesPeloModo.find((x) => x.id === id && x.modo === "automatico" && x.veredito === "libera");
+        if (!a) return null;
+        const jaContestada = a.contestadaEm !== null;
+        if (!jaContestada) a.contestadaEm = agora();
+        return { acao: { id: a.id, agente_id: a.agenteId, tipo: a.tipo, gatilho: a.gatilho, criado_em: new Date(a.criadoEm), contestada_em: new Date(a.contestadaEm ?? agora()) }, jaContestada };
       },
       async podar(antesDe) {
         const antes = b.acoesPeloModo.length;
@@ -2206,6 +2213,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         if ("liberado" in p) {
           if (item.desfecho !== null) return null;
           item.motivoManual = null;
+          item.justificativa = null;
           item.desfecho = p.executar ? null : "executado";
         } else {
           item.motivoManual = p.motivoManual;

@@ -14,7 +14,7 @@ import type { Escopo, Tx } from "../src/shared/types.ts";
  *
  * Por semana (segunda-feira, horário de Brasília) e por bot: os cartões de aprovação por `motivo_manual` e quantos foram
  * negados; os comandos no Mac (comando, gravar arquivo, MCP da pessoa) por motivo; as esperas de rotina e as horas
- * paradas; os bots por modo. Os PRs seguintes acrescentam as linhas do revisor. O que o revisor do Automático novo faria
+ * paradas; os bots por modo. O PR 4 acrescenta o revisor (veredito, cartões negados, liberadas contestadas). O que o revisor do Automático novo faria
  * NÃO vem daqui: vem dos logs `revisor_seria_chamado` e `cartao_seria_aberto` (src/use-cases/medir-revisao.ts).
  *
  * Como conta:
@@ -184,6 +184,48 @@ export async function lerDaPessoa(trx: Tx, escopo: Escopo, dias: number): Promis
   return { linhas, bots, credenciais };
 }
 
+/**
+ * O revisor do Automático (definido em 2026-10-26, plano dos modos de aprovação, PR 4; as metas do "Pronto quando"): por
+ * semana, as revisões e o veredito, dos cartões que ele deixou quantos a pessoa negou, e das liberadas quantas ela
+ * contestou ("Devia ter perguntado"). Só contagens de `acoes_pelo_modo` (0093): nem o comando nem o motivo saem do banco.
+ */
+export type LinhaRevisor = { semana: string; veredito: string | null; desfecho_pessoa: string | null; contestada: boolean; n: number };
+export type ResumoRevisor = { revisoes: number; libera: number; pede: number; falhou: number; naoRevisado: number; cartoes: number; negados: number; contestadas: number };
+
+export function resumirRevisor(linhas: readonly LinhaRevisor[]): Map<string, ResumoRevisor> {
+  const porSemana = new Map<string, ResumoRevisor>();
+  for (const l of linhas) {
+    const r = porSemana.get(l.semana) ?? { revisoes: 0, libera: 0, pede: 0, falhou: 0, naoRevisado: 0, cartoes: 0, negados: 0, contestadas: 0 };
+    r.revisoes += l.n;
+    if (l.veredito === "libera") r.libera += l.n;
+    else if (l.veredito === "pede") r.pede += l.n;
+    else if (l.veredito === "falhou") r.falhou += l.n;
+    else if (l.veredito === "nao_revisado") r.naoRevisado += l.n;
+    if (l.veredito !== null && l.veredito !== "libera") r.cartoes += l.n;
+    if (l.desfecho_pessoa === "negou") r.negados += l.n;
+    if (l.contestada) r.contestadas += l.n;
+    porSemana.set(l.semana, r);
+  }
+  return porSemana;
+}
+
+export async function lerRevisorDaPessoa(trx: Tx, escopo: Escopo, dias: number): Promise<LinhaRevisor[]> {
+  return trx<LinhaRevisor[]>`
+    select ${trx.unsafe(SEMANA("criado_em"))} as semana, veredito, desfecho_pessoa, contestada_em is not null as contestada, count(*)::int as n
+    from acoes_pelo_modo
+    where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and modo = 'automatico' and criado_em >= now() - make_interval(days => ${dias})
+    group by 1, 2, 3, 4`;
+}
+
+export function imprimirRevisor(r: ReadonlyMap<string, ResumoRevisor>, escrever: (s: string) => void): void {
+  const pct = (a: number, b: number) => (b === 0 ? "-" : `${Math.round((100 * a) / b)}%`);
+  const larg = [12, 9, 8, 7, 7, 8, 8, 8, 11];
+  const col = (vs: readonly (string | number)[]) => vs.map((v, i) => (i === 0 ? String(v).padEnd(larg[i]!) : String(v).padStart(larg[i]!))).join(" ");
+  escrever("Revisor do Automático (cartões = pede + falhou + não revisado; negados = a pessoa negou o cartão)");
+  escrever(col(["semana", "revisões", "libera", "pede", "falhou", "não rev.", "cartões", "negados", "contestadas"]));
+  for (const [s, c] of [...r].sort()) escrever(col([s, c.revisoes, `${c.libera} ${pct(c.libera, c.revisoes)}`, c.pede, c.falhou, c.naoRevisado, c.cartoes, `${c.negados} ${pct(c.negados, c.cartoes)}`, `${c.contestadas} ${pct(c.contestadas, c.libera)}`]));
+}
+
 export function imprimir(r: Resumo, bots: readonly LinhaBot[], escrever: (s: string) => void): void {
   const h = (ms: number) => (ms / 3_600_000).toFixed(1);
   // As `texto` primeiras colunas são texto (alinhadas à esquerda); as outras, números.
@@ -237,6 +279,7 @@ async function principal(): Promise<void> {
   const linhas = new Map<string, LinhaAprovacao>();
   const bots = new Map<string, LinhaBot>();
   const credenciais = new Map<string, LinhaCredencial>();
+  const doRevisor: LinhaRevisor[] = [];
   let pessoas = 0;
   try {
     await paraCadaPessoa(
@@ -247,6 +290,8 @@ async function principal(): Promise<void> {
         pessoas += 1;
         for (const l of lido.linhas) juntarLinha(linhas, l);
         for (const b of lido.bots) bots.set(b.id, b);
+        // acoes_pelo_modo é privada da dona (owner_id): cada pessoa lê só as suas, sem repetir entre escopos.
+        doRevisor.push(...(await lerRevisorDaPessoa(trx, escopo, dias)));
         // A negação mora na conversa da dona: cada pessoa lê só as suas (owner_id), então não repete entre escopos.
         for (const c of lido.credenciais) {
           const chave = `${c.semana}|${c.agente_id}`;
@@ -271,6 +316,8 @@ async function principal(): Promise<void> {
   escrever("");
   const r = resumir([...linhas.values()], [...bots.values()], [...credenciais.values()], Date.now());
   imprimir(r, [...bots.values()], escrever);
+  escrever("");
+  imprimirRevisor(resumirRevisor(doRevisor), escrever);
   log("info", "medir_modos", { dias, cartoes: linhas.size, bots: bots.size });
 }
 

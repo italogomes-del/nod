@@ -964,6 +964,11 @@ div.mac-medidor { padding-right: 36px; }
 .atv-agora .atv-hora { color: var(--ink-2); }
 .atv-link { padding: 0; border: 0; background: none; color: var(--ink-2); font: inherit; text-decoration: underline; text-decoration-color: var(--line-strong); cursor: pointer; }
 .atv-link:hover { color: var(--ink); }
+/* PR 4 dos modos de aprovação: embaixo da ação que o revisor liberou, o motivo dele e "Devia ter perguntado" (56 px =
+   o recuo da hora, como o .atv-inteiro). */
+.atv-revisor { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; padding: 0 8px 8px 56px; margin-top: -4px; font-size: 12.5px; color: var(--ink-2); }
+.atv-revisor-motivo b { font-weight: 600; }
+.atv-contestada { color: var(--ink-3); }
 .atv-inteiro { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 0 8px 10px 56px; font-size: 13px; color: var(--ink-2); }
 .atv-inteiro p { margin: 0; white-space: pre-wrap; }
 .atv .atv-vazio, .atv .atv-mais { margin: 0; padding: 4px 8px; font-size: 13px; }

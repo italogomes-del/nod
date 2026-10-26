@@ -1,7 +1,7 @@
 import type { ItemDeAtividade } from "../contracts/atividade.ts";
 import type { Assunto } from "../contracts/destino-no-chat.ts";
 import type { Mensagem } from "../contracts/mensagem.ts";
-import { comCasaAbreviada, rodouSemAprovacao, semVerbo, tituloNaAtividade, type AcaoDoModoParaTexto } from "./acoes-do-modo.ts";
+import { comCasaAbreviada, liberadaPeloRevisor, rodouSemAprovacao, semInvisiveis, semVerbo, tituloNaAtividade, type AcaoDoModoParaTexto } from "./acoes-do-modo.ts";
 import { DESTINO } from "./destino-no-chat.ts";
 
 /**
@@ -166,7 +166,7 @@ export function itemDaNegacaoDeConector(l: { chave: string; motivo: string; ferr
  * credenciais da AWS", "Comando arriscado") e o detalhe é o comando ou o caminho, redigido. Sem alvo: o registro não tem
  * mensagem, e o "Relatar" fica para a fala (como a linha da trilha, decisão 14).
  */
-export function itemDaAcaoDoModo(a: AcaoDoModoParaTexto & { id: string; em: number }): ItemDeAtividade {
+export function itemDaAcaoDoModo(a: AcaoDoModoParaTexto & { id: string; em: number; motivo?: string | null; contestadaEm?: number | null }): ItemDeAtividade {
   return {
     id: `modo:${a.id}`,
     em: a.em,
@@ -174,6 +174,8 @@ export function itemDaAcaoDoModo(a: AcaoDoModoParaTexto & { id: string; em: numb
     titulo: tituloNaAtividade(a),
     detalhe: cortar(comCasaAbreviada(semVerbo(a.resumo))),
     codigo: true,
+    // PR 4: a liberação do revisor leva o motivo dele e o "Devia ter perguntado".
+    ...(liberadaPeloRevisor(a) ? { revisor: { acaoId: a.id, motivo: a.motivo ? semInvisiveis(a.motivo) || null : null, contestada: (a.contestadaEm ?? null) !== null } } : {}),
   };
 }
 

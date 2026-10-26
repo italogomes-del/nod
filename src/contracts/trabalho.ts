@@ -155,8 +155,8 @@ export type TrabalhosDto = {
 /** GET trabalhos/:id: a tela da task. `mensagens` são as do trabalho (inclui as falas do meio). */
 export type TrabalhoDetalheDto = { trabalho: TrabalhoDto; mensagens: Mensagem[] };
 
-/** Linhas do chat (#191); `atividade`: gatilho da ADR-114; `troca`: bots numa linha (PR 3); `frentes`: "ver as N" do progresso (PR 7). */
-export type TipoLinha = "rotina" | "bots" | "task" | "atividade" | "troca" | "frentes";
+/** Linhas do chat (#191); `atividade`: ADR-114; `troca`: bots numa linha; `frentes`: "ver as N"; `revisor`: "Revisor liberou … · ver" (modos, PR 4). */
+export type TipoLinha = "rotina" | "bots" | "task" | "atividade" | "troca" | "frentes" | "revisor";
 export type EventoLinha = { acao: "mostrada" | "aberta"; tipo: TipoLinha; agenteId: string; chaveLinha: string };
 /** GET telemetria/linhas: por tipo, nos últimos 14 dias; `taxa` = abertas / mostradas (distintas por chaveLinha). */
 export type TaxaDeAbertura = { tipo: TipoLinha; mostradas: number; abertas: number; taxa: number | null };

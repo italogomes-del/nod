@@ -139,8 +139,11 @@ describe("decisões no chat", () => {
     const doRevisor = (motivoManual: "revisor_pediu" | "revisor_falhou", sempreServe: boolean | undefined, id = "i", ferramenta = "delete_task") => ({ ...base, id, idx: 0, destino: { conector: "clickup", ferramenta, argumentos: {} }, motivoManual, ...(sempreServe === undefined ? {} : { sempreServe }) });
     const html = (itens: ReturnType<typeof doRevisor>[]) => renderTimeline(conversa, { ...estado, suaVez: { ...estado.suaVez!, itens: [{ ...item, decisao: { ...item.decisao, tipo: "aprovacao" }, itensAprovacao: itens }] } });
     // O apagar num turno limpo: o botão vale (a regra pula o revisor da próxima vez).
+    // PR 4: o cartão do revisor é o compacto (tela A3): o botão é "Sempre permitir" e a dica diz para quê.
     const serve = html([doRevisor("revisor_pediu", true)]);
-    expect(serve).toContain("Sempre permitir delete task no clickup");
+    expect(serve).toContain('data-act="decidir-aprovacao-sempre"');
+    expect(serve).toContain(">Sempre permitir</button>");
+    expect(serve).toContain("Vale já para delete task no clickup");
     expect(serve).not.toContain("disabled");
     // O envio depois de conteúdo de fora, o turno contaminado, a falha e o item sem a marca: nem aparece.
     for (const itens of [[doRevisor("revisor_pediu", false)], [doRevisor("revisor_falhou", false)], [doRevisor("revisor_pediu", undefined)]]) {
@@ -151,8 +154,8 @@ describe("decisões no chat", () => {
     }
     // Lote misto do revisor: o botão nomeia só o item em que serve.
     const misto = html([doRevisor("revisor_pediu", true), doRevisor("revisor_pediu", false, "j", "create_task_comment")]);
-    expect(misto).toContain("Sempre permitir delete task no clickup");
-    expect(misto).not.toContain("create task comment no clickup");
+    expect(misto).toContain("Vale já para delete task no clickup,");
+    expect(misto).not.toContain("Vale já para delete task no clickup e");
   });
 
   it("card só com item sensível mostra o botão DESABILITADO com o motivo, nunca ausente", () => {

@@ -13,13 +13,18 @@ import type { Tx } from "../../src/shared/types.ts";
 import { autorizarComando, comandoRodaSemCard, type SaidaAutorizarComando } from "../../src/use-cases/autorizar-comando.ts";
 import { confirmacaoPeloModo } from "../../src/use-cases/confirmar-pelo-modo.ts";
 import { decidir } from "../../src/use-cases/decidir.ts";
+import { vincularEscopo } from "../../src/db/tx.ts";
+import { lerAtividade } from "../../src/use-cases/atividade.ts";
+import { contestarRevisor } from "../../src/use-cases/contestar-revisor.ts";
+import { lerConversa } from "../../src/use-cases/enviar-mensagem.ts";
+import { ANA } from "../helpers/deps-l6.ts";
 import { mudarModoAprovacao } from "../../src/use-cases/mudar-modo-aprovacao.ts";
 import { assentarRevisao, FRASE_MODO_MUDOU, rotinaParaRevisor } from "../../src/use-cases/revisar-acao.ts";
 import { dispararRotina } from "../../src/use-cases/disparar-rotina.ts";
 import { atualizarRotinaPeloAgente } from "../../src/use-cases/rotinas-do-agente.ts";
 import { criarTrabalho } from "../../src/use-cases/trabalhos.ts";
 import type { Deps } from "../../src/use-cases/tipos.ts";
-import { agenteComConversa, autoriaPessoa } from "../helpers/fabricas.ts";
+import { agenteComConversa, autoriaAgente, autoriaPessoa } from "../helpers/fabricas.ts";
 import { TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { depsSobre, servicosDeTeste } from "../helpers/l5.ts";
@@ -133,7 +138,8 @@ describeIntegracao("revisar-acao: o revisor do Automático no servidor (PR 3a, A
       expect(saidas[0]).toMatchObject({ data: { estado: "liberada", veredito: "libera" } });
       e = await estadoDe(c, decisaoId);
       expect(e.decisao).toMatchObject({ estado: "decidida", desfecho: { tipo: "decidida_por_regra", regra: "regra:revisor", regraVersao: 1 } });
-      expect(e.item).toMatchObject({ selecionado: true, desfecho: "executado", motivoManual: null });
+      // PR 4: a frase de queda que a fase 1 grava ("O revisor não respondeu a tempo") sai do item liberado.
+      expect(e.item).toMatchObject({ selecionado: true, desfecho: "executado", motivoManual: null, justificativa: null });
       expect(e.acao).toMatchObject({ veredito: "libera", motivo: "você pediu o push forçado", falha: null, revisorMs: 3200, fichasEntrada: 2100, fichasSaida: 30 });
       expect(e.acao?.entregueEm).not.toBeNull();
       // A segunda consulta do hook: o mesmo comando roda, e a rota grava a trilha com regra:revisor (porque "revisor").
@@ -490,6 +496,73 @@ describeIntegracao("revisar-acao: o revisor do Automático no servidor (PR 3a, A
       const repos: Repos = c.repos;
       expect(await repos.acoesPeloModo.revisoesDoTurno(c.turno.id)).toBe(1);
       expect(randomUUID()).not.toBe(c.turno.id);
+    });
+  });
+  it("PR 4 (telas A1, A2): o que o revisor liberou vai à conversa (acoesDoModo, com o motivo) e à Atividade com o 'Devia ter perguntado'; o que ele pediu, não", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const c = await cenario(trx);
+      await c.repos.mensagens.criar({ conversaId: c.conversaId, turnoId: c.turno.id, autoria: autoriaAgente(c.agenteId, MARLON.pessoaId), kind: "texto", texto: "Push feito.", confianca: "confiavel" });
+      const liberada = aguardarDe(await c.pedir({ comando: "git push --force origin feat/login" }));
+      await c.revisar(() => texto(LIBERA));
+      const pedida = aguardarDe(await c.pedir({ comando: "rm -rf src/legado" }));
+      await c.revisar(() => texto(PEDE));
+      const acaoId = (await c.repos.acoesPeloModo.daDecisao(liberada))!.id;
+      const conversa = (await lerConversa(c.deps, { conversaId: c.conversaId })).data;
+      expect(conversa.acoesDoModo?.[c.turno.id]).toEqual([{ id: acaoId, turnoId: c.turno.id, em: expect.any(Number), gatilho: "revisor", frase: "Revisor liberou git push --force origin feat/login: você pediu o push forçado" }]);
+      const dia = new Date().toISOString().slice(0, 10);
+      const atividade = (await lerAtividade(c.deps, { agenteId: c.agenteId, dia, fuso: "UTC" })).data;
+      const item = atividade.itens.find((i) => i.id === `modo:${acaoId}`);
+      expect(item).toMatchObject({ categoria: "sem_aprovacao", titulo: "Revisor liberou", detalhe: "git push --force origin feat/login", revisor: { acaoId, motivo: "você pediu o push forçado", contestada: false } });
+      const pedidaId = (await c.repos.acoesPeloModo.daDecisao(pedida))!.id;
+      expect(atividade.itens.some((i) => i.id === `modo:${pedidaId}`)).toBe(false);
+    });
+  });
+
+  it("PR 4: 'Devia ter perguntado' grava contestada_em uma vez, não desfaz nada, e só vale para a liberação do revisor da própria dona", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const c = await cenario(trx);
+      const liberada = aguardarDe(await c.pedir({ comando: "git push --force origin feat/login" }));
+      await c.revisar(() => texto(LIBERA));
+      const pedida = aguardarDe(await c.pedir({ comando: "rm -rf src/legado" }));
+      await c.revisar(() => texto(PEDE));
+      const acaoId = (await c.repos.acoesPeloModo.daDecisao(liberada))!.id;
+      const primeira = (await contestarRevisor(c.deps, { acaoId })).data;
+      expect(primeira.jaContestada).toBe(false);
+      const [linha] = await trx<{ contestada_em: Date }[]>`select contestada_em from acoes_pelo_modo where id = ${acaoId}`;
+      expect(linha?.contestada_em.getTime()).toBe(primeira.contestadaEm);
+      // O log leva ids e números, nunca o comando nem o motivo.
+      const log = saida.mock.calls.map((a) => String(a[0])).find((l) => l.includes("revisor_contestado")) ?? "";
+      expect(log).toContain(acaoId);
+      expect(log).not.toContain("git push");
+      expect(log).not.toContain("você pediu");
+      // A segunda não regrava; a decisão continua decidida e o item executado.
+      expect((await contestarRevisor(c.deps, { acaoId })).data).toEqual({ contestadaEm: primeira.contestadaEm, jaContestada: true });
+      expect((await estadoDe(c, liberada)).item).toMatchObject({ desfecho: "executado" });
+      // Atividade relida: a marca no lugar do botão.
+      const dia = new Date().toISOString().slice(0, 10);
+      expect((await lerAtividade(c.deps, { agenteId: c.agenteId, dia, fuso: "UTC" })).data.itens.find((i) => i.id === `modo:${acaoId}`)?.revisor?.contestada).toBe(true);
+      // O que o revisor pediu (a pessoa decide no cartão) e um id qualquer: 404.
+      await expect(contestarRevisor(c.deps, { acaoId: (await c.repos.acoesPeloModo.daDecisao(pedida))!.id })).rejects.toMatchObject({ codigo: "nao_encontrado" });
+      await expect(contestarRevisor(c.deps, { acaoId: randomUUID() })).rejects.toMatchObject({ codigo: "nao_encontrado" });
+      // Outra pessoa não vê a linha (RLS) nem contesta.
+      await vincularEscopo(trx, ANA);
+      const daAna = criarRepos(trx, ANA);
+      expect(await daAna.acoesPeloModo.naFalaDosTurnos([c.turno.id])).toEqual([]);
+      expect(await daAna.acoesPeloModo.contestar(acaoId)).toBeNull();
+      await vincularEscopo(trx, MARLON);
+    });
+  });
+
+  it("PR 4: o recibo do cartão do revisor leva `revisor` (o encolhido diz 'Negado por você')", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const c = await cenario(trx);
+      const decisaoId = aguardarDe(await c.pedir({ comando: "rm -rf src/legado" }));
+      await c.revisar(() => texto(PEDE));
+      const [item] = await c.repos.itensAprovacao.listar(decisaoId);
+      await decidir(c.deps, { decisaoId, itens: [{ id: item!.id, selecionado: false }] });
+      const [recibo] = await trx<{ payload: { revisor?: boolean; itens: { desfecho: string }[] } }[]>`select payload from mensagens where conversa_id = ${c.conversaId} and kind = 'resultado_aprovacao'`;
+      expect(recibo?.payload).toMatchObject({ revisor: true, itens: [{ desfecho: "retirado_pela_pessoa" }] });
+      expect((await c.repos.acoesPeloModo.daDecisao(decisaoId))?.desfechoPessoa).toBe("negou");
     });
   });
 });

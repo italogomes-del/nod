@@ -210,6 +210,24 @@ describeIntegracao("Atividade do bot (chat limpo, PR 1)", () => {
     });
   });
 
+  it("HTTP (PR 4 dos modos de aprovação): POST acoes-do-modo/:id/contestar — a dona marca a liberação do revisor; outra pessoa e id fora do formato, 404", async () => {
+    await withRollback(MARLON, async (trx) => {
+      trxAtual = trx;
+      const marlon = await servidor.entrar("marlon");
+      const ana = await servidor.entrar("ana");
+      const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON, { nome: "Ze" });
+      const turno = await repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
+      const acaoId = await repos.acoesPeloModo.registrar({ agenteId, conversaId, turnoId: turno!.id, decisaoId: null, modo: "automatico", tipo: "comando", resumo: "rm -rf dist", gatilho: "arriscado", risco: "apaga pastas inteiras", veredito: "libera", motivo: "você pediu" });
+      expect((await servidor.chamar(ana, "POST", `acoes-do-modo/${acaoId}/contestar`)).status).toBe(404);
+      const r = await servidor.chamar(marlon, "POST", `acoes-do-modo/${acaoId}/contestar`);
+      expect(r.status).toBe(200);
+      expect(await r.json()).toMatchObject({ jaContestada: false, contestadaEm: expect.any(Number) });
+      expect((await (await servidor.chamar(marlon, "POST", `acoes-do-modo/${acaoId}/contestar`)).json())).toMatchObject({ jaContestada: true });
+      expect((await servidor.chamar(marlon, "POST", "acoes-do-modo/nao-e-uuid/contestar")).status).toBe(404);
+      trxAtual = null;
+    });
+  });
+
   it("bot de empresa visível para a equipe: a Atividade continua só do dono", async () => {
     await withRollback(MARLON, async (trx) => {
       trxAtual = trx;

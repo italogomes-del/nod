@@ -1,5 +1,6 @@
 import { ErroDeDominio } from "../../../domain/erro.ts";
 import { contarAtividade, lerAtividade } from "../../../use-cases/atividade.ts";
+import { contestarRevisor } from "../../../use-cases/contestar-revisor.ts";
 import type { Rota } from "../roteador.ts";
 import { criarExecutor, type DepsRotas } from "./executar-caso.ts";
 
@@ -27,6 +28,14 @@ export function criarRotasAtividade(d: DepsRotas): Rota[] {
         const entrada = { agenteId: ctx.params.id ?? "", dia, fuso };
         if (url.searchParams.get("contagem") === "1") ctx.json(200, await executar(ctx.escopo, contarAtividade, entrada));
         else ctx.json(200, await executar(ctx.escopo, lerAtividade, entrada));
+      },
+    },
+    {
+      // PR 4 dos modos de aprovação: "Devia ter perguntado" numa ação que o revisor liberou (contestar-revisor.ts).
+      metodo: "POST",
+      padrao: /^\/acoes-do-modo\/(?<id>[^/]+)\/contestar$/,
+      async handler(ctx) {
+        ctx.json(200, await executar(ctx.escopo, contestarRevisor, { acaoId: ctx.params.id ?? "" }));
       },
     },
   ];

@@ -279,6 +279,8 @@ export function criarApi(escopo: Escopo) {
     atividade: (agenteId: string, dia: string, fuso: string) => get<AtividadeDto>(`agentes/${encodeURIComponent(agenteId)}/atividade?dia=${encodeURIComponent(dia)}&fuso=${encodeURIComponent(fuso)}`),
     /** NOD-326: a Biblioteca da gaveta do bot; `antes` é o cursor opaco da página anterior. */
     biblioteca: (conversaId: string, antes?: string | null) => get<PaginaDaBiblioteca>(`conversas/${encodeURIComponent(conversaId)}/biblioteca${antes ? `?antes=${encodeURIComponent(antes)}` : ""}`),
+    // PR 4 dos modos de aprovação: "Devia ter perguntado" numa ação que o revisor liberou (grava; não desfaz nada).
+    contestarRevisor: (acaoId: string) => post<{ contestadaEm: number; jaContestada: boolean }>(`acoes-do-modo/${encodeURIComponent(acaoId)}/contestar`),
     contagemAtividade: (agenteId: string, dia: string, fuso: string) => get<ContagemDaAtividade>(`agentes/${encodeURIComponent(agenteId)}/atividade?dia=${encodeURIComponent(dia)}&fuso=${encodeURIComponent(fuso)}&contagem=1`),
     // ADR-113: o "Lembrar disso" da fala manda a conversa, para a linha "Anotei …" aparecer nela.
     criarMemoria: (agenteId: string, tipo: TipoMemoria, texto: string, conversaId?: string) => post<{ memoria: Memoria }>(`agentes/${agenteId}/memoria`, { tipo, texto, ...(conversaId ? { conversaId } : {}) }),

@@ -19,6 +19,16 @@ export const MODOS: Readonly<Record<ModoAprovacao, Rotulos>> = {
   total: { curto: "Sem aprovações", titulo: "Ignorar todas as aprovações", descricao: "Faz tudo sem perguntar, até comandos com as credenciais do seu Mac. O que ele fez fica na Atividade." },
 };
 
+/**
+ * O Automático com o revisor ligado (espelho de DESCRICAO_AUTOMATICO_COM_REVISOR; PR 4 dos modos de aprovação, tela
+ * "Main"). A chave vem da frota (`FrotaDto.revisor`); desligada, vale a frase de `MODOS.automatico`, que é a verdade.
+ */
+export const DESCRICAO_AUTOMATICO_COM_REVISOR = "Roda o que você pediu. Um revisor confere cada ação arriscada: libera sozinho ou pede o seu ok num cartão.";
+
+export function descricao(m: ModoAprovacao, revisor: boolean): string {
+  return m === "automatico" && revisor ? DESCRICAO_AUTOMATICO_COM_REVISOR : MODOS[m].descricao;
+}
+
 const ORDEM: readonly ModoAprovacao[] = ["manual", "automatico", "total"];
 
 const svg = (corpo: string, tamanho = 16) => `<svg width="${tamanho}" height="${tamanho}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${corpo}</svg>`;
@@ -44,10 +54,10 @@ export function renderChipModo(modo: ModoAprovacao, dona: boolean): { html: stri
   return { html: `<span class="modo-pilula">${svg(ICONE[modo])}</span><span class="modo-dica" aria-hidden="true">${esc(titulo)}</span>`, titulo };
 }
 
-/** O menu dos três modos (itens `menuitemradio`, o atual marcado). Puro, para o teste ler o HTML. */
-export function renderMenuModo(nome: string, atual: ModoAprovacao): string {
+/** O menu dos três modos (itens `menuitemradio`, o atual marcado). Puro, para o teste ler o HTML. `revisor`: a chave do revisor ligada. */
+export function renderMenuModo(nome: string, atual: ModoAprovacao, revisor = false): string {
   const item = (m: ModoAprovacao) => `<button type="button" role="menuitemradio" aria-checked="${m === atual}" data-modo="${m}" class="modo-item modo-${m}">
-    <span class="modo-ic">${svg(ICONE[m], 20)}</span><span class="modo-txt"><b>${esc(MODOS[m].titulo)}</b><small>${esc(MODOS[m].descricao)}</small></span>${m === atual ? `<span class="modo-check">${svg(CHECK, 18)}</span>` : ""}</button>`;
+    <span class="modo-ic">${svg(ICONE[m], 20)}</span><span class="modo-txt"><b>${esc(MODOS[m].titulo)}</b><small>${esc(descricao(m, revisor))}</small></span>${m === atual ? `<span class="modo-check">${svg(CHECK, 18)}</span>` : ""}</button>`;
   return `<div role="menu" aria-label="Como ${esc(nome)} aprova as próprias ações"><p class="menu-nome">Como ${esc(nome)} aprova as próprias ações?</p>${ORDEM.map(item).join("")}<p class="modo-rodape">Vale para as próximas ações de ${esc(nome)}, em todas as conversas e rotinas. Só você muda.</p></div>`;
 }
 

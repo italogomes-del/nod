@@ -4,6 +4,7 @@ import { duplicarAgente } from "../../../src/use-cases/duplicar-agente.ts";
 import { gerirAgente } from "../../../src/use-cases/gerir-agente.ts";
 import { mudarModoAprovacao } from "../../../src/use-cases/mudar-modo-aprovacao.ts";
 import { ANA, depsEmMemoria, esperarErro, executar } from "../../helpers/deps-l6.ts";
+import { revisorDeTeste } from "../../helpers/revisor-de-teste.ts";
 
 describe("mudarModoAprovacao (ADR-059)", () => {
   it("NOD-316: bot novo nasce em Automático; a dona troca, e a troca vira linha na conversa do bot", async () => {
@@ -33,6 +34,17 @@ describe("mudarModoAprovacao (ADR-059)", () => {
     // PR 6 dos modos de aprovação: a frase do protótipo — até a credencial, e o que fez fica na Atividade.
     expect(linhas[2]).toMatch(/para Ignorar todas as aprovações: faz tudo sem perguntar, até comandos com as credenciais do seu Mac\. O que ele fez fica na Atividade\.$/);
     for (const l of linhas) expect(l).not.toMatch(/ler a web|depois de ler/);
+  });
+
+  it("PR 4 dos modos de aprovação: com o revisor ligado, a linha do Automático diz o revisor (sem 'na sua IA'); desligado, a de hoje", async () => {
+    const { deps, banco } = depsEmMemoria();
+    deps.services.revisor = revisorDeTeste({ assentar: async () => undefined }).executor;
+    const { agente, conversa } = (await executar(deps, criarAgente, { dono: "pessoa", nome: "Dev 1" })).data;
+    await executar(deps, mudarModoAprovacao, { agenteId: agente.id, modo: "manual" });
+    await executar(deps, mudarModoAprovacao, { agenteId: agente.id, modo: "automatico" });
+    const linha = banco.mensagens.filter((m) => m.conversaId === conversa.id && m.kind === "sistema").at(-1)?.texto ?? "";
+    expect(linha).toMatch(/para Aprovar automaticamente: roda o que você pediu\. Um revisor confere cada ação arriscada: libera sozinho ou pede o seu ok num cartão\.$/);
+    expect(linha).not.toMatch(/sua IA|sua conta/);
   });
 
   it("2026-10-18: ligar o total exige confirmado: true (o segundo clique); os outros modos não pedem", async () => {

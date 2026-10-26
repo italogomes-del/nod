@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classificar, imprimir, juntarLinha, resumir, tipoDoPedido, type LinhaAprovacao } from "../../../scripts/medir-modos.ts";
+import { classificar, imprimir, imprimirRevisor, juntarLinha, resumir, resumirRevisor, tipoDoPedido, type LinhaAprovacao } from "../../../scripts/medir-modos.ts";
 
 const AGORA = 1_760_000_000_000;
 const HORA = 60 * 60_000;
@@ -67,5 +67,22 @@ describe("medir-modos (a linha de base dos modos de aprovação)", () => {
     juntarLinha(m, base);
     juntarLinha(m, { ...base });
     expect(m.get("d")?.rotina).toBe(false);
+  });
+
+  it("PR 4: o revisor por semana — veredito, cartões que a pessoa negou e liberadas contestadas ('Devia ter perguntado')", () => {
+    const r = resumirRevisor([
+      { semana: "2026-10-26", veredito: "libera", desfecho_pessoa: null, contestada: false, n: 7 },
+      { semana: "2026-10-26", veredito: "libera", desfecho_pessoa: null, contestada: true, n: 1 },
+      { semana: "2026-10-26", veredito: "pede", desfecho_pessoa: "negou", contestada: false, n: 1 },
+      { semana: "2026-10-26", veredito: "pede", desfecho_pessoa: "aprovou", contestada: false, n: 2 },
+      { semana: "2026-10-26", veredito: "falhou", desfecho_pessoa: "venceu", contestada: false, n: 1 },
+      { semana: "2026-10-26", veredito: null, desfecho_pessoa: null, contestada: false, n: 1 },
+    ]);
+    expect(r.get("2026-10-26")).toEqual({ revisoes: 13, libera: 8, pede: 3, falhou: 1, naoRevisado: 0, cartoes: 4, negados: 1, contestadas: 1 });
+    const saida: string[] = [];
+    imprimirRevisor(r, (s) => saida.push(s));
+    expect(saida[2]).toContain("8 62%");
+    expect(saida[2]).toContain("1 25%");
+    expect(saida[2]).toContain("1 13%");
   });
 });

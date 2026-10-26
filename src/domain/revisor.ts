@@ -383,11 +383,15 @@ export function pedidoDoRevisor(e: EntradaRevisor): PedidoMontado {
   return { tipo: "pedido", prompt: PROMPT_REVISOR, entrada: `${confiavel.join("\n")}\n\nNÃO CONFIÁVEL\n${abre}\n${corpo}\n${fecha}\n${lembrete}\n`, resumo };
 }
 
-/** O motivo do revisor (texto de modelo) como vai ao cartão: sem controle, espaços juntos, até 160. A web escapa ao mostrar. */
+/**
+ * O motivo do revisor (texto de modelo) como vai ao cartão: sem controle, espaços juntos, até 160. A web escapa ao mostrar.
+ * revisto em 2026-10-26 (revisão do PR 4): sem os de formatação também (Cf: direção U+202E e cia., largura zero), como o
+ * "para quê" do pedido de acesso — o modelo leu conteúdo de fora, e o motivo agora vai à linha embaixo da fala e à
+ * Atividade, onde um controle de direção mudaria o que a pessoa lê.
+ */
 export function limparMotivo(texto: string): string {
   const limpo = texto
-    // eslint-disable-next-line no-control-regex -- é exatamente o que sai
-    .replace(/[\u0000-\u001f\u007f\u2028\u2029]/g, " ")
+    .replace(/[\p{Cc}\p{Cf}\u2028\u2029]/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
   if (limpo.length <= MOTIVO_REVISOR_MAX) return limpo;

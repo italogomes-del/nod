@@ -61,7 +61,7 @@ export const lerAtividade: CasoDeUso<EntradaAtividade, AtividadeDto> = async (de
     ...linhas.map((l) => itemDaMensagem(l.mensagem, l.assunto)),
     ...negacoes.map((n) => itemDaNegacaoDeConector({ ...n, em: n.em.getTime() })),
     ...trabalhos.flatMap((t) => itensDoTrabalho({ id: t.id, titulo: t.titulo, forma: t.forma, origem: t.origem, estado: t.estado, criadoEm: t.criado_em.getTime(), terminadoEm: t.terminado_em?.getTime() ?? null }, faixa)),
-    ...semAprovacao.map((a) => itemDaAcaoDoModo({ id: a.id, modo: a.modo, tipo: a.tipo, gatilho: a.gatilho, resumo: a.resumo, risco: a.risco, veredito: a.veredito, em: a.criado_em.getTime() })),
+    ...semAprovacao.map((a) => itemDaAcaoDoModo({ id: a.id, modo: a.modo, tipo: a.tipo, gatilho: a.gatilho, resumo: a.resumo, risco: a.risco, veredito: a.veredito, motivo: a.motivo, contestadaEm: a.contestada_em?.getTime() ?? null, em: a.criado_em.getTime() })),
   ];
   const pagina = ordenarAtividade(itens).slice(0, TETO_ITENS_ATIVIDADE);
   return {

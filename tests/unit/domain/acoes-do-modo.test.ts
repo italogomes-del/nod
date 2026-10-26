@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { comCasaAbreviada, entraNaFala, fraseNaFala, rodouSemAprovacao, semVerbo, tituloNaAtividade, type AcaoDoModoParaTexto } from "../../../src/domain/acoes-do-modo.ts";
+import { comCasaAbreviada, fraseNaFala, grupoNaFala, liberadaPeloRevisor, rodouSemAprovacao, semVerbo, tituloNaAtividade, type AcaoDoModoParaTexto } from "../../../src/domain/acoes-do-modo.ts";
 import { qualCredencial, tocaChaveDoNod, tocaCredencial } from "../../../src/domain/comando.ts";
 import { itemDaAcaoDoModo } from "../../../src/domain/item-de-atividade.ts";
 
@@ -84,11 +84,35 @@ describe("as frases do que o modo rodou sem a pessoa (telas Y1 a Y3)", () => {
     expect(semVerbo("git push")).toBe("git push");
   });
 
-  it("decisão 8 do plano: na fala, só a credencial e o arriscado do total; o resto só na Atividade", () => {
-    expect(entraNaFala({ modo: "total", gatilho: "credencial" })).toBe(true);
-    expect(entraNaFala({ modo: "total", gatilho: "arriscado" })).toBe(true);
-    for (const gatilho of ["fora_da_pasta", "comum", "envio_apos_fora"] as const) expect(entraNaFala({ modo: "total", gatilho }), gatilho).toBe(false);
-    expect(entraNaFala({ modo: "automatico", gatilho: "credencial" })).toBe(false);
+  it("decisão 8 do plano: na fala, só a credencial e o arriscado do total e (PR 4) o que o revisor liberou; o resto só na Atividade", () => {
+    expect(grupoNaFala({ modo: "total", gatilho: "credencial", veredito: null })).toBe("credencial");
+    expect(grupoNaFala({ modo: "total", gatilho: "arriscado", veredito: null })).toBe("arriscado");
+    for (const gatilho of ["fora_da_pasta", "comum", "envio_apos_fora"] as const) expect(grupoNaFala({ modo: "total", gatilho, veredito: null }), gatilho).toBeNull();
+    expect(grupoNaFala({ modo: "automatico", gatilho: "credencial", veredito: null })).toBeNull();
+    expect(grupoNaFala({ modo: "automatico", gatilho: "arriscado", veredito: "libera" })).toBe("revisor");
+    expect(grupoNaFala({ modo: "automatico", gatilho: "envio_apos_fora", veredito: "libera" })).toBe("revisor");
+    for (const veredito of ["pede", "falhou", "nao_revisado", null] as const) expect(grupoNaFala({ modo: "automatico", gatilho: "arriscado", veredito }), String(veredito)).toBeNull();
+    expect(liberadaPeloRevisor({ modo: "total", veredito: "libera" })).toBe(false);
+  });
+
+  it("PR 4 (telas A1 e A2): a frase do revisor diz o que ele liberou e o motivo dele, em minúscula e sem o ponto final", () => {
+    const libera = (a: Partial<AcaoDoModoParaTexto> & { motivo?: string | null }) => fraseNaFala({ ...acao({ modo: "automatico", veredito: "libera", gatilho: "arriscado", ...a }), motivo: a.motivo ?? null });
+    expect(libera({ resumo: "git push --force origin feat/login", motivo: "Você pediu o push forçado." })).toBe("Revisor liberou git push --force origin feat/login: você pediu o push forçado");
+    expect(libera({ resumo: "git push --force origin feat/login", motivo: null })).toBe("Revisor liberou git push --force origin feat/login");
+    // Sigla no começo fica como veio.
+    expect(libera({ resumo: "gh pr close 7", motivo: "PR 7 é seu" })).toBe("Revisor liberou gh pr close 7: PR 7 é seu");
+    expect(libera({ tipo: "app", resumo: "gmail · archive_messages", motivo: "é o que a rotina pede" })).toBe("Revisor liberou archive messages no gmail: é o que a rotina pede");
+    expect(libera({ tipo: "app", resumo: "gmail · archive_messages, gmail · delete_label", motivo: "é o que a rotina pede" })).toBe("Revisor liberou 2 ações num app: é o que a rotina pede");
+    expect(libera({ tipo: "arquivo", resumo: "Gravar /Users/marlon/notas.md", motivo: "você pediu" })).toBe("Revisor liberou gravar ~/notas.md: você pediu");
+    // O comando longo corta em 60, com reticências.
+    const longo = libera({ resumo: `rm -rf ${"pasta/".repeat(30)}`, motivo: "você pediu" });
+    expect(longo).toMatch(/^Revisor liberou rm -rf pasta\/.{40,60}…: você pediu$/);
+    // Revisão do PR 4: o lote que cruza apps não diz "num app".
+    expect(libera({ tipo: "app", resumo: "gmail · archive_messages, slack · delete_message", motivo: "você pediu" })).toBe("Revisor liberou 2 ações em apps: você pediu");
+    // Revisão do PR 4: o comando do bot e o motivo do modelo vão à linha sem controle de direção nem largura zero.
+    expect(libera({ resumo: "rm -rf dist\u202e/txt.exe", motivo: "você\u200b pediu\u2066" })).toBe("Revisor liberou rm -rf dist /txt.exe: você pediu");
+    // O total continua com a frase de sempre (o veredito nulo não é do revisor).
+    expect(fraseNaFala({ ...acao({ modo: "total", gatilho: "arriscado", risco: "reescreve ou apaga no remoto" }), motivo: "x" })).toBe("Rodou um comando que reescreve ou apaga no remoto");
   });
 
   it("o filtro 'Sem aprovação': tudo o que o total registrou e o que o revisor liberou — o cartão que a pessoa decidiu, não", () => {
@@ -100,6 +124,16 @@ describe("as frases do que o modo rodou sem a pessoa (telas Y1 a Y3)", () => {
   it("o item da Atividade: categoria, título, o detalhe em fonte de código e sem alvo", () => {
     const item = itemDaAcaoDoModo({ ...acao({ tipo: "leitura_credencial", gatilho: "credencial", resumo: "Ler ~/.aws/config" }), id: "a1", em: 1_000 });
     expect(item).toEqual({ id: "modo:a1", em: 1_000, categoria: "sem_aprovacao", titulo: "Leu as credenciais da AWS", detalhe: "~/.aws/config", codigo: true });
+  });
+
+  it("PR 4: a liberação do revisor na Atividade leva o motivo e o 'Devia ter perguntado' (contestada ou não); o total não", () => {
+    const base = { ...acao({ modo: "automatico", veredito: "libera", gatilho: "arriscado", resumo: "git push --force" }), id: "a2", em: 5 };
+    expect(itemDaAcaoDoModo({ ...base, motivo: "você pediu", contestadaEm: null }).revisor).toEqual({ acaoId: "a2", motivo: "você pediu", contestada: false });
+    expect(itemDaAcaoDoModo({ ...base, motivo: null, contestadaEm: 9 }).revisor).toEqual({ acaoId: "a2", motivo: null, contestada: true });
+    // Revisão do PR 4: o motivo (texto de modelo) chega à Atividade sem controle de direção, mesmo numa linha gravada antes.
+    expect(itemDaAcaoDoModo({ ...base, motivo: "ok\u202e moc.live", contestadaEm: null }).revisor?.motivo).toBe("ok moc.live");
+    expect(itemDaAcaoDoModo({ ...base, motivo: "\u202e", contestadaEm: null }).revisor?.motivo).toBeNull();
+    expect(itemDaAcaoDoModo({ ...base, modo: "total", veredito: null }).revisor).toBeUndefined();
   });
 
   // QA do PR 6 (2026-10-19): o hook manda o caminho absoluto; o protótipo Y3 mostra "~/.docker/config.json".

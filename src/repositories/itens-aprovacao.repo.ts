@@ -150,11 +150,14 @@ export function itensAprovacaoRepo(conn: Conn, escopo: Escopo) {
      * terminal o desfecho já nasce `executado` (é o que o hook lê); no app (`executar`, PR 5) o desfecho fica nulo até o
      * efeito rodar fora da transação e o assentamento gravá-lo (`assentarLoteAutomatico`), como no lote automático. Senão o
      * motivo do cartão e a frase (o motivo do revisor ou a da falha); `sempreServe` falso no cartão de falha (0094).
+     * revisto em 2026-10-26 (PR 4): o liberado limpa a `justificativa` — a fase 1 grava a frase de queda ("O revisor não
+     * respondeu a tempo") para o caso de a fase 3 nunca vir, e ela ficava num item que o revisor liberou. O motivo da
+     * liberação mora em `acoes_pelo_modo.motivo`.
      */
     async marcarRevisao(id: string, p: { liberado: true; executar?: true } | { motivoManual: Extract<MotivoAprovacaoManual, "revisor_pediu" | "revisor_falhou">; justificativa: string }): Promise<ItemAprovacao | null> {
       const [l] = "liberado" in p
         ? await conn<Linha[]>`
-          update itens_aprovacao set motivo_manual = null, desfecho = ${p.executar ? null : "executado"}
+          update itens_aprovacao set motivo_manual = null, justificativa = null, desfecho = ${p.executar ? null : "executado"}
           where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and desfecho is null
           returning ${conn.unsafe(COLUNAS)}`
         : await conn<Linha[]>`

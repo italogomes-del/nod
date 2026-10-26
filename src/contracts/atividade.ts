@@ -30,6 +30,11 @@ export type ItemDeAtividade = {
   codigo?: true;
   /** Negações repetidas (mesma ferramenta, mesma causa) numa linha só. */
   vezes?: number;
+  /**
+   * A ação que o revisor do Automático liberou (PR 4 dos modos de aprovação): o motivo dele e o "Devia ter perguntado",
+   * que a dona marca uma vez (`POST acoes-do-modo/:acaoId/contestar`) e não desfaz nada.
+   */
+  revisor?: { acaoId: string; motivo: string | null; contestada: boolean };
   /** O que o clique abre: a frente, ou o texto inteiro da mensagem com o "Relatar" (ADR-041). A trilha não tem alvo. */
   alvo?: AlvoDaAtividade;
 };

@@ -7,7 +7,7 @@ import type { IdHarness } from "../contracts/harness.ts";
 import type { Inventario } from "../contracts/inventario.ts";
 import type { Mensagem } from "../contracts/mensagem.ts";
 import type { OrigemTurno, Turno } from "../contracts/turno.ts";
-import { entraNaFala, fraseNaFala } from "../domain/acoes-do-modo.ts";
+import { fraseNaFala, grupoNaFala } from "../domain/acoes-do-modo.ts";
 import { excedeQuantidade, motorLe, tipoDoAnexo } from "../domain/anexo.ts";
 import { comCitacao, confiancaDaCitacao, trechoDaCitacao } from "../domain/citacao.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
@@ -240,19 +240,20 @@ export const lerConversa: CasoDeUso<{ conversaId: string; limite?: number }, Con
   // parte — a troca agrupada diz o nome mesmo com o `peer_pedido` fora da janela. Só na conversa própria.
   const pedidosDeColega = conversa.tipo === "propria" ? await deps.repos.mensagens.pedidosDeColega(turnosDeDelegacao(mensagens)) : undefined;
   // PR 6 dos modos de aprovação (telas Y1 e Y2): o que o "Ignorar todas" rodou nos turnos da janela e entra na linha
-  // embaixo da fala (credencial e arriscado), numa consulta à parte. Só na conversa própria; nada vira mensagem.
+  // embaixo da fala (credencial e arriscado), numa consulta à parte. Só na conversa própria; nada vira mensagem. PR 4
+  // (telas A1 e A2): também o que o revisor do Automático liberou.
   const acoesDoModo = conversa.tipo === "propria" ? await acoesDoModoNaConversa(deps, mensagens) : undefined;
   return { data: { conversa, mensagens, turnosPendentes, turnosEmCurso, turnosCancelados, propostas, fios, trabalhos, dono, reacoes, ...(pedidosDeColega ? { pedidosDeColega } : {}), ...(acoesDoModo ? { acoesDoModo } : {}) } };
 };
 
-/** As ações do total por turno da janela, com a frase pronta (`fraseNaFala`). */
+/** As ações do total e as liberadas pelo revisor (PR 4), por turno da janela, com a frase pronta (`fraseNaFala`). */
 async function acoesDoModoNaConversa(deps: Deps, mensagens: readonly Mensagem[]): Promise<Record<string, AcaoDoModoNaFala[]>> {
   const turnos = [...new Set(mensagens.map((m) => m.turnoId).filter((t): t is string => t !== null))];
   const porTurno: Record<string, AcaoDoModoNaFala[]> = {};
-  for (const linha of await deps.repos.acoesPeloModo.naFalaDosTurnos(turnos)) {
-    const a = { ...linha, modo: "total" as const };
-    if (!entraNaFala(a)) continue;
-    (porTurno[a.turno_id] ??= []).push({ id: a.id, turnoId: a.turno_id, em: a.criado_em.getTime(), gatilho: a.gatilho, frase: fraseNaFala(a, a.linux) });
+  for (const a of await deps.repos.acoesPeloModo.naFalaDosTurnos(turnos)) {
+    const gatilho = grupoNaFala(a);
+    if (!gatilho) continue;
+    (porTurno[a.turno_id] ??= []).push({ id: a.id, turnoId: a.turno_id, em: a.criado_em.getTime(), gatilho, frase: fraseNaFala(a, a.linux) });
   }
   return porTurno;
 }

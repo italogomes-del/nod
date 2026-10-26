@@ -1,13 +1,16 @@
 import type { Agente, ModoAprovacao } from "../contracts/agente.ts";
 import type { RuntimeEvent } from "../contracts/evento.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
-import { DESCRICAO_MODO, ehModoAprovacao, ROTULO_MODO } from "../domain/modo-aprovacao.ts";
+import { descricaoDoModo, ehModoAprovacao, ROTULO_MODO } from "../domain/modo-aprovacao.ts";
 import { autoriaPessoa, evento } from "./autoria-evento.ts";
 import type { CasoDeUso } from "./tipos.ts";
 
-/** O que cada modo passa a fazer, dito na linha da conversa: a mesma frase do menu, começando em minúscula. */
-function efeito(modo: ModoAprovacao): string {
-  const d = DESCRICAO_MODO[modo];
+/**
+ * O que cada modo passa a fazer, dito na linha da conversa: a mesma frase do menu, começando em minúscula. O Automático
+ * com o revisor ligado diz o revisor (PR 4 dos modos de aprovação).
+ */
+function efeito(modo: ModoAprovacao, revisor: boolean): string {
+  const d = descricaoDoModo(modo, revisor);
   return d.charAt(0).toLowerCase() + d.slice(1);
 }
 
@@ -43,7 +46,7 @@ export const mudarModoAprovacao: CasoDeUso<{ agenteId: string; modo: unknown; co
       autoria,
       kind: "sistema",
       assunto: "aprovacao.modo",
-      texto: `${pessoa?.nome ?? "A pessoa"} mudou as aprovações de ${agente.nome} para ${ROTULO_MODO[input.modo]}: ${efeito(input.modo)}`,
+      texto: `${pessoa?.nome ?? "A pessoa"} mudou as aprovações de ${agente.nome} para ${ROTULO_MODO[input.modo]}: ${efeito(input.modo, deps.services.revisor?.config.ligado === true)}`,
       confianca: "confiavel",
     });
     if (linha) events.push(evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: conversa.id, dados: { mensagem_id: linha.id, kind: "sistema" } }));

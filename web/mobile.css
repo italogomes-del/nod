@@ -165,8 +165,17 @@
   .reacao-chip { min-height: 44px; min-width: 44px; justify-content: center; font-size: 15px; }
   .citacao-da-fala { min-height: 44px; }
   /* PR 6 dos modos de aprovação: "ver na Atividade" é alvo de toque de 44 px sem engordar a linha (a área sobra para fora). */
-  .linha-modo-ver { display: inline-block; padding: 12px 0; margin: -12px 0; font-size: 13.5px; }
+  .linha-modo-ver { display: inline-block; padding: 13px 0; margin: -13px 0; font-size: 13.5px; }
+  /* QA do PR 4 (medido em 2026-10-26, Chrome a 390 px): o "ver" da linha do revisor tinha 19 × 43,6 px de alvo, o "ver
+     detalhes" do cartão 84 × 38 e o "Devia ter perguntado" ~42 de altura. Agora todos ≥ 44 × 44, sem mudar o lugar do
+     texto (a margem negativa devolve o que o enchimento soma). */
+  .linha-revisor .linha-modo-ver { box-sizing: border-box; min-width: 44px; padding: 13px 12px; margin: -13px -12px; text-align: center; }
   .linha-modo { font-size: 13.5px; }
+  /* O cartão do revisor (PR 4): alvo de 44 px nos botões em pílula e a pergunta podendo quebrar. */
+  .cr-acoes .bt { min-height: 44px; padding: 8px 16px; font-size: 14px; }
+  .cr-pergunta { white-space: normal; }
+  .cr-detalhe > summary { box-sizing: border-box; min-height: 44px; padding: 13px 0; margin: -9px 0; }
+  .atv-contestar { display: inline-block; box-sizing: border-box; min-height: 44px; padding: 13px 0; margin: -13px 0; }
   .bot-menu.menu-fala button { min-height: 44px; }
   /* Os emojis do menu também têm 44 de largura (eram ~30): o menu alarga para as cinco rápidas caberem numa linha. */
   .bot-menu.menu-fala { width: 252px; }

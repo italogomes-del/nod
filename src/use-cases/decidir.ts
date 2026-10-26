@@ -74,7 +74,7 @@ export const marcarEDecidir: CasoDeUso<EntradaDecidir, SaidaMarcarEDecidir> = as
   if (!decidida) throw new ErroDeDominio("estado_invalido", { cause: "decisão já decidida" });
   const itens = await deps.repos.itensAprovacao.listar(decisao.id);
   // ADR-115: o desfecho do cartão que a revisão deixou (a linha em acoes_pelo_modo, quando há; senão nada muda).
-  if (decisao.tipo === "aprovacao" && itens.some((i) => i.motivoManual === "revisor_pediu" || i.motivoManual === "revisor_falhou")) {
+  if (decisao.tipo === "aprovacao" && itens.some(doRevisor)) {
     await deps.repos.acoesPeloModo.registrarDesfechoPessoa(decisao.id, itens.some((i) => i.selecionado) ? "aprovou" : "negou");
   }
   const aExecutar: ItemAExecutar[] = [];
@@ -198,6 +198,9 @@ export function entradaDaAprovacao(decisao: Decisao, itens: readonly ItemAprovac
   ].join("\n");
 }
 
+/** O item veio do revisor do Automático (ADR-115): o cartão era o compacto do revisor. */
+const doRevisor = (i: Pick<ItemAprovacao, "motivoManual">): boolean => i.motivoManual === "revisor_pediu" || i.motivoManual === "revisor_falhou";
+
 function turnoCriado(deps: DepsContinuacao, turnoId: string, decisao: Decisao, autoria: RuntimeEvent["autoria"], agora: number): RuntimeEvent {
   return { tenantId: deps.escopo.tenantId, id: randomUUID(), createdAt: agora, kind: "turno_criado", autoria, pessoaDestinoId: deps.escopo.pessoaId, conversaId: decisao.conversaId, turnoId, dados: { origem: "retomada", retoma_turno_id: decisao.turnoId, decisao_id: decisao.id } };
 }
@@ -283,7 +286,8 @@ export const assentarAprovacao: CasoDeUso<EntradaAssentarAprovacao, SaidaAssenta
     autoria,
     kind: "resultado_aprovacao",
     texto,
-    payload: { kind: "resultado_aprovacao", decisaoId: decisao.id, frase: decisao.frase, itens: itens.map((i) => ({ idx: i.idx, desfecho: i.desfecho ?? "falhou_na_execucao", texto: i.textoFinal })) },
+    // PR 4 dos modos de aprovação: o cartão era do revisor — o encolhido diz "Negado por você", como os botões dele.
+    payload: { kind: "resultado_aprovacao", decisaoId: decisao.id, frase: decisao.frase, itens: itens.map((i) => ({ idx: i.idx, desfecho: i.desfecho ?? "falhou_na_execucao", texto: i.textoFinal })), ...(itens.some(doRevisor) ? { revisor: true as const } : {}) },
     confianca: "confiavel",
   });
   const events: RuntimeEvent[] = [];

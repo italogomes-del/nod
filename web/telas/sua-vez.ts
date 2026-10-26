@@ -12,6 +12,7 @@ import { renderCartaoPergunta } from "./cartao-pergunta.ts";
 import { emQuanto, foraDoArDesde, haQuanto, nadaEsperando } from "../lib/relogio.ts";
 import { acoesComAcesso, linhasPrecisa } from "./rotina-precisa.ts";
 import { listaDoLoteParaSuaVez } from "./card-lote.ts";
+import { ehCartaoDoRevisor, motivoDoCartao, renderCartaoRevisor, sempreNoCartao } from "./cartao-revisor.ts";
 
 type Item = SuaVezDto["itens"][number];
 
@@ -297,6 +298,7 @@ export function previaDoItem(i: Pick<Item["itensAprovacao"][number], "destino">)
 function renderCardAprovacao(item: Item, estado: Estado): string {
   const d = item.decisao;
   const conectores = estado.conectores;
+  const revisor = estado.frota?.revisor === true;
   const itens = item.itensAprovacao;
   const unico = itens.length === 1 && itens[0] && !itens[0].origemSensivel ? itens[0] : undefined;
   const slugs = [...new Set(itens.map((i) => i.destino.conector))];
@@ -316,11 +318,11 @@ function renderCardAprovacao(item: Item, estado: Estado): string {
     const acao = unico.destino.conector === "terminal"
       ? `<pre class="ap-comando"><code>${esc(unico.textoFinal)}</code></pre>`
       : unico.destino.conector === "computador" && unico.textoFinal.trim() !== d.frase.trim() ? `<div class="ap-oque">${esc(unico.textoFinal)}</div>` : "";
-    corpo = `${acao}${previaDoItem(unico)}${porqueDaPausa(unico)}${tagDesfecho(unico, true)}`;
+    corpo = `${acao}${previaDoItem(unico)}${porqueDaPausa(unico, revisor)}${tagDesfecho(unico, true)}`;
   } else {
     const linha = (i: Item["itensAprovacao"][number]): string => `<li class="aprov-item${i.origemSensivel ? " sensivel" : ""}">
       <label class="aprov-marca"><input type="checkbox" data-item="${esc(i.id)}" ${i.selecionado ? "checked" : ""} /><span class="aprov-item-txt">${esc(i.textoFinal)}${umApp ? "" : `<small>${esc(ondeAcontece(conectores, i.destino.conector))}</small>`}</span></label>
-      ${i.origemSensivel ? `<p class="justificativa">${esc(i.justificativa ?? JUSTIFICATIVA_PADRAO)}</p>` : ""}${porqueDaPausa(i)}${tagDesfecho(i, true)}${detalheTecnico(i)}
+      ${i.origemSensivel ? `<p class="justificativa">${esc(i.justificativa ?? JUSTIFICATIVA_PADRAO)}</p>` : ""}${porqueDaPausa(i, revisor)}${tagDesfecho(i, true)}${detalheTecnico(i)}
     </li>`;
     corpo = `<ul class="aprov-itens">${itens.map(linha).join("")}</ul>`;
   }
@@ -351,10 +353,18 @@ function renderCardAprovacao(item: Item, estado: Estado): string {
  * Emenda de 2026-09-30 (ADR-062): também a trava da rotina e a ferramenta fora do alcance, os motivos que nenhuma
  * regra "Sempre permitir" pula — sem a frase, o card depois do clique parecia a regra falhando.
  */
-export function porqueDaPausa(i: Pick<Item["itensAprovacao"][number], "motivoManual" | "justificativa" | "origemSensivel">): string {
+export function porqueDaPausa(i: Pick<Item["itensAprovacao"][number], "motivoManual" | "justificativa" | "origemSensivel">, revisor = false): string {
   const ic = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>';
+  // revisto em 2026-10-26 (PR 4 dos modos de aprovação): "Na aprovação automática, o arriscado sempre pergunta" deixa de
+  // ser verdade com o revisor ligado (`FrotaDto.revisor`); aí o cartão diz só o risco. Com a chave desligada, a frase de
+  // sempre, que é o que acontece. O revisor_pediu e o revisor_falhou abertos são o cartão compacto (cartao-revisor.ts);
+  // estas frases ficam para o lote que não veio inteiro do revisor.
   const frase = i.motivoManual === "acao_arriscada"
-    ? `Parou para você: ${!i.origemSensivel && i.justificativa ? `${i.justificativa}. ` : "é uma ação arriscada. "}Na aprovação automática, o arriscado sempre pergunta.`
+    ? `Parou para você: ${!i.origemSensivel && i.justificativa ? `${i.justificativa}.` : "é uma ação arriscada."}${revisor ? "" : " Na aprovação automática, o arriscado sempre pergunta."}`
+    : i.motivoManual === "revisor_pediu"
+      ? `O revisor pediu o seu ok${i.justificativa ? `: ${i.justificativa}` : "."}`
+      : i.motivoManual === "revisor_falhou"
+        ? (i.justificativa ?? "O revisor não respondeu; confira você.")
     : i.motivoManual === "toca_credencial"
       ? "Parou para você: toca uma credencial do Mac. Na aprovação automática, a credencial sempre pergunta; a chave do nod, em qualquer modo."
       : i.motivoManual === "regra_suspensa_conteudo_nao_confiavel"
@@ -367,7 +377,7 @@ export function porqueDaPausa(i: Pick<Item["itensAprovacao"][number], "motivoMan
   return frase ? `<p class="ap-porque">${ic}<span>${esc(frase)}</span></p>` : "";
 }
 
-function renderAprovacao(item: Item, aberta: boolean, conectores: Estado["conectores"]): string {
+function renderAprovacao(item: Item, aberta: boolean, conectores: Estado["conectores"], revisor = false): string {
   const itens = item.itensAprovacao;
   const marcados = itens.filter((i) => i.selecionado).length;
   const temSensivel = itens.some((i) => i.origemSensivel);
@@ -377,7 +387,7 @@ function renderAprovacao(item: Item, aberta: boolean, conectores: Estado["conect
       <div class="ap-oque">${esc(i.textoFinal)}</div>
       <div class="ap-onde">${esc(ondeAcontece(conectores, i.destino.conector))}</div>
       ${i.origemSensivel ? `<p class="justificativa">${esc(i.justificativa ?? JUSTIFICATIVA_PADRAO)}</p>` : ""}
-      ${aberta ? porqueDaPausa(i) : ""}
+      ${aberta ? porqueDaPausa(i, revisor) : ""}
       ${aberta ? detalheTecnico(i) : ""}
       ${tagDesfecho(i, aberta)}
     </div>
@@ -403,7 +413,7 @@ function renderAprovacao(item: Item, aberta: boolean, conectores: Estado["conect
     const resto = unico.destino.conector === "computador" || unico.destino.conector === "terminal" ? botao("decidir-aprovacao-resto", "Pode fazer e o resto desta tarefa", { id: item.decisao.id }) : "";
     return `<div class="ap-unico">
       ${acao}<div class="ap-onde">${esc(ondeAcontece(conectores, unico.destino.conector))}</div>
-      ${aberta ? porqueDaPausa(unico) : ""}
+      ${aberta ? porqueDaPausa(unico, revisor) : ""}
       ${aberta ? detalheTecnico(unico) : ""}
       ${tagDesfecho(unico, aberta)}
     </div>
@@ -412,14 +422,14 @@ function renderAprovacao(item: Item, aberta: boolean, conectores: Estado["conect
   return `<ul class="ap-lista">${itens.map(linha).join("")}</ul>${acoes}`;
 }
 
-function renderAcoes(item: Item, aberta: boolean, estado: Pick<Estado, "conectores" | "marketplace">): string {
+function renderAcoes(item: Item, aberta: boolean, estado: Pick<Estado, "conectores" | "marketplace" | "frota">): string {
   const d = item.decisao;
   const conectores = estado.conectores;
   if (!aberta) return d.estado === "vencida" ? `<div class="acoes">${botao("reabrir", "Reabrir", { id: d.id })}</div>` : "";
   switch (d.tipo) {
     case "aprovacao":
     case "gate_rotina":
-      return renderAprovacao(item, true, conectores);
+      return renderAprovacao(item, true, conectores, estado.frota?.revisor === true);
     // definido em 2026-09-24 (ADR-045): quem não quer retomar dispensa — antes o card só saía vencendo.
     case "retomar_turno":
       return `<div class="acoes"><input class="resposta" data-resposta="${esc(d.id)}" placeholder="o que mudou (opcional)" />${botao("retomar", "Retomar com turno novo", { classe: "pri", id: d.id })}${botao("dispensar", "Dispensar", { id: d.id, titulo: "Tirar da tela sem retomar" })}</div>`;
@@ -528,10 +538,34 @@ function renderItemPergunta(item: Item, estado: Estado): string {
   return `<li class="item-pergunta dec-${esc(item.estadoColuna)}" data-decisao="${esc(d.id)}">${cab}${cartao}</li>`;
 }
 
+/**
+ * O cartão compacto do revisor (PR 4 dos modos de aprovação, tela A3): os dados com os ajudantes da fila. No terminal, o
+ * comando inteiro em "ver comando"; no app, a prévia do que vai ser enviado e o nome técnico em "ver detalhes". Em "Sua
+ * vez", quem pede e "abrir conversa"; na conversa, o cartão fica embaixo da fala e dispensa os dois.
+ */
+function renderCartaoDoRevisor(item: Item, estado: Estado, naConversa: boolean): string {
+  const d = item.decisao;
+  const itens = item.itensAprovacao;
+  const unico = itens.length === 1 ? itens[0] : undefined;
+  const noTerminal = unico?.destino.conector === "terminal";
+  const doApp = (i: Item["itensAprovacao"][number]): string => `<div class="cr-item"><div class="cr-item-txt">${esc(i.textoFinal)}<small>${esc(ondeAcontece(estado.conectores, i.destino.conector))} · ${esc(i.destino.conector)}.${esc(i.destino.ferramenta)}</small></div>${previaDoItem(i)}</div>`;
+  const detalhe = noTerminal && unico
+    ? { rotulo: "ver comando", html: `<pre class="ap-comando"><code>${esc(unico.textoFinal)}</code></pre>` }
+    : { rotulo: itens.length > 1 ? `ver as ${itens.length} ações` : "ver detalhes", html: itens.map(doApp).join("") };
+  const servem = sempreNoCartao(item);
+  const nomes = [...new Set(servem.map((i) => acaoHumana(estado.conectores, i.destino.conector, i.destino.ferramenta)))];
+  const sempre = servem.length ? { titulo: `Vale já para ${nomes.join(" e ")}, em qualquer destino, enquanto o bot não tiver lido conteúdo de fora na tarefa.` } : null;
+  const agente = estado.frota?.agentes.find((a) => a.id === d.agenteId);
+  const cabecalho = naConversa ? undefined : `<div class="cr-cab"><b>${esc(item.agenteNome)}</b><span>· ${esc(haQuanto(item.aguardandoHaMs))}</span>${marcaGemeas(item)}</div>`;
+  const rodape = !naConversa && agente ? `<div class="cr-rodape">${botao("abrir-conversa", "abrir conversa", { classe: "link", dados: { conversa: d.conversaId, agente: d.agenteId } })}</div>` : undefined;
+  return renderCartaoRevisor({ decisaoId: d.id, pergunta: d.frase, motivo: motivoDoCartao(itens), detalhe, sempre, ...(cabecalho ? { cabecalho } : {}), ...(rodape ? { rodape } : {}) }, item.estadoColuna);
+}
+
 function renderItem(item: Item, estado: Estado, naConversa = false): string {
   const d = item.decisao;
   const aberta = item.estadoColuna !== "vencido";
   if (ehPergunta(d.tipo)) return renderItemPergunta(item, estado);
+  if (aberta && d.tipo === "aprovacao" && ehCartaoDoRevisor(item.itensAprovacao)) return renderCartaoDoRevisor(item, estado, naConversa);
   if (aberta && d.tipo === "aprovacao" && item.itensAprovacao.length > 0) return renderCardAprovacao(item, estado);
   const relogio = aberta ? `aguardando ${haQuanto(item.aguardandoHaMs)} · ${PRAZO_POR_TIPO[d.tipo](emQuanto(item.recusaAutomaticaEmMs), item)}` : rotuloVencido(d, estado.agora);
   const parada = d.tipo === "acesso" && aberta ? { marca: marcaRotinaParada(item.proposta, item.rotinaParada, estado.agora), linha: linhaNaoRodaram(item.rotinaParada, estado.agora) } : { marca: "", linha: "" };

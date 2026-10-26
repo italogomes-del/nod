@@ -56,6 +56,15 @@
   --signal-soft: #e6f0fb;
   --focus-ring: var(--ink);
 
+  /* O revisor do Automático (modos de aprovação, PR 4; tela A3, o cartão compacto "estilo Grok"): o azul claro do
+     cartão, a borda, o escudo e o Aprovar. Próprio, e não signal: signal é só o que é NOVO, nunca botão. */
+  --revisor: #1866c0;
+  --on-revisor: #ffffff;
+  --revisor-soft: #eef4fc;
+  --revisor-line: #c6daf3;
+  /* O ladrilho do escudo no cartão (A3). Escudo sobre ele: 4,5:1 no claro, 4,8:1 no escuro. */
+  --revisor-ladrilho: #dbe6fb;
+
   /* Estados */
   --warning: #7a4e08;
   --warning-soft: #fdf5e6;
@@ -121,6 +130,11 @@
     --signal: #4ea3f0;
     --on-signal: #0b1622;
     --signal-soft: #15283c;
+    --revisor: #4ea3f0;
+    --on-revisor: #0b1622;
+    --revisor-soft: #132335;
+    --revisor-line: #26425f;
+    --revisor-ladrilho: #1b3350;
     --warning: #ebbd6a;
     --warning-soft: #2a2214;
     --warning-line: #4d3c1c;
@@ -159,6 +173,11 @@
   --signal: #4ea3f0;
   --on-signal: #0b1622;
   --signal-soft: #15283c;
+  --revisor: #4ea3f0;
+  --on-revisor: #0b1622;
+  --revisor-soft: #132335;
+  --revisor-line: #26425f;
+  --revisor-ladrilho: #1b3350;
   --warning: #ebbd6a;
   --warning-soft: #2a2214;
   --warning-line: #4d3c1c;

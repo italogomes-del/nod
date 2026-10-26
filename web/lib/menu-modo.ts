@@ -7,8 +7,8 @@ import { dialogo } from "../telas/gestao-agentes.ts";
  * dele. Mora fora de telas/aprovacoes.ts para os testes da web (Node, sem DOM) importarem o render e a regra
  * (`reagirMenuModo`) sem puxar `document`.
  */
-export function abrirMenuModo(ancora: HTMLElement, nome: string, atual: ModoAprovacao, escolher: (modo: ModoAprovacao, confirmado: boolean) => void): void {
-  const d = dialogo(renderMenuModo(nome, atual), true);
+export function abrirMenuModo(ancora: HTMLElement, nome: string, atual: ModoAprovacao, escolher: (modo: ModoAprovacao, confirmado: boolean) => void, revisor = false): void {
+  const d = dialogo(renderMenuModo(nome, atual, revisor), true);
   d.classList.add("modo-menu");
   ancora.setAttribute("aria-expanded", "true");
   d.addEventListener("close", () => ancora.setAttribute("aria-expanded", "false"));
