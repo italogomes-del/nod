@@ -178,6 +178,13 @@
   .lc-ctrl, .lc-seta, .lc-quando { grid-column: 3; grid-row: 1 / span 2; align-self: center; margin-left: 12px; }
   .lc-seletor { max-width: 150px; min-height: 44px; }
   .lc-aninhada { margin-left: 14px; }
+  /* NOD-373: a linha da IA ganha uma coluna à esquerda para a alça (com ou sem toque; os 44px ficam no mobile.css). */
+  .lc-linha.prov-ia { grid-template-columns: auto auto minmax(0, 1fr) auto; gap: 0; padding-left: 4px; }
+  .prov-ia .prov-alca { grid-column: 1; grid-row: 1 / span 2; margin: 0 6px 0 0; align-self: center; }
+  .prov-ia .lc-ic { grid-column: 2; }
+  .prov-ia .lc-txt, .prov-ia .lc-status { grid-column: 3; }
+  .prov-ia .lc-ctrl { grid-column: 4; }
+  .prov-ia-item .ia-explica, .prov-ia-item .ia-aviso-nota, .prov-ia-item .ia-fluxo { margin-left: 14px; margin-right: 14px; }
   .cl-mais-bt { min-width: 44px; min-height: 44px; }
   /* O "…" vira folha, presa à base da tela. */
   .lc-linha .cl-menu { position: fixed; left: 8px; right: 8px; top: auto; bottom: 8px; width: auto; max-height: 75%; overflow-y: auto; z-index: 60; }

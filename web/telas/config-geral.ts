@@ -8,8 +8,8 @@ import { ESCOLHAS_TEMA, type EscolhaTema } from "../lib/tema.ts";
 /**
  * NOD-367 (protótipo v2 do Gil, aprovado em 2026-10-26): Configurações › Geral junta o que eram Preferências e Avisos, em
  * quatro blocos — Aparência (tema), Avisos (os dois switches), Ajuda (onboarding e atalhos; o menu "Ajuda" abre aqui e
- * foca `#ajuda`) e Avançado, recolhido: Modo dev, as chaves de experimento (ADR-111/112) e o status do banco, que saiu do
- * rodapé de todas as telas.
+ * foca `#ajuda`) e Avançado, recolhido: Modo dev, as chaves de experimento (ADR-111/112). O status do banco saiu do rodapé
+ * e, na NOD-373, também do Avançado: o banco é do nod e serve a todos, não é um ajuste da pessoa.
  */
 
 /** As chaves de experimento (ADR-111; ADR-112 soma o Modo WhatsApp), com a dica que antes ficava no title do menu. */
@@ -84,8 +84,6 @@ export type DadosGeral = {
   avisos: EstadoAvisos;
   modoDev: boolean;
   experimentos: Experimentos;
-  /** "Banco persistente · porta 5432"; null = o servidor não disse. */
-  banco: { texto: string; regime: string } | null;
 };
 
 export function renderGeral(d: DadosGeral, ui: ConfigUi): string {
@@ -102,7 +100,6 @@ export function renderGeral(d: DadosGeral, ui: ConfigUi): string {
     atalho("Fechar e voltar", ["esc"], "Esc"),
   ], { id: "ajuda" });
   const aberto = ui.abertos.includes("avancado");
-  const tomBanco: TomStatus = d.banco?.regime === "persistente" ? "ok" : d.banco?.regime === "efemero" ? "atencao" : "neutro";
   const avancado = listaAninhada([
     linhaConfig({
       titulo: "Modo dev",
@@ -114,7 +111,6 @@ export function renderGeral(d: DadosGeral, ui: ConfigUi): string {
       detalhe: e.dica,
       controle: { tipo: "switch", ligado: d.experimentos[e.chave] ?? false, acao: "alternar-experimento", dados: { experimento: e.chave } },
     })),
-    ...(d.banco ? [linhaConfig({ titulo: "Banco", detalhe: "Onde o servidor deste nod guarda os dados", status: { texto: d.banco.texto, tom: tomBanco } })] : []),
   ]);
   const blocoAvancado = grupoConfig(null, [linhaConfig({
     titulo: "Avançado",

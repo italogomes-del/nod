@@ -500,7 +500,6 @@ div.mac-medidor { padding-right: 36px; }
 .prov-ordem { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin: 0 2px 8px; font-size: 12.5px; color: var(--ink-3); }
 .prov-ordem span:first-child { font-weight: 600; color: var(--ink-2); }
 .prov-ia-item { transition: box-shadow .12s, opacity .12s; }
-.prov-ia-item + .prov-ia-item { border-top: 1px solid var(--line); }
 .prov-ia-item.arrastando, .int-ia.arrastando { opacity: .45; }
 .prov-ia-item.alvo { box-shadow: inset 0 3px 0 0 var(--action); }
 .prov-alca, .int-alca { flex: none; width: 22px; height: 32px; margin: 0 -4px; padding: 0; border: 0; border-radius: 6px; background: none;
@@ -508,8 +507,12 @@ div.mac-medidor { padding-right: 36px; }
 .prov-alca:hover, .int-alca:hover { color: var(--ink); background: var(--surface-raised); }
 .prov-alca:focus-visible, .int-alca:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
 .prov-pos { flex: none; width: 12px; font-size: 12px; color: var(--ink-3); text-align: center; font-variant-numeric: tabular-nums; }
-.provedores .ia-nota { margin: 12px 2px 0; font-size: 13px; color: var(--ink-3); line-height: 1.5; }
-.provedores .ia-nota b { font-weight: 500; color: var(--ink-2); }
+/* NOD-373 (#j3-1/proposta): cada IA numa linhaConfig — a alça à esquerda, a posição e o logo no ícone. */
+.lc-linha.prov-ia { gap: 10px; padding-left: 10px; }
+.prov-ia .lc-ic { display: flex; align-items: center; gap: 6px; }
+.prov-ia .cl-logo { width: 28px; height: 28px; }
+.prov-ia .cl-logo svg { width: 16px; height: 16px; }
+.prov-ordem-grupo .lc-nota b { font-weight: 500; color: var(--ink-2); }
 .provedores .prov-avancado { margin-top: 18px; }
 /* ADR-101 (NOD-211, protótipo v3): as várias contas de uma IA, embaixo do cartão dela. */
 .contas-ia { margin: 0 14px 14px 44px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-side); font-size: 13px; }
@@ -553,7 +556,7 @@ div.mac-medidor { padding-right: 36px; }
 .ob-card-ia.aberto { gap: 10px; }
 .ia-verificar { flex: none; width: 32px; height: 32px; display: inline-grid; place-items: center; border: 0; border-radius: 8px; background: none;
   color: var(--ink-3); cursor: pointer; opacity: 0; transition: opacity .15s, background .15s; }
-.ia-linha:hover .ia-verificar, .ia-verificar:focus-visible, .ia-verificar.girando { opacity: 1; }
+.ia-linha:hover .ia-verificar, .prov-ia:hover .ia-verificar, .prov-ia:focus-within .ia-verificar, .ia-verificar:focus-visible, .ia-verificar.girando { opacity: 1; }
 .ia-verificar:hover { background: var(--surface-raised); color: var(--ink); }
 .ia-verificar:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
 .ia-verificar.girando svg { animation: ob-gira .9s linear infinite; }
@@ -570,6 +573,8 @@ div.mac-medidor { padding-right: 36px; }
 /* Os passos dentro do cartão: instalar, entrar, testar. */
 .ia-fluxo { display: flex; flex-direction: column; margin: -6px 18px 14px 126px; padding: 0; list-style: none; }
 .ob-card-ia .ia-fluxo { margin: 2px 0 0 60px; }
+/* NOD-373: na linha da IA (linhaConfig), o que vem embaixo alinha com o título (alça + posição + logo). */
+.prov-ia-item .ia-explica, .prov-ia-item .ia-aviso-nota, .prov-ia-item .ia-fluxo { margin-left: 92px; }
 .ia-passo { display: flex; gap: 12px; align-items: flex-start; padding: 8px 0; }
 .ia-passo-marca { width: 22px; height: 22px; box-sizing: border-box; flex: none; border-radius: 50%; border: 1px solid var(--line-strong);
   color: var(--ink-3); display: grid; place-items: center; font-size: 11.5px; font-weight: 600; }

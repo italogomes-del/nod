@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
 import { ESTADOS_IA, type EstadoIa, type LoginDaIa } from "../../../src/contracts/estado-ia.ts";
 import { HARNESSES } from "../../../src/contracts/harness.ts";
 import type { IaDaPessoa } from "../../../src/contracts/inteligencia.ts";
@@ -7,7 +8,7 @@ import { estadoDaIa } from "../../../src/domain/estado-ia.ts";
 import { estadoInicial, type Estado } from "../../../web/estado/reducer.ts";
 import { haQuanto } from "../../../web/lib/relogio.ts";
 import { AJUDA_IA, estadoDoServidor, LINKS_AJUDA, pilhaDeAvatares, renderCartaoIa, UI_IAS_INICIAL, vistaDaIa, type ContextoCartao, type IaMac, type UiIas } from "../../../web/telas/cartao-ia.ts";
-import { renderProvedores } from "../../../web/telas/provedores.ts";
+import { chaveDoMenuDaIa, linhaDaIa, renderProvedores } from "../../../web/telas/provedores.ts";
 import { SECOES_ESPACO } from "../../../web/telas/espaco.ts";
 import { htmlMenuConta } from "../../../web/telas/menu-conta.ts";
 
@@ -212,10 +213,63 @@ describe("Provedores de IA (a seção que era Conexão)", () => {
   it("o título com os logos redondos, a ordem arrastável e o Recomendado", () => {
     const html = renderProvedores(estado());
     expect(html).toContain(`<h2 class="prov-titulo">${pilhaDeAvatares()}Provedores de IA</h2>`);
-    expect(html).toContain("<span>Ordem dos seus bots</span><span>arraste para mudar · cada bot pode ter a dele</span>");
-    expect(html).toContain('data-ordem-lista="pessoa"');
+    expect(html).toContain('<h3 class="lc-grupo-tit">Ordem dos seus bots</h3><div class="lc-lista" data-ordem-lista="pessoa">');
     expect(html.indexOf('data-ordem-item="claude-cli"')).toBeLessThan(html.indexOf('data-ordem-item="codex-cli"'));
-    expect(html).toContain("Recomendado: o Claude com <b>Opus</b> e o ChatGPT com <b>Sol</b>.");
+    expect(html).toContain("Recomendado: o Claude com <b>Opus</b> e o ChatGPT com <b>Sol</b>.</p></section>");
+  });
+
+  it("NOD-373 (#j3-1): cada IA é uma linhaConfig com a alça focável à esquerda, o título e o status com ponto de cor, sem o cartão antigo", () => {
+    const html = renderProvedores(estado());
+    const itens = [...html.matchAll(/<div class="prov-ia-item" data-ordem-item="([^"]+)"><div class="lc-linha prov-ia">(.*?)<\/div>/g)];
+    expect(itens.map((m) => m[1])).toEqual(["claude-cli", "codex-cli"]);
+    const [claude, codex] = itens.map((m) => m[2]!);
+    // A alça vem primeiro e fora do ícone aria-hidden: é ela que recebe o foco e as setas (ordem-arrastavel.ts).
+    expect(claude).toMatch(/^<button type="button" class="prov-alca" data-alca-ordem aria-label="Mover o Claude na ordem \(setas para cima e para baixo\)">/);
+    expect(claude).toMatch(/<\/button><span class="lc-ic" aria-hidden="true"><span class="prov-pos">1<\/span><span class="cl-logo"/);
+    expect(claude).toContain('<span class="lc-txt"><b>Claude</b><small>Claude Code');
+    expect(claude).toContain('<span class="lc-status lc-tom-ok" role="status"><i aria-hidden="true"></i>Conectado · em uso</span>');
+    expect(codex).toContain('<span class="prov-pos">2</span>');
+    expect(codex).toContain('<span class="lc-status lc-tom-neutro" role="status"><i aria-hidden="true"></i>Não está no seu Mac</span>');
+    expect(html).not.toContain('class="ia-linha"');
+    expect(html).not.toContain('class="prov-ordem"');
+    expect(html.match(/<p class="lc-nota">/g)).toHaveLength(1);
+  });
+
+  it("NOD-373: o tom da IA vira o ponto da linha (ok → ok, aviso → atenção, mudo → neutro); a conta vai no detalhe", () => {
+    const base = vistaDaIa("claude-cli", { servidor: servidor(PRONTO, PRONTO), ui: UI_IAS_INICIAL, agora: AGORA, onde: "provedores" });
+    expect(linhaDaIa({ ...base, tom: "ok" }, UI_IAS_INICIAL, 1)).toContain('lc-status lc-tom-ok"');
+    expect(linhaDaIa({ ...base, tom: "aviso", texto: "Tem versão nova" }, UI_IAS_INICIAL, 1)).toContain('<span class="lc-status lc-tom-atencao" role="status"><i aria-hidden="true"></i>Tem versão nova</span>');
+    expect(linhaDaIa({ ...base, tom: "mudo" }, UI_IAS_INICIAL, 1)).toContain('lc-status lc-tom-neutro"');
+    expect(linhaDaIa({ ...base, conta: "a@b.com" }, UI_IAS_INICIAL, 1)).toContain('<span class="sr-only">Conta: </span>a@b.com');
+  });
+
+  it("revisão NOD-373 (WCAG 2.5.7): o “…” da IA tem Subir e Descer, sem Subir na primeira nem Descer na última", () => {
+    const fechado = renderProvedores(estado());
+    expect(fechado).toContain(`data-act="cl-menu" data-id="${chaveDoMenuDaIa("claude-cli")}" aria-haspopup="menu" aria-expanded="false" aria-label="Mais ações de Claude"`);
+    expect(fechado).not.toContain("Subir na ordem");
+    const aberto = (ia: string) => renderProvedores(estado({ contasUi: { ...estadoInicial.contasUi, menu: chaveDoMenuDaIa(ia) } }));
+    const primeira = aberto("claude-cli");
+    expect(primeira).toContain('data-act="ia-ordem-passo" data-ia="claude-cli" data-passo="1"><svg');
+    expect(primeira).toContain("Descer na ordem");
+    expect(primeira).not.toContain("Subir na ordem");
+    const ultima = aberto("codex-cli");
+    expect(ultima).toContain('data-act="ia-ordem-passo" data-ia="codex-cli" data-passo="-1"');
+    expect(ultima).not.toContain("Descer na ordem");
+    expect(ultima.match(/role="menu"/g)).toHaveLength(1);
+  });
+
+  it("revisão NOD-373: o CSS mostra o Verificar no hover da linha nova, põe a alça na coluna dela até 720px e dá 44px no toque", () => {
+    const ler = (f: string) => readFileSync(new URL(`../../../web/${f}`, import.meta.url), "utf8");
+    expect(ler("navegacao.css")).toMatch(/\.prov-ia:hover \.ia-verificar, \.prov-ia:focus-within \.ia-verificar[^{]*\{ opacity: 1; \}/);
+    expect(ler("navegacao.css")).toContain(".lc-linha.prov-ia { gap: 10px; padding-left: 10px; }");
+    const cfg = ler("configuracoes.css");
+    const bloco720 = cfg.slice(cfg.indexOf("@media (max-width: 720px)"));
+    expect(bloco720).toContain(".lc-linha.prov-ia { grid-template-columns: auto auto minmax(0, 1fr) auto; gap: 0;"); // o gap de 10px do desktop não soma às margens no grid
+    expect(bloco720).toMatch(/\.prov-ia \.prov-alca \{ grid-column: 1; grid-row: 1 \/ span 2;/);
+    const mobile = ler("mobile.css");
+    expect(mobile).toContain(".prov-ia .prov-alca { width: 44px; height: 44px; }");
+    expect(mobile).toContain(".prov-ia .lc-ctrl button { min-height: 44px; }");
+    expect(mobile).toContain(".lc-linha.prov-ia { min-height: 60px; }");
   });
 
   it("a ordem segue a da pessoa", () => {

@@ -3,6 +3,7 @@ import type { DetalhesDasContas } from "../../src/contracts/desktop.ts";
 import type { MaquinaDto } from "../../src/contracts/maquina.ts";
 import { contaDoLogin, idDoLogin, maquinaDoLogin, type LoginNaTela, type UiContas } from "../telas/contas-lista.ts";
 import { ErroApi } from "./erro-api.ts";
+import { PREFIXO_MENU_DA_IA } from "./ordem.ts";
 
 /**
  * Os cliques da lista única de contas (definido em 2026-10-13, ADR-102; render em web/telas/contas-lista.ts). A web só
@@ -161,7 +162,7 @@ export function criarContasDaPessoa(d: DepsContasDaPessoa) {
       const ids = new Set(contas.contas.map((c) => c.id));
       const u = d.ui();
       const limpo: Partial<UiContas> = {};
-      if (u.menu && !ids.has(u.menu)) limpo.menu = null;
+      if (u.menu && !u.menu.startsWith(PREFIXO_MENU_DA_IA) && !ids.has(u.menu)) limpo.menu = null; // o "…" de uma IA não é de conta
       if (u.renomear && !ids.has(u.renomear)) limpo.renomear = null;
       if (u.detalhe && !ids.has(u.detalhe)) limpo.detalhe = null;
       if (Object.keys(limpo).length) d.mudar(limpo);

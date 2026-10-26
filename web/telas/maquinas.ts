@@ -96,21 +96,44 @@ export function leituraNoCartao(estado: Pick<Estado, "trabalhos">, id: string): 
   return l ? textoNoMenu(`<span class="maq-nivel nivel-${l.nivel}" aria-hidden="true"></span>${esc(l.curto)}. ${esc(l.texto)}`, `leitura-${id}`) : "";
 }
 
-/** O quanto os bots podem usar (ADR-085): um valor só, no "…" do Mac (ou de cada máquina, sem Mac). */
+/** O quanto os bots podem usar (ADR-085): um valor só, no "…" de uma máquina só (NOD-373: o Mac; sem Mac, a padrão). */
 export function itensDoUso(estado: Estado): string {
   const radios = USOS.map((u) => itemMenu("uso-do-mac", "", u.nome, { papel: "menuitemradio", marcado: u.id === estado.usoDoMac, dados: { uso: u.id }, nota: u.explicacao })).join("");
   return `<div role="group" aria-labelledby="uso-tit"><span class="cl-menu-tit" id="uso-tit">Quanto os bots podem usar</span>${radios}</div>${textoNoMenu("Um valor só, o de hoje: vale para todas as máquinas. Cada uma segura trabalho novo pela própria leitura.", "uso-nota")}`;
 }
 
+/** A máquina que tem o controle do uso (NOD-373): o id e o nome que aparece na lista. */
+export type DonoDoUso = { id: string; nome: string };
+
+/**
+ * NOD-373: o controle "Quanto os bots podem usar" é um valor global e fica num "…" só — o do Mac; sem Mac, o da máquina
+ * padrão (ou, se ela não for de trabalho, a primeira de trabalho). null = nenhuma máquina para guardá-lo.
+ */
+export function donoDoUso(todas: readonly MaquinaDto[], idsDoMac: ReadonlySet<string>, macSemChave: DonoDoUso | null, padraoId: string | null): DonoDoUso | null {
+  if (macSemChave) return macSemChave;
+  const mac = todas.find((m) => idsDoMac.has(m.id) && !soComputador(m));
+  if (mac) return { id: mac.id, nome: mac.nome };
+  const trabalho = maquinasDeTrabalho(todas);
+  const padrao = trabalho.find((m) => m.id === padraoId) ?? trabalho[0];
+  return padrao ? { id: padrao.id, nome: padrao.nome } : null;
+}
+
+/** O uso no "…": o controle na máquina dona; nas outras de trabalho, só a linha que diz onde ele fica. */
+function usoNoMenu(estado: Estado, m: MaquinaDto, usoEm: DonoDoUso | null): string {
+  if (soComputador(m) || !usoEm) return "";
+  if (usoEm.id === m.id) return `${itensDoUso(estado)}<hr>`;
+  return textoNoMenu(`O limite de uso fica no “…” da máquina ${esc(usoEm.nome)}.`, `uso-onde-${m.id}`);
+}
+
 /** ADR-102 (G2-M3) + NOD-367: o "…" da máquina — a leitura, o uso, renomear, contas, bots, a chave e desconectar. */
-function itensDaMaquina(estado: Estado, m: MaquinaDto, comUso: boolean, ehEsteMac: boolean): string {
+function itensDaMaquina(estado: Estado, m: MaquinaDto, usoEm: DonoDoUso | null, ehEsteMac: boolean): string {
   const bots = botsDaPessoa(estado).filter((b) => maquinaDoBot(estado, b)?.id === m.id).map((b) => b.nome);
   const chave = (estado.chaves ?? []).find((c) => c.id === m.id && !c.revogadaEm);
   const contas = estado.contasIa?.disponivel ? "" : iasEmTexto(m);
   return [
     m.conectada ? leituraNoCartao(estado, m.id) : "",
     contas ? textoNoMenu(esc(contas), `contas-${m.id}`) : "",
-    comUso && !soComputador(m) ? `${itensDoUso(estado)}<hr>` : "",
+    usoNoMenu(estado, m, usoEm),
     ehEsteMac ? itemMenu("maq-abrir", ICONE.monitor, "O que roda agora", { dados: { recolhe: "mac-agora" }, nota: "memória, processador, disco e quem está trabalhando" }) : "",
     itemMenu("maq-renomear", ICONE.lapis, "Renomear máquina", { dados: { maquina: m.id } }),
     estado.contasIa?.disponivel && !soComputador(m) ? itemMenu("cl-gerenciar", ICONE.info, "Gerenciar contas", { dados: { maquina: m.id }, nota: estado.contasIa ? textoDasContas(estado, m) : "" }) : "",
@@ -260,7 +283,7 @@ function detalhesDaChave(estado: Estado, m: MaquinaDto): string {
 }
 
 /** Uma máquina: a linha (ícone, nome, detalhe, status e "…") e, embaixo, o que se abre dela. */
-function linhaDaMaquina(estado: Estado, m: MaquinaDto, comUso: boolean, ehEsteMac: boolean): string {
+function linhaDaMaquina(estado: Estado, m: MaquinaDto, usoEm: DonoDoUso | null, ehEsteMac: boolean): string {
   const renomear = estado.contasUi.maquinaRenomear === m.id
     ? `<form class="cl-renomear maq-renomear" data-form="maq-renomear" data-maquina="${esc(m.id)}"><input name="nome" maxlength="60" value="${esc(m.nome)}" aria-label="Nome da máquina" data-cl-autofoco data-manter-foco="maq-renomear"><button type="submit" class="bt sm">Salvar</button><button type="button" class="bt link sm" data-act="maq-renomear-fechar">Cancelar</button></form>`
     : "";
@@ -269,7 +292,7 @@ function linhaDaMaquina(estado: Estado, m: MaquinaDto, comUso: boolean, ehEsteMa
     detalhe: detalheDaMaquina(estado, m, ehEsteMac),
     icone: m.plataforma === "darwin" ? ICONE.laptop : ICONE.servidor,
     status: statusDaMaquina(estado, m),
-    controle: { tipo: "menu", acao: "maq-menu", aberto: estado.contasUi.maquinaMenu === m.id, rotulo: m.nome, itens: itensDaMaquina(estado, m, comUso, ehEsteMac), dados: { maquina: m.id } },
+    controle: { tipo: "menu", acao: "maq-menu", aberto: estado.contasUi.maquinaMenu === m.id, rotulo: m.nome, itens: itensDaMaquina(estado, m, usoEm, ehEsteMac), dados: { maquina: m.id } },
   });
   const extras = soComputador(m) ? "" : `${nuvemNoCartao(estado, m)}${formConectarNuvem(estado, m)}`;
   return `<div class="cfg-maq" data-maquina-linha="${esc(m.id)}">${linha}${renomear}${detalhesDaChave(estado, m)}${extras}${telasNaMaquina(estado, m)}${ehEsteMac ? oQueRodaNoMac(estado) : ""}</div>`;
@@ -362,8 +385,11 @@ export function renderMaquinas(estado: Estado): string {
   const leituras = maquinasDe(estado.trabalhos) ?? [];
   // O Mac do servidor que não tem chave (ADR-092) entra como "Este Mac", com a leitura dele.
   const macSemChave = leituras.find((l) => l.ehMac && !todas.some((m) => m.id === l.id)) ?? null;
-  const idsDoMac = new Set(leituras.filter((l) => l.ehMac).map((l) => l.id));
-  const temMac = macSemChave !== null || todas.some((m) => idsDoMac.has(m.id));
+  // Revisão NOD-373: o Mac se reconhece pela leitura ou pela plataforma (que vem da conexão viva). Mac sem contato conta como
+  // "sem Mac" (critério 7 da NOD-373): o controle vai para a padrão até ele voltar.
+  const idsDoMac = new Set(leituras.filter((l) => l.ehMac).map((l) => l.id)); // "Este Mac": só o do servidor
+  const idsDeMac = new Set([...idsDoMac, ...todas.filter((m) => m.plataforma === "darwin").map((m) => m.id)]);
+  const usoEm = donoDoUso(todas, idsDeMac, macSemChave ? { id: macSemChave.id, nome: macSemChave.nome } : null, dados?.padraoId ?? null);
   const cab = `<h2>Máquinas</h2><p class="intro">Onde seus bots trabalham. Cada bot roda o Claude Code ou o Codex na máquina dele; a máquina de um bot se escolhe na ficha dele.</p>`;
   const conectar = estado.conectarMaquina ? renderConectar(estado, estado.conectarMaquina) : "";
   const regras = noMac
@@ -378,7 +404,7 @@ export function renderMaquinas(estado: Estado): string {
     : "";
   const linhas = [
     ...(macSemChave ? [linhaDoMacSemChave(estado, macSemChave.id, macSemChave.nome)] : []),
-    ...todas.map((m) => linhaDaMaquina(estado, m, !temMac || idsDoMac.has(m.id), idsDoMac.has(m.id))),
+    ...todas.map((m) => linhaDaMaquina(estado, m, usoEm, idsDoMac.has(m.id))),
   ];
   const suas = !dados
     ? grupoConfig("Suas máquinas", [], { notaHtml: `<span role="status">Verificando…</span>` })

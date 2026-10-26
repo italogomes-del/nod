@@ -103,7 +103,7 @@ describe("tema", () => {
 
   // NOD-367: o tema é um seletor nativo em Configurações › Geral › Aparência.
   it("a escolha em Geral marca a opção atual", () => {
-    const html = renderGeral({ tema: "escuro", avisos: { onde: "mac", situacao: "ligados" }, modoDev: false, experimentos: { calibracao: false, memoriaLonga: false, whatsapp: false }, banco: null }, CONFIG_UI_INICIAL);
+    const html = renderGeral({ tema: "escuro", avisos: { onde: "mac", situacao: "ligados" }, modoDev: false, experimentos: { calibracao: false, memoriaLonga: false, whatsapp: false } }, CONFIG_UI_INICIAL);
     expect(html).toContain('data-act-change="escolher-tema"');
     expect(html).toContain('<option value="escuro" selected>');
     expect(html).toContain('<option value="sistema">');

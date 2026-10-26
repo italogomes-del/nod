@@ -219,6 +219,11 @@
   .ia-linha { gap: 10px; padding: 14px 12px; }
   .ia-linha .ob-logo { width: 36px; height: 36px; }
   .prov-pos { display: none; }
+  /* NOD-373 (critério 5): a alça e a linha da IA com alvo de toque de 44 px (o grid fica no configuracoes.css, ≤ 720px). */
+  .lc-linha.prov-ia { min-height: 60px; }
+  .prov-ia .prov-alca { width: 44px; height: 44px; }
+  .prov-ia .lc-ctrl button { min-height: 44px; }
+  .prov-ia .ia-verificar { min-width: 44px; margin-left: 0; }
   .ia-linha .ob-pilula { height: 34px; padding: 0 12px; font-size: 13px; }
   .ia-verificar { width: 28px; margin-left: -4px; }
   .ia-fluxo, .ia-explica, .ia-aviso-nota { margin-left: 14px; margin-right: 14px; }

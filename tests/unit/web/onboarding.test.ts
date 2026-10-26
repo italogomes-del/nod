@@ -613,7 +613,7 @@ describe("reducer: resolverInicio e o onboarding", () => {
 // NOD-367: "Ver o onboarding de novo" saiu do menu e mora em Configurações › Geral › Ajuda.
 describe("Configurações › Geral", () => {
   it("tem 'Ver o onboarding de novo' no bloco Ajuda", () => {
-    const html = renderGeral({ tema: "sistema", avisos: { onde: "mac", situacao: "ligados" }, modoDev: false, experimentos: { calibracao: false, memoriaLonga: false, whatsapp: false }, banco: null }, CONFIG_UI_INICIAL);
+    const html = renderGeral({ tema: "sistema", avisos: { onde: "mac", situacao: "ligados" }, modoDev: false, experimentos: { calibracao: false, memoriaLonga: false, whatsapp: false } }, CONFIG_UI_INICIAL);
     expect(html).toContain("Ver o onboarding de novo");
     expect(html).toContain('data-act="ver-onboarding"');
     expect(html.indexOf('id="ajuda"')).toBeLessThan(html.indexOf("Ver o onboarding de novo"));

@@ -34,7 +34,10 @@ export type LinhaConfig = {
   detalheHtml?: string;
   /** HTML do ícone (SVG ou mascote). */
   icone?: string;
-  status?: { texto: string; tom: TomStatus };
+  /** HTML focável antes do ícone (a alça de arrastar de Provedores, NOD-373): o `.lc-ic` é aria-hidden, então ela fica fora. */
+  antes?: string;
+  /** `vivo`: o status é lido quando muda (role="status"). */
+  status?: { texto: string; tom: TomStatus; vivo?: boolean };
   /** A data numa coluna à direita (Feedback). */
   quando?: string;
   classe?: string;
@@ -48,8 +51,8 @@ export type LinhaConfig = {
 const dadosAttr = (dados: Record<string, string> | undefined): string =>
   dados ? Object.entries(dados).map(([k, v]) => ` data-${k}="${esc(v)}"`).join("") : "";
 
-export function statusLinha(s: { texto: string; tom: TomStatus }): string {
-  return `<span class="lc-status lc-tom-${s.tom}"><i aria-hidden="true"></i>${esc(s.texto)}</span>`;
+export function statusLinha(s: { texto: string; tom: TomStatus; vivo?: boolean }): string {
+  return `<span class="lc-status lc-tom-${s.tom}"${s.vivo ? ' role="status"' : ""}><i aria-hidden="true"></i>${esc(s.texto)}</span>`;
 }
 
 export function switchLinha(c: Extract<ControleLinha, { tipo: "switch" }>, rotulo: string): string {
@@ -101,7 +104,7 @@ export function normalizarBusca(texto: string): string {
 
 function miolo(l: LinhaConfig): string {
   const detalhe = l.detalheHtml ?? (l.detalhe ? esc(l.detalhe) : "");
-  return `${l.icone ? `<span class="lc-ic" aria-hidden="true">${l.icone}</span>` : ""}<span class="lc-txt"><b>${esc(l.titulo)}</b>${detalhe ? `<small>${detalhe}</small>` : ""}</span>${l.status ? statusLinha(l.status) : ""}${l.quando ? `<span class="lc-quando">${esc(l.quando)}</span>` : ""}`;
+  return `${l.antes ?? ""}${l.icone ? `<span class="lc-ic" aria-hidden="true">${l.icone}</span>` : ""}<span class="lc-txt"><b>${esc(l.titulo)}</b>${detalhe ? `<small>${detalhe}</small>` : ""}</span>${l.status ? statusLinha(l.status) : ""}${l.quando ? `<span class="lc-quando">${esc(l.quando)}</span>` : ""}`;
 }
 
 const SETA = `<span class="lc-seta" aria-hidden="true">${ICONE.seta}</span>`;
@@ -126,10 +129,10 @@ export function linhaConfig(l: LinhaConfig): string {
 }
 
 /** Um grupo de linhas com título (opcional), contagem e nota embaixo. `linhas` já em HTML. */
-export function grupoConfig(titulo: string | null, linhas: readonly string[], extra: { contagem?: number; nota?: string; notaHtml?: string; id?: string; classe?: string; aninhada?: boolean } = {}): string {
+export function grupoConfig(titulo: string | null, linhas: readonly string[], extra: { contagem?: number; nota?: string; notaHtml?: string; id?: string; classe?: string; aninhada?: boolean; listaAttrs?: string } = {}): string {
   const tit = titulo ? `<h3 class="lc-grupo-tit"${extra.id ? ` id="${esc(extra.id)}" tabindex="-1"` : ""}>${esc(titulo)}${extra.contagem !== undefined ? `<span>${extra.contagem}</span>` : ""}</h3>` : "";
   const nota = extra.notaHtml ?? (extra.nota ? esc(extra.nota) : "");
-  const lista = linhas.length ? `<div class="lc-lista${extra.aninhada ? " lc-aninhada" : ""}">${linhas.join("")}</div>` : "";
+  const lista = linhas.length ? `<div class="lc-lista${extra.aninhada ? " lc-aninhada" : ""}"${extra.listaAttrs ? ` ${extra.listaAttrs}` : ""}>${linhas.join("")}</div>` : "";
   return `<section class="lc-grupo${extra.classe ? ` ${extra.classe}` : ""}">${tit}${lista}${nota ? `<p class="lc-nota">${nota}</p>` : ""}</section>`;
 }
 

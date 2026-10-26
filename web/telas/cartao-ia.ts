@@ -578,22 +578,35 @@ function htmlPasso(v: VistaIa, p: PassoIa, n: number, ui: UiIas): string {
 export function renderCartaoIa(v: VistaIa, ui: UiIas, opcoes: { arrastar?: { pos: number }; verificar?: boolean } = {}): string {
   const marca = v.tom === "ok" ? ICONE_IA.certo : v.tom === "aviso" ? ICONE_IA.aviso : "";
   const classeEstado = v.tom === "mudo" ? "" : ` class="${v.tom}"`;
-  const alca = opcoes.arrastar
-    ? `<button type="button" class="prov-alca" data-alca-ordem aria-label="Mover o ${esc(v.nome)} na ordem (setas para cima e para baixo)">${ICONE_IA.alca}</button><span class="prov-pos" aria-hidden="true">${opcoes.arrastar.pos}</span>`
-    : "";
+  const alca = opcoes.arrastar ? `${alcaDaIa(v)}<span class="prov-pos" aria-hidden="true">${opcoes.arrastar.pos}</span>` : "";
+  const conta = v.conta ? `<span class="ia-conta" title="${esc(v.conta)}">${ICONE_IA.pessoa}<span class="ia-conta-txt"><span class="sr-only">Conta: </span>${esc(v.conta)}</span></span>` : "";
+  const linha = `<div class="ia-linha">${alca}${logoDaIa(v.ia)}<div class="ob-ia-txt"><b>${esc(v.nome)}</b><span${classeEstado} role="status">${marca}${esc(v.texto)}</span>${conta}</div>${acoesDaIa(v, ui, opcoes)}</div>`;
+  return linha + abaixoDaIa(v, ui);
+}
+
+/** A alça de arrastar (ordem-arrastavel.ts: arraste ou setas para cima e para baixo). */
+export function alcaDaIa(v: VistaIa): string {
+  return `<button type="button" class="prov-alca" data-alca-ordem aria-label="Mover o ${esc(v.nome)} na ordem (setas para cima e para baixo)">${ICONE_IA.alca}</button>`;
+}
+
+/** Os botões à direita da IA: o giro, Trocar conta, a ação do estado e o Verificar. */
+export function acoesDaIa(v: VistaIa, ui: UiIas, opcoes: { verificar?: boolean } = {}): string {
   const gira = v.girando ? GIRA : "";
   const botao = v.botao ? `<button type="button" class="ob-pilula${v.botao.destaque ? "" : " contorno"}" data-act="${v.botao.act}" data-ia="${v.ia}"${v.botao.agora ? ' data-agora="1"' : ""}>${esc(v.botao.rotulo)}</button>` : "";
   const trocar = v.trocar ? `<button type="button" class="${v.trocar === "link" ? "ob-link ia-trocar" : "ob-pilula contorno"}" data-act="ia-trocar" data-ia="${v.ia}" aria-label="Trocar a conta do ${esc(v.nome)}">Trocar conta</button>` : "";
-  const conta = v.conta ? `<span class="ia-conta" title="${esc(v.conta)}">${ICONE_IA.pessoa}<span class="ia-conta-txt"><span class="sr-only">Conta: </span>${esc(v.conta)}</span></span>` : "";
   const verificar = opcoes.verificar !== false && v.podeVerificar
     ? `<span class="ia-dica"><button type="button" class="ia-verificar${ui.verificando === v.ia ? " girando" : ""}" data-act="ia-verificar" data-ia="${v.ia}" aria-label="Verificar o ${esc(v.nome)} de novo">${ICONE_IA.verificar}</button><span class="ia-balao" role="tooltip">${esc(v.dica)}</span></span>`
     : "";
-  const linha = `<div class="ia-linha">${alca}${logoDaIa(v.ia)}<div class="ob-ia-txt"><b>${esc(v.nome)}</b><span${classeEstado} role="status">${marca}${esc(v.texto)}</span>${conta}</div>${gira}${trocar}${botao}${verificar}</div>`;
+  return `${gira}${trocar}${botao}${verificar}`;
+}
+
+/** O que vem embaixo da linha da IA: o fluxo de passos, a explicação, a nota e o "Prefere o terminal?". */
+export function abaixoDaIa(v: VistaIa, ui: UiIas): string {
   const fluxo = v.passos ? `<ol class="ia-fluxo" aria-live="polite">${v.passos.map((p, i) => htmlPasso(v, p, i + 1, ui)).join("")}</ol>` : "";
   const explica = v.explica ? `<div class="ia-explica" role="status"><p>${esc(v.explica)}</p></div>` : "";
   const nota = v.nota ? `<p class="ia-aviso-nota" role="status">${esc(v.nota)}</p>` : "";
   const terminal = v.terminal
     ? `<details class="ia-terminal"><summary class="cl-terminal-link">Prefere o terminal?</summary><p class="cl-terminal">No Terminal deste Mac: <code>${esc(v.terminal)}</code> <button type="button" class="ob-link" data-act="copiar-texto" data-texto="${esc(v.terminal)}">Copiar</button></p></details>`
     : "";
-  return linha + fluxo + explica + nota + terminal;
+  return fluxo + explica + nota + terminal;
 }

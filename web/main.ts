@@ -30,6 +30,7 @@ import type { ContasIaDto } from "../src/contracts/contas-ia.ts";
 import type { Mensagem } from "../src/contracts/mensagem.ts";
 import { criarIasDoMac } from "./lib/ias-do-mac.ts";
 import { instalarOrdemArrastavel } from "./lib/ordem-arrastavel.ts";
+import { chaveDoMenuDaIa, ordemDoPasso } from "./lib/ordem.ts";
 import { abrirMenu, abrirMenuCompartilhar, abrirMenuConta, dialogo, pedirGestao, textoDuplicar, type BotGerido, type AcaoGestao } from "./telas/gestao-agentes.ts";
 import { abrirLuz } from "./telas/luz.ts";
 import { baixarUrl } from "./telas/luz-html.ts";
@@ -1904,7 +1905,7 @@ function render(): void {
   if (!arrastandoBot) redesenharSidebar();
   const codigo = codigoComFoco();
   // Seu espaço é uma camada por cima: a tela de baixo continua montada e fica inerte (nem foco, nem clique) enquanto ela está aberta.
-  regiaoReabrindo("espaco", estado.espaco ? renderEspaco(estado, ambienteBanco, canalAvisos.estado(), voltaDaTela(estado, estado.tela), {
+  regiaoReabrindo("espaco", estado.espaco ? renderEspaco(estado, canalAvisos.estado(), voltaDaTela(estado, estado.tela), {
     conta: dadosConta(),
     contaPagina: contas?.minhaConta && estado.configUi.abertos.includes("conta-pagina") ? telaMinhaConta.render() : null,
     tema: lerTema(),
@@ -3313,7 +3314,7 @@ function mudarInteligencia(agenteId: string | undefined, m: (r: RascunhoIntelige
 const iaDaTela = (id: string | undefined) => iasDaTela(estado).find((i) => i.id === id);
 
 /** A ordem arrastada: a da pessoa (Provedores de IA) grava na hora; a do bot (2B) vai para o rascunho. */
-instalarOrdemArrastavel(document, (lista, ordem) => {
+function aoSoltarOrdem(lista: string, ordem: string[]): void {
   if (lista === "contas") { void contasDaPessoa.reordenar(ordem); return; }
   const ids = ordem.filter(ehIaMac);
   if (lista === "pessoa") {
@@ -3329,7 +3330,8 @@ instalarOrdemArrastavel(document, (lista, ordem) => {
     const atual = r.ordem ?? ordemDaPessoa(estado.ias?.ias, estado.ias?.ordem);
     return { tipo: "ordem", ordem: [...ids, ...atual.filter((id) => !ids.includes(id as never))] };
   });
-});
+}
+instalarOrdemArrastavel(document, aoSoltarOrdem);
 
 function filtrarBots(texto: string, raiz = "#sidebar"): void {
   const termo = texto.trim().toLowerCase();
@@ -4163,7 +4165,21 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   },
   "fechar-chave-emitida": () => dispatch({ tipo: "chave-emitida", emitida: null }),
   // ADR-102: a lista única de contas (Provedores de IA) e as ações da máquina (Máquinas).
-  "cl-menu": (el) => contasDaPessoa.menu(el.dataset.id ?? ""),
+  "cl-menu": (el) => {
+    const id = el.dataset.id ?? "";
+    contasDaPessoa.menu(id);
+    // Revisão NOD-373: aberto, o foco vai ao primeiro item (o "…" de cada IA na ordem, como o da máquina).
+    if (estado.contasUi.menu === id) document.querySelector<HTMLElement>(`#espaco [data-act="cl-menu"][data-id="${CSS.escape(id)}"]`)?.closest(".cl-mais")?.querySelector<HTMLElement>('.cl-menu [role^="menuitem"]')?.focus();
+  },
+  // Revisão NOD-373 (WCAG 2.5.7): "Subir/Descer na ordem" no "…" da IA, a mesma gravação do arrasto e das setas.
+  "ia-ordem-passo": (el) => {
+    const ia = el.dataset.ia ?? "";
+    const ids = [...document.querySelectorAll<HTMLElement>('#espaco [data-ordem-lista="pessoa"] [data-ordem-item]')].map((x) => x.dataset.ordemItem ?? "");
+    contasDaPessoa.fecharMenu();
+    const nova = ordemDoPasso(ids, ia, el.dataset.passo);
+    if (nova) aoSoltarOrdem("pessoa", nova);
+    focarGatilho(`[data-act="cl-menu"][data-id="${CSS.escape(chaveDoMenuDaIa(ia))}"]`);
+  },
   "cl-renomear": (el) => { contasDaPessoa.renomear(el.dataset.id ?? null); focarNovo(); },
   "cl-renomear-fechar": () => contasDaPessoa.renomear(null),
   "cl-detalhe": (el) => contasDaPessoa.detalhe(el.dataset.id ?? ""),

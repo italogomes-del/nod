@@ -43,14 +43,6 @@ function avisoRecriadoDispensado(): boolean {
   }
 }
 
-export type Ambiente = { regime: string; porta?: number | null } | null;
-
-export function textoAmbiente(ambiente: Ambiente): string | null {
-  if (!ambiente) return null;
-  const regime = ambiente.regime === "persistente" ? "Banco persistente" : ambiente.regime === "efemero" ? "Banco efêmero" : "Banco não identificado";
-  return `${regime}${ambiente.porta ? ` · porta ${ambiente.porta}` : ""}`;
-}
-
 export type ExtrasEspaco = {
   conta: DadosConta;
   /** A página de Minha conta aberta dentro de Conta (NOD-346); null = a lista. */
@@ -58,7 +50,7 @@ export type ExtrasEspaco = {
   tema: EscolhaTema;
 };
 
-export function renderEspaco(estado: Estado, ambiente: Ambiente, avisos: EstadoAvisos, volta: Volta, extras: ExtrasEspaco): string {
+export function renderEspaco(estado: Estado, avisos: EstadoAvisos, volta: Volta, extras: ExtrasEspaco): string {
   const secao = estado.espaco?.secao ?? "conexao";
   const nav = SECOES_ESPACO.map((s) => `<button type="button" class="espaco-item" data-act="secao-espaco" data-secao="${s.id}"${s.id === secao ? ' aria-current="page"' : ""}>${s.icone}<span>${esc(s.nome)}</span></button>`).join("");
   return `<div class="espaco cfg-espaco" role="dialog" aria-modal="true" aria-labelledby="espaco-titulo">
@@ -67,24 +59,21 @@ export function renderEspaco(estado: Estado, ambiente: Ambiente, avisos: EstadoA
       <h1 id="espaco-titulo">Configurações</h1>
       <div class="espaco-itens">${nav}</div>
     </nav>
-    <main class="espaco-conteudo">${conteudo(estado, secao, ambiente, avisos, extras)}</main>
+    <main class="espaco-conteudo">${conteudo(estado, secao, avisos, extras)}</main>
   </div>`;
 }
 
-function conteudo(estado: Estado, secao: SecaoEspaco, ambiente: Ambiente, avisos: EstadoAvisos, extras: ExtrasEspaco): string {
+function conteudo(estado: Estado, secao: SecaoEspaco, avisos: EstadoAvisos, extras: ExtrasEspaco): string {
   switch (secao) {
     case "conta":
       return extras.contaPagina !== null ? renderContaPagina(extras.contaPagina) : renderConta(extras.conta);
-    case "geral": {
-      const banco = textoAmbiente(ambiente);
+    case "geral":
       return renderGeral({
         tema: extras.tema,
         avisos,
         modoDev: estado.modoDev.ligado,
         experimentos: estado.experimentos,
-        banco: banco ? { texto: banco, regime: ambiente?.regime ?? "desconhecido" } : null,
       }, estado.configUi);
-    }
     case "conexao":
       return renderProvedores(estado);
     case "maquinas":

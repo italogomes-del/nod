@@ -18,3 +18,13 @@ export function ordemComPasso<T extends string>(ordem: readonly T[], de: T, pass
   const vizinho = ordem[i + passo];
   return i < 0 || vizinho === undefined ? [...ordem] : ordemArrastada(ordem, de, vizinho);
 }
+
+/** NOD-373: o "…" de uma IA em Provedores usa o mesmo estado de menu das contas, com esta chave. */
+export const PREFIXO_MENU_DA_IA = "ia-ordem:";
+export const chaveDoMenuDaIa = (ia: string): string => `${PREFIXO_MENU_DA_IA}${ia}`;
+
+/** NOD-373 (WCAG 2.5.7): "Subir/Descer na ordem" no "…". null quando a ordem não muda (nada a gravar). */
+export function ordemDoPasso(ids: readonly string[], ia: string, passo: string | undefined): string[] | null {
+  const nova = ordemComPasso(ids, ia, Number(passo) < 0 ? -1 : 1);
+  return nova.every((id, i) => id === ids[i]) ? null : nova;
+}

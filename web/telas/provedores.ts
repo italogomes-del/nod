@@ -1,7 +1,10 @@
 import type { Estado } from "../estado/reducer.ts";
 import { botao, esc, hora } from "../lib/render.ts";
 import { haQuanto } from "../lib/relogio.ts";
-import { ordemDasIas, pilhaDeAvatares, renderCartaoIa, UI_IAS_INICIAL, vistaDaIa, type ContextoCartao } from "./cartao-ia.ts";
+import { grupoConfig, itemMenu, linhaConfig, menuLinha, type TomStatus } from "../lib/linha-config.ts";
+import { ICONE } from "../lib/icones.ts";
+import { chaveDoMenuDaIa } from "../lib/ordem.ts";
+import { abaixoDaIa, acoesDaIa, alcaDaIa, logoDaIa, ordemDasIas, pilhaDeAvatares, renderCartaoIa, UI_IAS_INICIAL, vistaDaIa, type ContextoCartao, type UiIas, type VistaIa } from "./cartao-ia.ts";
 import { renderContasDaIa } from "./contas-ia.ts";
 import { nomeCurto, renderListaDeContas } from "./contas-lista.ts";
 import { botsDaPessoa, maquinaDoBot, maquinasDeTrabalho } from "./maquinas.ts";
@@ -25,23 +28,63 @@ export function renderProvedores(estado: Estado): string {
   const ui = estado.iasMac ?? UI_IAS_INICIAL;
   const servidor = estado.ias?.ias ?? null;
   const c: ContextoCartao = { servidor, ui, agora: estado.agora, onde: "provedores" };
-  const linhas = ordemDasIas(servidor).map((ia, i) => {
+  const ordem = ordemDasIas(servidor);
+  const linhas = ordem.map((ia, i) => {
     const v = vistaDaIa(ia, c);
-    // ADR-101 (NOD-211): as várias contas da IA, embaixo do cartão, só no app do Mac.
+    const ordemUi = { aberto: estado.contasUi.menu === chaveDoMenuDaIa(ia), primeira: i === 0, ultima: i === ordem.length - 1 };
+    // ADR-101 (NOD-211): as várias contas da IA, embaixo da linha, só no app do Mac.
     const contas = renderContasDaIa(ia, ui, estado.agora, Boolean(ui.estados[ia]?.conta));
-    return `<div class="prov-ia-item" data-ordem-item="${ia}">${renderCartaoIa(v, ui, { arrastar: { pos: i + 1 } })}${contas}</div>`;
-  }).join("");
+    return `<div class="prov-ia-item" data-ordem-item="${ia}">${linhaDaIa(v, ui, i + 1, ordemUi)}${abaixoDaIa(v, ui)}${contas}</div>`;
+  });
   const executor = estado.executor && estado.executor.trocavel !== false ? `<div class="espaco-cartao prov-avancado">${renderExecutor(estado)}</div>` : "";
+  const nota = `Arraste a alça (ou use as setas nela, ou o “…”) para mudar a ordem; cada bot pode ter a dele, na Inteligência. Recomendado: o Claude com <b>Opus</b> e o ChatGPT com <b>Sol</b>.`;
   return `<section class="espaco-secao cfg-secao provedores">
       <h2 class="prov-titulo">${pilhaDeAvatares()}Provedores de IA</h2>
       ${estado.contasIa?.disponivel ? '<p class="cl-faixa" role="status">Atualize o app do nod para ver e gerenciar as contas de todas as máquinas numa lista só.</p>' : ""}
-      <p class="intro">As IAs que seus bots usam${ui.noApp ? " neste Mac" : ""}. No automático, eles seguem esta ordem: a primeira pronta responde e, se ela parar ou chegar ao limite, a próxima assume.</p>
-      <div class="prov-ordem"><span>Ordem dos seus bots</span><span>arraste para mudar · cada bot pode ter a dele</span></div>
-      <div class="espaco-cartao prov-lista" data-ordem-lista="pessoa">${linhas}</div>
-      <p class="ia-nota">Recomendado: o Claude com <b>Opus</b> e o ChatGPT com <b>Sol</b>. Para outro modelo ou outra ordem num bot, abra a Inteligência dele.</p>
+      <p class="intro">As IAs que seus bots usam${ui.noApp ? " neste Mac" : ""}. No automático, a primeira pronta responde e, se ela parar ou chegar ao limite, a próxima assume.</p>
+      ${grupoConfig("Ordem dos seus bots", linhas, { classe: "prov-ordem-grupo", listaAttrs: 'data-ordem-lista="pessoa"', notaHtml: nota })}
       ${executor}
       ${foraDoAr(estado)}
     </section>`;
+}
+
+const TOM_DA_IA: Record<VistaIa["tom"], TomStatus> = { ok: "ok", aviso: "atencao", mudo: "neutro" };
+
+/**
+ * NOD-373 (#j3-1/proposta, critério 10 da NOD-367): cada IA numa `linhaConfig` — a alça à esquerda (fora do ícone, que é
+ * aria-hidden), a posição e o logo, o nome, a versão e a verificação no detalhe, e o status com o ponto de cor. Os botões
+ * do estado (instalar, entrar, Trocar conta, Verificar) ficam à direita; o fluxo e as notas, embaixo da linha.
+ */
+export function linhaDaIa(v: VistaIa, ui: UiIas, pos: number, ordem: OrdemDaLinha = { aberto: false, primeira: false, ultima: false }): string {
+  const conta = v.conta ? ` · <span class="ia-conta-txt"><span class="sr-only">Conta: </span>${esc(v.conta)}</span>` : "";
+  const acoes = acoesDaIa(v, ui);
+  return linhaConfig({
+    titulo: v.nome,
+    detalheHtml: `${esc(v.dica)}${conta}`,
+    antes: alcaDaIa(v),
+    icone: `<span class="prov-pos">${pos}</span>${logoDaIa(v.ia, "cl-logo")}`,
+    status: { texto: v.texto, tom: TOM_DA_IA[v.tom], vivo: true },
+    classe: `prov-ia${v.girando ? " girando" : ""}`,
+    controle: { tipo: "html", html: `${acoes}${menuDaOrdem(v, ordem)}` },
+  });
+}
+
+/** O "…" de cada IA na ordem: a chave dele em `contasUi.menu` (o mesmo estado do "…" das contas). */
+export { chaveDoMenuDaIa };
+
+export type OrdemDaLinha = { aberto: boolean; primeira: boolean; ultima: boolean };
+
+/**
+ * Revisão NOD-373 (WCAG 2.5.7, #j3-1/proposta): "Subir" e "Descer" no "…" da linha, a alternativa de um toque ao arrasto
+ * — quem usa leitor de tela no celular não arrasta nem tem setas. Sem "Subir" na primeira e sem "Descer" na última.
+ */
+function menuDaOrdem(v: VistaIa, o: OrdemDaLinha): string {
+  const itens = [
+    o.primeira ? "" : itemMenu("ia-ordem-passo", ICONE.recolher, "Subir na ordem", { dados: { ia: v.ia, passo: "-1" } }),
+    o.ultima ? "" : itemMenu("ia-ordem-passo", ICONE.abrir, "Descer na ordem", { dados: { ia: v.ia, passo: "1" } }),
+  ].join("");
+  if (!itens) return "";
+  return menuLinha({ tipo: "menu", acao: "cl-menu", dados: { id: chaveDoMenuDaIa(v.ia) }, aberto: o.aberto, rotulo: v.nome, itens });
 }
 
 /** A lista única de contas (web/telas/contas-lista.ts), com o filtro por máquina vindo de Máquinas. */

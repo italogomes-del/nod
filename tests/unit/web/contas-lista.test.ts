@@ -405,6 +405,17 @@ describe("controlador da lista (ADR-102)", () => {
     return { c, chamadas, rodar, get estado() { return estado; } };
   }
 
+  it("revisão NOD-373: recarregar as contas não fecha o \u201c…\u201d de uma IA em Provedores; o de uma conta que sumiu fecha", () => {
+    const m = montar();
+    m.c.menu("ia-ordem:claude-cli");
+    m.c.aoHidratar(CONTAS);
+    expect(m.estado.contasUi.menu).toBe("ia-ordem:claude-cli");
+    m.c.menu("ia-ordem:claude-cli");
+    m.c.menu("conta-que-sumiu");
+    m.c.aoHidratar(CONTAS);
+    expect(m.estado.contasUi.menu).toBeNull();
+  });
+
   it("arrastar muda a lista na hora e manda a ordem ao servidor", async () => {
     const m = montar();
     await m.c.reordenar([LEAPY.id, PESSOAL.id, GPT.id]);

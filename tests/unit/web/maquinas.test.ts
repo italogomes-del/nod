@@ -4,7 +4,7 @@ import { estadoInicial, type ConectarMaquina, type Estado } from "../../../web/e
 import { readFileSync } from "node:fs";
 import { proximoItemDoMenu } from "../../../web/lib/linha-config.ts";
 import { linhaMaquinaDoBot } from "../../../web/telas/detalhes.ts";
-import { COMANDO_DESLIGAR_COMPUTADOR, maquinaDoBot, maquinaNova, maquinasDeTrabalho, renderMaquinas } from "../../../web/telas/maquinas.ts";
+import { COMANDO_DESLIGAR_COMPUTADOR, donoDoUso, maquinaDoBot, maquinaNova, maquinasDeTrabalho, renderMaquinas } from "../../../web/telas/maquinas.ts";
 
 /** ADR-090: Seu espaço › Máquinas e o "Conectar uma máquina" (protótipo "Nod — Motor na VM"). */
 const maquina = (id: string, nome: string, o: Partial<MaquinaDto> = {}): MaquinaDto => ({ id, nome, prefixo: "abcd1234", criadaEm: 1, ultimoUsoEm: null, conectada: true, plataforma: "linux", ias: { "claude-cli": "pronto" }, gh: false, ...o });
@@ -14,6 +14,85 @@ const conectar = (o: Partial<ConectarMaquina> = {}): ConectarMaquina => ({ passo
 function com(maquinas: MaquinaDto[], o: { padraoId?: string | null; conectar?: ConectarMaquina | null; bots?: ReturnType<typeof bot>[]; noMac?: boolean } = {}): Estado {
   return { ...estadoInicial, sessao: { tenantId: "t", pessoaId: "p" }, maquinas: { maquinas, padraoId: o.padraoId ?? null, ...(o.noMac ? { servidorNoMac: { api: "http://127.0.0.1:8888" } } : {}) }, conectarMaquina: o.conectar ?? null, frota: { agentes: o.bots ?? [bot("a", "Ze 1", "vm"), bot("b", "Clarice")] } as never };
 }
+
+/** NOD-373: o "…" aberto de uma máquina, e só ele. */
+function menuDe(estado: Estado, id: string): string {
+  const html = renderMaquinas({ ...estado, contasUi: { ...estado.contasUi, maquinaMenu: id } } as Estado);
+  const i = html.indexOf('class="cl-menu"');
+  return i < 0 ? "" : html.slice(i, html.indexOf("</div></span></div>", i));
+}
+const comLeitura = (estado: Estado, leituras: { id: string; nome: string; ehMac: boolean }[]): Estado =>
+  ({ ...estado, trabalhos: { trabalhos: [], pressao: "verde", maquinas: leituras.map((l) => ({ ...l, pressao: "verde", processador: "verde" })) } } as never);
+const USO = "Quanto os bots podem usar";
+
+describe("NOD-373: \"Quanto os bots podem usar\" numa máquina só", () => {
+  const vm = maquina("vm", "vm-sp");
+  const vm2 = maquina("vm2", "vm-rj");
+  const pc = maquina("pc", "pc-bot", { papel: "computador" } as Partial<MaquinaDto>);
+  const mac = maquina("mac", "MacBook do Marlon", { plataforma: "darwin" });
+
+  it("critério 6: com Mac, o controle fica só no \"…\" do Mac; as outras dizem onde ele está", () => {
+    const e = comLeitura(com([vm, mac, vm2], { padraoId: "vm" }), [{ id: "mac", nome: "MacBook do Marlon", ehMac: true }]);
+    expect(menuDe(e, "mac")).toContain(USO);
+    for (const id of ["vm", "vm2"]) {
+      const menu = menuDe(e, id);
+      expect(menu).not.toContain(USO);
+      expect(menu).not.toContain('data-act="uso-do-mac"');
+      expect(menu).toContain(`data-menu-texto="uso-onde-${id}">O limite de uso fica no “…” da máquina MacBook do Marlon.</div>`);
+    }
+  });
+
+  it("critério 6: o Mac do servidor sem chave guarda o controle", () => {
+    const e = comLeitura(com([vm], { padraoId: "vm" }), [{ id: "este-mac", nome: "Este Mac", ehMac: true }]);
+    expect(menuDe(e, "este-mac")).toContain(USO);
+    expect(menuDe(e, "vm")).toContain("O limite de uso fica no “…” da máquina Este Mac.");
+  });
+
+  it("revisão NOD-373: antes de a leitura chegar, o Mac (darwin) já guarda o controle — ele não pula da padrão para o Mac", () => {
+    const e = com([vm, mac], { padraoId: "vm" });
+    expect(menuDe(e, "mac")).toContain(USO);
+    expect(menuDe(e, "vm")).toContain("O limite de uso fica no “…” da máquina MacBook do Marlon.");
+  });
+
+  it("revisão NOD-373: com leituras chegando mas o Mac (darwin) sem leitura, ele segue com o controle", () => {
+    const e = comLeitura(com([vm, mac], { padraoId: "vm" }), [{ id: "vm", nome: "vm-sp", ehMac: false }]);
+    expect(menuDe(e, "mac")).toContain(USO);
+    expect(menuDe(e, "vm")).not.toContain(USO);
+  });
+
+  it("revisão NOD-373: um 2º Mac (darwin) por chave não vira \u201cEste Mac\u201d — só o do servidor (ehMac)", () => {
+    const mac2 = maquina("mac2", "MacBook da Ana", { plataforma: "darwin" });
+    const html = renderMaquinas(comLeitura(com([vm, mac, mac2], { padraoId: "vm" }), [{ id: "mac", nome: "MacBook do Marlon", ehMac: true }]));
+    expect(html.match(/Este Mac · /g)).toHaveLength(1);
+  });
+
+  it("QA NOD-373: Mac sem contato (plataforma null) conta como sem Mac — a padrão guarda o controle e o Mac diz onde ele está", () => {
+    const macCalado = maquina("mac", "MacBook do Marlon", { plataforma: null, conectada: false });
+    const e = com([vm, macCalado, vm2], { padraoId: "vm2" });
+    expect(menuDe(e, "vm2")).toContain(USO);
+    expect(menuDe(e, "mac")).toContain("O limite de uso fica no “…” da máquina vm-rj.");
+  });
+
+  it("critério 7: sem Mac, só a máquina padrão tem o controle; critério 8: as outras só a linha", () => {
+    const e = com([vm, vm2], { padraoId: "vm2" });
+    expect(menuDe(e, "vm2")).toContain(USO);
+    const outra = menuDe(e, "vm");
+    expect(outra).not.toContain(USO);
+    expect(outra).toContain("O limite de uso fica no “…” da máquina vm-rj.");
+    expect(outra.match(/uso-onde/g)).toHaveLength(1);
+  });
+
+  it("sem Mac e sem padrão (ou padrão fora da lista), a primeira máquina de trabalho guarda o controle; a só computador não mostra nada", () => {
+    expect(donoDoUso([pc, vm, vm2], new Set(), null, null)).toEqual({ id: "vm", nome: "vm-sp" });
+    expect(donoDoUso([pc, vm, vm2], new Set(), null, "pc")).toEqual({ id: "vm", nome: "vm-sp" });
+    expect(donoDoUso([pc], new Set(), null, null)).toBeNull();
+    const e = com([pc, vm], { padraoId: null });
+    expect(menuDe(e, "vm")).toContain(USO);
+    const menuPc = menuDe(e, "pc");
+    expect(menuPc).not.toContain(USO);
+    expect(menuPc).not.toContain("O limite de uso fica");
+  });
+});
 
 describe("Seu espaço › Máquinas (ADR-090)", () => {
   it("NOD-367: uma lista só, com o status em ponto e texto, quantos bots em cada uma e o padrão num seletor", () => {

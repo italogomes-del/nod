@@ -82,7 +82,7 @@ describe("as 6 seções (critério 2)", () => {
     const volta = { rotulo: "Início", icone: "" };
     const e = reduzir(estadoInicial, { tipo: "espaco", secao: "geral" });
     for (const estado of [e, { ...e, computadorPessoa: { estado: "pronto", maquina: null, telas: [], esperando: [] } } as never]) {
-      const html = renderEspaco(estado, { regime: "persistente", porta: 5432 }, avisos, volta, extras);
+      const html = renderEspaco(estado, avisos, volta, extras);
       expect(html).toContain('<h1 id="espaco-titulo">Configurações</h1>');
       expect(html).toContain('aria-label="Seções das Configurações"');
       expect([...html.matchAll(/data-act="secao-espaco" data-secao="([^"]+)"/g)].map((m) => m[1])).toEqual(["conta", "geral", "conexao", "maquinas", "agentes", "feedback"]);
@@ -140,9 +140,9 @@ describe("Conta (critério 3)", () => {
 });
 
 describe("Geral (critérios 4 e 5)", () => {
-  const d: DadosGeral = { tema: "claro", avisos: { onde: "mac", situacao: "ligados", som: true }, modoDev: true, experimentos: { calibracao: true, memoriaLonga: false, whatsapp: false }, banco: { texto: "Banco persistente · porta 5432", regime: "persistente" } };
+  const d: DadosGeral = { tema: "claro", avisos: { onde: "mac", situacao: "ligados", som: true }, modoDev: true, experimentos: { calibracao: true, memoriaLonga: false, whatsapp: false } };
 
-  it("Aparência, Avisos, Ajuda e Avançado recolhido; o banco e os interruptores só aparecem com Avançado aberto", () => {
+  it("Aparência, Avisos, Ajuda e Avançado recolhido; os interruptores só aparecem com Avançado aberto e o banco não aparece (NOD-373)", () => {
     const fechado = renderGeral(d, CONFIG_UI_INICIAL);
     const ordem = ["Aparência", "Avisos", 'id="ajuda"', "Avançado"].map((t) => fechado.indexOf(t));
     expect([...ordem].sort((a, b) => a - b)).toEqual(ordem);
@@ -151,7 +151,7 @@ describe("Geral (critérios 4 e 5)", () => {
     expect(fechado).not.toContain("alternar-modo-dev");
     const aberto = renderGeral(d, { ...CONFIG_UI_INICIAL, abertos: ["avancado"] });
     expect(aberto).toContain('aria-expanded="true"');
-    expect(aberto).toContain("Banco persistente · porta 5432");
+    expect(aberto).not.toMatch(/Banco|Onde o servidor deste nod guarda os dados/);
     expect(aberto).toMatch(/role="switch" aria-checked="true" aria-label="Modo dev" data-act="alternar-modo-dev"/);
     expect(aberto).toMatch(/aria-checked="true" aria-label="Calibração" data-act="alternar-experimento" data-experimento="calibracao"/);
     expect(aberto).toMatch(/aria-checked="false" aria-label="Memória longa" data-act="alternar-experimento" data-experimento="memoriaLonga"/);
