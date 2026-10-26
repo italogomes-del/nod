@@ -1,3 +1,4 @@
+import type { Tela } from "../estado/reducer.ts";
 import { esc, hora } from "./render.ts";
 
 /**
@@ -46,6 +47,37 @@ export function depoisDeRolar(r: EstadoDaRolagem, m: Medida): EstadoDaRolagem {
   const longe = distanciaDoFim(m);
   const colada = m.topo < r.topoAntes - 1 && longe > 2 ? false : longe <= FOLGA_DO_FIM ? true : r.colada;
   return { colada, topoAntes: colada ? Math.max(r.topoAntes, m.topo) : m.topo };
+}
+
+/**
+ * Quais telas voltam ao topo ao navegar (NOD-371, 2026-10-26). A conversa, a sala e a tela da frente (`trabalho`, ADR-083)
+ * usam a rolagem "colada no fim" acima: abrem coladas e `depoisDeDesenhar` já as leva ao fim. Rolar ao topo depois disso
+ * dispara um evento de rolagem que `depoisDeRolar` lê como "subiu" e solta a tela. Por isso a frente abria no topo e os
+ * passos novos não desciam. As listas e as outras telas continuam abrindo no topo.
+ */
+export function rolaAoTopoAoNavegar(tela: Tela["tipo"]): boolean {
+  switch (tela) {
+    case "conversa":
+    case "sala":
+    case "trabalho":
+      return false;
+    case "inicio":
+    case "rotinas":
+    case "nova-rotina":
+    case "novo-bot":
+    case "conectores":
+    case "sua-vez":
+    case "nao-lidos":
+    case "nova-sala":
+    case "trabalhos":
+    case "linha":
+      return true;
+    default: {
+      // Uma tela nova não compila até alguém decidir se ela abre no topo ou colada no fim.
+      const nova: never = tela;
+      return nova;
+    }
+  }
 }
 
 /** definido em 2026-10-05: tanto tempo na tela para a linha "Novas" contar como vista. */

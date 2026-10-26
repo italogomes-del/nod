@@ -80,6 +80,7 @@ import { mudancaSujaAGaveta, reporSeletor, salvarOuRepor } from "./lib/salvar-ou
 import { criarAnunciador, criarRelogioDaFala, escreverTempos, lerFalasNaTela, type FalaNaTela } from "./lib/fala-viva.ts";
 import { criarRascunhos } from "./lib/rascunhos.ts";
 import { criarRolagem } from "./lib/rolagem-na-tela.ts";
+import { rolaAoTopoAoNavegar } from "./lib/rolagem.ts";
 import { anunciosDeFim, aoEsconder, aoSumir, SEM_PROGRESSO, teclaNaPilula, type ProgressoNaTela } from "./lib/pilula.ts";
 import { criarPilulaNaTela } from "./lib/pilula-na-tela.ts";
 import { memoriaNaPilula, pilulaNaConversa, type Pilula } from "./telas/pilula-do-bot.ts";
@@ -2315,7 +2316,7 @@ function navegar(tela: Tela): void {
   dispatch({ tipo: "navegar", tela });
   lembrarTaskAberta(tela);
   lerConversaDaTela();
-  if (tela.tipo !== "conversa" && tela.tipo !== "sala") document.getElementById("timeline")?.scrollTo({ top: 0 });
+  if (rolaAoTopoAoNavegar(tela.tipo)) document.getElementById("timeline")?.scrollTo({ top: 0 });
 }
 
 /**

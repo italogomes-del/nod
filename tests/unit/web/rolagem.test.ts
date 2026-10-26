@@ -1,5 +1,7 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { depoisDeRolar, distanciaDoFim, FOLGA_DO_FIM, PERMANENCIA_DA_LINHA_MS, permanenciaDaLinha, pilulaDasNovas } from "../../../web/lib/rolagem.ts";
+import type { Tela } from "../../../web/estado/reducer.ts";
+import { depoisDeRolar, distanciaDoFim, FOLGA_DO_FIM, PERMANENCIA_DA_LINHA_MS, permanenciaDaLinha, pilulaDasNovas, rolaAoTopoAoNavegar } from "../../../web/lib/rolagem.ts";
 
 /**
  * A rolagem da conversa (definido em 2026-10-05): "colada no fim" é um estado que só a pessoa solta, rolando para
@@ -94,5 +96,50 @@ describe("a pílula da base", () => {
   it("sem linha, ou com a linha abaixo da janela (a pessoa subiu além dela), não há pílula", () => {
     expect(pilulaDasNovas(null)).toBe("");
     expect(pilulaDasNovas({ ...linha, acima: false })).toBe("");
+  });
+});
+
+/**
+ * NOD-371: quais telas voltam ao topo ao navegar. O Record exige todos os tipos de `Tela`: uma tela nova não compila
+ * até alguém decidir se ela abre no topo ou colada no fim.
+ */
+describe("rolar ao topo ao navegar", () => {
+  const esperado: Record<Tela["tipo"], boolean> = {
+    conversa: false,
+    sala: false,
+    trabalho: false,
+    inicio: true,
+    rotinas: true,
+    "nova-rotina": true,
+    "novo-bot": true,
+    conectores: true,
+    "sua-vez": true,
+    "nao-lidos": true,
+    "nova-sala": true,
+    trabalhos: true,
+    linha: true,
+  };
+
+  for (const [tela, rola] of Object.entries(esperado) as [Tela["tipo"], boolean][]) {
+    it(`${tela} ${rola ? "abre no topo" : "não rola ao topo (fica colada no fim)"}`, () => {
+      expect(rolaAoTopoAoNavegar(tela)).toBe(rola);
+    });
+  }
+
+  it("navegar() rola ao topo só pelo predicado (antes, a condição inline deixava a frente de fora e ela abria no topo)", () => {
+    const main = readFileSync(new URL("../../../web/main.ts", import.meta.url), "utf8");
+    const inicio = main.indexOf("function navegar(tela: Tela): void {");
+    expect(inicio).toBeGreaterThan(-1);
+    const navegar = main.slice(inicio, main.indexOf("\n}\n", inicio));
+    const rolagens = navegar.split("\n").filter((l) => /scrollTo|scrollTop/.test(l));
+    expect(rolagens).toEqual(['  if (rolaAoTopoAoNavegar(tela.tipo)) document.getElementById("timeline")?.scrollTo({ top: 0 });']);
+  });
+
+  it("por que a frente não pode rolar ao topo: o scroll ao topo logo depois de colar no fim solta a tela", () => {
+    // depoisDeDesenhar abre colada e desce ao fim (topoAntes acompanha o fim)...
+    const aberta = depoisDeRolar({ colada: true, topoAntes: 0 }, { topo: FIM, altura: ALTURA, janela: JANELA });
+    expect(aberta.colada).toBe(true);
+    // ...e um scrollTo({top:0}) em seguida é lido como "subiu": os passos novos deixam de descer.
+    expect(depoisDeRolar(aberta, { topo: 0, altura: ALTURA, janela: JANELA }).colada).toBe(false);
   });
 });
