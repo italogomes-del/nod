@@ -1305,7 +1305,11 @@ nod-mascote[data-aviso="pergunta"], nod-mascote[data-aviso="nao-lido"] { --nod-a
 .cr-corpo { flex: 1; min-width: 0; }
 .cr-cab { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 0 0 2px; font-size: 12.5px; color: var(--ink-3); }
 .cr-cab b { font-weight: 600; color: var(--ink-2); }
-.cr-pergunta { margin: 0; font-size: 14.5px; line-height: 1.4; font-weight: 500; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* PR 4b: a pergunta é a ação ("Enviar e-mail “…” para financeiro@…?") e quebra a linha em vez de cortar com reticências — o
+   destino no fim é o que a pessoa mais precisa ler. O comando sem frase vai em fonte de código, no fundo do cartão. */
+.cr-pergunta { margin: 0; font-size: 14.5px; line-height: 1.4; font-weight: 500; color: var(--ink); overflow-wrap: anywhere; }
+.cr-pergunta code { font-size: .86em; padding: 1px 5px; background: var(--surface); border: 1px solid var(--revisor-line); }
+.linha-revisor .linha-modo-txt code { font-size: .92em; padding: 0 4px; overflow-wrap: anywhere; }
 .cr-motivo { margin: 3px 0 0; font-size: 13px; line-height: 1.45; color: var(--ink-2); overflow-wrap: anywhere; }
 .cr-motivo b { font-weight: 600; color: var(--ink-2); }
 .cr-detalhe { margin: 6px 0 0; font-size: 12.5px; color: var(--ink-2); }

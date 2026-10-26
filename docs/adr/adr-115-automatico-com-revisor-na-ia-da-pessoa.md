@@ -433,6 +433,27 @@ cabeçalho: a ADR passa a "aceita" no commit que ligar a chave.
    confere cada ação arriscada: libera sozinho ou pede o seu ok num cartão." Sem "na sua IA" nem "na sua conta", e a
    Atividade não mostra "N revisões na sua conta" — o revisor é do Nod. Desligada, o texto de hoje, que é o que acontece.
 
+**Emenda: a pergunta diz a ação (PR 4b, 2026-10-26; QA do #525, P2 e P3).** O cartão compacto perguntava a frase da
+decisão ("Clarice quer usar Planilhas e e-mail") e a linha dizia o comando cru; o destino e o conteúdo só apareciam em
+"ver detalhes", justamente no envio para fora. Agora o servidor monta uma frase curta da ação (`src/domain/frase-da-acao.ts`)
+e o cartão a pergunta, com o motivo do revisor embaixo como antes: no app, o verbo pelo grupo da capacidade + o objeto do
+nome da ferramenta + o destino dos argumentos ("Enviar e-mail “Lista de clientes” para financeiro@acme-pagamentos.co?",
+"Apagar 14 planilhas no Drive?"); no terminal, uma frase pelos casos de `comandoArriscado` e do envio para fora ("Push
+forçado na feat/login?", "Apagar a pasta build/ inteira?"), senão "Rodar ⟨comando⟩?" com o comando em fonte de código. A
+linha usa a mesma frase no meio: "Revisor liberou o push forçado na feat/login: você pediu". Regras:
+- **Calculada na leitura, nunca gravada** (`fraseDaAcao` em "Sua vez"; `item` em `naFalaDosTurnos`): sem migração, vale
+  para os itens de antes. O tipo vem de `acoes_pelo_modo` (o MCP mora no mesmo destino `terminal` que o comando).
+- **Nunca inventa nem diminui.** Sem argumento útil, verbo que não é do grupo do catálogo (o `destructiveHint` ganha do
+  nome), o lote, o arquivo e o MCP: o texto de antes. Dois comandos encadeados nunca ganham a frase de um deles.
+  Revisão do PR 4b: "encadeado" inclui a quebra de linha (decidida no texto cru) e `<(…)`; o push de várias branches,
+  `--all`, `--mirror` e o DROP fora do cliente do banco vão como código; cópia e cópia oculta contam no "e mais N"; e o
+  corte nunca come o destino (o título encolhe antes, e o domínio longo perde o começo, não o fim).
+- **Argumento é dado não confiável.** Cada valor sai sem invisíveis (`semInvisiveis`), redigido antes do corte
+  (`redigirECortar`) e curto (60); a frase, até 120; a web escapa tudo e só põe em `<code>` o trecho que o servidor marcou.
+- **A pergunta quebra a linha** em vez de cortar com reticências (o destino fica no fim). Divergência do protótipo: lá
+  a frase é uma paráfrase ("Enviar a lista de clientes…"); aqui o objeto vem do nome da ferramenta e o assunto vai entre
+  aspas, porque o servidor não parafraseia.
+
 **Ligar.** (1) o segredo, como em docs/deploy-gcp.md ("Chave da API do revisor do Automático"); (2) a política de
 privacidade publicada; (3) `NOD_REVISOR=ligado` no `infra/gcp/config.env`, commit e deploy; (4) conferir o log
 `revisor_modo` com `ligado: true, com_chave: true` e uma revisão de ponta a ponta num bot de teste em Automático.

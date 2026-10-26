@@ -12,7 +12,7 @@ import { renderCartaoPergunta } from "./cartao-pergunta.ts";
 import { emQuanto, foraDoArDesde, haQuanto, nadaEsperando } from "../lib/relogio.ts";
 import { acoesComAcesso, linhasPrecisa } from "./rotina-precisa.ts";
 import { listaDoLoteParaSuaVez } from "./card-lote.ts";
-import { ehCartaoDoRevisor, motivoDoCartao, renderCartaoRevisor, sempreNoCartao } from "./cartao-revisor.ts";
+import { ehCartaoDoRevisor, motivoDoCartao, perguntaDoCartao, renderCartaoRevisor, sempreNoCartao } from "./cartao-revisor.ts";
 
 type Item = SuaVezDto["itens"][number];
 
@@ -558,7 +558,7 @@ function renderCartaoDoRevisor(item: Item, estado: Estado, naConversa: boolean):
   const agente = estado.frota?.agentes.find((a) => a.id === d.agenteId);
   const cabecalho = naConversa ? undefined : `<div class="cr-cab"><b>${esc(item.agenteNome)}</b><span>· ${esc(haQuanto(item.aguardandoHaMs))}</span>${marcaGemeas(item)}</div>`;
   const rodape = !naConversa && agente ? `<div class="cr-rodape">${botao("abrir-conversa", "abrir conversa", { classe: "link", dados: { conversa: d.conversaId, agente: d.agenteId } })}</div>` : undefined;
-  return renderCartaoRevisor({ decisaoId: d.id, pergunta: d.frase, motivo: motivoDoCartao(itens), detalhe, sempre, ...(cabecalho ? { cabecalho } : {}), ...(rodape ? { rodape } : {}) }, item.estadoColuna);
+  return renderCartaoRevisor({ decisaoId: d.id, ...perguntaDoCartao(d.frase, itens), motivo: motivoDoCartao(itens), detalhe, sempre, ...(cabecalho ? { cabecalho } : {}), ...(rodape ? { rodape } : {}) }, item.estadoColuna);
 }
 
 function renderItem(item: Item, estado: Estado, naConversa = false): string {

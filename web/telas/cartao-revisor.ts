@@ -1,5 +1,5 @@
 import type { SuaVezDto } from "../../src/contracts/api.ts";
-import { botao, esc } from "../lib/render.ts";
+import { botao, esc, textoComCodigo } from "../lib/render.ts";
 import { ICONE_ESCUDO_PEDE } from "./linha-do-modo.ts";
 
 type Item = SuaVezDto["itens"][number];
@@ -50,10 +50,27 @@ export function motivoDoCartao(itens: readonly Pick<ItemAprovacao, "motivoManual
   return { rotulo: /revis/i.test(frase) ? null : "Revisor:", texto: frase };
 }
 
+/**
+ * A pergunta do cartão (PR 4b dos modos de aprovação, tela A3): com UM item e a frase da ação que o servidor montou dos
+ * argumentos (`fraseDaAcao`), a ação com "?" — "Enviar e-mail “Lista de clientes” para financeiro@acme-pagamentos.co?",
+ * "Push forçado na feat/login?". Sem ela (o lote, o arquivo, o MCP, o item sem argumento útil, o servidor de antes), a
+ * frase da decisão, como antes.
+ */
+export function perguntaDoCartao(fraseDaDecisao: string, itens: readonly Pick<ItemAprovacao, "fraseDaAcao">[]): { pergunta: string; codigo?: readonly [number, number] } {
+  const f = itens.length === 1 ? itens[0]?.fraseDaAcao : undefined;
+  if (!f?.texto) return { pergunta: fraseDaDecisao };
+  return { pergunta: `${f.texto}?`, ...(f.codigo ? { codigo: f.codigo } : {}) };
+}
+
 export type DadosDoCartaoRevisor = {
   decisaoId: string;
-  /** A frase da decisão ("Clarice quer rodar um comando no seu Mac"), numa linha. */
+  /**
+   * A pergunta: a frase da ação, do servidor ("Enviar e-mail “Lista de clientes” para financeiro@acme-pagamentos.co?",
+   * PR 4b; `perguntaDoCartao`), ou a frase da decisão de antes ("Clarice quer rodar um comando no seu Mac").
+   */
   pergunta: string;
+  /** O trecho da pergunta em fonte de código ([início, fim)): o comando sem frase, "Rodar ⟨npm run deploy⟩?". */
+  codigo?: readonly [number, number];
   motivo: { rotulo: string | null; texto: string };
   /** O que abre embaixo: o comando inteiro ("ver comando") ou os detalhes do app; HTML já escapado por quem monta. */
   detalhe: { rotulo: string; html: string } | null;
@@ -82,5 +99,5 @@ export function renderCartaoRevisor(d: DadosDoCartaoRevisor, estadoColuna: strin
   // QA do PR 4 (2026-10-26): a dica do "Sempre permitir" só existia no `title`, que quem usa toque nunca vê. Agora é texto
   // embaixo dos botões onde não há ponteiro que paire (web/interface.css) e a descrição do botão para o leitor de tela.
   const dica = d.sempre ? `<p class="cr-sempre-dica" id="cr-d-${id}">${esc(d.sempre.titulo)}</p>` : "";
-  return `<li class="decisao cartao-revisor dec-${esc(estadoColuna)}" data-decisao="${id}"><div class="cr" role="group" aria-labelledby="${titulo}"><span class="cr-escudo">${ICONE_ESCUDO_PEDE}</span><div class="cr-corpo">${d.cabecalho ?? ""}<p class="cr-pergunta" id="${titulo}" title="${esc(d.pergunta)}">${esc(d.pergunta)}</p>${motivo}${detalhe}<div class="cr-acoes">${acoes}</div>${dica}${d.rodape ?? ""}</div></div></li>`;
+  return `<li class="decisao cartao-revisor dec-${esc(estadoColuna)}" data-decisao="${id}"><div class="cr" role="group" aria-labelledby="${titulo}"><span class="cr-escudo">${ICONE_ESCUDO_PEDE}</span><div class="cr-corpo">${d.cabecalho ?? ""}<p class="cr-pergunta" id="${titulo}">${textoComCodigo(d.pergunta, d.codigo)}</p>${motivo}${detalhe}<div class="cr-acoes">${acoes}</div>${dica}${d.rodape ?? ""}</div></div></li>`;
 }

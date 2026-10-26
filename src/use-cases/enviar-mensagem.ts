@@ -7,7 +7,9 @@ import type { IdHarness } from "../contracts/harness.ts";
 import type { Inventario } from "../contracts/inventario.ts";
 import type { Mensagem } from "../contracts/mensagem.ts";
 import type { OrigemTurno, Turno } from "../contracts/turno.ts";
-import { fraseNaFala, grupoNaFala } from "../domain/acoes-do-modo.ts";
+import { grupoNaFala, linhaNaFala } from "../domain/acoes-do-modo.ts";
+import { fraseNoMeio } from "../domain/frase-da-acao.ts";
+import { fraseDoItem, type ConectoresDaLeitura } from "./frase-da-acao.ts";
 import { excedeQuantidade, motorLe, tipoDoAnexo } from "../domain/anexo.ts";
 import { comCitacao, confiancaDaCitacao, trechoDaCitacao } from "../domain/citacao.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
@@ -246,14 +248,20 @@ export const lerConversa: CasoDeUso<{ conversaId: string; limite?: number }, Con
   return { data: { conversa, mensagens, turnosPendentes, turnosEmCurso, turnosCancelados, propostas, fios, trabalhos, dono, reacoes, ...(pedidosDeColega ? { pedidosDeColega } : {}), ...(acoesDoModo ? { acoesDoModo } : {}) } };
 };
 
-/** As ações do total e as liberadas pelo revisor (PR 4), por turno da janela, com a frase pronta (`fraseNaFala`). */
+/**
+ * As ações do total e as liberadas pelo revisor (PR 4), por turno da janela, com a frase pronta (`linhaNaFala`). PR 4b: a
+ * liberada com um item só diz a ação como o cartão diria ("Revisor liberou o push forçado na feat/login: você pediu").
+ */
 async function acoesDoModoNaConversa(deps: Deps, mensagens: readonly Mensagem[]): Promise<Record<string, AcaoDoModoNaFala[]>> {
   const turnos = [...new Set(mensagens.map((m) => m.turnoId).filter((t): t is string => t !== null))];
   const porTurno: Record<string, AcaoDoModoNaFala[]> = {};
+  const conectores: ConectoresDaLeitura = new Map();
   for (const a of await deps.repos.acoesPeloModo.naFalaDosTurnos(turnos)) {
     const gatilho = grupoNaFala(a);
     if (!gatilho) continue;
-    (porTurno[a.turno_id] ??= []).push({ id: a.id, turnoId: a.turno_id, em: a.criado_em.getTime(), gatilho, frase: fraseNaFala(a, a.linux) });
+    const acao = gatilho === "revisor" && a.item ? await fraseDoItem(deps, a.tipo, { textoFinal: a.item.texto_final, destino: a.item.destino }, conectores) : null;
+    const { frase, codigo } = linhaNaFala(a, a.linux, acao ? fraseNoMeio(acao) : null);
+    (porTurno[a.turno_id] ??= []).push({ id: a.id, turnoId: a.turno_id, em: a.criado_em.getTime(), gatilho, frase, ...(codigo ? { codigo } : {}) });
   }
   return porTurno;
 }

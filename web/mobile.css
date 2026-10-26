@@ -171,9 +171,8 @@
      texto (a margem negativa devolve o que o enchimento soma). */
   .linha-revisor .linha-modo-ver { box-sizing: border-box; min-width: 44px; padding: 13px 12px; margin: -13px -12px; text-align: center; }
   .linha-modo { font-size: 13.5px; }
-  /* O cartão do revisor (PR 4): alvo de 44 px nos botões em pílula e a pergunta podendo quebrar. */
+  /* O cartão do revisor (PR 4): alvo de 44 px nos botões em pílula (a pergunta quebra em qualquer largura desde o PR 4b). */
   .cr-acoes .bt { min-height: 44px; padding: 8px 16px; font-size: 14px; }
-  .cr-pergunta { white-space: normal; }
   .cr-detalhe > summary { box-sizing: border-box; min-height: 44px; padding: 13px 0; margin: -9px 0; }
   .atv-contestar { display: inline-block; box-sizing: border-box; min-height: 44px; padding: 13px 0; margin: -13px 0; }
   .bot-menu.menu-fala button { min-height: 44px; }

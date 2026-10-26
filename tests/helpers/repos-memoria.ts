@@ -1184,7 +1184,11 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async naFalaDosTurnos(turnoIds) {
         return b.acoesPeloModo
           .filter((a) => turnoIds.includes(a.turnoId) && ((a.modo === "total" && (a.gatilho === "credencial" || a.gatilho === "arriscado")) || (a.modo === "automatico" && a.veredito === "libera")))
-          .map((a) => ({ id: a.id, turno_id: a.turnoId, modo: a.modo, tipo: a.tipo, gatilho: a.gatilho, resumo: a.resumo, risco: a.risco, veredito: a.veredito ?? null, motivo: a.motivo ?? null, criado_em: new Date(a.criadoEm), linux: false }));
+          .map((a) => {
+            const itens = a.modo === "automatico" && a.veredito === "libera" && a.decisaoId ? b.itens.filter((i) => i.decisaoId === a.decisaoId) : [];
+            const item = itens.length === 1 && itens[0] ? { texto_final: itens[0].textoFinal, destino: itens[0].destino } : null;
+            return { id: a.id, turno_id: a.turnoId, modo: a.modo, tipo: a.tipo, gatilho: a.gatilho, resumo: a.resumo, risco: a.risco, veredito: a.veredito ?? null, motivo: a.motivo ?? null, criado_em: new Date(a.criadoEm), linux: false, item };
+          });
       },
       async semAprovacaoDoDia(agenteId, f, limite) {
         return b.acoesPeloModo

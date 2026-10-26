@@ -95,20 +95,35 @@ function motivoNaLinha(motivo: string): string {
   return /^\p{Lu}\p{Ll}/u.test(m) ? m.charAt(0).toLowerCase() + m.slice(1) : m;
 }
 
+/** A ação dita no meio da linha do revisor (PR 4b, `fraseNoMeio` de frase-da-acao.ts), com o trecho de código, se houver. */
+export type AcaoNoMeio = { texto: string; codigo?: readonly [number, number] };
+
+const PREFIXO_DO_REVISOR = "Revisor liberou ";
+
 /**
  * A frase da linha embaixo da fala: "Usou o token do GitHub do seu Mac" (Y1), "Leu as credenciais da AWS do seu Mac"
  * (Y2); no arriscado, "Rodou um comando que reescreve ou apaga no remoto". `naMaquina` = o turno rodou numa máquina
  * Linux (ADR-090): a credencial é "desta máquina", não "do seu Mac". PR 4 (A1 e A2): o que o revisor liberou, com o
- * motivo dele — "Revisor liberou git push --force origin feat/login: você pediu".
+ * motivo dele. revisto em 2026-10-26 (PR 4b): com a frase da ação (`meio`), a linha diz a ação como o cartão — "Revisor
+ * liberou o push forçado na feat/login: você pediu" —, e o comando sem frase vai em fonte de código (`codigo`, relativo
+ * à `frase`). Sem ela (o arquivo, o MCP, o lote), o alvo de antes.
  */
-export function fraseNaFala(a: Pick<AcaoDoModoParaTexto, "tipo" | "gatilho" | "resumo" | "risco"> & { modo?: AcaoDoModoParaTexto["modo"]; veredito?: AcaoDoModoParaTexto["veredito"]; motivo?: string | null }, naMaquina = false): string {
+export function linhaNaFala(a: Pick<AcaoDoModoParaTexto, "tipo" | "gatilho" | "resumo" | "risco"> & { modo?: AcaoDoModoParaTexto["modo"]; veredito?: AcaoDoModoParaTexto["veredito"]; motivo?: string | null }, naMaquina = false, meio: AcaoNoMeio | null = null): { frase: string; codigo?: readonly [number, number] } {
   if (a.modo !== undefined && a.veredito !== undefined && liberadaPeloRevisor({ modo: a.modo, veredito: a.veredito })) {
     const motivo = a.motivo ? motivoNaLinha(a.motivo) : "";
-    return `Revisor liberou ${alvoDoRevisor(a)}${motivo ? `: ${motivo}` : ""}`;
+    const alvo = meio?.texto || alvoDoRevisor(a);
+    const frase = `${PREFIXO_DO_REVISOR}${alvo}${motivo ? `: ${motivo}` : ""}`;
+    const c = meio?.texto && meio.codigo ? meio.codigo : null;
+    return c ? { frase, codigo: [PREFIXO_DO_REVISOR.length + c[0], PREFIXO_DO_REVISOR.length + c[1]] } : { frase };
   }
-  if (a.gatilho === "credencial") return `${verboDaCredencial(a)} ${qualCredencial(a.resumo) ?? "uma credencial"} ${naMaquina ? "desta máquina" : "do seu Mac"}`;
-  if (a.gatilho === "arriscado") return a.risco ? `Rodou um comando que ${a.risco}` : "Rodou um comando arriscado";
-  return tituloNaAtividade(a);
+  if (a.gatilho === "credencial") return { frase: `${verboDaCredencial(a)} ${qualCredencial(a.resumo) ?? "uma credencial"} ${naMaquina ? "desta máquina" : "do seu Mac"}` };
+  if (a.gatilho === "arriscado") return { frase: a.risco ? `Rodou um comando que ${a.risco}` : "Rodou um comando arriscado" };
+  return { frase: tituloNaAtividade(a) };
+}
+
+/** Só o texto da linha (`linhaNaFala` sem a frase da ação). */
+export function fraseNaFala(a: Parameters<typeof linhaNaFala>[0], naMaquina = false): string {
+  return linhaNaFala(a, naMaquina).frase;
 }
 
 /**

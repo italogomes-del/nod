@@ -41,4 +41,24 @@ export type ItemAprovacao = {
    * gravado pelo servidor; a tela não recalcula). Ausente = a regra de sempre do botão.
    */
   sempreServe?: boolean;
+  /**
+   * PR 4b dos modos de aprovação: a frase curta da ação, calculada pelo servidor na LEITURA de "Sua vez" (nunca gravada),
+   * só nos itens que foram ao revisor e cuja ação diz algo pelos argumentos. Ausente = a pergunta de hoje (a frase da
+   * decisão). Vale também para os itens de antes do PR.
+   */
+  fraseDaAcao?: FraseDaAcao;
+};
+
+/**
+ * A frase curta da ação que vai ao revisor (definido em 2026-10-26, PR 4b; telas A3 e A1): "Enviar e-mail “Lista de
+ * clientes” para financeiro@acme-pagamentos.co", "Push forçado na feat/login". Montada pelo domínio a partir dos
+ * argumentos (dado não confiável: redigida, sem invisíveis, cortada em 120); a web escapa tudo e põe o "?" no cartão.
+ */
+export type FraseDaAcao = {
+  /** Sem ponto nem interrogação; começa em maiúscula. */
+  texto: string;
+  /** O artigo da linha "Revisor liberou …" ("o push forçado na feat/login"); ausente = a frase começa pelo verbo. */
+  artigo?: "o" | "a" | "os" | "as";
+  /** O comando sem frase: o trecho de `texto` em fonte de código, [início, fim) ("Rodar ⟨npm run deploy⟩"). */
+  codigo?: readonly [number, number];
 };

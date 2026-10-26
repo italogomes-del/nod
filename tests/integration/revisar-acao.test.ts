@@ -508,7 +508,7 @@ describeIntegracao("revisar-acao: o revisor do Automático no servidor (PR 3a, A
       await c.revisar(() => texto(PEDE));
       const acaoId = (await c.repos.acoesPeloModo.daDecisao(liberada))!.id;
       const conversa = (await lerConversa(c.deps, { conversaId: c.conversaId })).data;
-      expect(conversa.acoesDoModo?.[c.turno.id]).toEqual([{ id: acaoId, turnoId: c.turno.id, em: expect.any(Number), gatilho: "revisor", frase: "Revisor liberou git push --force origin feat/login: você pediu o push forçado" }]);
+      expect(conversa.acoesDoModo?.[c.turno.id]).toEqual([{ id: acaoId, turnoId: c.turno.id, em: expect.any(Number), gatilho: "revisor", frase: "Revisor liberou o push forçado na feat/login: você pediu o push forçado" }]);
       const dia = new Date().toISOString().slice(0, 10);
       const atividade = (await lerAtividade(c.deps, { agenteId: c.agenteId, dia, fuso: "UTC" })).data;
       const item = atividade.itens.find((i) => i.id === `modo:${acaoId}`);

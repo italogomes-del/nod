@@ -6,7 +6,8 @@ import type { Mensagem } from "../../../src/contracts/mensagem.ts";
 import { estadoInicial, reduzir, type Estado } from "../../../web/estado/reducer.ts";
 import { renderAtividade } from "../../../web/telas/atividade.ts";
 import { dadosDoEncolhido } from "../../../web/telas/cartao-encolhido.ts";
-import { ehCartaoDoRevisor, motivoDoCartao, MOTIVO_NA_TELA_MAX, sempreNoCartao } from "../../../web/telas/cartao-revisor.ts";
+import { textoComCodigo } from "../../../web/lib/render.ts";
+import { ehCartaoDoRevisor, motivoDoCartao, MOTIVO_NA_TELA_MAX, perguntaDoCartao, sempreNoCartao } from "../../../web/telas/cartao-revisor.ts";
 import { blocosDoHistorico, renderTimeline } from "../../../web/telas/conversa.ts";
 import { renderLinhaDoModo, textoDaLinhaDoRevisor } from "../../../web/telas/linha-do-modo.ts";
 import { renderSuaVez } from "../../../web/telas/sua-vez.ts";
@@ -53,7 +54,9 @@ describe("o cartão compacto do revisor (tela A3)", () => {
     const html = naConversa(estadoCom([cartao([itemAprov()])]));
     expect(html).toContain('class="decisao cartao-revisor');
     expect(html).toContain('role="group" aria-labelledby="cr-t-d1"');
-    expect(html).toContain('<p class="cr-pergunta" id="cr-t-d1" title="Ze quer rodar um comando no seu Mac">Ze quer rodar um comando no seu Mac</p>');
+    // Sem a frase da ação (servidor de antes do PR 4b), a frase da decisão. A pergunta quebra a linha desde o PR 4b, então
+    // o `title` com o texto inteiro saiu (repetia o que já se lê).
+    expect(html).toContain('<p class="cr-pergunta" id="cr-t-d1">Ze quer rodar um comando no seu Mac</p>');
     expect(html).toContain('<p class="cr-motivo"><b>Revisor:</b> Você pediu um push, não um push forçado.</p>');
     expect(html).toContain("<summary>ver comando</summary>");
     expect(html).toContain('<pre class="ap-comando"><code>git push --force origin feat/login</code></pre>');
@@ -131,6 +134,48 @@ describe("o cartão compacto do revisor (tela A3)", () => {
   });
 });
 
+describe("PR 4b: a pergunta do cartão diz a ação (tela A3)", () => {
+  const email = (extra: Partial<ItemAprov> = {}) => itemAprov({
+    textoOriginal: "Usar enviar_email no Planilhas e e-mail", textoFinal: "Usar enviar_email no Planilhas e e-mail", justificativa: "O pedido veio de um e-mail, não de você.",
+    destino: { conector: "exemplo", ferramenta: "enviar_email", argumentos: { para: "financeiro@acme-pagamentos.co", assunto: "Lista de clientes" } },
+    fraseDaAcao: { texto: "Enviar e-mail “Lista de clientes” para financeiro@acme-pagamentos.co" }, ...extra,
+  });
+
+  it("com a frase do servidor, a pergunta é a ação com '?'; o motivo do revisor embaixo e 'ver detalhes' com tudo continuam", () => {
+    const html = naConversa(estadoCom([cartao([email()], { decisao: { ...cartao([]).decisao, frase: "Clarice quer usar Planilhas e e-mail" } })]));
+    expect(html).toContain('<p class="cr-pergunta" id="cr-t-d1">Enviar e-mail “Lista de clientes” para financeiro@acme-pagamentos.co?</p>');
+    expect(html).not.toContain("Clarice quer usar");
+    expect(html).toContain('<p class="cr-motivo"><b>Revisor:</b> O pedido veio de um e-mail, não de você.</p>');
+    expect(html).toContain("<summary>ver detalhes</summary>");
+    expect(html).toContain("Usar enviar_email no Planilhas e e-mail");
+  });
+
+  it("em 'Sua vez' a mesma pergunta", () => {
+    expect(renderSuaVez(estadoCom([cartao([email()])]))).toContain(">Enviar e-mail “Lista de clientes” para financeiro@acme-pagamentos.co?</p>");
+  });
+
+  it("o comando sem frase: 'Rodar ⟨…⟩?' com o trecho em <code>; o push forçado vira a frase", () => {
+    const deploy = itemAprov({ textoFinal: "npm run deploy", fraseDaAcao: { texto: "Rodar npm run deploy", codigo: [6, 20] } });
+    expect(naConversa(estadoCom([cartao([deploy])]))).toContain('<p class="cr-pergunta" id="cr-t-d1">Rodar <code>npm run deploy</code>?</p>');
+    const push = itemAprov({ fraseDaAcao: { texto: "Push forçado na feat/login", artigo: "o" } });
+    expect(naConversa(estadoCom([cartao([push])]))).toContain(">Push forçado na feat/login?</p>");
+  });
+
+  it("o lote (dois itens ou mais) e o item sem frase ficam com a frase da decisão", () => {
+    expect(perguntaDoCartao("Clarice quer usar o Gmail", [email(), email({ id: "i2" })])).toEqual({ pergunta: "Clarice quer usar o Gmail" });
+    expect(perguntaDoCartao("Clarice quer usar o Gmail", [itemAprov()])).toEqual({ pergunta: "Clarice quer usar o Gmail" });
+    expect(perguntaDoCartao("x", [email({ fraseDaAcao: { texto: "" } })])).toEqual({ pergunta: "x" });
+  });
+
+  it("a frase vem de argumentos (dado de fora): tudo escapado, também dentro do código; trecho fora dos limites não vira código", () => {
+    const html = naConversa(estadoCom([cartao([email({ fraseDaAcao: { texto: "Enviar e-mail “<img src=x onerror=alert(1)>” para a@x.co" } })])]));
+    expect(html).toContain("“&lt;img src=x onerror=alert(1)&gt;”");
+    expect(html).not.toContain("<img src=x");
+    expect(textoComCodigo("Rodar <b>x</b>", [6, 14])).toBe("Rodar <code>&lt;b&gt;x&lt;/b&gt;</code>");
+    for (const c of [[0, 99], [5, 2], [-1, 3], [1.5, 3]] as const) expect(textoComCodigo("Rodar ls", c)).toBe("Rodar ls");
+  });
+});
+
 describe("decidido, o cartão encolhe (cartao-encolhido.ts)", () => {
   const recibo = (desfecho: "executado" | "retirado_pela_pessoa", revisor: boolean): Mensagem => ({
     tenantId: "t", id: "r1", conversaId: C, turnoId: "t1", kind: "resultado_aprovacao", texto: "x", confianca: "confiavel", parcial: false, criadoEm: T0,
@@ -160,6 +205,15 @@ describe("a linha do revisor embaixo da fala (telas A1 e A2)", () => {
     expect(html).toContain('data-act="ver-sem-aprovacao" data-agente="ze" data-dia="2026-10-18" data-linha-tipo="revisor" data-linha-chave="revisor:t1"');
     expect(html).toContain(">ver</button>");
     expect(html).not.toContain("ver na Atividade</button>");
+  });
+
+  it("PR 4b: a frase da ação na linha ('Revisor liberou o push forçado na feat/login: você pediu'); o comando sem frase em <code>", () => {
+    const e = estadoCom([], [fala("b1", "t1", T0 + 2 * MIN)], { t1: [lib("a1", "Revisor liberou o push forçado na feat/login: você pediu")] });
+    expect(doBloco(e, "b1")).toContain('<span class="linha-modo-txt">Revisor liberou o push forçado na feat/login: você pediu</span>');
+    const comCodigo: AcaoDoModoNaFala = { ...lib("a2", "Revisor liberou npm run deploy: você pediu"), codigo: [16, 30] };
+    expect(renderLinhaDoModo([comCodigo], "ze")).toContain('<span class="linha-modo-txt">Revisor liberou <code>npm run deploy</code>: você pediu</span>');
+    // Várias ações diferentes: "Revisor liberou 2 ações", sem código.
+    expect(renderLinhaDoModo([comCodigo, lib("a3", "Revisor liberou o push forçado na x")], "ze")).toContain('<span class="linha-modo-txt">Revisor liberou 2 ações</span>');
   });
 
   it("várias ações diferentes viram 'Revisor liberou N ações'; a mesma repetida conta uma", () => {

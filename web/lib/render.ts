@@ -6,6 +6,16 @@ import { htmlMascote, type EstadoMascote, type TamanhoMascote } from "./mascote.
 export { esc } from "./escape.ts";
 export { atualizarMascote } from "./mascote.ts";
 
+/**
+ * O texto escapado com um trecho em fonte de código (PR 4b dos modos de aprovação: o comando sem frase, "Rodar ⟨npm run
+ * deploy⟩"). `codigo` é [início, fim) no texto, vindo do servidor; fora dos limites, o texto sai todo sem código.
+ */
+export function textoComCodigo(texto: string, codigo?: readonly [number, number]): string {
+  const [i, f] = codigo ?? [0, 0];
+  if (!codigo || !Number.isInteger(i) || !Number.isInteger(f) || i < 0 || f <= i || f > texto.length) return esc(texto);
+  return `${esc(texto.slice(0, i))}<code>${esc(texto.slice(i, f))}</code>${esc(texto.slice(f))}`;
+}
+
 export function iniciais(nome: string): string {
   return nome
     .split(/\s+/)

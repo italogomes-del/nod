@@ -1,3 +1,4 @@
+import type { DestinoItem } from "../contracts/item-aprovacao.ts";
 import type { FalhaRevisao, VereditoRevisao } from "../contracts/revisao.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
 import { data, msOuNull } from "./conversao.ts";
@@ -67,7 +68,11 @@ interface Linha {
 }
 
 /** Uma ação na linha embaixo da fala: a do total (PR 6) ou a que o revisor liberou (PR 4, com o `motivo` dele). */
-export type LinhaNaFala = { id: string; turno_id: string; modo: "automatico" | "total"; tipo: TipoAcaoDoModo; gatilho: GatilhoAcaoDoModo; resumo: string; risco: string | null; veredito: VereditoRevisao | null; motivo: string | null; criado_em: Date; linux: boolean };
+export type LinhaNaFala = {
+  id: string; turno_id: string; modo: "automatico" | "total"; tipo: TipoAcaoDoModo; gatilho: GatilhoAcaoDoModo; resumo: string; risco: string | null; veredito: VereditoRevisao | null; motivo: string | null; criado_em: Date; linux: boolean;
+  /** PR 4b: o item da decisão quando ela tem UM só (o comando, ou a ação no app), para a frase da ação; senão null. */
+  item: { texto_final: string; destino: DestinoItem } | null;
+};
 /** Uma ação que rodou sem a pessoa, como a Atividade a lista (PR 6); `motivo` e `contestada_em` do revisor (PR 4). */
 export type LinhaSemAprovacao = { id: string; modo: "automatico" | "total"; tipo: TipoAcaoDoModo; gatilho: GatilhoAcaoDoModo; resumo: string; risco: string | null; veredito: VereditoRevisao | null; motivo: string | null; contestada_em: Date | null; criado_em: Date };
 /** O que a contestação devolve (PR 4): a linha contestada, para o log e a resposta. */
@@ -184,10 +189,15 @@ export function acoesPeloModoRepo(conn: Conn, escopo: Escopo) {
     async naFalaDosTurnos(turnoIds: readonly string[]): Promise<LinhaNaFala[]> {
       if (turnoIds.length === 0) return [];
       return conn<LinhaNaFala[]>`
-        select a.id, a.turno_id, a.modo, a.tipo, a.gatilho, a.resumo, a.risco, a.veredito, a.motivo, a.criado_em, coalesce(mt.plataforma = 'linux', false) as linux
+        select a.id, a.turno_id, a.modo, a.tipo, a.gatilho, a.resumo, a.risco, a.veredito, a.motivo, a.criado_em, coalesce(mt.plataforma = 'linux', false) as linux,
+          case when it.n = 1 then jsonb_build_object('texto_final', it.texto_final, 'destino', it.destino) end as item
         from acoes_pelo_modo a
           join turnos t on t.tenant_id = a.tenant_id and t.id = a.turno_id
           left join maquina_tokens mt on mt.tenant_id = t.tenant_id and mt.id = t.machine_id
+          left join lateral (
+            select count(*)::int as n, min(i.texto_final) as texto_final, (array_agg(i.destino))[1] as destino
+            from itens_aprovacao i where i.tenant_id = a.tenant_id and i.decisao_id = a.decisao_id
+          ) it on a.modo = 'automatico' and a.veredito = 'libera' and a.decisao_id is not null
         where a.tenant_id = ${escopo.tenantId} and a.turno_id = any(${turnoIds as string[]}::uuid[])
           and ((a.modo = 'total' and a.gatilho in ('credencial', 'arriscado')) or (a.modo = 'automatico' and a.veredito = 'libera'))
         order by a.criado_em, a.id`;

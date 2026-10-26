@@ -6,6 +6,7 @@ import { nuncaPermanente as ehNuncaPermanente } from "../domain/aprovacao-perman
 import { montarFila } from "../domain/fila-frota.ts";
 import { incidentesVisiveis } from "./dispensar-incidente.ts";
 import { fiosDosItens } from "./fios-da-pergunta.ts";
+import { fraseDoItem, type ConectoresDaLeitura } from "./frase-da-acao.ts";
 import { paradaDoPedido } from "./pre-voo-rotina.ts";
 import { TIPOS_RESPONDIVEIS } from "./responder-decisao.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
@@ -48,6 +49,21 @@ async function pedidosDosItens(deps: DepsSuaVez, decisoes: readonly Decisao[]): 
 }
 
 /**
+ * PR 4b dos modos de aprovação: os itens que foram ao revisor ganham a frase curta da ação (`fraseDaAcao`), que o cartão
+ * compacto pergunta no lugar da frase da decisão. Calculada aqui, a cada leitura; o item sem frase fica como está.
+ */
+async function comFraseDaAcao(deps: DepsSuaVez, decisaoId: string, itens: ItemAprovacao[], conectores: ConectoresDaLeitura): Promise<ItemAprovacao[]> {
+  if (!itens.some((i) => i.motivoManual === "revisor_pediu" || i.motivoManual === "revisor_falhou")) return itens;
+  const tipo = (await deps.repos.acoesPeloModo.daDecisao(decisaoId))?.tipo ?? null;
+  const saida: ItemAprovacao[] = [];
+  for (const i of itens) {
+    const frase = i.motivoManual === "revisor_pediu" || i.motivoManual === "revisor_falhou" ? await fraseDoItem(deps, tipo, i, conectores) : null;
+    saida.push(frase ? { ...i, fraseDaAcao: frase } : i);
+  }
+  return saida;
+}
+
+/**
  * "Sua vez" por PESSOA sob RLS de duas pernas (ADR-007, EMENDA 1): a leitura roda como nod_app com
  * a pessoa da sessão como DECISORA — nunca role privilegiado + filtro na aplicação. Vencida fica
  * visível em cinza com desfecho; reaberta volta ao topo (montarFila). Instantes saem em ISO UTC e
@@ -68,6 +84,7 @@ export async function listarSuaVez(deps: DepsSuaVez, input: EntradaSuaVez = {}):
   const pedidos = await pedidosDosItens(deps, fila.itens.map((i) => i.decisao));
 
   const itens: SuaVezDto["itens"] = [];
+  const conectores: ConectoresDaLeitura = new Map();
   for (const item of fila.itens) {
     let decisao = item.decisao;
     const aberta = decisao.estado === "pendente" || decisao.estado === "reaberta";
@@ -79,7 +96,7 @@ export async function listarSuaVez(deps: DepsSuaVez, input: EntradaSuaVez = {}):
     for (const id of marcar ? item.gemeas : []) {
       if (porId.get(id)?.vistaEm === null) await repos.decisoes.marcarVista(id, agora);
     }
-    const itensAprovacao: ItemAprovacao[] = decisao.tipo === "aprovacao" ? await repos.itensAprovacao.listar(decisao.id) : [];
+    const itensAprovacao: ItemAprovacao[] = decisao.tipo === "aprovacao" ? await comFraseDaAcao(deps, decisao.id, await repos.itensAprovacao.listar(decisao.id), conectores) : [];
     const proposta = TIPOS_COM_PROPOSTA.has(decisao.tipo) ? await repos.propostas.buscar(decisao.id) : null;
     // definido em 2026-09-24 (emenda da ADR-044): o pedido aberto de uma rotina diz desde quando ela está
     // parada e quais janelas não rodaram — só no aberto; o vencido já pausou a rotina.

@@ -1,7 +1,7 @@
 import type { AcaoDoModoNaFala } from "../../src/contracts/acoes-do-modo.ts";
 import type { Mensagem } from "../../src/contracts/mensagem.ts";
 import { diaLocal } from "../lib/atividade-do-bot.ts";
-import { esc } from "../lib/render.ts";
+import { esc, textoComCodigo } from "../lib/render.ts";
 
 /**
  * A linha discreta embaixo da fala (definido em 2026-10-19, plano dos modos de aprovação, PR 6; telas Y1 e Y2 do
@@ -17,7 +17,8 @@ import { esc } from "../lib/render.ts";
  * - **ver na Atividade**: abre a Atividade do bot no dia da ação, no filtro "Sem aprovação" (tela Y3).
  *
  * revisto em 2026-10-26 (PR 4 dos modos de aprovação, telas A1 e A2): o que o revisor do Automático liberou ganha a sua
- * linha, com o escudo: "Revisor liberou git push --force origin feat/login: você pediu · ver"; várias ações diferentes
+ * linha, com o escudo: "Revisor liberou o push forçado na feat/login: você pediu · ver" (a frase da ação, PR 4b; o comando
+ * sem frase em fonte de código: "Revisor liberou ⟨npm run deploy⟩: você pediu"); várias ações diferentes
  * no turno viram "Revisor liberou 3 ações · ver". O "ver" abre o mesmo filtro, onde cada liberação tem o motivo e o
  * "Devia ter perguntado", e conta na telemetria das linhas (`revisor`).
  */
@@ -81,7 +82,9 @@ function linhaDoRevisor(acoes: readonly AcaoDoModoNaFala[], agenteId: string): s
   const primeira = [...acoes].sort((x, y) => x.em - y.em)[0];
   const dia = diaLocal(primeira?.em ?? Date.now());
   const chave = `revisor:${primeira?.turnoId ?? ""}`;
-  return `<div class="linha-modo linha-revisor">${ICONE_ESCUDO_LIBEROU}<span class="linha-modo-txt">${esc(texto)}</span><span class="linha-modo-sep" aria-hidden="true">·</span><button type="button" class="linha-modo-ver" data-act="ver-sem-aprovacao" data-agente="${esc(agenteId)}" data-dia="${esc(dia)}" data-linha-tipo="revisor" data-linha-chave="${esc(chave)}" aria-label="${esc(`Ver na Atividade: ${texto}`)}">ver</button></div>`;
+  // PR 4b: uma ação só, e o comando sem frase — o trecho que o servidor marcou vai em fonte de código.
+  const codigo = new Set(acoes.map((a) => a.frase)).size === 1 ? acoes.find((a) => a.codigo)?.codigo : undefined;
+  return `<div class="linha-modo linha-revisor">${ICONE_ESCUDO_LIBEROU}<span class="linha-modo-txt">${textoComCodigo(texto, codigo)}</span><span class="linha-modo-sep" aria-hidden="true">·</span><button type="button" class="linha-modo-ver" data-act="ver-sem-aprovacao" data-agente="${esc(agenteId)}" data-dia="${esc(dia)}" data-linha-tipo="revisor" data-linha-chave="${esc(chave)}" aria-label="${esc(`Ver na Atividade: ${texto}`)}">ver</button></div>`;
 }
 
 /** O HTML da linha (ou das duas: a do revisor e a do total, se o modo mudou no meio do turno). `agenteId`: o bot da conversa (a Atividade é dele). */

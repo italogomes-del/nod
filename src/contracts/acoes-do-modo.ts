@@ -5,7 +5,8 @@ import type { EpochMs } from "./ids.ts";
  * "Ignorar todas as aprovações" rodou sem a pessoa e merece estar à vista — a credencial e o arriscado. O resto fica só
  * na Atividade, no filtro "Sem aprovação". A frase vem pronta do servidor (`fraseNaFala`, src/domain/acoes-do-modo.ts):
  * "Usou o token do GitHub do seu Mac". Nada vira mensagem nova no chat. revisto em 2026-10-26 (PR 4): também o que o
- * revisor do Automático liberou, com o motivo dele ("Revisor liberou git push --force origin feat/login: você pediu").
+ * revisor do Automático liberou, com o motivo dele; desde o PR 4b, com a frase da ação ("Revisor liberou o push forçado na
+ * feat/login: você pediu").
  */
 export type AcaoDoModoNaFala = {
   id: string;
@@ -17,6 +18,8 @@ export type AcaoDoModoNaFala = {
    */
   gatilho: "credencial" | "arriscado" | "revisor";
   frase: string;
+  /** PR 4b: o comando sem frase, na linha do revisor — o trecho de `frase` em fonte de código, [início, fim). */
+  codigo?: readonly [number, number];
 };
 
 /**
