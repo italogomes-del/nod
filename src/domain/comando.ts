@@ -33,7 +33,8 @@ const SIMPLES = new Set([
  */
 // revisto em 2026-09-30: `.key`/`.pem` só como NOME DE ARQUIVO (argumento que começa depois de espaço, aspa, `=` ou
 // `:` e termina num separador). `\.(pem|…|key)\b` casava `e.key` em JavaScript embutido: 11 blocos das skills do
-// Marlon (gstack-learn) paravam por credencial, e credencial pede a pessoa até no modo total.
+// Marlon (gstack-learn) paravam por credencial, e credencial pedia a pessoa até no modo total (até o PR 6 dos modos de
+// aprovação, 2026-10-19: no total, só a chave do nod ainda pede).
 const CREDENCIAL = /(^|[\s"'=/:~])(\.ssh|\.aws|\.gnupg|\.config\/gh|\.config\/nod-motor|\.netrc|\.git-credentials|\.npmrc|\.docker\/config\.json|\.kube|\.claude\/\.credentials\.json|\.codex\/auth\.json)(\/|$|[\s"'])|(^|[\s"'=/:~])conexao\.json(?=$|[\s"';|&)])|id_(rsa|ed25519|ecdsa|dsa)\b|(^|[\s"'=:])[\w./~*?-]*[\w*?]\.(pem|p12|pfx|key)(?=$|[\s"';|&)])|(^|[\s;&|])security\s+(find|dump|export)|gh\s+auth\s+token|Library\/Keychains/;
 
 /**
@@ -43,6 +44,42 @@ const CREDENCIAL = /(^|[\s"'=/:~])(\.ssh|\.aws|\.gnupg|\.config\/gh|\.config\/no
  */
 export function tocaCredencial(texto: string): boolean {
   return CREDENCIAL.test(texto);
+}
+
+/**
+ * A chave do PRÓPRIO nod nesta máquina (definido em 2026-10-19, plano dos modos de aprovação, PR 6): a do motor da VM
+ * (~/.config/nod-motor/conexao.json, ADR-090) e o `conexao.json` do app. Não é credencial da pessoa: com ela, quem a lê
+ * fala com o servidor como a máquina (puxa turnos, renova, relata). Por isso continua pedindo a pessoa até em "Ignorar
+ * todas as aprovações" — o único caso de credencial que o total não libera.
+ */
+const CHAVE_DO_NOD = /(^|[\s"'=/:~])\.config\/nod-motor(\/|$|[\s"'])|(^|[\s"'=/:~])conexao\.json(?=$|[\s"';|&)])/;
+
+export function tocaChaveDoNod(texto: string): boolean {
+  return CHAVE_DO_NOD.test(texto);
+}
+
+/**
+ * O que a credencial é, dito à pessoa na linha embaixo da fala e na Atividade ("Usou o token do GitHub do seu Mac"),
+ * definido em 2026-10-19 (plano dos modos de aprovação, PR 6; telas Y1 a Y3). Um padrão por alternativa de `CREDENCIAL`,
+ * na ordem em que a pessoa reconhece a coisa: `gh auth token | docker login` é "o token do GitHub". O que toca uma
+ * credencial sem padrão próprio (`.netrc`, `.pem`, `.kube`…) é "uma credencial"; o que não toca nenhuma, null.
+ */
+const QUAL_CREDENCIAL: readonly (readonly [RegExp, string])[] = [
+  [/gh\s+auth\s+token|(^|[\s"'=/:~])\.config\/gh(\/|$|[\s"'])/, "o token do GitHub"],
+  [/(^|[\s"'=/:~])\.aws(\/|$|[\s"'])/, "as credenciais da AWS"],
+  [/(^|[\s"'=/:~])\.ssh(\/|$|[\s"'])|id_(rsa|ed25519|ecdsa|dsa)\b/, "uma chave SSH"],
+  [/(^|[\s;&|])security\s+(find|dump|export)|Library\/Keychains/, "o Keychain"],
+  [/(^|[\s"'=/:~])\.docker\/config\.json(\/|$|[\s"'])/, "o login do Docker"],
+  [/(^|[\s"'=/:~])\.npmrc(\/|$|[\s"'])/, "o login do npm"],
+  [/(^|[\s"'=/:~])\.claude\/\.credentials\.json(\/|$|[\s"'])/, "o login do Claude"],
+  [/(^|[\s"'=/:~])\.codex\/auth\.json(\/|$|[\s"'])/, "o login do Codex"],
+  [CHAVE_DO_NOD, "a chave do nod nesta máquina"],
+];
+
+export function qualCredencial(texto: string): string | null {
+  if (!tocaCredencial(texto)) return null;
+  for (const [re, nome] of QUAL_CREDENCIAL) if (re.test(texto)) return nome;
+  return "uma credencial";
 }
 
 const GIT = new Set([
@@ -382,6 +419,23 @@ export function classificarComando(comando: string): ClasseComando {
   if (texto === "") return altera("comando vazio");
   if (texto.length > TETO) return altera("comando longo demais para conferir");
   if (tocaCredencial(texto)) return altera("toca uma credencial do Mac");
+  return classificarForma(texto);
+}
+
+/**
+ * O comando que toca credencial só a LÊ (`cat ~/.aws/config`), sem gravar, mandar ou rodar nada além de leitura?
+ * Definido em 2026-10-19 (QA do PR 6 dos modos de aprovação, telas Y2 e Y3): a frase do que o total rodou diz "Leu as
+ * credenciais da AWS", como o protótipo, e não "Usou". Só para o TEXTO dito à pessoa — a decisão continua em
+ * `classificarComando`, para a qual tocar credencial é sempre "altera".
+ */
+export function soLeCredencial(comando: string): boolean {
+  const texto = comando.trim();
+  if (texto === "" || texto.length > TETO || !tocaCredencial(texto)) return false;
+  return classificarForma(texto).tipo === "leitura";
+}
+
+/** A forma do comando (segmentos, operadores, redirecionamentos), depois das cercas do texto inteiro. */
+function classificarForma(texto: string): ClasseComando {
   const tokens = tokenizar(texto);
   if (!tokens) return altera("substituição de comando");
   let segmento: string[] = [];

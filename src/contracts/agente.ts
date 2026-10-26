@@ -19,8 +19,8 @@ export type EsforcoAgente = (typeof ESFORCOS_AGENTE)[number];
 
 /**
  * Como o bot aprova as próprias ações (ADR-059, 0040): 'manual' pede a pessoa para o que muda algo; 'automatico'
- * aprova sozinho e para no arriscado, na credencial e no que vem depois de conteúdo de fora; 'total' aprova tudo,
- * menos o que toca credencial. Só a dona muda.
+ * aprova sozinho e para no arriscado e na credencial (ADR-066: conteúdo de fora não para mais); 'total' aprova tudo,
+ * até a credencial do Mac (PR 6 dos modos de aprovação, ADR-115). Só a dona muda.
  */
 export const MODOS_APROVACAO = ["manual", "automatico", "total"] as const;
 export type ModoAprovacao = (typeof MODOS_APROVACAO)[number];

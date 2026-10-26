@@ -722,6 +722,14 @@
 .msg-linha .msg-actions:has(button[aria-expanded="true"]) { transform: translate(0, -50%); }
 /* A reação vira um chip embaixo da fala ("👍 1"): o da pessoa sai marcado e o toque tira. */
 .reacoes-da-fala { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0 0 10px; }
+/* PR 6 dos modos de aprovação (telas Y1 e Y2): a linha discreta embaixo da fala do que o "Ignorar todas" rodou sem a
+   pessoa — "Usou o token do GitHub do seu Mac · ver na Atividade". Cinza, 12,5 px, sem caixa: é rodapé da fala. */
+.linha-modo { margin: 6px 0 0 6px; font-size: 12.5px; line-height: 1.45; color: var(--ink-2); }
+/* Em linha (não flex): no celular a frase quebra como texto, com a chave e o "ver" juntos dela. */
+.linha-modo > svg { display: inline-block; margin-right: 6px; vertical-align: -2px; }
+.linha-modo-sep { margin: 0 6px; }
+.linha-modo-ver { padding: 0; border: 0; background: none; color: var(--ink-2); font: inherit; text-decoration: underline; text-decoration-color: var(--line-strong); text-underline-offset: 2px; cursor: pointer; }
+.linha-modo-ver:hover { color: var(--ink); }
 .reacao-chip { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--ink); font: inherit; font-size: 13px; line-height: 1.5; cursor: pointer; }
 .reacao-chip .reacao-n { color: var(--ink-2); }
 .reacao-chip.minha { border-color: var(--line-strong); background: var(--surface-raised); }

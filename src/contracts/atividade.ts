@@ -7,8 +7,8 @@ import type { EpochMs } from "./ids.ts";
  * hoje (ADR-029: nome, causa e relógio).
  *
  * Fontes: as mensagens da conversa própria do bot com destino `atividade` ou `anexo` (mais as de destino temporal), as
- * negações de conector indisponível da trilha (uma linha por conector e causa, com "N vezes") e os trabalhos que
- * começaram ou terminaram no dia. A memória não é fonte (sem índice em `events`): a web mostra a linha "Agora" do estado
+ * negações de conector indisponível da trilha (uma linha por conector e causa, com "N vezes"), os trabalhos que
+ * começaram ou terminaram no dia e (PR 6 dos modos de aprovação) o que o modo rodou sem a pessoa (`acoes_pelo_modo`). A memória não é fonte (sem índice em `events`): a web mostra a linha "Agora" do estado
  * que já tem.
  */
 export type AlvoDaAtividade = { trabalhoId: string } | { mensagemId: string };
@@ -26,6 +26,8 @@ export type ItemDeAtividade = {
    * tem uma rota para ler uma mensagem solta).
    */
   texto?: string;
+  /** O detalhe é um comando ou um caminho (PR 6 dos modos de aprovação, tela Y3): a web o mostra em fonte de código. */
+  codigo?: true;
   /** Negações repetidas (mesma ferramenta, mesma causa) numa linha só. */
   vezes?: number;
   /** O que o clique abre: a frente, ou o texto inteiro da mensagem com o "Relatar" (ADR-041). A trilha não tem alvo. */
@@ -45,7 +47,7 @@ export type AtividadeDto = {
   diaAnterior: string | null;
 };
 
-/** `contagem=1`: o "N hoje" da gaveta, contado nas três fontes sem montar os itens. */
+/** `contagem=1`: o "N hoje" da gaveta, contado nas quatro fontes sem montar os itens. */
 export type ContagemDaAtividade = { dia: string; total: number };
 
 /** Teto de itens por dia. definido em 2026-10-18 (plano, decisão 12): o resto fica no Raio-X. */

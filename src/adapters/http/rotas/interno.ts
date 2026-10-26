@@ -101,6 +101,9 @@ const dormirPadrao = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 /** NOD-263: movidas para use-cases/liberar-no-app.ts (PR 5 dos modos de aprovação); reexportadas para quem já importa daqui. */
 export { assentarComNovaTentativa, TENTATIVAS_FASE2 };
 
+/** As nativas em que o hook manda o arquivo de credencial ao servidor (PR 6 dos modos de aprovação, `decidirNativa`). */
+const NATIVAS_COM_CREDENCIAL: readonly string[] = ["Read", "Write", "Edit", "NotebookEdit", "Glob", "Grep", "apply_patch", "view_image", NATIVA_MCP_DA_PESSOA];
+
 /**
  * Rotas INTERNAS (/api/interno/…), autenticadas pelo token de turno no roteador da L1: a
  * identidade (turnoId, agenteId, tenant, pessoa) chega em ctx.params/ctx.escopo, nunca do corpo
@@ -294,7 +297,7 @@ export function rotasInternas(deps: DepsRotasInternas): Rota[] {
       // revisto em 2026-09-28 (ADR-055): o Bash vem com o comando, e quem decide é autorizarComando — o que só lê
       // roda; o resto abre um card e a resposta diz ao hook qual decisão esperar. Trilha só do que roda.
       async handler(ctx) {
-        const c = (await ctx.corpo()) as { ferramenta?: unknown; comando?: unknown; arquivo?: unknown; mcp?: unknown } | null;
+        const c = (await ctx.corpo()) as { ferramenta?: unknown; comando?: unknown; arquivo?: unknown; mcp?: unknown; credencial?: unknown } | null;
         const ferramenta = typeof c?.ferramenta === "string" ? c.ferramenta : "";
         const turnoId = ctx.params.turnoId ?? "";
         const plano = await deps.tokens.planoOuRecompor(turnoId);
@@ -322,9 +325,14 @@ export function rotasInternas(deps: DepsRotasInternas): Rota[] {
           ctx.json(403, { codigo: "nao_permitido", mensagem: motivoDaEsperaNegada(espera, comMeChameAs, comEsperarComando) });
           return;
         }
+        // PR 6 dos modos de aprovação: o hook novo manda o arquivo de credencial (ou o pedido do MCP que cita uma) em vez
+        // de negar sozinho. O servidor decide pelo modo atual e, quando libera, diz isso EXPLICITAMENTE
+        // (`credencial: "permitida"`): o hook não aceita um `{ ok: true }` cru, que é o que o servidor antigo responde.
+        // Só nas nativas em que o hook a manda; noutra (o Bash), o campo é ignorado e o comando segue a decisão de sempre.
+        const credencial = typeof c?.credencial === "string" && NATIVAS_COM_CREDENCIAL.includes(ferramenta) ? c.credencial : null;
         // ADR-115: o pedido ao revisor só entra na caixa depois do commit — o laço não pode responder por uma decisão que
         // o banco ainda não tem.
-        const paraACaixa: { revisao?: PedidoNaCaixa } = {};
+        const paraACaixa: { revisao?: PedidoNaCaixa; negar?: string } = {};
         const resultado = await deps.dentro(ctx.escopo, async (d) => {
           if (chave) {
             const anterior = await d.repos.nativasIdempotencia.travar(turnoId, chave);
@@ -336,8 +344,13 @@ export function rotasInternas(deps: DepsRotasInternas): Rota[] {
           // ADR-066: a gravação fora de ~/nod/<bot> (o hook manda `arquivo`) passa pela mesma decisão do comando.
           // ADR-103: o apply_patch do Codex grava como o Write do Claude.
           const arquivo = ["Write", "Edit", "NotebookEdit", "apply_patch"].includes(ferramenta) && typeof c?.arquivo === "string" ? c.arquivo : null;
-          if (rodaComando || arquivo !== null || mcp !== null) {
-            const r = await executar(d, autorizarComando, arquivo !== null ? { plano, arquivo } : mcp !== null ? { plano, mcp } : { plano, comando: String(c?.comando) });
+          if (credencial !== null || rodaComando || arquivo !== null || mcp !== null) {
+            const r = await executar(d, autorizarComando, credencial !== null ? { plano, credencial, ferramenta } : arquivo !== null ? { plano, arquivo } : mcp !== null ? { plano, mcp } : { plano, comando: String(c?.comando) });
+            if ("negar" in r) {
+              // Sem chave guardada: a negação não grava nada, e o reenvio (NOD-293) só decide de novo.
+              paraACaixa.negar = r.negar;
+              return null;
+            }
             if ("aguardar" in r) {
               if (r.revisao) paraACaixa.revisao = r.revisao;
               const resposta = { aguardar: r.aguardar };
@@ -352,10 +365,15 @@ export function rotasInternas(deps: DepsRotasInternas): Rota[] {
           }
           await d.repos.trilha.registrar({ agenteId: plano.agenteId, turnoId, ferramenta: nomeParaTrilha(`nativa__${ferramenta}`), kind: "tool_call", ...regra });
           if (NATIVAS_QUE_CONTAMINAM.includes(ferramenta)) await d.repos.turnos.contaminar(turnoId, deps.agora());
-          const resposta = { ok: true } as const;
+          // PR 6: a credencial liberada vai guardada com a confirmação explícita — o reenvio (NOD-293) devolve a mesma.
+          const resposta = credencial !== null ? ({ ok: true, credencial: "permitida" } as const) : ({ ok: true } as const);
           if (chave) await d.repos.nativasIdempotencia.registrar(turnoId, chave, resposta);
           return resposta;
         });
+        if (paraACaixa.negar !== undefined) {
+          ctx.json(403, { codigo: "nao_permitido", mensagem: paraACaixa.negar });
+          return;
+        }
         if (paraACaixa.revisao) deps.revisor?.enfileirar(paraACaixa.revisao);
         ctx.json(200, resultado);
       },

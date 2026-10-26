@@ -44,11 +44,14 @@ export const esperarComando: CasoNod<Deps, "esperar_comando"> = async (deps, inp
   if ((await deps.repos.turnos.voltasMarcadas(origemDaVolta(turno))) >= VOLTAS_SEGUIDAS_MAX) {
     return { data: { ok: false, erro: "voltas_demais", instrucao: `Você já voltou ${VOLTAS_SEGUIDAS_MAX} vezes para conferir a mesma coisa. Não espere de novo: diga à pessoa o que está esperando e por quê, e encerre o turno.` } };
   }
-  if (!(await comandoRodaSemCard(deps, plano, v.pedido.comando))) {
+  const liberado = await comandoRodaSemCard(deps, plano, v.pedido.comando);
+  if (!liberado) {
     return { data: { ok: false, erro: "precisa_aprovacao", instrucao: "Este comando pediria a aprovação da pessoa, e o Nod não roda sem ela. Use um comando que só acompanha (gh pr checks <n> --watch, gh run watch <id>) ou use me_chame_as para voltar mais tarde, e encerre o turno." } };
   }
   const espera = await deps.repos.esperas.criar({ agenteId: turno.agenteId, conversaId: turno.conversaId, trabalhoId: turno.trabalhoId ?? null, turnoId: turno.id, maquinaId: turno.machineId, pasta: plano.pastaDoBot ?? null, comando: v.pedido.comando, motivo: v.pedido.motivo });
   if (!espera) return { data: { ok: false, erro: "ja_esperando", instrucao: "Você já deixou um comando esperando neste turno e volta quando ele terminar. Encerre o turno." } };
+  // PR 6: o que o total liberou vai para a Atividade só quando a espera existe (o comando vai rodar), antes do commit.
+  await liberado.registrar();
   log("info", "espera_pedida", { espera_id: espera.id, turno_id: turno.id, trabalho_id: turno.trabalhoId ?? null, maquina_id: turno.machineId });
   return { data: { ok: true, espera_id: espera.id, instrucao: "Combinado: o Nod roda o comando na sua máquina, nesta pasta, e você volta sozinho nesta mesma sessão quando ele terminar, com o código de saída e as últimas linhas. Não rode o mesmo comando aqui nem fique checando: diga em uma frase o que vai esperar e encerre o turno agora." } };
 };

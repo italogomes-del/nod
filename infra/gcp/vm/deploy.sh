@@ -343,6 +343,12 @@ fi
 TROCA_PENDENTE=""
 rm -f Caddyfile.anterior
 echo "nod no ar: https://$NOD_DOMINIO ($TAG, cor $NOVA)"
+# PR 6 dos modos de aprovação (2026-10-19): a linha "Ignorar todas as aprovações agora também usa as credenciais…" na
+# conversa dos bots que já estavam no total. Idempotente (só escreve onde falta), com a cor nova já confirmada; falhar
+# aqui não derruba o deploy. Pode sair daqui depois do primeiro deploy do PR 6.
+# Com prazo de 5 min: uma trava no banco não segura o deploy (o script pode rodar de novo). `timeout` não roda a função
+# `dc`, por isso o docker compose por extenso.
+timeout 300 docker compose --env-file imagens.env run --rm --no-deps -T "nod-$NOVA" node scripts/aviso-total-credenciais.ts || echo "aviso do total falhou ou passou de 5 min (dc logs nod-$NOVA)" >&2
 
 # A velha drena (até 10 min: ligações vivas e turnos do Mac que não atravessam o reinício) e sai. Síncrono: o job
 # segue serializado (concurrency: deploy-producao) e o próximo deploy nunca acha duas cores de pé.

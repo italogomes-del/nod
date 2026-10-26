@@ -8,7 +8,7 @@ type Bot = NonNullable<Estado["frota"]>["agentes"][number];
 
 /**
  * A Atividade do bot, um nível da gaveta (definido em 2026-10-18, chat limpo, PR 2; ADR-114; protótipo "Atividade aberta no
- * drawer"): o que saiu do chat, um dia por página. Os filtros Tudo / Frentes / Bloqueios / Máquina e IA (botões com
+ * drawer"): o que saiu do chat, um dia por página. Os filtros Tudo / Sem aprovação / Frentes / Bloqueios / Máquina e IA (botões com
  * `aria-pressed`; item sem categoria só em "Tudo"), a lista com a hora à esquerda, o título e o detalhe em cinza, e "Dia
  * anterior ›" no fim. O clique leva ao alvo: a frente abre a tela dela; a mensagem abre o texto inteiro ali mesmo, com o
  * "Relatar" (ADR-041). A linha da trilha (app indisponível) não tem mensagem e não leva "Relatar" na v1 (decisão 14).
@@ -30,7 +30,7 @@ export function renderAtividade(estado: Estado, bot: Bot): string {
   if (!dto) return bloco(`${filtros}<p class="mudo atv-vazio">A atividade deste bot não está disponível agora.</p>`);
   const itens = itensDoFiltro(dto.itens, filtro);
   const agora = dia === hoje && (filtro === "tudo" || filtro === "maquina_ia") ? linhaAgora(estado, bot) : "";
-  const vazio = itens.length === 0 && !agora ? `<p class="mudo atv-vazio">${filtro === "tudo" ? "Nada neste dia." : "Nada deste tipo neste dia."}</p>` : "";
+  const vazio = itens.length === 0 && !agora ? `<p class="mudo atv-vazio">${filtro === "tudo" ? "Nada neste dia." : filtro === "sem_aprovacao" ? "Nada rodou sem aprovação neste dia." : "Nada deste tipo neste dia."}</p>` : "";
   const lista = itens.length || agora ? `<ol class="atv-lista" aria-label="${esc(`Atividade · ${rotuloDoDia(dia, hoje)}`)}">${agora}${itens.map((i) => linhaDoItem(i, vista?.aberta ?? null)).join("")}</ol>` : "";
   const truncados = dto.truncados > 0 ? `<p class="mudo atv-mais">e mais ${dto.truncados} ${dto.truncados === 1 ? "item" : "itens"} deste dia, no Raio-X</p>` : "";
   const seguinte = dia < hoje ? `<button type="button" class="atv-dia" data-act="atividade-dia" data-dia="${esc(diaSeguinte(dia))}">‹ Dia seguinte</button>` : "<span></span>";
@@ -54,7 +54,8 @@ function linhaAgora(estado: Estado, bot: Bot): string {
 /** Uma linha da lista. A mensagem aberta mostra o texto inteiro e o "Relatar"; a frente abre a tela dela. */
 function linhaDoItem(i: ItemDeAtividade, aberta: string | null): string {
   const vezes = i.vezes && i.vezes > 1 ? ` <span class="atv-vezes">${i.vezes} vezes</span>` : "";
-  const corpo = `<span class="atv-hora">${esc(hora(i.em))}</span><span class="atv-texto"><span class="atv-titulo">${esc(i.titulo)}${vezes}</span>${i.detalhe ? `<span class="atv-detalhe">${esc(i.detalhe)}</span>` : ""}</span>`;
+  // PR 6 dos modos de aprovação (tela Y3): o comando ou o caminho do que rodou sem aprovação vai em fonte de código.
+  const corpo = `<span class="atv-hora">${esc(hora(i.em))}</span><span class="atv-texto"><span class="atv-titulo">${esc(i.titulo)}${vezes}</span>${i.detalhe ? `<span class="atv-detalhe${i.codigo ? " atv-codigo" : ""}"${i.codigo ? ` title="${esc(i.detalhe)}"` : ""}>${esc(i.detalhe)}</span>` : ""}</span>`;
   const alvo = i.alvo;
   if (alvo && "trabalhoId" in alvo) return `<li class="atv-item"><button type="button" class="atv-botao" data-act="abrir-trabalho" data-id="${esc(alvo.trabalhoId)}">${corpo}</button></li>`;
   if (alvo && "mensagemId" in alvo) {

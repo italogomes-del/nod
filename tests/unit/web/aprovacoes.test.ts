@@ -62,10 +62,14 @@ describe("o botão de aprovações no campo (ADR-059; Fase 4, PR 2)", () => {
     }
   });
 
-  it("a confirmação do total: o aviso sem credencial (ela ainda para), os dois botões e o nome escapado", () => {
+  it("PR 6: o terceiro modo diz o texto do protótipo — até as credenciais, e o que fez fica na Atividade", () => {
+    expect(MODOS.total.descricao).toBe("Faz tudo sem perguntar, até comandos com as credenciais do seu Mac. O que ele fez fica na Atividade.");
+    expect(renderMenuModo("Ze", "automatico")).toContain("até comandos com as credenciais do seu Mac");
+  });
+
+  it("a confirmação do total (PR 6): o aviso fala das credenciais, os dois botões e o nome escapado", () => {
     const html = renderConfirmaTotal("Clarice");
-    expect(html).toContain("Um texto de fora, como um e-mail ou um PR, pode levar Clarice a agir por conta própria. Use em bots que trabalham só com o que é seu.");
-    expect(html).not.toContain("credenc");
+    expect(html).toContain("Um texto de fora, como um e-mail ou um PR, pode levar Clarice a usar suas credenciais. Use em bots que trabalham só com o que é seu.");
     expect(html).toContain('data-confirma="sim">Ignorar aprovações em Clarice</button>');
     expect(html).toContain('data-confirma="nao">Agora não</button>');
     expect(html).toContain('aria-labelledby="modo-confirma-txt"');

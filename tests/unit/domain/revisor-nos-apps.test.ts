@@ -14,7 +14,7 @@ import {
   VERSAO_APROVACAO_PERMANENTE,
   type EntradaAprovacao,
 } from "../../../src/domain/aprovacao-permanente.ts";
-import { REGRA_MODO_AUTOMATICO, REGRA_MODO_TOTAL, VERSAO_MODO_AUTOMATICO_COM_REVISOR } from "../../../src/domain/modo-aprovacao.ts";
+import { REGRA_MODO_AUTOMATICO, REGRA_MODO_TOTAL, VERSAO_MODO_AUTOMATICO_COM_REVISOR, VERSAO_MODO_TOTAL } from "../../../src/domain/modo-aprovacao.ts";
 import { pedidoDoRevisor, resumoDaAcao, type EntradaRevisor } from "../../../src/domain/revisor.ts";
 
 /**
@@ -26,6 +26,8 @@ import { pedidoDoRevisor, resumoDaAcao, type EntradaRevisor } from "../../../src
 /**
  * A cópia CONGELADA de `decidirAprovacao` como estava antes do PR 5 (main ff0e54ce, src/domain/aprovacao-permanente.ts:
  * 150-170), com a regra do modo de hoje inline (`decidirPeloModo` sem revisor). Não atualize esta cópia junto com a regra.
+ * A exceção é a VERSÃO do total, que vem da constante: o PR 6 (Ignorar todas de verdade) a subiu para 2 pela credencial do
+ * Mac no terminal e nos arquivos, sem mudar a decisão no caminho dos apps (o total já aprovava tudo ali).
  */
 function decidirAprovacaoDeHoje(entrada: EntradaAprovacao):
   | { automatico: true; regra: string; versao: number }
@@ -43,7 +45,7 @@ function decidirAprovacaoDeHoje(entrada: EntradaAprovacao):
   const arriscada = entrada.arriscada === true && !conversa;
   const modo = entrada.modo;
   const doModo = !modo || modo === "manual" ? null
-    : modo === "total" ? { automatico: true as const, regra: "regra:modo_total", versao: 1 }
+    : modo === "total" ? { automatico: true as const, regra: "regra:modo_total", versao: VERSAO_MODO_TOTAL }
     : arriscada ? { automatico: false as const, motivo: "acao_arriscada" as const }
     : { automatico: true as const, regra: "regra:modo_automatico", versao: 2 };
   if (plano.confiancaEntrada === "nao_confiavel" || entrada.contaminado === true) return doModo ?? { automatico: false, motivo: "regra_suspensa_conteudo_nao_confiavel" };

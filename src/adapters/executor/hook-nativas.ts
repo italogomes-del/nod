@@ -4,7 +4,7 @@ import { appendFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { aspasDeShell, chaveDoComando, comandoNaFila, MARCA_DA_FILA, precisaDaVez, repositorioDaOrigem, semPeso, type Historico } from "../../domain/fila-do-forno.ts";
-import { decidirNativa, NATIVA_MCP_DA_PESSOA } from "../../domain/nativas.ts";
+import { decidirNativa, FRASE_ARQUIVO_DE_CREDENCIAL, FRASE_MCP_COM_CREDENCIAL, NATIVA_MCP_DA_PESSOA } from "../../domain/nativas.ts";
 import { ESPERA_APROVACAO_NO_TURNO_MS, LONGPOLL_APROVACAO_MS, VARIAVEL_CONFIG_HOOK } from "../../shared/constantes.ts";
 import { mainDaVaga } from "./vaga.ts";
 
@@ -42,10 +42,16 @@ export type ConfigHook = { url: string; token: string; pastaDoBot?: string; home
 /** `updatedInput` (ADR-097): o Bash com a vez da fila em volta; o CLI valida contra o formato da ferramenta. */
 export type SaidaHook = { hookSpecificOutput: { hookEventName: "PreToolUse"; permissionDecision: "allow" | "deny"; permissionDecisionReason: string; updatedInput?: Record<string, unknown> } };
 
-/** O que o servidor respondeu sobre a chamada; `motivo` volta ao modelo quando nega. */
-export type Confirmacao = { permitir: boolean; motivo?: string };
-/** `arquivo` (ADR-066): a gravação fora de ~/nod/<bot>, que o servidor decide pelo modo — e o hook espera, como no Bash. */
-export type Confirmar = (p: { ferramenta: string; contamina: boolean; comando?: string; arquivo?: string; mcp?: string }) => Promise<Confirmacao>;
+/**
+ * O que o servidor respondeu sobre a chamada; `motivo` volta ao modelo quando nega. `credencial: "permitida"` (PR 6 dos
+ * modos de aprovação): a confirmação EXPLÍCITA de que o servidor decidiu a credencial pelo modo e a liberou.
+ */
+export type Confirmacao = { permitir: boolean; motivo?: string; credencial?: "permitida" };
+/**
+ * `arquivo` (ADR-066): a gravação fora de ~/nod/<bot>, que o servidor decide pelo modo — e o hook espera, como no Bash.
+ * `credencial` (PR 6): o arquivo de credencial (ou o pedido do MCP que cita uma), que o servidor decide pelo modo.
+ */
+export type Confirmar = (p: { ferramenta: string; contamina: boolean; comando?: string; arquivo?: string; mcp?: string; credencial?: string }) => Promise<Confirmacao>;
 
 const saida = (permitir: boolean, motivo: string): SaidaHook => ({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: permitir ? "allow" : "deny", permissionDecisionReason: `nod: ${motivo}` } });
 
@@ -67,9 +73,16 @@ export async function decidirHook(evento: unknown, confirmar: Confirmar, pastas?
   // MCP do nod: o proxy já decide e registra; o hook não confirma de novo no servidor (a rota só aceita nativas).
   // ADR-103: o MCP da pessoa (no Codex) vai ao servidor como a nativa NATIVA_MCP_DA_PESSOA, com o texto do pedido.
   if (ferramenta.startsWith("mcp__") && d.mcp === undefined) return saida(true, d.motivo);
+  const credencial = d.credencial !== undefined ? { credencial: d.credencial } : {};
   const c = d.mcp !== undefined
-    ? await confirmar({ ferramenta: NATIVA_MCP_DA_PESSOA, contamina: d.contamina, mcp: d.mcp })
-    : await confirmar({ ferramenta, contamina: d.contamina, ...(d.comando !== undefined ? { comando: d.comando } : {}), ...(d.arquivo !== undefined ? { arquivo: d.arquivo } : {}) });
+    ? await confirmar({ ferramenta: NATIVA_MCP_DA_PESSOA, contamina: d.contamina, mcp: d.mcp, ...credencial })
+    : await confirmar({ ferramenta, contamina: d.contamina, ...(d.comando !== undefined ? { comando: d.comando } : {}), ...(d.arquivo !== undefined ? { arquivo: d.arquivo } : {}), ...credencial });
+  // PR 6 dos modos de aprovação (revisão de engenharia, item 12): a credencial só passa com a confirmação EXPLÍCITA. Um
+  // servidor antigo (revertido) ignora o campo e responde `{ ok: true }` ao Read — sem isto, leria até no manual.
+  if (d.credencial !== undefined && !(c.permitir && c.credencial === "permitida")) {
+    const deSempre = d.mcp !== undefined ? FRASE_MCP_COM_CREDENCIAL : FRASE_ARQUIVO_DE_CREDENCIAL;
+    return saida(false, c.permitir ? deSempre : (c.motivo ?? deSempre));
+  }
   if (!c.permitir) return saida(false, c.motivo ?? "o servidor do nod não confirmou esta chamada");
   // ADR-097: a fila do forno no Bash e no Monitor (o prompt manda rodar teste demorado em segundo plano ou com o Monitor:
   // é ali que mora o peso), depois do servidor liberar o comando. Um servidor de desenvolvimento não prende a fila:
@@ -119,7 +132,12 @@ function lerHistoricoDaFila(dir: string): Historico {
 }
 
 /** Resposta do POST /api/interno/nativas: liberada, ou uma decisão aberta para esperar. */
-type RespostaNativa = { ok?: boolean; aguardar?: string; mensagem?: string };
+type RespostaNativa = { ok?: boolean; aguardar?: string; mensagem?: string; credencial?: unknown };
+
+/** `{ ok: true }` vira permitir; a confirmação da credencial só passa adiante se vier exatamente "permitida". */
+function liberada(r: RespostaNativa): Confirmacao {
+  return r.credencial === "permitida" ? { permitir: true, credencial: "permitida" } : { permitir: true };
+}
 /** `soltar` (ADR-083, #194): o servidor fechou a espera porque o Mac apertou — o turno encerra e volta quando a pessoa decidir. */
 type RespostaAguardar = { estado?: string; soltar?: boolean; itens?: { desfecho?: string | null }[] };
 
@@ -166,13 +184,13 @@ export function confirmarNoServidor(cfg: ConfigHook, opcoes: { agora?: () => num
   const buscar = opcoes.fetch ?? fetch;
   const base = cfg.url.replace(/\/+$/, "");
   const headers = { authorization: `Bearer ${cfg.token}`, "content-type": "application/json" };
-  return async ({ ferramenta, contamina, comando, arquivo, mcp }) => {
+  return async ({ ferramenta, contamina, comando, arquivo, mcp, credencial }) => {
     const chegou = agora();
     const pedirUmaVez = async (chave: string): Promise<RespostaNativa | Confirmacao> => {
       const r = await buscar(`${base}/api/interno/nativas`, {
         method: "POST",
         headers: { ...headers, "x-nod-idempotency-key": chave },
-        body: JSON.stringify({ ferramenta, contamina, ...(comando !== undefined ? { comando } : {}), ...(arquivo !== undefined ? { arquivo } : {}), ...(mcp !== undefined ? { mcp } : {}) }),
+        body: JSON.stringify({ ferramenta, contamina, ...(comando !== undefined ? { comando } : {}), ...(arquivo !== undefined ? { arquivo } : {}), ...(mcp !== undefined ? { mcp } : {}), ...(credencial !== undefined ? { credencial } : {}) }),
         signal: AbortSignal.timeout(10_000),
       });
       const corpo = (await r.json().catch(() => ({}))) as RespostaNativa;
@@ -193,7 +211,7 @@ export function confirmarNoServidor(cfg: ConfigHook, opcoes: { agora?: () => num
     };
     const primeira = await pedir(randomUUID());
     if ("permitir" in primeira) return primeira;
-    if (primeira.ok === true) return { permitir: true };
+    if (primeira.ok === true) return liberada(primeira);
     if (typeof primeira.aguardar !== "string") return { permitir: false, motivo: "resposta inesperada do servidor do nod" };
     const inicio = agora();
     while (agora() - inicio < ESPERA_APROVACAO_NO_TURNO_MS) {
@@ -209,7 +227,7 @@ export function confirmarNoServidor(cfg: ConfigHook, opcoes: { agora?: () => num
       }
       if (!(d.itens ?? []).some((i) => i.desfecho === "executado")) return { permitir: false, motivo: "a pessoa não aprovou este comando" };
       const segunda = await pedir(randomUUID());
-      return "permitir" in segunda ? segunda : segunda.ok === true ? { permitir: true } : { permitir: false, motivo: "o servidor do nod não liberou o comando aprovado" };
+      return "permitir" in segunda ? segunda : segunda.ok === true ? liberada(segunda) : { permitir: false, motivo: "o servidor do nod não liberou o comando aprovado" };
     }
     return { permitir: false, motivo: AINDA_ESPERANDO };
   };

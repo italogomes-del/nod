@@ -83,7 +83,7 @@ export const MOTIVOS_APROVACAO_MANUAL = [
   "destino_terminal", // ADR-055 (0034): comando que altera algo no terminal do Mac da pessoa.
   // ADR-059 (0040): o modo automático aprovaria, mas a ação é arriscada (apagar, forçar, merge, publicar).
   "acao_arriscada",
-  "toca_credencial", // ADR-059 (0040): o comando toca uma credencial do Mac — pede a pessoa em qualquer modo.
+  "toca_credencial", // ADR-059 (0040): o comando toca uma credencial do Mac — pede a pessoa no automático (no total, só a chave do nod; ADR-115).
   // ADR-115 (0093): o revisor do Automático pediu o ok da pessoa; ou não revisou (erro, prazo, teto, sem revisor).
   "revisor_pediu", "revisor_falhou",
 ] as const;

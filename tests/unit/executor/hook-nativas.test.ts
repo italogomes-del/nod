@@ -198,3 +198,81 @@ describe("args do turno com o kit do terminal (ADR-052, revisto pela ADR-055)", 
     expect(comandoDoHook({ nodePath: "/n", hookPath: "/a/it's/h.mjs", config: "/c", electronComoNode: true })).toBe("ELECTRON_RUN_AS_NODE=1 '/n' '/a/it'\\''s/h.mjs' '/c'");
   });
 });
+
+/**
+ * PR 6 dos modos de aprovação: o hook não nega mais sozinho o arquivo de credencial — manda ao servidor, que decide pelo
+ * modo. E só deixa passar com a confirmação EXPLÍCITA (`credencial: "permitida"`): um servidor antigo responde `{ ok: true }`
+ * ao Read (ignora o campo), e a credencial seria lida até no manual (revisão de engenharia do plano, item 12).
+ */
+describe("a credencial no hook novo × servidor novo e antigo (PR 6)", () => {
+  const cfg = { url: "http://nod/", token: "tok" };
+  const NATIVAS = "/api/interno/nativas";
+  const AGUARDAR = "/api/interno/decisoes/d1/aguardar";
+  const LER = evento("Read", { file_path: "/Users/m/.aws/config" });
+  const decidir = (ev: unknown, s: ReturnType<typeof servidor>) => decidirHook(ev, confirmarNoServidor(cfg, { fetch: s.f, dormir: async () => undefined }));
+
+  it("novo × novo, total: manda `credencial` (sem `arquivo`) e libera com a confirmação explícita", async () => {
+    const s = servidor({ [NATIVAS]: [{ ok: true, credencial: "permitida" }] });
+    const r = await decidir(LER, s);
+    expect(r.hookSpecificOutput.permissionDecision).toBe("allow");
+    expect(s.chamadas).toEqual([{ rota: NATIVAS, corpo: { ferramenta: "Read", contamina: false, credencial: "/Users/m/.aws/config" } }]);
+  });
+
+  it("novo × novo, automático: espera o cartão (`aguardar`), e a segunda consulta confirma explicitamente", async () => {
+    const s = servidor({ [NATIVAS]: [{ aguardar: "d1" }, { ok: true, credencial: "permitida" }], [AGUARDAR]: [{ estado: "pendente" }, { estado: "decidida", itens: [{ desfecho: "executado" }] }] });
+    const r = await decidir(evento("Write", { file_path: "/Users/m/.ssh/config" }), s);
+    expect(r.hookSpecificOutput.permissionDecision).toBe("allow");
+    expect(s.chamadas.map((c) => c.rota)).toEqual([NATIVAS, AGUARDAR, AGUARDAR, NATIVAS]);
+    expect(s.chamadas[0]?.corpo).toEqual({ ferramenta: "Write", contamina: false, credencial: "/Users/m/.ssh/config" });
+  });
+
+  it("novo × novo, automático recusado: nega com o motivo do servidor", async () => {
+    const s = servidor({ [NATIVAS]: [{ aguardar: "d1" }], [AGUARDAR]: [{ estado: "decidida", itens: [{ desfecho: "retirado_pela_pessoa" }] }] });
+    expect((await decidir(LER, s)).hookSpecificOutput).toMatchObject({ permissionDecision: "deny", permissionDecisionReason: "nod: a pessoa não aprovou este comando" });
+  });
+
+  it("novo × novo, manual: o servidor nega (403) com a frase de sempre, e ela chega ao modelo", async () => {
+    const frase = "arquivo de credencial (chaves, tokens, Keychain): o nod não abre; se a tarefa precisar, peça à pessoa";
+    const s = servidor({ [NATIVAS]: [{ status: 403, codigo: "nao_permitido", mensagem: frase }] });
+    expect((await decidir(LER, s)).hookSpecificOutput).toMatchObject({ permissionDecision: "deny", permissionDecisionReason: `nod: ${frase}` });
+  });
+
+  it("novo × ANTIGO: o `{ ok: true }` cru do servidor revertido NÃO libera — nega com a frase de sempre, em toda nativa", async () => {
+    for (const ev of [LER, evento("Write", { file_path: "/Users/m/.ssh/authorized_keys" }), evento("Glob", { pattern: "**/*.pem" }), evento("Grep", { pattern: "x", path: "/Users/m/.config/gh" })]) {
+      const s = servidor({ [NATIVAS]: [{ ok: true }] });
+      expect((await decidir(ev, s)).hookSpecificOutput, JSON.stringify(ev)).toMatchObject({ permissionDecision: "deny", permissionDecisionReason: "nod: arquivo de credencial (chaves, tokens, Keychain): o nod não abre; se a tarefa precisar, peça à pessoa" });
+    }
+    // Nem depois de um cartão aprovado: a segunda consulta também tem de vir explícita.
+    const s = servidor({ [NATIVAS]: [{ aguardar: "d1" }, { ok: true }], [AGUARDAR]: [{ estado: "decidida", itens: [{ desfecho: "executado" }] }] });
+    expect((await decidir(LER, s)).hookSpecificOutput.permissionDecision).toBe("deny");
+    // Valor diferente de "permitida" também não serve.
+    const t = servidor({ [NATIVAS]: [{ ok: true, credencial: true }] });
+    expect((await decidir(LER, t)).hookSpecificOutput.permissionDecision).toBe("deny");
+  });
+
+  it("o MCP da pessoa (Codex) que cita uma credencial vai com o pedido e a credencial; servidor antigo nega com a frase do MCP", async () => {
+    const ev = evento("mcp__fs__read", { path: "~/.ssh/id_ed25519" });
+    const novo = servidor({ [NATIVAS]: [{ ok: true, credencial: "permitida" }] });
+    expect((await decidirHook(ev, confirmarNoServidor(cfg, { fetch: novo.f }), { mcpDaPessoa: true })).hookSpecificOutput.permissionDecision).toBe("allow");
+    const corpo = novo.chamadas[0]?.corpo as { ferramenta: string; mcp: string; credencial: string };
+    expect(corpo.ferramenta).toBe("mcp_da_pessoa");
+    expect(corpo.credencial).toBe(corpo.mcp);
+    const antigo = servidor({ [NATIVAS]: [{ ok: true }] });
+    expect((await decidirHook(ev, confirmarNoServidor(cfg, { fetch: antigo.f }), { mcpDaPessoa: true })).hookSpecificOutput).toMatchObject({ permissionDecision: "deny", permissionDecisionReason: "nod: o pedido toca uma credencial (chaves, tokens, Keychain): o nod não manda; se a tarefa precisar, peça à pessoa" });
+  });
+
+  it("o arquivo comum não exige a confirmação da credencial (um `{ ok: true }` cru libera, como sempre)", async () => {
+    const s = servidor({ [NATIVAS]: [{ ok: true }] });
+    expect((await decidir(evento("Read", { file_path: "/Users/m/code/app/README.md" }), s)).hookSpecificOutput.permissionDecision).toBe("allow");
+    expect(s.chamadas[0]?.corpo).toEqual({ ferramenta: "Read", contamina: false });
+  });
+
+  it("as cercas fixas continuam no hook, antes do servidor, em qualquer modo: git fora da pasta e ferramenta fora do kit", async () => {
+    const s = servidor({ [NATIVAS]: [{ ok: true, credencial: "permitida" }] });
+    const pastas = { pastaDoBot: "/Users/m/nod/Ada", home: "/Users/m" };
+    const git = await decidirHook({ tool_name: "Bash", tool_input: { command: "git -C /Users/m/code/app checkout -b x" }, cwd: "/Users/m/nod/Ada" }, confirmarNoServidor(cfg, { fetch: s.f }), pastas);
+    expect(git.hookSpecificOutput.permissionDecision).toBe("deny");
+    expect((await decidir(evento("Task", {}), s)).hookSpecificOutput.permissionDecision).toBe("deny");
+    expect(s.chamadas).toEqual([]);
+  });
+});

@@ -958,6 +958,9 @@ div.mac-medidor { padding-right: 36px; }
 .atv-titulo { color: var(--ink); }
 .atv-vezes { color: var(--ink-3); font-size: 12.5px; }
 .atv-detalhe { font-size: 12.5px; color: var(--ink-2); }
+/* PR 6 dos modos de aprovação (tela Y3): o comando ou o caminho do que rodou sem aprovação, em fonte de código, numa
+   linha só e cortado com "…" como no protótipo (o texto inteiro fica no title). */
+.atv-detalhe.atv-codigo { font-family: var(--font-mono); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .atv-agora .atv-hora { color: var(--ink-2); }
 .atv-link { padding: 0; border: 0; background: none; color: var(--ink-2); font: inherit; text-decoration: underline; text-decoration-color: var(--line-strong); cursor: pointer; }
 .atv-link:hover { color: var(--ink); }

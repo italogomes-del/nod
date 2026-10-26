@@ -61,6 +61,11 @@ interface Linha {
   criado_em: Date;
 }
 
+/** Uma ação do total na linha embaixo da fala (PR 6). */
+export type LinhaNaFala = { id: string; turno_id: string; tipo: TipoAcaoDoModo; gatilho: GatilhoAcaoDoModo; resumo: string; risco: string | null; criado_em: Date; linux: boolean };
+/** Uma ação que rodou sem a pessoa, como a Atividade a lista (PR 6). */
+export type LinhaSemAprovacao = { id: string; modo: "automatico" | "total"; tipo: TipoAcaoDoModo; gatilho: GatilhoAcaoDoModo; resumo: string; risco: string | null; veredito: VereditoRevisao | null; criado_em: Date };
+
 const COLUNAS = "id, agente_id, conversa_id, turno_id, decisao_id, modo, tipo, resumo, gatilho, risco, veredito, falha, motivo, revisor_modelo, revisor_harness, revisor_maquina, entregue_em, revisor_ms, fichas_entrada, fichas_saida, desfecho_pessoa, criado_em";
 
 const paraAcao = (l: Linha): AcaoDoModo => ({
@@ -160,6 +165,43 @@ export function acoesPeloModoRepo(conn: Conn, escopo: Escopo) {
     async registrarDesfechoPessoa(decisaoId: string, desfecho: "aprovou" | "negou" | "venceu"): Promise<void> {
       await conn`update acoes_pelo_modo set desfecho_pessoa = ${desfecho}
         where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and decisao_id = ${decisaoId} and desfecho_pessoa is null`;
+    },
+
+    /**
+     * PR 6 dos modos de aprovação: o que o total rodou nos turnos da janela e entra na linha embaixo da fala (a credencial e
+     * o arriscado; `entraNaFala`). `linux`: o turno rodou numa máquina Linux (ADR-090, 0067) — a frase diz "desta máquina".
+     * Pela RLS, só a dona vê as próprias linhas.
+     */
+    async naFalaDosTurnos(turnoIds: readonly string[]): Promise<LinhaNaFala[]> {
+      if (turnoIds.length === 0) return [];
+      return conn<LinhaNaFala[]>`
+        select a.id, a.turno_id, a.tipo, a.gatilho, a.resumo, a.risco, a.criado_em, coalesce(mt.plataforma = 'linux', false) as linux
+        from acoes_pelo_modo a
+          join turnos t on t.tenant_id = a.tenant_id and t.id = a.turno_id
+          left join maquina_tokens mt on mt.tenant_id = t.tenant_id and mt.id = t.machine_id
+        where a.tenant_id = ${escopo.tenantId} and a.turno_id = any(${turnoIds as string[]}::uuid[])
+          and a.modo = 'total' and a.gatilho in ('credencial', 'arriscado')
+        order by a.criado_em, a.id`;
+    },
+
+    /**
+     * A quarta fonte da Atividade (PR 6): o que rodou sem a pessoa no dia — tudo o que o total registrou e o que o revisor
+     * liberou (`rodouSemAprovacao`). Os mais recentes primeiro, até `limite`.
+     */
+    async semAprovacaoDoDia(agenteId: string, f: { ini: Date; fim: Date }, limite: number): Promise<LinhaSemAprovacao[]> {
+      return conn<LinhaSemAprovacao[]>`
+        select id, modo, tipo, gatilho, resumo, risco, veredito, criado_em from acoes_pelo_modo
+        where tenant_id = ${escopo.tenantId} and agente_id = ${agenteId} and criado_em >= ${f.ini} and criado_em < ${f.fim}
+          and (modo = 'total' or veredito = 'libera')
+        order by criado_em desc, id desc limit ${limite}`;
+    },
+
+    async contarSemAprovacaoDoDia(agenteId: string, f: { ini: Date; fim: Date }): Promise<number> {
+      const [l] = await conn<{ n: number }[]>`
+        select count(*)::int as n from acoes_pelo_modo
+        where tenant_id = ${escopo.tenantId} and agente_id = ${agenteId} and criado_em >= ${f.ini} and criado_em < ${f.fim}
+          and (modo = 'total' or veredito = 'libera')`;
+      return l?.n ?? 0;
     },
 
     /** Retenção de 90 dias (0093): a dona apaga as próprias linhas mais velhas que `antesDe`. Devolve quantas. */

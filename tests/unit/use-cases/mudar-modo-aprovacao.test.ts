@@ -30,7 +30,8 @@ describe("mudarModoAprovacao (ADR-059)", () => {
     }
     expect(linhas[0]).toMatch(/para Aprovar manualmente: pede você antes de tudo que muda algo: commit, push, mensagem, arquivo fora da pasta\.$/);
     expect(linhas[1]).toMatch(/para Aprovar automaticamente: roda sem perguntar o que não for arriscado\. Para no arriscado e no que tocar uma credencial do Mac\.$/);
-    expect(linhas[2]).toMatch(/para Ignorar todas as aprovações: faz tudo sem perguntar\. Não abre arquivos de credencial do Mac, e comandos com elas pedem você\.$/);
+    // PR 6 dos modos de aprovação: a frase do protótipo — até a credencial, e o que fez fica na Atividade.
+    expect(linhas[2]).toMatch(/para Ignorar todas as aprovações: faz tudo sem perguntar, até comandos com as credenciais do seu Mac\. O que ele fez fica na Atividade\.$/);
     for (const l of linhas) expect(l).not.toMatch(/ler a web|depois de ler/);
   });
 

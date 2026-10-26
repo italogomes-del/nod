@@ -27,6 +27,8 @@ export async function limparPessoaE2E(db: Db, dbDono: Db, escopo: Escopo, ids: {
     await trx`delete from computador_acoes where owner_id = ${p}`;
     await trx`delete from gastos where owner_id = ${p}`;
     await trx`delete from catcher_registros where owner_id = ${p}`;
+    // 0093 (ADR-115): o registro do modo aponta para decisões e turnos (PR 6: o total também grava).
+    await trx`delete from acoes_pelo_modo where owner_id = ${p}`;
     await trx`delete from itens_aprovacao where owner_id = ${p}`;
     await trx`delete from decisao_eventos_varridos where owner_id = ${p}`;
     await trx`delete from decisoes where owner_id = ${p}`;
@@ -43,6 +45,8 @@ export async function limparPessoaE2E(db: Db, dbDono: Db, escopo: Escopo, ids: {
     await trx`delete from incidentes where owner_id = ${p}`;
     await trx`delete from rotina_execucoes where owner_id = ${p}`;
     await trx`delete from rotina_janelas where owner_id = ${p}`;
+    // 0097 (NOD-293): a resposta guardada do POST de nativa aponta para o turno — o hook de verdade a grava (PR 6, e2e).
+    await trx`delete from nativas_idempotencia where owner_id = ${p}`;
     await trx`delete from turnos where owner_id = ${p}`;
     // ADR-083 (0060): o trabalho aponta para agente, conversa e rotina, e os turnos apontam para ele — sai entre os dois.
     await trx`delete from trabalhos where owner_id = ${p}`;

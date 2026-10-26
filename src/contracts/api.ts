@@ -13,6 +13,7 @@ import type { FioDaPergunta, FioDoItem, PedidoDoItem } from "./pedido.ts";
 import type { BloqueioRotina, EsperaRotinaDto, JanelasPuladasDaRotina, OndeRodaDto, ParadaDaRotina, PerguntaPendenteDaRotina, Rotina } from "./rotina.ts";
 import type { DonoNaConversa, TrabalhoDto } from "./trabalho.ts";
 import type { TrocasNaConversa } from "./troca-entre-bots.ts";
+import type { AcoesDoModoNaConversa } from "./acoes-do-modo.ts";
 
 /** Mutação devolve ids; o estado chega por SSE (ADR-016). */
 export type RespostaMutacao = { ok: true; ids: Record<string, string> };
@@ -21,7 +22,6 @@ export type RespostaMutacao = { ok: true; ids: Record<string, string> };
 export type ModoSessaoDto = ({ modo: "google" } | { modo: "stub"; pessoas: { id: string; nome: string }[] }) & { contas?: { google: boolean; bootstrap: boolean; minhaConta?: boolean } };
 
 export type AmbienteBancoDto = { regime: "persistente" | "efemero" | "desconhecido"; porta: number | null };
-
 /** Chave de máquina como a dona a vê na lista (ADR-031): NUNCA traz a chave nem o hash. `papel` (NOD-94): PapelMaquina; ausente = motor. */
 export type ChaveMaquinaDto = { id: string; nome: string; prefixo: string; criadaEm: EpochMs; ultimoUsoEm: EpochMs | null; revogadaEm: EpochMs | null; papel?: "motor" | "computador" };
 
@@ -54,7 +54,7 @@ export type TurnoPendenteDto = { id: string; motivo: "agente_ocupado_em"; conver
  */
 export type TurnoEmCursoDto = { id: string; estado: "pendente" | "despachando"; desde: number; mensagemId: string | null; trabalhoId?: string | null; /** NOD-216: só a origem da fila do dono é desmentida por ela. */ origem?: string; /** NOD-276 (J3): quando a máquina o pegou; "Trabalhando · há N" conta daqui. */ despachadoEm?: number | null; /** QA do NOD-314: a máquina escolhida "desta vez" (sobrepõe a do bot no chip da fila). */ maquinaDestaVez?: string | null; /** NOD-348: o bot do turno (o mascote da fala viva na sala e na recarga). */ agenteId?: string };
 
-export type ConversaDto = DonoNaConversa & TrocasNaConversa & {
+export type ConversaDto = DonoNaConversa & TrocasNaConversa & AcoesDoModoNaConversa & {
   conversa: Conversa;
   mensagens: Mensagem[];
   turnosPendentes: TurnoPendenteDto[];

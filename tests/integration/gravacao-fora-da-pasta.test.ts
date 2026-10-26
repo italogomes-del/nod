@@ -57,11 +57,13 @@ describeIntegracao("gravar fora da pasta do bot segue o modo (ADR-066)", () => {
     });
   }
 
-  it("arquivo de credencial nunca grava sem a pessoa, em nenhum modo", async () => {
+  it("arquivo de credencial: no automático, card; no total grava sem a pessoa (PR 6 dos modos de aprovação) e registra como credencial", async () => {
     await withRollback(MARLON, async (trx) => {
+      const auto = await cenario(trx, "automatico");
+      expect("aguardar" in (await autorizarComando(auto.deps, { plano: auto.plano, arquivo: "/Users/m/.ssh/config" })).data).toBe(true);
       const c = await cenario(trx, "total");
-      const r = await autorizarComando(c.deps, { plano: c.plano, arquivo: "/Users/m/.ssh/config" });
-      expect("aguardar" in r.data).toBe(true);
+      expect((await autorizarComando(c.deps, { plano: c.plano, arquivo: "/Users/m/.ssh/config" })).data).toEqual({ permitir: true, porque: "modo_total" });
+      expect(await c.repos.acoesPeloModo.doTurno(c.plano.turnoId)).toMatchObject([{ modo: "total", tipo: "arquivo", gatilho: "credencial", resumo: "Gravar /Users/m/.ssh/config", veredito: null, decisaoId: null }]);
     });
   });
 });

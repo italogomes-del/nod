@@ -1,6 +1,7 @@
 import type { ItemDeAtividade } from "../contracts/atividade.ts";
 import type { Assunto } from "../contracts/destino-no-chat.ts";
 import type { Mensagem } from "../contracts/mensagem.ts";
+import { comCasaAbreviada, rodouSemAprovacao, semVerbo, tituloNaAtividade, type AcaoDoModoParaTexto } from "./acoes-do-modo.ts";
 import { DESTINO } from "./destino-no-chat.ts";
 
 /**
@@ -19,6 +20,7 @@ const ROTULO: Readonly<Record<Assunto, string>> = {
   "acesso.pasta": "Pasta aberta",
   "aprovacao.recibo": "Aprovação decidida",
   "aprovacao.automatica_falhou": "Aprovado sem perguntar · um item falhou",
+  "aprovacao.total_credenciais": "Ignorar todas as aprovações mudou",
   "proposta.obsoleta": "Mudança não aplicada",
   artefato: "Artefato",
   ligacao: "Chat de voz",
@@ -156,6 +158,22 @@ export function itemDaNegacaoDeConector(l: { chave: string; motivo: string; ferr
     titulo: `${l.conector ?? l.ferramenta} indisponível`,
     detalhe: CAUSA_DO_CONECTOR[l.motivo] ?? l.motivo.replaceAll("_", " "),
     ...(l.vezes > 1 ? { vezes: l.vezes } : {}),
+  };
+}
+
+/**
+ * Uma ação que o modo rodou sem a pessoa (PR 6 dos modos de aprovação; tela Y3): o título diz o que foi ("Leu as
+ * credenciais da AWS", "Comando arriscado") e o detalhe é o comando ou o caminho, redigido. Sem alvo: o registro não tem
+ * mensagem, e o "Relatar" fica para a fala (como a linha da trilha, decisão 14).
+ */
+export function itemDaAcaoDoModo(a: AcaoDoModoParaTexto & { id: string; em: number }): ItemDeAtividade {
+  return {
+    id: `modo:${a.id}`,
+    em: a.em,
+    categoria: rodouSemAprovacao(a) ? "sem_aprovacao" : null,
+    titulo: tituloNaAtividade(a),
+    detalhe: cortar(comCasaAbreviada(semVerbo(a.resumo))),
+    codigo: true,
   };
 }
 

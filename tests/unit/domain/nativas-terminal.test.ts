@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { tocaChaveDoNod } from "../../../src/domain/comando.ts";
 import { decidirNativa, NATIVAS_DE_ARQUIVO, NATIVAS_DO_TERMINAL, nativasDoTurno, pastaDoBot } from "../../../src/domain/nativas.ts";
 
 const decidir = (ferramenta: string, entrada: Record<string, unknown>) => decidirNativa({ ferramenta, entrada });
@@ -53,15 +54,33 @@ describe("kit do terminal (ADR-052, revisto pelas ADR-055 e ADR-066)", () => {
     ] as const) expect(decidir(f, entrada), f).toMatchObject({ permitir: true, contamina: false });
   });
 
-  it("ADR-055: menos onde moram as credenciais — as ferramentas de arquivo não abrem chaves nem tokens", () => {
-    for (const [f, entrada] of [
-      ["Read", { file_path: "/Users/marlon/.ssh/id_ed25519" }],
-      ["Read", { file_path: "/Users/marlon/.aws/credentials" }],
-      ["Read", { file_path: "/Users/marlon/.config/gh/hosts.yml" }],
-      ["Grep", { pattern: "token", path: "/Users/marlon/.config/gh" }],
-      ["Glob", { pattern: "**/*.pem" }],
-      ["Write", { file_path: "/Users/marlon/.ssh/authorized_keys" }],
-    ] as const) expect(decidir(f, entrada), `${f} ${JSON.stringify(entrada)}`).toMatchObject({ permitir: false });
+  it("PR 6 dos modos de aprovação: onde moram as credenciais, o hook não nega sozinho — manda `credencial` ao servidor, que decide pelo modo", () => {
+    for (const [f, entrada, credencial] of [
+      ["Read", { file_path: "/Users/marlon/.ssh/id_ed25519" }, "/Users/marlon/.ssh/id_ed25519"],
+      ["Read", { file_path: "/Users/marlon/.aws/credentials" }, "/Users/marlon/.aws/credentials"],
+      ["Read", { file_path: "/Users/marlon/.config/gh/hosts.yml" }, "/Users/marlon/.config/gh/hosts.yml"],
+      ["Grep", { pattern: "token", path: "/Users/marlon/.config/gh" }, "/Users/marlon/.config/gh"],
+      ["Glob", { pattern: "**/*.pem" }, "**/*.pem"],
+      ["Write", { file_path: "/Users/marlon/.ssh/authorized_keys" }, "/Users/marlon/.ssh/authorized_keys"],
+      ["Edit", { file_path: "/Users/marlon/.npmrc" }, "/Users/marlon/.npmrc"],
+    ] as const) {
+      const d = decidir(f, entrada);
+      expect(d, `${f} ${JSON.stringify(entrada)}`).toMatchObject({ permitir: true, contamina: false, credencial });
+      // A gravação de credencial não vai como `arquivo`: um servidor antigo a trataria como gravação comum.
+      expect(d.arquivo, f).toBeUndefined();
+    }
+  });
+
+  it("revisão do PR 6: o `glob` do Grep também é olhado, e todos os caminhos de credencial vão juntos (a chave do nod não se esconde atrás de outra)", () => {
+    expect(decidir("Grep", { path: "/Users/marlon", glob: ".config/nod-motor/*", pattern: "." }).credencial).toBe(".config/nod-motor/*");
+    const d = decidir("Grep", { path: "/Users/marlon/.ssh/..", glob: ".config/nod-motor/conexao.json", pattern: "." });
+    expect(d.credencial).toBe("/Users/marlon/.ssh/.. .config/nod-motor/conexao.json");
+    expect(tocaChaveDoNod(d.credencial ?? "")).toBe(true);
+  });
+
+  it("PR 6: o arquivo comum não leva `credencial` (o servidor só decide o que o hook marcou)", () => {
+    expect(decidir("Read", { file_path: "/Users/marlon/code/app/README.md" }).credencial).toBeUndefined();
+    expect(decidir("Write", { file_path: "/tmp/x.txt" }).credencial).toBeUndefined();
   });
 
   it("Bash vai ao servidor com o comando; web contamina o turno; o que não é do kit é negado", () => {

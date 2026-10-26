@@ -889,6 +889,8 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           .sort((x, y) => x.criadoEm - y.criadoEm);
         return todas.slice(Math.max(0, todas.length - limite));
       },
+      // O assunto (0091) não mora na Mensagem em memória: o aviso do PR 6 tem teste de integração.
+      ultimaComAssunto: soNoPostgres,
       async ultimaDaConversa(conversaId) {
         const todas = doTenant(b.mensagens).filter((m) => m.conversaId === conversaId).sort((x, y) => x.criadoEm - y.criadoEm);
         return todas[todas.length - 1] ?? null;
@@ -1172,6 +1174,21 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async registrarDesfechoPessoa(decisaoId, desfecho) {
         const a = b.acoesPeloModo.find((x) => x.decisaoId === decisaoId && x.desfechoPessoa === null);
         if (a) a.desfechoPessoa = desfecho;
+      },
+      async naFalaDosTurnos(turnoIds) {
+        return b.acoesPeloModo
+          .filter((a) => turnoIds.includes(a.turnoId) && a.modo === "total" && (a.gatilho === "credencial" || a.gatilho === "arriscado"))
+          .map((a) => ({ id: a.id, turno_id: a.turnoId, tipo: a.tipo, gatilho: a.gatilho, resumo: a.resumo, risco: a.risco, criado_em: new Date(a.criadoEm), linux: false }));
+      },
+      async semAprovacaoDoDia(agenteId, f, limite) {
+        return b.acoesPeloModo
+          .filter((a) => a.agenteId === agenteId && a.criadoEm >= f.ini.getTime() && a.criadoEm < f.fim.getTime() && (a.modo === "total" || a.veredito === "libera"))
+          .sort((x, y) => y.criadoEm - x.criadoEm)
+          .slice(0, limite)
+          .map((a) => ({ id: a.id, modo: a.modo, tipo: a.tipo, gatilho: a.gatilho, resumo: a.resumo, risco: a.risco, veredito: a.veredito ?? null, criado_em: new Date(a.criadoEm) }));
+      },
+      async contarSemAprovacaoDoDia(agenteId, f) {
+        return b.acoesPeloModo.filter((a) => a.agenteId === agenteId && a.criadoEm >= f.ini.getTime() && a.criadoEm < f.fim.getTime() && (a.modo === "total" || a.veredito === "libera")).length;
       },
       async podar(antesDe) {
         const antes = b.acoesPeloModo.length;

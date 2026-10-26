@@ -164,6 +164,9 @@
   /* ADR-113: os chips de reação e a citação acima do balão são alvos de toque (44 px); o menu ⋯ também. */
   .reacao-chip { min-height: 44px; min-width: 44px; justify-content: center; font-size: 15px; }
   .citacao-da-fala { min-height: 44px; }
+  /* PR 6 dos modos de aprovação: "ver na Atividade" é alvo de toque de 44 px sem engordar a linha (a área sobra para fora). */
+  .linha-modo-ver { display: inline-block; padding: 12px 0; margin: -12px 0; font-size: 13.5px; }
+  .linha-modo { font-size: 13.5px; }
   .bot-menu.menu-fala button { min-height: 44px; }
   /* Os emojis do menu também têm 44 de largura (eram ~30): o menu alarga para as cinco rápidas caberem numa linha. */
   .bot-menu.menu-fala { width: 252px; }

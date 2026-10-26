@@ -23,13 +23,18 @@ describe("decidirPeloModo (ADR-059, revisto pela ADR-066)", () => {
     expect(decidirPeloModo("automatico", { ...limpa, arriscada: true })).toEqual({ automatico: false, motivo: "acao_arriscada" });
   });
 
-  it("total aprova até o arriscado", () => {
-    expect(decidirPeloModo("total", { arriscada: true, credencial: false })).toEqual({ automatico: true, regra: REGRA_MODO_TOTAL, versao: 1 });
+  it("total aprova até o arriscado, pela regra do total na versão 2 (PR 6: o conjunto que passa ganhou a credencial)", () => {
+    expect(decidirPeloModo("total", { arriscada: true, credencial: false })).toEqual({ automatico: true, regra: REGRA_MODO_TOTAL, versao: 2 });
   });
 
-  it("credencial do Mac para em qualquer modo que não seja o manual (no manual, já é card)", () => {
+  it("PR 6 (ADR-115): a credencial do Mac para no automático; no total, roda — só a chave do próprio nod para", () => {
     expect(decidirPeloModo("automatico", { ...limpa, credencial: true })).toEqual({ automatico: false, motivo: "toca_credencial" });
-    expect(decidirPeloModo("total", { ...limpa, credencial: true })).toEqual({ automatico: false, motivo: "toca_credencial" });
+    expect(decidirPeloModo("total", { ...limpa, credencial: true })).toEqual({ automatico: true, regra: REGRA_MODO_TOTAL, versao: 2 });
+    expect(decidirPeloModo("total", { ...limpa, credencial: true, chaveDoNod: true })).toEqual({ automatico: false, motivo: "toca_credencial" });
+    expect(decidirPeloModo("automatico", { ...limpa, credencial: true, chaveDoNod: true })).toEqual({ automatico: false, motivo: "toca_credencial" });
+    // Com o revisor ligado também: o total não muda com a chave.
+    expect(decidirPeloModo("total", { ...limpa, credencial: true }, true)).toEqual({ automatico: true, regra: REGRA_MODO_TOTAL, versao: 2 });
+    expect(decidirPeloModo("total", { ...limpa, credencial: true, chaveDoNod: true }, true)).toEqual({ automatico: false, motivo: "toca_credencial" });
   });
 
   it("ADR-066: a ordem fechada inteira — credencial, total, arriscada, automático —, sem gate da rotina nem trava herdada", () => {
@@ -44,12 +49,8 @@ describe("decidirPeloModo (ADR-059, revisto pela ADR-066)", () => {
       { automatico: false, motivo: "toca_credencial" },
       { automatico: false, motivo: "toca_credencial" },
     ]);
-    expect(situacoes.map((s) => decidirPeloModo("total", s))).toEqual([
-      { automatico: true, regra: REGRA_MODO_TOTAL, versao: 1 },
-      { automatico: true, regra: REGRA_MODO_TOTAL, versao: 1 },
-      { automatico: false, motivo: "toca_credencial" },
-      { automatico: false, motivo: "toca_credencial" },
-    ]);
+    // PR 6: o total aprova as quatro, até a credencial.
+    expect(situacoes.map((s) => decidirPeloModo("total", s))).toEqual(situacoes.map(() => ({ automatico: true, regra: REGRA_MODO_TOTAL, versao: 2 })));
   });
 
   it("só os três nomes são modo", () => {
@@ -431,27 +432,43 @@ function decidirPeloModoDeHoje(modo: ModoAprovacao | undefined, s: { arriscada: 
   return { automatico: true, regra: "regra:modo_automatico", versao: 2 };
 }
 
+/**
+ * A regra de hoje DEPOIS do PR 6 (plano dos modos de aprovação, Parte 6; ADR-115): a cópia congelada acima com a única
+ * mudança de propósito — o total aprova também a credencial do Mac, na versão 2. Fora do revisor (a chave), é a decisão
+ * de produção. O teste "o PR 6 só muda o total com credencial" prova que a diferença entre as duas é só essa.
+ */
+function decidirPeloModoDepoisDoPr6(modo: ModoAprovacao | undefined, s: { arriscada: boolean; credencial: boolean }): ReturnType<typeof decidirPeloModoDeHoje> {
+  if (modo === "total") return { automatico: true, regra: "regra:modo_total", versao: 2 };
+  return decidirPeloModoDeHoje(modo, s);
+}
+
 const MODOS: readonly (ModoAprovacao | undefined)[] = [undefined, "manual", "automatico", "total"];
 const BOOLS = [false, true] as const;
 const MATRIZ = MODOS.flatMap((modo) => BOOLS.flatMap((arriscada) => BOOLS.flatMap((credencial) => BOOLS.flatMap((envioParaFora) => BOOLS.map((contaminado) => ({ modo, s: { arriscada, credencial, envioParaFora, contaminado } }))))));
 
 describe("decidirPeloModo com o revisor (plano dos modos de aprovação, PR 3a; ADR-115)", () => {
-  it("chave DESLIGADA: a matriz inteira (4 modos × arriscada × credencial × envio × contaminado) é igual à regra de hoje", () => {
+  it("chave DESLIGADA: a matriz inteira (4 modos × arriscada × credencial × envio × contaminado) é igual à regra de hoje (com o PR 6)", () => {
     expect(MATRIZ).toHaveLength(64);
     for (const { modo, s } of MATRIZ) {
-      const esperado = decidirPeloModoDeHoje(modo, s);
+      const esperado = decidirPeloModoDepoisDoPr6(modo, s);
       expect(decidirPeloModo(modo, s), JSON.stringify({ modo, s })).toEqual(esperado);
       expect(decidirPeloModo(modo, s, false), JSON.stringify({ modo, s })).toEqual(esperado);
     }
   });
 
-  it("chave LIGADA: a ordem nova — manual nulo; total igual (a credencial dele segue cartão até o PR 6); automático: credencial cartão, arriscado e envio contaminado ao revisor, o resto na versão 3", () => {
+  it("o PR 6 só muda o total: a credencial passa a rodar, e a versão do total sobe para 2", () => {
+    const mudou = MATRIZ.filter(({ modo, s }) => JSON.stringify(decidirPeloModo(modo, s)) !== JSON.stringify(decidirPeloModoDeHoje(modo, s)));
+    expect(new Set(mudou.map((m) => m.modo))).toEqual(new Set(["total"]));
+    for (const { modo, s } of mudou) expect(decidirPeloModo(modo, s)).toEqual({ automatico: true, regra: REGRA_MODO_TOTAL, versao: 2 });
+  });
+
+  it("chave LIGADA: a ordem nova — manual nulo; total aprova tudo (PR 6); automático: credencial cartão, arriscado e envio contaminado ao revisor, o resto na versão 3", () => {
     for (const { modo, s } of MATRIZ) {
       const d = decidirPeloModo(modo, s, true);
       const onde = JSON.stringify({ modo, s });
       if (!modo || modo === "manual") expect(d, onde).toBeNull();
+      else if (modo === "total") expect(d, onde).toEqual({ automatico: true, regra: REGRA_MODO_TOTAL, versao: 2 });
       else if (s.credencial) expect(d, onde).toEqual({ automatico: false, motivo: "toca_credencial" });
-      else if (modo === "total") expect(d, onde).toEqual({ automatico: true, regra: REGRA_MODO_TOTAL, versao: 1 });
       else if (s.arriscada) expect(d, onde).toEqual({ revisar: true, gatilho: "arriscado" });
       else if (s.envioParaFora && s.contaminado) expect(d, onde).toEqual({ revisar: true, gatilho: "envio_apos_fora" });
       else expect(d, onde).toEqual({ automatico: true, regra: REGRA_MODO_AUTOMATICO, versao: VERSAO_MODO_AUTOMATICO_COM_REVISOR });
@@ -459,7 +476,7 @@ describe("decidirPeloModo com o revisor (plano dos modos de aprovação, PR 3a; 
   });
 
   it("ligada, a mudança contra hoje é só no automático: o arriscado sai do cartão para o revisor, e o envio contaminado sai do 'roda' para o revisor", () => {
-    const mudou = MATRIZ.filter(({ modo, s }) => JSON.stringify(decidirPeloModo(modo, s, true)) !== JSON.stringify(decidirPeloModoDeHoje(modo, s)));
+    const mudou = MATRIZ.filter(({ modo, s }) => JSON.stringify(decidirPeloModo(modo, s, true)) !== JSON.stringify(decidirPeloModoDepoisDoPr6(modo, s)));
     expect(new Set(mudou.map((m) => m.modo))).toEqual(new Set(["automatico"]));
     for (const { s } of mudou) expect(s.credencial).toBe(false);
   });
@@ -482,7 +499,7 @@ describe("decidirPeloModo com o revisor (plano dos modos de aprovação, PR 3a; 
     const aprova = { automatico: true as const, regra: REGRA_MODO_AUTOMATICO, versao: 3 };
     expect(semRevisor(aprova)).toBe(aprova);
     // Com a chave desligada nada vira "revisar": semRevisor não muda a decisão de hoje em nenhum ponto da matriz.
-    for (const { modo, s } of MATRIZ) expect(semRevisor(decidirPeloModo(modo, s))).toEqual(decidirPeloModoDeHoje(modo, s));
+    for (const { modo, s } of MATRIZ) expect(semRevisor(decidirPeloModo(modo, s))).toEqual(decidirPeloModoDepoisDoPr6(modo, s));
   });
 
   it("o caminho dos apps (decidirAprovacao) não ganha o revisor no PR 3a: a decisão dele não muda", () => {

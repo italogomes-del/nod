@@ -129,7 +129,30 @@ export function ehPastaDeTask(pastaRelativaANod: string): boolean {
  * `arquivo` (definido em 2026-10-01, ADR-066): Write/Edit/NotebookEdit fora de ~/nod/<bot> — o servidor decide pelo
  * modo, como o comando. Só com o contexto da pasta (config do hook novo); sem ele, a gravação passa como antes.
  */
-export type DecisaoNativa = { permitir: boolean; motivo: string; contamina: boolean; comando?: string; arquivo?: string; mcp?: string };
+/**
+ * `credencial` (definido em 2026-10-19, plano dos modos de aprovação, PR 6): o arquivo de credencial (ou, no MCP da pessoa,
+ * o pedido que cita uma) que o hook manda ao SERVIDOR, que decide pelo modo atual: manual nega com a frase de sempre,
+ * automático vira cartão, total roda e registra. Antes o hook negava aqui mesmo, sem saber o modo. O hook só deixa a
+ * chamada passar com a confirmação EXPLÍCITA do servidor (`credencial: "permitida"`): um servidor antigo ignora o campo e
+ * responde `{ ok: true }` ao Read, e a credencial seria lida até no manual (revisão de engenharia do plano, item 12).
+ */
+export type DecisaoNativa = { permitir: boolean; motivo: string; contamina: boolean; comando?: string; arquivo?: string; mcp?: string; credencial?: string };
+
+/** A frase de sempre quando a credencial não passa (manual, servidor antigo, resposta sem a confirmação explícita). */
+export const FRASE_ARQUIVO_DE_CREDENCIAL = "arquivo de credencial (chaves, tokens, Keychain): o nod não abre; se a tarefa precisar, peça à pessoa";
+export const FRASE_MCP_COM_CREDENCIAL = "o pedido toca uma credencial (chaves, tokens, Keychain): o nod não manda; se a tarefa precisar, peça à pessoa";
+const MOTIVO_CREDENCIAL = "credencial do Mac: o servidor do nod decide pelo modo de aprovação";
+
+/**
+ * TODOS os caminhos da chamada que tocam credencial, separados por espaço (revisão do PR 6): o servidor confere neles a
+ * chave do próprio nod, que nem o total libera. Mandar só o primeiro deixava um patch com `~/.ssh/config` e
+ * `~/.config/nod-motor/conexao.json` (ou um Grep com `path` em `~/.ssh` e `pattern` na chave do nod) passar no total
+ * como se fosse só a chave SSH. O cartão do Automático também mostra todos.
+ */
+function credencialDosCaminhos(caminhos: readonly string[]): string | undefined {
+  const tocam = caminhos.filter(tocaCredencial);
+  return tocam.length > 0 ? tocam.join(" ") : undefined;
+}
 
 /**
  * definido em 2026-10-14 (ADR-103): os arquivos que um `apply_patch` do Codex cria, muda, apaga ou para onde move.
@@ -171,7 +194,7 @@ export function decidirNativa(p: { ferramenta: string; entrada: Record<string, u
   // ADR-103: no Codex, os MCPs da pessoa carregam junto com o do nod; cada chamada vai ao servidor, que decide pelo modo.
   if (p.ferramenta.startsWith("mcp__")) {
     const texto = textoDoMcp(p.ferramenta, p.entrada);
-    if (tocaCredencial(texto)) return { permitir: false, motivo: "o pedido toca uma credencial (chaves, tokens, Keychain): o nod não manda; se a tarefa precisar, peça à pessoa", contamina: false };
+    if (tocaCredencial(texto)) return { permitir: true, motivo: MOTIVO_CREDENCIAL, contamina: true, mcp: texto, credencial: texto };
     return { permitir: true, motivo: "app da pessoa: o servidor do nod decide", contamina: true, mcp: texto };
   }
   switch (p.ferramenta) {
@@ -180,13 +203,14 @@ export function decidirNativa(p: { ferramenta: string; entrada: Record<string, u
       const patch = typeof p.entrada.command === "string" ? p.entrada.command : "";
       const caminhos = caminhosDoPatch(patch);
       if (caminhos.length === 0) return { permitir: false, motivo: "patch sem arquivo reconhecível", contamina: false };
-      if (caminhos.some(tocaCredencial)) return { permitir: false, motivo: "arquivo de credencial (chaves, tokens, Keychain): o nod não abre; se a tarefa precisar, peça à pessoa", contamina: false };
+      const credencialNoPatch = credencialDosCaminhos(caminhos);
+      if (credencialNoPatch !== undefined) return { permitir: true, motivo: MOTIVO_CREDENCIAL, contamina: false, credencial: credencialNoPatch };
       const fora = p.pasta ? caminhos.map((c) => arquivoForaDaPastaDoBot(c, p.pasta!)).find((f) => f !== null) ?? null : null;
       return { permitir: true, motivo: "arquivos do Mac da pessoa", contamina: false, ...(fora ? { arquivo: fora } : {}) };
     }
     case "view_image": {
       const caminho = typeof p.entrada.path === "string" ? p.entrada.path : "";
-      if (tocaCredencial(caminho)) return { permitir: false, motivo: "arquivo de credencial (chaves, tokens, Keychain): o nod não abre; se a tarefa precisar, peça à pessoa", contamina: false };
+      if (tocaCredencial(caminho)) return { permitir: true, motivo: MOTIVO_CREDENCIAL, contamina: false, credencial: caminho };
       return { permitir: true, motivo: "arquivos do Mac da pessoa", contamina: false };
     }
     case "spawn_agent":
@@ -197,9 +221,11 @@ export function decidirNativa(p: { ferramenta: string; entrada: Record<string, u
     case "NotebookEdit":
     case "Glob":
     case "Grep": {
-      // ADR-055: o Mac inteiro, menos onde moram as credenciais — lê-las é o primeiro passo para vazá-las.
-      const caminhos = ["file_path", "notebook_path", "path", "pattern"].map((k) => p.entrada[k]).filter((v): v is string => typeof v === "string");
-      if (caminhos.some(tocaCredencial)) return { permitir: false, motivo: "arquivo de credencial (chaves, tokens, Keychain): o nod não abre; se a tarefa precisar, peça à pessoa", contamina: false };
+      // ADR-055: o Mac inteiro; onde moram as credenciais, o servidor decide pelo modo (PR 6 dos modos de aprovação) —
+      // lê-las é o primeiro passo para vazá-las, e só o "Ignorar todas as aprovações" lê sem a pessoa.
+      const caminhos = ["file_path", "notebook_path", "path", "pattern", "glob"].map((k) => p.entrada[k]).filter((v): v is string => typeof v === "string");
+      const credencial = credencialDosCaminhos(caminhos);
+      if (credencial !== undefined) return { permitir: true, motivo: MOTIVO_CREDENCIAL, contamina: false, credencial };
       // ADR-066: gravar fora da pasta do bot segue o modo de aprovação (o servidor decide); ler continua livre.
       const grava = p.ferramenta === "Write" || p.ferramenta === "Edit" || p.ferramenta === "NotebookEdit";
       const alvo = typeof p.entrada.file_path === "string" ? p.entrada.file_path : typeof p.entrada.notebook_path === "string" ? p.entrada.notebook_path : null;

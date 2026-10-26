@@ -1,11 +1,12 @@
 import { randomUUID } from "node:crypto";
 import type { RuntimeEvent } from "../contracts/evento.ts";
 import type { PlanoTurno } from "../contracts/plano-turno.ts";
-import { classificarComando, comandoArriscado, enviaPeloTerminal, tocaCredencial } from "../domain/comando.ts";
-import { NATIVA_MCP_DA_PESSOA } from "../domain/nativas.ts";
+import { classificarComando, comandoArriscado, enviaPeloTerminal, tocaChaveDoNod, tocaCredencial } from "../domain/comando.ts";
+import { FRASE_ARQUIVO_DE_CREDENCIAL, FRASE_MCP_COM_CREDENCIAL, NATIVA_MCP_DA_PESSOA } from "../domain/nativas.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { decidirPeloModo, REGRA_MODO_TOTAL, semRevisor, type DecisaoSemRevisor, type GatilhoDeRevisao } from "../domain/modo-aprovacao.ts";
-import { RISCO_DO_GATILHO } from "../domain/revisor.ts";
+import { resumoDeTexto, RISCO_DO_GATILHO } from "../domain/revisor.ts";
+import type { GatilhoAcaoDoModo, TipoAcaoDoModo } from "../repositories/acoes-pelo-modo.repo.ts";
 import { terminalLiberadoNaTarefa } from "./liberar-na-tarefa.ts";
 import { avaliarRevisao, medirRevisao, type OrigemDaRevisao } from "./medir-revisao.ts";
 import { revisarAcaoFase1, type PedidoNaCaixa } from "./revisar-acao.ts";
@@ -22,7 +23,11 @@ export const DESTINO_TERMINAL = { conector: "terminal", ferramenta: "bash" } as 
  * rota põe na caixa do turno depois do commit (a decisão `em_revisao`).
  */
 export type PorqueRoda = "leitura" | "aprovado" | "revisor" | "liberado_na_tarefa" | "modo_automatico" | "modo_total";
-export type SaidaAutorizarComando = { permitir: true; porque: PorqueRoda } | { aguardar: string; revisao?: PedidoNaCaixa };
+/**
+ * `negar` (PR 6 dos modos de aprovação): o arquivo de credencial no manual — o manual não muda, e a frase é a que o hook
+ * dizia sozinho antes. Só o pedido de credencial nega por aqui; o resto que o modo não aprova vira cartão.
+ */
+export type SaidaAutorizarComando = { permitir: true; porque: PorqueRoda } | { aguardar: string; revisao?: PedidoNaCaixa } | { negar: string };
 
 /**
  * Cada comando do terminal do Mac da pessoa (definido em 2026-09-28, ADR-055, "terminal de verdade, como o
@@ -33,7 +38,8 @@ export type SaidaAutorizarComando = { permitir: true; porque: PorqueRoda } | { a
  *  3. ela respondeu "Pode fazer e o resto desta tarefa" num comando, o turno está limpo e fora do gate de
  *     rotina, e o comando não toca credencial nem é arriscado → roda;
  *  4. ADR-059: o modo do bot aprova (`decidirPeloModo`): no automático, o que não é arriscado num turno limpo;
- *     no total, tudo. Credencial do Mac nunca passa por aqui → card em qualquer modo;
+ *     no total, tudo — até a credencial do Mac, desde o PR 6 dos modos de aprovação (ADR-115), menos a chave do nod.
+ *     No automático, credencial → card; no manual, o arquivo de credencial é negado (o comando, card);
  *  5. senão → card de aprovação na conversa, e o hook espera a resposta no próprio turno.
  *
  * ADR-115 (2026-10-18, PR 3a dos modos de aprovação): com a chave `NOD_REVISOR` ligada, o automático manda o arriscado e
@@ -46,7 +52,7 @@ export type SaidaAutorizarComando = { permitir: true; porque: PorqueRoda } | { a
  * agente, lido aqui: a dona que volta para o manual no meio de uma tarefa vale no comando seguinte.
  *
  * `arquivo` (definido em 2026-10-01, ADR-066): Write/Edit/NotebookEdit fora de ~/nod/<bot> passam pela MESMA decisão —
- * nunca é leitura, nunca é arriscado (o arriscado de arquivo é a credencial, que o hook já nega). Antes a gravação
+ * nunca é leitura, nunca é arriscado (o arriscado de arquivo é a credencial, que chega como `credencial`). Antes a gravação
  * ignorava o modo: no manual, o bot gravava em qualquer arquivo do Mac sem card.
  */
 /**
@@ -57,6 +63,8 @@ export type SaidaAutorizarComando = { permitir: true; porque: PorqueRoda } | { a
 export const COMANDO_MAX = 64_000;
 
 type Permitir = { permitir: true; porque: PorqueRoda };
+/** O que o total rodou sem a pessoa e vai para a Atividade (`acoes_pelo_modo`, veredito nulo; PR 6). */
+type RegistroDoTotal = { tipo: TipoAcaoDoModo; gatilho: GatilhoAcaoDoModo; risco: string | null };
 type AgenteDoPedido = { nome: string; titulo: string; descricao: string } | null;
 type PedeCard = { card: { agenteNome: string | null; motivo: Extract<DecisaoSemRevisor, { automatico: false }> | null; risco: string | null } };
 /** ADR-115: o modo mandou ao revisor (só com a chave `NOD_REVISOR` ligada). */
@@ -67,20 +75,33 @@ type VaiAoRevisor = { revisar: { gatilho: GatilhoDeRevisao; contaminado: boolean
  * da pessoa. O app nunca é leitura nem arriscado pelo texto: ninguém sabe pelo nome se a ferramenta só lê, então segue o
  * modo como o comando que muda algo.
  */
-type Pedido = { tipo: "comando" } | { tipo: "arquivo"; arquivo: string } | { tipo: "mcp" };
+/**
+ * `credencial` (definido em 2026-10-19, plano dos modos de aprovação, PR 6): o hook manda ao servidor o arquivo de
+ * credencial que antes negava sozinho — ler (Read, Glob, Grep, view_image), gravar (Write, Edit, NotebookEdit,
+ * apply_patch) ou o pedido de um MCP da pessoa que cita uma. Nunca é leitura livre nem vai ao revisor.
+ */
+type AcaoNaCredencial = "ler" | "gravar" | "mcp";
+type Pedido = { tipo: "comando" } | { tipo: "arquivo"; arquivo: string } | { tipo: "mcp" } | { tipo: "credencial"; caminho: string; acao: AcaoNaCredencial };
 
-const ORIGEM_DO_PEDIDO: Record<Pedido["tipo"], OrigemDaRevisao> = { comando: "terminal", arquivo: "arquivo", mcp: "mcp" };
+const ORIGEM_DO_PEDIDO: Record<Pedido["tipo"], OrigemDaRevisao> = { comando: "terminal", arquivo: "arquivo", mcp: "mcp", credencial: "arquivo" };
+
+/** O tipo da linha em `acoes_pelo_modo` e o gatilho (o que o manual pediria): credencial, arriscado, fora da pasta, comum. */
+function registroDoTotal(pedido: Pedido, credencial: boolean, risco: string | null): RegistroDoTotal {
+  const tipo: TipoAcaoDoModo = pedido.tipo === "credencial" ? (pedido.acao === "ler" ? "leitura_credencial" : pedido.acao === "gravar" ? "arquivo" : "mcp") : pedido.tipo;
+  if (credencial) return { tipo, gatilho: "credencial", risco };
+  return { tipo, gatilho: risco !== null ? "arriscado" : pedido.tipo === "arquivo" ? "fora_da_pasta" : "comum", risco };
+}
 
 /**
  * Os passos 1–4 acima, sem efeito: roda (e por quê) ou pede card. Quem cria o card é `autorizarComando`. `medir`: o PR 1
  * do plano dos modos de aprovação conta, no ponto em que o modo seria consultado, o que o Automático novo faria (só o
  * card do terminal; o `esperar_comando` não abre card e fica sem revisor).
  */
-async function decidirComando(deps: Deps, plano: PlanoTurno, texto: string, pedido: Pedido, medir = false): Promise<Permitir | PedeCard | VaiAoRevisor> {
+async function decidirComando(deps: Deps, plano: PlanoTurno, texto: string, pedido: Pedido, medir = false): Promise<(Permitir & { registro?: RegistroDoTotal }) | PedeCard | VaiAoRevisor | { negar: string }> {
   const contaminado = plano.confiancaEntrada !== "confiavel" || (await deps.repos.turnos.contaminado(plano.turnoId));
   if (pedido.tipo === "comando" && classificarComando(texto).tipo === "leitura" && !contaminado) return { permitir: true, porque: "leitura" };
   // revisto em 2026-10-18 (revisão de engenharia 4): pelo texto do item, que acha também a gravação de arquivo aprovada.
-  const aprovado = await deps.repos.itensAprovacao.aprovadoNaCadeia(plano.turnoId, texto, pedido.tipo === "arquivo");
+  const aprovado = await deps.repos.itensAprovacao.aprovadoNaCadeia(plano.turnoId, texto, guardaArquivo(pedido));
   if (aprovado === "pessoa") return { permitir: true, porque: "aprovado" };
   // A liberação do REVISOR vale só enquanto ele vale (revisão do PR 3a): a pessoa que volta o bot para o manual, ou a
   // chave desligada no meio do turno, faz o mesmo comando seguir a regra de agora — não a liberação de antes.
@@ -88,7 +109,11 @@ async function decidirComando(deps: Deps, plano: PlanoTurno, texto: string, pedi
     return { permitir: true, porque: "revisor" };
   }
   const risco = pedido.tipo === "comando" ? comandoArriscado(texto) : null;
-  const credencial = tocaCredencial(pedido.tipo === "arquivo" ? pedido.arquivo : texto);
+  const alvo = pedido.tipo === "arquivo" ? pedido.arquivo : pedido.tipo === "credencial" ? pedido.caminho : texto;
+  // PR 6: o pedido de credencial é credencial por definição (o hook já casou `tocaCredencial`); o servidor confere de novo
+  // só para a chave do próprio nod, que nem o total libera.
+  const credencial = pedido.tipo === "credencial" || tocaCredencial(alvo);
+  const chaveDoNod = credencial && tocaChaveDoNod(alvo);
   // definido em 2026-09-30 (ADR-062, auditoria das aprovações): "o resto desta tarefa" libera o comando comum, não
   // a credencial nem o arriscado — antes esta linha vinha antes das duas cercas, e um "pode fazer" num `ls` liberava
   // o `security find-generic-password` e o `rm -rf` seguintes, que nem o modo total libera sem a pessoa.
@@ -106,13 +131,15 @@ async function decidirComando(deps: Deps, plano: PlanoTurno, texto: string, pedi
   // ligado, o envio para fora depois de conteúdo de fora (turno ou conversa em 24 h) vai a ele (plano, 3a). Se a leitura
   // da conversa falhou (avaliação nula), o lado seguro: conta como contaminado — o envio vai ao revisor, nunca roda direto.
   const contaminadoParaRevisor = avaliacao ? avaliacao.contaminado : revisor || contaminado;
-  const decidido = decidirPeloModo(agente?.modoAprovacao, { arriscada: risco !== null, credencial, envioParaFora, contaminado: contaminadoParaRevisor }, revisor);
+  const decidido = decidirPeloModo(agente?.modoAprovacao, { arriscada: risco !== null, credencial, chaveDoNod, envioParaFora, contaminado: contaminadoParaRevisor }, revisor);
+  // O manual não muda (PR 6): o arquivo de credencial continua negado ali, com a frase que o hook dizia sozinho.
+  if (decidido === null && pedido.tipo === "credencial") return { negar: pedido.acao === "mcp" ? FRASE_MCP_COM_CREDENCIAL : FRASE_ARQUIVO_DE_CREDENCIAL };
   // O `esperar_comando` (medir = false) não abre cartão nem tem revisor: o que seria revisado não roda por ali.
   if (decidido && "revisar" in decidido && medir) {
     return { revisar: { gatilho: decidido.gatilho, contaminado: contaminadoParaRevisor, agente: agente ? { nome: agente.nome, titulo: agente.titulo, descricao: agente.descricao } : null, risco } };
   }
   const doModo = semRevisor(decidido);
-  if (doModo?.automatico) return { permitir: true, porque: doModo.regra === REGRA_MODO_TOTAL ? "modo_total" : "modo_automatico" };
+  if (doModo?.automatico) return doModo.regra === REGRA_MODO_TOTAL ? { permitir: true, porque: "modo_total", registro: registroDoTotal(pedido, credencial, risco) } : { permitir: true, porque: "modo_automatico" };
   return { card: { agenteNome: agente?.nome ?? null, motivo: doModo ?? null, risco } };
 }
 
@@ -120,38 +147,94 @@ async function decidirComando(deps: Deps, plano: PlanoTurno, texto: string, pedi
  * definido em 2026-10-12 (ADR-099, parte 2): `esperar_comando` passa o comando pelas MESMAS regras do terminal do bot, mas
  * não abre card — o turno vai encerrar logo depois, e ninguém esperaria a resposta. null = o comando pediria aprovação.
  */
-export async function comandoRodaSemCard(deps: Deps, plano: PlanoTurno, comando: string): Promise<Permitir | null> {
+/**
+ * `registrar` (revisão do PR 6): grava em `acoes_pelo_modo` o que o total liberou (nada nos outros casos). Quem chama o
+ * chama só quando a espera foi criada de fato, na mesma transação — antes, a segunda espera do turno (`ja_esperando`)
+ * deixava na Atividade um "Rodou sem perguntar" de um comando que não ia rodar.
+ */
+export async function comandoRodaSemCard(deps: Deps, plano: PlanoTurno, comando: string): Promise<(Permitir & { registrar: () => Promise<void> }) | null> {
   if (!(plano.nativas ?? []).includes("Bash")) return null;
   const texto = comando.trim();
-  if (texto === "" || texto.length > COMANDO_MAX) return null;
+  // PR 6: o total libera a credencial só no terminal do bot, onde fica registrada na Atividade; a espera, que roda fora
+  // do CLI e não registra, continua como antes — comando com credencial não roda por ali, em nenhum modo.
+  if (texto === "" || texto.length > COMANDO_MAX || tocaCredencial(texto)) return null;
   const r = await decidirComando(deps, plano, texto, { tipo: "comando" });
-  return "permitir" in r ? r : null;
+  if (!("permitir" in r)) return null;
+  const { registro } = r;
+  return { permitir: true, porque: r.porque, registrar: async () => (registro ? registrarNoTotal(deps, plano, texto, registro) : undefined) };
+}
+
+/**
+ * PR 6 (ADR-115): o que o "Ignorar todas as aprovações" rodou e o manual pediria fica em `acoes_pelo_modo`, a fonte da
+ * Atividade (filtro "Sem aprovação") e da linha embaixo da fala. Texto redigido, nunca na trilha.
+ */
+async function registrarNoTotal(deps: Deps, plano: PlanoTurno, texto: string, registro: RegistroDoTotal): Promise<void> {
+  await deps.repos.acoesPeloModo.registrar({ agenteId: plano.agenteId, conversaId: plano.conversaId, turnoId: plano.turnoId, decisaoId: null, modo: "total", resumo: resumoDeTexto(texto), ...registro });
+}
+
+/** O item do pedido guarda `{ arquivo }` (gravar fora da pasta, e ler ou gravar arquivo de credencial) ou `{ comando }`. */
+function guardaArquivo(pedido: Pedido): boolean {
+  return pedido.tipo === "arquivo" || (pedido.tipo === "credencial" && pedido.acao !== "mcp");
 }
 
 /** ADR-103: gravar arquivo é o Write no Claude e o apply_patch no Codex; o plano traz um ou outro. */
 const NATIVAS_QUE_GRAVAM = ["Write", "apply_patch"];
 
-export const autorizarComando: CasoDeUso<{ plano: PlanoTurno; comando: string } | { plano: PlanoTurno; arquivo: string } | { plano: PlanoTurno; mcp: string }, SaidaAutorizarComando> = async (deps, entrada) => {
+/** Quem mandou o arquivo de credencial (o hook, pela ferramenta): o que a pessoa está deixando o bot fazer com ele. */
+export function acaoNaCredencial(ferramenta: string): AcaoNaCredencial {
+  if (ferramenta === NATIVA_MCP_DA_PESSOA) return "mcp";
+  return ["Write", "Edit", "NotebookEdit", "apply_patch"].includes(ferramenta) ? "gravar" : "ler";
+}
+
+const FRASE_DA_CREDENCIAL: Record<AcaoNaCredencial, string> = { ler: "ler um arquivo de credencial do seu Mac", gravar: "mudar um arquivo de credencial do seu Mac", mcp: "usar um app seu com uma credencial" };
+
+type EntradaAutorizar =
+  | { plano: PlanoTurno; comando: string }
+  | { plano: PlanoTurno; arquivo: string }
+  | { plano: PlanoTurno; mcp: string }
+  /** PR 6: `ferramenta` é a nativa que o hook mandou (tem de estar no plano); `credencial`, o caminho ou o pedido do MCP. */
+  | { plano: PlanoTurno; credencial: string; ferramenta: string };
+
+/** O pedido, o texto do item (o que a pessoa lê no cartão e o que a segunda consulta compara) e a nativa que o plano exige. */
+function pedidoDaEntrada(entrada: EntradaAutorizar): { pedido: Pedido; texto: string; noPlano: boolean; campo: string } {
+  const nativas = entrada.plano.nativas ?? [];
+  if ("credencial" in entrada) {
+    const caminho = entrada.credencial.trim();
+    const acao = acaoNaCredencial(entrada.ferramenta);
+    return { pedido: { tipo: "credencial", caminho, acao }, texto: caminho === "" ? "" : acao === "ler" ? `Ler ${caminho}` : acao === "gravar" ? `Gravar ${caminho}` : caminho, noPlano: nativas.includes(entrada.ferramenta), campo: "credencial" };
+  }
+  if ("arquivo" in entrada) {
+    const arquivo = entrada.arquivo.trim();
+    return { pedido: { tipo: "arquivo", arquivo }, texto: arquivo === "" ? "" : `Gravar ${arquivo}`, noPlano: NATIVAS_QUE_GRAVAM.some((n) => nativas.includes(n)), campo: "arquivo" };
+  }
+  if ("mcp" in entrada) return { pedido: { tipo: "mcp" }, texto: entrada.mcp.trim(), noPlano: nativas.includes(NATIVA_MCP_DA_PESSOA), campo: "mcp" };
+  return { pedido: { tipo: "comando" }, texto: entrada.comando.trim(), noPlano: nativas.includes("Bash"), campo: "comando" };
+}
+
+export const autorizarComando: CasoDeUso<EntradaAutorizar, SaidaAutorizarComando> = async (deps, entrada) => {
   const { plano } = entrada;
-  const arquivo = "arquivo" in entrada ? entrada.arquivo.trim() : null;
-  const mcp = "mcp" in entrada ? entrada.mcp.trim() : null;
-  const nativas = plano.nativas ?? [];
-  const noPlano = arquivo !== null ? NATIVAS_QUE_GRAVAM.some((n) => nativas.includes(n)) : nativas.includes(mcp !== null ? NATIVA_MCP_DA_PESSOA : "Bash");
-  if (!noPlano) throw new ErroDeDominio("nao_permitido", { cause: `${arquivo !== null ? "gravar arquivo" : mcp !== null ? NATIVA_MCP_DA_PESSOA : "Bash"} fora do plano deste turno` });
-  const texto = arquivo !== null ? `Gravar ${arquivo}` : mcp !== null ? mcp : "comando" in entrada ? entrada.comando.trim() : "";
-  if (texto === "" || arquivo === "" || texto.length > COMANDO_MAX) throw new ErroDeDominio("entrada_invalida", { cause: arquivo !== null ? "arquivo" : mcp !== null ? "mcp" : "comando" });
-  const pedido: Pedido = arquivo !== null ? { tipo: "arquivo", arquivo } : mcp !== null ? { tipo: "mcp" } : { tipo: "comando" };
+  const { pedido, texto, noPlano, campo } = pedidoDaEntrada(entrada);
+  if (!noPlano) throw new ErroDeDominio("nao_permitido", { cause: `${campo === "arquivo" ? "gravar arquivo" : campo === "mcp" ? NATIVA_MCP_DA_PESSOA : campo === "credencial" ? "credencial" : "Bash"} fora do plano deste turno` });
+  if (texto === "" || texto.length > COMANDO_MAX) throw new ErroDeDominio("entrada_invalida", { cause: campo });
   const decidido = await decidirComando(deps, plano, texto, pedido, true);
-  if ("permitir" in decidido) return { data: decidido };
-  const destino = { ...DESTINO_TERMINAL, argumentos: arquivo === null ? { comando: texto } : { arquivo } };
-  const fraseDoPedido = (nome: string | null) => `${nome ?? "O bot"} quer ${arquivo !== null ? "gravar um arquivo no seu Mac" : mcp !== null ? "usar um app seu" : "rodar um comando no seu Mac"}`;
-  if ("revisar" in decidido) {
+  if ("negar" in decidido) return { data: { negar: decidido.negar } };
+  if ("permitir" in decidido) {
+    if (decidido.registro) await registrarNoTotal(deps, plano, texto, decidido.registro);
+    return { data: { permitir: true, porque: decidido.porque } };
+  }
+  const arquivoDoItem = pedido.tipo === "arquivo" ? pedido.arquivo : pedido.tipo === "credencial" && pedido.acao !== "mcp" ? pedido.caminho : null;
+  const destino = { ...DESTINO_TERMINAL, argumentos: arquivoDoItem === null ? { comando: texto } : { arquivo: arquivoDoItem } };
+  const oQue = pedido.tipo === "credencial" ? FRASE_DA_CREDENCIAL[pedido.acao] : pedido.tipo === "arquivo" ? "gravar um arquivo no seu Mac" : pedido.tipo === "mcp" ? "usar um app seu" : "rodar um comando no seu Mac";
+  const fraseDoPedido = (nome: string | null) => `${nome ?? "O bot"} quer ${oQue}`;
+  if ("revisar" in decidido && pedido.tipo !== "credencial") {
     // ADR-115: fase 1 do revisor (revisar-acao.ts) em vez do cartão. O hook não muda: espera a decisão `em_revisao`.
+    // A credencial nunca chega aqui: no Automático ela é cartão, sem revisor (decidirPeloModo).
     const { gatilho, contaminado, agente, risco } = decidido.revisar;
     const acao = pedido.tipo === "arquivo" ? { tipo: "arquivo" as const, caminho: pedido.arquivo } : pedido.tipo === "mcp" ? { tipo: "mcp" as const, pedido: texto } : { tipo: "comando" as const, comando: texto };
     const r = await revisarAcaoFase1(deps, { plano, tipo: pedido.tipo, itens: [{ texto, destino }], acao, gatilho, risco: risco ?? RISCO_DO_GATILHO[gatilho], contaminado, frase: fraseDoPedido(agente?.nome ?? null), agente });
     return { data: r.data.revisao ? { aguardar: r.data.aguardar, revisao: r.data.revisao } : { aguardar: r.data.aguardar }, events: r.events ?? [] };
   }
+  if (!("card" in decidido)) throw new ErroDeDominio("estado_invalido", { cause: "credencial mandada ao revisor" });
   const { agenteNome, motivo: doModo, risco } = decidido.card;
 
   const agora = deps.agora();

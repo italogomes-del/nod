@@ -51,6 +51,7 @@ import { trabalhosConhecidos } from "../lib/trabalhos.ts";
 import { TEXTO_FALHA_LEITURA } from "../lib/ouvir.ts";
 import { acoesDaFala, chipsDeReacao, citacaoAcimaDoBalao } from "./acoes-da-fala.ts";
 import { ancorasDoProgresso, comProgressoNaFala, marcadorDoProgresso } from "./progresso-na-fala.ts";
+import { ancorasDoModo, renderLinhaDoModo } from "./linha-do-modo.ts";
 
 /** id → nome (agentes da frota + a pessoa da sessão); id desconhecido cai no genérico, nunca no uuid. */
 export function nomesDe(estado: Estado): Record<string, string> {
@@ -530,8 +531,10 @@ export function comChipDeComando(texto: string): string {
  * Na fala do bot ele fica dentro do balão, depois do texto (protótipo "4"); no balão da pessoa (a frente da rede), embaixo
  * dele. Nos dois, antes das reações: o progresso é conteúdo da fala; a reação é sobre ela (decisão 20 do plano).
  * `diagramas` (NOD-328): só a timeline de conversa e sala liga; Trabalhos reaproveita esta função e fica com o card.
+ * `linhaDoModo` (PR 6 dos modos de aprovação, telas Y1 e Y2): a linha discreta do que o "Ignorar todas" rodou sem a
+ * pessoa neste turno (./linha-do-modo.ts), logo embaixo do balão do bot e antes das reações.
  */
-export function renderMensagem(m: Mensagem, estado: Estado, sala = false, opcoes: { etiqueta?: string; progresso?: string; diagramas?: boolean } = {}): string {
+export function renderMensagem(m: Mensagem, estado: Estado, sala = false, opcoes: { etiqueta?: string; progresso?: string; diagramas?: boolean; linhaDoModo?: string } = {}): string {
   // Kinds não-texto (parada, sistema, negação) também se relatam — são JUSTAMENTE os que a categoria
   // 'travou_ou_parou' descreve, e o caso de uso já trata mensagem sem turno (definido em 2026-09-21).
   // definido em 2026-10-03: o artefato é uma fala do bot — mascote, nome e hora em volta do card, como os balões; solto
@@ -583,7 +586,7 @@ export function renderMensagem(m: Mensagem, estado: Estado, sala = false, opcoes
   const progressoFora = ehPessoa || pergunta ? (opcoes.progresso ?? "") : "";
   const balao = motivoTela !== null ? (estado.computadorPessoa ? htmlPedidoDeTela(motivoTela, agente?.id ?? "", telaAberta) : htmlCartaoTela(motivoTela, agente?.id ?? "", telaAberta, agente?.nome, pergunta?.decisaoId)) : pergunta ? cartaoDaPergunta(m, estado) : (ehPessoa ? m.anexos?.length : temMidiaDoBot(m) && !progressoDentro) && m.texto.trim() === "" ? "" : `<div class="bubble${progressoDentro ? " com-progresso" : ""}">${ehPessoa ? comChipDeComando(m.texto) : textoFormatado(m.texto, { chave: m.id, diagramas: opcoes.diagramas === true })}${metaTags}${progressoDentro}</div>`;
   return `<article class="${classes}" data-mensagem="${esc(m.id)}"${pergunta ? ` data-pergunta="${esc(pergunta.decisaoId)}"` : ""}>
-    ${!ehPessoa && agente ? iconeAgente(agente, "md") : ""}<div class="bubble-wrap">${acoesDaMensagem(m, estado, sala)}${sender}${resposta ? rotuloDaResposta(m) : ""}${ehPessoa ? citacaoAcimaDoBalao(m) : ""}${anexosDe(m, estado)}${balao}${ehPessoa ? "" : midiasDoBot(m, estado)}${progressoFora}${ehPessoa ? "" : avisoDeLeitura(m, estado)}${ehPessoa ? "" : capturaDoTurno(m, estado)}${contextoDelegado}${chipsDeReacao(m, estado)}${fila ? renderSituacaoFila(fila, fila.turnoId) : ""}${faixaDaMensagem(m, estado)}</div>
+    ${!ehPessoa && agente ? iconeAgente(agente, "md") : ""}<div class="bubble-wrap">${acoesDaMensagem(m, estado, sala)}${sender}${resposta ? rotuloDaResposta(m) : ""}${ehPessoa ? citacaoAcimaDoBalao(m) : ""}${anexosDe(m, estado)}${balao}${ehPessoa ? "" : midiasDoBot(m, estado)}${progressoFora}${ehPessoa ? "" : (opcoes.linhaDoModo ?? "")}${ehPessoa ? "" : avisoDeLeitura(m, estado)}${ehPessoa ? "" : capturaDoTurno(m, estado)}${contextoDelegado}${chipsDeReacao(m, estado)}${fila ? renderSituacaoFila(fila, fila.turnoId) : ""}${faixaDaMensagem(m, estado)}</div>
   </article>${resposta ? linhaDaRetomada(m, estado) : ""}`;
 }
 
@@ -879,7 +882,7 @@ export type BlocoDaTimeline = { chave: string; html: string; inicio?: string; te
  * o resto é desenhado como sempre. O pedido a colega de quem pede, que era um `<details class="collaboration">`, agora é
  * linha também ("Enviou mensagem para…", "N mensagens com…").
  */
-function blocosDasMensagens(mensagens: Mensagem[], estado: Estado, sala: boolean): BlocoDaTimeline[] {
+function blocosDasMensagens(mensagens: Mensagem[], estado: Estado, sala: boolean, doModo?: { agenteId: string; acoes: ConversaEstado["acoesDoModo"] }): BlocoDaTimeline[] {
   const planos = planejarLinhas(mensagens, estado);
   // definido em 2026-09-29 (0039, canvas "Não lidos"): a linha "Novas" entra acima da primeira não lida de quando a
   // pessoa abriu a conversa (ou voltou para a janela com outras novas, emenda de 2026-10-05), e fica até ela sair. Se a
@@ -892,18 +895,24 @@ function blocosDasMensagens(mensagens: Mensagem[], estado: Estado, sala: boolean
   // "Começou N frentes" saíram do chat; na sala e no servidor de antes elas continuam.
   const ancoras = !sala && conversaLimpa(mensagens) ? ancorasDoProgresso(mensagens, (m) => planos.get(m.id)?.tipo === undefined || planos.get(m.id)?.tipo === "balao") : new Map<string, string[]>();
   const progressoDe = (id: string): string | undefined => ancoras.get(id)?.map(marcadorDoProgresso).join("");
+  // PR 6 dos modos de aprovação: a linha do que o "Ignorar todas" rodou sem a pessoa, na última fala à vista do turno.
+  const doModoNaFala = !sala && doModo ? ancorasDoModo(mensagens, doModo.acoes, (m) => planos.get(m.id)?.tipo === undefined || planos.get(m.id)?.tipo === "balao") : new Map();
+  const linhaDoModoDe = (id: string): { linhaDoModo?: string } => {
+    const acoes = doModoNaFala.get(id);
+    return acoes && doModo ? { linhaDoModo: renderLinhaDoModo(acoes, doModo.agenteId) } : {};
+  };
   const linhas: LinhaDaConversa[] = mensagens.map((m) => {
     const plano = planos.get(m.id);
     const progresso = progressoDe(m.id);
     const html = !plano
-      ? renderMensagem(m, estado, sala, { diagramas: true, ...(progresso ? { progresso } : {}) })
+      ? renderMensagem(m, estado, sala, { diagramas: true, ...(progresso ? { progresso } : {}), ...linhaDoModoDe(m.id) })
       : plano.tipo === "oculta"
         ? ""
         : plano.tipo === "linha"
           ? plano.html
           : plano.tipo === "troca"
             ? htmlTroca(plano, estado)
-            : (plano.antes ?? "") + renderMensagem(m, estado, sala, { etiqueta: plano.etiqueta, diagramas: true, ...(progresso ? { progresso } : {}) });
+            : (plano.antes ?? "") + renderMensagem(m, estado, sala, { etiqueta: plano.etiqueta, diagramas: true, ...(progresso ? { progresso } : {}), ...linhaDoModoDe(m.id) });
     // Chat limpo (PR 6): o instante que a linha mostra, para os divisores de data. A troca vai da primeira à última mensagem
     // dela; a mensagem que sumiu (só sobra, talvez, a linha "Novas") não abre bloco.
     const tempo = html === "" ? { em: null } : plano?.tipo === "troca" ? { em: plano.mensagens[0]?.em ?? m.criadoEm, ate: plano.mensagens.at(-1)?.em ?? m.criadoEm, instantes: plano.mensagens.map((x) => x.em) } : { em: m.criadoEm };
@@ -1099,7 +1108,7 @@ export function blocosDoHistorico(c: ConversaEstado, estado: Estado): BlocoDaTim
   const decididos = new Set(c.mensagens.map(pedidoDoRecibo).filter((id): id is string => id !== null));
   const abertas = propostas.filter((p) => !decididos.has(p.id));
   const idsDasPropostas = new Set([...abertas.map((p) => p.id), ...decididos]);
-  const { blocos, ancoradas } = comPedidosAncorados(comEncolhidosNaAncora(blocosDasMensagens(c.mensagens, estado, sala), c), c, estado, idsDasPropostas);
+  const { blocos, ancoradas } = comPedidosAncorados(comEncolhidosNaAncora(blocosDasMensagens(c.mensagens, estado, sala, c.conversa.agenteId ? { agenteId: c.conversa.agenteId, acoes: c.acoesDoModo } : undefined), c), c, estado, idsDasPropostas);
   return [
     // Chat limpo (PR 6; plano, Parte 5): o divisor do topo e um a cada pausa de 30 min ou troca de dia entre itens à vista,
     // calculados depois de esconder o que foi para a Atividade, juntar as trocas e encolher os cartões. Vale também na sala

@@ -16,8 +16,9 @@ COPY scripts/remendar-postgres.mjs ./scripts/
 RUN node scripts/remendar-postgres.mjs
 COPY src ./src
 # definido em 2026-10-02: o deploy migra com a própria imagem (docker compose run nod node scripts/migrate.ts).
-# NOD-218: e fecha as ligações da cor que saiu (scripts/ligacoes-orfas.ts).
-COPY scripts/migrate.ts scripts/seed.ts scripts/ligacoes-orfas.ts ./scripts/
+# NOD-218: e fecha as ligações da cor que saiu (scripts/ligacoes-orfas.ts). PR 6 dos modos de aprovação: e escreve a
+# linha do total nos bots que já estavam nele (scripts/aviso-total-credenciais.ts).
+COPY scripts/migrate.ts scripts/seed.ts scripts/ligacoes-orfas.ts scripts/aviso-total-credenciais.ts ./scripts/
 COPY tests/helpers/catcher-roteiro.ts ./tests/helpers/catcher-roteiro.ts
 # definido em 2026-10-03: src/adapters/workspace/pastas.ts importa este módulo; sem ele o servidor não sobe.
 COPY infra/computador/texto.mjs ./infra/computador/texto.mjs

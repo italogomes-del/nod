@@ -243,7 +243,12 @@ export function resumoDaAcao(a: AcaoParaRevisor): string {
     : a.tipo === "mcp" ? a.pedido
     : a.tipo === "app" ? `${a.app} · ${a.ferramenta}`
     : a.itens.map((i) => `${i.app} · ${i.ferramenta}`).join(", ");
-  return cortar(redigirSegredos(bruto.trim()), RESUMO_MAX - 1);
+  return resumoDeTexto(bruto);
+}
+
+/** O texto do item como fica em `acoes_pelo_modo.resumo` (o total também grava, PR 6): redigido, até 500. */
+export function resumoDeTexto(texto: string): string {
+  return cortar(redigirSegredos(texto.trim()), RESUMO_MAX - 1);
 }
 
 /**

@@ -356,7 +356,7 @@ export function porqueDaPausa(i: Pick<Item["itensAprovacao"][number], "motivoMan
   const frase = i.motivoManual === "acao_arriscada"
     ? `Parou para você: ${!i.origemSensivel && i.justificativa ? `${i.justificativa}. ` : "é uma ação arriscada. "}Na aprovação automática, o arriscado sempre pergunta.`
     : i.motivoManual === "toca_credencial"
-      ? "Parou para você: toca uma credencial do Mac. Isso pede você em qualquer modo."
+      ? "Parou para você: toca uma credencial do Mac. Na aprovação automática, a credencial sempre pergunta; a chave do nod, em qualquer modo."
       : i.motivoManual === "regra_suspensa_conteudo_nao_confiavel"
         ? "Parou para você: nesta tarefa o bot leu conteúdo de fora (web, e-mail, GitHub). Até ela acabar, o que altera algo passa por você."
         : i.motivoManual === "gate_de_rotina"

@@ -136,7 +136,7 @@ import { mimeDe, motivoRecusa, POR_MENSAGEM, renderItens as renderItensAnexo, re
 import type { EstadoTrabalho, TipoLinha } from "../src/contracts/trabalho.ts";
 import { aberto, abertosDoBot, leituraDoMac, listaPararTasks, telaAoFechar, telaDaTask, textoPararTasks, trabalhoPorId, trabalhosConhecidos } from "./lib/trabalhos.ts";
 import { criarTelemetria } from "./lib/telemetria-linhas.ts";
-import { chaveDaAtividade, criarVigiaDaAtividade, diaLocal, fusoLocal, type FiltroAtividade } from "./lib/atividade-do-bot.ts";
+import { chaveDaAtividade, criarVigiaDaAtividade, diaLocal, ehFiltroAtividade, fusoLocal } from "./lib/atividade-do-bot.ts";
 import { anuncioDosSubagentes, blocosAoVivoDaTask, blocosDoHistoricoDaTask, htmlAcoesDaTask, renderIconeTrabalhos, renderTelaLinha, renderTodosOsTrabalhos, renderTopoTrabalho } from "./telas/trabalhos.ts";
 import { renderTrabalhosPorBot, sinalDoBot } from "./telas/linha-do-dono.ts";
 import { temDonos } from "./lib/dono.ts";
@@ -3714,7 +3714,7 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   // ADR-114 (chat limpo, PR 2): os filtros, a troca de dia e a mensagem aberta (texto inteiro + Relatar) da Atividade.
   "atividade-filtro": (el) => {
     const filtro = el.dataset.filtro;
-    if (filtro === "tudo" || filtro === "frentes" || filtro === "bloqueios" || filtro === "maquina_ia") dispatch({ tipo: "atividade-vista", mudanca: { filtro: filtro satisfies FiltroAtividade } });
+    if (ehFiltroAtividade(filtro)) dispatch({ tipo: "atividade-vista", mudanca: { filtro } });
     document.querySelector<HTMLElement>(`#detalhes [data-act="atividade-filtro"][data-filtro="${CSS.escape(filtro ?? "")}"]`)?.focus({ preventScroll: true });
   },
   "atividade-dia": (el) => {
@@ -3727,6 +3727,13 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     const id = el.dataset.id ?? "";
     dispatch({ tipo: "atividade-vista", mudanca: { aberta: estado.atividadeVista?.aberta === id ? null : id } });
     document.querySelector<HTMLElement>(`#detalhes [data-act="atividade-abrir"][data-id="${CSS.escape(id)}"]`)?.focus({ preventScroll: true });
+  },
+  // PR 6 dos modos de aprovação (tela Y3): "ver na Atividade" da linha embaixo da fala abre a Atividade do bot no dia da
+  // ação, no filtro "Sem aprovação".
+  "ver-sem-aprovacao": (el) => {
+    const dia = el.dataset.dia ?? "";
+    abrirNivel(el.dataset.agente ?? "", { tipo: "atividade" });
+    if (estado.atividadeVista) dispatch({ tipo: "atividade-vista", mudanca: { filtro: "sem_aprovacao", ...(/^\d{4}-\d{2}-\d{2}$/.test(dia) ? { dia } : {}) } });
   },
   // definido em 2026-09-24 (emenda da ADR-044): parada pelo pré-voo (`ids.bloqueada`), o teste não roda —
   // a conversa abre com o card de acesso "rotina parada" e o botão que a destrava; "Sua vez" relê.

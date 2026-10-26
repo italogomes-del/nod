@@ -5,7 +5,8 @@ import type { ModoTurno } from "../contracts/plano-turno.ts";
 /**
  * O modo de aprovação do bot (ADR-059), escolhido pela dona no chip do campo. Duas regras NOMEADAS, como as da
  * ADR-042, porque os alcances são opostos: `modo_automatico` para no arriscado (revisto em 2026-10-01, ADR-066: não para
- * mais depois de conteúdo de fora); `modo_total` só para na credencial. Underscore, nunca hífen (CHECK trilha_sem_texto_livre, 0001).
+ * mais depois de conteúdo de fora); `modo_total` não para em nada (revisto em 2026-10-19, ADR-115: até a credencial do Mac
+ * passa; só a chave do próprio nod para). Underscore, nunca hífen (CHECK trilha_sem_texto_livre, 0001).
  * A versão sobe quando muda o CONJUNTO de ações que a regra deixa passar (por exemplo, sair um item da lista de
  * arriscados), para a trilha dizer sob qual semântica o bot agiu.
  */
@@ -17,7 +18,11 @@ export const VERSAO_MODO_AUTOMATICO = 2 as const;
  */
 export const VERSAO_MODO_AUTOMATICO_COM_REVISOR = 3 as const;
 export const REGRA_MODO_TOTAL = "regra:modo_total" as const;
-export const VERSAO_MODO_TOTAL = 1 as const;
+/**
+ * revisto em 2026-10-19 (plano dos modos de aprovação, PR 6; ADR-115): versão 2 — o total passa a rodar também o comando
+ * que toca credencial do Mac e a leitura e a gravação de arquivo de credencial (que o hook negava sozinho na versão 1).
+ */
+export const VERSAO_MODO_TOTAL = 2 as const;
 /** ADR-115: a ação que o revisor liberou fecha por esta regra (trilha e desfecho da decisão). */
 export const REGRA_REVISOR = "regra:revisor" as const;
 export const VERSAO_REGRA_REVISOR = 1 as const;
@@ -41,13 +46,14 @@ export const ROTULO_MODO: Readonly<Record<ModoAprovacao, string>> = {
  * O que cada modo faz, dito à pessoa: a descrição do menu do botão (web/telas/aprovacoes.ts, que não importa valores
  * de src e repete as frases — tests/unit/web/aprovacoes.test.ts confere que são iguais) e a linha gravada na troca.
  * revisto em 2026-10-18 (Fase 4, PR 2): o texto dizia que o automático para depois de ler a web ou um e-mail; desde
- * a ADR-066 não para. As frases descrevem o que a regra de hoje faz (`decidirPeloModo`, `nativas.ts` nega a leitura
- * de arquivo de credencial); as do revisor entram com ele.
+ * a ADR-066 não para. As frases descrevem o que a regra de hoje faz (`decidirPeloModo`); as do revisor entram com ele.
+ * revisto em 2026-10-19 (Fase 4, PR 6): a do total é a do protótipo — ele roda até o que usa as credenciais do Mac, e o
+ * que fez fica na Atividade.
  */
 export const DESCRICAO_MODO: Readonly<Record<ModoAprovacao, string>> = {
   manual: "Pede você antes de tudo que muda algo: commit, push, mensagem, arquivo fora da pasta.",
   automatico: "Roda sem perguntar o que não for arriscado. Para no arriscado e no que tocar uma credencial do Mac.",
-  total: "Faz tudo sem perguntar. Não abre arquivos de credencial do Mac, e comandos com elas pedem você.",
+  total: "Faz tudo sem perguntar, até comandos com as credenciais do seu Mac. O que ele fez fica na Atividade.",
 };
 
 export function ehModoAprovacao(x: unknown): x is ModoAprovacao {
@@ -68,8 +74,10 @@ export function conversaComAPessoa(modoTurno: ModoTurno | undefined): boolean {
 export type SituacaoDaAcao = {
   /** `comandoArriscado` no terminal; `acaoArriscadaNoApp` no conector. */
   arriscada: boolean;
-  /** O comando toca uma credencial do Mac (`tocaCredencial`). */
+  /** O comando toca uma credencial do Mac (`tocaCredencial`), ou é o arquivo de credencial que o hook mandou ao servidor. */
   credencial: boolean;
+  /** A credencial é a chave do próprio nod (`tocaChaveDoNod`): pede a pessoa até no total (PR 6). */
+  chaveDoNod?: boolean;
   /** Só pesa com o revisor ligado: escrita num app que não é ler nem apagar, todo MCP da pessoa, `enviaPeloTerminal`. */
   envioParaFora?: boolean;
   /** Só pesa com o revisor ligado: o turno, ou outro turno da conversa nas últimas 24 h, leu conteúdo de fora. */
@@ -89,8 +97,8 @@ export type DecisaoDoModo = DecisaoSemRevisor | { revisar: true; gatilho: Gatilh
  * Revisor DESLIGADO (`revisor` falso, o padrão; a chave `NOD_REVISOR`): a regra de hoje, byte a byte, e `envioParaFora`
  * e `contaminado` não pesam. Ordem fechada, tudo que para antes do que aprova:
  *
- *  1. credencial do Mac      → para, em QUALQUER modo (ADR-055 §3: credencial nunca foi aprovação, é cerca)
- *  2. total                  → aprova
+ *  1. credencial do Mac      → para no automático; no total, só a chave do próprio nod para
+ *  2. total                  → aprova (até a credencial do Mac)
  *  3. arriscada              → para
  *  4. automático             → aprova
  *
@@ -99,16 +107,21 @@ export type DecisaoDoModo = DecisaoSemRevisor | { revisar: true; gatilho: Gatilh
  * automático e o total seguem sem pedir. A trava herdada vira, no manual, a marca de conteúdo de fora que passa
  * de quem pediu para quem recebe (pedir-a-bot.ts). A ordem é igual em toda origem de turno.
  *
- * Revisor LIGADO (definido em 2026-10-18, plano dos modos de aprovação, 3a; ADR-115): o total segue igual (a credencial
- * dele continua cartão até o PR 6); no automático, credencial é cartão sem revisor (decisão do Marlon), e o resto segue
- * `gatilhoDeRevisao` — arriscada ou envio para fora depois de conteúdo de fora → `revisar`; senão aprova, na versão 3.
+ * revisto em 2026-10-19 (plano dos modos de aprovação, PR 6; ADR-115, emenda da ADR-055 §3 e da ADR-059): o total
+ * aprova também a credencial do Mac — "Ignorar todas as aprovações" de verdade, decisão do Marlon de 18/10. A credencial
+ * deixa de ser cerca no total; o que ele roda vai para a Atividade (`acoes_pelo_modo`). A chave do próprio nod continua
+ * parando (não é credencial da pessoa: é a da máquina falando com o servidor). Reverter o PR 6 é voltar esta linha.
+ *
+ * Revisor LIGADO (definido em 2026-10-18, plano dos modos de aprovação, 3a; ADR-115): o total segue igual; no automático,
+ * credencial é cartão sem revisor (decisão do Marlon), e o resto segue `gatilhoDeRevisao` — arriscada ou envio para fora
+ * depois de conteúdo de fora → `revisar`; senão aprova, na versão 3.
  *
  * Quem chama só consulta o modo onde o manual pediria a pessoa: leitura, "o resto desta tarefa" e as regras da
  * ADR-042 continuam valendo antes, e o que o modo não muda (sem plano, origem sensível, concessão) vem antes dele.
  */
 export function decidirPeloModo(modo: ModoAprovacao | undefined, s: SituacaoDaAcao, revisor = false): DecisaoDoModo | null {
   if (!modo || modo === "manual") return null;
-  if (s.credencial) return { automatico: false, motivo: "toca_credencial" };
+  if (s.credencial && (modo !== "total" || s.chaveDoNod === true)) return { automatico: false, motivo: "toca_credencial" };
   if (modo === "total") return { automatico: true, regra: REGRA_MODO_TOTAL, versao: VERSAO_MODO_TOTAL };
   if (!revisor) {
     if (s.arriscada) return { automatico: false, motivo: "acao_arriscada" };

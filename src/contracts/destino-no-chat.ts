@@ -18,6 +18,8 @@ export const ASSUNTOS = [
   "acesso.pasta",
   "aprovacao.recibo",
   "aprovacao.automatica_falhou",
+  // O aviso do deploy do PR 6 dos modos de aprovação: o "Ignorar todas" passou a usar as credenciais (uma vez por bot).
+  "aprovacao.total_credenciais",
   "proposta.obsoleta",
   "proposta.resultado",
   "artefato",
@@ -93,8 +95,11 @@ export type Assunto = (typeof ASSUNTOS)[number];
  */
 export type Destino = "chat" | "anexo" | "atividade";
 
-/** O filtro da Atividade. Item sem categoria só aparece em "Tudo". */
-export type CategoriaDaAtividade = "frentes" | "bloqueios" | "maquina_ia";
+/**
+ * O filtro da Atividade. Item sem categoria só aparece em "Tudo". `sem_aprovacao` (PR 6 dos modos de aprovação): o que o
+ * modo rodou sem a pessoa — o terminal e os arquivos (`acoes_pelo_modo`) e os apps e acessos aprovados pelo modo.
+ */
+export type CategoriaDaAtividade = "sem_aprovacao" | "frentes" | "bloqueios" | "maquina_ia";
 
 export type RegraDeDestino = {
   destino: Destino;

@@ -1,3 +1,4 @@
+import type { AcaoDoModoNaFala } from "../contracts/acoes-do-modo.ts";
 import type { TipoAnexo } from "../contracts/anexo.ts";
 import type { ConversaDto } from "../contracts/api.ts";
 import { comFilaDosPedidos } from "./fila-do-pedido.ts";
@@ -6,6 +7,7 @@ import type { IdHarness } from "../contracts/harness.ts";
 import type { Inventario } from "../contracts/inventario.ts";
 import type { Mensagem } from "../contracts/mensagem.ts";
 import type { OrigemTurno, Turno } from "../contracts/turno.ts";
+import { entraNaFala, fraseNaFala } from "../domain/acoes-do-modo.ts";
 import { excedeQuantidade, motorLe, tipoDoAnexo } from "../domain/anexo.ts";
 import { comCitacao, confiancaDaCitacao, trechoDaCitacao } from "../domain/citacao.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
@@ -237,8 +239,23 @@ export const lerConversa: CasoDeUso<{ conversaId: string; limite?: number }, Con
   // Chat limpo (PR 3, plano decisão 18): quem pediu cada turno de delegação da janela (próprio ou raiz), numa consulta à
   // parte — a troca agrupada diz o nome mesmo com o `peer_pedido` fora da janela. Só na conversa própria.
   const pedidosDeColega = conversa.tipo === "propria" ? await deps.repos.mensagens.pedidosDeColega(turnosDeDelegacao(mensagens)) : undefined;
-  return { data: { conversa, mensagens, turnosPendentes, turnosEmCurso, turnosCancelados, propostas, fios, trabalhos, dono, reacoes, ...(pedidosDeColega ? { pedidosDeColega } : {}) } };
+  // PR 6 dos modos de aprovação (telas Y1 e Y2): o que o "Ignorar todas" rodou nos turnos da janela e entra na linha
+  // embaixo da fala (credencial e arriscado), numa consulta à parte. Só na conversa própria; nada vira mensagem.
+  const acoesDoModo = conversa.tipo === "propria" ? await acoesDoModoNaConversa(deps, mensagens) : undefined;
+  return { data: { conversa, mensagens, turnosPendentes, turnosEmCurso, turnosCancelados, propostas, fios, trabalhos, dono, reacoes, ...(pedidosDeColega ? { pedidosDeColega } : {}), ...(acoesDoModo ? { acoesDoModo } : {}) } };
 };
+
+/** As ações do total por turno da janela, com a frase pronta (`fraseNaFala`). */
+async function acoesDoModoNaConversa(deps: Deps, mensagens: readonly Mensagem[]): Promise<Record<string, AcaoDoModoNaFala[]>> {
+  const turnos = [...new Set(mensagens.map((m) => m.turnoId).filter((t): t is string => t !== null))];
+  const porTurno: Record<string, AcaoDoModoNaFala[]> = {};
+  for (const linha of await deps.repos.acoesPeloModo.naFalaDosTurnos(turnos)) {
+    const a = { ...linha, modo: "total" as const };
+    if (!entraNaFala(a)) continue;
+    (porTurno[a.turno_id] ??= []).push({ id: a.id, turnoId: a.turno_id, em: a.criado_em.getTime(), gatilho: a.gatilho, frase: fraseNaFala(a, a.linux) });
+  }
+  return porTurno;
+}
 
 /**
  * Os turnos de delegação da janela: o da própria mensagem ou a raiz da cadeia de retomadas dela (ADR-099, I7 revista), o do

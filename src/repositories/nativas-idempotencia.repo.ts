@@ -1,7 +1,8 @@
 import type { Conn, Escopo } from "../shared/types.ts";
 import { data, jsonb } from "./conversao.ts";
 
-export type RespostaNativaIdempotente = { ok: true } | { aguardar: string };
+/** `credencial: "permitida"` (PR 6 dos modos de aprovação): a credencial que o modo liberou; o hook só aceita assim. */
+export type RespostaNativaIdempotente = { ok: true; credencial?: "permitida" } | { aguardar: string };
 
 /** Resposta durável do POST de nativa; a trava serializa dois reenvios antes de existir uma linha. */
 export function nativasIdempotenciaRepo(conn: Conn, escopo: Escopo) {

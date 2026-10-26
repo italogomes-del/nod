@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ModoTurno } from "../../../src/contracts/plano-turno.ts";
 import { caminhosDoPatch, decidirNativa, motivoSemTerminal, NATIVA_MCP_DA_PESSOA, NATIVAS_DO_TERMINAL, NATIVAS_DO_TERMINAL_CODEX, NATIVAS_QUE_CONTAMINAM, nativasDoTurno } from "../../../src/domain/nativas.ts";
+import { tocaChaveDoNod } from "../../../src/domain/comando.ts";
 import { montarPromptSistema, terminalNoCodex } from "../../../src/domain/prompt-sistema.ts";
 
 const pasta = { cwd: "/Users/ana/nod/Dev", pastaDoBot: "/Users/ana/nod/Dev", home: "/Users/ana" };
@@ -31,19 +32,26 @@ describe("ADR-103: o kit do terminal no Codex", () => {
     expect(caminhosDoPatch("echo oi")).toEqual([]);
   });
 
-  it("apply_patch: dentro da pasta passa; fora vai ao servidor com o arquivo; credencial e patch sem arquivo são negados", () => {
+  it("apply_patch: dentro da pasta passa; fora vai ao servidor com o arquivo; credencial vai ao servidor (PR 6); patch sem arquivo é negado", () => {
     const patch = (caminho: string) => ({ command: `*** Begin Patch\n*** Add File: ${caminho}\n+oi\n*** End Patch` });
     expect(decidirNativa({ ferramenta: "apply_patch", entrada: patch("/Users/ana/nod/Dev/a.txt"), pasta })).toEqual({ permitir: true, motivo: "arquivos do Mac da pessoa", contamina: false });
     expect(decidirNativa({ ferramenta: "apply_patch", entrada: patch("/Users/ana/code/nod/x.ts"), pasta })).toMatchObject({ permitir: true, arquivo: "/Users/ana/code/nod/x.ts" });
     // Relativo ao cwd do turno: dentro da pasta do bot.
     expect(decidirNativa({ ferramenta: "apply_patch", entrada: patch("repo/a.ts"), pasta }).arquivo).toBeUndefined();
-    expect(decidirNativa({ ferramenta: "apply_patch", entrada: patch("/Users/ana/.ssh/config"), pasta }).permitir).toBe(false);
+    expect(decidirNativa({ ferramenta: "apply_patch", entrada: patch("/Users/ana/.ssh/config"), pasta })).toMatchObject({ permitir: true, credencial: "/Users/ana/.ssh/config" });
+    expect(decidirNativa({ ferramenta: "apply_patch", entrada: patch("/Users/ana/.ssh/config"), pasta }).arquivo).toBeUndefined();
     expect(decidirNativa({ ferramenta: "apply_patch", entrada: { command: "nada" }, pasta }).permitir).toBe(false);
+    // Revisão do PR 6: todos os caminhos de credencial vão ao servidor — a chave do nod no segundo arquivo não se esconde
+    // atrás da chave SSH do primeiro (o servidor só libera no total o que não é a chave do nod).
+    const dois = { command: "*** Begin Patch\n*** Update File: /Users/ana/.ssh/config\n@@\n-a\n+b\n*** Add File: /Users/ana/.config/nod-motor/conexao.json\n+{}\n*** Add File: /Users/ana/nod/Dev/a.txt\n+oi\n*** End Patch" };
+    const d = decidirNativa({ ferramenta: "apply_patch", entrada: dois, pasta });
+    expect(d).toMatchObject({ permitir: true, credencial: "/Users/ana/.ssh/config /Users/ana/.config/nod-motor/conexao.json" });
+    expect(tocaChaveDoNod(d.credencial ?? "")).toBe(true);
   });
 
-  it("view_image lê (credencial não); spawn_agent passa (cada ferramenta dele volta ao hook)", () => {
-    expect(decidirNativa({ ferramenta: "view_image", entrada: { path: "/tmp/print.png" } }).permitir).toBe(true);
-    expect(decidirNativa({ ferramenta: "view_image", entrada: { path: "/Users/ana/.aws/credentials" } }).permitir).toBe(false);
+  it("view_image lê (credencial vai ao servidor, PR 6); spawn_agent passa (cada ferramenta dele volta ao hook)", () => {
+    expect(decidirNativa({ ferramenta: "view_image", entrada: { path: "/tmp/print.png" } })).toEqual({ permitir: true, motivo: "arquivos do Mac da pessoa", contamina: false });
+    expect(decidirNativa({ ferramenta: "view_image", entrada: { path: "/Users/ana/.aws/credentials" } })).toMatchObject({ permitir: true, credencial: "/Users/ana/.aws/credentials" });
     expect(decidirNativa({ ferramenta: "spawn_agent", entrada: {} }).permitir).toBe(true);
   });
 
@@ -54,8 +62,11 @@ describe("ADR-103: o kit do terminal no Codex", () => {
     expect(linear).toMatchObject({ permitir: true, contamina: true, mcp: 'linear: create_issue {"title":"Bug"}' });
     // Sem a marca (Claude, ou modo que não é da dona) nada muda: o proxy decide.
     expect(decidirNativa({ ferramenta: "mcp__linear__create_issue", entrada: {} }).mcp).toBeUndefined();
-    // Argumento que toca credencial nunca sai.
-    expect(decidirNativa({ ferramenta: "mcp__fs__read", entrada: { path: "~/.ssh/id_ed25519" }, mcpDaPessoa: true }).permitir).toBe(false);
+    // PR 6: argumento que toca credencial vai ao servidor como `credencial` (além do pedido), que decide pelo modo.
+    const cred = decidirNativa({ ferramenta: "mcp__fs__read", entrada: { path: "~/.ssh/id_ed25519" }, mcpDaPessoa: true });
+    expect(cred).toMatchObject({ permitir: true, contamina: true });
+    expect(cred.credencial).toBe(cred.mcp);
+    expect(cred.mcp).toContain("~/.ssh/id_ed25519");
     // Argumentos grandes chegam ao card cortados.
     expect(decidirNativa({ ferramenta: "mcp__x__y", entrada: { t: "a".repeat(5_000) }, mcpDaPessoa: true }).mcp!.length).toBeLessThan(2_100);
   });

@@ -99,7 +99,7 @@ describeIntegracao("modo de aprovação do bot (ADR-059)", () => {
     });
   });
 
-  it("ADR-066: depois da web o automático segue (leitura e escrita pelo modo) e só para no arriscado e na credencial; o total segue; o manual pede até a leitura", async () => {
+  it("ADR-066: depois da web o automático segue (leitura e escrita pelo modo) e só para no arriscado e na credencial; o total segue, até na credencial (PR 6); o manual pede até a leitura", async () => {
     await withRollback(MARLON, async (trx) => {
       const auto = await cenario(trx, "automatico");
       await auto.repos.turnos.contaminar(auto.turno.id, Date.now());
@@ -112,7 +112,9 @@ describeIntegracao("modo de aprovação do bot (ADR-059)", () => {
       await total.repos.turnos.contaminar(total.turno.id, Date.now());
       expect((await total.autorizar("git push --force origin fix/x")).data).toEqual({ permitir: true, porque: "modo_total" });
       expect((await total.autorizar("git status")).data).toEqual({ permitir: true, porque: "modo_total" });
-      expect(await total.motivoDoCard("gh auth token")).toMatchObject({ motivoManual: "toca_credencial" });
+      // PR 6 dos modos de aprovação: no total a credencial do Mac roda (só a chave do nod ainda para).
+      expect((await total.autorizar("gh auth token")).data).toEqual({ permitir: true, porque: "modo_total" });
+      expect(await total.motivoDoCard("cat ~/.config/nod-motor/conexao.json")).toMatchObject({ motivoManual: "toca_credencial" });
       const manual = await cenario(trx, "manual");
       await manual.repos.turnos.contaminar(manual.turno.id, Date.now());
       expect(await manual.motivoDoCard("git status")).toMatchObject({ motivoManual: "destino_terminal" });

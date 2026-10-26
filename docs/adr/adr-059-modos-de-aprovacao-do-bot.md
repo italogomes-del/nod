@@ -268,3 +268,34 @@ apagar de rotina ou de colega (decisão 4 do Marlon, 18/10; o cenário A4 do pro
 a pessoa pediu ou pede o ok dela num cartão. Merge e aprovar PR continuam saindo sozinhos. Com a chave desligada, o item
 4 vale como estava. O gatilho de reversão da emenda de 30/09 ("uma exclusão que a dona diga não ter pedido") passa a valer
 para a exclusão liberada pelo revisor.
+
+## Emenda de 2026-10-19: "Ignorar todas as aprovações" de verdade (Fase 4, PR 6)
+
+**Contexto.** Plano dos modos de aprovação, Parte 6, e decisões do Marlon de 18/10 (2: os bots que já estão no total
+passam à regra nova; 5: credencial no Automático é sempre cartão; 7: subir arquivo de credencial a um app continua
+recusado). Protótipo aprovado: telas Y1, Y2 e Y3 e o menu ("Main"). A [ADR-115](adr-115-automatico-com-revisor-na-ia-da-pessoa.md)
+traz a decisão inteira; aqui, o que muda nesta ADR.
+
+**Decisão.** Revê o item 2 (a tabela), o item 4 (registro) e o item 6 (texto do menu).
+1. **A alternativa descartada "Total sem a cerca da credencial" vira a decisão.** No total, o comando que toca credencial
+   do Mac e a leitura e a gravação de arquivo de credencial rodam sem cartão. Na tabela do item 2: "Comando que toca
+   credencial" fica card · card · **roda**; "Arquivo de credencial pelas ferramentas de arquivo" fica negado · **card** ·
+   **roda**. A chave do próprio nod continua pedindo a pessoa até no total.
+2. **Registro.** `regra:modo_total` sobe para a **versão 2**. Toda ação que o total roda e que o manual pediria fica em
+   `acoes_pelo_modo` (veredito nulo, sem decisão), com o gatilho (`credencial`, `arriscado`, `fora_da_pasta`, `comum`):
+   é a fonte da Atividade do bot no filtro novo "Sem aprovação" (que também lista os apps e acessos aprovados pelo modo)
+   e da linha discreta embaixo da fala, só para a credencial e o arriscado ("Usou o token do GitHub do seu Mac · ver na
+   Atividade"; `qualCredencial` dá o nome).
+3. **Texto.** O total no menu: "Faz tudo sem perguntar, até comandos com as credenciais do seu Mac. O que ele fez fica
+   na Atividade." O aviso da confirmação: "Um texto de fora, como um e-mail ou um PR, pode levar {nome} a usar suas
+   credenciais. Use em bots que trabalham só com o que é seu." A linha gravada na troca acompanha.
+4. **Os bots que já estão no total** ganham a regra nova no deploy e uma linha na conversa de cada um ("Ignorar todas as
+   aprovações agora também usa as credenciais do seu Mac sem pedir. O que ele fizer fica na Atividade."), escrita uma
+   vez por `scripts/aviso-total-credenciais.ts` (no `deploy.sh`).
+
+**Reverte** o gatilho de reversão "Credencial lida por bot no total sem card": é o comportamento pedido agora. No lugar
+dele, o da ADR-115: uma credencial lida no total e mandada para fora sem a pessoa ter pedido.
+
+**Riscos aceitos.** Um texto de fora pode levar o bot no total a usar uma credencial — o pedido do Marlon, com a
+confirmação no menu, a pílula âmbar, a linha na fala e a Atividade. Até o app do Mac atualizar, o hook antigo ainda nega
+o arquivo de credencial (o comando já roda, porque quem decide o comando é o servidor).

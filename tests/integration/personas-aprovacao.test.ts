@@ -208,6 +208,7 @@ async function terminal(m: Mundo, p: PlanoTurno, comando: string): Promise<{ r: 
     const [item] = await m.repos.itensAprovacao.listar(a.data.aguardar);
     return { r: card(item?.motivoManual ?? null), decisaoId: a.data.aguardar };
   }
+  if ("negar" in a.data) throw new Error(`comando não nega pelo servidor: ${a.data.negar}`);
   return { r: roda(a.data.porque), decisaoId: null };
 }
 
@@ -750,7 +751,7 @@ describeIntegracao("personas × aprovações (Rita manual · Marlon automático 
       });
     });
 
-    it("Bruno (total): tudo roda, até depois da web; só a credencial para", async () => {
+    it("Bruno (total): tudo roda, até depois da web e até a credencial (PR 6); só a chave do nod para", async () => {
       await withRollback(ESCOPO, async (trx) => {
         const m = await montar(trx, BRUNO);
         const t = await turnoConversa(m);
@@ -760,7 +761,8 @@ describeIntegracao("personas × aprovações (Rita manual · Marlon automático 
         await m.repos.turnos.contaminar(t.id, Date.now());
         expect((await terminal(m, p, "git push --force origin fix/x")).r).toEqual(roda("modo_total"));
         expect((await terminal(m, p, "git status")).r).toEqual(roda("modo_total"));
-        expect((await terminal(m, p, "gh auth token")).r).toEqual(card("toca_credencial"));
+        expect((await terminal(m, p, "gh auth token")).r).toEqual(roda("modo_total"));
+        expect((await terminal(m, p, "cat ~/.config/nod-motor/conexao.json")).r).toEqual(card("toca_credencial"));
       });
     });
   });

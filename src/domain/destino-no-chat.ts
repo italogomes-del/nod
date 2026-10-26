@@ -22,6 +22,8 @@ export const DESTINO: Readonly<Record<Assunto, RegraDeDestino>> = {
   "acesso.pasta": { destino: "chat", categoria: null },
   "aprovacao.recibo": { destino: "chat", categoria: null },
   "aprovacao.automatica_falhou": { destino: "chat", categoria: null },
+  // PR 6 dos modos de aprovação: a mudança de regra que a pessoa precisa ver no chat, uma vez, nos bots já no total.
+  "aprovacao.total_credenciais": { destino: "chat", categoria: null },
   // "Esta mudança não foi aplicada… Peça de novo ao bot": pede ação.
   "proposta.obsoleta": { destino: "chat", categoria: null },
   // A proposta confirmada ou recusada com payload (`proposta_decidida`, chat limpo PR 4): é o cartão encolhido no lugar
@@ -91,8 +93,9 @@ export const DESTINO: Readonly<Record<Assunto, RegraDeDestino>> = {
   "proposta.decidida": { destino: "atividade", categoria: null },
   inteligencia: { destino: "atividade", categoria: null },
   "aprovacao.modo": { destino: "atividade", categoria: null },
-  "aprovacao.automatica": { destino: "atividade", categoria: null },
-  "acesso.automatico": { destino: "atividade", categoria: null },
+  // PR 6 dos modos de aprovação: o que o modo aprovou num app ou num acesso também é "Sem aprovação" na Atividade.
+  "aprovacao.automatica": { destino: "atividade", categoria: "sem_aprovacao" },
+  "acesso.automatico": { destino: "atividade", categoria: "sem_aprovacao" },
   // "Você pode reabrir": a pergunta vencida ainda pede ação da pessoa (decidido pelo orquestrador em 18/10, no lugar do
   // Marlon, na QA do PR 1; o plano mandava para a Atividade porque o cartão já diz "Sem resposta").
   "decisao.vencida": { destino: "chat", categoria: null },

@@ -2,8 +2,8 @@
 
 Status: proposto; parte do servidor no PR 3a do [plano dos modos de aprovação](../plano-modos-de-aprovacao.md), com a
 chave `NOD_REVISOR` **desligada**. O laço (PR 3b) roda o revisor na máquina; o PR 4 liga a chave e passa esta ADR a
-"aceita"; o PR 5 leva o revisor aos apps (seção abaixo); o PR 6 completa com a parte do "Ignorar todas as aprovações".
-· Data: 2026-10-18 · Migrações 0093 e 0094 (PR 5).
+"aceita"; o PR 5 leva o revisor aos apps (seção abaixo); o PR 6 completa com a parte do "Ignorar todas as aprovações"
+(seção "O Ignorar todas de verdade", 2026-10-19, sem migração). · Data: 2026-10-18 · Migrações 0093 e 0094 (PR 5).
 
 ## Contexto
 
@@ -66,9 +66,9 @@ síncrona. O Marlon decidiu em 18/10 reverter essa recusa, com o revisor rodando
 
 Reverte de forma explícita: a recusa do revisor-modelo na ADR-042 (`adr-042:80-88`), na ADR-059 (`adr-059:99-102`) e em
 `docs/grokbot-comparison.md:104-108`; o gatilho de reversão da ADR-059 "qualquer comando da lista de arriscados rodando no
-automático" (`adr-059:128-130`), que deixa de ser defeito quando o revisor libera. A parte do "Ignorar todas" (a
-alternativa descartada "Total sem a cerca da credencial", `adr-059:111-113`, e o gatilho "Credencial lida por bot no
-total sem card", `adr-059:131`) entra no PR 6.
+automático" (`adr-059:128-130`), que deixa de ser defeito quando o revisor libera. Pela parte do "Ignorar todas"
+(PR 6, abaixo): a alternativa descartada "Total sem a cerca da credencial" (`adr-059:111-113`) vira a decisão, e o
+gatilho "Credencial lida por bot no total sem card" (`adr-059:131`) vira o comportamento pedido.
 
 ## PR 5 (2026-10-19): o revisor nos apps
 
@@ -138,3 +138,52 @@ app volta a ser cartão direto no Automático (sem revisor), como o primeiro gat
   causa dele → rever o modelo, o que vai ao revisor e o teto do dia.
 - Um veredito recusado por prova ou segredo inválido (logs `revisao_prova_invalida`, `revisao_segredo_recusado`) →
   alarme e investigação: alguém além do laço falou pela chave da máquina.
+- (PR 6) Uma credencial lida no total e mandada para fora sem a pessoa ter pedido, vista na Atividade → a credencial
+  volta a ser cerca no total.
+
+## O Ignorar todas de verdade (PR 6, 2026-10-19)
+
+**Contexto.** Decisões do Marlon de 18/10: no "Ignorar todas as aprovações" nada pede aprovação, nem a credencial do Mac
+(e os 28 bots que já estão no total passam à regra nova no deploy, com uma linha na conversa de cada um); no Automático a
+credencial é sempre cartão; subir um arquivo de credencial a um app continua recusado. Até aqui o comando que toca
+credencial virava cartão em todo modo, e o arquivo de credencial era negado no próprio hook, que não sabe o modo
+(`nativas.ts`). Produção, 30 dias até 17/10: 44 paradas por credencial.
+
+**Decisão.**
+1. **`decidirPeloModo`: o total aprova também a credencial**, com ou sem a chave do revisor; `regra:modo_total` na
+   versão 2. Só a chave do próprio nod (`tocaChaveDoNod`) continua cartão no total.
+2. **O hook manda a credencial ao servidor.** `decidirNativa` deixa de negar a leitura e a gravação de arquivo de
+   credencial e o MCP da pessoa que cita uma: devolve `permitir` com `credencial`, e o hook confirma no servidor.
+   `autorizarComando`: manual nega com a frase de sempre (o manual não muda); automático vira cartão, sem revisor (a
+   leitura espera como a gravação já esperava); total roda e registra.
+3. **Confirmação explícita** (revisão de engenharia do plano, item 12). O hook novo só deixa a credencial passar com
+   `{ ok: true, credencial: "permitida" }`, na primeira consulta ou na segunda, depois do cartão aprovado. Servidor
+   antigo (revertido) responde `{ ok: true }` cru ao Read: o hook nega com a frase de sempre. Hook antigo (app ou motor
+   ainda não atualizados, ADR-100) continua negando sozinho: o lado seguro. A rota só aceita o campo nas nativas em que
+   o hook o manda.
+4. **Registro.** Toda ação que o total roda e que o manual pediria vai para `acoes_pelo_modo` (`modo = 'total'`,
+   veredito nulo, sem decisão), com o gatilho: `credencial`, `arriscado` (com a frase de `comandoArriscado`),
+   `fora_da_pasta`, `comum`. Texto redigido (`resumoDeTexto`), nunca na trilha.
+5. **Onde a pessoa vê.** A Atividade do bot ganha a quarta fonte e o filtro "Sem aprovação" (o que o total rodou, o que
+   o revisor liberou, e os apps e acessos aprovados pelo modo). A fala do turno ganha a linha discreta do protótipo (Y1,
+   Y2), só para a credencial e o arriscado: "Usou o token do GitHub do seu Mac · ver na Atividade" (`qualCredencial`;
+   "desta máquina" na VM). "ver na Atividade" abre o dia da ação no filtro novo. O menu e a confirmação falam das
+   credenciais.
+6. **Cercas fixas que continuam no total**: git fora da pasta do bot (hook), o laço com `sleep` (rota, antes do modo),
+   os três passes, login/2FA/CAPTCHA/senha no computador do bot, fora do catálogo e sem plano, mudar o modo só pela dona
+   (e `gerir_bots` → total é cartão), mandar arquivo de credencial a um app (`arquivo-do-mac.ts`), a chave do próprio
+   nod, e o `esperar_comando` com credencial (roda fora do CLI e não passa pelo hook).
+7. **Os bots que já estão no total** ganham uma linha na conversa (`aprovacao.total_credenciais`, no chat), uma vez, por
+   `scripts/aviso-total-credenciais.ts`, que roda no `deploy.sh` depois de o servidor novo ficar saudável. O bot posto no
+   total depois do deploy não a ganha: a troca de modo já disse a regra nova.
+
+**Consequências.** O app do Mac precisa de release para ler e gravar arquivo de credencial no total (o hook roda no app);
+o motor da VM se atualiza com o deploy. Até lá, no Mac, o comando com credencial já roda no total (quem decide o comando
+é o servidor) e o arquivo de credencial segue negado. Reverter o PR 6 é voltar a linha da credencial no total em
+`decidirPeloModo`: com o servidor revertido, o hook novo nega (item 3).
+
+**Riscos aceitos.** Um texto de fora pode levar o bot no total a usar uma credencial — é o pedido, com a confirmação no
+menu, a pílula âmbar, a linha na fala, a Atividade e a instrução no prompt de nunca mandar uma credencial para fora.
+
+**Gatilho de reversão** (o último da lista "Gatilho de reversão"): uma credencial lida no total e mandada para fora sem a pessoa ter
+pedido, vista na Atividade → a credencial volta a ser cerca no total.

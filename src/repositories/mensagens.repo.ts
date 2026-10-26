@@ -422,6 +422,14 @@ export function mensagensRepo(conn: Conn, escopo: Escopo) {
       return Object.fromEntries(linhas.map((l) => [l.turno_id, { agenteId: l.autor_id, nome: l.nome }]));
     },
 
+    /** A última mensagem da conversa com este assunto (0091), ou null. O aviso do PR 6 dos modos de aprovação a usa. */
+    async ultimaComAssunto(conversaId: string, assunto: Assunto): Promise<Mensagem | null> {
+      const [l] = await conn<LinhaMensagem[]>`
+        select ${conn.unsafe(COLUNAS_MENSAGEM)} from mensagens where tenant_id = ${escopo.tenantId} and conversa_id = ${conversaId} and assunto = ${assunto}
+        order by criado_em desc, id desc limit 1`;
+      return l ? paraMensagem(l) : null;
+    },
+
     async ultimaDaConversa(conversaId: string): Promise<Mensagem | null> {
       const [l] = await conn<LinhaMensagem[]>`
         select ${conn.unsafe(COLUNAS_MENSAGEM)} from mensagens where tenant_id = ${escopo.tenantId} and conversa_id = ${conversaId} order by criado_em desc, id desc limit 1`;

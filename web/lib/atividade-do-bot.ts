@@ -8,11 +8,16 @@ import type { EventoLinha } from "../../src/contracts/trabalho.ts";
  * na redação de hoje.
  */
 
-/** Os filtros da tela "Atividade aberta no drawer": item sem categoria só aparece em "Tudo". */
-export type FiltroAtividade = "tudo" | "frentes" | "bloqueios" | "maquina_ia";
+/**
+ * Os filtros da tela "Atividade aberta no drawer": item sem categoria só aparece em "Tudo". "Sem aprovação" (PR 6 dos
+ * modos de aprovação, tela Y3) logo depois de "Tudo": o que o modo rodou sem a pessoa — é para onde "ver na Atividade"
+ * da linha embaixo da fala leva.
+ */
+export type FiltroAtividade = "tudo" | "sem_aprovacao" | "frentes" | "bloqueios" | "maquina_ia";
 
 export const FILTROS_DA_ATIVIDADE: readonly { filtro: FiltroAtividade; rotulo: string }[] = [
   { filtro: "tudo", rotulo: "Tudo" },
+  { filtro: "sem_aprovacao", rotulo: "Sem aprovação" },
   { filtro: "frentes", rotulo: "Frentes" },
   { filtro: "bloqueios", rotulo: "Bloqueios" },
   { filtro: "maquina_ia", rotulo: "Máquina e IA" },
@@ -49,6 +54,11 @@ export function fusoLocal(intl: () => string = () => Intl.DateTimeFormat().resol
 }
 
 export const chaveDaAtividade = (agenteId: string, dia: string): string => `${agenteId}:${dia}`;
+
+/** O filtro que a tela conhece (o `data-filtro` do botão); outro valor não muda nada. */
+export function ehFiltroAtividade(x: string | undefined): x is FiltroAtividade {
+  return FILTROS_DA_ATIVIDADE.some((f) => f.filtro === x);
+}
 
 /** Os itens que o filtro mostra; "Tudo" mostra todos, inclusive os sem categoria. */
 export function itensDoFiltro(itens: readonly ItemDeAtividade[], filtro: FiltroAtividade): ItemDeAtividade[] {

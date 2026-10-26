@@ -149,6 +149,16 @@ describeIntegracao("esperar_comando (ADR-099, parte 2)", () => {
     });
   });
 
+  it("revisão do PR 6: no total, a espera vai para a Atividade só quando é criada — a segunda do turno (ja_esperando) não deixa linha", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      await mudarModoAprovacao(m.deps, { agenteId: m.agenteId, modo: "total", confirmado: true });
+      expect((await esperarComando(m.deps, { ...m.ctx, comando: "kubectl rollout status deploy/app", motivo: "o rollout" })).data).toMatchObject({ ok: true });
+      expect((await esperarComando(m.deps, { ...m.ctx, comando: "kubectl rollout status deploy/api", motivo: "o outro" })).data).toMatchObject({ ok: false, erro: "ja_esperando" });
+      expect((await m.repos.acoesPeloModo.doTurno(m.turno.id)).map((a) => a.resumo)).toEqual(["kubectl rollout status deploy/app"]);
+    });
+  });
+
   it("Parar a task cancela a espera: a máquina não a recebe mais, e o fim tardio não acorda", async () => {
     await withRollback(MARLON, async (trx) => {
       const m = await montar(trx);

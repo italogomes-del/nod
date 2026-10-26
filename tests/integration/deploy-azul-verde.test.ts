@@ -41,6 +41,8 @@ if [ "$1" = compose ]; then
       case "$*" in *migrate.ts*) [ -n "\${FALHA_MIGRA:-}" ] && { echo "migração falhou" >&2; exit 1; } ;; esac
       # NOD-331: o banco fora na hora de fechar as órfãs.
       case "$*" in *"ligacoes-orfas.ts --instancia"*) [ -n "\${FALHA_ORFAS:-}" ] && { echo "órfãs: banco fora" >&2; exit 1; } ;; esac
+      # PR 6 dos modos de aprovação: o aviso do total que falha não derruba o deploy.
+      case "$*" in *aviso-total-credenciais.ts*) [ -n "\${FALHA_AVISO:-}" ] && { echo "aviso: banco fora" >&2; exit 1; } ;; esac
       exit 0 ;;
     up)
       if [ "$servico" = caddy ]; then
@@ -163,6 +165,10 @@ describe("deploy.sh azul/verde (NOD-218)", () => {
     expect(migra).toBeLessThan(up);
     expect(up).toBeLessThan(stop);
     expect(stop).toBeLessThan(orfas);
+    // PR 6 dos modos de aprovação: a linha do total sai pela cor nova, depois da confirmação e antes de a velha drenar.
+    const aviso = indice(log, `run --rm --no-deps -T nod-${nova} node scripts/aviso-total-credenciais.ts`);
+    expect(aviso).toBeGreaterThan(up);
+    expect(aviso).toBeLessThan(stop);
     expect(log.every((l) => !l.startsWith("docker compose") || l.startsWith("docker compose --env-file imagens.env"))).toBe(true);
     // Nunca --remove-orphans (derrubaria o legado na transição) nem um `up` sem nomear o serviço.
     expect(log.some((l) => l.includes("--remove-orphans"))).toBe(false);
@@ -170,6 +176,15 @@ describe("deploy.sh azul/verde (NOD-218)", () => {
     const curl = (await ler("curl.log")).split("\n").filter((l) => l.includes("/api/saude/lb"));
     expect(curl).toHaveLength(3);
     expect(curl[0]).toContain("--resolve teste.local:443:127.0.0.1 https://teste.local/api/saude/lb");
+  });
+
+  it("o aviso do total falha (PR 6): o deploy segue, diz no log e a velha drena", async () => {
+    await noAr("azul");
+    const r = deploy({ FALHA_AVISO: "1" });
+    expect(r.status).toBe(0);
+    expect(r.stderr).toContain("aviso do total falhou ou passou de 5 min");
+    expect(await marcador()).toBe("verde");
+    expect(roda("nod-azul")).toBe(false);
   });
 
   it("a nova não fica saudável: logs, stop da nova, marcador intocado e a velha segue", async () => {

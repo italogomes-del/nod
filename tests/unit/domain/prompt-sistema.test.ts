@@ -32,7 +32,9 @@ describe("montarPromptSistema: o modo de aprovação (ADR-059)", () => {
       expect(comTerminal(modo)).toContain("worktree add ~/nod/Vera/<repo>-<task> -b <branch> origin/main");
       expect(comTerminal(modo)).toContain("Gravar arquivo fora da sua pasta segue a mesma regra do comando que muda algo.");
     }
-    expect(comTerminal("total")).toContain("só o que toca uma credencial do Mac vira um pedido de aprovação");
+    // PR 6 dos modos de aprovação: no total, nem a credencial pede mais; fica registrado na Atividade.
+    expect(comTerminal("total")).toContain("até o que toca uma credencial do Mac; fica registrado na Atividade da pessoa.");
+    expect(comTerminal("total")).not.toContain("vira um pedido de aprovação");
   });
 
   it("ADR-088: na task, a worktree nasce dentro da pasta dela e o nod a apaga quando a task acaba", () => {
@@ -325,12 +327,14 @@ describe("NOD-155: o prompt em parte estável e parte volátil (cache por prefix
     // É um retrato fixo: quem mudar de propósito o TEXTO de uma linha do prompt regenera estes hashes com o mesmo
     // `digital`; uma falha aqui sem mudança de texto quer dizer que uma linha sumiu ou duplicou. Regenerado em 2026-10-06:
     // linha nova do "já liberei" (pedir_acesso na hora) em conversa e delegação. Regenerado em 2026-10-20 (NOD-317): saiu a
-    // menção a anotar_pendencia na linha do terminal (a entrada não tem mais pendências nem a ferramenta).
+    // menção a anotar_pendencia na linha do terminal (a entrada não tem mais pendências nem a ferramenta). Regenerado em
+    // 2026-10-19 (PR 6 dos modos de aprovação): as linhas "Aprovações:" e "Terminal:" do total não dizem mais que a
+    // credencial para.
     const digital = (s: string) => createHash("sha256").update([...s.split("\n")].sort().join("\n")).digest("hex");
     const esperado = {
-      conversa: "0e0e252b5eb153ef1792b706dc190782babd2e6babeb719451745e6331f453bb",
-      rotina: "05614ad1a349add1ff9f0abc624a732f01f18a8d9369bc820efb71aa54c6f07f",
-      delegacao: "a5a59c89e0dd5b66610d01c29d01012c01b8324b269a2fbdd923746177e9751c",
+      conversa: "a0c22940971edd931e2decbcc49476174c0a89e022dc3e74a098c9dd595e8dc6",
+      rotina: "8bf80039d21e1818db0f51276851dbc4086d24fcf50455f39b4ef70fa44509c3",
+      delegacao: "e72dc08f94bde1c4694c3445b27f28f2b55f4b9c523c14878da958dbaf54b092",
     };
     const obtido = { conversa: "", rotina: "", delegacao: "" };
     for (const modo of ["conversa", "rotina", "delegacao"] as const) obtido[modo] = digital(montarPromptSistema({ ...base, ...turnoA, profundidade: 1, modo }));

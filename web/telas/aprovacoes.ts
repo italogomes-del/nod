@@ -16,7 +16,7 @@ type Rotulos = { curto: string; titulo: string; descricao: string };
 export const MODOS: Readonly<Record<ModoAprovacao, Rotulos>> = {
   manual: { curto: "Manual", titulo: "Aprovar manualmente", descricao: "Pede você antes de tudo que muda algo: commit, push, mensagem, arquivo fora da pasta." },
   automatico: { curto: "Auto", titulo: "Aprovar automaticamente", descricao: "Roda sem perguntar o que não for arriscado. Para no arriscado e no que tocar uma credencial do Mac." },
-  total: { curto: "Sem aprovações", titulo: "Ignorar todas as aprovações", descricao: "Faz tudo sem perguntar. Não abre arquivos de credencial do Mac, e comandos com elas pedem você." },
+  total: { curto: "Sem aprovações", titulo: "Ignorar todas as aprovações", descricao: "Faz tudo sem perguntar, até comandos com as credenciais do seu Mac. O que ele fez fica na Atividade." },
 };
 
 const ORDEM: readonly ModoAprovacao[] = ["manual", "automatico", "total"];
@@ -53,11 +53,11 @@ export function renderMenuModo(nome: string, atual: ModoAprovacao): string {
 
 /**
  * O aviso que o terceiro item abre dentro do próprio menu, logo abaixo dele (definido em 2026-10-18, tela "o menu com
- * os três modos"). Neste PR ele não fala em credencial: no total ela ainda para (as frases com credencial entram
- * quando o total deixar de parar nela, Parte 6 do plano). Sem artigo antes do nome: o bot pode ser "a Clarice".
+ * os três modos"). revisto em 2026-10-19 (Parte 6 do plano, PR 6): o total deixou de parar na credencial, e o aviso diz
+ * isso, como no protótipo. Sem artigo antes do nome: o bot pode ser "a Clarice".
  */
 export function renderConfirmaTotal(nome: string): string {
-  return `<div class="modo-confirma" role="group" aria-labelledby="modo-confirma-txt"><p class="modo-confirma-txt" id="modo-confirma-txt">Um texto de fora, como um e-mail ou um PR, pode levar ${esc(nome)} a agir por conta própria. Use em bots que trabalham só com o que é seu.</p><div class="modo-confirma-acoes"><button type="button" role="menuitem" class="modo-confirma-sim" data-confirma="sim">Ignorar aprovações em ${esc(nome)}</button><button type="button" role="menuitem" class="modo-confirma-nao" data-confirma="nao">Agora não</button></div></div>`;
+  return `<div class="modo-confirma" role="group" aria-labelledby="modo-confirma-txt"><p class="modo-confirma-txt" id="modo-confirma-txt">Um texto de fora, como um e-mail ou um PR, pode levar ${esc(nome)} a usar suas credenciais. Use em bots que trabalham só com o que é seu.</p><div class="modo-confirma-acoes"><button type="button" role="menuitem" class="modo-confirma-sim" data-confirma="sim">Ignorar aprovações em ${esc(nome)}</button><button type="button" role="menuitem" class="modo-confirma-nao" data-confirma="nao">Agora não</button></div></div>`;
 }
 
 /**

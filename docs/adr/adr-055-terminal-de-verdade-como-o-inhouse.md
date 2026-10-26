@@ -116,3 +116,26 @@ Medido no CLI 2.1.284, lendo só o `init` (sem chamar o modelo):
 O item 8 ("Codex continua sem nativas") e a linha "Codex continua só com o proxy" foram revistos pela
 [ADR-103](adr-103-o-codex-com-o-terminal-pelo-hook-do-nod.md): o Codex tem o terminal sem sandbox, com o mesmo hook
 do nod decidindo cada comando.
+
+## Emenda de 2026-10-19: a credencial deixa de ser cerca no "Ignorar todas" (modos de aprovação, PR 6)
+
+Revê o item 3 ("Credenciais ficam de fora") pela [ADR-115](adr-115-automatico-com-revisor-na-ia-da-pessoa.md), por
+decisão do Marlon de 18/10. Produção, 30 dias até 17/10: 44 comandos pararam por credencial, inclusive em bots no
+"Ignorar todas as aprovações", e 28 de 43 bots estão nesse modo.
+
+- **O hook não nega mais sozinho.** A leitura e a gravação de arquivo de credencial pelas ferramentas de arquivo (Read,
+  Glob, Grep, Write, Edit, NotebookEdit; no Codex, `apply_patch` e `view_image`) e o MCP da pessoa que cita uma vão ao
+  servidor com o campo `credencial` (`decidirNativa`). O servidor decide pelo modo atual: **manual** nega com a frase de
+  sempre; **automático** vira cartão (sem revisor); **total** roda e registra em `acoes_pelo_modo`.
+- **Só com a confirmação explícita.** O hook só libera com `{ ok: true, credencial: "permitida" }`. Um servidor antigo
+  (revertido) ignora o campo e responde `{ ok: true }` ao Read; sem a exigência, a credencial seria lida até no manual.
+- **Hook antigo continua negando** (app do Mac ou motor ainda não atualizados): o lado seguro.
+- **O que fica cerca em todo modo:** a chave do próprio nod (`~/.config/nod-motor/conexao.json`, `conexao.json`;
+  `tocaChaveDoNod`) — não é credencial da pessoa, é a máquina falando com o servidor; mandar um arquivo de credencial a
+  um app (`arquivo-do-mac.ts`, `caminhoRecusado`); e a espera (`esperar_comando`), que roda fora do CLI e não roda
+  comando com credencial.
+- `tocaCredencial` continua decidindo o que é credencial e que nunca é "leitura" livre.
+
+**Gatilho de reversão** (o do item "uma credencial lida por um bot sem pedido da pessoa" passa a valer só fora do total):
+uma credencial lida no total e mandada para fora sem a pessoa ter pedido, vista na Atividade → a credencial volta a ser
+cerca no total (é voltar a linha da credencial em `decidirPeloModo`).
