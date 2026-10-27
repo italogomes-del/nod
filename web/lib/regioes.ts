@@ -66,6 +66,9 @@ export function regiaoPorBlocos(id: string, blocos: readonly Bloco[]): void {
   const raiz = document.getElementById(id);
   if (!raiz) return;
   const focado = document.activeElement instanceof HTMLElement && raiz.contains(document.activeElement) ? document.activeElement : null;
+  // O disclosure do <summary> focado é lido ANTES do morph (revisão do PR do pensamento no chat, 27/10): `trocarConteudo`
+  // tira o summary antigo do <details> que fica (`data-no-lugar`), e depois o `closest` dele não acha mais o pai.
+  const disclosureFocado = focado?.tagName === "SUMMARY" ? focado.closest<HTMLElement>("details[data-disclosure]")?.dataset.disclosure : undefined;
   const porChave = new Map((blocosAplicados.get(id) ?? []).filter((b) => b.el.parentNode === raiz).map((b) => [b.chave, b]));
   const vistos = new Set<string>();
   const novos: BlocoNaTela[] = blocos.map((b) => {
@@ -102,8 +105,7 @@ export function regiaoPorBlocos(id: string, blocos: readonly Bloco[]): void {
     const nome = focado instanceof HTMLInputElement || focado instanceof HTMLTextAreaElement ? focado.name : "";
     const campo = nome ? [...raiz.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("input[name], textarea[name]")].find((c) => c.name === nome) : undefined;
     if (campo) { campo.focus({ preventScroll: true }); return; }
-    const disclosure = focado.tagName === "SUMMARY" ? focado.closest<HTMLElement>("details[data-disclosure]")?.dataset.disclosure : undefined;
-    alvoDoFoco<HTMLElement>(disclosure ? { disclosure } : focado.dataset, raiz, document)?.focus({ preventScroll: true });
+    alvoDoFoco<HTMLElement>(disclosureFocado ? { disclosure: disclosureFocado } : focado.dataset, raiz, document)?.focus({ preventScroll: true });
   }
 }
 

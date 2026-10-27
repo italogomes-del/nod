@@ -46,8 +46,9 @@ describe("vigia do turno na tela (NOD-73)", () => {
     expect(html).toContain('class="bt aviso" data-act="parar-conversa"');
     expect(html).not.toContain("perigo");
     expect(html.match(/class="vigia-ic"/g)).toHaveLength(1);
-    // NOD-348: a linha viva para de brilhar no silêncio; o vigia fica à vista, fora do "ver etapas".
-    expect(html).toMatch(/class="fala-viva-linha (autor|rodape) parado"/);
+    // NOD-348 / Parte 2: o pensamento diz o silêncio no cabeçalho (fase "silencio", sem brilho); o vigia fica à vista, depois dele.
+    expect(html).toContain('data-fase="silencio"');
+    expect(html).toContain('<span class="fala-viva-estado">Sem novidade há 12 min</span>');
     expect(html.indexOf("</details>")).toBeLessThan(html.indexOf('class="atividade-vigia"'));
     expect(renderCabecalhoConversa(e, "a")).toContain("sem novidade há 12 min");
     // O relógio da tela anda sem frame novo.

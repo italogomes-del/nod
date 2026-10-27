@@ -223,7 +223,8 @@ export type ApiDeEnvio = {
   postarNaSala(salaId: string, texto: string): Promise<unknown>;
 };
 
-export type ResultadoEnvio = { enviado: "resposta" | "mensagem" };
+/** `ids` (Parte 1 do plano "o pensamento no chat"): os ids da mensagem e do turno que o POST devolve (`RespostaMutacao`). */
+export type ResultadoEnvio = { enviado: "resposta" | "mensagem"; ids?: Record<string, string> };
 
 /**
  * Envio do campo. Em modo resposta o texto vai por POST decisoes/:id/responder — a rota que já existe,
@@ -243,12 +244,19 @@ export async function enviarPeloComposer(
     return { enviado: "resposta" };
   }
   const respondeA = destino.tipo === "mensagem" ? destino.respondeA : undefined;
-  if (alvo.salaId) await api.postarNaSala(alvo.salaId, texto);
+  if (alvo.salaId) { await api.postarNaSala(alvo.salaId, texto); return { enviado: "mensagem" }; }
   // NOD-156: a chave só vale para a mensagem comum; resposta e sala têm rotas próprias.
-  else if (respondeA) await api.enviar(alvo.conversaId, texto, anexos, idEnvio, respondeA);
-  else if (idEnvio) await api.enviar(alvo.conversaId, texto, anexos, idEnvio);
-  else await api.enviar(alvo.conversaId, texto, anexos);
-  return { enviado: "mensagem" };
+  const r = respondeA ? await api.enviar(alvo.conversaId, texto, anexos, idEnvio, respondeA) : idEnvio ? await api.enviar(alvo.conversaId, texto, anexos, idEnvio) : await api.enviar(alvo.conversaId, texto, anexos);
+  const ids = idsDaResposta(r);
+  return ids ? { enviado: "mensagem", ids } : { enviado: "mensagem" };
+}
+
+/** Os ids do `RespostaMutacao` (só strings), ou null quando a resposta não é a esperada (servidor de antes). */
+export function idsDaResposta(r: unknown): Record<string, string> | null {
+  const ids = r && typeof r === "object" && "ids" in r ? (r as { ids?: unknown }).ids : null;
+  if (!ids || typeof ids !== "object") return null;
+  const so = Object.fromEntries(Object.entries(ids as Record<string, unknown>).filter((e): e is [string, string] => typeof e[1] === "string"));
+  return Object.keys(so).length ? so : null;
 }
 
 /** definido em 2026-09-24: o começo da pergunta numa linha curta (o resumo do fio resolvido). */

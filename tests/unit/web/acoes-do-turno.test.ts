@@ -4,7 +4,7 @@ import type { FrameSse, TipoFrame } from "../../../src/contracts/frame.ts";
 import { acoesDoTurno } from "../../../src/domain/acoes-do-turno.ts";
 import { rotuloFerramenta } from "../../../src/domain/rotulo-ferramenta.ts";
 import { aplicarFrame, estadoInicial, reduzir, type Estado } from "../../../web/estado/reducer.ts";
-import { ACOES_DO_RESUMO_MAX, ATIVIDADE_VAZIA, comFerramenta, comFimDaAcao, comTexto, fraseDasAcoes, linhasDoResumo, semFerramentaAberta, soSubagentes, type AtividadeTurno } from "../../../web/lib/atividade.ts";
+import { ACOES_DO_RESUMO_MAX, ATIVIDADE_VAZIA, comFerramenta, comFimDaAcao, comTexto, fraseDasAcoes, itensDoPensamento, linhasDoResumo, semFerramentaAberta, soSubagentes, type AtividadeTurno } from "../../../web/lib/atividade.ts";
 
 const CONVERSA = "11111111-1111-4111-8111-111111111111";
 const TURNO = "22222222-2222-4222-8222-222222222222";
@@ -93,12 +93,30 @@ describe("NOD-353: as ações do turno vivo", () => {
     e = aplicarFrame(e, frame("turno.atividade", { rotulo: "Rodou um comando", id: "b" }), AGORA + 6);
     e = aplicarFrame(e, frame("turno.acao_fim", { id: "b", falhou: true }), AGORA + 6);
     e = aplicarFrame(e, frame("turno.encerrado", {}), AGORA + 7);
-    expect(e.conversas[CONVERSA]?.mensagens.find((m) => m.id === "m1")?.payload).toEqual({ kind: "acoes_do_turno", acoes: [{ rotulo: "Leu um arquivo" }, { rotulo: "Rodou um comando", falhou: true }] });
+    // `duracaoMs` (revisão do PR do pensamento no chat, 27/10): o tempo do relógio da web, para o cabeçalho "pronto" não
+    // mudar de texto quando a releitura trouxer o do servidor.
+    expect(e.conversas[CONVERSA]?.mensagens.find((m) => m.id === "m1")?.payload).toEqual({ kind: "acoes_do_turno", acoes: [{ rotulo: "Leu um arquivo" }, { rotulo: "Rodou um comando", falhou: true }], duracaoMs: 7 });
     // O turno.fala do meio sem texto não mexe na gravada (o servidor só grava no fim).
     let m = comConversa();
     m = reduzir(m, { tipo: "hidratar-conversa", conversa: { ...conversa, mensagens: [gravada] }, agora: AGORA + 1 });
     m = aplicarFrame(aplicarFrame(m, frame("turno.atividade", { rotulo: "Leu um arquivo", id: "a" }), AGORA + 2), frame("turno.fala", {}), AGORA + 3);
     expect(m.conversas[CONVERSA]?.mensagens[0]?.payload ?? null).toBeNull();
+  });
+
+  it("revisão do PR do pensamento no chat (27/10): depois do turno.fala, a narração nova entra DEPOIS das ações de antes no pensamento", () => {
+    let e = comConversa();
+    e = aplicarFrame(e, frame("turno.delta", { texto: "Vou ler." }), AGORA);
+    e = aplicarFrame(e, frame("turno.atividade", { rotulo: "Leu um arquivo", id: "r1" }), AGORA + 1);
+    e = aplicarFrame(e, frame("turno.delta", { texto: "Primeira parte." }), AGORA + 2);
+    e = aplicarFrame(e, frame("turno.fala", {}), AGORA + 3);
+    // `antes` zerou; a ação de antes não pode guardar o `nota` da volta passada.
+    expect(e.atividades[CONVERSA]?.[TURNO]?.acoes.map((x) => x.nota)).toEqual([undefined]);
+    e = aplicarFrame(e, frame("turno.delta", { texto: "Agora vou verificar." }), AGORA + 4);
+    e = aplicarFrame(e, frame("turno.atividade", { rotulo: "Rodou um comando", id: "b1" }), AGORA + 5);
+    expect(itensDoPensamento(e.atividades[CONVERSA]?.[TURNO]).map((i) => (i.tipo === "nota" ? `nota:${i.texto}` : `grupo:${i.rotulo}`))).toEqual(["grupo:Leu um arquivo", "nota:Agora vou verificar.", "grupo:Rodou um comando"]);
+    // O mesmo com subagentes (soSubagentes recomeça a atividade).
+    const comSub: AtividadeTurno = { ...usa(ATIVIDADE_VAZIA, "Leu um arquivo", "r1"), antes: ["Vou ler."], acoes: [{ id: "r1", rotulo: "Leu um arquivo", estado: "feita", emUso: null, nota: 1 }], subagentes: { lista: [{ id: "s1", nome: "Sub", tarefa: "x", estado: "trabalhando", desde: AGORA }], resumo: null } as never };
+    expect(soSubagentes(comSub)?.acoes.map((x) => x.nota)).toEqual([undefined]);
   });
 
   it("linhas do resumo: a mesma regra da fala gravada (acoesDoTurno), e a parada conta a que rodava como feita", () => {

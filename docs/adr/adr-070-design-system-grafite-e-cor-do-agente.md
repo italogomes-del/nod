@@ -69,3 +69,14 @@ com erro.
 Reabrir se uma tela nova precisar de uma cor que nenhum token cobre mais de duas vezes (vira token
 novo no design system antes do CSS), ou se o modo escuro gerar mais de um relato de contraste por
 mês.
+
+## Emenda (2026-10-26): a cor do agente no brilho do pensamento
+
+Plano "o pensamento no chat" (ADR-129, Parte 3; opção C aprovada pelo Marlon). A regra "a cor do agente aparece só no
+avatar, no ponto de trabalhando e no marcador da menção" ganha uma quarta exceção declarada: **o brilho que corre no
+cabeçalho do pensamento da fala viva** (`.fala-viva-estado`, web/interface.css) é da cor do bot (`--mascote-cor`, da
+classe `c-*` posta na raiz da fala). O gradiente passa pelo tom do bot e por um ponto mais escuro (`color-mix` com
+`--ink`) no meio, para as skins claras (creme, âmbar) não sumirem no tema claro. Sem a cor (bot sem perfil, sala de
+antes), o cinza de sempre. Continua fora: link, seleção, botão, foco, aviso e qualquer texto parado.
+
+Gatilho: uma skin sem contraste legível nos dois temas que o `color-mix` não resolva reverte esta emenda para o cinza.

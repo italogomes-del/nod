@@ -500,62 +500,73 @@
 @media (max-width: 640px) { .msg-captura-bt { width: min(240px, 100%); height: auto; aspect-ratio: 16 / 10; } }
 @media (max-width: 640px) { .anexo-chip { min-width: 0; max-width: 100%; flex: 1 1 100%; } .msg-anexo-img { width: 132px; height: 88px; } }
 
-/* A fala viva (NOD-348, emenda da ADR-114; protótipo v2 do Gil): o turno rodando é a fala do bot — mascote, nome e, no lugar
-   da hora, "‹Estado› · ‹tempo›" com um brilho que corre (2 s, linear). Sem cartão, sem fundo chapado e sem botão cheio.
-   Sem texto, a linha fica ao lado do nome; com texto, desce para o rodapé e mora na margem de 25 px da .message (height
-   25 px; margin-bottom −25 px): quando a fala final entra no lugar, a conversa não muda de altura. */
+/* A fala viva (NOD-348, emenda da ADR-114; Parte 2 do plano "o pensamento no chat", 2026-10-26, opção C): o turno rodando é a
+   fala do bot — mascote, nome e, abaixo do nome, o PENSAMENTO: um <details> fechado por padrão, sem fundo, cujo cabeçalho diz
+   o que o bot faz agora em 14 px com um brilho que corre, e à direita a faixa "tempo · N ações · N falharam". Aberto, um
+   trilho à esquerda com as notas e os grupos de ações. Pronto ("Pensou por 9 s · 2 ações"), vira uma linha de 12 px acima da
+   fala, ainda abrindo. Sem cartão, sem fundo chapado e sem botão cheio. */
 /* `.ao-vivo` junto: a regra antiga `.message.ao-vivo { padding-left: 52px }` vem depois e venceria (a fala pularia 52 px no fim). */
 .message.ao-vivo.fala-viva, .message.fala-viva { padding-left: 0; animation: fala-entra .32s cubic-bezier(.2, .7, .2, 1) both; }
 .message.fala-viva .bubble-wrap { width: min(100%, 600px); }
 .message.fala-viva.com-texto .bubble-wrap { width: auto; }
-.fala-viva:not(.com-texto) .bubble-wrap { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 10px; }
-/* NOD-353 (revisão do PR 523): `order` põe o resumo das ações (e o resto em linha cheia) depois da linha viva — sem ele, o
-   resumo entre o nome e a linha empurrava a linha para baixo do nome. */
-.fala-viva:not(.com-texto) .bubble-wrap > :not(.msg-autor, .fala-viva-linha) { flex: 1 1 100%; order: 1; }
 .fala-viva .msg-autor { min-width: 0; max-width: 100%; }
-.fala-viva-linha { display: flex; align-items: baseline; min-width: 0; font-size: 12px; color: var(--ink-2); white-space: nowrap; animation: fala-troca .16s ease-out both; }
-.fala-viva-linha.autor { margin: 0 0 6px; }
-.fala-viva-linha.rodape { box-sizing: border-box; height: 25px; margin-bottom: -25px; padding-top: 7px; line-height: 18px; }
-.fala-viva-estado { min-width: 0; overflow: hidden; text-overflow: ellipsis;
-  background: linear-gradient(90deg, var(--ink-2) 0 35%, var(--ink) 50%, var(--ink-2) 65% 100%);
-  background-size: 250% 100%; background-position: 100% 0;
+.fala-viva .msg-autor b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pensar { margin: 0 0 8px; color: var(--ink); }
+.pensar > summary { display: flex; align-items: center; gap: 9px; max-width: 100%; min-height: 24px; box-sizing: border-box;
+  position: relative; left: -6px; padding: 2px 6px; border-radius: 6px; list-style: none; cursor: pointer; }
+.pensar > summary::-webkit-details-marker { display: none; }
+.pensar > summary:hover .fala-viva-estado { -webkit-text-fill-color: var(--ink); color: var(--ink); background: none; }
+.pensar > summary:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 0; }
+/* Parte 3 (emenda da ADR-070): o brilho que corre no texto é da cor do bot (--mascote-cor, da classe c-* na raiz da fala), com
+   um ponto mais escuro no meio para as skins claras (creme, âmbar) não sumirem sobre o fundo claro. `background-image`, não
+   o atalho `background`: o atalho zera o recorte pelo texto. Sem a cor (sala de antes, bot sem perfil), o cinza de sempre. */
+.fala-viva-estado { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 500;
+  background-image: linear-gradient(90deg, var(--ink-2) 0 28%, var(--mascote-cor, var(--ink)) 44%, color-mix(in srgb, var(--mascote-cor, var(--ink)) 55%, var(--ink)) 50%, var(--mascote-cor, var(--ink)) 56%, var(--ink-2) 72% 100%);
+  background-size: 320% 100%; background-position: 100% 0;
   -webkit-background-clip: text; background-clip: text; color: transparent; -webkit-text-fill-color: transparent;
-  animation: fala-brilho 2s linear infinite; }
-.fala-viva-sep, .fala-viva-tempo { flex: none; color: var(--ink-3); white-space: pre; }
-.fala-viva-tempo { font-variant-numeric: tabular-nums; }
-.fala-viva-tempo:empty, .fala-viva-sep:has(+ .fala-viva-tempo:empty) { display: none; }
-/* NOD-73: no silêncio do vigia o brilho para — a linha não finge trabalho; o aviso âmbar embaixo diz o resto. */
-.fala-viva-linha.parado .fala-viva-estado { animation: none; background: none; color: var(--ink-2); -webkit-text-fill-color: currentColor; }
-/* NOD-353 (protótipo v2 do Gil, p348-acoes): o resumo das ações, recolhido, entre o nome e o balão. Texto ink-2, sem
-   fundo; a seta gira 90° ao abrir; aberto, uma ação por linha com um fio à esquerda, e Falhou em --danger. */
-.fala-acoes { margin: 0 0 8px; font-size: 13px; color: var(--ink-2); }
-.fala-acoes > summary { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; min-height: 24px; box-sizing: border-box;
-  position: relative; left: -6px; padding: 0 6px; border-radius: 6px; list-style: none; cursor: pointer; }
-.fala-acoes > summary::-webkit-details-marker { display: none; }
-.fala-acoes > summary:hover { color: var(--ink); }
-.fala-acoes > summary:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 0; }
-.fala-acoes-txt { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.fala-acoes-seta { flex: none; display: inline-block; width: 10px; text-align: center; transition: transform .16s ease-out; }
-.fala-acoes-seta::before { content: "›"; }
-.fala-acoes[open] .fala-acoes-seta { transform: rotate(90deg); }
-.fala-acoes ol { margin: 4px 0 2px; padding: 0 0 0 12px; border-left: 1px solid var(--line); list-style: none; line-height: 22px; }
-.fala-acoes li { display: flex; gap: 8px; align-items: baseline; }
-.fala-acoes-falhou { flex: none; color: var(--danger); font-weight: 500; }
-.fala-acoes-vezes { flex: none; color: var(--ink-3); font-variant-numeric: tabular-nums; }
-.fala-acoes .atividade-tarefas { margin: 4px 0; }
-/* QA do PR 523: o balão fica do tamanho do texto (como hoje) quando o resumo é mais largo que ele; o recuo da seta é
-   `left`, não margem negativa, para a frase pedir a largura inteira e não sair cortada. */
-.bubble-wrap:has(> .fala-acoes) > .bubble { width: fit-content; max-width: 100%; box-sizing: border-box; }
-@media (prefers-reduced-motion: reduce) { .fala-acoes-seta { transition: none; } }
+  animation: fala-brilho 2.4s cubic-bezier(.45, 0, .55, 1) infinite; }
+/* A faixa à direita: tempo · ações · falhas; o separador é do CSS, e o que está vazio some. */
+.pensar-meta { flex: none; margin-left: auto; display: inline-flex; align-items: baseline; gap: 5px; font-size: 12px; color: var(--ink-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pensar-meta > span:empty { display: none; }
+.pensar-meta > span:not(:empty) ~ span:not(:empty)::before { content: "·"; margin-right: 5px; color: var(--ink-3); }
+.pensar-falhas { color: var(--danger); font-weight: 500; }
+.pensar-seta { flex: none; width: 12px; text-align: center; color: var(--ink-3); font-size: 12px; transition: transform .2s ease; }
+.pensar-seta::before { content: "⌄"; }
+.pensar[open] > summary .pensar-seta { transform: rotate(180deg); }
+/* Esperando a pessoa ou em silêncio: o brilho para (não finge trabalho); o silêncio fica âmbar. Pronto: 12 px, cinza, sem a faixa. */
+.pensar[data-fase="esperando"] .fala-viva-estado, .pensar[data-fase="silencio"] .fala-viva-estado, .pensar[data-fase="pronto"] .fala-viva-estado { animation: none; background: none; color: var(--ink-2); -webkit-text-fill-color: currentColor; }
+.pensar[data-fase="silencio"] .fala-viva-estado { color: var(--warning); }
+.pensar[data-fase="pronto"] .fala-viva-estado { font-size: 12px; font-weight: 400; }
+.pensar[data-fase="pronto"] > summary { min-height: 20px; }
+.pensar-corpo { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .3s cubic-bezier(.2, .7, .2, 1); }
+.pensar-dentro { min-height: 0; overflow: hidden; }
+.pensar[open] > .pensar-corpo { grid-template-rows: 1fr; }
+.pensar-lista { margin: 4px 0 2px; padding: 0 0 0 12px; border-left: 2px solid var(--line); list-style: none; line-height: 22px; font-size: 13px; color: var(--ink-2); }
+.pensar-nota { color: var(--ink-2); }
+.pensar-acao { display: flex; gap: 8px; align-items: center; }
+.pensar-ic { flex: none; width: 12px; height: 12px; border-radius: 50%; border: 1.5px solid var(--ink-3); box-sizing: border-box; display: grid; place-items: center; }
+.pensar-acao[data-estado="rodando"] .pensar-ic { border-color: var(--ink-3) transparent var(--ink-3) var(--ink-3); animation: pensar-gira .9s linear infinite; }
+.pensar-acao[data-estado="feita"] .pensar-ic { border-color: var(--success); background: var(--success); }
+.pensar-acao[data-estado="feita"] .pensar-ic::after { content: ""; width: 3px; height: 6px; border: solid var(--surface); border-width: 0 1.5px 1.5px 0; transform: translateY(-1px) rotate(45deg); }
+.pensar-acao[data-estado="falhou"] .pensar-ic { border-color: var(--danger); background: var(--danger); }
+.pensar-vezes { flex: none; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.pensar-falhou { flex: none; color: var(--danger); font-weight: 500; font-size: 12px; }
+.pensar-mais > details > summary { list-style: none; cursor: pointer; font-size: 12px; color: var(--ink-3); text-decoration: underline; }
+.pensar-mais > details > summary::-webkit-details-marker { display: none; }
+.pensar-mais ol { margin: 0; padding: 0; list-style: none; }
+.pensar .atividade-tarefas { margin: 4px 0; }
+/* O balão fica do tamanho do texto quando o pensamento é mais largo que ele (QA do PR 523). */
+.bubble-wrap:has(> .pensar) > .bubble { width: fit-content; max-width: 100%; box-sizing: border-box; }
+@keyframes pensar-gira { to { transform: rotate(360deg); } }
 /* Alto contraste: o texto recortado no gradiente sumiria; volta à cor do sistema. */
 @media (forced-colors: active) { .fala-viva-estado { background: none; color: CanvasText; -webkit-text-fill-color: currentColor; animation: none; } }
 @keyframes fala-entra { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
-@keyframes fala-troca { from { opacity: .3; } to { opacity: 1; } }
 @keyframes fala-brilho { from { background-position: 100% 0; } to { background-position: 0 0; } }
-/* Menos movimento: nada corre nem sobe; o estado e o tempo continuam escritos (o mascote já para sozinho). */
+/* Menos movimento: nada corre, gira nem sobe; o estado e o tempo continuam escritos (o mascote já para sozinho). */
 @media (prefers-reduced-motion: reduce) {
-  .message.fala-viva, .fala-viva-linha { animation: none; }
+  .message.fala-viva, .pensar-acao[data-estado="rodando"] .pensar-ic { animation: none; }
   .fala-viva-estado { animation: none; background: none; color: var(--ink-2); -webkit-text-fill-color: currentColor; }
+  .pensar-corpo, .pensar-seta { transition: none; }
 }
 /* NOD-358 (emenda da ADR-114; protótipo .p348-baloes): a resposta em vários balões, um por parágrafo, como no WhatsApp.
    Cada balão tem a largura do próprio texto e 6 px até o seguinte; o do progresso continua largo. O balão novo da fala
@@ -634,6 +645,11 @@
 @media (prefers-reduced-motion: reduce) { .progresso-ic.rodando::before { animation: none; } }
 
 /* Fila da conversa (2026-09-24): cada mensagem que espera mostra onde está e um Cancelar só dela. */
+/* Parte 1 do plano "o pensamento no chat" (2026-10-26): a fala da pessoa entre o clique e a confirmação do servidor. */
+.fala-pendente[data-envio="enviando"] .message.you .bubble { opacity: .6; transition: opacity .25s ease; }
+.fala-pendente[data-envio="falhou"] .message.you .bubble { background: var(--surface); color: var(--ink); border: 1px dashed var(--danger); }
+.fala-pendente .envio-erro { display: flex; justify-content: flex-end; align-items: center; gap: 10px; font-size: 12px; color: var(--danger); margin: -17px 0 22px; }
+.fala-pendente .envio-erro .bt.envio-bt { font-size: 12px; font-weight: 500; color: var(--ink); background: var(--surface); border: 1px solid var(--line-strong); border-radius: 7px; padding: 2px 8px; }
 .message.you.fila-na_fila .bubble, .message.you.fila-cancelando .bubble { background: var(--surface); border: 1px dashed var(--ink-3); color: var(--ink); }
 .message.you.fila-na_fila .bubble .chip-comando, .message.you.fila-cancelando .bubble .chip-comando, .message.you.fila-cancelada .bubble .chip-comando { background: var(--surface-raised); color: var(--ink-2); }
 .message.you.fila-cancelada .bubble { background: var(--surface); border: 1px dashed var(--line-strong); color: var(--ink-3); text-decoration: line-through; }

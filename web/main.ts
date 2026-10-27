@@ -51,7 +51,8 @@ import type { AlvoAviso } from "../src/contracts/desktop.ts";
 import type { Experimentos } from "../src/contracts/raio-x.ts";
 import type { Escopo } from "../src/shared/types.ts";
 import type { FrameSse } from "../src/contracts/frame.ts";
-import { agenteDaTela, bibliotecaAberta, conversaAbertaTemNotaDeContas, conversaDaTela, estadoInicial, invalidacoesAoReconectar, invalidacoesAoRetomar, invalidacoesDaTela, mudouNaTela, reduzir, secaoDoPedido, type Acao, type Estado, type Invalidacao, type NivelGaveta, type PedidoSecao, type SecaoEspaco, type Tela } from "./estado/reducer.ts";
+import type { AnexoDaConversa } from "../src/contracts/anexo.ts";
+import { agenteDaTela, bibliotecaAberta, conversaAbertaTemNotaDeContas, conversaDaTela, estadoInicial, invalidacoesAoReconectar, invalidacoesAoRetomar, invalidacoesDaTela, mudouNaTela, reduzir, secaoDoPedido, type Acao, type Estado, type FalaPendente, type Invalidacao, type NivelGaveta, type PedidoSecao, type SecaoEspaco, type Tela } from "./estado/reducer.ts";
 import { contaApi, criarApi, minhaContaApi, ErroApi, observarRede, sessao as sessaoApi, type Api } from "./lib/api.ts";
 import { criarContaNoChat, fraseDoErro as fraseDoErroDeConta } from "./telas/conta-no-chat.ts";
 import { criarMinhaConta } from "./telas/minha-conta.ts";
@@ -80,7 +81,7 @@ import { lembrar } from "./lib/lembrar.ts";
 import { atualizarGaveta } from "./lib/gaveta-render.ts";
 import { blocosMudariam, esquecerRegiao, regiao, regiaoMudaria, regiaoPorBlocos } from "./lib/regioes.ts";
 import { mudancaSujaAGaveta, reporSeletor, salvarOuRepor } from "./lib/salvar-ou-repor.ts";
-import { criarAnunciador, criarRelogioDaFala, escreverTempos, lerFalasNaTela, type FalaNaTela } from "./lib/fala-viva.ts";
+import { criarAnunciador, criarRelogioDaFala, escreverEstados, escreverTempos, lerFalasNaTela, TICK_CURTO_MS, type FalaNaTela } from "./lib/fala-viva.ts";
 import { criarRascunhos } from "./lib/rascunhos.ts";
 import { criarRolagem } from "./lib/rolagem-na-tela.ts";
 import { rolaAoTopoAoNavegar } from "./lib/rolagem.ts";
@@ -121,7 +122,7 @@ import { rolagemDaBarra, type Faixa } from "./lib/rolagem-barra.ts";
 import { comandoNoTexto, listaDaBarra, nomeDigitado, recentesDaConversa, type ItemDaBarra } from "./lib/barra.ts";
 import { renderDicaBarra, renderListaBarra } from "./telas/barra.ts";
 import type { ComandosDto } from "../src/contracts/comandos.ts";
-import { destinoDoEnvio, enviarPeloComposer, modoDoComposer, opcoesDaPergunta, proximaDoComposer, textoDaLetra } from "./lib/perguntas.ts";
+import { destinoDoEnvio, enviarPeloComposer, idsDaResposta, modoDoComposer, opcoesDaPergunta, proximaDoComposer, textoDaLetra } from "./lib/perguntas.ts";
 import { acharBotao, aplicarFocoDaFila, botaoEmFoco, proximoDaFila, VALIDADE_DO_FOCO_MS, type FocoDaFila } from "./lib/foco-da-fila.ts";
 import { aplicarEncolhidos, decididaNaConversa, type DecididaNestaAba } from "./lib/foco-do-encolhido.ts";
 import { seletorDoFocoNaRegiao } from "./lib/foco-do-bloco.ts";
@@ -708,7 +709,16 @@ const agendarNaJanela = (fn: () => void, ms: number): (() => void) => {
   const t = window.setTimeout(fn, ms);
   return () => window.clearTimeout(t);
 };
-const relogioDaFala = criarRelogioDaFala(() => escreverTempos(document.getElementById("timeline-ao-vivo"), Date.now()), agendarNaJanela, () => document.hidden);
+// Parte 2 do plano "o pensamento no chat": o mesmo tick escreve a troca pendente do cabeçalho quando a permanência deu; e,
+// enquanto alguma espera, o relógio bate a cada TICK_CURTO_MS (revisão de engenharia, 27/10) — no segundo inteiro a troca
+// atrasava até 1 s além dos 600 ms, e o plano pedia 200 ms.
+let trocasPendentes = 0;
+const relogioDaFala = criarRelogioDaFala(() => {
+  const aoVivo = document.getElementById("timeline-ao-vivo");
+  const agora = Date.now();
+  trocasPendentes = escreverEstados(aoVivo, agora);
+  return escreverTempos(aoVivo, agora) + trocasPendentes;
+}, agendarNaJanela, () => document.hidden, () => (trocasPendentes > 0 ? TICK_CURTO_MS : 1000));
 let anuncioPendente = 0;
 const anunciadorDoTurno = criarAnunciador((texto) => {
   const anuncio = document.getElementById("anuncio-turno");
@@ -2705,24 +2715,84 @@ async function enviarComposer(): Promise<void> {
   const comum = destino.tipo === "mensagem" && !alvo.salaId;
   const idEnvio = comum ? envios.iniciar(alvo.conversaId, texto, ids, destino.tipo === "mensagem" ? destino.respondeA : undefined) : undefined;
   if (idEnvio === null) return;
+  // Plano "o pensamento no chat", Parte 1 (2026-10-26): a mensagem comum entra na tela no clique (fala pendente) e o campo
+  // e os anexos limpam já; o POST confirma com `ids.mensagem` e a releitura só reconcilia. Falhou: a fala fica, com
+  // "Tentar de novo" (mesma chave) — sem faixa de erro no topo, salvo a sessão perdida (401), que é de toda a tela.
+  const pendente: FalaPendente | null = comum && idEnvio ? { idEnvio, texto: enviado, anexos: metasDosAnexos(fila), ...(destino.tipo === "mensagem" && destino.respondeA ? { respondeA: destino.respondeA } : {}), em: Date.now(), estado: "enviando", mensagemId: null, turnoId: null } : null;
+  if (pendente) {
+    dispatch({ tipo: "fala-pendente", conversaId: alvo.conversaId, pendente });
+    limparDepoisDeEnviar(ta, chave, texto);
+    limparAnexos(alvo.conversaId);
+    rolagem.colar();
+  }
   await agir(async () => {
     let enviou = false;
     let r: Awaited<ReturnType<typeof enviarPeloComposer>>;
     try {
       r = await enviarPeloComposer(a, alvo, destino, enviado, ids, idEnvio);
       enviou = true;
+    } catch (e) {
+      if (!pendente || (e instanceof ErroApi && e.status === 401)) throw e;
+      // Revisão de engenharia (27/10): o porquê (limite do plano, conversa encerrada, sem internet…) vai na própria fala,
+      // com a frase que a faixa de antes mostrava — sem ele, "Não foi enviada" não dizia o que fazer.
+      dispatch({ tipo: "fala-pendente-falhou", conversaId: alvo.conversaId, idEnvio: pendente.idEnvio, motivo: motivoDaFalha(e) });
+      return;
     } finally {
       if (idEnvio) envios.concluir(alvo.conversaId, enviou);
     }
-    limparDepoisDeEnviar(ta, chave, texto);
+    if (pendente) dispatch({ tipo: "fala-pendente-confirmada", conversaId: alvo.conversaId, idEnvio: pendente.idEnvio, mensagemId: r.ids?.mensagem ?? null, turnoId: r.ids?.turno ?? null });
+    else limparDepoisDeEnviar(ta, chave, texto);
     if (r.enviado === "resposta") anunciarPergunta(`Resposta enviada: ${enviado}`);
-    if (r.enviado === "mensagem") limparAnexos(alvo.conversaId);
+    if (r.enviado === "mensagem" && !pendente) limparAnexos(alvo.conversaId);
     // A escolha do campo vale até este envio: a próxima mensagem volta ao padrão.
     dispatch({ tipo: "composer", conversaId: alvo.conversaId, escolha: null });
     // Só a citação que foi junto: um "Responder" noutra fala durante o envio fica no campo para a próxima mensagem.
     if (citacao && estado.citacoes[alvo.conversaId]?.mensagemId === citacao.mensagemId) dispatch({ tipo: "citar", conversaId: alvo.conversaId, citacao: null });
     dispatch({ tipo: "invalidar", quais: r.enviado === "resposta" ? [`conversa:${alvo.conversaId}`, "sua-vez", "frota"] : [`conversa:${alvo.conversaId}`] });
   });
+}
+
+/** Os metadados dos anexos prontos, para a fala pendente desenhar os chips como a gravada vai desenhar. */
+function metasDosAnexos(fila: readonly ItemAnexo[]): AnexoDaConversa[] {
+  return fila.flatMap((i) => (i.estado === "pronto" && i.meta ? [{ ...i.meta }] : []));
+}
+
+/** A frase do erro que derrubou o envio da fala pendente (a mesma da faixa, `erroDaAcao`); AbortError não tem frase. */
+function motivoDaFalha(e: unknown): string | undefined {
+  const erro = erroDe(e);
+  return erro ? erroDaAcao(erro).mensagem : undefined;
+}
+
+/**
+ * "Tentar de novo" da fala pendente que falhou (Parte 1): a mesma fala, pela mesma chave de idempotência (`envios` guarda
+ * a chave pendente enquanto a assinatura é igual), sem passar pelo campo. Com outro envio em voo na conversa, espera.
+ */
+async function reenviarPendente(conversaId: string, idEnvio: string): Promise<void> {
+  const p = estado.conversas[conversaId]?.pendentes?.find((x) => x.idEnvio === idEnvio);
+  if (!p || !api) return;
+  const ids = p.anexos.map((x) => x.id);
+  // Revisão do PR (27/10): a chave é a da própria pendente (`envios` só trava o voo); e o motivo da falha anterior sai.
+  const chave = envios.iniciar(conversaId, p.texto, ids, p.respondeA, p.idEnvio);
+  if (chave === null) return;
+  const { motivo: _motivo, ...semMotivo } = p;
+  dispatch({ tipo: "fala-pendente", conversaId, pendente: { ...semMotivo, idEnvio: chave, estado: "enviando" } });
+  if (chave !== idEnvio) dispatch({ tipo: "fala-pendente-sai", conversaId, idEnvio });
+  const a = api;
+  let enviou = false;
+  try {
+    const r = await (p.respondeA ? a.enviar(conversaId, p.texto, ids, chave, p.respondeA) : a.enviar(conversaId, p.texto, ids, chave));
+    enviou = true;
+    // `idsDaResposta` (revisão de engenharia, 27/10): a resposta sem `ids` (servidor de antes, no deploy) não pode virar
+    // "falhou" depois de enviada — a pendente sai e a releitura traz a gravada, como no envio pelo campo.
+    const gravados = idsDaResposta(r);
+    dispatch({ tipo: "fala-pendente-confirmada", conversaId, idEnvio: chave, mensagemId: gravados?.mensagem ?? null, turnoId: gravados?.turno ?? null });
+    dispatch({ tipo: "invalidar", quais: [`conversa:${conversaId}`] });
+  } catch (e) {
+    dispatch({ tipo: "fala-pendente-falhou", conversaId, idEnvio: chave, motivo: motivoDaFalha(e) });
+    if (e instanceof ErroApi && e.status === 401) mostrarErro(e);
+  } finally {
+    envios.concluir(conversaId, enviou);
+  }
 }
 
 // ---- anexos (ADR-046) ----------------------------------------------------------------------------
@@ -4041,6 +4111,9 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     }, CANCELAR_DESFAZER_MS);
   },
   "desfazer-cancelamento": (el) => dispatch({ tipo: "desfazer-cancelamento", turnoId: el.dataset.id ?? "" }),
+  // Parte 1 do plano "o pensamento no chat": a fala pendente que falhou.
+  "reenviar-pendente": (el) => reenviarPendente(el.dataset.conversa ?? "", el.dataset.id ?? ""),
+  "descartar-pendente": (el) => dispatch({ tipo: "fala-pendente-sai", conversaId: el.dataset.conversa ?? "", idEnvio: el.dataset.id ?? "" }),
   "dispensar-incidente": (el) => agir(async () => void (await api!.dispensarIncidente(el.dataset.id ?? ""), dispatch({ tipo: "invalidar", quais: ["sua-vez"] }))),
   // definido em 2026-09-24 (ADR-044): o grupo (app · nível) do painel sai inteiro, com um registro só.
   "revogar-acessos": (el) => agir(async () => void (await api!.revogarAcessos(el.dataset.agente ?? "", (el.dataset.ids ?? "").split(",").filter(Boolean)), dispatch({ tipo: "invalidar", quais: [`concessoes:${el.dataset.agente ?? ""}`, "frota"] }))),

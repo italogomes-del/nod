@@ -141,7 +141,8 @@ describe("lembrar: a string de uma parte da tela só é refeita quando algo que 
     e = aplicarFrame(e, frame("turno.delta", { conversaId: ABERTA, turnoId: TURNO, texto: "segunda & fim" }, 4), AGORA);
     const depois = new Map(blocosAoVivo(c, e).map((b) => [b.chave, b.html]));
     expect(depois.get("vivo:t-2")).toBe(antes.get("vivo:t-2"));
-    expect(depois.get(`vivo:${TURNO}`)).toContain("Primeira &lt;parte&gt;<br>segunda &amp; fim");
+    // Parte 2 do plano "o pensamento no chat": o texto curto corre no cabeçalho do pensamento (a primeira linha, escapada).
+    expect(depois.get(`vivo:${TURNO}`)).toContain('<span class="fala-viva-estado">Primeira &lt;parte&gt;</span>');
     expect(renderAoVivoDaTimeline(c, e)).toBe([...depois.values()].join(""));
   });
 });

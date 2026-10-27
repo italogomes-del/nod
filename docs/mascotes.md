@@ -6,23 +6,27 @@ O perfil persiste apenas forma e cor. Expressões e reprodução do catálogo s�
 
 ## Mapa estado → situação
 
-| Bloub | Situação no nod | Integração |
-| --- | --- | --- |
-| idle | Sem turno vivo e sem decisão não vencida | Ativa; imóvel, olhar superior direito |
-| thinking | Turno na fila | Ativa |
-| orbit | Turno rodando | Ativa |
-| notify | Decisão não vencida, sem turno vivo | Ativa |
-| wink | Confirmação breve de ação | Reservada |
-| wide | Descoberta relevante | Reservada |
-| alert | Falha recuperável que requer atenção | Reservada |
-| exclaim | Bloqueio crítico ou prazo próximo | Reservada |
-| sleep | Agente explicitamente suspenso | Reservada |
-| egg | Criação/preparação inicial | Reservada |
-| hexagon | Preparação de integração | Reservada |
-| play | Início/retomada confirmada | Reservada |
-| burst | Conclusão bem-sucedida | Reservada; futuro disparo único por entrega |
-| comet | Transferência entre agentes | Reservada |
-| swirl | Transição visual entre contextos | Reservada; não é estado de negócio |
+A coluna "Chat" é da fala viva (Parte 3 do plano "o pensamento no chat", ADR-129, 2026-10-26; `renderFalaViva` em
+web/telas/conversa.ts): a base contínua troca com a permanência de 600 ms do cabeçalho, e o disparo único toca por cima
+e volta à base quando acaba (o relógio da virada, `proximaViradaDoMascote`, redesenha na hora).
+
+| Bloub | Situação no nod (barra, frota, cabeçalho) | Chat (fala viva) | Integração |
+| --- | --- | --- | --- |
+| idle | Sem turno vivo e sem decisão não vencida | Disponível, na fila; `+ attentif` escrevendo (narração ou fala em streaming) | Ativa; imóvel, olhar superior direito |
+| thinking | Turno na fila recente | O turno começou e nada chegou; entre ferramentas | Ativa |
+| orbit | Turno rodando | Ferramenta em uso, frentes trabalhando | Ativa |
+| notify | Decisão não vencida, sem turno vivo | Esperando a aprovação ou a resposta da pessoa no turno | Ativa |
+| wink | Confirmação breve de ação | Disparo único (1,7 s) quando a fala entra | Ativa no chat |
+| wide | Descoberta relevante | — | Reservada |
+| alert | Falha recuperável que requer atenção | Silêncio do vigia ("sem novidade há N min"); decisão pendente: `idle + somnolent` como alternativa (`MASCOTE_NO_SILENCIO`) | Ativa no chat |
+| exclaim | Bloqueio crítico ou prazo próximo | — (candidato: máquina caiu, limite do plano, falha; fora do chat) | Reservada |
+| sleep | Agente explicitamente suspenso | — | Reservada |
+| egg | Criação/preparação inicial | — (candidato: a linha "criada por você" e o bot novo na frota) | Reservada |
+| hexagon | Preparação de integração | — (candidato: o cartão de acesso ao conector) | Reservada |
+| play | Início/retomada confirmada | — (candidato: depois de Aprovar ou Retomar; precisa do fato no frame) | Reservada |
+| burst | Conclusão bem-sucedida | — (candidato: task entregue, uma vez por entrega) | Reservada; futuro disparo único por entrega |
+| comet | Transferência entre agentes | Disparo único (2,5 s) quando as frentes saem; depois, orbit | Ativa no chat |
+| swirl | Transição visual entre contextos | — | Reservada; não é estado de negócio |
 
 Prioridade atual: execução > fila > decisão > repouso. Escopo por conversa.
 Usado na barra lateral, cabeçalho da conversa e Frota. Mensagens históricas não simulam trabalho atual.
@@ -38,8 +42,8 @@ colere (irritada), triste, effraye (assustada), mefiant (desconfiada),
 confus (confusa), curieux (curiosa), fier (orgulhosa), timide (tímida),
 blase (entediada), somnolent (sonolenta).
 
-Fora da prévia, apenas a neutra é usada como expressão-base; as outras ficam reservadas
-a futuras escolhas explícitas de personalidade/interação, sem inferir emoções do texto.
+Fora da prévia, apenas a neutra é usada como expressão-base (e a atenta na fala viva enquanto o bot escreve); as outras
+ficam reservadas a futuras escolhas explícitas de personalidade/interação, sem inferir emoções do texto.
 Estados com rosto ou silhueta próprios preservam a animação original e podem ignorar a expressão/forma.
 
 ## Reprodução e adaptação visual

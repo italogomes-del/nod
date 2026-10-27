@@ -38,7 +38,8 @@ describeIntegracao("resumo das ações na fala final (NOD-353)", () => {
       const { deps } = depsSobre(trx, MARLON);
       const resultado = { ...SUCESSO, ferramentasChamadas: ["Read", "Read", "WebFetch", "Bash"], ferramentasFalharam: [2] };
       const r = await assentarTurno(deps, { turnoId, machineId: randomUUID(), seqLocal: 1, fala: { tipo: "texto", texto: "Pronto." }, resultado, executor: "catcher" });
-      const esperado = { kind: "acoes_do_turno", acoes: [{ rotulo: "Leu um arquivo", vezes: 2 }, { rotulo: "Abriu uma página", falhou: true }, { rotulo: "Rodou um comando" }] };
+      // `duracaoMs` (plano "o pensamento no chat", decisão 2 de 26/10): quanto o turno levou, para a fala gravada dizer "Pensou por".
+      const esperado = { kind: "acoes_do_turno", acoes: [{ rotulo: "Leu um arquivo", vezes: 2 }, { rotulo: "Abriu uma página", falhou: true }, { rotulo: "Rodou um comando" }], duracaoMs: expect.any(Number) };
       expect(r.data.mensagem?.payload).toEqual(esperado);
       const lida = await lerConversa(deps, { conversaId });
       const fala = lida.data.mensagens.find((m) => m.id === r.data.mensagem?.id);
@@ -90,7 +91,7 @@ describeIntegracao("resumo das ações na fala final (NOD-353)", () => {
       expect(r.data.mensagem).toBeNull();
       const lida = await lerConversa(deps, { conversaId });
       const porId = (id: string) => lida.data.mensagens.find((m) => m.id === id);
-      expect(porId(meio!.id)?.payload).toEqual({ kind: "acoes_do_turno", acoes: [{ rotulo: "Leu um arquivo" }, { rotulo: "Rodou um comando", falhou: true }] });
+      expect(porId(meio!.id)?.payload).toEqual({ kind: "acoes_do_turno", acoes: [{ rotulo: "Leu um arquivo" }, { rotulo: "Rodou um comando", falhou: true }], duracaoMs: expect.any(Number) });
       expect(porId(meio!.id)?.destino ?? "chat").toBe("chat");
       expect(porId(primeira!.id)?.payload ?? null).toBeNull();
       // Turno sem ferramenta não toca a fala do meio.
@@ -111,7 +112,7 @@ describeIntegracao("resumo das ações na fala final (NOD-353)", () => {
       const turnoId = post.data.turnos[0]?.id ?? "";
       const resultado = { ...SUCESSO, ferramentasChamadas: ["Bash"], ferramentasFalharam: [0] };
       const r = await assentarTurno(deps, { turnoId, machineId: randomUUID(), seqLocal: 1, fala: { tipo: "texto", texto: "Olhei." }, resultado, executor: "catcher" });
-      expect(r.data.mensagem?.payload).toEqual({ kind: "acoes_do_turno", acoes: [{ rotulo: "Rodou um comando", falhou: true }] });
+      expect(r.data.mensagem?.payload).toEqual({ kind: "acoes_do_turno", acoes: [{ rotulo: "Rodou um comando", falhou: true }], duracaoMs: expect.any(Number) });
       // A fala da pessoa na sala continua sem payload.
       const lida = await lerConversa(deps, { conversaId: s.data.conversa.id });
       expect(lida.data.mensagens.find((m) => m.autoria.autor_tipo === "pessoa")?.payload ?? null).toBeNull();

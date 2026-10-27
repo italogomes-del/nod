@@ -200,7 +200,7 @@ async function criarPedidoAPessoa(deps: Deps, input: Parameters<typeof pedirAPes
   if (!decisao) throw new Error("decisão não criada");
   const autoria = autoriaDoAgente(deps.escopo, input.agenteId);
   const payload: PayloadMensagem = { kind: "pedido_a_pessoa", decisaoId: decisao.id, ...(args.opcoes ? { opcoes: args.opcoes } : {}), ...(args.recomendada !== undefined ? { recomendada: args.recomendada } : {}), ...(ajudaDoComputador ? { ajudaDoComputador: true as const } : {}) };
-  await deps.repos.mensagens.criar({ conversaId: input.conversaId, turnoId: input.turnoId, autoria, kind: "texto", texto: args.texto, payload, confianca: "confiavel" });
+  const mensagem = await deps.repos.mensagens.criar({ conversaId: input.conversaId, turnoId: input.turnoId, autoria, kind: "texto", texto: args.texto, payload, confianca: "confiavel" });
   const evento: RuntimeEvent = {
     tenantId: deps.escopo.tenantId,
     id: randomUUID(),
@@ -210,7 +210,9 @@ async function criarPedidoAPessoa(deps: Deps, input: Parameters<typeof pedirAPes
     pessoaDestinoId: deps.escopo.pessoaId,
     conversaId: input.conversaId,
     turnoId: input.turnoId,
-    dados: { decisao_id: decisao.id, tipo, decisor_id: decisor.id, prazo_decisao_em: decisao.prazoDecisaoEm, ...(decisao.fioId ? { fio_id: decisao.fioId } : {}) },
+    // Parte 4 do plano "o pensamento no chat" (2026-10-26): a fala da pergunta vai no frame (JSON, porque `DadosEvento` é
+    // chato), e a web desenha o cartão na hora, sem esperar a releitura. Cliente de antes ignora o campo.
+    dados: { decisao_id: decisao.id, tipo, decisor_id: decisor.id, prazo_decisao_em: decisao.prazoDecisaoEm, ...(decisao.fioId ? { fio_id: decisao.fioId } : {}), ...(mensagem ? { mensagem_json: JSON.stringify(mensagem) } : {}) },
   };
   return { data: { estado: "pendente", decisao_id: decisao.id, instrucao: "encerre o turno; a resposta retoma depois" }, events: [evento] };
 }

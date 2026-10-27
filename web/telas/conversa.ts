@@ -7,14 +7,15 @@ import type { Mensagem } from "../../src/contracts/mensagem.ts";
 import type { TipoAnexo } from "../../src/contracts/anexo.ts";
 import type { Inventario } from "../../src/contracts/inventario.ts";
 import type { TarefaDoBot } from "../../src/contracts/turno.ts";
-import type { ConversaEstado, Estado, FalaSaindo, TurnoVivo } from "../estado/reducer.ts";
+import type { ConversaEstado, Estado, FalaPendente, FalaSaindo, TurnoVivo } from "../estado/reducer.ts";
 import { assinatura } from "../lib/assinatura.ts";
 import { ICONE } from "../lib/icones.ts";
 import { botao, dataHora, esc, hora, iconeAgente, paragrafos } from "../lib/render.ts";
+import type { EstadoMascote } from "../lib/mascote.ts";
 import { maquinaDoBot } from "./maquinas.ts";
 import { outraMaquinaDestaVez } from "../lib/rodar-desta-vez.ts";
 import { acordandoNaFila, motivoLegivel } from "../lib/maquina-nuvem.ts";
-import { estadoDaFala, falaComposta, fraseDasAcoes, geracaoDoBalao, linhasDoResumo, textoEmLf, type AtividadeTurno, type LinhaDoResumo, type VigiaDaAtividade } from "../lib/atividade.ts";
+import { COMET_MS, contagemDasAcoes, estadoDaFala, falaNoBalao, geracaoDoBalao, GRUPOS_A_VISTA, itensDoPensamento, textoEmLf, textoEscrevendo, WINK_MS, type AtividadeTurno, type ItemDoPensamento, type LinhaDoResumo, type VigiaDaAtividade } from "../lib/atividade.ts";
 import { linhaDaFila } from "../lib/fila-do-pedido.ts";
 import { haQuanto } from "../lib/relogio.ts";
 import { FALA_SAINDO_MS, tempoDaFala } from "../lib/fala-viva.ts";
@@ -556,7 +557,7 @@ export const ETIQUETA_CURTA = 16;
  * `linhaDoModo` (PR 6 dos modos de aprovação, telas Y1 e Y2): a linha discreta do que o "Ignorar todas" rodou sem a
  * pessoa neste turno (./linha-do-modo.ts), logo embaixo do balão do bot e antes das reações.
  */
-export function renderMensagem(m: Mensagem, estado: Estado, sala = false, opcoes: { etiqueta?: string; progresso?: string; diagramas?: boolean; linhaDoModo?: string; chipDaFala?: string } = {}): string {
+export function renderMensagem(m: Mensagem, estado: Estado, sala = false, opcoes: { etiqueta?: string; progresso?: string; diagramas?: boolean; linhaDoModo?: string; chipDaFala?: string; semAcoes?: boolean } = {}): string {
   // Kinds não-texto (parada, sistema, negação) também se relatam — são JUSTAMENTE os que a categoria
   // 'travou_ou_parou' descreve, e o caso de uso já trata mensagem sem turno (definido em 2026-09-21).
   // definido em 2026-10-03: o artefato é uma fala do bot — mascote, nome e hora em volta do card, como os balões; solto
@@ -615,7 +616,7 @@ export function renderMensagem(m: Mensagem, estado: Estado, sala = false, opcoes
       ? `<div class="bubble">${comChipDeComando(m.texto)}${metaTags}</div>`
       : baloesDoBot(m.texto, m.id, opcoes.diagramas === true, `${metaTags}${progressoDentro}`, progressoDentro !== "");
   return `<article class="${classes}" data-mensagem="${esc(m.id)}"${pergunta ? ` data-pergunta="${esc(pergunta.decisaoId)}"` : ""}>
-    ${!ehPessoa && agente ? iconeAgente(agente, "md") : ""}<div class="bubble-wrap">${acoesDaMensagem(m, estado, sala)}${sender}${ehPessoa ? "" : resumoDaMensagem(m)}${resposta ? rotuloDaResposta(m) : ""}${ehPessoa ? citacaoAcimaDoBalao(m) : ""}${anexosDe(m, estado)}${balao}${ehPessoa ? "" : midiasDoBot(m, estado)}${progressoFora}${ehPessoa ? "" : (opcoes.linhaDoModo ?? "")}${ehPessoa ? "" : avisoDeLeitura(m, estado)}${ehPessoa ? "" : capturaDoTurno(m, estado)}${contextoDelegado}${chipsDeReacao(m, estado)}${fila ? renderSituacaoFila(fila, fila.turnoId) : (opcoes.chipDaFala ?? "")}${faixaDaMensagem(m, estado)}</div>
+    ${!ehPessoa && agente ? iconeAgente(agente, "md") : ""}<div class="bubble-wrap">${opcoes.semAcoes ? "" : acoesDaMensagem(m, estado, sala)}${sender}${ehPessoa ? "" : resumoDaMensagem(m)}${resposta ? rotuloDaResposta(m) : ""}${ehPessoa ? citacaoAcimaDoBalao(m) : ""}${anexosDe(m, estado)}${balao}${ehPessoa ? "" : midiasDoBot(m, estado)}${progressoFora}${ehPessoa ? "" : (opcoes.linhaDoModo ?? "")}${ehPessoa ? "" : avisoDeLeitura(m, estado)}${ehPessoa ? "" : capturaDoTurno(m, estado)}${contextoDelegado}${chipsDeReacao(m, estado)}${fila ? renderSituacaoFila(fila, fila.turnoId) : (opcoes.chipDaFala ?? "")}${faixaDaMensagem(m, estado)}</div>
   </article>${resposta ? linhaDaRetomada(m, estado) : ""}`;
 }
 
@@ -732,41 +733,41 @@ function comDecisaoVencida(p: Proposta, estado: Estado): boolean {
 }
 
 /**
- * A fala viva (NOD-348, emenda da ADR-114): o turno rodando é uma fala do bot, como a que vai ficar — o mascote md do
- * bot do turno, o nome e, no lugar da hora, a linha viva "‹Estado› · ‹N s›" (Pensando, Escrevendo, Usando Linear,
- * Abrindo frentes; sem "digitando" e sem o nome da IA). O texto chega num balão sem cursor e a linha desce para o
- * rodapé, na margem da mensagem: quando a fala final entra, a conversa não muda de altura. Com ferramenta, o balão
- * continua (revisão 2 do #508: a resposta final de um turno com ferramenta não fica escondida), e as etapas e a lista
- * de tarefas ficam no resumo das ações (NOD-353); o vigia (NOD-73), à vista, com o Parar.
- * `saindo` (QA do #508): o turno acabou e a fala gravada ainda não chegou — a mesma fala, parada, até a releitura.
+ * A fala viva (NOD-348, emenda da ADR-114; Parte 2 do plano "o pensamento no chat", 2026-10-26, opção C aprovada pelo
+ * Marlon): o turno rodando é uma fala do bot — o mascote md do bot do turno, o nome e, abaixo dele, o PENSAMENTO
+ * (`renderPensar`): um `<details>` fechado por padrão cujo cabeçalho diz o que o bot faz agora (a narração curta corre
+ * ali mesmo; a ferramenta em uso e "Pensando" trocam com a permanência do reducer, `comCabecalho`) e, à direita, a faixa
+ * `tempo · N ações · N falharam`; aberto, as notas e os grupos de ações na ordem em que aconteceram.
+ * O balão só entra com texto definitivo (`falaNoBalao`): os relatórios longos e o texto corrente quando passou de
+ * `PROMOCAO_CHARS` ou o turno acabou — nunca a narração curta, que a gravada deixa de fora. Só anda numa direção.
+ * `saindo` (QA do #508): o turno acabou e a fala gravada ainda não chegou — a mesma fala, parada, com o cabeçalho
+ * "Pensou por N s · N ações", até a releitura (a gravada desenha o mesmo bloco, `resumoDaMensagem`).
  * Cada pedaço é uma parte (`data-parte`) filha do `.bubble-wrap`: `regiaoPorBlocos` troca só a parte que mudou e copia
- * os atributos para o mesmo `<nod-mascote>`, que não reinicia a cada pedaço do streaming (`morfar`). O tempo da linha
- * viva (`data-desde`) sai vazio e é escrito pelo relógio da tela (web/lib/fala-viva.ts), para o HTML não mudar a cada tick.
+ * os atributos para o mesmo `<nod-mascote>` (`morfar`). O pensamento é `data-no-lugar`: o nó fica (o `open` é da pessoa,
+ * web/lib/morph.ts) e só o conteúdo muda. O tempo (`data-desde`) e a troca pendente do cabeçalho (`data-estado-pendente`)
+ * são escritos pelo relógio da tela (web/lib/fala-viva.ts), para o HTML não mudar a cada tick.
  */
 export type FalaViva = { html: string; morfar: Morph };
 export function renderFalaViva(t: TurnoVivo, a: AtividadeTurno | undefined, agente: Pick<AgenteDaFala, "nome" | "cor" | "forma"> | undefined, estado: Estado, parar: string, saindo?: { em: number; chave: string }): FalaViva {
   const nome = agente?.nome ?? "O agente";
   const fala = saindo ? { chave: "respondeu", texto: "Respondeu", mascote: { state: "idle" } as { state: string; expression?: string } } : estadoDaFala(a);
-  const { texto, trechos } = falaComposta(a);
+  const { texto, trechos } = falaNoBalao(a, !!saindo);
   // A chave do cache do texto formatado e das tabelas: a fala parada do meio do turno tem a sua (revisão 4 do #508).
   const chave = saindo?.chave ?? `vivo:${t.turnoId}`;
   // NOD-73: no silêncio do vigia o brilho para (a linha não finge trabalho); o aviso âmbar diz o resto. A fala saindo também para.
-  const parado = saindo || minutosSemNovidade(a, estado.agora) !== null ? " parado" : "";
-  // Saindo, o tempo fica escrito (o do turno inteiro) e sem `data-desde`: o relógio não o conta mais.
-  const tempo = saindo ? `<span class="fala-viva-tempo" aria-hidden="true">${tempoDaFala(saindo.em - t.desde)}</span>` : `<span class="fala-viva-tempo" data-desde="${t.desde}" aria-hidden="true"></span>`;
-  const viva = (lugar: "autor" | "rodape") => `<div class="fala-viva-linha ${lugar}${parado}" data-parte="viva" data-estado-fala="${fala.chave}"><span class="fala-viva-estado">${esc(fala.texto)}</span><span class="fala-viva-sep" aria-hidden="true"> · </span>${tempo}</div>`;
+  const mudo = minutosSemNovidade(a, estado.agora);
+  const parado = saindo || mudo !== null ? " parado" : "";
   const partes: { chave: string; html: string }[] = [{ chave: "nome", html: `<div class="msg-autor" data-parte="nome"><b title="${esc(nome)}">${esc(nome)}</b></div>` }];
-  // NOD-353: o resumo das ações, entre o nome e o balão, como na fala gravada. A fala do meio que saiu (`saindo:`) não o
-  // tem — a gravada dela também não —; a última de um turno acabado (`vivo:`) tem, igual à gravada, sem pulo na troca.
-  const resumo = a && (!saindo || chave === `vivo:${t.turnoId}`) ? renderResumoDasAcoes(t.turnoId, linhasDoResumo(a.acoes, !!saindo), saindo ? [] : a.tarefas, "acoes") : "";
-  if (resumo) partes.push({ chave: "acoes", html: resumo });
-  if (!texto) partes.push({ chave: "viva", html: viva("autor") });
+  // O pensamento, entre o nome e o balão. A fala do meio que saiu (`saindo:`) não o tem — a gravada dela também não —;
+  // a última de um turno acabado (`vivo:`) tem, igual à gravada, sem pulo na troca (NOD-353).
+  const p = !saindo || chave === `vivo:${t.turnoId}` ? pensarDaFalaViva(t, a, estado, saindo, mudo) : null;
+  const pensar = p ? renderPensar({ ...p, parte: "pensar" }) : "";
+  if (pensar) partes.push({ chave: "pensar", html: pensar });
   // NOD-358: um balão por parágrafo, como a fala gravada vai mostrar. Ao vivo (`parcial`), o próximo só aparece quando
   // decide que não continua a lista de cima, e entra subindo (`balao-entra`); os anteriores não mudam, e o balão que
   // cresce muda por dentro (`data-no-lugar`), sem nó novo. O balão único fica como a fala de um parágrafo gravada (sem
   // `data-balao`, com a largura de antes; revisão 3 do PR #522): quando o segundo nasce, o primeiro passa à largura do
-  // texto uma vez. A geração do trecho onde o balão começa (`falaComposta`) entra na chave quando o texto depois da
-  // ferramenta substitui a narração curta: os balões dela saem e os novos entram; os do relatório longo ficam.
+  // texto uma vez. A geração do trecho onde o balão começa entra na chave: os balões do relatório longo guardam a dele.
   const baloes = texto ? dividirEmBaloes(texto, { parcial: !saindo }) : [];
   const emLf = textoEmLf(texto);
   let pos = 0;
@@ -782,13 +783,26 @@ export function renderFalaViva(t: TurnoVivo, a: AtividadeTurno | undefined, agen
   });
   const vigia = a && !saindo ? renderAvisoDoVigia(a, estado.agora, parar, "vigia") : "";
   if (vigia) partes.push({ chave: "vigia", html: vigia });
-  if (texto) partes.push({ chave: "viva", html: viva("rodape") });
   // `saindo` vai na classe (não num atributo): o morph copia a classe da raiz, e o anunciador pula a fala que saiu.
-  const raiz = `message bot fala-viva ao-vivo${texto ? " com-texto" : ""}${saindo ? " saindo" : ""}`;
+  // Parte 3: a cor do bot (classe c-*, web/estilos.css → --mascote-cor) na raiz, para o brilho do cabeçalho ser da cor dele.
+  const raiz = `message bot fala-viva ao-vivo${texto ? " com-texto" : ""}${saindo ? " saindo" : ""}${agente?.cor ? ` ${esc(agente.cor)}` : ""}`;
   const rotulo = `${nome} · ${minusculaInicial(fala.texto)}`;
-  // No silêncio do vigia o mascote também para (NOD-216: só anima com trabalho de verdade).
-  const state = parado ? "idle" : fala.mascote.state;
-  const mascote: Record<string, string> = { state, "data-estado": state === "orbit" ? "trabalhando" : "disponivel", "aria-label": rotulo, title: rotulo, ...(fala.mascote.expression ? { expression: fala.mascote.expression } : {}) };
+  // Parte 3 (o mapa do Bloub no chat, docs/mascotes.md): `wink` quando a fala entra (disparo único), `alert` no silêncio
+  // do vigia (NOD-216: só anima com trabalho de verdade; o "!" pede atenção), `notify` esperando a pessoa, `comet` quando
+  // as frentes saem, e senão o estado da fala (thinking, idle + attentif, orbit). O relógio da virada (web/lib/mascote.ts)
+  // redesenha quando um disparo acaba.
+  const state = saindo
+    ? (estado.agora - saindo.em < WINK_MS ? "wink" : "idle")
+    : mudo !== null
+      ? MASCOTE_NO_SILENCIO
+      : esperaDaPessoa(estado, t.turnoId)
+        ? "notify"
+        : a?.frentesEm !== undefined && estado.agora - a.frentesEm < COMET_MS
+          ? "comet"
+          : fala.mascote.state;
+  const expression = state === "idle" && !parado ? fala.mascote.expression : null;
+  const dataEstado = state === "orbit" || state === "comet" ? "trabalhando" : state === "thinking" ? "pensando" : state === "notify" ? "aguardando" : "disponivel";
+  const mascote: Record<string, string> = { state, "data-estado": dataEstado, "aria-label": rotulo, title: rotulo, ...(expression ? { expression } : {}) };
   const htmlDoMascote = agente ? mascoteDaFala(agente, mascote) : "";
   return {
     html: `<article class="${raiz}" data-turno="${esc(t.turnoId)}" data-morfar>${htmlDoMascote}<div class="bubble-wrap">${partes.map((p) => p.html).join("")}</div></article>`,
@@ -804,27 +818,142 @@ function minusculaInicial(s: string): string {
 }
 
 
-/** O mascote md da fala, com o estado da linha viva (idle + attentif pensando ou escrevendo; orbit fazendo; ADR-114, emenda da NOD-348). */
+/**
+ * Parte 3: o estado do Bloub no silêncio do vigia. Decisão pendente das capturas (26/10): `alert` (o "!") ou o repouso com
+ * a expressão sonolenta (`idle` + `somnolent`); começa com `alert`, que o catálogo reserva para "falha recuperável que pede
+ * atenção". Trocar aqui e em docs/mascotes.md.
+ */
+export const MASCOTE_NO_SILENCIO = "alert";
+
+/** O mascote md da fala, com o estado do Bloub que a fala pede (`state` e `expression` vêm prontos em `attrs`; Parte 3). */
 function mascoteDaFala(agente: Pick<AgenteDaFala, "nome" | "cor" | "forma">, attrs: Record<string, string>): string {
-  const base = iconeAgente(agente, "md", attrs.state === "orbit" ? "trabalhando" : "disponivel", `data-parte="mascote"${attrs.expression ? ` expression="${esc(attrs.expression)}"` : ""}`);
+  const base = iconeAgente(agente, "md", attrs["data-estado"] as EstadoMascote, `data-parte="mascote"${attrs.expression ? ` expression="${esc(attrs.expression)}"` : ""}`);
   // Substituição por função: com uma string, `$&`, `` $` `` e `$'` no nome do bot seriam lidos pelo replace e abririam um atributo (revisão do #508).
   const rotulo = (nome: string, valor: string) => () => ` ${nome}="${esc(valor)}"`;
-  return base.replace(/ aria-label="[^"]*"/, rotulo("aria-label", attrs["aria-label"] ?? "")).replace(/ title="[^"]*"/, rotulo("title", attrs.title ?? ""));
+  // O `state` do Bloub é o da fala (thinking, wink, comet…), não o do mapa geral de `htmlMascote`.
+  return base.replace(/ aria-label="[^"]*"/, rotulo("aria-label", attrs["aria-label"] ?? "")).replace(/ title="[^"]*"/, rotulo("title", attrs.title ?? "")).replace(/ state="[^"]*"/, rotulo("state", attrs.state ?? "idle"));
+}
+
+// ---- O pensamento (Parte 2 do plano "o pensamento no chat") ---------------------------------------------------------
+
+/** A fase do pensamento: o CSS desenha cada uma (`data-fase`). */
+export type FaseDoPensamento = "pensando" | "fazendo" | "esperando" | "silencio" | "pronto";
+
+export type Pensar = {
+  turnoId: string;
+  fase: FaseDoPensamento;
+  /** O cabeçalho: o texto à vista e, com a permanência ainda a correr, o que entra depois (o relógio da tela escreve). */
+  cabecalho: { id: string; texto: string; pendente?: { texto: string; desde: number } };
+  /** O que o leitor de tela ouve (sem a narração inteira): "Pensando", "Escrevendo", "Usando Linear". */
+  anuncio: string;
+  /** O tempo: ao vivo, contado pelo relógio da tela desde `desde`; pronto, já no cabeçalho. */
+  desde: number | null;
+  contagem: { acoes: number; falhas: number };
+  itens: readonly ItemDoPensamento[];
+  tarefas: readonly TarefaDoBot[];
+  /** `data-parte` da fala viva; a gravada não tem. */
+  parte?: string;
+};
+
+/** O que a fala viva diz no pensamento, a partir do turno e da atividade (puro; os testes leem daqui). */
+export function pensarDaFalaViva(t: TurnoVivo, a: AtividadeTurno | undefined, estado: Estado, saindo: { em: number } | undefined, mudo: number | null = minutosSemNovidade(a, estado.agora)): Pensar | null {
+  const contagem = contagemDasAcoes(a);
+  const itens = itensDoPensamento(a, !!saindo);
+  if (saindo) {
+    // No fim, o pensamento só fica quando houve o que contar (ações ou notas): a gravada sem resumo também não o tem.
+    if (contagem.acoes === 0 && itens.length === 0) return null;
+    return { turnoId: t.turnoId, fase: "pronto", cabecalho: { id: "pronto", texto: frasePensou(saindo.em - t.desde, contagem) }, anuncio: "Respondeu", desde: null, contagem, itens, tarefas: [] };
+  }
+  const estadoFala = estadoDaFala(a);
+  const espera = esperaDaPessoa(estado, t.turnoId);
+  const fase: FaseDoPensamento = mudo !== null ? "silencio" : espera ? "esperando" : estadoFala.chave === "ferramenta" || estadoFala.chave === "frentes" ? "fazendo" : "pensando";
+  const c = a?.cabecalho;
+  const cabecalho = fase === "silencio"
+    ? { id: "silencio", texto: `Sem novidade há ${mudo} min` }
+    : fase === "esperando"
+      ? { id: "esperando", texto: espera! }
+      : c
+        ? { id: c.id, texto: c.texto, ...(c.pendente ? { pendente: { texto: c.pendente.texto, desde: c.desde } } : {}) }
+        : { id: estadoFala.chave === "escrevendo" ? "escrevendo" : `${estadoFala.chave}:${estadoFala.texto}`, texto: estadoFala.chave === "escrevendo" && a ? textoEscrevendo(a) : estadoFala.texto };
+  return { turnoId: t.turnoId, fase, cabecalho, anuncio: fase === "silencio" ? cabecalho.texto : fase === "esperando" ? cabecalho.texto : estadoFala.texto, desde: t.desde, contagem, itens, tarefas: a?.tarefas ?? [] };
+}
+
+/** "Pensou por 9 s · 2 ações · 1 falhou": a linha do pensamento pronto (viva e gravada). Sem tempo: "2 ações · 1 falhou". */
+export function frasePensou(duracaoMs: number | null, contagem: { acoes: number; falhas: number }): string {
+  const partes = [duracaoMs === null ? "" : `Pensou por ${tempoDaFala(duracaoMs)}`, contagem.acoes ? `${contagem.acoes === 1 ? "1 ação" : `${contagem.acoes} ações`}` : "", contagem.falhas ? (contagem.falhas === 1 ? "1 falhou" : `${contagem.falhas} falharam`) : ""].filter(Boolean);
+  return partes.join(" · ");
 }
 
 /**
- * NOD-353 (protótipo v2 do Gil, `p348-acoes`; emenda da ADR-114): o resumo das ações da fala, recolhido por padrão. A
- * frase conta só as que terminaram ("Pesquisou na web e abriu uma página"); aberto, uma por linha, a que roda no
- * presente ("Usando Gmail") e a que deu erro com **Falhou** na linha dela. Fora de região live: a troca do presente
- * pelo passado não é anunciada. A mesma chave de disclosure na fala viva, na parada e na gravada (o aberto continua
- * aberto na troca, e o foco volta pelo `data-disclosure`). Nada terminado ainda: não aparece.
- * As tarefas do bot (o checklist) ficam dentro do aberto, só na fala viva, até a NOD-359.
+ * O turno espera a pessoa (aprovação ou pergunta aberta dele, em "Sua vez"): o cabeçalho diz, sem brilho. `null` = não.
+ * "Sua vez" chega uma releitura depois do frame; até lá o cabeçalho segue o estado da fala.
  */
-export function renderResumoDasAcoes(turnoId: string, linhas: readonly LinhaDoResumo[], tarefas: readonly TarefaDoBot[] = [], parte?: string): string {
-  const frase = fraseDasAcoes(linhas);
-  if (!frase) return "";
-  const itens = linhas.map((l) => `<li data-estado="${l.estado}"><span>${esc(l.estado === "rodando" ? (l.emUso ?? l.rotulo) : l.rotulo)}</span>${(l.vezes ?? 1) > 1 ? `<span class="fala-acoes-vezes">×${l.vezes}</span>` : ""}${l.estado === "falhou" ? '<span class="fala-acoes-falhou">Falhou</span>' : ""}</li>`).join("");
-  return `<details class="fala-acoes"${parte ? ` data-parte="${parte}"` : ""} data-disclosure="acoes-${esc(turnoId)}"><summary><span class="fala-acoes-txt">${esc(frase)}</span><span class="fala-acoes-seta" aria-hidden="true"></span></summary>${renderTarefasDoBot(tarefas)}<ol role="list">${itens}</ol></details>`;
+export function esperaDaPessoa(estado: Pick<Estado, "suaVez">, turnoId: string): string | null {
+  const item = estado.suaVez?.itens.find((i) => i.decisao.turnoId === turnoId && i.decisao.estado === "pendente" && i.estadoColuna !== "vencido");
+  if (!item) return null;
+  return item.decisao.tipo === "pergunta" ? "Esperando sua resposta" : "Esperando sua aprovação";
+}
+
+/**
+ * O bloco do pensamento: `<details>` fechado por padrão (o `open` é da pessoa e sobrevive ao morph e à regravação pelo
+ * `data-disclosure`), o cabeçalho no `<summary>` e, dentro, as tarefas do bot e a lista de notas e grupos — só os últimos
+ * `GRUPOS_A_VISTA` grupos à vista, os anteriores atrás de "N anteriores".
+ */
+export function renderPensar(p: Pensar | null): string {
+  if (!p) return "";
+  const pendente = p.cabecalho.pendente ? ` data-estado-pendente="${esc(p.cabecalho.pendente.texto)}" data-estado-desde="${p.cabecalho.pendente.desde}"` : "";
+  const tempo = p.desde !== null ? `<span class="fala-viva-tempo" data-desde="${p.desde}" aria-hidden="true"></span>` : "";
+  const contagem = p.contagem.acoes ? `<span class="pensar-contagem">${p.contagem.acoes === 1 ? "1 ação" : `${p.contagem.acoes} ações`}</span>` : "";
+  const falhas = p.contagem.falhas ? `<span class="pensar-falhas">${p.contagem.falhas === 1 ? "1 falhou" : `${p.contagem.falhas} falharam`}</span>` : "";
+  const meta = p.fase === "pronto" ? "" : `<span class="pensar-meta" aria-hidden="true">${tempo}${contagem}${falhas}</span>`;
+  const cab = `<summary class="pensar-cab"><span class="fala-viva-estado">${esc(p.cabecalho.texto)}</span><span class="sr-only fala-viva-anuncio">${esc(p.anuncio)}</span>${meta}<span class="pensar-seta" aria-hidden="true"></span></summary>`;
+  const grupos = p.itens.filter((i) => i.tipo === "grupo").length;
+  const escondidos = Math.max(0, grupos - GRUPOS_A_VISTA);
+  // Os itens até o grupo de índice `escondidos` (exclusive) vão para "N anteriores": notas incluídas, na mesma ordem.
+  const lista: string[] = [];
+  const anteriores: string[] = [];
+  let vistos = 0;
+  for (const item of p.itens) {
+    const li = itemDoPensamento(item);
+    if (item.tipo === "grupo") vistos += 1;
+    const escondido = item.tipo === "grupo" ? vistos <= escondidos : vistos < escondidos;
+    if (escondido) anteriores.push(li); else lista.push(li);
+  }
+  const mais = anteriores.length ? `<li class="pensar-mais"><details data-disclosure="pensar-mais-${esc(p.turnoId)}"><summary>${escondidos === 1 ? "1 anterior" : `${escondidos} anteriores`}</summary><ol role="list">${anteriores.join("")}</ol></details></li>` : "";
+  const corpo = `<div class="pensar-corpo"><div class="pensar-dentro">${renderTarefasDoBot(p.tarefas)}${lista.length || mais ? `<ol class="pensar-lista" role="list">${mais}${lista.join("")}</ol>` : ""}</div></div>`;
+  return `<details class="pensar"${p.parte ? ` data-parte="${p.parte}" data-no-lugar` : ""} data-disclosure="pensar-${esc(p.turnoId)}" data-fase="${p.fase}" data-estado-fala="${esc(p.cabecalho.id)}"${pendente}>${cab}${corpo}</details>`;
+}
+
+function itemDoPensamento(item: ItemDoPensamento): string {
+  if (item.tipo === "nota") return `<li class="pensar-nota">${esc(item.texto)}</li>`;
+  const estado = item.rodando ? "rodando" : item.falhas ? "falhou" : "feita";
+  const rotulo = item.rodando ? (item.emUso ?? item.rotulo) : item.rotulo;
+  const vezes = item.vezes > 1 ? `<span class="pensar-vezes">×${item.vezes}</span>` : "";
+  const falhou = item.falhas ? `<span class="pensar-falhou">${item.falhas === 1 ? "Falhou" : `${item.falhas} falharam`}</span>` : "";
+  return `<li class="pensar-acao" data-estado="${estado}"><i class="pensar-ic" aria-hidden="true"></i><span>${esc(rotulo)}</span>${vezes}${falhou}</li>`;
+}
+
+/**
+ * NOD-353 (compatibilidade): o resumo pronto a partir das linhas da gravada (`linhasDoResumo`) — o mesmo bloco do
+ * pensamento, na fase "pronto". `duracaoMs` (decisão 2 de 26/10): o servidor grava a duração no payload.
+ */
+export function renderResumoDasAcoes(turnoId: string, linhas: readonly LinhaDoResumo[], tarefas: readonly TarefaDoBot[] = [], parte?: string, duracaoMs: number | null = null): string {
+  // A gravada nunca tem ação rodando; a linha que ainda roda (só na viva de antes) fica de fora.
+  // Revisão do PR (27/10): o servidor (`acoesDoTurno`) separa a mesma ferramenta por desfecho ("A", "A falhou"); a viva
+  // (`itensDoPensamento`) junta a mesma ferramenta seguida num grupo só (×N · N falharam) — a gravada junta igual, senão
+  // o pensamento aberto reagrupava na troca viva → gravada.
+  const itens: ItemDoPensamento[] = [];
+  for (const l of linhas) {
+    if (l.estado === "rodando") continue;
+    const vezes = l.vezes ?? 1;
+    const falhas = l.estado === "falhou" ? vezes : 0;
+    const ultimo = itens[itens.length - 1];
+    if (ultimo && ultimo.tipo === "grupo" && ultimo.rotulo === l.rotulo) { ultimo.vezes += vezes; ultimo.falhas += falhas; continue; }
+    itens.push({ tipo: "grupo", rotulo: l.rotulo, vezes, falhas, rodando: false, emUso: null, frentes: false });
+  }
+  const contagem = { acoes: itens.reduce((n, i) => n + (i.tipo === "grupo" ? i.vezes : 0), 0), falhas: itens.reduce((n, i) => n + (i.tipo === "grupo" ? i.falhas : 0), 0) };
+  if (contagem.acoes === 0) return "";
+  return renderPensar({ turnoId, fase: "pronto", cabecalho: { id: "pronto", texto: frasePensou(duracaoMs, contagem) }, anuncio: "Respondeu", desde: null, contagem, itens, tarefas, ...(parte ? { parte } : {}) });
 }
 
 /** NOD-353: o resumo gravado na fala final (payload `acoes_do_turno`), na forma das linhas da fala viva. */
@@ -832,7 +961,8 @@ function resumoDaMensagem(m: Mensagem): string {
   // Revisão do #523: payload gravado é dado (jsonb de outra versão) — fora da forma, sem resumo em vez de quebrar a tela.
   if (m.payload?.kind !== "acoes_do_turno" || !Array.isArray(m.payload.acoes)) return "";
   const linhas = m.payload.acoes.filter((x) => typeof x?.rotulo === "string").map((x): LinhaDoResumo => ({ rotulo: x.rotulo, estado: x.falhou ? "falhou" : "feita", emUso: null, ...(Number.isInteger(x.vezes) && x.vezes! > 1 ? { vezes: Math.min(x.vezes!, 9999) } : {}) }));
-  return renderResumoDasAcoes(m.turnoId ?? m.id, linhas);
+  const duracaoMs = typeof m.payload.duracaoMs === "number" && Number.isFinite(m.payload.duracaoMs) && m.payload.duracaoMs >= 0 ? m.payload.duracaoMs : null;
+  return renderResumoDasAcoes(m.turnoId ?? m.id, linhas, [], undefined, duracaoMs);
 }
 
 /**
@@ -1174,6 +1304,10 @@ export function blocosDoHistorico(c: ConversaEstado, estado: Estado): BlocoDaTim
   const decididos = new Set(c.mensagens.map(pedidoDoRecibo).filter((id): id is string => id !== null));
   const abertas = propostas.filter((p) => !decididos.has(p.id));
   const idsDasPropostas = new Set([...abertas.map((p) => p.id), ...decididos]);
+  // Parte 1 do plano "o pensamento no chat": a gravada de uma fala que nasceu pendente fica com a chave do bloco da
+  // pendente, e as pendentes entram depois das mensagens (são as mais novas), antes das propostas e das decisões.
+  const chaveDaPendente = (b: BlocoDaTimeline): BlocoDaTimeline => (c.enviadas?.[b.chave] ? { ...b, chave: `pendente:${c.enviadas[b.chave]}` } : b);
+  const pendentes = (c.pendentes ?? []).map((p) => ({ chave: `pendente:${p.idEnvio}`, html: renderFalaPendente(p, c, estado) }));
   const { blocos, ancoradas } = comPedidosAncorados(comEncolhidosNaAncora(blocosDasMensagens(c.mensagens, estado, sala, c.conversa.agenteId ? { agenteId: c.conversa.agenteId, acoes: c.acoesDoModo } : undefined), c), c, estado, idsDasPropostas);
   return [
     // Chat limpo (PR 6; plano, Parte 5): o divisor do topo e um a cada pausa de 30 min ou troca de dia entre itens à vista,
@@ -1181,7 +1315,8 @@ export function blocosDoHistorico(c: ConversaEstado, estado: Estado): BlocoDaTim
     // e na conversa do servidor de antes: lá nada some, e o divisor só marca as pausas. "Hoje" e "Ontem" leem o relógio
     // direto, como `textoFormatado`: o histórico é lembrado com o dia de extra (main.ts, `partesDaTimeline`), e ler
     // `estado.agora` o refaria inteiro a cada tick de 15 s.
-    ...comDivisores(blocos, Date.now()),
+    ...comDivisores(blocos, Date.now()).map(chaveDaPendente),
+    ...pendentes,
     { chave: "acolhimento", html: acolhimento },
     ...abertas.map((p) => ({ chave: `proposta:${p.id}`, html: renderProposta(p, estado, c.propostas) })),
     { chave: "decisoes", html: renderDecisoesDaConversa(estado, c.conversa.id, idsDasPropostas, ancoradas) },
@@ -1189,6 +1324,29 @@ export function blocosDoHistorico(c: ConversaEstado, estado: Estado): BlocoDaTim
     // Ela aparecia sozinha em bot novo e a cada reconexão do Mac, porque valia para todo bot sem acesso por 24 h depois de
     // qualquer verificação. O card de acesso nasce quando o bot pede (pedir_acesso), logo abaixo da fala dele.
   ].filter((b) => b.html !== "");
+}
+
+/**
+ * Parte 1 do plano "o pensamento no chat" (2026-10-26): a fala da pessoa que ainda não voltou do servidor, desenhada
+ * pela mesma `renderMensagem` da gravada (para a troca pendente → gravada não mudar um pixel). `data-envio` diz o estado:
+ * `enviando` (balão mais claro) ou `falhou` (tracejado em vermelho, "Tentar de novo" com a mesma chave e Descartar).
+ */
+export function mensagemDaPendente(p: FalaPendente, c: ConversaEstado, estado: Estado): Mensagem {
+  return {
+    tenantId: c.conversa.tenantId, id: p.mensagemId ?? `pendente:${p.idEnvio}`, conversaId: c.conversa.id, turnoId: p.turnoId,
+    autoria: { autor_tipo: "pessoa", autor_id: estado.sessao?.pessoaId ?? c.conversa.ownerId } as Mensagem["autoria"],
+    kind: "texto", texto: p.texto, payload: null, confianca: "confiavel", parcial: false, criadoEm: p.em,
+    ...(p.anexos.length ? { anexos: [...p.anexos] } : {}),
+  };
+}
+
+export function renderFalaPendente(p: FalaPendente, c: ConversaEstado, estado: Estado): string {
+  // Sem as ações da fala (reagir, reportar, citar): elas levam o id gravado, que a pendente ainda não tem.
+  const fala = renderMensagem(mensagemDaPendente(p, c, estado), estado, c.conversa.tipo === "sala", { semAcoes: true });
+  const erro = p.estado === "falhou"
+    ? `<div class="envio-erro" role="status"><span>Não foi enviada.${p.motivo ? ` ${esc(p.motivo)}` : ""}</span>${botao("reenviar-pendente", "Tentar de novo", { classe: "envio-bt", id: p.idEnvio, dados: { conversa: c.conversa.id } })}${botao("descartar-pendente", "Descartar", { classe: "envio-bt", id: p.idEnvio, dados: { conversa: c.conversa.id } })}</div>`
+    : "";
+  return `<div class="fala-pendente" data-envio="${p.estado}">${fala}${erro}</div>`;
 }
 
 /**

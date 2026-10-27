@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { corpoDoEnvio, criarEnvios, enviarUmaVez } from "../../../web/lib/envio-idempotente.ts";
-import { enviarPeloComposer, type ApiDeEnvio } from "../../../web/lib/perguntas.ts";
+import { enviarPeloComposer, idsDaResposta, type ApiDeEnvio } from "../../../web/lib/perguntas.ts";
 
 function contador(): () => string {
   let n = 0;
@@ -24,6 +24,19 @@ describe("NOD-156: idEnvio no envio da web", () => {
     envios.concluir("c1", true);
     // A pessoa manda "oi" de novo, de propósito: é outra fala.
     expect(envios.iniciar("c1", "oi", [])).toBe("chave-2");
+    envios.concluir("c1", true);
+  });
+
+  it("revisão do PR do pensamento no chat (27/10): o 'Tentar de novo' manda a chave da própria pendente, mesmo com outra fala no meio", () => {
+    const envios = criarEnvios(contador());
+    expect(envios.iniciar("c1", "a", [])).toBe("chave-1");
+    envios.concluir("c1", false); // a fala A falhou (o POST pode ter chegado)
+    expect(envios.iniciar("c1", "b", [])).toBe("chave-2"); // a pessoa manda B
+    envios.concluir("c1", true);
+    // Sem a chave dada, A ganharia "chave-3" e o servidor a gravaria de novo.
+    expect(envios.iniciar("c1", "a", [], undefined, "chave-1")).toBe("chave-1");
+    // Continua uma por vez: com a chave dada em voo, outro envio espera.
+    expect(envios.iniciar("c1", "x", [])).toBeNull();
     envios.concluir("c1", true);
   });
 
@@ -67,6 +80,16 @@ describe("NOD-156: idEnvio no envio da web", () => {
     expect(api.postarNaSala).toHaveBeenCalledWith("s1", "oi, sala");
     await enviarPeloComposer(api, { conversaId: "c", salaId: null }, { tipo: "resposta", decisaoId: "d1" }, "sim", [], "chave-3");
     expect(api.responder).toHaveBeenCalledWith("d1", "sim");
+  });
+
+  it("Parte 1 do plano 'o pensamento no chat': os ids do POST voltam só quando têm a forma do RespostaMutacao (servidor de antes: sem ids)", async () => {
+    const api = { enviar: vi.fn(async () => ({ ok: true, ids: { mensagem: "m1", turno: "t1", extra: 7 } })), responder: vi.fn(async () => ({})), postarNaSala: vi.fn(async () => ({})) } satisfies ApiDeEnvio;
+    expect(await enviarPeloComposer(api, { conversaId: "c", salaId: null }, { tipo: "mensagem" }, "oi", [], "chave-1")).toEqual({ enviado: "mensagem", ids: { mensagem: "m1", turno: "t1" } });
+    expect(idsDaResposta({})).toBeNull();
+    expect(idsDaResposta({ ids: {} })).toBeNull();
+    expect(idsDaResposta(null)).toBeNull();
+    const antigo = { enviar: vi.fn(async () => ({})), responder: vi.fn(async () => ({})), postarNaSala: vi.fn(async () => ({})) } satisfies ApiDeEnvio;
+    expect(await enviarPeloComposer(antigo, { conversaId: "c", salaId: null }, { tipo: "mensagem" }, "oi", [], "chave-2")).toEqual({ enviado: "mensagem" });
   });
 });
 

@@ -11,7 +11,8 @@ describe("catálogo original Bloub", () => {
   it("mapeia todos os estados e formas originais sem inventar estados ativos", () => {
     expect(Object.keys(CATALOGO_MASCOTE).sort()).toEqual(STATES.map(s => s.id).sort());
     expect(Object.values(FORMAS_BLOUB).sort()).toEqual(SHAPES.map(s => s.id).sort());
-    expect(Object.values(CATALOGO_MASCOTE).filter(s => s.ativo)).toHaveLength(4);
+    // 4 do mapa geral + wink, alert e comet da fala viva do chat (Parte 3 do plano "o pensamento no chat", ADR-129).
+    expect(Object.entries(CATALOGO_MASCOTE).filter(([, s]) => s.ativo).map(([id]) => id).sort()).toEqual(["alert", "comet", "idle", "notify", "orbit", "thinking", "wink"]);
     expect(EXPRESSIONS).toHaveLength(16);
   });
   it("mantém repouso imóvel e sem piscadas em qualquer instante", () => {

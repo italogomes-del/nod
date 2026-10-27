@@ -11,7 +11,7 @@ export type Envios = {
    * A chave deste envio, ou `null` se já há um em voo nesta conversa. `respondeA` (ADR-113) entra na assinatura: a mesma
    * fala com outra citação (ou sem a que tinha) é outra mensagem, e o servidor não pode devolver a gravada antes.
    */
-  iniciar(conversaId: string, texto: string, anexos: readonly string[], respondeA?: string): string | null;
+  iniciar(conversaId: string, texto: string, anexos: readonly string[], respondeA?: string, chave?: string): string | null;
   /** Fecha o envio em voo; com `ok`, a chave pendente some e a próxima fala ganha outra. */
   concluir(conversaId: string, ok: boolean): void;
 };
@@ -20,11 +20,14 @@ export function criarEnvios(gerar: () => string = () => crypto.randomUUID()): En
   const pendentes = new Map<string, Pendente>();
   const emVoo = new Set<string>();
   return {
-    iniciar(conversaId, texto, anexos, respondeA) {
+    iniciar(conversaId, texto, anexos, respondeA, dada) {
       if (emVoo.has(conversaId)) return null;
       const assinatura = JSON.stringify([texto, [...anexos], respondeA ?? null]);
       const anterior = pendentes.get(conversaId);
-      const chave = anterior && anterior.assinatura === assinatura ? anterior.chave : gerar();
+      // `dada` (revisão do PR do pensamento no chat, 27/10): o "Tentar de novo" da fala pendente manda a chave que ela já
+      // tem — a de cá só lembra a última fala da conversa, e outra fala no meio trocaria a chave e gravaria a primeira
+      // de novo se o POST tinha chegado ao servidor.
+      const chave = dada ?? (anterior && anterior.assinatura === assinatura ? anterior.chave : gerar());
       pendentes.set(conversaId, { chave, assinatura });
       emVoo.add(conversaId);
       return chave;

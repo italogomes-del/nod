@@ -27,6 +27,8 @@ function cenario(mensagens: Mensagem[]): Estado {
 
 const conta = (html: string, trecho: string | RegExp): number => html.split(trecho).length - 1;
 const RESPOSTA = "Fechei a revisão.\n\nFaltam quatro coisas para sexta:\n\n- deploy\n- teste\n- doc\n- aviso\n\nTe aviso quando sair.";
+/** Parte 2 do plano "o pensamento no chat": ao vivo, o balão só entra com texto definitivo (> 280 caracteres); a gravada divide igual. */
+const RESPOSTA_LONGA = `Fechei a revisão ${"de todos os pontos levantados na reunião de ontem com o time. ".repeat(5)}\n\nFaltam quatro coisas para sexta:\n\n- deploy\n- teste\n- doc\n- aviso\n\nTe aviso quando sair.`;
 
 describe("a fala gravada", () => {
   it("um balão por parágrafo; mascote, nome e hora uma vez; a lista com a frase que a apresenta", () => {
@@ -71,8 +73,8 @@ describe("a fala viva", () => {
   const vivo = (texto: string): ReturnType<typeof blocosAoVivo>[number] => comAtividade(comTexto(ATIVIDADE_VAZIA, texto));
 
   it("cada balão é uma parte do morph; o novo entra com balao-entra", () => {
-    const b = vivo(RESPOSTA);
-    expect(b.morfar!.partes.map((p) => p.chave)).toEqual(["nome", "balao", "balao-1", "balao-2", "viva"]);
+    const b = vivo(RESPOSTA_LONGA);
+    expect(b.morfar!.partes.map((p) => p.chave)).toEqual(["nome", "pensar", "balao", "balao-1", "balao-2"]);
     expect(b.html).toContain('<div class="bubble balao-entra" data-parte="balao-1" data-balao="1" data-no-lugar>');
     expect(b.html).not.toMatch(/class="bubble balao-entra" data-parte="balao"/);
     expect(conta(b.html, "<nod-mascote")).toBe(1);
@@ -80,8 +82,8 @@ describe("a fala viva", () => {
 
   it("enquanto o texto chega, os balões só crescem e o morph troca só o último", () => {
     let antes: ReturnType<typeof vivo> | undefined;
-    for (let n = 1; n <= RESPOSTA.length; n++) {
-      const agora = vivo(RESPOSTA.slice(0, n));
+    for (let n = 1; n <= RESPOSTA_LONGA.length; n++) {
+      const agora = vivo(RESPOSTA_LONGA.slice(0, n));
       const plano = planoDoMorph(antes?.morfar, agora.morfar);
       if (antes) {
         expect(plano).not.toBeNull();
@@ -96,9 +98,12 @@ describe("a fala viva", () => {
   });
 
   it("revisão 3 do PR #522: o balão único ao vivo é o da fala de um parágrafo (sem data-balao, a largura de antes)", () => {
-    expect(vivo("Ok.").html).toContain('<div class="bubble" data-parte="balao" data-no-lugar>Ok.</div>');
+    const longo = `Ok, ${"a revisão passou em todos os pontos. ".repeat(9)}`;
+    expect(vivo(longo).html).toContain('<div class="bubble" data-parte="balao" data-no-lugar>Ok, a revisão passou');
     // Quando o segundo nasce, o primeiro ganha data-balao (a largura do texto), no mesmo nó (data-no-lugar).
-    expect(vivo("Ok.\n\nA").html).toContain('<div class="bubble" data-parte="balao" data-balao="0" data-no-lugar>Ok.</div>');
+    expect(vivo(`${longo}\n\nA`).html).toContain('<div class="bubble" data-parte="balao" data-balao="0" data-no-lugar>Ok, a revisão passou');
+    // Parte 2: o texto curto ao vivo ainda é pensamento, sem balão.
+    expect(vivo("Ok.").html).not.toContain('class="bubble"');
   });
 
   it("revisão 3 do PR #522: os balões do relatório longo mantêm a chave quando a narração curta é substituída", () => {
@@ -106,10 +111,11 @@ describe("a fala viva", () => {
     let a = comFerramenta(comTexto(ATIVIDADE_VAZIA, relatorio), "Consultou Linear", { texto: "Usando Linear", frentes: false });
     a = comFerramenta(comTexto(a, "Vou conferir."), "Consultou GitHub", { texto: "Usando GitHub", frentes: false });
     const antes = comAtividade(a).morfar!;
-    expect(antes.partes.filter((p) => p.chave.startsWith("balao")).map((p) => p.chave)).toEqual(["balao", "balao-1"]);
+    // Parte 2: só o relatório longo está no balão; a narração curta é nota do pensamento.
+    expect(antes.partes.filter((p) => p.chave.startsWith("balao")).map((p) => p.chave)).toEqual(["balao"]);
     const depois = comAtividade(comTexto(a, "Pronto.")).morfar!;
-    expect(depois.partes.filter((p) => p.chave.startsWith("balao")).map((p) => p.chave)).toEqual(["balao", "balao-g1-1"]);
-    // O balão do relatório fica (html null no plano); o da narração sai e o novo entra.
+    expect(depois.partes.filter((p) => p.chave.startsWith("balao")).map((p) => p.chave)).toEqual(["balao"]);
+    // O balão do relatório fica (html null no plano); nenhum balão sai nem entra.
     const plano = planoDoMorph(antes, depois)!;
     expect(plano.partes.find((p) => p.chave === "balao")?.html).toBeNull();
     expect(plano.partes.map((p) => p.chave)).not.toContain("balao-1");
@@ -125,7 +131,8 @@ describe("a fala viva", () => {
       a = comFerramenta(a, "Consultou GitHub", { texto: "Usando GitHub", frentes: false });
       const antes = comAtividade(a).morfar!;
       const depois = comAtividade(comTexto(a, "Pronto.")).morfar!;
-      expect(depois.partes.filter((p) => p.chave.startsWith("balao")).map((p) => p.chave)).toEqual([...escrevendo, "balao-g1-3"]);
+      // Parte 2: "Pronto." é curto — fica no pensamento; os balões do relatório não mudam.
+      expect(depois.partes.filter((p) => p.chave.startsWith("balao")).map((p) => p.chave)).toEqual(escrevendo);
       // Os balões do relatório não mudam no plano do morph (html null): nada sai, nada reanima.
       const plano = planoDoMorph(antes, depois)!;
       escrevendo.forEach((c) => expect(plano.partes.find((p) => p.chave === c)?.html).toBeNull());
@@ -147,21 +154,24 @@ describe("a fala viva", () => {
     const narracao = `Vou ${"x".repeat(272)} já.`;
     expect(narracao).toHaveLength(280);
     const a = comFerramenta(comTexto(ATIVIDADE_VAZIA, narracao), "F", { texto: "Usando", frentes: false });
-    const chaves = comAtividade(comTexto(a, "Pronto.")).morfar!.partes.filter((p) => p.chave.startsWith("balao")).map((p) => p.chave);
-    expect(chaves).toEqual(["balao-g1"]);
+    const b = comAtividade(comTexto(a, "Pronto."));
+    // Parte 2: curta, nunca entrou no balão — é nota do pensamento; "Pronto." também é curto.
+    expect(b.morfar!.partes.filter((p) => p.chave.startsWith("balao"))).toEqual([]);
+    expect(b.html).toContain(`<li class="pensar-nota">${narracao}</li>`);
   });
 
   it("revisão 8 do PR #522: a narração curta com quebras no fim conta como curta quando sai da lista guardada", () => {
     let a = comFerramenta(comTexto(ATIVIDADE_VAZIA, `${"x".repeat(279)}\n\n`), "Ferramenta", { texto: "Usando", frentes: false });
     for (let i = 0; i < 205; i++) a = comFerramenta(comTexto(a, `Passo ${i}.`), "Ferramenta", { texto: "Usando", frentes: false });
-    const chaves = comAtividade(comTexto(a, "Vou olhar.")).morfar!.partes.filter((p) => p.chave.startsWith("balao")).map((p) => p.chave);
-    expect(chaves).toEqual(["balao-g206"]);
+    const b = comAtividade(comTexto(a, "Vou olhar."));
+    expect(b.morfar!.partes.filter((p) => p.chave.startsWith("balao"))).toEqual([]);
+    expect(b.html).toContain('<span class="fala-viva-estado">Vou olhar.</span>');
   });
 
   it("revisão 5 do PR #522: a geração não cai quando a lista de narrações guardadas anda (mais de 200 ferramentas)", () => {
     let a = ATIVIDADE_VAZIA;
     for (let i = 0; i < 205; i++) a = comFerramenta(comTexto(a, `Passo ${i}.`), "Ferramenta", { texto: "Usando", frentes: false });
-    const narrando = comTexto(a, "Vou olhar.\n\nJá volto.");
+    const narrando = comTexto(a, `Vou olhar ${"cada um dos arquivos da lista com calma. ".repeat(8)}\n\nJá volto.`);
     const chaves = (x: AtividadeTurno) => comAtividade(x).morfar!.partes.filter((p) => p.chave.startsWith("balao")).map((p) => p.chave);
     expect(chaves(narrando)).toEqual(["balao-g205", "balao-g205-1"]);
     expect(chaves(comFerramenta(narrando, "Ferramenta", { texto: "Usando", frentes: false }))).toEqual(["balao-g205", "balao-g205-1"]);
@@ -174,32 +184,32 @@ describe("a fala viva", () => {
     a = comFerramenta(comTexto(a, relatorio), "F", { texto: "Usando", frentes: false });
     a = comFerramenta(comTexto(a, "Mais um."), "F", { texto: "Usando", frentes: false });
     const chaves = comAtividade(comTexto(a, "Ok.")).morfar!.partes.filter((p) => p.chave.startsWith("balao")).map((p) => p.chave);
-    expect(chaves).toEqual(["balao-g1", "balao-g1-1", "balao-g1-2", "balao-g2-3"]);
+    // Parte 2: "Ok." é curto (pensamento); os três balões do relatório ficam com a geração deles.
+    expect(chaves).toEqual(["balao-g1", "balao-g1-1", "balao-g1-2"]);
   });
 
   it("revisão 4 do PR #522: cada balão tem a sua chave de texto (as tabelas de dois balões não colidem)", () => {
     // A tabela longa tem o "mostrar mais", com a chave do texto no data-disclosure.
     const tabela = `| a | b |\n|---|---|\n${Array.from({ length: 30 }, (_, i) => `| ${i} | x |`).join("\n")}`;
     const html = vivo(`Um.\n\n${tabela}\n\nDois.\n\n${tabela}`).html;
-    const chaves = [...html.matchAll(/data-disclosure="([^"]+)"/g)].map((m) => m[1]);
+    const chaves = [...html.matchAll(/data-disclosure="(tabela:[^"]+)"/g)].map((m) => m[1]);
     expect(chaves).toHaveLength(2);
     expect(new Set(chaves).size).toBe(2);
   });
 
-  it("revisão 2 do PR #522: o texto que substitui a narração curta é outra geração de balões (o balão mostrado não muda de conteúdo)", () => {
+  it("Parte 2: a narração curta nunca vai ao balão — corre no cabeçalho e, fechada por ferramenta, vira nota; o balão nunca perde conteúdo", () => {
     const narrando = comTexto(ATIVIDADE_VAZIA, "Vou olhar o Linear.\n\nJá volto com a lista.");
-    expect(comAtividade(narrando).morfar!.partes.map((p) => p.chave)).toEqual(["nome", "balao", "balao-1", "viva"]);
+    expect(comAtividade(narrando).morfar!.partes.map((p) => p.chave)).toEqual(["nome", "pensar"]);
+    expect(comAtividade(narrando).html).toContain('<span class="fala-viva-estado">Vou olhar o Linear.</span>');
     const usando = comFerramenta(narrando, "Consultou Linear", { texto: "Usando Linear", frentes: false });
-    // Durante a ferramenta, a narração continua à vista, com as mesmas chaves.
-    expect(comAtividade(usando).morfar!.partes.filter((p) => p.chave.startsWith("balao")).map((p) => p.chave)).toEqual(["balao", "balao-1"]);
+    expect(comAtividade(usando).html).toContain('<li class="pensar-nota">Vou olhar o Linear.\n\nJá volto com a lista.</li>');
     const depois = comAtividade(comTexto(usando, "Achei 3 issues"));
-    const chaves = depois.morfar!.partes.filter((p) => p.chave.startsWith("balao")).map((p) => p.chave);
-    expect(chaves).toEqual(["balao-g1"]);
-    const antes = comAtividade(usando).morfar!;
-    const plano = planoDoMorph(antes, depois.morfar)!;
-    // As partes da narração saem (não estão no plano) e a nova entra inteira.
-    expect(plano.partes.map((p) => p.chave)).not.toContain("balao-1");
-    expect(plano.partes.find((p) => p.chave === "balao-g1")?.html).toContain("Achei 3 issues");
+    expect(depois.morfar!.partes.filter((p) => p.chave.startsWith("balao"))).toEqual([]);
+    expect(depois.html).toContain('<span class="fala-viva-estado">Achei 3 issues</span>');
+    // O pensamento é uma parte só, que muda por dentro: a nota continua lá.
+    const plano = planoDoMorph(comAtividade(usando).morfar, depois.morfar)!;
+    expect(plano.partes.map((p) => p.chave)).toEqual(["nome", "pensar"]);
+    expect(plano.partes.find((p) => p.chave === "pensar")?.html).toContain("Vou olhar o Linear.");
   });
 
   it("revisão 2 do PR #522: a fala parada divide como a gravada, sem esconder o começo indeciso do fim", () => {
@@ -212,8 +222,10 @@ describe("a fala viva", () => {
   });
 
   it("o começo de item depois da lista não aparece num balão próprio antes de decidir", () => {
-    expect(vivo("- a\n- b\n\n-").morfar!.partes.map((p) => p.chave)).toEqual(["nome", "balao", "viva"]);
-    expect(vivo("- a\n- b\n\n-").html).not.toMatch(/<\/ul>.*-<\/div>/s);
+    const lista = `${"- um item longo o bastante para a fala passar do limiar da promoção ao balão\n".repeat(5)}\n-`;
+    expect(lista.length).toBeGreaterThan(280);
+    expect(vivo(lista).morfar!.partes.map((p) => p.chave)).toEqual(["nome", "pensar", "balao"]);
+    expect(vivo(lista).html).not.toMatch(/<\/ul>.*-<\/div>/s);
   });
 });
 

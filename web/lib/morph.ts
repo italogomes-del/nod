@@ -122,7 +122,9 @@ export function aplicarMorph(bloco: NoDoMorph, plano: PlanoDoMorph, criar: (html
 
 /** NOD-358: a parte `data-no-lugar` recebe os atributos e os filhos da nova, e o nó (com a animação em curso) fica. */
 export function trocarConteudo(velho: NoDoMorph, novo: NoDoMorph): void {
-  for (const nome of velho.getAttributeNames()) if (novo.getAttribute(nome) === null) velho.removeAttribute(nome);
+  // Parte 2 do plano "o pensamento no chat": o `open` de um <details> é da pessoa (abriu ou fechou o pensamento), nunca
+  // do HTML novo — o render não o escreve, e tirá-lo fecharia o pensamento a cada pedaço do streaming.
+  for (const nome of velho.getAttributeNames()) if (nome !== "open" && novo.getAttribute(nome) === null) velho.removeAttribute(nome);
   for (const nome of novo.getAttributeNames()) {
     const valor = novo.getAttribute(nome) ?? "";
     if (velho.getAttribute(nome) !== valor) velho.setAttribute(nome, valor);

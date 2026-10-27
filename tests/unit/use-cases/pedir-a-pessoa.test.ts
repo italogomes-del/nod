@@ -95,6 +95,12 @@ describe("pedirAPessoa grava a fala ligada à decisão", () => {
     expect(novas[0]?.payload).toEqual({ kind: "pedido_a_pessoa", decisaoId: r.data.decisao_id, opcoes: ["Vou mandar agora", "Use a de agosto"] });
     expect(banco.decisoes.find((d) => d.id === r.data.decisao_id)?.frase).toBe("Não achei a planilha de vendas de setembro. Pode me mandar o link?");
     expect(banco.mensagens.some((m) => m.texto.startsWith("parei"))).toBe(false);
+    // Parte 4 do plano "o pensamento no chat" (2026-10-26): o frame `decisao_criada` leva a fala da pergunta em
+    // `mensagem_json` (a web desenha o cartão na hora, `mensagemDoFrame`), com o mesmo id da mensagem gravada.
+    const evento = r.events?.find((ev) => ev.kind === "decisao_criada");
+    expect(evento?.dados).toMatchObject({ decisao_id: r.data.decisao_id, tipo: "falta_de_dado" });
+    const noFrame = JSON.parse(String(evento?.dados.mensagem_json)) as { id: string; kind: string; autoria: unknown; payload: unknown };
+    expect(noFrame).toMatchObject({ id: novas[0]?.id, kind: "texto", autoria: { autor_tipo: "agente", autor_id: bot.agente.id }, payload: { kind: "pedido_a_pessoa", decisaoId: r.data.decisao_id } });
   });
 
   it("frase = texto inteiro nos três tipos, sem corte; a recomendada vai ao payload como 0 e o pedido de ajuda do computador é marcado", async () => {

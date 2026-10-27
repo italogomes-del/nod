@@ -252,7 +252,9 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
   // definido em 2026-10-05: com `causaSemIa` não há fala — o que veio é a recusa do fornecedor, nunca texto do bot.
   // NOD-353: o resumo das ações vai na fala final do bot (texto ou só mídia); turno sem ferramenta fica sem payload.
   const listaDeAcoes = acoesDoTurno(resultado.ferramentasChamadas, resultado.ferramentasFalharam);
-  const acoes: Extract<PayloadMensagem, { kind: "acoes_do_turno" }> | null = listaDeAcoes.length > 0 ? { kind: "acoes_do_turno", acoes: listaDeAcoes } : null;
+  // `duracaoMs` (plano "o pensamento no chat", 2026-10-26): do despacho (ou da criação, no turno de antes da 0083) até agora.
+  const duracaoMs = Math.max(0, agora - (turno.despachadoEm ?? turno.criadoEm));
+  const acoes: Extract<PayloadMensagem, { kind: "acoes_do_turno" }> | null = listaDeAcoes.length > 0 ? { kind: "acoes_do_turno", acoes: listaDeAcoes, duracaoMs } : null;
   const falaTexto = entrega.fala.tipo === "texto" && comandoDoTurno !== "compactar" && !resultado.causaSemIa ? traduzirSaidaDoComando(turno.entradaTexto, entrega.fala.texto, entrega.harness) : "";
   let mensagem: Mensagem | null = null;
   /** NOD-200: a fala de texto do bot fora de sala, não silenciada nem tardia — só ela leva a captura. */

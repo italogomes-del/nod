@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { ConversaDto } from "../../../src/contracts/api.ts";
 import type { FrameSse, TipoFrame } from "../../../src/contracts/frame.ts";
+import type { Mensagem } from "../../../src/contracts/mensagem.ts";
 import { aplicarFrame, estadoInicial, reduzir, type Estado } from "../../../web/estado/reducer.ts";
+import { textoDaFala } from "../../../web/lib/atividade.ts";
 
 const CONVERSA = "11111111-1111-4111-8111-111111111111";
 const TURNO = "22222222-2222-4222-8222-222222222222";
@@ -131,7 +133,8 @@ describe("aplicarFrame por TipoFrame", () => {
     expect(e.turnosVivos[TURNO]?.estado).toBe("rodando");
     e = aplicarFrame(e, frame("turno.atividade", { conversaId: CONVERSA, turnoId: TURNO, nome: "mcp__nod__gmail__label_thread", rotulo: "Alterou Gmail" }), AGORA);
     e = aplicarFrame(e, frame("turno.delta", { conversaId: CONVERSA, turnoId: TURNO, texto: "44 processados." }), AGORA);
-    expect(e.atividades[CONVERSA]?.[TURNO]).toEqual({
+    // Parte 2 do plano "o pensamento no chat": a atividade ganhou o cabeçalho (permanência) e a nota de cada ação; o resto é igual.
+    expect(e.atividades[CONVERSA]?.[TURNO]).toMatchObject({
       atual: "44 processados.",
       antes: ["Continuando com o próximo lote."],
       etapas: [{ texto: "Continuando com o próximo lote.", ferramentas: 2 }],
@@ -311,5 +314,77 @@ describe("texto ao vivo que chega antes do GET da conversa", () => {
     expect(aplicarFrame(antes, frame("turno.delta", { conversaId: OUTRA, turnoId: TURNO, texto: "x" }), AGORA)).toBe(antes);
     expect(aplicarFrame(antes, frame("turno.atividade", { conversaId: OUTRA, turnoId: TURNO, rotulo: "y" }), AGORA)).toBe(antes);
     expect(aplicarFrame(antes, frame("turno.tarefas", { conversaId: OUTRA, turnoId: TURNO, tarefas: [] }), AGORA)).toBe(antes);
+  });
+});
+
+/**
+ * QA do #534 (medido em 2026-10-27 no Mac, Chrome headless via CDP com o catcher): o `mensagem.nova` da fala final chega antes do `turno.encerrado` e dispara
+ * um GET que volta COM a gravada; a regra "a releitura só tira o retrato de antes dela" deixava retrato e gravada à vista
+ * por 200 ms, e o turno sem texto (resposta curta, só no fim) ficava 145 ms sem fala nenhuma entre a viva sumir e a
+ * gravada entrar. Em produção cada janela vale um RTT.
+ */
+describe("QA do #534: o retrato da fala e a gravada", () => {
+  const despachado = (): Estado => aplicarFrame(comConversa(), frame("turno.iniciado", { conversaId: CONVERSA, turnoId: TURNO, kind: "turno_despachado" }), AGORA);
+  const gravada = (texto: string, payload: Mensagem["payload"] = null): Mensagem => ({ tenantId: "t", id: "m-bot", conversaId: CONVERSA, turnoId: TURNO, autoria: { autor_tipo: "agente", autor_id: "a" } as Mensagem["autoria"], kind: "texto", texto, payload, confianca: "confiavel", parcial: false, criadoEm: AGORA + 1 });
+  const relida = (e: Estado, mensagens: Mensagem[], agora: number): Estado => reduzir(e, { tipo: "hidratar-conversa", conversa: { ...conversaVazia(), mensagens }, agora });
+  const retratos = (e: Estado) => Object.values(e.falasSaindo?.[CONVERSA] ?? {});
+
+  it("a releitura que começou antes do fim mas já traz a gravada tira o retrato; sem a gravada, ele fica (revisão 3 do #508)", () => {
+    let e = aplicarFrame(despachado(), frame("turno.delta", { conversaId: CONVERSA, turnoId: TURNO, texto: "Pronto, revisei." }), AGORA);
+    e = aplicarFrame(e, frame("turno.encerrado", { conversaId: CONVERSA, turnoId: TURNO }), AGORA + 10);
+    expect(retratos(e)).toHaveLength(1);
+    expect(retratos(relida(e, [], AGORA + 5))).toHaveLength(1);
+    expect(retratos(relida(e, [gravada("Pronto, revisei.")], AGORA + 5))).toHaveLength(0);
+    // Outra fala do mesmo turno (a do meio, de um `turno.fala`) não vale pela final.
+    expect(retratos(relida(e, [gravada("A do meio.")], AGORA + 5))).toHaveLength(1);
+    // A releitura de depois do fim continua tirando tudo, como antes.
+    expect(retratos(relida(e, [], AGORA + 20))).toHaveLength(0);
+  });
+
+  it("sem texto e com ações, o pensamento fica como retrato até a fala com o resumo chegar; sem ação nenhuma, nada fica", () => {
+    let e = aplicarFrame(despachado(), frame("turno.atividade", { conversaId: CONVERSA, turnoId: TURNO, rotulo: "Leu um arquivo", id: "toolu_1" }), AGORA);
+    e = aplicarFrame(e, frame("turno.acao_fim", { conversaId: CONVERSA, turnoId: TURNO, id: "toolu_1", falhou: true }), AGORA);
+    const fim = aplicarFrame(e, frame("turno.encerrado", { conversaId: CONVERSA, turnoId: TURNO }), AGORA + 10);
+    expect(fim.turnosVivos[TURNO]).toBeUndefined();
+    const retrato = retratos(fim)[0];
+    expect(retrato?.atividade.acoes.map((a) => a.estado)).toEqual(["falhou"]);
+    expect(textoDaFala(retrato?.atividade)).toBe("");
+    // A fala do turno sem o resumo (a do meio) não o tira; a que leva o resumo (`acoes_do_turno`), tira.
+    expect(retratos(relida(fim, [gravada("Tudo certo.")], AGORA + 5))).toHaveLength(1);
+    expect(retratos(relida(fim, [gravada("Tudo certo.", { kind: "acoes_do_turno", acoes: [{ rotulo: "Leu um arquivo", falhou: true }] })], AGORA + 5))).toHaveLength(0);
+    // Sem ação nem texto não há o que mostrar: nenhum retrato (a gravada sem resumo também não tem pensamento).
+    expect(aplicarFrame(despachado(), frame("turno.encerrado", { conversaId: CONVERSA, turnoId: TURNO }), AGORA + 10).falasSaindo).toBeUndefined();
+    // Com um retrato do turno (um `turno.fala` antes), o resumo vai para ele, como antes (NOD-353): nenhum retrato a mais.
+    let meio = aplicarFrame(despachado(), frame("turno.delta", { conversaId: CONVERSA, turnoId: TURNO, texto: "A do meio." }), AGORA);
+    meio = aplicarFrame(meio, frame("turno.fala", { conversaId: CONVERSA, turnoId: TURNO }), AGORA + 1);
+    meio = aplicarFrame(meio, frame("turno.atividade", { conversaId: CONVERSA, turnoId: TURNO, rotulo: "Leu um arquivo", id: "toolu_2" }), AGORA + 2);
+    const fimDoMeio = aplicarFrame(meio, frame("turno.encerrado", { conversaId: CONVERSA, turnoId: TURNO }), AGORA + 10);
+    expect(retratos(fimDoMeio)).toHaveLength(1);
+    expect(retratos(fimDoMeio)[0]?.atividade.acoes).toHaveLength(1);
+  });
+
+  it("a leitura que desmente o turno rodando (trabalhos, ou a que o Parar dispara) deixa o retrato; a que já traz a gravada, não", () => {
+    const e = aplicarFrame(despachado(), frame("turno.delta", { conversaId: CONVERSA, turnoId: TURNO, texto: "Pronto, revisei." }), AGORA);
+    // A conversa relida sem o turno em curso: o servidor já o encerrou e o frame ainda não chegou.
+    const semGravada = relida(e, [], AGORA + 10);
+    expect(semGravada.turnosVivos[TURNO]).toBeUndefined();
+    expect(retratos(semGravada)).toHaveLength(1);
+    expect(textoDaFala(retratos(semGravada)[0]?.atividade)).toBe("Pronto, revisei.");
+    // A releitura seguinte, com a gravada, o tira; a que desmente e já traz a gravada não deixa retrato.
+    expect(retratos(relida(semGravada, [gravada("Pronto, revisei.")], AGORA + 20))).toHaveLength(0);
+    expect(retratos(relida(e, [gravada("Pronto, revisei.")], AGORA + 10))).toHaveLength(0);
+    // O turno na fila (sem atividade) desmentido continua sem retrato.
+    const naFila = aplicarFrame(comConversa(), frame("turno.iniciado", { conversaId: CONVERSA, turnoId: TURNO, kind: "turno_criado" }), AGORA);
+    expect(relida(naFila, [], AGORA + 10).falasSaindo).toBeUndefined();
+  });
+
+  it("turno.interrompido deixa o retrato como o encerrado: o Parar não apaga a fala antes de a gravada (parcial) chegar", () => {
+    let e = aplicarFrame(despachado(), frame("turno.delta", { conversaId: CONVERSA, turnoId: TURNO, texto: "Começando a tarefa." }), AGORA);
+    e = aplicarFrame(e, frame("turno.atividade", { conversaId: CONVERSA, turnoId: TURNO, rotulo: "Leu um arquivo", id: "toolu_1" }), AGORA);
+    const fim = aplicarFrame(e, frame("turno.interrompido", { conversaId: CONVERSA, turnoId: TURNO }), AGORA + 10);
+    expect(fim.turnosVivos[TURNO]).toBeUndefined();
+    expect(retratos(fim)).toHaveLength(1);
+    expect(textoDaFala(retratos(fim)[0]?.atividade)).toBe("Começando a tarefa.");
+    expect(retratos(relida(fim, [gravada("Começando a tarefa.")], AGORA + 5))).toHaveLength(0);
   });
 });

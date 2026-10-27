@@ -231,6 +231,15 @@ describe("decidirBloco e o uso em regiaoPorBlocos (revisão 2 do #508)", () => {
     expect(corpo).toContain('performance.measure("nod:fala:morph"');
     expect(corpo).toContain('performance.measure("nod:fala:recriada"');
   });
+  it("revisão do PR do pensamento no chat (27/10): o disclosure do <summary> focado é lido ANTES do morph (trocarConteudo destaca o summary antigo do <details> que fica)", () => {
+    const regioes = readFileSync(new URL("../../../web/lib/regioes.ts", import.meta.url), "utf8");
+    const corpo = /export function regiaoPorBlocos\([\s\S]*?\n\}/.exec(regioes)![0];
+    const leitura = corpo.indexOf('const disclosureFocado = focado?.tagName === "SUMMARY" ? focado.closest<HTMLElement>("details[data-disclosure]")');
+    expect(leitura).toBeGreaterThan(-1);
+    expect(leitura).toBeLessThan(corpo.indexOf("aplicarMorph("));
+    expect(corpo).toContain("alvoDoFoco<HTMLElement>(disclosureFocado ? { disclosure: disclosureFocado } : focado.dataset, raiz, document)");
+    expect(corpo).not.toMatch(/isConnected[\s\S]*focado\.closest/);
+  });
 });
 
 describe("CSS da fala viva: movimento reduzido e alto contraste (revisão 2 do #508)", () => {
@@ -247,7 +256,7 @@ describe("CSS da fala viva: movimento reduzido e alto contraste (revisão 2 do #
   };
   it("com movimento reduzido, a fala não entra animada e o brilho da linha para", () => {
     const todos = css.split("@media (prefers-reduced-motion: reduce)").slice(1).join("");
-    expect(todos).toMatch(/\.message\.fala-viva, \.fala-viva-linha \{ animation: none; \}/);
+    expect(todos).toMatch(/\.message\.fala-viva, \.pensar-acao\[data-estado="rodando"\] \.pensar-ic \{ animation: none; \}/);
     expect(todos).toMatch(/\.fala-viva-estado \{ animation: none; background: none;/);
   });
   it("em forced-colors, o estado é texto do sistema, sem o gradiente", () => {

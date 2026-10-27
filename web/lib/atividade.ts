@@ -49,7 +49,17 @@ export type AtividadeTurno = {
   subagentes: SubagentesDoTurno | null;
   /** NOD-353: cada chamada do turno inteiro, na ordem (o resumo das ações); sobrevive às falas do meio. */
   acoes: AcaoNaTela[];
+  /**
+   * Plano "o pensamento no chat", Parte 2 (2026-10-26): o que o cabeçalho do pensamento diz agora, com permanência mínima
+   * (`PERMANENCIA_MS`): a troca que chega cedo demais fica em `pendente` até dar o tempo (a última vence). Calculado pelo
+   * reducer a cada frame (`comCabecalho`); ausente = o estado da fala direto.
+   */
+  cabecalho?: CabecalhoDoPensamento;
+  /** Parte 3: quando as frentes saíram (o disparo `comet` do mascote); ausente = nenhuma neste turno. */
+  frentesEm?: number;
 };
+
+export type CabecalhoDoPensamento = { id: string; texto: string; desde: number; pendente?: { id: string; texto: string } };
 
 /**
  * NOD-353: uma ação do turno na tela. `id` é o do tool_use (null no app antigo, que não o manda); `emUso` é a linha no
@@ -57,7 +67,7 @@ export type AtividadeTurno = {
  * fim do turno, e, sem id, pela próxima ferramenta. Falhou só vem do frame (tool_result.isError), nunca inventado.
  */
 export type EstadoDaAcao = "rodando" | "feita" | "falhou";
-export type AcaoNaTela = { id: string | null; rotulo: string; estado: EstadoDaAcao; emUso: string | null; frentes?: true };
+export type AcaoNaTela = { id: string | null; rotulo: string; estado: EstadoDaAcao; emUso: string | null; frentes?: true; nota?: number };
 /** Teto das chamadas guardadas por turno; o resumo mostra as primeiras `ACOES_DO_RESUMO_MAX` linhas (a regra da gravada). */
 export const ACOES_GUARDADAS = 2_000;
 export const ACOES_DO_RESUMO_MAX = 200;
@@ -115,7 +125,7 @@ export function soSubagentes(a: AtividadeTurno | undefined): AtividadeTurno | nu
   // virou a mensagem da fala.
   const ultimo = a.ultimaFerramenta ?? a.etapas[a.etapas.length - 1]?.texto ?? null;
   // NOD-353: o resumo das ações é do turno inteiro — atravessa a fala do meio (a do bot já não roda: vira feita).
-  return { ...ATIVIDADE_VAZIA, etapas: ultimo ? [{ texto: ultimo, ferramentas: 0 }] : [], totalEtapas: ultimo ? 1 : 0, subagentes: a.subagentes, acoes: acoesFechadas(a.acoes) };
+  return { ...ATIVIDADE_VAZIA, etapas: ultimo ? [{ texto: ultimo, ferramentas: 0 }] : [], totalEtapas: ultimo ? 1 : 0, subagentes: a.subagentes, acoes: acoesSemNota(acoesFechadas(a.acoes)) };
 }
 
 /**
@@ -158,7 +168,12 @@ export function comFerramenta(a: AtividadeTurno | undefined, rotulo: string, emU
     etapas = [{ texto: rotulo, ferramentas: 1 }];
     totalEtapas += 1;
   }
-  return { atual: "", etapas: etapas.slice(-ETAPAS_GUARDADAS), totalEtapas, ferramentas: base.ferramentas + 1, ultimaFerramenta: rotulo, tarefas: base.tarefas, vigia: base.vigia, emUso, subagentes: base.subagentes, ...depoisDaFerramenta(base, narracao !== ""), acoes: comAcao(narracao ? acoesFechadas(base.acoes) : base.acoes, rotulo, emUso, id) };
+  // Parte 2: a ação lembra quantas narrações vieram antes dela (o índice em `antes`, contando as já descartadas), para o
+  // pensamento listar notas e ações na ordem em que aconteceram.
+  const nota = (base.curtasDescartadas ?? 0) + (base.antes?.length ?? 0) + (narracao ? 1 : 0);
+  // `cabecalho` segue (Parte 2): é o reducer quem o recalcula depois, com a permanência; perdê-lo aqui zeraria o tempo.
+  // `frentesEm` também (Parte 3; revisão do PR, 27/10): a segunda frente aberta logo depois da primeira cortava o `comet`.
+  return { atual: "", etapas: etapas.slice(-ETAPAS_GUARDADAS), totalEtapas, ferramentas: base.ferramentas + 1, ultimaFerramenta: rotulo, tarefas: base.tarefas, vigia: base.vigia, emUso, subagentes: base.subagentes, ...depoisDaFerramenta(base, narracao !== ""), acoes: comAcao(narracao ? acoesFechadas(base.acoes) : base.acoes, rotulo, emUso, id, nota), ...(base.cabecalho ? { cabecalho: base.cabecalho } : {}), ...(base.frentesEm !== undefined ? { frentesEm: base.frentesEm } : {}) };
 }
 
 /** As que rodavam viram feitas (o texto voltou, a volta acabou, o turno acabou); devolve a mesma lista se nada mudou. */
@@ -167,11 +182,20 @@ export function acoesFechadas(acoes: readonly AcaoNaTela[]): AcaoNaTela[] {
   return acoes.map((x) => (x.estado === "rodando" ? { ...x, estado: "feita", emUso: null } : x));
 }
 
-function comAcao(acoes: readonly AcaoNaTela[], rotulo: string, emUso: FerramentaEmUso, id: string | null): AcaoNaTela[] {
+/**
+ * Revisão do PR (27/10): quando a volta acaba (`turno.fala`), `antes` e `curtasDescartadas` zeram e as narrações da volta
+ * seguinte recomeçam do índice 0 — as ações de antes perdem o `nota` (= nada antes delas), senão a primeira narração nova
+ * entrava antes das ações antigas no pensamento. Devolve a mesma lista quando nenhuma tem `nota`.
+ */
+export function acoesSemNota(acoes: readonly AcaoNaTela[]): AcaoNaTela[] {
+  return acoes.some((x) => x.nota !== undefined) ? acoes.map(({ nota: _nota, ...x }) => x) : [...acoes];
+}
+
+function comAcao(acoes: readonly AcaoNaTela[], rotulo: string, emUso: FerramentaEmUso, id: string | null, nota = 0): AcaoNaTela[] {
   // App antigo (sem id): não há fim por chamada; a ferramenta seguinte fecha as que estavam sem id.
   const base = id === null ? acoes.map((x) => (x.estado === "rodando" && x.id === null ? { ...x, estado: "feita" as const, emUso: null } : x)) : [...acoes];
   if (base.length >= ACOES_GUARDADAS) return base;
-  return [...base, { id, rotulo, estado: "rodando", emUso: emUso.texto, ...(emUso.frentes ? { frentes: true as const } : {}) }];
+  return [...base, { id, rotulo, estado: "rodando", emUso: emUso.texto, ...(emUso.frentes ? { frentes: true as const } : {}), ...(nota ? { nota } : {}) }];
 }
 
 /**
@@ -359,6 +383,124 @@ export function textoEmLf(texto: string): string {
   return paraLf(texto);
 }
 
+// ---- Plano "o pensamento no chat", Parte 2 (2026-10-26) --------------------------------------------------------------
+
+/**
+ * O limiar da promoção para balão: a mesma fronteira que o servidor usa para descartar a narração curta (`comporFala`),
+ * para o balão nunca mostrar um texto que a mensagem gravada vai deixar de fora. Decisão fechada em 26/10.
+ */
+export const PROMOCAO_CHARS = NARRACAO_MAX_CHARS_WEB;
+
+/**
+ * O que vai para o balão e o que fica no pensamento. Balão só com texto definitivo, numa direção só: os relatórios longos
+ * de antes da última ferramenta sempre (a gravada os guarda) e o texto corrente só quando passou de `PROMOCAO_CHARS` ou
+ * quando o turno acabou (`fim`: `turno.fala` ou `turno.encerrado`, quando a regra do servidor o grava, inclusive o último
+ * bloco fechado por ferramenta sem texto depois). Antes disso, o texto corrente é o `pensamento` (a narração curta no
+ * cabeçalho); uma narração fechada por ferramenta vira nota (`itensDoPensamento`), nunca balão.
+ */
+export function falaNoBalao(a: AtividadeTurno | undefined, fim: boolean): { texto: string; trechos: TrechoDaFala[]; pensamento: string; promovido: boolean } {
+  if (!a) return { texto: "", trechos: [], pensamento: "", promovido: false };
+  const blocos = a.antes ?? [];
+  const ultimo = blocos.length - 1;
+  const temAtual = a.atual.trim() !== "";
+  const [antes, final] = temAtual ? [blocos, a.atual] : fim && ultimo >= 0 ? [blocos.slice(0, ultimo), blocos[ultimo]!] : [blocos, ""];
+  const promovido = fim || final.trim().length > PROMOCAO_CHARS;
+  const noBalao = promovido ? final : "";
+  const curtasAte = (ate: number): number => (a.curtasDescartadas ?? 0) + antes.slice(0, ate).filter(ehCurta).length;
+  const relatorios = relatoriosComPosicao(antes, noBalao);
+  const texto = juntarFala(relatorios.map((r) => r.texto), noBalao);
+  const geracaoFinal = curtasAte(antes.length);
+  const pensamento = promovido ? "" : final.trim();
+  if (relatorios.length === 0) return { texto, trechos: texto ? [{ fim: Infinity, geracao: geracaoFinal }] : [], pensamento, promovido };
+  const trechos: TrechoDaFala[] = [];
+  let fimDoTrecho = -2;
+  for (const r of relatorios) {
+    fimDoTrecho += 2 + paraLf(r.texto).length;
+    trechos.push({ fim: fimDoTrecho, geracao: curtasAte(r.indice) });
+  }
+  trechos.push({ fim: Infinity, geracao: geracaoFinal });
+  return { texto, trechos, pensamento, promovido };
+}
+
+/** Um item do histórico do pensamento: a nota (narração curta fechada por ferramenta) ou um grupo de ações seguidas iguais. */
+export type ItemDoPensamento =
+  | { tipo: "nota"; texto: string }
+  | { tipo: "grupo"; rotulo: string; vezes: number; falhas: number; rodando: boolean; emUso: string | null; frentes: boolean };
+
+/** Quantos grupos ficam à vista no pensamento; os anteriores vão para "N anteriores". */
+export const GRUPOS_A_VISTA = 8;
+
+/**
+ * Notas e grupos na ordem em que aconteceram: a mesma ferramenta seguida vira um grupo (×N, com as falhas contadas), e a
+ * narração curta que veio antes de uma ação entra como nota antes dela (pelo `nota` da ação). Os relatórios longos não
+ * viram nota: estão no balão. `parado` (turno acabado): nada roda mais.
+ */
+export function itensDoPensamento(a: AtividadeTurno | undefined, parado = false): ItemDoPensamento[] {
+  if (!a) return [];
+  const base = a.curtasDescartadas ?? 0;
+  const notas = (a.antes ?? []).map((texto, i) => ({ indice: base + i, texto: texto.trim() })).filter((n) => n.texto && ehCurta(n.texto));
+  const itens: ItemDoPensamento[] = [];
+  let proximaNota = 0;
+  const notasAte = (limite: number): void => {
+    while (proximaNota < notas.length && notas[proximaNota]!.indice < limite) itens.push({ tipo: "nota", texto: notas[proximaNota++]!.texto });
+  };
+  for (const x of a.acoes) {
+    // Revisão do PR (27/10): `nota` omitida é zero (`comAcao` não a grava quando nada veio antes) — com `Infinity` a
+    // primeira ferramenta sem narração puxava para antes dela as notas que só vieram depois.
+    notasAte(x.nota ?? 0);
+    const rodando = !parado && x.estado === "rodando";
+    const ultimo = itens[itens.length - 1];
+    if (ultimo && ultimo.tipo === "grupo" && ultimo.rotulo === x.rotulo) {
+      ultimo.vezes += 1;
+      ultimo.falhas += x.estado === "falhou" ? 1 : 0;
+      ultimo.rodando = rodando;
+      ultimo.emUso = rodando ? x.emUso : null;
+      continue;
+    }
+    itens.push({ tipo: "grupo", rotulo: x.rotulo, vezes: 1, falhas: x.estado === "falhou" ? 1 : 0, rodando, emUso: rodando ? x.emUso : null, frentes: x.frentes === true });
+  }
+  notasAte(Infinity);
+  return itens;
+}
+
+/** Quantas ações e quantas falhas o turno teve (a faixa do cabeçalho e a linha "Pensou por"). */
+export function contagemDasAcoes(a: AtividadeTurno | undefined): { acoes: number; falhas: number } {
+  return { acoes: a?.acoes.length ?? 0, falhas: a?.acoes.filter((x) => x.estado === "falhou").length ?? 0 };
+}
+
+/** Permanência mínima do texto do cabeçalho: a troca que chega antes fica pendente (a última vence). */
+export const PERMANENCIA_MS = 600;
+
+/**
+ * O cabeçalho do pensamento a cada frame: a narração corre no cabeçalho enquanto o bot escreve (mesmo id, o texto muda
+ * na hora); a ferramenta em uso ou "Pensando" trocam só depois de `PERMANENCIA_MS` do último texto (até lá, `pendente`,
+ * que o relógio da tela escreve quando dá o tempo, web/lib/fala-viva.ts).
+ */
+export function comCabecalho(a: AtividadeTurno, agora: number): AtividadeTurno {
+  const alvo = estadoDaFala(a);
+  const escrevendo = alvo.chave === "escrevendo";
+  const id = escrevendo ? "escrevendo" : `${alvo.chave}:${alvo.texto}`;
+  const texto = escrevendo ? textoEscrevendo(a) : alvo.texto;
+  const c = a.cabecalho;
+  if (!c) return { ...a, cabecalho: { id, texto, desde: agora } };
+  if (c.id === id) return c.texto === texto && !c.pendente ? a : { ...a, cabecalho: { id, texto, desde: c.desde } };
+  if (agora - c.desde >= PERMANENCIA_MS) return { ...a, cabecalho: { id, texto, desde: agora } };
+  return c.pendente?.id === id && c.pendente.texto === texto ? a : { ...a, cabecalho: { ...c, pendente: { id, texto } } };
+}
+
+/** O cabeçalho enquanto o bot escreve: a narração curta (a primeira linha); promovida ao balão, só "Escrevendo" (o texto já está lá). */
+export function textoEscrevendo(a: AtividadeTurno): string {
+  // Revisão do PR (27/10): é o mesmo `promovido` de `falaNoBalao(a, false)` com `atual` não vazio, sem recompor a fala
+  // inteira a cada delta (o reducer chama isto em todo `turno.delta`, via `comCabecalho`).
+  return a.atual.trim().length > PROMOCAO_CHARS ? "Escrevendo" : primeiraLinha(a.atual);
+}
+
+/** A narração no cabeçalho: a primeira linha, sem marcação e sem o começo de lista; o CSS corta com reticências. */
+export function primeiraLinha(texto: string): string {
+  const linha = texto.trim().split(/\r?\n/).find((l) => l.trim() !== "") ?? "";
+  return linha.replace(/^\s*>+\s*/, "").replace(/[*_`#]+/g, "").replace(/^\s*[-•]\s+/, "").replace(/\s+/g, " ").trim();
+}
+
 /**
  * Primeira frase da narração, numa linha, sem marcação: é o que cabe numa linha do cartão. Só o começo do texto
  * decide o resumo: com o começo já limpo bem maior que `max`, o corte do prefixo não chega à frase (a frase termina
@@ -401,13 +543,25 @@ export function linhaAtual(a: AtividadeTurno): string {
  * Mascote: Pensando e Escrevendo ficam atentos (idle + attentif, não `thinking`); ferramenta e frentes, `orbit`.
  */
 export type ChaveDaFala = "pensando" | "escrevendo" | "ferramenta" | "frentes";
-export type EstadoDaFala = { chave: ChaveDaFala; texto: string; mascote: { state: "idle" | "orbit"; expression: "attentif" | null } };
+export type EstadoDaFala = { chave: ChaveDaFala; texto: string; mascote: { state: "idle" | "orbit" | "thinking"; expression: "attentif" | null } };
 
 const ATENTO = { state: "idle", expression: "attentif" } as const;
 const FAZENDO = { state: "orbit", expression: null } as const;
+/** Parte 3 do plano "o pensamento no chat" (2026-10-26): pensando é o `thinking` do Bloub (os três pontos), não o repouso atento. */
+const PENSANDO = { state: "thinking", expression: null } as const;
 
 export function estadoDaFala(a: AtividadeTurno | undefined): EstadoDaFala {
   if (a?.atual.trim()) return { chave: "escrevendo", texto: "Escrevendo", mascote: ATENTO };
   if (a?.emUso) return { chave: a.emUso.frentes ? "frentes" : "ferramenta", texto: a.emUso.texto, mascote: FAZENDO };
-  return { chave: "pensando", texto: "Pensando", mascote: ATENTO };
+  return { chave: "pensando", texto: "Pensando", mascote: PENSANDO };
+}
+
+/** Parte 3: quanto duram os disparos únicos do mascote (ms): `wink` quando a fala entra, `comet` quando as frentes saem. */
+export const WINK_MS = 1_700;
+export const COMET_MS = 2_500;
+
+/** Parte 3: as frentes acabaram de sair (o `emUso` com `frentes` nasceu neste frame): o mascote faz `comet` por `COMET_MS`. */
+export function comFrentesEm(antiga: AtividadeTurno | undefined, nova: AtividadeTurno, agora: number): AtividadeTurno {
+  const saiu = nova.emUso?.frentes === true && antiga?.emUso?.frentes !== true;
+  return saiu ? { ...nova, frentesEm: agora } : nova;
 }

@@ -36,19 +36,48 @@ export function escreverTempos(raiz: { querySelectorAll(seletor: string): ArrayL
   return els.length;
 }
 
-type Agendar = (fn: () => void, ms: number) => () => void;
+/** O atributo que diz quanto o cabeçalho precisa esperar (Parte 2 do plano "o pensamento no chat"); e o que escreve. */
+type ComPendente = { getAttribute(nome: string): string | null; removeAttribute(nome: string): void; querySelector(seletor: string): { textContent: string | null } | null };
 
 /**
- * O relógio da fala: `tocar()` escreve na hora (depois de cada render) e, havendo fala viva, agenda o próximo segundo.
+ * Parte 2: a troca do cabeçalho que o reducer deixou pendente (`comCabecalho`, permanência de 600 ms) entra quando dá o
+ * tempo, sem esperar o próximo frame: escreve o texto de `.fala-viva-estado` e tira o atributo. Devolve quantas ainda
+ * esperam (o relógio continua enquanto houver).
+ */
+export function escreverEstados(raiz: { querySelectorAll(seletor: string): ArrayLike<ComPendente> } | null, agora: number, permanenciaMs = 600): number {
+  if (!raiz) return 0;
+  const els = raiz.querySelectorAll("[data-estado-pendente]");
+  let esperam = 0;
+  for (let i = 0; i < els.length; i++) {
+    const el = els[i]!;
+    const desde = Number(el.getAttribute("data-estado-desde"));
+    const texto = el.getAttribute("data-estado-pendente") ?? "";
+    if (Number.isFinite(desde) && agora - desde < permanenciaMs) { esperam++; continue; }
+    const alvo = el.querySelector(".fala-viva-estado");
+    if (alvo && alvo.textContent !== texto) alvo.textContent = texto;
+    el.removeAttribute("data-estado-pendente");
+    el.removeAttribute("data-estado-desde");
+  }
+  return esperam;
+}
+
+type Agendar = (fn: () => void, ms: number) => () => void;
+
+/** O tick do relógio enquanto uma troca do cabeçalho espera a permanência (Parte 2): o segundo inteiro a atrasaria até 1 s. */
+export const TICK_CURTO_MS = 200;
+
+/**
+ * O relógio da fala: `tocar()` escreve na hora (depois de cada render) e, havendo fala viva, agenda o próximo segundo —
+ * ou `intervaloMs()` quando quem escreve pede um tick mais curto (a troca pendente do cabeçalho, `escreverEstados`).
  * Uma agenda por vez; com a aba escondida não reagenda (o `visibilitychange` chama `tocar()` de novo).
  */
-export function criarRelogioDaFala(escrever: () => number, agendar: Agendar, escondida: () => boolean): { tocar(): void } {
+export function criarRelogioDaFala(escrever: () => number, agendar: Agendar, escondida: () => boolean, intervaloMs: () => number = () => 1000): { tocar(): void } {
   let cancelar: (() => void) | null = null;
   const tocar = (): void => {
     cancelar?.();
     cancelar = null;
     if (escrever() === 0 || escondida()) return;
-    cancelar = agendar(() => { cancelar = null; tocar(); }, 1000);
+    cancelar = agendar(() => { cancelar = null; tocar(); }, intervaloMs());
   };
   return { tocar };
 }
@@ -56,7 +85,7 @@ export function criarRelogioDaFala(escrever: () => number, agendar: Agendar, esc
 export type FalaNaTela = { turnoId: string; nome: string; estado: string };
 
 /** Onde o anunciador lê as falas (o HTML vem de `renderFalaViva`): a fala que saiu (`.saindo`) não é acompanhada. */
-export const SELETORES_DA_FALA = { fala: "article.fala-viva[data-turno]:not(.saindo)", nome: ".msg-autor b", estado: ".fala-viva-estado" } as const;
+export const SELETORES_DA_FALA = { fala: "article.fala-viva[data-turno]:not(.saindo)", nome: ".msg-autor b", estado: ".fala-viva-anuncio" } as const;
 
 type ElDaFala = { getAttribute(nome: string): string | null; querySelector(seletor: string): { textContent: string | null } | null };
 

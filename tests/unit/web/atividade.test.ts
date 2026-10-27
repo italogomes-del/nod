@@ -62,8 +62,8 @@ describe("atividade do turno vivo", () => {
 
 // NOD-348: o estado da fala viva, no presente, e o mascote de cada um (decisão da Ada: atento, não "thinking").
 describe("estadoDaFala", () => {
-  it("sem nada é Pensando, atento", () => {
-    expect(estadoDaFala(undefined)).toEqual({ chave: "pensando", texto: "Pensando", mascote: { state: "idle", expression: "attentif" } });
+  it("sem nada é Pensando, com o `thinking` do Bloub (Parte 3)", () => {
+    expect(estadoDaFala(undefined)).toEqual({ chave: "pensando", texto: "Pensando", mascote: { state: "thinking", expression: null } });
     expect(estadoDaFala(ATIVIDADE_VAZIA).chave).toBe("pensando");
   });
   it("texto chegando é Escrevendo, atento", () => {
