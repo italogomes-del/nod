@@ -2,8 +2,9 @@ import { randomUUID } from "node:crypto";
 import { expect, it } from "vitest";
 import type { Turno } from "../../src/contracts/turno.ts";
 import { criarTokenTurno } from "../../src/services/token-turno.ts";
+import { FALA_DEPOIS_DO_FIM } from "../../src/domain/fala-na-frente.ts";
 import { REDE_MS } from "../../src/domain/trabalho.ts";
-import { promoverNaRede } from "../../src/use-cases/coordenar-trabalhos.ts";
+import { enfileirarNoTrabalho, mensagemParaTrabalho, promoverNaRede } from "../../src/use-cases/coordenar-trabalhos.ts";
 import { emitirPlanoTurno } from "../../src/use-cases/emitir-plano-turno.ts";
 import { INSTRUCAO_DO_RETORNO, PERGUNTA_DA_RECONEXAO } from "../../src/domain/retorno-do-lote.ts";
 import { entregarRespostaPeer } from "../../src/use-cases/entregar-resposta-peer.ts";
@@ -92,6 +93,186 @@ describeIntegracao("frentes: o lote volta ao dono numa mensagem só (ADR-099, I3
       expect(await m.retomadasDe(dono)).toHaveLength(1);
       // O turno seguinte da pessoa nasce limpo (a marca é por turno).
       expect(await m.repos.turnos.contaminado((await m.turnoDaConversa({ texto: "e agora?" })).id)).toBe(false);
+    });
+  });
+
+  it("NOD-376: a pessoa conversa numa frente que já voltou (avisar_a_cada_uma): o fim da conversa não acorda o dono de novo", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const dono = await m.turnoDaConversa();
+      const { loteId, ids } = await m.abrir(dono, TRES.slice(0, 2), true);
+      await m.terminar(ids[0]!, "Login corrigido");
+      expect(await m.retomadasDe(dono)).toHaveLength(1);
+
+      const fala = await mensagemParaTrabalho(m.deps, { trabalhoId: ids[0]!, texto: "Que commit foi?" });
+      expect((await m.repos.trabalhos.buscar(ids[0]!))?.estado).not.toBe("terminado");
+      await m.repos.turnos.assentar(fala.data.mensagemTurnoId, { estado: "concluido" });
+      await sincronizarTrabalho(m.deps, ids[0]!);
+      expect((await m.repos.trabalhos.buscar(ids[0]!))?.estado).toBe("terminado");
+      expect(await m.retomadasDe(dono)).toHaveLength(1);
+      expect((await m.repos.frentes.buscarLote(loteId))?.devolvidoEm).toBeNull();
+
+      // A outra frente termina: o retorno dela, o último, fecha o lote (a conversa não entrou em nenhum retorno).
+      await m.terminar(ids[1]!, "CI verde");
+      const retornos = await m.retomadasDe(dono);
+      expect(retornos).toHaveLength(2);
+      expect(retornos[1]!.entradaTexto).toContain("CI vermelha");
+      expect(retornos[1]!.entradaTexto).not.toContain("Login no Safari");
+      expect((await m.repos.frentes.buscarLote(loteId))?.devolvidoEm).toEqual(expect.any(Number));
+    });
+  });
+
+  it("NOD-376 (revisão 8): a conversa numa frente terminada não segura o lote — a outra termina e todas voltam; o fim da conversa não volta de novo", async () => {
+    for (const avisar of [false, true]) {
+      await withRollback(MARLON, async (trx) => {
+        const m = await montar(trx);
+        const dono = await m.turnoDaConversa();
+        const { loteId, ids } = await m.abrir(dono, TRES.slice(0, 2), avisar);
+        await m.terminar(ids[0]!, "Login corrigido");
+        const antes = (await m.retomadasDe(dono)).length;
+        const fala = await mensagemParaTrabalho(m.deps, { trabalhoId: ids[0]!, texto: "Que commit foi?" });
+        expect(["na_fila", "rodando"]).toContain((await m.repos.trabalhos.buscar(ids[0]!))?.estado);
+        await m.terminar(ids[1]!, "CI verde");
+        const depoisDaOutra = await m.retomadasDe(dono);
+        expect((await m.repos.frentes.buscarLote(loteId))?.devolvidoEm).toEqual(expect.any(Number));
+
+        await m.repos.turnos.assentar(fala.data.mensagemTurnoId, { estado: "concluido" });
+        await sincronizarTrabalho(m.deps, ids[0]!);
+        const retornos = await m.retomadasDe(dono);
+        if (avisar) {
+          // Cada uma voltou na hora; o fim da conversa não manda outra.
+          expect([antes, depoisDaOutra.length, retornos.length]).toEqual([1, 2, 2]);
+        } else {
+          // Um retorno só, com as duas (a que conversa, como terminou), assim que a outra termina.
+          expect([antes, depoisDaOutra.length, retornos.length]).toEqual([0, 1, 1]);
+          const json = JSON.parse(depoisDaOutra[0]!.entradaTexto.split("\n")[1]!) as Record<string, unknown>[];
+          expect(json.map((f) => [f.titulo, f.estado, f.feito])).toEqual([
+            ["Login no Safari", "terminado", "Login corrigido"],
+            ["CI vermelha", "terminado", "CI verde"],
+          ]);
+        }
+      });
+    }
+  });
+
+  it("NOD-376 (revisão 6): parar a conversa numa frente acabada não a faz voltar ao dono como parada", async () => {
+    for (const ultima of [false, true]) {
+      await withRollback(MARLON, async (trx) => {
+        const m = await montar(trx);
+        const dono = await m.turnoDaConversa();
+        const { ids } = await m.abrir(dono, TRES.slice(0, 2));
+        await m.terminar(ids[0]!, "Login corrigido");
+        if (ultima) await m.terminar(ids[1]!, "CI verde");
+        await mensagemParaTrabalho(m.deps, { trabalhoId: ids[0]!, texto: "Que commit foi?" });
+        await pararTrabalho(m.deps, { trabalhoId: ids[0]! });
+        if (!ultima) await m.terminar(ids[1]!, "CI verde");
+        const [retorno, ...mais] = await m.retomadasDe(dono);
+        expect(mais).toHaveLength(0);
+        const json = JSON.parse(retorno!.entradaTexto.split("\n")[1]!) as Record<string, unknown>[];
+        expect(json.map((f) => [f.titulo, f.estado, f.feito])).toEqual([
+          ["Login no Safari", "terminado", "Login corrigido"],
+          ["CI vermelha", "terminado", "CI verde"],
+        ]);
+      });
+    }
+  });
+
+  it("NOD-376 (revisão 3): duas falas seguidas numa frente acabada — as duas marcadas, nenhuma manda continuar, o dono não acorda de novo", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const dono = await m.turnoDaConversa();
+      const { ids } = await m.abrir(dono, TRES.slice(0, 2), true);
+      await m.terminar(ids[0]!, "Login corrigido");
+      const f1 = await mensagemParaTrabalho(m.deps, { trabalhoId: ids[0]!, texto: "Que commit foi?" });
+      expect((await m.repos.trabalhos.buscar(ids[0]!))?.estado).not.toBe("terminado");
+      const f2 = await mensagemParaTrabalho(m.deps, { trabalhoId: ids[0]!, texto: "E o PR?" });
+      for (const id of [f1.data.mensagemTurnoId, f2.data.mensagemTurnoId]) {
+        const t = (await m.repos.turnos.buscar(id))!;
+        expect(t.decididoPor).toBe(FALA_DEPOIS_DO_FIM);
+        expect(t.entradaTexto).toContain("já tinha acabado");
+        expect(t.entradaTexto).not.toContain("continue o trabalho");
+        await m.repos.turnos.assentar(id, { estado: "concluido" });
+      }
+      await sincronizarTrabalho(m.deps, ids[0]!);
+      expect(await m.retomadasDe(dono)).toHaveLength(1);
+      await m.terminar(ids[1]!, "CI verde");
+      const retornos = await m.retomadasDe(dono);
+      expect(retornos).toHaveLength(2);
+      expect(retornos[1]!.entradaTexto).not.toContain("Login no Safari");
+    });
+  });
+
+  it("NOD-376 (revisão 3): lote de colega com avisar_a_cada_uma — a conversa numa frente acabada não apaga a resposta nem troca o resumo", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      await agenteComConversa(trx, MARLON, { nome: "Bia" });
+      const daAda = await m.turnoDaConversa({ texto: "peça à Bia" });
+      await m.repos.turnos.assentar(daAda.id, { estado: "concluido" });
+      const pedido = await pedirABot(m.deps, { ...contexto(m.ada.agenteId, m.ada.conversaId, daAda.id), agente: "Bia", pedido: "Revise o login e a CI" });
+      if (!pedido.data.ok) throw new Error(pedido.data.instrucao);
+      const triagem = (await m.repos.turnos.buscar(pedido.data.tarefa_id))!;
+      const { loteId, ids } = await m.abrir(triagem, TRES.slice(0, 2), true);
+      await m.repos.turnos.assentar(triagem.id, { estado: "concluido" });
+
+      await m.terminar(ids[0]!, "Login revisado: ok");
+      const fala = await mensagemParaTrabalho(m.deps, { trabalhoId: ids[0]!, texto: "Que commit foi?" });
+      const t = (await m.repos.turnos.buscar(fala.data.mensagemTurnoId))!;
+      // O bot tenta devolver outro resumo na conversa: o de antes fica.
+      const r = await devolverResumo(m.deps, { ...contexto(t.agenteId, t.conversaId, t.id), feito: "Respondi à pessoa: o commit foi abc123" });
+      expect(r.data).toMatchObject({ ok: true });
+      expect((await m.repos.trabalhos.buscar(ids[0]!))?.resumo).toEqual({ feito: "Login revisado: ok" });
+      // Revisão 8: a conversa não segura a resposta — ela sai quando a outra termina, e o fim da conversa não manda outra.
+      await m.terminar(ids[1]!, "CI: um teste instável");
+      expect(await m.linhas(m.ada.conversaId, "peer_ask")).toHaveLength(1);
+
+      await m.repos.turnos.assentar(t.id, { estado: "concluido" });
+      await sincronizarTrabalho(m.deps, ids[0]!);
+      const [resposta, ...mais] = await m.linhas(m.ada.conversaId, "peer_ask");
+      expect(mais).toHaveLength(0);
+      expect(resposta!.texto).toBe("- Login no Safari: Login revisado: ok\n- CI vermelha: CI: um teste instável");
+      expect(await m.repos.frentes.buscarLote(loteId)).toMatchObject({ devolvidoEm: expect.any(Number) });
+    });
+  });
+
+  it("NOD-376 (revisão 4): lote já devolvido — a conversa que só conversa não volta; a que vira trabalho devolve o complementar", async () => {
+    for (const viraTrabalho of [false, true]) {
+      await withRollback(MARLON, async (trx) => {
+        const m = await montar(trx);
+        const dono = await m.turnoDaConversa();
+        const { loteId, ids } = await m.abrir(dono, TRES.slice(0, 1));
+        await m.terminar(ids[0]!, "Login corrigido");
+        expect((await m.repos.frentes.buscarLote(loteId))?.devolvidoEm).toEqual(expect.any(Number));
+        expect(await m.retomadasDe(dono)).toHaveLength(1);
+
+        const fala = await mensagemParaTrabalho(m.deps, { trabalhoId: ids[0]!, texto: "Que commit foi?" });
+        expect((await m.repos.trabalhos.buscar(ids[0]!))?.resumo).toEqual({ feito: "Login corrigido" });
+        const turnos = [fala.data.mensagemTurnoId];
+        if (viraTrabalho) {
+          // O dono manda um recado à frente no meio da conversa: trabalho de verdade, o resumo novo volta a ele.
+          const recado = await enfileirarNoTrabalho(m.deps, (await m.repos.trabalhos.buscar(ids[0]!))!, { texto: "Corrija também no Firefox", entrada: "Corrija também no Firefox", deQuem: { agenteId: dono.agenteId, turno: dono } });
+          const r = await devolverResumo(m.deps, { ...contexto(recado.turno.agenteId, recado.turno.conversaId, recado.turno.id), feito: "Login corrigido no Safari e no Firefox" });
+          expect(r.data).toMatchObject({ ok: true });
+          turnos.push(recado.turno.id);
+        }
+        for (const id of turnos) await m.repos.turnos.assentar(id, { estado: "concluido" });
+        await sincronizarTrabalho(m.deps, ids[0]!);
+        const retornos = await m.retomadasDe(dono);
+        expect(retornos).toHaveLength(viraTrabalho ? 2 : 1);
+        if (viraTrabalho) expect(retornos[1]!.entradaTexto).toContain("Firefox");
+        else expect((await m.repos.trabalhos.buscar(ids[0]!))?.resumo).toEqual({ feito: "Login corrigido" });
+      });
+    }
+  });
+
+  it("NOD-376 (revisão 5): a task que não é frente (rotina) segue com a fala crua, sem moldura nem marca", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const { trabalho } = await criarTrabalho(m.deps, { agenteId: m.ada.agenteId, conversaId: m.ada.conversaId, titulo: "Relatório diário", origem: "rotina", forma: "task" });
+      await m.repos.trabalhos.mudarEstado(trabalho.id, "terminado", Date.now());
+      const fala = await mensagemParaTrabalho(m.deps, { trabalhoId: trabalho.id, texto: "Mande de novo?" });
+      const t = (await m.repos.turnos.buscar(fala.data.mensagemTurnoId))!;
+      expect(t.entradaTexto).toBe("Mande de novo?");
+      expect(t.decididoPor).not.toBe(FALA_DEPOIS_DO_FIM);
     });
   });
 

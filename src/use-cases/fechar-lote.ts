@@ -4,6 +4,7 @@ import type { Trabalho } from "../contracts/trabalho.ts";
 import type { Turno } from "../contracts/turno.ts";
 import { ehFrente } from "../domain/frente.ts";
 import { decidirFecho, destinoDoLote, entradaComplementar, entradaDoRetorno, respostaAoColega, respostaComplementarAoColega, resumoMudou, respostaNaTroca, textoFrentesTerminadas, textoPedidoRespondido, type FrenteNoFecho } from "../domain/retorno-do-lote.ts";
+import { conversaDepoisDoFim } from "../domain/fala-na-frente.ts";
 import { trabalhoFinal } from "../domain/trabalho.ts";
 import { entradaDoRetornoARefazer, RETORNO_DO_LOTE } from "../domain/cota-da-ia.ts";
 import { redigir } from "../domain/redacao.ts";
@@ -36,10 +37,21 @@ export async function fecharLoteSePronto(deps: DepsFecho, frente: Trabalho): Pro
   if (!abertoPor) return [];
   const raiz = abertoPor.origem === "peer" ? abertoPor : await delegacaoDoTurno(deps.repos, abertoPor);
   const destino = destinoDoLote(raiz);
-  const frentes = await deps.repos.frentes.frentesDoLote(lote.id);
+  const frentes = await comoAcabaram(deps, await deps.repos.frentes.frentesDoLote(lote.id));
+  // NOD-376: a frente que já tinha acabado e reabriu só para a pessoa conversar nela não volta ao dono de novo. Com o lote
+  // ainda aberto: se faltam outras, nada; se era a última, o lote fecha — com o retorno de todas (ou a resposta ao colega,
+  // que só sai com todas), se ainda não saiu nenhum, ou em silêncio, se cada uma já voltou ao dono na hora.
   // A parada aberta (Parar global ou da sala) para o dono: o lote fecha sem acordá-lo. Falha na leitura = parado.
   // revisto em 2026-10-22 (NOD-311): o Parar do chat encerra a parada na mesma transação; não segura o retorno das frentes.
   const donoParado = destino === "dono" && (await deps.repos.paradas.ativa(deps.escopo.pessoaId, abertoPor.conversaId)) !== false;
+  if (conversaDepoisDoFim(await deps.repos.turnos.doTrabalho(frente.id))) {
+    if (frentes.some((f) => !trabalhoFinal(f.estado))) return [];
+    // Revisão 8: com o dono parado, a linha das que voltaram ainda sai (decidirFecho), como sem a conversa.
+    if (destino === "dono" && lote.avisarACadaUma && !donoParado) {
+      await deps.repos.frentes.marcarDevolvido(lote.id, null, deps.agora());
+      return [];
+    }
+  }
   const fecho = decidirFecho({ destino, avisarACadaUma: lote.avisarACadaUma, devolvido: false, frentes, fechou: frente.id, donoParado });
   if (fecho.acao === "nada") return [];
   if (fecho.acao === "colega") return raiz ? responderAoColega(deps, { lote, abertoPor, raiz, frentes: fecho.frentes }) : [];
@@ -48,6 +60,21 @@ export async function fecharLoteSePronto(deps: DepsFecho, frente: Trabalho): Pro
     return linhaFrentesTerminadas(deps, { lote, conversaId: abertoPor.conversaId, turnoId: null, agenteId: abertoPor.agenteId, frentes: fecho.frentes });
   }
   return devolverAoDono(deps, { lote, abertoPor, total: frentes.length, frentes: fecho.frentes, fechaLote: fecho.fechaLote, cuidado: fecho.cuidado, faltam: fecho.faltam, trabalhoDoRetorno: trabalhoDoRetorno(lote, frentes) });
+}
+
+/**
+ * definido em 2026-10-27 (NOD-376, revisões 6 e 8 do PR #539): a frente que já tinha terminado e só reabriu para a
+ * pessoa conversar nela volta ao dono como terminou — terminada, com o resumo guardado —, com a conversa ainda rodando
+ * (não segura o retorno das outras: a resposta pode esperar a cota por horas), parada ou caída. Parar a conversa não
+ * desfaz o trabalho entregue; o fim dela depois acha o lote já devolvido e não volta de novo.
+ */
+async function comoAcabaram<F extends FrenteNoFecho>(deps: DepsFecho, frentes: F[]): Promise<F[]> {
+  const vistas: F[] = [];
+  for (const f of frentes) {
+    const conversou = f.estado !== "terminado" && f.resumo !== null && conversaDepoisDoFim(await deps.repos.turnos.doTrabalho(f.id));
+    vistas.push(conversou ? { ...f, estado: "terminado", motivoInterrupcao: null, motivoFalha: null, vencidaTipo: null } : f);
+  }
+  return vistas;
 }
 
 /**

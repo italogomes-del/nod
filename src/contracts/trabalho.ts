@@ -152,8 +152,8 @@ export type TrabalhosDto = {
   maquinas?: LeituraDeMaquinaDto[];
 } & CotaNosTrabalhos & DonosNosTrabalhos;
 
-/** GET trabalhos/:id: a tela da task. `mensagens` são as do trabalho (inclui as falas do meio). */
-export type TrabalhoDetalheDto = { trabalho: TrabalhoDto; mensagens: Mensagem[] };
+/** GET trabalhos/:id: a tela da task. `mensagens`: as do trabalho (com as falas do meio); `falasNaFila`: NOD-376, domain/fala-na-frente.ts. */
+export type TrabalhoDetalheDto = { trabalho: TrabalhoDto; mensagens: Mensagem[]; falasNaFila?: { mensagemId: string; situacao: "na_fila" | "entregue" | "lendo" }[] };
 
 /** Linhas do chat (#191); `atividade`: ADR-114; `troca`: bots numa linha; `frentes`: "ver as N"; `revisor`: "Revisor liberou … · ver" (modos, PR 4). */
 export type TipoLinha = "rotina" | "bots" | "task" | "atividade" | "troca" | "frentes" | "revisor";

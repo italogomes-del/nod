@@ -10,6 +10,7 @@ import { criarInterruptor } from "../../src/services/interruptor.ts";
 import { LEASE_MS } from "../../src/shared/constantes.ts";
 import type { Tx } from "../../src/shared/types.ts";
 import { criarAgente } from "../../src/use-cases/criar-agente.ts";
+import { molduraFalaNaFrente } from "../../src/domain/mensagem-no-meio.ts";
 import { mensagemParaTrabalho } from "../../src/use-cases/coordenar-trabalhos.ts";
 import { enviarMensagem } from "../../src/use-cases/enviar-mensagem.ts";
 import { criarTrabalho } from "../../src/use-cases/trabalhos.ts";
@@ -106,9 +107,9 @@ async function montar(o: { capacidades?: boolean; depoisDeAssentar?: DepsPonte["
   const ler = <T>(fn: (r: ReturnType<typeof criarRepos>) => Promise<T>) => escopado((trx) => fn(criarRepos(trx, PESSOA)));
   const renovar = (turnoId: string, extra: Record<string, unknown> = {}) => ponte.renovar({ turnoId, machineId, sinais: SINAIS, eventos: [], ...extra });
   /** Uma task da pessoa com um turno na fila (o próximo puxar o pega). */
-  const tarefa = (titulo: string) => escopado(async (trx) => {
+  const tarefa = (titulo: string, forma: "task" | "frente" = "task") => escopado(async (trx) => {
     const d = depsSobreTrx(trx, PESSOA, { services: base });
-    const { trabalho, events } = await criarTrabalho(d, { agenteId, conversaId, titulo, origem: "pessoa" });
+    const { trabalho, events } = await criarTrabalho(d, { agenteId, conversaId, titulo, origem: "pessoa", forma });
     await d.repos.events.gravarComOutbox(events);
     const t = await d.repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem: "conversa", trabalhoId: trabalho.id, prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: titulo, entradaConfianca: "confiavel", modelo: "auto", harness: "auto" });
     return { trabalhoId: trabalho.id, turnoId: t!.id };
@@ -203,11 +204,12 @@ describeIntegracao("revisão #188 pela ponte: a rede de 2 min", () => {
 describeIntegracao("revisão #188 pela ponte: o recado da task em duas fases", () => {
   it("S18: o recado é oferecido sem sair da fila, vem em mensagensIds e mensagensSemMoldura, e só sai absorvido na confirmação", async () => {
     const m = await montar();
-    const { trabalhoId } = await m.tarefa("Relatório");
+    const { trabalhoId } = await m.tarefa("Relatório", "frente");
     const plano = await m.ponte.puxar(PESSOA.pessoaId);
     const recado = await m.recado(trabalhoId, "inclua setembro");
     const r = await m.renovar(plano!.turnoId, { aceitaMensagens: true, mensagensEntregues: [] });
-    expect(r).toMatchObject({ mensagens: ["inclua setembro"], mensagensIds: [recado], mensagensSemMoldura: [recado] });
+    // NOD-376: a fala da pessoa vem já com a moldura dela; o id segue em mensagensSemMoldura (o laço não embrulha de novo).
+    expect(r).toMatchObject({ mensagens: [molduraFalaNaFrente("inclua setembro")], mensagensIds: [recado], mensagensSemMoldura: [recado] });
     expect((await m.ler((x) => x.turnos.buscar(recado)))?.estado).toBe("pendente");
     // Já oferecido: não vai de novo enquanto a confirmação não volta.
     expect((await m.renovar(plano!.turnoId, { aceitaMensagens: true, mensagensEntregues: [] })).mensagens).toBeUndefined();
@@ -217,11 +219,11 @@ describeIntegracao("revisão #188 pela ponte: o recado da task em duas fases", (
 
   it("S18: o app antigo (sem confirmação) recebe o recado absorvido na hora, com o id alinhado ao texto", async () => {
     const m = await montar();
-    const { trabalhoId } = await m.tarefa("Relatório");
+    const { trabalhoId } = await m.tarefa("Relatório", "frente");
     const plano = await m.ponte.puxar(PESSOA.pessoaId);
     const recado = await m.recado(trabalhoId, "inclua setembro");
     const r = await m.renovar(plano!.turnoId, { aceitaMensagens: true });
-    expect(r).toMatchObject({ mensagens: ["inclua setembro"], mensagensIds: [recado] });
+    expect(r).toMatchObject({ mensagens: [molduraFalaNaFrente("inclua setembro")], mensagensIds: [recado] });
     expect((await m.ler((x) => x.turnos.buscar(recado)))?.motivoInterrupcao).toBe("absorvido");
   });
 

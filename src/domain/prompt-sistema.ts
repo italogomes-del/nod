@@ -298,6 +298,12 @@ const LINHA_FORMATACAO = "Formatação: a conversa mostra **negrito**, *itálico
 const PROGRESSO_RELATORIO = "O relatório completo vai só na resposta final, depois da última ferramenta.";
 const PROGRESSO_WHATSAPP = "A resposta final vai depois da última ferramenta.";
 
+/**
+ * NOD-376: a pessoa escreve na tela da frente e a mensagem só entra na sessão no fim da ferramenta em curso — um
+ * `gh run watch` em primeiro plano a segurou 6 min. Responder primeiro; a espera de fora segue do dono (ADR-099 §4).
+ */
+export const FALA_NA_FRENTE = "Se a pessoa escrever nesta frente, responda a ela primeiro, aqui, em poucas frases. Comando demorado do seu trabalho (testes, build) roda em segundo plano, para a mensagem dela não esperar, e você acompanha o resultado antes de devolver; CI e deploy de fora você não espera aqui: devolva o fato.";
+
 /** Uma task aberta do bot como entra no prompt da conversa: id (para mandar_para_frente), título, estado e o último passo. */
 /** `cuidado` (revisão do épico, S24): título e último passo vindos de colega ou de task que leu conteúdo de fora. */
 export type TrabalhoNoPrompt = { id: string; titulo: string; estado: string; ultimoPasso: string | null; cuidado?: boolean };
@@ -490,7 +496,7 @@ export function partesDoPromptSistema(entrada: EntradaPromptSistema): { estavel:
   if (pedidos.length > 0 && entrada.ferramentas.some((f) => f.nome === "responder_pedido")) volatil.push(linhaDosPedidosPendentes(pedidos));
   // ADR-083: a task do turno, e por que ela não abre outra; na conversa, as tasks abertas do bot (mudam a cada turno).
   if (entrada.trabalho?.forma === "frente") {
-    volatil.push(`Frente atual: você está na frente "${entrada.trabalho.titulo}", ${ORIGEM_DA_TASK[entrada.trabalho.origem]}. Ela roda à parte da conversa: trabalhe até o fim e devolva o resumo; a pergunta e o resultado chegam à pessoa como balão da task. Uma frente não abre outras: faça o trabalho aqui mesmo. ${BRANCH_NA_FRENTE_ATUAL}`);
+    volatil.push(`Frente atual: você está na frente "${entrada.trabalho.titulo}", ${ORIGEM_DA_TASK[entrada.trabalho.origem]}. Ela roda à parte da conversa: trabalhe até o fim e devolva o resumo; a pergunta e o resultado chegam à pessoa como balão da task. Uma frente não abre outras: faça o trabalho aqui mesmo. ${FALA_NA_FRENTE} ${BRANCH_NA_FRENTE_ATUAL}`);
   } else if (entrada.trabalho) {
     const naoAbre = entrada.ferramentas.some((f) => f.nome === "abrir_frentes") ? "" : " Uma task não abre outras (só a rotina abre, um nível): faça o trabalho aqui mesmo.";
     volatil.push(`Task atual: você está na task "${entrada.trabalho.titulo}", ${ORIGEM_DA_TASK[entrada.trabalho.origem]}. Ela roda à parte da conversa: trabalhe até o fim e entregue o resultado; a pergunta e o resultado chegam à pessoa como balão da task.${naoAbre}`);

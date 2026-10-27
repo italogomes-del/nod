@@ -118,11 +118,15 @@ export function frentesRepo(conn: Conn, escopo: Escopo) {
     /**
      * NOD-282 (G7): a frente que já tinha voltado ao dono foi reaberta — o resumo de antes fica em `resumo_anterior` (o
      * vazio `{}` quando ela não tinha resumo) e o atual zera, para a volta a final ganhar o resumo novo.
+     * NOD-376 (`manterAtual`): a frente reaberta pela conversa da pessoa guarda a cópia e mantém o atual — se a conversa
+     * só conversa, os dois ficam iguais e nada volta; se vira trabalho (um resumo novo), o complementar sai.
      */
-    async arquivarResumo(trabalhoId: string): Promise<boolean> {
+    async arquivarResumo(trabalhoId: string, opcoes: { manterAtual?: true } = {}): Promise<boolean> {
+      const manter = opcoes.manterAtual === true;
       const r = await conn`
-        update trabalhos set resumo_anterior = coalesce(resumo, '{}'::jsonb), resumo = null
-        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${trabalhoId} and forma = 'frente'`;
+        update trabalhos set resumo_anterior = coalesce(resumo, '{}'::jsonb), resumo = case when ${manter} then resumo else null end
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${trabalhoId} and forma = 'frente'
+          and (not ${manter} or resumo_anterior is null)`;
       return r.count === 1;
     },
 

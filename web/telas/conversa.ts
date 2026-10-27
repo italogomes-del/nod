@@ -517,6 +517,20 @@ function renderSituacaoFila(s: SituacaoFila, turnoId: string): string {
   return s.recusa ? `${chip}<p class="cx-erro" role="alert">${esc(s.recusa)}</p>` : chip;
 }
 
+/**
+ * NOD-376: o chip da fala que a pessoa escreveu na tela da frente — o mesmo `.fila-chip` discreto da conversa, sem o
+ * Cancelar (o turno do recado não tem Desfazer). A situação vem do detalhe da task (`falasNaFila`).
+ */
+export function chipDaFalaNaFrente(situacao: "na_fila" | "entregue" | "lendo", bot: string, frente: { rodando: boolean; precisaDeVoce?: boolean }): string {
+  const texto =
+    situacao === "lendo" ? `Entregue · ${bot} está lendo agora`
+    : situacao === "entregue" ? `Entregue · ${bot} lê ao fim do passo atual`
+    : frente.precisaDeVoce ? `Na fila · ${bot} lê depois que você responder o que ele perguntou`
+    : frente.rodando ? `Na fila · ${bot} lê no próximo passo`
+    : `Na fila · ${bot} volta à frente para responder`;
+  return `<div class="fila-chip" role="status"><span class="fila-relogio" aria-hidden="true"></span>${esc(texto)}</div>`;
+}
+
 /** "/review 420" na mensagem da pessoa: o comando vira chip e o resto segue como texto (canvas "Comandos /", C4). */
 export function comChipDeComando(texto: string): string {
   const m = /^\/([\w.:-]+)(\s[\s\S]*)?$/.exec(texto.trim());
@@ -535,7 +549,7 @@ export function comChipDeComando(texto: string): string {
  * `linhaDoModo` (PR 6 dos modos de aprovação, telas Y1 e Y2): a linha discreta do que o "Ignorar todas" rodou sem a
  * pessoa neste turno (./linha-do-modo.ts), logo embaixo do balão do bot e antes das reações.
  */
-export function renderMensagem(m: Mensagem, estado: Estado, sala = false, opcoes: { etiqueta?: string; progresso?: string; diagramas?: boolean; linhaDoModo?: string } = {}): string {
+export function renderMensagem(m: Mensagem, estado: Estado, sala = false, opcoes: { etiqueta?: string; progresso?: string; diagramas?: boolean; linhaDoModo?: string; chipDaFala?: string } = {}): string {
   // Kinds não-texto (parada, sistema, negação) também se relatam — são JUSTAMENTE os que a categoria
   // 'travou_ou_parou' descreve, e o caso de uso já trata mensagem sem turno (definido em 2026-09-21).
   // definido em 2026-10-03: o artefato é uma fala do bot — mascote, nome e hora em volta do card, como os balões; solto
@@ -589,7 +603,7 @@ export function renderMensagem(m: Mensagem, estado: Estado, sala = false, opcoes
       ? `<div class="bubble">${comChipDeComando(m.texto)}${metaTags}</div>`
       : baloesDoBot(m.texto, m.id, opcoes.diagramas === true, `${metaTags}${progressoDentro}`, progressoDentro !== "");
   return `<article class="${classes}" data-mensagem="${esc(m.id)}"${pergunta ? ` data-pergunta="${esc(pergunta.decisaoId)}"` : ""}>
-    ${!ehPessoa && agente ? iconeAgente(agente, "md") : ""}<div class="bubble-wrap">${acoesDaMensagem(m, estado, sala)}${sender}${ehPessoa ? "" : resumoDaMensagem(m)}${resposta ? rotuloDaResposta(m) : ""}${ehPessoa ? citacaoAcimaDoBalao(m) : ""}${anexosDe(m, estado)}${balao}${ehPessoa ? "" : midiasDoBot(m, estado)}${progressoFora}${ehPessoa ? "" : (opcoes.linhaDoModo ?? "")}${ehPessoa ? "" : avisoDeLeitura(m, estado)}${ehPessoa ? "" : capturaDoTurno(m, estado)}${contextoDelegado}${chipsDeReacao(m, estado)}${fila ? renderSituacaoFila(fila, fila.turnoId) : ""}${faixaDaMensagem(m, estado)}</div>
+    ${!ehPessoa && agente ? iconeAgente(agente, "md") : ""}<div class="bubble-wrap">${acoesDaMensagem(m, estado, sala)}${sender}${ehPessoa ? "" : resumoDaMensagem(m)}${resposta ? rotuloDaResposta(m) : ""}${ehPessoa ? citacaoAcimaDoBalao(m) : ""}${anexosDe(m, estado)}${balao}${ehPessoa ? "" : midiasDoBot(m, estado)}${progressoFora}${ehPessoa ? "" : (opcoes.linhaDoModo ?? "")}${ehPessoa ? "" : avisoDeLeitura(m, estado)}${ehPessoa ? "" : capturaDoTurno(m, estado)}${contextoDelegado}${chipsDeReacao(m, estado)}${fila ? renderSituacaoFila(fila, fila.turnoId) : (opcoes.chipDaFala ?? "")}${faixaDaMensagem(m, estado)}</div>
   </article>${resposta ? linhaDaRetomada(m, estado) : ""}`;
 }
 

@@ -276,3 +276,6 @@ frentes que devolvem o resultado ao dono. A pessoa fala com o bot, não com as f
   tipo `frentes`, desde a emenda do PR 8): as frentes voltam a aparecer como itens próprios.
 - Mais de 20% das esperas acordando o dono sem fato novo: rever o `esperar_comando` e a orientação do prompt.
 - A conversa com a pessoa parada por falta de cota mesmo com a reserva, mais de uma vez por semana: rever a reserva de 1%.
+
+> Cruzamento (2026-10-27, NOD-376): a fala da pessoa na tela de uma frente fica na frente (moldura própria) e não
+> volta ao dono; ver a emenda NOD-376 da [ADR-083](adr-083-trabalhos-paralelos-a-conversa-coordena.md).

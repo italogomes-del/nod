@@ -6,7 +6,7 @@ import type { Executor } from "../contracts/evento.ts";
 import type { Confianca } from "../contracts/mensagem.ts";
 import type { MotivoFalha, MotivoInterrupcao, MotivoLocalidade, MotivoSemNovidade } from "../contracts/motivos.ts";
 import type { EstadoTurno, OrigemTurno, Profundidade, SinaisTurno, Turno } from "../contracts/turno.ts";
-import { ENTRADA_DA_RETOMADA_DA_QUEDA, ENTRADA_DA_VOLTA_DA_COTA, MARCA_DO_PEDIDO_ORIGINAL, PREFIXOS_DA_VOLTA_DO_FUNDO, type PortaoDaCota, RETORNO_DO_LOTE } from "../domain/cota-da-ia.ts";
+import { ENTRADA_DA_RETOMADA_DA_QUEDA, ENTRADA_DA_VOLTA_DA_COTA, MARCA_DA_FALA_NA_FRENTE, MARCA_DO_PEDIDO_ORIGINAL, PREFIXOS_DA_VOLTA_DO_FUNDO, type PortaoDaCota, RETORNO_DO_LOTE } from "../domain/cota-da-ia.ts";
 import type { SomaDoDia } from "../domain/custo-do-dia.ts";
 import { modelosPorIa } from "../domain/ia-do-modelo.ts";
 import { ESPERA_MAXIMA_FUNDO_MS } from "../domain/memoria-mac.ts";
@@ -695,13 +695,13 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
      * "Levar as tasks" (ADR-108 R4/R5): os turnos pendentes das tasks do bot na IA `iaDe` passam a rodar em `harness`/
      * `modelo` (fixos naquele turno, como a conversa no #319), e só as esperas da COTA (entrada que começa com
      * ENTRADA_DA_VOLTA_DA_COTA) acordam agora, com a entrada nova — o "me chame às" do bot (ADR-086) segue com a hora dele.
-     * Devolve os ids reescritos.
+     * Devolve os ids reescritos. NOD-376: guarda desde a primeira marca — o pedido original ou a fala da pessoa na frente.
      */
     async levarTasksDoBot(p: { agenteId: string; iaDe: IdHarness | null; harness: string; modelo: string; entradaDaVolta: string }): Promise<string[]> {
       const linhas = await conn<{ id: string }[]>`
         update turnos t set harness = ${p.harness}, modelo = ${p.modelo},
           acordar_em = case when starts_with(t.entrada_texto, ${ENTRADA_DA_VOLTA_DA_COTA}) then null else t.acordar_em end,
-          entrada_texto = case when starts_with(t.entrada_texto, ${ENTRADA_DA_VOLTA_DA_COTA}) then ${p.entradaDaVolta}::text || case when strpos(t.entrada_texto, ${MARCA_DO_PEDIDO_ORIGINAL}::text) > 0 then substr(t.entrada_texto, strpos(t.entrada_texto, ${MARCA_DO_PEDIDO_ORIGINAL}::text)) else '' end
+          entrada_texto = case when starts_with(t.entrada_texto, ${ENTRADA_DA_VOLTA_DA_COTA}) then ${p.entradaDaVolta}::text || coalesce(substr(t.entrada_texto, least(nullif(strpos(t.entrada_texto, ${MARCA_DO_PEDIDO_ORIGINAL}::text), 0), nullif(strpos(t.entrada_texto, ${MARCA_DA_FALA_NA_FRENTE}::text), 0))), '')
             else t.entrada_texto end
         where t.tenant_id = ${escopo.tenantId} and t.owner_id = ${escopo.pessoaId} and t.agente_id = ${p.agenteId} and t.estado = 'pendente' and t.trabalho_id is not null
           and ${daIa(conn, p.iaDe)}

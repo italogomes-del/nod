@@ -40,7 +40,7 @@ import { avisarEsperaAoRemetente } from "./entregar-resposta-peer.ts";
 import { autoriaAgente, autoriaPessoa, evento } from "./autoria-evento.ts";
 import { aposQuedaDaMaquina } from "./interromper-por-maquina.ts";
 import { postarNaSala } from "./postar-na-sala.ts";
-import { enfileirarVoltaDoFundo, entradaDaVoltaDoFundo, fundoNaCadeia, raizDaCadeia } from "./volta-do-fundo.ts";
+import { enfileirarVoltaDoFundo, entradaDaVoltaDoFundo, falasSemResposta, fundoNaCadeia, raizDaCadeia } from "./volta-do-fundo.ts";
 import { continuarAprovacoesDoTurno } from "./decidir.ts";
 import { confirmarNaSessao } from "./sessao-viva.ts";
 import { emSavepoint } from "./savepoint.ts";
@@ -1099,7 +1099,7 @@ async function aposLimiteNoFundo(
   const base = conta?.tipo === "trocou" ? entradaDaTrocaDeConta(nomeDaIa(p.ia), conta.de, conta.para) : levada ? entradaDaTrocaDeIa(nomeDaIa(p.ia), nomeDaIa(levada)) : entradaDaVoltaDaCota(nomeDaIa(p.ia));
   // Já é uma volta da cota (a cadeia esperou antes): o aviso a quem pediu já saiu — uma vez por cadeia.
   const jaEsperou = turno.origem === "retomada" && turno.entradaTexto.startsWith(ENTRADA_DA_VOLTA_DA_COTA);
-  const volta = await enfileirarVoltaDoFundo(deps, { turno, retomaTurnoId, entradaTexto: entradaDaVoltaDoFundo({ turno, raiz, base, sessaoRetomavel }), acordarEm: p.renovaEm, agora });
+  const volta = await enfileirarVoltaDoFundo(deps, { turno, retomaTurnoId, entradaTexto: entradaDaVoltaDoFundo({ turno, raiz, base, sessaoRetomavel, falas: await falasSemResposta(deps, turno) }), acordarEm: p.renovaEm, agora });
   const events: RuntimeEvent[] = [
     evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { motivo: p.motivoInterrupcao, motivo_falha: p.motivoFalha, ia_no_limite: p.ia, renova_em: p.renovaEm, volta_turno_id: volta.id, espera_da_cota: "espera", custo_usd: p.custoUsd } }),
     evento(deps.escopo, { kind: "turno_criado", autoria, agora, conversaId: turno.conversaId, turnoId: volta.id, dados: { origem: volta.origem, agente_id: turno.agenteId, retoma_turno_id: retomaTurnoId, trabalho_id: turno.trabalhoId ?? null, acordar_em: p.renovaEm } }),
@@ -1191,7 +1191,7 @@ async function aposErroTransitorioNoFundo(
   const voltaEm = decisao.voltaEm ?? agora;
   const sessaoRetomavel = trabalho ? trabalho.sessaoCli !== null && (trabalho.sessaoHarness === null || trabalho.sessaoHarness === p.ia) : false;
   const base = entradaDaNovaTentativa(ia, decisao.tentativa, TENTATIVAS_TRANSITORIAS_MAX);
-  const volta = await enfileirarVoltaDoFundo(deps, { turno, retomaTurnoId, entradaTexto: entradaDaVoltaDoFundo({ turno, raiz, base, sessaoRetomavel }), acordarEm: voltaEm, tentativasTransitorias: decisao.tentativa, agora });
+  const volta = await enfileirarVoltaDoFundo(deps, { turno, retomaTurnoId, entradaTexto: entradaDaVoltaDoFundo({ turno, raiz, base, sessaoRetomavel, falas: await falasSemResposta(deps, turno) }), acordarEm: voltaEm, tentativasTransitorias: decisao.tentativa, agora });
   const events: RuntimeEvent[] = [
     // `espera_da_cota` fica como alias de `espera_no_fundo` enquanto quem lê (compor, a web) lê os dois.
     evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { motivo: p.motivoInterrupcao, motivo_falha: p.motivoFalha, volta_turno_id: volta.id, espera_da_cota: "espera", espera_no_fundo: "erro_transitorio", volta_em: voltaEm, tentativa: decisao.tentativa, custo_usd: p.custoUsd } }),

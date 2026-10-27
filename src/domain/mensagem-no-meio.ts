@@ -12,6 +12,23 @@ export function molduraMensagemNoMeio(texto: string): string {
 }
 
 /**
+ * NOD-376: a fala que a pessoa escreve na tela de uma frente (ou task). Antes ela ia crua, como o recado do bot
+ * (`mensagensSemMoldura`), e o bot a tratava como ruído: respondia só no fim, colado ao resumo. A moldura vai na própria
+ * entrada do turno do recado, então vale nos dois caminhos — absorvida no meio do turno vivo (o laço não embrulha de
+ * novo, o id segue em `mensagensSemMoldura`) e na frente parada ou terminada, que a fala reabre como turno próprio.
+ * O recado que o bot repassa (`mandar_para_frente`) não passa por aqui.
+ */
+export const INICIO_FALA_NA_FRENTE = "[nod] A pessoa escreveu nesta frente: «";
+const FRENTE_JA_ACABOU = "O trabalho desta frente já tinha acabado e o resumo dela já está guardado: não o refaça, não o retome nem devolva outro resumo.";
+export function molduraFalaNaFrente(texto: string, o: { frenteAcabou?: boolean } = {}): string {
+  // As aspas de fora («») no texto dela viram as de dentro (‹›): a fala não fecha a citação nem imita a moldura.
+  const fala = texto.replaceAll("«", "‹").replaceAll("»", "›");
+  // Revisão do PR #539 (A1): a frente que já tinha acabado só responde — não refaz nem retoma o trabalho sem ela pedir.
+  const depois = o.frenteAcabou ? FRENTE_JA_ACABOU : "Depois continue o trabalho de onde parou.";
+  return `${INICIO_FALA_NA_FRENTE}${fala}». Responda a ela primeiro, aqui na frente, em poucas frases. ${depois} A resposta fica nesta frente: não mude o pedido original, a não ser que ela peça.`;
+}
+
+/**
  * Os eventos em que o modelo passa a ler o que foi escrito na sessão (revisto em 2026-10-08, revisão do épico #188). O
  * padrão é o do CLI em stream-json: a mensagem entra na conversa no limite da ferramenta (depois do `tool_result`) ou no
  * fim da volta (`result`). Um driver cujo motor lê a mensagem em outro ponto passa as suas fronteiras.

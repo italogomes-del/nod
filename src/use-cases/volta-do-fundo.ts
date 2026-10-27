@@ -1,6 +1,8 @@
 import type { Turno } from "../contracts/turno.ts";
-import { ehFundo, ehVoltaDoFundo, entradaDaVolta, RETORNO_DO_LOTE } from "../domain/cota-da-ia.ts";
+import { ehFundo, ehVoltaDoFundo, entradaDaVolta, MARCA_DA_FALA_NA_FRENTE, MARCA_DO_PEDIDO_ORIGINAL, RETORNO_DO_LOTE } from "../domain/cota-da-ia.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
+import { FALA_DEPOIS_DO_FIM, falasSemRespostaDoTurno, turnoFalou } from "../domain/fala-na-frente.ts";
+import { INICIO_FALA_NA_FRENTE } from "../domain/mensagem-no-meio.ts";
 import { SALTOS_DE_RETOMADA } from "./apoio-l7.ts";
 import { PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
 import type { Deps } from "./tipos.ts";
@@ -74,14 +76,46 @@ export async function fundoNaCadeia(deps: Pick<Deps, "repos">, turno: Turno): Pr
  * retorno do lote é ele mesmo o pedido (os resumos das frentes), e a volta de uma volta reaproveita a entrada dela, que
  * já leva o pedido — nunca "Pedido original" aninhado.
  */
-export function entradaDaVoltaDoFundo(p: { turno: Turno; raiz: Turno; base: string; sessaoRetomavel: boolean }): string {
+export function entradaDaVoltaDoFundo(p: { turno: Turno; raiz: Turno; base: string; sessaoRetomavel: boolean; falas?: readonly string[] }): string {
   const { turno } = p;
+  // NOD-376 (revisões 7 e 8 do PR #539, definido em 2026-10-27): as falas da pessoa ainda sem resposta (`falas`, de
+  // falasSemResposta: as que a volta anterior levava, a do próprio turno cortado e as que ele absorveu) vão num bloco só,
+  // por último, depois de MARCA_DA_FALA_NA_FRENTE — mesmo com a sessão retomável: o corte pode ter vindo antes da
+  // resposta, e "continue de onde parou" sozinho a deixaria sem retorno. A já respondida não volta.
+  const comFalas = (entrada: string) => (p.falas?.length ? `${entrada}${MARCA_DA_FALA_NA_FRENTE}${p.falas.join("\n\n")}` : entrada);
   // NOD-309: a volta da nova tentativa também já leva o pedido (nunca aninhado).
   if (turno.origem === "retomada" && ehVoltaDoFundo(turno.entradaTexto)) {
-    return p.sessaoRetomavel ? p.base : turno.entradaTexto.includes("\n\nPedido original da frente:\n") ? `${p.base}${turno.entradaTexto.slice(turno.entradaTexto.indexOf("\n\nPedido original da frente:\n"))}` : p.base;
+    const iFala = turno.entradaTexto.lastIndexOf(MARCA_DA_FALA_NA_FRENTE);
+    const semFala = iFala >= 0 ? turno.entradaTexto.slice(0, iFala) : turno.entradaTexto;
+    const i = semFala.indexOf(MARCA_DO_PEDIDO_ORIGINAL);
+    const levado = i >= 0 ? semFala.slice(i) : null;
+    return comFalas(levado && !p.sessaoRetomavel ? `${p.base}${levado}` : p.base);
   }
-  const pedido = turno.decididoPor === RETORNO_DO_LOTE ? turno.entradaTexto : p.raiz.origem === "retomada" ? null : p.raiz.entradaTexto;
-  return entradaDaVolta({ base: p.base, sessaoRetomavel: p.sessaoRetomavel, pedidoOriginal: pedido });
+  // NOD-376: o turno cortado é o da fala da pessoa na frente (nasce `retomada`, então a raiz é o pedido da frente).
+  // Revisão 5 do PR #539 (definido em 2026-10-27): na frente que segue (não a terminada, marcada FALA_DEPOIS_DO_FIM), a
+  // sessão nova também ganha o pedido da frente, como qualquer volta, para continuar depois.
+  if (turno.entradaTexto.startsWith(INICIO_FALA_NA_FRENTE)) {
+    const pedido = turno.decididoPor === FALA_DEPOIS_DO_FIM || p.raiz.origem === "retomada" ? null : p.raiz.entradaTexto;
+    return comFalas(entradaDaVolta({ base: p.base, sessaoRetomavel: p.sessaoRetomavel, pedidoOriginal: pedido }));
+  }
+  // Revisão 9: o turno da conversa depois do fim (um comando / cru) não pede o trabalho de novo.
+  const pedido = turno.decididoPor === RETORNO_DO_LOTE ? turno.entradaTexto : p.raiz.origem === "retomada" || turno.decididoPor === FALA_DEPOIS_DO_FIM ? null : p.raiz.entradaTexto;
+  return comFalas(entradaDaVolta({ base: p.base, sessaoRetomavel: p.sessaoRetomavel, pedidoOriginal: pedido }));
+}
+
+/**
+ * NOD-376 (revisões 7 e 8): as falas da pessoa que a volta do turno cortado leva — as que a volta anterior levava, se o
+ * bot não falou nesta (a primeira coisa dela é responder), mais a do próprio turno e as que ele absorveu sem responder.
+ */
+export async function falasSemResposta(deps: Pick<Deps, "repos">, turno: Turno): Promise<string[]> {
+  if (!turno.trabalhoId) return [];
+  const iFala = turno.origem === "retomada" && ehVoltaDoFundo(turno.entradaTexto) ? turno.entradaTexto.lastIndexOf(MARCA_DA_FALA_NA_FRENTE) : -1;
+  const turnos = await deps.repos.turnos.doTrabalho(turno.trabalhoId);
+  const temFala = iFala >= 0 || turno.entradaTexto.startsWith(INICIO_FALA_NA_FRENTE) || turnos.some((t) => t.absorvidoPor === turno.id && t.entradaTexto.startsWith(INICIO_FALA_NA_FRENTE));
+  if (!temFala) return [];
+  const mensagens = await deps.repos.mensagens.doTrabalho(turno.trabalhoId);
+  const herdadas = iFala >= 0 && !turnoFalou(turno.id, mensagens) ? [turno.entradaTexto.slice(iFala + MARCA_DA_FALA_NA_FRENTE.length)] : [];
+  return [...herdadas, ...falasSemRespostaDoTurno(turno, turnos, mensagens)];
 }
 
 /** NOD-269: o primeiro turno da cadeia de retomadas (o que trouxe o pedido). Mesmo teto de saltos de rotinaDoTurno. */

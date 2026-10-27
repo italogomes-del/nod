@@ -7,7 +7,7 @@ import { botao, esc, hora, iconeAgente } from "../lib/render.ts";
 import { duracaoCurta } from "../lib/relogio.ts";
 import { textoFormatado } from "../lib/texto-formatado.ts";
 import { aberto, abertosDoBot, acoesDeFazer, agrupar, dicaSemContato, emEspera, esperaDaContaDe, esperandoColega, esperandoMaquina, etiquetaOrigem, quandoVolta, textoDaEsperaDaConta, voltaMarcada, filtrar, leituraDoMac, maquinasDe, memoriaDosBots, memoriaLegivel, pilulaDaCota, pilulaDasMaquinas, pilulaMac, pilulaMemoria, pontoTrabalho, maquinasDoAviso, rodandoNoMac, resumoDaPilula, seguradoPeloMac, situacaoDe, tempoDe, temposDaTask, tituloCurto, trabalhoPorId, trabalhosConhecidos, type GruposTrabalhos } from "../lib/trabalhos.ts";
-import { renderMensagem, type BlocoDaTimeline } from "./conversa.ts";
+import { chipDaFalaNaFrente, renderMensagem, type BlocoDaTimeline } from "./conversa.ts";
 import { outraMaquinaDestaVez } from "../lib/rodar-desta-vez.ts";
 import { horariosDaRotina } from "./linhas-do-chat.ts";
 import { custoDaFrente } from "./modo-dev.ts";
@@ -339,7 +339,14 @@ export function blocosDoHistoricoDaTask(estado: Estado, id: string): BlocoDaTime
   const d = estado.trabalhoDetalhe[id];
   const t = d?.trabalho ?? trabalhoPorId(estado, id);
   if (!t) return [{ chave: "carregando", html: '<p class="mudo tk-carregando">carregando a task…</p>' }];
-  const mensagens = d ? d.mensagens.map((m) => ({ chave: m.id, html: renderMensagem(m, estado) })) : [{ chave: "carregando", html: '<p class="mudo tk-carregando">carregando a conversa da task…</p>' }];
+  // NOD-376: a fala da pessoa ainda sem resposta leva o chip "Na fila" / "Entregue" (some quando o bot responde).
+  const bot = agente(estado, t.agenteId)?.nome ?? "o bot";
+  // A reabertura (turno.iniciado) relê o detalhe (RELEEM_A_TASK), então o estado aqui não fica o de antes dela.
+  const chip = (mid: string) => {
+    const f = d?.falasNaFila?.find((x) => x.mensagemId === mid);
+    return f ? { chipDaFala: chipDaFalaNaFrente(f.situacao, bot, { rodando: Boolean(t.turnoVivoId), precisaDeVoce: t.estado === "precisa_de_voce" }) } : {};
+  };
+  const mensagens = d ? d.mensagens.map((m) => ({ chave: m.id, html: renderMensagem(m, estado, false, chip(m.id)) })) : [{ chave: "carregando", html: '<p class="mudo tk-carregando">carregando a conversa da task…</p>' }];
   return [{ chave: "abertura", html: aberturaDaTask(t, estado) }, ...mensagens];
 }
 

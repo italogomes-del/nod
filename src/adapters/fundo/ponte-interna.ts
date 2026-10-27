@@ -552,7 +552,8 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
         }
         // ADR-083 (#193): a fala mandada à task (tela da task ou mandar_para_task) entra no turno vivo dela.
         // Revisão do épico (S18, 2026-10-08): nas mesmas duas fases da conversa (#189) — oferecida aqui, absorvida na
-        // confirmação —, com o id em `mensagensIds` e em `mensagensSemMoldura` (é recado para a task, não fala no meio).
+        // confirmação —, com o id em `mensagensIds` e em `mensagensSemMoldura`: o recado do bot entra cru, e a fala da pessoa já
+        // vem com a moldura dela no texto (NOD-376, domain/mensagem-no-meio.ts), sem a moldura genérica do meio.
         let semMoldura: string[] = [];
         if (r.ativo && p.aceitaMensagens) {
           const b = await absorverNoTrabalho(d, { turnoId: p.turnoId, confirma, jaOferecidas: [...jaOferecidas.keys()] });

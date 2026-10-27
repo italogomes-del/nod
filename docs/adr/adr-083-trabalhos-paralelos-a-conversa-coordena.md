@@ -113,3 +113,38 @@ Decisão do Marlon (19/10, revisão da NOD-225): o Parar da barra do chat princi
   fica registrado, sem acordar quem pediu.
 - **Risco aceito:** sem parada aberta, um pingue-pongue entre bots pode voltar quando chega um pedido novo; o Parar
   global resolve.
+
+## Emenda (2026-10-27, NOD-376): a fala da pessoa na tela da frente tem moldura própria
+
+- **Antes:** a fala escrita na tela de uma frente entrava no turno vivo dela como `mensagensSemMoldura` (igual ao
+  recado do bot, X3), sem o "responda a ela primeiro" do §6. O bot seguia o trabalho e a pessoa ficava sem retorno.
+- **Agora:** o turno do recado da pessoa já nasce com `molduraFalaNaFrente` (`src/domain/mensagem-no-meio.ts`):
+  responder primeiro, ali na frente, em poucas frases, sem mudar o pedido original; na frente que já tinha acabado,
+  não refazer o trabalho. O recado do bot (`mandar_para_frente`) segue cru. Comandos `/` seguem sem moldura, e a task antiga
+  (forma `task`) também.
+- **A frente reaberta pela conversa não arquiva o resumo** (`sincronizarTrabalho(..., { guardaResumo })`): sem
+  resumo anterior não há retorno complementar, e a conversa não volta ao dono nem ao colega que pediu.
+- **Na tela:** `GET trabalhos/:id` traz `falasNaFila` (`na_fila` / `entregue` / `lendo`), e a fala ganha um chip até
+  o bot responder (`src/domain/fala-na-frente.ts`).
+- **A frente que só reabriu para conversar não volta ao dono de novo** (`fecharLoteSePronto`): com o lote aberto, se
+  faltam outras, nada; se era a última, o lote fecha com o retorno de todas (ou em silêncio, se cada uma já voltou na
+  hora com `avisarACadaUma`). Vale para o pedido de um colega também: a conversa da pessoa não volta a ele. A volta do
+  fundo do turno da fala leva a fala com rótulo próprio (`MARCA_DA_FALA_NA_FRENTE`, por último, nunca como "Pedido
+  original"); com sessão nova numa frente que segue, leva também o pedido da frente.
+  Só as falas ainda sem resposta voltam (`falasSemResposta`): a do turno cortado, as que ele absorveu e as que a volta
+  anterior levava, se o bot não falou nela; a já respondida não volta nem reacende o chip.
+- **Como se sabe que é conversa:** o turno da fala na frente acabada nasce com `decidido_por = FALA_DEPOIS_DO_FIM`
+  (como `RETORNO_DO_LOTE`); `conversaDepoisDoFim` vale enquanto, depois dele, só vierem outras falas marcadas e voltas
+  do fundo. Nesse meio, `devolver_resumo` não troca o resumo já devolvido: responde ao bot que encerre com a resposta.
+  Se essa conversa for parada ou cair, a frente volta ao dono como terminou (terminada, com o resumo guardado):
+  parar a conversa não desfaz o trabalho entregue.
+- **Limites aceitos:** (1) o chip conta como resposta a fala de texto do bot no turno vivo depois da fala da pessoa; a
+  narração que o bot grava entre a fala e a hora em que a sessão a lê (até o fim do passo atual) tira o chip antes da
+  hora — fechar exigiria gravar a hora da absorção; o mesmo critério decide se a volta do fundo ainda leva a fala. (2) Revisão 8: a conversa não segura o lote — no fecho, a frente
+  em conversa depois do fim conta como terminada, com o resumo guardado. (3) Pedir trabalho novo na frente terminada pela barra não devolve
+  outro resumo ao dono se o bot só conversar: para refazer, peça ao bot na conversa. A frente parada (Parar) ou que
+  falhou não entra nisso: a fala na barra a retoma como antes (NOD-256 F1.3), e o resultado volta ao dono.
+- **Conversa que vira trabalho:** a reabertura pela conversa guarda a cópia do resumo sem zerar o atual
+  (`arquivarResumo(..., { manterAtual })`); se um recado do dono, uma decisão ou um pedido novo desfaz a conversa e a
+  frente devolve outro resumo, o retorno complementar (NOD-282 G7) sai como antes.
+- **Gatilho de reversão:** a moldura levar o bot a trocar o pedido da frente pela conversa.

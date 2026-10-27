@@ -3363,11 +3363,11 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           t.resumo = resumo;
           return true;
         },
-        async arquivarResumo(trabalhoId: string) {
+        async arquivarResumo(trabalhoId: string, opcoes: { manterAtual?: true } = {}) {
           const t = doTenant(b.trabalhos).find((x) => x.id === trabalhoId && x.ownerId === escopo.pessoaId && x.forma === "frente");
-          if (!t) return false;
+          if (!t || (opcoes.manterAtual && resumosAnteriores.has(t.id))) return false;
           resumosAnteriores.set(t.id, t.resumo ?? {});
-          t.resumo = null;
+          if (!opcoes.manterAtual) t.resumo = null;
           return true;
         },
         async consumirResumoAnterior(trabalhoId: string) {

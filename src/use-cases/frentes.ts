@@ -4,6 +4,7 @@ import type { CasoNod, ContextoFerramenta } from "../contracts/servicos.ts";
 import type { Trabalho } from "../contracts/trabalho.ts";
 import type { Turno } from "../contracts/turno.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
+import { conversaDepoisDoFim } from "../domain/fala-na-frente.ts";
 import { ehFrente, entradaDaFrente, instrucaoDoResumoInvalido, textoFrentesAbertas, tituloDoLote } from "../domain/frente.ts";
 import { validarResumo } from "../domain/resumo-da-frente.ts";
 import { podeAbrirTask, TETO_TASKS_POR_EXECUCAO_DE_ROTINA, tituloOuNada, trabalhoAberto } from "../domain/trabalho.ts";
@@ -191,6 +192,9 @@ export const devolverResumo: CasoNod<Deps, "devolver_resumo"> = async (deps, inp
   if (!turno || turno.agenteId !== agenteId) throw new ErroDeDominio("nao_permitido", { cause: "turno de outro bot" });
   const t = turno.trabalhoId ? await deps.repos.trabalhos.buscar(turno.trabalhoId) : null;
   if (!t || !ehFrente(t)) return { data: { ok: false, erro: "nao_e_frente", instrucao: "Só uma frente devolve resumo. Responda aqui mesmo, no texto." } };
+  // NOD-376 (revisão 3 do PR #539, definido em 2026-10-27): na conversa da pessoa com a frente que já tinha acabado, o resumo de antes fica — é o
+  // resultado da frente que volta ao dono (ou ao colega); a conversa não o troca.
+  if (conversaDepoisDoFim(await deps.repos.turnos.doTrabalho(t.id))) return { data: { ok: true, instrucao: "Esta frente já tinha devolvido o resumo, e ele fica como está: a conversa com a pessoa fica aqui. Encerre com a resposta a ela." } };
   const v = validarResumo(campos);
   if (!v.ok) return { data: { ok: false, erro: "resumo_invalido", instrucao: instrucaoDoResumoInvalido(v.erro, v.campo) } };
   if (!(await deps.repos.frentes.gravarResumo(t.id, v.resumo))) throw new ErroDeDominio("estado_invalido", { cause: "resumo da frente não gravado" });

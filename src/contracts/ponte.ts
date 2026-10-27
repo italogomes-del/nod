@@ -118,7 +118,7 @@ export type PedidoRenovar = {
  * O que a renovação devolve. `mensagens`: as falas da pessoa que entraram neste turno vivo, na ordem (ADR-067).
  * `mensagensIds` (#189): o id do turno de cada uma, na mesma ordem, para o app confirmar em `mensagensEntregues`.
  */
-/** `mensagensSemMoldura`: ids (de `mensagensIds`) que são recado para a task, não fala da pessoa — entram sem a moldura. */
+/** `mensagensSemMoldura`: ids (de `mensagensIds`) do trabalho: o laço não põe a moldura genérica (o texto já vem pronto — NOD-376). */
 /**
  * `ativo: "indefinido"` (NOD-214): só o cliente HTTP devolve — o servidor não respondeu (fora, 5xx, 409 sem reconexão) e
  * ainda está dentro de `TOLERANCIA_REINICIO_MS`. O laço segue o turno; só `false` interrompe. O servidor nunca o manda.

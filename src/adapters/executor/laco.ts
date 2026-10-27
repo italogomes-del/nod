@@ -284,7 +284,8 @@ export function iniciarLaco(o: OpcoesLaco): Laco {
           for (const [i, texto] of (r.mensagens ?? []).entries()) {
             const id = ids[i];
             // ADR-083 §6: a mensagem chega com a moldura ("responda a ela primeiro"), igual em todo driver. X3 (revisto
-            // em 2026-10-08): o recado para a task não é fala da pessoa — entra como veio.
+            // em 2026-10-08): o que vem do trabalho entra como veio — o recado do bot cru, a fala da pessoa já com a moldura
+            // dela (NOD-376, definido em 2026-10-27).
             const entrada = id !== undefined && semMoldura.includes(id) ? texto : molduraMensagemNoMeio(texto);
             // NOD-214: já escrita nesta sessão (a confirmação se perdeu): não escreve de novo, só confirma outra vez. QA da
             // NOD-214: a que ainda não entrou (o adapter vai escrever) espera o mensagemEntrou/mensagemDevolvida dela (X2).

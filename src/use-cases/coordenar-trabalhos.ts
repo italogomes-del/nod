@@ -6,7 +6,9 @@ import type { Turno } from "../contracts/turno.ts";
 import { RETORNO_DO_LOTE } from "../domain/cota-da-ia.ts";
 import { capacidadesDe } from "../domain/harness.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
-import { molduraDaFrente, semLinhaDeEmpurrar, seguimentoNaRede } from "../domain/frente.ts";
+import { ehFrente, molduraDaFrente, semLinhaDeEmpurrar, seguimentoNaRede } from "../domain/frente.ts";
+import { conversaDepoisDoFim, FALA_DEPOIS_DO_FIM } from "../domain/fala-na-frente.ts";
+import { molduraFalaNaFrente } from "../domain/mensagem-no-meio.ts";
 import { promoveNaRede, tituloProvisorio, trabalhoAberto, trabalhoFinal } from "../domain/trabalho.ts";
 import { ehUuid } from "./apoio-l7.ts";
 import { autoriaAgente, autoriaPessoa, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
@@ -57,7 +59,7 @@ export async function conversaDoBot(deps: Deps, turno: Turno): Promise<string> {
  * O turno é a RETOMADA do último turno dele, para seguir no modo e na procuração dele (rotina, colega ou conversa).
  * Rodando, a renovação o absorve no meio (absorverNoTrabalho); senão ele roda quando a faixa estiver livre.
  */
-export async function enfileirarNoTrabalho(deps: Deps, t: Trabalho, p: { texto: string; entrada: string; deQuem: "pessoa" | { agenteId: string; turno: Turno } }): Promise<{ turno: Turno; events: RuntimeEvent[] }> {
+export async function enfileirarNoTrabalho(deps: Deps, t: Trabalho, p: { texto: string; entrada: string; deQuem: "pessoa" | { agenteId: string; turno: Turno }; decididoPor?: string }): Promise<{ turno: Turno; events: RuntimeEvent[] }> {
   const agora = deps.agora();
   // Revisão do épico (S10, 2026-10-08): a pessoa falou de novo — a parada da conversa do trabalho se encerra, como a
   // mensagem na conversa faz (enviar-mensagem.ts). Sem isto o turno do recado morria `parado_pela_pessoa` no despacho.
@@ -86,6 +88,7 @@ export async function enfileirarNoTrabalho(deps: Deps, t: Trabalho, p: { texto: 
     mensagemOrigemId: mensagem.id,
     // NOD-285: o recado que o bot repassa à frente dele leva o arquivo da fala da pessoa (a frente é o próprio bot).
     entradaAnexos: p.deQuem === "pessoa" ? [] : p.deQuem.turno.entradaAnexos,
+    ...(p.decididoPor ? { decididoPor: p.decididoPor } : {}),
   });
   if (!turno) throw new ErroDeDominio("estado_invalido", { cause: "turno do recado não criado" });
   if (ultimo && (await deps.repos.turnos.contaminado(ultimo.id))) await deps.repos.turnos.contaminar(turno.id, agora);
@@ -96,7 +99,10 @@ export async function enfileirarNoTrabalho(deps: Deps, t: Trabalho, p: { texto: 
     evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: t.conversaId, turnoId: turno.id, dados: { mensagem_id: mensagem.id, kind: "texto", trabalho_id: t.id } }),
     evento(deps.escopo, { kind: "turno_criado", autoria, agora, conversaId: t.conversaId, turnoId: turno.id, dados: { origem: turno.origem, agente_id: t.agenteId, trabalhoId: t.id } }),
     // NOD-256 (F1.3): só a pessoa reabre a task num estado final; o recado do bot cai antes (mandarParaFrente recusa).
-    ...(await sincronizarTrabalho(deps, t.id, p.deQuem === "pessoa" ? { reabrir: true } : {})),
+    // NOD-376 (revisão do PR #539, A1): a conversa da pessoa na frente não arquiva o resumo — a frente que ela reabre
+    // para perguntar algo, ao acabar de novo, não acorda o dono nem responde ao colega com o papo dela (critério 4).
+    // Revisão 4 do PR #539 (definido em 2026-10-27): só a fala marcada (frente terminada); a frente parada ou que falhou segue o caminho de antes (continuar).
+    ...(await sincronizarTrabalho(deps, t.id, p.deQuem === "pessoa" ? { reabrir: true, ...(p.decididoPor === FALA_DEPOIS_DO_FIM ? { guardaResumo: true as const } : {}) } : {})),
   ];
   return { turno, events };
 }
@@ -107,7 +113,16 @@ export const mensagemParaTrabalho: CasoDeUso<{ trabalhoId: string; texto: string
   if (texto === "") throw new ErroDeDominio("texto_vazio");
   const t = await deps.repos.trabalhos.buscar(input.trabalhoId);
   if (!t) throw new ErroDeDominio("nao_encontrado");
-  const r = await enfileirarNoTrabalho(deps, t, { texto, entrada: texto, deQuem: "pessoa" });
+  // NOD-376: a fala da pessoa entra na frente com a moldura "responda primeiro" (rodando ou reaberta); a mensagem gravada
+  // (a que a tela mostra) segue com o texto dela.
+  // Revisão do PR #539: o comando ("/compactar", "/review 420") segue cru, para continuar reconhecido como comando.
+  // Revisão 3 do PR #539 (definido em 2026-10-27): a frente que já tinha acabado (ou que já reabriu só para conversar) ganha a marca FALA_DEPOIS_DO_FIM —
+  // o fecho do lote e o devolver_resumo a reconhecem — e a moldura que diz para não refazer.
+  // Revisão 4 do PR #539 (definido em 2026-10-27): só a frente que terminou; a parada (Parar) ou a que falhou a pessoa retoma pela barra, como antes.
+  const depoisDoFim = ehFrente(t) && (t.estado === "terminado" || conversaDepoisDoFim(await deps.repos.turnos.doTrabalho(t.id)));
+  // Revisão 5 do PR #539 (definido em 2026-10-27): só a frente ganha a moldura; a task comum (rotina, colega) segue com o texto cru, como antes.
+  const entrada = !ehFrente(t) || /^\/[\w.:-]+(\s|$)/.test(texto) ? texto : molduraFalaNaFrente(texto, { frenteAcabou: depoisDoFim });
+  const r = await enfileirarNoTrabalho(deps, t, { texto, entrada, deQuem: "pessoa", ...(depoisDoFim ? { decididoPor: FALA_DEPOIS_DO_FIM } : {}) });
   const [dto] = await trabalhosParaDto(deps, [(await deps.repos.trabalhos.buscar(t.id)) ?? t]);
   return { data: { trabalho: dto!, mensagemTurnoId: r.turno.id }, events: r.events };
 };

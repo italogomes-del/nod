@@ -52,6 +52,11 @@ describe("catálogo por forma (ADR-099, I2)", () => {
     expect(estavel).not.toContain("me_chame_as com em quantos minutos");
     expect(volatil).toContain('Frente atual: você está na frente "Login no Safari"');
     expect(volatil).not.toContain("Task atual:");
+    // NOD-376: a fala da pessoa na frente é respondida primeiro, e espera longa roda em segundo plano.
+    expect(volatil).toContain("Se a pessoa escrever nesta frente, responda a ela primeiro");
+    expect(volatil).toContain("CI e deploy de fora você não espera aqui: devolva o fato");
+    const daConversa = montarPlano(base).promptSistemaPartes!;
+    expect([...daConversa.estavel, ...daConversa.volatil].join("\n")).not.toContain("Se a pessoa escrever nesta frente");
     expect(secaoDaLinha("Frente: x")).toBe("ferramentas");
     expect(secaoDaLinha("Frentes: x")).toBe("ferramentas");
     expect(secaoDaLinha("Frente atual: x")).toBe("contexto");

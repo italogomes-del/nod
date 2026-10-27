@@ -29,6 +29,7 @@ import { donosDosBots, resolverDePresenca } from "./estado-do-dono.ts";
 import { fecharLoteSePronto } from "./fechar-lote.ts";
 import { resumoSeFaltar } from "./resumo-sem-chamada.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
+import { situacaoDasFalasNaFrente } from "../domain/fala-na-frente.ts";
 
 /**
  * Trabalhos (definido em 2026-10-07, ADR-083, épico #188): criar, manter o estado e montar o que a tela recebe. O
@@ -75,7 +76,7 @@ export async function criarTrabalho(deps: DepsTrabalho, n: Omit<NovoTrabalho, "t
  * definido em 2026-10-15 (NOD-256, F1.3): `reabrir` só no caminho da pessoa (mensagem na task, Retomar); sem ele a task
  * `parada` fica onde está (`mudarEstado` recusa) — a resposta de um colega ou a sincronização atrasada não a reabrem.
  */
-export async function sincronizarTrabalho(deps: DepsTrabalho, trabalhoId: string | null | undefined, opcoes: { reabrir?: true } = {}): Promise<RuntimeEvent[]> {
+export async function sincronizarTrabalho(deps: DepsTrabalho, trabalhoId: string | null | undefined, opcoes: { reabrir?: true; guardaResumo?: true } = {}): Promise<RuntimeEvent[]> {
   if (!trabalhoId) return [];
   const atual = await deps.repos.trabalhos.buscarTravado(trabalhoId);
   if (!atual) return [];
@@ -90,8 +91,10 @@ export async function sincronizarTrabalho(deps: DepsTrabalho, trabalhoId: string
   if (!mudou) return [];
   // NOD-282 (G7): a frente que já tinha voltado ao dono foi reaberta — o resumo de antes fica guardado, e a volta a final
   // dela ganha o resumo novo (o retorno complementar compara os dois).
+  // NOD-376: `guardaResumo` (a pessoa conversando na frente acabada) guarda a cópia sem zerar o atual: a conversa que só
+  // conversa não troca o resumo (devolver_resumo a ignora) e nada volta; a que vira trabalho devolve o novo, e o complementar sai.
   if (ehFrente(mudou) && mudou.loteId && trabalhoFinal(atual.estado) && !trabalhoFinal(novo) && (await deps.repos.frentes.buscarLote(mudou.loteId))?.devolvidoEm != null) {
-    await deps.repos.frentes.arquivarResumo(mudou.id);
+    await deps.repos.frentes.arquivarResumo(mudou.id, opcoes.guardaResumo ? { manterAtual: true } : {});
   }
   // ADR-099 (I2): a frente que acabou sem devolver_resumo ganha o resumo montado pelo servidor.
   await resumoSeFaltar(deps, mudou, fatos.perguntaVencida ? { perguntaVencida: true, ...(fatos.vencidaTipo ? { vencidaTipo: fatos.vencidaTipo } : {}) } : {});
@@ -398,7 +401,9 @@ export const detalharTrabalho: CasoDeUso<{ trabalhoId: string }, TrabalhoDetalhe
   const onde = servico ? (await maquinaDosTrabalhos(deps, servico, usoDoMac)).ondeRoda : undefined;
   const [dto] = await trabalhosParaDto(deps, [t], onde);
   const mensagens: Mensagem[] = await deps.repos.mensagens.doTrabalho(t.id);
-  return { data: { trabalho: dto!, mensagens } };
+  // NOD-376: o estado de cada fala da pessoa ainda sem resposta ("na fila" → "entregue" → some), do que o servidor sabe.
+  const falasNaFila = situacaoDasFalasNaFrente(await deps.repos.turnos.doTrabalho(t.id), mensagens);
+  return { data: { trabalho: dto!, mensagens, ...(falasNaFila.length ? { falasNaFila } : {}) } };
 };
 
 /**

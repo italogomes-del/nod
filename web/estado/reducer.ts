@@ -1225,7 +1225,7 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
 };
 
 /** Frames que trazem fala nova (ou o fim de um turno) para a conversa do bot: a tela da task aberta relê as mensagens dela. */
-const RELEEM_A_TASK: ReadonlySet<TipoFrame> = new Set<TipoFrame>(["mensagem.nova", "turno.fala", "turno.encerrado", "turno.interrompido", "decisao.nova", "decisao.decidida"]);
+const RELEEM_A_TASK: ReadonlySet<TipoFrame> = new Set<TipoFrame>(["mensagem.nova", "turno.iniciado", "turno.fala", "turno.encerrado", "turno.interrompido", "decisao.nova", "decisao.decidida"]);
 
 export function aplicarFrame(estado: Estado, frame: FrameSse, agora: number): Estado {
   const handler = POR_FRAME[frame.tipo];

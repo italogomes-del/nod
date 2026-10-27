@@ -10,7 +10,7 @@ import { trabalhoAberto } from "../domain/trabalho.ts";
 import { log } from "../obs/log.ts";
 import { rotinaDoTurno } from "./apoio-l7.ts";
 import { avisarEsperaAoRemetente } from "./entregar-resposta-peer.ts";
-import { enfileirarVoltaDoFundo, entradaDaVoltaDoFundo, fundoNaCadeia, raizDaCadeia } from "./volta-do-fundo.ts";
+import { enfileirarVoltaDoFundo, entradaDaVoltaDoFundo, falasSemResposta, fundoNaCadeia, raizDaCadeia } from "./volta-do-fundo.ts";
 import { autoriaAgente, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
 import { continuarAprovacoes } from "./decidir.ts";
 import { registrarDesfechoRotina } from "./disparar-rotina.ts";
@@ -141,7 +141,7 @@ async function aposQuedaNoFundo(deps: DepsQueda, c: Caido & { rotinaId: string |
   }
   const sessaoRetomavel = trabalho ? trabalho.sessaoCli !== null && (trabalho.sessaoHarness === null || trabalho.sessaoHarness === turno.harness) : false;
   const base = entradaDaRetomadaDaQueda(motivoEmPortugues(motivo));
-  const volta = await enfileirarVoltaDoFundo(deps, { turno, retomaTurnoId, entradaTexto: entradaDaVoltaDoFundo({ turno, raiz, base, sessaoRetomavel }), acordarEm: agora, agora });
+  const volta = await enfileirarVoltaDoFundo(deps, { turno, retomaTurnoId, entradaTexto: entradaDaVoltaDoFundo({ turno, raiz, base, sessaoRetomavel, falas: await falasSemResposta(deps, turno) }), acordarEm: agora, agora });
   const events: RuntimeEvent[] = [
     evento(deps.escopo, { kind: "turno_criado", autoria, agora, conversaId: turno.conversaId, turnoId: volta.id, dados: { origem: volta.origem, agente_id: turno.agenteId, retoma_turno_id: retomaTurnoId, trabalho_id: turno.trabalhoId ?? null, acordar_em: agora } }),
   ];

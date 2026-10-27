@@ -349,6 +349,11 @@ export function fraseDaEsperaDaCota(p: { ia: string; situacao: Exclude<SituacaoD
 
 /** O separador que entradaDaVolta põe entre o aviso da volta e o pedido que ela leva. */
 export const MARCA_DO_PEDIDO_ORIGINAL = "\n\nPedido original da frente:\n";
+/**
+ * NOD-376 (definido em 2026-10-27, revisão 5 do PR #539): a fala da pessoa na frente que a volta do fundo leva, com rótulo
+ * próprio e sempre por último — nunca como "Pedido original" (a fala não troca o pedido da frente).
+ */
+export const MARCA_DA_FALA_NA_FRENTE = "\n\nA pessoa escreveu nesta frente e ainda espera a resposta:\n";
 
 /**
  * definido em 2026-10-15 (NOD-269, G2): a entrada da volta da cota. Com sessão retomável (a task já rodou nesta IA), a
@@ -366,7 +371,7 @@ export function entradaDaVolta(p: { base: string; sessaoRetomavel: boolean; pedi
  * (o sufixo depois de MARCA_DO_PEDIDO_ORIGINAL). Antes o UPDATE trocava a entrada inteira e o pedido se perdia.
  */
 export function entradaLevadaComPedido(entradaAtual: string, entradaNova: string): string {
-  const i = entradaAtual.indexOf(MARCA_DO_PEDIDO_ORIGINAL);
+  const i = [entradaAtual.indexOf(MARCA_DO_PEDIDO_ORIGINAL), entradaAtual.indexOf(MARCA_DA_FALA_NA_FRENTE)].filter((x) => x >= 0).sort((a, b) => a - b)[0] ?? -1;
   return i >= 0 ? `${entradaNova}${entradaAtual.slice(i)}` : entradaNova;
 }
 
