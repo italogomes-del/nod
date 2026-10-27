@@ -25,6 +25,12 @@ export type Negacao = {
    * responde 401/403 não está "fora": o acesso ao app foi recusado e repetir não adianta.
    */
   causa?: "acesso_recusado" | CausaNativa;
+  /** definido em 2026-10-26 (NOD-374): quando o nod re-sonda o app sozinho (só conector_indisponivel; nula = no próximo ciclo). */
+  proximaEm?: EpochMs | null;
+  /** definido em 2026-10-27 (NOD-374): aberta pelos 5 timeouts seguidos — o app responde à sonda, mas as ações estouram o tempo. */
+  lento?: true;
+  /** definido em 2026-10-27 (NOD-374, revisão 4): o app está desabilitado — o laço não o re-sonda; só o "Tentar de novo". */
+  semRessonda?: true;
   /** definido em 2026-10-11: quantas vezes a mesma causa barrou a mesma ferramenta no turno (uma pílula só). */
   vezes?: number;
 };

@@ -30,6 +30,8 @@ export type Faixa = { ini: Date; fim: Date };
 export const MOTIVOS_DE_CONECTOR = ["conector_indisponivel", "timeout_transporte", "falha_tecnica"] as const;
 
 export type LinhaNegacaoDeConector = { chave: string; motivo: string; ferramenta: string; conector: string | null; vezes: number; em: Date };
+/** definido em 2026-10-27 (NOD-374): as voltas de um app (kind conector_recuperado), uma linha por app, com a mais recente. */
+export type LinhaRecuperacaoDeConector = { chave: string; ferramenta: string; conector: string | null; vezes: number; em: Date };
 export type LinhaTrabalhoDoDia = { id: string; titulo: string; forma: "task" | "frente"; origem: string; estado: string; criado_em: Date; terminado_em: Date | null };
 
 /** O assunto da linha se ele é um dos `assuntos` (o gravado, ou o resolvido na leitura na linha sem backfill). */
@@ -56,6 +58,9 @@ export function atividadeRepo(conn: Conn, escopo: Escopo) {
   const filtroTrilha = (agenteId: string, f: Faixa) => conn`
     t.tenant_id = ${escopo.tenantId} and t.agente_id = ${agenteId} and t.kind = 'negacao' and t.em >= ${f.ini} and t.em < ${f.fim}
       and t.motivo = any(${[...MOTIVOS_DE_CONECTOR]}::text[])`;
+
+  const filtroRecuperacao = (agenteId: string, f: Faixa) => conn`
+    t.tenant_id = ${escopo.tenantId} and t.agente_id = ${agenteId} and t.kind = 'conector_recuperado' and t.em >= ${f.ini} and t.em < ${f.fim}`;
 
   return {
     /** `[ini, fim)` do dia no fuso, pelo relógio de fusos do Postgres (o mesmo que compara as colunas). */
@@ -100,6 +105,23 @@ export function atividadeRepo(conn: Conn, escopo: Escopo) {
     async contarNegacoesDeConector(agenteId: string, f: Faixa): Promise<number> {
       const [l] = await conn<{ n: number }[]>`
         select count(*)::int as n from (select 1 from trilha t where ${filtroTrilha(agenteId, f)} group by coalesce(t.conector_id::text, t.ferramenta), t.motivo) g`;
+      return l?.n ?? 0;
+    },
+
+    /** NOD-374: "Gmail voltou sozinho" — uma linha por app no dia, com quantas vezes e a mais recente. */
+    async recuperacoesDeConector(agenteId: string, f: Faixa): Promise<LinhaRecuperacaoDeConector[]> {
+      return conn<LinhaRecuperacaoDeConector[]>`
+        select coalesce(t.conector_id::text, t.ferramenta) as chave, max(t.ferramenta) as ferramenta, max(c.nome) as conector,
+          count(*)::int as vezes, max(t.em) as em
+        from trilha t left join conectores c on c.tenant_id = t.tenant_id and c.id = t.conector_id
+        where ${filtroRecuperacao(agenteId, f)}
+        group by coalesce(t.conector_id::text, t.ferramenta)
+        order by max(t.em) desc`;
+    },
+
+    async contarRecuperacoesDeConector(agenteId: string, f: Faixa): Promise<number> {
+      const [l] = await conn<{ n: number }[]>`
+        select count(distinct coalesce(t.conector_id::text, t.ferramenta))::int as n from trilha t where ${filtroRecuperacao(agenteId, f)}`;
       return l?.n ?? 0;
     },
 

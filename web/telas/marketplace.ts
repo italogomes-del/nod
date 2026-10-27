@@ -88,6 +88,7 @@ function cartao(estado: Estado, app: AppComLogo, s: SituacaoApp, selecionado: bo
 
 function motivoDaFalha(c: Conector | undefined): string {
   const m = c?.ultimaFalha?.motivo;
+  if (c?.ultimaFalha?.causa === "acesso_recusado") return "recusou o acesso";
   if (m === "timeout_transporte") return "parou de responder";
   return "não está respondendo";
 }

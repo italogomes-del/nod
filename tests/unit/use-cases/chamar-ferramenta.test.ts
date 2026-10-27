@@ -282,11 +282,11 @@ describe("chamarFerramenta: gates, despacho por tabela e trilha (ADR-013, EMENDA
     expect(c.banco.decisoes).toHaveLength(0);
   });
 
-  it("conector que cai → conector_indisponivel transitória, ultimaFalha gravada; args fora do schema do conector → args_invalidos", async () => {
+  it("conector que cai → conector_indisponivel transitória; a queda sozinha não marca o app (NOD-374: a sonda de confirmação decide); args fora do schema do conector → args_invalidos", async () => {
     const c = await cenario({ responder: () => { throw new Error("conector_indisponivel"); } });
     const r = await c.chamar("exemplo__somar", { a: 1, b: 2 });
     expect(r.data).toMatchObject({ ok: false, negacao: { classe: "conector_indisponivel", motivo: "conector_indisponivel", terminal: false } });
-    expect((await c.deps.repos.conectores.buscar(c.conectorId))?.ultimaFalha).toEqual({ motivo: "conector_indisponivel", em: AGORA });
+    expect(await c.deps.repos.conectores.buscar(c.conectorId)).toMatchObject({ ultimaFalha: null, foraDoArDesde: null, timeoutsSeguidos: 0 });
     const invalido = await c.chamar("exemplo__somar", { a: "um" });
     expect(invalido.data).toMatchObject({ ok: false, negacao: { motivo: "args_invalidos" } });
     expect(c.chamadas).toHaveLength(1);
@@ -306,15 +306,22 @@ describe("chamarFerramenta: gates, despacho por tabela e trilha (ADR-013, EMENDA
     expect(c.contextos[2]).toEqual({ rotina: false, somenteLeitura: false });
   });
 
-  it("NOD-157: chamada que recupera dentro do serviço não marca falha; a que esgota marca UMA vez e nega com conector_indisponivel", async () => {
+  it("NOD-157/374: chamada que recupera dentro do serviço não escreve no app; a que esgota por timeout conta UMA vez e nega", async () => {
     const ok = await cenario();
+    const gravarOk = vi.spyOn(ok.deps.repos.conectores, "gravarEstadoFalha");
     await ok.chamar("exemplo__somar", { a: 1, b: 2 });
+    expect(gravarOk).not.toHaveBeenCalled();
     expect((await ok.deps.repos.conectores.buscar(ok.conectorId))?.ultimaFalha).toBeNull();
 
+    const t = await cenario({ responder: () => { throw new Error("timeout_transporte"); } });
+    const gravar = vi.spyOn(t.deps.repos.conectores, "gravarEstadoFalha");
+    const rt = await t.chamar("exemplo__somar", { a: 1, b: 2 });
+    expect(gravar).toHaveBeenCalledTimes(1);
+    expect(rt.data).toMatchObject({ ok: false, negacao: { motivo: "timeout_transporte" } });
+    expect(await t.deps.repos.conectores.buscar(t.conectorId)).toMatchObject({ ultimaFalha: null, foraDoArDesde: null, timeoutsSeguidos: 1 });
+
     const c = await cenario({ responder: () => { throw new Error("conector_indisponivel"); } });
-    const marcar = vi.spyOn(c.deps.repos.conectores, "marcarFalha");
     const r = await c.chamar("exemplo__somar", { a: 1, b: 2 });
-    expect(marcar).toHaveBeenCalledTimes(1);
     expect(r.data).toMatchObject({ ok: false, negacao: { classe: "conector_indisponivel", motivo: "conector_indisponivel", terminal: false } });
     expect(r.data).not.toHaveProperty("negacao.causa");
   });
@@ -324,9 +331,9 @@ describe("chamarFerramenta: gates, despacho por tabela e trilha (ADR-013, EMENDA
     ["tx_encerrada", () => new ErroTxEncerrada()],
     ["statement_timeout (57014)", () => Object.assign(new Error("canceling statement due to statement timeout"), { code: "57014" })],
     ["lock_timeout (55P03)", () => Object.assign(new Error("canceling statement due to lock timeout"), { code: "55P03" })],
-  ])("NOD-266: %s durante a chamada é falha nossa, não do app — relança sem marcarFalha nem negação", async (_nome, erro) => {
+  ])("NOD-266: %s durante a chamada é falha nossa, não do app — relança sem marcar o app nem negação", async (_nome, erro) => {
     const c = await cenario({ responder: () => { throw erro(); } });
-    const marcar = vi.spyOn(c.deps.repos.conectores, "marcarFalha");
+    const marcar = vi.spyOn(c.deps.repos.conectores, "gravarEstadoFalha");
     await expect(c.chamar("exemplo__somar", { a: 1, b: 2 })).rejects.toBeInstanceOf(erro().constructor);
     expect(marcar).not.toHaveBeenCalled();
     expect((await c.deps.repos.conectores.buscar(c.conectorId))?.ultimaFalha).toBeNull();
@@ -348,7 +355,7 @@ describe("chamarFerramenta: gates, despacho por tabela e trilha (ADR-013, EMENDA
     const vivos = criarConectoresVivos({ agora: () => AGORA, fetchImpl, carregar: async () => ({ nome: "exemplo", transporte: "http", url: "https://mcp.exemplo.com/mcp" }) });
     try {
       const c = await cenario({ responder: (ch) => vivos.chamar(ch.conectorId, ch.tool, ch.args, { rotina: false, somenteLeitura: true }) });
-      const marcar = vi.spyOn(c.deps.repos.conectores, "marcarFalha");
+      const marcar = vi.spyOn(c.deps.repos.conectores, "gravarEstadoFalha");
       const r = await c.chamar("exemplo__somar", { a: 1, b: 2 });
       expect(r.data).toMatchObject({ ok: true });
       expect(marcar).not.toHaveBeenCalled();
@@ -366,8 +373,25 @@ describe("chamarFerramenta: gates, despacho por tabela e trilha (ADR-013, EMENDA
       const c = await cenario({ responder: () => { throw new ErroTransporteMcp("conector_indisponivel", `http ${status}`, { status }); } });
       const r = await c.chamar("exemplo__somar", { a: 1, b: 2 });
       expect(r.data).toMatchObject({ ok: false, negacao: { classe: "conector_indisponivel", motivo: "falha_tecnica", causa: "acesso_recusado", terminal: false } });
-      expect((await c.deps.repos.conectores.buscar(c.conectorId))?.ultimaFalha).toEqual({ motivo: "falha_tecnica", em: AGORA });
+      // NOD-374: 401/403 aparece na hora (re-sondar não resolve) e não re-sonda.
+      expect(await c.deps.repos.conectores.buscar(c.conectorId)).toMatchObject({ ultimaFalha: { motivo: "falha_tecnica", em: AGORA, causa: "acesso_recusado" }, foraDoArDesde: AGORA, proximaSondaEm: null });
     }
+  });
+
+  it("NOD-374: sucesso num app com falha aberta limpa e registra a volta na trilha; sucesso num app sem falha não escreve", async () => {
+    let falhar = true;
+    const c = await cenario({ responder: () => { if (falhar) throw new ErroTransporteMcp("conector_indisponivel", "http 401", { status: 401 }); return { conteudo: "3", isError: false }; } });
+    await c.chamar("exemplo__somar", { a: 1, b: 2 });
+    expect((await c.deps.repos.conectores.buscar(c.conectorId))?.foraDoArDesde).toBe(AGORA);
+    falhar = false;
+    const limpar = vi.spyOn(c.deps.repos.conectores, "limparFalha");
+    const r = await c.chamar("exemplo__somar", { a: 1, b: 2 });
+    expect(r.data).toMatchObject({ ok: true });
+    expect(limpar).toHaveBeenCalledTimes(1);
+    expect(await c.deps.repos.conectores.buscar(c.conectorId)).toMatchObject({ ultimaFalha: null, foraDoArDesde: null, falhasSeguidas: 0, timeoutsSeguidos: 0 });
+    expect(c.banco.trilha.filter((t) => t.kind === "conector_recuperado")).toEqual([expect.objectContaining({ agenteId: c.agenteId, conectorId: c.conectorId, ferramenta: "exemplo", motivo: "falha_tecnica", regra: "regra:disjuntor_conector" })]);
+    await c.chamar("exemplo__somar", { a: 1, b: 2 });
+    expect(limpar).toHaveBeenCalledTimes(1);
   });
 });
 

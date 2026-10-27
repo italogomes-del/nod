@@ -1183,6 +1183,8 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
   "inventario.mudou": (e) => invalidar(e, "inventario", "frota", "executor", "ias", usoPlano(e), "maquinas", "trabalhos"),
   // ADR-102: a lista de contas (ou um login numa máquina) mudou. definido em 2026-10-16 (revisão do PR 1): a conta em uso
   // pode ter trocado (limite, login, outra conta na frente), e com ela o uso da janela do anel.
+  // NOD-374: o app entrou ou saiu de Fora do ar (sonda, laço ou chamada que limpou): a lateral e a tela de apps se atualizam.
+  "conector.mudou": (e) => invalidar(e, "frota", "conectores"),
   "contas.mudou": (e) => invalidar(e, "contas", "maquinas", usoPlano(e)),
   "agente.mudou": (e, f) => {
     const agenteId = texto(f.dados.agente_id) ?? texto(f.dados.agenteId);

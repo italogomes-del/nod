@@ -1,4 +1,5 @@
 import { contasIaMemoria, estadoContasIaMemoria, type EstadoContasIaMemoria } from "./contas-ia-memoria.ts";
+import { temFalha, type EstadoDisjuntor } from "../../src/domain/disjuntor-conector.ts";
 import type { ConfigGithubApp } from "../../src/repositories/github-app.repo.ts";
 import type { AnexoDaConversa, MimeAnexo, RecusasMidia } from "../../src/contracts/anexo.ts";
 import type { LinhaOnboarding } from "../../src/repositories/onboarding.repo.ts";
@@ -2535,13 +2536,13 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async atualizarEndpoint(id, url, envCifrado, envChaves) {
         const c = b.conectores.find((c) => c.id === id && c.ownerId === escopo.pessoaId);
         if (!c) return null;
-        Object.assign(c, { url, envCifrado, env: Object.fromEntries(envChaves.map((k) => [k, true])), habilitado: false, catalogo: [], sondadoEm: null, ultimaFalha: null });
+        Object.assign(c, { url, envCifrado, env: Object.fromEntries(envChaves.map((k) => [k, true])), habilitado: false, catalogo: [], sondadoEm: null, ultimaFalha: null, falhasSeguidas: 0, timeoutsSeguidos: 0, ultimoTimeoutEm: null, proximaSondaEm: null, foraDoArDesde: null });
         return c;
       },
       async tornarNativo(id, p) {
         const c = b.conectores.find((c) => c.id === id && c.ownerId === escopo.pessoaId);
         if (!c) return null;
-        Object.assign(c, { transporte: "stdio", comando: p.comando, args: [], url: null, envCifrado: p.envCifrado, env: Object.fromEntries(p.envChaves.map((k) => [k, true])), habilitado: false, catalogo: [], sondadoEm: null, ultimaFalha: null });
+        Object.assign(c, { transporte: "stdio", comando: p.comando, args: [], url: null, envCifrado: p.envCifrado, env: Object.fromEntries(p.envChaves.map((k) => [k, true])), habilitado: false, catalogo: [], sondadoEm: null, ultimaFalha: null, falhasSeguidas: 0, timeoutsSeguidos: 0, ultimoTimeoutEm: null, proximaSondaEm: null, foraDoArDesde: null });
         return c;
       },
       async criar(c) {
@@ -2565,6 +2566,11 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           sondadoEm: null,
           ultimaFalha: null,
           criadoEm: agora(),
+          falhasSeguidas: 0,
+          timeoutsSeguidos: 0,
+          ultimoTimeoutEm: null,
+          proximaSondaEm: null,
+          foraDoArDesde: null,
           envCifrado: c.envCifrado ?? null,
         };
         b.conectores.push(conector);
@@ -2589,8 +2595,11 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         if (r.ok) {
           c.catalogo = r.catalogo;
           c.habilitado = true;
-          c.ultimaFalha = null;
-        } else c.ultimaFalha = { motivo: r.motivo, em: r.agora };
+          Object.assign(c, { ultimaFalha: null, falhasSeguidas: 0, timeoutsSeguidos: 0, ultimoTimeoutEm: null, proximaSondaEm: null, foraDoArDesde: null });
+        } else {
+          c.ultimaFalha = { motivo: r.motivo, em: c.ultimaFalha?.em ?? r.agora, ...(r.causa ? { causa: r.causa } : {}) };
+          c.foraDoArDesde = c.foraDoArDesde ?? r.agora;
+        }
         return c;
       },
       async habilitar(id, habilitado) {
@@ -2608,11 +2617,27 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         c.env = env;
         return true;
       },
-      async marcarFalha(id, motivo, em) {
-        const c = doTenant(b.conectores).find((x) => x.id === id);
+      async estadoFalhaTravado(id) {
+        const c = doTenant(b.conectores).find((x) => x.id === id && x.ownerId === escopo.pessoaId);
+        return c ? estadoDoConector(c) : null;
+      },
+      async gravarEstadoFalha(id, e) {
+        const c = doTenant(b.conectores).find((x) => x.id === id && x.ownerId === escopo.pessoaId);
         if (!c) return false;
-        c.ultimaFalha = { motivo, em };
+        Object.assign(c, { ultimaFalha: e.ultimaFalha, falhasSeguidas: e.falhasSeguidas, timeoutsSeguidos: e.timeoutsSeguidos, ultimoTimeoutEm: e.ultimoTimeoutEm ?? null, proximaSondaEm: e.proximaSondaEm, foraDoArDesde: e.foraDoArDesde });
         return true;
+      },
+      async limparFalha(id) {
+        const c = doTenant(b.conectores).find((x) => x.id === id && x.ownerId === escopo.pessoaId);
+        if (!c || !temFalha(estadoDoConector(c))) return false;
+        const antes = c.ultimaFalha;
+        Object.assign(c, { ultimaFalha: null, falhasSeguidas: 0, timeoutsSeguidos: 0, ultimoTimeoutEm: null, proximaSondaEm: null, foraDoArDesde: null });
+        return antes;
+      },
+      async comFalhaAberta() {
+        return doTenant(b.conectores)
+          .filter((c) => c.ownerId === escopo.pessoaId && c.habilitado && c.ultimaFalha !== null && c.ultimaFalha.causa !== "acesso_recusado")
+          .map((c) => ({ id: c.id, slug: c.slug, nome: c.nome, estado: estadoDoConector(c) }));
       },
     },
 
@@ -2861,6 +2886,10 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       },
       async doTurnos(turnoIds) {
         return doTenant(b.trilha).filter((l) => l.turnoId !== null && turnoIds.includes(l.turnoId));
+      },
+      async agentesComNegacaoDoConector(conectorId, desde) {
+        const ids = doTenant(b.trilha).filter((l) => l.ownerId === escopo.pessoaId && l.kind === "negacao" && l.conectorId === conectorId && Date.parse(l.em) >= desde).map((l) => l.agenteId);
+        return [...new Set(ids)].sort();
       },
       async filtrar(f = {}) {
         return doTenant(b.trilha)
@@ -3476,6 +3505,8 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       contarMensagens: soNoPostgres,
       negacoesDeConector: soNoPostgres,
       contarNegacoesDeConector: soNoPostgres,
+      recuperacoesDeConector: soNoPostgres,
+      contarRecuperacoesDeConector: soNoPostgres,
       trabalhos: soNoPostgres,
       contarTrabalhos: soNoPostgres,
     },
@@ -3490,4 +3521,9 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
   } satisfies Repos;
 
   return repos;
+}
+
+/** NOD-374: o estado do disjuntor de um conector em memória (campos opcionais no contrato viram os padrões). */
+function estadoDoConector(c: ConectorGuardado): EstadoDisjuntor {
+  return { ultimaFalha: c.ultimaFalha, falhasSeguidas: c.falhasSeguidas ?? 0, timeoutsSeguidos: c.timeoutsSeguidos ?? 0, ultimoTimeoutEm: c.ultimoTimeoutEm ?? null, proximaSondaEm: c.proximaSondaEm ?? null, foraDoArDesde: c.foraDoArDesde ?? null };
 }

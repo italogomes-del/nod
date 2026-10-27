@@ -77,6 +77,19 @@ export function trilhaRepo(conn: Conn, escopo: Escopo) {
     },
 
     /**
+     * definido em 2026-10-26 (NOD-374): os bots que tiveram negação daquele app desde `desde` — a recuperação automática vai
+     * à trilha de cada um (agente_id é NOT NULL). Usa o índice parcial das negações.
+     */
+    async agentesComNegacaoDoConector(conectorId: string, desde: number): Promise<string[]> {
+      const linhas = await conn<{ agente_id: string }[]>`
+        select distinct t.agente_id from agentes a
+        join trilha t on t.tenant_id = a.tenant_id and t.agente_id = a.id and t.kind = 'negacao' and t.em >= ${data(desde)}
+        where a.tenant_id = ${escopo.tenantId} and a.owner_id = ${escopo.pessoaId} and t.owner_id = ${escopo.pessoaId} and t.conector_id = ${conectorId}
+        order by t.agente_id limit 50`;
+      return linhas.map((l) => l.agente_id);
+    },
+
+    /**
      * GET trilha?dia&agente&conector (E8.4). `dia` é 'AAAA-MM-DD' no fuso dado (default UTC):
      * a comparação é feita no banco com a coluna em timestamptz.
      */

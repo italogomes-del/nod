@@ -51,8 +51,10 @@ describe("quais apps entram no cartão de liberar", () => {
     expect(slugs({ conectores: [conector("gmail", "Gmail", { habilitado: false }), slack] })).toEqual(["slack"]);
     expect(slugs({ conectores: [conector("gmail", "Gmail", { sondadoEm: null }), slack] })).toEqual(["slack"]);
     expect(slugs({ conectores: [conector("gmail", "Gmail", { ultimaFalha: { motivo: "conector_indisponivel", em: HA_UMA_HORA + 1 } }), slack] })).toEqual(["slack"]);
-    // Falha velha, de antes de o app voltar, não esconde a oferta.
-    expect(slugs({ conectores: [conector("gmail", "Gmail", { ultimaFalha: { motivo: "conector_indisponivel", em: HA_UMA_HORA - 1 } })] })).toEqual(["gmail"]);
+    // NOD-374: a falha que ainda não persistiu (sem foraDoArDesde; o carimbo antigo também) não esconde a oferta; a que
+    // persiste esconde mesmo se a última sonda (o "Tentar de novo" que falhou) é posterior ao começo dela.
+    expect(slugs({ conectores: [conector("gmail", "Gmail", { ultimaFalha: { motivo: "conector_indisponivel", em: HA_UMA_HORA - 1 }, foraDoArDesde: null })] })).toEqual(["gmail"]);
+    expect(slugs({ conectores: [conector("gmail", "Gmail", { ultimaFalha: { motivo: "conector_indisponivel", em: HA_UMA_HORA - 1 }, foraDoArDesde: HA_UMA_HORA - 1 })] })).toEqual([]);
   });
 
   it("a janela é de 24 h a partir da última verificação boa: no limite entra, um milissegundo depois não", () => {

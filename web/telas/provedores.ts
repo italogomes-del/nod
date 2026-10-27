@@ -10,7 +10,8 @@ import { nomeCurto, renderListaDeContas } from "./contas-lista.ts";
 import { botsDaPessoa, maquinaDoBot, maquinasDeTrabalho } from "./maquinas.ts";
 import { renderExecutor } from "./frota.ts";
 import { logoApp } from "./marketplace.ts";
-import { renderNegacoes, textoMotivo } from "./negacao.ts";
+import type { Negacao } from "../../src/contracts/negacao.ts";
+import { renderNegacoes } from "./negacao.ts";
 
 /**
  * Seu espaço › Provedores de IA (definido em 2026-10-10, protótipo Main aprovado; antes "Conexão"). As IAs que os bots
@@ -118,6 +119,23 @@ function renderProvedoresContas(estado: Estado): string {
     </section>`;
 }
 
+/**
+ * definido em 2026-10-26 (NOD-374): o cartão de Fora do ar diz o que houve, desde quando e o que o nod faz sozinho —
+ * "<App> · parou de responder · desde HH:MM (há N) · o nod tenta de novo sozinho; próxima às HH:MM". O acesso recusado
+ * (401/403) não volta sozinho: pede para entrar de novo no app.
+ */
+export function linhaForaDoAr(n: Pick<Negacao, "motivo" | "desde" | "causa" | "proximaEm" | "lento" | "semRessonda">, agora: number): { motivo: string; detalhe: string } {
+  const desde = `desde ${hora(n.desde)} (${haQuanto(agora - n.desde)})`;
+  if (n.causa === "acesso_recusado") return { motivo: "recusou o acesso", detalhe: `${desde} · entre de novo no app` };
+  // Desabilitado (a 1ª sonda falhou, ou a pessoa desligou): o laço não sonda — não prometer o que não vem (revisão 4).
+  if (n.semRessonda) return { motivo: "parou de responder", detalhe: `${desde} · toque em Tentar de novo` };
+  // Os 5 timeouts seguidos: o app responde à sonda, mas não executa — volta com uma ação que dá certo ou sozinho, depois
+  // de ~30 min sem estourar o tempo (aposSondaOk).
+  if (n.lento) return { motivo: "está demorando demais", detalhe: `${desde} · o nod confere de novo sozinho; próxima às ${hora(n.proximaEm ?? agora)}` };
+  const proxima = n.proximaEm && n.proximaEm > agora ? `próxima às ${hora(n.proximaEm)}` : "próxima em instantes";
+  return { motivo: "parou de responder", detalhe: `${desde} · o nod tenta de novo sozinho; ${proxima}` };
+}
+
 /** Os conectores fora do ar e as negações da frota (o que era o rodapé da antiga seção Conexão). */
 function foraDoAr(estado: Estado): string {
   const negacoes = [...(estado.frota?.negacoes ?? []), ...estado.negacoes.filter((n) => n.classe !== "conector_indisponivel")];
@@ -127,8 +145,8 @@ function foraDoAr(estado: Estado): string {
     const c = estado.conectores.find((x) => x.slug === n.nome || x.nome === n.nome);
     const nome = c?.nome ?? n.nome;
     const tentar = c ? botao("sondar-conector", "Tentar de novo", { classe: "sm", id: c.id }) : "";
-    const motivo = textoMotivo(n.motivo);
-    return `<div class="espaco-fora" role="status">${logoApp(estado, c?.slug ?? n.nome, nome)}<div><b>${esc(nome)}</b>${motivo ? ` <span>· ${esc(motivo)}</span>` : ""}<small>desde ${esc(hora(n.desde))} (${esc(haQuanto(estado.agora - n.desde))})</small></div>${tentar}</div>`;
+    const l = linhaForaDoAr(n, estado.agora);
+    return `<div class="espaco-fora" role="status">${logoApp(estado, c?.slug ?? n.nome, nome)}<div><b>${esc(nome)}</b> <span>· ${esc(l.motivo)}</span><small>${esc(l.detalhe)}</small></div>${tentar}</div>`;
   };
   return `${fora.length ? `<h3 class="espaco-subtitulo">Fora do ar</h3>${fora.map(linhaFora).join("")}` : ""}${renderNegacoes(outras, estado.agora)}`;
 }

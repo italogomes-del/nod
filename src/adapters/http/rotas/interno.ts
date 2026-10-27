@@ -18,7 +18,8 @@ import { fecharPorMemoria } from "../../../use-cases/trabalhos.ts";
 import { autorizarComando } from "../../../use-cases/autorizar-comando.ts";
 import { ehUuid } from "../../../use-cases/apoio-l7.ts";
 import type { PedidoNaFila } from "../../../use-cases/revisar-acao.ts";
-import { chamarFerramentaFase1, concluirChamada, executarEfeito, REGRA_CHAMADA, registrarExecucaoLocal, respostaSemFase2, VERSAO_REGRA_CHAMADA, type SaidaFase1Chamada } from "../../../use-cases/chamar-ferramenta.ts";
+import { chamarFerramentaFase1, concluirChamada, entradaDaLimpeza, executarEfeito, precisaLimparAposSucesso, REGRA_CHAMADA, registrarExecucaoLocal, respostaSemFase2, VERSAO_REGRA_CHAMADA, type SaidaFase1Chamada } from "../../../use-cases/chamar-ferramenta.ts";
+import { classificarFalhaDaChamada, limparFalhaAposSucesso } from "../../../use-cases/disjuntor-conector.ts";
 import { nomeParaTrilha, registrarNegacao } from "../../../use-cases/registrar-negacao.ts";
 import { assentarComNovaTentativa, TENTATIVAS_FASE2 } from "../../../use-cases/liberar-no-app.ts";
 import type { Rota } from "../roteador.ts";
@@ -51,6 +52,11 @@ export type DepsRotasInternas = {
   /** NOD-323 (revisão 3): quanto o upload espera a vaga antes do 503, e o prazo total do corpo (teste encurta). */
   esperaVagaMidiaMs?: number;
   prazoCorpoMidiaMs?: (bytes: number) => number;
+  /**
+   * definido em 2026-10-26 (NOD-374): a sonda de confirmação depois de uma chamada que falhou por timeout ou queda
+   * (adapters/fundo/disjuntor-conectores.ts). Roda depois da resposta, fora de tx; ausente = sem confirmação (o laço re-sonda).
+   */
+  disjuntor?: { confirmar(escopo: { tenantId: string; pessoaId: string }, conectorId: string): void; mudou?(escopo: { tenantId: string; pessoaId: string }): void };
 };
 
 /** NOD-323: no máximo 2 uploads de mídia ao mesmo tempo no processo (50 MiB cada na memória); o terceiro é 503 e o proxy tenta de novo. */
@@ -213,6 +219,17 @@ export function rotasInternas(deps: DepsRotasInternas): Rota[] {
         const direto = respostaSemFase2(efeito, desfecho);
         if (direto) {
           ctx.json(200, direto);
+          // NOD-374: o app que tinha falha respondeu — limpa numa tx curta depois da resposta. Se falhar, a próxima chamada
+          // que der certo tenta de novo (a fase 1 ainda vê a falha); a chamada já foi respondida e não depende disso.
+          if (precisaLimparAposSucesso(efeito, desfecho)) {
+            await executarComContexto(contextoDoLog, () => deps.dentro(ctx.escopo, (d) => executar(d, limparFalhaAposSucesso, entradaDaLimpeza(efeito))))
+              .then((r) => {
+                if (r.limpou) deps.disjuntor?.mudou?.(ctx.escopo);
+              })
+              .catch((e: unknown) => {
+                log("aviso", "conector_limpeza_falhou", { conector_id: efeito.conectorId, erro: e instanceof Error ? e.name : "desconhecido" });
+              });
+          }
           return;
         }
         const resultado = await executarComContexto(contextoDoLog, () => assentarComNovaTentativa(
@@ -220,6 +237,10 @@ export function rotasInternas(deps: DepsRotasInternas): Rota[] {
           { correlationId, efeito, dormir: deps.dormir ?? dormirPadrao },
         ));
         ctx.json(200, resultado);
+        // NOD-374: timeout ou queda → a sonda de confirmação decide se a falha abre (401/403 já apareceu na fase 2).
+        if (efeito.tipo === "conector" && desfecho.tipo === "conector" && !desfecho.ok && classificarFalhaDaChamada(desfecho.erro).tipo !== "acesso_recusado") {
+          deps.disjuntor?.confirmar(ctx.escopo, efeito.conectorId);
+        }
       },
     },
     {

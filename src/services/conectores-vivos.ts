@@ -156,9 +156,10 @@ export function criarConectoresVivos(opcoes: OpcoesConectoresVivos): ConectoresV
       }
     },
 
-    async sondar(conector: Conector, o?: { orcamentoMs?: number }): Promise<ResultadoSonda> {
+    async sondar(conector: Conector, o?: { orcamentoMs?: number; manterVivos?: boolean }): Promise<ResultadoSonda> {
       // A sonda usa o env DECIFRADO via carregar; o `conector` recebido só traz placeholders (ConectorGuardado).
-      await descartar(conector.id);
+      // definido em 2026-10-26 (NOD-374): a sonda de fundo (manterVivos) não descarta o cliente de uma chamada em curso.
+      if (!o?.manterVivos) await descartar(conector.id);
       if (conector.comando === COMANDO_GITHUB_NATIVO) return (await opcoes.sondarNativo?.(conector)) ?? { ok: false, motivo: "conector_indisponivel" };
       const cfg = (await opcoes.carregar(conector.id, { rotina: false })) ?? { nome: conector.slug, transporte: conector.transporte, comando: conector.comando, args: conector.args, url: conector.url, env: {} };
       return sondarConector(cfg, { ambiente: opcoes.ambiente, fetchImpl: opcoes.fetchImpl, ...(o?.orcamentoMs !== undefined ? { orcamentoMs: o.orcamentoMs } : {}) });

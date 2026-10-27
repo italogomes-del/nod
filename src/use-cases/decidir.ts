@@ -9,6 +9,7 @@ import { ErroDeDominio } from "../domain/erro.ts";
 import { exigirForaDaTx } from "../db/tx.ts";
 import { redigir } from "../domain/redacao.ts";
 import { rotinaDoTurno } from "./apoio-l7.ts";
+import { limparFalhasDosExecutados } from "./disjuntor-conector.ts";
 import { enfileirarRetomada } from "./enfileirar-retomada.ts";
 import { fecharGemeas } from "./fechar-gemeas.ts";
 import { PRAZO_DECISAO_MS } from "./pedir-a-pessoa.ts";
@@ -253,6 +254,8 @@ export const assentarAprovacao: CasoDeUso<EntradaAssentarAprovacao, SaidaAssenta
   if (!decisao) throw new ErroDeDominio("nao_encontrado", { cause: "decisão" });
   for (const d of input.desfechos) await deps.repos.itensAprovacao.registrarDesfecho(d.itemId, d.desfecho);
   const itens = await deps.repos.itensAprovacao.listar(decisao.id);
+  const executados = new Set(input.desfechos.filter((d) => d.desfecho === "executado").map((d) => d.itemId));
+  await limparFalhasDosExecutados(deps, itens.filter((i) => executados.has(i.id)).map((i) => ({ slug: i.destino.conector, desfecho: "executado" })), decisao.agenteId);
   const noMac = itens.filter((i) => i.selecionado && i.desfecho === null && i.destino.execucao === "maquina");
   if (noMac.length > 0) {
     // ADR-048: aprovado, mas o efeito é do gh do Mac da dona — o resultado e a retomada saem quando

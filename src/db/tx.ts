@@ -89,7 +89,7 @@ export function ehTimeoutDaTx(e: unknown): boolean {
   return typeof e === "object" && e !== null && SQLSTATES_DE_TIMEOUT_DA_TX.has(Reflect.get(e, "code"));
 }
 
-/** Os erros de infra desta camada: quem trata falha de app (ex.: marcarFalha do conector) os relança sem mexer. */
+/** Os erros de infra desta camada: quem trata falha de app (ex.: o disjuntor do conector) os relança sem mexer. */
 export function ehErroDeInfraDaTx(e: unknown): boolean {
   return e instanceof ErroBancoOcupado || e instanceof ErroTxEncerrada || ehTimeoutDaTx(e);
 }

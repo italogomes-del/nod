@@ -40,7 +40,7 @@ describe("NOD-212: sonda real contra o tool router do Composio", () => {
 
   it("401 no tools/list: o log leva causa http_401 e o status, que o motivo sozinho escondia", async () => {
     const f = mcpComposioFalso({ ferramentas: [], statusToolsList: 401 }) as typeof fetch;
-    expect(await sondarConector(cfg, { fetchImpl: f })).toEqual({ ok: false, motivo: "conector_indisponivel" });
+    expect(await sondarConector(cfg, { fetchImpl: f })).toEqual({ ok: false, motivo: "conector_indisponivel", causa: "acesso_recusado" });
     expect(linhas("sonda_conector_falhou")).toEqual([expect.objectContaining({ causa: "http_401", status: 401 })]);
   });
 

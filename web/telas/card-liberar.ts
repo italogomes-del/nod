@@ -1,5 +1,6 @@
 import type { Concessao } from "../../src/contracts/concessao.ts";
 import type { Conector } from "../../src/contracts/conector.ts";
+import { falhaVisivel } from "../lib/fora-do-ar.ts";
 import type { Proposta } from "../../src/contracts/conversa.ts";
 import type { ConversaEstado, Estado } from "../estado/reducer.ts";
 import { botao, esc, iconeAgente } from "../lib/render.ts";
@@ -63,7 +64,7 @@ export function appsParaLiberar(e: EntradaAppsParaLiberar): AppParaLiberar[] {
   return e.conectores
     .flatMap((c): AppParaLiberar[] => {
       if (c.ownerId !== e.pessoaId || !c.habilitado || c.sondadoEm === null) return [];
-      if (c.ultimaFalha && c.ultimaFalha.em >= c.sondadoEm) return [];
+      if (c.ultimaFalha && falhaVisivel(c)) return [];
       if (e.agora - c.sondadoEm > JANELA_LIBERAR_MS) return [];
       if (comConcessao.has(c.id) || pedidos.has(c.slug)) return [];
       const dispensadoEm = dispensadas[c.id];

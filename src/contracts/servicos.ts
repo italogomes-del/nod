@@ -13,7 +13,8 @@ import type { LeituraDisco, NivelPressao, ServicoDasMaquinas } from "./trabalho.
 export type IdentidadeDeTurno = { turnoId: string; tenantId: string; pessoaId: string; agenteId: string };
 export type IdentidadeSemTurno = Omit<IdentidadeDeTurno, "turnoId">;
 
-export type ResultadoSonda = { ok: true; ferramentas: CapacidadeConector[] } | { ok: false; motivo: MotivoNegacao };
+/** definido em 2026-10-26 (NOD-374): `causa` = o app respondeu 401/403 à sonda (reconectar; re-sondar não resolve). */
+export type ResultadoSonda = { ok: true; ferramentas: CapacidadeConector[] } | { ok: false; motivo: MotivoNegacao; causa?: "acesso_recusado" };
 
 /**
  * Contrato `Services` completo (EMENDA 18). Genérico em `Trx` porque src/contracts não importa
@@ -92,7 +93,8 @@ export interface ServicesNod<Trx> {
   conectores: {
     /** `contexto.rotina` (ADR-048): só turno de rotina pode usar o GitHub App da organização. Ausente = interativo. `somenteLeitura` (NOD-157): readOnlyHint da ferramenta; ausente = escrita, que só repete em 429. */
     chamar(conectorId: string, tool: string, args: Record<string, unknown>, contexto?: { rotina: boolean; somenteLeitura?: boolean }): Promise<{ conteudo: string; isError: boolean }>;
-    sondar(conector: Conector, opcoes?: { orcamentoMs?: number }): Promise<ResultadoSonda>; // orcamentoMs (NOD-208): teto da sonda http inteira; ausente = ORCAMENTO_CONECTOR_MS
+    // manterVivos (NOD-374): a sonda de confirmação/do laço de fundo não derruba o cliente vivo de outra chamada em curso.
+    sondar(conector: Conector, opcoes?: { orcamentoMs?: number; manterVivos?: boolean }): Promise<ResultadoSonda>; // orcamentoMs (NOD-208): teto da sonda http inteira; ausente = ORCAMENTO_CONECTOR_MS
   };
   interruptor: {
     registrar(turnoId: string, fn: () => Promise<void>): void;

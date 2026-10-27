@@ -20,6 +20,7 @@ import { logoApp } from "./marketplace.ts";
 import { renderMemoriaNaGaveta } from "./memoria.ts";
 import { renderNovaRotinaNaGaveta } from "./nova-rotina.ts";
 import { textoMotivo } from "./negacao.ts";
+import { falhaVisivel } from "../lib/fora-do-ar.ts";
 import { renderGavetaTrabalhos } from "./trabalhos.ts";
 import { abertosDoBot } from "../lib/trabalhos.ts";
 import { renderAtividade } from "./atividade.ts";
@@ -472,7 +473,7 @@ function gruposDeAcesso(estado: Estado, agenteId: string): GrupoAcesso[] {
     const cap = c?.catalogo.find((x) => x.nome === g.capacidade);
     const chave = c?.slug ?? g.conectorId;
     const grupo = grupos.get(chave) ?? { chave, slug: c?.slug ?? "", nome: c?.nome ?? "conector", indisponivel: false, falha: null, leitura: [], escrita: [], descricaoDe: new Map<string, string>() };
-    if (c?.ultimaFalha) { grupo.indisponivel = true; grupo.falha ??= c.ultimaFalha; }
+    if (c?.ultimaFalha && falhaVisivel(c)) { grupo.indisponivel = true; grupo.falha ??= c.ultimaFalha; }
     if (cap?.descricao) grupo.descricaoDe.set(g.id, cap.descricao);
     (cap?.readOnlyHint === true ? grupo.leitura : grupo.escrita).push(g);
     grupos.set(chave, grupo);

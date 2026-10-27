@@ -53,8 +53,19 @@ export type Conector = {
   habilitado: boolean;
   catalogo: CapacidadeConector[];
   sondadoEm: EpochMs | null;
-  ultimaFalha: { motivo: MotivoNegacao; em: EpochMs } | null;
+  /** definido em 2026-10-26 (NOD-374): `causa` = 401/403 (o app recusou o acesso; reconectar, não re-sondar). */
+  ultimaFalha: { motivo: MotivoNegacao; em: EpochMs; causa?: "acesso_recusado" } | null;
   criadoEm: EpochMs;
+  /**
+   * definido em 2026-10-26 (NOD-374, src/domain/disjuntor-conector.ts): o estado do disjuntor do app. O repositório sempre
+   * preenche; opcionais só para quem monta um Conector à mão (testes, telas antigas). O app aparece em "Fora do ar" quando
+   * `ultimaFalha` e `foraDoArDesde` existem — a falha aberta sem `foraDoArDesde` ainda não persistiu o bastante.
+   */
+  falhasSeguidas?: number;
+  timeoutsSeguidos?: number;
+  ultimoTimeoutEm?: EpochMs | null;
+  proximaSondaEm?: EpochMs | null;
+  foraDoArDesde?: EpochMs | null;
 };
 
 /**

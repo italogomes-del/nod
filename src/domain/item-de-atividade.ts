@@ -162,6 +162,21 @@ export function itemDaNegacaoDeConector(l: { chave: string; motivo: string; ferr
 }
 
 /**
+ * definido em 2026-10-27 (NOD-374, revisão do PR #538): o app que estava fora do ar voltou (a sonda do nod ou uma chamada
+ * que deu certo). Fica na Atividade de cada bot que esbarrou na falha — o fechamento do "indisponível" do mesmo dia.
+ */
+export function itemDaRecuperacaoDeConector(l: { chave: string; ferramenta: string; conector: string | null; vezes: number; em: number }): ItemDeAtividade {
+  return {
+    id: `trilha:${l.chave}:recuperado`,
+    em: l.em,
+    categoria: null,
+    titulo: `${l.conector ?? l.ferramenta} voltou sozinho`,
+    detalhe: "o app respondeu de novo",
+    ...(l.vezes > 1 ? { vezes: l.vezes } : {}),
+  };
+}
+
+/**
  * Uma ação que o modo rodou sem a pessoa (PR 6 dos modos de aprovação; tela Y3): o título diz o que foi ("Leu as
  * credenciais da AWS", "Comando arriscado") e o detalhe é o comando ou o caminho, redigido. Sem alvo: o registro não tem
  * mensagem, e o "Relatar" fica para a fala (como a linha da trilha, decisão 14).

@@ -140,6 +140,28 @@ describeIntegracao("Atividade do bot (chat limpo, PR 1)", () => {
     });
   });
 
+  it("NOD-374: a volta do app aparece depois do indisponível (uma linha por app, com as vezes); a de ontem e a de outro bot não entram", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { repos, agenteId } = await agenteComConversa(trx, MARLON);
+      await nasceuEm(trx, agenteId, em("08:00", "2026-10-10"));
+      const outro = await agenteComConversa(trx, MARLON);
+      const gmail = (await repos.conectores.criar({ nome: "Gmail", slug: "gmail", transporte: "stdio", comando: "node", declaracao: "nao-toca" }))!;
+      const volta = (agente: string, quando: Date) => repos.trilha.registrar({ agenteId: agente, conectorId: gmail.id, ferramenta: "gmail", kind: "conector_recuperado", motivo: "conector_indisponivel", regra: "regra:disjuntor_conector", regraVersao: 1, em: quando.getTime() });
+      await repos.trilha.registrar({ agenteId, conectorId: gmail.id, ferramenta: "gmail_buscar", kind: "negacao", motivo: "conector_indisponivel", regra: "regra:parada_alcada", regraVersao: 1, em: em("12:00").getTime() });
+      await volta(agenteId, em("12:20"));
+      await volta(agenteId, em("15:00"));
+      await volta(agenteId, em("12:00", "2026-10-17"));
+      await volta(outro.agenteId, em("12:20"));
+
+      const deps = depsSobreTrx(trx, MARLON);
+      const { data } = await executar(deps, lerAtividade, { agenteId, dia: DIA, fuso: "UTC" });
+      expect(data.itens.map((i) => i.id)).toEqual([`trilha:${gmail.id}:recuperado`, `trilha:${gmail.id}:conector_indisponivel`]);
+      expect(data.itens[0]).toMatchObject({ categoria: null, titulo: "Gmail voltou sozinho", detalhe: "o app respondeu de novo", vezes: 2, em: em("15:00").getTime() });
+      expect(data.total).toBe(2);
+      expect((await executar(deps, contarAtividade, { agenteId, dia: DIA, fuso: "UTC" })).data.total).toBe(2);
+    });
+  });
+
   it("fuso: a mesma linha cai no dia certo de cada lado da meia-noite; o nascimento do bot fecha o dia anterior", async () => {
     await withRollback(MARLON, async (trx) => {
       const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON);

@@ -20,7 +20,7 @@ export const sondarConector: CasoDeUso<EntradaSondarConector, SaidaSondarConecto
   const agora = deps.agora();
   const atualizado = await deps.repos.conectores.registrarSonda(
     conector.id,
-    resultado.ok ? { ok: true, catalogo: resultado.ferramentas, agora } : { ok: false, motivo: resultado.motivo, agora },
+    resultado.ok ? { ok: true, catalogo: resultado.ferramentas, agora } : { ok: false, motivo: resultado.motivo, agora, ...(resultado.causa ? { causa: resultado.causa } : {}) },
   );
   if (!atualizado) throw new ErroDeDominio("nao_encontrado", { cause: "conector de outra pessoa" });
   return { data: { ok: resultado.ok, conector: conectorPublico(atualizado) } };

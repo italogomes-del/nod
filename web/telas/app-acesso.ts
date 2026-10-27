@@ -1,5 +1,6 @@
 import type { Agente } from "../../src/contracts/agente.ts";
 import type { CapacidadeConector, Conector } from "../../src/contracts/conector.ts";
+import { falhaVisivel } from "../lib/fora-do-ar.ts";
 import type { Estado } from "../estado/reducer.ts";
 import { esc } from "../lib/render.ts";
 
@@ -41,7 +42,9 @@ export function situacaoDoApp(estado: Ctx & Pick<Estado, "conectando">, slug: st
   const c = conectorDoApp(estado, slug);
   if (estado.conectando[slug] && !estado.conectando[slug]?.falhou) return "conectando";
   if (!c) return "nao_conectado";
-  const falhaNova = c.ultimaFalha && (c.sondadoEm === null || c.ultimaFalha.em >= c.sondadoEm);
+  // NOD-374 (revisão 2 do PR #538): a sonda boa limpa a falha no servidor, e a falha que persiste guarda o começo dela
+  // (anterior à última sonda): `falhaVisivel` é o critério, sem comparar com `sondadoEm`.
+  const falhaNova = c.ultimaFalha && falhaVisivel(c);
   if (falhaNova) return "atencao";
   return c.habilitado ? "conectado" : c.sondadoEm ? "atencao" : "nao_conectado";
 }

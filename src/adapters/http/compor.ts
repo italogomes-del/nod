@@ -81,6 +81,7 @@ import type { Deps, Services, UseCasesNod } from "../../use-cases/tipos.ts";
 import type { RegistroCatcher } from "../executor/drivers/catcher.ts";
 import { criarClienteNod } from "../executor/cliente-nod.ts";
 import { iniciarLaco } from "../executor/laco.ts";
+import { criarDisjuntor, type Disjuntor } from "../fundo/disjuntor-conectores.ts";
 import { anexarLinksDaFala } from "../executor/midia-local.ts";
 import { criarAcompanhanteDeTarefas } from "../executor/acompanhar-tarefas.ts";
 import { criarAcompanhanteDeSubagentes } from "../executor/acompanhar-subagentes.ts";
@@ -273,6 +274,8 @@ export type App = {
   reservasEmVoo(): number;
   /** NOD-170: os computadores dos bots, só quando ligados (NOD_COMPUTADORES=docker ou driver injetado); o boot liga o varredor de ociosidade. */
   computadores: Computadores | null;
+  /** NOD-374: o disjuntor por app — a confirmação depois da chamada que falhou e o laço de re-sonda (o boot liga na cor ativa). */
+  disjuntor: Disjuntor;
   /** Liga os dois canais WebSocket da ligação ao servidor HTTP (boot, depois do listen). */
   anexarVoz(server: Server, resolverEscopo: (req: IncomingMessage) => Escopo | null | Promise<Escopo | null>): CanaisVoz;
   fechar(): Promise<void>;
@@ -543,6 +546,8 @@ export function comporApp(o: OpcoesCompor): App {
   };
 
   const dentro: DentroDeTx = (escopo, fn) => abrirTxEscopada(db, escopo)((trx) => fn(depsDe(trx, escopo)));
+  // NOD-374: a sonda de fundo roda fora de tx, sob o contexto de log da dona (o `carregar` do conector precisa dele).
+  const disjuntor = criarDisjuntor({ db, dentro, sondar: (c, op) => services.conectores.sondar(c, op), mudou: (escopo) => barramento.publicar(escopo.pessoaId, "conector.mudou", {}) });
   // NOD-345 (ADR-124): contas atrás de NOD_CONTAS/NOD_BOOTSTRAP/NOD_CONTAS_GOOGLE (compor-contas.ts). Desligadas = null.
   const contas = comporContas({ db, env, dentro, agora: relogio, ...(o.enviadorEmail ? { enviador: o.enviadorEmail } : {}) });
 
@@ -1376,7 +1381,7 @@ export function comporApp(o: OpcoesCompor): App {
     // definido em 2026-09-16: NOD_LONGPOLL_MS encurta a fatia do long-poll de aprovação (testes/e2e); default LONGPOLL_APROVACAO_MS.
     ...rotasComputadores(computadores),
     ...rotasWorkspaces(workspaces, dentro),
-    ...rotasInternas({ dentro, computadores, workspaces, tokens, agora: relogio, revisor, pressao: (pessoaId) => trabalhosVivos.memoria(pessoaId)?.nivel ?? null, longpollMs: env.NOD_LONGPOLL_MS ? numero(env.NOD_LONGPOLL_MS, 20_000) : undefined }),
+    ...rotasInternas({ dentro, computadores, workspaces, tokens, agora: relogio, revisor, disjuntor, pressao: (pessoaId) => trabalhosVivos.memoria(pessoaId)?.nivel ?? null, longpollMs: env.NOD_LONGPOLL_MS ? numero(env.NOD_LONGPOLL_MS, 20_000) : undefined }),
     ...criarRotasRotinas(depsL7),
     ...criarRotasSalas(depsL7),
     ...criarRotasSuaVez(dentro),
@@ -1489,6 +1494,7 @@ export function comporApp(o: OpcoesCompor): App {
     useCases,
     dentro,
     computadores: o.computador || env.NOD_COMPUTADORES === "docker" || computadorNoMotor ? computadores : null,
+    disjuntor,
     depsDe,
     ponte,
     rotas,
@@ -1552,6 +1558,7 @@ export function comporApp(o: OpcoesCompor): App {
       await provedoresVoz.encerrar();
       await varredorMaquinas?.parar();
       reconciliadorNuvem?.parar();
+      await disjuntor.parar();
       await conectoresVivos.fechar();
     },
   };

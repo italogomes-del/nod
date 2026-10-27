@@ -26,7 +26,7 @@ const MOTIVO_HUMANO: Record<Negacao["motivo"], string> = {
   parada_ativa: "parada ativa pela pessoa",
   args_invalidos: "argumentos inválidos",
   falha_tecnica: "falha técnica",
-  timeout_transporte: "tempo esgotado no transporte",
+  timeout_transporte: "a conexão com o app demorou demais",
 };
 
 /**

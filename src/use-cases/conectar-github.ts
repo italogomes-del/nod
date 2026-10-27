@@ -77,7 +77,7 @@ export async function garantirGithubSemConfiguracao(deps: Deps, opcoes: { pelaPe
   if (!nativo) return { ok: false, motivo: "sonda_falhou" };
   const sonda = await deps.services.conectores.sondar(conectorPublico(nativo));
   const agora = deps.agora();
-  const atualizado = await deps.repos.conectores.registrarSonda(nativo.id, sonda.ok ? { ok: true, catalogo: sonda.ferramentas, agora } : { ok: false, motivo: sonda.motivo, agora });
+  const atualizado = await deps.repos.conectores.registrarSonda(nativo.id, sonda.ok ? { ok: true, catalogo: sonda.ferramentas, agora } : { ok: false, motivo: sonda.motivo, agora, ...(sonda.causa ? { causa: sonda.causa } : {}) });
   if (!sonda.ok || !atualizado) return { ok: false, motivo: "sonda_falhou" };
   return { ok: true, conector: atualizado };
 }

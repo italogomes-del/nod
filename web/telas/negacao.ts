@@ -20,7 +20,7 @@ const MOTIVO: Record<Negacao["motivo"], string> = {
   parada_ativa: "parada ativa pela pessoa",
   args_invalidos: "argumentos inválidos",
   falha_tecnica: "falha técnica",
-  timeout_transporte: "tempo esgotado no transporte",
+  timeout_transporte: "a conexão com o app demorou demais",
 };
 
 /** definido em 2026-10-11: a mesma frase da pílula da conversa (src/domain/negacao-nativa.ts, CAUSA_NATIVA_HUMANA). */

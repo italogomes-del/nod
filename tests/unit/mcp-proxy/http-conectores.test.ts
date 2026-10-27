@@ -55,6 +55,15 @@ it("meta-executores Composio não entram no catálogo concedível", async () => 
   expect(r).toMatchObject({ ok: true, ferramentas: [{ nome: "SLACK_SEND_MESSAGE", readOnlyHint: false }] });
 });
 
+it("NOD-374: a sonda que leva 401/403 diz que o acesso foi recusado (reconectar, não re-sondar); 500 não", async () => {
+  for (const [status, causa] of [[401, "acesso_recusado"], [403, "acesso_recusado"], [500, undefined]] as const) {
+    const f: typeof fetch = async () => new Response("x", { status });
+    const r = await sondarConector({ nome: "gmail", transporte: "http", url: "https://example.com/mcp" }, { fetchImpl: f, orcamentoMs: 2_000 });
+    expect(r.ok).toBe(false);
+    expect(r.ok ? undefined : r.causa).toBe(causa);
+  }
+});
+
 it("preserva parâmetros opcionais e nullable dos MCPs remotos", () => {
   const schema = paraJsonSchema({ type: "object", properties: { text: { anyOf: [{ type: "string" }, { type: "null" }] }, channel: { type: "string" } }, required: ["channel"] });
   expect(errosDoSchema(schema, { channel: "C1", text: "Olá" })).toEqual([]);

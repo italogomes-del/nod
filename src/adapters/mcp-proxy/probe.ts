@@ -123,7 +123,8 @@ export async function sondarConector(cfg: ConfigSonda, opcoes: OpcoesSonda = {})
   } catch (e) {
     const motivo = e instanceof ErroTransporteMcp ? e.motivo : "falha_tecnica";
     log("aviso", "sonda_conector_falhou", { conector: cfg.nome, motivo, causa: causaDaFalhaDeSonda(e), ...(e instanceof ErroTransporteMcp && e.status !== undefined ? { status: e.status } : {}), erro: e instanceof Error ? e.name : "desconhecido" });
-    return { ok: false, motivo };
+    const recusado = e instanceof ErroTransporteMcp && (e.status === 401 || e.status === 403);
+    return { ok: false, motivo, ...(recusado ? { causa: "acesso_recusado" as const } : {}) };
   } finally {
     await cliente.fechar().catch(() => undefined);
   }

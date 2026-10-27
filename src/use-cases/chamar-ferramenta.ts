@@ -11,6 +11,7 @@ import { RISCO_APAGAR_NO_APP, RISCO_DO_GATILHO } from "../domain/revisor.ts";
 import { conectorTrazConteudoDeFora } from "../domain/conteudo-de-fora.ts";
 import { errosDoSchema } from "../domain/schema-args.ts";
 import { ehErroDeInfraDaTx } from "../db/tx.ts";
+import { temFalha } from "../domain/disjuntor-conector.ts";
 import { rotinaDoTurno } from "./apoio-l7.ts";
 import { JANELA_CONVERSA_DE_FORA_MS, medirRevisao } from "./medir-revisao.ts";
 import { revisarAcaoFase1, type PedidoNaFila } from "./revisar-acao.ts";
@@ -18,6 +19,7 @@ import { normalizarPedidoAPessoa } from "./pedir-a-pessoa.ts";
 import { assentarLoteAutomatico, pedirAprovacaoFase1, type LoteAutomatico } from "./pedir-aprovacao.ts";
 import { semprePermitirVivo } from "./regras-vivas.ts";
 import { executarItens, type DesfechoExecutado } from "./decidir.ts";
+import { classificarFalhaDaChamada, limparFalhaAposSucesso, registrarFalhaDaChamada } from "./disjuntor-conector.ts";
 import { nomeParaTrilha, registrarNegacao, type EntradaRegistrarNegacao } from "./registrar-negacao.ts";
 import type { CasoDeUso, Deps, Services } from "./tipos.ts";
 import { sincronizarTrabalho } from "./trabalhos.ts";
@@ -60,6 +62,11 @@ export type EfeitoPendente =
     somenteLeitura: boolean;
     /** O que a fase 2 precisa para registrar a negação se o app falhar (o mesmo registro de antes). */
     negacao: Pick<EntradaRegistrarNegacao, "turnoId" | "agenteId" | "conversaId" | "nome" | "autoria">;
+    /**
+     * definido em 2026-10-26 (NOD-374): o app tinha falha aberta ou timeouts contados quando a fase 1 leu. Só nesse caso o
+     * sucesso volta ao banco para limpar (limparFalhaAposSucesso); app sem falha continua sem escrita nenhuma (NOD-263).
+     */
+    comFalha?: boolean;
   }
   | { tipo: "lote"; lote: LoteAutomatico };
 
@@ -360,6 +367,7 @@ export const chamarFerramentaFase1: CasoDeUso<EntradaChamarFerramenta, SaidaFase
         rotina,
         somenteLeitura: ferramenta.readOnlyHint === true,
         negacao: { turnoId: input.turnoId, agenteId: input.agenteId, conversaId: plano.conversaId, nome: input.nome, ...(plano.autoria ? { autoria: plano.autoria } : {}) },
+        comFalha: temFalha({ ultimaFalha: conector.ultimaFalha, falhasSeguidas: conector.falhasSeguidas ?? 0, timeoutsSeguidos: conector.timeoutsSeguidos ?? 0, proximaSondaEm: conector.proximaSondaEm ?? null, foraDoArDesde: conector.foraDoArDesde ?? null }),
       },
     },
     events,
@@ -388,6 +396,15 @@ export function respostaSemFase2(efeito: EfeitoPendente, desfecho: DesfechoEfeit
   return { ok: true, conteudo: r.isError ? `erro do conector ${efeito.slug}: ${r.conteudo}` : r.conteudo, confianca: "nao_confiavel" };
 }
 
+/** NOD-374: o sucesso de uma chamada num app com falha volta ao banco (tx curta) para limpar; sem falha, nada. */
+export function precisaLimparAposSucesso(efeito: EfeitoPendente, desfecho: DesfechoEfeito): efeito is Extract<EfeitoPendente, { tipo: "conector" }> {
+  return efeito.tipo === "conector" && desfecho.tipo === "conector" && desfecho.ok && efeito.comFalha === true;
+}
+
+export function entradaDaLimpeza(efeito: Extract<EfeitoPendente, { tipo: "conector" }>): { conectorId: string; slug: string; agenteId: string } {
+  return { conectorId: efeito.conectorId, slug: efeito.slug, agenteId: efeito.negacao.agenteId };
+}
+
 export type EntradaConcluirChamada = { efeito: EfeitoPendente; desfecho: DesfechoEfeito };
 
 /**
@@ -408,9 +425,11 @@ export const concluirChamada: CasoDeUso<EntradaConcluirChamada, ResultadoChamada
     const e = desfecho.ok ? undefined : desfecho.erro;
     // definido em 2026-10-05 (NOD-157): 401/403 do conector não é "servidor fora" — o acesso ao app foi recusado. Sem enum novo:
     // falha_tecnica com `causa`, que muda só a redação. A chamada que chega aqui já esgotou as tentativas do cliente.
-    const recusado = e instanceof Error && "status" in e && (e.status === 401 || e.status === 403);
-    const motivo: MotivoNegacao = recusado ? "falha_tecnica" : e instanceof Error && e.message === "timeout_transporte" ? "timeout_transporte" : "conector_indisponivel";
-    await deps.repos.conectores.marcarFalha(efeito.conectorId, motivo, deps.agora());
+    // definido em 2026-10-26 (NOD-374): a falha passa pelo disjuntor — só o 401/403 aparece na hora; o timeout conta e a
+    // queda fica para a sonda de confirmação (a rota a dispara depois de responder). Sem retry de tools/call.
+    const { tipo, motivo } = classificarFalhaDaChamada(e);
+    const recusado = tipo === "acesso_recusado";
+    await registrarFalhaDaChamada(deps, { conectorId: efeito.conectorId, tipo });
     const n = await registrarNegacao(deps, { ...efeito.negacao, motivo, classe: "conector_indisponivel", conectorId: efeito.conectorId, viaGateDeRotina: false, ...(recusado ? { causa: "acesso_recusado" as const } : {}) });
     return { data: { ok: false, negacao: n.data }, events: n.events ?? [] };
   }
@@ -429,7 +448,10 @@ export const chamarFerramenta: CasoDeUso<EntradaChamarFerramenta, ResultadoChama
   if (!("efeito" in data)) return { data, events: f1.events ?? [] };
   const desfecho = await executarEfeito(deps.services, data.efeito);
   const sem = respostaSemFase2(data.efeito, desfecho);
-  if (sem) return { data: sem, events: f1.events ?? [] };
+  if (sem) {
+    if (precisaLimparAposSucesso(data.efeito, desfecho)) await limparFalhaAposSucesso(deps, entradaDaLimpeza(data.efeito));
+    return { data: sem, events: f1.events ?? [] };
+  }
   const f2 = await concluirChamada(deps, { efeito: data.efeito, desfecho });
   return { data: f2.data, events: [...(f1.events ?? []), ...(f2.events ?? [])] };
 };

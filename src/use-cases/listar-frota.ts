@@ -1,5 +1,6 @@
 import type { FrotaDto } from "../contracts/api.ts";
 import type { Inventario } from "../contracts/inventario.ts";
+import { abertaPorTimeouts, falhaVisivel } from "../domain/disjuntor-conector.ts";
 import type { Negacao } from "../contracts/negacao.ts";
 import { descricaoEstado, previaDaMensagem } from "../domain/descricao-agente.ts";
 import { modeloDoModo } from "../domain/computador.ts";
@@ -51,8 +52,19 @@ export const listarFrota: CasoDeUso<{ agora?: number; gerenciar?: boolean }, Fro
   const inventario: Inventario = motores.find((m) => m.motor === "claude-cli")?.inventario ?? motores.find((m) => m.motor === "catcher")?.inventario ?? inventarioAusente(agora);
 
   const negacoes: Negacao[] = (await deps.repos.conectores.listar())
-    .filter((c) => c.ultimaFalha !== null)
-    .map((c) => ({ classe: "conector_indisponivel", nome: c.slug, motivo: c.ultimaFalha?.motivo ?? "conector_indisponivel", desde: c.ultimaFalha?.em ?? agora, terminal: false }));
+    // definido em 2026-10-26 (NOD-374): só a falha que persistiu (ou o acesso recusado) vira "Fora do ar".
+    .filter(falhaVisivel)
+    .map((c): Negacao => ({
+      classe: "conector_indisponivel",
+      nome: c.slug,
+      motivo: c.ultimaFalha?.motivo ?? "conector_indisponivel",
+      desde: c.ultimaFalha?.em ?? agora,
+      terminal: false,
+      ...(c.ultimaFalha?.causa ? { causa: c.ultimaFalha.causa } : {}),
+      proximaEm: c.proximaSondaEm ?? null,
+      ...(abertaPorTimeouts({ ultimaFalha: c.ultimaFalha, falhasSeguidas: c.falhasSeguidas ?? 0, timeoutsSeguidos: c.timeoutsSeguidos ?? 0, proximaSondaEm: c.proximaSondaEm ?? null, foraDoArDesde: c.foraDoArDesde ?? null }) ? { lento: true as const } : {}),
+      ...(c.habilitado ? {} : { semRessonda: true as const }),
+    }));
 
   return { data: { agentes: linhas, inventario, negacoes, ...(deps.services.revisor?.config.ligado ? { revisor: true as const } : {}) } };
 };

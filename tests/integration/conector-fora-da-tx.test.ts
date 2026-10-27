@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { rotasInternas, TENTATIVAS_FASE2 } from "../../src/adapters/http/rotas/interno.ts";
+import { aposSondaFalha, ESTADO_LIMPO } from "../../src/domain/disjuntor-conector.ts";
 import { FERRAMENTAS_NOD } from "../../src/contracts/ferramentas-nod.ts";
 import { ErroBancoOcupado } from "../../src/db/tx.ts";
 import { criarTokenTurno } from "../../src/services/token-turno.ts";
@@ -49,13 +50,15 @@ describe("rota interna: o efeito externo roda fora da transação (NOD-263)", ()
     }
   };
   const dormidas: number[] = [];
+  /** NOD-374: as confirmações que a rota dispara depois de responder (a sonda em si é do adaptador de fundo). */
+  const confirmacoes: string[] = [];
   let srv: ServidorDeTeste;
   let agenteId: string;
   let conversaId: string;
   let conectorId: string;
 
   beforeAll(async () => {
-    srv = await servidorDeTeste([...rotasInternas({ dentro, tokens, agora, longpollMs: 300, intervaloMs: 40, dormir: async (ms) => void dormidas.push(ms) })], { autorizarTokenTurno: tokens.autorizar });
+    srv = await servidorDeTeste([...rotasInternas({ dentro, tokens, agora, longpollMs: 300, intervaloMs: 40, dormir: async (ms) => void dormidas.push(ms), disjuntor: { confirmar: (_e, id) => void confirmacoes.push(id) } })], { autorizarTokenTurno: tokens.autorizar });
     const repos = memoria.repos(MARLON);
     memoria.banco.pessoas.push({ tenantId: TENANT_PADRAO, id: PESSOA_MARLON, nome: "Marlon", iniciais: "M", email: null });
     agenteId = (await repos.agentes.criar({ nome: "Vera", dono: "pessoa", forma: "shape-hex", cor: "c-purple", modelo: "m" }))?.id ?? "";
@@ -70,7 +73,9 @@ describe("rota interna: o efeito externo roda fora da transação (NOD-263)", ()
     for (const capacidade of ["buscar", "enviar"]) await repos.concessoes.conceder({ agenteId, conectorId, capacidade, mensagemId: "m" });
   });
   afterAll(() => srv.close());
-  afterEach(() => {
+  afterEach(async () => {
+    await memoria.repos(MARLON).conectores.gravarEstadoFalha(conectorId, ESTADO_LIMPO);
+    confirmacoes.length = 0;
     ocupadoNa = () => false;
     comportamento = async () => ({ conteudo: "ok", isError: false });
     vi.restoreAllMocks();
@@ -121,7 +126,7 @@ describe("rota interna: o efeito externo roda fora da transação (NOD-263)", ()
     ["timeout_transporte", () => new Error("timeout_transporte"), "timeout_transporte", undefined],
     ["401 → acesso_recusado", () => Object.assign(new Error("401"), { status: 401 }), "falha_tecnica", "acesso_recusado"],
     ["qualquer outro erro", () => new Error("ECONNRESET"), "conector_indisponivel", undefined],
-  ] as const)("AC4: app que falha (%s) vira negação na FASE 2 — trilha, evento, marca no conector — e o efeito roda uma vez, fora da tx", async (_nome, erro, motivo, causa) => {
+  ] as const)("AC4: app que falha (%s) vira negação na FASE 2 — trilha, evento, disjuntor (NOD-374) — e o efeito roda uma vez, fora da tx", async (_nome, erro, motivo, causa) => {
     const t = await turno();
     comportamento = async () => {
       throw erro();
@@ -136,7 +141,36 @@ describe("rota interna: o efeito externo roda fora da transação (NOD-263)", ()
     const eventos = memoria.banco.events.slice(antes.events).filter((e) => e.kind === "negacao");
     expect(eventos).toHaveLength(1);
     expect(eventos[0]?.dados).toMatchObject({ motivo, conector_id: conectorId });
-    expect(memoria.banco.conectores.find((c) => c.id === conectorId)?.ultimaFalha?.motivo).toBe(motivo);
+    // NOD-374: só o 401/403 aparece na hora e não confirma; timeout só conta e queda não escreve — a confirmação decide.
+    const c = memoria.banco.conectores.find((x) => x.id === conectorId);
+    if (causa) {
+      expect(c?.ultimaFalha).toMatchObject({ motivo, causa });
+      expect(c?.foraDoArDesde).toBe(c?.ultimaFalha?.em);
+      expect(confirmacoes).toEqual([]);
+    } else {
+      expect(c?.ultimaFalha).toBeNull();
+      expect(c?.foraDoArDesde ?? null).toBeNull();
+      expect(c?.timeoutsSeguidos).toBe(motivo === "timeout_transporte" ? 1 : 0);
+      expect(confirmacoes).toEqual([conectorId]);
+    }
+  });
+
+  it("NOD-374: sucesso num app com falha aberta limpa numa 2ª tx curta e registra a volta; o seguinte não escreve", async () => {
+    const t = await turno();
+    const aberto = aposSondaFalha(aposSondaFalha(ESTADO_LIMPO, "conector_indisponivel", agora() - 20 * 60_000, 0.5), "conector_indisponivel", agora() - 5 * 60_000, 0.5);
+    await memoria.repos(MARLON).conectores.gravarEstadoFalha(conectorId, aberto);
+    const antes = { tx: tx.total, chamadas: chamadas.length };
+    const r = await t.chamar("email__buscar", {});
+    expect(r.corpo).toEqual({ ok: true, conteudo: "ok", confianca: "nao_confiavel" });
+    expect(chamadas.slice(antes.chamadas)).toEqual([{ tool: "buscar", txAbertas: 0 }]);
+    // A limpeza roda depois da resposta: espera ela assentar.
+    await vi.waitFor(() => expect(tx.total - antes.tx).toBe(2));
+    expect(memoria.banco.conectores.find((x) => x.id === conectorId)).toMatchObject({ ultimaFalha: null, foraDoArDesde: null, falhasSeguidas: 0, proximaSondaEm: null });
+    expect(memoria.banco.trilha.filter((l) => l.kind === "conector_recuperado" && l.conectorId === conectorId).at(-1)).toMatchObject({ agenteId, ferramenta: "email", motivo: "conector_indisponivel" });
+    const depois = tx.total;
+    await t.chamar("email__buscar", {});
+    expect(tx.total - depois).toBe(1);
+    expect(confirmacoes).toEqual([]);
   });
 
   it("AC5: o lote que o modo automático aprova roda sem tx aberta; a decisão já sai fechada na fase 1; mensagem e evento uma vez só, com o texto e a autoria de sempre", async () => {

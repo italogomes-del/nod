@@ -14,6 +14,7 @@ import { ErroDeDominio } from "../domain/erro.ts";
 import { errosDoSchema } from "../domain/schema-args.ts";
 import { rotinaDoTurno } from "./apoio-l7.ts";
 import { executarItens, type DesfechoExecutado, type ItemAExecutar } from "./decidir.ts";
+import { limparFalhasDosExecutados } from "./disjuntor-conector.ts";
 import { JANELA_CONVERSA_DE_FORA_MS, medirRevisao } from "./medir-revisao.ts";
 import { revisarAcaoFase1, type PedidoNaFila } from "./revisar-acao.ts";
 import { PRAZO_DECISAO_MS } from "./pedir-a-pessoa.ts";
@@ -245,6 +246,9 @@ export const assentarLoteAutomatico = async (deps: Deps, input: EntradaAssentarL
   let gravados = 0;
   for (const d of desfechos) if (await deps.repos.itensAprovacao.registrarDesfechoSeAberto(d.itemId, d.desfecho)) gravados++;
   const criados = lote.aExecutar.map((a) => a.item);
+  // Revisão 7 do PR #538 (NOD-374): o item do lote que deu certo fecha a falha do app, como a chamada direta.
+  const desfechoDe = new Map(desfechos.map((d) => [d.itemId, d.desfecho]));
+  await limparFalhasDosExecutados(deps, lote.aExecutar.filter((a) => a.conectorId !== null).map((a) => ({ slug: a.item.destino.conector, desfecho: desfechoDe.get(a.item.id) ?? null })), lote.agenteId);
   // ADR-048: item que roda no gh do Mac (servidor compartilhado) ainda não tem desfecho: o turno espera
   // pelo long-poll de `aguardar` enquanto o app desktop da pessoa executa; a fala "Fiz sem perguntar"
   // sai quando o Mac relatar (itens-na-maquina.ts).

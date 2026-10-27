@@ -3,6 +3,7 @@ import type { Estado } from "../estado/reducer.ts";
 import { avatarAgente, botao, esc, hora } from "../lib/render.ts";
 import { haQuanto } from "../lib/relogio.ts";
 import type { NomeCapacidadeGithub } from "../../src/contracts/github.ts";
+import { falhaVisivel } from "../lib/fora-do-ar.ts";
 
 /**
  * definido em 2026-09-24 (ADR-048): o que o GitHub nativo sabe fazer, para dizer o que o jeito de
@@ -48,7 +49,7 @@ export function renderConectores(estado: Estado): string {
   const agentes = estado.frota?.agentes ?? [];
   const cartoes = estado.conectores
     .map((c) => {
-      const falha = c.ultimaFalha ? `<div class="negacao negacao-conector_indisponivel">conector ${esc(c.slug)} indisponível: ${esc(c.ultimaFalha.motivo.replaceAll("_", " "))} desde ${hora(c.ultimaFalha.em)} (${haQuanto(estado.agora - c.ultimaFalha.em)})</div>` : "";
+      const falha = c.ultimaFalha && falhaVisivel(c) ? `<div class="negacao negacao-conector_indisponivel">conector ${esc(c.slug)} indisponível: ${esc(c.ultimaFalha.causa === "acesso_recusado" ? "recusou o acesso" : c.ultimaFalha.motivo === "timeout_transporte" ? "a conexão com o app demorou demais" : c.ultimaFalha.motivo.replaceAll("_", " "))} desde ${hora(c.ultimaFalha.em)} (${haQuanto(estado.agora - c.ultimaFalha.em)})</div>` : "";
       const catalogo = c.catalogo.length
         ? `<ul class="catalogo">${c.catalogo.map((cap) => `<li><code>${esc(cap.nome)}</code> <span class="tag ${cap.readOnlyHint ? "tag-cinza" : "tag-ambar"}">${cap.readOnlyHint ? "só leitura" : "efeito externo"}</span> <span class="mudo">${esc(cap.descricao)}</span></li>`).join("")}</ul>`
         : '<p class="mudo">catálogo vazio — sonde para descobrir as ferramentas</p>';
