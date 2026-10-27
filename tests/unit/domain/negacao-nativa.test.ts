@@ -9,7 +9,6 @@ import { gitForaDaPastaDoBot } from "../../../src/domain/git-na-pasta-do-bot.ts"
 import { CAUSA_NATIVA_HUMANA, causaDaNegacaoNativa, motivoDoHookDoNod, negacoesDoTurno } from "../../../src/domain/negacao-nativa.ts";
 import { decidirNativa } from "../../../src/domain/nativas.ts";
 import { classificarResultado, classificarSessao } from "../../../src/domain/stream-json.ts";
-import { textoNegacao } from "../../../web/telas/negacao.ts";
 
 const TASK = "/home/nod/nod/Ze 1/jornada-08aff6";
 const ctx = { cwd: TASK, pastaDoBot: TASK, home: "/home/nod", daTask: true };
@@ -62,9 +61,7 @@ describe("a pílula diz por que o nod barrou a nativa (definido em 2026-10-11)",
     expect(descreverNegacao({ ...base, causa: "git_fora_da_pasta", vezes: 3 }, 0)).toBe("ferramenta Bash negada: git fora da pasta da task; o bot recebeu o caminho certo (3 vezes)");
     expect(descreverNegacao({ ...base, causa: "esperando_aprovacao" }, 0)).toBe("ferramenta Bash negada: esperando sua aprovação na conversa");
     expect(descreverNegacao(base, 0)).toBe("ferramenta Bash negada: alcance insuficiente — peça aprovação");
-    // A lista "Fora do ar" da web repete o mapa (a web só importa tipos): as frases não podem divergir.
-    for (const causa of CAUSAS_NATIVAS) expect(textoNegacao({ ...base, causa }, 0)).toContain(CAUSA_NATIVA_HUMANA[causa]);
-    expect(textoNegacao({ ...base, causa: "inventada" as never }, 0)).toContain("alcance insuficiente");
+    for (const causa of CAUSAS_NATIVAS) expect(descreverNegacao({ ...base, causa }, 0)).toContain(CAUSA_NATIVA_HUMANA[causa]);
   });
 
   it("o motor junta os motivos do turno, pelo nome que o tool_use pediu, também na sessão viva", () => {

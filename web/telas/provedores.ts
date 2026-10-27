@@ -11,7 +11,7 @@ import { botsDaPessoa, maquinaDoBot, maquinasDeTrabalho } from "./maquinas.ts";
 import { renderExecutor } from "./frota.ts";
 import { logoApp } from "./marketplace.ts";
 import type { Negacao } from "../../src/contracts/negacao.ts";
-import { renderNegacoes } from "./negacao.ts";
+import { naTela, renderNegacoes } from "./negacao.ts";
 
 /**
  * Seu espaço › Provedores de IA (definido em 2026-10-10, protótipo Main aprovado; antes "Conexão"). As IAs que os bots
@@ -20,7 +20,7 @@ import { renderNegacoes } from "./negacao.ts";
  * {ordemIas}`; cada bot pode ter a dele (tela 2B). Cada linha é o cartão de web/telas/cartao-ia.ts: estado curto, um
  * botão e o ícone de verificar que aparece no hover, com a versão e a hora no balão.
  *
- * Embaixo, quando há: os conectores fora do ar (um por linha, com "Tentar de novo"), as negações da frota e, só no modo
+ * Embaixo, quando há: os conectores fora do ar (um por linha, com "Tentar de novo"), o plano ausente da frota e, só no modo
  * local (o servidor diz `trocavel`), o interruptor de simulação, atrás de "Configurar conexão".
  */
 export function renderProvedores(estado: Estado): string {
@@ -136,11 +136,16 @@ export function linhaForaDoAr(n: Pick<Negacao, "motivo" | "desde" | "causa" | "p
   return { motivo: "parou de responder", detalhe: `${desde} · o nod tenta de novo sozinho; ${proxima}` };
 }
 
-/** Os conectores fora do ar e as negações da frota (o que era o rodapé da antiga seção Conexão). */
+/**
+ * Os conectores fora do ar e as negações da frota (o que era o rodapé da antiga seção Conexão).
+ * definido em 2026-10-27 (NOD-384, decisão do Marlon): a ferramenta negada não aparece mais aqui — a tela mostra só as
+ * contas, a ordem e o consumo. O dado continua gravado (trilha, Raio-X, Atividade) e a pílula segue na conversa; o lugar
+ * no admin fica para depois. O plano ausente ("nenhum trabalho começa") continua: é alerta de que nada roda.
+ */
 function foraDoAr(estado: Estado): string {
   const negacoes = [...(estado.frota?.negacoes ?? []), ...estado.negacoes.filter((n) => n.classe !== "conector_indisponivel")];
   const fora = negacoes.filter((n) => n.classe === "conector_indisponivel");
-  const outras = negacoes.filter((n) => n.classe !== "conector_indisponivel");
+  const outras = negacoes.filter((n) => n.classe !== "conector_indisponivel").filter(naTela);
   const linhaFora = (n: (typeof fora)[number]) => {
     const c = estado.conectores.find((x) => x.slug === n.nome || x.nome === n.nome);
     const nome = c?.nome ?? n.nome;
