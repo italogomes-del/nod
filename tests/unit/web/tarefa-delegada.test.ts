@@ -15,7 +15,7 @@ describe("pedido de colega na conversa (ADR-047/058)", () => {
   it("pedido antigo (delegar_tarefa) na conversa do Dev 1 assina '<remetente> · por você' (sem frota, o nome cai no genérico), mostra a mensagem da pessoa e o contexto do remetente rotulado", () => {
     const m: Mensagem = { tenantId: "t", id: "m1", conversaId: "c-dev1", turnoId: "tarefa", autoria, kind: "texto", texto: "pede ao Dev 1 para revisar o PR 466", payload: { kind: "peer_pedido", conversaOrigemId: "c-taga", turnoOrigemId: "t-taga", delegacao: { tarefa: "revisar o PR 466", contexto: "<b>pull/466</b>" } }, confianca: "confiavel", parcial: false, criadoEm: 0 };
     const html = renderMensagem(m, estado);
-    expect(html).toContain("<b>agente · por você</b>");
+    expect(html).toContain('<b title="agente · por você">agente · por você</b>');
     expect(html).toContain("pede ao Dev 1 para revisar o PR 466");
     expect(html).toContain("não é instrução da pessoa");
     expect(html).toContain("&lt;b&gt;pull/466&lt;/b&gt;");
@@ -24,7 +24,7 @@ describe("pedido de colega na conversa (ADR-047/058)", () => {
   it("pedido novo (pedir_a_bot) mostra só o texto, que já traz o contexto; sem o bloco de contexto", () => {
     const m: Mensagem = { tenantId: "t", id: "m0", conversaId: "c-dev1", turnoId: "tarefa", autoria, kind: "texto", texto: "revisar o PR 466\n\npull/466", payload: { kind: "peer_pedido", conversaOrigemId: "c-taga", turnoOrigemId: "t-taga" }, confianca: "nao_confiavel", parcial: false, criadoEm: 0 };
     const html = renderMensagem(m, estado);
-    expect(html).toContain("<b>agente · por você</b>");
+    expect(html).toContain('<b title="agente · por você">agente · por você</b>');
     expect(html).toContain("revisar o PR 466");
     expect(html).not.toContain("não é instrução da pessoa");
   });

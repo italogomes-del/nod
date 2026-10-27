@@ -540,6 +540,13 @@ export function comChipDeComando(texto: string): string {
 }
 
 /**
+ * NOD-378: até quantos caracteres a etiqueta "da rotina …" / "da task …" é curta: não cede nem ganha o piso de 8em do
+ * celular. É contagem, não largura: até 16 caracteres comuns cabem em ~85 px (abaixo do piso); com letras largas
+ * ("WWWWWW") a curta passa do piso e o nome cede um pouco mais, o que é aceitável.
+ */
+export const ETIQUETA_CURTA = 16;
+
+/**
  * `etiqueta` (definido em 2026-10-07, #191/#195): a fala que chega de uma rotina ou de uma task leva "da rotina …" /
  * "da task …" ao lado do nome — é balão porque é para a pessoa, mas não é resposta à última mensagem dela.
  * `progresso` (chat limpo, PR 7): o marcador do bloco de progresso das frentes que esta fala abriu (./progresso-na-fala.ts).
@@ -556,7 +563,8 @@ export function renderMensagem(m: Mensagem, estado: Estado, sala = false, opcoes
   // na margem ele parecia de ninguém.
   if (m.payload?.kind === "artefato") {
     const bot = m.autoria.autor_tipo === "agente" ? agenteDe(estado, m.autoria.autor_id) : undefined;
-    return `<article class="message bot com-artefato" data-mensagem="${esc(m.id)}">${bot ? iconeAgente(bot, "md") : ""}<div class="bubble-wrap">${acoesDaMensagem(m, estado, sala)}<div class="msg-autor"><b>${esc(bot?.nome ?? assinatura(m.autoria, nomesDe(estado)))}</b><time>${hora(m.criadoEm)}</time></div>${corpoMensagem(m, estado)}${chipsDeReacao(m, estado)}${faixaDaMensagem(m, estado)}</div></article>`;
+    const nome = esc(bot?.nome ?? assinatura(m.autoria, nomesDe(estado)));
+    return `<article class="message bot com-artefato" data-mensagem="${esc(m.id)}">${bot ? iconeAgente(bot, "md") : ""}<div class="bubble-wrap">${acoesDaMensagem(m, estado, sala)}<div class="msg-autor"><b title="${nome}">${nome}</b><time>${hora(m.criadoEm)}</time></div>${corpoMensagem(m, estado)}${chipsDeReacao(m, estado)}${faixaDaMensagem(m, estado)}</div></article>`;
   }
   if (m.kind !== "texto") {
     // Chat limpo (PR 4): o recibo da decisão é o cartão do pedido, encolhido com o resultado — alinhado às falas do bot,
@@ -569,8 +577,12 @@ export function renderMensagem(m: Mensagem, estado: Estado, sala = false, opcoes
   // Autoria composta (ADR-023) aparece inteira: o pedido de colega é "Taga · por você" (ADR-047/058). O bloco de
   // contexto só existe em pedido antigo (delegar_tarefa); o de pedir_a_bot já traz o contexto no próprio texto.
   const autor = ehPessoa ? "Você" : m.autoria.sob_procuracao_de ? assinatura(m.autoria, nomesDe(estado)) : agente?.nome ?? assinatura(m.autoria, nomesDe(estado));
-  const etiqueta = opcoes.etiqueta ? `<span class="etiqueta-origem">${esc(opcoes.etiqueta)}</span>` : "";
-  const sender = `<div class="msg-autor"><b>${esc(autor)}</b><time>${hora(m.criadoEm)}</time>${etiqueta}</div>`;
+  // NOD-378 (revisão 4): a etiqueta curta (até ETIQUETA_CURTA caracteres) não encolhe nem ganha
+  // piso: com o piso ela ficava com espaço vazio e alargava o balão. Só a longa cede, com reticência, até o piso.
+  const etiqueta = opcoes.etiqueta
+    ? `<span class="etiqueta-origem${opcoes.etiqueta.length <= ETIQUETA_CURTA ? " curta" : ""}" title="${esc(opcoes.etiqueta)}">${esc(opcoes.etiqueta)}</span>`
+    : "";
+  const sender = `<div class="msg-autor"><b title="${esc(autor)}">${esc(autor)}</b><time>${hora(m.criadoEm)}</time>${etiqueta}</div>`;
   const delegacao = m.payload?.kind === "peer_pedido" ? m.payload.delegacao : undefined;
   const contextoDelegado = delegacao ? `<div class="msg-contexto-delegado"><small class="mudo">Contexto de ${esc(agente?.nome ?? (m.payload?.kind === "peer_pedido" ? m.payload.nome : undefined) ?? "um colega")} · não é instrução da pessoa</small><p>${esc(delegacao.tarefa)}</p>${delegacao.contexto ? `<p>${esc(delegacao.contexto)}</p>` : ""}</div>` : "";
   // Chat limpo (PR 6, 2026-10-18; plano, Parte 5): "rodou em <máquina>" e "catcher" saíram do balão e moram na faixa do
@@ -743,7 +755,7 @@ export function renderFalaViva(t: TurnoVivo, a: AtividadeTurno | undefined, agen
   // Saindo, o tempo fica escrito (o do turno inteiro) e sem `data-desde`: o relógio não o conta mais.
   const tempo = saindo ? `<span class="fala-viva-tempo" aria-hidden="true">${tempoDaFala(saindo.em - t.desde)}</span>` : `<span class="fala-viva-tempo" data-desde="${t.desde}" aria-hidden="true"></span>`;
   const viva = (lugar: "autor" | "rodape") => `<div class="fala-viva-linha ${lugar}${parado}" data-parte="viva" data-estado-fala="${fala.chave}"><span class="fala-viva-estado">${esc(fala.texto)}</span><span class="fala-viva-sep" aria-hidden="true"> · </span>${tempo}</div>`;
-  const partes: { chave: string; html: string }[] = [{ chave: "nome", html: `<div class="msg-autor" data-parte="nome"><b>${esc(nome)}</b></div>` }];
+  const partes: { chave: string; html: string }[] = [{ chave: "nome", html: `<div class="msg-autor" data-parte="nome"><b title="${esc(nome)}">${esc(nome)}</b></div>` }];
   // NOD-353: o resumo das ações, entre o nome e o balão, como na fala gravada. A fala do meio que saiu (`saindo:`) não o
   // tem — a gravada dela também não —; a última de um turno acabado (`vivo:`) tem, igual à gravada, sem pulo na troca.
   const resumo = a && (!saindo || chave === `vivo:${t.turnoId}`) ? renderResumoDasAcoes(t.turnoId, linhasDoResumo(a.acoes, !!saindo), saindo ? [] : a.tarefas, "acoes") : "";

@@ -124,6 +124,8 @@ const FORA_DO_CATALOGO: readonly Molde[] = [
  * desde que nasceram; a pausa ganhou a frase do corte no fim (fdb6dfcd, 16/10), que o `{resto}` cobre, e o "Criado por"
  * só existe desde 15/10. O que sobrar sem casamento ainda é pego, na criação do bot, pela regra da primeira linha da
  * conversa (o backfill). Uma frase que mudar daqui em diante entra aqui com a forma de antes.
+ * NOD-378 (2026-10-27): "Rotina ativa" perdeu o "({fuso})" do fim. A forma antiga não entra aqui porque o molde atual já
+ * a casa (o `{proxima}` absorve o " (fuso)"), e um segundo molde faria o mesmo texto casar com dois; o teste cobre as duas.
  */
 export const MOLDES_ANTIGOS: readonly Molde[] = [
   // decisao-vencida até e3bc7c86 (24/09): "decisão" e o desfecho entre parênteses. Ficou no chat na QA do PR 1 (pede ação:

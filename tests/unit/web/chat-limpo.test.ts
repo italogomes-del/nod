@@ -95,7 +95,9 @@ describe("a semente da filha 03: 11 itens, 9 você↔bot", () => {
     expect(linhas[1]!.html).toContain('data-linha-tipo="bots"');
     const daRotina = baloes.find((b) => b.html.includes("da rotina"));
     expect(daRotina?.html).toContain("A Gabriela marcou você no #suporte");
-    expect(daRotina?.html).toContain('<span class="etiqueta-origem">da rotina');
+    expect(daRotina?.html).toMatch(/<span class="etiqueta-origem( curta)?" title="da rotina/);
+    // NOD-378: no celular o nome e a etiqueta cortam com reticência; o title repete o texto do cabeçalho (o nome inteiro; a etiqueta já vem limitada a 48 caracteres, fora do escopo).
+    expect(daRotina?.html).toMatch(/<div class="msg-autor"><b title="([^"]+)">\1<\/b><time>/);
     // Nenhuma fala do meio da rotina nem do pedido aparece no chat; a linha "Rotina executou" também some.
     const tudo = blocos.map((b) => b.html).join("");
     for (const escondida of ["Li o #suporte", "Vou olhar", "Revisado: dois ajustes", "Lendo o #suporte", "Rotina executou"]) expect(tudo).not.toContain(escondida);
@@ -164,7 +166,7 @@ describe("tasks na conversa (#195)", () => {
     expect(blocos[2]!.html).toContain("<span>Abriu a task</span><b>Migrar relatórios</b>");
     expect(blocos[2]!.html).toContain('data-trabalho="tb-1"');
     expect(blocos[2]!.html).toContain('data-linha-tipo="task"');
-    expect(blocos[3]!.html).toContain('<span class="etiqueta-origem">da task Migrar relatórios</span>');
+    expect(blocos[3]!.html).toContain('<span class="etiqueta-origem" title="da task Migrar relatórios">da task Migrar relatórios</span>');
     expect(blocos[3]!.html).toContain("terminou · 39 min · US$ 0,88");
     expect(blocos.map((b) => b.html).join("")).not.toContain("Convertendo o lote 1");
   });
@@ -369,7 +371,7 @@ describe("QA do épico (2026-10-08): nome de rotina longo não estica a linha ne
     expect(linha).toContain("<b>Toda manhã leia o canal #suporte e me avise se…</b> rodou 2 vezes");
     expect(linha).not.toContain(longo);
     const com = cenario(execucaoComNovidade(t0), { trabalhos: { trabalhos: [trabalho("tb-r6", { origem: "rotina", rotinaNome: longo, estado: "terminado", terminadoEm: t0 + 2 * MIN })], pressao: null, memoriaTotalMb: null } });
-    expect(itens(com.c, com.e).map((b) => b.html).join("")).toContain('<span class="etiqueta-origem">da rotina Toda manhã leia o canal #suporte e me avise se…</span>');
+    expect(itens(com.c, com.e).map((b) => b.html).join("")).toContain('<span class="etiqueta-origem" title="da rotina Toda manhã leia o canal #suporte e me avise se…">da rotina Toda manhã leia o canal #suporte e me avise se…</span>');
   });
 });
 
@@ -501,7 +503,7 @@ describe("ADR-099 (I7 revista): a rotina e o pedido de colega sem trabalho segue
 
   it("no retorno: o resultado da retomada vira o balão \"da rotina\"; o \"comecei\" do dono não", () => {
     const { e, c } = cenario([daPessoa("p1", t0), ...daTriagem(t0 + MIN), ...doRetorno(t0 + 30 * MIN)]);
-    const daRotina = itens(c, e).filter((b) => ehBalao(b.html) && b.html.includes('<span class="etiqueta-origem">da rotina'));
+    const daRotina = itens(c, e).filter((b) => ehBalao(b.html) && /<span class="etiqueta-origem( curta)?" title="da rotina/.test(b.html));
     expect(daRotina).toHaveLength(1);
     expect(daRotina[0]!.html).toContain("O PR 7 tem dois comentários seus para responder.");
     const tudo = itens(c, e).map((b) => b.html).join("");
@@ -570,7 +572,7 @@ describe("chat limpo com destino (ADR-114, PR 2)", () => {
     const { e, c } = cenario(ms, { trabalhos: { trabalhos: [t], pressao: null, memoriaTotalMb: null } });
     const blocos = itens(c, e);
     expect(blocos.map((b) => b.chave)).toEqual(["p1", "b1", "m2"]);
-    expect(blocos[2]!.html).toContain('<span class="etiqueta-origem">da task Migrar relatórios</span>');
+    expect(blocos[2]!.html).toContain('<span class="etiqueta-origem" title="da task Migrar relatórios">da task Migrar relatórios</span>');
     const tudo = html(c, e);
     expect(tudo).not.toContain("Abriu a task");
     expect(tudo).not.toContain("terminou ·");
@@ -633,7 +635,7 @@ describe("chat limpo com destino (ADR-114, PR 2)", () => {
     const blocos = itens(c, e);
     expect(blocos.map((b) => b.chave)).toEqual(["p1", "r6c"]);
     expect(blocos[1]!.html).toContain("A Gabriela marcou você no #suporte");
-    expect(blocos[1]!.html).toContain('<span class="etiqueta-origem">da rotina');
+    expect(blocos[1]!.html).toMatch(/<span class="etiqueta-origem( curta)?" title="da rotina/);
     expect(html(c, e)).not.toContain("nada para você");
     expect(html(c, e)).not.toContain("Rotina executou");
   });

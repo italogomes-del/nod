@@ -66,7 +66,7 @@ describe("criarRotina (ferramenta, origem agente)", () => {
     expect(d.banco.propostas[0]?.estado).toBe("confirmada");
     expect(d.banco.decisoes[0]?.estado).toBe("decidida");
     const sistema = d.banco.mensagens.find((m) => m.kind === "sistema");
-    expect(sistema?.texto).toBe(`Rotina ativa: dias úteis às 08:00 (${TZ}) · próxima execução: 17/09/2026, 08:00 (${TZ}).`);
+    expect(sistema?.texto).toBe(`Rotina ativa: dias úteis às 08:00 (${TZ}) · próxima execução: 17/09/2026, 08:00.`);
     expect(a.events?.map((e) => e.kind)).toEqual(["rotina_criada", "decisao_decidida"]);
     const de_novo = await ativarRotina(d.deps, { propostaId: r.data.proposta_id });
     expect(de_novo.data.jaExistia).toBe(true);

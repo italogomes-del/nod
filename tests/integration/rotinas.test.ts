@@ -49,7 +49,7 @@ describeIntegracao("rotinas: proposta tipada, confirmação, fuso nomeado, pausa
       const rotina = await deps.services.rotinas.ativar(trx, r.data.proposta_id);
       expect(rotina).toMatchObject({ id: r.data.proposta_id, estado: "ativa", exigeAprovacao: true, fusoIana: TZ, proximaExecucao: r.data.proxima_execucao, ownerId: PESSOA_MARLON });
       const mensagens = await repos.mensagens.listarDaConversa(conversaId);
-      expect(mensagens.map((m) => [m.kind, m.texto])).toEqual([["sistema", `Rotina ativa: dias úteis às 08:00 (${TZ}) · próxima execução: 17/09/2026, 08:00 (${TZ}).`]]);
+      expect(mensagens.map((m) => [m.kind, m.texto])).toEqual([["sistema", `Rotina ativa: dias úteis às 08:00 (${TZ}) · próxima execução: 17/09/2026, 08:00.`]]);
       expect((await repos.propostas.buscar(r.data.proposta_id))?.estado).toBe("confirmada");
       expect((await repos.decisoes.buscar(r.data.proposta_id))?.estado).toBe("decidida");
       const de_novo = await ativarRotina(deps, { propostaId: r.data.proposta_id });

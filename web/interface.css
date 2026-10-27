@@ -60,6 +60,20 @@
 .msg-autor { display: flex; gap: 10px; align-items: center; margin: 0 0 6px; font-size: 12px; }
 .msg-autor b { font-weight: 600; }
 .msg-autor time { color: var(--ink-3); font-size: 10px; }
+/* NOD-378 (27/10): no celular a timeline tem overflow-wrap: anywhere (mobile.css), que deixa todo texto encolher a 1
+   caractere; com a etiqueta "da rotina …" sem quebra, o nome e a hora viravam colunas de uma letra e a etiqueta vazava.
+   Ninguém quebra linha: a hora não encolhe; quem cede é a etiqueta, e o nome só depois que ela chega ao piso (o piso de
+   8em mora no bloco do celular em mobile.css). A etiqueta curta (.curta, até 16 caracteres, ver conversa.ts) não cede nem
+   ganha piso: o piso a alargava e alargava o balão. O peso 1000000 da etiqueta
+   contra 1 do nome é para o nome não perder nem uma fração de pixel antes disso: o flex reparte o encolhimento por
+   peso × largura, e com 1000 o nome médio já ganhava reticência sem precisar. Nenhum mínimo nem teto no nome: um %
+   cortava nome que cabia e um mínimo alargava nome curto ("Ada", "Você") no desktop (revisões do PR 540). */
+.msg-autor time { flex: none; white-space: nowrap; }
+.msg-autor b { flex: 0 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.msg-autor .etiqueta-origem { flex: 0 1000000 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.msg-autor .etiqueta-origem.curta { flex: none; }
+/* Fora do celular, um piso pequeno só para a longa: numa janela estreita sem toque ela não vira pílula vazia (revisão 5). */
+.msg-autor .etiqueta-origem:not(.curta) { min-width: 3em; }
 .you .msg-autor { justify-content: flex-end; }
 .tag { font-size: 9px; text-transform: none; letter-spacing: 0; font-weight: 400; border-radius: 6px; }
 .meta-tags { opacity: .72; }
@@ -499,7 +513,6 @@
    resumo entre o nome e a linha empurrava a linha para baixo do nome. */
 .fala-viva:not(.com-texto) .bubble-wrap > :not(.msg-autor, .fala-viva-linha) { flex: 1 1 100%; order: 1; }
 .fala-viva .msg-autor { min-width: 0; max-width: 100%; }
-.fala-viva .msg-autor b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fala-viva-linha { display: flex; align-items: baseline; min-width: 0; font-size: 12px; color: var(--ink-2); white-space: nowrap; animation: fala-troca .16s ease-out both; }
 .fala-viva-linha.autor { margin: 0 0 6px; }
 .fala-viva-linha.rodape { box-sizing: border-box; height: 25px; margin-bottom: -25px; padding-top: 7px; line-height: 18px; }

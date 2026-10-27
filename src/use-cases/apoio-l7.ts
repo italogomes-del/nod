@@ -93,8 +93,11 @@ export function evento(
   };
 }
 
-/** "16/09/2026 08:00" no fuso dado (pt-BR, 24 h). Sem fuso = UTC com o rótulo. */
-export function carimbo(instante: number, fusoIana = "UTC"): string {
+/**
+ * "16/09/2026, 08:00" no fuso dado (pt-BR, 24 h). Sem fuso = UTC com o rótulo. `rotulo: false` tira o " UTC" para quem
+ * já nomeia o fuso no mesmo texto (NOD-378, "Rotina ativa").
+ */
+export function carimbo(instante: number, fusoIana = "UTC", { rotulo = true }: { rotulo?: boolean } = {}): string {
   const texto = new Intl.DateTimeFormat("pt-BR", {
     timeZone: fusoIana,
     hourCycle: "h23",
@@ -104,15 +107,15 @@ export function carimbo(instante: number, fusoIana = "UTC"): string {
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date(instante));
-  return fusoIana === "UTC" ? `${texto} UTC` : texto;
+  return rotulo && fusoIana === "UTC" ? `${texto} UTC` : texto;
 }
 
-/** Texto fixo de "rotina ativa" com periodicidade, próxima execução e fuso NOMEADO (E7.1). */
+/** Texto fixo de "rotina ativa" com periodicidade, próxima execução e fuso NOMEADO uma vez, no resumo (E7.1, NOD-378). */
 export function textoRotinaAtiva(rotina: Pick<Rotina, "cron" | "fusoIana" | "proximaExecucao">, agora: number): string {
   return redigir("rotina-proxima-execucao", agora, {
     resumo: resumoCron(rotina.cron, rotina.fusoIana),
-    proxima: carimbo(rotina.proximaExecucao, rotina.fusoIana),
-    fuso: rotina.fusoIana,
+    // NOD-378: o fuso já está nomeado no resumo; o rótulo " UTC" do carimbo o repetiria.
+    proxima: carimbo(rotina.proximaExecucao, rotina.fusoIana, { rotulo: false }),
   });
 }
 

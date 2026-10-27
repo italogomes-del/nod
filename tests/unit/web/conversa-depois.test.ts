@@ -66,7 +66,7 @@ describe("2. a parte ao vivo é a Ada falando", () => {
     const html = blocos[0]!.html;
     expect(html).toMatch(/^<article class="message bot fala-viva ao-vivo com-texto" data-turno="t1" data-morfar><nod-mascote [^>]*data-parte="mascote"/);
     expect(html).toContain('state="orbit"');
-    expect(html).toContain('<div class="msg-autor" data-parte="nome"><b>Ada</b></div>');
+    expect(html).toContain('<div class="msg-autor" data-parte="nome"><b title="Ada">Ada</b></div>');
     expect(html).toContain('<span class="fala-viva-estado">Usando GitHub</span>');
     expect(html).toContain(`data-desde="${AGORA - 60_000}"`);
     // Sem o nome da IA, sem "digitando", sem cursor, sem a linha antiga e sem o ponto que pulsa.
@@ -141,7 +141,7 @@ describe("2. a parte ao vivo é a Ada falando", () => {
     const html = blocosAoVivo(c, e)[0]!.html;
     expect(html).toContain('state="idle"');
     expect(html).toContain('expression="attentif"');
-    expect(html).toContain('<div class="msg-autor" data-parte="nome"><b>Ada</b></div><div class="fala-viva-linha autor" data-parte="viva" data-estado-fala="pensando"><span class="fala-viva-estado">Pensando</span>');
+    expect(html).toContain('<div class="msg-autor" data-parte="nome"><b title="Ada">Ada</b></div><div class="fala-viva-linha autor" data-parte="viva" data-estado-fala="pensando"><span class="fala-viva-estado">Pensando</span>');
     expect(html).not.toContain("claude");
   });
 
@@ -169,9 +169,9 @@ describe("2. a parte ao vivo é a Ada falando", () => {
     const { e: base, c } = cenario([msg("m1", "pessoa", 1)]);
     const e: Estado = { ...base, frota: { agentes: [{ id: "a", nome: "Ada", conversaId: C, cor: "blue", forma: "square" }, { id: "g", nome: "Gil", conversaId: "c2", cor: "teal", forma: "shape-hex" }] } as never, turnosVivos: { t1: { turnoId: "t1", conversaId: C, estado: "rodando", executor: null, machineId: null, desde: AGORA, agenteId: "g" } } };
     const html = blocosAoVivo(c, e)[0]!.html;
-    expect(html).toContain("<b>Gil</b>");
+    expect(html).toContain('<b title="Gil">Gil</b>');
     expect(html).toContain('aria-label="Gil · pensando"');
-    expect(html).not.toContain("<b>Ada</b>");
+    expect(html).not.toContain(">Ada</b>");
   });
 
   it("QA do #508: no fim do turno a fala fica, parada, com a mesma chave, até a releitura trazer a fala gravada", () => {
@@ -270,8 +270,8 @@ describe("2. a parte ao vivo é a Ada falando", () => {
     const comVivo: Estado = { ...base, frota, turnosVivos: { t1: { turnoId: "t1", conversaId: C, estado: "rodando", executor: null, machineId: null, desde: AGORA, agenteId: "g" } }, atividades: { [C]: { t1: comTexto(ATIVIDADE_VAZIA, "Feito.") } } };
     const fim = reduzir(comVivo, { tipo: "frame", frame: { tipo: "turno.encerrado", dados: { turnoId: "t1", conversaId: C } } as never, agora: AGORA });
     const html = blocosAoVivo(fim.conversas[C]!, fim)[0]!.html;
-    expect(html).toContain("<b>Gil</b>");
-    expect(html).not.toContain("<b>Ada</b>");
+    expect(html).toContain('<b title="Gil">Gil</b>');
+    expect(html).not.toContain(">Ada</b>");
   });
 
   it("QA 2 do #508: a ferramenta que chega depois do texto não esvazia o balão; a parada leva as duas partes", () => {
@@ -456,7 +456,7 @@ describe("revisão de 2026-10-03: o card da lista, o artefato e os recibos", () 
     const { e } = cenario([]);
     const html = renderMensagem(msg("m1", "agente", 1, { kind: "artefato", payload: { kind: "artefato", artefatoId: "art", versao: 1, titulo: "Painel" } as never }), e);
     expect(html).toContain('class="message bot com-artefato"');
-    expect(html).toContain("<b>Ada</b>");
+    expect(html).toContain('<b title="Ada">Ada</b>');
     expect(html).toContain('data-artefato="art"');
   });
 

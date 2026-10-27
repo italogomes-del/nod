@@ -79,6 +79,8 @@
   .timeline-wrap { padding: 14px max(12px, env(safe-area-inset-right)) 16px max(12px, env(safe-area-inset-left)); overflow-x: hidden;
     overscroll-behavior: contain; overflow-wrap: anywhere; }
   .timeline { max-width: 100%; }
+  /* NOD-378: o piso da etiqueta do cabeçalho (interface.css), para "da rotina …" não sumir quando o nome é longo. */
+  .msg-autor .etiqueta-origem:not(.curta) { min-width: 8em; }
   .message { gap: 8px; }
   .message > .icon { width: 28px; height: 28px; min-width: 28px; }
   .bubble-wrap { max-width: calc(100% - 36px); min-width: 0; }

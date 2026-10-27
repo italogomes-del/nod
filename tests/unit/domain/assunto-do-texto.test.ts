@@ -36,6 +36,11 @@ const FICAM_NO_CHAT: readonly [string, Assunto][] = [
   [mensagemDeNascimento({ nome: "Ada", quem: "Nina", pessoa: "Marlon", agora: Date.UTC(2026, 9, 15), descricao: "Revisa PRs." }), "agente.criado"],
   [textoRotinaAtiva(rotina, 0), "rotina.evento"],
   [`Rotina atualizada. ${textoRotinaAtiva(rotina, 0)}`, "rotina.evento"],
+  // NOD-378: a rotina em UTC e as linhas gravadas antes da correção, com o fuso repetido no fim, seguem no chat.
+  [textoRotinaAtiva({ ...rotina, fusoIana: "UTC" }, 0), "rotina.evento"],
+  ["Rotina ativa: todo dia às 09:00 (America/Sao_Paulo) · próxima execução: 19/10/2026, 09:00 (America/Sao_Paulo).", "rotina.evento"],
+  ["Rotina ativa: todo dia às 12:00 (UTC) · próxima execução: 19/10/2026, 12:00 UTC (UTC).", "rotina.evento"],
+  ["Rotina atualizada. Rotina ativa: todo dia às 09:00 (America/Sao_Paulo) · próxima execução: 19/10/2026, 09:00 (America/Sao_Paulo).", "rotina.evento"],
   ["Rotina excluída: todo dia às 09:00. Nada mais será disparado por ela.", "rotina.evento"],
   [textoPausada({ cortados: 0, rodando: false }), "rotina.evento"],
   [textoPausada({ cortados: 2, rodando: true }), "rotina.evento"],
