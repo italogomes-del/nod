@@ -204,13 +204,38 @@ export async function mensagemExecutorIndisponivel(
  * web. revisto em 2026-10-18 (chat limpo, PR 2): na conversa própria elas não contam mais no `limite` (vêm como `anexo`,
  * desde o corte), e uma task muito falante não empurra as falas da conversa para fora da janela.
  */
-export const lerConversa: CasoDeUso<{ conversaId: string; limite?: number }, ConversaDto> = async (deps, input) => {
+/**
+ * NOD-380 (critério 4): `?ate=<mensagem>` faz a janela crescer até incluir a mensagem achada na busca, mesmo antiga. Conta
+ * todas as mensagens desde ela (a janela da conversa própria conta só itens de chat, que são no máximo isso) mais uma folga,
+ * até o teto: uma conversa de semanas não vira um dump. definido em 2026-10-28: 200 é a janela de sempre (listarComTurno).
+ */
+export const JANELA_PADRAO = 200;
+export const TETO_JANELA_ATE = 1000;
+const FOLGA_JANELA_ATE = 20;
+
+export function janelaAte(desde: number | null, limite = JANELA_PADRAO): number {
+  if (desde === null) return limite;
+  return Math.min(TETO_JANELA_ATE, Math.max(limite, desde + FOLGA_JANELA_ATE));
+}
+
+/** O teto dos anexos com `?ate=`: o da janela crescida quando ela cresceu; senão, nenhum (fica o de sempre, 300). */
+export function tetoAnexosAte(desde: number | null, limite = JANELA_PADRAO): number | undefined {
+  return desde !== null && janelaAte(desde, limite) > limite ? TETO_JANELA_ATE : undefined;
+}
+
+export const lerConversa: CasoDeUso<{ conversaId: string; limite?: number; ate?: string }, ConversaDto> = async (deps, input) => {
   const conversa = await deps.repos.conversas.buscar(input.conversaId);
   if (!conversa) throw new ErroDeDominio("nao_encontrado");
+  const desde = input.ate ? await deps.repos.mensagens.contarDesde(conversa.id, input.ate, TETO_JANELA_ATE + 1) : null;
+  const limite = input.ate ? janelaAte(desde, input.limite) : input.limite;
+  // Revisão 5 do PR #551: os anexos só sobem ao teto quando a fala achada está mesmo fora da janela de sempre; um `ate` de
+  // outra conversa, invisível ou já nas 200 recentes (a web o repete a cada releitura) não pesa a leitura.
+  const tetoAnexos = tetoAnexosAte(desde, input.limite);
   const [lidas, turnosPendentes, vivos, propostas] = await Promise.all([
     // Chat limpo (ADR-114, PR 2): na conversa própria a janela conta só os itens de chat (os avisos que saem moram na
     // Atividade do bot), traz os `anexo` desde o corte e cada mensagem leva o destino resolvido no servidor. Na sala, nada muda.
-    deps.repos.mensagens.listarComTurno(conversa.id, input.limite, { comDestino: conversa.tipo === "propria" }),
+    // NOD-380: com `ate` fora da janela de sempre, os anexos têm o mesmo teto da janela; com o teto de sempre (300), o piso deles cortava a fala achada.
+    deps.repos.mensagens.listarComTurno(conversa.id, limite, { comDestino: conversa.tipo === "propria", ...(tetoAnexos ? { tetoAnexos } : {}) }),
     deps.repos.turnos.pendentesRenderizaveis(conversa.id),
     deps.repos.turnos.vivosDaConversa(conversa.id),
     deps.repos.propostas.pendentesDaConversa(conversa.id),

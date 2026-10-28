@@ -1,4 +1,5 @@
 import type { RecusasMidia } from "../contracts/anexo.ts";
+import { FOLGA_TRECHO, JANELA_TRECHO } from "../contracts/busca.ts";
 import type { Autoria } from "../contracts/evento.ts";
 import type { Assunto, Destino } from "../contracts/destino-no-chat.ts";
 import type { Confianca, KindMensagem, Mensagem, PayloadMensagem } from "../contracts/mensagem.ts";
@@ -32,6 +33,23 @@ export interface LinhaMensagem {
   criado_em: Date;
   /** 0091 (chat limpo): o que a mensagem é; null = fala ou linha sem backfill. Fica no servidor: a web recebe o destino. */
   assunto: string | null;
+}
+
+/** NOD-380: uma linha da busca de mensagens (`buscarTexto`), com o instante em texto de µs para o cursor. */
+export interface LinhaAchada {
+  id: string;
+  conversa_id: string;
+  conversa_tipo: "propria" | "sala";
+  agente_id: string | null;
+  sala_id: string | null;
+  autor_tipo: Autoria["autor_tipo"];
+  autor_id: string;
+  /** Só a janela de até JANELA_TRECHO caracteres em volta do acerto, com os espaços juntados. */
+  texto: string;
+  /** Se a janela deixou texto de fora antes ou depois (a web mostra "…"). */
+  cortado_inicio: boolean;
+  cortado_fim: boolean;
+  criado_em_txt: string;
 }
 
 export const COLUNAS_MENSAGEM =
@@ -198,7 +216,7 @@ const falaDeTrabalho = (conn: Conn) => conn`(m.assunto is null and m.kind = 'tex
  * 2026-10-18 (EXPLAIN ANALYZE na conversa sintética do Eng 1, 6.300 linhas), com o `in` o Postgres refazia a passada dos
  * anexos para cada linha da conversa (6.102 voltas, 5,5 milhões de buffers, 20 s).
  */
-function recorteDaJanela(conn: Conn, tenantId: string, conversaId: string, limite: number): ReturnType<Conn> {
+function recorteDaJanela(conn: Conn, tenantId: string, conversaId: string, limite: number, tetoAnexos = TETO_ANEXOS_DA_JANELA): ReturnType<Conn> {
   const daConversa = conn`m.tenant_id = ${tenantId} and m.conversa_id = ${conversaId}`;
   const comTurno = conn`left join turnos t on t.tenant_id = m.tenant_id and t.id = m.turno_id`;
   const naoContam = [...ASSUNTOS_ANEXO, ...ASSUNTOS_ATIVIDADE];
@@ -213,9 +231,9 @@ function recorteDaJanela(conn: Conn, tenantId: string, conversaId: string, limit
       select m.id, m.criado_em from mensagens m ${comTurno}
       where ${daConversa} and (m.assunto = any(${[...ASSUNTOS_ANEXO]}::text[]) or ${falaDeTrabalho(conn)})
         and m.criado_em >= coalesce((select em from corte), '-infinity'::timestamptz)
-      order by m.criado_em desc, m.id desc limit ${TETO_ANEXOS_DA_JANELA}
+      order by m.criado_em desc, m.id desc limit ${tetoAnexos}
     ), piso as (
-      select case when count(*) >= ${TETO_ANEXOS_DA_JANELA} then min(criado_em) end as em from anexos
+      select case when count(*) >= ${tetoAnexos} then min(criado_em) end as em from anexos
     )
     select ${conn.unsafe(COLUNAS_MENSAGEM.split(", ").map((c) => `m0.${c}`).join(", "))}, ${colunaPrimeira(conn, "m0")}
     from (select id from chat where criado_em >= coalesce((select em from piso), '-infinity'::timestamptz) union all select id from anexos) j
@@ -292,15 +310,69 @@ export function mensagensRepo(conn: Conn, escopo: Escopo) {
      *
      * A sala não muda: as `limite` mais recentes, sem destino (lá a conversa entre bots é o conteúdo).
      */
-    async listarComTurno(conversaId: string, limite = 200, opcoes: { comDestino?: boolean } = {}): Promise<Mensagem[]> {
+    async listarComTurno(conversaId: string, limite = 200, opcoes: { comDestino?: boolean; tetoAnexos?: number } = {}): Promise<Mensagem[]> {
       if (!opcoes.comDestino) {
         const linhas = await selectComTurno(conn, escopo.tenantId, conn`
           select ${conn.unsafe(COLUNAS_MENSAGEM)} from mensagens where tenant_id = ${escopo.tenantId} and conversa_id = ${conversaId}
           order by criado_em desc, id desc limit ${limite}`);
         return linhas.map(paraMensagemComTurno);
       }
-      const linhas = await selectComTurno(conn, escopo.tenantId, recorteDaJanela(conn, escopo.tenantId, conversaId, limite));
+      const linhas = await selectComTurno(conn, escopo.tenantId, recorteDaJanela(conn, escopo.tenantId, conversaId, limite, opcoes.tetoAnexos));
       return linhas.map((l) => ({ ...paraMensagemComTurno(l), destino: destinoDaLinha(l) }));
+    },
+
+    /**
+     * NOD-380: as falas de texto inteiras que contêm `termo` (cru: o escape do LIKE é feito no SQL DEPOIS de normalizar, porque o
+     * unaccent transforma `％`, `＿` e `＼` de largura total em `%`, `_` e `\`; escapado antes, viravam curinga), ignorando acento e
+     * caixa (`nod_sem_acento`, 0116), da mais nova à mais antiga, depois de `antes`. Quem decide o que a pessoa lê é a RLS
+     * de `mensagens` e de `conversas` (dona, 'equipe', perna da sala): esta consulta não abre nem fecha nada além disso.
+     * Os espaços do texto são juntados como os do termo (termoDaBusca): "oi tudo" acha "oi\ntudo". A conversa de um bot
+     * na lixeira não aparece (a sidebar e a fila de Bots também o escondem; a sala segue com o histórico dela).
+     * Na conversa própria só o que o chat mostra (o mesmo recorte da janela: sem anexo, atividade nem fala de trabalho);
+     * na sala, tudo, como a janela da sala. Sem índice de texto (a RLS com FORCE o impede, ADR-008): a consulta varre as
+     * mensagens do tenant, e o `statement_timeout` local de 4 s é o teto.
+     */
+    async buscarTexto(termo: string, antes: { criadoEm: string; id: string } | null, limite: number, sinal?: AbortSignal): Promise<{ linhas: LinhaAchada[]; temMais: boolean }> {
+      await conn`set local statement_timeout = '4s'`;
+      // Revisões 7 e 8: quem já desconectou (a pessoa digitou outra letra) não manda a consulta. A que já foi segue até o fim
+      // (no máximo 4 s): cancelar dentro da transação pelo driver prendia a conexão (provado no teste da revisão 8).
+      sinal?.throwIfAborted();
+      const naoContam = [...ASSUNTOS_ANEXO, ...ASSUNTOS_ATIVIDADE];
+      const consulta = conn<LinhaAchada[]>`
+        select m.id, m.conversa_id, c.tipo as conversa_tipo, c.agente_id, c.sala_id, m.autor_tipo, m.autor_id,
+          substr(j.junto, j.de, ${JANELA_TRECHO}) as texto, j.de > 1 as cortado_inicio, j.de + ${JANELA_TRECHO} <= length(j.junto) as cortado_fim,
+          to_char(m.criado_em at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as criado_em_txt
+        from mensagens m
+        join conversas c on c.tenant_id = m.tenant_id and c.id = m.conversa_id
+        left join agentes a on a.tenant_id = c.tenant_id and a.id = c.agente_id
+        left join turnos t on t.tenant_id = m.tenant_id and t.id = m.turno_id
+        -- Revisão de segurança do PR #551: só a janela em volta do acerto sai do banco (o trecho no Node era linear no texto
+        -- inteiro, até 1 MB por fala). A posição vem do texto normalizado; o unaccent quase não muda o tamanho, e a folga cobre.
+        cross join lateral (select regexp_replace(m.texto, '\\s+', ' ', 'g') as junto) jj
+        cross join lateral (select greatest(1, strpos(nod_sem_acento(jj.junto), nod_sem_acento(${termo})) - ${FOLGA_TRECHO}) as de, jj.junto) j
+        where m.tenant_id = ${escopo.tenantId} and m.kind = 'texto' and not m.parcial
+          and (c.tipo = 'sala' or a.excluido_em is null)
+          and regexp_replace(nod_sem_acento(m.texto), '\\s+', ' ', 'g') like '%' || replace(replace(replace(nod_sem_acento(${termo}), '\\', '\\\\'), '%', '\\%'), '_', '\\_') || '%' escape '\\'
+          and (c.tipo = 'sala' or ((m.assunto is null or m.assunto <> all(${naoContam}::text[])) and not ${falaDeTrabalho(conn)}))
+          ${antes ? conn`and (m.criado_em, m.id) < (${antes.criadoEm}::text::timestamptz, ${antes.id}::uuid)` : conn``}
+        order by m.criado_em desc, m.id desc
+        limit ${limite + 1}`;
+      const linhas = await consulta;
+      return { linhas: linhas.slice(0, limite), temMais: linhas.length > limite };
+    },
+
+    /**
+     * NOD-380 (critério 4): quantas mensagens a conversa tem da `mensagemId` (inclusive) para cá, para a janela crescer até
+     * ela. null quando a mensagem não é desta conversa ou a pessoa não a lê (a RLS esconde a linha).
+     */
+    async contarDesde(conversaId: string, mensagemId: string, teto = Number.MAX_SAFE_INTEGER): Promise<number | null> {
+      // Revisão 7: conta no máximo `teto` (passou dele, a janela não cresce até lá de qualquer jeito).
+      const [l] = await conn<{ n: number | null }[]>`
+        select (select count(*)::int from (select 1 from mensagens m
+                where m.tenant_id = a.tenant_id and m.conversa_id = a.conversa_id and (m.criado_em, m.id) >= (a.criado_em, a.id)
+                limit ${Math.min(teto, 2_147_483_647)}) x) as n
+        from mensagens a where a.tenant_id = ${escopo.tenantId} and a.id = ${mensagemId} and a.conversa_id = ${conversaId}`;
+      return l?.n ?? null;
     },
 
     /**

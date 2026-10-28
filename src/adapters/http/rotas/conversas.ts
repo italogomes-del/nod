@@ -32,7 +32,10 @@ export function criarRotasConversas(d: DepsRotas): Rota[] {
       metodo: "GET",
       padrao: new RegExp(`^/conversas/${ID}/mensagens$`),
       async handler(ctx) {
-        ctx.json(200, await executar(ctx.escopo, lerConversa, { conversaId: ctx.params.id ?? "" }));
+        // NOD-380: `?ate=<mensagem>` (a busca do celular) faz a janela chegar até ela; id fora de uuid é entrada inválida.
+        const ate = new URL(ctx.req.url ?? "/", "http://x").searchParams.get("ate");
+        if (ate !== null && !UUID.test(ate)) throw new ErroDeDominio("entrada_invalida", { cause: "conversa: ate" });
+        ctx.json(200, await executar(ctx.escopo, lerConversa, { conversaId: ctx.params.id ?? "", ...(ate ? { ate } : {}) }));
       },
     },
     {

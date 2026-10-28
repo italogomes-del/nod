@@ -434,3 +434,17 @@
   .fala-pendente .envio-erro .bt.envio-bt { min-height: 44px; font-size: 13px; border: 0; background: none; color: var(--ink); text-decoration: underline; }
 }
 @keyframes esqueleto-pulsa { 50% { opacity: .55; } }
+
+/* NOD-380 (protótipo v3): no celular o balão da pessoa tem a mesma cor do balão do bot. Aqui, e não na busca-celular.css,
+   porque é casca do celular (ADR-094: o mobile.css é a última folha e quem decide o celular). */
+@media (hover: none) and (pointer: coarse) and (max-width: 600px), (hover: none) and (pointer: coarse) and (max-height: 500px) {
+  .message.you .bubble { background: var(--surface-raised); color: var(--ink); }
+  .message.you .bubble a { color: inherit; }
+  .message.you .bubble .chip-comando { background: color-mix(in srgb, var(--ink) 10%, transparent); color: var(--ink); }
+  /* Na conversa com o topo em pílula (NOD-381), a lupa é o par do ‹: o mesmo círculo de vidro de 44, à direita. */
+  .cabecalho.cabecalho-pilula .buscar-celular { position: absolute; right: max(12px, env(safe-area-inset-right)); top: calc(env(safe-area-inset-top) + 4px);
+    margin: 0; border: 1px solid var(--line); border-radius: 50%; color: var(--ink);
+    background: color-mix(in srgb, var(--surface) 82%, transparent); -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px); box-shadow: var(--shadow-pop); }
+  /* A não enviada (NOD-381) segue a mesma cor, só a 60%: sem isto ela voltava ao --action. */
+  .fala-pendente[data-envio="falhou"] .message.you .bubble { background: var(--surface-raised); color: var(--ink); }
+}

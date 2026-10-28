@@ -76,7 +76,7 @@ import { criarLiveEvents, type LiveEvents } from "./lib/live-events.ts";
 import { ehCelular, enterEnvia } from "./lib/celular.ts";
 import { criarCelular } from "./lib/gaveta-bots.ts";
 import "./pwa.ts";
-import { botao, esc, iconeAgente } from "./lib/render.ts";
+import { avatar, botao, esc, iconeAgente } from "./lib/render.ts";
 import { COPIADO_MS, mostrarCopia, ROTULO_COPIADO, type RelogioDoCopiar } from "./lib/copiar.ts";
 import { avisoDeEstado } from "./lib/aviso-estado.ts";
 import { aplicarTema, lerTema, type EscolhaTema } from "./lib/tema.ts";
@@ -143,6 +143,9 @@ import { juntarAoCampo, textoDaFalha } from "./telas/ditado.ts";
 import { criarTelaOnboarding, guardarFocoDaCamada } from "./telas/onboarding-controle.ts";
 import { movimentoReduzido } from "./lib/movimento.ts";
 import { alvoDoQueEspera, levarAoAlvo, passoDoAtalho, type AlvoDoAtalho } from "./lib/levar-ao-alvo.ts";
+import { criarBuscaCelular, limparEntradaDaBusca } from "./telas/busca-celular.ts";
+import { alvoDepoisDeFalar, alvoNoFimDaConversa, apagarTodosOsRecentes, appInerte, buscarSemOcupado, chaveDosRecentes, dataCurta, ESPERA_DESENHO_MS, vizinhaDesenhada } from "./lib/busca-celular.ts";
+import type { MensagemAchada } from "../src/contracts/busca.ts";
 import { gavetaPrendeFoco, irmaosAteARaiz, seletoresDaOrigem, voltaDoTab } from "./lib/foco-gaveta.ts";
 import type { Ligacao } from "../src/contracts/ligacao.ts";
 import type { MotivoAvaliacaoLigacao } from "./lib/api.ts";
@@ -273,6 +276,12 @@ const celular = criarCelular();
 let buscaAberta = false;
 const termoBusca = (): string => (document.getElementById("busca-bots") as HTMLInputElement | null)?.value ?? "";
 function abrirBusca(): void {
+  // NOD-380: no celular a busca é a tela cheia (bots, salas e mensagens); no computador continua o filtro da barra.
+  if (celular.ativo()) {
+    celular.fecharBots();
+    buscaCelular.abrir();
+    return;
+  }
   celular.abrirBots();
   buscaAberta = true;
   render();
@@ -1107,10 +1116,14 @@ async function buscar(q: Invalidacao): Promise<Acao | null> {
   if (q.startsWith("conversa:")) {
     // Modo dev (0036): a faixa de cada resposta acompanha a conversa — o turno que acabou de assentar já tem Raio-X.
     void carregarRaioX(q.slice(9));
-    return { tipo: "hidratar-conversa", conversa: await api.conversa(q.slice(9)), agora };
+    const ate = ateDaBusca(q.slice(9));
+    return { tipo: "hidratar-conversa", conversa: notarAlvoDaBusca(q.slice(9), ate, await api.conversa(q.slice(9), ate)), agora };
   }
   // QA do PR #302 (NOD-216): a conversa do bot que o dono diz trabalhando, lida fora da tela para a barra animar.
-  if (q.startsWith("vivos:")) return { tipo: "hidratar-conversa", conversa: await api.conversa(q.slice(6)), agora };
+  if (q.startsWith("vivos:")) {
+    const ate = ateDaBusca(q.slice(6));
+    return { tipo: "hidratar-conversa", conversa: notarAlvoDaBusca(q.slice(6), ate, await api.conversa(q.slice(6), ate)), agora };
+  }
   if (q.startsWith("memoria:")) return { tipo: "hidratar-memorias", agenteId: q.slice(8), memorias: (await api.memorias(q.slice(8))).memorias };
   if (q.startsWith("concessoes:")) return { tipo: "hidratar-concessoes", agenteId: q.slice(11), ...(await api.concessoes(q.slice(11))) };
   if (q.startsWith("execucoes:")) return { tipo: "hidratar-execucoes", rotinaId: q.slice(10), execucoes: (await api.execucoes(q.slice(10))).execucoes };
@@ -1397,6 +1410,11 @@ function renderSidebar(estado: Estado): string {
 
 const MENU = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>';
 
+/** NOD-380: a lupa do topo do celular abre a busca em tela cheia (até a barra da NOD-379 chegar). No computador o CSS a esconde. */
+function botaoBuscarCelular(): string {
+  return `<button type="button" class="buscar-celular" data-act="abrir-busca" aria-label="Buscar bots, salas e mensagens">${LUPA}</button>`;
+}
+
 /** O ☰ que abre a gaveta de bots no celular (ADR-094). No computador o CSS o esconde. */
 const VOLTAR = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 5-7 7 7 7"/></svg>';
 
@@ -1494,7 +1512,7 @@ function renderPrincipal(): void {
   definirTelaDoBot(donoDaTela ? api : null, donoDaTela && t.tipo === "conversa" ? t.agenteId : null);
   // ADR-094: um cabeçalho só. No celular o ☰ da gaveta de bots entra no próprio cabeçalho da tela; tela sem cabeçalho
   // ganha uma faixa só com ele (`so-menu`, que no computador não aparece).
-  regiao("cabecalho", botaoAbrirBots(t.tipo === "conversa") + cabecalho);
+  regiao("cabecalho", botaoAbrirBots(t.tipo === "conversa") + cabecalho + botaoBuscarCelular());
   document.getElementById("cabecalho")?.classList.toggle("so-menu", cabecalho === "");
   document.getElementById("cabecalho")?.classList.toggle("cabecalho-task", t.tipo === "trabalho");
   // Plano "tela limpa" (2026-10-16, T1): na conversa própria o cabeçalho é a pílula flutuante sobre o chat.
@@ -2042,6 +2060,8 @@ async function abrirDoMenuConta(qual: string): Promise<void> {
   await contaApi.sair().catch(() => undefined);
   // Quem sai cai na tela de entrada, não num espaço provisório novo; e este navegador esquece o verificador.
   try { window.localStorage.removeItem(CHAVE_VERIFICADOR); } catch { /* sem storage */ }
+  // NOD-380: o que se buscou neste navegador não fica para quem entrar depois.
+  try { apagarTodosOsRecentes(window.localStorage); } catch { /* sem storage */ }
   window.location.replace("/?saiu=1");
 }
 
@@ -2123,7 +2143,8 @@ function render(): void {
   regiao("onboarding", camadaOnboarding);
   devolverFoco?.();
   document.getElementById("onboarding")?.toggleAttribute("hidden", camadaOnboarding === "");
-  document.querySelector(".app")?.toggleAttribute("inert", !!estado.espaco || telaLigacao.cheia() || telaOnboarding.cobre());
+  // A busca do celular em tela cheia também (NOD-380): sem isto, o próximo render devolvia a .app ao Tab com o diálogo aberto.
+  document.querySelector(".app")?.toggleAttribute("inert", appInerte({ outraCamada: appInerteSemBusca(), buscaAberta: !!document.querySelector(".busca-celular:not(.saindo)") }));
   document.getElementById("espaco")?.toggleAttribute("inert", telaLigacao.cheia());
   telaLigacao.render();
   const retomar = ligacaoParaRetomar;
@@ -2574,6 +2595,8 @@ function navegar(tela: Tela): void {
 
 /** O que muda fora do reducer quando a tela troca: por `navegar` ou, na NOD-370, quando o bot da conversa saiu da frota. */
 function aoTrocarDeTela(antes: Tela, tela: Tela): void {
+  // NOD-380: a janela que cresce até a fala achada vale enquanto a pessoa está naquela conversa.
+  if (alvoDaBusca && ((tela.tipo !== "conversa" && tela.tipo !== "sala") || tela.conversaId !== alvoDaBusca.conversaId)) alvoDaBusca = null;
   // A gaveta aberta só para um nível (ou a sobreposta, na janela estreita) fecha quando a conversa muda.
   if (tela.tipo !== "conversa" || antes.tipo !== "conversa" || antes.conversaId !== tela.conversaId) {
     painelAbertoNaHora = false;
@@ -2925,6 +2948,8 @@ async function enviarComposer(): Promise<void> {
     try {
       r = await enviarPeloComposer(a, alvo, destino, enviado, ids, idEnvio);
       enviou = true;
+      // NOD-380: depois de falar, a conversa volta à janela comum; o alvo da busca não segura mais o `?ate=`.
+      alvoDaBusca = alvoDepoisDeFalar(alvoDaBusca, alvo.conversaId);
     } catch (e) {
       if (!pendente || (e instanceof ErroApi && e.status === 401)) throw e;
       // Revisão de engenharia (27/10): o porquê (limite do plano, conversa encerrada, sem internet…) vai na própria fala,
@@ -2976,6 +3001,8 @@ async function reenviarPendente(conversaId: string, idEnvio: string): Promise<vo
   try {
     const r = await (p.respondeA ? a.enviar(conversaId, p.texto, ids, chave, p.respondeA) : a.enviar(conversaId, p.texto, ids, chave));
     enviou = true;
+    // NOD-380: quem fala na conversa voltou para o fim; a janela deixa de crescer até a fala achada na busca.
+    alvoDaBusca = alvoDepoisDeFalar(alvoDaBusca, conversaId);
     // `idsDaResposta` (revisão de engenharia, 27/10): a resposta sem `ids` (servidor de antes, no deploy) não pode virar
     // "falhou" depois de enviada — a pendente sai e a releitura traz a gravada, como no envio pelo campo.
     const gravados = idsDaResposta(r);
@@ -3241,6 +3268,130 @@ function verPerguntaNaConversa(conversaId: string, agenteId: string, decisaoId: 
   };
   window.setTimeout(tentar, 0);
 }
+
+/** O que deixa a .app inerte fora a busca do celular: Seu espaço, a ligação em tela cheia e o onboarding por cima. */
+function appInerteSemBusca(): boolean {
+  return !!estado.espaco || telaLigacao.cheia() || telaOnboarding.cobre();
+}
+
+/**
+ * NOD-380: a fala achada na busca do celular. Enquanto a pessoa lê a conversa dela, cada leitura da conversa pede `?ate=`
+ * (a janela cresce até a fala, mesmo fora das 200 recentes, e não encolhe debaixo de quem está lendo quando chega fala
+ * nova) e, quando a timeline a desenha, leva até ela com o destaque de 2 s. Sair da conversa ou mandar uma fala nela (a
+ * pessoa voltou para o fim) esquece o alvo, e a janela volta à normal.
+ */
+let alvoDaBusca: { conversaId: string; mensagemId: string; veio?: boolean; veioEm?: number; desenhado?: boolean } | null = null;
+const ateDaBusca = (conversaId: string): string | undefined => (alvoDaBusca?.conversaId === conversaId ? alvoDaBusca.mensagemId : undefined);
+/** A resposta diz se a fala veio na janela (e não o relógio): rede lenta não vira o aviso de "antiga demais". */
+function notarAlvoDaBusca<C extends { mensagens: readonly { id: string }[] }>(conversaId: string, ate: string | undefined, conversa: C): C {
+  // Só a resposta pedida com este `ate` conta: uma leitura sem ele, já em voo antes do toque, não vira "antiga demais".
+  if (ate && alvoDaBusca?.conversaId === conversaId && alvoDaBusca.mensagemId === ate) {
+    alvoDaBusca.veio = conversa.mensagens.some((x) => x.id === ate);
+    if (alvoDaBusca.veio) alvoDaBusca.veioEm ??= Date.now();
+  }
+  return conversa;
+}
+const DESTAQUE_BUSCA_MS = 2000;
+/** Quanto esperar a resposta e o desenho da fala achada (rede lenta com a janela de até 1000). */
+const ESPERA_ALVO_MS = 20_000;
+
+function abrirMensagemAchada(m: MensagemAchada): void {
+  if (!(m.conversaTipo === "sala" && m.salaId) && !m.agenteId) return;
+  // O alvo antes de navegar: a 1ª leitura da conversa, disparada pela navegação, já sai com o `?ate=`.
+  alvoDaBusca = { conversaId: m.conversaId, mensagemId: m.id };
+  if (m.conversaTipo === "sala" && m.salaId) navegar({ tipo: "sala", salaId: m.salaId, conversaId: m.conversaId });
+  else if (m.agenteId) navegar({ tipo: "conversa", conversaId: m.conversaId, agenteId: m.agenteId });
+  // A conversa já lida tinha a janela das recentes: relê com o `ate`.
+  dispatch({ tipo: "invalidar", quais: [`conversa:${m.conversaId}` as Invalidacao] });
+  const id = CSS.escape(m.id);
+  const desiste = Date.now() + ESPERA_ALVO_MS;
+  const tentar = (): void => {
+    const t = estado.tela;
+    if ((t.tipo !== "conversa" && t.tipo !== "sala") || t.conversaId !== m.conversaId) return;
+    const alvo = document.querySelector<HTMLElement>(`#timeline [data-mensagem="${id}"]`);
+    if (!alvo) {
+      const veio = alvoDaBusca?.mensagemId === m.id ? alvoDaBusca.veio : undefined;
+      // A resposta chegou sem a fala (mais de 1000 falas depois dela): avisa em vez de parar calado na conversa.
+      if (veio === false) {
+        dispatch({ tipo: "erro", erro: { codigo: "busca_alvo_fora", mensagem: "Essa mensagem é antiga demais para abrir aqui. A conversa abriu nas mais recentes." } });
+        return;
+      }
+      // Veio, mas a timeline não a desenha (fala do meio de um turno de rotina ou colega, recolhida): leva à vizinha.
+      const veioEm = alvoDaBusca?.mensagemId === m.id ? alvoDaBusca.veioEm : undefined;
+      if (veio === true && veioEm !== undefined && Date.now() - veioEm >= ESPERA_DESENHO_MS) {
+        const timeline = document.querySelector("#timeline");
+        const ids = (estado.conversas[m.conversaId]?.mensagens ?? []).map((x) => x.id);
+        const perto = timeline ? vizinhaDesenhada(ids, m.id, (x) => !!timeline.querySelector(`[data-mensagem="${CSS.escape(x)}"]`)) : null;
+        const el = perto ? timeline?.querySelector<HTMLElement>(`[data-mensagem="${CSS.escape(perto)}"]`) : null;
+        if (el) return destacar(el);
+      }
+      if (Date.now() < desiste) window.setTimeout(tentar, 120);
+      else dispatch({ tipo: "erro", erro: { codigo: "busca_alvo_fora", mensagem: "Não deu para levar até essa mensagem. A conversa abriu nas mais recentes." } });
+      return;
+    }
+    destacar(alvo);
+  };
+  const destacar = (alvo: HTMLElement): void => {
+    if (alvoDaBusca?.mensagemId === m.id) alvoDaBusca.desenhado = true;
+    rolagem.soltar();
+    levarAoAlvo(alvo, { reduzido: movimentoReduzido(), agendar: (fn, ms) => window.setTimeout(fn, ms), realcar: false });
+    alvo.classList.add("achada-na-busca");
+    window.setTimeout(() => alvo.classList.remove("achada-na-busca"), DESTAQUE_BUSCA_MS);
+  };
+  window.setTimeout(tentar, 0);
+}
+
+document.getElementById("timeline")?.addEventListener(
+  "scroll",
+  (ev) => {
+    const c = ev.currentTarget as HTMLElement;
+    if (alvoDaBusca) alvoDaBusca = alvoNoFimDaConversa(alvoDaBusca, { topo: c.scrollTop, altura: c.scrollHeight, janela: c.clientHeight });
+  },
+  { passive: true },
+);
+
+const FORMATO_HORA = new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+const FORMATO_DIA_MES = new Intl.DateTimeFormat("pt-BR", { day: "numeric", month: "short" });
+const FORMATO_DATA = new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" });
+
+limparEntradaDaBusca();
+const buscaCelular = criarBuscaCelular({
+  appInerte: appInerteSemBusca,
+  bots: () =>
+    [...(estado.frota?.agentes ?? [])]
+      .filter((a) => !a.excluidoEm)
+      .sort((a, b) => (b.ultimaMensagem?.em ?? 0) - (a.ultimaMensagem?.em ?? 0))
+      .map((a) => ({ agenteId: a.id, conversaId: a.conversaId, nome: a.nome, titulo: a.titulo, sub: a.ultimaMensagem?.previa ?? a.titulo, mascote: (tamanho) => iconeAgente(a, tamanho) })),
+  salas: () =>
+    estado.salas.map(({ sala, membros }) => {
+      const nomes = membros.filter((x) => !x.removidoEm).map((x) => estado.frota?.agentes.find((a) => a.id === x.agenteId)?.nome).filter((n): n is string => Boolean(n));
+      return { salaId: sala.id, conversaId: sala.conversaId, nome: sala.nome, sub: nomes.join(", "), membros: `${membros.filter((x) => !x.removidoEm).length} bots` };
+    }),
+  rosto: (m) => {
+    const agentes = estado.frota?.agentes ?? [];
+    const sala = m.salaId ? estado.salas.find((s) => s.sala.id === m.salaId)?.sala : undefined;
+    const doBot = m.agenteId ? agentes.find((a) => a.id === m.agenteId) : undefined;
+    const sufixo = sala ? `em ${sala.nome}` : "";
+    if (m.autor.tipo === "agente") {
+      const bot = agentes.find((a) => a.id === m.autor.id);
+      return { titulo: bot?.nome ?? "Bot", sufixo, avatar: bot ? iconeAgente(bot, "md") : avatar({ tipo: "agente", nome: "Bot" }) };
+    }
+    const eu = m.autor.id === estado.sessao?.pessoaId;
+    const nome = eu ? "Você" : "Pessoa";
+    return { titulo: nome, sufixo: sufixo || (doBot ? `com ${doBot.nome}` : ""), avatar: avatar({ tipo: "pessoa", nome }) };
+  },
+  data: (iso) => dataCurta(iso, Date.now(), { hora: (t) => FORMATO_HORA.format(t), diaMes: (t) => FORMATO_DIA_MES.format(t), completa: (t) => FORMATO_DATA.format(t) }),
+  buscar: (termo, cursor, signal) => {
+    const a = api;
+    if (!a) return Promise.reject(new Error("sem sessão"));
+    return buscarSemOcupado((s) => a.buscarMensagens(termo, cursor, s), signal, (ms) => new Promise((ok) => window.setTimeout(ok, ms)));
+  },
+  abrirBot: (agenteId, conversaId) => navegar({ tipo: "conversa", conversaId, agenteId }),
+  abrirSala: (salaId, conversaId) => navegar({ tipo: "sala", salaId, conversaId }),
+  abrirMensagem: abrirMensagemAchada,
+  reduzido: () => movimentoReduzido(),
+  chaveRecentes: () => (estado.sessao ? chaveDosRecentes(estado.sessao.tenantId, estado.sessao.pessoaId) : null),
+});
 
 /**
  * "Esperando você" na linha do dono (definido em 2026-10-12, ADR-099, parte 5): leva à mensagem do bot com a pergunta — a

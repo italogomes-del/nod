@@ -895,6 +895,13 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       },
       // O assunto (0091) não mora na Mensagem em memória: o aviso do PR 6 tem teste de integração.
       ultimaComAssunto: soNoPostgres,
+      // NOD-380: a busca depende do nod_sem_acento e da RLS do Postgres; os testes são de integração.
+      buscarTexto: soNoPostgres,
+      async contarDesde(conversaId, mensagemId) {
+        const todas = doTenant(b.mensagens).filter((m) => m.conversaId === conversaId);
+        const alvo = todas.find((m) => m.id === mensagemId);
+        return alvo ? todas.filter((m) => m.criadoEm >= alvo.criadoEm).length : null;
+      },
       async ultimaDaConversa(conversaId) {
         const todas = doTenant(b.mensagens).filter((m) => m.conversaId === conversaId).sort((x, y) => x.criadoEm - y.criadoEm);
         return todas[todas.length - 1] ?? null;

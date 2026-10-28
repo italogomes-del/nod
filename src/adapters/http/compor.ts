@@ -121,6 +121,8 @@ import { resolve } from "node:path";
 import { rotasConcessoes } from "./rotas/concessoes.ts";
 import { rotasMarketplace } from "./rotas/marketplace.ts";
 import { rotasConectores } from "./rotas/conectores.ts";
+import { criarRotasBusca } from "./rotas/busca.ts";
+import { lerPoolMax } from "../../db/client.ts";
 import { criarRotasConversas } from "./rotas/conversas.ts";
 import { criarRotasRelatos } from "./rotas/relatos.ts";
 import { criarRotasDecisoes } from "./rotas/decisoes.ts";
@@ -1323,6 +1325,7 @@ export function comporApp(o: OpcoesCompor): App {
       ...(compartilhado ? {} : Object.fromEntries(ponte.maquinasConectadas().map((m) => [m.machineId, (Object.entries(m.harnesses ?? {}) as [IdHarness, Inventario | undefined][]).filter(([, i]) => i?.estado === "pronto").map(([h]) => h)]))),
     })),
     ...criarRotasConversas(depsRotas),
+    ...criarRotasBusca(depsRotas, { poolMax: lerPoolMax(env) }),
     ...criarRotasTrabalhos(depsRotas),
     ...criarRotasAtividade(depsRotas),
     ...criarRotasArtefatos(depsRotas),

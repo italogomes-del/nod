@@ -1,5 +1,6 @@
 import type { AtividadeDto, ContagemDaAtividade } from "../../src/contracts/atividade.ts";
 import type { PaginaDaBiblioteca } from "../../src/contracts/biblioteca.ts";
+import type { PaginaDaBusca } from "../../src/contracts/busca.ts";
 import type { AnexoMeta } from "../../src/contracts/anexo.ts";
 import type { ArtefatoDto } from "../../src/contracts/artefato.ts";
 import type { AcaoComputador, ComputadorDto, ResultadoComputador } from "../../src/contracts/computador.ts";
@@ -225,7 +226,11 @@ export function criarApi(escopo: Escopo) {
     gravarOrdemIas: (ordemIas: IdHarness[] | null) => pedir<Preferencias>("PUT", `${base}/preferencias`, { ordemIas }),
     gravarInteligencia: (agenteId: string, pedido: PedidoInteligencia) => pedir<{ agente: Agente }>("PUT", `${base}/agentes/${encodeURIComponent(agenteId)}/inteligencia`, pedido),
     inteligencia: (agenteId: string) => get<{ inteligencia: InteligenciaBot }>(`agentes/${encodeURIComponent(agenteId)}/inteligencia`),
-    conversa: (id: string) => get<ConversaDto>(`conversas/${id}/mensagens`),
+    /** NOD-380: `ate` (o id de uma fala achada na busca) faz a janela crescer até ela, mesmo fora das 200 recentes. */
+    conversa: (id: string, ate?: string) => get<ConversaDto>(`conversas/${id}/mensagens${ate ? `?ate=${encodeURIComponent(ate)}` : ""}`),
+    /** NOD-380: a busca de mensagens do celular; 20 por página, `cursor` vem da página anterior; `signal` cancela o pedido velho. */
+    buscarMensagens: (q: string, cursor: string | null = null, signal?: AbortSignal) =>
+      pedir<PaginaDaBusca>("GET", `${base}/busca/mensagens?q=${encodeURIComponent(q)}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`, undefined, { silencioso: true, ...(signal ? { signal } : {}) }),
     /** NOD-156: `idEnvio` é a chave da fala (nasce no compositor); o reenvio com a mesma chave não duplica. */
     enviar: (conversaId: string, texto: string, anexos: readonly string[] = [], idEnvio?: string, respondeA?: string) =>
       pedirDeNovoSeCair<RespostaMutacao>("POST", `${base}/conversas/${conversaId}/mensagens`, corpoDoEnvio(texto, anexos, idEnvio, respondeA), idEnvio),
