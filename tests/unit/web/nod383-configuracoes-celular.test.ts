@@ -117,9 +117,9 @@ describe("NOD-383: Geral no celular (critérios 1 e 2)", () => {
   });
 
   it("no desktop os atalhos continuam (⌘K, ⌘⇧D, esc)", () => {
-    const h = renderGeral(geral, CONFIG_UI_INICIAL, false);
+    const h = renderGeral(geral, CONFIG_UI_INICIAL, false, "app-mac");
     for (const t of ["<kbd>⌘</kbd><kbd>K</kbd>", "<kbd>⌘</kbd><kbd>⇧</kbd><kbd>D</kbd>", "<kbd>esc</kbd>"]) expect(h).toContain(t);
-    expect(renderGeral(geral, CONFIG_UI_INICIAL)).toBe(h);
+    expect(renderGeral(geral, CONFIG_UI_INICIAL, undefined, "app-mac")).toBe(h);
   });
 });
 

@@ -1,6 +1,7 @@
 import type { Experimentos } from "../../src/contracts/raio-x.ts";
 import type { ConfigUi } from "../estado/reducer.ts";
 import { detalheDoTema } from "../lib/aparelho.ts";
+import { linhasDaFolha, lugarAtual, type LugarTeclado } from "../lib/atalhos.ts";
 import type { EstadoAvisos } from "../lib/avisos.ts";
 import { ehCelular } from "../lib/celular.ts";
 import { grupoConfig, linhaConfig, listaAninhada, type TomStatus } from "../lib/linha-config.ts";
@@ -81,7 +82,8 @@ export function renderAvisos(a: EstadoAvisos, celular = ehCelular()): string {
   });
 }
 
-const kbd = (teclas: readonly string[]) => `<span class="cfg-kbd" aria-hidden="true">${teclas.map((t) => `<kbd>${esc(t)}</kbd>`).join("")}</span>`;
+// NOD-117: uma linha pode ter combinações alternativas ("?" ou ⌘/), separadas por "ou".
+const kbd = (combinacoes: readonly (readonly string[])[]) => `<span class="cfg-kbd" aria-hidden="true">${combinacoes.map((teclas) => teclas.map((t) => `<kbd>${esc(t)}</kbd>`).join("")).join(" ou ")}</span>`;
 
 export type DadosGeral = {
   tema: EscolhaTema;
@@ -91,20 +93,16 @@ export type DadosGeral = {
 };
 
 /** NOD-383: no celular não há teclado de atalhos: a Ajuda fica só com o onboarding, e o Tema fala do aparelho. */
-export function renderGeral(d: DadosGeral, ui: ConfigUi, celular = ehCelular()): string {
+export function renderGeral(d: DadosGeral, ui: ConfigUi, celular = ehCelular(), lugar: LugarTeclado = lugarAtual()): string {
   const tema = grupoConfig("Aparência", [linhaConfig({
     titulo: "Tema",
     detalhe: detalheDoTema(celular),
     controle: { tipo: "seletor", acao: "escolher-tema", rotulo: "Tema", opcoes: ESCOLHAS_TEMA.map((t) => ({ valor: t.id, rotulo: t.nome, selecionado: t.id === d.tema })) },
   })]);
-  const atalho = (titulo: string, teclas: readonly string[], falado: string) => linhaConfig({ titulo, controle: { tipo: "html", html: `${kbd(teclas)}<span class="sr-only">${esc(falado)}</span>` } });
+  // NOD-117: a folha de atalhos é este bloco, com as teclas do lugar onde o nod roda (web/lib/atalhos.ts).
   const ajuda = grupoConfig("Ajuda", [
     linhaConfig({ titulo: "Ver o onboarding de novo", detalhe: "A apresentação do nod, do começo", controle: { tipo: "link", acao: "ver-onboarding" } }),
-    ...(celular ? [] : [
-      atalho("Modo dev", ["⌘", "⇧", "D"], "Command Shift D"),
-      atalho("Buscar agentes", ["⌘", "K"], "Command K"),
-      atalho("Fechar e voltar", ["esc"], "Esc"),
-    ]),
+    ...(celular ? [] : linhasDaFolha(lugar).map((l) => linhaConfig({ titulo: l.titulo, controle: { tipo: "html", html: `${kbd(l.combinacoes)}<span class="sr-only">${esc(l.falado)}</span>` } }))),
   ], { id: "ajuda" });
   const aberto = ui.abertos.includes("avancado");
   const avancado = listaAninhada([

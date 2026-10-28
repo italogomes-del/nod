@@ -159,8 +159,44 @@ describe("Geral (critérios 4 e 5)", () => {
   });
 
   it("o atalho ⌘⇧D aparece em Ajuda e continua global no main.ts", () => {
-    expect(renderGeral(d, CONFIG_UI_INICIAL)).toContain("<kbd>⌘</kbd><kbd>⇧</kbd><kbd>D</kbd>");
+    expect(renderGeral(d, CONFIG_UI_INICIAL, false, "app-mac")).toContain("<kbd>⌘</kbd><kbd>⇧</kbd><kbd>D</kbd>");
     expect(ler("main.ts")).toMatch(/ev\.shiftKey && ev\.key\.toLowerCase\(\) === "d"[^\n]*alternarModoDev/);
+  });
+
+  it("NOD-117: o bloco Ajuda é a folha, com os 7 atalhos nas teclas do lugar e texto para leitor de tela", () => {
+    const ajudaDe = (html: string) => html.slice(html.indexOf('id="ajuda"'), html.indexOf("Avançado"));
+    const titulos = ["Nova conversa (novo bot)", "Ir ao bot 1 a 9 da barra", "Bot anterior e próximo", "Folha de atalhos", "Buscar agentes", "Modo dev", "Fechar e voltar"];
+    const casos: [Parameters<typeof renderGeral>[3], string, string][] = [
+      ["app-mac", "<kbd>⌘</kbd><kbd>N</kbd>", "Command N"],
+      ["navegador-mac", "<kbd>⌃</kbd><kbd>N</kbd>", "Control N"],
+      ["outro", "<kbd>Alt</kbd><kbd>N</kbd>", "Alt N"],
+    ];
+    for (const [lugar, novo, falado] of casos) {
+      const ajuda = ajudaDe(renderGeral(d, CONFIG_UI_INICIAL, false, lugar));
+      for (const t of titulos) expect(ajuda, `${lugar}: ${t}`).toContain(t);
+      expect(ajuda.match(/class="cfg-kbd"/g)).toHaveLength(7);
+      expect(ajuda.match(/class="sr-only"/g)).toHaveLength(7);
+      expect(ajuda).toContain(novo);
+      expect(ajuda).toContain(`<span class="sr-only">${falado}</span>`);
+      expect(ajuda).toContain("<kbd>?</kbd> ou ");
+    }
+    expect(ajudaDe(renderGeral(d, CONFIG_UI_INICIAL, false, "outro"))).toContain("<kbd>Ctrl</kbd><kbd>/</kbd>");
+    // No celular não há atalhos.
+    expect(ajudaDe(renderGeral(d, CONFIG_UI_INICIAL, true, "app-mac"))).not.toContain("cfg-kbd");
+  });
+
+  it("NOD-117: o keydown global chama os atalhos depois de ⌘K e ⌘⇧D, e o + diz o atalho", () => {
+    const main = ler("main.ts");
+    const k = main.indexOf('ev.key.toLowerCase() === "k") { ev.preventDefault(); abrirBusca()');
+    const dev = main.indexOf("void agir(alternarModoDev); return; }");
+    const novos = main.indexOf("const atalho = atalhoDoTeclado(teclaSemRepetir, {");
+    expect(k).toBeGreaterThan(0);
+    expect(dev).toBeGreaterThan(k);
+    expect(novos).toBeGreaterThan(dev);
+    // O contexto real chega ao atalho: Seu espaço, ditado e diálogo.
+    const ctx = main.slice(novos, main.indexOf("});", novos));
+    for (const c of ["SELETOR_CAMPO", "SELETOR_MODAL", "espaco: !!estado.espaco", "ditando: ditado.ativo()", "telaOnboarding.cobre()"]) expect(ctx, c).toContain(c);
+    expect(main).toMatch(/aria-keyshortcuts="\$\{ATALHO_NOVO_BOT\.aria\} Shift\+Enter Shift\+Space" title="Nova conversa \(\$\{ATALHO_NOVO_BOT\.texto\}\)"/);
   });
 
   it("toda ação de Geral e de Conta tem tratador no main.ts", () => {

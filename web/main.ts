@@ -83,6 +83,7 @@ import { criarAvisador } from "./lib/avisador.ts";
 import { criarCanalAvisos } from "./lib/canal-avisos.ts";
 import { criarLiveEvents, type LiveEvents } from "./lib/live-events.ts";
 import { ehCelular, enterEnvia } from "./lib/celular.ts";
+import { alvoDoAtalho, atalhoDoNovoBot, atalhoDoTeclado, lugarAtual, SELETOR_CAMPO, SELETOR_MODAL, type AcaoAtalho } from "./lib/atalhos.ts";
 import { rotuloDoMac } from "./lib/aparelho.ts";
 import { criarCelular } from "./lib/gaveta-bots.ts";
 import { tentarFrotaAgora } from "./lib/tentar-frota.ts";
@@ -175,6 +176,9 @@ import { temDonos } from "./lib/dono.ts";
 import { executarRotinaComConfirmacao } from "./lib/executar-rotina.ts";
 import { criarBuscaNaConversa } from "./telas/busca-na-conversa.ts";
 import { DICA_MS, MARCA_CUTUCAO, MARCA_DICA, SEGURAR_MS, deslocamentoDoPuxar, deveCutucar, cliqueDepoisDoGesto, criarFiltroDeEco, deveMostrarDica, escFechaABusca, fimDoGesto, gravarMarca, lerMarca, tremeu, type GestoAnterior, type Marcas, type ViaDaBusca } from "./lib/descoberta-da-busca.ts";
+// NOD-117: as teclas dos atalhos mudam com o lugar (app do Mac, navegador no Mac, Windows/Linux): web/lib/atalhos.ts.
+const LUGAR_TECLADO = lugarAtual();
+const ATALHO_NOVO_BOT = atalhoDoNovoBot(LUGAR_TECLADO);
 
 /**
  * main.ts: sessão → hidratar → SSE (ADR-016) → laço "dispatch → reidratar o que o reducer invalidou →
@@ -1524,7 +1528,7 @@ function renderSidebar(estado: Estado): string {
     <div class="inicio-barra"><label class="search inicio-busca">${LUPA}<input id="busca-bots" type="search" enterkeyhint="search" placeholder="Buscar" aria-label="Buscar agentes" autocomplete="off" /></label></div>`;
   }
   return `<div class="search-wrap">
-      <div class="sh">${nodDiscreto}<button class="icone-topo" data-act="abrir-busca" aria-label="Buscar agentes" aria-keyshortcuts="Meta+K Control+K" title="Buscar (⌘K)">${LUPA}</button>${naoLidos}${renderIconeTrabalhos(estado)}${renderChamada(estado)}<span class="create-actions"><button class="create-trigger" data-act="navegar" data-tela="novo-bot" data-segurar="segurar-mais" aria-label="Nova conversa (segure para criar um bot direto)" aria-keyshortcuts="Shift+Enter Shift+Space"><span class="segurar-anel" aria-hidden="true"></span>+</button></span></div>
+      <div class="sh">${nodDiscreto}<button class="icone-topo" data-act="abrir-busca" aria-label="Buscar agentes" aria-keyshortcuts="Meta+K Control+K" title="Buscar (⌘K)">${LUPA}</button>${naoLidos}${renderIconeTrabalhos(estado)}${renderChamada(estado)}<span class="create-actions"><button class="create-trigger" data-act="navegar" data-tela="novo-bot" data-segurar="segurar-mais" aria-label="Nova conversa (segure para criar um bot direto)" aria-keyshortcuts="${ATALHO_NOVO_BOT.aria} Shift+Enter Shift+Space" title="Nova conversa (${ATALHO_NOVO_BOT.texto})"><span class="segurar-anel" aria-hidden="true"></span>+</button></span></div>
       <label class="search"${buscando ? "" : " hidden"}><span>⌕</span><input id="busca-bots" placeholder="Buscar agentes…" aria-label="Buscar agentes" autocomplete="off" /><kbd>esc</kbd></label>
     </div>
     ${renderIncidentes(estado)}
@@ -6166,6 +6170,25 @@ document.addEventListener("keydown", (ev) => {
   // a busca no fim da própria fila (lista da barra, citação, "Respondendo").
   if (ev.key === "Escape" && escFechaABusca({ aberta: buscaNaConversa.aberta(), camadaPorCima: camadaSobreABusca(), ditado: ditado.ativo(), emCampo: !!(ev.target as HTMLElement).closest?.("dialog, #detalhes, #faixa-trabalhos, input, textarea, select") })) { ev.preventDefault(); buscaNaConversa.fechar(true); return; }
   if ((ev.metaKey || ev.ctrlKey) && ev.shiftKey && ev.key.toLowerCase() === "d" && estado.sessao) { ev.preventDefault(); void agir(alternarModoDev); return; }
+  // NOD-117: Novo bot, ir ao bot 1–9, anterior/próximo e a folha. Depois de ⌘K e ⌘⇧D, que seguem iguais.
+  // Primeiro sem olhar o DOM (cada letra digitada passa aqui); só a tecla que pode ser atalho lê o contexto.
+  // A repetição (tecla segurada) não age, mas também não vaza: Alt+2 segurado no Chrome do Linux trocaria de aba.
+  const teclaSemRepetir = { code: ev.code, key: ev.key, metaKey: ev.metaKey, ctrlKey: ev.ctrlKey, altKey: ev.altKey, shiftKey: ev.shiftKey, isComposing: ev.isComposing, keyCode: ev.keyCode };
+  if (estado.sessao && atalhoDoTeclado(teclaSemRepetir, { lugar: LUGAR_TECLADO, emCampo: false, dialogo: false, celular: false })) {
+    const alvo = ev.target as HTMLElement;
+    const atalho = atalhoDoTeclado(teclaSemRepetir, {
+      lugar: LUGAR_TECLADO,
+      emCampo: !!alvo.closest?.(SELETOR_CAMPO),
+      dialogo: !!document.querySelector(SELETOR_MODAL) || !!alvo.closest?.(SELETOR_MODAL) || telaLigacao.cheia() || telaOnboarding.cobre(),
+      celular: ehCelular(),
+      espaco: !!estado.espaco,
+      ditando: ditado.ativo(),
+      // Campo da gaveta (memória, missão e voz…): navegar a zeraria com o texto pela metade.
+      editando: !!alvo.closest?.("#detalhes") && !!alvo.closest?.(SELETOR_CAMPO),
+    });
+    // Atalho reconhecido sempre para aqui: ⌘5 com 3 bots não faz nada (critério 2), em vez de cair no navegador.
+    if (atalho) { ev.preventDefault(); if (!ev.repeat) void executarAtalho(atalho); return; }
+  }
   if (ev.key === "Escape" && (ev.target as HTMLElement).id === "busca-bots") { fecharBusca(); return; }
   // ADR-095: Esc com o ditado aberto joga a gravação fora (no campo fica o que já estava escrito).
   if (ev.key === "Escape" && ditado.ativo() && !(ev.target as HTMLElement).closest?.("dialog")) { ev.preventDefault(); ditado.descartar(); return; }
@@ -6841,6 +6864,38 @@ const ACOES_CHANGE: Record<string, (valor: string, el: HTMLSelectElement) => Pro
 
 
 // ---- Seu espaço e o menu da conta (definido em 2026-09-30, canvas "Menu, sidebar e gaveta") -----------------------------
+/** NOD-117: os botões dos bots que contam na barra, na ordem dela (fixados, Meus agentes, seções, equipe). */
+function botaoDoBotNoAtalho(a: { tipo: "ir-ao-bot"; n: number } | { tipo: "vizinho"; passo: 1 | -1 }): HTMLElement | null {
+  const buscando = document.getElementById("sidebar")?.hasAttribute("data-buscando") ?? false;
+  // O Nod discreto do topo (.nod-topo) não entra: a issue conta fixados, Meus agentes, seções e equipe. Com a conversa
+  // dele aberta, nenhum bot é o atual e ⌘⇧] vai ao 1º (⌘⇧[ ao último).
+  const linhas = [...document.querySelectorAll<HTMLElement>("#sidebar .list .fixado, #sidebar .list .bot-row")].flatMap((el) => {
+    const botao = el.querySelector<HTMLElement>(':scope > [data-act="abrir-conversa"]');
+    return botao ? [{ botao, escondida: el.classList.contains("escondida"), oculta: el.hidden, atual: botao.getAttribute("aria-current") === "true" }] : [];
+  });
+  const i = alvoDoAtalho(linhas, a, buscando);
+  return i === null ? null : (linhas[i]?.botao ?? null);
+}
+
+/** Faz o atalho; false quando não há alvo (aí não faz nada). */
+function executarAtalho(a: AcaoAtalho): boolean {
+  if (a.tipo === "folha") { abrirEspaco("ajuda"); return true; }
+  // Com Seu espaço aberto só a folha chega aqui (atalhoDoTeclado, `espaco`).
+  if (a.tipo === "novo-bot") {
+    navegar({ tipo: "novo-bot" });
+    requestAnimationFrame(() => document.getElementById("busca-destinatario")?.focus());
+    return true;
+  }
+  const bot = botaoDoBotNoAtalho(a);
+  if (!bot) return false;
+  const nome = bot.querySelector("b")?.textContent ?? "";
+  void ACOES["abrir-conversa"]?.(bot);
+  // Pelo teclado não há clique para o leitor de tela seguir: anuncia e põe o foco no campo da conversa.
+  if (nome) anunciar(`Conversa com ${nome}`);
+  requestAnimationFrame(() => document.getElementById("composer-texto")?.focus());
+  return true;
+}
+
 function abrirEspaco(pedido: PedidoSecao, lista = false): void {
   // NOD-379: o espaço cobre a inicial (fora do .app, por cima); escondê-la deixaria a conversa de baixo ao fechar.
   // NOD-367: os pedidos de antes (avisos, este Mac, relatos…) caem na seção que os absorveu.
