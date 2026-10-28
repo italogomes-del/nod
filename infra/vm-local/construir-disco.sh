@@ -61,6 +61,12 @@ baixar_base() { # arch destino
   echo "$esperado  $destino" | sha512sum -c --status || { echo "sha512 da base Debian não confere ($destino)" >&2; return 1; }
 }
 
+# Rede do appliance do libguestfs para o apt e o computador.sh do convidado. Sem cliente DHCP no appliance (Ubuntu 24.04)
+# a eth0 sobe sem endereço: aqui ela recebe o endereço fixo da rede SLIRP do libguestfs (169.254.0.0/16, gateway .2,
+# DNS .3). O daemon do libguestfs troca o /etc/resolv.conf do convidado a cada comando e devolve o original depois,
+# por isso o DNS vai junto de cada comando que usa a rede, e não num --run-command à parte.
+REDE_DO_APPLIANCE='if ! ip -4 addr show dev eth0 2>/dev/null | grep -q inet; then ip link set eth0 up && ip addr add 169.254.2.15/16 dev eth0 && ip route add default via 169.254.2.2; fi; [ -s /etc/resolv.conf ] || { rm -f /etc/resolv.conf; echo "nameserver 169.254.2.3" > /etc/resolv.conf; }'
+
 construir() { # arch versao origem saida
   local arch="$1" versao="$2" origem="$3" saida="$4" trab raw disco node_versao a
   arch_valida "$arch" || { echo "arquitetura inválida: '$arch' (arm64 ou amd64)" >&2; return 2; }
@@ -94,11 +100,11 @@ construir() { # arch versao origem saida
 
   passo "chrony, o computador da pessoa (ADR-122) e os arquivos do nod no convidado"
   ext virt-customize -a "$raw" --network \
-    --install chrony,curl,ca-certificates,xz-utils \
+    --run-command "$REDE_DO_APPLIANCE && apt-get -q update && DEBIAN_FRONTEND=noninteractive apt-get -q -y install chrony curl ca-certificates xz-utils" \
     --mkdir /var/lib/nod \
     --copy-in "$trab/origem:/var/lib/nod" \
     --run-command 'mkdir -p /opt/nod-motor/node && tar --no-same-owner -xJf /var/lib/nod/origem/node.tar.xz -C /opt/nod-motor/node --strip-components=1 && chown -R root:root /opt/nod-motor/node' \
-    --run-command 'ORIGEM=/var/lib/nod/origem sh /var/lib/nod/origem/computador.sh' \
+    --run-command "$REDE_DO_APPLIANCE && ORIGEM=/var/lib/nod/origem sh /var/lib/nod/origem/computador.sh" \
     --mkdir /etc/systemd/system/nod-computador.service.d \
     --copy-in "$DIR_VM/arquivos/etc/systemd/system/nod-computador.service.d/nod-dados.conf:/etc/systemd/system/nod-computador.service.d" \
     --mkdir /etc/systemd/system/nod-computador-terminal.service.d \

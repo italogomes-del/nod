@@ -179,8 +179,16 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libguestfs-tools qemu-utils zstd
+          # No arm64: firmware UEFI (AAVMF) e o ROM da virtio-net (ipxe-qemu) para o appliance do libguestfs subir.
+          if [ "$ARCH" = arm64 ]; then sudo apt-get install -y --no-install-recommends qemu-efi-aarch64 ipxe-qemu; fi
+          # O runner arm64 não tem /dev/kvm: o appliance roda em TCG (mais lento).
+          if [ ! -c /dev/kvm ]; then echo "LIBGUESTFS_BACKEND_SETTINGS=force_tcg" >> "$GITHUB_ENV"; fi
           # O libguestfs do Ubuntu lê o kernel do host para montar o appliance; ele vem 0600.
           sudo chmod 0644 /boot/vmlinuz-*
+          # Como root, o passt troca para nobody e não grava o pid na pasta 0700 do libguestfs ("passt exited with
+          # status 1" no virt-customize --network). Sem o passt, o libguestfs usa a rede SLIRP do qemu, que o
+          # construir-disco.sh configura no appliance (REDE_DO_APPLIANCE).
+          if [ -x /usr/bin/passt ]; then sudo mv /usr/bin/passt /usr/bin/passt.desligado; fi
       - run: npm ci
       - name: Origem do disco (motor e computador.sh)
         run: |
@@ -191,6 +199,9 @@ jobs:
           node scripts/vm-local/origem-do-disco.ts --saida dist/vm-local/origem
       - name: Disco da VM
         run: sudo -E bash infra/vm-local/construir-disco.sh "$ARCH" "$VERSAO" dist/vm-local/origem release
+      - name: Diagnóstico do libguestfs
+        if: failure()
+        run: sudo libguestfs-test-tool 2>&1 | tail -120 || true
       - name: Conferir o disco
         run: |
           set -euo pipefail

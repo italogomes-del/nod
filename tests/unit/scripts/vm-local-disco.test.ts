@@ -36,7 +36,8 @@ describe("infra/vm-local/construir-disco.sh (NOD-93)", () => {
     expect(linhas[4]).toContain(`https://nodejs.org/dist/v${NODE_DO_MOTOR}/node-v${NODE_DO_MOTOR}-linux-arm64.tar.xz`);
     expect(linhas[5]).toContain(`https://nodejs.org/dist/v${NODE_DO_MOTOR}/SHASUMS256.txt`);
     const customize = linhas.find((l) => l.includes("virt-customize"))!;
-    expect(customize).toContain("--install chrony,");
+    expect(customize).toContain("apt-get -q -y install chrony curl ca-certificates xz-utils");
+    expect(customize).toContain("169.254.2.3");
     expect(customize).not.toMatch(/docker|nod-imagem/);
     expect(customize).toContain("sh /var/lib/nod/origem/computador.sh");
     expect(customize).toContain("systemctl enable nod-dados.service chrony.service");
