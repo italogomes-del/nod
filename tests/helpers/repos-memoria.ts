@@ -2924,7 +2924,11 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         return doTenant(b.gastos).some((g) => g.ownerId === escopo.pessoaId && g.custoUsd === null && g.tokensEntrada + g.tokensSaida > 0 && g.em >= p.desde && g.em <= p.ate && daConversa(g.turnoId));
       },
       async doTurno(turnoId) {
-        return doTenant(b.gastos).filter((g) => g.turnoId === turnoId).map(({ tenantId: _t, ownerId: _o, ...g }) => g);
+        // NOD-361: mesma ordem do Postgres (`order by em, id`).
+        return doTenant(b.gastos)
+          .filter((g) => g.turnoId === turnoId)
+          .sort((x, y) => x.em - y.em || (x.id < y.id ? -1 : x.id > y.id ? 1 : 0))
+          .map(({ tenantId: _t, ownerId: _o, ...g }) => g);
       },
       async somarMes(em, executor) {
         const inicio = new Date(em);

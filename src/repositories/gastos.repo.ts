@@ -50,7 +50,7 @@ export function gastosRepo(conn: Conn, escopo: Escopo) {
 
     async doTurno(turnoId: string): Promise<Gasto[]> {
       const linhas = await conn<Linha[]>`
-        select id, turno_id, executor, tokens_entrada, tokens_saida, custo_usd, modelo, em from gastos where tenant_id = ${escopo.tenantId} and turno_id = ${turnoId} order by em`;
+        select id, turno_id, executor, tokens_entrada, tokens_saida, custo_usd, modelo, em from gastos where tenant_id = ${escopo.tenantId} and turno_id = ${turnoId} order by em, id`;
       return linhas.map(paraGasto);
     },
 

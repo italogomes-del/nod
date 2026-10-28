@@ -52,9 +52,18 @@ describeIntegracao("concessoesRepo: por agente e capacidade, presa à mensagem d
       expect(cols?.n).toBe(0);
 
       const turno = await repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem: "conversa", prazoEm: em + 60_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
-      await repos.gastos.registrar({ turnoId: turno?.id ?? "", executor: "local", tokensEntrada: 18, tokensSaida: 90, custoUsd: 0.0207631, modelo: "claude-haiku-4-5-20251001", em });
-      await repos.gastos.registrar({ turnoId: turno?.id ?? "", executor: "local", tokensEntrada: 5, tokensSaida: 10, custoUsd: 0.0032996, modelo: "claude-haiku-4-5-20251001", em });
-      expect((await repos.gastos.doTurno(turno?.id ?? "")).map((g) => g.custoUsd)).toEqual([0.0207631, 0.0032996]);
+      // NOD-361: os dois gastos têm o MESMO `em` e `id` é gen_random_uuid(); a ordem entre eles não tem
+      // significado de produto. A asserção não depende da ordem de gravação, e o desempate de `doTurno`
+      // (`order by em, id`) é provado com ids fixos: o gravado primeiro recebe o MAIOR id, então a ordem
+      // física (inserção) contradiz a do desempate e, na prática, `doTurno` sem `, id` falha (antes: ~50% das rodadas).
+      const primeiro = await repos.gastos.registrar({ turnoId: turno?.id ?? "", executor: "local", tokensEntrada: 18, tokensSaida: 90, custoUsd: 0.0207631, modelo: "claude-haiku-4-5-20251001", em });
+      const segundo = await repos.gastos.registrar({ turnoId: turno?.id ?? "", executor: "local", tokensEntrada: 5, tokensSaida: 10, custoUsd: 0.0032996, modelo: "claude-haiku-4-5-20251001", em });
+      expect((await repos.gastos.doTurno(turno?.id ?? "")).map((g) => g.custoUsd).sort((a, b) => (a ?? 0) - (b ?? 0))).toEqual([0.0032996, 0.0207631]);
+      const ID_MAIOR = "ffffffff-ffff-4fff-bfff-ffffffffffff";
+      const ID_MENOR = "00000000-0000-4000-8000-000000000001";
+      await trx`update gastos set id = ${ID_MAIOR} where id = ${primeiro?.id ?? ""}`;
+      await trx`update gastos set id = ${ID_MENOR} where id = ${segundo?.id ?? ""}`;
+      expect((await repos.gastos.doTurno(turno?.id ?? "")).map((g) => [g.id, g.custoUsd])).toEqual([[ID_MENOR, 0.0032996], [ID_MAIOR, 0.0207631]]);
       expect(await repos.gastos.somarMes(em)).toBeCloseTo(0.0240627, 6);
       // L9 (pendência L8 §3): filtro por executor — os dois gastos são do CLI local; o catcher não gastou nada.
       expect(await repos.gastos.somarMes(em, "local")).toBeCloseTo(0.0240627, 6);
@@ -96,7 +105,11 @@ describeIntegracao("concessoesRepo: por agente e capacidade, presa à mensagem d
       await repos.catcher.registrar({ turnoId: turno?.id ?? "", tipo: "plano_recebido", dados: { ferramentas: ["mcp__nod__lembrar"] } });
       await repos.catcher.registrar({ turnoId: turno?.id ?? "", tipo: "tool_use", dados: { nome: "lembrar", input: { tipo: "fato", texto: "x" } } });
       expect((await repos.catcher.listar(turno?.id ?? "")).map((r) => r.tipo)).toEqual(["plano_recebido", "tool_use"]);
-      expect((await repos.catcher.listarRecentes(1)).map((r) => r.tipo)).toEqual(["tool_use"]);
+      // NOD-361: listarRecentes lê o tenant inteiro e catcher_registros nasce 'equipe' — o projeto concurrency
+      // commita registros no mesmo TENANT_PADRAO. Só os registros deste turno contam; o limite é checado à parte.
+      const doTeste = (await repos.catcher.listarRecentes(1000)).filter((r) => r.turnoId === turno?.id);
+      expect(doTeste.map((r) => r.tipo)).toEqual(["tool_use", "plano_recebido"]);
+      expect(await repos.catcher.listarRecentes(1)).toHaveLength(1);
       const [v] = await trx<{ visibility: string }[]>`select visibility from catcher_registros where turno_id = ${turno?.id ?? ""} limit 1`;
       expect(v?.visibility).toBe("equipe");
       await expectRejected(trx, () => repos.catcher.registrar({ turnoId: turno?.id ?? "", tipo: "Tipo Livre", dados: {} }), "23514");
