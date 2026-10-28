@@ -18,7 +18,8 @@ const arg = (nome, padrao) => { const i = process.argv.indexOf(`--${nome}`); ret
 const SOCKET = arg('socket', '/run/nod-computador/ctl.sock');
 const TELAS = Number(arg('telas', '6'));
 const CRED = randomBytes(32).toString('hex');
-const ID = `pc-vm-${randomUUID().slice(0, 8)}`;
+// Ids do tamanho dos reais (uuid): com ids curtos o tmp da tela cabia no teto do socket unix e o Chrome abria (NOD-96, 28/10).
+const ID = randomUUID();
 const { privada, publica } = chavesDeAssinatura(CRED, ID);
 const LOGIN = 'https://httpbin.org/cookies/set/sid/abc';
 const VER_LOGIN = 'https://httpbin.org/cookies';
@@ -98,7 +99,7 @@ try {
   const ligar = await iniciar();
   passo('iniciar numa instalação limpa (TOFU) em menos de 60 s', ligar.r.desfecho === 'ok' && ligar.ms < 60_000, `${ligar.ms} ms ${ligar.r.motivo ?? ''}`);
 
-  const bots = Array.from({ length: TELAS }, (_, i) => `bot-${i + 1}`);
+  const bots = Array.from({ length: TELAS }, () => randomUUID());
   const primeira = await navegar(bots[0], 'https://example.com/');
   // O example.com tirou o "Example Domain" do corpo (fica só no <title>): vale o título ou o texto de hoje.
   const exemplo = (r) => /Example Domain/.test(r?.resultado?.tela?.titulo ?? '') || /documentation examples/.test(texto(r));
