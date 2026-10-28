@@ -4,6 +4,7 @@ import { abrirCapturaAmpliada } from "./telas/captura-ampliada.ts";
 import { abrirPreviaArquivo } from "./telas/previa-arquivo.ts";
 import { abrirComputador, aplicarModoDevNoComputador } from "./telas/computador.ts";
 import { abrirTelaCheia } from "./telas/tela-cheia.ts";
+import { criarAcoesDaEspera } from "./lib/esperas-de-colega.ts";
 import { avisoDoComputador, OPERACOES_PESSOA, type OperacaoPessoa } from "./lib/computador-pessoa.ts";
 import { CHAVE_AVISO_RECRIADO } from "./telas/espaco.ts";
 import { marcarTelaFechadaNaAjuda } from "./lib/computador.ts";
@@ -3787,6 +3788,16 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     if (url) void mostrarNoFinder(url, midiaDom).then((ok) => { if (!ok) anunciar("O arquivo não está mais na pasta do bot"); });
   },
   ...telaConta.acoes,
+  // NOD-377: Cobrar e Desistir da espera de colega vencida (pílula e Trabalhos).
+  ...criarAcoesDaEspera({
+    cobrar: (agenteId, tarefaId) => api!.cobrarEspera(agenteId, tarefaId),
+    desistir: (agenteId, tarefaId) => api!.desistirDaEspera(agenteId, tarefaId),
+    invalidar: () => dispatch({ tipo: "invalidar", quais: ["trabalhos"] }),
+    render: () => render(),
+    anunciar: (texto) => anunciar(texto),
+    // Revisão do PR #544: o foco vai ao campo só na conversa (em Trabalhos, fica onde estava).
+    focarCampo: () => { if (estado.tela.tipo === "conversa") document.getElementById("composer-texto")?.focus(); },
+  }),
   ...(telaMinhaConta.acoes as Record<string, (el: HTMLElement) => Promise<void> | void>),
   "conta-abrir": (el) => { try { marcarFalou(window.localStorage); } catch { /* sem storage */ } return telaConta.acoes["conta-abrir"]?.(el); },
   "entrada-ir": (el) => { entrada = { ...entrada, conta: { etapa: el.dataset.etapa === "recuperar" ? "recuperar" : "entrar", erro: null, enviadoPara: null, ocupado: false }, redefinir: null }; render(); },

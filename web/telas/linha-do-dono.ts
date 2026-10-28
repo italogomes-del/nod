@@ -1,6 +1,7 @@
 import type { DonoDto } from "../../src/contracts/dono.ts";
 import type { TrabalhoDto } from "../../src/contracts/trabalho.ts";
 import type { Estado } from "../estado/reducer.ts";
+import { acaoLocal, comAcaoLocal, htmlDasAcoes } from "../lib/esperas-de-colega.ts";
 import { conversaViva, esperaNaTela, fraseDoDono, frentesDoBot, grupoDaLinha, linhaDoDono, quemPediu, temDonos, type GrupoDoBot, type LinhaDoDono } from "../lib/dono.ts";
 import { ICONE } from "../lib/icones.ts";
 import { duracaoCurta } from "../lib/relogio.ts";
@@ -93,8 +94,13 @@ function fraseDoBot(estado: Estado, x: LinhaDoBot, todos: readonly TrabalhoDto[]
     const frase = vivas.length === 1 && vivas[0] ? tituloCurto(vivas[0].titulo) : x.linha.texto;
     return { frase, detalhe: x.linha.extras.join(" · "), tempo: `desde ${hora(desde)}` };
   }
-  // Esperando: o tempo já vai à direita ("desde 17:58"); a duração sai do detalhe.
-  return { frase: x.linha.texto, detalhe: x.linha.extras.filter((s) => !/^(\d+ min|menos de 1 min|\d+h|\d+ d)$/.test(s)).join(" · "), tempo: `desde ${hora(desde)}` };
+  // Esperando: o tempo já vai à direita ("desde 17:58"); a duração sai do detalhe. NOD-377: a única espera, de colega
+  // vencida, diz "sem resposta há 26h" no lugar do "desde".
+  // Revisão do PR #544: com a ação local por cima (a cobrada já não está vencida; a desistida sai).
+  const esperas = x.dono.esperas.map((e) => comAcaoLocal(e)).filter((e) => e !== null);
+  const [unica] = esperas;
+  const vencida = esperas.length === 1 && unica?.tipo === "colega" && unica.colega?.vencida === true && unica.colega.tarefaId ? esperaNaTela(unica, estado.agora).colega?.resumo : undefined;
+  return { frase: x.linha.texto, detalhe: x.linha.extras.filter((s) => !/^(\d+ min|menos de 1 min|\d+h|\d+ d)$/.test(s)).join(" · "), tempo: vencida ?? `desde ${hora(desde)}` };
 }
 
 /** "2 bots trabalhando · 1 esperando · 1 precisa de você" e, quando há leitura, a memória dos bots em cada máquina. */
@@ -177,9 +183,14 @@ function frentesAbertasDoBot(estado: Estado, x: LinhaDoBot, todos: readonly Trab
     const passo = aberto(t) ? situacaoDe(t, todos, false, estado.agora) : "";
     return `<button type="button" class="tb-frente" data-act="abrir-trabalho" data-id="${esc(t.id)}">${pontoTrabalho(t, x.bot.cor)}<span class="tb-frente-titulo">${esc(tituloCurto(t.titulo))}</span><span class="tb-frente-passo"${passo ? ` title="${esc(passo)}"` : ""}>${esc(passo)}</span><span class="tb-frente-fim">${esc(fim)}</span></button>`;
   };
-  const daConversa = x.dono.esperas.filter((e) => e.trabalhoId === null).map((e) => {
+  const daConversa = x.dono.esperas.filter((e) => e.trabalhoId === null).map((d) => comAcaoLocal(d)).filter((e) => e !== null).map((e) => {
     const v = esperaNaTela(e, estado.agora);
-    return `<div class="tb-frente estatica"><span class="ponto-trabalho fora-do-mac" aria-hidden="true"></span><span class="tb-frente-titulo">${esc(v.titulo)}</span><span class="tb-frente-passo">${esc(v.linhas.at(-1) ?? "")}</span><span class="tb-frente-fim">${esc(v.tempo)}</span></div>`;
+    const c = v.colega;
+    // NOD-377 (protótipo, passo 10): vencida, "sem resposta há 26h" à direita e a linha de Cobrar/Desistir embaixo.
+    const fim = c?.vencida ? c.resumo : v.tempo;
+    const passo = c?.resumo && !c.vencida ? `${c.resumo} · ${v.linhas.at(-1) ?? ""}` : v.linhas.at(-1) ?? "";
+    const acoes = c?.acoes ? htmlDasAcoes({ agenteId: x.bot.id, tarefaId: c.tarefaId, colega: c.nome, podeCobrar: c.podeCobrar, fase: acaoLocal.fase(c.tarefaId), classe: "p377-acoes-tb" }) : "";
+    return `<div class="tb-frente estatica${c?.vencida ? " p377-frente" : ""}"><span class="ponto-trabalho fora-do-mac" aria-hidden="true"></span><span class="tb-frente-titulo">${esc(v.titulo)}</span><span class="tb-frente-passo">${esc(passo)}</span><span class="tb-frente-fim${c?.vencida ? " p377-venc" : ""}">${esc(fim)}</span></div>${acoes}`;
   }).join("");
   const fila = x.dono.fila.map((p, i) => {
     // NOD-302: o pedido que a cota da IA segura diz "na fila (cota)" e quando volta.

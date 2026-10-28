@@ -1907,11 +1907,11 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         }
         return n;
       },
-      async cancelarPendente(id) {
+      async cancelarPendente(id, motivo = "parado_pela_pessoa", _o = {}) {
         const t = doTenant(b.turnos).find((x) => x.id === id && x.estado === "pendente");
         if (!t) return null;
         t.estado = "interrompido";
-        t.motivoInterrupcao = "parado_pela_pessoa";
+        t.motivoInterrupcao = motivo;
         t.leaseAte = null;
         return t;
       },
@@ -3487,6 +3487,11 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
     // Sem o ramo do piso da NOD-279: aqui `abertos` sempre se comporta como `semPiso` (o piso se prova no Postgres).
     pedidosDeColega: {
       async travar() {},
+      async travarTarefa() {},
+      async travarTrabalhosDaCadeia() {},
+      async pendentesDaCadeia() {
+        return [];
+      },
       async abertos(desde: number, filtro: { de?: string; semPiso?: boolean } = {}): Promise<PedidoAberto[]> {
         const ms = doTenant(b.mensagens);
         const fechado = (id: unknown) => typeof id === "string" && doTenant(b.trabalhos).some((t) => t.id === id && ["terminado", "parado", "falhou"].includes(t.estado));
@@ -3509,6 +3514,10 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         return doTenant(b.esperas).filter((e) => turnoIds.includes(e.turnoId) && e.estado === "rodando").length;
       },
       async triagensParadas() {
+        return [];
+      },
+      // NOD-377: a regra das esperas de colega roda contra o Postgres (tests/integration/esperas-de-colega.test.ts).
+      async esperasDeColega() {
         return [];
       },
     },

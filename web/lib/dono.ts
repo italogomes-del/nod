@@ -115,8 +115,38 @@ export function conversaViva(estado: Pick<Estado, "turnosVivos">, conversaId: st
   return Object.values(estado.turnosVivos).some((v) => v.conversaId === conversaId && !v.trabalhoId && v.estado === "rodando");
 }
 
+/**
+ * NOD-377: a espera de colega com prazo. `resumo` = "sem resposta há 26h" (vencida) ou "cobrado agora" (cobrada no prazo);
+ * `acoes` = a tela oferece Desistir (e Cobrar, com `podeCobrar`).
+ */
+export type ColegaNaTela = { tarefaId: string; nome: string; vencida: boolean; podeCobrar: boolean; resumo: string; acoes: boolean };
+
 /** Uma espera na linha aberta: o que espera (o comando, em fonte fixa), as linhas de baixo e há quanto tempo. */
-export type EsperaNaTela = { titulo: string; comando: boolean; linhas: string[]; tempo: string };
+export type EsperaNaTela = { titulo: string; comando: boolean; linhas: string[]; tempo: string; colega?: ColegaNaTela };
+
+/** "às 13:38" (hoje), "ontem às 13:38", "em 21/10 às 13:38": quando o pedido saiu. */
+export function quandoPediu(desde: number, agora: number): string {
+  const dia = (t: number): number => new Date(new Date(t).getFullYear(), new Date(t).getMonth(), new Date(t).getDate()).getTime();
+  const dias = Math.round((dia(agora) - dia(desde)) / 86_400_000);
+  if (dias <= 0) return `às ${hora(desde)}`;
+  if (dias === 1) return `ontem às ${hora(desde)}`;
+  const d = new Date(desde);
+  return `em ${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")} às ${hora(desde)}`;
+}
+
+/** "cobrado agora" (no primeiro minuto) ou "cobrado há 5 min". */
+function cobradoHa(em: number, agora: number): string {
+  return agora - em < 60_000 ? "cobrado agora" : `cobrado há ${duracaoCurta(agora - em)}`;
+}
+
+/** O colega da espera com o prazo (NOD-377); undefined = o servidor de antes, sem o pedido. */
+function colegaNaTela(e: EsperaDoDonoDto, agora: number): ColegaNaTela | undefined {
+  const c = e.colega;
+  if (!c?.tarefaId) return undefined;
+  const vencida = c.vencida === true;
+  const resumo = vencida ? `sem resposta há ${duracaoCurta(agora - e.desde)}` : c.cobradoEm ? cobradoHa(c.cobradoEm, agora) : "";
+  return { tarefaId: c.tarefaId, nome: e.motivo, vencida, podeCobrar: c.podeCobrar === true && !c.removido, resumo, acoes: !c.removido && (vencida || Boolean(c.cobradoEm)) };
+}
 
 /**
  * A espera aberta (quadro 03): o comando e "última linha: …" e "volta sozinho quando terminar · tentativa 2 de 3"; a volta
@@ -138,9 +168,14 @@ export function esperaNaTela(e: EsperaDoDonoDto, agora: number, frente?: string 
     const quando = e.acordaEm ? `Volta ${quandoVolta(e.acordaEm, agora)}` : "Volta marcada";
     return { titulo: quando, comando: false, linhas: [[e.motivo !== "a volta marcada" ? e.motivo : "", daFrente].filter(Boolean).join(" · ")].filter(Boolean), tempo };
   }
-  const linhas = [[`pedido enviado às ${hora(e.desde)}`, daFrente].filter(Boolean).join(" · ")];
-  const colega = e.colega ? estadoDoColega(e.colega, e.motivo) : "";
-  return { titulo: `Esperando ${e.motivo}`, comando: false, linhas: colega ? [colega, ...linhas] : linhas, tempo };
+  const linhas = [[`pedido enviado ${quandoPediu(e.desde, agora)}`, daFrente].filter(Boolean).join(" · ")];
+  const c = colegaNaTela(e, agora);
+  const estado = e.colega ? estadoDoColega(e.colega, e.motivo) : "";
+  // NOD-377: vencida, "sem resposta há 26h" no lugar de "Leo está livre" (e o tempo à direita sai); cobrada, "cobrado
+  // agora · Leo está trabalhando".
+  const primeira = c?.vencida && !e.colega?.removido ? c.resumo : [c?.resumo, estado].filter(Boolean).join(" · ");
+  const titulo = `Esperando ${e.motivo}`;
+  return { titulo, comando: false, linhas: primeira ? [primeira, ...linhas] : linhas, tempo: c?.vencida ? "" : tempo, ...(c ? { colega: c } : {}) };
 }
 
 /**

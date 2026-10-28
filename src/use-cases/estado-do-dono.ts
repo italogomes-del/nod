@@ -1,3 +1,4 @@
+import { aEntregar, esperaVencida, podeCobrar, semResposta } from "../domain/espera-de-colega.ts";
 import type { DonoDto, EsperaDoDonoDto, EstadoDoDono } from "../contracts/dono.ts";
 import { VOLTAS_SEM_NOVIDADE } from "../contracts/ferramentas-trabalho.ts";
 import type { ServicoDasMaquinas, Trabalho } from "../contracts/trabalho.ts";
@@ -75,16 +76,42 @@ export async function estadoDoDonoAgora(deps: DepsDono, agenteId: string, presen
  * tentativa N de 3, pelas voltas da mesma cadeia), as voltas marcadas e os pedidos a colega sem resposta.
  */
 async function esperasDosDonos(deps: DepsDono, crus: FatosCrusDosDonos): Promise<(EsperaDoDonoDto & { agenteId: string })[]> {
+  const agora = deps.agora();
   const comandos: (EsperaDoDonoDto & { agenteId: string })[] = [];
   for (const c of crus.comandos) {
     const voltas = c.emVolta ? (await deps.repos.turnos.ultimasVoltas(c.origem, VOLTAS_SEM_NOVIDADE + 1)).slice(1) : [];
     comandos.push({ agenteId: c.agenteId, tipo: "comando", trabalhoId: c.trabalhoId, motivo: c.motivo, desde: c.desde, comando: c.comando, ultimaLinha: ultimaLinha(c.saidaAnterior), tentativa: tentativaDaEspera(voltas, c.emVolta), tentativas: VOLTAS_SEM_NOVIDADE });
   }
   const voltas = crus.voltas.map((v) => ({ agenteId: v.agenteId, tipo: "volta" as const, trabalhoId: v.trabalhoId, motivo: v.motivo?.trim() || "a volta marcada", desde: v.desde, acordaEm: v.acordaEm }));
-  const colegas = crus.colegas.map((c) => ({
-    agenteId: c.agenteId, tipo: "colega" as const, trabalhoId: c.trabalhoId, motivo: c.nome ?? "um colega", desde: c.desde,
-    colega: { id: c.colegaId, removido: c.colegaRemovido, trabalhando: c.colegaTrabalhando, fila: c.colegaFila },
-  }));
+  const colegas: (EsperaDoDonoDto & { agenteId: string })[] = [];
+  // Revisão 10 do PR #544 (M2): as vencidas pelo relógio de todos os bots numa leitura só (antes, uma por espera).
+  const vencidasPeloRelogio = crus.colegas.filter((c) => esperaVencida({ criadoEm: c.desde, cobradoEm: c.cobradoEm }, agora));
+  const lidas = vencidasPeloRelogio.length === 0 ? [] : await deps.repos.pedidosDeColega.esperasDeColega(agora, { tarefaIds: vencidasPeloRelogio.map((c) => c.tarefaId) });
+  const lidaDe = new Map(lidas.map((e) => [`${e.tarefaId}|${e.deAgenteId}`, e]));
+  for (const c of crus.colegas) {
+    // NOD-377 (revisão 2 do PR #544, A1): vencida pelo relógio, a espera ainda pode estar ocupada. Com a cadeia rodando ou
+    // aguardando frentes ou uma decisão, não é "sem resposta" (o varredor espera); na fila, é "sem resposta", mas Cobrar só
+    // duplicaria o pedido (o servidor recusa). Quem diz é a mesma leitura do varredor (esperasDeColega), só para as
+    // vencidas pelo relógio, lidas acima.
+    let vencida = esperaVencida({ criadoEm: c.desde, cobradoEm: c.cobradoEm }, agora);
+    let ocupada = false;
+    if (vencida) {
+      const e = lidaDe.get(`${c.tarefaId}|${c.agenteId}`);
+      // Revisão 11 (B3): não achada na releitura (fechou entre as duas leituras), sem Cobrar — a rota daria 404.
+      // QA do PR #544 (bug 2): concluída com fala, a próxima passada entrega — nem "sem resposta", nem Cobrar.
+      ocupada = !e || e.rodando || e.naFila || e.aguardando || aEntregar(e);
+      vencida = !e || (semResposta(e, agora) && !aEntregar(e));
+    }
+    colegas.push({
+      agenteId: c.agenteId, tipo: "colega" as const, trabalhoId: c.trabalhoId, motivo: c.nome ?? "um colega", desde: c.desde,
+      colega: {
+        id: c.colegaId, removido: c.colegaRemovido, trabalhando: c.colegaTrabalhando, fila: c.colegaFila,
+        // NOD-377: o prazo da espera, pela mesma regra do varredor (src/domain/espera-de-colega.ts).
+        tarefaId: c.tarefaId, vencida, cobradoEm: c.cobradoEm,
+        podeCobrar: podeCobrar({ criadoEm: c.desde, cobradoEm: c.cobradoEm, cobrancas: c.cobrancas, colegaExcluido: c.colegaRemovido, ocupada }, agora),
+      },
+    });
+  }
   return [...comandos, ...voltas, ...colegas].sort((a, b) => a.desde - b.desde);
 }
 

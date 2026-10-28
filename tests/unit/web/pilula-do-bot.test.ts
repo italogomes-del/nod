@@ -394,3 +394,36 @@ describe("a conversa aberta antes do histórico chegar (QA do PR 400)", () => {
     expect(daPilula(pilulaNaConversa(estadoCom([], espera), "orq", SEM_PROGRESSO)).escondida).toBe(false);
   });
 });
+
+describe("NOD-377: a espera de colega vencida na pílula (protótipo aprovado)", () => {
+  const H = 3_600_000;
+  const vencida = (c: Partial<NonNullable<EsperaDoDonoDto["colega"]>> = {}): DonoDto => dono(
+    { principal: "esperando", esperando: 1, motivoEspera: "Leo", desde: AGORA - 26 * H },
+    [{ tipo: "colega", trabalhoId: null, motivo: "Leo", desde: AGORA - 26 * H, colega: { id: "l", removido: false, trabalhando: false, fila: 0, tarefaId: "t1", vencida: true, cobradoEm: null, podeCobrar: true, ...c } }],
+  );
+
+  it("fechada: 'sem resposta há 26h' no lugar do tempo, em cinza; aberta: Cobrar e Desistir, sem o tempo à direita", () => {
+    const p = daPilula(pilulaNaConversa(estadoCom([], vencida()), "orq", SEM_PROGRESSO));
+    expect([p.pilula.texto, ...p.pilula.resto]).toEqual(["Esperando Leo", "sem resposta há 26h"]);
+    expect(p.partes.botao).toContain('class="pf-resto p377-resto"');
+    expect(p.partes.corpo).toContain('data-act="espera-cobrar" aria-label="Cobrar Leo" data-agente="orq" data-tarefa="t1"');
+    expect(p.partes.corpo).toContain(">Desistir</button>");
+    expect(p.partes.corpo).toContain("sem resposta há 26h");
+    expect(p.partes.corpo).not.toContain("Leo está livre");
+    expect(p.partes.corpo).not.toContain("pf-item-fim");
+  });
+
+  it("cobrada: 'Esperando Leo · cobrado agora' e só Desistir", () => {
+    const p = daPilula(pilulaNaConversa(estadoCom([], vencida({ vencida: false, podeCobrar: false, cobradoEm: AGORA - 5_000 })), "orq", SEM_PROGRESSO));
+    expect([p.pilula.texto, ...p.pilula.resto]).toEqual(["Esperando Leo", "cobrado agora"]);
+    expect(p.partes.corpo).not.toContain("espera-cobrar");
+    expect(p.partes.corpo).toContain("espera-desistir");
+  });
+
+  it("no prazo: nada muda (o tempo e sem ações)", () => {
+    const d = dono({ principal: "esperando", esperando: 1, motivoEspera: "Leo", desde: AGORA - 2 * H }, [{ tipo: "colega", trabalhoId: null, motivo: "Leo", desde: AGORA - 2 * H, colega: { id: "l", removido: false, trabalhando: false, fila: 0, tarefaId: "t1", vencida: false, cobradoEm: null, podeCobrar: false } }]);
+    const p = daPilula(pilulaNaConversa(estadoCom([], d), "orq", SEM_PROGRESSO));
+    expect(p.pilula.resto).toEqual(["2h"]);
+    expect(p.partes.corpo).not.toContain("p377-acoes");
+  });
+});

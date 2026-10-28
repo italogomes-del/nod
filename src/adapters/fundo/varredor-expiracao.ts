@@ -4,13 +4,14 @@ import { redigir } from "../../domain/redacao.ts";
 import { log } from "../../obs/log.ts";
 import { metricas as registroPadrao, type Metricas } from "../../obs/metricas.ts";
 import { criarRepos } from "../../repositories/index.ts";
-import type { Db, Escopo, Relogio, Transacao } from "../../shared/types.ts";
+import type { Db, Escopo, Relogio, Transacao, Tx } from "../../shared/types.ts";
 import { autoriaPessoa, carimbo, evento } from "../../use-cases/apoio-l7.ts";
 import { vencerPedidoDaRotina } from "../../use-cases/decidir-acesso.ts";
 import { expirarItensNaMaquina } from "../../use-cases/itens-na-maquina.ts";
 import { registrarDesfechoRotina, TIPOS_GATE_ROTINA, TIPOS_QUE_SEGURAM_A_EXECUCAO } from "../../use-cases/disparar-rotina.ts";
 import { avisarFalhaDelegacao } from "../../use-cases/entregar-resposta-peer.ts";
 import { cuidarDasFrentesCaidas } from "../../use-cases/frentes-caidas.ts";
+import { cuidarDasEsperasDeColega } from "../../use-cases/esperas-de-colega.ts";
 import { cuidarDosPedidosParados, type PedidosAdiados } from "../../use-cases/pedidos-parados.ts";
 import { cuidarDosTurnosOrfaos, type TurnosObservados } from "../../use-cases/turnos-orfaos.ts";
 import { PRAZO_DECISAO_PADRAO_MS } from "../../use-cases/autoria-evento.ts";
@@ -31,11 +32,21 @@ export type OpcoesVarredor = {
   metricas?: Metricas;
   /** #218: pedidos parados adiados entre as passadas (pedidos-parados.ts); o laço cria um mapa só para o processo. */
   pedidosAdiados?: PedidosAdiados;
+  /** NOD-377: as esperas de colega adiadas entre as passadas (esperas-de-colega.ts), num mapa à parte do de cima. */
+  esperasAdiadas?: PedidosAdiados;
+  /**
+   * NOD-377 (revisão do PR #544): a última passada das esperas de colega por pessoa (`tenant:pessoa`). A leitura não tem
+   * janela de idade; uma a cada INTERVALO_ESPERAS_DE_COLEGA_MS basta (o prazo é de 24 h). Ausente = toda passada (testes).
+   */
+  esperasPassadas?: Map<string, number>;
   /** NOD-219: quando cada turno velho na fila foi observado (turnos-orfaos.ts); o laço cria um mapa só para o processo. */
   turnosObservados?: TurnosObservados;
   /** ADR-115: a idade a partir da qual a decisão `em_revisao` vira cartão; ausente = RECOLHER_REVISAO_MS (2 × o prazo). Só o teste muda. */
   recolherRevisaoMs?: number;
 };
+
+/** NOD-377: o intervalo entre duas passadas das esperas de colega da mesma pessoa. */
+export const INTERVALO_ESPERAS_DE_COLEGA_MS = 5 * 60_000;
 
 /** ADR-115 (0093): a retenção de `acoes_pelo_modo` (o resumo da ação e o motivo do revisor são texto livre). */
 export const RETENCAO_ACOES_PELO_MODO_MS = 90 * 24 * 60 * 60_000;
@@ -75,6 +86,26 @@ export async function varrerPessoa(escopo: Escopo, tx: Transacao, opcoes: Opcoes
     });
   } catch (e) {
     log("erro", "pedidos_parados_falhou", { erro: ehErroDeDominio(e) ? e.codigo : e instanceof Error ? e.name : "desconhecido" });
+  }
+  // definido em 2026-10-27 (NOD-377): toda espera de colega tem fim — sem janela de idade, depois das quedas recentes de
+  // cima. Cada pedido na sua transação (revisão 3 do PR #544, M1): o que lança volta sozinho, os outros saem, e as travas
+  // de um pedido não ficam presas enquanto a passada trava o próximo (o impasse com o assentar do colega).
+  const chaveEsperas = `${escopo.tenantId}:${escopo.pessoaId}`;
+  const ultimaEsperas = opcoes.esperasPassadas?.get(chaveEsperas);
+  const vezDasEsperas = ultimaEsperas === undefined || opcoes.agora() - ultimaEsperas >= INTERVALO_ESPERAS_DE_COLEGA_MS;
+  if (vezDasEsperas) try {
+    opcoes.esperasPassadas?.set(chaveEsperas, opcoes.agora());
+    const depsDe = (trx: Tx): Deps => ({ repos: criarRepos(trx, escopo), services: opcoes.services, useCases: opcoes.useCases, tx, escopo, agora: opcoes.agora });
+    const porPedido = <T>(fn: (d: Deps) => Promise<T>): Promise<T> => tx((trx) => fn(depsDe(trx)));
+    // A leitura da passada também numa transação própria e curta; cada pedido relê sob a trava dele e grava os eventos
+    // na transação dele. Nenhuma transação fica aberta esperando outra (o pool não se esgota).
+    const inicio = performance.now();
+    const r = await cuidarDasEsperasDeColega({ agora: opcoes.agora }, { adiados: opcoes.esperasAdiadas, porPedido });
+    // ADR-132 (gatilho de reversão, revisão 5 do PR #544): a passada que passa de 1 s por pessoa fica registrada.
+    const duracaoMs = Math.round(performance.now() - inicio);
+    if (duracaoMs > 1_000) log("aviso", "esperas_de_colega_lenta", { tenant_id: escopo.tenantId, duracao_ms: duracaoMs, entregues: r.data.entregues.length, avisados: r.data.avisados.length, limpos: r.data.limpos.length });
+  } catch (e) {
+    log("erro", "esperas_de_colega_falhou", { erro: ehErroDeDominio(e) ? e.codigo : e instanceof Error ? e.name : "desconhecido" });
   }
   // definido em 2026-10-12 (ADR-099, I9): as frentes de lote que caíram (frentes-caidas.ts), também em transação própria.
   try {
@@ -250,7 +281,7 @@ export async function varrer(db: Db, opcoes: OpcoesVarredor, laco: OpcoesLaco = 
 }
 
 export function iniciarVarredorExpiracao(db: Db, opcoesIniciais: OpcoesVarredor & { intervaloMs?: number }, laco: OpcoesLaco = {}): { parar(): Promise<void> } {
-  const opcoes = { ...opcoesIniciais, pedidosAdiados: opcoesIniciais.pedidosAdiados ?? new Map<string, number>(), turnosObservados: opcoesIniciais.turnosObservados ?? new Map<string, number>() };
+  const opcoes = { ...opcoesIniciais, pedidosAdiados: opcoesIniciais.pedidosAdiados ?? new Map<string, number>(), esperasAdiadas: opcoesIniciais.esperasAdiadas ?? new Map<string, number>(), esperasPassadas: opcoesIniciais.esperasPassadas ?? new Map<string, number>(), turnosObservados: opcoesIniciais.turnosObservados ?? new Map<string, number>() };
   let rodando = false;
   let emVoo: Promise<unknown> | null = null;
   const timer = setInterval(() => {

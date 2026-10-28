@@ -62,7 +62,21 @@ export type EsperaDoDonoDto = {
   colega?: ColegaEsperadoDto;
 };
 
-export type ColegaEsperadoDto = { id: string | null; removido: boolean; trabalhando: boolean; fila: number };
+export type ColegaEsperadoDto = {
+  id: string | null;
+  removido: boolean;
+  trabalhando: boolean;
+  fila: number;
+  /**
+   * NOD-377 (definido em 2026-10-27): o pedido (a tarefa) e o prazo da espera. `vencida` = passou 24 h do pedido ou da
+   * última cobrança sem resposta: a tela troca "X está livre" por "sem resposta há X" e oferece Desistir; `podeCobrar`
+   * acrescenta o Cobrar (uma vez por pedido). Opcionais: o servidor de antes não manda.
+   */
+  tarefaId?: string;
+  vencida?: boolean;
+  cobradoEm?: number | null;
+  podeCobrar?: boolean;
+};
 
 /** De onde veio um pedido na fila do dono. */
 export type DeQuemPediu = "pessoa" | "colega" | "rotina";

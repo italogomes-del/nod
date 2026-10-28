@@ -1,6 +1,7 @@
 import type { TrabalhoDto } from "../../src/contracts/trabalho.ts";
 import type { Estado } from "../estado/reducer.ts";
 import { donoDoBot, esperaNaTela, linhaDoDono, quemPediu, textoDaFila, textoDasEsperas, type EsperaNaTela } from "../lib/dono.ts";
+import { acaoLocal, comAcaoLocal, htmlDasAcoes } from "../lib/esperas-de-colega.ts";
 import { pilulaEscondida, type ProgressoNaTela } from "../lib/pilula.ts";
 import { esc, hora } from "../lib/render.ts";
 import { aberto, esperandoMaquina, tituloCurto, trabalhosConhecidos } from "../lib/trabalhos.ts";
@@ -42,6 +43,8 @@ export type Pilula = {
   esperas: EsperaNaTela[];
   fila: { quem: string; desde: number }[];
   memoria: (MemoriaNoProgresso & { alvo: string }) | null;
+  /** NOD-377: o resto fechado diz "sem resposta há 26h" (em cinza). */
+  vencida?: boolean;
   /** As frentes abertas que o "Parar" da pílula para. */
   abertas: TrabalhoDto[];
 };
@@ -110,8 +113,10 @@ function esperaNoDono(dono: NonNullable<ReturnType<typeof donoDoBot>>, trabalhoI
  */
 export function pilulaDoBot(estado: Estado, agenteId: string): Pilula | null {
   const bot: Agente | undefined = agente(estado, agenteId);
-  const dono = donoDoBot(estado, agenteId, bot?.conversaId);
-  if (!dono) return null;
+  const doServidor = donoDoBot(estado, agenteId, bot?.conversaId);
+  if (!doServidor) return null;
+  // NOD-377: o Cobrar e o Desistir que o servidor ainda não releu (a desistida some, a cobrada já diz "cobrado agora").
+  const dono = { ...doServidor, esperas: doServidor.esperas.map((x) => comAcaoLocal(x)).filter((x): x is NonNullable<typeof x> => x !== null) };
   const nome = bot?.nome ?? "bot";
   const { grupos, abertas } = gruposDoBot(estado, agenteId, bot?.conversaId);
   const todos = trabalhosConhecidos(estado, bot?.conversaId);
@@ -141,9 +146,14 @@ export function pilulaDoBot(estado: Estado, agenteId: string): Pilula | null {
     return { agenteId, nome, sinal: vivo ? "vivo" : "espera", texto, resto, grupos, esperas, fila, memoria, abertas };
   }
   // Sem frentes: a espera ou a fila, pela prioridade da linha do dono (o "Esperando você" fica com o cartão da pergunta).
-  const l = linhaDoDono({ ...dono, estado: { ...e, esperandoVoce: 0 } }, estado.agora);
+  const desistidas = doServidor.esperas.length - dono.esperas.length;
+  const l = linhaDoDono({ ...dono, estado: { ...e, esperandoVoce: 0, esperando: Math.max(0, e.esperando - desistidas) } }, estado.agora);
   if (!l || l.sinal === "voce") return null;
-  return { agenteId, nome, sinal: l.sinal === "vivo" ? "vivo" : l.sinal, texto: l.texto, resto: l.extras, grupos: [], esperas, fila, memoria, abertas: [] };
+  // NOD-377: a única espera, de colega vencida ou cobrada, troca o tempo por "sem resposta há 26h" / "cobrado agora".
+  const [unica] = esperas;
+  const resumo = esperas.length === 1 && l.sinal === "espera" ? unica?.colega?.resumo : undefined;
+  const resto = resumo ? [resumo, ...l.extras.filter((x) => !/^(\d+ min|menos de 1 min|\d+h|\d+ d)$/.test(x))] : l.extras;
+  return { agenteId, nome, sinal: l.sinal === "vivo" ? "vivo" : l.sinal, texto: l.texto, resto, grupos: [], esperas, fila, memoria, abertas: [], ...(resumo && unica?.colega?.vencida ? { vencida: true } : {}) };
 }
 
 /**
@@ -184,10 +194,14 @@ function ponto(sinal: Pilula["sinal"]): string {
   return `<span class="pf-ponto ${sinal}" aria-hidden="true"></span>`;
 }
 
-function itemDaEspera(v: EsperaNaTela): string {
+function itemDaEspera(v: EsperaNaTela, agenteId: string): string {
   const titulo = v.comando ? `<code class="pf-comando">${esc(v.titulo)}</code>` : `<span class="pf-item-titulo">${esc(v.titulo)}</span>`;
-  const linhas = v.linhas.map((x, i) => `<span class="pf-sub${i === 0 && x.startsWith("última linha") ? " mono" : ""}">${esc(x)}</span>`).join("");
-  return `<li class="pf-item">${ponto("espera")}<span class="pf-item-corpo">${titulo}${linhas}</span><span class="pf-item-fim">${esc(v.tempo)}</span></li>`;
+  const c = v.colega;
+  const linhas = v.linhas.map((x, i) => `<span class="pf-sub${i === 0 && x.startsWith("última linha") ? " mono" : ""}${i === 0 && c?.vencida ? " p377-venc" : ""}">${esc(x)}</span>`).join("");
+  // NOD-377 (protótipo aprovado): vencida ou cobrada, Cobrar/Desistir em texto embaixo, e o tempo à direita sai.
+  const acoes = c?.acoes ? htmlDasAcoes({ agenteId, tarefaId: c.tarefaId, colega: c.nome, podeCobrar: c.podeCobrar, fase: acaoLocal.fase(c.tarefaId) }) : "";
+  const fim = v.tempo ? `<span class="pf-item-fim">${esc(v.tempo)}</span>` : "";
+  return `<li class="pf-item${acoes ? " p377-item" : ""}">${ponto("espera")}<span class="pf-item-corpo">${titulo}${linhas}${acoes}</span>${fim}</li>`;
 }
 
 function corpoDaPilula(p: Pilula): string {
@@ -201,7 +215,7 @@ function corpoDaPilula(p: Pilula): string {
     const cab = p.grupos.length > 1 ? `<h3 class="pf-lote">${esc(g.titulo)} · ${esc(estadoDoGrupo(g))}</h3>` : "";
     return `${cab}<ul class="pf-lista">${itens}</ul>`;
   }).join("");
-  const esperas = p.esperas.length ? `<h3 class="pf-secao">Esperando</h3><ul class="pf-lista">${p.esperas.map(itemDaEspera).join("")}</ul>` : "";
+  const esperas = p.esperas.length ? `<h3 class="pf-secao">Esperando</h3><ul class="pf-lista">${p.esperas.map((v) => itemDaEspera(v, p.agenteId)).join("")}</ul>` : "";
   const fila = p.fila.length ? `<h3 class="pf-secao">Na fila</h3><ul class="pf-lista">${p.fila.map((x, i) => `<li class="pf-item"><span class="pf-ordem" aria-hidden="true">${i + 1}</span><span class="pf-item-corpo"><span class="pf-item-titulo">${esc(x.quem.charAt(0).toUpperCase() + x.quem.slice(1))}</span></span><span class="pf-item-fim">${esc(hora(x.desde))}</span></li>`).join("")}</ul>` : "";
   // A frase da memória só aqui dentro (decisão tomada 5); o ponto leva a Trabalhos, Este Mac ou Máquinas.
   const memoria = p.memoria ? `<button type="button" class="pf-memoria-linha ${p.memoria.nivel}" ${p.memoria.alvo}><span class="pf-memoria-ponto" aria-hidden="true"></span>${esc(p.memoria.texto)}</button>` : "";
@@ -213,7 +227,7 @@ function corpoDaPilula(p: Pilula): string {
  * tem para onde levar e não aparece.
  */
 export function partesDaPilula(p: Pilula, progresso: Pick<ProgressoNaTela, "naTimeline">): PartesDaPilula {
-  const resto = p.resto.length ? `<span class="sr-only">, </span><span class="pf-resto">${esc(p.resto.join(" · "))}</span>` : "";
+  const resto = p.resto.length ? `<span class="sr-only">, </span><span class="pf-resto${p.vencida ? " p377-resto" : ""}">${esc(p.resto.join(" · "))}</span>` : "";
   const botao = `${ponto(p.sinal)}<span class="pf-texto">${esc(p.texto)}</span>${resto}${SETA_CIMA}`;
   const memoria = p.memoria ? `<button type="button" class="pf-memoria ${p.memoria.nivel}" ${p.memoria.alvo} title="${esc(p.memoria.texto)}" aria-label="${esc(p.memoria.texto)}"><span class="pf-memoria-ponto" aria-hidden="true"></span></button>` : "";
   const resumo = [p.texto, ...p.resto].join(" · ");

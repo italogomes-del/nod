@@ -73,3 +73,7 @@ e a entrega tardia acabam a task do colega sem passar por ele. Ninguém relia o 
 ## Gatilho de reversão
 
 - Mais de 10% dos pedidos retomados caírem de novo em 2 semanas: reabrir o limite e o sinal de volta.
+
+> Emenda (2026-10-28, NOD-377): o pedido com mais de 24 h não fica mais de fora; a [ADR-132](adr-132-toda-espera-de-colega-tem-fim.md)
+> fecha toda espera de colega (prazo de 24 h, uma reentrega, Cobrar/Desistir no painel). A janela de 24 h daqui segue
+> como o tempo da queda antes do aviso.

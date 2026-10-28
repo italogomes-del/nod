@@ -1,6 +1,8 @@
 import type { DeQuemPediu } from "../contracts/dono.ts";
+import { ENTRADA_DA_COBRANCA } from "../domain/espera-de-colega.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
 import { data, ms } from "./conversao.ts";
+import { pedidoAbertoSql, PROFUNDIDADE_DA_CADEIA, uuidDoPayload } from "./pedidos-de-colega.repo.ts";
 
 /** Um comando esperando (`esperar_comando`), com o que a linha aberta mostra e o que a tentativa precisa. */
 export type ComandoDoDono = {
@@ -32,6 +34,10 @@ export type ColegaDoDono = {
   colegaRemovido: boolean;
   colegaTrabalhando: boolean;
   colegaFila: number;
+  /** NOD-377: o pedido (a tarefa do handoff), a última cobrança e quantas houve — para "sem resposta há X" e o Cobrar. */
+  tarefaId: string;
+  cobradoEm: number | null;
+  cobrancas: number;
 };
 export type PedidoDoDono = { turnoId: string; agenteId: string; de: DeQuemPediu; nome: string | null; desde: number };
 
@@ -101,22 +107,36 @@ export function donosRepo(conn: Conn, escopo: Escopo) {
           ) m on true
           where t.tenant_id = ${escopo.tenantId} and t.agente_id = any(${ids}::uuid[]) and t.estado = 'pendente' and t.acordar_em > ${data(agora)}
           order by t.criado_em, t.id`,
-        // O pedido a colega sem resposta (a regra de fatos.colega em trabalhos.repo.ts), da conversa ou de uma frente.
-        conn<{ agente_id: string; trabalho_id: string | null; nome: string | null; criado_em: Date; colega_id: string | null; colega_removido: boolean; colega_trabalhando: boolean; colega_fila: number }[]>`
-          select t.agente_id, t.trabalho_id, g.nome, h.criado_em, g.id as colega_id,
-            (g.id is null or g.excluido_em is not null) as colega_removido,
-            (g.id is not null and exists (select 1 from turnos q where q.tenant_id = g.tenant_id and q.agente_id = g.id and q.estado = 'despachando')) as colega_trabalhando,
+        // O pedido a colega sem resposta, da conversa ou de uma frente. NOD-377: "aberto" é o pedidoAbertoSql, o mesmo do varredor.
+        conn<{ agente_id: string; trabalho_id: string | null; tarefa_id: string; nome: string | null; criado_em: Date; colega_id: string | null; colega_removido: boolean; colega_trabalhando: boolean; colega_fila: number; cobrado_em: Date | null; cobrancas: number }[]>`
+          select t.agente_id, t.trabalho_id, h.payload->>'tarefaId' as tarefa_id, g.nome, h.criado_em, g.id as colega_id,
+            (g.excluido_em is not null) as colega_removido,
+            exists (select 1 from turnos q where q.tenant_id = g.tenant_id and q.agente_id = g.id and q.estado = 'despachando') as colega_trabalhando,
             (select count(*)::int from turnos q where q.tenant_id = h.tenant_id and q.agente_id = g.id and q.estado = 'pendente'
-              and (q.acordar_em is null or q.acordar_em <= ${data(agora)})) as colega_fila
+              and (q.acordar_em is null or q.acordar_em <= ${data(agora)})) as colega_fila,
+            cb.ultima as cobrado_em, coalesce(cb.quantas, 0) as cobrancas
           from mensagens h
           join turnos t on t.tenant_id = h.tenant_id and t.id = h.turno_id
-          left join agentes g on g.tenant_id = h.tenant_id and g.id::text = h.payload->>'para'
-          where h.tenant_id = ${escopo.tenantId} and t.agente_id = any(${ids}::uuid[]) and h.kind = 'handoff'
-            and h.payload->>'tarefaId' is not null
-            and not exists (select 1 from mensagens r where r.tenant_id = h.tenant_id and r.conversa_id = h.conversa_id and r.kind = 'peer_ask'
-              and r.payload->>'tarefaId' = h.payload->>'tarefaId')
-            and not exists (select 1 from trabalhos k where k.tenant_id = h.tenant_id and k.id::text = h.payload->>'trabalhoId'
-              and k.estado in ('terminado', 'parado', 'falhou'))
+          -- Revisão 2 do PR #544 (B3): os mesmos joins do varredor (esperasDeColega) — o colega é o dono do turno da tarefa;
+          -- sem o turno, o painel não mostra o que o varredor nunca fecharia.
+          join turnos d on d.tenant_id = h.tenant_id and d.id = ${uuidDoPayload(conn, conn`h.payload->>'tarefaId'`)}
+          join agentes g on g.tenant_id = h.tenant_id and g.id = d.agente_id
+          -- NOD-377: as cobranças do pedido (Cobrar ou a reentrega automática). Revisão 3 do PR #544 (M4): só as retomadas
+          -- da cadeia da tarefa que COMEÇAM pela marca, como no varredor (esperasDeColega).
+          left join lateral (
+            with recursive cadeia(id, n) as (
+              select d.id, 0
+              union all
+              select r.id, c.n + 1 from cadeia c join turnos r on r.tenant_id = h.tenant_id and r.retoma_turno_id = c.id and r.origem = 'retomada'
+              where c.n < ${PROFUNDIDADE_DA_CADEIA}
+            )
+            select max(q.criado_em) as ultima, count(*)::int as quantas from cadeia c join turnos q on q.tenant_id = h.tenant_id and q.id = c.id
+            where q.origem = 'retomada' and left(q.entrada_texto, length(${ENTRADA_DA_COBRANCA} || d.id::text)) = ${ENTRADA_DA_COBRANCA} || d.id::text
+          ) cb on true
+          -- Os mesmos filtros do varredor (esperasDeColega): da pessoa e com quem pediu vivo (o painel só mostra o que fecha).
+          where h.tenant_id = ${escopo.tenantId} and h.owner_id = ${escopo.pessoaId} and h.kind = 'handoff'
+            and t.agente_id = any(${ids}::uuid[]) and ${pedidoAbertoSql(conn, "h")}
+            and exists (select 1 from agentes a where a.tenant_id = h.tenant_id and a.id = ${uuidDoPayload(conn, conn`h.payload->>'de'`)} and a.excluido_em is null)
           order by h.criado_em, h.id`,
         // Os pedidos na fila do dono, ainda não começados: a fala da pessoa, a triagem de um colega ou de uma rotina. A
         // ordem é a do reivindicar no que importa à tela: a pessoa passa na frente, o resto por chegada.
@@ -139,7 +159,7 @@ export function donosRepo(conn: Conn, escopo: Escopo) {
         decisoes: new Map(decisoes.map((l) => [l.agente_id, { quantas: l.quantas, desde: ms(l.desde) }])),
         comandos: comandos.map((l) => ({ id: l.id, agenteId: l.agente_id, trabalhoId: l.trabalho_id, turnoId: l.turno_id, comando: l.comando, motivo: l.motivo, desde: ms(l.criado_em), saidaAnterior: l.saida_anterior, emVolta: l.em_volta, origem: l.origem })),
         voltas: voltas.map((l) => ({ agenteId: l.agente_id, trabalhoId: l.trabalho_id, motivo: l.motivo, desde: ms(l.criado_em), acordaEm: ms(l.acordar_em) })),
-        colegas: colegas.map((l) => ({ agenteId: l.agente_id, trabalhoId: l.trabalho_id, nome: l.nome, desde: ms(l.criado_em), colegaId: l.colega_id, colegaRemovido: l.colega_removido, colegaTrabalhando: l.colega_trabalhando, colegaFila: l.colega_fila })),
+        colegas: colegas.map((l) => ({ agenteId: l.agente_id, trabalhoId: l.trabalho_id, tarefaId: l.tarefa_id, nome: l.nome, desde: ms(l.criado_em), colegaId: l.colega_id, colegaRemovido: l.colega_removido, colegaTrabalhando: l.colega_trabalhando, colegaFila: l.colega_fila, cobradoEm: l.cobrado_em ? ms(l.cobrado_em) : null, cobrancas: l.cobrancas })),
         fila: fila.map((l) => {
           const de: DeQuemPediu = l.origem === "conversa" ? "pessoa" : l.origem === "rotina" ? "rotina" : "colega";
           return { turnoId: l.id, agenteId: l.agente_id, de, nome: de === "colega" ? l.colega : de === "rotina" ? l.rotina : null, desde: ms(l.criado_em) };

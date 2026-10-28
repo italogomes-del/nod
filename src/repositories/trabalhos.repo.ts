@@ -11,6 +11,7 @@ import type { FatosLimpeza } from "../domain/limpeza-das-tasks.ts";
 import type { FatosTrabalho } from "../domain/trabalho.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
 import { alvoDoTurno } from "./alvo-da-maquina.ts";
+import { pedidoAbertoSql } from "./pedidos-de-colega.repo.ts";
 import { data, ms, msOuNull } from "./conversao.ts";
 
 interface Linha {
@@ -231,10 +232,7 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
             and exists (select 1 from mensagens h join turnos t on t.tenant_id = h.tenant_id and t.id = h.turno_id
               where h.tenant_id = w.tenant_id and t.trabalho_id = w.id and h.kind = 'handoff' and h.payload->>'tarefaId' is not null
                 and h.criado_em < ${colegaAntesDe === null ? null : data(colegaAntesDe)}::timestamptz
-                and not exists (select 1 from mensagens r where r.tenant_id = h.tenant_id and r.conversa_id = h.conversa_id and r.kind = 'peer_ask'
-                  and r.payload->>'tarefaId' = h.payload->>'tarefaId')
-                and not exists (select 1 from trabalhos c where c.tenant_id = h.tenant_id and c.id::text = h.payload->>'trabalhoId'
-                  and c.estado in ('terminado', 'parado', 'falhou'))))
+                and ${pedidoAbertoSql(conn, "h")}))
         order by criado_em limit 1`;
       return l ? paraTrabalho(l) : null;
     },
@@ -435,10 +433,7 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
           -- acabado sem peer_ask (a pessoa o parou) não segura este: senão ele ficaria rodando para sempre.
           exists (select 1 from mensagens h join turnos t on t.tenant_id = h.tenant_id and t.id = h.turno_id
             where h.tenant_id = ${escopo.tenantId} and t.trabalho_id = ${id} and h.kind = 'handoff' and h.payload->>'tarefaId' is not null
-              and not exists (select 1 from mensagens r where r.tenant_id = h.tenant_id and r.conversa_id = h.conversa_id and r.kind = 'peer_ask'
-                and r.payload->>'tarefaId' = h.payload->>'tarefaId')
-              and not exists (select 1 from trabalhos c where c.tenant_id = h.tenant_id and c.id::text = h.payload->>'trabalhoId'
-                and c.estado in ('terminado', 'parado', 'falhou'))) as colega,
+              and ${pedidoAbertoSql(conn, "h")}) as colega,
           u.estado as ultimo_estado, u.motivo_interrupcao as ultimo_motivo
         from (select 1) um
         left join lateral (
@@ -511,10 +506,7 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
           from mensagens h join turnos t on t.tenant_id = h.tenant_id and t.id = h.turno_id
           left join agentes g on g.tenant_id = h.tenant_id and g.id::text = h.payload->>'para'
           where h.tenant_id = w.tenant_id and t.trabalho_id = w.id and h.kind = 'handoff' and h.payload->>'tarefaId' is not null
-            and not exists (select 1 from mensagens r where r.tenant_id = h.tenant_id and r.conversa_id = h.conversa_id and r.kind = 'peer_ask'
-              and r.payload->>'tarefaId' = h.payload->>'tarefaId')
-            and not exists (select 1 from trabalhos k where k.tenant_id = h.tenant_id and k.id::text = h.payload->>'trabalhoId'
-              and k.estado in ('terminado', 'parado', 'falhou'))
+            and ${pedidoAbertoSql(conn, "h")}
           order by h.criado_em, h.id limit 1
         ) c on true
         -- ADR-099 (I10): o motivo da volta marcada mais próxima — o do turno que a marcou (o mesmo despertar_em).

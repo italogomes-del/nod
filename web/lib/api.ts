@@ -262,6 +262,9 @@ export function criarApi(escopo: Escopo) {
     trabalho: (id: string) => get<TrabalhoDetalheDto>(`trabalhos/${encodeURIComponent(id)}`),
     escreverNoTrabalho: (id: string, texto: string) => post<RespostaMutacao>(`trabalhos/${encodeURIComponent(id)}/mensagens`, { texto }),
     pararTrabalho: (id: string) => post<RespostaMutacao>(`trabalhos/${encodeURIComponent(id)}/parar`),
+    // NOD-377: o Cobrar e o Desistir da espera de colega vencida.
+    cobrarEspera: (agenteId: string, tarefaId: string) => post<{ ok: true; cobradoEm: number; cobrancas: number }>(`agentes/${encodeURIComponent(agenteId)}/esperas-de-colega/${encodeURIComponent(tarefaId)}/cobrar`),
+    desistirDaEspera: (agenteId: string, tarefaId: string) => post<{ ok: true }>(`agentes/${encodeURIComponent(agenteId)}/esperas-de-colega/${encodeURIComponent(tarefaId)}/desistir`),
     trabalhoDepois: (id: string, depoisDe: string) => post<RespostaMutacao>(`trabalhos/${encodeURIComponent(id)}/depois`, { depoisDe }),
     trabalhoFazerAqui: (id: string) => post<RespostaMutacao>(`trabalhos/${encodeURIComponent(id)}/fazer-aqui`),
     // #191: o que a tela mostrou e o que a pessoa abriu, em lote; a taxa por tipo aparece no Modo dev.

@@ -1140,11 +1140,19 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
       return r.length;
     },
 
-    /** Cancelar da fila: só o que AINDA está pendente — um turno que o laço acabou de reivindicar fica intacto. */
-    async cancelarPendente(id: string): Promise<Turno | null> {
+    /**
+     * Cancelar da fila: só o que AINDA está pendente — um turno que o laço acabou de reivindicar fica intacto. `motivo`:
+     * a pessoa (padrão) ou, no fecho automático de um pedido a colega (NOD-377, revisão 3 do PR #544), `vencido`.
+     */
+    async cancelarPendente(id: string, motivo: "parado_pela_pessoa" | "vencido" = "parado_pela_pessoa", o: { pularTravado?: boolean } = {}): Promise<Turno | null> {
+      // NOD-377 (revisão 4 do PR #544, M1): com `pularTravado`, a linha que outra transação segura fica (SKIP LOCKED). Quem
+      // a segura está mudando o estado dela (o Parar e a exclusão a interrompem, o despacho a pega); esperar por ela com a
+      // trava da raiz do pedido na mão fechava o ciclo com o Parar (linha → raiz): impasse.
+      const pular = o.pularTravado === true;
       const [l] = await conn<Linha[]>`
-        update turnos set estado = 'interrompido', motivo_interrupcao = 'parado_pela_pessoa', lease_ate = null
+        update turnos set estado = 'interrompido', motivo_interrupcao = ${motivo}, lease_ate = null
         where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and estado = 'pendente'
+          and (not ${pular}::boolean or id in (select x.id from turnos x where x.tenant_id = ${escopo.tenantId} and x.id = ${id} and x.estado = 'pendente' for update skip locked))
         returning ${conn.unsafe(COLUNAS)}`;
       return l ? paraTurno(l) : null;
     },

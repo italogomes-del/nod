@@ -1,20 +1,62 @@
+import type postgres from "postgres";
 import { ENTRADA_DA_VOLTA_DA_COTA } from "../domain/cota-da-ia.ts";
+import { ENTRADA_DA_COBRANCA, type EsperaDeColega } from "../domain/espera-de-colega.ts";
 import { IDADE_MAX_PEDIDO_RETOMAVEL_MS, MOTIVOS_DE_QUEDA, MOTIVOS_FALHA_SEM_QUEDA, type PedidoParado } from "../domain/pedido-parado.ts";
 import type { PedidoAberto } from "../domain/triagem.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
 import { data, msOuNull } from "./conversao.ts";
 
-/**
- * O id `campo` do payload do handoff (`m`) como uuid, ou null quando não é um uuid (NOD-362). O cast sem a guarda
- * derrubaria a consulta inteira por um payload malformado; o CASE garante que o cast só roda depois da regex. A regex
- * aceita maiúsculas (`~*`) e o cast normaliza: um id em maiúsculas agora casa com o turno (o `::text` de antes não casava).
- */
-function uuidDoPayload(conn: Conn, campo: "tarefaId" | "trabalhoId") {
-  return conn`(case when m.payload->>${campo} ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then (m.payload->>${campo})::uuid end)`;
-}
-
 /** Estados de um trabalho ainda aberto (o mesmo recorte do índice `trabalhos_pedidos_abertos` da 0071). */
 const ABERTOS = ["na_fila", "rodando", "precisa_de_voce", "fechado_ocioso"] as const;
+
+/**
+ * O id de um payload JSON como uuid (revisão do PR #544; NOD-362): `coluna::text = payload->>'x'` não usa o índice da
+ * chave e varria a tabela; o cast direto lança com um valor que não é uuid (payload antigo ou forjado). Fora do formato:
+ * null. O CASE garante que o cast só roda depois da regex; `~*` aceita maiúsculas e o cast normaliza.
+ */
+export function uuidDoPayload(conn: Conn, expr: postgres.PendingQuery<postgres.Row[]>) {
+  return conn`(case when ${expr} ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then (${expr})::uuid end)`;
+}
+
+/**
+ * NOD-377 (revisão 6 do PR #544, M1): a profundidade da cadeia de retomadas que as esperas leem — a mesma janela da entrega
+ * (cadeiaDaDelegacao lê os 500 turnos da conversa). Com o corte de 10 da triagem, uma cadeia longa tinha o "último" errado
+ * (aviso de queda com o colega ainda rodando) e pendentes além do 10.º elo ficavam na fila.
+ */
+export const PROFUNDIDADE_DA_CADEIA = 500;
+
+/** O handoff ainda sem peer_ask da mesma tarefa NA MESMA conversa (CA8) — a parte de pedidoAbertoSql que `abertos` usa. */
+export function semRespostaSql(conn: Conn, alias: string) {
+  const h = conn(alias);
+  return conn`not exists (select 1 from mensagens r where r.tenant_id = ${h}.tenant_id and r.conversa_id = ${h}.conversa_id and r.kind = 'peer_ask'
+      and r.payload->>'tarefaId' = ${h}.payload->>'tarefaId')`;
+}
+
+/**
+ * O pedido a colega ainda aberto (definido em 2026-10-27, NOD-377): a mensagem `alias` é um `handoff` com tarefa, sem
+ * `peer_ask` da mesma tarefa NA MESMA conversa (nem resultado nem aviso de falha; a resposta de outra conversa não fecha
+ * esta espera) e sem a task de colega de antes já acabada. É a ÚNICA definição: o painel (donos.repo.ts) e o varredor
+ * (`esperasDeColega`) usam esta; a espera circular (`abertos`, NOD-362) usa a mesma semRespostaSql e o mesmo filtro do
+ * trabalho, depois da CTE materializada — antes cada um tinha a sua, e o painel mostrava o que
+ * o varredor já não olhava.
+ */
+export function pedidoAbertoSql(conn: Conn, alias: string) {
+  const h = conn(alias);
+  return conn`${h}.kind = 'handoff' and ${h}.payload->>'tarefaId' is not null
+    and ${semRespostaSql(conn, alias)}
+    and not exists (select 1 from trabalhos k where k.tenant_id = ${h}.tenant_id and k.id = ${uuidDoPayload(conn, conn`${h}.payload->>'trabalhoId'`)}
+      and k.estado in ('terminado', 'parado', 'falhou'))`;
+}
+
+/** Um pedido aberto como o varredor e as ações do painel (Cobrar, Desistir) o leem. */
+export type EsperaDeColegaLida = EsperaDeColega & {
+  /** Quem pediu (o bot que espera) e a conversa de onde pediu (a do handoff). */
+  deAgenteId: string;
+  conversaId: string;
+  colegaId: string;
+  colegaNome: string;
+  deNome: string;
+};
 
 /**
  * Os pedidos entre bots vistos pela triagem do dono (definido em 2026-10-12, ADR-099 itens 1a e 8, issue I7 revista).
@@ -30,6 +72,33 @@ export function pedidosDeColegaRepo(conn: Conn, escopo: Escopo) {
      */
     async travar(): Promise<void> {
       await conn`select pg_advisory_xact_lock(hashtext(${escopo.tenantId}), hashtext('pedir_a_bot'))`;
+    },
+
+    /**
+     * NOD-377 (revisão do PR #544): a entrega de UMA tarefa (resultado ou aviso) é serializada pela raiz. Sem ela, o
+     * assentar do turno e o varredor (ou o Desistir) liam "nada entregue" ao mesmo tempo e gravavam dois peer_ask.
+     */
+    async travarTarefa(tarefaId: string): Promise<void> {
+      await conn`select pg_advisory_xact_lock(hashtext(${escopo.tenantId}), hashtext(${"peer_ask:" + tarefaId}))`;
+    },
+
+    /**
+     * NOD-377 (revisão 5 do PR #544, M1): os trabalhos dos turnos da cadeia do pedido, travados (FOR UPDATE, em ordem de
+     * id) ANTES da raiz. O assentar do turno do colega trava o trabalho dele e depois a raiz (entregar); o varredor, o
+     * Cobrar e o Desistir, que pegavam a raiz e depois o trabalho (sincronizar ao cancelar o pendente), fechavam o ciclo.
+     */
+    async travarTrabalhosDaCadeia(tarefaId: string): Promise<void> {
+      await conn`
+        with recursive cadeia(id, n) as (
+          select ${tarefaId}::uuid, 0
+          union all
+          select r.id, c.n + 1 from cadeia c
+          join turnos r on r.tenant_id = ${escopo.tenantId} and r.retoma_turno_id = c.id and r.origem = 'retomada'
+          where c.n < ${PROFUNDIDADE_DA_CADEIA}
+        )
+        select k.id from trabalhos k
+        where k.tenant_id = ${escopo.tenantId} and k.id in (select t.trabalho_id from cadeia c join turnos t on t.tenant_id = ${escopo.tenantId} and t.id = c.id where t.trabalho_id is not null)
+        order by k.id for update of k`;
     },
 
     /**
@@ -57,13 +126,13 @@ export function pedidosDeColegaRepo(conn: Conn, escopo: Escopo) {
       const linhas = await conn<{ de: string; para: string; tarefa_id: string | null; criado_em: Date; texto: string | null }[]>`
         with h as materialized (
           select m.payload->>'de' as de, m.payload->>'para' as para, m.payload->>'tarefaId' as tarefa_id, m.criado_em,
-            m.payload->>'motivo' as texto, ${uuidDoPayload(conn, "tarefaId")} as tarefa, ${uuidDoPayload(conn, "trabalhoId")} as trabalho
+            m.payload->>'motivo' as texto, ${uuidDoPayload(conn, conn`m.payload->>'tarefaId'`)} as tarefa, ${uuidDoPayload(conn, conn`m.payload->>'trabalhoId'`)} as trabalho
           from mensagens m
           where m.tenant_id = ${escopo.tenantId} and m.kind = 'handoff' and m.payload->>'tarefaId' is not null
             and m.criado_em >= ${data(piso)}
             ${de === undefined ? conn`` : conn`and m.payload->>'de' = ${de}::text`}
-            and not exists (select 1 from mensagens r where r.tenant_id = m.tenant_id and r.conversa_id = m.conversa_id and r.kind = 'peer_ask'
-              and r.payload->>'tarefaId' = m.payload->>'tarefaId')
+            -- NOD-377 (CA5): a mesma "sem resposta" do painel e do varredor (pedidoAbertoSql); o trabalho fechado vem depois.
+            and ${semRespostaSql(conn, "m")}
         )
         select h.de, h.para, h.tarefa_id, h.criado_em, h.texto from h
         where not exists (select 1 from trabalhos k where k.tenant_id = ${escopo.tenantId} and h.trabalho is not null and k.id = h.trabalho
@@ -215,6 +284,152 @@ export function pedidosDeColegaRepo(conn: Conn, escopo: Escopo) {
           turnoDoTextoFinal: null,
         };
       });
+    },
+
+    /**
+     * Os pedidos abertos da pessoa (pedidoAbertoSql), SEM janela de idade (definido em 2026-10-27, NOD-377), com o que a
+     * regra de src/domain/espera-de-colega.ts precisa. A cadeia é o turno da tarefa e as retomadas dele (a triagem do
+     * dono, ADR-099) mais os turnos da task de colega de antes (`trabalhoId`). As cobranças são as retomadas marcadas com
+     * ENTRADA_DA_COBRANCA + a tarefa, na conversa dela. Quem pediu excluído fica fora (não há a quem entregar). Até
+     * `limite`, os mais antigos primeiro; `tarefaId`/`de` filtram um pedido (as ações do painel).
+     */
+    async esperasDeColega(agora: number, o: { adiados?: readonly string[]; tarefaId?: string; tarefaIds?: readonly string[]; de?: string; limite?: number } = {}): Promise<EsperaDeColegaLida[]> {
+      // Revisão 10 do PR #544 (M2): os filtros entram só quando vêm (o `x is null or …` deixava o plano genérico, NOD-362).
+      // `tarefaIds`: o painel lê de uma vez as esperas vencidas de todos os bots (antes, uma consulta por espera).
+      const tarefas = o.tarefaIds ?? (o.tarefaId === undefined ? null : [o.tarefaId]);
+      if (tarefas?.length === 0) return [];
+      const adiados = o.adiados ?? [];
+      const linhas = await conn<{
+        tarefa_id: string; de_id: string; conversa_id: string; criado_em: Date; colega_id: string; colega_nome: string; de_nome: string; colega_excluido: boolean; colega_livre: boolean;
+        cobrado_em: Date | null; cobrancas: number; rodando: boolean; vivo: boolean; aguardando: boolean; na_fila: boolean; fila_desde: Date | null; rodou: boolean;
+        ultimo_id: string | null; ultimo_estado: string | null; ultimo_motivo: string | null; ultimo_fim: Date | null; texto_final: string | null; retomar_de: string | null;
+      }[]>`
+        with recursive pedidos as (
+          select h.id as handoff_id, h.criado_em, h.conversa_id, ${uuidDoPayload(conn, conn`h.payload->>'de'`)} as de_id, ${uuidDoPayload(conn, conn`h.payload->>'trabalhoId'`)} as trabalho_id, d.id as tarefa_id, d.conversa_id as tarefa_conversa, d.agente_id as colega_id
+          from mensagens h
+          join turnos d on d.tenant_id = h.tenant_id and d.id = ${uuidDoPayload(conn, conn`h.payload->>'tarefaId'`)}
+          where h.tenant_id = ${escopo.tenantId} and h.owner_id = ${escopo.pessoaId} and ${pedidoAbertoSql(conn, "h")}
+            and exists (select 1 from agentes a where a.tenant_id = h.tenant_id and a.id = ${uuidDoPayload(conn, conn`h.payload->>'de'`)} and a.excluido_em is null)
+            ${adiados.length === 0 ? conn`` : conn`and not (h.payload->>'tarefaId' = any(${[...adiados]}::text[]))`}
+            ${tarefas === null ? conn`` : conn`and h.payload->>'tarefaId' = any(${[...tarefas]}::text[])`}
+            ${o.de === undefined ? conn`` : conn`and h.payload->>'de' = ${o.de}::text`}
+        ), cadeia(raiz, id, n) as (
+          select p.tarefa_id, p.tarefa_id, 0 from pedidos p
+          union all
+          select c.raiz, r.id, c.n + 1 from cadeia c
+          join turnos r on r.tenant_id = ${escopo.tenantId} and r.retoma_turno_id = c.id and r.origem = 'retomada'
+          where c.n < ${PROFUNDIDADE_DA_CADEIA}
+        ), membros as (
+          select raiz, id from cadeia
+          union
+          select p.tarefa_id, t.id from pedidos p join turnos t on t.tenant_id = ${escopo.tenantId} and t.trabalho_id = p.trabalho_id
+        )
+        select p.tarefa_id, p.de_id, p.conversa_id, p.criado_em, p.colega_id, g.nome as colega_nome, quem.nome as de_nome,
+          (g.excluido_em is not null) as colega_excluido,
+          not exists (select 1 from turnos t where t.tenant_id = g.tenant_id and t.agente_id = g.id
+            and (t.estado = 'despachando' or (t.estado = 'pendente' and (t.acordar_em is null or t.acordar_em <= ${data(agora)})))) as colega_livre,
+          cb.ultima as cobrado_em, coalesce(cb.quantas, 0) as cobrancas,
+          coalesce(f.rodando, false) or exists (select 1 from esperas e join membros mb on mb.id = e.turno_id
+            where e.tenant_id = ${escopo.tenantId} and mb.raiz = p.tarefa_id and e.estado = 'rodando') as rodando,
+          -- Revisão do PR #544: a triagem do dono com frentes abertas, ou uma decisão da pessoa em aberto, não é "sem resposta".
+          (exists (select 1 from lotes_de_frentes l join membros mb on mb.id = l.aberto_por_turno_id
+              where l.tenant_id = ${escopo.tenantId} and mb.raiz = p.tarefa_id and l.devolvido_em is null)
+            or exists (select 1 from decisoes dc join membros mb on mb.id = dc.turno_id
+              where dc.tenant_id = ${escopo.tenantId} and mb.raiz = p.tarefa_id and dc.estado in ('pendente', 'reaberta', 'em_revisao'))
+            -- Revisão 4 do PR #544 (M2): o colega que pediu a um terceiro e espera a resposta dele também está trabalhando
+            -- (o mesmo "aguardando_colega" de entregar-resposta-peer.ts). A espera de lá tem fim pela regra dela.
+            or exists (select 1 from mensagens hh join membros mb on mb.id = hh.turno_id
+              where hh.tenant_id = ${escopo.tenantId} and mb.raiz = p.tarefa_id and ${pedidoAbertoSql(conn, "hh")})) as aguardando,
+          coalesce(f.vivo, false) as vivo,
+          coalesce(f.na_fila, false) as na_fila, f.fila_desde, coalesce(f.rodou, false) as rodou,
+          u.id as ultimo_id, u.estado::text as ultimo_estado, u.motivo_interrupcao::text as ultimo_motivo, u.fim as ultimo_fim,
+          x.texto as texto_final, rc.id as retomar_de
+        from pedidos p
+        join agentes g on g.tenant_id = ${escopo.tenantId} and g.id = p.colega_id
+        join agentes quem on quem.tenant_id = ${escopo.tenantId} and quem.id = p.de_id
+        -- Revisão 3 do PR #544 (M4): as cobranças são as retomadas DA CADEIA do pedido que COMEÇAM pela marca — não a
+        -- conversa inteira do colega, nem um texto de terceiro que repita a frase no meio (a resposta de outro colega que cai
+        -- numa retomada começa por "Resposta de").
+        left join lateral (
+          select max(q.criado_em) as ultima, count(*)::int as quantas from cadeia c join turnos q on q.tenant_id = ${escopo.tenantId} and q.id = c.id
+          where c.raiz = p.tarefa_id and q.origem = 'retomada'
+            and left(q.entrada_texto, length(${ENTRADA_DA_COBRANCA} || p.tarefa_id::text)) = ${ENTRADA_DA_COBRANCA} || p.tarefa_id::text
+        ) cb on true
+        left join lateral (
+          -- Revisão 9 do PR #544 (A1): a volta da cota pendente é a espera da cota (C22), não fila parada — "Seguir com",
+          -- conta nova, trocar a IA e Levar tasks a acordam zerando acordar_em, e o criado_em dela é o da queda. Conta como
+          -- rodando (o teto da espera ainda vale) e fica fora da fila e do fila_desde.
+          select bool_or(q.estado = 'despachando' or (q.estado = 'pendente' and (q.acordar_em > ${data(agora)} or starts_with(q.entrada_texto, ${ENTRADA_DA_VOLTA_DA_COTA})))) as rodando,
+            bool_or(q.estado = 'pendente' and (q.acordar_em is null or q.acordar_em <= ${data(agora)}) and not starts_with(q.entrada_texto, ${ENTRADA_DA_VOLTA_DA_COTA})) as na_fila,
+            -- Revisão 8 do PR #544 (A1): desde quando o turno mais antigo da fila está pronto (criado ou acordado).
+            min(greatest(q.criado_em, coalesce(q.acordar_em, q.criado_em))) filter (where q.estado = 'pendente' and (q.acordar_em is null or q.acordar_em <= ${data(agora)}) and not starts_with(q.entrada_texto, ${ENTRADA_DA_VOLTA_DA_COTA})) as fila_desde,
+            bool_or(q.estado = 'despachando') as vivo,
+            bool_or(q.attempted or q.despachado_em is not null) as rodou
+          from membros mb join turnos q on q.tenant_id = ${escopo.tenantId} and q.id = mb.id where mb.raiz = p.tarefa_id
+        ) f on true
+        left join lateral (
+          select q.id, q.estado, q.motivo_interrupcao, coalesce(q.ultimo_sinal_em, q.lease_ate, q.despachado_em, q.criado_em) as fim
+          from membros mb join turnos q on q.tenant_id = ${escopo.tenantId} and q.id = mb.id
+          where mb.raiz = p.tarefa_id and coalesce(q.motivo_interrupcao::text, '') <> 'absorvido'
+          order by q.criado_em desc, q.id desc limit 1
+        ) u on true
+        -- Revisão 2 do PR #544 (M2): de onde a reentrega retoma — o último da cadeia de retomadas, nunca da task antiga.
+        left join lateral (
+          select q.id from cadeia c join turnos q on q.tenant_id = ${escopo.tenantId} and q.id = c.id
+          where c.raiz = p.tarefa_id and coalesce(q.motivo_interrupcao::text, '') <> 'absorvido'
+          order by q.criado_em desc, q.id desc limit 1
+        ) rc on true
+        -- Revisão 10 do PR #544 (M1): a fala final é a do ÚLTIMO turno (u). Uma fala de um turno anterior da cadeia (antes de
+        -- uma reentrega ou cobrança que acabou calada) é intermediária ou superada: sem fala no último, "sem resposta".
+        left join lateral (
+          select m.texto from mensagens m
+          where m.tenant_id = ${escopo.tenantId} and m.turno_id = u.id and m.kind = 'texto' and m.autor_tipo = 'agente' and m.autor_id = p.colega_id
+            and coalesce(m.parcial, false) = false
+          order by m.criado_em desc, m.id desc limit 1
+        ) x on true
+        order by p.criado_em, p.handoff_id
+        limit ${o.limite ?? (tarefas ? tarefas.length : 50)}`;
+      return linhas.map((l) => ({
+        tarefaId: l.tarefa_id,
+        deAgenteId: l.de_id,
+        conversaId: l.conversa_id,
+        colegaId: l.colega_id,
+        colegaNome: l.colega_nome,
+        deNome: l.de_nome,
+        criadoEm: l.criado_em.getTime(),
+        cobradoEm: msOuNull(l.cobrado_em),
+        cobrancas: l.cobrancas,
+        colegaExcluido: l.colega_excluido,
+        colegaLivre: l.colega_livre,
+        rodando: l.rodando,
+        vivo: l.vivo,
+        aguardando: l.aguardando,
+        naFila: l.na_fila,
+        filaDesde: msOuNull(l.fila_desde),
+        rodou: l.rodou,
+        ultimo: l.ultimo_id && l.ultimo_estado && l.ultimo_fim ? { id: l.ultimo_id, estado: l.ultimo_estado, motivo: l.ultimo_motivo, fimEm: l.ultimo_fim.getTime() } : null,
+        textoFinal: l.texto_final,
+        retomarDe: l.retomar_de,
+      }));
+    },
+
+    /**
+     * NOD-377 (revisão 2 do PR #544, M5): os turnos da cadeia de retomadas do pedido ainda na fila (pendentes, de agora ou
+     * de uma volta marcada). Fechado o pedido de vez (o aviso do prazo, o Desistir), eles saem da fila: o colega não
+     * trabalha para quem não espera mais.
+     */
+    async pendentesDaCadeia(tarefaId: string): Promise<string[]> {
+      const linhas = await conn<{ id: string }[]>`
+        with recursive cadeia(id, n) as (
+          select ${tarefaId}::uuid, 0
+          union all
+          select r.id, c.n + 1 from cadeia c
+          join turnos r on r.tenant_id = ${escopo.tenantId} and r.retoma_turno_id = c.id and r.origem = 'retomada'
+          where c.n < ${PROFUNDIDADE_DA_CADEIA}
+        )
+        select t.id from cadeia c join turnos t on t.tenant_id = ${escopo.tenantId} and t.id = c.id
+        where t.estado = 'pendente' order by t.criado_em, t.id`;
+      return linhas.map((l) => l.id);
     },
   };
 }

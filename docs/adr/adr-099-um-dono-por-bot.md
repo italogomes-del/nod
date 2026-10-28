@@ -279,3 +279,6 @@ frentes que devolvem o resultado ao dono. A pessoa fala com o bot, não com as f
 
 > Cruzamento (2026-10-27, NOD-376): a fala da pessoa na tela de uma frente fica na frente (moldura própria) e não
 > volta ao dono; ver a emenda NOD-376 da [ADR-083](adr-083-trabalhos-paralelos-a-conversa-coordena.md).
+
+> Emenda (2026-10-28, NOD-377): a espera "Esperando <colega>" do dono sempre tem fim e mostra "sem resposta há X" com
+> Cobrar e Desistir quando vence; ver a [ADR-132](adr-132-toda-espera-de-colega-tem-fim.md).

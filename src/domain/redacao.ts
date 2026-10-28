@@ -191,7 +191,8 @@ const MOTIVO_EM_PORTUGUES: Readonly<Record<MotivoFalha | MotivoInterrupcao, stri
   lancamento_falhou: "a IA não conseguiu abrir neste Mac",
   sessao_rejeitada: "a IA recusou a conversa antes de começar",
   absorvido: "a mensagem foi lida junto com a seguinte",
-  vencido: "a execução ficou na fila sem começar e a janela seguinte chegou",
+  // Revisão 3 do PR #544: também o turno de um pedido a colega que o prazo fechou (NOD-377), não só a rotina.
+  vencido: "ficou na fila sem começar e o prazo passou",
   // NOD-293 A7: a pessoa revogou a chave da máquina com o turno rodando nela.
   maquina_removida: "a máquina foi removida; a frente parou",
   erro_max_turns: "o agente chegou ao limite de passos deste turno",

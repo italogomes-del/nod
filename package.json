@@ -55,6 +55,7 @@
     "release:mac": "bash scripts/desktop/release-mac.sh",
     "computador:build": "node scripts/computador/build.ts",
     "computador:orfaos": "node scripts/computadores-orfaos.ts",
+    "esperas:limpar": "node scripts/limpar-esperas-nod-377.ts",
     "computador:legado": "node scripts/computador-legado.ts"
   },
   "simple-git-hooks": {

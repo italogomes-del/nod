@@ -11,7 +11,7 @@ import { notaPedidosAbertos } from "./pedidos-abertos.ts";
 import type { Deps } from "./tipos.ts";
 import { sincronizarTrabalho } from "./trabalhos.ts";
 
-export type SaidaEntregaPeer = { mensagem: Mensagem; continuacao: Turno; remetenteAgenteId: string } | { ignorado: "nao_e_tarefa_peer" | "aguardando_pessoa" | "aguardando_colega" | "aguardando_volta" | "aguardando_frentes" | "ja_entregue" | "remetente_excluido" | "quem_pediu_parado" | "alvo_excluido" };
+export type SaidaEntregaPeer = { mensagem: Mensagem; continuacao: Turno; remetenteAgenteId: string } | { ignorado: "nao_e_tarefa_peer" | "aguardando_pessoa" | "aguardando_colega" | "aguardando_volta" | "aguardando_frentes" | "ja_entregue" | "remetente_excluido" | "quem_pediu_parado" | "alvo_excluido" | "fechado_sem_acordar" };
 
 /**
  * definido em 2026-10-12 (ADR-099, I3): a entrega roda também dentro do fecho de um lote de frentes, que só tem repos,
@@ -158,7 +158,12 @@ async function aguardandoPessoa(deps: DepsEntrega, cadeia: readonly Turno[]): Pr
 }
 
 /** NOD-282 (G7): `complementar` = a resposta já saiu e esta acrescenta o que mudou (não cai no `ja_entregue`). */
-type Entrega = { tarefa: Turno; texto: string; falha: boolean; complementar?: boolean; paradoPeloChat?: true };
+/**
+ * NOD-377: `final` = o aviso fecha o pedido de vez (a marca `paradoPelaPessoa`): um resultado tardio do colega só fica
+ * registrado, não acorda quem pediu de novo — o Desistir da pessoa e a limpeza. `semAcordar` = além disso, grava o
+ * peer_ask sem continuação (o ramo de "quem pediu parado"): só a limpeza dos pedidos com mais de 7 dias.
+ */
+type Entrega = { tarefa: Turno; texto: string; falha: boolean; complementar?: boolean; paradoPeloChat?: true; final?: true; semAcordar?: true };
 
 function payloadDaEntrega(alvo: { id: string; nome: string }, tarefa: Turno, origem: { turnoOrigemId: string } | null, delegada: boolean, falha: boolean, paradoPelaPessoa = false) {
   return { kind: "peer_ask" as const, agenteId: alvo.id, nome: alvo.nome, naoSupervisionado: true as const, tarefaId: tarefa.id, ...(origem ? { turnoOrigemId: origem.turnoOrigemId } : {}), ...(delegada ? { delegada: true as const } : {}), ...(falha ? { falhou: true as const } : {}), ...(tarefa.trabalhoId ? { trabalhoId: tarefa.trabalhoId } : {}), ...(paradoPelaPessoa ? { paradoPelaPessoa: true as const } : {}) };
@@ -210,6 +215,8 @@ async function entregar(deps: DepsEntrega, e: Entrega): Promise<{ data: SaidaEnt
   // NOD-311: a pessoa parou quem pediu (o aviso saiu com paradoPelaPessoa): o resultado tardio só registra.
   let paradoAntes = false;
   if (delegada) {
+    // NOD-377: a leitura de "já entregue" e a gravação do peer_ask sob a trava da raiz (corrida assentar × varredor).
+    await deps.repos.pedidosDeColega.travarTarefa(tarefa.id);
     const entregues = (await deps.repos.mensagens.listarDaConversa(conversaRemetente.id, 500)).filter((m) => m.payload?.kind === "peer_ask" && m.payload.tarefaId === tarefa.id);
     const resultadoSaiu = entregues.some((m) => m.payload?.kind === "peer_ask" && !m.payload.falhou);
     if (!e.complementar && (resultadoSaiu || (e.falha && entregues.length > 0))) return { data: { ignorado: "ja_entregue" } };
@@ -230,7 +237,7 @@ async function entregar(deps: DepsEntrega, e: Entrega): Promise<{ data: SaidaEnt
   // revisto na revisão do PR #458: a marca `paradoPelaPessoa` (que torna final o aviso) só sai quando o Parar é do turno
   // que pediu ou do Parar do chat (`paradoPeloChat`); depois do Parar global, da sala ou da task, um resultado depois
   // do aviso (a pessoa retomou) segue saindo normalmente, como antes da NOD-311.
-  const parado = paradoAntes ? "turno" : await quemPediuParado(deps, pediu, conversaRemetente.id);
+  const parado = paradoAntes ? "turno" : e.semAcordar ? "sem_acordar" : await quemPediuParado(deps, pediu, conversaRemetente.id);
   if (parado) {
     const registro = await deps.repos.mensagens.criar({
       conversaId: conversaRemetente.id,
@@ -238,10 +245,12 @@ async function entregar(deps: DepsEntrega, e: Entrega): Promise<{ data: SaidaEnt
       autoria,
       kind: "peer_ask",
       texto: e.falha ? `${alvo.nome} não concluiu: ${e.texto}` : e.texto,
-      payload: payloadDaEntrega(alvo, tarefa, origem, delegada, e.falha, parado === "turno" || e.paradoPeloChat === true),
+      payload: payloadDaEntrega(alvo, tarefa, origem, delegada, e.falha, parado === "turno" || e.final === true || e.paradoPeloChat === true),
       confianca: "nao_confiavel",
     });
     const eventos = registro ? [evento(deps, "mensagem_criada", autoria, { mensagemId: registro.id, kind: "peer_ask", tarefaId: tarefa.id }, { conversaId: conversaRemetente.id })] : [];
+    // NOD-377: o trabalho de quem pediu esperava este pedido (aguardandoColega); fechado, ele relê o estado.
+    if (parado === "sem_acordar") return { data: { ignorado: "fechado_sem_acordar" }, events: [...eventos, ...(await sincronizarTrabalho(deps, pediu?.trabalhoId ?? null))] };
     return { data: { ignorado: "quem_pediu_parado" }, events: eventos };
   }
   // NOD-259: e os pedidos dele a colegas ainda sem resposta, de qualquer fio — fora o que está sendo entregue agora.
@@ -283,7 +292,7 @@ async function entregar(deps: DepsEntrega, e: Entrega): Promise<{ data: SaidaEnt
     autoria,
     kind: "peer_ask",
     texto: e.falha ? `${alvo.nome} não concluiu: ${e.texto}` : e.texto,
-    payload: payloadDaEntrega(alvo, tarefa, origem, delegada, e.falha),
+    payload: payloadDaEntrega(alvo, tarefa, origem, delegada, e.falha, e.final === true),
     confianca: "nao_confiavel",
   });
   if (!mensagem) throw new ErroDeDominio("estado_invalido", { cause: "mensagem peer_ask não criada" });
@@ -348,6 +357,50 @@ export async function avisarFalhaDelegacao(deps: DepsEntrega, input: { turnoId: 
   const espera = input.semEsperar ? null : await aindaNaoEntrega(deps, tarefa, null, input.turnoId);
   if (espera) return { data: { ignorado: espera } };
   return entregar(deps, { tarefa, texto: input.motivo, falha: true, ...(input.paradoPeloChat ? { paradoPeloChat: true as const } : {}) });
+}
+
+/**
+ * NOD-377: fecha um pedido sem acordar quem pediu — a limpeza dos pedidos com mais de 7 dias. Não
+ * espera nada da cadeia (é a decisão final de fechar). Uma vez por raiz, como o aviso: `ja_entregue` se já houve entrega.
+ */
+export async function fecharPedidoSemAcordar(deps: DepsEntrega, input: { turnoId: string; motivo: string; resultado?: string | null }): Promise<{ data: SaidaEntregaPeer; events?: RuntimeEvent[] }> {
+  const turno = await deps.repos.turnos.buscar(input.turnoId);
+  const tarefa = turno ? await delegacaoDoTurno(deps.repos, turno) : null;
+  if (!tarefa) return { data: { ignorado: "nao_e_tarefa_peer" } };
+  // Revisão do PR #544 (M6): o colega concluiu com fala e ninguém entregou — o fecho registra o RESULTADO, não "sem resposta".
+  if (input.resultado) return entregar(deps, { tarefa, texto: input.resultado, falha: false, final: true, semAcordar: true });
+  return entregar(deps, { tarefa, texto: input.motivo, falha: true, final: true, semAcordar: true });
+}
+
+/**
+ * NOD-377 (revisão 2 do PR #544, M2): o último recurso do teto. A entrega pela raiz foi ignorada por algo estrutural (o
+ * handoff aponta um turno que não é tarefa de colega, o fecho saiu noutra conversa, quem pediu sumiu) e o pedido ficaria
+ * aberto para sempre. Grava o peer_ask de fecho direto na conversa do handoff — é ele que tira o pedido de "aberto"
+ * (pedidoAbertoSql) — sem acordar ninguém. `motivo` é texto do servidor.
+ */
+export async function fecharNaConversaDoPedido(deps: DepsEntrega, p: { conversaId: string; tarefaId: string; colega: { id: string; nome: string }; motivo: string }): Promise<RuntimeEvent[]> {
+  const autoria = autoriaAgente(p.colega.id, deps.escopo.pessoaId, null);
+  const registro = await deps.repos.mensagens.criar({
+    conversaId: p.conversaId,
+    turnoId: null,
+    autoria,
+    kind: "peer_ask",
+    texto: `${p.colega.nome} não concluiu: ${p.motivo}`,
+    payload: { kind: "peer_ask", agenteId: p.colega.id, nome: p.colega.nome, naoSupervisionado: true, tarefaId: p.tarefaId, delegada: true, falhou: true, paradoPelaPessoa: true },
+    confianca: "nao_confiavel",
+  });
+  return registro ? [evento(deps, "mensagem_criada", autoria, { mensagemId: registro.id, kind: "peer_ask", tarefaId: p.tarefaId }, { conversaId: p.conversaId })] : [];
+}
+
+/**
+ * NOD-377: o Desistir da pessoa — fecha o pedido com o aviso e acorda quem pediu uma vez (ele segue com o que tem e oferece
+ * pedir de novo, protótipo aprovado). Final: um resultado tardio do colega só fica registrado. Não espera nada da cadeia.
+ */
+export async function desistirDoPedido(deps: DepsEntrega, input: { turnoId: string; motivo: string }): Promise<{ data: SaidaEntregaPeer; events?: RuntimeEvent[] }> {
+  const turno = await deps.repos.turnos.buscar(input.turnoId);
+  const tarefa = turno ? await delegacaoDoTurno(deps.repos, turno) : null;
+  if (!tarefa) return { data: { ignorado: "nao_e_tarefa_peer" } };
+  return entregar(deps, { tarefa, texto: input.motivo, falha: true, final: true });
 }
 
 /**

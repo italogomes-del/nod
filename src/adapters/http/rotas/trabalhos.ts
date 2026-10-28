@@ -1,6 +1,7 @@
 import type { RespostaMutacao } from "../../../contracts/api.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
 import { fazerAqui, fazerDepois, mensagemParaTrabalho } from "../../../use-cases/coordenar-trabalhos.ts";
+import { cobrarEspera, desistirDaEspera } from "../../../use-cases/esperas-de-colega.ts";
 import { detalharTrabalho, listarTrabalhos, pararTrabalho } from "../../../use-cases/trabalhos.ts";
 import { registrarLinhas, taxasDasLinhas } from "../../../use-cases/telemetria-linhas.ts";
 import type { Rota } from "../roteador.ts";
@@ -73,6 +74,24 @@ export function criarRotasTrabalhos(d: DepsRotas): Rota[] {
       async handler(ctx) {
         const r = await executar(ctx.escopo, fazerAqui, { trabalhoId: ctx.params.id ?? "" });
         ctx.json(200, { ok: true, ids: { trabalho: r.trabalho.id, turno: r.turnoId }, trabalho: r.trabalho });
+      },
+    },
+    {
+      // NOD-377: Cobrar e Desistir da espera vencida de um bot por um colega (o painel e Trabalhos). Os dois ids só seguem
+      // se forem uuid; o caso de uso confere que o pedido é deste bot e desta pessoa (nao_encontrado se não).
+      metodo: "POST",
+      padrao: new RegExp(`^/agentes/${ID}/esperas-de-colega/(?<tarefa>[^/]+)/(?<acao>cobrar|desistir)$`),
+      async handler(ctx) {
+        const agenteId = ctx.params.id ?? "";
+        const tarefaId = ctx.params.tarefa ?? "";
+        if (!UUID.test(agenteId) || !UUID.test(tarefaId)) throw new ErroDeDominio("nao_encontrado");
+        if (ctx.params.acao === "cobrar") {
+          const r = await executar(ctx.escopo, cobrarEspera, { agenteId, tarefaId });
+          ctx.json(200, { ok: true, ids: { agente: agenteId }, cobradoEm: r.cobradoEm, cobrancas: r.cobrancas });
+          return;
+        }
+        await executar(ctx.escopo, desistirDaEspera, { agenteId, tarefaId });
+        ctx.json(200, { ok: true, ids: { agente: agenteId } });
       },
     },
     {
