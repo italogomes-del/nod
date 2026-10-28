@@ -137,8 +137,11 @@ Google. Criar a VM é o PR 2; custo e ajuste fino do sono, o PR 3.
 - O filtro do `reivindicar` e a suspensão dos prazos leem `maquinas_nuvem` com ou sem a flag. Sem linhas, não mudam
   nada. Mas tirar a flag com uma máquina dormindo deixa a linha parada: os turnos dela esperam e o prazo de 24 h não
   corre. Antes de desligar, acordar as máquinas (`docs/deploy-gcp.md`).
-- O `infra/gcp/vm/deploy.sh` ainda não leva `NOD_MAQUINA_NUVEM` nem o callback ao `nod.env`: ligar em produção pede
-  essas linhas lá.
+- Emenda 2026-10-28 (NOD-96): o `infra/gcp/vm/deploy.sh` leva ao env da cor nova `NOD_MAQUINA_NUVEM` (do
+  `config.env`, vazio por padrão), `NOD_NUVEM_REDIRECT_URI=https://<NOD_DOMINIO>/api/nuvem/google/callback` e
+  `NOD_URL_PUBLICA=https://<NOD_DOMINIO>`. Ligar em produção é `NOD_MAQUINA_NUVEM=gcp` no `config.env` e um deploy,
+  depois de cadastrar essa URI no cliente OAuth de `nod-producao`. Ligado em 2026-10-28 (NOD-92): o Marlon cadastrou a
+  URI e o escopo `cloud-platform`, e o Google aceita a URI (sem `redirect_uri_mismatch`).
 - O estado do preparo ("preparando", "falhou") e o pedido OAuth pendente ficam na memória: um deploy no meio perde os
   dois, e a pessoa conecta de novo.
 - A rotina não vence enquanto espera. Quando a máquina acorda, vale de novo a regra de sempre, contada do instante

@@ -225,6 +225,17 @@ do dia, `NOD_REVISOR_TETO_PESSOA_USD` (padrão US$ 1), na mesma tabela, chave `r
 (com o segredo da sessão; trocar o `nod-sessao-segredo` zera as cotas do dia, não o total). Acima da cota, só as
 revisões daquela pessoa viram cartão.
 
+## Computador da pessoa no motor (NOD-96, ADR-122)
+
+Ligado em produção em 2026-10-28: `NOD_COMPUTADORES=motor` no `config.env`, que o `deploy.sh` leva ao env da cor nova
+(sem espaços nem CR nas pontas). O computador roda na máquina Linux da pessoa (Debian 12 ou 13), pelo motor: o script
+de `/motor` instala também o supervisor, a tela e o terminal, e o servidor só conversa com ele pela ponte. Nada roda
+no servidor, que segue sem Docker para os bots.
+
+Desligar: esvazie a linha e rode o deploy. As rotas `computador/*` dão 404, a tela do computador some e as
+máquinas que já instalaram o computador seguem com ele parado (o motor anuncia, mas ninguém o chama). O que a migração
+arquivou do modelo por bot não volta. Reverter a imagem por tag não desliga a flag: ela mora no `config.env`.
+
 ## Máquina na nuvem que dorme e acorda (NOD-92, ADR-121)
 
 Com `NOD_MAQUINA_NUVEM=gcp`, a pessoa conecta a conta Google Cloud dela em Máquinas, e o nod liga e desliga a VM
@@ -270,11 +281,10 @@ chave de conta de serviço falha com `credencial_nuvem` (`org_bloqueia_chave`).
 Sem `NOD_GOOGLE_CLIENT_ID`/`_SECRET` ou sem callback (nem `NOD_NUVEM_REDIRECT_URI` nem `NOD_URL_PUBLICA`), as rotas
 existem, mas conectar responde `integracao_nao_configurada`.
 
-**Atenção:** hoje o `infra/gcp/vm/deploy.sh` monta o `nod.env` com uma lista fixa e não leva nenhuma destas
-variáveis, nem `NOD_URL_PUBLICA`. Pôr a linha só no `config.env` não liga nada. Para ligar em produção, acrescente ao
-`deploy.sh`, como as do revisor, `NOD_MAQUINA_NUVEM=${NOD_MAQUINA_NUVEM:-}` e
-`NOD_NUVEM_REDIRECT_URI=https://$NOD_DOMINIO/api/nuvem/google/callback` (e, se quiser,
-`NOD_NUVEM_CONTA_FATURAMENTO`); depois, `NOD_MAQUINA_NUVEM=gcp` no `config.env` e rode o deploy.
+O `infra/gcp/vm/deploy.sh` leva ao env da cor nova (desde 2026-10-28, NOD-96) `NOD_MAQUINA_NUVEM` e
+`NOD_NUVEM_CONTA_FATURAMENTO` do `config.env`, `NOD_NUVEM_REDIRECT_URI=https://<NOD_DOMINIO>/api/nuvem/google/callback`
+e `NOD_URL_PUBLICA=https://<NOD_DOMINIO>`. Para ligar: cadastre a URI no cliente OAuth (acima), ponha
+`NOD_MAQUINA_NUVEM=gcp` no `config.env` e rode o deploy.
 
 ### Desligar
 

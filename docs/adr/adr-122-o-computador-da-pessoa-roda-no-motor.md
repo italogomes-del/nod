@@ -328,6 +328,16 @@ HKDF `login:principal:senhas-v1`) e as põe no `Login Data` de um perfil antes d
   - `operarDaPessoa`/motor de `esquecer_senhas`;
   - painel com a ação Esquecer senhas, a confirmação (texto literal do plano) e as etapas.
 
+## Emenda 2026-10-28: ligado em produção
+
+`NOD_COMPUTADORES=motor` no `infra/gcp/config.env`; o `deploy.sh` leva a linha ao env da cor nova, limpa de espaços e
+CR (o servidor compara por igualdade exata, e um `motor\r` desligaria em silêncio). Vai junto `NOD_URL_PUBLICA`
+(`https://<NOD_DOMINIO>`): o script de `/motor` passa a apontar sempre para o domínio, também quando servido pelo
+endereço provisório. Nenhuma outra variável é exigida pelo modo motor: as chaves de assinatura e do keyring derivam
+da `NOD_CREDENTIAL_KEY`; `NOD_COMPUTADORES_MAX` e `NOD_COMPUTADOR_IMAGEM` são do modo `docker`, e
+`NOD_COMPUTADOR_OCIOSO_MIN` (varredor de ociosidade) fica no padrão de 15 min. Reverter: esvaziar a linha e rodar o
+deploy (a tela some e as rotas dão 404; o arquivado do modelo por bot não volta; reverter a imagem por tag não desliga).
+
 ## Fora
 
 Compartilhar por workspace (bots de colegas); mais de uma máquina por pessoa; compartilhar

@@ -173,6 +173,12 @@ CREDENTIAL_KEY="$(segredo nod-credential-key)"
 NOD_REVISOR="$(printf '%s' "${NOD_REVISOR:-}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
 REVISOR_CHAVE=""
 if [ "$NOD_REVISOR" = ligado ]; then REVISOR_CHAVE="$(segredo nod-anthropic-revisor)"; fi
+# ADR-122 (NOD-96) e ADR-121 (NOD-92): o servidor compara as flags por igualdade exata (`=== "motor"`); um config.env com
+# CRLF ou espaço nas pontas desligaria em silêncio. Mesma limpeza do NOD_REVISOR.
+limpo() { printf '%s' "$1" | tr -d '\r\n' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'; }
+NOD_COMPUTADORES="$(limpo "${NOD_COMPUTADORES:-}")"
+NOD_MAQUINA_NUVEM="$(limpo "${NOD_MAQUINA_NUVEM:-}")"
+NOD_NUVEM_CONTA_FATURAMENTO="$(limpo "${NOD_NUVEM_CONTA_FATURAMENTO:-}")"
 
 # Só o env da cor nova muda: a velha, que ainda drena, nunca recebe config nova.
 cat >"nod-$NOVA.env.novo" <<EOF
@@ -214,6 +220,15 @@ NOD_LIGACAO_CODEX=${NOD_LIGACAO_CODEX:-0}
 # Teto de pedidos de TTS por minuto deste processo, abaixo da cota de 200/min do projeto (emenda da ADR-071, NOD-166).
 NOD_VOZ_TTS_TETO_MIN=${NOD_VOZ_TTS_TETO_MIN:-180}
 NOD_DRENAGEM_MAX_MS=600000
+# O endereço público do nod (sem barra no fim): o script do motor e da instalação por SSH apontam para ele, e a máquina
+# na nuvem (ADR-121) baixa o motor dele. Sem ele, cada um usa o host do pedido (o provisório também é servido).
+NOD_URL_PUBLICA=https://$NOD_DOMINIO
+# ADR-122 (NOD-96): motor liga o computador da pessoa, que roda na máquina dela pelo motor. Vazio = desligado.
+NOD_COMPUTADORES=$NOD_COMPUTADORES
+# ADR-121 (NOD-92): gcp liga a máquina na nuvem da pessoa. Só depois de cadastrar a URI abaixo no cliente OAuth.
+NOD_MAQUINA_NUVEM=$NOD_MAQUINA_NUVEM
+NOD_NUVEM_REDIRECT_URI=https://$NOD_DOMINIO/api/nuvem/google/callback
+NOD_NUVEM_CONTA_FATURAMENTO=${NOD_NUVEM_CONTA_FATURAMENTO:-}
 EOF
 mv "nod-$NOVA.env.novo" "nod-$NOVA.env"
 if [ "$NOVA" = azul ]; then gravar_imagens "$IMAGEM" "$(imagem_de verde)"; else gravar_imagens "$(imagem_de azul)" "$IMAGEM"; fi

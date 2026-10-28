@@ -84,3 +84,14 @@ describe("revisor do Automático desligado em produção (ADR-115)", () => {
     expect(config).not.toMatch(/^NOD_REVISOR_CHAVE=/m);
   });
 });
+
+describe("computador da pessoa e máquina na nuvem ligados em produção (NOD-96 e NOD-92, 2026-10-28)", () => {
+  it("o config.env traz NOD_COMPUTADORES=motor e NOD_MAQUINA_NUVEM=gcp, uma vez cada (o source fica com a última)", async () => {
+    const { readFile } = await import("node:fs/promises");
+    const config = await readFile(fileURLToPath(new URL("../../infra/gcp/config.env", import.meta.url)), "utf8");
+    expect(config).toMatch(/^NOD_COMPUTADORES=motor$/m);
+    expect(config).toMatch(/^NOD_MAQUINA_NUVEM=gcp$/m);
+    expect(config.match(/^NOD_COMPUTADORES=/gm)).toHaveLength(1);
+    expect(config.match(/^NOD_MAQUINA_NUVEM=/gm)).toHaveLength(1);
+  });
+});

@@ -613,3 +613,65 @@ describe("deploy.sh e a chave do revisor no servidor (ADR-115, 2026-10-25)", () 
     expect(env).toMatch(/^NOD_REVISOR_CHAVE=segredo-falso$/m);
   });
 });
+
+describe("deploy.sh e o computador da pessoa / a máquina na nuvem (NOD-96, ADR-122 e ADR-121)", () => {
+  const com = (linhas: string) => writeFile(join(dir, "config.env"), `PROJETO=projeto-teste\nREGISTRO=registro-teste\nSQL_IP=10.0.0.1\nNOD_DOMINIO=teste.local\n${linhas}\n`);
+
+  it("leva NOD_COMPUTADORES, NOD_MAQUINA_NUVEM, a URL pública e o callback da nuvem ao env da cor nova", async () => {
+    await noAr("azul");
+    await com("NOD_COMPUTADORES=motor\nNOD_MAQUINA_NUVEM=\nNOD_NUVEM_CONTA_FATURAMENTO=0X0X0X-0X0X0X-0X0X0X");
+    expect(deploy().status).toBe(0);
+    const env = await ler("nod-verde.env");
+    expect(env).toMatch(/^NOD_COMPUTADORES=motor$/m);
+    expect(env).toMatch(/^NOD_MAQUINA_NUVEM=$/m);
+    expect(env).toMatch(/^NOD_URL_PUBLICA=https:\/\/teste\.local$/m);
+    expect(env).toMatch(/^NOD_NUVEM_REDIRECT_URI=https:\/\/teste\.local\/api\/nuvem\/google\/callback$/m);
+    expect(env).toMatch(/^NOD_NUVEM_CONTA_FATURAMENTO=0X0X0X-0X0X0X-0X0X0X$/m);
+  });
+
+  it("sem as linhas no config.env, as flags vão vazias (desligadas)", async () => {
+    await noAr("azul");
+    await com("");
+    expect(deploy().status).toBe(0);
+    const env = await ler("nod-verde.env");
+    expect(env).toMatch(/^NOD_COMPUTADORES=$/m);
+    expect(env).toMatch(/^NOD_MAQUINA_NUVEM=$/m);
+    expect(env).toMatch(/^NOD_NUVEM_CONTA_FATURAMENTO=$/m);
+  });
+
+  it("espaço ou CRLF em volta do valor não desliga em silêncio: o servidor compara por igualdade exata", async () => {
+    await noAr("azul");
+    await com('NOD_COMPUTADORES=" motor "\nNOD_MAQUINA_NUVEM=gcp\r\nNOD_NUVEM_CONTA_FATURAMENTO=" billingAccounts/0-0-0 "');
+    expect(deploy().status).toBe(0);
+    const env = await ler("nod-verde.env");
+    expect(env).toMatch(/^NOD_COMPUTADORES=motor$/m);
+    expect(env).toMatch(/^NOD_MAQUINA_NUVEM=gcp$/m);
+    expect(env).toMatch(/^NOD_NUVEM_CONTA_FATURAMENTO=billingAccounts\/0-0-0$/m);
+  });
+
+  it("cada variável que o compor.ts lê nesses modos sai no env com o valor que liga (nome errado não passa verde)", async () => {
+    const { readFile } = await import("node:fs/promises");
+    await noAr("azul");
+    await com("NOD_COMPUTADORES=motor\nNOD_MAQUINA_NUVEM=gcp");
+    expect(deploy().status).toBe(0);
+    const env = Object.fromEntries(
+      (await ler("nod-verde.env")).split("\n").filter((l) => /^[A-Z_]+=/.test(l)).map((l) => [l.slice(0, l.indexOf("=")), l.slice(l.indexOf("=") + 1)]),
+    );
+    const compor = await readFile(fileURLToPath(new URL("../../src/adapters/http/compor.ts", import.meta.url)), "utf8");
+    const lidas = new Set([...compor.matchAll(/env\.(NOD_COMPUTADORES|NOD_MAQUINA_NUVEM|NOD_URL_PUBLICA|NOD_NUVEM_[A-Z_]+)\b/g)].map((m) => m[1]));
+    expect([...lidas].sort()).toEqual(["NOD_COMPUTADORES", "NOD_MAQUINA_NUVEM", "NOD_NUVEM_CONTA_FATURAMENTO", "NOD_NUVEM_REDIRECT_URI", "NOD_URL_PUBLICA"]);
+    for (const v of lidas) expect(Object.keys(env)).toContain(v);
+    // Os mesmos testes do compor.ts (igualdade exata e trim).
+    expect(env.NOD_COMPUTADORES === "motor").toBe(true);
+    expect(env.NOD_MAQUINA_NUVEM?.trim() === "gcp").toBe(true);
+    expect(new URL(env.NOD_URL_PUBLICA ?? "").href).toBe("https://teste.local/");
+    expect(env.NOD_NUVEM_REDIRECT_URI).toBe("https://teste.local/api/nuvem/google/callback");
+  });
+
+  it("CRLF numa linha do meio do config.env (motor\\r\\n) também sai limpo", async () => {
+    await noAr("azul");
+    await com("NOD_COMPUTADORES=motor\r\nNOD_LIGACAO=admins");
+    expect(deploy().status).toBe(0);
+    expect(await ler("nod-verde.env")).toMatch(/^NOD_COMPUTADORES=motor$/m);
+  });
+});
