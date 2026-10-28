@@ -68,7 +68,7 @@ import type { FrameSse } from "../src/contracts/frame.ts";
 import type { AnexoDaConversa } from "../src/contracts/anexo.ts";
 import { agenteDaTela, bibliotecaAberta, conversaAbertaTemNotaDeContas, conversaDaTela, estadoInicial, invalidacoesAoReconectar, invalidacoesAoRetomar, invalidacoesDaTela, mudouNaTela, reduzir, secaoAberta, secaoDoPedido, type Acao, type Estado, type FalaPendente, type Invalidacao, type NivelGaveta, type PedidoSecao, type PerfilCelular, type SecaoEspaco, type Tela } from "./estado/reducer.ts";
 import { contaApi, criarApi, minhaContaApi, ErroApi, observarRede, sessao as sessaoApi, type Api } from "./lib/api.ts";
-import { criarContaNoChat, fraseDoErro as fraseDoErroDeConta } from "./telas/conta-no-chat.ts";
+import { abreProvisorio, CHAVE_EQUIPE, decidirPareamento, criarContaNoChat, equipeNoApp, fraseDoErro as fraseDoErroDeConta, linkDaEquipe, type PassoPareamento } from "./telas/conta-no-chat.ts";
 import { criarMinhaConta } from "./telas/minha-conta.ts";
 import { reduzirFoto } from "./lib/reduzir-foto.ts";
 import { deveLembrar, htmlLembrete, jaFalou, marcarFalou } from "./telas/lembrete-conta.ts";
@@ -558,6 +558,8 @@ const telaOnboarding = criarTelaOnboarding({
 /** O app não conseguiu trocar a chave de máquina: não recarrega com a conta nova na tela e o executor na antiga. */
 const FALHA_TROCA_APP = "O app não conseguiu trocar de conta. Feche e abra o nod para tentar de novo.";
 let contas: { google: boolean; bootstrap: boolean; minhaConta?: boolean } | null = null;
+/** NOD-406: o servidor entra pelo Google (modo "google" de /api/sessao/modo); lido junto com `contas`. */
+let loginGoogle = false;
 let contaAtual: EstadoContaDto | null = null;
 const conversaDoNod = () => {
   const nod = (estado.frota?.agentes ?? []).find((a) => a.papel === "nod" && a.ownerId === estado.sessao?.pessoaId);
@@ -571,6 +573,9 @@ const telaConta = criarContaNoChat({
   aoMudar: () => render(),
   // No app, o Google abre no navegador do sistema, sem a sessão do app: o Google para conta ainda não vale lá.
   google: () => (contas?.google ?? false) && window.nodDesktop === undefined,
+  // NOD-406: sem o Google para conta, a equipe ainda entra pelo Google de antes (o cookie da equipe troca o do provisório).
+  // Só na web: no app, o Google abre no navegador do sistema, sem a sessão do app.
+  equipe: () => linkEquipe(),
   noApp: () => window.nodDesktop !== undefined,
   async entrou(trocaApp) {
     // O app troca a chave de máquina pela do espaço novo e se reconecta; a web já tem o cookie novo e só recarrega.
@@ -581,7 +586,8 @@ const telaConta = criarContaNoChat({
     }
     window.location.reload();
   },
-  contaMudou: (e) => { contaAtual = e; render(); },
+  // NOD-406 (revisão r6): o provisório que vira conta pelo código (sem recarregar) segue para o pedido do Mac guardado.
+  contaMudou: (e) => { contaAtual = e; render(); if (decidirPareamento({ modoLido: true, contas: true, estado: e }) === "abrir") seguirPareamento("abrir"); },
   abrirUrl: (url) => { if (window.nodDesktop) window.open(url, "_blank", "noopener"); else window.location.assign(url); },
   agora: () => Date.now(),
   campo: (form, nome) => String(new FormData(form as HTMLFormElement).get(nome) ?? ""),
@@ -2359,6 +2365,15 @@ function redefinirPelaTela(form: HTMLFormElement): Promise<void> {
 
 /** NOD-345: o que o menu da conta pede — "Sair" sai desta sessão; o resto abre o cartão na conversa do Nod. */
 async function abrirDoMenuConta(qual: string): Promise<void> {
+  // NOD-406: "Sou da equipe" vai ao Google da equipe (o mesmo link do cartão de entrar); no app, à tela de conexão.
+  if (qual === "equipe") {
+    if (equipeDoApp()) {
+      // A confirmação é um diálogo do app; cancelar ou ocupado devolvem false e a pessoa segue no espaço.
+      await window.nodDesktop?.souDaEquipe?.().catch(() => false);
+      return;
+    }
+    const url = linkEquipe(); if (url) window.location.assign(url); return;
+  }
   if (qual !== "sair") return telaConta.abrir(qual, true);
   await contaApi.sair().catch(() => undefined);
   // Quem sai cai na tela de entrada, não num espaço provisório novo; e este navegador esquece o verificador.
@@ -2625,8 +2640,6 @@ async function iniciarSessao(escopo: Escopo): Promise<void> {
   live.connect();
   dispatch({ tipo: "invalidar", quais: ["frota", "sua-vez", "nao-lidos", "salas", "executor", "rotinas"] });
   void lerComputadorAgora();
-  const pedido = pedidoPendente();
-  if (pedido) abrirPareamento(api, pedido, esquecerPedido);
   // #195: a task que estava aberta antes de recarregar volta aberta.
   const task = taskLembrada();
   if (task) navegar(task);
@@ -2746,6 +2759,7 @@ async function boot(): Promise<void> {
   }
   if (url.searchParams.get("entrar") === "recusado") {
     entrada = { ...entrada, recusado: true };
+    marcarEquipe(false);
     url.searchParams.delete("entrar");
     window.history.replaceState(null, "", url.pathname + url.search + url.hash);
   }
@@ -2787,7 +2801,9 @@ async function boot(): Promise<void> {
         // instalação (localStorage) pede o espaço e volta ao mesmo espaço depois. Fora isso, a tela de entrada de antes.
         // No app, o espaço provisório vem pelo processo principal (com a chave de máquina); aqui seria um espaço só da
         // tela, sem executor. Sessão do app que caiu volta à tela de entrar.
-        if (!saiu && modo.contas?.bootstrap && window.nodDesktop === undefined && (await provisorioDaWeb())) {
+        // NOD-406: a volta recusada do Google da equipe fica na tela de entrada, com o motivo, sem abrir um provisório.
+        // A marca da equipe: quem já entrou pelo Google da equipe neste navegador volta à tela de entrar.
+        if (abreProvisorio({ saiu, recusado: entrada.recusado, bootstrap: modo.contas?.bootstrap ?? false, noApp: window.nodDesktop !== undefined, equipe: daEquipe(), pareando: pedidoPendente() !== null }) && (await provisorioDaWeb())) {
           await iniciarSessao(await sessaoApi.atual());
           await lerContas(voltaDaConta);
           return;
@@ -2827,9 +2843,46 @@ const LIMITE_PROVISORIO = "Muitos espaços novos foram abertos desta rede agora.
 async function lerContas(volta: string | null): Promise<void> {
   const modo = entrada.modo ?? (await sessaoApi.modo().catch(() => null));
   contas = modo?.contas ?? null;
-  if (!contas) return;
-  if (volta) await telaConta.aoVoltarDoGoogle(volta);
-  else await telaConta.retomar();
+  loginGoogle = modo?.modo === "google";
+  // NOD-406 (revisões r5/r6): o pedido "Conectar este Mac?" espera saber quem é a sessão. Sem contas ligadas, abre como
+  // antes; sem conseguir ler o modo, fica guardado.
+  if (!contas) { seguirPareamento(decidirPareamento({ modoLido: modo !== null, contas: false, estado: null })); return; }
+  if (volta) {
+    await telaConta.aoVoltarDoGoogle(volta);
+    seguirPareamento(decidirPareamento({ modoLido: true, contas: true, estado: contaAtual, volta }));
+    return;
+  }
+  const e = await telaConta.retomar();
+  // NOD-406: a sessão da equipe (pessoa de antes das contas) marca o navegador; a recusa do Google tira a marca (no boot).
+  if (e?.legado) marcarEquipe(true);
+  // NOD-406: o Google da equipe recusou e o cookie do provisório seguiu valendo: o motivo aparece no cartão de entrar,
+  // em vez de a pessoa voltar ao espaço sem saber por quê.
+  if (entrada.recusado && e && !e.conta && !e.legado) {
+    entrada = { ...entrada, recusado: false };
+    await telaConta.abrir("entrar", true, RECUSA_EQUIPE);
+    return;
+  }
+  seguirPareamento(decidirPareamento({ modoLido: true, contas: true, estado: e }));
+}
+function daEquipe(): boolean {
+  try { return window.localStorage.getItem(CHAVE_EQUIPE) === "1"; } catch { return false; }
+}
+function marcarEquipe(sim: boolean): void {
+  try { if (sim) window.localStorage.setItem(CHAVE_EQUIPE, "1"); else window.localStorage.removeItem(CHAVE_EQUIPE); } catch { /* sem storage: sem a marca */ }
+}
+const RECUSA_EQUIPE = "Não foi possível entrar com essa conta Google. Se ela ainda não tem acesso ao nod, peça para ser cadastrada.";
+/** NOD-406: o link da equipe no cartão de entrar e no menu do espaço provisório. */
+const equipeDoApp = () => equipeNoApp({ loginGoogle, contaGoogle: contas?.google ?? false, noApp: window.nodDesktop !== undefined, ponte: typeof window.nodDesktop?.souDaEquipe === "function" });
+const linkEquipe = () => linkDaEquipe({ loginGoogle, contaGoogle: contas?.google ?? false, noApp: window.nodDesktop !== undefined, url: sessaoApi.urlGoogle });
+
+/** NOD-406 (revisão r5): com contas ligadas, o espaço provisório entra numa conta antes de conectar o Mac. */
+const PAREAR_PROVISORIO = "Para conectar o app do Mac, entre primeiro na sua conta. O pedido do app continua esperando.";
+/** "abrir" = "Conectar este Mac?"; "entrar" = o cartão de entrar, com o pedido guardado; "esperar" = nada. */
+function seguirPareamento(passo: PassoPareamento): void {
+  const pedido = pedidoPendente();
+  if (!pedido || !api || passo === "esperar" || document.getElementById("parear-titulo")) return;
+  if (passo === "abrir") abrirPareamento(api, pedido, esquecerPedido);
+  else void telaConta.abrir("entrar", true, PAREAR_PROVISORIO);
 }
 
 /** Revisão NOD-215: sem sessão, a falha de rede do boot fica no "Reconectando…" e a página recarrega quando o nod voltar. */
@@ -4490,7 +4543,7 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     }
     setTimeout(() => { el.textContent = antes; }, 1500);
   },
-  entrar: (el) => agir(async () => iniciarSessao(await sessaoApi.entrar(el.dataset.pessoa ?? ""))),
+  entrar: (el) => agir(async () => { await iniciarSessao(await sessaoApi.entrar(el.dataset.pessoa ?? "")); await lerContas(null); }),
   navegar: (el) => {
     const tela = el.dataset.tela;
     if (tela === "conectores") abrirMarketplace();
@@ -6843,6 +6896,7 @@ function dadosMenuConta(): DadosMenuConta {
     quem: quemEsta(),
     // NOD-345: com contas no servidor, Sair por último (ou o convite, no espaço provisório).
     ...(contas && contaAtual ? { conta: { email: contaAtual.conta?.email ?? contaAtual.legado?.email ?? null, senha: contaAtual.conta?.senha ?? false, legado: !contaAtual.conta && !!contaAtual.legado } } : {}),
+    equipe: contas ? (linkEquipe() ?? (equipeDoApp() ? "app" : null)) : null,
   };
 }
 

@@ -95,3 +95,25 @@ describe("computador da pessoa e máquina na nuvem ligados em produção (NOD-96
     expect(config.match(/^NOD_MAQUINA_NUVEM=/gm)).toHaveLength(1);
   });
 });
+
+describe("login por e-mail ligado em produção (ADR-124 §6, NOD-406, 2026-10-28)", () => {
+  it("o config.env liga NOD_CONTAS e NOD_BOOTSTRAP com remetente do nodbot.ai; a chave do Resend só mora no Secret Manager", async () => {
+    const { readFile } = await import("node:fs/promises");
+    const config = await readFile(fileURLToPath(new URL("../../infra/gcp/config.env", import.meta.url)), "utf8");
+    expect(config).toMatch(/^NOD_CONTAS=1$/m);
+    expect(config).toMatch(/^NOD_BOOTSTRAP=1$/m);
+    expect(config).toMatch(/^NOD_EMAIL_REMETENTE="nod <conta@nodbot\.ai>"$/m);
+    for (const v of ["NOD_CONTAS", "NOD_BOOTSTRAP", "NOD_EMAIL_REMETENTE"]) expect(config.match(new RegExp(`^${v}=`, "gm")), v).toHaveLength(1);
+    // Os dois que dependem do OAuth externo e da revisão LGPD seguem fora.
+    expect(config).not.toMatch(/^NOD_CONTAS_GOOGLE=1/m);
+    expect(config).not.toMatch(/^NOD_MINHA_CONTA=1/m);
+    expect(config).not.toMatch(/^NOD_RESEND_API_KEY=/m);
+    expect(config).not.toMatch(/re_[A-Za-z0-9_]{16,}/);
+    const script = await readFile(DEPLOY, "utf8");
+    expect(script).toMatch(/segredo nod-resend-api-key/);
+    const provisionar = await readFile(fileURLToPath(new URL("../../infra/gcp/provisionar.sh", import.meta.url)), "utf8");
+    // O acesso da VM ao segredo nasce com o provisionamento (a mesma lista dos outros segredos que ela lê).
+    expect(provisionar).toMatch(/nod-credential-key[^\n]*nod-resend-api-key; do\n\s+gc secrets add-iam-policy-binding/);
+    expect(provisionar).toMatch(/nod-resend-api-key; do\n\s+gc secrets describe "\$s" [^\n]*\|\| gc secrets create "\$s"/);
+  });
+});

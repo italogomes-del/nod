@@ -29,6 +29,34 @@ source ./config.env
 : "${SQL_IP:?SQL_IP vazio no config.env}"
 
 segredo() { gcloud secrets versions access latest --secret="$1" --project="$PROJETO"; }
+limpo() { printf '%s' "$1" | tr -d '\r\n' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'; }
+
+# ADR-124 §6 (NOD-406): login por e-mail. O servidor compara as flags por `=== "1"` e, com NOD_CONTAS=1 e NOD_LOGIN=google,
+# recusa subir sem a chave do Resend e o remetente: a cor nova nunca ficaria saudável. Aqui o deploy para antes de mexer
+# em qualquer cor, com o motivo. O Google para conta e Minha conta ainda não têm caminho neste deploy: ligados, recusa
+# em vez de sumir em silêncio.
+NOD_CONTAS="$(limpo "${NOD_CONTAS:-}")"
+NOD_BOOTSTRAP="$(limpo "${NOD_BOOTSTRAP:-}")"
+NOD_EMAIL_REMETENTE="$(limpo "${NOD_EMAIL_REMETENTE:-}")"
+for v in NOD_CONTAS_GOOGLE NOD_MINHA_CONTA NOD_PURGA_CONTA; do
+  [ -z "$(limpo "${!v:-}")" ] || { echo "$v ainda não é levado pelo deploy (NOD-406): tire a linha do config.env" >&2; exit 1; }
+done
+for v in NOD_CONTAS NOD_BOOTSTRAP; do
+  case "${!v}" in ""|1) ;; *) echo "$v só aceita 1 ou vazio no config.env (o servidor compara por === \"1\")" >&2; exit 1 ;; esac
+done
+# O nome só com letras, dígitos, espaço, ponto, _ e -: no env_file do compose, `#`, `$` e aspas mudariam o valor.
+REMETENTE_OK='^([A-Za-z0-9 ._-]+ <[A-Za-z0-9._%+-]+@nodbot\.ai>|[A-Za-z0-9._%+-]+@nodbot\.ai)$'
+# A chave do Resend (só de envio) mora no Secret Manager e só é lida com as contas ligadas, aqui, antes da reconciliação
+# das cores. Só o formato `re_…` passa: um CR ou uma quebra de linha colados com ela injetariam linhas no env.
+RESEND_CHAVE=""
+if [ "$NOD_CONTAS" = 1 ]; then
+  [[ "$NOD_EMAIL_REMETENTE" =~ $REMETENTE_OK ]] || { echo "NOD_CONTAS=1 exige NOD_EMAIL_REMETENTE do domínio nodbot.ai no config.env (ex.: \"nod <conta@nodbot.ai>\")" >&2; exit 1; }
+  RESEND_CHAVE="$(segredo nod-resend-api-key 2>/dev/null)" || { echo "NOD_CONTAS=1: não consegui ler o segredo nod-resend-api-key (existe? a SA da VM tem secretAccessor? docs/deploy-gcp.md, Login por e-mail)" >&2; exit 1; }
+  [[ "$RESEND_CHAVE" =~ ^re_[A-Za-z0-9_]+$ ]] || { echo "NOD_CONTAS=1 exige o segredo nod-resend-api-key com uma chave do Resend (re_…; docs/deploy-gcp.md, Login por e-mail)" >&2; exit 1; }
+elif [ "$NOD_BOOTSTRAP" = 1 ]; then
+  echo "NOD_BOOTSTRAP=1 exige NOD_CONTAS=1 no config.env" >&2
+  exit 1
+fi
 
 ip_publico() { curl -fsS -H 'Metadata-Flavor: Google' http://metadata.google.internal/computeMetadata/v1/instance/network-interfaces/0/access-configs/0/external-ip; }
 # Sem domínio, o provisório é o endereço. Com domínio, o Caddy serve os dois (NOD-173): Macs antigos têm o provisório.
@@ -174,12 +202,10 @@ NOD_REVISOR="$(printf '%s' "${NOD_REVISOR:-}" | sed -e 's/^[[:space:]]*//' -e 's
 REVISOR_CHAVE=""
 if [ "$NOD_REVISOR" = ligado ]; then REVISOR_CHAVE="$(segredo nod-anthropic-revisor)"; fi
 # ADR-122 (NOD-96) e ADR-121 (NOD-92): o servidor compara as flags por igualdade exata (`=== "motor"`); um config.env com
-# CRLF ou espaço nas pontas desligaria em silêncio. Mesma limpeza do NOD_REVISOR.
-limpo() { printf '%s' "$1" | tr -d '\r\n' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'; }
+# CRLF ou espaço nas pontas desligaria em silêncio. Mesma limpeza do NOD_REVISOR (`limpo`, definida no topo).
 NOD_COMPUTADORES="$(limpo "${NOD_COMPUTADORES:-}")"
 NOD_MAQUINA_NUVEM="$(limpo "${NOD_MAQUINA_NUVEM:-}")"
 NOD_NUVEM_CONTA_FATURAMENTO="$(limpo "${NOD_NUVEM_CONTA_FATURAMENTO:-}")"
-
 # Só o env da cor nova muda: a velha, que ainda drena, nunca recebe config nova.
 cat >"nod-$NOVA.env.novo" <<EOF
 NOD_LOGIN=google
@@ -229,6 +255,12 @@ NOD_COMPUTADORES=$NOD_COMPUTADORES
 NOD_MAQUINA_NUVEM=$NOD_MAQUINA_NUVEM
 NOD_NUVEM_REDIRECT_URI=https://$NOD_DOMINIO/api/nuvem/google/callback
 NOD_NUVEM_CONTA_FATURAMENTO=${NOD_NUVEM_CONTA_FATURAMENTO:-}
+# ADR-124 §6 (NOD-406): contas com e-mail e senha, recuperação e o espaço provisório. Vazio = desligado. O link de
+# recuperação usa o NOD_URL_PUBLICA acima.
+NOD_CONTAS=$NOD_CONTAS
+NOD_BOOTSTRAP=$NOD_BOOTSTRAP
+NOD_EMAIL_REMETENTE=${NOD_CONTAS:+$NOD_EMAIL_REMETENTE}
+NOD_RESEND_API_KEY=$RESEND_CHAVE
 EOF
 mv "nod-$NOVA.env.novo" "nod-$NOVA.env"
 if [ "$NOVA" = azul ]; then gravar_imagens "$IMAGEM" "$(imagem_de verde)"; else gravar_imagens "$(imagem_de azul)" "$IMAGEM"; fi

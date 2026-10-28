@@ -25,6 +25,9 @@ export type DadosMenuConta = {
    * convite "Criar conta ou entrar" (o lembrete permanente, opção 2 do Gil).
    */
   conta?: { email: string | null; senha: boolean; legado?: boolean };
+  /** NOD-406: no espaço provisório, o login de equipe pelo Google (a URL), ou "app" (a tela de conexão do app, com a
+   * chave de Chaves). O clique vai por `data-conta="equipe"`. */
+  equipe?: string | null;
 };
 
 /** "AN" de "Ana"; sem nome, as duas primeiras letras do e-mail. */
@@ -106,7 +109,7 @@ export function htmlMenuConta(d: DadosMenuConta): string {
   // Sair por último; no espaço provisório (sem conta ainda), o convite fica no lugar dele.
   const fim = !d.conta ? ""
     : d.conta.email === null
-      ? `<hr><button type="button" role="menuitem" data-conta="inicio">${ICONE.pessoa}<span class="mc-nome">Criar conta ou entrar</span><span class="mc-meta">Seu espaço está só ${nesteAparelho()}</span></button>`
+      ? `<hr><button type="button" role="menuitem" data-conta="inicio">${ICONE.pessoa}<span class="mc-nome">Criar conta ou entrar</span><span class="mc-meta">Seu espaço está só ${nesteAparelho()}</span></button>${d.equipe ? `<button type="button" role="menuitem" data-conta="equipe">${ICONE.pessoa}<span class="mc-nome">${d.equipe === "app" ? "Sou da equipe: conectar com a chave" : "Sou da equipe: entrar com Google"}</span></button>` : ""}`
       : `<hr><button type="button" role="menuitem" data-conta="sair">${ICONE.sair}<span class="mc-nome">Sair</span></button>`;
   return `${quem}${faixa}${maquina}<div role="menu" aria-label="${esc(rotulo)}">
     ${item("conexao", pilhaDeAvatares(true), "Provedores de IA", d.conexao)}

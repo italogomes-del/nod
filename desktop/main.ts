@@ -3,7 +3,7 @@ import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, Notification, p
 import { spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { createWriteStream, existsSync } from "node:fs";
-import { readFile, writeFile, mkdir, rename, stat } from "node:fs/promises";
+import { readFile, writeFile, mkdir, rename, rm, stat } from "node:fs/promises";
 import { homedir, hostname, tmpdir, userInfo } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -72,7 +72,8 @@ import type { IdDriver } from "../src/adapters/executor/spi.ts";
 declare const __NOD_SERVIDOR_PADRAO__: string;
 const SERVIDOR_PADRAO = typeof __NOD_SERVIDOR_PADRAO__ === "string" ? __NOD_SERVIDOR_PADRAO__ : "";
 
-type Config = { url: string; chave: string };
+/** `provisoria`: a conexão de um espaço provisório (NOD-345); só ela o "Sou da equipe" (NOD-406) pode desfazer. */
+type Config = { url: string; chave: string; provisoria?: true };
 const dir = dirname(fileURLToPath(import.meta.url));
 const setup = join(dir, "setup.html");
 const setupUrl = pathToFileURL(setup).href;
@@ -340,9 +341,26 @@ async function verificadorDaInstalacao(): Promise<string | null> {
   await rename(`${arquivo}.tmp`, arquivo);
   return novo;
 }
+/** NOD-406: a marca de "sou da equipe" desta instalação (sem ela, a primeira abertura pede um espaço provisório). */
+function caminhoEquipe() { return join(app.getPath("userData"), "equipe"); }
+/**
+ * NOD-406: conectou pela tela de conexão (chave ou pareamento), então não é um provisório: se a conexão um dia sumir, a
+ * próxima abertura volta a esta tela em vez de pedir um provisório novo. Falhar aqui não desfaz a conexão.
+ */
+async function marcarEquipeDoApp(): Promise<void> {
+  await mkdir(app.getPath("userData"), { recursive: true }).then(() => writeFile(caminhoEquipe(), "1\n", { mode: 0o600 })).catch(() => undefined);
+}
 /** Primeira abertura sem chave: o espaço provisório, se o servidor padrão oferece. null = segue a tela de conexão. */
 async function configProvisoria(): Promise<Config | null> {
-  if (!SERVIDOR_PADRAO) return null;
+  // NOD-406 (revisões r5 a r7): conexao.enc que não se lê (Keychain negado ou resetado, outra assinatura) não vira
+  // provisório sozinha, porque pode ser da equipe. A tela de conexão diz por quê; o arquivo é guardado de lado (não
+  // apagado: a falha pode ser passageira) e a próxima abertura sem conectar volta ao sem conta.
+  if (existsSync(caminhoConfig())) {
+    await rename(caminhoConfig(), `${caminhoConfig()}.ilegivel`).catch(() => undefined);
+    mensagem = "Não consegui ler a conexão guardada neste Mac (Keychain). Entre de novo, ou feche e abra o app para usar sem conta.";
+    return null;
+  }
+  if (!SERVIDOR_PADRAO || existsSync(caminhoEquipe())) return null;
   const url = urlServidor(SERVIDOR_PADRAO, !app.isPackaged);
   if (!(await servidorOfereceProvisorio(url))) return null;
   const verificador = await verificadorDaInstalacao().catch(() => null);
@@ -350,13 +368,13 @@ async function configProvisoria(): Promise<Config | null> {
   const chave = await pedirProvisorio({ servidor: url, verificador, nome: userInfo().username, versao: app.getVersion() });
   if (!chave) return null;
   log("info", "espaco_provisorio_no_app", {});
-  return { url, chave };
+  return { url, chave, provisoria: true };
 }
 async function ler(): Promise<Config | null> {
   try {
     if (!safeStorage.isEncryptionAvailable()) return null;
     const c = JSON.parse(safeStorage.decryptString(await readFile(caminhoConfig()))) as Config;
-    return { url: urlServidor(c.url, !app.isPackaged), chave: c.chave };
+    return { url: urlServidor(c.url, !app.isPackaged), chave: c.chave, ...(c.provisoria === true ? { provisoria: true as const } : {}) };
   } catch { return null; }
 }
 function proteger(w: BrowserWindow, origem?: string) {
@@ -1429,10 +1447,12 @@ else {
       validarRemetente(e);
       if (conectando) return { mensagem: "Conexão em andamento…" };
       conectando = true;
+      mensagem = ""; // NOD-406: a dica do "Sou da equipe" não esconde o erro desta tentativa.
       try {
         const url = urlServidor(valor, !app.isPackaged);
         const chave = await parearPeloNavegador({ servidor: url, nome: hostname(), abrir: (u) => shell.openExternal(u) });
         await conectar({ url, chave });
+        await marcarEquipeDoApp();
       } catch (erro) {
         if (erro instanceof FalhaPareamento) mensagem = mensagens[erro.codigo] ?? mensagens.servidor_fora!;
         else if (erro instanceof FalhaPonte) mensagem = mensagens[erro.codigo]!;
@@ -1449,9 +1469,11 @@ else {
       validarRemetente(e);
       if (conectando) return { mensagem: "Conexão em andamento…" };
       conectando = true;
+      mensagem = ""; // NOD-406: a dica do "Sou da equipe" não esconde o erro desta tentativa.
       try {
         if (!dados || typeof dados !== "object" || !("url" in dados) || !("chave" in dados) || typeof dados.chave !== "string" || dados.chave.length > 1024 || !dados.chave) throw new FalhaPonte("resposta_invalida");
         await conectar({ url: urlServidor(dados.url, !app.isPackaged), chave: dados.chave });
+        await marcarEquipeDoApp();
       } catch (erro) { if (erro instanceof FalhaPonte) mensagem = mensagens[erro.codigo]!; else if (!mensagem) mensagem = "Não foi possível conectar. Confira sua conta de IA e o acesso ao Keychain."; }
       finally { conectando = false; }
       return { mensagem };
@@ -1472,6 +1494,25 @@ else {
       try { await conectar({ url: configuracao.url, chave }); return true; }
       catch (erro) { mensagem = erro instanceof FalhaPonte ? mensagens[erro.codigo]! : "Conecte novamente para continuar."; await mostrarSetup(); return false; }
       finally { conectando = false; }
+    });
+    // NOD-406: quem é da equipe sai do provisório e conecta com a chave de Chaves (a tela de conexão de antes).
+    // Só desfaz uma conexão provisória, com confirmação. A conexão salva some (fechar o app antes de conectar devolve o
+    // mesmo provisório: o verificador da instalação fica); a marca só nasce quando a conexão pela tela der certo.
+    ipcMain.handle(CANAIS_DESKTOP.souDaEquipe, async (e): Promise<boolean> => {
+      validarRemetenteWeb(e);
+      if (conectando || !configuracao?.provisoria || !janela) return false;
+      const r = await dialog.showMessageBox(janela, { type: "question", message: "Entrar como alguém da equipe?", detail: "Este espaço provisório sai deste app e aparece a tela de conexão: entre com o Google da equipe ou cole a chave de Chaves. Uma ligação em andamento é encerrada. Se fechar o app antes de conectar, o espaço provisório volta.", buttons: ["Ir para a conexão", "Cancelar"], defaultId: 1, cancelId: 1 });
+      if (r.response !== 0 || conectando || !configuracao?.provisoria) return false;
+      conectando = true;
+      try {
+        log("info", "app_sou_da_equipe", {});
+        await parar();
+        await rm(caminhoConfig(), { force: true });
+        configuracao = null;
+        mensagem = "Entre com o Google da equipe ou cole a chave de Chaves.";
+        await mostrarSetup();
+        return true;
+      } finally { conectando = false; }
     });
     configuracao = await ler() ?? await configProvisoria().catch(() => null);
     await mostrarSetup();

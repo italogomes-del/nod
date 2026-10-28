@@ -141,14 +141,13 @@ export type NodDesktop = {
   contas?: PonteContas;
   /** NOD-323: a mídia do bot que ficou no Mac (Mostrar no Finder). Opcional: o app anterior não tem. */
   midia?: PonteMidia;
-  /**
-   * NOD-345 (ADR-124): a pessoa entrou numa conta pela janela do app; a página passa o código de troca de uso único e o
+  /** NOD-345 (ADR-124): a pessoa entrou numa conta pela janela do app; a página passa o código de troca de uso único e o
    * processo principal o troca pela chave do espaço novo e reconecta. `false` = código recusado (a página segue na sessão
    * web). Opcional: o app instalado antes desta versão não tem, e a página então só pede para reconectar o app. */
   trocarConta?(codigo: string): Promise<boolean>;
   desafioConta?(): Promise<string>; // O desafio (SHA-256) do segredo de troca: a página o manda no login para receber o código.
-  /** NOD-93: retoma já o download pausado da VM local (app sem a VM: não faz nada). Ausente = app antigo. */
-  vmTentarAgora?(): Promise<void>;
+  souDaEquipe?(): Promise<boolean>; // NOD-406: sai do espaço provisório para a tela de conexão (false = cancelado/ocupado/não provisória).
+  vmTentarAgora?(): Promise<void>; // NOD-93: retoma já o download pausado da VM local (sem a VM: nada). Ausente = app antigo.
   aoAbrir(fn: (alvo: AlvoAviso) => void): void; // a pessoa clicou num aviso: a web abre o alvo.
   aoBuscar?(fn: (acao: "abrir" | "proxima" | "anterior") => void): void; // NOD-42: Editar › Buscar (ausente = app antigo).
 };
@@ -192,6 +191,7 @@ export const CANAIS_DESKTOP = {
   contasDetalhes: "nod:contas-detalhes",
   trocarConta: "nod:trocar-conta", // NOD-345 (ADR-124): a troca de espaço depois de entrar numa conta pela janela do app.
   desafioConta: "nod:desafio-conta",
+  souDaEquipe: "nod:sou-da-equipe", // NOD-406: a equipe sai do espaço provisório e volta à tela de conexão de antes.
   vmTentarAgora: "nod:vm-tentar-agora", // NOD-93 (ADR-127): o "tentar agora" do download pausado da VM local.
 } as const;
 

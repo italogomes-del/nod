@@ -49,7 +49,12 @@ export type Etapa =
   | { tipo: "parear-entrar"; simbolos: string[] | null; erro: string | null }
   | { tipo: "google-app" };
 
-export type VistaConta = { etapa: Etapa | null; ocupado: boolean; resolvidas: readonly string[]; google: boolean; agora: number };
+/**
+ * `equipe` (NOD-406): o endereço do "Entrar com Google" da equipe (ADR-030, o login de antes), quando o servidor entra
+ * pelo Google e o Google para conta está desligado. Com o espaço provisório ligado, quem é da equipe e abre um navegador
+ * novo cai no provisório: sem este link, a única porta seria o e-mail, que a pessoa de time não tem. Ausente = nada.
+ */
+export type VistaConta = { etapa: Etapa | null; ocupado: boolean; resolvidas: readonly string[]; google: boolean; agora: number; equipe?: string | null };
 
 const SELO = `<span class="cc-selo">Conta no nod</span>`;
 const SIMBOLO: Record<string, string> = { sol: "☀️", lua: "🌙", estrela: "⭐", folha: "🍃", onda: "🌊", montanha: "⛰️", chave: "🔑", barco: "⛵", flor: "🌸", nuvem: "☁️", raio: "⚡", peixe: "🐟" };
@@ -85,15 +90,17 @@ function linhaSessao(s: SessaoContaDto, atual: string, agora: number): string {
 const simbolos = (lista: readonly string[]) => `<p class="cc-simbolos" aria-label="${esc(lista.join(", "))}">${lista.map((s) => `<span title="${esc(s)}">${SIMBOLO[s] ?? esc(s)}</span>`).join("")}</p>`;
 
 /** O cartão ativo. Puro: a vista entra, o HTML sai (os testes leem isto). */
-export function htmlEtapa(e: Etapa, v: { ocupado: boolean; google: boolean; agora: number }): string {
+export function htmlEtapa(e: Etapa, v: { ocupado: boolean; google: boolean; agora: number; equipe?: string | null }): string {
   const o = v.ocupado;
+  // `bt`: o mesmo alvo de toque dos outros links do rodapé (44 px no celular, ADR-094).
+  const equipe = v.equipe ? `<a class="bt cc-link" href="${esc(v.equipe)}">Sou da equipe: entrar com Google</a>` : "";
   switch (e.tipo) {
     case "inicio":
       return cartao(
         "Guarde seu espaço numa conta",
         `<p class="cc-texto">Hoje ele está só ${nesteAparelho()}. Com uma conta, você entra de qualquer lugar e não perde nada.</p>
         <div class="cc-acoes cc-coluna">${v.google ? bt("conta-google", "Continuar com Google", { classe: "pri", ocupado: o }) : ""}${bt("conta-ir", "Usar e-mail", { classe: v.google ? "" : "pri", dados: { etapa: "cadastro" } })}${bt("conta-fechar", "Agora não", { classe: "cc-link" })}</div>
-        <p class="cc-rodape">${bt("conta-ir", "Já tenho conta com e-mail", { classe: "cc-link", dados: { etapa: "entrar" } })}${bt("conta-ir", "Tenho um código", { classe: "cc-link", dados: { etapa: "parear-entrar" } })}</p>`,
+        <p class="cc-rodape">${bt("conta-ir", "Já tenho conta com e-mail", { classe: "cc-link", dados: { etapa: "entrar" } })}${bt("conta-ir", "Tenho um código", { classe: "cc-link", dados: { etapa: "parear-entrar" } })}${equipe}</p>`,
         "Criar conta ou entrar",
       );
     case "cadastro":
@@ -148,7 +155,7 @@ export function htmlEtapa(e: Etapa, v: { ocupado: boolean; google: boolean; agor
         "Entrar na sua conta",
         `<form data-form="conta-entrar" class="cc-form">${campoEmail()}${campoSenha("senha", "Senha", false)}${erroDe(e.erro)}
         <div class="cc-acoes">${bt("conta-ir", "Esqueci a senha", { classe: "cc-link", dados: { etapa: "recuperar" } })}${enviar("Entrar", o)}</div></form>
-        <p class="cc-rodape">${bt("conta-ir", "Criar conta", { classe: "cc-link", dados: { etapa: "cadastro" } })}</p>`,
+        <p class="cc-rodape">${bt("conta-ir", "Criar conta", { classe: "cc-link", dados: { etapa: "cadastro" } })}${equipe}</p>`,
       );
     case "recuperar":
       return e.enviadoPara
@@ -212,6 +219,51 @@ export function htmlBlocoConta(v: VistaConta): string {
 export const SENHA_CURTA = "A senha precisa de pelo menos 12 caracteres.";
 export const senhaCurta = (senha: string): boolean => [...senha].length < 12;
 
+/**
+ * NOD-406: o link "Sou da equipe: entrar com Google" (o login de equipe de antes, que troca o cookie do provisório).
+ * Só com o login de equipe pelo Google, sem o Google para conta (que já tem o próprio botão) e na web: no app, o Google
+ * abre no navegador do sistema, sem a sessão do app.
+ */
+export function linkDaEquipe(s: { loginGoogle: boolean; contaGoogle: boolean; noApp: boolean; url: string }): string | null {
+  return s.loginGoogle && !s.contaGoogle && !s.noApp ? s.url : null;
+}
+
+/**
+ * NOD-406 (revisões r5 a r7): o que fazer com o pedido "Conectar este Mac?" guardado (ADR-069). Abre direto só para uma
+ * conta ou a pessoa da equipe; num espaço provisório o Mac ficaria preso a um espaço descartável, então a pessoa entra
+ * primeiro ("entrar") e o pedido segue guardado. "esperar" = não mexe: não deu para ler, a volta recusada do Google já
+ * diz o motivo, ou há um código ou uma escolha em andamento (a conversão pelo código abre o pedido depois).
+ */
+export type PassoPareamento = "abrir" | "entrar" | "esperar";
+export function decidirPareamento(s: {
+  modoLido: boolean;
+  contas: boolean;
+  estado: { conta?: unknown; legado?: unknown; verificando?: unknown; escolha?: unknown } | null;
+  volta?: string | null;
+}): PassoPareamento {
+  if (!s.modoLido) return "esperar";
+  if (!s.contas) return "abrir";
+  if (!s.estado) return "esperar";
+  if (s.estado.conta || s.estado.legado) return "abrir";
+  if (s.volta === "recusado" || s.estado.verificando || s.estado.escolha) return "esperar";
+  return "entrar";
+}
+
+/** NOD-406: no app, a equipe sai do provisório pela ponte do processo principal (o Google abriria fora do app). */
+export function equipeNoApp(s: { loginGoogle: boolean; contaGoogle: boolean; noApp: boolean; ponte: boolean }): boolean {
+  return s.loginGoogle && !s.contaGoogle && s.noApp && s.ponte;
+}
+
+/**
+ * NOD-406: a marca (localStorage) de que este navegador já entrou pelo Google da equipe. Com ela, a sessão que venceu ou
+ * caiu volta à tela de entrar (com "Entrar com Google") em vez de abrir um espaço provisório descartável.
+ */
+export const CHAVE_EQUIPE = "nod-equipe";
+export function abreProvisorio(s: { saiu: boolean; recusado: boolean; bootstrap: boolean; noApp: boolean; equipe: boolean; pareando: boolean }): boolean {
+  // Com um pedido de pareamento do app (ADR-069), o Mac se liga à conta de quem entra, nunca a um provisório.
+  return !s.saiu && !s.recusado && s.bootstrap && !s.noApp && !s.equipe && !s.pareando;
+}
+
 /** A frase de um erro da API para dentro do cartão (limite, entrada, rede). */
 export function fraseDoErro(e: unknown): string {
   if (e instanceof AppDesatualizado) return "Atualize o app do nod para entrar numa conta por aqui.";
@@ -233,6 +285,8 @@ export type DepsConta = {
   irParaConversa: (conversaId: string, agenteId: string) => void;
   aoMudar: () => void;
   google: () => boolean;
+  /** NOD-406: o "Entrar com Google" da equipe (VistaConta.equipe); null ou ausente = nada. */
+  equipe?: () => string | null;
   noApp: () => boolean;
   /** Entrou noutro espaço (conta, importação, redefinição, pareamento): o app troca a chave; a web recarrega. */
   entrou: (trocaApp: string | null) => Promise<void>;
@@ -297,13 +351,14 @@ export function criarContaNoChat(deps: DepsConta) {
   }
 
   /** Abre um cartão. `pelaInterface`: começou pelo menu, então vai para a conversa do Nod. */
-  async function abrir(qual: string, pelaInterface = true): Promise<void> {
+  async function abrir(qual: string, pelaInterface = true, erro: string | null = null): Promise<void> {
     pollParar();
     const nod = pelaInterface ? deps.conversaDoNod() : null;
     conversaId = nod?.conversaId ?? deps.conversaDaTela();
     if (nod) deps.irParaConversa(nod.conversaId, nod.agenteId);
     if (qual === "parear-gerar") return gerarPareamento();
-    mudar(await etapaInicial(ETAPAS_DIRETAS.has(qual) ? qual : "inicio"));
+    // NOD-406: o "entrar" pode abrir já com o motivo (a volta recusada do Google da equipe).
+    mudar(qual === "entrar" && erro ? { tipo: "entrar", erro } : await etapaInicial(ETAPAS_DIRETAS.has(qual) ? qual : "inicio"));
   }
 
   /** Retoma o que ficou aberto no servidor (código pendente, escolha). Chamado no boot e na volta do Google. */
@@ -498,7 +553,7 @@ export function criarContaNoChat(deps: DepsConta) {
       // O estado pode chegar antes da frota (boot): o cartão pendente se liga à conversa do Nod quando ela existir.
       if ((etapa || resolvidas.length) && !conversaId) conversaId = deps.conversaDoNod()?.conversaId ?? deps.conversaDaTela();
       if (id !== conversaId) return "";
-      return htmlBlocoConta({ etapa, ocupado, resolvidas, google: deps.google(), agora: deps.agora() });
+      return htmlBlocoConta({ etapa, ocupado, resolvidas, google: deps.google(), agora: deps.agora(), equipe: deps.equipe?.() ?? null });
     },
     abrir,
     retomar,

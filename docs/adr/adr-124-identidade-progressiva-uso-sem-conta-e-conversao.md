@@ -100,6 +100,19 @@ converter nem ao importar (fica sem acesso); o código de verificação é por s
 app, o nome inicial do espaço é o usuário do sistema; a volta do Google iniciada no app termina com a sessão no
 navegador e o app relê o estado.
 
+**Em produção (NOD-406, 2026-10-28):** `NOD_CONTAS=1` e `NOD_BOOTSTRAP=1` ligados em app.nodbot.ai, com o remetente
+`conta@nodbot.ai` e a chave do Resend (só de envio) no segredo `nod-resend-api-key`; `NOD_CONTAS_GOOGLE` e
+`NOD_MINHA_CONTA` seguem desligados e o `deploy.sh` recusa ligá-los até terem caminho. O bootstrap vai junto porque o
+cadastro por e-mail só converte um espaço provisório; isso abre o app para quem chega sem login, como a §2 prevê para
+o produto público. Sobe só com os limites por IP e por hora: a cota pequena por espaço provisório e o desafio
+anti-automação desta seção, e a revisão da política e dos textos jurídicos de "Limites", ainda não existem e ficam como
+pendência para o Marlon e a PM decidirem (issue NOD-406, label precisa-humano). A equipe (ADR-030) entra pelo link "Sou
+da equipe: entrar com Google" do cartão de entrar e do menu do espaço provisório; o navegador que já entrou pela equipe
+guarda a marca `nod-equipe` e, quando a sessão cai, volta à tela de entrar em vez de abrir um provisório; a volta
+recusada do Google mostra o motivo e tira a marca. Valem os gatilhos de reversão de baixo (10% da capacidade por três
+dias); além deles, qualquer abuso de bootstrap visível no gasto do dia. Reverter é `NOD_BOOTSTRAP` vazio no
+`config.env` e o deploy (as contas já criadas seguem entrando).
+
 ## Impacto nas decisões anteriores
 
 - **ADR-030:** deixa de valer a regra “login só consulta pessoa admitida”. A allowlist e a admissão por domínio ficam

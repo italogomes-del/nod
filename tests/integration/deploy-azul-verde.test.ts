@@ -93,7 +93,8 @@ beforeEach(async () => {
   };
   await exe("docker", DOCKER);
   await exe("curl", CURL);
-  await exe("gcloud", '#!/bin/sh\ncase "$*" in *"$FALHA_SEGREDO"*) [ -n "$FALHA_SEGREDO" ] && exit 1 ;; esac\necho segredo-falso\n');
+  // A chave do Resend tem formato (`re_…`), que o deploy confere; SEGREDO_RESEND troca o valor devolvido (até vazio).
+  await exe("gcloud", '#!/bin/sh\necho "$*" >> "$FAKE/gcloud.log"\ncase "$*" in *"$FALHA_SEGREDO"*) [ -n "$FALHA_SEGREDO" ] && exit 1 ;; esac\ncase "$*" in *nod-resend-api-key*) printf "%s\\n" "${SEGREDO_RESEND-re_segredo_falso}"; exit 0 ;; esac\necho segredo-falso\n');
   await exe("sleep", "#!/bin/sh\nexit 0\n");
   await writeFile(join(dir, "config.env"), "PROJETO=projeto-teste\nREGISTRO=registro-teste\nSQL_IP=10.0.0.1\nNOD_DOMINIO=teste.local\n");
   await writeFile(join(dir, "Caddyfile"), "teste\n");
@@ -673,5 +674,164 @@ describe("deploy.sh e o computador da pessoa / a máquina na nuvem (NOD-96, ADR-
     await com("NOD_COMPUTADORES=motor\r\nNOD_LIGACAO=admins");
     expect(deploy().status).toBe(0);
     expect(await ler("nod-verde.env")).toMatch(/^NOD_COMPUTADORES=motor$/m);
+  });
+});
+
+describe("deploy.sh e o login por e-mail (ADR-124 §6, NOD-406)", () => {
+  const com = (linhas: string) => writeFile(join(dir, "config.env"), `PROJETO=projeto-teste\nREGISTRO=registro-teste\nSQL_IP=10.0.0.1\nNOD_DOMINIO=teste.local\n${linhas}\n`);
+  const envDa = async (cor: string) =>
+    Object.fromEntries((await ler(`nod-${cor}.env`)).split("\n").filter((l) => /^[A-Z_]+=/.test(l)).map((l) => [l.slice(0, l.indexOf("=")), l.slice(l.indexOf("=") + 1)]));
+
+  it("ligado: as flags, o remetente e a chave do Resend vão ao env da cor nova, e o servidor aceita a combinação", async () => {
+    const { recusasDasFlagsDeConta } = await import("../../src/adapters/http/compor-contas.ts");
+    await noAr("azul");
+    await com('NOD_CONTAS=1\nNOD_BOOTSTRAP=1\nNOD_EMAIL_REMETENTE="nod <conta@nodbot.ai>"');
+    const r = deploy();
+    expect(r.stderr).toBe("");
+    expect(r.status).toBe(0);
+    const env = await envDa("verde");
+    expect(env.NOD_CONTAS).toBe("1");
+    expect(env.NOD_BOOTSTRAP).toBe("1");
+    expect(env.NOD_EMAIL_REMETENTE).toBe("nod <conta@nodbot.ai>");
+    expect(env.NOD_RESEND_API_KEY).toBe("re_segredo_falso");
+    // As mesmas regras do boot do servidor: com o env que o deploy grava, nada impede a cor nova de subir.
+    expect(recusasDasFlagsDeConta(env)).toEqual([]);
+    // O segredo não aparece na saída do deploy.
+    expect(r.stdout + r.stderr).not.toContain("re_segredo_falso");
+  });
+
+  it("desligado (sem as linhas): as flags vão vazias e o segredo do Resend nem é lido", async () => {
+    await noAr("azul");
+    await com("");
+    expect(deploy({ FALHA_SEGREDO: "nod-resend-api-key" }).status).toBe(0);
+    const env = await envDa("verde");
+    for (const v of ["NOD_CONTAS", "NOD_BOOTSTRAP", "NOD_EMAIL_REMETENTE", "NOD_RESEND_API_KEY"]) expect(env[v], v).toBe("");
+    expect(await ler("gcloud.log")).not.toContain("nod-resend-api-key");
+  });
+
+  it("desligado com o segredo válido e um remetente no config.env: a chave nem é pedida e nada de e-mail vai ao env", async () => {
+    await noAr("azul");
+    await com('NOD_EMAIL_REMETENTE="nod #x <conta@nodbot.ai>"');
+    expect(deploy().status).toBe(0);
+    expect(await ler("gcloud.log")).not.toContain("nod-resend-api-key");
+    const env = await envDa("verde");
+    expect(env.NOD_RESEND_API_KEY).toBe("");
+    expect(env.NOD_EMAIL_REMETENTE).toBe("");
+  });
+
+  it("ligado e sem o segredo nod-resend-api-key: sai antes de gravar o env e de subir qualquer cor", async () => {
+    await noAr("azul");
+    await com('NOD_CONTAS=1\nNOD_EMAIL_REMETENTE="nod <conta@nodbot.ai>"');
+    const r = deploy({ FALHA_SEGREDO: "nod-resend-api-key" });
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toMatch(/não consegui ler o segredo nod-resend-api-key/);
+    expect(await ler("nod-verde.env").catch(() => "")).toBe("");
+    // Lido antes da reconciliação das cores: nada mexe no docker.
+    expect(await chamadas()).toEqual([]);
+    expect(await marcador()).toBe("azul");
+  });
+
+  it.each(["NOD_CONTAS=true", "NOD_CONTAS=sim", "NOD_CONTAS=0", "NOD_BOOTSTRAP=yes"])("%s: recusa (só 1 ou vazio; outro valor desligaria em silêncio)", async (linha) => {
+    await noAr("azul");
+    await com(`${linha}\nNOD_EMAIL_REMETENTE="nod <conta@nodbot.ai>"`);
+    const r = deploy();
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toMatch(/só aceita 1 ou vazio/);
+    expect(await chamadas()).toEqual([]);
+  });
+
+  it.each([
+    "",
+    'NOD_EMAIL_REMETENTE="nod <conta@gmail.com>"',
+    "NOD_EMAIL_REMETENTE=conta@nodbot.ai.evil.com",
+    "NOD_EMAIL_REMETENTE=conta@evilnodbot.ai",
+    "NOD_EMAIL_REMETENTE=conta@nodbotXai",
+    "NOD_EMAIL_REMETENTE=@nodbot.ai",
+    'NOD_EMAIL_REMETENTE="a@x.com, b@nodbot.ai"',
+    'NOD_EMAIL_REMETENTE="conta@nodbot.ai>"',
+    // No env_file do compose, ` #` corta o valor, `$` interpola e aspas mudam o parse.
+    'NOD_EMAIL_REMETENTE="nod #x <conta@nodbot.ai>"',
+    "NOD_EMAIL_REMETENTE='nod $X <conta@nodbot.ai>'",
+    `NOD_EMAIL_REMETENTE='"nod" <conta@nodbot.ai>'`,
+  ])("ligado e sem remetente do nodbot.ai (%s): recusa antes de subir, com o motivo", async (linha) => {
+    await noAr("azul");
+    await com(`NOD_CONTAS=1\n${linha}`);
+    const r = deploy();
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toMatch(/NOD_CONTAS=1 exige NOD_EMAIL_REMETENTE do domínio nodbot\.ai/);
+    expect(await ler("nod-verde.env").catch(() => "")).toBe("");
+    expect(await marcador()).toBe("azul");
+    // Config errada para antes de mexer em qualquer cor (nem a reconciliação roda).
+    expect(await chamadas()).toEqual([]);
+  });
+
+  it.each(["nod <conta@nodbot.ai>", "conta@nodbot.ai", "Nod Bot <no-reply+conta@nodbot.ai>"])("remetente válido (%s) passa", async (rem) => {
+    await noAr("azul");
+    await com(`NOD_CONTAS=1\nNOD_EMAIL_REMETENTE="${rem}"`);
+    expect(deploy().status).toBe(0);
+    expect((await envDa("verde")).NOD_EMAIL_REMETENTE).toBe(rem);
+  });
+
+  it.each([
+    ["vazio", ""],
+    ["com CR", "re_abc\r"],
+    ["com quebra de linha no meio (injetaria NOD_LOGIN no env)", "re_abc\nNOD_LOGIN=stub"],
+    ["fora do formato do Resend", "sk-ant-123"],
+  ])("ligado e o segredo %s: recusa antes de subir, sem mostrar o valor", async (_n, valor) => {
+    await noAr("azul");
+    await com('NOD_CONTAS=1\nNOD_EMAIL_REMETENTE="nod <conta@nodbot.ai>"');
+    const r = deploy({ SEGREDO_RESEND: valor });
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toMatch(/exige o segredo nod-resend-api-key com uma chave do Resend/);
+    if (valor) expect(r.stdout + r.stderr).not.toContain(valor.trim());
+    expect(await ler("nod-verde.env").catch(() => "")).toBe("");
+    expect(await chamadas()).toEqual([]);
+    expect(await marcador()).toBe("azul");
+  });
+
+  it.each(["NOD_CONTAS_GOOGLE", "NOD_MINHA_CONTA", "NOD_PURGA_CONTA"])("%s no config.env: recusa em vez de sumir em silêncio", async (v) => {
+    await noAr("azul");
+    await com(`NOD_CONTAS=1\nNOD_EMAIL_REMETENTE="nod <conta@nodbot.ai>"\n${v}=1`);
+    const r = deploy();
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain(`${v} ainda não é levado pelo deploy`);
+    expect(await chamadas()).toEqual([]);
+  });
+
+  it("NOD_BOOTSTRAP=1 sem NOD_CONTAS=1: recusa antes de subir (o servidor também recusaria)", async () => {
+    await noAr("azul");
+    await com("NOD_BOOTSTRAP=1");
+    const r = deploy();
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toMatch(/NOD_BOOTSTRAP=1 exige NOD_CONTAS=1/);
+    expect(await ler("nod-verde.env").catch(() => "")).toBe("");
+  });
+
+  it("espaço ou CRLF em volta do valor não desliga em silêncio (o servidor compara por === \"1\")", async () => {
+    await noAr("azul");
+    await com('NOD_CONTAS=" 1 "\r\nNOD_BOOTSTRAP=1\r\nNOD_EMAIL_REMETENTE="nod <conta@nodbot.ai>"\r');
+    expect(deploy().status).toBe(0);
+    const env = await envDa("verde");
+    expect(env.NOD_CONTAS).toBe("1");
+    expect(env.NOD_BOOTSTRAP).toBe("1");
+    expect(env.NOD_EMAIL_REMETENTE).toBe("nod <conta@nodbot.ai>");
+    expect(env.NOD_RESEND_API_KEY).toBe("re_segredo_falso");
+  });
+
+  it("toda env.NOD_* que o compor-contas.ts lê sai no env, ou o deploy recusa ligá-la (nome novo não passa verde)", async () => {
+    const { readFile } = await import("node:fs/promises");
+    await noAr("azul");
+    await com('NOD_CONTAS=1\nNOD_EMAIL_REMETENTE="nod <conta@nodbot.ai>"');
+    expect(deploy().status).toBe(0);
+    const env = await envDa("verde");
+    const fonte = await readFile(fileURLToPath(new URL("../../src/adapters/http/compor-contas.ts", import.meta.url)), "utf8");
+    const lidas = [...new Set([...fonte.matchAll(/env\.(NOD_[A-Z_]+)\b/g)].map((m) => m[1]!))];
+    expect(lidas.length).toBeGreaterThan(5);
+    // Recusadas no topo do deploy.sh (o teste acima prova a recusa de cada uma); NOD_API_PORT tem padrão no servidor.
+    const recusadas = ["NOD_CONTAS_GOOGLE", "NOD_MINHA_CONTA", "NOD_PURGA_CONTA"];
+    const comPadrao = ["NOD_API_PORT"];
+    const faltam = lidas.filter((v) => !(v in env) && !recusadas.includes(v) && !comPadrao.includes(v));
+    expect(faltam).toEqual([]);
+    expect(env.NOD_LOGIN).toBe("google");
   });
 });

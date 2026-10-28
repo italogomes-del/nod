@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { ErroApi } from "../../../web/lib/erro-api.ts";
-import { criarContaNoChat, htmlBlocoConta, htmlEtapa, resumoDoEspaco, type ApiConta, type DepsConta } from "../../../web/telas/conta-no-chat.ts";
+import { abreProvisorio, criarContaNoChat, equipeNoApp, decidirPareamento, htmlBlocoConta, htmlEtapa, linkDaEquipe, resumoDoEspaco, type ApiConta, type DepsConta } from "../../../web/telas/conta-no-chat.ts";
 import { deveLembrar, htmlLembrete, jaFalou, marcarFalou } from "../../../web/telas/lembrete-conta.ts";
 import { htmlMenuConta } from "../../../web/telas/menu-conta.ts";
 
@@ -45,6 +45,18 @@ describe("cartões: HTML puro", () => {
     const h = htmlEtapa({ tipo: "inicio" }, vista);
     for (const t of ["Conta no nod", "Continuar com Google", "Usar e-mail", "Agora não", "Já tenho conta com e-mail", "Tenho um código"]) expect(h).toContain(t);
     expect(htmlEtapa({ tipo: "inicio" }, { ...vista, google: false })).not.toContain("Continuar com Google");
+  });
+
+  it("NOD-406: com `equipe`, o início e o entrar levam ao Google da equipe; sem ele, o link não aparece", () => {
+    const comEquipe = { ...vista, google: false, equipe: "/api/sessao/google" };
+    for (const etapa of [{ tipo: "inicio" as const }, { tipo: "entrar" as const, erro: null }]) {
+      const h = htmlEtapa(etapa, comEquipe);
+      expect(h).toContain('<a class="bt cc-link" href="/api/sessao/google">Sou da equipe: entrar com Google</a>');
+      expect(htmlEtapa(etapa, { ...vista, google: false })).not.toContain("Sou da equipe");
+      expect(htmlEtapa(etapa, { ...vista, google: false, equipe: null })).not.toContain("Sou da equipe");
+    }
+    // O endereço passa pelo escape (nunca HTML cru no href).
+    expect(htmlEtapa({ tipo: "inicio" }, { ...vista, equipe: '/x"><b>' })).not.toContain('"><b>');
   });
 
   it("código: Restam N, vencido pede outro, ocupado = Conferindo… desabilitado", () => {
@@ -115,6 +127,17 @@ describe("cartões: HTML puro", () => {
 });
 
 describe("controlador", () => {
+  it("NOD-406: abrir(\"entrar\") com o motivo mostra o erro no cartão; sem motivo, o cartão limpo", async () => {
+    const { c, bloco } = montar({});
+    await c.abrir("entrar", true, "Não foi possível entrar com essa conta Google.");
+    expect(bloco()).toContain('role="alert"');
+    expect(bloco()).toContain("Não foi possível entrar com essa conta Google.");
+    await c.abrir("entrar", true);
+    expect(bloco()).not.toContain('role="alert"');
+    await c.abrir("inicio", true, "ignorado");
+    expect(bloco()).not.toContain("ignorado");
+  });
+
   it("o que começa pelo menu abre na conversa do Nod; fora dela o bloco é vazio", async () => {
     const { c, irParaConversa, bloco } = montar({});
     await c.abrir("inicio", true);
@@ -398,5 +421,62 @@ describe("lembrete e menu (opção 2)", () => {
     expect(com).toContain("ana@x.com");
     expect([...com.matchAll(/data-conta="([^"]+)"/g)].map((m) => m[1])).toEqual(["sair"]);
     for (const t of ["Trocar senha", "Sessões", "Conectar outro computador"]) expect(com).not.toContain(t);
+  });
+
+  it("NOD-406: menu do espaço provisório com `equipe`: o item da equipe vem depois do convite; com conta, nunca", () => {
+    const base = { faixa: null, conexao: "Conectada", equipe: "/api/sessao/google" };
+    const sem = htmlMenuConta({ ...base, conta: { email: null, senha: false } });
+    expect([...sem.matchAll(/data-conta="([^"]+)"/g)].map((m) => m[1])).toEqual(["inicio", "equipe"]);
+    expect(sem).toContain("Sou da equipe: entrar com Google");
+    expect(htmlMenuConta({ ...base, equipe: null, conta: { email: null, senha: false } })).not.toContain('data-conta="equipe"');
+    const com = htmlMenuConta({ ...base, conta: { email: "ana@x.com", senha: true } });
+    expect(com).not.toContain('data-conta="equipe"');
+    // No app, a equipe conecta com a chave (a tela de conexão), não pelo Google.
+    expect(htmlMenuConta({ ...base, equipe: "app", conta: { email: null, senha: false } })).toContain("Sou da equipe: conectar com a chave");
+  });
+
+  it("NOD-406: no app, o item da equipe só com o Google de equipe, sem Google para conta e com a ponte do app nova", () => {
+    const base = { loginGoogle: true, contaGoogle: false, noApp: true, ponte: true };
+    expect(equipeNoApp(base)).toBe(true);
+    expect(equipeNoApp({ ...base, loginGoogle: false })).toBe(false);
+    expect(equipeNoApp({ ...base, contaGoogle: true })).toBe(false);
+    expect(equipeNoApp({ ...base, noApp: false })).toBe(false);
+    expect(equipeNoApp({ ...base, ponte: false })).toBe(false);
+  });
+
+  it("NOD-406: o espaço provisório só abre na primeira visita web com bootstrap, sem saída, recusa nem marca da equipe", () => {
+    const base = { saiu: false, recusado: false, bootstrap: true, noApp: false, equipe: false, pareando: false };
+    expect(abreProvisorio(base)).toBe(true);
+    for (const k of ["saiu", "recusado", "noApp", "equipe", "pareando"] as const) expect(abreProvisorio({ ...base, [k]: true }), k).toBe(false);
+    expect(abreProvisorio({ ...base, bootstrap: false })).toBe(false);
+  });
+
+  it("NOD-406: linkDaEquipe só com login de equipe pelo Google, sem o Google para conta e fora do app", () => {
+    const url = "/api/sessao/google";
+    expect(linkDaEquipe({ loginGoogle: true, contaGoogle: false, noApp: false, url })).toBe(url);
+    expect(linkDaEquipe({ loginGoogle: false, contaGoogle: false, noApp: false, url })).toBeNull();
+    expect(linkDaEquipe({ loginGoogle: true, contaGoogle: true, noApp: false, url })).toBeNull();
+    expect(linkDaEquipe({ loginGoogle: true, contaGoogle: false, noApp: true, url })).toBeNull();
+  });
+});
+
+describe("NOD-406 (revisões r5 a r7): o pedido do Mac guardado", () => {
+  const prov = { conta: null, legado: null, verificando: null, escolha: null };
+  const d = (estado: Parameters<typeof decidirPareamento>[0]["estado"], extra: Partial<Parameters<typeof decidirPareamento>[0]> = {}) => decidirPareamento({ modoLido: true, contas: true, estado, ...extra });
+  it("abre direto para conta, pessoa da equipe e sem contas ligadas", () => {
+    expect(d({ ...prov, conta: { email: "a@b.c" } })).toBe("abrir");
+    expect(d({ ...prov, legado: { email: "eq@b.c" } })).toBe("abrir");
+    expect(decidirPareamento({ modoLido: true, contas: false, estado: null })).toBe("abrir");
+  });
+  it("o espaço provisório entra primeiro, inclusive com resposta parcial", () => {
+    expect(d(prov)).toBe("entrar");
+    expect(d({})).toBe("entrar");
+  });
+  it("espera quando não deu para ler, na volta recusada e com código ou escolha em andamento", () => {
+    expect(decidirPareamento({ modoLido: false, contas: false, estado: null })).toBe("esperar");
+    expect(d(null)).toBe("esperar");
+    expect(d(prov, { volta: "recusado" })).toBe("esperar");
+    expect(d({ ...prov, verificando: { email: "a@b.c" } })).toBe("esperar");
+    expect(d({ ...prov, escolha: { email: "a@b.c" } })).toBe("esperar");
   });
 });

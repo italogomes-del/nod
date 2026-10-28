@@ -45,9 +45,10 @@ segredo_gerado nod-pg-senha-dono "openssl rand -hex 24"
 segredo_gerado nod-pg-senha-app "openssl rand -hex 24"
 segredo_gerado nod-sessao-segredo "openssl rand -base64 48"
 segredo_gerado nod-credential-key "openssl rand -hex 32"
-# Os dois do Google e a chave da API do revisor (ADR-115) são cadastrados à mão (docs/deploy-gcp.md); aqui só nascem
-# vazios. Sem versão, o deploy com NOD_REVISOR=ligado para antes de subir a cor nova.
-for s in nod-google-client-id nod-google-client-secret nod-anthropic-revisor; do
+# Os dois do Google, a chave da API do revisor (ADR-115) e a do Resend (ADR-124, NOD-406) são cadastrados à mão
+# (docs/deploy-gcp.md); aqui só nascem vazios. Sem versão, o deploy com NOD_REVISOR=ligado ou NOD_CONTAS=1 para antes
+# de subir a cor nova.
+for s in nod-google-client-id nod-google-client-secret nod-anthropic-revisor nod-resend-api-key; do
   gc secrets describe "$s" >/dev/null 2>&1 || gc secrets create "$s" --replication-policy=user-managed --locations="$REGIAO"
 done
 
@@ -83,7 +84,7 @@ for papel in roles/logging.logWriter roles/monitoring.metricWriter roles/aiplatf
   gc projects add-iam-policy-binding "$PROJETO" --member="serviceAccount:$SA_VM" --role="$papel" --condition=None >/dev/null
 done
 gc artifacts repositories add-iam-policy-binding "$REPO" --location="$REGIAO" --member="serviceAccount:$SA_VM" --role=roles/artifactregistry.reader >/dev/null
-for s in nod-pg-senha-postgres nod-pg-senha-dono nod-pg-senha-app nod-sessao-segredo nod-credential-key nod-google-client-id nod-google-client-secret nod-anthropic-revisor; do
+for s in nod-pg-senha-postgres nod-pg-senha-dono nod-pg-senha-app nod-sessao-segredo nod-credential-key nod-google-client-id nod-google-client-secret nod-anthropic-revisor nod-resend-api-key; do
   gc secrets add-iam-policy-binding "$s" --member="serviceAccount:$SA_VM" --role=roles/secretmanager.secretAccessor >/dev/null
 done
 

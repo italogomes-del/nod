@@ -225,6 +225,35 @@ do dia, `NOD_REVISOR_TETO_PESSOA_USD` (padrão US$ 1), na mesma tabela, chave `r
 (com o segredo da sessão; trocar o `nod-sessao-segredo` zera as cotas do dia, não o total). Acima da cota, só as
 revisões daquela pessoa viram cartão.
 
+### Login por e-mail (NOD-345, NOD-406, ADR-124 §6)
+
+Conta com e-mail e senha, código de verificação e recuperação de senha. Com `NOD_CONTAS=1` no `config.env`, o deploy
+exige `NOD_EMAIL_REMETENTE` do domínio `nodbot.ai` (verificado no Resend) e lê o segredo `nod-resend-api-key` para
+`NOD_RESEND_API_KEY`; sem versão nele, ou com outro remetente, o deploy para antes de subir a cor nova. `NOD_BOOTSTRAP=1`
+(exige `NOD_CONTAS=1`) abre o app para quem chega sem login, num espaço provisório que vira conta pelo cartão "Usar
+e-mail"; quem é da equipe entra pelo link "Sou da equipe: entrar com Google" do mesmo cartão. Desligado, o segredo nem é
+lido. O deploy também recusa a chave fora do formato `re_…` (um CR ou uma quebra de linha colados com ela). Para gravar
+a chave (o `provisionar.sh` já cria o segredo vazio e o acesso da SA da VM):
+
+```bash
+# Uma chave do Resend com permissão só de envio, no domínio nodbot.ai. O read -rs não deixa a chave no histórico.
+read -rs CHAVE && printf %s "$CHAVE" | gcloud secrets versions add nod-resend-api-key --data-file=- --project=nod-producao; unset CHAVE
+# Só numa VM provisionada antes da NOD-406:
+gcloud secrets add-iam-policy-binding nod-resend-api-key --member="serviceAccount:nod-vm@nod-producao.iam.gserviceaccount.com" \
+  --role=roles/secretmanager.secretAccessor --project=nod-producao
+```
+
+Depois de ligar, confira um envio de verdade (a recuperação de senha para um endereço de teste): uma chave errada ou o
+domínio sem verificação no Resend só aparecem no primeiro e-mail, no log como `email_conta_falhou`.
+
+Para desligar, esvazie `NOD_CONTAS` e `NOD_BOOTSTRAP` no `config.env` e rode o deploy: as contas já criadas ficam no banco, só deixam
+de entrar por e-mail até religar.
+
+Atenção ao desligar `NOD_CONTAS`: o servidor deixa de conferir o `sid` e o corte das sessões. Sessões encerradas por "sair
+das outras" ou por senha nova voltam a valer, e os cookies dos espaços provisórios seguem válidos. Se o motivo for uma
+conta comprometida ou abuso, troque também o `nod-sessao-segredo` (nova versão no Secret Manager e deploy): todo mundo
+entra de novo. Para só fechar a porta aos visitantes, esvazie apenas `NOD_BOOTSTRAP`.
+
 ## Computador da pessoa no motor (NOD-96, ADR-122)
 
 Ligado em produção em 2026-10-28: `NOD_COMPUTADORES=motor` no `config.env`, que o `deploy.sh` leva ao env da cor nova

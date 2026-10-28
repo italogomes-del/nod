@@ -70,6 +70,8 @@ mexe neles.
 | `nod-sessao-segredo` | Assinatura das sessões |
 | `nod-google-client-id`, `nod-google-client-secret` | Cliente OAuth do login Google |
 | `nod-pg-senha-postgres`, `nod-pg-senha-dono`, `nod-pg-senha-app` | Senhas dos papéis do banco |
+| `nod-anthropic-revisor` | `NOD_REVISOR_CHAVE`, chave da API do revisor do Automático (ADR-115); só lida com `NOD_REVISOR=ligado` |
+| `nod-resend-api-key` | `NOD_RESEND_API_KEY`, chave do Resend (só de envio) do login por e-mail (ADR-124 §6, NOD-406); só lida com `NOD_CONTAS=1` |
 
 Nunca imprima um segredo: passe por variável de ambiente (`-e PGPASSWORD`), nunca por `echo`.
 
