@@ -20,6 +20,7 @@ import { prepararCloneDaMaquina, type ResultadoPreparo } from "./clone-da-maquin
 import { FERRAMENTA_ANEXAR_MIDIA } from "../../contracts/ferramentas-proxy.ts";
 import { criarClienteNod } from "./cliente-nod.ts";
 import { anexarLinksDaFala } from "./midia-local.ts";
+import { abrirCheckpoint, type CheckpointAberto } from "./checkpoints.ts";
 
 /**
  * Laço puxar → rodar → renovar → entregar (ADR-021: o app puxa, o servidor nunca disca) sobre uma
@@ -100,6 +101,12 @@ export type OpcoesLaco = {
   midiaDaFala?: (plano: PlanoTurno, texto: string, sinal: AbortSignal) => Promise<string>;
   /** O prazo total da J6 (default PRAZO_MIDIA_DA_FALA_MS); estourou, a fala vai como veio. Injetável no teste. */
   prazoMidiaDaFalaMs?: number;
+  /**
+   * definido em 2026-10-28 (NOD-54, ADR-134): a foto da pasta do turno antes do driver e depois dele (git sombra em
+   * `~/nod/.checkpoints`). Ausente = a desta máquina; `false` desliga (o teste do laço que não é sobre isso). Nunca
+   * derruba o turno: sem foto, a entrega vai sem `checkpoint`.
+   */
+  checkpoints?: ((plano: PlanoTurno) => Promise<CheckpointAberto | null>) | false;
 };
 
 /** NOD-323 J6: o teto da mídia da fala inteira (até 10 arquivos); o lease bate enquanto isso. */
@@ -107,6 +114,17 @@ export const PRAZO_MIDIA_DA_FALA_MS = 5 * 60_000;
 
 const estadoDoGitPadrao = (plano: PlanoTurno): Promise<string | null> =>
   estadoDoGit(join(homedir(), "nod", plano.pastaDoBot!), criarExecutarComando(process.env, homedir()));
+
+/**
+ * A sala e a frente não guardam checkpoint (assentar-turno): sem foto, a retenção da máquina conta o mesmo que o servidor
+ * (revisão 2, M3; a frente, revisão 11, M5). O registro e o manifesto do hook continuam: o cruzamento ainda vale.
+ */
+export const fotografaOTurno = (plano: Pick<PlanoTurno, "pastaDoBot" | "modoTurno">): boolean =>
+  !!plano.pastaDoBot && !plano.pastaDoBot.includes("/") && plano.modoTurno !== "sala";
+
+/** A sala entra só no registro: sem foto, mas o desfazer do bot espera por ela (revisão 4, M3). */
+const checkpointPadrao = (plano: PlanoTurno): Promise<CheckpointAberto | null> =>
+  plano.pastaDoBot ? abrirCheckpoint({ home: homedir(), pastaDoBot: plano.pastaDoBot, turnoId: plano.turnoId, soRegistro: !fotografaOTurno(plano) }) : Promise.resolve(null);
 
 const prepararClonePadrao = (repo: string, signal: AbortSignal): Promise<ResultadoPreparo> => prepararCloneDaMaquina({ home: homedir(), repo, signal });
 
@@ -362,6 +380,13 @@ export function iniciarLaco(o: OpcoesLaco): Laco {
     };
     const observacao = setInterval(() => avisar(vigia.avaliar(o.relogio())), vigiaMs);
     observacao.unref?.();
+    // NOD-54 (ADR-134): a foto do antes, aberta logo antes do driver; fechada uma vez, antes da entrega.
+    let foto: CheckpointAberto | null = null;
+    const fecharFoto = async () => {
+      const f = foto;
+      foto = null;
+      return f ? f.fechar().catch(() => null) : null;
+    };
     const entregar = async (bruto: ResultadoTurno): Promise<void> => {
       if (entregue || entregando) return;
       entregando = true;
@@ -444,6 +469,8 @@ export function iniciarLaco(o: OpcoesLaco): Laco {
         }
         pararNoPreparo = controle.signal.aborted;
       }
+      const abrirFoto = o.checkpoints === false ? null : (o.checkpoints ?? checkpointPadrao);
+      foto = abrirFoto ? await abrirFoto(plano).catch(() => null) : null;
       const adapter = registro.instance.adapter(plano);
       adapterAtual = adapter;
       o.aoIniciarTurno?.(plano, adapter);
@@ -496,11 +523,16 @@ export function iniciarLaco(o: OpcoesLaco): Laco {
       const anotado = (await o.aoResultado?.(plano, resultado)) ?? resultado;
       // NOD-264 (C20): o laço sabe mais que o driver (que só vê "interrompi"): a causa dele vale quando o turno parou.
       const causa = anotado.desfecho === "interrompido" ? (causaDoLaco ?? causaDoTurno ?? anotado.causa) : anotado.causa;
-      await entregar({ ...anotado, sinais: { ...anotado.sinais, ...sinais }, ...(causa ? { causa } : {}) });
+      const checkpoint = await fecharFoto();
+      await entregar({ ...anotado, sinais: { ...anotado.sinais, ...sinais }, ...(causa ? { causa } : {}), ...(checkpoint ? { checkpoint } : {}) });
     } catch (erro) {
       log("erro", "laco_turno_excecao", { turno_id: plano.turnoId, erro: erro instanceof Error ? erro.name : "desconhecido" });
-      await entregar(resultadoDeExcecao(erro, sinais));
+      const checkpoint = await fecharFoto();
+      await entregar({ ...resultadoDeExcecao(erro, sinais), ...(checkpoint ? { checkpoint } : {}) });
     } finally {
+      // O turno só sai do registro da pasta quando acaba de verdade (sem prazo: turno não tem duração máxima). Rede para
+      // a saída que não passou pelo fechar acima.
+      await fecharFoto();
       clearInterval(batida);
       if (renovarLogo) clearTimeout(renovarLogo);
       clearInterval(checagem);

@@ -4,6 +4,7 @@ import type { CitacaoNoCampo, Estado } from "../estado/reducer.ts";
 import { baixaveis } from "../lib/midia.ts";
 import { inicioDaPergunta } from "../lib/perguntas.ts";
 import { esc } from "../lib/render.ts";
+import { ICONE_DESFAZER, itemDoDesfazer } from "./desfazer.ts";
 
 /**
  * Ações na fala (definido em 2026-10-18, ADR-113, plano "pergunta com botões", Parte 5 e Parte 3b; protótipo aprovado,
@@ -152,7 +153,7 @@ export function htmlSeletorDeReacao(m: Mensagem, estado: Estado, todas = false):
   return `<div role="menu" aria-label="Reagir a esta mensagem">${linhaDeEmojis(m, estado, todas)}</div>`;
 }
 
-type ItemDoMenu = { acao: "copiar" | "abrir-task" | "lembrar" | "raio-x" | "baixar-tudo"; icone: string; texto: string };
+type ItemDoMenu = { acao: "copiar" | "abrir-task" | "lembrar" | "raio-x" | "baixar-tudo" | "desfazer"; icone: string; texto: string; desabilitado?: boolean };
 
 /** Os itens do ⋯ que valem para esta fala, na ordem do protótipo. */
 export function itensDoMenu(m: Mensagem, estado: Estado): ItemDoMenu[] {
@@ -166,13 +167,19 @@ export function itensDoMenu(m: Mensagem, estado: Estado): ItemDoMenu[] {
   if (!ehLinha(m) && m.texto.trim() !== "" && m.confianca !== "nao_confiavel" && botDaFala(m, estado)) itens.push({ acao: "lembrar", icone: ICONE_DA_FALA.lembrar, texto: "Lembrar disso" });
   // O Raio-X é do modo dev (0036) e do turno: fala sem turno (a da pessoa) não tem o que mostrar.
   if (estado.modoDev.ligado && m.turnoId) itens.push({ acao: "raio-x", icone: ICONE_DA_FALA.raioX, texto: "Ver no Raio-X" });
+  // NOD-54 (ADR-134): no fim, depois de um divisor — "Desfazer N arquivos" na fala final do turno que mudou arquivos.
+  const desfazer = itemDoDesfazer(m, estado);
+  if (desfazer) itens.push({ acao: "desfazer", icone: ICONE_DESFAZER, texto: desfazer.texto, desabilitado: desfazer.desabilitado });
   return itens;
 }
 
 /** O menu ⋯: as reações rápidas no topo (fala de bot) e os itens, cada um com o ícone à esquerda. */
 export function htmlMenuDaFala(m: Mensagem, estado: Estado): string {
   const emojis = podeReagir(m) ? linhaDeEmojis(m, estado) : "";
-  const itens = itensDoMenu(m, estado).map((i) => `<button type="button" role="menuitem" data-fala="${i.acao}">${i.icone}${esc(i.texto)}</button>`).join("");
+  const itens = itensDoMenu(m, estado).map((i) => {
+    const extra = i.acao === "desfazer" ? ` class="dft-mi"${i.desabilitado ? ' aria-disabled="true"' : ""}` : "";
+    return `<button type="button" role="menuitem" data-fala="${i.acao}"${extra}>${i.icone}${esc(i.texto)}</button>`;
+  }).join("");
   return `<div role="menu" aria-label="Mais ações da mensagem">${emojis}${itens}</div>`;
 }
 

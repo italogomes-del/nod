@@ -166,7 +166,7 @@ export type ResultadoTurno = {
    * anúncio e o turno). O servidor apaga o vínculo e refaz o turno uma vez noutra conta.
    */
   contaAusente?: true;
-};
+} & import("./checkpoint.ts").CheckpointDoResultado;
 
 /**
  * definido em 2026-10-12 (ADR-101 item 6): `trocou` = "Trocar sozinho" ligado e o turno deve ser refeito na conta `para`;

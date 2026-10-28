@@ -2,6 +2,7 @@ import type { AtividadeDto, ContagemDaAtividade } from "../../src/contracts/ativ
 import type { PaginaDaBiblioteca } from "../../src/contracts/biblioteca.ts";
 import type { PaginaDaBusca } from "../../src/contracts/busca.ts";
 import type { AnexoMeta } from "../../src/contracts/anexo.ts";
+import type { CheckpointDaFala } from "../../src/contracts/checkpoint.ts";
 import type { ArtefatoDto } from "../../src/contracts/artefato.ts";
 import type { AcaoComputador, ComputadorDto, ResultadoComputador } from "../../src/contracts/computador.ts";
 import { lerComputadorPessoa, type ComputadorPessoaDto, type OperacaoPessoa } from "./computador-pessoa.ts";
@@ -236,6 +237,9 @@ export function criarApi(escopo: Escopo) {
       pedirDeNovoSeCair<RespostaMutacao>("POST", `${base}/conversas/${conversaId}/mensagens`, corpoDoEnvio(texto, anexos, idEnvio, respondeA), idEnvio),
     /** ADR-113: põe (`marcada`) ou tira a reação da pessoa numa fala; devolve as reações dela. */
     reagir: (mensagemId: string, emoji: string, marcada: boolean) => pedir<{ reacoes: ReacaoNaFala[] }>("PUT", `${base}/mensagens/${encodeURIComponent(mensagemId)}/reacoes`, { emoji, marcada }),
+    /** NOD-54 (ADR-134): pede o desfazer do turno; `forcar` = "Voltar mesmo assim" nos conflitos. A recusa vem com `ok: false`. */
+    desfazerTurno: (conversaId: string, turnoId: string, forcar = false) =>
+      pedir<{ ok: true; checkpoint: CheckpointDaFala } | { ok: false; recusa: "vencido" | "outro_desfazendo" | "ja_desfazendo" | "nada_a_forcar" }>("POST", `${base}/conversas/${encodeURIComponent(conversaId)}/turnos/${encodeURIComponent(turnoId)}/desfazer`, { forcar }),
     /** ADR-046: o arquivo sobe cru (não em JSON) e volta como metadado; progresso só existe no XHR. */
     subirAnexo: (conversaId: string, arquivo: File, mime: string, aoProgresso?: (fracao: number) => void) => subir(`${base}/conversas/${conversaId}/anexos`, arquivo, mime, aoProgresso),
     urlAnexo: (conversaId: string, anexoId: string) => `${base}/conversas/${encodeURIComponent(conversaId)}/anexos/${encodeURIComponent(anexoId)}`,

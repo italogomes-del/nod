@@ -60,7 +60,9 @@ export type KindEvento =
   /** ADR-083 (#194): a pressão de memória do Mac mudou de nível. */
   | "pressao_memoria"
   /** definido em 2026-10-18 (ADR-113): a pessoa pôs ou tirou uma reação numa fala (só ids, o emoji e a ação). */
-  | "reacao_mudou";
+  | "reacao_mudou"
+  /** definido em 2026-10-28 (NOD-54, ADR-134): o checkpoint de uma fala mudou (pedido, progresso, fim). Só ids e estado. */
+  | "checkpoint_mudou";
 
 /** Dados do evento: só escalares (o CHECK da trilha e o outbox não aceitam prosa aninhada). */
 export type DadosEvento = Record<string, string | number | boolean | null>;

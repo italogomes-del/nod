@@ -42,6 +42,7 @@ import type { trabalhosRepo } from "./trabalhos.repo.ts";
 import type { frentesRepo } from "./frentes.repo.ts";
 import type { pedidosDeColegaRepo } from "./pedidos-de-colega.repo.ts";
 import type { donosRepo } from "./donos.repo.ts";
+import type { checkpointsRepo } from "./checkpoints.repo.ts";
 import type { esperasRepo } from "./esperas.repo.ts";
 import type { contasIaRepo } from "./contas-ia.repo.ts";
 import type { esperasDaCotaRepo } from "./esperas-da-cota.repo.ts";
@@ -99,6 +100,7 @@ export interface Repos {
   donos: ReturnType<typeof donosRepo>;
   /** 0070 (ADR-099, parte 2): as esperas de comando. */
   esperas: ReturnType<typeof esperasRepo>;
+  checkpoints: ReturnType<typeof checkpointsRepo>;
   /** 0074 (ADR-102): as contas de IA da pessoa em todas as máquinas. */
   contasIa: ReturnType<typeof contasIaRepo>;
   /** definido em 2026-10-15 (NOD-277): a task esperando a cota (a retomada marcada) e as contas livres da mesma IA. */

@@ -17,6 +17,7 @@ import { criarAcompanhanteDeSubagentes } from "../src/adapters/executor/acompanh
 import { iniciarPoolDeLacos, type PoolDeLacos } from "../src/adapters/executor/pool-lacos.ts";
 import { criarAmostradorMemoria } from "../src/adapters/executor/amostrador-memoria.ts";
 import { criarExecutarComando, iniciarLimpezaDasTasks, modoDaLimpeza, type LimpezaDasTasks } from "../src/adapters/executor/limpeza-das-tasks.ts";
+import { iniciarDesfazeres, type Desfazeres } from "../src/adapters/executor/desfazeres.ts";
 import { iniciarEsperas, type Esperas } from "../src/adapters/executor/esperas.ts";
 import type { PlanoTurno } from "../src/contracts/plano-turno.ts";
 import { configDosDrivers, criarRegistryDetalhado } from "../src/adapters/executor/registry.ts";
@@ -111,6 +112,8 @@ let itensGithub: ReturnType<typeof setInterval> | null = null;
 let limpezaDasTasks: LimpezaDasTasks | null = null;
 /** ADR-099 (parte 2, 2026-10-12): o laço das esperas de comando deste Mac; os comandos em si moram no módulo esperas.ts. */
 let esperasDoMac: Esperas | null = null;
+/** NOD-54 (ADR-134): o laço dos desfazeres de arquivos deste Mac. */
+let desfazeresDoMac: Desfazeres | null = null;
 /** Revisão do #225: os turnos rodando neste Mac — a limpeza não mexe na pasta de nenhum deles. */
 const planosNoMac = new Map<string, PlanoTurno>();
 /**
@@ -424,6 +427,8 @@ async function parar() {
   limpezaDasTasks = null;
   esperasDoMac?.parar();
   esperasDoMac = null;
+  desfazeresDoMac?.parar();
+  desfazeresDoMac = null;
   vigiaIas?.parar();
   vigiaIas = null;
   contasNoServidor?.parar();
@@ -524,6 +529,8 @@ async function conectar(c: Config) {
     // ADR-099 (parte 2): as esperas de comando deste Mac (o puxar, a cada 5 s), com o ambiente dos drivers.
     esperasDoMac?.parar();
     esperasDoMac = iniciarEsperas({ ponte: ponteHttp.ponte, pessoaId: dados.escopo.pessoaId, machineId: dados.machineId, home: homeDoMac, env: cfg.env });
+    desfazeresDoMac?.parar();
+    desfazeresDoMac = iniciarDesfazeres({ ponte: ponteHttp.ponte, pessoaId: dados.escopo.pessoaId, machineId: dados.machineId, home: homeDoMac });
   }
   // ADR-102 (2026-10-13): as contas deste Mac, lidas pelo CLI na pasta de cada uma (impressão = e-mail + organização +
   // pessoa, nunca em claro ao servidor). A lista segue a do app (contas.json); a primeira leitura é inteira (a pessoa

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { entrega as validarEntrega } from "../../../src/adapters/http/rotas/ponte-validacao.ts";
-import { cortarTexto, driverDoPlano, iniciarLaco, resultadoDeExcecao } from "../../../src/adapters/executor/laco.ts";
+import { cortarTexto, driverDoPlano, fotografaOTurno, iniciarLaco, resultadoDeExcecao } from "../../../src/adapters/executor/laco.ts";
 import { RENOVACAO_INDEFINIDO_MS, RENOVACAO_MS, TEXTO_ENTREGA_MAX_CHARS } from "../../../src/shared/constantes.ts";
 import type { Adapter, Driver, Instance, Registry } from "../../../src/adapters/executor/spi.ts";
 import type { PlanoTurno } from "../../../src/contracts/plano-turno.ts";
@@ -231,6 +231,35 @@ describe("laço puxar → rodar → renovar → entregar (ADR-021, ADR-009)", ()
     ]);
     expect(ponte.entregas[0]?.resultado.sinais.attempted).toBe(true);
     expect(ponte.entregas.map((e) => e.seqLocal)).toEqual([1, 2]);
+  });
+
+  it("NOD-54: a foto abre antes do driver e fecha antes da entrega, que leva o checkpoint (e passa na validação HTTP)", async () => {
+    const ordem: string[] = [];
+    const resumo = { arquivos: [{ caminho: "~/nod/B/a.md", acao: "mudado" as const }], total: 1 };
+    const ponte = ponteFalsa([planoDeTeste(randomUUID(), "[[texto: pronto]]"), planoDeTeste(randomUUID(), "x")]);
+    let n = 0;
+    const laco = iniciarLaco({
+      ponte, registry: await registryCom(driverFalso()), pessoaId: "p", machineId: "m1", relogio: Date.now, dormir: async () => new Promise((r) => setTimeout(r, 1)),
+      aoIniciarTurno: () => ordem.push("driver"),
+      checkpoints: async () => {
+        ordem.push("abriu");
+        n += 1;
+        return n === 1 ? { comFoto: true, fechar: async () => (ordem.push("fechou"), resumo) } : { comFoto: true, fechar: async () => { throw new Error("disco"); } };
+      },
+    });
+    await esperarAte(() => ponte.entregas.length === 2);
+    await laco.parar();
+    expect(ordem.slice(0, 3)).toEqual(["abriu", "driver", "fechou"]);
+    expect(ponte.entregas[0]?.resultado.checkpoint).toEqual(resumo);
+    expect(validarEntrega(JSON.parse(JSON.stringify(ponte.entregas[0])), "m1").resultado.checkpoint).toEqual(resumo);
+    expect(ponte.entregas[1]?.resultado.checkpoint, "fechar que lança: a entrega segue sem checkpoint").toBeUndefined();
+  });
+
+  it("NOD-54: o resumo fora do formato some na validação e a entrega passa", () => {
+    const base = { turnoId: randomUUID(), seqLocal: 1, fala: { tipo: "texto", texto: "ok" }, resultado: { desfecho: "sucesso", texto: "ok", sessaoCli: null, custoUsd: null, sinais: SINAIS_ZERADOS, tokens: { entrada: 0, saida: 0, cacheLeitura: 0, cacheCriacao: 0 }, ferramentasChamadas: [], negacoesPermissao: [] } };
+    for (const checkpoint of [{ arquivos: [{ caminho: "/etc/passwd", acao: "mudado" }], total: 1 }, { arquivos: [{ caminho: "~/../x", acao: "mudado" }], total: 1 }, { arquivos: [{ caminho: "~/a", acao: "x" }], total: 1 }, { arquivos: [], total: 0 }, { arquivos: [{ caminho: "~/a", acao: "criado" }], total: 0 }]) {
+      expect(validarEntrega({ ...base, resultado: { ...base.resultado, checkpoint } }, "m1").resultado.checkpoint).toBeUndefined();
+    }
   });
 
   it("plano para um driver em sombra é entregue 'interrompido' executor_indisponivel sem rodar nada", async () => {
@@ -1041,6 +1070,7 @@ describe("J6: mídia citada na fala (NOD-323)", () => {
     const laco = iniciarLaco({
       ponte, registry: await registryCom(driverFalso()), pessoaId: "p", machineId: "m1", relogio: Date.now, renovacaoMs: 10_000, dormir: async () => new Promise((r) => setTimeout(r, 1)),
       midiaDaFala: async (p, t) => { chamadas.push(t); return midiaDaFala(p, t); },
+      checkpoints: false,
     });
     await esperarAte(() => ponte.entregas.length === 1);
     await laco.parar();
@@ -1063,7 +1093,7 @@ describe("J6: mídia citada na fala (NOD-323)", () => {
     const ponte = ponteFalsa([comAnexar(planoDeTeste("t-j6d", "[[texto: veja ![v](v.mp4)]]"))]);
     let liberar!: (t: string) => void;
     let renovacoesNoInicio = -1;
-    const laco = iniciarLaco({
+    const laco = iniciarLaco({ checkpoints: false,
       ponte, registry: await registryCom(driverFalso()), pessoaId: "p", machineId: "m1", relogio: Date.now, renovacaoMs: 5, dormir: async () => new Promise((r) => setTimeout(r, 1)),
       midiaDaFala: () => { renovacoesNoInicio = ponte.renovacoes.length; return new Promise((ok) => { liberar = ok; }); },
     });
@@ -1079,7 +1109,7 @@ describe("J6: mídia citada na fala (NOD-323)", () => {
   it("estourou o prazo da J6: a fala vai como veio", async () => {
     let sinal: AbortSignal | undefined;
     const ponte = ponteFalsa([comAnexar(planoDeTeste("t-j6e", "[[texto: veja ![v](v.mp4)]]"))]);
-    const laco = iniciarLaco({
+    const laco = iniciarLaco({ checkpoints: false,
       ponte, registry: await registryCom(driverFalso()), pessoaId: "p", machineId: "m1", relogio: Date.now, renovacaoMs: 10_000, dormir: async () => new Promise((r) => setTimeout(r, 1)),
       midiaDaFala: (_p, _t, s) => { sinal = s; return new Promise(() => undefined); }, prazoMidiaDaFalaMs: 20,
     });
@@ -1094,7 +1124,7 @@ describe("J6: mídia citada na fala (NOD-323)", () => {
     let subindo = false;
     let sinal: AbortSignal | undefined;
     const ponte = ponteFalsa([comAnexar(planoDeTeste("t-j6f", "[[texto: veja ![v](v.mp4)]]"))], () => !subindo);
-    const laco = iniciarLaco({
+    const laco = iniciarLaco({ checkpoints: false,
       ponte, registry: await registryCom(driverFalso()), pessoaId: "p", machineId: "m1", relogio: Date.now, renovacaoMs: 5, dormir: async () => new Promise((r) => setTimeout(r, 1)),
       midiaDaFala: (_p, _t, s) => { subindo = true; sinal = s; return new Promise(() => undefined); }, prazoMidiaDaFalaMs: 60_000,
     });
@@ -1112,7 +1142,7 @@ describe("J6: mídia citada na fala (NOD-323)", () => {
       ponte.renovacoes.push(p);
       return { ativo: p.sinais.producedOutput !== true, versaoMinimaApp: "0.1.0" };
     };
-    const laco = iniciarLaco({
+    const laco = iniciarLaco({ checkpoints: false,
       ponte, registry: await registryCom(driverFalso({ atrasoMs: 5 })), pessoaId: "p", machineId: "m1", relogio: Date.now, renovacaoMs: 20, dormir: async () => new Promise((r) => setTimeout(r, 1)),
       midiaDaFala: async (_p, t) => { chamou = true; return t; },
     });
@@ -1127,4 +1157,14 @@ describe("J6: mídia citada na fala (NOD-323)", () => {
     expect(chamadas).toEqual([]);
     expect(entrega.fala).toEqual({ tipo: "texto", texto: "![g](g.png)" });
   });
+
+describe("NOD-54: qual turno ganha a foto", () => {
+  it("a sala não (o servidor não guarda): a retenção da máquina conta o mesmo que a do servidor (revisão 2, M3)", () => {
+    expect(fotografaOTurno({ pastaDoBot: "Ada", modoTurno: "conversa" })).toBe(true);
+    expect(fotografaOTurno({ pastaDoBot: "Ada", modoTurno: "sala" })).toBe(false);
+    // A frente fica só no registro: o servidor não guarda o checkpoint dela (revisão 11, M5).
+    expect(fotografaOTurno({ pastaDoBot: "Ada/nod-54-implementar", modoTurno: "conversa" })).toBe(false);
+    expect(fotografaOTurno({ pastaDoBot: undefined, modoTurno: "conversa" })).toBe(false);
+  });
+});
 });

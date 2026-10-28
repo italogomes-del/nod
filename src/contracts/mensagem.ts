@@ -187,13 +187,13 @@ export type Mensagem = {
    */
   origemTurno?: OrigemTurno | null;
   /**
-   * definido em 2026-10-12 (ADR-099, I7 revista): o turno de uma retomada leva a raiz da cadeia dele (o turno que ela
-   * continua, até 10 saltos). A execução de rotina e o pedido de colega não viram mais trabalho: sem a raiz, a resposta
-   * da pessoa, a volta marcada e o retorno das frentes saíam da linha agrupada "da rotina" / "Pedido do …".
+   * definido em 2026-10-12 (ADR-099, I7 revista): o turno de uma retomada leva a raiz da cadeia dele (o turno que ela continua, até 10
+   * saltos). A execução de rotina e o pedido de colega não viram mais trabalho: sem a raiz, a resposta da pessoa, a volta marcada e o retorno das frentes saíam da linha agrupada "da rotina" / "Pedido do …".
    */
   raiz?: { turnoId: string; origem: OrigemTurno };
   trabalhoId?: string | null;
   fimDoTurno?: boolean;
   motivoRecomeco?: MotivoRecomeco; // NOD-312: o turno da fala recomeçou sem a sessão. Ausente = normal ou servidor antigo.
   destino?: Destino; // ADR-114 (2026-10-18): o destino da tabela DESTINO, resolvido no servidor; só na conversa própria. Ausente = sala ou servidor antigo.
+  checkpoint?: import("./checkpoint.ts").CheckpointDaFala; // NOD-54 (ADR-134): na fala final do turno que mudou arquivos, o "Desfazer N arquivos" do ⋯. Ausente = sem checkpoint ou vencido.
 };

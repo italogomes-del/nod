@@ -2,6 +2,7 @@ import type { ComandoComputador, EstadoComputadorRelatado, ResultadoComandoCompu
 import { IAS_COM_CONTA, type IaComConta, type ProgressoDoLogin, type PuxadaDeContas } from "../../contracts/contas-ia.ts";
 import type { PedidoDeInstalacao, ProgressoDeInstalacao } from "../../contracts/instalacoes-ssh.ts";
 import type { AnuncioMaquina, PastaParaLimpar, PonteInterna, RespostaRenovar, TrechoVivo, VigiaVivo } from "../../contracts/ponte.ts";
+import type { DesfazerParaRodar } from "../../contracts/checkpoint.ts";
 import type { EsperaParaRodar } from "../../contracts/espera.ts";
 import type { PlanoTurno } from "../../contracts/plano-turno.ts";
 import type { SubagenteVivo, TarefaDoBot } from "../../contracts/turno.ts";
@@ -49,6 +50,13 @@ function esperaValida(v: unknown): v is EsperaParaRodar {
   if (typeof v !== "object" || v === null) return false;
   const e = v as Record<string, unknown>;
   return typeof e.id === "string" && typeof e.comando === "string" && (e.pasta === null || typeof e.pasta === "string") && typeof e.iniciada === "boolean";
+}
+
+/** NOD-54: o que veio do servidor tem a forma de `DesfazerParaRodar` (a máquina ainda confere a pasta e o turno). */
+function desfazerValido(v: unknown): v is DesfazerParaRodar {
+  if (typeof v !== "object" || v === null) return false;
+  const e = v as Record<string, unknown>;
+  return typeof e.turnoId === "string" && typeof e.pastaDoBot === "string" && Number.isSafeInteger(e.tentativa) && Array.isArray(e.forcar) && e.forcar.every((f) => typeof f === "string");
 }
 
 /**
@@ -263,6 +271,23 @@ export function criarPonteHttp(o: { url: string; chave: string; versao: string; 
       try {
         const r = await chamar<{ seguir?: unknown }>("esperas/resultado", { relato }, { rota404: true });
         return { seguir: r.seguir === true };
+      } catch {
+        return null;
+      }
+    },
+    /** NOD-54 (ADR-134): os desfazeres desta máquina. Servidor antigo (404) ou fora do ar: null. */
+    async desfazeres() {
+      try {
+        const r = await chamar<{ desfazeres?: unknown }>("desfazeres", {}, { rota404: true });
+        return Array.isArray(r.desfazeres) ? r.desfazeres.filter(desfazerValido) : null;
+      } catch {
+        return null;
+      }
+    },
+    async relatarDesfazer(_pessoaId, _machineId, relato) {
+      try {
+        const r = await chamar<{ ok?: unknown }>("desfazeres/relato", { relato }, { rota404: true });
+        return { ok: r.ok === true };
       } catch {
         return null;
       }

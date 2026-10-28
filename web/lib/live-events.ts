@@ -108,6 +108,7 @@ const TIPOS: Record<TipoFrame, true> = {
   "trabalho.mudou": true,
   "memoria.mudou": true,
   "reacao.mudou": true,
+  "checkpoint.mudou": true,
   "conector.mudou": true,
   resumed: true,
 };

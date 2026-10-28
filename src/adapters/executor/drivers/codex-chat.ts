@@ -1,4 +1,5 @@
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import type { EsforcoAgente } from "../../../contracts/agente.ts";
 import type { PlanoTurno } from "../../../contracts/plano-turno.ts";
@@ -173,6 +174,8 @@ async function rodarUmaVez(c: ContextoChatCodex, comTerminal: boolean): Promise<
       const config: ConfigHook = {
         url: c.urlNod, token: plano.tokenDeTurno, pastaDoBot: cwd, home: await real(terminal.home), daTask: ehPastaDeTask(plano.pastaDoBot!),
         ...(terminal.vaga ? { vaga: terminal.vaga } : {}), formato: "codex", prazoMs: PRAZO_HOOK_CODEX_MS, negacoes: arquivoNegacoes, mcpDaPessoa,
+        // NOD-54 (ADR-134): o original do arquivo gravado fora da pasta vai para o checkpoint do turno.
+        checkpoint: { turnoId: plano.turnoId, pastaDoBot: plano.pastaDoBot!, home: homedir() },
       };
       const caminhoConfig = join(dir, "hook-nativas.json");
       await writeFile(caminhoConfig, JSON.stringify(config), { mode: 0o600 });

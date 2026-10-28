@@ -53,6 +53,8 @@ export type TipoFrame =
   | "memoria.mudou"
   /** ADR-113: as reações de uma fala mudaram: {conversaId, mensagem_id}. A web relê a conversa (o chip embaixo da fala). */
   | "reacao.mudou"
+  /** NOD-54 (ADR-134): o checkpoint de uma fala mudou: {conversaId, mensagem_id, estado}. A web relê a conversa. */
+  | "checkpoint.mudou"
   /** definido em 2026-10-27 (NOD-374): um app da pessoa entrou ou saiu de "Fora do ar" ({}). A web relê a frota e os conectores. */
   | "conector.mudou"
   | "resumed";

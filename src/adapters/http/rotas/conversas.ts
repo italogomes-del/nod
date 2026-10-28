@@ -4,6 +4,7 @@ import { ErroDeDominio } from "../../../domain/erro.ts";
 import { lerAnexo, lerBiblioteca, lerFaixaDoAnexo, localDaMidia, receberAnexo } from "../../../use-cases/anexos.ts";
 import { lerCursor, limiteDaBiblioteca } from "../../../domain/biblioteca.ts";
 import { enviarMensagem, lerConversa } from "../../../use-cases/enviar-mensagem.ts";
+import { pedirDesfazerTurno } from "../../../use-cases/desfazer-turno.ts";
 import { parar } from "../../../use-cases/parar.ts";
 import { reagir } from "../../../use-cases/reagir.ts";
 import { UUID, type Rota } from "../roteador.ts";
@@ -138,6 +139,22 @@ export function criarRotasConversas(d: DepsRotas): Rota[] {
         const corpo = corpoObjeto(await ctx.corpo());
         if (typeof corpo.marcada !== "boolean") throw new ErroDeDominio("entrada_invalida", { cause: "marcada" });
         ctx.json(200, await executar(ctx.escopo, reagir, { mensagemId: ctx.params.id ?? "", emoji: corpo.emoji, marcada: corpo.marcada }));
+      },
+    },
+    {
+      // NOD-54 (ADR-134): o "Desfazer N arquivos" da fala. `forcar` = "Voltar mesmo assim" nos conflitos do desfazer anterior.
+      // A recusa (vencido, outro desfazendo do mesmo bot) volta 200 com `ok: false` e o motivo: é resposta, não erro — a
+      // tela diz o que houve sem passar pelo aviso genérico de falha.
+      metodo: "POST",
+      padrao: new RegExp(`^/conversas/${ID}/turnos/(?<turno>[^/]+)/desfazer$`),
+      async handler(ctx) {
+        const conversaId = ctx.params.id ?? "";
+        const turnoId = ctx.params.turno ?? "";
+        if (!UUID.test(conversaId) || !UUID.test(turnoId)) throw new ErroDeDominio("nao_encontrado");
+        const corpo = corpoObjeto(await ctx.corpo());
+        if (corpo.forcar !== undefined && typeof corpo.forcar !== "boolean") throw new ErroDeDominio("entrada_invalida", { cause: "forcar" });
+        const r = await executar(ctx.escopo, pedirDesfazerTurno, { conversaId, turnoId, forcar: corpo.forcar === true });
+        ctx.json(200, r);
       },
     },
     {

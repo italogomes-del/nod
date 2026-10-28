@@ -575,7 +575,7 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
                   // ADR-097: a fila do forno da máquina, que todos os turnos daqui dividem.
                   const nodeDoHook = { nodePath: lig.nodePath ?? process.execPath, hookPath: lig.hookPath, electronComoNode: lig.electronComoNode };
                   const vaga = lig.filaDoForno === false ? undefined : { dir: pastaDaFila(cfg.cwdBase), invocar: invocarDoHook(nodeDoHook) };
-                  await writeFile(config, JSON.stringify({ url: lig.urlNod, token: plano.tokenDeTurno, pastaDoBot: pastaBot, home, daTask: ehPastaDeTask(plano.pastaDoBot!), ...(vaga ? { vaga } : {}) }), { mode: 0o600 });
+                  await writeFile(config, JSON.stringify({ url: lig.urlNod, token: plano.tokenDeTurno, pastaDoBot: pastaBot, home, daTask: ehPastaDeTask(plano.pastaDoBot!), ...(vaga ? { vaga } : {}), checkpoint: { turnoId: plano.turnoId, pastaDoBot: plano.pastaDoBot!, home: homedir() } }), { mode: 0o600 });
                   const comandoHook = comandoDoHook({ ...nodeDoHook, config });
                   // ADR-055: o Mac inteiro da pessoa, a começar pela pasta dela; os projetos autorizados continuam juntos.
                   const dirsExtras = [...new Set([home, ...(plano.workspacePastas?.aprovadas ?? [])])].filter((p) => p !== pastaBot);

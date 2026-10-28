@@ -7,6 +7,7 @@ import { anexosRepo } from "./anexos.repo.ts";
 import { atividadeRepo } from "./atividade.repo.ts";
 import { artefatosRepo } from "./artefatos.repo.ts";
 import { catcherRepo } from "./catcher.repo.ts";
+import { checkpointsRepo } from "./checkpoints.repo.ts";
 import { concessoesRepo } from "./concessoes.repo.ts";
 import { permissoesPermanentesRepo } from "./permissoes-permanentes.repo.ts";
 import { conectoresRepo } from "./conectores.repo.ts";
@@ -85,6 +86,7 @@ export function criarRepos(conn: Conn, escopo: Escopo): Repos {
     pedidosDeColega: pedidosDeColegaRepo(conn, escopo),
     donos: donosRepo(conn, escopo),
     esperas: esperasRepo(conn, escopo),
+    checkpoints: checkpointsRepo(conn, escopo),
     contasIa: contasIaRepo(conn, escopo),
     esperasDaCota: esperasDaCotaRepo(conn, escopo),
     trocasDeIa: trocasDeIaRepo(conn, escopo),

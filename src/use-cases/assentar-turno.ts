@@ -16,7 +16,7 @@ import { descreverNegacao } from "../domain/estado-degradacao.ts";
 import { iaDaNegacao } from "../domain/harness.ts";
 import { negacoesDoTurno } from "../domain/negacao-nativa.ts";
 import { ultimoSinalDoTurno, type MotivoDaQueda } from "../domain/incidente.ts";
-import { NATIVA_MCP_DA_PESSOA, NATIVAS_DO_TERMINAL, NATIVAS_DO_TERMINAL_CODEX } from "../domain/nativas.ts";
+import { NATIVA_MCP_DA_PESSOA, NATIVAS_DO_TERMINAL, NATIVAS_DO_TERMINAL_CODEX, pastaDoBot } from "../domain/nativas.ts";
 import { motivoEmPortugues, redigir } from "../domain/redacao.ts";
 import { iasNoLimite, inteligenciaDoAgente, ordemEfetiva, podeReenviar, prazoDoLimite, prazoDoLimiteDaConta, proximaIaNoLimite } from "../domain/inteligencia.ts";
 import { usoDoPlanoValido } from "../domain/uso-do-plano.ts";
@@ -312,6 +312,18 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
   if (!mensagem && !tardia && comandoDoTurno === "compactar" && resultado.desfecho === "sucesso") {
     const agente = await deps.repos.agentes.buscar(turno.agenteId);
     mensagem = await deps.repos.mensagens.criar({ conversaId: turno.conversaId, turnoId: turno.id, autoria, kind: "sistema", assunto: "compactacao", texto: textoDaCompactacao(agente?.nome ?? "O bot", compactacao?.antes ?? null, compactacao?.depois ?? null), confianca: "confiavel" });
+  }
+  // NOD-54 (ADR-134): o turno mudou arquivos na máquina — o resumo vira o checkpoint da fala final ("Desfazer N arquivos").
+  // Fora a sala (a fala vai por postarNaSala e o menu dela não tem desfazer nesta PR). A sombra da máquina é por bot (o
+  // primeiro pedaço da pasta do plano), e o servidor guarda a pasta do bot para o pedido de desfazer achá-la.
+  // Sem fala final (o Parar, ou a última fala saiu no meio) o item mora na última fala de texto do bot no turno, a que a
+  // tela marca como final (revisão M2). Turno sem fala nenhuma não tem onde o item morar: sem checkpoint, sem órfão.
+  // Nem a frente (revisão 6, M3): a linha "Desfeito" mora na conversa e a sessão da frente não a lê — o bot não ficaria
+  // sabendo. Desfazer turno de frente fica para depois (ADR-134).
+  if (resultado.checkpoint && turno.origem !== "sala" && !turno.trabalhoId) {
+    const mensagemId = mensagem?.kind === "texto" ? mensagem.id : mensagem ? null : await deps.repos.mensagens.ultimaFalaDoTurno(turno.id, turno.agenteId);
+    const agente = mensagemId ? await deps.repos.agentes.buscar(turno.agenteId) : null;
+    if (agente && mensagemId) await deps.repos.checkpoints.criar({ agenteId: turno.agenteId, conversaId: turno.conversaId, turnoId: turno.id, maquinaId: entrega.machineId, pastaDoBot: pastaDoBot(agente.nome), mensagemId, arquivos: resultado.checkpoint.arquivos, total: resultado.checkpoint.total }, agora);
   }
   if (mensagem) events.push(evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { mensagem_id: mensagem.id, kind: mensagem.kind, parcial: mensagem.parcial } }));
 

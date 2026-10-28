@@ -31,6 +31,8 @@ import { absorverNoTrabalho, promoverNaRede } from "../../use-cases/coordenar-tr
 import { eventoPressao, sincronizarTrabalho } from "../../use-cases/trabalhos.ts";
 import { camposDoRelato, pastaSemTrabalhoDoTurno, pastasParaLimpar, relatoValido } from "../../use-cases/limpeza-das-tasks.ts";
 import { relatarEspera as relatarEsperaDaMaquina } from "../../use-cases/esperar-comando.ts";
+import { relatarDesfazer as relatarDesfazerDaMaquina } from "../../use-cases/desfazer-turno.ts";
+import type { DesfazerParaRodar, RelatoDesfazer } from "../../contracts/checkpoint.ts";
 import type { EsperaParaRodar, RelatoEspera, RespostaRelatoEspera } from "../../contracts/espera.ts";
 import { REDE_MS } from "../../domain/trabalho.ts";
 import type { MudancaDePressao } from "./trabalhos-vivos.ts";
@@ -822,6 +824,25 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
       return abrirTxEscopada(db, escopo)(async (trx) => {
         const d = depsDe(trx, escopo);
         const r = await relatarEsperaDaMaquina(d, { maquinaId: machineId, relato });
+        if (r.events.length) await d.repos.events.gravarComOutbox(r.events);
+        return r.data;
+      });
+    },
+
+    /** NOD-54 (ADR-134): os desfazeres que a máquina deve rodar. */
+    async desfazeres(pessoaId, machineId): Promise<DesfazerParaRodar[]> {
+      const escopo = await resolverEscopo(pessoaId);
+      if (!escopo) return [];
+      return abrirTxEscopada(db, escopo)((trx) => criarRepos(trx, escopo).checkpoints.paraAMaquina(machineId));
+    },
+
+    /** NOD-54: o relato do desfazer; o fim deixa a linha para o bot e o frame sai pelo outbox. */
+    async relatarDesfazer(pessoaId, machineId, relato: RelatoDesfazer): Promise<{ ok: boolean }> {
+      const escopo = await resolverEscopo(pessoaId);
+      if (!escopo) return { ok: false };
+      return abrirTxEscopada(db, escopo)(async (trx) => {
+        const d = depsDe(trx, escopo);
+        const r = await relatarDesfazerDaMaquina(d, { maquinaId: machineId, relato });
         if (r.events.length) await d.repos.events.gravarComOutbox(r.events);
         return r.data;
       });

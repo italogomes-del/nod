@@ -21,7 +21,7 @@ import { cabecalhoCookieSessao } from "../sessao-cookie.ts";
 import type { CanalComputador } from "../../computador/canal.ts";
 import type { EstadoComputadorRelatado } from "../../../contracts/computador-motor.ts";
 import type { MaquinaDaPessoa } from "../../computador/motor.ts";
-import { anuncioComputador, anuncioVmLocal, estadoComputadorRelatado, resultadoComandoComputador, capacidadesAnunciadas, contasAnunciadas, entrega, impressoes, progressoDoLogin, progressoDeInstalacao, exigir, falas, idsDeMensagens, inventario, memoria, objeto, relatoEspera, sessaoDaRenovacao, sinais, texto, trechos, turnosEmAndamento, uuid } from "./ponte-validacao.ts";
+import { anuncioComputador, anuncioVmLocal, estadoComputadorRelatado, resultadoComandoComputador, capacidadesAnunciadas, contasAnunciadas, entrega, impressoes, progressoDoLogin, progressoDeInstalacao, exigir, falas, idsDeMensagens, inventario, memoria, objeto, relatoDesfazer, relatoEspera, sessaoDaRenovacao, sinais, texto, trechos, turnosEmAndamento, uuid } from "./ponte-validacao.ts";
 import { versaoAceita } from "../../../domain/versao-app.ts";
 import { relatoValido } from "../../../use-cases/limpeza-das-tasks.ts";
 
@@ -566,6 +566,18 @@ export function criarPonteHttpServidor(d: {
       c.ultimo = d.agora();
       const r = await c.ponte.relatarEspera?.(ctx.escopo.pessoaId, ctx.params.chaveId!, relatoEspera(b.relato));
       ctx.json(200, r ?? { seguir: false });
+    }),
+    /** NOD-54 (ADR-134): a máquina PUXA os desfazeres de arquivos dela e relata o progresso e o fim (molde das esperas). */
+    rota("desfazeres", async (ctx) => {
+      const c = conexao(ctx);
+      c.ultimo = d.agora();
+      ctx.json(200, { desfazeres: (await c.ponte.desfazeres?.(ctx.escopo.pessoaId, ctx.params.chaveId!)) ?? [] });
+    }),
+    rota("desfazeres/relato", async (ctx, b) => {
+      const c = conexao(ctx);
+      c.ultimo = d.agora();
+      const r = await c.ponte.relatarDesfazer?.(ctx.escopo.pessoaId, ctx.params.chaveId!, relatoDesfazer(b.relato));
+      ctx.json(200, r ?? { ok: false });
     }),
     rota("desconectar", async (ctx) => {
       const c = conexao(ctx);

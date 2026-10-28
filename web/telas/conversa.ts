@@ -54,6 +54,7 @@ import { conversaLimpa, htmlTroca, juntarTrocas, planejarLinhas, type PlanoMensa
 import { trabalhosConhecidos } from "../lib/trabalhos.ts";
 import { TEXTO_FALHA_LEITURA } from "../lib/ouvir.ts";
 import { acoesDaFala, chipsDeReacao, citacaoAcimaDoBalao } from "./acoes-da-fala.ts";
+import { desfazerDaFala } from "./desfazer.ts";
 import { ancorasDoProgresso, comProgressoNaFala, marcadorDoProgresso } from "./progresso-na-fala.ts";
 import { ancorasDoModo, renderLinhaDoModo } from "./linha-do-modo.ts";
 
@@ -624,7 +625,7 @@ export function renderMensagem(m: Mensagem, estado: Estado, sala = false, opcoes
       : baloesDoBot(m.texto, m.id, opcoes.diagramas === true, `${metaTags}${progressoDentro}`, progressoDentro !== "");
   return `<article class="${classes}" data-mensagem="${esc(m.id)}"${pergunta ? ` data-pergunta="${esc(pergunta.decisaoId)}"` : ""}>
     ${!ehPessoa && agente ? iconeAgente(agente, "md") : ""}<div class="bubble-wrap">${opcoes.semAcoes ? "" : acoesDaMensagem(m, estado, sala)}${sender}${ehPessoa ? "" : resumoDaMensagem(m)}${resposta ? rotuloDaResposta(m) : ""}${ehPessoa ? citacaoAcimaDoBalao(m) : ""}${anexosDe(m, estado)}${balao}${ehPessoa ? "" : midiasDoBot(m, estado)}${progressoFora}${ehPessoa ? "" : (opcoes.linhaDoModo ?? "")}${ehPessoa ? "" : avisoDeLeitura(m, estado)}${ehPessoa ? "" : capturaDoTurno(m, estado)}${contextoDelegado}${chipsDeReacao(m, estado)}${fila ? renderSituacaoFila(fila, fila.turnoId) : (opcoes.chipDaFala ?? "")}${faixaDaMensagem(m, estado)}</div>
-  </article>${resposta ? linhaDaRetomada(m, estado) : ""}`;
+  </article>${ehPessoa ? "" : desfazerDaFala(m, estado, agente?.nome ?? "o bot")}${resposta ? linhaDaRetomada(m, estado) : ""}`;
 }
 
 /**

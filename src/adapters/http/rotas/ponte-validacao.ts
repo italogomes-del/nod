@@ -33,6 +33,8 @@ import { TETO_TAREFAS, TETO_TITULO_TAREFA } from "../../../domain/tarefas-do-bot
 import { NOME_DE_FERRAMENTA, TETO_DESCRICAO_SUBAGENTE, TETO_SUBAGENTES } from "../../../domain/subagentes.ts";
 import { LIMIARES_REPETICAO } from "../../../domain/vigia-turno.ts";
 import { usoDoPlanoValido } from "../../../domain/uso-do-plano.ts";
+import { caminhoValido, resumoCheckpointValido } from "../../../domain/checkpoints.ts";
+import { DESFECHOS_ARQUIVO, type DesfechoArquivo, type RelatoDesfazer } from "../../../contracts/checkpoint.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
 import { PRAZO_LIMITE_MAXIMO_MS } from "../../../domain/inteligencia.ts";
 import { TEXTO_ENTREGA_MAX_CHARS } from "../../../shared/constantes.ts";
@@ -447,6 +449,8 @@ export function entrega(v: unknown, machineId: string, agora: number = Date.now(
   // Revisão do épico (S19, 2026-10-08): o que o CLI recebeu e não foi confirmado numa renovação.
   const entregues = idsDeMensagens(e.mensagensEntregues);
   const falharam = ferramentasFalharam(r.ferramentasFalharam, (r.ferramentasChamadas as string[]).length);
+  // NOD-54 (ADR-134): o resumo do checkpoint é extra; fora do formato some e o turno fica sem "Desfazer".
+  const checkpoint = resumoCheckpointValido(r.checkpoint);
   return { turnoId: uuid(e.turnoId), machineId, seqLocal: Number(e.seqLocal), fala: f as Entrega["fala"], ...(entregues?.length ? { mensagensEntregues: entregues } : {}), resultado: {
     desfecho: r.desfecho as Entrega["resultado"]["desfecho"], texto: r.texto, sessaoCli: r.sessaoCli as string | null,
     custoUsd: r.custoUsd as number | null, ...(r.custoDesconhecido === true && r.custoUsd === null ? { custoDesconhecido: true } : {}), sinais: validados, tokens: t as Entrega["resultado"]["tokens"],
@@ -463,6 +467,7 @@ export function entrega(v: unknown, machineId: string, agora: number = Date.now(
     ...(contaNoLimite ? { contaNoLimite } : {}),
     // ADR-102 (R6): só num turno interrompido, e só o booleano.
     ...(r.desfecho === "interrompido" && r.contaAusente === true ? { contaAusente: true as const } : {}),
+    ...(checkpoint ? { checkpoint } : {}),
   } };
 }
 
@@ -482,6 +487,31 @@ export function relatoEspera(v: unknown): RelatoEspera {
   exigir(r.codigo === null || (typeof r.codigo === "number" && Number.isInteger(r.codigo) && r.codigo >= -1 && r.codigo <= 255));
   exigir(texto(r.saida, 4 * SAIDA_ESPERA_MAX));
   return { id, tipo: "terminou", codigo: r.codigo as number | null, saida: r.saida };
+}
+
+/**
+ * NOD-54 (ADR-134): o relato de um desfazer. Progresso (`feitos` de `total`) ou fim: o resultado (até 1000 arquivos, cada
+ * caminho como a tela mostra) ou a falha. Fora do formato, 400: a máquina guarda e manda de novo, e o servidor nunca grava
+ * caminho torto.
+ */
+export function relatoDesfazer(v: unknown): RelatoDesfazer {
+  const r = objeto(v);
+  const turnoId = uuid(r.turnoId);
+  exigir(Number.isSafeInteger(r.feitos) && Number.isSafeInteger(r.total) && Number(r.feitos) >= 0 && Number(r.total) >= 0 && Number(r.total) <= 1_000_000);
+  exigir(Number.isSafeInteger(r.tentativa) && Number(r.tentativa) >= 1);
+  const base = { turnoId, tentativa: Number(r.tentativa), feitos: Number(r.feitos), total: Number(r.total) };
+  if (r.falha !== undefined) {
+    exigir(r.falha === "sem_checkpoint" || r.falha === "erro");
+    return { ...base, falha: r.falha };
+  }
+  if (r.resultado === undefined) return base;
+  const arquivos = objeto(r.resultado).arquivos;
+  exigir(Array.isArray(arquivos) && arquivos.length <= 1000);
+  return { ...base, resultado: { arquivos: arquivos.map((a) => {
+    const x = objeto(a);
+    exigir(caminhoValido(x.caminho) && DESFECHOS_ARQUIVO.includes(x.desfecho as DesfechoArquivo));
+    return { caminho: x.caminho, desfecho: x.desfecho as DesfechoArquivo };
+  }) } };
 }
 
 /**

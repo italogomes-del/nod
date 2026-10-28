@@ -90,6 +90,7 @@ import { comRotulos, haSubagenteTrabalhando, resumoSubagentes } from "../../doma
 import { iniciarPoolDeLacos } from "../executor/pool-lacos.ts";
 import { criarAmostradorMemoria } from "../executor/amostrador-memoria.ts";
 import { criarExecutarComando, iniciarLimpezaDasTasks, modoDaLimpeza } from "../executor/limpeza-das-tasks.ts";
+import { iniciarDesfazeres } from "../executor/desfazeres.ts";
 import { iniciarEsperas } from "../executor/esperas.ts";
 import { caminhoAumentado } from "../executor/caminho.ts";
 import { montarAmbiente } from "../../domain/ambiente-executor.ts";
@@ -1492,7 +1493,9 @@ export function comporApp(o: OpcoesCompor): App {
     const pool = iniciarLacoDaPessoa(p);
     const limpeza = modoLimpeza === "desligada" ? null : iniciarLimpezaDasTasks({ ponte: p.ponte, pessoaId: p.pessoaId, home: homeDoExecutor, executar: criarExecutarComando(env, homeDoExecutor), simular: modoLimpeza === "simular", emUso: pastaEmUso, machineId: p.machineId });
     const esperas = iniciarEsperas({ ponte: p.ponte, pessoaId: p.pessoaId, machineId: p.machineId, home: homeDoExecutor, env: ambienteDasEsperas });
-    return { ...pool, async parar() { limpeza?.parar(); esperas.parar(); await pool.parar(); } };
+    // NOD-54 (ADR-134): os desfazeres de arquivos, como as esperas (o servidor local é o executor do Mac).
+    const desfazeres = iniciarDesfazeres({ ponte: p.ponte, pessoaId: p.pessoaId, machineId: p.machineId, home: homeDoExecutor });
+    return { ...pool, async parar() { limpeza?.parar(); esperas.parar(); desfazeres.parar(); await pool.parar(); } };
   };
 
   return {

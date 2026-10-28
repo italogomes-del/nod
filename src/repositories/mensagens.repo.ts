@@ -1,4 +1,5 @@
 import type { RecusasMidia } from "../contracts/anexo.ts";
+import type { ArquivoDoCheckpoint, EstadoCheckpoint, FalhaDesfazer, ResultadoGuardado } from "../contracts/checkpoint.ts";
 import { FOLGA_TRECHO, JANELA_TRECHO } from "../contracts/busca.ts";
 import type { Autoria } from "../contracts/evento.ts";
 import type { Assunto, Destino } from "../contracts/destino-no-chat.ts";
@@ -8,6 +9,8 @@ import type { MotivoRecomeco, OrigemTurno } from "../contracts/turno.ts";
 import { assuntoNaLeitura } from "../domain/assunto-do-texto.ts";
 import { ASSUNTOS_ANEXO, ASSUNTOS_ATIVIDADE, assuntoDe, destinoDe } from "../domain/destino-no-chat.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
+import { PRAZO_DESFAZENDO_MS, RETEM_MS } from "../domain/checkpoints.ts";
+import { checkpointDaFala } from "./checkpoints.repo.ts";
 import { data, ms } from "./conversao.ts";
 
 export interface LinhaMensagem {
@@ -120,7 +123,9 @@ export function assuntoDaNova(m: { kind: KindMensagem; payload?: PayloadMensagem
 }
 
 /** A linha lida com o turno (ADR-083, S2): a origem do turno, o trabalho e se é a última fala de um turno encerrado. */
-type LinhaComTurno = LinhaMensagem & { midia_recusas?: RecusasMidia | null; turno_origem: OrigemTurno | null; trabalho_id: string | null; fim_do_turno: boolean | null; raiz_id: string | null; raiz_origem: OrigemTurno | null; motivo_recomeco?: MotivoRecomeco | null; primeira?: boolean | null; frente_de_lote: boolean | null };
+type LinhaComTurno = LinhaMensagem & { midia_recusas?: RecusasMidia | null; turno_origem: OrigemTurno | null; trabalho_id: string | null; fim_do_turno: boolean | null; raiz_id: string | null; raiz_origem: OrigemTurno | null; motivo_recomeco?: MotivoRecomeco | null; primeira?: boolean | null; frente_de_lote: boolean | null } & LinhaDoCheckpoint;
+/** NOD-54 (0120): o checkpoint da fala (left join; nulo sem checkpoint ou vencido). */
+type LinhaDoCheckpoint = { ck_estado?: EstadoCheckpoint | null; ck_arquivos?: ArquivoDoCheckpoint[] | null; ck_total?: number | null; ck_feitos?: number | null; ck_desfeito_em?: Date | null; ck_resultado?: ResultadoGuardado | null; ck_falha?: FalhaDesfazer | null };
 
 /**
  * definido em 2026-10-18 (chat limpo, PR 2): teto dos `anexo` que a janela traz desde o corte (o plano, 1b). Os `anexo`
@@ -158,7 +163,10 @@ export function destinoDaLinha(l: LinhaMensagem & { primeira?: boolean | null; f
 function paraMensagemComTurno(l: LinhaComTurno): Mensagem {
   // NOD-323: o que o bot não conseguiu anexar vai só na fala final do turno (a linha discreta abaixo dela, j5-6).
   const recusas = l.fim_do_turno === true && Array.isArray(l.midia_recusas) && l.midia_recusas.length > 0 ? { midiaRecusas: l.midia_recusas } : {};
-  return { ...paraMensagem(l), origemTurno: l.turno_origem, trabalhoId: l.trabalho_id, fimDoTurno: l.fim_do_turno === true, ...recusas, ...(l.motivo_recomeco ? { motivoRecomeco: l.motivo_recomeco } : {}), ...(l.raiz_id && l.raiz_origem ? { raiz: { turnoId: l.raiz_id, origem: l.raiz_origem } } : {}) };
+  const checkpoint = l.ck_estado && l.ck_arquivos && l.ck_total != null
+    ? { checkpoint: checkpointDaFala({ estado: l.ck_estado, arquivos: l.ck_arquivos, total: l.ck_total, feitos: l.ck_feitos ?? 0, desfeitoEm: l.ck_desfeito_em ? ms(l.ck_desfeito_em) : null, resultado: l.ck_resultado ?? null, falha: l.ck_falha ?? null }) }
+    : {};
+  return { ...paraMensagem(l), origemTurno: l.turno_origem, trabalhoId: l.trabalho_id, fimDoTurno: l.fim_do_turno === true, ...recusas, ...(l.motivo_recomeco ? { motivoRecomeco: l.motivo_recomeco } : {}), ...(l.raiz_id && l.raiz_origem ? { raiz: { turnoId: l.raiz_id, origem: l.raiz_origem } } : {}), ...checkpoint };
 }
 
 /**
@@ -175,11 +183,17 @@ function selectComTurno(conn: Conn, tenantId: string, recorte: ReturnType<Conn>)
   return conn<LinhaComTurno[]>`
     select m.*, t.origem as turno_origem, t.midia_recusas, t.motivo_recomeco, coalesce(t.trabalho_id, o.trabalho_id) as trabalho_id, rz.raiz_id, rz.raiz_origem,
       coalesce(w.forma = 'frente' and w.lote_id is not null, false) as frente_de_lote,
+      -- O desfazendo preso (a máquina sumiu) aparece como falhou: a tela oferece "Tentar de novo" e não prende o bot (NOD-54).
+      case when ck.estado = 'desfazendo' and ck.pedido_em < now() - make_interval(secs => ${PRAZO_DESFAZENDO_MS / 1000}) then 'falhou' else ck.estado end as ck_estado,
+      ck.arquivos as ck_arquivos, ck.total as ck_total, ck.feitos as ck_feitos, ck.desfeito_em as ck_desfeito_em, ck.resultado as ck_resultado,
+      case when ck.estado = 'desfazendo' and ck.pedido_em < now() - make_interval(secs => ${PRAZO_DESFAZENDO_MS / 1000}) then 'erro' else ck.falha end as ck_falha,
       (t.estado in ('concluido', 'interrompido') and m.kind = 'texto' and m.autor_tipo = 'agente'
         and m.criado_em = max(case when m.kind = 'texto' and m.autor_tipo = 'agente' then m.criado_em end) over (partition by m.turno_id)) as fim_do_turno
     from (${recorte}) m
     left join turnos t on t.tenant_id = m.tenant_id and t.id = m.turno_id
     left join trabalhos w on w.tenant_id = m.tenant_id and w.id = t.trabalho_id
+    left join checkpoints ck on ck.tenant_id = m.tenant_id and ck.mensagem_id = m.id and (ck.estado <> 'vencido' or ck.falha = 'sem_checkpoint')
+      and not (ck.estado in ('disponivel', 'falhou') and ck.criado_em < now() - make_interval(secs => ${RETEM_MS / 1000}))
     left join lateral (
       select x.trabalho_id from turnos x where x.tenant_id = ${tenantId} and x.mensagem_origem_id = m.id and m.turno_id is null
       order by x.criado_em limit 1
@@ -559,6 +573,14 @@ export function mensagensRepo(conn: Conn, escopo: Escopo) {
           order by criado_em desc, id desc limit 1
         ) and payload is null`;
       return r.count === 1;
+    },
+
+    /** NOD-54 (revisão M2): a última fala de texto do bot no turno, onde mora o checkpoint quando não veio fala final. */
+    async ultimaFalaDoTurno(turnoId: string, agenteId: string): Promise<string | null> {
+      const [l] = await conn<{ id: string }[]>`select id from mensagens where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and turno_id = ${turnoId}
+          and autor_tipo = 'agente' and autor_id = ${agenteId} and kind = 'texto' and assunto is null
+        order by criado_em desc, id desc limit 1`;
+      return l?.id ?? null;
     },
 
     /** Turno interrompido no meio do streaming: a fala já gravada fica marcada como parcial (ADR-010). */

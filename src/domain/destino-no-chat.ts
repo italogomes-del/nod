@@ -90,6 +90,7 @@ export const DESTINO: Readonly<Record<Assunto, RegraDeDestino>> = {
   "memoria.anotada": { destino: "atividade", categoria: null },
   "memoria.task_fechada": { destino: "atividade", categoria: null },
   compactacao: { destino: "atividade", categoria: null },
+  "arquivos.desfeitos": { destino: "atividade", categoria: null },
   "proposta.decidida": { destino: "atividade", categoria: null },
   inteligencia: { destino: "atividade", categoria: null },
   "aprovacao.modo": { destino: "atividade", categoria: null },

@@ -77,6 +77,8 @@ export const ASSUNTOS = [
   "memoria.anotada",
   "memoria.task_fechada",
   "compactacao",
+  // NOD-54 (ADR-134): a linha que o bot lê no próximo turno ("Desfeito: N arquivos voltaram"); a pessoa vê o resultado na própria fala.
+  "arquivos.desfeitos",
   "proposta.decidida",
   "inteligencia",
   "aprovacao.modo",

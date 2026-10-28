@@ -1,4 +1,5 @@
 import type { AnuncioComputador } from "./computador-motor.ts";
+import type { DesfazerParaRodar, RelatoDesfazer } from "./checkpoint.ts";
 import type { ContaAnunciada } from "./contas-ia.ts";
 import type { EsperaParaRodar, RelatoEspera, RespostaRelatoEspera } from "./espera.ts";
 import type { CapacidadesHarness, IdHarness } from "./harness.ts";
@@ -184,4 +185,11 @@ export interface PonteInterna {
   esperas?(pessoaId: string, machineId: string): Promise<EsperaParaRodar[] | null>;
   /** ADR-099: o relato de uma espera (começou, terminou, não deu). null = sem resposta: a máquina guarda e manda de novo. */
   relatarEspera?(pessoaId: string, machineId: string, relato: RelatoEspera): Promise<RespostaRelatoEspera | null>;
+  /**
+   * definido em 2026-10-28 (NOD-54, ADR-134): os desfazeres de arquivos que esta máquina deve rodar (o puxar, molde das
+   * esperas). null = sem resposta (servidor fora ou antigo): a máquina não faz nada por isso.
+   */
+  desfazeres?(pessoaId: string, machineId: string): Promise<DesfazerParaRodar[] | null>;
+  /** NOD-54: o progresso e o fim de um desfazer. null = sem resposta: a máquina guarda o fim e manda de novo. */
+  relatarDesfazer?(pessoaId: string, machineId: string, relato: RelatoDesfazer): Promise<{ ok: boolean } | null>;
 }

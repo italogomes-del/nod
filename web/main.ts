@@ -48,6 +48,7 @@ import { acaoDoAlvo, indiceNaLuz } from "./lib/link-anexo.ts";
 import { alternarAudio, alternarGif, instalarMidiaDom, irNoAudio, mostrarNoFinder, tentarDeNovo, velocidadeDoAudio, type OpcoesMidiaDom } from "./lib/midia-dom.ts";
 import { baixaveis } from "./lib/midia.ts";
 import { botDaFala, citacaoDaFala, htmlMenuDaFala, htmlSeletorDeReacao, linhaDeEmojis, reacoesDaFala, textoAbrirTask, textoParaLembrar } from "./telas/acoes-da-fala.ts";
+import { podeAbrirCartao, TEXTO_DA_RECUSA } from "./telas/desfazer.ts";
 import { renderChipModo } from "./telas/aprovacoes.ts";
 import { controleDaFolha, linhasDoBot, linhasVisiveis, renderFolhaMais, rotuloDoMais, travarToqueDuploEm, type EscolhaDaFolhaMais, type LinhasDaFolhaMais } from "./telas/folha-mais.ts";
 import { abrirMenuModo } from "./lib/menu-modo.ts";
@@ -3495,7 +3496,9 @@ function abrirMenuDaFala(ancora: HTMLElement, tipo: "reagir" | "mais"): void {
     }
     const emoji = alvo.closest<HTMLElement>("[data-reacao]")?.dataset.reacao;
     if (emoji) { d.close(); void alternarReacao(fala, emoji); return; }
-    const acao = alvo.closest<HTMLElement>("[data-fala]")?.dataset.fala;
+    const item = alvo.closest<HTMLElement>("[data-fala]");
+    if (item?.getAttribute("aria-disabled") === "true") return;
+    const acao = item?.dataset.fala;
     if (acao) { d.close(); acaoDoMenuDaFala(fala, acao, ancora); }
   });
   d.addEventListener("keydown", (e) => {
@@ -3535,6 +3538,10 @@ function acaoDoMenuDaFala(fala: Mensagem, acao: string, ancora: HTMLElement): vo
     void abrirRaioX(api, fala.turnoId, t.tipo === "conversa" ? botGerido(t.agenteId)?.nome ?? "agente" : "sala", ancora, ondeDoTurno(fala, estado.conversas[fala.conversaId]?.mensagens ?? []));
     return;
   }
+  if (acao === "desfazer") {
+    if (podeAbrirCartao(fala, estado)) abrirCartaoDesfazer(fala);
+    return;
+  }
   if (!api || !bot) return;
   const a = api;
   // Decisão 3 do plano (Marlon, 18/10): "Abrir task com isto" passa pelo bot — a mensagem comum cita a fala e o bot usa
@@ -3551,6 +3558,44 @@ function acaoDoMenuDaFala(fala: Mensagem, acao: string, ancora: HTMLElement): vo
     anunciar(`Anotado na memória de ${botGerido(bot)?.nome ?? "o bot"}`);
   });
 }
+
+/**
+ * NOD-54 (ADR-134): o cartão "Desfazer o que o bot mudou?" abre embaixo da fala e o foco vai ao título (não é modal: a
+ * conversa segue). Esc ou Cancelar fecham e o foco volta ao ⋯ da fala.
+ */
+function abrirCartaoDesfazer(fala: Mensagem): void {
+  dispatch({ tipo: "desfazer-cartao", mensagemId: fala.id });
+  const titulo = document.querySelector<HTMLElement>(`[data-desfazer-cartao="${CSS.escape(fala.id)}"] h3`);
+  titulo?.focus();
+  titulo?.scrollIntoView({ block: "nearest", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+}
+
+function fecharCartaoDesfazer(focarMenu: boolean): void {
+  const id = estado.desfazerAberto;
+  if (!id) return;
+  dispatch({ tipo: "desfazer-cartao", mensagemId: null });
+  if (focarMenu) document.querySelector<HTMLElement>(`[data-mensagem="${CSS.escape(id)}"] [data-act="mais-da-fala"]`)?.focus();
+}
+
+/** Pede o desfazer (ou o "Voltar mesmo assim"): a máquina do turno puxa e a linha da fala mostra o progresso. */
+function pedirDesfazer(fala: Mensagem, forcar: boolean): void {
+  if (!api || !fala.turnoId) return;
+  const a = api;
+  const turnoId = fala.turnoId;
+  if (estado.desfazerAberto === fala.id) dispatch({ tipo: "desfazer-cartao", mensagemId: null });
+  void agir(async () => {
+    const r = await a.desfazerTurno(fala.conversaId, turnoId, forcar);
+    dispatch({ tipo: "invalidar", quais: [`conversa:${fala.conversaId}`] });
+    anunciar(r.ok ? (forcar ? "Voltando os arquivos em conflito" : "Desfazendo os arquivos deste turno") : TEXTO_DA_RECUSA[r.recusa]);
+  });
+}
+
+document.addEventListener("keydown", (ev) => {
+  if (ev.key !== "Escape" || !estado.desfazerAberto) return;
+  if (!(ev.target as HTMLElement).closest?.("[data-desfazer-cartao]")) return;
+  ev.preventDefault();
+  fecharCartaoDesfazer(true);
+});
 
 /** "Trocar" e o × da caixa "Respondendo" (Parte 3a): muda o que a próxima mensagem faz e volta ao campo. */
 function escolherNoComposer(outroAssunto: boolean, alvoId?: string): void {
@@ -4375,6 +4420,20 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   },
 
   // ADR-113 (plano "pergunta com botões", Parte 5): as ações na fala — web/telas/acoes-da-fala.ts desenha, aqui se age.
+  // NOD-54: o cartão e as linhas do desfazer (web/telas/desfazer.ts).
+  "desfazer-cancelar": () => fecharCartaoDesfazer(true),
+  "desfazer-confirmar": (el) => {
+    const fala = falaPorId(el.dataset.id ?? "");
+    if (fala) pedirDesfazer(fala, false);
+  },
+  "desfazer-tentar": (el) => {
+    const fala = falaPorId(el.dataset.id ?? "");
+    if (fala) pedirDesfazer(fala, false);
+  },
+  "desfazer-forcar": (el) => {
+    const fala = falaPorId(el.dataset.id ?? "");
+    if (fala) pedirDesfazer(fala, true);
+  },
   "reagir-fala": (el) => abrirMenuDaFala(el, "reagir"),
   "mais-da-fala": (el) => abrirMenuDaFala(el, "mais"),
   "reagir-chip": (el) => {

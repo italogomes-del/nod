@@ -19,6 +19,7 @@ import { encerrarGruposOrfaos } from "../src/adapters/executor/grupos-orfaos.ts"
 import { encerrarFugitivosDaInstancia } from "../src/adapters/executor/fugitivos.ts";
 import { prepararGruposDaMaquina } from "../src/adapters/executor/grupos-da-maquina.ts";
 import { criarExecutarComando, iniciarLimpezaDasTasks, modoDaLimpeza, type LimpezaDasTasks } from "../src/adapters/executor/limpeza-das-tasks.ts";
+import { iniciarDesfazeres, type Desfazeres } from "../src/adapters/executor/desfazeres.ts";
 import { iniciarEsperas, type Esperas } from "../src/adapters/executor/esperas.ts";
 import { iniciarComputador, type LacoComputador } from "../src/adapters/executor/computador.ts";
 import type { PlanoTurno } from "../src/contracts/plano-turno.ts";
@@ -136,6 +137,7 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
   /** ADR-088 (limpeza das tasks, #225): as pastas de task encerradas nesta máquina; os turnos rodando nunca são mexidos. */
   let limpeza: LimpezaDasTasks | null = null;
   let esperas: Esperas | null = null;
+  let desfazeres: Desfazeres | null = null;
   /** NOD-96 PR 3: o fio entre a ponte e o supervisor do computador desta máquina. */
   let computador: LacoComputador | null = null;
   /** NOD-94: a instaladora por SSH (só no papel motor e com o servidor que aceita). */
@@ -278,6 +280,8 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
   // ADR-099 (parte 2): as esperas de comando desta máquina (o puxar, a cada 5 s). O comando roda fora do CLI, com o
   // ambiente dos drivers; a reconexão não o derruba (o estado mora no módulo, esperas.ts).
   esperas = iniciarEsperas({ ponte: ponteHttp.ponte, pessoaId: dados.escopo.pessoaId, machineId: dados.machineId, home: cfg.env.HOME ?? homedir(), env: cfg.env });
+  // NOD-54 (ADR-134): os desfazeres de arquivos desta máquina (o puxar, a cada 3 s), no git sombra de ~/nod/.checkpoints.
+  desfazeres = iniciarDesfazeres({ ponte: ponteHttp.ponte, pessoaId: dados.escopo.pessoaId, machineId: dados.machineId, home: cfg.env.HOME ?? homedir() });
   // NOD-96 PR 3 (ADR-122): o computador da pessoa. Puxa os comandos e repassa ao supervisor; servidor sem a flag (404)
   // deixa o laço quieto, tentando de novo a cada 10 min.
   computador = iniciarComputador({ canal: ponteHttp.computador });
@@ -409,6 +413,7 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
     if (itens) clearInterval(itens);
     limpeza?.parar();
     esperas?.parar();
+    desfazeres?.parar();
     computador?.parar();
     vigia?.parar();
     ponteHttp.cancelar();

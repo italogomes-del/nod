@@ -44,7 +44,8 @@ function resolver(caminho: string, base: string | null, home: string): string | 
  * revisto em 2026-10-09 (revisão do #225): NFC e sem caixa — o APFS não diferencia maiúsculas e o mesmo acento chega em
  * NFC ou NFD; `~/nod/dev 4/x` e `~/nod/Dev 4/x` são a mesma pasta no Mac.
  */
-const comparavel = (c: string) => c.normalize("NFC").toLowerCase();
+/** A forma de comparar caminhos: o disco do macOS não distingue maiúsculas e o nome pode vir em NFD. */
+export const comparavel = (c: string): string => c.normalize("NFC").toLowerCase();
 const dentro = (alvo: string, pasta: string) => {
   const a = comparavel(alvo);
   const p = comparavel(pasta);
@@ -95,6 +96,12 @@ function caminhoDoWorktreeAdd(args: readonly string[]): string | null {
     return a;
   }
   return null;
+}
+
+/** O caminho absoluto que a nativa grava (relativo ao `cwd` do evento), ou o cru quando não dá para resolver. */
+export function caminhoGravado(caminho: string, ctx: Pick<ContextoDaPasta, "cwd" | "home">): string {
+  const base = ctx.cwd === null ? null : resolver(ctx.cwd, null, ctx.home);
+  return resolver(caminho, base, ctx.home) ?? caminho;
 }
 
 /**

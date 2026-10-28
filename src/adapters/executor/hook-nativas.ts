@@ -4,9 +4,12 @@ import { appendFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ehPontoDeEntrada } from "../../shared/entrada.ts";
 import { aspasDeShell, chaveDoComando, comandoNaFila, MARCA_DA_FILA, precisaDaVez, repositorioDaOrigem, semPeso, type Historico } from "../../domain/fila-do-forno.ts";
-import { decidirNativa, FRASE_ARQUIVO_DE_CREDENCIAL, FRASE_MCP_COM_CREDENCIAL, NATIVA_MCP_DA_PESSOA } from "../../domain/nativas.ts";
+import { caminhosDoPatch, decidirNativa, FRASE_ARQUIVO_DE_CREDENCIAL, FRASE_MCP_COM_CREDENCIAL, NATIVA_MCP_DA_PESSOA } from "../../domain/nativas.ts";
 import { ESPERA_APROVACAO_NO_TURNO_MS, LONGPOLL_APROVACAO_MS, VARIAVEL_CONFIG_HOOK } from "../../shared/constantes.ts";
 import { mainDaVaga } from "./vaga.ts";
+import { guardarOriginal } from "./checkpoints.ts";
+import { caminhoGravado, comparavel } from "../../domain/git-na-pasta-do-bot.ts";
+import { ehPastaDeFrente } from "../../domain/checkpoints.ts";
 
 /**
  * Hook PreToolUse do nod (ADR-052): o Claude Code o chama ANTES de cada ferramenta nativa do turno, e é ele
@@ -37,7 +40,14 @@ import { mainDaVaga } from "./vaga.ts";
  *   do Codex, e o driver junta daqui as negações do turno (a pílula "ferramenta negada" com a causa, como no Claude).
  * - `mcpDaPessoa`: o turno carregou os MCPs da pessoa; os que não são do nod vão ao servidor (NATIVA_MCP_DA_PESSOA).
  */
-export type ConfigHook = { url: string; token: string; pastaDoBot?: string; home?: string; daTask?: boolean; vaga?: { dir: string; invocar: string }; formato?: "claude" | "codex"; prazoMs?: number; negacoes?: string; mcpDaPessoa?: boolean };
+/**
+ * `checkpoint` (definido em 2026-10-28, NOD-54, ADR-134): o turno e a pasta do bot relativa a `~/nod` (a do git sombra).
+ * Presente, a gravação liberada FORA da pasta do bot guarda antes o original do arquivo, para o "Desfazer" do turno.
+ */
+export type ConfigHook = { url: string; token: string; pastaDoBot?: string; home?: string; daTask?: boolean; vaga?: { dir: string; invocar: string }; formato?: "claude" | "codex"; prazoMs?: number; negacoes?: string; mcpDaPessoa?: boolean; checkpoint?: { turnoId: string; pastaDoBot: string; home?: string } };
+
+/** Guarda o original de um arquivo antes da gravação (injetável no teste; nunca lança, nunca nega). */
+export type Guardar = (caminhos: string[]) => Promise<void>;
 
 /** `updatedInput` (ADR-097): o Bash com a vez da fila em volta; o CLI valida contra o formato da ferramenta. */
 export type SaidaHook = { hookSpecificOutput: { hookEventName: "PreToolUse"; permissionDecision: "allow" | "deny"; permissionDecisionReason: string; updatedInput?: Record<string, unknown> } };
@@ -62,7 +72,23 @@ export const AINDA_ESPERANDO = "o pedido de aprovação deste comando continua n
 /** O comando com a vez da fila em volta, ou null se ele roda direto (ADR-097). */
 export type Fila = (comando: string, cwd: string | null) => string | null;
 
-export async function decidirHook(evento: unknown, confirmar: Confirmar, pastas?: Pick<ConfigHook, "pastaDoBot" | "home" | "daTask" | "mcpDaPessoa">, fila?: Fila): Promise<SaidaHook> {
+/**
+ * O caminho gravado que a foto do turno não cobre: fora da pasta do bot ou, no turno da raiz (`~/nod/<bot>`), dentro
+ * de uma pasta de frente, que a foto da raiz pula. Caminho não resolvido conta como fora (o turno fica sem checkpoint).
+ */
+/** As nativas que gravam arquivo (as que o hook guarda antes). */
+const GRAVAM = new Set(["Write", "Edit", "MultiEdit", "NotebookEdit", "apply_patch"]);
+
+function foraDaFoto(caminho: string, pasta: { pastaDoBot: string; daTask: boolean }): boolean {
+  const c = comparavel(caminho);
+  const raiz = comparavel(pasta.pastaDoBot);
+  if (!c.startsWith(`${raiz}/`)) return true;
+  // A raiz do bot é a pasta que não é de task (revisão 8, M2: no Codex a pasta vem real, e `~/nod` pode ser um link).
+  if (pasta.daTask) return false;
+  return ehPastaDeFrente(c.slice(raiz.length + 1).split("/")[0] ?? "");
+}
+
+export async function decidirHook(evento: unknown, confirmar: Confirmar, pastas?: Pick<ConfigHook, "pastaDoBot" | "home" | "daTask" | "mcpDaPessoa">, fila?: Fila, guardar?: Guardar): Promise<SaidaHook> {
   const e = (typeof evento === "object" && evento !== null ? evento : {}) as { tool_name?: unknown; tool_input?: unknown; cwd?: unknown };
   const ferramenta = typeof e.tool_name === "string" ? e.tool_name : "";
   const entrada = typeof e.tool_input === "object" && e.tool_input !== null ? (e.tool_input as Record<string, unknown>) : {};
@@ -84,6 +110,16 @@ export async function decidirHook(evento: unknown, confirmar: Confirmar, pastas?
     return saida(false, c.permitir ? deSempre : (c.motivo ?? deSempre));
   }
   if (!c.permitir) return saida(false, c.motivo ?? "o servidor do nod não confirmou esta chamada");
+  // NOD-54 (ADR-134): a gravação liberada — o original vai para o checkpoint antes. Vão todos os caminhos gravados (no
+  // patch do Codex, todos os do patch); o `guardarOriginal` fica com os que a foto do turno não cobre: fora da pasta e,
+  // no turno da raiz do bot, dentro de uma pasta de frente (revisão 5, M1).
+  if (guardar && pasta && GRAVAM.has(ferramenta)) {
+    const brutos = ferramenta === "apply_patch" && typeof entrada.command === "string"
+      ? caminhosDoPatch(entrada.command)
+      : ["file_path", "notebook_path"].map((k) => entrada[k]).filter((v): v is string => typeof v === "string");
+    const gravados = d.arquivo !== undefined && ferramenta !== "apply_patch" ? [d.arquivo] : brutos.map((c) => caminhoGravado(c, pasta)).filter((c) => foraDaFoto(c, pasta));
+    if (gravados.length > 0) await guardar(gravados).catch(() => undefined);
+  }
   // ADR-097: a fila do forno no Bash e no Monitor (o prompt manda rodar teste demorado em segundo plano ou com o Monitor:
   // é ali que mora o peso), depois do servidor liberar o comando. Um servidor de desenvolvimento não prende a fila:
   // quem tem a vez há mais de TETO_DA_VEZ_MS deixa de segurar (vaga.ts).
@@ -276,6 +312,11 @@ export async function decidirComPrazo(decidir: () => Promise<SaidaHook>, prazoMs
   }
 }
 
+/** O stdout do hook é o canal com o CLI (só a decisão): o aviso da guarda do checkpoint vai ao stderr. */
+export const avisoNoStderr = (evento: string, dados: { turno_id: string; erro: string }): void => {
+  process.stderr.write(`${JSON.stringify({ nivel: "aviso", evento, ...dados })}\n`);
+};
+
 export async function main(): Promise<void> {
   // ADR-097: o nod-vaga mora neste mesmo script (o motor e o app já o instalam): `… hook-nativas.mjs vaga pegar …`.
   if (process.argv[2] === "vaga") return mainDaVaga(process.argv.slice(3));
@@ -287,7 +328,9 @@ export async function main(): Promise<void> {
     cfg = JSON.parse(readFileSync(process.argv[2] ?? process.env[VARIAVEL_CONFIG_HOOK] ?? "", "utf8")) as ConfigHook;
     const c = cfg;
     evento = JSON.parse(await lerStdin()) as unknown;
-    resposta = await decidirComPrazo(() => decidirHook(evento, confirmarNoServidor(c), c, c.vaga ? filaDaMaquina(c.vaga) : undefined), c.prazoMs);
+    // O home do checkpoint é o do laço (`homedir()`), o mesmo do manifesto que o fechar lê (revisão 7, M1).
+    const guardar: Guardar | undefined = c.checkpoint && c.home ? (caminhos) => guardarOriginal({ home: c.checkpoint!.home ?? c.home!, pastaDoBot: c.checkpoint!.pastaDoBot, turnoId: c.checkpoint!.turnoId, caminhos, avisar: avisoNoStderr }) : undefined;
+    resposta = await decidirComPrazo(() => decidirHook(evento, confirmarNoServidor(c), c, c.vaga ? filaDaMaquina(c.vaga) : undefined, guardar), c.prazoMs);
   } catch {
     resposta = saida(false, "não foi possível decidir esta chamada");
   }

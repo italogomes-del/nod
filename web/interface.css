@@ -2285,3 +2285,52 @@ img.luz-midia { display: block; flex: none; width: min(var(--w), calc(100cqw - 1
 .bot-menu.menu-pilula { width: 220px; }
 .bot-menu.menu-pilula button[role="menuitem"] { gap: 10px; padding: 10px; min-height: 44px; }
 .bot-menu.menu-pilula button svg { flex: none; color: var(--ink-2); }
+/* NOD-54 (ADR-134): desfazer o que o bot mudou num turno — o item no ⋯ da fala, o cartão de confirmação e a linha de
+   progresso, resultado ou falha embaixo da fala (protótipo nod-prototipos/nod-54, classes dft-). Só tokens do nod. */
+.bot-menu.menu-fala .dft-mi { margin-top: 4px; border-top: 1px solid var(--line); border-radius: 0 0 10px 10px; padding-top: 10px; }
+.bot-menu.menu-fala .dft-mi[aria-disabled="true"] { color: var(--ink-3); cursor: default; background: none; }
+.bot-menu.menu-fala .dft-mi[aria-disabled="true"] svg { color: var(--ink-3); }
+.dft-cartao { margin: -10px 0 25px 52px; width: min(520px, calc(100% - 52px)); box-sizing: border-box; padding: 16px 18px 14px;
+  border: 1px solid var(--line); border-radius: 17px; border-top-left-radius: 8px; background: var(--surface); color: var(--ink); font-size: 13.5px; }
+/* foco-ok: recebe o foco só pelo código, quando o cartão abre (web/main.ts); não é um controle, e o :focus-visible abaixo cobre o teclado */
+.dft-cartao h3 { margin: 0; font-size: 15px; font-weight: 600; line-height: 1.4; outline: none; }
+.dft-cartao h3:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 3px; border-radius: 4px; }
+.dft-sub { margin: 3px 0 10px; color: var(--ink-2); line-height: 1.5; }
+.dft-lista { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
+.dft-lista > li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.dft-arq { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 8px; overflow: hidden; }
+.dft-arq b { font-weight: 500; white-space: nowrap; }
+.dft-pasta { color: var(--ink-3); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dft-fez { flex: none; color: var(--ink-3); font-size: 12.5px; }
+.dft-mais .dft-arq { color: var(--ink-3); font-size: 12.5px; }
+.dft-ic-aviso { flex: none; margin-top: 2px; color: var(--warning); }
+.dft-lista > li.dft-conflito { margin: 0 -10px; padding: 10px; border: 1px solid var(--warning-line); border-radius: 10px; background: var(--warning-soft); }
+.dft-conflito .dft-fez { color: var(--warning); font-weight: 500; }
+.dft-cons { display: flex; align-items: flex-start; gap: 6px; margin: 8px 0 0; color: var(--warning); font-size: 12.5px; line-height: 1.5; }
+.dft-nao { margin: 10px 0 0; color: var(--ink-2); font-size: 12.5px; line-height: 1.5; }
+.dft-nao b { font-weight: 600; color: var(--ink); }
+.dft-acoes { display: flex; justify-content: flex-end; align-items: center; gap: 6px; margin-top: 12px; }
+.dft-cancelar, .dft-ok, .dft-tentar { height: 32px; padding: 0 14px; border-radius: 999px; font: inherit; font-size: 13px; cursor: pointer; }
+.dft-cancelar { border: 0; background: none; color: var(--ink-2); }
+.dft-cancelar:hover { background: var(--surface-raised); color: var(--ink); }
+.dft-ok, .dft-tentar { border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink); font-weight: 500; }
+.dft-ok:hover, .dft-tentar:hover { background: var(--surface-raised); }
+:is(.dft-cancelar, .dft-ok, .dft-tentar):focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.dft-linha { margin: -14px 0 25px 52px; width: fit-content; max-width: calc(100% - 52px); box-sizing: border-box; color: var(--ink-3); font-size: 12.5px; line-height: 1.5; }
+.dft-linha.dft-rodando, .dft-linha.dft-erro { display: flex; align-items: center; gap: 7px; }
+.dft-linha.dft-rodando { color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.dft-linha.dft-erro { color: var(--ink-2); flex-wrap: wrap; }
+.dft-linha.dft-erro .dft-ic-aviso { margin: 0; }
+.dft-linha .dft-tentar { height: 28px; padding: 0 12px; font-size: 12.5px; margin-left: 4px; }
+.dft-feito summary { display: flex; align-items: center; gap: 7px; list-style: none; cursor: pointer; border-radius: 6px; }
+.dft-feito summary::-webkit-details-marker { display: none; }
+.dft-feito summary:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.dft-ver { color: var(--ink-2); text-decoration: underline; text-underline-offset: 2px; text-decoration-color: var(--line-strong); }
+.dft-feito-lista { margin: 6px 0 0 22px; min-width: min(420px, 70vw); color: var(--ink-2); }
+.dft-gira { flex: none; animation: dft-gira 1s linear infinite; }
+@keyframes dft-gira { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .dft-gira { animation: none; } }
+@media (max-width: 700px) {
+  .dft-cartao, .dft-linha { margin-left: 0; width: 100%; max-width: 100%; }
+  .dft-cancelar, .dft-ok, .dft-tentar, .dft-linha .dft-tentar { height: 44px; }
+}

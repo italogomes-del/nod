@@ -37,6 +37,45 @@ describe("hook do nod (ADR-052, revisto pela ADR-055)", () => {
   });
 });
 
+describe("NOD-54: o hook guarda o original da gravação fora da pasta (ADR-134)", () => {
+  const pastas = { pastaDoBot: "/Users/m/nod/Ada", home: "/Users/m" };
+  const ok: Confirmar = async () => ({ permitir: true });
+  const guardados: string[][] = [];
+  const guardar = async (c: string[]) => { guardados.push(c); };
+
+  it("Write/Edit fora da pasta, liberado: guarda o caminho antes; dentro da pasta, Read ou negado: não guarda", async () => {
+    guardados.length = 0;
+    await decidirHook(evento("Write", { file_path: "/Users/m/Documents/x.md" }), ok, pastas, undefined, guardar);
+    await decidirHook(evento("Edit", { file_path: "notas.md" }), ok, pastas, undefined, guardar);
+    await decidirHook(evento("Read", { file_path: "/Users/m/Documents/x.md" }), ok, pastas, undefined, guardar);
+    const negado = await decidirHook(evento("Write", { file_path: "/Users/m/Documents/y.md" }), async () => ({ permitir: false, motivo: "não" }), pastas, undefined, guardar);
+    expect(negado.hookSpecificOutput.permissionDecision).toBe("deny");
+    expect(guardados).toEqual([["/Users/m/Documents/x.md"]]);
+  });
+
+  it("turno da raiz do bot: gravar dentro de uma pasta de frente guarda (a foto da raiz pula as frentes; revisão 5, M1)", async () => {
+    guardados.length = 0;
+    await decidirHook(evento("Write", { file_path: "/Users/m/nod/Ada/task-abc123/a.ts" }), ok, pastas, undefined, guardar);
+    await decidirHook(evento("Write", { file_path: "/Users/m/nod/Ada/task-abc123/b.ts" }), ok, { pastaDoBot: "/Users/m/nod/Ada/task-abc123", home: "/Users/m" }, undefined, guardar);
+    expect(guardados).toEqual([["/Users/m/nod/Ada/task-abc123/a.ts"]]);
+  });
+
+  it("frente com maiúsculas trocadas (o disco do macOS não distingue): a raiz ainda guarda (revisão 7, M2)", async () => {
+    guardados.length = 0;
+    await decidirHook(evento("Write", { file_path: "/Users/m/nod/ADA/task-abc123/a.ts" }), ok, pastas, undefined, guardar);
+    expect(guardados).toEqual([["/Users/m/nod/ADA/task-abc123/a.ts"]]);
+  });
+
+  it("apply_patch: guarda todos os arquivos do patch que estão fora; guardar que lança não nega", async () => {
+    guardados.length = 0;
+    const command = "*** Begin Patch\n*** Update File: /Users/m/a.md\n*** Add File: notas.md\n*** Add File: /Users/m/b.md\n*** End Patch";
+    await decidirHook(evento("apply_patch", { command }), ok, pastas, undefined, guardar);
+    expect(guardados).toEqual([["/Users/m/a.md", "/Users/m/b.md"]]);
+    const r = await decidirHook(evento("Write", { file_path: "/Users/m/c.md" }), ok, pastas, undefined, async () => { throw new Error("disco"); });
+    expect(r.hookSpecificOutput.permissionDecision).toBe("allow");
+  });
+});
+
 /** Servidor falso: responde às rotas que o hook chama, em ordem, e guarda o que foi pedido. */
 function servidor(respostas: Record<string, (unknown | ((corpo: unknown) => unknown))[]>) {
   const chamadas: { rota: string; corpo: unknown }[] = [];

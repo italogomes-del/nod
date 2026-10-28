@@ -508,6 +508,8 @@ export type Estado = {
    */
   leitura: LeituraAtual | null;
   falhaLeitura: { mensagemId: string } | null;
+  /** NOD-54 (ADR-134): a fala com o cartão "Desfazer o que o bot mudou?" aberto embaixo dela (uma por vez). */
+  desfazerAberto: string | null;
   /**
    * Onboarding por ligação (definido em 2026-10-04, ADR-077): o que `GET onboarding` disse. undefined = ainda não leu;
    * null = a leitura falhou ou a rota não existe (falha fechada: o app abre normal). `onboardingAberto` = a camada do
@@ -644,6 +646,8 @@ export type Acao =
   | { tipo: "hidratar-disponibilidade-ligacao"; agenteId: string; disponibilidade: DisponibilidadeLigacao | null }
   /** NOD-106: o tocador mudou de fase (null = ocioso); `falha` grava (ou, com null, tira) o aviso de falha. */
   | { tipo: "leitura-mudou"; leitura: LeituraAtual | null; falha?: { mensagemId: string } | null }
+  /** NOD-54: abre (o id da fala) ou fecha (null) o cartão do desfazer. */
+  | { tipo: "desfazer-cartao"; mensagemId: string | null }
   | { tipo: "esquecer-disponibilidade-ligacao"; agenteId: string }
   | { tipo: "hidratar-onboarding"; onboarding: EstadoOnboarding | null }
   | { tipo: "onboarding-aberto"; aberto: boolean }
@@ -739,6 +743,7 @@ export const estadoInicial: Estado = {
   disponibilidadeLigacao: {},
   leitura: null,
   falhaLeitura: null,
+  desfazerAberto: null,
   onboardingAberto: false,
   trabalhos: null,
   trabalhoDetalhe: {},
@@ -1390,6 +1395,7 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
   "ligacao.mudou": (e, f) => invalidar(e, conv(f), "ligacao"),
   // ADR-113: as reações de uma fala mudaram (noutra aba ou pelo próprio clique) — relê a conversa, que traz o chip.
   "reacao.mudou": (e, f) => invalidar(e, conv(f)),
+  "checkpoint.mudou": (e, f) => invalidar(e, conv(f)),
   // ADR-083: um trabalho nasceu ou mudou — relê a lista (faixa, barra, gaveta), a conversa do bot (a linha "Abriu a
   // task", a pergunta e o resultado) e a tela da task, se ela já foi aberta.
   "trabalho.mudou": (e, f) => {
@@ -1838,6 +1844,8 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
       const igual = a === b || (a !== null && b !== null && a.ligacaoId === b.ligacaoId && a.local === b.local && a.agenteId === b.agenteId);
       return igual ? estado : { ...estado, ligacaoViva: b };
     }
+    case "desfazer-cartao":
+      return estado.desfazerAberto === acao.mensagemId ? estado : { ...estado, desfazerAberto: acao.mensagemId };
     case "leitura-mudou": {
       const a = estado.leitura;
       const b = acao.leitura;

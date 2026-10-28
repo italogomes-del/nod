@@ -962,6 +962,9 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         x.payload = payload;
         return true;
       },
+      async ultimaFalaDoTurno(turnoId, agenteId) {
+        return doTenant(b.mensagens).filter((m) => m.turnoId === turnoId && m.autoria.autor_tipo === "agente" && m.autoria.autor_id === agenteId && m.kind === "texto").sort((p, q) => p.criadoEm - q.criadoEm).at(-1)?.id ?? null;
+      },
       async marcarParciaisDoTurno(turnoId) {
         let n = 0;
         for (const m of doTenant(b.mensagens)) {
@@ -3578,6 +3581,16 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       contarRecuperacoesDeConector: soNoPostgres,
       trabalhos: soNoPostgres,
       contarTrabalhos: soNoPostgres,
+    },
+    // NOD-54 (0120): os checkpoints são do Postgres (tests/integration/checkpoints.test.ts); aqui, nenhum.
+    checkpoints: {
+      criar: async () => null,
+      doTurno: async () => null,
+      desfazendoDoAgente: async () => null,
+      pedirDesfazer: async () => ({ ok: false as const, recusa: "nao_encontrado" as const }),
+      paraAMaquina: async () => [],
+      progresso: async () => null,
+      finalizar: async () => null,
     },
     // NOD-346: o "Sobre mim" é do Postgres (tests/integration/minha-conta.test.ts); aqui fica vazio.
     perfil: {
