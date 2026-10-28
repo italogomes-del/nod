@@ -107,6 +107,9 @@ describeIntegracao("modo dev (0035 + 0036): o custo de cada turno e o Raio-X", (
       const r = (await executar(deps, raioXDoTurno, { turnoId: t2 })).data;
       expect(r).toMatchObject({ turnoId: t2, estado: "concluido", custoUsd: 1.02, execucao: EXECUCAO, composicao: { comTexto: true, entrada: { texto: "com modo dev" } } });
       expect(r.composicao?.prompt.find((p) => p.secao === "identidade")?.texto).toContain("um agente do nod");
+      // NOD-352: o nome amigável de cada ferramenta das chamadas, para o title do Raio-X.
+      expect(r.nomesDasFerramentas).toEqual({ "mcp__nod__clickup__GET_TASKS": "Consultou Clickup" });
+      expect(semTexto.nomesDasFerramentas).toEqual({});
       expect(JSON.stringify(r.composicao)).not.toContain(`tok-${t2}`);
 
       const conversa = (await executar(deps, raioXDaConversa, { conversaId: criado.conversa.id, desde: 0 })).data;

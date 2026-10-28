@@ -110,6 +110,11 @@ export type RaioXTurno = {
   criadoEm: number;
   composicao: ComposicaoRaioX | null;
   execucao: ExecucaoRaioX | null;
+  /**
+   * NOD-352: o nome amigável de cada ferramenta das chamadas ("Rodou um comando"), pelo id técnico. O Raio-X é diagnóstico
+   * e mostra o id; o nome vai no `title`. Servidor antigo não o manda.
+   */
+  nomesDasFerramentas?: Record<string, string>;
 };
 
 /** Uma linha por turno na faixa dev embaixo de cada resposta. */

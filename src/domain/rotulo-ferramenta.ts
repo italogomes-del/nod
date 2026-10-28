@@ -4,63 +4,108 @@
  * nunca input/resultado: o cartão diz o que o agente está fazendo, não o conteúdo que ele tocou.
  */
 import type { EventoStream } from "../contracts/turno.ts";
-const NOD: Record<string, string> = {
-  lembrar: "Anotou na memória",
-  atualizar_perfil: "Propôs mudança no perfil",
-  pedir_acesso: "Pediu um acesso",
-  criar_rotina: "Propôs uma rotina",
-  listar_rotinas: "Consultou as rotinas",
-  pausar_rotina: "Pausou uma rotina",
-  reativar_rotina: "Reativou uma rotina",
-  atualizar_rotina: "Propôs mudança numa rotina",
-  excluir_rotina: "Propôs excluir uma rotina",
-  pedir_aprovacao: "Pediu aprovação",
-  pedir_a_pessoa: "Pediu ajuda a você",
-  passar: "Passou a vez",
-  encaminhar: "Encaminhou a outro bot",
-  sem_novidade: "Viu que não há novidade",
-  pedir_a_bot: "Pediu ajuda a outro bot",
-  ver_colegas: "Viu o que os colegas fazem",
+/**
+ * NOD-352 (definido em 2026-10-28): cada ferramenta do nod no passado (etapas, resumo gravado, último passo do subagente)
+ * e no presente (cabeçalho do pensamento, grupo que roda, leitor de tela). Verbo + objeto genérico, como as copies do
+ * Gil; nunca o id cru. Ferramenta nova do nod sem linha aqui quebra o teste de varredura.
+ */
+const NOD: Record<string, readonly [passado: string, presente: string]> = {
+  lembrar: ["Anotou na memória", "Anotando na memória"],
+  atualizar_perfil: ["Propôs mudança no perfil", "Propondo mudança no perfil"],
+  pedir_acesso: ["Pediu um acesso", "Pedindo um acesso"],
+  criar_rotina: ["Propôs uma rotina", "Propondo uma rotina"],
+  listar_rotinas: ["Consultou as rotinas", "Consultando as rotinas"],
+  pausar_rotina: ["Pausou uma rotina", "Pausando uma rotina"],
+  reativar_rotina: ["Reativou uma rotina", "Reativando uma rotina"],
+  atualizar_rotina: ["Propôs mudança numa rotina", "Propondo mudança numa rotina"],
+  excluir_rotina: ["Propôs excluir uma rotina", "Propondo excluir uma rotina"],
+  pedir_aprovacao: ["Pediu aprovação", "Pedindo aprovação"],
+  pedir_a_pessoa: ["Pediu ajuda a você", "Pedindo ajuda a você"],
+  passar: ["Passou a vez", "Passando a vez"],
+  encaminhar: ["Encaminhou a outro bot", "Encaminhando a outro bot"],
+  sem_novidade: ["Viu que não há novidade", "Vendo se há novidade"],
+  pedir_a_bot: ["Pediu ajuda a outro bot", "Pedindo ajuda a outro bot"],
+  ver_colegas: ["Viu o que os colegas fazem", "Vendo o que os colegas fazem"],
+  publicar_artefato: ["Publicou um artefato", "Publicando um artefato"],
+  ler_artefato: ["Leu um artefato", "Lendo um artefato"],
   // ADR-083 (#193): a conversa coordena as tasks.
-  abrir_task: "Abriu uma task",
-  mandar_para_task: "Repassou a uma task",
-  me_chame_as: "Saiu do Mac até a hora de voltar",
+  abrir_task: ["Abriu uma task", "Abrindo uma task"],
+  mandar_para_task: ["Repassou a uma task", "Repassando a uma task"],
+  me_chame_as: ["Saiu do Mac até a hora de voltar", "Marcando a hora de voltar"],
   // ADR-099 (I2): o dono abre frentes em lote e cada frente devolve um resumo.
-  abrir_frentes: "Começou frentes",
-  mandar_para_frente: "Repassou a uma frente",
-  devolver_resumo: "Devolveu o resumo",
+  abrir_frentes: ["Começou frentes", "Abrindo frentes"],
+  // O cabeçalho de frentes é um só, "Abrindo frentes" (NOD-348, ADR-114), para abrir e para repassar.
+  mandar_para_frente: ["Repassou a uma frente", "Abrindo frentes"],
+  devolver_resumo: ["Devolveu o resumo", "Devolvendo o resumo"],
   // ADR-099 (parte 2): o Nod roda o comando e acorda o bot quando ele termina.
-  esperar_comando: "Deixou um comando esperando por ele",
+  esperar_comando: ["Deixou um comando esperando por ele", "Deixando um comando esperando por ele"],
   // NOD-210 (ADR-104): um bot comum cria outros bots quando a pessoa pede.
-  criar_bots: "Criou bots",
+  criar_bots: ["Criou bots", "Criando bots"],
   // NOD-262: o bot fecha da conversa um pedido de colega que já resolveu.
-  responder_pedido: "Respondeu a um pedido de colega",
+  responder_pedido: ["Respondeu a um pedido de colega", "Respondendo a um pedido de colega"],
   // NOD-50: o cartão de credencial; o rótulo nunca cita o valor (o bot nem o tem).
-  pedir_credencial: "Pediu uma chave",
+  pedir_credencial: ["Pediu uma chave", "Pedindo uma chave"],
+  // O bot do nod (gerir a frota) e a ligação.
+  gerir_bots: ["Mexeu nos bots", "Mexendo nos bots"],
+  ver_apps_conectados: ["Viu os apps conectados", "Vendo os apps conectados"],
+  registrar_relato: ["Registrou um relato", "Registrando um relato"],
+  iniciar_tarefa: ["Começou uma tarefa", "Começando uma tarefa"],
+  desligar: ["Desligou a ligação", "Desligando a ligação"],
+  anotar_entrevista: ["Anotou a conversa", "Anotando a conversa"],
+  concluir_entrevista: ["Concluiu a conversa", "Concluindo a conversa"],
+  propor_bot: ["Propôs um bot", "Propondo um bot"],
+  // As do proxy (fora do catálogo do nod, mas com o mesmo prefixo).
+  ler_mais: ["Leu o resto de um resultado", "Lendo o resto de um resultado"],
+  anexar_midia: ["Anexou uma mídia", "Anexando uma mídia"],
 };
 
 /**
  * As nativas do Claude Code no kit do terminal (definido em 2026-09-28): "Usou TaskCreate" e "Usou Bash" não diziam
  * nada a quem lê o cartão. A lista de tarefas aparece inteira no cartão; aqui basta dizer que o bot a organizou.
+ * NOD-352: passado e presente; `Monitor` e `Task`/`Agent` com a copy do Gil; as do Codex (ADR-103) também.
  */
-const NATIVAS: Record<string, string> = {
-  Read: "Leu um arquivo",
-  Edit: "Editou um arquivo",
-  Write: "Escreveu um arquivo",
-  NotebookEdit: "Editou um notebook",
-  Glob: "Procurou arquivos",
-  Grep: "Procurou nos arquivos",
-  Bash: "Rodou um comando",
-  WebFetch: "Abriu uma página",
-  WebSearch: "Pesquisou na web",
-  Skill: "Usou uma skill",
-  Agent: "Chamou um subagente",
-  ToolSearch: "Buscou ferramentas",
-  TaskCreate: "Organizou as tarefas",
-  TaskUpdate: "Organizou as tarefas",
-  TaskList: "Organizou as tarefas",
-  TaskGet: "Organizou as tarefas",
+const NATIVAS: Record<string, readonly [passado: string, presente: string]> = {
+  Read: ["Leu um arquivo", "Lendo um arquivo"],
+  Edit: ["Editou um arquivo", "Editando um arquivo"],
+  Write: ["Escreveu um arquivo", "Escrevendo um arquivo"],
+  NotebookEdit: ["Editou um notebook", "Editando um notebook"],
+  Glob: ["Procurou arquivos", "Procurando arquivos"],
+  Grep: ["Procurou nos arquivos", "Procurando nos arquivos"],
+  Bash: ["Rodou um comando", "Rodando um comando"],
+  BashOutput: ["Leu a saída de um comando", "Lendo a saída de um comando"],
+  Monitor: ["Acompanhou um processo", "Acompanhando um processo"],
+  TaskStop: ["Parou um processo", "Parando um processo"],
+  WebFetch: ["Abriu uma página", "Abrindo uma página"],
+  WebSearch: ["Pesquisou na web", "Pesquisando na web"],
+  Skill: ["Usou uma skill", "Usando uma skill"],
+  Agent: ["Chamou um subagente", "Chamando um subagente"],
+  // O `init` do CLI lista o subagente como "Task" (nativas.ts); o hook recebe "Agent".
+  Task: ["Chamou um subagente", "Chamando um subagente"],
+  ToolSearch: ["Buscou ferramentas", "Buscando ferramentas"],
+  TaskCreate: ["Organizou as tarefas", "Organizando as tarefas"],
+  TaskUpdate: ["Organizou as tarefas", "Organizando as tarefas"],
+  TaskList: ["Organizou as tarefas", "Organizando as tarefas"],
+  TaskGet: ["Organizou as tarefas", "Organizando as tarefas"],
+  // Nomes antigos do CLI (a lista de tarefas e o parar de um processo em segundo plano).
+  TodoWrite: ["Organizou as tarefas", "Organizando as tarefas"],
+  KillShell: ["Parou um processo", "Parando um processo"],
+  KillBash: ["Parou um processo", "Parando um processo"],
+  // Codex (NATIVAS_DO_TERMINAL_CODEX): `apply_patch` cria e edita; `spawn_agent` é o subagente.
+  apply_patch: ["Editou arquivos", "Editando arquivos"],
+  view_image: ["Viu uma imagem", "Vendo uma imagem"],
+  spawn_agent: ["Chamou um subagente", "Chamando um subagente"],
+  web_search: ["Pesquisou na web", "Pesquisando na web"],
 };
+
+/** O rótulo do nod só para o servidor `nod` de verdade, olhando o nome cru (um `claude_ai_nod` não se passa por ele). */
+function doNod(nomeCli: string): readonly [string, string] | undefined {
+  return nomeCli.startsWith("mcp__nod__") ? de(NOD, nomeCli.slice("mcp__nod__".length)) : undefined;
+}
+
+/** Só as chaves próprias: `NATIVAS["constructor"]` não pode virar rótulo (o nome vem do CLI). */
+function de<T>(mapa: Record<string, T>, chave: string): T | undefined {
+  return Object.hasOwn(mapa, chave) ? mapa[chave] : undefined;
+}
 
 /** Prefixos de capacidade que só leem; o resto de um conector conta como alteração. */
 const LEITURA = /^(search|list|get|read|find|fetch|query|who|consultar|listar|ler|buscar)/i;
@@ -90,10 +135,10 @@ const SERVIDOR_DE_IA = /claude|codex|openai|anthropic|gemini|gpt/i;
 
 export function rotuloFerramenta(nomeCli: string): string {
   const m = /^mcp__([^_]+(?:_[^_]+)*?)__(.+)$/.exec(semIaNoNome(nomeCli));
-  if (!m) return NATIVAS[nomeCli] ?? (nomeCli ? `Usou ${nomeCli}` : "Usou uma ferramenta");
+  if (!m) return de(NATIVAS, nomeCli)?.[0] ?? "Usou uma ferramenta";
   const nome = m[2]!;
-  const nod = NOD[nome];
-  if (nod) return nod;
+  const nod = doNod(nomeCli);
+  if (nod) return nod[0];
   if (nome.startsWith("computador_")) return "Usou o computador";
   if (nome.startsWith("workspace_")) return "Usou a pasta de trabalho";
   const conector = /^(.+?)__(.+)$/.exec(nome);
@@ -105,15 +150,15 @@ export function rotuloFerramenta(nomeCli: string): string {
     return `${LEITURA.test(cap) ? "Consultou" : "Alterou"} ${SERVIDOR_DE_IA.test(slug) ? "uma ferramenta" : titulo(slug)}`;
   }
   if (m[1] === "navegador") return "Usou o navegador";
-  if (m[1] === "ferramenta") return "Usou uma ferramenta";
-  return `Usou ${titulo(m[1] === "nod" ? nome : m[1]!)}`;
+  if (m[1] === "ferramenta" || m[1] === "nod") return "Usou uma ferramenta";
+  return `Usou ${titulo(m[1]!)}`;
 }
 
 /** O substantivo das nativas no aviso do vigia ("Esperando *Terminal* terminar"), nunca o comando (NOD-73). */
 const NATIVAS_NOME: Record<string, string> = {
   Bash: "Terminal",
   BashOutput: "Terminal",
-  Monitor: "Monitor",
+  Monitor: "Acompanhamento de processo",
   Read: "Leitura de arquivo",
   Edit: "Edição de arquivo",
   Write: "Escrita de arquivo",
@@ -124,11 +169,17 @@ const NATIVAS_NOME: Record<string, string> = {
   WebSearch: "Pesquisa na web",
   Skill: "Skill",
   Agent: "Subagente",
+  Task: "Subagente",
+  TaskStop: "Parada de processo",
   ToolSearch: "Busca de ferramentas",
   TaskCreate: "Lista de tarefas",
   TaskUpdate: "Lista de tarefas",
   TaskList: "Lista de tarefas",
   TaskGet: "Lista de tarefas",
+  apply_patch: "Edição de arquivo",
+  view_image: "Imagem",
+  spawn_agent: "Subagente",
+  web_search: "Pesquisa na web",
 };
 
 /**
@@ -137,35 +188,48 @@ const NATIVAS_NOME: Record<string, string> = {
  */
 export function nomeDaFerramenta(nomeCli: string): string {
   const m = /^mcp__([^_]+(?:_[^_]+)*?)__(.+)$/.exec(semIaNoNome(nomeCli));
-  if (!m) return NATIVAS_NOME[nomeCli] ?? (nomeCli || "uma ferramenta");
+  // NOD-352: nativa desconhecida também não mostra o id cru.
+  if (!m) return de(NATIVAS_NOME, nomeCli) ?? "uma ferramenta";
   const nome = m[2]!;
   if (nome.startsWith("computador_")) return "Computador";
   if (nome.startsWith("workspace_")) return "Pasta de trabalho";
   const conector = /^(.+?)__(.+)$/.exec(nome);
   if (conector) return SERVIDOR_DE_IA.test(conector[1]!) ? "uma ferramenta" : titulo(conector[1]!);
   if (m[1] === "ferramenta") return "uma ferramenta";
-  return titulo(m[1] === "nod" ? nome : m[1]!);
+  // NOD-352 (revisão 2 do #578): a ferramenta do nod não mostra o id formatado ("Lembrar"); só o nod de verdade, pelo nome cru.
+  if (m[1] === "nod") return nomeCli.startsWith("mcp__nod__") ? "o nod" : "uma ferramenta";
+  return titulo(m[1]!);
 }
 
 /**
- * NOD-348 (definido em 2026-10-23): o que a fala viva diz AGORA — "Usando ‹ferramenta›", com o mesmo nome do vigia
- * (`nomeDaFerramenta`), e "Abrindo frentes" quando o bot abre ou manda para frentes. Os verbos no presente ("Rodando um
- * comando") são da NOD-352; aqui só o nome que já existe (revisão do #508). Como o rótulo, só lê o NOME que o CLI viu.
+ * NOD-348 (definido em 2026-10-23): o que a fala viva diz AGORA, e `frentes` quando o bot abre ou manda para frentes.
+ * NOD-352 (2026-10-28): o texto é o `rotuloAgora`, com verbo no presente. Como o rótulo, só lê o NOME que o CLI viu.
  */
 export type FerramentaEmUso = { texto: string; frentes: boolean };
 
 const FRENTES = new Set(["abrir_frentes", "mandar_para_frente"]);
 
+/**
+ * NOD-352: o rótulo no presente ("Rodando um comando", "Anotando na memória", "Usando o computador"). Conector e servidor
+ * MCP de fora seguem "Usando ‹app›" (o formato da fala viva do Gil, "usando Gmail"); desconhecida é "Usando uma
+ * ferramenta"; nunca o id cru nem o nome da IA.
+ */
+export function rotuloAgora(nomeCli: string): string {
+  const m = /^mcp__([^_]+(?:_[^_]+)*?)__(.+)$/.exec(semIaNoNome(nomeCli));
+  if (!m) return de(NATIVAS, nomeCli)?.[1] ?? "Usando uma ferramenta";
+  const nome = m[2]!;
+  const nod = doNod(nomeCli);
+  if (nod) return nod[1];
+  if (nome.startsWith("computador_")) return "Usando o computador";
+  if (nome.startsWith("workspace_")) return "Usando a pasta de trabalho";
+  if (m[1] === "navegador") return "Usando o navegador";
+  if (/__/.test(nome) || m[1] !== "nod") return `Usando ${nomeDaFerramenta(nomeCli)}`;
+  return "Usando uma ferramenta";
+}
+
 export function ferramentaEmUso(nomeCli: string): FerramentaEmUso {
   const m = /^mcp__([^_]+(?:_[^_]+)*?)__(.+)$/.exec(nomeCli);
-  if (!m) return { texto: `Usando ${NATIVAS_NOME[nomeCli] ?? "uma ferramenta"}`, frentes: false };
-  if (m[1] === "nod" && FRENTES.has(m[2]!)) return { texto: "Abrindo frentes", frentes: true };
-  // O conector do próprio CLI (`claude_ai_Linear`) não mostra o nome da IA na tela (critério 8 da NOD-348).
-  const semIa = semIaNoNome(nomeCli);
-  if (semIa.startsWith("mcp__navegador__")) return { texto: "Usando o navegador", frentes: false };
-  if (semIa.startsWith("mcp__ferramenta__")) return { texto: "Usando uma ferramenta", frentes: false };
-  const nome = m[1] === "nod" && !/^(computador_|workspace_)/.test(m[2]!) && !/__/.test(m[2]!) ? "o nod" : nomeDaFerramenta(semIa);
-  return { texto: `Usando ${nome}`, frentes: false };
+  return { texto: rotuloAgora(nomeCli), frentes: !!m && m[1] === "nod" && FRENTES.has(m[2]!) };
 }
 
 /** NOD-353: teto do rótulo da ação, o mesmo no frame ao vivo e no resumo gravado (a troca da viva pela gravada não muda o texto). */
@@ -185,7 +249,12 @@ export function repassarAcaoDoEvento(alvo: { ferramenta(turnoId: string, nome: s
   else if (ev.tipo === "tool_result") alvo.fimDaFerramenta(turnoId, ev.toolUseId, ev.isError);
 }
 
+/** Revisão 2 do #578: o presente também tem o teto do rótulo (um conector de slug longo vira "Usando ‹slug›"). */
+function comTeto(e: FerramentaEmUso): FerramentaEmUso {
+  return { ...e, texto: e.texto.slice(0, ROTULO_DA_ACAO_MAX) };
+}
+
 /** O laço local manda o mesmo frame da ponte, com o `emUso` da fala viva (NOD-348) e o fim de cada chamada (NOD-353). */
 export function frameDaFerramenta(nomeCli: string, id?: string): { nome: string; rotulo: string; emUso: FerramentaEmUso; id?: string } {
-  return { nome: nomeCli, rotulo: rotuloFerramenta(nomeCli).slice(0, ROTULO_DA_ACAO_MAX), emUso: ferramentaEmUso(nomeCli), ...(id ? { id } : {}) };
+  return { nome: nomeCli, rotulo: rotuloFerramenta(nomeCli).slice(0, ROTULO_DA_ACAO_MAX), emUso: comTeto(ferramentaEmUso(nomeCli)), ...(id ? { id } : {}) };
 }

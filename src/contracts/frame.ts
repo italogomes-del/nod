@@ -5,7 +5,7 @@ export type TipoFrame =
   | "turno.delta"
   /**
    * Ferramenta chamada no turno vivo: só {nome, rotulo, emUso}, nunca input/resultado (`frameDaFerramenta` em
-   * src/domain/rotulo-ferramenta.ts). Separa as etapas da atividade; `emUso` é a linha viva ("Usando Linear", NOD-348).
+   * src/domain/rotulo-ferramenta.ts). Separa as etapas da atividade; `emUso` é a linha viva no presente ("Rodando um comando", "Usando Linear"; NOD-348, NOD-352).
    */
   | "turno.atividade"
   /** NOD-353: {id, falhou} — a chamada `id` (o mesmo do turno.atividade) terminou; `falhou` vem de tool_result.isError. */

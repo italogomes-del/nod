@@ -2,6 +2,7 @@ import { USOS_DO_MAC, type Experimentos, type Preferencias, type RaioXConversa, 
 import { ErroDeDominio } from "../domain/erro.ts";
 import { lerOrdemDaPessoa } from "../domain/inteligencia.ts";
 import { resumoDoRaioX } from "../domain/raio-x.ts";
+import { rotuloFerramenta } from "../domain/rotulo-ferramenta.ts";
 import type { CasoDeUso } from "./tipos.ts";
 
 /** Turnos que a faixa dev cobre numa conversa: os mais recentes, o bastante para a tela aberta. */
@@ -66,7 +67,10 @@ export const fecharAviso: CasoDeUso<{ chave: unknown }, Preferencias> = async (d
 export const raioXDoTurno: CasoDeUso<{ turnoId: string }, RaioXTurno> = async (deps, input) => {
   const t = await deps.repos.raioX.doTurno(input.turnoId);
   if (!t) throw new ErroDeDominio("nao_encontrado", { cause: "turno" });
-  return { data: t };
+  // NOD-352: o nome amigável de cada id para o `title` do Raio-X (a web não lê o domínio, ADR-018).
+  const nomes = new Map<string, string>();
+  for (const c of t.execucao?.chamadas ?? []) for (const f of c.ferramentas) if (!nomes.has(f.nome)) nomes.set(f.nome, rotuloFerramenta(f.nome));
+  return { data: { ...t, nomesDasFerramentas: Object.fromEntries(nomes) } };
 };
 
 /** A faixa dev de cada resposta da conversa e o total desde `desde` (a meia-noite de quem pergunta). */

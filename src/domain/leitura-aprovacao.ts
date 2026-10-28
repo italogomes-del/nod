@@ -5,6 +5,14 @@ import type { TipoDecisao } from "../contracts/decisao.ts";
  * pelo SERVIDOR a partir de campos tipados — nunca pelo modelo —, para que a pessoa ouça exatamente o que aprova.
  */
 
+/**
+ * NOD-352 (revisão do #578): o que a ligação lê de um item de terminal ou computador. O destino gravado não é o nome do
+ * CLI (`bash`, `executar`), então `rotuloFerramenta` cairia em "Usou uma ferramenta"; o rótulo é fixo pelo conector.
+ */
+export function rotuloDoItemFalado(conector: "terminal" | "computador"): string {
+  return conector === "terminal" ? "Rodar um comando" : "Usar o computador";
+}
+
 /** Um item de uma aprovação em lista. */
 export type ItemParaLeitura =
   /** Item de app: `texto` é o textoFinal do item; `origemConector` = o texto veio de conteúdo de um conector. */

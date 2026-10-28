@@ -102,18 +102,25 @@ function secaoParteFixa(r: RaioXTurno, x: ExecucaoRaioX, primeira: ChamadaRaioX)
     </section>`;
 }
 
-function nomeDaFerramenta(nome: string): string {
+/** O id técnico sem o prefixo do servidor MCP: o Raio-X é diagnóstico do modo dev e mostra o id (NOD-352). */
+function idDaFerramenta(nome: string): string {
   return nome.replace(/^mcp__[^_]+(?:_[^_]+)*?__/, "");
 }
 
-function linhaChamada(c: ChamadaRaioX, inicio: number, janela: number | null, fixa: number, base: number): { html: string; perto: boolean } {
+/** NOD-352: o nome amigável (do servidor, `nomesDasFerramentas`) vai no `title`; servidor antigo, sem `title`. */
+function ferramentaNaLinha(nome: string, nomes: Readonly<Record<string, string>> | undefined): string {
+  const amigavel = nomes && Object.hasOwn(nomes, nome) ? nomes[nome] : undefined;
+  return `<code${amigavel ? ` title="${esc(amigavel)}"` : ""}>${esc(idDaFerramenta(nome))}</code>`;
+}
+
+function linhaChamada(c: ChamadaRaioX, inicio: number, janela: number | null, fixa: number, base: number, nomes?: Readonly<Record<string, string>>): { html: string; perto: boolean } {
   const perto = janela !== null && c.contexto >= janela * ALERTA_JANELA;
   const parteFixa = Math.min(fixa, c.contexto);
   const mini = `<span class="rx-mini" aria-hidden="true"><span class="rx-mini-fixa" style="${largura(pct(parteFixa, base))}"></span><span class="rx-mini-conversa${perto ? " rx-pesada" : ""}" style="${largura(pct(c.contexto - parteFixa, base))}"></span></span>`;
   const detalhe = `${mil(c.cacheLido)} do cache · ${mil(c.entrada + c.cacheNovo)} novos · ${mil(c.saida)} de saída${c.pensamento ? ` (${mil(c.pensamento)} pensando)` : ""}`;
   const ferramentas = c.ferramentas.map((f) => {
     const tamanho = f.resultadoChars === null ? "" : f.resultadoChars >= RESULTADO_GRANDE ? ` → <b>${esc(mil(f.resultadoChars))}</b>` : ` → ${esc(mil(f.resultadoChars))} caract.`;
-    return `<span class="rx-ferramenta"><code>${esc(nomeDaFerramenta(f.nome))}</code>${tamanho}${f.erro ? ' <span class="rx-erro">erro</span>' : ""}</span>`;
+    return `<span class="rx-ferramenta">${ferramentaNaLinha(f.nome, nomes)}${tamanho}${f.erro ? ' <span class="rx-erro">erro</span>' : ""}</span>`;
   }).join('<span class="rx-sep" aria-hidden="true"> · </span>');
   const descricao = ferramentas || `<span class="rx-nota">${esc(`${mil(c.saida)} de saída${c.pensamento ? ` (${mil(c.pensamento)} pensando)` : ""}`)}</span>`;
   return {
@@ -148,7 +155,7 @@ function abaCusto(r: RaioXTurno): string {
     </div>`;
   const fixa = primeira && r.composicao ? secaoParteFixa(r, x, primeira) : "";
   const escala = x.janela && pico !== null && pico >= x.janela * JANELA_FOLGADA ? x.janela : Math.max(pico ?? 0, 1);
-  const linhas = x.chamadas.map((c) => ({ em: c.em, ...linhaChamada(c, r.criadoEm, x.janela, primeira?.contexto ?? 0, escala) }));
+  const linhas = x.chamadas.map((c) => ({ em: c.em, ...linhaChamada(c, r.criadoEm, x.janela, primeira?.contexto ?? 0, escala, r.nomesDasFerramentas) }));
   const eventos = [...linhas, ...x.compactacoes.map((c) => ({ em: c.em, html: linhaCompactacao(c, r.criadoEm), perto: false }))].sort((a, b) => a.em - b.em);
   const omitidas = x.chamadasOmitidas ? `<li class="rx-evento rx-nota"><span>… ${x.chamadasOmitidas} chamadas do meio não guardadas</span></li>` : "";
   const fim = r.estado === "interrompido" ? `<li class="rx-evento rx-falhou"><span>✕ turno interrompido</span></li>` : "";

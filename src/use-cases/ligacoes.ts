@@ -7,8 +7,7 @@ import { VELOCIDADES_VOZ, VOZES_NOD } from "../contracts/vozes.ts";
 import { ehIdVoz, generoDaVoz } from "../domain/vozes.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import type { PerfilComando } from "../domain/comando-de-voz.ts";
-import { FECHO_LEITURA, redigirLeituraDeAprovacao, type PedidoDeLeitura } from "../domain/leitura-aprovacao.ts";
-import { rotuloFerramenta } from "../domain/rotulo-ferramenta.ts";
+import { FECHO_LEITURA, redigirLeituraDeAprovacao, rotuloDoItemFalado, type PedidoDeLeitura } from "../domain/leitura-aprovacao.ts";
 import type { MetricasLigacao, NovaFala } from "../repositories/ligacoes.repo.ts";
 import { autoriaAgente, autoriaPessoa, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
 import { encerrarCerebroSemLigacao } from "./despachar-turno.ts";
@@ -378,7 +377,7 @@ export const leituraDaDecisao: CasoDeUso<{ decisaoId: string; soDoBotDoOnboardin
       acao: d.frase,
       app: itens[0]?.destino.conector && itens[0].destino.conector !== "terminal" && itens[0].destino.conector !== "computador" ? itens[0].destino.conector : null,
       itens: itens.map((i) => (i.destino.conector === "terminal" || i.destino.conector === "computador"
-        ? { tipo: i.destino.conector, rotuloFerramenta: rotuloFerramenta(i.destino.ferramenta) }
+        ? { tipo: i.destino.conector, rotuloFerramenta: rotuloDoItemFalado(i.destino.conector) }
         : { tipo: "app" as const, texto: i.textoFinal })),
     };
   } else if (d.tipo === "retomar_turno") pedido = { tipo: "retomar_turno", acao: d.frase, contaminado };

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { FECHO_LEITURA, redigirLeituraDeAprovacao, TEXTO_NA_TELA } from "../../../src/domain/leitura-aprovacao.ts";
+import { readFileSync } from "node:fs";
+import { FECHO_LEITURA, redigirLeituraDeAprovacao, rotuloDoItemFalado, TEXTO_NA_TELA } from "../../../src/domain/leitura-aprovacao.ts";
 
 describe("redigirLeituraDeAprovacao", () => {
   it("aprovação de um item: ação, app, destino, o texto e o fecho", () => {
@@ -102,5 +103,17 @@ describe("redigirLeituraDeAprovacao", () => {
   it("campos tipados também são limpos e cortados", () => {
     const r = redigirLeituraDeAprovacao({ tipo: "aprovacao", acao: "**mandar**", app: "Gmail", destino: "https://evil.com/x", itens: [] });
     expect(r).toBe(`Preciso da sua aprovação para mandar no Gmail, para um link. ${FECHO_LEITURA}`);
+  });
+});
+
+describe("rotuloDoItemFalado (NOD-352, revisão do #578)", () => {
+  it("terminal e computador têm rótulo fixo, nunca 'Usou uma ferramenta' nem o destino cru", () => {
+    expect(rotuloDoItemFalado("terminal")).toBe("Rodar um comando");
+    expect(rotuloDoItemFalado("computador")).toBe("Usar o computador");
+  });
+  it("a ligação monta o item de terminal/computador por ele, não por rotuloFerramenta (o destino é `bash`/`executar`)", () => {
+    const ligacoes = readFileSync(new URL("../../../src/use-cases/ligacoes.ts", import.meta.url), "utf8");
+    expect(ligacoes).toMatch(/rotuloFerramenta: rotuloDoItemFalado\(i\.destino\.conector\)/);
+    expect(ligacoes).not.toMatch(/rotuloFerramenta\(i\.destino/);
   });
 });

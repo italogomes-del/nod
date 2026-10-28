@@ -800,7 +800,7 @@ export function comporApp(o: OpcoesCompor): App {
     seguro: env.NOD_LOGIN === "google",
     agora: relogio,
     delta: (plano, texto) => publicarDoPlano(plano, "turno.delta", { texto }),
-    // NOD-348: `emUso` é o que a fala viva diz agora ("Usando Linear", "Abrindo frentes"); a web não lê o domínio (ADR-018).
+    // NOD-348/NOD-352: `emUso` é o que a fala viva diz agora (`rotuloAgora`: "Rodando um comando", "Abrindo frentes"); a web não lê o domínio (ADR-018).
     ferramenta: (plano, nome, id) => publicarDoPlano(plano, "turno.atividade", frameDaFerramenta(nome, id)),
     fimDaFerramenta: (plano, id, falhou) => publicarDoPlano(plano, "turno.acao_fim", { id, falhou }),
     tarefas: (plano, tarefas) => publicarDoPlano(plano, "turno.tarefas", { tarefas }),

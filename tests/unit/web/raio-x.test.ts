@@ -140,3 +140,21 @@ describe("NOD-312: o chip da sessão no Raio-X", () => {
     expect(nova).not.toContain("Aviso de recomeço");
   });
 });
+
+describe("NOD-352: o Raio-X mostra o id técnico e o nome amigável no title", () => {
+  it("com o mapa do servidor, o code ganha o title; sem ele (servidor antigo), fica só o id", () => {
+    const comNomes = renderRaioX({ ...CLARICE, nomesDasFerramentas: { Read: "Leu um arquivo", "mcp__nod__lembrar": "Anotou na memória" } }, "Clarice");
+    expect(comNomes).toContain('<code title="Leu um arquivo">Read</code>');
+    expect(comNomes).toContain('<code title="Anotou na memória">lembrar</code>');
+    const semNomes = renderRaioX(CLARICE, "Clarice");
+    expect(semNomes).toContain("<code>Read</code>");
+    expect(semNomes).not.toContain("<code title=");
+  });
+  it("o nome amigável é escapado e chave herdada do objeto não vira title", () => {
+    const r = { ...CLARICE, execucao: { ...CLARICE.execucao!, chamadas: [{ ...CLARICE.execucao!.chamadas[0]!, ferramentas: [{ nome: "constructor", resultadoChars: null, erro: false }, { nome: "Bash", resultadoChars: null, erro: false }] }] } };
+    const html = renderRaioX({ ...r, nomesDasFerramentas: { Bash: '"><script>' } }, "Clarice");
+    expect(html).toContain("<code>constructor</code>");
+    expect(html).not.toContain("<script>");
+    expect(html).toContain('<code title="&quot;&gt;&lt;script&gt;">Bash</code>');
+  });
+});
