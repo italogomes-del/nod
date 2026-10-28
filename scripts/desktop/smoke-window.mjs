@@ -21,8 +21,8 @@ async function janelaWeb() {
   try {
     await w.loadURL("data:text/html;charset=utf-8,<!doctype html><title>nod</title><body>web</body>");
     const estado = await w.webContents.executeJavaScript(`({ node: typeof require, processo: typeof process, nod: typeof window.nod, ponte: Object.keys(window.nodDesktop ?? {}).sort().join(","), ias: Object.keys(window.nodDesktop?.ias ?? {}).sort().join(","), midia: Object.keys(window.nodDesktop?.midia ?? {}).sort().join(","), ipc: typeof window.ipcRenderer })`);
-    const esperado = "aoAbrir,avisar,contador,contas,definirAvisos,definirSom,definirTema,emLigacao,iaEntrar,iaInstalar,iaTestar,ias,microfone,midia,preferencias";
-    const esperadoIas = "abrirLink,aoMudar,cancelar,colarCodigo,entrar,estados,instalar,verificar";
+    const esperado = "aoAbrir,aoBuscar,avisar,contador,contas,definirAvisos,definirSom,definirTema,desafioConta,emLigacao,iaEntrar,iaInstalar,iaTestar,ias,microfone,midia,preferencias,trocarConta,vmTentarAgora";
+    const esperadoIas = "abrirLink,aoMudar,atualizar,cancelar,colarCodigo,entrar,estados,instalar,verificar";
     if (estado.node !== "undefined" || estado.processo !== "undefined" || estado.nod !== "undefined" || estado.ipc !== "undefined" || estado.ponte !== esperado || estado.ias !== esperadoIas || estado.midia !== "existe,maquina,mostrarNoFinder") throw new Error(`Janela web expõe mais que nodDesktop: ${JSON.stringify(estado)}`);
     // O evento do processo principal chega à página pelo `aoMudar`, e o pedido de estados volta do processo principal.
     await w.webContents.executeJavaScript(`window.nodDesktop.ias.aoMudar((e) => { window.iaMudou = e; })`);
