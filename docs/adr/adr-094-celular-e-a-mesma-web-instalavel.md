@@ -112,3 +112,9 @@ Reverter se, em 14 dias de uso no celular, acontecer um destes:
     (`retomar`);
   - `tests/unit/http/estatico.test.ts`;
   - `tests/integration/sessao-google.test.ts` e `tests/concurrency/admissao-por-dominio.test.ts`.
+
+## Emenda de 2026-10-27: o ‹ da conversa (NOD-381)
+
+Na conversa o ☰ do cabeçalho vira o ‹ do protótipo nod-381, num círculo de vidro à esquerda da pílula flutuante. Até a
+tela inicial do celular (NOD-379) existir, ele abre a mesma gaveta de bots (mesmo `data-act`, mesmo rótulo "Bots e
+conversas"); quando ela existir, o ‹ passa a voltar para ela.

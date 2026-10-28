@@ -8,6 +8,10 @@
 /* Fora do celular o ☰ não existe e a faixa que só o teria também não. */
 .abrir-bots, .fundo-gaveta-bots { display: none; }
 .cabecalho.so-menu { display: none; }
+/* NOD-381: o que só o celular desenha (o + do campo, a presença dentro da pílula e o esqueleto do carregando) não existe no
+   computador; lá a pílula segue com o nome e o ponto, como antes. */
+.mais-campo, .pilula-presenca, .esqueleto-conversa { display: none; }
+.pilula-txt { display: contents; }
 
 @media (hover: none) and (pointer: coarse) and (max-width: 600px), (hover: none) and (pointer: coarse) and (max-height: 500px) {
   /* ADR-125 (NOD-349): a gaveta do bot com alvos de 44 px no toque. */
@@ -65,15 +69,39 @@
   .presenca { display: none; }
   .cab-acoes { flex: none; flex-wrap: nowrap; gap: 4px; margin-left: 0; }
   .cab-acoes .bt { min-width: 44px; min-height: 44px; padding: 8px 10px; }
-  /* Plano "tela limpa" (2026-10-16, T1): no celular a pílula do bot fica na faixa do ☰, sem flutuar nem esmaecer o chat;
-     a presença inteira continua no rótulo da pílula (o subtítulo some, como a presença já sumia aqui). */
-  .cabecalho.cabecalho-pilula { position: relative; flex-direction: row; align-items: center; justify-content: flex-start; gap: 8px; pointer-events: auto;
-    min-height: 56px; padding: calc(6px + env(safe-area-inset-top)) max(10px, env(safe-area-inset-right)) 6px max(10px, env(safe-area-inset-left));
-    border-bottom: 1px solid var(--line); background: var(--surface); }
+  /* NOD-381 (protótipo nod-381, aprovado em 2026-10-27): o topo da conversa flutua sobre o chat — o ‹ num círculo de vidro
+     à esquerda e a pílula do bot centrada (44 px, avatar 28, nome 15/600 e a presença em 12 px embaixo, sem ponto nem ›).
+     Embaixo deles o texto esmaece (--surface sólido até o meio dos botões → transparente em sa+76). Só os botões recebem
+     toque; a faixa deixa a conversa rolar por baixo. O Ligar segue na gaveta do bot (o protótipo o mostra só em ligação). */
+  .cabecalho.cabecalho-pilula { position: absolute; z-index: 4; top: 0; left: 0; right: 0; display: flex; flex-direction: row; align-items: flex-start;
+    justify-content: center; gap: 0; min-height: 0; height: calc(env(safe-area-inset-top) + 76px); box-sizing: border-box;
+    padding: calc(env(safe-area-inset-top) + 4px) 64px 0; border: 0; pointer-events: none;
+    background: linear-gradient(var(--surface) calc(env(safe-area-inset-top) + 36px), color-mix(in srgb, var(--surface) 0%, transparent)); }
+  .cabecalho.cabecalho-pilula > * { pointer-events: auto; }
   .cabecalho.cabecalho-pilula::before, .cabecalho.cabecalho-pilula .pilula-sub { display: none; }
-  .cabecalho.cabecalho-pilula ~ .timeline-wrap, .cabecalho.cabecalho-pilula + #erro:not(:empty) + .timeline-wrap { padding-top: 14px; }
-  .cabecalho.cabecalho-pilula + #erro:not(:empty) { margin-top: 0; }
-  .pilula-bot { min-height: 44px; height: 44px; box-shadow: none; }
+  .cabecalho.cabecalho-pilula .voltar-bots { position: absolute; left: max(12px, env(safe-area-inset-left)); top: calc(env(safe-area-inset-top) + 4px);
+    margin: 0; border: 1px solid var(--line); border-radius: 50%; color: var(--ink);
+    background: color-mix(in srgb, var(--surface) 82%, transparent); -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px); box-shadow: var(--shadow-pop); }
+  .cabecalho.cabecalho-pilula .pilula-bot { min-height: 44px; height: 44px; max-width: min(254px, 100%); gap: 8px; padding: 0 16px 0 8px; border-radius: 22px;
+    background: color-mix(in srgb, var(--surface) 82%, transparent); -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px); box-shadow: var(--shadow-pop); }
+  .cabecalho.cabecalho-pilula .pilula-bot:hover, .cabecalho.cabecalho-pilula .pilula-bot:focus-visible { padding-right: 16px; }
+  .cabecalho.cabecalho-pilula .pilula-bot .pilula-seta { display: none; }
+  .pilula-bot .icon.sm { width: 28px; height: 28px; min-width: 28px; }
+  .pilula-txt { display: flex; flex-direction: column; min-width: 0; text-align: left; }
+  .pilula-nome { font-size: 15px; font-weight: 600; line-height: 1.2; }
+  .pilula-presenca { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 400; line-height: 1.2; color: var(--ink-2); }
+  .pilula-presenca b { font-weight: 600; }
+  /* A linha do computador do bot fica na base da pílula (como no computador), não na base do véu sobre o chat. */
+  .cabecalho.cabecalho-pilula .pilula-bot:has(> .cb-fio) { position: relative; }
+  /* QA: o ponto de presença do computador (interface.css, mais específico) vazava para a pílula do celular; aqui a
+     presença é o texto de 12 px, só quando o bot não está disponível. */
+  .cabecalho.cabecalho-pilula .pilula-bot .presenca { display: none; }
+  .cabecalho.cabecalho-pilula .pilula-bot > .cb-fio { left: 19px; right: 19px; border-radius: 2px; }
+  /* A primeira mensagem começa abaixo da pílula (sa + 52 + 12), e a mensagem destacada também não para embaixo dela. */
+  .cabecalho.cabecalho-pilula ~ .timeline-wrap { padding-top: calc(env(safe-area-inset-top) + 64px); scroll-padding-top: calc(env(safe-area-inset-top) + 64px); }
+  .cabecalho.cabecalho-pilula + #erro:not(:empty) { position: relative; z-index: 5; margin-top: calc(env(safe-area-inset-top) + 56px); }
+  /* Revisão 2: entre o #erro e a lista há os avisos sr-only, então o irmão é `~`, não `+`; e a folga da rolagem segue. */
+  .cabecalho.cabecalho-pilula + #erro:not(:empty) ~ .timeline-wrap { padding-top: 12px; scroll-padding-top: 12px; }
 
   /* ---- A conversa ---- */
   .timeline-wrap { padding: 14px max(12px, env(safe-area-inset-right)) 16px max(12px, env(safe-area-inset-left)); overflow-x: hidden;
@@ -119,6 +147,45 @@
   /* 16 px nos campos: abaixo disso o Safari dá zoom sozinho ao focar (e a pinça continua livre). */
   .composer textarea, input:not([type="checkbox"]):not([type="radio"]), select, textarea { font-size: 16px; }
   .composer textarea { max-height: 30vh; }
+  /* NOD-381: o campo vira pílula de vidro de três peças, + | texto | mic, enviar ou parar (46 px, raio 23, 12 px das bordas
+     e 8 px acima da área segura). O texto é 16/22 e cresce até 6 linhas; depois rola dentro. Clipe, modo e IA moram na
+     folha do + (web/telas/folha-mais.ts). A caixa segue no fluxo (não flutua sobre o chat): o teclado já a empurra. */
+  .cabecalho-pilula ~ .composer-wrap, .composer-wrap { padding: 6px max(12px, env(safe-area-inset-right)) calc(env(safe-area-inset-bottom) + 8px) max(12px, env(safe-area-inset-left)); }
+  /* Com o teclado aberto, 8 px acima dele (a área segura de baixo continua valendo 34 no iOS e sobraria um vão). */
+  html.teclado-aberto .cabecalho-pilula ~ .composer-wrap, html.teclado-aberto .composer-wrap { padding-bottom: 8px; }
+  .composer .box { min-height: 46px; gap: 0; padding: 0 1px; border-radius: 23px; align-items: flex-end; border: 1px solid var(--line);
+    background: color-mix(in srgb, var(--surface) 86%, transparent); -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px); }
+  /* Revisão 4: a `.com-anexos` do computador centraliza (interface.css); no celular o + e a ponta ficam embaixo. */
+  .composer .box.com-anexos { padding-left: 1px; align-items: flex-end; }
+  .composer .box.com-anexos:has(.anexos-fila:not([hidden])) { border-radius: 22px; padding-top: 6px; }
+  .composer .box:not(.com-mais), .composer .box:has(> .mais-campo[hidden]) { padding-left: 14px; }
+  .composer textarea { min-height: 44px; max-height: calc(6 * 22px + 22px); padding: 11px 4px; line-height: 22px; overflow-y: auto; }
+  .composer .box.com-mais > .clipe, .composer .box.com-mais > .modo-chip, .composer .box.com-mais > .seletor-ia { display: none; }
+  .composer .mais-campo { display: grid; place-items: center; flex: none; width: 44px; height: 44px; padding: 0; border: 0; border-radius: 50%;
+    background: transparent; color: var(--ink-2); cursor: pointer; }
+  .composer .mais-campo[aria-expanded="true"], .composer .mais-campo:active { color: var(--ink); background: var(--surface-raised); }
+  /* Revisão 2 (ADR-059, riscos aceitos): com "Ignorar todas as aprovações" o aviso âmbar continua à vista no campo — o +
+     fica em --warning com um ponto, já que o chip do modo saiu daqui. */
+  .composer .mais-campo[data-atencao] { position: relative; color: var(--warning); }
+  /* Sem o + (bot de colega sem anexo), o chip do modo total volta ao campo, só leitura: o aviso nunca some. */
+  .composer .box.com-mais:has(> .mais-campo[hidden]) > .modo-chip[data-modo="total"] { display: inline-grid; width: 44px; height: 44px; }
+  /* Revisão 5: as regras do computador para .com-modo (0,3,0) venciam o padding do celular. */
+  .composer .box.com-mais { padding-left: 1px; }
+  .composer .box.com-mais textarea { padding-left: 4px; }
+  .composer .mais-campo[data-atencao]::after { content: ""; position: absolute; top: 9px; right: 9px; width: 7px; height: 7px; border-radius: 50%; background: var(--warning); }
+  /* A ponta: um botão por vez. Campo vazio com o ditado disponível = mic; com texto ou anexo = enviar; o bot trabalhando
+     = parar (com texto, parar e enviar: o Parar nunca some enquanto ele trabalha, revisão do PR 1). */
+  .composer .box:not(.gravando):has(.mic:not([hidden])):has(textarea:placeholder-shown):not(:has(.anexos-fila:not([hidden]))) .send { display: none; }
+  /* Revisão 1 do PR 545: com o bot trabalhando e o campo vazio o mic continua (+ | campo | mic | parar, três controles):
+     ditar enquanto ele trabalha já existia. */
+  .composer .box:has(textarea:not(:placeholder-shown)) .mic, .composer .box:has(.anexos-fila:not([hidden])) .mic { display: none; }
+  /* Com anexo a fila vai para a primeira linha e o + fica na linha do texto (a fila tem flex-basis 100%). */
+  .composer .box .anexos-fila { order: -1; }
+  /* Revisão 3: o resumo ("1 de 5 · 2,3 MB") sobe junto, numa linha só dele logo abaixo das miniaturas; na linha do texto ele
+     tirava ~80 px do campo (abaixo dos 60%). */
+  .composer .box.com-mais .anexos-resumo { order: -1; flex-basis: 100%; padding: 4px 6px 0; }
+  .composer .box:not(.gravando) .send, .composer .box:not(.gravando) .parar-envio { position: relative; width: 32px; min-width: 32px; height: 32px; min-height: 32px; margin: 6px; border-radius: 50%; font-size: 15px; }
+  .composer .box:not(.gravando) .send::after, .composer .box:not(.gravando) .parar-envio::after { content: ""; position: absolute; inset: -6px; }
   .composer .send, .composer .clipe, .composer .parar-envio { min-width: 44px; min-height: 44px; }
   /* Revisão do PR 1 (2026-10-16): o seletor de IA também é alvo de toque (44 px). */
   .composer .seletor-ia { min-height: 44px; margin-bottom: 0; }
@@ -135,7 +202,7 @@
   /* ADR-095 (as fotos do Grok no iPhone, docs/referencias/ditado-grok/): gravando, a linha do campo vira três pílulas —
      ■ (para e põe no campo) | tempo e nível | enviar largo (para e envia direto). O resto do campo some até acabar. */
   .composer .mic { width: 44px; height: 44px; background: transparent; }
-  .composer .box.gravando { border: 0; background: transparent; box-shadow: none; padding: 0; gap: 10px; min-height: 52px; align-items: stretch; }
+  .composer .box.gravando { border-radius: 0; -webkit-backdrop-filter: none; backdrop-filter: none; border: 0; background: transparent; box-shadow: none; padding: 0; gap: 10px; min-height: 52px; align-items: stretch; }
   .composer .box.gravando > :not(.ditado):not(.send) { display: none; }
   .composer .box.gravando .ditado { display: contents; }
   .composer .box.gravando .ditado-parar, .composer .box.gravando .ditado-ouvindo { height: 52px; border-radius: 26px; border: 1px solid var(--line); background: var(--surface); }
@@ -249,10 +316,13 @@
     transform: translateY(100%); transition: transform .3s cubic-bezier(.4, 0, .2, 1); }
   .pilula-frentes[data-estado="aberta"] .pf-painel { clip-path: none; transform: none; transition: transform .34s cubic-bezier(.2, .8, .2, 1); }
   .pilula-frentes[data-estado="aberta"] .pf-fundo { display: block; position: fixed; inset: 0; z-index: 40; width: 100%; height: 100%; padding: 0; border: 0; background: var(--backdrop); }
-  .pf-cab { min-height: 36px; }
-  .pf-fechar { min-height: 36px; padding: 0 14px; }
-  .pf-lista .progresso-item, .pf-item { min-height: 40px; }
-  .pf-ver, .pf-parar { min-height: 40px; }
+  .pf-cab { min-height: 44px; }
+  .pf-fechar { min-height: 44px; padding: 0 14px; }
+  /* NOD-381: as linhas e os botões do painel de frentes com alvo de 44 px (eram 40). */
+  .pf-lista .progresso-item, .pf-item { min-height: 44px; }
+  .pf-ver, .pf-parar { min-height: 44px; min-width: 44px; }
+  /* QA: o chip fechado tinha 42 px de altura dentro da moldura de 44. */
+  .pf-botao { min-height: 44px; }
   .stage.com-pilula-frentes > .timeline-wrap { padding-bottom: 78px; }
   .stage.com-pilula-frentes .pilula-novas { bottom: 66px; }
   /* A Atividade no celular (a gaveta já é folha por cima da conversa): alvos de toque de 44 px. */
@@ -319,3 +389,48 @@
   .luz-mini { width: 44px; height: 44px; }
   .luz.cem .luz-fig { padding: 60px 0 16px; }
 }
+
+/* NOD-381 (protótipo nod-381): a folha do +, os alvos de 44 px que faltavam no chat e os estados (carregando e não enviada). */
+@media (hover: none) and (pointer: coarse) and (max-width: 600px), (hover: none) and (pointer: coarse) and (max-height: 500px) {
+  /* A folha do + sobe da base, na largura da tela, com linhas de 60 px: título, o valor de hoje em 13 px e o ›. */
+  dialog.bot-menu.folha-mais { inset: auto 0 0 0; width: 100%; max-width: 100%; margin: 0; box-sizing: border-box;
+    padding: 6px 8px calc(10px + env(safe-area-inset-bottom)); border: 0; border-radius: 18px 18px 0 0; }
+  .folha-mais .fm-alca { display: block; width: 36px; height: 5px; margin: 2px auto 8px; border-radius: 3px; background: var(--line-strong); }
+  .bot-menu.folha-mais .fm-linha { display: flex; align-items: center; gap: 14px; width: 100%; min-height: 60px; padding: 8px 12px; border: 0; border-radius: 12px;
+    background: none; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+  .bot-menu.folha-mais .fm-linha:active, .bot-menu.folha-mais .fm-linha:focus-visible { background: var(--surface-raised); }
+  .folha-mais .fm-ic { flex: none; color: var(--ink-2); }
+  .folha-mais .fm-txt { display: flex; flex: 1; flex-direction: column; min-width: 0; }
+  .folha-mais .fm-txt b { font-size: 16px; font-weight: 600; }
+  .folha-mais .fm-txt small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; color: var(--ink-3); }
+  .folha-mais .fm-txt small.fm-atencao { color: var(--warning); }
+  .bot-menu.folha-mais .fm-ic { width: 20px; height: 20px; }
+  .bot-menu.folha-mais .fm-chev { width: 16px; height: 16px; }
+  .folha-mais .fm-chev { flex: none; color: var(--ink-3); }
+
+  /* O ✕ do anexo continua com 20/22 px de desenho, com alvo de 44 px. */
+  .anexo-x { position: relative; }
+  .anexo-thumb .anexo-x { position: absolute; }
+  .anexo-x::after { content: ""; position: absolute; inset: -11px; }
+  /* O ✕ da miniatura tem 20 px: 20 + 2 × 12 = 44. */
+  .anexo-thumb .anexo-x::after { inset: -12px; }
+  /* A miniatura cortava o alvo (overflow: hidden): o corte fica só na foto, e o ✕ alcança 44 px. */
+  .anexo-thumb { overflow: visible; }
+  .anexo-thumb img { border-radius: 11px; }
+  /* Os botões do cartão de artefato (nova aba, Tela cheia, Baixar) e o ✕ da tela cheia: alvo de 44 px. */
+  .artefato-acoes .bt.link { min-height: 44px; padding: 0 4px; }
+  .artefato-acoes .bt.link, .artefato-dialogo .artefato-acoes .bt.sm { min-width: 44px; min-height: 44px; }
+
+  /* Carregando: três balões cinza no lugar do texto (o texto fica para o leitor de tela). */
+  .carregando-conversa { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .esqueleto-conversa { display: flex; flex-direction: column; gap: 14px; padding: 8px 4px; }
+  .esqueleto-conversa i { display: block; height: 44px; width: 70%; border-radius: 18px; background: var(--surface-raised); animation: esqueleto-pulsa 1.4s ease-in-out infinite; }
+  .esqueleto-conversa .eq-voce { align-self: flex-end; width: 52%; }
+  .esqueleto-conversa .curto { width: 40%; }
+  /* Não enviada: o balão a 60% e a linha "Não foi enviada · Tentar de novo" em 13 px, sem o vermelho (o erro é da rede,
+     não da pessoa). */
+  .fala-pendente[data-envio="falhou"] .message.you .bubble { opacity: .6; border: 0; background: var(--action); color: var(--on-action); }
+  .fala-pendente .envio-erro { font-size: 13px; color: var(--ink-2); }
+  .fala-pendente .envio-erro .bt.envio-bt { min-height: 44px; font-size: 13px; border: 0; background: none; color: var(--ink); text-decoration: underline; }
+}
+@keyframes esqueleto-pulsa { 50% { opacity: .55; } }

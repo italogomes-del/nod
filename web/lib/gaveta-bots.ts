@@ -51,7 +51,11 @@ export function criarCelular(): Celular {
     if (area) {
       raiz.setProperty("--altura-visivel", `${area.altura}px`);
       raiz.setProperty("--topo-visivel", `${area.topo}px`);
+      // NOD-381: com o teclado aberto a caixa fica 8 px acima dele (o iOS mantém a área segura de baixo, 34 px).
+      // Revisão 4: compara com o clientHeight (a viewport de layout, que o teclado não encolhe) e só com um campo em foco.
+      document.documentElement.classList.toggle("teclado-aberto", tecladoAberto(area.altura, document.documentElement.clientHeight, document.activeElement));
     } else {
+      document.documentElement.classList.remove("teclado-aberto");
       raiz.removeProperty("--altura-visivel");
       raiz.removeProperty("--topo-visivel");
     }
@@ -89,4 +93,10 @@ export function criarCelular(): Celular {
     fecharBots: () => mudar(false),
     alternarBots: () => { if (consulta.matches) mudar(!abertos); },
   };
+}
+
+/** NOD-381: o teclado está aberto quando a área visível ficou 100 px menor que a de layout e há um campo de texto em foco. */
+export function tecladoAberto(alturaVisivel: number, alturaDoLayout: number, foco: { tagName?: string; isContentEditable?: boolean } | null): boolean {
+  const editavel = !!foco && (foco.tagName === "TEXTAREA" || foco.tagName === "INPUT" || foco.isContentEditable === true);
+  return editavel && alturaVisivel < alturaDoLayout - 100;
 }

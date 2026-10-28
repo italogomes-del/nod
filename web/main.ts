@@ -41,9 +41,10 @@ import { alternarAudio, alternarGif, instalarMidiaDom, irNoAudio, mostrarNoFinde
 import { baixaveis } from "./lib/midia.ts";
 import { botDaFala, citacaoDaFala, htmlMenuDaFala, htmlSeletorDeReacao, linhaDeEmojis, reacoesDaFala, textoAbrirTask, textoParaLembrar } from "./telas/acoes-da-fala.ts";
 import { renderChipModo } from "./telas/aprovacoes.ts";
+import { controleDaFolha, linhasDoBot, linhasVisiveis, renderFolhaMais, rotuloDoMais, travarToqueDuploEm, type EscolhaDaFolhaMais, type LinhasDaFolhaMais } from "./telas/folha-mais.ts";
 import { abrirMenuModo } from "./lib/menu-modo.ts";
 import { abrirMenuIa } from "./lib/menu-ia.ts";
-import { dadosDoSeletor, mioloDoSeletor, pedidoDoSeletor, renderMenuIa } from "./telas/seletor-ia.ts";
+import { dadosDoSeletor, mioloDoSeletor, pedidoDoSeletor, renderMenuIa, rotuloDoSeletor } from "./telas/seletor-ia.ts";
 import type { FormaAgente, CorAgente } from "../src/contracts/agente.ts";
 import type { AmbienteBancoDto, ModoSessaoDto } from "../src/contracts/api.ts";
 import type { PedidoInteligencia } from "../src/contracts/inteligencia.ts";
@@ -1289,8 +1290,16 @@ function renderSidebar(estado: Estado): string {
 const MENU = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>';
 
 /** O ☰ que abre a gaveta de bots no celular (ADR-094). No computador o CSS o esconde. */
-function botaoAbrirBots(): string {
-  return `<button type="button" class="abrir-bots" data-act="abrir-bots" aria-label="Bots e conversas" aria-controls="sidebar" aria-expanded="${celular.botsAbertos()}">${MENU}</button>`;
+const VOLTAR = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 5-7 7 7 7"/></svg>';
+
+/**
+ * NOD-381 (definido em 2026-10-27): na conversa o ☰ vira o ‹ do protótipo, um círculo de vidro à esquerda da pílula. Até a
+ * tela inicial do celular (NOD-379) existir, o ‹ abre a mesma gaveta de bots que o ☰ abria. No computador nenhum dos dois
+ * aparece (`.abrir-bots` é escondido fora do celular, web/mobile.css).
+ */
+function botaoAbrirBots(naConversa = false): string {
+  const [classe, rotulo, icone] = naConversa ? ["abrir-bots voltar-bots", "Bots e conversas", VOLTAR] : ["abrir-bots", "Bots e conversas", MENU];
+  return `<button type="button" class="${classe}" data-act="abrir-bots" aria-label="${rotulo}" aria-controls="sidebar" aria-expanded="${celular.botsAbertos()}">${icone}</button>`;
 }
 
 /**
@@ -1377,7 +1386,7 @@ function renderPrincipal(): void {
   definirTelaDoBot(donoDaTela ? api : null, donoDaTela && t.tipo === "conversa" ? t.agenteId : null);
   // ADR-094: um cabeçalho só. No celular o ☰ da gaveta de bots entra no próprio cabeçalho da tela; tela sem cabeçalho
   // ganha uma faixa só com ele (`so-menu`, que no computador não aparece).
-  regiao("cabecalho", botaoAbrirBots() + cabecalho);
+  regiao("cabecalho", botaoAbrirBots(t.tipo === "conversa") + cabecalho);
   document.getElementById("cabecalho")?.classList.toggle("so-menu", cabecalho === "");
   document.getElementById("cabecalho")?.classList.toggle("cabecalho-task", t.tipo === "trabalho");
   // Plano "tela limpa" (2026-10-16, T1): na conversa própria o cabeçalho é a pílula flutuante sobre o chat.
@@ -1407,6 +1416,7 @@ function renderPrincipal(): void {
     ditado.descartar();
     // Revisão do PR 1 (2026-10-16): o menu do seletor de IA é do bot do campo que sai; um clique nele nunca grava noutro.
     fecharMenuIa();
+    fecharFolhaMais();
     const saindo = document.getElementById("composer-texto") as HTMLTextAreaElement | null;
     if (composerDe && saindo) rascunhos.guardar(composerDe, saindo.value);
     composerDe = composer?.chave ?? null;
@@ -1624,6 +1634,7 @@ function atualizarComposer(): void {
   if (nota && nota.textContent !== a.nota) nota.textContent = a.nota;
   atualizarModoNoComposer();
   atualizarSeletorIa();
+  atualizarMais();
   atualizarParar();
 }
 
@@ -1739,6 +1750,81 @@ function atualizarModoNoComposer(): void {
     chip.setAttribute("aria-label", r.titulo);
     chip.setAttribute("aria-disabled", String(!dona));
   }
+}
+
+/** A folha do + aberta (NOD-381): uma por vez, do campo da conversa da tela. */
+let folhaMais: HTMLDialogElement | null = null;
+
+function fecharFolhaMais(): void {
+  if (folhaMais?.open) folhaMais.close();
+  folhaMais = null;
+}
+
+/** O que a folha do + mostra para o bot da tela (`linhasDoBot`). */
+function linhasDaFolhaMais(): LinhasDaFolhaMais {
+  const t = estado.tela;
+  const bot = t.tipo === "conversa" ? botGerido(t.agenteId) : undefined;
+  const d = t.tipo === "conversa" ? dadosDoSeletor(estado, t.agenteId) : null;
+  return linhasDoBot({
+    temArquivo: document.getElementById("composer-arquivos") !== null,
+    dona: !!bot && bot.ownerId === estado.sessao?.pessoaId,
+    modo: bot?.modoAprovacao,
+    ia: d?.dona ? rotuloDoSeletor(d) : null,
+  });
+}
+
+/** O menu que a folha acabou de abrir (o último <dialog> aberto) engole o 2º toque de um toque duplo. */
+function travarToqueDuplo(): void {
+  const abertos = document.querySelectorAll<HTMLDialogElement>("dialog[open]");
+  const d = abertos[abertos.length - 1];
+  if (d) travarToqueDuploEm(d);
+}
+
+/** O + só aparece quando a folha teria o que mostrar (bot de outra pessoa sem anexo, frota ainda chegando: escondido). */
+function atualizarMais(): void {
+  const mais = document.querySelector<HTMLButtonElement>("#composer .mais-campo");
+  if (!mais) return;
+  const l = linhasDaFolhaMais();
+  const vazio = linhasVisiveis(l).length === 0;
+  if (mais.hidden !== vazio) mais.hidden = vazio;
+  // Revisão 2: o aviso do modo total continua no campo (ADR-059) e o rótulo diz o que a folha tem. Revisão 5: o aviso
+  // vale para quem conversa com o bot, dona ou colega (o colega é quem manda o texto que o faz agir sozinho).
+  const t = estado.tela;
+  const atencao = t.tipo === "conversa" && botGerido(t.agenteId)?.modoAprovacao === "total";
+  if (mais.hasAttribute("data-atencao") !== atencao) mais.toggleAttribute("data-atencao", atencao);
+  const rotulo = rotuloDoMais(l, atencao);
+  if (mais.getAttribute("aria-label") !== rotulo) mais.setAttribute("aria-label", rotulo);
+}
+
+/**
+ * NOD-381: o + do campo no celular abre a folha de baixo com Anexar, Modo de aprovação e IA. Cada linha fecha a folha e
+ * faz o que o botão antigo fazia, com o + como âncora (o menu de modo e o de IA abrem acima do campo, como antes).
+ * O diálogo de `dialogo` para o clique (stopPropagation), então as linhas têm o próprio ouvinte.
+ */
+function abrirFolhaMais(el: HTMLElement): void {
+  const l = linhasDaFolhaMais();
+  if (linhasVisiveis(l).length === 0) return;
+  fecharMenuIa();
+  const chave = composerDe;
+  const d = dialogo(renderFolhaMais(l), true);
+  d.classList.add("folha-mais");
+  folhaMais = d;
+  const controle = controleDaFolha(el, {
+    valido: () => composerDe === chave && el.isConnected,
+    anexar: () => document.getElementById("composer-arquivos")?.click(),
+    modo: () => { abrirModoAprovacao(el); travarToqueDuplo(); },
+    ia: () => { abrirSeletorIa(el); travarToqueDuplo(); },
+  });
+  d.addEventListener("close", () => { if (folhaMais === d) folhaMais = null; controle.fechou(); });
+  d.addEventListener("click", (e) => {
+    const linha = (e.target as HTMLElement).closest<HTMLElement>("[data-mais]");
+    if (!linha) return;
+    // Revisão 2: Anexar fecha antes de agir — com o modal aberto o input de arquivo fica inerte. Modo e IA marcam o
+    // pendente antes do close (revisão 4: vale também num motor que dispare o `close` na hora), e ele roda no `close`.
+    const escolha = linha.dataset.mais as EscolhaDaFolhaMais;
+    if (escolha === "anexar") { d.close(); controle.escolher(escolha); } else { controle.escolher(escolha); d.close(); }
+  });
+  d.querySelector<HTMLElement>("[data-mais]")?.focus();
 }
 
 function abrirModoAprovacao(el: HTMLElement): void {
@@ -3958,6 +4044,7 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   "modo-aprovacao": (el) => abrirModoAprovacao(el),
   // Plano "tela limpa" (2026-10-16, T6): o seletor de IA do campo.
   "seletor-ia": (el) => abrirSeletorIa(el),
+  "abrir-mais": (el) => abrirFolhaMais(el),
   // Prévia da voz do bot (Editar perfil): toca a amostra do provedor das ligações.
   "ouvir-voz": (el) => {
     const tenant = estado.sessao?.tenantId;

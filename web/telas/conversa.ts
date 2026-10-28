@@ -1217,7 +1217,9 @@ function recolherAvisos(linhas: readonly LinhaDaConversa[]): BlocoDaTimeline[] {
 }
 
 export function renderTimeline(c: ConversaEstado | null, estado: Estado): string {
-  if (!c) return `<div class="mudo">carregando conversa…</div>`;
+  // NOD-381 (definido em 2026-10-27): no celular o "carregando" é o esqueleto de três balões do protótipo; o texto segue
+  // para o leitor de tela e é o que o computador mostra (web/mobile.css troca um pelo outro).
+  if (!c) return `<div class="mudo carregando-conversa">carregando conversa…</div><div class="esqueleto-conversa" aria-hidden="true"><i class="eq-bot"></i><i class="eq-voce"></i><i class="eq-bot curto"></i></div>`;
   return `<div class="timeline">${renderHistoricoDaTimeline(c, estado)}${renderAoVivoDaTimeline(c, estado)}</div>`;
 }
 
@@ -1465,7 +1467,10 @@ export function renderCabecalhoConversa(estado: Estado, agenteId: string): strin
   const disponivel = texto === "Disponível";
   const rotulo = `${nome} · ${texto}`;
   const sub = disponivel ? "" : `<span class="pilula-sub" aria-hidden="true">${html}</span>`;
-  return `<button type="button" class="pilula-bot" data-act="alternar-detalhes" aria-controls="detalhes" aria-label="${esc(`Painel de ${rotulo}`)}" title="${esc(rotulo)}">${a ? iconeAgente(a, "sm", estadoMascoteNaConversa(estado, a.conversaId)) : ""}<span class="pilula-nome">${esc(nome)}</span><span class="presenca${ativa ? " ativa" : ""}" aria-hidden="true"></span><span class="pilula-seta" aria-hidden="true">›</span>${a?.ownerId === estado.sessao?.pessoaId ? htmlFio(estado.computadorPessoa) : ""}</button>${sub}`;
+  // NOD-381 (definido em 2026-10-27): no celular a presença vai dentro da pílula, em 12px abaixo do nome; o computador
+  // continua com o ponto e a linha de baixo (`.pilula-txt` é `display: contents` e `.pilula-presenca` fica escondida).
+  const presencaNaPilula = disponivel ? "" : `<span class="pilula-presenca" aria-hidden="true">${html}</span>`;
+  return `<button type="button" class="pilula-bot" data-act="alternar-detalhes" aria-controls="detalhes" aria-label="${esc(`Painel de ${rotulo}`)}" title="${esc(rotulo)}">${a ? iconeAgente(a, "sm", estadoMascoteNaConversa(estado, a.conversaId)) : ""}<span class="pilula-txt"><span class="pilula-nome">${esc(nome)}</span>${presencaNaPilula}</span><span class="presenca${ativa ? " ativa" : ""}" aria-hidden="true"></span><span class="pilula-seta" aria-hidden="true">›</span>${a?.ownerId === estado.sessao?.pessoaId ? htmlFio(estado.computadorPessoa) : ""}</button>${sub}`;
 }
 
 /**
@@ -1529,6 +1534,8 @@ export const rotuloDoParar = (nome: string | undefined): string => (nome ? `Para
 
 const QUADRADO = '<svg width="13" height="13" viewBox="0 0 14 14" aria-hidden="true"><rect x="1.5" y="1.5" width="11" height="11" rx="2.5" fill="currentColor"/></svg>';
 
+const MAIS = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>';
+
 const CLIPE = '<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5 12.6 19.9a5.5 5.5 0 0 1-7.8-7.8l8.5-8.5a3.7 3.7 0 0 1 5.2 5.2l-8.5 8.5a1.8 1.8 0 0 1-2.6-2.6l7.8-7.8"/></svg>';
 
 /**
@@ -1564,6 +1571,9 @@ export function htmlComposer(placeholder: string, sugestoes: readonly string[] =
   const chip = opcoes.aprovacao ? HTML_CHIP_MODO : "";
   const seletor = opcoes.aprovacao ? HTML_SELETOR_IA : "";
   const parar = opcoes.aprovacao ? `<button type="button" class="parar-envio" data-act="parar-conversa" aria-label="${esc(rotuloDoParar(opcoes.bot))}" title="Parar o que está rodando nesta conversa" hidden>${QUADRADO}</button>` : "";
-  return `<div class="composer"><div class="composer-pergunta" id="composer-pergunta"></div>${barra}<div class="box${aceita ? " com-anexos" : ""}${chip ? " com-modo" : ""}">${lista}${anexar}${chip}<textarea id="composer-texto" rows="1" placeholder="${esc(placeholder)}" data-sugestoes="${esc(JSON.stringify(sugestoes))}"></textarea>${resumo}${seletor}${htmlPilulaDitado()}${htmlBotaoDitado()}${parar}<button class="send" data-act="enviar" aria-label="Enviar">➤</button></div>
+  // NOD-381 (definido em 2026-10-27): no celular o clipe, o modo e a IA saem de dentro do campo e moram na folha do +
+  // (web/telas/folha-mais.ts); o + só nasce quando há o que abrir e o computador nunca o vê (web/mobile.css).
+  const mais = aceita || opcoes.aprovacao ? `<button type="button" class="mais-campo" data-act="abrir-mais" aria-label="Anexar, modo e IA" aria-haspopup="menu" aria-expanded="false">${MAIS}</button>` : "";
+  return `<div class="composer"><div class="composer-pergunta" id="composer-pergunta"></div>${barra}<div class="box${aceita ? " com-anexos" : ""}${chip ? " com-modo" : ""}${mais ? " com-mais" : ""}">${lista}${mais}${anexar}${chip}<textarea id="composer-texto" rows="1" placeholder="${esc(placeholder)}" data-sugestoes="${esc(JSON.stringify(sugestoes))}"></textarea>${resumo}${seletor}${htmlPilulaDitado()}${htmlBotaoDitado()}${parar}<button class="send" data-act="enviar" aria-label="Enviar">➤</button></div>
   <p class="nota" id="composer-nota" data-padrao=""></p></div>`;
 }

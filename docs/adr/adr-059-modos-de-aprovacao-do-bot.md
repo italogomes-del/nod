@@ -299,3 +299,14 @@ dele, o da ADR-115: uma credencial lida no total e mandada para fora sem a pesso
 **Riscos aceitos.** Um texto de fora pode levar o bot no total a usar uma credencial — o pedido do Marlon, com a
 confirmação no menu, a pílula âmbar, a linha na fala e a Atividade. Até o app do Mac atualizar, o hook antigo ainda nega
 o arquivo de credencial (o comando já roda, porque quem decide o comando é o servidor).
+
+## Emenda de 2026-10-27: no celular o modo mora na folha do + (NOD-381)
+
+No celular o botão do modo sai de dentro do campo e vira a linha "Modo de aprovação" da folha do + (web/telas/folha-mais.ts),
+com o modo atual embaixo ("Ignorar todas as aprovações" em `--warning`) e o mesmo menu de hoje. Revê o item 6 só no
+celular: o colega não tem a linha (a folha de um bot de outra pessoa só tem Anexar, critério de design da NOD-381) e vê o
+modo na gaveta do bot (Ambiente, "Aprovações · …"), como já via. No computador nada muda.
+
+O aviso âmbar que os riscos aceitos contam continua no campo, para a dona e para o colega: com o modo total, o + fica em
+`--warning` com um ponto e o nome dele diz o modo; quando não há + (bot de colega sem anexo), o chip do total volta ao
+campo, só leitura.

@@ -7,6 +7,6 @@
     "moduleResolution": "NodeNext"
   },
   "include": ["src/**/*.ts", "tests/**/*.ts", "scripts/**/*.ts"],
-  "//": "os testes da tela cheia e do confirmar da NOD-370 importam código de DOM: quem o checa é o tsconfig.web.json",
-  "exclude": ["tests/unit/web/tela-cheia.test.ts", "tests/unit/web/nod370-confirmar.test.ts", "tests/unit/web/ordem-arrastavel.test.ts"]
+  "//": "os testes da tela cheia, do confirmar da NOD-370 e do chat no celular (NOD-381) importam código de DOM: quem o checa é o tsconfig.web.json",
+  "exclude": ["tests/unit/web/tela-cheia.test.ts", "tests/unit/web/nod370-confirmar.test.ts", "tests/unit/web/ordem-arrastavel.test.ts", "tests/unit/web/chat-celular.test.ts"]
 }

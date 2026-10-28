@@ -173,7 +173,9 @@ export function criarRolagem(caixa: HTMLElement, lugarDaPilula: HTMLElement, sua
       for (let d = linha.closest<HTMLDetailsElement>("details:not([open])"); d; d = linha.closest<HTMLDetailsElement>("details:not([open])")) d.open = true;
       estado = { ...estado, colada: false };
       linhaVista = linha.dataset.novas ?? "";
-      const alvo = caixa.scrollTop + linha.getBoundingClientRect().top - caixa.getBoundingClientRect().top - 12;
+      // NOD-381: no celular o topo flutua sobre o chat e a caixa diz quanto ele cobre (scroll-padding-top); a nova
+      // nunca para embaixo dele. Sem a medida (computador), a folga de sempre.
+      const alvo = caixa.scrollTop + linha.getBoundingClientRect().top - caixa.getBoundingClientRect().top - folgaDoTopo(caixa);
       caixa.scrollTo({ top: Math.max(0, alvo), behavior: suave() ? "smooth" : "auto" });
       atualizarPilula();
     },
@@ -184,4 +186,10 @@ export function criarRolagem(caixa: HTMLElement, lugarDaPilula: HTMLElement, sua
       medirProgresso();
     },
   };
+}
+
+/** A folga acima da linha de novas: o scroll-padding-top da caixa (o topo flutuante do celular, NOD-381) ou 12 px. */
+export function folgaDoTopo(caixa: Element): number {
+  const lido = typeof getComputedStyle === "function" ? Number.parseFloat(getComputedStyle(caixa).scrollPaddingTop) : Number.NaN;
+  return Number.isFinite(lido) && lido > 12 ? lido : 12;
 }
