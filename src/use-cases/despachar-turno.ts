@@ -60,6 +60,8 @@ export type EntradaDespacharTurno = {
   fundoSemPrazo?: boolean;
   /** ADR-092: a máquina da ponte com o servidor no Mac (modo local) — só pega o turno que tem ela como alvo. */
   soComoAlvo?: boolean;
+  /** ADR-130: a máquina drenando para se atualizar (ADR-100) — só pega o que a pessoa espera agora. */
+  soDaPessoa?: boolean;
   /**
    * 0068 (emenda da ADR-036): as IAs da pessoa no limite da assinatura agora. Um turno do Automático não vai para uma
    * máquina que só tem IA no limite enquanto outra máquina viva da pessoa tiver uma fora dele (iasParaOAutomatico).
@@ -123,7 +125,7 @@ export const despacharTurno: CasoDeUso<EntradaDespacharTurno, SaidaDespacharTurn
     ? [...new Set([...input.harnessesProntos, ...Object.entries(input.harnessesDaPessoa).filter(([, i]) => i?.estado === "pronto" || (i?.estado === "ausente" && (i.causa === "sonda_lenta" || i.causa === "atualizando"))).map(([id]) => id)])]
     : undefined;
   const { harnessesAuto, cota, declinio } = portaoDoDespacho(input);
-  const turno = await deps.repos.turnos.reivindicar({ machineId: input.machineId, agora, harnessesProntos: input.harnessesProntos, ...(harnessesAuto ? { harnessesAuto } : {}), harnessesProntosPessoa: prontosPessoa, aceitaLigacao: input.aceitaLigacao, segurarFundo: input.segurarFundo, segurarNovo: input.segurarNovo, fundoSemPrazo: input.fundoSemPrazo, espacarFundo: input.espacarFundo, ...(input.soComoAlvo ? { soComoAlvo: true } : {}), ...(cota ? { cota } : {}), ...(declinio ? { declinio } : {}) });
+  const turno = await deps.repos.turnos.reivindicar({ machineId: input.machineId, agora, harnessesProntos: input.harnessesProntos, ...(harnessesAuto ? { harnessesAuto } : {}), harnessesProntosPessoa: prontosPessoa, aceitaLigacao: input.aceitaLigacao, segurarFundo: input.segurarFundo, segurarNovo: input.segurarNovo, fundoSemPrazo: input.fundoSemPrazo, espacarFundo: input.espacarFundo, ...(input.soComoAlvo ? { soComoAlvo: true } : {}), ...(input.soDaPessoa ? { soDaPessoa: true } : {}), ...(cota ? { cota } : {}), ...(declinio ? { declinio } : {}) });
   if (!turno) return { data: { plano: null, turno: null, motivo: "fila_vazia" } };
   // NOD-268: o alarme do reenvio em laço (só log; o freio é o teto de reenvios). Revisão do PR #319: a falha da consulta
   // não derruba o despacho de um turno já reivindicado.

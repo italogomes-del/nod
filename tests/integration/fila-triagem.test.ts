@@ -235,8 +235,12 @@ describeIntegracao("fila do dono: a triagem na entrada (ADR-099, I7 revista)", (
       expect(await fila()).toMatchObject({ kind: "handoff", tarefaId: triagem, fila: { motivo: null } });
       await trx`update turnos set prazo_em = now() - interval '1 minute', criado_em = now() - interval '2 hours' where id = ${triagem}`;
       expect(await fila()).toMatchObject({ fila: { motivo: "condicao_da_maquina" } });
-      const outro = await m.turnoDe(m.dev);
-      await trx`update turnos set estado = 'despachando', lease_ate = now() + interval '1 minute' where id = ${outro.id}`;
+      // ADR-130: a fala da pessoa com o Dev rodando não segura a triagem (faixas diferentes da conversa); uma rotina, sim.
+      const daPessoa = await m.turnoDe(m.dev);
+      await trx`update turnos set estado = 'despachando', lease_ate = now() + interval '1 minute' where id = ${daPessoa.id}`;
+      expect(await fila()).toMatchObject({ fila: { motivo: "condicao_da_maquina" } });
+      const rotina = await m.turnoDe(m.dev, { origem: "rotina" });
+      await trx`update turnos set estado = 'despachando', lease_ate = now() + interval '1 minute' where id = ${rotina.id}`;
       expect(await fila()).toMatchObject({ fila: { motivo: "faixa_ocupada" } });
       // Sem turno pendente na cadeia, o card não fala mais de fila.
       await trx`update turnos set estado = 'interrompido', motivo_interrupcao = 'parado_pela_pessoa' where id = ${triagem}`;

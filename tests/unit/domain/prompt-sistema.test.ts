@@ -353,3 +353,23 @@ describe("NOD-155: o prompt em parte estável e parte volátil (cache por prefix
     expect(montarPromptSistema({ ...base, ...turnoA, modo: "delegacao" })).not.toContain("__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__");
   });
 });
+
+describe("ADR-130: o turno da pessoa vê o que o bot faz nos bastidores", () => {
+  const base = { agente, memorias: [], ferramentas: [], nativas: [], pastaDoBot: "Vera", pessoaNome: "Marlon", modo: "conversa" as const };
+
+  it("a rotina e o pedido de colega em andamento entram numa linha da parte volátil, com o aviso de não refazer", () => {
+    const longa = `Puxar as issues priorizadas do Linear e distribuir entre Eng 1 e Revisor ${"x".repeat(100)}`;
+    const p = partesDoPromptSistema({ ...base, bastidores: [{ tipo: "rotina", nome: longa, minutos: 12 }, { tipo: "colega", nome: "Leonardo", minutos: 0 }, { tipo: "colega", nome: null, minutos: 3 }] });
+    const linha = p.volatil.find((l) => l.startsWith("Agora, nos bastidores desta conversa"));
+    expect(linha).toContain('a rotina "Puxar as issues priorizadas do Linear');
+    expect(linha).toContain("…\" (há 12 min)");
+    expect(linha).toContain("o pedido de Leonardo (agora há pouco)");
+    expect(linha).toContain("o pedido de um colega (há 3 min)");
+    expect(linha).toContain("Não refaça esse trabalho aqui");
+    expect(p.estavel.join("\n")).not.toContain("nos bastidores desta conversa");
+  });
+
+  it("sem nada nos bastidores, o prompt não muda", () => {
+    expect(montarPromptSistema({ ...base, bastidores: [] })).toBe(montarPromptSistema(base));
+  });
+});

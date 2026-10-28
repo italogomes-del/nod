@@ -28,7 +28,7 @@ import type { FormaTrabalho } from "../contracts/frente.ts";
 import { manualDoNod } from "./manual-do-nod.ts";
 import { ehNod } from "./nod.ts";
 import { FERRAMENTA_RESPONDER_PEDIDO, temPedidosNoTurno, type PedidoPendenteNoPrompt } from "./pedidos-pendentes.ts";
-import { partesDoPromptSistema, trechoComClone, trechoDoClone, type EntradaPromptSistema, type RotinaNoPrompt, type TrabalhoNoPrompt } from "./prompt-sistema.ts";
+import { partesDoPromptSistema, trechoComClone, trechoDoClone, type BastidorNoPrompt, type EntradaPromptSistema, type RotinaNoPrompt, type TrabalhoNoPrompt } from "./prompt-sistema.ts";
 import { FERRAMENTAS_COMPUTADOR } from "../contracts/ferramentas-computador.ts";
 import { FERRAMENTA_ANEXAR_MIDIA, FERRAMENTA_LER_MAIS } from "../contracts/ferramentas-proxy.ts";
 import type { ComputadorFora } from "./prompt-sistema.ts";
@@ -235,6 +235,8 @@ export type EntradaPlano = {
   trabalho?: { titulo: string; origem: OrigemTrabalho; trabalhoMaeId: string | null; forma?: FormaTrabalho; repo?: string | null } | null;
   /** ADR-083: as tasks abertas do bot, para a seção "Trabalhos em andamento" da conversa coordenadora. */
   trabalhosAbertos?: readonly TrabalhoNoPrompt[];
+  /** ADR-130: o que o bot faz agora nos bastidores desta conversa; só chega ao prompt no turno da conversa. */
+  bastidores?: readonly BastidorNoPrompt[];
   /** ADR-082: NOD_GERIR_BOTS=0 tira as ferramentas do Nod do catálogo (o interruptor de rollback sem reverter o PR). */
   semFerramentasDoNod?: boolean;
   /** ADR-104 (revisão do PR #309): NOD_CRIAR_BOTS=0 tira criar_bots do catálogo dos bots comuns, o mesmo interruptor. */
@@ -327,7 +329,7 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
   // NOD-323 (ADR-126): quem tem pasta e terminal gera arquivos; `anexar_midia` os mostra no chat (atendida pelo proxy).
   // A sala fica fora nesta PR (a fala da sala vai por postarNaSala, que não prende a mídia).
   if (pasta && modo !== "sala" && entrada.semAnexarMidia !== true) ferramentas = [...ferramentas, FERRAMENTA_ANEXAR_MIDIA];
-  const prompt = promptEmPartes({ agente: entrada.agente, memorias: entrada.memorias, ferramentas, nativas, pastaDoBot: pasta, pessoaNome: entrada.pessoaNome, modo, colegas: entrada.colegas, contextoConversa: entrada.contextoConversa, conectores: entrada.conectores, rotinas: entrada.rotinasDoAgente, computadorFora: temComputador ? entrada.computadorFora ?? null : null, delegacao: modo === "delegacao" ? entrada.delegacao ?? null : null, profundidade: entrada.profundidade, semTerminal: motivoSemTerminal({ modo, confianca: entrada.confianca, terminal: entrada.terminal === true }), harness: entrada.harness ?? null, trabalho: entrada.trabalho ?? null, trabalhosAbertos: podeAbrirTask(entrada.trabalho ?? null) ? entrada.trabalhosAbertos ?? [] : [], ...(comPedidos ? { pedidosPendentes: entrada.pedidosPendentes } : {}), ...(ehNod(entrada.agente) ? { manualDoNod: manualDoNod(entrada.revisor === true) } : {}), ...(entrada.maquina ? { maquina: entrada.maquina } : {}), ...(entrada.calibracao ? { calibracao: true } : {}), ...(entrada.whatsapp ? { whatsapp: true } : {}), ...(entrada.revisor ? { revisor: true } : {}), ...(entrada.sobreMim ? { sobreMim: entrada.sobreMim } : {}) });
+  const prompt = promptEmPartes({ agente: entrada.agente, memorias: entrada.memorias, ferramentas, nativas, pastaDoBot: pasta, pessoaNome: entrada.pessoaNome, modo, colegas: entrada.colegas, contextoConversa: entrada.contextoConversa, conectores: entrada.conectores, rotinas: entrada.rotinasDoAgente, computadorFora: temComputador ? entrada.computadorFora ?? null : null, delegacao: modo === "delegacao" ? entrada.delegacao ?? null : null, profundidade: entrada.profundidade, semTerminal: motivoSemTerminal({ modo, confianca: entrada.confianca, terminal: entrada.terminal === true }), harness: entrada.harness ?? null, trabalho: entrada.trabalho ?? null, trabalhosAbertos: podeAbrirTask(entrada.trabalho ?? null) ? entrada.trabalhosAbertos ?? [] : [], ...(comPedidos ? { pedidosPendentes: entrada.pedidosPendentes } : {}), ...(modo === "conversa" && entrada.bastidores?.length ? { bastidores: entrada.bastidores } : {}), ...(ehNod(entrada.agente) ? { manualDoNod: manualDoNod(entrada.revisor === true) } : {}), ...(entrada.maquina ? { maquina: entrada.maquina } : {}), ...(entrada.calibracao ? { calibracao: true } : {}), ...(entrada.whatsapp ? { whatsapp: true } : {}), ...(entrada.revisor ? { revisor: true } : {}), ...(entrada.sobreMim ? { sobreMim: entrada.sobreMim } : {}) });
   const clone = cloneDaMaquina(entrada, pasta, ferramentas, prompt.promptSistema);
   return {
     tenantId: entrada.turno.tenantId,

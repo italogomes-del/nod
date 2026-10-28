@@ -33,7 +33,7 @@ import { montarPlano, REGRA_MONTAGEM, saidaDoCloneDaMaquina } from "../domain/pl
 import { anexosAnteriores, cortarFalas } from "../domain/historico-do-plano.ts";
 import { textoParaOBot } from "../domain/citacao.ts";
 import { composicaoDoPlano } from "../domain/raio-x.ts";
-import type { ComputadorFora } from "../domain/prompt-sistema.ts";
+import type { BastidorNoPrompt, ComputadorFora } from "../domain/prompt-sistema.ts";
 import { resumoCron } from "../domain/rotina-texto.ts";
 import type { TokenTurno } from "../services/token-turno.ts";
 import type { Services } from "./tipos.ts";
@@ -340,6 +340,19 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   // também — é olhando o que está em andamento que o dono decide começar, juntar ou esperar.
   const trabalhosAbertos = podeAbrirTask(trabalho) && (trabalho ? modo === "rotina" : modo === "conversa" || modo === "criacao" || modo === "rotina" || modo === "delegacao") ? (await trabalhosParaDto(deps, await deps.repos.trabalhos.abertosDoAgente(agente.id))).map((t) => ({ id: t.id, titulo: t.titulo, estado: esperaDoTrabalho(t) ? "esperando" : t.estado, ultimoPasso: t.ultimoPasso, ...(t.deFora ? { cuidado: true } : {}) })) : [];
 
+  // ADR-130: no turno da pessoa, o que o próprio bot faz agora nos bastidores desta conversa (rodam em paralelo desde a
+  // 0121): a rotina pela instrução que a pessoa confirmou, o pedido de colega pelo nome de quem pediu.
+  const bastidores: BastidorNoPrompt[] = modo === "conversa" && !trabalho
+    ? await Promise.all((await deps.repos.turnos.bastidoresVivos(turno.conversaId)).filter((b) => b.id !== turno.id).map(async (b): Promise<BastidorNoPrompt> => {
+      const minutos = Math.max(0, Math.floor((agora - (b.despachadoEm ?? b.criadoEm)) / 60_000));
+      const daRotina = await rotinaDoTurno(deps.repos, b.id);
+      if (daRotina) return { tipo: "rotina", nome: daRotina.rotina.instrucao, minutos };
+      const raiz = await delegacaoDoTurno(deps.repos, b);
+      const pedido = await deps.repos.mensagens.pedidoDaTarefa((raiz ?? b).id);
+      return { tipo: "colega", nome: visiveis.find((a) => a.id === pedido?.autoria.autor_id)?.nome ?? null, minutos };
+    }))
+    : [];
+
   // NOD-262: na conversa e na sala, os pedidos de colegas ainda na fila do bot — com eles o bot fecha com responder_pedido
   // o que a pessoa já resolveu ali. A pergunta é a tarefa do peer_pedido (o texto do remetente), cortada no domínio.
   const pedidosPendentes = modo === "conversa" || modo === "sala"
@@ -438,6 +451,7 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
     trabalho: dadosDoTrabalho,
     trabalhosAbertos,
     pedidosPendentes,
+    ...(bastidores.length ? { bastidores } : {}),
     harness: escolha?.harness ?? null,
     // NOD-323 (revisão 3 do #507): a máquina que anunciou capacidades sem `anexarMidia` é o app anterior — o proxy dele
     // trataria a ferramenta como ler_mais. "Não sei" (undefined: modo local ou máquina ainda reconectando) segue com ela.

@@ -13,6 +13,7 @@ import { ESPERA_MAXIMA_FUNDO_MS } from "../domain/memoria-mac.ts";
 import { porChegada } from "../domain/ordem-das-falas.ts";
 import { MOTIVOS_DE_QUEDA, MOTIVOS_FALHA_SEM_QUEDA } from "../domain/pedido-parado.ts";
 import { paraProfundidade } from "../domain/profundidade.ts";
+import { nasceNosBastidores } from "../domain/triagem.ts";
 import { ABERTURA_DA_ESPERA_DO_SERVIDOR } from "../domain/redacao.ts";
 import { PRAZO_PRESO_SEM_CONTATO_MS, type FatosFundoPreso, type FatosTurnoOrfao, type FundoPreso } from "../domain/turno-orfao.ts";
 import type { VoltaDaCadeia } from "../domain/voltas-sem-novidade.ts";
@@ -235,6 +236,18 @@ function seguradoPelaCotaSql(c: Conn, cota: PortaoDaCota) {
                   and ${naCota(cota.limite, cota.autoLimite)})))`;
 }
 
+/**
+ * A faixa do turno `t` está ocupada (definido em 2026-10-07, ADR-083 §3; revisto em 2026-10-26, ADR-130): sem trabalho, por
+ * outro turno da MESMA conversa, sem trabalho, despachando e da MESMA faixa — a da pessoa ou a dos bastidores
+ * (`turnos.bastidores`, 0121); com trabalho, por outro turno do mesmo trabalho. A ligação não ocupa nem espera faixa. Uma
+ * regra só para o `reivindicar` (que pula), o varredor de órfãos, o fundo preso e o "na fila" da conversa.
+ */
+function faixaOcupadaSql(c: Conn) {
+  return c`(case when t.trabalho_id is null
+    then exists (select 1 from turnos d where d.tenant_id = t.tenant_id and d.conversa_id = t.conversa_id and d.trabalho_id is null and d.estado = 'despachando' and d.origem <> 'ligacao' and d.bastidores = t.bastidores)
+    else exists (select 1 from turnos d where d.tenant_id = t.tenant_id and d.trabalho_id = t.trabalho_id and d.estado = 'despachando') end)`;
+}
+
 /** ADR-108: o turno da task está na IA `ia` — fixado nela, ou no Automático com a sessão da task nela. null = qualquer. */
 function daIa(conn: Conn, ia: IdHarness | null) {
   if (ia === null) return conn`true`;
@@ -273,7 +286,7 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
       const estado: EstadoTurno = t.interrompidoCom ? "interrompido" : "pendente";
       const [l] = await conn<Linha[]>`
         insert into turnos (tenant_id, id, owner_id, conversa_id, agente_id, origem, estado, motivo_interrupcao, prazo_em, profundidade,
-          entrada_texto, entrada_anexos, entrada_confianca, modelo, harness, retoma_turno_id, reenvios, executor, locality_reason, decidido_por, mensagem_origem_id, sob_procuracao_de, ligacao_id, trabalho_id, acordar_em, maquina_desta_vez, pessoa_esperando, contaminado_em, tentativas_transitorias)
+          entrada_texto, entrada_anexos, entrada_confianca, modelo, harness, retoma_turno_id, reenvios, executor, locality_reason, decidido_por, mensagem_origem_id, sob_procuracao_de, ligacao_id, trabalho_id, acordar_em, maquina_desta_vez, pessoa_esperando, contaminado_em, tentativas_transitorias, bastidores)
         values (${escopo.tenantId}, ${t.id ?? conn`gen_random_uuid()`}, ${escopo.pessoaId}, ${t.conversaId}, ${t.agenteId}, ${t.origem}, ${estado},
           ${t.interrompidoCom ?? null}, ${data(t.prazoEm)}, ${t.profundidade}, ${t.entradaTexto}, ${(t.entradaAnexos ?? []) as string[]}::uuid[], ${t.entradaConfianca}, ${t.modelo}, ${t.harness ?? "auto"},
           ${t.retomaTurnoId ?? null}, ${t.reenvios ?? 0}, ${t.executor}, ${t.localityReason ?? "tudo_local_nesta_rodada"},
@@ -281,7 +294,10 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
           ${t.trabalhoId !== undefined ? t.trabalhoId : t.retomaTurnoId ? conn`(select r.trabalho_id from turnos r where r.tenant_id = ${escopo.tenantId} and r.id = ${t.retomaTurnoId})` : null},
           ${dataOuNull(t.acordarEm)}, ${t.maquinaDestaVez ?? null}, ${t.pessoaEsperando === true},
           ${t.contaminadoDe ? conn`(select o.contaminado_em from turnos o where o.tenant_id = ${escopo.tenantId} and o.id = ${t.contaminadoDe})` : null},
-          ${t.tentativasTransitorias ?? 0})
+          ${t.tentativasTransitorias ?? 0},
+          -- ADR-130: a faixa da conversa. A retomada e a repetição herdam a do turno que continuam (nunca saem dos bastidores).
+          ${nasceNosBastidores(t)}::boolean or exists (select 1 from turnos b where b.tenant_id = ${escopo.tenantId}
+            and b.id = any(${[t.retomaTurnoId, t.contaminadoDe].filter((x): x is string => !!x)}::uuid[]) and b.bastidores))
         returning ${conn.unsafe(COLUNAS)}`;
       return l ? paraTurno(l) : null;
     },
@@ -331,7 +347,7 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
      * 0068: `harnessesAuto` (ausente = os prontos) são as IAs desta máquina que valem para o turno do Automático — sem a
      * que está no limite enquanto a pessoa tiver outra fora dele (iasParaOAutomatico).
      */
-    async reivindicar(p: { machineId: string; agora: number; harnessesProntos?: readonly string[]; harnessesAuto?: readonly string[]; harnessesProntosPessoa?: readonly string[]; aceitaLigacao?: boolean; segurarFundo?: boolean; espacarFundo?: boolean; segurarNovo?: boolean; fundoSemPrazo?: boolean; soComoAlvo?: boolean; cota?: PortaoDaCota | null; declinio?: { ias: readonly string[]; auto: boolean } | null }): Promise<Turno | null> {
+    async reivindicar(p: { machineId: string; agora: number; harnessesProntos?: readonly string[]; harnessesAuto?: readonly string[]; harnessesProntosPessoa?: readonly string[]; aceitaLigacao?: boolean; segurarFundo?: boolean; espacarFundo?: boolean; segurarNovo?: boolean; fundoSemPrazo?: boolean; soComoAlvo?: boolean; soDaPessoa?: boolean; cota?: PortaoDaCota | null; declinio?: { ias: readonly string[]; auto: boolean } | null }): Promise<Turno | null> {
       const dentro = async (trx: Conn): Promise<Turno | null> => {
         await trx`select pg_advisory_xact_lock(hashtext(${`${escopo.tenantId}:${escopo.pessoaId}`}))`;
         // NOD-94 (emenda 11 da ADR-090): a máquina só-computador nunca pega turno, venha o puxar de onde vier (o papel é o
@@ -373,6 +389,9 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
               -- ADR-092: com o servidor no Mac (modo local), a máquina conectada pela ponte só pega o turno que tem ELA como alvo
               -- (o bot escolhido para ela, ou o padrão da pessoa): sem alvo, o turno é do Mac, onde estão os arquivos dos bots.
               ${p.soComoAlvo === true ? trx`and ${alvo} = ${p.machineId}` : trx``}
+              -- definido em 2026-10-26 (ADR-130): a máquina drenando para se atualizar (ADR-100) só pega o que a pessoa espera
+              -- agora: a faixa dela na conversa (fora de trabalho e fora dos bastidores), a ligação e o turno que ela olha.
+              ${p.soDaPessoa === true ? trx`and (t.origem = 'ligacao' or t.pessoa_esperando or (t.trabalho_id is null and not t.bastidores))` : trx``}
               -- definido em 2026-10-04 (ADR-072): o turno da ligação não serializa com o trabalho do bot, nos dois
               -- sentidos — a conversa por voz segue enquanto o bot trabalha, e o trabalho segue durante a ligação. Só
               -- vai para a máquina que anunciou o laço de voz, e passa na frente da fila (a pessoa está esperando).
@@ -381,7 +400,9 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
                   -- revisto em 2026-10-07 (ADR-083 §3): a faixa é coalesce(trabalho_id, conversa_id). O turno da conversa
                   -- espera só outro turno da MESMA conversa sem trabalho. De propósito: o mesmo bot responde ao mesmo
                   -- tempo na conversa direta e numa sala (conversas diferentes), e o trabalho dele não segura a conversa.
-                  and not exists (select 1 from turnos d where d.tenant_id = t.tenant_id and d.conversa_id = t.conversa_id and d.trabalho_id is null and d.estado = 'despachando' and d.origem <> 'ligacao'))
+                  -- revisto em 2026-10-26 (ADR-130): e da MESMA faixa (turnos.bastidores). A fala da pessoa não espera a triagem de uma
+                  -- rotina ou de um colega, que não a ouve no meio; a triagem não espera a pessoa. Cada faixa segue serial.
+                  and not ${faixaOcupadaSql(trx)})
                 or (t.origem <> 'ligacao' and t.trabalho_id is not null
                   -- O turno de um trabalho espera só outro turno do MESMO trabalho e o trabalho de que ele depende
                   -- ("Fazer depois da …"), até ele terminar, parar ou falhar.
@@ -1270,9 +1291,7 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
             (a.excluido_em is null and a.geracao_execucao is distinct from t.geracao_execucao) as geracao_antiga,
             (t.trabalho_id is not null and exists (select 1 from trabalhos w join trabalhos dep on dep.tenant_id = w.tenant_id and dep.id = w.depois_de_trabalho_id
               where w.tenant_id = t.tenant_id and w.id = t.trabalho_id and dep.estado not in ('terminado', 'parado', 'falhou'))) as depois_de_aberto,
-            (case when t.trabalho_id is null
-              then exists (select 1 from turnos d where d.tenant_id = t.tenant_id and d.conversa_id = t.conversa_id and d.trabalho_id is null and d.estado = 'despachando' and d.origem <> 'ligacao')
-              else exists (select 1 from turnos d where d.tenant_id = t.tenant_id and d.trabalho_id = t.trabalho_id and d.estado = 'despachando') end) as faixa_ocupada,
+            ${faixaOcupadaSql(conn)} as faixa_ocupada,
             ${alvoDoTurno(conn, agora)} as alvo_id
           from turnos t
           left join agentes a on a.tenant_id = t.tenant_id and a.id = t.agente_id
@@ -1325,9 +1344,7 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
               and m.turno_id in (select c.id from turnos c where c.tenant_id = t.tenant_id and (c.id = r.id or c.retoma_turno_id = r.id))) as avisado,
             (t.trabalho_id is not null and exists (select 1 from trabalhos dep where dep.tenant_id = w.tenant_id and dep.id = w.depois_de_trabalho_id
               and dep.estado not in ('terminado', 'parado', 'falhou'))) as depois_de_aberto,
-            (case when t.trabalho_id is null
-              then exists (select 1 from turnos d where d.tenant_id = t.tenant_id and d.conversa_id = t.conversa_id and d.trabalho_id is null and d.estado = 'despachando' and d.origem <> 'ligacao')
-              else exists (select 1 from turnos d where d.tenant_id = t.tenant_id and d.trabalho_id = t.trabalho_id and d.estado = 'despachando') end) as faixa_ocupada
+            ${faixaOcupadaSql(conn)} as faixa_ocupada
           from turnos t
           join agentes a on a.tenant_id = t.tenant_id and a.id = t.agente_id and a.excluido_em is null and a.geracao_execucao = t.geracao_execucao
           join turnos r on r.tenant_id = t.tenant_id and r.id = coalesce(t.retoma_turno_id, t.id)
@@ -1440,6 +1457,19 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
       return linhas.map(paraTurno);
     },
 
+    /**
+     * ADR-130: os turnos que rodam agora nos bastidores da conversa (a triagem de rotina e de colega, fora de trabalho). O
+     * turno da pessoa os vê no prompt, para não refazer o trabalho em paralelo.
+     */
+    async bastidoresVivos(conversaId: string): Promise<Turno[]> {
+      const linhas = await conn<Linha[]>`
+        select ${conn.unsafe(COLUNAS)} from turnos
+        where tenant_id = ${escopo.tenantId} and conversa_id = ${conversaId} and estado = 'despachando' and trabalho_id is null and bastidores
+          and origem <> 'ligacao'
+        order by coalesce(despachado_em, criado_em)`;
+      return linhas.map(paraTurno);
+    },
+
     async vivosDaConversa(conversaId: string): Promise<Turno[]> {
       const linhas = await conn<Linha[]>`
         select ${conn.unsafe(COLUNAS)} from turnos
@@ -1462,8 +1492,8 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
      */
     async pendentesRenderizaveis(conversaId: string): Promise<TurnoPendenteDto[]> {
       // ADR-083: turno de trabalho não é "agente ocupado" de ninguém, nem espera por isso: tem faixa própria.
-      const pendentes = await conn<{ id: string; agente_id: string }[]>`
-        select id, agente_id from turnos
+      const pendentes = await conn<{ id: string; agente_id: string; bastidores: boolean }[]>`
+        select id, agente_id, bastidores from turnos
         where tenant_id = ${escopo.tenantId} and conversa_id = ${conversaId} and estado = 'pendente' and origem <> 'ligacao' and trabalho_id is null
           -- ADR-086: a retomada marcada para mais tarde não está "na fila" — ela nem pode sair ainda.
           and (acordar_em is null or acordar_em <= now())
@@ -1471,12 +1501,14 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
       if (pendentes.length === 0) return [];
       // revisto em 2026-10-07 (ADR-083): só a faixa da conversa segura um turno dela — o despachando sem trabalho NESTA
       // conversa (o do mesmo agente primeiro). O bot ocupado em outra conversa ou num trabalho não segura mais.
-      const ocupados = await conn<{ agente_id: string; conversa_id: string }[]>`
-        select agente_id, conversa_id from turnos
+      // revisto em 2026-10-26 (ADR-130): e só o da MESMA faixa (a da pessoa ou a dos bastidores), como no `reivindicar`.
+      const ocupados = await conn<{ agente_id: string; conversa_id: string; bastidores: boolean }[]>`
+        select agente_id, conversa_id, bastidores from turnos
         where tenant_id = ${escopo.tenantId} and estado = 'despachando' and origem <> 'ligacao' and trabalho_id is null and conversa_id = ${conversaId}
         order by criado_em`;
       return pendentes.flatMap((p): TurnoPendenteDto[] => {
-        const ocupado = ocupados.find((d) => d.agente_id === p.agente_id) ?? ocupados[0];
+        const daFaixa = ocupados.filter((d) => d.bastidores === p.bastidores);
+        const ocupado = daFaixa.find((d) => d.agente_id === p.agente_id) ?? daFaixa[0];
         return ocupado ? [{ id: p.id, motivo: "agente_ocupado_em", conversaId: ocupado.conversa_id }] : [];
       });
     },

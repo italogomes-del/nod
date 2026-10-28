@@ -386,7 +386,8 @@ export function criarPonteHttpServidor(d: {
             reservando++;
             // Revisão do #209: a leitura entra uma vez por pedido. Repetida a cada 250 ms durante a espera de até 20 s,
             // ela passava por cima da mais nova que a renovação trouxe e o nível ia e voltava na tela.
-            try { plano = await c.ponte.puxar(ctx.escopo.pessoaId, mem); } finally { reservando--; mem = undefined; }
+            // ADR-130: a máquina drenando (ADR-100) só aceita o que a pessoa espera agora; servidor antigo ignora o campo.
+            try { plano = await (b.soDaPessoa === true ? c.ponte.puxar(ctx.escopo.pessoaId, mem, { soDaPessoa: true }) : c.ponte.puxar(ctx.escopo.pessoaId, mem)); } finally { reservando--; mem = undefined; }
           }
           if (plano) { c.planos.set(plano.turnoId, plano); break; }
           if (drenando) break;

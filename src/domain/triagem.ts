@@ -23,6 +23,23 @@ export function ehTriagemDeColega(t: TurnoDaFaixa): boolean {
 }
 
 /**
+ * As origens que nascem nos bastidores da conversa (definido em 2026-10-26, ADR-130): a triagem de rotina e de colega e o
+ * pedido de colega de antes. A lista é a mesma do backfill da 0121.
+ */
+export const ORIGENS_DOS_BASTIDORES: readonly OrigemTurno[] = ["rotina", "delegacao", "peer"];
+
+/**
+ * O turno nasce nos bastidores da conversa do bot (definido em 2026-10-26, ADR-130)? A conversa tem duas faixas: a da
+ * pessoa e a dos bastidores. Um turno da conversa (sem trabalho) só espera outro da MESMA faixa: a fala da pessoa nunca
+ * espera a triagem de uma rotina ou de um colega, que não a ouve no meio (aceitaMensagemNaSessao), não usa a sessão do CLI
+ * da conversa e não é promovida pela rede de 2 min. Sob procuração também é bastidor: a resposta vai a outra pessoa. A
+ * retomada e a repetição herdam a faixa do turno que continuam (no INSERT, turnos.repo.ts `enfileirar`), não daqui.
+ */
+export function nasceNosBastidores(t: { origem: OrigemTurno; sobProcuracaoDe?: string | null }): boolean {
+  return ORIGENS_DOS_BASTIDORES.includes(t.origem) || (t.sobProcuracaoDe ?? null) !== null;
+}
+
+/**
  * O turno está na triagem (o prompt ganha as linhas dela): pedido de colega ou de rotina, fora de trabalho, com
  * `abrir_frentes` no catálogo. A retomada de um deles conta igual (ela continua o mesmo pedido, no mesmo modo).
  */

@@ -238,6 +238,14 @@ frentes que devolvem o resultado ao dono. A pessoa fala com o bot, não com as f
   por bot e o aviso de ritmo fora do normal não aparecem mais na tela. Gatilho para rever: gasto fora do ritmo que a
   pessoa só descobre na fatura.
 
+## Emenda (2026-10-26, ADR-130) — item 1
+
+- **A triagem da rotina e do colega roda nos bastidores da conversa do dono**, em paralelo à fala da pessoa. A conversa
+  tem duas faixas (`turnos.bastidores`, 0121): a da pessoa e a dos bastidores (rotina, delegação, peer, sob procuração e
+  as retomadas deles); cada uma é serial e uma não espera a outra. "A pessoa passa na frente" passa a valer também para o
+  que já roda: a fala dela não espera mais uma rotina ou um pedido de colega em andamento. O turno da pessoa vê no prompt
+  o que roda nos bastidores. A drenagem do motor (ADR-100) continua entregando a fala da pessoa.
+
 ## Alternativas rejeitadas
 
 - **Manter tasks como pares e coordenar por fora** (esperas como objeto, registro de efeitos, painel do orquestrador): é

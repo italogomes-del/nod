@@ -149,6 +149,9 @@ export type VigiaVivo = { mudoMs: number; aberta?: string; emFundo: number; repe
 
 export type { MotivoPuladaLimpeza, PastaParaLimpar, RelatoLimpeza } from "./limpeza.ts";
 
+/** ADR-130: o que a máquina aceita neste puxar. Ausente = tudo, como antes. */
+export type OpcoesDoPuxar = { soDaPessoa?: boolean };
+
 /**
  * Os cinco verbos da ponte (ADR-021), faladas in-process nesta rodada. A ponte HTTP entra depois
  * sem trocar o driver. {ativo:false} em renovar manda o executor abortar.
@@ -160,8 +163,9 @@ export interface PonteInterna {
    * só o cliente HTTP do app tem; a ponte interna do servidor não precisa (o `conectar` dela já é idempotente).
    */
   anunciarInventario?(m: AnuncioMaquina): Promise<void>;
-  /** ADR-085 (2026-10-08): `maquina` é a leitura do Mac que pede (memória e processador); ausente = app antigo ou sem leitura. */
-  puxar(pessoaId: string, maquina?: LeituraMemoria): Promise<PlanoTurno | null>;
+  /** ADR-085: `maquina` é a leitura do Mac que pede (ausente = app antigo ou sem leitura). ADR-130: `soDaPessoa` = drenando
+   * para se atualizar (ADR-100), só aceita o que a pessoa espera agora (conversa, ligação, `pessoa_esperando`). */
+  puxar(pessoaId: string, maquina?: LeituraMemoria, opcoes?: OpcoesDoPuxar): Promise<PlanoTurno | null>;
   renovar(p: PedidoRenovar): Promise<RespostaRenovar>;
   entregar(e: Entrega): Promise<void>;
   desconectar(machineId: string): Promise<void>;

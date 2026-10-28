@@ -8,15 +8,19 @@ const esperarAte = async (cond: () => boolean) => {
   expect(cond()).toBe(true);
 };
 
-/** Ponte com fila controlada pelo teste e um laço mínimo (puxa → roda até liberar → puxa de novo). */
+/**
+ * Ponte com fila controlada pelo teste e um laço mínimo (puxa → roda até liberar → puxa de novo). `daPessoa` é o que a
+ * pessoa espera agora (ADR-130): sai primeiro, e é a única que sai quando o puxar pede `soDaPessoa`.
+ */
 function cenario() {
   const fila: string[] = [];
+  const daPessoa: string[] = [];
   const liberar = new Map<string, () => void>();
   const rodando = new Set<string>();
   const ponte = {
     conectar: async () => {},
-    puxar: async () => {
-      const id = fila.shift();
+    puxar: async (_pessoa: string, _maquina?: unknown, opcoes?: { soDaPessoa?: boolean }) => {
+      const id = daPessoa.shift() ?? (opcoes?.soDaPessoa ? undefined : fila.shift());
       return id ? ({ turnoId: id } as PlanoTurno) : null;
     },
     renovar: async () => ({ ativo: true, versaoMinimaApp: "0" }),
@@ -40,7 +44,7 @@ function cenario() {
     })();
     return { parar: async () => { parado = true; await corrida; }, turnoAtual: () => atual };
   };
-  return { fila, liberar, rodando, pool: iniciarPoolDeLacos(criar, ponte) };
+  return { fila, daPessoa, liberar, rodando, pool: iniciarPoolDeLacos(criar, ponte) };
 }
 
 describe("pool elástico de laços: um ocioso sempre, um a mais por turno rodando", () => {
@@ -71,6 +75,21 @@ describe("pool elástico de laços: um ocioso sempre, um a mais por turno rodand
     pool.drenar(false);
     await esperarAte(() => rodando.has("taga"));
     liberar.get("taga")?.();
+    await pool.parar();
+  });
+
+  it("ADR-130: drenando, a fala da pessoa ainda sai; o fundo espera a atualização", async () => {
+    const { fila, daPessoa, liberar, rodando, pool } = cenario();
+    pool.drenar(true);
+    fila.push("rotina-da-ada");
+    daPessoa.push("fala-do-marlon");
+    await esperarAte(() => rodando.has("fala-do-marlon"));
+    await new Promise((r) => setTimeout(r, 30));
+    expect(fila).toEqual(["rotina-da-ada"]);
+    liberar.get("fala-do-marlon")?.();
+    pool.drenar(false);
+    await esperarAte(() => rodando.has("rotina-da-ada"));
+    liberar.get("rotina-da-ada")?.();
     await pool.parar();
   });
 

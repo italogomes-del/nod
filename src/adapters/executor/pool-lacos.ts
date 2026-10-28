@@ -11,8 +11,9 @@ export type PoolDeLacos = {
   /** Turnos rodando agora, um por laço ocupado. */
   turnosAtuais(): string[];
   /**
-   * ADR-100: com `true`, o laço ocioso para de puxar trabalho novo (o puxar volta vazio); os turnos que rodam terminam e
-   * entregam como sempre. É o que o motor faz para se atualizar sem interromper ninguém. `false` volta a puxar.
+   * ADR-100: com `true`, o laço ocioso para de puxar trabalho novo de fundo; os turnos que rodam terminam e entregam como
+   * sempre. É o que o motor faz para se atualizar sem interromper ninguém. `false` volta a puxar tudo. ADR-130: o que a
+   * pessoa espera agora continua saindo (`soDaPessoa` no puxar).
    */
   drenar(sim: boolean): void;
 };
@@ -51,8 +52,9 @@ export function iniciarPoolDeLacos(criar: (ponte: PonteInterna) => LacoDoPool, p
           void vaga.laco?.parar();
           return null;
         }
-        if (drenando) return null;
-        const plano = await ponte.puxar(pessoaId, maquina);
+        // revisto em 2026-10-26 (ADR-130): drenando, o laço ainda pega o que a pessoa espera agora (a fala dela, a ligação):
+        // a drenagem durava até 10 min por hora e a mensagem dela ficava "na fila" sem motivo visível. O fundo espera.
+        const plano = drenando ? await ponte.puxar(pessoaId, maquina, { soDaPessoa: true }) : await ponte.puxar(pessoaId, maquina);
         if (plano) {
           vaga.ocupado = true;
           if (!parando && ociosos() === 0) subir();

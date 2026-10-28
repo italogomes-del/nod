@@ -166,9 +166,9 @@ export function criarPonteHttp(o: { url: string; chave: string; versao: string; 
         throw e;
       }
     },
-    async puxar(_pessoaId, maquina) {
+    async puxar(_pessoaId, maquina, opcoes) {
       try {
-        const plano = (await chamar<{ plano: PlanoTurno | null }>("puxar", maquina ? { memoria: maquina } : {})).plano;
+        const plano = (await chamar<{ plano: PlanoTurno | null }>("puxar", { ...(maquina ? { memoria: maquina } : {}), ...(opcoes?.soDaPessoa ? { soDaPessoa: true } : {}) })).plano;
         if (plano) { emAndamento.add(plano.turnoId); primeiraFalha.delete(plano.turnoId); if (plano.tokenDeTurno) tokens.set(plano.turnoId, plano.tokenDeTurno); }
         return plano;
       }

@@ -34,7 +34,7 @@ import type { LinhaTrilha } from "../../src/db/schema/trilha.ts";
 import { ORCAMENTO_INICIAL } from "../../src/domain/canal-orcamento.ts";
 import { seguravelPeloMac } from "../../src/domain/memoria-mac.ts";
 import { ateOPrimeiroAnexo, porChegada } from "../../src/domain/ordem-das-falas.ts";
-import type { PedidoAberto } from "../../src/domain/triagem.ts";
+import { nasceNosBastidores, type PedidoAberto } from "../../src/domain/triagem.ts";
 import { MOTIVOS_DE_QUEDA, MOTIVOS_FALHA_SEM_QUEDA } from "../../src/domain/pedido-parado.ts";
 import { cotaSegura, ehVoltaDoFundo, ENTRADA_DA_RETOMADA_DA_QUEDA, ENTRADA_DA_VOLTA_DA_COTA, entradaLevadaComPedido, tipoParaCota, type PortaoDaCota } from "../../src/domain/cota-da-ia.ts";
 import { MODO_APROVACAO_INICIAL } from "../../src/domain/modo-aprovacao.ts";
@@ -147,6 +147,8 @@ export type BancoMemoria = {
   liberacoesDispensadas: Map<string, number>;
   /** 0033: turnos que trouxeram conteúdo da web pelas nativas. */
   contaminados: Set<string>;
+  /** ADR-130 (0121): os turnos dos bastidores da conversa (a coluna `turnos.bastidores` do repo real). */
+  bastidores: Set<string>;
   githubApp: Map<string, ConfigGithubApp>;
   composioSessoes: Map<string, import("../../src/repositories/composio.repo.ts").SessaoComposio>;
   concessoes: Concessao[];
@@ -226,6 +228,7 @@ export function criarBancoMemoria(): { banco: BancoMemoria; repos(escopo?: Escop
     leituras: new Map(),
     liberacoesDispensadas: new Map(),
     contaminados: new Set(),
+    bastidores: new Set(),
     githubApp: new Map(),
     composioSessoes: new Map(),
     concessoes: [],
@@ -1708,6 +1711,8 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         if (t.maquinaDestaVez) { b.maquinaDestaVez.set(turno.id, t.maquinaDestaVez); turno.maquinaDestaVez = t.maquinaDestaVez; }
         // NOD-287: a marca da web do turno de origem nasce junto, como o INSERT do repo real.
         if (t.contaminadoDe && b.contaminados.has(t.contaminadoDe)) b.contaminados.add(turno.id);
+        // ADR-130: a faixa nasce no INSERT; a retomada e a repetição herdam a do turno que continuam.
+        if (nasceNosBastidores(t) || [t.retomaTurnoId, t.contaminadoDe].some((x) => x && b.bastidores.has(x))) b.bastidores.add(turno.id);
         return turno;
       },
       async buscar(id) {
@@ -1725,7 +1730,10 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           .filter((t) => {
             // ADR-099 §7 / NOD-253: o portão da cota (seguradoPelaCotaSql).
             if (cota && seguradoPelaCota(t, cota)) return false;
-            if (!t.trabalhoId) return !vivos.some((d) => d.estado === "despachando" && !d.trabalhoId && d.conversaId === t.conversaId && d.origem !== "ligacao");
+            // ADR-130: a drenagem do motor só pega o que a pessoa espera agora.
+            if (p.soDaPessoa === true && !(t.origem === "ligacao" || t.pessoaEsperando || (!t.trabalhoId && !b.bastidores.has(t.id)))) return false;
+            // ADR-130: e, sem trabalho, só a MESMA faixa da conversa (a da pessoa ou a dos bastidores) segura.
+            if (!t.trabalhoId) return !vivos.some((d) => d.estado === "despachando" && !d.trabalhoId && d.conversaId === t.conversaId && d.origem !== "ligacao" && b.bastidores.has(d.id) === b.bastidores.has(t.id));
             if (vivos.some((d) => d.estado === "despachando" && d.trabalhoId === t.trabalhoId)) return false;
             const dono = doTenant(b.trabalhos).find((x) => x.id === t.trabalhoId);
             const dep = dono?.depoisDeTrabalhoId ? doTenant(b.trabalhos).find((x) => x.id === dono.depoisDeTrabalhoId) : null;
@@ -1973,6 +1981,9 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async pendentesDaPessoa(conversaId) {
         return doTenant(b.turnos).filter((t) => t.ownerId === escopo.pessoaId && t.estado === "pendente" && (!conversaId || t.conversaId === conversaId)).sort(porChegada);
       },
+      async bastidoresVivos(conversaId) {
+        return doTenant(b.turnos).filter((t) => t.conversaId === conversaId && t.estado === "despachando" && !t.trabalhoId && b.bastidores.has(t.id) && t.origem !== "ligacao");
+      },
       async vivosDaConversa(conversaId) {
         return doTenant(b.turnos).filter((t) => t.conversaId === conversaId && (t.estado === "pendente" || t.estado === "despachando") && (t.acordarEm ?? 0) <= agora());
       },
@@ -1980,7 +1991,8 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         const todos = doTenant(b.turnos);
         const saida: { id: string; motivo: "agente_ocupado_em"; conversaId: string }[] = [];
         for (const p of todos.filter((t) => t.conversaId === conversaId && t.estado === "pendente" && !t.trabalhoId && (t.acordarEm ?? 0) <= agora())) {
-          const daConversa = todos.filter((d) => d.estado === "despachando" && !d.trabalhoId && d.conversaId === conversaId);
+          // ADR-130: só a mesma faixa (a da pessoa ou a dos bastidores) segura.
+          const daConversa = todos.filter((d) => d.estado === "despachando" && !d.trabalhoId && d.conversaId === conversaId && b.bastidores.has(d.id) === b.bastidores.has(p.id));
           const ocupado = daConversa.find((d) => d.agenteId === p.agenteId) ?? daConversa[0];
           if (ocupado) saida.push({ id: p.id, motivo: "agente_ocupado_em", conversaId: ocupado.conversaId });
         }

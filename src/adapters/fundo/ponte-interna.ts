@@ -43,6 +43,9 @@ import { ESPACO_FUNDO_MS, portaoDoMac } from "../../domain/memoria-mac.ts";
 import type { Deps, Services, UseCasesNod } from "../../use-cases/tipos.ts";
 import type { TokenTurno } from "../../services/token-turno.ts";
 
+/** ADR-130: a fala da pessoa que esperou mais que isto para começar vira a linha `fala_esperou`. */
+const FALA_ESPEROU_MS = 10_000;
+
 /** definido em 2026-09-16: versão mínima do app = a do package.json desta rodada; a ponte HTTP compara quando entrar (ADR-021). */
 export const VERSAO_MINIMA_APP = "0.1.0";
 
@@ -408,7 +411,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
       for (const chave of declinioVisto.keys()) if (chave.startsWith(`${machineId} `)) declinioVisto.delete(chave);
     },
 
-    async puxar(pessoaId, leituraDoMac): Promise<PlanoTurno | null> {
+    async puxar(pessoaId, leituraDoMac, opcoes): Promise<PlanoTurno | null> {
       esquecerVencidos();
       const escopo = await resolverEscopo(pessoaId);
       if (!escopo) return null;
@@ -470,10 +473,14 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
         const plano = await abrirTxEscopada(db, escopo)(async (trx) => {
           const d = { ...depsDe(trx, escopo), services };
           if (mudanca?.mudou && leituraDoMac) await d.repos.events.gravarComOutbox([eventoPressao(d, mudanca, leituraDoMac)]);
-          const r = await despacharTurno(d, { ...entradaDaCota, segurarFundo, segurarNovo, fundoSemPrazo, espacarFundo, prontosPorMaquina: porMaquina, ...(soNoutraMaquina.length ? { soNoutraMaquina } : {}), inventario: maquina.inventario, aceitaLigacao: maquina.ligacao === true, ...(deps.soComoAlvo ? { soComoAlvo: true } : {}) });
+          const r = await despacharTurno(d, { ...entradaDaCota, segurarFundo, segurarNovo, fundoSemPrazo, espacarFundo, prontosPorMaquina: porMaquina, ...(soNoutraMaquina.length ? { soNoutraMaquina } : {}), inventario: maquina.inventario, aceitaLigacao: maquina.ligacao === true, ...(deps.soComoAlvo ? { soComoAlvo: true } : {}), ...(opcoes?.soDaPessoa ? { soDaPessoa: true } : {}) });
           filaVazia = r.data.motivo === "fila_vazia";
           if (r.events?.length) await d.repos.events.gravarComOutbox(r.events);
           if (r.data.plano) {
+            // ADR-130: quanto a fala da pessoa esperou para começar (o gatilho da ADR). Só a que esperou mais de 10 s vira
+            // linha: o normal é sair em poucos segundos.
+            const t = r.data.turno;
+            if (t.origem === "conversa" && t.mensagemOrigemId && agora() - t.criadoEm > FALA_ESPEROU_MS) log("aviso", "fala_esperou", { pessoa_id: pessoaId, machine_id: maquina.machineId, turno_id: t.id, conversa_id: t.conversaId, espera_ms: agora() - t.criadoEm, drenando: opcoes?.soDaPessoa === true });
             vistos.set(r.data.plano.turnoId, agora());
             despachados.set(r.data.plano.turnoId, { em: agora(), sessaoCli: r.data.plano.entrada.bifurcar ? null : r.data.plano.entrada.sessaoCli, bifurcou: r.data.plano.entrada.bifurcar === true, modo: r.data.plano.modoTurno ?? null, conta: r.data.plano.conta?.id ?? null });
             escopos.set(r.data.plano.turnoId, escopo);
