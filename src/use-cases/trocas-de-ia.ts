@@ -8,7 +8,7 @@ import type { ContaDaTroca, DecisaoDaPessoa, DecisaoDaTroca, PayloadTrocaDeIa, T
 import { DECISOES_DA_PESSOA } from "../contracts/troca-de-ia.ts";
 import type { UsoDoPlano } from "../contracts/uso-do-plano.ts";
 import { filaLivre, naFila, voltaDaIa } from "../domain/contas-da-pessoa.ts";
-import { cotaDasIas, cotaSegura, entradaDaTrocaDeContaSemSessao, entradaDaTrocaDeIa, situacaoDaIa, type TipoParaCota } from "../domain/cota-da-ia.ts";
+import { contasPelaCota, cotaDasContas, cotaDasIas, cotaSegura, entradaDaTrocaDeContaSemSessao, entradaDaTrocaDeIa, situacaoDaIa, type TipoParaCota } from "../domain/cota-da-ia.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { quandoDaFrase } from "../domain/erro-fornecedor.ts";
 import { derivadosDa, iaDoAutomatico, iasNoLimite, inteligenciaDoAgente, ordemEfetiva, proximaIaNoLimite } from "../domain/inteligencia.ts";
@@ -54,11 +54,19 @@ export async function maquinaDasTasks(deps: Pick<Deps, "repos">, agenteId: strin
 }
 
 /** O que a regra da IA lê do banco: as contas e as máquinas, as preferências e o uso do plano (uma vez por tique, I5). */
-export type LeituraDasIas = LeituraDasContas & { preferencias: Preferencias; usos: readonly UsoDoPlano[] };
+export type LeituraDasIas = LeituraDasContas & { preferencias: Preferencias; usos: readonly UsoDoPlano[]; usosPorConta: readonly UsoDoPlano[] };
 
 export async function lerIas(deps: Pick<Deps, "repos">): Promise<LeituraDasIas> {
-  const [contas, preferencias, usos] = await Promise.all([lerContas(deps), deps.repos.preferencias.buscar(), deps.repos.usoDoPlano.listar()]);
-  return { ...contas, preferencias, usos };
+  const [contas, preferencias, usos, usosPorConta] = await Promise.all([lerContas(deps), deps.repos.preferencias.buscar(), deps.repos.usoDoPlano.listar(), deps.repos.usoDoPlano.listarPorConta()]);
+  return { ...contas, preferencias, usos, usosPorConta };
+}
+
+/**
+ * NOD-401 (definido em 2026-10-28): as contas com a cota medida POR CONTA (uso_do_plano_contas) aplicada — a conta que a
+ * cota segura para `tipo` conta como no limite até a janela dela renovar. A mesma visão no estado, no aviso e no varredor.
+ */
+export function contasComCota(l: LeituraDasIas, agora: number, tipo: TipoParaCota = "fundo_seguindo"): LeituraDasIas["contas"] {
+  return contasPelaCota(l.contas, cotaDasContas({ usos: l.usosPorConta, agora }), tipo);
 }
 
 /**
@@ -68,16 +76,22 @@ export async function lerIas(deps: Pick<Deps, "repos">): Promise<LeituraDasIas> 
  * - com conta da IA logada na máquina: a conta em uso dela (`contaDoTurno`, a fila); a volta pela mesma regra
  *   (`voltaDaIa`). Uma conta livre só noutra máquina não traz a IA de volta para o bot (C2);
  * - sem conta dela na máquina (ou sem máquina): o limite da IA (`preferencias.ias_no_limite`);
- * - por cima, a cota medida do plano (C1): a IA que a cota segura para este tipo de trabalho (`cotaSegura`; a task com
- *   sessão é `fundo_seguindo`, que só o limite segura) parou até a janela renovar.
+ * - a cota medida do plano (C1): POR CONTA (NOD-401, `uso_do_plano_contas`) nos dois primeiros casos — a conta que a cota
+ *   segura para este tipo de trabalho (`cotaSegura`; a task com sessão é `fundo_seguindo`, que só o limite segura) conta
+ *   como no limite até a janela dela renovar; a linha por IA (`uso_do_plano`) só no terceiro (sem conta na máquina).
  * `voltaEm` null = ninguém disse quando (I6: nada inventa 1 h aqui).
  */
 export function estadoDaIa(l: LeituraDasIas, p: { ia: IdHarness; machineId: string | null; ordemDoBot: readonly IdHarness[] | null; agora: number; contaDe?: string | null; tipo?: TipoParaCota }): { parou: boolean; voltaEm: number | null } {
   const { ia, agora } = p;
   let parou = false;
   let voltaEm: number | null = null;
-  const daConta = p.contaDe ? l.contas.find((c) => c.id === p.contaDe && c.removidaEm === null) : undefined;
-  const daMaquina = p.machineId && ehIaComConta(ia) ? contasDaMaquinaDe(l, p.machineId, agora) : null;
+  const tipo = p.tipo ?? "fundo_seguindo";
+  // NOD-401: a cota medida POR CONTA (uso_do_plano_contas, a regra de cotaDasIasComContas): a conta que a cota segura para
+  // este tipo de trabalho conta como no limite até a janela dela renovar. A leitura de uma conta não pesa nas outras.
+  const contas = contasComCota(l, agora, tipo);
+  const daConta = p.contaDe ? contas.find((c) => c.id === p.contaDe && c.removidaEm === null) : undefined;
+  const daMaquinaLida = p.machineId && ehIaComConta(ia) ? contasDaMaquinaDe(l, p.machineId, agora) : null;
+  const daMaquina = daMaquinaLida ? { ...daMaquinaLida, contas } : null;
   const temContaAqui = daMaquina !== null && daMaquina.contas.some((c) => c.ia === ia && c.removidaEm === null && daMaquina.naMaquina.has(c.id));
   if (daConta) {
     parou = daConta.noLimiteAte !== null && daConta.noLimiteAte > agora;
@@ -90,14 +104,32 @@ export function estadoDaIa(l: LeituraDasIas, p: { ia: IdHarness; machineId: stri
     parou = iasNoLimite(l.preferencias.iasNoLimite, agora).includes(ia);
     const renova = l.preferencias.iasNoLimite?.[ia]?.renovaEm;
     voltaEm = parou && renova !== undefined ? renova : null;
-  }
-  // C1: a cota medida (só o uso do plano; o limite gravado já entrou acima).
-  const cota = cotaDasIas({ usos: l.usos, limites: null, agora }).find((c) => c.ia === ia);
-  if (cota && cotaSegura(p.tipo ?? "fundo_seguindo", situacaoDaIa([cota], ia))) {
-    parou = true;
-    voltaEm = Math.max(voltaEm ?? 0, cota.voltaEm);
+    // C1: a cota medida por IA (uso_do_plano, a leitura da última conta que rodou) só vale para a IA sem conta logada na
+    // máquina (motor, app antigo). Com conta logada, a linha por IA é a de UMA conta e não segura as outras (NOD-401).
+    const cota = cotaDasIas({ usos: l.usos, limites: null, agora }).find((c) => c.ia === ia);
+    if (cota && cotaSegura(tipo, situacaoDaIa([cota], ia))) {
+      parou = true;
+      voltaEm = Math.max(voltaEm ?? 0, cota.voltaEm);
+    }
   }
   return { parou, voltaEm };
+}
+
+/**
+ * NOD-401 (definido em 2026-10-28): a conta da IA que parou na máquina-alvo, para o cartão dizer o apelido. É a conta cuja
+ * volta é a do aviso (`voltaEm`, pela cota por conta) — o cartão nunca junta o apelido de uma com a volta de outra; sem
+ * ela, a escolhida da pessoa logada ali, senão a primeira da fila ali, senão a primeira da IA ali. null = sem conta da IA
+ * na máquina (o cartão diz só a IA).
+ */
+export function contaQueParou(l: LeituraDasIas, p: { ia: IdHarness; machineId: string | null; agora: number; voltaEm: number | null; tipo?: TipoParaCota }): { id: string; apelido: string } | null {
+  if (!p.machineId || !ehIaComConta(p.ia)) return null;
+  const daMaquina = contasDaMaquinaDe(l, p.machineId, p.agora);
+  const contas = contasComCota(l, p.agora, p.tipo);
+  const daIa = contas.filter((c) => c.ia === p.ia && c.removidaEm === null && daMaquina.naMaquina.has(c.id)).sort((a, b) => a.posicao - b.posicao);
+  const escolhida = daMaquina.escolhidas[p.ia];
+  const daVolta = p.voltaEm !== null ? daIa.filter((c) => c.noLimiteAte === p.voltaEm) : [];
+  const conta = daVolta.find((c) => c.id === escolhida) ?? daVolta.find(naFila) ?? daVolta[0] ?? daIa.find((c) => c.id === escolhida) ?? daIa.find(naFila) ?? daIa[0];
+  return conta ? { id: conta.id, apelido: conta.apelido } : null;
 }
 
 export type NovoAvisoDeTroca = {
@@ -115,6 +147,8 @@ export type NovoAvisoDeTroca = {
   conta?: ContaDaTroca | null;
   /** I1: no ChatGPT, a conta da sessão que parou ("levar" = outra conta do ChatGPT; `iaPara` = `iaDe`). */
   contaDe?: { id: string; apelido: string } | null;
+  /** NOD-401: a conta da IA que parou na máquina-alvo (o cartão diz o apelido, não só a IA). */
+  contaQueParou?: { id: string; apelido: string } | null;
   /** C5: a outra IA só está pronta fora da máquina do bot (o cartão explica por que não oferece "levar"). */
   foraDaMaquina?: { ia: IdHarness; maquina: string | null } | null;
   autoria: Autoria;
@@ -162,7 +196,7 @@ export async function avisarTrocaDeIa(deps: Deps, p: NovoAvisoDeTroca): Promise<
     agora: p.agora,
   });
   const contaPara = await contaParaDoAviso(deps, p);
-  const payload: PayloadTrocaDeIa = payloadDaTroca(troca, tasks, { conta: p.conta ?? null, contaDe: p.contaDe ?? null, foraDaMaquina: p.foraDaMaquina ?? null, contaPara });
+  const payload: PayloadTrocaDeIa = payloadDaTroca(troca, tasks, { conta: p.conta ?? null, contaDe: p.contaDe ?? null, foraDaMaquina: p.foraDaMaquina ?? null, contaPara, contaQueParou: p.contaQueParou ?? null });
   const texto = fraseDaTroca({
     nomeDe: nomeDoProvedor(troca.iaDe),
     nomePara: troca.iaPara ? nomeDoProvedor(troca.iaPara) : null,
@@ -173,6 +207,7 @@ export async function avisarTrocaDeIa(deps: Deps, p: NovoAvisoDeTroca): Promise<
     voltaEm: troca.voltaEm,
     quando: (t) => quandoDaFrase(t, p.agora),
     contaDe: p.contaDe?.apelido ?? null,
+    contaQueParou: p.contaQueParou?.apelido ?? null,
     foraDaMaquina: p.foraDaMaquina ? { nome: nomeDoProvedor(p.foraDaMaquina.ia), maquina: p.foraDaMaquina.maquina } : null,
   });
   const events: RuntimeEvent[] = [];
@@ -208,7 +243,7 @@ async function contaParaDoAviso(deps: Deps, p: NovoAvisoDeTroca): Promise<{ id: 
   return conta ? { id: conta.id, apelido: conta.apelido } : null;
 }
 
-function payloadDaTroca(t: TrocaDeIa, tasks: number, extra: { conta: ContaDaTroca | null; contaDe: { id: string; apelido: string } | null; foraDaMaquina: { ia: IdHarness; maquina: string | null } | null; contaPara: { id: string; apelido: string } | null }): PayloadTrocaDeIa {
+function payloadDaTroca(t: TrocaDeIa, tasks: number, extra: { conta: ContaDaTroca | null; contaDe: { id: string; apelido: string } | null; foraDaMaquina: { ia: IdHarness; maquina: string | null } | null; contaPara: { id: string; apelido: string } | null; contaQueParou?: { id: string; apelido: string } | null }): PayloadTrocaDeIa {
   return {
     kind: "troca_de_ia",
     trocaId: t.id,
@@ -222,6 +257,7 @@ function payloadDaTroca(t: TrocaDeIa, tasks: number, extra: { conta: ContaDaTroc
     ...(t.fixo ? { fixo: true as const, conta: extra.conta } : {}),
     ...(extra.contaDe ? { contaDe: extra.contaDe } : {}),
     ...(extra.contaPara ? { contaPara: extra.contaPara } : {}),
+    ...(extra.contaQueParou && !extra.contaDe ? { contaQueParou: extra.contaQueParou } : {}),
     ...(extra.foraDaMaquina ? { foraDaMaquina: extra.foraDaMaquina } : {}),
     ...(t.decisao ? { decisao: t.decisao, decididoEm: t.decididoEm ?? undefined } : {}),
   };
@@ -396,13 +432,17 @@ export async function quandoAIaVolta(deps: Pick<Deps, "repos">, p: { ia: IdHarne
  * cartão dizer por que não oferece.
  */
 export async function outraIaParaAsTasks(deps: Pick<Deps, "repos">, p: { agenteId: string; iaDe: IdHarness; prontosDoAlvo: readonly string[]; prontosDaPessoa: readonly string[]; daMaquina: ContasDaMaquina | null; agora: number }): Promise<{ ia: IdHarness | null; noutraMaquina: IdHarness | null }> {
-  const [agente, preferencias] = await Promise.all([deps.repos.agentes.buscar(p.agenteId), deps.repos.preferencias.buscar()]);
+  const [agente, preferencias, usosPorConta] = await Promise.all([deps.repos.agentes.buscar(p.agenteId), deps.repos.preferencias.buscar(), deps.repos.usoDoPlano.listarPorConta()]);
   if (!agente) return { ia: null, noutraMaquina: null };
   const inteligencia = inteligenciaDoAgente(agente);
   const ordem = ordemEfetiva({ doBot: inteligencia.ordem, daPessoa: preferencias.ordemIas ?? null });
-  const r = p.daMaquina ? escolherContaDoTurno(p.daMaquina, inteligencia.ordem, p.agora) : null;
-  const semConta = IAS_COM_CONTA.filter((ia) => r !== null && ia in r.porIa && r.porIa[ia] === null);
-  const noLimite = [...new Set([...iasNoLimite(preferencias.iasNoLimite, p.agora), ...semConta, p.iaDe])];
+  // NOD-401 (definido em 2026-10-28): a outra IA também se mede pela cota POR CONTA (a mesma visão de estadoDaIa) — a IA
+  // cuja única conta a leitura dela segura não é oferecida para "levar"; a IA com conta na máquina não usa o limite por IA.
+  const daMaquina = p.daMaquina ? { ...p.daMaquina, contas: contasPelaCota(p.daMaquina.contas, cotaDasContas({ usos: usosPorConta, agora: p.agora }), "fundo_seguindo") } : null;
+  const r = daMaquina ? escolherContaDoTurno(daMaquina, inteligencia.ordem, p.agora) : null;
+  const governada = (ia: IdHarness) => r !== null && ia in r.porIa;
+  const semConta = IAS_COM_CONTA.filter((ia) => governada(ia) && r!.porIa[ia] === null);
+  const noLimite = [...new Set([...iasNoLimite(preferencias.iasNoLimite, p.agora).filter((ia) => !governada(ia)), ...semConta, p.iaDe])];
   const ia = proximaIaNoLimite({ ordem, prontos: p.prontosDoAlvo as IdHarness[], noLimite, atual: p.iaDe });
   const noutraMaquina = ia ? null : proximaIaNoLimite({ ordem, prontos: p.prontosDaPessoa as IdHarness[], noLimite: [...iasNoLimite(preferencias.iasNoLimite, p.agora), p.iaDe], atual: p.iaDe });
   return { ia, noutraMaquina };
@@ -473,7 +513,7 @@ async function varrerUma(deps: Deps, t: TrocaDeIa, l: LeituraDasIas, agora: numb
     // C3: "esperar" acorda as esperas quando a IA volta (a mesma regra do aviso aberto). I4: "conta" só espera a fila
     // daquela IA voltar a ter conta livre na máquina, para soltar a escolhida fora da fila.
     const daMaquina = t.machineId ? contasDaMaquinaDe(l, t.machineId, agora) : null;
-    const voltou = t.decisao === "conta" ? ehIaComConta(t.iaDe) && filaLivre(l.contas, t.iaDe, agora, daMaquina?.naMaquina) : !estado().parou;
+    const voltou = t.decisao === "conta" ? ehIaComConta(t.iaDe) && filaLivre(contasComCota(l, agora), t.iaDe, agora, daMaquina?.naMaquina) : !estado().parou;
     const vencida = agora - (t.decididoEm ?? agora) >= ESPERA_DECIDIDA_VALE_MS;
     if (!voltou && !vencida) return;
     if (!(await deps.repos.trocasDeIa.marcarVoltou(t.id, agora))) return;
@@ -496,7 +536,7 @@ async function soltarEscolhidaForaDaFila(deps: Deps, l: LeituraDasIas, t: TrocaD
   const conta = escolhida ? l.contas.find((c) => c.id === escolhida) : undefined;
   if (!conta || naFila(conta)) return;
   const daMaquina = t.machineId ? contasDaMaquinaDe(l, t.machineId, agora) : null;
-  if (!filaLivre(l.contas, t.iaDe, agora, daMaquina?.naMaquina)) return;
+  if (!filaLivre(contasComCota(l, agora), t.iaDe, agora, daMaquina?.naMaquina)) return;
   await deps.repos.contasIa.definirEscolhida(t.iaDe, null);
   delete l.escolhidas[t.iaDe];
   log("info", "escolhida_fora_da_fila_solta", { troca_id: t.id, ia: t.iaDe, conta_id: conta.id });

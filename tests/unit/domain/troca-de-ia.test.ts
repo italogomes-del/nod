@@ -52,6 +52,11 @@ describe("fraseDaTroca", () => {
       .toBe("O Claude chegou ao limite · volta às 20:50. O ChatGPT não está em vm-bots, a máquina do Eng 1. Para a task, recomendo esperar o Claude: continuam de onde pararam.");
   });
 
+  it("NOD-401: a conta que parou (a IA inteira na máquina) dá o apelido sem mudar o destino do 'levar'", () => {
+    expect(fraseDaTroca({ nomeDe: "Claude", nomePara: "ChatGPT", nomeDoBot: "Eng 1", recomendacao: "levar", tasks: 1, fixo: false, voltaEm: AGORA, quando, contaQueParou: "marlonwlv (20x)" }))
+      .toBe("A conta marlonwlv (20x) do Claude chegou ao limite · volta às 20:50. Para a task, recomendo levar para o ChatGPT: recomeçam do resumo, mas não ficam paradas.");
+  });
+
   it("fixo: o estado do bot e que ele volta sozinho (canvas C3)", () => {
     expect(fraseDaTroca({ nomeDe: "Claude", nomePara: "ChatGPT", nomeDoBot: "Eng 1", recomendacao: "esperar", tasks: 0, fixo: true, voltaEm: AGORA, quando }))
       .toBe("Eng 1 parou até 20:50: as contas do Claude da sua fila acabaram. Volta sozinho às 20:50.");

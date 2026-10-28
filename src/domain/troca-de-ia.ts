@@ -54,6 +54,8 @@ export function fraseDaTroca(p: {
   voltaEm: EpochMs | null;
   quando: (t: EpochMs) => string;
   contaDe?: string | null;
+  /** NOD-401: o apelido da conta que parou (a IA inteira parou na máquina; não muda o destino do "levar"). */
+  contaQueParou?: string | null;
   foraDaMaquina?: { nome: string; maquina: string | null } | null;
 }): string {
   const volta = p.voltaEm !== null ? p.quando(p.voltaEm) : null;
@@ -63,7 +65,8 @@ export function fraseDaTroca(p: {
     return `${p.nomeDoBot} parou${ate}: as contas do ${p.nomeDe} da sua fila acabaram. Volta sozinho ${volta ?? "quando uma conta voltar"}.`;
   }
   const tasks = p.tasks === 1 ? "a task" : `as ${p.tasks} tasks`;
-  const quem = p.contaDe ? `A conta ${p.contaDe} do ${p.nomeDe}` : `O ${p.nomeDe}`;
+  const apelido = p.contaDe ?? p.contaQueParou ?? null;
+  const quem = apelido ? `A conta ${apelido} do ${p.nomeDe}` : `O ${p.nomeDe}`;
   const quandoVolta = volta ? ` · volta ${volta}` : ` · o ${p.nomeDe} não disse quando volta`;
   const fora = p.foraDaMaquina ? ` O ${p.foraDaMaquina.nome} não está ${p.foraDaMaquina.maquina ? `em ${p.foraDaMaquina.maquina}, ` : "n"}a máquina do ${p.nomeDoBot}.` : "";
   const destino = p.contaDe ? `outra conta do ${p.nomeDe}` : `o ${p.nomePara}`;

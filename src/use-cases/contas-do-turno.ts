@@ -3,7 +3,7 @@ import type { Autoria, RuntimeEvent } from "../contracts/evento.ts";
 import type { IdHarness } from "../contracts/harness.ts";
 import type { Mensagem } from "../contracts/mensagem.ts";
 import type { Turno } from "../contracts/turno.ts";
-import { contaDoTurno, decidirLimiteDaConta, fraseDoLimiteDaConta, type ContaDaPessoa, type ContaDoTurno, type DecisaoDoLimiteDaConta, type VinculoDaConta } from "../domain/contas-da-pessoa.ts";
+import { contaDoTurno, decidirLimiteDaConta, fraseDoLimiteDaConta, voltaDaIa, type ContaDaPessoa, type ContaDoTurno, type DecisaoDoLimiteDaConta, type VinculoDaConta } from "../domain/contas-da-pessoa.ts";
 import { horaDaFrase, quandoDaFrase } from "../domain/erro-fornecedor.ts";
 import type { ContaGuardadaNoServidor } from "../repositories/contas-ia.repo.ts";
 import { evento } from "./autoria-evento.ts";
@@ -137,7 +137,10 @@ export function semContaParaOTurno(
   const de = naOrdem.find((x) => x.noLimiteAte !== null && x.noLimiteAte > agora) ?? naOrdem[0];
   if (!de) return null;
   const { decisao } = decidirLimiteDaConta({ contas: visao.contas, naMaquina: visao.naMaquina, noutraMaquina: visao.noutraMaquina, escolhidas: visao.escolhidas, ordemDoBot: opcoes.ordemDoBot ?? null, contaId: de.id, ate: de.noLimiteAte, agora, iaFixa: opcoes.iaFixa ?? null });
-  return { de, decisao, voltaEm: de.noLimiteAte };
+  // NOD-401: a conta `de` explica o aviso, mas a fila (ou a escolhida) pode ter outra conta que volta antes. Contas livres
+  // fora da fila continuam sendo escolha explícita no cartão e não mudam silenciosamente a hora da retomada.
+  const voltaEm = voltaDaIa(visao.contas, de.ia, agora, { naMaquina: visao.naMaquina, escolhida: visao.escolhidas[de.ia] }) ?? de.noLimiteAte;
+  return { de, decisao, voltaEm };
 }
 
 /** O payload `contas` da nota de limite (a tela desenha os botões). */

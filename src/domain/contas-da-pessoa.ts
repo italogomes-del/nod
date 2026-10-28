@@ -145,9 +145,10 @@ export function decidirLimiteDaConta(p: {
   const daIaFixa = (c: ContaDaPessoa) => !p.iaFixa || c.ia === p.iaFixa;
   // R2: com a IA fixa, as contas das outras IAs nem entram na conta (nem como "livres").
   const naMaquina = p.iaFixa ? new Set([...p.naMaquina].filter((id) => contas.find((c) => c.id === id)?.ia === p.iaFixa)) : p.naMaquina;
-  // A escolha antiga da IA não vale mais (QA do NOD-211: ao perguntar, nada fica escolhido).
+  // A conta que acabou de atingir o limite deixa de ser escolhida. Uma escolha de OUTRA conta da IA continua valendo:
+  // ela foi explícita e pode ser justamente a próxima conta livre fora da fila (NOD-401, revisão rodada 5).
   const escolhidas = { ...p.escolhidas };
-  delete escolhidas[conta.ia];
+  if (escolhidas[conta.ia] === conta.id) delete escolhidas[conta.ia];
   const proximo = contaDoTurno({ contas, naMaquina, escolhidas, ordemDoBot: p.ordemDoBot, agora: p.agora });
   const mesmaIa = proximo?.porIa[conta.ia];
   if (mesmaIa && mesmaIa.id !== conta.id) return { contas, decisao: { tipo: "trocou", para: mesmaIa } };

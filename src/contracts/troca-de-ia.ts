@@ -84,6 +84,8 @@ export type PayloadTrocaDeIa = {
    * "A conversa segue no ChatGPT · conta X" (o apelido, nunca o e-mail). Ausente = a IA sem conta na lista ali.
    */
   contaPara?: { id: string; apelido: string };
+  /** NOD-401: a conta da IA que parou na máquina-alvo (todas as da fila ali no limite) — o cartão diz o apelido dela. */
+  contaQueParou?: { id: string; apelido: string };
   /** Preenchidos quando a troca fecha (a tela troca os botões pela linha do que aconteceu). */
   decisao?: DecisaoDaTroca;
   decididoEm?: EpochMs;

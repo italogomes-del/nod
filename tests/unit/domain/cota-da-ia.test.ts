@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { UsoDoPlano } from "../../../src/contracts/uso-do-plano.ts";
 import type { ContaDaPessoa } from "../../../src/domain/contas-da-pessoa.ts";
-import { cotaDasIas, cotaDasIasComContas, cotaParaTela, cotaSegura, ehFundo, entradaDaVolta, entradaDaVoltaDaCota, entradaDoRetornoARefazer, entradaLevadaComPedido, esperaDaCotaNaTela, MARCA_DO_PEDIDO_ORIGINAL, iasConhecidas, LEITURA_SEM_HORARIO_VALE_MS, portaoDaCota, RETORNO_DO_LOTE, situacaoDoTurno, tipoParaCota, type TipoParaCota } from "../../../src/domain/cota-da-ia.ts";
+import { cadeiaJaEsperou, cotaDasIas, cotaDasIasComContas, cotaParaTela, cotaSegura, ehFundo, ehTrocaDeConta, ehVoltaDoFundo, entradaDaTrocaDeConta, entradaDaVolta, entradaDaVoltaDaCota, entradaDoRetornoARefazer, entradaLevadaComPedido, esperaDaCotaNaTela, MARCA_DA_FALA_NA_FRENTE, MARCA_DO_PEDIDO_ORIGINAL, iasConhecidas, LEITURA_SEM_HORARIO_VALE_MS, portaoDaCota, RETORNO_DO_LOTE, situacaoDoTurno, tipoParaCota, type TipoParaCota } from "../../../src/domain/cota-da-ia.ts";
 
 const AGORA = Date.UTC(2026, 9, 12, 15, 0);
 const HORA = 3_600_000;
@@ -171,6 +171,16 @@ describe("NOD-274/258/269: o fundo espera a cota, e a volta sabe o pedido", () =
     // QA do #385: um retorno que não é volta da cota fica inteiro, mesmo se um resumo citar a marca do pedido original.
     const citaAMarca = "As frentes do lote terminaram:\n- Fila: a volta dizia\n\nPedido original da frente:\nrevisar";
     expect(entradaDoRetornoARefazer(citaAMarca)).toBe(citaAMarca);
+  });
+
+  it("NOD-401: marcas citadas no pedido ou numa fala não falsificam troca de conta nem espera anterior", () => {
+    const troca = entradaDaTrocaDeConta("Claude Code", "Pessoal", "Marlon 20x");
+    const trocaDepoisDeEspera = entradaDaTrocaDeConta("Claude Code", "Pessoal", "Marlon 20x", true);
+    const apenasVolta = entradaDaVoltaDaCota("Claude Code");
+    expect(ehTrocaDeConta(`${apenasVolta}${MARCA_DO_PEDIDO_ORIGINAL}${troca}`)).toBe(false);
+    expect(ehTrocaDeConta(`${apenasVolta}${MARCA_DA_FALA_NA_FRENTE}${troca}`)).toBe(false);
+    expect(cadeiaJaEsperou(`${troca}${MARCA_DO_PEDIDO_ORIGINAL}${trocaDepoisDeEspera}`, ehVoltaDoFundo)).toBe(false);
+    expect(cadeiaJaEsperou(`${troca}${MARCA_DA_FALA_NA_FRENTE}${trocaDepoisDeEspera}`, ehVoltaDoFundo)).toBe(false);
   });
 });
 

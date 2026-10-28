@@ -326,13 +326,41 @@ export function ehVoltaDoFundo(entradaTexto: string): boolean {
   return PREFIXOS_DA_VOLTA_DO_FUNDO.some((p) => entradaTexto.startsWith(p));
 }
 
+const MARCA_DA_TROCA_DE_CONTA = " no meio deste trabalho e o nod seguiu com a conta ";
+
 /**
  * definido em 2026-10-12 (ADR-101, QA do NOD-211): a entrada da volta da task cuja conta parou e o Mac já seguiu com outra
  * conta da mesma IA ("Trocar sozinho"). Começa com ENTRADA_DA_VOLTA_DA_COTA, para contar como a volta da cota (e não como
- * volta sem novidade). Só posições (ADR-019): o apelido mora no Mac.
+ * volta sem novidade). Pela posição (ADR-101, o apelido mora no Mac) ou, revisto em 2026-10-28 (NOD-401, ADR-102 item 6:
+ * a lista mora no servidor), pelo apelido da fila.
  */
-export function entradaDaTrocaDeConta(nomeDaIa: string, de: number, para: number): string {
-  return `${ENTRADA_DA_VOLTA_DA_COTA}${nomeDaIa} chegou ao limite na conta ${de} no meio deste trabalho e o nod seguiu com a conta ${para}. Siga de onde parou; o que já saiu antes do limite continua valendo.`;
+export function entradaDaTrocaDeConta(nomeDaIa: string, de: number | string, para: number | string, jaEsperou = false): string {
+  return `${ENTRADA_DA_VOLTA_DA_COTA}${nomeDaIa} chegou ao limite na conta ${de}${MARCA_DA_TROCA_DE_CONTA}${para}${jaEsperou ? MARCA_DA_ESPERA_NA_CADEIA : ""}. Siga de onde parou; o que já saiu antes do limite continua valendo.`;
+}
+
+/** NOD-401: a troca de conta numa cadeia que já tinha esperado a cota — a marca segue para a próxima volta. */
+const MARCA_DA_ESPERA_NA_CADEIA = " (a cota já tinha sido esperada antes neste trabalho)";
+
+/**
+ * NOD-401 (definido em 2026-10-28): a entrada é a de uma troca de conta (seguiu na hora, ninguém esperou). A cadeia que só
+ * trocou de conta ainda não avisou a espera: o próximo limite que espera de verdade diz isso na conversa e a quem pediu.
+ */
+export function ehTrocaDeConta(entradaTexto: string): boolean {
+  return entradaTexto.startsWith(ENTRADA_DA_VOLTA_DA_COTA) && cabecaDaEntrada(entradaTexto).includes(MARCA_DA_TROCA_DE_CONTA);
+}
+
+/** A parte da entrada que o nod escreveu: antes do pedido original e das falas da pessoa (texto dela não vira marca). */
+function cabecaDaEntrada(entradaTexto: string): string {
+  const i = [entradaTexto.indexOf(MARCA_DO_PEDIDO_ORIGINAL), entradaTexto.indexOf(MARCA_DA_FALA_NA_FRENTE)].filter((x) => x >= 0).sort((a, b) => a - b)[0];
+  return i === undefined ? entradaTexto : entradaTexto.slice(0, i);
+}
+
+/**
+ * NOD-401 (revisão rodada 4): a cadeia já esperou a cota (e já avisou a espera na conversa e a quem pediu)? A volta do fundo
+ * conta; a troca de conta só conta quando leva a marca de que a cadeia esperou antes dela (`entradaDaTrocaDeConta`).
+ */
+export function cadeiaJaEsperou(entradaTexto: string, prefixo: (texto: string) => boolean): boolean {
+  return prefixo(entradaTexto) && (!ehTrocaDeConta(entradaTexto) || cabecaDaEntrada(entradaTexto).includes(MARCA_DA_ESPERA_NA_CADEIA));
 }
 
 /**

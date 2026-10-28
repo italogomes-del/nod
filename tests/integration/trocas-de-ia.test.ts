@@ -130,7 +130,8 @@ describeIntegracao("trocas de IA (0080, ADR-108)", () => {
       await m.repos.inventario.registrar("claude-cli", pronto);
       const vm = (await m.repos.maquinaTokens.criar({ nome: "vm-bots", prefixo: randomBytes(4).toString("hex"), hash: randomBytes(32) }))!.id;
       await m.repos.contasIa.doAnuncio(vm, [anuncio(1, "claude-cli", "Pessoal"), anuncio(2, "codex-cli", "Pessoal")], AGORA);
-      await m.repos.usoDoPlano.gravar({ harness: "claude-cli", situacao: "esgotado", cincoHoras: { utilizacao: 1, renovaEm: AGORA + 3 * HORA }, semana: null, medidoEm: AGORA }, vm);
+      const contaClaude = (await m.repos.contasIa.listar()).contas.find((conta) => conta.ia === "claude-cli")!;
+      await m.repos.usoDoPlano.gravar({ harness: "claude-cli", situacao: "esgotado", cincoHoras: { utilizacao: 1, renovaEm: AGORA + 3 * HORA }, semana: null, medidoEm: AGORA }, vm, contaClaude.id);
       const t = await m.task({ entrada: "faz a A1", acordarEm: null });
       await trx`update trabalhos set iniciado_em = ${new Date(AGORA - HORA)} where id = ${t.trabalhoId}`;
       const r = await despacharTurno(m.deps, { machineId: vm, executor: "local", inventario: pronto, harnessesProntos: ["claude-cli", "codex-cli"] });

@@ -11,6 +11,7 @@ import { criarAgente } from "../../../src/use-cases/criar-agente.ts";
 import { despacharTurno } from "../../../src/use-cases/despachar-turno.ts";
 import { emitirPlanoTurno } from "../../../src/use-cases/emitir-plano-turno.ts";
 import { definirInteligenciaDoBot } from "../../../src/use-cases/inteligencia.ts";
+import { interromperPorMaquina } from "../../../src/use-cases/interromper-por-maquina.ts";
 import { avisarTrocaDeIa, decidirTrocaDeIa, varrerTrocasDeIa } from "../../../src/use-cases/trocas-de-ia.ts";
 import { depsEmMemoria, esperarErro, executar, MARLON } from "../../helpers/deps-l6.ts";
 
@@ -32,7 +33,7 @@ const limite = (voltaEm: number | null): ResultadoTurno => ({ ...base, desfecho:
 const pronto = { estado: "pronto" as const, versao: "2.1.296", em: T0 };
 const PESSOA = { autor_tipo: "pessoa" as const, autor_id: MARLON.pessoaId, sob_procuracao_de: null, conta_de_execucao: MARLON.pessoaId, executor: "local" as const, locality: "local" as const, locality_reason: "tudo_local_nesta_rodada" as const, machine_id: null, decidido_por: "pessoa" as const, regra_versao: 1 };
 
-async function cenario(o: { fixo?: boolean; codexNaVm?: boolean; segundaCodex?: boolean } = {}) {
+async function cenario(o: { fixo?: boolean; codexNaVm?: boolean; segundaCodex?: boolean; segundaClaude?: boolean } = {}) {
   const relogio = { agora: T0 };
   const { deps, banco } = depsEmMemoria(MARLON, { relogio: () => relogio.agora });
   const { data: bot } = await executar(deps, criarAgente, { dono: "pessoa", nome: "Eng 1" });
@@ -40,18 +41,19 @@ async function cenario(o: { fixo?: boolean; codexNaVm?: boolean; segundaCodex?: 
   const vm = (await deps.repos.maquinaTokens.criar({ nome: "vm-bots", prefixo: "8f2a", hash: randomBytes(32) }))!.id;
   const mac = (await deps.repos.maquinaTokens.criar({ nome: "mac", prefixo: "9a1b", hash: randomBytes(32) }))!.id;
   await deps.repos.agentes.definirMaquina([bot.agente.id], vm);
-  await deps.repos.contasIa.doAnuncio(vm, [anuncio(1, "claude-cli", "Pessoal"), anuncio(2, "codex-cli", "Pessoal"), anuncio(3, "claude-cli", "Leapy", true), ...(o.segundaCodex ? [anuncio(5, "codex-cli", "Reserva")] : [])], T0);
+  await deps.repos.contasIa.doAnuncio(vm, [anuncio(1, "claude-cli", "Pessoal"), anuncio(2, "codex-cli", "Pessoal"), anuncio(3, "claude-cli", "Leapy", true), ...(o.segundaCodex ? [anuncio(5, "codex-cli", "Reserva")] : []), ...(o.segundaClaude ? [anuncio(6, "claude-cli", "Marlon 20x")] : [])], T0);
   // O Mac tem uma 2ª conta do Claude, NA FILA (a pessoa ligou), que a vm-bots não tem.
   await deps.repos.contasIa.doAnuncio(mac, [anuncio(4, "claude-cli", "Mac")], T0);
   const lista = (await deps.repos.contasIa.listar()).contas;
   const conta = (apelido: string, ia: IdHarness = "claude-cli") => lista.find((c) => c.apelido === apelido && c.ia === ia)!;
   await deps.repos.contasIa.definirTrocaAutomatica(conta("Mac").id, true);
   if (o.segundaCodex) await deps.repos.contasIa.definirTrocaAutomatica(conta("Reserva", "codex-cli").id, true);
+  if (o.segundaClaude) await deps.repos.contasIa.definirTrocaAutomatica(conta("Marlon 20x").id, true);
   const agente = (await deps.repos.agentes.buscar(bot.agente.id))!;
-  const task = async (o2: { sessao?: IdHarness | null } = {}) => {
+  const task = async (o2: { sessao?: IdHarness | null; origem?: "conversa" | "delegacao" } = {}) => {
     const t = await deps.repos.trabalhos.criar({ agenteId: bot.agente.id, conversaId: bot.conversa.id, titulo: "A1", origem: "pessoa", rotinaId: null, forma: "frente", ...(o2.sessao !== null ? { iniciadoEm: T0 - HORA } : {}) });
     if (o2.sessao !== null) await deps.repos.trabalhos.atualizarSessao(t!.id, `sessao-${o2.sessao ?? "claude-cli"}`, o2.sessao ?? "claude-cli", "local");
-    const turno = await deps.repos.turnos.enfileirar({ conversaId: bot.conversa.id, agenteId: bot.agente.id, origem: "conversa", prazoEm: T0 + 86_400_000, profundidade: 0, entradaTexto: "faz a A1", entradaConfianca: "confiavel", modelo: agente.modelo, harness: agente.harness, executor: "local", trabalhoId: t!.id });
+    const turno = await deps.repos.turnos.enfileirar({ conversaId: bot.conversa.id, agenteId: bot.agente.id, origem: o2.origem ?? "conversa", prazoEm: T0 + 86_400_000, profundidade: 0, entradaTexto: "faz a A1", entradaConfianca: "confiavel", modelo: agente.modelo, harness: agente.harness, executor: "local", trabalhoId: t!.id });
     return { trabalhoId: t!.id, turnoId: turno!.id };
   };
   const prontosPorMaquina = { [vm]: (o.codexNaVm === false ? ["claude-cli"] : ["claude-cli", "codex-cli"]) as IdHarness[], [mac]: ["claude-cli", "codex-cli"] as IdHarness[] };
@@ -73,7 +75,7 @@ describe("C1: a cota medida não leva a task com sessão para outra IA", () => {
   it("Claude em 100% medido e o ChatGPT livre: a task com sessão no Claude espera a janela renovar e o aviso nasce", async () => {
     const c = await cenario();
     const t = await c.task();
-    await c.deps.repos.usoDoPlano.gravar({ harness: "claude-cli", situacao: "esgotado", cincoHoras: { utilizacao: 1, renovaEm: T0 + 3 * HORA }, semana: null, medidoEm: T0 }, c.vm);
+    await c.deps.repos.usoDoPlano.gravar({ harness: "claude-cli", situacao: "esgotado", cincoHoras: { utilizacao: 1, renovaEm: T0 + 3 * HORA }, semana: null, medidoEm: T0 }, c.vm, c.conta("Pessoal").id);
     const r = await c.despachar();
     expect(r.data).toMatchObject({ plano: null, motivo: "executor_indisponivel" });
     expect(c.voltaDe(t.turnoId)).toMatchObject({ estado: "pendente", acordarEm: T0 + 3 * HORA, harness: "auto" });
@@ -83,7 +85,7 @@ describe("C1: a cota medida não leva a task com sessão para outra IA", () => {
   it("NOD-390: o aviso leva a conta da fila do ChatGPT na máquina do bot (o cartão diz 'segue no ChatGPT · conta Pessoal')", async () => {
     const c = await cenario();
     await c.task();
-    await c.deps.repos.usoDoPlano.gravar({ harness: "claude-cli", situacao: "esgotado", cincoHoras: { utilizacao: 1, renovaEm: T0 + 3 * HORA }, semana: null, medidoEm: T0 }, c.vm);
+    await c.deps.repos.usoDoPlano.gravar({ harness: "claude-cli", situacao: "esgotado", cincoHoras: { utilizacao: 1, renovaEm: T0 + 3 * HORA }, semana: null, medidoEm: T0 }, c.vm, c.conta("Pessoal").id);
     await c.despachar();
     expect(c.payload()).toMatchObject({ iaPara: "codex-cli", contaPara: { id: c.conta("Pessoal", "codex-cli").id, apelido: "Pessoal" } });
   });
@@ -107,7 +109,7 @@ describe("C1: a cota medida não leva a task com sessão para outra IA", () => {
   it("na reserva (99,5%), a task que já começou segue no Claude: a sessão não sai para o ChatGPT", async () => {
     const c = await cenario();
     const t = await c.task();
-    await c.deps.repos.usoDoPlano.gravar({ harness: "claude-cli", situacao: "perto", cincoHoras: { utilizacao: 0.995, renovaEm: T0 + 3 * HORA }, semana: null, medidoEm: T0 }, c.vm);
+    await c.deps.repos.usoDoPlano.gravar({ harness: "claude-cli", situacao: "perto", cincoHoras: { utilizacao: 0.995, renovaEm: T0 + 3 * HORA }, semana: null, medidoEm: T0 }, c.vm, c.conta("Pessoal").id);
     // O plano (emitir) não põe o Claude no "no limite" desta task: a sessão é dele.
     const plano = await executar(c.deps, emitirPlanoTurno, { turnoId: t.turnoId, machineId: c.vm, executor: "local", harnesses: { "claude-cli": pronto, "codex-cli": pronto } });
     expect(plano.data.harness).toBe("claude-cli");
@@ -115,6 +117,358 @@ describe("C1: a cota medida não leva a task com sessão para outra IA", () => {
     const r = await c.despachar();
     expect(r.data.plano?.turnoId).toBe(t.turnoId);
     expect(c.trocas()).toEqual([]);
+  });
+});
+
+describe("NOD-401: o limite de UMA conta não para a IA com outra conta dela livre na fila da máquina", () => {
+  // A leitura da conta que rodou vai para a linha por IA E para a da conta (assentar-turno.ts); a semana em 100%.
+  const esgotada = (renovaEm: number, medidoEm = T0) => ({ harness: "claude-cli" as const, situacao: "esgotado" as const, cincoHoras: { utilizacao: 0.4, renovaEm: T0 + 2 * HORA }, semana: { utilizacao: 1, renovaEm }, medidoEm });
+
+  for (const origem of ["conversa", "delegacao"] as const) {
+    it(`a conta 1 com a semana em 100% (linha por IA e da conta) e a conta 2 livre na fila: a task (${origem}) segue, sem aviso`, async () => {
+      const c = await cenario({ segundaClaude: true });
+      const t = await c.task({ origem });
+      await c.deps.repos.usoDoPlano.gravar(esgotada(T0 + 66 * HORA), c.vm, c.conta("Pessoal").id);
+      // O plano fica no Claude (a sessão é dele) na conta livre da fila — o ChatGPT · Pessoal vem antes na lista, mas a
+      // posição das contas não leva a task em silêncio para outra IA (ADR-108 R4).
+      const plano = await executar(c.deps, emitirPlanoTurno, { turnoId: t.turnoId, machineId: c.vm, executor: "local", harnesses: { "claude-cli": pronto, "codex-cli": pronto } });
+      expect(plano.data.harness).toBe("claude-cli");
+      expect(plano.data.conta?.apelido).toBe("Marlon 20x");
+      const r = await c.despachar();
+      expect(r.data.plano?.turnoId).toBe(t.turnoId);
+      expect(c.trocas()).toEqual([]);
+      expect(c.avisos()).toEqual([]);
+      expect(c.voltaDe(t.turnoId)).toBeUndefined();
+    });
+  }
+
+  it("só a linha por IA em 100% (sem leitura por conta): a IA com conta logada na máquina não para", async () => {
+    const c = await cenario();
+    const t = await c.task();
+    await c.deps.repos.usoDoPlano.gravar(esgotada(T0 + 66 * HORA), c.vm);
+    const r = await c.despachar();
+    expect(r.data.plano?.turnoId).toBe(t.turnoId);
+    expect(c.trocas()).toEqual([]);
+  });
+
+  it("as duas contas da fila na máquina no limite: o aviso diz a conta cuja volta ele mostra (a primeira que renova)", async () => {
+    const c = await cenario({ segundaClaude: true });
+    const t = await c.task();
+    await c.deps.repos.usoDoPlano.gravar(esgotada(T0 + 66 * HORA), c.vm, c.conta("Pessoal").id);
+    await c.deps.repos.usoDoPlano.gravar(esgotada(T0 + 5 * HORA, T0 + 1), c.vm, c.conta("Marlon 20x").id);
+    const r = await c.despachar();
+    expect(r.data).toMatchObject({ plano: null, motivo: "executor_indisponivel" });
+    expect(c.voltaDe(t.turnoId)).toMatchObject({ acordarEm: T0 + 5 * HORA });
+    expect(c.trocas()).toMatchObject([{ iaDe: "claude-cli", iaPara: "codex-cli", voltaEm: T0 + 5 * HORA }]);
+    expect(c.payload()).toMatchObject({ contaQueParou: { id: c.conta("Marlon 20x").id, apelido: "Marlon 20x" } });
+    expect(c.avisos().at(-1)?.texto).toMatch(/^A conta Marlon 20x do Claude chegou ao limite/);
+  });
+
+  it("o aviso que nasce no assentamento (limite durante a rodada) também diz a conta, e o despacho não o regrava sem ela", async () => {
+    const c = await cenario();
+    const t = await c.task();
+    await c.bateNoLimite(t.turnoId, c.conta("Pessoal").id, T0 + 2 * HORA);
+    expect(c.trocas()).toMatchObject([{ iaDe: "claude-cli", iaPara: "codex-cli" }]);
+    expect(c.payload()).toMatchObject({ contaQueParou: { id: c.conta("Pessoal").id, apelido: "Pessoal" } });
+    expect(c.avisos().at(-1)?.texto).toMatch(/^A conta Pessoal do Claude chegou ao limite/);
+  });
+
+  for (const origem of ["conversa", "delegacao"] as const) {
+    it(`a conta 1 bate o limite semanal NA RODADA e a conta 2 está livre na fila (${origem}): segue na hora, com a linha leve e sem espera`, async () => {
+      const c = await cenario({ segundaClaude: true });
+      const t = await c.task({ origem });
+      await c.bateNoLimite(t.turnoId, c.conta("Pessoal").id, T0 + 66 * HORA);
+      expect(c.trocas()).toEqual([]);
+      const volta = c.voltaDe(t.turnoId)!;
+      expect(volta).toMatchObject({ estado: "pendente", acordarEm: T0 });
+      expect(volta.entradaTexto).toContain("seguiu com a conta Marlon 20x");
+      const linhas = c.banco.mensagens.filter((m) => m.kind === "sistema").map((m) => m.texto);
+      expect(linhas.some((x) => /espera e volta sozinha|esperando/.test(x))).toBe(false);
+      expect(linhas.some((x) => /Pessoal acabou .*→ seguindo no .*Marlon 20x/.test(x))).toBe(true);
+      const r = await c.despachar();
+      expect(r.data.plano?.turnoId).toBe(volta.id);
+      expect(c.trocas()).toEqual([]);
+    });
+  }
+
+  it("task do Automático troca de conta sem virar bot fixo quando a segunda conta também para", async () => {
+    const c = await cenario({ segundaClaude: true });
+    const t = await c.task();
+    await c.bateNoLimite(t.turnoId, c.conta("Pessoal").id, T0 + 66 * HORA);
+    const seguiu = c.voltaDe(t.turnoId)!;
+    expect(seguiu.harness).toBe("auto");
+    await c.bateNoLimite(seguiu.id, c.conta("Marlon 20x").id, T0 + 5 * HORA);
+    expect(c.trocas().at(-1)).toMatchObject({ fixo: false, recomendacao: "levar", aplicarEm: T0 + 10 * MIN });
+    expect(c.payload()).toMatchObject({ contaQueParou: { id: c.conta("Marlon 20x").id, apelido: "Marlon 20x" } });
+  });
+
+  it("pedido de colega sem task: segue na conta 2 e a conta 2 também bate o limite — a volta espera E a linha de espera sai (a troca de conta não conta como espera)", async () => {
+    const c = await cenario({ segundaClaude: true });
+    const agente = (await c.deps.repos.agentes.buscar(c.bot.id))!;
+    const t = await c.deps.repos.turnos.enfileirar({ conversaId: c.conversaId, agenteId: c.bot.id, origem: "delegacao", prazoEm: T0 + 86_400_000, profundidade: 1, entradaTexto: "revisa o PR", entradaConfianca: "confiavel", modelo: agente.modelo, harness: agente.harness, executor: "local", trabalhoId: null });
+    await c.bateNoLimite(t!.id, c.conta("Pessoal").id, T0 + 66 * HORA);
+    const seguiu = c.banco.turnos.find((x) => x.estado === "pendente")!;
+    expect(seguiu.entradaTexto).toContain("seguiu com a conta Marlon 20x");
+    const planoDaVolta = await executar(c.deps, emitirPlanoTurno, { turnoId: seguiu.id, machineId: c.vm, executor: "local", harnesses: { "claude-cli": pronto, "codex-cli": pronto } });
+    expect(planoDaVolta.data).toMatchObject({ harness: "claude-cli", conta: { id: c.conta("Marlon 20x").id } });
+    await c.bateNoLimite(seguiu.id, c.conta("Marlon 20x").id, T0 + 5 * HORA);
+    // A volta retoma o turno de origem (retomaTurnoId é a raiz da cadeia), não o turno que seguiu.
+    const espera = c.banco.turnos.filter((x) => x.estado === "pendente");
+    expect(espera).toMatchObject([{ origem: "retomada", acordarEm: T0 + 5 * HORA }]);
+    expect(espera[0]!.entradaTexto).not.toContain("seguiu com a conta");
+    const linhas = c.banco.mensagens.filter((m) => m.kind === "sistema").map((m) => m.texto);
+    expect(linhas.filter((x) => /espera|volta sozinh/.test(x) && !/seguindo/.test(x))).toHaveLength(1);
+  });
+
+  it("pedido sem task: troca de conta e a máquina cai — a primeira espera real ainda ganha a linha da máquina", async () => {
+    const c = await cenario({ segundaClaude: true });
+    const t = await pedidoSemTask(c);
+    await c.bateNoLimite(t.id, c.conta("Pessoal").id, T0 + 66 * HORA);
+    const seguiu = pendentes(c)[0]!;
+    expect(seguiu.entradaTexto).toContain("seguiu com a conta Marlon 20x");
+    expect(await c.deps.repos.turnos.reivindicar({ machineId: c.vm, agora: T0 })).toMatchObject({ id: seguiu.id });
+    c.relogio.agora = T0 + HORA;
+    const vencido = (await c.deps.repos.turnos.vencidos(c.relogio.agora)).find((x) => x.id === seguiu.id);
+    expect(vencido).toBeDefined();
+    await interromperPorMaquina(c.deps, { turnos: [vencido!] });
+    expect(c.banco.mensagens.filter((m) => m.kind === "sistema" && m.texto.includes("fica na fila"))).toHaveLength(1);
+    const depoisDaQueda = pendentes(c)[0]!;
+    const plano = await executar(c.deps, emitirPlanoTurno, { turnoId: depoisDaQueda.id, machineId: c.vm, executor: "local", harnesses: { "claude-cli": pronto, "codex-cli": pronto } });
+    expect(plano.data).toMatchObject({ harness: "claude-cli", conta: { id: c.conta("Marlon 20x").id } });
+  });
+
+  const pedidoSemTask = async (c: Awaited<ReturnType<typeof cenario>>) => {
+    const agente = (await c.deps.repos.agentes.buscar(c.bot.id))!;
+    return (await c.deps.repos.turnos.enfileirar({ conversaId: c.conversaId, agenteId: c.bot.id, origem: "delegacao", prazoEm: T0 + 86_400_000, profundidade: 1, entradaTexto: "revisa o PR", entradaConfianca: "confiavel", modelo: agente.modelo, harness: agente.harness, executor: "local", trabalhoId: null }))!;
+  };
+  const pendentes = (c: Awaited<ReturnType<typeof cenario>>) => c.banco.turnos.filter((x) => x.estado === "pendente");
+  const linhasDeEspera = (c: Awaited<ReturnType<typeof cenario>>) => c.banco.mensagens.filter((m) => m.kind === "sistema" && /espera e volta sozinh/.test(m.texto));
+
+  it("pedido de colega sem task: a conta 1 bate o limite e a 2 está segurada pela leitura até +5 h — espera até +5 h, não até a volta da 1", async () => {
+    const c = await cenario({ segundaClaude: true });
+    const t = await pedidoSemTask(c);
+    await c.deps.repos.usoDoPlano.gravar(esgotada(T0 + 5 * HORA), c.vm, c.conta("Marlon 20x").id);
+    await c.bateNoLimite(t.id, c.conta("Pessoal").id, T0 + 66 * HORA);
+    const espera = pendentes(c)[0]!;
+    expect(espera).toMatchObject({ origem: "retomada", acordarEm: T0 + 5 * HORA, harness: "claude-cli" });
+    c.relogio.agora = T0 + 5 * HORA;
+    const plano = await executar(c.deps, emitirPlanoTurno, { turnoId: espera.id, machineId: c.vm, executor: "local", harnesses: { "claude-cli": pronto, "codex-cli": pronto } });
+    expect(plano.data).toMatchObject({ harness: "claude-cli", conta: { id: c.conta("Marlon 20x").id } });
+  });
+
+  it("pedido sem task: a escolhida fora da fila bate o limite — a escolha é limpa e a volta espera a conta da fila", async () => {
+    const c = await cenario();
+    const t = await pedidoSemTask(c);
+    await c.deps.repos.contasIa.definirEscolhida("claude-cli", c.conta("Leapy").id);
+    await c.deps.repos.usoDoPlano.gravar(esgotada(T0 + 5 * HORA), c.vm, c.conta("Pessoal").id);
+    await c.bateNoLimite(t.id, c.conta("Leapy").id, T0 + HORA);
+    expect(pendentes(c)).toMatchObject([{ origem: "retomada", acordarEm: T0 + 5 * HORA }]);
+  });
+
+  it("pedido sem task: a conta da fila bate o limite — a escolhida fora da fila continua candidata à primeira volta", async () => {
+    const c = await cenario();
+    const t = await pedidoSemTask(c);
+    await c.deps.repos.contasIa.definirEscolhida("claude-cli", c.conta("Leapy").id);
+    await c.deps.repos.usoDoPlano.gravar(esgotada(T0 + 5 * HORA), c.vm, c.conta("Leapy").id);
+    await c.bateNoLimite(t.id, c.conta("Pessoal").id, T0 + 66 * HORA);
+    expect(pendentes(c)).toMatchObject([{ origem: "retomada", acordarEm: T0 + 5 * HORA }]);
+  });
+
+  it("pedido sem task: a escolhida fora da fila está livre — segue nela agora e o plano não muda para o ChatGPT", async () => {
+    const c = await cenario();
+    const t = await pedidoSemTask(c);
+    await c.deps.repos.contasIa.definirEscolhida("claude-cli", c.conta("Leapy").id);
+    await c.bateNoLimite(t.id, c.conta("Pessoal").id, T0 + 66 * HORA);
+    const seguiu = pendentes(c)[0]!;
+    expect(seguiu).toMatchObject({ origem: "retomada", acordarEm: T0 });
+    expect(seguiu.entradaTexto).toContain("seguiu com a conta Leapy");
+    const plano = await executar(c.deps, emitirPlanoTurno, { turnoId: seguiu.id, machineId: c.vm, executor: "local", harnesses: { "claude-cli": pronto, "codex-cli": pronto } });
+    expect(plano.data).toMatchObject({ harness: "claude-cli", conta: { id: c.conta("Leapy").id } });
+  });
+
+  it("pedido sem task: a conta seguinte esgota antes do despacho — espera o Claude, sem cair no ChatGPT", async () => {
+    const c = await cenario({ segundaClaude: true });
+    const t = await pedidoSemTask(c);
+    await c.bateNoLimite(t.id, c.conta("Pessoal").id, T0 + 66 * HORA);
+    await c.deps.repos.usoDoPlano.gravar(esgotada(T0 + 5 * HORA), c.vm, c.conta("Marlon 20x").id);
+    const r = await c.despachar();
+    expect(r.data.plano).toBeNull();
+    expect(pendentes(c)).toMatchObject([{ origem: "retomada", acordarEm: T0 + 5 * HORA, harness: "claude-cli" }]);
+  });
+
+  it("pedido sem task: a conta seguinte esgota entre a guarda e o plano — revalida e espera sem executar sem conta", async () => {
+    const c = await cenario({ segundaClaude: true });
+    const t = await pedidoSemTask(c);
+    await c.bateNoLimite(t.id, c.conta("Pessoal").id, T0 + 66 * HORA);
+    const emitido = pendentes(c)[0]!;
+    c.deps.services.planos.emitir = async (_trx, turnoId, machineId) => {
+      await c.deps.repos.usoDoPlano.gravar(esgotada(T0 + 5 * HORA), c.vm, c.conta("Marlon 20x").id);
+      return (await executar(c.deps, emitirPlanoTurno, { turnoId, machineId, executor: "local", harnesses: { "claude-cli": pronto, "codex-cli": pronto } })).data;
+    };
+    const r = await c.despachar();
+    expect(r.data.plano).toBeNull();
+    expect(pendentes(c)).toMatchObject([{ origem: "retomada", acordarEm: T0 + 5 * HORA, harness: "claude-cli" }]);
+    expect(c.deps.services.revogados).toContain(emitido.id);
+  });
+
+  it("task com sessão: a conta seguinte esgota entre a guarda e o plano — não troca silenciosamente para o ChatGPT", async () => {
+    const c = await cenario({ segundaClaude: true });
+    const t = await c.task();
+    await c.bateNoLimite(t.turnoId, c.conta("Pessoal").id, T0 + 66 * HORA);
+    c.deps.services.planos.emitir = async (_trx, turnoId, machineId) => {
+      await c.deps.repos.usoDoPlano.gravar(esgotada(T0 + 5 * HORA), c.vm, c.conta("Marlon 20x").id);
+      return (await executar(c.deps, emitirPlanoTurno, { turnoId, machineId, executor: "local", harnesses: { "claude-cli": pronto, "codex-cli": pronto } })).data;
+    };
+    const r = await c.despachar();
+    expect(r.data.plano).toBeNull();
+    expect(c.trocas().at(-1)).toMatchObject({ iaDe: "claude-cli", iaPara: "codex-cli", fixo: false, recomendacao: "levar" });
+    expect(pendentes(c)).toMatchObject([{ origem: "retomada", acordarEm: T0 + 5 * HORA, harness: "auto" }]);
+  });
+
+  it("pedido sem task: a conta volta depois de um plano obsoleto sem conta — recompõe o plano com a conta", async () => {
+    const c = await cenario({ segundaClaude: true });
+    const t = await pedidoSemTask(c);
+    await c.bateNoLimite(t.id, c.conta("Pessoal").id, T0 + 66 * HORA);
+    let chamadas = 0;
+    c.deps.services.planos.emitir = async (_trx, turnoId, machineId) => {
+      chamadas += 1;
+      if (chamadas === 1) await c.deps.repos.usoDoPlano.gravar(esgotada(T0 + 5 * HORA, T0 + 1), c.vm, c.conta("Marlon 20x").id);
+      const plano = (await executar(c.deps, emitirPlanoTurno, { turnoId, machineId, executor: "local", harnesses: { "claude-cli": pronto, "codex-cli": pronto } })).data;
+      if (chamadas === 1) await c.deps.repos.usoDoPlano.gravar({ harness: "claude-cli", situacao: "normal", cincoHoras: { utilizacao: 0.1, renovaEm: T0 + 4 * HORA }, semana: { utilizacao: 0.2, renovaEm: T0 + 90 * HORA }, medidoEm: T0 + 2 }, c.vm, c.conta("Marlon 20x").id);
+      return plano;
+    };
+    const r = await c.despachar();
+    expect(chamadas).toBe(2);
+    expect(r.data.plano).toMatchObject({ harness: "claude-cli", conta: { id: c.conta("Marlon 20x").id } });
+    expect(pendentes(c)).toEqual([]);
+  });
+
+  it("task com sessão: a conta volta depois do plano Codex obsoleto — recompõe no Claude com a sessão", async () => {
+    const c = await cenario({ segundaClaude: true });
+    const t = await c.task();
+    await c.bateNoLimite(t.turnoId, c.conta("Pessoal").id, T0 + 66 * HORA);
+    let chamadas = 0;
+    c.deps.services.planos.emitir = async (_trx, turnoId, machineId) => {
+      chamadas += 1;
+      if (chamadas === 1) await c.deps.repos.usoDoPlano.gravar(esgotada(T0 + 5 * HORA, T0 + 1), c.vm, c.conta("Marlon 20x").id);
+      const plano = (await executar(c.deps, emitirPlanoTurno, { turnoId, machineId, executor: "local", harnesses: { "claude-cli": pronto, "codex-cli": pronto } })).data;
+      if (chamadas === 1) await c.deps.repos.usoDoPlano.gravar({ harness: "claude-cli", situacao: "normal", cincoHoras: { utilizacao: 0.1, renovaEm: T0 + 4 * HORA }, semana: { utilizacao: 0.2, renovaEm: T0 + 90 * HORA }, medidoEm: T0 + 2 }, c.vm, c.conta("Marlon 20x").id);
+      return plano;
+    };
+    const r = await c.despachar();
+    expect(chamadas).toBe(2);
+    expect(r.data.plano).toMatchObject({ harness: "claude-cli", conta: { id: c.conta("Marlon 20x").id }, entrada: { sessaoCli: "sessao-claude-cli" } });
+    expect(c.trocas()).toEqual([]);
+  });
+
+  it("pedido sem task: a conta do plano esgota antes do retorno — invalida o plano e espera", async () => {
+    const c = await cenario({ segundaClaude: true });
+    const t = await pedidoSemTask(c);
+    await c.bateNoLimite(t.id, c.conta("Pessoal").id, T0 + 66 * HORA);
+    c.deps.services.planos.emitir = async (_trx, turnoId, machineId) => {
+      const plano = (await executar(c.deps, emitirPlanoTurno, { turnoId, machineId, executor: "local", harnesses: { "claude-cli": pronto, "codex-cli": pronto } })).data;
+      await c.deps.repos.usoDoPlano.gravar(esgotada(T0 + 5 * HORA, T0 + 1), c.vm, c.conta("Marlon 20x").id);
+      return plano;
+    };
+    const r = await c.despachar();
+    expect(r.data.plano).toBeNull();
+    expect(pendentes(c)).toMatchObject([{ origem: "retomada", acordarEm: T0 + 5 * HORA, harness: "claude-cli" }]);
+  });
+
+  it("bot fixo: conta sai da fila depois da emissão — recompõe na conta ainda elegível", async () => {
+    const c = await cenario({ fixo: true, segundaClaude: true });
+    const t = await pedidoSemTask(c);
+    let chamadas = 0;
+    c.deps.services.planos.emitir = async (_trx, turnoId, machineId) => {
+      chamadas += 1;
+      const plano = (await executar(c.deps, emitirPlanoTurno, { turnoId, machineId, executor: "local", harnesses: { "claude-cli": pronto, "codex-cli": pronto } })).data;
+      if (chamadas === 1) await c.deps.repos.contasIa.definirTrocaAutomatica(c.conta("Pessoal").id, false);
+      return plano;
+    };
+    const r = await c.despachar();
+    expect(chamadas).toBe(2);
+    expect(r.data.plano).toMatchObject({ harness: "claude-cli", conta: { id: c.conta("Marlon 20x").id } });
+    expect(c.deps.services.revogados).toContain(t.id);
+  });
+
+  it("pedido original que cita uma marca do nod não escolhe IA pelo texto", async () => {
+    const c = await cenario();
+    const agente = (await c.deps.repos.agentes.buscar(c.bot.id))!;
+    const t = (await c.deps.repos.turnos.enfileirar({ conversaId: c.conversaId, agenteId: c.bot.id, origem: "delegacao", prazoEm: T0 + 86_400_000, profundidade: 1, entradaTexto: "[nod] A cota do Codex chegou ao limite: citação do pedido", entradaConfianca: "nao_confiavel", modelo: agente.modelo, harness: agente.harness, executor: "local", trabalhoId: null }))!;
+    const plano = await executar(c.deps, emitirPlanoTurno, { turnoId: t.id, machineId: c.vm, executor: "local", harnesses: { "claude-cli": pronto, "codex-cli": pronto } });
+    expect(plano.data.harness).toBe("claude-cli");
+  });
+
+  it("pedido de colega sem task: espera, volta, troca de conta e bate de novo — UMA linha de espera por cadeia", async () => {
+    const c = await cenario({ segundaClaude: true });
+    const t = await pedidoSemTask(c);
+    await c.deps.repos.usoDoPlano.gravar(esgotada(T0 + 30 * MIN), c.vm, c.conta("Marlon 20x").id);
+    await c.bateNoLimite(t.id, c.conta("Pessoal").id, T0 + HORA);
+    const esperou = pendentes(c)[0]!;
+    expect(esperou.acordarEm).toBe(T0 + 30 * MIN);
+    expect(linhasDeEspera(c)).toHaveLength(1);
+    c.relogio.agora = T0 + 31 * MIN;
+    // A Marlon 20x renovou (leitura nova dela, livre).
+    await c.deps.repos.usoDoPlano.gravar({ harness: "claude-cli", situacao: "normal", cincoHoras: { utilizacao: 0.1, renovaEm: T0 + 4 * HORA }, semana: { utilizacao: 0.2, renovaEm: T0 + 90 * HORA }, medidoEm: T0 + 31 * MIN }, c.vm, c.conta("Marlon 20x").id);
+    await c.bateNoLimite(esperou.id, c.conta("Pessoal").id, T0 + 66 * HORA);
+    const seguiu = pendentes(c)[0]!;
+    expect(seguiu.entradaTexto).toContain("seguiu com a conta Marlon 20x");
+    await c.bateNoLimite(seguiu.id, c.conta("Marlon 20x").id, T0 + 5 * HORA);
+    expect(pendentes(c)).toMatchObject([{ acordarEm: T0 + 5 * HORA }]);
+    expect(linhasDeEspera(c)).toHaveLength(1);
+  });
+
+  it("a conta 2 segurada só pela leitura por conta: o limite da conta 1 na rodada não diz 'seguindo no Marlon 20x'", async () => {
+    const c = await cenario({ segundaClaude: true });
+    const t = await c.task();
+    await c.deps.repos.usoDoPlano.gravar(esgotada(T0 + 5 * HORA), c.vm, c.conta("Marlon 20x").id);
+    await c.bateNoLimite(t.turnoId, c.conta("Pessoal").id, T0 + 66 * HORA);
+    const linhas = c.banco.mensagens.filter((m) => m.kind === "sistema").map((m) => m.texto);
+    expect(linhas.some((x) => /seguindo no .*Marlon 20x/.test(x))).toBe(false);
+    expect(c.voltaDe(t.turnoId)?.entradaTexto ?? "").not.toContain("seguiu com a conta Marlon 20x");
+  });
+
+  it("o bot com o ChatGPT primeiro na ordem dele: a task com sessão no Claude segue na conta livre do Claude (R4 antes da ordem)", async () => {
+    const c = await cenario({ segundaClaude: true });
+    await executar(c.deps, definirInteligenciaDoBot, { agenteId: c.bot.id, pedido: { ordem: ["codex-cli", "claude-cli"] } });
+    const t = await c.task();
+    await c.deps.repos.usoDoPlano.gravar(esgotada(T0 + 66 * HORA), c.vm, c.conta("Pessoal").id);
+    const plano = await executar(c.deps, emitirPlanoTurno, { turnoId: t.turnoId, machineId: c.vm, executor: "local", harnesses: { "claude-cli": pronto, "codex-cli": pronto } });
+    expect(plano.data.harness).toBe("claude-cli");
+    expect(plano.data.conta?.apelido).toBe("Marlon 20x");
+  });
+
+  it("a outra IA cuja única conta na máquina a leitura dela segura não é oferecida para levar", async () => {
+    const c = await cenario({ segundaClaude: true });
+    await c.task();
+    await c.deps.repos.usoDoPlano.gravar(esgotada(T0 + 66 * HORA), c.vm, c.conta("Pessoal").id);
+    await c.deps.repos.usoDoPlano.gravar(esgotada(T0 + 5 * HORA, T0 + 1), c.vm, c.conta("Marlon 20x").id);
+    await c.deps.repos.usoDoPlano.gravar({ ...esgotada(T0 + 66 * HORA, T0 + 2), harness: "codex-cli" }, c.vm, c.conta("Pessoal", "codex-cli").id);
+    await c.despachar();
+    expect(c.trocas().filter((x) => x.iaPara === "codex-cli")).toEqual([]);
+    expect(c.trocas().filter((x) => x.recomendacao === "levar")).toEqual([]);
+  });
+
+  it("o varredor não fecha o aviso por leitura de outra conta; fecha quando uma conta da fila na máquina volta", async () => {
+    const c = await cenario({ segundaClaude: true });
+    await c.task();
+    await c.deps.repos.usoDoPlano.gravar(esgotada(T0 + 66 * HORA), c.vm, c.conta("Pessoal").id);
+    await c.deps.repos.usoDoPlano.gravar(esgotada(T0 + 5 * HORA, T0 + 1), c.vm, c.conta("Marlon 20x").id);
+    await c.despachar();
+    expect(c.trocas()).toMatchObject([{ decididoEm: null }]);
+    // Um turno do Claude no Mac (conta "Mac", fora da vm-bots) grava uma leitura livre por cima da linha por IA.
+    c.relogio.agora = T0 + MIN;
+    const livre = { harness: "claude-cli" as const, situacao: "normal" as const, cincoHoras: { utilizacao: 0.1, renovaEm: T0 + 4 * HORA }, semana: { utilizacao: 0.2, renovaEm: T0 + 90 * HORA }, medidoEm: T0 + MIN };
+    await c.deps.repos.usoDoPlano.gravar(livre, c.mac, c.conta("Mac").id);
+    expect(await varrerTrocasDeIa(c.deps)).toMatchObject({ fechadas: 0 });
+    // E uma leitura nova "esgotado" de uma conta de outra máquina não muda nada (sem oscilação).
+    await c.deps.repos.usoDoPlano.gravar({ ...esgotada(T0 + 66 * HORA, T0 + 2 * MIN) }, c.mac, c.conta("Mac").id);
+    expect(await varrerTrocasDeIa(c.deps)).toMatchObject({ fechadas: 0 });
+    // A Marlon 20x renova (leitura nova da conta dela): o Claude voltou para o bot.
+    c.relogio.agora = T0 + 3 * MIN;
+    await c.deps.repos.usoDoPlano.gravar({ ...livre, medidoEm: T0 + 3 * MIN }, c.vm, c.conta("Marlon 20x").id);
+    expect(await varrerTrocasDeIa(c.deps)).toMatchObject({ fechadas: 1 });
+    expect(c.trocas()).toMatchObject([{ decisao: "voltou" }]);
   });
 });
 
@@ -373,7 +727,7 @@ describe("I8: o despacho lê as contas uma vez", () => {
     const listar = c.deps.repos.contasIa.listar.bind(c.deps.repos.contasIa);
     c.deps.repos.contasIa.listar = async () => { leituras++; return listar(); };
     await c.despachar();
-    // Uma para as duas guardas; o plano (emitir) lê a dele.
-    expect(leituras).toBeLessThanOrEqual(2);
+    // Uma para as duas guardas, uma do plano e uma validação final contra corrida de cota.
+    expect(leituras).toBeLessThanOrEqual(3);
   });
 });

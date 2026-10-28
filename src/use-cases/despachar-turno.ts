@@ -5,7 +5,7 @@ import { HARNESS_LEGADO, HARNESSES, type IdHarness } from "../contracts/harness.
 import type { Inventario } from "../contracts/inventario.ts";
 import type { PlanoTurno } from "../contracts/plano-turno.ts";
 import type { Turno } from "../contracts/turno.ts";
-import { portaoDaCota, type PortaoDaCota } from "../domain/cota-da-ia.ts";
+import { contasPelaCota, cotaDasContas, portaoDaCota, tipoParaCota, type PortaoDaCota } from "../domain/cota-da-ia.ts";
 import { entradaDaFila } from "../domain/entrada-da-fila.ts";
 import { ehErroDeDominio, ErroDeDominio } from "../domain/erro.ts";
 import { causaHarnessIndisponivel, harnessFixado, inventarioHarnessSemSonda } from "../domain/harness.ts";
@@ -29,8 +29,7 @@ import { redigir } from "../domain/redacao.ts";
 import { ehIaComConta } from "../domain/contas-da-pessoa.ts";
 import { temSessaoNaIa } from "../domain/troca-de-ia.ts";
 import { trabalhoAberto } from "../domain/trabalho.ts";
-import { avisarTrocaDeIa, estadoDaIa, maquinaDasTasks, outraIaParaAsTasks, type LeituraDasIas } from "./trocas-de-ia.ts";
-import { tipoParaCota } from "../domain/cota-da-ia.ts";
+import { avisarTrocaDeIa, contaQueParou, estadoDaIa, maquinaDasTasks, outraIaParaAsTasks, type LeituraDasIas } from "./trocas-de-ia.ts";
 
 export type EntradaDespacharTurno = {
   machineId: string;
@@ -180,13 +179,14 @@ export const despacharTurno: CasoDeUso<EntradaDespacharTurno, SaidaDespacharTurn
 
   // ADR-102 (2026-10-13): a máquina tem contas anunciadas e nenhuma serve sem a pessoa decidir — na conversa, a nota com
   // as contas livres (sem gastar turno pago); no fundo (task, rotina), o turno volta à fila até a primeira conta renovar.
+  let contasDaGuarda: LeituraDasContas | null = null;
   if (executor !== "catcher" && turno.origem !== "ligacao") {
     // Revisão do PR 2 (I8): as contas são lidas UMA vez para as duas guardas.
-    const contas = (await deps.repos.contasIa.temContaNaMaquina(input.machineId)) ? await lerContas(deps) : null;
-    const semConta = await semContaNaMaquina(deps, { turno, machineId: input.machineId, executor, harnessesProntos: input.harnessesProntos, contas, agora });
+    contasDaGuarda = (await deps.repos.contasIa.temContaNaMaquina(input.machineId)) ? await lerContas(deps) : null;
+    const semConta = await semContaNaMaquina(deps, { turno, machineId: input.machineId, executor, harnessesProntos: input.harnessesProntos, contas: contasDaGuarda, agora });
     if (semConta) return semConta;
     // ADR-108 (E1): a task do Automático com sessão na IA que está no limite não sai noutra IA pelo plano — espera a volta.
-    const segura = await segurarTaskNaIaDaSessao(deps, { turno, machineId: input.machineId, executor, harnessesProntos: input.harnessesProntos, harnessesDaPessoa: input.harnessesDaPessoa, prontosPorMaquina: input.prontosPorMaquina, contas, agora });
+    const segura = await segurarTaskNaIaDaSessao(deps, { turno, machineId: input.machineId, executor, harnessesProntos: input.harnessesProntos, harnessesDaPessoa: input.harnessesDaPessoa, prontosPorMaquina: input.prontosPorMaquina, contas: contasDaGuarda, agora });
     if (segura) return segura;
   }
 
@@ -202,7 +202,49 @@ export const despacharTurno: CasoDeUso<EntradaDespacharTurno, SaidaDespacharTurn
   if (adiado) return { data: adiado.data, events: [...events, ...adiado.events] };
 
   try {
-    const plano = await deps.tx((trx) => deps.services.planos.emitir(trx, comFila.id, input.machineId));
+    let plano = await deps.tx((trx) => deps.services.planos.emitir(trx, comFila.id, input.machineId));
+    // NOD-401 (revisão rodada 7): a leitura por conta pode mudar entre a guarda e a emissão. Se o plano fixo terminou sem
+    // conta numa máquina que gerencia contas, revalida com a leitura nova e transforma a corrida em espera, nunca em uma
+    // execução na pasta padrão nem em troca silenciosa de IA.
+    if (executor !== "catcher" && comFila.origem !== "ligacao" && contasDaGuarda) {
+      const trabalho = comFila.trabalhoId ? await deps.repos.trabalhos.buscar(comFila.trabalhoId) : null;
+      const iaDaSessao = trabalho && temSessaoNaIa(trabalho, trabalho.sessaoHarness ?? "") ? trabalho.sessaoHarness : null;
+      const deFundo = await fundoNaCadeia(deps, comFila);
+      const agente = await deps.repos.agentes.buscar(comFila.agenteId);
+      const ordemDoBot = agente ? inteligenciaDoAgente(agente).ordem : null;
+      for (let tentativa = 0; tentativa < 2; tentativa += 1) {
+        const contasFinais = await lerContas(deps);
+        // Reaplica as duas guardas sobre a MESMA leitura final. Elas transformam cota concorrente em espera/cartão.
+        const semConta = await semContaNaMaquina(deps, { turno: comFila, machineId: input.machineId, executor, harnessesProntos: input.harnessesProntos, contas: contasFinais, agora });
+        if (semConta) {
+          deps.services.tokenTurno.revogar(comFila.id);
+          return { data: semConta.data, events: [...events, ...semConta.events] };
+        }
+        const segura = await segurarTaskNaIaDaSessao(deps, { turno: comFila, machineId: input.machineId, executor, harnessesProntos: input.harnessesProntos, harnessesDaPessoa: input.harnessesDaPessoa, prontosPorMaquina: input.prontosPorMaquina, contas: contasFinais, agora });
+        if (segura) {
+          deps.services.tokenTurno.revogar(comFila.id);
+          return { data: segura.data, events: [...events, ...segura.events] };
+        }
+
+        const c = contasDaMaquinaDe(contasFinais, input.machineId, agora);
+        const visao = deFundo ? { ...c, contas: contasPelaCota(c.contas, cotaDasContas({ usos: await deps.repos.usoDoPlano.listarPorConta(), agora }), "fundo_seguindo") } : c;
+        const contaPlanejada = plano.conta ? visao.contas.find((x) => x.id === plano.conta!.id) : null;
+        const contaElegivel = plano.harness && ehIaComConta(plano.harness) ? escolherContaDoTurno(visao, ordemDoBot, agora)?.porIa[plano.harness] : null;
+        const contaValida = !plano.harness || !ehIaComConta(plano.harness) || !!contaPlanejada && contaPlanejada.removidaEm === null && visao.naMaquina.has(contaPlanejada.id) && (contaPlanejada.noLimiteAte === null || contaPlanejada.noLimiteAte <= agora) && contaElegivel?.id === contaPlanejada.id;
+        // No Automático, um plano de outra IA não pode descartar a sessão só porque leu uma cota que já mudou.
+        const sessaoValida = !plano.harness || harnessFixado(comFila.harness, comFila.modelo) !== null || !iaDaSessao || plano.harness === iaDaSessao;
+        if (contaValida && sessaoValida) break;
+        if (tentativa === 0) {
+          deps.services.tokenTurno.revogar(comFila.id);
+          plano = await deps.tx((trx) => deps.services.planos.emitir(trx, comFila.id, input.machineId));
+          continue;
+        }
+        // Duas visões consecutivas discordaram do plano: falha fechado, nunca executa com conta/IA obsoleta.
+        deps.services.tokenTurno.revogar(comFila.id);
+        const recusado = await recusarPorExecutor(deps, { turno: comFila, executor, inventario, agora, ...(plano.harness ? { harness: plano.harness } : {}) });
+        return { data: recusado.data, events: [...events, ...recusado.events] };
+      }
+    }
     // ADR-083: o trabalho do turno passa a rodando (ou a precisa de você, se uma decisão dele segue aberta).
     events.push(...(await sincronizarDoTurno(deps, comFila)));
     return { data: { plano, turno: comFila, motivo: null }, events };
@@ -277,11 +319,15 @@ async function semContaNaMaquina(
   if (!p.contas) return null;
   const c = contasDaMaquinaDe(p.contas, p.machineId, agora);
   if (c.naMaquina.size === 0) return null;
+  // NOD-401 (revisão rodada 6): a guarda pré-plano usa a mesma visão por conta do plano. Se a conta para a qual a cadeia
+  // acabou de trocar esgotou entre assentamento e despacho, o turno fixado espera nela em vez de escapar para outra IA.
+  const deFundo = await fundoNaCadeia(deps, turno);
+  const v = deFundo ? { ...c, contas: contasPelaCota(c.contas, cotaDasContas({ usos: await deps.repos.usoDoPlano.listarPorConta(), agora }), "fundo_seguindo") } : c;
   const agente = await deps.repos.agentes.buscar(turno.agenteId);
   const ordemDoBot = agente ? inteligenciaDoAgente(agente).ordem : null;
-  const r = escolherContaDoTurno(c, ordemDoBot, agora);
+  const r = escolherContaDoTurno(v, ordemDoBot, agora);
   const fixo = harnessFixado(turno.harness, turno.modelo);
-  const sem = semContaParaOTurno(c, r, fixo ? [fixo] : (p.harnessesProntos ?? IAS_COM_CONTA), agora, { iaFixa: fixo && ehIaComConta(fixo) ? fixo : null, ordemDoBot });
+  const sem = semContaParaOTurno(v, r, fixo ? [fixo] : (p.harnessesProntos ?? IAS_COM_CONTA), agora, { iaFixa: fixo && ehIaComConta(fixo) ? fixo : null, ordemDoBot });
   if (!sem) return null;
   // NOD-269: motivo próprio ('sem_conta'), não 'limite_do_plano' — a recusa no despacho não se confunde com o limite visto
   // no meio da rodada, e a repetição dos barrados por IA (barradosPorFaltaDeIa) a deixa de fora.
@@ -289,7 +335,7 @@ async function semContaNaMaquina(
   const autoria = autoriaAgente({ agenteId: turno.agenteId, contaDeExecucao: turno.ownerId, executor: p.executor, localityReason: "motor_ausente" });
   // NOD-269 (NOD-222): a espera é decidida pelo TIPO do turno — a frente que a pessoa abriu na conversa (origem
   // 'conversa' + trabalho) também espera; antes ela caía na nota, virava "falhou" e fechava o lote.
-  if (await fundoNaCadeia(deps, turno)) {
+  if (deFundo) {
     // ADR-099 §7: nenhuma frente falha por limite — a task espera a conta voltar (1 h sem horário do fornecedor).
     const volta = sem.voltaEm !== null && sem.voltaEm > agora ? sem.voltaEm : agora + PRAZO_SEM_HORARIO_MS;
     const espera = await esperarContaNaFrente(deps, { turno, executor: p.executor, ia: sem.de.ia, renovaEm: volta, autoria, agora });
@@ -309,7 +355,7 @@ async function semContaNaMaquina(
   const events: RuntimeEvent[] = [
     evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { motivo: "executor_indisponivel", motivo_falha: "sem_conta", sem_conta: true } }),
     // Revisão do PR #319: a fala que já esperou não espera de novo — sem a nota, ela sumiria calada (nunca silêncio).
-    ...(calada ? [] : await criarNotaDeContas(deps, { turno, autoria, agora, de: sem.de, decisao: sem.decisao, maquina: c.nomeDaMaquina ? { id: p.machineId, nome: c.nomeDaMaquina } : null, voltaEm: sem.voltaEm })),
+    ...(calada ? [] : await criarNotaDeContas(deps, { turno, autoria, agora, de: sem.de, decisao: sem.decisao, maquina: v.nomeDaMaquina ? { id: p.machineId, nome: v.nomeDaMaquina } : null, voltaEm: sem.voltaEm })),
     ...(adiada ?? []),
     // NOD-251/NOD-275: a rotina que não esperou a conta (sem task aberta) registra a janela 'interrompida'/limite_do_plano.
     ...(await registrarRecusaDaRotina(deps, turno, "limite_do_plano")),
@@ -339,8 +385,8 @@ async function segurarTaskNaIaDaSessao(
   const trabalho = await deps.repos.trabalhos.buscar(turno.trabalhoId);
   const ia = trabalho?.sessaoHarness ?? null;
   if (!trabalho || !trabalhoAberto(trabalho.estado) || !ia || !temSessaoNaIa(trabalho, ia) || !ehIaComConta(ia)) return null;
-  const [agente, preferencias, usos] = await Promise.all([deps.repos.agentes.buscar(turno.agenteId), deps.repos.preferencias.buscar(), deps.repos.usoDoPlano.listar()]);
-  const l: LeituraDasIas = { ...(p.contas ?? (await lerContas(deps))), preferencias, usos };
+  const [agente, preferencias, usos, usosPorConta] = await Promise.all([deps.repos.agentes.buscar(turno.agenteId), deps.repos.preferencias.buscar(), deps.repos.usoDoPlano.listar(), deps.repos.usoDoPlano.listarPorConta()]);
+  const l: LeituraDasIas = { ...(p.contas ?? (await lerContas(deps))), preferencias, usos, usosPorConta };
   const alvo = await maquinaDasTasks(deps, turno.agenteId, p.machineId);
   const ordemDoBot = agente ? inteligenciaDoAgente(agente).ordem : null;
   const geral = estadoDaIa(l, { ia, machineId: alvo, ordemDoBot, agora, tipo: tipoParaCota(turno, trabalho) });
@@ -366,7 +412,8 @@ async function segurarTaskNaIaDaSessao(
     const prontosDaPessoa = (Object.entries(p.harnessesDaPessoa ?? {}) as [IdHarness, Inventario | undefined][]).filter(([, i]) => i?.estado === "pronto").map(([h]) => h);
     const outra = await outraIaParaAsTasks(deps, { agenteId: turno.agenteId, iaDe: ia, prontosDoAlvo, prontosDaPessoa: prontosDaPessoa.length ? prontosDaPessoa : prontosDoAlvo, daMaquina, agora });
     para = outra.ia;
-    if (outra.ia || outra.noutraMaquina) aviso = await avisarTrocaDeIa(deps, { agenteId: turno.agenteId, conversaId: turno.conversaId, turnoId: null, iaDe: ia, iaPara: outra.ia, voltaEm: volta, fixo: false, machineId: alvo, foraDaMaquina: outra.ia ? null : { ia: outra.noutraMaquina!, maquina: daMaquina?.nomeDaMaquina ?? null }, autoria, agora });
+    const parada = contaQueParou(l, { ia, machineId: alvo, agora, voltaEm: volta, tipo: tipoParaCota(turno, trabalho) });
+    if (outra.ia || outra.noutraMaquina) aviso = await avisarTrocaDeIa(deps, { agenteId: turno.agenteId, conversaId: turno.conversaId, turnoId: null, iaDe: ia, iaPara: outra.ia, voltaEm: volta, fixo: false, machineId: alvo, contaQueParou: parada, foraDaMaquina: outra.ia ? null : { ia: outra.noutraMaquina!, maquina: daMaquina?.nomeDaMaquina ?? null }, autoria, agora });
   }
   log("info", "task_espera_ia_da_sessao", { turno_id: turno.id, trabalho_id: turno.trabalhoId, ia, acordar_em: volta, para, machine_id: alvo, pela_conta: pelaConta?.parou === true });
   return { data: { plano: null, turno: assentado ?? turno, motivo: "executor_indisponivel" }, events: [...espera, ...aviso, ...(await sincronizarDoTurno(deps, turno))] };

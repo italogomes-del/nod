@@ -6,7 +6,7 @@ import { destinoDaQueda, juntarQuedas, motivoDaQueda, ultimoSinalDoTurno, type M
 import { MOTIVO_SERVIDOR_NAO_RESPONDEU, motivoDaQuedaEmPortugues, motivoEmPortugues, redigir } from "../domain/redacao.ts";
 import { quandoDaFrase } from "../domain/erro-fornecedor.ts";
 import { JANELA_QUEDAS_NO_FUNDO_MS } from "../shared/constantes.ts";
-import { ehVoltaDoFundo, entradaDaRetomadaDaQueda } from "../domain/cota-da-ia.ts";
+import { cadeiaJaEsperou, ehVoltaDoFundo, entradaDaRetomadaDaQueda } from "../domain/cota-da-ia.ts";
 import { decidirEsperaNoFundo } from "../domain/espera-no-fundo.ts";
 import { trabalhoAberto } from "../domain/trabalho.ts";
 import { log } from "../obs/log.ts";
@@ -164,7 +164,8 @@ async function aposQuedaNoFundo(deps: DepsQueda, c: Caido & { rotinaId: string |
     evento(deps.escopo, { kind: "turno_criado", autoria, agora, conversaId: turno.conversaId, turnoId: volta.id, dados: { origem: volta.origem, agente_id: turno.agenteId, retoma_turno_id: retomaTurnoId, trabalho_id: turno.trabalhoId ?? null, acordar_em: acordarEm } }),
   ];
   const pedido = chave === "frente" ? "Esta task" : chave === "rotina" ? "Esta execução da rotina" : "Este pedido";
-  const jaEsperou = turno.origem === "retomada" && ehVoltaDoFundo(turno.entradaTexto);
+  // NOD-401: a troca de conta (seguiu na hora, sem avisar a espera) não conta como espera da cadeia.
+  const jaEsperou = turno.origem === "retomada" && cadeiaJaEsperou(turno.entradaTexto, ehVoltaDoFundo);
   // QA do NOD-386: a espera anterior foi de outro tipo (servidor ↔ máquina) — a causa mudou, e a linha nova é notícia.
   const esperouPor = (m: string) => jaEsperou && turno.entradaTexto.startsWith(entradaDaRetomadaDaQueda(m));
   const trocouDeCausa = c.servidorFalhou ? esperouPor(motivoEmPortugues("maquina_sem_contato")) : esperouPor(MOTIVO_SERVIDOR_NAO_RESPONDEU);

@@ -193,13 +193,21 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   const pelaCota = fundo ? cotaDasIasComContas({ usos: await deps.repos.usoDoPlano.listar(), usosPorConta, limites: preferencias.iasNoLimite, contas: lidas, agora }).map((c) => c.ia).filter((ia) => !temSessaoNaIa(daSessao, ia)) : [];
   const contas = daMaquina ? escolherContaDoTurno(daMaquina, inteligencia.ordem, agora) : null;
   const governadas = (ia: IdHarness) => contas !== null && ia in contas.porIa;
+  // NOD-401 (definido em 2026-10-28, ADR-108 R4): a task com sessão numa IA que ainda tem conta utilizável na máquina fica
+  // nessa IA — a conta em uso dela parou e a próxima da fila segue com o --resume (a sessão do Claude vale em qualquer
+  // conta). A posição das contas na lista nunca leva a task em silêncio para outra IA (recomeçar do resumo é decisão da
+  // pessoa, pelo aviso de troca). No ChatGPT (I1) a sessão mora na pasta da conta: só a conta da sessão a retoma — com
+  // outra, quem decide é a guarda do despacho e o aviso de troca de conta, nunca a ordem.
+  const contaDaFila = contas && daSessao?.sessaoHarness && temSessaoNaIa(daSessao, daSessao.sessaoHarness) ? (contas.porIa[daSessao.sessaoHarness as IaComConta] ?? null) : null;
+  const retomaNaConta = contaDaFila && daSessao && (contaDaFila.ia !== "codex-cli" || (await deps.repos.trabalhos.contaDaSessao(daSessao.id)) === contaDaFila.id);
+  const iaDaSessao = retomaNaConta ? contaDaFila.ia : null;
   // NOD-285 (K1): os anexos que existem (o arquivo limpo do disco não tem meta e não filtra) decidem quais IAs servem.
   const metasDosAnexos = await deps.repos.anexos.metas(turno.entradaAnexos);
   const escolha = executor !== "catcher" && input.harnesses
     ? escolherHarness(turno, input.harnesses, {
       tiposDeAnexo: metasDosAnexos.map((a) => tipoDoAnexo(a.mime)),
       ordem: contas
-        ? ordemCompleta([...(input.harnessPreferido ? [input.harnessPreferido] : []), ...contas.ordemIas, ...ordemEfetiva({ doBot: inteligencia.ordem, daPessoa: preferencias.ordemIas ?? null })])
+        ? ordemCompleta([...(iaDaSessao ? [iaDaSessao] : []), ...(input.harnessPreferido ? [input.harnessPreferido] : []), ...contas.ordemIas, ...ordemEfetiva({ doBot: inteligencia.ordem, daPessoa: preferencias.ordemIas ?? null })])
         : ordemEfetiva({ doBot: inteligencia.ordem, daPessoa: preferencias.ordemIas ?? null, preferido: input.harnessPreferido }),
       noLimite: [...new Set([...(contas?.iasSemConta ?? []), ...iasNoLimite(preferencias.iasNoLimite, agora).filter((ia) => !governadas(ia)), ...pelaCota])],
       escolhas: inteligencia.escolhas,

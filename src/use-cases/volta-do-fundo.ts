@@ -1,4 +1,5 @@
 import type { Turno } from "../contracts/turno.ts";
+import type { IdHarness } from "../contracts/harness.ts";
 import { ehFundo, ehVoltaDoFundo, entradaDaVolta, MARCA_DA_FALA_NA_FRENTE, MARCA_DO_PEDIDO_ORIGINAL, RETORNO_DO_LOTE } from "../domain/cota-da-ia.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { FALA_DEPOIS_DO_FIM, falasSemRespostaDoTurno, turnoFalou } from "../domain/fala-na-frente.ts";
@@ -22,7 +23,7 @@ type DepsFundo = Pick<Deps, "repos" | "agora">;
  */
 export async function enfileirarVoltaDoFundo(
   deps: DepsFundo,
-  p: { turno: Turno; retomaTurnoId: string; entradaTexto: string; acordarEm: number; tentativasTransitorias?: number; agora: number },
+  p: { turno: Turno; retomaTurnoId: string; entradaTexto: string; acordarEm: number; tentativasTransitorias?: number; harness?: IdHarness; agora: number },
 ): Promise<Turno> {
   const { turno } = p;
   const volta = await deps.repos.turnos.enfileirar({
@@ -36,11 +37,11 @@ export async function enfileirarVoltaDoFundo(
     entradaTexto: p.entradaTexto,
     entradaConfianca: turno.entradaConfianca,
     sobProcuracaoDe: turno.sobProcuracaoDe ?? null,
-    // NOD-279 D7 revisto pelo ADR-108 (#358): a volta segue com a inteligência do turno. A task com sessão já fica na IA da
-    // sessão pela guarda do despacho e do plano (segurarTaskNaIaDaSessao); fixar o harness aqui a tiraria do Automático e
-    // anularia o "levar" (a task sem sessão seguiria presa na IA no limite).
+    // NOD-279 D7 revisto pelo ADR-108 (#358): normalmente a volta segue com a inteligência do turno. NOD-401: quando a
+    // conta trocou e seguiu na hora, `harness` fixa só esta cadeia na IA anunciada; as quedas e tentativas seguintes herdam
+    // a marca durável, e a guarda de contas espera em vez de mudar silenciosamente para outra IA.
     modelo: turno.modelo,
-    harness: turno.harness,
+    harness: p.harness ?? turno.harness,
     executor: turno.executor,
     acordarEm: p.acordarEm,
     // NOD-309: o teto de 3 tentativas conta por cadeia — a volta herda o contador (a do transitório, já somado).

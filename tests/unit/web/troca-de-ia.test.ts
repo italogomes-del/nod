@@ -134,6 +134,11 @@ describe("revisão do PR 2: o aviso de troca de IA", () => {
     expect(sem).not.toContain("· conta");
   });
 
+  it("NOD-401: com a conta que parou no aviso, o título diz o apelido dela; sem ela, só a IA", () => {
+    expect(cartaoTrocaDeIa(aviso({ contaQueParou: { id: "x", apelido: "marlonwlv (20x)" } }), { nomeDoBot: "Eng 1", agora: AGORA })).toContain("<b>A conta marlonwlv (20x) do Claude chegou ao limite");
+    expect(cartaoTrocaDeIa(aviso(), { nomeDoBot: "Eng 1", agora: AGORA })).toContain("<b>O Claude chegou ao limite");
+  });
+
   it("C5: a outra IA não está na máquina do bot — só esperar, e o cartão diz por quê", () => {
     const html = cartaoTrocaDeIa(aviso({ iaPara: null, foraDaMaquina: { ia: "codex-cli", maquina: "vm-bots" } }), { nomeDoBot: "Eng 1", agora: AGORA })!;
     expect(html).toContain("O ChatGPT não está em vm-bots, a máquina do Eng 1.");

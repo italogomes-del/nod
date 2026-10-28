@@ -126,6 +126,25 @@ com teste; as decisões abaixo foram tomadas sem o Marlon e ficam para ele confi
   sessão é `fundo_seguindo`, então só o limite medido (100%) a segura — ela espera a janela renovar com o aviso, em vez de
   sair no ChatGPT. Na reserva (99%), a task que já começou segue na IA da sessão: o plano não põe essa IA no "no limite"
   dela (`emitir-plano-turno.ts`).
+  *Emenda de 2026-10-28 (NOD-401):* com conta da IA logada na máquina, a cota medida é **por conta**
+  (`uso_do_plano_contas`, `contasComCota`, a mesma regra de `cotaDasIasComContas`). A conta que a leitura dela segura
+  conta como no limite, e a próxima da fila segue sozinha. A linha por IA (`cotaDasIas`) só vale para IA sem conta na
+  máquina. O plano põe na frente a IA da sessão que ainda tem conta utilizável, para que a posição das contas na lista
+  não a leve para outra IA em silêncio. A outra IA oferecida e o "voltou" do varredor usam a mesma visão. O cartão diz a
+  conta cuja volta ele mostra (`contaQueParou`). Isso vale também para o bot com ordem própria: a task com sessão fica na IA
+  da sessão enquanto ela tiver conta livre, porque o R4 vem antes da ordem. No ChatGPT (I1), a prioridade vale só quando
+  a conta da fila é a da sessão; com outra conta, decide o aviso de troca de conta. No assentamento, o fundo que segue na
+  próxima conta da mesma IA ganha a linha leve "acabou → seguindo no …" e a entrada da troca, nunca "espera e volta
+  sozinha", e quem pediu não recebe aviso de espera.
+  A troca de conta não conta como espera (`ehTrocaDeConta`): se a conta seguinte também bate o limite, a cadeia sem task
+  ganha a linha de espera e o aviso a quem pediu. A decisão do assentamento para o fundo também lê a cota por conta, então
+  não diz "seguindo no …" para uma conta que a leitura dela segura. Duas suposições ficam registradas. Com várias contas
+  no limite, o cartão nomeia só a que volta primeiro, porque é a volta que ele mostra. No ChatGPT, com a sessão numa conta
+  livre que não é a primeira da fila na máquina, o plano ainda escolhe a da fila e o aviso de troca de conta decide. Esse
+  comportamento já existia antes do NOD-401 e fica para um follow-up.
+  O fundo que não segue na hora espera a primeira conta da fila da IA na máquina que volta, pela mesma visão da cota, e não
+  só a conta desta rodada. A troca de conta numa cadeia que já esperou leva essa marca na entrada (`cadeiaJaEsperou`), para
+  que a cadeia continue com uma só linha de espera e um só aviso a quem pediu.
 - **O aviso reaberto (C2).** Reabrir o aviso do mesmo bot e da mesma IA até 30 min depois de fechar reaproveita a linha
   do anterior na conversa (`JANELA_DO_AVISO_MS`), só no aviso das tasks.
 - **Herança do "esperar" (C3).** A pessoa escolheu "esperar" para (bot, IA) e a IA não voltou: a task seguinte que para
