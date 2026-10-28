@@ -37,6 +37,24 @@ export const PRAZO_ACAO_MS = 55_000;
 export const BATIMENTO_MS = 30_000;
 /** Displays :100 a :199 (ADR-122: Xvfb :1NN). */
 export const DISPLAY_BASE = 100;
+/**
+ * Config do dbus de cada computador: o session.conf padrão sem `<standard_session_servicedirs/>` (nada é ativado sob
+ * demanda; o keyring é sempre o que o supervisor sobe destravado). O endereço vem do `--address`.
+ */
+export const CONF_DO_BUS = `<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-Bus Bus Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
+<busconfig>
+  <type>session</type>
+  <keep_umask/>
+  <listen>unix:tmpdir=/tmp</listen>
+  <auth>EXTERNAL</auth>
+  <policy context="default">
+    <allow send_destination="*" eavesdrop="true"/>
+    <allow eavesdrop="true"/>
+    <allow own="*"/>
+  </policy>
+</busconfig>
+`;
 
 /** PSS (MB) da árvore de processos de `pid`, via smaps_rollup. 0 se não der para ler. */
 export function memoriaDaArvore(pid) {
@@ -225,7 +243,12 @@ export function criarSupervisor(op) {
   async function ligarMaquina(c, chaveMaquina) {
     const socketBus = path.join(c.d.bus, 'socket');
     await rm(socketBus, { force: true });
-    const dbus = iniciarProc(bin.dbus, ['--session', '--nofork', '--nopidfile', `--address=unix:path=${socketBus}`, '--print-address=1'], {});
+    // NOD-96: barramento SEM ativação de serviço. Com o session.conf padrão, o secret-tool que chega antes do nosso
+    // keyring tomar o nome ativa um 2º gnome-keyring (sem senha) pelo org.freedesktop.secrets.service; ele fica com o
+    // nome, o nosso sai com "another secret service is running" e o store morre pedindo prompt: "o keyring não destravou".
+    const confBus = path.join(c.d.run, 'bus.conf');
+    await writeFile(confBus, CONF_DO_BUS, { mode: 0o600 });
+    const dbus = iniciarProc(bin.dbus, [`--config-file=${confBus}`, '--nofork', '--nopidfile', `--address=unix:path=${socketBus}`, '--print-address=1'], {});
     c.procs.push(dbus);
     const endereco = await primeiraLinhaDe(dbus, 10_000);
     if (!endereco) throw Object.assign(new Error('o dbus não abriu'), { codigo: 'nao_iniciou' });
@@ -348,8 +371,13 @@ export function criarSupervisor(op) {
       if (c.telas.get(agenteId) === t && t.estado !== 'fechada') { c.telas.set(agenteId, { estado: 'fechada', ultimaAcaoEm: t.ultimaAcaoEm }); relatarEstado(c); }
     });
     t.abrindo = (async () => {
-      const loja = await lerLoja(c.d.loja, c.chaveLoja);
-      const storage = await lerTudo(c.d.storage, c.chaveStorage).catch((e) => { log(`storage: ${e?.message}`); return { itens: [] }; });
+      // NOD-96: lê na fila da máquina, DEPOIS das fusões em curso. A tela manda o diff de cookies antes da resposta da
+      // ação; lida fora da fila, a loja ainda não tinha o login que outra tela acabou de fazer, e o repasse só alcança as
+      // telas já abertas: a tela que abria logo depois ficava deslogada ("login em comum entre as telas" na VM).
+      const { loja, storage } = await naFila(c, async () => ({
+        loja: await lerLoja(c.d.loja, c.chaveLoja),
+        storage: await lerTudo(c.d.storage, c.chaveStorage).catch((e) => { log(`storage: ${e?.message}`); return { itens: [] }; }),
+      }));
       // NOD-97 PR 5: as senhas salvas em comum viajam no config (o valor já vem cifrado pelo Safe Storage); a tela as
       // importa no perfil ANTES de abrir o Chrome. Senhas ilegíveis não seguram a tela (abre sem elas).
       const senhas = await lerSenhas(c.d.senhas, c.chaveSenhas).catch((e) => { log(`senhas: ${e?.message}`); return null; });
@@ -357,7 +385,7 @@ export function criarSupervisor(op) {
         tipo: 'abrir',
         config: {
           agenteId, display, raiz, run, ocultar: [path.dirname(terminal)], resolv, resolvEm, perfil: path.join(c.d.perfis, agenteId), perfilBase: c.d.perfilBase, workspace: path.join(c.d.workspace, agenteId),
-          logins: c.d.logins, tmp: path.join(c.d.run, 'telas', agenteId), x11, bus: c.d.bus, busEndereco: c.busEndereco, bin, sandbox: op.sandbox !== false,
+          logins: c.d.logins, tmp: path.join(c.d.run, 'telas', agenteId), scripts: path.join(c.d.raiz, 'bwrap', agenteId), x11, bus: c.d.bus, busEndereco: c.busEndereco, bin, sandbox: op.sandbox !== false,
           xvfbArgs: op.xvfbArgs, cookies: cookiesVivos(loja, agora()), storage: storage.itens, geracao: storage.geracao, senhas,
         },
       });
@@ -492,6 +520,7 @@ export function criarSupervisor(op) {
     c.telas.delete(agenteId);
     await rm(path.join(c.d.perfis, agenteId), { recursive: true, force: true });
     await rm(path.join(c.d.run, 'telas', agenteId), { recursive: true, force: true });
+    await rm(path.join(c.d.raiz, 'bwrap', agenteId), { recursive: true, force: true });
     relatarEstado(c);
   }
 

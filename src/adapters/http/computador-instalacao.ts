@@ -46,15 +46,18 @@ export const RESOLV_DO_STUB = "/run/systemd/resolve/stub-resolv.conf";
 /** O grupo do socket do terminal: só o nod-pc (o supervisor). Separado do grupo do workspace (nod-pc-arquivos). */
 export const GRUPO_DO_TERMINAL = "nod-pc-ctl";
 
-const ENDURECIMENTO = `NoNewPrivileges=true
+/**
+ * NOD-96: o supervisor fica SEM ProtectKernelTunables e ProtectKernelLogs. No systemd 257 (Debian 13) elas cobrem
+ * pedaços do /proc, e o kernel recusa o procfs novo do bwrap das telas ("Can't mount proc on /proc"): nenhuma tela
+ * abre. O nod-pc não tem privilégio (NoNewPrivileges) e cada tela segue no bwrap; o terminal mantém as duas.
+ */
+const endurecimento = (doKernel: boolean) => `NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
 PrivateDevices=true
-ProtectKernelTunables=true
-ProtectKernelModules=true
-ProtectKernelLogs=true
-ProtectControlGroups=true
+${doKernel ? "ProtectKernelTunables=true\n" : ""}ProtectKernelModules=true
+${doKernel ? "ProtectKernelLogs=true\n" : ""}ProtectControlGroups=true
 OOMScoreAdjust=300
 IPAddressDeny=${REDES_NEGADAS.join(" ")}
 IPAddressAllow=${REDES_LIBERADAS.join(" ")}
@@ -101,7 +104,7 @@ Restart=always
 RestartSec=5
 KillMode=mixed
 TimeoutStopSec=30
-${ENDURECIMENTO}
+${endurecimento(false)}
 `,
   "nod-computador-terminal.socket": `[Unit]
 Description=Nod: o socket do terminal do computador da pessoa (ADR-122)
@@ -132,7 +135,7 @@ ReadWritePaths=/var/lib/nod-computador
 ExecStart=/opt/nod-motor/node/bin/node /opt/nod-motor/computador/terminal.mjs
 Restart=always
 RestartSec=5
-${ENDURECIMENTO}
+${endurecimento(true)}
 `,
 };
 

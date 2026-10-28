@@ -100,7 +100,9 @@ try {
 
   const bots = Array.from({ length: TELAS }, (_, i) => `bot-${i + 1}`);
   const primeira = await navegar(bots[0], 'https://example.com/');
-  passo('o Chromium real abre e navega', primeira.desfecho === 'ok' && /Example Domain/.test(texto(primeira)), primeira.motivo ?? '');
+  // O example.com tirou o "Example Domain" do corpo (fica só no <title>): vale o título ou o texto de hoje.
+  const exemplo = (r) => /Example Domain/.test(r?.resultado?.tela?.titulo ?? '') || /documentation examples/.test(texto(r));
+  passo('o Chromium real abre e navega', primeira.desfecho === 'ok' && exemplo(primeira), primeira.motivo ?? texto(primeira).slice(0, 80));
 
   // Login em comum: o bot 1 entra; o bot 2 (tela aberta depois) já vê o cookie.
   await navegar(bots[0], LOGIN);

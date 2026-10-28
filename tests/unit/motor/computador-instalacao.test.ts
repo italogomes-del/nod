@@ -57,7 +57,12 @@ describe("instalação do computador da pessoa (ADR-122)", () => {
     const u = UNIDADES_DO_COMPUTADOR;
     for (const servico of ["nod-computador.service", "nod-computador-terminal.service"]) {
       const s = u[servico]!;
-      for (const d of ["NoNewPrivileges=true", "ProtectSystem=strict", "ProtectHome=true", "PrivateTmp=true", "PrivateDevices=true", "ProtectKernelTunables=true", "ProtectKernelModules=true", "OOMScoreAdjust=300"]) expect(s).toContain(`${d}\n`);
+      for (const d of ["NoNewPrivileges=true", "ProtectSystem=strict", "ProtectHome=true", "PrivateTmp=true", "PrivateDevices=true", "ProtectKernelModules=true", "ProtectControlGroups=true", "OOMScoreAdjust=300"]) expect(s).toContain(`${d}\n`);
+      // NOD-96: no systemd 257 elas impedem o procfs do bwrap das telas; só o terminal (sem bwrap) as mantém.
+      for (const d of ["ProtectKernelTunables=true", "ProtectKernelLogs=true"]) {
+        if (servico === "nod-computador.service") expect(s).not.toContain(d);
+        else expect(s).toContain(`${d}\n`);
+      }
       const negadas = /IPAddressDeny=(.*)\n/.exec(s)?.[1]?.split(" ");
       expect(negadas).toEqual([...REDES_NEGADAS]);
       for (const r of ["127.0.0.0/8", "::1/128", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "100.64.0.0/10", "fc00::/7", "fe80::/10"]) expect(negadas).toContain(r);

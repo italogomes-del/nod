@@ -415,23 +415,32 @@ export function criarTela(config, avisar) {
       ...(comPerfil ? { perfil: config.perfil, workspace: config.workspace, logins: config.logins } : {}),
     });
 
+  // NOD-96: os scripts do bwrap NÃO ficam no tmp: ele é o /run da unit (noexec no Debian 12: o spawn dá EACCES e o
+  // Xvfb "não abre") e entra com escrita no bwrap da tela (o Chromium reescreveria o próprio lançador). Ficam em
+  // `config.scripts`, sob a raiz dos computadores (exec, e some atrás do tmpfs dentro do bwrap).
+  const pastaDosScripts = config.scripts ?? config.tmp;
   async function noBwrap(nome, binario, comPerfil) {
     if (!config.bin.bwrap) return binario;
-    const script = path.join(config.tmp, `${nome}.sh`);
+    await mkdir(pastaDosScripts, { recursive: true, mode: 0o700 });
+    const script = path.join(pastaDosScripts, `${nome}.sh`);
     await writeFile(script, scriptDoBwrap({ bwrap: config.bin.bwrap, args: bwrapArgs(comPerfil), binario }), { mode: 0o700 });
     await chmod(script, 0o700);
     return script;
   }
 
+  let erroAoIniciar = null;
   function iniciar(bin, args) {
     const p = spawn(bin, args, { stdio: 'ignore', env: ambienteX, detached: true });
-    p.on('error', () => {});
+    // O erro do spawn (EACCES, ENOENT) vai no detalhe da falha: engolido, só restava "o Xvfb não abriu".
+    p.on('error', (e) => { erroAoIniciar ??= `${path.basename(bin)}: ${e?.code ?? e?.message ?? e}`; });
     filhos.push(p);
     return p;
   }
 
   async function subir() {
     await mkdir(config.tmp, { recursive: true, mode: 0o700 });
+    // NOD-96: com PrivateTmp na unit, o /tmp nasce vazio e o bwrap não monta o /tmp/.X11-unix que não existe.
+    await mkdir(config.x11, { recursive: true, mode: 0o1777 }).catch(() => {});
     await mkdir(ambienteX.HOME, { recursive: true, mode: 0o700 });
     await mkdir(config.workspace, { recursive: true });
     await forkDoPerfil(config.perfilBase, config.perfil);
@@ -453,7 +462,7 @@ export function criarTela(config, avisar) {
     iniciar(await noBwrap('xvfb', config.bin.xvfb, false), argsDoXvfb(config.display, XAUTHORITY, config.xvfbArgs ?? []));
     for (let i = 0; i < 100; i++) {
       if (await access(socketX).then(() => true, () => false)) break;
-      if (i === 99) throw falhaDe('nao_iniciou', 'o Xvfb não abriu');
+      if (i === 99 || erroAoIniciar) throw falhaDe('nao_iniciou', `o Xvfb não abriu${erroAoIniciar ? ` (${erroAoIniciar})` : ''}`);
       await esperar(100);
     }
     const cfg = path.join(config.tmp, 'openbox.xml');
