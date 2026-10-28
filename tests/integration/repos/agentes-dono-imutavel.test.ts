@@ -73,9 +73,9 @@ describeIntegracao("agentesRepo: dono imutável, perfil, frota e visibilidade", 
       const m1 = await repos.memorias.criar({ agenteId: a?.id ?? "", tipo: "preferencia", texto: "resumos em tópicos", origem: "agente" });
       const m2 = await repos.memorias.criar({ agenteId: a?.id ?? "", tipo: "fato", texto: "PR 42 está aberto", origem: "pessoa" });
       expect((await repos.memorias.listarDoAgente(a?.id ?? "")).map((m) => m.id)).toEqual([m1?.id, m2?.id]);
-      expect(await repos.memorias.atualizar(m1?.id ?? "", { texto: "prefiro tópicos" })).toMatchObject({ texto: "prefiro tópicos", tipo: "preferencia" });
-      expect(await repos.memorias.apagar(m2?.id ?? "")).toBe(true);
-      expect(await repos.memorias.apagar(m2?.id ?? "")).toBe(false);
+      expect(await repos.memorias.atualizar(m1?.id ?? "", { texto: "prefiro tópicos" }, { autor: "pessoa" })).toMatchObject({ texto: "prefiro tópicos", tipo: "preferencia" });
+      expect(await repos.memorias.apagar(m2?.id ?? "", { autor: "pessoa" })).toMatchObject({ id: m2?.id });
+      expect(await repos.memorias.apagar(m2?.id ?? "", { autor: "pessoa" })).toBeNull();
       expect(await repos.memorias.listarDoAgente(a?.id ?? "")).toHaveLength(1);
     });
   });

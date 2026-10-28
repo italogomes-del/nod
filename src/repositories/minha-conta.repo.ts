@@ -209,6 +209,10 @@ export function exportacoesRepo(conn: Conn, escopo: Escopo) {
         where m.tenant_id = ${t} and m.owner_id = ${p} order by m.conversa_id, m.criado_em, m.id`;
       const memorias = await conn<Record<string, unknown>[]>`select id, agente_id, tipo, texto, criado_em
         from agente_memorias where tenant_id = ${t} and owner_id = ${p} order by criado_em, id`;
+      // NOD-58: o diário da memória também é da pessoa.
+      const historicoMemoria = await conn<Record<string, unknown>[]>`select id, agente_id, memoria_id, acao, autor, antes_tipo, antes_texto,
+          depois_tipo, depois_texto, desfaz_id, desfeita_em, revisada_em, criado_em
+        from memoria_diario where tenant_id = ${t} and owner_id = ${p} order by criado_em, id`;
       const rotinas = await conn<Record<string, unknown>[]>`select id, agente_id, cron, fuso_iana, instrucao, entregavel, estado, criado_em
         from rotinas where tenant_id = ${t} and owner_id = ${p} and excluido_em is null order by criado_em, id`;
       const decisoes = await conn<Record<string, unknown>[]>`select id, tipo, estado, agente_id, conversa_id, frase, criado_em, decidida_em
@@ -220,7 +224,7 @@ export function exportacoesRepo(conn: Conn, escopo: Escopo) {
         from trilha tr where tr.tenant_id = ${t} and tr.owner_id = ${p} order by tr.em, tr.id`;
       const foto = perfil?.foto instanceof Uint8Array && typeof perfil.foto_tipo === "string" ? { bytes: perfil.foto, tipo: perfil.foto_tipo } : null;
       const perfilSemFoto = perfil ? { nome: perfil.nome ?? null, sobre_mim: perfil.sobre_mim ?? null, como_conheceu: perfil.como_conheceu ?? null, objetivo: perfil.objetivo ?? null, tamanho_time: perfil.tamanho_time ?? null } : null;
-      return { perfil: perfilSemFoto, foto, bots, conversas, mensagens, memorias, rotinas, decisoes, trilha };
+      return { perfil: perfilSemFoto, foto, bots, conversas, mensagens, memorias, historicoMemoria, rotinas, decisoes, trilha };
     },
     /** Apaga o arquivo das vencidas (fica a linha, sem o peso). */
     async limparVencidas(agora: number): Promise<number> {
@@ -238,6 +242,7 @@ export type DadosDaPessoa = {
   conversas: Record<string, unknown>[];
   mensagens: Record<string, unknown>[];
   memorias: Record<string, unknown>[];
+  historicoMemoria: Record<string, unknown>[];
   rotinas: Record<string, unknown>[];
   decisoes: Record<string, unknown>[];
   trilha: Record<string, unknown>[];

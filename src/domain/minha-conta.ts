@@ -104,7 +104,7 @@ type Linhas = readonly Record<string, unknown>[];
  * como arquivo. Puro: quem chama monta o zip.
  */
 export function arquivosDaExportacao(
-  d: { perfil: Record<string, unknown> | null; foto: { bytes: Uint8Array; tipo: string } | null; bots: Linhas; conversas: Linhas; mensagens: Linhas; memorias: Linhas; rotinas: Linhas; decisoes: Linhas; trilha: Linhas },
+  d: { perfil: Record<string, unknown> | null; foto: { bytes: Uint8Array; tipo: string } | null; bots: Linhas; conversas: Linhas; mensagens: Linhas; memorias: Linhas; historicoMemoria?: Linhas; rotinas: Linhas; decisoes: Linhas; trilha: Linhas },
   conta: { email: string },
   agora: number,
 ): { nome: string; dados: string | Uint8Array }[] {
@@ -125,6 +125,7 @@ export function arquivosDaExportacao(
         "",
         "perfil.json: nome, e-mail e Sobre mim (e a foto, se houver).",
         "bots.json: os bots que você criou. memorias.json: o que eles guardaram. rotinas.json: as rotinas.",
+        "memoria_diario.json: cada mudança na memória dos bots (antes e depois, quem fez, o que foi desfeito).",
         "conversas.json e conversas/<id>.json: as conversas e as mensagens de cada uma.",
         "decisoes.json: o que você aprovou ou recusou. trilha.json: o registro legível das ações dos bots.",
         "",
@@ -136,6 +137,7 @@ export function arquivosDaExportacao(
     { nome: "bots.json", dados: json(d.bots) },
     { nome: "conversas.json", dados: json(d.conversas) },
     { nome: "memorias.json", dados: json(d.memorias) },
+    { nome: "memoria_diario.json", dados: json(d.historicoMemoria ?? []) },
     { nome: "rotinas.json", dados: json(d.rotinas) },
     { nome: "decisoes.json", dados: json(d.decisoes) },
     { nome: "trilha.json", dados: json(d.trilha) },

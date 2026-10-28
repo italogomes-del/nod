@@ -71,7 +71,7 @@ export const duplicarAgente: CasoDeUso<{ agenteId: string; rotinasPausadas?: boo
   ];
   if (dona) {
     for (const m of await deps.repos.memorias.listarDoAgente(original.id)) {
-      await deps.repos.memorias.criar({ agenteId: agente.id, tipo: m.tipo, texto: m.texto, origem: m.origem });
+      await deps.repos.memorias.criar({ agenteId: agente.id, tipo: m.tipo, texto: m.texto, origem: m.origem }, { diario: false });
     }
     events.push(...(await copiarConcessoes(deps, original.id, agente.id)));
     events.push(...(await copiarRegrasPermanentes(deps, original.id, agente.id, conversa.id)));

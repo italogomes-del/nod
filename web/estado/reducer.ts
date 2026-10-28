@@ -18,7 +18,7 @@ import type { UsoDoPlanoDto } from "../../src/contracts/uso-do-plano.ts";
 import type { DisponibilidadeLigacao } from "../../src/contracts/ligacao.ts";
 import type { EstadoOnboarding } from "../../src/contracts/onboarding.ts";
 import type { AppComLogo } from "../../src/contracts/marketplace.ts";
-import type { Memoria } from "../../src/contracts/memoria.ts";
+import type { EntradaDiario, Memoria, PaginaDiario, TipoMemoria } from "../../src/contracts/memoria.ts";
 import type { NaoLidosDto } from "../../src/contracts/nao-lidos.ts";
 import type { CausaNativa, Negacao } from "../../src/contracts/negacao.ts";
 import type { ExecucaoRotina } from "../../src/contracts/rotina.ts";
@@ -196,7 +196,11 @@ export type NivelGaveta =
   | { tipo: "acesso"; id: string }
   | { tipo: "dar-acesso" }
   | { tipo: "perfil" }
-  | { tipo: "memoria" }
+  /**
+   * NOD-58: a Memória tem duas abas (Memórias | Histórico). `editando` é a memória aberta no editor (opção A, no lugar);
+   * `menu`, a do "…" aberto; `realce`, a entrada do Histórico que "Ver no Histórico"/"Ver a mais nova" apontou.
+   */
+  | { tipo: "memoria"; aba?: "memorias" | "historico"; editando?: string; menu?: string; realce?: string }
   | { tipo: "inteligencia" }
   | { tipo: "nova-rotina" }
   /** ADR-083 (#196): os trabalhos do bot por grupo (Precisa de você, Trabalhando, Na fila, Terminados hoje). */
@@ -205,6 +209,9 @@ export type NivelGaveta =
   | { tipo: "atividade" }
   /** ADR-125 (NOD-349): Atalhos, Perfil (Missão e voz), Acessos, Ambiente e o Modo dev, fora da visão geral. */
   | { tipo: "ajustes" };
+
+/** NOD-58: a memória apagada nesta sessão, que fica no lugar como uma linha com Desfazer. */
+export type MemoriaApagadaNaTela = { memoriaId: string; tipo: TipoMemoria; texto: string; criadoEm: number };
 
 /** ADR-125: as abas da visão geral da gaveta (a Biblioteca chegou com a NOD-326). */
 export type AbaGaveta = "detalhes" | "biblioteca" | "computador";
@@ -285,7 +292,7 @@ export type EscolhaComposer = { outroAssunto: boolean; alvoId: string | null };
  */
 export type CitacaoNoCampo = { mensagemId: string; trecho: string };
 
-export type Invalidacao = "onboarding" | "ligacao" | "trabalhos" | `trabalho:${string}` | `disponibilidade:${string}` | "gestao" | "frota" | "sua-vez" | "nao-lidos" | "rotinas" | "conectores" | "inventario" | "executor" | "ias" | "uso-plano" | "salas" | "chaves" | "maquinas" | "nuvem" | "contas" | "relatos" | `conversa:${string}` | `vivos:${string}` | `memoria:${string}` | `concessoes:${string}` | `execucoes:${string}` | `atividade:${string}` | `atividade-hoje:${string}` | `biblioteca:${string}`;
+export type Invalidacao = "onboarding" | "ligacao" | "trabalhos" | `trabalho:${string}` | `disponibilidade:${string}` | "gestao" | "frota" | "sua-vez" | "nao-lidos" | "rotinas" | "conectores" | "inventario" | "executor" | "ias" | "uso-plano" | "salas" | "chaves" | "maquinas" | "nuvem" | "contas" | "relatos" | `conversa:${string}` | `vivos:${string}` | `memoria:${string}` | `diario:${string}` | `concessoes:${string}` | `execucoes:${string}` | `atividade:${string}` | `atividade-hoje:${string}` | `biblioteca:${string}`;
 
 export type Estado = {
   sessao: Escopo | null;
@@ -414,6 +421,16 @@ export type Estado = {
    */
   liberacoesDispensadas: Record<string, Record<string, number>>;
   memorias: Record<string, Memoria[]>;
+  /** NOD-58: quantas mudanças do bot (só dele) faltam revisar, por bot; vem com a lista e com o histórico. */
+  memoriasARevisar: Record<string, number>;
+  /** NOD-58: o histórico da memória do bot, mais novas primeiro (páginas de 50 anexadas pelo "Mostrar mais"). */
+  diarios: Record<string, { entradas: EntradaDiario[]; mais: boolean }>;
+  /** NOD-58: as memórias que a pessoa apagou nesta sessão, no lugar onde estavam, com Desfazer (por bot). */
+  memoriasApagadas: Record<string, MemoriaApagadaNaTela[]>;
+  /** NOD-58: o aviso sob uma entrada do Histórico: o desfazer recusou (`conflito`, 409) ou não chegou (`rede`). */
+  avisoDiario: { entradaId: string; tipo: "conflito" | "rede" } | null;
+  /** NOD-58: a frase do aria-live da Memória ("Memória apagada. Dá para desfazer."). */
+  statusMemoria: string;
   /** Minhas chaves de máquina (ADR-031); null = ainda não carregou. */
   chaves: ChaveMaquinaDto[] | null;
   /** ADR-090: as máquinas da pessoa (chaves vivas + o que as conectadas anunciaram) e o padrão de onde os bots trabalham. */
@@ -563,7 +580,14 @@ export type Acao =
   | { tipo: "lista-de-pasta"; propostaId: string; lista: "curta" | "todas" }
   | { tipo: "hidratar-conectores"; conectores: Conector[]; marketplace?: AppComLogo[]; composioConfigurado?: boolean }
   | { tipo: "hidratar-concessoes"; agenteId: string; concessoes: Concessao[]; liberacoesDispensadas?: Record<string, number> }
-  | { tipo: "hidratar-memorias"; agenteId: string; memorias: Memoria[] }
+  | { tipo: "hidratar-memorias"; agenteId: string; memorias: Memoria[]; aRevisar?: number }
+  | { tipo: "hidratar-diario"; agenteId: string; pagina: PaginaDiario; anexar?: boolean }
+  | { tipo: "diario-revisado"; agenteId: string; entradaId: string | null; aRevisar: number }
+  | { tipo: "diario-desfeita"; agenteId: string; entradaId: string; em: number }
+  | { tipo: "memoria-apagada"; agenteId: string; apagada: MemoriaApagadaNaTela }
+  | { tipo: "memoria-apagada-sai"; agenteId: string; memoriaId: string }
+  | { tipo: "aviso-diario"; aviso: { entradaId: string; tipo: "conflito" | "rede" } | null }
+  | { tipo: "status-memoria"; texto: string }
   | { tipo: "hidratar-salas"; salas: { sala: Sala; membros: MembroSala[] }[] }
   | { tipo: "hidratar-chaves"; chaves: ChaveMaquinaDto[] }
   | { tipo: "hidratar-maquinas"; maquinas: MaquinasDto }
@@ -661,6 +685,11 @@ export const estadoInicial: Estado = {
   concessoes: {},
   liberacoesDispensadas: {},
   memorias: {},
+  memoriasARevisar: {},
+  diarios: {},
+  memoriasApagadas: {},
+  avisoDiario: null,
+  statusMemoria: "",
   chaves: null,
   maquinas: null,
   computadorPessoa: null,
@@ -1311,9 +1340,12 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
   "contas.mudou": (e) => invalidar(e, "contas", "maquinas", usoPlano(e)),
   "agente.mudou": (e, f) => {
     const agenteId = texto(f.dados.agente_id) ?? texto(f.dados.agenteId);
-    const memoria: Invalidacao | null = f.dados.acao === "memoria_criada" && agenteId ? `memoria:${agenteId}` : null;
+    // NOD-58: qualquer mudança na memória (o bot anotou, a pessoa editou, apagou ou desfez) relê a lista e o histórico.
+    const daMemoria = String(f.dados.acao ?? "").startsWith("memoria_") && agenteId;
+    const memoria: Invalidacao | null = daMemoria ? `memoria:${agenteId}` : null;
+    const diario: Invalidacao | null = daMemoria ? `diario:${agenteId}` : null;
     const concessoes: Invalidacao | null = f.dados.kind === "concessao_criada" && agenteId ? `concessoes:${agenteId}` : null;
-    return invalidar(e, "frota", "gestao", "nao-lidos", ...(["excluir", "restaurar", "duplicado"].includes(String(f.dados.acao)) ? ["rotinas", "salas", "sua-vez"] as const : []), conv(f), memoria, concessoes);
+    return invalidar(e, "frota", "gestao", "nao-lidos", ...(["excluir", "restaurar", "duplicado"].includes(String(f.dados.acao)) ? ["rotinas", "salas", "sua-vez"] as const : []), conv(f), memoria, diario, concessoes);
   },
   "parada.faixa": (e, f) => {
     const faixa: FaixaParada = {
@@ -1629,8 +1661,70 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
     case "hidratar-concessoes":
       // Sem as dispensas na resposta, o que havia fica: sem saber o que a pessoa dispensou, o cartão de liberar não aparece.
       return { ...estado, concessoes: { ...estado.concessoes, [acao.agenteId]: acao.concessoes }, liberacoesDispensadas: acao.liberacoesDispensadas ? { ...estado.liberacoesDispensadas, [acao.agenteId]: acao.liberacoesDispensadas } : estado.liberacoesDispensadas };
-    case "hidratar-memorias":
-      return { ...estado, memorias: { ...estado.memorias, [acao.agenteId]: acao.memorias } };
+    case "hidratar-memorias": {
+      // NOD-58: a memória que voltou (desfazer, outro aparelho) deixa de aparecer como apagada.
+      const apagadas = (estado.memoriasApagadas[acao.agenteId] ?? []).filter((a) => !acao.memorias.some((m) => m.id === a.memoriaId));
+      return {
+        ...estado,
+        memorias: { ...estado.memorias, [acao.agenteId]: acao.memorias },
+        memoriasApagadas: { ...estado.memoriasApagadas, [acao.agenteId]: apagadas },
+        ...(acao.aRevisar === undefined ? {} : { memoriasARevisar: { ...estado.memoriasARevisar, [acao.agenteId]: acao.aRevisar } }),
+      };
+    }
+    case "hidratar-diario": {
+      const velho = estado.diarios[acao.agenteId];
+      let entradas: EntradaDiario[];
+      let mais = acao.pagina.mais;
+      if (acao.anexar) {
+        const antes = velho?.entradas ?? [];
+        const vistas = new Set(antes.map((e) => e.id));
+        entradas = [...antes, ...acao.pagina.entradas.filter((e) => !vistas.has(e.id))];
+      } else {
+        // Releitura (frame, desfazer): a 1ª página nova por cima, e o que já veio pelo "Mostrar mais" continua
+        // abaixo dela, desde que encoste na página nova (sem buraco entre as duas).
+        entradas = acao.pagina.entradas;
+        const ultima = entradas.at(-1);
+        const primeiraVelha = velho?.entradas[0];
+        if (acao.pagina.mais && ultima && primeiraVelha && !maisNova(ultima, primeiraVelha)) {
+          const resto = (velho?.entradas ?? []).filter((e) => maisNova(ultima, e));
+          if (resto.length > 0) {
+            entradas = [...entradas, ...resto];
+            mais = velho?.mais ?? mais;
+          }
+        }
+      }
+      return {
+        ...estado,
+        diarios: { ...estado.diarios, [acao.agenteId]: { entradas, mais } },
+        memoriasARevisar: { ...estado.memoriasARevisar, [acao.agenteId]: acao.pagina.aRevisar },
+      };
+    }
+    case "diario-desfeita": {
+      const d = estado.diarios[acao.agenteId];
+      if (!d) return estado;
+      const entradas = d.entradas.map((e) => (e.id === acao.entradaId && e.desfeitaEm === null ? { ...e, desfeitaEm: acao.em, revisadaEm: e.revisadaEm ?? acao.em } : e));
+      return { ...estado, diarios: { ...estado.diarios, [acao.agenteId]: { ...d, entradas } } };
+    }
+    case "diario-revisado": {
+      const d = estado.diarios[acao.agenteId];
+      const agora = estado.agora > 0 ? estado.agora : Date.now();
+      const entradas = d?.entradas.map((e) => (e.autor === "agente" && e.revisadaEm === null && (acao.entradaId === null || e.id === acao.entradaId) ? { ...e, revisadaEm: agora } : e));
+      return {
+        ...estado,
+        ...(d && entradas ? { diarios: { ...estado.diarios, [acao.agenteId]: { ...d, entradas } } } : {}),
+        memoriasARevisar: { ...estado.memoriasARevisar, [acao.agenteId]: acao.aRevisar },
+      };
+    }
+    case "memoria-apagada": {
+      const outras = (estado.memoriasApagadas[acao.agenteId] ?? []).filter((a) => a.memoriaId !== acao.apagada.memoriaId);
+      return { ...estado, memoriasApagadas: { ...estado.memoriasApagadas, [acao.agenteId]: [...outras, acao.apagada] } };
+    }
+    case "memoria-apagada-sai":
+      return { ...estado, memoriasApagadas: { ...estado.memoriasApagadas, [acao.agenteId]: (estado.memoriasApagadas[acao.agenteId] ?? []).filter((a) => a.memoriaId !== acao.memoriaId) } };
+    case "aviso-diario":
+      return { ...estado, avisoDiario: acao.aviso };
+    case "status-memoria":
+      return { ...estado, statusMemoria: acao.texto };
     case "hidratar-salas":
       return { ...estado, salas: acao.salas, carregado: estado.carregado.salas ? estado.carregado : { ...estado.carregado, salas: true } };
     case "hidratar-nao-lidos":
@@ -1900,6 +1994,11 @@ export function bibliotecaAberta(estado: Pick<Estado, "tela" | "gaveta" | "abaGa
   return nivel === null && estado.abaGaveta[t.agenteId] === "biblioteca";
 }
 
+/** NOD-58: a ordem do diário (mais novas primeiro, por (criadoEm, id), como no servidor): `a` vem antes de `b`. */
+function maisNova(a: EntradaDiario, b: EntradaDiario): boolean {
+  return a.criadoEm > b.criadoEm || (a.criadoEm === b.criadoEm && a.id > b.id);
+}
+
 export function invalidacoesDaTela(estado: Estado): Invalidacao[] {
   const t = estado.tela;
   const faltas: Invalidacao[] = [];
@@ -1920,7 +2019,11 @@ export function invalidacoesDaTela(estado: Estado): Invalidacao[] {
   if (t.tipo === "conversa" && !(t.agenteId in estado.disponibilidadeLigacao) && estado.frota?.agentes.some((a) => a.id === t.agenteId && a.ownerId === estado.sessao?.pessoaId)) faltas.push(`disponibilidade:${t.agenteId}`);
   // Os níveis da gaveta que leem algo próprio: a memória do bot e o histórico da rotina aberta.
   const nivel = t.tipo === "conversa" && estado.gaveta?.agenteId === t.agenteId ? estado.gaveta.nivel : null;
-  if (nivel?.tipo === "memoria" && !estado.memorias[estado.gaveta?.agenteId ?? ""]) faltas.push(`memoria:${estado.gaveta?.agenteId ?? ""}`);
+  const gavetaDe = estado.gaveta?.agenteId ?? "";
+  // NOD-58: Ajustes mostra "N para revisar" na linha Memória (o número vem com a lista); o Histórico lê o diário.
+  if ((nivel?.tipo === "memoria" && !estado.memorias[gavetaDe]) || (nivel?.tipo === "ajustes" && !(gavetaDe in estado.memoriasARevisar))) faltas.push(`memoria:${gavetaDe}`);
+  const donaDaGaveta = estado.frota?.agentes.some((a) => a.id === gavetaDe && a.ownerId === estado.sessao?.pessoaId) ?? false;
+  if (nivel?.tipo === "memoria" && nivel.aba === "historico" && donaDaGaveta && !estado.diarios[gavetaDe]) faltas.push(`diario:${gavetaDe}`);
   if (nivel?.tipo === "rotina" && !estado.execucoes[nivel.id]) faltas.push(`execucoes:${nivel.id}`);
   // ADR-114: a página do dia aberto na Atividade; e o "N hoje" da linha "Atividade" do bot da pessoa (o main só busca com o
   // painel à vista). Lida num dia que já passou (a meia-noite virou com a tela aberta), relê.

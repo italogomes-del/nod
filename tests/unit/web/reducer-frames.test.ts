@@ -233,7 +233,7 @@ describe("aplicarFrame por TipoFrame", () => {
     // NOD-374: o app entrou ou saiu de Fora do ar.
     expect(aplicarFrame(estadoInicial, frame("conector.mudou"), AGORA).invalidacoes).toEqual(["frota", "conectores"]);
     expect(aplicarFrame(estadoInicial, frame("agente.mudou", { agente_id: "a1", acao: "perfil_confirmado" }), AGORA).invalidacoes).toEqual(["frota", "gestao", "nao-lidos"]);
-    expect(aplicarFrame(estadoInicial, frame("agente.mudou", { agente_id: "a1", acao: "memoria_criada", conversaId: CONVERSA }), AGORA).invalidacoes).toEqual(["frota", "gestao", "nao-lidos", `conversa:${CONVERSA}`, "memoria:a1"]);
+    expect(aplicarFrame(estadoInicial, frame("agente.mudou", { agente_id: "a1", acao: "memoria_criada", conversaId: CONVERSA }), AGORA).invalidacoes).toEqual(["frota", "gestao", "nao-lidos", `conversa:${CONVERSA}`, "memoria:a1", "diario:a1"]);
     expect(aplicarFrame(estadoInicial, frame("agente.mudou", { agente_id: "a1", kind: "concessao_criada" }), AGORA).invalidacoes).toEqual(["frota", "gestao", "nao-lidos", "concessoes:a1"]);
   });
 

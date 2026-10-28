@@ -188,7 +188,7 @@ function linhaDaMemoria(m: Mensagem, estado: Estado): string | null {
   const tipo = achado[2] ?? TIPO_ANTIGO[achado[1] ?? ""] ?? "";
   const agenteId = m.autoria.autor_tipo === "agente" ? m.autoria.autor_id : undefined;
   const agente = agenteId ? agenteDe(estado, agenteId) : undefined;
-  const ver = agente ? ` ${botao("ir-memoria", "Ver na memória", { classe: "link sm", id: agente.id })}` : "";
+  const ver = agente ? ` ${botao("ir-memoria", "Ver na memória", { classe: "link sm", id: agente.id, dados: { aba: "historico" } })}` : "";
   return `<div class="msg-sistema msg-memoria">${paragrafos(`Anotei ${tipo}: ${m.texto.slice(achado[0].length)}`)}${ver}</div>`;
 }
 

@@ -23,6 +23,7 @@ export const TABELA_ERROS: Readonly<Record<CodigoErro, { status: number; mensage
   escopo_vazio: { status: 400, mensagem: "Escolha pelo menos uma permissão antes de continuar." },
   limite_atingido: { status: 429, mensagem: "Você chegou ao limite por agora. Espere um pouco e tente de novo." },
   nao_permitido: { status: 403, mensagem: "Você não tem permissão para fazer isso." },
+  mudou_depois: { status: 409, mensagem: "Esta memória foi alterada depois. Desfaça a mudança mais nova primeiro." },
   estado_invalido: { status: 409, mensagem: "Isso não pode ser feito agora. Atualize a página e tente de novo." },
   executor_indisponivel: { status: 503, mensagem: "A inteligência não está disponível neste Mac agora. Abra o nod no Mac e tente de novo." },
   fuso_invalido: { status: 400, mensagem: "Fuso horário inválido. Use o nome de uma região, como America/Sao_Paulo, e não uma diferença de horas." },

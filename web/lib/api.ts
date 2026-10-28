@@ -29,7 +29,7 @@ import type { DecisaoDaPessoa } from "../../src/contracts/troca-de-ia.ts";
 import type { OpcaoRitmo } from "../../src/contracts/rotina-ritmo.ts";
 import type { UsoDoPlanoDto } from "../../src/contracts/uso-do-plano.ts";
 import type { IdHarness } from "../../src/contracts/harness.ts";
-import type { Memoria, TipoMemoria } from "../../src/contracts/memoria.ts";
+import type { EntradaDiario, Memoria, PaginaDiario, TipoMemoria } from "../../src/contracts/memoria.ts";
 import type { ReacaoNaFala } from "../../src/contracts/reacao.ts";
 import type { AppComLogo } from "../../src/contracts/marketplace.ts";
 import type { ConfirmarEmailDto, ExportacaoDto, FormasDto, MinhaContaDto, PerfilDto, ReautenticarDto } from "../../src/contracts/minha-conta.ts";
@@ -279,7 +279,11 @@ export function criarApi(escopo: Escopo) {
     fixar: (id: string, fixado?: boolean) => post<{ agente: Agente }>(`agentes/${id}/fixar`, fixado === undefined ? {} : { fixado }),
     ocultar: (id: string, oculto?: boolean) => post<{ agente: Agente }>(`agentes/${id}/ocultar`, oculto === undefined ? {} : { oculto }),
     duplicar: (id: string) => post<{ agente: Agente; conversa: Conversa }>(`agentes/${id}/duplicar`),
-    memorias: (agenteId: string) => get<{ memorias: Memoria[] }>(`agentes/${agenteId}/memoria`),
+    memorias: (agenteId: string) => get<{ memorias: Memoria[]; aRevisar?: number }>(`agentes/${agenteId}/memoria`),
+    // NOD-58: o histórico da memória (50 por página; `antes` é a última entrada já mostrada), o desfazer e o revisar.
+    diarioMemoria: (agenteId: string, antes?: string) => get<PaginaDiario>(`agentes/${agenteId}/memoria/diario${antes ? `?antes=${encodeURIComponent(antes)}` : ""}`),
+    desfazerEntrada: (agenteId: string, entradaId: string) => post<{ entrada: EntradaDiario; memoria: Memoria | null; aRevisar: number }>(`agentes/${agenteId}/memoria/diario/${encodeURIComponent(entradaId)}/desfazer`, {}),
+    revisarDiario: (agenteId: string, entradaId?: string) => post<{ revisadas: number; aRevisar: number }>(`agentes/${agenteId}/memoria/diario/revisar`, entradaId ? { entradaId } : {}),
     // Chat limpo (ADR-114, PR 2): a Atividade do bot, um dia por página, e só o "N hoje" da gaveta (contagem=1).
     atividade: (agenteId: string, dia: string, fuso: string) => get<AtividadeDto>(`agentes/${encodeURIComponent(agenteId)}/atividade?dia=${encodeURIComponent(dia)}&fuso=${encodeURIComponent(fuso)}`),
     /** NOD-326: a Biblioteca da gaveta do bot; `antes` é o cursor opaco da página anterior. */

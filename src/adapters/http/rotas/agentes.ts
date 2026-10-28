@@ -6,7 +6,7 @@ import type { DonoAgente, FormaAgente, CorAgente } from "../../../contracts/agen
 import type { TipoMemoria } from "../../../contracts/memoria.ts";
 import { criarAgente } from "../../../use-cases/criar-agente.ts";
 import { duplicarAgente } from "../../../use-cases/duplicar-agente.ts";
-import { apagarMemoria, editarMemoria, listarMemorias } from "../../../use-cases/editar-memorias.ts";
+import { apagarMemoria, desfazerEntradaDiario, editarMemoria, listarDiarioMemoria, listarMemorias, revisarDiarioMemoria } from "../../../use-cases/editar-memorias.ts";
 import { editarPerfil } from "../../../use-cases/editar-perfil.ts";
 import { fixarAgente, ocultarAgente } from "../../../use-cases/fixar-ocultar-agente.ts";
 import { registrarMemoria } from "../../../use-cases/lembrar.ts";
@@ -151,6 +151,29 @@ export function criarRotasAgentes(d: DepsRotas, desligarComputador?: (escopo: Es
           origem: "pessoa",
         });
         ctx.json(201, r);
+      },
+    },
+    {
+      metodo: "GET",
+      padrao: new RegExp(`^/agentes/${ID}/memoria/diario$`),
+      async handler(ctx) {
+        const url = new URL(ctx.req.url ?? "/", "http://127.0.0.1");
+        ctx.json(200, await executar(ctx.escopo, listarDiarioMemoria, { agenteId: ctx.params.id ?? "", antes: url.searchParams.get("antes") }));
+      },
+    },
+    {
+      metodo: "POST",
+      padrao: new RegExp(`^/agentes/${ID}/memoria/diario/revisar$`),
+      async handler(ctx) {
+        const corpo = corpoObjeto(await ctx.corpo());
+        ctx.json(200, await executar(ctx.escopo, revisarDiarioMemoria, { agenteId: ctx.params.id ?? "", entradaId: textoOpcional(corpo.entradaId) ?? null }));
+      },
+    },
+    {
+      metodo: "POST",
+      padrao: new RegExp(`^/agentes/${ID}/memoria/diario/(?<eid>[^/]+)/desfazer$`),
+      async handler(ctx) {
+        ctx.json(200, await executar(ctx.escopo, desfazerEntradaDiario, { agenteId: ctx.params.id ?? "", entradaId: ctx.params.eid ?? "" }));
       },
     },
     {

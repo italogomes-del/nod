@@ -192,12 +192,50 @@ describeIntegracao("rotas agentes/conversas/propostas/turnos/frota (L6) com serv
       expect((await servidor.chamar(marlon, "DELETE", `agentes/${agente.id}/memoria/${memoria.id}`)).status).toBe(200);
       expect(((await (await servidor.chamar(marlon, "GET", `agentes/${agente.id}/memoria`)).json()) as { memorias: unknown[] }).memorias).toEqual([]);
 
+      // NOD-58: o histórico, o desfazer (e o 409 de quem tenta de novo) e o revisar pela HTTP.
+      const hist = await servidor.chamar(marlon, "GET", `agentes/${agente.id}/memoria/diario`);
+      expect(hist.status).toBe(200);
+      const pagina = (await hist.json()) as { entradas: { id: string; acao: string }[]; aRevisar: number; mais: boolean };
+      expect(pagina.entradas.map((e) => e.acao)).toEqual(["apagada", "editada", "criada"]);
+      expect(pagina).toMatchObject({ aRevisar: 0, mais: false });
+      expect(Object.keys(pagina.entradas[0]!)).not.toContain("memoriaOrigem");
+      const desfez = await servidor.chamar(marlon, "POST", `agentes/${agente.id}/memoria/diario/${pagina.entradas[0]!.id}/desfazer`);
+      expect(desfez.status).toBe(200);
+      expect(((await desfez.json()) as { memoria: { texto: string } }).memoria.texto).toBe("tópicos curtos");
+      const deNovo = await servidor.chamar(marlon, "POST", `agentes/${agente.id}/memoria/diario/${pagina.entradas[0]!.id}/desfazer`);
+      expect(deNovo.status).toBe(409);
+      expect(((await deNovo.json()) as { codigo: string }).codigo).toBe("mudou_depois");
+      expect((await servidor.chamar(marlon, "POST", `agentes/${agente.id}/memoria/diario/nao-e-uuid/desfazer`)).status).toBe(404);
+      expect((await servidor.chamar(marlon, "GET", `agentes/${agente.id}/memoria/diario?antes=lixo`)).status).toBe(400);
+      const revisou = await servidor.chamar(marlon, "POST", `agentes/${agente.id}/memoria/diario/revisar`, {});
+      expect(revisou.status).toBe(200);
+      expect(await revisou.json()).toMatchObject({ revisadas: 0, aRevisar: 0 });
+
       expect(((await (await servidor.chamar(marlon, "POST", `agentes/${agente.id}/fixar`)).json()) as { agente: Agente }).agente.fixado).toBe(true);
       expect(((await (await servidor.chamar(marlon, "POST", `agentes/${agente.id}/ocultar`, { oculto: true })).json()) as { agente: Agente }).agente.oculto).toBe(true);
       const dup = await servidor.chamar(marlon, "POST", `agentes/${agente.id}/duplicar`);
       expect(dup.status).toBe(201);
       expect(((await dup.json()) as { agente: Agente }).agente).toMatchObject({ nome: "Vera (cópia)", duplicadoDe: agente.id });
       trxAtual = null;
+    });
+  });
+
+  it("NOD-58: diário da memória pela rota — Ana vê o bot de equipe de Marlon, mas listar, desfazer e revisar dão 404", async () => {
+    await withRollback(MARLON, async (trx) => {
+      trxAtual = trx;
+      const marlon = await servidor.entrar("marlon");
+      const ana = await servidor.entrar("ana");
+      const { agente } = (await (await servidor.chamar(marlon, "POST", "agentes", { dono: "empresa" })).json()) as { agente: Agente };
+      expect((await servidor.chamar(marlon, "POST", `agentes/${agente.id}/memoria`, { tipo: "fato", texto: "da equipe" })).status).toBe(201);
+      const pagina = (await (await servidor.chamar(marlon, "GET", `agentes/${agente.id}/memoria/diario`)).json()) as { entradas: { id: string }[] };
+      const entradaId = pagina.entradas[0]!.id;
+      expect((await servidor.chamar(ana, "GET", `agentes/${agente.id}/memoria`)).status).toBe(200);
+      expect((await servidor.chamar(ana, "GET", `agentes/${agente.id}/memoria/diario`)).status).toBe(404);
+      expect((await servidor.chamar(ana, "POST", `agentes/${agente.id}/memoria/diario/${entradaId}/desfazer`)).status).toBe(404);
+      expect((await servidor.chamar(ana, "POST", `agentes/${agente.id}/memoria/diario/revisar`, {})).status).toBe(404);
+      const depois = (await (await servidor.chamar(marlon, "GET", `agentes/${agente.id}/memoria/diario`)).json()) as { entradas: { desfeitaEm: number | null }[] };
+      expect(depois.entradas).toHaveLength(1);
+      expect(depois.entradas[0]!.desfeitaEm).toBeNull();
     });
   });
 

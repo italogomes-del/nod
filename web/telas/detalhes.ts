@@ -259,7 +259,7 @@ function nivelAjustes(estado: Estado, a: Bot, dona: boolean): Nivel {
   const origem = (n: string) => `${irPara(a, n as NivelGaveta["tipo"])} data-origem="${n}"`;
   const atalhos = `<section class="gv-secao gvn-atalhos"><h3>Atalhos</h3><div class="gv-cartao">
       ${ligar}
-      ${linha(`${ICONE.livro}<span class="gv-linha-txt">Memória</span>`, origem("memoria"), ICONE.seta)}
+      ${linha(`${ICONE.livro}<span class="gv-linha-txt">Memória</span>${dona && (estado.memoriasARevisar[a.id] ?? 0) > 0 ? `<span class="gv-meta mem-conta-meta">${estado.memoriasARevisar[a.id]} para revisar</span>` : ""}`, origem("memoria"), ICONE.seta)}
       ${linha(`${ICONE.relogio}<span class="gv-linha-txt">Trabalhos</span>${trabalhosAbertos ? `<span class="gv-meta">${trabalhosAbertos} ${trabalhosAbertos === 1 ? "aberto" : "abertos"}</span>` : ""}`, origem("trabalhos"), ICONE.seta)}
       ${dona ? linha(`${ICONE.pulso}<span class="gv-linha-txt">Atividade</span>${linhaAtividadeHoje(estado, a.id)}`, origem("atividade"), ICONE.seta) : ""}
     </div></section>`;
@@ -317,7 +317,7 @@ function renderNivel(estado: Estado, a: Bot, dona: boolean, nivel: NivelGaveta):
     case "perfil":
       return nivelPerfil(a);
     case "memoria":
-      return { titulo: "Memória", corpo: renderMemoriaNaGaveta(estado, a.id) };
+      return { titulo: "Memória", corpo: renderMemoriaNaGaveta(estado, a.id, { nome: a.nome, dona, nivel }) };
     case "inteligencia": {
       // 2B (protótipo Inteligencia2): o rascunho vive no reducer até Salvar; sem rascunho deste bot, o gravado.
       const r = estado.rascunhoIa?.agenteId === a.id ? estado.rascunhoIa : rascunhoDe(a);

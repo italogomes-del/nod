@@ -57,7 +57,7 @@ const PREFIXO_TENANT = /^\/api\/t\/([^/]+)(\/.*)?$/;
  * Grupos com outro nome (`nome` de ferramenta) não passam por aqui.
  */
 export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const GRUPOS_UUID = new Set(["id", "mid", "aid"]);
+const GRUPOS_UUID = new Set(["id", "mid", "aid", "eid"]);
 const PREFIXO_INTERNO = /^\/api\/interno(\/.*)$/;
 const PREFIXO_PUBLICO = /^\/api(\/.*)$/;
 

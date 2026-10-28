@@ -41,6 +41,8 @@ export async function limparPessoaE2E(db: Db, dbDono: Db, escopo: Escopo, ids: {
     await trx`delete from mensagens where owner_id = ${p}`;
     await trx`delete from propostas where owner_id = ${p}`;
     await trx`delete from agente_memorias where owner_id = ${p}`;
+    // NOD-58 (0118): o diário da memória aponta para o agente.
+    await trx`delete from memoria_diario where owner_id = ${p}`;
     await trx`delete from paradas where owner_id = ${p}`;
     await trx`delete from incidentes where owner_id = ${p}`;
     await trx`delete from rotina_execucoes where owner_id = ${p}`;

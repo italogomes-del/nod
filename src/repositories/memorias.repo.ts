@@ -1,4 +1,4 @@
-import type { Memoria, TipoMemoria } from "../contracts/memoria.ts";
+import type { AutorMemoria, Memoria, TipoMemoria } from "../contracts/memoria.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
 import { ms } from "./conversao.ts";
 
@@ -8,7 +8,7 @@ interface Linha {
   agente_id: string;
   tipo: TipoMemoria;
   texto: string;
-  origem: "pessoa" | "agente";
+  origem: AutorMemoria;
   criado_em: Date;
 }
 
@@ -24,16 +24,43 @@ const paraMemoria = (l: Linha): Memoria => ({
   criadoEm: ms(l.criado_em),
 });
 
-export type NovaMemoria = { id?: string; agenteId: string; tipo: TipoMemoria; texto: string; origem: "pessoa" | "agente" };
+export type NovaMemoria = {
+  id?: string;
+  agenteId: string;
+  tipo: TipoMemoria;
+  texto: string;
+  origem: AutorMemoria;
+  /** Recriar no lugar (desfazer uma remoção): a data original da memória. */
+  criadoEm?: number;
+};
 
-/** Memória por bot: editável pela pessoa; injetada no prompt com "não substitui fonte autoritativa". */
+/**
+ * Como a escrita entra no diário (NOD-58). `autor` é quem fez a mudança (na criação, por padrão, a origem);
+ * `desfazId` marca que esta escrita desfaz aquela entrada; `diario: false` só para cópia (duplicar bot), que não é mudança.
+ */
+export type OpcoesDiario = { autor?: AutorMemoria; desfazId?: string | null; diario?: boolean };
+
+/**
+ * Memória por bot: editável pela pessoa; injetada no prompt com "não substitui fonte autoritativa".
+ * NOD-58: criar, atualizar e apagar gravam a entrada do diário NO MESMO STATEMENT (CTE): a escrita e o diário
+ * nunca se separam, venha de onde vier a chamada.
+ */
 export function memoriasRepo(conn: Conn, escopo: Escopo) {
   return {
-    async criar(m: NovaMemoria): Promise<Memoria | null> {
+    async criar(m: NovaMemoria, op: OpcoesDiario = {}): Promise<Memoria | null> {
+      const autor = op.autor ?? m.origem;
+      const criadoEm = m.criadoEm === undefined ? conn`clock_timestamp()` : conn`${new Date(m.criadoEm)}::timestamptz`;
       const [l] = await conn<Linha[]>`
-        insert into agente_memorias (tenant_id, id, owner_id, agente_id, tipo, texto, origem)
-        values (${escopo.tenantId}, ${m.id ?? conn`gen_random_uuid()`}, ${escopo.pessoaId}, ${m.agenteId}, ${m.tipo}, ${m.texto}, ${m.origem})
-        returning ${conn.unsafe(COLUNAS)}`;
+        with m as (
+          insert into agente_memorias (tenant_id, id, owner_id, agente_id, tipo, texto, origem, criado_em)
+          values (${escopo.tenantId}, ${m.id ?? conn`gen_random_uuid()`}, ${escopo.pessoaId}, ${m.agenteId}, ${m.tipo}, ${m.texto}, ${m.origem}, ${criadoEm})
+          returning *
+        ), d as (
+          insert into memoria_diario (tenant_id, owner_id, agente_id, memoria_id, acao, autor, memoria_origem, memoria_criado_em, depois_tipo, depois_texto, desfaz_id)
+          select m.tenant_id, m.owner_id, m.agente_id, m.id, 'criada', ${autor}, m.origem, m.criado_em, m.tipo, m.texto, ${op.desfazId ?? null}
+          from m where ${op.diario !== false}
+        )
+        select ${conn.unsafe(COLUNAS)} from m`;
       return l ? paraMemoria(l) : null;
     },
 
@@ -48,16 +75,42 @@ export function memoriasRepo(conn: Conn, escopo: Escopo) {
       return linhas.map(paraMemoria);
     },
 
-    async atualizar(id: string, campos: { texto?: string; tipo?: TipoMemoria }): Promise<Memoria | null> {
+    /** Edição sem mudança real (mesmo texto e tipo) não entra no diário. */
+    async atualizar(id: string, campos: { texto?: string; tipo?: TipoMemoria }, op: OpcoesDiario & { autor: AutorMemoria }): Promise<Memoria | null> {
       const [l] = await conn<Linha[]>`
-        update agente_memorias set texto = coalesce(${campos.texto ?? null}, texto), tipo = coalesce(${campos.tipo ?? null}, tipo)
-        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} returning ${conn.unsafe(COLUNAS)}`;
+        with velha as (
+          select * from agente_memorias where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} for update
+        ), m as (
+          update agente_memorias a set texto = coalesce(${campos.texto ?? null}, a.texto), tipo = coalesce(${campos.tipo ?? null}, a.tipo)
+          from velha v where a.tenant_id = v.tenant_id and a.id = v.id
+          returning a.*
+        ), d as (
+          insert into memoria_diario (tenant_id, owner_id, agente_id, memoria_id, acao, autor, memoria_origem, memoria_criado_em, antes_tipo, antes_texto, depois_tipo, depois_texto, desfaz_id)
+          select m.tenant_id, m.owner_id, m.agente_id, m.id, 'editada', ${op.autor}, m.origem, m.criado_em, v.tipo, v.texto, m.tipo, m.texto, ${op.desfazId ?? null}
+          from m join velha v on v.tenant_id = m.tenant_id and v.id = m.id
+          where ${op.diario !== false} and (v.texto is distinct from m.texto or v.tipo is distinct from m.tipo)
+        )
+        select ${conn.unsafe(COLUNAS)} from m`;
       return l ? paraMemoria(l) : null;
     },
 
-    async apagar(id: string): Promise<boolean> {
-      const r = await conn`delete from agente_memorias where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id}`;
-      return r.count === 1;
+    /** Devolve a memória como era antes de sair (null se não havia). */
+    async apagar(id: string, op: OpcoesDiario & { autor: AutorMemoria }): Promise<Memoria | null> {
+      const [l] = await conn<Linha[]>`
+        with m as (
+          delete from agente_memorias where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} returning *
+        ), d as (
+          insert into memoria_diario (tenant_id, owner_id, agente_id, memoria_id, acao, autor, memoria_origem, memoria_criado_em, antes_tipo, antes_texto, desfaz_id)
+          select m.tenant_id, m.owner_id, m.agente_id, m.id, 'apagada', ${op.autor}, m.origem, m.criado_em, m.tipo, m.texto, ${op.desfazId ?? null}
+          from m where ${op.diario !== false}
+        )
+        select ${conn.unsafe(COLUNAS)} from m`;
+      return l ? paraMemoria(l) : null;
+    },
+
+    /** Serializa quem mexe na mesma memória (editar, apagar, desfazer) até o fim da transação. */
+    async travar(id: string): Promise<void> {
+      await conn`select pg_advisory_xact_lock(hashtext(${escopo.tenantId}), hashtext(${`memoria:${id}`}))`;
     },
   };
 }

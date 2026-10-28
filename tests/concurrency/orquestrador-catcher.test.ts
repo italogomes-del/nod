@@ -91,6 +91,7 @@ afterEach(async () => {
     await trx`delete from mensagens where owner_id = ${p}`;
     await trx`delete from propostas where owner_id = ${p}`;
     await trx`delete from agente_memorias where owner_id = ${p}`;
+    await trx`delete from memoria_diario where owner_id = ${p}`;
     await trx`delete from paradas where owner_id = ${p}`;
     await trx`delete from turnos where owner_id = ${p}`;
     // ADR-083 (0060): o trabalho aponta para agente, conversa e rotina, e os turnos apontam para ele — sai entre os dois.

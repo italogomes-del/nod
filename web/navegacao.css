@@ -1086,3 +1086,128 @@ div.mac-medidor { padding-right: 36px; }
 .gvb-esq-linha b { width: 60%; height: 10px; border-radius: 5px; background: var(--surface-raised); }
 @media (prefers-reduced-motion: reduce) { .gvb-esq-rot, .gvb-esq { animation: none; } }
 @media (forced-colors: active) { .gvb-menu { opacity: 1; } }
+
+/* NOD-58 · diário da memória (protótipo v2, Editar opção A): só tokens do nod, sem fundo chapado, sem vermelho.
+   No toque o "…" fica sempre à vista (no lugar do toque longo do protótipo). */
+.mem-abas { justify-content: flex-start; }
+.mem-conta { color: var(--ink-3); }
+.mem-painel { gap: 18px; }
+.mem-meta { margin: 0; color: var(--ink-3); font-size: 12.5px; }
+.mem-hist-cab { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 12px; }
+.mem-dia { display: flex; flex-direction: column; gap: 6px; }
+.mem-dia-titulo { margin: 0; color: var(--ink-3); font-size: 12px; font-weight: 600; }
+.mem-entradas { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--line); }
+.mem-entrada { position: relative; display: flex; flex-direction: column; gap: 4px; padding: 10px 6px 8px 14px; border-bottom: 1px solid var(--line); border-radius: 2px; }
+.mem-entrada.mem-realce { box-shadow: 0 0 0 2px var(--ink); transition: box-shadow .2s ease; }
+.mem-ponto { position: absolute; left: 2px; top: 17px; width: 6px; height: 6px; border-radius: 50%; background: var(--ink); }
+.mem-quem { margin: 0; color: var(--ink-2); font-size: 13px; line-height: 18px; }
+.mem-quem b { color: var(--ink); font-weight: 600; }
+.mem-texto { display: flex; flex-direction: column; gap: 2px; margin: 0; color: var(--ink); font-size: 14px; line-height: 20px; overflow-wrap: anywhere; }
+.mem-texto del { color: var(--ink-3); text-decoration-color: var(--ink-3); }
+.mem-texto ins { text-decoration: none; }
+.mem-desfeita .mem-texto { color: var(--ink-3); text-decoration: line-through; }
+.mem-desfeita .mem-quem, .mem-desfeita .mem-quem b { color: var(--ink-3); }
+.mem-pe { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0 12px; min-height: 32px; }
+.mem-acoes { display: inline-flex; align-items: center; gap: 0 16px; }
+.mem-acao { display: inline-flex; align-items: center; min-height: 32px; padding: 0; border: 0; background: none; font: inherit; font-size: 13px; color: var(--ink-3); cursor: pointer; border-radius: 6px; white-space: nowrap; }
+.mem-desfazer, .mem-link, .mem-marcar { color: var(--ink); text-decoration: underline; text-decoration-color: var(--line-strong); text-underline-offset: 3px; }
+.mem-acao:hover { color: var(--ink); text-decoration-color: currentColor; }
+.mem-acao:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.mem-acao[aria-busy="true"] { color: var(--ink-3); cursor: progress; text-decoration: none; }
+.mem-aviso { margin: 0; color: var(--ink-2); font-size: 12.5px; line-height: 18px; }
+.mem-aviso .mem-acao { min-height: 0; font-size: inherit; }
+.mem-vazio { margin: 4px 0 0; }
+.mem-mais { display: flex; align-items: center; gap: 12px; }
+/* Apagada, na aba Memórias: o cartão vira uma linha com Desfazer, no mesmo lugar. */
+.mem-apagada-txt { display: flex; flex-direction: column; gap: 2px; min-width: 0; margin: 0; color: var(--ink-2); font-size: 13px; }
+.mem-apagada-txt .mem-meta { overflow-wrap: anywhere; }
+.gv-meta.mem-conta-meta { margin-left: auto; }
+@media (prefers-reduced-motion: reduce) { .mem-entrada.mem-realce { transition: none; } }
+@media (forced-colors: active) { .mem-ponto { background: CanvasText; } .mem-entrada.mem-realce { outline: 2px solid Highlight; } }
+@media (hover: none) and (pointer: coarse) and (max-width: 600px), (hover: none) and (pointer: coarse) and (max-height: 500px) {
+  .mem-acoes { gap: 0 24px; }
+  .mem-acao, .mem-aviso .mem-acao { min-height: 44px; min-width: 44px; }
+  .mem-pe { min-height: 44px; }
+}
+/* ---------- v2 · o Editar da memória (opção A, no lugar): lê por padrão, edita onde está, Apagar fora do Salvar ---------- */
+.mem-mems { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--line); }
+.mem-mem { position: relative; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.mem-mem-corpo { display: flex; flex-direction: column; gap: 3px; width: 100%; margin: 0; padding: 6px 40px 6px 8px; border: 0; border-radius: 8px;
+  background: none; font: inherit; text-align: left; color: var(--ink); cursor: text; box-sizing: border-box; }
+.mem-mem-corpo:hover, .mem-com-menu .mem-mem-corpo { background: var(--surface-raised); }
+.mem-mem-corpo:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.mem-mem-texto { display: block; font-size: 14px; line-height: 20px; color: var(--ink); overflow-wrap: anywhere; }
+.mem-mem-meta { display: block; margin: 0; font-size: 12.5px; line-height: 17px; color: var(--ink-3); }
+.mem-mem-tipo { color: var(--ink-2); }
+.mem-mem-mais { position: absolute; top: 10px; right: 6px; display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 8px;
+  background: none; color: var(--ink-3); cursor: pointer; opacity: 0; }
+.mem-mem:hover .mem-mem-mais, .mem-mem-mais:focus-visible, .mem-mem-mais[aria-expanded="true"] { opacity: 1; }
+.mem-mem-mais:hover, .mem-mem-mais[aria-expanded="true"] { background: var(--surface-selected); color: var(--ink); }
+.mem-mem-mais:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 0; }
+
+/* O menu do "…": Editar em cima, Apagar no fim, separado por uma linha. */
+.mem-menu { position: absolute; z-index: 6; top: 42px; right: 4px; display: flex; flex-direction: column; min-width: 196px; padding: 4px;
+  border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow-pop); }
+.mem-menu-cab { display: none; }
+.mem-menu-item { display: flex; align-items: center; justify-content: space-between; gap: 16px; height: 32px; padding: 0 10px; border: 0; border-radius: 8px;
+  background: none; font: inherit; font-size: 13.5px; color: var(--ink); text-align: left; cursor: pointer; white-space: nowrap; }
+.mem-menu-item:hover, .mem-menu-item:focus-visible { background: var(--surface-raised); }
+.mem-menu-item:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.mem-menu-item kbd { font: inherit; font-size: 12px; color: var(--ink-3); }
+.mem-menu-sep { width: 100%; height: 0; margin: 4px 0; border: 0; border-top: 1px solid var(--line); }
+.mem-menu-perigo { color: var(--danger); }
+.mem-menu-perigo:hover, .mem-menu-perigo:focus-visible { background: var(--danger-soft); }
+
+/* Editando: uma caixa só (texto em cima, tipo e ações embaixo), como o composer. */
+.mem-editor { display: flex; flex-direction: column; gap: 4px; margin: 2px 0; padding: 8px 8px 8px 12px; border: 1px solid var(--line-strong);
+  border-radius: 12px; background: var(--surface); }
+.mem-editor:focus-within { border-color: var(--ink); }
+.mem-editor-texto { display: block; width: 100%; min-height: 40px; margin: 0; padding: 2px 4px 2px 0; border: 0; outline: none; resize: none;
+  background: none; font: inherit; font-size: 14px; line-height: 20px; color: var(--ink); field-sizing: content; box-sizing: border-box; }
+.mem-editor-texto::placeholder { color: var(--ink-3); }
+.mem-editor-pe { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.mem-tipo { position: relative; display: inline-flex; }
+.mem-tipo select { appearance: none; -webkit-appearance: none; height: 28px; margin: 0; padding: 0 26px 0 10px; border: 0; border-radius: 999px;
+  background: var(--surface-raised); font: inherit; font-size: 12.5px; color: var(--ink-2); cursor: pointer; }
+.mem-tipo select:hover { color: var(--ink); }
+.mem-tipo select:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.mem-tipo::after { content: ""; position: absolute; top: 50%; right: 11px; width: 5px; height: 5px; margin-top: -4px; border-right: 1.5px solid var(--ink-3);
+  border-bottom: 1.5px solid var(--ink-3); transform: rotate(45deg); pointer-events: none; }
+.mem-editor-acoes { display: inline-flex; align-items: center; gap: 2px; }
+.mem-cancelar, .mem-salvar { display: inline-flex; align-items: center; justify-content: center; height: 28px; margin: 0; border: 0; font: inherit;
+  font-size: 13px; cursor: pointer; white-space: nowrap; }
+.mem-cancelar { padding: 0 10px; border-radius: 8px; background: none; color: var(--ink-2); }
+.mem-cancelar:hover { background: var(--surface-raised); color: var(--ink); }
+.mem-salvar { padding: 0 14px; border-radius: 999px; background: var(--action); color: var(--on-action); font-weight: 550; }
+.mem-salvar:hover { opacity: .88; }
+.mem-cancelar:focus-visible, .mem-salvar:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.mem-editor-meta { padding: 2px 0 2px 12px; }
+
+/* Anotar: a mesma caixa, com o tipo e o Anotar sempre à vista. Recolher o pé ao sair do campo mudava a altura no meio do
+   toque e o primeiro toque no "…" de baixo caía fora do botão (QA do NOD-58). */
+.mem-anotar { padding: 6px 8px 6px 12px; }
+.mem-anotar .mem-editor-texto { min-height: 24px; padding: 2px 0; }
+
+/* Apagada: a linha fica no lugar, com Desfazer à direita. */
+.mem-mem.mem-apagada { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 6px 8px 8px; }
+.mem-mem.mem-apagada .mem-apagada-txt .mem-meta { display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
+@media (forced-colors: active) { .mem-editor { border-color: CanvasText; } .mem-menu { border-color: CanvasText; } .mem-editor-texto { outline: 2px solid transparent; } .mem-editor-texto:focus { outline-color: Highlight; } }
+@media (hover: none) and (pointer: coarse) and (max-width: 600px), (hover: none) and (pointer: coarse) and (max-height: 500px) {
+  .mem-mem-corpo { padding: 8px 52px 8px 8px; min-height: 44px; cursor: default; }
+  /* ADR-094: o "…" é a via de toque do menu (no lugar do toque longo); 44×44 de área real. */
+  .mem-mem-mais { top: 6px; right: 0; width: 44px; height: 44px; opacity: 1; }
+  .mem-mem-corpo:hover { background: none; }
+  .mem-com-menu .mem-mem-corpo { background: var(--surface-selected); }
+  .mem-menu { position: fixed; top: auto; left: 0; right: 0; bottom: 0; min-width: 0; padding: 22px 12px calc(14px + env(safe-area-inset-bottom)); border: 0; border-radius: 18px 18px 0 0; box-shadow: 0 0 0 100vmax var(--backdrop), var(--shadow-pop); }
+  .mem-menu::before { content: ""; position: absolute; top: 8px; left: 50%; width: 36px; height: 4px; margin-left: -18px; border-radius: 2px; background: var(--line-strong); }
+  .mem-menu-cab { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; margin: 0 0 6px; padding: 0 10px 12px; border-bottom: 1px solid var(--line); font-size: 13.5px; line-height: 19px; color: var(--ink-2); }
+  .mem-menu-item { height: 52px; font-size: 16px; }
+  .mem-menu-item kbd { display: none; }
+  .mem-editor { padding: 10px 6px 6px 12px; }
+  .mem-editor-texto { font-size: 16px; line-height: 22px; }
+  .mem-tipo select { height: 44px; font-size: 14px; }
+  .mem-anotar .mem-editor-texto { min-height: 44px; }
+  .mem-cancelar, .mem-salvar { min-height: 44px; font-size: 15px; }
+  .mem-salvar { padding: 0 18px; }
+  .mem-mem.mem-apagada .mem-acao { min-height: 44px; min-width: 44px; }
+}

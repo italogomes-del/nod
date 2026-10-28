@@ -613,10 +613,21 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       },
       async apagar(id) {
         const i = b.memorias.findIndex((m) => m.tenantId === escopo.tenantId && m.id === id);
-        if (i === -1) return false;
-        b.memorias.splice(i, 1);
-        return true;
+        if (i === -1) return null;
+        const [m] = b.memorias.splice(i, 1);
+        return m ?? null;
       },
+      async travar() {},
+    },
+
+    // NOD-58: o diário da memória só existe no Postgres (CTE na escrita); aqui, vazio.
+    memoriasDiario: {
+      listar: async () => ({ entradas: [], mais: false }),
+      contarARevisar: async () => 0,
+      buscar: async () => null,
+      ultimaDaMemoria: async () => null,
+      marcarDesfeita: soNoPostgres,
+      revisar: soNoPostgres,
     },
 
     conversas: {

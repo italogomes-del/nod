@@ -31,10 +31,12 @@ import { cifrarCodigo } from "./lib/cifra.ts";
 import { criarInstalarSsh, type CampoSegredo } from "./lib/instalar-ssh.ts";
 import type { ContasIaDto } from "../src/contracts/contas-ia.ts";
 import type { Mensagem } from "../src/contracts/mensagem.ts";
+import type { TipoMemoria } from "../src/contracts/memoria.ts";
 import { criarIasDoMac } from "./lib/ias-do-mac.ts";
 import { instalarOrdemArrastavel } from "./lib/ordem-arrastavel.ts";
 import { chaveDoMenuDaIa, ordemDoPasso } from "./lib/ordem.ts";
 import { abrirMenu, abrirMenuCompartilhar, abrirMenuConta, dialogo, pedirGestao, textoDuplicar, type BotGerido, type AcaoGestao } from "./telas/gestao-agentes.ts";
+import { rascunhoMudou } from "./telas/memoria.ts";
 import { abrirLuz } from "./telas/luz.ts";
 import { baixarUrl } from "./telas/luz-html.ts";
 import { htmlDoMenuDaBiblioteca } from "./telas/biblioteca.ts";
@@ -1185,7 +1187,11 @@ async function buscar(q: Invalidacao): Promise<Acao | null> {
     const ate = ateDaBusca(q.slice(6));
     return { tipo: "hidratar-conversa", conversa: notarAlvoDaBusca(q.slice(6), ate, await api.conversa(q.slice(6), ate)), agora };
   }
-  if (q.startsWith("memoria:")) return { tipo: "hidratar-memorias", agenteId: q.slice(8), memorias: (await api.memorias(q.slice(8))).memorias };
+  if (q.startsWith("memoria:")) {
+    const r = await api.memorias(q.slice(8));
+    return { tipo: "hidratar-memorias", agenteId: q.slice(8), memorias: r.memorias, ...(r.aRevisar === undefined ? {} : { aRevisar: r.aRevisar }) };
+  }
+  if (q.startsWith("diario:")) return { tipo: "hidratar-diario", agenteId: q.slice(7), pagina: await api.diarioMemoria(q.slice(7)) };
   if (q.startsWith("concessoes:")) return { tipo: "hidratar-concessoes", agenteId: q.slice(11), ...(await api.concessoes(q.slice(11))) };
   if (q.startsWith("execucoes:")) return { tipo: "hidratar-execucoes", rotinaId: q.slice(10), execucoes: (await api.execucoes(q.slice(10))).execucoes };
   // ADR-114 (chat limpo, PR 2): a página do dia da Atividade (404: servidor de antes ou bot de outra pessoa — fica
@@ -1320,7 +1326,9 @@ function relevante(q: Invalidacao): boolean {
   if (q === "contas") return secao === "maquinas" || secao === "conexao" || ((t.tipo === "conversa" || t.tipo === "trabalho" || conversaAbertaTemNotaDeContas(estado)) && (contasFalharamEm === null || Date.now() - contasFalharamEm > ESPERA_CONTAS_MS));
   if (q === "relatos") return secao === "feedback";
   if (q.startsWith("conversa:")) return (t.tipo === "conversa" || t.tipo === "sala" || t.tipo === "linha") && t.conversaId === q.slice(9);
-  if (q.startsWith("memoria:")) return t.tipo === "conversa" && estado.gaveta?.agenteId === q.slice(8) && estado.gaveta.nivel.tipo === "memoria";
+  // NOD-58: a lista também com Ajustes aberto (o "N para revisar" da linha Memória); o histórico, só com a aba dele.
+  if (q.startsWith("memoria:")) return t.tipo === "conversa" && estado.gaveta?.agenteId === q.slice(8) && (estado.gaveta.nivel.tipo === "memoria" || estado.gaveta.nivel.tipo === "ajustes");
+  if (q.startsWith("diario:")) return t.tipo === "conversa" && estado.gaveta?.agenteId === q.slice(7) && estado.gaveta.nivel.tipo === "memoria" && estado.gaveta.nivel.aba === "historico" && (estado.frota?.agentes.some((a) => a.id === q.slice(7) && a.ownerId === estado.sessao?.pessoaId) ?? false);
   if (q.startsWith("concessoes:")) return t.tipo === "conversa" && t.agenteId === q.slice(11) ? true : t.tipo === "conectores";
   // 2026-09-21: o painel de detalhes (tela conversa) também mostra o histórico — é onde a pessoa
   // confere que uma rotina silenciosa (desfecho sem_novidade, que não escreve no chat) rodou.
@@ -4089,6 +4097,188 @@ const timersCopiarCodigo = new WeakMap<HTMLElement, number>();
 /** NOD-8: o relógio do "✓ Copiado" dos outros botões de copiar (web/lib/copiar.ts). */
 const relogioDoCopiar: RelogioDoCopiar = { agendar: (fn, ms) => window.setTimeout(fn, ms), cancelar: (id) => clearTimeout(id), timers: new WeakMap() };
 
+/** NOD-58: muda o nível da Memória aberto (aba, editor, menu, realce) sem sair dele. */
+function mudarNivelMemoria(agenteId: string, mudanca: Partial<Extract<NivelGaveta, { tipo: "memoria" }>>): void {
+  const atual = estado.gaveta?.agenteId === agenteId && estado.gaveta.nivel.tipo === "memoria" ? estado.gaveta.nivel : { tipo: "memoria" as const };
+  const nivel: NivelGaveta = { ...atual, ...mudanca, tipo: "memoria" };
+  for (const k of Object.keys(nivel) as (keyof typeof nivel)[]) if (nivel[k] === undefined) delete nivel[k];
+  dispatch({ tipo: "gaveta", agenteId, nivel });
+}
+
+/**
+ * NOD-58: o retorno das ações da Memória vai para a região viva fixa (fora do `#detalhes`, que é redesenhado e nasceria
+ * já com o texto, sem ser lido), com o limpa-e-escreve do `anunciarEm`.
+ */
+function avisarMemoria(texto: string): void {
+  dispatch({ tipo: "status-memoria", texto });
+  anunciarGestao(texto);
+}
+
+/** NOD-58 (QA): digitar e apagar tudo não é rascunho; compara cada campo com o valor desenhado. */
+function memoriaComRascunho(): boolean {
+  const campos = [...document.querySelectorAll<HTMLTextAreaElement | HTMLSelectElement>("#detalhes form.mem-editor textarea, #detalhes form.mem-editor select")];
+  return rascunhoMudou(campos.map((c) => (c instanceof HTMLSelectElement ? { value: c.value, defaultValue: [...c.options].find((o) => o.defaultSelected)?.value ?? c.value } : c)));
+}
+
+/** NOD-58: com texto não salvo no editor ou no Anotar, trocar de memória, de aba ou abrir o "…" pergunta antes. */
+function semPerderRascunho(fazer: () => void): void {
+  if (gavetaSuja && gavetaSuja === chaveDaGaveta() && !memoriaComRascunho()) gavetaSuja = null;
+  if (gavetaSuja && gavetaSuja === chaveDaGaveta()) {
+    // `fazer` roda pelo `depois`, já com o diálogo fechado: com o modal aberto a página é inerte e o foco não pegaria.
+    pedirGestao("Descartar as mudanças?", "<p>O que você mudou aqui ainda não foi salvo.</p>", "Descartar", async () => { gavetaSuja = null; }, true, () => { if (gavetaSuja === null) fazer(); });
+    return;
+  }
+  fazer();
+}
+
+/** NOD-58: memórias com um Desfazer da linha "Apagada" a caminho (inclui a leitura do diário antes do desfazer). */
+const trazendo = new Set<string>();
+
+/** NOD-58: memórias com um Apagar a caminho; o segundo clique não sai e não vira um 404 falso. */
+const apagando = new Set<string>();
+
+/** NOD-58: entradas com um desfazer a caminho; o segundo clique (duplo clique) não sai e não vira um falso conflito. */
+const desfazendo = new Set<string>();
+
+/** NOD-58: desfaz uma entrada do diário. 409 = a memória mudou depois (aviso com "Ver a mais nova"); rede = "Tentar de novo". */
+async function desfazerNoDiario(agenteId: string, entradaId: string, memoriaId: string): Promise<boolean> {
+  if (desfazendo.has(entradaId)) return false;
+  desfazendo.add(entradaId);
+  avisador.acaoPropria();
+  dispatch({ tipo: "erro", erro: null });
+  dispatch({ tipo: "ocupado", valor: true });
+  try {
+    const r = await api!.desfazerEntrada(agenteId, entradaId);
+    dispatch({ tipo: "aviso-diario", aviso: null });
+    // A original fica desfeita já na tela, mesmo se veio pelo "Mostrar mais" (a releitura só traz a 1ª página).
+    dispatch({ tipo: "diario-desfeita", agenteId, entradaId, em: r.entrada.criadoEm });
+    if (r.entrada.acao === "criada") dispatch({ tipo: "memoria-apagada-sai", agenteId, memoriaId });
+    avisarMemoria("Mudança desfeita.");
+    dispatch({ tipo: "invalidar", quais: [`memoria:${agenteId}`, `diario:${agenteId}`] });
+    return true;
+  } catch (e) {
+    if (e instanceof ErroApi && e.status === 409) {
+      dispatch({ tipo: "aviso-diario", aviso: { entradaId, tipo: "conflito" } });
+      avisarMemoria("Esta memória mudou depois. Desfaça a mudança mais nova primeiro.");
+      dispatch({ tipo: "invalidar", quais: [`diario:${agenteId}`] });
+    } else if (ehErroDeRede(erroDe(e))) {
+      dispatch({ tipo: "aviso-diario", aviso: { entradaId, tipo: "rede" } });
+      avisarMemoria("Não deu para desfazer agora.");
+    } else mostrarErro(e);
+    return false;
+  } finally {
+    desfazendo.delete(entradaId);
+    dispatch({ tipo: "ocupado", valor: false });
+  }
+}
+
+/** NOD-58: a linha "Apagada" da aba Memórias: o desfazer é o da entrada mais nova dessa memória (a remoção). */
+async function desfazerApagada(el: HTMLElement): Promise<void> {
+  const agenteId = el.dataset.agente ?? "";
+  const memoriaId = el.dataset.id ?? "";
+  let entrada = estado.diarios[agenteId]?.entradas.find((e) => e.memoriaId === memoriaId);
+  if (entrada?.acao !== "apagada" || entrada.desfeitaEm !== null) {
+    const pagina = await api!.diarioMemoria(agenteId).catch((e: unknown) => (mostrarErro(e), null));
+    if (!pagina) return;
+    dispatch({ tipo: "hidratar-diario", agenteId, pagina });
+    entrada = pagina.entradas.find((e) => e.memoriaId === memoriaId);
+  }
+  if (entrada?.acao !== "apagada" || entrada.desfeitaEm !== null) {
+    dispatch({ tipo: "memoria-apagada-sai", agenteId, memoriaId });
+    avisarMemoria("Esta memória mudou depois. Veja no Histórico.");
+    return;
+  }
+  if (await desfazerNoDiario(agenteId, entrada.id, memoriaId)) avisarMemoria("Memória de volta.");
+}
+
+/** NOD-58: as ações da Memória (abas Memórias | Histórico). Nada de Desfazer no chat, nem Refazer (decisão de produto). */
+const acoesDaMemoria: Record<string, (el: HTMLElement) => Promise<void> | void> = {
+  "memoria-aba": (el) => semPerderRascunho(() => {
+    const agenteId = el.dataset.agente ?? "";
+    const aba = el.dataset.aba === "historico" ? "historico" : "memorias";
+    gavetaSuja = null;
+    dispatch({ tipo: "aviso-diario", aviso: null });
+    mudarNivelMemoria(agenteId, { aba, editando: undefined, menu: undefined, realce: undefined });
+    // O histórico guardado aparece na hora; a leitura nova chega por cima.
+    if (aba === "historico") dispatch({ tipo: "invalidar", quais: [`diario:${agenteId}`] });
+    document.querySelector<HTMLElement>(`#detalhes .mem-aba[data-aba="${aba}"]`)?.focus();
+  }),
+  "editar-memoria": (el) => semPerderRascunho(() => {
+    gavetaSuja = null;
+    mudarNivelMemoria(el.dataset.agente ?? "", { editando: el.dataset.id, menu: undefined });
+    const campo = document.querySelector<HTMLTextAreaElement>("#detalhes .mem-editando .mem-editor-texto");
+    if (campo) { campo.focus(); campo.setSelectionRange(campo.value.length, campo.value.length); }
+  }),
+  "cancelar-edicao": (el) => {
+    gavetaSuja = null;
+    mudarNivelMemoria(el.dataset.agente ?? "", { editando: undefined });
+    document.querySelector<HTMLElement>(`#detalhes [data-mem-corpo="${CSS.escape(el.dataset.id ?? "")}"]`)?.focus();
+  },
+  "memoria-mais": (el) => semPerderRascunho(() => {
+    const agenteId = el.dataset.agente ?? "";
+    const aberto = estado.gaveta?.nivel.tipo === "memoria" && estado.gaveta.nivel.menu === el.dataset.id;
+    mudarNivelMemoria(agenteId, { menu: aberto ? undefined : el.dataset.id });
+    if (!aberto) document.querySelector<HTMLElement>("#detalhes .mem-menu [role=menuitem]")?.focus();
+  }),
+  "apagar-memoria": (el) => {
+    const memoriaId = el.dataset.id ?? "";
+    if (apagando.has(memoriaId)) return;
+    apagando.add(memoriaId);
+    return agir(async () => {
+      const agenteId = el.dataset.agente ?? "";
+      const m = estado.memorias[agenteId]?.find((x) => x.id === memoriaId);
+      await api!.apagarMemoria(agenteId, memoriaId);
+      gavetaSuja = null;
+      if (m) dispatch({ tipo: "memoria-apagada", agenteId, apagada: { memoriaId: m.id, tipo: m.tipo, texto: m.texto, criadoEm: m.criadoEm } });
+      mudarNivelMemoria(agenteId, { menu: undefined, editando: undefined });
+      const dona = estado.frota?.agentes.some((b) => b.id === agenteId && b.ownerId === estado.sessao?.pessoaId) ?? false;
+      avisarMemoria(dona ? "Memória apagada. Dá para desfazer." : "Memória apagada.");
+      dispatch({ tipo: "invalidar", quais: [`memoria:${agenteId}`, `diario:${agenteId}`] });
+      document.querySelector<HTMLElement>(`#detalhes [data-act="desfazer-apagada"][data-id="${CSS.escape(memoriaId)}"]`)?.focus();
+    }).finally(() => apagando.delete(memoriaId));
+  },
+  // Com rascunho não salvo a gaveta não se redesenha (a linha "Apagada" ficaria e o 2º clique viraria conflito falso).
+  "desfazer-apagada": (el) => semPerderRascunho(() => {
+    const memoriaId = el.dataset.id ?? "";
+    if (trazendo.has(memoriaId)) return;
+    trazendo.add(memoriaId);
+    void desfazerApagada(el).finally(() => trazendo.delete(memoriaId));
+  }),
+  "ver-no-historico": (el) => semPerderRascunho(() => {
+    const agenteId = el.dataset.agente ?? "";
+    gavetaSuja = null;
+    mudarNivelMemoria(agenteId, { aba: "historico", menu: undefined, editando: undefined, realce: el.dataset.id });
+    dispatch({ tipo: "invalidar", quais: [`diario:${agenteId}`] });
+  }),
+  "desfazer-entrada": (el) => void desfazerNoDiario(el.dataset.agente ?? "", el.dataset.id ?? "", el.dataset.memoria ?? ""),
+  "ver-mais-nova": (el) => {
+    dispatch({ tipo: "aviso-diario", aviso: null });
+    mudarNivelMemoria(el.dataset.agente ?? "", { realce: el.dataset.memoria });
+    document.querySelector<HTMLElement>("#detalhes .mem-realce")?.scrollIntoView({ block: "nearest" });
+  },
+  "revisar-entrada": (el) =>
+    agir(async () => {
+      const agenteId = el.dataset.agente ?? "";
+      const r = await api!.revisarDiario(agenteId, el.dataset.id ?? "");
+      dispatch({ tipo: "diario-revisado", agenteId, entradaId: el.dataset.id ?? "", aRevisar: r.aRevisar });
+      avisarMemoria("Marcada como revisada.");
+    }),
+  "revisar-tudo": (el) =>
+    agir(async () => {
+      const agenteId = el.dataset.agente ?? "";
+      const r = await api!.revisarDiario(agenteId);
+      dispatch({ tipo: "diario-revisado", agenteId, entradaId: null, aRevisar: r.aRevisar });
+      avisarMemoria("Tudo revisado.");
+    }),
+  "diario-mais": (el) =>
+    agir(async () => {
+      const agenteId = el.dataset.agente ?? "";
+      const ultima = estado.diarios[agenteId]?.entradas.at(-1);
+      if (!ultima) return;
+      dispatch({ tipo: "hidratar-diario", agenteId, pagina: await api!.diarioMemoria(agenteId, ultima.id), anexar: true });
+    }),
+};
+
 /** Cria um bot em branco e abre a conversa dele. */
 function criarBotAgora(): Promise<void> {
   return agir(async () => {
@@ -4700,7 +4890,8 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   },
   "restaurar-agente": (el) => agir(async () => { await mudarGestao(() => api!.restaurarAgente(el.dataset.id ?? "")); }),
   "ir-perfil": (el) => abrirNivel(el.dataset.id ?? "", { tipo: "perfil" }),
-  "ir-memoria": (el) => abrirNivel(el.dataset.id ?? "", { tipo: "memoria" }),
+  "ir-memoria": (el) => abrirNivel(el.dataset.id ?? "", { tipo: "memoria", ...(el.dataset.aba === "historico" ? { aba: "historico" as const } : {}) }),
+  ...acoesDaMemoria,
   "fechar-erro": () => dispatch({ tipo: "erro", erro: null }),
   // Sem agir(): no navegador, o pedido de permissão precisa sair direto do clique.
   "alternar-avisos": () => canalAvisos.alternar(),
@@ -4849,16 +5040,6 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   "dispensar-incidente": (el) => agir(async () => void (await api!.dispensarIncidente(el.dataset.id ?? ""), dispatch({ tipo: "invalidar", quais: ["sua-vez"] }))),
   // definido em 2026-09-24 (ADR-044): o grupo (app · nível) do painel sai inteiro, com um registro só.
   "revogar-acessos": (el) => agir(async () => void (await api!.revogarAcessos(el.dataset.agente ?? "", (el.dataset.ids ?? "").split(",").filter(Boolean)), dispatch({ tipo: "invalidar", quais: [`concessoes:${el.dataset.agente ?? ""}`, "frota"] }))),
-  "salvar-memoria": (el) =>
-    agir(async () => {
-      gavetaSuja = null;
-      const li = el.closest("[data-memoria]");
-      const texto = li?.querySelector<HTMLInputElement>('[data-campo="texto"]')?.value ?? "";
-      const tipo = li?.querySelector<HTMLSelectElement>('[data-campo="tipo"]')?.value as "preferencia" | "fato" | "resumo" | undefined;
-      await api!.editarMemoria(el.dataset.agente ?? "", el.dataset.id ?? "", { texto, tipo });
-      dispatch({ tipo: "invalidar", quais: [`memoria:${el.dataset.agente ?? ""}`] });
-    }),
-  "apagar-memoria": (el) => agir(async () => void (gavetaSuja = null, await api!.apagarMemoria(el.dataset.agente ?? "", el.dataset.id ?? ""), dispatch({ tipo: "invalidar", quais: [`memoria:${el.dataset.agente ?? ""}`] }))),
   "pausar-rotina": (el) => agir(async () => void (await api!.pausarRotina(el.dataset.id ?? ""), dispatch({ tipo: "invalidar", quais: ["rotinas"] }))),
   "ativar-rotina": (el) => agir(async () => void (await api!.ativarRotina(el.dataset.id ?? ""), dispatch({ tipo: "invalidar", quais: ["rotinas"] }))),
   "ver-execucoes": (el) => {
@@ -5392,7 +5573,18 @@ const FORMS: Record<string, (form: HTMLFormElement) => Promise<void>> = {
       await api!.criarMemoria(form.dataset.id ?? "", String(d.get("tipo") ?? "fato") as "preferencia" | "fato" | "resumo", String(d.get("texto") ?? ""));
       form.reset();
       gavetaSuja = null;
-      dispatch({ tipo: "invalidar", quais: [`memoria:${form.dataset.id ?? ""}`] });
+      dispatch({ tipo: "invalidar", quais: [`memoria:${form.dataset.id ?? ""}`, `diario:${form.dataset.id ?? ""}`] });
+    }),
+  // NOD-58: o editor no lugar (opção A). Salvar fecha o editor; o texto e o tipo vão juntos.
+  "salvar-memoria": (form) =>
+    agir(async () => {
+      const agenteId = form.dataset.agente ?? "";
+      const d = new FormData(form);
+      await api!.editarMemoria(agenteId, form.dataset.id ?? "", { texto: String(d.get("texto") ?? ""), tipo: String(d.get("tipo") ?? "fato") as TipoMemoria });
+      gavetaSuja = null;
+      mudarNivelMemoria(agenteId, { editando: undefined });
+      dispatch({ tipo: "invalidar", quais: [`memoria:${agenteId}`, `diario:${agenteId}`] });
+      document.querySelector<HTMLElement>(`#detalhes [data-mem-corpo="${CSS.escape(form.dataset.id ?? "")}"]`)?.focus();
     }),
   "criar-sala": (form) =>
     agir(async () => {
@@ -5490,7 +5682,34 @@ document.addEventListener("click", (ev) => {
   const u = estado.contasUi;
   if ((u.menu || u.maquinaMenu) && !(ev.target as HTMLElement).closest(".cl-mais")) dispatch({ tipo: "contas-ui", mudanca: { menu: null, maquinaMenu: null } });
   if (estado.nuvem.sonoMenu && !(ev.target as HTMLElement).closest(".nv-ajuste-wrap")) dispatch({ tipo: "nuvem-ui", mudanca: { sonoMenu: null } });
+  // NOD-58: o "…" da memória aberto é como um modal leve: o clique fora só fecha (no celular, o fundo escurecido da folha
+  // não deixa o toque acertar a memória de baixo).
+  const g = estado.gaveta;
+  if (g?.nivel.tipo === "memoria" && g.nivel.menu && document.querySelector("#detalhes .mem-menu") && !(ev.target as HTMLElement).closest(`.mem-menu, dialog, .mem-mem-mais[data-id="${CSS.escape(g.nivel.menu)}"]`)) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    mudarNivelMemoria(g.agenteId, { menu: undefined });
+  }
 }, true);
+// NOD-58: no editor da memória, Esc cancela e ⌘↵ (Ctrl+↵) salva; no "…" aberto, Esc fecha e devolve o foco.
+document.addEventListener("keydown", (ev) => {
+  const alvo = ev.target as HTMLElement;
+  const editor = alvo.closest?.<HTMLFormElement>('#detalhes form[data-form="salvar-memoria"]');
+  if (editor && ev.key === "Escape") {
+    ev.preventDefault();
+    editor.querySelector<HTMLElement>('[data-act="cancelar-edicao"]')?.click();
+  } else if (alvo.closest?.("#detalhes form.mem-editor") && ev.key === "Enter" && (ev.metaKey || ev.ctrlKey)) {
+    ev.preventDefault();
+    alvo.closest<HTMLFormElement>("form")?.requestSubmit();
+  } else if (ev.key === "Escape" && alvo.closest?.("#detalhes .mem-menu")) {
+    ev.preventDefault();
+    const id = alvo.closest<HTMLElement>("[data-memoria]")?.dataset.memoria ?? "";
+    const seletor = `#detalhes [data-act="memoria-mais"][data-id="${CSS.escape(id)}"]`;
+    document.querySelector<HTMLElement>(seletor)?.click();
+    // Depois do redesenho: o botão antigo já saiu do DOM.
+    document.querySelector<HTMLElement>(seletor)?.focus();
+  }
+});
 // NOD-367: setas, Home e End no "…" das Configurações (o `.cl-menu` aberto), como no menu do avatar.
 document.addEventListener("keydown", (ev) => {
   const menu = (ev.target as HTMLElement).closest?.<HTMLElement>("#espaco .cl-menu");
@@ -6627,6 +6846,12 @@ function abrirMenuDaBiblioteca(ancora: HTMLElement): void {
 }
 
 function escolherAba(agenteId: string, aba: string): void {
+  // NOD-58: as setas nas abas Memórias | Histórico do nível Memória trocam a aba como o clique.
+  if (aba === "memorias" || aba === "historico") {
+    const tab = document.querySelector<HTMLElement>(`#detalhes .mem-aba[data-aba="${aba}"]`);
+    if (tab) ACOES["memoria-aba"]?.(tab);
+    return;
+  }
   if (aba !== "detalhes" && aba !== "biblioteca" && aba !== "computador") return;
   dispatch({ tipo: "aba-gaveta", agenteId, aba });
   try { localStorage.setItem(CHAVE_ABA_GAVETA, JSON.stringify(estado.abaGaveta)); } catch { /* modo privado */ }
