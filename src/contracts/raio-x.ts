@@ -99,7 +99,14 @@ export type ComposicaoRaioX = {
    * trabalho (na entrada) e as últimas falas (no contexto). Ausente = turno normal ou de antes da NOD-312.
    */
   recomeco?: { motivo: MotivoRecomeco; avisoChars: number; resumoChars: number; historicoChars: number };
+  /**
+   * NOD-60 (ADR-136): a memória do bot no turno de texto — quantas ele tem, quantas entraram pelo núcleo (preferências e
+   * recentes; todas, quando cabem) e quantas só pela busca do turno. Ausente = ligação ou turno de antes da NOD-60.
+   */
+  memoria?: MemoriaNoTurno;
 };
+
+export type MemoriaNoTurno = { total: number; nucleo: number; recall: number };
 
 /** GET turnos/:id/raio-x. `custoUsd` é o do turno (turnos.custo_usd), já sem o acumulado da sessão. */
 export type RaioXTurno = {

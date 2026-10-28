@@ -14,11 +14,16 @@ import { BRANCH_NA_FRENTE_ATUAL, DONO_INTEGRA, ehFrente, worktreeDaFrente } from
 import { ehPastaDeTask, NATIVA_MCP_DA_PESSOA, type MotivoSemTerminal } from "./nativas.ts";
 import { linhaDosPedidosPendentes, type PedidoPendenteNoPrompt } from "./pedidos-pendentes.ts";
 import { podeRepassar, PROFUNDIDADE_MAXIMA, proximaProfundidade } from "./profundidade.ts";
+import { escolherMemoriasDoTurno, linhaDaMemoria } from "./recall-memoria.ts";
 import { redigir } from "./redacao.ts";
 import { emTriagem, linhaDaTriagem } from "./triagem.ts";
 
-/** definido em 2026-09-16: memória limitada e ordenada para o --append-system-prompt ser ESTÁVEL por agente (cache ephemeral_1h, mapa-cli). */
-export const MEMORIAS_NO_PROMPT = 40;
+/**
+ * revisto em 2026-10-28 (NOD-60, ADR-136): o teto e a escolha moram em recall-memoria.ts. A memória está na parte volátil
+ * desde a NOD-155, então o motivo antigo (prompt estável por agente) não vale mais; o corte nas 40 MAIS ANTIGAS escondia
+ * toda memória nova. O caso de uso passa a escolha do turno (núcleo + recall); aqui ela é reaplicada só como guarda.
+ */
+export { MEMORIAS_NO_PROMPT } from "./recall-memoria.ts";
 
 /**
  * definido em 2026-09-21: o teto de rotinas por agente é 50 (rotina-limites.ts), e o inventário
@@ -511,10 +516,11 @@ export function partesDoPromptSistema(entrada: EntradaPromptSistema): { estavel:
   // sumia da fala; o classificador agora o recupera (NARRACAO_MAX_CHARS em stream-json.ts), e a última
   // frase pede ao modelo que não dependa disso.
   if (nomes.length > 0) linhas.push("Progresso: o texto que você escreve entre chamadas de ferramenta aparece para a pessoa como etapas, uma linha cada. Narre cada passo em uma frase curta começando por um verbo (\"Categorizando lote de 11 e-mails\"), sem repetir contadores nem escrever \"Continuando\". " + (entrada.whatsapp ? PROGRESSO_WHATSAPP : PROGRESSO_RELATORIO) + " Não chame ferramenta depois do relatório; se precisar, reescreva o relatório inteiro no fim.");
-  const memorias = [...entrada.memorias].sort((a, b) => a.criadoEm - b.criadoEm || a.id.localeCompare(b.id)).slice(0, MEMORIAS_NO_PROMPT);
+  // NOD-60: a escolha é idempotente — a do caso de uso já cabe e volta igual; a lista crua cai no núcleo, nunca nas mais antigas.
+  const { memorias } = escolherMemoriasDoTurno({ todas: entrada.memorias });
   if (memorias.length > 0) {
     volatil.push(cabecalhoDaMemoria());
-    for (const m of memorias) volatil.push(`- [${m.tipo}] ${m.texto}`);
+    for (const m of memorias) volatil.push(linhaDaMemoria(m));
   }
   // NOD-262: os pedidos de colegas na fila mudam a cada turno — parte volátil, depois da memória.
   const pedidos = entrada.pedidosPendentes ?? [];

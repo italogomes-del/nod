@@ -141,6 +141,16 @@ describe("NOD-312: o chip da sessão no Raio-X", () => {
   });
 });
 
+describe("NOD-60: a memória do turno no Raio-X", () => {
+  const com = (memoria: NonNullable<RaioXTurno["composicao"]>["memoria"]): RaioXTurno => ({ ...CLARICE, composicao: { ...CLARICE.composicao!, ...(memoria ? { memoria } : {}) } });
+  it("mostra total, núcleo e busca do turno", () => {
+    expect(renderRaioX(com({ total: 60, nucleo: 22, recall: 9 }), "Clarice")).toContain("Memória: <b>31</b> de 60 no prompt · núcleo <b>22</b> · busca do turno <b>9</b>");
+  });
+  it("turno antigo ou ligação (sem o campo): sem a linha", () => {
+    expect(renderRaioX(com(undefined), "Clarice")).not.toContain("busca do turno");
+  });
+});
+
 describe("NOD-352: o Raio-X mostra o id técnico e o nome amigável no title", () => {
   it("com o mapa do servidor, o code ganha o title; sem ele (servidor antigo), fica só o id", () => {
     const comNomes = renderRaioX({ ...CLARICE, nomesDasFerramentas: { Read: "Leu um arquivo", "mcp__nod__lembrar": "Anotou na memória" } }, "Clarice");

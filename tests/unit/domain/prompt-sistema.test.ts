@@ -192,6 +192,9 @@ describe("montarPromptSistema", () => {
     const muitas = Array.from({ length: MEMORIAS_NO_PROMPT + 5 }, (_, i) => mem(`m${i}`, `fato ${i}`, i));
     const p = montarPromptSistema({ agente, memorias: muitas, ferramentas: [], pessoaNome: "M", modo: "conversa" });
     expect(p.split("\n- [").length - 1).toBe(MEMORIAS_NO_PROMPT);
+    // NOD-60: a lista crua (sem a busca do caso de uso) cai no núcleo — a mais nova entra, a mais antiga não.
+    expect(p).toContain(`fato ${MEMORIAS_NO_PROMPT + 4}`);
+    expect(p).not.toContain("- [preferencia] fato 0\n");
   });
 
   describe("conexões: o que é do agente, não só o que está habilitado", () => {

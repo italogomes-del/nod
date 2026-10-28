@@ -75,6 +75,22 @@ export function memoriasRepo(conn: Conn, escopo: Escopo) {
       return linhas.map(paraMemoria);
     },
 
+    /**
+     * NOD-60 (ADR-136): as memórias do bot que casam com `consulta` (busca léxica `nod_pt` na coluna gerada da 0123,
+     * pelo índice do bot), da mais relevante para a menos. Um termo basta (OU entre os termos): a pergunta
+     * "qual o CNPJ da Leapy?" acha "o CNPJ da Leapy é X" mesmo sem "qual". Consulta só de stopwords não acha nada.
+     * O rank divide pelo log do tamanho (normalização 1): a memória longa não vence só por ser longa. O `&` do plainto_tsquery vira `|`: os lexemas saem entre aspas e sem espaço, então o separador " & " é único.
+     */
+    async buscarPorTexto(agenteId: string, consulta: string, limite: number): Promise<Memoria[]> {
+      const linhas = await conn<Linha[]>`
+        with q as (select replace(plainto_tsquery('nod_pt', ${consulta})::text, ' & ', ' | ')::tsquery as q)
+        select ${conn.unsafe(COLUNAS)} from agente_memorias, q
+        where tenant_id = ${escopo.tenantId} and agente_id = ${agenteId} and search_tsv @@ q.q
+        order by ts_rank(search_tsv, q.q, 1) desc, criado_em desc, id
+        limit ${limite}`;
+      return linhas.map(paraMemoria);
+    },
+
     /** Edição sem mudança real (mesmo texto e tipo) não entra no diário. */
     async atualizar(id: string, campos: { texto?: string; tipo?: TipoMemoria }, op: OpcoesDiario & { autor: AutorMemoria }): Promise<Memoria | null> {
       const [l] = await conn<Linha[]>`

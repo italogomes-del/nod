@@ -128,7 +128,7 @@ function grupoDe(f: PlanoTurno["catalogo"]["ferramentas"][number]): Pick<GrupoDe
  * saem em ordem decrescente de tamanho: é a pergunta que o Raio-X responde ("o que ocupa a janela?").
  */
 /** ADR-111: `experimentos` = as chaves que valeram no turno (o caso de uso resolve); ausente, a composição sai sem elas. */
-export function composicaoDoPlano(plano: PlanoTurno, opcoes: { modo: ModoTurno; comTexto: boolean; experimentos?: NonNullable<ComposicaoRaioX["experimentos"]>; recomeco?: NonNullable<ComposicaoRaioX["recomeco"]> }): ComposicaoRaioX {
+export function composicaoDoPlano(plano: PlanoTurno, opcoes: { modo: ModoTurno; comTexto: boolean; experimentos?: NonNullable<ComposicaoRaioX["experimentos"]>; recomeco?: NonNullable<ComposicaoRaioX["recomeco"]>; memoria?: NonNullable<ComposicaoRaioX["memoria"]> }): ComposicaoRaioX {
   const grupos = new Map<string, GrupoDeFerramentas>();
   for (const f of plano.catalogo.ferramentas) {
     const g = grupoDe(f);
@@ -152,6 +152,7 @@ export function composicaoDoPlano(plano: PlanoTurno, opcoes: { modo: ModoTurno; 
     comTexto: opcoes.comTexto,
     ...(opcoes.experimentos ? { experimentos: opcoes.experimentos } : {}),
     ...(opcoes.recomeco ? { recomeco: opcoes.recomeco } : {}),
+    ...(opcoes.memoria ? { memoria: opcoes.memoria } : {}),
   };
 }
 

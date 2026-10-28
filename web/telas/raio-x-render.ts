@@ -210,11 +210,21 @@ function abaEnviado(r: RaioXTurno): string {
   const experimentos = x
     ? `<p class="rx-quadro">Experimentos: Calibração <b>${x.calibracao ? "ligada" : "desligada"}</b> · Memória longa <b>${x.memoriaLonga ? "ligada" : "desligada"}</b>${x.memoriaLonga && c.sessaoRetomada ? " (sem efeito: a sessão foi retomada)" : ""}${x.anexosAnteriores ? ` · ${x.anexosAnteriores} ${x.anexosAnteriores === 1 ? "anexo anterior voltou" : "anexos anteriores voltaram"}` : ""} · Modo WhatsApp <b>${x.whatsapp ? "ligado" : "desligado"}</b></p>`
     : "";
-  return `<p class="rx-intro">Na ordem em que o Claude Code monta cada chamada. Tamanho em caracteres, exato; tokens estimados a ${CARACTERES_POR_TOKEN} caracteres por token.</p>${semTexto}${experimentos}
+  return `<p class="rx-intro">Na ordem em que o Claude Code monta cada chamada. Tamanho em caracteres, exato; tokens estimados a ${CARACTERES_POR_TOKEN} caracteres por token.</p>${semTexto}${experimentos}${linhaDaMemoriaNoTurno(c.memoria)}
     <section class="rx-secao rx-lista"><div class="rx-secao-cab"><h3>1 · Prompt de sistema do nod</h3><span class="rx-num">${esc(mil(c.promptChars))} caract.</span></div>${prompt}</section>
     <section class="rx-secao rx-lista"><div class="rx-secao-cab"><h3>2 · Definições de ferramentas</h3><span class="rx-num">${esc(mil(totalFerramentas))} caract.</span></div>${grupos}${nativas}${busca}</section>
     <section class="rx-secao rx-lista"><div class="rx-secao-cab"><h3>3 · Histórico da conversa</h3><span class="rx-num${chip === "sessão nova" ? "" : " p312-chip"}">${esc(chip)}</span></div><p class="rx-texto">${esc(historico)}</p>${falasDoRecomeco}</section>
     <section class="rx-secao rx-lista"><div class="rx-secao-cab"><h3>4 · Entrada do turno</h3><span class="rx-num">${esc(mil(c.entrada.chars))} caract.${esc(anexos)}</span></div>${c.entrada.texto !== undefined ? `<p class="rx-texto rx-citacao">“${esc(c.entrada.texto)}”</p>` : ""}${entradaDoRecomeco}</section>`;
+}
+
+/**
+ * NOD-60 (ADR-136): quantas memórias o bot tem e quantas entraram no prompt, pelo núcleo (preferências e recentes; todas,
+ * quando cabem) e pela busca do turno. Ausente (ligação, turno antigo) = sem a linha.
+ */
+export function linhaDaMemoriaNoTurno(m: ComposicaoRaioX["memoria"]): string {
+  if (!m) return "";
+  const noPrompt = m.nucleo + m.recall;
+  return `<p class="rx-quadro">Memória: <b>${noPrompt}</b> de ${m.total} no prompt · núcleo <b>${m.nucleo}</b> · busca do turno <b>${m.recall}</b></p>`;
 }
 
 // ---------------------------------------------------------------------------------------------

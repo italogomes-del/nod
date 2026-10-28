@@ -1,3 +1,4 @@
+import type { Memoria } from "../contracts/memoria.ts";
 import type { AnexoMeta, TipoAnexo } from "../contracts/anexo.ts";
 import { tipoDoAnexo } from "../domain/anexo.ts";
 import type { CapacidadesHarness, IdHarness } from "../contracts/harness.ts";
@@ -50,6 +51,7 @@ import { avisoDeRecomeco, montarResumoDoRecomeco, motivoDoRecomeco } from "../do
 import { emSavepoint } from "./savepoint.ts";
 import { dadosDoResumo, TURNOS_DO_RESUMO } from "./resumo-do-recomeco.ts";
 import { log } from "../obs/log.ts";
+import { ACHADAS_POR_BUSCA, consultaDoTurno, escolherMemoriasDoTurno, memoriaCabeInteira } from "../domain/recall-memoria.ts";
 
 export type EntradaEmitirPlano = {
   turnoId: string;
@@ -223,6 +225,22 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   // de saltos e a raiz não foi achada, o turno continua delegação — nunca cai em conversa com --resume.
   const ehDelegacao = delegacao !== null || Boolean(turno.sobProcuracaoDe);
   const modo = modoDoTurno(turno, conversa, agente, ligacao !== null, ehDelegacao);
+  // NOD-60 (ADR-136): a memória que não cabe inteira entra por núcleo + recall. A busca é a única query a mais e só roda
+  // quando há o que escolher; na rotina (e na retomada dela) busca pela instrução, que a entrada embrulha em contexto
+  // fixo; nas outras retomadas, pela fala que começou a cadeia mais a da retomada (que pode trazer a resposta da pessoa). A ligação tem o
+  // prompt de voz e segue com as 15 mais recentes (prompt-ligacao.ts). A busca é complemento: se falhar, o turno segue
+  // com o núcleo (savepoint, para o erro do Postgres não abortar a emissão).
+  const textoDaBusca = async (): Promise<string> => ligacao ? (turno.origem === "retomada" ? `${ligacao.rotina.instrucao}\n${turno.entradaTexto}` : ligacao.rotina.instrucao) : turno.origem === "retomada" ? `${(await deps.repos.turnos.raizDaCadeia(turno.id) ?? turno).entradaTexto}\n${turno.entradaTexto}` : turno.entradaTexto;
+  const consulta = modo === "ligacao" || memoriaCabeInteira(memorias) ? null : consultaDoTurno(await textoDaBusca());
+  let achadas: Memoria[] = [];
+  if (consulta) {
+    try {
+      achadas = await emSavepoint(deps, () => deps.repos.memorias.buscarPorTexto(agente.id, consulta, ACHADAS_POR_BUSCA));
+    } catch (erro) {
+      log("aviso", "recall_de_memoria_falhou", { turno_id: turno.id, erro: erro instanceof Error ? erro.name : "desconhecido", codigo: String((erro as { code?: unknown } | null)?.code ?? "") || null });
+    }
+  }
+  const escolhaDeMemorias = escolherMemoriasDoTurno({ todas: memorias, achadas });
   const mensagens = await deps.repos.mensagens.listarDaConversa(turno.conversaId, MENSAGENS_DO_PLANO);
   const resposta = mensagens.find((m) => m.turnoId === turno.id && m.payload?.kind === "peer_ask");
   const origemId = resposta?.payload?.kind === "peer_ask" ? resposta.payload.turnoOrigemId : undefined;
@@ -411,7 +429,7 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
     turno: { ...turno, sobProcuracaoDe, ...(modeloEscolhido ? { modelo: modeloEscolhido } : {}) },
     agente,
     ...(raciocinio ? { raciocinio } : {}),
-    memorias,
+    memorias: escolhaDeMemorias.memorias,
     concessoes,
     conectores,
     modo,
@@ -560,7 +578,7 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   guardarPlanoSeSuportado(deps.services.tokenTurno, plano);
   // Modo dev (0036): o que este plano manda ao modelo, por parte. Os textos só com o modo dev da pessoa ligado.
   const { modoDev } = preferencias;
-  await deps.repos.raioX.gravarComposicao(turno.id, composicaoDoPlano(plano, { modo, comTexto: modoDev, experimentos: { calibracao: experimentos.calibracao, memoriaLonga, whatsapp, anexosAnteriores: anteriores.length }, ...(partesDoRecomeco ? { recomeco: partesDoRecomeco } : {}) }));
+  await deps.repos.raioX.gravarComposicao(turno.id, composicaoDoPlano(plano, { modo, comTexto: modoDev, experimentos: { calibracao: experimentos.calibracao, memoriaLonga, whatsapp, anexosAnteriores: anteriores.length }, ...(modo !== "ligacao" ? { memoria: { total: escolhaDeMemorias.total, nucleo: escolhaDeMemorias.nucleo, recall: escolhaDeMemorias.recall } } : {}), ...(partesDoRecomeco ? { recomeco: partesDoRecomeco } : {}) }));
 
   const evento: RuntimeEvent = {
     tenantId: deps.escopo.tenantId,

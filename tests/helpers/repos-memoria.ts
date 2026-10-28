@@ -608,6 +608,14 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async listarDoAgente(agenteId) {
         return doTenant(b.memorias).filter((m) => m.agenteId === agenteId).sort((x, y) => x.criadoEm - y.criadoEm || x.id.localeCompare(y.id));
       },
+      // NOD-60: aproximação da busca `nod_pt` (o comportamento real se prova no Postgres): palavra de 4+ letras, sem acento.
+      async buscarPorTexto(agenteId, consulta, limite) {
+        const palavras = (t: string) => new Set(t.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((p) => p.length >= 4));
+        const busca = palavras(consulta);
+        const nota = (m: Memoria) => [...palavras(m.texto)].filter((p) => busca.has(p)).length;
+        return doTenant(b.memorias).filter((m) => m.agenteId === agenteId && nota(m) > 0)
+          .sort((x, y) => nota(y) - nota(x) || y.criadoEm - x.criadoEm || x.id.localeCompare(y.id)).slice(0, limite);
+      },
       async atualizar(id, campos) {
         const m = doTenant(b.memorias).find((x) => x.id === id);
         if (!m) return null;
