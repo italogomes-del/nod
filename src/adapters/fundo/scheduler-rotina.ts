@@ -20,6 +20,11 @@ export type OpcoesTick = {
   services: Services;
   useCases: UseCasesNod;
   agora: Relogio;
+  /**
+   * definido em 2026-10-28 (NOD-385): o batimento do agendador na saúde. Bate depois de CADA rotina processada (qualquer
+   * desfecho), depois de cada pessoa e ao fim do tick: um tick longo que anda não é laço parado; uma rotina presa é.
+   */
+  aoBater?: () => void;
 };
 
 /**
@@ -78,14 +83,16 @@ export async function tickPessoa(escopo: Escopo, tx: Transacao, opcoes: OpcoesTi
       // NOD-271: quanto a tx de UMA rotina segurou o tick (o pré-voo e a busca da execução aberta moram aqui).
       const ms = Date.now() - inicioTx;
       if (ms >= LIMIAR_TX_LENTA_MS) log("aviso", "rotina_tx_ms", { rotina_id: rotina.id, ms });
+      // NOD-385: disparada, adiada, bloqueada, de outro processo ou com falha — a rotina terminou, o laço anda.
+      opcoes.aoBater?.();
     }
   }
   return resultado;
 }
 
-/** Um tick para todas as pessoas (paraCadaPessoa: uma tx real por pessoa; escopo obrigatório). */
+/** Um tick para todas as pessoas (paraCadaPessoa: uma tx real por pessoa; escopo obrigatório). NOD-385: bate entre pessoas. */
 export async function tick(db: Db, opcoes: OpcoesTick, laco: OpcoesLaco = {}): Promise<void> {
-  await paraCadaPessoa(db, (escopo, tx) => tickPessoa(escopo, tx, opcoes).then(() => undefined), laco);
+  await paraCadaPessoa(db, (escopo, tx) => tickPessoa(escopo, tx, opcoes).then(() => undefined), { ...laco, aoBater: opcoes.aoBater ?? laco.aoBater });
 }
 
 /**
@@ -95,8 +102,11 @@ export async function tick(db: Db, opcoes: OpcoesTick, laco: OpcoesLaco = {}): P
  * nascer num "dark wake" de segundos e morrer no sono seguinte. Corta a cadeia na origem.
  * definido em 2026-10-15 (NOD-267): `aoBater` ao TERMINAR cada tick (sucesso ou erro) e no tick que só espera a
  * ADR-045 — o tick pulado por `rodando` não bate: é o laço preso que a saúde precisa ver.
+ * definido em 2026-10-28 (NOD-385): e também DENTRO do tick, depois de cada rotina e de cada pessoa. Um tick longo que
+ * anda (6 rotinas de 30 s) não vira `laco_parado`; uma única rotina (ou pessoa) presa além de 3 intervalos vira.
+ * `laco_tick_lento` segue medindo o tick inteiro.
  */
-export function iniciarScheduler(db: Db, opcoes: OpcoesTick & { intervaloMs?: number; aoBater?: () => void }, laco: OpcoesLaco = {}): { parar(): Promise<void> } {
+export function iniciarScheduler(db: Db, opcoes: OpcoesTick & { intervaloMs?: number }, laco: OpcoesLaco = {}): { parar(): Promise<void> } {
   let rodando = false;
   let emVoo: Promise<unknown> | null = null;
   let relogio: RelogioDoAgendador = { ultimoTick: null, esperarAte: 0 };

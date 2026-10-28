@@ -25,9 +25,11 @@ export type VerificacaoSaude = () => Promise<MotivoSaude | null>;
 
 /**
  * Batimento por laço, em memória (NOD-267): o laço grava `agora()` ao TERMINAR cada tick (com sucesso ou com erro) —
- * o tick pulado por `rodando` não bate, que é justamente o laço preso. `registrar` declara o laço com o intervalo,
- * começa o batimento ali (quando o laço sobe, depois do registry e do inventário do boot, que podem demorar) e devolve
- * a função que o laço chama ao bater.
+ * o tick pulado por `rodando` não bate, que é justamente o laço preso. Definido em 2026-10-28 (NOD-385): o agendador
+ * bate também DENTRO do tick, depois de cada rotina e de cada pessoa — o batimento mede progresso, então um tick longo
+ * que anda não vira `laco_parado` (nem 503 no `/lb`, nem reinício pelo watchdog), e uma rotina presa além do limite
+ * vira. `registrar` declara o laço com o intervalo, começa o batimento ali (quando o laço sobe, depois do registry e do
+ * inventário do boot, que podem demorar) e devolve a função que o laço chama ao bater.
  */
 export type Batimentos = {
   registrar(laco: string, intervaloMs: number): () => void;

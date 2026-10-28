@@ -41,6 +41,10 @@ o que a saúde enxerga e quem age:
    processo de novo. Liga logo depois do `listen` (um boot pendurado no banco também reinicia). Carência de `LEASE_MS`
    (90 s) desde o início do processo; para no começo da drenagem (ADR-071) e no `fechar()`. Banco fora do ar também
    conta: o reinício não conserta o banco, mas o processo novo tem pool limpo e o Docker espaça as tentativas.
+   *Emenda (2026-10-28, NOD-385):* o agendador bate também dentro do tick, depois de cada rotina processada (qualquer
+   desfecho) e de cada pessoa. O batimento passa a medir progresso: um tick longo que anda não vira `laco_parado` (em
+   23/10 virou, tirou a única cor do Caddy e o watchdog reiniciou o processo); uma única rotina presa além de 3
+   intervalos continua virando. O varredor de lease segue batendo só ao fim do tick.
 3. **Tick lento** vira log `laco_tick_lento {laco, duracao_ms, intervalo_ms}`, para ver o travamento chegando antes do 503.
 4. **Monitor externo** em `https://<domínio>/api/saude` a cada 1 min, alerta por e-mail depois de 2 falhas
    ([runbook-producao.md](../runbook-producao.md), seção 7). O cadastro é manual, do dono da conta, e ficou fora da NOD-267.

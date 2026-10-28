@@ -14,6 +14,11 @@ export interface OpcoesLaco {
   aoFalhar?: (escopo: Escopo, erro: unknown) => void;
   /** Índice da primeira pessoa da volta, dado o total. Default: sorteado. Injetável só para o teste fixar a ordem. */
   sortearInicio?: (total: number) => number;
+  /**
+   * definido em 2026-10-28 (NOD-385): chamado depois de cada pessoa (com sucesso ou falha) — o batimento do laço na saúde
+   * mede o progresso da volta, não a volta inteira. Só o agendador passa; os outros laços seguem batendo ao fim do tick.
+   */
+  aoBater?: () => void;
 }
 
 const logarFalha = (escopo: Escopo, erro: unknown): void => {
@@ -63,6 +68,8 @@ export async function paraCadaPessoa(
     } catch (e) {
       aoFalhar(escopo, e);
       if (e instanceof ErroBancoOcupado) return;
+    } finally {
+      opcoes.aoBater?.();
     }
   }
 }
