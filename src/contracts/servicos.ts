@@ -85,16 +85,14 @@ export interface ServicesNod<Trx> {
     /** O plano emitido para um turno vivo (GET /api/interno/plano); null sem token/plano. */
     buscar(turnoId: string): PlanoTurno | null;
   };
-  /**
-   * `semMensagem` (definido em 2026-09-28, ADR-050): as rotinas que vêm com o perfil nascem pela
-   * confirmação dele, que escreve UMA linha com todas; sem isso a conversa ganhava uma por rotina.
-   */
+  /** `semMensagem` (2026-09-28, ADR-050): as rotinas do perfil nascem pela confirmação dele, que escreve UMA linha com todas. */
   rotinas: { ativar(trx: Trx, propostaId: string, opcoes?: { semMensagem?: boolean }): Promise<Rotina> };
   conectores: {
     /** `contexto.rotina` (ADR-048): só turno de rotina pode usar o GitHub App da organização. Ausente = interativo. `somenteLeitura` (NOD-157): readOnlyHint da ferramenta; ausente = escrita, que só repete em 429. */
     chamar(conectorId: string, tool: string, args: Record<string, unknown>, contexto?: { rotina: boolean; somenteLeitura?: boolean }): Promise<{ conteudo: string; isError: boolean }>;
-    // manterVivos (NOD-374): a sonda de confirmação/do laço de fundo não derruba o cliente vivo de outra chamada em curso.
-    sondar(conector: Conector, opcoes?: { orcamentoMs?: number; manterVivos?: boolean }): Promise<ResultadoSonda>; // orcamentoMs (NOD-208): teto da sonda http inteira; ausente = ORCAMENTO_CONECTOR_MS
+    // orcamentoMs (NOD-208): teto da sonda http inteira. manterVivos (NOD-374): não derruba o cliente vivo de outra chamada em curso. env (NOD-50): sonda este env candidato no lugar do guardado.
+    sondar(conector: Conector, opcoes?: { orcamentoMs?: number; manterVivos?: boolean; env?: Record<string, string> }): Promise<ResultadoSonda>;
+    descartar?(conectorId: string): Promise<void>; // NOD-50: fecha os clientes vivos (a chave mudou; o próximo uso sobe com o env novo)
   };
   interruptor: {
     registrar(turnoId: string, fn: () => Promise<void>): void;
@@ -162,7 +160,7 @@ export interface UseCasesNod<Deps> {
   gerirBots: CasoNod<Deps, "gerir_bots">;
   verAppsConectados: CasoNod<Deps, "ver_apps_conectados">;
   registrarRelatoDoNod: CasoNod<Deps, "registrar_relato">;
-  criarBots: CasoNod<Deps, "criar_bots">; responderPedido: CasoNod<Deps, "responder_pedido">;
+  criarBots: CasoNod<Deps, "criar_bots">; responderPedido: CasoNod<Deps, "responder_pedido">; pedirCredencial: CasoNod<Deps, "pedir_credencial">;
 }
 
 /** Mapa nome da ferramenta → chave em UseCasesNod (o despacho é por tabela, não por if). */
@@ -195,5 +193,5 @@ export const USE_CASE_POR_FERRAMENTA = {
   gerir_bots: "gerirBots",
   ver_apps_conectados: "verAppsConectados",
   registrar_relato: "registrarRelatoDoNod",
-  criar_bots: "criarBots", responder_pedido: "responderPedido",
+  criar_bots: "criarBots", responder_pedido: "responderPedido", pedir_credencial: "pedirCredencial",
 } as const satisfies Record<NomeFerramentaNod, keyof UseCasesNod<unknown>>;

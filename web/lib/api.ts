@@ -308,6 +308,8 @@ export function criarApi(escopo: Escopo) {
     // definido em 2026-09-24 (ADR-048): o GitHub pode conectar na hora (gh logado nesta máquina, sem URL de login) ou dizer o que falta (`frase`).
     conectarApp: (slug: string) => post<{ url?: string; conectorId?: string; conectado?: boolean; frase?: string }>(`marketplace/${encodeURIComponent(slug)}/conectar`),
     appGithub: (p: { appId: string; instalacaoId: string; chavePrivada: string }) => post<{ configurado: boolean }>("marketplace/github/app", p),
+    /** NOD-50: o valor do cartão de credencial vai daqui direto ao cofre; a resposta não o devolve. */
+    guardarCredencial: (propostaId: string, valor: string) => post<{ estado: "guardada" }>(`propostas/${encodeURIComponent(propostaId)}/credencial`, { valor }),
     tokenGithub: (token: string) => post<{ conectado: boolean; conectorId: string }>("marketplace/github/token", { token }),
     verificarApp: (slug: string) => post<{ conectado: boolean; falhou?: boolean; causa?: "composio" | "app" | null }>(`marketplace/${encodeURIComponent(slug)}/verificar`),
     atualizarCredenciais: (id: string, env: Record<string, string>) => patch<{ conector: Conector }>(`conectores/${id}/credenciais`, { env }),

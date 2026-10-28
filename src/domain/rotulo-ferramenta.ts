@@ -35,6 +35,8 @@ const NOD: Record<string, string> = {
   criar_bots: "Criou bots",
   // NOD-262: o bot fecha da conversa um pedido de colega que já resolveu.
   responder_pedido: "Respondeu a um pedido de colega",
+  // NOD-50: o cartão de credencial; o rótulo nunca cita o valor (o bot nem o tem).
+  pedir_credencial: "Pediu uma chave",
 };
 
 /**

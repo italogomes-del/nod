@@ -55,6 +55,11 @@ export function propostasRepo(conn: Conn, escopo: Escopo) {
       return l ? paraProposta(l) : null;
     },
 
+    /** NOD-50: serializa os pedidos de credencial do mesmo turno (o anti-repetição lê e depois cria). */
+    async travarPedidosDoTurno(turnoId: string): Promise<void> {
+      await conn`select pg_advisory_xact_lock(hashtextextended(${`${escopo.tenantId}:${escopo.pessoaId}:credencial:${turnoId}`}, 0))`;
+    },
+
     /**
      * definido em 2026-10-07 (NOD-197): `buscar` com a linha TRAVADA até o fim da transação. Ordem única dos cards de
      * rotina: PROPOSTA e depois DECISÃO — a conversa já trava a proposta primeiro (propostas.decidir), e "Sua vez"

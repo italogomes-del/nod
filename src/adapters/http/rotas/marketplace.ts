@@ -2,8 +2,7 @@ import { COMANDO_GITHUB_NATIVO, ENV_TOKEN_GITHUB, SLUG_GITHUB } from "../../../c
 import { APPS_MARKETPLACE } from "../../../contracts/marketplace.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
 import { fraseSemJeito } from "../../../domain/github.ts";
-import { formatoDeTokenGithub, garantirGithubSemConfiguracao, guardarComposioGithub, guardarTokenGithub } from "../../../use-cases/conectar-github.ts";
-import { API_GITHUB } from "../../conectores-locais/github/backend-rest.ts";
+import { garantirGithubSemConfiguracao, guardarComposioGithub, guardarTokenGithub } from "../../../use-cases/conectar-github.ts";
 import { registrarConector } from "../../../use-cases/registrar-conector.ts";
 import { sondarConector, type SaidaSondarConector } from "../../../use-cases/sondar-conector.ts";
 import { aoConectarApp } from "../../../use-cases/ao-conectar-app.ts";
@@ -15,6 +14,7 @@ import { ESPERAS_SONDA_VERIFICAR_MS, VERIFICAR_TETO_MS } from "../../../shared/c
 import type { Escopo } from "../../../shared/types.ts";
 import type { Rota } from "../roteador.ts";
 import { executar, type DentroDeTx } from "./dentro-de-tx.ts";
+import { conferirChaveComposio, conferirTokenGithub } from "./segredos-de-app.ts";
 
 export type OpcoesRotasMarketplace = {
   dentro: DentroDeTx;
@@ -74,17 +74,7 @@ export function rotasMarketplace(op: OpcoesRotasMarketplace): Rota[] {
      */
     { metodo: "POST", padrao: /^\/marketplace\/github\/token$/, async handler(ctx) {
       const body = await ctx.corpo() as { token?: unknown } | null;
-      const token = typeof body?.token === "string" ? body.token.trim() : "";
-      if (!formatoDeTokenGithub(token)) throw new ErroDeDominio("entrada_invalida");
-      let aceito: boolean;
-      try {
-        const r = await (op.fetchImpl ?? fetch)(`${op.apiGithub ?? API_GITHUB}/user`, { headers: { authorization: `Bearer ${token}`, accept: "application/vnd.github+json", "user-agent": "nod" }, redirect: "error", signal: AbortSignal.timeout(10_000) });
-        if (r.status !== 200 && r.status !== 401 && r.status !== 403) throw new ErroDeDominio("conector_indisponivel");
-        aceito = r.status === 200;
-      } catch (e) {
-        throw e instanceof ErroDeDominio ? e : new ErroDeDominio("conector_indisponivel");
-      }
-      if (!aceito) throw new ErroDeDominio("integracao_autenticacao");
+      const token = await conferirTokenGithub(body?.token, op);
       const salvo = await op.dentro(ctx.escopo, (d) => guardarTokenGithub(d, { token, cifrar: op.cifrar, decifrar: op.decifrar }));
       const s = await op.dentro(ctx.escopo, async (d) => {
         const r = await executar(d, sondarConector, { conectorId: salvo.id });
@@ -119,9 +109,7 @@ export function rotasMarketplace(op: OpcoesRotasMarketplace): Rota[] {
     } },
     { metodo: "POST", padrao: /^\/marketplace\/configurar$/, async handler(ctx) {
       const body = await ctx.corpo() as { chave?: unknown } | null;
-      if (typeof body?.chave !== "string" || !body.chave.trim() || body.chave.length > 4096 || /[\r\n]/.test(body.chave)) throw new ErroDeDominio("entrada_invalida");
-      const chave = body.chave.trim();
-      await cliente(chave).validar();
+      const chave = await conferirChaveComposio(body?.chave, op.fetchImpl);
       await op.dentro(ctx.escopo, async (d) => { await d.repos.composio.salvarChave(op.cifrar(chave)); });
       ctx.json(200, { configurado: true });
     } },

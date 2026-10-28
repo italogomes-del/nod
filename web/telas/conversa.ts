@@ -32,6 +32,7 @@ import { linhaNaoRodaram } from "../lib/execucao.ts";
 import { chaveDoItem, estadoDaPergunta } from "../lib/perguntas.ts";
 import { acoesComAcesso, linhasPrecisa } from "./rotina-precisa.ts";
 import { renderCardAcesso } from "./card-acesso.ts";
+import { ehCartaoCredencial, renderCardCredencial } from "./card-credencial.ts";
 import { acaoHumana, detalheAcesso, idsGemeas, marcaGemeas, marcaRotinaParada, pedidosAncoraveis, renderDecisaoAncorada, renderDecisoesDaConversa, rotulosAcesso } from "./sua-vez.ts";
 import { renderCardPasta } from "./card-pasta.ts";
 import { dadosDoEncolhido, pedidoDoRecibo, renderCartaoEncolhido, turnoDoEncolhido } from "./cartao-encolhido.ts";
@@ -645,6 +646,12 @@ function renderProposta(p: Proposta, estado: Estado, propostas: readonly Propost
   // definido em 2026-09-18: a pasta já vem descoberta, então autorizar é um clique — a pessoa não
   // navega em menu nem digita caminho. Sem candidatas, o mesmo card abre a escolha manual.
   if (p.payload.kind === "pasta") return renderCardPasta(p, p.payload, estado, a);
+  // definido em 2026-10-28 (NOD-50): o pedido de chave — o valor vai do campo direto ao cofre (card-credencial.ts).
+  // Só a dona cola a chave (revisão 6): numa sala o colega vê o pedido, sem campo — o mesmo de Sua vez.
+  if (ehCartaoCredencial(p)) {
+    const d = decisaoAbertaDoCard(p, estado);
+    return !d || d.ownerId !== estado.sessao?.pessoaId ? `<p class="p50-para">${esc(a?.nome ?? "O bot")} pediu uma chave a quem o chamou. Só quem pediu pode colá-la.</p>` : renderCardCredencial(p, a?.nome ?? "O bot");
+  }
   // definido em 2026-10-07 (ADR-082): as mudanças em vários bots que o Nod pediu de uma vez — um card, uma linha por ação.
   if (p.payload.kind === "lote_bots") return renderCardLote(p, p.payload, p.estado === "pendente" && decisaoAbertaDoCard(p, estado) !== null);
   let itens = "";
@@ -665,7 +672,7 @@ function renderProposta(p: Proposta, estado: Estado, propostas: readonly Propost
   } else if (p.payload.kind === "rotina_exclusao") {
     const c = p.payload;
     itens = `<div class="it"><b>quando</b>${esc(c.resumo)}</div><div class="it"><b>instrução</b>${esc(c.instrucao)}</div><div class="it">Depois de excluída, nada mais é disparado por ela. Para só interromper por um tempo, peça para pausar.</div>`;
-  } else {
+  } else if (p.payload.kind === "acesso") {
     const c = p.payload;
     const decisao = decisaoAbertaDoCard(p, estado);
     // definido em 2026-09-24 (ADR-044): com a decisão de mesmo id aberta, o card é a frase do domínio e
@@ -726,9 +733,10 @@ function acoesDaRotinaComAcesso(p: Proposta, estado: Estado): { botoes: string; 
 /** A proposta de rotina existente continua 'pendente' quando a decisão dela vence (o varredor só
  *  vence decisões). Os botões do card dariam estado_invalido; sai o card e fica a decisão vencida,
  *  em cinza e com Reabrir, como em "Sua vez". Reaberta, o card volta com os botões funcionando.
- *  Pedido de acesso idem desde 2026-09-24 (ADR-044): também nasce com a decisão de mesmo id. */
+ *  Pedido de acesso idem desde 2026-09-24 (ADR-044): também nasce com a decisão de mesmo id. E o pedido de
+ *  credencial (NOD-50): vencido, o campo da chave sai e fica o Reabrir. */
 function comDecisaoVencida(p: Proposta, estado: Estado): boolean {
-  if (p.payload.kind !== "rotina_atualizacao" && p.payload.kind !== "rotina_exclusao" && p.payload.kind !== "acesso") return false;
+  if (p.payload.kind !== "rotina_atualizacao" && p.payload.kind !== "rotina_exclusao" && p.payload.kind !== "acesso" && p.payload.kind !== "credencial") return false;
   return estado.suaVez?.itens.some((i) => i.decisao.id === p.id && i.estadoColuna === "vencido") ?? false;
 }
 

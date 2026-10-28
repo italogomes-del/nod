@@ -26,5 +26,8 @@ export function tituloDaProposta(p: Pick<Proposta, "payload">): string {
       return `Abrir o projeto ${(c.candidatas[0]?.nome ?? c.buscaTermo).trim()}`.trim();
     case "lote_bots":
       return com("Mudanças nos bots", c.resumo);
+    // NOD-50: o título do cartão aberto, sem o valor (o payload nunca o tem).
+    case "credencial":
+      return c.alvo === "github_token" ? "Token do GitHub" : c.alvo === "composio" ? "Chave do Composio do time" : `Chave para ${c.app}`;
   }
 }

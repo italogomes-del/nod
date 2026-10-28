@@ -159,6 +159,7 @@ const DESPACHO: Despacho = {
   registrar_relato: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.registrar_relato](deps, { ...ctx, ...args }),
   criar_bots: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.criar_bots](deps, { ...ctx, ...args }),
   responder_pedido: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.responder_pedido](deps, { ...ctx, ...args }),
+  pedir_credencial: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.pedir_credencial](deps, { ...ctx, ...args }),
 };
 
 /**
@@ -169,7 +170,7 @@ const DESPACHO: Despacho = {
 const NOD_DE_CONTEUDO_NAO_CONFIAVEL: ReadonlySet<NomeFerramentaNod> = new Set(["ler_artefato"]);
 
 /** As ferramentas nod que deixam uma decisão aberta para a pessoa (o estado da task do turno muda, ADR-083). */
-const FERRAMENTAS_QUE_PEDEM_A_PESSOA: ReadonlySet<NomeFerramentaNod> = new Set(["pedir_a_pessoa", "pedir_aprovacao", "pedir_acesso"]);
+const FERRAMENTAS_QUE_PEDEM_A_PESSOA: ReadonlySet<NomeFerramentaNod> = new Set(["pedir_a_pessoa", "pedir_aprovacao", "pedir_acesso", "pedir_credencial"]);
 
 function ehNomeNod(nome: string): nome is NomeFerramentaNod {
   return Object.prototype.hasOwnProperty.call(FERRAMENTAS_NOD, nome);

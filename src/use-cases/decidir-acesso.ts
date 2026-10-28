@@ -17,6 +17,7 @@ import { recusarProposta } from "./recusar-proposta.ts";
 import { retomarAposAcesso } from "./retomar-apos-acesso.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
 import { sincronizarDasDecisoes } from "./trabalhos.ts";
+import { fecharPedidoDeCredencial } from "./guardar-credencial.ts";
 
 export type EntradaDecidirAcesso = {
   decisaoId: string;
@@ -117,6 +118,13 @@ export const decidirAcesso: CasoDeUso<EntradaDecidirAcesso, SaidaDecidirAcesso> 
  */
 export const recusarPropostaPelaConversa: CasoDeUso<{ propostaId: string; executor: Executor }, { proposta: Proposta; decisao: Decisao | null }> = async (deps, input) => {
   const lida = await deps.repos.propostas.buscar(input.propostaId);
+  // NOD-50: "Agora não" no cartão de credencial fecha o pedido e retoma o turno com `recusada`.
+  if (lida?.payload.kind === "credencial") {
+    const r = await fecharPedidoDeCredencial(deps, { propostaId: lida.id, resultado: "recusada" });
+    const proposta = await deps.repos.propostas.buscar(lida.id);
+    if (!proposta) throw new ErroDeDominio("nao_encontrado");
+    return { data: { proposta, decisao: await deps.repos.decisoes.buscar(lida.id) }, events: r.events ?? [] };
+  }
   if (lida?.payload.kind === "acesso" && !lida.payload.conectar && lida.estado === "pendente") {
     const aberta = await deps.repos.decisoes.buscar(lida.id);
     if (aberta?.tipo === "acesso" && aberta.ownerId === deps.escopo.pessoaId && (aberta.estado === "pendente" || aberta.estado === "reaberta")) {

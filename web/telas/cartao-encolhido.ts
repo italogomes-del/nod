@@ -147,6 +147,12 @@ function daPasta(p: Payload<"pasta_aberta">, estado: Estado): DadosDoEncolhido {
 
 function daProposta(m: Mensagem, p: Payload<"proposta_decidida">, estado: Estado): DadosDoEncolhido {
   const quem = porQuem(m, estado);
+  // NOD-50: o cartão de credencial encolhe sem nada do valor; guardada leva o "Trocar" para Configurações avançadas.
+  if (p.tipo === "credencial") {
+    return p.estado === "confirmada"
+      ? { decisaoId: p.propostaId, titulo: p.titulo, resultado: "Guardada no cofre", marca: "ok", anuncio: `${p.titulo}: guardada no cofre`, rodape: `<p class="ce-rodape"><span>O bot não vê a chave.</span>${botao("abrir-avancado", "Trocar", { classe: "link", aria: "Trocar a chave em Configurações avançadas" })}</p>` }
+      : { decisaoId: p.propostaId, titulo: p.titulo, resultado: `Deixada de lado${quem}`, marca: null, anuncio: `${p.titulo}: deixada de lado` };
+  }
   return p.estado === "confirmada"
     ? { decisaoId: p.propostaId, titulo: p.titulo, resultado: `Confirmado${quem}`, marca: "ok", anuncio: `Confirmado: ${p.titulo}` }
     : { decisaoId: p.propostaId, titulo: p.titulo, resultado: `Recusado${quem}`, marca: null, anuncio: `Recusado: ${p.titulo}` };

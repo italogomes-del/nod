@@ -148,3 +148,46 @@ img.conta-avatar, img.foto-avatar { object-fit: cover; }
 @media (forced-colors: active) {
   .conta-campo input:focus-visible, .conta-campo textarea:focus-visible { outline: 2px solid Highlight; outline-offset: 2px; }
 }
+
+/* NOD-50 · o cartão de pedido de chave (protótipo nod-prototipos/nod-50): só tokens do nod, irmão do cartão da pergunta. */
+.p50-cartao { width: 100%; max-width: 460px; box-sizing: border-box; margin: 6px 0 0; display: flex; flex-direction: column; gap: 10px; padding: 16px 16px 14px; border-radius: 20px; background: var(--surface-raised); color: var(--ink); }
+.p50-cab { display: flex; align-items: center; gap: 8px; }
+.p50-ic { display: grid; place-items: center; flex: none; width: 22px; height: 22px; color: var(--ink-2); }
+.p50-ic svg { width: 16px; height: 16px; }
+.p50-titulo { margin: 0; font-size: 15px; font-weight: 600; line-height: 1.35; color: var(--ink); }
+.p50-para { margin: -4px 0 0 30px; font-size: 13.5px; line-height: 1.45; color: var(--ink-2); }
+.p50-campo { gap: 6px; margin: 2px 0 0; }
+.p50-rotulo { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; font-size: 12.5px; color: var(--ink-2); }
+.p50-rotulo code { font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-3); }
+.p50-senha { position: relative; }
+.p50-senha input { min-height: 40px; box-sizing: border-box; padding-right: 78px; font-size: 14px; letter-spacing: .02em; background: var(--surface); }
+.p50-senha input[type="text"] { font-family: var(--font-mono); font-size: 13.5px; }
+.p50-senha input[readonly] { color: var(--ink-3); }
+.p50-senha input[aria-invalid="true"] { border-color: var(--danger); }
+.p50-mostrar { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); min-height: 32px; padding: 0 10px; }
+.p50-mostrar[aria-pressed="true"] { color: var(--ink); }
+.p50-sigilo { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 12.5px; color: var(--ink-3); }
+.p50-sigilo svg { flex: none; }
+.p50-erro { margin: -2px 0 0; font-size: 13px; line-height: 1.45; color: var(--danger); }
+.p50-status { margin: 0; font-size: 13px; color: var(--ink-2); }
+.p50-acoes { display: flex; justify-content: flex-end; align-items: center; gap: 6px; margin-top: 2px; }
+.p50-guardar, .p50-deixar { display: inline-flex; align-items: center; justify-content: center; min-height: 36px; padding: 0 14px; border-radius: 999px; font: inherit; font-size: 13.5px; cursor: pointer; }
+.p50-guardar { border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink); font-weight: 560; }
+.p50-guardar:hover { border-color: var(--ink-3); }
+.p50-guardar[aria-busy="true"] { color: var(--ink-3); cursor: progress; }
+.p50-deixar { border: 0; background: none; color: var(--ink-3); }
+.p50-deixar:hover { color: var(--ink); background: var(--surface-selected); }
+.p50-guardar:focus-visible, .p50-deixar:focus-visible, .p50-mostrar:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+/* Em Sua vez, o cartão ocupa a largura do item, como o da pergunta. */
+.lista > li.item-pergunta .p50-cartao { max-width: none; margin: 0; }
+/* Celular: 16px no campo (o iOS não dá zoom) e 44px de alvo. */
+@media (hover: none) and (pointer: coarse) and (max-width: 600px), (hover: none) and (pointer: coarse) and (max-height: 500px) {
+  .p50-cartao { border-radius: 22px; padding: 16px 14px 14px; max-width: none; }
+  .p50-senha input { min-height: 46px; font-size: 16px; padding-right: 88px; }
+  .p50-senha input[type="text"] { font-size: 16px; }
+  .p50-mostrar { min-height: 44px; min-width: 44px; right: 2px; }
+  .p50-guardar, .p50-deixar { min-height: 44px; padding: 0 16px; }
+  .p50-para { margin-left: 0; margin-top: -2px; }
+}
+@media (max-width: 600px) { .p50-para { margin-left: 0; } }
+.p50-guardar[disabled] { cursor: progress; }

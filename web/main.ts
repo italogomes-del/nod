@@ -14,6 +14,7 @@ import { aoVerComputador, definirTelaDoBot } from "./telas/tela-do-bot.ts";
 import { abrirWorkspace } from "./telas/workspace.ts";
 import { listaDoQuePodem, rotuloPermitir, type EscolhaLiberar } from "./telas/card-liberar.ts";
 import { CURTA } from "./telas/card-pasta.ts";
+import { erroDaResposta as erroDoCartao, faseDoCartao, marcarFase, versaoDasFases } from "./telas/card-credencial.ts";
 import { abrirReportarBug } from "./telas/reportar-bug.ts";
 import { destinoDoFeedback } from "./telas/relatos.ts";
 import { proximoItemDoMenu } from "./lib/linha-config.ts";
@@ -1621,7 +1622,7 @@ function anunciarSubagentes(id: string): void {
 
 /** A tela da task em duas partes: o histórico lembrado (só muda com mensagem nova) e o ao vivo do turno do trabalho. */
 function partesDaTask(id: string): PartesDaTimeline {
-  return { historico: lembrar("task-historico", estado, [id], (e) => blocosDoHistoricoDaTask(e, id)), aoVivo: blocosAoVivoDaTask(estado, id) };
+  return { historico: lembrar("task-historico", estado, [id, versaoDasFases()], (e) => blocosDoHistoricoDaTask(e, id)), aoVivo: blocosAoVivoDaTask(estado, id) };
 }
 
 function partesDaTimeline(): PartesDaTimeline | null {
@@ -1630,7 +1631,7 @@ function partesDaTimeline(): PartesDaTimeline | null {
   // O chip de link do Slack diz "mensagem das HH:MM" no mesmo dia e "de DD/MM" depois: o dia é um extra.
   // Chat limpo (PR 7): o progresso das frentes na fala lê o ao vivo e o relógio, então não entra aqui — a fala leva só o
   // lugar dele, que `progressoNaTela` enche depois (web/telas/progresso-na-fala.ts); a fala não é regravada quando uma frente anda.
-  const historico = lembrar("timeline-historico", estado, [new Date().toDateString()], (e) => {
+  const historico = lembrar("timeline-historico", estado, [new Date().toDateString(), versaoDasFases()], (e) => {
     const conversa = conversaDaTela(e);
     return conversa ? blocosDoHistorico(conversa, e) : [];
   });
@@ -4575,6 +4576,25 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     dispatch({ tipo: "invalidar", quais: ["sua-vez", "rotinas", "frota", "gestao", ...(conversaAtual() ? [`conversa:${conversaAtual()?.conversaId}` as Invalidacao] : [])] });
   }),
   "decidir-proposta": (el) => agir(async () => void (marcarDecidida(el, el.dataset.id), await api!.decidir(el.dataset.id ?? "", {}), dispatch({ tipo: "invalidar", quais: ["sua-vez", "rotinas", "frota", ...(conversaAtual() ? [`conversa:${conversaAtual()?.conversaId}` as Invalidacao] : [])] }))),
+  // NOD-50: o cartão de credencial. Mostrar troca o tipo do campo sem redesenhar (o valor fica onde está); a fase guarda
+  // só o "mostrando", para o próximo frame não esconder o que a pessoa pediu para ver.
+  "mostrar-credencial": (el) => {
+    const id = el.dataset.id ?? "";
+    const input = el.parentElement?.querySelector<HTMLInputElement>("input");
+    if (!input) return;
+    const mostrar = input.type === "password";
+    input.type = mostrar ? "text" : "password";
+    el.textContent = mostrar ? "Ocultar" : "Mostrar";
+    el.setAttribute("aria-pressed", String(mostrar));
+    marcarFase(id, { ...faseDoCartao(id), mostrando: mostrar });
+  },
+  "recusar-credencial": (el) => agir(async () => {
+    const id = el.dataset.id ?? "";
+    for (const campo of document.querySelectorAll<HTMLInputElement>(`[data-form="guardar-credencial"][data-id="${CSS.escape(id)}"] input[name="valor"]`)) campo.value = "";
+    marcarFase(id, null);
+    await api!.decidir(id, { recusar: true });
+    dispatch({ tipo: "invalidar", quais: ["sua-vez", ...(conversaAtual() ? [`conversa:${conversaAtual()?.conversaId}` as Invalidacao] : [])] });
+  }),
   "recusar-decisao": (el) => agir(async () => void (marcarDecidida(el, el.dataset.id), await api!.decidir(el.dataset.id ?? "", { recusar: true }), dispatch({ tipo: "invalidar", quais: ["sua-vez", "rotinas", ...(conversaAtual() ? [`conversa:${conversaAtual()?.conversaId}` as Invalidacao] : [])] }))),
   // definido em 2026-09-24 (emenda da ADR-045): a pergunta se responde pelo campo da conversa. Revisto em 2026-10-18
   // (plano "pergunta com botões"): estes são os gestos em volta do cartão e da caixa "Respondendo".
@@ -5060,6 +5080,32 @@ const FORMS: Record<string, (form: HTMLFormElement) => Promise<void>> = {
     form.reset();
     dispatch({ tipo: "aviso-conexao", texto: "GitHub App da organização guardado. As rotinas de quem não conectou o próprio GitHub passam a usá-lo." });
   }),
+  // NOD-50: o valor sai do campo direto para POST propostas/:id/credencial e não passa por estado, storage nem conversa.
+  // Recusada ou mal formatada: o campo volta vazio e recebe o foco. Rede: o valor fica no campo e o botão vira "Tentar de novo".
+  "guardar-credencial": async (form) => {
+    const id = form.dataset.id ?? "";
+    const atual = faseDoCartao(id);
+    if (atual.ocupado || !api) return;
+    const input = form.querySelector<HTMLInputElement>('input[name="valor"]');
+    const valor = input?.value.trim() ?? "";
+    const focarCampo = () => document.querySelector<HTMLInputElement>(`[data-form="guardar-credencial"][data-id="${CSS.escape(id)}"] input[name="valor"]`)?.focus();
+    if (!valor) { marcarFase(id, { ...atual, ocupado: false, erro: "vazio" }); render(); focarCampo(); return; }
+    marcarFase(id, { ...atual, ocupado: true, erro: null });
+    render();
+    try {
+      await api.guardarCredencial(id, valor);
+      for (const campo of document.querySelectorAll<HTMLInputElement>(`[data-form="guardar-credencial"][data-id="${CSS.escape(id)}"] input[name="valor"]`)) campo.value = "";
+      marcarFase(id, null);
+      dispatch({ tipo: "invalidar", quais: ["sua-vez", "conectores", ...(conversaAtual() ? [`conversa:${conversaAtual()?.conversaId}` as Invalidacao] : [])] });
+    } catch (e) {
+      const erro = e instanceof ErroApi ? erroDoCartao(e.status === 0 ? null : e.status, e.codigo) : "rede";
+      if (erro === "recusada" || erro === "formato") for (const campo of document.querySelectorAll<HTMLInputElement>(`[data-form="guardar-credencial"][data-id="${CSS.escape(id)}"] input[name="valor"]`)) campo.value = "";
+      marcarFase(id, { ...faseDoCartao(id), ocupado: false, erro });
+      if (erro === "resolvido") dispatch({ tipo: "invalidar", quais: ["sua-vez", ...(conversaAtual() ? [`conversa:${conversaAtual()?.conversaId}` as Invalidacao] : [])] });
+      render();
+      focarCampo();
+    }
+  },
   "token-github": (form) => agir(async () => {
     const d = new FormData(form);
     const r = await api!.tokenGithub(String(d.get("token") ?? ""));

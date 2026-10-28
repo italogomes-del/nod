@@ -14,6 +14,8 @@ export type TipoDecisao =
   | "bot"
   /** definido em 2026-10-07 (ADR-082, 0060): as mudanças em vários bots que o Nod pediu de uma vez (gerir_bots). */
   | "lote_bots"
+  /** definido em 2026-10-28 (NOD-50, 0115): o cartão de pedido de credencial (pedir_credencial). Só a pessoa resolve. */
+  | "credencial"
   | "pergunta"
   | "falta_de_dado"
   | "permissao";

@@ -110,6 +110,9 @@ export const confirmarProposta: CasoDeUso<{ propostaId: string; prazoMs?: number
   // decide primeiro, e a recusa por perfil mudado teria de sair de `confirmada`.
   if (existente.payload.kind === "perfil") return confirmarPerfil(deps, existente);
   if (existente.payload.kind === "lote_bots") throw new ErroDeDominio("estado_invalido", { cause: "lote do Nod se decide pela decisão do card" });
+  // NOD-50: o cartão de credencial só se resolve guardando o valor (POST propostas/:id/credencial) ou recusando; confirmar
+  // sem valor não tem o que aplicar.
+  if (existente.payload.kind === "credencial") throw new ErroDeDominio("estado_invalido", { cause: "credencial se guarda pelo cartão" });
   if (existente.payload.kind === "acesso" && existente.estado === "pendente") {
     const jaAberta = await deps.repos.decisoes.buscar(existente.id);
     if (jaAberta) return { data: { proposta: existente, agente: null, rotina: null, decisao: jaAberta }, events: [] };
@@ -149,6 +152,8 @@ export const confirmarProposta: CasoDeUso<{ propostaId: string; prazoMs?: number
   } else if (proposta.payload.kind === "lote_bots") {
     // ADR-082: o lote do Nod se decide pela decisão de mesmo id (POST decisoes/:id/decidir → decidirLoteDeBots).
     throw new ErroDeDominio("estado_invalido", { cause: "lote do Nod se decide pela decisão do card" });
+  } else if (proposta.payload.kind === "credencial") {
+    throw new ErroDeDominio("estado_invalido", { cause: "credencial se guarda pelo cartão" });
   } else {
     const p = proposta.payload;
     const agenteDaProposta = await deps.repos.agentes.buscar(proposta.agenteId);

@@ -5,6 +5,7 @@ import { meChameAs } from "../../../src/use-cases/me-chame-as.ts";
 import { esperarComando } from "../../../src/use-cases/esperar-comando.ts";
 import { criarBots } from "../../../src/use-cases/criar-bots.ts";
 import { responderPedido } from "../../../src/use-cases/responder-pedido.ts";
+import { pedirCredencial } from "../../../src/use-cases/pedir-credencial.ts";
 import { gerirBots } from "../../../src/use-cases/gerir-bots.ts";
 import { registrarRelatoDoNod, verAppsConectados } from "../../../src/use-cases/nod.ts";
 import type { Conector } from "../../../src/contracts/conector.ts";
@@ -101,6 +102,7 @@ export function depsFalsos(opcoes: OpcoesDepsFalsos = {}): { deps: Deps; banco: 
     esperarComando,
     criarBots,
     responderPedido,
+    pedirCredencial,
     gerirBots,
     verAppsConectados,
     registrarRelatoDoNod,

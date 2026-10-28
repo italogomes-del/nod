@@ -189,6 +189,17 @@ export function conectoresRepo(conn: Conn, escopo: Escopo) {
     },
 
     /**
+     * definido em 2026-10-28 (NOD-50): a troca condicional (compare-and-set) do env. Só grava se o env cifrado ainda for
+     * `esperado` (o cifrado leva IV aleatório, então dois gravadores nunca escrevem o mesmo texto). false = outro gravou antes.
+     */
+    async atualizarEnvSe(id: string, esperado: string | null, p: { envCifrado: string | null; envChaves: string[] }): Promise<boolean> {
+      const r = await conn`
+        update conectores set env_cifrado = ${p.envCifrado}, env_chaves = ${p.envChaves}::text[]
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and env_cifrado is not distinct from ${esperado}`;
+      return r.count === 1;
+    },
+
+    /**
      * definido em 2026-10-26 (NOD-374): o estado do disjuntor com a linha TRAVADA (FOR UPDATE) até o fim da transação, para
      * duas chamadas ou a sonda e o laço não perderem contagem. null = conector apagado ou de outra pessoa (só a dona escreve).
      */

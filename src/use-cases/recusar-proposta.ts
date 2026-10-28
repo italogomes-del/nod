@@ -26,6 +26,8 @@ const KINDS_COM_CARD_EM_SUA_VEZ: ReadonlySet<string> = new Set(["rotina", "rotin
 export const recusarProposta: CasoDeUso<{ propostaId: string }, { proposta: Proposta }> = async (deps, input) => {
   const existente = await deps.repos.propostas.buscar(input.propostaId);
   if (!existente) throw new ErroDeDominio("nao_encontrado");
+  // NOD-50: o cartão de credencial fecha só por fecharPedidoDeCredencial (que retoma o turno com `recusada`).
+  if (existente.payload.kind === "credencial") throw new ErroDeDominio("estado_invalido", { cause: "credencial fecha pelo cartão" });
   const proposta = await deps.repos.propostas.decidir(input.propostaId, "recusada");
   if (!proposta) throw new ErroDeDominio("estado_invalido", { cause: `proposta ${existente.estado}` });
   if (proposta.payload.kind === "perfil") await recusarRotinasDoCard(deps, proposta.payload);

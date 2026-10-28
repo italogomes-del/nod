@@ -14,6 +14,12 @@ export function composioRepo(conn: Conn, escopo: Escopo) {
       await conn`insert into composio_configuracoes (tenant_id, owner_id, visibility, chave_cifrada) values (${escopo.tenantId}, ${escopo.pessoaId}, 'equipe', ${cifrada})
         on conflict (tenant_id) do update set chave_cifrada = excluded.chave_cifrada`;
     },
+    /** NOD-50: grava só se o time ainda não tem chave (o cartão do bot não troca a que existe); false = já havia. */
+    async salvarChaveSeAusente(cifrada: string): Promise<boolean> {
+      const r = await conn`insert into composio_configuracoes (tenant_id, owner_id, visibility, chave_cifrada) values (${escopo.tenantId}, ${escopo.pessoaId}, 'equipe', ${cifrada})
+        on conflict (tenant_id) do nothing`;
+      return r.count === 1;
+    },
     async sessao(toolkit: string): Promise<SessaoComposio | null> {
       const [r] = await conn<{ toolkit: string; sessao_id: string; conta_id: string; conector_id: string }[]>`select toolkit, sessao_id, conta_id, conector_id from composio_sessoes where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and toolkit = ${toolkit}`;
       return r ? { toolkit: r.toolkit, sessaoId: r.sessao_id, contaId: r.conta_id, conectorId: r.conector_id } : null;

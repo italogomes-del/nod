@@ -993,6 +993,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async buscar(id) {
         return doTenant(b.propostas).find((p) => p.id === id) ?? null;
       },
+      async travarPedidosDoTurno() {},
       async buscarParaAtualizar(id) {
         // Espelha `buscar`; sem concorrência na memória, sem lock.
         return doTenant(b.propostas).find((p) => p.id === id) ?? null;
@@ -2542,6 +2543,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
     composio: {
       async chave() { return b.composioChaves.get(escopo.tenantId + escopo.pessoaId) ?? null; },
       async salvarChave(c) { b.composioChaves.set(escopo.tenantId + escopo.pessoaId, c); },
+      async salvarChaveSeAusente(c) { if (b.composioChaves.has(escopo.tenantId + escopo.pessoaId)) return false; b.composioChaves.set(escopo.tenantId + escopo.pessoaId, c); return true; },
       async sessao(t) { return b.composioSessoes.get(escopo.tenantId + escopo.pessoaId + t) ?? null; },
       async salvarSessao(s) { b.composioSessoes.set(escopo.tenantId + escopo.pessoaId + s.toolkit, s); },
     },
@@ -2624,6 +2626,15 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async atualizarEnv(id, p) {
         const c = doTenant(b.conectores).find((x) => x.id === id);
         if (!c) return false;
+        c.envCifrado = p.envCifrado;
+        const env: Record<string, true> = {};
+        for (const k of p.envChaves) env[k] = true;
+        c.env = env;
+        return true;
+      },
+      async atualizarEnvSe(id, esperado, p) {
+        const c = doTenant(b.conectores).find((x) => x.id === id);
+        if (!c || (c.envCifrado ?? null) !== esperado) return false;
         c.envCifrado = p.envCifrado;
         const env: Record<string, true> = {};
         for (const k of p.envChaves) env[k] = true;

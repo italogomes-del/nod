@@ -12,6 +12,7 @@ import { renderCartaoPergunta } from "./cartao-pergunta.ts";
 import { emQuanto, foraDoArDesde, haQuanto, nadaEsperando } from "../lib/relogio.ts";
 import { acoesComAcesso, linhasPrecisa } from "./rotina-precisa.ts";
 import { listaDoLoteParaSuaVez } from "./card-lote.ts";
+import { ehCartaoCredencial, renderCardCredencial } from "./card-credencial.ts";
 import { ehCartaoDoRevisor, motivoDoCartao, perguntaDoCartao, renderCartaoRevisor, sempreNoCartao } from "./cartao-revisor.ts";
 
 type Item = SuaVezDto["itens"][number];
@@ -30,6 +31,7 @@ const TIPO_HUMANO: Record<TipoDecisao, string> = {
   pergunta: "pergunta",
   falta_de_dado: "falta um dado",
   permissao: "pedido de permissão",
+  credencial: "pedido de chave",
 };
 
 const recusaAutomatica = (em: string): string => `recusa automática ${em}`;
@@ -63,6 +65,7 @@ const PRAZO_POR_TIPO: Record<TipoDecisao, (em: string, item: Item) => string> = 
   pergunta: vence,
   falta_de_dado: vence,
   permissao: vence,
+  credencial: vence,
 };
 
 /** Regras que fecham decisão sem pessoa (ADR-042), em frase curta; regra sem tradução cai no genérico. */
@@ -422,7 +425,7 @@ function renderAprovacao(item: Item, aberta: boolean, conectores: Estado["conect
   return `<ul class="ap-lista">${itens.map(linha).join("")}</ul>${acoes}`;
 }
 
-function renderAcoes(item: Item, aberta: boolean, estado: Pick<Estado, "conectores" | "marketplace" | "frota">): string {
+function renderAcoes(item: Item, aberta: boolean, estado: Pick<Estado, "conectores" | "marketplace" | "frota" | "sessao">): string {
   const d = item.decisao;
   const conectores = estado.conectores;
   if (!aberta) return d.estado === "vencida" ? `<div class="acoes">${botao("reabrir", "Reabrir", { id: d.id })}</div>` : "";
@@ -469,6 +472,11 @@ function renderAcoes(item: Item, aberta: boolean, estado: Pick<Estado, "conector
     // Verbo próprio: "Confirmar" não diz que o que se confirma é uma exclusão.
     case "rotina_exclusao":
       return `<div class="acoes">${botao("decidir-proposta", "Excluir rotina", { classe: "pri", id: d.id })}${botao("recusar-decisao", "Manter rotina", { id: d.id })}</div>`;
+    // NOD-50: o mesmo cartão da conversa — guardar daqui vai pelo mesmo POST, direto ao cofre.
+    case "credencial":
+      // Só a dona do pedido guarda ou recusa (a rota devolve nao_encontrado às outras): a quem só vê, nada de campo de chave.
+      if (d.ownerId !== estado.sessao?.pessoaId) return `<p class="p50-para">Só quem pediu pode colar esta chave.</p>`;
+      return ehCartaoCredencial(item.proposta) ? renderCardCredencial(item.proposta, item.agenteNome, "sv") : `<div class="acoes">${botao("recusar-credencial", "Deixar de lado", { id: d.id })}</div>`;
     // As três de pedir_a_pessoa viram o cartão da pergunta (renderItemPergunta, plano "pergunta com botões", Parte 4).
     case "pergunta":
     case "falta_de_dado":

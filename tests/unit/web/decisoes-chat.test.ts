@@ -36,7 +36,7 @@ describe("decisões no chat", () => {
   });
 
   it("pedido vencido oferece reabertura e não concede acesso", () => {
-    const vencido: Estado = { ...estado, suaVez: { ...estado.suaVez!, itens: [{ ...item, estadoColuna: "vencido", decisao: { ...item.decisao, estado: "vencida" } }] } };
+    const vencido: Estado = { ...estado, sessao: { pessoaId: "p" } as Estado["sessao"], suaVez: { ...estado.suaVez!, itens: [{ ...item, estadoColuna: "vencido", decisao: { ...item.decisao, estado: "vencida" } }] } };
     const html = renderTimeline(conversa, vencido);
     expect(html).toContain("1 pedido vencido · ver");
     expect(html).not.toContain("Preciso da sua decisão para continuar");
@@ -192,10 +192,31 @@ describe("decisões no chat", () => {
     expect(html).not.toContain('data-act="decidir-proposta"');
     expect(html).toContain('data-act="reabrir"');
 
-    const reaberta: Estado = { ...estado, suaVez: { ...estado.suaVez!, itens: [{ ...item, estadoColuna: "pendente", decisao: { ...decisao, estado: "reaberta" } }] } };
+    const reaberta: Estado = { ...estado, sessao: { pessoaId: "p" } as Estado["sessao"], suaVez: { ...estado.suaVez!, itens: [{ ...item, estadoColuna: "pendente", decisao: { ...decisao, estado: "reaberta" } }] } };
     const aberto = renderTimeline({ ...conversa, propostas: [proposta] }, reaberta);
     expect(aberto.match(/data-act="decidir-proposta"/g)).toHaveLength(1);
     expect(aberto).toContain("Excluir rotina");
+  });
+
+  it("NOD-50: pedido de credencial vencido tira o campo da chave e deixa a decisão vencida com Reabrir", () => {
+    const proposta: Proposta = { tenantId: "t", id: "d", conversaId: "c", agenteId: "a", estado: "pendente", criadoEm: 0, kind: "credencial", payload: { kind: "credencial", alvo: "conector", conectorId: "cx", app: "Exemplo", chave: "EXEMPLO_API_KEY", para: "Ler os pedidos.", turnoId: "t1" } } as Proposta;
+    const decisao = { ...item.decisao, tipo: "credencial" as const };
+    const vencido: Estado = { ...estado, sessao: { pessoaId: "p" } as Estado["sessao"], suaVez: { ...estado.suaVez!, itens: [{ ...item, estadoColuna: "vencido", decisao: { ...decisao, estado: "vencida" } }] } };
+    const html = renderTimeline({ ...conversa, propostas: [proposta] }, vencido);
+    expect(html).not.toContain('data-form="guardar-credencial"');
+    expect(html).toContain('data-act="reabrir"');
+    const reaberta: Estado = { ...estado, sessao: { pessoaId: "p" } as Estado["sessao"], suaVez: { ...estado.suaVez!, itens: [{ ...item, estadoColuna: "pendente", decisao: { ...decisao, estado: "reaberta" } }] } };
+    expect(renderTimeline({ ...conversa, propostas: [proposta] }, reaberta)).toContain('data-form="guardar-credencial"');
+  });
+
+  it("NOD-50 (revisão 6): na conversa, quem não é a dona vê o pedido sem o campo da chave", () => {
+    const proposta: Proposta = { tenantId: "t", id: "d", conversaId: "c", agenteId: "a", estado: "pendente", criadoEm: 0, kind: "credencial", payload: { kind: "credencial", alvo: "conector", conectorId: "cx", app: "Exemplo", chave: "EXEMPLO_API_KEY", para: "Ler os pedidos.", turnoId: "t1" } } as Proposta;
+    const comDona = (ownerId: string): Estado => ({ ...estado, sessao: { pessoaId: "p" } as Estado["sessao"], suaVez: { ...estado.suaVez!, itens: [{ ...item, decisao: { ...item.decisao, tipo: "credencial" as const, ownerId } }] } });
+    expect(renderTimeline({ ...conversa, propostas: [proposta] }, comDona("p"))).toContain('data-form="guardar-credencial"');
+    // Realista (revisão 7): Sua vez só traz as decisões de quem decide, então a colega da sala não tem a decisão nenhuma.
+    const deOutra = renderTimeline({ ...conversa, propostas: [proposta] }, { ...estado, sessao: { pessoaId: "colega" } as Estado["sessao"], suaVez: { ...estado.suaVez!, itens: [] } });
+    expect(deOutra).not.toContain('data-form="guardar-credencial"');
+    expect(deOutra).toContain("Só quem pediu pode colá-la");
   });
 
   describe("pedido de acesso em um clique (ADR-044)", () => {

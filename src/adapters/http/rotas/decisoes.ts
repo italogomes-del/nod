@@ -17,6 +17,7 @@ import { reciboDaPropostaConfirmada } from "../../../use-cases/proposta-decidida
 import { recusarProposta } from "../../../use-cases/recusar-proposta.ts";
 import { autoriaDaPessoa } from "../../../use-cases/registrar-negacao.ts";
 import { fecharComResposta, retomarComResposta } from "../../../use-cases/responder-decisao.ts";
+import { fecharPedidoDeCredencial } from "../../../use-cases/guardar-credencial.ts";
 import { retomarTurno } from "../../../use-cases/retomar-turno.ts";
 import type { Deps, Services } from "../../../use-cases/tipos.ts";
 import { sincronizarDasDecisoes } from "../../../use-cases/trabalhos.ts";
@@ -186,6 +187,20 @@ export function criarRotasDecisoes(d: DepsRotasDecisoes): Rota[] {
             // Revisão do épico (S2, 2026-10-08): a task do turno que propôs relê o estado.
             await deps.repos.events.gravarComOutbox([eventoDecidida(deps, decidida, { recusada: recusada(corpo) }), ...(await sincronizarDasDecisoes(deps, [decidida]))]);
           });
+          const resposta: RespostaMutacao = { ok: true, ids };
+          ctx.json(200, resposta);
+          return;
+        }
+
+        if (atual.tipo === "credencial") {
+          // NOD-50: em "Sua vez" o cartão de credencial só se RECUSA; guardar é pelo campo do cartão (POST
+          // propostas/:id/credencial), porque o valor nunca passa por esta rota. Recusar retoma o turno com `recusada`.
+          // Só a dona decide o pedido de chave (a mesma regra do POST que guarda): a decisão visível à equipe não dá a
+          // outra pessoa o poder de recusá-lo em nome dela (revisão do PR #553).
+          if (atual.ownerId !== ctx.escopo.pessoaId) throw new ErroDeDominio("nao_encontrado", { cause: "pedido de chave de outra pessoa" });
+          if (!recusada(corpo)) throw new ErroDeDominio("estado_invalido", { cause: "credencial se guarda pelo cartão" });
+          const r = await d.dentro(ctx.escopo, (deps) => executar(deps, fecharPedidoDeCredencial, { propostaId: atual.id, resultado: "recusada" }));
+          if (r.turnoId) ids.turnoRetomada = r.turnoId;
           const resposta: RespostaMutacao = { ok: true, ids };
           ctx.json(200, resposta);
           return;
