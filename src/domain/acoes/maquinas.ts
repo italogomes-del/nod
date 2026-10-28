@@ -32,6 +32,7 @@ export const ACOES_MAQUINAS = [
   { id: "nuvem.acordar", titulo: "Acordar uma máquina da nuvem", risco: "muda", cartaoNoChat: false, chat: falta },
   { id: "nuvem.dormir_apos", titulo: "Escolher quando a máquina da nuvem dorme", risco: "muda", cartaoNoChat: false, chat: falta },
   { id: "computador.operar", titulo: "Ligar, desligar ou reiniciar o computador", risco: "muda", cartaoNoChat: false, chat: falta },
+  { id: "computador.trocar_lugar", titulo: "Mudar o computador de máquina", risco: "arriscada", cartaoNoChat: false, chat: falta },
   { id: "computador.operar_do_bot", titulo: "Ligar, desligar ou reiniciar o computador de um bot", risco: "muda", cartaoNoChat: false, chat: falta },
   { id: "computador.usar_tela", titulo: "Usar a tela do computador com as próprias mãos", risco: "muda", cartaoNoChat: false, chat: { estado: "nunca", motivo: "são as mãos da pessoa no computador do bot" } },
 ] as const satisfies readonly DefinicaoAcao[];

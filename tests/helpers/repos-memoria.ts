@@ -319,7 +319,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       obterDaPessoa: async () => { throw new Error("use o banco para testar o computador da pessoa"); },
       fixarMaquina: async () => undefined, fixarSupervisor: async () => null, esquecerSupervisor: async () => undefined,
       iniciarOperacao: async () => false, progredirOperacao: async () => false, terminarOperacao: async () => false, arquivarLegado: async () => [], legadosArquivados: async () => [],
-      trocarSupervisor: async () => false, avisoRecriado: async () => false, atividadeDaPessoa: async () => [],
+      trocarSupervisor: async () => false, fixarLugar: async () => false, adicionarSaidaPendente: async () => false, saidaMarcada: async () => {}, avisoRecriado: async () => false, atividadeDaPessoa: async () => [],
     },
     computadorTelas: {
       buscar: async () => null, porId: async () => null, obter: async () => null, travar: async () => null, doComputador: async () => [], fila: async () => [],
@@ -3122,7 +3122,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       },
       async identificar(id) {
         const l = b.maquinaTokens.find((x) => x.tenantId === escopo.tenantId && x.ownerId === escopo.pessoaId && x.id === id);
-        return l ? { nome: l.nome, plataforma: l.plataforma ?? null, papel: l.papel ?? "motor" } : null;
+        return l ? { nome: l.nome, plataforma: l.plataforma ?? null, papel: l.papel ?? "motor", ultimoUsoEm: (l as { ultimoUsoEm?: Date | null }).ultimoUsoEm?.getTime() ?? null } : null;
       },
     },
     maquinasSsh: {

@@ -114,7 +114,14 @@ export type MaquinaDoComputador = {
   foto: { ligadoDesde: number | null; memoriaTotalMb: number | null; titulos: Record<string, string | null> } | null;
   /** NOD-93: o preparo da VM local, quando a máquina é o Mac. */
   preparo?: VmLocalAnunciada;
+  /** NOD-365: sem contato agora, o último contato que a ponte viu (para "sem contato desde HH:MM"); null = nunca. */
+  ultimoContato?: number | null;
 };
+
+/** NOD-365: uma opção da seção "Onde o computador mora" (domínio: opcoesDeLugar). */
+export type LugarDoComputador = { maquinaId: string; nome: string; tipo: "onde_o_nod_roda" | "este_mac" | "outra_maquina"; atual: boolean; pronta: boolean; conectada?: boolean };
+/** NOD-365: o progresso da troca de máquina, parte a parte. */
+export type ProgressoDaTroca = (p: { pct: number; etapa: string }) => Promise<void> | void;
 
 export interface DriverComputador {
   /** NOD-192: o painel de um bot sem computador mostra só o ambiente — não há container para inspecionar. */
@@ -140,4 +147,13 @@ export interface DriverComputador {
   maquinaDoComputador?(id: string, escopo?: EscopoDoDriver): Promise<MaquinaDoComputador | null>;
   /** O `iniciar` deste computador está em curso. */
   ligando?(id: string): boolean;
+  /**
+   * NOD-365: muda o computador para a máquina `destinoId`, levando a loja de logins cifrada (sem `semLogins`), liga lá e
+   * marca a pasta da origem para sair em 30 dias. Se o `iniciar` no destino falhar, o banco volta a apontar para a origem.
+   */
+  trocar?(id: string, destinoId: string, opcoes: { semLogins: boolean; aoProgresso?: ProgressoDaTroca }, escopo?: EscopoDoDriver): Promise<void>;
+  /** NOD-365: uma máquina antiga reconectou; entrega as marcas de saída pendentes sem precisar ligar a atual. */
+  reconciliarSaidasPendentes?(id: string, escopo?: EscopoDoDriver): Promise<void>;
+  /** NOD-365: as opções de lugar (as máquinas que anunciam o computador e a atual). */
+  lugares?(id: string, escopo?: EscopoDoDriver): Promise<LugarDoComputador[]>;
 }

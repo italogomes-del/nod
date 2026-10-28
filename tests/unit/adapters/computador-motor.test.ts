@@ -358,7 +358,7 @@ describe("driver motor: operações da pessoa (NOD-96 PR 5)", () => {
     m.canal.relatarEstado(escopo, "vm", { computadorId: ID, ligado: true, supervisorPub: m.sup.publica, ligadoDesde: 5, memoriaTotalMb: 8000, telas: [{ agenteId: "bot-1", estado: "aberta", ultimaAcaoEm: null, memoriaMb: 300, titulo: "Caixa de entrada" }] });
     expect((await m.driver.maquinaDoComputador!(ID))?.foto).toEqual({ ligadoDesde: 5, memoriaTotalMb: 8000, titulos: { "bot-1": "Caixa de entrada" } });
     const s = mundo({ conectada: false, loc: { agenteId: null, maquinaId: "vm" } });
-    expect(await s.driver.maquinaDoComputador!(ID)).toEqual({ id: "vm", nome: "vm-1", contato: null, foto: null });
+    expect(await s.driver.maquinaDoComputador!(ID)).toEqual({ id: "vm", nome: "vm-1", contato: null, foto: null, ultimoContato: null });
     expect(await mundo({ conectada: false, loc: { agenteId: null } }).driver.maquinaDoComputador!(ID)).toBeNull();
     const p = m.driver.iniciar(ID);
     expect(m.driver.ligando!(ID)).toBe(true);

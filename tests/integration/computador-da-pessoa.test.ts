@@ -210,4 +210,62 @@ describeIntegracao("computador da pessoa no motor (0106)", () => {
       expect((await a.repos.computadores.atividadeDaPessoa(c.id)).map((x) => x.tipo).sort()).toEqual(["atualizar", "navegar"]);
     });
   });
+
+  it("NOD-365: o lugar só muda com a troca em curso; a segunda troca não começa; trocar sem os logins mostra o aviso até ser dispensado", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const a = await agenteComConversa(trx, MARLON);
+      const origem = (await a.repos.maquinaTokens.criar({ nome: "Linux A", prefixo: randomBytes(4).toString("hex"), hash: randomBytes(32) }))!;
+      const destino = (await a.repos.maquinaTokens.criar({ nome: "Linux B", prefixo: randomBytes(4).toString("hex"), hash: randomBytes(32) }))!;
+      const c = await a.repos.computadores.obterDaPessoa(origem.id);
+      await a.repos.computadores.fixarSupervisor(c.id, new Uint8Array(32).fill(1));
+      const paraB = { maquinaId: destino.id, hospedeiraId: destino.id, supervisorPub: null, saidasPendentesDe: [] };
+      // Sem a operação 'trocar', nada muda (nem com outra operação em curso).
+      expect(await a.repos.computadores.fixarLugar(c.id, paraB)).toBe(false);
+      expect(await a.repos.computadores.iniciarOperacao(c.id, "atualizar", 1000)).toBe(true);
+      expect(await a.repos.computadores.fixarLugar(c.id, paraB)).toBe(false);
+      expect(await a.repos.computadores.terminarOperacao(c.id, "atualizar")).toBe(true);
+      expect((await a.repos.computadores.daPessoa())!.maquinaId).toBe(origem.id);
+
+      expect(await a.repos.computadores.iniciarOperacao(c.id, "trocar", 2000)).toBe(true);
+      // A segunda troca (ou qualquer operação) ao mesmo tempo não começa: o serviço responde estado_invalido.
+      expect(await a.repos.computadores.iniciarOperacao(c.id, "trocar", 2001)).toBe(false);
+      expect(await a.repos.computadores.fixarLugar(c.id, paraB)).toBe(true);
+      // O destino faz TOFU de novo: a chave da origem não vale lá.
+      expect(await a.repos.computadores.daPessoa()).toMatchObject({ maquinaId: destino.id, hospedeiraId: destino.id, supervisorPub: null, operacao: { tipo: "trocar" } });
+      // A volta (o iniciar falhou) devolve a chave de antes.
+      expect(await a.repos.computadores.fixarLugar(c.id, { maquinaId: origem.id, hospedeiraId: origem.id, supervisorPub: new Uint8Array(32).fill(1), saidasPendentesDe: [] })).toBe(true);
+      expect((await a.repos.computadores.daPessoa())!.supervisorPub).toBe(Buffer.from(new Uint8Array(32).fill(1)).toString("base64"));
+      expect(await a.repos.computadores.terminarOperacao(c.id, "trocar")).toBe(true);
+
+      // Trazer de volta para onde o nod roda: maquina_id nulo; a origem sem contato fica pendente.
+      expect(await a.repos.computadores.iniciarOperacao(c.id, "trocar", 3000)).toBe(true);
+      expect(await a.repos.computadores.adicionarSaidaPendente(c.id, destino.id)).toBe(true);
+      expect(await a.repos.computadores.fixarLugar(c.id, { maquinaId: null, hospedeiraId: destino.id, supervisorPub: null, saidasPendentesDe: [origem.id] })).toBe(true);
+      expect(await a.repos.computadores.daPessoa()).toMatchObject({ maquinaId: null, hospedeiraId: destino.id, saidasPendentesDe: [origem.id] });
+      // A troca renova o prazo a cada parte (a loja grande não vence nos 15 min); sem renovarEm, o desde fica.
+      await a.repos.computadores.progredirOperacao(c.id, "trocar", { pct: 50, etapa: "Copiando os logins", renovarEm: 900_000 });
+      expect((await a.repos.computadores.daPessoa())!.operacao!.desde).toBe(900_000);
+      await a.repos.computadores.progredirOperacao(c.id, "trocar", { pct: 60, etapa: "Copiando os logins" });
+      expect((await a.repos.computadores.daPessoa())!.operacao!.desde).toBe(900_000);
+      await a.repos.computadores.terminarOperacao(c.id, "trocar");
+      // O marcar_saida de outra máquina não limpa; o da pendente limpa (fora da operação também).
+      await a.repos.computadores.saidaMarcada(c.id, destino.id);
+      expect((await a.repos.computadores.daPessoa())!.saidasPendentesDe).toEqual([origem.id]);
+      await a.repos.computadores.saidaMarcada(c.id, origem.id);
+      expect((await a.repos.computadores.daPessoa())!.saidasPendentesDe).toEqual([]);
+      // O último uso gravado da chave é o "sem contato desde" que sobrevive à ponte.
+      await trx`update maquina_tokens set ultimo_uso_em = to_timestamp(1700000000) where id = ${origem.id}`;
+      expect(await a.repos.maquinaTokens.identificar(origem.id)).toMatchObject({ nome: "Linux A", ultimoUsoEm: 1_700_000_000_000 });
+
+      // Sem computador por bot arquivado, o aviso só aparece depois de trocar sem os logins, e sai quando dispensado.
+      expect(await a.repos.computadores.avisoRecriado(c.id)).toBe(false);
+      await a.repos.computadores.registrar({ computadorId: c.id, autor: "pessoa", tipo: "trocar_sem_logins", estado: "concluida" });
+      expect(await a.repos.computadores.avisoRecriado(c.id)).toBe(true);
+      await a.repos.computadores.registrar({ computadorId: c.id, autor: "pessoa", tipo: "aviso_recriado", estado: "concluida" });
+      expect(await a.repos.computadores.avisoRecriado(c.id)).toBe(false);
+      // Uma nova troca sem os logins, depois do dispensar, mostra de novo.
+      await trx`update computador_acoes set em = em - interval '1 minute' where computador_id = ${c.id} and tipo = 'aviso_recriado'`;
+      expect(await a.repos.computadores.avisoRecriado(c.id)).toBe(true);
+    });
+  });
 });

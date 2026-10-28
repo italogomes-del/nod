@@ -1,5 +1,5 @@
 import type { Agente } from "../../src/contracts/agente.ts";
-import type { ControleComputador } from "../../src/contracts/computador.ts";
+import type { ControleComputador, LugarDoComputador } from "../../src/contracts/computador.ts";
 import type { EstadoTelaComputador } from "../../src/contracts/computador-motor.ts";
 import type { MotivoFalhaComputador } from "../../src/contracts/motivos.ts";
 import type { VmLocalAnunciada } from "../../src/contracts/vm-local.ts";
@@ -25,7 +25,7 @@ export type EstadoComputadorPessoa = (typeof ESTADOS_COMPUTADOR_PESSOA)[number];
 export const OPERACOES_PESSOA = ["acordar", "dormir", "atualizar", "redefinir", "sair_de_todos", "esquecer_senhas", "tentar_de_novo"] as const;
 export type OperacaoPessoa = (typeof OPERACOES_PESSOA)[number];
 /** As operações longas, que têm progresso e etapas. */
-export type OperacaoLonga = "atualizar" | "redefinir" | "sair_de_todos" | "esquecer_senhas";
+export type OperacaoLonga = "atualizar" | "redefinir" | "sair_de_todos" | "esquecer_senhas" | "trocar";
 
 export type TelaDaPessoa = {
   agenteId: string;
@@ -57,14 +57,26 @@ export type ComputadorPessoaDto = {
   atividade?: AtividadeDaPessoa[];
   /** NOD-93 (ADR-127): o preparo da VM local quando o computador mora no Mac (baixando, pausado, macOS antigo...). */
   preparo?: VmLocalAnunciada | null;
+  /** NOD-365: onde o computador pode morar (só as opções disponíveis; a atual marcada). */
+  lugares?: LugarDoComputador[];
+  /** NOD-365: desde quando a máquina do computador está sem contato (epoch ms), para o "desde HH:MM". */
+  semContatoDesde?: number | null;
 };
 
 /**
  * O que a pessoa marcou no painel: a ação sugerida por um aviso, o diálogo de confirmação aberto, as etapas da operação
  * e (NOD-93) a janela de primeiro uso da VM local, que o app abre quando o primeiro download começa.
  */
-export type ComputadorUi = { realce: OperacaoPessoa | null; confirmar: "redefinir" | "sair_de_todos" | "esquecer_senhas" | null; etapasAbertas: boolean; preparoAberto: boolean };
-export const UI_INICIAL: ComputadorUi = { realce: null, confirmar: null, etapasAbertas: false, preparoAberto: false };
+export type ComputadorUi = {
+  realce: OperacaoPessoa | null;
+  confirmar: "redefinir" | "sair_de_todos" | "esquecer_senhas" | null;
+  etapasAbertas: boolean;
+  preparoAberto: boolean;
+  /** NOD-365: a troca de lugar pedida (a confirmação aberta) e a recusa da origem sem contato, com o texto do servidor. */
+  trocarPara?: string | null;
+  recusaDaTroca?: { maquinaId: string; texto: string } | null;
+};
+export const UI_INICIAL: ComputadorUi = { realce: null, confirmar: null, etapasAbertas: false, preparoAberto: false, trocarPara: null, recusaDaTroca: null };
 
 type BotVisto = Pick<Agente, "id" | "nome" | "cor" | "forma">;
 
@@ -131,6 +143,7 @@ const NOME_OPERACAO: Readonly<Record<OperacaoLonga, { gerundio: string; infiniti
   redefinir: { gerundio: "Redefinindo", infinitivo: "redefinir" },
   sair_de_todos: { gerundio: "Saindo dos sites", infinitivo: "sair dos sites" },
   esquecer_senhas: { gerundio: "Esquecendo as senhas", infinitivo: "esquecer as senhas" },
+  trocar: { gerundio: "Mudando de máquina", infinitivo: "mudar de máquina" },
 };
 
 /** As etapas de cada operação, na ordem. A etapa do servidor que não estiver aqui aparece como a atual, pelo nome. */
@@ -140,6 +153,8 @@ export const ETAPAS: Readonly<Record<OperacaoLonga, readonly string[]>> = {
   sair_de_todos: ["Saindo das contas", "Limpando"],
   // Os mesmos nomes que o supervisor emite (infra/computador/supervisor.mjs, case esquecer_senhas).
   esquecer_senhas: ["Esquecendo senhas", "Apagando senhas salvas", "Reabrindo"],
+  // Os mesmos nomes que o driver emite (src/adapters/computador/motor.ts, trocar).
+  trocar: ["Copiando os logins", "Levando para a máquina nova", "Ligando na máquina nova"],
 };
 
 export function pctDaOperacao(dto: ComputadorPessoaDto): number {
@@ -321,12 +336,35 @@ function textoDaFalha(motivo: MotivoFalhaComputador): string {
  */
 export function htmlAvisoDeFalha(dto: ComputadorPessoaDto): string | null {
   if (dto.estado !== "fora_do_ar") return null;
+  const semContato = tituloSemContato(dto);
+  if (semContato) {
+    return htmlAviso({
+      titulo: semContato,
+      apoio: "Ligue a máquina, ou mude o computador para outra.",
+      acoes: [link("Tentar de novo", 'data-act="operar-computador" data-op="tentar_de_novo"'), link("Onde o computador mora", 'data-act="ver-lugar-do-computador"')],
+    });
+  }
   const naoLigou = dto.falha?.motivo === "nao_ficou_pronto";
   return htmlAviso({
     titulo: naoLigou ? "Não consegui ligar o computador" : "O computador parou de responder",
     apoio: dto.falha ? textoDaFalha(dto.falha.motivo) : "Atualizar costuma resolver.",
     acoes: [link("Tentar de novo", 'data-act="operar-computador" data-op="tentar_de_novo"'), link("Ver computador do bot", 'data-act="ver-computador-do-bot" data-realce="atualizar"')],
   });
+}
+
+/** "14:05" no fuso de quem vê. */
+export function horaCurta(ms: number): string {
+  return new Date(ms).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+}
+
+/**
+ * NOD-365: a máquina do computador sumiu. "Não consegui ligar o computador: <nome> está sem contato desde HH:MM".
+ * O computador nunca muda de máquina sozinho: o caminho é o link para Onde o computador mora.
+ */
+export function tituloSemContato(dto: ComputadorPessoaDto): string | null {
+  if (dto.estado !== "fora_do_ar" || dto.falha?.motivo !== "maquina_sem_contato" || !dto.maquina) return null;
+  const desde = dto.semContatoDesde ?? dto.maquina.contato;
+  return `Não consegui ligar o computador: ${dto.maquina.nome} está sem contato${desde ? ` desde ${horaCurta(desde)}` : ""}`;
 }
 
 // ---- a linha de espera no chat ---------------------------------------------------------------------------------------
@@ -377,7 +415,7 @@ export function htmlLinhaOk(texto: string): string {
 
 /** A linha no chat de cada bot cuja tela fechou por uma operação (redefinir ou atualizar). */
 export function htmlLinhaTelaFechada(tipo: OperacaoLonga, nome: string): string {
-  const oQue = tipo === "redefinir" ? "sendo redefinido" : tipo === "atualizar" ? "sendo atualizado" : "saindo dos sites";
+  const oQue = tipo === "redefinir" ? "sendo redefinido" : tipo === "atualizar" ? "sendo atualizado" : tipo === "trocar" ? "mudando de máquina" : tipo === "esquecer_senhas" ? "esquecendo as senhas" : "saindo dos sites";
   return htmlLinha({ segmentos: [`O computador está ${oQue}. A tela de ${nome} fechou; ela volta quando ele precisar do navegador.`], icone: "monitor", centro: true });
 }
 
@@ -464,9 +502,12 @@ export function htmlPainelComputadorDoBot(dto: ComputadorPessoaDto, bots: readon
   const faixa = dto.aviso_recriado && !avisoDispensado
     ? `<div class="pc-faixa" role="status">${ICONE_CB.info}<div><b>Entre nos sites de novo uma vez</b><p>O computador do bot foi recriado e os logins não vieram junto. Da próxima vez que um bot precisar de um site com login, ele pede para você entrar; o login vale para todos.</p></div>${ghost("Entendi", 'data-act="entendi-computador"')}</div>`
     : "";
-  const fora = dto.estado === "fora_do_ar"
-    ? `<div class="pc-faixa alerta" role="status">${ICONE_CB.info}<div><b>O computador parou de responder</b><p>${esc(dto.falha ? textoDaFalha(dto.falha.motivo) : "Atualizar costuma resolver.")}</p></div>${ghost("Tentar de novo", 'data-act="operar-computador" data-op="tentar_de_novo"')}</div>`
-    : "";
+  const semContato = tituloSemContato(dto);
+  const fora = semContato
+    ? `<div class="pc-faixa alerta" role="status">${ICONE_CB.info}<div><b>${esc(semContato)}</b><p>Ligue a máquina, ou mude o computador para outra em ${link("Onde o computador mora", 'data-act="ver-lugar-do-computador"')}.</p></div>${ghost("Tentar de novo", 'data-act="operar-computador" data-op="tentar_de_novo"')}</div>`
+    : dto.estado === "fora_do_ar"
+      ? `<div class="pc-faixa alerta" role="status">${ICONE_CB.info}<div><b>O computador parou de responder</b><p>${esc(dto.falha ? textoDaFalha(dto.falha.motivo) : "Atualizar costuma resolver.")}</p></div>${ghost("Tentar de novo", 'data-act="operar-computador" data-op="tentar_de_novo"')}</div>`
+      : "";
   const ligado = dto.ligadoDesde && dto.estado !== "dormindo" ? ` · ligado ${haQuantoTempo(agora - dto.ligadoDesde)}` : "";
   const abertas = telasAbertas(dto);
   const pct = memoriaEmUso(dto);
@@ -514,7 +555,49 @@ export function htmlPainelComputadorDoBot(dto: ComputadorPessoaDto, bots: readon
   }).join("");
   const atividadeHtml = atividade ? `<h3 class="espaco-subtitulo">Atividade</h3><ol class="espaco-cartao pc-atividade">${atividade}</ol>` : "";
 
-  return `<section class="espaco-secao seu-pc" aria-labelledby="pc-titulo">${faixa}${fora}${faixaMacos}<h2 id="pc-titulo">Computador do bot</h2><p class="intro">Um computador para todos os seus bots. Cada bot tem a própria tela e o próprio navegador, e um login feito aqui vale para todos.</p>${cartao}${antigo ? "" : `${telas}${grupo("Manutenção")}${grupo("Logins")}`}${atividadeHtml}${htmlDialogoDoPainel(dto, bots, ui)}</section>`;
+  return `<section class="espaco-secao seu-pc" aria-labelledby="pc-titulo">${faixa}${fora}${faixaMacos}<h2 id="pc-titulo">Computador do bot</h2><p class="intro">Um computador para todos os seus bots. Cada bot tem a própria tela e o próprio navegador, e um login feito aqui vale para todos.</p>${cartao}${antigo ? "" : `${telas}${htmlLugares(dto, ui)}${grupo("Manutenção")}${grupo("Logins")}`}${atividadeHtml}${htmlDialogoDoPainel(dto, bots, ui)}</section>`;
+}
+
+// ---- onde o computador mora (NOD-365) -------------------------------------------------------------------------------
+
+const ROTULO_DO_LUGAR: Readonly<Record<LugarDoComputador["tipo"], string>> = {
+  onde_o_nod_roda: "Onde o nod roda",
+  este_mac: "Este Mac",
+  outra_maquina: "Outra máquina sua",
+};
+
+/**
+ * Seu computador › Onde o computador mora: só as opções disponíveis, a atual marcada. Mudar pede confirmação; voltar
+ * para onde o nod roda é "Trazer de volta". Sem outra máquina, o link leva ao Conectar (o fluxo SSH mora lá).
+ */
+export function htmlLugares(dto: ComputadorPessoaDto, ui: ComputadorUi): string {
+  const lugares = dto.lugares ?? [];
+  if (!lugares.length) return "";
+  const emCurso = Boolean(dto.operacao) || dto.estado === "ligando";
+  const linha = (l: LugarDoComputador) => {
+    const detalhe = l.atual ? (l.pronta ? "O computador mora aqui" : l.conectada === false ? "O computador mora aqui · sem contato" : "O computador mora aqui · não está pronta") : l.pronta ? l.nome : `${l.nome} · não está pronta`;
+    const botao = l.atual
+      ? '<span class="tag">atual</span>'
+      : `<button type="button" class="bt sm" data-act="pc-trocar" data-maquina="${esc(l.maquinaId)}"${emCurso || !l.pronta ? " disabled" : ""}>${l.tipo === "onde_o_nod_roda" ? "Trazer de volta" : "Mudar para cá"}</button>`;
+    const recusa = ui.recusaDaTroca?.maquinaId === l.maquinaId
+      ? `<p class="cb-aviso-sub pc-recusa" role="alert">${esc(ui.recusaDaTroca.texto)}${SEP}${link("Trocar sem os logins", `data-act="pc-trocar-sem-logins" data-maquina="${esc(l.maquinaId)}"`)}</p>`
+      : "";
+    return `<div class="pc-acao${l.atual ? " atual" : ""}" data-pc-lugar="${esc(l.maquinaId)}"${l.atual ? ' aria-current="true"' : ""}><span class="pc-acao-txt"><b>${esc(ROTULO_DO_LUGAR[l.tipo])}</b><span>${esc(detalhe)}</span>${recusa}</span>${botao}</div>`;
+  };
+  const semOutra = !lugares.some((l) => l.tipo === "outra_maquina")
+    ? `<p class="mudo sm">${link("Usar outra máquina sua", 'data-act="conectar-sempre-ligada"')}: conecte uma VM ou um servidor Linux por SSH.</p>`
+    : "";
+  return `<h3 class="espaco-subtitulo" id="pc-lugar-tit">Onde o computador mora</h3><div class="espaco-cartao pc-acoes pc-lugares" role="group" aria-labelledby="pc-lugar-tit">${lugares.map(linha).join("")}</div>${semOutra}`;
+}
+
+/** A confirmação da troca: os logins vão, os arquivos ficam 30 dias na origem. O foco começa em Cancelar. */
+export function htmlConfirmarTroca(dto: ComputadorPessoaDto, destinoId: string): string {
+  const lugares = dto.lugares ?? [];
+  const destino = lugares.find((l) => l.maquinaId === destinoId && !l.atual);
+  if (!destino) return "";
+  const origem = lugares.find((l) => l.atual)?.nome ?? dto.maquina?.nome ?? "a máquina de agora";
+  const titulo = destino.tipo === "onde_o_nod_roda" ? "Trazer o computador de volta?" : `Mudar o computador para ${destino.nome}?`;
+  return `<div class="cl-fundo" data-act="pc-cancelar"></div><div class="cl-dialogo" role="dialog" aria-modal="true" aria-labelledby="pc-trocar-tit"><h3 id="pc-trocar-tit">${esc(titulo)}</h3><p>${esc(`Os logins vão junto. Os arquivos não vão; ficam 30 dias em ${origem}.`)}</p><div class="cl-caixa">As telas abertas fecham agora e voltam na máquina nova quando um bot precisar. Leva alguns minutos.</div><div class="cl-dialogo-acoes"><button type="button" class="bt" data-act="pc-cancelar" data-cl-autofoco>Cancelar</button><button type="button" class="bt pri" data-act="pc-trocar-confirmar" data-maquina="${esc(destino.maquinaId)}">${destino.tipo === "onde_o_nod_roda" ? "Trazer de volta" : "Mudar"}</button></div></div>`;
 }
 
 /** Os diálogos do painel: a confirmação (o foco começa em Cancelar) e as etapas, sem Cancelar no meio. */
@@ -531,6 +614,8 @@ export function htmlDialogoDoPainel(dto: ComputadorPessoaDto, bots: readonly Bot
   if (ui.confirmar === "esquecer_senhas") {
     return `<div class="cl-fundo" data-act="pc-cancelar"></div><div class="cl-dialogo" role="dialog" aria-modal="true" aria-labelledby="pc-senhas-tit"><h3 id="pc-senhas-tit">Esquecer as senhas salvas?</h3><p>Apaga as senhas que o Chrome guardou neste computador. Os bots deixam de entrar sozinhos quando a sessão expirar.</p><div class="cl-caixa">As telas abertas fecham e religam agora. Para sair das contas em uso, use também Sair de todos os sites.</div>${acoes("esquecer_senhas", "Esquecer senhas")}</div>`;
   }
+  const troca = ui.trocarPara ? htmlConfirmarTroca(dto, ui.trocarPara) : "";
+  if (troca) return troca;
   if (ui.etapasAbertas && dto.operacao) {
     const pct = pctDaOperacao(dto);
     const nome = NOME_OPERACAO[dto.operacao.tipo].gerundio;

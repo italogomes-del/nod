@@ -11,6 +11,7 @@ import type { DriverComputador } from "../../contracts/computador.ts";
 import { criarDriverDocker } from "../computador/docker.ts";
 import { criarCanalComputador } from "../computador/canal.ts";
 import { criarDriverMotor } from "../computador/motor.ts";
+import { lugarPadrao } from "../../domain/computador-canal.ts";
 import type { EstadoComputadorRelatado } from "../../contracts/computador-motor.ts";
 import { type Computadores, criarComputadores, reconciliarTelas } from "../fundo/computadores.ts";
 import { rotasComputadores } from "./rotas/computadores.ts";
@@ -647,29 +648,49 @@ export function comporApp(o: OpcoesCompor): App {
       const [daPessoa, tela] = await Promise.all([d.repos.computadores.daPessoa(), d.repos.computadorTelas.porId(id)]);
       if (!daPessoa || (tela ? tela.computadorId !== daPessoa.id : id !== daPessoa.id)) return null;
       const preferencias = await d.repos.preferencias.buscar();
-      return { escopo, computadorId: daPessoa.id, agenteId: tela?.agenteId ?? null, maquinaId: daPessoa.maquinaId, hospedeiraId: daPessoa.hospedeiraId, supervisorPub: daPessoa.supervisorPub,
+      return { escopo, computadorId: daPessoa.id, agenteId: tela?.agenteId ?? null, maquinaId: daPessoa.maquinaId, hospedeiraId: daPessoa.hospedeiraId, supervisorPub: daPessoa.supervisorPub, saidasPendentesDe: daPessoa.saidasPendentesDe,
         padraoId: preferencias.maquinaPadraoId ?? null, uso: preferencias.usoDoMac ?? "equilibrado" };
     }) : Promise.resolve(null),
     // Lazy: a ponte nasce depois (ela recebe o canal).
     maquinas: (escopo) => ponteHttp.maquinasComComputador(escopo),
     nomeDaMaquina: (escopo, maquinaId) => dentro(escopo, async (d) => (await d.repos.maquinaTokens.identificar(maquinaId))?.nome ?? null),
+    maquinaGravada: (escopo, maquinaId) => dentro(escopo, (d) => d.repos.maquinaTokens.identificar(maquinaId)),
     fixarHospedeira: (escopo, id, maquinaId) => dentro(escopo, (d) => d.repos.computadores.fixarMaquina(id, { maquinaId: null, hospedeiraId: maquinaId })),
     fixarSupervisor: (escopo, id, pub) => dentro(escopo, (d) => d.repos.computadores.fixarSupervisor(id, Buffer.from(pub, "base64"))),
+    // NOD-365: a troca de máquina.
+    ultimoContato: (maquinaId) => ponteHttp.ultimoContato(maquinaId),
+    fixarLugar: (escopo, id, l) => dentro(escopo, async (d) => {
+      if (!await d.repos.computadores.fixarLugar(id, { maquinaId: l.maquinaId, hospedeiraId: l.hospedeiraId, supervisorPub: l.supervisorPub ? Buffer.from(l.supervisorPub, "base64") : null, saidasPendentesDe: l.saidasPendentesDe })) throw new ErroDeDominio("estado_invalido", { cause: "a troca não está em curso" });
+    }),
+    adicionarSaidaPendente: (escopo, id, maquinaId) => dentro(escopo, async (d) => {
+      if (!await d.repos.computadores.adicionarSaidaPendente(id, maquinaId)) throw new ErroDeDominio("estado_invalido", { cause: "a troca não está em curso" });
+    }),
+    saidaMarcada: (escopo, id, maquinaId) => dentro(escopo, (d) => d.repos.computadores.saidaMarcada(id, maquinaId)),
   }) : null;
   /** A foto do supervisor: a primeira X25519 que ele mostra fica (TOFU); outra é só registrada — o `iniciar` recusa. */
   async function reconciliarComputador(escopo: Escopo, maquinaId: string, relato: EstadoComputadorRelatado): Promise<void> {
     if (!relato.computadorId) return;
     const desfecho = await dentro(escopo, async (d) => {
-      if ((await d.repos.computadores.daPessoa())?.id !== relato.computadorId) return null;
+      const daPessoa = await d.repos.computadores.daPessoa();
+      if (daPessoa?.id !== relato.computadorId) return null;
+      // NOD-365: depois de uma troca, a foto que a origem ainda manda não mexe nas telas nem fixa a X25519 dela: só a
+      // máquina onde o computador mora agora fala por ele.
+      const atual = daPessoa.maquinaId ?? daPessoa.hospedeiraId;
+      if (atual && atual !== maquinaId) return daPessoa.saidasPendentesDe.includes(maquinaId) ? "saida_pendente" as const : null;
       await reconciliarTelas(d, relato.computadorId, relato);
       // NOD-96 PR 5: o progresso da operação em curso (o painel o lê no GET /computador); só vale com a mesma operação.
       if (relato.operacao) await d.repos.computadores.progredirOperacao(relato.computadorId, relato.operacao.tipo, { pct: relato.operacao.pct, etapa: relato.operacao.etapa });
       return d.repos.computadores.fixarSupervisor(relato.computadorId, Buffer.from(relato.supervisorPub, "base64"));
     });
+    if (desfecho === "saida_pendente") {
+      await driverMotor?.reconciliarSaidasPendentes?.(relato.computadorId, escopo);
+      return;
+    }
     if (desfecho === "diferente") log("aviso", "computador_supervisor_diferente", { computador_id: relato.computadorId, maquina_id: maquinaId });
   }
   const computadores = criarComputadores({ dentro, driver: o.computador ?? driverMotor ?? criarDriverDocker(env), executor: () => executorAtual, guardarTelas: capturaNoTranscript,
     porPessoa: computadorNoMotor,
+    lugarPadraoNaCriacao: computadorNoMotor ? (escopo) => lugarPadrao(ponteHttp.maquinasComComputador(escopo)) : undefined,
     cifrar: (s) => cifrar(s, chave), decifrar: (s) => decifrar(s, chave),
     // `saude` (emenda da ADR-037): o computador entrou ou saiu do ar — a web relê a frota só nesse caso.
     mudou: (escopo, agenteId, saude) => { barramento.publicar(escopo.pessoaId, "computador.mudou", { agenteId, ...(saude ? { saude: true } : {}) }); } });

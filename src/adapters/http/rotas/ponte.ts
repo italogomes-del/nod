@@ -734,7 +734,7 @@ export function criarPonteHttpServidor(d: {
   function maquinasComComputador(escopo: Escopo): MaquinaDaPessoa[] {
     return [...conexoes.entries()].flatMap(([id, c]) => {
       if (c.escopo.pessoaId !== escopo.pessoaId || c.escopo.tenantId !== escopo.tenantId || d.agora() - c.ultimo >= 60_000) return [];
-      return [{ machineId: id, nome: c.nome, plataforma: c.plataforma, computador: c.anuncio?.computador?.estado ?? null, ultimoContato: c.ultimo, ...(c.anuncio?.vmLocal ? { vmLocal: c.anuncio.vmLocal } : {}) }];
+      return [{ machineId: id, nome: c.nome, plataforma: c.plataforma, papel: c.papel, computador: c.anuncio?.computador?.estado ?? null, ultimoContato: c.ultimo, ...(c.anuncio?.vmLocal ? { vmLocal: c.anuncio.vmLocal } : {}) }];
     });
   }
   /** ADR-102: a pessoa renomeou a máquina; a conexão viva passa a usar o nome novo. */

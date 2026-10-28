@@ -67,6 +67,50 @@ export function escolherMaquina(p: { maquinaId: string | null; hospedeiraId: str
 }
 
 /**
+ * definido em 2026-10-28 (NOD-365): onde o computador nasce, só na criação. A primeira máquina Linux com o computador
+ * pronto (a de contato mais recente); sem nenhuma, o Mac que anuncia o computador e prepara a VM local (ADR-127). null =
+ * nenhuma serve ainda; o `iniciar` escolhe depois por `escolherMaquina`.
+ */
+export function lugarPadrao(vivas: readonly (MaquinaCandidata & { vmLocal?: unknown })[], padraoId: string | null = null): string | null {
+  // NOD-365: dentro do grupo, a mesma ordem do escolherMaquina: a única, depois a padrão da pessoa, depois a mais recente.
+  const recente = (l: readonly MaquinaCandidata[]) => (l.length === 1 ? l[0]!.machineId : null)
+    ?? (padraoId && l.some((m) => m.machineId === padraoId) ? padraoId : null)
+    ?? [...l].sort((a, b) => b.ultimoContato - a.ultimoContato)[0]?.machineId ?? null;
+  return recente(vivas.filter((m) => m.plataforma === "linux" && m.computador === "pronto"))
+    ?? recente(vivas.filter((m) => m.plataforma === "darwin" && m.computador !== null && m.computador !== "sem_suporte" && m.vmLocal !== undefined));
+}
+
+/** As três formas de lugar da seção "Onde o computador mora" (NOD-365). */
+export const TIPOS_DE_LUGAR = ["onde_o_nod_roda", "este_mac", "outra_maquina"] as const;
+export type TipoDeLugar = (typeof TIPOS_DE_LUGAR)[number];
+export type LugarCandidato = MaquinaCandidata & { nome: string; papel: "motor" | "computador" };
+export type OpcaoDeLugar = { maquinaId: string; nome: string; tipo: TipoDeLugar; atual: boolean; pronta: boolean; conectada: boolean };
+
+/**
+ * definido em 2026-10-28 (NOD-365): as opções da seção "Onde o computador mora", só as disponíveis. Onde o nod roda: as
+ * Linux de papel motor que anunciam o computador; Este Mac: os Macs que anunciam; Outra máquina sua: as de papel
+ * computador (instaladas por SSH). `atual` marca a máquina onde o computador mora hoje, e ela entra mesmo sem contato
+ * (com `pronta: false`), para a pessoa ver de onde está saindo.
+ */
+export function opcoesDeLugar(conectadas: readonly LugarCandidato[], atual: { maquinaId: string; nome: string; papel: "motor" | "computador"; plataforma: MaquinaCandidata["plataforma"] } | null): OpcaoDeLugar[] {
+  const tipoDe = (m: { plataforma: MaquinaCandidata["plataforma"]; papel: "motor" | "computador" }): TipoDeLugar | null =>
+    m.papel === "computador" ? "outra_maquina" : m.plataforma === "linux" ? "onde_o_nod_roda" : m.plataforma === "darwin" ? "este_mac" : null;
+  const ordem = (t: TipoDeLugar) => TIPOS_DE_LUGAR.indexOf(t);
+  const opcoes: OpcaoDeLugar[] = [];
+  for (const m of conectadas) {
+    const tipo = tipoDe(m);
+    // Só as disponíveis: sem suporte ou sem os pacotes não vira opção (a atual entra abaixo, para a pessoa ver onde mora).
+    if (!tipo || ((m.computador === null || m.computador !== "pronto") && m.machineId !== atual?.maquinaId)) continue;
+    opcoes.push({ maquinaId: m.machineId, nome: m.nome, tipo, atual: m.machineId === atual?.maquinaId, pronta: m.computador === "pronto", conectada: true });
+  }
+  if (atual && !opcoes.some((x) => x.atual)) {
+    const tipo = tipoDe(atual);
+    if (tipo) opcoes.push({ maquinaId: atual.maquinaId, nome: atual.nome, tipo, atual: true, pronta: false, conectada: false });
+  }
+  return opcoes.sort((a, b) => ordem(a.tipo) - ordem(b.tipo) || a.nome.localeCompare(b.nome));
+}
+
+/**
  * Gancho da NOD-92: a máquina gerenciada não dorme enquanto o computador dela tem tela abrindo, aberta ou esperando, ou
  * teve ação há menos de 15 min.
  */

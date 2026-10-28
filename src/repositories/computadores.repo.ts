@@ -7,9 +7,9 @@ import type { Conn, Escopo } from "../shared/types.ts";
 type Linha = { id: string; agente_id: string; habilitado: boolean; controle: ControleComputador; politica: PoliticaComputador; ajuda: string | null; ajuda_decisao_id: string | null; ocupado_ate: Date | null; operacao_id: string | null; criado_em: Date; falhas_seguidas: number; falha_motivo: MotivoFalhaComputador | null; indisponivel_desde: Date | null };
 type LinhaAcao = { id: string; computador_id: string; turno_id: string | null; autor: RegistroComputador["autor"]; tipo: string; estado: RegistroComputador["estado"]; motivo: MotivoFalhaComputador | null; argumentos_cifrados: string | null; em: Date };
 const computador = (l: Linha): Computador => ({ id: l.id, agenteId: l.agente_id, habilitado: l.habilitado, controle: l.controle, politica: l.politica, ajuda: l.ajuda, ajudaDecisaoId: l.ajuda_decisao_id, ocupadoAte: l.ocupado_ate?.getTime() ?? null, operacaoId: l.operacao_id, criadoEm: l.criado_em.getTime(), falhasSeguidas: l.falhas_seguidas, falhaMotivo: l.falha_motivo, indisponivelDesde: l.indisponivel_desde?.getTime() ?? null });
-type LinhaDaPessoa = { id: string; owner_id: string; maquina_id: string | null; hospedeira_id: string | null; supervisor_pub: Buffer | null; operacao: OperacaoComputador | null; operacao_progresso: number | null; operacao_etapa: string | null; operacao_desde: Date | null; falhas_seguidas: number; falha_motivo: MotivoFalhaComputador | null; indisponivel_desde: Date | null; ultima_atividade_em: Date; criado_em: Date };
+type LinhaDaPessoa = { id: string; owner_id: string; maquina_id: string | null; hospedeira_id: string | null; supervisor_pub: Buffer | null; saidas_pendentes_de?: string[]; operacao: OperacaoComputador | null; operacao_progresso: number | null; operacao_etapa: string | null; operacao_desde: Date | null; falhas_seguidas: number; falha_motivo: MotivoFalhaComputador | null; indisponivel_desde: Date | null; ultima_atividade_em: Date; criado_em: Date };
 const daPessoa = (l: LinhaDaPessoa): ComputadorDaPessoa => ({
-  id: l.id, ownerId: l.owner_id, maquinaId: l.maquina_id, hospedeiraId: l.hospedeira_id, supervisorPub: l.supervisor_pub ? l.supervisor_pub.toString("base64") : null,
+  id: l.id, ownerId: l.owner_id, maquinaId: l.maquina_id, hospedeiraId: l.hospedeira_id, supervisorPub: l.supervisor_pub ? l.supervisor_pub.toString("base64") : null, saidasPendentesDe: l.saidas_pendentes_de ?? [],
   operacao: l.operacao && l.operacao_desde ? { tipo: l.operacao, progresso: l.operacao_progresso, etapa: l.operacao_etapa, desde: l.operacao_desde.getTime() } : null,
   falhasSeguidas: l.falhas_seguidas, falhaMotivo: l.falha_motivo, indisponivelDesde: l.indisponivel_desde?.getTime() ?? null, ultimaAtividadeEm: l.ultima_atividade_em.getTime(), criadoEm: l.criado_em.getTime(),
 });
@@ -181,6 +181,32 @@ export function computadoresRepo(conn: Conn, escopo: Escopo) {
       return l.igual ? "igual" : "diferente";
     },
     /** O Redefinir apaga o computador na máquina: o próximo supervisor mostra chave nova e ela é aceita (TOFU de novo). */
+    /**
+     * NOD-365: o computador muda de máquina. maquina_id, hospedeira_id e a X25519 fixada mudam juntos (o supervisor do
+     * destino tem outra chave: TOFU de novo); só com a troca em curso, como o trocarSupervisor do Redefinir. A reversão
+     * (o destino não ligou) usa o mesmo caminho com os valores de antes.
+     */
+    async fixarLugar(id: string, l: { maquinaId: string | null; hospedeiraId: string | null; supervisorPub: Uint8Array | null; saidasPendentesDe: string[] }): Promise<boolean> {
+      const linhas = await conn`update computadores set maquina_id = ${l.maquinaId}, hospedeira_id = ${l.hospedeiraId},
+        supervisor_pub = ${l.supervisorPub ? Buffer.from(l.supervisorPub) : null}, saidas_pendentes_de = ${l.saidasPendentesDe}
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and modelo = 'por_pessoa' and operacao = 'trocar' returning id`;
+      return linhas.length > 0;
+    },
+    /** NOD-365: registra a limpeza ANTES de importar, fechando a janela de queda entre importar e trocar o lugar. */
+    async adicionarSaidaPendente(id: string, maquinaId: string): Promise<boolean> {
+      const linhas = await conn`update computadores set saidas_pendentes_de = array_append(saidas_pendentes_de, ${maquinaId}::uuid)
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and modelo = 'por_pessoa'
+          and operacao = 'trocar' and not (${maquinaId}::uuid = any(saidas_pendentes_de)) returning id`;
+      if (linhas.length > 0) return true;
+      const [existe] = await conn<{ ok: boolean }[]>`select ${maquinaId}::uuid = any(saidas_pendentes_de) as ok from computadores
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and modelo = 'por_pessoa' and operacao = 'trocar'`;
+      return existe?.ok === true;
+    },
+    /** NOD-365: uma máquina recebeu o `marcar_saida` (ou voltou a ser a atual): remove só ela da lista. */
+    async saidaMarcada(id: string, maquinaId: string): Promise<void> {
+      await conn`update computadores set saidas_pendentes_de = array_remove(saidas_pendentes_de, ${maquinaId}::uuid)
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and ${maquinaId}::uuid = any(saidas_pendentes_de)`;
+    },
     async esquecerSupervisor(id: string): Promise<void> {
       await conn`update computadores set supervisor_pub = null where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and modelo = 'por_pessoa'`;
     },
@@ -198,9 +224,12 @@ export function computadoresRepo(conn: Conn, escopo: Escopo) {
      * dispensou o "Entre nos sites de novo uma vez" (registro 'aviso_recriado' no computador dela).
      */
     async avisoRecriado(id: string): Promise<boolean> {
+      // NOD-365: a troca de máquina sem os logins também mostra o aviso, até a pessoa dispensá-lo depois dela.
       const [l] = await conn<{ mostrar: boolean }[]>`select
-          exists (select 1 from computadores where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and modelo = 'por_bot' and arquivado_em is not null)
-          and not exists (select 1 from computador_acoes where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and computador_id = ${id} and tipo = 'aviso_recriado')
+          (exists (select 1 from computadores where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and modelo = 'por_bot' and arquivado_em is not null)
+          and not exists (select 1 from computador_acoes where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and computador_id = ${id} and tipo = 'aviso_recriado'))
+          or exists (select 1 from computador_acoes t where t.tenant_id = ${escopo.tenantId} and t.owner_id = ${escopo.pessoaId} and t.computador_id = ${id} and t.tipo = 'trocar_sem_logins'
+            and not exists (select 1 from computador_acoes v where v.tenant_id = t.tenant_id and v.owner_id = t.owner_id and v.computador_id = t.computador_id and v.tipo = 'aviso_recriado' and v.em >= t.em))
           as mostrar`;
       return l?.mostrar === true;
     },
@@ -211,10 +240,12 @@ export function computadoresRepo(conn: Conn, escopo: Escopo) {
       return linhas.length > 0;
     },
     /** O progresso que o supervisor relatou; só vale para a operação em curso. `pct` fica entre 0 e 100. */
-    async progredirOperacao(id: string, tipo: OperacaoComputador, p: { pct: number; etapa: string | null }): Promise<boolean> {
+    async progredirOperacao(id: string, tipo: OperacaoComputador, p: { pct: number; etapa: string | null; renovarEm?: number }): Promise<boolean> {
       const pct = Math.max(0, Math.min(100, Math.round(p.pct)));
       const etapa = p.etapa === null ? null : p.etapa.slice(0, 80);
-      const linhas = await conn`update computadores set operacao_progresso = ${pct}, operacao_etapa = ${etapa}
+      // NOD-365: a troca renova o prazo a cada parte (operacaoViva conta de operacao_desde): a loja grande não perde a vez.
+      const desde = p.renovarEm === undefined ? null : new Date(p.renovarEm);
+      const linhas = await conn`update computadores set operacao_progresso = ${pct}, operacao_etapa = ${etapa}, operacao_desde = coalesce(${desde}::timestamptz, operacao_desde)
         where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and operacao = ${tipo} returning id`;
       return linhas.length > 0;
     },

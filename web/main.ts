@@ -4845,8 +4845,18 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   },
   "pc-cancelar": () => {
     const op = estado.computadorUi.confirmar;
-    dispatch({ tipo: "computador-ui", ui: { confirmar: null } });
+    const lugar = estado.computadorUi.trocarPara;
+    dispatch({ tipo: "computador-ui", ui: { confirmar: null, trocarPara: null } });
     if (op) document.querySelector<HTMLElement>(`#espaco [data-pc-acao="${op}"] button`)?.focus();
+    else if (lugar) document.querySelector<HTMLElement>(`#espaco [data-pc-lugar="${CSS.escape(lugar)}"] button`)?.focus();
+  },
+  // NOD-365: onde o computador mora. Mudar pede confirmação; a origem sem contato recusa e oferece "Trocar sem os logins".
+  "pc-trocar": (el) => { dispatch({ tipo: "computador-ui", ui: { trocarPara: el.dataset.maquina ?? null, recusaDaTroca: null } }); focarNovo(); },
+  "pc-trocar-confirmar": (el) => trocarLugarDoComputador(el.dataset.maquina ?? "", false),
+  "pc-trocar-sem-logins": (el) => trocarLugarDoComputador(el.dataset.maquina ?? "", true),
+  "ver-lugar-do-computador": () => {
+    abrirEspaco("computador-do-bot");
+    document.querySelector<HTMLElement>("#espaco #pc-lugar-tit")?.scrollIntoView({ block: "start" });
   },
   "pc-segundo-plano": () => dispatch({ tipo: "computador-ui", ui: { etapasAbertas: false, preparoAberto: false } }),
   // NOD-93 (ADR-127): o download pausado da VM local retoma já (o app decide; sem a VM ou app antigo, não faz nada).
@@ -6834,6 +6844,31 @@ async function pulsoDoComputador(minha: number): Promise<void> {
   const ms = !c ? 60_000 : c.operacao || c.estado === "ligando" ? 1_000 : 5_000;
   computadorTimer = window.setTimeout(() => void pulsoDoComputador(minha), ms);
 }
+/** NOD-365: muda o computador de máquina. A troca segue em segundo plano; o progresso vem pela leitura do computador. */
+function trocarLugarDoComputador(maquinaId: string, semLogins: boolean): Promise<void> {
+  if (!maquinaId) return Promise.resolve();
+  dispatch({ tipo: "computador-ui", ui: { trocarPara: null, recusaDaTroca: null, etapasAbertas: secaoAberta(estado) === "maquinas" } });
+  window.clearTimeout(computadorTimer);
+  ++computadorGeracao;
+  return agir(async () => {
+    try {
+      await api!.trocarLugarDoComputador(maquinaId, semLogins);
+    } catch (e) {
+      // A origem sem contato não é erro de tela: a recusa fica na linha da máquina, com o link "Trocar sem os logins".
+      if (e instanceof ErroApi && e.codigo === "origem_sem_contato") {
+        // A frase do servidor é fixa; o nome da máquina de agora vem da própria seção (o servidor não põe dado na frase).
+        const atual = estado.computadorPessoa?.lugares?.find((l) => l.atual)?.nome;
+        dispatch({ tipo: "computador-ui", ui: { recusaDaTroca: { maquinaId, texto: atual ? `${atual} está sem contato. Ligue-a para levar os logins.` : e.message } } });
+        return;
+      }
+      throw e;
+    } finally {
+      await lerComputadorAgora();
+      focarNovo();
+    }
+  });
+}
+
 function operarComputador(op: OperacaoPessoa): Promise<void> {
   const longa = op === "atualizar" || op === "redefinir" || op === "sair_de_todos" || op === "esquecer_senhas";
   dispatch({ tipo: "computador-ui", ui: { confirmar: null, realce: null, etapasAbertas: longa && secaoAberta(estado) === "maquinas" } });

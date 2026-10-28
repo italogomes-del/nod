@@ -1,4 +1,5 @@
 // NOD-96 PR 2 (ADR-122): o supervisor como processo comum, com dbus/keyring/secret-tool falsos e sem telas reais.
+import { Buffer } from "node:buffer";
 import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { connect } from "node:net";
 import { tmpdir } from "node:os";
@@ -16,7 +17,7 @@ const ID = "pc1";
 const limpar: Array<() => Promise<unknown> | unknown> = [];
 afterEach(async () => { for (const f of limpar.splice(0).reverse()) await f(); });
 
-async function montar(leitura = () => ({ memoria: "verde" as unknown, processador: "verde" as unknown }), aoAtualizar?: () => void) {
+async function montar(leitura = () => ({ memoria: "verde" as unknown, processador: "verde" as unknown }), aoAtualizar?: () => void, agora?: () => number) {
   const dir = await mkdtemp(join(tmpdir(), "nod-supervisor-test-"));
   limpar.push(() => rm(dir, { recursive: true, force: true }));
   const bin = async (nome: string, corpo: string) => {
@@ -40,15 +41,30 @@ async function montar(leitura = () => ({ memoria: "verde" as unknown, processado
   await escutar(st, terminal);
   limpar.push(() => new Promise((r) => st.close(r)));
   const logs: string[] = [];
-  const sup = criarSupervisor({ raiz: join(dir, "raiz"), run: join(dir, "run"), terminal, bin: binarios, leitura, log: (m) => logs.push(m), aoAtualizar });
+  const sup = criarSupervisor({ raiz: join(dir, "raiz"), run: join(dir, "run"), terminal, bin: binarios, leitura, log: (m) => logs.push(m), aoAtualizar, agora });
   limpar.push(() => sup.encerrar());
-  return { dir, sup, registro, logs, terminal };
+  return { dir, sup, registro, logs, terminal, binarios };
 }
 
 const { privada, publica } = chavesDeAssinatura(CRED, ID);
 let n = 0;
-const cmd = (c: Record<string, unknown>, chave = privada) =>
-  assinarComando({ id: `c${++n}`, computadorId: ID, uso: "equilibrado", prazoMs: Date.now() + 60_000, ...c }, chave);
+let epocaTeste = 1_000;
+let ultimaEpocaTeste = epocaTeste;
+const epocasPorTroca = new Map<string, number>();
+const cmd = (c: Record<string, unknown>, chave = privada) => {
+  const tipo = c.tipo;
+  const daTroca = tipo === "exportar_logins" || tipo === "importar_logins" || tipo === "cancelar_exportacao" || tipo === "marcar_saida";
+  let epocaTroca = c.epocaTroca;
+  if (daTroca && epocaTroca === undefined) {
+    const troca = typeof c.troca === "string" ? c.troca : null;
+    if (troca) {
+      epocaTroca = epocasPorTroca.get(troca) ?? ++epocaTeste;
+      epocasPorTroca.set(troca, epocaTroca as number);
+      ultimaEpocaTeste = epocaTroca as number;
+    } else epocaTroca = ultimaEpocaTeste;
+  }
+  return assinarComando({ id: `c${++n}`, computadorId: ID, uso: "equilibrado", prazoMs: Date.now() + 60_000, ...c, ...(daTroca ? { epocaTroca } : {}) }, chave);
+};
 
 async function iniciar(sup: Supervisor) {
   // Qualquer comando cria o computador no disco (e o par X25519); antes do TOFU ele é recusado.
@@ -270,5 +286,220 @@ describe("supervisor", () => {
     const fotosAntes = linhas.filter((m) => m.tipo === "estado").length;
     s.write(`${JSON.stringify({ tipo: "pedir_estado" })}\n`);
     await chegou(() => linhas.filter((m) => m.tipo === "estado").length > fotosAntes);
+  });
+});
+
+describe("NOD-365: a loja de logins muda de máquina", () => {
+  const chave = chaveDaLoja(chaveDaMaquina(CRED, ID));
+  const loja = (dir: string) => join(dir, "raiz", ID, "logins", "principal", "cookies.enc");
+  const comCookie = async (dir: string, valor: string) => gravarLoja(loja(dir), chave, fundir(lojaVazia(), { postos: [{ name: "s", value: valor, domain: ".a.com", path: "/" }], removidos: [] }, Date.now()).loja);
+
+  /** Leva a loja da origem ao destino como o driver leva: exporta parte a parte e importa cada uma, na ordem. */
+  async function levar(origem: Supervisor, destino: Supervisor, troca = "t1") {
+    const partes: string[] = [];
+    let total = 1;
+    for (let i = 0; i < total; i++) {
+      const r = await origem.tratar(cmd({ tipo: "exportar_logins", troca, parte: i, servidorPub: publica }));
+      expect(r.desfecho).toBe("ok");
+      total = r.logins!.total;
+      partes.push(r.logins!.dados);
+    }
+    for (let i = 0; i < total; i++) {
+      const r = await destino.tratar(cmd({ tipo: "importar_logins", troca, parte: i, total, dados: partes[i], servidorPub: publica }));
+      expect(r.desfecho).toBe("ok");
+    }
+    return partes;
+  }
+
+  it("ida e volta: a loja cifrada chega igual, o destino sem TOFU fixa a chave e o canal não leva texto claro", async () => {
+    const a = await montar();
+    const b = await montar();
+    await iniciar(a.sup);
+    await comCookie(a.dir, "segredo-do-cookie");
+    const partes = await levar(a.sup, b.sup);
+    // A origem desligou (a loja parou de mudar) e o destino passou a confiar na mesma chave do servidor.
+    expect(a.sup.estados()[0]?.ligado).toBe(false);
+    expect((await readFile(join(b.dir, "raiz", ID, "estado", "servidor.pub"), "utf8")).trim()).toBe(publica);
+    expect(Buffer.from(partes.join(""), "base64").toString("latin1")).not.toContain("segredo-do-cookie");
+    expect(await readFile(loja(b.dir))).toEqual(await readFile(loja(a.dir)));
+    expect(cookiesVivos(await lerLoja(loja(b.dir), chave)).map((c) => c.value)).toEqual(["segredo-do-cookie"]);
+    // E volta: a loja do destino substitui a da origem inteira.
+    await comCookie(b.dir, "mudou-no-destino");
+    await levar(b.sup, a.sup, "t2");
+    expect(cookiesVivos(await lerLoja(loja(a.dir), chave)).map((c) => c.value)).toEqual(["mudou-no-destino"]);
+  });
+
+  it("a importação recusa parte fora de ordem, troca trocada e pacote com nome fora da lista", async () => {
+    const b = await montar();
+    const imp = (c: Record<string, unknown>) => b.sup.tratar(cmd({ tipo: "importar_logins", servidorPub: publica, ...c }));
+    expect((await imp({ troca: "t", parte: 1, total: 2, dados: "" })).desfecho).toBe("falhou");
+    expect((await imp({ troca: "t", parte: 0, total: 2, dados: "" })).desfecho).toBe("ok");
+    expect((await imp({ troca: "outra", parte: 1, total: 2, dados: "" })).desfecho).toBe("falhou");
+    expect((await imp({ troca: "t", parte: 0, total: 99_999, dados: "" })).desfecho).toBe("falhou");
+    for (const nome of ["../../estado/servidor.pub", "storage/../../x.enc", "Cookies", "storage/estado.enc/../a"]) {
+      const pacote = Buffer.from(JSON.stringify({ versao: 1, arquivos: [{ nome, dados: "AA==" }] })).toString("base64");
+      expect((await imp({ troca: `n${++n}`, parte: 0, total: 1, dados: pacote })).desfecho).toBe("falhou");
+    }
+    const versao2 = Buffer.from(JSON.stringify({ versao: 2, arquivos: [] })).toString("base64");
+    expect((await imp({ troca: "v2", parte: 0, total: 1, dados: versao2 })).desfecho).toBe("falhou");
+    await expect(stat(join(b.dir, "raiz", ID, "estado", "x.enc"))).rejects.toThrow();
+  });
+
+  it("a exportação não segue um symlink plantado na loja", async () => {
+    const a = await montar();
+    await iniciar(a.sup);
+    const { symlink } = await import("node:fs/promises");
+    await symlink(join(a.dir, "raiz", ID, "estado", "supervisor.key"), join(a.dir, "raiz", ID, "logins", "principal", "senhas.enc"));
+    const r = await a.sup.tratar(cmd({ tipo: "exportar_logins", troca: "s", parte: 0, servidorPub: publica }));
+    const pacote = JSON.parse(Buffer.from(r.logins!.dados, "base64").toString("utf8")) as { arquivos: { nome: string }[] };
+    expect(pacote.arquivos.map((x) => x.nome)).not.toContain("senhas.enc");
+  });
+
+  it("uma importação que caiu entre os renames é recuperada ao carregar, sem perder a loja nova", async () => {
+    const a = await montar();
+    const logins = join(a.dir, "raiz", ID, "logins");
+    await mkdir(join(logins, "principal.novo"), { recursive: true });
+    await writeFile(join(logins, "principal.novo", "cookies.enc"), "novo");
+    await mkdir(join(logins, "principal.velho"), { recursive: true });
+    await a.sup.carregar();
+    expect(await readFile(join(logins, "principal", "cookies.enc"), "utf8")).toBe("novo");
+    await expect(stat(join(logins, "principal.velho"))).rejects.toThrow();
+  });
+
+  it("o iniciar em voo termina antes de a exportação desligar: a origem fica desligada e a loja parada", async () => {
+    const a = await montar();
+    // A chave do servidor já fixada: sem isso, os dois comandos gravam o servidor.pub ao mesmo tempo e, sob carga, a
+    // exportação pode entrar na fila antes do iniciar (o teste ficava instável).
+    await iniciar(a.sup);
+    await a.sup.tratar(cmd({ tipo: "parar" }));
+    expect(a.sup.estados()[0]?.ligado).toBe(false);
+    const supervisorPub = a.sup.estados().find((e) => e.computadorId === ID)!.supervisorPub;
+    const ligando = a.sup.tratar(cmd({ tipo: "iniciar", servidorPub: publica, segredoSelado: selar(supervisorPub, chaveDaMaquina(CRED, ID)) }));
+    const exportando = a.sup.tratar(cmd({ tipo: "exportar_logins", troca: "voo", parte: 0, servidorPub: publica }));
+    expect((await ligando).desfecho).toBe("ok");
+    expect((await exportando).desfecho).toBe("ok");
+    expect(a.sup.estados()[0]?.ligado).toBe(false);
+  });
+
+  it("exportar e iniciar no mesmo tick: o iniciar enfileirado revalida e não religa a origem", async () => {
+    const a = await montar();
+    await iniciar(a.sup);
+    await a.sup.tratar(cmd({ tipo: "parar" }));
+    await writeFile(loja(a.dir), Buffer.alloc(600 * 1024, 7));
+    const supervisorPub = a.sup.estados().find((e) => e.computadorId === ID)!.supervisorPub;
+    const exportando = a.sup.tratar(cmd({ tipo: "exportar_logins", troca: "mesmo-tick", parte: 0, servidorPub: publica }));
+    const ligando = a.sup.tratar(cmd({ tipo: "iniciar", servidorPub: publica, segredoSelado: selar(supervisorPub, chaveDaMaquina(CRED, ID)) }));
+    expect((await exportando).logins!.total).toBeGreaterThan(1);
+    expect(await ligando).toMatchObject({ desfecho: "falhou", motivo: "atualizando" });
+    expect(a.sup.estados()[0]?.ligado).toBe(false);
+  });
+
+  it("com a exportação aberta (partes faltando), o iniciar e o abrir_tela recusam com atualizando", async () => {
+    const a = await montar();
+    await iniciar(a.sup);
+    // Uma loja de ~600 KiB sai em duas partes de 384 KiB.
+    await writeFile(loja(a.dir), Buffer.alloc(600 * 1024, 7));
+    const p0 = await a.sup.tratar(cmd({ tipo: "exportar_logins", troca: "aberta", parte: 0, servidorPub: publica }));
+    expect(p0.logins!.total).toBeGreaterThan(1);
+    const supervisorPub = a.sup.estados().find((e) => e.computadorId === ID)!.supervisorPub;
+    const religar = () => a.sup.tratar(cmd({ tipo: "iniciar", servidorPub: publica, segredoSelado: selar(supervisorPub, chaveDaMaquina(CRED, ID)) }));
+    expect(await religar()).toMatchObject({ desfecho: "falhou", motivo: "atualizando" });
+    expect(await a.sup.tratar(cmd({ tipo: "abrir_tela", agenteId: "ag1" }))).toMatchObject({ desfecho: "falhou", motivo: "atualizando" });
+    for (let i = 1; i < p0.logins!.total; i++) expect((await a.sup.tratar(cmd({ tipo: "exportar_logins", troca: "aberta", parte: i, servidorPub: publica }))).desfecho).toBe("ok");
+    // Entregar a última parte não libera a origem: só o cancelamento explícito (falha) ou marcar_saida (sucesso).
+    expect(await religar()).toMatchObject({ desfecho: "falhou", motivo: "atualizando" });
+    expect((await a.sup.tratar(cmd({ tipo: "cancelar_exportacao", troca: "aberta" }))).desfecho).toBe("ok");
+    // A loja de teste é lixo (o iniciar pode falhar ao lê-la), mas o bloqueio da exportação acabou.
+    expect((await religar()).motivo).not.toBe("atualizando");
+  });
+
+  it("pacote de uma parte continua bloqueando a origem até cancelar", async () => {
+    const a = await montar();
+    await iniciar(a.sup);
+    const supervisorPub = a.sup.estados().find((e) => e.computadorId === ID)!.supervisorPub;
+    const p0 = await a.sup.tratar(cmd({ tipo: "exportar_logins", troca: "curta", parte: 0, servidorPub: publica }));
+    expect(p0.logins!.total).toBe(1);
+    const religar = () => a.sup.tratar(cmd({ tipo: "iniciar", servidorPub: publica, segredoSelado: selar(supervisorPub, chaveDaMaquina(CRED, ID)) }));
+    expect(await religar()).toMatchObject({ desfecho: "falhou", motivo: "atualizando" });
+    expect((await a.sup.tratar(cmd({ tipo: "cancelar_exportacao", troca: "curta" }))).desfecho).toBe("ok");
+    expect((await religar()).motivo).not.toBe("atualizando");
+  });
+
+  it("virar destino invalida o snapshot antigo que ainda tinha partes", async () => {
+    const a = await montar();
+    await iniciar(a.sup);
+    await writeFile(loja(a.dir), Buffer.alloc(600 * 1024, 7));
+    const p0 = await a.sup.tratar(cmd({ tipo: "exportar_logins", troca: "antiga", parte: 0, servidorPub: publica }));
+    expect(p0.logins!.total).toBeGreaterThan(1);
+    const vazio = Buffer.from(JSON.stringify({ versao: 1, arquivos: [] })).toString("base64");
+    expect((await a.sup.tratar(cmd({ tipo: "importar_logins", troca: "nova", parte: 0, total: 1, dados: vazio, servidorPub: publica }))).desfecho).toBe("ok");
+    expect(await a.sup.tratar(cmd({ tipo: "exportar_logins", troca: "antiga", parte: 1, servidorPub: publica }))).toMatchObject({ desfecho: "falhou", motivo: "acao_falhou" });
+  });
+
+  it("recusa partes e trocas antigas pela época, inclusive depois de reiniciar", async () => {
+    const a = await montar();
+    await iniciar(a.sup);
+    await writeFile(loja(a.dir), Buffer.alloc(600 * 1024, 7));
+    const p0 = await a.sup.tratar(cmd({ tipo: "exportar_logins", troca: "epoca-atual", epocaTroca: 20_000, parte: 0, servidorPub: publica }));
+    expect(p0.logins!.total).toBeGreaterThan(1);
+    expect(await a.sup.tratar(cmd({ tipo: "exportar_logins", troca: "epoca-atual", epocaTroca: 19_999, parte: 1, servidorPub: publica }))).toMatchObject({ desfecho: "falhou", motivo: "acao_falhou" });
+    const sup2 = criarSupervisor({ raiz: join(a.dir, "raiz"), run: join(a.dir, "run-epoca"), terminal: a.terminal, bin: a.binarios, log: () => {} });
+    limpar.push(() => sup2.encerrar());
+    await sup2.carregar();
+    const vazio = Buffer.from(JSON.stringify({ versao: 1, arquivos: [] })).toString("base64");
+    expect(await sup2.tratar(cmd({ tipo: "importar_logins", troca: "replay-antigo", epocaTroca: 19_999, parte: 0, total: 1, dados: vazio, servidorPub: publica }))).toMatchObject({ desfecho: "falhou", motivo: "acao_falhou" });
+  });
+
+  it("o bloqueio da origem sobrevive ao reinício do supervisor", async () => {
+    const a = await montar();
+    await iniciar(a.sup);
+    expect((await a.sup.tratar(cmd({ tipo: "exportar_logins", troca: "reinicio", parte: 0, servidorPub: publica }))).desfecho).toBe("ok");
+    const sup2 = criarSupervisor({ raiz: join(a.dir, "raiz"), run: join(a.dir, "run2"), terminal: a.terminal, bin: a.binarios, log: () => {} });
+    limpar.push(() => sup2.encerrar());
+    await sup2.carregar();
+    const supervisorPub = sup2.estados().find((e) => e.computadorId === ID)!.supervisorPub;
+    expect(await sup2.tratar(cmd({ tipo: "iniciar", servidorPub: publica, segredoSelado: selar(supervisorPub, chaveDaMaquina(CRED, ID)) }))).toMatchObject({ desfecho: "falhou", motivo: "atualizando" });
+    expect((await sup2.tratar(cmd({ tipo: "cancelar_exportacao", troca: "reinicio" }))).desfecho).toBe("ok");
+  });
+
+  it("uma exportação abandonada destrava a origem após 10 min sem partes, inclusive depois de reiniciar", async () => {
+    let agora = Date.now();
+    const a = await montar(undefined, undefined, () => agora);
+    await iniciar(a.sup);
+    expect((await a.sup.tratar(cmd({ tipo: "exportar_logins", troca: "abandonada", parte: 0, servidorPub: publica }))).desfecho).toBe("ok");
+    agora += 10 * 60_000 + 1;
+    const sup2 = criarSupervisor({ raiz: join(a.dir, "raiz"), run: join(a.dir, "run-expirada"), terminal: a.terminal, bin: a.binarios, agora: () => agora, log: () => {} });
+    limpar.push(() => sup2.encerrar());
+    await sup2.carregar();
+    const supervisorPub = sup2.estados().find((e) => e.computadorId === ID)!.supervisorPub;
+    expect(await sup2.tratar(cmd({ tipo: "iniciar", prazoMs: agora + 60_000, servidorPub: publica, segredoSelado: selar(supervisorPub, chaveDaMaquina(CRED, ID)) }))).toMatchObject({ desfecho: "ok" });
+  });
+
+  it("marcar_saida que não grava a marca mantém a origem bloqueada", async () => {
+    const a = await montar();
+    await iniciar(a.sup);
+    expect((await a.sup.tratar(cmd({ tipo: "exportar_logins", troca: "marca-falha", parte: 0, servidorPub: publica }))).desfecho).toBe("ok");
+    const raizDoComputador = join(a.dir, "raiz", ID);
+    await chmod(raizDoComputador, 0o500);
+    expect((await a.sup.tratar(cmd({ tipo: "marcar_saida" }))).desfecho).toBe("falhou");
+    await chmod(raizDoComputador, 0o700);
+    const supervisorPub = a.sup.estados().find((e) => e.computadorId === ID)!.supervisorPub;
+    expect(await a.sup.tratar(cmd({ tipo: "iniciar", servidorPub: publica, segredoSelado: selar(supervisorPub, chaveDaMaquina(CRED, ID)) }))).toMatchObject({ desfecho: "falhou", motivo: "atualizando" });
+    expect((await a.sup.tratar(cmd({ tipo: "cancelar_exportacao", troca: "marca-falha" }))).desfecho).toBe("ok");
+  });
+
+  it("marcar_saida desliga e a varredura apaga a pasta só com 30 dias; o iniciar desmarca", async () => {
+    let agora = Date.now();
+    const dir = await mkdtemp(join(tmpdir(), "nod-supervisor-varre-"));
+    limpar.push(() => rm(dir, { recursive: true, force: true }));
+    const sup = criarSupervisor({ raiz: join(dir, "raiz"), run: join(dir, "run"), terminal: join(dir, "t.sock"), bin: { dbus: "true", keyring: "true", secretTool: "true", xvfb: "Xvfb", openbox: "openbox", chromium: "chromium", bwrap: null, xdotool: "xdotool", xclip: "xclip", scrot: "scrot" }, agora: () => agora, log: () => {} });
+    limpar.push(() => sup.encerrar());
+    await sup.tratar(cmd({ tipo: "exportar_logins", troca: "m", parte: 0, servidorPub: publica }));
+    expect((await sup.tratar(cmd({ tipo: "marcar_saida" }))).desfecho).toBe("ok");
+    agora += 29 * 24 * 3_600_000;
+    expect(await sup.varrer()).toEqual([]);
+    agora += 24 * 3_600_000;
+    expect(await sup.varrer()).toEqual([ID]);
+    await expect(stat(join(dir, "raiz", ID))).rejects.toThrow();
   });
 });

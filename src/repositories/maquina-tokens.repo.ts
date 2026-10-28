@@ -109,10 +109,11 @@ export function maquinaTokensRepo(conn: Conn, escopo: Escopo) {
      * Nome e sistema de uma chave, revogada ou não (o aviso de uma queda antiga ainda a nomeia). null = não é chave da
      * pessoa — no modo local, o Mac que roda o servidor não tem chave.
      */
-    async identificar(id: string): Promise<{ nome: string; plataforma: PlataformaMaquina | null; papel: PapelMaquina } | null> {
-      const [l] = await conn<{ nome: string; plataforma: PlataformaMaquina | null; papel: PapelMaquina }[]>`
-        select nome, plataforma, papel from maquina_tokens where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id}`;
-      return l ?? null;
+    async identificar(id: string): Promise<{ nome: string; plataforma: PlataformaMaquina | null; papel: PapelMaquina; ultimoUsoEm: number | null } | null> {
+      const [l] = await conn<{ nome: string; plataforma: PlataformaMaquina | null; papel: PapelMaquina; ultimo_uso_em: Date | null }[]>`
+        select nome, plataforma, papel, ultimo_uso_em from maquina_tokens where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id}`;
+      // NOD-365: o último uso gravado é o "sem contato desde" que sobrevive à ponte esquecer a conexão (90 s) e ao reinício.
+      return l ? { nome: l.nome, plataforma: l.plataforma, papel: l.papel, ultimoUsoEm: l.ultimo_uso_em?.getTime() ?? null } : null;
     },
 
     /**

@@ -1,4 +1,4 @@
-import type { AcaoComputador, ControleComputador, PoliticaComputador, ResultadoComputador } from "./computador.ts";
+import type { AcaoComputador, ControleComputador, LugarDoComputador, PoliticaComputador, ResultadoComputador } from "./computador.ts";
 import type { EpochMs } from "./ids.ts";
 import type { MotivoFalhaComputador } from "./motivos.ts";
 import type { UsoDoMac } from "./raio-x.ts";
@@ -15,7 +15,7 @@ export type ModeloComputador = (typeof MODELOS_COMPUTADOR)[number];
 export const ESTADOS_TELA_COMPUTADOR = ["fechada", "esperando", "abrindo", "aberta", "fechando"] as const;
 export type EstadoTelaComputador = (typeof ESTADOS_TELA_COMPUTADOR)[number];
 /** Mesma ordem do enum operacao_computador (0106; `esquecer_senhas` acrescentado ao fim na 0112, NOD-97 PR 6). */
-export const OPERACOES_COMPUTADOR = ["atualizar", "redefinir", "sair_de_todos", "esquecer_senhas"] as const;
+export const OPERACOES_COMPUTADOR = ["atualizar", "redefinir", "sair_de_todos", "esquecer_senhas", "trocar"] as const;
 export type OperacaoComputador = (typeof OPERACOES_COMPUTADOR)[number];
 
 /** A operação em curso no computador da pessoa (Atualizar, Redefinir, Sair de todos os sites), com o progresso relatado. */
@@ -29,6 +29,8 @@ export type ComputadorDaPessoa = {
   hospedeiraId: string | null;
   /** X25519 do supervisor, em base64, gravada no primeiro contato (TOFU); nula até lá e depois do Redefinir. */
   supervisorPub: string | null;
+  /** NOD-365: máquinas de onde saiu sem receber `marcar_saida`; cada uma recebe quando voltar. */
+  saidasPendentesDe: string[];
   operacao: OperacaoEmCurso | null;
   falhasSeguidas: number;
   falhaMotivo: MotivoFalhaComputador | null;
@@ -56,7 +58,7 @@ export type TelaComputadorBot = {
   criadoEm: EpochMs;
 };
 
-export const TIPOS_COMANDO_COMPUTADOR = ["iniciar", "abrir_tela", "acao", "fechar_tela", "parar", "atualizar", "redefinir", "sair_de_todos", "esquecer_senhas", "apagar_perfil"] as const;
+export const TIPOS_COMANDO_COMPUTADOR = ["iniciar", "abrir_tela", "acao", "fechar_tela", "parar", "atualizar", "redefinir", "sair_de_todos", "esquecer_senhas", "apagar_perfil", "exportar_logins", "importar_logins", "cancelar_exportacao", "marcar_saida"] as const;
 export type TipoComandoComputador = (typeof TIPOS_COMANDO_COMPUTADOR)[number];
 
 /**
@@ -79,6 +81,17 @@ export type ComandoComputador = {
    * esta chave no primeiro `iniciar` (TOFU, ADR-122); depois disso o campo é ignorado.
    */
   servidorPub?: string;
+  /**
+   * NOD-365 (definido em 2026-10-28): a troca de máquina. `troca` liga as partes de uma mesma troca; `parte` é a pedida
+   * (`exportar_logins`) ou a que vai (`importar_logins`, com `total` e `dados`, o pacote cifrado em base64). O servidor
+   * só repassa: os arquivos da loja estão cifrados com a chave do computador.
+   */
+  troca?: string;
+  /** Época monotônica da troca nesta máquina; cerca comandos atrasados mesmo depois de reiniciar o supervisor. */
+  epocaTroca?: number;
+  parte?: number;
+  total?: number;
+  dados?: string;
   /** Epoch em ms até quando o comando vale (no máximo 2 min à frente). */
   prazoMs: number;
   /** Ed25519 em base64 sobre a forma canônica do comando sem este campo. */
@@ -98,7 +111,12 @@ export type ResultadoComandoComputador = {
   progresso?: { pct: number; etapa: string };
   /** Só no `ok` do `redefinir`: a X25519 nova do supervisor, que o servidor fixa no lugar da antiga (NOD-96 PR 5). */
   supervisorPub?: string;
+  /** NOD-365: no `ok` do `exportar_logins`, a parte pedida do pacote da loja (cifrado, base64) e quantas são. */
+  logins?: PartePacoteLogins;
 };
+export type PartePacoteLogins = { parte: number; total: number; dados: string };
+/** definido em 2026-10-28 (NOD-365): a parte em base64 cabe no corpo da ponte (1 MiB); o supervisor manda até ~512 KiB. */
+export const TETO_PARTE_LOGINS_B64 = 600 * 1024;
 
 /** A foto do computador que o supervisor manda sem ser perguntado (ao ligar, a cada mudança de tela e no batimento). */
 export type EstadoComputadorRelatado = {
@@ -167,6 +185,10 @@ export type ComputadorDaPessoaDto = {
   /** As últimas ações no computador, mais nova primeiro; `agenteId` nulo = a pessoa. */
   atividade?: { agenteId: string | null; texto: string; em: EpochMs }[];
   aviso_recriado?: boolean;
+  /** NOD-365: as máquinas onde o computador pode morar (a atual marcada). */
+  lugares?: LugarDoComputador[];
+  /** NOD-365: a máquina do computador está sem contato desde este instante (o último contato que a ponte viu). */
+  semContatoDesde?: EpochMs | null;
 };
 
 /**

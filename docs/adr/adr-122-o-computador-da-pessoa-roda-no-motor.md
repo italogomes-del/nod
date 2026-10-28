@@ -338,6 +338,27 @@ da `NOD_CREDENTIAL_KEY`; `NOD_COMPUTADORES_MAX` e `NOD_COMPUTADOR_IMAGEM` são d
 `NOD_COMPUTADOR_OCIOSO_MIN` (varredor de ociosidade) fica no padrão de 15 min. Reverter: esvaziar a linha e rodar o
 deploy (a tela some e as rotas dão 404; o arquivado do modelo por bot não volta; reverter a imagem por tag não desliga).
 
+## Emenda 2026-10-28 (NOD-365): o computador muda de máquina
+
+O computador da pessoa pode morar em outra máquina dela ("Onde o computador mora"). A loja de logins vai cifrada, como
+está no disco, em partes de 384 KiB pela ponte (`exportar_logins` na origem, `importar_logins` no destino); o servidor
+só repassa e nunca decifra. A chave da loja deriva do id do computador, então a loja é portável entre máquinas.
+
+- **TOFU ampliado:** `exportar_logins` e `importar_logins` também fixam a `servidorPub` (como o `iniciar`), porque o
+  destino de uma troca nunca recebeu um `iniciar`. **Risco aceito:** um processo local como `nod` na máquina nova,
+  antes da primeira troca, poderia fixar uma chave dele e recusar os comandos do servidor. O efeito é negação de
+  serviço (a troca falha e o banco volta à origem); ele não lê a loja, que segue cifrada com uma chave que só o
+  servidor deriva. A correção é a mesma do TOFU original: o Redefinir.
+- **Uma coisa de cada vez no supervisor:** `iniciar`, `exportar_logins`, `importar_logins` e `marcar_saida` andam em
+  série por computador; com uma exportação aberta, `iniciar` e `abrir_tela` recusam com `atualizando` (vence em
+  10 min). O driver espera o `iniciar` em voo antes de começar a troca.
+- **A origem fica 30 dias:** recebe `marcar_saida` (`.saiu-em`) e a varredura apaga a pasta depois de 30 dias. A
+  origens sem contato ficam em `computadores.saidas_pendentes_de` e recebem o `marcar_saida` no primeiro ligar em que
+  estiver conectada; o destino que recebeu a loja e não ligou (a troca voltou) também é marcado.
+- **Trazer de volta** para onde o nod roda grava `maquina_id` nulo e só a `hospedeira_id`.
+- **Gatilho de reversão:** um caso de loja perdida ou trocada pela metade em 30 dias de log
+  (`computador_troca_nao_revertida`) → a troca volta a exigir a origem desligada à mão e a cópia por SSH.
+
 ## Fora
 
 Compartilhar por workspace (bots de colegas); mais de uma máquina por pessoa; compartilhar

@@ -108,7 +108,7 @@ describeIntegracao("incidentes (ADR-045): um aviso por queda do Mac, nunca um ca
       const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON, { nome: "Ze 1" });
       const vm = await chave(repos, "nod-motor-teste", "linux");
       await repos.maquinaTokens.registrarPlataforma(vm, "linux");
-      expect(await repos.maquinaTokens.identificar(vm)).toEqual({ nome: "nod-motor-teste", plataforma: "linux", papel: "motor" });
+      expect(await repos.maquinaTokens.identificar(vm)).toEqual({ nome: "nod-motor-teste", plataforma: "linux", papel: "motor", ultimoUsoEm: null });
       const agora = T0 + 2 * H;
       await interromperPorMaquina({ repos, escopo: MARLON, agora: () => agora }, { turnos: [await turnoRodando(trx, agenteId, conversaId, vm, T0)] });
       expect(await aviso(repos, conversaId)).toBe("Turno interrompido: a máquina nod-motor-teste parou de responder (desligada, sem rede ou motor parado). O que já saiu fica marcado como parcial; nada foi reenviado.");

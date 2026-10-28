@@ -4,7 +4,7 @@ import type { ComputadorDaPessoa, ComputadorDaPessoaDto, EstadoComputadorDaPesso
 import { FERRAMENTAS_COMPUTADOR } from "../../contracts/ferramentas-computador.ts";
 import type { MotivoFalhaComputador } from "../../contracts/motivos.ts";
 import type { PlanoTurno } from "../../contracts/plano-turno.ts";
-import { acaoDaFalha, alteraComputador, computadorPadrao, CONTA_PARA_SAUDE, ehEsperandoTela, ehFalhaComputador, type FalhaComputador, instrucaoDaFalha, LIMITE_FALHAS_SEGUIDAS, MOTIVO_FALHA_EM_PORTUGUES, resumirDetalhe, resumoAcaoComputador, TEXTO_ATUALIZANDO, textoDaAtividade, textoPedidoDeTela, validarAcaoComputador } from "../../domain/computador.ts";
+import { acaoDaFalha, alteraComputador, computadorPadrao, CONTA_PARA_SAUDE, ehEsperandoTela, ehFalhaComputador, FalhaComputador, instrucaoDaFalha, LIMITE_FALHAS_SEGUIDAS, MOTIVO_FALHA_EM_PORTUGUES, resumirDetalhe, resumoAcaoComputador, TEXTO_ATUALIZANDO, textoDaAtividade, textoPedidoDeTela, validarAcaoComputador } from "../../domain/computador.ts";
 import { ehErroDeDominio, ErroDeDominio } from "../../domain/erro.ts";
 import { deduplicarObservacao, type HashesObservacao } from "../../domain/observacao-computador.ts";
 import { decidirPeloModo, semRevisor } from "../../domain/modo-aprovacao.ts";
@@ -31,6 +31,8 @@ type Opcoes = { executor(): "local" | "catcher"; dentro: Dentro; driver: DriverC
    * Desligado: o caminho de sempre, um computador (docker) por bot.
    */
   porPessoa?: boolean;
+  /** NOD-365: escolhido uma vez, no INSERT do computador da pessoa; mudanças posteriores no inventário não o movem. */
+  lugarPadraoNaCriacao?: (escopo: Escopo) => string | null;
   dormir?: (ms: number) => Promise<void> };
 /**
  * NOD-96 PR 4: onde a ação roda. No modo docker é o computador do bot (`telaId` nulo, `computadorId` = `id`). No modo
@@ -90,6 +92,7 @@ const OPERACAO_NO_AVISO: Record<OperacaoComputador, string> = {
   redefinir: "você pediu para redefinir o computador",
   sair_de_todos: "você pediu para sair de todos os sites",
   esquecer_senhas: "você pediu para esquecer as senhas salvas",
+  trocar: "você pediu para mudar o computador de máquina",
 };
 function esperandoTelaParaAgente(quem: string[]): string {
   const uso = quem.length ? ` ${quem.join(", ")} ${quem.length === 1 ? "está" : "estão"} usando o computador agora.` : "";
@@ -210,9 +213,9 @@ const lugarDocker: Lugar = {
  * nasce fechada (computadorTelas.obter); bot excluído ou de outra pessoa não tem tela (nao_encontrado). O registro da
  * ação leva o bot (`agente_id`) e a tela; a da pessoa leva só a tela.
  */
-const lugarTela: Lugar = {
+const criarLugarTela = (lugarPadraoNaCriacao: (escopo: Escopo) => string | null): Lugar => ({
   async obter(d, agenteId) {
-    const p = await d.repos.computadores.obterDaPessoa();
+    const p = await d.repos.computadores.obterDaPessoa(lugarPadraoNaCriacao(d.escopo));
     if (!await d.repos.computadores.vincularBot(p.id, agenteId)) throw new ErroDeDominio("nao_encontrado");
     const t = await d.repos.computadorTelas.obter(p.id, agenteId);
     const travada = t && await d.repos.computadorTelas.travar(t.id);
@@ -229,7 +232,7 @@ const lugarTela: Lugar = {
   liberar: (d, v, operacao, em) => d.repos.computadorTelas.liberar(v.id, operacao, em),
   registrar: (d, v, e) => d.repos.computadores.registrar({ ...e, computadorId: v.computadorId, telaId: v.id, ...(e.autor === "bot" ? { agenteId: v.agenteId } : {}) }),
   emUsoPor: (d, v) => d.repos.computadores.emUsoPor(v.computadorId, v.id),
-};
+});
 
 /**
  * NOD-96 PR 4 (ADR-122): o banco segue a foto do supervisor. A tela relatada leva o estado, a memória medida e a última
@@ -255,7 +258,9 @@ export function criarComputadores(o: Opcoes) {
   const agora = o.agora ?? Date.now;
   const dormir = o.dormir ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const porPessoa = o.porPessoa === true;
-  const lugar = porPessoa ? lugarTela : lugarDocker;
+  const lugarPadraoNaCriacao = o.lugarPadraoNaCriacao ?? (() => null);
+  const lugar = porPessoa ? criarLugarTela(lugarPadraoNaCriacao) : lugarDocker;
+  const obterDaPessoa = (d: Deps) => d.repos.computadores.obterDaPessoa(lugarPadraoNaCriacao(d.escopo));
   const obter = (d: Deps, agenteId: string) => lugar.obter(d, agenteId);
   const reservar = (d: Deps, c: Vaga, acao: AcaoComputador, autor: "bot" | "pessoa", turnoId?: string, registroId?: string) => reservarCom(lugar, d, c, acao, autor, turnoId, registroId);
   /** S5: o turno que pediu o computador ocupado e quem o segurava, até a próxima ação dele passar (TrabalhoDto). */
@@ -894,6 +899,9 @@ export function criarComputadores(o: Opcoes) {
         atividade: lido.atividade.map((a) => ({ agenteId: a.agenteId, texto: textoDaAtividade(a.tipo, a.estado), em: a.em })),
         aviso_recriado: lido.aviso,
         ...(m?.preparo ? { preparo: m.preparo } : {}),
+        // NOD-365: a seção "Onde o computador mora" e o "sem contato desde HH:MM" da faixa de fora do ar.
+        lugares: (await o.driver.lugares?.(p.id, escopo)) ?? [],
+        ...(m && m.contato === null && m.ultimoContato ? { semContatoDesde: m.ultimoContato } : {}),
       };
     },
     /**
@@ -915,7 +923,7 @@ export function criarComputadores(o: Opcoes) {
       }
       if (op === "acordar" || op === "tentar_de_novo") {
         const { id, registroId } = await o.dentro(escopo, async (d) => {
-          const p = (await d.repos.computadores.travarDaPessoa((await d.repos.computadores.obterDaPessoa()).id))!;
+          const p = (await d.repos.computadores.travarDaPessoa((await obterDaPessoa(d)).id))!;
           if (operacaoViva(p, d.agora())) throw new ErroDeDominio("estado_invalido", { cause: "atualizando" });
           return { id: p.id, registroId: (await d.repos.computadores.registrar({ computadorId: p.id, autor: "pessoa", tipo: op, estado: "executando" })).id };
         });
@@ -959,7 +967,7 @@ export function criarComputadores(o: Opcoes) {
       const operar = o.driver.operar?.bind(o.driver);
       if (!operar) throw new ErroDeDominio("estado_invalido");
       const plano = await o.dentro(escopo, async (d) => {
-        const p = (await d.repos.computadores.travarDaPessoa((await d.repos.computadores.obterDaPessoa()).id))!;
+        const p = (await d.repos.computadores.travarDaPessoa((await obterDaPessoa(d)).id))!;
         // A operação que passou do teto (o servidor caiu no meio) não segura a nova.
         if (p.operacao && !operacaoViva(p, d.agora())) await d.repos.computadores.terminarOperacao(p.id, p.operacao.tipo);
         if (!await d.repos.computadores.iniciarOperacao(p.id, op, d.agora())) throw new ErroDeDominio("estado_invalido", { cause: "atualizando" });
@@ -992,6 +1000,67 @@ export function criarComputadores(o: Opcoes) {
             await d.repos.computadores.terminarOperacao(plano.id, op);
             await d.repos.computadores.concluir(plano.registroId, sucesso ? "concluida" : "falhou", falha?.motivo ?? null);
           }).catch((e: unknown) => log("erro", "computador_operacao_nao_encerrada", { computador_id: plano.id, tipo: op, erro: e instanceof Error ? e.name : "desconhecido" }));
+          o.mudou(escopo, "", true);
+        }
+      })();
+      return { concluida };
+    },
+    /**
+     * definido em 2026-10-28 (NOD-365): a pessoa muda o computador de máquina (ou o traz de volta para onde o nod roda).
+     * É uma operação como Atualizar: uma por vez, os bots esperam (operacaoViva) e as telas fecham com aviso no chat. O
+     * driver leva a loja de logins cifrada e só aponta o banco para o destino; se o destino não ligar, volta à origem.
+     * Destino igual ao atual ou que não anuncia o computador: estado_invalido na hora. `semLogins`: a pessoa entra nos
+     * sites de novo uma vez (o aviso de recriado volta).
+     */
+    async trocarLugarDaPessoa(escopo: Escopo, pedido: { maquinaId: string; semLogins: boolean }): Promise<{ concluida: Promise<void> }> {
+      if (!porPessoa) throw new ErroDeDominio("nao_encontrado");
+      const trocar = o.driver.trocar?.bind(o.driver);
+      if (!trocar) throw new ErroDeDominio("estado_invalido");
+      const plano = await o.dentro(escopo, async (d) => {
+        const p = (await d.repos.computadores.travarDaPessoa((await obterDaPessoa(d)).id))!;
+        if ((p.maquinaId ?? p.hospedeiraId) === pedido.maquinaId) throw new ErroDeDominio("estado_invalido", { cause: "já mora nessa máquina" });
+        return p;
+      });
+      const lugares = (await o.driver.lugares?.(plano.id, escopo)) ?? [];
+      const destino = lugares.find((l) => l.maquinaId === pedido.maquinaId);
+      if (!destino || destino.atual || !destino.pronta) throw new ErroDeDominio("estado_invalido", { cause: "a máquina não roda o computador agora" });
+      // A origem sem contato não entrega a loja: a recusa sai na hora, com o nome dela, para a tela oferecer "Trocar sem os logins".
+      const origem = lugares.find((l) => l.atual);
+      if (!pedido.semLogins && origem && origem.conectada === false) throw new FalhaComputador("maquina_sem_contato", { maquina: origem.nome });
+      const marcado = await o.dentro(escopo, async (d) => {
+        const p = (await d.repos.computadores.travarDaPessoa(plano.id))!;
+        if ((p.maquinaId ?? p.hospedeiraId) === pedido.maquinaId) throw new ErroDeDominio("estado_invalido", { cause: "já mora nessa máquina" });
+        if (p.operacao && !operacaoViva(p, d.agora())) await d.repos.computadores.terminarOperacao(p.id, p.operacao.tipo);
+        if (!await d.repos.computadores.iniciarOperacao(p.id, "trocar", d.agora())) throw new ErroDeDominio("estado_invalido", { cause: "atualizando" });
+        const registroId = (await d.repos.computadores.registrar({ computadorId: p.id, autor: "pessoa", tipo: "trocar", estado: "executando" })).id;
+        for (const t of await d.repos.computadorTelas.doComputador(p.id)) if (t.estado !== "fechada") await avisarOperacao(d, t.agenteId, "trocar");
+        return { id: p.id, registroId };
+      });
+      o.mudou(escopo, "", true);
+      log("info", "computador_operacao_iniciada", { computador_id: marcado.id, tipo: "trocar", sem_logins: pedido.semLogins });
+      const concluida = (async () => {
+        let falha: FalhaComputador | null = null;
+        let sucesso = false;
+        try {
+          await trocar(marcado.id, pedido.maquinaId, {
+            semLogins: pedido.semLogins,
+            // Cada parte avança o progresso: a troca grande não passa do teto de 15 min sem sinal de vida.
+            aoProgresso: async ({ pct, etapa }) => {
+              await o.dentro(escopo, (d) => d.repos.computadores.progredirOperacao(marcado.id, "trocar", { pct, etapa, renovarEm: d.agora() }));
+              o.mudou(escopo, "");
+            },
+          }, escopo);
+          sucesso = true;
+        } catch (e) {
+          if (ehFalhaComputador(e)) falha = e;
+          log("aviso", "computador_operacao_falhou", { computador_id: marcado.id, tipo: "trocar", motivo: ehFalhaComputador(e) ? e.motivo : "desconhecido" });
+        } finally {
+          await o.dentro(escopo, async (d) => {
+            for (const t of await d.repos.computadorTelas.doComputador(marcado.id)) if (t.estado !== "fechada" && t.estado !== "esperando") await d.repos.computadorTelas.mudarEstado(t.id, "fechada", d.agora(), ["aberta", "abrindo", "fechando"]);
+            if (sucesso && pedido.semLogins) await d.repos.computadores.registrar({ computadorId: marcado.id, autor: "pessoa", tipo: "trocar_sem_logins", estado: "concluida" });
+            await d.repos.computadores.terminarOperacao(marcado.id, "trocar");
+            await d.repos.computadores.concluir(marcado.registroId, sucesso ? "concluida" : "falhou", falha?.motivo ?? null);
+          }).catch((e: unknown) => log("erro", "computador_operacao_nao_encerrada", { computador_id: marcado.id, tipo: "trocar", erro: e instanceof Error ? e.name : "desconhecido" }));
           o.mudou(escopo, "", true);
         }
       })();

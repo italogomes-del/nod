@@ -1,3 +1,4 @@
+import type { LugarDoComputador } from "../../../src/contracts/computador.ts";
 import { beforeEach, expect, it } from "vitest";
 import type { AcaoComputador, DriverComputador, ResultadoComputador } from "../../../src/contracts/computador.ts";
 import type { ComputadorDaPessoa, EstadoTelaComputador, TelaComputadorBot } from "../../../src/contracts/computador-motor.ts";
@@ -39,6 +40,7 @@ let guardado: string | null;
 let iniciados: string[];
 /** Turnos que já acabaram (turnoPermitido nega). */
 let concluidos: Set<string>;
+let lugarPedidoNaCriacao: string | null;
 
 const tela = (agenteId: string, t: Partial<TelaComputadorBot> = {}): TelaComputadorBot => ({
   id: `tela-${agenteId.slice(-1)}`, computadorId: "pessoa-1", agenteId, estado: "fechada", esperandoDesde: null, controle: "bot", politica: "autonomo",
@@ -68,7 +70,7 @@ const deps = () => ({
   agora: () => agora,
   repos: {
     computadores: {
-      obterDaPessoa: async () => pessoa, daPessoa: async () => pessoa, travarDaPessoa: async (id: string) => (id === pessoa.id ? pessoa : null),
+      obterDaPessoa: async (maquinaId: string | null = null) => { lugarPedidoNaCriacao = maquinaId; return pessoa; }, daPessoa: async () => pessoa, travarDaPessoa: async (id: string) => (id === pessoa.id ? pessoa : null),
       vincularBot: async (_c: string, agenteId: string) => !excluidos.has(agenteId) && agenteId in NOMES,
       registrar: async (r: Omit<(typeof registros)[number], "id">) => { const id = `registro-${registros.length + 1}`; registros.push({ ...r, id }); return { id }; },
       concluir: async (id: string, estado: string, motivo?: string | null) => { const r = registros.find((x) => x.id === id); if (r) { r.estado = estado; r.motivo = motivo ?? null; } },
@@ -125,6 +127,7 @@ const deps = () => ({
 
 const computadores = criarComputadores({
   executor: () => "catcher", porPessoa: true, driver, cifrar: (s) => s, decifrar: (s) => s, mudou: () => {}, agora: () => agora,
+  lugarPadraoNaCriacao: () => "maquina-inicial",
   dentro: async <T>(_e: unknown, fn: (d: never) => Promise<T>) => fn(deps() as never),
   dormir: async (ms) => { dormiu++; agora += ms; await aoDormir?.(); },
 });
@@ -138,7 +141,8 @@ const observar = (agenteId: string) => computadores.chamar(MARLON, plano(agenteI
 
 beforeEach(() => {
   agora = T0;
-  pessoa = { id: "pessoa-1", ownerId: MARLON.pessoaId, maquinaId: null, hospedeiraId: null, supervisorPub: null, operacao: null, falhasSeguidas: 0, falhaMotivo: null, indisponivelDesde: null, ultimaAtividadeEm: T0, criadoEm: 0 };
+  pessoa = { id: "pessoa-1", ownerId: MARLON.pessoaId, maquinaId: null, hospedeiraId: null, supervisorPub: null, saidasPendentesDe: [], operacao: null, falhasSeguidas: 0, falhaMotivo: null, indisponivelDesde: null, ultimaAtividadeEm: T0, criadoEm: 0 };
+  lugarPedidoNaCriacao = null;
   telas = new Map([tela(A), tela(B)].map((t) => [t.id, t]));
   registros = [];
   excluidos = new Set();
@@ -156,6 +160,11 @@ beforeEach(() => {
   guardado = null;
   iniciados = [];
   concluidos = new Set();
+});
+
+it("NOD-365: o lugar padrão é entregue ao INSERT do computador, não escolhido pelo primeiro iniciar", async () => {
+  await observar(A);
+  expect(lugarPedidoNaCriacao).toBe("maquina-inicial");
 });
 
 it("a ação do bot vai à tela dele; o registro leva o bot e a tela; a tela fica aberta", async () => {
@@ -517,4 +526,83 @@ it("fora do ar no computador da pessoa: o aviso no chat traz a ação do painel 
     await comFalha.chamar(MARLON, plano(A), "computador_observar", {});
     expect(avisos).toEqual([expect.objectContaining({ texto: expect.stringMatching(/use "⚙ Atualizar o computador" no painel do computador/), payload: expect.objectContaining({ kind: "computador_fora_do_ar", acao: { op: "atualizar", rotulo: "⚙ Atualizar o computador" } }) })]);
   } finally { driver.executar = executar; }
+});
+
+// ---- NOD-365: onde o computador mora ----
+
+it("trocar de máquina: valida o destino, uma troca por vez, avança o progresso, fecha as telas e registra; sem os logins, o aviso volta", async () => {
+  const { FalhaComputador } = await import("../../../src/domain/computador.ts");
+  const lugares: LugarDoComputador[] = [
+    { maquinaId: "maq-1", nome: "Servidor de casa", tipo: "onde_o_nod_roda" as const, atual: true, pronta: true },
+    { maquinaId: "maq-2", nome: "vps-sp", tipo: "outra_maquina" as const, atual: false, pronta: true },
+    { maquinaId: "maq-3", nome: "vps-rj", tipo: "outra_maquina" as const, atual: false, pronta: false },
+  ];
+  pessoa = { ...pessoa, maquinaId: "maq-1", hospedeiraId: "maq-1" };
+  mudar("tela-a", { estado: "aberta" });
+  let soltar!: () => void;
+  const pedidos: { destino: string; semLogins: boolean }[] = [];
+  const progresso: number[] = [];
+  driver.lugares = async () => lugares;
+  driver.trocar = async (_id, destino, op) => {
+    pedidos.push({ destino, semLogins: op.semLogins });
+    await op.aoProgresso?.({ pct: 40, etapa: "Levando para a máquina nova" });
+    await new Promise<void>((r) => { soltar = r; });
+  };
+  const comProgresso = criarComputadores({
+    executor: () => "catcher", porPessoa: true, driver, cifrar: (s) => s, decifrar: (s) => s, mudou: () => {}, agora: () => agora,
+    dentro: async <T>(_e: unknown, fn: (d: never) => Promise<T>) => { const d = deps(); (d.repos.computadores as Record<string, unknown>).progredirOperacao = async (_c: string, _t: string, p: { pct: number }) => { progresso.push(p.pct); return true; }; return fn(d as never); },
+    dormir: async (ms) => { agora += ms; },
+  });
+  try {
+    // O destino é o atual, não está na lista ou não está pronto: estado_invalido, sem operação.
+    for (const m of ["maq-1", "maq-9", "maq-3"]) await expect(comProgresso.trocarLugarDaPessoa(MARLON, { maquinaId: m, semLogins: false })).rejects.toMatchObject({ codigo: "estado_invalido" });
+    expect(pessoa.operacao).toBeNull();
+
+    const simultaneas = await Promise.allSettled([
+      comProgresso.trocarLugarDaPessoa(MARLON, { maquinaId: "maq-2", semLogins: false }),
+      comProgresso.trocarLugarDaPessoa(MARLON, { maquinaId: "maq-2", semLogins: false }),
+    ]);
+    expect(simultaneas.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    expect(simultaneas.filter((r) => r.status === "rejected")).toEqual([expect.objectContaining({ reason: expect.objectContaining({ codigo: "estado_invalido" }) })]);
+    const concluida = (simultaneas.find((r) => r.status === "fulfilled") as PromiseFulfilledResult<{ concluida: Promise<void> }>).value.concluida;
+    expect(pessoa.operacao).toMatchObject({ tipo: "trocar" });
+    expect(avisos).toEqual([expect.objectContaining({ conversaId: "conversa-a", payload: { kind: "computador_em_operacao", agenteId: A, operacao: "trocar" } })]);
+    // A chamada perdedora recebeu estado_invalido; enquanto a vencedora segue, Atualizar também é recusado.
+    await expect(comProgresso.operarDaPessoa(MARLON, "atualizar")).rejects.toMatchObject({ codigo: "estado_invalido" });
+    soltar();
+    await concluida;
+    expect(pedidos).toEqual([{ destino: "maq-2", semLogins: false }]);
+    expect(progresso).toEqual([40]);
+    expect(pessoa.operacao).toBeNull();
+    expect(telas.get("tela-a")!.estado).toBe("fechada");
+    expect(registros.filter((r) => r.tipo.startsWith("trocar"))).toEqual([expect.objectContaining({ tipo: "trocar", autor: "pessoa", estado: "concluida" })]);
+
+    // A origem com contato mas sem os pacotes (não pronta) ainda entrega a loja: a troca segue, sem a recusa.
+    lugares[0] = { ...lugares[0]!, pronta: false, conectada: true };
+    const soltarAntigo = soltar;
+    const comContato = await comProgresso.trocarLugarDaPessoa(MARLON, { maquinaId: "maq-2", semLogins: false });
+    for (let i = 0; i < 500 && soltar === soltarAntigo; i++) await Promise.resolve();
+    soltar();
+    await comContato.concluida;
+    expect(pedidos.at(-1)).toEqual({ destino: "maq-2", semLogins: false });
+    // A origem sem contato: a recusa sai na hora com o nome dela (a tela diz "<origem> está sem contato…"), sem operação.
+    lugares[0] = { ...lugares[0]!, pronta: false, conectada: false };
+    await expect(comProgresso.trocarLugarDaPessoa(MARLON, { maquinaId: "maq-2", semLogins: false })).rejects.toEqual(expect.objectContaining({ motivo: "maquina_sem_contato", maquina: "Servidor de casa" }));
+    expect(pessoa.operacao).toBeNull();
+    // Trocar sem os logins segue e registra para a faixa "entre nos sites de novo".
+    driver.trocar = async (_id, destino, op) => { pedidos.push({ destino, semLogins: op.semLogins }); };
+    await (await comProgresso.trocarLugarDaPessoa(MARLON, { maquinaId: "maq-2", semLogins: true })).concluida;
+    expect(pedidos.at(-1)).toEqual({ destino: "maq-2", semLogins: true });
+    expect(registros.filter((r) => r.tipo === "trocar_sem_logins")).toEqual([expect.objectContaining({ autor: "pessoa", estado: "concluida" })]);
+
+    // A troca que falha no driver encerra a operação e não registra o sem-logins.
+    driver.trocar = async () => { throw new FalhaComputador("nao_iniciou"); };
+    await (await comProgresso.trocarLugarDaPessoa(MARLON, { maquinaId: "maq-2", semLogins: true })).concluida;
+    expect(pessoa.operacao).toBeNull();
+    expect(registros.filter((r) => r.tipo === "trocar").at(-1)).toMatchObject({ estado: "falhou", motivo: "nao_iniciou" });
+    expect(registros.filter((r) => r.tipo === "trocar_sem_logins")).toHaveLength(1);
+  } finally {
+    delete driver.lugares;
+    delete driver.trocar;
+  }
 });

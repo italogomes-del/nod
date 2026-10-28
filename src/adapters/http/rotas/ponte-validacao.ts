@@ -5,7 +5,7 @@ import { ACOES_DO_PREPARO, type PreparoDoLogin } from "../../../contracts/prepar
 import { ehIaComConta, IMPRESSAO } from "../../../domain/contas-da-pessoa.ts";
 import { emailDaConta, organizacaoDaConta } from "../../../domain/estado-ia.ts";
 import type { RelatoEspera } from "../../../contracts/espera.ts";
-import { DESFECHOS_COMANDO_COMPUTADOR, ESTADOS_ANUNCIO_COMPUTADOR, ESTADOS_TELA_COMPUTADOR, OPERACOES_COMPUTADOR, type AnuncioComputador, type EstadoComputadorRelatado, type ResultadoComandoComputador } from "../../../contracts/computador-motor.ts";
+import { DESFECHOS_COMANDO_COMPUTADOR, ESTADOS_ANUNCIO_COMPUTADOR, ESTADOS_TELA_COMPUTADOR, OPERACOES_COMPUTADOR, TETO_PARTE_LOGINS_B64, type AnuncioComputador, type EstadoComputadorRelatado, type ResultadoComandoComputador } from "../../../contracts/computador-motor.ts";
 import type { ResultadoComputador } from "../../../contracts/computador.ts";
 import { ESTADOS_VM_LOCAL, type VmLocalAnunciada } from "../../../contracts/vm-local.ts";
 import type { ProgressoDeInstalacao } from "../../../contracts/instalacoes-ssh.ts";
@@ -650,6 +650,13 @@ export function resultadoComandoComputador(v: unknown): ResultadoComandoComputad
   }
   // NOD-96 PR 5: a X25519 nova do supervisor depois do Redefinir.
   if (desfecho === "ok" && typeof r.supervisorPub === "string" && B64_CHAVE.test(r.supervisorPub)) saida.supervisorPub = r.supervisorPub;
+  // NOD-365: a parte do pacote da loja (cifrada) na troca de máquina.
+  if (desfecho === "ok" && r.logins !== undefined) {
+    const l = objeto(r.logins);
+    const inteiro = (x: unknown): x is number => Number.isInteger(x) && (x as number) >= 0;
+    exigir(inteiro(l.parte) && inteiro(l.total) && l.parte < l.total && typeof l.dados === "string" && l.dados.length <= TETO_PARTE_LOGINS_B64 && /^[A-Za-z0-9+/]*={0,2}$/.test(l.dados));
+    saida.logins = { parte: l.parte, total: l.total, dados: l.dados };
+  }
   return saida;
 }
 /** A foto do computador. `computadorId` vazio = supervisor ainda sem computador (só a X25519 importa). */

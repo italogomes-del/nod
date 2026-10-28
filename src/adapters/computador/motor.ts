@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
-import type { AcaoComputador, AmbienteComputador, DriverComputador, ResultadoComputador } from "../../contracts/computador.ts";
+import type { AcaoComputador, AmbienteComputador, DriverComputador, LugarDoComputador, ProgressoDaTroca, ResultadoComputador } from "../../contracts/computador.ts";
 import type { ComandoComputador, ResultadoComandoComputador, TipoComandoComputador } from "../../contracts/computador-motor.ts";
 import type { UsoDoMac } from "../../contracts/raio-x.ts";
 import type { VmLocalAnunciada } from "../../contracts/vm-local.ts";
-import { escolherMaquina, type MaquinaCandidata, motivoParaFicarAcordada, PRAZO_COMANDO_MS, TETO_PRONTO_MS } from "../../domain/computador-canal.ts";
+import { escolherMaquina, type MaquinaCandidata, motivoParaFicarAcordada, opcoesDeLugar, PRAZO_COMANDO_MS, TETO_PRONTO_MS } from "../../domain/computador-canal.ts";
+import type { PapelMaquina } from "../../contracts/maquina.ts";
 import { ehFalhaComputador, EsperandoTela, FalhaComputador } from "../../domain/computador.ts";
 import { log } from "../../obs/log.ts";
 import type { Escopo } from "../../shared/types.ts";
@@ -33,11 +34,17 @@ export type ComputadorLocalizado = {
   maquinaId: string | null;
   hospedeiraId: string | null;
   supervisorPub: string | null;
+  /** NOD-365: máquinas de onde o computador saiu sem receber `marcar_saida` (compatível com localizadores antigos). */
+  saidasPendentesDe?: string[];
   padraoId: string | null;
   uso: UsoDoMac;
 };
 /** `vmLocal`: o preparo da VM local que o Mac anuncia (NOD-93); ausente nas Linux e no app antigo. */
-export type MaquinaDaPessoa = MaquinaCandidata & { nome: string; vmLocal?: VmLocalAnunciada };
+export type MaquinaDaPessoa = MaquinaCandidata & { nome: string; vmLocal?: VmLocalAnunciada; papel?: PapelMaquina };
+/** NOD-365: onde o computador mora no banco (maquina_id, hospedeira_id e a X25519 fixada). */
+export type LugarGravado = { maquinaId: string | null; hospedeiraId: string | null; supervisorPub: string | null; saidasPendentesDe: string[] };
+/** NOD-365: o pacote vazio da loja (versão 1, sem arquivos): a troca sem os logins zera a loja que o destino tivesse. */
+export const PACOTE_VAZIO = Buffer.from(JSON.stringify({ versao: 1, arquivos: [] })).toString("base64");
 
 export type OpcoesDriverMotor = {
   env: Record<string, string | undefined>;
@@ -53,6 +60,18 @@ export type OpcoesDriverMotor = {
   fixarSupervisor(escopo: Escopo, id: string, pub: string): Promise<"gravada" | "igual" | "diferente" | null>;
   /** Gancho da NOD-92: acorda a máquina gerenciada que dorme; true = acordou (o teto de 60 s começa aí). */
   acordarSePreciso?(escopo: Escopo, maquinaId: string): Promise<boolean>;
+  /** NOD-365: o último contato da máquina, mesmo desconectada (ponte), para "sem contato desde HH:MM". */
+  ultimoContato?(maquinaId: string): number | null;
+  /**
+   * NOD-365: a chave da máquina, mesmo desconectada: papel e plataforma (a seção não inventa o tipo da atual sem contato)
+   * e o último uso gravado (o "desde HH:MM" depois que a ponte esquece a conexão).
+   */
+  maquinaGravada?(escopo: Escopo, maquinaId: string): Promise<{ nome: string; plataforma: MaquinaCandidata["plataforma"] | null; papel: PapelMaquina; ultimoUsoEm: number | null } | null>;
+  /** NOD-365: aponta o computador para outra máquina (maquina_id, hospedeira_id e a X25519 fixada, de uma vez). */
+  fixarLugar?(escopo: Escopo, id: string, lugar: LugarGravado): Promise<void>;
+  adicionarSaidaPendente?(escopo: Escopo, id: string, maquinaId: string): Promise<void>;
+  /** NOD-365: a máquina antiga recebeu o `marcar_saida` (limpa a saída pendente dela). */
+  saidaMarcada?(escopo: Escopo, id: string, maquinaId: string): Promise<void>;
   agora?: () => number;
   dormir?: (ms: number) => Promise<void>;
   novoId?: () => string;
@@ -73,14 +92,22 @@ const PASSO_ESPERANDO_MS = 1_000;
  * as telas e apagar perfis demora). O comando continua valendo 2 min para sair da fila; só a espera é longa.
  */
 export const PRAZO_RESPOSTA_OPERACAO_MS = 10 * 60_000;
+/** definido em 2026-10-28 (NOD-365): cada parte da loja de logins tem 2 min para ir e voltar (~512 KiB pela ponte). */
+export const PRAZO_RESPOSTA_PARTE_MS = 2 * 60_000;
 
 export function criarDriverMotor(o: OpcoesDriverMotor): DriverComputador & { motivoParaFicarAcordada(maquinaId: string): boolean } {
   const agora = o.agora ?? Date.now;
   const dormir = o.dormir ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const novoId = o.novoId ?? randomUUID;
+  let ultimaEpocaTroca = 0;
+  const novaEpocaTroca = () => (ultimaEpocaTroca = Math.max(ultimaEpocaTroca + 1, agora()));
   const credencial = o.env.NOD_CREDENTIAL_KEY ?? "";
   const credencialOk = /^[a-f0-9]{64}$/i.test(credencial);
   const iniciando = new Map<string, Promise<void>>();
+  // NOD-365: o computador no meio da troca; o ligar dela não entrega a saída pendente (a própria troca marca a origem).
+  const trocando = new Set<string>();
+  /** NOD-365: os `marcar_saida` pendentes em curso (computador:máquina), para o `ligar` seguido não mandar dois. */
+  const marcando = new Set<string>();
   /** A última ação por máquina, para o gancho da NOD-92. */
   const ultimaAcao = new Map<string, number>();
   /**
@@ -107,7 +134,9 @@ export function criarDriverMotor(o: OpcoesDriverMotor): DriverComputador & { mot
 
   /** A máquina do computador, já conectada. Sem contato: acorda (NOD-92) ou falha na hora. */
   async function maquinaViva(id: string, loc: ComputadorLocalizado): Promise<MaquinaDaPessoa> {
-    const alvo = escolherMaquina({ maquinaId: loc.maquinaId, hospedeiraId: loc.hospedeiraId, padraoId: loc.padraoId, conectadas: o.maquinas(loc.escopo) });
+    const conectadas = o.maquinas(loc.escopo);
+    // NOD-365: `lugarPadrao` já foi persistido no INSERT. Ligar nunca recalcula o lugar inicial.
+    const alvo = escolherMaquina({ maquinaId: loc.maquinaId, hospedeiraId: loc.hospedeiraId, padraoId: loc.padraoId, conectadas });
     if (!alvo) throw new FalhaComputador("maquina_sem_contato", { detalhe: "nenhuma máquina conectada anuncia o computador" });
     let viva = o.maquinas(loc.escopo).find((m) => m.machineId === alvo);
     if (!viva && o.acordarSePreciso && await o.acordarSePreciso(loc.escopo, alvo).catch(() => false)) viva = o.maquinas(loc.escopo).find((m) => m.machineId === alvo);
@@ -146,7 +175,10 @@ export function criarDriverMotor(o: OpcoesDriverMotor): DriverComputador & { mot
     const maquina = await maquinaViva(id, loc);
     const ate = agora() + TETO_PRONTO_MS;
     const foto = () => o.canal.foto(loc.escopo, maquina.machineId);
-    if (foto()?.computadorId === id && foto()?.ligado) return;
+    if (foto()?.computadorId === id && foto()?.ligado) {
+      entregarSaidaPendente(idDoPortao, loc, id, maquina.machineId);
+      return;
+    }
     if (!loc.hospedeiraId && !loc.maquinaId) await o.fixarHospedeira(loc.escopo, id, maquina.machineId);
     let pub = loc.supervisorPub;
     // NOD-96 PR 7 (definido em 2026-10-22): numa instalação limpa o supervisor não conhece o computador e não relata
@@ -176,6 +208,7 @@ export function criarDriverMotor(o: OpcoesDriverMotor): DriverComputador & { mot
     }
     if (r.desfecho === "ok") {
       log("info", "computador_iniciado", { computador_id: id, maquina_id: maquina.machineId, driver: "motor" });
+      entregarSaidaPendente(idDoPortao, loc, id, maquina.machineId);
       return;
     }
     throw new FalhaComputador(r.motivo ?? "nao_iniciou", { maquina: maquina.nome });
@@ -199,12 +232,155 @@ export function criarDriverMotor(o: OpcoesDriverMotor): DriverComputador & { mot
     return pub;
   }
 
+  /** O `marcar_saida` de uma máquina antiga, sem segurar quem chamou; falhou, fica pendente para o próximo `ligar`. */
+  async function marcarSaida(idDoPortao: string, loc: ComputadorLocalizado, id: string, maquina: MaquinaDaPessoa, epocaTroca = novaEpocaTroca()): Promise<boolean> {
+    try {
+      const r = await enviar(idDoPortao, { ...loc, agenteId: null }, maquina, "marcar_saida", agora() + PRAZO_RESPOSTA_PARAR_MS, () => new FalhaComputador("sem_resposta", { maquina: maquina.nome }), { epocaTroca });
+      if (r.desfecho === "ok") {
+        await o.saidaMarcada?.(loc.escopo, id, maquina.machineId);
+        return true;
+      }
+      log("aviso", "computador_saida_nao_marcada", { computador_id: id, motivo: r.motivo ?? "desconhecido" });
+    } catch (e) {
+      log("aviso", "computador_saida_nao_marcada", { computador_id: id, motivo: ehFalhaComputador(e) ? e.motivo : "desconhecido" });
+    }
+    return false;
+  }
+
+  /**
+   * NOD-365: a máquina de onde o computador saiu sem contato recebe o `marcar_saida` quando volta (o computador ligou e
+   * ela está conectada). Se o computador voltou a morar nela, não há o que marcar: só limpa.
+   */
+  function entregarSaidaPendente(idDoPortao: string, loc: ComputadorLocalizado, id: string, atual: string): void {
+    if (trocando.has(id)) return;
+    for (const pendente of loc.saidasPendentesDe ?? []) {
+      if (pendente === atual) { o.saidaMarcada?.(loc.escopo, id, pendente).catch(() => undefined); continue; }
+      const antiga = o.maquinas(loc.escopo).find((m) => m.machineId === pendente);
+      const chave = `${id}:${pendente}`;
+      if (!antiga || marcando.has(chave)) continue;
+      marcando.add(chave);
+      void marcarSaida(idDoPortao, loc, id, antiga).finally(() => marcando.delete(chave));
+    }
+  }
+
   function iniciar(id: string, escopo?: Escopo): Promise<void> {
     const emCurso = iniciando.get(id);
     if (emCurso) return emCurso;
     const p = ligar(id, escopo).finally(() => iniciando.delete(id));
     iniciando.set(id, p);
     return p;
+  }
+
+  /** Uma parte da troca: o comando assinado, com a chave do servidor (TOFU) e o prazo de cada parte. */
+  async function parteDaTroca(idDoPortao: string, loc: ComputadorLocalizado, maquina: MaquinaDaPessoa, tipo: "exportar_logins" | "importar_logins", extra: Partial<ComandoComputador>): Promise<ResultadoComandoComputador> {
+    const id = loc.computadorId ?? idDoPortao;
+    const r = await enviar(idDoPortao, { ...loc, agenteId: null }, maquina, tipo, agora() + PRAZO_RESPOSTA_PARTE_MS, () => new FalhaComputador("sem_resposta", { maquina: maquina.nome }), { servidorPub: publicaDeAssinatura(credencial, id), ...extra });
+    if (r.desfecho !== "ok") throw new FalhaComputador(r.motivo ?? "acao_falhou", { maquina: maquina.nome });
+    return r;
+  }
+
+  async function cancelarExportacao(idDoPortao: string, loc: ComputadorLocalizado, origem: MaquinaDaPessoa, troca: string, epocaTroca: number): Promise<boolean> {
+    try {
+      const r = await enviar(idDoPortao, { ...loc, agenteId: null }, origem, "cancelar_exportacao", agora() + PRAZO_RESPOSTA_PARAR_MS, () => new FalhaComputador("sem_resposta", { maquina: origem.nome }), { troca, epocaTroca });
+      if (r.desfecho === "ok") return true;
+      log("aviso", "computador_exportacao_nao_cancelada", { computador_id: loc.computadorId ?? idDoPortao, motivo: r.motivo ?? "acao_falhou" });
+    } catch (e) {
+      log("aviso", "computador_exportacao_nao_cancelada", { computador_id: loc.computadorId ?? idDoPortao, motivo: ehFalhaComputador(e) ? e.motivo : "desconhecido" });
+    }
+    return false;
+  }
+
+  /**
+   * definido em 2026-10-28 (NOD-365): o computador muda de máquina. A loja de logins vai cifrada, em partes, da origem
+   * para o destino (o servidor só repassa base64; a chave deriva do id do computador, não da máquina). Depois o banco
+   * aponta para o destino com a X25519 esquecida (o supervisor de lá tem outra; TOFU de novo) e o `iniciar` prova a loja.
+   * Falhou o `iniciar`: o banco volta ao lugar de antes e a origem não é marcada. Deu certo: a pasta da origem fica
+   * marcada e sai em 30 dias. Sem `semLogins`, a origem sem contato é `maquina_sem_contato` com o nome dela.
+   */
+  async function trocar(idDoPortao: string, destinoId: string, op: { semLogins: boolean; aoProgresso?: ProgressoDaTroca }, escopo?: Escopo): Promise<void> {
+    // Um iniciar em voo (uma tela abrindo) termina antes: senão ele ligaria a origem depois de a loja sair de lá.
+    await iniciando.get(idDoPortao)?.catch(() => undefined);
+    const loc = { ...await localizar(idDoPortao, escopo), agenteId: null };
+    const id = loc.computadorId ?? idDoPortao;
+    if (!o.fixarLugar || !o.adicionarSaidaPendente) throw new FalhaComputador("acao_falhou", { detalhe: "troca de máquina indisponível" });
+    const progresso = async (pct: number, etapa: string) => { await op.aoProgresso?.({ pct, etapa }); };
+    const conectadas = o.maquinas(loc.escopo);
+    const destino = conectadas.find((m) => m.machineId === destinoId);
+    if (!destino) throw new FalhaComputador("maquina_sem_contato", { maquina: (await o.nomeDaMaquina(loc.escopo, destinoId).catch(() => null)) ?? "a máquina escolhida" });
+    if (destino.computador === null || destino.computador === "sem_suporte") throw new FalhaComputador("sem_suporte", { maquina: destino.nome });
+    if (destino.computador === "faltam_pacotes") throw new FalhaComputador("faltam_pacotes", { maquina: destino.nome });
+    const origemId = escolherMaquina({ maquinaId: loc.maquinaId, hospedeiraId: loc.hospedeiraId, padraoId: loc.padraoId, conectadas });
+    const origem = origemId && origemId !== destinoId ? conectadas.find((m) => m.machineId === origemId) : undefined;
+    // Só a máquina gravada é origem de fato (o disco é dela); sem nada gravado, o computador ainda não morou em lugar nenhum.
+    const temOrigem = Boolean((loc.maquinaId ?? loc.hospedeiraId) && origemId && origemId !== destinoId);
+    const pendentesAnteriores = loc.saidasPendentesDe ?? [];
+    const epocaTroca = novaEpocaTroca();
+    let trocaOrigem: string | null = null;
+    let concluiu = false;
+    let podeCancelarOrigem = true;
+    try {
+    if (!op.semLogins && temOrigem) {
+      if (!origem) throw new FalhaComputador("maquina_sem_contato", { maquina: (await o.nomeDaMaquina(loc.escopo, origemId!).catch(() => null)) ?? "a máquina do computador" });
+      const troca = novoId();
+      trocaOrigem = troca;
+      await progresso(5, "Copiando os logins");
+      const partes: string[] = [];
+      for (let i = 0, total = 1; i < total; i++) {
+        const r = await parteDaTroca(idDoPortao, loc, origem, "exportar_logins", { troca, epocaTroca, parte: i });
+        if (!r.logins || r.logins.parte !== i) throw new FalhaComputador("acao_falhou", { maquina: origem.nome, detalhe: "parte fora de ordem" });
+        total = r.logins.total;
+        partes.push(r.logins.dados);
+        await progresso(5 + Math.round((40 * (i + 1)) / total), "Copiando os logins");
+      }
+      // Imediatamente antes da primeira escrita no destino, registre a limpeza durável. Se o servidor cair depois da
+      // importação e antes de trocar o lugar, a próxima reconciliação ainda manda `.saiu-em` para ele.
+      await o.adicionarSaidaPendente(loc.escopo, id, destinoId);
+      for (let i = 0; i < partes.length; i++) {
+        await parteDaTroca(idDoPortao, loc, destino, "importar_logins", { troca, epocaTroca, parte: i, total: partes.length, dados: partes[i]! });
+        await progresso(45 + Math.round((35 * (i + 1)) / partes.length), "Levando para a máquina nova");
+      }
+    } else {
+      // Sem os logins, o destino começa com a loja vazia: a que ele guardasse de uma estada antiga não volta (a faixa
+      // "entre nos sites de novo" é verdade).
+      await progresso(45, "Levando para a máquina nova");
+      await o.adicionarSaidaPendente(loc.escopo, id, destinoId);
+      await parteDaTroca(idDoPortao, loc, destino, "importar_logins", { troca: novoId(), epocaTroca, parte: 0, total: 1, dados: PACOTE_VAZIO });
+    }
+    const antes: LugarGravado = { maquinaId: loc.maquinaId, hospedeiraId: loc.hospedeiraId, supervisorPub: loc.supervisorPub, saidasPendentesDe: [...new Set([...pendentesAnteriores, destinoId])] };
+    // A origem fica pendente até receber o `marcar_saida` (agora, ou quando voltar a ter contato); a pendente de antes,
+    // se não for o destino, continua.
+    const pendentes = [...new Set([...pendentesAnteriores, ...(temOrigem && origemId ? [origemId] : [])])].filter((m) => m !== destinoId);
+    // "Onde o nod roda" (a máquina do motor) é o lugar padrão: grava maquina_id null e só a hospedeira, como um
+    // computador que nunca saiu de lá; uma máquina da pessoa grava as duas.
+    const ondeONodRoda = destino.papel === "motor" && destino.plataforma === "linux";
+    await o.fixarLugar(loc.escopo, id, { maquinaId: ondeONodRoda ? null : destinoId, hospedeiraId: destinoId, supervisorPub: null, saidasPendentesDe: pendentes });
+    podeCancelarOrigem = false;
+    trocando.add(id);
+    try {
+      await progresso(85, "Ligando na máquina nova");
+      await iniciar(idDoPortao, escopo);
+    } catch (e) {
+      try {
+        await o.fixarLugar(loc.escopo, id, antes);
+        podeCancelarOrigem = true;
+      } catch (r) {
+        log("erro", "computador_troca_nao_revertida", { computador_id: id, erro: r instanceof Error ? r.name : "desconhecido" });
+        throw new FalhaComputador("acao_falhou", { maquina: destino.nome, detalhe: "a reversão do lugar falhou" });
+      }
+      // O destino já recebeu a loja: se ele não é o lugar de antes, marca a saída nele para a cópia não ficar lá para sempre.
+      if (destinoId !== (antes.maquinaId ?? antes.hospedeiraId)) void marcarSaida(idDoPortao, loc, id, destino, epocaTroca).catch(() => false);
+      log("aviso", "computador_troca_falhou", { computador_id: id, destino_id: destinoId, motivo: ehFalhaComputador(e) ? e.motivo : "desconhecido" });
+      throw e;
+    } finally {
+      trocando.delete(id);
+    }
+    if (origem && temOrigem) await marcarSaida(idDoPortao, loc, id, origem, epocaTroca);
+    await progresso(100, "pronto");
+    log("info", "computador_trocou_de_maquina", { computador_id: id, origem_id: origemId, destino_id: destinoId, com_logins: !op.semLogins });
+    concluiu = true;
+    } finally {
+      if (!concluiu && trocaOrigem && origem && podeCancelarOrigem) await cancelarExportacao(idDoPortao, loc, origem, trocaOrigem, epocaTroca);
+    }
   }
 
   return {
@@ -297,7 +473,11 @@ export function criarDriverMotor(o: OpcoesDriverMotor): DriverComputador & { mot
       const alvo = escolherMaquina({ maquinaId: loc.maquinaId, hospedeiraId: loc.hospedeiraId, padraoId: loc.padraoId, conectadas }) ?? loc.maquinaId ?? loc.hospedeiraId;
       if (!alvo) return null;
       const viva = conectadas.find((m) => m.machineId === alvo);
-      if (!viva) return { id: alvo, nome: (await o.nomeDaMaquina(loc.escopo, alvo).catch(() => null)) ?? "a máquina do computador", contato: null, foto: null };
+      if (!viva) {
+        const gravada = await o.maquinaGravada?.(loc.escopo, alvo).catch(() => null) ?? null;
+        const nome = gravada?.nome ?? (await o.nomeDaMaquina(loc.escopo, alvo).catch(() => null)) ?? "a máquina do computador";
+        return { id: alvo, nome, contato: null, foto: null, ultimoContato: o.ultimoContato?.(alvo) ?? gravada?.ultimoUsoEm ?? null };
+      }
       const f = o.canal.foto(loc.escopo, alvo);
       const foto = f?.computadorId === id
         ? { ligadoDesde: f.ligadoDesde ?? null, memoriaTotalMb: f.memoriaTotalMb ?? null, titulos: Object.fromEntries(f.telas.map((t) => [t.agenteId, t.titulo ?? null])) }
@@ -307,6 +487,27 @@ export function criarDriverMotor(o: OpcoesDriverMotor): DriverComputador & { mot
     },
     ligando(id) {
       return iniciando.has(id);
+    },
+    trocar,
+    async reconciliarSaidasPendentes(idDoPortao, escopo) {
+      const loc = await acharLoc(idDoPortao, escopo);
+      if (!loc) return;
+      const id = loc.computadorId ?? idDoPortao;
+      const atual = loc.maquinaId ?? loc.hospedeiraId;
+      if (atual) entregarSaidaPendente(idDoPortao, loc, id, atual);
+    },
+    async lugares(idDoPortao, escopo) {
+      const loc = await acharLoc(idDoPortao, escopo);
+      if (!loc) return [];
+      const atualId = loc.maquinaId ?? loc.hospedeiraId;
+      const conectadas = o.maquinas(loc.escopo).map((m) => ({ ...m, papel: m.papel ?? "motor" }));
+      const viva = atualId ? conectadas.find((m) => m.machineId === atualId) : undefined;
+      // A atual sem contato entra com o nome, o papel e a plataforma da chave (sem a chave, como "Outra máquina sua").
+      const gravada = atualId && !viva ? await o.maquinaGravada?.(loc.escopo, atualId).catch(() => null) ?? null : null;
+      const atual = !atualId ? null : viva ? { maquinaId: viva.machineId, nome: viva.nome, papel: viva.papel, plataforma: viva.plataforma }
+        : gravada ? { maquinaId: atualId, nome: gravada.nome, papel: gravada.papel, plataforma: gravada.plataforma ?? "darwin" }
+        : { maquinaId: atualId, nome: (await o.nomeDaMaquina(loc.escopo, atualId).catch(() => null)) ?? "a máquina do computador", papel: "computador" as const, plataforma: "linux" as const };
+      return opcoesDeLugar(conectadas, atual) satisfies LugarDoComputador[];
     },
     motivoParaFicarAcordada(maquinaId: string): boolean {
       const foto = o.canal.fotoDaMaquina(maquinaId);

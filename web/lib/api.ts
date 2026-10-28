@@ -205,6 +205,7 @@ export function criarApi(escopo: Escopo) {
       }
     },
     operarComputador: (operacao: OperacaoPessoa) => post<unknown>("computador", { operacao }),
+    trocarLugarDoComputador: (maquinaId: string, semLogins: boolean) => post<{ ok: true }>("computador/lugar", { maquinaId, semLogins }),
     urlEventos: `${base}/eventos`,
     frota: () => get<FrotaDto>("frota"),
     gestaoAgentes: () => get<FrotaDto>("gestao-agentes"),

@@ -10,7 +10,7 @@
 // conectar, a cada mudança de tela e a cada batimento.
 import { clearInterval, clearTimeout, setInterval, setTimeout } from 'node:timers';
 import { fork } from 'node:child_process';
-import { mkdir, readFile, readdir, rm, writeFile, chmod } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rename, rm, writeFile, chmod } from 'node:fs/promises';
 import { existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { availableParallelism, totalmem } from 'node:os';
 import net from 'node:net';
@@ -19,6 +19,7 @@ import process from 'node:process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { setTimeout as esperar } from 'node:timers/promises';
 import { spawn } from 'node:child_process';
+import { Buffer } from 'node:buffer';
 import { createPrivateKey, randomUUID } from 'node:crypto';
 import { abrirSelo, chaveDaLoja, chaveDasSenhas, chaveDoStorage, conferirComando, novoParX25519, publicaX25519, senhaSafeStorage } from './chaves.mjs';
 import { atualizarLoja, cookiesVivos, fundir, lerLoja, zerar } from './loja-cookies.mjs';
@@ -26,10 +27,20 @@ import { decidirAbertura, leituraLocal } from './regua.mjs';
 import { gravarOrigem, lerEstado, lerTudo, limparStorage, pastaDoStorage } from './login-storage.mjs';
 import { arquivoDasSenhas, esquecerSenhas, lerSenhas, recolherSenhas } from './login-senhas.mjs';
 import { RESOLV_DO_STUB } from './isolamento.mjs';
+import { desempacotar, desmarcarSaida, empacotar, gravarLoja as gravarLojaImportada, marcarSaida, PARTE_BYTES, partir, recuperar, saiuEm, TETO_LOJA_BYTES, VALIDADE_IMPORTACAO_MS, venceu } from './troca-logins.mjs';
 
 const AQUI = path.dirname(fileURLToPath(import.meta.url));
 export const ID_VALIDO = /^[A-Za-z0-9_-]{1,64}$/;
-export const TIPOS = ['iniciar', 'abrir_tela', 'acao', 'fechar_tela', 'parar', 'atualizar', 'redefinir', 'sair_de_todos', 'esquecer_senhas', 'apagar_perfil'];
+export const TIPOS = ['iniciar', 'abrir_tela', 'acao', 'fechar_tela', 'parar', 'atualizar', 'redefinir', 'sair_de_todos', 'esquecer_senhas', 'apagar_perfil', 'exportar_logins', 'importar_logins', 'cancelar_exportacao', 'marcar_saida'];
+/**
+ * NOD-365 (definido em 2026-10-28): os comandos que podem chegar antes de o computador conhecer a chave do servidor e
+ * a fixam (TOFU), como o `iniciar`: a troca de máquina começa na origem e no destino antes de qualquer `iniciar` lá.
+ */
+export const TIPOS_QUE_FIXAM = ['iniciar', 'exportar_logins', 'importar_logins'];
+/** definido em 2026-10-28 (NOD-365): a varredura das pastas que saíram desta máquina roda ao carregar e a cada 6 h. */
+export const VARREDURA_MS = 6 * 60 * 60_000;
+/** NOD-365: trava durável da origem entre o snapshot e `marcar_saida`/`cancelar_exportacao`. */
+export const MARCA_TROCA_EM_CURSO = '.troca-em-curso';
 /** Os comandos que dizem a tela (levam `agenteId`). */
 export const TIPOS_DA_TELA = ['abrir_tela', 'acao', 'fechar_tela', 'apagar_perfil'];
 export const PRAZO_ABRIR_TELA_MS = 60_000;
@@ -196,10 +207,22 @@ export function criarSupervisor(op) {
     let c = computadores.get(id);
     if (c) return c;
     const d = dirs(id);
+    // NOD-365: uma importação que caiu entre os renames termina aqui, ANTES de criar as pastas (o mkdir criaria uma
+    // principal vazia e a recuperação descartaria a loja nova completa).
+    await recuperar(d.logins).catch((e) => log(`recuperar a loja de ${id}: ${e?.message}`));
     await prepararPastas(d);
     const privX = await chaveDoSupervisor(d);
     const servidorPub = await readFile(path.join(d.estado, 'servidor.pub'), 'utf8').then((s) => s.trim(), () => null);
-    c = { id, d, privX, pubX: publicaX25519(privX), servidorPub, vistos: new Map(), ligado: false, chaveLoja: null, chaveStorage: null, chaveSenhas: null, marcasSenhas: new Map(), busEndereco: null, procs: [], telas: new Map(), operacao: null, fila: Promise.resolve() };
+    const estadoTroca = await readFile(path.join(d.raiz, MARCA_TROCA_EM_CURSO), 'utf8').then((s) => {
+      try {
+        const e = JSON.parse(s);
+        if (!Number.isSafeInteger(e?.epoca) || e.epoca <= 0) return null;
+        const exportacao = e.exportacao && ID_VALIDO.test(e.exportacao.troca) && e.exportacao.epoca === e.epoca && Number.isFinite(e.exportacao.em)
+          ? e.exportacao : null;
+        return { epoca: e.epoca, exportacao };
+      } catch { return null; }
+    }, () => null);
+    c = { id, d, privX, pubX: publicaX25519(privX), servidorPub, vistos: new Map(), ligado: false, chaveLoja: null, chaveStorage: null, chaveSenhas: null, marcasSenhas: new Map(), busEndereco: null, procs: [], telas: new Map(), operacao: null, fila: Promise.resolve(), exportacao: null, importacao: null, trocaEpoca: estadoTroca?.epoca ?? 0, trocaEmCurso: estadoTroca?.exportacao ?? null };
     computadores.set(id, c);
     return c;
   }
@@ -550,6 +573,8 @@ export function criarSupervisor(op) {
           await desligarMaquina(c);
           return falhou(cmd.id, e?.codigo === 'cofre_invalido' ? 'cofre_invalido' : 'nao_iniciou');
         }
+        // NOD-365: o computador voltou a morar aqui; a pasta não é mais apagada pela varredura.
+        await desmarcarSaida(c.d.raiz).catch(() => {});
         relatarEstado(c);
         return resultado(cmd.id, 'ok');
       }
@@ -634,12 +659,148 @@ export function criarSupervisor(op) {
         // A X25519 nova vai na resposta deste comando, que veio assinado com a chave do servidor: é assim que o
         // servidor troca a supervisor_pub fixada (TOFU) sem aceitar uma chave diferente vinda de uma foto qualquer.
         return resultado(cmd.id, 'ok', { progresso: { pct: 100, etapa: 'pronto' }, supervisorPub: c.pubX });
+      case 'exportar_logins':
+        return exportarLogins(c, cmd);
+      case 'importar_logins':
+        return importarLogins(c, cmd);
+      case 'cancelar_exportacao':
+        if (!trocaValida(cmd.troca) || !epocaValida(cmd.epocaTroca) || c.trocaEmCurso?.troca !== cmd.troca || c.trocaEmCurso.epoca !== cmd.epocaTroca) return falhou(cmd.id, 'acao_falhou');
+        await limparTrocaEmCurso(c);
+        c.exportacao = null;
+        return resultado(cmd.id, 'ok');
+      case 'marcar_saida':
+        if (!epocaValida(cmd.epocaTroca) || cmd.epocaTroca < c.trocaEpoca) return falhou(cmd.id, 'acao_falhou');
+        if (cmd.epocaTroca > c.trocaEpoca) { c.trocaEpoca = cmd.epocaTroca; await salvarEstadoTroca(c); }
+        await desligarMaquina(c);
+        await marcarSaida(c.d.raiz, agora());
+        await limparTrocaEmCurso(c);
+        c.exportacao = null;
+        relatarEstado(c);
+        return resultado(cmd.id, 'ok');
       default:
         return falhou(cmd.id, 'acao_falhou');
     }
   }
 
+  const trocaValida = (t) => typeof t === 'string' && ID_VALIDO.test(t);
+  const epocaValida = (e) => Number.isSafeInteger(e) && e > 0;
+  async function salvarEstadoTroca(c) {
+    const arquivo = path.join(c.d.raiz, MARCA_TROCA_EM_CURSO);
+    const tmp = `${arquivo}.novo`;
+    await writeFile(tmp, JSON.stringify({ epoca: c.trocaEpoca, exportacao: c.trocaEmCurso }), { mode: 0o600 });
+    await rename(tmp, arquivo);
+  }
+  async function marcarTrocaEmCurso(c, troca, epoca) {
+    c.trocaEpoca = epoca;
+    c.trocaEmCurso = { troca, epoca, em: agora() };
+    await salvarEstadoTroca(c);
+  }
+  async function renovarTrocaEmCurso(c) {
+    if (!c.trocaEmCurso) return;
+    c.trocaEmCurso.em = agora();
+    await salvarEstadoTroca(c);
+  }
+  async function limparTrocaEmCurso(c) {
+    c.trocaEmCurso = null;
+    await salvarEstadoTroca(c);
+  }
+
+  /**
+   * NOD-365 (definido em 2026-10-28): a origem da troca. Na parte 0 fecha as telas, desliga (a loja para de mudar) e
+   * empacota; as partes seguintes saem do mesmo pacote, pelo id da troca. Os arquivos vão cifrados como estão.
+   */
+  async function exportarLogins(c, cmd) {
+    const parte = cmd.parte ?? 0;
+    if (!trocaValida(cmd.troca) || !epocaValida(cmd.epocaTroca) || !Number.isInteger(parte) || parte < 0) return falhou(cmd.id, 'acao_falhou');
+    const vencida = c.exportacao && agora() - c.exportacao.em > VALIDADE_IMPORTACAO_MS;
+    if (parte === 0 || vencida || c.exportacao?.troca !== cmd.troca) {
+      if (parte !== 0) return falhou(cmd.id, 'acao_falhou');
+      if (cmd.epocaTroca <= c.trocaEpoca) return falhou(cmd.id, 'acao_falhou');
+      await desligarMaquina(c);
+      relatarEstado(c);
+      try {
+        const partes = partir(await naFila(c, () => empacotar(c.d.logins)));
+        await marcarTrocaEmCurso(c, cmd.troca, cmd.epocaTroca);
+        c.exportacao = { troca: cmd.troca, epoca: cmd.epocaTroca, partes, em: agora() };
+      } catch (e) {
+        log(`exportar_logins ${c.id}: ${e?.message}`);
+        c.exportacao = null;
+        // A loja acima do teto também é `acao_falhou` (o motivo é um enum do banco); o log diz qual.
+        return falhou(cmd.id, 'acao_falhou');
+      }
+    }
+    if (c.exportacao.epoca !== cmd.epocaTroca) return falhou(cmd.id, 'acao_falhou');
+    await renovarTrocaEmCurso(c);
+    const { partes } = c.exportacao;
+    if (parte >= partes.length) return falhou(cmd.id, 'acao_falhou');
+    const r = resultado(cmd.id, 'ok', { logins: { parte, total: partes.length, dados: partes[parte] } });
+    return r;
+  }
+
+  /**
+   * NOD-365: o destino da troca. As partes chegam em ordem, pelo id da troca; uma troca nova descarta a anterior e a
+   * que passa de 10 min vence. Na última, desliga (se estiver ligado), confere o pacote e troca a loja inteira de uma vez.
+   */
+  async function importarLogins(c, cmd) {
+    const { troca, parte, total, dados } = cmd;
+    if (!trocaValida(troca) || !epocaValida(cmd.epocaTroca) || !Number.isInteger(parte) || !Number.isInteger(total) || total < 1 || parte < 0 || parte >= total || typeof dados !== 'string') return falhou(cmd.id, 'acao_falhou');
+    // O pacote nunca passa do teto da loja (mais o JSON e o base64 dos arquivos): a memória do supervisor não cresce sem limite.
+    if (total > Math.ceil((TETO_LOJA_BYTES * 1.4 + 1024) / PARTE_BYTES)) return falhou(cmd.id, 'acao_falhou');
+    if (c.importacao && (c.importacao.troca !== troca || agora() - c.importacao.em > VALIDADE_IMPORTACAO_MS)) c.importacao = null;
+    if (parte === 0) {
+      if (cmd.epocaTroca <= c.trocaEpoca) return falhou(cmd.id, 'acao_falhou');
+      c.trocaEpoca = cmd.epocaTroca;
+      await salvarEstadoTroca(c);
+      c.importacao = { troca, epoca: cmd.epocaTroca, total, partes: [], em: agora() };
+    }
+    const imp = c.importacao;
+    if (!imp || imp.epoca !== cmd.epocaTroca || imp.total !== total || imp.partes.length !== parte) {
+      c.importacao = null;
+      return falhou(cmd.id, 'acao_falhou');
+    }
+    imp.partes.push(Buffer.from(dados, 'base64'));
+    if (parte < total - 1) return resultado(cmd.id, 'ok');
+    c.importacao = null;
+    try {
+      const arquivos = desempacotar(Buffer.concat(imp.partes));
+      await desligarMaquina(c);
+      await naFila(c, () => gravarLojaImportada(c.d.logins, arquivos));
+      await desmarcarSaida(c.d.raiz);
+      await limparTrocaEmCurso(c);
+      // A máquina virou destino: qualquer snapshot antigo que ela ainda servia deixa de representar a loja atual.
+      c.exportacao = null;
+    } catch (e) {
+      log(`importar_logins ${c.id}: ${e?.message}`);
+      return falhou(cmd.id, 'acao_falhou');
+    }
+    relatarEstado(c);
+    return resultado(cmd.id, 'ok');
+  }
+
+  /**
+   * NOD-365 (definido em 2026-10-28): apaga as pastas dos computadores que saíram desta máquina há 30 dias ou mais (a
+   * marca `.saiu-em`). O ligado não sai: voltou a morar aqui sem passar pelo `iniciar` ainda.
+   */
+  async function varrer() {
+    let nomes = [];
+    try { nomes = await readdir(raiz); } catch { return []; }
+    const apagados = [];
+    for (const n of nomes) {
+      if (!ID_VALIDO.test(n)) continue;
+      const c = computadores.get(n);
+      if (c?.ligado) continue;
+      if (!venceu(await saiuEm(path.join(raiz, n)), agora())) continue;
+      await rm(path.join(raiz, n), { recursive: true, force: true });
+      await rm(path.join(run, n), { recursive: true, force: true });
+      computadores.delete(n);
+      apagados.push(n);
+      log(`varredura: ${n} saiu há 30 dias; apagado`);
+    }
+    return apagados;
+  }
+
   const OPERACOES = new Set(['atualizar', 'redefinir', 'sair_de_todos', 'esquecer_senhas']);
+  const TIPOS_DO_LUGAR = new Set(['iniciar', 'abrir_tela', 'exportar_logins', 'importar_logins', 'cancelar_exportacao', 'marcar_saida']);
   // A primeira etapa de cada operação, com o nome que a web lista (web/lib/computador-pessoa.ts, ETAPAS).
   const PRIMEIRA_ETAPA = { sair_de_todos: 'Saindo das contas', esquecer_senhas: 'Esquecendo senhas' };
 
@@ -656,7 +817,7 @@ export function criarSupervisor(op) {
       // relatado na hora — o servidor só manda o `iniciar` depois de ver a X25519 dele.
       if (novo) relatarEstado(c);
       // A chave do servidor fica fixada no primeiro `iniciar` (TOFU, como a do supervisor do lado de lá).
-      const fixar = !c.servidorPub && cmd.tipo === 'iniciar' && typeof cmd.servidorPub === 'string';
+      const fixar = !c.servidorPub && TIPOS_QUE_FIXAM.includes(cmd.tipo) && typeof cmd.servidorPub === 'string';
       const publica = c.servidorPub ?? (fixar ? cmd.servidorPub : null);
       const recusa = publica ? conferirComando(cmd, publica, c.vistos, agora()) : 'sem_chave_do_servidor';
       if (recusa) {
@@ -673,6 +834,23 @@ export function criarSupervisor(op) {
         relatarEstado(c);
       }
       try {
+        // NOD-365: o iniciar, a exportação, a importação e a marca de saída mexem no mesmo lugar (ligado, loja, .saiu-em):
+        // um de cada vez, para o desligar da exportação não correr com um iniciar em voo.
+        if (TIPOS_DO_LUGAR.has(cmd.tipo)) {
+          const vez = (c.serieDoLugar ?? Promise.resolve()).then(async () => {
+            // Esta guarda precisa estar DENTRO da série: exportar e iniciar podem chegar no mesmo tick, quando
+            // `c.exportacao` ainda é null. Depois de a exportação rodar, o iniciar enfileirado deve ser recusado.
+            // Se o servidor caiu e perdeu o id da troca, a origem volta sozinha depois de 10 min sem nenhuma parte.
+            if (c.trocaEmCurso && agora() - c.trocaEmCurso.em > VALIDADE_IMPORTACAO_MS) {
+              await limparTrocaEmCurso(c);
+              c.exportacao = null;
+            }
+            if ((cmd.tipo === 'iniciar' || cmd.tipo === 'abrir_tela') && c.trocaEmCurso) return falhou(id, 'atualizando');
+            return executar(c, cmd);
+          });
+          c.serieDoLugar = vez.catch(() => {});
+          return await vez;
+        }
         return await executar(c, cmd);
       } finally {
         if (OPERACOES.has(cmd.tipo)) {
@@ -689,22 +867,27 @@ export function criarSupervisor(op) {
   /** Os computadores que já existem no disco (para o relato ao conectar). */
   async function carregar() {
     let nomes = [];
+    await varrer().catch((e) => log(`varredura: ${e?.message}`));
     try { nomes = await readdir(raiz); } catch { /* segue */ }
     for (const n of nomes) if (ID_VALIDO.test(n)) await obter(n).catch(() => {});
   }
 
   const batimento = setInterval(() => { for (const c of computadores.values()) relatarEstado(c); }, op.batimentoMs ?? BATIMENTO_MS);
   batimento.unref();
+  const varredura = setInterval(() => { void varrer().catch((e) => log(`varredura: ${e?.message}`)); }, op.varreduraMs ?? VARREDURA_MS);
+  varredura.unref();
 
   return {
     tratar,
     carregar,
+    varrer,
     estados: () => [...computadores.values()].map(estadoDe),
     ouvir(f) { ouvintes.add(f); return () => ouvintes.delete(f); },
     /** Espera as fusões de cookies em curso (testes). */
     async assentar() { for (const c of computadores.values()) await c.fila; },
     async encerrar() {
       clearInterval(batimento);
+      clearInterval(varredura);
       for (const c of computadores.values()) await desligarMaquina(c).catch(() => {});
     },
   };
