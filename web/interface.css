@@ -2185,3 +2185,62 @@ img.luz-midia { display: block; flex: none; width: min(var(--w), calc(100cqw - 1
 .p350-lista .progresso-passo { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .p350-lista .progresso-item.falhou .p350-passo { color: var(--ink-2); }
 @media (max-width: 640px) { .p350-lista .progresso-titulo { min-height: 0; } }
+
+/* ---- NOD-42 (definido em 2026-10-28, protótipo v3 aprovado): buscar na conversa (⌘F) ----------------------------------
+   A pílula do bot estica e vira o campo, no mesmo lugar e na mesma altura (38 px). O nome do bot continua à vista e
+   continua sendo o botão do painel. ˄ ˅ × de 32 px à vista enquanto a busca está aberta (v3 substitui o "só no hover" da
+   v2). Na sala e na task, que não têm a pílula, o miolo entra no fim do cabeçalho. */
+.bnc { display: contents; }
+.bnc-fechar-cl { display: none; }
+.bnc-pilula { position: relative; display: flex; align-items: center; height: 38px; width: min(460px, calc(100% - 32px)); box-sizing: border-box;
+  padding: 0 4px 0 0; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); box-shadow: var(--shadow-pop);
+  pointer-events: auto; font-size: 13.5px; color: var(--ink); }
+.bnc-pilula:focus-within { border-color: var(--line-strong); }
+.bnc-pilula.bnc-abre { animation: bnc-estica .18s cubic-bezier(.2, .8, .2, 1) both; }
+@keyframes bnc-estica { from { width: 120px; } }
+.bnc-lugar-pb { display: contents; }
+.bnc-lugar-pb:empty + .bnc-div { display: none; }
+.bnc-pilula .pilula-bot.bnc-pb, .bnc-pilula .pilula-bot.bnc-pb:hover, .bnc-pilula .pilula-bot.bnc-pb:focus-visible {
+  flex: none; height: 36px; max-width: none; padding: 0 10px 0 5px; border: 0; background: none; box-shadow: none; }
+.bnc-pilula .bnc-pb .pilula-seta { display: none; }
+.bnc-pilula .bnc-pb .pilula-nome { max-width: 120px; }
+.bnc-pilula .bnc-pb:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; border-radius: 999px; }
+.cabecalho.buscando > .pilula-sub { display: none !important; }
+.bnc-div { flex: none; width: 1px; height: 18px; background: var(--line); }
+.bnc-campo { flex: 1; min-width: 112px; display: flex; align-items: center; gap: 7px; padding: 0 6px 0 10px; color: var(--ink-3); cursor: text; }
+.bnc-lupa { flex: none; }
+/* foco-no-conteiner: .bnc-pilula */
+.bnc-campo input { flex: 1; min-width: 0; border: 0; background: none; outline: none; padding: 0; font: inherit; font-size: 13.5px; color: var(--ink); }
+.bnc-campo input::placeholder { color: var(--ink-3); }
+.bnc-campo input::-webkit-search-cancel-button { display: none; }
+.bnc-contagem { flex: none; padding: 0 8px 0 2px; font-size: 12px; color: var(--ink-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.bnc-contagem:empty { display: none; }
+.bnc-setas { flex: none; display: flex; align-items: center; }
+.bnc-bt { flex: none; width: 32px; height: 32px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 999px; background: none; color: var(--ink-2); cursor: pointer; }
+.bnc-bt svg { width: 16px; height: 16px; }
+.bnc-bt:hover { background: var(--surface-raised); color: var(--ink); }
+.bnc-bt:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.bnc-bt[aria-disabled="true"], .bnc-bt[aria-disabled="true"]:hover { color: var(--line-strong); background: none; cursor: default; }
+/* Sala e task: o cabeçalho é uma faixa; o miolo fica à direita, sem pílula do bot. */
+.cabecalho:not(.cabecalho-pilula) .bnc-pilula { margin-left: auto; width: min(380px, 50%); box-shadow: none; }
+/* Descoberta da primeira vez: "⌘F busca" em tinta 3 dentro da própria pílula, por 3 s (main.ts). */
+#cabecalho { --bnc-dica: ""; } /* a dica "⌘F busca" (main.ts grava o texto no #cabecalho) */
+.cabecalho-pilula.bnc-dica .pilula-bot::after { content: var(--bnc-dica, ""); margin-left: 2px; font-size: 12px; font-weight: 500; color: var(--ink-3); white-space: nowrap; }
+
+/* O realce: âmbar suave em todas, âmbar forte com sublinhado na atual (forma, não só cor). Sem a API, o balão da atual
+   ganha um contorno. */
+::highlight(nod-busca) { background-color: var(--realce-busca); color: var(--realce-busca-texto); }
+::highlight(nod-busca-atual) { background-color: var(--realce-busca-atual); color: var(--realce-busca-tinta);
+  text-decoration: underline 2px; text-underline-offset: 2px; }
+.bnc-atual-sem-api { outline: 2px solid var(--realce-busca-atual); outline-offset: 4px; border-radius: 12px; }
+@media (forced-colors: active) {
+  ::highlight(nod-busca) { background-color: Mark; color: MarkText; }
+  ::highlight(nod-busca-atual) { background-color: Highlight; color: HighlightText; }
+  .bnc-pilula { border: 1px solid CanvasText; }
+  .bnc-pilula:focus-within { outline: 2px solid Highlight; outline-offset: 2px; }
+}
+@media (prefers-reduced-motion: reduce) { .bnc-pilula.bnc-abre { animation: none; } }
+/* NOD-42: o menu do toque longo na pílula (celular), no molde do menu da fala. */
+.bot-menu.menu-pilula { width: 220px; }
+.bot-menu.menu-pilula button[role="menuitem"] { gap: 10px; padding: 10px; min-height: 44px; }
+.bot-menu.menu-pilula button svg { flex: none; color: var(--ink-2); }

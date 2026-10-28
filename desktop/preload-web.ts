@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 import { CANAIS_DESKTOP, type AlvoAviso, type AvisoDesktop, type ContasNaTela, type IaDesktop, type NodDesktop, type PonteContas, type PonteIas, type TemaDesktop } from "../src/contracts/desktop.ts";
+import type { AcaoDeBusca } from "./menu.ts";
 import type { EstadoIa } from "../src/contracts/estado-ia.ts";
 import { CANAIS_MIDIA, type PonteMidia } from "../src/contracts/midia-desktop.ts";
 
@@ -76,6 +77,12 @@ const ponte: NodDesktop = {
     // Um ouvinte só (a página registra uma vez; recarregar recria o preload). O evento do IPC não vai à página.
     ipcRenderer.removeAllListeners(CANAIS_DESKTOP.abrir);
     ipcRenderer.on(CANAIS_DESKTOP.abrir, (_evento, alvo: AlvoAviso) => fn(alvo));
+  },
+  aoBuscar: (fn: (acao: AcaoDeBusca) => void) => {
+    ipcRenderer.removeAllListeners(CANAIS_DESKTOP.buscar);
+    ipcRenderer.on(CANAIS_DESKTOP.buscar, (_evento, acao: AcaoDeBusca) => {
+      if (acao === "abrir" || acao === "proxima" || acao === "anterior") fn(acao);
+    });
   },
 };
 contextBridge.exposeInMainWorld("nodDesktop", ponte);

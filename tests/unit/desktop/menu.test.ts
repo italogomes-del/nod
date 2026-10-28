@@ -3,7 +3,7 @@ import type { MenuItemConstructorOptions } from "electron";
 import { templateDoMenu } from "../../../desktop/menu.ts";
 
 /** NOD-174: o menu do Mac em pt-BR. Todo item com `role` ganha `label` explícito; o rótulo nativo do Electron é em inglês. */
-const nada = { conexao: () => undefined, definirAvisos: () => undefined, exportarDiagnostico: () => undefined };
+const nada = { conexao: () => undefined, definirAvisos: () => undefined, exportarDiagnostico: () => undefined, buscar: () => undefined };
 
 function itens(template: MenuItemConstructorOptions[]): MenuItemConstructorOptions[] {
   return template.flatMap((i) => [i, ...(Array.isArray(i.submenu) ? itens(i.submenu) : [])]);
@@ -24,6 +24,7 @@ describe("templateDoMenu", () => {
     expect(rotulos(true)).toEqual([
       "nod", "Conexão / verificar conta de IA", "Exportar diagnóstico…", "Avisos no Mac", "Sair do nod",
       "Editar", "Desfazer", "Refazer", "Recortar", "Copiar", "Colar", "Selecionar tudo",
+      "Buscar", "Buscar", "Buscar próxima", "Buscar anterior",
       "Visualizar", "Recarregar", "Tamanho real", "Aumentar", "Diminuir", "Tela cheia",
     ]);
   });
@@ -64,5 +65,22 @@ describe("templateDoMenu", () => {
     expect(porRotulo.get("Copiar")).toBe("copy");
     expect(porRotulo.get("Colar")).toBe("paste");
     expect(porRotulo.get("Sair do nod")).toBe("quit");
+  });
+
+  it("NOD-42: Editar › Buscar mostra ⌘F/⌘G/⇧⌘G sem tomar a tecla e repassa o clique à página", () => {
+    const acoes: string[] = [];
+    const todos = itens(templateDoMenu({ avisos: true, empacotado: true }, { ...nada, buscar: (a) => acoes.push(a) }));
+    const buscar = todos.find((i) => i.label === "Buscar" && Array.isArray(i.submenu));
+    const sub = (buscar?.submenu ?? []) as MenuItemConstructorOptions[];
+    expect(sub.map((i) => [i.label, i.accelerator, i.registerAccelerator])).toEqual([
+      ["Buscar", "CmdOrCtrl+F", false], ["Buscar próxima", "CmdOrCtrl+G", false], ["Buscar anterior", "Shift+CmdOrCtrl+G", false],
+    ]);
+    for (const i of sub) i.click?.({} as never, undefined, {} as never);
+    expect(acoes).toEqual(["abrir", "proxima", "anterior"]);
+  });
+
+  it("NOD-42: sem a ação de busca, o submenu não aparece", () => {
+    const { buscar: _b, ...semBusca } = nada;
+    expect(itens(templateDoMenu({ avisos: true, empacotado: true }, semBusca)).some((i) => i.label === "Buscar")).toBe(false);
   });
 });

@@ -5,6 +5,7 @@
  * `data-act` em main.ts. ADR-029 (render por classe): estados de falha viram texto com relógio.
  */
 import { levarCampos } from "./levar-campos.ts";
+import { trocarEmVolta } from "./varredura-da-busca.ts";
 import { alvoDoFoco } from "./foco-do-bloco.ts";
 import { aplicarMorph, decidirBloco, type Morph, type NoDoMorph } from "./morph.ts";
 
@@ -27,6 +28,21 @@ export function regiao(id: string, html: string): void {
   if (ultimoHtml.get(id) === html) return;
   ultimoHtml.set(id, html);
   el.innerHTML = html;
+}
+
+/**
+ * NOD-42 (definido em 2026-10-28, revisão do #560): como `regiao`, mas o filho `manter` não sai do DOM — o resto é
+ * trocado em volta dele (o campo da busca guarda foco, acento no meio e animação). Sem `manter` (ou fora da região), é o
+ * `regiao` de sempre.
+ */
+export function regiaoEmVoltaDe(id: string, html: string, manter: Element | null): void {
+  const el = document.getElementById(id);
+  if (!manter || !el || manter.parentNode !== el) { regiao(id, html); return; }
+  if (ultimoHtml.get(id) === html) return;
+  ultimoHtml.set(id, html);
+  const molde = document.createElement("template");
+  molde.innerHTML = html;
+  trocarEmVolta<ChildNode>(el, Array.from(molde.content.childNodes), manter);
 }
 
 /**

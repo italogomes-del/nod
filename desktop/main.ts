@@ -252,7 +252,7 @@ async function definirSom(ligado: boolean): Promise<PreferenciasDesktop> {
   return estadoPreferencias();
 }
 function montarMenu() {
-  Menu.setApplicationMenu(Menu.buildFromTemplate(templateDoMenu({ avisos: preferencias.avisos, empacotado: app.isPackaged }, { conexao: () => { void parar().then(mostrarSetup); }, definirAvisos: (ligado) => { void definirAvisos(ligado); }, exportarDiagnostico: () => { void exportarDiagnostico(); } })));
+  Menu.setApplicationMenu(Menu.buildFromTemplate(templateDoMenu({ avisos: preferencias.avisos, empacotado: app.isPackaged }, { conexao: () => { void parar().then(mostrarSetup); }, definirAvisos: (ligado) => { void definirAvisos(ligado); }, exportarDiagnostico: () => { void exportarDiagnostico(); }, buscar: (acao) => { janelaWeb()?.webContents.send(CANAIS_DESKTOP.buscar, acao); } })));
 }
 // ---- Diagnóstico para suporte (definido em 2026-10-05, NOD-138) -------------------------------------------------------
 // Só pelo menu nativo: funciona na tela de conexão e com a janela web fora do ar, e não aumenta a ponte da página. O texto

@@ -6,7 +6,8 @@
  */
 import type { MenuItemConstructorOptions } from "electron";
 
-export type AcoesDoMenu = { conexao: () => void; definirAvisos: (ligado: boolean) => void; exportarDiagnostico: () => void };
+export type AcaoDeBusca = "abrir" | "proxima" | "anterior";
+export type AcoesDoMenu = { conexao: () => void; definirAvisos: (ligado: boolean) => void; exportarDiagnostico: () => void; buscar?: (acao: AcaoDeBusca) => void };
 export type OpcoesDoMenu = { avisos: boolean; empacotado: boolean };
 
 /** O idioma que o Chromium usa no menu de contexto, nos diálogos nativos e na validação da página. */
@@ -46,6 +47,20 @@ export function templateDoMenu(opcoes: OpcoesDoMenu, acoes: AcoesDoMenu): MenuIt
         { label: "Copiar", role: "copy" },
         { label: "Colar", role: "paste" },
         { label: "Selecionar tudo", role: "selectAll" },
+        // NOD-42 (definido em 2026-10-28): Editar › Buscar. No Linux e no Windows, `registerAccelerator: false` mostra o
+        // atalho sem tomá-lo: a tecla chega à página, que decide se abre (só na conversa, na sala e na task). No Mac a opção
+        // não vale e a tecla pode chegar pelas duas vias: a página ignora o eco (`ecoDoMenu`, web/lib/descoberta-da-busca.ts).
+        ...(acoes.buscar ? [
+          { type: "separator" },
+          {
+            label: "Buscar",
+            submenu: [
+              { label: "Buscar", accelerator: "CmdOrCtrl+F", registerAccelerator: false, click: () => acoes.buscar?.("abrir") },
+              { label: "Buscar próxima", accelerator: "CmdOrCtrl+G", registerAccelerator: false, click: () => acoes.buscar?.("proxima") },
+              { label: "Buscar anterior", accelerator: "Shift+CmdOrCtrl+G", registerAccelerator: false, click: () => acoes.buscar?.("anterior") },
+            ],
+          },
+        ] satisfies MenuItemConstructorOptions[] : []),
       ],
     },
     { label: "Visualizar", submenu: visualizar },

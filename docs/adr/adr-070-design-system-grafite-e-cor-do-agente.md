@@ -80,3 +80,12 @@ classe `c-*` posta na raiz da fala). O gradiente passa pelo tom do bot e por um 
 antes), o cinza de sempre. Continua fora: link, seleção, botão, foco, aviso e qualquer texto parado.
 
 Gatilho: uma skin sem contraste legível nos dois temas que o `color-mix` não resolva reverte esta emenda para o cinza.
+
+## Emenda (2026-10-28): o realce da busca na conversa
+
+NOD-42 (⌘F). O realce das ocorrências usa tokens próprios (`--realce-busca`, `--realce-busca-atual` e
+`--realce-busca-tinta` e `--realce-busca-texto`, web/tokens.css, com valor por tema; o texto de todas as
+ocorrências também troca de cor, porque a bolha da própria pessoa tem texto branco), e não `--agent-ambre`: a cor do agente segue só na
+identidade, e o realce não se confunde com o bot âmbar. No modo de alto contraste do sistema, `Mark` e `Highlight`.
+
+Gatilho: o texto de um tema perder o contraste de 4,5:1 sobre o realce reverte para um novo par de valores.

@@ -69,6 +69,12 @@
   --warning: #7a4e08;
   --warning-soft: #fdf5e6;
   --warning-line: #efd6a6;
+  /* Realce da busca na conversa (NOD-42): todas as ocorrências e a atual, com
+     o texto de cada uma (a bolha da própria pessoa tem texto branco). Não é cor de agente (ADR-070). */
+  --realce-busca: #fbe7a8;
+  --realce-busca-atual: #f2c14e;
+  --realce-busca-tinta: #1a1a1d;
+  --realce-busca-texto: #1a1a1d;
   --danger: #c42b1c;
   --danger-soft: #fdecea;
   --danger-line: #f3c2bc;
@@ -138,6 +144,10 @@
     --warning: #ebbd6a;
     --warning-soft: #2a2214;
     --warning-line: #4d3c1c;
+    --realce-busca: #5a4716;
+    --realce-busca-atual: #c99a2e;
+    --realce-busca-tinta: #0a0a0c;
+    --realce-busca-texto: #f5ecd6;
     --danger: #f2796b;
     --danger-soft: #2e1613;
     --danger-line: #5a2a24;
@@ -181,6 +191,10 @@
   --warning: #ebbd6a;
   --warning-soft: #2a2214;
   --warning-line: #4d3c1c;
+  --realce-busca: #5a4716;
+  --realce-busca-atual: #c99a2e;
+  --realce-busca-tinta: #0a0a0c;
+  --realce-busca-texto: #f5ecd6;
   --danger: #f2796b;
   --danger-soft: #2e1613;
   --danger-line: #5a2a24;

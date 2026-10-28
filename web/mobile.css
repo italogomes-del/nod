@@ -654,6 +654,35 @@
 }
 @keyframes esqueleto-pulsa { 50% { opacity: .55; } }
 
+/* NOD-42 (definido em 2026-10-28, protótipo v3): no celular a busca aberta é [✕] ( mascote ⌕ termo 3/4 │ ˄ ˅ ). O ✕ ocupa
+   o lugar e o tamanho do ‹; saem o nome do bot e o "desde" (o leitor ouve pelo anúncio); tudo com 44 px. */
+@media (hover: none) and (pointer: coarse) and (max-width: 600px), (hover: none) and (pointer: coarse) and (max-height: 500px) {
+  .cabecalho.cabecalho-pilula.buscando { padding-left: calc(max(12px, env(safe-area-inset-left)) + 52px); padding-right: max(12px, env(safe-area-inset-right)); }
+  /* A lupa da busca geral (NOD-380) sai enquanto a busca na conversa está aberta: a pílula ocupa o lugar dela. */
+  .cabecalho.buscando .voltar-bots, .cabecalho.buscando .buscar-celular { display: none; }
+  .cabecalho.cabecalho-pilula.buscando .bnc-fechar-cl { display: grid; place-items: center; position: absolute; left: max(12px, env(safe-area-inset-left)); top: calc(env(safe-area-inset-top) + 4px);
+    width: 44px; height: 44px; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: 50%; color: var(--ink);
+    background: color-mix(in srgb, var(--surface) 82%, transparent); -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px); box-shadow: var(--shadow-pop); }
+  .bnc-fechar-cl svg { width: 20px; height: 20px; }
+  .bnc-pilula { height: 46px; width: auto; flex: 1 1 0; min-width: 0; padding-right: 0; border-radius: 22px;
+    background: color-mix(in srgb, var(--surface) 92%, transparent); -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px); }
+  .cabecalho.cabecalho-pilula .bnc-pilula .pilula-bot.bnc-pb { height: 44px; min-height: 44px; padding: 0 6px 0 5px; background: none; box-shadow: none;
+    -webkit-backdrop-filter: none; backdrop-filter: none; }
+  /* Na sala e na task não há o ✕ da esquerda: lá fica o × das setas (revisão do PR 560). */
+  .bnc-pilula .bnc-pb .pilula-txt, .bnc-desde, .cabecalho-pilula .bnc-setas .bnc-fechar { display: none; }
+  .bnc-campo { min-width: 64px; padding: 0 4px 0 8px; }
+  .bnc-campo input { font-size: 16px; }
+  .bnc-contagem { padding: 0 2px; font-size: 15px; }
+  .bnc-bt { width: 44px; height: 44px; }
+  .bnc-bt svg { width: 18px; height: 18px; }
+  .cabecalho:not(.cabecalho-pilula) .bnc-pilula { width: auto; margin-left: 0; }
+  /* Puxar a pílula para baixo abre a busca (main.ts): a pílula acompanha o dedo; o navegador não rola com ela. */
+  .cabecalho.cabecalho-pilula .pilula-bot, .cabecalho.cabecalho-pilula .bnc-pilula { touch-action: none; }
+  .cabecalho.cabecalho-pilula .pilula-bot.bnc-puxando { transition: none; }
+  /* O cutucão nunca roda com movimento reduzido: quem decide é o main.ts (deveCutucar), que nem põe a classe. */
+  .cabecalho.cabecalho-pilula .pilula-bot.bnc-cutuca { animation: bnc-cutuca .9s cubic-bezier(.2, .8, .2, 1) 1; }
+  @keyframes bnc-cutuca { 0% { transform: none; } 30% { transform: translateY(6px); } 100% { transform: none; } }
+}
 /* NOD-380 (protótipo v3): no celular o balão da pessoa tem a mesma cor do balão do bot. Aqui, e não na busca-celular.css,
    porque é casca do celular (ADR-094: o mobile.css é a última folha e quem decide o celular). */
 @media (hover: none) and (pointer: coarse) and (max-width: 600px), (hover: none) and (pointer: coarse) and (max-height: 500px) {

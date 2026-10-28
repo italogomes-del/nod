@@ -149,8 +149,8 @@ export type NodDesktop = {
   desafioConta?(): Promise<string>; // O desafio (SHA-256) do segredo de troca: a página o manda no login para receber o código.
   /** NOD-93: retoma já o download pausado da VM local (app sem a VM: não faz nada). Ausente = app antigo. */
   vmTentarAgora?(): Promise<void>;
-  /** Chamado quando a pessoa clica num aviso: a web abre o alvo. */
-  aoAbrir(fn: (alvo: AlvoAviso) => void): void;
+  aoAbrir(fn: (alvo: AlvoAviso) => void): void; // a pessoa clicou num aviso: a web abre o alvo.
+  aoBuscar?(fn: (acao: "abrir" | "proxima" | "anterior") => void): void; // NOD-42: Editar › Buscar (ausente = app antigo).
 };
 
 /** Canais de IPC da janela web; nenhum outro chega ao processo principal por ela. */
@@ -161,7 +161,7 @@ export const CANAIS_DESKTOP = {
   definirAvisos: "nod:definir-avisos",
   definirTema: "nod:definir-tema",
   definirSom: "nod:definir-som",
-  abrir: "nod:abrir",
+  abrir: "nod:abrir", buscar: "nod:buscar", // buscar: NOD-42, Editar › Buscar.
   microfone: "nod:microfone",
   emLigacao: "nod:em-ligacao",
   iaEntrar: "nod:ia-entrar",

@@ -91,7 +91,7 @@ import type { DadosConta } from "./telas/config-conta.ts";
 import { estadoMascoteNaConversa, mascoteComAviso, proximaViradaDoMascote } from "./lib/mascote.ts";
 import { lembrar } from "./lib/lembrar.ts";
 import { atualizarGaveta } from "./lib/gaveta-render.ts";
-import { blocosMudariam, esquecerRegiao, regiao, regiaoMudaria, regiaoPorBlocos } from "./lib/regioes.ts";
+import { blocosMudariam, esquecerRegiao, regiao, regiaoEmVoltaDe, regiaoMudaria, regiaoPorBlocos } from "./lib/regioes.ts";
 import { mudancaSujaAGaveta, reporSeletor, salvarOuRepor } from "./lib/salvar-ou-repor.ts";
 import { criarAnunciador, criarRelogioDaFala, escreverEstados, escreverTempos, lerFalasNaTela, TICK_CURTO_MS, type FalaNaTela } from "./lib/fala-viva.ts";
 import { criarRascunhos } from "./lib/rascunhos.ts";
@@ -167,6 +167,8 @@ import { anuncioDosSubagentes, blocosAoVivoDaTask, blocosDoHistoricoDaTask, html
 import { renderTrabalhosPorBot, sinalDoBot } from "./telas/linha-do-dono.ts";
 import { temDonos } from "./lib/dono.ts";
 import { executarRotinaComConfirmacao } from "./lib/executar-rotina.ts";
+import { criarBuscaNaConversa } from "./telas/busca-na-conversa.ts";
+import { DICA_MS, MARCA_CUTUCAO, MARCA_DICA, SEGURAR_MS, deslocamentoDoPuxar, deveCutucar, cliqueDepoisDoGesto, criarFiltroDeEco, deveMostrarDica, escFechaABusca, fimDoGesto, gravarMarca, lerMarca, tremeu, type GestoAnterior, type Marcas, type ViaDaBusca } from "./lib/descoberta-da-busca.ts";
 
 /**
  * main.ts: sessão → hidratar → SSE (ADR-016) → laço "dispatch → reidratar o que o reducer invalidou →
@@ -1552,6 +1554,178 @@ function htmlDoErro(e: ErroNaTela): string {
   return `<div class="erro" role="alert">${esc(e.mensagem)}${relatar} ${botao("fechar-erro", "×", { classe: "sm" })}${detalhes}</div>`;
 }
 
+/**
+ * NOD-42 (definido em 2026-10-28): a busca na conversa (⌘F) mora na pílula do topo (web/telas/busca-na-conversa.ts). Só
+ * na conversa, na sala e na task; trocar de tela fecha. O "desde" é a mensagem mais antiga carregada (a janela de 200).
+ */
+const buscaNaConversa = criarBuscaNaConversa({
+  raiz: () => document.getElementById("timeline"),
+  desde: desdeDaBusca,
+  reduzido: movimentoReduzido,
+  // No celular o foco abriria o teclado: lá o foco não vai ao campo de mensagem.
+  // No celular o foco volta à pílula do bot (não abre o teclado, e o leitor de tela não perde a posição).
+  aoFechar: () => {
+    const alvo = celular.ativo() ? document.querySelector<HTMLElement>("#cabecalho > .pilula-bot") : document.getElementById("composer-texto");
+    alvo?.focus({ preventScroll: true });
+  },
+});
+let telaDaBusca: string | null = null;
+// Editar › Buscar no menu do Mac: o clique chega aqui; fora da conversa, não faz nada (como o ⌘F).
+const passaDoEco = criarFiltroDeEco();
+/** ⌘F/⌘G pela tecla ou pelo menu. O eco da outra via (a mesma tecla, no Mac) não anda de novo. */
+function acaoDaBusca(acao: "abrir" | "proxima" | "anterior", via: ViaDaBusca["via"]): void {
+  if (!passaDoEco({ acao, via, em: performance.now() })) return;
+  if (acao !== "abrir" && buscaNaConversa.aberta()) buscaNaConversa.navegar(acao === "proxima" ? 1 : -1);
+  else abrirBuscaNaConversa();
+}
+window.nodDesktop?.aoBuscar?.((acao) => {
+  if (podeBuscarNaConversa()) acaoDaBusca(acao, "menu");
+});
+
+function chaveDaTelaDeBusca(): string | null {
+  const t = estado.tela;
+  if (t.tipo === "conversa" || t.tipo === "sala") return `${t.tipo}:${t.conversaId}`;
+  if (t.tipo === "trabalho") return `trabalho:${t.id}`;
+  return null;
+}
+
+function desdeDaBusca(): Date | null {
+  const c = conversaDaTela(estado);
+  if (!c || c.mensagens.length === 0) return null;
+  let menor = Infinity;
+  for (const m of c.mensagens) if (m.criadoEm < menor) menor = m.criadoEm;
+  return Number.isFinite(menor) ? new Date(menor) : null;
+}
+
+/** ⌘F abre? Só com a conversa, a sala ou a task na frente: sem diálogo, sem Seu espaço e sem a ligação em tela cheia. */
+function podeBuscarNaConversa(): boolean {
+  return chaveDaTelaDeBusca() !== null && !camadaSobreABusca();
+}
+
+/** Seu espaço, ligação em tela cheia, onboarding ou um diálogo cobrem a conversa (o `.app` fica inerte). */
+function camadaSobreABusca(): boolean {
+  // A busca geral do celular (NOD-380) e a inicial dos bots (NOD-379) também cobrem a conversa.
+  return !!estado.espaco || telaLigacao.cheia() || telaOnboarding.cobre() || !!document.querySelector("dialog:modal")
+    || !!document.querySelector(".busca-celular:not(.saindo)") || celular.botsAbertos();
+}
+
+function abrirBuscaNaConversa(): void {
+  telaDaBusca = chaveDaTelaDeBusca();
+  document.getElementById("cabecalho")?.classList.remove("bnc-dica"); // a dica "⌘F busca" não fica dentro da busca aberta
+  buscaNaConversa.abrir(document.getElementById("cabecalho"));
+}
+
+// ---- NOD-42: a descoberta (uma vez) e o gesto da pílula no celular ----------------------------------------------------
+const marcasDaBusca: Marcas = { ler: (k) => localStorage.getItem(k), gravar: (k, v) => localStorage.setItem(k, v) };
+let dicaVista = lerMarca(marcasDaBusca, MARCA_DICA);
+let cutucaoVisto = lerMarca(marcasDaBusca, MARCA_CUTUCAO);
+const NO_MAC = /Mac|iPhone|iPad/.test(navigator.platform);
+const ATALHO_DA_BUSCA = NO_MAC ? "⌘F" : "Ctrl+F";
+
+/** "⌘F busca" na pílula por 3 s, na primeira conversa longa (computador). A classe fica no #cabecalho: sobrevive ao render. */
+function talvezMostrarDicaDaBusca(): void {
+  if (dicaVista || celular.ativo() || estado.tela.tipo !== "conversa" || buscaNaConversa.aberta()) return;
+  const area = document.getElementById("timeline");
+  const cab = document.getElementById("cabecalho");
+  if (!area || !cab) return;
+  if (!deveMostrarDica({ jaMostrou: dicaVista, celular: celular.ativo(), conteudo: area.scrollHeight, area: area.clientHeight })) return;
+  dicaVista = true;
+  gravarMarca(marcasDaBusca, MARCA_DICA);
+  cab.style.setProperty("--bnc-dica", JSON.stringify(`${ATALHO_DA_BUSCA} busca`));
+  cab.classList.add("bnc-dica");
+  window.setTimeout(() => cab.classList.remove("bnc-dica"), DICA_MS);
+}
+
+/** Celular: a pílula desce 6 px uma vez, na primeira rolagem longa para trás (nunca com movimento reduzido). */
+document.getElementById("timeline")?.addEventListener("scroll", (ev) => {
+  if (cutucaoVisto || estado.tela.tipo !== "conversa" || buscaNaConversa.aberta()) return;
+  const area = ev.currentTarget as HTMLElement;
+  const distanciaDoFim = area.scrollHeight - area.scrollTop - area.clientHeight;
+  if (!deveCutucar({ jaCutucou: cutucaoVisto, celular: celular.ativo(), reduzido: movimentoReduzido(), distanciaDoFim, area: area.clientHeight })) return;
+  const pilula = document.querySelector<HTMLElement>("#cabecalho > .pilula-bot");
+  if (!pilula) return;
+  cutucaoVisto = true;
+  gravarMarca(marcasDaBusca, MARCA_CUTUCAO);
+  pilula.classList.add("bnc-cutuca");
+  pilula.addEventListener("animationend", () => pilula.classList.remove("bnc-cutuca"), { once: true });
+}, { passive: true });
+
+/** O menu do toque longo na pílula (o da NOD-382 ainda não existe: nasce com o item da busca). */
+function abrirMenuDaPilula(ancora: HTMLElement): void {
+  const d = dialogo(`<div role="menu" aria-label="Conversa"><button type="button" role="menuitem" data-pilula="buscar"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>Buscar na conversa</button></div>`, true);
+  d.classList.add("menu-pilula");
+  const r = ancora.getBoundingClientRect();
+  d.style.left = `${Math.max(12, Math.min(r.left + r.width / 2 - d.offsetWidth / 2, window.innerWidth - d.offsetWidth - 12))}px`;
+  d.style.top = `${Math.min(r.bottom + 8, window.innerHeight - d.offsetHeight - 12)}px`;
+  d.querySelector<HTMLButtonElement>("[data-pilula]")?.focus();
+  d.addEventListener("click", (e) => {
+    if (!(e.target as HTMLElement).closest("[data-pilula='buscar']")) return;
+    d.close();
+    abrirBuscaNaConversa();
+  });
+}
+
+/**
+ * Celular: puxar a pílula para baixo abre a busca, empurrar o miolo aberto para cima fecha, e segurar a pílula abre o
+ * menu. O clique que vem depois de um gesto não abre o painel do bot.
+ */
+let gestoDaPilula: { x: number; y: number; id: number; aberta: boolean; el: HTMLElement; segurar: number; tremeu: boolean } | null = null;
+let engolirClique: GestoAnterior = null;
+document.addEventListener("pointerdown", (ev) => {
+  // Depois de um arrasto o navegador não gera clique: o flag do gesto anterior morre no toque seguinte, qualquer que
+  // seja o alvo (3ª revisão do PR 560: o primeiro toque no ✕ depois de puxar era engolido).
+  engolirClique = null;
+  if (!celular.ativo() || ev.pointerType === "mouse" || chaveDaTelaDeBusca() === null) return;
+  const alvo = ev.target as HTMLElement;
+  const aberta = buscaNaConversa.aberta();
+  const el = aberta ? alvo.closest?.<HTMLElement>("#cabecalho .bnc-pilula") : alvo.closest?.<HTMLElement>("#cabecalho > .pilula-bot");
+  // Aberta: empurrar vale de qualquer ponto do miolo (inclusive a pílula do bot nele), menos o campo e os botões da busca.
+  if (!el || (aberta && alvo.closest("input, .bnc-bt"))) return;
+  const segurar = aberta ? 0 : window.setTimeout(() => {
+    if (!gestoDaPilula || gestoDaPilula.tremeu) return;
+    gestoDaPilula = null;
+    el.style.transform = "";
+    engolirClique = "segurar";
+    if (podeBuscarNaConversa()) abrirMenuDaPilula(el);
+  }, SEGURAR_MS);
+  gestoDaPilula = { x: ev.clientX, y: ev.clientY, id: ev.pointerId, aberta, el, segurar, tremeu: false };
+}, true);
+document.addEventListener("pointermove", (ev) => {
+  const g = gestoDaPilula;
+  if (!g || ev.pointerId !== g.id) return;
+  const dx = ev.clientX - g.x;
+  const dy = ev.clientY - g.y;
+  if (!g.tremeu && tremeu(dx, dy)) { g.tremeu = true; window.clearTimeout(g.segurar); }
+  if (!g.aberta && g.tremeu) { g.el.classList.add("bnc-puxando"); g.el.style.transform = `translateY(${deslocamentoDoPuxar(dy)}px)`; }
+}, true);
+function soltarPilula(ev: PointerEvent, cancelado: boolean): void {
+  const g = gestoDaPilula;
+  if (!g || ev.pointerId !== g.id) return;
+  gestoDaPilula = null;
+  window.clearTimeout(g.segurar);
+  g.el.classList.remove("bnc-puxando");
+  g.el.style.transform = "";
+  if (cancelado || !g.tremeu) return;
+  engolirClique = "arrastar";
+  const fim = fimDoGesto(ev.clientY - g.y, g.aberta);
+  if (fim === "abrir" && podeBuscarNaConversa()) abrirBuscaNaConversa();
+  else if (fim === "fechar") buscaNaConversa.fechar(false);
+}
+document.addEventListener("pointerup", (ev) => soltarPilula(ev, false), true);
+document.addEventListener("pointercancel", (ev) => soltarPilula(ev, true), true);
+document.addEventListener("click", (ev) => {
+  const gesto = engolirClique;
+  if (!gesto) return;
+  engolirClique = null;
+  const alvo = ev.target as HTMLElement;
+  if (!cliqueDepoisDoGesto(gesto, { noCabecalho: !!alvo.closest?.("#cabecalho"), noMenu: !!alvo.closest?.("[data-pilula]") })) return;
+  ev.preventDefault();
+  ev.stopPropagation();
+}, true);
+document.addEventListener("contextmenu", (ev) => {
+  if (celular.ativo() && (ev.target as HTMLElement).closest?.("#cabecalho > .pilula-bot")) ev.preventDefault();
+}, true);
+
 function renderPrincipal(): void {
   const t = estado.tela;
   // NOD-174: a pessoa lê a frase do servidor; o código fechado fica só no <details>, para quem depura.
@@ -1620,7 +1794,11 @@ function renderPrincipal(): void {
   definirTelaDoBot(donoDaTela ? api : null, donoDaTela && t.tipo === "conversa" ? t.agenteId : null);
   // ADR-094: um cabeçalho só. No celular o ☰ da gaveta de bots entra no próprio cabeçalho da tela; tela sem cabeçalho
   // ganha uma faixa só com ele (`so-menu`, que no computador não aparece).
-  regiao("cabecalho", botaoAbrirBots(t.tipo === "conversa") + cabecalho + botaoBuscarCelular());
+  // NOD-42: a busca é da tela em que abriu (fecha ANTES do render: o "buscando" sai do cabeçalho junto). Aberta, o
+  // cabeçalho é regravado em volta do miolo, que nunca sai do DOM (texto, foco, acento e cursor ficam).
+  if (buscaNaConversa.aberta() && chaveDaTelaDeBusca() !== telaDaBusca) buscaNaConversa.fechar(false);
+  regiaoEmVoltaDe("cabecalho", botaoAbrirBots(t.tipo === "conversa") + cabecalho + botaoBuscarCelular(), buscaNaConversa.no());
+  buscaNaConversa.encaixar(document.getElementById("cabecalho"));
   document.getElementById("cabecalho")?.classList.toggle("so-menu", cabecalho === "");
   document.getElementById("cabecalho")?.classList.toggle("cabecalho-task", t.tipo === "trabalho");
   // Plano "tela limpa" (2026-10-16, T1): na conversa própria o cabeçalho é a pílula flutuante sobre o chat.
@@ -1678,6 +1856,7 @@ function renderPrincipal(): void {
   document.body.classList.toggle("ocupado", estado.ocupado);
   // QA do PR #389 (2026-10-18): depois de responder em "Sua vez", o foco vai ao próximo item quando a fila relida chega.
   if (focoDaFila && aplicarFocoDaFila(document, focoDaFila, Date.now()) === "feito") focoDaFila = null;
+  talvezMostrarDicaDaBusca();
 }
 
 function pedirFocoDaFila(respondida: string): void {
@@ -2219,6 +2398,7 @@ function render(): void {
     definirTelaDoBot(null, null);
     regiao("detalhes", "");
     regiao("sidebar", "");
+    buscaNaConversa.fechar(false); // sem sessão, a busca não fica aberta vigiando a tela de entrada (2ª revisão do PR 560)
     regiao("cabecalho", "");
     // Revisão do PR 1 (2026-10-16): sem sessão não há pílula — a classe deixava o cabeçalho vazio flutuando sobre a entrada.
     document.getElementById("cabecalho")?.classList.remove("cabecalho-pilula");
@@ -5546,6 +5726,18 @@ document.addEventListener("click", (ev) => {
 
 document.addEventListener("keydown", (ev) => {
   if ((ev.metaKey || ev.ctrlKey) && ev.key.toLowerCase() === "k") { ev.preventDefault(); abrirBusca(); return; }
+  // NOD-42: ⌘F/Ctrl+F abre a busca na pílula; ⌘G/⇧⌘G andam (e abrem, se fechada). Fora da conversa, segue o padrão.
+  // No Mac só o ⌘ (Ctrl+F é "avançar um caractere" no campo de texto do macOS).
+  if ((NO_MAC ? ev.metaKey : ev.ctrlKey) && !ev.altKey && (ev.key.toLowerCase() === "f" || ev.key.toLowerCase() === "g") && podeBuscarNaConversa()) {
+    ev.preventDefault();
+    const g = ev.key.toLowerCase() === "g";
+    acaoDaBusca(g ? (ev.shiftKey ? "anterior" : "proxima") : "abrir", "tecla");
+    return;
+  }
+  // NOD-42: Esc com a busca aberta (foco fora dela, ex. no body ou na timeline) fecha a busca antes de fechar a task/tela.
+  // Num campo (o composer, o ⌘K), no ditado e na gaveta, o Esc de lá vem antes (revisões do PR 560); o do composer fecha
+  // a busca no fim da própria fila (lista da barra, citação, "Respondendo").
+  if (ev.key === "Escape" && escFechaABusca({ aberta: buscaNaConversa.aberta(), camadaPorCima: camadaSobreABusca(), ditado: ditado.ativo(), emCampo: !!(ev.target as HTMLElement).closest?.("dialog, #detalhes, #faixa-trabalhos, input, textarea, select") })) { ev.preventDefault(); buscaNaConversa.fechar(true); return; }
   if ((ev.metaKey || ev.ctrlKey) && ev.shiftKey && ev.key.toLowerCase() === "d" && estado.sessao) { ev.preventDefault(); void agir(alternarModoDev); return; }
   if (ev.key === "Escape" && (ev.target as HTMLElement).id === "busca-bots") { fecharBusca(); return; }
   // ADR-095: Esc com o ditado aberto joga a gravação fora (no campo fica o que já estava escrito).
@@ -5586,7 +5778,7 @@ document.addEventListener("keydown", (ev) => {
   if (ev.key === "Escape" && estado.tela.tipo === "conectores" && estado.tela.voltar && !celular.botsAbertos() && !(ev.target as HTMLElement).closest?.("dialog, input, textarea, select")) { ev.preventDefault(); void ACOES["voltar-conexao"]?.(document.body); return; }
   // A tela da task (e a provisória de uma linha) fecha no Esc — menos com algo digitado no campo dela.
   // NOD-379: com a inicial do celular à vista, o Esc não age na tela escondida por baixo (Marketplace, Trabalho, linha).
-  if (ev.key === "Escape" && (estado.tela.tipo === "trabalho" || estado.tela.tipo === "linha") && !celular.botsAbertos() && !(ev.target as HTMLElement).closest?.("dialog, input, select, #detalhes") && !((ev.target as HTMLTextAreaElement).id === "composer-texto" && (ev.target as HTMLTextAreaElement).value.trim())) { ev.preventDefault(); fecharTask(); return; }
+  if (ev.key === "Escape" && (estado.tela.tipo === "trabalho" || estado.tela.tipo === "linha") && !celular.botsAbertos() && !buscaNaConversa.aberta() && !(ev.target as HTMLElement).closest?.("dialog, input, select, #detalhes") && !((ev.target as HTMLTextAreaElement).id === "composer-texto" && (ev.target as HTMLTextAreaElement).value.trim())) { ev.preventDefault(); fecharTask(); return; }
   // Esc dentro da gaveta, num nível interno, volta um nível (o mesmo ‹ do topo).
   if (ev.key === "Escape" && estado.gaveta && (ev.target as HTMLElement).closest?.("#detalhes")) { ev.preventDefault(); voltarNivel(); return; }
   const ta = ev.target as HTMLTextAreaElement;
@@ -5610,7 +5802,9 @@ document.addEventListener("keydown", (ev) => {
     if (alvo && comCaixaRespondendo(alvo.conversaId)) {
       ev.preventDefault();
       escolherNoComposer(true);
+      return;
     }
+    if (escFechaABusca({ aberta: buscaNaConversa.aberta(), camadaPorCima: camadaSobreABusca(), ditado: ditado.ativo(), emCampo: false })) { ev.preventDefault(); buscaNaConversa.fechar(true); }
     return;
   }
   if (enterEnvia(ev, celular.ativo())) {
