@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { ERROS_DO_SCRIPT, ETAPAS_DO_SCRIPT, papelDoScript, scriptDeInstalacao, servidorParaScript } from "../../../src/adapters/http/motor-instalacao.ts";
 import { PISO_CLI } from "../../../src/adapters/executor/flag-floors.ts";
-import { arquivoDaConexao, carregarConexao, comandoDeEntrar, guardarConexao, lerComando, lerConexao, pastaDoMotor } from "../../../motor/conexao.ts";
+import { aposentarChaveAntiga, arquivoDaConexao, carregarConexao, comandoDeEntrar, guardarConexao, lerComando, lerConexao, pastaDoMotor } from "../../../motor/conexao.ts";
 
 describe("motor sem janela (ADR-090)", () => {
   it("lê os comandos do nod-motor", () => {
@@ -41,6 +41,25 @@ describe("motor sem janela (ADR-090)", () => {
     expect(lerConexao(await readFile(arquivoDaConexao(pasta), "utf8"))).not.toBeNull();
     expect(lerConexao("{}")).toBeNull();
     expect(lerConexao("não é json")).toBeNull();
+  });
+
+  it("NOD-344: aposentarChaveAntiga manda a chave ANTIGA no Bearer, só no mesmo servidor e se a chave mudou; erro não derruba", async () => {
+    const chamadas: { url: string; auth: string | null }[] = [];
+    const f = (async (url: string, init: RequestInit) => {
+      chamadas.push({ url, auth: new Headers(init.headers).get("authorization") });
+      return new Response("{}", { status: 200 });
+    }) as unknown as typeof fetch;
+    const nova = { url: "https://nod.exemplo.com", chave: "nova.k" };
+    expect(await aposentarChaveAntiga({ url: "https://nod.exemplo.com", chave: "velha.k" }, nova, "1.0.0", f)).toBe(true);
+    expect(chamadas).toEqual([{ url: "https://nod.exemplo.com/api/maquina/aposentar", auth: "Bearer velha.k" }]);
+    expect(await aposentarChaveAntiga(null, nova, "1.0.0", f)).toBe(false);
+    expect(await aposentarChaveAntiga({ url: "https://outro.exemplo.com", chave: "velha.k" }, nova, "1.0.0", f)).toBe(false);
+    expect(await aposentarChaveAntiga(nova, nova, "1.0.0", f)).toBe(false);
+    expect(chamadas).toHaveLength(1);
+    const falha = (async () => { throw new Error("rede fora"); }) as unknown as typeof fetch;
+    expect(await aposentarChaveAntiga({ url: nova.url, chave: "velha.k" }, nova, "1.0.0", falha)).toBe(false);
+    const recusa = (async () => new Response("{}", { status: 401 })) as unknown as typeof fetch;
+    expect(await aposentarChaveAntiga({ url: nova.url, chave: "velha.k" }, nova, "1.0.0", recusa)).toBe(false);
   });
 
   it("o script de instalação só sai com HTTPS (ou http em loopback) e um host sem nada que o shell interprete", () => {

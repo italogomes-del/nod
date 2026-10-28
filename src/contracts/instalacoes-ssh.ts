@@ -65,7 +65,8 @@ export type InstalacaoCriadaDto = { id: string; origemId: string; chavePublica: 
 /**
  * O que a instaladora recebe na puxada. `cifrado` sai uma vez só (e some do servidor); `cancelado: true` avisa (uma vez)
  * que a pessoa cancelou o pedido em andamento. `impressaoConhecida`: a host key guardada do endereço (reinstalação
- * com StrictHostKeyChecking=yes); null = primeira vez. `servidor`: o endereço do nod que a máquina nova alcança.
+ * com StrictHostKeyChecking=yes); null = primeira vez. `servidor`: o endereço do nod que a máquina nova alcança (o
+ * NOD_URL_PUBLICA); null = a instaladora usa a origem a que ela está pareada (NOD-344: nunca o header `Host`).
  */
 export type PedidoDeInstalacao = {
   id: string;
@@ -75,7 +76,7 @@ export type PedidoDeInstalacao = {
   metodo: MetodoSsh;
   impressaoConhecida: string | null;
   convite: string;
-  servidor: string;
+  servidor: string | null;
   cifrado?: CodigoCifrado;
   cancelado?: true;
 };

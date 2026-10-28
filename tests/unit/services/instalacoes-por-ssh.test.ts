@@ -19,16 +19,18 @@ const PUB = "TUlJQklqQU5CZ2txaGtpRzl3MEJBUUVGQUFPQ0FROEFNSUlCQ2dLQ0FRRUE=";
 const CIFRADO = { chave: "QUJD", iv: "REVG", dados: "R0hJ" };
 const IMP_A = `SHA256:${"a".repeat(43)}`;
 const IMP_B = `SHA256:${"b".repeat(43)}`;
+const VISIVEL_DEPOIS = 10 * 60_000;
 
 function montar() {
   let agora = 1_760_000_000_000;
-  const inst = criarInstalacoesPorSsh(() => agora);
+  const revogados: string[] = [];
+  const inst = criarInstalacoesPorSsh(() => agora, { revogarConvite: (c) => revogados.push(c) });
   let convites = 0;
   const pedido = (o: Partial<NovoPedido> = {}): NovoPedido => ({
     escopo: MARLON, host: "vm.exemplo.com", porta: 22, usuario: "root", metodo: "chave", impressaoConhecida: null, servidor: "https://nod.exemplo.com",
     criarConvite: () => `convite-${++convites}`, ...o,
   });
-  return { inst, pedido, convites: () => convites, passar: (ms: number) => { agora += ms; } };
+  return { inst, pedido, revogados, convites: () => convites, passar: (ms: number) => { agora += ms; } };
 }
 
 describe("instalações por SSH", () => {
@@ -52,6 +54,27 @@ describe("instalações por SSH", () => {
     // Parada há mais de 15 s, não é oferecida.
     passar(INSTALADORA_VIVA_MS + 1);
     expect(inst.instaladoras(MARLON)).toEqual([]);
+  });
+
+  // Revisão do PR #579 (codex): sem NOD_URL_PUBLICA, a instaladora de antes da NOD-344 falharia com `servidor: null`.
+  it("servidor null só vai para a instaladora que anuncia servidorProprio; com URL pública, qualquer uma", () => {
+    const { inst, pedido, convites } = montar();
+    inst.anunciarInstaladora(MARLON, VM, { chavePublica: PUB, plataforma: "linux" });
+    expect(inst.pedir(pedido({ servidor: null }))).toBe("instaladora_antiga");
+    expect(convites()).toBe(0);
+    expect(inst.pedir(pedido())).toMatchObject({ origemId: VM });
+    inst.anunciarInstaladora(MARLON, VM, { chavePublica: PUB, plataforma: "linux", servidorProprio: true });
+    expect(inst.pedir(pedido({ servidor: null }))).toMatchObject({ origemId: VM });
+  });
+
+  it("revisão do PR #579: sem origem escolhida, vai para a instaladora que dá conta, não para a primeira da lista", () => {
+    const { inst, pedido } = montar();
+    inst.anunciarInstaladora(MARLON, VM, { chavePublica: PUB, plataforma: "linux" });
+    inst.anunciarInstaladora(MARLON, MAC, { chavePublica: PUB, plataforma: "darwin", servidorProprio: true });
+    expect(inst.pedir(pedido({ servidor: null }))).toMatchObject({ origemId: MAC });
+    // A tela pré-seleciona a primeira da lista: a que dá conta vem antes, mesmo tendo puxado antes da antiga.
+    inst.anunciarInstaladora(MARLON, VM, { chavePublica: PUB, plataforma: "linux" });
+    expect(inst.instaladoras(MARLON).map((i) => i.machineId)).toEqual([MAC, VM]);
   });
 
   it("o modo apelido só sai pelo Mac", () => {
@@ -127,6 +150,21 @@ describe("instalações por SSH", () => {
     expect(inst.progresso(MARLON, VM, { id: r.id, etapa: "pacotes" }).aceito).toBe(false);
     inst.entregarCredencial(MARLON, r.id, CIFRADO);
     expect(inst.pendentes(MARLON, VM)[0]).toMatchObject({ impressaoConhecida: IMP_B, cifrado: CIFRADO });
+  });
+
+  it("revisão do PR #579: confiar na nova depois do prazo do convite é recusado (a impressão nova não é gravada)", () => {
+    const { inst, pedido, passar } = montar();
+    inst.anunciarInstaladora(MARLON, VM, { chavePublica: PUB, plataforma: "linux" });
+    const r = inst.pedir(pedido({ impressaoConhecida: IMP_A }));
+    if (typeof r === "string") throw new Error(r);
+    inst.entregarCredencial(MARLON, r.id, CIFRADO);
+    inst.pendentes(MARLON, VM);
+    passar(PRAZO_INSTALACAO_MS - 1_000);
+    inst.progresso(MARLON, VM, { id: r.id, erro: "chave_do_servidor_mudou", impressao: IMP_B });
+    passar(2_000);
+    // Ainda visível na tela (o erro é recente), mas o convite já morreu no prazo.
+    expect(inst.ver(MARLON, r.id)).toMatchObject({ estado: "erro", motivo: "chave_do_servidor_mudou" });
+    expect(inst.confiarNova(MARLON, r.id)).toBeNull();
   });
 
   it("instalacao_falhou guarda no máximo 20 linhas, cada uma cortada", () => {
@@ -228,5 +266,94 @@ describe("instalações por SSH", () => {
     expect(credencialValida({ ...CIFRADO, dados: "A".repeat(MAX_CREDENCIAL) })).not.toBeNull();
     expect(credencialValida({ ...CIFRADO, dados: "A".repeat(MAX_CREDENCIAL + 4) })).toBeNull();
     expect(credencialValida({ ...CIFRADO, dados: "não é base64" })).toBeNull();
+  });
+
+  // NOD-344: o script pode seguir rodando lá depois do erro; o convite morto impede que ele pareie a máquina depois.
+  describe("o convite do pedido que falha morre (uma vez)", () => {
+    const entregue = (m: ReturnType<typeof montar>, o: Partial<NovoPedido> = {}) => {
+      m.inst.anunciarInstaladora(MARLON, VM, { chavePublica: PUB, plataforma: "linux" });
+      const r = m.inst.pedir(m.pedido(o));
+      if (typeof r === "string") throw new Error(r);
+      m.inst.entregarCredencial(MARLON, r.id, CIFRADO);
+      m.inst.pendentes(MARLON, VM);
+      return r.id;
+    };
+
+    it("erro relatado pela instaladora: revoga na hora, e o relato repetido não revoga de novo", () => {
+      const m = montar();
+      const id = entregue(m);
+      m.inst.progresso(MARLON, VM, { id, etapa: "pacotes" });
+      expect(m.revogados).toEqual([]);
+      m.inst.progresso(MARLON, VM, { id, erro: "instalacao_falhou" });
+      m.inst.progresso(MARLON, VM, { id, erro: "instalacao_falhou" });
+      expect(m.revogados).toEqual(["convite-1"]);
+      // Já em erro, cancelar não tem o que fazer (e não revoga de novo).
+      expect(m.inst.cancelar(MARLON, id)).toBeNull();
+      expect(m.revogados).toEqual(["convite-1"]);
+    });
+
+    it("prazo estourado (tempo_esgotado e nao_pareou) e instaladora que reiniciou: revogam", () => {
+      const m = montar();
+      const pareando = entregue(m);
+      const esperando = m.inst.pedir(m.pedido());
+      if (typeof esperando === "string") throw new Error(esperando);
+      m.inst.progresso(MARLON, VM, { id: pareando, etapa: "pareamento" });
+      m.passar(PRAZO_INSTALACAO_MS + 1);
+      expect(m.inst.ver(MARLON, esperando.id)?.motivo).toBe("tempo_esgotado");
+      expect(m.inst.ver(MARLON, pareando)?.motivo).toBe("nao_pareou");
+      expect([...m.revogados].sort()).toEqual(["convite-1", "convite-2"]);
+
+      const m2 = montar();
+      entregue(m2);
+      m2.inst.anunciarInstaladora(MARLON, VM, { chavePublica: "T1VUUk8=", plataforma: "linux" });
+      expect(m2.revogados).toEqual(["convite-1"]);
+    });
+
+    it("chave_do_servidor_mudou com as impressões espera o \"Confiar na nova\" com o convite vivo; morre no cancelar", () => {
+      const m = montar();
+      const id = entregue(m, { impressaoConhecida: IMP_A });
+      m.inst.progresso(MARLON, VM, { id, erro: "chave_do_servidor_mudou", impressao: IMP_B });
+      expect(m.revogados).toEqual([]);
+      expect(m.inst.cancelar(MARLON, id)).toBe("convite-1");
+      expect(m.inst.ver(MARLON, id)).toMatchObject({ estado: "cancelada" });
+      expect(m.revogados).toEqual(["convite-1"]);
+      // A instaladora já tinha terminado: não há cancelamento a avisar.
+      expect(m.inst.pendentes(MARLON, VM)).toEqual([]);
+    });
+
+    it("chave_do_servidor_mudou sem impressão conhecida (primeira instalação): não há o que confiar, revoga", () => {
+      const m = montar();
+      const id = entregue(m);
+      m.inst.progresso(MARLON, VM, { id, erro: "chave_do_servidor_mudou", impressao: IMP_B });
+      expect(m.revogados).toEqual(["convite-1"]);
+    });
+
+    it("chave_do_servidor_mudou esquecido: revoga no prazo; se sair da memória antes, revoga ao sair", () => {
+      const m = montar();
+      const id = entregue(m, { impressaoConhecida: IMP_A });
+      m.inst.progresso(MARLON, VM, { id, erro: "chave_do_servidor_mudou", impressao: IMP_B });
+      m.passar(PRAZO_INSTALACAO_MS + 1);
+      m.inst.ver(MARLON, id);
+      expect(m.revogados).toEqual(["convite-1"]);
+
+      const m2 = montar();
+      const id2 = entregue(m2, { impressaoConhecida: IMP_A });
+      m2.inst.progresso(MARLON, VM, { id: id2, erro: "chave_do_servidor_mudou", impressao: IMP_B });
+      m2.passar(11 * 60_000);
+      expect(m2.inst.ver(MARLON, id2)).toBeNull();
+      expect(m2.revogados).toEqual(["convite-1"]);
+    });
+
+    it("pronta e cancelada pelo caminho normal: o pareamento não revoga; o cancelar revoga uma vez", () => {
+      const m = montar();
+      const id = entregue(m);
+      m.inst.pareada(MARLON, "convite-1", VM);
+      m.passar(PRAZO_INSTALACAO_MS + VISIVEL_DEPOIS + 1);
+      m.inst.ver(MARLON, id);
+      expect(m.revogados).toEqual([]);
+      const id2 = entregue(m);
+      expect(m.inst.cancelar(MARLON, id2)).toBe("convite-2");
+      expect(m.revogados).toEqual(["convite-2"]);
+    });
   });
 });

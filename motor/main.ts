@@ -49,7 +49,7 @@ import { anuncioDoComputador, sondaLocal } from "./computador.ts";
 import { arquivoDasAtualizacoes, arquivoDoEstadoDeIa, arquivoDoPedidoDeIa, ESPERA_DA_RESPOSTA_MS, ESPERA_DO_SERVICO_MS, gravarJson, IA_DO_TERMINAL, lerEstadoDoPedido, passoNpmLocal, vigiarPedidosDoTerminal } from "./atualizar-ias.ts";
 import { criarPreparoNoMotor } from "./preparo-do-login.ts";
 import { criarIasDoMotor, esperarNoTerminal, quemNaoPodeAtualizar } from "./ias-do-motor.ts";
-import { AJUDA, arquivoDaConexao, carregarConexao, comandoDeEntrar, guardarConexao, lerComando, pastaDoExecutor, pastaDoMotor, type ConexaoMotor } from "./conexao.ts";
+import { AJUDA, aposentarChaveAntiga, arquivoDaConexao, carregarConexao, comandoDeEntrar, guardarConexao, lerComando, pastaDoExecutor, pastaDoMotor, type ConexaoMotor } from "./conexao.ts";
 
 /**
  * O motor do Nod sem janela (ADR-090): o mesmo laço do app do Mac (`desktop/main.ts`, `conectar()`) numa máquina Linux
@@ -399,13 +399,15 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
 
   // NOD-94 (emenda 11 da ADR-090): esta máquina instala a "só computador" da pessoa por SSH, quando a tela pede.
   if (papel === "motor" && dados.instalacoes === true) {
-    instaladora = iniciarInstaladora({ ponte: ponteHttp.instalacoes, sistema: sistemaDeVerdade(), agendar: (fn, ms) => { const t = setTimeout(fn, ms); return { cancelar: () => clearTimeout(t) }; } });
+    instaladora = iniciarInstaladora({ ponte: ponteHttp.instalacoes, sistema: sistemaDeVerdade(), agendar: (fn, ms) => { const t = setTimeout(fn, ms); return { cancelar: () => clearTimeout(t) }; }, servidor: c.url });
   }
 
   async function parar() {
     if (encerrado) return;
     encerrado = true;
-    instaladora?.parar();
+    // NOD-344: a limpeza das instalações em curso (agente morto, mestre encerrada, teto de 10 s) começa já e corre junto
+    // com o resto do desligamento; é esperada no fim, antes do desconectar.
+    const fimDasInstalacoes = instaladora?.parar();
     atualizador?.parar();
     atualizadorDasIas.parar();
     pedidosDoTerminal?.parar();
@@ -423,6 +425,7 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
     if (anterior) await anterior.parar().catch(() => undefined);
     for (const reg of Object.values(registryDoLaco)) if (reg?.estado === "pronto") await reg.instance.dispose();
     memoria.parar();
+    await fimDasInstalacoes;
     await ponteHttp.ponte.desconectar("").catch(() => undefined);
   }
   return { parar: async () => { await parar(); fim("parado"); }, terminou };
@@ -527,7 +530,11 @@ async function parear(servidorBruto: string, nomeBruto: string | null, convite: 
     if (!r || r.status !== 201 && r.status !== 400) continue;
     if (r.status === 201) {
       const { chave } = (await r.json()) as { chave: string };
+      // NOD-344: a reinstalação por convite aposenta a chave que estava aqui (lida antes de gravar a nova).
+      const anterior = convite ? await carregarConexao(pastaDoMotor(process.env)) : null;
       await guardarConexao(pastaDoMotor(process.env), { url, chave });
+      // Já pareou: falha daqui (versão ilegível, rede) não vira erro do parear.
+      if (anterior) await aposentarChaveAntiga(anterior, { url, chave }, await versaoDoMotor().catch(() => "0.0.0"));
       process.stdout.write(`\n✓ Conectada como ${nome}.\n\nAgora entre nas suas contas de IA pela tela (Seu espaço › Provedores de IA), ou aqui:\n  nod-motor entrar claude\n  nod-motor entrar codex\n  nod-motor entrar github    (opcional)\n\n`);
       return 0;
     }

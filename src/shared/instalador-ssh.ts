@@ -67,8 +67,11 @@ export type ResultadoSsh =
   | { ok: true; impressao: string | null; conferencia: Conferencia; avisos: string[] }
   | { ok: false; motivo: MotivoInstalacao; impressao?: string; linhas: string[] };
 
-/** definido em 2026-10-22 (plano da NOD-94): os prazos de cada passo. A instalação baixa Node e pacotes: 20 min. */
-export const PRAZOS_SSH = { conectar: 30_000, agente: 15_000, varredura: 20_000, conferencia: 60_000, envio: 60_000, instalacao: 20 * 60_000, sair: 10_000 } as const;
+/**
+ * definido em 2026-10-22 (plano da NOD-94): os prazos de cada passo. A instalação baixa Node e pacotes: 20 min.
+ * `sair` definido em 2026-10-28 (NOD-344): 3 s, para o `-O exit` e o `ssh-agent -k` caberem no teto de 10 s do `parar()`.
+ */
+export const PRAZOS_SSH = { conectar: 30_000, agente: 15_000, varredura: 20_000, conferencia: 60_000, envio: 60_000, instalacao: 20 * 60_000, sair: 3_000 } as const;
 /** Menos que isso só avisa (o computador do bot é um Chrome; 4 GB é o mínimo confortável). */
 export const MEMORIA_MINIMA_MB = 4096;
 const MAX_LINHAS = 20;
@@ -177,6 +180,7 @@ export async function instalarPorSsh(pedido: PedidoSsh, credencial: CredencialSs
   if (!SEGURO_NO_SHELL.test(pasta)) { await sistema.apagar(pasta); return falha("instalacao_falhou", ["pasta temporária inválida"]); }
   const fechar: (() => void)[] = [];
   let agentePid: string | null = null;
+  /** NOD-344: a mestre foi TENTADA (não só aberta): uma falha ou um cancelamento no meio pode deixá-la viva em fundo. */
   let mestre = false;
   const apelido = pedido.metodo === "apelido";
   // Fora do apelido, o ssh não lê nada da casa de quem roda: sem config (-F /dev/null), sem agente herdado e sem as
@@ -185,7 +189,8 @@ export async function instalarPorSsh(pedido: PedidoSsh, credencial: CredencialSs
   // descartaria também a chave do agente, que é a única que o modo chave deve oferecer.
   const ambiente = sistema.ambiente ?? process.env;
   const envBase: Record<string, string> = apelido
-    ? { ...Object.fromEntries(Object.entries(ambiente).filter((e): e is [string, string] => typeof e[1] === "string")), LC_ALL: "C", LANG: "C" }
+    // NOD-344: as variáveis do próprio Nod (NOD_*, com chaves e endereços) não vão para o ssh nem para o ProxyCommand.
+    ? { ...Object.fromEntries(Object.entries(ambiente).filter((e): e is [string, string] => typeof e[1] === "string" && !e[0].startsWith("NOD_"))), LC_ALL: "C", LANG: "C" }
     : { PATH: ambiente.PATH ?? "/usr/bin:/bin", HOME: pasta, LC_ALL: "C", LANG: "C" };
   const controle = join(pasta, "c");
   const conhecidos = join(pasta, "known_hosts");
@@ -214,7 +219,9 @@ export async function instalarPorSsh(pedido: PedidoSsh, credencial: CredencialSs
     // 1. Credencial: a chave no agente (pelo stdin) ou a senha no askpass.
     if (pedido.metodo === "chave") {
       const sock = join(pasta, "a");
-      const a = await sistema.executar("ssh-agent", ["-s", "-a", sock, "-t", "1800"], { env: envBase, prazoMs: PRAZOS_SSH.agente });
+      // NOD-344 (revisão do PR #579): pelo sistema sem o sinal — o `-s` sai logo e deixa o agente em fundo; cancelado no
+      // meio, a saída se perderia e o agente (com a chave a caminho) ficaria vivo sem PID para o `-k`.
+      const a = await sistemaBase.executar("ssh-agent", ["-s", "-a", sock, "-t", "1800"], { env: envBase, prazoMs: PRAZOS_SSH.agente });
       agentePid = /SSH_AGENT_PID=(\d+)/.exec(a.saida)?.[1] ?? null;
       if (a.codigo !== 0 || !agentePid) return falha("instalacao_falhou", ["ssh-agent não subiu", ...linhasDe(a)]);
       const envAdd = { ...envBase, SSH_AUTH_SOCK: sock, ...(credencial.frase ? await askpass(credencial.frase) : {}) };
@@ -243,7 +250,9 @@ export async function instalarPorSsh(pedido: PedidoSsh, credencial: CredencialSs
       estrito = true;
     }
 
-    // 3. A conexão mestre: aqui o login acontece (e o askpass é lido, uma vez).
+    // 3. A conexão mestre: aqui o login acontece (e o askpass é lido, uma vez). Marcada antes: com ControlPersist, a mestre
+    // pode ficar em fundo mesmo quando este `ssh` falha, estoura o prazo ou é cancelado; o `-O exit` do finally a encerra.
+    mestre = true;
     const m = await sistema.executar("ssh", [
       ...opcoes(["-o", "ControlMaster=yes", "-o", "ControlPersist=900", "-o", `StrictHostKeyChecking=${apelido ? "yes" : estrito ? "yes" : "accept-new"}`,
         ...(pedido.metodo === "senha" ? ["-o", "PreferredAuthentications=password,keyboard-interactive", "-o", "PubkeyAuthentication=no", "-o", "NumberOfPasswordPrompts=1"] : []),
@@ -259,7 +268,6 @@ export async function instalarPorSsh(pedido: PedidoSsh, credencial: CredencialSs
       if (apelido && motivo === "chave_do_servidor_mudou") return falha("instalacao_falhou", [`Este Mac não confirmou a identidade de ${pedido.host}. Abra o Terminal, rode ssh ${pedido.host}, confira e tente de novo.`, ...linhasDe(m)]);
       return falha(motivo, linhasDe(m));
     }
-    mestre = true;
     let impressao: string | null = pedido.impressaoConhecida;
     if (!apelido && !estrito) {
       const k = await sistema.executar("ssh-keygen", ["-l", "-E", "sha256", "-f", conhecidos], { env: envBase, prazoMs: PRAZOS_SSH.agente });
@@ -309,8 +317,10 @@ export async function instalarPorSsh(pedido: PedidoSsh, credencial: CredencialSs
     return falha("instalacao_falhou", linhas);
   } finally {
     for (const f of fechar) { try { f(); } catch { /* já fechado */ } }
-    if (mestre) await sistemaBase.executar("ssh", [...opcoes(["-O", "exit"]), ...destino], { env: envBase, prazoMs: PRAZOS_SSH.sair }).catch(() => undefined);
+    // NOD-344 (revisão do PR #579): o agente (que guarda a chave) morre primeiro, e cada passo tem 3 s: a limpeza inteira
+    // cabe no teto de 10 s do `parar` da instaladora, que não espera mais que isso.
     if (agentePid) await sistemaBase.executar("ssh-agent", ["-k"], { env: { ...envBase, SSH_AGENT_PID: agentePid }, prazoMs: PRAZOS_SSH.sair }).catch(() => undefined);
+    if (mestre) await sistemaBase.executar("ssh", [...opcoes(["-O", "exit"]), ...destino], { env: envBase, prazoMs: PRAZOS_SSH.sair }).catch(() => undefined);
     await sistemaBase.apagar(pasta).catch(() => undefined);
   }
 }

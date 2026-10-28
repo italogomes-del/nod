@@ -173,6 +173,25 @@ Cita a [ADR-102](adr-102-contas-da-pessoa-em-todas-as-maquinas.md) (a cifra do n
 - **Gatilho de reversão:** se a maioria das instalações cair na saída manual (o `curl … | sh` com o convite), ou se
   surgir hospedagem gerenciada, a instalação por SSH sai e fica só o comando.
 
+### Adendo à emenda 11 (2026-10-28, NOD-344): o endereço do script e a chave antiga
+
+- **O endereço que o script da outra máquina usa nunca vem do pedido HTTP.** É o `NOD_URL_PUBLICA`; sem ele, o pedido vai
+  com `servidor: null` e a instaladora usa a origem com que ela mesma está pareada. Um `Host`/`X-Forwarded-Host` forjado
+  não desvia o pareamento. A instaladora anuncia que sabe fazer isso (`servidorProprio`); a de antes da NOD-344 recebe
+  409 `instaladora_antiga` na hora, e a lista de instaladoras (a primeira é a pré-selecionada na tela) põe antes as que dão conta. Origem em loopback com
+  destino fora dele falha antes do SSH com `sem_saida_para_o_nod` ("configure NOD_URL_PUBLICA").
+- **A reinstalação aposenta a chave antiga.** O motor que pareia de novo com convite chama `POST /api/maquina/aposentar`
+  com a chave anterior (o próprio Bearer: só revoga a si mesma) e o servidor a revoga por `removerMaquina`, que também
+  fecha os avisos "sem contato". A VM ligada à nuvem não perde a chave por aqui (409 `maquina_na_nuvem`, ADR-121). O
+  "Substituir" do computador também passa por `removerMaquina`.
+- **Desligar a instaladora espera a limpeza** (ssh-agent morto, mestre encerrada; teto de 10 s) e avisa o fim
+  (`instalacao_falhou`, uma tentativa) do que estava no meio, para a tela não ficar em "instalando".
+- **Limite aceito:** quem tem root na máquina reinstalada lê a chave antiga de qualquer jeito; por isso aposentar uma chave
+  de outra pessoa que estava no mesmo `conexao.json` é o comportamento certo (fica órfã ao ser sobrescrita), e o log
+  `maquina_aposentada` traz pessoa e tenant. Instalar por SSH na própria máquina da instaladora-motor (destino em
+  loopback) pareia no mesmo `conexao.json` e aposenta a chave do próprio motor: os turnos dele caem como
+  `maquina_removida`. Caso raro, aceito.
+
 ## Emenda de 2026-10-22 — o computador da pessoa entra (ADR-122, NOD-96)
 
 O item 10 deixa de ser "fora": com `NOD_COMPUTADORES=motor`, o computador é um por pessoa e roda numa máquina Linux

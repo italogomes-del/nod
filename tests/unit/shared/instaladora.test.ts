@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { CodigoCifrado } from "../../../src/contracts/contas-ia.ts";
 import type { PedidoDeInstalacao, ProgressoDeInstalacao } from "../../../src/contracts/instalacoes-ssh.ts";
 import { gerarParDoLogin } from "../../../src/shared/cifra-do-codigo.ts";
-import { iniciarInstaladora, INTERVALO_INSTALACOES_MS, INTERVALO_SEM_ROTA_MS, type PonteDeInstalacoes } from "../../../src/shared/instaladora.ts";
+import { ehLoopback, iniciarInstaladora, INTERVALO_INSTALACOES_MS, INTERVALO_SEM_ROTA_MS, type PonteDeInstalacoes } from "../../../src/shared/instaladora.ts";
 import type { instalarPorSsh, ResultadoSsh, Sistema } from "../../../src/shared/instalador-ssh.ts";
 
 const par = gerarParDoLogin();
@@ -20,15 +20,15 @@ const pedido = (p: Partial<PedidoDeInstalacao> = {}): PedidoDeInstalacao => ({
   id: "p1", host: "vm", porta: 22, usuario: "root", metodo: "senha", impressaoConhecida: null, convite: "c".repeat(32), servidor: "https://nod", ...p,
 });
 
-function montar(puxadas: (PedidoDeInstalacao[] | null | "sem_rota")[], instalar: typeof instalarPorSsh) {
+function montar(puxadas: (PedidoDeInstalacao[] | null | "sem_rota")[], instalar: typeof instalarPorSsh, puxar?: PonteDeInstalacoes["puxar"]) {
   const relatos: ProgressoDeInstalacao[] = [];
   const chavesPuxadas: string[] = [];
   const agendados: { fn: () => void; ms: number }[] = [];
   const ponte: PonteDeInstalacoes = {
-    async puxar(chave) { chavesPuxadas.push(chave); return puxadas.shift() ?? []; },
+    puxar: puxar ?? (async (chave) => { chavesPuxadas.push(chave); return puxadas.shift() ?? []; }),
     async progresso(p) { relatos.push(p); return true; },
   };
-  const inst = iniciarInstaladora({ ponte, sistema: {} as Sistema, agendar: (fn, ms) => { agendados.push({ fn, ms }); return { cancelar: () => undefined }; }, esperar: async () => undefined, instalar, par });
+  const inst = iniciarInstaladora({ ponte, sistema: {} as Sistema, agendar: (fn, ms) => { agendados.push({ fn, ms }); return { cancelar: () => undefined }; }, esperar: async () => undefined, instalar, par, servidor: "https://pareado.nod" });
   const proxima = async () => { const a = agendados.shift()!; a.fn(); await new Promise((r) => setTimeout(r, 5)); return a.ms; };
   return { inst, relatos, chavesPuxadas, agendados, proxima };
 }
@@ -94,6 +94,21 @@ describe("instaladora", () => {
     expect(m.inst.emAndamento()).toEqual([]);
   });
 
+  it("revisão do PR #579: cancelado pela tela e depois o parar(): sem aviso de 'desligada no meio'", async () => {
+    let soltar: () => void = () => undefined;
+    const instalar: typeof instalarPorSsh = async () => {
+      await new Promise<void>((r) => { soltar = r; });
+      return { ok: false, motivo: "instalacao_falhou", linhas: [] };
+    };
+    const m = montar([[pedido({ metodo: "apelido" })], [pedido({ metodo: "apelido", cancelado: true })]], instalar);
+    await ate();
+    await m.proxima();
+    const p = m.inst.parar();
+    soltar();
+    await p;
+    expect(m.relatos).toEqual([]);
+  });
+
   it("servidor sem a rota: espera 5 min; sem resposta: tenta de novo em 3 s", async () => {
     const m = montar(["sem_rota", null], async () => ({} as ResultadoSsh));
     await ate();
@@ -106,7 +121,71 @@ describe("instaladora", () => {
     let sinal: AbortSignal | undefined;
     const m = montar([[pedido({ metodo: "apelido" })]], async (_p, _c, _s, _a, s) => { sinal = s; return new Promise(() => undefined); });
     await ate();
-    m.inst.parar();
+    void m.inst.parar();
     expect(sinal?.aborted).toBe(true);
+  });
+
+  // NOD-344: o app do Mac sai logo depois do parar(); sem esperar, o ssh-agent e a mestre ficavam órfãos.
+  it("parar só resolve depois do finally (a limpeza) da instalação em curso", async () => {
+    let soltar: () => void = () => undefined;
+    let limpou = false;
+    const m = montar([[pedido({ metodo: "apelido" })]], async (_p, _c, _s, _a, s) => {
+      await new Promise<void>((r) => { soltar = r; s?.addEventListener("abort", () => undefined); });
+      limpou = true;
+      return { ok: false, motivo: "instalacao_falhou", linhas: [] };
+    });
+    await ate();
+    let resolveu = false;
+    const p = m.inst.parar().then(() => { resolveu = true; });
+    await ate();
+    expect(resolveu).toBe(false);
+    soltar();
+    await p;
+    expect(limpou).toBe(true);
+    // Revisão do PR #579: desligar no meio (não o cancelar da tela) avisa o fim, para a tela não ficar em "instalando".
+    expect(m.relatos).toEqual([{ id: "p1", erro: "instalacao_falhou", linhas: ["A máquina que instalava foi desligada no meio. Tente de novo."] }]);
+  });
+
+  it("parar sem nada rodando resolve na hora", async () => {
+    const m = montar([[]], async () => ({} as ResultadoSsh));
+    await ate();
+    await m.inst.parar();
+  });
+
+  it("parar com a puxada em voo: o que ela trouxer não roda", async () => {
+    let entregar: (v: PedidoDeInstalacao[]) => void = () => undefined;
+    let chamou = false;
+    const m = montar([], async () => { chamou = true; return {} as ResultadoSsh; }, () => new Promise((r) => { entregar = r; }));
+    await ate();
+    const p = m.inst.parar();
+    entregar([pedido({ metodo: "apelido" })]);
+    await p;
+    await ate();
+    expect(chamou).toBe(false);
+    expect(m.inst.emAndamento()).toEqual([]);
+    expect(m.agendados).toEqual([]);
+  });
+
+  it("pedido sem servidor (o nod sem NOD_URL_PUBLICA): usa a origem a que a instaladora está pareada", async () => {
+    const servidores: string[] = [];
+    const instalar: typeof instalarPorSsh = async (p) => { servidores.push(p.servidor); return { ok: true, impressao: null, conferencia: {} as never, avisos: [] }; };
+    montar([[pedido({ metodo: "apelido", servidor: null }), pedido({ id: "p2", metodo: "apelido" })]], instalar);
+    await ate();
+    expect(servidores).toEqual(["https://pareado.nod", "https://nod"]);
+  });
+
+  it("NOD-344: servidor em loopback e destino remoto: sem_saida_para_o_nod antes do SSH; destino também local, instala", async () => {
+    const hosts: string[] = [];
+    const instalar: typeof instalarPorSsh = async (p) => { hosts.push(p.host); return { ok: true, impressao: null, conferencia: {} as never, avisos: [] }; };
+    const m = montar([[
+      pedido({ metodo: "apelido", servidor: "http://127.0.0.1:8888" }),
+      pedido({ id: "p2", metodo: "apelido", host: "localhost", servidor: "http://[::1]:8888" }),
+    ]], instalar);
+    await ate();
+    expect(hosts).toEqual(["localhost"]);
+    expect(m.relatos.find((r) => r.id === "p1")).toMatchObject({ erro: "sem_saida_para_o_nod" });
+    expect(m.relatos.find((r) => r.id === "p1")!.linhas!.join(" ")).toMatch(/NOD_URL_PUBLICA/);
+    for (const h of ["localhost", "127.0.0.1", "127.9.8.7", "::1", "[::1]", "app.localhost", "LOCALHOST."]) expect(ehLoopback(h)).toBe(true);
+    for (const h of ["vm", "10.0.0.1", "128.0.0.1", "localhost.exemplo.com", "nod.exemplo.com", ""]) expect(ehLoopback(h)).toBe(false);
   });
 });

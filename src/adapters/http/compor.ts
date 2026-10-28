@@ -757,13 +757,16 @@ export function comporApp(o: OpcoesCompor): App {
   const logins = criarLoginsNaMaquina(relogio);
   const dispositivo = criarPareamentoDispositivo(relogio);
   // NOD-94 (emenda 11 da ADR-090): os pedidos de instalação da máquina só computador por SSH (em memória; só compartilhado).
-  const instalacoes = criarInstalacoesPorSsh(relogio);
+  // NOD-344: o pedido que falha ou expira revoga o convite dele (o script pode parear depois da falha).
+  const instalacoes = criarInstalacoesPorSsh(relogio, { revogarConvite: (c) => dispositivo.revogarConvite(c) });
   /** A máquina nova pareou com o convite de um pedido: ele fica `pronta` e o endereço (com a host key) é guardado. */
   const pareadaPorConvite = async (e: { escopo: Escopo; convite: string; maquinaId: string }) => {
     const r = instalacoes.pareada(e.escopo, e.convite, e.maquinaId);
     if (!r) return;
     log("info", "instalacao_ssh_pronta", { pessoa_id: e.escopo.pessoaId, instalacao_id: r.id, maquina_id: e.maquinaId });
     // Sem impressão (a instaladora não relatou) ou sem usuário (modo apelido): não há o que travar na reinstalação.
+    // NOD-344: a chave antiga do mesmo endereço não é revogada aqui; quem a aposenta é o próprio `parear --convite` (prova
+    // de posse, rota da ponte "aposentar"), porque endereço igual não prova que é a mesma máquina.
     if (r.impressao && r.usuario) {
       const { impressao, usuario } = r;
       await dentro(e.escopo, (d) => d.repos.maquinasSsh.registrar({ maquinaId: e.maquinaId, host: r.host, porta: r.porta, usuario, impressaoHost: impressao }, d.agora()));
@@ -826,7 +829,7 @@ export function comporApp(o: OpcoesCompor): App {
     }),
     // NOD-94: a instalação por SSH é do modo compartilhado (no local, ADR-092, a opção não aparece).
     ...(compartilhado ? { instalacoes: {
-      puxada: (escopo: Escopo, chaveId: string, e: { chavePublica: string; plataforma: PlataformaMaquina }) => {
+      puxada: (escopo: Escopo, chaveId: string, e: { chavePublica: string; plataforma: PlataformaMaquina; servidorProprio: boolean }) => {
         instalacoes.anunciarInstaladora(escopo, chaveId, e);
         return instalacoes.pendentes(escopo, chaveId);
       },
@@ -836,6 +839,11 @@ export function comporApp(o: OpcoesCompor): App {
         log(r.aceito ? "info" : "aviso", r.aceito ? "instalacao_ssh_progresso" : "instalacao_ssh_progresso_recusado", { machine_id: chaveId, instalacao_id: p.id, etapa: p.etapa ?? null, erro: p.erro ?? null });
         return r.aceito;
       },
+      // ADR-121: a VM ligada à nuvem não perde a chave por aqui (como no revogar da tela).
+      aposentar: (escopo: Escopo, chaveId: string) => dentro(escopo, async (d) => {
+        if (await d.repos.maquinasNuvem.buscarPorMaquina(chaveId)) return "nuvem" as const;
+        return (await removerMaquina(d, chaveId)).revogou;
+      }),
     } } : {}),
     // ADR-102: as contas da pessoa são do modo compartilhado (suposição 7: o modo local fica com a tela da ADR-101).
     ...(compartilhado ? { contas: {

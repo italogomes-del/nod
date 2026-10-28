@@ -366,7 +366,8 @@ export function criarPonteHttp(o: { url: string; chave: string; versao: string; 
     instalacoes: {
       async puxar(chavePublica: string): Promise<PedidoDeInstalacao[] | null | "sem_rota"> {
         try {
-          const r = await chamar<{ pedidos?: unknown }>("instalacoes", { chavePublica }, { rota404: true });
+          // NOD-344: `servidorProprio` = esta instaladora aceita `servidor: null` (usa a origem a que está pareada).
+          const r = await chamar<{ pedidos?: unknown }>("instalacoes", { chavePublica, servidorProprio: true }, { rota404: true });
           return Array.isArray(r.pedidos) ? (r.pedidos as PedidoDeInstalacao[]) : [];
         } catch (e) {
           return e instanceof FalhaPonte && e.codigo === "rota_ausente" ? "sem_rota" : null;

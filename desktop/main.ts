@@ -134,7 +134,7 @@ let maquinaIdAtual: string | null = null;
 let contasLocais: ContasLocais | null = null;
 let contasNoServidor: { parar(): void } | null = null;
 /** NOD-94: este Mac como instaladora por SSH (só quando o servidor diz que aceita: `instalacoes: true` na conexão). */
-let instalacoesNoServidor: { parar(): void } | null = null;
+let instalacoesNoServidor: { parar(): Promise<void> } | null = null;
 const driversPorConta = new Map<string, Promise<RegistroDriver | null>>();
 let sincronizandoContas: Promise<void> = Promise.resolve();
 let ghLogado: boolean | null = null;
@@ -451,8 +451,14 @@ async function parar() {
   vigiaIas = null;
   contasNoServidor?.parar();
   contasNoServidor = null;
-  instalacoesNoServidor?.parar();
+  // NOD-344: a limpeza das instalações em curso (o ssh-agent com a chave morto, a mestre encerrada, teto de 10 s) começa
+  // já e é esperada no fim. A referência sai ANTES de qualquer await: um conectar() no meio grava a instaladora nova, e
+  // este parar() não a zera por engano (revisão do PR #579).
+  const instalacoesQueParam = instalacoesNoServidor;
   instalacoesNoServidor = null;
+  const fimDasInstalacoes = instalacoesQueParam?.parar();
+  // Revisão do PR #579: o cliente que sai é o de agora; um conectar() durante a espera (até 10 s) não é desligado por este.
+  const clienteQueSai = cliente;
   vmLocal?.desconectar();
   const anterior = laco; laco = null;
   cliente?.cancelar();
@@ -460,8 +466,11 @@ async function parar() {
   for (const r of Object.values(registry ?? {})) if (r?.estado === "pronto") await r.instance.dispose();
   for (const chave of [...driversPorConta.keys()]) await descartarDriverDaConta(chave);
   contasLocais = null;
-  if (cliente) await cliente.ponte.desconectar("").catch(() => undefined);
-  registry = null; cliente = null;
+  // O aviso final das instalações paradas (instalacoes/progresso) exige a conexão viva: espera antes do desconectar,
+  // como o motor (codex no PR #579).
+  await fimDasInstalacoes;
+  if (clienteQueSai) await clienteQueSai.ponte.desconectar("").catch(() => undefined);
+  if (cliente === clienteQueSai) { registry = null; cliente = null; }
   inventariosAtuais = null; maquinaIdAtual = null; ghLogado = null;
   // definido em 2026-10-09: um login aberto pelo app morre com a conexão (a janela que mostrava o código fechou).
   await loginIas.parar().catch(() => undefined);
@@ -651,8 +660,10 @@ async function conectar(c: Config) {
       registrar: (evento, campos) => log("aviso", evento, campos),
     });
     // NOD-94: a instalação por SSH de uma máquina "só computador", feita daqui (inclusive pelo apelido do ~/.ssh/config).
-    instalacoesNoServidor?.parar();
-    instalacoesNoServidor = dados.instalacoes === true ? iniciarInstalacoesNoServidor({ ponte: ponteHttp.instalacoes, env: cfg.env, agendar: agendarTimer }) : null;
+    // O parar() do começo do conectar já a zerou; sem await aqui (revisão do PR #579), para um parar() no meio não
+    // deixar uma instaladora nova viva depois do desligamento.
+    void instalacoesNoServidor?.parar();
+    instalacoesNoServidor = dados.instalacoes === true ? iniciarInstalacoesNoServidor({ ponte: ponteHttp.instalacoes, env: cfg.env, agendar: agendarTimer, servidor: c.url }) : null;
   }
   const anterior = janela;
   // definido em 2026-09-24 ("aviso no Mac"): preload próprio da janela web — só `nodDesktop` (preload-web.ts).

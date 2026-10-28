@@ -19,6 +19,8 @@ export type DepsInstalacoesNoServidor = {
   sistema?: DepsInstaladora["sistema"];
   instalar?: DepsInstaladora["instalar"];
   par?: DepsInstaladora["par"];
+  /** NOD-344: a origem do servidor da conexão (o script de instalação nunca vem do `Host` de quem pediu). */
+  servidor: string;
 };
 
 export function iniciarInstalacoesNoServidor(d: DepsInstalacoesNoServidor): Instaladora {
@@ -26,6 +28,7 @@ export function iniciarInstalacoesNoServidor(d: DepsInstalacoesNoServidor): Inst
     ponte: d.ponte,
     sistema: d.sistema ?? sistemaDeVerdade(ambienteDoSsh(d.env)),
     agendar: d.agendar,
+    servidor: d.servidor,
     ...(d.instalar ? { instalar: d.instalar } : {}),
     ...(d.par ? { par: d.par } : {}),
   });

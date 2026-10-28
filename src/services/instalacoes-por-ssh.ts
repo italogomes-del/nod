@@ -77,10 +77,10 @@ export type Instaladora = { machineId: string; plataforma: PlataformaMaquina; vi
 type Pedido = {
   id: string; escopo: Escopo; origemId: string; chavePublica: string;
   host: string; porta: number; usuario: string; metodo: MetodoSsh;
-  impressaoConhecida: string | null; impressaoVista: string | null; convite: string; servidor: string;
+  impressaoConhecida: string | null; impressaoVista: string | null; convite: string; servidor: string | null;
   estado: EstadoInstalacao; etapa: EtapaInstalacao | null; motivo: MotivoInstalacao | null;
   impressoes: { antiga: string; nova: string } | null; linhas: string[]; maquinaId: string | null;
-  cifrado: CodigoCifrado | null; entregue: boolean; avisarCancelamento: boolean;
+  cifrado: CodigoCifrado | null; entregue: boolean; avisarCancelamento: boolean; conviteRevogado: boolean;
   criadoEm: number; atualizadoEm: number; ate: number;
 };
 
@@ -89,17 +89,22 @@ export type NovoPedido = {
   origemId?: string | null;
   host: string; porta: number; usuario: string; metodo: MetodoSsh;
   impressaoConhecida: string | null;
-  servidor: string;
+  /** null = o nod sem NOD_URL_PUBLICA: a instaladora usa a origem dela (NOD-344). */
+  servidor: string | null;
   /** Chamado só depois das checagens (o convite não nasce para um pedido recusado). */
   criarConvite(): string;
 };
 
 export interface InstalacoesPorSsh {
   /** A instaladora puxou (a cada 3 s) com a chave pública dela. Par novo = os pedidos que ela tinha caem em `nao_pareou`. */
-  anunciarInstaladora(escopo: Escopo, machineId: string, e: { chavePublica: string; plataforma: PlataformaMaquina }): void;
+  anunciarInstaladora(escopo: Escopo, machineId: string, e: { chavePublica: string; plataforma: PlataformaMaquina; servidorProprio?: boolean }): void;
   /** As instaladoras vivas da pessoa, a mais recente primeiro. */
   instaladoras(escopo: Escopo): Instaladora[];
-  pedir(e: NovoPedido): InstalacaoCriadaDto | "sem_instaladora" | "muitos_pedidos" | "apelido_so_no_mac";
+  /**
+   * `instaladora_antiga` (NOD-344, revisão do PR #579): o nod sem NOD_URL_PUBLICA manda `servidor: null`, e a instaladora
+   * de antes da NOD-344 não sabe usar a própria origem (falharia em `instalacao_falhou` lá no meio).
+   */
+  pedir(e: NovoPedido): InstalacaoCriadaDto | "sem_instaladora" | "muitos_pedidos" | "apelido_so_no_mac" | "instaladora_antiga";
   ver(escopo: Escopo, id: string): InstalacaoSshDto | null;
   /** A credencial cifrada da tela; entregue à instaladora uma vez. */
   entregarCredencial(escopo: Escopo, id: string, cifrado: CodigoCifrado): "ok" | "sem_pedido" | "nao_pede";
@@ -113,23 +118,47 @@ export interface InstalacoesPorSsh {
   pareada(escopo: Escopo, convite: string, maquinaId: string): { id: string; host: string; porta: number; usuario: string; impressao: string | null } | null;
   /** "Confiar na nova": o pedido volta a `esperando` com a impressão nova (e pede a credencial de novo). */
   confiarNova(escopo: Escopo, id: string): { host: string; porta: number; impressao: string } | null;
-  /** O convite do pedido cancelado (para a composição revogá-lo); null = não é dela ou já acabou. */
+  /**
+   * O convite do pedido cancelado (para a composição revogá-lo); null = não é dela ou já acabou. O erro que espera o
+   * "Confiar na nova" ainda se cancela (o convite dele segue vivo até aqui).
+   */
   cancelar(escopo: Escopo, id: string): string | null;
 }
 
-export function criarInstalacoesPorSsh(agora: () => number = Date.now): InstalacoesPorSsh {
+export type DepsInstalacoesPorSsh = {
+  /**
+   * NOD-344: o pedido que deu erro (ou expirou) mata o convite dele — o script pode seguir rodando lá e parear uma
+   * máquina que a tela já mostrou como falha. Idempotente. Exceção: `chave_do_servidor_mudou` com as duas impressões
+   * espera o "Confiar na nova", que reusa o mesmo convite; ele morre no cancelar ou no prazo.
+   */
+  revogarConvite?(convite: string): void;
+};
+
+export function criarInstalacoesPorSsh(agora: () => number = Date.now, deps: DepsInstalacoesPorSsh = {}): InstalacoesPorSsh {
   const pedidos = new Map<string, Pedido>();
-  const instaladoras = new Map<string, Instaladora & { escopo: Escopo; chavePublica: string }>();
+  const instaladoras = new Map<string, Instaladora & { escopo: Escopo; chavePublica: string; servidorProprio: boolean }>();
   const daPessoa = (a: Escopo, b: Escopo) => a.tenantId === b.tenantId && a.pessoaId === b.pessoaId;
   const chaveInstaladora = (escopo: Escopo, machineId: string) => `${escopo.tenantId}:${escopo.pessoaId}:${machineId}`;
   const final = (e: EstadoInstalacao) => ESTADOS_INSTALACAO_FINAIS.includes(e);
   const mudar = (p: Pedido, m: Partial<Pedido>) => Object.assign(p, m, { atualizadoEm: agora() });
-  const falhar = (p: Pedido, motivo: MotivoInstalacao) => mudar(p, { estado: "erro", motivo, cifrado: null });
+  /** O erro que a tela resolve com "Confiar na nova" (o mesmo convite volta a valer). */
+  const esperaConfianca = (p: Pedido) => p.estado === "erro" && p.motivo === "chave_do_servidor_mudou" && p.impressoes !== null;
+  const revogar = (p: Pedido) => {
+    if (p.conviteRevogado) return;
+    p.conviteRevogado = true;
+    deps.revogarConvite?.(p.convite);
+  };
+  const falhar = (p: Pedido, motivo: MotivoInstalacao) => { mudar(p, { estado: "erro", motivo, cifrado: null }); revogar(p); };
   const varrer = () => {
     const t = agora();
     for (const [id, p] of pedidos) {
       if (!final(p.estado) && p.ate <= t) falhar(p, p.estado === "pareando" ? "nao_pareou" : "tempo_esgotado");
-      if (final(p.estado) && t - p.atualizadoEm > VISIVEL_DEPOIS_MS) pedidos.delete(id);
+      else if (esperaConfianca(p) && p.ate <= t) revogar(p);
+      if (final(p.estado) && t - p.atualizadoEm > VISIVEL_DEPOIS_MS) {
+        // Sai da memória antes do prazo esperando o "Confiar na nova": ninguém mais o cancela, então o convite morre aqui.
+        if (esperaConfianca(p)) revogar(p);
+        pedidos.delete(id);
+      }
     }
     for (const [k, i] of instaladoras) if (t - i.vistoEm > VISIVEL_DEPOIS_MS) instaladoras.delete(k);
   };
@@ -158,28 +187,35 @@ export function criarInstalacoesPorSsh(agora: () => number = Date.now): Instalac
         for (const p of pedidos.values()) if (p.origemId === machineId && daPessoa(p.escopo, escopo) && !final(p.estado) && p.estado !== "pareando") falhar(p, "nao_pareou");
       }
       if (!antes && instaladoras.size >= MAX_INSTALADORAS) instaladoras.delete(instaladoras.keys().next().value!);
-      instaladoras.set(k, { escopo, machineId, plataforma: e.plataforma, chavePublica: e.chavePublica, vistoEm: agora() });
+      instaladoras.set(k, { escopo, machineId, plataforma: e.plataforma, chavePublica: e.chavePublica, servidorProprio: e.servidorProprio === true, vistoEm: agora() });
     },
     instaladoras(escopo) {
       varrer();
-      return vivas(escopo).map(({ machineId, plataforma, vistoEm }) => ({ machineId, plataforma, vistoEm }));
+      // Revisão do PR #579: a tela pré-seleciona a primeira; a que sabe usar a própria origem (`servidorProprio`) vem antes
+      // da antiga, senão sem NOD_URL_PUBLICA o pedido levaria `instaladora_antiga` conforme quem puxou por último.
+      const lista = vivas(escopo);
+      return [...lista.filter((i) => i.servidorProprio), ...lista.filter((i) => !i.servidorProprio)].map(({ machineId, plataforma, vistoEm }) => ({ machineId, plataforma, vistoEm }));
     },
     pedir(e) {
       varrer();
       const abertos = [...pedidos.values()].filter((p) => daPessoa(p.escopo, e.escopo) && !final(p.estado));
       if (abertos.length >= MAX_INSTALACOES_POR_PESSOA || pedidos.size >= MAX_PEDIDOS) return "muitos_pedidos";
       const lista = vivas(e.escopo);
-      const origem = e.origemId ? lista.find((i) => i.machineId === e.origemId) : lista[0];
+      // Sem origem escolhida: a primeira que dá conta do pedido (Mac no apelido; `servidorProprio` sem URL pública). Nenhuma
+      // dá: a primeira, para a recusa dizer o porquê (revisão do PR #579).
+      const serve = (i: (typeof lista)[number]) => (e.metodo !== "apelido" || i.plataforma === "darwin") && (e.servidor !== null || i.servidorProprio);
+      const origem = e.origemId ? lista.find((i) => i.machineId === e.origemId) : (lista.find(serve) ?? lista[0]);
       if (!origem) return "sem_instaladora";
       // O apelido é do ~/.ssh/config do Mac (o agente e o chaveiro dele); num motor Linux não significa nada.
       if (e.metodo === "apelido" && origem.plataforma !== "darwin") return "apelido_so_no_mac";
+      if (e.servidor === null && !origem.servidorProprio) return "instaladora_antiga";
       const t = agora();
       const p: Pedido = {
         id: randomUUID(), escopo: e.escopo, origemId: origem.machineId, chavePublica: origem.chavePublica,
         host: e.host, porta: e.porta, usuario: e.usuario, metodo: e.metodo,
         impressaoConhecida: e.impressaoConhecida, impressaoVista: null, convite: e.criarConvite(), servidor: e.servidor,
         estado: "esperando", etapa: null, motivo: null, impressoes: null, linhas: [], maquinaId: null,
-        cifrado: null, entregue: false, avisarCancelamento: false, criadoEm: t, atualizadoEm: t, ate: t + PRAZO_INSTALACAO_MS,
+        cifrado: null, entregue: false, avisarCancelamento: false, conviteRevogado: false, criadoEm: t, atualizadoEm: t, ate: t + PRAZO_INSTALACAO_MS,
       };
       pedidos.set(p.id, p);
       return { id: p.id, origemId: p.origemId, chavePublica: p.chavePublica, expiraEm: p.ate };
@@ -228,6 +264,7 @@ export function criarInstalacoesPorSsh(agora: () => number = Date.now): Instalac
         // A host key mudou: a tela mostra as duas impressões e oferece "Confiar na nova".
         const impressoes = pr.erro === "chave_do_servidor_mudou" && p.impressaoConhecida && pr.impressao ? { antiga: p.impressaoConhecida, nova: pr.impressao } : null;
         mudar(p, { estado: "erro", motivo: pr.erro, impressoes, cifrado: null });
+        if (!esperaConfianca(p)) revogar(p);
         return { aceito: true, pedido: publico(p) };
       }
       if (pr.etapa) {
@@ -246,14 +283,17 @@ export function criarInstalacoesPorSsh(agora: () => number = Date.now): Instalac
     confiarNova(escopo, id) {
       const p = doEscopo(escopo, id);
       if (!p || p.estado !== "erro" || p.motivo !== "chave_do_servidor_mudou" || !p.impressoes) return null;
+      // Revisão do PR #579: o convite já morreu (prazo ou cancelado): não grava a impressão nova para um pedido que não volta.
+      if (p.conviteRevogado || p.ate <= agora()) return null;
       const impressao = p.impressoes.nova;
       mudar(p, { estado: "esperando", motivo: null, impressoes: null, etapa: null, linhas: [], impressaoConhecida: impressao, impressaoVista: impressao, cifrado: null, entregue: false });
       return { host: p.host, porta: p.porta, impressao };
     },
     cancelar(escopo, id) {
       const p = doEscopo(escopo, id);
-      if (!p || final(p.estado)) return null;
-      mudar(p, { estado: "cancelada", cifrado: null, avisarCancelamento: p.entregue });
+      if (!p || (final(p.estado) && !esperaConfianca(p))) return null;
+      mudar(p, { estado: "cancelada", cifrado: null, avisarCancelamento: p.entregue && !final(p.estado) });
+      revogar(p);
       return p.convite;
     },
   };

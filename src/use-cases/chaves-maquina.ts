@@ -25,7 +25,8 @@ export const emitirChaveMaquina: CasoDeUso<{ nome: unknown; papel?: PapelMaquina
   if (papel === "computador") {
     const anterior = await deps.repos.maquinaTokens.computadorVivo(deps.agora());
     if (anterior && input.substituir !== true) throw new ErroDeDominio("estado_invalido", { cause: "já há uma máquina só computador" });
-    if (anterior) await deps.repos.maquinaTokens.revogar(anterior.id, deps.agora());
+    // NOD-344: pelo removerMaquina, o aviso "sem contato" da anterior sai junto (na mesma trava do varredor).
+    if (anterior) await removerMaquina(deps, anterior.id);
   }
   const cunhada = cunharChaveMaquina(deps.escopo);
   const dados = await deps.repos.maquinaTokens.criar({ nome, prefixo: cunhada.prefixo, hash: cunhada.hash, papel });

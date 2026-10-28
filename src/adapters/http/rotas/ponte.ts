@@ -151,8 +151,14 @@ export function criarPonteHttpServidor(d: {
    * gerou ao subir; a credencial vem cifrada com ela, uma vez) e o progresso. Ausente = modo local: 404 e a máquina segue.
    */
   instalacoes?: {
-    puxada(escopo: Escopo, chaveId: string, e: { chavePublica: string; plataforma: PlataformaMaquina }): PedidoDeInstalacao[];
+    puxada(escopo: Escopo, chaveId: string, e: { chavePublica: string; plataforma: PlataformaMaquina; servidorProprio: boolean }): PedidoDeInstalacao[];
     progresso(escopo: Escopo, chaveId: string, p: ProgressoDeInstalacao): Promise<boolean>;
+    /**
+     * NOD-344: a máquina revoga a PRÓPRIA chave (prova de posse: só quem tem o Bearer chega aqui). O `nod-motor parear
+     * --convite` chama com a chave antiga do `conexao.json` depois de parear a nova, para a reinstalação não deixar a
+     * antiga viva no servidor. true = revogou agora; "nuvem" = a VM ligada à nuvem (ADR-121), que não perde a chave por aqui.
+     */
+    aposentar(escopo: Escopo, chaveId: string): Promise<boolean | "nuvem">;
   };
 }) {
   const conexoes = new Map<string, Conexao>();
@@ -347,7 +353,7 @@ export function criarPonteHttpServidor(d: {
       if (!d.instalacoes || c.papel === "computador") { ctx.json(404, { codigo: "sem_instalacoes" }); return; }
       exigir(typeof b.chavePublica === "string" && b.chavePublica.length > 0 && b.chavePublica.length <= 2_048 && /^[A-Za-z0-9+/]+={0,2}$/.test(b.chavePublica));
       c.ultimo = d.agora();
-      ctx.json(200, { pedidos: d.instalacoes.puxada(ctx.escopo, ctx.params.chaveId!, { chavePublica: b.chavePublica, plataforma: c.plataforma }) });
+      ctx.json(200, { pedidos: d.instalacoes.puxada(ctx.escopo, ctx.params.chaveId!, { chavePublica: b.chavePublica, plataforma: c.plataforma, servidorProprio: b.servidorProprio === true }) });
     }),
     rota("instalacoes/progresso", async (ctx, b) => {
       conexao(ctx);
@@ -579,6 +585,29 @@ export function criarPonteHttpServidor(d: {
       c.ultimo = d.agora();
       const r = await c.ponte.relatarDesfazer?.(ctx.escopo.pessoaId, ctx.params.chaveId!, relatoDesfazer(b.relato));
       ctx.json(200, r ?? { ok: false });
+    }),
+    /** NOD-344: a reinstalação aposenta a chave antiga (a própria do Bearer). Não exige conexão: o motor antigo já parou. */
+    rota("aposentar", async (ctx) => {
+      if (!d.instalacoes) { ctx.json(404, { codigo: "sem_instalacoes" }); return; }
+      const id = ctx.params.chaveId!;
+      const r = await d.instalacoes.aposentar(ctx.escopo, id);
+      if (r === "nuvem") { log("aviso", "maquina_aposentar_recusada", { pessoa_id: ctx.escopo.pessoaId, machine_id: id, motivo: "nuvem" }); ctx.json(409, { codigo: "maquina_na_nuvem" }); return; }
+      const revogou = r;
+      const c = conexoes.get(id);
+      if (c && c.escopo.pessoaId === ctx.escopo.pessoaId && c.escopo.tenantId === ctx.escopo.tenantId) {
+        // Como o "desconectar" (revisão do PR #579): a barra e a lista do dono releem na hora.
+        const antes = assinaturaDasIas(ctx.escopo.pessoaId);
+        await c.ponte.desconectar(id);
+        conexoes.delete(id);
+        d.computador?.canal.esquecerMaquina(id);
+        const estava = presencaAvisada.get(id);
+        presencaAvisada.set(id, { escopo: c.escopo, viva: false });
+        await persistir(c);
+        avisarSeMudou(ctx.escopo, antes);
+        if (estava?.viva) d.inventarioMudou?.(c.escopo, "presenca");
+      }
+      log("info", "maquina_aposentada", { pessoa_id: ctx.escopo.pessoaId, tenant_id: ctx.escopo.tenantId, machine_id: id, revogou });
+      ctx.json(200, { ok: true, revogou });
     }),
     rota("desconectar", async (ctx) => {
       const c = conexao(ctx);

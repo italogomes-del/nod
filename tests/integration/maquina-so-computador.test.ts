@@ -71,6 +71,19 @@ describeIntegracao("máquina só computador", () => {
     });
   });
 
+  // NOD-344: o "Substituir" passa pelo removerMaquina; o aviso "sem contato" da anterior não fica aberto para sempre.
+  it("emitir com substituir fecha o aviso 'sem contato' em curso da só-computador anterior", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const primeira = await emitirChaveMaquina(m.deps, { nome: "vm-1", papel: "computador" });
+      const id = primeira.data.dados.id;
+      await m.repos.incidentes.abrir({ tipo: "mac_sem_contato", machineId: id, comecouEm: Date.now() - 60_000, voltouEm: null, rotinas: 1, conversas: 0, agentes: [] });
+      expect((await m.repos.incidentes.emCurso()).map((i) => i.machineId)).toEqual([id]);
+      await emitirChaveMaquina(m.deps, { nome: "vm-2", papel: "computador", substituir: true });
+      expect(await m.repos.incidentes.emCurso()).toEqual([]);
+    });
+  });
+
   it("computadorVivo revoga a só-computador que venceu sem confirmação e libera a vaga", async () => {
     await withRollback(MARLON, async (trx) => {
       const m = await montar(trx);

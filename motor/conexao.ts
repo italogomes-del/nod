@@ -52,6 +52,31 @@ export async function guardarConexao(pasta: string, c: ConexaoMotor): Promise<vo
   await rename(tmp, destino);
 }
 
+/**
+ * NOD-344 (nota 7 da re-revisão da NOD-94): o `parear --convite` (a instalação por SSH, que reinstala por cima) acabou de
+ * gravar a chave nova. Se o `conexao.json` anterior era do MESMO servidor e de outra chave, ela é aposentada com ela mesma
+ * (prova de posse: o servidor revoga só a chave do Bearer) — sem isso ela ficaria viva no servidor sem ninguém usá-la.
+ * Melhor esforço: rede fora ou chave já revogada (401) não derrubam o pareamento. true = o servidor confirmou.
+ */
+export async function aposentarChaveAntiga(
+  anterior: ConexaoMotor | null,
+  nova: ConexaoMotor,
+  versao: string,
+  f: typeof fetch = fetch,
+): Promise<boolean> {
+  if (!anterior || anterior.url !== nova.url || anterior.chave === nova.chave) return false;
+  try {
+    const r = await f(`${nova.url}/api/maquina/aposentar`, {
+      method: "POST", redirect: "error",
+      headers: { authorization: `Bearer ${anterior.chave}`, "x-nod-versao": versao, "content-type": "application/json" },
+      body: "{}", signal: AbortSignal.timeout(15_000),
+    });
+    return r.ok;
+  } catch {
+    return false;
+  }
+}
+
 export type ComandoMotor =
   | { tipo: "rodar" }
   | { tipo: "parear"; servidor: string; nome: string | null; convite: string | null }

@@ -83,5 +83,18 @@ describeIntegracao("motor sem janela: parear e conectar (processo real, commita)
 
     rodar.kill("SIGTERM");
     expect(await new Promise<number | null>((resolver) => rodar.once("exit", resolver))).toBe(0);
+
+    // NOD-344: a reinstalação por SSH chama exatamente este caminho (`parear --convite`). A conexão local ainda tem a
+    // chave anterior; depois da troca, o motor precisa aposentá-la no servidor, não apenas sobrescrever conexao.json.
+    const antiga = maquina!.id;
+    const convite = (await (await api("POST", "maquinas/convites", { papel: "computador", substituir: true })).json()) as { convite: string };
+    const reparear = motor("parear", url, "--nome", "vm-teste", "--convite", convite.convite);
+    let saidaDoReparear = "";
+    reparear.stdout!.on("data", (b: Buffer) => { saidaDoReparear += b.toString(); });
+    expect(await new Promise<number | null>((resolver) => reparear.once("exit", resolver)), saidaDoReparear).toBe(0);
+    const [chaveAntiga] = await abrirTxEscopada(db, dona)((trx) =>
+      trx<{ revogado_em: Date | null }[]>`select revogado_em from maquina_tokens where id = ${antiga}`,
+    );
+    expect(chaveAntiga?.revogado_em).toBeInstanceOf(Date);
   }, 60_000);
 });

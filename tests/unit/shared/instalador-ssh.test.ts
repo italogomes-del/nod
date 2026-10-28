@@ -183,7 +183,9 @@ describe("instalarPorSsh", () => {
     expect(mestre.o.env.SSH_ASKPASS).toBeUndefined();
     // NOD-94 (re-revisão): o OpenSSH acha ~/.ssh/id_* pela casa do passwd, não pelo $HOME; só a chave do agente serve.
     expect(mestre.args).toEqual(expect.arrayContaining(["IdentityFile=none"]));
-    expect(f.chamadas.at(-1)).toMatchObject({ programa: "ssh-agent", args: ["-k"], o: { env: { SSH_AGENT_PID: "4242" } } });
+    // O agente (a chave) morre primeiro; a mestre fecha por último.
+    expect(f.chamadas.at(-2)).toMatchObject({ programa: "ssh-agent", args: ["-k"], o: { env: { SSH_AGENT_PID: "4242" } } });
+    expect(f.chamadas.at(-1)!.args).toEqual(expect.arrayContaining(["-O", "exit"]));
     expect(f.apagadas).toHaveLength(1);
   });
 
@@ -234,10 +236,11 @@ describe("instalarPorSsh", () => {
     expect(f.apagadas).toHaveLength(1);
   });
 
-  it("login recusado: ssh_recusou_login, limpa sem `-O exit`", async () => {
+  // NOD-344: a mestre pode ter subido (ControlPersist) mesmo com o comando falhando: o `-O exit` roda sempre.
+  it("login recusado: ssh_recusou_login, e o `-O exit` roda mesmo assim", async () => {
     const f = sistemaFalso((c) => (c.args.includes("ControlMaster=yes") ? { codigo: 255, erro: "root@vm: Permission denied (publickey,password)." } : undefined));
     expect(await instalarPorSsh(pedido(), { senha: SENHA }, f.sistema)).toMatchObject({ ok: false, motivo: "ssh_recusou_login" });
-    expect(f.chamadas.some((c) => c.args.includes("-O"))).toBe(false);
+    expect(f.chamadas.some((c) => c.args.includes("-O") && c.args.includes("exit"))).toBe(true);
     expect(f.canos[0]!.aberto).toBe(false);
     expect(f.apagadas).toHaveLength(1);
   });
@@ -281,6 +284,25 @@ describe("instalarPorSsh", () => {
     expect(mestre.args).toContain("BatchMode=yes");
     expect(mestre.args.slice(-3)).toEqual(["--", "minha-vm", "true"]);
     expect(f.chamadas.some((c) => c.programa === "ssh-keygen" || c.programa === "ssh-keyscan")).toBe(false);
+  });
+
+  // NOD-344: no apelido o ssh herda o env do processo; nada do Nod (NOD_*, tokens, URLs) vai para o ssh nem para o ProxyCommand.
+  it("apelido: o env do ssh não leva variáveis NOD_*", async () => {
+    const f = sistemaFalso();
+    f.sistema.ambiente = { PATH: "/usr/bin", HOME: "/home/x", SSH_AUTH_SOCK: "/tmp/a", NOD_TOKEN_MAQUINA: "vazou", NOD_URL: "https://nod" };
+    await instalarPorSsh(pedido({ metodo: "apelido", host: "minha-vm", usuario: "" }), {}, f.sistema);
+    for (const c of f.chamadas) expect(Object.keys(c.o.env ?? {}).filter((k) => k.startsWith("NOD_"))).toEqual([]);
+    const mestre = f.chamadas.find((c) => c.args.includes("ControlMaster=yes"))!;
+    expect(mestre.o.env).toMatchObject({ PATH: "/usr/bin", HOME: "/home/x", SSH_AUTH_SOCK: "/tmp/a" });
+  });
+
+  it("chave cancelada no meio: o agente (ssh-agent -k) e a mestre (-O exit) morrem na limpeza", async () => {
+    const ctrl = new AbortController();
+    const f = sistemaFalso((c) => { if (c.args.at(-1) === "sh -s") ctrl.abort(); return undefined; });
+    await instalarPorSsh(pedido({ metodo: "chave" }), { chave: CHAVE }, f.sistema, () => undefined, ctrl.signal);
+    expect(f.chamadas.at(-2)).toMatchObject({ programa: "ssh-agent", args: ["-k"] });
+    expect(f.chamadas.at(-1)!.args).toEqual(expect.arrayContaining(["-O", "exit"]));
+    expect(f.apagadas).toHaveLength(1);
   });
 
   it("cancelada no meio: nada mais roda depois do passo abortado, mas a limpeza roda", async () => {

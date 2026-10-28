@@ -4,7 +4,6 @@ import { log } from "../../../obs/log.ts";
 import { credencialValida, hostValido, portaValida, usuarioValido, type InstalacoesPorSsh } from "../../../services/instalacoes-por-ssh.ts";
 import type { PareamentoDispositivo } from "../../../services/pareamento-dispositivo.ts";
 import { assertUuid } from "../../../use-cases/apoio-l7.ts";
-import { servidorParaScript } from "../motor-instalacao.ts";
 import type { Ctx, Rota } from "../roteador.ts";
 import type { DentroDeTx } from "./dentro-de-tx.ts";
 
@@ -19,16 +18,13 @@ export type DepsRotasInstalacoes = {
   dentro: DentroDeTx;
   instalacoes: InstalacoesPorSsh;
   dispositivo: PareamentoDispositivo;
-  /** NOD_URL_PUBLICA: o endereço do nod que a máquina nova alcança. Ausente = o do pedido (como o `/motor/instalar`). */
+  /**
+   * NOD_URL_PUBLICA: o endereço do nod que a máquina nova alcança. NOD-344: ausente = null, e a instaladora usa a origem
+   * a que ela mesma está pareada. Nunca o `Host`/`X-Forwarded-Host` de quem pediu: ele vai para o script que roda como
+   * root na máquina nova, e o header é de quem chama.
+   */
   urlPublica?: string;
 };
-
-function servidorDoPedido(ctx: Ctx, urlPublica: string | undefined): string | null {
-  if (urlPublica) return urlPublica;
-  const h = ctx.req.headers;
-  const proto = String(h["x-forwarded-proto"] ?? ("encrypted" in ctx.req.socket && ctx.req.socket.encrypted ? "https" : "http"));
-  return servidorParaScript(proto, String(h["x-forwarded-host"] ?? h.host ?? ""));
-}
 
 function exigirPedido(deps: DepsRotasInstalacoes, ctx: Ctx) {
   const id = assertUuid(ctx.params.id, "instalação");
@@ -65,8 +61,7 @@ export function rotasInstalacoesSsh(deps: DepsRotasInstalacoes): Rota[] {
         if (usuario === null) throw new ErroDeDominio("entrada_invalida", { cause: "usuário" });
         const origemId = corpo.origemId === undefined || corpo.origemId === null ? null : assertUuid(corpo.origemId, "máquina de origem");
         const substituir = corpo.substituir === true;
-        const servidor = servidorDoPedido(ctx, deps.urlPublica);
-        if (!servidor) { ctx.json(400, { codigo: "entrada_invalida", mensagem: "Abra o Nod pelo HTTPS dele para instalar por SSH." }); return; }
+        const servidor = deps.urlPublica ?? null;
 
         const { vivo, impressaoConhecida } = await deps.dentro(ctx.escopo, async (d) => ({
           vivo: await d.repos.maquinaTokens.computadorVivo(d.agora()),
@@ -81,6 +76,7 @@ export function rotasInstalacoesSsh(deps: DepsRotasInstalacoes): Rota[] {
         });
         if (r === "sem_instaladora") { ctx.json(409, { codigo: "sem_instaladora", mensagem: "Nenhuma máquina sua está ligada para instalar. Abra o app do Mac ou ligue um motor." }); return; }
         if (r === "muitos_pedidos") { ctx.json(429, { codigo: "muitos_pedidos", mensagem: "Você já tem instalações demais abertas. Termine ou cancele uma delas." }); return; }
+        if (r === "instaladora_antiga") { ctx.json(409, { codigo: "instaladora_antiga", mensagem: "A máquina que vai instalar está com o app antigo. Atualize o app dela e tente de novo." }); return; }
         if (r === "apelido_so_no_mac") throw new ErroDeDominio("entrada_invalida", { cause: "apelido só pelo Mac" });
         log("info", "instalacao_ssh_pedida", { pessoa_id: ctx.escopo.pessoaId, instalacao_id: r.id, origem_id: r.origemId, metodo, reinstalacao: impressaoConhecida !== null, substituir });
         ctx.json(201, r);
