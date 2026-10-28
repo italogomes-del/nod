@@ -48,6 +48,10 @@ import { dadosDoSeletor, mioloDoSeletor, pedidoDoSeletor, renderMenuIa, rotuloDo
 import type { FormaAgente, CorAgente } from "../src/contracts/agente.ts";
 import type { AmbienteBancoDto, ModoSessaoDto } from "../src/contracts/api.ts";
 import type { PedidoInteligencia } from "../src/contracts/inteligencia.ts";
+import { abrir as abrirLote, cancelar as cancelarLote, marcar as marcarLote, marcarTodos as marcarTodosLote, previaDoLote, valorComum as valorComumLote, type AcaoLote, type IaDoLote, type LoteAgentes } from "./lib/lote-agentes.ts";
+import { executarLote, pedidoDaIa, type DepsDoLote } from "./lib/lote-executar.ts";
+import { botsDoLote, motivoDoDestinoIndisponivel, textoDaContagem, textoDoResultado as textoDoResultadoLote, textoMudando as textoMudandoLote } from "./telas/agentes-lote.ts";
+import { botCasaComBusca } from "./telas/config-agentes.ts";
 import type { AlvoAviso } from "../src/contracts/desktop.ts";
 import type { Experimentos } from "../src/contracts/raio-x.ts";
 import type { Escopo } from "../src/shared/types.ts";
@@ -69,7 +73,7 @@ import { abrirPareamento } from "./telas/parear-mac.ts";
 import { criarAvisador } from "./lib/avisador.ts";
 import { criarCanalAvisos } from "./lib/canal-avisos.ts";
 import { criarLiveEvents, type LiveEvents } from "./lib/live-events.ts";
-import { enterEnvia } from "./lib/celular.ts";
+import { ehCelular, enterEnvia } from "./lib/celular.ts";
 import { criarCelular } from "./lib/gaveta-bots.ts";
 import "./pwa.ts";
 import { botao, esc, iconeAgente } from "./lib/render.ts";
@@ -851,6 +855,110 @@ async function gravarInteligenciaComPrevia(a: NonNullable<Estado["frota"]>["agen
     await api!.gravarInteligencia(a.id, levarTasks ? { ...pedido, levarTasks: true } : pedido);
     dispatch({ tipo: "invalidar", quais: ["frota", "gestao", ...(levarTasks ? (["trabalhos"] as const) : [])] });
     depois?.();
+  });
+}
+
+// ---- NOD-368: a seleção e a troca em lote de Configurações › Agentes ------------------------------------------------
+
+/** Os bots ativos da pessoa (os da lista por time); ocultos, excluídos e os de outra pessoa ficam fora do lote. */
+function botsAtivosDoLote(): BotGerido[] {
+  const pessoaId = estado.sessao?.pessoaId;
+  return (estado.gestao?.agentes ?? []).filter((a) => a.ownerId === pessoaId && !a.excluidoEm && !a.oculto);
+}
+/** Os visíveis pela busca: o "Selecionar todos" vale só para eles. */
+const visiveisDoLote = (): string[] => botsAtivosDoLote().filter((a) => botCasaComBusca(a, estado.configUi.busca)).map((a) => a.id);
+const gravarLote = (lote: LoteAgentes): void => dispatch({ tipo: "config-ui", mudanca: { lote } });
+
+const depsDoLote: DepsDoLote = {
+  lote: () => estado.configUi.lote,
+  gravarLote,
+  gravar: (id, acao) => (acao.tipo === "maquina" ? api!.maquinaDoBot(id, acao.destino || null) : api!.gravarInteligencia(id, pedidoDaIa(acao.destino))),
+  // Revisão 1 (#7): a falha de rede vira a frase de ação não concluída (como no banner), não o "Reconectando…".
+  fraseDoErro: (e) => { const erro = erroDe(e); return erro ? erroDaAcao(erro).mensagem : null; },
+  textoMudando: (acao) => textoMudandoLote(estado, acao),
+  textoDoResultado: (acao, ocupado) => textoDoResultadoLote(estado, acao, ocupado),
+  invalidar: () => dispatch({ tipo: "invalidar", quais: ["frota", "gestao", "maquinas"] }),
+  anunciar: (texto) => { const vivo = document.getElementById("anuncio-config"); if (vivo) vivo.textContent = texto; },
+};
+
+/**
+ * Depois de fechar a barra, o foco não cai no <body>. Revisão 4: no computador vai à busca; no celular, a busca abriria o
+ * teclado por cima das linhas (como em main.ts › "o campo espera o toque"), então vai ao "Selecionar" do topo. Sem rolar:
+ * a pessoa continua vendo as linhas com "Mudando…" e o resultado.
+ */
+function focarDepoisDoLote(): void {
+  requestAnimationFrame(() => {
+    const alvo = ehCelular() ? "#espaco .cfg-agentes .lote-selecionar" : "#espaco .cfg-agentes [data-config-busca]";
+    (document.querySelector<HTMLElement>(alvo) ?? document.querySelector<HTMLElement>("#espaco .cfg-agentes .lote-todos"))?.focus({ preventScroll: true });
+  });
+}
+
+/**
+ * Revisão 1 (#3): no fim da troca, se algo falhou e a pessoa não levou o foco a outro lugar (ele ficou na busca, onde o
+ * confirmar o deixou, ou caiu no <body>), o foco vai ao primeiro "Tentar de novo".
+ */
+function focarFalhaDoLote(): void {
+  requestAnimationFrame(() => {
+    const ativo = document.activeElement;
+    const parado = !ativo || ativo === document.body || (ativo as HTMLElement).matches?.("#espaco .cfg-agentes :is([data-config-busca], .lote-selecionar, .lote-todos)");
+    if (parado) document.querySelector<HTMLElement>("#espaco .cfg-agentes .lote-tentar")?.focus({ preventScroll: true });
+  });
+}
+
+/** Revisão 1 (#4): a contagem da barra é dita pelo nó fixo #anuncio-config a cada marca e desmarca. */
+function anunciarSelecaoDoLote(): void {
+  const ativos = new Set(botsAtivosDoLote().map((a) => a.id));
+  const vivo = document.getElementById("anuncio-config");
+  if (vivo) vivo.textContent = textoDaContagem(estado.configUi.lote.selecionados.filter((id) => ativos.has(id)).length);
+}
+
+function abrirSeletorDoLote(el: HTMLElement): void {
+  if (el.getAttribute("aria-disabled") === "true") return;
+  const qual = el.dataset.qual === "ia" ? "ia" : "maquina";
+  const comum = valorComumLote(botsDoLote(estado, botsAtivosDoLote(), qual).map((b) => b.valor));
+  gravarLote(abrirLote(estado.configUi.lote, qual, comum));
+  // O foco entra no seletor (no marcado, ou na primeira opção que se pode escolher).
+  if (estado.configUi.lote.aberto) requestAnimationFrame(() => (document.querySelector<HTMLElement>('.lote-pop [role="radio"][aria-checked="true"]') ?? document.querySelector<HTMLElement>('.lote-pop [role="radio"]:not([aria-disabled="true"])'))?.focus());
+}
+
+function fecharSeletorDoLote(): void {
+  const qual = estado.configUi.lote.aberto;
+  if (!qual) return;
+  gravarLote({ ...estado.configUi.lote, aberto: null, escolha: null });
+  requestAnimationFrame(() => document.querySelector<HTMLElement>(`.lote-bt-${qual}`)?.focus());
+}
+
+/** Confirmar: só os que não estão no destino; a opção que ficou indisponível (máquina caiu) não grava. */
+async function confirmarLote(): Promise<void> {
+  const { aberto, escolha } = estado.configUi.lote;
+  if (!aberto || escolha === null) return;
+  const acao: AcaoLote = aberto === "maquina" ? { tipo: "maquina", destino: escolha } : { tipo: "ia", destino: escolha as IaDoLote };
+  if (motivoDoDestinoIndisponivel(estado, acao) !== null) return;
+  const { mudam } = previaDoLote(botsDoLote(estado, botsAtivosDoLote(), aberto), escolha);
+  avisador.acaoPropria();
+  const fim = executarLote(depsDoLote, mudam, acao);
+  // Revisão 2/4: ao confirmar, o foco vai a um lugar estável (busca no computador, Selecionar no celular); o fim decide.
+  focarDepoisDoLote();
+  if ((await fim).erros > 0) focarFalhaDoLote();
+}
+
+/** Tentar de novo: refaz só aquele bot, com a mesma ação. */
+async function tentarDeNovoNoLote(id: string): Promise<void> {
+  const r = estado.configUi.lote.resultados[id];
+  const a = botsAtivosDoLote().find((x) => x.id === id);
+  if (r?.estado !== "erro" || !a || estado.configUi.lote.mudando) return;
+  // Revisão 1 (#6): o destino guardado pode ter caído desde a falha; aí não manda o PUT e a linha diz o motivo de agora.
+  const motivo = motivoDoDestinoIndisponivel(estado, r.acao);
+  if (motivo !== null) {
+    gravarLote({ ...estado.configUi.lote, resultados: { ...estado.configUi.lote.resultados, [id]: { estado: "erro", texto: `Não mudou: ${motivo}`, acao: r.acao } } });
+    depsDoLote.anunciar(`${a.nome} não mudou: ${motivo}`);
+    return;
+  }
+  avisador.acaoPropria();
+  await executarLote(depsDoLote, [{ id, nome: a.nome, valor: "", ocupado: abertosDoBot(estado, id).length > 0 }], r.acao, { fecharSelecao: false });
+  requestAnimationFrame(() => {
+    const tentar = document.querySelector<HTMLElement>(`#espaco .cfg-agentes .lote-tentar[data-id="${CSS.escape(id)}"]`);
+    (tentar ?? document.querySelector<HTMLElement>(`#espaco .cfg-agentes [data-act="lote-marcar"][data-id="${CSS.escape(id)}"]`))?.focus();
   });
 }
 
@@ -3640,6 +3748,24 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   "secao-espaco": (el) => abrirEspaco((el.dataset.secao as SecaoEspaco | undefined) ?? "conexao"),
   // NOD-367: as ações das Configurações (a linha recolhida, a conta, os experimentos e o onboarding).
   "config-recolhe": (el) => { if (el.dataset.recolhe) dispatch({ tipo: "config-recolhe", id: el.dataset.recolhe }); },
+  // NOD-368: a seleção e a troca em lote de Agentes.
+  "lote-marcar": (el) => { if (el.dataset.id) { gravarLote(marcarLote(estado.configUi.lote, el.dataset.id)); anunciarSelecaoDoLote(); } },
+  "lote-todos": () => { gravarLote(marcarTodosLote(estado.configUi.lote, visiveisDoLote())); anunciarSelecaoDoLote(); },
+  "lote-selecionar": () => {
+    gravarLote({ ...estado.configUi.lote, selecionando: true });
+    requestAnimationFrame(() => document.querySelector<HTMLElement>("#espaco .cfg-agentes .lote-todos")?.focus());
+  },
+  "lote-cancelar": () => { gravarLote(cancelarLote(estado.configUi.lote)); focarDepoisDoLote(); },
+  "lote-abrir": (el) => abrirSeletorDoLote(el),
+  "lote-fechar": () => fecharSeletorDoLote(),
+  "lote-escolher": (el) => {
+    if (el.getAttribute("aria-disabled") === "true") return;
+    gravarLote({ ...estado.configUi.lote, escolha: el.dataset.valor ?? "" });
+    // Revisão 3: a prévia é dita pelo nó fixo (um role=status recriado a cada desenho não é lido com confiança).
+    depsDoLote.anunciar(document.querySelector("#espaco .lote-previa")?.textContent ?? "");
+  },
+  "lote-confirmar": () => confirmarLote(),
+  "lote-tentar": (el) => (el.dataset.id ? tentarDeNovoNoLote(el.dataset.id) : undefined),
   "alternar-experimento": (el) => {
     const chave = el.dataset.experimento;
     if (chave === "calibracao" || chave === "memoriaLonga" || chave === "whatsapp") return agir(() => alternarExperimento(chave));
@@ -4995,6 +5121,41 @@ document.addEventListener("focusout", (ev) => {
   campo.closest("label")?.setAttribute("hidden", "");
 });
 
+// NOD-368 (celular = CONSULTA_CELULAR, revisão 3): o toque longo numa linha de Agentes marca o bot e liga a seleção; no modo seleção, tocar na
+// linha marca e desmarca. Os botões da linha (a caixa, o "…", o Tentar de novo) seguem com a ação deles.
+
+let toqueLongoLote: { timer: number; x: number; y: number; id: string } | null = null;
+let engolirCliqueLote = false;
+document.addEventListener("pointerdown", (ev) => {
+  // Revisão 1 (#8): um toque novo zera o "engolir o próximo clique" que um toque longo sem clique deixou ligado.
+  engolirCliqueLote = false;
+  const linha = (ev.target as HTMLElement).closest?.<HTMLElement>("#espaco .cfg-agentes .lote-linha");
+  if (!linha || (ev.target as HTMLElement).closest("button") || !ehCelular()) return;
+  const id = linha.dataset.loteId;
+  if (!id || estado.configUi.lote.selecionados.includes(id)) return;
+  const timer = window.setTimeout(() => {
+    toqueLongoLote = null;
+    engolirCliqueLote = true;
+    gravarLote({ ...marcarLote(estado.configUi.lote, id), selecionando: true });
+    anunciarSelecaoDoLote();
+    navigator.vibrate?.(10);
+  }, 500);
+  toqueLongoLote = { timer, x: ev.clientX, y: ev.clientY, id };
+});
+const soltarToqueLongo = (): void => { if (toqueLongoLote) { window.clearTimeout(toqueLongoLote.timer); toqueLongoLote = null; } };
+document.addEventListener("pointerup", soltarToqueLongo);
+document.addEventListener("pointercancel", soltarToqueLongo);
+document.addEventListener("pointermove", (ev) => { if (toqueLongoLote && Math.hypot(ev.clientX - toqueLongoLote.x, ev.clientY - toqueLongoLote.y) > 10) soltarToqueLongo(); });
+document.addEventListener("contextmenu", (ev) => { if (engolirCliqueLote && (ev.target as HTMLElement).closest?.(".lote-linha")) ev.preventDefault(); });
+document.addEventListener("click", (ev) => {
+  const linha = (ev.target as HTMLElement).closest?.<HTMLElement>("#espaco .cfg-agentes .lote-linha");
+  if (engolirCliqueLote) { engolirCliqueLote = false; if (linha) { ev.preventDefault(); ev.stopPropagation(); return; } }
+  if (!linha || (ev.target as HTMLElement).closest("button") || !ehCelular()) return;
+  if (!(linha.closest(".lote-ligado")) || !linha.dataset.loteId) return;
+  gravarLote(marcarLote(estado.configUi.lote, linha.dataset.loteId));
+  anunciarSelecaoDoLote();
+}, true);
+
 document.addEventListener("keydown", (ev) => {
   if ((ev.metaKey || ev.ctrlKey) && ev.key.toLowerCase() === "k") { ev.preventDefault(); abrirBusca(); return; }
   if ((ev.metaKey || ev.ctrlKey) && ev.shiftKey && ev.key.toLowerCase() === "d" && estado.sessao) { ev.preventDefault(); void agir(alternarModoDev); return; }
@@ -5005,6 +5166,16 @@ document.addEventListener("keydown", (ev) => {
   if (ev.key === "Escape" && telaLigacao.cheia() && !(ev.target as HTMLElement).closest?.("dialog")) { ev.preventDefault(); telaLigacao.encolher(); return; }
   // Chat limpo (PR 8): Esc dentro da pílula alargada fecha e devolve o foco a ela (web/lib/pilula-na-tela.ts).
   if (teclaNaPilula(ev.key, estado.faixaTrabalhosAberta !== null) === "fechar" && (ev.target as HTMLElement).closest?.("#faixa-trabalhos")) { ev.preventDefault(); dispatch({ tipo: "faixa-trabalhos", agenteId: null }); return; }
+  // NOD-368: Esc fecha o seletor do lote (o foco volta ao botão que o abriu) antes de fechar Seu espaço.
+  if (ev.key === "Escape" && estado.configUi.lote.aberto && document.querySelector(".lote-pop")) { ev.preventDefault(); fecharSeletorDoLote(); return; }
+  // NOD-368: setas para cima e para baixo andam entre as opções do seletor (radiogroup), pulando as indisponíveis.
+  if ((ev.key === "ArrowDown" || ev.key === "ArrowUp") && (ev.target as HTMLElement).closest?.(".lote-ops")) {
+    const ops = [...document.querySelectorAll<HTMLElement>('.lote-ops [role="radio"]:not([aria-disabled="true"])')];
+    const i = ops.indexOf(ev.target as HTMLElement);
+    const prox = i < 0 ? (ev.key === "ArrowDown" ? ops[0] : ops.at(-1)) : ops[(i + (ev.key === "ArrowDown" ? 1 : ops.length - 1)) % ops.length];
+    if (prox) { ev.preventDefault(); prox.focus(); }
+    return;
+  }
   // QA da NOD-370: com o confirmar aberto e o pedido andando, os botões dele ficam desativados e o foco cai no <body>; o Esc
   // não fecha Seu espaço por trás do diálogo.
   if (ev.key === "Escape" && estado.espaco && !(ev.target as HTMLElement).closest?.("dialog") && !document.querySelector("dialog[open]")) { ev.preventDefault(); fecharEspaco(); return; }

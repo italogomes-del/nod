@@ -184,6 +184,12 @@
   .prov-ia .lc-ic { grid-column: 2; }
   .prov-ia .lc-txt, .prov-ia .lc-status { grid-column: 3; }
   .prov-ia .lc-ctrl { grid-column: 4; }
+  /* NOD-368 (revisão 4): a caixa do lote antes do ícone, como a alça de Provedores; com ou sem toque, marcada ou não. */
+  .lc-linha.lote-linha { grid-template-columns: auto auto minmax(0, 1fr) auto; }
+  .lote-linha .lote-cb { grid-column: 1; grid-row: 1 / span 2; align-self: center; }
+  .lote-linha .lc-ic { grid-column: 2; }
+  .lote-linha .lc-txt, .lote-linha .lc-status { grid-column: 3; }
+  .lote-linha .lc-ctrl { grid-column: 4; }
   .prov-ia-item .ia-explica, .prov-ia-item .ia-aviso-nota, .prov-ia-item .ia-fluxo { margin-left: 14px; margin-right: 14px; }
   .cl-mais-bt { min-width: 44px; min-height: 44px; }
   /* O "…" vira folha, presa à base da tela. */

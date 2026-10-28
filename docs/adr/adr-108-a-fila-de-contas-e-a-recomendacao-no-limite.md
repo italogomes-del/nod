@@ -70,6 +70,11 @@ apareceram juntos:
 6. **Trocar a IA do bot pelo seletor com tasks em andamento (R5, E8).** `PUT /agentes/:id/inteligencia` aceita
    `levarTasks?: boolean`, separado no caso de uso antes da validação estrita. A web pergunta "Só daqui em diante"
    (padrão) ou "Levar as tasks também".
+   *Emenda (NOD-368, 28/10/2026):* a troca de IA **em lote** (Configurações › Agentes, vários bots de uma vez) não
+   pergunta: vai sempre como "Só daqui em diante" (o PUT sem `levarTasks`), pelo mesmo `PUT /agentes/:id/inteligencia`
+   da ficha, um por bot. A prévia avisa quem está no meio de uma tarefa ("a troca vale a partir do próximo pedido").
+   Levar as tasks continua sendo escolha de um bot por vez, na ficha. Gatilho de reversão: pedido de "levar as tasks"
+   em lote.
 7. **Bot fixo sem conta da IA dele na fila (R6).** No lugar da nota, o aviso diz o estado ("O Eng 1 está parado até
    13:00"), que ele volta sozinho, e oferece os caminhos que existem: (a) "Continuar na conta <fora da fila>" — o
    "Seguir com" estendido: grava a escolhida, acorda as tasks do bot que esperavam a IA e fecha o aviso; (b) "Continuar

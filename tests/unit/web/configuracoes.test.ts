@@ -94,9 +94,9 @@ describe("as 6 seções (critério 2)", () => {
     let e = reduzir(estadoInicial, { tipo: "espaco", secao: "geral" });
     e = reduzir(e, { tipo: "config-recolhe", id: "avancado" });
     e = reduzir(e, { tipo: "config-ui", mudanca: { busca: "téo" } });
-    expect(e.configUi).toEqual({ abertos: ["avancado"], busca: "téo", filtro: "todos" });
+    expect(e.configUi).toEqual({ abertos: ["avancado"], busca: "téo", filtro: "todos", lote: CONFIG_UI_INICIAL.lote });
     expect(reduzir(e, { tipo: "espaco", secao: "geral" }).configUi.abertos).toEqual(["avancado"]);
-    expect(reduzir(e, { tipo: "espaco", secao: "agentes" }).configUi).toEqual({ abertos: [], busca: "téo", filtro: "todos" });
+    expect(reduzir(e, { tipo: "espaco", secao: "agentes" }).configUi).toEqual({ abertos: [], busca: "téo", filtro: "todos", lote: CONFIG_UI_INICIAL.lote });
     expect(reduzir(e, { tipo: "espaco", secao: null }).configUi).toEqual(CONFIG_UI_INICIAL);
     expect(reduzir(reduzir(e, { tipo: "config-recolhe", id: "avancado" }), { tipo: "espaco", secao: "geral" }).configUi.abertos).toEqual([]);
   });

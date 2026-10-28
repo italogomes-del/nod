@@ -43,6 +43,7 @@ import { UI_IAS_INICIAL, type UiIas } from "../telas/cartao-ia.ts";
 import { UI_CONTAS_INICIAL, type UiContas } from "../telas/contas-lista.ts";
 import { UI_NUVEM_INICIAL, type UiNuvem } from "../lib/maquina-nuvem.ts";
 import type { RascunhoInteligencia } from "../telas/inteligencia.ts";
+import { LOTE_INICIAL, soOsQueExistem, type LoteAgentes } from "../lib/lote-agentes.ts";
 
 /**
  * Estado da web (ADR-020: a web decide, nunca executa; ADR-029: todo fail-closed vira estado
@@ -170,8 +171,14 @@ export function secaoDoPedido(p: PedidoSecao): SecaoEspaco {
  * detalhe de uma chave ou de um envio), o "…" aberto e a busca de Agentes. Fechar as Configurações zera.
  */
 /** `filtro`: o tipo escolhido em Feedback ("todos", "bug", "melhoria" ou "duvida"). */
-export type ConfigUi = { abertos: string[]; busca: string; filtro: string };
-export const CONFIG_UI_INICIAL: ConfigUi = { abertos: [], busca: "", filtro: "todos" };
+/** NOD-368: `lote` = a seleção e a troca em lote de Agentes; zera ao trocar de seção, como o resto daqui. */
+export type ConfigUi = { abertos: string[]; busca: string; filtro: string; lote: LoteAgentes };
+export const CONFIG_UI_INICIAL: ConfigUi = { abertos: [], busca: "", filtro: "todos", lote: LOTE_INICIAL };
+/**
+ * NOD-368 (revisão 1): sair de Agentes no meio de uma troca em lote não zera o `mudando` nem as mensagens: os PUTs em voo
+ * ainda escrevem nelas, e voltar a Agentes antes do fim não pode abrir uma segunda troca por cima da primeira.
+ */
+export const loteAoSair = (l: LoteAgentes): LoteAgentes => (l.mudando ? { ...LOTE_INICIAL, mudando: true, resultados: l.resultados } : LOTE_INICIAL);
 
 /**
  * A gaveta do bot por níveis (definido em 2026-09-30, canvas "Menu, sidebar e gaveta"): o que é do bot abre DENTRO dela,
@@ -1373,7 +1380,7 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
         ...aoTrocarDeTela(estado, acao.tela),
         // Ir a outro lugar (o clique num aviso, por exemplo) fecha Seu espaço: a pessoa foi para onde pediu.
         espaco: null,
-        configUi: CONFIG_UI_INICIAL,
+        configUi: { ...CONFIG_UI_INICIAL, lote: loteAoSair(estado.configUi.lote) },
         erro: null,
         // Saiu de Computadores: a chave crua some da memória (ela aparece uma vez só).
         chaveEmitida: null,
@@ -1388,7 +1395,7 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
       // seção fecha o "…" e as linhas abertas; fechar as Configurações zera também a busca.
       return {
         ...estado, espaco: acao.secao ? { secao: acao.secao } : null, chaveEmitida: acao.secao === "maquinas" ? estado.chaveEmitida : null, erro: null,
-        configUi: !acao.secao ? CONFIG_UI_INICIAL : acao.secao === estado.espaco?.secao ? estado.configUi : { ...CONFIG_UI_INICIAL, busca: estado.configUi.busca },
+        configUi: !acao.secao ? { ...CONFIG_UI_INICIAL, lote: loteAoSair(estado.configUi.lote) } : acao.secao === estado.espaco?.secao ? estado.configUi : { ...CONFIG_UI_INICIAL, busca: estado.configUi.busca, lote: loteAoSair(estado.configUi.lote) },
         // NOD-367 (revisão 2): o relato.criado não invalida nada (ADR-041), então entrar em Feedback relê "Seus envios" e
         // esquece o erro de antes; o envio feito na conversa com o Nod aparece ao voltar.
         ...(acao.secao === "feedback" && estado.espaco?.secao !== "feedback" ? { relatos: null, relatosErro: false } : {}),
@@ -1443,7 +1450,11 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
     case "hidratar-gestao": {
       // NOD-370: a gestão traz os excluídos; a conversa de baixo do bot excluído vai para Início (Seu espaço fica).
       const excluidos = new Set(acao.gestao.agentes.filter((a) => a.excluidoEm).map((a) => a.id));
-      return semBotsQueSairam(estado, excluidos, { gestao: acao.gestao }) ?? { ...estado, gestao: acao.gestao };
+      // NOD-368 (revisão 2): o bot excluído, ocultado ou de outra pessoa sai da seleção do lote quando a gestão é relida.
+      const ativos = acao.gestao.agentes.filter((a) => a.ownerId === estado.sessao?.pessoaId && !a.excluidoEm && !a.oculto).map((a) => a.id);
+      const lote = soOsQueExistem(estado.configUi.lote, ativos);
+      const comLote = lote === estado.configUi.lote ? estado : { ...estado, configUi: { ...estado.configUi, lote } };
+      return semBotsQueSairam(comLote, excluidos, { gestao: acao.gestao }) ?? { ...comLote, gestao: acao.gestao };
     }
     case "hidratar-frota": {
       // Revisão da NOD-349: o computador que a frota diz que voltou deixa de valer como "fora" lido num pulso antigo.
