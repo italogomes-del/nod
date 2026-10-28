@@ -1162,6 +1162,7 @@ async function aposErroTransitorioNoFundo(
     causa: "erro_transitorio",
     tentativasTransitorias: tentativas,
     quedas: 0,
+    maquinaPresente: false,
     agora,
     inicioDaCadeia: raiz.criadoEm,
     ehRotina: daRotina !== null,

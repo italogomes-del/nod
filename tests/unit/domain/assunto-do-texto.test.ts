@@ -7,7 +7,7 @@ import { assuntoDaLinhaAntiga, assuntoDoTexto, assuntoNaLeitura, MOLDES_ANTIGOS,
 import { textoDaCompactacao } from "../../../src/domain/comandos.ts";
 import { linhaDoDesfecho, mensagemDeNascimento } from "../../../src/domain/criar-bots.ts";
 import { assuntoDaInterrupcao, destinoDe } from "../../../src/domain/destino-no-chat.ts";
-import { motivoDaQuedaEmPortugues, motivoEmPortugues, redigir } from "../../../src/domain/redacao.ts";
+import { MOTIVO_SERVIDOR_NAO_RESPONDEU, motivoDaQuedaEmPortugues, motivoEmPortugues, redigir } from "../../../src/domain/redacao.ts";
 import { TEXTO_ROTINA_MUDOU } from "../../../src/use-cases/aplicar-proposta-rotina.ts";
 import { textoRotinaAtiva } from "../../../src/use-cases/apoio-l7.ts";
 import { TEXTO_PERFIL_MUDOU } from "../../../src/use-cases/confirmar-perfil.ts";
@@ -63,6 +63,7 @@ const FICAM_NO_CHAT: readonly [string, Assunto][] = [
   [redigir("turno-interrompido", 0, { motivo: motivoEmPortugues("maquina_sem_contato") }), "turno.queda_da_maquina"],
   [redigir("turno-interrompido", 0, { motivo: motivoDaQuedaEmPortugues({ nome: "nod-vm", plataforma: "linux" }) }), "turno.queda_da_maquina"],
   [redigir("turno-interrompido", 0, { motivo: motivoEmPortugues("reinicio_servidor") }), "turno.queda_da_maquina"],
+  [redigir("turno-interrompido", 0, { motivo: MOTIVO_SERVIDOR_NAO_RESPONDEU }), "turno.queda_da_maquina"],
   [redigir("decisao-vencida", 0, { quando: "18/10 10:00", desfecho: "ninguém viu" }), "decisao.vencida"],
 ];
 
@@ -90,6 +91,7 @@ const OUTROS: readonly [string, Assunto][] = [
   [redigir("cota-no-limite-rotina-nao-rodou", 0, { ia: "Claude", quando: "amanhã" }), "cota.espera"],
   [redigir("fundo-nova-tentativa", 0, { ia: "Claude", pedido: "Este pedido", quando: "às 14:00", tentativa: "1", maximo: "3" }), "fundo.espera"],
   [redigir("fundo-espera-maquina", 0, { maquina: "O Mac", pedido: "Esta task" }), "fundo.espera"],
+  [redigir("fundo-espera-servidor", 0, { pedido: "Esta task", quando: "às 10:01" }), "fundo.espera"],
   [redigir("rotina-nao-rodou", 0, { motivo: "Mac sem contato", quando: "às 14:00" }), "rotina.adiada"],
   [redigir("pedido-a-colega-espera-cota", 0, { agente: "Ada", ia: "Claude", quando: "às 14:00" }), "cota.espera"],
   [redigir("rodando-desta-vez", 0, { maquina: "Mac do Marlon" }), "conta.nota"],

@@ -129,12 +129,23 @@ export const RETRY_AFTER_MAX_MS = 5_000;
 /**
  * Espera no fundo por toda queda (NOD-309, emenda da ADR-045). definido em 2026-10-20: o erro transitório do provedor
  * (sobrecarga, 5xx, rede) volta depois de ~1, ~5 e ~15 min (jitter de ±25%, o mesmo dos conectores), no máximo 3 vezes
- * por cadeia; reinício do servidor e máquina sem contato, até MAX_QUEDAS_POR_PEDIDO (3) quedas; e a cadeia inteira de
+ * por cadeia; reinício do servidor e máquina sem contato, até MAX_QUEDAS_NO_FUNDO_NA_JANELA (5) quedas em 2 h (NOD-386); e a cadeia inteira de
  * pedido de colega, frente e retorno do lote desiste em 24 h (NOD-229). A cota não tem teto aqui: ela tem hora de volta.
  */
 export const ESPERAS_TRANSITORIAS_NO_FUNDO_MS: readonly number[] = [60_000, 5 * 60_000, 15 * 60_000];
 export const TENTATIVAS_TRANSITORIAS_MAX = 3;
 export const PRAZO_DO_FUNDO_MS = 24 * 60 * 60_000;
+
+/**
+ * Queda de infraestrutura no fundo (NOD-386, emenda da ADR-045). definido em 2026-10-28: o reinício do servidor e a queda
+ * com a máquina em contato (o servidor não respondeu a tempo) voltam com espera crescente — ~30 s, 1, 2, 5 e 10 min, com
+ * o jitter de ±25% —, não na hora: numa instabilidade de minutos a volta imediata caía de novo e gastava o teto. O teto
+ * conta só as quedas das últimas 2 h (5 na janela; a 6ª desiste), além das 24 h da cadeia. A máquina sem contato segue
+ * voltando quando ela puxar. Os outros usos de MAX_QUEDAS_POR_PEDIDO (pedido parado, frente caída, espera de comando) não mudam.
+ */
+export const ESPERAS_QUEDA_NO_FUNDO_MS: readonly number[] = [30_000, 60_000, 2 * 60_000, 5 * 60_000, 10 * 60_000];
+export const MAX_QUEDAS_NO_FUNDO_NA_JANELA = 5;
+export const JANELA_QUEDAS_NO_FUNDO_MS = 2 * 60 * 60_000;
 
 /**
  * Sonda logo depois do login do Composio (NOD-208). definido em 2026-10-12: logo depois do `fixarConta`, a

@@ -201,6 +201,28 @@ describeIntegracao("varredor de lease (ADR-010/021, E9.4; ADR-045): conversa com
     });
   });
 
+  it("NOD-386: conversa com a máquina em contato — o Retomar diz que foi o servidor, sem culpar o Mac e sem incidente", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const agora = Date.now();
+      const deps = depsSobreTrx(trx, MARLON, { relogio: () => agora });
+      const { data: criado } = await executar(deps, criarAgente, { dono: "pessoa" });
+      await executar(deps, enviarMensagem, { conversaId: criado.conversa.id, texto: "oi", inventario: PRONTO });
+      const mac = randomUUID();
+      const turnoId = (await executar(deps, despacharTurno, { machineId: mac, inventario: PRONTO })).data.plano?.turnoId ?? "";
+      const quando = agora + LEASE_MS + 1;
+      const queda = await varrerPessoa(deps.tx, MARLON, quando, { inicioDoProcesso: 0, ultimoContato: (id: string) => (id === mac ? quando - 5_000 : null) });
+      expect(queda.interrompidos).toEqual([turnoId]);
+      expect(queda.decisoes).toHaveLength(1);
+      expect(queda.incidenteId ?? null).toBeNull();
+      const frase = (await deps.repos.decisoes.buscar(queda.decisoes[0] ?? ""))?.frase ?? "";
+      expect(frase).toContain("o servidor do nod não respondeu a tempo");
+      expect(frase).not.toMatch(/Mac|máquina/);
+      const sistema = (await deps.repos.mensagens.listarDaConversa(criado.conversa.id)).filter((m) => m.turnoId === turnoId && m.kind === "sistema");
+      expect(sistema.map((m) => m.texto).join(" ")).not.toMatch(/Mac parou|máquina .* parou/);
+      expect(await deps.repos.incidentes.emCurso()).toEqual([]);
+    });
+  });
+
   it("NOD-241 (CA4f/CA4i): a queda grava o último sinal — o varredor, lease_ate − LEASE_MS; o despacho recusado, a hora da recusa; o primeiro valor vence", async () => {
     await withRollback(MARLON, async (trx) => {
       const agora = Date.now();

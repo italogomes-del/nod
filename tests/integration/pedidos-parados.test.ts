@@ -177,6 +177,27 @@ describeIntegracao("pedidos a colega parados (2026-10-08)", () => {
     });
   });
 
+  it("NOD-386: o colega cai com a máquina dele em contato — volta sozinho e quem pediu lê que foi o servidor, sem culpar a máquina", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const sinalEm = Date.now();
+      await trx`update turnos set estado = 'despachando', machine_id = ${randomUUID()}, lease_ate = ${new Date(sinalEm + LEASE_MS)},
+        ultimo_sinal_em = ${new Date(sinalEm)} where id = ${m.tarefa.id}`;
+      const v = await varrerLeases(m.deps.tx, MARLON, sinalEm + LEASE_MS + 10, { inicioDoProcesso: 0, ultimoContato: () => sinalEm + LEASE_MS });
+      expect(v.interrompidos).toEqual([m.tarefa.id]);
+      expect(v.incidenteId ?? null).toBeNull();
+      const voltas = await trx<{ acordar_em: Date | null }[]>`select acordar_em from turnos where retoma_turno_id = ${m.tarefa.id} and estado = 'pendente'`;
+      expect(voltas).toHaveLength(1);
+      expect(voltas[0]!.acordar_em).not.toBeNull();
+      const avisos = (await m.repos.mensagens.listarDaConversa(m.ada.conversaId, 500)).filter((x) => x.kind === "sistema" && x.texto.startsWith("O servidor do nod não respondeu a tempo."));
+      expect(avisos).toHaveLength(1);
+      expect(avisos[0]!.texto).toMatch(/O pedido a Dev volta (às|em) .*, de onde parou\.$/);
+      expect(avisos[0]!.texto).not.toMatch(/máquina|Mac|computador/);
+      expect(await m.pecasDaAda()).toHaveLength(0);
+      expect(await m.repos.incidentes.emCurso()).toEqual([]);
+    });
+  });
+
   it("NOD-241 (CA4j): a janela de 24 h conta da queda — o pedido feito há 25 h cujo colega cai agora é retomado; o que terminou há 25 h não volta", async () => {
     await withRollback(MARLON, async (trx) => {
       const m = await montar(trx);

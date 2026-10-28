@@ -3,7 +3,8 @@ import { expect, it } from "vitest";
 import type { ResultadoTurno, Turno } from "../../src/contracts/turno.ts";
 import { varrerPessoa as varrerLeases } from "../../src/adapters/fundo/varredor-lease.ts";
 import { ENTRADA_DA_NOVA_TENTATIVA, ENTRADA_DA_RETOMADA_DA_QUEDA, RETORNO_DO_LOTE } from "../../src/domain/cota-da-ia.ts";
-import { ESPERAS_TRANSITORIAS_NO_FUNDO_MS, LEASE_MS, TENTATIVAS_TRANSITORIAS_MAX } from "../../src/shared/constantes.ts";
+import { AVISO_FUNDO_PRESO_MS } from "../../src/domain/turno-orfao.ts";
+import { ESPERAS_TRANSITORIAS_NO_FUNDO_MS, LEASE_MS, PRAZO_DO_FUNDO_MS, TENTATIVAS_TRANSITORIAS_MAX } from "../../src/shared/constantes.ts";
 import { assentarTurno } from "../../src/use-cases/assentar-turno.ts";
 import { dispararRotina } from "../../src/use-cases/disparar-rotina.ts";
 import { abrirFrentes, devolverResumo } from "../../src/use-cases/frentes.ts";
@@ -244,6 +245,152 @@ describeIntegracao("NOD-309 (PR 4): a rotina cai por reinício e a próxima exec
       const rotina = await m.repos.rotinas.buscar(m.rotinaId!);
       const seguinte = await dispararRotina(m.deps, { rotina: rotina!, instanteAgendado: sinalEm + 1_000, machineId: randomUUID(), executor: "catcher" });
       expect("turno" in seguinte.data).toBe(true);
+    });
+  });
+});
+
+/**
+ * NOD-386: a queda no fundo com a máquina AINDA em contato (o servidor do nod não respondeu a tempo, a máquina seguiu
+ * puxando) não culpa a máquina nem abre aviso de queda: a volta fica marcada com espera crescente (~30 s, 1, 2, 5, 10 min)
+ * e a linha diz que o servidor não respondeu. O teto é de 5 quedas numa janela de 2 h; queda mais velha não conta.
+ */
+describeIntegracao("NOD-386: queda com a máquina em contato → espera crescente e 'o servidor não respondeu'", () => {
+  const derrubar = async (trx: Trx, m: Awaited<ReturnType<typeof montar>>, turnoId: string, sinalEm: number, maquina: string, contato: number | null) => {
+    await trx`update turnos set estado = 'despachando', machine_id = ${maquina}, lease_ate = ${new Date(sinalEm + LEASE_MS)} where id = ${turnoId}`;
+    return varrerLeases(m.deps.tx, MARLON, sinalEm + LEASE_MS + 10, { inicioDoProcesso: 0, ultimoContato: () => contato });
+  };
+  const voltasDaQueda = async (m: Awaited<ReturnType<typeof montar>>) =>
+    (await m.repos.turnos.listarDaConversa(m.ada.conversaId, 500)).filter((x) => x.origem === "retomada" && x.entradaTexto.startsWith(ENTRADA_DA_RETOMADA_DA_QUEDA));
+  const linhas = async (m: Awaited<ReturnType<typeof montar>>, re: RegExp) => (await m.repos.mensagens.listarDaConversa(m.ada.conversaId, 500)).filter((x) => x.kind === "sistema" && re.test(x.texto ?? ""));
+
+  for (const tipo of TIPOS) {
+    it(`${tipo}: máquina em contato → volta marcada no futuro, UMA linha do servidor, nada culpando a máquina, nenhum aviso`, async () => {
+      await withRollback(MARLON, async (trx) => {
+        const m = await montar(trx, tipo);
+        const sinalEm = Date.now();
+        const notadaEm = sinalEm + LEASE_MS + 10;
+        const v = await derrubar(trx, m, m.alvo.id, sinalEm, randomUUID(), notadaEm - 1_000);
+        expect(v.interrompidos).toContain(m.alvo.id);
+        expect(v.incidenteId ?? null).toBeNull();
+        expect(await m.repos.incidentes.emCurso()).toEqual([]);
+        expect(await m.repos.turnos.buscar(m.alvo.id)).toMatchObject({ estado: "interrompido", motivoInterrupcao: "maquina_sem_contato" });
+        const voltas = await voltasDaQueda(m);
+        expect(voltas).toHaveLength(1);
+        // 1ª queda: ~30 s ±25%, nunca "agora".
+        expect(voltas[0]!.acordarEm).toBeGreaterThanOrEqual(notadaEm + 22_500);
+        expect(voltas[0]!.acordarEm).toBeLessThanOrEqual(notadaEm + 37_500);
+        // A volta diz ao bot que quem falhou foi o servidor, não a máquina.
+        expect(voltas[0]!.entradaTexto).toContain("(o servidor do nod não respondeu a tempo)");
+        expect(await linhas(m, /^O servidor do nod não respondeu a tempo\. .* volta (às|em) /)).toHaveLength(1);
+        expect(await linhas(m, /sem contato|parou de responder|fica na fila e retoma quando/)).toHaveLength(0);
+        expect((await m.repos.decisoes.doTurno(m.alvo.id)).filter((d) => d.tipo === "retomar_turno")).toEqual([]);
+      });
+    });
+  }
+
+  it("a linha do servidor promete uma hora: se a volta não for pega, o aviso de fundo preso ainda sai, contado da volta", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx, "pedido");
+      const sinalEm = Date.now();
+      await derrubar(trx, m, m.alvo.id, sinalEm, randomUUID(), sinalEm + LEASE_MS);
+      const volta = (await voltasDaQueda(m)).at(-1)!;
+      const ids = async (agora: number) => (await m.repos.turnos.fundosPresos(agora, { avisoMs: AVISO_FUNDO_PRESO_MS, prazoMs: PRAZO_DO_FUNDO_MS })).map((c) => c.id);
+      // A volta marcada para daqui a 5 min: 11 min depois da criação ainda não faz 10 min da volta.
+      const acordar = sinalEm + 5 * 60_000;
+      await trx`update turnos set acordar_em = ${new Date(acordar)}, criado_em = ${new Date(sinalEm)} where id = ${volta.id}`;
+      expect(await ids(sinalEm + 11 * 60_000)).not.toContain(volta.id);
+      // 10 min depois da volta sem ninguém pegar: a linha do servidor não conta como aviso — o aviso de preso sai.
+      expect(await ids(acordar + AVISO_FUNDO_PRESO_MS + 1_000)).toContain(volta.id);
+    });
+  });
+
+  it("QA do NOD-386: a 2ª queda do servidor não repete a linha; a seguinte com a máquina ausente ainda diz que é a máquina", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx, "pedido");
+      const maquina = randomUUID();
+      const inicio = Date.now();
+      await derrubar(trx, m, m.alvo.id, inicio, maquina, inicio + LEASE_MS);
+      let atual = (await voltasDaQueda(m)).at(-1)!;
+      // 2ª queda, de novo com a máquina em contato: a cadeia já disse "o servidor não respondeu".
+      await derrubar(trx, m, atual.id, inicio + 60_000, maquina, inicio + 60_000 + LEASE_MS);
+      atual = (await voltasDaQueda(m)).at(-1)!;
+      expect(await linhas(m, /^O servidor do nod não respondeu a tempo\./)).toHaveLength(1);
+      // 3ª queda, agora com a máquina sem contato há 10 min: a causa mudou, a linha da máquina sai.
+      const sinalEm = inicio + 2 * 60_000;
+      const v = await derrubar(trx, m, atual.id, sinalEm, maquina, sinalEm - 10 * 60_000);
+      expect(v.interrompidos).toContain(atual.id);
+      expect(await linhas(m, /fica na fila e retoma quando/)).toHaveLength(1);
+      expect(await linhas(m, /^O servidor do nod não respondeu a tempo\./)).toHaveLength(1);
+    });
+  });
+
+  it("reinício do servidor com a máquina em contato segue o reinício: nenhuma linha, nem do servidor nem da máquina", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx, "pedido");
+      const sinalEm = Date.now();
+      await trx`update turnos set estado = 'despachando', machine_id = ${randomUUID()}, lease_ate = ${new Date(sinalEm + LEASE_MS)} where id = ${m.alvo.id}`;
+      await varrerLeases(m.deps.tx, MARLON, sinalEm + LEASE_MS + 10, { inicioDoProcesso: sinalEm + 1, ultimoContato: () => sinalEm + LEASE_MS });
+      expect(await m.repos.turnos.buscar(m.alvo.id)).toMatchObject({ estado: "interrompido", motivoInterrupcao: "reinicio_servidor" });
+      expect(await voltasDaQueda(m)).toHaveLength(1);
+      expect(await linhas(m, /servidor do nod não respondeu|fica na fila e retoma quando/)).toHaveLength(0);
+    });
+  });
+
+  it("rotina que desiste no teto com a máquina em contato: o histórico diz 'servidor_nao_respondeu', não culpa a máquina", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const inicio = Date.now();
+      const m = await montar(trx, "rotina", { proximaJanelaEm: inicio + 24 * 60 * 60_000 });
+      const maquina = randomUUID();
+      let atual = m.alvo;
+      for (let i = 0; i < 6; i++) {
+        const sinalEm = inicio + i * 60_000;
+        await derrubar(trx, m, atual.id, sinalEm, maquina, sinalEm + LEASE_MS);
+        atual = (await voltasDaQueda(m)).at(-1) ?? atual;
+      }
+      const execucoes = await m.repos.rotinaExecucoes.listar(m.rotinaId!);
+      expect(execucoes).toEqual([expect.objectContaining({ desfecho: "interrompida", motivo: "servidor_nao_respondeu" })]);
+    });
+  });
+
+  it("máquina sem contato segue como hoje: volta na hora, a linha da máquina e o aviso de queda", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx, "rotina");
+      const sinalEm = Date.now();
+      const v = await derrubar(trx, m, m.alvo.id, sinalEm, randomUUID(), sinalEm - 10 * 60_000);
+      expect(v.incidenteId).toBeTruthy();
+      const voltas = await voltasDaQueda(m);
+      expect(voltas).toHaveLength(1);
+      expect(voltas[0]!.acordarEm ?? sinalEm + LEASE_MS + 10).toBeLessThanOrEqual(sinalEm + LEASE_MS + 10);
+      expect(await linhas(m, /fica na fila e retoma quando/)).toHaveLength(1);
+      expect(await linhas(m, /servidor do nod não respondeu/)).toHaveLength(0);
+    });
+  });
+
+  it("teto: 4 quedas na janela de 2 h ainda esperam (a 5ª espera mais); a 5ª conta e a 6ª desiste; quedas de mais de 2 h não contam", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx, "pedido");
+      const maquina = randomUUID();
+      const inicio = Date.now();
+      // Uma queda velha (3 h atrás) na cadeia: fora da janela.
+      await derrubar(trx, m, m.alvo.id, inicio - 3 * 60 * 60_000, maquina, inicio - 3 * 60 * 60_000 + LEASE_MS);
+      let atual = (await voltasDaQueda(m)).at(-1)!;
+      const esperas: number[] = [];
+      for (let i = 0; i < 5; i++) {
+        const sinalEm = inicio + i * 60_000;
+        const v = await derrubar(trx, m, atual.id, sinalEm, maquina, sinalEm + LEASE_MS);
+        expect(v.interrompidos).toContain(atual.id);
+        const voltas = await voltasDaQueda(m);
+        expect(voltas.at(-1)!.id, `queda ${i + 1} na janela ganhou volta`).not.toBe(atual.id);
+        atual = voltas.at(-1)!;
+        esperas.push((atual.acordarEm ?? 0) - (sinalEm + LEASE_MS + 10));
+      }
+      // Espera crescente: cada degrau acima do teto de jitter do anterior não é garantido, mas a 5ª (10 min) > a 1ª (30 s).
+      expect(esperas[0]).toBeLessThanOrEqual(37_500);
+      expect(esperas[4]).toBeGreaterThanOrEqual(7.5 * 60_000);
+      // 6ª queda na janela (5 já contadas): desiste, sem volta nova.
+      const sinalEm = inicio + 5 * 60_000;
+      await derrubar(trx, m, atual.id, sinalEm, maquina, sinalEm + LEASE_MS);
+      expect((await voltasDaQueda(m)).at(-1)!.id).toBe(atual.id);
     });
   });
 });

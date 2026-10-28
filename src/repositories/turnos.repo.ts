@@ -13,6 +13,7 @@ import { ESPERA_MAXIMA_FUNDO_MS } from "../domain/memoria-mac.ts";
 import { porChegada } from "../domain/ordem-das-falas.ts";
 import { MOTIVOS_DE_QUEDA, MOTIVOS_FALHA_SEM_QUEDA } from "../domain/pedido-parado.ts";
 import { paraProfundidade } from "../domain/profundidade.ts";
+import { ABERTURA_DA_ESPERA_DO_SERVIDOR } from "../domain/redacao.ts";
 import { PRAZO_PRESO_SEM_CONTATO_MS, type FatosFundoPreso, type FatosTurnoOrfao, type FundoPreso } from "../domain/turno-orfao.ts";
 import type { VoltaDaCadeia } from "../domain/voltas-sem-novidade.ts";
 import { abrirTxEscopada } from "../db/tx.ts";
@@ -531,9 +532,11 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
 
     /**
      * NOD-309 (PR 3): quantas vezes a cadeia (a raiz e as retomadas dela, em qualquer profundidade) caiu por infraestrutura, fora `exceto` — o teto
-     * de quedas da espera no fundo (MAX_QUEDAS_POR_PEDIDO). A mesma régua das consultas de pedido parado e frente caída.
+     * de quedas da espera no fundo. A mesma régua das consultas de pedido parado e frente caída.
+     * revisto em 2026-10-28 (NOD-386): só as quedas de `desde` em diante (a janela de 2 h, JANELA_QUEDAS_NO_FUNDO_MS), pela
+     * hora da queda (`ultimo_sinal_em`, 0076; sem ela, a criação do turno).
      */
-    async quedasDaCadeia(raizId: string, exceto: string): Promise<number> {
+    async quedasDaCadeia(raizId: string, exceto: string, desde: number): Promise<number> {
       const [l] = await conn<{ n: number }[]>`
         with recursive cadeia as (
           select id from turnos where tenant_id = ${escopo.tenantId} and id = ${raizId}
@@ -543,7 +546,8 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
         select count(*)::int as n from turnos q join cadeia c on c.id = q.id
         where q.tenant_id = ${escopo.tenantId} and q.id <> ${exceto} and q.estado = 'interrompido'
           and q.motivo_interrupcao::text = any(${[...MOTIVOS_DE_QUEDA]}::text[])
-          and coalesce(q.motivo_falha::text, '') <> all(${[...MOTIVOS_FALHA_SEM_QUEDA]}::text[])`;
+          and coalesce(q.motivo_falha::text, '') <> all(${[...MOTIVOS_FALHA_SEM_QUEDA]}::text[])
+          and coalesce(q.ultimo_sinal_em, q.criado_em) >= ${data(desde)}`;
       return l?.n ?? 0;
     },
 
@@ -1224,6 +1228,7 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
               when t.trabalho_id is not null then 'task'
               when r.origem = 'rotina' then 'rotina' end) as fundo,
             exists (select 1 from mensagens m where m.tenant_id = t.tenant_id and m.conversa_id = t.conversa_id and m.assunto = 'fundo.espera'
+              and not starts_with(m.texto, ${ABERTURA_DA_ESPERA_DO_SERVIDOR})
               and m.turno_id in (select c.id from turnos c where c.tenant_id = t.tenant_id and (c.id = r.id or c.retoma_turno_id = r.id))) as avisado,
             (t.trabalho_id is not null and exists (select 1 from trabalhos dep where dep.tenant_id = w.tenant_id and dep.id = w.depois_de_trabalho_id
               and dep.estado not in ('terminado', 'parado', 'falhou'))) as depois_de_aberto,
@@ -1237,7 +1242,7 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
           where t.tenant_id = ${escopo.tenantId} and t.owner_id = ${escopo.pessoaId} and t.estado = 'pendente' and t.origem <> 'ligacao'
             and t.pessoa_esperando = false and t.parar_solicitado_em is null
             and (t.acordar_em is null or t.acordar_em <= ${data(agora)})
-            and t.criado_em <= ${data(agora - p.avisoMs)}
+            and greatest(t.criado_em, coalesce(t.acordar_em, t.criado_em)) <= ${data(agora - p.avisoMs)}
             -- ADR-121 (NOD-92): o fundo que espera a máquina na nuvem acordar não está preso; o prazo não corre.
             and not ${nuvemSuspendePrazo(conn, conn`t.tenant_id`, alvoDoTurno(conn, agora))}
         ) x

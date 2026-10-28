@@ -81,6 +81,11 @@ describe("NOD-309 (PR 4): decidirFundoPreso", () => {
     expect(decidirFundoPreso({ ...base, criadoEm: T - 9 * 60_000 }, T, DIA)).toEqual({ tipo: "nada" });
     expect(decidirFundoPreso({ ...base, avisado: true }, T, DIA)).toEqual({ tipo: "nada" });
   });
+  it("NOD-386: o fundo que esperou uma volta conta os 10 min a partir da volta, não da criação", () => {
+    const voltou = { ...base, criadoEm: T - 3 * 3_600_000, acordarEm: T - 2 * 60_000 };
+    expect(decidirFundoPreso(voltou, T, DIA)).toEqual({ tipo: "nada" });
+    expect(decidirFundoPreso({ ...voltou, acordarEm: T - 11 * 60_000 }, T, DIA)).toEqual({ tipo: "avisar" });
+  });
   it("a cota no limite tem a nota dela; a faixa ocupada e a task anterior não são a máquina; a conversa não é fundo", () => {
     expect(decidirFundoPreso({ ...base, cotaNoLimite: true }, T, DIA)).toEqual({ tipo: "nada" });
     expect(decidirFundoPreso({ ...base, faixaOcupada: true }, T, DIA)).toEqual({ tipo: "nada" });

@@ -29,6 +29,8 @@ const MOTIVO_HUMANO: Readonly<Record<string, string>> = {
   // NOD-309 (definido em 2026-10-20): o erro transitório do provedor passou da próxima janela. A máquina sem contato e o
   // reinício usam os rótulos do topo ("não rodou · o servidor reiniciou, volta 14:00").
   erro_do_provedor: "o serviço da IA ficou instável",
+  // NOD-386: a queda com a máquina em contato passou da próxima janela (quem falhou foi o servidor).
+  servidor_nao_respondeu: "o servidor do nod não respondeu a tempo",
   // definido em 2026-10-15 (NOD-270): a pergunta das voltas sem novidade ficou sem resposta e a janela seguinte seguiu.
   voltas_sem_novidade: "pergunta sem resposta, fechada pela janela seguinte",
   // NOD-251/NOD-275 (definido em 2026-10-15): a máquina recusou o turno no despacho, ou a pessoa pediu Parar.

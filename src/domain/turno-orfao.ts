@@ -161,7 +161,8 @@ export function decidirFundoPreso(f: FatosFundoPreso, agora: number, prazoDoFund
   if (f.acordarEm !== null && f.acordarEm > agora) return { tipo: "nada" };
   const desiste = f.fundo === "colega" || f.fundo === "frente" || f.fundo === "lote";
   if (desiste && agora - f.inicioDaCadeia >= prazoDoFundoMs) return { tipo: "desistir" };
-  if (!f.avisado && !f.cotaNoLimite && agora - f.criadoEm >= AVISO_FUNDO_PRESO_MS) return { tipo: "avisar" };
+  // NOD-386: a volta marcada (acordar_em) só fica pegável na hora dela; os 10 min contam dali, não da criação.
+  if (!f.avisado && !f.cotaNoLimite && agora - Math.max(f.criadoEm, f.acordarEm ?? 0) >= AVISO_FUNDO_PRESO_MS) return { tipo: "avisar" };
   return { tipo: "nada" };
 }
 

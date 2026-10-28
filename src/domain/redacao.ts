@@ -36,6 +36,7 @@ export type ChaveRedacao =
   | "pedido-a-colega-espera-cota"
   | "retorno-do-lote-caiu"
   | "fundo-espera-maquina"
+  | "fundo-espera-servidor"
   | "fundo-nova-tentativa"
   | "fundo-desistiu"
   | "rotina-nao-rodou"
@@ -122,6 +123,9 @@ const CATALOGO: Record<ChaveRedacao, string> = {
   // definido em 2026-10-20 (NOD-309): o fundo espera por toda queda, com UM aviso por cadeia. {pedido} já com artigo
   // ("Este pedido", "Esta frente", "Esta execução da rotina"); {quando} = "às 14:30" (quandoDaFrase).
   "fundo-espera-maquina": "{maquina} está sem contato. {pedido} fica na fila e retoma quando o contato voltar, de onde parou.",
+  // NOD-386: o lease venceu com a máquina em contato (o servidor não atendeu a renovação ou a entrega). Não cita a máquina:
+  // ela estava de pé. {quando} = a volta com espera crescente ("às 14:30").
+  "fundo-espera-servidor": "O servidor do nod não respondeu a tempo. {pedido} volta {quando}, de onde parou.",
   "fundo-nova-tentativa": "O serviço do {ia} está instável. {pedido} tenta de novo {quando}: tentativa {tentativa} de {maximo}.",
   "fundo-desistiu": "{pedido} caiu ({motivo}) e parou de tentar: {porque}. Peça de novo quando quiser.",
   // NOD-309: a janela que nenhuma queda pode rodar a tempo — uma linha por janela, na conversa da rotina e no histórico.
@@ -216,6 +220,18 @@ export type MaquinaDaQueda = { nome: string; plataforma: PlataformaMaquina | nul
 export function motivoDaQuedaEmPortugues(maquina: MaquinaDaQueda | null): string {
   return maquina?.plataforma === "linux" ? `a máquina ${maquina.nome} parou de responder (desligada, sem rede ou motor parado)` : MOTIVO_EM_PORTUGUES.maquina_sem_contato;
 }
+
+/**
+ * NOD-386 (definido em 2026-10-28): o motivo da queda quando o lease venceu com a máquina em contato — quem não respondeu
+ * foi o servidor, e a frase não cita a máquina. O banco continua gravando `maquina_sem_contato` (sem valor novo no enum).
+ */
+export const MOTIVO_SERVIDOR_NAO_RESPONDEU = "o servidor do nod não respondeu a tempo";
+
+/**
+ * NOD-386: o começo da linha `fundo-espera-servidor`. Ela promete uma hora de volta e por isso não conta como o aviso de
+ * fundo preso da cadeia (turnos.repo `fundosPresos`): se a volta não for pega, o aviso ainda sai.
+ */
+export const ABERTURA_DA_ESPERA_DO_SERVIDOR = "O servidor do nod não respondeu a tempo.";
 
 /**
  * O molde cru de uma chave, com os `{param}` por preencher (definido em 2026-10-18, chat limpo): o backfill do assunto

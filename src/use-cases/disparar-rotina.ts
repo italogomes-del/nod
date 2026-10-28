@@ -389,6 +389,8 @@ const MOTIVO_NAO_RODOU: Readonly<Record<MotivoNaoRodouRotina, string>> = {
   maquina_sem_contato: "o computador do bot ficou sem contato",
   reinicio_servidor: "o servidor reiniciou",
   erro_do_provedor: "a IA ficou fora do ar",
+  // NOD-386: a máquina seguiu em contato e quem falhou foi o servidor; a linha não culpa a máquina.
+  servidor_nao_respondeu: "o servidor do nod não respondeu a tempo",
 };
 
 /** "às 14:00" (no fuso da rotina; "em 21/10 às 14:00" se for outro dia) ou, sem hora, na próxima execução da agenda. */

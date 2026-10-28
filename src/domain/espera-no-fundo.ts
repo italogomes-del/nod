@@ -1,7 +1,6 @@
 import type { MotivoNaoRodouRotina } from "../contracts/motivos.ts";
-import { ESPERAS_TRANSITORIAS_NO_FUNDO_MS, PRAZO_DO_FUNDO_MS, TENTATIVAS_TRANSITORIAS_MAX } from "../shared/constantes.ts";
+import { ESPERAS_QUEDA_NO_FUNDO_MS, ESPERAS_TRANSITORIAS_NO_FUNDO_MS, MAX_QUEDAS_NO_FUNDO_NA_JANELA, PRAZO_DO_FUNDO_MS, TENTATIVAS_TRANSITORIAS_MAX } from "../shared/constantes.ts";
 import { comJitter } from "./nova-tentativa.ts";
-import { MAX_QUEDAS_POR_PEDIDO } from "./pedido-parado.ts";
 
 /**
  * Trabalho de fundo não se perde por nenhuma queda (definido em 2026-10-20, NOD-309, emenda da ADR-045). Uma regra só
@@ -10,8 +9,8 @@ import { MAX_QUEDAS_POR_PEDIDO } from "./pedido-parado.ts";
  * NOD-274). A conversa com a pessoa fica fora: ela continua com o card Retomar.
  *
  * Pura: relógio e aleatório entram por parâmetro. Quem chama decide antes o que vence tudo: Parar (`parado_pela_pessoa`
- * nunca retoma) e o pedido de colega cujo pedinte já desistiu. No modo local (sem `ultimoContato`) a máquina está sempre
- * presente: quem chama passa `reinicio_servidor` no lugar de `maquina_sem_contato`.
+ * nunca retoma) e o pedido de colega cujo pedinte já desistiu. No modo local (sem `ultimoContato`) não há como saber se
+ * a máquina estava em contato: `maquinaPresente` vem falso e a volta é quando ela puxar (NOD-386).
  */
 export const CAUSAS_DE_ESPERA_NO_FUNDO = ["cota", "reinicio_servidor", "maquina_sem_contato", "erro_transitorio"] as const;
 export type CausaDeEsperaNoFundo = (typeof CAUSAS_DE_ESPERA_NO_FUNDO)[number];
@@ -23,8 +22,18 @@ export type EntradaEsperaNoFundo = {
   causa: CausaDeEsperaNoFundo;
   /** Quedas transitórias que a cadeia já teve ANTES desta (turnos.tentativas_transitorias da origem). */
   tentativasTransitorias: number;
-  /** Quedas de infraestrutura (reinício, máquina) que a cadeia já teve ANTES desta. */
+  /**
+   * Quedas de infraestrutura (reinício, máquina) que a cadeia já teve ANTES desta, só as da janela de 2 h
+   * (JANELA_QUEDAS_NO_FUNDO_MS, NOD-386): quem chama conta com `quedasDaCadeia(..., desde)`.
+   */
   quedas: number;
+  /**
+   * NOD-386: a máquina do turno estava em contato quando o lease venceu (modo compartilhado, contato < OFFLINE_MS). Com
+   * ela presente, quem não respondeu foi o servidor: `maquina_sem_contato` volta com espera crescente, como o reinício.
+   * Ausente (ou modo local) = a máquina sumiu de fato e a volta é quando ela puxar. Quem chama passa aqui o "servidor
+   * falhou" do varredor (máquina em contato no modo compartilhado). Só vale para `maquina_sem_contato`.
+   */
+  maquinaPresente: boolean;
   agora: number;
   /** Quando a cadeia começou (o turno raiz): o prazo de 24 h conta daqui. */
   inicioDaCadeia: number;
@@ -60,14 +69,23 @@ export function esperaTransitoriaNoFundo(n: number, aleatorio: number): number {
 }
 
 /**
- * Esperar, não rodar esta janela, ou desistir. Ordem: o teto da causa (3 transitórias, 3 quedas), o prazo da cadeia (24 h,
+ * NOD-386: a espera antes da volta `n` depois de uma queda de infraestrutura com o servidor em falta (reinício, ou a máquina
+ * em contato): ~30 s, 1, 2, 5 e 10 min com jitter de ±25%; da 5ª em diante, ~10 min.
+ */
+export function esperaQuedaNoFundo(n: number, aleatorio: number): number {
+  const i = Math.min(Math.max(n, 1), ESPERAS_QUEDA_NO_FUNDO_MS.length) - 1;
+  return comJitter(ESPERAS_QUEDA_NO_FUNDO_MS[i] ?? 0, aleatorio);
+}
+
+/**
+ * Esperar, não rodar esta janela, ou desistir. Ordem: o teto da causa (3 transitórias; 5 quedas nas últimas 2 h, NOD-386), o prazo da cadeia (24 h,
  * menos para a cota, que tem hora de volta e nunca teve teto — o fim de semana do plano semanal espera), e por último a
  * fronteira da rotina: volta em ou depois da próxima janela = `nao_rodou`, sem empilhar. A volta "quando o Mac voltar"
  * (null) não tem hora para comparar: a rotina espera, e a janela seguinte a fecha como `nao_rodou` (disparar-rotina).
  */
 export function decidirEsperaNoFundo(e: EntradaEsperaNoFundo): DecisaoEsperaNoFundo {
   if (e.causa === "erro_transitorio" && e.tentativasTransitorias >= TENTATIVAS_TRANSITORIAS_MAX) return { tipo: "desistir", motivo: "tentativas_esgotadas" };
-  if ((e.causa === "reinicio_servidor" || e.causa === "maquina_sem_contato") && e.quedas >= MAX_QUEDAS_POR_PEDIDO) return { tipo: "desistir", motivo: "quedas_esgotadas" };
+  if ((e.causa === "reinicio_servidor" || e.causa === "maquina_sem_contato") && e.quedas >= MAX_QUEDAS_NO_FUNDO_NA_JANELA) return { tipo: "desistir", motivo: "quedas_esgotadas" };
 
   const voltaEm = voltaDaCausa(e);
   // A rotina tem prazo próprio (a próxima janela); o resto do fundo, 24 h desde o começo da cadeia.
@@ -76,7 +94,9 @@ export function decidirEsperaNoFundo(e: EntradaEsperaNoFundo): DecisaoEsperaNoFu
     if (e.agora >= limite || (voltaEm !== null && voltaEm >= limite)) return { tipo: "desistir", motivo: "prazo_esgotado" };
   }
   if (e.ehRotina && e.proximaExecucao !== null && voltaEm !== null && voltaEm >= e.proximaExecucao) {
-    return { tipo: "nao_rodou", voltaEm, motivo: MOTIVO_NAO_RODOU_DA_CAUSA[e.causa] };
+    // NOD-386: com a máquina em contato, quem falhou foi o servidor — o motivo não culpa a máquina.
+    const motivo = e.causa === "maquina_sem_contato" && e.maquinaPresente ? "servidor_nao_respondeu" : MOTIVO_NAO_RODOU_DA_CAUSA[e.causa];
+    return { tipo: "nao_rodou", voltaEm, motivo };
   }
   const tentativa = e.causa === "erro_transitorio" ? e.tentativasTransitorias + 1 : e.causa === "cota" ? 1 : e.quedas + 1;
   return { tipo: "esperar", voltaEm, tentativa };
@@ -85,8 +105,9 @@ export function decidirEsperaNoFundo(e: EntradaEsperaNoFundo): DecisaoEsperaNoFu
 function voltaDaCausa(e: EntradaEsperaNoFundo): number | null {
   switch (e.causa) {
     case "cota": return e.voltaDaCota ?? null;
-    case "reinicio_servidor": return e.agora;
-    case "maquina_sem_contato": return null;
+    // NOD-386: o servidor em falta volta com espera crescente; a máquina que sumiu de fato, quando ela puxar (null).
+    case "reinicio_servidor": return e.agora + esperaQuedaNoFundo(e.quedas + 1, e.aleatorio);
+    case "maquina_sem_contato": return e.maquinaPresente ? e.agora + esperaQuedaNoFundo(e.quedas + 1, e.aleatorio) : null;
     case "erro_transitorio": return e.agora + esperaTransitoriaNoFundo(e.tentativasTransitorias + 1, e.aleatorio);
   }
 }

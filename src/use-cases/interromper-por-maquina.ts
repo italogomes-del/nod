@@ -3,7 +3,9 @@ import type { Incidente } from "../contracts/incidente.ts";
 import type { Turno } from "../contracts/turno.ts";
 import { assuntoDaInterrupcao } from "../domain/destino-no-chat.ts";
 import { destinoDaQueda, juntarQuedas, motivoDaQueda, ultimoSinalDoTurno, type MotivoDaQueda, type QuedaDeMaquina } from "../domain/incidente.ts";
-import { motivoDaQuedaEmPortugues, motivoEmPortugues, redigir } from "../domain/redacao.ts";
+import { MOTIVO_SERVIDOR_NAO_RESPONDEU, motivoDaQuedaEmPortugues, motivoEmPortugues, redigir } from "../domain/redacao.ts";
+import { quandoDaFrase } from "../domain/erro-fornecedor.ts";
+import { JANELA_QUEDAS_NO_FUNDO_MS } from "../shared/constantes.ts";
 import { ehVoltaDoFundo, entradaDaRetomadaDaQueda } from "../domain/cota-da-ia.ts";
 import { decidirEsperaNoFundo } from "../domain/espera-no-fundo.ts";
 import { trabalhoAberto } from "../domain/trabalho.ts";
@@ -20,7 +22,10 @@ import { sincronizarDoTurno } from "./trabalhos.ts";
 import { propagarSessaoDoTurno } from "./sessao-do-turno.ts";
 
 /** O que a regra de queda usa de Deps: o varredor de lease (laço de fundo) monta só isto. */
-export type DepsQueda = Pick<Deps, "repos" | "escopo" | "agora">;
+export type DepsQueda = Pick<Deps, "repos" | "escopo" | "agora"> & {
+  /** [0, 1): o jitter da espera crescente do fundo (NOD-386). Ausente = Math.random; o teste fixa. */
+  aleatorio?: () => number;
+};
 
 /** A retomada anterior da mesma conversa sai quando uma queda nova abre outra (ADR-045). */
 export const REGRA_RETOMADA_SUBSTITUIDA = "regra:retomada_substituida" as const;
@@ -46,8 +51,13 @@ export type SaidaQuedaDaMaquina = {
  */
 type MotivoDoVarredor = MotivoDaQueda | "maquina_removida";
 
-/** Um turno JÁ interrompido pela queda, com o que se sabe dela. */
-type Caido = { turno: Turno; motivo: MotivoDoVarredor; perdidoDesde: number; maquinaPresente: boolean };
+/**
+ * Um turno JÁ interrompido pela queda, com o que se sabe dela. `servidorFalhou` (NOD-386): o lease venceu com a máquina
+ * em contato no modo compartilhado (o varredor viu o contato dela < OFFLINE_MS) — quem não respondeu foi o servidor. A
+ * frase não cita a máquina, não abre aviso de máquina e o fundo volta com espera crescente. O motivo gravado segue
+ * `maquina_sem_contato` (sem valor novo no enum).
+ */
+type Caido = { turno: Turno; motivo: MotivoDoVarredor; perdidoDesde: number; maquinaPresente: boolean; servidorFalhou: boolean };
 
 /**
  * O que acontece com UM turno derrubado. Fundo (NOD-309, PR 3): volta para a fila sozinho (aposQuedaNoFundo); só o que a
@@ -64,13 +74,14 @@ async function consequencias(deps: DepsQueda, c: Caido & { rotinaId: string | nu
   const autoria = autoriaAgente({ agenteId: turno.agenteId, contaDeExecucao: turno.ownerId, executor: "catcher", machineId: turno.machineId, decididoPor: "regra:varredor_lease" });
   // NOD-309 (PR 3, emenda da ADR-045): o trabalho de fundo não ganha "Retomar" nem cai calado — volta para a fila sozinho.
   const noFundo = continuadas > 0 ? null : await aposQuedaNoFundo(deps, c, autoria);
-  events.push(evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { motivo, machine_id: turno.machineId, perdido_desde: c.perdidoDesde, ...(noFundo?.dados ?? {}) } }));
+  events.push(evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { motivo, machine_id: turno.machineId, perdido_desde: c.perdidoDesde, ...(c.servidorFalhou ? { servidor_falhou: 1 } : {}), ...(noFundo?.dados ?? {}) } }));
   if (noFundo) {
     events.push(...noFundo.events);
     return { decisaoId: null, rotinaId: c.rotinaId, rotina: c.rotinaId !== null };
   }
   if (c.rotinaId) {
-    const r = await registrarDesfechoRotina(deps, { turnoId: turno.id, desfecho: "interrompida", motivo });
+    // NOD-386: a rotina que desistiu com a máquina em contato não culpa a máquina no histórico.
+    const r = await registrarDesfechoRotina(deps, { turnoId: turno.id, desfecho: "interrompida", motivo: c.servidorFalhou && motivo === "maquina_sem_contato" ? "servidor_nao_respondeu" : motivo });
     events.push(...(r.events ?? []));
     return { decisaoId: null, rotinaId: c.rotinaId, rotina: true };
   }
@@ -87,8 +98,9 @@ async function consequencias(deps: DepsQueda, c: Caido & { rotinaId: string | nu
     if (fechada) events.push(evento(deps.escopo, { kind: "decisao_decidida", autoria: { ...autoria, decidido_por: REGRA_RETOMADA_SUBSTITUIDA }, agora, conversaId: fechada.conversaId, turnoId: fechada.turnoId, dados: { decisao_id: fechada.id, tipo: fechada.tipo, regra: REGRA_RETOMADA_SUBSTITUIDA } }));
   }
   // definido em 2026-10-09: a queda nomeia a máquina Linux (a VM do motor) em vez de culpar o Mac.
-  const maquina = motivo === "maquina_sem_contato" && turno.machineId ? await deps.repos.maquinaTokens.identificar(turno.machineId) : null;
-  const frase = redigir("turno-interrompido", agora, { motivo: motivo === "maquina_sem_contato" ? motivoDaQuedaEmPortugues(maquina) : motivoEmPortugues(motivo) });
+  // NOD-386: com a máquina em contato, quem falhou foi o servidor — a frase não a cita.
+  const maquina = motivo === "maquina_sem_contato" && !c.servidorFalhou && turno.machineId ? await deps.repos.maquinaTokens.identificar(turno.machineId) : null;
+  const frase = redigir("turno-interrompido", agora, { motivo: motivo === "maquina_sem_contato" ? (c.servidorFalhou ? MOTIVO_SERVIDOR_NAO_RESPONDEU : motivoDaQuedaEmPortugues(maquina)) : motivoEmPortugues(motivo) });
   const decisao = await deps.repos.decisoes.criar({ tipo: "retomar_turno", agenteId: turno.agenteId, conversaId: turno.conversaId, turnoId: turno.id, prazoDecisaoEm: agora + (prazoMs ?? PRAZO_DECISAO_PADRAO_MS), frase });
   const aviso = await deps.repos.mensagens.criar({ conversaId: turno.conversaId, turnoId: turno.id, autoria, kind: "sistema", assunto: assuntoDaInterrupcao(motivo), texto: frase, confianca: "confiavel" });
   if (decisao) events.push(evento(deps.escopo, { kind: "decisao_criada", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { decisao_id: decisao.id, tipo: "retomar_turno" } }));
@@ -99,10 +111,12 @@ async function consequencias(deps: DepsQueda, c: Caido & { rotinaId: string | nu
 /**
  * definido em 2026-10-20 (NOD-309, PR 3, emenda da ADR-045): o trabalho de FUNDO derrubado no meio do turno — rotina,
  * pedido de colega, frente e retorno do lote — volta para a fila sozinho, pela regra única do fundo
- * (domain/espera-no-fundo.ts). Reinício do servidor: a retomada entra agora. Máquina sem contato: entra agora também e
- * fica pendente até a máquina voltar a puxar — é o "quando o Mac voltar"; a linha diz isso uma vez por cadeia (a task
- * sempre, é o fio dela) e quem pediu ao colega lê uma vez. O reinício não avisa (ADR-045: não é culpa do Mac, e a volta
- * é imediata). A rotina cuja volta passaria da próxima janela fica `nao_rodou` com o motivo; o teto (3 quedas por cadeia)
+ * (domain/espera-no-fundo.ts). Reinício do servidor: a retomada acorda depois da espera crescente (NOD-386: ~30 s, 1, 2,
+ * 5, 10 min). Máquina sem contato: entra agora e fica pendente até a máquina voltar a puxar — é o "quando o Mac voltar";
+ * a linha diz isso uma vez por cadeia (a task sempre, é o fio dela) e quem pediu ao colega lê uma vez. Com a máquina em
+ * contato (NOD-386, `servidorFalhou`), quem falhou foi o servidor: espera crescente como o reinício, e a linha diz "O
+ * servidor do nod não respondeu a tempo", sem citar a máquina. O reinício não avisa (ADR-045: não é culpa do Mac, e a
+ * primeira volta é em ~30 s). A rotina cuja volta passaria da próxima janela fica `nao_rodou` com o motivo; o teto (5 quedas em 2 h)
  * ou o prazo (24 h) devolve null, e vale o caminho de antes (o "Retomar", o histórico da rotina, o aviso do pedido parado).
  * Quem pediu Parar não chega aqui (aposParada); a ligação não é fundo.
  */
@@ -117,51 +131,70 @@ async function aposQuedaNoFundo(deps: DepsQueda, c: Caido & { rotinaId: string |
   const retomaTurnoId = turno.retomaTurnoId ?? turno.id;
   const raiz = await raizDaCadeia(deps, turno);
   const daRotina = c.rotinaId ? await rotinaDoTurno(deps.repos, turno.id) : null;
-  const quedas = await deps.repos.turnos.quedasDaCadeia(raiz.id, turno.id);
+  // NOD-386: o teto conta só as quedas das últimas 2 h; a espera crescente vem da mesma conta.
+  const quedas = await deps.repos.turnos.quedasDaCadeia(raiz.id, turno.id, agora - JANELA_QUEDAS_NO_FUNDO_MS);
   const decisao = decidirEsperaNoFundo({
     causa: motivo,
     tentativasTransitorias: turno.tentativasTransitorias ?? 0,
     quedas,
+    maquinaPresente: c.servidorFalhou,
     agora,
     inicioDaCadeia: raiz.criadoEm,
     ehRotina: daRotina !== null,
     proximaExecucao: daRotina?.rotina.proximaExecucao ?? null,
-    aleatorio: 0,
+    aleatorio: deps.aleatorio?.() ?? Math.random(),
   });
   const chave = turno.trabalhoId ? "frente" : daRotina ? "rotina" : "pedido";
   if (decisao.tipo === "desistir") {
-    log("aviso", "fundo_desistiu", { turno_id: turno.id, causa: motivo, motivo: decisao.motivo, quedas, fundo: chave });
+    log("aviso", "fundo_desistiu", { turno_id: turno.id, causa: motivo, motivo: decisao.motivo, quedas, fundo: chave, ...(c.servidorFalhou ? { servidor_falhou: 1 } : {}) });
     return null;
   }
   await deps.repos.turnos.travarRetomadas(retomaTurnoId);
   if (decisao.tipo === "nao_rodou") {
     const r = await registrarDesfechoRotina(deps, { turnoId: turno.id, desfecho: "nao_rodou", motivo: decisao.motivo, ...(decisao.voltaEm !== null ? { voltaEm: decisao.voltaEm } : {}) });
-    log("info", "fundo_rotina_nao_rodou", { turno_id: turno.id, rotina_id: daRotina?.rotina.id ?? null, causa: motivo, volta_em: decisao.voltaEm });
-    return { dados: { espera_no_fundo: motivo, espera_da_cota: "nao_rodou", volta_em: decisao.voltaEm }, events: r.events ?? [] };
+    log("info", "fundo_rotina_nao_rodou", { turno_id: turno.id, rotina_id: daRotina?.rotina.id ?? null, causa: motivo, volta_em: decisao.voltaEm, motivo: decisao.motivo });
+    return { dados: { espera_no_fundo: motivo, espera_da_cota: "nao_rodou", volta_em: decisao.voltaEm, ...(c.servidorFalhou ? { servidor_falhou: 1 } : {}) }, events: r.events ?? [] };
   }
   const sessaoRetomavel = trabalho ? trabalho.sessaoCli !== null && (trabalho.sessaoHarness === null || trabalho.sessaoHarness === turno.harness) : false;
-  const base = entradaDaRetomadaDaQueda(motivoEmPortugues(motivo));
-  const volta = await enfileirarVoltaDoFundo(deps, { turno, retomaTurnoId, entradaTexto: entradaDaVoltaDoFundo({ turno, raiz, base, sessaoRetomavel, falas: await falasSemResposta(deps, turno) }), acordarEm: agora, agora });
+  const base = entradaDaRetomadaDaQueda(c.servidorFalhou ? MOTIVO_SERVIDOR_NAO_RESPONDEU : motivoEmPortugues(motivo));
+  // NOD-386: a volta acorda na hora da espera crescente; sem hora (a máquina sumiu), entra já e espera ela puxar.
+  const acordarEm = decisao.voltaEm ?? agora;
+  const volta = await enfileirarVoltaDoFundo(deps, { turno, retomaTurnoId, entradaTexto: entradaDaVoltaDoFundo({ turno, raiz, base, sessaoRetomavel, falas: await falasSemResposta(deps, turno) }), acordarEm, agora });
   const events: RuntimeEvent[] = [
-    evento(deps.escopo, { kind: "turno_criado", autoria, agora, conversaId: turno.conversaId, turnoId: volta.id, dados: { origem: volta.origem, agente_id: turno.agenteId, retoma_turno_id: retomaTurnoId, trabalho_id: turno.trabalhoId ?? null, acordar_em: agora } }),
+    evento(deps.escopo, { kind: "turno_criado", autoria, agora, conversaId: turno.conversaId, turnoId: volta.id, dados: { origem: volta.origem, agente_id: turno.agenteId, retoma_turno_id: retomaTurnoId, trabalho_id: turno.trabalhoId ?? null, acordar_em: acordarEm } }),
   ];
-  if (motivo === "maquina_sem_contato") {
-    const jaEsperou = turno.origem === "retomada" && ehVoltaDoFundo(turno.entradaTexto);
+  const pedido = chave === "frente" ? "Esta task" : chave === "rotina" ? "Esta execução da rotina" : "Este pedido";
+  const jaEsperou = turno.origem === "retomada" && ehVoltaDoFundo(turno.entradaTexto);
+  // QA do NOD-386: a espera anterior foi de outro tipo (servidor ↔ máquina) — a causa mudou, e a linha nova é notícia.
+  const esperouPor = (m: string) => jaEsperou && turno.entradaTexto.startsWith(entradaDaRetomadaDaQueda(m));
+  const trocouDeCausa = c.servidorFalhou ? esperouPor(motivoEmPortugues("maquina_sem_contato")) : esperouPor(MOTIVO_SERVIDOR_NAO_RESPONDEU);
+  const jaAvisado = jaEsperou && !trocouDeCausa;
+  if (c.servidorFalhou) {
+    // NOD-386: o servidor não respondeu; a máquina estava de pé. Uma linha por cadeia (a task sempre) e um aviso a quem pediu.
+    const quando = quandoDaFrase(acordarEm, agora);
+    if (chave === "frente" || !jaAvisado) {
+      const linha = await deps.repos.mensagens.criar({ conversaId: turno.conversaId, turnoId: turno.id, autoria, kind: "sistema", assunto: "fundo.espera", texto: redigir("fundo-espera-servidor", agora, { pedido, quando }), confianca: "confiavel" });
+      if (linha) events.push(evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { mensagem_id: linha.id, kind: "sistema" } }));
+    }
+    if (!jaAvisado) {
+      const agente = await deps.repos.agentes.buscar(turno.agenteId);
+      events.push(...(await avisarEsperaAoRemetente(deps, { turno, texto: redigir("fundo-espera-servidor", agora, { pedido: `O pedido a ${agente?.nome ?? "o colega"}`, quando }) })));
+    }
+  } else if (motivo === "maquina_sem_contato") {
     const identificada = turno.machineId ? await deps.repos.maquinaTokens.identificar(turno.machineId) : null;
     const maquina = identificada?.plataforma === "linux" ? `A máquina ${identificada.nome}` : "O Mac";
-    const pedido = chave === "frente" ? "Esta task" : chave === "rotina" ? "Esta execução da rotina" : "Este pedido";
-    if (chave === "frente" || !jaEsperou) {
+    if (chave === "frente" || !jaAvisado) {
       const linha = await deps.repos.mensagens.criar({ conversaId: turno.conversaId, turnoId: turno.id, autoria, kind: "sistema", assunto: "fundo.espera", texto: redigir("fundo-espera-maquina", agora, { maquina, pedido }), confianca: "confiavel" });
       if (linha) events.push(evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { mensagem_id: linha.id, kind: "sistema" } }));
     }
-    if (!jaEsperou) {
+    if (!jaAvisado) {
       const agente = await deps.repos.agentes.buscar(turno.agenteId);
       events.push(...(await avisarEsperaAoRemetente(deps, { turno, texto: redigir("fundo-espera-maquina", agora, { maquina, pedido: `O pedido a ${agente?.nome ?? "o colega"}` }) })));
     }
   }
   // Risco do plano (laço de retomada): o teto de quedas por cadeia segura; o log mede a tentativa.
   log("info", "fundo_retomado", { turno_id: turno.id, volta_turno_id: volta.id, causa: motivo, tentativa: decisao.tentativa, fundo: chave });
-  return { dados: { espera_no_fundo: motivo, espera_da_cota: "espera", volta_turno_id: volta.id, volta_em: decisao.voltaEm, tentativa: decisao.tentativa }, events };
+  return { dados: { espera_no_fundo: motivo, espera_da_cota: "espera", volta_turno_id: volta.id, volta_em: decisao.voltaEm, tentativa: decisao.tentativa, ...(c.servidorFalhou ? { servidor_falhou: 1 } : {}) }, events };
 }
 
 /**
@@ -175,7 +208,7 @@ async function aposQuedaNoFundo(deps: DepsQueda, c: Caido & { rotinaId: string |
 async function aplicar(deps: DepsQueda, caidos: readonly Caido[], prazoMs: number | undefined): Promise<{ data: SaidaQuedaDaMaquina; events: RuntimeEvent[] }> {
   const saida: SaidaQuedaDaMaquina = { interrompidos: [], decisoes: [], rotinas: [], porMotivo: { maquina_sem_contato: 0, reinicio_servidor: 0 }, incidenteId: null };
   const events: RuntimeEvent[] = [];
-  const doMac = caidos.filter((c) => c.motivo === "maquina_sem_contato");
+  const doMac = caidos.filter((c) => c.motivo === "maquina_sem_contato" && !c.servidorFalhou);
   // Reinício do servidor não é culpa do Mac: nenhum aviso de queda (ADR-045).
   const ultimo = doMac.length > 0 ? await deps.repos.incidentes.travarUltimo("mac_sem_contato") : null;
   const classificados: (Caido & { rotinaId: string | null })[] = [];
@@ -203,7 +236,8 @@ async function aplicar(deps: DepsQueda, caidos: readonly Caido[], prazoMs: numbe
     if (c.motivo !== "maquina_removida") saida.porMotivo[c.motivo] += 1;
     if (r.decisaoId) saida.decisoes.push(r.decisaoId);
     if (r.rotinaId) saida.rotinas.push(r.rotinaId);
-    if (c.motivo === "maquina_sem_contato") quedas.push({ perdidoDesde: c.perdidoDesde, notadoEm: deps.agora(), machineId: c.turno.machineId, agenteId: c.turno.agenteId, rotina: r.rotina, maquinaPresente: c.maquinaPresente });
+    // NOD-386: com a máquina em contato o servidor falhou — nenhum aviso de máquina sem contato.
+    if (c.motivo === "maquina_sem_contato" && !c.servidorFalhou) quedas.push({ perdidoDesde: c.perdidoDesde, notadoEm: deps.agora(), machineId: c.turno.machineId, agenteId: c.turno.agenteId, rotina: r.rotina, maquinaPresente: c.maquinaPresente });
   }
   saida.incidenteId = (await registrarIncidente(deps, ultimo, quedas))?.id ?? null;
   return { data: saida, events };
@@ -218,7 +252,7 @@ async function reclassificarSobATrava(deps: DepsQueda, c: Caido): Promise<Caido>
   if (c.motivo !== "maquina_sem_contato" || c.turno.machineId === null) return c;
   if (!(await deps.repos.maquinaTokens.removida(c.turno.machineId, deps.agora()))) return c;
   const turno = await deps.repos.turnos.reclassificarInterrupcao(c.turno.id, "maquina_sem_contato", "maquina_removida");
-  return turno ? { ...c, turno, motivo: "maquina_removida" } : c;
+  return turno ? { ...c, turno, motivo: "maquina_removida", servidorFalhou: false } : c;
 }
 
 /** UM aviso por queda (src/domain/incidente.ts): mescla no último ou abre outro. */
@@ -282,7 +316,11 @@ export async function interromperPorMaquina(deps: DepsQueda, input: EntradaVarre
       await deps.repos.turnoCredenciais.apagar(turno.id);
     }
     if (motivo === "parado_pela_pessoa") parados.push({ turno, perdidoDesde });
-    else caidos.push({ turno, motivo, perdidoDesde, maquinaPresente: input.maquinaPresente ? input.maquinaPresente(vencido.machineId) : true });
+    else {
+      // NOD-386: só no modo compartilhado (o varredor sabe o contato da máquina) dá para dizer que ela estava de pé.
+      const maquinaPresente = input.maquinaPresente ? input.maquinaPresente(vencido.machineId) : true;
+      caidos.push({ turno, motivo, perdidoDesde, maquinaPresente, servidorFalhou: motivo === "maquina_sem_contato" && input.maquinaPresente !== undefined && maquinaPresente });
+    }
   }
   const r = await aplicar(deps, caidos, input.prazoMs);
   // Depois das quedas: a mesma ordem de travas (a trava por pessoa dos incidentes antes das janelas de rotina).
@@ -312,7 +350,8 @@ async function aposParada(deps: DepsQueda, turno: Turno, perdidoDesde: number): 
  * servidor derrubou é `reinicio_servidor` (Retomar, sem aviso de queda do Mac). Ausente = `maquina_sem_contato`.
  */
 export function aposQuedaDaMaquina(deps: DepsQueda, turno: Turno, p: { perdidoDesde: number; prazoMs?: number; motivo?: MotivoDaQueda }): Promise<{ data: SaidaQuedaDaMaquina; events: RuntimeEvent[] }> {
-  return aplicar(deps, [{ turno, motivo: p.motivo ?? "maquina_sem_contato", perdidoDesde: p.perdidoDesde, maquinaPresente: true }], p.prazoMs);
+  // NOD-386: a porta da entrega não sabe se a máquina estava em contato quando o lease venceu (pode ter dormido): texto de hoje.
+  return aplicar(deps, [{ turno, motivo: p.motivo ?? "maquina_sem_contato", perdidoDesde: p.perdidoDesde, maquinaPresente: true, servidorFalhou: false }], p.prazoMs);
 }
 
 /**

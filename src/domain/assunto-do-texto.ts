@@ -3,7 +3,7 @@ import type { Autoria } from "../contracts/evento.ts";
 import type { KindMensagem, PayloadMensagem } from "../contracts/mensagem.ts";
 import { MOTIVOS_FALHA, MOTIVOS_INTERRUPCAO } from "../contracts/motivos.ts";
 import { assuntoDaInterrupcao, assuntoDe } from "./destino-no-chat.ts";
-import { moldeDaRedacao, motivoEmPortugues, type ChaveRedacao } from "./redacao.ts";
+import { moldeDaRedacao, MOTIVO_SERVIDOR_NAO_RESPONDEU, motivoEmPortugues, type ChaveRedacao } from "./redacao.ts";
 
 /**
  * O assunto de uma linha antiga pelo texto (definido em 2026-10-18, chat limpo, PR 1; ADR-114). Só o backfill usa
@@ -34,7 +34,7 @@ const MOTIVOS_DO_AVISO: readonly string[] = [...MOTIVOS_INTERRUPCAO, ...MOTIVOS_
 function doTurnoInterrompido(params: readonly string[]): Assunto {
   const frase = params[0] ?? "";
   const codigo = MOTIVOS_DO_AVISO.find((m) => motivoEmPortugues(m) === frase)
-    ?? (/^a máquina .+ parou de responder \(desligada, sem rede ou motor parado\)$/.test(frase) ? "maquina_sem_contato" : "desconhecido");
+    ?? (/^a máquina .+ parou de responder \(desligada, sem rede ou motor parado\)$/.test(frase) || frase === MOTIVO_SERVIDOR_NAO_RESPONDEU ? "maquina_sem_contato" : "desconhecido");
   return assuntoDaInterrupcao(codigo);
 }
 
@@ -62,6 +62,7 @@ const DO_CATALOGO: readonly (readonly [ChaveRedacao, Classificador])[] = [
   // NOD-309: as outras quedas do fundo (erro do provedor, máquina, reinício).
   ["fundo-nova-tentativa", "fundo.espera"],
   ["fundo-espera-maquina", "fundo.espera"],
+  ["fundo-espera-servidor", "fundo.espera"],
   ["rotina-nao-rodou", "rotina.adiada"],
   ["fala-no-limite-espera", "ia.fala_espera"],
   ["ia-pronta-noutra-maquina", "ia.fala_espera"],

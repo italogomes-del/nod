@@ -470,3 +470,38 @@ turno de rotina pendente em vez de pular para sempre"). Plano de engenharia da N
 **Gatilho de reversão.** Se, em 14 dias de log, mais de 5% das cadeias de fundo terminarem `falhou` por
 `tentativas_esgotadas`/`quedas_esgotadas` com o fornecedor de pé, o teto é curto: subir. Se a pessoa clicar "Retomar" num
 fundo que já tinha volta marcada em mais de 10% das quedas, a espera automática está lenta demais para quem olha.
+
+## Emenda de 2026-10-28 — a queda no fundo espera mais e não culpa a máquina que está em contato (NOD-386)
+
+**Contexto.** Com a emenda de 20/10, o fundo que caía por reinício do servidor ou "máquina sem contato" voltava NA HORA,
+e o teto de 3 quedas de infraestrutura contava a cadeia inteira: uma instabilidade de 8 min matou uma task do Revisor em
+22/10 (`quedas_esgotadas`). Em 23/10 a `nod-motor-teste` estava em contato, mas o servidor recusou a entrega
+(`503 banco_ocupado`); o motor parou de renovar e o turno caiu como `maquina_sem_contato` com "a máquina nod-motor-teste
+parou de responder" — culpando a máquina pela falha do servidor. Diagnóstico na NOD-362, correção na NOD-386.
+
+**Decisão.**
+
+- **Espera crescente** (`esperaQuedaNoFundo`, `ESPERAS_QUEDA_NO_FUNDO_MS`): a volta da queda por reinício do servidor, ou
+  com a máquina ainda em contato, fica marcada em ~30 s, 1, 2, 5 e 10 min (±25%, `comJitter`), em vez de "agora".
+  A queda com a máquina realmente sem contato segue esperando a máquina voltar (sem hora), como antes.
+- **Teto por janela**: 5 quedas em 2 h (`MAX_QUEDAS_NO_FUNDO_NA_JANELA`, `JANELA_QUEDAS_NO_FUNDO_MS`). Conta a hora do
+  último sinal da queda (`coalesce(ultimo_sinal_em, criado_em)`, `quedasDaCadeia(raiz, exceto, desde)`); queda mais velha
+  não conta. O teto de 24 h da cadeia (`PRAZO_DO_FUNDO_MS`) continua. `MAX_QUEDAS_POR_PEDIDO` (3) segue nos demais usos.
+- **A máquina em contato não leva a culpa.** No modo compartilhado, quando o varredor vence o lease e a máquina do turno
+  ainda está puxando (`maquinaVoltou`, a mesma régua da presença), a queda é do servidor: a linha é
+  "O servidor do nod não respondeu a tempo. {pedido} volta {quando}, de onde parou." (`fundo-espera-servidor`,
+  assunto `fundo.espera`; ao remetente também, no pedido de colega), a frase da conversa usa
+  `MOTIVO_SERVIDOR_NAO_RESPONDEU` e NENHUM aviso de queda da máquina abre. O `motivo_interrupcao` gravado continua
+  `maquina_sem_contato` (sem migração; o evento leva `servidor_falhou: 1`). Sem contato, tudo segue como hoje (linha da
+  máquina e aviso). A porta da entrega (`aposQuedaDaMaquina`) e o modo local não mudam. A rotina cuja volta passa da
+  próxima janela fica `nao_rodou` com o motivo novo `servidor_nao_respondeu` (`rotina_execucoes.motivo` é `text`, sem
+  migração; uma imagem antiga mostraria o código cru, pelo `?? e.motivo` de `web/lib/execucao.ts`).
+- **O aviso de fundo preso conta da volta marcada.** A volta com hora só fica pegável em `acordar_em`: os 10 min de
+  `AVISO_FUNDO_PRESO_MS` contam de `greatest(criado_em, acordar_em)`, para todo fundo. E a linha do servidor (que promete
+  uma hora) não conta como o aviso da cadeia: se a volta não for pega, o aviso de preso ainda sai uma vez
+  (`ABERTURA_DA_ESPERA_DO_SERVIDOR`, em `fundosPresos`).
+
+**Gatilho de reversão.** Se em 14 dias de log mais de 5% das cadeias de fundo com `servidor_falhou` terminarem em
+`quedas_esgotadas`, a espera ou o teto estão curtos: subir. Se a pessoa clicar "Retomar" numa conversa cuja frase diz
+"o servidor do nod não respondeu" e a máquina de fato estava fora (presença mentiu), voltar a culpar a máquina e revisar
+`OFFLINE_MS`.

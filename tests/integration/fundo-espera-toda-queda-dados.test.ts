@@ -45,4 +45,26 @@ describeIntegracao("fundo espera por toda queda: dados (NOD-309, 0098)", () => {
       expect((await repos.frentes.buscarLote(loteId))?.retornoConcluidoEm).toBe(em);
     });
   });
+
+  it("NOD-386: quedasDaCadeia conta só as quedas de `desde` em diante, pela hora do último sinal (borda inclusa)", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const ada = await agenteComConversa(trx, MARLON, { nome: "Ada" });
+      const { repos } = depsSobre(trx, MARLON);
+      const novo = { executor: "catcher", conversaId: ada.conversaId, agenteId: ada.agenteId, prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "rode a rotina", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli" } as const;
+      const raiz = (await repos.turnos.enfileirar({ ...novo, origem: "rotina" }))!;
+      const desde = Date.now() - 2 * 60 * 60_000;
+      const cair = async (id: string, sinal: number | null, criado: number) =>
+        trx`update turnos set estado = 'interrompido', motivo_interrupcao = 'maquina_sem_contato', ultimo_sinal_em = ${sinal === null ? null : new Date(sinal)}, criado_em = ${new Date(criado)} where id = ${id}`;
+      await cair(raiz.id, desde - 1, Date.now());
+      const a = (await repos.turnos.enfileirar({ ...novo, origem: "retomada", retomaTurnoId: raiz.id }))!;
+      await cair(a.id, desde, desde - 60_000);
+      const b = (await repos.turnos.enfileirar({ ...novo, origem: "retomada", retomaTurnoId: a.id }))!;
+      await cair(b.id, null, desde + 1);
+      const atual = (await repos.turnos.enfileirar({ ...novo, origem: "retomada", retomaTurnoId: b.id }))!;
+      // raiz: sinal 1 ms antes (fora, mesmo criado agora); a: sinal na borda (dentro, mesmo criado antes); b: sem sinal, pela criação.
+      expect(await repos.turnos.quedasDaCadeia(raiz.id, atual.id, desde)).toBe(2);
+      expect(await repos.turnos.quedasDaCadeia(raiz.id, b.id, desde)).toBe(1);
+      expect(await repos.turnos.quedasDaCadeia(raiz.id, atual.id, 0)).toBe(3);
+    });
+  });
 });

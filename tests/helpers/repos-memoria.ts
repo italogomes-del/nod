@@ -58,6 +58,9 @@ import { EXECUCOES_GUARDADAS, LEASE_MS } from "../../src/shared/constantes.ts";
 import type { Escopo } from "../../src/shared/types.ts";
 import { PESSOA_MARLON, TENANT_PADRAO } from "./ids.ts";
 
+/** turnos.ultimo_sinal_em (0076): a hora da queda que `interromper` grava uma vez; o Turno do contrato não a carrega. */
+const ULTIMO_SINAL = new WeakMap<Turno, number>();
+
 /**
  * `Repos` em memória para tests/unit/use-cases (Práticas §1: a fábrica de tx vira `(fn) => fn({} as never)`
  * e os repos são estes). Mesmas assinaturas de src/repositories/*.repo.ts (o compilador cobra:
@@ -1472,7 +1475,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async travarRetomadas() {
         // Em memória tudo roda em série: não há o que travar.
       },
-      async quedasDaCadeia(raizId: string, exceto: string) {
+      async quedasDaCadeia(raizId: string, exceto: string, desde: number) {
         const todos = doTenant(b.turnos);
         const cadeia = new Set([raizId]);
         for (let mudou = true; mudou;) {
@@ -1480,7 +1483,8 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           for (const t of todos) if (t.retomaTurnoId && cadeia.has(t.retomaTurnoId) && !cadeia.has(t.id)) { cadeia.add(t.id); mudou = true; }
         }
         return todos.filter((t) => cadeia.has(t.id) && t.id !== exceto && t.estado === "interrompido"
-          && (MOTIVOS_DE_QUEDA as readonly string[]).includes(t.motivoInterrupcao ?? "") && !(MOTIVOS_FALHA_SEM_QUEDA as readonly string[]).includes(t.motivoFalha ?? "")).length;
+          && (MOTIVOS_DE_QUEDA as readonly string[]).includes(t.motivoInterrupcao ?? "") && !(MOTIVOS_FALHA_SEM_QUEDA as readonly string[]).includes(t.motivoFalha ?? "")
+          && (ULTIMO_SINAL.get(t) ?? t.criadoEm) >= desde).length;
       },
       async reescreverFundoDoBot(agenteId: string, para: { harness: NonNullable<Turno["harness"]>; modelo: string }) {
         const todos = doTenant(b.turnos);
@@ -1745,6 +1749,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async assentar(id, a) {
         const t = doTenant(b.turnos).find((x) => x.id === id && (x.estado === "pendente" || x.estado === "despachando"));
         if (!t) return null;
+        if (a.estado === "interrompido" && a.ultimoSinalEm !== undefined && a.ultimoSinalEm !== null && !ULTIMO_SINAL.has(t)) ULTIMO_SINAL.set(t, a.ultimoSinalEm);
         t.estado = a.estado;
         t.motivoInterrupcao = a.estado === "interrompido" ? (a.motivoInterrupcao ?? "sem_progresso") : null;
         t.motivoFalha = a.motivoFalha ?? null;
@@ -1806,6 +1811,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         if (o.leaseVencidoEm !== undefined && t.leaseAte !== null && t.leaseAte >= o.leaseVencidoEm) return null;
         t.estado = "interrompido";
         t.motivoInterrupcao = motivo;
+        if (o.ultimoSinalEm !== undefined && !ULTIMO_SINAL.has(t)) ULTIMO_SINAL.set(t, o.ultimoSinalEm);
         t.leaseAte = null;
         return t;
       },

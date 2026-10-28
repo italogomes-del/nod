@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { MOTIVOS_NAO_RODOU_ROTINA } from "../../../src/contracts/motivos.ts";
-import { CAUSAS_DE_ESPERA_NO_FUNDO, decidirEsperaNoFundo, esperaTransitoriaNoFundo, MOTIVO_NAO_RODOU_DA_CAUSA, type EntradaEsperaNoFundo } from "../../../src/domain/espera-no-fundo.ts";
-import { redigir } from "../../../src/domain/redacao.ts";
-import { PRAZO_DO_FUNDO_MS, TENTATIVAS_TRANSITORIAS_MAX } from "../../../src/shared/constantes.ts";
+import { CAUSAS_DE_ESPERA_NO_FUNDO, decidirEsperaNoFundo, esperaQuedaNoFundo, esperaTransitoriaNoFundo, MOTIVO_NAO_RODOU_DA_CAUSA, type EntradaEsperaNoFundo } from "../../../src/domain/espera-no-fundo.ts";
+import { ABERTURA_DA_ESPERA_DO_SERVIDOR, MOTIVO_SERVIDOR_NAO_RESPONDEU, motivoDaQuedaEmPortugues, redigir } from "../../../src/domain/redacao.ts";
+import { JANELA_QUEDAS_NO_FUNDO_MS, MAX_QUEDAS_NO_FUNDO_NA_JANELA, PRAZO_DO_FUNDO_MS, TENTATIVAS_TRANSITORIAS_MAX } from "../../../src/shared/constantes.ts";
 
 const MIN = 60_000;
 const HORA = 60 * MIN;
@@ -12,6 +12,7 @@ const base = (e: Partial<EntradaEsperaNoFundo> = {}): EntradaEsperaNoFundo => ({
   causa: "erro_transitorio",
   tentativasTransitorias: 0,
   quedas: 0,
+  maquinaPresente: false,
   agora: T0,
   inicioDaCadeia: T0,
   ehRotina: false,
@@ -35,15 +36,38 @@ describe("espera no fundo por toda queda (NOD-309)", () => {
     expect(decidirEsperaNoFundo(base({ tentativasTransitorias: TENTATIVAS_TRANSITORIAS_MAX }))).toEqual({ tipo: "desistir", motivo: "tentativas_esgotadas" });
   });
 
-  it("reinício volta agora; máquina sem contato volta quando o Mac voltar (sem hora); 3 quedas desistem", () => {
-    expect(decidirEsperaNoFundo(base({ causa: "reinicio_servidor" }))).toEqual({ tipo: "esperar", voltaEm: T0, tentativa: 1 });
+  it("NOD-386: espera da queda com o servidor em falta: ~30 s, 1, 2, 5 e 10 min, ±25%, presa no último degrau", () => {
+    expect([1, 2, 3, 4, 5].map((n) => esperaQuedaNoFundo(n, 0.5))).toEqual([30_000, MIN, 2 * MIN, 5 * MIN, 10 * MIN]);
+    expect(esperaQuedaNoFundo(1, 0)).toBe(0.75 * 30_000);
+    expect(esperaQuedaNoFundo(5, 1)).toBe(1.25 * 10 * MIN);
+    expect(esperaQuedaNoFundo(0, 0.5)).toBe(30_000);
+    expect(esperaQuedaNoFundo(9, 0.5)).toBe(10 * MIN);
+  });
+
+  it("NOD-386: reinício e máquina presente voltam com espera crescente, não na hora; máquina ausente volta quando puxar", () => {
+    for (const e of [{ causa: "reinicio_servidor" as const }, { causa: "maquina_sem_contato" as const, maquinaPresente: true }]) {
+      expect(decidirEsperaNoFundo(base({ ...e }))).toEqual({ tipo: "esperar", voltaEm: T0 + 30_000, tentativa: 1 });
+      expect(decidirEsperaNoFundo(base({ ...e, quedas: 1 }))).toEqual({ tipo: "esperar", voltaEm: T0 + MIN, tentativa: 2 });
+      expect(decidirEsperaNoFundo(base({ ...e, quedas: 2 }))).toEqual({ tipo: "esperar", voltaEm: T0 + 2 * MIN, tentativa: 3 });
+      expect(decidirEsperaNoFundo(base({ ...e, quedas: 4, aleatorio: 0 }))).toEqual({ tipo: "esperar", voltaEm: T0 + 0.75 * 10 * MIN, tentativa: 5 });
+    }
     expect(decidirEsperaNoFundo(base({ causa: "maquina_sem_contato", quedas: 1 }))).toEqual({ tipo: "esperar", voltaEm: null, tentativa: 2 });
+    // A presença só muda a máquina: o reinício espera igual com ela fora.
+    expect(decidirEsperaNoFundo(base({ causa: "reinicio_servidor", maquinaPresente: false, quedas: 3 }))).toEqual({ tipo: "esperar", voltaEm: T0 + 5 * MIN, tentativa: 4 });
+  });
+
+  it("NOD-386: teto por janela — 3 quedas não esgotam; com 5 na janela, a 6ª desiste com quedas_esgotadas", () => {
+    expect(MAX_QUEDAS_NO_FUNDO_NA_JANELA).toBe(5);
     for (const causa of ["reinicio_servidor", "maquina_sem_contato"] as const) {
-      expect(decidirEsperaNoFundo(base({ causa, quedas: 3 }))).toEqual({ tipo: "desistir", motivo: "quedas_esgotadas" });
+      for (const maquinaPresente of [true, false]) {
+        expect(decidirEsperaNoFundo(base({ causa, maquinaPresente, quedas: 3 })).tipo).toBe("esperar");
+        expect(decidirEsperaNoFundo(base({ causa, maquinaPresente, quedas: 4 })).tipo).toBe("esperar");
+        expect(decidirEsperaNoFundo(base({ causa, maquinaPresente, quedas: 5 }))).toEqual({ tipo: "desistir", motivo: "quedas_esgotadas" });
+      }
     }
     // As quedas não gastam as tentativas transitórias, nem o contrário.
     expect(decidirEsperaNoFundo(base({ causa: "reinicio_servidor", tentativasTransitorias: 3 })).tipo).toBe("esperar");
-    expect(decidirEsperaNoFundo(base({ quedas: 3 })).tipo).toBe("esperar");
+    expect(decidirEsperaNoFundo(base({ quedas: 5 })).tipo).toBe("esperar");
   });
 
   it("pedido de colega, frente e lote: 24 h desde o começo da cadeia, contando a hora da volta", () => {
@@ -65,7 +89,11 @@ describe("espera no fundo por toda queda (NOD-309)", () => {
     expect(decidirEsperaNoFundo(base({ ...rotina }))).toEqual({ tipo: "esperar", voltaEm: T0 + MIN, tentativa: 1 });
     expect(decidirEsperaNoFundo(base({ ...rotina, tentativasTransitorias: 2 }))).toEqual({ tipo: "nao_rodou", voltaEm: T0 + 15 * MIN, motivo: "erro_do_provedor" });
     expect(decidirEsperaNoFundo(base({ ...rotina, causa: "cota", voltaDaCota: T0 + 10 * MIN }))).toEqual({ tipo: "nao_rodou", voltaEm: T0 + 10 * MIN, motivo: "cota_da_ia" });
-    expect(decidirEsperaNoFundo(base({ ...rotina, causa: "reinicio_servidor" }))).toEqual({ tipo: "esperar", voltaEm: T0, tentativa: 1 });
+    expect(decidirEsperaNoFundo(base({ ...rotina, causa: "reinicio_servidor" }))).toEqual({ tipo: "esperar", voltaEm: T0 + 30_000, tentativa: 1 });
+    // NOD-386: a espera crescente que passa da próxima janela também fecha a janela.
+    expect(decidirEsperaNoFundo(base({ ...rotina, causa: "maquina_sem_contato", maquinaPresente: true, quedas: 4 }))).toEqual({ tipo: "nao_rodou", voltaEm: T0 + 10 * MIN, motivo: "servidor_nao_respondeu" });
+    // Reinício segue com o motivo dele.
+    expect(decidirEsperaNoFundo(base({ ...rotina, causa: "reinicio_servidor", quedas: 4 }))).toEqual({ tipo: "nao_rodou", voltaEm: T0 + 10 * MIN, motivo: "reinicio_servidor" });
     // Sem hora (Mac sem contato), a rotina espera; a janela seguinte a fecha como 'nao_rodou' (disparar-rotina).
     expect(decidirEsperaNoFundo(base({ ...rotina, causa: "maquina_sem_contato" }))).toEqual({ tipo: "esperar", voltaEm: null, tentativa: 1 });
     // A rotina não usa o prazo de 24 h: o prazo dela é a próxima janela.
@@ -89,5 +117,18 @@ describe("espera no fundo por toda queda (NOD-309)", () => {
     expect(textos[1]).toBe("O serviço do Claude Code está instável. Esta frente tenta de novo às 10:05: tentativa 1 de 3.");
     expect(textos[3]).toBe("Não rodou · reinício do servidor, volta 11:00. A rotina segue a agenda.");
     for (const t of textos) expect(t).not.toMatch(/[{}]/);
+  });
+
+  it("NOD-386: os dois textos — máquina em contato culpa o servidor sem citar a máquina; sem contato, o de hoje", () => {
+    const servidor = redigir("fundo-espera-servidor", T0, { pedido: "Esta task", quando: "às 10:01" });
+    expect(servidor.startsWith(ABERTURA_DA_ESPERA_DO_SERVIDOR)).toBe(true);
+    expect(servidor).toBe("O servidor do nod não respondeu a tempo. Esta task volta às 10:01, de onde parou.");
+    expect(servidor).not.toMatch(/máquina|Mac/);
+    expect(JANELA_QUEDAS_NO_FUNDO_MS).toBe(2 * 60 * MIN);
+    expect(MAX_QUEDAS_NO_FUNDO_NA_JANELA).toBe(5);
+    expect(MOTIVO_SERVIDOR_NAO_RESPONDEU).toBe("o servidor do nod não respondeu a tempo");
+    expect(redigir("turno-interrompido", T0, { motivo: MOTIVO_SERVIDOR_NAO_RESPONDEU })).toBe("Turno interrompido: o servidor do nod não respondeu a tempo. O que já saiu fica marcado como parcial; nada foi reenviado.");
+    expect(redigir("fundo-espera-maquina", T0, { maquina: "A máquina nod-motor-teste", pedido: "Esta task" })).toBe("A máquina nod-motor-teste está sem contato. Esta task fica na fila e retoma quando o contato voltar, de onde parou.");
+    expect(motivoDaQuedaEmPortugues({ nome: "nod-motor-teste", plataforma: "linux" })).toBe("a máquina nod-motor-teste parou de responder (desligada, sem rede ou motor parado)");
   });
 });
