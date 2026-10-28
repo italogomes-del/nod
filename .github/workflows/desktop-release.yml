@@ -31,6 +31,8 @@ jobs:
       - run: npm ci
       - run: psql postgres://postgres:postgres@127.0.0.1:5434/postgres -v ON_ERROR_STOP=1 -f infra/postgres/init/01_roles.sql
       - run: npm run db:migrate:test
+      # A catraca C da paridade (NOD-391) compara o piso com o da main: o checkout raso da tag não traz a origin/main.
+      - run: git fetch --no-tags --depth=1 origin +main:refs/remotes/origin/main
       - run: npm run check
       - run: npm run build
       - run: npm run desktop:build
