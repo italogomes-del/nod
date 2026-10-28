@@ -66,3 +66,10 @@ em abas e num nível de ajustes.
   chega fala nova do bot, e ao reconectar ou retomar o stream.
 - Gatilho de reversão: se a leitura da Biblioteca passar de 200 ms no p95 com o índice parcial `anexos_da_biblioteca`,
   a lista passa a vir junto com a conversa em vez de uma rota própria.
+
+## Emenda (2026-10-28, NOD-379): no celular o ⋯ da linha sai
+
+O item 2 deixava um ⋯ visível na linha só no toque. Na inicial do celular (ADR-094, emenda NOD-379) o ⋯ some da vista e
+o menu do bot abre no toque longo, com o bot segurado por cima do fundo desfocado e o menu logo abaixo; uma dica única
+("Segure um bot para ver as ações") ensina o gesto. O botão ⋯ continua no HTML, escondido só visualmente, para o leitor de
+tela. No computador nada muda.

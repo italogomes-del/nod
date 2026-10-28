@@ -169,8 +169,13 @@ describe("NOD-381: alvos de 44 px e estados", () => {
 describe("NOD-381: o computador não muda", () => {
   it("fora da consulta do celular só há o que esconde as peças novas (e o que já existia)", () => {
     const fora = foraDasConsultas(css("mobile.css")).replace(/\s+/g, " ").trim();
+    // NOD-379: os @keyframes da inicial ficam no topo (só rodam dentro da consulta) e o fundo da gaveta saiu com ela.
     expect(fora).toBe(
-      ".abrir-bots, .fundo-gaveta-bots { display: none; } .cabecalho.so-menu { display: none; } " +
+      "@keyframes inicio-chat-entra { from { transform: translateX(100%); box-shadow: -10px 0 30px rgba(0, 0, 0, .12); } to { transform: none; box-shadow: none; } } " +
+      "@keyframes inicio-pulso { 0%, 100% { opacity: 1; } 50% { opacity: .55; } } " +
+      "@keyframes inicio-segurar { from { transform: none; } to { transform: scale(1.02); } } " +
+      "@keyframes inicio-folha { from { transform: translateY(100%); } to { transform: none; } } " +
+      ".abrir-bots { display: none; } .cabecalho.so-menu { display: none; } " +
       ".mais-campo, .pilula-presenca, .esqueleto-conversa { display: none; } .pilula-txt { display: contents; } " +
       "@keyframes esqueleto-pulsa { 50% { opacity: .55; } }",
     );

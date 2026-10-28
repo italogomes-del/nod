@@ -56,7 +56,8 @@ export function abrirMenu(a: BotGerido, dona: boolean, ancora: HTMLElement, exec
   d.addEventListener("keydown", (e) => {
     if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) return;
     e.preventDefault();
-    const itens = [...d.querySelectorAll<HTMLButtonElement>("button")];
+    // NOD-379: a cópia inerte do bot segurado (celular) mora no diálogo; as setas só andam pelos itens.
+    const itens = [...d.querySelectorAll<HTMLButtonElement>("button:not([inert] button)")];
     const atual = itens.indexOf(document.activeElement as HTMLButtonElement);
     const proximo = e.key === "Home" ? 0 : e.key === "End" ? itens.length - 1 : (atual + (e.key === "ArrowDown" ? 1 : -1) + itens.length) % itens.length;
     itens[proximo]?.focus();
@@ -122,13 +123,15 @@ export function pedirGestao(titulo: string, corpo: string, confirmar: string, sa
  * Configurações (`secao` recebe o pedido: "geral", "agentes", "feedback", "ajuda", "conexao"); Sair e o convite da conta
  * vão por `conta`.
  */
-export function abrirMenuConta(ancora: HTMLElement, dados: DadosMenuConta, acoes: { secao(s: PedidoSecao): void; conta?(qual: string): void }): void {
+export function abrirMenuConta(ancora: HTMLElement, dados: DadosMenuConta, acoes: { secao(s: PedidoSecao): void; conta?(qual: string): void }, folha = false): void {
   const d = dialogo(htmlMenuConta(dados), true);
   d.classList.add("menu-conta");
+  // NOD-379: no celular o avatar fica no topo da inicial e o menu vira folha de baixo (o CSS a prende embaixo).
+  if (folha) d.classList.add("folha");
   // Nasce acima do avatar, alinhado à esquerda da barra (a largura dela menos as margens).
   const r = ancora.getBoundingClientRect();
   d.style.left = `${Math.max(12, r.left)}px`;
-  d.style.top = `${Math.max(12, r.top - d.offsetHeight - 10)}px`;
+  d.style.top = folha ? "auto" : `${Math.max(12, r.top - d.offsetHeight - 10)}px`;
   d.addEventListener("click", (e) => {
     const alvo = e.target as HTMLElement;
     const secao = alvo.closest<HTMLElement>("[data-secao]")?.dataset.secao as PedidoSecao | undefined;

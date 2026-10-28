@@ -7,6 +7,6 @@
     "moduleResolution": "Bundler",
     "jsx": "preserve"
   },
-  "include": ["web/**/*.ts", "src/contracts/**/*.ts", "src/shared/types.ts", "tests/unit/web/tela-cheia.test.ts", "tests/unit/web/nod370-confirmar.test.ts", "tests/unit/web/ordem-arrastavel.test.ts", "tests/unit/web/chat-celular.test.ts", "tests/unit/web/busca-celular.test.ts", "tests/unit/web/busca-celular-tela.test.ts"],
+  "include": ["web/**/*.ts", "src/contracts/**/*.ts", "src/shared/types.ts", "tests/unit/web/tela-cheia.test.ts", "tests/unit/web/nod370-confirmar.test.ts", "tests/unit/web/ordem-arrastavel.test.ts", "tests/unit/web/chat-celular.test.ts", "tests/unit/web/busca-celular.test.ts", "tests/unit/web/busca-celular-tela.test.ts", "tests/unit/web/inicio-celular-historico.test.ts"],
   "exclude": ["web/**/*.test.ts"]
 }

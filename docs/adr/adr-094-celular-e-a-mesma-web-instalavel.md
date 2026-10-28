@@ -133,3 +133,27 @@ Reverter se, em 14 dias de uso no celular, acontecer um destes:
 Na conversa o ☰ do cabeçalho vira o ‹ do protótipo nod-381, num círculo de vidro à esquerda da pílula flutuante. Até a
 tela inicial do celular (NOD-379) existir, ele abre a mesma gaveta de bots (mesmo `data-act`, mesmo rótulo "Bots e
 conversas"); quando ela existir, o ‹ passa a voltar para ela.
+
+## Emenda (2026-10-28, NOD-379): a barra de bots vira a tela inicial
+
+Protótipo nod-379 v3. No celular a barra de bots deixa de ser gaveta (item 3, primeiro ponto): o app abre nela, ocupando
+a tela, no formato de mensageiro — o topo do web (avatar à esquerda, não lidos/Trabalhos/Sua vez só quando há algo, o +
+à direita, alvos de 44 px), os favoritos em grade de quatro (oito à vista e "Ver todos"), as conversas em lista com hora e
+prévia e uma barra flutuante só com Buscar. Tocar num bot esconde a inicial e o chat entra da direita (280 ms, nada com
+movimento reduzido); o ‹ do cabeçalho e o voltar do navegador desempilham uma entrada nossa no histórico
+(`{nodInicio: "conversa"}`) e mostram a inicial na mesma rolagem; sem essa entrada (link, recarregar) o ‹ só mostra a
+inicial, sem `history.back()`. Sai o fundo escurecido e o Esc da gaveta. Com a inicial por cima, a conversa de baixo não
+conta como lida. Exceção ao "nenhum foco é movido" do item 3: quem estava com o foco na inicial e entra numa conversa o
+leva ao ‹; ao voltar, ele volta à linha de onde saiu (a parte que some fica inerte e o foco não pode ficar nela). O menu do bot abre no toque longo (450 ms, 10 px de tolerância; o ⋯ fica só para o leitor de tela) e o
+menu da conta vira folha de baixo. O computador não muda. Código: `web/lib/gaveta-bots.ts`, `web/lib/inicio-celular.ts`,
+`web/lib/toque-longo.ts`, `renderSidebar` em `web/main.ts` e o bloco "inicial" de `web/mobile.css`.
+
+O ‹ da NOD-381 passa a voltar à inicial (rótulo "Voltar ao início").
+
+Decisões e limites da emenda NOD-379:
+- Recarregar com um Trabalho aberto (#195, `sessionStorage` da aba) reabre o Trabalho, não a inicial: é a mesma aba
+  voltando ao que estava; o ‹ dele leva à inicial. Abrir o app (aba nova, PWA) sempre começa na inicial.
+- Recarregar dentro de uma conversa deixa uma entrada a mais no histórico (a do documento anterior, sem a marca): um
+  voltar a mais não muda nada na tela.
+- Seu espaço aberto pela inicial mostra "‹ Início". O voltar do navegador com ele aberto não o fecha.
+- A seção "Implementação (2026-10-10)" acima descreve a gaveta, o fundo e o Esc, que esta emenda substitui.

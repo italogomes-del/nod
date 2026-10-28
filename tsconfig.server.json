@@ -7,6 +7,6 @@
     "moduleResolution": "NodeNext"
   },
   "include": ["src/**/*.ts", "tests/**/*.ts", "scripts/**/*.ts"],
-  "//": "os testes da tela cheia, do confirmar da NOD-370, do chat no celular (NOD-381) e da busca do celular (NOD-380) importam código de DOM: quem o checa é o tsconfig.web.json",
-  "exclude": ["tests/unit/web/tela-cheia.test.ts", "tests/unit/web/nod370-confirmar.test.ts", "tests/unit/web/ordem-arrastavel.test.ts", "tests/unit/web/chat-celular.test.ts", "tests/unit/web/busca-celular.test.ts", "tests/unit/web/busca-celular-tela.test.ts"]
+  "//": "os testes da tela cheia, do confirmar da NOD-370, do chat no celular (NOD-381) da busca do celular (NOD-380) e da inicial do celular (NOD-379) importam código de DOM: quem o checa é o tsconfig.web.json",
+  "exclude": ["tests/unit/web/tela-cheia.test.ts", "tests/unit/web/nod370-confirmar.test.ts", "tests/unit/web/ordem-arrastavel.test.ts", "tests/unit/web/chat-celular.test.ts", "tests/unit/web/busca-celular.test.ts", "tests/unit/web/busca-celular-tela.test.ts", "tests/unit/web/inicio-celular-historico.test.ts"]
 }

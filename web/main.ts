@@ -79,6 +79,9 @@ import { criarLiveEvents, type LiveEvents } from "./lib/live-events.ts";
 import { ehCelular, enterEnvia } from "./lib/celular.ts";
 import { rotuloDoMac } from "./lib/aparelho.ts";
 import { criarCelular } from "./lib/gaveta-bots.ts";
+import { tentarFrotaAgora } from "./lib/tentar-frota.ts";
+import { criarToqueLongo,dicaJaVista, alturaDaLista, escolherRedesenhada, lugarDoMenuSegurado, marcarDicaVista, MS_DICA } from "./lib/toque-longo.ts";
+import { escondidosNoCelular, estadoDaLista, FAVORITOS_VISIVEIS, gruposSemResultado, horaDaLinha, PREFIXO_DO_PEDIDO } from "./lib/inicio-celular.ts";
 import "./pwa.ts";
 import { avatar, botao, esc, iconeAgente } from "./lib/render.ts";
 import { COPIADO_MS, mostrarCopia, ROTULO_COPIADO, type RelogioDoCopiar } from "./lib/copiar.ts";
@@ -276,7 +279,45 @@ let painelAberto = ((): boolean => { try { return localStorage.getItem(CHAVE_PAI
 /** Aberta para mostrar um nível (abrirNivel), sem virar preferência: fecha de novo ao trocar de conversa. */
 let painelAbertoNaHora = false;
 // ADR-094 (definido em 2026-10-10): no celular a barra de bots vira gaveta, aberta pelo ☰ do cabeçalho.
-const celular = criarCelular();
+// NOD-379 (emenda da ADR-094): a gaveta virou a tela inicial do celular; o ☰ virou o ‹ que volta a ela.
+// A pílula da conversa diz se a gaveta do bot está aberta; mostrar a inicial fecha a gaveta (gaveta-bots.ts).
+const celular = criarCelular(() => { render(); marcarPainelNaPilula(); });
+// NOD-379: a barra que ficou sem redesenhar enquanto a busca do celular tinha o foco. Ela é refeita um pouco depois do
+// focusout, para não trocar o DOM entre o toque e o clique na linha que a pessoa foi abrir.
+let sidebarAdiada = false;
+function redesenharAdiada(): void {
+  if (!sidebarAdiada) return;
+  window.setTimeout(() => { if (sidebarAdiada) { sidebarAdiada = false; if (!arrastandoBot) redesenharSidebar(); } }, MS_REDESENHO_ADIADO);
+}
+// definido em 2026-10-28 (NOD-379): mais que um toque comum (~150 ms entre o focusout e o click).
+const MS_REDESENHO_ADIADO = 500;
+// NOD-379: o último toque longo (o contextmenu do Android que vem junto é ignorado) e o timer da dica dele.
+let ultimoToqueLongo = 0;
+// definido em 2026-10-28 (NOD-379): o contextmenu do Android chega junto do gesto, bem antes de 1 s.
+const MS_CONTEXTMENU_DO_GESTO = 1000;
+let timerDica = 0;
+/** NOD-379: a última leitura da frota falhou — a inicial do celular diz "Não deu para carregar seus bots · Tentar de novo". */
+let frotaFalhou = false;
+/** NOD-379: o onboarding já estava aberto na última ação (abrir agora esconde a inicial uma vez, para o guia ficar à vista). */
+let onboardingVisto = false;
+/** NOD-379: o + do topo da inicial (24 px, como os outros ícones do topo no protótipo v3). */
+const MAIS = '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>';
+/** NOD-379: "Ver todos" abriu os favoritos além dos 8 primeiros (vale até recarregar). */
+let favoritosTodos = false;
+
+/** NOD-379: os favoritos da inicial do celular — o rótulo, "Ver todos" acima de 8 e a grade de 4. */
+function gradeDoCelular(blocos: string, total: number): string {
+  if (!total) return "";
+  const ver = total > FAVORITOS_VISIVEIS ? `<button type="button" class="inicio-ver" data-act="ver-favoritos" aria-expanded="${favoritosTodos}">${favoritosTodos ? "Ver menos" : "Ver todos"}</button>` : "";
+  return `<div class="inicio-favoritos"><div class="inicio-rotulo"><h2>Favoritos</h2>${ver}</div><section class="fixados" aria-label="Favoritos">${blocos}</section></div>`;
+}
+
+/** NOD-379: a inicial carregando — 4 favoritos e 6 linhas em esqueleto, sem texto (o leitor de tela ouve "Carregando"). */
+const ESQUELETO_DO_INICIO = `<div class="inicio-esqueleto" role="status"><span class="sr-only">Carregando seus bots</span><div class="esq-grade">${'<span class="esq redondo"></span>'.repeat(4)}</div>${'<div class="esq-linha"><span class="esq redondo"></span><span class="esq-txt"><span class="esq"></span><span class="esq"></span></span></div>'.repeat(6)}</div>`;
+
+/** NOD-379: sem nenhum bot — o mascote, uma frase e o botão de contorno; a barra de Buscar continua. */
+const INICIO_VAZIO = `<div class="inicio-vazio">${iconeAgente({ nome: "Nod", cor: "c-black", forma: "shape-pebble" }, "lg")}<h2>Crie seu primeiro bot</h2><p>Diga o que ele faz e ele começa a trabalhar.</p><button type="button" class="bt inicio-contorno" data-act="navegar" data-tela="novo-bot">Criar bot</button></div>`;
+
 // A busca da sidebar fica fechada até ser pedida (ícone ou ⌘K); aberta, fecha no Esc ou ao perder o foco vazia.
 let buscaAberta = false;
 const termoBusca = (): string => (document.getElementById("busca-bots") as HTMLInputElement | null)?.value ?? "";
@@ -609,7 +650,7 @@ const lendo = new Set<string>();
 
 function lerConversaDaTela(): void {
   const t = estado.tela;
-  if (!api || !estado.naoLidos || (t.tipo !== "conversa" && t.tipo !== "sala") || !naFrente() || estado.espaco) return;
+  if (!api || !estado.naoLidos || (t.tipo !== "conversa" && t.tipo !== "sala") || !naFrente() || estado.espaco || celular.botsAbertos()) return;
   const conversaId = t.conversaId;
   const comLinha = linhaEm === conversaId || primeiraLeitura;
   linhaEm = null;
@@ -634,7 +675,8 @@ function temNovas(conversaId: string, e: Estado = estado): boolean {
   if (!naoLidaDe(e, conversaId)) return false;
   const t = e.tela;
   const aberta = (t.tipo === "conversa" || t.tipo === "sala") && t.conversaId === conversaId;
-  return !(aberta && naFrente() && deixarNaoLida !== conversaId);
+  // NOD-379: com a inicial do celular por cima, a conversa de baixo não está sendo lida.
+  return !(aberta && naFrente() && !celular.botsAbertos() && deixarNaoLida !== conversaId);
 }
 
 /**
@@ -691,9 +733,12 @@ function dispatch(acao: Acao): void {
 function reduzirVendoSaida(acao: Acao): boolean {
   const antes = estado.tela;
   estado = reduzir(estado, sobreporPendentes(acao, perfilPendente));
+  // NOD-379: o onboarding pendente continua abrindo no guia, não na inicial do celular.
+  if (estado.onboardingAberto && !onboardingVisto) celular.fecharBots();
+  onboardingVisto = !!estado.onboardingAberto;
   if ((acao.tipo !== "hidratar-frota" && acao.tipo !== "hidratar-gestao") || antes.tipo !== "conversa" || estado.tela === antes) return false;
   if (estado.tela.tipo === "conversa" && estado.tela.conversaId === antes.conversaId) return false;
-  celular.fecharBots();
+  // NOD-379: a inicial do celular, se estava à vista, continua: a troca é da conversa de baixo.
   aoTrocarDeTela(antes, estado.tela);
   lembrarTaskAberta(estado.tela);
   return true;
@@ -1035,8 +1080,17 @@ const leituraDaGestao = criarUltimaLeitura();
 async function buscarFrota(): Promise<Acao | null> {
   if (!api) return null;
   const vez = leituraDaFrota.comecar();
-  const frota = await api.frota();
-  return vez() ? { tipo: "hidratar-frota", frota } : null;
+  let frota: Awaited<ReturnType<Api["frota"]>>;
+  try {
+    frota = await api.frota();
+  } catch (e) {
+    // Só a leitura mais nova mexe no aviso: uma antiga que falha depois de uma nova que deu certo não o liga.
+    if (vez()) frotaFalhou = true;
+    throw e;
+  }
+  if (!vez()) return null;
+  frotaFalhou = false;
+  return { tipo: "hidratar-frota", frota };
 }
 
 async function buscar(q: Invalidacao): Promise<Acao | null> {
@@ -1295,6 +1349,9 @@ function relevante(q: Invalidacao): boolean {
  * estado entra nos extras de `redesenharSidebar`.
  */
 function renderSidebar(estado: Estado): string {
+  // NOD-379: no celular a barra é a tela inicial (topo do web, favoritos em grade, conversas como num mensageiro e a barra
+  // flutuante de Buscar). O HTML do computador não muda.
+  const ehCelular = celular.ativo();
   const agentes = estado.frota?.agentes ?? [];
   const abertas = abertasPorAgente(estado);
   const perguntas = perguntasPorAgente(estado);
@@ -1304,7 +1361,8 @@ function renderSidebar(estado: Estado): string {
   // definido em 2026-09-30 (canvas "Menu, sidebar e gaveta"): os bots da pessoa se arrastam — para a grade (fixa), entre
   // seções ou para uma seção nova. Os da equipe não: fixar e seção são da dona.
   // ADR-081: o Nod não se arrasta — ele não entra em seção; topo e discreto são pelo menu dele.
-  const arrastavel = (a: (typeof agentes)[number]) => (a.ownerId === estado.sessao?.pessoaId && a.papel !== "nod" ? ` draggable="true" data-arrastavel="${esc(a.id)}"` : "");
+  // NOD-379: no celular nada se arrasta (o iOS arrastaria no toque longo, que abre o menu).
+  const arrastavel = (a: (typeof agentes)[number]) => (ehCelular ? "" : a.ownerId === estado.sessao?.pessoaId && a.papel !== "nod" ? ` draggable="true" data-arrastavel="${esc(a.id)}"` : "");
   const avisos = new Map(agentes.map((a): [string, AvisoBot] => [a.id, (abertas.get(a.id) ?? 0) > 0 ? "decisao" : perguntas.get(a.id) ? "pergunta" : temNovas(a.conversaId, estado) ? "nao-lido" : ""]));
   const avisoDe = (a: (typeof agentes)[number]): AvisoBot => avisos.get(a.id) ?? "";
   const linha = (a: (typeof agentes)[number], escondida = false) => {
@@ -1326,10 +1384,26 @@ function renderSidebar(estado: Estado): string {
     const subtitulo = emLigacao ? `<span class="sub-em-ligacao">${ICONE_LIGACAO.fone(12)}Em ligação</span>` : a.computadorForaDoAr && a.ownerId === estado.sessao?.pessoaId ? '<span class="sub-fora-do-ar">computador fora do ar</span>' : perguntando ? SUBTITULO_ESPERANDO : paradas.has(a.id) ? SUBTITULO_ROTINA_PARADA : `<span${nova ? ' class="previa-nova"' : ""}>${esc(a.ultimaMensagem?.previa || a.descricaoEstado || "acabamos de nos conhecer")}</span>`;
     // ADR-083 (#196, K8 variante 3): com trabalho aberto, o chip com o número e o ponto na cor do bot ao lado do nome.
     const chip = (a.titulo ? `<i class="chip">${esc(a.titulo)}</i>` : "") + sinalDoBot(estado, a);
+    if (ehCelular) return linhaDoCelular(a, { escondida, aviso, nova, emLigacao, chip, estadoVisual, rotuloAviso, perguntando: perguntando > 0 });
     // definido em 2026-09-30 (canvas "Menu, sidebar e gaveta"): sem ••• na linha nem no fixado — o menu do bot abre no
     // clique direito (ou Shift+F10). O nome inteiro, com o título, fica no title. ADR-125 (NOD-349): o ⋯ saiu do topo da
     // gaveta e mora aqui, à vista só no toque (sem clique direito); no mouse ele segue escondido.
     return `<div class="bot-row${escondida ? " escondida" : ""}" data-bot-contexto="${esc(a.id)}"${arrastavel(a)} data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}"><button class="row"${atual(a.conversaId)} data-act="abrir-conversa" data-conversa="${esc(a.conversaId)}" data-agente="${esc(a.id)}" data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}" aria-label="Abrir conversa com ${esc(a.nome)}${emLigacao ? " (em ligação)" : ""}${rotuloAviso}" title="${esc(a.titulo ? `${a.nome} · ${a.titulo}` : a.nome)}">${iconeAgente(a, "", estadoVisual, aviso ? `data-aviso="${aviso}"` : "")}<span class="txt"><span class="nome-linha"><b>${esc(a.nome)}</b>${chip}</span>${subtitulo}</span></button><button type="button" class="bot-mais" data-act="menu-agente" data-id="${esc(a.id)}" aria-label="Ações de ${esc(a.nome)}" aria-haspopup="menu">⋯</button></div>`;
+  };
+  /**
+   * NOD-379 (protótipo v3): a linha de mensageiro — mascote de 48, nome e título, a hora à direita e a prévia embaixo. Quando
+   * o bot pede algo, a prévia ganha o prefixo ("Decisão:", "Pergunta:") e a linha fica em destaque; mensagem nova também.
+   * O ⋯ fica só para o leitor de tela: o menu abre no toque longo.
+   */
+  const linhaDoCelular = (a: (typeof agentes)[number], o: { escondida: boolean; aviso: AvisoBot; nova: boolean; emLigacao: boolean; chip: string; estadoVisual: ReturnType<typeof mascoteComAviso>; rotuloAviso: string; perguntando: boolean }) => {
+    const prefixo = PREFIXO_DO_PEDIDO[o.aviso];
+    const previa = `<span class="inicio-previa">${prefixo ? `<i>${prefixo}</i> ` : ""}${esc(a.ultimaMensagem?.previa || a.descricaoEstado || "acabamos de nos conhecer")}</span>`;
+    const sub = o.emLigacao ? `<span class="sub-em-ligacao">${ICONE_LIGACAO.fone(12)}Em ligação</span>` : a.computadorForaDoAr && a.ownerId === estado.sessao?.pessoaId ? '<span class="sub-fora-do-ar">computador fora do ar</span>' : !prefixo && paradas.has(a.id) ? SUBTITULO_ROTINA_PARADA : !prefixo && o.perguntando ? SUBTITULO_ESPERANDO : previa;
+    const em = a.ultimaMensagem?.em;
+    const hora = em ? `<time class="inicio-hora" datetime="${new Date(em).toISOString()}">${horaDaLinha(em, Date.now(), fusoLocal())}</time>` : "";
+    const tom = prefixo ? " pede" : o.nova ? " nao-lida" : "";
+    const busca = esc(`${a.nome} ${a.titulo}`.toLowerCase());
+    return `<div class="bot-row inicio-linha${tom}${o.escondida ? " escondida" : ""}" data-bot-contexto="${esc(a.id)}" data-busca="${busca}"><button class="row" data-act="abrir-conversa" data-conversa="${esc(a.conversaId)}" data-agente="${esc(a.id)}" data-busca="${busca}" aria-label="Abrir conversa com ${esc(a.nome)}${o.emLigacao ? " (em ligação)" : ""}${o.rotuloAviso}">${iconeAgente(a, "", o.estadoVisual, o.aviso ? `data-aviso="${o.aviso}"` : "")}<span class="txt"><span class="nome-linha"><b>${esc(a.nome)}</b>${o.chip}${hora}</span>${sub}</span></button><button type="button" class="bot-mais" data-act="menu-agente" data-id="${esc(a.id)}" aria-label="Ações de ${esc(a.nome)}" aria-haspopup="menu">⋯</button></div>`;
   };
   const meus = agentes.filter((a) => a.ownerId === estado.sessao?.pessoaId);
   // definido em 2026-10-04 (web/lib/secoes.ts): a seção recolhe pelo título. Recolhida, ficam à vista o bot da conversa
@@ -1339,30 +1413,38 @@ function renderSidebar(estado: Estado): string {
   const conversaAberta = t.tipo === "conversa" ? t.conversaId : null;
   const alertaDe = (a: (typeof agentes)[number]) => (!!a.computadorForaDoAr && a.ownerId === pessoaId) || estado.ligacaoViva?.agenteId === a.id;
   const secaoDeBots = (nome: string, chave: string, lista: typeof agentes, atributos: string) => {
-    const s = estadoDaSecao({ chave, recolhidas: secoesRecolhidas, conversaAberta, bots: lista.map((a) => ({ conversaId: a.conversaId, aviso: avisoDe(a), alerta: alertaDe(a) })) });
-    return `<section class="section"${atributos}${s.recolhida ? " data-recolhida" : ""}>${cabecalhoSecao(nome, chave, { recolhida: s.recolhida, total: lista.length, aviso: s.aviso })}${lista.map((a, i) => linha(a, s.escondidos[i])).join("")}</section>`;
+    const bots = lista.map((a) => ({ conversaId: a.conversaId, aviso: avisoDe(a), alerta: alertaDe(a) }));
+    const s = estadoDaSecao({ chave, recolhidas: secoesRecolhidas, conversaAberta, bots });
+    // NOD-379: no celular a seção recolhida deixa à vista quem pede algo (o aviso fica na linha, não sobe para o título).
+    const escondidos = ehCelular ? escondidosNoCelular(s.recolhida, bots) : s.escondidos;
+    return `<section class="section"${atributos}${s.recolhida ? " data-recolhida" : ""}>${cabecalhoSecao(nome, chave, { recolhida: s.recolhida, total: lista.length, aviso: ehCelular ? "" : s.aviso })}${lista.map((a, i) => linha(a, escondidos[i])).join("")}</section>`;
   };
   // Cada seção é um alvo de soltar (data-grupo); "Meus agentes" é a seção "" e continua alvo mesmo vazia (só aparece arrastando).
   const grupo = (nome: string, secao: string, lista: typeof agentes) => secaoDeBots(nome, chaveDaSecao(pessoaId, secao), lista, ` data-grupo="secao" data-secao="${esc(secao)}"${lista.length ? "" : " data-vazio"}`);
   // definido em 2026-09-24 (sidebar no estilo do Grok): fixados em grade de 4 — avatar grande, nome e o
   // título num chip. Mesmo aviso no mascote e o mesmo menu (clique direito / •••) da linha.
-  const bloco = (a: (typeof agentes)[number]) => {
+  const bloco = (a: (typeof agentes)[number], i: number) => {
     const aviso = avisoDe(a);
+    // NOD-379: no celular, além dos 8 primeiros, só com "Ver todos" (ou buscando).
+    const alem = ehCelular && i >= FAVORITOS_VISIVEIS && !favoritosTodos ? " alem-dos-visiveis" : "";
     const mascote = estadoMascoteNaConversa(estado, a.conversaId);
     const rotulo = aviso ? ` (${ESPERA[aviso]})` : "";
     const emLigacao = estado.ligacaoViva?.agenteId === a.id;
-    return `<div class="fixado${emLigacao ? " em-ligacao" : ""}" data-bot-contexto="${esc(a.id)}"${arrastavel(a)} data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}"><button class="fixado-bt"${atual(a.conversaId)} data-act="abrir-conversa" data-conversa="${esc(a.conversaId)}" data-agente="${esc(a.id)}" aria-label="Abrir conversa com ${esc(a.nome)}${rotulo}" title="${esc(a.titulo ? `${a.nome} · ${a.titulo}` : a.nome)}">${iconeAgente(a, "lg", mascoteComAviso(mascote, aviso), aviso ? `data-aviso="${aviso}"` : "")}<b>${esc(a.nome)}</b>${emLigacao ? `<i class="chip chip-em-ligacao">${ICONE_LIGACAO.fone(11)}Em ligação</i>` : sinalDoBot(estado, a) || (a.titulo ? `<i class="chip">${esc(a.titulo)}</i>` : "")}</button><button type="button" class="bot-mais bot-mais-fixado" data-act="menu-agente" data-id="${esc(a.id)}" aria-label="Ações de ${esc(a.nome)}" aria-haspopup="menu">⋯</button></div>`;
+    return `<div class="fixado${emLigacao ? " em-ligacao" : ""}${alem}" data-bot-contexto="${esc(a.id)}"${arrastavel(a)} data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}"><button class="fixado-bt"${atual(a.conversaId)} data-act="abrir-conversa" data-conversa="${esc(a.conversaId)}" data-agente="${esc(a.id)}" aria-label="Abrir conversa com ${esc(a.nome)}${rotulo}" title="${esc(a.titulo ? `${a.nome} · ${a.titulo}` : a.nome)}">${iconeAgente(a, "lg", mascoteComAviso(mascote, aviso), aviso ? `data-aviso="${aviso}"` : "")}<b>${esc(a.nome)}</b>${emLigacao ? `<i class="chip chip-em-ligacao">${ICONE_LIGACAO.fone(11)}Em ligação</i>` : sinalDoBot(estado, a) || (a.titulo ? `<i class="chip">${esc(a.titulo)}</i>` : "")}</button><button type="button" class="bot-mais bot-mais-fixado" data-act="menu-agente" data-id="${esc(a.id)}" aria-label="Ações de ${esc(a.nome)}" aria-haspopup="menu">⋯</button></div>`;
   };
   // definido em 2026-10-07 (ADR-081): o Nod nunca entra numa seção. Fixado, é o primeiro da grade; desafixado (discreto),
   // vira o botão com o logo e o nome na barra de cima, à esquerda da lupa (canvas "Nod — bot fixo", Alt E).
   const nod = meus.find((a) => a.papel === "nod") ?? null;
   const comuns = meus.filter((a) => a.papel !== "nod");
   const secoes = [...new Set(comuns.filter((a) => !a.fixado && a.secao).map((a) => a.secao!))].sort((a, b) => a.localeCompare(b));
-  const fixados = [...(nod?.fixado ? [nod] : []), ...comuns.filter((a) => a.fixado)];
-  const grade = meus.length ? `<section class="fixados" aria-label="Fixados" data-grupo="fixados"${fixados.length ? "" : " data-vazio"}>${fixados.map(bloco).join("")}${fixados.length ? "" : '<p class="fixados-vazio">Solte aqui para fixar</p>'}</section>` : "";
+  // NOD-379 (suposição registrada no PR): no celular não há barra de cima para o Nod discreto; ele é sempre o primeiro favorito.
+  const fixados = [...(nod && (nod.fixado || ehCelular) ? [nod] : []), ...comuns.filter((a) => a.fixado)];
+  const grade = !meus.length ? "" : ehCelular
+    ? gradeDoCelular(fixados.map(bloco).join(""), fixados.length)
+    : `<section class="fixados" aria-label="Fixados" data-grupo="fixados"${fixados.length ? "" : " data-vazio"}>${fixados.map(bloco).join("")}${fixados.length ? "" : '<p class="fixados-vazio">Solte aqui para fixar</p>'}</section>`;
   const bots = meus.length ? grupo("Meus agentes", "", comuns.filter((a) => !a.fixado && !a.secao)) + secoes.map((s) => grupo(s, s, comuns.filter((a) => !a.fixado && a.secao === s))).join("") + '<div class="nova-secao-alvo" data-grupo="nova-secao" aria-hidden="true">+ Nova seção</div>' : "";
   const avisoNod = nod ? avisoDe(nod) : "";
-  const nodDiscreto = nod && !nod.fixado
+  const nodDiscreto = nod && !nod.fixado && !ehCelular
     ? `<button class="nod-topo" data-bot-contexto="${esc(nod.id)}"${atual(nod.conversaId)} data-act="abrir-conversa" data-conversa="${esc(nod.conversaId)}" data-agente="${esc(nod.id)}" aria-label="Abrir o Nod${avisoNod ? ` (${ESPERA[avisoNod]})` : ""}" title="Nod">${LOGO_NOD}<span>Nod</span>${avisoNod ? `<span class="nod-topo-aviso" data-aviso="${avisoNod}" aria-hidden="true"></span>` : ""}</button>`
     : "";
   const daEquipe = agentes.filter((a) => a.ownerId !== estado.sessao?.pessoaId);
@@ -1395,6 +1477,28 @@ function renderSidebar(estado: Estado): string {
   const naoLidos = comNovas || t.tipo === "nao-lidos"
     ? `<button class="icone-topo nao-lidos-bt" data-act="navegar" data-tela="nao-lidos" aria-current="${t.tipo === "nao-lidos" ? "page" : "false"}" aria-label="${esc(rotuloNaoLidos(estado))}" title="Não lidos">${BANDEJA}${comNovas ? '<span class="ponto-novo" aria-hidden="true"></span>' : ""}</button>`
     : "";
+  if (ehCelular) {
+    // O Nod está sempre lá: "vazio" é não ter nenhum outro bot (ele fica na grade, acima do convite).
+    const lista = estadoDaLista({ temFrota: !!estado.frota, falhou: frotaFalhou, bots: comuns.length + daEquipe.length });
+    const meio = lista === "carregando" ? ESQUELETO_DO_INICIO
+      : lista === "vazia" ? `${grade}${INICIO_VAZIO}`
+      : lista === "erro" ? ""
+      : `${grade}${bots}${equipe}`;
+    // O erro com cache fica acima da lista; sem cache, é tudo o que há.
+    const erroFrota = frotaFalhou ? '<p class="inicio-aviso" role="status">Não deu para carregar seus bots · <button type="button" class="inicio-link" data-act="tentar-frota">Tentar de novo</button></p>' : "";
+    return `<div class="inicio-topo">
+      <button class="me me-topo${falhaMotor ? " me-falha" : ""}" data-act="menu-conta" aria-haspopup="menu" aria-expanded="${estado.espaco ? "true" : "false"}" aria-label="Menu da conta: ${esc(situacaoMotor)}${avisoUso ? ` · ${esc(avisoUso.resumo)}` : ""}"><span class="av-me">eu</span>${avisoUso ? '<span class="me-ponto" aria-hidden="true"></span>' : ""}</button>
+      <span class="inicio-topo-acoes">${naoLidos}${renderIconeTrabalhos(estado)}${renderChamada(estado)}<button class="create-trigger" data-act="navegar" data-tela="novo-bot" aria-label="Nova conversa">${MAIS}</button></span>
+    </div>
+    ${renderIncidentes(estado)}
+    ${ambiente}
+    ${falhaMotor ? avisoDeEstado({ tom: "alerta", texto: situacaoMotor, papel: "status", classe: "aviso-compacto", acao: botao("secao-espaco", motorDesatualizado(estado) ? "Atualizar" : "Conectar", { classe: "pri sm", dados: { secao: "conexao" } }) }) : ""}
+    <div class="list">
+      ${erroFrota}
+      ${meio}
+    </div>
+    <div class="inicio-barra"><label class="search inicio-busca">${LUPA}<input id="busca-bots" type="search" enterkeyhint="search" placeholder="Buscar" aria-label="Buscar agentes" autocomplete="off" /></label></div>`;
+  }
   return `<div class="search-wrap">
       <div class="sh">${nodDiscreto}<button class="icone-topo" data-act="abrir-busca" aria-label="Buscar agentes" aria-keyshortcuts="Meta+K Control+K" title="Buscar (⌘K)">${LUPA}</button>${naoLidos}${renderIconeTrabalhos(estado)}${renderChamada(estado)}<span class="create-actions"><button class="create-trigger" data-act="navegar" data-tela="novo-bot" data-segurar="segurar-mais" aria-label="Nova conversa (segure para criar um bot direto)" aria-keyshortcuts="Shift+Enter Shift+Space"><span class="segurar-anel" aria-hidden="true"></span>+</button></span></div>
       <label class="search"${buscando ? "" : " hidden"}><span>⌕</span><input id="busca-bots" placeholder="Buscar agentes…" aria-label="Buscar agentes" autocomplete="off" /><kbd>esc</kbd></label>
@@ -1413,24 +1517,23 @@ function renderSidebar(estado: Estado): string {
     </div>`;
 }
 
-const MENU = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>';
+// NOD-379: o ‹ da conversa volta à inicial do celular (era o ☰ da gaveta).
+const MENU = '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>';
 
-/** NOD-380: a lupa do topo do celular abre a busca em tela cheia (até a barra da NOD-379 chegar). No computador o CSS a esconde. */
+/** NOD-380: a lupa do topo da conversa no celular abre a busca em tela cheia. No computador o CSS a esconde. */
 function botaoBuscarCelular(): string {
   return `<button type="button" class="buscar-celular" data-act="abrir-busca" aria-label="Buscar bots, salas e mensagens">${LUPA}</button>`;
 }
 
-/** O ☰ que abre a gaveta de bots no celular (ADR-094). No computador o CSS o esconde. */
+// O ‹ da pílula é o do protótipo nod-381 (22 px, traço 2).
 const VOLTAR = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 5-7 7 7 7"/></svg>';
 
 /**
- * NOD-381 (definido em 2026-10-27): na conversa o ☰ vira o ‹ do protótipo, um círculo de vidro à esquerda da pílula. Até a
- * tela inicial do celular (NOD-379) existir, o ‹ abre a mesma gaveta de bots que o ☰ abria. No computador nenhum dos dois
- * aparece (`.abrir-bots` é escondido fora do celular, web/mobile.css).
+ * NOD-381 + NOD-379: na conversa o ‹ é o círculo de vidro à esquerda da pílula (`voltar-bots`); no celular ele volta à
+ * tela inicial (era o ☰ da gaveta). No computador não aparece (`.abrir-bots` é escondido fora do celular, web/mobile.css).
  */
 function botaoAbrirBots(naConversa = false): string {
-  const [classe, rotulo, icone] = naConversa ? ["abrir-bots voltar-bots", "Bots e conversas", VOLTAR] : ["abrir-bots", "Bots e conversas", MENU];
-  return `<button type="button" class="${classe}" data-act="abrir-bots" aria-label="${rotulo}" aria-controls="sidebar" aria-expanded="${celular.botsAbertos()}">${icone}</button>`;
+  return `<button type="button" class="abrir-bots${naConversa ? " voltar-bots" : ""}" data-act="abrir-bots" aria-label="Voltar ao início">${naConversa ? VOLTAR : MENU}</button>`;
 }
 
 /**
@@ -2109,6 +2212,8 @@ function render(): void {
     quadroPendente = 0;
   }
   agendarViradaDoMascote();
+  // NOD-379: sem sessão a inicial não existe e a entrada (no palco) não pode ficar inerte.
+  celular.definirSessao(!!estado.sessao);
   if (!estado.sessao) {
     document.querySelector(".app")?.classList.add("sem-sessao");
     definirTelaDoBot(null, null);
@@ -2132,9 +2237,11 @@ function render(): void {
   const gavetaDoApp = gavetaPrendeFoco(estado.tela);
   if (gavetaDoApp && !gavetaMontada) origemDaGaveta = origemDoFoco();
   if (!arrastandoBot) redesenharSidebar();
+  if (celular.botsAbertos()) mostrarDicaToqueLongo();
+  else esconderDicaToqueLongo(false);
   const codigo = codigoComFoco();
   // Seu espaço é uma camada por cima: a tela de baixo continua montada e fica inerte (nem foco, nem clique) enquanto ela está aberta.
-  regiaoReabrindo("espaco", estado.espaco ? renderEspaco(estado, canalAvisos.estado(), voltaDaTela(estado, estado.tela), {
+  regiaoReabrindo("espaco", estado.espaco ? renderEspaco(estado, canalAvisos.estado(), celular.botsAbertos() ? { rotulo: "Início", icone: "" } : voltaDaTela(estado, estado.tela), {
     conta: dadosConta(),
     contaPagina: contas?.minhaConta && estado.configUi.abertos.includes("conta-pagina") ? telaMinhaConta.render() : null,
     tema: lerTema(),
@@ -2159,7 +2266,9 @@ function render(): void {
     queueMicrotask(() => telaLigacao.retomar(retomar));
   }
   renderPrincipal();
-  prenderFocoNaGaveta(gavetaDoApp);
+  // NOD-379: com a inicial do celular à vista (o voltar do navegador por cima do Marketplace), a gaveta de app não prende
+  // o foco: ela deixaria a inicial inerte.
+  prenderFocoNaGaveta(celular.botsAbertos() ? null : gavetaDoApp);
   codigo?.();
   focoPendente.aplicar();
 }
@@ -2223,11 +2332,14 @@ function prenderFocoNaGaveta(slug: string | null): void {
  * (digitar na busca filtra direto, no ouvinte de input).
  */
 function redesenharSidebar(): void {
-  const html = lembrar("sidebar", estado, [ambienteBanco, buscaAberta, termoBusca() !== "", naFrente(), deixarNaoLida, secoesRecolhidas], renderSidebar);
+  const html = lembrar("sidebar", estado, [ambienteBanco, buscaAberta, termoBusca() !== "", naFrente(), deixarNaoLida, secoesRecolhidas, celular.ativo(), celular.botsAbertos(), frotaFalhou, favoritosTodos, celular.ativo() ? new Date().toDateString() : ""], renderSidebar);
   if (!regiaoMudaria("sidebar", html)) return;
   const busca = document.getElementById("busca-bots") as HTMLInputElement | null;
   const valorBusca = busca?.value ?? "";
   const focoBusca = document.activeElement === busca;
+  // NOD-379: no celular o campo mora na barra flutuante; regravá-la com ele focado fecha o teclado do iOS e perde o acento
+  // em composição. O filtro segue ao vivo; a lista se atualiza logo depois que a busca perde o foco.
+  if (focoBusca && celular.ativo()) { sidebarAdiada = true; return; }
   const rolagem = document.querySelector<HTMLElement>("#sidebar .list")?.scrollTop ?? 0;
   regiao("sidebar", html);
   const novaBusca = document.getElementById("busca-bots") as HTMLInputElement | null;
@@ -2591,12 +2703,22 @@ function propostaDoEstado(id: string): Proposta | null {
 
 function navegar(tela: Tela): void {
   const antes = estado.tela;
-  celular.fecharBots();
+  // NOD-379: no celular o "início" é a tela inicial (fechar um Trabalho, voltar da conexão), não a conversa que o reducer
+  // escolhe para ele; saindo dela, empilha uma entrada no histórico (o voltar do navegador volta a ela).
+  const paraInicial = celular.ativo() && tela.tipo === "inicio";
+  if (!paraInicial) celular.entrarNaConversa();
   aoTrocarDeTela(antes, tela);
   dispatch({ tipo: "navegar", tela });
+  // Antes de ler a conversa: a que o reducer põe por baixo da inicial não conta como lida.
+  if (paraInicial) celular.voltarAoInicio();
   lembrarTaskAberta(tela);
   lerConversaDaTela();
   if (rolaAoTopoAoNavegar(tela.tipo)) document.getElementById("timeline")?.scrollTo({ top: 0 });
+}
+
+/** A tela de onde a pessoa sai: no celular, com a inicial à vista, é a inicial (não a conversa escondida por baixo). */
+function telaDeOrigem(): Tela {
+  return celular.botsAbertos() ? { tipo: "inicio" } : estado.tela;
 }
 
 /** O que muda fora do reducer quando a tela troca: por `navegar` ou, na NOD-370, quando o bot da conversa saiu da frota. */
@@ -2621,14 +2743,14 @@ function aoTrocarDeTela(antes: Tela, tela: Tela): void {
  * Andar dentro dele (Avançado, voltar ao Marketplace, clicar no botão de novo) não esquece a origem.
  */
 function abrirMarketplace(avancado = false): void {
-  const t = estado.tela;
+  const t = telaDeOrigem();
   const voltar = t.tipo === "conectores" ? t.voltar : t.tipo === "inicio" ? undefined : t;
   navegar({ tipo: "conectores", ...(avancado ? { avancado: true as const } : {}), ...(voltar ? { voltar } : {}) });
 }
 
 /** Abre a tela da task; de dentro de outra task (ou de uma linha), o Fechar continua voltando para a tela de fora. */
 function abrirTrabalho(id: string): void {
-  if (id) navegar(telaDaTask(estado.tela, id));
+  if (id) navegar(telaDaTask(telaDeOrigem(), id));
 }
 
 function fecharTask(): void {
@@ -3759,7 +3881,27 @@ function filtrarBots(texto: string, raiz = "#sidebar"): void {
   for (const el of document.querySelectorAll<HTMLElement>(`${raiz} [data-busca]`)) el.hidden = !el.dataset.busca?.includes(termo);
   // Buscando, as seções recolhidas mostram o que casa (navegacao.css) — por atributo, sem redesenhar a barra no meio da
   // digitação: refazer o campo cortava o acento de tecla morta ("´é") e o focusout fechava a busca (definido em 2026-10-04).
-  if (raiz === "#sidebar") document.getElementById("sidebar")?.toggleAttribute("data-buscando", termo !== "");
+  if (raiz !== "#sidebar") return;
+  document.getElementById("sidebar")?.toggleAttribute("data-buscando", termo !== "");
+  // NOD-379 (critério 6): buscando, a seção ou a grade sem nenhum resultado some inteira, com o título.
+  const grupos = [...document.querySelectorAll<HTMLElement>("#sidebar .section, #sidebar .fixados, #sidebar .inicio-favoritos")];
+  const itens = grupos.map((g) => [...g.querySelectorAll<HTMLElement>(".bot-row, .fixado")].map((el) => !el.hidden));
+  const some = gruposSemResultado(termo !== "", itens);
+  grupos.forEach((g, i) => g.toggleAttribute("data-sem-resultado", some[i]));
+  // Nada em lugar nenhum: uma frase no lugar da lista vazia.
+  const nada = termo !== "" && grupos.length > 0 && some.every(Boolean);
+  const lista = document.querySelector<HTMLElement>("#sidebar .list");
+  let aviso = lista?.querySelector<HTMLElement>(".busca-nada") ?? null;
+  if (nada && lista && !aviso) {
+    aviso = document.createElement("p");
+    aviso.className = "busca-nada mudo";
+    aviso.setAttribute("role", "status");
+    lista.append(aviso);
+  }
+  if (aviso) {
+    aviso.hidden = !nada;
+    aviso.textContent = nada ? `Nenhum bot com “${texto.trim()}”` : "";
+  }
 }
 
 /** NOD-45: o timer que devolve o Copiar do card do bloco de código ao repouso, por botão. */
@@ -3921,7 +4063,7 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     else if (tela === "espaco") abrirEspaco("conexao");
   },
   // NOD-383: no celular, "Configurações" (a Geral do menu) abre a lista das seções; os outros itens abrem a seção direto.
-  "menu-conta": (el) => abrirMenuConta(el, dadosMenuConta(), { secao: (s) => abrirEspaco(s, s === "geral" && celular.ativo()), conta: (qual) => void abrirDoMenuConta(qual) }),
+  "menu-conta": (el) => abrirMenuConta(el, dadosMenuConta(), { secao: (s) => abrirEspaco(s, s === "geral" && celular.ativo()), conta: (qual) => void abrirDoMenuConta(qual) }, celular.ativo()),
   "secao-espaco": (el) => abrirEspaco((el.dataset.secao as SecaoEspaco | undefined) ?? "conexao"),
   // NOD-367: as ações das Configurações (a linha recolhida, a conta, os experimentos e o onboarding).
   "config-recolhe": (el) => { if (el.dataset.recolhe) dispatch({ tipo: "config-recolhe", id: el.dataset.recolhe }); },
@@ -4267,7 +4409,19 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   "ditado-parar": () => ditado.concluir("campo"),
   "remover-anexo": (el) => removerAnexo(el.dataset.id ?? ""),
   "abrir-busca": () => abrirBusca(),
-  "abrir-bots": () => celular.alternarBots(),
+  "abrir-bots": () => celular.voltarAoInicio(),
+  // NOD-379: a inicial do celular — reler a frota que falhou e abrir os favoritos além dos 8.
+  "tentar-frota": () => {
+    void tentarFrotaAgora<Acao>({
+      buscar: buscarFrota,
+      aplicar: (a) => dispatch(a),
+      tirarDaFila: () => pendentesDeRede.delete("frota"),
+      voltarParaFila: () => { pendentesDeRede.add("frota"); sonda.lembrar(); },
+      ehRede: (e) => { const erro = erroDe(e); return !!erro && ehErroDeRede(erro); },
+      redesenhar: render,
+    });
+  },
+  "ver-favoritos": () => { favoritosTodos = !favoritosTodos; render(); },
   // O botão some ao ser usado: o foco vai para o campo, e não para o <body>.
   "rolar-para-novas": () => {
     rolagem.irParaNovas();
@@ -4414,7 +4568,7 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     if (tipo) telemetria.aberta({ tipo, agenteId: el.dataset.agente ?? "", chaveLinha: el.dataset.linhaChave ?? "" });
     const trabalho = el.dataset.trabalho;
     if (trabalho) { abrirTrabalho(trabalho); return; }
-    const t = estado.tela;
+    const t = telaDeOrigem();
     navegar({ tipo: "linha", conversaId: el.dataset.conversa ?? "", mensagens: (el.dataset.mensagens ?? "").split(",").filter(Boolean), titulo: el.dataset.titulo ?? "", voltar: t.tipo === "trabalho" || t.tipo === "linha" ? t.voltar : t, ...(tipo === "rotina" ? { rotina: true } : {}) });
   },
   "fechar-trabalho": () => fecharTask(),
@@ -5346,7 +5500,11 @@ document.addEventListener("drop", (ev) => {
 // clique na linha que a pessoa foi abrir.
 document.addEventListener("focusout", (ev) => {
   const campo = ev.target as HTMLInputElement;
-  if (campo.id !== "busca-bots" || campo.value.trim()) return;
+  if (campo.id !== "busca-bots") return;
+  // NOD-379: no celular o campo é a própria barra flutuante da inicial; esconder a label sumiria com a barra. A lista
+  // adiada enquanto ele tinha o foco se refaz, com ou sem texto.
+  if (campo.closest(".inicio-busca")) { redesenharAdiada(); return; }
+  if (campo.value.trim()) return;
   buscaAberta = false;
   campo.closest("label")?.setAttribute("hidden", "");
 });
@@ -5416,7 +5574,7 @@ document.addEventListener("keydown", (ev) => {
     return;
   }
   // definido em 2026-09-25 (revisão do PR #68): Esc fecha a gaveta do app e o "+ Dar acesso" do painel.
-  if (ev.key === "Escape" && estado.tela.tipo === "conectores" && estado.tela.gaveta) { ev.preventDefault(); void ACOES["fechar-gaveta"]?.(document.body); return; }
+  if (ev.key === "Escape" && estado.tela.tipo === "conectores" && estado.tela.gaveta && !celular.botsAbertos()) { ev.preventDefault(); void ACOES["fechar-gaveta"]?.(document.body); return; }
   // NOD-122: com a gaveta aberta o Tab dá a volta nela, em vez de sair para a barra do navegador.
   if (ev.key === "Tab" && gavetaMontada && !ev.altKey && !ev.metaKey && !ev.ctrlKey) {
     const gaveta = document.querySelector<HTMLElement>(".tela-conectores .gaveta");
@@ -5425,9 +5583,10 @@ document.addEventListener("keydown", (ev) => {
     if (alvo !== null) { ev.preventDefault(); focaveis[alvo]?.focus(); return; }
   }
   // Sem gaveta, Esc no Marketplace volta para onde a pessoa estava (definido em 2026-10-04) — menos digitando num campo.
-  if (ev.key === "Escape" && estado.tela.tipo === "conectores" && estado.tela.voltar && !(ev.target as HTMLElement).closest?.("dialog, input, textarea, select")) { ev.preventDefault(); void ACOES["voltar-conexao"]?.(document.body); return; }
+  if (ev.key === "Escape" && estado.tela.tipo === "conectores" && estado.tela.voltar && !celular.botsAbertos() && !(ev.target as HTMLElement).closest?.("dialog, input, textarea, select")) { ev.preventDefault(); void ACOES["voltar-conexao"]?.(document.body); return; }
   // A tela da task (e a provisória de uma linha) fecha no Esc — menos com algo digitado no campo dela.
-  if (ev.key === "Escape" && (estado.tela.tipo === "trabalho" || estado.tela.tipo === "linha") && !(ev.target as HTMLElement).closest?.("dialog, input, select, #detalhes") && !((ev.target as HTMLTextAreaElement).id === "composer-texto" && (ev.target as HTMLTextAreaElement).value.trim())) { ev.preventDefault(); fecharTask(); return; }
+  // NOD-379: com a inicial do celular à vista, o Esc não age na tela escondida por baixo (Marketplace, Trabalho, linha).
+  if (ev.key === "Escape" && (estado.tela.tipo === "trabalho" || estado.tela.tipo === "linha") && !celular.botsAbertos() && !(ev.target as HTMLElement).closest?.("dialog, input, select, #detalhes") && !((ev.target as HTMLTextAreaElement).id === "composer-texto" && (ev.target as HTMLTextAreaElement).value.trim())) { ev.preventDefault(); fecharTask(); return; }
   // Esc dentro da gaveta, num nível interno, volta um nível (o mesmo ‹ do topo).
   if (ev.key === "Escape" && estado.gaveta && (ev.target as HTMLElement).closest?.("#detalhes")) { ev.preventDefault(); voltarNivel(); return; }
   const ta = ev.target as HTMLTextAreaElement;
@@ -5682,8 +5841,92 @@ document.addEventListener("contextmenu", (ev) => {
   ev.preventDefault();
   const a = botGerido(row.dataset.botContexto);
   const ponto = ev.clientX || ev.clientY ? { x: ev.clientX, y: ev.clientY } : undefined;
+  // NOD-379: o Android dispara contextmenu no toque longo; o gesto nosso já abriu o menu. Se o do sistema vier antes
+  // (espera menor que 450 ms), ele abre o menu do bot segurado direto, sem piscar o menu comum.
+  if (Date.now() - ultimoToqueLongo < MS_CONTEXTMENU_DO_GESTO) return;
+  if (celular.ativo() && row.closest("#sidebar")) { toqueLongo.esquecer(); abrirMenuSegurado(row); return; }
   if (a) abrirMenu(a, a.ownerId === estado.sessao?.pessoaId, row, (acao) => acaoDoBot(a, acao), ponto);
 });
+
+// NOD-379 (protótipo nod-379 v3): no celular o ⋯ sai e o menu do bot abre no toque longo. O bot segurado sobe por cima do
+// fundo desfocado (um clone sem foco, no mesmo lugar) e o menu nasce logo abaixo dele.
+function abrirMenuSegurado(segurada: HTMLElement): boolean {
+  const a = botGerido(segurada.dataset.botContexto);
+  // A barra pode ter sido redesenhada durante a espera (frota, não lidos, mensagem nova): a linha segurada saiu do DOM e
+  // a de agora é outra, com o mesmo bot no mesmo lugar (favorito ou lista).
+  const row = segurada.isConnected ? segurada : linhaRedesenhada(segurada);
+  if (!a || !row) return false;
+  ultimoToqueLongo = Date.now();
+  esconderDicaToqueLongo(true);
+  navigator.vibrate?.(10);
+  const r = row.getBoundingClientRect();
+  row.classList.add("segurado");
+  abrirMenu(a, a.ownerId === estado.sessao?.pessoaId, row, (acao) => acaoDoBot(a, acao), { x: r.left + 12, y: r.bottom + 8 });
+  const d = document.getElementById("gestao-dialogo");
+  if (!d) { row.classList.remove("segurado"); return false; }
+  d.classList.add("menu-segurado");
+  // Posicionado de novo já com os itens de 48 px: abaixo do bot se couber, senão acima; sem caber, rola por dentro. A
+  // altura natural é a da lista mais a moldura do diálogo (preenchimento e borda), medida pelo estilo: o .bot-menu tem
+  // max-height e o offsetHeight dele pode já vir cortado.
+  const lista = d.querySelector<HTMLElement>('[role="menu"]');
+  const cs = getComputedStyle(d);
+  const moldura = ["paddingTop", "paddingBottom", "borderTopWidth", "borderBottomWidth"].reduce((soma, k) => soma + (parseFloat(cs[k as "paddingTop"]) || 0), 0);
+  const lugar = lugarDoMenuSegurado({ topo: r.top, base: r.bottom }, lista ? lista.scrollHeight + moldura : d.offsetHeight, window.innerHeight);
+  d.style.top = `${lugar.topo}px`;
+  if (lista && lugar.alturaMaxima !== null) Object.assign(lista.style, { maxHeight: `${alturaDaLista(lugar.alturaMaxima, moldura, 0)}px`, overflowY: "auto" });
+  const copia = row.cloneNode(true) as HTMLElement;
+  copia.removeAttribute("data-bot-contexto");
+  copia.classList.add("segurado-copia");
+  for (const mais of copia.querySelectorAll(".bot-mais")) mais.remove();
+  copia.inert = true;
+  copia.setAttribute("aria-hidden", "true");
+  Object.assign(copia.style, { left: `${r.left}px`, top: `${r.top}px`, width: `${r.width}px`, height: `${r.height}px` });
+  d.prepend(copia);
+  d.addEventListener("close", () => row.classList.remove("segurado"));
+  return true;
+}
+function linhaRedesenhada(segurada: HTMLElement): HTMLElement | null {
+  const id = segurada.dataset.botContexto;
+  if (!id) return null;
+  const candidatas = [...document.querySelectorAll<HTMLElement>(`#sidebar [data-bot-contexto="${CSS.escape(id)}"]`)];
+  return candidatas[escolherRedesenhada(segurada.className, candidatas.map((c) => c.className))] ?? null;
+}
+const toqueLongo = criarToqueLongo<HTMLElement>({ agendar: (fn, ms) => window.setTimeout(fn, ms), cancelar: (id) => clearTimeout(id), agora: () => performance.now() }, abrirMenuSegurado);
+document.addEventListener("pointerdown", (ev) => {
+  const row = celular.ativo() && ev.pointerType !== "mouse" && ev.isPrimary ? (ev.target as HTMLElement).closest<HTMLElement>("#sidebar [data-bot-contexto]") : null;
+  if (row) toqueLongo.comecar(row, ev.clientX, ev.clientY);
+  else toqueLongo.esquecer();
+}, true);
+document.addEventListener("pointermove", (ev) => toqueLongo.mover(ev.clientX, ev.clientY));
+document.addEventListener("pointerup", () => toqueLongo.soltar());
+document.addEventListener("pointercancel", () => toqueLongo.soltar());
+// O clique que vem depois do gesto não abre a conversa por baixo do menu.
+document.addEventListener("click", (ev) => {
+  if (toqueLongo.engolirClique()) { ev.preventDefault(); ev.stopPropagation(); }
+}, true);
+
+// A dica "Segure um bot para ver as ações" aparece uma vez só, na inicial: some no ✕, em 6 s ou no primeiro toque longo.
+function armazenamento(): Storage | null {
+  try { return window.localStorage; } catch { return null; }
+}
+function esconderDicaToqueLongo(marcar: boolean): void {
+  clearTimeout(timerDica);
+  document.querySelector(".dica-toque-longo")?.remove();
+  if (marcar) marcarDicaVista(armazenamento());
+}
+function mostrarDicaToqueLongo(): void {
+  if (!celular.botsAbertos() || document.querySelector(".dica-toque-longo") || dicaJaVista(armazenamento())) return;
+  if (!document.querySelector("#sidebar .inicio-linha, #sidebar .fixado")) return;
+  const dica = document.createElement("div");
+  dica.className = "dica-toque-longo";
+  dica.setAttribute("role", "status");
+  dica.innerHTML = `<span>Segure um bot para ver as ações</span><button type="button" aria-label="Fechar a dica">✕</button>`;
+  dica.querySelector("button")!.addEventListener("click", () => esconderDicaToqueLongo(true));
+  document.body.append(dica);
+  // Vista ao aparecer: entrar numa conversa antes dos 6 s não a traz de volta.
+  marcarDicaVista(armazenamento());
+  timerDica = window.setTimeout(() => esconderDicaToqueLongo(false), MS_DICA);
+}
 
 // ---- arrastar na barra lateral (definido em 2026-09-30, canvas "Menu, sidebar e gaveta") ---------------------------------
 // Soltar na grade fixa, numa seção move, em "+ Nova seção" pede o nome. A barra se reorganiza na hora (frotaAoSoltar) e o
@@ -5976,7 +6219,7 @@ const ACOES_CHANGE: Record<string, (valor: string, el: HTMLSelectElement) => Pro
 
 // ---- Seu espaço e o menu da conta (definido em 2026-09-30, canvas "Menu, sidebar e gaveta") -----------------------------
 function abrirEspaco(pedido: PedidoSecao, lista = false): void {
-  celular.fecharBots();
+  // NOD-379: o espaço cobre a inicial (fora do .app, por cima); escondê-la deixaria a conversa de baixo ao fechar.
   // NOD-367: os pedidos de antes (avisos, este Mac, relatos…) caem na seção que os absorveu.
   const secao = secaoDoPedido(pedido);
   // O menu "Avisos no Mac" muda a preferência sem passar por aqui: Geral relê ao abrir.
@@ -5999,7 +6242,8 @@ function fecharEspaco(): void {
   const t = estado.tela;
   if (t.tipo === "conversa" || t.tipo === "sala") linhaEm = t.conversaId;
   lerConversaDaTela();
-  document.querySelector<HTMLElement>("#sidebar .rodape .me")?.focus();
+  const foco = celular.botsAbertos() ? "#sidebar .me-topo" : celular.ativo() ? '.stage [data-act="abrir-bots"]' : "#sidebar .rodape .me";
+  document.querySelector<HTMLElement>(foco)?.focus();
 }
 
 /** NOD-12: o uso do plano que segura as rotinas (faixa do menu e ponto no avatar). Na simulação (catcher), nada. */
@@ -6070,7 +6314,8 @@ function chaveDaGaveta(): string {
 function abrirNivel(agenteId: string, nivel: NivelGaveta): void {
   const a = botGerido(agenteId);
   if (!a) return;
-  const t = estado.tela;
+  // NOD-379: da inicial do celular (o toque longo), entra na conversa — mesmo que seja a que está por baixo.
+  const t = telaDeOrigem();
   if (t.tipo !== "conversa" || t.agenteId !== a.id) navegar({ tipo: "conversa", conversaId: a.conversaId, agenteId: a.id });
   gavetaSuja = null;
   const app = document.querySelector(".app");
@@ -6239,7 +6484,7 @@ function fecharPopoverAvatar(focarAvatar = true): void {
 
 /** ADR-125: Renomear bot (menu da lista) abre a visão geral da gaveta com o nome selecionado no campo. */
 function renomearNaGaveta(a: BotGerido): void {
-  const t = estado.tela;
+  const t = telaDeOrigem();
   if (t.tipo !== "conversa" || t.agenteId !== a.id) navegar({ tipo: "conversa", conversaId: a.conversaId, agenteId: a.id });
   const app = document.querySelector(".app");
   if (window.matchMedia("(max-width: 1099px)").matches) app?.classList.add("detalhes-abertos");

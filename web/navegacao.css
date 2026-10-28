@@ -53,6 +53,8 @@
 .section[data-recolhida] { padding-bottom: 4px; }
 #sidebar[data-buscando] .secao-cab { pointer-events: none; }
 #sidebar[data-buscando] .secao-cab > svg, #sidebar[data-buscando] .secao-cab small, #sidebar[data-buscando] .secao-aviso { display: none; }
+/* NOD-379 (critério 6): buscando, a seção ou a grade sem nenhum resultado some inteira, com o título (filtrarBots). */
+#sidebar [data-sem-resultado] { display: none !important; }
 
 /* ---- Menu da conta (canvas "Menu 1") -------------------------------------------------
    Nasce acima do avatar, da largura da barra menos as margens. A faixa do topo só aparece quando algo precisa de você. */
