@@ -22,6 +22,8 @@ export type ContextoBiblioteca = {
   /** A máquina deste app do Mac (`lembrancaDaMidia.esteMac`): o que ficou nela é conferido na pasta do bot. */
   esteMac?: string | null;
   agora: number;
+  /** NOD-382: no perfil do celular, o vazio é só o título e o erro é a linha "· Tentar de novo" (critérios 7 e 8). */
+  celular?: boolean;
 };
 
 const PONTOS = ICONE.pontos;
@@ -78,8 +80,10 @@ const ESQUELETO = `<div class="gvb-carregando" role="status" aria-busy="true"><s
 /** A lista desenhada, ou o estado (carregando, erro, vazio). `b` ausente = a primeira leitura está a caminho. */
 export function renderListaBiblioteca(b: BibliotecaDaConversa | undefined, c: ContextoBiblioteca): string {
   if (!b) return ESQUELETO;
+  if (b.erro && c.celular) return `<p class="pfc-erro" role="status">A biblioteca não carregou · <button type="button" class="pfc-link" data-act="biblioteca-tentar" data-id="${esc(c.conversaId)}">Tentar de novo</button></p>`;
   if (b.erro) return `<div class="gv-rotina-vazia gvb-erro" role="group" aria-live="polite"><p>Não deu para carregar a Biblioteca.</p><button type="button" class="bt sm" data-act="biblioteca-tentar" data-id="${esc(c.conversaId)}">Tentar de novo</button></div>`;
   const grupos = gruposVisiveis(b, c.agora);
+  if (grupos.length === 0 && c.celular) return '<div class="pfc-vazio"><b>Nenhum arquivo ainda</b></div>';
   if (grupos.length === 0) return `<p class="gv-rotina-vazia gvb-vazio">Os arquivos que ${esc(c.bot)} criar aparecem aqui.</p>`;
   const luz: ItemLuz[] = [];
   const secoes = grupos.map((g) => {

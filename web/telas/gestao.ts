@@ -2,7 +2,7 @@ import type { FrotaDto } from "../../src/contracts/api.ts";
 
 /** Os tipos e textos da gestão de agentes (a tela é Configurações › Agentes, config-agentes.ts); os menus e diálogos moram em gestao-agentes.ts. */
 export type BotGerido = FrotaDto["agentes"][number];
-export type AcaoGestao = "fixar" | "mover" | "nao-lido" | "renomear" | "perfil" | "duplicar" | "copiar" | "ocultar" | "excluir" | "restaurar";
+export type AcaoGestao = "fixar" | "mover" | "nao-lido" | "renomear" | "perfil" | "duplicar" | "copiar" | "ocultar" | "excluir" | "restaurar" | "ver-perfil";
 
 /**
  * O texto da caixa de duplicar. definido em 2026-09-28 (emenda da ADR-034): a dona leva o bot inteiro; bot de equipe de

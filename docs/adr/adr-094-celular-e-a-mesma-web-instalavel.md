@@ -39,6 +39,7 @@ no toque, sem 🐞 fixo e sem •••.
    - o 🐞 "relatar" aparece só depois de um toque na mensagem;
    - abrir uma conversa não abre o teclado;
    - nenhum foco é movido pelo código ao abrir a gaveta, e o toque não deixa anel de foco.
+     (Emenda 2026-10-28, NOD-382, ADR-133 item 4: o perfil do bot foca o ‹ ao abrir, e "Mensagem" abre o teclado.)
 
    (Emenda 2026-10-28, NOD-383.) Exceção registrada: as **Configurações** têm render próprio no celular, decidido por
    `ehCelular()` (`renderEspacoCelular` em `web/telas/espaco.ts`): uma lista estilo Ajustes e cada seção em tela cheia

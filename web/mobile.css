@@ -510,6 +510,113 @@
   .luz.cem .luz-fig { padding: 60px 0 16px; }
 }
 
+/* ==============================================================================   NOD-382: o perfil do bot no celular, no estilo do iOS (web/telas/perfil-celular.ts). Entra pela direita em 280 ms; o
+   topo só tem o ‹ redondo; avatar 96, nome 22/700, título 15; ações rápidas em círculos de 52; a lista agrupada em
+   --surface-side (raio 12, margem 16, 24 entre grupos), linhas de 52 com divisória recuada 50 px.
+   ===================================================================================== */
+@media (hover: none) and (pointer: coarse) and (max-width: 600px), (hover: none) and (pointer: coarse) and (max-height: 500px) {
+  .com-detalhes.detalhes-abertos .detalhes:has(.pfc-corpo) { animation: pfc-entra 280ms cubic-bezier(.2, .8, .2, 1); background: var(--surface); }
+  @keyframes pfc-entra { from { transform: translateX(100%); } to { transform: none; } }
+
+  .pfc-topo { display: flex; align-items: center; min-height: 56px; padding: 0 12px; border-bottom: 0; }
+  .pfc-topo .pfc-voltar { width: 44px; height: 44px; border-radius: 50%; background: color-mix(in srgb, var(--surface-side) 80%, transparent); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
+  .pfc-topo-nivel { display: grid; grid-template-columns: 56px 1fr 56px; padding: 0 12px; }
+  .pfc-topo-nivel .gv-lado { min-width: 0; }
+  .pfc-titulo { margin: 0; font-size: 17px; font-weight: 600; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pfc-corpo { padding: 0 0 24px; }
+
+  .pfc-id { display: flex; flex-direction: column; align-items: center; padding: 8px 16px 0; text-align: center; }
+  .pfc-id .icon.mascote.xl { width: 96px; height: 96px; }
+  .pfc-avatar .gvn-avatar { padding: 0; border: 0; background: none; border-radius: 50%; }
+  .pfc-rotina-conserto { list-style: none; padding: 0 16px 12px; }
+  .pfc-rotina-conserto .pfc-contorno { margin: 0; width: 100%; }
+  .pfc-campo { position: relative; display: flex; align-items: center; justify-content: center; width: 100%; max-width: 340px; }
+  .pfc-id .pfc-nome { margin: 12px 0 0; min-height: 44px; padding: 0 44px; font-size: 22px; font-weight: 700; line-height: 28px; max-width: none; }
+  .pfc-id .pfc-sub { margin: 0; min-height: 44px; padding: 0 44px; font-size: 15px; line-height: 20px; color: var(--ink-2); max-width: none; }
+  .pfc-id .pfc-fixo { padding: 0 8px; display: flex; align-items: center; justify-content: center; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pfc-id h2.pfc-fixo { display: block; line-height: 44px; }
+  .pfc-id .pfc-nome:focus, .pfc-id .pfc-sub:focus { background: var(--surface-side); border-radius: 10px; }
+  .pfc-campo .pfc-nome:not(:focus), .pfc-campo .pfc-sub:not(:focus) { background: transparent; }
+  .pfc-lapis { position: absolute; right: 0; top: 50%; translate: 0 -50%; width: 44px; height: 44px; display: grid; place-items: center; border: 0; background: none; color: var(--ink-3); }
+  .pfc-lapis svg { width: 17px; height: 17px; }
+  .pfc-campo:has(input:focus) .pfc-lapis { visibility: hidden; }
+  .pfc-meta { margin-top: 2px; font-size: 13px; color: var(--ink-3); }
+
+  .pfc-acoes { display: flex; justify-content: center; gap: 28px; margin: 20px 16px 28px; }
+  .pfc-acao { display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 64px; border: 0; background: none; padding: 0; color: var(--ink); }
+  .pfc-acao-circulo { width: 52px; height: 52px; display: grid; place-items: center; border: 1px solid var(--line-strong); border-radius: 50%; }
+  .pfc-acao-circulo svg { width: 22px; height: 22px; }
+  .pfc-acao-rotulo { font-size: 12px; font-weight: 500; color: var(--ink-2); }
+
+  .pfc-grupos { display: flex; flex-direction: column; gap: 24px; }
+  .pfc-grupo { margin: 0 16px; padding: 0; list-style: none; border-radius: 12px; background: var(--surface-side); overflow: hidden; }
+  .pfc-linha { position: relative; display: flex; align-items: center; gap: 14px; width: 100%; min-height: 52px; padding: 0 16px; border: 0; background: none; color: var(--ink); font: inherit; font-size: 16px; text-align: left; }
+  .pfc-grupo > :is(.pfc-linha, .pfc-rotina) + :is(.pfc-linha, .pfc-rotina)::before,
+  .pfc-grupo > span[hidden] + .pfc-linha::before { content: ""; position: absolute; left: 50px; right: 0; top: 0; border-top: 1px solid var(--line); }
+  .pfc-icone { display: grid; place-items: center; width: 20px; flex: none; color: var(--ink-2); }
+  .pfc-icone svg { width: 20px; height: 20px; }
+  .pfc-rotulo { flex: none; }
+  .pfc-valor { flex: 1; min-width: 0; text-align: right; font-size: 15px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pfc-seta { display: grid; place-items: center; width: 16px; flex: none; color: var(--ink-3); }
+  .pfc-seta svg { width: 16px; height: 16px; }
+  .pfc-linha:active { background: color-mix(in srgb, var(--ink) 6%, transparent); }
+  .pfc-excluir { justify-content: center; color: var(--danger); font-weight: 500; }
+  .pfc-esqueleto { display: inline-block; width: 40px; height: 12px; border-radius: 6px; background: color-mix(in srgb, var(--ink) 10%, transparent); vertical-align: middle; }
+  .pfc-esqueleto-largo { width: 60%; }
+
+  /* Rotinas: Nova rotina primeiro; linhas de 64 com o interruptor de 51 × 31 numa área de 52 × 44, ligado em --ink. */
+  .pfc-nova { color: var(--ink); margin-bottom: 0; }
+  .pfc-grupo + .pfc-grupo, .pfc-grupo + .pfc-vazio, .pfc-grupo + .pfc-erro { margin-top: 24px; }
+  .pfc-rotina { position: relative; display: flex; align-items: center; min-height: 64px; padding-right: 8px; }
+  .pfc-rotina-abrir { flex: 1; min-width: 0; min-height: 64px; display: flex; flex-direction: column; justify-content: center; gap: 2px; padding: 0 12px 0 16px; border: 0; background: none; color: var(--ink); text-align: left; font: inherit; }
+  .pfc-rotina-abrir b { font-size: 16px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pfc-rotina-abrir small { font-size: 13px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pfc-rotina-esqueleto { padding: 0 16px; }
+  .pfc-chave { flex: none; width: 52px; height: 44px; display: grid; place-items: center; padding: 0; border: 0; background: none; }
+  .pfc-trilho { position: relative; width: 51px; height: 31px; border-radius: 16px; background: color-mix(in srgb, var(--ink) 16%, transparent); transition: background .2s; }
+  .pfc-trilho::after { content: ""; position: absolute; top: 2px; left: 2px; width: 27px; height: 27px; border-radius: 50%; background: var(--surface); box-shadow: var(--shadow-knob); transition: translate .2s; }
+  .pfc-chave[aria-checked="true"] .pfc-trilho { background: var(--ink); }
+  .pfc-chave[aria-checked="true"] .pfc-trilho::after { translate: 20px 0; }
+  .gv-linha:has(> .pfc-chave) { min-height: 52px; }
+  .gv-linha > .pfc-chave { margin-left: auto; }
+
+  .pfc-vazio { display: flex; flex-direction: column; align-items: center; gap: 8px; margin: 40px 32px 0; text-align: center; }
+  .pfc-vazio b { font-size: 17px; font-weight: 600; }
+  .pfc-vazio p { margin: 0; font-size: 15px; color: var(--ink-3); }
+  .pfc-erro { margin: 24px 16px 0; font-size: 15px; color: var(--ink-2); text-align: center; }
+  .pfc-link { min-height: 44px; padding: 0 4px; border: 0; background: none; color: var(--ink); font: inherit; text-decoration: underline; }
+  .pfc-nota { margin: 8px 32px 0; font-size: 13px; color: var(--ink-3); }
+  .pfc-linha-fixa { cursor: default; }
+  .pfc-contorno { display: flex; align-items: center; justify-content: center; min-height: 44px; margin: 16px 16px 0; padding: 0 20px; border: 1px solid var(--line-strong); border-radius: 12px; background: none; color: var(--ink); font: inherit; font-size: 16px; font-weight: 500; width: calc(100% - 32px); }
+  .pfc-vazio .pfc-contorno { width: auto; margin: 8px 0 0; }
+
+  /* As folhas (Compartilhar e a confirmação do Excluir) sobem de baixo, na largura da tela. */
+  dialog#gestao-dialogo.pfc-folha { inset: auto 0 0 0; left: 0 !important; top: auto !important; width: 100%; max-width: none; margin: 0; padding: 0; border: 0; border-radius: 16px 16px 0 0; background: var(--surface); box-sizing: border-box; animation: pfc-sobe 240ms cubic-bezier(.2, .8, .2, 1); }
+  /* O respiro fica no filho: tocar dentro da folha nunca cai no próprio <dialog> (que fecha ao toque fora). */
+  dialog#gestao-dialogo.pfc-folha > * { padding-top: 8px; padding-bottom: calc(16px + env(safe-area-inset-bottom)); }
+  @keyframes pfc-sobe { from { transform: translateY(100%); } to { transform: none; } }
+  .pfc-folha-titulo { margin: 8px 16px; font-size: 13px; color: var(--ink-3); text-align: center; }
+  .pfc-folha-linha { display: flex; align-items: center; width: 100%; min-height: 56px; padding: 0 20px; border: 0; background: none; color: var(--ink); font: inherit; font-size: 17px; }
+  .pfc-folha-linha + .pfc-folha-linha { border-top: 1px solid var(--line); }
+  .pfc-confirma { display: flex; flex-direction: column; text-align: center; }
+  .pfc-confirma h2 { margin: 8px 16px 4px; font-size: 17px; font-weight: 600; }
+  .pfc-confirma p { margin: 0 16px 8px; font-size: 15px; color: var(--ink-2); }
+  .pfc-confirma .dialogo-erro:empty { display: none; }
+  .pfc-confirma .pfc-contorno { margin-top: 8px; }
+  .pfc-perigo { border-color: var(--danger); color: var(--danger); }
+  .pfc-cancelar { border-color: transparent; }
+
+  /* Critério 6 (QA): os itens do menu do toque longo e as linhas de Ajustes no perfil têm alvo de 44 / 52 px. */
+  :where(dialog#gestao-dialogo) [role="menu"] [data-gestao] { min-height: 44px; }
+  .com-detalhes.detalhes-abertos .detalhes:has(.pfc-corpo) .gv-linha { min-height: 52px; }
+  /* Ajustes não tem valor: a seta vai para a borda mesmo assim. */
+  .pfc-seta { margin-left: auto; }
+  .com-detalhes.detalhes-abertos .detalhes:has(.pfc-corpo) :is(.gv-aviso, .ia-comando, .ia-explica) { background: none; border: 0; color: var(--ink-2); }
+
+  /* O toque longo numa linha da lista abre o menu do bot, não a lupa nem o menu do iOS. */
+  [data-bot-contexto] { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+}
+
 /* NOD-383: Configurações e toques de celular. Sem atalho de teclado à vista (crit. 1), sem banco (crit. 6, v2: o regime não
    aparece em lugar nenhum no celular), Configurações em lista estilo Ajustes com cada seção em tela cheia (crit. 3), detalhe
    de uma linha com "Saiba mais" (crit. 7), a folha de "Criar um bot agora?" (crit. 5) e alvos de 44 px (crit. 4, a auditoria

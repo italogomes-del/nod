@@ -1,5 +1,7 @@
 import type { Estado } from "../estado/reducer.ts";
 import { renderDetalhes } from "../telas/detalhes.ts";
+import { renderPerfilCelular } from "../telas/perfil-celular.ts";
+import { ehCelular } from "./celular.ts";
 import { lembrar } from "./lembrar.ts";
 import { lembrancaDaMidia } from "./midia.ts";
 import { preservandoCampo, reaplicarAviso } from "./gaveta-identidade.ts";
@@ -34,7 +36,9 @@ export function atualizarGaveta(estado: Estado, gavetaSuja: string | null): void
   // pessoa digita, o cursor e o foco ficam). Revisão 2: antes o frame inteiro era pulado e a gaveta congelava.
   const campo = typeof (ativo as Element | null)?.matches === "function" && ativo!.matches("#detalhes .gvn-nome, #detalhes .gvn-sub") ? (ativo as HTMLInputElement) : null;
   // NOD-326: a Biblioteca lê a lembrança da mídia (o que saiu da pasta, este Mac), que mora fora do estado.
-  const html = lembrar("detalhes", estado, [lembrancaDaMidia.sumiram.size, lembrancaDaMidia.esteMac], renderDetalhes);
+  // NOD-382: no celular, o perfil do bot no estilo do iOS; o desktop segue com a gaveta de sempre.
+  const celular = ehCelular();
+  const html = lembrar("detalhes", estado, [lembrancaDaMidia.sumiram.size, lembrancaDaMidia.esteMac, celular], celular ? renderPerfilCelular : renderDetalhes);
   if (!regiaoMudaria("detalhes", html)) return;
   if (campo) {
     const seletor = `[data-campo="${CSS.escape(campo.dataset.campo ?? "")}"][data-id="${CSS.escape(campo.dataset.id ?? "")}"]`;

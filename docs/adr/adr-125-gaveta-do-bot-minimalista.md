@@ -73,3 +73,9 @@ O item 2 deixava um ⋯ visível na linha só no toque. Na inicial do celular (A
 o menu do bot abre no toque longo, com o bot segurado por cima do fundo desfocado e o menu logo abaixo; uma dica única
 ("Segure um bot para ver as ações") ensina o gesto. O botão ⋯ continua no HTML, escondido só visualmente, para o leitor de
 tela. No computador nada muda.
+
+## Emenda (2026-10-28, NOD-382): o celular
+
+No celular, a gaveta vira o perfil do bot da [ADR-133](adr-133-perfil-do-bot-no-celular.md): lista agrupada no lugar das
+abas, menu do toque longo com até 5 itens (Ocultar vai para Ajustes › Na lista) e Ajustes sem as descrições longas. O
+desktop segue esta ADR.

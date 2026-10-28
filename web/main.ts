@@ -35,7 +35,9 @@ import type { TipoMemoria } from "../src/contracts/memoria.ts";
 import { criarIasDoMac } from "./lib/ias-do-mac.ts";
 import { instalarOrdemArrastavel } from "./lib/ordem-arrastavel.ts";
 import { chaveDoMenuDaIa, ordemDoPasso } from "./lib/ordem.ts";
-import { abrirMenu, abrirMenuCompartilhar, abrirMenuConta, dialogo, pedirGestao, textoDuplicar, type BotGerido, type AcaoGestao } from "./telas/gestao-agentes.ts";
+import { abrirFolhaCompartilhar, abrirMenu, abrirMenuCompartilhar, abrirMenuConta, confirmarExclusaoNaFolha, dialogo, pedirGestao, textoDuplicar, type BotGerido, type AcaoGestao } from "./telas/gestao-agentes.ts";
+import { perfilAoAbrir, perfilAoAbrirNivel, saidaDoPerfil } from "./telas/perfil-celular.ts";
+import { criarMarcaDoPerfil, planoDaSaida } from "./lib/lista-apos-saida.ts";
 import { rascunhoMudou } from "./telas/memoria.ts";
 import { abrirLuz } from "./telas/luz.ts";
 import { baixarUrl } from "./telas/luz-html.ts";
@@ -62,7 +64,7 @@ import type { Experimentos } from "../src/contracts/raio-x.ts";
 import type { Escopo } from "../src/shared/types.ts";
 import type { FrameSse } from "../src/contracts/frame.ts";
 import type { AnexoDaConversa } from "../src/contracts/anexo.ts";
-import { agenteDaTela, bibliotecaAberta, conversaAbertaTemNotaDeContas, conversaDaTela, estadoInicial, invalidacoesAoReconectar, invalidacoesAoRetomar, invalidacoesDaTela, mudouNaTela, reduzir, secaoAberta, secaoDoPedido, type Acao, type Estado, type FalaPendente, type Invalidacao, type NivelGaveta, type PedidoSecao, type SecaoEspaco, type Tela } from "./estado/reducer.ts";
+import { agenteDaTela, bibliotecaAberta, conversaAbertaTemNotaDeContas, conversaDaTela, estadoInicial, invalidacoesAoReconectar, invalidacoesAoRetomar, invalidacoesDaTela, mudouNaTela, reduzir, secaoAberta, secaoDoPedido, type Acao, type Estado, type FalaPendente, type Invalidacao, type NivelGaveta, type PedidoSecao, type PerfilCelular, type SecaoEspaco, type Tela } from "./estado/reducer.ts";
 import { contaApi, criarApi, minhaContaApi, ErroApi, observarRede, sessao as sessaoApi, type Api } from "./lib/api.ts";
 import { criarContaNoChat, fraseDoErro as fraseDoErroDeConta } from "./telas/conta-no-chat.ts";
 import { criarMinhaConta } from "./telas/minha-conta.ts";
@@ -82,7 +84,7 @@ import { ehCelular, enterEnvia } from "./lib/celular.ts";
 import { rotuloDoMac } from "./lib/aparelho.ts";
 import { criarCelular } from "./lib/gaveta-bots.ts";
 import { tentarFrotaAgora } from "./lib/tentar-frota.ts";
-import { criarToqueLongo,dicaJaVista, alturaDaLista, escolherRedesenhada, lugarDoMenuSegurado, marcarDicaVista, MS_DICA } from "./lib/toque-longo.ts";
+import { criarToqueLongo, dicaJaVista, alturaDaLista, escolherRedesenhada, lugarDoMenuSegurado, marcarDicaVista, MS_DICA } from "./lib/toque-longo.ts";
 import { escondidosNoCelular, estadoDaLista, FAVORITOS_VISIVEIS, gruposSemResultado, horaDaLinha, PREFIXO_DO_PEDIDO } from "./lib/inicio-celular.ts";
 import "./pwa.ts";
 import { avatar, botao, esc, iconeAgente } from "./lib/render.ts";
@@ -719,6 +721,8 @@ document.addEventListener("keydown", () => focoPendente.descartar(), true);
  * na zona morta temporal, derrubando o app no boot.
  */
 let perfilPendente: Record<string, MudancaDePerfil> = {};
+
+const marcaDoPerfil = criarMarcaDoPerfil();
 function dispatch(acao: Acao): void {
   // Abrir Trabalhos relê agora, sem esperar a janela de algum frame de turno.
   if (acao.tipo === "navegar" && acao.tela.tipo === "trabalhos") releituraTrabalhos.cancelar();
@@ -740,8 +744,9 @@ function reduzirVendoSaida(acao: Acao): boolean {
   // NOD-379: o onboarding pendente continua abrindo no guia, não na inicial do celular.
   if (estado.onboardingAberto && !onboardingVisto) celular.fecharBots();
   onboardingVisto = !!estado.onboardingAberto;
-  if ((acao.tipo !== "hidratar-frota" && acao.tipo !== "hidratar-gestao") || antes.tipo !== "conversa" || estado.tela === antes) return false;
-  if (estado.tela.tipo === "conversa" && estado.tela.conversaId === antes.conversaId) return false;
+  if (acao.tipo !== "hidratar-frota" && acao.tipo !== "hidratar-gestao") return false;
+  const saiu = antes.tipo === "conversa" && estado.tela !== antes && !(estado.tela.tipo === "conversa" && estado.tela.conversaId === antes.conversaId);
+  if (!saiu) return false;
   // NOD-379: a inicial do celular, se estava à vista, continua: a troca é da conversa de baixo.
   aoTrocarDeTela(antes, estado.tela);
   lembrarTaskAberta(estado.tela);
@@ -1117,7 +1122,8 @@ async function buscar(q: Invalidacao): Promise<Acao | null> {
     suaVezSemVer = !ver;
     return { tipo: "hidratar-sua-vez", suaVez };
   }
-  if (q === "rotinas") return { tipo: "hidratar-rotinas", rotinas: (await api.rotinas()).rotinas };
+  // NOD-382: a falha fica no estado, para o perfil do celular mostrar "—" e "As rotinas não carregaram · Tentar de novo".
+  if (q === "rotinas") return { tipo: "hidratar-rotinas", rotinas: (await api.rotinas().catch((e: unknown) => { dispatch({ tipo: "rotinas-falharam" }); throw e; })).rotinas };
   if (q === "conectores") return { tipo: "hidratar-conectores", ...(await api.conectores()) };
   if (q === "salas") return { tipo: "hidratar-salas", salas: (await api.salas()).salas };
   if (q === "nao-lidos") return { tipo: "hidratar-nao-lidos", naoLidos: await api.naoLidos() };
@@ -2966,6 +2972,9 @@ function anunciarGestao(texto: string): void {
 function acaoDoBot(a: BotGerido, acao: AcaoGestao): void {
   const executar = (fn: () => Promise<unknown>) => void agir(async () => { await mudarGestao(fn); });
   if (acao === "perfil") { abrirNivel(a.id, { tipo: "perfil" }); return; }
+  // NOD-382: no celular o menu tem "Ver perfil"; da lista, o ‹ do perfil volta para a lista.
+  if (acao === "ver-perfil") { abrirPerfil(a.id, celular.botsAbertos() ? "lista" : "chat"); return; }
+  if (ehCelular() && acao === "excluir") { excluirNoCelular(a); return; }
   // ADR-125 (NOD-349): Renomear abre a gaveta com o nome em edição (saiu o diálogo); Enter ou blur salva, Esc desfaz.
   if (acao === "renomear") { renomearNaGaveta(a); return; }
   if (acao === "mover") {
@@ -4802,6 +4811,13 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     if (!app) return;
     // Estreita, o painel é sobreposto e abre/fecha a cada vez; larga, esconder é preferência que fica.
     // ADR-114: o painel que aparece pede o "N hoje" da Atividade (relevante só com ele à vista).
+    // NOD-382: no celular a pílula abre o perfil do bot (e o ‹ dele volta ao chat).
+    if (ehCelular()) {
+      const t = estado.tela;
+      if (app.classList.contains("detalhes-abertos")) fecharPerfil();
+      else if (t.tipo === "conversa") abrirPerfil(t.agenteId, "chat");
+      return;
+    }
     if (window.matchMedia("(max-width: 1099px)").matches) { app.classList.toggle("detalhes-abertos"); marcarPainelNaPilula(); void reidratar(); return; }
     const oculto = !app.classList.contains("detalhes-ocultos");
     app.classList.toggle("detalhes-ocultos", oculto);
@@ -4812,6 +4828,8 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     try { localStorage.setItem(CHAVE_PAINEL_ABERTO, oculto ? "0" : "1"); } catch { /* sem storage, vale só nesta aba */ }
   },
   "preencher-prompt": (el) => {
+    // NOD-382: no celular o perfil cobre o chat; "Ajustar" fecha o perfil para o campo aparecer.
+    if (ehCelular() && estado.perfilCelular) fecharPerfil("chat", false);
     const ta = document.getElementById("composer-texto") as HTMLTextAreaElement | null;
     if (ta) { escreverNoCampo(ta, el.dataset.texto ?? ""); ta.focus(); ta.selectionStart = ta.selectionEnd = ta.value.length; if (composerDe) rascunhos.guardar(composerDe, ta.value); }
   },
@@ -4821,6 +4839,46 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     if (nivel) abrirNivel(el.dataset.agente ?? "", nivel);
   },
   "gaveta-voltar": () => voltarNivel(),
+  // NOD-382: o perfil do bot no celular (web/telas/perfil-celular.ts).
+  "perfil-voltar": () => fecharPerfil(),
+  "perfil-mensagem": () => fecharPerfil("chat"),
+  "perfil-compartilhar": (el) => { const a = botGerido(el.dataset.id); if (a) abrirFolhaCompartilhar(a, (acao) => acaoDoBot(a, acao)); },
+  "perfil-excluir": (el) => { const a = botGerido(el.dataset.id); if (a) excluirNoCelular(a); },
+  "perfil-ocultar": (el) => {
+    // O bot oculto sai da frota (GET /frota não o traz): ocultar fecha o perfil e volta à lista, com o aviso e o foco do
+    // desktop (depoisDeTirarDaLista). Trazer de volta é por Configurações › Agentes › Ocultos, como no desktop.
+    const a = botGerido(el.dataset.id);
+    if (!a || a.oculto || a.papel === "nod" || a.ownerId !== estado.sessao?.pessoaId) return;
+    el.setAttribute("aria-checked", "true");
+    el.setAttribute("disabled", "");
+    const perfil = estado.perfilCelular?.agenteId === a.id ? estado.perfilCelular : null;
+    const marca = marcaDoPerfil.marca();
+    void agir(async () => {
+      try { await mudarGestao(() => api!.ocultar(a.id, true)); } catch (erro) { el.setAttribute("aria-checked", "false"); el.removeAttribute("disabled"); throw erro; }
+      sairDoPerfilDoBotQueSaiu(a, perfil, marca);
+      depoisDeTirarDaLista(a, "Ocultos")(false);
+    });
+  },
+  "perfil-copiar-pasta": (el) => {
+    const caminho = el.dataset.caminho ?? "";
+    if (!caminho) return;
+    const copiado = (): void => {
+      const v = el.querySelector(".pfc-valor");
+      const antes = v?.textContent ?? "";
+      if (v) { v.textContent = "Copiado"; window.setTimeout(() => { if (v.isConnected && v.textContent === "Copiado") v.textContent = antes; }, 1500); }
+      anunciar("Caminho copiado");
+    };
+    const manual = (): void => pedirGestao("Caminho da pasta", `<p>Selecione e copie o caminho abaixo.</p><input aria-label="Caminho da pasta" readonly value="${esc(caminho)}" />`, "Concluir", async () => {});
+    if (!navigator.clipboard) { manual(); return; }
+    void navigator.clipboard.writeText(caminho).then(copiado, manual);
+  },
+  // Sem rotinas carregadas, o dispatch já relê (invalidacoesDaTela): basta voltar ao carregando.
+  "perfil-tentar-rotinas": () => { dispatch({ tipo: "rotinas-tentando" }); dispatch({ tipo: "invalidar", quais: ["rotinas"] }); },
+  "perfil-editar": (el) => {
+    const campo = document.querySelector<HTMLInputElement>(`#detalhes input[data-campo="${CSS.escape(el.dataset.campo ?? "")}"][data-id="${CSS.escape(el.dataset.id ?? "")}"]`);
+    campo?.focus();
+    campo?.select();
+  },
   // ADR-114 (chat limpo, PR 2): os filtros, a troca de dia e a mensagem aberta (texto inteiro + Relatar) da Atividade.
   "atividade-filtro": (el) => {
     const filtro = el.dataset.filtro;
@@ -5998,6 +6056,8 @@ document.addEventListener("keydown", (ev) => {
   // A tela da task (e a provisória de uma linha) fecha no Esc — menos com algo digitado no campo dela.
   // NOD-379: com a inicial do celular à vista, o Esc não age na tela escondida por baixo (Marketplace, Trabalho, linha).
   if (ev.key === "Escape" && (estado.tela.tipo === "trabalho" || estado.tela.tipo === "linha") && !celular.botsAbertos() && !buscaNaConversa.aberta() && !(ev.target as HTMLElement).closest?.("dialog, input, select, #detalhes") && !((ev.target as HTMLTextAreaElement).id === "composer-texto" && (ev.target as HTMLTextAreaElement).value.trim())) { ev.preventDefault(); fecharTask(); return; }
+  // NOD-382: Esc na visão geral do perfil do celular volta à origem, como o ‹ (no campo do nome, o Esc só desfaz).
+  if (ev.key === "Escape" && ehCelular() && estado.perfilCelular && !estado.gaveta && !estado.avatarAberto && (ev.target as HTMLElement).closest?.("#detalhes") && !(ev.target as HTMLElement).closest?.("input, textarea, dialog")) { ev.preventDefault(); fecharPerfil(); return; }
   // Esc dentro da gaveta, num nível interno, volta um nível (o mesmo ‹ do topo).
   if (ev.key === "Escape" && estado.gaveta && (ev.target as HTMLElement).closest?.("#detalhes")) { ev.preventDefault(); voltarNivel(); return; }
   const ta = ev.target as HTMLTextAreaElement;
@@ -6731,12 +6791,96 @@ function abrirNivel(agenteId: string, nivel: NivelGaveta): void {
   const t = telaDeOrigem();
   if (t.tipo !== "conversa" || t.agenteId !== a.id) navegar({ tipo: "conversa", conversaId: a.conversaId, agenteId: a.id });
   gavetaSuja = null;
+  // NOD-382: no celular a gaveta é o perfil; um atalho do chat (Ver na memória, Trocar a IA…) abre o perfil do bot com
+  // origem no chat, para a Biblioteca carregar e o ‹ e o Esc fecharem como de costume.
+  const perfil = perfilAoAbrirNivel(estado.perfilCelular, a.id, ehCelular());
+  if (perfil !== estado.perfilCelular) dispatch({ tipo: "perfil-celular", perfil });
   const app = document.querySelector(".app");
   if (window.matchMedia("(max-width: 1099px)").matches) app?.classList.add("detalhes-abertos");
   else if (painelOculto()) painelAbertoNaHora = true;
   dispatch({ tipo: "gaveta", agenteId: a.id, nivel });
   if (nivel.tipo === "atividade") vigiaAtividade.atividadeAberta(a.id);
   document.querySelector<HTMLElement>("#detalhes .gv-voltar")?.focus();
+}
+
+/**
+ * NOD-382: abre o perfil do bot no celular, entrando pela direita. `origem` diz para onde o ‹ volta: o chat ou a lista de
+ * bots (com a tela de antes, se abrir o perfil trocou de conversa).
+ */
+function abrirPerfil(agenteId: string, origem: "lista" | "chat"): void {
+  const a = botGerido(agenteId);
+  if (!a) return;
+  const antes = estado.tela;
+  // De Configurações › Agentes, o ‹ volta a Seu espaço; o espaço fecha antes, para o perfil não abrir debaixo dele.
+  const perfil = perfilAoAbrir({ agenteId: a.id, tela: antes, lista: origem === "lista", espaco: estado.espaco?.secao ?? null });
+  if (estado.espaco) fecharEspaco();
+  if (antes.tipo !== "conversa" || antes.agenteId !== a.id) navegar({ tipo: "conversa", conversaId: a.conversaId, agenteId: a.id });
+  else celular.entrarNaConversa();
+  gavetaSuja = null;
+  marcaDoPerfil.mexeu();
+  // A classe antes do desenho: a tela do bot (o valor do Computador) já vê o painel aberto.
+  document.querySelector(".app")?.classList.add("detalhes-abertos");
+  dispatch({ tipo: "perfil-celular", perfil });
+  dispatch({ tipo: "gaveta", agenteId: a.id, nivel: null });
+  marcarPainelNaPilula();
+  void reidratar();
+  document.querySelector<HTMLElement>("#detalhes .pfc-voltar")?.focus({ preventScroll: true });
+}
+
+/**
+ * NOD-382: fecha o perfil. "origem" é o ‹ e o Esc (volta ao chat ou, se veio da lista, à tela de antes com a lista
+ * aberta); "chat" é o Mensagem (fica no chat do bot). O destino vem de saidaDoPerfil (testado em perfil-celular.test.ts).
+ */
+function fecharPerfil(para: "origem" | "chat" = "origem", focar = true): void {
+  const perfil = estado.perfilCelular;
+  marcaDoPerfil.mexeu();
+  const saida = saidaDoPerfil(perfil, para);
+  document.querySelector(".app")?.classList.remove("detalhes-abertos");
+  dispatch({ tipo: "perfil-celular", perfil: null });
+  dispatch({ tipo: "gaveta", agenteId: estado.gaveta?.agenteId ?? "", nivel: null });
+  marcarPainelNaPilula();
+  if (saida.navegar) navegar(saida.navegar);
+  if (saida.abrirLista) celular.voltarAoInicio();
+  // Seu espaço foca o próprio ‹ ao abrir.
+  if (saida.abrirEspaco) { abrirEspaco(saida.abrirEspaco); return; }
+  if (!focar) return;
+  const alvo = saida.foco === "composer" ? document.getElementById("composer-texto")
+    : saida.foco === "linha-do-bot" && perfil ? document.querySelector<HTMLElement>(`[data-bot-contexto="${CSS.escape(perfil.agenteId)}"] [data-act="abrir-conversa"], button[data-bot-contexto="${CSS.escape(perfil.agenteId)}"]`)
+    : document.querySelector<HTMLElement>("#cabecalho .pilula-bot");
+  alvo?.focus({ preventScroll: true });
+}
+
+/**
+ * NOD-382: o bot saiu da frota (excluído ou oculto) com o perfil dele aberto. O perfil fecha e a pessoa vai para a lista
+ * de bots, venha da lista ou do chat (a conversa do bot não existe mais na lista; a NOD-370 leva a tela de baixo ao
+ * Início). Se a frota ainda não chegou, o perfil fecha pelo caminho de sempre.
+ */
+function sairDoPerfilDoBotQueSaiu(a: BotGerido, perfil: PerfilCelular | null, marca: number): void {
+  // A pessoa fechou o perfil (ou abriu o de outro bot) enquanto o pedido corria: fica onde está. A frota que chegou antes
+  // da resposta e zerou o perfil (NOD-370) não conta: a pessoa ainda vai para a lista ou para Seu espaço.
+  // A decisão mora em web/lib/lista-apos-saida.ts (planoDaSaida), testada nas três ordens de SSE e REST.
+  const plano = planoDaSaida(a.id, perfil, marcaDoPerfil.intacto(marca), estado.perfilCelular?.agenteId ?? null, !!estado.espaco);
+  if (!plano) return;
+  if (plano.fecharPerfil) fecharPerfil("origem", false);
+  if (plano.limparPainel) { document.querySelector(".app")?.classList.remove("detalhes-abertos"); marcarPainelNaPilula(); }
+  if (plano.abrirEspaco) abrirEspaco(plano.abrirEspaco);
+  if (!plano.abrirLista) return;
+  // A releitura ainda não chegou: a inicial abre agora e fica (reduzirVendoSaida não a fecha, NOD-379); pelo histórico.
+  celular.voltarAoInicio();
+}
+
+/** NOD-382: Excluir no celular confirma numa folha; excluído, o perfil fecha e a pessoa volta à lista. */
+function excluirNoCelular(a: BotGerido): void {
+  if (a.papel === "nod" || a.ownerId !== estado.sessao?.pessoaId) return;
+  confirmarExclusaoNaFolha(a, async () => {
+    const perfil = estado.perfilCelular?.agenteId === a.id ? estado.perfilCelular : null;
+    const marca = marcaDoPerfil.marca();
+    // Sem passar pelo mostrarErro: o erro já aparece na própria folha ("Não deu para excluir"), não duas vezes.
+    await api!.excluirAgente(a.id);
+    dispatch({ tipo: "invalidar", quais: ["frota", "gestao", "rotinas", "salas", "sua-vez"] });
+    sairDoPerfilDoBotQueSaiu(a, perfil, marca);
+  // O aviso e o foco são calculados depois de fechar o perfil (a lista ou Seu espaço já abertos), como no Ocultar.
+  }, (aberto) => depoisDeTirarDaLista(a, "Excluídos")(aberto));
 }
 
 /**
@@ -6747,7 +6891,7 @@ function fecharNivel(): void {
   gavetaSuja = null;
   const g = estado.gaveta;
   if (!g) { document.querySelector<HTMLElement>("#detalhes .gv-painel")?.focus(); return; }
-  const pai = paiDoNivel(g.nivel);
+  const pai = paiDoNivel(g.nivel, ehCelular());
   dispatch({ tipo: "gaveta", agenteId: g.agenteId, nivel: pai });
   const id = "id" in g.nivel ? g.nivel.id : "";
   const origem = document.querySelector<HTMLElement>(`#detalhes [data-act="gaveta"][data-nivel="${g.nivel.tipo}"]${id ? `[data-id="${CSS.escape(id)}"]` : ""}`);
@@ -6827,7 +6971,9 @@ function abrirMenuDaBiblioteca(ancora: HTMLElement): void {
       a.download = nome;
       a.click();
     } else if (acao === "ir" && fala?.isConnected) {
-      if (window.matchMedia("(max-width: 1099px)").matches) {
+      // NOD-382: no celular, ir para a mensagem fecha o perfil de verdade (o estado junto), e a pessoa fica no chat.
+      if (ehCelular() && estado.perfilCelular) fecharPerfil("chat", false);
+      else if (window.matchMedia("(max-width: 1099px)").matches) {
         document.querySelector(".app")?.classList.remove("detalhes-abertos");
         marcarPainelNaPilula();
       }

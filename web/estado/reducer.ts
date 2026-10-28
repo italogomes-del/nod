@@ -208,7 +208,18 @@ export type NivelGaveta =
   /** ADR-114 (chat limpo, PR 2): o que saiu do chat do bot, um dia por vez (web/telas/atividade.ts). */
   | { tipo: "atividade" }
   /** ADR-125 (NOD-349): Atalhos, Perfil (Missão e voz), Acessos, Ambiente e o Modo dev, fora da visão geral. */
-  | { tipo: "ajustes" };
+  | { tipo: "ajustes" }
+  /** NOD-382: as telas das linhas do perfil do celular (web/telas/perfil-celular.ts); o desktop não as abre. */
+  | { tipo: "codigo" }
+  | { tipo: "rotinas" }
+  | { tipo: "biblioteca" }
+  | { tipo: "computador" };
+
+/**
+ * NOD-382: o perfil do bot no celular está aberto, e de onde a pessoa veio (o ‹ volta para lá): da lista de bots (com a
+ * tela que estava atrás dela em `voltar`) ou do chat do próprio bot.
+ */
+export type PerfilCelular = { agenteId: string; origem: "lista" | "chat" | "espaco"; voltar?: Tela; espaco?: SecaoEspaco };
 
 /** NOD-58: a memória apagada nesta sessão, que fica no lugar como uma linha com Desfazer. */
 export type MemoriaApagadaNaTela = { memoriaId: string; tipo: TipoMemoria; texto: string; criadoEm: number };
@@ -391,6 +402,10 @@ export type Estado = {
   conectando: Record<string, ConexaoApp>;
   /** O nível aberto na gaveta de um bot; outro bot na tela = visão geral. */
   gaveta: { agenteId: string; nivel: NivelGaveta } | null;
+  /** NOD-382: o perfil do celular aberto (null = fechado ou desktop). */
+  perfilCelular: PerfilCelular | null;
+  /** NOD-382: a leitura de /rotinas falhou antes de dar certo uma vez (o perfil do celular mostra "—" e Tentar de novo). */
+  rotinasFalharam: boolean;
   /** ADR-125: a última aba da gaveta por bot (o main lê e grava em `localStorage` `nod.gaveta.aba`). */
   abaGaveta: Record<string, AbaGaveta>;
   /** ADR-125: o popover do avatar aberto, com a forma e a cor de quando abriu (Redefinir volta a elas). */
@@ -532,6 +547,9 @@ export type Estado = {
 export type Acao =
   | { tipo: "conexao-app"; slug: string; valor: ConexaoApp | null }
   | { tipo: "gaveta"; agenteId: string; nivel: NivelGaveta | null }
+  | { tipo: "perfil-celular"; perfil: PerfilCelular | null }
+  | { tipo: "rotinas-falharam" }
+  | { tipo: "rotinas-tentando" }
   | { tipo: "aba-gaveta"; agenteId: string; aba: AbaGaveta }
   | { tipo: "abas-lidas"; abas: Record<string, AbaGaveta> }
   | { tipo: "avatar-popover"; aberto: { agenteId: string; forma: FormaAgente; cor: CorAgente } | null }
@@ -673,6 +691,8 @@ export const estadoInicial: Estado = {
   composioConfigurado: false,
   conectando: {},
   gaveta: null,
+  perfilCelular: null,
+  rotinasFalharam: false,
   abaGaveta: {},
   avatarAberto: null,
   computadorVisto: {},
@@ -1578,8 +1598,16 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
       const composer = Object.fromEntries(Object.entries(estado.composer).filter(([conversaId]) => comPergunta.has(conversaId)));
       return { ...estado, suaVez: acao.suaVez, composer };
     }
+    case "rotinas-tentando":
+      // "Tentar de novo": volta ao carregando até a resposta (ou a nova falha).
+      return estado.rotinasFalharam ? { ...estado, rotinasFalharam: false } : estado;
+    case "rotinas-falharam":
+      // Só a primeira carga que falha vira erro: com a lista já carregada, uma falha passageira não a troca pelo aviso.
+      return estado.rotinasFalharam || estado.carregado.rotinas ? estado : { ...estado, rotinasFalharam: true };
+    case "perfil-celular":
+      return { ...estado, perfilCelular: acao.perfil };
     case "hidratar-rotinas":
-      return { ...estado, rotinas: acao.rotinas, carregado: estado.carregado.rotinas ? estado.carregado : { ...estado.carregado, rotinas: true } };
+      return { ...estado, rotinasFalharam: false, rotinas: acao.rotinas, carregado: estado.carregado.rotinas ? estado.carregado : { ...estado.carregado, rotinas: true } };
     case "hidratar-execucoes":
       return { ...estado, execucoes: { ...estado.execucoes, [acao.rotinaId]: acao.execucoes } };
     case "alternar-historico":
@@ -1899,7 +1927,7 @@ export function conversaDaTela(estado: Estado): ConversaEstado | null {
  * a tela fica "inicio" (vazia); qualquer navegação para "inicio" resolve do mesmo jeito.
  */
 /** O que troca junto com a tela, por `navegar` ou quando o bot da conversa sai da frota (NOD-370). */
-function aoTrocarDeTela(estado: Estado, tela: Tela): Pick<Estado, "tela" | "atividades" | "avatarAberto" | "gaveta" | "faixaParada" | "novasDesde" | "faixaTrabalhosAberta"> {
+function aoTrocarDeTela(estado: Estado, tela: Tela): Pick<Estado, "tela" | "atividades" | "avatarAberto" | "gaveta" | "perfilCelular" | "faixaParada" | "novasDesde" | "faixaTrabalhosAberta"> {
   const saindo = conversaIdNaTela(estado);
   const atividades = saindo && !estado.conversas[saindo] && estado.atividades[saindo] && conversaIdNaTela({ ...estado, tela }) !== saindo
     ? semConversa(estado.atividades, saindo)
@@ -1911,6 +1939,8 @@ function aoTrocarDeTela(estado: Estado, tela: Tela): Pick<Estado, "tela" | "ativ
     avatarAberto: null,
     // A gaveta só continua num nível interno se a conversa é do mesmo bot; outro bot abre na visão geral.
     gaveta: tela.tipo === "conversa" && estado.gaveta?.agenteId === tela.agenteId ? estado.gaveta : null,
+    // NOD-382: o perfil do celular é da conversa do bot; outra tela o fecha.
+    perfilCelular: tela.tipo === "conversa" && estado.perfilCelular?.agenteId === tela.agenteId ? estado.perfilCelular : null,
     faixaParada: tela.tipo === estado.tela.tipo ? estado.faixaParada : null,
     // A linha "Novas" vale enquanto a pessoa está na conversa; saiu, ela some.
     novasDesde: {},
@@ -1987,10 +2017,12 @@ export function resolverInicio(entrada: Estado): Estado {
 
 /** O que a tela atual precisa ter carregado (o main busca o que faltar). */
 /** NOD-326: a conversa de um bot na tela, a gaveta dele na visão geral (sem nível aberto) e a aba Biblioteca escolhida. */
-export function bibliotecaAberta(estado: Pick<Estado, "tela" | "gaveta" | "abaGaveta">): boolean {
+export function bibliotecaAberta(estado: Pick<Estado, "tela" | "gaveta" | "abaGaveta"> & Partial<Pick<Estado, "perfilCelular">>): boolean {
   const t = estado.tela;
   if (t.tipo !== "conversa") return false;
   const nivel = estado.gaveta?.agenteId === t.agenteId ? estado.gaveta.nivel : null;
+  // NOD-382: no perfil do celular, a linha Biblioteca mostra "N itens" e a tela dela é a lista inteira.
+  if (estado.perfilCelular?.agenteId === t.agenteId && (nivel === null || nivel.tipo === "biblioteca")) return true;
   return nivel === null && estado.abaGaveta[t.agenteId] === "biblioteca";
 }
 

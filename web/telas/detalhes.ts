@@ -49,6 +49,8 @@ type Concessoes = Estado["concessoes"][string];
 export function nivelDaGaveta(tipo: string | undefined, id = ""): NivelGaveta | null {
   if (tipo === "rotina" || tipo === "acesso") return { tipo, id };
   if (tipo === "dar-acesso" || tipo === "perfil" || tipo === "memoria" || tipo === "inteligencia" || tipo === "nova-rotina" || tipo === "trabalhos" || tipo === "atividade" || tipo === "ajustes") return { tipo };
+  // NOD-382: as telas das linhas do perfil do celular.
+  if (tipo === "codigo" || tipo === "rotinas" || tipo === "biblioteca" || tipo === "computador") return { tipo };
   return null;
 }
 
@@ -56,7 +58,11 @@ export function nivelDaGaveta(tipo: string | undefined, id = ""): NivelGaveta | 
  * ADR-125 (NOD-349): para onde o ‹ de cada nível volta. O que abre do nível Ajustes volta para Ajustes; a rotina, a nova
  * rotina e o próprio Ajustes voltam à visão geral (null).
  */
-export function paiDoNivel(nivel: NivelGaveta): NivelGaveta | null {
+export function paiDoNivel(nivel: NivelGaveta, celular = false): NivelGaveta | null {
+  // NOD-382: no perfil do celular a rotina e a nova rotina abrem da tela Rotinas e voltam para ela; as telas das linhas
+  // (Código, Rotinas, Biblioteca, Computador) voltam ao perfil.
+  if (nivel.tipo === "codigo" || nivel.tipo === "rotinas" || nivel.tipo === "biblioteca" || nivel.tipo === "computador") return null;
+  if (celular && (nivel.tipo === "rotina" || nivel.tipo === "nova-rotina")) return { tipo: "rotinas" };
   return nivel.tipo === "rotina" || nivel.tipo === "nova-rotina" || nivel.tipo === "ajustes" ? null : { tipo: "ajustes" };
 }
 
@@ -148,7 +154,7 @@ function identidade(estado: Estado, a: Bot, dona: boolean): string {
 }
 
 /** ADR-125: o popover do avatar, com as 8 formas e as 12 cores do mascote (rádios com setas) e Redefinir. */
-function popoverAvatar(a: Bot): string {
+export function popoverAvatar(a: Bot): string {
   const formas = FORMAS_MASCOTE.map((forma, i) => {
     const sel = a.forma === forma;
     return `<button type="button" class="gvn-forma" role="radio" aria-checked="${sel}" tabindex="${sel ? 0 : -1}" aria-label="${NOMES_FORMAS[i]}" title="${NOMES_FORMAS[i]}" data-act="gaveta-forma" data-id="${esc(a.id)}" data-valor="${forma}">${iconeAgente({ ...a, forma }, "sm")}</button>`;
@@ -189,7 +195,7 @@ function abaDetalhes(estado: Estado, a: Bot, dona: boolean): string {
 }
 
 /** "Falta acesso ao Meta Ads" / "Falta conectar o Meta Ads": a frase da linha neutra da rotina parada (ADR-125). */
-function fraseDaParada(b: NonNullable<RotinaDto["bloqueio"]>): string {
+export function fraseDaParada(b: NonNullable<RotinaDto["bloqueio"]>): string {
   return b.motivo === "sem_conexao" ? `Falta conectar o ${b.app}` : `Falta acesso ao ${b.app}`;
 }
 
@@ -203,7 +209,7 @@ export function estadoDoComputadorNaGaveta(estado: Pick<Estado, "computadorVisto
  * ADR-125: a aba Computador — a miniatura e os estados ligado, dormindo, sem computador e fora do ar. A imagem ao vivo
  * entra por web/telas/tela-do-bot.ts, que só observa com esta aba à vista (`data-comp-bot`), sem regravar a gaveta.
  */
-function abaComputador(estado: Estado, a: Bot): string {
+export function abaComputador(estado: Estado, a: Bot): string {
   // NOD-96 (v2): com o computador da pessoa, a aba mostra a miniatura com Abrir, "não está usando o navegador",
   // dormindo/Acordar e o fora do ar com o caminho — o estado vem do computador da pessoa, não do pulso deste bot.
   const v2 = estado.computadorPessoa;
@@ -237,14 +243,14 @@ function abaComputador(estado: Estado, a: Bot): string {
  * NOD-326 (ADR-125): a aba Biblioteca — no bot da pessoa, a Pasta de trabalho no topo (saiu de Ajustes › Ambiente); embaixo,
  * os arquivos e mídias que o bot criou nesta conversa (web/telas/biblioteca.ts).
  */
-export function abaBiblioteca(estado: Estado, a: Bot, dona: boolean): string {
+export function abaBiblioteca(estado: Estado, a: Bot, dona: boolean, celular = false): string {
   const pasta = dona ? `<div class="gv-cartao gvb-pasta">${linhaDaPasta(estado, a)}</div>` : "";
   const tenant = estado.sessao?.tenantId;
   if (!tenant) return pasta;
   // Revisão 2: a mesma conversa que a busca e a releitura usam (a da tela).
   const conversaId = estado.tela.tipo === "conversa" ? estado.tela.conversaId : a.conversaId;
   const url = (id: string) => `/api/t/${encodeURIComponent(tenant)}/conversas/${encodeURIComponent(conversaId)}/anexos/${encodeURIComponent(id)}`;
-  const lista = renderListaBiblioteca(estado.bibliotecaDoBot[conversaId], { conversaId, url, bot: a.nome, sumiram: lembrancaDaMidia.sumiram, esteMac: lembrancaDaMidia.esteMac, agora: estado.agora > 0 ? estado.agora : Date.now() });
+  const lista = renderListaBiblioteca(estado.bibliotecaDoBot[conversaId], { conversaId, url, bot: a.nome, sumiram: lembrancaDaMidia.sumiram, esteMac: lembrancaDaMidia.esteMac, agora: estado.agora > 0 ? estado.agora : Date.now(), ...(celular ? { celular } : {}) });
   return `${pasta}<section class="gv-secao gvb">${lista}</section>`;
 }
 
@@ -252,7 +258,7 @@ export function abaBiblioteca(estado: Estado, a: Bot, dona: boolean): string {
  * ADR-125 (emenda ADR-060 item 5): o nível Ajustes — Atalhos (Ligar, Memória, Trabalhos, Atividade), Perfil (Missão e
  * voz), Acessos, Ambiente e, no fim, o que é do Modo dev. Colabora saiu; a Pasta foi para a aba Biblioteca (NOD-326).
  */
-function nivelAjustes(estado: Estado, a: Bot, dona: boolean): Nivel {
+export function nivelAjustes(estado: Estado, a: Bot, dona: boolean, celular = false): Nivel {
   const grupos = gruposDeAcesso(estado, a.id);
   const trabalhosAbertos = abertosDoBot(estado, a.id, a.conversaId).length;
   const ligar = dona ? htmlLinhaLigar(botaoLigar({ agente: a, pessoaId: estado.sessao?.pessoaId, disponibilidade: estado.disponibilidadeLigacao[a.id], ligacao: estado.ligacaoViva }), a.nome) : "";
@@ -264,38 +270,50 @@ function nivelAjustes(estado: Estado, a: Bot, dona: boolean): Nivel {
       ${dona ? linha(`${ICONE.pulso}<span class="gv-linha-txt">Atividade</span>${linhaAtividadeHoje(estado, a.id)}`, origem("atividade"), ICONE.seta) : ""}
     </div></section>`;
   const perfil = dona
-    ? `<section class="gv-secao"><h3>Perfil</h3><div class="gv-cartao">${linha(`${ICONE.pessoa}<span class="gv-linha-txt">Missão e voz<small>O que ${esc(a.nome)} faz e como fala nas ligações</small></span>`, origem("perfil"), ICONE.seta)}</div></section>`
+    ? `<section class="gv-secao"><h3>Perfil</h3><div class="gv-cartao">${linha(`${ICONE.pessoa}<span class="gv-linha-txt">Missão e voz${celular ? "" : `<small>O que ${esc(a.nome)} faz e como fala nas ligações</small>`}</span>`, origem("perfil"), ICONE.seta)}</div></section>`
     : `<section class="gv-secao"><h3>Perfil</h3><p class="gv-descricao">${esc(a.descricao || "Sem missão escrita.")}</p></section>`;
   const acessos = grupos
     .map((g) => `<li class="acesso">${linha(`${logoApp(estado, g.slug, g.nome)}<span class="gv-linha-txt"><b>${esc(g.nome)}</b><small>${esc(nivelDoGrupo(g).rotulo)}${g.indisponivel ? " · indisponível" : ""}</small></span>${g.indisponivel ? `<span class="gvn-alerta-icone" aria-hidden="true" title="o conector está fora do ar">${ICONE.alerta}</span>` : ""}`, `${irPara(a, "acesso", g.chave)} data-origem="acesso:${esc(g.chave)}"`, ICONE.seta)}</li>`)
     .join("");
   const acessosHtml = `<section class="gv-secao secao-acessos"><div class="gv-secao-cab"><h3>Acessos</h3>${dona ? `<button type="button" class="gv-link" ${origem("dar-acesso")} aria-label="Dar a ${esc(a.nome)} acesso a um app">+ Dar acesso</button>` : ""}</div>
-      ${acessos ? `<ul class="gv-cartao">${acessos}</ul>` : '<p class="mudo">Este bot ainda não usa nenhuma ferramenta externa. Ele pede o acesso quando precisar — ou dê você mesmo.</p>'}
+      ${acessos ? `<ul class="gv-cartao">${acessos}</ul>` : celular ? '<p class="mudo">Nenhum acesso</p>' : '<p class="mudo">Este bot ainda não usa nenhuma ferramenta externa. Ele pede o acesso quando precisar — ou dê você mesmo.</p>'}
     </section>`;
   const modo = MODOS[a.modoAprovacao ?? "manual"];
   const ambiente = dona
     ? `<div class="gv-cartao">
         ${estado.modoDev.ligado ? linha(`${ICONE.monitor}<span class="gv-linha-txt">Computador do bot</span>`, `data-act="abrir-computador" data-id="${esc(a.id)}" title="O computador próprio do bot (ADR-037), não o seu Mac"`) : ""}
         ${renderLinhaInteligencia(a, contextoInteligencia(estado), estado.menuIa === a.id)}
-        ${linhaMaquinaDoBot(estado, a)}
+        ${linhaMaquinaDoBot(estado, a, celular)}
         ${linha(`${ICONE.escudo}<span class="gv-linha-txt">Aprovações</span><span class="gv-meta">${esc(modo.curto)}</span>`, `data-act="modo-aprovacao" data-id="${esc(a.id)}" title="${esc(`${modo.titulo}: ${descricao(a.modoAprovacao ?? "manual", estado.frota?.revisor === true)}`)}"`)}
       </div>`
     : `<p class="mudo">Aprovações: ${esc(modo.titulo)}</p>`;
-  const ambienteHtml = `<section class="gv-secao"><h3>Ambiente</h3>${ambiente}<p class="mudo gv-nota">${estado.executor?.atual === "catcher" ? "Simulação · respostas de teste" : "Sua conta de IA · computador conectado"}</p></section>`;
+  const ambienteHtml = `<section class="gv-secao"><h3>Ambiente</h3>${ambiente}${celular ? "" : `<p class="mudo gv-nota">${estado.executor?.atual === "catcher" ? "Simulação · respostas de teste" : "Sua conta de IA · computador conectado"}</p>`}</section>`;
+  // NOD-382: no celular, Ocultar saiu do menu e virou o interruptor "Ocultar da lista" (o Nod não se oculta, ADR-081).
+  const naLista = celular && dona && a.papel !== "nod"
+    ? `<section class="gv-secao pfc-na-lista"><h3>Na lista</h3><div class="gv-cartao"><div class="gv-linha">${ICONE.olho}<span class="gv-linha-txt">Ocultar da lista</span>${chaveCelular(a.oculto === true, "perfil-ocultar", a.id, "Ocultar da lista")}</div></div></section>`
+    : "";
   const dev = estado.modoDev.ligado ? `<section class="gv-secao gv-dev"><h3>Modo dev</h3><div class="gv-dev-corpo">${renderSeloModoDev(estado, a.conversaId, a.nome)}</div></section>` : "";
-  return { titulo: "Ajustes", corpo: atalhos + perfil + acessosHtml + ambienteHtml + dev };
+  return { titulo: "Ajustes", corpo: atalhos + perfil + naLista + acessosHtml + ambienteHtml + dev };
 }
 
 /**
  * NOD-367: onde o bot trabalha, na ficha dele (saiu de Máquinas): "Qualquer uma" (no servidor no Mac, "Este Mac") e as
  * máquinas conectadas; a escolhida que ficou sem contato continua na lista, marcada. `PUT /agentes/:id/maquina`.
  */
-export function linhaMaquinaDoBot(estado: Pick<Estado, "maquinas">, a: Pick<Bot, "id" | "nome" | "maquinaId">): string {
+export function linhaMaquinaDoBot(estado: Pick<Estado, "maquinas">, a: Pick<Bot, "id" | "nome" | "maquinaId">, celular = false): string {
   const todas = maquinasDeTrabalho(estado.maquinas?.maquinas ?? []);
   const vivas = todas.filter((m) => m.conectada || m.id === a.maquinaId);
   if (vivas.length === 0) return "";
   const opcoes = opcoesDeMaquina(vivas, a.maquinaId ?? null, !!estado.maquinas?.servidorNoMac);
-  return `<div class="gv-linha gv-maquina cfg-maq-bot">${ICONE.servidor}<span class="gv-linha-txt">Máquina<small>Onde ${esc(a.nome)} roda o Claude Code ou o Codex</small></span>${seletorLinha({ tipo: "seletor", acao: "maquina-do-bot", rotulo: `Máquina de ${a.nome}`, opcoes, dados: { id: a.id } })}</div>`;
+  return `<div class="gv-linha gv-maquina cfg-maq-bot">${ICONE.servidor}<span class="gv-linha-txt">Máquina${celular ? "" : `<small>Onde ${esc(a.nome)} roda o Claude Code ou o Codex</small>`}</span>${seletorLinha({ tipo: "seletor", acao: "maquina-do-bot", rotulo: `Máquina de ${a.nome}`, opcoes, dados: { id: a.id } })}</div>`;
+}
+
+/**
+ * NOD-382: o interruptor do celular (51 × 31 numa área de 52 × 44, ligado em --ink). `role="switch"` com o estado em
+ * aria-checked; o rótulo diz o que ele liga.
+ */
+export function chaveCelular(ligada: boolean, acao: string, id: string, rotulo: string): string {
+  return `<button type="button" class="pfc-chave" role="switch" aria-checked="${ligada}" data-act="${esc(acao)}" data-id="${esc(id)}" aria-label="${esc(rotulo)}"><span class="pfc-trilho" aria-hidden="true"></span></button>`;
 }
 
 function linhaDaPasta(estado: Estado, a: Bot): string {
@@ -304,9 +322,9 @@ function linhaDaPasta(estado: Estado, a: Bot): string {
 
 // ---- níveis ---------------------------------------------------------------------------------------------------------
 
-type Nivel = { titulo: string; corpo: string; rodape?: string; form?: string };
+export type Nivel = { titulo: string; corpo: string; rodape?: string; form?: string };
 
-function renderNivel(estado: Estado, a: Bot, dona: boolean, nivel: NivelGaveta): Nivel {
+export function renderNivel(estado: Estado, a: Bot, dona: boolean, nivel: NivelGaveta): Nivel {
   switch (nivel.tipo) {
     case "rotina":
       return nivelRotina(estado, a, nivel.id);
@@ -336,6 +354,16 @@ function renderNivel(estado: Estado, a: Bot, dona: boolean, nivel: NivelGaveta):
       return { titulo: "Atividade", corpo: renderAtividade(estado, a) };
     case "ajustes":
       return nivelAjustes(estado, a, dona);
+    // NOD-382: as telas do perfil do celular (web/telas/perfil-celular.ts). Se a janela deixa de ser celular com uma delas
+    // aberta, o desktop mostra o equivalente que já tinha.
+    case "rotinas":
+      return { titulo: "Rotinas", corpo: abaDetalhes(estado, a, dona) };
+    case "biblioteca":
+      return { titulo: "Biblioteca", corpo: abaBiblioteca(estado, a, dona) };
+    case "computador":
+      return { titulo: "Computador", corpo: abaComputador(estado, a) };
+    case "codigo":
+      return { titulo: "Código", corpo: dona ? `<div class="gv-cartao">${linhaDaPasta(estado, a)}</div>` : "" };
   }
 }
 
@@ -497,11 +525,11 @@ export function nomeLegivel(capacidade: string, conector: string): string {
 }
 
 /** "dias úteis às 08:00 (America/Sao_Paulo)" → "dias úteis às 08:00": na linha da gaveta o fuso é ruído; no nível ele fica. */
-function semFuso(resumo: string): string {
+export function semFuso(resumo: string): string {
   return resumo.replace(/\s*\([^)]*\)\s*$/, "");
 }
 
-function capitalizar(texto: string): string {
+export function capitalizar(texto: string): string {
   return texto ? texto[0]!.toUpperCase() + texto.slice(1) : texto;
 }
 

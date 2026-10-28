@@ -1087,6 +1087,9 @@ div.mac-medidor { padding-right: 36px; }
 @media (prefers-reduced-motion: reduce) { .gvb-esq-rot, .gvb-esq { animation: none; } }
 @media (forced-colors: active) { .gvb-menu { opacity: 1; } }
 
+/* NOD-382: sem movimento para quem pediu (o @media do celular em mobile.css é um só; esta regra mora aqui). */
+@media (prefers-reduced-motion: reduce) { .detalhes:has(.pfc-corpo), dialog.pfc-folha { animation: none !important; } }
+
 /* NOD-58 · diário da memória (protótipo v2, Editar opção A): só tokens do nod, sem fundo chapado, sem vermelho.
    No toque o "…" fica sempre à vista (no lugar do toque longo do protótipo). */
 .mem-abas { justify-content: flex-start; }
