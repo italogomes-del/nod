@@ -50,6 +50,7 @@ import { criarAtualizadorDeIas, diaLocal, fimDaInstalacao, inventarioComAtualiza
 import { cabeAprovacao, criarElevador, depsReaisDoElevador } from "./elevar-mac.ts";
 import { ambienteDoBinarioDoNod, ativarPrefixo, candidatosDoNod, descartarPrefixo, escolherBinario, nomeDaVersao, pastasFerramentas, prefixoAtivo, prepararPrefixoNovo, type Candidato } from "./ferramentas.ts";
 import { criarVigiaDasIas, type Veredito, type VigiaDasIas } from "./vigia-ias.ts";
+import { criarFilaDeepLink, criarLogAdiado, criarReceptorDeepLink, deepLinkDoArgv } from "./deep-link.ts";
 import { lerAviso, lerContador, lerPreferencias, lerTemaDesktop, opcoesDoAviso, origemDe, remetenteWebValido } from "./avisos-mac.ts";
 import { abreNoNavegador } from "./links-externos.ts";
 import { arquivoDaMidia } from "./midia-mac.ts";
@@ -99,6 +100,30 @@ function primeiroUsoDaVm(estado: string): void {
   primeiroUsoAberto = true;
   focarJanela(web);
   web.webContents.send(CANAIS_DESKTOP.abrir, { tipo: "computador-do-bot", primeiroUso: true } satisfies AlvoAviso);
+}
+/**
+ * NOD-136: o link `nod://` que chegou de fora (open-url no Mac, argv da segunda instância no Windows/Linux). Qualquer
+ * página pode montar um: inválido só grava o motivo (nunca a URL) e traz o app para a frente (critério 6). Válido vai para a fila de um alvo,
+ * traz a janela e avisa a web, que o busca quando tem sessão, frota e salas (`deepLinkPendente`), o que cobre o app
+ * frio, a tela de conexão e o login, que troca de página. Passados 2 min na fila, o alvo é descartado. O log fica
+ * guardado até o arquivo de log existir (o link do app frio chega antes do `ready`).
+ */
+// A validade (2 min) é de relógio de parede: o monotônico para com o Mac dormindo, e o link de antes da tampa fechada
+// valeria ao acordar. O intervalo de 2 s do receptor segue no monotônico.
+const filaDeepLink = criarFilaDeepLink(() => Date.now());
+const logDeepLink = criarLogAdiado((nivel, evento, campos) => { log(nivel, evento, campos); });
+const receberDeepLink = criarReceptorDeepLink({
+  fila: filaDeepLink,
+  log: logDeepLink.log,
+  focar: () => focarJanela(janela),
+  avisarWeb: () => janelaWeb()?.webContents.send(CANAIS_DESKTOP.deepLink),
+  agora: () => performance.now(),
+  agendar: (fn, ms) => { setTimeout(fn, ms); },
+});
+function entregarDeepLink(): AlvoAviso | null {
+  const { alvo, expirou } = filaDeepLink.tirar();
+  if (expirou) logDeepLink.log("info", "deep_link_expirado");
+  return alvo;
 }
 // NOD-93 passo 10: a VM ligada entra como um bloco no total da memória do Mac.
 const memoriaDoMac = criarAmostradorMemoria({ env: process.env, bloco: () => vmLocal?.memoriaMb() ?? 0 });
@@ -1266,7 +1291,18 @@ if (!app.requestSingleInstanceLock()) app.quit();
 else {
   // NOD-137: abrir de novo (segunda cópia, Dock) traz a janela atual, inclusive minimizada. Sem janela (boot ou troca em
   // curso), o activate não faz nada: fechar a última janela sai do app (window-all-closed).
-  app.on("second-instance", () => focarJanela(janela));
+  // NOD-136: no Mac o link chega pelo open-url, que no app frio dispara entre o will-finish-launching e o `ready`. O
+  // ouvinte entra aqui, síncrono: medido em 2026-10-28 (Electron 43.7, main ESM), o corpo do main roda inteiro antes
+  // do will-finish-launching, mesmo depois de um `await`. No Windows/Linux o link vem no argv (o da segunda instância
+  // ou o desta, se abriu fria).
+  app.on("open-url", (event, url) => { event.preventDefault(); receberDeepLink(url); });
+  app.on("second-instance", (_event, argv) => {
+    const url = deepLinkDoArgv(argv);
+    if (url) receberDeepLink(url); // foca também
+    else focarJanela(janela);
+  });
+  const deepLinkInicial = deepLinkDoArgv(process.argv);
+  if (deepLinkInicial) receberDeepLink(deepLinkInicial);
   app.on("activate", () => focarJanela(janela));
   app.on("window-all-closed", () => app.quit());
   app.on("before-quit", (event) => {
@@ -1290,6 +1326,7 @@ else {
     await contasDoApp.iniciar().catch((erro: unknown) => log("erro", "contas_ler_falhou", { erro: erro instanceof Error ? erro.name : "desconhecido" }));
     // NOD-138: o log() do app passa a gravar em ~/Library/Logs/nod antes de qualquer outra coisa, e as quedas viram linha.
     definirDestinoDoLog(criarArquivoDeLog({ dir: app.getPath("logs"), maxBytes: MAX_BYTES_LOG }));
+    logDeepLink.liberar();
     instalarOuvintesDeQueda({ app, processo: process, registrar: (campos) => log("erro", "app_processo_caiu", campos), encerrando: () => encerrando, ehJanelaPrincipal: (conteudo) => !!janela && !janela.isDestroyed() && conteudo === janela.webContents });
     log("info", "app_iniciado", { versao: app.getVersion(), empacotado: app.isPackaged, arquitetura: process.arch });
     // NOD-93 (ADR-127): a VM local (só com NOD_VM_LOCAL=1 num Mac). A fase vai no anúncio, no máximo 1/s.
@@ -1318,6 +1355,10 @@ else {
       if (lido !== null) { contadorAtual = lido; aplicarContador(); }
     });
     ipcMain.handle(CANAIS_DESKTOP.preferencias, (e) => { validarRemetenteWeb(e); return estadoPreferencias(); });
+    // NOD-136: a web busca o link `nod://` da fila quando tem sessão e frota; só a janela web, na origem do servidor.
+    ipcMain.handle(CANAIS_DESKTOP.deepLinkPendente, (e) => { validarRemetenteWeb(e); return entregarDeepLink(); });
+    // NOD-136: o esquema `nod://` é registrado só pelo Info.plist (electron-builder.yml, mac.protocols); sem
+    // setAsDefaultProtocolClient, que reafirmaria a cada abertura e registraria no Windows/Linux (fora do escopo).
     // NOD-93 (ADR-127): o "tentar agora" do download pausado; sem a VM local (flag desligada), não faz nada.
     ipcMain.handle(CANAIS_DESKTOP.vmTentarAgora, (e) => { validarRemetenteWeb(e); vmLocal?.preparador.tentarAgora(); });
     ipcMain.handle(CANAIS_DESKTOP.definirAvisos, (e, ligado: unknown) => {

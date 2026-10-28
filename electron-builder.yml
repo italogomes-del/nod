@@ -47,6 +47,10 @@ mac:
   entitlements: desktop/entitlements.mac.plist
   entitlementsInherit: desktop/entitlements.mac.plist
   minimumSystemVersion: '12.0'
+  # NOD-136: o esquema `nod://` (CFBundleURLTypes no Info.plist); o app trata o link em desktop/deep-link.ts.
+  protocols:
+    - name: nod
+      schemes: [nod]
   # Modo ligação (2026-10-04, ADR-071): o texto que o macOS mostra ao pedir o microfone.
   extendInfo:
     NSMicrophoneUsageDescription: O nod usa o microfone quando você dita uma mensagem ou liga para um bot.

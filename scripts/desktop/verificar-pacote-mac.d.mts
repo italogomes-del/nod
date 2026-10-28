@@ -6,6 +6,7 @@ export type SaidasPacote = {
   entitlementsApp: string;
   helpers: { nome: string; entitlements: string }[];
   microfone: SaidaComando;
+  esquemaUrl: SaidaComando;
   lipo: string;
   staplerApp: SaidaComando;
   staplerDmg: SaidaComando;
@@ -24,6 +25,7 @@ export function filtrarHelpers(nomes: readonly string[]): string[];
 export function conferirHelpersEncontrados(helpers: readonly string[]): Conferencia;
 export function lerTextoMicrofone(yaml: string): string;
 export function compararMicrofone(saida: SaidaComando, esperado: string): Conferencia;
+export function compararEsquemaUrl(saida: SaidaComando, esperado?: string): Conferencia;
 export function interpretarLipo(saida: string, arch: string): Conferencia;
 export function interpretarStapler(alvo: string, saida: SaidaComando): Conferencia;
 export function interpretarSpctl(alvo: string, saida: SaidaComando): Conferencia;

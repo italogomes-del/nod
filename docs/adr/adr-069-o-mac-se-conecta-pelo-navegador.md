@@ -53,3 +53,17 @@ ou do Codex do Mac é encontrada sem turno pago (ADR-036), e o GitHub vem do `gh
 
 Reabrir se o servidor ganhar réplicas (o pedido precisa ir para o banco ou para um armazenamento
 compartilhado), ou se mais de um pareamento em cada cinco falhar por prazo vencido.
+
+## Emenda de 2026-10-28 — `nod://` para navegação (NOD-136)
+
+O esquema `nod://` passa a ser registrado pelo app (Info.plist, `mac.protocols` no electron-builder), mas **só para
+navegar**: `nod://conversa/<uuid>`, `nod://sua-vez` e `nod://computador-do-bot`. O pareamento continua pelo navegador,
+como decidido acima; nenhum segredo, código ou token viaja num link `nod://`.
+
+O risco que levou a rejeitar o esquema para o login continua valendo e foi aceito: outro app que registre `nod` pode
+receber o link (o LaunchServices escolhe quem o trata), e com ele só o UUID de uma conversa, que sozinho não dá acesso
+a nada. Do lado do nod, o link vem de qualquer página: o parser (desktop/deep-link.ts) é estrito, a URL nunca vai à
+página, a `loadURL` nem ao log, e a conversa que não é da pessoa abre Sua vez.
+
+Gatilho de reversão: se um link `nod://` precisar carregar segredo ou executar uma ação (não só abrir uma tela), esta
+emenda cai e a ação volta a passar pelo navegador.

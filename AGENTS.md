@@ -290,6 +290,14 @@ principal, que confere remetente e argumentos (`desktop/avisos-mac.ts`). A voz d
 renderer (web/lib/ligacao.ts), nunca pelo processo principal: é a referência do AEC do Chromium.
 `electron scripts/desktop/smoke-window.mjs` (depois de `desktop:build`) confere as duas pontes sem empacotar.
 
+Definido em 2026-10-28 (NOD-136, deep links `nod://`): o esquema é registrado só pelo Info.plist
+(`electron-builder.yml`, `mac.protocols`). Navegação apenas, por isso não contraria a ADR-069 (que recusou `nod://`
+para o login: qualquer app pode registrar o mesmo esquema). O link vem de fora: `desktop/deep-link.ts` o lê de forma
+estrita (só conversa/<uuid>, sua-vez e computador-do-bot) e a URL nunca vai à página, a `loadURL` nem ao log (só o
+motivo). Desvio da spec, que pedia push do alvo: a ponte avisa sem dado (`aoDeepLink`) e a página PUXA o alvo
+(`deepLinkPendente`, remetente conferido) quando tem sessão, frota e salas, porque o processo principal não sabe
+quando a página logou. Ordem de release: a web sobe antes do app que a usa (o app novo com a web antiga só foca).
+
 Definido em 2026-10-24 (NOD-93, ADR-127): a VM local do Mac só existe com `NOD_VM_LOCAL=1` (no app e na variável de
 repositório do `desktop-release`). O disco vem de `NOD_VM_DISCO_URL` (só `https:`; padrão o release do repo) e é
 conferido pelo sha256 embutido no app (`<Resources>/vm-local/disco.sha256`, gravado no release por

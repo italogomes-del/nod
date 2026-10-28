@@ -21,7 +21,7 @@ async function janelaWeb() {
   try {
     await w.loadURL("data:text/html;charset=utf-8,<!doctype html><title>nod</title><body>web</body>");
     const estado = await w.webContents.executeJavaScript(`({ node: typeof require, processo: typeof process, nod: typeof window.nod, ponte: Object.keys(window.nodDesktop ?? {}).sort().join(","), ias: Object.keys(window.nodDesktop?.ias ?? {}).sort().join(","), midia: Object.keys(window.nodDesktop?.midia ?? {}).sort().join(","), ipc: typeof window.ipcRenderer })`);
-    const esperado = "aoAbrir,aoBuscar,avisar,contador,contas,definirAvisos,definirSom,definirTema,desafioConta,emLigacao,iaEntrar,iaInstalar,iaTestar,ias,microfone,midia,preferencias,trocarConta,vmTentarAgora";
+    const esperado = "aoAbrir,aoBuscar,aoDeepLink,avisar,contador,contas,deepLinkPendente,definirAvisos,definirSom,definirTema,desafioConta,emLigacao,iaEntrar,iaInstalar,iaTestar,ias,microfone,midia,preferencias,trocarConta,vmTentarAgora";
     const esperadoIas = "abrirLink,aoMudar,atualizar,cancelar,colarCodigo,entrar,estados,instalar,verificar";
     if (estado.node !== "undefined" || estado.processo !== "undefined" || estado.nod !== "undefined" || estado.ipc !== "undefined" || estado.ponte !== esperado || estado.ias !== esperadoIas || estado.midia !== "existe,maquina,mostrarNoFinder") throw new Error(`Janela web expõe mais que nodDesktop: ${JSON.stringify(estado)}`);
     // O evento do processo principal chega à página pelo `aoMudar`, e o pedido de estados volta do processo principal.
@@ -36,7 +36,14 @@ async function janelaWeb() {
     await esperar(200);
     const alvo = await w.webContents.executeJavaScript("window.alvoAberto ?? null");
     if (recebidos[0] !== 3 || alvo?.tipo !== "sua-vez") throw new Error(`Ponte da janela web não chegou ao processo principal: ${JSON.stringify({ recebidos, alvo })}`);
-    return { ...estado, contador: recebidos[0], alvo: alvo.tipo };
+    // NOD-136: o aviso do deep link chega sem dado nenhum (a URL nunca vai à página); o alvo vem pelo invoke.
+    ipcMain.handle("nod:deep-link-pendente", () => ({ tipo: "sua-vez" }));
+    await w.webContents.executeJavaScript(`window.nodDesktop.aoDeepLink((...args) => { window.deepLinkArgs = args.length; })`);
+    w.webContents.send("nod:deep-link", "nod://nao-deveria-chegar");
+    await esperar(200);
+    const deepLink = await w.webContents.executeJavaScript("Promise.all([window.deepLinkArgs ?? null, window.nodDesktop.deepLinkPendente()])");
+    if (deepLink[0] !== 0 || deepLink[1]?.tipo !== "sua-vez") throw new Error(`Ponte do deep link não funcionou: ${JSON.stringify(deepLink)}`);
+    return { ...estado, contador: recebidos[0], alvo: alvo.tipo, deepLink: deepLink[1].tipo };
   } finally { w.destroy(); }
 }
 // medido em 2026-10-06 (NOD-187): sem este ouvinte, destruir a última janela dispara o `app.quit()` padrão durante o

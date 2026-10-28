@@ -4,17 +4,16 @@ import type { PonteContas } from "./contas-desktop.ts";
 import type { PonteMidia } from "./midia-desktop.ts";
 
 /**
- * Ponte da JANELA WEB do app desktop (definido em 2026-09-24, "aviso no Mac"): o que o preload dela
- * (desktop/preload-web.ts) expõe como `window.nodDesktop`. Só tipos e `as const` (EMENDA 26): a web
- * importa com `import type`; o processo principal valida cada argumento (desktop/avisos-mac.ts), porque
- * quem chama é uma página remota.
+ * Ponte da JANELA WEB do app desktop (definido em 2026-09-24, "aviso no Mac"): o que o preload dela (desktop/preload-web.ts)
+ * expõe como `window.nodDesktop`. Só tipos e `as const` (EMENDA 26): a web importa com `import type`; o processo
+ * principal valida cada argumento (desktop/avisos-mac.ts), porque quem chama é uma página remota.
  *
  * Separada da ponte da tela de conexão (`window.nod`, desktop/preload.ts): aquela entrega `conectar` e
  * a chave da máquina, e a web já usa `window.nod` para inspeção no console.
  */
 
-/** Para onde o clique no aviso leva: a conversa do pedido (um só) ou "Sua vez" (vários). */
-export type AlvoAviso = { tipo: "conversa"; conversaId: string; agenteId: string } | { tipo: "sua-vez" } | { tipo: "computador-do-bot"; primeiroUso?: boolean };
+// Para onde o clique no aviso (ou o link `nod://`, NOD-136, sem `agenteId`) leva: a conversa ou "Sua vez".
+export type AlvoAviso = { tipo: "conversa"; conversaId: string; agenteId?: string } | { tipo: "sua-vez" } | { tipo: "computador-do-bot"; primeiroUso?: boolean };
 
 /** Um aviso já redigido pela web (web/lib/avisos.ts): o Mac só mostra. */
 export type AvisoDesktop = { titulo: string; corpo: string; alvo: AlvoAviso };
@@ -150,6 +149,7 @@ export type NodDesktop = {
   vmTentarAgora?(): Promise<void>; // NOD-93: retoma já o download pausado da VM local (sem a VM: nada). Ausente = app antigo.
   aoAbrir(fn: (alvo: AlvoAviso) => void): void; // a pessoa clicou num aviso: a web abre o alvo.
   aoBuscar?(fn: (acao: "abrir" | "proxima" | "anterior") => void): void; // NOD-42: Editar › Buscar (ausente = app antigo).
+  aoDeepLink?(fn: () => void): void; deepLinkPendente?(): Promise<AlvoAviso | null>; // NOD-136: aviso sem dado; o pull esvazia a fila.
 };
 
 /** Canais de IPC da janela web; nenhum outro chega ao processo principal por ela. */
@@ -160,7 +160,7 @@ export const CANAIS_DESKTOP = {
   definirAvisos: "nod:definir-avisos",
   definirTema: "nod:definir-tema",
   definirSom: "nod:definir-som",
-  abrir: "nod:abrir", buscar: "nod:buscar", // buscar: NOD-42, Editar › Buscar.
+  abrir: "nod:abrir", buscar: "nod:buscar", deepLink: "nod:deep-link", deepLinkPendente: "nod:deep-link-pendente", // NOD-42, NOD-136
   microfone: "nod:microfone",
   emLigacao: "nod:em-ligacao",
   iaEntrar: "nod:ia-entrar",

@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   compararEntitlements,
+  compararEsquemaUrl,
   compararMicrofone,
   conferirPacote,
   filtrarHelpers,
@@ -63,6 +64,7 @@ const saidasCertas = (): SaidasPacote => ({
   entitlementsApp: entXml(ESPERADAS),
   helpers: HELPERS.map((nome) => ({ nome, entitlements: entXml(ESPERADAS) })),
   microfone: { codigo: 0, saida: `${MICROFONE}\n` },
+  esquemaUrl: { codigo: 0, saida: "nod\n" },
   lipo: "arm64\n",
   staplerApp: staplerOk(APP),
   staplerDmg: staplerOk(DMG),
@@ -167,6 +169,14 @@ describe("verificar-pacote-mac.mjs (NOD-203)", () => {
   it("texto do microfone diferente reprova; ausente no Info.plist também", () => {
     expect(falhasCom({ microfone: { codigo: 0, saida: "This app needs access to the microphone.\n" } })).toEqual([`NSMicrophoneUsageDescription: esperava ${MICROFONE}, veio This app needs access to the microphone.`]);
     expect(compararMicrofone({ codigo: 1, saida: "Could not extract value, error: No value at that key path or invalid key path: NSMicrophoneUsageDescription\n" }, MICROFONE).ok).toBe(false);
+  });
+
+  it("NOD-136: sem o esquema nod:// no Info.plist, ou com outro, reprova", () => {
+    expect(falhasCom({ esquemaUrl: { codigo: 1, saida: "Could not extract value, error: No value at that key path or invalid key path: CFBundleURLTypes.0.CFBundleURLSchemes.0\n" } })).toEqual([
+      "CFBundleURLTypes (esquema): esperava nod, veio ausente no Info.plist (saída 1: Could not extract value, error: No value at that key path or invalid key path: CFBundleURLTypes.0.CFBundleURLSchemes.0)",
+    ]);
+    expect(compararEsquemaUrl({ codigo: 0, saida: "nodx\n" }).ok).toBe(false);
+    expect(compararEsquemaUrl({ codigo: 0, saida: "nod\n" }).ok).toBe(true);
   });
 
   it("lê o texto do microfone do yml com ou sem aspas", () => {

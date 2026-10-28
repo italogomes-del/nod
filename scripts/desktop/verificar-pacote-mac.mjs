@@ -103,6 +103,12 @@ export function compararMicrofone({ codigo, saida }, esperado) {
   return resultado("NSMicrophoneUsageDescription", codigo === 0 && veio === esperado, esperado, veio);
 }
 
+/** NOD-136: o esquema `nod://` registrado no Info.plist (`plutil -extract CFBundleURLTypes.0.CFBundleURLSchemes.0 raw`). */
+export function compararEsquemaUrl({ codigo, saida }, esperado = "nod") {
+  const veio = codigo === 0 ? String(saida ?? "").replace(/\r?\n$/, "") : `ausente no Info.plist (saída ${codigo}: ${resumo(saida)})`;
+  return resultado("CFBundleURLTypes (esquema)", codigo === 0 && veio === esperado, esperado, veio);
+}
+
 /** `lipo -archs`: exatamente a arquitetura do job, nem a outra nem as duas. */
 export function interpretarLipo(saida, arch) {
   const esperado = ARCH_DO_LIPO[arch] ?? `arquitetura conhecida (arm64 ou x64), veio ARCH=${arch}`;
@@ -156,6 +162,7 @@ export function conferirPacote(saidas, esperado) {
     conferirHelpersEncontrados(helpers.map((h) => h.nome)),
     ...helpers.map((h) => compararEntitlements(h.nome, h.entitlements, esperado.entitlements)),
     compararMicrofone(saidas.microfone, esperado.microfone),
+    compararEsquemaUrl(saidas.esquemaUrl),
     interpretarLipo(saidas.lipo, esperado.arch),
     interpretarStapler("nod.app", saidas.staplerApp),
     interpretarStapler("DMG", saidas.staplerDmg),
@@ -191,6 +198,7 @@ function verificarPacote(app, dmg) {
     entitlementsApp: rodar("codesign", ["-d", "--entitlements", "-", "--xml", app]).saida,
     helpers,
     microfone: rodar("plutil", ["-extract", "NSMicrophoneUsageDescription", "raw", "-o", "-", join(app, "Contents", "Info.plist")]),
+    esquemaUrl: rodar("plutil", ["-extract", "CFBundleURLTypes.0.CFBundleURLSchemes.0", "raw", "-o", "-", join(app, "Contents", "Info.plist")]),
     lipo: rodar("lipo", ["-archs", join(app, "Contents", "MacOS", "nod")]).saida,
     staplerApp: rodar("xcrun", ["stapler", "validate", app]),
     staplerDmg: rodar("xcrun", ["stapler", "validate", dmg]),

@@ -81,6 +81,7 @@ import { CHAVE_GUARDADA, lerGuardado, lerPedido, PARAMETROS_DO_PEDIDO, type Pedi
 import { abrirPareamento } from "./telas/parear-mac.ts";
 import { criarAvisador } from "./lib/avisador.ts";
 import { criarCanalAvisos } from "./lib/canal-avisos.ts";
+import { criarPuxadorDeepLink, destinoDoAlvo, leituraConta } from "./lib/deep-link.ts";
 import { criarLiveEvents, type LiveEvents } from "./lib/live-events.ts";
 import { ehCelular, enterEnvia } from "./lib/celular.ts";
 import { alvoDoAtalho, atalhoDoNovoBot, atalhoDoTeclado, lugarAtual, SELETOR_CAMPO, SELETOR_MODAL, type AcaoAtalho } from "./lib/atalhos.ts";
@@ -387,6 +388,8 @@ window.matchMedia("(max-width: 1099px)").addEventListener("change", marcarPainel
  * Notification API e título da aba no navegador (web/lib/canal-avisos.ts).
  */
 const canalAvisos = criarCanalAvisos((alvo) => abrirAlvoDoAviso(alvo), () => { if (estado.sessao) render(); });
+// NOD-136: o link `nod://` que abriu o app do Mac vai para o mesmo lugar do clique no aviso, quando há sessão, frota e salas.
+const deepLink = criarPuxadorDeepLink(window.nodDesktop, () => !!estado.sessao, (alvo) => abrirAlvoDoAviso(alvo));
 // definido em 2026-10-04 (ADR-070): no app do Mac, a escolha de tema mora em preferencias.json (o localStorage é apagado a
 // cada conexão); ao abrir, ela volta para o localStorage e para o data-theme, e Preferências mostra o botão certo.
 void window.nodDesktop?.preferencias().then((p) => { if (p.tema) aplicarTema(p.tema, document.documentElement); }, () => undefined);
@@ -1290,6 +1293,8 @@ async function reidratar(): Promise<void> {
   // até ser aberta, e antes cada frame caía aqui e redesenhava a tela inteira de forma síncrona.
   if (relevantes.length === 0) return;
   const telaAntes = estado.tela;
+  // NOD-136: a leitura que voltou depois de outra sessão começar não conta para o link desta.
+  const lerParaDeepLink = deepLink.leitor();
   reidratando = true;
   let lerDepois = false;
   let saiu = false;
@@ -1300,6 +1305,9 @@ async function reidratar(): Promise<void> {
       try {
         const acao = await buscar(q);
         if (acao && reduzirVendoSaida(acao)) saiu = true;
+        // NOD-136: o link `nod://` espera a frota e as salas da sessão (a conversa pode ser de uma sala).
+        const lida = acao ? leituraConta(q, { acao: acao.tipo }) : null;
+        if (lida) lerParaDeepLink(lida);
         if (acao?.tipo === "hidratar-sua-vez") canalAvisos.contador(avisador.atualizar(acao.suaVez));
         if (acao?.tipo === "hidratar-nao-lidos") lerDepois = true;
         if (acao?.tipo === "trabalho-sumiu") lembrarTaskAberta(estado.tela);
@@ -1307,6 +1315,7 @@ async function reidratar(): Promise<void> {
         if (!(e instanceof ErroApi && e.status === 404)) {
           const erro = erroDe(e);
           if (erro && ehErroDeRede(erro)) {
+            // NOD-136: falha de rede não conta para o link (leituraConta); a leitura volta com a rede.
             // Revisão NOD-215: a rede caiu depois das tentativas desta leitura. O resto da passada também cairia (cada
             // GET esperaria mais 8,5 s com `reidratando` preso): guarda esta e as que faltam para quando o nod voltar.
             for (const resto of relevantes.slice(i)) pendentesDeRede.add(resto);
@@ -1316,6 +1325,9 @@ async function reidratar(): Promise<void> {
           }
           if (erro) estado = reduzir(estado, acaoDoErro(erro));
         }
+        // Servidor sem salas (404) ou com erro que não é de rede: sem salas nesta sessão, o link não espera mais por elas.
+        const lida = leituraConta(q, { erroDeRede: false });
+        if (lida) lerParaDeepLink(lida);
       }
     }
     render();
@@ -2605,6 +2617,7 @@ async function iniciarSessao(escopo: Escopo): Promise<void> {
   // Outra sessão, outra fila: a primeira leitura volta a ser só a linha de base.
   avisador.reiniciar();
   canalAvisos.contador(0);
+  deepLink.novaSessao();
   ambienteBanco = await api.ambiente();
   dispatch({ tipo: "sessao", escopo });
   void api.preferencias().then((p) => {
@@ -3084,17 +3097,13 @@ function abrirAlvoDoAviso(alvo: AlvoAviso): void {
   if (!estado.sessao) return;
   // NOD-93: o primeiro download da VM local abre o painel do computador com a janela de primeiro uso (a cena do
   // mascote, a barra com os MB e o "Continuar em segundo plano").
-  if (alvo.tipo === "computador-do-bot") {
+  const destino = destinoDoAlvo(alvo, { pessoaId: estado.sessao.pessoaId, agentes: estado.frota?.agentes ?? [], salas: estado.salas });
+  if (destino.tipo === "computador-do-bot") {
     abrirEspaco("computador-do-bot");
-    if (alvo.primeiroUso) dispatch({ tipo: "computador-ui", ui: { preparoAberto: true } });
+    if (destino.primeiroUso) dispatch({ tipo: "computador-ui", ui: { preparoAberto: true } });
     return;
   }
-  const conversaId = alvo.tipo === "conversa" ? alvo.conversaId : null;
-  const agente = estado.frota?.agentes.find((a) => a.conversaId === conversaId && a.ownerId === estado.sessao?.pessoaId);
-  const sala = estado.salas.find((s) => s.sala.conversaId === conversaId);
-  if (agente) navegar({ tipo: "conversa", conversaId: agente.conversaId, agenteId: agente.id });
-  else if (sala) navegar({ tipo: "sala", salaId: sala.sala.id, conversaId: sala.sala.conversaId });
-  else navegar({ tipo: "sua-vez" });
+  navegar(destino);
 }
 
 function botGerido(id: string | undefined): BotGerido | undefined {

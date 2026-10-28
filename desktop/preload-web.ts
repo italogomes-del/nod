@@ -79,6 +79,12 @@ const ponte: NodDesktop = {
     ipcRenderer.removeAllListeners(CANAIS_DESKTOP.abrir);
     ipcRenderer.on(CANAIS_DESKTOP.abrir, (_evento, alvo: AlvoAviso) => fn(alvo));
   },
+  // NOD-136: o link `nod://` na fila do processo principal. O aviso não leva nada; o alvo vem do invoke, já validado.
+  aoDeepLink: (fn: () => void) => {
+    ipcRenderer.removeAllListeners(CANAIS_DESKTOP.deepLink);
+    ipcRenderer.on(CANAIS_DESKTOP.deepLink, () => fn());
+  },
+  deepLinkPendente: () => ipcRenderer.invoke(CANAIS_DESKTOP.deepLinkPendente),
   aoBuscar: (fn: (acao: AcaoDeBusca) => void) => {
     ipcRenderer.removeAllListeners(CANAIS_DESKTOP.buscar);
     ipcRenderer.on(CANAIS_DESKTOP.buscar, (_evento, acao: AcaoDeBusca) => {
