@@ -1,3 +1,4 @@
+import type { SituacaoConta } from "../contracts/ferramentas-conta.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
 import { data, ms, msOuNull } from "./conversao.ts";
 
@@ -154,6 +155,19 @@ export async function ehProvisorio(conn: Conn, escopo: Escopo): Promise<boolean>
 export async function pessoaEhLegada(conn: Conn, escopo: Escopo): Promise<boolean> {
   const [l] = await conn<{ ok: boolean }[]>`select (email is not null) as ok from pessoas where tenant_id = ${escopo.tenantId} and id = ${escopo.pessoaId}`;
   return l?.ok === true;
+}
+
+/**
+ * NOD-351: a situação da conta da pessoa, para o chat escolher o cartão. Lê na conexão que recebe (a transação do turno,
+ * sem abrir outra do pool). Conta sem senha de pessoa do login de antes é `conta_google_de_antes`: o link de recuperação
+ * não cria senha para ela (ServicoConta.redefinir).
+ */
+export async function situacaoDaConta(conn: Conn, escopo: Escopo): Promise<SituacaoConta> {
+  const conta = await contaDaPessoa(conn, escopo);
+  if (conta?.temSenha) return "conta_com_senha";
+  if (conta) return (await pessoaEhLegada(conn, escopo)) ? "conta_google_de_antes" : "conta_sem_senha";
+  if (await ehProvisorio(conn, escopo)) return "sem_conta";
+  return (await pessoaEhLegada(conn, escopo)) ? "legado" : "fora_das_contas";
 }
 
 /** O e-mail da pessoa de antes das contas (ADR-030); null = provisória ou sem e-mail. */

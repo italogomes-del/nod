@@ -132,6 +132,23 @@ describe("driver catcher + cliente-nod contra rota interna real", { timeout: TIM
     expect(registros[3]?.dados).toMatchObject({ desfecho: "sucesso", ferramentasChamadas: ["mcp__nod__lembrar"] });
   });
 
+  it("abrir_conta nunca põe propriedade extra sensível no EventoStream nem em catcher_registros", async () => {
+    const registros: RegistroCatcher[] = [];
+    const inst = await instancia(registros);
+    const espiao = sinksEspiao();
+    chamadas.length = 0;
+    const ferramenta = { nome: "abrir_conta", nomeMcp: "mcp__nod__abrir_conta" as const, origem: "nod" as const, conectorId: null, readOnlyHint: false, tocaDadoPessoal: false, schema: { type: "object" as const } };
+    await inst.adapter(planoDeTeste('[[tool: abrir_conta {"pedido":"entrar","senha":"segredo que não pode persistir"}]]', {
+      catalogo: { ferramentas: [ferramenta], servidores: [] },
+    })).rodarTurno(espiao.sinks);
+
+    expect(espiao.eventos.find((e) => e.tipo === "tool_use")).toMatchObject({ input: { pedido: "entrar" } });
+    expect(registros.find((r) => r.tipo === "tool_use")?.dados.input).toEqual({ pedido: "entrar" });
+    expect(JSON.stringify([...espiao.eventos, ...registros])).not.toContain("segredo que não pode persistir");
+    // A cópia enviada ao servidor continua crua: o despachante real aplica additionalProperties:false e recusa.
+    expect(chamadas[0]?.corpo).toMatchObject({ argumentos: { pedido: "entrar", senha: "segredo que não pode persistir" } });
+  });
+
   it("sem marcador: roteiro padrão responde 'catcher: recebi N caracteres; ferramentas: […]' com custo 0", async () => {
     const inst = await instancia();
     const espiao = sinksEspiao();

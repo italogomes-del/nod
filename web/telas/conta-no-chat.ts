@@ -1,4 +1,5 @@
 import type { CadastroDto, ContagemEspacoDto, EntrarDto, EsperaPareamentoDto, EstadoContaDto, EstadoPareamentoDto, ImportarDto, PareamentoAbertoDto, PedirPareamentoDto, SessaoContaDto, SessoesDto, TrocarSenhaDto, VerificarDto } from "../../src/contracts/conta.ts";
+import type { EtapaPeloChat } from "../../src/contracts/ferramentas-conta.ts";
 import { AppDesatualizado, ErroApi } from "../lib/erro-api.ts";
 import { esc } from "../lib/render.ts";
 import { nesteAparelho } from "../lib/aparelho.ts";
@@ -45,6 +46,8 @@ export type Etapa =
   | { tipo: "recuperar"; enviadoPara: string | null }
   | { tipo: "senha"; erro: string | null; salva: number | null }
   | { tipo: "sessoes"; dados: SessoesDto | null; confirmar: boolean }
+  /** NOD-351: aberto pelo chat, antes do clique; o código só nasce em "Gerar código" (gerar invalida o anterior). */
+  | { tipo: "parear-pronto" }
   | { tipo: "parear-gerar"; codigo: string; expiraEm: number; pedido: { aparelho: string; simbolos: string[] } | null; vencido: boolean }
   | { tipo: "parear-entrar"; simbolos: string[] | null; erro: string | null }
   | { tipo: "google-app" };
@@ -195,6 +198,8 @@ export function htmlEtapa(e: Etapa, v: { ocupado: boolean; google: boolean; agor
         <div class="cc-acoes">${bt("conta-fechar", "Cancelar", { classe: "cc-link" })}</div>`,
       );
     }
+    case "parear-pronto":
+      return cartao("Conectar outro computador", `<p class="cc-texto">Gere um código aqui e digite no outro computador, em <b>Tenho um código</b>. Ele vale por 5 minutos e uma vez só.</p><div class="cc-acoes">${bt("conta-fechar", "Cancelar", { classe: "cc-link" })}${bt("conta-parear-gerar", "Gerar código", { classe: "pri", ocupado: o })}</div>`);
     case "parear-entrar":
       return e.simbolos
         ? cartao("Confirme no outro computador", `<p class="cc-texto">Lá vai aparecer um pedido com estes símbolos. Confira e toque em <b>Sim, conectar</b>.</p>${simbolos(e.simbolos)}<p class="cc-dica" role="status">Esperando a confirmação…</p><div class="cc-acoes">${bt("conta-fechar", "Cancelar", { classe: "cc-link" })}</div>`)
@@ -298,7 +303,28 @@ export type DepsConta = {
   intervalo?: (fn: () => void, ms: number) => () => void;
   /** Lê um campo do formulário (na página, FormData; nos testes, um falso). */
   campo: (form: Formulario, nome: string) => string;
+  /** NOD-351: a pessoa já escreveu algo num campo do cartão de conta aberto? Ausente = não. */
+  digitado?: () => boolean;
 };
+
+/** NOD-351: as etapas que o frame `conta.abrir` pode abrir. Record total no tipo: etapa nova no contrato não compila sem estar aqui. */
+const ETAPAS_PELO_CHAT: Record<EtapaPeloChat, true> = { inicio: true, entrar: true, senha: true, recuperar: true, sessoes: true, "parear-gerar": true };
+
+/**
+ * NOD-351: a etapa que um pedido do chat pode trocar sem a pessoa perder nada: nenhuma, a de início, o pareamento antes
+ * de gerar ou vencido, as sessões sem a confirmação aberta e os cartões que já terminaram (link pedido, senha salva).
+ */
+export function emRepouso(e: Etapa | null): boolean {
+  if (e === null) return true;
+  switch (e.tipo) {
+    case "inicio": case "parear-pronto": return true;
+    case "sessoes": return !e.confirmar;
+    case "recuperar": return e.enviadoPara !== null;
+    case "senha": return e.salva !== null;
+    case "parear-gerar": return e.vencido;
+    default: return false;
+  }
+}
 
 const ETAPAS_DIRETAS = new Set(["inicio", "cadastro", "entrar", "recuperar", "senha", "sessoes", "parear-entrar"]);
 
@@ -308,11 +334,13 @@ export function criarContaNoChat(deps: DepsConta) {
   let ocupado = false;
   let resolvidas: string[] = [];
   let conversaId: string | null = null;
+  /** NOD-351: a etapa atual foi aberta pelo chat e a pessoa ainda não tocou nela (outro pedido do chat pode trocá-la). */
+  let intocada = false;
   let pararPoll: (() => void) | null = null;
   const campo = deps.campo;
   const intervalo = deps.intervalo ?? ((fn, ms) => { const t = setInterval(fn, ms); return () => clearInterval(t); });
 
-  const mudar = (e: Etapa | null) => { etapa = e; deps.aoMudar(); };
+  const mudar = (e: Etapa | null) => { etapa = e; intocada = false; deps.aoMudar(); };
   const resolver = (linha: string) => { pollParar(); resolvidas = [...resolvidas, linha].slice(-6); mudar(null); };
   function pollParar() { pararPoll?.(); pararPoll = null; }
   function poll(fn: () => Promise<boolean>, ms = 2000) {
@@ -361,6 +389,28 @@ export function criarContaNoChat(deps: DepsConta) {
     mudar(qual === "entrar" && erro ? { tipo: "entrar", erro } : await etapaInicial(ETAPAS_DIRETAS.has(qual) ? qual : "inicio"));
   }
 
+  /**
+   * NOD-351: o frame `conta.abrir` (um bot chamou abrir_conta). O cartão abre na conversa DO FRAME, não na da tela nem na
+   * do Nod, e só com uma etapa da lista do chat (o frame é dado: etapa fora dela, ou conversa vazia, não abre nada). Não
+   * passa por cima do que a pessoa está fazendo: com um envio em curso ou uma etapa fora do repouso (formulário,
+   * código, escolha, confirmação, pareamento em curso), o pedido é ignorado, a não ser que essa etapa também tenha vindo
+   * do chat e a pessoa ainda não tenha tocado nela nem escrito nada (aí o pedido novo vale, mesmo noutra conversa). Não chama API nenhuma: o frame chega em
+   * todas as abas e aparelhos da pessoa, e o pareamento abre no botão "Gerar código" (gerar invalida o código anterior).
+   * Em outra conversa, as linhas resolvidas da anterior não vão junto.
+   */
+  async function abrirPeloChat(qual: unknown, conversa: unknown): Promise<boolean> {
+    if (typeof qual !== "string" || !Object.hasOwn(ETAPAS_PELO_CHAT, qual)) return false;
+    if (typeof conversa !== "string" || !conversa) return false;
+    if (ocupado) return false;
+    if (!emRepouso(etapa) && !(intocada && !(deps.digitado?.() ?? false))) return false;
+    pollParar();
+    if (conversa !== conversaId) resolvidas = [];
+    conversaId = conversa;
+    mudar(qual === "parear-gerar" ? { tipo: "parear-pronto" } : await etapaInicial(qual));
+    intocada = true;
+    return true;
+  }
+
   /** Retoma o que ficou aberto no servidor (código pendente, escolha). Chamado no boot e na volta do Google. */
   async function retomar(): Promise<EstadoContaDto | null> {
     const e = await deps.api().estado().catch(() => null);
@@ -395,6 +445,10 @@ export function criarContaNoChat(deps: DepsConta) {
         resolver(fraseDoErro(e));
       }
     });
+  }
+
+  function tocando<A extends unknown[], R>(m: Record<string, (...a: A) => R>): Record<string, (...a: A) => R> {
+    return Object.fromEntries(Object.entries(m).map(([k, f]) => [k, (...a: A) => { intocada = false; return f(...a); }]));
   }
 
   const acoes: Record<string, (el: ElAcao) => Promise<void> | void> = {
@@ -556,6 +610,7 @@ export function criarContaNoChat(deps: DepsConta) {
       return htmlBlocoConta({ etapa, ocupado, resolvidas, google: deps.google(), agora: deps.agora(), equipe: deps.equipe?.() ?? null });
     },
     abrir,
+    abrirPeloChat,
     retomar,
     /** A volta do Google (`?conta=`): o que o servidor fez vira a linha ou o cartão certo. */
     async aoVoltarDoGoogle(r: string): Promise<void> {
@@ -567,8 +622,9 @@ export function criarContaNoChat(deps: DepsConta) {
     },
     /** Outra sessão: nada do cartão anterior fica. */
     descartar(): void { pollParar(); etapa = null; ocupado = false; resolvidas = []; conversaId = null; },
-    acoes,
-    forms,
+    // Qualquer toque da pessoa no cartão o tira do "aberto pelo chat e intocado".
+    acoes: tocando(acoes),
+    forms: tocando(forms),
     /** Para os testes. */
     etapa: () => etapa,
   };

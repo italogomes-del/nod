@@ -594,6 +594,7 @@ const telaConta = criarContaNoChat({
   contaMudou: (e) => { contaAtual = e; render(); if (decidirPareamento({ modoLido: true, contas: true, estado: e }) === "abrir") seguirPareamento("abrir"); },
   abrirUrl: (url) => { if (window.nodDesktop) window.open(url, "_blank", "noopener"); else window.location.assign(url); },
   agora: () => Date.now(),
+  digitado: () => [...document.querySelectorAll<HTMLInputElement>(".cc-bloco form input")].some((i) => i.value !== ""),
   campo: (form, nome) => String(new FormData(form as HTMLFormElement).get(nome) ?? ""),
 });
 /** NOD-346: Minha conta em Seu espaço (só com NOD_MINHA_CONTA: o modo da sessão diz `contas.minhaConta`). */
@@ -823,6 +824,8 @@ function falasNaTela(): FalaNaTela[] {
 function receberFrame(frame: FrameSse): void {
   // Antes do reducer: no fim, o anunciador ainda sabe quem falava (o turno sai do estado no mesmo frame).
   anunciadorDoTurno.frame(frame.tipo, frame.dados);
+  // NOD-351: um bot abriu um cartão de conta nesta conversa; o controlador confere a etapa e a conversa do frame.
+  if (frame.tipo === "conta.abrir") void telaConta.abrirPeloChat(frame.dados.etapa, frame.dados.conversaId).catch(() => undefined);
   const antes = estado;
   estado = reduzir(estado, { tipo: "frame", frame, agora: Date.now() });
   if (mudouNaTela(antes, estado)) renderNoQuadro();

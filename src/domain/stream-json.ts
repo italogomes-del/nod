@@ -1,4 +1,5 @@
 import type { EventoStream, ResultadoTurno, SinaisTurno, TokensTurno } from "../contracts/turno.ts";
+import { entradaFerramentaObservavel } from "./entrada-ferramenta-observavel.ts";
 import { motivoDoHookDoNod } from "./negacao-nativa.ts";
 import { redigirECortar, redigirSegredos } from "./segredos.ts";
 
@@ -225,7 +226,10 @@ export function interpretarLinhaStreamJson(linha: string): EventoStream {
     if (Array.isArray(content)) {
       for (const bloco of content) {
         const b = obj(bloco);
-        if (b?.["type"] === "tool_use") return { tipo: "tool_use", id: str(b["id"]), nome: str(b["name"]), input: b["input"] };
+        if (b?.["type"] === "tool_use") {
+          const nome = str(b["name"]);
+          return { tipo: "tool_use", id: str(b["id"]), nome, input: entradaFerramentaObservavel(nome, b["input"]) };
+        }
       }
       // O CLI emite UMA linha `assistant` por bloco de conteúdo (thinking, text, tool_use — ver
       // s3-mcp-ok.jsonl), então uma linha com texto e ferramenta juntos não foi observada; se vier, a

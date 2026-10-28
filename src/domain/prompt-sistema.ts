@@ -413,6 +413,8 @@ export function partesDoPromptSistema(entrada: EntradaPromptSistema): { estavel:
   }
   // NOD-50 (revisão do PR #553): linha própria, para valer também na rotina e sem pedir_acesso.
   if (entrada.ferramentas.some((f) => f.nome === "pedir_credencial")) linhas.push("Se faltar uma chave, token ou senha de API, chame pedir_credencial: a pessoa cola num cartão que guarda direto no cofre, e você recebe só guardada ou recusada. Nunca peça o valor no chat.");
+  // NOD-351: pedido de conta pelo chat abre o cartão da NOD-345; o bot nunca recebe senha, código, token ou cookie.
+  if (entrada.ferramentas.some((f) => f.nome === "abrir_conta")) linhas.push("Se a pessoa pedir para criar conta, entrar ou trocar de conta, trocar a senha, sair dos outros computadores ou conectar outro computador, chame abrir_conta: o cartão abre aqui e ela confirma nele. Nunca peça nem repita senha ou código no chat.");
   if (entrada.ferramentas.some((f) => f.nome === "pedir_acesso") && entrada.modo === "rotina") {
     // definido em 2026-09-24 (ADR-044): na rotina entram só os slugs. As duas linhas abaixo custam
     // ~4-5 mil tokens (o catálogo inteiro de cada conexão), e execuções com mais de 1 h entre si

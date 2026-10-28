@@ -45,6 +45,7 @@ const NOD: Record<string, readonly [passado: string, presente: string]> = {
   responder_pedido: ["Respondeu a um pedido de colega", "Respondendo a um pedido de colega"],
   // NOD-50: o cartão de credencial; o rótulo nunca cita o valor (o bot nem o tem).
   pedir_credencial: ["Pediu uma chave", "Pedindo uma chave"],
+  abrir_conta: ["Pediu um cartão de conta", "Pedindo um cartão de conta"],
   // O bot do nod (gerir a frota) e a ligação.
   gerir_bots: ["Mexeu nos bots", "Mexendo nos bots"],
   ver_apps_conectados: ["Viu os apps conectados", "Vendo os apps conectados"],

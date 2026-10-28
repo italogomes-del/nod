@@ -3,6 +3,7 @@ import type { PlanoTurno } from "../../../contracts/plano-turno.ts";
 import type { EventoStream, ResultadoTurno, TokensTurno } from "../../../contracts/turno.ts";
 import { SEM_CAPACIDADES } from "../../../contracts/harness.ts";
 import { criarFalaDoMeio } from "../../../domain/mensagem-no-meio.ts";
+import { entradaFerramentaObservavel } from "../../../domain/entrada-ferramenta-observavel.ts";
 import { classificarResultado } from "../../../domain/stream-json.ts";
 // Importado por caminho, como o plano autoriza (L3 registrou): o roteiro é módulo puro sem vitest e a
 // gramática dos marcadores tem que ser UMA — copiar aqui faria as duas divergirem.
@@ -150,8 +151,9 @@ export function criarCatcherDriver(o: OpcoesCatcher = {}): Driver {
                   const id = `toolu_catcher_${emitidos.length}`;
                   const nome = p.nome.startsWith("mcp__nod__") ? p.nome.slice("mcp__nod__".length) : p.nome;
                   const nomeMcp: `mcp__nod__${string}` = `mcp__nod__${nome}`;
-                  registrar("tool_use", { id, nome, nomeMcp, noCatalogo: ferramentas.includes(nomeMcp), input: p.input });
-                  if (!(await emitir({ tipo: "tool_use", id, nome: nomeMcp, input: p.input }))) break;
+                  const inputObservavel = entradaFerramentaObservavel(nome, p.input);
+                  registrar("tool_use", { id, nome, nomeMcp, noCatalogo: ferramentas.includes(nomeMcp), input: inputObservavel });
+                  if (!(await emitir({ tipo: "tool_use", id, nome: nomeMcp, input: inputObservavel }))) break;
                   let resposta: { conteudo: string; isError: boolean };
                   if (!cliente) resposta = { conteudo: `catcher: ${nome} não executada (sem servidor)`, isError: false };
                   else {

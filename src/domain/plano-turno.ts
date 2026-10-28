@@ -243,6 +243,11 @@ export type EntradaPlano = {
   /** ADR-104 (revisão do PR #309): NOD_CRIAR_BOTS=0 tira criar_bots do catálogo dos bots comuns, o mesmo interruptor. */
   semCriarBots?: boolean;
   /**
+   * NOD-351: NOD_CONTAS=1 põe abrir_conta no catálogo da conversa, da criação e da sala (onde a pessoa está falando com o
+   * bot e o cartão aparece). Fora de rotina, delegação, ligação, peer e frente: ninguém está ali para preencher o cartão.
+   */
+  contas?: boolean;
+  /**
    * definido em 2026-10-15 (NOD-262): os pedidos de colegas na fila do bot (delegações pendentes), os mais antigos
    * primeiro. Na conversa e na sala, com ao menos um, entram a linha do prompt e responder_pedido; ausente ou vazio = nada.
    */
@@ -255,6 +260,10 @@ export type EntradaPlano = {
  * (conector ∩ concessão) ∩ profundidade — sem redução por confiança desde a ADR-066. Lança executor_indisponivel
  * quando a localidade recusa (inventário não 'pronto'). tokenDeTurno e machineId são do servidor.
  */
+/** NOD-351: os modos com a pessoa na conversa, onde abrir_conta entra com NOD_CONTAS=1. Fora de task e frente: a tela delas não mostra o cartão. */
+const MODOS_DA_CONTA: readonly ModoTurno[] = ["conversa", "criacao", "sala"];
+const FERRAMENTA_ABRIR_CONTA: NomeFerramentaNod = "abrir_conta";
+
 export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTurno" | "machineId"> {
   const esforco = entrada.raciocinio ?? entrada.agente.esforco ?? undefined;
   const tocaDadoPessoal = entrada.conectores.some((c) => c.habilitado && conectorTocaDadoPessoal(c));
@@ -276,7 +285,8 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
   // ligação), não há onde rodar: fica o me_chame_as.
   const esperaComando: readonly NomeFerramentaNod[] = nativas.includes("Bash") && FERRAMENTAS_NOD_POR_MODO[modo].includes("me_chame_as") ? ["esperar_comando"] : [];
   const frente = ehFrente(entrada.trabalho);
-  const nod = [...FERRAMENTAS_NOD_POR_MODO[modo], ...esperaComando, ...(modo === "ligacao" && entrada.onboarding ? FERRAMENTAS_NOD_ONBOARDING : []), ...doNod, ...criaBots, ...respondePedido]
+  const abreConta: readonly NomeFerramentaNod[] = entrada.contas && MODOS_DA_CONTA.includes(modo) && !entrada.trabalho ? [FERRAMENTA_ABRIR_CONTA] : [];
+  const nod = [...FERRAMENTAS_NOD_POR_MODO[modo], ...esperaComando, ...(modo === "ligacao" && entrada.onboarding ? FERRAMENTAS_NOD_ONBOARDING : []), ...doNod, ...criaBots, ...respondePedido, ...abreConta]
     .filter((n) => (n !== "abrir_frentes" || podeAbrirTask(entrada.trabalho ?? null)) && (n !== "mandar_para_frente" || podeMandarParaTask(entrada.trabalho ?? null)))
     .filter((n) => !frente || !FERRAMENTAS_FORA_DA_FRENTE.includes(n))
     .concat(frente ? [FERRAMENTA_DA_FRENTE] : [])

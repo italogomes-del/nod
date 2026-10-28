@@ -1,4 +1,5 @@
 import type { EventoStream } from "../contracts/turno.ts";
+import { entradaFerramentaObservavel } from "./entrada-ferramenta-observavel.ts";
 import { redigirECortar } from "./segredos.ts";
 
 /**
@@ -16,7 +17,10 @@ export function interpretarCodex(linha: string): EventoStream[] {
   if (v.type === "item.completed" && item.type === "agent_message" && typeof item.text === "string") {
     return item.text.trim() === "" ? [{ tipo: "delta", texto: item.text }] : [{ tipo: "delta", texto: item.text }, { tipo: "texto_bloco", texto: item.text }];
   }
-  if (v.type === "item.started" && item.type === "mcp_tool_call") return [{ tipo: "tool_use", id: String(item.id ?? ""), nome: `mcp__${String(item.server ?? "nod")}__${String(item.tool ?? "")}`, input: item.arguments }];
+  if (v.type === "item.started" && item.type === "mcp_tool_call") {
+    const nome = `mcp__${String(item.server ?? "nod")}__${String(item.tool ?? "")}`;
+    return [{ tipo: "tool_use", id: String(item.id ?? ""), nome, input: entradaFerramentaObservavel(nome, item.arguments) }];
+  }
   // definido em 2026-10-05: a chamada que falha traz o motivo do Codex (ex.: "user cancelled MCP tool call").
   if (v.type === "item.completed" && item.type === "mcp_tool_call") return [{ tipo: "tool_result", toolUseId: String(item.id ?? ""), isError: item.status === "failed", texto: item.status === "failed" ? mensagemDe(item.error) ?? "" : "" }];
   if (v.type !== "turn.completed" && v.type !== "turn.failed") return [];

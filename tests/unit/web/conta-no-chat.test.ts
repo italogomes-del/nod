@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { ErroApi } from "../../../web/lib/erro-api.ts";
-import { abreProvisorio, criarContaNoChat, equipeNoApp, decidirPareamento, htmlBlocoConta, htmlEtapa, linkDaEquipe, resumoDoEspaco, type ApiConta, type DepsConta } from "../../../web/telas/conta-no-chat.ts";
+import { interpretarFrame } from "../../../web/lib/live-events.ts";
+import { abreProvisorio, criarContaNoChat, decidirPareamento, emRepouso, equipeNoApp, htmlBlocoConta, htmlEtapa, linkDaEquipe, resumoDoEspaco, type ApiConta, type DepsConta } from "../../../web/telas/conta-no-chat.ts";
 import { deveLembrar, htmlLembrete, jaFalou, marcarFalou } from "../../../web/telas/lembrete-conta.ts";
 import { htmlMenuConta } from "../../../web/telas/menu-conta.ts";
 
@@ -478,5 +479,130 @@ describe("NOD-406 (revisões r5 a r7): o pedido do Mac guardado", () => {
     expect(d(prov, { volta: "recusado" })).toBe("esperar");
     expect(d({ ...prov, verificando: { email: "a@b.c" } })).toBe("esperar");
     expect(d({ ...prov, escolha: { email: "a@b.c" } })).toBe("esperar");
+  });
+});
+
+describe("NOD-351: o cartão aberto pelo chat (frame conta.abrir)", () => {
+  it("abre na conversa DO FRAME (nem na da tela nem na do Nod) e não troca a conversa da tela", async () => {
+    const api = { sessoes: vi.fn(async () => ({ atual: "s1", sessoes: [] })) };
+    const { c, irParaConversa } = montar(api as unknown as Partial<ApiConta>);
+    expect(await c.abrirPeloChat("sessoes", "conv-ada")).toBe(true);
+    expect(c.blocoNaConversa("conv-ada")).toContain("Sessões");
+    expect(c.blocoNaConversa("conv-nod")).toBe("");
+    expect(c.blocoNaConversa("conv-tela")).toBe("");
+    expect(irParaConversa).not.toHaveBeenCalled();
+    expect(c.etapa()).toMatchObject({ tipo: "sessoes", confirmar: false });
+  });
+
+  it("cada etapa da lista abre o cartão dela; parear-gerar só mostra o botão, e o código sai no toque da pessoa", async () => {
+    for (const [qual, tipo] of [["inicio", "inicio"], ["entrar", "entrar"], ["senha", "senha"], ["recuperar", "recuperar"]] as const) {
+      const { c } = montar({});
+      await c.abrirPeloChat(qual, "conv-ada");
+      expect(c.etapa()?.tipo).toBe(tipo);
+    }
+    const gerarPareamento = vi.fn(async () => ({ codigo: "654321", expiraEm: 301_000 }));
+    const { c } = montar({ gerarPareamento, pareamento: vi.fn(async () => ({ pareamento: null })) } as unknown as Partial<ApiConta>);
+    await c.abrirPeloChat("parear-gerar", "conv-ada");
+    // O frame chega a todas as abas e aparelhos: nenhum deles pode gerar (e invalidar) código sozinho.
+    expect(gerarPareamento).not.toHaveBeenCalled();
+    expect(c.etapa()).toEqual({ tipo: "parear-pronto" });
+    expect(c.blocoNaConversa("conv-ada")).toContain("Gerar código");
+    await c.acoes["conta-parear-gerar"]!(el());
+    expect(gerarPareamento).toHaveBeenCalledTimes(1);
+    expect(c.blocoNaConversa("conv-ada")).toContain("654 321");
+  });
+
+  it("duas abas recebem o mesmo frame de pareamento e nenhuma chama a API", async () => {
+    const gerarPareamento = vi.fn(async () => ({ codigo: "111111", expiraEm: 301_000 }));
+    const api = { gerarPareamento, pareamento: vi.fn(async () => ({ pareamento: null })) } as unknown as Partial<ApiConta>;
+    const a = montar(api);
+    const b = montar(api);
+    await a.c.abrirPeloChat("parear-gerar", "conv-ada");
+    await b.c.abrirPeloChat("parear-gerar", "conv-ada");
+    expect(gerarPareamento).not.toHaveBeenCalled();
+  });
+
+  it("emRepouso: só troca cartão parado, nunca um em curso", () => {
+    expect(emRepouso(null)).toBe(true);
+    expect(emRepouso({ tipo: "parear-pronto" })).toBe(true);
+    expect(emRepouso({ tipo: "parear-entrar", simbolos: null, erro: null })).toBe(false);
+    expect(emRepouso({ tipo: "parear-gerar", codigo: "1", expiraEm: 1, pedido: { aparelho: "Mac", simbolos: ["a"] }, vencido: false })).toBe(false);
+    expect(emRepouso({ tipo: "parear-gerar", codigo: "1", expiraEm: 1, pedido: null, vencido: true })).toBe(true);
+    expect(emRepouso({ tipo: "sessoes", dados: null, confirmar: true })).toBe(false);
+    expect(emRepouso({ tipo: "sessoes", dados: null, confirmar: false })).toBe(true);
+    expect(emRepouso({ tipo: "entrar", erro: null })).toBe(false);
+    expect(emRepouso({ tipo: "senha", erro: null, salva: null })).toBe(false);
+    expect(emRepouso({ tipo: "senha", erro: null, salva: 1 })).toBe(true);
+    expect(emRepouso({ tipo: "recuperar", enviadoPara: null })).toBe(false);
+    expect(emRepouso({ tipo: "recuperar", enviadoPara: "a@x.com" })).toBe(true);
+  });
+
+  it("frame novo não atropela código de pareamento já gerado nem formulário aberto", async () => {
+    const gerarPareamento = vi.fn(async () => ({ codigo: "222222", expiraEm: 301_000 }));
+    const { c } = montar({ gerarPareamento, pareamento: vi.fn(async () => ({ pareamento: null })) } as unknown as Partial<ApiConta>);
+    await c.abrirPeloChat("parear-gerar", "conv-ada");
+    await c.acoes["conta-parear-gerar"]!(el());
+    expect(await c.abrirPeloChat("entrar", "conv-ada")).toBe(false);
+    expect(c.blocoNaConversa("conv-ada")).toContain("222 222");
+    let digitou = true;
+    const f = montar({}, { digitado: () => digitou });
+    await f.c.abrirPeloChat("entrar", "conv-ada");
+    expect(await f.c.abrirPeloChat("sessoes", "conv-ada")).toBe(false);
+    expect(f.c.etapa()?.tipo).toBe("entrar");
+    // Tocou no cartão (mostrar a senha, por exemplo): mesmo com os campos vazios, ele é dela agora.
+    digitou = false;
+    await f.c.acoes["conta-mostrar"]?.(el());
+    await f.c.acoes["conta-ir"]!(el({ etapa: "entrar" }));
+    expect(await f.c.abrirPeloChat("sessoes", "conv-ada")).toBe(false);
+  });
+
+  it("cartão aberto pelo chat e ainda intocado cede ao pedido seguinte, mesmo noutra conversa (o bot não diz que abriu à toa)", async () => {
+    const { c } = montar({ sessoes: vi.fn(async () => ({ atual: "s1", sessoes: [] })) } as unknown as Partial<ApiConta>, { digitado: () => false });
+    expect(await c.abrirPeloChat("entrar", "conv-ada")).toBe(true);
+    expect(await c.abrirPeloChat("senha", "conv-ada")).toBe(true);
+    expect(c.etapa()?.tipo).toBe("senha");
+    expect(await c.abrirPeloChat("sessoes", "conv-bia")).toBe(true);
+    expect(c.blocoNaConversa("conv-bia")).toContain("Sessões");
+    expect(c.blocoNaConversa("conv-ada")).toBe("");
+  });
+
+  it("cartão aberto pela pessoa (menu) não cede ao chat", async () => {
+    const { c } = montar({}, { digitado: () => false });
+    await c.abrir("entrar");
+    expect(await c.abrirPeloChat("senha", "conv-ada")).toBe(false);
+    expect(c.etapa()?.tipo).toBe("entrar");
+  });
+
+  it("o frame é dado: etapa fora da lista do chat, tipo errado ou conversa vazia não abre nada", async () => {
+    const { c } = montar({});
+    for (const [qual, conv] of [["cadastro", "conv-ada"], ["parear-entrar", "conv-ada"], ["codigo", "conv-ada"], ["escolha", "conv-ada"], ["google-app", "conv-ada"], [7, "conv-ada"], [undefined, "conv-ada"], ["entrar", ""], ["entrar", undefined], ["entrar", 3]] as const) {
+      expect(await c.abrirPeloChat(qual, conv)).toBe(false);
+    }
+    expect(c.etapa()).toBeNull();
+  });
+
+  it("não passa por cima do que a pessoa está fazendo: com código aberto ou envio em curso, ignora", async () => {
+    let soltar: () => void = () => undefined;
+    const api = {
+      cadastrar: vi.fn(async () => ({ enviado: true, email: "ana@x.com" })),
+      entrar: vi.fn(() => new Promise((r) => { soltar = () => r({ resultado: "recusado" }); })),
+    };
+    const { c } = montar(api as unknown as Partial<ApiConta>);
+    await c.abrir("cadastro");
+    await c.forms["conta-cadastro"]!(form({ email: "ana@x.com", senha: SENHA }));
+    expect(c.etapa()?.tipo).toBe("codigo");
+    expect(await c.abrirPeloChat("entrar", "conv-ada")).toBe(false);
+    expect(c.etapa()?.tipo).toBe("codigo");
+
+    const outro = montar(api as unknown as Partial<ApiConta>);
+    await outro.c.abrir("entrar");
+    const enviando = outro.c.forms["conta-entrar"]!(form({ email: "ana@x.com", senha: SENHA }));
+    expect(await outro.c.abrirPeloChat("sessoes", "conv-ada")).toBe(false);
+    soltar();
+    await enviando;
+  });
+
+  it("o SSE aceita o frame conta.abrir (TIPOS espelha TipoFrame)", () => {
+    expect(interpretarFrame(JSON.stringify({ streamId: "s", seq: 1, pessoaId: "p", tipo: "conta.abrir", dados: { etapa: "entrar", conversaId: "c" } }))).toMatchObject({ tipo: "conta.abrir" });
   });
 });

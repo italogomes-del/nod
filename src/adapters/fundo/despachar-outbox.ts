@@ -71,6 +71,7 @@ export const FRAME_POR_EVENTO: Record<KindEvento, TipoFrame> = {
   // definido em 2026-10-18 (ADR-113): o frame diz "as reações desta fala mudaram"; a web relê a conversa por REST.
   reacao_mudou: "reacao.mudou",
   checkpoint_mudou: "checkpoint.mudou",
+  conta_abrir: "conta.abrir",
   // Telemetria das linhas (#191): gravada sem outbox, nunca vira frame. A chave existe porque a tabela é total; se uma
   // linha dessas cair no outbox por engano, o frame inofensivo "agente.mudou" só faz a web reler o bot.
   linha_mostrada: "agente.mudou",

@@ -73,6 +73,7 @@ import { passar } from "../../use-cases/passar.ts";
 import { semNovidade } from "../../use-cases/sem-novidade.ts";
 import { pedirAcesso } from "../../use-cases/pedir-acesso.ts";
 import { pedirCredencial } from "../../use-cases/pedir-credencial.ts";
+import { abrirConta } from "../../use-cases/abrir-conta.ts";
 import { pedirAPessoa } from "../../use-cases/pedir-a-pessoa.ts";
 import { pedirAprovacao } from "../../use-cases/pedir-aprovacao.ts";
 import { pedirABot } from "../../use-cases/pedir-a-bot.ts";
@@ -102,6 +103,7 @@ import { criarPonteInterna, type PonteInternaNod } from "../fundo/ponte-interna.
 import { autorizarChaveMaquina } from "./autorizar-chave-maquina.ts";
 import { segredoEfetivo } from "./sessao.ts";
 import { comporContas, type ContasMontadas } from "./compor-contas.ts";
+import { situacaoDaConta } from "../../repositories/contas.repo.ts";
 import type { EnviadorEmail } from "../email/enviador.ts";
 import { criarPonteHttpServidor } from "./rotas/ponte.ts";
 import type { Rota } from "./roteador.ts";
@@ -386,9 +388,13 @@ export function comporApp(o: OpcoesCompor): App {
     return tenants.get(pessoaId) ?? null;
   }
 
-  const useCases: UseCasesNod = { lembrar, atualizarPerfil, pedirAcesso, criarRotina, listarRotinasDoAgente, pausarRotinaPeloAgente, reativarRotinaPeloAgente, atualizarRotinaPeloAgente, excluirRotinaPeloAgente, pedirAprovacao, pedirAPessoa, passar, encaminhar, semNovidade, pedirABot, verColegas, publicarArtefato, lerArtefato, iniciarTarefa, desligar, anotarEntrevista, concluirEntrevista, proporBot, abrirTask, mandarParaTask, meChameAs, esperarComando, abrirFrentes, mandarParaFrente, devolverResumo, gerirBots, verAppsConectados, registrarRelatoDoNod, criarBots, responderPedido, pedirCredencial };
+  const useCases: UseCasesNod = { lembrar, atualizarPerfil, pedirAcesso, criarRotina, listarRotinasDoAgente, pausarRotinaPeloAgente, reativarRotinaPeloAgente, atualizarRotinaPeloAgente, excluirRotinaPeloAgente, pedirAprovacao, pedirAPessoa, passar, encaminhar, semNovidade, pedirABot, verColegas, publicarArtefato, lerArtefato, iniciarTarefa, desligar, anotarEntrevista, concluirEntrevista, proporBot, abrirTask, mandarParaTask, meChameAs, esperarComando, abrirFrentes, mandarParaFrente, devolverResumo, gerirBots, verAppsConectados, registrarRelatoDoNod, criarBots, responderPedido, pedirCredencial, abrirConta };
 
-  const depsDe = (trx: Tx, escopo: Escopo): Deps => ({ repos: criarRepos(trx, escopo), services, useCases, tx: (fn) => fn(trx), escopo, agora: relogio, fusoPadrao, modeloPadrao });
+  // NOD-351: a situação da conta para abrir_conta, lida na transação do turno (sem outra conexão do pool). Liga tarde: as
+  // contas nascem depois, sobre `dentro`; false = desligadas, e abrir_conta volta `indisponivel`.
+  // NOD-351: a mesma regra de comporContas (null sem NOD_CONTAS=1): o catálogo e a situação da conta saem dela.
+  const contasLigadas = env.NOD_CONTAS === "1";
+  const depsDe = (trx: Tx, escopo: Escopo): Deps => ({ repos: criarRepos(trx, escopo), services, useCases, tx: (fn) => fn(trx), escopo, agora: relogio, fusoPadrao, modeloPadrao, ...(contasLigadas ? { situacaoConta: () => situacaoDaConta(trx, escopo) } : {}) });
   const depsSobre = (trx: Tx): Deps => depsDe(trx, escopoDoContexto());
   const gravar = async (trx: Tx, events: RuntimeEvent[]): Promise<void> => {
     if (events.length) await criarRepos(trx, escopoDoContexto()).events.gravarComOutbox(events);
@@ -531,7 +537,7 @@ export function comporApp(o: OpcoesCompor): App {
         const daPonte = compartilhado || maquinaDaPonte(d.escopo, machineIdDoPlano);
         const r = await emitirPlanoTurno(d, { turnoId, machineId: machineIdDoPlano, executor: daPonte ? "local" : executorAtual, permitirResume: true, sessaoPorMaquina: daPonte, ghNaMaquina: await ghDaPessoa(d.escopo, machineIdDoPlano),
           harnesses: daPonte ? ponteHttp.harnesses(d.escopo, machineIdDoPlano) : Object.fromEntries(HARNESSES.map((h) => [h.id, inventarioDe(h.id)])),
-          harnessPreferido: !daPonte && driverPreferido !== "catcher" ? driverPreferido : null, modelosLigacao, semFerramentasDoNod, semCriarBots,
+          harnessPreferido: !daPonte && driverPreferido !== "catcher" ? driverPreferido : null, modelosLigacao, semFerramentasDoNod, semCriarBots, contas: contasLigadas,
           maquina: daPonte ? ponteHttp.maquina(d.escopo, machineIdDoPlano) : null, ...(daPonte && !compartilhado ? { maquinaRemota: true } : {}),
           ...(daPonte ? { capacidadesDaMaquina: ponteHttp.capacidadesDaMaquina(d.escopo, machineIdDoPlano) } : {}) });
         if (r.events?.length) await d.repos.events.gravarComOutbox(r.events);
@@ -615,7 +621,7 @@ export function comporApp(o: OpcoesCompor): App {
       const capacidades = daPonte ? ponteHttp.capacidadesDaMaquinaConectada(escopo, t.machineId) : undefined;
       const r = await emitirPlanoTurno(d, {
         turnoId: t.id, machineId: t.machineId, executor: c.executor, permitirResume: false, ghNaMaquina: await ghDaPessoa(escopo, t.machineId),
-        harnesses: c.harness ? { [c.harness]: inventario } : undefined, harnessPreferido: c.harness, modelosLigacao, semFerramentasDoNod, semCriarBots,
+        harnesses: c.harness ? { [c.harness]: inventario } : undefined, harnessPreferido: c.harness, modelosLigacao, semFerramentasDoNod, semCriarBots, contas: contasLigadas,
         maquina: daPonte ? ponteHttp.maquina(escopo, t.machineId) : null, ...(daPonte && !compartilhado ? { maquinaRemota: true } : {}),
         ...(capacidades ? { capacidadesDaMaquina: capacidades } : {}),
         recompor: { tokenDeTurno: token, harness: c.harness },

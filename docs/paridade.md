@@ -243,9 +243,9 @@ Estados: **vivo** = o chat faz pelo mesmo executor da tela, com teste de contrat
 
 | Ação | O que faz | Risco | No chat | Rotas |
 | --- | --- | --- | --- | --- |
-| `conta.trocar_senha` | Trocar a senha | pessoa_confirma | nunca: senha nunca passa pela conversa | rota pública de conta (/api/conta, ADR-124) |
-| `conta.entrar` | Entrar, cadastrar ou recuperar a conta | pessoa_confirma | nunca: sessão: sem sessão não há chat | rota pública de conta (/api/conta, ADR-124) |
-| `conta.parear_aparelho` | Parear um aparelho com a conta | pessoa_confirma | nunca: pareamento: a pessoa confere o código no aparelho | rota pública de conta (/api/conta, ADR-124) |
+| `conta.trocar_senha` | Trocar a senha | pessoa_confirma | nunca: senha nunca passa pela conversa; o chat só abre o cartão (abrir_conta); quem preenche e confirma é a pessoa, no cartão | rota pública de conta (/api/conta, ADR-124) |
+| `conta.entrar` | Entrar, cadastrar ou recuperar a conta | pessoa_confirma | nunca: sessão: sem sessão não há chat; o chat só abre o cartão (abrir_conta); quem preenche e confirma é a pessoa, no cartão | rota pública de conta (/api/conta, ADR-124) |
+| `conta.parear_aparelho` | Parear um aparelho com a conta | pessoa_confirma | nunca: pareamento: a pessoa confere o código no aparelho; o chat só abre o cartão (abrir_conta); quem preenche e confirma é a pessoa, no cartão | rota pública de conta (/api/conta, ADR-124) |
 | `conta.sair_das_outras` | Sair dos outros aparelhos | arriscada | falta (NOD-395) | rota pública de conta (/api/conta, ADR-124) |
 | `conta.editar_perfil` | Editar o nome, o sobre mim e a foto | muda | falta (NOD-395) | rota pública de conta (/api/conta, ADR-124) |
 | `conta.trocar_email` | Trocar o e-mail da conta | pessoa_confirma | falta (NOD-395) | rota pública de conta (/api/conta, ADR-124) |

@@ -14,6 +14,15 @@ function eventosDe(nome: string): EventoStream[] {
 const STDERR_S2C = "Error: Session ID b086c652-7e33-44f6-8d2e-b7643f69274c is already in use.\n";
 
 describe("interpretarLinhaStreamJson", () => {
+  it("ADR-124: Claude e Codex não expõem extras sensíveis de abrir_conta no EventoStream", () => {
+    const input = { pedido: "entrar", senha: "segredo que não pode aparecer" };
+    const claude = interpretarLinhaStreamJson(JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", id: "u1", name: "mcp__nod__abrir_conta", input }] } }));
+    const codex = interpretarCodex(JSON.stringify({ type: "item.started", item: { type: "mcp_tool_call", id: "u2", server: "nod", tool: "abrir_conta", arguments: input } }));
+    expect(claude).toMatchObject({ tipo: "tool_use", input: { pedido: "entrar" } });
+    expect(codex[0]).toMatchObject({ tipo: "tool_use", input: { pedido: "entrar" } });
+    expect(JSON.stringify([claude, codex])).not.toContain("segredo que não pode aparecer");
+  });
+
   it("init, delta, tool_use, tool_result, result e rate_limit saem do s3 real; o resto é ignorado sem falhar", () => {
     const evs = eventosDe("s3-mcp-ok.jsonl");
     const init = evs.find((e) => e.tipo === "init");

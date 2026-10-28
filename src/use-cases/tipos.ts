@@ -1,5 +1,6 @@
 import type { EfeitoAposCommit } from "../contracts/acoes.ts";
 import type { RuntimeEvent } from "../contracts/evento.ts";
+import type { SituacaoConta } from "../contracts/ferramentas-conta.ts";
 import type { ServicesNod, UseCasesNod as UseCasesNodContrato } from "../contracts/servicos.ts";
 import type { Repos } from "../repositories/tipos.ts";
 import type { Escopo, Relogio, Transacao, Tx } from "../shared/types.ts";
@@ -31,6 +32,11 @@ export interface Deps {
    * lote do Nod criarem com o mesmo padrão (NOD-391, QA do #563).
    */
   modeloPadrao?: string;
+  /**
+   * NOD-351: a situação da conta da pessoa do escopo (situacaoDaConta, na transação do turno), para abrir_conta escolher o cartão. Ausente =
+   * contas desligadas (NOD_CONTAS≠1): a ferramenta volta sem cartão, `indisponivel`.
+   */
+  situacaoConta?: () => Promise<SituacaoConta>;
 }
 
 export type UseCasesNod = UseCasesNodContrato<Deps>;

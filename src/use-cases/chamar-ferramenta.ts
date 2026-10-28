@@ -160,6 +160,7 @@ const DESPACHO: Despacho = {
   criar_bots: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.criar_bots](deps, { ...ctx, ...args }),
   responder_pedido: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.responder_pedido](deps, { ...ctx, ...args }),
   pedir_credencial: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.pedir_credencial](deps, { ...ctx, ...args }),
+  abrir_conta: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.abrir_conta](deps, { ...ctx, ...args }),
 };
 
 /**
