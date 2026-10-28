@@ -11,7 +11,7 @@ export function rotasWorkspaces(w?: Workspaces, dentro?: DentroDeTx): Rota[] {
      * Permitir em um clique: concede a pasta proposta e retoma o turno que a pediu, para a pessoa
      * não precisar remandar a mensagem. Conceder continua sendo ato dela — o modelo só propôs.
      */
-    { metodo: "POST", padrao: /^\/propostas\/(?<id>[^/]+)\/permitir-pasta$/, async handler(c) {
+    { metodo: "POST", acao: "cartoes.permitir_pasta", padrao: /^\/propostas\/(?<id>[^/]+)\/permitir-pasta$/, async handler(c) {
       if (!w || !dentro) throw new ErroDeDominio("nao_permitido");
       const b = await c.corpo() as { pasta?: unknown };
       if (typeof b?.pasta !== "string") throw new ErroDeDominio("entrada_invalida");
@@ -33,18 +33,18 @@ export function rotasWorkspaces(w?: Workspaces, dentro?: DentroDeTx): Rota[] {
       const corpo: WorkspaceDto = { disponivel: Boolean(w), vinculo: w ? await w.consultar(c.escopo, c.params.id!) : null };
       c.json(200, corpo);
     } },
-    { metodo: "POST", padrao: /^\/conversas\/(?<id>[^/]+)\/workspace\/pastas$/, async handler(c) {
+    { metodo: "POST", acao: "conversas.criar_pasta", padrao: /^\/conversas\/(?<id>[^/]+)\/workspace\/pastas$/, async handler(c) {
       if (!w) throw new ErroDeDominio("nao_permitido");
       const b = await c.corpo() as { caminho?: unknown };
       if (b?.caminho !== undefined && typeof b.caminho !== "string") throw new ErroDeDominio("entrada_invalida");
       c.json(200, await w.listar(c.escopo, c.params.id!, b?.caminho));
     } },
-    { metodo: "POST", padrao: /^\/conversas\/(?<id>[^/]+)\/workspace$/, async handler(c) {
+    { metodo: "POST", acao: "conversas.definir_pasta", padrao: /^\/conversas\/(?<id>[^/]+)\/workspace$/, async handler(c) {
       if (!w) throw new ErroDeDominio("nao_permitido");
       const b = await c.corpo() as { pasta?: unknown };
       if (typeof b?.pasta !== "string") throw new ErroDeDominio("entrada_invalida");
       c.json(200, await w.escolher(c.escopo, c.params.id!, b.pasta));
     } },
-    { metodo: "DELETE", padrao: /^\/conversas\/(?<id>[^/]+)\/workspace$/, async handler(c) { if (!w) throw new ErroDeDominio("nao_permitido"); await w.revogar(c.escopo, c.params.id!); c.json(200, { ok: true }); } },
+    { metodo: "DELETE", acao: "conversas.tirar_pasta", padrao: /^\/conversas\/(?<id>[^/]+)\/workspace$/, async handler(c) { if (!w) throw new ErroDeDominio("nao_permitido"); await w.revogar(c.escopo, c.params.id!); c.json(200, { ok: true }); } },
   ];
 }

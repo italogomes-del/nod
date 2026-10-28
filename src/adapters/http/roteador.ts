@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { ErroDeDominio } from "../../domain/erro.ts";
+import type { IdAcao } from "../../domain/acoes/index.ts";
 import type { Escopo } from "../../shared/types.ts";
 import { responderErro } from "./erros.ts";
 import { json, lerCorpo } from "./util.ts";
@@ -30,9 +31,13 @@ export type CtxPublico = Omit<Ctx, "escopo"> & { escopo: Escopo | null };
 
 export type Metodo = "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
 
+/**
+ * `acao` (NOD-391, ADR-135): o id do registro único de ações (src/domain/acoes/) que a rota executa. Toda rota de pessoa
+ * que muda algo declara o seu; a catraca (tests/conformidade/paridade.test.ts) falha sem ele. Id fora do registro não compila.
+ */
 export type Rota =
-  | { metodo: Metodo; padrao: RegExp; handler(ctx: Ctx): Promise<void>; interno?: true; maquina?: true; publica?: undefined }
-  | { metodo: Metodo; padrao: RegExp; handler(ctx: CtxPublico): Promise<void>; publica: true; interno?: undefined; maquina?: undefined };
+  | { metodo: Metodo; padrao: RegExp; handler(ctx: Ctx): Promise<void>; interno?: true; maquina?: true; publica?: undefined; acao?: IdAcao }
+  | { metodo: Metodo; padrao: RegExp; handler(ctx: CtxPublico): Promise<void>; publica: true; interno?: undefined; maquina?: undefined; acao?: IdAcao };
 
 /** Identidade derivada do token de turno (L5 implementa services.tokenTurno.autorizar). */
 export interface IdentidadeDeTurno extends Escopo {

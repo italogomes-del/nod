@@ -23,6 +23,7 @@ node scripts/alvos-44px/rodar.ts [claro|escuro]   # auditoria de toque do CELULA
 npm run sonda               # ADR-019: {estado, versao} sem email; custa um turno de MODELO_SONDA_PADRAO (Sonnet 4.6). sonda:mcp-timeout mede o teto do tools/call
 npm run test:integration    # só com DATABASE_URL_TEST (copie .env.example para .env); sem ele pula fora do CI e FALHA sob CI
 npm run prompt:referencia   # NOD-163: regrava tests/unit/domain/__prompts__/ (o prompt de sistema inteiro por cenário, estável × volátil, e tamanhos.json) — só quando a mudança no prompt é de propósito
+npm run paridade            # NOD-391 (ADR-135): regrava docs/paridade.md a partir do registro de ações; sob CI ou com --conferir só confere
 npm run db:test:limpar      # apaga os bancos nod_test_<hash> de worktrees que não existem mais (nunca nod nem nod_test); roda no fim do check
 npm run db:migrate          # como nod_dono; a aplicação (nod_app, NOBYPASSRLS) nunca migra
 npm run db:seed             # identidade (tenants/pessoas) como nod_dono + Vera/Tuca/sala geral como nod_app; idempotente por id determinístico (a 2ª passagem registra seed_sem_mudancas); o CI nunca chama
@@ -78,6 +79,10 @@ feature que estavam corretos (docs/praticas-herdadas.md §8). Se algo falhar sem
   desligados: a decisora reescreveu frase/prazo e pôs `visibility = 'equipe'` na decisão da dona); por isso a policy vem
   SEMPRE com um trigger BEFORE UPDATE que fecha a lista de colunas que quem não é a dona pode mudar
   (`colunasLivresDaDecisora` em `src/db/schema/decisoes.ts`), e o motivo em `POLICIES_EXTRAS` nomeia o trigger.
+- **Toda rota de pessoa que muda algo declara `Rota.acao`** (NOD-391, ADR-135). O id sai do registro em
+  `src/domain/acoes/` (o tipo `IdAcao` não aceita id fora dele). A catraca `tests/conformidade/paridade.test.ts` barra
+  rota sem id (A), ação sem rota (B), vivas abaixo de `docs/paridade.piso.json` (C) e `docs/paridade.md` velho (D):
+  rota nova → registre a ação e rode `npm run paridade`; ligou uma ação no chat → suba o piso no mesmo PR.
 - **Migração nova só adiciona** (NOD-186). `npm run fence:migrations` (`scripts/migracao-aditiva.ts`, no `check`
   e no CI) lê o trecho antes de `-- ROLLBACK:`, sem comentários nem literais (`'…'`, `E'…'`, `"…"`; o corpo
   de `$$…$$` é verificado como código), e barra `DROP TABLE`,

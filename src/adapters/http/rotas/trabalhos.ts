@@ -36,7 +36,7 @@ export function criarRotasTrabalhos(d: DepsRotas): Rota[] {
       },
     },
     {
-      metodo: "POST",
+      metodo: "POST", acao: "trabalhos.parar",
       padrao: new RegExp(`^/trabalhos/${ID}/parar$`),
       async handler(ctx) {
         const r = await executar(ctx.escopo, pararTrabalho, { trabalhoId: ctx.params.id ?? "" });
@@ -46,7 +46,7 @@ export function criarRotasTrabalhos(d: DepsRotas): Rota[] {
     },
     {
       // A pessoa escreve na tela da task: entra no meio do trabalho se ele roda, senão vira o próximo passo dele.
-      metodo: "POST",
+      metodo: "POST", acao: "trabalhos.enviar",
       padrao: new RegExp(`^/trabalhos/${ID}/mensagens$`),
       async handler(ctx) {
         const corpo = corpoObjeto(await ctx.corpo());
@@ -57,7 +57,7 @@ export function criarRotasTrabalhos(d: DepsRotas): Rota[] {
     },
     {
       // "Fazer depois da …": {depoisDe: id | null}. Id de fora só segue se for uuid (o caso de uso confere o dono).
-      metodo: "POST",
+      metodo: "POST", acao: "trabalhos.depois",
       padrao: new RegExp(`^/trabalhos/${ID}/depois$`),
       async handler(ctx) {
         const corpo = corpoObjeto(await ctx.corpo());
@@ -69,7 +69,7 @@ export function criarRotasTrabalhos(d: DepsRotas): Rota[] {
     },
     {
       // "Fazer aqui": a task é desfeita e o pedido dela vira um turno da conversa.
-      metodo: "POST",
+      metodo: "POST", acao: "trabalhos.fazer_aqui",
       padrao: new RegExp(`^/trabalhos/${ID}/fazer-aqui$`),
       async handler(ctx) {
         const r = await executar(ctx.escopo, fazerAqui, { trabalhoId: ctx.params.id ?? "" });
@@ -79,7 +79,7 @@ export function criarRotasTrabalhos(d: DepsRotas): Rota[] {
     {
       // NOD-377: Cobrar e Desistir da espera vencida de um bot por um colega (o painel e Trabalhos). Os dois ids só seguem
       // se forem uuid; o caso de uso confere que o pedido é deste bot e desta pessoa (nao_encontrado se não).
-      metodo: "POST",
+      metodo: "POST", acao: "bots.cobrar_colega",
       padrao: new RegExp(`^/agentes/${ID}/esperas-de-colega/(?<tarefa>[^/]+)/(?<acao>cobrar|desistir)$`),
       async handler(ctx) {
         const agenteId = ctx.params.id ?? "";
@@ -96,7 +96,7 @@ export function criarRotasTrabalhos(d: DepsRotas): Rota[] {
     },
     {
       // #191: a web manda em lote o que mostrou e o que a pessoa abriu; vai só para events (sem frame).
-      metodo: "POST",
+      metodo: "POST", acao: "telemetria.registrar",
       padrao: /^\/telemetria\/linhas$/,
       async handler(ctx) {
         const corpo = corpoObjeto(await ctx.corpo());

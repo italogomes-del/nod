@@ -24,7 +24,7 @@ import { conferirChaveComposio, conferirTokenGithub } from "./segredos-de-app.ts
  */
 export function rotasCredencial(op: OpcoesRotasMarketplace): Rota[] {
   return [
-    { metodo: "POST", padrao: /^\/propostas\/(?<id>[0-9a-f-]{36})\/credencial$/, async handler(ctx) {
+    { metodo: "POST", acao: "cartoes.guardar_credencial", padrao: /^\/propostas\/(?<id>[0-9a-f-]{36})\/credencial$/, async handler(ctx) {
       const propostaId = ctx.params.id ?? "";
       const body = await ctx.corpo() as { valor?: unknown } | null;
       const valor = valorDeCredencial(body?.valor);

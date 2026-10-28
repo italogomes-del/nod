@@ -4,13 +4,10 @@ import type { IdHarness } from "../../../contracts/harness.ts";
 import { gerirAgente } from "../../../use-cases/gerir-agente.ts";
 import type { DonoAgente, FormaAgente, CorAgente } from "../../../contracts/agente.ts";
 import type { TipoMemoria } from "../../../contracts/memoria.ts";
-import { criarAgente } from "../../../use-cases/criar-agente.ts";
-import { duplicarAgente } from "../../../use-cases/duplicar-agente.ts";
 import { apagarMemoria, desfazerEntradaDiario, editarMemoria, listarDiarioMemoria, listarMemorias, revisarDiarioMemoria } from "../../../use-cases/editar-memorias.ts";
-import { editarPerfil } from "../../../use-cases/editar-perfil.ts";
+import { EXECUTORES_BOTS } from "../../../use-cases/acoes/bots.ts";
 import { fixarAgente, ocultarAgente } from "../../../use-cases/fixar-ocultar-agente.ts";
 import { registrarMemoria } from "../../../use-cases/lembrar.ts";
-import { mudarModoAprovacao } from "../../../use-cases/mudar-modo-aprovacao.ts";
 import { definirInteligenciaDoBot, lerInteligenciaDoBot } from "../../../use-cases/inteligencia.ts";
 import { decidirTrocaDeIa } from "../../../use-cases/trocas-de-ia.ts";
 import type { Rota } from "../roteador.ts";
@@ -23,38 +20,37 @@ const ID = "(?<id>[^/]+)";
  * (dono no corpo → 403 dono_imutavel), Pin/Hide/Duplicate e memória. Cada handler: valida a forma,
  * chama o caso de uso, responde. Mutação devolve o que criou/alterou; o estado vivo chega por SSE.
  */
-export function criarRotasAgentes(d: DepsRotas, desligarComputador?: (escopo: Escopo, agenteId: string) => Promise<void>, prontosPorMaquina?: (escopo: Escopo) => Readonly<Record<string, readonly IdHarness[]>>): Rota[] {
+export function criarRotasAgentes(d: DepsRotas, prontosPorMaquina?: (escopo: Escopo) => Readonly<Record<string, readonly IdHarness[]>>): Rota[] {
   const executar = criarExecutor(d);
   return [
-    { metodo: "PATCH", padrao: new RegExp(`^/agentes/${ID}/organizacao$`), async handler(ctx) {
+    { metodo: "PATCH", acao: "bots.mover", padrao: new RegExp(`^/agentes/${ID}/organizacao$`), async handler(ctx) {
       const corpo = corpoObjeto(await ctx.corpo());
-      ctx.json(200, await executar(ctx.escopo, gerirAgente, { agenteId: ctx.params.id ?? "", acao: "organizar",
+      ctx.json(200, await executar(ctx.escopo, EXECUTORES_BOTS["bots.mover"], { agenteId: ctx.params.id ?? "",
         secao: corpo.secao as string | undefined, naoLido: corpo.naoLido as boolean | undefined,
         fixado: corpo.fixado as boolean | undefined, ordem: corpo.ordem as string[] | undefined }));
     } },
-    { metodo: "DELETE", padrao: new RegExp(`^/agentes/${ID}$`), async handler(ctx) {
-      const resultado = await executar(ctx.escopo, gerirAgente, { agenteId: ctx.params.id ?? "", acao: "excluir" });
-      await desligarComputador?.(ctx.escopo, ctx.params.id ?? "");
-      ctx.json(200, resultado);
+    { metodo: "DELETE", acao: "bots.excluir", padrao: new RegExp(`^/agentes/${ID}$`), async handler(ctx) {
+      // NOD-391: o desligamento do computador é efeito pós-commit do executor único (o mesmo do lote do Nod).
+      ctx.json(200, await executar(ctx.escopo, EXECUTORES_BOTS["bots.excluir"], { agenteId: ctx.params.id ?? "" }));
     } },
-    { metodo: "POST", padrao: new RegExp(`^/agentes/${ID}/restaurar$`), async handler(ctx) {
+    { metodo: "POST", acao: "bots.restaurar", padrao: new RegExp(`^/agentes/${ID}/restaurar$`), async handler(ctx) {
       ctx.json(200, await executar(ctx.escopo, gerirAgente, { agenteId: ctx.params.id ?? "", acao: "restaurar" }));
     } },
     {
-      metodo: "POST",
+      metodo: "POST", acao: "bots.criar",
       padrao: /^\/agentes$/,
       async handler(ctx) {
         const corpo = corpoObjeto(await ctx.corpo());
-        const r = await executar(ctx.escopo, criarAgente, { dono: corpo.dono as DonoAgente, interativo: corpo.interativo === true, nome: textoOpcional(corpo.nome), titulo: textoOpcional(corpo.titulo), descricao: textoOpcional(corpo.descricao), modelo: textoOpcional(corpo.modelo) ?? d.modeloPadrao, harness: corpo.harness as PreferenciaHarness | undefined });
+        const r = await executar(ctx.escopo, EXECUTORES_BOTS["bots.criar"], { dono: corpo.dono as DonoAgente, interativo: corpo.interativo === true, nome: textoOpcional(corpo.nome), titulo: textoOpcional(corpo.titulo), descricao: textoOpcional(corpo.descricao), modelo: textoOpcional(corpo.modelo), harness: corpo.harness as PreferenciaHarness | undefined });
         ctx.json(201, r);
       },
     },
     {
-      metodo: "PATCH",
+      metodo: "PATCH", acao: "bots.editar",
       padrao: new RegExp(`^/agentes/${ID}$`),
       async handler(ctx) {
         const corpo = corpoObjeto(await ctx.corpo());
-        const r = await executar(ctx.escopo, editarPerfil, {
+        const r = await executar(ctx.escopo, EXECUTORES_BOTS["bots.editar"], {
           agenteId: ctx.params.id ?? "",
           nome: textoOpcional(corpo.nome),
           titulo: textoOpcional(corpo.titulo),
@@ -80,7 +76,7 @@ export function criarRotasAgentes(d: DepsRotas, desligarComputador?: (escopo: Es
       },
     },
     {
-      metodo: "PUT",
+      metodo: "PUT", acao: "bots.definir_inteligencia",
       padrao: new RegExp(`^/agentes/${ID}/inteligencia$`),
       async handler(ctx) {
         // ADR-108 (revisão do PR 2, C6): as IAs prontas por máquina, para "levar as tasks" ao Automático.
@@ -90,7 +86,7 @@ export function criarRotasAgentes(d: DepsRotas, desligarComputador?: (escopo: Es
     {
       // ADR-108 (R4/R6): a escolha no aviso de troca de IA do bot — esperar, levar as tasks, ou (bot fixo) seguir noutra IA
       // até a volta. Só a dona; quem chega primeiro vence (o segundo clique recebe `aplicada: false`).
-      metodo: "POST",
+      metodo: "POST", acao: "bots.decidir_troca_de_ia",
       padrao: new RegExp(`^/agentes/${ID}/troca-de-ia$`),
       async handler(ctx) {
         const corpo = corpoObjeto(await ctx.corpo());
@@ -100,15 +96,15 @@ export function criarRotasAgentes(d: DepsRotas, desligarComputador?: (escopo: Es
     {
       // ADR-059: o botão de aprovações do campo. Só a dona; a troca vira linha na conversa do bot. O total exige
       // `confirmado: true` (o segundo clique do menu; emenda de 2026-10-18).
-      metodo: "POST",
+      metodo: "POST", acao: "bots.mudar_modo",
       padrao: new RegExp(`^/agentes/${ID}/modo-aprovacao$`),
       async handler(ctx) {
         const corpo = corpoObjeto(await ctx.corpo());
-        ctx.json(200, await executar(ctx.escopo, mudarModoAprovacao, { agenteId: ctx.params.id ?? "", modo: corpo.modo, confirmado: corpo.confirmado }));
+        ctx.json(200, await executar(ctx.escopo, EXECUTORES_BOTS["bots.mudar_modo"], { agenteId: ctx.params.id ?? "", modo: corpo.modo, confirmado: corpo.confirmado }));
       },
     },
     {
-      metodo: "POST",
+      metodo: "POST", acao: "bots.fixar",
       padrao: new RegExp(`^/agentes/${ID}/fixar$`),
       async handler(ctx) {
         const corpo = corpoObjeto(await ctx.corpo());
@@ -116,7 +112,7 @@ export function criarRotasAgentes(d: DepsRotas, desligarComputador?: (escopo: Es
       },
     },
     {
-      metodo: "POST",
+      metodo: "POST", acao: "bots.ocultar",
       padrao: new RegExp(`^/agentes/${ID}/ocultar$`),
       async handler(ctx) {
         const corpo = corpoObjeto(await ctx.corpo());
@@ -124,10 +120,10 @@ export function criarRotasAgentes(d: DepsRotas, desligarComputador?: (escopo: Es
       },
     },
     {
-      metodo: "POST",
+      metodo: "POST", acao: "bots.duplicar",
       padrao: new RegExp(`^/agentes/${ID}/duplicar$`),
       async handler(ctx) {
-        ctx.json(201, await executar(ctx.escopo, duplicarAgente, { agenteId: ctx.params.id ?? "" }));
+        ctx.json(201, await executar(ctx.escopo, EXECUTORES_BOTS["bots.duplicar"], { agenteId: ctx.params.id ?? "" }));
       },
     },
     {
@@ -138,7 +134,7 @@ export function criarRotasAgentes(d: DepsRotas, desligarComputador?: (escopo: Es
       },
     },
     {
-      metodo: "POST",
+      metodo: "POST", acao: "memoria.criar",
       padrao: new RegExp(`^/agentes/${ID}/memoria$`),
       async handler(ctx) {
         const corpo = corpoObjeto(await ctx.corpo());
@@ -162,7 +158,7 @@ export function criarRotasAgentes(d: DepsRotas, desligarComputador?: (escopo: Es
       },
     },
     {
-      metodo: "POST",
+      metodo: "POST", acao: "memoria.revisar_diario",
       padrao: new RegExp(`^/agentes/${ID}/memoria/diario/revisar$`),
       async handler(ctx) {
         const corpo = corpoObjeto(await ctx.corpo());
@@ -170,14 +166,14 @@ export function criarRotasAgentes(d: DepsRotas, desligarComputador?: (escopo: Es
       },
     },
     {
-      metodo: "POST",
+      metodo: "POST", acao: "memoria.desfazer_diario",
       padrao: new RegExp(`^/agentes/${ID}/memoria/diario/(?<eid>[^/]+)/desfazer$`),
       async handler(ctx) {
         ctx.json(200, await executar(ctx.escopo, desfazerEntradaDiario, { agenteId: ctx.params.id ?? "", entradaId: ctx.params.eid ?? "" }));
       },
     },
     {
-      metodo: "PATCH",
+      metodo: "PATCH", acao: "memoria.editar",
       padrao: new RegExp(`^/agentes/${ID}/memoria/(?<mid>[^/]+)$`),
       async handler(ctx) {
         const corpo = corpoObjeto(await ctx.corpo());
@@ -185,7 +181,7 @@ export function criarRotasAgentes(d: DepsRotas, desligarComputador?: (escopo: Es
       },
     },
     {
-      metodo: "DELETE",
+      metodo: "DELETE", acao: "memoria.apagar",
       padrao: new RegExp(`^/agentes/${ID}/memoria/(?<mid>[^/]+)$`),
       async handler(ctx) {
         const r = await executar(ctx.escopo, apagarMemoria, { memoriaId: ctx.params.mid ?? "" });

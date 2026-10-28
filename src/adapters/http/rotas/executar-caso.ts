@@ -1,3 +1,4 @@
+import type { EfeitoAposCommit } from "../../../contracts/acoes.ts";
 import type { Executor } from "../../../contracts/evento.ts";
 import type { IdHarness } from "../../../contracts/harness.ts";
 import type { Inventario } from "../../../contracts/inventario.ts";
@@ -20,6 +21,8 @@ export type DepsRotas = {
   executor?: Executor;
   /** #313: as IAs das máquinas vivas da pessoa (modo compartilhado), para a negação do envio nomear a IA do bot. */
   harnessesDaPessoa?: (pessoaId: string) => Partial<Record<IdHarness, Inventario>>;
+  /** NOD-391 (ADR-135 §4): roda o efeito que o caso de uso agendou, depois do commit. Erro sobe para a rota. */
+  rodarAposCommit?: (escopo: Escopo, efeito: EfeitoAposCommit) => Promise<void>;
 };
 
 export type Executar = <I, O>(escopo: Escopo, caso: CasoDeUso<I, O>, input: I) => Promise<O>;
@@ -27,13 +30,18 @@ export type Executar = <I, O>(escopo: Escopo, caso: CasoDeUso<I, O>, input: I) =
 /** Abre a tx escopada, monta Deps, roda o caso de uso e grava os eventos pelo outbox na MESMA tx (ADR-010). */
 export function criarExecutor(d: DepsRotas): Executar {
   const agora = d.agora ?? (() => Date.now());
-  return (escopo, caso, input) =>
-    d.abrirTx(escopo)(async (trx) => {
-      const deps: Deps = { repos: criarRepos(trx, escopo), services: d.services, useCases: d.useCases, tx: (fn) => fn(trx), escopo, agora };
+  return async (escopo, caso, input) => {
+    const efeitos: EfeitoAposCommit[] = [];
+    const data = await d.abrirTx(escopo)(async (trx) => {
+      const deps: Deps = { repos: criarRepos(trx, escopo), services: d.services, useCases: d.useCases, tx: (fn) => fn(trx), escopo, agora, modeloPadrao: d.modeloPadrao, aposCommit: (e) => void efeitos.push(e) };
       const r = await caso(deps, input);
       if (r.events?.length) await deps.repos.events.gravarComOutbox(r.events);
       return r.data;
     });
+    // Só depois do commit: o efeito lê o que a transação gravou (ADR-135 §4).
+    for (const e of efeitos) await d.rodarAposCommit?.(escopo, e);
+    return data;
+  };
 }
 
 export function corpoObjeto(corpo: unknown): Record<string, unknown> {

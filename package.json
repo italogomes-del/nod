@@ -56,7 +56,8 @@
     "computador:build": "node scripts/computador/build.ts",
     "computador:orfaos": "node scripts/computadores-orfaos.ts",
     "esperas:limpar": "node scripts/limpar-esperas-nod-377.ts",
-    "computador:legado": "node scripts/computador-legado.ts"
+    "computador:legado": "node scripts/computador-legado.ts",
+    "paridade": "node scripts/paridade.ts"
   },
   "simple-git-hooks": {
     "pre-commit": "if command -v mise >/dev/null 2>&1; then mise exec -- npx lint-staged; else npx lint-staged; fi"

@@ -33,7 +33,7 @@ export function criarRotasTurnos(d: DepsRotas): Rota[] {
     },
     {
       // definido em 2026-09-24: cancelar UMA mensagem da fila (o Cancelar embaixo dela); o Parar continua parando tudo.
-      metodo: "POST",
+      metodo: "POST", acao: "turnos.cancelar",
       padrao: new RegExp(`^/turnos/${ID}/cancelar$`),
       async handler(ctx) {
         const r = await executar(ctx.escopo, cancelarTurno, { turnoId: ctx.params.id ?? "" });
@@ -42,7 +42,7 @@ export function criarRotasTurnos(d: DepsRotas): Rota[] {
       },
     },
     {
-      metodo: "POST",
+      metodo: "POST", acao: "turnos.retomar",
       padrao: new RegExp(`^/turnos/${ID}/retomar$`),
       async handler(ctx) {
         const corpo = corpoObjeto(await ctx.corpo());

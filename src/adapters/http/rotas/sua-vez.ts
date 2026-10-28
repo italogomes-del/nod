@@ -32,7 +32,7 @@ export function criarRotasSuaVez(comDeps: ComDeps): Rota[] {
     },
     {
       // definido em 2026-09-24 (ADR-045): "Entendi" no aviso de queda do Mac. Id desconhecido → 404.
-      metodo: "POST",
+      metodo: "POST", acao: "incidentes.dispensar",
       padrao: /^\/incidentes\/(?<id>[^/]+)\/dispensar$/,
       async handler(ctx) {
         const saida = await comDeps(ctx.escopo, (deps) => dispensarIncidente(deps, { incidenteId: ctx.params.id ?? "" }));
@@ -41,7 +41,7 @@ export function criarRotasSuaVez(comDeps: ComDeps): Rota[] {
       },
     },
     {
-      metodo: "POST",
+      metodo: "POST", acao: "cartoes.reabrir",
       padrao: /^\/decisoes\/(?<id>[^/]+)\/reabrir$/,
       async handler(ctx) {
         const decisaoId = ctx.params.id ?? "";
@@ -63,7 +63,7 @@ export function criarRotasSuaVez(comDeps: ComDeps): Rota[] {
       },
     },
     {
-      metodo: "POST",
+      metodo: "POST", acao: "cartoes.dispensar",
       padrao: /^\/decisoes\/(?<id>[^/]+)\/dispensar$/,
       async handler(ctx) {
         const decisaoId = ctx.params.id ?? "";

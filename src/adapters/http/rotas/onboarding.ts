@@ -51,7 +51,7 @@ export function criarRotasOnboarding(d: DepsRotasOnboarding): Rota[] {
       },
     },
     {
-      metodo: "POST",
+      metodo: "POST", acao: "onboarding.etapa",
       padrao: /^\/onboarding\/etapa$/,
       async handler(ctx) {
         const b = corpoObjeto(await ctx.corpo());
@@ -95,7 +95,7 @@ export function criarRotasOnboarding(d: DepsRotasOnboarding): Rota[] {
       },
     },
     {
-      metodo: "POST",
+      metodo: "POST", acao: "onboarding.concluir",
       padrao: /^\/onboarding\/concluir$/,
       async handler(ctx) {
         await executar(ctx.escopo, concluirOnboarding, {});
@@ -104,7 +104,7 @@ export function criarRotasOnboarding(d: DepsRotasOnboarding): Rota[] {
     },
     {
       // O card "Novo bot" sem proposta da Nina (caminho sem voz): a pessoa cria o bot direto.
-      metodo: "POST",
+      metodo: "POST", acao: "onboarding.bot",
       padrao: /^\/onboarding\/bot$/,
       async handler(ctx) {
         const b = corpoObjeto(await ctx.corpo());
@@ -114,7 +114,7 @@ export function criarRotasOnboarding(d: DepsRotasOnboarding): Rota[] {
     },
     {
       // "Rotina do {bot}": uma das três opções do modelo, pelo clique (a pessoa é a confirmação).
-      metodo: "POST",
+      metodo: "POST", acao: "onboarding.rotina",
       padrao: /^\/onboarding\/rotina$/,
       async handler(ctx) {
         const b = corpoObjeto(await ctx.corpo());

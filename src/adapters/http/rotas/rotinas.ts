@@ -70,7 +70,7 @@ export function corpoObjeto(c: unknown): Record<string, unknown> {
 export function criarRotasRotinas(deps: DepsRotasL7): Rota[] {
   return [
     {
-      metodo: "POST",
+      metodo: "POST", acao: "rotinas.executar",
       padrao: /^\/rotinas\/(?<id>[^/]+)\/executar$/,
       async handler(ctx) {
         // NOD-272: sem `confirmar`, a execução já aberta volta como `jaNaFila` (nada criado) e a web pergunta.
@@ -92,7 +92,7 @@ export function criarRotasRotinas(deps: DepsRotasL7): Rota[] {
       },
     },
     {
-      metodo: "POST",
+      metodo: "POST", acao: "rotinas.criar",
       padrao: /^\/rotinas$/,
       async handler(ctx) {
         const corpo = corpoObjeto(await ctx.corpo());
@@ -113,7 +113,7 @@ export function criarRotasRotinas(deps: DepsRotasL7): Rota[] {
       },
     },
     {
-      metodo: "POST",
+      metodo: "POST", acao: "rotinas.pausar",
       padrao: /^\/rotinas\/(?<id>[^/]+)\/pausar$/,
       async handler(ctx) {
         const { rotina } = await executar(deps, ctx.escopo, pausarRotina, { rotinaId: uuid(ctx.params.id, "id"), estado: "pausada" });
@@ -122,7 +122,7 @@ export function criarRotasRotinas(deps: DepsRotasL7): Rota[] {
       },
     },
     {
-      metodo: "POST",
+      metodo: "POST", acao: "rotinas.ativar",
       padrao: /^\/rotinas\/(?<id>[^/]+)\/ativar$/,
       async handler(ctx) {
         const { rotina } = await executar(deps, ctx.escopo, pausarRotina, { rotinaId: uuid(ctx.params.id, "id"), estado: "ativa" });
@@ -132,7 +132,7 @@ export function criarRotasRotinas(deps: DepsRotasL7): Rota[] {
     },
     {
       // NOD-313 (2026-10-23): o clique da pessoa no card de ritmo — a ÚNICA porta que muda a rotina a partir da sugestão.
-      metodo: "POST",
+      metodo: "POST", acao: "rotinas.mudar_ritmo",
       padrao: /^\/rotinas\/(?<id>[^/]+)\/ritmo$/,
       async handler(ctx) {
         const corpo = corpoObjeto(await ctx.corpo());

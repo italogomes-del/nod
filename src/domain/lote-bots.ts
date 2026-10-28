@@ -2,6 +2,7 @@ import type { Agente, ModoAprovacao } from "../contracts/agente.ts";
 import type { MotivoCardDoLote } from "../contracts/conversa.ts";
 import type { AcaoLote, AppConectado, TipoAcaoLote } from "../contracts/ferramentas-do-nod.ts";
 import { MAX_ACOES_LOTE } from "../contracts/ferramentas-do-nod.ts";
+import { deForaNoLote, riscoNoLote } from "./acoes/index.ts";
 import { decidirPeloModo, semRevisor } from "./modo-aprovacao.ts";
 import { ehNod, nomeReservadoAoNod } from "./nod.ts";
 
@@ -134,16 +135,19 @@ export function resolverBot(alvo: string, bots: readonly BotDoLote[], pessoaId: 
   return { bot };
 }
 
-/** O risco de uma ação no lote; null = não é arriscada. */
+/**
+ * O risco de uma ação no lote; null = não é arriscada. revisto em 2026-10-28 (NOD-391, ADR-135): sai do registro de ações
+ * (src/domain/acoes/), pelo mapa risco → modo: `pessoa_confirma` espera a pessoa em todo modo (`ligar_total`),
+ * `arriscada` vira cartão no manual e no automático, e `leitura`/`muda` seguem o modo — salvo a cerca 3.
+ */
 export function riscoDaAcao(a: Pick<AcaoLote, "tipo" | "descricao" | "titulo" | "modo">, s: { contaminado: boolean; alvoTemAcessos: boolean }): MotivoCardDoLote | null {
-  if (a.tipo === "mudar_modo" && a.modo === "total") return "ligar_total";
-  if (a.tipo === "excluir" || a.tipo === "mudar_modo") return "arriscada";
-  if (!s.contaminado) return null;
+  const risco = riscoNoLote(a);
+  if (risco === "pessoa_confirma") return "ligar_total";
+  if (risco === "arriscada") return "arriscada";
   // Cerca 3: depois de conteúdo de fora, o que dá ou reaproveita acesso, e o que grava instrução que um bot vai seguir
   // depois (a descrição vira o prompt dele; a rotina roda sozinha) — revisão de 2026-10-07: sem isto, uma página lida
-  // pelo Nod no automático plantava uma rotina num bot que já tem o Gmail.
-  if (a.tipo === "dar_acesso" || a.tipo === "criar_rotina" || (a.tipo === "duplicar" && s.alvoTemAcessos)) return "conteudo_de_fora";
-  if (a.tipo === "editar" && (a.descricao !== undefined || a.titulo !== undefined)) return "conteudo_de_fora";
+  // pelo Nod no automático plantava uma rotina num bot que já tem o Gmail. Cada id diz a sua (`lote.deFora`).
+  if (s.contaminado && deForaNoLote(a, { alvoTemAcessos: s.alvoTemAcessos })) return "conteudo_de_fora";
   return null;
 }
 

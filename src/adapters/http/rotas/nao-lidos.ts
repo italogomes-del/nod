@@ -18,7 +18,7 @@ export function criarRotasNaoLidos(d: DepsRotas): Rota[] {
       },
     },
     {
-      metodo: "POST",
+      metodo: "POST", acao: "conversas.marcar_tudo_lido",
       padrao: /^\/nao-lidos\/marcar-tudo$/,
       async handler(ctx) {
         await executar(ctx.escopo, marcarTudoLido, {});
@@ -26,7 +26,7 @@ export function criarRotasNaoLidos(d: DepsRotas): Rota[] {
       },
     },
     {
-      metodo: "POST",
+      metodo: "POST", acao: "conversas.marcar_lida",
       padrao: new RegExp(`^/conversas/${ID}/lida$`),
       async handler(ctx) {
         await executar(ctx.escopo, marcarConversaLida, { conversaId: ctx.params.id ?? "" });
@@ -34,7 +34,7 @@ export function criarRotasNaoLidos(d: DepsRotas): Rota[] {
       },
     },
     {
-      metodo: "POST",
+      metodo: "POST", acao: "conversas.marcar_nao_lida",
       padrao: new RegExp(`^/conversas/${ID}/nao-lida$`),
       async handler(ctx) {
         await executar(ctx.escopo, marcarConversaNaoLida, { conversaId: ctx.params.id ?? "" });

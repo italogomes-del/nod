@@ -12,7 +12,7 @@ export function criarRotasPropostas(d: DepsRotas): Rota[] {
   const executar = criarExecutor(d);
   return [
     {
-      metodo: "POST",
+      metodo: "POST", acao: "cartoes.confirmar_proposta",
       padrao: new RegExp(`^/propostas/${ID}/confirmar$`),
       async handler(ctx) {
         const r = await executar(ctx.escopo, confirmarProposta, { propostaId: ctx.params.id ?? "", prazoMs: d.prazoDecisaoMs });
@@ -27,7 +27,7 @@ export function criarRotasPropostas(d: DepsRotas): Rota[] {
       },
     },
     {
-      metodo: "POST",
+      metodo: "POST", acao: "cartoes.recusar_proposta",
       padrao: new RegExp(`^/propostas/${ID}/recusar$`),
       async handler(ctx) {
         // NOD-202: o card de acesso com a decisão aberta em "Sua vez" recusa pelo caminho da decisão (decidirAcesso),

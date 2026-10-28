@@ -91,7 +91,7 @@ export function rotasConectores(deps: DepsRotasConectores): Rota[] {
       },
     },
     {
-      metodo: "PATCH", padrao: /^\/conectores\/(?<id>[^/]+)\/credenciais$/,
+      metodo: "PATCH", acao: "apps.credenciais", padrao: /^\/conectores\/(?<id>[^/]+)\/credenciais$/,
       async handler(ctx) {
         const c = await ctx.corpo() as { env?: unknown } | null;
         if (!c || typeof c !== "object") throw new ErroDeDominio("entrada_invalida");
@@ -115,7 +115,7 @@ export function rotasConectores(deps: DepsRotasConectores): Rota[] {
       },
     },
     {
-      metodo: "POST",
+      metodo: "POST", acao: "apps.criar",
       padrao: /^\/conectores$/,
       async handler(ctx) {
         const c = (await ctx.corpo()) as CorpoConector;
@@ -137,7 +137,7 @@ export function rotasConectores(deps: DepsRotasConectores): Rota[] {
       },
     },
     {
-      metodo: "POST",
+      metodo: "POST", acao: "apps.sondar",
       padrao: /^\/conectores\/(?<id>[^/]+)\/sondar$/,
       async handler(ctx) {
         const r = await deps.dentro(ctx.escopo, (d) => executar(d, sondarConector, { conectorId: ctx.params.id ?? "" }));
@@ -145,7 +145,7 @@ export function rotasConectores(deps: DepsRotasConectores): Rota[] {
       },
     },
     {
-      metodo: "POST",
+      metodo: "POST", acao: "apps.habilitar",
       padrao: /^\/conectores\/(?<id>[^/]+)\/habilitar$/,
       async handler(ctx) {
         const conector = await deps.dentro(ctx.escopo, (d) => executar(d, habilitarConector, { conectorId: ctx.params.id ?? "", habilitado: true }));
@@ -153,7 +153,7 @@ export function rotasConectores(deps: DepsRotasConectores): Rota[] {
       },
     },
     {
-      metodo: "POST",
+      metodo: "POST", acao: "apps.desabilitar",
       padrao: /^\/conectores\/(?<id>[^/]+)\/desabilitar$/,
       async handler(ctx) {
         const conector = await deps.dentro(ctx.escopo, (d) => executar(d, habilitarConector, { conectorId: ctx.params.id ?? "", habilitado: false }));

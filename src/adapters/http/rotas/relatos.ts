@@ -13,7 +13,7 @@ export function criarRotasRelatos(d: DepsRotas): Rota[] {
   const executar = criarExecutor(d);
   return [
     {
-      metodo: "POST",
+      metodo: "POST", acao: "relatos.registrar",
       padrao: /^\/relatos$/,
       async handler(ctx) {
         const entrada = validarRelato(await ctx.corpo());

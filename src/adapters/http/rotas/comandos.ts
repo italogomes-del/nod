@@ -17,7 +17,7 @@ export function criarRotasComandos(d: DepsRotas): Rota[] {
       },
     },
     {
-      metodo: "POST",
+      metodo: "POST", acao: "conversas.nova_sessao",
       padrao: new RegExp(`^/conversas/${ID}/nova-sessao$`),
       async handler(ctx) {
         const r = await executar(ctx.escopo, novaSessao, { conversaId: ctx.params.id ?? "" });

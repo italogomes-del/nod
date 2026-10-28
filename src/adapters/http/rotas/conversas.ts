@@ -40,7 +40,7 @@ export function criarRotasConversas(d: DepsRotas): Rota[] {
       },
     },
     {
-      metodo: "POST",
+      metodo: "POST", acao: "conversas.enviar",
       padrao: new RegExp(`^/conversas/${ID}/mensagens$`),
       async handler(ctx) {
         const corpo = corpoObjeto(await ctx.corpo());
@@ -61,7 +61,7 @@ export function criarRotasConversas(d: DepsRotas): Rota[] {
     {
       // ADR-046: corpo BINÁRIO (o arquivo), tipo no content-type e nome em x-nod-nome. O cabeçalho próprio
       // força preflight num POST de outra origem — defesa a mais sobre o cookie SameSite=Strict.
-      metodo: "POST",
+      metodo: "POST", acao: "conversas.anexar",
       padrao: new RegExp(`^/conversas/${ID}/anexos$`),
       async handler(ctx) {
         const nome = ctx.req.headers["x-nod-nome"];
@@ -133,7 +133,7 @@ export function criarRotasConversas(d: DepsRotas): Rota[] {
     {
       // ADR-113 (Parte 5 do plano "pergunta com botões"): põe (`marcada: true`) ou tira a reação da pessoa numa fala.
       // Idempotente, por isso PUT: o mesmo corpo duas vezes deixa o mesmo estado. Responde as reações da fala.
-      metodo: "PUT",
+      metodo: "PUT", acao: "conversas.reagir",
       padrao: new RegExp(`^/mensagens/${ID}/reacoes$`),
       async handler(ctx) {
         const corpo = corpoObjeto(await ctx.corpo());
@@ -145,7 +145,7 @@ export function criarRotasConversas(d: DepsRotas): Rota[] {
       // NOD-54 (ADR-134): o "Desfazer N arquivos" da fala. `forcar` = "Voltar mesmo assim" nos conflitos do desfazer anterior.
       // A recusa (vencido, outro desfazendo do mesmo bot) volta 200 com `ok: false` e o motivo: é resposta, não erro — a
       // tela diz o que houve sem passar pelo aviso genérico de falha.
-      metodo: "POST",
+      metodo: "POST", acao: "conversas.desfazer_turno",
       padrao: new RegExp(`^/conversas/${ID}/turnos/(?<turno>[^/]+)/desfazer$`),
       async handler(ctx) {
         const conversaId = ctx.params.id ?? "";
@@ -158,14 +158,14 @@ export function criarRotasConversas(d: DepsRotas): Rota[] {
       },
     },
     {
-      metodo: "POST",
+      metodo: "POST", acao: "conversas.parar",
       padrao: new RegExp(`^/conversas/${ID}/parar$`),
       async handler(ctx) {
         ctx.json(200, await executar(ctx.escopo, parar, { conversaId: ctx.params.id ?? "" }));
       },
     },
     {
-      metodo: "POST",
+      metodo: "POST", acao: "conversas.parar_tudo",
       padrao: /^\/parar$/,
       async handler(ctx) {
         ctx.json(200, await executar(ctx.escopo, parar, { conversaId: null }));

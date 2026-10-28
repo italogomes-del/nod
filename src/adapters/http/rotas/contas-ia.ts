@@ -55,7 +55,7 @@ export function rotasContasIa(deps: DepsRotasContas): Rota[] {
       },
     },
     {
-      metodo: "PUT",
+      metodo: "PUT", acao: "contas_ia.ordenar",
       padrao: /^\/contas-ia\/ordem$/,
       async handler(ctx) {
         const corpo = (await ctx.corpo()) as { ids?: unknown };
@@ -67,7 +67,7 @@ export function rotasContasIa(deps: DepsRotasContas): Rota[] {
       },
     },
     {
-      metodo: "PUT",
+      metodo: "PUT", acao: "contas_ia.mudar_modo",
       padrao: /^\/contas-ia\/modo$/,
       async handler(ctx) {
         const corpo = (await ctx.corpo()) as { modo?: unknown };
@@ -80,7 +80,7 @@ export function rotasContasIa(deps: DepsRotasContas): Rota[] {
       },
     },
     {
-      metodo: "PATCH",
+      metodo: "PATCH", acao: "contas_ia.editar",
       padrao: /^\/contas-ia\/(?<id>[^/]+)$/,
       async handler(ctx) {
         const id = assertUuid(ctx.params.id, "conta");
@@ -99,7 +99,7 @@ export function rotasContasIa(deps: DepsRotasContas): Rota[] {
       },
     },
     {
-      metodo: "POST",
+      metodo: "POST", acao: "contas_ia.sair",
       padrao: /^\/contas-ia\/(?<id>[^/]+)\/sair$/,
       async handler(ctx) {
         const id = assertUuid(ctx.params.id, "conta");
@@ -127,7 +127,7 @@ export function rotasContasIa(deps: DepsRotasContas): Rota[] {
       },
     },
     {
-      metodo: "DELETE",
+      metodo: "DELETE", acao: "contas_ia.remover",
       padrao: /^\/contas-ia\/(?<id>[^/]+)$/,
       async handler(ctx) {
         const id = assertUuid(ctx.params.id, "conta");
@@ -138,7 +138,7 @@ export function rotasContasIa(deps: DepsRotasContas): Rota[] {
       },
     },
     {
-      metodo: "POST",
+      metodo: "POST", acao: "contas_ia.seguir",
       padrao: /^\/contas-ia\/(?<id>[^/]+)\/seguir$/,
       async handler(ctx) {
         const contaId = assertUuid(ctx.params.id, "conta");
@@ -153,7 +153,7 @@ export function rotasContasIa(deps: DepsRotasContas): Rota[] {
     },
     {
       // NOD-280 (definido em 2026-10-15): "Tentar de novo com <conta>" — na nota (com o turno) ou em Provedores (sem).
-      metodo: "POST",
+      metodo: "POST", acao: "contas_ia.tentar_de_novo",
       padrao: /^\/contas-ia\/(?<id>[^/]+)\/tentar-de-novo$/,
       async handler(ctx) {
         const contaId = assertUuid(ctx.params.id, "conta");
@@ -167,7 +167,7 @@ export function rotasContasIa(deps: DepsRotasContas): Rota[] {
     },
     // ── O login de uma conta numa máquina pela tela (ADR-102 item 3) ──────────────────────────────────────────────────
     {
-      metodo: "POST",
+      metodo: "POST", acao: "contas_ia.entrar",
       padrao: /^\/maquinas\/(?<id>[^/]+)\/logins$/,
       async handler(ctx) {
         const corpo = (await ctx.corpo()) as { ia?: unknown; contaId?: unknown; apelido?: unknown };
@@ -199,7 +199,7 @@ export function rotasContasIa(deps: DepsRotasContas): Rota[] {
       },
     },
     {
-      metodo: "POST",
+      metodo: "POST", acao: "contas_ia.codigo_do_login",
       padrao: /^\/maquinas\/(?<id>[^/]+)\/logins\/(?<login>[^/]+)\/codigo$/,
       async handler(ctx) {
         const corpo = (await ctx.corpo()) as { cifrado?: unknown };
@@ -215,7 +215,7 @@ export function rotasContasIa(deps: DepsRotasContas): Rota[] {
       },
     },
     {
-      metodo: "POST",
+      metodo: "POST", acao: "contas_ia.cancelar_login",
       padrao: /^\/maquinas\/(?<id>[^/]+)\/logins\/(?<login>[^/]+)\/cancelar$/,
       async handler(ctx) {
         const loginId = assertUuid(ctx.params.login, "login");
@@ -231,7 +231,7 @@ export function rotasContasIa(deps: DepsRotasContas): Rota[] {
       // O botão "Atualizar agora" da VM ou do Mac visto de outro aparelho: o pedido fica em memória e a máquina o recebe
       // uma vez, na próxima puxada (`atualizar`). O andamento volta pelo anúncio (Inventario.atualizacao). Fora do ar, 409:
       // o pedido venceria antes de alguém puxá-lo.
-      metodo: "POST",
+      metodo: "POST", acao: "maquinas.atualizar_ia",
       padrao: /^\/maquinas\/(?<id>[^/]+)\/ias\/(?<ia>[^/]+)\/atualizar$/,
       async handler(ctx) {
         const ia = ctx.params.ia;
@@ -254,7 +254,7 @@ export function rotasContasIa(deps: DepsRotasContas): Rota[] {
     },
     // ── A máquina: nome, desconexão e o convite do comando de instalação ─────────────────────────────────────────────
     {
-      metodo: "PATCH",
+      metodo: "PATCH", acao: "maquinas.editar",
       padrao: /^\/maquinas\/(?<id>[^/]+)$/,
       async handler(ctx) {
         const corpo = (await ctx.corpo()) as { nome?: unknown };
@@ -268,7 +268,7 @@ export function rotasContasIa(deps: DepsRotasContas): Rota[] {
       },
     },
     {
-      metodo: "POST",
+      metodo: "POST", acao: "maquinas.desconectar",
       padrao: /^\/maquinas\/(?<id>[^/]+)\/desconectar$/,
       async handler(ctx) {
         const corpo = (await ctx.corpo()) as { sairDasContas?: unknown };
@@ -292,7 +292,7 @@ export function rotasContasIa(deps: DepsRotasContas): Rota[] {
       },
     },
     {
-      metodo: "POST",
+      metodo: "POST", acao: "maquinas.convidar",
       padrao: /^\/maquinas\/convites$/,
       async handler(ctx) {
         // NOD-94: `{papel: "computador"}` = o comando manual da instalação por SSH ("Prefere fazer você mesmo?"): a máquina

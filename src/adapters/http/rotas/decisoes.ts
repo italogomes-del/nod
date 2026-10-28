@@ -106,7 +106,7 @@ export function criarRotasDecisoes(d: DepsRotasDecisoes): Rota[] {
 
   return [
     {
-      metodo: "POST",
+      metodo: "POST", acao: "cartoes.decidir",
       padrao: new RegExp(`^/decisoes/${ID}/decidir$`),
       async handler(ctx) {
         const decisaoId = ctx.params.id ?? "";
@@ -281,7 +281,7 @@ export function criarRotasDecisoes(d: DepsRotasDecisoes): Rota[] {
       },
     },
     {
-      metodo: "POST",
+      metodo: "POST", acao: "cartoes.responder",
       padrao: new RegExp(`^/decisoes/${ID}/responder$`),
       async handler(ctx) {
         const decisaoId = ctx.params.id ?? "";
@@ -299,7 +299,7 @@ export function criarRotasDecisoes(d: DepsRotasDecisoes): Rota[] {
       },
     },
     {
-      metodo: "POST",
+      metodo: "POST", acao: "turnos.retomar_decisao",
       padrao: new RegExp(`^/decisoes/${ID}/retomar$`),
       async handler(ctx) {
         const decisaoId = ctx.params.id ?? "";

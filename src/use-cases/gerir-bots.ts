@@ -1,3 +1,4 @@
+import type { EfeitoAposCommit } from "../contracts/acoes.ts";
 import type { AcaoNoLote, MotivoCardDoLote, PayloadPropostaAcesso, PayloadPropostaLoteBots } from "../contracts/conversa.ts";
 import type { RuntimeEvent } from "../contracts/evento.ts";
 import type { AcaoLote, ResultadoGerirBots } from "../contracts/ferramentas-do-nod.ts";
@@ -9,13 +10,9 @@ import { decidirPeloModo, semRevisor } from "../domain/modo-aprovacao.ts";
 import { log } from "../obs/log.ts";
 import { autoriaPessoa, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
 import { semCard, type PorRegra } from "./confirmar-pelo-modo.ts";
-import { criarAgente } from "./criar-agente.ts";
+import { EXECUTORES_BOTS } from "./acoes/bots.ts";
 import { criarRotinaPelaPessoa } from "./criar-rotina.ts";
 import { decidirAcesso } from "./decidir-acesso.ts";
-import { duplicarAgente } from "./duplicar-agente.ts";
-import { editarPerfil } from "./editar-perfil.ts";
-import { gerirAgente } from "./gerir-agente.ts";
-import { mudarModoAprovacao } from "./mudar-modo-aprovacao.ts";
 import { appsDaPessoa, turnoDoNodComAPessoa } from "./nod.ts";
 import { abrirPedidoDeAcesso } from "./pedir-acesso.ts";
 import { autoriaDoAgente } from "./registrar-negacao.ts";
@@ -70,27 +67,27 @@ async function executarAcao(deps: Deps, a: AcaoLote & { alvoNome: string }, botI
   };
   switch (a.tipo) {
     case "criar": {
-      const r = await criarAgente(deps, { dono: "pessoa", nome: a.nome, titulo: a.titulo, descricao: a.descricao, ...(a.modelo ? { modelo: a.modelo } : {}) });
-      const events = [...(r.events ?? [])];
-      if (a.secao && a.secao.trim() !== "") events.push(...((await gerirAgente(deps, { agenteId: r.data.agente.id, acao: "organizar", secao: a.secao })).events ?? []));
-      return { botId: r.data.agente.id, nome: r.data.agente.nome, events };
+      // NOD-391: o mesmo executor da rota POST /agentes; o lote já cria na seção.
+      const r = await EXECUTORES_BOTS["bots.criar"](deps, { dono: "pessoa", nome: a.nome, titulo: a.titulo, descricao: a.descricao, ...(a.modelo ? { modelo: a.modelo } : {}), ...(a.secao !== undefined ? { secao: a.secao } : {}) });
+      return { botId: r.data.agente.id, nome: r.data.agente.nome, events: r.events ?? [] };
     }
     case "duplicar": {
       // NOD-289 (M2): pelo Nod as rotinas da cópia vêm sempre pausadas, com ou sem card — sem a caixa da dona, ativas
       // rodariam em dobro sem ninguém ver.
-      const r = await duplicarAgente(deps, { agenteId: exigirAlvo(), rotinasPausadas: true });
+      const r = await EXECUTORES_BOTS["bots.duplicar"](deps, { agenteId: exigirAlvo(), rotinasPausadas: true });
       return { botId: r.data.agente.id, nome: r.data.agente.nome, events: r.events ?? [], ...(r.data.rotinasPausadasNaCopia > 0 ? { aviso: AVISO_ROTINAS_PAUSADAS } : {}) };
     }
     case "editar": {
-      const r = await editarPerfil(deps, { agenteId: exigirAlvo(), nome: a.nome, titulo: a.titulo, descricao: a.descricao, modelo: a.modelo, esforco: a.esforco === undefined ? undefined : a.esforco === "" ? null : a.esforco });
+      const r = await EXECUTORES_BOTS["bots.editar"](deps, { agenteId: exigirAlvo(), nome: a.nome, titulo: a.titulo, descricao: a.descricao, modelo: a.modelo, esforco: a.esforco === undefined ? undefined : a.esforco === "" ? null : a.esforco });
       return { botId: r.data.agente.id, nome: r.data.agente.nome, events: r.events ?? [] };
     }
     case "mover": {
-      const r = await gerirAgente(deps, { agenteId: exigirAlvo(), acao: "organizar", secao: a.secao ?? "" });
+      const r = await EXECUTORES_BOTS["bots.mover"](deps, { agenteId: exigirAlvo(), secao: a.secao ?? "" });
       return { botId: r.data.agente.id, nome: r.data.agente.nome, events: r.events ?? [] };
     }
     case "excluir": {
-      const r = await gerirAgente(deps, { agenteId: exigirAlvo(), acao: "excluir" });
+      // NOD-391: o mesmo executor da rota DELETE, que agenda o desligamento do computador para depois do commit.
+      const r = await EXECUTORES_BOTS["bots.excluir"](deps, { agenteId: exigirAlvo() });
       return { botId: r.data.agente.id, nome: r.data.agente.nome, events: r.events ?? [] };
     }
     case "criar_rotina": {
@@ -101,7 +98,7 @@ async function executarAcao(deps: Deps, a: AcaoLote & { alvoNome: string }, botI
       // Ligar o total pede a confirmação da pessoa (emenda de 2026-10-18 da ADR-059): só o card aprovado por ela
       // (`pelaPessoa`, que só decidirLoteDeBots liga) a dá; o modo do Nod nunca. `decidirLote` já manda essa ação ao card;
       // isto é a segunda cerca. Revisão do PR #401: não usa `porRegra === null`, que também é o Nod no manual.
-      const r = await mudarModoAprovacao(deps, { agenteId: exigirAlvo(), modo: a.modo, confirmado: ctx.pelaPessoa });
+      const r = await EXECUTORES_BOTS["bots.mudar_modo"](deps, { agenteId: exigirAlvo(), modo: a.modo, confirmado: ctx.pelaPessoa });
       return { botId: r.data.agente.id, nome: r.data.agente.nome, events: r.events ?? [] };
     }
     case "dar_acesso": {
@@ -140,8 +137,12 @@ async function executarEmOrdem(
       continue;
     }
     const botId = origem ? origem.botId : a.botId;
+    // ADR-135 §4: o efeito pós-commit da ação só segue se o savepoint dela ficar; a ação desfeita leva o efeito junto.
+    const efeitos: EfeitoAposCommit[] = [];
+    const daAcao: Deps = { ...deps, aposCommit: (e) => void efeitos.push(e) };
     try {
-      const feito = await emSavepoint(deps, () => executarAcao(deps, origem ? { ...a, alvoNome: origem.alvoNome } : a, botId, { nodId: ctx.nodId, porRegra: ctx.porRegraDe(a), pelaPessoa: ctx.pelaPessoa }));
+      const feito = await emSavepoint(daAcao, () => executarAcao(daAcao, origem ? { ...a, alvoNome: origem.alvoNome } : a, botId, { nodId: ctx.nodId, porRegra: ctx.porRegraDe(a), pelaPessoa: ctx.pelaPessoa }));
+      for (const e of efeitos) deps.aposCommit?.(e);
       a.estado = "feita";
       a.erro = null;
       a.botId = feito.botId;

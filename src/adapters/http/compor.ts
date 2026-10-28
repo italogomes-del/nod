@@ -1,3 +1,4 @@
+import type { EfeitoAposCommit } from "../../contracts/acoes.ts";
 import { criarLoginsNaMaquina } from "../../services/logins-na-maquina.ts";
 import { anunciarContasDaMaquina } from "../../use-cases/contas-ia.ts";
 import { rotasContasIa } from "./rotas/contas-ia.ts";
@@ -387,7 +388,7 @@ export function comporApp(o: OpcoesCompor): App {
 
   const useCases: UseCasesNod = { lembrar, atualizarPerfil, pedirAcesso, criarRotina, listarRotinasDoAgente, pausarRotinaPeloAgente, reativarRotinaPeloAgente, atualizarRotinaPeloAgente, excluirRotinaPeloAgente, pedirAprovacao, pedirAPessoa, passar, encaminhar, semNovidade, pedirABot, verColegas, publicarArtefato, lerArtefato, iniciarTarefa, desligar, anotarEntrevista, concluirEntrevista, proporBot, abrirTask, mandarParaTask, meChameAs, esperarComando, abrirFrentes, mandarParaFrente, devolverResumo, gerirBots, verAppsConectados, registrarRelatoDoNod, criarBots, responderPedido, pedirCredencial };
 
-  const depsDe = (trx: Tx, escopo: Escopo): Deps => ({ repos: criarRepos(trx, escopo), services, useCases, tx: (fn) => fn(trx), escopo, agora: relogio, fusoPadrao });
+  const depsDe = (trx: Tx, escopo: Escopo): Deps => ({ repos: criarRepos(trx, escopo), services, useCases, tx: (fn) => fn(trx), escopo, agora: relogio, fusoPadrao, modeloPadrao });
   const depsSobre = (trx: Tx): Deps => depsDe(trx, escopoDoContexto());
   const gravar = async (trx: Tx, events: RuntimeEvent[]): Promise<void> => {
     if (events.length) await criarRepos(trx, escopoDoContexto()).events.gravarComOutbox(events);
@@ -550,7 +551,16 @@ export function comporApp(o: OpcoesCompor): App {
     barramento,
   };
 
-  const dentro: DentroDeTx = (escopo, fn) => abrirTxEscopada(db, escopo)((trx) => fn(depsDe(trx, escopo)));
+  // NOD-391 (ADR-135 §4): o efeito fora do banco que um caso de uso agenda (desligar o computador do bot excluído) roda
+  // depois do commit. O tratador chega tarde: os computadores nascem depois, montados sobre este `dentro`.
+  let rodarAposCommit: (escopo: Escopo, efeito: EfeitoAposCommit) => Promise<void> = async () => undefined;
+  const dentro: DentroDeTx = async (escopo, fn) => {
+    const efeitos: EfeitoAposCommit[] = [];
+    const r = await abrirTxEscopada(db, escopo)((trx) => fn({ ...depsDe(trx, escopo), aposCommit: (e) => void efeitos.push(e) }));
+    // Pelo Nod (e no clique do cartão do lote), a ação já commitou: a falha do efeito vira aviso no log, não erro do lote.
+    for (const e of efeitos) await rodarAposCommit(escopo, e).catch((erro: unknown) => log("aviso", "efeito_apos_commit_falhou", { tipo: e.tipo, agente_id: e.agenteId, erro: erro instanceof Error ? erro.message : String(erro) }));
+    return r;
+  };
   // NOD-374: a sonda de fundo roda fora de tx, sob o contexto de log da dona (o `carregar` do conector precisa dele).
   const disjuntor = criarDisjuntor({ db, dentro, sondar: (c, op) => services.conectores.sondar(c, op), mudou: (escopo) => barramento.publicar(escopo.pessoaId, "conector.mudou", {}) });
   // NOD-345 (ADR-124): contas atrás de NOD_CONTAS/NOD_BOOTSTRAP/NOD_CONTAS_GOOGLE (compor-contas.ts). Desligadas = null.
@@ -658,6 +668,7 @@ export function comporApp(o: OpcoesCompor): App {
     // `saude` (emenda da ADR-037): o computador entrou ou saiu do ar — a web relê a frota só nesse caso.
     mudou: (escopo, agenteId, saude) => { barramento.publicar(escopo.pessoaId, "computador.mudou", { agenteId, ...(saude ? { saude: true } : {}) }); } });
   if (o.computador || env.NOD_COMPUTADORES === "docker" || computadorNoMotor) services.computadores = computadores;
+  rodarAposCommit = (escopo, efeito) => computadores.desligarExcluido(escopo, efeito.agenteId);
   services.capturas = criarCapturas({ ligado: capturaNoTranscript, fonte: computadores });
   // definido em 2026-09-18: login web remoto não autoriza o filesystem do host; stub só escuta loopback.
   const workspaces = compartilhado || env.NOD_LOGIN !== "stub" ? undefined : criarWorkspaces({ dentro, machineId, imagem: env.NOD_COMPUTADOR_IMAGEM, ...(env.NOD_BUSCA_BASE ? { baseBusca: env.NOD_BUSCA_BASE } : {}), raiz: join(expandirTil(env.NOD_HOME ?? "~/.nod", homedir()), "workspaces") });
@@ -1306,6 +1317,7 @@ export function comporApp(o: OpcoesCompor): App {
       return executorAtual;
     },
     ...(compartilhado ? { harnessesDaPessoa: (pessoaId: string) => ponteHttp.harnessesDaPessoa(pessoaId) } : {}),
+    rodarAposCommit: (escopo, efeito) => rodarAposCommit(escopo, efeito),
   };
   const depsL7: DepsRotasL7 = { executor: () => executorAtual, txPara: (escopo) => abrirTxEscopada(db, escopo), services, useCases, agora: relogio, fusoPadrao };
   const rotas: Rota[] = [
@@ -1323,7 +1335,7 @@ export function comporApp(o: OpcoesCompor): App {
       } } satisfies Rota,
     ] : criarRotasExecutor({ estado: estadoExecutor, trocar: trocarExecutor })),
     ...criarRotasIas({ ...depsRotas, inventarios: (escopo) => Object.fromEntries(catalogoHarness(escopo.pessoaId).opcoes.map((h) => [h.id, h.inventario])) }),
-    ...criarRotasAgentes(depsRotas, computadores.desligarExcluido, (escopo) => ({
+    ...criarRotasAgentes(depsRotas, (escopo) => ({
       ...ponteHttp.prontosPorMaquinaDaPessoa(escopo.pessoaId),
       ...(compartilhado ? {} : Object.fromEntries(ponte.maquinasConectadas().map((m) => [m.machineId, (Object.entries(m.harnesses ?? {}) as [IdHarness, Inventario | undefined][]).filter(([, i]) => i?.estado === "pronto").map(([h]) => h)]))),
     })),

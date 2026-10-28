@@ -72,7 +72,7 @@ export function rotasMarketplace(op: OpcoesRotasMarketplace): Rota[] {
      * (GET /user): token recusado não vira conector "conectado" que falha na primeira chamada. Guardar
      * e sondar são duas transações — a sonda decifra o env da linha já gravada.
      */
-    { metodo: "POST", padrao: /^\/marketplace\/github\/token$/, async handler(ctx) {
+    { metodo: "POST", acao: "apps.github_token", padrao: /^\/marketplace\/github\/token$/, async handler(ctx) {
       const body = await ctx.corpo() as { token?: unknown } | null;
       const token = await conferirTokenGithub(body?.token, op);
       const salvo = await op.dentro(ctx.escopo, (d) => guardarTokenGithub(d, { token, cifrar: op.cifrar, decifrar: op.decifrar }));
@@ -93,7 +93,7 @@ export function rotasMarketplace(op: OpcoesRotasMarketplace): Rota[] {
       const admin = await ehAdmin(ctx.escopo);
       ctx.json(200, c ? { configurado: true, appId: c.appId, instalacaoId: c.instalacaoId, podeTrocar: admin && c.ownerId === ctx.escopo.pessoaId } : { configurado: false, podeCadastrar: admin });
     } },
-    { metodo: "POST", padrao: /^\/marketplace\/github\/app$/, async handler(ctx) {
+    { metodo: "POST", acao: "apps.github_app", padrao: /^\/marketplace\/github\/app$/, async handler(ctx) {
       const body = await ctx.corpo() as { appId?: unknown; instalacaoId?: unknown; chavePrivada?: unknown } | null;
       const appId = typeof body?.appId === "string" || typeof body?.appId === "number" ? String(body.appId).trim() : "";
       const instalacaoId = typeof body?.instalacaoId === "string" || typeof body?.instalacaoId === "number" ? String(body.instalacaoId).trim() : "";
@@ -107,13 +107,13 @@ export function rotasMarketplace(op: OpcoesRotasMarketplace): Rota[] {
       op.aoTrocarApp?.(ctx.escopo.tenantId);
       ctx.json(200, { configurado: true, appId, instalacaoId });
     } },
-    { metodo: "POST", padrao: /^\/marketplace\/configurar$/, async handler(ctx) {
+    { metodo: "POST", acao: "apps.configurar_marketplace", padrao: /^\/marketplace\/configurar$/, async handler(ctx) {
       const body = await ctx.corpo() as { chave?: unknown } | null;
       const chave = await conferirChaveComposio(body?.chave, op.fetchImpl);
       await op.dentro(ctx.escopo, async (d) => { await d.repos.composio.salvarChave(op.cifrar(chave)); });
       ctx.json(200, { configurado: true });
     } },
-    { metodo: "POST", padrao: /^\/marketplace\/(?<slug>[a-z0-9-]+)\/conectar$/, async handler(ctx) {
+    { metodo: "POST", acao: "apps.conectar", padrao: /^\/marketplace\/(?<slug>[a-z0-9-]+)\/conectar$/, async handler(ctx) {
       const app = acharApp(ctx.params.slug ?? "");
       if (app.slug === SLUG_GITHUB) {
         // ADR-048: o que já está pronto ganha. gh logado nesta máquina (ou o App da organização no
@@ -171,7 +171,7 @@ export function rotasMarketplace(op: OpcoesRotasMarketplace): Rota[] {
       });
       ctx.json(200, { url: link.url, conectorId });
     } },
-    { metodo: "POST", padrao: /^\/marketplace\/(?<slug>[a-z0-9-]+)\/verificar$/, async handler(ctx) {
+    { metodo: "POST", acao: "apps.verificar", padrao: /^\/marketplace\/(?<slug>[a-z0-9-]+)\/verificar$/, async handler(ctx) {
       const app = acharApp(ctx.params.slug ?? "");
       const { cifrada, sessao } = await op.dentro(ctx.escopo, async (d) => ({ cifrada: await d.repos.composio.chave(), sessao: await d.repos.composio.sessao(app.slug) }));
       if (!cifrada || !sessao) throw new ErroDeDominio("estado_invalido");

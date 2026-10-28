@@ -165,7 +165,7 @@ export function rotasNuvem(deps: DepsRotasNuvem): Rota[] {
 
   return [
     {
-      metodo: "POST",
+      metodo: "POST", acao: "nuvem.conectar_google",
       padrao: /^\/nuvem\/google$/,
       async handler(ctx) {
         if (!deps.oauth) throw new ErroDeDominio("integracao_nao_configurada", { cause: "oauth da nuvem" });
@@ -253,7 +253,7 @@ export function rotasNuvem(deps: DepsRotasNuvem): Rota[] {
       },
     },
     {
-      metodo: "POST",
+      metodo: "POST", acao: "nuvem.dormir",
       padrao: /^\/nuvem\/maquinas\/(?<id>[^/]+)\/dormir$/,
       async handler(ctx) {
         const r = await deps.dentro(ctx.escopo, async (d) => d.repos.maquinasNuvem.tentarDormir((await maquinaDaNuvem(d, ctx.params.id ?? "")).id, agora(), { forcar: true }));
@@ -262,7 +262,7 @@ export function rotasNuvem(deps: DepsRotasNuvem): Rota[] {
       },
     },
     {
-      metodo: "POST",
+      metodo: "POST", acao: "nuvem.acordar",
       padrao: /^\/nuvem\/maquinas\/(?<id>[^/]+)\/acordar$/,
       async handler(ctx) {
         const ok = await deps.dentro(ctx.escopo, async (d) => d.repos.maquinasNuvem.pedirAcordar((await maquinaDaNuvem(d, ctx.params.id ?? "")).id, agora()));
@@ -271,7 +271,7 @@ export function rotasNuvem(deps: DepsRotasNuvem): Rota[] {
       },
     },
     {
-      metodo: "PUT",
+      metodo: "PUT", acao: "nuvem.dormir_apos",
       padrao: /^\/nuvem\/maquinas\/(?<id>[^/]+)\/dormir-apos$/,
       async handler(ctx) {
         const { minutos } = ((await ctx.corpo()) ?? {}) as { minutos?: unknown };
@@ -282,7 +282,7 @@ export function rotasNuvem(deps: DepsRotasNuvem): Rota[] {
       },
     },
     {
-      metodo: "POST",
+      metodo: "POST", acao: "nuvem.criar_maquina",
       padrao: /^\/nuvem\/maquinas$/,
       async handler(ctx) {
         const c = lerCriar(await ctx.corpo());
@@ -290,7 +290,7 @@ export function rotasNuvem(deps: DepsRotasNuvem): Rota[] {
       },
     },
     {
-      metodo: "DELETE",
+      metodo: "DELETE", acao: "nuvem.excluir_maquina",
       padrao: /^\/nuvem\/maquinas\/(?<id>[^/]+)$/,
       async handler(ctx) {
         const id = ctx.params.id ?? "";

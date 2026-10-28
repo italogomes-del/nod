@@ -35,7 +35,7 @@ export function criarRotasArtefatos(d: DepsRotas): Rota[] {
       },
     },
     {
-      metodo: "PUT",
+      metodo: "PUT", acao: "artefatos.salvar_estado",
       padrao: new RegExp(`^/artefatos/${ID}/estado$`),
       async handler(ctx) {
         const corpo = corpoObjeto(await ctx.corpo());

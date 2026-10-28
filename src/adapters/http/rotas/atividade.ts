@@ -32,7 +32,7 @@ export function criarRotasAtividade(d: DepsRotas): Rota[] {
     },
     {
       // PR 4 dos modos de aprovação: "Devia ter perguntado" numa ação que o revisor liberou (contestar-revisor.ts).
-      metodo: "POST",
+      metodo: "POST", acao: "modo.contestar",
       padrao: /^\/acoes-do-modo\/(?<id>[^/]+)\/contestar$/,
       async handler(ctx) {
         ctx.json(200, await executar(ctx.escopo, contestarRevisor, { acaoId: ctx.params.id ?? "" }));

@@ -1,3 +1,4 @@
+import type { EfeitoAposCommit } from "../contracts/acoes.ts";
 import type { RuntimeEvent } from "../contracts/evento.ts";
 import type { ServicesNod, UseCasesNod as UseCasesNodContrato } from "../contracts/servicos.ts";
 import type { Repos } from "../repositories/tipos.ts";
@@ -20,6 +21,16 @@ export interface Deps {
   agora: Relogio;
   /** Fuso da pessoa enquanto ainda não há preferência individual persistida. */
   fusoPadrao?: string;
+  /**
+   * NOD-391 (ADR-135 §4): agenda um efeito fora do banco para DEPOIS do commit desta transação (desligar o computador
+   * do bot excluído). Ausente = quem montou os Deps não roda efeito pós-commit (o efeito se perde, como antes).
+   */
+  aposCommit?: (efeito: EfeitoAposCommit) => void;
+  /**
+   * O modelo do bot criado sem modelo pelo `bots.criar` (NOD_MODELO; ausente = "auto"). Mora nos Deps para a tela e o
+   * lote do Nod criarem com o mesmo padrão (NOD-391, QA do #563).
+   */
+  modeloPadrao?: string;
 }
 
 export type UseCasesNod = UseCasesNodContrato<Deps>;

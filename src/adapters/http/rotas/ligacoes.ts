@@ -73,7 +73,7 @@ export function criarRotasLigacoes(d: DepsRotasLigacoes): Rota[] {
       },
     },
     {
-      metodo: "POST",
+      metodo: "POST", acao: "voz.ligar",
       padrao: /^\/ligacoes$/,
       async handler(ctx) {
         const agenteId = texto(corpoObjeto(await ctx.corpo()).agenteId);
@@ -85,7 +85,7 @@ export function criarRotasLigacoes(d: DepsRotasLigacoes): Rota[] {
       },
     },
     {
-      metodo: "POST",
+      metodo: "POST", acao: "voz.encerrar",
       padrao: new RegExp(`^/ligacoes/${ID}/encerrar$`),
       async handler(ctx) {
         const id = ctx.params.id ?? "";
@@ -100,7 +100,7 @@ export function criarRotasLigacoes(d: DepsRotasLigacoes): Rota[] {
       // Rede de segurança (definido em 2026-10-05): a IA do Mac caiu e a pessoa escolheu com qual continuar. Abre um
       // turno-cérebro novo para a MESMA ligação. Só vale com a ligação esperando a escolha: fora disso (409) ninguém
       // abre um segundo cérebro numa ligação que tem um.
-      metodo: "POST",
+      metodo: "POST", acao: "voz.continuar",
       padrao: new RegExp(`^/ligacoes/${ID}/continuar$`),
       async handler(ctx) {
         const id = ctx.params.id ?? "";
@@ -124,14 +124,14 @@ export function criarRotasLigacoes(d: DepsRotasLigacoes): Rota[] {
       },
     },
     {
-      metodo: "DELETE",
+      metodo: "DELETE", acao: "voz.apagar_falas",
       padrao: new RegExp(`^/ligacoes/${ID}/falas$`),
       async handler(ctx) {
         ctx.json(200, await executar(ctx.escopo, apagarTranscricao, { ligacaoId: ctx.params.id ?? "" }));
       },
     },
     {
-      metodo: "POST",
+      metodo: "POST", acao: "voz.avaliar",
       padrao: new RegExp(`^/ligacoes/${ID}/avaliacao$`),
       async handler(ctx) {
         const b = corpoObjeto(await ctx.corpo());
@@ -139,7 +139,7 @@ export function criarRotasLigacoes(d: DepsRotasLigacoes): Rota[] {
       },
     },
     {
-      metodo: "POST",
+      metodo: "POST", acao: "voz.consentir",
       padrao: /^\/voz\/consentimento$/,
       async handler(ctx) {
         ctx.json(200, await executar(ctx.escopo, consentirVoz, { versao: corpoObjeto(await ctx.corpo()).versao }));
@@ -182,7 +182,7 @@ export function criarRotasLigacoes(d: DepsRotasLigacoes): Rota[] {
     },
     {
       // A voz do bot e a velocidade (Ajustes da ligação, detalhes do bot). Vale na próxima frase da ligação.
-      metodo: "PATCH",
+      metodo: "PATCH", acao: "bots.mudar_voz",
       padrao: new RegExp(`^/agentes/${ID}/voz$`),
       async handler(ctx) {
         const b = corpoObjeto(await ctx.corpo());

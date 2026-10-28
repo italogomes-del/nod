@@ -29,7 +29,7 @@ export function criarRotasSalas(deps: DepsRotasL7): Rota[] {
       },
     },
     {
-      metodo: "POST",
+      metodo: "POST", acao: "salas.criar",
       padrao: /^\/salas$/,
       async handler(ctx) {
         const corpo = corpoObjeto(await ctx.corpo());
@@ -41,7 +41,7 @@ export function criarRotasSalas(deps: DepsRotasL7): Rota[] {
       },
     },
     {
-      metodo: "POST",
+      metodo: "POST", acao: "salas.adicionar_membro",
       padrao: /^\/salas\/(?<id>[^/]+)\/membros$/,
       async handler(ctx) {
         const corpo = corpoObjeto(await ctx.corpo());
@@ -51,7 +51,7 @@ export function criarRotasSalas(deps: DepsRotasL7): Rota[] {
       },
     },
     {
-      metodo: "POST",
+      metodo: "POST", acao: "salas.enviar",
       padrao: /^\/salas\/(?<id>[^/]+)\/mensagens$/,
       async handler(ctx) {
         const corpo = corpoObjeto(await ctx.corpo());
@@ -66,7 +66,7 @@ export function criarRotasSalas(deps: DepsRotasL7): Rota[] {
       },
     },
     {
-      metodo: "POST",
+      metodo: "POST", acao: "salas.parar",
       padrao: /^\/salas\/(?<id>[^/]+)\/parar$/,
       async handler(ctx) {
         ctx.json(200, await executar(deps, ctx.escopo, pararSala, { salaId: uuid(ctx.params.id, "id") }));

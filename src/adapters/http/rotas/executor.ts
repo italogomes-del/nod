@@ -29,7 +29,7 @@ export function criarRotasExecutor(d: DepsRotasExecutor): Rota[] {
       },
     },
     {
-      metodo: "POST",
+      metodo: "POST", acao: "contas_ia.trocar_executor",
       padrao: /^\/executor$/,
       async handler(ctx) {
         ctx.json(200, await d.trocar(idDoCorpo(await ctx.corpo())));

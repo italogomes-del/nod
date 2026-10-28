@@ -11,6 +11,8 @@ import type { PlanoTurno } from "../../src/contracts/plano-turno.ts";
 import type { ItemAprovacao } from "../../src/contracts/item-aprovacao.ts";
 import type { ResultadoChamada } from "../../src/use-cases/chamar-ferramenta.ts";
 import { emitirPlanoTurno } from "../../src/use-cases/emitir-plano-turno.ts";
+import { gerirBots } from "../../src/use-cases/gerir-bots.ts";
+import { garantirNod } from "../../src/use-cases/onboarding.ts";
 import { computadorPadrao } from "../../src/domain/computador.ts";
 import { servidorCompleto, type ServidorCompleto } from "../helpers/servidor-completo.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
@@ -283,5 +285,26 @@ describeIntegracao("computadores: autorização e controle pelo servidor complet
     expect(segunda).toMatchObject({ok:true,isError:true,confianca:"nao_confiavel"});
     liberar();bloquear=undefined;
     await primeira;
+  },30000);
+  // NOD-391 (ADR-135 §4): excluir pelo Nod (gerir_bots, sob o `dentro` do app composto) desliga o computador do bot depois
+  // do commit, como o DELETE da tela acima. Antes desta issue o lote excluía e deixava o computador ligado.
+  it("NOD-391: excluir pelo gerir_bots do Nod desliga o computador, como a tela",async()=>{
+    const b=await botNovo();await emitirPlano(b);
+    expect(await chamar("computador_observar")).toMatchObject({ok:true});
+    const id=await vinculo(b);
+    expect(id).not.toBeNull();expect(ativos.has(id!)).toBe(true);
+    const r=await srv.app.dentro(srv.pessoa,async d=>{
+      const r0=await garantirNod(d,{});const nod=r0.data.nod;
+      if(r0.events?.length)await d.repos.events.gravarComOutbox(r0.events);
+      await d.repos.agentes.definirModoAprovacao(nod.id,"total");
+      const t=await d.repos.turnos.enfileirar({executor:"catcher",conversaId:nod.conversaId,agenteId:nod.id,origem:"conversa",prazoEm:Date.now()+600000,profundidade:0,entradaTexto:"exclua o bot",entradaConfianca:"confiavel",modelo:"auto"});
+      const lote=await gerirBots(d,{turnoId:t!.id,agenteId:nod.id,conversaId:nod.conversaId,resumo:"Excluir o bot",acoes:[{tipo:"excluir",bot:b.agente.id}]});
+      if(lote.events?.length)await d.repos.events.gravarComOutbox(lote.events);
+      return lote.data;
+    });
+    expect(r).toMatchObject({ok:true,esperando:[]});
+    expect(ativos.has(id!)).toBe(false);
+    const habilitado=await srv.app.dentro(srv.pessoa,d=>d.tx(async trx=>(await trx<{habilitado:boolean}[]>`select habilitado from computadores where id = ${id}`)[0]?.habilitado));
+    expect(habilitado).toBe(false);
   },30000);
 });

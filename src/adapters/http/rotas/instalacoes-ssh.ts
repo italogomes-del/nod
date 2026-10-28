@@ -50,7 +50,7 @@ export function rotasInstalacoesSsh(deps: DepsRotasInstalacoes): Rota[] {
       },
     },
     {
-      metodo: "POST",
+      metodo: "POST", acao: "maquinas.instalar_ssh",
       padrao: /^\/maquinas\/ssh$/,
       async handler(ctx) {
         const corpo = (await ctx.corpo()) as Record<string, unknown>;
@@ -94,7 +94,7 @@ export function rotasInstalacoesSsh(deps: DepsRotasInstalacoes): Rota[] {
       },
     },
     {
-      metodo: "POST",
+      metodo: "POST", acao: "maquinas.credencial_ssh",
       padrao: /^\/maquinas\/ssh\/(?<id>[^/]+)\/credencial$/,
       async handler(ctx) {
         const corpo = (await ctx.corpo()) as { cifrado?: unknown };
@@ -108,7 +108,7 @@ export function rotasInstalacoesSsh(deps: DepsRotasInstalacoes): Rota[] {
       },
     },
     {
-      metodo: "POST",
+      metodo: "POST", acao: "maquinas.confiar_ssh",
       padrao: /^\/maquinas\/ssh\/(?<id>[^/]+)\/confiar-nova$/,
       async handler(ctx) {
         const p = exigirPedido(deps, ctx);
@@ -121,7 +121,7 @@ export function rotasInstalacoesSsh(deps: DepsRotasInstalacoes): Rota[] {
       },
     },
     {
-      metodo: "POST",
+      metodo: "POST", acao: "maquinas.cancelar_ssh",
       padrao: /^\/maquinas\/ssh\/(?<id>[^/]+)\/cancelar$/,
       async handler(ctx) {
         const p = exigirPedido(deps, ctx);

@@ -41,6 +41,9 @@ Marlon no /spec de 2026-10-07:
    `gerirAgente` (mover, excluir), `criarRotinaPelaPessoa`, `mudarModoAprovacao`. Uma que o caso de uso recusa volta
    sozinha e as outras seguem (um erro do Postgres derruba o lote inteiro); não existe "desfazer o lote" (excluir já se
    restaura, ADR-034).
+   **Emenda de 2026-10-28 ([ADR-135](adr-135-registro-unico-de-acoes-e-paridade.md), NOD-391):** criar, duplicar, editar,
+   mover, excluir e mudar o modo passam pelo executor único do registro (`src/use-cases/acoes/bots.ts`), o mesmo da tela;
+   o risco de cada tipo (§3) sai do registro; e excluir pelo Nod desliga o computador do bot depois do commit, como a tela.
 6. **Dar acesso pela decisão de acesso.** `abrirPedidoDeAcesso` no bot alvo e `decidirAcesso` na mesma transação, com a
    regra do modo do Nod ou a pessoa que aprovou o lote. É o caminho que a trava do ESLint já permite: o
    `conceder-so-pela-pessoa.test.ts` continua de pé sem exceção nova. **Emenda à ADR-044:** além do clique da pessoa,

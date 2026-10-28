@@ -19,7 +19,7 @@ export type { ArgsAtualizarPerfil, ArgsVerColegas, AppDoColega, ColegaListado, R
 export type { ArgsAtualizarRotina, ArgsCriarRotina, ArgsExcluirRotina, ArgsListarRotinas, ArgsPausarRotina, ArgsReativarRotina, ResultadoAlternarRotina, ResultadoCriarRotina, ResultadoListarRotinas, ResultadoPropostaRotina, RotinaListada } from "./ferramentas-rotina.ts";
 
 /**
- * As ferramentas nod (vinte e nove em 2026-10-07; eram VINTE E UMA na contagem original) (EMENDA 16 acrescenta pedir_a_pessoa; sem_novidade entra em 2026-09-21
+ * As ferramentas nod (trinta e seis em 2026-10-28, contadas pelo teste; eram VINTE E UMA na contagem original) (EMENDA 16 acrescenta pedir_a_pessoa; sem_novidade entra em 2026-09-21
  * para que uma rotina possa encerrar em silêncio; o ciclo de vida de rotina, do mesmo dia, mora em
  * ferramentas-rotina.ts pelo gatilho de 200 linhas da EMENDA 26; pedir_a_bot substitui perguntar_a_bot e
  * delegar_tarefa em 2026-09-29, ADR-058; ver_colegas entra em 2026-09-28, ADR-050, e mora com atualizar_perfil em

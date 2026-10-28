@@ -63,7 +63,7 @@ export function rotasConcessoes(deps: DepsRotasConcessoes): Rota[] {
       },
     },
     {
-      metodo: "POST",
+      metodo: "POST", acao: "acessos.conceder",
       padrao: /^\/agentes\/(?<id>[^/]+)\/concessoes$/,
       async handler(ctx) {
         const corpo = await ctx.corpo();
@@ -81,7 +81,7 @@ export function rotasConcessoes(deps: DepsRotasConcessoes): Rota[] {
        * exatamente o do nível (capacidadesDoNivel): o que falta é concedido num lote (uma mensagem de
        * consentimento) e o que sobra é revogado num registro. Rota de pessoa, como o conceder ao lado.
        */
-      metodo: "POST",
+      metodo: "POST", acao: "acessos.dar",
       padrao: /^\/agentes\/(?<id>[^/]+)\/acessos$/,
       async handler(ctx) {
         const corpo = await ctx.corpo();
@@ -113,7 +113,7 @@ export function rotasConcessoes(deps: DepsRotasConcessoes): Rota[] {
        * pessoa (ADR-044); depois de conceder, o bot é chamado de volta com a nota do que foi liberado
        * (retomar-apos-liberar.ts), que não concede nada.
        */
-      metodo: "POST",
+      metodo: "POST", acao: "acessos.liberar",
       padrao: /^\/agentes\/(?<id>[^/]+)\/acessos\/liberar$/,
       async handler(ctx) {
         const apps = appsDoCorpo(await ctx.corpo());
@@ -137,7 +137,7 @@ export function rotasConcessoes(deps: DepsRotasConcessoes): Rota[] {
     },
     {
       // definido em 2026-10-05: "Agora não" do mesmo cartão — a dispensa por bot e app fica guardada (0054). Rota de pessoa.
-      metodo: "POST",
+      metodo: "POST", acao: "acessos.dispensar",
       padrao: /^\/agentes\/(?<id>[^/]+)\/acessos\/dispensar$/,
       async handler(ctx) {
         const corpo = await ctx.corpo();
@@ -149,7 +149,7 @@ export function rotasConcessoes(deps: DepsRotasConcessoes): Rota[] {
     },
     {
       // definido em 2026-09-24 (ADR-044): revoga o grupo (app · nível) do painel com UM registro escrito.
-      metodo: "POST",
+      metodo: "POST", acao: "acessos.revogar",
       padrao: /^\/agentes\/(?<id>[^/]+)\/concessoes\/revogar$/,
       async handler(ctx) {
         const corpo = await ctx.corpo();
@@ -160,7 +160,7 @@ export function rotasConcessoes(deps: DepsRotasConcessoes): Rota[] {
       },
     },
     {
-      metodo: "DELETE",
+      metodo: "DELETE", acao: "acessos.revogar",
       padrao: /^\/concessoes\/(?<id>[^/]+)$/,
       async handler(ctx) {
         const r = await deps.dentro(ctx.escopo, (d) => executar(d, revogar, { concessaoId: ctx.params.id ?? "" }));

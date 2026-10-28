@@ -21,7 +21,7 @@ export function criarRotasRaioX(d: DepsRotas): Rota[] {
       },
     },
     {
-      metodo: "PUT",
+      metodo: "PUT", acao: "preferencias.salvar",
       padrao: /^\/preferencias$/,
       async handler(ctx) {
         const corpo = corpoObjeto(await ctx.corpo());
@@ -33,7 +33,7 @@ export function criarRotasRaioX(d: DepsRotas): Rota[] {
     },
     {
       // definido em 2026-10-06 (0059): o aviso fechado fica com a pessoa, não no navegador (o app do Mac limpa o dele).
-      metodo: "POST",
+      metodo: "POST", acao: "preferencias.fechar_aviso",
       padrao: /^\/preferencias\/avisos-fechados$/,
       async handler(ctx) {
         const corpo = corpoObjeto(await ctx.corpo());

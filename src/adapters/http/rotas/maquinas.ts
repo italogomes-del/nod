@@ -54,7 +54,7 @@ export function rotasMaquinas(deps: { dentro: DentroDeTx; pareamento: Pareamento
     );
   return [
     {
-      metodo: "POST",
+      metodo: "POST", acao: "maquinas.criar_chave",
       padrao: /^\/maquinas\/chaves$/,
       async handler(ctx) {
         const corpo = (await ctx.corpo()) as { nome?: unknown };
@@ -70,7 +70,7 @@ export function rotasMaquinas(deps: { dentro: DentroDeTx; pareamento: Pareamento
       },
     },
     {
-      metodo: "DELETE",
+      metodo: "DELETE", acao: "maquinas.revogar_chave",
       padrao: /^\/maquinas\/chaves\/(?<id>[^/]+)$/,
       async handler(ctx) {
         ctx.json(200, await deps.dentro(ctx.escopo, async (d) => {
@@ -81,7 +81,7 @@ export function rotasMaquinas(deps: { dentro: DentroDeTx; pareamento: Pareamento
       },
     },
     {
-      metodo: "POST",
+      metodo: "POST", acao: "maquinas.parear",
       padrao: /^\/maquinas\/pareamentos$/,
       async handler(ctx) {
         const corpo = (await ctx.corpo()) as { nome?: unknown; desafio?: unknown };
@@ -168,7 +168,7 @@ export function rotasMaquinas(deps: { dentro: DentroDeTx; pareamento: Pareamento
       },
     },
     {
-      metodo: "POST",
+      metodo: "POST", acao: "maquinas.aprovar_dispositivo",
       padrao: /^\/maquinas\/dispositivos\/(?<codigo>[^/]+)\/aprovar$/,
       async handler(ctx) {
         const ok = deps.dispositivo.aprovar({ codigoPessoa: decodeURIComponent(ctx.params.codigo ?? ""), escopo: ctx.escopo });
@@ -194,7 +194,7 @@ export function rotasMaquinas(deps: { dentro: DentroDeTx; pareamento: Pareamento
       },
     },
     {
-      metodo: "PUT",
+      metodo: "PUT", acao: "maquinas.definir_padrao",
       padrao: /^\/maquinas\/padrao$/,
       async handler(ctx) {
         const corpo = (await ctx.corpo()) as { maquinaId?: unknown };
@@ -203,7 +203,7 @@ export function rotasMaquinas(deps: { dentro: DentroDeTx; pareamento: Pareamento
       },
     },
     {
-      metodo: "PUT",
+      metodo: "PUT", acao: "maquinas.escolher_do_bot",
       padrao: /^\/agentes\/(?<id>[^/]+)\/maquina$/,
       async handler(ctx) {
         const corpo = (await ctx.corpo()) as { maquinaId?: unknown };
@@ -213,7 +213,7 @@ export function rotasMaquinas(deps: { dentro: DentroDeTx; pareamento: Pareamento
       },
     },
     {
-      metodo: "PUT",
+      metodo: "PUT", acao: "maquinas.definir_bots",
       padrao: /^\/maquinas\/(?<id>[^/]+)\/bots$/,
       async handler(ctx) {
         const corpo = (await ctx.corpo()) as { agentes?: unknown };
@@ -224,7 +224,7 @@ export function rotasMaquinas(deps: { dentro: DentroDeTx; pareamento: Pareamento
       },
     },
     {
-      metodo: "POST",
+      metodo: "POST", acao: "maquinas.rodar_desta_vez",
       padrao: /^\/conversas\/(?<id>[^/]+)\/rodar-desta-vez$/,
       async handler(ctx) {
         const corpo = (await ctx.corpo()) as { maquinaId?: unknown; turnoId?: unknown; contaId?: unknown };
@@ -248,7 +248,7 @@ export function rotasMaquinas(deps: { dentro: DentroDeTx; pareamento: Pareamento
       // NOD-314 (definido em 2026-10-20): "Rodar em <outra> desta vez" no topo da task que espera uma máquina sem contato.
       // Só os turnos AINDA pendentes do trabalho vão para a máquina escolhida, uma vez; a máquina fixa do bot não muda.
       // A máquina precisa ser da pessoa (404) e ter contato recente (409 maquina_sem_contato); sem pendente, 409 nada_na_fila.
-      metodo: "POST",
+      metodo: "POST", acao: "maquinas.rodar_desta_vez",
       padrao: /^\/trabalhos\/(?<id>[^/]+)\/rodar-desta-vez$/,
       async handler(ctx) {
         const trabalhoId = assertUuid(ctx.params.id, "trabalho");
