@@ -40,7 +40,7 @@ describe("site estático (site/)", () => {
     expect(html).not.toMatch(/<meta\s+name=["']robots["']/i);
   });
 
-  it.each(["index.html", "404.html"])("3. nenhum recurso de %s vem de fora (só <a href> pode ser externo)", (arquivo) => {
+  it.each(["index.html", "404.html", "privacidade.html", "termos.html"])("3. nenhum recurso de %s vem de fora (só <a href> pode ser externo)", (arquivo) => {
     const pagina = ler(arquivo);
     const recursos = [
       ...[...pagina.matchAll(/\s(?:src|srcset|poster)="([^"]*)"/g)].flatMap((m) => m[1]!.split(",").map((s) => s.trim().split(/\s+/)[0]!)),
@@ -130,5 +130,15 @@ describe("site estático (site/)", () => {
       expect(destinos.get(caminho)!.status, caminho).toBe("302");
       expect(destinos.get(caminho)!.destino, caminho).toMatch(/^https:\/\/[^/]+\/.+\.dmg$/);
     }
+  });
+
+  it.each(["privacidade", "termos"])("9. /%s existe em pt-BR, sem meta robots, com canonical e links para as duas páginas e a home", (slug) => {
+    const pagina = ler(`${slug}.html`);
+    expect(pagina).toContain('<html lang="pt-BR">');
+    expect(pagina).not.toMatch(/<meta\s+name=["']robots["']/i);
+    expect(pagina).toContain(`<link rel="canonical" href="https://nodbot.ai/${slug}">`);
+    for (const href of ['href="/"', 'href="/privacidade"', 'href="/termos"']) expect(pagina).toContain(href);
+    expect(ler("sitemap.xml")).toContain(`<loc>https://nodbot.ai/${slug}</loc>`);
+    expect(html).toContain(`href="/${slug}"`);
   });
 });
