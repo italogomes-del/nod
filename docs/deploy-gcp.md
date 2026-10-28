@@ -333,14 +333,63 @@ Para recriar do zero: apague a VM, remova os runners dela em Settings › Action
 ```bash
 # Entrar na VM (pelo IAP)
 gcloud compute ssh nod-vm --zone=southamerica-east1-b --tunnel-through-iap --project=nod-producao
-# Logs: Cloud Logging, ou na VM
+# Logs ao vivo pelo cache local (sem os run --rm nem o que veio antes de recriar a cor; histórico: "Logs" abaixo)
 sudo docker compose --env-file /opt/nod/imagens.env -f /opt/nod/compose.yml logs -f nod-azul nod-verde
 # Seed (só com o banco sem pessoas): cria o dono com o e-mail do login Google
 sudo bash -c 'cd /opt/nod && cor="$(cat estado/cor-ativa)" &&
   docker compose --env-file imagens.env run --rm --no-deps -T -e NOD_SEED_EMAIL=voce@exemplo.com "nod-$cor" node scripts/seed.ts'
 ```
 
-Restaurar o banco (PITR, plano B, segredos) e o ensaio de restauração: [runbook-producao.md](runbook-producao.md).
+### Logs
+
+Os logs das duas cores e do Caddy vão para o Cloud Logging (driver `gcplogs` no `compose.yml`, com a primeira entrada em 2026-10-03 01:55 UTC) e
+ficam 30 dias no bucket `_Default`, fora do disco da VM. Eles sobrevivem ao deploy azul/verde: o contêiner velho some,
+os logs dele não.
+
+**`docker logs` só vê o contêiner atual.** Ele (e o `docker compose logs`) lê o cache local de cada contêiner que
+ainda existe: perde tudo quando o deploy recria a cor, nunca mostra os `docker compose run --rm` do deploy (migração,
+`ligacoes-orfas`, aviso de credenciais) e é truncado pelo tamanho. Não serve para histórico. Para investigar um
+incidente, use sempre o `gcloud logging read` (de qualquer máquina com acesso ao projeto, não precisa entrar na VM):
+
+```bash
+L='logName="projects/nod-producao/logs/gcplogs-docker-driver"'
+# Por janela (UTC) e por evento, em ordem cronológica: o watchdog de 23/10
+gcloud logging read "$L AND timestamp>=\"2026-10-23T16:00:00Z\" AND timestamp<=\"2026-10-23T16:35:00Z\" AND jsonPayload.message:\"watchdog_reiniciando\"" \
+  --project=nod-producao --order=asc --limit=200 --format='value(timestamp,jsonPayload.container.name,jsonPayload.message)'
+# Por cor, últimas 2 h, do mais novo ao mais velho: jsonPayload.container.name:\"nod-azul\" (ou \"nod-verde\", \"caddy\")
+gcloud logging read "$L AND jsonPayload.container.name:\"nod-verde\"" \
+  --project=nod-producao --freshness=2h --limit=200 --format='value(timestamp,jsonPayload.container.name,jsonPayload.message)'
+# Só erros do app nos últimos 7 dias, em qualquer cor
+gcloud logging read "$L AND jsonPayload.message:\"\\\"nivel\\\":\\\"erro\\\"\"" \
+  --project=nod-producao --freshness=7d --limit=100 --format='value(timestamp,jsonPayload.container.name,jsonPayload.message)'
+```
+
+Como o filtro funciona:
+
+- `jsonPayload.message` é a linha JSON do app como texto; `:` busca por trecho, então `jsonPayload.message:"tx_longa"`
+  acha o evento e `jsonPayload.message:"<turno_id>"` acha um turno.
+- `jsonPayload.container.name` é o nome do contêiner com `/` na frente: `/nod-nod-azul-1`, `/nod-nod-verde-1`,
+  `/nod-caddy-1`, e `/nod-nod-azul-run-<id>` ou `/nod-nod-verde-run-<id>` para os `run --rm` do deploy. O filtro por
+  trecho (`:"nod-verde"`) pega a cor e os `run` dela. Antes de 2026-10-23 (NOD-218) havia uma cor só,
+  `/nod-nod-1` (e `/nod-nod-run-<id>`): para isolá-la, use o trecho `jsonPayload.container.name:"/nod-nod-1"` ou
+  `:"/nod-nod-run-"`. Esses somem da retenção por volta de 2026-11-22.
+- `--freshness` (padrão `1d`) só vale **sem** `timestamp` no filtro **e sem** `--order=asc`; nos dois casos ele é
+  ignorado: vale a janela do filtro ou, sem ela, toda a retenção. Para um dia antigo ou para ler em ordem cronológica, ponha a
+  janela no filtro. Sem janela e sem `--freshness=30d`, o comando só olha as últimas 24 h e parece que "não tem log".
+- O padrão é do mais novo para o mais velho; `--order=asc` (sempre com a janela no filtro) lê em ordem cronológica.
+  Se a saída bater no `--limit`, estreite a janela.
+- No console (Logs Explorer), o filtro vai por extenso, sem `$L` e sem as barras do shell:
+  `logName="projects/nod-producao/logs/gcplogs-docker-driver" AND jsonPayload.message:"watchdog_reiniciando"`.
+- A saída traz `pessoa_id`, `tenant_id` e erros crus: guarde só num arquivo seu (`mktemp`, 0600), apague ao terminar e não
+  anexe o arquivo inteiro a issue ou PR.
+
+**O motor não está aqui.** O `nod-motor` roda na VM do motor da pessoa, não na `nod-vm`, e não manda nada para o Cloud
+Logging. Lá o log é do systemd, e o sufixo `UTC` evita depender do fuso da VM:
+`sudo journalctl -u nod-motor --since "2026-10-23 16:00 UTC" --until "2026-10-23 16:35 UTC"` (`-f` acompanha; a
+atualização está em `sudo journalctl -u nod-motor-atualizar`). Veja [motor-na-vm.md](motor-na-vm.md).
+
+Restaurar o banco (PITR, plano B, segredos) e o ensaio de restauração: [runbook-producao.md](runbook-producao.md). O
+passo a passo de investigar um incidente: [runbook-producao.md](runbook-producao.md#8-investigar-um-incidente-onde-estão-os-logs).
 
 O monitor de disponibilidade fica fora da GCP (ADR-017): cadastre `https://<domínio>/api/saude`
 num serviço externo (UptimeRobot, Better Stack). O passo a passo e o reinício automático pelo watchdog (NOD-267) estão
