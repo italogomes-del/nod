@@ -102,6 +102,9 @@ Testável). Falhou em "Testável" ou "Small" → corte de novo.
 - **Costuras** — arquivos/módulos concretos a tocar.
 - **Escopo / Fora de escopo** — a linha vermelha explícita.
 - **Aceite = o teste** — qual dos quatro modos e o que prova.
+- **No chat** — os ids das ações novas, 2-3 falas de como a pessoa pede, o cartão e o risco, mais o critério fixo
+  "dá para fazer pelo chat com qualquer bot"; sem ação nova, "No chat: nenhuma ação nova". Modelo em
+  [`/acao-no-chat`](../acao-no-chat/SKILL.md).
 - **Depende de** — issues anteriores.
 
 ### Incógnitas viram spikes, não stories
@@ -144,6 +147,7 @@ fechar.
 
 - [ ] `office-hours.md`, `epicos.md`, `issues.md` na pasta `jornada-<NN>/`.
 - [ ] Cada issue: 1 PR, 1 teste de aceite nomeado, ≤2 ADRs, fora-de-escopo explícito, depende-de.
+- [ ] Cada issue com botão novo tem a seção "No chat" (`/acao-no-chat`); sem ação nova, diz "nenhuma ação nova".
 - [ ] User Story onde há persona; Issue onde é enabler/decisão/limpeza.
 - [ ] Perguntas em aberto viraram spikes com entregável = ADR.
 - [ ] Costuras citam arquivos/funções reais (leu o código no Passo 0).

@@ -141,6 +141,10 @@ feature que estavam corretos (docs/praticas-herdadas.md §8). Se algo falhar sem
 - **A web só faz `import type` de `src/`** (eslint) e nunca executa nada: pede por REST, recebe frames
   SSE que dizem O QUE mudou (kind, conversaId, turnoId) e reidrata por REST (`web/estado/reducer.ts`).
   O composer nunca é regravado dentro da mesma conversa (`web/lib/regioes.ts`).
+- **Todo botão novo tem ação no registro e caminho no chat** (NOD-392): o registro a catraca acima trava; o caminho no
+  chat (que ela aceita como `falta`/`nunca`) o fluxo garante: o spec traz a seção "No chat", o protótipo mostra o
+  caminho pela conversa e o plano traz a seção "Ações"; o modelo de cada uma está em
+  [`.claude/skills/acao-no-chat/SKILL.md`](.claude/skills/acao-no-chat/SKILL.md) (`/acao-no-chat`).
 
 ## Quatro modos de teste
 
