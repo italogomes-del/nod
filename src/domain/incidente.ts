@@ -16,8 +16,18 @@ export const JANELA_MESCLA_INCIDENTE_MS = 3 * 60 * 60 * 1000;
  */
 export const INCIDENTE_VISIVEL_MS = 12 * 60 * 60 * 1000;
 
-/** Quem derrubou o turno: o Mac (repouso, rede, nod fechado) ou o próprio servidor, reiniciado. */
-export type MotivoDaQueda = "maquina_sem_contato" | "reinicio_servidor";
+/**
+ * Quem derrubou o turno: o Mac (repouso, rede, nod fechado), o próprio servidor, reiniciado, ou — desde 2026-10-27
+ * (ADR-131) — o motor da máquina, que parou no meio do turno e disse isso na entrega (a atualização sozinha da VM, o
+ * `systemctl restart`, o app fechado). Só a máquina sem contato vira aviso de queda (incidente).
+ */
+export type MotivoDaQueda = "maquina_sem_contato" | "reinicio_servidor" | "reinicio_do_motor";
+const MOTIVOS_DA_QUEDA: readonly string[] = ["maquina_sem_contato", "reinicio_servidor", "reinicio_do_motor"] satisfies readonly MotivoDaQueda[];
+
+/** O turno caiu por uma queda (a máquina, o servidor ou o motor), não pelo trabalho. */
+export function ehMotivoDaQueda(motivo: string | null | undefined): motivo is MotivoDaQueda {
+  return motivo != null && MOTIVOS_DA_QUEDA.includes(motivo);
+}
 
 /** Uma queda notada: o turno perdeu a máquina entre `perdidoDesde` e `notadoEm`. */
 export type QuedaDeMaquina = { perdidoDesde: number; notadoEm: number; machineId: string | null; agenteId: string; rotina: boolean; maquinaPresente: boolean };

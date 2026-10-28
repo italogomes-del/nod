@@ -15,7 +15,7 @@ import { classificarErroFornecedor, ehErroTransitorio, fraseDoErroFornecedor, fr
 import { descreverNegacao } from "../domain/estado-degradacao.ts";
 import { iaDaNegacao } from "../domain/harness.ts";
 import { negacoesDoTurno } from "../domain/negacao-nativa.ts";
-import { ultimoSinalDoTurno, type MotivoDaQueda } from "../domain/incidente.ts";
+import { ehMotivoDaQueda, ultimoSinalDoTurno, type MotivoDaQueda } from "../domain/incidente.ts";
 import { NATIVA_MCP_DA_PESSOA, NATIVAS_DO_TERMINAL, NATIVAS_DO_TERMINAL_CODEX, pastaDoBot } from "../domain/nativas.ts";
 import { motivoEmPortugues, redigir } from "../domain/redacao.ts";
 import { iasNoLimite, inteligenciaDoAgente, ordemEfetiva, podeReenviar, prazoDoLimite, prazoDoLimiteDaConta, proximaIaNoLimite } from "../domain/inteligencia.ts";
@@ -182,6 +182,11 @@ export function desfechoDaEntrega(turno: Pick<Turno, "pararSolicitadoEm" | "leas
   // definido em 2026-10-15 (NOD-245): a entrega de um turno ADOTADO (o processo que o despachou caiu num deploy),
   // interrompida sem motivo e sem Parar, é o CLI que a máquina matou porque o servidor não respondia — quem derrubou o
   // turno foi o reinício, não o trabalho: `reinicio_servidor`, com card Retomar (antes, `trabalho_incompleto` sem Retomar).
+  // definido em 2026-10-27 (ADR-131): o motor da máquina parou no meio do turno e disse isso na entrega (a atualização
+  // sozinha da VM, o `systemctl restart`, o app fechado) — quem derrubou o turno foi o reinício, não o trabalho. Antes
+  // virava `trabalho_incompleto`: a frente falhava e o lote fechava como falha a cada atualização do motor. Agora é queda:
+  // o fundo volta para a fila na hora, com a sessão do CLI; a conversa ganha o Retomar. O Parar da pessoa vence.
+  if (causaDaEntrega(resultado.causa) === "reinicio_do_motor" && turno.pararSolicitadoEm === null) return { estado: "interrompido", motivoInterrupcao: "reinicio_do_motor", motivoFalha: resultado.motivoFalha ?? null };
   if (o.adotada === true && resultado.desfecho === "interrompido" && !resultado.motivoInterrupcao && turno.pararSolicitadoEm === null) return { estado: "interrompido", motivoInterrupcao: "reinicio_servidor", motivoFalha: resultado.motivoFalha ?? null };
   if (turno.pararSolicitadoEm === null && turno.leaseAte !== null && turno.leaseAte < agora) return { estado: "interrompido", motivoInterrupcao: "maquina_sem_contato", motivoFalha: resultado.motivoFalha ?? null };
   // definido em 2026-09-18: quem produziu saída e não concluiu NÃO é 'sem_progresso' — o rótulo
@@ -221,16 +226,16 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
   // NOD-264 (E8, emenda da ADR-045 sobre a ADR-010): o trabalho terminou com sucesso e só a máquina sumiu antes de
   // entregar; sem retomada criada, a entrega promove o turno a `concluido` (a fala entra inteira, não parcial).
   const promoverTardia = tardia && turno.estado === "interrompido" && resultado.desfecho === "sucesso" && !resultado.causaSemIa
-    && (turno.motivoInterrupcao === "maquina_sem_contato" || turno.motivoInterrupcao === "reinicio_servidor")
+    && ehMotivoDaQueda(turno.motivoInterrupcao)
     && !(await deps.repos.turnos.temRetomada(turno.id));
   const interrompido = (tardia && !promoverTardia) || desfecho.estado === "interrompido";
   // A máquina caiu (ADR-045): nesta entrega (lease vencido) ou antes dela, pelo varredor (tardia). NOD-245: ou o
   // servidor reiniciou no meio do turno adotado — a mesma regra de queda, com o motivo dela (sem aviso de queda do Mac).
-  const motivoDaQuedaNaEntrega: MotivoDaQueda | null = tardia ? null : desfecho.motivoInterrupcao === "maquina_sem_contato" || desfecho.motivoInterrupcao === "reinicio_servidor" ? desfecho.motivoInterrupcao : null;
+  const motivoDaQuedaNaEntrega: MotivoDaQueda | null = !tardia && ehMotivoDaQueda(desfecho.motivoInterrupcao) ? desfecho.motivoInterrupcao : null;
   const quedaDaMaquina = motivoDaQuedaNaEntrega !== null;
   // Lido AGORA: assentar zera lease_ate, e o último sinal de vida (lease − LEASE_MS) é o começo do aviso.
   const perdidoDesde = ultimoSinalDoTurno(turno, agora);
-  const caiuAntes = tardia && (turno.motivoInterrupcao === "maquina_sem_contato" || turno.motivoInterrupcao === "reinicio_servidor") && resultado.desfecho !== "sucesso";
+  const caiuAntes = tardia && ehMotivoDaQueda(turno.motivoInterrupcao) && resultado.desfecho !== "sucesso";
   // definido em 2026-09-24 (ADR-045): rotina derrubada pela máquina não escreve na conversa — nem a
   // fala parcial, que seria um "Vou verificar…" cortado. A execução vai só para o histórico da rotina.
   // Sucesso tardio continua entrando: é trabalho terminado, e o entregável da rotina É a fala.

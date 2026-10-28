@@ -70,6 +70,13 @@ describe("espera no fundo por toda queda (NOD-309)", () => {
     expect(decidirEsperaNoFundo(base({ quedas: 5 })).tipo).toBe("esperar");
   });
 
+  it("ADR-131: o reinício do motor volta agora e não gasta o teto de quedas (o motor reinicia a cada versão nova)", () => {
+    expect(decidirEsperaNoFundo(base({ causa: "reinicio_do_motor" }))).toEqual({ tipo: "esperar", voltaEm: T0, tentativa: 1 });
+    expect(decidirEsperaNoFundo(base({ causa: "reinicio_do_motor", quedas: 7 }))).toEqual({ tipo: "esperar", voltaEm: T0, tentativa: 8 });
+    // O prazo do fundo continua valendo.
+    expect(decidirEsperaNoFundo(base({ causa: "reinicio_do_motor", inicioDaCadeia: T0 - PRAZO_DO_FUNDO_MS }))).toEqual({ tipo: "desistir", motivo: "prazo_esgotado" });
+  });
+
   it("pedido de colega, frente e lote: 24 h desde o começo da cadeia, contando a hora da volta", () => {
     const inicio = T0 - PRAZO_DO_FUNDO_MS;
     expect(decidirEsperaNoFundo(base({ causa: "reinicio_servidor", inicioDaCadeia: inicio }))).toEqual({ tipo: "desistir", motivo: "prazo_esgotado" });

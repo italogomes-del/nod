@@ -10,9 +10,10 @@ import { comJitter } from "./nova-tentativa.ts";
  *
  * Pura: relógio e aleatório entram por parâmetro. Quem chama decide antes o que vence tudo: Parar (`parado_pela_pessoa`
  * nunca retoma) e o pedido de colega cujo pedinte já desistiu. No modo local (sem `ultimoContato`) não há como saber se
- * a máquina estava em contato: `maquinaPresente` vem falso e a volta é quando ela puxar (NOD-386).
+ * a máquina estava em contato: `maquinaPresente` vem falso e a volta é quando ela puxar (NOD-386). O reinício do motor (ADR-131)
+ * volta na hora, sem a espera crescente do servidor, e não conta no teto de quedas (QUEDAS_FORA_DO_TETO).
  */
-export const CAUSAS_DE_ESPERA_NO_FUNDO = ["cota", "reinicio_servidor", "maquina_sem_contato", "erro_transitorio"] as const;
+export const CAUSAS_DE_ESPERA_NO_FUNDO = ["cota", "reinicio_servidor", "reinicio_do_motor", "maquina_sem_contato", "erro_transitorio"] as const;
 export type CausaDeEsperaNoFundo = (typeof CAUSAS_DE_ESPERA_NO_FUNDO)[number];
 
 /** Por que o fundo desistiu: `falhou` com aviso único a quem pediu. */
@@ -58,6 +59,7 @@ export type DecisaoEsperaNoFundo =
 export const MOTIVO_NAO_RODOU_DA_CAUSA: Readonly<Record<CausaDeEsperaNoFundo, MotivoNaoRodouRotina>> = {
   cota: "cota_da_ia",
   reinicio_servidor: "reinicio_servidor",
+  reinicio_do_motor: "reinicio_do_motor",
   maquina_sem_contato: "maquina_sem_contato",
   erro_transitorio: "erro_do_provedor",
 };
@@ -107,6 +109,8 @@ function voltaDaCausa(e: EntradaEsperaNoFundo): number | null {
     case "cota": return e.voltaDaCota ?? null;
     // NOD-386: o servidor em falta volta com espera crescente; a máquina que sumiu de fato, quando ela puxar (null).
     case "reinicio_servidor": return e.agora + esperaQuedaNoFundo(e.quedas + 1, e.aleatorio);
+    // ADR-131: o motor que se reiniciou de propósito já está de volta — sem espera.
+    case "reinicio_do_motor": return e.agora;
     case "maquina_sem_contato": return e.maquinaPresente ? e.agora + esperaQuedaNoFundo(e.quedas + 1, e.aleatorio) : null;
     case "erro_transitorio": return e.agora + esperaTransitoriaNoFundo(e.tentativasTransitorias + 1, e.aleatorio);
   }

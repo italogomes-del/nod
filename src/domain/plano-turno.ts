@@ -22,6 +22,7 @@ import { montarFerramentas } from "./montagem-ferramentas.ts";
 import { ehPastaDeTask, motivoSemTerminal, nativasDoTurno, pastaDoBot } from "./nativas.ts";
 import { caminhoDoClone, CLONE_DA_MAQUINA, repoDoGithub, type MotivoSaida } from "./clone-da-maquina.ts";
 import { podeAbrirTask, podeMandarParaTask } from "./trabalho.ts";
+import { daFaixaDaPessoa } from "./triagem.ts";
 import { ehFrente, FERRAMENTA_DA_FRENTE, FERRAMENTAS_FORA_DA_FRENTE, worktreeDaFrente } from "./frente.ts";
 import type { OrigemTrabalho } from "../contracts/trabalho.ts";
 import type { FormaTrabalho } from "../contracts/frente.ts";
@@ -355,6 +356,7 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
     },
     modoAprovacao: entrada.agente.modoAprovacao ?? "manual",
     modoTurno: modo,
+    daPessoa: daFaixaDaPessoa(entrada.turno),
     /**
      * ADR-042: resolvido aqui, no PUXAR, e cruzado com o catálogo JÁ montado — a regra
      * evita a pergunta, nunca amplia alcance (ADR-038). Turno não confiável recebe lista VAZIA: o

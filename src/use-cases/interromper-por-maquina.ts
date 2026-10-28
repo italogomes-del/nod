@@ -206,7 +206,7 @@ async function aposQuedaNoFundo(deps: DepsQueda, c: Caido & { rotinaId: string |
  * dois laços acordam juntos depois de uma noite de sono e não podem se cruzar.
  */
 async function aplicar(deps: DepsQueda, caidos: readonly Caido[], prazoMs: number | undefined): Promise<{ data: SaidaQuedaDaMaquina; events: RuntimeEvent[] }> {
-  const saida: SaidaQuedaDaMaquina = { interrompidos: [], decisoes: [], rotinas: [], porMotivo: { maquina_sem_contato: 0, reinicio_servidor: 0 }, incidenteId: null };
+  const saida: SaidaQuedaDaMaquina = { interrompidos: [], decisoes: [], rotinas: [], porMotivo: { maquina_sem_contato: 0, reinicio_servidor: 0, reinicio_do_motor: 0 }, incidenteId: null };
   const events: RuntimeEvent[] = [];
   const doMac = caidos.filter((c) => c.motivo === "maquina_sem_contato" && !c.servidorFalhou);
   // Reinício do servidor não é culpa do Mac: nenhum aviso de queda (ADR-045).

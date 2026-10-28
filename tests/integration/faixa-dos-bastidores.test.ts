@@ -25,12 +25,17 @@ describeIntegracao("ADR-130: a conversa do bot tem a faixa da pessoa e a dos bas
       const { data: criado } = await executar(deps, criarAgente, { dono: "pessoa" });
       const rotina = await fundo(deps, criado, "rotina");
       const maquina = randomUUID();
-      expect((await executar(deps, despacharTurno, { machineId: maquina, inventario: PRONTO })).data.plano?.turnoId).toBe(rotina.id);
+      const daRotina = (await executar(deps, despacharTurno, { machineId: maquina, inventario: PRONTO })).data.plano;
+      expect(daRotina?.turnoId).toBe(rotina.id);
+      // ADR-131: o plano diz ao motor que a rotina é fundo (o reinício pode passar por cima dela).
+      expect(daRotina?.daPessoa).toBe(false);
 
       const fala = (await executar(deps, enviarMensagem, { conversaId: criado.conversa.id, texto: "oi, Ada", inventario: PRONTO })).data;
       // Antes da ADR-130 o pendente da pessoa ficava "na fila" (agente_ocupado_em) até a rotina assentar.
       expect((await lerConversa(deps, { conversaId: criado.conversa.id })).data.turnosPendentes).toEqual([]);
-      expect((await executar(deps, despacharTurno, { machineId: maquina, inventario: PRONTO })).data.plano?.turnoId).toBe(fala.turno.id);
+      const daFala = (await executar(deps, despacharTurno, { machineId: maquina, inventario: PRONTO })).data.plano;
+      expect(daFala?.turnoId).toBe(fala.turno.id);
+      expect(daFala?.daPessoa).toBe(true);
       expect((await deps.repos.turnos.buscar(rotina.id))?.estado).toBe("despachando");
     });
   });

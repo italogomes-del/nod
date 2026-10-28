@@ -11,7 +11,7 @@ import type { SomaDoDia } from "../domain/custo-do-dia.ts";
 import { modelosPorIa } from "../domain/ia-do-modelo.ts";
 import { ESPERA_MAXIMA_FUNDO_MS } from "../domain/memoria-mac.ts";
 import { porChegada } from "../domain/ordem-das-falas.ts";
-import { MOTIVOS_DE_QUEDA, MOTIVOS_FALHA_SEM_QUEDA } from "../domain/pedido-parado.ts";
+import { MOTIVOS_DE_QUEDA, MOTIVOS_FALHA_SEM_QUEDA, QUEDAS_FORA_DO_TETO } from "../domain/pedido-parado.ts";
 import { paraProfundidade } from "../domain/profundidade.ts";
 import { nasceNosBastidores } from "../domain/triagem.ts";
 import { ABERTURA_DA_ESPERA_DO_SERVIDOR } from "../domain/redacao.ts";
@@ -64,6 +64,7 @@ interface Linha {
   decidido_por: string;
   despachado_em?: Date | null;
   maquina_desta_vez?: string | null;
+  bastidores?: boolean;
   tentativas_transitorias?: number;
   motivo_recomeco?: MotivoRecomeco | null;
 }
@@ -73,7 +74,7 @@ interface Linha {
 export type SessaoDoTurno = { sessaoCli: string; executor: string; harness: string | null; contaId: string | null; machineId: string | null };
 
 const COLUNAS =
-  "tenant_id, id, owner_id, conversa_id, agente_id, origem, estado, attempted, rejected, prompt_submitted, produced_output, machine_id, lease_ate, prazo_em, motivo_interrupcao, motivo_falha, sem_novidade_motivo, retoma_turno_id, profundidade, reenvios, parar_solicitado_em, entrada_texto, entrada_anexos, entrada_confianca, custo_usd, modelo, harness, executor, criado_em, mensagem_origem_id, absorvido_por, sob_procuracao_de, ligacao_id, trabalho_id, acordar_em, pessoa_esperando, decidido_por, despachado_em, tentativas_transitorias, maquina_desta_vez, motivo_recomeco";
+  "tenant_id, id, owner_id, conversa_id, agente_id, origem, estado, attempted, rejected, prompt_submitted, produced_output, machine_id, lease_ate, prazo_em, motivo_interrupcao, motivo_falha, sem_novidade_motivo, retoma_turno_id, profundidade, reenvios, parar_solicitado_em, entrada_texto, entrada_anexos, entrada_confianca, custo_usd, modelo, harness, executor, criado_em, mensagem_origem_id, absorvido_por, sob_procuracao_de, ligacao_id, trabalho_id, acordar_em, pessoa_esperando, decidido_por, despachado_em, tentativas_transitorias, maquina_desta_vez, bastidores, motivo_recomeco";
 
 function paraTurno(l: Linha): Turno {
   return {
@@ -115,6 +116,8 @@ function paraTurno(l: Linha): Turno {
     tentativasTransitorias: l.tentativas_transitorias ?? 0,
     // QA do NOD-314: só quando há ("Rodar em <outra> desta vez"); o chip da fila diz a máquina deste turno.
     ...(l.maquina_desta_vez ? { maquinaDestaVez: l.maquina_desta_vez } : {}),
+    // ADR-131: só quando é (o plano diz ao motor se o turno é da pessoa, `daPessoa`).
+    ...(l.bastidores ? { bastidores: true } : {}),
     ...(l.motivo_recomeco ? { motivoRecomeco: l.motivo_recomeco } : {}),
   };
 }
@@ -589,7 +592,7 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
         )
         select count(*)::int as n from turnos q join cadeia c on c.id = q.id
         where q.tenant_id = ${escopo.tenantId} and q.id <> ${exceto} and q.estado = 'interrompido'
-          and q.motivo_interrupcao::text = any(${[...MOTIVOS_DE_QUEDA]}::text[])
+          and q.motivo_interrupcao::text = any(${MOTIVOS_DE_QUEDA.filter((m) => !QUEDAS_FORA_DO_TETO.includes(m))}::text[])
           and coalesce(q.motivo_falha::text, '') <> all(${[...MOTIVOS_FALHA_SEM_QUEDA]}::text[])
           and coalesce(q.ultimo_sinal_em, q.criado_em) >= ${data(desde)}`;
       return l?.n ?? 0;
@@ -1024,7 +1027,7 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
 
     /**
      * definido em 2026-10-15 (NOD-264, E8; emenda da ADR-045 sobre a ADR-010): a entrega tardia com SUCESSO de um turno que
-     * a queda assentou (`maquina_sem_contato`/`reinicio_servidor`) promove o turno a `concluido` — o trabalho terminou, só
+     * a queda assentou (`maquina_sem_contato`/`reinicio_servidor`/`reinicio_do_motor`) promove o turno a `concluido` — o trabalho terminou, só
      * a máquina sumiu antes de entregar. Condicional: só o interrompido por queda muda (o UPDATE decide a corrida com a
      * retomada automática), e nunca para 'pendente' (sem requeue). Quem chama já conferiu que não há retomada criada.
      */
@@ -1037,7 +1040,7 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
         where r.tenant_id = ${escopo.tenantId} and r.owner_id = ${escopo.pessoaId} and r.retoma_turno_id = ${id}
           and r.estado = 'pendente' and starts_with(r.entrada_texto, ${ENTRADA_DA_RETOMADA_DA_QUEDA})
           and exists (select 1 from turnos t where t.tenant_id = ${escopo.tenantId} and t.id = ${id} and t.estado = 'interrompido'
-            and t.motivo_interrupcao in ('maquina_sem_contato', 'reinicio_servidor'))
+            and t.motivo_interrupcao in ('maquina_sem_contato', 'reinicio_servidor', 'reinicio_do_motor'))
           and (select count(*) from turnos o where o.tenant_id = ${escopo.tenantId} and o.retoma_turno_id = ${id}) = 1`;
       const [l] = await conn<Linha[]>`
         update turnos set
@@ -1055,7 +1058,7 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
           custo_sessao_usd = coalesce(${a.custoSessaoUsd ?? null}, custo_sessao_usd),
           lease_ate = null
         where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and estado = 'interrompido'
-          and motivo_interrupcao in ('maquina_sem_contato', 'reinicio_servidor')
+          and motivo_interrupcao in ('maquina_sem_contato', 'reinicio_servidor', 'reinicio_do_motor')
           and not exists (select 1 from turnos r where r.tenant_id = ${escopo.tenantId} and r.retoma_turno_id = ${id})
         returning ${conn.unsafe(COLUNAS)}`;
       return l ? paraTurno(l) : null;

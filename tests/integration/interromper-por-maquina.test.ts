@@ -53,7 +53,7 @@ describeIntegracao("NOD-293 A7: a máquina removida para a frente sem aviso de '
 
       expect(r.data.interrompidos).toEqual([t.id]);
       expect(r.data.incidenteId).toBeNull();
-      expect(r.data.porMotivo).toEqual({ maquina_sem_contato: 0, reinicio_servidor: 0 });
+      expect(r.data.porMotivo).toEqual({ maquina_sem_contato: 0, reinicio_servidor: 0, reinicio_do_motor: 0 });
       expect(await totalDeIncidentes(trx)).toBe(antes);
       expect(await repos.incidentes.visiveis(0)).toEqual([]);
       expect((await repos.turnos.buscar(t.id))?.motivoInterrupcao).toBe("maquina_removida");

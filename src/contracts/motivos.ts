@@ -28,10 +28,7 @@ export const MOTIVOS_INTERRUPCAO = [
   "lancamento_falhou",
   "sessao_rejeitada",
   "executor_indisponivel",
-  /**
-   * definido em 2026-09-18: ficou mudo sem ferramenta pendente; o watchdog de atividade encerrou. Ninguém mais o
-   * grava desde 2026-10-01 (ADR-067, o vigia saiu); fica no enum para o histórico dos turnos antigos.
-   */
+  /** 2026-09-18: ficou mudo sem ferramenta pendente e o watchdog encerrou. Ninguém o grava desde 2026-10-01 (ADR-067). */
   "turno_travado",
   /** definido em 2026-09-18: produziu trabalho e não concluiu — não confundir com sem_progresso. */
   "trabalho_incompleto",
@@ -40,6 +37,7 @@ export const MOTIVOS_INTERRUPCAO = [
   /** 2026-10-15 (NOD-243): turno de rotina pendente, nunca começado, além de max(período, 30 min); a janela seguinte o encerra. */
   "vencido",
   "maquina_removida", // 2026-10-20 (NOD-293 A7, 0099): a pessoa revogou a chave da máquina com o turno rodando; sem "sem contato".
+  "reinicio_do_motor", // 2026-10-27 (ADR-131, 0122): o motor parou no meio do turno (atualização, restart, app fechado); é queda.
 ] as const;
 export type MotivoInterrupcao = (typeof MOTIVOS_INTERRUPCAO)[number];
 
@@ -135,7 +133,7 @@ export const MOTIVOS_INTERRUPCAO_ROTINA = ["vencida", "frente_parada", "rotina_p
 export type MotivoInterrupcaoRotina = (typeof MOTIVOS_INTERRUPCAO_ROTINA)[number];
 
 /** Por que a janela ficou 'nao_rodou' (NOD-274; NOD-314: preso 24 h à máquina sem contato; NOD-309: toda queda do fundo, domain/espera-no-fundo.ts). Vai em rotina_execucoes.motivo. */
-export const MOTIVOS_NAO_RODOU_ROTINA = ["cota_da_ia", "execucao_anterior_aberta", "maquina_sem_contato", "reinicio_servidor", "erro_do_provedor", "servidor_nao_respondeu"] as const;
+export const MOTIVOS_NAO_RODOU_ROTINA = ["cota_da_ia", "execucao_anterior_aberta", "maquina_sem_contato", "reinicio_servidor", "reinicio_do_motor", "erro_do_provedor", "servidor_nao_respondeu"] as const;
 export type MotivoNaoRodouRotina = (typeof MOTIVOS_NAO_RODOU_ROTINA)[number];
 
 /**

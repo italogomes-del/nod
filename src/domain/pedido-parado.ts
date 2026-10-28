@@ -8,7 +8,13 @@ import type { EstadoTrabalho } from "../contracts/trabalho.ts";
  */
 
 /** Motivos de infraestrutura: o bot não errou, a máquina ou a IA saiu do ar no meio do pedido. */
-export const MOTIVOS_DE_QUEDA = ["maquina_sem_contato", "executor_indisponivel", "reinicio_servidor"] as const;
+export const MOTIVOS_DE_QUEDA = ["maquina_sem_contato", "executor_indisponivel", "reinicio_servidor", "reinicio_do_motor"] as const;
+/**
+ * definido em 2026-10-27 (ADR-131): a queda que não gasta o teto de quedas da cadeia (MAX_QUEDAS_POR_PEDIDO). O motor que
+ * se atualiza reinicia a cada versão nova, e uma frente de horas atravessa vários deploys: com o teto, ela desistiria na
+ * terceira atualização sem nada ter dado errado. O prazo do fundo (24 h) continua valendo.
+ */
+export const QUEDAS_FORA_DO_TETO: readonly string[] = ["reinicio_do_motor"];
 
 /**
  * NOD-274 (C6, QA do PR #340): a recusa no despacho também chega como `executor_indisponivel`, mas não é queda — o

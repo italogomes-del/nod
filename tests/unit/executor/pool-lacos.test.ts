@@ -20,8 +20,9 @@ function cenario() {
   const ponte = {
     conectar: async () => {},
     puxar: async (_pessoa: string, _maquina?: unknown, opcoes?: { soDaPessoa?: boolean }) => {
-      const id = daPessoa.shift() ?? (opcoes?.soDaPessoa ? undefined : fila.shift());
-      return id ? ({ turnoId: id } as PlanoTurno) : null;
+      const dela = daPessoa.shift();
+      const id = dela ?? (opcoes?.soDaPessoa ? undefined : fila.shift());
+      return id ? ({ turnoId: id, daPessoa: dela !== undefined } as PlanoTurno) : null;
     },
     renovar: async () => ({ ativo: true, versaoMinimaApp: "0" }),
     entregar: async () => {},
@@ -64,7 +65,7 @@ describe("pool elástico de laços: um ocioso sempre, um a mais por turno rodand
     const { fila, liberar, rodando, pool } = cenario();
     fila.push("nina");
     await esperarAte(() => rodando.size === 1);
-    pool.drenar(true);
+    pool.drenar("fundo");
     fila.push("taga");
     await new Promise((r) => setTimeout(r, 30));
     expect(pool.turnosAtuais()).toEqual(["nina"]);
@@ -80,7 +81,7 @@ describe("pool elástico de laços: um ocioso sempre, um a mais por turno rodand
 
   it("ADR-130: drenando, a fala da pessoa ainda sai; o fundo espera a atualização", async () => {
     const { fila, daPessoa, liberar, rodando, pool } = cenario();
-    pool.drenar(true);
+    pool.drenar("fundo");
     fila.push("rotina-da-ada");
     daPessoa.push("fala-do-marlon");
     await esperarAte(() => rodando.has("fala-do-marlon"));
@@ -90,6 +91,28 @@ describe("pool elástico de laços: um ocioso sempre, um a mais por turno rodand
     pool.drenar(false);
     await esperarAte(() => rodando.has("rotina-da-ada"));
     liberar.get("rotina-da-ada")?.();
+    await pool.parar();
+  });
+
+  it("ADR-131: conta os turnos da pessoa à parte do fundo; drenando tudo, nem a fala dela começa", async () => {
+    const { fila, daPessoa, liberar, rodando, pool } = cenario();
+    fila.push("frente-1", "frente-2");
+    await esperarAte(() => rodando.size === 2);
+    expect(pool.turnosDaPessoa()).toBe(0);
+    daPessoa.push("fala-do-marlon");
+    await esperarAte(() => rodando.has("fala-do-marlon"));
+    expect(pool.turnosAtuais().length).toBe(3);
+    expect(pool.turnosDaPessoa()).toBe(1);
+    liberar.get("fala-do-marlon")?.();
+    await esperarAte(() => !rodando.has("fala-do-marlon"));
+    await esperarAte(() => pool.turnosDaPessoa() === 0);
+    pool.drenar("tudo");
+    daPessoa.push("outra-fala");
+    await new Promise((r) => setTimeout(r, 30));
+    expect(daPessoa).toEqual(["outra-fala"]);
+    pool.drenar("fundo");
+    await esperarAte(() => rodando.has("outra-fala"));
+    for (const id of ["frente-1", "frente-2", "outra-fala"]) liberar.get(id)?.();
     await pool.parar();
   });
 

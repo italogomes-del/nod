@@ -114,3 +114,11 @@ reinicia.
 
 O login na VM instala a IA que falta ou está abaixo do piso, pelo mesmo `npm_local`. Ele confere antes se há 2 GB livres
 em `~/.local` e, se não houver, para com `sem_espaco`.
+
+## Emenda de 2026-10-27 — o motor se atualiza com frentes rodando (ADR-131)
+
+O gatilho de reversão da emenda de 2026-10-15 disparou: a VM dos bots ficou dias sem se atualizar, drenando 10 a 15 min a
+cada 70 min, porque sempre havia de 1 a 5 frentes rodando. Pela [ADR-131](adr-131-o-motor-se-atualiza-com-frentes-rodando.md),
+o item 2 muda: drenando, o motor espera só os turnos da pessoa (`daPessoa` no plano) e pede o reinício por cima do fundo;
+o reinício é queda (`reinicio_do_motor`) e o servidor retoma o fundo na hora, sem gastar o teto de quedas. A regra
+"nenhum turno é interrompido" passa a ser "nenhum turno da pessoa é interrompido".

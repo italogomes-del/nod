@@ -35,7 +35,8 @@ import { ORCAMENTO_INICIAL } from "../../src/domain/canal-orcamento.ts";
 import { seguravelPeloMac } from "../../src/domain/memoria-mac.ts";
 import { ateOPrimeiroAnexo, porChegada } from "../../src/domain/ordem-das-falas.ts";
 import { nasceNosBastidores, type PedidoAberto } from "../../src/domain/triagem.ts";
-import { MOTIVOS_DE_QUEDA, MOTIVOS_FALHA_SEM_QUEDA } from "../../src/domain/pedido-parado.ts";
+import { ehMotivoDaQueda } from "../../src/domain/incidente.ts";
+import { MOTIVOS_DE_QUEDA, MOTIVOS_FALHA_SEM_QUEDA, QUEDAS_FORA_DO_TETO } from "../../src/domain/pedido-parado.ts";
 import { cotaSegura, ehVoltaDoFundo, ENTRADA_DA_RETOMADA_DA_QUEDA, ENTRADA_DA_VOLTA_DA_COTA, entradaLevadaComPedido, tipoParaCota, type PortaoDaCota } from "../../src/domain/cota-da-ia.ts";
 import { MODO_APROVACAO_INICIAL } from "../../src/domain/modo-aprovacao.ts";
 import { harnessFixado } from "../../src/domain/harness.ts";
@@ -1508,7 +1509,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           for (const t of todos) if (t.retomaTurnoId && cadeia.has(t.retomaTurnoId) && !cadeia.has(t.id)) { cadeia.add(t.id); mudou = true; }
         }
         return todos.filter((t) => cadeia.has(t.id) && t.id !== exceto && t.estado === "interrompido"
-          && (MOTIVOS_DE_QUEDA as readonly string[]).includes(t.motivoInterrupcao ?? "") && !(MOTIVOS_FALHA_SEM_QUEDA as readonly string[]).includes(t.motivoFalha ?? "")
+          && (MOTIVOS_DE_QUEDA as readonly string[]).includes(t.motivoInterrupcao ?? "") && !QUEDAS_FORA_DO_TETO.includes(t.motivoInterrupcao ?? "") && !(MOTIVOS_FALHA_SEM_QUEDA as readonly string[]).includes(t.motivoFalha ?? "")
           && (ULTIMO_SINAL.get(t) ?? t.criadoEm) >= desde).length;
       },
       async reescreverFundoDoBot(agenteId: string, para: { harness: NonNullable<Turno["harness"]>; modelo: string }) {
@@ -1712,7 +1713,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         // NOD-287: a marca da web do turno de origem nasce junto, como o INSERT do repo real.
         if (t.contaminadoDe && b.contaminados.has(t.contaminadoDe)) b.contaminados.add(turno.id);
         // ADR-130: a faixa nasce no INSERT; a retomada e a repetição herdam a do turno que continuam.
-        if (nasceNosBastidores(t) || [t.retomaTurnoId, t.contaminadoDe].some((x) => x && b.bastidores.has(x))) b.bastidores.add(turno.id);
+        if (nasceNosBastidores(t) || [t.retomaTurnoId, t.contaminadoDe].some((x) => x && b.bastidores.has(x))) { b.bastidores.add(turno.id); turno.bastidores = true; }
         return turno;
       },
       async buscar(id) {
@@ -1831,7 +1832,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         if (doTenant(b.turnos).some((t) => t.id === id)) b.sessaoOrigem.set(id, sessaoCli);
       },
       async concluirTardia(id, a) {
-        const t = doTenant(b.turnos).find((x) => x.id === id && x.estado === "interrompido" && (x.motivoInterrupcao === "maquina_sem_contato" || x.motivoInterrupcao === "reinicio_servidor"));
+        const t = doTenant(b.turnos).find((x) => x.id === id && x.estado === "interrompido" && ehMotivoDaQueda(x.motivoInterrupcao));
         if (!t) return null;
         const filhas = doTenant(b.turnos).filter((r) => r.retomaTurnoId === id);
         // NOD-309 (PR 3): a retomada da queda ainda na fila, única, é absorvida pelo sucesso tardio.

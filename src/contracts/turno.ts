@@ -85,6 +85,8 @@ export type Turno = {
   acordarEm?: number | null; // ADR-086: a volta marcada ("me chame às 16:00") — a fila só a entrega a partir daqui
   /** NOD-272 (0088): a pessoa está olhando ("Testar agora", "Permitir e rodar agora" e as frentes deles) — conta como conversa na cota. */
   pessoaEsperando?: boolean;
+  /** ADR-130 (0121): roda nos bastidores (rotina, colega, procuração e retomadas), não na faixa da pessoa. Ausente = não. */
+  bastidores?: boolean;
   /** NOD-309 (0098): quantas vezes a cadeia deste turno já caiu por erro transitório do provedor. Ausente = 0. */
   tentativasTransitorias?: number;
   /** NOD-312 (0119): o turno recomeçou sem a sessão que a conversa tinha, e por quê. Ausente = turno normal. */
@@ -94,10 +96,8 @@ export type Turno = {
    * lote (RETORNO_DO_LOTE, domain/cota-da-ia.ts), que é fundo para a cota sem coluna nova. Ausente = não lido.
    */
   decididoPor?: string;
-  /**
-   * Pessoa que PEDIU o trabalho (0028, ADR-047/ADR-025). Preenchido só no turno de delegação: a autoria do
-   * plano sai com `sob_procuracao_de` dela. Ausente/null = a pessoa falou direto, ou ninguém pediu.
-   */
+  /** Pessoa que PEDIU o trabalho (0028, ADR-047/ADR-025). Só no turno de delegação: a autoria do plano sai com
+   * `sob_procuracao_de` dela. Ausente/null = a pessoa falou direto, ou ninguém pediu. */
   sobProcuracaoDe?: string | null;
   /** definido em 2026-10-04 (ADR-072): a ligação deste turno (o turno-cérebro e o trabalho pedido durante ela). */
   ligacaoId?: string | null;

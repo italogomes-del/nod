@@ -40,6 +40,16 @@ export function nasceNosBastidores(t: { origem: OrigemTurno; sobProcuracaoDe?: s
 }
 
 /**
+ * O turno é o que a pessoa espera agora (definido em 2026-10-27, ADR-131): a ligação, o que ela olha (`pessoa_esperando`)
+ * e a faixa dela na conversa (sem trabalho, fora dos bastidores). A mesma régua do `soDaPessoa` do reivindicar
+ * (turnos.repo.ts). O motor que se atualiza espera só estes acabarem; o resto (frente, rotina, colega) ele reinicia no
+ * meio e o servidor retoma (`reinicio_do_motor`).
+ */
+export function daFaixaDaPessoa(t: { origem: OrigemTurno; pessoaEsperando?: boolean; trabalhoId?: string | null; bastidores?: boolean }): boolean {
+  return t.origem === "ligacao" || t.pessoaEsperando === true || (!t.trabalhoId && t.bastidores !== true);
+}
+
+/**
  * O turno está na triagem (o prompt ganha as linhas dela): pedido de colega ou de rotina, fora de trabalho, com
  * `abrir_frentes` no catálogo. A retomada de um deles conta igual (ela continua o mesmo pedido, no mesmo modo).
  */

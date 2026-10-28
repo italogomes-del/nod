@@ -250,6 +250,53 @@ describeIntegracao("NOD-309 (PR 4): a rotina cai por reinício e a próxima exec
 });
 
 /**
+ * ADR-131: o motor da máquina parou no meio do turno de fundo (a atualização sozinha da VM, o `systemctl restart`) e
+ * entregou com a causa `reinicio_do_motor`. Antes virava `trabalho_incompleto` e a frente falhava a cada atualização; agora
+ * é queda: a retomada entra na fila na hora, calada, sem card, e o reinício não gasta o teto de quedas da cadeia.
+ */
+const REINICIO_DO_MOTOR: ResultadoTurno = {
+  desfecho: "interrompido", causa: "reinicio_do_motor", texto: "", sessaoCli: null, custoUsd: 0, sinais: { ...SINAIS, producedOutput: true },
+  tokens: { entrada: 0, saida: 0, cacheLeitura: 0, cacheCriacao: 0 }, ferramentasChamadas: [], negacoesPermissao: [],
+};
+
+describeIntegracao("ADR-131: o motor reinicia no meio do turno de fundo → retomada na fila na hora, calada, sem card", () => {
+  for (const tipo of TIPOS) {
+    it(`${tipo}: queda reinicio_do_motor, uma retomada pendente para agora, nenhuma linha, nenhum card`, async () => {
+      await withRollback(MARLON, async (trx) => {
+        const m = await montar(trx, tipo);
+        const r = await m.cair(m.alvo, REINICIO_DO_MOTOR);
+        expect(r.data.turno).toMatchObject({ estado: "interrompido", motivoInterrupcao: "reinicio_do_motor" });
+        const voltas = (await m.repos.turnos.listarDaConversa(m.ada.conversaId, 500)).filter((x) => x.origem === "retomada" && x.estado === "pendente" && x.entradaTexto.startsWith(ENTRADA_DA_RETOMADA_DA_QUEDA));
+        expect(voltas).toHaveLength(1);
+        expect(voltas[0]).toMatchObject({ trabalhoId: m.alvo.trabalhoId ?? null, retomaTurnoId: m.alvo.retomaTurnoId ?? m.alvo.id });
+        expect(voltas[0]!.acordarEm).not.toBeNull();
+        expect(voltas[0]!.acordarEm!).toBeLessThanOrEqual(Date.now());
+        if (tipo === "rotina") expect(await m.repos.rotinaExecucoes.listar(m.rotinaId!)).toEqual([]);
+        expect((await m.repos.decisoes.doTurno(m.alvo.id)).filter((d) => d.tipo === "retomar_turno")).toEqual([]);
+        const avisos = (await m.repos.mensagens.listarDaConversa(m.ada.conversaId, 500)).filter((x) => x.kind === "sistema" && /fica na fila e retoma quando|Turno interrompido/.test(x.texto ?? ""));
+        expect(avisos).toEqual([]);
+      });
+    });
+  }
+
+  it("frente: cinco atualizações seguidas no meio do trabalho não esgotam o teto de quedas — ela sempre volta", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx, "frente");
+      let atual = m.alvo;
+      for (let i = 0; i < 5; i++) {
+        await m.cair(atual, REINICIO_DO_MOTOR);
+        const volta = await m.voltaDe(atual);
+        expect(volta, `volta ${i + 1}`).not.toBeNull();
+        atual = volta!;
+      }
+      expect(await m.repos.turnos.quedasDaCadeia(m.alvo.id, atual.id, 0)).toBe(0);
+      const [trabalho] = await trx<{ estado: string }[]>`select estado from trabalhos where id = ${m.alvo.trabalhoId!}`;
+      expect(trabalho?.estado).not.toBe("falhou");
+    });
+  });
+});
+
+/**
  * NOD-386: a queda no fundo com a máquina AINDA em contato (o servidor do nod não respondeu a tempo, a máquina seguiu
  * puxando) não culpa a máquina nem abre aviso de queda: a volta fica marcada com espera crescente (~30 s, 1, 2, 5, 10 min)
  * e a linha diz que o servidor não respondeu. O teto é de 5 quedas numa janela de 2 h; queda mais velha não conta.

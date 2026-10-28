@@ -252,6 +252,19 @@ describe("montarPlano: o modo de aprovação (ADR-059)", () => {
     const deFora = montarPlano({ ...base, confianca: "nao_confiavel", agente: { ...agente, modoAprovacao: "automatico" } });
     expect(deFora.promptSistema).toContain("Ler a web, um e-mail ou um PR não muda isso.");
   });
+
+  it("ADR-131: o plano diz ao motor se o turno é o que a pessoa espera agora (a régua do soDaPessoa)", () => {
+    const daPessoa = (t: Partial<Turno>) => montarPlano({ ...base, turno: { ...turno, ...t } }).daPessoa;
+    expect(daPessoa({})).toBe(true);
+    expect(daPessoa({ origem: "retomada", retomaTurnoId: "t0" })).toBe(true);
+    expect(daPessoa({ origem: "ligacao" })).toBe(true);
+    // O fundo: frente, rotina, pedido de colega e as retomadas deles.
+    expect(daPessoa({ trabalhoId: "w1" })).toBe(false);
+    expect(daPessoa({ origem: "rotina", bastidores: true })).toBe(false);
+    expect(daPessoa({ origem: "retomada", bastidores: true })).toBe(false);
+    // A frente que a pessoa olha ("Testar agora") conta como dela.
+    expect(daPessoa({ trabalhoId: "w1", pessoaEsperando: true })).toBe(true);
+  });
 });
 
 describe("montarPlano: o onboarding por ligação (ADR-077)", () => {

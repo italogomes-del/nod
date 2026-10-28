@@ -7,6 +7,7 @@ import type { TurnoAbertoDaRotina } from "../repositories/rotina-janelas.repo.ts
 import type { Trabalho } from "../contracts/trabalho.ts";
 import type { Turno } from "../contracts/turno.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
+import { ehMotivoDaQueda } from "../domain/incidente.ts";
 import { blocoPedidosAbertos, type PedidoAbertoNoPrompt } from "../domain/triagem.ts";
 import { motivoEmPortugues, redigir } from "../domain/redacao.ts";
 import { proximaJanela } from "../domain/rotina-janela.ts";
@@ -410,6 +411,7 @@ const MOTIVO_NAO_RODOU: Readonly<Record<MotivoNaoRodouRotina, string>> = {
   execucao_anterior_aberta: "a execução anterior ainda estava aberta",
   maquina_sem_contato: "o computador do bot ficou sem contato",
   reinicio_servidor: "o servidor reiniciou",
+  reinicio_do_motor: "o nod foi reiniciado na máquina",
   erro_do_provedor: "a IA ficou fora do ar",
   // NOD-386: a máquina seguiu em contato e quem falhou foi o servidor; a linha não culpa a máquina.
   servidor_nao_respondeu: "o servidor do nod não respondeu a tempo",
@@ -620,7 +622,7 @@ export async function registrarRecusaDaRotina(deps: Pick<Deps, "repos" | "escopo
 export async function registrarDesfechoDaEntrega(deps: Pick<Deps, "repos" | "escopo" | "agora">, turno: Turno): Promise<RuntimeEvent[]> {
   if (turno.origem !== "rotina" && turno.origem !== "retomada") return [];
   // NOD-245: o mesmo para `reinicio_servidor` (a entrega do turno adotado que o deploy derrubou).
-  if (turno.motivoInterrupcao === "maquina_sem_contato" || turno.motivoInterrupcao === "reinicio_servidor") return [];
+  if (ehMotivoDaQueda(turno.motivoInterrupcao)) return [];
   if (turno.estado === "interrompido" && turno.motivoInterrupcao === "parado_pela_pessoa") return registrarRecusaDaRotina(deps, turno, "parado_pela_pessoa");
   const silencioso = turno.estado === "concluido" && turno.semNovidadeMotivo !== null;
   const desfecho = silencioso ? "sem_novidade" : turno.estado === "concluido" ? "executou" : "falhou";

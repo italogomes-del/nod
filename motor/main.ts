@@ -309,8 +309,10 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
     if (import.meta.url.endsWith(".mjs")) {
       void atualizacaoLigada({ url: c.url }).then((ligada) => {
         if (!ligada || encerrado || atualizador) return;
-        // NOD-9 PR4: a atualização de uma IA conta como um turno rodando (o motor não reinicia no meio do npm).
-        atualizador = iniciarAtualizacao({ url: c.url, dir, pastaDoMotor: pasta, turnosRodando: () => (laco?.turnosAtuais().length ?? 0) + (iasAtualizando() ? 1 : 0), drenar: (sim) => laco?.drenar(sim) });
+        // NOD-9 PR4: a atualização de uma IA conta como um turno rodando (o motor não reinicia no meio do npm). ADR-131: e
+        // como um turno da pessoa — o reinício passa por cima do fundo, nunca da atualização da IA.
+        const ia = () => (iasAtualizando() ? 1 : 0);
+        atualizador = iniciarAtualizacao({ url: c.url, dir, pastaDoMotor: pasta, turnosRodando: () => (laco?.turnosAtuais().length ?? 0) + ia(), turnosDaPessoa: () => (laco?.turnosDaPessoa() ?? 0) + ia(), drenar: (nivel) => laco?.drenar(nivel) });
       });
     }
   };

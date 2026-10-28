@@ -143,6 +143,12 @@ export type PlanoTurno = {
    * no automático, apagar num app e merge que ela pediu ali saem sem card. Ausente (plano antigo) = não é conversa.
    */
   modoTurno?: ModoTurno;
+  /**
+   * definido em 2026-10-27 (ADR-131): o turno é o que a pessoa espera agora (a fala dela na conversa, a ligação, o que ela
+   * olha). O motor que se atualiza espera só estes acabarem; os outros (frente, rotina, colega) ele reinicia no meio e o
+   * servidor os retoma. Ausente (servidor antigo) = conta como da pessoa: o motor não reinicia por cima dele.
+   */
+  daPessoa?: boolean;
   /** Presente só no turno da ligação (modoTurno = "ligacao"). */
   ligacaoVoz?: LigacaoVozPlano;
   /**

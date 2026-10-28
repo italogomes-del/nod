@@ -140,6 +140,45 @@ describe("assentarTurno: entrega depois de o Mac cair (ADR-045)", () => {
   });
 });
 
+describe("ADR-131: o motor parou no meio do turno (atualização sozinha, restart, app fechado)", () => {
+  const doMotor: ResultadoTurno = { ...cortado, causa: "reinicio_do_motor" };
+
+  it("desfechoDaEntrega: a causa reinicio_do_motor é queda, não trabalho incompleto; o Parar vence; o sucesso fica sucesso", () => {
+    const livre = { pararSolicitadoEm: null, leaseAte: T0 + LEASE_MS };
+    expect(desfechoDaEntrega(livre, doMotor, T0)).toEqual({ estado: "interrompido", motivoInterrupcao: "reinicio_do_motor", motivoFalha: null });
+    expect(desfechoDaEntrega(livre, { ...doMotor, desfecho: "falha", motivoFalha: "erro_execucao" }, T0)).toMatchObject({ motivoInterrupcao: "reinicio_do_motor", motivoFalha: "erro_execucao" });
+    expect(desfechoDaEntrega({ ...livre, pararSolicitadoEm: T0 }, doMotor, T0)).toMatchObject({ motivoInterrupcao: "parado_pela_pessoa" });
+    expect(desfechoDaEntrega(livre, { ...pronto, causa: "reinicio_do_motor" }, T0)).toMatchObject({ estado: "concluido" });
+    // Mesmo com o lease vencido ou adotada: quem disse por que parou foi o motor.
+    expect(desfechoDaEntrega({ pararSolicitadoEm: null, leaseAte: T0 }, doMotor, T0 + 1)).toMatchObject({ motivoInterrupcao: "reinicio_do_motor" });
+    expect(desfechoDaEntrega(livre, doMotor, T0, { adotada: true })).toMatchObject({ motivoInterrupcao: "reinicio_do_motor" });
+    // Outra causa continua como antes.
+    expect(desfechoDaEntrega(livre, { ...cortado, causa: "sinal:SIGKILL" }, T0)).toMatchObject({ motivoInterrupcao: "trabalho_incompleto" });
+  });
+
+  it("rotina: volta à fila sozinha e calada, sem aviso de queda e sem fechar a execução", async () => {
+    const c = await cenario("rotina");
+    c.passar(30_000);
+    const r = await c.entregar(doMotor);
+    expect(r.data.turno).toMatchObject({ estado: "interrompido", motivoInterrupcao: "reinicio_do_motor" });
+    expect(c.banco.execucoes).toEqual([]);
+    expect(c.banco.mensagens).toHaveLength(c.antes);
+    expect(c.banco.turnos.filter((t) => t.retomaTurnoId === c.turnoId).map((t) => t.estado)).toEqual(["pendente"]);
+    expect(c.banco.decisoes).toEqual([]);
+    expect(c.banco.incidentes).toEqual([]);
+  });
+
+  it("conversa: UM Retomar com a frase do motor, sem aviso de máquina sem contato", async () => {
+    const c = await cenario("conversa");
+    c.passar(30_000);
+    const r = await c.entregar(doMotor);
+    expect(r.data.turno).toMatchObject({ estado: "interrompido", motivoInterrupcao: "reinicio_do_motor" });
+    expect(c.banco.decisoes.map((d) => [d.tipo, d.turnoId, d.estado])).toEqual([["retomar_turno", c.turnoId, "pendente"]]);
+    expect(c.banco.decisoes[0]?.frase).toContain("o nod foi reiniciado na máquina");
+    expect(c.banco.incidentes).toEqual([]);
+  });
+});
+
 describe("NOD-245: entrega de um turno ADOTADO depois do reinício do servidor", () => {
   it("desfechoDaEntrega: adotada sem motivo e sem Parar é reinicio_servidor; o Parar e o motivo do cliente continuam valendo", () => {
     const livre = { pararSolicitadoEm: null, leaseAte: null };

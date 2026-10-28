@@ -11,6 +11,8 @@ import { desdeQuando, horaMinuto, listaDeJanelas, quandoCurto, quandoVoltaNoFuso
 const MOTIVO_HUMANO: Readonly<Record<string, string>> = {
   maquina_sem_contato: "seu Mac parou de responder",
   reinicio_servidor: "o servidor reiniciou",
+  // ADR-131: o motor da máquina parou no meio (a atualização sozinha da VM, o restart, o app fechado).
+  reinicio_do_motor: "o nod foi reiniciado na máquina",
   // NOD-293 A7: a pessoa revogou a chave da máquina com a execução rodando nela.
   maquina_removida: "a máquina foi removida",
   // definido em 2026-09-24: o pedido da execução foi dispensado ainda aberto (dispensar-decisao.ts).

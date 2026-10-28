@@ -1,6 +1,7 @@
 import type { Autoria } from "../contracts/evento.ts";
 import type { KindMensagem, PayloadMensagem } from "../contracts/mensagem.ts";
 import { ASSUNTOS, type Assunto, type Destino, type RegraDeDestino } from "../contracts/destino-no-chat.ts";
+import { ehMotivoDaQueda } from "./incidente.ts";
 
 /**
  * Para onde cada assunto vai (definido em 2026-10-18, plano do chat limpo, PR 1; ADR-114). Só no servidor: a web recebe
@@ -120,7 +121,7 @@ export const ASSUNTOS_DA_ATIVIDADE: readonly Assunto[] = ASSUNTOS.filter((a) => 
  */
 export function assuntoDaInterrupcao(motivo: string): Assunto {
   if (motivo === "parado_pela_pessoa" || motivo === "absorvido") return "turno.interrompido";
-  if (motivo === "maquina_sem_contato" || motivo === "reinicio_servidor") return "turno.queda_da_maquina";
+  if (ehMotivoDaQueda(motivo)) return "turno.queda_da_maquina";
   return "turno.falhou";
 }
 

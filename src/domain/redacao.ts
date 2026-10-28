@@ -187,6 +187,8 @@ const MOTIVO_EM_PORTUGUES: Readonly<Record<MotivoFalha | MotivoInterrupcao, stri
   // parou foi o Mac da pessoa, e as três causas comuns cabem na frase.
   maquina_sem_contato: "seu Mac parou de responder (repouso, sem rede ou nod fechado)",
   reinicio_servidor: "o servidor reiniciou",
+  // ADR-131: o motor da máquina parou no meio (a atualização sozinha da VM, o restart, o app fechado).
+  reinicio_do_motor: "o nod foi reiniciado na máquina",
   executor_indisponivel: "a inteligência não estava disponível",
   lancamento_falhou: "a IA não conseguiu abrir neste Mac",
   sessao_rejeitada: "a IA recusou a conversa antes de começar",

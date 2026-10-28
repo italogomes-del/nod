@@ -92,7 +92,10 @@ O que muda em relação ao compartilhado:
 
 ## Atualizar e desligar
 
-- Atualizar: rode o mesmo `curl … | sh`. Ele troca os arquivos e mantém a conexão e os logins.
+- Atualizar: rode o mesmo `curl … | sh`. Ele troca os arquivos e mantém a conexão e os logins. Com o motor já rodando,
+  a versão nova só vale depois de `sudo systemctl restart nod-motor`. Desde a ADR-131 o reinício não derruba as tasks:
+  elas voltam para a fila na hora e continuam da mesma sessão. Normalmente nada disso é preciso: o motor se atualiza
+  sozinho (ADR-100).
 - Atualizar a IA (NOD-9, definido em 2026-10-23): o motor atualiza sozinho o Claude Code e o Codex que ficarem abaixo
   da versão que o nod precisa, quando a IA não tem turno rodando. Para pedir na hora: `nod-motor atualizar-ia claude`
   (ou `codex`), como o usuário `nod`: `sudo -u nod nod-motor atualizar-ia claude`. Ele espera os turnos daquela IA,
