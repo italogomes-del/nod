@@ -1,5 +1,5 @@
 import type { Readable, Writable } from "node:stream";
-import { pathToFileURL } from "node:url";
+import { ehPontoDeEntrada } from "../../../shared/entrada.ts";
 import { CAPACIDADES_GITHUB } from "../../../contracts/github.ts";
 import { ArgumentoGithubInvalido, ehCapacidadeGithub, validarArgsGithub } from "../../../domain/github.ts";
 import { PROTOCOLO_MCP } from "../../mcp-proxy/cliente-mcp.ts";
@@ -113,6 +113,6 @@ export async function main(env: Readonly<Record<string, string | undefined>> = p
   await criarServidorGithub(backendDoAmbiente(env)).ligar(process.stdin, process.stdout);
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (ehPontoDeEntrada(import.meta.url)) {
   void main().then(() => process.exit(0));
 }

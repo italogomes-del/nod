@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { appendFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { ehPontoDeEntrada } from "../../shared/entrada.ts";
 import { aspasDeShell, chaveDoComando, comandoNaFila, MARCA_DA_FILA, precisaDaVez, repositorioDaOrigem, semPeso, type Historico } from "../../domain/fila-do-forno.ts";
 import { decidirNativa, FRASE_ARQUIVO_DE_CREDENCIAL, FRASE_MCP_COM_CREDENCIAL, NATIVA_MCP_DA_PESSOA } from "../../domain/nativas.ts";
 import { ESPERA_APROVACAO_NO_TURNO_MS, LONGPOLL_APROVACAO_MS, VARIAVEL_CONFIG_HOOK } from "../../shared/constantes.ts";
@@ -297,4 +297,4 @@ export async function main(): Promise<void> {
   if (cfg?.prazoMs) process.exit(0);
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) void main();
+if (ehPontoDeEntrada(import.meta.url)) void main();

@@ -1,4 +1,4 @@
-import { pathToFileURL } from "node:url";
+import { ehPontoDeEntrada } from "../../shared/entrada.ts";
 import { log } from "../../obs/log.ts";
 import { arquivoDeGruposDoServidor, encerrarGruposOrfaos } from "../executor/grupos-orfaos.ts";
 import { encerrarFugitivosDaInstancia } from "../executor/fugitivos.ts";
@@ -55,7 +55,7 @@ export function ouvirSinaisDeEncerramento(encerrar: (sinal: string) => void, sai
   };
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (ehPontoDeEntrada(import.meta.url)) {
   try {
     process.loadEnvFile(".env");
   } catch {

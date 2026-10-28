@@ -66,8 +66,8 @@ ANTERIOR=$(gh release list -R "$REPO_GH" --exclude-drafts --limit 50 --json tagN
   --jq '[.[] | select(.tagName | test("^(desktop-)?v"))] | sort_by(.publishedAt) | last | .tagName // ""')
 
 # O hdiutil trava quando o Mac está saturado (rc.8: Docker a 800% de CPU). Um DMG de 2 MB em 90 s prova que ele responde.
-# Caminho real (pwd -P): o $TMPDIR do macOS fica em /var, link para /private/var, e o proxy só roda o main quando o
-# caminho recebido é igual ao import.meta.url dele. Pelo link, ele sai com 0 sem responder.
+# Caminho real (pwd -P): o $TMPDIR do macOS fica em /var, link para /private/var. Desde a NOD-298 o proxy compara pelo
+# caminho real e roda pelo link também; o pwd -P ficou por ser inofensivo.
 TRABALHO=$(cd "$(mktemp -d "${TMPDIR:-/tmp}/nod-release-$VERSAO.XXXXXX")" && pwd -P)
 perl -e 'alarm 90; exec @ARGV' hdiutil create -quiet -size 2m -fs HFS+ -volname teste "$TRABALHO/teste.dmg" \
   || falha "o hdiutil não respondeu em 90 s. Alivie o Mac (por exemplo, docker desktop restart) e rode de novo"

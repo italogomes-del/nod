@@ -1,6 +1,6 @@
 import { appendFileSync } from "node:fs";
 import type { Readable, Writable } from "node:stream";
-import { pathToFileURL } from "node:url";
+import { ehPontoDeEntrada } from "../../shared/entrada.ts";
 import type { Negacao } from "../../contracts/negacao.ts";
 import type { PlanoTurno } from "../../contracts/plano-turno.ts";
 import { ESPERA_APROVACAO_NO_TURNO_MS, LONGPOLL_APROVACAO_MS, ORCAMENTO_RESULTADO_CHARS } from "../../shared/constantes.ts";
@@ -319,6 +319,6 @@ export async function main(env: Readonly<Record<string, string | undefined>> = p
   await proxy.ligar(process.stdin, process.stdout);
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (ehPontoDeEntrada(import.meta.url)) {
   void main().then(() => process.exit(0));
 }
