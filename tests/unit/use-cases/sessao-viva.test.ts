@@ -91,6 +91,30 @@ describe("absorverNaSessao (ADR-067)", () => {
     for (const t of [comAnexo, rotina, deOutra]) expect(t.estado).toBe("pendente");
   });
 
+  it("NOD-23: /configurar e o que veio depois ficam na fila (viram turno próprio, com o plano que traduz o comando)", async () => {
+    const { d, agenteId, conversaId } = await cenario();
+    const vivo = await turno(d, agenteId, conversaId, { estado: "despachando" });
+    const antes = await turno(d, agenteId, conversaId, { texto: "antes" });
+    const configurar = await turno(d, agenteId, conversaId, { texto: "/setup muda o tom" });
+    const depois = await turno(d, agenteId, conversaId, { texto: "depois" });
+    // App antigo (sem confirmação): absorve só o que vem antes do comando.
+    expect((await absorverNaSessao(d.deps, { turnoId: vivo.id, executor: "local" })).data.textos).toEqual(["antes"]);
+    expect(antes.estado).toBe("interrompido");
+    for (const t of [configurar, depois]) expect(t.estado).toBe("pendente");
+    // App que confirma: nem oferece.
+    expect((await absorverNaSessao(d.deps, { turnoId: vivo.id, executor: "local", confirma: true })).data.textos).toEqual([]);
+  });
+
+  it("NOD-23: uma citação antes do /configurar não esconde o comando da sessão viva", async () => {
+    const { d, agenteId, conversaId } = await cenario();
+    const vivo = await turno(d, agenteId, conversaId, { estado: "despachando" });
+    const antes = await turno(d, agenteId, conversaId, { texto: "antes" });
+    const configurar = await turno(d, agenteId, conversaId, { texto: "(respondendo a: «Quer mudar?»)\n/configurar" });
+    const depois = await turno(d, agenteId, conversaId, { texto: "depois" });
+    expect((await absorverNaSessao(d.deps, { turnoId: vivo.id, executor: "local" })).data.ids).toEqual([antes.id]);
+    expect([configurar.estado, depois.estado]).toEqual(["pendente", "pendente"]);
+  });
+
   it("pedido de colega (delegação, sob procuração), sala e turno que não roda não recebem mensagem da pessoa", async () => {
     const { d, agenteId, conversaId } = await cenario();
     const delegacao = await turno(d, agenteId, conversaId, { estado: "despachando", origem: "delegacao" });

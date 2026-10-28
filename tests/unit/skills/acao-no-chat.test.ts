@@ -90,7 +90,7 @@ describe("skill /acao-no-chat (NOD-392)", () => {
     expect(plano).toMatch(/[^!]ehNod\([^)]*\)[^;]*MODOS_DAS_MAOS_DO_NOD[^;]*FERRAMENTAS_DO_NOD/);
     expect(plano).toMatch(/!ehNod\([^)]*\)[^;]*MODOS_DAS_MAOS_DO_NOD[^;]*FERRAMENTA_CRIAR_BOTS/);
     // FERRAMENTAS_NOD_POR_MODO entra em todo bot; FERRAMENTAS_DO_NOD é somado
-    expect(plano).toMatch(/\[\.\.\.FERRAMENTAS_NOD_POR_MODO\[modo\][^;]*\.\.\.doNod/);
+    expect(plano).toMatch(/\.\.\.FERRAMENTAS_NOD_POR_MODO\[modo\][^;]*\.\.\.doNod/);
     expect(plano).toContain('FERRAMENTA_CRIAR_BOTS: NomeFerramentaNod = "criar_bots"');
   });
 

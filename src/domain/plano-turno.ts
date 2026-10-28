@@ -1,6 +1,8 @@
+import { semCitacao } from "./citacao.ts";
 import type { AnexoMeta } from "../contracts/anexo.ts";
 import type { PlataformaMaquina } from "../contracts/ponte.ts";
-import { traduzirParaOCli } from "./comandos.ts";
+import { comandoDaConversa, traduzirParaOCli } from "./comandos.ts";
+import { COMANDO_CONFIGURAR, entradaDaReconfiguracao } from "./reconfiguracao.ts";
 import type { Agente, EsforcoAgente } from "../contracts/agente.ts";
 import type { Concessao } from "../contracts/concessao.ts";
 import type { Conector } from "../contracts/conector.ts";
@@ -135,6 +137,27 @@ const MODOS_DAS_MAOS_DO_NOD: readonly ModoTurno[] = ["conversa", "criacao"];
  */
 export const FERRAMENTA_CRIAR_BOTS: NomeFerramentaNod = "criar_bots";
 
+/** NOD-23 (emenda da ADR-050): a ferramenta que a conversa ganha em reconfiguração (src/domain/reconfiguracao.ts). */
+export const FERRAMENTA_RECONFIGURACAO: NomeFerramentaNod = "atualizar_perfil";
+
+/**
+ * NOD-23: a reconfiguração só vale na conversa da pessoa com um bot comum, fora de task (a frente e a task filha não
+ * mudam o perfil de quem as abriu). Quem diz se a janela está viva e se o bot é elegível é emitir-plano-turno.
+ */
+export function emReconfiguracaoNoPlano(entrada: Pick<EntradaPlano, "reconfiguracao" | "modo" | "agente" | "trabalho">): boolean {
+  return entrada.reconfiguracao === true && entrada.modo === "conversa" && !ehNod(entrada.agente) && !entrada.trabalho;
+}
+
+/** NOD-23: fora da reconfiguração, /configurar não vai cru ao CLI (que não o conhece); o bot só explica onde vale. */
+const CONFIGURAR_FORA = "A pessoa escreveu /configurar, que reconfigura um bot próprio já confirmado. Aqui ele não vale. Diga isso em uma frase, sem usar ferramentas.";
+
+/** A entrada do turno: /configurar vira o pedido da entrevista (ou a explicação); os outros comandos, o do CLI. */
+function entradaDoTurno(texto: string, harness: IdHarness | null | undefined, reconfigura: boolean): string {
+  const c = comandoDaConversa(semCitacao(texto));
+  if (c?.comando.nome === COMANDO_CONFIGURAR) return reconfigura ? entradaDaReconfiguracao(c.resto) : CONFIGURAR_FORA;
+  return traduzirParaOCli(texto, harness);
+}
+
 export const PLANO_SEM_VALIDADE = Number.MAX_SAFE_INTEGER;
 
 export const REGRA_MONTAGEM = "regra:montagem-ferramentas" as const;
@@ -253,6 +276,11 @@ export type EntradaPlano = {
    * primeiro. Na conversa e na sala, com ao menos um, entram a linha do prompt e responder_pedido; ausente ou vazio = nada.
    */
   pedidosPendentes?: readonly PedidoPendenteNoPrompt[];
+  /**
+   * NOD-23: a conversa está em reconfiguração (/configurar há menos de 2 h, bot elegível; emitir-plano-turno confere).
+   * Só vale no modo conversa, fora de task e fora do Nod: soma atualizar_perfil e troca a linha do modo pela da entrevista.
+   */
+  reconfiguracao?: boolean;
   agora: number;
 };
 
@@ -286,8 +314,9 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
   // ligação), não há onde rodar: fica o me_chame_as.
   const esperaComando: readonly NomeFerramentaNod[] = nativas.includes("Bash") && FERRAMENTAS_NOD_POR_MODO[modo].includes("me_chame_as") ? ["esperar_comando"] : [];
   const frente = ehFrente(entrada.trabalho);
+  const reconfigura = emReconfiguracaoNoPlano(entrada);
   const abreConta: readonly NomeFerramentaNod[] = entrada.contas && MODOS_DA_CONTA.includes(modo) && !entrada.trabalho ? [FERRAMENTA_ABRIR_CONTA] : [];
-  const nod = [...FERRAMENTAS_NOD_POR_MODO[modo], ...esperaComando, ...(modo === "ligacao" && entrada.onboarding ? FERRAMENTAS_NOD_ONBOARDING : []), ...doNod, ...criaBots, ...respondePedido, ...abreConta]
+  const nod = [...(reconfigura ? [FERRAMENTA_RECONFIGURACAO] : []), ...FERRAMENTAS_NOD_POR_MODO[modo], ...esperaComando, ...(modo === "ligacao" && entrada.onboarding ? FERRAMENTAS_NOD_ONBOARDING : []), ...doNod, ...criaBots, ...respondePedido, ...abreConta]
     .filter((n) => (n !== "abrir_frentes" || podeAbrirTask(entrada.trabalho ?? null)) && (n !== "mandar_para_frente" || podeMandarParaTask(entrada.trabalho ?? null)))
     .filter((n) => !frente || !FERRAMENTAS_FORA_DA_FRENTE.includes(n))
     .concat(frente ? [FERRAMENTA_DA_FRENTE] : [])
@@ -341,7 +370,7 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
   // NOD-323 (ADR-126): quem tem pasta e terminal gera arquivos; `anexar_midia` os mostra no chat (atendida pelo proxy).
   // A sala fica fora nesta PR (a fala da sala vai por postarNaSala, que não prende a mídia).
   if (pasta && modo !== "sala" && entrada.semAnexarMidia !== true) ferramentas = [...ferramentas, FERRAMENTA_ANEXAR_MIDIA];
-  const prompt = promptEmPartes({ agente: entrada.agente, memorias: entrada.memorias, ferramentas, nativas, pastaDoBot: pasta, pessoaNome: entrada.pessoaNome, modo, colegas: entrada.colegas, contextoConversa: entrada.contextoConversa, conectores: entrada.conectores, rotinas: entrada.rotinasDoAgente, computadorFora: temComputador ? entrada.computadorFora ?? null : null, delegacao: modo === "delegacao" ? entrada.delegacao ?? null : null, profundidade: entrada.profundidade, semTerminal: motivoSemTerminal({ modo, confianca: entrada.confianca, terminal: entrada.terminal === true }), harness: entrada.harness ?? null, trabalho: entrada.trabalho ?? null, trabalhosAbertos: podeAbrirTask(entrada.trabalho ?? null) ? entrada.trabalhosAbertos ?? [] : [], ...(comPedidos ? { pedidosPendentes: entrada.pedidosPendentes } : {}), ...(modo === "conversa" && entrada.bastidores?.length ? { bastidores: entrada.bastidores } : {}), ...(ehNod(entrada.agente) ? { manualDoNod: manualDoNod(entrada.revisor === true) } : {}), ...(entrada.maquina ? { maquina: entrada.maquina } : {}), ...(entrada.calibracao ? { calibracao: true } : {}), ...(entrada.whatsapp ? { whatsapp: true } : {}), ...(entrada.revisor ? { revisor: true } : {}), ...(entrada.sobreMim ? { sobreMim: entrada.sobreMim } : {}) });
+  const prompt = promptEmPartes({ agente: entrada.agente, memorias: entrada.memorias, ferramentas, nativas, pastaDoBot: pasta, pessoaNome: entrada.pessoaNome, modo, colegas: entrada.colegas, contextoConversa: entrada.contextoConversa, conectores: entrada.conectores, rotinas: entrada.rotinasDoAgente, computadorFora: temComputador ? entrada.computadorFora ?? null : null, delegacao: modo === "delegacao" ? entrada.delegacao ?? null : null, profundidade: entrada.profundidade, semTerminal: motivoSemTerminal({ modo, confianca: entrada.confianca, terminal: entrada.terminal === true }), harness: entrada.harness ?? null, trabalho: entrada.trabalho ?? null, trabalhosAbertos: podeAbrirTask(entrada.trabalho ?? null) ? entrada.trabalhosAbertos ?? [] : [], ...(comPedidos ? { pedidosPendentes: entrada.pedidosPendentes } : {}), ...(modo === "conversa" && entrada.bastidores?.length ? { bastidores: entrada.bastidores } : {}), ...(ehNod(entrada.agente) ? { manualDoNod: manualDoNod(entrada.revisor === true) } : {}), ...(entrada.maquina ? { maquina: entrada.maquina } : {}), ...(entrada.calibracao ? { calibracao: true } : {}), ...(entrada.whatsapp ? { whatsapp: true } : {}), ...(entrada.revisor ? { revisor: true } : {}), ...(entrada.sobreMim ? { sobreMim: entrada.sobreMim } : {}), ...(reconfigura ? { reconfiguracao: true } : {}) });
   const clone = cloneDaMaquina(entrada, pasta, ferramentas, prompt.promptSistema);
   return {
     tenantId: entrada.turno.tenantId,
@@ -360,7 +389,7 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
     ...(pasta ? { pastaDoBot: pasta } : {}),
     ...prompt,
     ...(clone && "caminho" in clone ? { cloneDaMaquina: clone } : {}),
-    entrada: { texto: traduzirParaOCli(entrada.turno.entradaTexto, entrada.harness), sessaoCli: entrada.sessaoCli, modelo: entrada.turno.modelo, ...(entrada.anexos?.length ? { anexos: [...entrada.anexos] } : {}), ...(esforco ? { esforco } : {}) },
+    entrada: { texto: entradaDoTurno(entrada.turno.entradaTexto, entrada.harness, reconfigura), sessaoCli: entrada.sessaoCli, modelo: entrada.turno.modelo, ...(entrada.anexos?.length ? { anexos: [...entrada.anexos] } : {}), ...(esforco ? { esforco } : {}) },
     politicaExecucao: {
       prazoMs,
       orcamentoResultadoChars: ORCAMENTO_RESULTADO_CHARS,

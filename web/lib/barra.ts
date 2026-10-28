@@ -74,11 +74,15 @@ export function recentesDaConversa(mensagens: readonly Mensagem[]): string[] {
   return nomes;
 }
 
-export function listaDaBarra(dto: ComandosDto | null, filtro: string, recentes: readonly string[], comAtalhos = false): ListaDaBarra {
+/**
+ * `botProprio` (NOD-23): a conversa é com um bot da pessoa, já confirmado e que não é o Nod; só aí entram os comandos
+ * `soBotProprio` (/configurar). O servidor confere de novo ao receber.
+ */
+export function listaDaBarra(dto: ComandosDto | null, filtro: string, recentes: readonly string[], comAtalhos = false, botProprio = false): ListaDaBarra {
   const f = filtro.toLowerCase();
   const atalhos = comAtalhos ? ATALHOS_DA_BARRA.filter((a) => posicao(a.nome, f) >= 0) : [];
   const doMacLista = dto?.doMac?.comandos ?? [];
-  const conversa = (dto?.daConversa ?? []).filter((c) => [c.nome, ...c.apelidos].some((n) => posicao(n, f) >= 0));
+  const conversa = (dto?.daConversa ?? []).filter((c) => (botProprio || !c.soBotProprio) && [c.nome, ...c.apelidos].some((n) => posicao(n, f) >= 0));
   const ordenar = <T extends { nome: string }>(xs: T[]) => xs.map((x) => ({ x, p: posicao(x.nome, f) })).filter((y) => y.p >= 0).sort((a, b) => a.p - b.p).map((y) => y.x);
   const recentesItens = recentes
     .map((nome) => doMacLista.find((c) => c.nome === nome) ?? null)

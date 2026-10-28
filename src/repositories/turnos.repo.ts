@@ -1133,13 +1133,16 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
      * mandada a uma task não entra no turno da conversa, nem o contrário). Só toca 'pendente', então
      * um Cancelar que chegou antes deixa aquela mensagem de fora e um que chega depois recebe estado_invalido.
      */
-    async absorverPendentes(turno: Turno, entrada: (textos: readonly string[]) => string): Promise<{ turno: Turno; absorvidos: Turno[] }> {
+    async absorverPendentes(turno: Turno, entrada: (textos: readonly string[]) => string, ids?: readonly string[]): Promise<{ turno: Turno; absorvidos: Turno[] }> {
       if (!turno.mensagemOrigemId || (turno.origem !== "conversa" && turno.origem !== "sala")) return { turno, absorvidos: [] };
+      // NOD-23: com `ids`, só estas (o caso de uso cortou no primeiro comando da conversa); vazio = nenhuma.
+      if (ids && ids.length === 0) return { turno, absorvidos: [] };
       const linhas = await conn<Linha[]>`
         update turnos set estado = 'interrompido', motivo_interrupcao = 'absorvido', absorvido_por = ${turno.id}, lease_ate = null
         where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and conversa_id = ${turno.conversaId} and agente_id = ${turno.agenteId}
           and estado = 'pendente' and origem in ('conversa', 'sala') and mensagem_origem_id is not null and id <> ${turno.id}
           and trabalho_id is not distinct from ${turno.trabalhoId ?? null}::uuid
+          ${ids ? conn`and id = any(${ids as string[]}::uuid[])` : conn``}
         returning ${conn.unsafe(COLUNAS)}`;
       const absorvidos = linhas.map(paraTurno).sort((a, b) => a.criadoEm - b.criadoEm);
       if (absorvidos.length === 0) return { turno, absorvidos };

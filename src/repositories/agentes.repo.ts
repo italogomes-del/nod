@@ -36,10 +36,12 @@ interface Linha {
   inteligencia_modo: ModoInteligencia | null;
   ordem_ias: IdHarness[] | null;
   escolhas_ia: EscolhasIa | null;
+  configurando_desde: Date | null;
+  configurando_turno_id: string | null;
   criado_em: Date;
 }
 
-const COLUNAS = "tenant_id, id, owner_id, visibility, nome, titulo, descricao, dono, forma, cor, fixado, oculto, confirmado, modelo, harness, esforco, modo_aprovacao, duplicado_de, criado_em, secao, posicao, nao_lido, excluido_em, voz, voz_velocidade, papel, maquina_id, inteligencia_modo, ordem_ias, escolhas_ia";
+const COLUNAS = "tenant_id, id, owner_id, visibility, nome, titulo, descricao, dono, forma, cor, fixado, oculto, confirmado, modelo, harness, esforco, modo_aprovacao, duplicado_de, criado_em, secao, posicao, nao_lido, excluido_em, voz, voz_velocidade, papel, maquina_id, inteligencia_modo, ordem_ias, escolhas_ia, configurando_desde, configurando_turno_id";
 
 /** 0068: as colunas novas lidas como gravadas e conferidas contra harness/modelo (inteligenciaDoAgente). */
 function inteligenciaDaLinha(l: Linha): InteligenciaBot {
@@ -77,6 +79,8 @@ function paraAgente(l: Linha): Agente {
     voz: l.voz ?? null,
     vozVelocidade: l.voz_velocidade ?? 1,
     papel: l.papel ?? null,
+    configurandoDesde: l.configurando_desde ? ms(l.configurando_desde) : null,
+    configurandoTurnoId: l.configurando_turno_id,
     criadoEm: ms(l.criado_em),
   };
 }
@@ -143,7 +147,7 @@ export function agentesRepo(conn: Conn, escopo: Escopo) {
     async excluir(id: string, agora: number): Promise<Agente | null> {
       await conn`select pg_advisory_xact_lock(hashtext(${escopo.tenantId}), hashtext(${id}))`;
       // ADR-059: excluir volta o modo a 'manual' — restaurar não devolve autonomia, como não devolve concessões (ADR-034).
-      const [l] = await conn<Linha[]>`update agentes set excluido_em = ${new Date(agora)}, fixado = false, geracao_execucao = geracao_execucao + 1, modo_aprovacao = 'manual'
+      const [l] = await conn<Linha[]>`update agentes set excluido_em = ${new Date(agora)}, configurando_desde = null, configurando_turno_id = null, fixado = false, geracao_execucao = geracao_execucao + 1, modo_aprovacao = 'manual'
         where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and excluido_em is null
         returning ${conn.unsafe(COLUNAS)}`;
       if (!l) return null;
@@ -211,6 +215,44 @@ export function agentesRepo(conn: Conn, escopo: Escopo) {
     async buscarParaAtualizar(id: string): Promise<Agente | null> {
       const [l] = await conn<Linha[]>`select ${conn.unsafe(COLUNAS)} from agentes where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and excluido_em is null for update`;
       return l ? paraAgente(l) : null;
+    },
+
+    /**
+     * definido em 2026-10-28 (NOD-23): /configurar liga a entrevista de reconfiguração. Só a dona, bot confirmado, não
+     * excluído e nunca o Nod (o Nod não se reconfigura); a mesma regra de `podeReconfigurar`, repetida no WHERE para a
+     * linha que mudou entre a leitura e a escrita. Devolve se ligou.
+     */
+    async iniciarConfiguracao(id: string, agora: number, turnoId: string, expirouAntesDe: number): Promise<boolean> {
+      const linhas = await conn`update agentes set configurando_desde = ${new Date(agora)},
+          configurando_turno_id = case when configurando_desde is null or configurando_desde <= ${new Date(expirouAntesDe)} then ${turnoId} else coalesce(configurando_turno_id, ${turnoId}) end
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and excluido_em is null and confirmado and papel is null
+        returning id`;
+      return linhas.length > 0;
+    },
+
+    /**
+     * NOD-23: o /configurar que sai atrasado (fila, repetição) religa a janela vencida a partir da emissão. Só se o modo
+     * ainda está aberto (coluna não nula: o cartão não foi decidido). O UPDATE espera a trava do agente: emitir não
+     * segura a linha do turno nesta transação, então não há ordem cruzada com excluir; pular a trava perderia o comando.
+     */
+    async religarConfiguracao(id: string, agora: number, turnoId: string): Promise<boolean> {
+      const linhas = await conn`update agentes set configurando_desde = ${new Date(agora)}, configurando_turno_id = ${turnoId}
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id}
+          and excluido_em is null and confirmado and papel is null
+        returning id`;
+      return linhas.length > 0;
+    },
+
+    /** NOD-23: confirmar ou recusar a proposta de perfil fecha o modo. Idempotente (já fechado = nada). */
+    async encerrarConfiguracao(id: string, propostaTurnoId: string | null): Promise<void> {
+      await conn`update agentes set configurando_desde = null, configurando_turno_id = null
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and configurando_desde is not null
+          and exists (
+            select 1 from turnos p join turnos i on i.tenant_id = p.tenant_id
+            where p.tenant_id = agentes.tenant_id and p.id = ${propostaTurnoId} and i.id = agentes.configurando_turno_id
+              and p.agente_id = agentes.id and i.agente_id = agentes.id and p.conversa_id = i.conversa_id
+              and (p.criado_em, p.id) >= (i.criado_em, i.id)
+          )`;
     },
 
     async atualizarPerfil(id: string, perfil: PerfilAgente): Promise<Agente | null> {

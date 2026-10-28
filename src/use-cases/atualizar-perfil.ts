@@ -1,5 +1,8 @@
 import type { PayloadPropostaPerfil, PayloadPropostaRotina } from "../contracts/conversa.ts";
+import type { Turno } from "../contracts/turno.ts";
+import { semCitacao } from "../domain/citacao.ts";
 import { ehErroDeDominio, ErroDeDominio } from "../domain/erro.ts";
+import { emReconfiguracao } from "../domain/reconfiguracao.ts";
 import { podeCriarRotina } from "../domain/rotina-limites.ts";
 import { revisaoAtualDoPerfil } from "./confirmar-perfil.ts";
 import { autoriaAgente, evento } from "./autoria-evento.ts";
@@ -10,6 +13,43 @@ function opcional(v: unknown): string | undefined {
   if (v === undefined) return undefined;
   if (typeof v !== "string" || v.trim() === "") throw new ErroDeDominio("entrada_invalida", { cause: "campo de perfil" });
   return v.trim();
+}
+
+const depoisOuIgual = (turno: Turno, inicio: Turno) => turno.criadoEm > inicio.criadoEm || (turno.criadoEm === inicio.criadoEm && turno.id >= inicio.id);
+
+/** NOD-23: o prompt guia a entrevista; esta catraca impede o modelo de pular o resumo/"Certo?" ou exceder 4 perguntas. */
+async function validarRoteiroDaReconfiguracao(deps: Parameters<UseCasesNod["atualizarPerfil"]>[0], agenteId: string, conversaId: string, turnoId: string): Promise<void> {
+  const agente = await deps.repos.agentes.buscar(agenteId);
+  if (!agente) throw new ErroDeDominio("nao_encontrado");
+  // Bot ainda em criação usa a mesma ferramenta sem a entrevista da NOD-23. Num bot confirmado, plano antigo falha
+  // fechado depois de 2 h, confirmação ou recusa — a presença da ferramenta no plano não é autorização duradoura.
+  if (!agente.confirmado) return;
+  if (!agente.configurandoTurnoId || !emReconfiguracao(agente, deps.agora())) throw new ErroDeDominio("estado_invalido", { cause: "reconfiguracao encerrada" });
+  const [inicio, atual] = await Promise.all([deps.repos.turnos.buscar(agente.configurandoTurnoId), deps.repos.turnos.buscar(turnoId)]);
+  if (!inicio || !atual || inicio.agenteId !== agenteId || atual.agenteId !== agenteId || inicio.conversaId !== conversaId || atual.conversaId !== conversaId || !depoisOuIgual(atual, inicio)) {
+    throw new ErroDeDominio("estado_invalido", { cause: "proposta fora da reconfiguracao" });
+  }
+  const mensagens = await deps.repos.mensagens.listarDaConversa(conversaId, 200);
+  const comTurno = await Promise.all(mensagens.map(async (m) => ({
+    mensagem: m,
+    turno: m.turnoId ? await deps.repos.turnos.buscar(m.turnoId)
+      : m.autoria.autor_tipo === "pessoa" ? await deps.repos.turnos.buscarPorMensagemOrigem(m.id) : null,
+  })));
+  const relevantes = comTurno.filter(({ mensagem, turno }) => mensagem.kind === "texto" && turno?.origem === "conversa" && !turno.trabalhoId && depoisOuIgual(turno, inicio)).map(({ mensagem }) => mensagem);
+  // A confirmação pode ter sido absorvida pela sessão viva: a fala da pessoa conserva o turno próprio (posterior),
+  // enquanto o modelo chama a ferramenta no turno vivo original. A ordem das mensagens é a verdade desta troca.
+  let ultimaPessoa = -1;
+  for (let i = 0; i < relevantes.length; i++) if (relevantes[i]!.autoria.autor_tipo === "pessoa" && relevantes[i]!.autoria.autor_id === deps.escopo.pessoaId) ultimaPessoa = i;
+  const textoConfirmacao = ultimaPessoa >= 0 ? semCitacao(relevantes[ultimaPessoa]!.texto).trim() : "";
+  const afirmou = /^(?:sim|certo|isso|pode|confirmo|correto|ok|yes|perfeito|beleza|(?:ficou|est[aá]|t[aá])\s+(?:ótimo|otimo|certo|correto)|manda\s+ver|segue)\b/iu.test(textoConfirmacao);
+  const negou = /\b(?:n[aã]o|nunca|recuso|cancela|cancelar)\b/iu.test(textoConfirmacao);
+  const confirmou = afirmou && !negou;
+  const falas = relevantes.slice(0, ultimaPessoa).filter((m) => m.autoria.autor_tipo === "agente" && m.autoria.autor_id === agenteId);
+  const resumo = falas.at(-1);
+  const perguntas = falas.slice(0, -1).filter((m) => m.texto.includes("?"));
+  const umaPorFala = perguntas.every((m) => (m.texto.match(/\?/g) ?? []).length === 1);
+  const resumoValido = resumo && /\bcerto\s*\?/iu.test(resumo.texto) && (resumo.texto.match(/\?/g) ?? []).length === 1;
+  if (perguntas.length > 4 || !umaPorFala || !resumoValido || !confirmou) throw new ErroDeDominio("estado_invalido", { cause: `roteiro da reconfiguracao incompleto: perguntas=${perguntas.length}, uma=${umaPorFala}, resumo=${Boolean(resumoValido)}, confirmou=${confirmou}` });
 }
 
 /**
@@ -23,6 +63,7 @@ function opcional(v: unknown): string | undefined {
  * tipado com o índice e nada é criado — o modelo corrige e chama de novo.
  */
 export const atualizarPerfil: UseCasesNod["atualizarPerfil"] = async (deps, input) => {
+  await validarRoteiroDaReconfiguracao(deps, input.agenteId, input.conversaId, input.turnoId);
   const payload: PayloadPropostaPerfil = { kind: "perfil", turnoId: input.turnoId };
   const nome = opcional(input.nome);
   const titulo = opcional(input.titulo);

@@ -124,6 +124,9 @@ const CENARIOS: Record<string, EntradaPromptSistema> = {
   // NOD-346 (ADR-126): o bot é da pessoa e ela escreveu o "Sobre mim" — uma linha a mais na parte estável, numa linha só
   // mesmo com quebra no texto.
   "conversa-sobre-mim": { ...conversa("manual"), sobreMim: "Sou designer e mãe de dois.\nPrefiro respostas curtas." },
+  // NOD-23: /configurar — a conversa manual em reconfiguração: atualizar_perfil no catálogo e a linha da entrevista no
+  // lugar da linha da conversa.
+  "conversa-reconfiguracao": { ...conversa("manual"), reconfiguracao: true, ferramentas: [...conversa("manual").ferramentas, f("atualizar_perfil")] },
   // 3. Pedido de colega em profundidade 1 e no limite da corrente (ADR-063).
   "colega-profundidade-1": pedidoDeColega(1),
   "colega-profundidade-3": pedidoDeColega(3),

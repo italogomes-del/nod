@@ -4,6 +4,7 @@ import { entradaDaFila } from "../../src/domain/entrada-da-fila.ts";
 import { cancelarTurno } from "../../src/use-cases/cancelar-turno.ts";
 import { criarAgente } from "../../src/use-cases/criar-agente.ts";
 import { despacharTurno } from "../../src/use-cases/despachar-turno.ts";
+import { emitirPlanoTurno } from "../../src/use-cases/emitir-plano-turno.ts";
 import { enviarMensagem, lerConversa } from "../../src/use-cases/enviar-mensagem.ts";
 import { depsSobreTrx, esperarErro, executar, MARLON } from "../helpers/deps-l6.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
@@ -37,6 +38,41 @@ describeIntegracao("fila da conversa no Postgres (0024): cancelar uma, ler as re
       expect(d.data.plano?.entrada.texto).toBe(entradaDaFila(["fazer novamente", "e o e-mail do Daniel?"]));
       expect(await deps.repos.turnos.buscar(c.data.turno.id)).toMatchObject({ estado: "interrompido", motivoInterrupcao: "absorvido", absorvidoPor: a.data.turno.id });
       await esperarErro(() => cancelarTurno(deps, { turnoId: c.data.turno.id }), "estado_invalido");
+    });
+  });
+
+  it("NOD-23: /configurar separa a fila em três turnos e não é absorvido por uma fala comum", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const deps = depsSobreTrx(trx, MARLON);
+      const { data: criado } = await executar(deps, criarAgente, { dono: "pessoa" });
+      await deps.repos.agentes.atualizarPerfil(criado.agente.id, { descricao: "Ajuda com código", confirmado: true });
+      const conversaId = criado.conversa.id;
+      const maquina = randomUUID();
+      const antes = await executar(deps, enviarMensagem, { conversaId, texto: "antes", inventario: PRONTO });
+      const configurar = await executar(deps, enviarMensagem, { conversaId, texto: "/configurar", inventario: PRONTO });
+      const depois = await executar(deps, enviarMensagem, { conversaId, texto: "depois", inventario: PRONTO });
+
+      const primeiro = (await executar(deps, despacharTurno, { machineId: maquina, inventario: PRONTO })).data;
+      expect(primeiro.plano?.turnoId).toBe(antes.data.turno.id);
+      expect(primeiro.plano?.entrada.texto).toBe("antes");
+      expect(primeiro.plano && "catalogo" in primeiro.plano ? primeiro.plano.catalogo.ferramentas.map((f) => f.nome) : []).not.toContain("atualizar_perfil");
+      expect(primeiro.plano && "promptSistema" in primeiro.plano ? primeiro.plano.promptSistema : "").not.toContain("Modo de reconfiguração");
+      expect((await deps.repos.turnos.buscar(configurar.data.turno.id))?.estado).toBe("pendente");
+      expect((await deps.repos.turnos.buscar(depois.data.turno.id))?.estado).toBe("pendente");
+
+      await deps.repos.turnos.assentar(antes.data.turno.id, { estado: "concluido", sinais: { promptSubmitted: true, producedOutput: true } });
+      const segundo = (await executar(deps, despacharTurno, { machineId: maquina, inventario: PRONTO })).data;
+      expect(segundo.plano?.turnoId).toBe(configurar.data.turno.id);
+      // deps-l6 usa um emissor mínimo no despachante; a regra NOD-23 é provada pelo emissor real sobre o turno escolhido.
+      const planoReal = (await emitirPlanoTurno(deps, { turnoId: configurar.data.turno.id, machineId: maquina, executor: "local", harnesses: { "claude-cli": PRONTO } })).data;
+      expect(planoReal.entrada.texto).toContain("Comece a entrevista");
+      expect("catalogo" in planoReal ? planoReal.catalogo.ferramentas.map((f) => f.nome) : []).toContain("atualizar_perfil");
+      expect((await deps.repos.turnos.buscar(depois.data.turno.id))?.estado).toBe("pendente");
+
+      await deps.repos.turnos.assentar(configurar.data.turno.id, { estado: "concluido", sinais: { promptSubmitted: true, producedOutput: true } });
+      const terceiro = (await executar(deps, despacharTurno, { machineId: maquina, inventario: PRONTO })).data;
+      expect(terceiro.plano?.turnoId).toBe(depois.data.turno.id);
+      expect(terceiro.plano?.entrada.texto).toBe("depois");
     });
   });
 });

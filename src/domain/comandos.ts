@@ -7,6 +7,7 @@ import {
   type ComandoDoMac,
 } from "../contracts/comandos.ts";
 import { HARNESS_LEGADO, type IdHarness } from "../contracts/harness.ts";
+import { semCitacao } from "./citacao.ts";
 import { capacidadesDe } from "./harness.ts";
 
 /**
@@ -22,6 +23,9 @@ export const COMANDOS_DA_CONVERSA: readonly ComandoDaConversa[] = [
   { nome: "compactar", apelidos: ["compact"], descricao: "Resume o histórico e libera a janela; o bot continua daqui", acao: "turno", cli: "/compact" },
   { nome: "nova-sessao", apelidos: ["clear", "nova-sessão"], descricao: "O bot começa do zero; a conversa continua aqui para você", acao: "nod" },
   { nome: "modelo", apelidos: ["model", "effort", "esforco", "esforço"], descricao: "Troca o modelo e o esforço do bot", acao: "tela" },
+  // NOD-23 (definido em 2026-10-28): o bot entrevista a pessoa e propõe o perfil de novo (src/domain/reconfiguracao.ts).
+  // Sem `cli`: o nod troca a entrada pelo pedido da entrevista (montarPlano). `config` sai de "só do terminal".
+  { nome: "configurar", apelidos: ["setup", "config"], descricao: "O bot te entrevista e propõe um perfil novo", acao: "turno", soBotProprio: true },
 ];
 
 /** "/Nome args" → o comando da conversa pelo nome ou apelido, sem diferença de caixa. */
@@ -31,6 +35,14 @@ export function comandoDaConversa(texto: string): { comando: ComandoDaConversa; 
   const nome = m[1]!.toLowerCase();
   const comando = COMANDOS_DA_CONVERSA.find((c) => c.nome === nome || c.apelidos.includes(nome));
   return comando ? { comando, resto: m[2]!.trim() } : null;
+}
+
+/**
+ * NOD-23 (2026-10-28): a fala é um comando da conversa com turno próprio (/configurar, /contexto, /uso, /compactar), com
+ * ou sem a citação na frente. Ela não entra na fila lida junta nem no turno vivo: sem o plano dela, ia crua ao CLI.
+ */
+export function ehComandoDeTurno(texto: string): boolean {
+  return comandoDaConversa(semCitacao(texto))?.comando.acao === "turno";
 }
 
 /**
@@ -141,7 +153,9 @@ export function montarCatalogo(e: { skills: readonly string[]; comandos: readonl
     vistos.add(nome);
     const arquivo = e.arquivos[nome];
     if (arquivo) {
-      if (arquivo.frontmatter.userInvocable === false) continue;
+      // NOD-23 (2026-10-28): o nome da conversa ganha do arquivo do Mac (/setup, /config): o servidor sempre o trata como
+      // o comando da conversa, então listar a skill de mesmo nome mostraria um comando que nunca roda.
+      if (arquivo.frontmatter.userInvocable === false || daConversa.has(nome)) continue;
       const inteira = (arquivo.frontmatter.description ?? "").trim();
       const sufixo = /\s*\(([A-Za-z][\w.-]{2,29})\)\s*$/.exec(inteira);
       const origem = arquivo.origem === "suas" && sufixo ? sufixo[1]! : arquivo.origem;
@@ -156,7 +170,8 @@ export function montarCatalogo(e: { skills: readonly string[]; comandos: readonl
       comandos.push({ nome, descricao: COMANDOS_EMBUTIDOS_NO_CHAT[nome]!, origem: "Claude Code" });
     }
   }
-  const soDoTerminal = [...new Set([...e.soDoTerminal, ...[...e.comandos].filter((c) => terminal.has(c))])].slice(0, TETO_SO_DO_TERMINAL);
+  // NOD-23: um nome que é da conversa (/config = /configurar) nunca é "só do terminal", mesmo que o CLI o diga.
+  const soDoTerminal = [...new Set([...e.soDoTerminal, ...[...e.comandos].filter((c) => terminal.has(c))])].filter((c) => !daConversa.has(c)).slice(0, TETO_SO_DO_TERMINAL);
   return { comandos, soDoTerminal, versaoCli: e.versaoCli };
 }
 

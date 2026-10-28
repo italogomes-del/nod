@@ -55,6 +55,8 @@ async function recusarObsoleta(deps: Deps, proposta: Proposta, p: PayloadPropost
   const recusada = await deps.repos.propostas.decidir(proposta.id, "recusada");
   if (!recusada) throw new ErroDeDominio("estado_invalido", { cause: `proposta ${proposta.estado}` });
   await recusarRotinasDoCard(deps, p);
+  // NOD-23: o cartão de perfil fechou (aqui, recusado por obsoleto): a reconfiguração acaba junto.
+  await deps.repos.agentes.encerrarConfiguracao(atual.id, p.turnoId ?? null);
   const autoria = autoriaPessoa(deps.escopo);
   const mensagem = await deps.repos.mensagens.criar({ conversaId: proposta.conversaId, autoria, kind: "sistema", assunto: "proposta.obsoleta", texto: TEXTO_PERFIL_MUDOU, confianca: "confiavel" });
   log("aviso", "proposta_perfil_obsoleta", { proposta_id: proposta.id, agente_id: atual.id });
@@ -105,6 +107,8 @@ export async function confirmarPerfil(deps: Deps, lida: Proposta): Promise<{ dat
   const autoria = autoriaPessoa(deps.escopo);
   const agente = await deps.repos.agentes.atualizarPerfil(proposta.agenteId, { nome: p.nome, titulo: p.titulo, descricao: p.descricao, confirmado: true });
   if (!agente) throw new ErroDeDominio("nao_permitido");
+  // NOD-23: perfil confirmado fecha a reconfiguração (a linha do agente já está travada desde buscarParaAtualizar).
+  await deps.repos.agentes.encerrarConfiguracao(agente.id, proposta.payload.turnoId ?? null);
   const events: RuntimeEvent[] = [];
   // definido em 2026-09-28 (ADR-050): as rotinas que vieram com o perfil nascem no mesmo clique, com os
   // acessos declarados (ativarRotina), e a linha de sistema é uma só para o card inteiro.

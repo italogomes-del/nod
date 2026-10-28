@@ -470,6 +470,8 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         const a = doTenant(b.agentes).find((a) => a.id === id && a.ownerId === escopo.pessoaId && !a.excluidoEm);
         if (!a) return null;
         a.excluidoEm = em;
+        a.configurandoDesde = null;
+        a.configurandoTurnoId = null;
         a.fixado = false;
         a.modoAprovacao = "manual";
         b.geracoes.set(id, (b.geracoes.get(id) ?? 0) + 1);
@@ -533,6 +535,33 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async buscarParaAtualizar(id) {
         // Espelha o SQL: só a dona e não excluído. Sem concorrência na memória, sem lock.
         return doTenant(b.agentes).find((a) => a.id === id && a.ownerId === escopo.pessoaId && !a.excluidoEm) ?? null;
+      },
+      async iniciarConfiguracao(id, quando, turnoId, expirouAntesDe) {
+        // Espelha o SQL (NOD-23): só a dona, confirmado, não excluído e nunca o Nod.
+        const a = doTenant(b.agentes).find((x) => x.id === id && x.ownerId === escopo.pessoaId && !x.excluidoEm && x.confirmado && !x.papel);
+        if (!a) return false;
+        const reinicia = a.configurandoDesde == null || a.configurandoDesde <= expirouAntesDe;
+        a.configurandoDesde = quando;
+        if (reinicia || !a.configurandoTurnoId) a.configurandoTurnoId = turnoId;
+        return true;
+      },
+      async religarConfiguracao(id, quando, turnoId) {
+        const a = doTenant(b.agentes).find((x) => x.id === id && x.ownerId === escopo.pessoaId && !x.excluidoEm && x.confirmado && !x.papel);
+        if (!a) return false;
+        a.configurandoDesde = quando;
+        a.configurandoTurnoId = turnoId;
+        return true;
+      },
+      async encerrarConfiguracao(id, propostaTurnoId) {
+        const a = doTenant(b.agentes).find((x) => x.id === id && x.ownerId === escopo.pessoaId);
+        const proposta = doTenant(b.turnos).find((t) => t.id === propostaTurnoId);
+        const inicio = doTenant(b.turnos).find((t) => t.id === a?.configurandoTurnoId);
+        const pertence = proposta && inicio && proposta.agenteId === id && inicio.agenteId === id && proposta.conversaId === inicio.conversaId
+          && (proposta.criadoEm > inicio.criadoEm || (proposta.criadoEm === inicio.criadoEm && proposta.id >= inicio.id));
+        if (a && pertence) {
+          a.configurandoDesde = null;
+          a.configurandoTurnoId = null;
+        }
       },
       async atualizarPerfil(id, perfil) {
         const a = doTenant(b.agentes).find((x) => x.id === id);
@@ -1896,10 +1925,10 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         t.leaseAte = null;
         return t;
       },
-      async absorverPendentes(turno, entrada) {
+      async absorverPendentes(turno, entrada, ids) {
         if (!turno.mensagemOrigemId || (turno.origem !== "conversa" && turno.origem !== "sala")) return { turno, absorvidos: [] };
         const absorvidos = doTenant(b.turnos)
-          .filter((t) => t.id !== turno.id && t.conversaId === turno.conversaId && t.agenteId === turno.agenteId && t.estado === "pendente" && (t.origem === "conversa" || t.origem === "sala") && t.mensagemOrigemId && (t.trabalhoId ?? null) === (turno.trabalhoId ?? null))
+          .filter((t) => (!ids || ids.includes(t.id)) && t.id !== turno.id && t.conversaId === turno.conversaId && t.agenteId === turno.agenteId && t.estado === "pendente" && (t.origem === "conversa" || t.origem === "sala") && t.mensagemOrigemId && (t.trabalhoId ?? null) === (turno.trabalhoId ?? null))
           .sort((x, y) => x.criadoEm - y.criadoEm);
         for (const t of absorvidos) {
           t.estado = "interrompido";

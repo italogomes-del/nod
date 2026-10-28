@@ -100,3 +100,13 @@ describe("ADR-125 (NOD-349): Planejar e Pedir ajuda no / da conversa", () => {
     expect(listaDaBarra(DTO, "", []).itens.some((i) => i.grupo === "atalhos")).toBe(false);
   });
 });
+
+describe("NOD-23: /configurar só na conversa com bot próprio", () => {
+  const COM_CONFIGURAR: ComandosDto = { ...DTO, daConversa: [...DTO.daConversa, { nome: "configurar", apelidos: ["setup", "config"], descricao: "O bot te entrevista e propõe um perfil novo", acao: "turno", soBotProprio: true }] };
+  it("bot próprio vê; o Nod, bot alheio ou tela sem bot não", () => {
+    expect(listaDaBarra(COM_CONFIGURAR, "setup", [], true, true).itens.map((i) => i.nome)).toContain("configurar");
+    expect(listaDaBarra(COM_CONFIGURAR, "conf", [], true, true).itens.map((i) => i.nome)).toContain("configurar");
+    expect(listaDaBarra(COM_CONFIGURAR, "conf", [], true, false).itens.map((i) => i.nome)).not.toContain("configurar");
+    expect(listaDaBarra(COM_CONFIGURAR, "", []).itens.map((i) => i.nome)).not.toContain("configurar");
+  });
+});

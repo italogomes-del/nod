@@ -16,3 +16,15 @@ export function ateOPrimeiroAnexo<T extends { criadoEm: number; id: string; entr
   const corte = ordenada.findIndex((t) => t.entradaAnexos.length > 0);
   return corte === -1 ? ordenada : ordenada.slice(0, corte);
 }
+
+/**
+ * NOD-23 (2026-10-28): o turno vivo também para na primeira fala que é comando da conversa com turno próprio
+ * (/configurar, /contexto, /uso, /compactar). Absorvida, ela ia crua ao stdin do CLI, sem o plano que a traduz (a
+ * entrevista do /configurar precisa da ferramenta e do prompt do modo). Ela e o que veio depois esperam o próximo turno.
+ * `ehComandoDeTurno` vem de quem chama (src/domain/comandos.ts), para este arquivo seguir sem dependências.
+ */
+export function ateOPrimeiroComando<T extends { criadoEm: number; id: string; entradaTexto: string }>(fila: readonly T[], ehComandoDeTurno: (texto: string) => boolean): T[] {
+  const ordenada = [...fila].sort(porChegada);
+  const corte = ordenada.findIndex((t) => ehComandoDeTurno(t.entradaTexto));
+  return corte === -1 ? ordenada : ordenada.slice(0, corte);
+}

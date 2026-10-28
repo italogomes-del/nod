@@ -3185,7 +3185,9 @@ function atualizarBarra(ta: HTMLTextAreaElement): void {
   const filtro = nomeDigitado(ta.value, ta.selectionStart);
   if (filtro !== null) {
     const recentes = recentesDaConversa(conversaDaTela(estado)?.mensagens ?? []);
-    const l = listaDaBarra(comandosDto, filtro, recentes, estado.tela.tipo === "conversa");
+    const bot = estado.tela.tipo === "conversa" ? botGerido(estado.tela.agenteId) : undefined;
+    const botProprio = Boolean(bot && bot.ownerId === estado.sessao?.pessoaId && bot.confirmado && bot.papel !== "nod");
+    const l = listaDaBarra(comandosDto, filtro, recentes, estado.tela.tipo === "conversa", botProprio);
     itensDaBarra = l.itens;
     selecionadoNaBarra = Math.min(selecionadoNaBarra, Math.max(0, l.itens.length - 1));
     lista.innerHTML = renderListaBarra(l, { filtro, selecionado: selecionadoNaBarra, bot: nomeDoBotDaTela(), doMacEm: comandosDto?.doMacEm ?? null });

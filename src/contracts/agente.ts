@@ -79,6 +79,10 @@ export type Agente = {
    * não se renomeia, não se move nem se duplica (`nod_protegido`). Ausente = bot comum.
    */
   papel?: PapelAgente | null;
+  /** NOD-23 (0127): desde quando /configurar ligou a entrevista de reconfiguração; null ou ausente = fora do modo. */
+  configurandoDesde?: EpochMs | null;
+  /** NOD-23 (0127): turno do /configurar que abriu o modo; separa falas anteriores da entrevista. */
+  configurandoTurnoId?: string | null;
   criadoEm: EpochMs;
 };
 

@@ -90,3 +90,20 @@ O desenho que valeu está na página "Bot novo" do canvas "Nod — tela do agent
 - Desmarcar rotinas dentro do card; hoje é tudo ou "Ajustar" pela conversa.
 - Ver as instruções inteiras das rotinas no card; o card mostra o começo, e o resto fica no `title`.
 - Pausar "por uma semana": pausar é até a pessoa reativar.
+
+## Emenda (2026-10-28, NOD-23): `/configurar` reabre a entrevista num bot já confirmado
+
+- **Submodo, não modo novo.** `/configurar` (apelidos `/setup` e `/config`) na conversa própria com um bot da
+  pessoa, confirmado, não excluído e que não é o Nod, liga `agentes.configurando_desde`. Enquanto a janela está
+  viva, o turno de conversa recebe também `atualizar_perfil` e a linha da entrevista no prompt (no máximo 4
+  perguntas, uma por mensagem, resumo e "Certo?"). Tudo o mais que vale para `conversa` continua valendo.
+- **Nada muda sem a pessoa.** A ferramenta só propõe; o perfil muda no cartão de sempre (`confirmar-perfil`).
+- **Fim do modo.** Confirmar, recusar ou a proposta ficar obsoleta fecha o modo (`encerrarConfiguracao`). Sem
+  nada disso, ele expira em 2 h. O turno que é o próprio `/configurar` vale mesmo atrasado (fila, repetição) e
+  religa a janela a partir da emissão.
+- **Sessão viva.** A fala `/configurar` não é absorvida pelo turno em curso (ADR-067): vira turno próprio, com o
+  plano que a traduz.
+- **Ressalva aceita.** Um turno já emitido com `atualizar_perfil` continua com ela se a pessoa recusar o cartão no
+  meio dele; o bot pode propor de novo, mas nada muda sem confirmar.
+- **Gatilho de reversão.** Se, em 30 dias, aparecer na trilha um `atualizar_perfil` fora da criação sem um
+  `/configurar` da pessoa nas 2 h anteriores, a janela por coluna não basta e passa a exigir o comando no mesmo turno.

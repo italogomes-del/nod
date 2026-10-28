@@ -82,6 +82,13 @@ const INSTRUCAO_MODO: Record<Exclude<ModoTurno, "delegacao">, string> = {
 };
 
 /**
+ * NOD-23 (/configurar): a conversa em reconfiguração troca a linha do modo pela da entrevista. Até 4 perguntas, uma por
+ * mensagem, partindo do perfil atual; resumo e "Certo?" antes de propor; pedido direto pula a entrevista.
+ */
+export const INSTRUCAO_RECONFIGURACAO =
+  "Modo de reconfiguração: a pessoa pediu para reconfigurar você. Parta do seu perfil atual e entreviste-a com no máximo 4 perguntas curtas, uma por mensagem, com exemplos concretos: a missão, o tom, o que evitar e as rotinas. Se ela já disse o que quer mudar, pule as perguntas. Antes de propor, resuma a mudança em poucas linhas e pergunte \"Certo?\"; depois do sim, chame atualizar_perfil com a descrição revista e o que mais mudar (nome, título; rotinas novas em rotinas). Nada muda antes de ela confirmar o cartão. Fora isso, responda normalmente. Efeito externo só por item aprovado via pedir_aprovacao.";
+
+/**
  * revisto em 2026-10-13 (revisão do PR #309): sem criar_bots no catálogo (NOD_CRIAR_BOTS=0), a linha da criação não
  * promete a ferramenta — fica só o "não vire um deles".
  */
@@ -280,6 +287,8 @@ export type EntradaPromptSistema = {
    * numa linha só, depois do que o bot faz. Ausente ou vazio = sem a linha.
    */
   sobreMim?: string | null;
+  /** NOD-23: a conversa está em reconfiguração (montarPlano já conferiu modo, Nod e task). */
+  reconfiguracao?: boolean;
 };
 
 /**
@@ -370,6 +379,7 @@ export function partesDoPromptSistema(entrada: EntradaPromptSistema): { estavel:
   const pede = entrada.ferramentas.some((f) => f.nome === "pedir_a_bot");
   // A linha da delegação traz o nome de quem pediu: vai para a parte volátil. Os outros modos são poucos valores fixos.
   if (entrada.modo === "delegacao") volatil.push(instrucaoDelegacao(entrada.delegacao, pede));
+  else if (entrada.modo === "conversa" && entrada.reconfiguracao) linhas.push(INSTRUCAO_RECONFIGURACAO);
   else linhas.push(instrucaoDoModo(entrada.modo, pede, entrada.ferramentas.some((f) => f.nome === "criar_bots")));
   const modoAprovacao = entrada.agente.modoAprovacao ?? "manual";
   if (modoAprovacao !== "manual") linhas.push(comRevisor(entrada, modoAprovacao) ? INSTRUCAO_AUTOMATICO_COM_REVISOR : INSTRUCAO_APROVACAO[modoAprovacao]);

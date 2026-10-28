@@ -23,7 +23,7 @@ export type ContagemImportacao = { bots: number; conversas: number; mensagens: n
 
 /** Colunas que apontam para o que NÃO vem junto: viram null na cópia. */
 const SOLTAR: Record<string, readonly string[]> = {
-  agentes: ["computador_id", "maquina_id", "duplicado_de", "excluido_em"],
+  agentes: ["computador_id", "maquina_id", "duplicado_de", "excluido_em", "configurando_desde", "configurando_turno_id"],
   conversas: ["sala_id", "sessao_cli", "sessao_executor", "sessao_harness", "sessao_em", "sessao_conta_id", "sessao_maquina_id", "recomeco_em"],
   mensagens: ["turno_id", "machine_id", "id_envio"],
   // NOD-323: a mídia do bot aponta para o turno e a máquina da origem (que não vêm); o caminho só vale naquela máquina.

@@ -1,3 +1,5 @@
+import { semCitacao } from "../domain/citacao.ts";
+import { COMANDO_CONFIGURAR, emReconfiguracao, podeReconfigurar } from "../domain/reconfiguracao.ts";
 import type { Memoria } from "../contracts/memoria.ts";
 import type { AnexoMeta, TipoAnexo } from "../contracts/anexo.ts";
 import { tipoDoAnexo } from "../domain/anexo.ts";
@@ -429,7 +431,29 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   const raciocinio = escolha?.raciocinio && modeloEscolhido ? raciocinioValido(escolha.harness, modeloEscolhido, escolha.raciocinio) : escolha?.raciocinio;
   // NOD-315 (ADR-119): o repo da frente vai junto, para o clone da máquina.
   const dadosDoTrabalho = trabalho ? { titulo: trabalho.titulo, origem: trabalho.origem, trabalhoMaeId: trabalho.trabalhoMaeId, forma: formaEfetiva(trabalho), ...(trabalho.repo ? { repo: trabalho.repo } : {}) } : null;
+  // NOD-23: a conversa em reconfiguração (janela viva e bot elegível); montarPlano confere o modo, o Nod e a task.
+  // O turno que É o /configurar, de fala da pessoa, vale mesmo atrasado (fila, máquina fora, repetição depois de 2 h)
+  // enquanto o modo está aberto (coluna não nula). Coluna nula = o cartão já foi decidido: a reemissão não reabre.
+  // A janela vencida religa a partir de agora (não na recomposição), para as respostas da entrevista acharem o modo.
+  const elegivel = modo === "conversa" && !trabalho && podeReconfigurar(agente, deps.escopo.pessoaId);
+  const aberto = (agente.configurandoDesde ?? null) !== null;
+  const comandoConfigurar = elegivel && conversa?.tipo === "propria" && turno.origem === "conversa" && Boolean(turno.mensagemOrigemId)
+    && comandoDaConversa(semCitacao(turno.entradaTexto))?.comando.nome === COMANDO_CONFIGURAR;
+  // A primeira emissão pode reabrir: o card da tentativa anterior pode ter sido decidido entre o envio deste comando e
+  // a vez dele na fila. Recomposição nunca reabre uma tentativa já encerrada.
+  const ehComandoConfigurar = comandoConfigurar && (!input.recompor || aberto);
+  // Cada comando que realmente chega à emissão abre uma tentativa nova. No envio, o primeiro marcador fica preservado
+  // para dois comandos pendentes não invalidarem um ao outro antes de a fila chegar neles.
+  const religou = ehComandoConfigurar && !input.recompor ? await deps.repos.agentes.religarConfiguracao(agente.id, agora, turno.id) : null;
+  const turnoDoInicio = religou === true ? turno : agente.configurandoTurnoId ? await deps.repos.turnos.buscar(agente.configurandoTurnoId) : null;
+  // A fila ordena por (criado_em, id): só o comando e o que veio depois pertencem à entrevista. O timestamp sozinho não
+  // basta — duas falas podem nascer no mesmo milissegundo, e uma fala anterior não pode ganhar atualizar_perfil.
+  const depoisDoInicio = Boolean(turnoDoInicio && turnoDoInicio.agenteId === turno.agenteId && turnoDoInicio.conversaId === turno.conversaId
+    && (turno.criadoEm > turnoDoInicio.criadoEm || (turno.criadoEm === turnoDoInicio.criadoEm && turno.id >= turnoDoInicio.id)));
+  const pedeConfigurar = ehComandoConfigurar && depoisDoInicio && (!input.recompor ? religou === true : emReconfiguracao(agente, agora));
+  const reconfiguracao = elegivel && depoisDoInicio && (pedeConfigurar || emReconfiguracao(agente, agora));
   const parcial = montarPlano({
+    ...(reconfiguracao ? { reconfiguracao: true } : {}),
     workspace: Boolean(deps.services.workspaces),
     workspaceVinculado: workspaceId !== null,
     computador: Boolean(deps.services.computadores),

@@ -61,6 +61,13 @@ custaram centavos com haiku):
      o que vier depois) e escreve a linha na conversa;
    - `/modelo` abre a escolha de modelo e esforço.
 
+### Emenda (2026-10-28, NOD-23)
+
+`/configurar` entra nos comandos da conversa, com os apelidos `/setup` e `/config`. Por isso `/config` deixa de ser
+"só do terminal". Um comando ou skill do Mac com um desses nomes some da barra: o servidor sempre trata o nome como
+o comando da conversa, então a skill nunca rodaria pelo chat. Na web, `/configurar` aparece só em bot próprio e
+confirmado que não é o Nod.
+
 ## Alternativas descartadas
 
 - **`--setting-sources user`.** Traria as skills, mas também `env`, `permissions` e `autoMode` do `settings.json`

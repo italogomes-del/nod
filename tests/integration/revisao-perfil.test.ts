@@ -75,16 +75,19 @@ describeIntegracao("revisão do perfil no card de perfil (NOD-190)", () => {
 
   it("critério 1: título ou descrição editados pela tela também invalidam o card", async () => {
     await withRollback(MARLON, async (trx) => {
-      const c = await cenario(trx);
-      const porTitulo = await c.propor();
-      await editarPerfil(c.deps, { agenteId: c.agenteId, titulo: "Tech Lead" });
-      expect((await confirmarProposta(c.deps, { propostaId: porTitulo.id })).data.obsoleta).toBe(true);
+      const titulo = await cenario(trx);
+      const porTitulo = await titulo.propor();
+      await editarPerfil(titulo.deps, { agenteId: titulo.agenteId, titulo: "Tech Lead" });
+      expect((await confirmarProposta(titulo.deps, { propostaId: porTitulo.id })).data.obsoleta).toBe(true);
+      expect(await titulo.repos.agentes.buscar(titulo.agenteId)).toMatchObject({ nome: "Vera", titulo: "Tech Lead" });
+      expect(await titulo.avisos()).toHaveLength(1);
 
-      const porDescricao = await c.propor();
-      await editarPerfil(c.deps, { agenteId: c.agenteId, descricao: "Outra missão" });
-      expect((await confirmarProposta(c.deps, { propostaId: porDescricao.id })).data.obsoleta).toBe(true);
-      expect(await c.repos.agentes.buscar(c.agenteId)).toMatchObject({ nome: "Vera", titulo: "Tech Lead", descricao: "Outra missão" });
-      expect(await c.avisos()).toHaveLength(2);
+      const descricao = await cenario(trx);
+      const porDescricao = await descricao.propor();
+      await editarPerfil(descricao.deps, { agenteId: descricao.agenteId, descricao: "Outra missão" });
+      expect((await confirmarProposta(descricao.deps, { propostaId: porDescricao.id })).data.obsoleta).toBe(true);
+      expect(await descricao.repos.agentes.buscar(descricao.agenteId)).toMatchObject({ nome: "Vera", descricao: "Outra missão" });
+      expect(await descricao.avisos()).toHaveLength(1);
     });
   });
 

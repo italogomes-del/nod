@@ -43,6 +43,8 @@ export type ComandoDaConversa = {
   cli?: string;
   /** Não chama o modelo (medido: /context e /cost custam US$ 0). */
   gratis?: boolean;
+  /** NOD-23: só no "/" da conversa com um bot da própria pessoa, já confirmado (nunca no Nod nem em bot alheio). */
+  soBotProprio?: boolean;
 };
 
 /** GET comandos: o catálogo do Mac da pessoa (null antes do primeiro turno no Claude Code) e os da conversa. */

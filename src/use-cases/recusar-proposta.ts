@@ -28,6 +28,9 @@ export const recusarProposta: CasoDeUso<{ propostaId: string }, { proposta: Prop
   if (!existente) throw new ErroDeDominio("nao_encontrado");
   // NOD-50: o cartão de credencial fecha só por fecharPedidoDeCredencial (que retoma o turno com `recusada`).
   if (existente.payload.kind === "credencial") throw new ErroDeDominio("estado_invalido", { cause: "credencial fecha pelo cartão" });
+  // NOD-23: recusar um cartão de perfil fecha a reconfiguração. Antes de decidir a proposta, na mesma ordem de trava de
+  // confirmarPerfil (agente → proposta); se a decisão falhar, a transação inteira volta.
+  if (existente.payload.kind === "perfil") await deps.repos.agentes.encerrarConfiguracao(existente.agenteId, existente.payload.turnoId ?? null);
   const proposta = await deps.repos.propostas.decidir(input.propostaId, "recusada");
   if (!proposta) throw new ErroDeDominio("estado_invalido", { cause: `proposta ${existente.estado}` });
   if (proposta.payload.kind === "perfil") await recusarRotinasDoCard(deps, proposta.payload);

@@ -1,6 +1,7 @@
 import type { Executor } from "../contracts/evento.ts";
 import type { OrigemTurno, Turno } from "../contracts/turno.ts";
-import { ateOPrimeiroAnexo } from "../domain/ordem-das-falas.ts";
+import { ehComandoDeTurno } from "../domain/comandos.ts";
+import { ateOPrimeiroAnexo, ateOPrimeiroComando } from "../domain/ordem-das-falas.ts";
 import { autoriaAgente, autoriaPessoa, evento } from "./autoria-evento.ts";
 import { contaminarSeAbsorveuDeFora } from "./coordenar-trabalhos.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
@@ -71,15 +72,18 @@ export const absorverNaSessao: CasoDeUso<{ turnoId: string; executor: Executor; 
   const nada = { data: { textos: [], ids: [] } };
   const turno = await deps.repos.turnos.buscar(e.turnoId);
   if (!turno || !(await aceitaNaSessao(deps, turno))) return nada;
+  // NOD-286: corta na primeira fala pendente com anexo (a que veio depois do print espera com ele). NOD-23: e na
+  // primeira que é comando da conversa com turno próprio (ateOPrimeiroComando).
+  const daSessao = (await deps.repos.turnos.pendentesDaPessoa(turno.conversaId)).filter((t) => t.id !== turno.id && t.agenteId === turno.agenteId && t.origem === "conversa" && Boolean(t.mensagemOrigemId) && !t.trabalhoId);
+  const absorviveis = ateOPrimeiroComando(ateOPrimeiroAnexo(daSessao), ehComandoDeTurno);
   if (e.confirma) {
+    // A já oferecida sai depois do corte: ela nunca tem anexo nem é comando, então não muda onde a fila para.
     const fora = new Set(e.jaOferecidas ?? []);
-    // NOD-286: corta na primeira fala pendente com anexo (a que veio depois do print espera com ele). A já oferecida sai
-    // depois do corte: ela nunca tem anexo, então não muda onde a fila para.
-    const daSessao = (await deps.repos.turnos.pendentesDaPessoa(turno.conversaId)).filter((t) => t.id !== turno.id && t.agenteId === turno.agenteId && t.origem === "conversa" && Boolean(t.mensagemOrigemId) && !t.trabalhoId);
-    const fila = ateOPrimeiroAnexo(daSessao).filter((t) => !fora.has(t.id));
+    const fila = absorviveis.filter((t) => !fora.has(t.id));
     return { data: { textos: fila.map((t) => t.entradaTexto), ids: fila.map((t) => t.id) } };
   }
-  const absorvidos = await deps.repos.turnos.absorverNaSessao(turno);
+  // App que não confirma: absorve só as que passaram pelos cortes (o repositório refaz o corte do anexo no SQL).
+  const absorvidos = await deps.repos.turnos.absorverNaSessao(turno, absorviveis.map((t) => t.id));
   if (absorvidos.length === 0) return nada;
   return { data: { textos: absorvidos.map((a) => a.entradaTexto), ids: absorvidos.map((a) => a.id) }, events: eventosDeAbsorcao(deps, e.executor, turno.id, absorvidos) };
 };

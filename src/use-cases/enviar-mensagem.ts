@@ -1,3 +1,5 @@
+import { comandoDaConversa } from "../domain/comandos.ts";
+import { COMANDO_CONFIGURAR, JANELA_RECONFIGURACAO_MS, podeReconfigurar } from "../domain/reconfiguracao.ts";
 import type { AcaoDoModoNaFala } from "../contracts/acoes-do-modo.ts";
 import type { TipoAnexo } from "../contracts/anexo.ts";
 import type { ConversaDto } from "../contracts/api.ts";
@@ -107,7 +109,6 @@ export const enviarMensagem: CasoDeUso<EntradaEnviarMensagem, SaidaEnviarMensage
   const naoLido = fixo ? anexos.find((a) => !motorLe(fixo, tipoDoAnexo(a.mime))) : undefined;
   if (naoLido) throw new ErroDeDominio("entrada_invalida", { cause: `${agente.harness} não lê ${tipoDoAnexo(naoLido.mime)}` });
   const mensagem: Mensagem = anexos.length > 0 ? { ...criada, anexos } : criada;
-
   const inventario = input.inventario ?? (await deps.repos.inventario.buscar(motorDe(executor))) ?? inventarioAusente(agora);
   const localidade = resolverLocalidade({ origem, tocaDadoPessoal: false, motorExigido: agente.modelo, inventario });
   const recusado = "recusado" in localidade;
@@ -131,6 +132,12 @@ export const enviarMensagem: CasoDeUso<EntradaEnviarMensagem, SaidaEnviarMensage
     interrompidoCom: recusado ? "executor_indisponivel" : undefined,
   });
   if (!turno) throw new ErroDeDominio("nao_permitido");
+  // NOD-23: /configurar na conversa própria com bot elegível liga a reconfiguração na mesma transação do turno; o plano
+  // do turno lê a coluna. Fora disso o comando segue como texto (montarPlano o traduz para uma explicação curta). Depois
+  // do enfileirar: a trava consultiva do agente (gatilho da 0011) vem antes da linha, na ordem de agentes.excluir.
+  if (conversa.tipo === "propria" && comandoDaConversa(texto)?.comando.nome === COMANDO_CONFIGURAR && podeReconfigurar(agente, deps.escopo.pessoaId)) {
+    await deps.repos.agentes.iniciarConfiguracao(agente.id, agora, turno.id, agora - JANELA_RECONFIGURACAO_MS);
+  }
 
   const events = [evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: conversa.id, turnoId: turno.id, dados: { mensagem_id: mensagem.id, kind: "texto" } })];
   let negacao: Mensagem | null = null;

@@ -60,7 +60,7 @@ describeIntegracao("o / do chat (0037 + 0038): esforço, catálogo do Mac, coman
       const lido = (await executar(deps, lerComandos, {})).data;
       expect(lido.doMac).toEqual(CATALOGO);
       expect(lido.doMacEm).toEqual(expect.any(Number));
-      expect(lido.daConversa.map((c) => c.nome)).toEqual(["contexto", "uso", "compactar", "nova-sessao", "modelo"]);
+      expect(lido.daConversa.map((c) => c.nome)).toEqual(["contexto", "uso", "compactar", "nova-sessao", "modelo", "configurar"]);
 
       await vincularEscopo(trx, ANA);
       expect((await executar(depsSobreTrx(trx, ANA), lerComandos, {})).data.doMac).toBeNull();

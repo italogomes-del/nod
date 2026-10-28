@@ -5,6 +5,8 @@ import { HARNESS_LEGADO, HARNESSES, type IdHarness } from "../contracts/harness.
 import type { Inventario } from "../contracts/inventario.ts";
 import type { PlanoTurno } from "../contracts/plano-turno.ts";
 import type { Turno } from "../contracts/turno.ts";
+import { ehComandoDeTurno } from "../domain/comandos.ts";
+import { ateOPrimeiroComando } from "../domain/ordem-das-falas.ts";
 import { contasPelaCota, cotaDasContas, portaoDaCota, tipoParaCota, type PortaoDaCota } from "../domain/cota-da-ia.ts";
 import { entradaDaFila } from "../domain/entrada-da-fila.ts";
 import { ehErroDeDominio, ErroDeDominio } from "../domain/erro.ts";
@@ -192,7 +194,9 @@ export const despacharTurno: CasoDeUso<EntradaDespacharTurno, SaidaDespacharTurn
 
   // Fila lida junta (definido em 2026-09-24), só depois dos gates: um turno recusado não arrasta as outras
   // falas. As demais pendentes desta conversa entram neste turno e cada uma sai 'absorvido'.
-  const { turno: comFila, absorvidos } = await deps.repos.turnos.absorverPendentes(turno, entradaDaFila);
+  // NOD-23: o comando da conversa com turno próprio (/configurar…) não absorve nem é absorvido: junto de outras falas
+  // ("1. oi 2. /configurar") o plano não o reconhece. Ele e o que veio depois esperam o próximo turno.
+  const { turno: comFila, absorvidos } = await deps.repos.turnos.absorverPendentes(turno, entradaDaFila, await absorviveisDaFila(deps, turno));
   const autoria = autoriaPessoa(deps.escopo, executor);
   const events = absorvidos.map((a) => evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: a.conversaId, turnoId: a.id, dados: { motivo: "absorvido", absorvido_por: comFila.id } }));
 
@@ -437,4 +441,16 @@ async function recusarPorExecutor(
   events.push(...(await registrarRecusaDaRotina(deps, p.turno, motivoFalha)));
   events.push(...(await sincronizarDoTurno(deps, p.turno)));
   return { data: { plano: null, turno: assentado ?? p.turno, motivo: "executor_indisponivel" }, events };
+}
+
+/**
+ * NOD-23: as pendentes que a fila lida junta pode levar — nenhuma se o próprio turno é comando da conversa; senão, as de
+ * antes do primeiro comando. undefined = sem comando na fila, o repositório leva todas como antes.
+ */
+async function absorviveisDaFila(deps: Deps, turno: Turno): Promise<readonly string[] | undefined> {
+  if (!turno.mensagemOrigemId || (turno.origem !== "conversa" && turno.origem !== "sala")) return undefined;
+  if (ehComandoDeTurno(turno.entradaTexto)) return [];
+  const fila = (await deps.repos.turnos.pendentesDaPessoa(turno.conversaId)).filter((t) => t.id !== turno.id && t.agenteId === turno.agenteId && Boolean(t.mensagemOrigemId) && (t.origem === "conversa" || t.origem === "sala") && (t.trabalhoId ?? null) === (turno.trabalhoId ?? null));
+  if (!fila.some((t) => ehComandoDeTurno(t.entradaTexto))) return undefined;
+  return ateOPrimeiroComando(fila, ehComandoDeTurno).map((t) => t.id);
 }
