@@ -43,6 +43,13 @@ O hook é instalado pelo `prepare` do `npm ci`/`npm install`; confira com `ls .g
 (observado em 2026-09-16: o primeiro commit da fundação saiu SEM o hook porque ninguém tinha rodado
 `npm run prepare` — um `git commit` que não imprime a linha do lint-staged é sinal de hook ausente).
 
+**PR rascunho não roda CI** (2026-10-28; a fila do runner próprio tinha 63% de runs cancelados por push novo nas
+frentes). Enquanto o PR é rascunho, confira local com `npm run check` (ou os testes do que mudou) e faça quantos
+pushes quiser. Quando quiser a CI, uma vez, com o trabalho pronto: `gh pr ready <n>` e espere com
+`gh pr checks <n> --watch`. Num rascunho esse comando volta na hora sem checks: não é falha nem CI verde. Falhou e
+precisa mexer de novo: `gh pr ready <n> --undo`, corrija e repita. PR só de documentação também não roda (menos os
+docs que os testes leem; a lista está no `ci.yml`).
+
 ## Aviso: nvm/asdf ganham do mise
 
 Se o seu shell carrega nvm ou asdf, eles GANHAM do mise e você roda a suíte no Node errado, e o erro

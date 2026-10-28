@@ -10,7 +10,20 @@ name: ci
 on:
   push:
     branches: [main, "rebuild/**"]
+  # definido em 2026-10-28 (fila do runner: 290 runs em 24 h, 182 cancelados por push novo nas frentes): PR rascunho não
+  # roda (os jobs pulam pelo `if` abaixo; o bot confere com `npm run check` local e chama `gh pr ready` quando quer a
+  # CI, ver AGENTS.md); ready_for_review dispara o run. PR só de documentação também não roda, menos os arquivos de
+  # docs/ que os testes leem (paridade, deploy-gcp, runbook). Na main roda sempre: o deploy depende de cada ci.
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "**"
+      - "!docs/**"
+      - "!**/*.md"
+      - "docs/paridade.md"
+      - "docs/paridade.piso.json"
+      - "docs/deploy-gcp.md"
+      - "docs/runbook-producao.md"
 
 # Push novo no mesmo PR cancela o run antigo. Na main nada é cancelado: o deploy depende de cada ci.
 concurrency:
@@ -19,6 +32,7 @@ concurrency:
 
 jobs:
   lint-typecheck:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: [self-hosted, linux, nod-ci]
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -33,6 +47,7 @@ jobs:
       - run: npm run fence:migrations
 
   unit:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: [self-hosted, linux, nod-ci]
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -44,6 +59,7 @@ jobs:
       - run: npm run test:unit
 
   integration:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: [self-hosted, linux, nod-integracao]
     services:
       postgres:
