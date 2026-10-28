@@ -110,9 +110,17 @@ function emUso(x: ContextoContas): string | null {
  * QA do PR #306 (ISSUE-008): só conta logada em alguma máquina está "em uso".
  */
 export function contaEmUso(contas: readonly ContaIa[], agora: number, p: { filtro?: string | null; ia?: ContaIa["ia"] } = {}): ContaIa | null {
-  const logadas = contas.filter((c) => (p.ia === undefined || c.ia === p.ia) && (p.filtro ? prontaEm(c, p.filtro) : c.maquinas.some((v) => v.estado === "pronta")));
-  const temFila = (ia: ContaIa["ia"]) => logadas.some((c) => c.ia === ia && c.entraNaTrocaAutomatica);
-  return logadas.find((c) => !noLimite(c, agora) && (c.entraNaTrocaAutomatica || !temFila(c.ia))) ?? null;
+  const logadas = contas.filter((c) => (p.ia === undefined || c.ia === p.ia) && (p.filtro ? prontaEm(c, p.filtro) : c.maquinas.some((v) => v.estado === "pronta"))).sort((a, b) => a.posicao - b.posicao);
+  // NOD-390 (revisão): a mesma regra de `contaEmUsoDaIa` (src/domain/contas-da-pessoa.ts), por IA: a primeira da fila
+  // livre; sem conta da IA na fila, a PRIMEIRA dela, só se livre (a segunda livre não entra sem a pessoa escolher).
+  const daIa = (ia: ContaIa["ia"]): ContaIa | null => {
+    const lista = logadas.filter((c) => c.ia === ia);
+    const daFila = lista.find((c) => c.entraNaTrocaAutomatica && !noLimite(c, agora));
+    if (daFila) return daFila;
+    const [primeira] = lista;
+    return primeira && !lista.some((c) => c.entraNaTrocaAutomatica) && !noLimite(primeira, agora) ? primeira : null;
+  };
+  return logadas.find((c) => daIa(c.ia) === c) ?? null;
 }
 
 function pilulas(c: ContaIa, x: ContextoContas): string {

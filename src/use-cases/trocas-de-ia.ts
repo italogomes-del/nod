@@ -161,7 +161,8 @@ export async function avisarTrocaDeIa(deps: Deps, p: NovoAvisoDeTroca): Promise<
     contaDe: p.contaDe?.id ?? null,
     agora: p.agora,
   });
-  const payload: PayloadTrocaDeIa = payloadDaTroca(troca, tasks, { conta: p.conta ?? null, contaDe: p.contaDe ?? null, foraDaMaquina: p.foraDaMaquina ?? null });
+  const contaPara = await contaParaDoAviso(deps, p);
+  const payload: PayloadTrocaDeIa = payloadDaTroca(troca, tasks, { conta: p.conta ?? null, contaDe: p.contaDe ?? null, foraDaMaquina: p.foraDaMaquina ?? null, contaPara });
   const texto = fraseDaTroca({
     nomeDe: nomeDoProvedor(troca.iaDe),
     nomePara: troca.iaPara ? nomeDoProvedor(troca.iaPara) : null,
@@ -196,7 +197,18 @@ export async function avisarTrocaDeIa(deps: Deps, p: NovoAvisoDeTroca): Promise<
   return events;
 }
 
-function payloadDaTroca(t: TrocaDeIa, tasks: number, extra: { conta: ContaDaTroca | null; contaDe: { id: string; apelido: string } | null; foraDaMaquina: { ia: IdHarness; maquina: string | null } | null }): PayloadTrocaDeIa {
+/**
+ * NOD-390: a conta para onde a conversa segue na outra IA — a conta em uso dela na máquina-alvo do bot, pela fila
+ * (`contaDoTurno`, a mesma regra do despacho). Só no aviso das tasks no Automático; null = sem máquina, a IA não tem conta
+ * logada ali, ou nenhuma utilizável agora (o cartão diz só a IA, como antes).
+ */
+async function contaParaDoAviso(deps: Deps, p: NovoAvisoDeTroca): Promise<{ id: string; apelido: string } | null> {
+  if (p.fixo || !p.iaPara || p.iaPara === p.iaDe || !p.machineId || !ehIaComConta(p.iaPara)) return null;
+  const conta = escolherContaDoTurno(contasDaMaquinaDe(await lerContas(deps), p.machineId, p.agora), null, p.agora)?.porIa[p.iaPara] ?? null;
+  return conta ? { id: conta.id, apelido: conta.apelido } : null;
+}
+
+function payloadDaTroca(t: TrocaDeIa, tasks: number, extra: { conta: ContaDaTroca | null; contaDe: { id: string; apelido: string } | null; foraDaMaquina: { ia: IdHarness; maquina: string | null } | null; contaPara: { id: string; apelido: string } | null }): PayloadTrocaDeIa {
   return {
     kind: "troca_de_ia",
     trocaId: t.id,
@@ -209,6 +221,7 @@ function payloadDaTroca(t: TrocaDeIa, tasks: number, extra: { conta: ContaDaTroc
     aplicarEm: t.aplicarEm,
     ...(t.fixo ? { fixo: true as const, conta: extra.conta } : {}),
     ...(extra.contaDe ? { contaDe: extra.contaDe } : {}),
+    ...(extra.contaPara ? { contaPara: extra.contaPara } : {}),
     ...(extra.foraDaMaquina ? { foraDaMaquina: extra.foraDaMaquina } : {}),
     ...(t.decisao ? { decisao: t.decisao, decididoEm: t.decididoEm ?? undefined } : {}),
   };

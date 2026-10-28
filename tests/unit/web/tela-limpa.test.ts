@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { Agente } from "../../../src/contracts/agente.ts";
 import type { ConversaDto } from "../../../src/contracts/api.ts";
 import type { ContaIa } from "../../../src/contracts/contas-ia.ts";
-import { HARNESSES } from "../../../src/contracts/harness.ts";
+import { HARNESSES, type IdHarness } from "../../../src/contracts/harness.ts";
 import { RACIOCINIOS, type IaDaPessoa } from "../../../src/contracts/inteligencia.ts";
 import type { Inventario } from "../../../src/contracts/inventario.ts";
 import { estadoInicial, invalidacoesDaTela, reduzir, type Estado, type TurnoVivo } from "../../../web/estado/reducer.ts";
@@ -13,9 +13,10 @@ import { botoesDoCampo, htmlComposer, mostraPararNoCampo, renderCabecalhoConvers
 import { modoDoComposer } from "../../../web/lib/perguntas.ts";
 import { aparenciaDoComposer } from "../../../web/telas/pergunta.ts";
 import {
-  ALERTA_USO, dadosDoSeletor, escolhaDoItem, fraseDoLimite, mioloDoSeletor, pedidoDoSeletor, renderMenuIa, rotuloDoSeletor,
+  ALERTA_USO, dadosDoSeletor, decidirSeAcabar, escolhaDoItem, seguirDaDecisao, fraseDoLimite, mioloDoSeletor, pedidoDoSeletor, renderMenuIa, rotuloDoSeletor,
 } from "../../../web/telas/seletor-ia.ts";
 import { lerEscolhas } from "../../../src/domain/inteligencia.ts";
+import { contaDoTurno, decidirLimiteDaConta, nomeDaConta, type ContaDaPessoa } from "../../../src/domain/contas-da-pessoa.ts";
 import type { ContextoInteligencia } from "../../../web/telas/inteligencia.ts";
 
 /**
@@ -175,36 +176,163 @@ describe("T6: o seletor de IA no campo", () => {
     // O apelido não vai colado no número (uso_do_plano é por pessoa + IA, não por conta).
     expect(menu).not.toContain("Claude · marlonwlv");
     expect(menu).not.toContain("@exemplo.com");
-    expect(fraseDoLimite(d)).toMatch(/^Renova às \d\d:\d\d\. Se acabar, a conversa segue no <span class="ia-sel-forte">ChatGPT<\/span>\.$/);
-    expect(fraseDoLimite({ ...d, uso: 0.95 })).toContain("Se acabar agora, a conversa segue no");
+    expect(fraseDoLimite(d)).toMatch(/^Renova às \d\d:\d\d\. Se acabar, segue no <span class="ia-sel-forte">ChatGPT · conta Assinaturas GFK<\/span>\.$/);
+    expect(fraseDoLimite({ ...d, uso: 0.95 })).toContain("Se acabar agora, segue no");
     // Sem o uso, o cabeçalho mostra só a IA (sem número nem barra).
     const sem = renderMenuIa(dadosDoSeletor(cenario({}, { usoDoPlano: null }), "a")!);
     expect(sem).toContain("<b>Claude</b>");
     expect(sem).not.toContain("ia-sel-barra");
   });
 
-  it("'Se acabar' espelha decidirLimiteDaConta: outra conta no Trocar sozinho, outra IA no Automático, perguntar, esperar", () => {
+  it("'Se acabar' espelha decidirLimiteDaConta (ADR-108, NOD-390): a fila decide, sem olhar o modo; perguntar; esperar", () => {
     const frase = (e: Estado) => fraseDoLimite({ ...dadosDoSeletor(e, "a")!, renovaEm: null });
     const fixo = { harness: "claude-cli" as const, modelo: "opus" };
-    // 1. "Trocar sozinho" e outra conta livre do Claude pronta e na fila: segue nela (vale também para o fixo: o modelo não muda).
+    // 1. Outra conta livre do Claude pronta e na fila: segue nela, em qualquer `modo` (o legado não conta mais), também no fixo.
     const duas = (modo: "automatico" | "perguntar", p: Partial<ContaIa> = {}) => ({ contasIa: { disponivel: true, modo, contas: [conta("Pessoal", { entraNaTrocaAutomatica: true }), conta("Equipe", { posicao: 1, entraNaTrocaAutomatica: true, ...p })] } });
-    expect(dadosDoSeletor(cenario(fixo, duas("automatico")), "a")!.seguir).toEqual({ tipo: "conta", apelido: "Equipe" });
-    expect(frase(cenario(fixo, duas("automatico")))).toBe('Se acabar, segue na conta <span class="ia-sel-forte">Equipe</span>.');
-    // 2. No modo "perguntar" com outra conta livre: o Nod pergunta antes de trocar de conta.
-    expect(frase(cenario(fixo, duas("perguntar")))).toBe("Se acabar, o Nod pergunta antes de trocar de conta.");
+    for (const modo of ["automatico", "perguntar"] as const) {
+      expect(dadosDoSeletor(cenario(fixo, duas(modo)), "a")!.seguir).toEqual({ tipo: "conta", ia: "Claude", apelido: "Equipe" });
+      expect(frase(cenario(fixo, duas(modo)))).toBe('Se acabar, segue no <span class="ia-sel-forte">Claude · conta Equipe</span>.');
+      expect(frase(cenario({}, duas(modo)))).toBe('Se acabar, segue no <span class="ia-sel-forte">Claude · conta Equipe</span>.');
+    }
     // NOD-308: a corporativa na fila segue como qualquer conta; qualquer conta fora da fila (pessoal ou não) não.
-    expect(dadosDoSeletor(cenario(fixo, duas("automatico", { corporativa: true })), "a")!.seguir).toEqual({ tipo: "conta", apelido: "Equipe" });
-    expect(frase(cenario(fixo, duas("automatico", { entraNaTrocaAutomatica: false })))).toBe("Se acabar, o Nod pergunta antes de trocar de conta.");
-    // 3. Automático com outra IA pronta: a conversa segue nela (só o nome da IA).
-    expect(frase(cenario())).toBe('Se acabar, a conversa segue no <span class="ia-sel-forte">ChatGPT</span>.');
-    // 4. Fixo, sem outra conta da IA: espera a conta voltar.
+    expect(dadosDoSeletor(cenario(fixo, duas("perguntar", { corporativa: true })), "a")!.seguir).toEqual({ tipo: "conta", ia: "Claude", apelido: "Equipe" });
+    expect(frase(cenario(fixo, duas("perguntar", { entraNaTrocaAutomatica: false })))).toBe("Se acabar, o Nod pergunta antes de trocar de conta.");
+    // 2. Automático, sem outra conta do Claude: a conversa segue na conta em uso do ChatGPT, com o apelido.
+    expect(dadosDoSeletor(cenario(), "a")!.seguir).toEqual({ tipo: "conta", ia: "ChatGPT", apelido: "Assinaturas GFK" });
+    expect(frase(cenario())).toBe('Se acabar, segue no <span class="ia-sel-forte">ChatGPT · conta Assinaturas GFK</span>.');
+    // 3. Fixo, sem outra conta da IA: espera a conta voltar (a do ChatGPT não conta, R2).
     expect(dadosDoSeletor(cenario(fixo), "a")!.seguir).toEqual({ tipo: "esperar" });
     expect(frase(cenario(fixo))).toBe("Se acabar, espera a conta voltar.");
     // A máquina do bot conta: a outra conta pronta só noutra máquina não troca sozinha (o servidor pergunta).
-    const noutra = cenario({ ...fixo, maquinaId: "m1" }, duas("automatico", { maquinas: [{ maquinaId: "m2", nome: "VM", estado: "pronta" }] }));
+    const noutra = cenario({ ...fixo, maquinaId: "m1" }, duas("perguntar", { maquinas: [{ maquinaId: "m2", nome: "VM", estado: "pronta" }] }));
     expect(frase(noutra)).toBe("Se acabar, o Nod pergunta antes de trocar de conta.");
     // A outra conta no limite não conta.
-    expect(frase(cenario(fixo, duas("automatico", { noLimiteAte: AGORA + 60_000 })))).toBe("Se acabar, espera a conta voltar.");
+    expect(frase(cenario(fixo, duas("perguntar", { noLimiteAte: AGORA + 60_000 })))).toBe("Se acabar, espera a conta voltar.");
+    // Sem lista de contas (modo local, ADR-092): a regra por IA de antes, só o nome da IA.
+    expect(frase(cenario({}, { contasIa: null }))).toBe('Se acabar, a conversa segue no <span class="ia-sel-forte">ChatGPT</span>.');
+    expect(frase(cenario(fixo, { contasIa: null }))).toBe("Se acabar, espera a conta voltar.");
+  });
+
+  describe("NOD-390: os critérios do 'Se acabar' pela fila", () => {
+    // Claude A em uso, Claude B (livre, pronta na máquina), ChatGPT X; modo legado "perguntar" (ninguém mais o muda).
+    const fila = (b: Partial<ContaIa> = {}) => ({ contasIa: { disponivel: true, modo: "perguntar" as const, contas: [
+      conta("A", { entraNaTrocaAutomatica: true }), conta("B", { posicao: 1, entraNaTrocaAutomatica: true, ...b }), conta("X", { ia: "codex-cli", posicao: 2, entraNaTrocaAutomatica: true }),
+    ] } });
+    const frase = (e: Estado) => fraseDoLimite({ ...dadosDoSeletor(e, "a")!, renovaEm: null });
+    it("CA1: Claude B na fila → 'segue no Claude · conta B' (o bug dizia ChatGPT)", () => {
+      expect(dadosDoSeletor(cenario({}, fila()), "a")!.conta).toBe("A");
+      expect(frase(cenario({}, fila()))).toBe('Se acabar, segue no <span class="ia-sel-forte">Claude · conta B</span>.');
+    });
+    it("CA2: Claude B fora da fila e o ChatGPT na fila, no Automático → 'segue no ChatGPT · conta X'", () => {
+      expect(frase(cenario({}, fila({ entraNaTrocaAutomatica: false })))).toBe('Se acabar, segue no <span class="ia-sel-forte">ChatGPT · conta X</span>.');
+    });
+    it("CA3: o bot com IA fixa nunca anuncia outra IA", () => {
+      const fixo = { harness: "claude-cli" as const, modelo: "opus" };
+      expect(frase(cenario(fixo, fila()))).toBe('Se acabar, segue no <span class="ia-sel-forte">Claude · conta B</span>.');
+      expect(frase(cenario(fixo, fila({ entraNaTrocaAutomatica: false })))).toBe("Se acabar, o Nod pergunta antes de trocar de conta.");
+      expect(frase(cenario(fixo, fila({ noLimiteAte: AGORA + 60_000 })))).toBe("Se acabar, espera a conta voltar.");
+      for (const b of [{}, { entraNaTrocaAutomatica: false }, { noLimiteAte: AGORA + 60_000 }]) expect(frase(cenario(fixo, fila(b)))).not.toContain("ChatGPT");
+      // ChatGPT fixo: nunca o Claude.
+      const gpt = cenario({ harness: "codex-cli", modelo: "auto" }, fila());
+      expect(frase(gpt)).not.toContain("Claude");
+    });
+    it("a frase nunca traz o e-mail da conta", () => {
+      for (const b of [{}, { entraNaTrocaAutomatica: false }]) expect(renderMenuIa(dadosDoSeletor(cenario({}, fila(b)), "a")!)).not.toContain("@exemplo.com");
+    });
+  });
+
+  // NOD-390 (CA5): estados gerados (semente fixa, mulberry32): 1 a 4 contas das duas IAs, a posição embaralhada à parte da
+  // ordem do array, na fila ou não, no limite ou não, prontas em m1, m2, nas duas ou em nenhuma.
+  const gerador = (semente: number) => () => {
+    semente = (semente + 0x6d2b79f5) | 0;
+    let t = Math.imul(semente ^ (semente >>> 15), 1 | semente);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const IAS_C = ["claude-cli", "codex-cli"] as const;
+  const PRONTA = (m: string) => ({ maquinaId: m, nome: m, estado: "pronta" as const });
+  const MAQUINAS = [[], [PRONTA("m1")], [PRONTA("m2")], [PRONTA("m1"), PRONTA("m2")], [{ maquinaId: "m1", nome: "m1", estado: "sem_login" as const }, PRONTA("m2")]];
+  function contasGeradas(rnd: () => number): ContaIa[] {
+    const sorteio = (n: number) => Math.floor(rnd() * n);
+    const n = 1 + sorteio(4);
+    const posicoes = [...Array(n).keys()];
+    for (let i = n - 1; i > 0; i--) { const j = sorteio(i + 1); [posicoes[i], posicoes[j]] = [posicoes[j]!, posicoes[i]!]; }
+    return posicoes.map((posicao, i) => conta(`c${i}`, {
+      ia: IAS_C[sorteio(2)]!, posicao, entraNaTrocaAutomatica: sorteio(2) === 0,
+      noLimiteAte: sorteio(4) === 0 ? AGORA + 60_000 : sorteio(5) === 0 ? AGORA - 1 : null, maquinas: MAQUINAS[sorteio(MAQUINAS.length)]!,
+    }));
+  }
+  const doDominio = (contas: readonly ContaIa[]): ContaDaPessoa[] => contas.map((c) => ({ id: c.id, ia: c.ia, apelido: c.apelido, plano: c.plano, corporativa: c.corporativa, posicao: c.posicao, entraNaTrocaAutomatica: c.entraNaTrocaAutomatica, noLimiteAte: c.noLimiteAte, removidaEm: null }));
+  const naM1 = (contas: readonly ContaIa[]) => new Set(contas.filter((c) => c.maquinas.some((m) => m.maquinaId === "m1" && m.estado === "pronta")).map((c) => c.id));
+  const naM2 = (contas: readonly ContaIa[]) => new Map(contas.filter((c) => c.maquinas.some((m) => m.maquinaId === "m2" && m.estado === "pronta")).map((c) => [c.id, { id: "m2", nome: "m2" }]));
+  /** A decisão do servidor como assentar-turno.ts a pede (com a IA fixa, só as contas dela: contasDaIaDoTurno). */
+  function doServidor(contas: readonly ContaIa[], p: { atualId: string; iaFixa: (typeof IAS_C)[number] | null; ordemDoBot: IdHarness[] | null }) {
+    const vistas = p.iaFixa ? contas.filter((c) => c.ia === p.iaFixa) : contas;
+    return decidirLimiteDaConta({ contas: doDominio(vistas), naMaquina: naM1(vistas), noutraMaquina: naM2(vistas), escolhidas: {}, ordemDoBot: p.ordemDoBot, iaFixa: p.iaFixa, contaId: p.atualId, ate: null, agora: AGORA }).decisao;
+  }
+
+  it("NOD-390 (CA5): a web e o servidor (decidirLimiteDaConta) decidem igual para o mesmo estado de contas", () => {
+    const rnd = gerador(390);
+    const tipos = new Set<string>();
+    let vistos = 0;
+    for (let k = 0; k < 4000; k++) {
+      const contas = contasGeradas(rnd);
+      const iaFixa = ([null, null, "claude-cli", "codex-cli"] as const)[Math.floor(rnd() * 4)]!;
+      const ordemDoBot = iaFixa ? null : ([null, ["codex-cli", "claude-cli"], ["claude-cli", "codex-cli"]] as const)[Math.floor(rnd() * 3)]!;
+      const candidatas = contas.filter((c) => !iaFixa || c.ia === iaFixa);
+      const atual = candidatas[Math.floor(rnd() * candidatas.length)];
+      if (!atual) continue;
+      const ordem = ordemDoBot ? [...ordemDoBot] : null;
+      const web = decidirSeAcabar(contas, { atualId: atual.id, maquina: "m1", iaFixa, ordemDoBot: ordem, agora: AGORA });
+      const decisao = doServidor(contas, { atualId: atual.id, iaFixa, ordemDoBot: ordem });
+      const caso = JSON.stringify({ contas: contas.map((c) => [c.id, c.ia, c.posicao, c.entraNaTrocaAutomatica, c.noLimiteAte, c.maquinas.map((m) => `${m.maquinaId}:${m.estado}`)]), atual: atual.id, iaFixa, ordemDoBot });
+      expect(web.tipo, caso).toBe(decisao.tipo);
+      if ((web.tipo === "trocou" || web.tipo === "outra_ia") && (decisao.tipo === "trocou" || decisao.tipo === "outra_ia")) expect(web.para.id, caso).toBe(decisao.para.id);
+      vistos++;
+      tipos.add(decisao.tipo);
+    }
+    expect(vistos).toBeGreaterThan(3000);
+    expect([...tipos].sort()).toEqual(["outra_ia", "perguntar", "todas_no_limite", "trocou"]);
+  });
+
+  it("NOD-390 (CA5): pela tela inteira — a conta em uso, o 'Se acabar' e a frase batem com o servidor", () => {
+    const rnd = gerador(108);
+    const tipos = new Set<string>();
+    let comConta = 0;
+    for (let k = 0; k < 1500; k++) {
+      const contas = contasGeradas(rnd);
+      const iaFixa = ([null, null, "claude-cli", "codex-cli"] as const)[Math.floor(rnd() * 4)]!;
+      const bot = { maquinaId: "m1", ...(iaFixa ? { harness: iaFixa, modelo: "auto" } : {}) } as Partial<Agente>;
+      const d = dadosDoSeletor(cenario(bot, { contasIa: { disponivel: true, modo: "perguntar", contas } }), "a")!;
+      const ia = d.ia as (typeof IAS_C)[number];
+      const caso = JSON.stringify({ contas: contas.map((c) => [c.id, c.ia, c.posicao, c.entraNaTrocaAutomatica, c.noLimiteAte, c.maquinas.map((m) => `${m.maquinaId}:${m.estado}`)]), iaFixa, ia });
+      // A conta em uso da IA do seletor é a que o servidor escolheria na máquina do bot (contaEmUsoDaIa, E4).
+      const doTurno = contaDoTurno({ contas: doDominio(contas), naMaquina: naM1(contas), escolhidas: {}, ordemDoBot: null, agora: AGORA });
+      const esperada = doTurno?.porIa[ia] ?? null;
+      expect(d.conta, caso).toBe(esperada?.apelido ?? null);
+      if (!esperada) continue;
+      comConta++;
+      const decisao = doServidor(contas, { atualId: esperada.id, iaFixa, ordemDoBot: null });
+      tipos.add(decisao.tipo);
+      const frase = fraseDoLimite({ ...d, uso: null, renovaEm: null });
+      if (decisao.tipo === "trocou" || decisao.tipo === "outra_ia") {
+        expect(d.seguir, caso).toEqual(seguirDaDecisao({ tipo: decisao.tipo, para: contas.find((c) => c.id === decisao.para.id)! }));
+        // A frase nomeia a conta como o servidor ("Claude · B" → "segue no Claude · conta B").
+        expect(frase, caso).toBe(`Se acabar, segue no <span class="ia-sel-forte">${nomeDaConta(decisao.para).replace(" · ", " · conta ")}</span>.`);
+        if (iaFixa) expect(decisao.para.ia, caso).toBe(iaFixa);
+      } else {
+        expect(frase, caso).toBe(decisao.tipo === "perguntar" ? "Se acabar, o Nod pergunta antes de trocar de conta." : "Se acabar, espera a conta voltar.");
+      }
+    }
+    expect(comConta).toBeGreaterThan(400);
+    expect([...tipos].sort()).toEqual(["outra_ia", "perguntar", "todas_no_limite", "trocou"]);
+  });
+
+  it("NOD-390 (revisão): a conta em uso sem conta da IA na fila é a PRIMEIRA dela, só se livre (contaEmUsoDaIa, E4)", () => {
+    const contas = [conta("A", { noLimiteAte: AGORA + 60_000 }), conta("B", { posicao: 1 }), conta("X", { ia: "codex-cli", posicao: 2, entraNaTrocaAutomatica: true })];
+    expect(contaEmUso(contas, AGORA, { ia: "claude-cli", filtro: "m1" })).toBeNull();
+    expect(contaEmUso(contas, AGORA, { filtro: "m1" })?.apelido).toBe("X");
+    expect(contaEmUso([conta("A"), conta("B", { posicao: 1 })], AGORA, { ia: "claude-cli" })?.apelido).toBe("A");
   });
 
   it("NOD-12: o anel usa a leitura da conta em uso; sem `cota` no DTO (servidor anterior), a da IA; conta sem leitura, sem número", () => {
@@ -328,11 +456,14 @@ describe("T6: o seletor de IA no campo", () => {
     expect(dadosDoSeletor(depois, "a")).toMatchObject({ auto: false, ia: "codex-cli" });
   });
 
-  it("a conta em uso: a primeira da IA fora do limite e logada", () => {
-    const contas = [conta("a1", { noLimiteAte: AGORA + 1000 }), conta("a2", { maquinas: [] }), conta("a3"), conta("b1", { ia: "codex-cli" })];
+  it("a conta em uso: a primeira da fila fora do limite e logada; sem fila, a primeira da IA só se livre (E4, NOD-390)", () => {
+    const contas = [conta("a1", { noLimiteAte: AGORA + 1000, entraNaTrocaAutomatica: true }), conta("a2", { maquinas: [], entraNaTrocaAutomatica: true }), conta("a3", { entraNaTrocaAutomatica: true }), conta("b1", { ia: "codex-cli" })];
     expect(contaEmUso(contas, AGORA, { ia: "claude-cli" })?.id).toBe("a3");
     expect(contaEmUso(contas, AGORA, { ia: "codex-cli" })?.id).toBe("b1");
     expect(contaEmUso(contas, AGORA)?.id).toBe("a3");
+    // Pela posição, não pela ordem do array.
+    expect(contaEmUso([conta("z", { posicao: 3 }), conta("y", { posicao: 1 })], AGORA, { ia: "claude-cli" })?.id).toBe("y");
+    expect(contaEmUso([conta("z", { ia: "codex-cli", posicao: 3 }), conta("y", { posicao: 1 })], AGORA)?.id).toBe("y");
   });
 
   it("a conversa pede o uso do plano e as contas (o cabeçalho do menu); sem a rota (null), não pede de novo", () => {

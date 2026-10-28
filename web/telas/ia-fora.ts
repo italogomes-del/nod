@@ -480,7 +480,8 @@ export function cartaoTrocaDeIa(m: Mensagem, p: { nomeDoBot: string | null; agor
   const levarOp = para ? opcaoDaTroca({ act: "troca-levar", dados, rotulo: mesmaIa ? `Seguir noutra conta do ${de}` : `Levar as tasks para o ${para}`, consequencia: mesmaIa ? "Seguem agora, mas recomeçam do resumo: a sessão fica na conta que parou." : "Seguem agora, mas recomeçam do resumo de cada frente.", recomendada: levar }) : "";
   const rodape = levar ? "Se você não escolher em 10 min, eu sigo a recomendação." : "Se você não escolher, eu sigo a recomendação.";
   const titulo = mesmaIa ? `A conta ${t.contaDe!.apelido} do ${de} chegou ao limite` : `O ${de} chegou ao limite`;
-  const conversa = para && !mesmaIa ? `A conversa segue no ${para}. ` : "";
+  // NOD-390: com a conta da outra IA (a da fila na máquina do bot), o apelido junto, como no seletor de IA.
+  const conversa = para && !mesmaIa ? `A conversa segue no ${para}${t.contaPara ? ` · conta ${t.contaPara.apelido}` : ""}. ` : "";
   return `<div class="aviso-estado tom-info aviso-troca" role="status"><div class="aviso-estado-txt"><b>${esc(titulo)}${volta ? ` · volta ${esc(volta)}` : ""}</b><p>${esc(conversa)}${esc(fora)}${esc(frase)}</p><ul class="troca-opcoes">${levar ? levarOp + esperar : esperar + levarOp}</ul><small class="troca-rodape">${esc(rodape)}</small></div></div>`;
 }
 

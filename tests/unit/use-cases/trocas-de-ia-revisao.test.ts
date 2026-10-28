@@ -80,6 +80,30 @@ describe("C1: a cota medida não leva a task com sessão para outra IA", () => {
     expect(c.trocas()).toMatchObject([{ iaDe: "claude-cli", iaPara: "codex-cli", voltaEm: T0 + 3 * HORA, machineId: c.vm }]);
   });
 
+  it("NOD-390: o aviso leva a conta da fila do ChatGPT na máquina do bot (o cartão diz 'segue no ChatGPT · conta Pessoal')", async () => {
+    const c = await cenario();
+    await c.task();
+    await c.deps.repos.usoDoPlano.gravar({ harness: "claude-cli", situacao: "esgotado", cincoHoras: { utilizacao: 1, renovaEm: T0 + 3 * HORA }, semana: null, medidoEm: T0 }, c.vm);
+    await c.despachar();
+    expect(c.payload()).toMatchObject({ iaPara: "codex-cli", contaPara: { id: c.conta("Pessoal", "codex-cli").id, apelido: "Pessoal" } });
+  });
+
+  it("NOD-390: sem conta do ChatGPT na máquina do bot, o aviso não inventa conta", async () => {
+    const c = await cenario();
+    const r = await avisarTrocaDeIa(c.deps, { agenteId: c.bot.id, conversaId: c.conversaId, turnoId: null, iaDe: "claude-cli", iaPara: "codex-cli", voltaEm: T0 + HORA, fixo: false, machineId: c.mac, autoria: { ...PESSOA }, agora: T0 });
+    expect(r.length).toBeGreaterThan(0);
+    expect(c.payload()?.iaPara).toBe("codex-cli");
+    expect(c.payload()).not.toHaveProperty("contaPara");
+  });
+
+  it("NOD-390 (QA): bot com IA fixa ou troca para a mesma IA: o aviso não leva conta de outra IA", async () => {
+    for (const [iaPara, fixo] of [["codex-cli", true], ["claude-cli", false]] as const) {
+      const c = await cenario();
+      await avisarTrocaDeIa(c.deps, { agenteId: c.bot.id, conversaId: c.conversaId, turnoId: null, iaDe: "claude-cli", iaPara, voltaEm: T0 + HORA, fixo, machineId: c.vm, autoria: { ...PESSOA }, agora: T0 });
+      expect(c.payload(), `${iaPara} fixo=${fixo}`).not.toHaveProperty("contaPara");
+    }
+  });
+
   it("na reserva (99,5%), a task que já começou segue no Claude: a sessão não sai para o ChatGPT", async () => {
     const c = await cenario();
     const t = await c.task();

@@ -79,6 +79,11 @@ export type PayloadTrocaDeIa = {
   foraDaMaquina?: { ia: IdHarness; maquina: string | null };
   /** I1: a conta do ChatGPT que parou (a sessão mora nela); "levar" segue noutra conta do ChatGPT, do resumo. */
   contaDe?: { id: string; apelido: string };
+  /**
+   * NOD-390: a conta em uso da outra IA (`iaPara`) na máquina-alvo, pela fila, quando o aviso foi aberto — o cartão diz
+   * "A conversa segue no ChatGPT · conta X" (o apelido, nunca o e-mail). Ausente = a IA sem conta na lista ali.
+   */
+  contaPara?: { id: string; apelido: string };
   /** Preenchidos quando a troca fecha (a tela troca os botões pela linha do que aconteceu). */
   decisao?: DecisaoDaTroca;
   decididoEm?: EpochMs;

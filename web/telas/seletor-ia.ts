@@ -1,4 +1,5 @@
 import type { Agente, EsforcoAgente } from "../../src/contracts/agente.ts";
+import type { IdHarness } from "../../src/contracts/harness.ts";
 import type { ContaIa } from "../../src/contracts/contas-ia.ts";
 import type { IaDaPessoa, PedidoInteligencia } from "../../src/contracts/inteligencia.ts";
 import type { Estado } from "../estado/reducer.ts";
@@ -43,7 +44,13 @@ export type GrupoDoSeletor = { ia: IaMac; serve: boolean; modelos: { id: string;
  * O que acontece se a conta em uso acabar (`fraseDoLimite`): segue noutra conta da mesma IA, segue noutra IA, o Nod
  * pergunta antes de trocar de conta, ou o bot espera a conta voltar.
  */
-export type SeguirSeAcabar = { tipo: "conta"; apelido: string } | { tipo: "ia"; nome: string } | { tipo: "perguntar" } | { tipo: "esperar" };
+export type SeguirSeAcabar = { tipo: "conta"; ia: string; apelido: string } | { tipo: "ia"; nome: string } | { tipo: "perguntar" } | { tipo: "esperar" };
+
+/**
+ * NOD-390: a decisão do servidor (`DecisaoDoLimiteDaConta`, src/domain/contas-da-pessoa.ts) vista pela web: "trocou" e
+ * "outra_ia" trazem a conta da lista para onde a conversa segue.
+ */
+export type DecisaoSeAcabar = { tipo: "trocou" | "outra_ia"; para: ContaIa } | { tipo: "perguntar" } | { tipo: "todas_no_limite" };
 
 export type DadosSeletor = {
   agenteId: string;
@@ -76,35 +83,78 @@ const livre = (c: ContaIa, agora: number) => c.noLimiteAte === null || c.noLimit
 /** Pronta na máquina do bot; sem máquina conhecida, em qualquer uma. */
 const prontaNa = (c: ContaIa, maquina: string | null) => c.maquinas.some((v) => v.estado === "pronta" && (maquina === null || v.maquinaId === maquina));
 
+const posicaoNaOrdem = (ordem: readonly IdHarness[], ia: IdHarness) => {
+  const i = ordem.indexOf(ia);
+  return i < 0 ? ordem.length : i;
+};
+
 /**
- * O que acontece se a conta em uso acabar, espelhando a regra do servidor (`decidirLimiteDaConta` em
- * src/domain/contas-da-pessoa.ts, ADR-101/102), na mesma ordem:
- *  1. "Trocar sozinho" (`modo: automatico`) e outra conta livre da MESMA IA pronta na máquina, que está na fila
- *     (corporativa ou não, NOD-308): segue nela ("trocou").
- *  2. No Automático, outra IA pronta e fora do limite: a conversa segue nela ("outra_ia"). O bot fixo não troca de IA.
- *  3. Outra conta livre (o servidor pergunta com as livres de qualquer máquina): o Nod pergunta antes de trocar de conta.
- *     No bot fixo, só as da mesma IA contam.
- *  4. Senão o bot espera a conta voltar.
+ * NOD-390: o espelho, na web, de `decidirLimiteDaConta` + `contaDoTurno` (src/domain/contas-da-pessoa.ts, ADR-108) para a
+ * conta `atual` que acabasse agora. A web só faz `import type` de src/ (AGENTS.md), então a regra é copiada e
+ * tests/unit/web/tela-limpa.test.ts confere as duas sobre muitos estados (mesmo tipo, mesma conta). Na ordem do servidor:
+ *  1. Por IA, a conta em uso entre as prontas na máquina (em ordem de posição): a primeira da fila livre; sem conta da IA
+ *     na fila ali, a primeira dela se livre; senão nenhuma. Outra conta da MESMA IA assim: segue nela ("trocou"). Não olha
+ *     o `modo` (o "Perguntar antes / Trocar sozinho" saiu com a ADR-108; o servidor já o ignora).
+ *  2. Sem IA fixa (Automático), a conta em uso de outra IA na máquina, pela ordem do bot ou pela posição: "outra_ia".
+ *  3. Outra conta livre (em qualquer máquina, ou em nenhuma): o Nod pergunta. Com a IA fixa, só as contas dela (R2).
+ *  4. Senão todas no limite.
+ * A web não recebe a conta "escolhida" da pessoa (`contas_escolhidas`, ContasIaDto não a traz): decide como sem escolha.
+ * Com uma conta fora da fila escolhida e nenhuma da fila livre, o servidor a usa e a web não a vê (diferença conhecida,
+ * NOD-390; mandar a escolhida no DTO é follow-up). A ordem do bot só decide com 3+ IAs com conta (hoje são 2). A máquina é
+ * a do bot (null = qualquer máquina com a conta pronta). O filtro da IA fixa em `naMaquina` espelha o do servidor.
+ */
+export function decidirSeAcabar(contas: readonly ContaIa[], p: { atualId: string; maquina: string | null; iaFixa: IdHarness | null; ordemDoBot: readonly IdHarness[] | null; agora: number }): DecisaoSeAcabar {
+  const atual = contas.find((c) => c.id === p.atualId);
+  if (!atual) return { tipo: "todas_no_limite" };
+  // A conta em uso acabou: fica no limite (a hora não importa, só que passa de agora).
+  const marcadas = contas.map((c) => (c.id === atual.id ? { ...c, noLimiteAte: p.agora + 1 } : c));
+  const daIaFixa = (c: ContaIa) => p.iaFixa === null || c.ia === p.iaFixa;
+  const emOrdem = [...marcadas].sort((a, b) => a.posicao - b.posicao);
+  const naMaquina = emOrdem.filter((c) => prontaNa(c, p.maquina) && daIaFixa(c));
+  const porIa = new Map<IdHarness, ContaIa | null>();
+  for (const c of naMaquina) {
+    if (porIa.has(c.ia)) continue;
+    const daIa = naMaquina.filter((x) => x.ia === c.ia);
+    const daFila = daIa.find((x) => x.entraNaTrocaAutomatica && livre(x, p.agora));
+    const [primeira] = daIa;
+    porIa.set(c.ia, daFila ?? (!daIa.some((x) => x.entraNaTrocaAutomatica) && primeira && livre(primeira, p.agora) ? primeira : null));
+  }
+  const mesmaIa = porIa.get(atual.ia);
+  if (mesmaIa && mesmaIa.id !== atual.id) return { tipo: "trocou", para: mesmaIa };
+  if (p.iaFixa === null) {
+    const comConta = [...porIa.values()].filter((c): c is ContaIa => c !== null && c.ia !== atual.ia);
+    const ordem = p.ordemDoBot;
+    const [outraIa] = comConta.sort((a, b) => (ordem ? posicaoNaOrdem(ordem, a.ia) - posicaoNaOrdem(ordem, b.ia) : a.posicao - b.posicao));
+    if (outraIa) return { tipo: "outra_ia", para: outraIa };
+  }
+  if (emOrdem.some((c) => c.id !== atual.id && livre(c, p.agora) && daIaFixa(c))) return { tipo: "perguntar" };
+  return { tipo: "todas_no_limite" };
+}
+
+/** A frase sai da decisão: a conta para onde segue (a IA pelo nome da tela e o apelido, nunca o e-mail), perguntar ou esperar. */
+export function seguirDaDecisao(d: DecisaoSeAcabar): SeguirSeAcabar {
+  if (d.tipo === "trocou" || d.tipo === "outra_ia") return { tipo: "conta", ia: ehIaMac(d.para.ia) ? PROVEDOR[d.para.ia].nome : d.para.ia, apelido: d.para.apelido };
+  return d.tipo === "perguntar" ? { tipo: "perguntar" } : { tipo: "esperar" };
+}
+
+/**
+ * O que acontece se a conta em uso acabar. Com a conta em uso na lista, é a decisão do servidor (`decidirSeAcabar`,
+ * NOD-390): segue na próxima conta da fila (da mesma IA, ou de outra no Automático) e a frase diz a IA e o apelido dela.
+ * Sem conta (modo local, ADR-092, ou a lista ainda não chegou), vale a regra por IA de antes: no Automático, outra IA
+ * pronta e fora do limite; o bot fixo não troca de IA.
  *
  * definido em 2026-10-16 (revisão do PR 1): a máquina é a do bot (`agente.maquinaId`, senão a padrão da pessoa); sem
- * nenhuma das duas, vale qualquer máquina com a conta pronta. A conta "escolhida" da pessoa (`contas_escolhidas`) não
- * chega à web (ContasIaDto não a traz): a conta em uso é a primeira livre da ordem, como o servidor faz quando não há
- * escolha — e no limite o servidor descarta a escolha da IA que acabou, então a regra 1 não depende dela.
+ * nenhuma das duas, vale qualquer máquina com a conta pronta.
  */
 export function seguirSeAcabar(estado: Estado, p: { ia: IaDaPessoa; auto: boolean; ordem: Parameters<typeof iasDoBot>[1]; c: ContextoInteligencia; atual: ContaIa | null; maquina: string | null }): SeguirSeAcabar {
   const contas = estado.contasIa?.contas ?? [];
-  const atual = p.atual;
-  const outras = atual ? contas.filter((x) => x.id !== atual.id && livre(x, p.c.agora)) : [];
-  const daMesmaIa = outras.filter((x) => x.ia === atual?.ia);
-  if (estado.contasIa?.modo === "automatico") {
-    const sozinha = daMesmaIa.find((x) => prontaNa(x, p.maquina) && x.entraNaTrocaAutomatica);
-    if (sozinha) return { tipo: "conta", apelido: sozinha.apelido };
+  if (p.atual) {
+    return seguirDaDecisao(decidirSeAcabar(contas, { atualId: p.atual.id, maquina: p.maquina, iaFixa: p.auto ? null : p.atual.ia, ordemDoBot: p.ordem, agora: p.c.agora }));
   }
   if (p.auto) {
     const proxima = iasDoBot(p.c.ias, p.ordem).find((x) => x.id !== p.ia.id && ehIaMac(x.id) && conectada(x, p.c) && !noLimite(x, p.c));
     if (proxima && ehIaMac(proxima.id)) return { tipo: "ia", nome: PROVEDOR[proxima.id].nome };
   }
-  if ((p.auto ? outras : daMesmaIa).length > 0) return { tipo: "perguntar" };
   return { tipo: "esperar" };
 }
 
@@ -192,7 +242,7 @@ export function fraseDoLimite(d: Pick<DadosSeletor, "uso" | "renovaEm" | "seguir
   const quando = alerta ? "Se acabar agora," : "Se acabar,";
   const forte = (t: string) => `<span class="ia-sel-forte">${esc(t)}</span>`;
   const s = d.seguir;
-  const depois = s.tipo === "conta" ? `segue na conta ${forte(s.apelido)}` : s.tipo === "ia" ? `a conversa segue no ${forte(s.nome)}` : s.tipo === "perguntar" ? "o Nod pergunta antes de trocar de conta" : "espera a conta voltar";
+  const depois = s.tipo === "conta" ? `segue no ${forte(`${s.ia} · conta ${s.apelido}`)}` : s.tipo === "ia" ? `a conversa segue no ${forte(s.nome)}` : s.tipo === "perguntar" ? "o Nod pergunta antes de trocar de conta" : "espera a conta voltar";
   return `${renova}${quando} ${depois}.`;
 }
 
