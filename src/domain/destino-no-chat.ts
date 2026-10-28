@@ -38,6 +38,8 @@ export const DESTINO: Readonly<Record<Assunto, RegraDeDestino>> = {
   "sala.evento": { destino: "chat", categoria: null },
   "rotina.evento": { destino: "chat", categoria: null },
   "rotina.falhou": { destino: "chat", categoria: null },
+  // NOD-114: o aviso que o bot deu por conta própria é fala para a pessoa ler.
+  "aviso.pessoa": { destino: "chat", categoria: null },
   // O aviso único de janelas adiadas (NOD-243): diz por que a rotina não roda e quando volta.
   "rotina.adiada": { destino: "chat", categoria: null },
   // A linha "Rotina executou" (ou "passou em branco"): a silenciosa (sem_novidade) não grava linha nenhuma, então é ela que
@@ -206,6 +208,8 @@ export function assuntoDe(kind: KindMensagem, payload: PayloadMensagem | null, a
         return "frentes.recado";
       case "pedido_respondido":
         return "pedido.respondido";
+      case "aviso_pessoa":
+        return "aviso.pessoa";
       case "boas_vindas":
       case "acoes_do_turno": // NOD-353: a fala final com o resumo das ações continua fala.
       case "pedido_a_pessoa":

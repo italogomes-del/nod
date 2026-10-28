@@ -20,7 +20,7 @@ export const listarNaoLidos: CasoDeUso<Record<string, never>, NaoLidosDto> = asy
   const mensagens = await deps.repos.leituras.mensagens(conversas.map((c) => c.conversaId));
   const saida: ConversaNaoLida[] = conversas.flatMap((c) => {
     const m = mensagens.get(c.conversaId);
-    return m ? [{ ...c, primeiraId: m.primeira.id, mensagens: m.ultimas, daRotina: m.daRotina }] : [];
+    return m ? [{ ...c, primeiraId: m.primeira.id, mensagens: m.ultimas, ...(m.avisos.length > 0 ? { avisos: m.avisos } : {}), daRotina: m.daRotina }] : [];
   });
   return { data: { conversas: saida } };
 };

@@ -42,7 +42,13 @@ export function canalMac(mac: NodDesktop, aoAbrir: (alvo: AlvoAviso) => void, ao
     ligado: () => prefs.avisos,
     reler,
     alternar: () => mac.definirAvisos(!prefs.avisos).then(aplicar, () => undefined),
-    mostrar: (aviso) => void mac.avisar(aviso).then(reler, () => undefined),
+    // NOD-114: o app do Mac de antes do alvo "trabalho" recusa o aviso (devolve false); a segunda tentativa vai com a
+    // conversa do bot, que todo app aceita. No app novo o false é foco ou aviso desligado, e a conversa cai no mesmo false.
+    mostrar: (aviso) =>
+      void mac
+        .avisar(aviso)
+        .then((ok) => (ok || aviso.alvo.tipo !== "trabalho" ? ok : mac.avisar({ ...aviso, alvo: { tipo: "conversa", conversaId: aviso.alvo.conversaId, agenteId: aviso.alvo.agenteId } })))
+        .then(reler, () => undefined),
     contador: (n) => void mac.contador(n).catch(() => undefined),
   };
   const definirSom = mac.definirSom?.bind(mac);

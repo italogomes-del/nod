@@ -110,3 +110,24 @@ describe("opcoesDoAviso (NOD-196)", () => {
     expect(Object.keys(opcoesDoAviso(aviso, { som: true })).sort()).toEqual(["body", "groupId", "silent", "title"]);
   });
 });
+
+describe("NOD-114: alvo da task e um grupo por bot", () => {
+  const trabalho = { tipo: "trabalho" as const, trabalhoId: "tr-1", agenteId: "ag-1", conversaId: "c-1" };
+
+  it("lerAlvo aceita o alvo trabalho e recusa id fora do padrão", () => {
+    expect(lerAviso({ titulo: "Nina", corpo: "x", alvo: trabalho })).toEqual({ titulo: "Nina", corpo: "x", alvo: trabalho });
+    expect(lerAviso({ titulo: "Nina", corpo: "x", alvo: { ...trabalho, trabalhoId: "../../etc" } })).toBeNull();
+    expect(lerAviso({ titulo: "Nina", corpo: "x", alvo: { ...trabalho, agenteId: "a b" } })).toBeNull();
+    expect(lerAviso({ titulo: "Nina", corpo: "x", alvo: { ...trabalho, conversaId: "x".repeat(65) } })).toBeNull();
+    expect(lerAviso({ titulo: "Nina", corpo: "x", alvo: { tipo: "trabalho", trabalhoId: "tr-1", agenteId: "ag-1" } })).toBeNull();
+  });
+
+  it("o grupo é o bot: id validado, copiado, e vira um groupId por bot dentro do grupo do nod", () => {
+    const aviso = lerAviso({ titulo: "Nina", corpo: "x", alvo: { tipo: "sua-vez" }, grupo: "ag-1" });
+    expect(aviso).toEqual({ titulo: "Nina", corpo: "x", alvo: { tipo: "sua-vez" }, grupo: "ag-1" });
+    expect(lerAviso({ titulo: "Nina", corpo: "x", alvo: { tipo: "sua-vez" }, grupo: "../x" })).toBeNull();
+    expect(lerAviso({ titulo: "Nina", corpo: "x", alvo: { tipo: "sua-vez" }, grupo: 3 })).toBeNull();
+    expect(opcoesDoAviso(aviso!, { som: true }).groupId).toBe(`${GRUPO_AVISOS}:ag-1`);
+    expect(opcoesDoAviso({ ...aviso!, grupo: "ag-2" }, { som: true }).groupId).not.toBe(opcoesDoAviso(aviso!, { som: true }).groupId);
+  });
+});

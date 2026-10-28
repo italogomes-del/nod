@@ -161,6 +161,7 @@ export interface UseCasesNod<Deps> {
   verAppsConectados: CasoNod<Deps, "ver_apps_conectados">;
   registrarRelatoDoNod: CasoNod<Deps, "registrar_relato">;
   criarBots: CasoNod<Deps, "criar_bots">; responderPedido: CasoNod<Deps, "responder_pedido">; pedirCredencial: CasoNod<Deps, "pedir_credencial">;
+  avisarPessoa: CasoNod<Deps, "avisar_pessoa">;
   abrirConta: CasoNod<Deps, "abrir_conta">;
 }
 
@@ -194,5 +195,5 @@ export const USE_CASE_POR_FERRAMENTA = {
   gerir_bots: "gerirBots",
   ver_apps_conectados: "verAppsConectados",
   registrar_relato: "registrarRelatoDoNod",
-  criar_bots: "criarBots", responder_pedido: "responderPedido", pedir_credencial: "pedirCredencial", abrir_conta: "abrirConta",
+  criar_bots: "criarBots", responder_pedido: "responderPedido", pedir_credencial: "pedirCredencial", avisar_pessoa: "avisarPessoa", abrir_conta: "abrirConta",
 } as const satisfies Record<NomeFerramentaNod, keyof UseCasesNod<unknown>>;

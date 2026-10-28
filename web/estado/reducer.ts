@@ -1331,7 +1331,8 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
   // quando um turno termina (uma leitura por turno, sem relógio novo); fora da conversa a falta espera a tela pedir. O turno
   // interrompido também gastou a janela (e é o que acaba quando a conta bate no limite): relê igual (revisão do PR 1).
   // NOD-12: e a lista de contas, que carrega a leitura por conta.
-  "turno.encerrado": (e, f, agora) => invalidar(fimDosSubagentes(encerrado(semTurnoVivo(comFalaSaindo(e, texto(f.dados.turnoId), agora, true), texto(f.dados.turnoId)), texto(f.dados.turnoId)), texto(f.dados.conversaId), texto(f.dados.turnoId), agora), conv(f), "frota", usoPlano(e), contasDoTurno(e), ...trabalhosDoTurno(f), ...bibliotecaDoFrame(e, f)),
+  // NOD-114 (revisão): e os não lidos — a fala do meio que virou o fim do turno só vira o aviso "terminou" numa releitura.
+  "turno.encerrado": (e, f, agora) => invalidar(fimDosSubagentes(encerrado(semTurnoVivo(comFalaSaindo(e, texto(f.dados.turnoId), agora, true), texto(f.dados.turnoId)), texto(f.dados.turnoId)), texto(f.dados.conversaId), texto(f.dados.turnoId), agora), conv(f), "frota", "nao-lidos", usoPlano(e), contasDoTurno(e), ...trabalhosDoTurno(f), ...bibliotecaDoFrame(e, f)),
   // QA do #534 (27/10): o Parar deixa o retrato como o fim normal — a fala viva não some antes de a gravada (parcial) chegar.
   "turno.interrompido": (e, f, agora) => invalidar(fimDosSubagentes(encerrado(semTurnoVivo(comFalaSaindo(e, texto(f.dados.turnoId), agora, true), texto(f.dados.turnoId)), texto(f.dados.turnoId)), texto(f.dados.conversaId), texto(f.dados.turnoId), agora), conv(f), "frota", "sua-vez", usoPlano(e), contasDoTurno(e), ...trabalhosDoTurno(f), ...bibliotecaDoFrame(e, f)),
   // Parte 4 do plano "o pensamento no chat": a fala da pergunta vem no frame (`mensagem_json`) e entra na conversa já

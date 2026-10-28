@@ -85,6 +85,8 @@ export async function listarSuaVez(deps: DepsSuaVez, input: EntradaSuaVez = {}):
 
   const itens: SuaVezDto["itens"] = [];
   const conectores: ConectoresDaLeitura = new Map();
+  // NOD-114: a task do turno que pediu, para o aviso do navegador e do desktop abrir a task e não a conversa (uma consulta só).
+  const trabalhos = await repos.turnos.trabalhosDosTurnos(fila.itens.flatMap((i) => (i.decisao.turnoId ? [i.decisao.turnoId] : [])));
   for (const item of fila.itens) {
     let decisao = item.decisao;
     const aberta = decisao.estado === "pendente" || decisao.estado === "reaberta";
@@ -102,7 +104,7 @@ export async function listarSuaVez(deps: DepsSuaVez, input: EntradaSuaVez = {}):
     // parada e quais janelas não rodaram — só no aberto; o vencido já pausou a rotina.
     const rotinaParada = proposta && aberta && decisao.tipo === "acesso" ? await paradaDoPedido(repos, proposta) : null;
     const nuncaPermanente = itensAprovacao.filter((i) => ehNuncaPermanente(i.destino.ferramenta)).map((i) => i.id);
-    itens.push({ ...item, decisao, itensAprovacao, proposta, fio: fios.get(decisao.id) ?? null, rotinaParada, nuncaPermanente, pedido: pedidos.get(decisao.id) ?? null });
+    itens.push({ ...item, decisao, itensAprovacao, proposta, fio: fios.get(decisao.id) ?? null, rotinaParada, nuncaPermanente, pedido: pedidos.get(decisao.id) ?? null, trabalhoId: decisao.turnoId ? (trabalhos.get(decisao.turnoId) ?? null) : null });
   }
 
   const foraDoAr = (await repos.inventario.listar())

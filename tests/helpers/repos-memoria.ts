@@ -1635,6 +1635,9 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         b.contaminados.add(id);
         return true;
       },
+      async trabalhosDosTurnos(ids: readonly string[]) {
+        return new Map(doTenant(b.turnos).filter((t) => ids.includes(t.id)).map((t) => [t.id, t.trabalhoId ?? null] as [string, string | null]));
+      },
       async contaminado(id: string) {
         return b.contaminados.has(id);
       },
@@ -3375,12 +3378,12 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
             .sort((x, y) => y.ultimaEm - x.ultimaEm);
         },
         async mensagens(conversaIds: readonly string[], por = 3) {
-          const saida = new Map<string, { primeira: Mensagem; ultimas: Mensagem[]; daRotina: boolean }>();
+          const saida = new Map<string, { primeira: Mensagem; ultimas: Mensagem[]; avisos: Mensagem[]; daRotina: boolean }>();
           for (const id of conversaIds) {
             const ms = naoLidas(id);
             if (!ms.length) continue;
             const turnos = new Set(ms.map((m) => m.turnoId));
-            saida.set(id, { primeira: ms[0]!, ultimas: ms.slice(-por), daRotina: doTenant(b.turnos).some((t) => turnos.has(t.id) && t.origem === "rotina") });
+            saida.set(id, { primeira: ms[0]!, ultimas: ms.slice(-por), avisos: [], daRotina: doTenant(b.turnos).some((t) => turnos.has(t.id) && t.origem === "rotina") });
           }
           return saida;
         },

@@ -63,7 +63,8 @@ describe("aplicarFrame por TipoFrame", () => {
     expect(e.atividades[CONVERSA]).toEqual({});
     expect(e.turnosVivos[TURNO]).toBeUndefined();
     // Plano "tela limpa" (2026-10-16): o turno que termina relê o uso do plano (o anel do seletor de IA).
-    expect(e.invalidacoes).toEqual([`conversa:${CONVERSA}`, "trabalhos", "frota", "uso-plano"]);
+    // NOD-114: também relê não lidos, de onde nasce o aviso "terminou".
+    expect(e.invalidacoes).toEqual([`conversa:${CONVERSA}`, "trabalhos", "frota", "nao-lidos", "uso-plano"]);
   });
 
   it("revisão 7 do #508: a chave da fala parada não sobrescreve uma que já existe com o mesmo instante", () => {

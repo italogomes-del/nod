@@ -815,6 +815,13 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
       return r.count === 1;
     },
 
+    /** NOD-114 (revisão): a task de cada turno numa consulta só — "Sua vez" leva o trabalhoId de cada item sem uma leitura por item. */
+    async trabalhosDosTurnos(ids: readonly string[]): Promise<Map<string, string | null>> {
+      if (ids.length === 0) return new Map();
+      const linhas = await conn<{ id: string; trabalho_id: string | null }[]>`select id, trabalho_id from turnos where tenant_id = ${escopo.tenantId} and id = any(${[...new Set(ids)]}::uuid[])`;
+      return new Map(linhas.map((l) => [l.id, l.trabalho_id]));
+    },
+
     async contaminado(id: string): Promise<boolean> {
       const [l] = await conn<{ sim: boolean }[]>`select contaminado_em is not null as sim from turnos where tenant_id = ${escopo.tenantId} and id = ${id}`;
       return l?.sim === true;

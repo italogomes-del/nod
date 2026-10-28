@@ -17,6 +17,8 @@ export type ConversaNaoLida = {
   desde: EpochMs;
   ultimaEm: EpochMs;
   mensagens: Mensagem[];
+  /** NOD-114: os avisos não lidos (avisar_pessoa, rotina que não rodou) que ficaram antes das `mensagens` (até 10). */
+  avisos?: Mensagem[];
   daRotina: boolean;
 };
 export type NaoLidosDto = { conversas: ConversaNaoLida[] };

@@ -73,6 +73,8 @@ export const ASSUNTOS = [
   "frentes.terminadas",
   "frentes.recado",
   "pedido.respondido",
+  // NOD-114: o bot avisou a pessoa por conta própria (avisar_pessoa); o desktop e o navegador mostram o aviso.
+  "aviso.pessoa",
   // O resto do que o sistema escreve (Atividade).
   "memoria.anotada",
   "memoria.task_fechada",

@@ -26,6 +26,7 @@ import { pedirAPessoa } from "../../src/use-cases/pedir-a-pessoa.ts";
 import { pedirAprovacao } from "../../src/use-cases/pedir-aprovacao.ts";
 import type { Deps, Services, UseCasesNod } from "../../src/use-cases/tipos.ts";
 import { criarBancoMemoria, type BancoMemoria } from "./repos-memoria.ts";
+import { avisarPessoa } from "../../src/use-cases/avisar-pessoa.ts";
 
 /**
  * Helpers da L5 (proxy MCP, plano, conectores, aprovação): plano de teste, services/useCases
@@ -139,6 +140,7 @@ export function useCasesDeTeste(sobrescrita: Partial<UseCasesNod> = {}): UseCase
     criarBots,
     responderPedido,
     pedirCredencial,
+    avisarPessoa,
     abrirConta,
     gerirBots,
     verAppsConectados,

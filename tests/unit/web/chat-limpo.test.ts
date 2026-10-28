@@ -886,3 +886,21 @@ describe("frente de lote (NOD-325)", () => {
     expect(fz?.html).toContain("da task Frente f-a");
   });
 });
+
+describe("o aviso do bot à pessoa fica à vista (NOD-114)", () => {
+  const aviso = (id: string, turno: string, origem: "rotina" | "delegacao", trabalhoId: string): Mensagem =>
+    msg(id, t0 + 5 * MIN, { turnoId: turno, origemTurno: origem, trabalhoId, payload: { kind: "aviso_pessoa" }, texto: "O deploy caiu, olhe o #ops" });
+
+  it("no meio de uma execução de rotina, vira balão em vez de sumir para dentro da linha", () => {
+    const { e, c } = cenario([...execucaoSilenciosa(1, t0), aviso("av1", "tr1", "rotina", "tb-r1")]);
+    const balao = itens(c, e).find((b) => b.chave === "av1");
+    expect(balao && ehBalao(balao.html)).toBe(true);
+    expect(balao?.html).toContain("O deploy caiu");
+  });
+
+  it("no meio de um pedido de colega (delegação), também", () => {
+    const { e, c } = cenario([...pedidoDoChico(t0), aviso("av2", "tk", "delegacao", "tb-k")]);
+    const balao = itens(c, e).find((b) => b.chave === "av2");
+    expect(balao && ehBalao(balao.html)).toBe(true);
+  });
+});

@@ -119,7 +119,7 @@ const marcada = (m: Mensagem): boolean => m.origemTurno !== undefined || m.traba
 /** Fala da pessoa ou do bot que pode sumir para dentro de uma linha (os cards, recibos e avisos ficam à vista). */
 function recolhivel(m: Mensagem): boolean {
   const k = m.payload?.kind;
-  if (k === "trabalho_aberto" || k === "pedido_a_pessoa") return false;
+  if (k === "trabalho_aberto" || k === "pedido_a_pessoa" || k === "aviso_pessoa") return false;
   return m.kind === "texto" || m.kind === "rotina_execucao" || m.kind === "handoff" || m.kind === "peer_ask";
 }
 
@@ -246,9 +246,12 @@ export function planejarLinhas(mensagens: readonly Mensagem[], estado: Estado): 
     // ADR-099 (I7 revista): na rotina, o turno do dono que abriu frentes ("comecei…") não é o resultado — o resultado é o
     // do retorno das frentes; até ele chegar a execução não acabou.
     const abriramFrentes = new Set(u.tipo === "rotina" ? u.mensagens.flatMap((m) => (m.payload?.kind === "frentes_abertas" && m.turnoId ? [m.turnoId] : [])) : []);
-    const baloes = u.mensagens.filter((m) => m.payload?.kind === "pedido_a_pessoa" || (u.tipo !== "colega" && falou && m.destino !== "anexo" && m.kind === "texto" && m.autoria.autor_tipo === "agente" && m.fimDoTurno === true && !(m.turnoId && abriramFrentes.has(m.turnoId))));
+    // NOD-114: o aviso que o bot mandou à pessoa (avisar_pessoa) é para ela, como a pergunta: fica à vista em qualquer
+    // turno — o clique na notificação abre esta conversa, e o aviso escondido seria marcado lido sem ser visto.
+    const paraPessoa = (m: Mensagem): boolean => m.payload?.kind === "pedido_a_pessoa" || m.payload?.kind === "aviso_pessoa";
+    const baloes = u.mensagens.filter((m) => paraPessoa(m) || (u.tipo !== "colega" && falou && m.destino !== "anexo" && m.kind === "texto" && m.autoria.autor_tipo === "agente" && m.fimDoTurno === true && !(m.turnoId && abriramFrentes.has(m.turnoId))));
     // O resultado do trabalho que terminou ganha a linha "… terminou · 39 min · US$ 0,88" logo acima (K5).
-    const ultimoFim = [...baloes].reverse().find((m) => m.payload?.kind !== "pedido_a_pessoa");
+    const ultimoFim = [...baloes].reverse().find((m) => !paraPessoa(m));
     for (const m of baloes) {
       const t = u.trabalho;
       // Chat limpo (ADR-114): o fim da task mora na Atividade e na linha do dono; o balão do resultado fica sem a linha.

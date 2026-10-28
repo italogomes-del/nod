@@ -7,6 +7,7 @@ import { fixarAgente, ocultarAgente } from "../../src/use-cases/fixar-ocultar-ag
 import { gerirAgente } from "../../src/use-cases/gerir-agente.ts";
 import { listarFrota } from "../../src/use-cases/listar-frota.ts";
 import { listarNaoLidos, marcarConversaLida, marcarConversaNaoLida, marcarTudoLido } from "../../src/use-cases/nao-lidos.ts";
+import { autoriaPessoa as autoriaDaRegra } from "../../src/use-cases/apoio-l7.ts";
 import { autoriaPessoa } from "../../src/use-cases/autoria-evento.ts";
 import { autoriaDoAgente } from "../../src/use-cases/registrar-negacao.ts";
 import type { Deps } from "../../src/use-cases/tipos.ts";
@@ -45,6 +46,74 @@ describeIntegracao("não lidos: o que chegou depois do lido até", () => {
 
       const terceira = await falaDoBot(d, MARLON, c, b.agente.id, "Mais uma coisa.");
       expect((await listarNaoLidos(d, {})).data.conversas.find((x) => x.conversaId === c)).toMatchObject({ total: 1, primeiraId: terceira.id });
+    });
+  });
+
+  it("NOD-114: conta a rotina que não rodou e leva a origem, a task e o fim do turno de cada mensagem; o aviso não é o fim", async () => {
+    await withRollback(MARLON, async (tx) => {
+      const d = depsSobreTrx(tx, MARLON);
+      const { data: b } = await criarAgente(d, { dono: "pessoa", nome: "Rotineiro" });
+      const c = b.conversa.id;
+      const turno = await d.repos.turnos.enfileirar({ executor: "catcher", conversaId: c, agenteId: b.agente.id, origem: "rotina", prazoEm: d.agora() + 600_000, profundidade: 0, entradaTexto: "veja o Linear", entradaConfianca: "confiavel", modelo: "m" });
+      const autoria = autoriaDoAgente(MARLON, b.agente.id);
+      const meio = await d.repos.mensagens.criar({ conversaId: c, turnoId: turno!.id, autoria, kind: "texto", texto: "Olhando.", confianca: "confiavel" });
+      const fim = await d.repos.mensagens.criar({ conversaId: c, turnoId: turno!.id, autoria, kind: "texto", texto: "Feito.", confianca: "confiavel" });
+      // O aviso do bot vem depois da fala final e mesmo assim não é o fim do turno.
+      const aviso = await d.repos.mensagens.criar({ conversaId: c, turnoId: turno!.id, autoria, kind: "texto", payload: { kind: "aviso_pessoa" }, texto: "A NOD-12 travou.", confianca: "confiavel" });
+      // Como disparar-rotina.ts grava: autoria da pessoa pela regra que decidiu. Falhou conta; o Parar dela (interrompida) não.
+      const linhaDaRotina = (desfecho: "falhou" | "interrompida") => d.repos.mensagens.criar({ conversaId: c, autoria: autoriaDaRegra(MARLON.pessoaId, "regra:varredor-expiracao"), kind: "rotina_execucao", texto: `A rotina ${desfecho}.`, payload: { kind: "rotina_execucao", rotinaId: c, instanteAgendado: 0, desfecho }, confianca: "confiavel" });
+      const parada = await linhaDaRotina("interrompida");
+      expect(parada).not.toBeNull();
+      const falhou = await linhaDaRotina("falhou");
+      const outroAviso = await d.repos.mensagens.criar({ conversaId: c, autoria, kind: "sistema", assunto: "memoria.anotada", texto: "Lembrei.", confianca: "confiavel" });
+      expect(outroAviso).not.toBeNull();
+
+      const vivo = (await listarNaoLidos(d, {})).data.conversas.find((x) => x.conversaId === c);
+      expect(vivo?.total).toBe(4);
+      // O turno ainda roda: nada é fim.
+      expect(vivo?.mensagens.some((m) => m.fimDoTurno)).toBe(false);
+
+      await tx`update turnos set estado = 'concluido' where id = ${turno!.id}`;
+      const n = (await listarNaoLidos(d, {})).data.conversas.find((x) => x.conversaId === c);
+      expect(n).toMatchObject({ total: 4, primeiraId: meio!.id, daRotina: true });
+      const porId = new Map((n?.mensagens ?? []).map((m) => [m.id, m]));
+      expect([...porId.keys()]).toEqual([fim!.id, aviso!.id, falhou!.id]);
+      expect(porId.get(fim!.id)).toMatchObject({ origemTurno: "rotina", trabalhoId: null, fimDoTurno: true });
+      expect(porId.get(aviso!.id)).toMatchObject({ origemTurno: "rotina", fimDoTurno: false, payload: { kind: "aviso_pessoa" } });
+      expect(porId.get(falhou!.id)).toMatchObject({ origemTurno: null, fimDoTurno: false });
+    });
+  });
+
+  it("NOD-114 (revisão): a fala da retomada leva a raiz da cadeia — a conversa que a pessoa aprovou e deixou rodando", async () => {
+    await withRollback(MARLON, async (tx) => {
+      const d = depsSobreTrx(tx, MARLON);
+      const { data: b } = await criarAgente(d, { dono: "pessoa", nome: "Retomador" });
+      const c = b.conversa.id;
+      const base = { executor: "catcher", conversaId: c, agenteId: b.agente.id, prazoEm: d.agora() + 600_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" } as const;
+      const raiz = await d.repos.turnos.enfileirar({ ...base, origem: "conversa" });
+      const ret = await d.repos.turnos.enfileirar({ ...base, origem: "retomada", retomaTurnoId: raiz!.id });
+      const fala = await d.repos.mensagens.criar({ conversaId: c, turnoId: ret!.id, autoria: autoriaDoAgente(MARLON, b.agente.id), kind: "texto", texto: "Enviado.", confianca: "confiavel" });
+      await tx`update turnos set estado = 'concluido' where id = ${ret!.id}`;
+      const m = (await listarNaoLidos(d, {})).data.conversas.find((x) => x.conversaId === c)?.mensagens.find((x) => x.id === fala!.id);
+      expect(m).toMatchObject({ origemTurno: "retomada", fimDoTurno: true, raiz: { turnoId: raiz!.id, origem: "conversa" } });
+    });
+  });
+
+  it("NOD-114 (revisão 2): o aviso que ficou antes das três últimas vem em avisos — a fala comum, não", async () => {
+    await withRollback(MARLON, async (tx) => {
+      const d = depsSobreTrx(tx, MARLON);
+      const { data: b } = await criarAgente(d, { dono: "pessoa", nome: "Avisador" });
+      const c = b.conversa.id;
+      const autoria = autoriaDoAgente(MARLON, b.agente.id);
+      await falaDoBot(d, MARLON, c, b.agente.id, "zero");
+      const aviso = await d.repos.mensagens.criar({ conversaId: c, autoria, kind: "texto", payload: { kind: "aviso_pessoa" }, texto: "A NOD-12 travou.", confianca: "confiavel" });
+      const falhou = await d.repos.mensagens.criar({ conversaId: c, autoria: autoriaDaRegra(MARLON.pessoaId, "regra:varredor-expiracao"), kind: "rotina_execucao", texto: "A rotina falhou.", payload: { kind: "rotina_execucao", rotinaId: c, instanteAgendado: 0, desfecho: "falhou" }, confianca: "confiavel" });
+      await falaDoBot(d, MARLON, c, b.agente.id, "meio");
+      for (const t of ["um", "dois", "três"]) await falaDoBot(d, MARLON, c, b.agente.id, t);
+      const n = (await listarNaoLidos(d, {})).data.conversas.find((x) => x.conversaId === c);
+      expect(n?.total).toBe(7);
+      expect(n?.mensagens.map((m) => m.texto)).toEqual(["um", "dois", "três"]);
+      expect(n?.avisos?.map((m) => m.id)).toEqual([aviso!.id, falhou!.id]);
     });
   });
 

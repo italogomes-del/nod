@@ -57,6 +57,25 @@ describeIntegracao("Sua vez (listar-sua-vez + reabrir-decisao)", () => {
     });
   });
 
+  it("NOD-114: o item leva a task do turno que pediu; pedido de turno da conversa e sem turno levam null", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON, { nome: "Vera" });
+      const agora = Date.now();
+      const w = await repos.trabalhos.criar({ agenteId, conversaId, titulo: "Frente", origem: "pessoa" });
+      const daTask = await repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem: "conversa", trabalhoId: w!.id, prazoEm: agora + 600_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
+      const daConversa = await repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem: "conversa", prazoEm: agora + 600_000, profundidade: 0, entradaTexto: "y", entradaConfianca: "confiavel", modelo: "m" });
+      const naTask = await repos.decisoes.criar({ tipo: "falta_de_dado", agenteId, conversaId, turnoId: daTask!.id, prazoDecisaoEm: agora + DIA, frase: "falta o CNPJ" });
+      const naConversa = await repos.decisoes.criar({ tipo: "falta_de_dado", agenteId, conversaId, turnoId: daConversa!.id, prazoDecisaoEm: agora + DIA, frase: "falta o CPF" });
+      const semTurno = await repos.decisoes.criar({ tipo: "gate_rotina", agenteId, conversaId, prazoDecisaoEm: agora + DIA, frase: "rotina das 8h" });
+
+      const { data } = await listarSuaVez(deps(trx, MARLON, () => agora));
+      const porId = new Map(data.itens.map((i) => [i.decisao.id, i.trabalhoId]));
+      expect(porId.get(naTask!.id)).toBe(w!.id);
+      expect(porId.get(naConversa!.id)).toBeNull();
+      expect(porId.get(semTurno!.id)).toBeNull();
+    });
+  });
+
   it("reabrir volta ao topo (reaberto, prazo novo, sem desfecho) e devolve o evento; pendente → estado_invalido; desconhecida → nao_encontrado", async () => {
     await withRollback(MARLON, async (trx) => {
       const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON);

@@ -94,14 +94,15 @@ import { FERRAMENTAS_WORKSPACE } from "../contracts/ferramentas-workspace.ts";
  * (a task de colega de antes, a filha de rotina, a frente), e a execução de rotina com mãe só abre, como antes.
  */
 export const FERRAMENTAS_NOD_POR_MODO: Record<ModoTurno, readonly NomeFerramentaNod[]> = {
-  criacao: ["atualizar_perfil", "lembrar", "pedir_aprovacao", "pedir_acesso", "pedir_credencial", "criar_rotina", "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "ver_colegas", "pedir_a_bot", "pedir_a_pessoa", "publicar_artefato", "ler_artefato", "abrir_frentes", "mandar_para_frente", "me_chame_as"],
-  conversa: ["lembrar", "pedir_aprovacao", "pedir_acesso", "pedir_credencial", "criar_rotina", "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "ver_colegas", "pedir_a_bot", "pedir_a_pessoa", "publicar_artefato", "ler_artefato", "abrir_frentes", "mandar_para_frente", "me_chame_as"],
+  criacao: ["atualizar_perfil", "lembrar", "pedir_aprovacao", "pedir_acesso", "pedir_credencial", "criar_rotina", "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "ver_colegas", "pedir_a_bot", "pedir_a_pessoa", "publicar_artefato", "ler_artefato", "abrir_frentes", "mandar_para_frente", "me_chame_as", "avisar_pessoa"],
+  conversa: ["lembrar", "pedir_aprovacao", "pedir_acesso", "pedir_credencial", "criar_rotina", "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "ver_colegas", "pedir_a_bot", "pedir_a_pessoa", "publicar_artefato", "ler_artefato", "abrir_frentes", "mandar_para_frente", "me_chame_as", "avisar_pessoa"],
   sala: ["lembrar", "pedir_aprovacao", "pedir_acesso", "pedir_credencial", "criar_rotina", "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "ver_colegas", "pedir_a_bot", "pedir_a_pessoa", "passar", "encaminhar"],
   // NOD-50 (revisão 6 do PR #553): rotina sem pedir_credencial — o cartão não segura a execução seguinte, que abriria outro a cada
   // disparo; a rotina que precisa de chave pede pela pessoa (pedir_a_pessoa) ou pela conversa.
-  rotina: ["lembrar", "pedir_aprovacao", "pedir_acesso", "ver_colegas", "pedir_a_pessoa", "pedir_a_bot", "sem_novidade", "publicar_artefato", "ler_artefato", "abrir_frentes", "mandar_para_frente", "me_chame_as"],
+  rotina: ["lembrar", "pedir_aprovacao", "pedir_acesso", "ver_colegas", "pedir_a_pessoa", "pedir_a_bot", "sem_novidade", "publicar_artefato", "ler_artefato", "abrir_frentes", "mandar_para_frente", "me_chame_as", "avisar_pessoa"],
   peer: ["lembrar"],
-  delegacao: ["lembrar", "pedir_acesso", "pedir_credencial", "pedir_aprovacao", "ver_colegas", "pedir_a_pessoa", "pedir_a_bot", "publicar_artefato", "ler_artefato", "abrir_frentes", "mandar_para_frente", "me_chame_as"],
+  // NOD-114: avisar_pessoa na conversa e na criação (a task que roda sem a pessoa olhando), na rotina e no pedido de colega.
+  delegacao: ["lembrar", "pedir_acesso", "pedir_credencial", "pedir_aprovacao", "ver_colegas", "pedir_a_pessoa", "pedir_a_bot", "publicar_artefato", "ler_artefato", "abrir_frentes", "mandar_para_frente", "me_chame_as", "avisar_pessoa"],
   // definido em 2026-10-04 (ADR-072): a ligação fala com a pessoa ao vivo. O kit da conversa sem pedir_a_pessoa (a
   // pergunta é a própria fala) e sem artefatos (não há tela para lê-los); trabalho demorado vai por iniciar_tarefa.
   ligacao: ["lembrar", "pedir_aprovacao", "pedir_acesso", "criar_rotina", "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "ver_colegas", "pedir_a_bot", "iniciar_tarefa", "desligar"],

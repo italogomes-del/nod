@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { NodDesktop, PreferenciasDesktop } from "../../../src/contracts/desktop.ts";
 import { canalMac } from "../../../web/lib/canal-avisos-mac.ts";
+import { TAG_AVISO, tagDoAviso } from "../../../web/lib/avisos.ts";
 
 /**
  * O som dos avisos no canal do Mac (NOD-196, web/lib/canal-avisos-mac.ts; o do navegador não tem som): o canal só expõe som()/alternarSom() quando a ponte tem definirSom (app
@@ -109,5 +110,35 @@ describe("canal de avisos: app antigo (NOD-196)", () => {
     await esperarMicrotarefas();
     expect(aoMudar).not.toHaveBeenCalled();
     expect(c.ligado()).toBe(true);
+  });
+});
+
+describe("tag do navegador (NOD-114)", () => {
+  it("um aviso por bot: a tag leva o bot, e o aviso de um não apaga o do outro; sem bot, a tag de sempre", () => {
+    expect(tagDoAviso("ag-Nina")).toBe(`${TAG_AVISO}:ag-Nina`);
+    expect(tagDoAviso("ag-Nina")).not.toBe(tagDoAviso("ag-Taga"));
+    expect(tagDoAviso(undefined)).toBe(TAG_AVISO);
+  });
+});
+
+describe("canal do Mac: alvo da task no app antigo (NOD-114)", () => {
+  const aviso = { titulo: "Nina", corpo: "x", alvo: { tipo: "trabalho" as const, trabalhoId: "tr-1", agenteId: "ag-1", conversaId: "c-1" }, grupo: "ag-1" };
+
+  it("o app que recusa o alvo trabalho recebe de novo o aviso com a conversa do bot", async () => {
+    const enviados: unknown[] = [];
+    const mac = ponte();
+    mac.avisar = async (a) => (enviados.push(a), a.alvo.tipo !== "trabalho");
+    canal(mac).canal.mostrar(aviso);
+    await esperarMicrotarefas();
+    expect(enviados).toEqual([aviso, { ...aviso, alvo: { tipo: "conversa", conversaId: "c-1", agenteId: "ag-1" } }]);
+  });
+
+  it("o app que aceita mostra uma vez só", async () => {
+    const enviados: unknown[] = [];
+    const mac = ponte();
+    mac.avisar = async (a) => (enviados.push(a), true);
+    canal(mac).canal.mostrar(aviso);
+    await esperarMicrotarefas();
+    expect(enviados).toEqual([aviso]);
   });
 });

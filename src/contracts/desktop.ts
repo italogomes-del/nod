@@ -12,11 +12,11 @@ import type { PonteMidia } from "./midia-desktop.ts";
  * a chave da máquina, e a web já usa `window.nod` para inspeção no console.
  */
 
-// Para onde o clique no aviso (ou o link `nod://`, NOD-136, sem `agenteId`) leva: a conversa ou "Sua vez".
-export type AlvoAviso = { tipo: "conversa"; conversaId: string; agenteId?: string } | { tipo: "sua-vez" } | { tipo: "computador-do-bot"; primeiroUso?: boolean };
+/** Para onde o aviso ou link `nod://` (NOD-136, sem `agenteId`) leva: conversa, task (NOD-114) ou "Sua vez". */
+export type AlvoAviso = { tipo: "conversa"; conversaId: string; agenteId?: string } | { tipo: "trabalho"; trabalhoId: string; agenteId: string; conversaId: string } | { tipo: "sua-vez" } | { tipo: "computador-do-bot"; primeiroUso?: boolean };
 
-/** Um aviso já redigido pela web (web/lib/avisos.ts): o Mac só mostra. */
-export type AvisoDesktop = { titulo: string; corpo: string; alvo: AlvoAviso };
+/** Um aviso já redigido pela web (web/lib/avisos.ts): o Mac só mostra. `grupo` (NOD-114): o bot, um grupo do macOS por bot. */
+export type AvisoDesktop = { titulo: string; corpo: string; alvo: AlvoAviso; grupo?: string };
 
 /** Tema escolhido em Preferências (definido em 2026-10-04, ADR-070); "sistema" segue o macOS. */
 export type TemaDesktop = "sistema" | "claro" | "escuro";

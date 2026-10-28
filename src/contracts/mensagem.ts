@@ -161,7 +161,7 @@ export type PayloadMensagem =
   | PayloadPedidoRespondido
   /** Chat limpo, PR 4 (o cartão encolhido): cartao-encolhido.ts. */
   | PayloadRegraPermanente
-  | PayloadPropostaDecidida
+  | PayloadPropostaDecidida | { kind: "aviso_pessoa" } // NOD-114: a fala `texto` com que o bot avisou a pessoa por conta própria (avisar_pessoa).
   | { kind: "turno_preso"; maquinaId: string; /** QA do NOD-314: a IA em que o turno está fixado (harnessFixado); null/ausente = Automático. */ ia?: string | null }; // NOD-314: pendente preso 24 h a uma máquina sem contato saiu da fila.
 
 export type Mensagem = {

@@ -74,6 +74,7 @@ import { passar } from "../../use-cases/passar.ts";
 import { semNovidade } from "../../use-cases/sem-novidade.ts";
 import { pedirAcesso } from "../../use-cases/pedir-acesso.ts";
 import { pedirCredencial } from "../../use-cases/pedir-credencial.ts";
+import { avisarPessoa } from "../../use-cases/avisar-pessoa.ts";
 import { abrirConta } from "../../use-cases/abrir-conta.ts";
 import { pedirAPessoa } from "../../use-cases/pedir-a-pessoa.ts";
 import { pedirAprovacao } from "../../use-cases/pedir-aprovacao.ts";
@@ -389,7 +390,7 @@ export function comporApp(o: OpcoesCompor): App {
     return tenants.get(pessoaId) ?? null;
   }
 
-  const useCases: UseCasesNod = { lembrar, atualizarPerfil, pedirAcesso, criarRotina, listarRotinasDoAgente, pausarRotinaPeloAgente, reativarRotinaPeloAgente, atualizarRotinaPeloAgente, excluirRotinaPeloAgente, pedirAprovacao, pedirAPessoa, passar, encaminhar, semNovidade, pedirABot, verColegas, publicarArtefato, lerArtefato, iniciarTarefa, desligar, anotarEntrevista, concluirEntrevista, proporBot, abrirTask, mandarParaTask, meChameAs, esperarComando, abrirFrentes, mandarParaFrente, devolverResumo, gerirBots, verAppsConectados, registrarRelatoDoNod, criarBots, responderPedido, pedirCredencial, abrirConta };
+  const useCases: UseCasesNod = { lembrar, atualizarPerfil, pedirAcesso, criarRotina, listarRotinasDoAgente, pausarRotinaPeloAgente, reativarRotinaPeloAgente, atualizarRotinaPeloAgente, excluirRotinaPeloAgente, pedirAprovacao, pedirAPessoa, passar, encaminhar, semNovidade, pedirABot, verColegas, publicarArtefato, lerArtefato, iniciarTarefa, desligar, anotarEntrevista, concluirEntrevista, proporBot, abrirTask, mandarParaTask, meChameAs, esperarComando, abrirFrentes, mandarParaFrente, devolverResumo, gerirBots, verAppsConectados, registrarRelatoDoNod, criarBots, responderPedido, pedirCredencial, avisarPessoa, abrirConta };
 
   // NOD-351: a situação da conta para abrir_conta, lida na transação do turno (sem outra conexão do pool). Liga tarde: as
   // contas nascem depois, sobre `dentro`; false = desligadas, e abrir_conta volta `indisponivel`.

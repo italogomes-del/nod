@@ -24,6 +24,7 @@ import { lembrar } from "../../src/use-cases/lembrar.ts";
 import type { CasoDeUso, Deps, Services, UseCasesNod } from "../../src/use-cases/tipos.ts";
 import { PESSOA_ANA, PESSOA_MARLON, TENANT_PADRAO } from "./ids.ts";
 import { criarBancoMemoria, type BancoMemoria } from "./repos-memoria.ts";
+import { avisarPessoa } from "../../src/use-cases/avisar-pessoa.ts";
 
 /**
  * Deps de teste da L6. As fatias de Services das outras lanes (planos ← L5, rotinas ← L7, tokenTurno ← L5,
@@ -157,6 +158,7 @@ export function useCasesDeTeste(): UseCasesNod {
     criarBots,
     responderPedido,
     pedirCredencial,
+    avisarPessoa,
     abrirConta,
     gerirBots,
     verAppsConectados,

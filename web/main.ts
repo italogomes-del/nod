@@ -399,6 +399,7 @@ const avisador = criarAvisador({
   ligado: () => canalAvisos.ligado(),
   pessoaId: () => estado.sessao?.pessoaId ?? null,
   mostrar: (aviso) => canalAvisos.mostrar(aviso),
+  nomeDoBot: (id) => [...(estado.frota?.agentes ?? []), ...(estado.gestao?.agentes ?? [])].find((a) => a.id === id)?.nome ?? null,
 });
 /**
  * Artefatos do nod (ADR-051, definido em 2026-09-28): o card vem na timeline; o iframe sandbox, o estado
@@ -1309,7 +1310,10 @@ async function reidratar(): Promise<void> {
         const lida = acao ? leituraConta(q, { acao: acao.tipo }) : null;
         if (lida) lerParaDeepLink(lida);
         if (acao?.tipo === "hidratar-sua-vez") canalAvisos.contador(avisador.atualizar(acao.suaVez));
-        if (acao?.tipo === "hidratar-nao-lidos") lerDepois = true;
+        if (acao?.tipo === "hidratar-nao-lidos") {
+          lerDepois = true;
+          avisador.atualizarNaoLidos(acao.naoLidos);
+        }
         if (acao?.tipo === "trabalho-sumiu") lembrarTaskAberta(estado.tela);
       } catch (e) {
         if (!(e instanceof ErroApi && e.status === 404)) {
@@ -3090,8 +3094,8 @@ function acaoDoBot(a: BotGerido, acao: AcaoGestao): void {
 }
 
 /**
- * Clique no aviso: um pedido abre a conversa dele (ou a sala); vários, ou a conversa de outra pessoa
- * (a decisora designada não a lê), abrem "Sua vez".
+ * Clique no aviso: abre a task de onde veio (NOD-114, ADR-083), ou a conversa do bot (ou a sala); a conversa de outra
+ * pessoa (a decisora designada não a lê) abre "Sua vez".
  */
 function abrirAlvoDoAviso(alvo: AlvoAviso): void {
   if (!estado.sessao) return;
@@ -3101,6 +3105,10 @@ function abrirAlvoDoAviso(alvo: AlvoAviso): void {
   if (destino.tipo === "computador-do-bot") {
     abrirEspaco("computador-do-bot");
     if (destino.primeiroUso) dispatch({ tipo: "computador-ui", ui: { preparoAberto: true } });
+    return;
+  }
+  if (alvo.tipo === "trabalho") {
+    abrirTrabalho(alvo.trabalhoId);
     return;
   }
   navegar(destino);

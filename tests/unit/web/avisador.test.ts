@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { SuaVezDto } from "../../../src/contracts/api.ts";
+import type { TipoDecisao } from "../../../src/contracts/decisao.ts";
+import type { Mensagem } from "../../../src/contracts/mensagem.ts";
+import type { NaoLidosDto } from "../../../src/contracts/nao-lidos.ts";
 import { AGRUPAR_MS, criarAvisador, INTERVALO_MS, SILENCIO_APOS_ACAO_MS, type Avisador } from "../../../web/lib/avisador.ts";
 import type { Aviso } from "../../../web/lib/avisos.ts";
 
@@ -11,10 +14,10 @@ import type { Aviso } from "../../../web/lib/avisos.ts";
 type Item = SuaVezDto["itens"][number];
 const AGORA = Date.parse("2026-09-24T12:00:00Z");
 
-function item(id: string, nome = "Nina", p: { dona?: string; gemeas?: string[]; vencido?: boolean } = {}): Item {
+function item(id: string, nome = "Nina", p: { dona?: string; gemeas?: string[]; vencido?: boolean; tipo?: TipoDecisao } = {}): Item {
   return {
     decisao: {
-      tenantId: "t", id, ownerId: p.dona ?? "p", decisorId: "p", agenteId: `ag-${nome}`, conversaId: `c-${nome}`, turnoId: null, tipo: "acesso",
+      tenantId: "t", id, ownerId: p.dona ?? "p", decisorId: "p", agenteId: `ag-${nome}`, conversaId: `c-${nome}`, turnoId: null, tipo: p.tipo ?? "acesso",
       estado: p.vencido ? "vencida" : "pendente", prazoDecisaoEm: new Date(AGORA + 86_400_000).toISOString(), prazoExecucaoEm: null,
       frase: `pedido ${id}`, desfecho: null, vistaEm: null, criadoEm: new Date(AGORA).toISOString(), fioId: null,
     },
@@ -22,6 +25,11 @@ function item(id: string, nome = "Nina", p: { dona?: string; gemeas?: string[]; 
   };
 }
 const fila = (...itens: Item[]): SuaVezDto => ({ itens, incidentes: [], foraDoAr: [], vazio: itens.length === 0, ultimaDecisaoEm: null });
+/** Uma fala da Nina nos não lidos (NOD-114). */
+function fala(id: string, p: Partial<Mensagem> = {}): Mensagem {
+  return { tenantId: "t" as Mensagem["tenantId"], id, conversaId: "c-Nina", turnoId: "tu", autoria: { autor_tipo: "agente", autor_id: "ag-Nina" } as Mensagem["autoria"], kind: "texto", texto: `fala ${id}`, payload: null, confianca: "confiavel", parcial: false, criadoEm: AGORA, origemTurno: "conversa", trabalhoId: null, fimDoTurno: false, ...p };
+}
+const lidos = (...mensagens: Mensagem[]): NaoLidosDto => ({ conversas: mensagens.length ? [{ conversaId: "c-Nina", tipo: "propria", agenteId: "ag-Nina", salaId: null, total: mensagens.length, primeiraId: mensagens[0]!.id, desde: AGORA, ultimaEm: AGORA, mensagens, daRotina: false }] : [] });
 
 /** Relógio falso: `passar(ms)` roda, em ordem, o que vence no caminho. */
 function montar(opcoes: { foco?: boolean; ligado?: boolean } = {}) {
@@ -43,6 +51,7 @@ function montar(opcoes: { foco?: boolean; ligado?: boolean } = {}) {
     ligado: () => ctx.ligado,
     pessoaId: () => "p",
     mostrar: (a) => mostrados.push(a),
+    nomeDoBot: (id) => (id === "ag-Nina" ? "Nina" : null),
   });
   function passar(ms: number): void {
     const fim = agora + ms;
@@ -68,7 +77,7 @@ describe("avisador", () => {
     passar(AGRUPAR_MS - 1);
     expect(mostrados).toEqual([]);
     passar(1);
-    expect(mostrados).toEqual([{ titulo: "Taga precisa de você", corpo: "pedido d2", alvo: { tipo: "conversa", conversaId: "c-Taga", agenteId: "ag-Taga" } }]);
+    expect(mostrados).toEqual([{ titulo: "Taga precisa de você", corpo: "pedido d2", alvo: { tipo: "conversa", conversaId: "c-Taga", agenteId: "ag-Taga" }, grupo: "ag-Taga" }]);
   });
 
   it("com o nod na frente, nada — nem depois, quando ele sai da frente", () => {
@@ -91,31 +100,73 @@ describe("avisador", () => {
     expect(mostrados).toEqual([]);
   });
 
-  it("o que chega dentro dos 2 s vira um aviso só", () => {
+  it("o que chega dentro dos 2 s do mesmo bot vira um aviso só; de dois bots, dois avisos, um por bot (NOD-114)", () => {
     const { avisador, mostrados, passar } = montar();
     avisador.atualizar(fila());
     avisador.atualizar(fila(item("d1", "Nina")));
     passar(1_500);
-    avisador.atualizar(fila(item("d1", "Nina"), item("d2", "Taga"), item("d3", "Zé")));
+    avisador.atualizar(fila(item("d1", "Nina"), item("d2", "Nina"), item("d3", "Taga")));
     passar(AGRUPAR_MS);
-    expect(mostrados).toEqual([{ titulo: "3 pedidos esperando por você", corpo: "Nina, Taga e mais 1", alvo: { tipo: "sua-vez" } }]);
+    expect(mostrados).toEqual([
+      { titulo: "Nina precisa de você", corpo: "pedido d1 · e mais 1", alvo: { tipo: "conversa", conversaId: "c-Nina", agenteId: "ag-Nina" }, grupo: "ag-Nina" },
+      { titulo: "Taga precisa de você", corpo: "pedido d3", alvo: { tipo: "conversa", conversaId: "c-Taga", agenteId: "ag-Taga" }, grupo: "ag-Taga" },
+    ]);
   });
 
-  it("no máximo um aviso por 60 s: o que chega no meio entra no próximo, junto", () => {
+  it("no máximo um aviso por 60 s POR BOT: o que chega no meio entra no próximo daquele bot; outro bot não espera", () => {
     const { avisador, mostrados, passar } = montar();
     avisador.atualizar(fila());
     avisador.atualizar(fila(item("d1")));
     passar(AGRUPAR_MS);
     expect(mostrados).toHaveLength(1);
     passar(10_000);
-    avisador.atualizar(fila(item("d1"), item("d2", "Taga")));
-    passar(20_000);
-    avisador.atualizar(fila(item("d1"), item("d2", "Taga"), item("d3", "Zé")));
-    passar(INTERVALO_MS - 30_000 - 1);
-    expect(mostrados).toHaveLength(1);
-    passar(1);
+    avisador.atualizar(fila(item("d1"), item("d2")));
+    passar(AGRUPAR_MS);
+    // Taga não espera o teto da Nina.
+    avisador.atualizar(fila(item("d1"), item("d2"), item("t1", "Taga")));
+    passar(AGRUPAR_MS);
+    expect(mostrados.map((m) => m.titulo)).toEqual(["Nina precisa de você", "Taga precisa de você"]);
+    avisador.atualizar(fila(item("d1"), item("d2"), item("d3"), item("t1", "Taga")));
+    passar(INTERVALO_MS - 10_000 - 2 * AGRUPAR_MS - 1);
     expect(mostrados).toHaveLength(2);
-    expect(mostrados[1]).toMatchObject({ titulo: "2 pedidos esperando por você", corpo: "Taga e Zé" });
+    passar(1);
+    expect(mostrados).toHaveLength(3);
+    expect(mostrados[2]).toMatchObject({ titulo: "Nina precisa de você", corpo: "pedido d2 · e mais 1" });
+  });
+
+  it("NOD-114: não lidos são a segunda entrada — o aviso do bot e o turno que terminou, com linha de base própria e nome pela frota", () => {
+    const { avisador, mostrados, passar } = montar();
+    avisador.atualizar(fila());
+    avisador.atualizarNaoLidos(lidos(fala("m0", { fimDoTurno: true })));
+    passar(INTERVALO_MS);
+    expect(mostrados).toEqual([]);
+    avisador.atualizarNaoLidos(lidos(fala("m0", { fimDoTurno: true }), fala("m1", { payload: { kind: "aviso_pessoa" }, texto: "A NOD-12 travou.", trabalhoId: "tr-1" })));
+    passar(AGRUPAR_MS);
+    expect(mostrados).toEqual([{ titulo: "Nina", corpo: "A NOD-12 travou.", alvo: { tipo: "trabalho", trabalhoId: "tr-1", agenteId: "ag-Nina", conversaId: "c-Nina" }, grupo: "ag-Nina" }]);
+  });
+
+  it("NOD-114: a conversa lida antes da hora some dos não lidos e o aviso não sai; com foco, nada", () => {
+    const { avisador, mostrados, passar, ctx } = montar();
+    avisador.atualizarNaoLidos(lidos());
+    avisador.atualizarNaoLidos(lidos(fala("m1", { fimDoTurno: true })));
+    avisador.atualizarNaoLidos(lidos());
+    passar(AGRUPAR_MS);
+    expect(mostrados).toEqual([]);
+    ctx.foco = true;
+    avisador.atualizarNaoLidos(lidos(fala("m2", { fimDoTurno: true })));
+    passar(AGRUPAR_MS);
+    expect(mostrados).toEqual([]);
+  });
+
+  it("NOD-114: pedido e fala do mesmo bot no mesmo lote viram um aviso, com o título do mais importante", () => {
+    const { avisador, mostrados, passar } = montar();
+    avisador.atualizar(fila());
+    avisador.atualizarNaoLidos(lidos());
+    avisador.atualizarNaoLidos(lidos(fala("m1", { fimDoTurno: true, texto: "Terminei." })));
+    avisador.atualizar(fila(item("d1", "Nina", { tipo: "aprovacao" })));
+    passar(AGRUPAR_MS);
+    expect(mostrados).toHaveLength(1);
+    expect(mostrados[0]).toMatchObject({ titulo: "Nina quer sua aprovação", corpo: "pedido d1 · e mais 1" });
   });
 
   it("pedido resolvido antes da hora não vira aviso", () => {

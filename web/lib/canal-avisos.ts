@@ -1,5 +1,5 @@
 import type { AlvoAviso } from "../../src/contracts/desktop.ts";
-import type { EstadoAvisos } from "./avisos.ts";
+import { tagDoAviso, type EstadoAvisos } from "./avisos.ts";
 import { canalMac, type CanalAvisos } from "./canal-avisos-mac.ts";
 
 export type { CanalAvisos } from "./canal-avisos-mac.ts";
@@ -8,11 +8,9 @@ export type { CanalAvisos } from "./canal-avisos-mac.ts";
  * Por onde o aviso sai (definido em 2026-09-24, "aviso no Mac"). No app desktop, pela ponte
  * `window.nodDesktop` (desktop/preload-web.ts): notificação do macOS e número no Dock, com a preferência
  * guardada pelo app — o localStorage da janela é apagado a cada conexão (desktop/main.ts, clearStorageData).
- * Num navegador comum, pela Notification API com `tag` fixa (um aviso substitui o anterior) e o número
+ * Num navegador comum, pela Notification API com `tag` por bot (o aviso novo de um bot substitui o anterior dele) e o número
  * no título da aba.
  */
-/** `tag` das notificações do navegador: a nova substitui a anterior em vez de empilhar. */
-export const TAG_AVISO = "nod-sua-vez";
 const CHAVE_PREFERENCIA = "nod:avisos";
 
 export function criarCanalAvisos(aoAbrir: (alvo: AlvoAviso) => void, aoMudar: () => void): CanalAvisos {
@@ -59,7 +57,7 @@ function canalNavegador(aoAbrir: (alvo: AlvoAviso) => void, aoMudar: () => void)
     mostrar(aviso) {
       let n: Notification;
       try {
-        n = new Notification(aviso.titulo, { body: aviso.corpo, tag: TAG_AVISO });
+        n = new Notification(aviso.titulo, { body: aviso.corpo, tag: tagDoAviso(aviso.grupo) });
       } catch {
         // permissão revogada no meio da sessão: "Seu espaço" passa a dizer "Bloqueados" na próxima leitura
         aoMudar();

@@ -20,6 +20,7 @@ import { pedirAprovacao } from "../../../src/use-cases/pedir-aprovacao.ts";
 import type { Deps, Services, UseCasesNod } from "../../../src/use-cases/tipos.ts";
 import { PESSOA_MARLON, TENANT_PADRAO } from "../../helpers/ids.ts";
 import { criarBancoMemoria, type BancoMemoria } from "../../helpers/repos-memoria.ts";
+import { avisarPessoa } from "../../../src/use-cases/avisar-pessoa.ts";
 
 export const MARLON: Escopo = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
 
@@ -104,6 +105,7 @@ export function depsFalsos(opcoes: OpcoesDepsFalsos = {}): { deps: Deps; banco: 
     criarBots,
     responderPedido,
     pedirCredencial,
+    avisarPessoa,
     abrirConta,
     gerirBots,
     verAppsConectados,

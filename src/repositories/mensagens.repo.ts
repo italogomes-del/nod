@@ -187,8 +187,9 @@ function selectComTurno(conn: Conn, tenantId: string, recorte: ReturnType<Conn>)
       case when ck.estado = 'desfazendo' and ck.pedido_em < now() - make_interval(secs => ${PRAZO_DESFAZENDO_MS / 1000}) then 'falhou' else ck.estado end as ck_estado,
       ck.arquivos as ck_arquivos, ck.total as ck_total, ck.feitos as ck_feitos, ck.desfeito_em as ck_desfeito_em, ck.resultado as ck_resultado,
       case when ck.estado = 'desfazendo' and ck.pedido_em < now() - make_interval(secs => ${PRAZO_DESFAZENDO_MS / 1000}) then 'erro' else ck.falha end as ck_falha,
-      (t.estado in ('concluido', 'interrompido') and m.kind = 'texto' and m.autor_tipo = 'agente'
-        and m.criado_em = max(case when m.kind = 'texto' and m.autor_tipo = 'agente' then m.criado_em end) over (partition by m.turno_id)) as fim_do_turno
+      -- NOD-114: o aviso (avisar_pessoa) não é a fala final do turno, como em leituras.repo.ts.
+      (t.estado in ('concluido', 'interrompido') and m.kind = 'texto' and m.autor_tipo = 'agente' and coalesce(m.payload->>'kind', '') <> 'aviso_pessoa'
+        and m.criado_em = max(case when m.kind = 'texto' and m.autor_tipo = 'agente' and coalesce(m.payload->>'kind', '') <> 'aviso_pessoa' then m.criado_em end) over (partition by m.turno_id)) as fim_do_turno
     from (${recorte}) m
     left join turnos t on t.tenant_id = m.tenant_id and t.id = m.turno_id
     left join trabalhos w on w.tenant_id = m.tenant_id and w.id = t.trabalho_id

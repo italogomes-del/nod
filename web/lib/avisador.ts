@@ -1,5 +1,6 @@
 import type { SuaVezDto } from "../../src/contracts/api.ts";
-import { contarAbertas, novasAbertas, redigirAviso, type Aviso, type PedidoNovo } from "./avisos.ts";
+import type { NaoLidosDto } from "../../src/contracts/nao-lidos.ts";
+import { contarAbertas, novasAbertas, novasMensagens, redigirAviso, type Aviso, type PedidoNovo } from "./avisos.ts";
 
 /**
  * Quando avisar (definido em 2026-09-24, "aviso no Mac"): as regras de silêncio sobre o que avisos.ts
@@ -8,7 +9,10 @@ import { contarAbertas, novasAbertas, redigirAviso, type Aviso, type PedidoNovo 
  *  - só com o nod FORA da frente (`document.hasFocus()` falso na hora de mostrar): na frente, o pedido
  *    já está na tela e o aviso seria ruído;
  *  - espera 2 s para juntar o que chega junto (uma rotina que pede três acessos vira um aviso);
- *  - no máximo um aviso por 60 s: o que chega no meio entra no próximo;
+ *  - revisto em 2026-10-28 (NOD-114): um aviso por BOT, nunca misturando bots, e no máximo um por 60 s por bot: o que
+ *    chega no meio entra no próximo daquele bot;
+ *  - duas entradas: "Sua vez" (aprovação, pergunta, precisa de você) e "Não lidos" (o aviso do bot, a rotina que não
+ *    rodou, o turno que terminou); cada uma com a sua linha de base na primeira leitura;
  *  - nunca o mesmo pedido duas vezes;
  *  - nada nos 5 s depois de um gesto da pessoa (agir() em web/main.ts): o que nasce do próprio clique
  *    ela já sabe — o aviso espera, e só sai se ela não estiver mais na frente;
@@ -31,49 +35,75 @@ export type DepsAvisador = {
   ligado(): boolean;
   pessoaId(): string | null;
   mostrar(aviso: Aviso): void;
+  /** O nome do bot pela frota (a fala dos não lidos não traz). Ausente ou null: "Seu bot". */
+  nomeDoBot?(agenteId: string): string | null;
 };
 
 export type Avisador = {
   /** Depois de cada leitura de "Sua vez": guarda o que é novo e devolve o número do selo. */
   atualizar(suaVez: SuaVezDto): number;
+  /** Depois de cada leitura de "Não lidos" (NOD-114): guarda as falas que avisam. */
+  atualizarNaoLidos(naoLidos: NaoLidosDto): void;
   /** A pessoa agiu: nada de aviso nos próximos 5 s. */
   acaoPropria(): void;
   /** A sessão trocou. */
   reiniciar(): void;
 };
 
+/** O que o avisador guarda de cada bot: o lote que espera, desde quando, o último aviso e o timer. */
+type DoBot = { pendentes: PedidoNovo[]; primeiroEm: number; ultimoAviso: number; cancelar: (() => void) | null; marcadoPara: number };
+
 export function criarAvisador(deps: DepsAvisador): Avisador {
   let conhecidas: Set<string> | null = null;
-  /** Ids das decisões abertas na última leitura: pedido resolvido antes da hora não vira aviso. */
+  let conhecidasMsg: Set<string> | null = null;
+  /** Ids das decisões abertas e chaves das falas não lidas na última leitura: o resolvido antes da hora não vira aviso. */
   let abertas = new Set<string>();
+  let abertasMsg = new Set<string>();
   const avisados = new Set<string>();
-  let pendentes: PedidoNovo[] = [];
-  let primeiroEm = 0;
-  let ultimoAviso = Number.NEGATIVE_INFINITY;
+  const bots = new Map<string, DoBot>();
   let ultimaAcao = Number.NEGATIVE_INFINITY;
-  let cancelar: (() => void) | null = null;
-  let marcadoPara = Number.NaN;
 
-  function reagendar(): void {
-    if (pendentes.length === 0) return;
-    const quando = Math.max(primeiroEm + AGRUPAR_MS, ultimoAviso + INTERVALO_MS, ultimaAcao + SILENCIO_APOS_ACAO_MS);
-    if (cancelar && quando === marcadoPara) return;
-    cancelar?.();
-    marcadoPara = quando;
-    cancelar = deps.relogio.esperar(Math.max(0, quando - deps.relogio.agora()), disparar);
+  const doBot = (agenteId: string): DoBot => {
+    let b = bots.get(agenteId);
+    if (!b) bots.set(agenteId, (b = { pendentes: [], primeiroEm: 0, ultimoAviso: Number.NEGATIVE_INFINITY, cancelar: null, marcadoPara: Number.NaN }));
+    return b;
+  };
+  const segueAberto = (p: PedidoNovo): boolean => p.ids.some((id) => abertas.has(id) || abertasMsg.has(id));
+
+  function reagendar(agenteId: string): void {
+    const b = doBot(agenteId);
+    if (b.pendentes.length === 0) return;
+    const quando = Math.max(b.primeiroEm + AGRUPAR_MS, b.ultimoAviso + INTERVALO_MS, ultimaAcao + SILENCIO_APOS_ACAO_MS);
+    if (b.cancelar && quando === b.marcadoPara) return;
+    b.cancelar?.();
+    b.marcadoPara = quando;
+    b.cancelar = deps.relogio.esperar(Math.max(0, quando - deps.relogio.agora()), () => disparar(agenteId));
   }
 
-  function disparar(): void {
-    cancelar = null;
-    const lote = pendentes.filter((p) => p.ids.some((id) => abertas.has(id)) && !p.ids.some((id) => avisados.has(id)));
-    pendentes = [];
-    // Na frente (ou desligado), o lote se perde de propósito: ela está vendo a faixa do topo.
+  function disparar(agenteId: string): void {
+    const b = doBot(agenteId);
+    b.cancelar = null;
+    const lote = b.pendentes.filter((p) => segueAberto(p) && !p.ids.some((id) => avisados.has(id)));
+    b.pendentes = [];
+    // Na frente (ou desligado), o lote se perde de propósito: ela está vendo a tela.
     if (lote.length === 0 || deps.temFoco() || !deps.ligado()) return;
-    const aviso = redigirAviso(lote, deps.pessoaId());
+    const aviso = redigirAviso(lote, deps.pessoaId(), (id) => deps.nomeDoBot?.(id) ?? null);
     if (!aviso) return;
     for (const p of lote) for (const id of p.ids) avisados.add(id);
-    ultimoAviso = deps.relogio.agora();
+    b.ultimoAviso = deps.relogio.agora();
     deps.mostrar(aviso);
+  }
+
+  function acolher(novas: readonly PedidoNovo[]): void {
+    const tocados = new Set<string>();
+    for (const n of novas) {
+      if (n.ids.some((id) => avisados.has(id))) continue;
+      const b = doBot(n.agenteId);
+      if (b.pendentes.length === 0) b.primeiroEm = deps.relogio.agora();
+      b.pendentes.push(n);
+      tocados.add(n.agenteId);
+    }
+    for (const id of tocados) reagendar(id);
   }
 
   return {
@@ -81,27 +111,27 @@ export function criarAvisador(deps: DepsAvisador): Avisador {
       const r = novasAbertas(conhecidas, suaVez);
       conhecidas = r.conhecidas;
       abertas = new Set(suaVez.itens.filter((i) => i.estadoColuna !== "vencido").flatMap((i) => [i.decisao.id, ...i.gemeas]));
-      const novas = r.novas.filter((n) => !n.ids.some((id) => avisados.has(id)));
-      if (novas.length > 0) {
-        if (pendentes.length === 0) primeiroEm = deps.relogio.agora();
-        pendentes = [...pendentes, ...novas];
-        reagendar();
-      }
+      acolher(r.novas);
       return contarAbertas(suaVez);
+    },
+    atualizarNaoLidos(naoLidos) {
+      const r = novasMensagens(conhecidasMsg, naoLidos);
+      conhecidasMsg = r.conhecidas;
+      abertasMsg = r.abertas;
+      acolher(r.novas);
     },
     acaoPropria() {
       ultimaAcao = deps.relogio.agora();
-      reagendar();
+      for (const id of bots.keys()) reagendar(id);
     },
     reiniciar() {
-      cancelar?.();
-      cancelar = null;
-      marcadoPara = Number.NaN;
+      for (const b of bots.values()) b.cancelar?.();
+      bots.clear();
       conhecidas = null;
+      conhecidasMsg = null;
       abertas = new Set();
+      abertasMsg = new Set();
       avisados.clear();
-      pendentes = [];
-      ultimoAviso = Number.NEGATIVE_INFINITY;
       ultimaAcao = Number.NEGATIVE_INFINITY;
     },
   };

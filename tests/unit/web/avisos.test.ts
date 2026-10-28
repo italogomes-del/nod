@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { SuaVezDto } from "../../../src/contracts/api.ts";
 import type { TipoDecisao } from "../../../src/contracts/decisao.ts";
-import { estadoInicial } from "../../../web/estado/reducer.ts";
-import { contarAbertas, CORPO_MAX, novasAbertas, redigirAviso, type PedidoNovo } from "../../../web/lib/avisos.ts";
+import type { Mensagem } from "../../../src/contracts/mensagem.ts";
+import type { NaoLidosDto } from "../../../src/contracts/nao-lidos.ts";
+import { estadoInicial, reduzir } from "../../../web/estado/reducer.ts";
+import { AVISO_DE_FORA, BOT_SEM_NOME, contarAbertas, CORPO_MAX, novasAbertas, novasMensagens, redigirAviso, tipoDaDecisao, tipoDaMensagem, type PedidoNovo, type TipoAviso } from "../../../web/lib/avisos.ts";
 import { renderAvisos } from "../../../web/telas/config-geral.ts";
 import { renderChamada } from "../../../web/telas/sua-vez.ts";
 
@@ -44,7 +46,7 @@ describe("novasAbertas", () => {
   it("depois, devolve só os pedidos abertos que não estavam na fila", () => {
     const base = novasAbertas(null, fila([item("d1")])).conhecidas;
     const r = novasAbertas(base, fila([item("d1"), item("d2", { nome: "Taga", agente: "b", conversa: "cb", frase: "Posso ler o Gmail?" })]));
-    expect(r.novas).toEqual([{ id: "d2", ids: ["d2"], agenteId: "b", agenteNome: "Taga", conversaId: "cb", ownerId: "p", frase: "Posso ler o Gmail?" }]);
+    expect(r.novas).toEqual([{ id: "d2", ids: ["d2"], tipo: "precisa", agenteId: "b", agenteNome: "Taga", conversaId: "cb", ownerId: "p", trabalhoId: null, frase: "Posso ler o Gmail?" }]);
     // O conjunto só cresce: a mesma leitura de novo não devolve nada.
     expect(novasAbertas(r.conhecidas, fila([item("d1"), item("d2")])).novas).toEqual([]);
   });
@@ -97,28 +99,135 @@ describe("contarAbertas", () => {
   });
 });
 
-describe("redigirAviso", () => {
-  const pedido = (id: string, nome: string, frase = `pedido ${id}`, dona = "p"): PedidoNovo => ({ id, ids: [id], agenteId: `ag-${nome}`, agenteNome: nome, conversaId: `c-${nome}`, ownerId: dona, frase });
+describe("novasMensagens (NOD-114): o aviso do bot, a rotina que não rodou e o turno que terminou", () => {
+  const autoria = (tipo: "agente" | "pessoa", id: string) => ({ autor_tipo: tipo, autor_id: id }) as Mensagem["autoria"];
+  function msg(id: string, p: Partial<Mensagem> = {}): Mensagem {
+    return { tenantId: "t" as Mensagem["tenantId"], id, conversaId: "c", turnoId: "tu", autoria: autoria("agente", "a"), kind: "texto", texto: `fala ${id}`, payload: null, confianca: "confiavel", parcial: false, criadoEm: AGORA, origemTurno: "conversa", trabalhoId: null, fimDoTurno: false, ...p };
+  }
+  const lidos = (...mensagens: Mensagem[]): NaoLidosDto => ({ conversas: [{ conversaId: "c", tipo: "propria", agenteId: "a", salaId: null, total: mensagens.length, primeiraId: mensagens[0]?.id ?? "x", desde: AGORA, ultimaEm: AGORA, mensagens, daRotina: false }] });
+  const rotina = (desfecho: "falhou" | "nao_rodou" | "interrompida" | "executou") => ({ kind: "rotina_execucao", rotinaId: "r", instanteAgendado: AGORA, desfecho }) as const;
 
-  it("um pedido: '{agente} precisa de você', a frase no corpo (até 140) e o clique abre a conversa", () => {
+  it("o tipo de cada fala: só o aviso do bot, a rotina que falhou ou não rodou e o fim de um turno da pessoa", () => {
+    expect(tipoDaMensagem(msg("1", { payload: { kind: "aviso_pessoa" } }))).toBe("aviso");
+    expect(tipoDaMensagem(msg("2", { kind: "rotina_execucao", autoria: autoria("pessoa", "p"), payload: rotina("falhou") }))).toBe("rotina_nao_rodou");
+    expect(tipoDaMensagem(msg("3", { kind: "rotina_execucao", payload: rotina("nao_rodou") }))).toBe("rotina_nao_rodou");
+    expect(tipoDaMensagem(msg("4", { kind: "rotina_execucao", payload: rotina("interrompida") }))).toBeNull();
+    expect(tipoDaMensagem(msg("5", { kind: "rotina_execucao", payload: rotina("executou") }))).toBeNull();
+    expect(tipoDaMensagem(msg("6", { fimDoTurno: true }))).toBe("terminou");
+    // "Terminou" só para turno pedido pela pessoa: rotina, peer e delegação não geram.
+    for (const origem of ["rotina", "peer", "delegacao"] as const) expect(tipoDaMensagem(msg("7", { fimDoTurno: true, origemTurno: origem }))).toBeNull();
+    expect(tipoDaMensagem(msg("8"))).toBeNull();
+    expect(tipoDaMensagem(msg("9", { fimDoTurno: true, autoria: autoria("pessoa", "p") }))).toBeNull();
+  });
+
+  it("revisão: o turno que acaba relê os não lidos (a fala do meio que virou o fim só vira 'terminou' na releitura)", () => {
+    const e = reduzir(estadoInicial, { tipo: "frame", frame: { tipo: "turno.encerrado", dados: { turnoId: "t1", conversaId: "c" } } as never, agora: AGORA });
+    expect(e.invalidacoes).toContain("nao-lidos");
+  });
+
+  it("revisão: a retomada termina o pedido da conversa quando a raiz da cadeia é a conversa; a da rotina, não", () => {
+    expect(tipoDaMensagem(msg("1", { fimDoTurno: true, origemTurno: "retomada", raiz: { turnoId: "r", origem: "conversa" } }))).toBe("terminou");
+    expect(tipoDaMensagem(msg("2", { fimDoTurno: true, origemTurno: "retomada", raiz: { turnoId: "r", origem: "rotina" } }))).toBeNull();
+    expect(tipoDaMensagem(msg("3", { fimDoTurno: true, origemTurno: "retomada" }))).toBeNull();
+  });
+
+  it("revisão (ADR-026): a fala de um turno que leu conteúdo de fora vai marcada no aviso", () => {
+    const [n] = novasMensagens(new Set(), lidos(msg("1", { payload: { kind: "aviso_pessoa" }, confianca: "nao_confiavel" }))).novas;
+    expect(n?.deFora).toBe(true);
+    expect(redigirAviso([n!], "p")?.corpo).toBe(`${AVISO_DE_FORA}fala 1`);
+    expect(novasMensagens(new Set(), lidos(msg("2", { payload: { kind: "aviso_pessoa" } }))).novas[0]?.deFora).toBeUndefined();
+  });
+
+  it("a rotina que não rodou avisa uma vez enquanto a conversa segue sem leitura; lida, a próxima falha avisa de novo", () => {
+    const falha = (id: string) => msg(id, { kind: "rotina_execucao", autoria: autoria("pessoa", "p"), payload: rotina("nao_rodou"), origemTurno: "rotina" });
+    const base = novasMensagens(null, lidos()).conhecidas;
+    const r1 = novasMensagens(base, lidos(falha("f1")));
+    expect(r1.novas.map((n) => n.id)).toEqual(["f1"]);
+    const r2 = novasMensagens(r1.conhecidas, lidos(falha("f1"), falha("f2")));
+    expect(r2.novas).toEqual([]);
+    // A pessoa leu: a f1 e a f2 saem dos não lidos, e a f3 é novidade.
+    expect(novasMensagens(r2.conhecidas, lidos(falha("f3"))).novas.map((n) => n.id)).toEqual(["f3"]);
+  });
+
+  it("o aviso que ficou antes das três últimas (campo avisos) ainda avisa", () => {
+    const base = novasMensagens(null, lidos()).conhecidas;
+    const dto = lidos(msg("m2"), msg("m3"), msg("m4"));
+    dto.conversas[0]!.avisos = [msg("av", { payload: { kind: "aviso_pessoa" } })];
+    const r = novasMensagens(base, dto);
+    expect(r.novas.map((n) => n.id)).toEqual(["av"]);
+    expect(r.abertas.has("m:av:aviso")).toBe(true);
+  });
+
+  it("primeira leitura é linha de base; depois só a fala nova, com a task e sem nome (a frota resolve)", () => {
+    const base = novasMensagens(null, lidos(msg("1", { payload: { kind: "aviso_pessoa" } })));
+    expect(base.novas).toEqual([]);
+    const r = novasMensagens(base.conhecidas, lidos(msg("1", { payload: { kind: "aviso_pessoa" } }), msg("2", { fimDoTurno: true, trabalhoId: "tr-9", texto: "Pronto." })));
+    expect(r.novas).toEqual([{ id: "2", ids: ["m:2:terminou"], tipo: "terminou", agenteId: "a", agenteNome: null, conversaId: "c", ownerId: null, trabalhoId: "tr-9", frase: "Pronto." }]);
+    expect(novasMensagens(r.conhecidas, lidos(msg("2", { fimDoTurno: true }))).novas).toEqual([]);
+  });
+
+  it("a fala do meio que virou o fim do turno depois da leitura é novidade; a linha da rotina sai pelo bot da conversa", () => {
+    const base = novasMensagens(null, lidos()).conhecidas;
+    const meio = novasMensagens(base, lidos(msg("1")));
+    expect(meio.novas).toEqual([]);
+    expect(novasMensagens(meio.conhecidas, lidos(msg("1", { fimDoTurno: true }))).novas.map((n) => n.tipo)).toEqual(["terminou"]);
+    const falhou = novasMensagens(base, lidos(msg("r1", { kind: "rotina_execucao", autoria: autoria("pessoa", "p"), payload: rotina("falhou") })));
+    expect(falhou.novas).toMatchObject([{ tipo: "rotina_nao_rodou", agenteId: "a" }]);
+    expect([...falhou.abertas]).toEqual(["m:r1:rotina_nao_rodou"]);
+  });
+});
+
+describe("redigirAviso", () => {
+  const pedido = (id: string, nome: string, frase = `pedido ${id}`, dona: string | null = "p", p: { tipo?: TipoAviso; trabalho?: string } = {}): PedidoNovo => ({ id, ids: [id], tipo: p.tipo ?? "precisa", agenteId: `ag-${nome}`, agenteNome: nome, conversaId: `c-${nome}`, ownerId: dona, trabalhoId: p.trabalho ?? null, frase });
+
+  it("um pedido: '{agente} precisa de você', a frase no corpo (até 140), o clique abre a conversa e o grupo é o bot", () => {
     const frase = `Posso mandar o relatório para a diretoria? ${"Ele tem os números de setembro e ".repeat(6)}fim.`;
     const aviso = redigirAviso([pedido("d1", "Nina", frase)], "p");
     expect(aviso?.titulo).toBe("Nina precisa de você");
     expect(Array.from(aviso?.corpo ?? "")).toHaveLength(CORPO_MAX);
     expect(aviso?.corpo.endsWith("…")).toBe(true);
     expect(aviso?.alvo).toEqual({ tipo: "conversa", conversaId: "c-Nina", agenteId: "ag-Nina" });
+    expect(aviso?.grupo).toBe("ag-Nina");
     expect(redigirAviso([pedido("d1", "Nina", "  Posso\n ler o  Gmail? ")])?.corpo).toBe("Posso ler o Gmail?");
   });
 
-  it("a decisora designada que não é dona: o clique abre 'Sua vez' (ela não lê a conversa de outra pessoa)", () => {
-    expect(redigirAviso([pedido("d1", "Nina", "x", "outra")], "p")?.alvo).toEqual({ tipo: "sua-vez" });
+  it("NOD-114: cada tipo sai com o seu título", () => {
+    const titulo = (tipo: TipoAviso) => redigirAviso([pedido("d1", "Nina", "x", "p", { tipo })], "p")?.titulo;
+    expect(titulo("aprovacao")).toBe("Nina quer sua aprovação");
+    expect(titulo("pergunta")).toBe("Nina tem uma pergunta");
+    expect(titulo("precisa")).toBe("Nina precisa de você");
+    expect(titulo("aviso")).toBe("Nina");
+    expect(titulo("terminou")).toBe("Nina terminou");
+    expect(titulo("rotina_nao_rodou")).toBe("Rotina de Nina não rodou");
+    expect(redigirAviso([pedido("d1", "Nina", "A NOD-12 foi aprovada.", "p", { tipo: "aviso" })], "p")?.corpo).toBe("A NOD-12 foi aprovada.");
   });
 
-  it("vários: '{N} pedidos esperando por você', quem pede no corpo, e o clique abre 'Sua vez'", () => {
-    const aviso = redigirAviso([pedido("d1", "Nina"), pedido("d2", "Taga"), pedido("d3", "Nina"), pedido("d4", "Zé")]);
-    expect(aviso).toEqual({ titulo: "4 pedidos esperando por você", corpo: "Nina, Taga e mais 1", alvo: { tipo: "sua-vez" } });
-    expect(redigirAviso([pedido("d1", "Nina"), pedido("d2", "Taga")])?.corpo).toBe("Nina e Taga");
-    expect(redigirAviso([pedido("d1", "Nina"), pedido("d2", "Nina")])?.corpo).toBe("Nina");
+  it("NOD-114: o tipo de cada decisão — aprovação, pergunta e o resto 'precisa de você'", () => {
+    expect(tipoDaDecisao("aprovacao")).toBe("aprovacao");
+    expect(tipoDaDecisao("pergunta")).toBe("pergunta");
+    for (const t of ["acesso", "permissao", "falta_de_dado", "retomar_turno", "credencial"] as const) expect(tipoDaDecisao(t)).toBe("precisa");
+  });
+
+  it("NOD-114: no lote de um bot o título é o do tipo mais importante, e o corpo diz quantas mais", () => {
+    const aviso = redigirAviso([pedido("m1", "Nina", "Terminei.", null, { tipo: "terminou" }), pedido("d1", "Nina", "Posso enviar?", "p", { tipo: "aprovacao" }), pedido("d2", "Nina", "Qual cliente?", "p", { tipo: "pergunta" })], "p");
+    expect(aviso).toMatchObject({ titulo: "Nina quer sua aprovação", corpo: "Posso enviar? · e mais 2" });
+    expect(Array.from(redigirAviso([pedido("d1", "Nina", "y".repeat(400)), pedido("d2", "Nina")], "p")?.corpo ?? "")).toHaveLength(CORPO_MAX);
+  });
+
+  it("NOD-114: pedido nascido numa task abre a task; a fala sem nome usa a frota, e sem frota 'Seu bot'", () => {
+    expect(redigirAviso([pedido("d1", "Nina", "x", "p", { trabalho: "tr-1" })], "p")?.alvo).toEqual({ tipo: "trabalho", trabalhoId: "tr-1", agenteId: "ag-Nina", conversaId: "c-Nina" });
+    const semNome: PedidoNovo = { ...pedido("m1", "Nina", "x", null, { tipo: "terminou" }), agenteNome: null };
+    expect(redigirAviso([semNome], "p", (id) => (id === "ag-Nina" ? "Nina da frota" : null))?.titulo).toBe("Nina da frota terminou");
+    expect(redigirAviso([semNome], "p")?.titulo).toBe(`${BOT_SEM_NOME} terminou`);
+  });
+
+  it("revisão: a fala final só com mídia (sem texto) não vira aviso de corpo vazio", () => {
+    expect(redigirAviso([pedido("m1", "Nina", "  ", null, { tipo: "terminou" })], "p")?.corpo).toBe("Abra para ver.");
+  });
+
+  it("a decisora designada que não é dona: o clique abre 'Sua vez' (ela não lê a conversa de outra pessoa), mesmo vindo de task", () => {
+    expect(redigirAviso([pedido("d1", "Nina", "x", "outra")], "p")?.alvo).toEqual({ tipo: "sua-vez" });
+    expect(redigirAviso([pedido("d1", "Nina", "x", "outra", { trabalho: "tr-1" })], "p")?.alvo).toEqual({ tipo: "sua-vez" });
     expect(redigirAviso([])).toBeNull();
   });
 });

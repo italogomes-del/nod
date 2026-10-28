@@ -38,6 +38,13 @@ function id(v: unknown): string | null {
 function lerAlvo(v: unknown): AlvoAviso | null {
   if (typeof v !== "object" || v === null || !("tipo" in v)) return null;
   if (v.tipo === "sua-vez") return { tipo: "sua-vez" };
+  // NOD-114: o pedido nascido numa task abre a task (ADR-083); o id passa pela mesma régua.
+  if (v.tipo === "trabalho") {
+    const trabalhoId = "trabalhoId" in v ? id(v.trabalhoId) : null;
+    const agenteId = "agenteId" in v ? id(v.agenteId) : null;
+    const conversaId = "conversaId" in v ? id(v.conversaId) : null;
+    return trabalhoId && agenteId && conversaId ? { tipo: "trabalho", trabalhoId, agenteId, conversaId } : null;
+  }
   if (v.tipo !== "conversa" || !("conversaId" in v) || !("agenteId" in v)) return null;
   const conversaId = id(v.conversaId);
   const agenteId = id(v.agenteId);
@@ -50,7 +57,10 @@ export function lerAviso(dados: unknown): AvisoDesktop | null {
   const titulo = texto(dados.titulo, LIMITES_AVISO.titulo, false);
   const corpo = texto(dados.corpo, LIMITES_AVISO.corpo, true);
   const alvo = lerAlvo(dados.alvo);
-  return titulo !== null && corpo !== null && alvo ? { titulo, corpo, alvo } : null;
+  // NOD-114: o grupo (o bot) é opcional; presente, passa pela régua do id — fora dela, o aviso inteiro é recusado.
+  const grupo = "grupo" in dados && dados.grupo !== undefined ? id(dados.grupo) : undefined;
+  if (titulo === null || corpo === null || !alvo || grupo === null) return null;
+  return grupo ? { titulo, corpo, alvo, grupo } : { titulo, corpo, alvo };
 }
 
 /** O número do Dock: inteiro de 0 a 9999; qualquer outra coisa → null. */
@@ -82,8 +92,12 @@ export function lerPreferencias(conteudo: string | null): Pick<PreferenciasDeskt
   };
 }
 
-/** O agrupamento dos avisos no Centro de Notificações: um só grupo para o nod. */
+/** O agrupamento dos avisos no Centro de Notificações: o grupo do nod; com bot (NOD-114), um grupo por bot dentro dele. */
 export const GRUPO_AVISOS = "nod-sua-vez";
+
+export function grupoDoAviso(aviso: Pick<AvisoDesktop, "grupo">): string {
+  return aviso.grupo ? `${GRUPO_AVISOS}:${aviso.grupo}` : GRUPO_AVISOS;
+}
 
 /**
  * As opções do `new Notification` do Electron para um aviso (NOD-196). Som desligado → `silent: true`: o aviso aparece
@@ -91,5 +105,5 @@ export const GRUPO_AVISOS = "nod-sua-vez";
  * e os Ajustes do Sistema continuam mandando.
  */
 export function opcoesDoAviso(aviso: AvisoDesktop, p: { som: boolean }): { title: string; body: string; groupId: string; silent: boolean } {
-  return { title: aviso.titulo, body: aviso.corpo, groupId: GRUPO_AVISOS, silent: !p.som };
+  return { title: aviso.titulo, body: aviso.corpo, groupId: grupoDoAviso(aviso), silent: !p.som };
 }
