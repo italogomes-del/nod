@@ -4,6 +4,7 @@ import { redigir } from "../../domain/redacao.ts";
 import { log } from "../../obs/log.ts";
 import { metricas as registroPadrao, type Metricas } from "../../obs/metricas.ts";
 import { criarRepos } from "../../repositories/index.ts";
+import { podarLimitesConta } from "../../repositories/contas.repo.ts";
 import type { Db, Escopo, Relogio, Transacao, Tx } from "../../shared/types.ts";
 import { autoriaPessoa, carimbo, evento } from "../../use-cases/apoio-l7.ts";
 import { vencerPedidoDaRotina } from "../../use-cases/decidir-acesso.ts";
@@ -156,6 +157,13 @@ export async function varrerPessoa(escopo: Escopo, tx: Transacao, opcoes: Opcoes
     });
   } catch (e) {
     log("erro", "nativas_idempotencia_poda_falhou", { erro: ehErroDeDominio(e) ? e.codigo : e instanceof Error ? e.name : "desconhecido" });
+  }
+  // NOD-408/LGPD: remove contadores globais vencidos mesmo sem novo cadastro/recuperação; a própria função limita a
+  // uma execução por hora no processo, embora este varredor passe por cada pessoa.
+  try {
+    await tx((trx) => podarLimitesConta(trx, opcoes.agora()));
+  } catch (e) {
+    log("erro", "limites_conta_poda_falhou", { erro: e instanceof Error ? e.name : "desconhecido" });
   }
   // NOD-323 (ADR-126): a mídia do bot solta há mais de um dia (nenhuma fala a prendeu), em transação própria.
   try {

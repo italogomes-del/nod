@@ -464,7 +464,7 @@ const doApp = (): Promise<OpcoesPedido> => cabecalhosDoApp(typeof window === "un
 
 export const contaApi = {
   estado: () => pedir<EstadoContaDto>("GET", "/api/conta"),
-  provisorioWeb: (verificador: string) => pedir<{ novo: boolean }>("POST", "/api/conta/provisorio", { verificador, forma: "web" }),
+  provisorioWeb: (verificador: string, prova?: { desafio: string; resposta: string }) => pedir<{ novo: boolean }>("POST", "/api/conta/provisorio", { verificador, forma: "web", ...prova }),
   cadastrar: (email: string, senha: string) => pedir<CadastroDto>("POST", "/api/conta/cadastro", { email, senha }),
   reenviar: () => pedir<CadastroDto>("POST", "/api/conta/reenviar", {}),
   verificar: (codigo: string) => pedir<VerificarDto>("POST", "/api/conta/verificar", { codigo }),

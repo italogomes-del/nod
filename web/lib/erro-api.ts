@@ -18,6 +18,9 @@ export class ErroApi extends Error {
   readonly rota: string | null;
   /** NOD-346: o porquê, quando o servidor manda um da lista branca (ex.: `reautenticar`); nunca vai para a frase. */
   motivo: string | null = null;
+  /** NOD-408: prova de trabalho pública; não contém segredo nem dado pessoal. */
+  desafio: string | null = null;
+  bits: number | null = null;
   constructor(status: number, codigo: string, mensagem: string, correlationId: string | null = null, rota: string | null = null) {
     super(mensagem);
     this.name = "ErroApi";
@@ -46,10 +49,12 @@ export function falhaDeTransporte(rota: string): ErroApi {
 
 /** Resposta de erro → ErroApi. 502/503/504 sem o corpo do nod viram servidor fora; com corpo, o código do servidor manda. */
 export function erroDaResposta(status: number, lido: unknown, rota: string): ErroApi {
-  const e = (typeof lido === "object" && lido !== null ? lido : {}) as { codigo?: string; mensagem?: string; correlation_id?: string | null; motivo?: unknown };
+  const e = (typeof lido === "object" && lido !== null ? lido : {}) as { codigo?: string; mensagem?: string; correlation_id?: string | null; motivo?: unknown; desafio?: unknown; bits?: unknown };
   if (e.codigo === undefined && STATUS_DE_PROXY.has(status)) return new ErroApi(status, "servidor_indisponivel", FRASE_SERVIDOR_INDISPONIVEL, null, rota);
   const erro = new ErroApi(status, e.codigo ?? "falha_interna", e.mensagem ?? FALHA_SEM_FRASE, e.correlation_id ?? null, rota);
   if (typeof e.motivo === "string") erro.motivo = e.motivo;
+  if (typeof e.desafio === "string" && e.desafio.length <= 200) erro.desafio = e.desafio;
+  if (typeof e.bits === "number" && Number.isInteger(e.bits) && e.bits >= 1 && e.bits <= 30) erro.bits = e.bits;
   return erro;
 }
 

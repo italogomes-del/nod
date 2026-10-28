@@ -95,7 +95,7 @@ Em `NOD_LOGIN=stub` os e-mails vão para a caixa local (`GET /api/dev/caixa`, s�
 pelo campo `contas` de `/api/sessao/modo`, nunca por tentativa e 404. Ligar em produção depende do domínio `nodbot.ai`
 no Resend e do OAuth externo (label precisa-humano na NOD-345).
 
-Suposições registradas: sem cota por espaço provisório (limites por IP e por hora); o provisório não é apagado ao
+Suposições registradas na decisão original: sem cota por espaço provisório (substituída pela ADR-137); o provisório não é apagado ao
 converter nem ao importar (fica sem acesso); o código de verificação é por sessão; o pareamento não mostra cidade; no
 app, o nome inicial do espaço é o usuário do sistema; a volta do Google iniciada no app termina com a sessão no
 navegador e o app relê o estado.
@@ -104,9 +104,8 @@ navegador e o app relê o estado.
 `conta@nodbot.ai` e a chave do Resend (só de envio) no segredo `nod-resend-api-key`; `NOD_CONTAS_GOOGLE` e
 `NOD_MINHA_CONTA` seguem desligados e o `deploy.sh` recusa ligá-los até terem caminho. O bootstrap vai junto porque o
 cadastro por e-mail só converte um espaço provisório; isso abre o app para quem chega sem login, como a §2 prevê para
-o produto público. Sobe só com os limites por IP e por hora: a cota pequena por espaço provisório e o desafio
-anti-automação desta seção, e a revisão da política e dos textos jurídicos de "Limites", ainda não existem e ficam como
-pendência para o Marlon e a PM decidirem (issue NOD-406, label precisa-humano). A equipe (ADR-030) entra pelo link "Sou
+o produto público. A ADR-137 acrescentou, atrás de flags próprias e inicialmente desligadas, a cota por espaço, o
+desafio anti-automação, os limites diários/de domínio e a revisão dos textos jurídicos. A equipe (ADR-030) entra pelo link "Sou
 da equipe: entrar com Google" do cartão de entrar e do menu do espaço provisório; o navegador que já entrou pela equipe
 guarda a marca `nod-equipe` e, quando a sessão cai, volta à tela de entrar em vez de abrir um provisório; a volta
 recusada do Google mostra o motivo e tira a marca. Valem os gatilhos de reversão de baixo (10% da capacidade por três

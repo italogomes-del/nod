@@ -249,6 +249,11 @@ domínio sem verificação no Resend só aparecem no primeiro e-mail, no log com
 Para desligar, esvazie `NOD_CONTAS` e `NOD_BOOTSTRAP` no `config.env` e rode o deploy: as contas já criadas ficam no banco, só deixam
 de entrar por e-mail até religar.
 
+As salvaguardas da NOD-408 são independentes e começam desligadas: `NOD_PROVISORIO_COTA_TURNOS=30` limita turnos novos
+de cada espaço sem conta; `NOD_ANTIABUSO=1` liga o desafio leve depois de três espaços por IP/hora, o teto duro por IP
+em 24 horas e os limites adicionais de cadastro/recuperação por IP e domínio. Ambas exigem `NOD_BOOTSTRAP=1`. Para
+desligar em incidente, esvazie as duas linhas no `config.env` e rode o deploy; espaços, contas e conversas permanecem.
+
 Atenção ao desligar `NOD_CONTAS`: o servidor deixa de conferir o `sid` e o corte das sessões. Sessões encerradas por "sair
 das outras" ou por senha nova voltam a valer, e os cookies dos espaços provisórios seguem válidos. Se o motivo for uma
 conta comprometida ou abuso, troque também o `nod-sessao-segredo` (nova versão no Secret Manager e deploy): todo mundo

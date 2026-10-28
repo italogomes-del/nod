@@ -68,6 +68,8 @@ import type { FrameSse } from "../src/contracts/frame.ts";
 import type { AnexoDaConversa } from "../src/contracts/anexo.ts";
 import { agenteDaTela, bibliotecaAberta, conversaAbertaTemNotaDeContas, conversaDaTela, estadoInicial, invalidacoesAoReconectar, invalidacoesAoRetomar, invalidacoesDaTela, mudouNaTela, reduzir, secaoAberta, secaoDoPedido, type Acao, type Estado, type FalaPendente, type Invalidacao, type NivelGaveta, type PedidoSecao, type PerfilCelular, type SecaoEspaco, type Tela } from "./estado/reducer.ts";
 import { contaApi, criarApi, minhaContaApi, ErroApi, observarRede, sessao as sessaoApi, type Api } from "./lib/api.ts";
+import { reagirACota } from "./lib/cota-provisorio.ts";
+import { resolverProvaNoNavegador } from "./lib/prova-trabalho.ts";
 import { abreProvisorio, CHAVE_EQUIPE, decidirPareamento, criarContaNoChat, equipeNoApp, fraseDoErro as fraseDoErroDeConta, linkDaEquipe, type PassoPareamento } from "./telas/conta-no-chat.ts";
 import { criarMinhaConta } from "./telas/minha-conta.ts";
 import { reduzirFoto } from "./lib/reduzir-foto.ts";
@@ -2854,11 +2856,18 @@ async function provisorioDaWeb(): Promise<boolean> {
     await contaApi.provisorioWeb(v);
     return true;
   } catch (e) {
+    if (e instanceof ErroApi && e.desafio && e.bits) {
+      const resposta = await resolverProvaNoNavegador(e.desafio, e.bits);
+      if (resposta !== null) {
+        try { await contaApi.provisorioWeb(v, { desafio: e.desafio, resposta }); return true; } catch { /* mostra o limite abaixo */ }
+      }
+    }
     // Muitos espaços novos da mesma rede (NAT de escritório, CGNAT): a tela de entrada diz por quê, em vez de só aparecer.
     if (e instanceof ErroApi && e.status === 429) entrada = { ...entrada, conta: { etapa: "entrar", enviadoPara: null, ocupado: false, ...entrada.conta, erro: LIMITE_PROVISORIO } };
     return false;
   }
 }
+
 /** NOD-346: o servidor não diz se a conta existiu (sem enumeração); a dica cobre quem excluiu e voltou depois do prazo. */
 const ERRO_ENTRAR = "E-mail ou senha não conferem. Se você excluiu a conta há mais de 30 dias, ela e os dados foram apagados.";
 const LIMITE_PROVISORIO = "Muitos espaços novos foram abertos desta rede agora. Entre com uma conta ou tente de novo em alguns minutos.";
@@ -3297,7 +3306,15 @@ async function enviarParaTrabalho(id: string): Promise<void> {
   rolagem.colar();
   // Revisão W3 (2026-10-08): Enter + botão não mandam o mesmo recado duas vezes (a rota da task não leva `idEnvio`).
   await enviarUmaVez(envios, `trabalho:${id}`, texto, () => agir(async () => {
-    await a.escreverNoTrabalho(id, texto);
+    try {
+      await a.escreverNoTrabalho(id, texto);
+    } catch (e) {
+      if (e instanceof ErroApi && e.codigo === "cota_provisorio") {
+        await telaConta.abrir("cota", false);
+        return;
+      }
+      throw e;
+    }
     limparDepoisDeEnviar(ta, chave, texto);
     dispatch({ tipo: "invalidar", quais: [`trabalho:${id}`, "trabalhos"] });
   }));
@@ -3358,6 +3375,18 @@ async function enviarComposer(): Promise<void> {
       alvoDaBusca = alvoDepoisDeFalar(alvoDaBusca, alvo.conversaId);
     } catch (e) {
       if (!pendente || (e instanceof ErroApi && e.status === 401)) throw e;
+      if (e instanceof ErroApi && e.codigo === "cota_provisorio") {
+        const naTela = ta.isConnected && composerDe === chave;
+        const atual = naTela ? ta.value : chave ? rascunhos.ler(chave) : "";
+        await reagirACota({
+          enviado,
+          atual,
+          retirarFala: () => dispatch({ tipo: "fala-pendente-sai", conversaId: alvo.conversaId, idEnvio: pendente.idEnvio }),
+          repor: (reposto) => { if (naTela) { escreverNoCampo(ta, reposto); ajustarAltura(ta); atualizarBarra(ta); } if (chave) rascunhos.guardar(chave, reposto); },
+          abrirConta: () => telaConta.abrir("cota", false),
+        });
+        return;
+      }
       // Revisão de engenharia (27/10): o porquê (limite do plano, conversa encerrada, sem internet…) vai na própria fala,
       // com a frase que a faixa de antes mostrava — sem ele, "Não foi enviada" não dizia o que fazer.
       dispatch({ tipo: "fala-pendente-falhou", conversaId: alvo.conversaId, idEnvio: pendente.idEnvio, motivo: motivoDaFalha(e) });

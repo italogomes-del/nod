@@ -74,6 +74,8 @@ export async function enfileirarNoTrabalho(deps: Deps, t: Trabalho, p: { texto: 
     conversaId: t.conversaId,
     agenteId: t.agenteId,
     origem: ultimo ? "retomada" : "conversa",
+    // Retomar a sessão da task é detalhe técnico: cada fala nova da pessoa ainda abre gasto e conta na cota.
+    ...(p.deQuem === "pessoa" ? { contaCotaProvisorio: true } : {}),
     retomaTurnoId: ultimo?.id ?? null,
     trabalhoId: t.id,
     prazoEm: agora + PRAZO_DECISAO_PADRAO_MS,

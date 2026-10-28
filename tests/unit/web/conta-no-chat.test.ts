@@ -48,6 +48,16 @@ describe("cartões: HTML puro", () => {
     expect(htmlEtapa({ tipo: "inicio" }, { ...vista, google: false })).not.toContain("Continuar com Google");
   });
 
+  it("NOD-408: a cota explica que a mensagem voltou e oferece criar conta", () => {
+    const semGoogle = htmlEtapa({ tipo: "inicio", cota: true }, { ...vista, google: false });
+    expect(semGoogle).toContain("Você usou as mensagens sem conta");
+    expect(semGoogle).toContain("sua mensagem ficou no campo");
+    expect(semGoogle).toContain(">Criar conta<");
+    const comGoogle = htmlEtapa({ tipo: "inicio", cota: true }, vista);
+    expect(comGoogle).toContain("Continuar com Google");
+    expect(comGoogle).toContain(">Usar e-mail<");
+  });
+
   it("NOD-406: com `equipe`, o início e o entrar levam ao Google da equipe; sem ele, o link não aparece", () => {
     const comEquipe = { ...vista, google: false, equipe: "/api/sessao/google" };
     for (const etapa of [{ tipo: "inicio" as const }, { tipo: "entrar" as const, erro: null }]) {

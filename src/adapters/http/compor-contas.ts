@@ -12,6 +12,8 @@ import { contaNoGoogle, rotaCaixaDev, rotasConta } from "./rotas/conta.ts";
 import { executar, type DentroDeTx } from "./rotas/dentro-de-tx.ts";
 import { segredoEfetivo } from "./sessao.ts";
 import { criarGuardaSessao, type GuardaSessao } from "./sessao-revogavel.ts";
+import { antiAbusoLigado, tetoDaCota } from "../../domain/salvaguardas-provisorio.ts";
+import { definirCotaDoProvisorio } from "../../repositories/cota-provisorio.ts";
 
 /**
  * Composição das contas (NOD-345, ADR-124). As flags são lidas SÓ aqui e em `recusasDasFlagsDeConta` (boot):
@@ -48,14 +50,25 @@ export function recusasDasFlagsDeConta(env: Env): string[] {
   if (env.NOD_CONTAS_GOOGLE === "1" && env.NOD_LOGIN !== "google") r.push("NOD_CONTAS_GOOGLE=1 exige NOD_LOGIN=google");
   if (contas && env.NOD_LOGIN === "google" && (!env.NOD_RESEND_API_KEY || !env.NOD_EMAIL_REMETENTE)) r.push("NOD_CONTAS=1 com NOD_LOGIN=google exige NOD_RESEND_API_KEY e NOD_EMAIL_REMETENTE");
   if (contas && env.NOD_LOGIN === "google" && !env.NOD_URL_PUBLICA) r.push("NOD_CONTAS=1 com NOD_LOGIN=google exige NOD_URL_PUBLICA (o link de recuperação)");
+  const cota = tetoDaCota(env.NOD_PROVISORIO_COTA_TURNOS);
+  if (typeof cota === "object" && cota) r.push(cota.invalido);
+  const antiAbuso = antiAbusoLigado(env.NOD_ANTIABUSO);
+  if (typeof antiAbuso === "object") r.push(antiAbuso.invalido);
+  if ((cota !== null || antiAbuso === true) && env.NOD_BOOTSTRAP !== "1") r.push("salvaguardas do provisório exigem NOD_BOOTSTRAP=1");
   return r;
 }
 
 export function comporContas(p: { db: Db; env: Env; dentro: DentroDeTx; agora: () => number; enviador?: EnviadorEmail }): ContasMontadas | null {
   const { env } = p;
-  if (env.NOD_CONTAS !== "1") return null;
+  if (env.NOD_CONTAS !== "1") {
+    definirCotaDoProvisorio(null);
+    return null;
+  }
   const recusas = recusasDasFlagsDeConta(env);
   if (recusas.length) throw new Error(`contas: ${recusas.join("; ")}`);
+  const cota = tetoDaCota(env.NOD_PROVISORIO_COTA_TURNOS);
+  const antiAbuso = antiAbusoLigado(env.NOD_ANTIABUSO);
+  definirCotaDoProvisorio(typeof cota === "number" ? cota : null);
   const stub = env.NOD_LOGIN !== "google";
   const segredo = segredoEfetivo(stub ? "stub" : "google", env.NOD_SESSAO_SEGREDO);
   const seguro = !stub;
@@ -70,6 +83,7 @@ export function comporContas(p: { db: Db; env: Env; dentro: DentroDeTx; agora: (
     agora: p.agora,
     repo: repoContas,
     emitirChaveMaquina: (escopo, nome) => p.dentro(escopo, async (d) => (await executar(d, emitirChaveMaquina, { nome })).chave),
+    antiAbuso: antiAbuso === true,
   });
   const bootstrap = env.NOD_BOOTSTRAP === "1";
   const googleLigado = env.NOD_CONTAS_GOOGLE === "1";

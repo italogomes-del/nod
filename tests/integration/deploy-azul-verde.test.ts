@@ -685,13 +685,15 @@ describe("deploy.sh e o login por e-mail (ADR-124 §6, NOD-406)", () => {
   it("ligado: as flags, o remetente e a chave do Resend vão ao env da cor nova, e o servidor aceita a combinação", async () => {
     const { recusasDasFlagsDeConta } = await import("../../src/adapters/http/compor-contas.ts");
     await noAr("azul");
-    await com('NOD_CONTAS=1\nNOD_BOOTSTRAP=1\nNOD_EMAIL_REMETENTE="nod <conta@nodbot.ai>"');
+    await com('NOD_CONTAS=1\nNOD_BOOTSTRAP=1\nNOD_PROVISORIO_COTA_TURNOS=30\nNOD_ANTIABUSO=1\nNOD_EMAIL_REMETENTE="nod <conta@nodbot.ai>"');
     const r = deploy();
     expect(r.stderr).toBe("");
     expect(r.status).toBe(0);
     const env = await envDa("verde");
     expect(env.NOD_CONTAS).toBe("1");
     expect(env.NOD_BOOTSTRAP).toBe("1");
+    expect(env.NOD_PROVISORIO_COTA_TURNOS).toBe("30");
+    expect(env.NOD_ANTIABUSO).toBe("1");
     expect(env.NOD_EMAIL_REMETENTE).toBe("nod <conta@nodbot.ai>");
     expect(env.NOD_RESEND_API_KEY).toBe("re_segredo_falso");
     // As mesmas regras do boot do servidor: com o env que o deploy grava, nada impede a cor nova de subir.
@@ -705,8 +707,16 @@ describe("deploy.sh e o login por e-mail (ADR-124 §6, NOD-406)", () => {
     await com("");
     expect(deploy({ FALHA_SEGREDO: "nod-resend-api-key" }).status).toBe(0);
     const env = await envDa("verde");
-    for (const v of ["NOD_CONTAS", "NOD_BOOTSTRAP", "NOD_EMAIL_REMETENTE", "NOD_RESEND_API_KEY"]) expect(env[v], v).toBe("");
+    for (const v of ["NOD_CONTAS", "NOD_BOOTSTRAP", "NOD_PROVISORIO_COTA_TURNOS", "NOD_ANTIABUSO", "NOD_EMAIL_REMETENTE", "NOD_RESEND_API_KEY"]) expect(env[v], v).toBe("");
     expect(await ler("gcloud.log")).not.toContain("nod-resend-api-key");
+  });
+
+  it("recusa cota acima do teto antes de publicar a cor nova", async () => {
+    await noAr("azul");
+    await com("NOD_CONTAS=1\nNOD_BOOTSTRAP=1\nNOD_PROVISORIO_COTA_TURNOS=100001");
+    const r = deploy();
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain("1 a 100000");
   });
 
   it("desligado com o segredo válido e um remetente no config.env: a chave nem é pedida e nada de e-mail vai ao env", async () => {

@@ -8,6 +8,10 @@ import { criarAgente } from "../../src/use-cases/criar-agente.ts";
 import { enviarMensagem } from "../../src/use-cases/enviar-mensagem.ts";
 import type { Quem } from "../../src/use-cases/conta.ts";
 import { segredoDeTroca } from "../../desktop/conta-provisoria.ts";
+import { resolverDesafio } from "../../src/services/desafio-provisorio.ts";
+import { definirCotaDoProvisorio } from "../../src/repositories/cota-provisorio.ts";
+import { ANTIABUSO, DIA_MS, dominioParaLimite } from "../../src/domain/salvaguardas-provisorio.ts";
+import { chaveDeLimite } from "../../src/services/segredos-conta.ts";
 import { depsSobreTrx, executar, MARLON } from "../helpers/deps-l6.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { withRollback } from "../helpers/with-rollback.ts";
@@ -32,6 +36,122 @@ describeIntegracao("conta (NOD-345): provisório, cadastro, escolha, recuperaç�
       const [p] = await trx<{ email: string | null }[]>`select email from pessoas where tenant_id = ${a.escopo.tenantId} and id = ${a.escopo.pessoaId}`;
       expect(p).toEqual({ email: null });
       await expect(m.s.provisorio(q, { verificador: "curto", forma: "app" })).rejects.toBeInstanceOf(ErroDeDominio);
+    });
+  });
+
+  it("NOD-408: depois de três espaços no mesmo IP exige prova de trabalho, válida uma vez", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = mundo(trx, { antiAbuso: true });
+      const q: Quem = { escopo: null, sid: null, ip: ip(), aparelho: "macOS · Chrome" };
+      for (let i = 0; i < 3; i++) expect((await m.s.provisorio(q, { verificador: verificador(), forma: "web" })).novo).toBe(true);
+      const v = verificador();
+      await expect(m.s.provisorio(q, { verificador: v, forma: "web" })).rejects.toMatchObject({ codigo: "limite_atingido", cause: "desafio_provisorio" });
+      const prova = m.s.emitirDesafioProvisorio(q.ip);
+      const resposta = resolverDesafio(prova.desafio, prova.bits);
+      expect(resposta).not.toBeNull();
+      expect((await m.s.provisorio(q, { verificador: v, forma: "web", desafio: prova.desafio, resposta })).novo).toBe(true);
+      await expect(m.s.provisorio(q, { verificador: verificador(), forma: "web", desafio: prova.desafio, resposta })).rejects.toMatchObject({ cause: "desafio_provisorio" });
+    });
+  });
+
+  it("NOD-408: tetos duros barram espaços e contas por IP/domínio, inclusive Google e recuperação", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const segredo = "segredo-de-teste-com-mais-de-32-caracteres";
+      const chaveDeslizante = chaveDeLimite(segredo, "janela_deslizante", randomBytes(8).toString("hex"));
+      const t0 = Date.now() - (Date.now() % (60 * 60_000)) + 60 * 60_000 - 10;
+      expect(await repoContas.consumirLimiteDeslizante(trx, chaveDeslizante, 60 * 60_000, 2, t0)).toBe(true);
+      expect(await repoContas.consumirLimiteDeslizante(trx, chaveDeslizante, 60 * 60_000, 2, t0)).toBe(true);
+      expect(await repoContas.consumirLimiteDeslizante(trx, chaveDeslizante, 60 * 60_000, 2, t0 + 20)).toBe(false);
+      expect(await trx`select 1 from limites_conta where chave = ${chaveDeslizante}`).toHaveLength(1);
+      expect(await repoContas.consumirLimiteDeslizante(trx, chaveDeslizante, 60 * 60_000, 2, t0 + 60 * 60_000 + 1)).toBe(true);
+      const chaveFixa = chaveDeLimite(segredo, "janela_fixa_legada", randomBytes(8).toString("hex"));
+      expect(await repoContas.consumirLimite(trx, chaveFixa, 60 * 60_000, 1, t0)).toBe(true);
+      expect(await repoContas.consumirLimite(trx, chaveFixa, 60 * 60_000, 1, t0 + 20)).toBe(true);
+      const esgotar = async (tipo: string, valor: string, teto: number, janela = DIA_MS) => {
+        for (let i = 0; i < teto; i++) expect(await repoContas.consumirLimiteDeslizante(trx, chaveDeLimite(segredo, tipo, valor), janela, teto, Date.now())).toBe(true);
+      };
+      const m = mundo(trx, { antiAbuso: true });
+      const antiga = `desafio_provisorio:${randomBytes(16).toString("base64url")}`;
+      await trx`insert into limites_conta (chave, janela, contagem) values (${antiga}, ${new Date(Date.now() - 3 * DIA_MS)}, 1)`;
+      await repoContas.podarLimitesConta(trx, Date.now());
+      expect(await trx`select 1 from limites_conta where chave = ${antiga}`).toHaveLength(0);
+      const ipEspaco = ip();
+      await esgotar("provisorio_ip_dia", ipEspaco, ANTIABUSO.provisorioPorIpDia);
+      const [linhaAntes] = await trx<{ n: number }[]>`select count(*)::int as n from limites_conta`;
+      await expect(m.s.provisorio({ escopo: null, sid: null, ip: ipEspaco, aparelho: "x" }, { verificador: verificador(), forma: "web" })).rejects.toMatchObject({ cause: "provisorio por ip" });
+      const [linhaDepois] = await trx<{ n: number }[]>`select count(*)::int as n from limites_conta`;
+      expect(linhaDepois?.n).toBe(linhaAntes?.n);
+
+      const porIp = await provisorio(m);
+      await esgotar("cadastro_ip_dia", porIp.ip, ANTIABUSO.cadastroPorIpDia);
+      const dominioNaoEnvenenado = `empresa-${randomBytes(4).toString("hex")}.com`;
+      const emailNaoEnvenenado = `bloqueada@${dominioNaoEnvenenado}`;
+      await expect(m.s.cadastrar(porIp, { email: emailNaoEnvenenado, senha: SENHA })).rejects.toMatchObject({ cause: "cadastro" });
+      expect(await trx`select 1 from limites_conta where chave = ${chaveDeLimite(segredo, "cadastro_email", emailNaoEnvenenado)}`).toHaveLength(0);
+      expect(await trx`select 1 from limites_conta where chave = ${chaveDeLimite(segredo, "cadastro_dominio", dominioNaoEnvenenado)}`).toHaveLength(0);
+
+      const emailDominio = `nova@empresa-${randomBytes(4).toString("hex")}.com`;
+      const dominio = dominioParaLimite(emailDominio)!;
+      const porDominio = await provisorio(m);
+      await esgotar("cadastro_dominio", dominio, ANTIABUSO.cadastroPorDominioHora, 60 * 60_000);
+      await m.s.cadastrar(porDominio, { email: emailDominio, senha: SENHA });
+      await expect(m.s.verificar(porDominio, { codigo: codigoDoEmail(m) })).rejects.toMatchObject({ cause: "cadastro" });
+
+      const google = await provisorio(m);
+      await expect(m.s.voltaGoogle(google, { iss: "https://accounts.google.com", sub: `sub-${randomBytes(4).toString("hex")}`, email: emailDominio, autoridade: true })).rejects.toMatchObject({ cause: "cadastro Google" });
+
+      const emailRecuperacao = `dono@recuperar-${randomBytes(4).toString("hex")}.com`;
+      const dominioDaRecuperacao = dominioParaLimite(emailRecuperacao)!;
+      const donoRecuperacao = await provisorio(m);
+      const contaRecuperacao = await repoContas.criarConta(trx, emailRecuperacao);
+      expect(contaRecuperacao).not.toBeNull();
+      expect(await repoContas.ligarContaPessoa(trx, contaRecuperacao!, donoRecuperacao.escopo!)).toBe(true);
+      const antes = m.caixa.mensagens.length;
+      await esgotar("recuperar_dominio", dominioDaRecuperacao, ANTIABUSO.recuperarPorDominioHora, 60 * 60_000);
+      expect(await m.s.recuperar({ escopo: null, sid: null, ip: ip(), aparelho: "x" }, { email: emailRecuperacao })).toEqual({ ok: true });
+      expect(m.caixa.mensagens).toHaveLength(antes);
+
+      const ipRecuperacao = ip();
+      const dominioRecuperacao = `recuperar-${randomBytes(4).toString("hex")}.com`;
+      await esgotar("recuperar_ip_dia", ipRecuperacao, ANTIABUSO.recuperarPorIpDia);
+      expect(await m.s.recuperar({ escopo: null, sid: null, ip: ipRecuperacao, aparelho: "x" }, { email: `alvo@${dominioRecuperacao}` })).toEqual({ ok: true });
+      expect(await trx`select 1 from limites_conta where chave = ${chaveDeLimite(segredo, "recuperar_dominio", dominioRecuperacao)}`).toHaveLength(0);
+    });
+  });
+
+  it("NOD-408: espaço provisório para de enfileirar turnos novos no teto", async () => {
+    await withRollback(MARLON, async (trx) => {
+      definirCotaDoProvisorio(1);
+      try {
+        const m = mundo(trx);
+        const q = await provisorio(m, "Com cota");
+        await vincularEscopo(trx, q.escopo!);
+        const dp = depsSobreTrx(trx, q.escopo!);
+        const bot = (await executar(dp, criarAgente, { dono: "pessoa" })).data;
+        await executar(dp, enviarMensagem, { conversaId: bot.conversa.id, texto: "primeira", inventario: PRONTO });
+        await expect(executar(dp, enviarMensagem, { conversaId: bot.conversa.id, texto: "segunda", inventario: PRONTO })).rejects.toMatchObject({ codigo: "cota_provisorio" });
+        expect(await trx`select 1 from turnos where tenant_id = ${q.escopo!.tenantId}`).toHaveLength(1);
+      } finally {
+        definirCotaDoProvisorio(null);
+      }
+    });
+  });
+
+  it("NOD-408: fala nova interrompida consome a cota; a repetição futura não abre um bypass", async () => {
+    await withRollback(MARLON, async (trx) => {
+      definirCotaDoProvisorio(1);
+      try {
+        const m = mundo(trx);
+        const q = await provisorio(m, "Interrompido conta");
+        await vincularEscopo(trx, q.escopo!);
+        const dp = depsSobreTrx(trx, q.escopo!);
+        const bot = (await executar(dp, criarAgente, { dono: "pessoa" })).data;
+        await executar(dp, enviarMensagem, { conversaId: bot.conversa.id, texto: "sem executor", inventario: { estado: "ausente", motivo: "sem IA", em: 0 } });
+        await expect(executar(dp, enviarMensagem, { conversaId: bot.conversa.id, texto: "não passa", inventario: PRONTO })).rejects.toMatchObject({ codigo: "cota_provisorio" });
+        expect(await trx<{ conta: boolean }[]>`select conta_cota_provisorio as conta from turnos where tenant_id = ${q.escopo!.tenantId}`).toEqual([{ conta: true }]);
+      } finally {
+        definirCotaDoProvisorio(null);
+      }
     });
   });
 

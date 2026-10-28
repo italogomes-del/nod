@@ -11,6 +11,7 @@ import type { SomaDoDia } from "../domain/custo-do-dia.ts";
 import { modelosPorIa } from "../domain/ia-do-modelo.ts";
 import { ESPERA_MAXIMA_FUNDO_MS } from "../domain/memoria-mac.ts";
 import { porChegada } from "../domain/ordem-das-falas.ts";
+import { turnoNovoParaCota } from "../domain/salvaguardas-provisorio.ts";
 import { MOTIVOS_DE_QUEDA, MOTIVOS_FALHA_SEM_QUEDA, QUEDAS_FORA_DO_TETO } from "../domain/pedido-parado.ts";
 import { paraProfundidade } from "../domain/profundidade.ts";
 import { nasceNosBastidores } from "../domain/triagem.ts";
@@ -140,6 +141,8 @@ export type NovoTurno = {
   conversaId: string;
   agenteId: string;
   origem: OrigemTurno;
+  /** NOD-408: sobrescreve a inferência apenas para fala nova da pessoa que retoma uma task existente. */
+  contaCotaProvisorio?: boolean;
   prazoEm: number;
   profundidade: Profundidade;
   entradaTexto: string;
@@ -289,7 +292,7 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
       const estado: EstadoTurno = t.interrompidoCom ? "interrompido" : "pendente";
       const [l] = await conn<Linha[]>`
         insert into turnos (tenant_id, id, owner_id, conversa_id, agente_id, origem, estado, motivo_interrupcao, prazo_em, profundidade,
-          entrada_texto, entrada_anexos, entrada_confianca, modelo, harness, retoma_turno_id, reenvios, executor, locality_reason, decidido_por, mensagem_origem_id, sob_procuracao_de, ligacao_id, trabalho_id, acordar_em, maquina_desta_vez, pessoa_esperando, contaminado_em, tentativas_transitorias, bastidores)
+          entrada_texto, entrada_anexos, entrada_confianca, modelo, harness, retoma_turno_id, reenvios, executor, locality_reason, decidido_por, mensagem_origem_id, sob_procuracao_de, ligacao_id, trabalho_id, acordar_em, maquina_desta_vez, pessoa_esperando, contaminado_em, tentativas_transitorias, bastidores, conta_cota_provisorio)
         values (${escopo.tenantId}, ${t.id ?? conn`gen_random_uuid()`}, ${escopo.pessoaId}, ${t.conversaId}, ${t.agenteId}, ${t.origem}, ${estado},
           ${t.interrompidoCom ?? null}, ${data(t.prazoEm)}, ${t.profundidade}, ${t.entradaTexto}, ${(t.entradaAnexos ?? []) as string[]}::uuid[], ${t.entradaConfianca}, ${t.modelo}, ${t.harness ?? "auto"},
           ${t.retomaTurnoId ?? null}, ${t.reenvios ?? 0}, ${t.executor}, ${t.localityReason ?? "tudo_local_nesta_rodada"},
@@ -300,7 +303,8 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
           ${t.tentativasTransitorias ?? 0},
           -- ADR-130: a faixa da conversa. A retomada e a repetição herdam a do turno que continuam (nunca saem dos bastidores).
           ${nasceNosBastidores(t)}::boolean or exists (select 1 from turnos b where b.tenant_id = ${escopo.tenantId}
-            and b.id = any(${[t.retomaTurnoId, t.contaminadoDe].filter((x): x is string => !!x)}::uuid[]) and b.bastidores))
+            and b.id = any(${[t.retomaTurnoId, t.contaminadoDe].filter((x): x is string => !!x)}::uuid[]) and b.bastidores),
+          ${turnoNovoParaCota(t)})
         returning ${conn.unsafe(COLUNAS)}`;
       return l ? paraTurno(l) : null;
     },

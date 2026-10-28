@@ -193,7 +193,17 @@ export function rotasConta(d: DepsRotasConta): Rota[] {
         // A web só ganha espaço provisório quando ainda não tem sessão (não troca a de alguém sem querer).
         if (forma === "web" && q.escopo) { ctx.json(200, { escopo: q.escopo, novo: false }); return; }
         if (forma === "app" && ctx.req.headers.origin !== undefined) throw new ErroDeDominio("nao_permitido", { cause: "chave de máquina pedida por página" });
-        const r = await d.servico.provisorio(q, { verificador: b.verificador, nome: b.nome, forma });
+        let r;
+        try {
+          r = await d.servico.provisorio(q, { verificador: b.verificador, nome: b.nome, forma, desafio: b.desafio, resposta: b.resposta });
+        } catch (erro) {
+          if (erro instanceof ErroDeDominio && erro.codigo === "limite_atingido" && erro.cause === "desafio_provisorio") {
+            const desafio = d.servico.emitirDesafioProvisorio(q.ip);
+            ctx.json(429, { codigo: "limite_atingido", mensagem: TABELA_ERROS.limite_atingido.mensagem, ...desafio });
+            return;
+          }
+          throw erro;
+        }
         if (r.sessao) ctx.res.setHeader("set-cookie", cookie(r.sessao));
         ctx.json(200, { escopo: r.escopo, novo: r.novo, ...(r.chave ? { chave: r.chave } : {}) });
       }),

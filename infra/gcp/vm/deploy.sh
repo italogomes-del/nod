@@ -37,6 +37,8 @@ limpo() { printf '%s' "$1" | tr -d '\r\n' | sed -e 's/^[[:space:]]*//' -e 's/[[:
 # em vez de sumir em silêncio.
 NOD_CONTAS="$(limpo "${NOD_CONTAS:-}")"
 NOD_BOOTSTRAP="$(limpo "${NOD_BOOTSTRAP:-}")"
+NOD_PROVISORIO_COTA_TURNOS="$(limpo "${NOD_PROVISORIO_COTA_TURNOS:-}")"
+NOD_ANTIABUSO="$(limpo "${NOD_ANTIABUSO:-}")"
 NOD_EMAIL_REMETENTE="$(limpo "${NOD_EMAIL_REMETENTE:-}")"
 for v in NOD_CONTAS_GOOGLE NOD_MINHA_CONTA NOD_PURGA_CONTA; do
   [ -z "$(limpo "${!v:-}")" ] || { echo "$v ainda não é levado pelo deploy (NOD-406): tire a linha do config.env" >&2; exit 1; }
@@ -44,6 +46,11 @@ done
 for v in NOD_CONTAS NOD_BOOTSTRAP; do
   case "${!v}" in ""|1) ;; *) echo "$v só aceita 1 ou vazio no config.env (o servidor compara por === \"1\")" >&2; exit 1 ;; esac
 done
+case "$NOD_ANTIABUSO" in ""|1) ;; *) echo "NOD_ANTIABUSO só aceita 1 ou vazio" >&2; exit 1 ;; esac
+[[ -z "$NOD_PROVISORIO_COTA_TURNOS" || ( "$NOD_PROVISORIO_COTA_TURNOS" =~ ^[1-9][0-9]{0,5}$ && "$NOD_PROVISORIO_COTA_TURNOS" -le 100000 ) ]] || { echo "NOD_PROVISORIO_COTA_TURNOS deve ser inteiro de 1 a 100000 ou vazio" >&2; exit 1; }
+if { [ -n "$NOD_ANTIABUSO" ] || [ -n "$NOD_PROVISORIO_COTA_TURNOS" ]; } && [ "$NOD_BOOTSTRAP" != 1 ]; then
+  echo "salvaguardas do provisório exigem NOD_BOOTSTRAP=1" >&2; exit 1
+fi
 # O nome só com letras, dígitos, espaço, ponto, _ e -: no env_file do compose, `#`, `$` e aspas mudariam o valor.
 REMETENTE_OK='^([A-Za-z0-9 ._-]+ <[A-Za-z0-9._%+-]+@nodbot\.ai>|[A-Za-z0-9._%+-]+@nodbot\.ai)$'
 # A chave do Resend (só de envio) mora no Secret Manager e só é lida com as contas ligadas, aqui, antes da reconciliação
@@ -259,6 +266,8 @@ NOD_NUVEM_CONTA_FATURAMENTO=${NOD_NUVEM_CONTA_FATURAMENTO:-}
 # recuperação usa o NOD_URL_PUBLICA acima.
 NOD_CONTAS=$NOD_CONTAS
 NOD_BOOTSTRAP=$NOD_BOOTSTRAP
+NOD_PROVISORIO_COTA_TURNOS=$NOD_PROVISORIO_COTA_TURNOS
+NOD_ANTIABUSO=$NOD_ANTIABUSO
 NOD_EMAIL_REMETENTE=${NOD_CONTAS:+$NOD_EMAIL_REMETENTE}
 NOD_RESEND_API_KEY=$RESEND_CHAVE
 EOF

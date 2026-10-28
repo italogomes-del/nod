@@ -429,10 +429,7 @@ export async function registrarInstalacao(conn: Conn, hash: Buffer, escopo: Esco
   return linhas.length > 0;
 }
 
-/**
- * Conta um uso na janela fixa e diz se ainda cabe. Janela fixa (não deslizante): simples e suficiente contra abuso; o
- * pior caso é 2× o teto na virada da janela. As janelas antigas da chave são apagadas no caminho.
- */
+/** Limite legado em janela fixa. Mantido para não mudar cadastro/entrada/recuperação com as flags desligadas. */
 export async function consumirLimite(conn: Conn, chave: string, janelaMs: number, teto: number, agora: number): Promise<boolean> {
   const inicio = Math.floor(agora / janelaMs) * janelaMs;
   await conn`delete from limites_conta where chave = ${chave} and janela < ${data(inicio)}`;
@@ -440,4 +437,36 @@ export async function consumirLimite(conn: Conn, chave: string, janelaMs: number
     insert into limites_conta (chave, janela, contagem) values (${chave}, ${data(inicio)}, 1)
     on conflict (chave, janela) do update set contagem = limites_conta.contagem + 1 returning contagem`;
   return (l?.contagem ?? teto + 1) <= teto;
+}
+
+/** Consulta o limite novo sem consumir. Útil para negar cedo sem criar outro contador antes do teto duro. */
+export async function cabeNoLimiteDeslizante(conn: Conn, chave: string, janelaMs: number, teto: number, agora: number): Promise<boolean> {
+  const corte = agora - janelaMs;
+  await conn`select pg_advisory_xact_lock(hashtextextended(${chave}, 410))`;
+  await conn`delete from limites_conta where chave = ${chave} and janela <= ${data(corte)}`;
+  const [l] = await conn<{ contagem: number }[]>`select coalesce(sum(contagem), 0)::int as contagem from limites_conta where chave = ${chave} and janela > ${data(corte)}`;
+  return (l?.contagem ?? teto) < teto;
+}
+
+/** Consome o limite novo em janela deslizante. A trava torna soma + incremento atômicos entre processos. */
+export async function consumirLimiteDeslizante(conn: Conn, chave: string, janelaMs: number, teto: number, agora: number): Promise<boolean> {
+  const corte = agora - janelaMs;
+  await conn`select pg_advisory_xact_lock(hashtextextended(${chave}, 410))`;
+  await conn`delete from limites_conta where chave = ${chave} and janela <= ${data(corte)}`;
+  const [antes] = await conn<{ contagem: number }[]>`select coalesce(sum(contagem), 0)::int as contagem from limites_conta where chave = ${chave} and janela > ${data(corte)}`;
+  // Recusas não renovam o bloqueio nem criam uma linha por tentativa automatizada.
+  if ((antes?.contagem ?? teto) >= teto) return false;
+  await conn`
+    insert into limites_conta (chave, janela, contagem) values (${chave}, ${data(agora)}, 1)
+    on conflict (chave, janela) do update set contagem = limites_conta.contagem + 1`;
+  return true;
+}
+
+let ultimaPodaDosLimites = 0;
+/** NOD-408/LGPD: o varredor chama mesmo sem tráfego de conta; o processo poda no máximo uma vez por hora. */
+export async function podarLimitesConta(conn: Conn, agora: number): Promise<number> {
+  if (agora - ultimaPodaDosLimites < 60 * 60_000) return 0;
+  const removidas = await conn`delete from limites_conta where janela < ${data(agora - 2 * 24 * 60 * 60_000)} returning 1`;
+  ultimaPodaDosLimites = agora;
+  return removidas.length;
 }

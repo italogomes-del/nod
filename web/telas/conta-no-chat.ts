@@ -38,7 +38,7 @@ type ElAcao = { dataset: { [k: string]: string | undefined } };
 type Formulario = object;
 
 export type Etapa =
-  | { tipo: "inicio" }
+  | { tipo: "inicio"; cota?: boolean }
   | { tipo: "cadastro"; erro: string | null }
   | { tipo: "codigo"; email: string; restantes: number | null; vencido: boolean; reenviado: boolean; erro?: string | null; naoEnviado?: boolean }
   | { tipo: "escolha"; email: string; espaco: ContagemEspacoDto | null; falhou: boolean; confirmado: boolean; incerto?: boolean; semSessao?: boolean }
@@ -101,8 +101,8 @@ export function htmlEtapa(e: Etapa, v: { ocupado: boolean; google: boolean; agor
     case "inicio":
       return cartao(
         "Guarde seu espaço numa conta",
-        `<p class="cc-texto">Hoje ele está só ${nesteAparelho()}. Com uma conta, você entra de qualquer lugar e não perde nada.</p>
-        <div class="cc-acoes cc-coluna">${v.google ? bt("conta-google", "Continuar com Google", { classe: "pri", ocupado: o }) : ""}${bt("conta-ir", "Usar e-mail", { classe: v.google ? "" : "pri", dados: { etapa: "cadastro" } })}${bt("conta-fechar", "Agora não", { classe: "cc-link" })}</div>
+        `<p class="cc-texto">${e.cota ? "Você usou as mensagens sem conta. Crie uma conta para continuar: nada do que você fez se perde, e sua mensagem ficou no campo." : `Hoje ele está só ${nesteAparelho()}. Com uma conta, você entra de qualquer lugar e não perde nada.`}</p>
+        <div class="cc-acoes cc-coluna">${v.google ? bt("conta-google", "Continuar com Google", { classe: "pri", ocupado: o }) : ""}${bt("conta-ir", e.cota && !v.google ? "Criar conta" : "Usar e-mail", { classe: v.google ? "" : "pri", dados: { etapa: "cadastro" } })}${bt("conta-fechar", "Agora não", { classe: "cc-link" })}</div>
         <p class="cc-rodape">${bt("conta-ir", "Já tenho conta com e-mail", { classe: "cc-link", dados: { etapa: "entrar" } })}${bt("conta-ir", "Tenho um código", { classe: "cc-link", dados: { etapa: "parear-entrar" } })}${equipe}</p>`,
         "Criar conta ou entrar",
       );
@@ -326,7 +326,7 @@ export function emRepouso(e: Etapa | null): boolean {
   }
 }
 
-const ETAPAS_DIRETAS = new Set(["inicio", "cadastro", "entrar", "recuperar", "senha", "sessoes", "parear-entrar"]);
+const ETAPAS_DIRETAS = new Set(["inicio", "cota", "cadastro", "entrar", "recuperar", "senha", "sessoes", "parear-entrar"]);
 
 /** O controlador: uma etapa ativa, as linhas resolvidas e a conversa onde o bloco mora. */
 export function criarContaNoChat(deps: DepsConta) {
@@ -365,6 +365,7 @@ export function criarContaNoChat(deps: DepsConta) {
 
   async function etapaInicial(qual: string): Promise<Etapa> {
     switch (qual) {
+      case "cota": return { tipo: "inicio", cota: true };
       case "cadastro": return { tipo: "cadastro", erro: null };
       case "entrar": return { tipo: "entrar", erro: null };
       case "recuperar": return { tipo: "recuperar", enviadoPara: null };

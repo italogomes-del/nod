@@ -164,9 +164,9 @@ export const CODIGOS_ERRO = [
   "integracao_autenticacao",
   // ADR-081 (0060): o Nod não se exclui, não se oculta, não se renomeia, não se move nem se duplica.
   "nod_protegido", "mudou_depois", // NOD-58 (0117): desfazer recusado, a memória mudou depois (409).
+  "cota_provisorio", // NOD-408 (0126): o espaço sem conta usou a cota de turnos novos (429).
 ] as const;
 export type CodigoErro = (typeof CODIGOS_ERRO)[number];
-
 /**
  * definido em 2026-09-24 (ADR-037, emenda "saúde do computador"): por que o computador do bot falhou,
  * em código FECHADO — antes tudo virava "computador_indisponivel_ou_tela_alterada". As seis primeiras

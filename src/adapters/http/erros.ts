@@ -33,6 +33,7 @@ export const TABELA_ERROS: Readonly<Record<CodigoErro, { status: number; mensage
   env_placeholder_chave_nova: { status: 400, mensagem: "O valor oculto só vale para uma chave que já existe. Preencha o valor da chave nova." },
   dono_imutavel: { status: 403, mensagem: "O dono do agente não pode ser trocado." },
   texto_vazio: { status: 400, mensagem: "Escreva algo antes de enviar." },
+  cota_provisorio: { status: 429, mensagem: "Você usou as mensagens sem conta. Crie uma conta para continuar: nada do que você fez se perde, e sua mensagem ficou no campo." },
   nod_protegido: { status: 403, mensagem: "O Nod fica sempre com você: não dá para excluir, ocultar, renomear, mover nem duplicar." },
 };
 

@@ -23,6 +23,8 @@ import { log } from "../obs/log.ts";
 import { vincularEscopo } from "../db/tx.ts";
 import type { Escopo, Tx } from "../shared/types.ts";
 import { contarEspaco, importarEspaco, type ContagemImportacao } from "./importar-espaco.ts";
+import { ANTIABUSO, DIA_MS, dominioParaLimite } from "../domain/salvaguardas-provisorio.ts";
+import { emitirDesafio, verificarDesafio } from "../services/desafio-provisorio.ts";
 
 /**
  * Conta no nod (NOD-345, ADR-124): usar sem conta, criar conta (e-mail+senha ou Google), entrar numa conta que já
@@ -91,6 +93,8 @@ export type DepsConta = {
   emitirChaveMaquina(escopo: Escopo, nome: string): Promise<string>;
   /** As consultas de conta (contas.repo.ts), injetadas (ADR-018: caso de uso não importa repositório). */
   repo: typeof RepoContas;
+  /** NOD-408: desafio e limites adicionais. Desligado preserva exatamente os limites da NOD-345. */
+  antiAbuso?: boolean;
 };
 
 /** Quem pede: o escopo e o sid do cookie (ambos null sem sessão), o IP e o aparelho (rótulo do user-agent). */
@@ -137,15 +141,20 @@ export function servicoConta(d: DepsConta) {
   const repo = d.repo;
   const chaveVerificacao = (sid: string) => `cadastro:${sid}`;
 
-  async function limitar(pares: [tipo: string, valor: string, teto: number, janelaMs?: number][]): Promise<boolean> {
-    return d.transacao(async (trx) => {
-      let ok = true;
-      for (const [tipo, valor, teto, janela] of pares) {
-        if (!(await repo.consumirLimite(trx, chaveDeLimite(d.segredo, tipo, valor), janela ?? HORA, teto, d.agora()))) ok = false;
+  async function limitarNo(trx: Tx, pares: [tipo: string, valor: string, teto: number, janelaMs?: number][], deslizante = false): Promise<boolean> {
+    let cabe = true;
+    for (const [tipo, valor, teto, janela] of pares) {
+      // O IP vem antes do domínio. Parar aqui impede um IP já bloqueado de consumir a cota compartilhada de uma
+      // empresa e negar cadastro/recuperação para todas as pessoas legítimas dela.
+      const consumir = deslizante ? repo.consumirLimiteDeslizante : repo.consumirLimite;
+      if (!(await consumir(trx, chaveDeLimite(d.segredo, tipo, valor), janela ?? HORA, teto, d.agora()))) {
+        cabe = false;
+        if (deslizante) return false;
       }
-      return ok;
-    });
+    }
+    return cabe;
   }
+  const limitar = (pares: [tipo: string, valor: string, teto: number, janelaMs?: number][], deslizante = false) => d.transacao((trx) => limitarNo(trx, pares, deslizante));
 
   function exigirSessao(q: Quem): { escopo: Escopo; sid: string } {
     if (!q.escopo || !q.sid) throw new ErroDeDominio("nao_permitido", { cause: "conta exige sessão com sid" });
@@ -209,17 +218,35 @@ export function servicoConta(d: DepsConta) {
      * app guarda no safeStorage; a web, no localStorage): a mesma instalação pedindo de novo volta ao MESMO espaço.
      * `forma: "app"` devolve uma chave de máquina; `"web"`, uma sessão.
      */
-    async provisorio(q: Quem, e: { verificador: unknown; nome?: unknown; forma: "app" | "web" }): Promise<{ escopo: Escopo; chave: string | null; sessao: SessaoNova | null; novo: boolean }> {
+    emitirDesafioProvisorio(ip: string) {
+      return emitirDesafio(d.segredo, ip, d.agora());
+    },
+    async provisorio(q: Quem, e: { verificador: unknown; nome?: unknown; forma: "app" | "web"; desafio?: unknown; resposta?: unknown }): Promise<{ escopo: Escopo; chave: string | null; sessao: SessaoNova | null; novo: boolean }> {
       if (typeof e.verificador !== "string" || !/^[A-Za-z0-9_-]{32,128}$/.test(e.verificador)) throw new ErroDeDominio("entrada_invalida", { cause: "verificador" });
       const hash = hmacConta(d.segredo, "instalacao", e.verificador);
-      if (!(await limitar([["provisorio_verificador", hash.toString("hex"), LIMITES.provisorioPorVerificador]]))) throw limiteMsg("provisorio por verificador");
       const achada = await d.transacao((trx) => repo.instalacaoPorVerificador(trx, hash));
+      // Só instalações já registradas ganham contador próprio. Um verificador aleatório novo passa pelos portões por IP
+      // abaixo; persistir uma chave por entrada desconhecida permitiria amplificar `limites_conta` sem limite.
+      if ((achada || !d.antiAbuso) && !(await limitar([["provisorio_verificador", hash.toString("hex"), LIMITES.provisorioPorVerificador]]))) throw limiteMsg("provisorio por verificador");
       // Instalação que já virou conta: entra pela conta. Não ganha espaço novo e vazio quando a sessão cai.
       if (achada?.aposentada) throw new ErroDeDominio("estado_invalido", { cause: "instalação já tem conta" });
       let ja: Escopo | null = achada ? { tenantId: achada.tenantId, pessoaId: achada.pessoaId } : null;
       let escopo = ja;
       if (!escopo) {
-        if (!(await limitar([["provisorio_ip", q.ip, LIMITES.provisorioPorIp]]))) throw limiteMsg("provisorio por ip");
+        if (d.antiAbuso) {
+          const chaveDia = chaveDeLimite(d.segredo, "provisorio_ip_dia", q.ip);
+          const cabeNoDia = await d.transacao((trx) => repo.cabeNoLimiteDeslizante(trx, chaveDia, DIA_MS, ANTIABUSO.provisorioPorIpDia, d.agora()));
+          if (!cabeNoDia) throw limiteMsg("provisorio por ip");
+          const semDesafio = await limitar([["provisorio_ip_hora", q.ip, ANTIABUSO.provisorioSemDesafioPorIpHora]], true);
+          if (!semDesafio) {
+            const valido = verificarDesafio(d.segredo, q.ip, { desafio: e.desafio, resposta: e.resposta }, d.agora()) === "ok";
+            const usoUnico = valido && typeof e.desafio === "string" && await limitar([["desafio_provisorio", e.desafio, 1, DIA_MS]], true);
+            if (!usoUnico) throw limiteMsg("desafio_provisorio");
+          }
+          // A tentativa inicial e o retry da prova são uma criação só: o teto diário conta apenas depois de a prova
+          // passar, senão cada espaço desafiado consumiria duas posições da cota dura.
+          if (!(await limitar([["provisorio_ip_dia", q.ip, ANTIABUSO.provisorioPorIpDia, DIA_MS]], true))) throw limiteMsg("provisorio por ip");
+        } else if (!(await limitar([["provisorio_ip", q.ip, LIMITES.provisorioPorIp]]))) throw limiteMsg("provisorio por ip");
         const { nome, iniciais } = nomeDoProvisorio(e.nome);
         const criado = await d.transacao(async (trx) => {
           const [l] = await trx<{ o_tenant_id: string; o_pessoa_id: string }[]>`select o_tenant_id, o_pessoa_id from nod_criar_espaco_provisorio(${nome}, ${iniciais})`;
@@ -258,6 +285,7 @@ export function servicoConta(d: DepsConta) {
       if (!email) throw new ErroDeDominio("entrada_invalida", { cause: "email" });
       const senha = exigirSenhaBoa(e.senha);
       if (!(await d.transacao((trx) => repo.ehProvisorio(trx, escopo)))) throw new ErroDeDominio("estado_invalido", { cause: "só o espaço provisório vira conta" });
+      if (d.antiAbuso && !(await limitar([["cadastro_ip_dia", q.ip, ANTIABUSO.cadastroPorIpDia, DIA_MS]], true))) throw limiteMsg("cadastro");
       if (!(await limitar([["cadastro_ip", q.ip, LIMITES.cadastroPorIp], ["cadastro_email", email, LIMITES.cadastroPorEmail], ["cadastro_email_dia", email, LIMITES.cadastroPorEmailDia, 24 * HORA]]))) throw limiteMsg("cadastro");
       const senhaHash = await hashSenha(senha);
       const codigo = novoCodigo();
@@ -318,6 +346,8 @@ export function servicoConta(d: DepsConta) {
         // A resposta diz isso (a posse do e-mail já está provada pelo código: não vaza nada) e o código fica gasto.
         if (existente ? await repo.pessoaEhLegada(trx, existente.destino) : await repo.existePessoaLegada(trx, email)) return { resultado: "pelo_google", email } as const;
         if (!existente) {
+          const dominio = d.antiAbuso ? dominioParaLimite(email) : null;
+          if (dominio && !(await limitarNo(trx, [["cadastro_dominio", dominio, ANTIABUSO.cadastroPorDominioHora]], true))) throw limiteMsg("cadastro");
           const contaId = await repo.criarConta(trx, email);
           if (!contaId) throw new ErroDeDominio("estado_invalido", { cause: "conta criada em paralelo" });
           if (!(await repo.ligarContaPessoa(trx, contaId, escopo))) throw new ErroDeDominio("estado_invalido", { cause: "pessoa já tem conta" });
@@ -448,6 +478,11 @@ export function servicoConta(d: DepsConta) {
           // Sem autoridade (domínio próprio fora do Workspace) o Google não responde pelo e-mail: uma conta Google criada
           // com o e-mail de outra pessoa tomaria esse e-mail antes do cadastro dela. Aí o caminho é e-mail e código.
           if (!provisorio || !g.autoridade) return { resultado: "recusado" } as const;
+          if (d.antiAbuso) {
+            const dominio = dominioParaLimite(email);
+            const pares: [string, string, number, number?][] = [["cadastro_ip_dia", q.ip, ANTIABUSO.cadastroPorIpDia, DIA_MS], ...(dominio ? [["cadastro_dominio", dominio, ANTIABUSO.cadastroPorDominioHora] as [string, string, number]] : [])];
+            if (!(await limitarNo(trx, pares, true))) throw limiteMsg("cadastro Google");
+          }
           const contaId = await repo.criarConta(trx, email);
           if (!contaId) throw new ErroDeDominio("estado_invalido", { cause: "conta criada em paralelo" });
           if (!(await repo.ligarContaPessoa(trx, contaId, provisorio.escopo))) throw new ErroDeDominio("estado_invalido", { cause: "pessoa já tem conta" });
@@ -481,7 +516,9 @@ export function servicoConta(d: DepsConta) {
     async recuperar(q: Quem, e: { email: unknown }): Promise<{ ok: true }> {
       const email = normalizarEmail(e.email);
       if (!email) throw new ErroDeDominio("entrada_invalida", { cause: "email" });
-      const cabe = await limitar([["recuperar_ip", q.ip, LIMITES.recuperarPorIp], ["recuperar_email", email, LIMITES.recuperarPorEmail]]);
+      const dominio = d.antiAbuso ? dominioParaLimite(email) : null;
+      const cabeNovo = !d.antiAbuso || await limitar([["recuperar_ip_dia", q.ip, ANTIABUSO.recuperarPorIpDia, DIA_MS]], true);
+      const cabe = cabeNovo && await limitar([["recuperar_ip", q.ip, LIMITES.recuperarPorIp], ["recuperar_email", email, LIMITES.recuperarPorEmail]]);
       if (!cabe) {
         // Mesmo resultado para quem passou do limite: não revela nada e não manda e-mail.
         log("aviso", "recuperacao_limitada", {});
@@ -491,6 +528,7 @@ export function servicoConta(d: DepsConta) {
       const conta = await d.transacao(async (trx) => {
         const c = await repo.contaPorEmail(trx, email);
         if (!c) return null;
+        if (dominio && !(await limitarNo(trx, [["recuperar_dominio", dominio, ANTIABUSO.recuperarPorDominioHora]], true))) return null;
         await repo.emitirCodigo(trx, { finalidade: "recuperacao", chave: c.id, hash: hashDoCodigo(d.segredo, "recuperacao", token), expiraEm: d.agora() + TOKEN_RECUPERACAO_MS });
         return c;
       });

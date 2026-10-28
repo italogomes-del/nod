@@ -40,6 +40,7 @@ import { salasRepo } from "./salas.repo.ts";
 import type { Repos } from "./tipos.ts";
 import { trilhaRepo } from "./trilha.repo.ts";
 import { turnosRepo } from "./turnos.repo.ts";
+import { comCotaDoProvisorio } from "./cota-provisorio.ts";
 import { trabalhosRepo } from "./trabalhos.repo.ts";
 import { frentesRepo } from "./frentes.repo.ts";
 import { pedidosDeColegaRepo } from "./pedidos-de-colega.repo.ts";
@@ -80,7 +81,8 @@ export function criarRepos(conn: Conn, escopo: Escopo): Repos {
     propostas: propostasRepo(conn, escopo),
     relatos: relatosRepo(conn, escopo),
     reacoes: reacoesRepo(conn, escopo),
-    turnos: turnosRepo(conn, escopo),
+    // NOD-408: a cota do espaço provisório embrulha o ponto único de todo turno (desligada = o repo de sempre).
+    turnos: comCotaDoProvisorio(turnosRepo(conn, escopo), conn, escopo),
     trabalhos: trabalhosRepo(conn, escopo),
     frentes: frentesRepo(conn, escopo),
     pedidosDeColega: pedidosDeColegaRepo(conn, escopo),

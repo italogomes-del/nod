@@ -32,6 +32,22 @@ const chaveDe = async (r: Response): Promise<string | null> => {
   return typeof chave === "string" && chave.length > 0 && chave.length <= 1024 ? chave : null;
 };
 
+async function resolverProva(desafio: string, bits: number): Promise<string | null> {
+  // O protocolo da ADR-137 fixa 16 bits. Não aceite um servidor corrompido mandando trabalho arbitrário ao app.
+  if (bits !== 16 || desafio.length > 200) return null;
+  for (let inicio = 0; inicio < 50_000_000; inicio += 2_000) {
+    for (let i = inicio; i < inicio + 2_000; i++) {
+      const h = createHash("sha256").update(`${desafio}:${i}`, "utf8").digest();
+      let zeros = 0;
+      for (const b of h) { if (b === 0) { zeros += 8; continue; } zeros += Math.clz32(b) - 24; break; }
+      if (zeros >= bits) return String(i);
+    }
+    // O bootstrap roda no processo principal: ceder entre lotes mantém janela, dock e IPC responsivos.
+    await new Promise<void>((r) => setImmediate(r));
+  }
+  return null;
+}
+
 /** O servidor oferece o espaço provisório? Fora do ar ou sem a flag: não (o app mostra a tela de conexão de antes). */
 export async function servidorOfereceProvisorio(servidor: string, fetchImpl: typeof fetch = fetch): Promise<boolean> {
   try {
@@ -48,15 +64,23 @@ export async function servidorOfereceProvisorio(servidor: string, fetchImpl: typ
 export async function pedirProvisorio(o: { servidor: string; verificador: string; nome: string; versao: string; fetchImpl?: typeof fetch }): Promise<string | null> {
   if (!verificadorValido(o.verificador)) return null;
   try {
-    const r = await (o.fetchImpl ?? fetch)(new URL("/api/conta/provisorio", o.servidor), {
+    const chamar = (prova?: { desafio: string; resposta: string }) => (o.fetchImpl ?? fetch)(new URL("/api/conta/provisorio", o.servidor), {
       method: "POST",
       redirect: "error",
       // O rótulo do aparelho (a chave em Máquinas, a sessão em Sessões) vem do user-agent: "macOS · app do nod".
       headers: { "content-type": "application/json", "user-agent": `nod/${o.versao} (${process.platform === "darwin" ? "Macintosh" : process.platform})` },
       // `nome` é o da pessoa (o usuário do sistema), só para o espaço não nascer "Você"; ela troca depois.
-      body: JSON.stringify({ verificador: o.verificador, forma: "app", nome: o.nome.slice(0, 80) }),
+      body: JSON.stringify({ verificador: o.verificador, forma: "app", nome: o.nome.slice(0, 80), ...prova }),
       signal: AbortSignal.timeout(15_000),
     });
+    let r = await chamar();
+    if (r.status === 429) {
+      const corpo = await r.json().catch(() => ({})) as { desafio?: unknown; bits?: unknown };
+      if (typeof corpo.desafio === "string" && typeof corpo.bits === "number") {
+        const resposta = await resolverProva(corpo.desafio, corpo.bits);
+        if (resposta !== null) r = await chamar({ desafio: corpo.desafio, resposta });
+      }
+    }
     return await chaveDe(r);
   } catch {
     return null;

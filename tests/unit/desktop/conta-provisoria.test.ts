@@ -75,6 +75,26 @@ describe("app: espaço provisório e troca de chave", () => {
     expect(await pedirProvisorio({ servidor: base, verificador: "x", nome: "x", versao: "1" })).toBeNull();
   });
 
+  it("NOD-408: resolve o desafio do 429 e repete o bootstrap uma vez", async () => {
+    const corpos: Record<string, unknown>[] = [];
+    const fetchImpl = (async (_url: string | URL | Request, init?: RequestInit) => {
+      corpos.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      if (corpos.length === 1) return new Response(JSON.stringify({ desafio: "desafio-do-app", bits: 16 }), { status: 429 });
+      return new Response(JSON.stringify({ chave: "nodm_depois_da_prova" }), { status: 200 });
+    }) as typeof fetch;
+    expect(await pedirProvisorio({ servidor: base, verificador: verificadorNovo(), nome: "x", versao: "1", fetchImpl })).toBe("nodm_depois_da_prova");
+    expect(corpos).toHaveLength(2);
+    const resposta = String(corpos[1]?.resposta);
+    expect(createHash("sha256").update(`desafio-do-app:${resposta}`).digest().subarray(0, 2)).toEqual(Buffer.from([0, 0]));
+  });
+
+  it("NOD-408: recusa dificuldade fora do protocolo sem repetir nem congelar", async () => {
+    let chamadas = 0;
+    const fetchImpl = (async () => { chamadas++; return new Response(JSON.stringify({ desafio: "x", bits: 30 }), { status: 429 }); }) as typeof fetch;
+    expect(await pedirProvisorio({ servidor: base, verificador: verificadorNovo(), nome: "x", versao: "1", fetchImpl })).toBeNull();
+    expect(chamadas).toBe(1);
+  });
+
   it("troca de chave: código válido → chave da conta; inválido, curto ou não-string → null", async () => {
     expect(await trocarChaveDoApp({ servidor: base, prova: "p".repeat(43), codigo: "codigo-de-troca-valido-0123" })).toBe("nodm_da_conta");
     expect(await trocarChaveDoApp({ servidor: base, prova: "p".repeat(43), codigo: "codigo-de-troca-errado-0123" })).toBeNull();

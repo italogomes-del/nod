@@ -19,7 +19,7 @@ export const APP = segredoDeTroca();
 
 export type Mundo = { s: ServicoConta; caixa: CaixaLocal; trx: Tx; chaves: Escopo[]; agora: { t: number }; falhar: { importacao: boolean } };
 
-export function mundo(trx: Tx, opcoes: { enviarFalha?: boolean; repo?: typeof repoContas } = {}): Mundo {
+export function mundo(trx: Tx, opcoes: { enviarFalha?: boolean; repo?: typeof repoContas; antiAbuso?: boolean } = {}): Mundo {
   const caixa = caixaLocal();
   const chaves: Escopo[] = [];
   const agora = { t: Date.now() };
@@ -36,6 +36,7 @@ export function mundo(trx: Tx, opcoes: { enviarFalha?: boolean; repo?: typeof re
     urlBase: "https://nod.teste",
     agora: () => agora.t,
     repo: opcoes.repo ?? repoContas,
+    antiAbuso: opcoes.antiAbuso === true,
     emitirChaveMaquina: async (escopo) => { chaves.push(escopo); return `nodm_${randomBytes(8).toString("hex")}`; },
   });
   return { s, caixa, trx, chaves, agora, falhar };
