@@ -102,3 +102,41 @@ describe("Raio-X do turno (revisão contra o canvas, D2 e D3)", () => {
     expect(renderRaioX(CLARICE, "Clarice")).not.toContain("Modo WhatsApp");
   });
 });
+
+describe("NOD-312: o chip da sessão no Raio-X", () => {
+  const abrir = (composicao: Partial<NonNullable<RaioXTurno["composicao"]>>) => renderRaioX({ ...CLARICE, composicao: { ...CLARICE.composicao!, ...composicao } }, "Clarice");
+  it("motivo desconhecido (servidor mais novo): só 'recomeçou', nunca 'undefined' (revisão 9)", () => {
+    const html = abrir({ sessaoRetomada: false, recomeco: { motivo: "troca_de_galaxia" as never, avisoChars: 200, resumoChars: 0, historicoChars: 0 } });
+    expect(html).toContain('<span class="rx-num p312-chip">recomeçou</span>');
+    expect(html).not.toContain("undefined");
+  });
+  it("recomeçou: o motivo no chip e no cabeçalho, e as partes que foram no prompt", () => {
+    const html = abrir({ sessaoRetomada: false, recomeco: { motivo: "troca_de_conta", avisoChars: 200, resumoChars: 1_100, historicoChars: 2_900 } });
+    expect(html).toContain('<span class="rx-num p312-chip">recomeçou · troca de conta</span>');
+    expect(html).toMatch(/rx-meta">[^<]*recomeçou · troca de conta/);
+    expect(html).toContain(">Aviso de recomeço<");
+    expect(html).toContain(">Resumo do trabalho<");
+    expect(html).toContain(">Últimas falas<");
+    // Revisão 1: o aviso e o resumo vão na entrada do turno (seção 4), as falas no histórico (seção 3).
+    const s3 = html.slice(html.indexOf("3 · Histórico"), html.indexOf("4 · Entrada"));
+    const s4 = html.slice(html.indexOf("4 · Entrada"));
+    expect(s3).toContain(">Últimas falas<");
+    expect(s3).not.toContain(">Aviso de recomeço<");
+    expect(s4).toContain(">Aviso de recomeço<");
+    expect(s4).toContain(">Resumo do trabalho<");
+    expect(s3).toContain("vão na entrada do turno");
+  });
+  it("QA (bug 2): a fala com \"/\" que recomeçou leva o chip, sem prometer aviso nem resumo na entrada", () => {
+    const html = abrir({ sessaoRetomada: false, recomeco: { motivo: "troca_de_ia", avisoChars: 0, resumoChars: 0, historicoChars: 900 } });
+    expect(html).toContain('<span class="rx-num p312-chip">recomeçou · troca de IA</span>');
+    expect(html).not.toContain(">Aviso de recomeço<");
+    expect(html).not.toContain("vão na entrada do turno");
+    expect(html).toContain("sem o aviso de recomeço");
+  });
+  it("retomada: \"lembrando\"; sessão nova sem recomeço: segue \"sessão nova\", sem chip", () => {
+    expect(abrir({ sessaoRetomada: true })).toContain('<span class="rx-num p312-chip">lembrando</span>');
+    const nova = abrir({ sessaoRetomada: false });
+    expect(nova).toContain('<span class="rx-num">sessão nova</span>');
+    expect(nova).not.toContain("Aviso de recomeço");
+  });
+});

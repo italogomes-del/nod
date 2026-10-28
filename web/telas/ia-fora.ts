@@ -8,6 +8,7 @@ import { avisoDeEstado } from "../lib/aviso-estado.ts";
 import { atualizacaoEmCurso, comandoDoTerminal, fraseDaAtualizacao } from "../lib/atualizacao-ia.ts";
 import { formatoData } from "../lib/formato-data.ts";
 import { botao, esc, hora, paragrafos } from "../lib/render.ts";
+import { CARONA_TEXTO, ICONE_TROCA, caronaClicavel, explicacaoDaCarona, fraseDoDetalheDaIa, type AlvoDoRecomeco } from "../lib/recomeco.ts";
 import { LOGOS_IA } from "./onboarding-logos.ts";
 import { estadoNaTela, type UiIas } from "./cartao-ia.ts";
 import type { IaDaPessoa } from "../../src/contracts/inteligencia.ts";
@@ -382,9 +383,28 @@ export function fraseDoMotivoDaNota(motivo: MotivoDaNota | null | undefined): st
 }
 
 /** ADR-102: o turno seguiu noutra conta sozinho ("Trocar sozinho" ou outra IA), ou na conta que a pessoa escolheu. */
-export function linhaContaSeguiu(m: Mensagem): string | null {
+export function linhaContaSeguiu(m: Mensagem, recomeco?: AlvoDoRecomeco): string | null {
   if (m.payload?.kind !== "conta_seguiu" && m.payload?.kind !== "conta_escolhida") return null;
-  return `<div class="linha-centro-wrap linha-ia"><span class="linha-centro estatica"><span class="linha-ic" aria-hidden="true">↻</span><span>${esc(m.texto)}</span></span></div>`;
+  return linhaDeTroca(m, recomeco);
+}
+
+/**
+ * A linha de troca de conta (ADR-101/102), com o ↻ em SVG. NOD-312: quando o turno logo depois recomeçou sem a sessão,
+ * a carona "· relê o necessário" vai na mesma frase (quebra inteira no celular) e abre a explicação logo abaixo.
+ */
+function linhaDeTroca(m: Mensagem, recomeco?: AlvoDoRecomeco, texto: string = m.texto): string {
+  const carona = recomeco?.tipo === "carona" ? caronaClicavel(m.id) : "";
+  const explica = recomeco?.tipo === "carona" ? explicacaoDaCarona(m.id, recomeco) : "";
+  return `<div class="linha-centro-wrap linha-ia"><span class="linha-centro estatica"><span class="linha-ic" aria-hidden="true">${ICONE_TROCA}</span><span class="p312-frase">${esc(texto)}${carona}</span></span>${explica}</div>`;
+}
+
+/**
+ * NOD-312: a consequência de "Continuar na conta X" diz a verdade da sessão (ADR-107). No Codex a sessão é da conta: a
+ * outra conta recomeça sem a memória e relê o necessário. No Claude Code as contas dividem a pasta das sessões e, na
+ * mesma máquina, a sessão segue: lá "continua de onde parou" é verdade e fica.
+ */
+export function mesmaIaOutraConta(ia: IdHarness): string {
+  return ia === "claude-cli" ? "Mesmo modelo, continua de onde parou." : "Mesmo modelo, mas relê o necessário.";
 }
 
 /** "11 min", "16 horas": quanto falta para a conta voltar, para a frase da recomendação. */
@@ -425,11 +445,12 @@ function opcaoDaTroca(o: { act: string; dados: string; rotulo: string; consequen
  * primeiro, marcada) e o rodapé do que acontece sem escolha. Fixo: o bot está parado até a volta e os dois caminhos
  * (a conta fora da fila, a outra IA até a volta). Fechado: uma linha com o desfecho. null = não é esse aviso.
  */
-export function cartaoTrocaDeIa(m: Mensagem, p: { nomeDoBot: string | null; agora: number }): string | null {
+export function cartaoTrocaDeIa(m: Mensagem, p: { nomeDoBot: string | null; agora: number; recomeco?: AlvoDoRecomeco }): string | null {
   const t = m.payload;
   if (t?.kind !== "troca_de_ia") return null;
   const bot = p.nomeDoBot ?? "bot";
-  if (t.decisao) return `<div class="linha-centro-wrap linha-ia"><span class="linha-centro estatica"><span class="linha-ic" aria-hidden="true">↻</span><span>${esc(desfechoDaTroca(t, bot))}</span></span></div>`;
+  // NOD-312 (revisão 2): o desfecho é a linha da troca; quando o turno seguinte recomeçou, ela leva a carona.
+  if (t.decisao) return linhaDeTroca(m, p.recomeco, desfechoDaTroca(t, bot));
   const de = nomeDaIa(t.iaDe);
   const para = t.iaPara ? nomeDaIa(t.iaPara) : null;
   const volta = t.voltaEm !== null ? quandoVolta(t.voltaEm, p.agora) : null;
@@ -437,8 +458,8 @@ export function cartaoTrocaDeIa(m: Mensagem, p: { nomeDoBot: string | null; agor
   if (t.fixo) {
     const ate = volta ? volta.replace(/^(às|em) /, "") : null;
     const opcoes = [
-      ...(t.conta ? [opcaoDaTroca({ act: "cl-seguir", dados: ` data-id="${esc(t.conta.id)}" data-conversa="${esc(m.conversaId)}"`, rotulo: `Continuar na conta ${de} · ${t.conta.apelido}`, consequencia: `Mesmo modelo, continua de onde parou.${t.conta.corporativa ? " É a conta da empresa." : ""}`, recomendada: false })] : []),
-      ...(para ? [opcaoDaTroca({ act: "troca-outra-ia", dados, rotulo: `Continuar no ${para}${ate ? ` até ${ate}` : ""}`, consequencia: `Outro provedor: as tasks recomeçam do resumo.${volta ? ` ${volta[0]!.toUpperCase()}${volta.slice(1)} volta ao ${de}.` : ""}`, recomendada: false })] : []),
+      ...(t.conta ? [opcaoDaTroca({ act: "cl-seguir", dados: ` data-id="${esc(t.conta.id)}" data-conversa="${esc(m.conversaId)}"`, rotulo: `Continuar na conta ${de} · ${t.conta.apelido}`, consequencia: `${mesmaIaOutraConta(t.iaDe)}${t.conta.corporativa ? " É a conta da empresa." : ""}`, recomendada: false })] : []),
+      ...(para ? [opcaoDaTroca({ act: "troca-outra-ia", dados, rotulo: `Continuar no ${para}${ate ? ` até ${ate}` : ""}`, consequencia: `Outro provedor: ${bot} relê o necessário e as tasks recomeçam do resumo.${volta ? ` ${volta[0]!.toUpperCase()}${volta.slice(1)} volta ao ${de}.` : ""}`, recomendada: false })] : []),
     ].join("");
     // QA do PR 2 (16/10): sem artigo nem gênero para o nome do bot ("Vera parou", não "O Vera está parado").
     const texto = `Este bot usa só o ${de}, e as contas do ${de} da sua fila acabaram. Se você não fizer nada, ${bot} volta sozinho${volta ? ` ${volta}` : ""}.${opcoes ? " Para continuar agora, escolha um caminho:" : ""}`;
@@ -467,9 +488,9 @@ export function cartaoTrocaDeIa(m: Mensagem, p: { nomeDoBot: string | null; agor
  * ADR-101: em "Trocar sozinho", o nod seguiu com a próxima conta da mesma IA e repetiu o turno. Uma linha discreta, só
  * com posições ("Conta 1 do Claude Code no limite até 14:00. Seguindo com a conta 3."); o apelido fica no Mac.
  */
-export function linhaContaTrocada(m: Mensagem): string | null {
+export function linhaContaTrocada(m: Mensagem, recomeco?: AlvoDoRecomeco): string | null {
   if (m.payload?.kind !== "conta_trocada") return null;
-  return `<div class="linha-centro-wrap linha-ia"><span class="linha-centro estatica"><span class="linha-ic" aria-hidden="true">↻</span><span>${esc(m.texto)}</span></span></div>`;
+  return linhaDeTroca(m, recomeco);
 }
 
 const ICONE_CADEADO = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="10.5" width="14" height="9.5" rx="2"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5"/></svg>';
@@ -534,7 +555,7 @@ export function linhaAtualizarIa(ia: IdIa, noApp: boolean, comando: string = COM
  * Uma linha centralizada e discreta — "O Claude chegou ao limite · respondendo pelo ChatGPT" —, dita uma vez por troca;
  * o porquê, até quando e "Ver em Provedores de IA" ficam atrás do clique. `modelo` = o modelo do bot na IA que assumiu.
  */
-export function linhaIaTrocada(m: Mensagem, extra: { modelo?: string | null } = {}): string | null {
+export function linhaIaTrocada(m: Mensagem, extra: { modelo?: string | null; recomeco?: AlvoDoRecomeco } = {}): string | null {
   const p = m.payload;
   if (p?.kind !== "ia_trocada" || !ehIa(p.de) || !ehIa(p.para)) return null;
   const de = PROVEDOR_DA_IA[p.de];
@@ -546,5 +567,13 @@ export function linhaIaTrocada(m: Mensagem, extra: { modelo?: string | null } = 
       ? [`A conta do ${de.nome} está sem acesso`, `A conta do ${de.nome} deste Mac entrou, mas não tem acesso ao ${de.cli} pela assinatura. Seus bots em automático usam ${comModelo} até ela voltar.`]
       : [`O ${de.nome} não respondeu`, `O ${de.cli} deste Mac não respondeu. Seus bots em automático usam ${comModelo} até ele voltar.`];
   const ver = `<button type="button" class="linha-link" data-act="secao-espaco" data-secao="conexao">Ver em Provedores de IA</button>`;
-  return `<div class="linha-centro-wrap linha-ia"><details class="linha-ia-troca" data-disclosure="ia-trocada-${esc(m.id)}"><summary class="linha-centro">${logo(p.para)}<span>${esc(motivo)} ·</span><b>respondendo pelo ${esc(para.nome)}</b></summary><p class="linha-ia-detalhe">${esc(detalhe)} ${ver}</p></details></div>`;
+  // NOD-312: a carona em texto (o summary já é o controle) e a frase a mais no detalhe, quando o turno recomeçou.
+  const recomecou = extra.recomeco?.tipo === "carona";
+  const carona = recomecou ? CARONA_TEXTO : "";
+  // Revisão 1: com a carona, motivo, destino e carona viram uma frase só (quebra inteira no celular, não em colunas).
+  const frase = recomecou
+    ? `<span class="p312-frase">${esc(motivo)} · <b>respondendo pelo ${esc(para.nome)}</b> ${carona}</span>`
+    : `<span>${esc(motivo)} ·</span><b>respondendo pelo ${esc(para.nome)}</b>`;
+  const det = recomecou ? fraseDoDetalheDaIa(de.nome, para.nome, extra.recomeco?.nomeDoBot ?? null) : "";
+  return `<div class="linha-centro-wrap linha-ia"><details class="linha-ia-troca" data-disclosure="ia-trocada-${esc(m.id)}"><summary class="linha-centro">${logo(p.para)}${frase}</summary><p class="linha-ia-detalhe">${esc(detalhe)}${det} ${ver}</p></details></div>`;
 }

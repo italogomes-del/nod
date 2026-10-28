@@ -67,6 +67,15 @@ apareceram juntos:
    `entrada.passagem.git` e o executor anexa o "Estado do branch" (git e `gh pr list`, 5 s por comando) antes do
    driver. O "Levar" preserva o "Pedido original da frente" da entrada ao trocar o aviso. Código:
    `src/domain/passagem-de-bastao.ts`, `src/use-cases/passagem-de-bastao.ts`, `src/adapters/executor/estado-do-git.ts`.
+   **Emenda (2026-10-28, NOD-312): o mesmo mecanismo serve à conversa que recomeça.** O 1º turno de conversa do bot
+   (origem conversa/retomada, sem trabalho, delegação, sala ou ligação, depois do /nova-sessao) que sai sem a sessão
+   que a conversa tinha ganha um motivo (`turnos.motivo_recomeco`: troca de conta, de IA, de máquina ou sessão
+   recusada), gravado uma vez. O motivo sai das mesmas variáveis da regra de retomada (ADR-107), que não muda. A
+   entrada leva um aviso fixo e um resumo do trabalho (os últimos 8 turnos de conversa: ferramentas por nome e vezes,
+   efeitos, erros, decisões; nunca saída de ferramenta; `redigirSegredos` em tudo; teto 3 mil caracteres), montado por
+   `renderizarSecoes` de `passagem-de-bastao.ts`. A web mostra a carona "· relê o necessário" na linha da troca ou a
+   marca "recomeçou" na fala. Código: `src/domain/recomeco.ts`, `src/use-cases/resumo-do-recomeco.ts`,
+   `web/lib/recomeco.ts`.
 6. **Trocar a IA do bot pelo seletor com tasks em andamento (R5, E8).** `PUT /agentes/:id/inteligencia` aceita
    `levarTasks?: boolean`, separado no caso de uso antes da validação estrita. A web pergunta "Só daqui em diante"
    (padrão) ou "Levar as tasks também".

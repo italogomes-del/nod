@@ -1634,6 +1634,27 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async largarSessao() {
         return false;
       },
+      // NOD-312: sem sessão do CLI em memória (acima), nunca há o que perder.
+      async ultimaSessaoDaConversa() {
+        return null;
+      },
+      async registrarMotivoRecomeco(id, motivo) {
+        const t = doTenant(b.turnos).find((x) => x.id === id);
+        if (!t || t.motivoRecomeco) return false;
+        t.motivoRecomeco = motivo;
+        return true;
+      },
+      async limparMotivoRecomeco(id) {
+        const t = doTenant(b.turnos).find((x) => x.id === id);
+        if (t) delete t.motivoRecomeco;
+      },
+      async ultimosDaConversa(conversaId, agenteId, antesDe, desde, limite = 8) {
+        return doTenant(b.turnos)
+          .filter((t) => t.conversaId === conversaId && t.agenteId === agenteId && (t.origem === "conversa" || t.origem === "retomada") && !t.trabalhoId && !t.sobProcuracaoDe && !t.ligacaoId
+            && t.motivoInterrupcao !== "absorvido" && t.id !== antesDe.id && t.criadoEm < antesDe.criadoEm && (desde === null || t.criadoEm > desde))
+          .sort((a, c) => a.criadoEm - c.criadoEm)
+          .slice(-limite);
+      },
       async registrarExecutor(id, executor) {
         const t = doTenant(b.turnos).find((x) => x.id === id);
         if (t) t.executor = executor;
@@ -1867,6 +1888,9 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         const alvo = doTenant(b.turnos).find((t) => t.id === turno.id) ?? turno;
         alvo.entradaTexto = entrada([turno.entradaTexto, ...absorvidos.map((a) => a.entradaTexto)]);
         alvo.entradaAnexos = [...new Set([...turno.entradaAnexos, ...absorvidos.flatMap((a) => a.entradaAnexos)])];
+        // NOD-312 (revisão 9): como o SQL — o motivo da repetição absorvida vai para quem absorve.
+        const motivo = absorvidos.find((a) => a.motivoRecomeco)?.motivoRecomeco;
+        if (!alvo.motivoRecomeco && motivo) alvo.motivoRecomeco = motivo;
         return { turno: alvo, absorvidos };
       },
       async absorverNaSessao(turno, ids) {

@@ -1,5 +1,6 @@
 import { escNoEspaco, focoAoAbrirEspaco, voltarParaLista } from "./lib/navegacao-config.ts";
 import "./lib/mascote-elemento.ts";
+import { alternarExplicacao, detailsParaFecharComEsc } from "./lib/recomeco.ts";
 import { abrirCapturaAmpliada } from "./telas/captura-ampliada.ts";
 import { abrirPreviaArquivo } from "./telas/previa-arquivo.ts";
 import { abrirComputador, aplicarModoDevNoComputador } from "./telas/computador.ts";
@@ -4444,6 +4445,11 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   // NOD-383: no celular, "Configurações" (a Geral do menu) abre a lista das seções; os outros itens abrem a seção direto.
   "menu-conta": (el) => abrirMenuConta(el, dadosMenuConta(), { secao: (s) => abrirEspaco(s, s === "geral" && celular.ativo()), conta: (qual) => void abrirDoMenuConta(qual) }, celular.ativo()),
   "secao-espaco": (el) => abrirEspaco((el.dataset.secao as SecaoEspaco | undefined) ?? "conexao"),
+  // NOD-312: a carona "relê o necessário" e a marca "recomeçou" abrem e fecham a explicação logo abaixo (no DOM, sem
+  // re-render: o foco fica no botão); o estado sobrevive ao próximo render da timeline (web/lib/recomeco.ts).
+  "recomeco-explicar": (el) => {
+    alternarExplicacaoNoDom(el);
+  },
   // NOD-367: as ações das Configurações (a linha recolhida, a conta, os experimentos e o onboarding).
   "config-recolhe": (el) => { if (el.dataset.recolhe) dispatch({ tipo: "config-recolhe", id: el.dataset.recolhe }); },
   // NOD-368: a seleção e a troca em lote de Agentes.
@@ -5734,6 +5740,38 @@ document.addEventListener("click", (ev) => {
   const acao = ACOES[el.dataset.act ?? ""];
   if (acao) void acao(el);
 });
+
+// NOD-312: Esc dentro da explicação do recomeço (ou no botão que a abriu) fecha e devolve o foco ao botão.
+document.addEventListener("keydown", (ev) => {
+  if (ev.key !== "Escape") return;
+  const alvo = ev.target as HTMLElement;
+  const regiao = alvo.closest?.<HTMLElement>(".p312-explica");
+  const botao = alvo.closest?.<HTMLElement>('[data-act="recomeco-explicar"][aria-expanded="true"]')
+    ?? (regiao ? document.querySelector<HTMLElement>(`[data-act="recomeco-explicar"][aria-controls="${CSS.escape(regiao.id)}"]`) : null);
+  if (!botao || botao.getAttribute("aria-expanded") !== "true") {
+    // QA: a linha da troca de IA com a carona (details) também fecha no Esc e devolve o foco ao summary.
+    const det = detailsParaFecharComEsc<HTMLDetailsElement>(alvo);
+    if (!det) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    det.open = false;
+    det.querySelector<HTMLElement>("summary")?.focus();
+    return;
+  }
+  ev.preventDefault();
+  ev.stopPropagation();
+  alternarExplicacaoNoDom(botao, false);
+  botao.focus();
+}, true);
+
+function alternarExplicacaoNoDom(botao: HTMLElement, aberta?: boolean): void {
+  const id = botao.dataset.id;
+  if (!id) return;
+  const vai = alternarExplicacao(id, aberta);
+  botao.setAttribute("aria-expanded", String(vai));
+  const regiao = document.getElementById(botao.getAttribute("aria-controls") ?? "");
+  if (regiao) regiao.hidden = !vai;
+}
 
 // ADR-102: o ⋯ da conta e o da máquina fecham num clique fora deles; Esc fecha o diálogo, o menu e o formulário abertos.
 document.addEventListener("click", (ev) => {

@@ -19,6 +19,10 @@ export type SinaisTurno = {
 /** Quatro estados (ADR-010 revisado); 'interrompido' exige motivo (CHECK na 0002). */
 export type EstadoTurno = "pendente" | "despachando" | "concluido" | "interrompido";
 
+/** NOD-312 (0119): por que o turno de conversa recomeçou sem a sessão do CLI; a regra de retomada (ADR-107) não muda. */
+export const MOTIVOS_RECOMECO = ["troca_de_conta", "troca_de_ia", "troca_de_maquina", "sessao_recusada"] as const;
+export type MotivoRecomeco = (typeof MOTIVOS_RECOMECO)[number];
+
 /**
  * 'delegacao' (definido em 2026-09-24, ADR-047; revisto em 2026-09-29, ADR-058): o turno de quem cumpre um
  * pedido de colega (pedir_a_bot), com os acessos dele. 'peer' é legado: o turno de quem respondia a
@@ -83,6 +87,8 @@ export type Turno = {
   pessoaEsperando?: boolean;
   /** NOD-309 (0098): quantas vezes a cadeia deste turno já caiu por erro transitório do provedor. Ausente = 0. */
   tentativasTransitorias?: number;
+  /** NOD-312 (0119): o turno recomeçou sem a sessão que a conversa tinha, e por quê. Ausente = turno normal. */
+  motivoRecomeco?: MotivoRecomeco;
   /**
    * definido em 2026-10-15 (NOD-258): a regra que criou o turno (`turnos.decidido_por`). Só uma é lida hoje: o retorno do
    * lote (RETORNO_DO_LOTE, domain/cota-da-ia.ts), que é fundo para a cota sem coluna nova. Ausente = não lido.

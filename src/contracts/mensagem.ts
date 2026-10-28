@@ -7,7 +7,7 @@ import type { CAUSA_LIMITE, CausaSemIa } from "./inventario.ts";
 import type { EpochMs, TenantId } from "./ids.ts";
 import type { CausaNativa } from "./negacao.ts";
 import type { EstadoTrabalho, OrigemTrabalho } from "./trabalho.ts";
-import type { ContaNoLimite, OrigemTurno } from "./turno.ts";
+import type { ContaNoLimite, MotivoRecomeco, OrigemTurno } from "./turno.ts";
 import type { PayloadTrocaDeIa } from "./troca-de-ia.ts";
 import type { PayloadRotinaEvento, PayloadRotinaRitmo } from "./rotina.ts";
 import type { Destino } from "./destino-no-chat.ts";
@@ -194,6 +194,6 @@ export type Mensagem = {
   raiz?: { turnoId: string; origem: OrigemTurno };
   trabalhoId?: string | null;
   fimDoTurno?: boolean;
-  /** ADR-114 (2026-10-18): o destino da tabela DESTINO, resolvido no servidor; só na conversa própria. Ausente = sala ou servidor antigo. */
-  destino?: Destino;
+  motivoRecomeco?: MotivoRecomeco; // NOD-312: o turno da fala recomeçou sem a sessão. Ausente = normal ou servidor antigo.
+  destino?: Destino; // ADR-114 (2026-10-18): o destino da tabela DESTINO, resolvido no servidor; só na conversa própria. Ausente = sala ou servidor antigo.
 };

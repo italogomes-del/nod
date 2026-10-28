@@ -143,3 +143,21 @@ describe("revisão do PR 2: o aviso de troca de IA", () => {
     expect(html).not.toContain("A conversa segue no");
   });
 });
+
+describe("NOD-312: a copy do cartão diz a verdade da sessão", () => {
+  const conta = { id: "dddddddd-0000-4000-8000-000000000001", apelido: "Leapy", corporativa: false };
+  it("Codex: a outra conta relê o necessário (a sessão é da conta); a outra IA também, e as tasks recomeçam do resumo", () => {
+    const html = cartaoTrocaDeIa(aviso({ fixo: true, iaDe: "codex-cli", iaPara: "claude-cli", conta }), { nomeDoBot: "Eng 1", agora: AGORA })!;
+    expect(html).toContain("Mesmo modelo, mas relê o necessário.");
+    expect(html).not.toContain("continua de onde parou");
+    expect(html).toContain("Outro provedor: Eng 1 relê o necessário e as tasks recomeçam do resumo.");
+  });
+  it("Claude Code: as contas dividem as sessões e, na mesma máquina, a sessão segue — a frase fica", () => {
+    const html = cartaoTrocaDeIa(aviso({ fixo: true, conta }), { nomeDoBot: "Eng 1", agora: AGORA })!;
+    expect(html).toContain("Mesmo modelo, continua de onde parou.");
+  });
+  it("a prévia da troca leva o bloco neutro: a conversa vai, o que leu e testou não", () => {
+    const html = htmlDaPreviaDaTroca({ nomeDoBot: "Gil", destino: "o ChatGPT", tasks: 2 });
+    expect(html).toContain('<p class="p312-bloco">Gil leva a conversa, mas não o que já leu e testou na IA de agora. No próximo pedido, relê o necessário.</p>');
+  });
+});

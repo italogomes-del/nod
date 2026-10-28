@@ -1,4 +1,6 @@
 import type { Agente, CorAgente, FormaAgente } from "../../src/contracts/agente.ts";
+import type { MotivoRecomeco } from "../../src/contracts/turno.ts";
+import { ehMotivoRecomeco } from "../lib/recomeco.ts";
 import type { AnexoDaConversa } from "../../src/contracts/anexo.ts";
 import type { AtividadeDto } from "../../src/contracts/atividade.ts";
 import type { Mensagem } from "../../src/contracts/mensagem.ts";
@@ -254,7 +256,7 @@ export type LigacaoVivaNaTela = { ligacaoId: string; agenteId: string; conversaI
 /** `agenteId` (NOD-348): o bot do turno, do `agente_id` do frame — na sala, cada fala viva tem o mascote de quem fala. */
 /** O turno que acabou com texto, guardado com a atividade até a releitura da conversa (`em`: a hora do fim). */
 export type FalaSaindo = { turno: TurnoVivo; atividade: AtividadeTurno; em: number };
-export type TurnoVivo = { turnoId: string; conversaId: string; estado: "na_fila" | "rodando"; executor: string | null; machineId: string | null; desde: number; trabalhoId?: string | null; vistoEm?: number; chegouEm?: number; origem?: string | null; agenteId?: string | null };
+export type TurnoVivo = { turnoId: string; conversaId: string; estado: "na_fila" | "rodando"; executor: string | null; machineId: string | null; desde: number; trabalhoId?: string | null; vistoEm?: number; chegouEm?: number; origem?: string | null; agenteId?: string | null; /** NOD-312: o turno recomeçou sem a sessão (turno_despachado.dados.motivo_recomeco). */ motivoRecomeco?: MotivoRecomeco | null };
 
 /**
  * Plano "o pensamento no chat", Parte 1 (2026-10-26): a fala da pessoa entre o clique e a confirmação do servidor. Nasce
@@ -1218,6 +1220,11 @@ function emUsoDoFrame(v: unknown): FerramentaEmUso {
   return typeof t === "string" && t.trim() ? { texto: t.trim().slice(0, 80), frentes: frentes === true } : SEM_NOME_DA_FERRAMENTA;
 }
 
+/** NOD-312: o motivo do recomeço do frame, conferido contra a lista do contrato (valor desconhecido = nenhum). */
+function motivoDoFrame(v: unknown): MotivoRecomeco | null {
+  return ehMotivoRecomeco(v) ? v : null;
+}
+
 const POR_FRAME: Record<TipoFrame, Handler> = {
   // definido em 2026-09-29 (0039): a mensagem nova também relê os não lidos (o ponto da barra e o ícone do topo).
   "mensagem.nova": (e, f) => (conv(f) ? invalidar(e, conv(f), "nao-lidos", ...atividadeDoFrame(e, f), ...bibliotecaDoFrame(e, f)) : e),
@@ -1234,7 +1241,7 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
     const estado = f.dados.kind === "turno_despachado" ? "rodando" : "na_fila";
     const anterior = e.turnosVivos[turnoId];
     const trabalhoId = texto(f.dados.trabalhoId) ?? texto(f.dados.trabalho_id) ?? anterior?.trabalhoId ?? null;
-    const vivo: TurnoVivo = { turnoId, conversaId, estado, executor: texto(f.dados.executor) ?? anterior?.executor ?? null, machineId: texto(f.dados.machine_id) ?? anterior?.machineId ?? null, desde: estado === "rodando" && anterior?.estado !== "rodando" ? agora : (anterior?.desde ?? agora), trabalhoId, vistoEm: agora, chegouEm: anterior?.chegouEm ?? agora, origem: texto(f.dados.origem) ?? anterior?.origem ?? null, agenteId: texto(f.dados.agente_id) ?? texto(f.dados.agenteId) ?? anterior?.agenteId ?? null };
+    const vivo: TurnoVivo = { turnoId, conversaId, estado, executor: texto(f.dados.executor) ?? anterior?.executor ?? null, machineId: texto(f.dados.machine_id) ?? anterior?.machineId ?? null, desde: estado === "rodando" && anterior?.estado !== "rodando" ? agora : (anterior?.desde ?? agora), trabalhoId, vistoEm: agora, chegouEm: anterior?.chegouEm ?? agora, origem: texto(f.dados.origem) ?? anterior?.origem ?? null, agenteId: texto(f.dados.agente_id) ?? texto(f.dados.agenteId) ?? anterior?.agenteId ?? null, motivoRecomeco: motivoDoFrame(f.dados.motivo_recomeco) ?? anterior?.motivoRecomeco ?? null };
     return invalidar({ ...e, turnosVivos: { ...e.turnosVivos, [turnoId]: vivo } }, conv(f), "trabalhos");
   },
   "turno.delta": (e, f, agora) => {

@@ -341,7 +341,7 @@ export function renderNivel(estado: Estado, a: Bot, dona: boolean, nivel: NivelG
       const r = estado.rascunhoIa?.agenteId === a.id ? estado.rascunhoIa : rascunhoDe(a);
       return {
         titulo: "Inteligência",
-        corpo: renderInteligencia(r, a.nome, contextoInteligencia(estado), ordemDaPessoa(estado.ias?.ias, estado.ias?.ordem)),
+        corpo: renderInteligencia(r, a.nome, contextoInteligencia(estado), ordemDaPessoa(estado.ias?.ias, estado.ias?.ordem), rascunhoDe(a)),
         rodape: rodapeDeFormulario("Salvar"),
         form: `data-form="inteligencia" data-id="${esc(a.id)}"`,
       };

@@ -266,7 +266,18 @@ export function pedidoDoRascunho(r: RascunhoInteligencia): PedidoInteligencia {
 }
 
 /** 2B: o corpo do nível Inteligência (o rodapé Cancelar/Salvar é o da gaveta). */
-export function renderInteligencia(r: RascunhoInteligencia, nomeDoBot: string, c: ContextoInteligencia, ordemDaPessoa: readonly IdHarness[]): string {
+/**
+ * NOD-312: a escolha do rascunho troca a IA em uso? É o caso que o servidor avisa ao bot (aviso e resumo do trabalho,
+ * `troca_de_ia`). Revisão 2 do #550: modelo ou esforço novos na mesma IA também zeram a sessão, mas esse turno não leva
+ * aviso nem resumo (fora do escopo da NOD-312) — a nota não promete o que não acontece.
+ */
+export function sessaoMudou(salvo: RascunhoInteligencia, r: RascunhoInteligencia, c: ContextoInteligencia, ordemDaPessoa: readonly IdHarness[]): boolean {
+  const antes = iaEmUso({ modo: salvo.modo, fixa: salvo.fixa, ordem: [...(salvo.ordem ?? ordemDaPessoa)], escolhas: salvo.escolhas }, c);
+  const depois = iaEmUso({ modo: r.modo, fixa: r.fixa, ordem: [...(r.ordem ?? ordemDaPessoa)], escolhas: r.escolhas }, c);
+  return !!antes && !!depois && antes.id !== depois.id;
+}
+
+export function renderInteligencia(r: RascunhoInteligencia, nomeDoBot: string, c: ContextoInteligencia, ordemDaPessoa: readonly IdHarness[], salvo?: RascunhoInteligencia): string {
   const auto = r.modo === "auto";
   const ordem = r.ordem ?? ordemDaPessoa;
   const todas = iasDoBot(c.ias, ordem);
@@ -294,12 +305,15 @@ export function renderInteligencia(r: RascunhoInteligencia, nomeDoBot: string, c
   const propria = auto && r.ordem !== null ? `<div class="int-fora"><span>Ordem própria de ${esc(nomeDoBot)}</span><button type="button" data-act="int-ordem-pessoa">Usar a minha ordem</button></div>` : "";
   const foraTexto = fora.length ? `${fora.join(", ")} não ${fora.length === 1 ? "está conectado" : "estão conectados"}${c.ui.noApp ? " neste Mac" : ""}` : "Outras IAs aparecem aqui quando conectadas";
   const foraAcao = fora.length ? "Conectar" : "Provedores de IA";
+  // NOD-312: antes de Salvar, a troca que muda a sessão diz o que acontece na conversa.
+  const nota = salvo && sessaoMudou(salvo, r, c, ordemDaPessoa) ? `<p class="p312-nota-ia" id="int-nota-recomeco" role="status">Ao trocar, ${esc(nomeDoBot)} leva a conversa e relê o necessário no próximo pedido.</p>` : "";
   return `<div class="modo" role="radiogroup" aria-label="Como ${esc(nomeDoBot)} escolhe a IA">
       <button type="button" class="modo-op" role="radio" aria-checked="${auto}" data-act="int-modo" data-modo="auto">${radio(auto)}<span><b>Automático</b><span class="sub">Usa a primeira IA pronta da ${r.ordem === null ? "sua ordem" : "ordem dele"}. Se ela parar ou chegar ao limite, passa para a próxima.</span></span></button>
       <button type="button" class="modo-op" role="radio" aria-checked="${!auto}" data-act="int-modo" data-modo="fixa">${radio(!auto)}<span><b>Uma IA só</b><span class="sub">Usa sempre a mesma IA. Se ela parar, ${esc(nomeDoBot)} espera em vez de trocar.</span></span></button>
     </div>
     <div class="int-titulo"><b>${auto ? "Ordem" : "Qual IA"}</b><span>${auto ? "arraste para mudar" : "só as conectadas"}</span></div>
-    <div class="int-lista" data-ordem-lista="bot"${auto ? "" : ' role="radiogroup" aria-label="Qual IA"'}>${linhas}</div>
+    <div class="int-lista" data-ordem-lista="bot"${auto ? "" : ' role="radiogroup" aria-label="Qual IA"'}${nota ? ' aria-describedby="int-nota-recomeco"' : ""}>${linhas}</div>
+    ${nota}
     ${propria}
     <div class="int-fora"><span>${esc(foraTexto)}</span><button type="button" data-act="secao-espaco" data-secao="conexao">${foraAcao}</button></div>`;
 }
@@ -372,6 +386,7 @@ export function htmlDaPreviaDaTroca(p: { nomeDoBot: string; destino: string; tas
   const tasks = uma ? "A task em andamento fica" : `As ${p.tasks} tasks em andamento ficam`;
   return `<h2 id="previa-troca-titulo">Passar ${esc(p.nomeDoBot)} para ${esc(p.destino)}?</h2>
     <p>Muda agora: a conversa e o que ${esc(p.nomeDoBot)} começar daqui em diante.</p>
+    <p class="p312-bloco">${esc(p.nomeDoBot)} leva a conversa, mas não o que já leu e testou na IA de agora. No próximo pedido, relê o necessário.</p>
     <p>${tasks} na IA de agora e ${uma ? "continua de onde parou" : "continuam de onde pararam"}. Se ${uma ? "for junto, recomeça" : "forem junto, recomeçam"} do resumo.</p>
     <div class="acoes"><button class="bt" data-levar type="button">Levar as tasks também</button> <button class="bt pri" data-so-daqui type="button" autofocus>Só daqui em diante</button></div>`;
 }

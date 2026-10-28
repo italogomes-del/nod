@@ -510,6 +510,11 @@
   .luz.cem .luz-fig { padding: 60px 0 16px; }
 }
 
+/* NOD-312: no celular, a explicação do recomeço ocupa a largura toda. */
+@media (hover: none) and (pointer: coarse) and (max-width: 600px), (hover: none) and (pointer: coarse) and (max-height: 500px) {
+  .p312-explica { width: 100%; }
+}
+
 /* ==============================================================================   NOD-382: o perfil do bot no celular, no estilo do iOS (web/telas/perfil-celular.ts). Entra pela direita em 280 ms; o
    topo só tem o ‹ redondo; avatar 96, nome 22/700, título 15; ações rápidas em círculos de 52; a lista agrupada em
    --surface-side (raio 12, margem 16, 24 entre grupos), linhas de 52 com divisória recuada 50 px.

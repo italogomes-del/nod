@@ -4,7 +4,7 @@ import { MOTIVO_DA_CAUSA, type CausaSemIa, type Inventario } from "../contracts/
 import type { Mensagem, PayloadMensagem } from "../contracts/mensagem.ts";
 import type { MotivoFalha, MotivoInterrupcao } from "../contracts/motivos.ts";
 import type { Entrega } from "../contracts/ponte.ts";
-import type { ContaNoLimite, Turno } from "../contracts/turno.ts";
+import type { ContaNoLimite, MotivoRecomeco, Turno } from "../contracts/turno.ts";
 import { comandoDaConversa, textoDaCompactacao, traduzirSaidaDoComando } from "../domain/comandos.ts";
 import { custoDoTurno } from "../domain/custo-turno.ts";
 import { assuntoDaInterrupcao } from "../domain/destino-no-chat.ts";
@@ -936,7 +936,8 @@ async function aposSessaoRejeitada(
   await deps.repos.mensagens.marcarParciaisDoTurno(turno.id);
   return [
     evento(deps.escopo, { kind: "turno_interrompido", autoria: p.autoria, agora: p.agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { motivo: "sessao_rejeitada", motivo_falha: null, repete_sem_resume: true, custo_usd: p.custoUsd } }),
-    ...(await repetirNaConversa(deps, { turno, executor: p.executor, agora: p.agora })),
+    // NOD-312: a repetição nasce com o motivo (a sessão já foi largada aqui; a emissão do plano não teria como saber).
+    ...(await repetirNaConversa(deps, { turno, executor: p.executor, agora: p.agora, recomeco: "sessao_recusada" })),
   ];
 }
 
@@ -989,7 +990,7 @@ async function repetirRetomadaSemSessao(
  * A fala da pessoa de novo na fila (a mesma entrada; `reenvios` + 1), como na troca de IA e de conta. Quem chama já
  * conferiu o teto (podeReenviar, NOD-268).
  */
-async function repetirNaConversa(deps: Deps, p: { turno: Turno; executor: Executor; agora: number }): Promise<RuntimeEvent[]> {
+async function repetirNaConversa(deps: Deps, p: { turno: Turno; executor: Executor; agora: number; recomeco?: MotivoRecomeco }): Promise<RuntimeEvent[]> {
   const { turno } = p;
   const novo = await deps.repos.turnos.enfileirar({
     conversaId: turno.conversaId,
@@ -1008,6 +1009,7 @@ async function repetirNaConversa(deps: Deps, p: { turno: Turno; executor: Execut
     trabalhoId: turno.trabalhoId ?? null,
     contaminadoDe: turno.id,
   });
+  if (novo && p.recomeco) await deps.repos.turnos.registrarMotivoRecomeco(novo.id, p.recomeco);
   return novo ? [evento(deps.escopo, { kind: "turno_criado", autoria: autoriaPessoa(deps.escopo, p.executor), agora: p.agora, conversaId: turno.conversaId, turnoId: novo.id, dados: { origem: "conversa", agente_id: turno.agenteId, repete_turno_id: turno.id } })] : [];
 }
 

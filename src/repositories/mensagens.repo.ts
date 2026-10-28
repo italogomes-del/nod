@@ -4,7 +4,7 @@ import type { Autoria } from "../contracts/evento.ts";
 import type { Assunto, Destino } from "../contracts/destino-no-chat.ts";
 import type { Confianca, KindMensagem, Mensagem, PayloadMensagem } from "../contracts/mensagem.ts";
 import type { PedidoDeColega } from "../contracts/troca-entre-bots.ts";
-import type { OrigemTurno } from "../contracts/turno.ts";
+import type { MotivoRecomeco, OrigemTurno } from "../contracts/turno.ts";
 import { assuntoNaLeitura } from "../domain/assunto-do-texto.ts";
 import { ASSUNTOS_ANEXO, ASSUNTOS_ATIVIDADE, assuntoDe, destinoDe } from "../domain/destino-no-chat.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
@@ -120,7 +120,7 @@ export function assuntoDaNova(m: { kind: KindMensagem; payload?: PayloadMensagem
 }
 
 /** A linha lida com o turno (ADR-083, S2): a origem do turno, o trabalho e se é a última fala de um turno encerrado. */
-type LinhaComTurno = LinhaMensagem & { midia_recusas?: RecusasMidia | null; turno_origem: OrigemTurno | null; trabalho_id: string | null; fim_do_turno: boolean | null; raiz_id: string | null; raiz_origem: OrigemTurno | null; primeira?: boolean | null; frente_de_lote: boolean | null };
+type LinhaComTurno = LinhaMensagem & { midia_recusas?: RecusasMidia | null; turno_origem: OrigemTurno | null; trabalho_id: string | null; fim_do_turno: boolean | null; raiz_id: string | null; raiz_origem: OrigemTurno | null; motivo_recomeco?: MotivoRecomeco | null; primeira?: boolean | null; frente_de_lote: boolean | null };
 
 /**
  * definido em 2026-10-18 (chat limpo, PR 2): teto dos `anexo` que a janela traz desde o corte (o plano, 1b). Os `anexo`
@@ -158,7 +158,7 @@ export function destinoDaLinha(l: LinhaMensagem & { primeira?: boolean | null; f
 function paraMensagemComTurno(l: LinhaComTurno): Mensagem {
   // NOD-323: o que o bot não conseguiu anexar vai só na fala final do turno (a linha discreta abaixo dela, j5-6).
   const recusas = l.fim_do_turno === true && Array.isArray(l.midia_recusas) && l.midia_recusas.length > 0 ? { midiaRecusas: l.midia_recusas } : {};
-  return { ...paraMensagem(l), origemTurno: l.turno_origem, trabalhoId: l.trabalho_id, fimDoTurno: l.fim_do_turno === true, ...recusas, ...(l.raiz_id && l.raiz_origem ? { raiz: { turnoId: l.raiz_id, origem: l.raiz_origem } } : {}) };
+  return { ...paraMensagem(l), origemTurno: l.turno_origem, trabalhoId: l.trabalho_id, fimDoTurno: l.fim_do_turno === true, ...recusas, ...(l.motivo_recomeco ? { motivoRecomeco: l.motivo_recomeco } : {}), ...(l.raiz_id && l.raiz_origem ? { raiz: { turnoId: l.raiz_id, origem: l.raiz_origem } } : {}) };
 }
 
 /**
@@ -173,7 +173,7 @@ function paraMensagemComTurno(l: LinhaComTurno): Mensagem {
  */
 function selectComTurno(conn: Conn, tenantId: string, recorte: ReturnType<Conn>) {
   return conn<LinhaComTurno[]>`
-    select m.*, t.origem as turno_origem, t.midia_recusas, coalesce(t.trabalho_id, o.trabalho_id) as trabalho_id, rz.raiz_id, rz.raiz_origem,
+    select m.*, t.origem as turno_origem, t.midia_recusas, t.motivo_recomeco, coalesce(t.trabalho_id, o.trabalho_id) as trabalho_id, rz.raiz_id, rz.raiz_origem,
       coalesce(w.forma = 'frente' and w.lote_id is not null, false) as frente_de_lote,
       (t.estado in ('concluido', 'interrompido') and m.kind = 'texto' and m.autor_tipo = 'agente'
         and m.criado_em = max(case when m.kind = 'texto' and m.autor_tipo = 'agente' then m.criado_em end) over (partition by m.turno_id)) as fim_do_turno

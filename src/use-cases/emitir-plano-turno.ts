@@ -22,7 +22,7 @@ import type { EscolhasIa } from "../contracts/inteligencia.ts";
 import { iasNoLimite, inteligenciaDoAgente, ordemCompleta, ordemEfetiva, raciocinioValido } from "../domain/inteligencia.ts";
 import { contasPelaCota, cotaDasContas, cotaDasIasComContas, tipoParaCota } from "../domain/cota-da-ia.ts";
 import { temSessaoNaIa } from "../domain/troca-de-ia.ts";
-import type { Turno } from "../contracts/turno.ts";
+import type { MotivoRecomeco, Turno } from "../contracts/turno.ts";
 import { MOTIVO_FALHA_EM_PORTUGUES, modeloDoModo } from "../domain/computador.ts";
 import { COMANDO_GITHUB_NATIVO, SLUG_GITHUB } from "../contracts/github.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
@@ -43,8 +43,12 @@ import { contaDoPlano, escolherContaDoTurno, lerContasDaMaquina } from "./contas
 import type { IaComConta } from "../contracts/contas-ia.ts";
 import { conectorPublico } from "./registrar-conector.ts";
 import { ehColega } from "./ver-colegas.ts";
+import { comandoDaConversa } from "../domain/comandos.ts";
 import { juntarPassagem, montarPassagemDeBastao } from "../domain/passagem-de-bastao.ts";
 import { dadosDaPassagem } from "./passagem-de-bastao.ts";
+import { avisoDeRecomeco, montarResumoDoRecomeco, motivoDoRecomeco } from "../domain/recomeco.ts";
+import { emSavepoint } from "./savepoint.ts";
+import { dadosDoResumo, TURNOS_DO_RESUMO } from "./resumo-do-recomeco.ts";
 import { log } from "../obs/log.ts";
 
 export type EntradaEmitirPlano = {
@@ -272,6 +276,17 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   const autorDe = (m: (typeof mensagens)[number]) => (m.autoria.autor_tipo === "pessoa" ? "pessoa" : visiveis.find((a) => a.id === m.autoria.autor_id)?.nome ?? "bot");
   // /nova-sessao (0038): o bot começa do zero — o histórico do prompt só leva o que veio depois do recomeço.
   const recomeco = conversa?.recomecoEm ?? null;
+  // NOD-312: o turno de conversa que recomeçou sem a sessão que a conversa tinha, e por quê. Só lê as variáveis da regra
+  // acima (que não muda). A troca manual de IA zera a sessão da conversa antes do turno: a sessão anterior vem do último
+  // turno de conversa do bot que deixou uma (depois do /nova-sessao). A repetição da sessão recusada já nasce com o motivo.
+  const elegivelAoRecomeco = !trabalho && (modo === "conversa" || modo === "criacao") && (turno.origem === "conversa" || turno.origem === "retomada")
+    && input.permitirResume !== false && ligacao === null && !ehDelegacao && conversa?.tipo !== "sala";
+  const anteriorDoRecomeco = elegivelAoRecomeco && !sessaoCli && !turno.motivoRecomeco
+    ? await deps.repos.turnos.ultimaSessaoDaConversa(turno.conversaId, turno.agenteId, turno, recomeco) : null;
+  const motivoRecomeco = sessaoCli || !elegivelAoRecomeco ? null : turno.motivoRecomeco ?? motivoDoRecomeco({
+    elegivel: elegivelAoRecomeco, retomou: sessaoCli !== null, iaRetoma: retoma, anterior: anteriorDoRecomeco,
+    atual: { harness: escolha?.harness ?? null, executor, mesmaConta, mesmaMaquina },
+  });
   // definido em 2026-10-12 (ADR-099, I2): a frente sem sessão recebe o histórico DELA (as falas dos turnos dela e os
   // recados), nunca o da conversa do dono — no Codex a frente via a conversa com a pessoa. A task de antes segue igual.
   // revisto em 2026-10-12 (ADR-099, I10): a task de antes, migrada pela 0072 sem lote, segue com o histórico de antes.
@@ -452,6 +467,30 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
       log("aviso", "passagem_de_bastao_falhou", { turno_id: turno.id, trabalho_id: trabalho.id, erro: erro instanceof Error ? erro.name : "desconhecido" });
     }
   }
+  // NOD-312: o aviso de recomeço e o resumo do trabalho vão na entrada, como a passagem da NOD-310 (o histórico das
+  // últimas falas já vai no contexto). Falha ao montar o resumo: o turno segue só com o aviso (nunca derruba a emissão).
+  let partesDoRecomeco: { motivo: MotivoRecomeco; avisoChars: number; resumoChars: number; historicoChars: number } | null = null;
+  // Revisão 1 (baixo 5): o comando da conversa (/contexto, /compactar…) vai cru para o CLI — o aviso e o resumo no fim
+  // dele virariam argumento do comando. O motivo continua gravado no turno (a pessoa vê a marca).
+  // Revisão 5: idem para a fala que começa com "/" sem ser comando do nod (uma skill do CLI, "/review 123").
+  if (motivoRecomeco && modo !== "ligacao" && !comandoDaConversa(parcial.entrada.texto) && !parcial.entrada.texto.trimStart().startsWith("/")) {
+    let resumo: string | null = null;
+    try {
+      // Revisão 2 do #550: num savepoint, para um erro do Postgres não abortar a transação da emissão.
+      resumo = await emSavepoint(deps, async () => {
+        const turnosAnteriores = await deps.repos.turnos.ultimosDaConversa(turno.conversaId, turno.agenteId, turno, recomeco, TURNOS_DO_RESUMO);
+        return montarResumoDoRecomeco(await dadosDoResumo(deps, turnosAnteriores, guardados));
+      });
+    } catch (erro) {
+      log("aviso", "resumo_do_recomeco_falhou", { turno_id: turno.id, erro: erro instanceof Error ? erro.name : "desconhecido" });
+    }
+    const aviso = avisoDeRecomeco(motivoRecomeco, { comResumo: resumo !== null });
+    parcial.entrada = { ...parcial.entrada, texto: juntarPassagem(parcial.entrada.texto, resumo ? `${aviso}\n\n${resumo}` : aviso) };
+    partesDoRecomeco = { motivo: motivoRecomeco, avisoChars: aviso.length, resumoChars: resumo?.length ?? 0, historicoChars: JSON.stringify(historico).length };
+  } else if (motivoRecomeco) {
+    // QA (bug 2): a fala com "/" vai crua, mas o turno recomeçou do mesmo jeito — o Raio-X diz isso, como a marca da fala.
+    partesDoRecomeco = { motivo: motivoRecomeco, avisoChars: 0, resumoChars: 0, historicoChars: JSON.stringify(historico).length };
+  }
   if (input.ghNaMaquina) {
     // O login do gh serve à dona: só o conector github DELA roda na máquina; o de outra pessoa, nunca.
     const meu = guardados.find((c) => c.slug === SLUG_GITHUB && c.comando === COMANDO_GITHUB_NATIVO && c.ownerId === deps.escopo.pessoaId);
@@ -496,10 +535,15 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   // NOD-291 (0084): o turno roda numa CÓPIA da sessão da conversa — o total que o CLI devolver traz o histórico da mãe,
   // e o assentar desconta o total dela (turnos.totalAnteriorDaSessao). Grava de onde a cópia saiu.
   if (bifurcar && sessaoDaConversa) await deps.repos.turnos.registrarSessaoOrigem(turno.id, sessaoDaConversa);
+  // NOD-312: só grava sobre a coluna nula (a repetição da sessão recusada já veio com o motivo). A recomposição nem chega
+  // aqui: volta antes, e com permitirResume false nem calcula o motivo.
+  if (motivoRecomeco && !turno.motivoRecomeco) await deps.repos.turnos.registrarMotivoRecomeco(turno.id, motivoRecomeco);
+  // Revisão 4: a repetição nasceu com 'sessao_recusada', mas outro turno gravou sessão nova antes e esta a retomou.
+  if (sessaoCli && turno.motivoRecomeco) await deps.repos.turnos.limparMotivoRecomeco(turno.id);
   guardarPlanoSeSuportado(deps.services.tokenTurno, plano);
   // Modo dev (0036): o que este plano manda ao modelo, por parte. Os textos só com o modo dev da pessoa ligado.
   const { modoDev } = preferencias;
-  await deps.repos.raioX.gravarComposicao(turno.id, composicaoDoPlano(plano, { modo, comTexto: modoDev, experimentos: { calibracao: experimentos.calibracao, memoriaLonga, whatsapp, anexosAnteriores: anteriores.length } }));
+  await deps.repos.raioX.gravarComposicao(turno.id, composicaoDoPlano(plano, { modo, comTexto: modoDev, experimentos: { calibracao: experimentos.calibracao, memoriaLonga, whatsapp, anexosAnteriores: anteriores.length }, ...(partesDoRecomeco ? { recomeco: partesDoRecomeco } : {}) }));
 
   const evento: RuntimeEvent = {
     tenantId: deps.escopo.tenantId,
@@ -518,6 +562,8 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
       despachadoEm: turno.despachadoEm ?? agora,
       // ADR-083: o frame turno.iniciado diz de que trabalho é o turno (a web põe o ao vivo na task, não no chat).
       trabalhoId: turno.trabalhoId ?? null,
+      // NOD-312: o turno recomeçou sem a sessão; a web põe a carona/marca e a nota das etapas já ao vivo.
+      ...(motivoRecomeco ? { motivo_recomeco: motivoRecomeco } : {}),
       executor,
       harness: escolha?.harness ?? null,
       modelo: plano.entrada.modelo,

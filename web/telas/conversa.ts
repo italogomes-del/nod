@@ -45,6 +45,7 @@ import { HTML_SELETOR_IA } from "./seletor-ia.ts";
 import { avisoDeEstado } from "../lib/aviso-estado.ts";
 import { inventarioEmUso } from "./frota.ts";
 import { cartaoRitmoRotina } from "./ritmo-rotina.ts";
+import { alvosDoRecomeco, marcaDoRecomeco, notaDasEtapas, type AlvoDoRecomeco } from "../lib/recomeco.ts";
 import { avisoContaSemAcesso, avisoHarnessFora, avisoModeloRecusado, ehIa, inventarioDaIa, cartaoTrocaDeIa, linhaContaSeguiu, linhaContaTrocada, linhaIaDoBotTrocada, linhaIaTrocada, linhaIaVoltou, linhaLimiteSemOutra, prontaDepois, type IdIa } from "./ia-fora.ts";
 import { escolhaEfetiva, iasDaTela, inteligenciaDoBot } from "./inteligencia.ts";
 import { htmlBotaoDitado, htmlPilulaDitado } from "./ditado.ts";
@@ -275,16 +276,17 @@ function turnoPresoJaRefeito(m: Mensagem, estado: Pick<Estado, "conversas" | "tr
  */
 function linhaDeIa(m: Mensagem, estado: Estado): string | null {
   const p = m.payload;
-  if (p?.kind === "conta_trocada") return linhaContaTrocada(m);
-  if (p?.kind === "conta_seguiu" || p?.kind === "conta_escolhida") return linhaContaSeguiu(m);
+  const recomeco = alvosDaVez.get(m.id);
+  if (p?.kind === "conta_trocada") return linhaContaTrocada(m, recomeco);
+  if (p?.kind === "conta_seguiu" || p?.kind === "conta_escolhida") return linhaContaSeguiu(m, recomeco);
   // ADR-108 (R4/R6): o aviso de troca de IA do bot (o bot vem do payload: a linha pode ter nascido do despacho).
-  if (p?.kind === "troca_de_ia") return cartaoTrocaDeIa(m, { nomeDoBot: agenteDe(estado, p.agenteId)?.nome ?? null, agora: estado.agora });
+  if (p?.kind === "troca_de_ia") return cartaoTrocaDeIa(m, { nomeDoBot: agenteDe(estado, p.agenteId)?.nome ?? null, agora: estado.agora, ...(recomeco ? { recomeco } : {}) });
   if (p?.kind !== "ia_trocada" && p?.kind !== "limite_do_plano") return null;
   const bot = m.autoria.autor_tipo === "agente" ? agenteDe(estado, m.autoria.autor_id) : undefined;
   const ias = iasDaTela(estado);
   if (p.kind === "ia_trocada") {
     const ia = ias.find((i) => i.id === p.para);
-    return linhaIaTrocada(m, { modelo: ia && bot ? ia.modelos.find((x) => x.id === escolhaEfetiva(ia, inteligenciaDoBot(bot).escolhas).modelo)?.nome ?? null : null });
+    return linhaIaTrocada(m, { modelo: ia && bot ? ia.modelos.find((x) => x.id === escolhaEfetiva(ia, inteligenciaDoBot(bot).escolhas).modelo)?.nome ?? null : null, ...(recomeco ? { recomeco } : {}) });
   }
   return linhaLimiteSemOutra(m, { nomeDoBot: bot?.nome ?? null, agenteId: bot?.id ?? null, agora: estado.agora, ui: estado.iasMac, ias, fixa: bot ? inteligenciaDoBot(bot).modo === "fixa" : false, contasIa: estado.contasIa });
 }
@@ -584,7 +586,11 @@ export function renderMensagem(m: Mensagem, estado: Estado, sala = false, opcoes
   const etiqueta = opcoes.etiqueta
     ? `<span class="etiqueta-origem${opcoes.etiqueta.length <= ETIQUETA_CURTA ? " curta" : ""}" title="${esc(opcoes.etiqueta)}">${esc(opcoes.etiqueta)}</span>`
     : "";
-  const sender = `<div class="msg-autor"><b title="${esc(autor)}">${esc(autor)}</b><time>${hora(m.criadoEm)}</time>${etiqueta}</div>`;
+  // NOD-312: a marca "↺ recomeçou" ao lado da hora (o turno recomeçou sem a sessão e não havia linha onde pegar carona);
+  // a explicação abre no fluxo, logo abaixo do nome. Fica para sempre no histórico.
+  const alvo = alvosDaVez.get(m.id);
+  const recomeco = alvo?.tipo === "marca" ? marcaDoRecomeco(m.id, alvo) : null;
+  const sender = `<div class="msg-autor"><b title="${esc(autor)}">${esc(autor)}</b><time>${hora(m.criadoEm)}</time>${recomeco?.marca ?? ""}${etiqueta}</div>${recomeco?.explicacao ?? ""}`;
   const delegacao = m.payload?.kind === "peer_pedido" ? m.payload.delegacao : undefined;
   const contextoDelegado = delegacao ? `<div class="msg-contexto-delegado"><small class="mudo">Contexto de ${esc(agente?.nome ?? (m.payload?.kind === "peer_pedido" ? m.payload.nome : undefined) ?? "um colega")} · não é instrução da pessoa</small><p>${esc(delegacao.tarefa)}</p>${delegacao.contexto ? `<p>${esc(delegacao.contexto)}</p>` : ""}</div>` : "";
   // Chat limpo (PR 6, 2026-10-18; plano, Parte 5): "rodou em <máquina>" e "catcher" saíram do balão e moram na faixa do
@@ -768,6 +774,8 @@ export function renderFalaViva(t: TurnoVivo, a: AtividadeTurno | undefined, agen
   const partes: { chave: string; html: string }[] = [{ chave: "nome", html: `<div class="msg-autor" data-parte="nome"><b title="${esc(nome)}">${esc(nome)}</b></div>` }];
   // O pensamento, entre o nome e o balão. A fala do meio que saiu (`saindo:`) não o tem — a gravada dela também não —;
   // a última de um turno acabado (`vivo:`) tem, igual à gravada, sem pulo na troca (NOD-353).
+  // NOD-312: o turno que recomeçou sem a sessão diz, no topo, que relê o necessário antes de seguir.
+  if (t.motivoRecomeco && !saindo) partes.push({ chave: "recomeco", html: notaDasEtapas(t.motivoRecomeco, agente?.nome ?? null) });
   const p = !saindo || chave === `vivo:${t.turnoId}` ? pensarDaFalaViva(t, a, estado, saindo, mudo) : null;
   const pensar = p ? renderPensar({ ...p, parte: "pensar" }) : "";
   if (pensar) partes.push({ chave: "pensar", html: pensar });
@@ -1087,7 +1095,23 @@ export type BlocoDaTimeline = { chave: string; html: string; inicio?: string; te
  * linha também ("Enviou mensagem para…", "N mensagens com…").
  */
 function blocosDasMensagens(mensagens: Mensagem[], estado: Estado, sala: boolean, doModo?: { agenteId: string; acoes: ConversaEstado["acoesDoModo"] }): BlocoDaTimeline[] {
+  // NOD-312: onde vão a carona e a marca do recomeço, lidos durante este render (síncrono) por linhaDeIa e renderMensagem.
   const planos = planejarLinhas(mensagens, estado);
+  // Revisão 3 do #550: no chat limpo (ADR-114) as linhas de troca moram na Atividade e somem do chat; a carona só vai
+  // numa linha que a pessoa vê (sem plano = desenhada como sempre). Linha oculta não conta, e o recomeço cai na marca.
+  const noChat = (m: Mensagem): boolean => !planos.has(m.id);
+  alvosDaVez = sala ? new Map() : alvosDoRecomeco(mensagens, (id) => agenteDe(estado, id)?.nome ?? null, noChat);
+  try {
+    return blocosDasMensagensComAlvos(mensagens, estado, sala, planos, doModo);
+  } finally {
+    alvosDaVez = new Map();
+  }
+}
+
+/** NOD-312: os alvos do recomeço do render em curso (vazio fora dele: Trabalhos e os testes que renderizam uma fala só). */
+let alvosDaVez: Map<string, AlvoDoRecomeco> = new Map();
+
+function blocosDasMensagensComAlvos(mensagens: Mensagem[], estado: Estado, sala: boolean, planos: Map<string, PlanoMensagem>, doModo?: { agenteId: string; acoes: ConversaEstado["acoesDoModo"] }): BlocoDaTimeline[] {
   // definido em 2026-09-29 (0039, canvas "Não lidos"): a linha "Novas" entra acima da primeira não lida de quando a
   // pessoa abriu a conversa (ou voltou para a janela com outras novas, emenda de 2026-10-05), e fica até ela sair. Se a
   // primeira não lida sumiu para dentro de uma linha, a linha "Novas" fica sozinha no lugar dela.

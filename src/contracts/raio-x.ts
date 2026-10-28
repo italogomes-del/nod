@@ -1,6 +1,7 @@
 import type { IdHarness } from "./harness.ts";
 import type { LimitesIa } from "./inteligencia.ts";
 import type { ModoTurno } from "./plano-turno.ts";
+import type { MotivoRecomeco } from "./turno.ts";
 
 /**
  * Raio-X do turno (modo dev, definido em 2026-09-28, 0036): o que foi enviado ao modelo e quanto cada chamada
@@ -93,6 +94,11 @@ export type ComposicaoRaioX = {
    * anteriores). Ausente = turno de antes da 0088. ADR-112: `whatsapp` ausente = turno de antes da 0089 (desligada).
    */
   experimentos?: Omit<Experimentos, "whatsapp"> & { whatsapp?: boolean; anexosAnteriores: number };
+  /**
+   * NOD-312: o turno recomeçou sem a sessão (o motivo) e o tamanho do que foi no lugar dela: o aviso e o resumo do
+   * trabalho (na entrada) e as últimas falas (no contexto). Ausente = turno normal ou de antes da NOD-312.
+   */
+  recomeco?: { motivo: MotivoRecomeco; avisoChars: number; resumoChars: number; historicoChars: number };
 };
 
 /** GET turnos/:id/raio-x. `custoUsd` é o do turno (turnos.custo_usd), já sem o acumulado da sessão. */

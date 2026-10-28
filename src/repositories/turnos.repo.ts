@@ -5,7 +5,7 @@ import type { RecusasMidia } from "../contracts/anexo.ts";
 import type { Executor } from "../contracts/evento.ts";
 import type { Confianca } from "../contracts/mensagem.ts";
 import type { MotivoFalha, MotivoInterrupcao, MotivoLocalidade, MotivoSemNovidade } from "../contracts/motivos.ts";
-import type { EstadoTurno, OrigemTurno, Profundidade, SinaisTurno, Turno } from "../contracts/turno.ts";
+import type { EstadoTurno, MotivoRecomeco, OrigemTurno, Profundidade, SinaisTurno, Turno } from "../contracts/turno.ts";
 import { ENTRADA_DA_RETOMADA_DA_QUEDA, ENTRADA_DA_VOLTA_DA_COTA, MARCA_DA_FALA_NA_FRENTE, MARCA_DO_PEDIDO_ORIGINAL, PREFIXOS_DA_VOLTA_DO_FUNDO, type PortaoDaCota, RETORNO_DO_LOTE } from "../domain/cota-da-ia.ts";
 import type { SomaDoDia } from "../domain/custo-do-dia.ts";
 import { modelosPorIa } from "../domain/ia-do-modelo.ts";
@@ -64,6 +64,7 @@ interface Linha {
   despachado_em?: Date | null;
   maquina_desta_vez?: string | null;
   tentativas_transitorias?: number;
+  motivo_recomeco?: MotivoRecomeco | null;
 }
 
 
@@ -71,7 +72,7 @@ interface Linha {
 export type SessaoDoTurno = { sessaoCli: string; executor: string; harness: string | null; contaId: string | null; machineId: string | null };
 
 const COLUNAS =
-  "tenant_id, id, owner_id, conversa_id, agente_id, origem, estado, attempted, rejected, prompt_submitted, produced_output, machine_id, lease_ate, prazo_em, motivo_interrupcao, motivo_falha, sem_novidade_motivo, retoma_turno_id, profundidade, reenvios, parar_solicitado_em, entrada_texto, entrada_anexos, entrada_confianca, custo_usd, modelo, harness, executor, criado_em, mensagem_origem_id, absorvido_por, sob_procuracao_de, ligacao_id, trabalho_id, acordar_em, pessoa_esperando, decidido_por, despachado_em, tentativas_transitorias, maquina_desta_vez";
+  "tenant_id, id, owner_id, conversa_id, agente_id, origem, estado, attempted, rejected, prompt_submitted, produced_output, machine_id, lease_ate, prazo_em, motivo_interrupcao, motivo_falha, sem_novidade_motivo, retoma_turno_id, profundidade, reenvios, parar_solicitado_em, entrada_texto, entrada_anexos, entrada_confianca, custo_usd, modelo, harness, executor, criado_em, mensagem_origem_id, absorvido_por, sob_procuracao_de, ligacao_id, trabalho_id, acordar_em, pessoa_esperando, decidido_por, despachado_em, tentativas_transitorias, maquina_desta_vez, motivo_recomeco";
 
 function paraTurno(l: Linha): Turno {
   return {
@@ -113,6 +114,7 @@ function paraTurno(l: Linha): Turno {
     tentativasTransitorias: l.tentativas_transitorias ?? 0,
     // QA do NOD-314: só quando há ("Rodar em <outra> desta vez"); o chip da fila diz a máquina deste turno.
     ...(l.maquina_desta_vez ? { maquinaDestaVez: l.maquina_desta_vez } : {}),
+    ...(l.motivo_recomeco ? { motivoRecomeco: l.motivo_recomeco } : {}),
   };
 }
 
@@ -245,6 +247,27 @@ function daIa(conn: Conn, ia: IdHarness | null) {
  * por UPDATE que volte a 'pendente'. Retomar é turno NOVO com retoma_turno_id (ADR-009).
  */
 export function turnosRepo(conn: Conn, escopo: Escopo) {
+  /**
+   * NOD-312 (revisão 2 do #550): o turno `t` é da conversa se for de conversa, ou uma retomada cuja raiz (até 10 saltos
+   * de retoma_turno_id, o SALTOS_DE_RETOMADA de rotinaDoTurno/delegacaoDoTurno) é de conversa. A retomada de uma rotina
+   * ou de um pedido de colega roda na mesma conversa, mas noutra sessão: não é o que a pessoa perde.
+   */
+  /**
+   * NOD-312 (revisão 8): o turno de conversa promovido pela rede de 2 min (ADR-083) ganha `trabalho_id`, mas foi a
+   * pessoa que falou com o bot nele — conta como último turno de conversa, senão o aviso da mesma troca sai de novo.
+   * Só ele (origem 'conversa'): as retomadas e os turnos seguintes da frente são dela.
+   * Revisão 10: a retomada de conversa (aprovação respondida) também conta como último turno — na IA que não retoma,
+   * é a IA dela que diz se a troca já foi avisada.
+   */
+  const DA_CONVERSA_OU_DA_REDE = (a: "t" | "u") =>
+    `(${a}.trabalho_id is null or (${a}.origem = 'conversa' and exists (select 1 from trabalhos w where w.tenant_id = ${a}.tenant_id and w.id = ${a}.trabalho_id and w.origem = 'rede')))`;
+  const raizDeConversa = (a: "t" | "u" = "t") => conn.unsafe(`(${a}.origem = 'conversa' or (${a}.origem = 'retomada' and (
+    with recursive cadeia(id, origem, retoma_turno_id, saltos) as (
+      select r.id, r.origem, r.retoma_turno_id, 1 from turnos r where r.tenant_id = ${a}.tenant_id and r.id = ${a}.retoma_turno_id
+      union all
+      select p.id, p.origem, p.retoma_turno_id, c.saltos + 1 from cadeia c join turnos p on p.tenant_id = ${a}.tenant_id and p.id = c.retoma_turno_id
+      where c.origem = 'retomada' and c.saltos < 10
+    ) select origem from cadeia order by saltos desc limit 1) = 'conversa'))`);
   return {
     async enfileirar(t: NovoTurno): Promise<Turno | null> {
       const estado: EstadoTurno = t.interrompidoCom ? "interrompido" : "pendente";
@@ -844,6 +867,64 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
     },
 
     /**
+     * NOD-312: a última sessão que um turno de conversa do bot deixou nesta conversa (sem trabalho, delegação nem
+     * ligação), depois do /nova-sessao e antes do turno `antesDe`. A troca manual de IA zera `conversas.sessao_cli`
+     * antes do turno; o turno guarda a dele, então é daqui que se sabe que havia o que perder. `harnessDoUltimoTurno` é a
+     * IA do último turno de conversa da pessoa que rodou até o fim (com sessão ou não; revisão 12: o interrompido não conta — o aviso dele pode não ter chegado à IA — e só no mesmo executor): é o que faz o aviso de troca de IA sair uma vez só.
+     */
+    async ultimaSessaoDaConversa(conversaId: string, agenteId: string, antesDe: { id: string; criadoEm: number }, desde: number | null): Promise<(SessaoDoTurno & { turnoId: string; harnessDoUltimoTurno: string | null }) | null> {
+      const [l] = await conn<{ id: string; sessao_cli: string; executor: string; harness_efetivo: string | null; conta_id: string | null; machine_id: string | null; harness_do_ultimo: string | null }[]>`
+        select id, sessao_cli, executor, harness_efetivo, conta_id, machine_id,
+          (select u.harness_efetivo from turnos u
+            where u.tenant_id = t.tenant_id and u.conversa_id = t.conversa_id and u.agente_id = t.agente_id
+              and u.origem in ('conversa', 'retomada') and ${conn.unsafe(DA_CONVERSA_OU_DA_REDE('u'))} and u.sob_procuracao_de is null and u.ligacao_id is null
+              and ${raizDeConversa("u")}
+              and u.harness_efetivo is not null and u.estado = 'concluido' and u.executor = t.executor and u.id <> ${antesDe.id} and u.criado_em < ${data(antesDe.criadoEm)}
+              ${desde === null ? conn`` : conn`and u.criado_em > ${data(desde)}`}
+            order by u.criado_em desc, u.id desc limit 1) as harness_do_ultimo
+        from turnos t
+        where tenant_id = ${escopo.tenantId} and conversa_id = ${conversaId} and agente_id = ${agenteId}
+          and origem in ('conversa', 'retomada') and ${conn.unsafe(DA_CONVERSA_OU_DA_REDE('t'))} and sob_procuracao_de is null and ligacao_id is null
+          and ${raizDeConversa()}
+          and sessao_cli is not null and id <> ${antesDe.id} and criado_em < ${data(antesDe.criadoEm)}
+          ${desde === null ? conn`` : conn`and criado_em > ${data(desde)}`}
+        order by criado_em desc, id desc limit 1`;
+      return l ? { turnoId: l.id, sessaoCli: l.sessao_cli, executor: l.executor, harness: l.harness_efetivo, contaId: l.conta_id, machineId: l.machine_id, harnessDoUltimoTurno: l.harness_do_ultimo } : null;
+    },
+
+    /**
+     * NOD-312 (0119): por que o turno recomeçou sem a sessão. Só grava sobre a coluna nula — a repetição da sessão
+     * recusada nasce com 'sessao_recusada', e a emissão do plano dela não pode trocar por outro motivo.
+     */
+    async registrarMotivoRecomeco(id: string, motivo: MotivoRecomeco): Promise<boolean> {
+      const r = await conn`update turnos set motivo_recomeco = ${motivo} where tenant_id = ${escopo.tenantId} and id = ${id} and motivo_recomeco is null`;
+      return r.count === 1;
+    },
+
+    /** NOD-312 (revisão 4): a repetição da sessão recusada que acabou retomando uma sessão nova não recomeçou. */
+    async limparMotivoRecomeco(id: string): Promise<void> {
+      await conn`update turnos set motivo_recomeco = null where tenant_id = ${escopo.tenantId} and id = ${id}`;
+    },
+
+    /**
+     * NOD-312: os últimos turnos de conversa do bot nesta conversa (para o resumo do trabalho do turno que recomeça), do
+     * mais antigo ao mais novo, depois do /nova-sessao e antes do turno `antesDe`. Sempre com limite. Revisão 9: com o turno
+     * promovido pela rede (foi a pessoa que falou com o bot nele) e sem os absorvidos (a fala foi junto com outra; nada se perdeu).
+     */
+    async ultimosDaConversa(conversaId: string, agenteId: string, antesDe: { id: string; criadoEm: number }, desde: number | null, limite = 8): Promise<Turno[]> {
+      const linhas = await conn<Linha[]>`
+        select ${conn.unsafe(COLUNAS)} from turnos t
+        where tenant_id = ${escopo.tenantId} and conversa_id = ${conversaId} and agente_id = ${agenteId}
+          and origem in ('conversa', 'retomada') and ${conn.unsafe(DA_CONVERSA_OU_DA_REDE('t'))} and sob_procuracao_de is null and ligacao_id is null
+          and not (estado = 'interrompido' and motivo_interrupcao = 'absorvido')
+          and ${raizDeConversa()}
+          and id <> ${antesDe.id} and criado_em < ${data(antesDe.criadoEm)}
+          ${desde === null ? conn`` : conn`and criado_em > ${data(desde)}`}
+        order by criado_em desc, id desc limit ${limite}`;
+      return linhas.map(paraTurno).reverse();
+    },
+
+    /**
      * ADR-107 (NOD-281, critério 4): o CLI recusou a sessão que este turno deixou (sessao_rejeitada na retomada da cadeia).
      * Ela sai do turno para nenhuma retomada dele voltar a pedir o mesmo --resume. Só a coluna da sessão — nunca o estado.
      */
@@ -1032,8 +1113,12 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
       const absorvidos = linhas.map(paraTurno).sort((a, b) => a.criadoEm - b.criadoEm);
       if (absorvidos.length === 0) return { turno, absorvidos };
       const anexos = [...new Set([...turno.entradaAnexos, ...absorvidos.flatMap((a) => a.entradaAnexos)])];
+      // NOD-312 (revisão 9): a repetição da sessão recusada nasce com 'sessao_recusada'; absorvida por uma fala mais
+      // antiga, o motivo vai junto — senão o turno que de fato recomeça sai sem aviso, resumo nem marca.
+      const motivoAbsorvido = absorvidos.find((a) => a.motivoRecomeco)?.motivoRecomeco ?? null;
       const [l] = await conn<Linha[]>`
-        update turnos set entrada_texto = ${entrada([turno.entradaTexto, ...absorvidos.map((a) => a.entradaTexto)])}, entrada_anexos = ${anexos as string[]}::uuid[]
+        update turnos set entrada_texto = ${entrada([turno.entradaTexto, ...absorvidos.map((a) => a.entradaTexto)])}, entrada_anexos = ${anexos as string[]}::uuid[],
+          motivo_recomeco = coalesce(motivo_recomeco, ${motivoAbsorvido}::text)
         where tenant_id = ${escopo.tenantId} and id = ${turno.id}
         returning ${conn.unsafe(COLUNAS)}`;
       return { turno: l ? paraTurno(l) : turno, absorvidos };

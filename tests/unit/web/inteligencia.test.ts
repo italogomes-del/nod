@@ -211,3 +211,28 @@ it.each([
   expect(texto).toContain(frase);
   expect(texto).not.toMatch(/[a-z0-9]+_[a-z0-9]+/);
 });
+
+describe("NOD-312: a nota da gaveta antes de Salvar", () => {
+  const NOTA = "Ao trocar, Clarice leva a conversa e relê o necessário no próximo pedido.";
+  const c = ctx({ claude: PRONTO, codex: PRONTO });
+  it("sem mudança: nenhuma nota", () => {
+    const salvo = rascunhoDe(clarice());
+    expect(renderInteligencia(salvo, "Clarice", c, ["claude-cli", "codex-cli"], salvo)).not.toContain(NOTA);
+  });
+  it("a IA em uso muda (Uma IA só, outra IA): a nota aparece, ligada à lista por aria-describedby", () => {
+    const salvo = rascunhoDe(clarice());
+    const r = { ...salvo, modo: "fixa" as const, fixa: "codex-cli" as const };
+    const html = renderInteligencia(r, "Clarice", c, ["claude-cli", "codex-cli"], salvo);
+    expect(html).toContain(`<p class="p312-nota-ia" id="int-nota-recomeco" role="status">${NOTA}</p>`);
+    expect(html).toContain('aria-describedby="int-nota-recomeco"');
+  });
+  it("o modelo muda na mesma IA: sem nota (esse turno não leva aviso, revisão 2); sem o salvo (chamada antiga), nunca", () => {
+    const salvo = rascunhoDe(clarice());
+    const outro = ia("claude-cli").modelos.find((m) => m.id !== (salvo.escolhas["claude-cli"]?.modelo ?? ia("claude-cli").recomendado?.modelo ?? ia("claude-cli").modelos[0]?.id));
+    expect(outro).toBeDefined();
+    if (!outro) return;
+    const r = { ...salvo, escolhas: { ...salvo.escolhas, "claude-cli": { modelo: outro.id } } };
+    expect(renderInteligencia(r, "Clarice", c, ["claude-cli", "codex-cli"], salvo)).not.toContain(NOTA);
+    expect(renderInteligencia(r, "Clarice", c, ["claude-cli", "codex-cli"])).not.toContain(NOTA);
+  });
+});

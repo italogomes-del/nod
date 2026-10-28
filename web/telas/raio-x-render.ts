@@ -1,4 +1,5 @@
-import type { ChamadaRaioX, CompactacaoRaioX, ExecucaoRaioX, GrupoDeFerramentas, RaioXTurno, SecaoDoPrompt } from "../../src/contracts/raio-x.ts";
+import type { ChamadaRaioX, CompactacaoRaioX, ComposicaoRaioX, ExecucaoRaioX, GrupoDeFerramentas, RaioXTurno, SecaoDoPrompt } from "../../src/contracts/raio-x.ts";
+import type { MotivoRecomeco } from "../../src/contracts/turno.ts";
 import { esc } from "../lib/render.ts";
 import { ALERTA_JANELA, CUSTO_DESCONHECIDO, custoDoTurno, mil, modeloCurto, usd } from "./modo-dev.ts";
 
@@ -181,7 +182,18 @@ function abaEnviado(r: RaioXTurno): string {
     ? `<p class="rx-quadro">Busca de ferramentas do Claude Code: <b>${r.execucao.buscaDeFerramentas ? "ligada" : "desligada"}</b> ${r.execucao.buscaDeFerramentas ? "— as definições dos apps só entram quando o modelo as busca." : "neste turno — todas as definições foram carregadas de uma vez."}</p>`
     : "";
   const compactacoes = r.execucao?.compactacoes ?? [];
-  const historico = c.sessaoRetomada
+  // NOD-312: o chip do histórico diz o motivo do recomeço ou "lembrando" (a sessão retomada, o padrão silencioso).
+  const chip = rotuloDaSessao(c);
+  const rec = c.recomeco;
+  // Revisão 1 (baixo 8): o aviso e o resumo vão na entrada do turno (seção 4); as últimas falas, no prompt (seção 3).
+  const itemDoRecomeco = (nome: string, n: number): string => (n > 0 ? `<div class="rx-item"><span class="rx-seta rx-seta-vazia" aria-hidden="true"></span><span class="rx-item-nome">${esc(nome)}</span><span class="rx-num">${esc(mil(n))} caract.</span></div>` : "");
+  const falasDoRecomeco = rec ? itemDoRecomeco("Últimas falas", rec.historicoChars) : "";
+  const entradaDoRecomeco = rec ? itemDoRecomeco("Aviso de recomeço", rec.avisoChars) + itemDoRecomeco("Resumo do trabalho", rec.resumoChars) : "";
+  const historico = rec
+    ? rec.avisoChars > 0
+      ? "Sem a sessão anterior: as últimas falas vão dentro do prompt, na seção “Contexto recente da conversa”; o aviso de recomeço e o resumo do trabalho vão na entrada do turno."
+      : "Sem a sessão anterior: as últimas falas vão dentro do prompt, na seção “Contexto recente da conversa”. A entrada começa com “/” e vai crua para a IA, sem o aviso de recomeço."
+    : c.sessaoRetomada
     ? `Fica na sessão do Claude Code no Mac, não no nod.${compactacoes.length ? ` Depois de cada compactação, o que sobrou: ${compactacoes.map((k) => (k.depois !== null ? mil(k.depois) : "?")).join(" → ")} tokens.` : ""}`
     : "Sessão nova: as últimas falas vão dentro do prompt, na seção “Contexto recente da conversa”.";
   const anexos = c.entrada.anexos ? ` · ${c.entrada.anexos} ${c.entrada.anexos === 1 ? "anexo" : "anexos"}` : "";
@@ -194,8 +206,8 @@ function abaEnviado(r: RaioXTurno): string {
   return `<p class="rx-intro">Na ordem em que o Claude Code monta cada chamada. Tamanho em caracteres, exato; tokens estimados a ${CARACTERES_POR_TOKEN} caracteres por token.</p>${semTexto}${experimentos}
     <section class="rx-secao rx-lista"><div class="rx-secao-cab"><h3>1 · Prompt de sistema do nod</h3><span class="rx-num">${esc(mil(c.promptChars))} caract.</span></div>${prompt}</section>
     <section class="rx-secao rx-lista"><div class="rx-secao-cab"><h3>2 · Definições de ferramentas</h3><span class="rx-num">${esc(mil(totalFerramentas))} caract.</span></div>${grupos}${nativas}${busca}</section>
-    <section class="rx-secao rx-lista"><div class="rx-secao-cab"><h3>3 · Histórico da conversa</h3><span class="rx-num">${c.sessaoRetomada ? "sessão retomada" : "sessão nova"}</span></div><p class="rx-texto">${esc(historico)}</p></section>
-    <section class="rx-secao rx-lista"><div class="rx-secao-cab"><h3>4 · Entrada do turno</h3><span class="rx-num">${esc(mil(c.entrada.chars))} caract.${esc(anexos)}</span></div>${c.entrada.texto !== undefined ? `<p class="rx-texto rx-citacao">“${esc(c.entrada.texto)}”</p>` : ""}</section>`;
+    <section class="rx-secao rx-lista"><div class="rx-secao-cab"><h3>3 · Histórico da conversa</h3><span class="rx-num${chip === "sessão nova" ? "" : " p312-chip"}">${esc(chip)}</span></div><p class="rx-texto">${esc(historico)}</p>${falasDoRecomeco}</section>
+    <section class="rx-secao rx-lista"><div class="rx-secao-cab"><h3>4 · Entrada do turno</h3><span class="rx-num">${esc(mil(c.entrada.chars))} caract.${esc(anexos)}</span></div>${c.entrada.texto !== undefined ? `<p class="rx-texto rx-citacao">“${esc(c.entrada.texto)}”</p>` : ""}${entradaDoRecomeco}</section>`;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -204,11 +216,20 @@ function abaEnviado(r: RaioXTurno): string {
 /** O mesmo fechar da gaveta do Marketplace (redondo, fundo suave), com o X no desenho dos ícones do nod. */
 export const BOTAO_FECHAR = '<button type="button" class="rx-fechar" data-rx="fechar" aria-label="Fechar o Raio-X"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>';
 
+const MOTIVO_NO_CHIP: Record<MotivoRecomeco, string> = { troca_de_conta: "troca de conta", troca_de_ia: "troca de IA", troca_de_maquina: "troca de máquina", sessao_recusada: "sessão recusada" };
+
+/** NOD-312: "recomeçou · troca de conta" (ou de IA, de máquina, sessão recusada), "lembrando" (retomada) ou "sessão nova". */
+export function rotuloDaSessao(c: Pick<ComposicaoRaioX, "sessaoRetomada" | "recomeco">): string {
+  // Revisão 9: um motivo que esta web não conhece (servidor mais novo) fica só "recomeçou", nunca "undefined".
+  if (c.recomeco) return MOTIVO_NO_CHIP[c.recomeco.motivo] ? `recomeçou · ${MOTIVO_NO_CHIP[c.recomeco.motivo]}` : "recomeçou";
+  return c.sessaoRetomada ? "lembrando" : "sessão nova";
+}
+
 function cabecalho(r: RaioXTurno, nome: string, onde: string): string {
   const x = r.execucao;
   const fim = x ? ` → ${new Date(r.criadoEm + x.duracaoMs).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}` : "";
   const quando = `${new Date(r.criadoEm).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}${fim}`;
-  const partes = [nome, quando, modeloCurto(x?.modelo ?? r.composicao?.modelo ?? null), x?.versaoCli ? `Claude Code ${x.versaoCli}` : "", r.composicao ? (r.composicao.sessaoRetomada ? "sessão retomada" : "sessão nova") : "", onde].filter(Boolean);
+  const partes = [nome, quando, modeloCurto(x?.modelo ?? r.composicao?.modelo ?? null), x?.versaoCli ? `Claude Code ${x.versaoCli}` : "", r.composicao ? rotuloDaSessao(r.composicao) : "", onde].filter(Boolean);
   return `<header class="rx-cab"><div><h2 id="rx-titulo">Raio-X do turno</h2><p class="rx-meta">${partes.map(esc).join(" · ")}</p></div>${BOTAO_FECHAR}</header>`;
 }
 

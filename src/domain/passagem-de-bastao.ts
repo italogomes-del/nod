@@ -66,11 +66,32 @@ function secao(titulo: string, itens: readonly ItemDaPassagem[], jaOmitidos = 0,
   return { titulo, itens: ordenados, omitidos: jaOmitidos, aoMenos: aoMenos && jaOmitidos > 0 };
 }
 
-function renderizar(cabeca: string, secoes: readonly Secao[]): string {
+function renderizar(cabeca: string, secoes: readonly Secao[], instrucao: string): string {
   const corpo = secoes
     .filter((s) => s.itens.length > 0 || s.omitidos > 0)
     .map((s) => [s.titulo, ...s.itens, ...(s.omitidos ? [`(…mais ${s.aoMenos ? "de " : ""}${s.omitidos} ${s.omitidos === 1 && !s.aoMenos ? "item omitido" : "itens omitidos"})`] : [])].join("\n"));
-  return [cabeca, ...corpo, INSTRUCAO_DA_PASSAGEM].join("\n\n");
+  return [cabeca, ...corpo, instrucao].join("\n\n");
+}
+
+/** Uma seção a renderizar: título, itens e o que a leitura já deixou de fora. */
+export type SecaoDaPassagem = { titulo: string; itens: readonly ItemDaPassagem[]; omitidos?: number; aoMenos?: boolean };
+
+/**
+ * O renderizador da passagem, por parâmetro (NOD-312: o resumo do trabalho do turno de conversa que recomeça usa o
+ * mesmo mecanismo). Seções das mais recentes para as mais antigas, com teto total `teto`: ao estourar, sai o item mais
+ * antigo da seção mais longa, até caber; cada seção diz quantos itens omitiu. Seção vazia não aparece.
+ */
+export function renderizarSecoes(cabeca: string, entrada: readonly SecaoDaPassagem[], o: { teto: number; instrucao: string }): string {
+  const secoes = entrada.map((s) => secao(s.titulo, s.itens, s.omitidos, s.aoMenos));
+  let texto = renderizar(cabeca, secoes, o.instrucao);
+  while (texto.length > o.teto) {
+    const maior = secoes.reduce<Secao | null>((m, s) => (s.itens.length > 0 && (!m || s.itens.join("\n").length > m.itens.join("\n").length) ? s : m), null);
+    if (!maior) break;
+    maior.itens.pop();
+    maior.omitidos += 1;
+    texto = renderizar(cabeca, secoes, o.instrucao);
+  }
+  return texto.length > o.teto ? cortarEmLinha(texto, o.teto) : texto;
 }
 
 /**
@@ -87,21 +108,12 @@ export function montarPassagemDeBastao(dados: DadosDaPassagem, o: { teto?: numbe
   const pedidoNaEntrada = !!dados.pedidoOriginal?.trim() && iMarca >= 0 && o.entrada!.slice(iMarca + MARCA_DO_PEDIDO_ORIGINAL.length).trimStart().startsWith(dados.pedidoOriginal.trim());
   const pedido = dados.pedidoOriginal?.trim() && !pedidoNaEntrada ? `Pedido original:\n${cortarEmLinha(dados.pedidoOriginal, PEDIDO_ORIGINAL_MAX)}` : null;
   const cabeca = pedido ? `${TITULO_DA_PASSAGEM}\n\n${pedido}` : TITULO_DA_PASSAGEM;
-  const secoes = [
-    secao("O que já foi feito (as últimas falas do bot neste trabalho, mais recentes primeiro):", dados.feito, dados.omitidas?.feito, dados.omitidas?.aoMenos),
-    secao("Decisões e respostas da pessoa:", dados.decisoes, dados.omitidas?.decisoes, dados.omitidas?.aoMenos),
-    secao("O que deu errado:", dados.erros),
-    secao("Efeitos externos já feitos (não repita):", dados.efeitos),
-  ];
-  let texto = renderizar(cabeca, secoes);
-  while (texto.length > teto) {
-    const maior = secoes.reduce<Secao | null>((m, s) => (s.itens.length > 0 && (!m || s.itens.join("\n").length > m.itens.join("\n").length) ? s : m), null);
-    if (!maior) break;
-    maior.itens.pop();
-    maior.omitidos += 1;
-    texto = renderizar(cabeca, secoes);
-  }
-  return texto.length > teto ? cortarEmLinha(texto, teto) : texto;
+  return renderizarSecoes(cabeca, [
+    { titulo: "O que já foi feito (as últimas falas do bot neste trabalho, mais recentes primeiro):", itens: dados.feito, omitidos: dados.omitidas?.feito, aoMenos: dados.omitidas?.aoMenos },
+    { titulo: "Decisões e respostas da pessoa:", itens: dados.decisoes, omitidos: dados.omitidas?.decisoes, aoMenos: dados.omitidas?.aoMenos },
+    { titulo: "O que deu errado:", itens: dados.erros },
+    { titulo: "Efeitos externos já feitos (não repita):", itens: dados.efeitos },
+  ], { teto, instrucao: INSTRUCAO_DA_PASSAGEM });
 }
 
 /**
