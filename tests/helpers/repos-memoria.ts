@@ -3477,9 +3477,10 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
     },
     // ADR-099 (I7 revista): os pedidos entre bots na triagem do dono. A trava e as quedas se provam no Postgres
     // (tests/integration/fila-triagem.test.ts, tests/concurrency/pedidos-cruzados.test.ts); aqui, o mínimo para a regra.
+    // Sem o ramo do piso da NOD-279: aqui `abertos` sempre se comporta como `semPiso` (o piso se prova no Postgres).
     pedidosDeColega: {
       async travar() {},
-      async abertos(desde: number, filtro: { de?: string } = {}): Promise<PedidoAberto[]> {
+      async abertos(desde: number, filtro: { de?: string; semPiso?: boolean } = {}): Promise<PedidoAberto[]> {
         const ms = doTenant(b.mensagens);
         const fechado = (id: unknown) => typeof id === "string" && doTenant(b.trabalhos).some((t) => t.id === id && ["terminado", "parado", "falhou"].includes(t.estado));
         const handoffs = ms.flatMap((m) => (m.payload?.kind === "handoff" && m.payload.tarefaId && m.criadoEm >= desde && !fechado(m.payload.trabalhoId)

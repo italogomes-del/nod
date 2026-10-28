@@ -4,6 +4,15 @@ import type { PedidoAberto } from "../domain/triagem.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
 import { data, msOuNull } from "./conversao.ts";
 
+/**
+ * O id `campo` do payload do handoff (`m`) como uuid, ou null quando não é um uuid (NOD-362). O cast sem a guarda
+ * derrubaria a consulta inteira por um payload malformado; o CASE garante que o cast só roda depois da regex. A regex
+ * aceita maiúsculas (`~*`) e o cast normaliza: um id em maiúsculas agora casa com o turno (o `::text` de antes não casava).
+ */
+function uuidDoPayload(conn: Conn, campo: "tarefaId" | "trabalhoId") {
+  return conn`(case when m.payload->>${campo} ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then (m.payload->>${campo})::uuid end)`;
+}
+
 /** Estados de um trabalho ainda aberto (o mesmo recorte do índice `trabalhos_pedidos_abertos` da 0071). */
 const ABERTOS = ["na_fila", "rodando", "precisa_de_voce", "fechado_ocioso"] as const;
 
@@ -31,34 +40,50 @@ export function pedidosDeColegaRepo(conn: Conn, escopo: Escopo) {
      * NOD-279 (C22, definido em 2026-10-15): o handoff mais velho que `desde` segue aberto enquanto a cadeia da tarefa (o
      * turno da tarefa e as retomadas dele, ou os turnos da task do colega) tem turno pendente ou despachando — a espera da
      * cota não vence a janela. Piso de IDADE_MAX_PEDIDO_RETOMAVEL_MS antes de `desde`, para não montar a cadeia do
-     * histórico todo.
+     * histórico todo. `semPiso` (NOD-362) pula esse ramo: só os handoffs desde `desde` (o aviso no prompt da rotina).
+     *
+     * revisto em 2026-10-28 (NOD-362): a consulta levava de 12 a 83 s em produção e travava o tick do agendador.
+     * - Os ids do payload viram uuid antes de comparar (`uuidDoPayload`), com a coluna nua: assim valem a PK de `turnos`,
+     *   `turnos_por_trabalho` e a PK de `trabalhos` (o `id::text = payload->>…` de antes varria `turnos` por handoff). O
+     *   cast é guardado pela regex: um id que não é uuid vira null (não casa com nada), sem derrubar a consulta.
+     * - Os handoffs vêm por `mensagens_handoffs_por_tempo` e a resposta por `mensagens_peer_ask_por_conversa` (0115).
+     * - A CTE `materialized` tira os respondidos ANTES de montar a cadeia de retomadas, que é a parte cara por handoff.
+     * - Sem `de`, a consulta não leva o filtro (antes `${de} is null or …` deixava o plano genérico).
      */
-    async abertos(desde: number, filtro: { de?: string } = {}): Promise<PedidoAberto[]> {
+    async abertos(desde: number, filtro: { de?: string; semPiso?: boolean } = {}): Promise<PedidoAberto[]> {
       // NOD-259: com o pedido em si (tarefaId, criadoEm, texto = `motivo` do handoff) e, opcional, só os de um bot.
-      const de = filtro.de ?? null;
+      const de = filtro.de;
+      const piso = filtro.semPiso ? desde : desde - IDADE_MAX_PEDIDO_RETOMAVEL_MS;
       const linhas = await conn<{ de: string; para: string; tarefa_id: string | null; criado_em: Date; texto: string | null }[]>`
-        select m.payload->>'de' as de, m.payload->>'para' as para, m.payload->>'tarefaId' as tarefa_id, m.criado_em, m.payload->>'motivo' as texto from mensagens m
-        where m.tenant_id = ${escopo.tenantId} and m.kind = 'handoff' and m.payload->>'tarefaId' is not null
-          and (m.criado_em >= ${data(desde)} or (m.criado_em >= ${data(desde - IDADE_MAX_PEDIDO_RETOMAVEL_MS)} and (
-            exists (select 1 from turnos v where v.tenant_id = m.tenant_id and v.trabalho_id::text = m.payload->>'trabalhoId'
-              and v.estado in ('pendente', 'despachando'))
+        with h as materialized (
+          select m.payload->>'de' as de, m.payload->>'para' as para, m.payload->>'tarefaId' as tarefa_id, m.criado_em,
+            m.payload->>'motivo' as texto, ${uuidDoPayload(conn, "tarefaId")} as tarefa, ${uuidDoPayload(conn, "trabalhoId")} as trabalho
+          from mensagens m
+          where m.tenant_id = ${escopo.tenantId} and m.kind = 'handoff' and m.payload->>'tarefaId' is not null
+            and m.criado_em >= ${data(piso)}
+            ${de === undefined ? conn`` : conn`and m.payload->>'de' = ${de}::text`}
+            and not exists (select 1 from mensagens r where r.tenant_id = m.tenant_id and r.conversa_id = m.conversa_id and r.kind = 'peer_ask'
+              and r.payload->>'tarefaId' = m.payload->>'tarefaId')
+        )
+        select h.de, h.para, h.tarefa_id, h.criado_em, h.texto from h
+        where not exists (select 1 from trabalhos k where k.tenant_id = ${escopo.tenantId} and h.trabalho is not null and k.id = h.trabalho
+            and k.estado in ('terminado', 'parado', 'falhou'))
+          ${filtro.semPiso ? conn`` : conn`and (h.criado_em >= ${data(desde)}
+            -- o "is not null" casa com o predicado de turnos_por_trabalho (sem ele o plano varre turnos num subplano hashed).
+            or exists (select 1 from turnos v where v.tenant_id = ${escopo.tenantId} and h.trabalho is not null and v.trabalho_id is not null
+              and v.trabalho_id = h.trabalho and v.estado in ('pendente', 'despachando'))
             or exists (
               with recursive cadeia(id, n) as (
-                select d.id, 0 from turnos d where d.tenant_id = m.tenant_id and d.id::text = m.payload->>'tarefaId'
+                select d.id, 0 from turnos d where d.tenant_id = ${escopo.tenantId} and d.id = h.tarefa
                 union all
-                select r.id, c.n + 1 from cadeia c join turnos r on r.tenant_id = m.tenant_id and r.retoma_turno_id = c.id and r.origem = 'retomada'
+                select r.id, c.n + 1 from cadeia c join turnos r on r.tenant_id = ${escopo.tenantId} and r.retoma_turno_id = c.id and r.origem = 'retomada'
                 where c.n < 10
               )
-              select 1 from cadeia c join turnos v on v.tenant_id = m.tenant_id and v.id = c.id where v.estado in ('pendente', 'despachando')))))
-          and (${de}::text is null or m.payload->>'de' = ${de}::text)
-          and not exists (select 1 from mensagens r where r.tenant_id = m.tenant_id and r.conversa_id = m.conversa_id and r.kind = 'peer_ask'
-            and r.payload->>'tarefaId' = m.payload->>'tarefaId')
-          and not exists (select 1 from trabalhos k where k.tenant_id = m.tenant_id and k.id::text = m.payload->>'trabalhoId'
-            and k.estado in ('terminado', 'parado', 'falhou'))
+              select 1 from cadeia c join turnos v on v.tenant_id = ${escopo.tenantId} and v.id = c.id where v.estado in ('pendente', 'despachando')))`}
         union
         select w.pedido_por_agente_id::text, w.agente_id::text, null, w.criado_em, null from trabalhos w
         where w.tenant_id = ${escopo.tenantId} and w.pedido_por_agente_id is not null and w.estado = any(${[...ABERTOS]}::text[])
-          and (${de}::text is null or w.pedido_por_agente_id::text = ${de}::text)`;
+          ${de === undefined ? conn`` : conn`and w.pedido_por_agente_id::text = ${de}::text`}`;
       return linhas
         .filter((l) => l.de && l.para)
         .map((l) => ({ de: l.de, para: l.para, tarefaId: l.tarefa_id, criadoEm: l.criado_em.getTime(), texto: l.texto }));

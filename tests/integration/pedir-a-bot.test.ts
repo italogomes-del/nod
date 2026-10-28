@@ -8,6 +8,8 @@ import { criarRepos } from "../../src/repositories/index.ts";
 import type { Repos } from "../../src/repositories/tipos.ts";
 import { chamarFerramenta } from "../../src/use-cases/chamar-ferramenta.ts";
 import { decidirAcesso } from "../../src/use-cases/decidir-acesso.ts";
+import { dispararRotina, LIMIAR_PEDIDOS_ABERTOS_MS, nivelDoTempoDosPedidos } from "../../src/use-cases/disparar-rotina.ts";
+import { definirDestinoDoLog } from "../../src/obs/log.ts";
 import { emitirPlanoTurno } from "../../src/use-cases/emitir-plano-turno.ts";
 import { enviarMensagem } from "../../src/use-cases/enviar-mensagem.ts";
 import { entregarRespostaPeer } from "../../src/use-cases/entregar-resposta-peer.ts";
@@ -319,6 +321,117 @@ describeIntegracao("pedir_a_bot (ADR-058): quem recebe usa os acessos dele", () 
       // A cadeia acabou sem resposta: o pedido de 30 h sai da espera circular, como antes.
       await trx`update turnos set estado = 'interrompido', motivo_interrupcao = 'trabalho_incompleto' where id = ${volta!.id}`;
       expect(await repos.pedidosDeColega.abertos(AGORA - JANELA_PEDIDOS_ABERTOS_MS)).not.toContainEqual(aresta);
+    });
+  });
+
+  it("NOD-362: tarefaId/trabalhoId do handoff que não é uuid não derruba abertos (com e sem de, com e sem o piso)", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { taga, deps, repos, turnoTaga } = await cenario(trx);
+      const tarefaId = tarefaDoPedido((await pedir(deps, { turnoId: turnoTaga!.id, agenteId: taga.agenteId, conversaId: taga.conversaId })).data);
+      // Um com 2 h (na janela) e um com 30 h (cai no ramo do piso, que monta a cadeia pelo tarefaId).
+      for (const [ids, horas] of [[{ tarefaId: "nao-e-uuid", trabalhoId: "tambem-nao" }, 2], [{ tarefaId: "00000000-0000-0000-0000-00000000000g", trabalhoId: "" }, 30],
+        // uuid cercado de lixo: sem as âncoras da regex o cast quebraria a consulta (mutante do QA).
+        [{ tarefaId: `x${tarefaId}`, trabalhoId: `${randomUUID()} ` }, 30]] as const) {
+        await trx`insert into mensagens (tenant_id, owner_id, visibility, conversa_id, autor_tipo, autor_id, conta_de_execucao, executor, locality, locality_reason, decidido_por, regra_versao, kind, texto, confianca, payload, criado_em)
+          select tenant_id, owner_id, visibility, conversa_id, autor_tipo, autor_id, conta_de_execucao, executor, locality, locality_reason, decidido_por, regra_versao, kind, texto, confianca,
+            payload || ${trx.json(ids)}, ${new Date(AGORA - horas * 3_600_000)}
+          from mensagens where kind = 'handoff' and payload->>'tarefaId' = ${tarefaId}`;
+      }
+      const desde = AGORA - JANELA_PEDIDOS_ABERTOS_MS;
+      const daTaga = (ps: readonly { de: string; tarefaId: string | null }[]) => ps.filter((p) => p.de === taga.agenteId).map((p) => p.tarefaId).sort();
+      for (const filtro of [{}, { de: taga.agenteId }, { semPiso: true }, { de: taga.agenteId, semPiso: true }]) {
+        // O de 2 h segue aberto (nenhuma resposta da tarefa "nao-e-uuid"); o de 30 h sem cadeia viva sai, como antes.
+        expect(daTaga(await repos.pedidosDeColega.abertos(desde, filtro))).toEqual(["nao-e-uuid", tarefaId].sort());
+      }
+    });
+  });
+
+  it("NOD-362: abertos desce pelos índices da 0115 e pela PK de trabalhos, sem varrer turnos, com e sem de", async () => {
+    // Critério 1: a consulta real, contada pelos scans da própria transação (sob RLS, como nod_app). Sem seq scan para
+    // o planejador não preferir varrer as tabelas pequenas do teste.
+    await withRollback(MARLON, async (trx) => {
+      const { taga, dev1, deps, repos, turnoTaga } = await cenario(trx);
+      const tarefaId = tarefaDoPedido((await pedir(deps, { turnoId: turnoTaga!.id, agenteId: taga.agenteId, conversaId: taga.conversaId })).data);
+      const w = (await repos.trabalhos.criar({ agenteId: dev1.agenteId, conversaId: dev1.conversaId, titulo: "task", origem: "pessoa" }))!;
+      // 30 h e com trabalhoId: passa pelos ramos do turno da task e da cadeia de retomadas.
+      await trx`update mensagens set criado_em = ${new Date(AGORA - 30 * 3_600_000)}, payload = payload || ${trx.json({ trabalhoId: w.id })}
+        where kind = 'handoff' and payload->>'tarefaId' = ${tarefaId}`;
+      await trx`set local enable_seqscan = off`;
+      // Em `turnos` o índice escolhido varia com o volume (pkey, turnos_vivos, turnos_por_trabalho); o que não pode é varrer.
+      const indices = ["mensagens_handoffs_por_tempo", "mensagens_peer_ask_por_conversa", "trabalhos_pkey"];
+      const scans = async () => {
+        const [l] = await trx<{ indices: Record<string, number>; seq_turnos: number }[]>`
+          select (select jsonb_object_agg(n, pg_stat_get_xact_numscans(n::regclass)) from unnest(${indices}::text[]) n) as indices,
+            (select seq_scan from pg_stat_xact_user_tables where relname = 'turnos')::int as seq_turnos`;
+        return l!;
+      };
+      for (const filtro of [{}, { de: taga.agenteId }]) {
+        const antes = await scans();
+        await repos.pedidosDeColega.abertos(AGORA - JANELA_PEDIDOS_ABERTOS_MS, filtro);
+        const depois = await scans();
+        for (const i of indices) expect({ filtro, i, usou: (depois.indices[i] ?? 0) > (antes.indices[i] ?? 0) }).toEqual({ filtro, i, usou: true });
+        expect(depois.seq_turnos).toBe(antes.seq_turnos);
+      }
+    });
+  });
+
+  it("NOD-362: handoff de 30 h com trabalhoId (uuid) segue aberto pelo turno vivo da task e sai quando a task acaba", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { taga, dev1, deps, repos, turnoTaga } = await cenario(trx);
+      const tarefaId = tarefaDoPedido((await pedir(deps, { turnoId: turnoTaga!.id, agenteId: taga.agenteId, conversaId: taga.conversaId })).data);
+      const w = (await repos.trabalhos.criar({ agenteId: dev1.agenteId, conversaId: dev1.conversaId, titulo: "task do colega", origem: "pessoa" }))!;
+      await trx`update mensagens set criado_em = ${new Date(AGORA - 30 * 3_600_000)}, payload = payload || ${trx.json({ trabalhoId: w.id })}
+        where kind = 'handoff' and payload->>'tarefaId' = ${tarefaId}`;
+      // A cadeia do tarefaId acabou: o que segura o pedido é só o turno pendente da task (ramo `turnos_por_trabalho`).
+      await trx`update turnos set estado = 'interrompido', motivo_interrupcao = 'trabalho_incompleto' where id = ${tarefaId}`;
+      const daTask = await repos.turnos.enfileirar({ executor: "catcher", conversaId: dev1.conversaId, agenteId: dev1.agenteId, origem: "conversa", prazoEm: AGORA + 60_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
+      await trx`update turnos set trabalho_id = ${w.id} where id = ${daTask!.id}`;
+      const desde = AGORA - JANELA_PEDIDOS_ABERTOS_MS;
+      const aresta = expect.objectContaining({ de: taga.agenteId, tarefaId });
+      expect(await repos.pedidosDeColega.abertos(desde)).toContainEqual(aresta);
+      expect(await repos.pedidosDeColega.abertos(desde, { de: taga.agenteId })).toContainEqual(aresta);
+      // O turno da task acabou: sem cadeia viva, o de 30 h sai.
+      await trx`update turnos set estado = 'interrompido', motivo_interrupcao = 'trabalho_incompleto' where id = ${daTask!.id}`;
+      expect(await repos.pedidosDeColega.abertos(desde)).not.toContainEqual(aresta);
+      // Na janela (2 h), só a task terminada fecha o pedido (`not exists` por `trabalhos_pkey`).
+      await trx`update mensagens set criado_em = ${new Date(AGORA - 2 * 3_600_000)} where kind = 'handoff' and payload->>'tarefaId' = ${tarefaId}`;
+      expect(await repos.pedidosDeColega.abertos(desde)).toContainEqual(aresta);
+      await trx`update trabalhos set estado = 'terminado', terminado_em = now() where id = ${w.id}`;
+      expect(await repos.pedidosDeColega.abertos(desde)).not.toContainEqual(aresta);
+      expect(await repos.pedidosDeColega.abertos(desde, { de: taga.agenteId, semPiso: true })).not.toContainEqual(aresta);
+    });
+  });
+
+  it("NOD-362: no disparo da rotina o pedido de 2 h entra no prompt e o de 30 h preso na cota não, mas segue em abertos", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { taga, dev1, deps, repos, turnoTaga } = await cenario(trx);
+      const recente = tarefaDoPedido((await pedir(deps, { turnoId: turnoTaga!.id, agenteId: taga.agenteId, conversaId: taga.conversaId }, "Dev 1", "revisar o PR recente")).data);
+      const outroTurno = await repos.turnos.enfileirar({ executor: "catcher", conversaId: taga.conversaId, agenteId: taga.agenteId, origem: "conversa", prazoEm: AGORA + 60_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
+      const antigo = tarefaDoPedido((await pedir(deps, { turnoId: outroTurno!.id, agenteId: taga.agenteId, conversaId: taga.conversaId }, "Dev 1", "revisar o PR antigo na cota")).data);
+      await trx`update mensagens set criado_em = ${new Date(AGORA - 2 * 3_600_000)} where kind = 'handoff' and payload->>'tarefaId' = ${recente}`;
+      await trx`update mensagens set criado_em = ${new Date(AGORA - 30 * 3_600_000)} where kind = 'handoff' and payload->>'tarefaId' = ${antigo}`;
+      // O de 30 h: a triagem parou no limite da IA e a volta da cota espera a renovação (o cenário da NOD-279).
+      await trx`update turnos set estado = 'interrompido', motivo_interrupcao = 'trabalho_incompleto' where id = ${antigo}`;
+      await repos.turnos.enfileirar({ executor: "catcher", conversaId: dev1.conversaId, agenteId: dev1.agenteId, origem: "retomada", retomaTurnoId: antigo, prazoEm: AGORA + 86_400_000, profundidade: 1, entradaTexto: entradaDaVoltaDaCota("Claude Code"), entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli", acordarEm: AGORA + 3_600_000 });
+
+      const rotina = await repos.rotinas.criar({ agenteId: taga.agenteId, conversaId: taga.conversaId, cron: "0 * * * *", fusoIana: "UTC", instrucao: "Ver o board", fonte: "Linear", entregavel: "chat", limitesAprovacao: "", politicaSemDado: "", proximaExecucao: AGORA, exigeAprovacao: false });
+      const logs: { nivel: string; evento: string; ms?: number; pedidos?: number; rotina_id?: string }[] = [];
+      definirDestinoDoLog((linha) => logs.push(JSON.parse(linha) as (typeof logs)[number]));
+      const r = await dispararRotina(deps, { rotina: rotina!, instanteAgendado: AGORA, machineId: randomUUID(), executor: "catcher" }).finally(() => definirDestinoDoLog(null));
+      if (!("turno" in r.data)) throw new Error("a rotina deveria disparar");
+      // O tempo da consulta vai para o log (critério 5): info abaixo do limiar, com o número de pedidos do aviso.
+      const tempo = logs.find((l) => l.evento === "pedidos_abertos_ms");
+      expect(tempo).toMatchObject({ nivel: "info", rotina_id: rotina!.id, pedidos: 1 });
+      expect(tempo?.ms).toEqual(expect.any(Number));
+      expect([nivelDoTempoDosPedidos(LIMIAR_PEDIDOS_ABERTOS_MS), nivelDoTempoDosPedidos(LIMIAR_PEDIDOS_ABERTOS_MS + 1)]).toEqual(["info", "aviso"]);
+      const entrada = (await repos.turnos.buscar(r.data.turno.id))?.entradaTexto ?? "";
+      expect(entrada).toContain("Pedidos seus a colegas ainda sem resposta");
+      expect(entrada).toContain("revisar o PR recente");
+      expect(entrada).not.toContain("revisar o PR antigo na cota");
+      // A guarda do pedir_a_bot (sem a opção) segue vendo o pedido preso na cota.
+      const tarefas = (await repos.pedidosDeColega.abertos(AGORA - JANELA_PEDIDOS_ABERTOS_MS, { de: taga.agenteId })).map((p) => p.tarefaId);
+      expect(tarefas).toEqual(expect.arrayContaining([recente, antigo]));
+      expect((await repos.pedidosDeColega.abertos(AGORA - JANELA_PEDIDOS_ABERTOS_MS)).map((p) => p.tarefaId)).toEqual(expect.arrayContaining([recente, antigo]));
     });
   });
 });

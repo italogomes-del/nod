@@ -14,6 +14,7 @@ import { resumoCron } from "../domain/rotina-texto.ts";
 import { agenteVisivel, autoriaAgente, autoriaPessoa, carimbo, evento, PRAZO_DECISAO_MS, rotinaDoTurno } from "./apoio-l7.ts";
 import { eventoTrabalhoMudou } from "./trabalhos.ts";
 import { prazoDoColega } from "./janela-pulada.ts";
+import { log } from "../obs/log.ts";
 import { pedidosAbertosDoBot } from "./pedidos-abertos.ts";
 import { decisoesQueSeguramARotina, preVooDaRotina, REGRA_PRE_VOO, type BloqueioDoPreVoo } from "./pre-voo-rotina.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
@@ -311,6 +312,27 @@ export const dispararRotina: CasoDeUso<EntradaDisparo, SaidaDisparo> = async (de
   return fechoDasVoltas.length === 0 ? r : { ...r, events: [...fechoDasVoltas, ...(r.events ?? [])] };
 };
 
+/** definido em 2026-10-28 (NOD-362): acima disto a busca dos pedidos abertos no disparo vira aviso no log. */
+export const LIMIAR_PEDIDOS_ABERTOS_MS = 500;
+
+/** O nível do log `pedidos_abertos_ms`: aviso acima do limiar (NOD-362). */
+export function nivelDoTempoDosPedidos(ms: number): "info" | "aviso" {
+  return ms > LIMIAR_PEDIDOS_ABERTOS_MS ? "aviso" : "info";
+}
+
+/**
+ * Os pedidos abertos do bot para o prompt da rotina (NOD-259), só os da janela (`semPiso`, NOD-362): o disparo roda
+ * dentro do tick do agendador, e o pedido de mais de 24 h preso na cota não precisa aparecer no aviso da rotina. Mede
+ * o tempo (`pedidos_abertos_ms`) para provar no log que a consulta não volta a segurar o tick.
+ */
+async function pedidosAbertosDaRotina(deps: Deps, rotina: Rotina, agora: number): Promise<PedidoAbertoNoPrompt[]> {
+  const inicio = performance.now();
+  const pedidos = await pedidosAbertosDoBot(deps, rotina.agenteId, agora, [], { semPiso: true });
+  const ms = Math.round(performance.now() - inicio);
+  log(nivelDoTempoDosPedidos(ms), "pedidos_abertos_ms", { rotina_id: rotina.id, agente_id: rotina.agenteId, ms, pedidos: pedidos.length });
+  return pedidos;
+}
+
 /** O resto do disparo, depois do pré-voo: o turno da rotina. */
 async function abrirJanela(deps: Deps, input: EntradaDisparo, agente: Awaited<ReturnType<typeof agenteVisivel>>, agora: number, antes: RuntimeEvent[]): Promise<{ data: SaidaDisparo; events?: RuntimeEvent[] }> {
   const { rotina, instanteAgendado } = input;
@@ -325,7 +347,7 @@ async function abrirJanela(deps: Deps, input: EntradaDisparo, agente: Awaited<Re
     origem: "rotina",
     prazoEm: agora + PRAZO_DECISAO_MS,
     profundidade: 0,
-    entradaTexto: montarEntradaRotina(rotina, instanteAgendado, await pedidosAbertosDoBot(deps, rotina.agenteId, agora)),
+    entradaTexto: montarEntradaRotina(rotina, instanteAgendado, await pedidosAbertosDaRotina(deps, rotina, agora)),
     // revisto em 2026-10-01 (ADR-066): a entrada da rotina é confiável — é a instrução que a pessoa confirmou. Antes
     // ela nascia não confiável quando a FONTE citava um app de fora (GitHub, Gmail), e o catálogo perdia a escrita:
     // 1.040 de 1.130 turnos de rotina saíram assim até 30/09. A marca agora vem do que o bot lê (chamar-ferramenta.ts).

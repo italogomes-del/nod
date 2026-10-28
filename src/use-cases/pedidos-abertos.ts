@@ -13,9 +13,15 @@ export const JANELA_PEDIDOS_ABERTOS_MS = PRAZO_DECISAO_PADRAO_MS;
  * Os pedidos que `agenteId` fez a colegas e ainda esperam resposta (NOD-259), com o nome de quem recebe, na mesma janela
  * da espera circular e da guarda do `pedir_a_bot`. Só os do handoff (a frente de um pedido é o mesmo pedido). `exceto`
  * tira tarefas que o chamador já sabe respondidas (a que está sendo entregue agora).
+ *
+ * definido em 2026-10-28 (NOD-362): `semPiso` lista só os handoffs da janela, sem o pedido mais velho que segue aberto
+ * por esperar a cota (NOD-279). É o do prompt da rotina: um aviso, não uma guarda, e o disparo roda dentro do tick do
+ * agendador. A guarda do pedir_a_bot (espera circular, pedido repetido) segue com a regra inteira.
  */
-export async function pedidosAbertosDoBot(deps: Pick<Deps, "repos">, agenteId: string, agora: number, exceto: readonly string[] = []): Promise<PedidoAbertoNoPrompt[]> {
-  const abertos = (await deps.repos.pedidosDeColega.abertos(agora - JANELA_PEDIDOS_ABERTOS_MS, { de: agenteId }))
+export async function pedidosAbertosDoBot(
+  deps: Pick<Deps, "repos">, agenteId: string, agora: number, exceto: readonly string[] = [], opcoes: { semPiso?: boolean } = {},
+): Promise<PedidoAbertoNoPrompt[]> {
+  const abertos = (await deps.repos.pedidosDeColega.abertos(agora - JANELA_PEDIDOS_ABERTOS_MS, { de: agenteId, semPiso: opcoes.semPiso }))
     .filter((p) => p.de === agenteId && p.tarefaId !== null && !exceto.includes(p.tarefaId));
   if (abertos.length === 0) return [];
   const nomes = new Map<string, string>();
