@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { algumCwdDentro, caminhoDoRemotoLocal, lerLsRemote, prerequisitosDoBundle, saiDoGuardado, temArquivoEscondidoDoStatus } from "../../../src/domain/clone-refazivel.ts";
+import { algumCwdDentro, caminhoDoRemotoLocal, lerLsRemote, prerequisitosDoBundle, saiDoGuardado, temArquivoEscondidoDoStatus, temTagSoLocal } from "../../../src/domain/clone-refazivel.ts";
 
 describe("NOD-295 A: as regras puras do clone refazível", () => {
   it("remoto de rede não tem caminho local; o local (caminho, file://) tem", () => {
@@ -37,6 +37,26 @@ describe("QA #413: leitura do remoto, do bundle e do cwd", () => {
     expect(new Set(r.commits)).toEqual(new Set(["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "dddddddddddddddddddddddddddddddddddddddd"]));
     expect(r.objetos.has("cccccccccccccccccccccccccccccccccccccccc")).toBe(true);
     expect(lerLsRemote("").commits).toEqual([]);
+  });
+
+  it("NOD-319: ls-remote devolve as tags pelo nome, com o objeto da ref (o da anotada, não o descascado)", () => {
+    const r = lerLsRemote("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\trefs/heads/main\ncccccccccccccccccccccccccccccccccccccccc\trefs/tags/v1\nbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\trefs/tags/v1^{}\ndddddddddddddddddddddddddddddddddddddddd\trefs/tags/leve\n");
+    expect([...r.tags]).toEqual([["refs/tags/v1", "cccccccccccccccccccccccccccccccccccccccc"], ["refs/tags/leve", "dddddddddddddddddddddddddddddddddddddddd"]]);
+  });
+
+  it("NOD-319: tag só local = nenhum remoto com o mesmo nome e o mesmo objeto; linha ilegível é dúvida", () => {
+    const a = "a".repeat(40);
+    const b = "b".repeat(40);
+    const origin = new Map([["refs/tags/v1", a]]);
+    const espelho = new Map([["refs/tags/v2", b]]);
+    expect(temTagSoLocal("", [origin])).toBe(false);
+    expect(temTagSoLocal(`refs/tags/v1 ${a}\n`, [origin])).toBe(false);
+    expect(temTagSoLocal(`refs/tags/v1 ${a}\nrefs/tags/v2 ${b}`, [origin, espelho])).toBe(false);
+    expect(temTagSoLocal(`refs/tags/v1 ${b}`, [origin])).toBe(true); // mesmo nome, outro objeto
+    expect(temTagSoLocal(`refs/tags/local ${a}`, [origin])).toBe(true); // mesmo objeto, outro nome (a leve)
+    expect(temTagSoLocal(`refs/tags/v1 ${a}`, [])).toBe(true);
+    expect(temTagSoLocal("lixo", [origin])).toBe(true);
+    expect(temTagSoLocal(`refs/heads/v1 ${a}`, [origin])).toBe(true);
   });
 
   it("bundle: os pré-requisitos são as linhas '-' do cabeçalho", () => {

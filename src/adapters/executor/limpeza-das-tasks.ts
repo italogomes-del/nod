@@ -432,8 +432,18 @@ async function outroDependeDe(clone: string, outros: readonly string[], executar
  * sai: a pasta fica para o caminho da ADR-088/096 (vira `encerrada` em 3 dias, ou em 2 h com o disco apertado, e é
  * guardada antes).
  */
-async function provarSemTrabalho(base: string, raiz: string, p: PastaParaLimpar, achados: Achados, montagens: readonly string[], executar: ExecutarComando): Promise<{ provadas: Map<string, string>; clones: Set<string> } | { duvida: string }> {
+async function provarSemTrabalho(base: string, raiz: string, p: PastaParaLimpar, achados: Achados, montagens: readonly string[], executar: ExecutarComando, simular: boolean): Promise<{ provadas: Map<string, string>; clones: Set<string>; fotos: Map<string, string | null> } | { duvida: string }> {
+  // NOD-319 (ressalva 1 do QA do #413): o processo vivo em qualquer lugar da pasta (um shell em `<frente>/tmp`, um
+  // servidor na worktree) segura a frente inteira — antes só se olhava dentro do clone, como no caminho `encerrada`.
+  if (await temProcessoVivo(base)) return { duvida: "processo_vivo" };
+  // Revisão do #577 (A1): o retrato de cada worktree e clone sai ANTES das conferências — o que mudar durante a prova
+  // (até minutos de rede por clone) também aparece na reconferência antes do rm. Na simulação nada sai: não se tira.
   if (!(await ficariaVazia(base, 0, new Set([...achados.worktrees, ...achados.clones]), montagens, false))) return { duvida: "sobras" };
+  const fotos = new Map<string, string | null>();
+  if (!simular) {
+    for (const wt of achados.worktrees) fotos.set(wt, await fotoDoRepo(wt, executar, "worktree"));
+    for (const c of achados.clones) fotos.set(c, await fotoDoRepo(c, executar, "clone"));
+  }
   const provadas = new Map<string, string>();
   for (const wt of achados.worktrees) {
     if (await cloneSumiu(wt, raiz)) return { duvida: "clone_sumiu" };
@@ -453,7 +463,7 @@ async function provarSemTrabalho(base: string, raiz: string, p: PastaParaLimpar,
     if (motivo) return { duvida: `clone_${motivo}` };
     clones.add(clone);
   }
-  return { provadas, clones };
+  return { provadas, clones, fotos };
 }
 
 function relatoVazio(simular: boolean): RelatoLimpeza {
@@ -506,8 +516,9 @@ export async function limparPastas(pastas: readonly PastaParaLimpar[], o: Opcoes
     // ADR-099 (I5): a frente sem trabalho só passa daqui com a prova inteira; a dúvida conta uma vez, como `sem_prova`.
     let provadas: Map<string, string> | null = null;
     let clonesProvados: Set<string> | null = null;
+    let fotos = new Map<string, string | null>();
     if (p.quando === "sem_trabalho") {
-      const prova = await provarSemTrabalho(base, raiz, p, achados, montagens, o.executar);
+      const prova = await provarSemTrabalho(base, raiz, p, achados, montagens, o.executar, simular);
       if ("duvida" in prova) {
         pular("sem_prova");
         log("info", "limpeza_sem_trabalho", { trabalho_id: p.trabalhoId, decisao: "fica", motivo: prova.duvida });
@@ -515,8 +526,38 @@ export async function limparPastas(pastas: readonly PastaParaLimpar[], o: Opcoes
       }
       provadas = prova.provadas;
       clonesProvados = prova.clones;
+      fotos = prova.fotos;
       log("info", "limpeza_sem_trabalho", { trabalho_id: p.trabalhoId, decisao: simular ? "simulada" : "apaga", worktrees: provadas.size, clones: clonesProvados.size });
     }
+    // Logo antes da primeira remoção: o servidor ainda oferece a pasta e ela não está em uso. O processo vivo e o retrato
+    // da frente sem trabalho são conferidos em `aindaSemTrabalho`, antes de cada remoção.
+    const reconfirmar = async (): Promise<boolean> => {
+      return (o.reconfirmar ? await o.reconfirmar(p) : true) && !o.emUso?.(rel);
+    };
+    // Revisão do #577 (M1): entre uma remoção e outra da frente sem trabalho (o `worktree remove` e o `rm -rf` podem
+    // levar minutos), um turno pode ter entrado. Antes de CADA remoção: nenhum processo vivo na pasta, o servidor não a
+    // marcou em uso e, no clone provado, as refs, o HEAD e o status iguais aos da prova. Mudou = desiste da pasta.
+    const aindaSemTrabalho = async (repo: string): Promise<boolean> => {
+      if (p.quando !== "sem_trabalho" || simular) return true;
+      let motivo: string | null = null;
+      if (o.emUso?.(rel)) motivo = "em_uso";
+      else if (await temProcessoVivo(base)) motivo = "processo_vivo";
+      else if (fotos.has(repo)) {
+        const antes = fotos.get(repo);
+        if (antes === null || antes !== (await fotoDoRepo(repo, o.executar, provadas?.has(repo) ? "worktree" : "clone"))) motivo = "mudou";
+      }
+      // QA do #577: o `rm -rf` do clone leva junto o registro das worktrees dele. Agora, só ele mesmo pode estar na lista:
+      // a da frente que o git recusou remover, ou uma nova criada depois da prova (fora da pasta), seguram o clone.
+      if (motivo === null && clonesProvados?.has(repo)) {
+        const lista = await worktreesDoClone(repo, o.executar);
+        const proprio = comparavel(await real(repo));
+        if (lista === null) motivo = "erro";
+        else for (const w of lista) if (comparavel(await real(w.caminho)) !== proprio) { motivo = "worktree_viva"; break; }
+      }
+      if (motivo === null) return true;
+      log("info", "limpeza_sem_trabalho", { trabalho_id: p.trabalhoId, decisao: "desistiu", motivo });
+      return false;
+    };
     const saem = new Set<string>();
     let confirmada: boolean | null = null;
     // ADR-096 §4: montagem, travada ou erro numa worktree seguram a pasta inteira — nem guardar se tenta.
@@ -541,7 +582,7 @@ export async function limparPastas(pastas: readonly PastaParaLimpar[], o: Opcoes
         continue;
       }
       // Logo antes da primeira remoção da pasta: o servidor ainda a oferece, e nenhum turno deste Mac começou nela.
-      if (confirmada === null) confirmada = (o.reconfirmar ? await o.reconfirmar(p) : true) && !o.emUso?.(rel);
+      if (confirmada === null) confirmada = await reconfirmar();
       if (!confirmada) { pular("nao_reconfirmada"); break; }
       if (simular) {
         const du = await o.executar("du", ["-sk", wt], { prazoMs: PRAZO_MEDIO_MS, fundo: true });
@@ -554,6 +595,7 @@ export async function limparPastas(pastas: readonly PastaParaLimpar[], o: Opcoes
         log("info", "limpeza_simulada_worktree", { trabalho_id: p.trabalhoId, caminho: relative(raiz, wt), quando: p.quando, estimado_mb: Math.round(bytes / 1_048_576) });
         continue;
       }
+      if (!(await aindaSemTrabalho(wt))) { confirmada = false; pular("nao_reconfirmada"); break; }
       const antes = await livre(raiz).catch(() => null);
       // SEM --force (ADR-088): se algo mudou desde a conferência, o git ainda recusa a worktree suja.
       const r = await o.executar("git", ["-C", dirComum, "worktree", "remove", wt], { prazoMs: PRAZO_REMOVER_MS, fundo: true });
@@ -579,7 +621,7 @@ export async function limparPastas(pastas: readonly PastaParaLimpar[], o: Opcoes
         log("info", "limpeza_clone_fica", { trabalho_id: p.trabalhoId, caminho: relative(raiz, clone), motivo });
         continue;
       }
-      if (confirmada === null) confirmada = (o.reconfirmar ? await o.reconfirmar(p) : true) && !o.emUso?.(rel);
+      if (confirmada === null) confirmada = await reconfirmar();
       if (!confirmada) { pular("nao_reconfirmada"); break; }
       if (simular) {
         const du = await o.executar("du", ["-sk", clone], { prazoMs: PRAZO_MEDIO_MS, fundo: true });
@@ -591,6 +633,7 @@ export async function limparPastas(pastas: readonly PastaParaLimpar[], o: Opcoes
         log("info", "limpeza_simulada_clone", { trabalho_id: p.trabalhoId, caminho: relative(raiz, clone), quando: p.quando, estimado_mb: Math.round(bytes / 1_048_576) });
         continue;
       }
+      if (!(await aindaSemTrabalho(clone))) { confirmada = false; pular("nao_reconfirmada"); break; }
       const antes = await livre(raiz).catch(() => null);
       const rm = await o.executar("rm", ["-rf", "--", clone], { prazoMs: PRAZO_REMOVER_MS, fundo: true });
       if (rm.codigo !== 0 || (await existePadrao(clone))) {
@@ -613,7 +656,7 @@ export async function limparPastas(pastas: readonly PastaParaLimpar[], o: Opcoes
     // menos tempo (`so_com_pr_mergeado`) a pasta fica: o bot ainda pode voltar a ela.
     if (p.quando !== "encerrada" || segura) continue;
     if (confirmada === null) {
-      confirmada = (o.reconfirmar ? await o.reconfirmar(p) : true) && !o.emUso?.(rel);
+      confirmada = await reconfirmar();
       if (!confirmada) { pular("nao_reconfirmada"); continue; }
     }
     // ADR-106 (revisão do #320): de novo logo antes de apagar — a compactação pode levar 20 min.
@@ -847,6 +890,29 @@ export type LimpezaDasTasks = { parar(): void; passada(o?: { apertado?: boolean 
  * pergunta leva só o código daquela pasta — com a lista inteira, a pasta que caía fora das 500 da resposta não se
  * reconfirmava.
  */
+/**
+ * Revisão do #577 (M1, A1): o retrato barato e sem rede do que a remoção apaga. Igual ao da prova = nada foi commitado,
+ * movido ou escrito desde então; `null` (git falhou) nunca bate.
+ * - clone (o `rm -rf` leva tudo): refs com o objeto, o HEAD, o `status` com os ignorados (um `.env` novo) e quantos
+ *   commits o reflog alcança (o commit seguido de `reset` some das refs, não dele);
+ * - worktree (o `worktree remove` leva só ela; refs e branches ficam no clone, que outras frentes mexem): o HEAD, o
+ *   reflog do HEAD dela e o `status` com os ignorados.
+ */
+async function fotoDoRepo(repo: string, executar: ExecutarComando, tipo: "clone" | "worktree"): Promise<string | null> {
+  const op = { prazoMs: PRAZO_MEDIO_MS, fundo: true };
+  const comandos: string[][] = tipo === "clone"
+    ? [["for-each-ref", "--format=%(refname) %(objectname)"], ["rev-parse", "HEAD"], ["rev-list", "--count", "--all", "--reflog"]]
+    : [["rev-parse", "HEAD"], ["reflog", "show", "--format=%H", "HEAD"]];
+  comandos.push(["status", "--porcelain", "-z", "--ignored=traditional", "--untracked-files=normal"]);
+  const partes: string[] = [];
+  for (const c of comandos) {
+    const r = await executar("git", ["-C", repo, ...c], op);
+    if (r.codigo !== 0) return null;
+    partes.push(r.stdout);
+  }
+  return partes.join("\n--\n");
+}
+
 const reconfirmarPela = (pastasParaLimpar: NonNullable<PonteInterna["pastasParaLimpar"]>, pessoaId: string, pedido?: { apertado?: boolean }) => async (p: PastaParaLimpar) =>
   (await pastasParaLimpar(pessoaId, { ...pedido, codigos: [codigoDaPasta(p.pasta)] })).some((x) => x.trabalhoId === p.trabalhoId && x.pasta === p.pasta && (x.quando === "encerrada" || x.quando === p.quando));
 

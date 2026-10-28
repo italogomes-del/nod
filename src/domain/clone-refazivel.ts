@@ -63,7 +63,7 @@ const SHA = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
  * anotada já descascada (`^{}`) e a tag leve. Comparar com `refs/remotes/*` locais não prova nada: elas ficam velhas
  * quando a branch é apagada no servidor ou quando não há rede.
  */
-export function lerLsRemote(stdout: string): { commits: string[]; objetos: Set<string> } {
+export function lerLsRemote(stdout: string): { commits: string[]; objetos: Set<string>; tags: Map<string, string> } {
   const objetos = new Set<string>();
   const porRef = new Map<string, string>();
   const descascadas = new Map<string, string>();
@@ -75,8 +75,32 @@ export function lerLsRemote(stdout: string): { commits: string[]; objetos: Set<s
     else porRef.set(ref, sha);
   }
   const commits = new Set<string>();
-  for (const [ref, sha] of porRef) commits.add(descascadas.get(ref) ?? sha);
-  return { commits: [...commits], objetos };
+  // NOD-319: as tags anunciadas, pelo nome da ref, com o objeto que a ref aponta (o da tag anotada, não o descascado).
+  const tags = new Map<string, string>();
+  for (const [ref, sha] of porRef) {
+    commits.add(descascadas.get(ref) ?? sha);
+    if (ref.startsWith("refs/tags/")) tags.set(ref, sha);
+  }
+  return { commits: [...commits], objetos, tags };
+}
+
+/**
+ * NOD-319 (ressalva 2 do QA do #413): há tag local (leve ou anotada) que nenhum remoto anuncia com o mesmo nome e o
+ * mesmo objeto? A tag leve num commit do remoto passava (o commit está lá), e o nome dela sumia com o clone. `locais` é
+ * a saída de `git for-each-ref --format='%(refname) %(objectname)' refs/tags`; `anunciadas`, as tags de cada remoto
+ * (`lerLsRemote().tags`). Linha que não se lê = dúvida = sim.
+ */
+export function temTagSoLocal(locais: string, anunciadas: readonly ReadonlyMap<string, string>[]): boolean {
+  for (const linha of locais.split("\n")) {
+    const l = linha.trim();
+    if (l === "") continue;
+    const espaco = l.lastIndexOf(" ");
+    const ref = l.slice(0, espaco);
+    const sha = l.slice(espaco + 1);
+    if (espaco <= 0 || !ref.startsWith("refs/tags/") || !SHA.test(sha)) return true;
+    if (!anunciadas.some((t) => t.get(ref) === sha)) return true;
+  }
+  return false;
 }
 
 /**

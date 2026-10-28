@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { lstat, mkdir, open, readdir, readFile, readlink, realpath, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { MotivoPuladaLimpeza } from "../../contracts/ponte.ts";
-import { algumCwdDentro, caminhoDoRemotoLocal, EXCLUSOES_MAX, lerLsRemote, prerequisitosDoBundle, saiDoGuardado } from "../../domain/clone-refazivel.ts";
+import { algumCwdDentro, caminhoDoRemotoLocal, EXCLUSOES_MAX, lerLsRemote, prerequisitosDoBundle, saiDoGuardado, temTagSoLocal } from "../../domain/clone-refazivel.ts";
 import { FORA_DO_GUARDADO, GUARDADO_MAX_BYTES, guardadoVencido, pedacoDeRef } from "../../domain/guardado.ts";
 import { classificarIgnorado, protegidoPorMontagem } from "../../domain/limpeza-das-tasks.ts";
 import { DISCO_CRITICO_MB } from "../../domain/memoria-mac.ts";
@@ -330,6 +330,20 @@ export async function remotosRefazem(clone: string, base: string, executar: Exec
 
 /** QA do #413: acima disto de pontas no remoto, os ids não cabem com folga na linha de comando — não se prova (fica). */
 const PONTAS_DO_REMOTO_MAX = 20_000;
+/**
+ * NOD-319 (ressalva 4 do QA do #413, definido em 2026-10-28): um remoto que não responde segurava a passada até 10 min
+ * no `ls-remote` e 20 min no `fetch`. Anunciar as pontas leva segundos; o fetch pelo id no clone não raso (o raso não
+ * busca, ADR-128), poucos minutos. Estourou = o remoto travou: loga qual (só o nome) e o clone fica. O guardado da
+ * task encerrada (`cloneSemObjetos`) passa os prazos antigos (revisão do #577, M2/M3).
+ */
+export const PRAZO_LS_REMOTE_MS = 60_000;
+export const PRAZO_FETCH_PONTAS_MS = 5 * 60_000;
+
+/** NOD-319: o comando que estourou o prazo (`codigo -2`) deixa no log o nome do remoto — nunca a URL, que pode ter token. */
+function remotoTravou(r: ResultadoComando, remoto: string, etapa: "ls_remote" | "fetch", prazoMs: number): void {
+  if (r.codigo === -2) log("aviso", "limpeza_remoto_travou", { remoto, etapa, prazo_s: Math.round(prazoMs / 1000) });
+}
+
 /** QA do #413: o `git fetch` das pontas que faltam não roda manutenção, grafo nem submódulo no clone que vai sair. */
 const FETCH_QUIETO = ["-c", "gc.auto=0", "-c", "maintenance.auto=false", "-c", "fetch.writeCommitGraph=false"];
 
@@ -340,7 +354,10 @@ export type ProvaNoRemoto =
       base: string[];
       /** Há commit — de ref nenhuma, nem só do reflog — fora do que o remoto alcança. */
       fora: boolean;
-      /** Há ponta local que não é commit (a tag anotada) e que o remoto não tem. */
+      /**
+       * Há tag local (leve ou anotada, NOD-319) que nenhum remoto anuncia com o mesmo nome e o mesmo objeto, ou outra
+       * ponta local que não é commit e que o remoto não tem.
+       */
       tagLocal: boolean;
     };
 
@@ -352,32 +369,41 @@ export type ProvaNoRemoto =
  * - a base são as pontas anunciadas que já estão no clone; faltando alguma (o remoto andou), elas vêm por `git fetch`
  *   pelo id, sem gravar ref nenhuma (`--refmap=`, sem FETCH_HEAD) e sem manutenção — o clone não muda de forma visível;
  * - `fora`: `git rev-list --all --reflog --not <base>` não vazio (inclui `refs/remotes/*` velhas e o stash);
- * - `tagLocal`: ponta local que não é commit (tag anotada) e cujo objeto o remoto não anunciou.
+ * - `tagLocal`: tag local sem par de nome e objeto num remoto (NOD-319: a leve também), ou ponta local fora de
+ *   `refs/tags` que não é commit e cujo objeto o remoto não anunciou.
  *
  * ADR-128 (revisto em 2026-10-26): no clone RASO (`.git/shallow`) não há fetch. Lá ele trazia o histórico inteiro das
  * branches que não passam pela fronteira — medido na VM dos bots: ~500 MB por passada, sem ref nenhuma que os
  * segurasse, e a passada seguinte baixava de novo (6 clones do gamefik de ~1 GB a 14–18 GB, 39–65 pacotes cada). Sem
  * as pontas que faltam, a base é menor e `fora` só pode dar sim a mais: o clone é guardado, nunca apagado a mais.
  */
-export async function provaNoRemoto(clone: string, executar: ExecutarComando): Promise<ProvaNoRemoto> {
+export async function provaNoRemoto(clone: string, executar: ExecutarComando, prazos: { lsRemoteMs: number; fetchMs: number } = { lsRemoteMs: PRAZO_LS_REMOTE_MS, fetchMs: PRAZO_FETCH_PONTAS_MS }): Promise<ProvaNoRemoto> {
   const r = await executar("git", ["-C", clone, "remote"]);
   if (r.codigo !== 0) return { motivo: "erro" };
   const nomes = r.stdout.split("\n").map((l) => l.trim()).filter((l) => l !== "");
   if (nomes.length === 0) return { motivo: "sem_remoto" };
+  // Revisão do #577 (B4): o nome vem do `.git/config` e vai cru ao ls-remote/fetch — com `-` na frente viraria opção.
+  if (nomes.some((n) => n.startsWith("-"))) return { motivo: "erro" };
   const deQuem = new Map<string, string>();
   const objetos = new Set<string>();
+  const tagsAnunciadas: Map<string, string>[] = [];
   for (const nome of nomes) {
-    const ls = await executar("git", ["-C", clone, "ls-remote", "--heads", "--tags", nome], { prazoMs: PRAZO_REMOVER_MS, fundo: true });
+    const ls = await executar("git", ["-C", clone, "ls-remote", "--heads", "--tags", nome], { prazoMs: prazos.lsRemoteMs, fundo: true });
+    remotoTravou(ls, nome, "ls_remote", prazos.lsRemoteMs);
     if (ls.codigo !== 0) return { motivo: "remoto_inacessivel" };
     const lido = lerLsRemote(ls.stdout);
     for (const o of lido.objetos) objetos.add(o);
+    tagsAnunciadas.push(lido.tags);
     for (const c of lido.commits) if (!deQuem.has(c)) deQuem.set(c, nome);
   }
   if (deQuem.size === 0) return { motivo: "remoto_vazio" };
   if (deQuem.size > PONTAS_DO_REMOTO_MAX) return { motivo: "remoto_grande_demais" };
-  const pontas = await executar("git", ["-C", clone, "for-each-ref", "--format=%(objectname) %(objecttype)"]);
+  const pontas = await executar("git", ["-C", clone, "for-each-ref", "--format=%(refname) %(objectname) %(objecttype)"]);
   if (pontas.codigo !== 0) return { motivo: "erro" };
-  const tagLocal = pontas.stdout.split("\n").some((l) => { const [sha = "", tipo = ""] = l.trim().split(" "); return sha !== "" && tipo !== "commit" && !objetos.has(sha); });
+  const linhas = pontas.stdout.split("\n").map((l) => l.trim().split(" ")).filter(([ref = ""]) => ref !== "");
+  // As tags vão por nome (NOD-319); o resto, como antes: ponta que não é commit e cujo objeto o remoto não anunciou.
+  const locais = linhas.filter(([ref = ""]) => ref.startsWith("refs/tags/")).map(([ref, sha]) => `${ref} ${sha ?? ""}`).join("\n");
+  const tagLocal = temTagSoLocal(locais, tagsAnunciadas) || linhas.some(([ref = "", sha = "", tipo = ""]) => !ref.startsWith("refs/tags/") && sha !== "" && tipo !== "commit" && !objetos.has(sha));
   const presentes = async (): Promise<string[] | null> => {
     const p = await executar("git", ["-C", clone, "rev-list", "--no-walk", "--ignore-missing", ...deQuem.keys()], { prazoMs: PRAZO_REMOVER_MS, fundo: true });
     return p.codigo === 0 ? p.stdout.split("\n").map((l) => l.trim()).filter((l) => l !== "") : null;
@@ -395,7 +421,8 @@ export async function provaNoRemoto(clone: string, executar: ExecutarComando): P
     const faltam = new Map<string, string[]>();
     for (const [c, nome] of deQuem) if (!tem.has(c)) faltam.set(nome, [...(faltam.get(nome) ?? []), c]);
     for (const [nome, shas] of faltam) {
-      const f = await executar("git", ["-C", clone, ...FETCH_QUIETO, "fetch", "-q", "--no-tags", "--no-write-fetch-head", "--no-recurse-submodules", "--refmap=", nome, ...shas], { prazoMs: PRAZO_GUARDAR_MS, fundo: true });
+      const f = await executar("git", ["-C", clone, ...FETCH_QUIETO, "fetch", "-q", "--no-tags", "--no-write-fetch-head", "--no-recurse-submodules", "--refmap=", nome, ...shas], { prazoMs: prazos.fetchMs, fundo: true });
+      remotoTravou(f, nome, "fetch", prazos.fetchMs);
       if (f.codigo !== 0) return { motivo: "remoto_inacessivel" };
     }
     base = await presentes();
@@ -448,8 +475,13 @@ async function cloneSemObjetos(clone: string, base: string, prefixo: string, exe
   // QA do #413 (bug 2): a base do bundle é o que o remoto DE VERDADE tem (`provaNoRemoto`), não `--remotes` locais — com
   // a branch apagada no servidor o bundle exigia um commit que ninguém mais tem, e o não enviado se perdia. Sem rede, vai
   // o `.git` inteiro.
-  const prova = await provaNoRemoto(clone, executar);
-  if ("motivo" in prova) return nada;
+  // Revisão do #577 (M2/M3): o guardado da task encerrada mantém os prazos antigos (10 min no ls-remote, 20 no fetch,
+  // prioridade baixa); curtos, estouravam sob load alto e `.git/objects` inteiro ia para o tar (o `grande_demais` da
+  // ADR-128).
+  const prova = await provaNoRemoto(clone, executar, { lsRemoteMs: PRAZO_REMOVER_MS, fetchMs: PRAZO_GUARDAR_MS });
+  // QA do #577: a tag local sem par no remoto (a anotada é um objeto que só este clone tem e que o `rev-list` do bundle,
+  // só de commits, não vê) — sem `.git/objects` ela sumia. Vai o `.git` inteiro.
+  if ("motivo" in prova || prova.tagLocal) return nada;
   // Revisão do #528 (bloqueante): no clone raso o commit da fronteira parece não ter pai, e o bundle não exige o pai dele.
   // Se a fronteira não está sob uma ponta do remoto (branch apagada ou reescrita no servidor depois do squash), o clone
   // novo não tem esse pai e o `git fetch` do bundle falha — o não enviado se perderia. Só vai sem objetos quando toda
@@ -500,7 +532,7 @@ async function lerFronteiras(git: string): Promise<string[] | null> {
 }
 
 /** QA do #413 (bug 2): os pré-requisitos do bundle (cabeçalho até a linha em branco) estão todos sob `base`? */
-async function soExigeDoRemoto(clone: string, pacote: string, base: readonly string[], executar: ExecutarComando): Promise<boolean> {
+export async function soExigeDoRemoto(clone: string, pacote: string, base: readonly string[], executar: ExecutarComando): Promise<boolean> {
   let cabecalho: string;
   try {
     const f = await open(pacote, "r");
