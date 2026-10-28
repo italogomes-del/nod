@@ -271,6 +271,25 @@ describe("NOD-381 (revisão 2)", () => {
     expect(m).toContain(".anexo-thumb .anexo-x::after { inset: -12px; }");
   });
 
+  it("NOD-354 (QA): o toque do Parar fora do ditado tem 44 px — o ::after conta a borda de 1 px (32 − 2 + 2 × 7)", () => {
+    const m = readFileSync("web/mobile.css", "utf8");
+    expect(m).toContain(".composer .box:not(.gravando) .parar-envio::after { inset: -7px; }");
+    expect(readFileSync("web/interface.css", "utf8")).toMatch(/\.composer \.parar-envio \{[^}]*border: 1px solid/);
+  });
+
+  it("NOD-354: gravando o ditado, o Parar do bot segue à vista (é o único Parar da conversa), em âmbar e com 44 px", () => {
+    const m = readFileSync("web/mobile.css", "utf8");
+    const gravando = m.split("\n").filter((l) => l.includes(".box.gravando") && l.includes("display: none"));
+    // Toda regra que esconde peças no modo gravando poupa o Parar (seletor genérico com :not) e nenhuma o cita direto.
+    for (const linha of gravando) {
+      if (/>\s*:not\(/.test(linha)) expect(linha).toContain(":not(.parar-envio)");
+      expect(linha).not.toMatch(/\.parar-envio\s*(,|\{)/);
+    }
+    expect(m).toMatch(/\.composer \.box\.gravando \.parar-envio \{[^}]*width: 44px; min-width: 44px; height: 44px; min-height: 44px;[^}]*color: var\(--warning\)/);
+    // O ■ do ditado e o Enviar não caem abaixo de 44 px com o Parar na linha (320 px).
+    expect(m).toContain(".composer .box.gravando .ditado-parar, .composer .box.gravando .send { min-width: 44px; }");
+  });
+
   it("Parar e Enviar lado a lado sem alvos sobrepostos", () => {
     expect(m).not.toContain(".parar-envio + .send { margin-left: 0; }");
   });

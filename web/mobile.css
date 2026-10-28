@@ -306,6 +306,8 @@
   .composer .box.com-mais .anexos-resumo { order: -1; flex-basis: 100%; padding: 4px 6px 0; }
   .composer .box:not(.gravando) .send, .composer .box:not(.gravando) .parar-envio { position: relative; width: 32px; min-width: 32px; height: 32px; min-height: 32px; margin: 6px; border-radius: 50%; font-size: 15px; }
   .composer .box:not(.gravando) .send::after, .composer .box:not(.gravando) .parar-envio::after { content: ""; position: absolute; inset: -6px; }
+  /* NOD-354 (QA do PR 573): o Parar tem borda de 1 px e o ::after conta da borda para dentro — −6 dava 42 px de toque. */
+  .composer .box:not(.gravando) .parar-envio::after { inset: -7px; }
   .composer .send, .composer .clipe, .composer .parar-envio { min-width: 44px; min-height: 44px; }
   /* Revisão do PR 1 (2026-10-16): o seletor de IA também é alvo de toque (44 px). */
   .composer .seletor-ia { min-height: 44px; margin-bottom: 0; }
@@ -323,7 +325,17 @@
      ■ (para e põe no campo) | tempo e nível | enviar largo (para e envia direto). O resto do campo some até acabar. */
   .composer .mic { width: 44px; height: 44px; background: transparent; }
   .composer .box.gravando { border-radius: 0; -webkit-backdrop-filter: none; backdrop-filter: none; border: 0; background: transparent; box-shadow: none; padding: 0; gap: 10px; min-height: 52px; align-items: stretch; }
-  .composer .box.gravando > :not(.ditado):not(.send) { display: none; }
+  /* NOD-354: o Parar do bot fica à vista também gravando — é o único Parar da conversa (o aviso do vigia não o repete).
+     Revisão 2 do PR 573: em âmbar (o tom do aviso), para não se confundir com o ■ neutro que para o ditado, e com 44 px,
+     para a linha caber a 320 px; o ■ do ditado e o Enviar nunca ficam abaixo de 44 px. Revisão 3: quem cede são as barras do
+     nível (cortadas), nunca os dígitos do tempo. */
+  .composer .box.gravando > :not(.ditado):not(.send):not(.parar-envio) { display: none; }
+  .composer .box.gravando .parar-envio { flex: none; width: 44px; min-width: 44px; height: 44px; min-height: 44px; margin: 4px 0; border-radius: 50%; border-color: var(--warning); color: var(--warning); }
+  .composer .box.gravando .ditado-parar, .composer .box.gravando .send { min-width: 44px; }
+  .composer .box.gravando .ditado-ouvindo { min-width: 0; overflow: hidden; }
+  .composer .box.gravando:has(.parar-envio:not([hidden])) .ditado-ouvindo { justify-content: flex-start; padding: 0 10px; }
+  .composer .box.gravando .ditado-tempo { flex: none; }
+  .composer .box.gravando .ditado-nivel { min-width: 0; overflow: hidden; }
   .composer .box.gravando .ditado { display: contents; }
   .composer .box.gravando .ditado-parar, .composer .box.gravando .ditado-ouvindo { height: 52px; border-radius: 26px; border: 1px solid var(--line); background: var(--surface); }
   .composer .box.gravando .ditado-parar { flex: 1; width: auto; }

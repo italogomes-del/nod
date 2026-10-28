@@ -6,7 +6,7 @@ import { estadoInicial, reduzir, type Estado } from "../../../web/estado/reducer
 import { DetectorDeFala, dePcm16, Ganho, paraPcm16, QUADROS_PARA_CALAR, Reamostrador } from "../../../web/lib/ligacao-audio.ts";
 import { AMOSTRAS_POR_QUADRO, fechamentoDefinitivo, lerMsgServidor, lerQuadroVoz, quadroMicrofone, rotaPeloNome } from "../../../web/lib/ligacao-protocolo.ts";
 import { duracaoRelogio } from "../../../web/lib/relogio.ts";
-import { mostraPararNoCampo, renderCabecalhoConversa, renderMensagem } from "../../../web/telas/conversa.ts";
+import { pararNoCampoDaTela, renderCabecalhoConversa, renderMensagem } from "../../../web/telas/conversa.ts";
 import { renderDetalhes } from "../../../web/telas/detalhes.ts";
 import { avisoDoEstadoLocal, botaoLigar, comLegenda, htmlCardJanela, partesDaLigacao, renderAvaliacao, renderLinhaLigacao, renderTranscricao, textoFase, textoFim, type EstadoTelaLigacao } from "../../../web/telas/ligacao.ts";
 
@@ -297,8 +297,9 @@ describe("cabeçalho e turnos da ligação", () => {
     expect(reduzir(e, frame({ modo: "ligacao" })).turnosVivos).toEqual({});
     expect(reduzir(e, frame({ origem: "ligacao" })).turnosVivos).toEqual({});
     expect(Object.keys(reduzir(e, frame({})).turnosVivos)).toEqual(["t1"]);
-    expect(mostraPararNoCampo(reduzir(e, frame({ modo: "ligacao" })), "a")).toBe(false);
-    expect(mostraPararNoCampo(reduzir(e, frame({})), "a")).toBe(true);
+    const naTela = (x: Estado): Estado => ({ ...x, tela: { tipo: "conversa" as const, conversaId: C, agenteId: "a" } });
+    expect(pararNoCampoDaTela(naTela(reduzir(e, frame({ modo: "ligacao" }))))).toBe(false);
+    expect(pararNoCampoDaTela(naTela(reduzir(e, frame({}))))).toBe(true);
   });
 
   it("o frame ligacao.mudou relê a conversa e a ligação viva", () => {

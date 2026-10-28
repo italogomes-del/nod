@@ -4,7 +4,7 @@ import type { ConversaDto } from "../../../src/contracts/api.ts";
 import type { Mensagem } from "../../../src/contracts/mensagem.ts";
 import type { TrabalhoDto } from "../../../src/contracts/trabalho.ts";
 import { estadoInicial, reduzir, type ConversaEstado, type Estado } from "../../../web/estado/reducer.ts";
-import { blocosAoVivo, blocosDoHistorico, mostraPararNoCampo, tituloDoParar } from "../../../web/telas/conversa.ts";
+import { blocosAoVivo, blocosDoHistorico, pararNoCampoDaTela, tituloDoParar } from "../../../web/telas/conversa.ts";
 import { horariosDaRotina, planejarLinhas } from "../../../web/telas/linhas-do-chat.ts";
 
 /**
@@ -247,8 +247,9 @@ describe("tasks na conversa (#195)", () => {
   // pílula) e o título nunca fala das tasks.
   it("o Parar do campo não aparece só com task aberta, e o título não fala das tasks", () => {
     const { e } = cenario([], { trabalhos: { trabalhos: [trabalho("tb-1")], pressao: null, memoriaTotalMb: null } });
-    expect(mostraPararNoCampo(e, "clarice")).toBe(false);
-    expect(mostraPararNoCampo({ ...e, trabalhos: { trabalhos: [], pressao: null, memoriaTotalMb: null } }, "clarice")).toBe(false);
+    const tela = { tipo: "conversa" as const, conversaId: C, agenteId: "clarice" };
+    expect(pararNoCampoDaTela({ ...e, tela })).toBe(false);
+    expect(pararNoCampoDaTela({ ...e, tela, trabalhos: { trabalhos: [], pressao: null, memoriaTotalMb: null } })).toBe(false);
     expect(tituloDoParar(e, "clarice")).toBe("Parar o que está rodando nesta conversa");
   });
 });

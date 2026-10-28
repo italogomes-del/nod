@@ -1004,18 +1004,23 @@ export function renderAvisoDoVigia(a: AtividadeTurno, agora: number, parar: stri
   const mudo = minutosSemNovidade(a, agora);
   if (!v || (mudo === null && !v.repeticao)) return "";
   const linhas = [
-    mudo !== null ? `<p><b><span class="vigia-ic" aria-hidden="true">${ICONE.relogioMini}</span>Sem novidade há ${mudo} min</b><span>${esperaDoVigia(v)} Se parecer travado, use Parar.</span></p>` : "",
+    mudo !== null ? `<p><b><span class="vigia-ic" aria-hidden="true">${ICONE.relogioMini}</span>Sem novidade há ${mudo} min</b><span>${esperaDoVigia(v)} Se parecer travado, use Parar${parar ? "" : " no campo"}.</span></p>` : "",
     v.repeticao ? `<p><b><span class="vigia-ic" aria-hidden="true">${ICONE.proxima}</span>Repetiu a mesma ação ${v.repeticao.vezes} vezes</b><span>Em <b>${esc(v.repeticao.rotulo)}</b>. Pode estar andando em círculo.</span></p>` : "",
   ].join("");
   return `<div class="atividade-vigia"${parte ? ` data-parte="${parte}"` : ""} role="status">${linhas}${parar}</div>`;
 }
 
-/** O Parar do aviso: a mesma ação do Parar do campo (conversa) ou da sala, em âmbar — é aviso, não erro (protótipo do Gil). */
-function pararDoVigia(c: ConversaEstado): string {
+/**
+ * O Parar do aviso: a mesma ação do Parar do campo (conversa) ou da sala, em âmbar — é aviso, não erro (protótipo do Gil).
+ * revisto em 2026-10-28 (NOD-354): na conversa, quando o Parar do campo está à vista, o aviso não repete o botão — um
+ * Parar só na tela. A condição é a do próprio campo (`pararNoCampoDaConversa`), para nunca sobrar zero nem dois: se o
+ * campo não mostra o dele, o aviso mantém o seu. A sala mantém sempre o dela.
+ */
+export function pararDoVigia(c: ConversaEstado, estado: Estado): string {
   const salaId = c.conversa.salaId;
-  return salaId
-    ? botao("parar-sala", "Parar", { classe: "aviso", id: salaId, titulo: "interrompe todos os turnos desta sala" })
-    : botao("parar-conversa", "Parar", { classe: "aviso", titulo: "interrompe agora o que está rodando nesta conversa" });
+  if (salaId) return botao("parar-sala", "Parar", { classe: "aviso", id: salaId, titulo: "interrompe todos os turnos desta sala" });
+  if (pararNoCampoDaConversa(estado, c.conversa.id)) return "";
+  return botao("parar-conversa", "Parar", { classe: "aviso", titulo: "interrompe agora o que está rodando nesta conversa" });
 }
 
 /** A lista de tarefas do bot (definido em 2026-09-28): a checklist que o terminal mostra, dentro do cartão. */
@@ -1045,7 +1050,7 @@ function blocosDoTurnoVivo(t: TurnoVivo, c: ConversaEstado, estado: Estado): Blo
   const atividade = estado.atividades[c.conversa.id]?.[t.turnoId];
   const id = t.agenteId ?? c.conversa.agenteId;
   const agente = id ? agenteDe(estado, id) : undefined;
-  const fala = renderFalaViva(t, atividade, agente, estado, pararDoVigia(c));
+  const fala = renderFalaViva(t, atividade, agente, estado, pararDoVigia(c, estado));
   return [{ chave, html: fala.html, morfar: fala.morfar }];
 }
 
@@ -1536,15 +1541,21 @@ function presencaDoBot(estado: Estado, agenteId: string): { html: string; ativa:
 }
 
 /**
- * O bot da conversa está trabalhando (definido em 2026-10-16, decisão E11 do plano "tela limpa"): há turno vivo da
- * conversa. O turno do cérebro da ligação não entra (turnosVivos já o ignora). É o `trabalhando` de `botoesDoCampo`.
- * revisto em 2026-10-22 (NOD-311): task aberta não conta — o Parar do campo não para as frentes (o turno delas já fica
- * fora de turnosVivosDaConversa); com só frentes rodando, o Parar some do campo e fica o da pílula.
+ * O Parar do campo vale para esta conversa (NOD-354, 2026-10-28)? A tela é ela e há turno vivo do chat nela (desde a
+ * NOD-354 pela conversa da tela, não pela do bot na frota; o turno das frentes e o da ligação ficam fora de
+ * `turnosVivosDaConversa`, NOD-311). Fonte única do `trabalhando` do
+ * campo (main.ts, atualizarParar) e do aviso do vigia (`pararDoVigia`): os dois leem a conversa que o clique para
+ * (`conversaAtual`).
  */
-export function mostraPararNoCampo(estado: Estado, agenteId: string): boolean {
-  const a = agenteDe(estado, agenteId);
-  if (!a?.conversaId) return false;
-  return turnosVivosDaConversa(estado, a.conversaId).length > 0;
+export function pararNoCampoDaConversa(estado: Estado, conversaId: string): boolean {
+  const t = estado.tela;
+  return t.tipo === "conversa" && t.conversaId === conversaId && turnosVivosDaConversa(estado, conversaId).length > 0;
+}
+
+/** O `trabalhando` do campo da tela atual (main.ts, atualizarParar): a mesma regra que tira o Parar do aviso do vigia. */
+export function pararNoCampoDaTela(estado: Estado): boolean {
+  const t = estado.tela;
+  return t.tipo === "conversa" && pararNoCampoDaConversa(estado, t.conversaId);
 }
 
 /**
@@ -1562,8 +1573,8 @@ export function tituloDoParar(_estado: Estado, _agenteId: string): string {
   return "Parar o que está rodando nesta conversa";
 }
 
-/** O nome que o leitor de tela ouve no Parar do campo. */
-export const rotuloDoParar = (nome: string | undefined): string => (nome ? `Parar ${nome}` : "Parar");
+/** O nome que o leitor de tela ouve no Parar do campo (revisto em 2026-10-28, NOD-354: diz que para a resposta, não o bot). */
+export const rotuloDoParar = (nome: string | undefined): string => (nome ? `Parar resposta do ${nome}` : "Parar resposta");
 
 const QUADRADO = '<svg width="13" height="13" viewBox="0 0 14 14" aria-hidden="true"><rect x="1.5" y="1.5" width="11" height="11" rx="2.5" fill="currentColor"/></svg>';
 
@@ -1586,7 +1597,7 @@ const CLIPE = '<svg width="19" height="19" viewBox="0 0 24 24" fill="none" strok
  * definido em 2026-10-16 (plano "tela limpa", T5/T6/E11): sai a dica "Enter envia · Shift+Enter…" — a nota nasce vazia
  * e só mostra a do modo resposta; na conversa própria (`aprovacao`) entram o seletor de IA (web/telas/seletor-ia.ts),
  * entre o texto e o microfone, e o Parar (secundário, redondo, escondido) logo antes do Enviar — o Enviar continua na
- * ponta, onde a pessoa o procura; o main mostra cada um pelo `botoesDoCampo`. `bot` dá o nome do Parar ("Parar Eng 1").
+ * ponta, onde a pessoa o procura; o main mostra cada um pelo `botoesDoCampo`. `bot` dá o nome do Parar ("Parar resposta do Eng 1").
  */
 export function htmlComposer(placeholder: string, sugestoes: readonly string[] = [], opcoes: { anexos?: Aceita; comandos?: boolean; aprovacao?: boolean; bot?: string } = {}): string {
   const lista = sugestoes.length ? `<div class="autocomplete" id="autocomplete" hidden></div>` : "";

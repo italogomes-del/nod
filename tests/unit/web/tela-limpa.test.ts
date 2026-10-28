@@ -9,7 +9,7 @@ import type { Inventario } from "../../../src/contracts/inventario.ts";
 import { estadoInicial, invalidacoesDaTela, reduzir, type Estado, type TurnoVivo } from "../../../web/estado/reducer.ts";
 import { UI_IAS_INICIAL } from "../../../web/telas/cartao-ia.ts";
 import { contaEmUso } from "../../../web/telas/contas-lista.ts";
-import { botoesDoCampo, htmlComposer, mostraPararNoCampo, renderCabecalhoConversa, tituloDoParar } from "../../../web/telas/conversa.ts";
+import { botoesDoCampo, htmlComposer, pararNoCampoDaTela, renderCabecalhoConversa, tituloDoParar } from "../../../web/telas/conversa.ts";
 import { modoDoComposer } from "../../../web/lib/perguntas.ts";
 import { aparenciaDoComposer } from "../../../web/telas/pergunta.ts";
 import {
@@ -92,9 +92,9 @@ describe("T1: a pílula no lugar do cabeçalho", () => {
 
 describe("E11: o Parar no campo", () => {
   it("o bot trabalha com turno vivo da conversa (na fila ou rodando); sem turno, não; o título diz o que para", () => {
-    expect(mostraPararNoCampo(cenario({}, { turnosVivos: vivo() }), "a")).toBe(true);
-    expect(mostraPararNoCampo(cenario({}, { turnosVivos: vivo("na_fila" as TurnoVivo["estado"]) }), "a")).toBe(true);
-    expect(mostraPararNoCampo(cenario(), "a")).toBe(false);
+    expect(pararNoCampoDaTela(cenario({}, { turnosVivos: vivo() }))).toBe(true);
+    expect(pararNoCampoDaTela(cenario({}, { turnosVivos: vivo("na_fila" as TurnoVivo["estado"]) }))).toBe(true);
+    expect(pararNoCampoDaTela(cenario())).toBe(false);
     expect(tituloDoParar(cenario({}, { turnosVivos: vivo() }), "a")).toBe("Parar o que está rodando nesta conversa");
   });
 
@@ -113,10 +113,10 @@ describe("E11: o Parar no campo", () => {
 
   it("o campo da conversa nasce com o Parar (secundário, com o nome do bot) antes do Enviar e o seletor de IA; a sala não tem nenhum dos dois", () => {
     const conversa = htmlComposer("x", [], { aprovacao: true, comandos: true, bot: "Eng 1" });
-    expect(conversa).toContain('<button type="button" class="parar-envio" data-act="parar-conversa" aria-label="Parar Eng 1"');
+    expect(conversa).toContain('<button type="button" class="parar-envio" data-act="parar-conversa" aria-label="Parar resposta do Eng 1"');
     expect(conversa).toMatch(/class="parar-envio"[^>]* hidden>/);
     expect(conversa.indexOf('data-act="parar-conversa"')).toBeLessThan(conversa.indexOf('data-act="enviar"'));
-    expect(htmlComposer("x", [], { aprovacao: true })).toContain('data-act="parar-conversa" aria-label="Parar"');
+    expect(htmlComposer("x", [], { aprovacao: true })).toContain('data-act="parar-conversa" aria-label="Parar resposta"');
     expect(conversa).toContain('id="composer-ia" data-act="seletor-ia"');
     // O seletor fica entre o texto e o microfone.
     expect(conversa.indexOf("composer-texto")).toBeLessThan(conversa.indexOf("composer-ia"));

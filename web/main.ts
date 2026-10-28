@@ -126,7 +126,7 @@ import { appsQueFaltam } from "./telas/rotina-precisa.ts";
 import { criarConexoes } from "./lib/conexao.ts";
 import type { Proposta } from "../src/contracts/conversa.ts";
 import { criarProgressoNaTela } from "./telas/progresso-na-fala.ts";
-import { blocosAoVivo, blocosDoHistorico, botoesDoCampo, htmlComposer, mostraPararNoCampo, renderCabecalhoConversa, renderTimeline, rotuloDoParar, tituloDoParar, type BlocoDaTimeline } from "./telas/conversa.ts";
+import { blocosAoVivo, blocosDoHistorico, botoesDoCampo, htmlComposer, pararNoCampoDaTela, renderCabecalhoConversa, renderTimeline, rotuloDoParar, tituloDoParar, type BlocoDaTimeline } from "./telas/conversa.ts";
 import { criarArtefatosVivos } from "./telas/artefatos-vivos.ts";
 import { criarDiagramasVivos } from "./telas/diagramas-vivos.ts";
 import { instalarDicaDeLink } from "./lib/dica-link.ts";
@@ -2078,8 +2078,8 @@ function atualizarComposer(): void {
 }
 
 /**
- * O Parar do campo (plano "tela limpa", 2026-10-16, decisão E11; revisão do PR 1): enquanto há turno vivo ou task aberta
- * do bot, o Parar fica à vista como botão secundário ao lado do Enviar — mesmo com rascunho, anexo ou o ditado gravando,
+ * O Parar do campo (plano "tela limpa", 2026-10-16, decisão E11; revisão do PR 1): enquanto há turno vivo do chat na
+ * conversa da tela (NOD-311: task não conta; NOD-354: `pararNoCampoDaTela`), o Parar fica à vista como botão secundário ao lado do Enviar — mesmo com rascunho, anexo ou o ditado gravando,
  * quando o Enviar também aparece. Com o campo vazio, só o Parar. Quem decide é `botoesDoCampo` (web/telas/conversa.ts).
  */
 function atualizarParar(): void {
@@ -2090,7 +2090,7 @@ function atualizarParar(): void {
   if (!parar || !enviar || !ta) return;
   const alvo = conversaAtual();
   const anexos = alvo && !alvo.salaId ? (anexosPendentes.get(alvo.conversaId) ?? []).length : 0;
-  const b = botoesDoCampo({ trabalhando: t.tipo === "conversa" && mostraPararNoCampo(estado, t.agenteId), temConteudo: ta.value.trim() !== "" || anexos > 0, ditando: ditado.ativo() });
+  const b = botoesDoCampo({ trabalhando: pararNoCampoDaTela(estado), temConteudo: ta.value.trim() !== "" || anexos > 0, ditando: ditado.ativo() });
   if (parar.hidden !== !b.parar) parar.hidden = !b.parar;
   if (enviar.hidden !== !b.enviar) enviar.hidden = !b.enviar;
   if (b.parar && t.tipo === "conversa") {
