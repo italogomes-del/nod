@@ -390,6 +390,105 @@
   .luz.cem .luz-fig { padding: 60px 0 16px; }
 }
 
+/* NOD-383: Configurações e toques de celular. Sem atalho de teclado à vista (crit. 1), sem banco (crit. 6, v2: o regime não
+   aparece em lugar nenhum no celular), Configurações em lista estilo Ajustes com cada seção em tela cheia (crit. 3), detalhe
+   de uma linha com "Saiba mais" (crit. 7), a folha de "Criar um bot agora?" (crit. 5) e alvos de 44 px (crit. 4, a auditoria
+   em scripts/alvos-44px confere). O desktop não lê nada daqui. */
+@media (hover: none) and (pointer: coarse) and (max-width: 600px), (hover: none) and (pointer: coarse) and (max-height: 500px) {
+  kbd, .cfg-kbd { display: none; }
+  .ambiente-banco { display: none; }
+
+  /* O topo da barra: 44 pt de toque, 8 pt de vão, ícone de 24 px e retorno no toque. */
+  .sh { gap: 8px; }
+  .icone-topo, .create-trigger { width: 44px; height: 44px; border-radius: 12px; }
+  .icone-topo svg { width: 24px; height: 24px; }
+  .create-trigger { font-size: 26px; }
+  .icone-topo:active, .create-trigger:active { background: var(--surface-raised); }
+  .nod-topo { min-height: 44px; }
+  /* O cabeçalho de seção da barra vira linha de 44 px. */
+  .secao-cab { min-height: 44px; }
+
+  /* As Configurações seguem a área acima do teclado, como a .app. */
+  #espaco { inset: auto 0; top: var(--topo-visivel, 0px); height: var(--altura-visivel, 100dvh); padding: 0; }
+  .cfg-celular { flex-direction: column; height: 100%; background: var(--surface-side); }
+  .cfg-topo { flex: none; display: flex; align-items: center; gap: 8px; min-height: 56px; box-sizing: border-box;
+    padding: calc(6px + env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) 6px max(12px, env(safe-area-inset-left)); }
+  .cfg-celular .cfg-redondo { display: grid; place-items: center; width: 44px; height: 44px; padding: 0; border: 1px solid var(--line); border-radius: 50%;
+    background: var(--surface); color: var(--ink); }
+  .cfg-celular .cfg-redondo:active { background: var(--surface-raised); }
+  .cfg-celular .cfg-redondo svg { width: 22px; height: 22px; }
+  .cfg-topo-tit { flex: 1; min-width: 0; margin: 0; font-size: 17px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cfg-celular .espaco-conteudo { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+    padding: 4px max(16px, env(safe-area-inset-right)) calc(24px + env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); }
+  /* O título da seção já está no topo; o h2 de dentro sairia repetido. */
+  .cfg-celular .cfg-secao > h2, .cfg-celular .cfg-fb-cab h2 { display: none; }
+
+  /* A lista (Gil, itens 2 e 3): grupos em --surface sobre --surface-side, borda --line, raio 12; nada quebra em 2 linhas. */
+  .cfg-titulo-grande { margin: 4px 4px 16px; font-size: 30px; font-weight: 700; letter-spacing: -.02em; }
+  .cfg-grupo { margin-bottom: 20px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); overflow: hidden; }
+  .cfg-item { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 48px; box-sizing: border-box; padding: 0 14px;
+    border: 0; border-top: 1px solid var(--line); background: none; color: var(--ink); font: inherit; font-size: 16px; text-align: left; }
+  .cfg-item:first-child { border-top: 0; }
+  .cfg-item:active { background: var(--surface-raised); }
+  .cfg-item-ic { flex: none; display: grid; place-items: center; width: 24px; height: 24px; color: var(--ink-2); }
+  .cfg-item-ic svg { width: 22px; height: 22px; }
+  .cfg-item-nome { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cfg-item-valor { flex: none; max-width: 40%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--ink-3); font-size: 15px; }
+  .cfg-item-seta { flex: none; display: grid; color: var(--ink-3); }
+  .cfg-item-conta { min-height: 72px; }
+  .cfg-item-conta .mc-av { width: 48px; height: 48px; font-size: 16px; }
+  .cfg-item-conta .cfg-item-nome b { display: block; font-size: 17px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cfg-item-conta .cfg-item-nome small { display: block; font-size: 14px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* Dentro da seção: o detalhe tem 1 linha (14 px, --ink-2); o resto abre no "Saiba mais", na própria linha. */
+  .cfg-celular .lc-txt b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cfg-celular .lc-txt small, .cfg-celular .lc-nota-curta { font-size: 14px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cfg-celular .lc-txt small.lc-aberto, .cfg-celular .lc-nota-curta.lc-aberto { white-space: normal; overflow: visible; }
+  .cfg-celular .lc-grupo-tit { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .lc-saiba { position: relative; display: inline-block; margin: 2px 0 0; padding: 0; border: 0; background: none; color: var(--ink-2);
+    font: inherit; font-size: 14px; font-weight: 500; text-decoration: underline; text-underline-offset: 2px; }
+  /* 44 px de toque sem engordar a linha: a área sobra para cima e para baixo, por cima do texto (que não é clicável). */
+  .lc-saiba::after { content: ""; position: absolute; z-index: 1; left: -8px; right: -8px; top: 50%; height: 44px; transform: translateY(-50%); }
+  .lc-grupo > .lc-saiba { margin: 4px 2px 0; }
+  /* Linha que já é um botão (link, recolhe): o "Saiba mais" fica fora dele, logo abaixo, com 44 px reais de altura. */
+  .lc-com-saiba > .lc-saiba-fora { display: block; min-height: 44px; margin: 0; padding: 0 16px; text-align: left; }
+  .lc-com-saiba > .lc-saiba-fora::after { content: none; }
+  .cfg-celular .lc-switch::before { inset: -12px -5px; }
+  .cfg-celular .lc-seletor { min-height: 44px; max-width: 46vw; }
+  .cfg-celular .lc-link { min-height: 52px; }
+
+  /* Feedback: o Enviar fica embaixo, à vista, logo acima do teclado (a coluna segue --altura-visivel). */
+  .cfg-celular .cfg-fb { display: flex; flex-direction: column; min-height: 100%; }
+  .cfg-celular .cfg-fb-cab { display: contents; }
+  .cfg-celular .cfg-fb-cab .cfg-enviar { order: 99; position: sticky; bottom: 0; margin-top: auto; align-self: stretch; justify-content: center;
+    min-height: 48px; box-shadow: 0 -8px 16px var(--surface-side); }
+
+  /* A folha "Criar um bot agora?": presa embaixo, mensagem do Nod (mascote e balão), Criar em contorno e Cancelar em texto. */
+  dialog.folha-criar-bot { inset: auto 0 0; width: 100%; max-width: 100%; max-height: none; margin: 0; box-sizing: border-box;
+    padding: 10px max(16px, env(safe-area-inset-right)) calc(16px + env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+    border: 0; border-top: 1px solid var(--line); border-radius: 18px 18px 0 0; background: var(--surface); color: var(--ink); box-shadow: var(--shadow-pop); }
+  dialog.folha-criar-bot::backdrop { background: var(--backdrop); }
+  .fcb-alca { width: 36px; height: 5px; margin: 0 auto 14px; border-radius: 3px; background: var(--line-strong); }
+  .fcb-msg { display: flex; align-items: flex-start; gap: 10px; }
+  .fcb-mascote { flex: none; display: grid; width: 32px; height: 32px; }
+  .fcb-mascote svg { width: 32px; height: 32px; }
+  .fcb-balao { flex: 1; min-width: 0; padding: 10px 14px; border: 1px solid var(--line); border-radius: 4px 16px 16px 16px; background: var(--surface-side); }
+  .fcb-balao h2 { margin: 0 0 4px; font-size: 16px; font-weight: 600; }
+  .fcb-balao p { margin: 0; font-size: 15px; color: var(--ink-2); }
+  /* O arrasto da folha é dela: sem isso o navegador trata como rolagem e manda pointercancel. */
+  dialog.folha-criar-bot { touch-action: none; }
+  .fcb-acoes { display: flex; flex-direction: column; gap: 8px; margin-top: 16px; }
+  .fcb-acoes .bt { min-height: 48px; width: 100%; justify-content: center; font-size: 16px; }
+  .fcb-criar { border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink); }
+  .fcb-cancelar { border: 0; background: none; color: var(--ink-2); }
+
+  /* Achados da auditoria de 44px (scripts/alvos-44px): o avatar da conta, os itens do menu da conta, a busca dos agentes
+     e a caixa de mensagem tinham menos de 44 de toque. */
+  .me { min-width: 44px; }
+  /* 48 e não 44: itens colados com 44 exatos perdem a borda para o vizinho no arredondamento do subpixel. */
+  [role="menu"] > [role="menuitem"] { min-height: 48px; }
+  .cfg-busca input { min-height: 44px; }
+}
 /* NOD-381 (protótipo nod-381): a folha do +, os alvos de 44 px que faltavam no chat e os estados (carregando e não enviada). */
 @media (hover: none) and (pointer: coarse) and (max-width: 600px), (hover: none) and (pointer: coarse) and (max-height: 500px) {
   /* A folha do + sobe da base, na largura da tela, com linhas de 60 px: título, o valor de hoje em 13 px e o ›. */

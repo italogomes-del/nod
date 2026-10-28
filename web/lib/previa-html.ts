@@ -1,5 +1,6 @@
 import { milhar } from "./csv.ts";
 import { esc } from "./escape.ts";
+import { ehCelular } from "./celular.ts";
 
 /**
  * NOD-327 (ADR-120): a parte pura da prévia de arquivo — o HTML do modal, da tabela de CSV, o zoom e as opções do PDF.
@@ -47,11 +48,16 @@ const letra = (i: number): string => {
 export const contagemCsv = (total: number): string => (total === 1 ? "1 linha" : `${milhar(total)} linhas`);
 
 /** O HTML da tabela; puro, para o teste sem DOM. */
+/** NOD-383: no celular não há setas, Shift nem ⌘C. */
+export function dicaDaTabelaCsv(celular = ehCelular()): string {
+  return celular ? "Toque numa célula para selecionar e copiar." : "Clique numa célula para selecionar. Setas movem, Shift estende, ⌘C ou Ctrl+C copia em colunas.";
+}
+
 export function htmlTabelaCsv(linhas: readonly (readonly string[])[], colunas: number, total: number): string {
   const cab = `<tr><th class="pv-csv-canto" scope="col"><span class="sr-only">Linha</span></th>${Array.from({ length: colunas }, (_, c) => `<th scope="col">${letra(c)}</th>`).join("")}</tr>`;
   const corpo = linhas.map((l, r) => `<tr><th scope="row">${r + 1}</th>${l.map((v, c) => `<td data-r="${r}" data-c="${c}">${esc(v)}</td>`).join("")}</tr>`).join("");
   const aviso = total > linhas.length ? `<p class="pv-csv-aviso" role="status">Mostrando ${milhar(linhas.length)} de ${milhar(total)}</p>` : "";
-  const dica = `<div class="pv-csv-dica"><button type="button" class="pv-csv-dica-bt" aria-expanded="true" aria-controls="pv-csv-dica-txt" aria-label="Recolher dica"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button><span id="pv-csv-dica-txt">Clique numa célula para selecionar. Setas movem, Shift estende, ⌘C ou Ctrl+C copia em colunas.</span></div>`;
+  const dica = `<div class="pv-csv-dica"><button type="button" class="pv-csv-dica-bt" aria-expanded="true" aria-controls="pv-csv-dica-txt" aria-label="Recolher dica"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button><span id="pv-csv-dica-txt">${dicaDaTabelaCsv()}</span></div>`;
   return `${dica}${aviso}<div class="pv-csv-rolagem" tabindex="0" role="grid" aria-label="Tabela" aria-rowcount="${total + 1}" aria-colcount="${colunas + 1}"><table class="pv-csv-tabela"><thead>${cab}</thead><tbody>${corpo}</tbody></table></div>`;
 }
 

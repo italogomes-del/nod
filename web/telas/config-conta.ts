@@ -1,3 +1,5 @@
+import { nesteAparelho } from "../lib/aparelho.ts";
+import { ehCelular } from "../lib/celular.ts";
 import { ICONE } from "../lib/icones.ts";
 import { grupoConfig, linhaConfig } from "../lib/linha-config.ts";
 import { esc } from "../lib/render.ts";
@@ -27,7 +29,7 @@ export type DadosConta = {
 
 const pagina = (aba: string, passo = "") => ({ aba, ...(passo ? { passo } : {}) });
 
-export function renderConta(d: DadosConta): string {
+export function renderConta(d: DadosConta, celular = ehCelular()): string {
   const quem = d.nome ?? d.email ?? "Você";
   const av = `<span class="mc-av mc-av-g" aria-hidden="true">${esc(iniciaisDeQuem(d.nome, d.email))}</span>`;
   const cab = `<h2>Conta</h2><p class="intro">Quem você é no nod e como você entra.</p>`;
@@ -42,7 +44,7 @@ export function renderConta(d: DadosConta): string {
   // Espaço provisório: ainda não há conta; o convite fica no lugar de "Como você entra".
   if (d.email === null) {
     return `<section class="espaco-secao cfg-secao cfg-conta">${cab}${grupoConfig(null, [perfil])}${grupoConfig("Como você entra", [
-      linhaConfig({ titulo: "Criar conta ou entrar", detalhe: "Seu espaço está só neste computador", icone: ICONE.pessoa, controle: { tipo: "link", acao: "cfg-conta", dados: { conta: "inicio" } } }),
+      linhaConfig({ titulo: "Criar conta ou entrar", detalhe: `Seu espaço está só ${nesteAparelho(celular)}`, icone: ICONE.pessoa, controle: { tipo: "link", acao: "cfg-conta", dados: { conta: "inicio" } } }),
     ])}</section>`;
   }
   const entra: string[] = [
@@ -77,7 +79,7 @@ export function renderConta(d: DadosConta): string {
     })])
     : "";
   const fim = [
-    linhaConfig({ titulo: "Sair", detalhe: "Encerra a sessão neste computador; seus bots continuam trabalhando", icone: ICONE.sair, controle: { tipo: "link", acao: "cfg-conta", dados: { conta: "sair" } } }),
+    linhaConfig({ titulo: "Sair", detalhe: `Encerra a sessão ${nesteAparelho(celular)}; seus bots continuam trabalhando`, icone: ICONE.sair, controle: { tipo: "link", acao: "cfg-conta", dados: { conta: "sair" } } }),
     ...(d.minhaConta && !d.legado
       ? [linhaConfig({
         titulo: "Excluir conta",

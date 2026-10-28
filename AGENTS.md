@@ -19,6 +19,7 @@ npm run diario:prod         # Nod diário sem modo dev (#218): build da web + s�
 npm run e2e:fumaca          # doze jornadas sobre o servidor completo com catcher (tests/concurrency/e2e-catcher.test.ts), custo zero
 npm run e2e:aceite          # scripts/e2e-aceite.sh com o CLI real (sonnet, ou NOD_MODELO); imprime o custo somado — rode UMA vez, custa assinatura
 node scripts/carga-tela/rodar.ts medir <rotulo>   # carga da TELA num Chrome headless (vários bots escrevendo, turno pesado) sobre um banco efêmero; uso no cabeçalho do script (ADR-061)
+node scripts/alvos-44px/rodar.ts [claro|escuro]   # auditoria de toque do CELULAR (390×844, toque): alvo <44×44 por elementFromPoint a 22 px, atalho de teclado, macOS/"este computador", banco, título em 2 linhas; falha listando seletor e tamanho. Rode ao mexer na interface do celular (ADR-094); uso no cabeçalho do script
 npm run sonda               # ADR-019: {estado, versao} sem email; custa um turno de MODELO_SONDA_PADRAO (Sonnet 4.6). sonda:mcp-timeout mede o teto do tools/call
 npm run test:integration    # só com DATABASE_URL_TEST (copie .env.example para .env); sem ele pula fora do CI e FALHA sob CI
 npm run prompt:referencia   # NOD-163: regrava tests/unit/domain/__prompts__/ (o prompt de sistema inteiro por cenário, estável × volátil, e tamanhos.json) — só quando a mudança no prompt é de propósito

@@ -1,6 +1,8 @@
 import type { MaquinaDto } from "../../src/contracts/maquina.ts";
 import type { Agente } from "../../src/contracts/agente.ts";
 import type { ConectarMaquina, Estado } from "../estado/reducer.ts";
+import { rotuloDoMac } from "../lib/aparelho.ts";
+import { ehCelular } from "../lib/celular.ts";
 import { ICONE } from "../lib/icones.ts";
 import { ICONE_CB, resumoDasTelas } from "../lib/computador-pessoa.ts";
 import { botao, dataHora, esc, hora, iconeAgente } from "../lib/render.ts";
@@ -267,7 +269,7 @@ function detalheDaMaquina(estado: Estado, m: MaquinaDto, ehEsteMac: boolean): st
   const pelaPadrao = aqui.filter((b) => !b.maquinaId || !(estado.maquinas?.maquinas ?? []).some((x) => x.id === b.maquinaId)).length;
   const bots = aqui.length === 0 ? "nenhum bot aqui" : `${aqui.length} ${aqui.length === 1 ? "bot" : "bots"} aqui${pelaPadrao > 0 ? `, ${pelaPadrao} pela padrão` : ""}`;
   const onde = m.nuvem ? `Google Cloud · ${nomeDaZona(m.nuvem.zona)}` : nomePlataforma(m);
-  return `${ehEsteMac ? "Este Mac · " : ""}${onde} · ${bots}`;
+  return `${ehEsteMac ? `${rotuloDoMac()} · ` : ""}${onde} · ${bots}`;
 }
 
 /** NOD-367: a chave da máquina, aberta pelo "Detalhes da chave" do "…" (a chave inteira só aparece ao criar). */
@@ -315,7 +317,7 @@ function linhaDoMacSemChave(estado: Estado, id: string, nome: string): string {
   const l = leituraDaMaquina(estado, id);
   const linha = linhaConfig({
     titulo: nome,
-    detalhe: `Este Mac · ${detalheDosBotsNoMac(estado)}`,
+    detalhe: `${rotuloDoMac()} · ${detalheDosBotsNoMac(estado)}`,
     icone: ICONE.laptop,
     status: l?.status ?? { texto: "Conectada", tom: "ok" },
     controle: { tipo: "menu", acao: "maq-menu", aberto: estado.contasUi.maquinaMenu === id, rotulo: nome, dados: { maquina: id }, itens: `${leituraNoCartao(estado, id)}${itensDoUso(estado)}<hr>${itemMenu("maq-abrir", ICONE.monitor, "O que roda agora", { dados: { recolhe: "mac-agora" }, nota: "memória, processador, disco e quem está trabalhando" })}` },
@@ -393,7 +395,7 @@ export function renderMaquinas(estado: Estado): string {
   const cab = `<h2>Máquinas</h2><p class="intro">Onde seus bots trabalham. Cada bot roda o Claude Code ou o Codex na máquina dele; a máquina de um bot se escolhe na ficha dele.</p>`;
   const conectar = estado.conectarMaquina ? renderConectar(estado, estado.conectarMaquina) : "";
   const regras = noMac
-    ? `"Este Mac": o bot roda aqui, onde o Nod está aberto; uma VM só pega o trabalho dos bots escolhidos para ela. Se a máquina de um bot ficar sem contato, a conversa espera por ela.`
+    ? ehCelular() ? `"Seu Mac": o bot roda no Mac onde o Nod está instalado; uma VM só pega o trabalho dos bots escolhidos para ela. Se a máquina de um bot ficar sem contato, a conversa espera por ela.` : `"Este Mac": o bot roda aqui, onde o Nod está aberto; uma VM só pega o trabalho dos bots escolhidos para ela. Se a máquina de um bot ficar sem contato, a conversa espera por ela.`
     : `"Qualquer uma": o primeiro computador conectado que estiver livre pega o trabalho. Se a máquina de um bot ficar sem contato, a conversa espera por ela; na mensagem você pode rodar em outra só daquela vez.`;
   const padrao = maquinas.length > 0
     ? grupoConfig(null, [linhaConfig({
@@ -409,7 +411,7 @@ export function renderMaquinas(estado: Estado): string {
   const suas = !dados
     ? grupoConfig("Suas máquinas", [], { notaHtml: `<span role="status">Verificando…</span>` })
     : linhas.length === 0
-      ? grupoConfig("Suas máquinas", [], { nota: noMac ? "Nenhuma máquina conectada ainda. Os bots rodam neste Mac; conecte uma VM Linux para mandar bots para ela." : "Nenhuma máquina conectada ainda. Conecte o app do Mac ou uma VM Linux para os bots trabalharem nela." })
+      ? grupoConfig("Suas máquinas", [], { nota: noMac ? `Nenhuma máquina conectada ainda. Os bots rodam ${ehCelular() ? "no seu Mac" : "neste Mac"}; conecte uma VM Linux para mandar bots para ela.` : "Nenhuma máquina conectada ainda. Conecte o app do Mac ou uma VM Linux para os bots trabalharem nela." })
       : grupoConfig("Suas máquinas", linhas, { classe: "cfg-maquinas" });
   return `<section class="espaco-secao cfg-secao cfg-maquinas-secao maquinas">
     ${cab}
@@ -430,7 +432,7 @@ export function renderMaquinas(estado: Estado): string {
 /** As opções do seletor de máquina: "Qualquer uma" (no servidor no Mac, "Este Mac") e as máquinas de trabalho. */
 export function opcoesDeMaquina(maquinas: readonly MaquinaDto[], atual: string | null, noMac: boolean): OpcaoSeletor[] {
   const valor = atual && maquinas.some((m) => m.id === atual) ? atual : "";
-  return [{ id: "", nome: noMac ? "Este Mac" : "Qualquer uma" }, ...maquinas.map((m) => ({ id: m.id, nome: m.conectada ? m.nome : `${m.nome} (offline)` }))]
+  return [{ id: "", nome: noMac ? rotuloDoMac() : "Qualquer uma" }, ...maquinas.map((m) => ({ id: m.id, nome: m.conectada ? m.nome : `${m.nome} (offline)` }))]
     .map((o) => ({ valor: o.id, rotulo: o.nome, selecionado: o.id === valor }));
 }
 

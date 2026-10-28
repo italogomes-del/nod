@@ -1,6 +1,7 @@
 import type { CadastroDto, ContagemEspacoDto, EntrarDto, EsperaPareamentoDto, EstadoContaDto, EstadoPareamentoDto, ImportarDto, PareamentoAbertoDto, PedirPareamentoDto, SessaoContaDto, SessoesDto, TrocarSenhaDto, VerificarDto } from "../../src/contracts/conta.ts";
 import { AppDesatualizado, ErroApi } from "../lib/erro-api.ts";
 import { esc } from "../lib/render.ts";
+import { nesteAparelho } from "../lib/aparelho.ts";
 
 /**
  * NOD-345 (ADR-124, protótipo aprovado do Gil): criar conta, entrar, levar o espaço, recuperar a senha, ver as sessões e
@@ -63,6 +64,8 @@ const campoSenha = (nome: string, rotulo: string, nova: boolean) =>
   `<label class="cc-campo">${rotulo}<span class="cc-senha"><input name="${nome}" type="password" autocomplete="${nova ? "new-password" : "current-password"}" required ${nova ? 'minlength="12" ' : ""}maxlength="128"><button type="button" class="cc-mostrar" data-act="conta-mostrar" aria-pressed="false">Mostrar</button></span></label>`;
 const cartao = (titulo: string, corpo: string, rotulo = titulo) => `<div class="cc-cartao" role="group" aria-label="${esc(rotulo)}">${SELO}<h3 class="cc-titulo">${esc(titulo)}</h3>${corpo}</div>`;
 
+const maiuscula = (t: string): string => t.charAt(0).toUpperCase() + t.slice(1);
+
 /** "3 bots, 12 conversas e 2 rotinas" (só o que tem; sem nada, null). */
 export function resumoDoEspaco(c: ContagemEspacoDto | null): string | null {
   if (!c) return null;
@@ -88,7 +91,7 @@ export function htmlEtapa(e: Etapa, v: { ocupado: boolean; google: boolean; agor
     case "inicio":
       return cartao(
         "Guarde seu espaço numa conta",
-        `<p class="cc-texto">Hoje ele está só neste computador. Com uma conta, você entra de qualquer lugar e não perde nada.</p>
+        `<p class="cc-texto">Hoje ele está só ${nesteAparelho()}. Com uma conta, você entra de qualquer lugar e não perde nada.</p>
         <div class="cc-acoes cc-coluna">${v.google ? bt("conta-google", "Continuar com Google", { classe: "pri", ocupado: o }) : ""}${bt("conta-ir", "Usar e-mail", { classe: v.google ? "" : "pri", dados: { etapa: "cadastro" } })}${bt("conta-fechar", "Agora não", { classe: "cc-link" })}</div>
         <p class="cc-rodape">${bt("conta-ir", "Já tenho conta com e-mail", { classe: "cc-link", dados: { etapa: "entrar" } })}${bt("conta-ir", "Tenho um código", { classe: "cc-link", dados: { etapa: "parear-entrar" } })}</p>`,
         "Criar conta ou entrar",
@@ -131,12 +134,12 @@ export function htmlEtapa(e: Etapa, v: { ocupado: boolean; google: boolean; agor
           <div class="cc-acoes">${bt("conta-importar", o ? "Conferindo…" : "Tentar de novo", { classe: "pri", ocupado: o })}</div>`);
       }
       if (e.falhou) {
-        return cartao("Não deu para levar", `${topo}<p class="cc-texto">Nada mudou: seu espaço continua neste computador, do jeito que estava.</p>
+        return cartao("Não deu para levar", `${topo}<p class="cc-texto">Nada mudou: seu espaço continua ${nesteAparelho()}, do jeito que estava.</p>
           <div class="cc-acoes">${bt("conta-cancelar", "Continuar sem conta", { classe: "cc-link", ocupado: o })}${bt("conta-importar", o ? "Levando…" : "Tentar de novo", { classe: "pri", ocupado: o })}</div>`);
       }
       return cartao(
         "Levar o que você fez para esta conta?",
-        `${topo}<p class="cc-texto"><b>${esc(e.email)}</b> já tem um espaço. ${resumo ? `Neste computador você tem ${esc(resumo)}.` : "Este computador ainda não tem nada seu."} Levar junta os dois: nada se perde.</p>
+        `${topo}<p class="cc-texto"><b>${esc(e.email)}</b> já tem um espaço. ${resumo ? `${maiuscula(nesteAparelho())} você tem ${esc(resumo)}.` : `${maiuscula(nesteAparelho().replace(/^neste/, "este"))} ainda não tem nada seu.`} Levar junta os dois: nada se perde.</p>
         <div class="cc-acoes cc-coluna">${bt("conta-importar", o ? "Levando…" : "Levar para esta conta", { classe: "pri", ocupado: o })}${bt("conta-outra", "Usar outra conta", { ocupado: o })}${bt("conta-cancelar", "Agora não", { classe: "cc-link", ocupado: o })}</div>`,
       );
     }
@@ -173,7 +176,7 @@ export function htmlEtapa(e: Etapa, v: { ocupado: boolean; google: boolean; agor
       if (e.vencido) return cartao("O código venceu", `<p class="cc-texto">Ele vale por 5 minutos e uma vez só.</p><div class="cc-acoes">${bt("conta-fechar", "Fechar", { classe: "cc-link" })}${bt("conta-parear-gerar", "Gerar novo código", { classe: "pri", ocupado: o })}</div>`);
       if (e.pedido) {
         return cartao(
-          "Conectar este computador?",
+          `Conectar ${nesteAparelho().replace(/^neste/, "este")}?`,
           `<p class="cc-texto"><b>${esc(e.pedido.aparelho)}</b> quer entrar na sua conta. Os símbolos abaixo são os mesmos que aparecem nele?</p>${simbolos(e.pedido.simbolos)}
           <div class="cc-acoes">${bt("conta-parear-decidir", "Não reconheço", { classe: "cc-link", ocupado: o, dados: { confirmar: "nao" } })}${bt("conta-parear-decidir", "Sim, conectar", { classe: "pri", ocupado: o, dados: { confirmar: "sim" } })}</div>`,
         );
@@ -346,7 +349,7 @@ export function criarContaNoChat(deps: DepsConta) {
       pollParar();
       const e = etapa;
       // Fechar o código ou o cartão de início deixa o espaço como está; a linha só diz isso.
-      resolver(e?.tipo === "inicio" ? "Seu espaço continua só neste computador. Dá para criar a conta depois, pelo menu." : e?.tipo === "recuperar" && e.enviadoPara ? "Link de recuperação pedido." : e?.tipo === "senha" && e.salva !== null ? "Senha nova salva." : "Fechado.");
+      resolver(e?.tipo === "inicio" ? `Seu espaço continua só ${nesteAparelho()}. Dá para criar a conta depois, pelo menu.` : e?.tipo === "recuperar" && e.enviadoPara ? "Link de recuperação pedido." : e?.tipo === "senha" && e.salva !== null ? "Senha nova salva." : "Fechado.");
     },
     "conta-google": () => trabalhar(async () => {
       try {
@@ -392,7 +395,7 @@ export function criarContaNoChat(deps: DepsConta) {
     }),
     "conta-cancelar": () => trabalhar(async () => {
       await deps.api().cancelar().catch(() => undefined);
-      resolver("Seu espaço continua só neste computador.");
+      resolver(`Seu espaço continua só ${nesteAparelho()}.`);
     }),
     "conta-sessoes-confirmar": () => { if (etapa?.tipo === "sessoes") mudar({ ...etapa, confirmar: true }); },
     "conta-sessoes-voltar": () => { if (etapa?.tipo === "sessoes") mudar({ ...etapa, confirmar: false }); },

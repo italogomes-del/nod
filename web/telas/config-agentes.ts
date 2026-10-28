@@ -1,4 +1,5 @@
 import type { Estado } from "../estado/reducer.ts";
+import { rotuloDoMac } from "../lib/aparelho.ts";
 import { ICONE } from "../lib/icones.ts";
 import { grupoConfig, linhaConfig, listaAninhada, normalizarBusca } from "../lib/linha-config.ts";
 import { botao, esc, iconeAgente } from "../lib/render.ts";
@@ -29,7 +30,7 @@ function iaDoBot(a: BotGerido): string {
 
 /** "Design · vm-trabalho · Claude": a função, a máquina (ou a padrão) e a IA. */
 export function detalheDoBot(estado: Pick<Estado, "maquinas">, a: BotGerido): string {
-  const maquina = maquinaDoBot(estado as Estado, a)?.nome ?? (estado.maquinas?.servidorNoMac ? "Este Mac" : "Qualquer uma");
+  const maquina = maquinaDoBot(estado as Estado, a)?.nome ?? (estado.maquinas?.servidorNoMac ? rotuloDoMac() : "Qualquer uma");
   return [a.titulo || "Sem título", maquina, iaDoBot(a)].join(" · ");
 }
 

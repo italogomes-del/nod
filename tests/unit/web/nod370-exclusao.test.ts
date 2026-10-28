@@ -138,7 +138,7 @@ describe("NOD-370: a fiação em main.ts", () => {
 
   it("a rolagem é guardada no elemento que rola de Seu espaço, e o foco pendente é aplicado a cada desenho (critério 1)", async () => {
     const [main, espaco, css] = await Promise.all([ler("../../../web/main.ts"), ler("../../../web/telas/espaco.ts"), ler("../../../web/navegacao.css")]);
-    expect(main).toMatch(/regiaoReabrindo\("espaco", estado\.espaco \? renderEspaco\([\s\S]{0,400}?\) : "", \{ seletor: "\.espaco-conteudo", chave: estado\.espaco\?\.secao === "agentes" \? "agentes" : null \}\);/);
+    expect(main).toMatch(/regiaoReabrindo\("espaco", estado\.espaco \? renderEspaco\([\s\S]{0,400}?\) : "", \{ seletor: "\.espaco-conteudo", chave: secaoAberta\(estado\) === "agentes" \? "agentes" : null \}\);/);
     expect(espaco).toContain('<main class="espaco-conteudo">');
     expect(css).toMatch(/\.espaco-conteudo \{[^}]*overflow: auto/);
     expect(corpo(main, "function render(): void {")).toMatch(/focoPendente\.aplicar\(\);\s*$/);
@@ -147,14 +147,16 @@ describe("NOD-370: a fiação em main.ts", () => {
   it("a ligação passa à lista o Agentes aberto de verdade e o grupo da ação ao anúncio (QA: mutantes M6 e M8)", async () => {
     const main = await ler("../../../web/main.ts");
     const fiacao = corpo(main, "function depoisDeTirarDaLista(");
-    expect(fiacao).toContain('agentesAberto: estado.espaco?.secao === "agentes"');
+    // NOD-383: a lista do celular não é o Agentes aberto (secaoAberta é null nela).
+    expect(fiacao).toContain('agentesAberto: secaoAberta(estado) === "agentes"');
     expect(fiacao).toMatch(/nome: a\.nome, grupo, anunciar: anunciarGestao/);
     expect(fiacao).toMatch(/function depoisDeTirarDaLista\(a: BotGerido, grupo: "Excluídos" \| "Ocultos"\)/);
   });
 
   it("Esc com o confirmar aberto (o foco no <body> enquanto o pedido anda) não fecha Seu espaço por trás dele (QA)", async () => {
     const main = await ler("../../../web/main.ts");
-    const linha = main.split("\n").find((l) => l.includes("fecharEspaco(); return;") && l.includes('ev.key === "Escape" && estado.espaco'));
+    // NOD-383: o bloco do Esc ganhou o ramo do celular (volta para a lista); a guarda do diálogo é a mesma.
+    const linha = main.split("\n").find((l) => l.includes('ev.key === "Escape" && estado.espaco &&'));
     expect(linha).toContain('!document.querySelector("dialog[open]")');
   });
 

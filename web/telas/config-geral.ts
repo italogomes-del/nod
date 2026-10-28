@@ -1,6 +1,8 @@
 import type { Experimentos } from "../../src/contracts/raio-x.ts";
 import type { ConfigUi } from "../estado/reducer.ts";
+import { detalheDoTema } from "../lib/aparelho.ts";
 import type { EstadoAvisos } from "../lib/avisos.ts";
+import { ehCelular } from "../lib/celular.ts";
 import { grupoConfig, linhaConfig, listaAninhada, type TomStatus } from "../lib/linha-config.ts";
 import { esc } from "../lib/render.ts";
 import { ESCOLHAS_TEMA, type EscolhaTema } from "../lib/tema.ts";
@@ -43,6 +45,8 @@ const TOM_AVISOS: Record<EstadoAvisos["situacao"], TomStatus> = { ligados: "ok",
 
 /** NOD-115: desligado, o aviso sai em silêncio; com os avisos desligados, o som trava na posição guardada. */
 export const AJUDA_SOM = "Desligado, o aviso aparece em silêncio: o banner e o número no Dock continuam.";
+/** NOD-383: no celular não há Dock. */
+export const AJUDA_SOM_CELULAR = "Desligado, o aviso aparece em silêncio.";
 export const AJUDA_SOM_TRAVADO = "Ligue os avisos para escolher. Sua escolha fica guardada.";
 
 /**
@@ -50,7 +54,7 @@ export const AJUDA_SOM_TRAVADO = "Ligue os avisos para escolher. Sua escolha fic
  * no navegador, pede a permissão no clique. Bloqueado no navegador, o clique não resolve: o switch trava e o detalhe diz
  * onde liberar.
  */
-export function renderAvisos(a: EstadoAvisos): string {
+export function renderAvisos(a: EstadoAvisos, celular = ehCelular()): string {
   const ligado = a.situacao === "ligados" || (a.onde === "mac" && a.situacao === "bloqueados");
   const travado = a.situacao === "indisponiveis" || (a.onde === "navegador" && a.situacao === "bloqueados");
   const detalhe = a.situacao === "bloqueados" || a.situacao === "indisponiveis"
@@ -67,7 +71,7 @@ export function renderAvisos(a: EstadoAvisos): string {
   if (a.som !== undefined) {
     linhas.push(linhaConfig({
       titulo: "Tocar som",
-      detalheHtml: `<span id="avisos-som-ajuda">${esc(ligado ? AJUDA_SOM : AJUDA_SOM_TRAVADO)}</span>`,
+      detalheHtml: `<span id="avisos-som-ajuda">${esc(ligado ? (celular ? AJUDA_SOM_CELULAR : AJUDA_SOM) : AJUDA_SOM_TRAVADO)}</span>`,
       controle: { tipo: "switch", ligado: a.som, acao: "alternar-som", desabilitado: !ligado, descritoPor: "avisos-som-ajuda" },
     }));
   }
@@ -86,18 +90,21 @@ export type DadosGeral = {
   experimentos: Experimentos;
 };
 
-export function renderGeral(d: DadosGeral, ui: ConfigUi): string {
+/** NOD-383: no celular não há teclado de atalhos: a Ajuda fica só com o onboarding, e o Tema fala do aparelho. */
+export function renderGeral(d: DadosGeral, ui: ConfigUi, celular = ehCelular()): string {
   const tema = grupoConfig("Aparência", [linhaConfig({
     titulo: "Tema",
-    detalhe: "Sistema acompanha o modo claro ou escuro do macOS. Vale para este computador.",
+    detalhe: detalheDoTema(celular),
     controle: { tipo: "seletor", acao: "escolher-tema", rotulo: "Tema", opcoes: ESCOLHAS_TEMA.map((t) => ({ valor: t.id, rotulo: t.nome, selecionado: t.id === d.tema })) },
   })]);
   const atalho = (titulo: string, teclas: readonly string[], falado: string) => linhaConfig({ titulo, controle: { tipo: "html", html: `${kbd(teclas)}<span class="sr-only">${esc(falado)}</span>` } });
   const ajuda = grupoConfig("Ajuda", [
     linhaConfig({ titulo: "Ver o onboarding de novo", detalhe: "A apresentação do nod, do começo", controle: { tipo: "link", acao: "ver-onboarding" } }),
-    atalho("Modo dev", ["⌘", "⇧", "D"], "Command Shift D"),
-    atalho("Buscar agentes", ["⌘", "K"], "Command K"),
-    atalho("Fechar e voltar", ["esc"], "Esc"),
+    ...(celular ? [] : [
+      atalho("Modo dev", ["⌘", "⇧", "D"], "Command Shift D"),
+      atalho("Buscar agentes", ["⌘", "K"], "Command K"),
+      atalho("Fechar e voltar", ["esc"], "Esc"),
+    ]),
   ], { id: "ajuda" });
   const aberto = ui.abertos.includes("avancado");
   const avancado = listaAninhada([

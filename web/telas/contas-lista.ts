@@ -4,6 +4,7 @@ import type { CausaFalhaLogin, ResultadoColarCodigo } from "../../src/contracts/
 import type { MaquinaDto } from "../../src/contracts/maquina.ts";
 import { ICONE } from "../lib/icones.ts";
 import { esc } from "../lib/render.ts";
+import { rotuloDoMac } from "../lib/aparelho.ts";
 import { VIVO } from "../lib/copiar.ts";
 import { comandoDoTerminal, fraseDaAtualizacao } from "../lib/atualizacao-ia.ts";
 import { logoDaIa, PROVEDOR } from "./cartao-ia.ts";
@@ -184,7 +185,7 @@ function blocoDoLogin(l: LoginNaTela, x: ContextoContas, conta: ContaIa | null):
   const nome = m ? nomeCurto(m, x.maquinas) : "máquina";
   const ic = m?.plataforma === "darwin" ? ICONE.laptop : ICONE.servidor;
   const id = esc(idDoLogin(l));
-  const cab = (direita: string) => `<div class="cl-login-cab">${ic}<b>${m?.plataforma === "darwin" ? "Este Mac" : esc(nome)}</b><span>${direita}</span></div>`;
+  const cab = (direita: string) => `<div class="cl-login-cab">${ic}<b>${m?.plataforma === "darwin" ? rotuloDoMac() : esc(nome)}</b><span>${direita}</span></div>`;
   if (l.onde === "mac") {
     return `<div class="cl-login" data-login="${id}">${cab(`<button type="button" class="ob-link" data-act="cl-login-fechar" data-login="${id}">Fechar</button>`)}<div class="cl-login-mac">${x.cartaoDoMac(l.ia)}</div></div>`;
   }
@@ -374,7 +375,7 @@ function formNova(x: ContextoContas): string {
     const mac = m.plataforma === "darwin";
     const pode = !mac || ehEsteMac(m, x);
     const dica = mac ? (pode ? "abre o navegador" : "abra o app do nod nesse Mac") : preparoNaNova(m, n.ia) ?? "o login aparece aqui na tela";
-    return `<label class="cl-maq${pode ? "" : " mudo"}"><input type="checkbox" value="${esc(m.id)}" data-cl-nova-maq${n.maquinas.includes(m.id) && pode ? " checked" : ""}${pode ? "" : " disabled"}>${mac ? ICONE.laptop : ICONE.servidor}<span><b>${esc(mac && pode ? "Este Mac" : m.nome)}</b><small>${esc(dica)}</small></span></label>`;
+    return `<label class="cl-maq${pode ? "" : " mudo"}"><input type="checkbox" value="${esc(m.id)}" data-cl-nova-maq${n.maquinas.includes(m.id) && pode ? " checked" : ""}${pode ? "" : " disabled"}>${mac ? ICONE.laptop : ICONE.servidor}<span><b>${esc(mac && pode ? rotuloDoMac() : m.nome)}</b><small>${esc(dica)}</small></span></label>`;
   }).join("");
   const marcadas = n.maquinas.filter((id) => x.maquinas.some((m) => m.id === id && m.conectada)).length;
   return `<form class="espaco-cartao cl-nova" data-form="cl-nova">

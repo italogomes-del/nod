@@ -1,4 +1,5 @@
 import { esc } from "../lib/render.ts";
+import { nesteAparelho } from "../lib/aparelho.ts";
 
 /**
  * NOD-345 (decisão do Gil, opção 2): o lembrete de que o espaço está só neste computador são DUAS coisas e nada mais —
@@ -19,7 +20,7 @@ export type SituacaoLembrete = {
 export const deveLembrar = (s: SituacaoLembrete): boolean => s.contas && s.temConta === false && s.rotinas > 0 && !s.jaFalou;
 
 export const htmlLembrete = (): string =>
-  `<section class="cc-bloco" aria-label="Lembrete da conta"><div class="cc-lembrete"><p>Seu espaço está só neste computador. Se ele se perder, o que você montou vai junto. Com uma conta, você entra de qualquer lugar.</p><div class="cc-acoes">${`<button type="button" class="bt cc-link" data-act="conta-lembrete-ok">Agora não</button><button type="button" class="bt pri" data-act="conta-abrir" data-etapa="inicio">${esc("Criar conta")}</button>`}</div></div></section>`;
+  `<section class="cc-bloco" aria-label="Lembrete da conta"><div class="cc-lembrete"><p>Seu espaço está só ${nesteAparelho()}. Se ele se perder, o que você montou vai junto. Com uma conta, você entra de qualquer lugar.</p><div class="cc-acoes">${`<button type="button" class="bt cc-link" data-act="conta-lembrete-ok">Agora não</button><button type="button" class="bt pri" data-act="conta-abrir" data-etapa="inicio">${esc("Criar conta")}</button>`}</div></div></section>`;
 
 export function jaFalou(storage: Pick<Storage, "getItem"> | null): boolean {
   try { return storage?.getItem(CHAVE_LEMBRETE) === "1"; } catch { return true; }

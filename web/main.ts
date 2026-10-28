@@ -1,3 +1,4 @@
+import { escNoEspaco, focoAoAbrirEspaco, voltarParaLista } from "./lib/navegacao-config.ts";
 import "./lib/mascote-elemento.ts";
 import { abrirCapturaAmpliada } from "./telas/captura-ampliada.ts";
 import { abrirPreviaArquivo } from "./telas/previa-arquivo.ts";
@@ -57,7 +58,7 @@ import type { Experimentos } from "../src/contracts/raio-x.ts";
 import type { Escopo } from "../src/shared/types.ts";
 import type { FrameSse } from "../src/contracts/frame.ts";
 import type { AnexoDaConversa } from "../src/contracts/anexo.ts";
-import { agenteDaTela, bibliotecaAberta, conversaAbertaTemNotaDeContas, conversaDaTela, estadoInicial, invalidacoesAoReconectar, invalidacoesAoRetomar, invalidacoesDaTela, mudouNaTela, reduzir, secaoDoPedido, type Acao, type Estado, type FalaPendente, type Invalidacao, type NivelGaveta, type PedidoSecao, type SecaoEspaco, type Tela } from "./estado/reducer.ts";
+import { agenteDaTela, bibliotecaAberta, conversaAbertaTemNotaDeContas, conversaDaTela, estadoInicial, invalidacoesAoReconectar, invalidacoesAoRetomar, invalidacoesDaTela, mudouNaTela, reduzir, secaoAberta, secaoDoPedido, type Acao, type Estado, type FalaPendente, type Invalidacao, type NivelGaveta, type PedidoSecao, type SecaoEspaco, type Tela } from "./estado/reducer.ts";
 import { contaApi, criarApi, minhaContaApi, ErroApi, observarRede, sessao as sessaoApi, type Api } from "./lib/api.ts";
 import { criarContaNoChat, fraseDoErro as fraseDoErroDeConta } from "./telas/conta-no-chat.ts";
 import { criarMinhaConta } from "./telas/minha-conta.ts";
@@ -74,6 +75,7 @@ import { criarAvisador } from "./lib/avisador.ts";
 import { criarCanalAvisos } from "./lib/canal-avisos.ts";
 import { criarLiveEvents, type LiveEvents } from "./lib/live-events.ts";
 import { ehCelular, enterEnvia } from "./lib/celular.ts";
+import { rotuloDoMac } from "./lib/aparelho.ts";
 import { criarCelular } from "./lib/gaveta-bots.ts";
 import "./pwa.ts";
 import { avatar, botao, esc, iconeAgente } from "./lib/render.ts";
@@ -99,6 +101,7 @@ import { renderNovaRotina } from "./telas/nova-rotina.ts";
 import { contextoInteligencia, nivelDaGaveta, paiDoNivel } from "./telas/detalhes.ts";
 import { avisarNaIdentidade, criarFilaDePerfil, criarSalvarAvatar, ERRO_AO_SALVAR, instalarIdentidade, sobreporPendentes } from "./lib/gaveta-identidade.ts";
 import { renderEspaco } from "./telas/espaco.ts";
+import { confirmarCriarBot, criarRapido } from "./telas/confirmar-criar-bot.ts";
 import { USOS } from "./telas/este-mac.ts";
 import { botsDaPessoa, maquinaNova, maquinasDeTrabalho, nomeDeInstanciaSugerido, soComputador } from "./telas/maquinas.ts";
 import { erroDoConectar, erroDoCriar, erroDoExcluir, recusaDoDormir, REGIAO_PADRAO, relerEnquantoCria, ZONA_PADRAO } from "./lib/maquina-nuvem.ts";
@@ -1085,7 +1088,7 @@ async function buscar(q: Invalidacao): Promise<Acao | null> {
     // Revisão do PR 1 (2026-10-16): na conversa a lista só serve ao cabeçalho do seletor de IA (informativo) — a falha fica
     // fechada, sem faixa vermelha, e a conversa só tenta de novo depois de ESPERA_CONTAS_MS (`relevante`). Em Máquinas e
     // em Provedores de IA o erro continua aparecendo.
-    const naTelaDeContas = estado.espaco?.secao === "maquinas" || estado.espaco?.secao === "conexao";
+    const naTelaDeContas = secaoAberta(estado) === "maquinas" || secaoAberta(estado) === "conexao";
     const contas = await api.contasIa().catch((e: unknown): ContasIaDto | null => {
       if (e instanceof ErroApi && e.status === 404) return { disponivel: false, modo: "perguntar", contas: [] };
       if (naTelaDeContas) throw e;
@@ -1249,7 +1252,7 @@ function relevante(q: Invalidacao): boolean {
   if (q === "frota" || q === "inventario" || q === "executor" || q === "ias" || q === "sua-vez" || q === "salas" || q === "nao-lidos" || q === "ligacao" || q === "trabalhos" || q.startsWith("vivos:")) return true;
   if (q.startsWith("trabalho:")) return t.tipo === "trabalho" && t.id === q.slice(9);
   if (q.startsWith("disponibilidade:")) return t.tipo === "conversa" && t.agenteId === q.slice(16);
-  const secao = estado.espaco?.secao;
+  const secao = secaoAberta(estado);
   if (q === "gestao") return secao === "agentes";
   if (q === "rotinas") return t.tipo === "rotinas" || t.tipo === "conversa";
   if (q === "conectores") return t.tipo === "conectores" || t.tipo === "conversa" || t.tipo === "sala";
@@ -1391,7 +1394,7 @@ function renderSidebar(estado: Estado): string {
     ? `<button class="icone-topo nao-lidos-bt" data-act="navegar" data-tela="nao-lidos" aria-current="${t.tipo === "nao-lidos" ? "page" : "false"}" aria-label="${esc(rotuloNaoLidos(estado))}" title="Não lidos">${BANDEJA}${comNovas ? '<span class="ponto-novo" aria-hidden="true"></span>' : ""}</button>`
     : "";
   return `<div class="search-wrap">
-      <div class="sh">${nodDiscreto}<button class="icone-topo" data-act="abrir-busca" aria-label="Buscar agentes" aria-keyshortcuts="Meta+K Control+K" title="Buscar (⌘K)">${LUPA}</button>${naoLidos}${renderIconeTrabalhos(estado)}${renderChamada(estado)}<span class="create-actions"><button class="create-trigger" data-act="navegar" data-tela="novo-bot" data-segurar="criar-rapido" aria-label="Nova conversa (segure para criar um bot direto)" aria-keyshortcuts="Shift+Enter Shift+Space"><span class="segurar-anel" aria-hidden="true"></span>+</button></span></div>
+      <div class="sh">${nodDiscreto}<button class="icone-topo" data-act="abrir-busca" aria-label="Buscar agentes" aria-keyshortcuts="Meta+K Control+K" title="Buscar (⌘K)">${LUPA}</button>${naoLidos}${renderIconeTrabalhos(estado)}${renderChamada(estado)}<span class="create-actions"><button class="create-trigger" data-act="navegar" data-tela="novo-bot" data-segurar="segurar-mais" aria-label="Nova conversa (segure para criar um bot direto)" aria-keyshortcuts="Shift+Enter Shift+Space"><span class="segurar-anel" aria-hidden="true"></span>+</button></span></div>
       <label class="search"${buscando ? "" : " hidden"}><span>⌕</span><input id="busca-bots" placeholder="Buscar agentes…" aria-label="Buscar agentes" autocomplete="off" /><kbd>esc</kbd></label>
     </div>
     ${renderIncidentes(estado)}
@@ -2133,7 +2136,8 @@ function render(): void {
     conta: dadosConta(),
     contaPagina: contas?.minhaConta && estado.configUi.abertos.includes("conta-pagina") ? telaMinhaConta.render() : null,
     tema: lerTema(),
-  }) : "", { seletor: ".espaco-conteudo", chave: estado.espaco?.secao === "agentes" ? "agentes" : null });
+    conexao: resumoConexao(),
+  }) : "", { seletor: ".espaco-conteudo", chave: secaoAberta(estado) === "agentes" ? "agentes" : null });
   devolverSegredosSsh();
   document.getElementById("espaco")?.toggleAttribute("hidden", !estado.espaco);
   // A ligação em tela cheia também deixa a .app (e Seu espaço) inerte; a pílula não: a pessoa usa o nod com a ligação aberta.
@@ -2399,13 +2403,13 @@ async function boot(): Promise<void> {
     // Revisto em 2026-10-11: com Máquinas aberta, a lista também. Máquina que cai ou volta não vira `inventario.mudou` (só a
     // mudança das IAs da pessoa vira), e o cartão ficava em "sem contato" com a VM já de volta e os bots trabalhando nela.
     // Desde a NOD-300 (2026-10-20) ela vira (motivo "presenca", no varrer da ponte); esta releitura fica como rede.
-    if (ticks % 2 === 0 && estado.sessao && estado.espaco?.secao === "maquinas") estado = reduzir(estado, { tipo: "invalidar", quais: ["trabalhos", "maquinas"] });
+    if (ticks % 2 === 0 && estado.sessao && secaoAberta(estado) === "maquinas") estado = reduzir(estado, { tipo: "invalidar", quais: ["trabalhos", "maquinas"] });
     // ADR-121 (NOD-92): de volta do Google, o preparo da conta roda no servidor; a conta é relida até ele terminar.
     const conta = estado.nuvem.conta;
     if (estado.sessao && estado.nuvem.aviso === "preparando" && conta !== "desligada" && (conta === null || conta.preparando)) estado = reduzir(estado, { tipo: "invalidar", quais: ["nuvem", "maquinas"] });
     // PR 2: enquanto o nod cria uma VM, a conta (a lista do que está sendo criado) e as máquinas são relidas: o motor pareia sozinho.
     // Revisão NOD-92 (item 17): a primeira leitura que falhou (rede, 5xx) deixa a conta em null; o tique tenta de novo.
-    else if (estado.sessao && estado.espaco?.secao === "maquinas" && (conta === null || relerEnquantoCria(estado.nuvem))) estado = reduzir(estado, { tipo: "invalidar", quais: ["nuvem", "maquinas"] });
+    else if (estado.sessao && secaoAberta(estado) === "maquinas" && (conta === null || relerEnquantoCria(estado.nuvem))) estado = reduzir(estado, { tipo: "invalidar", quais: ["nuvem", "maquinas"] });
     dispatch({ tipo: "tick", agora: Date.now() });
   }, 15_000);
   const url = new URL(window.location.href);
@@ -2639,7 +2643,7 @@ async function mudarGestao(fn: () => Promise<unknown>): Promise<void> {
 
 /** NOD-370: depois de excluir ou ocultar, o anúncio e o foco na lista em que a pessoa estava (web/lib/posicao-da-lista.ts). */
 function depoisDeTirarDaLista(a: BotGerido, grupo: "Excluídos" | "Ocultos"): (dialogoAindaAberto: boolean) => void {
-  return planejarSaidaDaLista({ doc: document as unknown as RaizDaLista, ativo: () => document.activeElement, agentesAberto: estado.espaco?.secao === "agentes", id: a.id, nome: a.nome, grupo, anunciar: anunciarGestao, lembrarFoco: (seletor) => focoPendente.lembrar(seletor) });
+  return planejarSaidaDaLista({ doc: document as unknown as RaizDaLista, ativo: () => document.activeElement, agentesAberto: secaoAberta(estado) === "agentes", id: a.id, nome: a.nome, grupo, anunciar: anunciarGestao, lembrarFoco: (seletor) => focoPendente.lembrar(seletor) });
 }
 
 /** NOD-370: a região viva fica fora da `.app`, que está inerte (fora da árvore de acessibilidade) com Seu espaço aberto. */
@@ -3761,6 +3765,15 @@ const timersCopiarCodigo = new WeakMap<HTMLElement, number>();
 /** NOD-8: o relógio do "✓ Copiado" dos outros botões de copiar (web/lib/copiar.ts). */
 const relogioDoCopiar: RelogioDoCopiar = { agendar: (fn, ms) => window.setTimeout(fn, ms), cancelar: (id) => clearTimeout(id), timers: new WeakMap() };
 
+/** Cria um bot em branco e abre a conversa dele. */
+function criarBotAgora(): Promise<void> {
+  return agir(async () => {
+    const r = await api!.criarAgente(undefined, { interativo: true });
+    dispatch({ tipo: "invalidar", quais: ["frota"] });
+    navegar({ tipo: "conversa", conversaId: r.conversa.id, agenteId: r.agente.id });
+  });
+}
+
 const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   ...telaOnboarding.acoes,
   // NOD-323: a mídia do bot.
@@ -3895,7 +3908,8 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     else if (tela === "gestao") abrirEspaco("agentes");
     else if (tela === "espaco") abrirEspaco("conexao");
   },
-  "menu-conta": (el) => abrirMenuConta(el, dadosMenuConta(), { secao: abrirEspaco, conta: (qual) => void abrirDoMenuConta(qual) }),
+  // NOD-383: no celular, "Configurações" (a Geral do menu) abre a lista das seções; os outros itens abrem a seção direto.
+  "menu-conta": (el) => abrirMenuConta(el, dadosMenuConta(), { secao: (s) => abrirEspaco(s, s === "geral" && celular.ativo()), conta: (qual) => void abrirDoMenuConta(qual) }),
   "secao-espaco": (el) => abrirEspaco((el.dataset.secao as SecaoEspaco | undefined) ?? "conexao"),
   // NOD-367: as ações das Configurações (a linha recolhida, a conta, os experimentos e o onboarding).
   "config-recolhe": (el) => { if (el.dataset.recolhe) dispatch({ tipo: "config-recolhe", id: el.dataset.recolhe }); },
@@ -4026,6 +4040,14 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     timersCopiarCodigo.set(el, window.setTimeout(() => mostrar("Copiar", "Copiar código"), COPIADO_MS));
   },
   "fechar-espaco": () => fecharEspaco(),
+  // NOD-383: o ‹ de uma seção no celular volta para a lista das Configurações (o foco vai para a seção de onde saiu).
+  "cfg-lista": () => {
+    const volta = voltarParaLista(estado, !!contas?.minhaConta);
+    if (!volta) return;
+    if (volta.fecharMinhaConta) telaMinhaConta.fechar();
+    dispatch({ tipo: "espaco", secao: volta.secao, lista: true });
+    document.querySelector<HTMLElement>(volta.foco)?.focus();
+  },
   // definido em 2026-09-25 (jornadas de conexão): "Conectar" abre o login NA HORA — no card do chat, no
   // cartão do marketplace, na gaveta, no painel do bot e no card da rotina — e a web espera sozinha
   // (web/lib/conexao.ts). Sem "Verificar conexão" e sem ir ao marketplace no meio de uma conversa.
@@ -4121,11 +4143,11 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     if (t.tipo === "conectores" && t.voltar) navegar(t.voltar);
     else navegar({ tipo: "inicio" });
   },
-  "criar-rapido": () => agir(async () => {
-    const r = await api!.criarAgente(undefined, { interativo: true });
-    dispatch({ tipo: "invalidar", quais: ["frota"] });
-    navegar({ tipo: "conversa", conversaId: r.conversa.id, agenteId: r.agente.id });
-  }),
+  // NOD-383: no celular, segurar o + pergunta antes ("Criar um bot agora?"); só Criar chama o criarAgente.
+  // O toque explícito em "Criar novo bot" (Nova conversa) cria direto.
+  "criar-rapido": () => criarBotAgora(),
+  // NOD-383: segurar o + do topo. No celular o toque longo sai sem querer: pergunta antes; no desktop cria direto.
+  "segurar-mais": () => void criarRapido(celular.ativo(), () => confirmarCriarBot(LOGO_NOD), criarBotAgora),
   "escolher-missao": (el) => {
     const ta = document.getElementById("composer-texto") as HTMLTextAreaElement | null;
     if (ta) { escreverNoCampo(ta, el.dataset.texto ?? ""); return enviarComposer(); }
@@ -5329,7 +5351,13 @@ document.addEventListener("keydown", (ev) => {
   }
   // QA da NOD-370: com o confirmar aberto e o pedido andando, os botões dele ficam desativados e o foco cai no <body>; o Esc
   // não fecha Seu espaço por trás do diálogo.
-  if (ev.key === "Escape" && estado.espaco && !(ev.target as HTMLElement).closest?.("dialog") && !document.querySelector("dialog[open]")) { ev.preventDefault(); fecharEspaco(); return; }
+  if (ev.key === "Escape" && estado.espaco && !(ev.target as HTMLElement).closest?.("dialog") && !document.querySelector("dialog[open]")) {
+    ev.preventDefault();
+    // NOD-383: no celular, Esc numa seção volta para a lista, como o ‹.
+    if (escNoEspaco(celular.ativo(), estado) === "lista") void ACOES["cfg-lista"]?.(document.body);
+    else fecharEspaco();
+    return;
+  }
   // definido em 2026-09-25 (revisão do PR #68): Esc fecha a gaveta do app e o "+ Dar acesso" do painel.
   if (ev.key === "Escape" && estado.tela.tipo === "conectores" && estado.tela.gaveta) { ev.preventDefault(); void ACOES["fechar-gaveta"]?.(document.body); return; }
   // NOD-122: com a gaveta aberta o Tab dá a volta nela, em vez de sair para a barra do navegador.
@@ -5850,7 +5878,7 @@ async function pulsoDoComputador(minha: number): Promise<void> {
 }
 function operarComputador(op: OperacaoPessoa): Promise<void> {
   const longa = op === "atualizar" || op === "redefinir" || op === "sair_de_todos" || op === "esquecer_senhas";
-  dispatch({ tipo: "computador-ui", ui: { confirmar: null, realce: null, etapasAbertas: longa && estado.espaco?.secao === "maquinas" } });
+  dispatch({ tipo: "computador-ui", ui: { confirmar: null, realce: null, etapasAbertas: longa && secaoAberta(estado) === "maquinas" } });
   // Uma leitura que saiu antes do POST chegaria sem a operação e apagaria o diálogo de etapas: a geração nova a descarta.
   window.clearTimeout(computadorTimer);
   ++computadorGeracao;
@@ -5890,7 +5918,7 @@ const ACOES_CHANGE: Record<string, (valor: string, el: HTMLSelectElement) => Pro
 
 
 // ---- Seu espaço e o menu da conta (definido em 2026-09-30, canvas "Menu, sidebar e gaveta") -----------------------------
-function abrirEspaco(pedido: PedidoSecao): void {
+function abrirEspaco(pedido: PedidoSecao, lista = false): void {
   celular.fecharBots();
   // NOD-367: os pedidos de antes (avisos, este Mac, relatos…) caem na seção que os absorveu.
   const secao = secaoDoPedido(pedido);
@@ -5899,9 +5927,8 @@ function abrirEspaco(pedido: PedidoSecao): void {
   const jaAberto = !!estado.espaco;
   if (secao === "conta" && contas?.minhaConta) telaMinhaConta.abrir();
   else if (estado.espaco?.secao === "conta" && contas?.minhaConta) telaMinhaConta.fechar();
-  dispatch({ tipo: "espaco", secao });
-  // "Ajuda" abre Geral no bloco Ajuda.
-  const foco = pedido === "ajuda" ? "#espaco #ajuda" : jaAberto ? `#espaco [data-secao="${secao}"]` : "#espaco .espaco-voltar";
+  dispatch({ tipo: "espaco", secao, ...(lista ? { lista } : {}) });
+  const foco = focoAoAbrirEspaco({ pedido, secao, celular: celular.ativo(), lista, jaAberto });
   const alvo = document.querySelector<HTMLElement>(foco);
   alvo?.focus();
   if (pedido === "ajuda") alvo?.scrollIntoView({ block: "start" });
@@ -5924,6 +5951,12 @@ function avisoDoUso(): AvisoDoUso | null {
   return faixaDoUso(estado.contasIa.contas, estado.agora);
 }
 
+/** O estado de Provedores de IA em uma palavra (o menu da conta e a lista das Configurações no celular). */
+function resumoConexao(): string {
+  const inv = inventarioEmUso(estado);
+  return !estado.executor ? "Verificando" : inv && inv.estado !== "pronto" ? "Desconectada" : estado.executor.atual === "catcher" ? "Simulação" : "Conectada";
+}
+
 function dadosMenuConta(): DadosMenuConta {
   const inv = inventarioEmUso(estado);
   const falha = !!inv && inv.estado !== "pronto";
@@ -5934,7 +5967,7 @@ function dadosMenuConta(): DadosMenuConta {
     : ((u) => (u ? { texto: u.texto, botao: "Ver contas" } : null))(avisoDoUso());
   return {
     faixa,
-    conexao: !estado.executor ? "Verificando" : falha ? "Desconectada" : estado.executor.atual === "catcher" ? "Simulação" : "Conectada",
+    conexao: resumoConexao(),
     maquina: avisoDasMaquinas(),
     quem: quemEsta(),
     // NOD-345: com contas no servidor, Sair por último (ou o convite, no espaço provisório).
@@ -5945,7 +5978,7 @@ function dadosMenuConta(): DadosMenuConta {
 /** NOD-367: o que o menu dizia do Este Mac (#219) e do computador do bot (NOD-96), agora numa linha que abre Máquinas. */
 function avisoDasMaquinas(): DadosMenuConta["maquina"] {
   const mac = leituraDoMac(estado.trabalhos).motivoEspera;
-  if (mac) return { texto: mac === "disco" ? "Este Mac com o disco quase cheio" : "Este Mac ocupado: trabalho novo espera", tom: "atencao" };
+  if (mac) return { texto: mac === "disco" ? `${rotuloDoMac()} com o disco quase cheio` : `${rotuloDoMac()} ocupado: trabalho novo espera`, tom: "atencao" };
   return estado.computadorPessoa ? avisoDoComputador(estado.computadorPessoa, estado.computadorMemoria.okMenuAte > estado.agora) : null;
 }
 

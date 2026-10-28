@@ -157,6 +157,12 @@ export type SecaoEspaco = "conta" | "geral" | "conexao" | "maquinas" | "agentes"
  */
 export type PedidoSecao = SecaoEspaco | "avisos" | "preferencias" | "este-mac" | "computador-do-bot" | "computadores" | "relatos" | "ajuda";
 
+/** NOD-383: a seção que está aberta de fato. Na lista das Configurações do celular, nenhuma (o tique, as releituras e o Esc
+ * não agem sobre a seção de onde a pessoa saiu). */
+export function secaoAberta(e: Pick<Estado, "espaco">): SecaoEspaco | null {
+  return e.espaco && !e.espaco.lista ? e.espaco.secao : null;
+}
+
 export function secaoDoPedido(p: PedidoSecao): SecaoEspaco {
   switch (p) {
     case "avisos": case "preferencias": case "ajuda": return "geral";
@@ -285,7 +291,8 @@ export type Estado = {
   sessao: Escopo | null;
   tela: Tela;
   /** Seu espaço aberto por cima da tela, na seção escolhida; null = fechado. */
-  espaco: { secao: SecaoEspaco } | null;
+  /** NOD-383: `lista` = no celular, a lista das seções (estilo Ajustes); a seção abre por cima dela. O desktop ignora. */
+  espaco: { secao: SecaoEspaco; lista?: boolean } | null;
   configUi: ConfigUi;
   frota: FrotaDto | null;
   gestao?: FrotaDto | null;
@@ -523,7 +530,7 @@ export type Acao =
   | { tipo: "aviso-conexao"; texto: string | null }
   | { tipo: "sessao"; escopo: Escopo | null }
   | { tipo: "navegar"; tela: Tela }
-  | { tipo: "espaco"; secao: SecaoEspaco | null }
+  | { tipo: "espaco"; secao: SecaoEspaco | null; lista?: boolean }
   | { tipo: "config-ui"; mudanca: Partial<ConfigUi> }
   /** Abre ou fecha uma linha recolhida das Configurações. */
   | { tipo: "config-recolhe"; id: string }
@@ -1394,11 +1401,13 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
       // A chave crua só vive enquanto a pessoa está em Máquinas; trocar de seção ou fechar a descarta. NOD-367: trocar de
       // seção fecha o "…" e as linhas abertas; fechar as Configurações zera também a busca.
       return {
-        ...estado, espaco: acao.secao ? { secao: acao.secao } : null, chaveEmitida: acao.secao === "maquinas" ? estado.chaveEmitida : null, erro: null,
-        configUi: !acao.secao ? { ...CONFIG_UI_INICIAL, lote: loteAoSair(estado.configUi.lote) } : acao.secao === estado.espaco?.secao ? estado.configUi : { ...CONFIG_UI_INICIAL, busca: estado.configUi.busca, lote: loteAoSair(estado.configUi.lote) },
+        // NOD-383: a lista do celular não é seção nenhuma (guarda só de onde a pessoa saiu, para o foco): voltar para ela
+        // descarta a chave e as linhas abertas como trocar de seção.
+        ...estado, espaco: acao.secao ? { secao: acao.secao, ...(acao.lista ? { lista: true } : {}) } : null, chaveEmitida: acao.secao === "maquinas" && !acao.lista ? estado.chaveEmitida : null, erro: null,
+        configUi: !acao.secao ? { ...CONFIG_UI_INICIAL, lote: loteAoSair(estado.configUi.lote) } : acao.secao === estado.espaco?.secao && !acao.lista && !estado.espaco.lista ? estado.configUi : { ...CONFIG_UI_INICIAL, busca: estado.configUi.busca, lote: loteAoSair(estado.configUi.lote) },
         // NOD-367 (revisão 2): o relato.criado não invalida nada (ADR-041), então entrar em Feedback relê "Seus envios" e
         // esquece o erro de antes; o envio feito na conversa com o Nod aparece ao voltar.
-        ...(acao.secao === "feedback" && estado.espaco?.secao !== "feedback" ? { relatos: null, relatosErro: false } : {}),
+        ...(acao.secao === "feedback" && !acao.lista && secaoAberta(estado) !== "feedback" ? { relatos: null, relatosErro: false } : {}),
       };
     case "config-ui":
       return { ...estado, configUi: { ...estado.configUi, ...acao.mudanca } };
@@ -1894,7 +1903,7 @@ export function bibliotecaAberta(estado: Pick<Estado, "tela" | "gaveta" | "abaGa
 export function invalidacoesDaTela(estado: Estado): Invalidacao[] {
   const t = estado.tela;
   const faltas: Invalidacao[] = [];
-  const secao = estado.espaco?.secao;
+  const secao = secaoAberta(estado);
   if (secao === "agentes" && !estado.gestao) faltas.push("gestao");
   if (!estado.frota) faltas.push("frota");
   // Plano das IAs (2026-10-10): Provedores de IA, a gaveta (2A/2B) e as linhas de troca de IA no chat leem `GET /ias`.

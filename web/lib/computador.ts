@@ -1,6 +1,7 @@
 import type { ComputadorDto, RegistroComputador } from "../../src/contracts/computador.ts";
 import type { MotivoFalhaComputador } from "../../src/contracts/motivos.ts";
 import { botao, esc } from "./render.ts";
+import { ehCelular } from "./celular.ts";
 
 /**
  * Cópia de PREFIXO/SUFIXO de src/domain/computador.ts (a web não executa src/). O teste unitário
@@ -127,10 +128,11 @@ export function aoFecharATela(controla: boolean, ajudaDecisaoId: string | null):
  * O rótulo do ✕ e a dica do topo (protótipo v1.1). No controle, fechar devolve; com o pedido de ajuda aberto, fechar
  * não devolve, e o ✕ diz isso em vez de prometer devolver.
  */
-export function rotuloDoFechar(nome: string, controla: boolean, ajudaDecisaoId: string | null): { rotulo: string; dica: string | null } {
+export function rotuloDoFechar(nome: string, controla: boolean, ajudaDecisaoId: string | null, celular = ehCelular()): { rotulo: string; dica: string | null } {
   const efeito = aoFecharATela(controla, ajudaDecisaoId);
-  if (efeito === "devolver") return { rotulo: `Fechar e devolver ao ${nome} (Esc)`, dica: `Fechar devolve ao ${nome}` };
-  if (efeito === "esperar") return { rotulo: "Fechar (o pedido continua aberto)", dica: "Esc fecha; o pedido continua aberto" };
+  // NOD-383: no celular não há Esc.
+  if (efeito === "devolver") return { rotulo: `Fechar e devolver ao ${nome}${celular ? "" : " (Esc)"}`, dica: `Fechar devolve ao ${nome}` };
+  if (efeito === "esperar") return { rotulo: "Fechar (o pedido continua aberto)", dica: celular ? "Fechar não encerra o pedido" : "Esc fecha; o pedido continua aberto" };
   return { rotulo: "Fechar computador", dica: null };
 }
 

@@ -1,4 +1,5 @@
 import type { ContaIa } from "../../src/contracts/contas-ia.ts";
+import { nesteAparelho } from "../lib/aparelho.ts";
 import { ICONE } from "../lib/icones.ts";
 import { esc } from "../lib/render.ts";
 import { pilhaDeAvatares, PROVEDOR } from "./cartao-ia.ts";
@@ -105,7 +106,7 @@ export function htmlMenuConta(d: DadosMenuConta): string {
   // Sair por último; no espaço provisório (sem conta ainda), o convite fica no lugar dele.
   const fim = !d.conta ? ""
     : d.conta.email === null
-      ? `<hr><button type="button" role="menuitem" data-conta="inicio">${ICONE.pessoa}<span class="mc-nome">Criar conta ou entrar</span><span class="mc-meta">Seu espaço está só neste computador</span></button>`
+      ? `<hr><button type="button" role="menuitem" data-conta="inicio">${ICONE.pessoa}<span class="mc-nome">Criar conta ou entrar</span><span class="mc-meta">Seu espaço está só ${nesteAparelho()}</span></button>`
       : `<hr><button type="button" role="menuitem" data-conta="sair">${ICONE.sair}<span class="mc-nome">Sair</span></button>`;
   return `${quem}${faixa}${maquina}<div role="menu" aria-label="${esc(rotulo)}">
     ${item("conexao", pilhaDeAvatares(true), "Provedores de IA", d.conexao)}

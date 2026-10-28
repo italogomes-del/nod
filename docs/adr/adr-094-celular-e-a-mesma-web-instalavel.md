@@ -39,6 +39,16 @@ no toque, sem 🐞 fixo e sem •••.
    - o 🐞 "relatar" aparece só depois de um toque na mensagem;
    - abrir uma conversa não abre o teclado;
    - nenhum foco é movido pelo código ao abrir a gaveta, e o toque não deixa anel de foco.
+
+   (Emenda 2026-10-28, NOD-383.) Exceção registrada: as **Configurações** têm render próprio no celular, decidido por
+   `ehCelular()` (`renderEspacoCelular` em `web/telas/espaco.ts`): uma lista estilo Ajustes e cada seção em tela cheia
+   com ‹, o detalhe de linha em 1 linha com "Saiba mais" (`comSaibaMais` em `web/lib/linha-config.ts`) e a folha
+   "Criar um bot agora?" ao segurar o +. O motivo: 6 seções em abas e linhas com três frases não cabem em 390 px só com
+   CSS. Os textos que falam do aparelho passam por `web/lib/aparelho.ts` ("neste aparelho", "Seu Mac"). O conteúdo de
+   cada seção é o mesmo do desktop (as mesmas funções `render*`); o desktop não muda. A auditoria
+   `scripts/alvos-44px/` (44 px por `elementFromPoint`, sem atalho de teclado, macOS, "este computador" nem banco) guarda
+   o celular. Reverter esta exceção se o render do celular divergir do desktop em conteúdo (uma opção que só existe num
+   dos dois) ou se uma seção nova não entrar na lista do celular no mesmo PR.
 4. **O service worker guarda só o que é público** (`web/public/sw.js`): `/offline.html` e os ícones, num cache
    versionado (`nod-publico-v1`). Ele só atende navegação da mesma origem fora de `/api`: vai à rede e, sem rede, mostra a
    página "sem conexão". API, sessão, SSE, anexos e o HTML/JS do app nunca são copiados nem servidos do cache. Não há
@@ -112,6 +122,11 @@ Reverter se, em 14 dias de uso no celular, acontecer um destes:
     (`retomar`);
   - `tests/unit/http/estatico.test.ts`;
   - `tests/integration/sessao-google.test.ts` e `tests/concurrency/admissao-por-dominio.test.ts`.
+- `scripts/alvos-44px/` (NOD-383, 2026-10-28): auditoria de toque do celular num Chrome headless em 390×844 com toque.
+  Mede cada alvo visível por `elementFromPoint` a 22 px do centro nos 4 pontos cardinais (área efetiva ≥44×44) e acha
+  atalho de teclado, macOS, "este computador", informação de banco e título que quebra em duas linhas; falha listando
+  seletor e tamanho. A regra é pura (`regra.ts`, `tests/unit/scripts/alvos-44px.test.ts`); o executor (`rodar.ts`) roda
+  contra um servidor com `NOD_LOGIN=stub`. Regressão para quem mexer na interface do celular.
 
 ## Emenda de 2026-10-27: o ‹ da conversa (NOD-381)
 
