@@ -3,6 +3,10 @@ import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve, join } from "node:path";
 import { setTimeout as esperar } from "node:timers/promises";
+import { readFileSync } from "node:fs";
+// NOD-93 (28/10): a lista esperada mora num JSON que o teste unitário confere contra desktop/preload-web.ts,
+// para a ponte nova quebrar já na CI do PR e não só no release do Mac.
+const PONTE = JSON.parse(readFileSync(resolve("scripts/desktop/ponte-web-esperada.json"), "utf8"));
 const scratch = await mkdtemp(join(tmpdir(), "nod-ui-smoke-"));
 app.setPath("userData", scratch);
 const isolada = { sandbox: true, contextIsolation: true, nodeIntegration: false };
@@ -21,9 +25,9 @@ async function janelaWeb() {
   try {
     await w.loadURL("data:text/html;charset=utf-8,<!doctype html><title>nod</title><body>web</body>");
     const estado = await w.webContents.executeJavaScript(`({ node: typeof require, processo: typeof process, nod: typeof window.nod, ponte: Object.keys(window.nodDesktop ?? {}).sort().join(","), ias: Object.keys(window.nodDesktop?.ias ?? {}).sort().join(","), midia: Object.keys(window.nodDesktop?.midia ?? {}).sort().join(","), ipc: typeof window.ipcRenderer })`);
-    const esperado = "aoAbrir,aoBuscar,aoDeepLink,avisar,contador,contas,deepLinkPendente,definirAvisos,definirSom,definirTema,desafioConta,emLigacao,iaEntrar,iaInstalar,iaTestar,ias,microfone,midia,preferencias,trocarConta,vmTentarAgora";
-    const esperadoIas = "abrirLink,aoMudar,atualizar,cancelar,colarCodigo,entrar,estados,instalar,verificar";
-    if (estado.node !== "undefined" || estado.processo !== "undefined" || estado.nod !== "undefined" || estado.ipc !== "undefined" || estado.ponte !== esperado || estado.ias !== esperadoIas || estado.midia !== "existe,maquina,mostrarNoFinder") throw new Error(`Janela web expõe mais que nodDesktop: ${JSON.stringify(estado)}`);
+    const esperado = PONTE.nodDesktop.join(",");
+    const esperadoIas = PONTE.ias.join(",");
+    if (estado.node !== "undefined" || estado.processo !== "undefined" || estado.nod !== "undefined" || estado.ipc !== "undefined" || estado.ponte !== esperado || estado.ias !== esperadoIas || estado.midia !== PONTE.midia.join(",")) throw new Error(`Janela web expõe mais que nodDesktop: ${JSON.stringify(estado)}`);
     // O evento do processo principal chega à página pelo `aoMudar`, e o pedido de estados volta do processo principal.
     await w.webContents.executeJavaScript(`window.nodDesktop.ias.aoMudar((e) => { window.iaMudou = e; })`);
     w.webContents.send("nod:ia-mudou", { ia: "claude-cli", estado: "entrando" });
