@@ -21,7 +21,7 @@ import { haQuanto } from "../lib/relogio.ts";
 import { FALA_SAINDO_MS, tempoDaFala } from "../lib/fala-viva.ts";
 import { textoFormatado } from "../lib/texto-formatado.ts";
 import { dividirEmBaloes } from "../lib/baloes.ts";
-import { estadoMascoteNaConversa, mascoteAnimado, turnosVivosDaConversa } from "../lib/mascote.ts";
+import { estadoMascoteNaConversa, mascoteAnimado, turnosVivosDaConversa, turnosVivosDoChat } from "../lib/mascote.ts";
 import { renderFaixaParada } from "./faixa-parada.ts";
 import type { Morph } from "../lib/morph.ts";
 import { htmlCartaoTela, htmlLinhaSenhaSalva, motivoDoPedidoDeTela } from "../lib/computador.ts";
@@ -50,7 +50,7 @@ import { avisoContaSemAcesso, avisoHarnessFora, avisoModeloRecusado, ehIa, inven
 import { escolhaEfetiva, iasDaTela, inteligenciaDoBot } from "./inteligencia.ts";
 import { htmlBotaoDitado, htmlPilulaDitado } from "./ditado.ts";
 import { renderLinhaLigacao } from "./ligacao.ts";
-import { conversaLimpa, htmlTroca, juntarTrocas, planejarLinhas, type PlanoMensagem } from "./linhas-do-chat.ts";
+import { conversaLimpa, emOrdemDoChat, htmlTroca, juntarTrocas, lugarDosBastidores, NENHUM_TURNO_VIVO, planejarLinhas, type PlanoMensagem, type TurnosDaPessoaVivos } from "./linhas-do-chat.ts";
 import { trabalhosConhecidos } from "../lib/trabalhos.ts";
 import { TEXTO_FALHA_LEITURA } from "../lib/ouvir.ts";
 import { acoesDaFala, chipsDeReacao, citacaoAcimaDoBalao } from "./acoes-da-fala.ts";
@@ -509,7 +509,7 @@ export function situacaoNaFila(m: Mensagem, estado: Estado): (SituacaoFila & { t
     const la = estado.frota?.agentes.find((a) => a.conversaId === outra.conversaId);
     return { tipo: "na_fila", turnoId: emCurso.id, texto: `Na fila · ${nome} está respondendo em ${la ? `#${la.nome}` : "outra conversa"}` };
   }
-  const naFila = Object.values(estado.turnosVivos).filter((t) => t.conversaId === c.conversa.id && t.estado === "na_fila" && !(t.turnoId in estado.cancelando)).length;
+  const naFila = Object.values(estado.turnosVivos).filter((t) => t.conversaId === c.conversa.id && t.estado === "na_fila" && !t.bastidores && !(t.turnoId in estado.cancelando)).length;
   return { tipo: "na_fila", turnoId: emCurso.id, texto: naFila > 1 ? `Na fila · ${nome} lê junto com as outras quando terminar` : `Na fila · ${nome} lê quando terminar o turno atual` };
 }
 
@@ -1285,8 +1285,9 @@ export function turnosDeTrabalho(c: ConversaEstado, estado: Estado): ReadonlySet
 /** Os turnos vivos da conversa e a faixa de parada, em blocos (um por turno). */
 export function blocosAoVivo(c: ConversaEstado, estado: Estado): BlocoDaTimeline[] {
   const deTrabalho = turnosDeTrabalho(c, estado);
-  // NOD-216: a mesma fonte do mascote (turnosVivosDaConversa), mais o que a conversa relida diz ser de trabalho.
-  const vivos = turnosVivosDaConversa(estado, c.conversa.id).filter((t) => !deTrabalho.has(t.turnoId));
+  // NOD-216: a mesma fonte do mascote, mais o que a conversa relida diz ser de trabalho. NOD-402: menos os dos bastidores
+  // (rotina, colega), que rodam em segundo plano — no chat só entra a mensagem gravada, quando há algo para a pessoa.
+  const vivos = turnosVivosDoChat(estado, c.conversa.id).filter((t) => !deTrabalho.has(t.turnoId));
   // As falas paradas, na ordem em que saíram: as dos turnos que acabaram vêm antes das vivas (são mais velhas — a sala e
   // o turno novo não as passam para baixo, revisão 4 do #508); a do meio do turno (`turno.fala`), antes da fala viva
   // dele. A última de um turno que acabou fica com a chave da fala viva (o bloco é reaproveitado pelo morph).
@@ -1323,6 +1324,23 @@ export function renderHistoricoDaTimeline(c: ConversaEstado, estado: Estado): st
   return comProgressoNaFala(blocosDoHistorico(c, estado), c, estado).map((b) => b.html).join("");
 }
 
+/** NOD-402: quanto tempo o turno da pessoa ainda na fila segura as mensagens dos bastidores (depois, a fila parou). */
+/** O mesmo número de `FILA_SEGURA_MS` em src/repositories/mensagens.repo.ts (o `turnoDesde` da âncora): mudar um muda o outro. */
+export const FILA_SEGURA_MS = 5 * 60_000;
+
+/**
+ * NOD-402 (revisão 13): de quando o turno vivo da pessoa segura a mensagem dos bastidores. Da hora em que ele pôde rodar
+ * (`criadoEm`), se esperou pouco na fila; se esperou mais que `FILA_SEGURA_MS`, o que foi gravado nessa espera já estava à
+ * vista e não pode sumir quando ele despacha: a trava passa a valer do despacho (`despachadoEm`). Na fila há mais tempo
+ * que isso, não segura nada.
+ */
+export function inicioDaTrava(t: TurnoVivo, agora: number): number | undefined {
+  if (t.criadoEm === undefined) return t.estado === "rodando" ? t.despachadoEm : undefined;
+  if (t.estado === "na_fila") return agora - t.criadoEm < FILA_SEGURA_MS ? t.criadoEm : undefined;
+  if (t.despachadoEm === undefined || t.despachadoEm - t.criadoEm < FILA_SEGURA_MS) return t.criadoEm;
+  return t.despachadoEm;
+}
+
 export function blocosDoHistorico(c: ConversaEstado, estado: Estado): BlocoDaTimeline[] {
   const sala = c.conversa.tipo === "sala";
   const agente = c.conversa.agenteId ? agenteDe(estado, c.conversa.agenteId) : undefined;
@@ -1348,7 +1366,28 @@ export function blocosDoHistorico(c: ConversaEstado, estado: Estado): BlocoDaTim
   // pendente, e as pendentes entram depois das mensagens (são as mais novas), antes das propostas e das decisões.
   const chaveDaPendente = (b: BlocoDaTimeline): BlocoDaTimeline => (c.enviadas?.[b.chave] ? { ...b, chave: `pendente:${c.enviadas[b.chave]}` } : b);
   const pendentes = (c.pendentes ?? []).map((p) => ({ chave: `pendente:${p.idEnvio}`, html: renderFalaPendente(p, c, estado) }));
-  const { blocos, ancoradas } = comPedidosAncorados(comEncolhidosNaAncora(blocosDasMensagens(c.mensagens, estado, sala, c.conversa.agenteId ? { agenteId: c.conversa.agenteId, acoes: c.acoesDoModo } : undefined), c), c, estado, idsDasPropostas);
+  // NOD-402 (critério 4): a mensagem de bastidores não entra entre as falas do turno da pessoa. As âncoras por posição
+  // (`comEncolhidosNaAncora`, `comPedidosAncorados`) leem a MESMA lista reordenada.
+  // O turno da pessoa que acabou mas cuja fala final ainda não voltou na releitura (o retrato da fala, `falasSaindo`) ainda
+  // segura: sem isso, a mensagem da rotina aparecia antes da resposta e pulava quando ela chegava (definido em 2026-10-28).
+  const finais = new Set(c.mensagens.filter((m) => m.fimDoTurno === true && m.turnoId).map((m) => m.turnoId as string));
+  const saindo = Object.values(estado.falasSaindo?.[c.conversa.id] ?? {}).map((s) => s.turno).filter((t) => !t.bastidores && !t.trabalhoId && !finais.has(t.turnoId));
+  const vivosDoChat = [...turnosVivosDoChat(estado, c.conversa.id), ...saindo];
+  // Só a hora do servidor (definido em 2026-10-28): o `desde` é do relógio do navegador e não se compara ao `criadoEm`. Trava
+  // a partir da hora em que o turno NASCEU (revisão 9: `criadoEm`, do `turno_criado`, do `turno_despachado` e do GET; o
+  // mesmo relógio do `turnoDesde` da âncora), na fila ou rodando — não da última fala, que ainda pode estar em `pendentes`.
+  // O turno sem hora do servidor (servidor antigo) cai no despacho; sem nenhuma, não segura nada.
+  // O turno parado na fila (máquina fora, por exemplo) segura só nos primeiros minutos: a linha "a rotina não rodou" e o
+  // resultado dela não somem por horas atrás de uma fala que não anda (definido em 2026-10-28).
+  const rodandoDesde = vivosDoChat.flatMap((t) => { const d = inicioDaTrava(t, estado.agora); return d === undefined ? [] : [d]; }).reduce<number | null>((min, d) => (min === null || d < min ? d : min), null);
+  const vivos = { desde: rodandoDesde, turnos: new Set(vivosDoChat.map((t) => t.turnoId)) };
+  const mensagens = emOrdemDoChat(c.mensagens, vivos);
+  const co = mensagens === c.mensagens ? c : { ...c, mensagens: [...mensagens] };
+  // O pedido (cartão) de um turno cuja fala está segurada fica segurado com ela: ancorado por `criadoEm`, cairia no meio do
+  // turno da pessoa.
+  const vistas = new Set(mensagens.map((m) => m.id));
+  const turnosSegurados = new Set(c.mensagens.filter((m) => m.turnoId && !vistas.has(m.id)).map((m) => m.turnoId as string));
+  const { blocos, ancoradas } = comPedidosAncorados(comEncolhidosNaAncora(blocosDasMensagens(co.mensagens, estado, sala, c.conversa.agenteId ? { agenteId: c.conversa.agenteId, acoes: c.acoesDoModo } : undefined), co), co, estado, idsDasPropostas, turnosSegurados, vivos, c.mensagens);
   return [
     // Chat limpo (PR 6; plano, Parte 5): o divisor do topo e um a cada pausa de 30 min ou troca de dia entre itens à vista,
     // calculados depois de esconder o que foi para a Atividade, juntar as trocas e encolher os cartões. Vale também na sala
@@ -1460,14 +1499,29 @@ function inicioDoBloco({ chave, inicio }: BlocoDaTimeline): string {
  * recolhidos: a chave de um bloco é o id da primeira mensagem dele (ou `avisos-<id>`), então a âncora que caiu dentro
  * de um grupo recolhido fica depois do grupo — nunca some.
  */
-function comPedidosAncorados(blocos: BlocoDaTimeline[], c: ConversaEstado, estado: Estado, propostas: ReadonlySet<string>): { blocos: BlocoDaTimeline[]; ancoradas: ReadonlySet<string> } {
-  const pedidos = pedidosAncoraveis(estado, c.conversa.id, propostas);
-  if (pedidos.length === 0) return { blocos, ancoradas: new Set() };
+function comPedidosAncorados(blocos: BlocoDaTimeline[], c: ConversaEstado, estado: Estado, propostas: ReadonlySet<string>, turnosSegurados: ReadonlySet<string> = new Set(), vivos: TurnosDaPessoaVivos = NENHUM_TURNO_VIVO, doServidor: readonly Mensagem[] = c.mensagens): { blocos: BlocoDaTimeline[]; ancoradas: ReadonlySet<string> } {
+  const todos = pedidosAncoraveis(estado, c.conversa.id, propostas);
+  // NOD-402: o pedido de um turno dos bastidores sem fala à vista (a rotina que pediu aprovação, credencial ou acesso sem escrever nada)
+  // segue a regra da mensagem dos bastidores pela hora dele: segurado com o turno da pessoa vivo, ou depois da última fala
+  // do turno que rodava. O do próprio turno vivo da pessoa não entra (fica embaixo da mensagem que o disparou).
+  const lugar = new Map<string, "fica" | "segura" | number>();
+  for (const i of todos) {
+    const t = i.decisao.turnoId;
+    if (t === null || i.bastidores !== true || vivos.turnos.has(t) || doServidor.some((m) => m.turnoId === t)) continue;
+    const em = Date.parse(i.decisao.criadoEm);
+    const inicio = doServidor.findIndex((m) => m.criadoEm > em); // a ordem do servidor: `c` já vem reordenada, sem as seguradas
+    lugar.set(i.decisao.id, inicio < 0 ? (vivos.desde !== null && em >= vivos.desde ? "segura" : "fica") : lugarDosBastidores(doServidor, inicio, em, vivos));
+  }
+  // O segurado conta como ancorado (sai da seção do fim) e não é desenhado agora.
+  const segurados = todos.filter((i) => (i.decisao.turnoId !== null && turnosSegurados.has(i.decisao.turnoId)) || lugar.get(i.decisao.id) === "segura").map((i) => i.decisao.id);
+  const pedidos = segurados.length === 0 ? todos : todos.filter((i) => !segurados.includes(i.decisao.id));
+  if (pedidos.length === 0) return { blocos, ancoradas: new Set(segurados) };
   const posicao = new Map(c.mensagens.map((m, i) => [m.id, i]));
   const inicioDe = blocos.map((b) => posicao.get(inicioDoBloco(b)));
   const depoisDe = new Map<number, typeof pedidos>();
   for (const item of pedidos) {
-    const ancora = ancoraDoPedido(item.decisao, c);
+    const l = lugar.get(item.decisao.id);
+    const ancora = typeof l === "number" ? doServidor[l]?.id : ancoraDoPedido(item.decisao, c);
     const alvo = ancora === undefined ? undefined : posicao.get(ancora);
     if (alvo === undefined) continue;
     let bloco = -1;
@@ -1477,7 +1531,7 @@ function comPedidosAncorados(blocos: BlocoDaTimeline[], c: ConversaEstado, estad
     while (blocos[bloco + 1]?.chave.startsWith(ENCOLHIDO)) bloco++;
     depoisDe.set(bloco, [...(depoisDe.get(bloco) ?? []), item]);
   }
-  const ancoradas = new Set([...depoisDe.values()].flat().map((i) => i.decisao.id));
+  const ancoradas = new Set([...segurados, ...[...depoisDe.values()].flat().map((i) => i.decisao.id)]);
   const saida = blocos.flatMap((b, i) => [b, ...(depoisDe.get(i) ?? []).map((item) => ({ chave: `decisao:${item.decisao.id}`, html: renderDecisaoAncorada(item, estado) }))]);
   return { blocos: saida, ancoradas };
 }
@@ -1519,7 +1573,8 @@ export function renderCabecalhoConversa(estado: Estado, agenteId: string): strin
 function presencaDoBot(estado: Estado, agenteId: string): { html: string; ativa: boolean } {
   const a = agenteDe(estado, agenteId);
   const vivos = a?.conversaId ? turnosVivosDaConversa(estado, a.conversaId) : [];
-  const rodando = vivos.find((v) => v.estado === "rodando");
+  // NOD-402: o "sem novidade há N min" é do turno da conversa; a rotina em paralelo não guarda atividade.
+  const rodando = vivos.find((v) => v.estado === "rodando" && !v.bastidores) ?? vivos.find((v) => v.estado === "rodando");
   const mascote = a ? estadoMascoteNaConversa(estado, a.conversaId) : "disponivel";
   // NOD-73: "Trabalhando · sem novidade há N min" quando o vigia avisou silêncio.
   const mudo = rodando && a?.conversaId ? minutosSemNovidade(estado.atividades[a.conversaId]?.[rodando.turnoId], estado.agora) : null;
@@ -1549,7 +1604,8 @@ function presencaDoBot(estado: Estado, agenteId: string): { html: string; ativa:
  */
 export function pararNoCampoDaConversa(estado: Estado, conversaId: string): boolean {
   const t = estado.tela;
-  return t.tipo === "conversa" && t.conversaId === conversaId && turnosVivosDaConversa(estado, conversaId).length > 0;
+  // NOD-402: a rotina e o colega rodando nos bastidores não acendem o Parar do campo (nada deles aparece no chat).
+  return t.tipo === "conversa" && t.conversaId === conversaId && turnosVivosDoChat(estado, conversaId).length > 0;
 }
 
 /** O `trabalhando` do campo da tela atual (main.ts, atualizarParar): a mesma regra que tira o Parar do aviso do vigia. */

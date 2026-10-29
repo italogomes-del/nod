@@ -724,6 +724,15 @@ describe("driver claude-cli contra o binário falso (contrato empírico 2026-09-
       expect(resultado.texto).toBe("Disparei os testes.\n\nTestes verdes.");
     });
 
+    it("NOD-402: no turno dos bastidores (rotina) nenhuma volta vira fala do meio — vão juntas na entrega, que o sem_novidade cala", async () => {
+      const { instance } = await instanciar("sessao-viva", {}, { ...HELP, NOD_FALSO_FUNDO_MS: "50" });
+      const falas: string[] = [];
+      const resultado = await instance.adapter({ ...planoDeTeste(dir), bastidores: true }).rodarTurno({ ...sinksEspiao({}).sinks, falaIntermediaria: (t) => falas.push(t), ocioso: async () => false });
+      expect(resultado.desfecho).toBe("sucesso");
+      expect(falas).toEqual([]);
+      expect(resultado.texto).toBe("Disparei os testes.\n\nTestes verdes.");
+    });
+
     it("comando da barra (/uso, /contexto) segue de uma vez só, pelo texto, mesmo com --input-format", async () => {
       const { instance, registro, stdin } = await instanciar("s3-mcp-ok", {}, HELP);
       await instance.adapter(planoDeTeste(dir, { texto: "/cost" })).rodarTurno(sinksEspiao({}).sinks);

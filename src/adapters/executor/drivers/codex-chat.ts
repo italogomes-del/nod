@@ -193,7 +193,8 @@ async function rodarUmaVez(c: ContextoChatCodex, comTerminal: boolean): Promise<
     const pendentes: Promise<void>[] = [];
     let sinais: SinaisTurno = { ...SINAIS_ZERADOS, attempted: true };
     const meio = criarFalaDoMeio(FRONTEIRAS_CODEX);
-    const falaNaHora = plano.modoTurno !== "sala" && sinks.falaIntermediaria !== undefined;
+    // NOD-402 (ADR-130): nem nos bastidores da conversa — tudo vai na entrega, que o `sem_novidade` cala.
+    const falaNaHora = plano.modoTurno !== "sala" && !plano.bastidores && sinks.falaIntermediaria !== undefined;
     // A entrada da sessão: aberta depois do handshake, fechada quando o modelo terminou e nada mais chegou.
     let aberta = false;
     let fila: ItemDaFila[] = [];

@@ -256,7 +256,7 @@ export type LigacaoVivaNaTela = { ligacaoId: string; agenteId: string; conversaI
 /** `agenteId` (NOD-348): o bot do turno, do `agente_id` do frame — na sala, cada fala viva tem o mascote de quem fala. */
 /** O turno que acabou com texto, guardado com a atividade até a releitura da conversa (`em`: a hora do fim). */
 export type FalaSaindo = { turno: TurnoVivo; atividade: AtividadeTurno; em: number };
-export type TurnoVivo = { turnoId: string; conversaId: string; estado: "na_fila" | "rodando"; executor: string | null; machineId: string | null; desde: number; trabalhoId?: string | null; vistoEm?: number; chegouEm?: number; origem?: string | null; agenteId?: string | null; /** NOD-312: o turno recomeçou sem a sessão (turno_despachado.dados.motivo_recomeco). */ motivoRecomeco?: MotivoRecomeco | null };
+export type TurnoVivo = { turnoId: string; conversaId: string; estado: "na_fila" | "rodando"; executor: string | null; machineId: string | null; desde: number; trabalhoId?: string | null; vistoEm?: number; chegouEm?: number; origem?: string | null; agenteId?: string | null; /** NOD-312: o turno recomeçou sem a sessão (turno_despachado.dados.motivo_recomeco). */ motivoRecomeco?: MotivoRecomeco | null; /** NOD-402 (ADR-130): turno dos bastidores (rotina, colega, sob procuração) — conta na presença, nunca no chat. */ bastidores?: boolean; /** NOD-402: a hora do despacho no relógio do SERVIDOR (turno_despachado, GET), comparável ao `criadoEm` das mensagens. */ despachadoEm?: number; /** NOD-402: a hora em que o turno nasceu no SERVIDOR (turno_criado, turno_despachado, GET); a ordem do chat trava daqui. */ criadoEm?: number };
 
 /**
  * Plano "o pensamento no chat", Parte 1 (2026-10-26): a fala da pessoa entre o clique e a confirmação do servidor. Nasce
@@ -810,7 +810,9 @@ const contasDoTurno = (e: Estado): Invalidacao | null => (e.contasIa === null ? 
 /** NOD-348: guarda a fala viva do turno que vira mensagem com texto, na conversa aberta (não o da task, sem fala viva). */
 function comFalaSaindo(estado: Estado, turnoId: string | null, agora: number, fim = false): Estado {
   const turno = turnoId ? estado.turnosVivos[turnoId] : undefined;
-  if (!turno || turno.estado !== "rodando" || turno.trabalhoId || !estado.conversas[turno.conversaId]) return estado;
+  // NOD-402: o turno dos bastidores nunca teve fala viva no chat — sem retrato (o `sem_novidade` não grava nada e o
+  // retrato que esperava a gravada sumia aos 15 s: a mensagem que pisca e some).
+  if (!turno || turno.estado !== "rodando" || turno.trabalhoId || turno.bastidores || !estado.conversas[turno.conversaId]) return estado;
   const atividade = estado.atividades[turno.conversaId]?.[turno.turnoId];
   if (!atividade) return estado;
   if (!textoDaFala(atividade)) {
@@ -1143,6 +1145,27 @@ function comAtividade(estado: Estado, conversaId: string, turnoId: string, mudar
   return { ...estado.atividades, [conversaId]: { ...daConversa, [turnoId]: agora === undefined ? nova : comCabecalho(comFrentesEm(antiga, nova, agora), agora) } };
 }
 
+/**
+ * NOD-402 (ADR-130): as origens que nascem nos bastidores — a mesma lista de `ORIGENS_DOS_BASTIDORES` (src/domain/triagem.ts),
+ * repetida aqui porque a web não importa o domínio. O servidor manda `bastidores: true` nos frames e no DTO (inclusive na
+ * retomada, que herda a faixa com outra origem); a origem só cobre o GET de um servidor antigo (o DTO traz o `trabalhoId`).
+ */
+const ORIGENS_DOS_BASTIDORES: ReadonlySet<string> = new Set(["rotina", "delegacao", "peer"]);
+// definido em 2026-10-28: a marca do frame é a do servidor (que já deixa de fora a frente de rotina ou colega, com `trabalhoId`).
+// A origem não basta: o `turno_criado` da repetição de uma frente (contas-ia) leva `origem: "rotina"` sem o `trabalhoId`.
+const bastidoresDoFrame = (dados: Record<string, unknown>): boolean => !dados.trabalhoId && !dados.trabalho_id && dados.bastidores === true;
+
+/**
+ * NOD-402: o frame ao vivo (texto, ferramenta, etapas, subagentes, vigia) é de um turno dos bastidores? Esses não guardam
+ * atividade: nada deles vai ao chat. O frame direto do plano chega antes do `turno.iniciado` (outbox), então vale a marca
+ * do próprio frame além da do turno vivo.
+ */
+function deBastidores(e: Estado, dados: Record<string, unknown>, turnoId: string): boolean {
+  const vivo = e.turnosVivos[turnoId];
+  if (dados.trabalhoId || dados.trabalho_id || vivo?.trabalhoId) return false;
+  return dados.bastidores === true || vivo?.bastidores === true;
+}
+
 /** O frame é do turno do cérebro de uma ligação (ADR-071)? `modo` é o que o servidor manda; `origem` também vale. */
 function turnoDeLigacao(dados: Record<string, unknown>): boolean {
   return dados.modo === "ligacao" || dados.origem === "ligacao";
@@ -1246,7 +1269,7 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
     const estado = f.dados.kind === "turno_despachado" ? "rodando" : "na_fila";
     const anterior = e.turnosVivos[turnoId];
     const trabalhoId = texto(f.dados.trabalhoId) ?? texto(f.dados.trabalho_id) ?? anterior?.trabalhoId ?? null;
-    const vivo: TurnoVivo = { turnoId, conversaId, estado, executor: texto(f.dados.executor) ?? anterior?.executor ?? null, machineId: texto(f.dados.machine_id) ?? anterior?.machineId ?? null, desde: estado === "rodando" && anterior?.estado !== "rodando" ? agora : (anterior?.desde ?? agora), trabalhoId, vistoEm: agora, chegouEm: anterior?.chegouEm ?? agora, origem: texto(f.dados.origem) ?? anterior?.origem ?? null, agenteId: texto(f.dados.agente_id) ?? texto(f.dados.agenteId) ?? anterior?.agenteId ?? null, motivoRecomeco: motivoDoFrame(f.dados.motivo_recomeco) ?? anterior?.motivoRecomeco ?? null };
+    const vivo: TurnoVivo = { turnoId, conversaId, estado, executor: texto(f.dados.executor) ?? anterior?.executor ?? null, machineId: texto(f.dados.machine_id) ?? anterior?.machineId ?? null, desde: estado === "rodando" && anterior?.estado !== "rodando" ? agora : (anterior?.desde ?? agora), trabalhoId, vistoEm: agora, chegouEm: anterior?.chegouEm ?? agora, origem: texto(f.dados.origem) ?? anterior?.origem ?? null, agenteId: texto(f.dados.agente_id) ?? texto(f.dados.agenteId) ?? anterior?.agenteId ?? null, motivoRecomeco: motivoDoFrame(f.dados.motivo_recomeco) ?? anterior?.motivoRecomeco ?? null, ...(!trabalhoId && (bastidoresDoFrame(f.dados) || anterior?.bastidores) ? { bastidores: true } : {}), ...(typeof f.dados.despachadoEm === "number" ? { despachadoEm: f.dados.despachadoEm } : anterior?.despachadoEm !== undefined ? { despachadoEm: anterior.despachadoEm } : {}), ...(typeof f.dados.criadoEm === "number" ? { criadoEm: f.dados.criadoEm } : anterior?.criadoEm !== undefined ? { criadoEm: anterior.criadoEm } : {}) };
     return invalidar({ ...e, turnosVivos: { ...e.turnosVivos, [turnoId]: vivo } }, conv(f), "trabalhos");
   },
   "turno.delta": (e, f, agora) => {
@@ -1256,8 +1279,8 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
     const trecho = typeof f.dados.texto === "string" ? f.dados.texto : "";
     if (!turnoId || !conversaId) return e;
     const vivo = e.turnosVivos[turnoId];
-    const turnosVivos = vivo && vivo.estado !== "rodando" ? { ...e.turnosVivos, [turnoId]: { ...vivo, estado: "rodando" as const } } : e.turnosVivos;
-    if (!guardaAoVivo(e, conversaId)) return turnosVivos === e.turnosVivos ? e : { ...e, turnosVivos };
+    const turnosVivos = vivo && vivo.estado !== "rodando" ? { ...e.turnosVivos, [turnoId]: { ...vivo, estado: "rodando" as const, desde: agora } } : e.turnosVivos;
+    if (!guardaAoVivo(e, conversaId) || deBastidores(e, f.dados, turnoId)) return turnosVivos === e.turnosVivos ? e : { ...e, turnosVivos };
     return { ...e, turnosVivos, atividades: comAtividade(e, conversaId, turnoId, (a) => comTexto(a, trecho), agora) };
   },
   "turno.atividade": (e, f, agora) => {
@@ -1267,7 +1290,8 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
     if (!turnoId || !conversaId || !guardaAoVivo(e, conversaId)) return e;
     const rotulo = texto(f.dados.rotulo) ?? "Usou uma ferramenta";
     const vivo = e.turnosVivos[turnoId];
-    const turnosVivos = vivo && vivo.estado !== "rodando" ? { ...e.turnosVivos, [turnoId]: { ...vivo, estado: "rodando" as const } } : e.turnosVivos;
+    const turnosVivos = vivo && vivo.estado !== "rodando" ? { ...e.turnosVivos, [turnoId]: { ...vivo, estado: "rodando" as const, desde: agora } } : e.turnosVivos;
+    if (deBastidores(e, f.dados, turnoId)) return turnosVivos === e.turnosVivos ? e : { ...e, turnosVivos };
     return { ...e, turnosVivos, atividades: comAtividade(e, conversaId, turnoId, (a) => comFerramenta(a, rotulo, emUsoDoFrame(f.dados.emUso), idDaAcao(f.dados.id)), agora) };
   },
   // NOD-353: a chamada terminou (feita ou Falhou, de tool_result.isError); fim de turno ou id desconhecido não muda nada.
@@ -1276,7 +1300,7 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
     const turnoId = texto(f.dados.turnoId);
     const conversaId = texto(f.dados.conversaId);
     const id = idDaAcao(f.dados.id);
-    if (!turnoId || !conversaId || !id || !guardaAoVivo(e, conversaId)) return e;
+    if (!turnoId || !conversaId || !id || !guardaAoVivo(e, conversaId) || deBastidores(e, f.dados, turnoId)) return e;
     const a = e.atividades[conversaId]?.[turnoId];
     const nova = comFimDaAcao(a, id, f.dados.falhou === true);
     return !nova || nova === a ? e : { ...e, atividades: { ...e.atividades, [conversaId]: { ...e.atividades[conversaId], [turnoId]: comCabecalho(nova, agora) } } };
@@ -1285,7 +1309,7 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
     if (turnoDeLigacao(f.dados)) return e;
     const turnoId = texto(f.dados.turnoId);
     const conversaId = texto(f.dados.conversaId);
-    if (!turnoId || !conversaId || !guardaAoVivo(e, conversaId)) return e;
+    if (!turnoId || !conversaId || !guardaAoVivo(e, conversaId) || deBastidores(e, f.dados, turnoId)) return e;
     return { ...e, atividades: comAtividade(e, conversaId, turnoId, (a) => comTarefas(a, tarefasDoFrame(f.dados.tarefas)), agora) };
   },
   // NOD-350: a lista inteira dos subagentes do turno (o servidor manda no máximo ~1 por segundo) e a linha pronta.
@@ -1293,7 +1317,7 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
     if (turnoDeLigacao(f.dados)) return e;
     const turnoId = texto(f.dados.turnoId);
     const conversaId = texto(f.dados.conversaId);
-    if (!turnoId || !conversaId || !guardaAoVivo(e, conversaId)) return e;
+    if (!turnoId || !conversaId || !guardaAoVivo(e, conversaId) || deBastidores(e, f.dados, turnoId)) return e;
     // A descarga do último frame pode chegar depois do fim: não ressuscita o cartão, só acerta a lista final.
     if (e.turnosEncerrados.includes(turnoId)) {
       const fim = e.subagentesDoFim[turnoId];
@@ -1315,7 +1339,7 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
     if (turnoDeLigacao(f.dados)) return e;
     const turnoId = texto(f.dados.turnoId);
     const conversaId = texto(f.dados.conversaId);
-    if (!turnoId || !conversaId || !guardaAoVivo(e, conversaId)) return e;
+    if (!turnoId || !conversaId || !guardaAoVivo(e, conversaId) || deBastidores(e, f.dados, turnoId)) return e;
     const vigia = vigiaDoFrame(f.dados, agora);
     if (!vigia) return e;
     return { ...e, atividades: comAtividade(e, conversaId, turnoId, (a) => comVigia(a, vigia)) };
@@ -1587,9 +1611,21 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
       // `chegouEm`: o relógio da web, nunca adiante do `desde` do banco (o relógio da web atrasado faria a fila "pensar").
       // NOD-276 (J3): o que já roda conta "Trabalhando · há N" do despacho; "Na fila há N" segue com a criação.
       const desdeDe = (t: (typeof novos)[number]): number => (t.estado === "despachando" ? (t.despachadoEm ?? t.desde) : t.desde);
-      for (const t of novos) turnosVivos[t.id] = { turnoId: t.id, conversaId, estado: t.estado === "despachando" ? "rodando" : "na_fila", executor: null, machineId: null, desde: desdeDe(t), trabalhoId: t.trabalhoId ?? null, vistoEm: acao.agora, chegouEm: Math.min(desdeDe(t), acao.agora), origem: t.origem ?? null, agenteId: t.agenteId ?? null };
+      const deBastidoresNoDto = (t: (typeof emCurso)[number]): boolean => !t.trabalhoId && (t.bastidores === true || (typeof t.origem === "string" && ORIGENS_DOS_BASTIDORES.has(t.origem)));
+      for (const t of novos) turnosVivos[t.id] = { turnoId: t.id, conversaId, estado: t.estado === "despachando" ? "rodando" : "na_fila", executor: null, machineId: null, desde: desdeDe(t), trabalhoId: t.trabalhoId ?? null, vistoEm: acao.agora, chegouEm: Math.min(desdeDe(t), acao.agora), origem: t.origem ?? null, agenteId: t.agenteId ?? null, ...(deBastidoresNoDto(t) ? { bastidores: true } : {}), ...(t.estado === "despachando" && t.despachadoEm != null ? { despachadoEm: t.despachadoEm } : {}), criadoEm: t.desde };
+      // definido em 2026-10-28: o turno que a web já via (o `turno_criado` saiu sem a marca) passa aos bastidores pela leitura.
+      let promovidos = turnosVivos;
+      for (const t of emCurso) {
+        const ja = promovidos[t.id];
+        const marca = ja && !ja.bastidores && !ja.trabalhoId && deBastidoresNoDto(t);
+        // Definido em 2026-10-28: e ganha a hora do despacho do servidor (o `turno_despachado` perdido não a deixa faltar até o fim).
+        const hora = ja && ja.despachadoEm === undefined && t.estado === "despachando" && t.despachadoEm != null;
+        const nasceu = ja && ja.criadoEm === undefined;
+        if (marca || hora || nasceu) { if (promovidos === semSumidos.turnosVivos) promovidos = { ...promovidos }; promovidos[t.id] = { ...ja, ...(marca ? { bastidores: true } : {}), ...(hora ? { despachadoEm: t.despachadoEm as number } : {}), ...(nasceu ? { criadoEm: t.desde } : {}) }; }
+      }
       // O texto em streaming de um turno que já acabou sai; o dos que continuam vivos fica.
-      const vivosDaConversa = new Set(Object.values(turnosVivos).filter((t) => t.conversaId === conversaId).map((t) => t.turnoId));
+      // NOD-402: o turno dos bastidores não guarda atividade (o promovido aqui perde a que tinha).
+      const vivosDaConversa = new Set(Object.values(promovidos).filter((t) => t.conversaId === conversaId && !t.bastidores).map((t) => t.turnoId));
       const anteriores = estado.atividades[conversaId] ?? {};
       const mortos = Object.keys(anteriores).filter((turnoId) => !vivosDaConversa.has(turnoId));
       let atividades = estado.atividades;
@@ -1605,7 +1641,7 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
       const extras = { ...(pendentes.length ? { pendentes } : {}), ...(antes?.enviadas ? { enviadas: antes.enviadas } : {}) };
       // O retrato de antes da releitura sai (revisão 3 do #508); o desta releitura (`semDesmentidos`, `em` = agora) ou de depois
       // dela fica — salvo se a gravada já veio nela (QA do #534).
-      return { ...semFalasSaindo(semSumidos, (s, c) => c !== conversaId || (s.em >= acao.agora && !gravadaDoRetrato(acao.conversa, s))), turnosVivos, atividades, conversas: { ...estado.conversas, [conversaId]: { ...acao.conversa, carregadaEm: acao.agora, ...extras } } };
+      return { ...semFalasSaindo(semSumidos, (s, c) => c !== conversaId || (s.em >= acao.agora && !gravadaDoRetrato(acao.conversa, s))), turnosVivos: promovidos, atividades, conversas: { ...estado.conversas, [conversaId]: { ...acao.conversa, carregadaEm: acao.agora, ...extras } } };
     }
     case "hidratar-sua-vez": {
       // A escolha do campo só vale enquanto a conversa tem pergunta aberta: respondida ou deixada pra lá

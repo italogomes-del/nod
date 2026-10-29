@@ -52,7 +52,7 @@ export type TurnoPendenteDto = { id: string; motivo: "agente_ocupado_em"; conver
  * Turno aberto da conversa (definido em 2026-09-24): a web recria o "trabalhando" ao recarregar a página no meio de um
  * turno. Sem isto ela só conhecia o turno pelo frame turno.iniciado, que não se repete, e o cartão sumia até o fim.
  */
-export type TurnoEmCursoDto = { id: string; estado: "pendente" | "despachando"; desde: number; mensagemId: string | null; trabalhoId?: string | null; /** NOD-216: só a origem da fila do dono é desmentida por ela. */ origem?: string; /** NOD-276 (J3): quando a máquina o pegou; "Trabalhando · há N" conta daqui. */ despachadoEm?: number | null; /** QA do NOD-314: a máquina escolhida "desta vez" (sobrepõe a do bot no chip da fila). */ maquinaDestaVez?: string | null; /** NOD-348: o bot do turno (o mascote da fala viva na sala e na recarga). */ agenteId?: string };
+export type TurnoEmCursoDto = { id: string; estado: "pendente" | "despachando"; desde: number; mensagemId: string | null; trabalhoId?: string | null; /** NOD-216: só a origem da fila do dono é desmentida por ela. */ origem?: string; /** NOD-276 (J3): quando a máquina o pegou; "Trabalhando · há N" conta daqui. */ despachadoEm?: number | null; /** QA do NOD-314: a máquina escolhida "desta vez" (sobrepõe a do bot no chip da fila). */ maquinaDestaVez?: string | null; /** NOD-348: o bot do turno (o mascote da fala viva na sala e na recarga). */ agenteId?: string; /** NOD-402 (ADR-130): turno dos bastidores (rotina, colega) — a web o conta na presença e o deixa fora do chat. */ bastidores?: boolean };
 
 export type ConversaDto = DonoNaConversa & TrocasNaConversa & AcoesDoModoNaConversa & {
   conversa: Conversa;
@@ -76,7 +76,7 @@ export type SuaVezDto = {
    * `rotinaParada` (mesma data, emenda da ADR-044): o pedido de acesso aberto que veio de uma rotina — desde quando e o que não rodou.
    * `nuncaPermanente` (ADR-047): sem "Sempre permitir". `pedido` (2026-10-18): PedidoDoItem. `trabalhoId` (NOD-114): a task do turno (null = conversa).
    */
-  itens: (ItemFila & { itensAprovacao: ItemAprovacao[]; proposta: Proposta | null; fio: FioDoItem | null; rotinaParada: ParadaDaRotina | null; nuncaPermanente?: string[]; pedido?: PedidoDoItem | null; trabalhoId?: string | null })[];
+  itens: (ItemFila & { itensAprovacao: ItemAprovacao[]; proposta: Proposta | null; fio: FioDoItem | null; rotinaParada: ParadaDaRotina | null; nuncaPermanente?: string[]; pedido?: PedidoDoItem | null; trabalhoId?: string | null; /** NOD-402: o turno do pedido é dos bastidores. */ bastidores?: boolean })[];
   /** Avisos de infraestrutura (ADR-045): um por queda do Mac, nunca um card por turno. Não são decisões. */
   incidentes: IncidenteDto[];
   foraDoAr: { nome: string; desde: EpochMs }[];

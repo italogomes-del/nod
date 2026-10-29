@@ -7,7 +7,7 @@ import { caminhoDaPastaDoBot } from "../lib/pasta-do-bot.ts";
 import { mostraCaminhoDaPasta } from "../lib/capacidades.ts";
 import { interpolar } from "../lib/relogio.ts";
 import { botaoLigar, ICONE_LIGACAO } from "./ligacao.ts";
-import { abaBiblioteca, capitalizar, chaveCelular, estadoDoComputadorNaGaveta, fraseDaParada, identidadeEditavel, nivelAjustes, nomeEditavel, paiDoNivel, popoverAvatar, renderNivel, semFuso, type Nivel } from "./detalhes.ts";
+import { abaBiblioteca, capitalizar, chaveCelular, estadoDoComputadorNaGaveta, fraseDaParada, identidadeEditavel, nivelAjustes, nomeEditavel, paiDoNivel, popoverAvatar, renderNivel, segundoPlano, semFuso, type Nivel } from "./detalhes.ts";
 import { secaoOnboardingDetalhes } from "./onboarding.ts";
 import { botaoDaParada } from "../lib/execucao.ts";
 
@@ -28,7 +28,7 @@ export function renderPerfilCelular(estado: Estado): string {
   const nivel = estado.gaveta?.agenteId === a.id ? estado.gaveta.nivel : null;
   if (!nivel) {
     const voltar = `<button type="button" class="gv-icone gv-painel pfc-voltar" data-act="perfil-voltar" aria-label="Voltar" title="Voltar">${ICONE.voltar}</button>`;
-    return `<div class="gv-topo pfc-topo">${voltar}</div><div class="gv-corpo pfc-corpo">${cabecalho(estado, a, dona)}${acoesRapidas(estado, a)}${onboarding(estado, a)}${grupos(estado, a, dona)}</div>`;
+    return `<div class="gv-topo pfc-topo">${voltar}</div><div class="gv-corpo pfc-corpo">${cabecalho(estado, a, dona)}${acoesRapidas(estado, a)}${segundoPlano(estado, a, dona)}${onboarding(estado, a)}${grupos(estado, a, dona)}</div>`;
   }
   const n = nivelCelular(estado, a, dona, nivel);
   const pai = paiDoNivel(nivel, true);

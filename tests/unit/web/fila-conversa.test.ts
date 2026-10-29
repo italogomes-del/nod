@@ -33,6 +33,11 @@ describe("fila da conversa: cada mensagem com seu Cancelar", () => {
     expect(situacaoNaFila(mensagem("m3"), duas)).toEqual({ tipo: "na_fila", turnoId: "t3", texto: "Na fila · Nina lê junto com as outras quando terminar" });
   });
 
+  it("NOD-402: a rotina na fila dos bastidores não conta como outra mensagem da pessoa", () => {
+    const e = comConversa({ turnosEmCurso: [{ ...emCurso("r1", "pendente", null), origem: "rotina", bastidores: true } as never, emCurso("t2", "pendente", "m2")] });
+    expect(situacaoNaFila(mensagem("m2"), e)).toEqual({ tipo: "na_fila", turnoId: "t2", texto: "Na fila · Nina lê quando terminar o turno atual" });
+  });
+
   it("Cancelar mostra Desfazer por 5 s só na web; cancelada no servidor vira 'não rodou'", () => {
     const e = comConversa({ turnosEmCurso: [emCurso("t2", "pendente", "m2")] });
     const cancelando = reduzir(e, { tipo: "cancelando-turno", turnoId: "t2", agora: AGORA });

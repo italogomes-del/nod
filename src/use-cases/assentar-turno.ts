@@ -247,6 +247,10 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
   // Um turno interrompido não é silenciado: o texto pode ser um relato parcial de bloqueio, e o
   // silêncio só é honesto quando a execução foi completa.
   const silencioso = turno.semNovidadeMotivo !== null && !interrompido && (turno.origem === "rotina" || turno.origem === "retomada");
+  // NOD-402 (ADR-130): o turno dos bastidores da conversa que a pessoa parou (o Parar do chat também para a rotina e o
+  // colega, NOD-252) não deixa no chat a fala cortada ("Vou verificar…") de um trabalho que ela nem via: a execução fica
+  // no histórico da rotina, como a do pendente parado.
+  const bastidorParado = interrompido && turno.bastidores === true && !turno.trabalhoId && (desfecho.motivoInterrupcao === "parado_pela_pessoa" || turno.motivoInterrupcao === "parado_pela_pessoa");
   const autoria = autoriaAgente({ agenteId: turno.agenteId, contaDeExecucao: turno.ownerId, executor, machineId: entrega.machineId });
   const events: RuntimeEvent[] = [...(confirmadas?.events ?? [])];
 
@@ -286,7 +290,7 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
     const post = await postarNaSala(deps, { salaId: conversa.salaId, texto: falaTexto, autoria, confianca: turno.entradaConfianca, turnoId: turno.id, executor, eRotina: false, acoes });
     mensagem = post.data.mensagem;
     events.push(...(post.events ?? []).filter((ev) => ev.kind !== "mensagem_criada"));
-  } else if (falaTexto.trim() !== "" && !silencioso && !rotinaCaida) {
+  } else if (falaTexto.trim() !== "" && !silencioso && !rotinaCaida && !bastidorParado) {
     mensagem = await deps.repos.mensagens.criar({
       conversaId: turno.conversaId,
       turnoId: turno.id,
@@ -299,8 +303,14 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
     });
     falaDoBot = !tardia;
   }
+  // NOD-402 (definido em 2026-10-28): no lugar da fala cortada, uma linha curta diz que o Parar da pessoa também parou o que
+  // rodava em segundo plano — sem ela, a rotina (que ela não via) sumia sem rastro no chat.
+  if (bastidorParado && !mensagem) {
+    const oQue = turno.origem === "rotina" ? "a rotina que" : turno.origem === "delegacao" || turno.origem === "peer" ? "o pedido de colega que" : "o que";
+    mensagem = await deps.repos.mensagens.criar({ conversaId: turno.conversaId, turnoId: turno.id, autoria, kind: "texto", texto: `Parei também ${oQue} rodava em segundo plano.`, payload: null, confianca: "confiavel", parcial: false });
+  }
   // NOD-323 (ADR-126): o bot anexou mídia e não escreveu nada — a fala entra vazia, só para levar a mídia.
-  const podeFalar = entrega.fala.tipo === "texto" && !resultado.causaSemIa && !silencioso && !rotinaCaida && turno.origem !== "sala" && comandoDoTurno !== "compactar";
+  const podeFalar = entrega.fala.tipo === "texto" && !resultado.causaSemIa && !silencioso && !rotinaCaida && !bastidorParado && turno.origem !== "sala" && comandoDoTurno !== "compactar";
   if (!mensagem && podeFalar && (await deps.repos.anexos.contarDoTurno(turno.id)) > 0) {
     mensagem = await deps.repos.mensagens.criar({ conversaId: turno.conversaId, turnoId: turno.id, autoria, kind: "texto", texto: "", payload: acoes, confianca: turno.entradaConfianca, parcial: interrompido });
     falaDoBot = !tardia;

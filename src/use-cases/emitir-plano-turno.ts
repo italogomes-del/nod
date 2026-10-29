@@ -627,8 +627,13 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
       agente_id: turno.agenteId,
       // NOD-276 (J3): a hora do despacho; a web conta "Trabalhando · há N" daqui (pelo próprio relógio, ao ver o frame).
       despachadoEm: turno.despachadoEm ?? agora,
+      // NOD-402 (ADR-130): a hora em que o turno passou a poder rodar (nasceu, ou acordou, na volta marcada); relógio do banco,
+      // o das mensagens. A ordem do chat trava a partir dela.
+      criadoEm: Math.max(turno.criadoEm, turno.acordarEm ?? 0),
       // ADR-083: o frame turno.iniciado diz de que trabalho é o turno (a web põe o ao vivo na task, não no chat).
       trabalhoId: turno.trabalhoId ?? null,
+      // NOD-402 (ADR-130): o turno é dos bastidores (a retomada herda a faixa com outra origem); a web o deixa fora do chat.
+      ...(turno.bastidores && !turno.trabalhoId ? { bastidores: true } : {}),
       // NOD-312: o turno recomeçou sem a sessão; a web põe a carona/marca e a nota das etapas já ao vivo.
       ...(motivoRecomeco ? { motivo_recomeco: motivoRecomeco } : {}),
       executor,

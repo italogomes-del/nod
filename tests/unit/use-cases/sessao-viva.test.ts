@@ -63,6 +63,15 @@ describe("gravarFalasDaSessao (ADR-067)", () => {
   });
 });
 
+describe("NOD-402: a fala do meio de um motor anterior não se perde", () => {
+  it("rotina: o motor novo não a manda (driver); se o anterior mandar, o servidor grava — ele já a tirou da entrega", async () => {
+    const { d, agenteId, conversaId } = await cenario();
+    const rotina = await turno(d, agenteId, conversaId, { estado: "despachando", origem: "rotina", daPessoa: false });
+    expect(rotina.bastidores).toBe(true);
+    expect((await gravarFalasDaSessao(d.deps, { turnoId: rotina.id, machineId: "m1", executor: "local", textos: ["Achei 2 e-mails."] })).data.gravadas).toBe(1);
+  });
+});
+
 describe("absorverNaSessao (ADR-067)", () => {
   it("as falas da pessoa na fila desta conversa entram no turno vivo, na ordem, e saem 'absorvido' apontando para ele", async () => {
     const { d, agenteId, conversaId } = await cenario();

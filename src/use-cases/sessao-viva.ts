@@ -22,6 +22,9 @@ const vivo = (t: Turno | null): t is Turno => t !== null && t.estado === "despac
 export const gravarFalasDaSessao: CasoDeUso<{ turnoId: string; machineId: string; executor: Executor; textos: readonly string[] }, { gravadas: number }> = async (deps, e) => {
   const turno = await deps.repos.turnos.buscar(e.turnoId);
   if (!vivo(turno) || turno.origem === "sala" || (turno.machineId !== null && turno.machineId !== e.machineId)) return { data: { gravadas: 0 } };
+  // NOD-402 (ADR-130): o turno dos bastidores da conversa não fala no meio — o driver não manda a fala na hora
+  // (`PlanoTurno.bastidores`) e o texto todo vai na entrega. Se ainda chegar uma aqui, é de um motor anterior, que já a
+  // tirou da entrega (`rodadasJaFaladas`): gravar é o que não perde o texto (definido em 2026-10-28).
   const agora = deps.agora();
   const autoria = autoriaAgente({ agenteId: turno.agenteId, contaDeExecucao: turno.ownerId, executor: e.executor, machineId: e.machineId });
   const events = [];

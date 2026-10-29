@@ -60,6 +60,49 @@ serialização era só a regra da faixa.
 - **A pílula "Esperando <colega> · 21 d"** é outro defeito: o pedido a colega sem resposta conta para sempre (NOD-276).
   Fica para o plano dos pedidos a colega (tabela própria, com fim e prazo).
 
+## Emenda NOD-402 (2026-10-28): os bastidores ficam fora do ao vivo do chat
+
+A faixa dos bastidores também vale na tela. O turno de rotina, de colega e as retomadas deles rodam em segundo plano:
+nada do ao vivo deles (texto parcial, pensamento, ações, o "retrato" da fala que sumia aos 15 s do NOD-348) entra no
+chat. Só a mensagem gravada, quando há algo para a pessoa, aparece.
+
+- O servidor marca `bastidores: true` em todo frame do turno: o `turno.iniciado` dos dois kinds (o `turno_criado` lê o
+  turno no despacho do outbox; o `turno_despachado` leva a marca nos dados), os frames diretos do plano
+  (`PlanoTurno.bastidores`) e o `turnosEmCurso` do GET da conversa (a página recarregada no meio da execução).
+- A web guarda a marca no `TurnoVivo`; `turnosVivosDoChat` (o ao vivo e o Parar do campo) deixa esses turnos fora. A
+  presença (barra, mascote, pílula) segue `turnosVivosDaConversa` e continua mostrando que o bot trabalha.
+- Só o turno da conversa (`bastidores && !trabalhoId`). A frente que a rotina ou o colega abre é um trabalho como outro:
+  mantém o ao vivo na tela da task.
+- O driver não fala no meio no turno dos bastidores (`falaNaHora` falso; sessão viva, ADR-067): o texto todo vai junto na
+  entrega, se houver o que dizer. A fala do meio que um motor anterior ainda mande é gravada (ele já a tirou da entrega).
+- Com só os bastidores rodando, o Parar do campo não acende; o painel do bot mostra "Rodando em segundo plano" com o
+  mesmo Parar, para a rotina ou o colega travado não ficar sem saída.
+- O Parar do campo segue a NOD-252 (para tudo da conversa, bastidores inclusive). A fala cortada dos bastidores não vira
+  mensagem (`bastidorParado`); a execução fica no histórico. Poupar a rotina em paralelo quando a pessoa para o turno
+  dela é decisão de produto em aberto (mexe em esperas, delegações e outbox); fica para outra issue.
+- A mensagem leva a marca (`Mensagem.bastidores`, da coluna do turno): cobre a procuração e as retomadas.
+- A mensagem de bastidores gravada enquanto um turno da conversa rodava vai para logo depois da última mensagem DESSE
+  turno (`emOrdemDoChat`). "Rodava" é pela hora em que o turno nasceu (`Mensagem.turnoDesde`, de
+  `turnos.criado_em`, ou do `acordar_em` na volta marcada, o relógio do banco que também carimba as mensagens; cobre o turno ainda na fila; o turno que esperou mais de 5 min na fila, com a máquina fora, conta do despacho, porque o que foi gravado nessa espera já estava à vista), nunca pela posição: uma mensagem antiga não muda de lugar por causa de um turno que começou
+  depois dela. Com o turno da pessoa vivo, ela fica segurada até ele acabar, e o cartão do pedido dela também; a que já
+  estava à vista não some.
+- O pedido aberto de um turno dos bastidores sem mensagem própria (aprovação, credencial, acesso) vem marcado na Sua
+  vez (`bastidores`, de `turnos.bastidores` sem trabalho) e segue a mesma regra pela hora dele. O de outro turno (a
+  frente) fica onde estava. Enquanto a fala final da pessoa ainda não voltou na releitura (`falasSaindo`), o turno dela
+  conta como vivo.
+- Na passagem de "na fila" para "rodando" pelo delta, o `desde` do `TurnoVivo` vira a hora da passagem (era a da fila);
+  para segurar, a ordem do chat usa a hora em que o turno passou a poder rodar no servidor (a criação, ou o `acordar_em`
+  da volta marcada; `criadoEm` no `turno_criado`, no
+  `turno_despachado` e no GET; o mesmo relógio da âncora), na fila ou rodando, nunca o relógio do navegador nem a última
+  fala (que pode estar ainda em `pendentes`).
+- Motor e app de antes desta emenda ainda falam no meio do turno dos bastidores até se atualizarem (ADR-100): a fala é
+  gravada e aparece no chat. Aceito pela janela curta; não sobe a versão mínima.
+- O colega que pediu (`entregarRespostaPeer`) passa a receber o texto de todas as rodadas do turno, não só a última,
+  porque o driver não fala no meio nos bastidores.
+- A lista das origens está repetida em três lugares (`src/domain/triagem.ts`, `web/estado/reducer.ts`,
+  `web/telas/linhas-do-chat.ts`; a web não importa `src/domain`): mudar uma muda as três.
+  Na web, a origem só vale no GET de um servidor antigo; nos frames vale a marca que o servidor manda.
+
 ## Gatilho de reversão
 
 - Relato de trabalho duplicado porque a pessoa pediu o que a rotina já fazia, mais de uma vez por semana com a linha dos

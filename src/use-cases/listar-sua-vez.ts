@@ -83,6 +83,14 @@ export async function listarSuaVez(deps: DepsSuaVez, input: EntradaSuaVez = {}):
   const fios = await fiosDosItens(repos, fila.itens.map((i) => i.decisao));
   const pedidos = await pedidosDosItens(deps, fila.itens.map((i) => i.decisao));
 
+  // NOD-402 (ADR-130): o pedido aberto de um turno dos bastidores (rotina, colega, sob procuração; não a frente) leva a
+  // marca; a web segue para ele a regra da mensagem dos bastidores (segurado enquanto a pessoa conversa).
+  const bastidores = new Set<string>();
+  for (const t of new Set(fila.itens.flatMap((i) => (i.decisao.turnoId && i.estadoColuna !== "vencido" ? [i.decisao.turnoId] : [])))) {
+    const turno = await repos.turnos.buscar(t);
+    if (turno?.bastidores && !turno.trabalhoId) bastidores.add(t);
+  }
+
   const itens: SuaVezDto["itens"] = [];
   const conectores: ConectoresDaLeitura = new Map();
   // NOD-114: a task do turno que pediu, para o aviso do navegador e do desktop abrir a task e não a conversa (uma consulta só).
@@ -104,7 +112,7 @@ export async function listarSuaVez(deps: DepsSuaVez, input: EntradaSuaVez = {}):
     // parada e quais janelas não rodaram — só no aberto; o vencido já pausou a rotina.
     const rotinaParada = proposta && aberta && decisao.tipo === "acesso" ? await paradaDoPedido(repos, proposta) : null;
     const nuncaPermanente = itensAprovacao.filter((i) => ehNuncaPermanente(i.destino.ferramenta)).map((i) => i.id);
-    itens.push({ ...item, decisao, itensAprovacao, proposta, fio: fios.get(decisao.id) ?? null, rotinaParada, nuncaPermanente, pedido: pedidos.get(decisao.id) ?? null, trabalhoId: decisao.turnoId ? (trabalhos.get(decisao.turnoId) ?? null) : null });
+    itens.push({ ...item, decisao, itensAprovacao, proposta, fio: fios.get(decisao.id) ?? null, rotinaParada, nuncaPermanente, pedido: pedidos.get(decisao.id) ?? null, trabalhoId: decisao.turnoId ? (trabalhos.get(decisao.turnoId) ?? null) : null, ...(decisao.turnoId && bastidores.has(decisao.turnoId) ? { bastidores: true } : {}) });
   }
 
   const foraDoAr = (await repos.inventario.listar())

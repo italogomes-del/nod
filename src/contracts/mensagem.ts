@@ -191,8 +191,8 @@ export type Mensagem = {
    * saltos). A execução de rotina e o pedido de colega não viram mais trabalho: sem a raiz, a resposta da pessoa, a volta marcada e o retorno das frentes saíam da linha agrupada "da rotina" / "Pedido do …".
    */
   raiz?: { turnoId: string; origem: OrigemTurno };
-  trabalhoId?: string | null;
-  fimDoTurno?: boolean;
+  trabalhoId?: string | null; fimDoTurno?: boolean;
+  bastidores?: boolean; turnoDesde?: number; // NOD-402 (ADR-130): gravada por turno dos bastidores da conversa; `turnos.criado_em` (relógio do banco, o das mensagens). Ausentes = não, ou servidor antigo.
   motivoRecomeco?: MotivoRecomeco; // NOD-312: o turno da fala recomeçou sem a sessão. Ausente = normal ou servidor antigo.
   destino?: Destino; // ADR-114 (2026-10-18): o destino da tabela DESTINO, resolvido no servidor; só na conversa própria. Ausente = sala ou servidor antigo.
   checkpoint?: import("./checkpoint.ts").CheckpointDaFala; // NOD-54 (ADR-134): na fala final do turno que mudou arquivos, o "Desfazer N arquivos" do ⋯. Ausente = sem checkpoint ou vencido.

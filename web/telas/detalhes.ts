@@ -6,7 +6,7 @@ import { ICONE } from "../lib/icones.ts";
 import { MOTIVO_FALHA_TEXTO } from "../lib/computador.ts";
 import { htmlGavetaTela } from "../lib/computador-pessoa.ts";
 import { ATALHO_SEMPRE_LIGADA, botaoDaParada, desdeDaParada, linhaOndeRoda, pedeAtalhoNaExecucao, rotuloExecucao } from "../lib/execucao.ts";
-import { CORES_MASCOTE, FORMAS_MASCOTE } from "../lib/mascote.ts";
+import { CORES_MASCOTE, FORMAS_MASCOTE, turnosVivosDaConversa, turnosVivosDoChat } from "../lib/mascote.ts";
 import { botaoLigar, htmlLinhaLigar, VELOCIDADES, VOZES } from "./ligacao.ts";
 import { renderSeloModoDev } from "./modo-dev.ts";
 import { caminhoDaPastaDoBot } from "../lib/pasta-do-bot.ts";
@@ -191,7 +191,21 @@ function abaDetalhes(estado: Estado, a: Bot, dona: boolean): string {
   // ADR-077: durante a configuração guiada, o painel da guia mostra o que a pessoa contou e o que já foi montado.
   const o = estado.onboarding;
   const onboarding = estado.onboardingAberto && o && o.guia?.id === a.id && (o.etapa === "entrevista" || o.etapa === "configurando" || o.etapa === "concluido") ? secaoOnboardingDetalhes(o) : "";
-  return onboarding + rotinasHtml + ajustes;
+  return onboarding + segundoPlano(estado, a, dona) + rotinasHtml + ajustes;
+}
+
+/**
+ * NOD-402 (definido em 2026-10-28): a rotina ou o pedido de colega rodando sozinho nos bastidores não acende o Parar do campo
+ * (nada dele aparece no chat). Para o que travou não ficar sem saída, o painel do bot mostra a linha "Rodando em segundo
+ * plano" com o mesmo Parar da conversa (NOD-252: para o que roda nela), no desktop e no perfil do celular. Só na conversa à vista e com o turno da pessoa
+ * parado — com ele vivo, o Parar do campo já está lá.
+ */
+export function segundoPlano(estado: Estado, a: Bot, dona: boolean): string {
+  const t = estado.tela;
+  if (!dona || !a.conversaId || t.tipo !== "conversa" || t.conversaId !== a.conversaId) return "";
+  const fundo = turnosVivosDaConversa(estado, a.conversaId).some((v) => v.bastidores === true && !v.trabalhoId && v.estado === "rodando");
+  if (!fundo || turnosVivosDoChat(estado, a.conversaId).length > 0) return "";
+  return `<section class="gv-secao"><div class="gvn-parada gvn-segundo-plano" role="status"><span class="gvn-parada-icone" aria-hidden="true">${ICONE.relogioMini}</span><span>Rodando em segundo plano (rotina ou pedido de colega).</span>${botao("parar-conversa", "Parar", { classe: "gvn-acao-texto", titulo: "interrompe o que roda em segundo plano nesta conversa" })}</div></section>`;
 }
 
 /** "Falta acesso ao Meta Ads" / "Falta conectar o Meta Ads": a frase da linha neutra da rotina parada (ADR-125). */

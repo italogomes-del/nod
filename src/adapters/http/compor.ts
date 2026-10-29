@@ -27,6 +27,7 @@ import type { EstadoExecutor, IdExecutor } from "../../contracts/executor.ts";
 import { CAUSAS_DO_MAC, type CausaDoMac, type Inventario } from "../../contracts/inventario.ts";
 import { sondaFoiLenta } from "../../domain/sonda-lenta.ts";
 import type { PlanoTurno } from "../../contracts/plano-turno.ts";
+import { dadosDoFrameDoPlano } from "./frame-do-plano.ts";
 import type { EventoStream, SubagenteVivo } from "../../contracts/turno.ts";
 import { chaveDe, cifrar, decifrar } from "../../db/cifra.ts";
 import { abrirTxEscopada, exigirForaDaTx, txEscopadaOuDoContexto } from "../../db/tx.ts";
@@ -1474,7 +1475,7 @@ export function comporApp(o: OpcoesCompor): App {
       trabalhosVivos.subagentes(plano.turnoId, resumo, haSubagenteTrabalhando(lista));
       dados = { ...dados, subagentes: lista, resumo };
     }
-    barramento.publicar(plano.autoria.conta_de_execucao, tipo, { turnoId: plano.turnoId, conversaId: plano.conversaId, agenteId: plano.agenteId, executor: plano.executor, machineId: plano.machineId, ...dados });
+    barramento.publicar(plano.autoria.conta_de_execucao, tipo, dadosDoFrameDoPlano(plano, dados));
   }
   // NOD-73: o vigia do turno (só avisa), igual para o app do Mac e o modo servidor — frame e log saem do mesmo lugar.
   const avisoDoVigia = criarAvisoDoVigia((plano, dados) => publicarDoPlano(plano, "turno.vigia", dados));

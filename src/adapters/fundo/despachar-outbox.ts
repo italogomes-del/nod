@@ -126,7 +126,7 @@ export async function despacharPessoa(conn: Conn, escopo: Escopo, barramento: Ba
     try {
       // ADR-099 (I10, definido em 2026-10-12): o `trabalho.mudou` leva o estado do dono do bot, lido na hora de publicar
       // (depois do commit de quem mudou): a web atualiza a linha do bot sem refazer a lista. Um por bot por passada.
-      const extra = item.tipo === "trabalho_mudou" ? await estadoDoDonoNoFrame(conn, repos, agora, item.dados.agenteId, donos) : {};
+      const extra = item.tipo === "trabalho_mudou" ? await estadoDoDonoNoFrame(conn, repos, agora, item.dados.agenteId, donos) : item.tipo === "turno_criado" ? await bastidoresNoFrame(conn, repos, item.turnoId, item.dados) : {};
       // conversaId/turnoId do evento vão no frame: é como a web sabe qual conversa reidratar (definido em 2026-09-16, L9).
       barramento.publicar(escopo.pessoaId, frameDoEvento(item.tipo), { ...item.dados, ...extra, kind: item.tipo, eventoId: item.eventoId, conversaId: item.conversaId, turnoId: item.turnoId });
       if (soPublicar) soPublicar.vistos.add(item.id);
@@ -189,6 +189,32 @@ async function estadoDoDonoNoFrame(conn: Conn, repos: ReturnType<typeof criarRep
   }
   const estado = cache.estados.get(agenteId);
   return estado ? { estadoDono: estado } : {};
+}
+
+/**
+ * NOD-402 (ADR-130): o `turno_criado` diz se o turno é dos bastidores (rotina, colega, ou a retomada deles, que herda a
+ * faixa com outra origem). São ~10 lugares que emitem o evento; a faixa já está no turno, então ela é lida aqui, na hora de
+ * publicar (o turno foi gravado na mesma transação do evento). Como o estado do dono, num SAVEPOINT: a falha não segura o
+ * frame — ele sai sem a marca e a web cai na origem (rotina/delegacao/peer).
+ */
+async function bastidoresNoFrame(conn: Conn, repos: ReturnType<typeof criarRepos>, turnoId: string | null, dados: Record<string, unknown>): Promise<{ bastidores?: true; criadoEm?: number }> {
+  const marca = dados.bastidores === true ? { bastidores: true as const } : {};
+  if (!turnoId) return marca;
+  try {
+    await conn`savepoint bastidores_do_turno`;
+    try {
+      const turno = await repos.turnos.buscar(turnoId);
+      await conn`release savepoint bastidores_do_turno`;
+      // A hora em que o turno nasceu (relógio do banco): a web trava a ordem do chat a partir dela, não da última fala.
+      return { ...(turno?.bastidores && !turno.trabalhoId ? { bastidores: true as const } : marca), ...(turno ? { criadoEm: Math.max(turno.criadoEm, turno.acordarEm ?? 0) } : {}) };
+    } catch (e) {
+      await conn`rollback to savepoint bastidores_do_turno`;
+      throw e;
+    }
+  } catch (e) {
+    log("aviso", "bastidores_do_turno_falhou", { turno_id: turnoId, erro: e instanceof Error ? e.name : "desconhecido" });
+    return marca;
+  }
 }
 
 /**

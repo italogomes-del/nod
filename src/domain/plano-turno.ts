@@ -377,6 +377,7 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
     turnoId: entrada.turno.id,
     conversaId: entrada.turno.conversaId,
     agenteId: entrada.agente.id,
+    ...(entrada.turno.bastidores && !entrada.turno.trabalhoId ? { bastidores: true as const } : {}),
     localidade: "local",
     executor: entrada.executor,
     superficie: "maquina_da_pessoa",

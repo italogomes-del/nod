@@ -66,6 +66,11 @@ export type PlanoTurno = {
   localidade: "local";
   machineId: string;
   executor: Executor;
+  /**
+   * NOD-402 (ADR-130): o turno roda nos bastidores da conversa (rotina, colega, sob procuração, ou a retomada deles). Os
+   * frames ao vivo levam a marca e a web não os põe no chat. Ausente = da faixa da pessoa.
+   */
+  bastidores?: true;
   harness?: IdHarness;
   /**
    * ADR-102 (2026-10-13): a conta da lista da pessoa que este turno usa. A máquina acha a pasta dela pela impressão

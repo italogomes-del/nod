@@ -200,7 +200,11 @@ async function criarPedidoAPessoa(deps: Deps, input: Parameters<typeof pedirAPes
   if (!decisao) throw new Error("decisão não criada");
   const autoria = autoriaDoAgente(deps.escopo, input.agenteId);
   const payload: PayloadMensagem = { kind: "pedido_a_pessoa", decisaoId: decisao.id, ...(args.opcoes ? { opcoes: args.opcoes } : {}), ...(args.recomendada !== undefined ? { recomendada: args.recomendada } : {}), ...(ajudaDoComputador ? { ajudaDoComputador: true as const } : {}) };
-  const mensagem = await deps.repos.mensagens.criar({ conversaId: input.conversaId, turnoId: input.turnoId, autoria, kind: "texto", texto: args.texto, payload, confianca: "confiavel" });
+  const criada = await deps.repos.mensagens.criar({ conversaId: input.conversaId, turnoId: input.turnoId, autoria, kind: "texto", texto: args.texto, payload, confianca: "confiavel" });
+  // NOD-402 (ADR-130): a pergunta da rotina, do colega ou da retomada deles vai no frame com a marca dos bastidores, como
+  // no GET; sem ela a web a punha no meio do turno da pessoa até a releitura.
+  const doTurno = criada ? await deps.repos.turnos.buscar(input.turnoId) : null;
+  const mensagem = criada && doTurno?.bastidores && !doTurno.trabalhoId ? { ...criada, bastidores: true } : criada;
   const evento: RuntimeEvent = {
     tenantId: deps.escopo.tenantId,
     id: randomUUID(),

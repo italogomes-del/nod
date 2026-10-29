@@ -54,6 +54,15 @@ export function turnosVivosDaConversa(estado: Pick<Estado, "turnosVivos" | "trab
   return Object.values(estado.turnosVivos).filter((turno) => turno.conversaId === conversaId && !turno.trabalhoId && !deTask.has(turno.turnoId));
 }
 
+/**
+ * NOD-402 (ADR-130): os turnos vivos que aparecem NO CHAT da conversa — os da conversa menos os dos bastidores (rotina,
+ * colega). Fonte do ao vivo (fala viva, pensamento) e do Parar do campo. A rotina roda em segundo plano: só a mensagem
+ * gravada, quando há algo para a pessoa, entra no chat. A presença (barra, mascote, pílula) segue `turnosVivosDaConversa`.
+ */
+export function turnosVivosDoChat(estado: Pick<Estado, "turnosVivos" | "trabalhos">, conversaId: string): TurnoVivo[] {
+  return turnosVivosDaConversa(estado, conversaId).filter((turno) => !turno.bastidores);
+}
+
 /** Revisão NOD-216: o conjunto dos turnos de task, um por leitura de `GET trabalhos` — a barra o pede uma vez por bot. */
 const DE_TASK = new WeakMap<object, ReadonlySet<string>>();
 const SEM_TASK: ReadonlySet<string> = new Set();

@@ -161,6 +161,25 @@ it("X1: steer aceito enquanto a narração ainda sai — \"Começando.\" não vi
   expect(r).toMatchObject({ desfecho: "sucesso", texto: "Terminei." });
 });
 
+it("NOD-402: no turno dos bastidores (rotina) o codex não fala no meio — tudo vai junto na entrega", async () => {
+  const instance = await criarCodexCliDriver(lig).create(cfg);
+  const adapter: Adapter = instance.adapter({ ...planoHarness({ texto: "[[chat-steer]] revisa as tasks" }), bastidores: true });
+  const falas: string[] = [];
+  let entregue = false;
+  const r = await adapter.rodarTurno({
+    sinal: async () => {},
+    delta: () => {},
+    evento: (e) => {
+      if (e.tipo === "delta" && !entregue) entregue = adapter.receberMensagem?.(molduraMensagemNoMeio("e o prazo?"), "m1") ?? false;
+    },
+    falaIntermediaria: (t) => falas.push(t),
+  });
+  expect(entregue).toBe(true);
+  expect(falas).toEqual([]);
+  expect(r.desfecho).toBe("sucesso");
+  expect(r.texto).toMatch(/Recebi: A pessoa escreveu enquanto você trabalhava: «e o prazo\?»[\s\S]*Terminei\./);
+});
+
 it("X2: o turn/start que levaria a mensagem é recusado — ela nunca é confirmada e volta como devolvida", async () => {
   cfg.env.TESTE_NOD_RECUSAR_TURNO = "2";
   const instance = await criarCodexCliDriver(lig).create(cfg);

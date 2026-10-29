@@ -87,6 +87,75 @@ function agente(estado: Estado, id: string | null | undefined): Agente | undefin
   return [...(estado.frota?.agentes ?? []), ...(estado.gestao?.agentes ?? [])].find((a) => a.id === id && !a.excluidoEm);
 }
 
+/** NOD-402 (ADR-130): as origens dos bastidores — espelho de `ORIGENS_DOS_BASTIDORES` (src/domain/triagem.ts). */
+const ORIGENS_DOS_BASTIDORES: ReadonlySet<string> = new Set(["rotina", "delegacao", "peer"]);
+// A marca do servidor (`bastidores`, da coluna do turno: cobre a procuração e as retomadas); a origem é o servidor antigo.
+// A linha `rotina_execucao` é da rotina mesmo com autoria de pessoa (a de `parada_aberta`).
+const deBastidores = (m: Mensagem): boolean => !m.trabalhoId && (m.kind === "rotina_execucao" || (m.autoria.autor_tipo !== "pessoa" && (m.bastidores === true || ORIGENS_DOS_BASTIDORES.has(m.origemTurno ?? "") || ORIGENS_DOS_BASTIDORES.has(m.raiz?.origem ?? ""))));
+const doTurnoDaConversa = (m: Mensagem): boolean => !m.trabalhoId && m.autoria.autor_tipo === "agente" && Boolean(m.turnoId) && !deBastidores(m);
+
+/** NOD-402: o que a tela sabe dos turnos da conversa vivos agora (o ao vivo do chat, sem os bastidores). */
+export type TurnosDaPessoaVivos = {
+  /** Desde quando a pessoa tem turno vivo: o despacho do servidor do que roda, ou a fala dela que pôs um na fila; null = nenhum. */
+  readonly desde: number | null;
+  /** Os ids dos turnos vivos da conversa (rodando ou na fila). */
+  readonly turnos: ReadonlySet<string>;
+};
+export const NENHUM_TURNO_VIVO: TurnosDaPessoaVivos = { desde: null, turnos: new Set() };
+
+/**
+ * NOD-402 (critério 4): a mensagem de bastidores (rotina, colega e as retomadas deles) que o servidor gravou enquanto um
+ * turno da conversa rodava não entra entre as falas dele. Esse turno é o da próxima mensagem do agente da conversa que já
+ * rodava quando ela foi gravada (`turnoDesde` ≤ `criadoEm`, do servidor; sem o campo, só o turno vivo agora). Com ele
+ * vivo, ela fica segurada até ele acabar; acabado, vai para logo depois da ÚLTIMA mensagem dele (a fala da pessoa
+ * absorvida no meio não divide o turno). Sem turno adiante: com um turno da conversa rodando desde antes dela, fica
+ * segurada; senão, fica onde está — o que já estava à vista não some, e uma mensagem antiga nunca muda de lugar por
+ * causa de um turno que começou depois dela. Sem mudança a lista volta a mesma (a mesma referência), e os índices de
+ * quem ancora pela posição seguem os desta lista.
+ */
+export function emOrdemDoChat(mensagens: readonly Mensagem[], vivos: TurnosDaPessoaVivos): readonly Mensagem[] {
+  const depoisDe = new Map<number, Mensagem[]>();
+  const fica: boolean[] = mensagens.map(() => true);
+  let mudou = false;
+  for (let k = 0; k < mensagens.length; k += 1) {
+    const m = mensagens[k] as Mensagem;
+    if (!deBastidores(m)) continue;
+    const lugar = lugarDosBastidores(mensagens, k + 1, m.criadoEm, vivos);
+    if (lugar === "fica") continue;
+    fica[k] = false;
+    mudou = true;
+    if (lugar !== "segura") depoisDe.set(lugar, [...(depoisDe.get(lugar) ?? []), m]);
+  }
+  if (!mudou) return mensagens;
+  const saida: Mensagem[] = [];
+  mensagens.forEach((m, k) => { if (fica[k]) saida.push(m); saida.push(...(depoisDe.get(k) ?? [])); });
+  return saida;
+}
+
+/**
+ * O lugar de algo dos bastidores gravado em `em`, olhando a lista a partir de `inicio` (a posição em que ele cairia):
+ * "fica" onde está, "segura" (o turno da conversa que rodava ainda vive) ou o índice da última mensagem desse turno, depois
+ * da qual vai. A regra de `emOrdemDoChat`, que o cartão de pedido sem fala própria também segue (conversa.ts).
+ */
+export function lugarDosBastidores(mensagens: readonly Mensagem[], inicio: number, em: number, vivos: TurnosDaPessoaVivos): "fica" | "segura" | number {
+  const rodavaEm = (x: Mensagem): boolean => (x.turnoDesde !== undefined ? x.turnoDesde <= em : vivos.turnos.has(x.turnoId ?? ""));
+  // Revisão 15: um turno da conversa vivo desde antes dela segura, mesmo que outro (já acabado) também rodasse — dois turnos
+  // da pessoa podem se sobrepor (a fala com anexo ou comando que a sessão viva não absorve vira o turno seguinte).
+  if (vivos.desde !== null && em >= vivos.desde) return "segura";
+  // Todos os turnos da conversa que rodavam em `em` (os que gravaram depois dela e já existiam): vai depois da última
+  // mensagem de qualquer um deles; algum ainda vivo, segura.
+  const turnos = new Set<string>();
+  let alvo = -1;
+  for (let x = inicio; x < mensagens.length; x += 1) {
+    const m = mensagens[x] as Mensagem;
+    if (!doTurnoDaConversa(m) || !(rodavaEm(m) || turnos.has(m.turnoId ?? ""))) continue;
+    if (vivos.turnos.has(m.turnoId ?? "")) return "segura";
+    turnos.add(m.turnoId ?? "");
+    alvo = x;
+  }
+  return alvo < 0 ? "fica" : alvo;
+}
+
 /**
  * A conversa é limpa (ADR-114): o servidor mandou o destino (só na conversa própria). Sem ele, o desenho de antes.
  */

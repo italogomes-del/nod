@@ -646,7 +646,9 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
                 let rodadasFaladas = 0;
                 // Falas intermediárias saem da sessão viva; na sala, a fala passa pelos responders (postarNaSala) e
                 // vai inteira na entrega.
-                const falaNaHora = plano.modoTurno !== "sala" && sinks.falaIntermediaria !== undefined;
+                // NOD-402 (ADR-130): nem nos bastidores da conversa — a rotina não fala no meio; tudo vai na entrega,
+                // que o `sem_novidade` cala.
+                const falaNaHora = plano.modoTurno !== "sala" && !plano.bastidores && sinks.falaIntermediaria !== undefined;
                 const falarRodadas = () => {
                   if (!falaNaHora) return;
                   for (; rodadasFaladas < rodadas.length; rodadasFaladas++) {

@@ -123,7 +123,7 @@ export function assuntoDaNova(m: { kind: KindMensagem; payload?: PayloadMensagem
 }
 
 /** A linha lida com o turno (ADR-083, S2): a origem do turno, o trabalho e se é a última fala de um turno encerrado. */
-type LinhaComTurno = LinhaMensagem & { midia_recusas?: RecusasMidia | null; turno_origem: OrigemTurno | null; trabalho_id: string | null; fim_do_turno: boolean | null; raiz_id: string | null; raiz_origem: OrigemTurno | null; motivo_recomeco?: MotivoRecomeco | null; primeira?: boolean | null; frente_de_lote: boolean | null } & LinhaDoCheckpoint;
+type LinhaComTurno = LinhaMensagem & { midia_recusas?: RecusasMidia | null; turno_origem: OrigemTurno | null; turno_bastidores?: boolean | null; turno_criado_em?: Date | null; trabalho_id: string | null; fim_do_turno: boolean | null; raiz_id: string | null; raiz_origem: OrigemTurno | null; motivo_recomeco?: MotivoRecomeco | null; primeira?: boolean | null; frente_de_lote: boolean | null } & LinhaDoCheckpoint;
 /** NOD-54 (0120): o checkpoint da fala (left join; nulo sem checkpoint ou vencido). */
 type LinhaDoCheckpoint = { ck_estado?: EstadoCheckpoint | null; ck_arquivos?: ArquivoDoCheckpoint[] | null; ck_total?: number | null; ck_feitos?: number | null; ck_desfeito_em?: Date | null; ck_resultado?: ResultadoGuardado | null; ck_falha?: FalhaDesfazer | null };
 
@@ -166,7 +166,7 @@ function paraMensagemComTurno(l: LinhaComTurno): Mensagem {
   const checkpoint = l.ck_estado && l.ck_arquivos && l.ck_total != null
     ? { checkpoint: checkpointDaFala({ estado: l.ck_estado, arquivos: l.ck_arquivos, total: l.ck_total, feitos: l.ck_feitos ?? 0, desfeitoEm: l.ck_desfeito_em ? ms(l.ck_desfeito_em) : null, resultado: l.ck_resultado ?? null, falha: l.ck_falha ?? null }) }
     : {};
-  return { ...paraMensagem(l), origemTurno: l.turno_origem, trabalhoId: l.trabalho_id, fimDoTurno: l.fim_do_turno === true, ...recusas, ...(l.motivo_recomeco ? { motivoRecomeco: l.motivo_recomeco } : {}), ...(l.raiz_id && l.raiz_origem ? { raiz: { turnoId: l.raiz_id, origem: l.raiz_origem } } : {}), ...checkpoint };
+  return { ...paraMensagem(l), origemTurno: l.turno_origem, trabalhoId: l.trabalho_id, fimDoTurno: l.fim_do_turno === true, ...(l.turno_bastidores === true && !l.trabalho_id ? { bastidores: true } : {}), ...(l.turno_criado_em ? { turnoDesde: new Date(l.turno_criado_em).getTime() } : {}), ...recusas, ...(l.motivo_recomeco ? { motivoRecomeco: l.motivo_recomeco } : {}), ...(l.raiz_id && l.raiz_origem ? { raiz: { turnoId: l.raiz_id, origem: l.raiz_origem } } : {}), ...checkpoint };
 }
 
 /**
@@ -179,9 +179,17 @@ function paraMensagemComTurno(l: LinhaComTurno): Mensagem {
  * (ADR-099, I7) existia desde 12/10, mas as colunas dele nunca eram lidas, e `raiz` não chegava a mensagem nenhuma: a
  * retomada de um pedido de colega (quem recebeu pediu a um terceiro) saía da troca e a fala entregue virava balão.
  */
+/**
+ * NOD-402 (revisão 14): a hora de onde o turno segura a mensagem dos bastidores (`Mensagem.turnoDesde`). É a hora em que ele
+ * pôde rodar (criação ou `acordar_em`); se ficou mais que isto na fila (máquina fora), o que foi gravado na espera já
+ * estava à vista e não pode sumir quando ele fala: vale o despacho. O mesmo número de `FILA_SEGURA_MS` em
+ * web/telas/conversa.ts (a web não importa daqui): mudar um muda o outro.
+ */
+const FILA_SEGURA_MS = 5 * 60_000;
+
 function selectComTurno(conn: Conn, tenantId: string, recorte: ReturnType<Conn>) {
   return conn<LinhaComTurno[]>`
-    select m.*, t.origem as turno_origem, t.midia_recusas, t.motivo_recomeco, coalesce(t.trabalho_id, o.trabalho_id) as trabalho_id, rz.raiz_id, rz.raiz_origem,
+    select m.*, t.origem as turno_origem, t.bastidores as turno_bastidores, case when t.despachado_em - greatest(t.criado_em, coalesce(t.acordar_em, t.criado_em)) >= make_interval(secs => ${FILA_SEGURA_MS / 1000}) then t.despachado_em else greatest(t.criado_em, coalesce(t.acordar_em, t.criado_em)) end as turno_criado_em, t.midia_recusas, t.motivo_recomeco, coalesce(t.trabalho_id, o.trabalho_id) as trabalho_id, rz.raiz_id, rz.raiz_origem,
       coalesce(w.forma = 'frente' and w.lote_id is not null, false) as frente_de_lote,
       -- O desfazendo preso (a máquina sumiu) aparece como falhou: a tela oferece "Tentar de novo" e não prende o bot (NOD-54).
       case when ck.estado = 'desfazendo' and ck.pedido_em < now() - make_interval(secs => ${PRAZO_DESFAZENDO_MS / 1000}) then 'falhou' else ck.estado end as ck_estado,
