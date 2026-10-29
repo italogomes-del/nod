@@ -20,7 +20,8 @@ import { ehUuid } from "../../../use-cases/apoio-l7.ts";
 import type { PedidoNaFila } from "../../../use-cases/revisar-acao.ts";
 import { chamarFerramentaFase1, concluirChamada, entradaDaLimpeza, executarEfeito, precisaLimparAposSucesso, REGRA_CHAMADA, registrarExecucaoLocal, respostaSemFase2, VERSAO_REGRA_CHAMADA, type SaidaFase1Chamada } from "../../../use-cases/chamar-ferramenta.ts";
 import { classificarFalhaDaChamada, limparFalhaAposSucesso } from "../../../use-cases/disjuntor-conector.ts";
-import { nomeParaTrilha, registrarNegacao } from "../../../use-cases/registrar-negacao.ts";
+import { nomeParaTrilha, REGRA_PARADA_ALCADA, registrarNegacao, VERSAO_REGRA_PARADA_ALCADA } from "../../../use-cases/registrar-negacao.ts";
+import { REGRA_CLIQUE, REGRA_LIBERADO_NA_TAREFA, VERSAO_LIBERADO_NA_TAREFA, VERSAO_REGRA_CLIQUE } from "../../../domain/decisoes.ts";
 import { assentarComNovaTentativa, TENTATIVAS_FASE2 } from "../../../use-cases/liberar-no-app.ts";
 import type { Rota } from "../roteador.ts";
 import { TAMANHO_MAX_MIDIA, TETO_CABECALHO_MIDIA, type CabecalhoMidia } from "../../../contracts/anexo.ts";
@@ -368,7 +369,9 @@ export function rotasInternas(deps: DepsRotasInternas): Rota[] {
           if (credencial !== null || rodaComando || arquivo !== null || mcp !== null) {
             const r = await executar(d, autorizarComando, credencial !== null ? { plano, credencial, ferramenta } : arquivo !== null ? { plano, arquivo } : mcp !== null ? { plano, mcp } : { plano, comando: String(c?.comando) });
             if ("negar" in r) {
-              // Sem chave guardada: a negação não grava nada, e o reenvio (NOD-293) só decide de novo.
+              // Sem chave guardada: o reenvio (NOD-293) só decide de novo. NOD-70: a negação vira linha `negacao` na
+              // trilha (o reenvio grava outra — a tela agrupa as repetidas).
+              await d.repos.trilha.registrar({ agenteId: plano.agenteId, turnoId, ferramenta: nomeParaTrilha(`nativa__${ferramenta}`), kind: "negacao", motivo: "credencial_no_manual", regra: REGRA_PARADA_ALCADA, regraVersao: VERSAO_REGRA_PARADA_ALCADA });
               paraOExecutor.negar = r.negar;
               return null;
             }
@@ -383,6 +386,9 @@ export function rotasInternas(deps: DepsRotasInternas): Rota[] {
             if (r.porque === "modo_total") regra = { regra: REGRA_MODO_TOTAL, regraVersao: VERSAO_MODO_TOTAL };
             // Revisão de engenharia 21: o comando liberado pelo revisor leva a regra dele, não a da chamada.
             if (r.porque === "revisor") regra = { regra: REGRA_REVISOR, regraVersao: VERSAO_REGRA_REVISOR };
+            // NOD-70: o clique da pessoa e o "liberar na tarefa" também levam a regra real (a leitura segue a da chamada).
+            if (r.porque === "aprovado") regra = { regra: REGRA_CLIQUE, regraVersao: VERSAO_REGRA_CLIQUE };
+            if (r.porque === "liberado_na_tarefa") regra = { regra: REGRA_LIBERADO_NA_TAREFA, regraVersao: VERSAO_LIBERADO_NA_TAREFA };
           }
           await d.repos.trilha.registrar({ agenteId: plano.agenteId, turnoId, ferramenta: nomeParaTrilha(`nativa__${ferramenta}`), kind: "tool_call", ...regra });
           if (NATIVAS_QUE_CONTAMINAM.includes(ferramenta)) await d.repos.turnos.contaminar(turnoId, deps.agora());

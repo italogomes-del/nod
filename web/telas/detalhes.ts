@@ -34,8 +34,11 @@ import { maquinasDeTrabalho, opcoesDeMaquina } from "./maquinas.ts";
  * (ou com a rota indisponível), a linha não mostra número.
  */
 function linhaAtividadeHoje(estado: Estado, agenteId: string): string {
-  const total = estado.atividadeHoje[agenteId]?.total;
-  return typeof total === "number" ? `<span class="gv-meta">${total} hoje</span>` : "";
+  const hoje = estado.atividadeHoje[agenteId];
+  const total = hoje?.total;
+  // NOD-70: "· N negadas" (as decisões negadas hoje) só quando há alguma; o número sozinho não vira alarme.
+  const negadas = typeof hoje?.negadas === "number" && hoje.negadas > 0 ? ` · ${hoje.negadas} ${hoje.negadas === 1 ? "negada" : "negadas"}` : "";
+  return typeof total === "number" ? `<span class="gv-meta">${total} hoje${negadas}</span>` : negadas ? `<span class="gv-meta">${negadas.slice(3)}</span>` : "";
 }
 
 type Bot = NonNullable<Estado["frota"]>["agentes"][number];

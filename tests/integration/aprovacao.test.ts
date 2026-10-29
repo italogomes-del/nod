@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import { decidir } from "../../src/use-cases/decidir.ts";
-import { pedirAprovacao } from "../../src/use-cases/pedir-aprovacao.ts";
+import { assentarLoteAutomatico, pedirAprovacao } from "../../src/use-cases/pedir-aprovacao.ts";
 import { expectRejected } from "../helpers/expect-rejected.ts";
 import { agenteComConversa, autoriaPessoa } from "../helpers/fabricas.ts";
 import { PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
@@ -89,6 +89,42 @@ describeIntegracao("aprovação em lista tipada: pedir → decidir → executar 
 
       await expect(decidir(deps, { decisaoId })).rejects.toMatchObject({ codigo: "estado_invalido" });
       expect(chamadas).toHaveLength(2);
+
+      // NOD-70: o cartão deixou 4 linhas `cartao`; o clique, 2 permitidas e 2 negadas com o desfecho — todas com o app.
+      const trilha = await repos.trilha.doTurno(turno?.id ?? "");
+      expect(trilha.every((l) => l.ferramenta === "email__enviar" && l.conectorId === email?.id)).toBe(true);
+      expect(trilha.filter((l) => l.kind === "cartao").map((l) => l.regra)).toEqual(Array(4).fill("regra:cartao"));
+      expect(trilha.filter((l) => l.kind !== "cartao").map((l) => [l.kind, l.motivo, l.regra]).sort()).toEqual([
+        ["negacao", "retirado_pela_pessoa", "regra:clique"],
+        ["negacao", "sensivel_nao_aprovado", "regra:clique"],
+        ["tool_call", "item_de_aprovacao", "regra:clique"],
+        ["tool_call", "item_de_aprovacao", "regra:clique"],
+      ]);
+    });
+  });
+
+  it("NOD-70: o lote que rodou sem cartão deixa uma linha `tool_call` por item que rodou, com a regra do item (ou a do lote); reassentar não repete", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON, { nome: "Vera" });
+      const email = await repos.conectores.criar({ nome: "Email", slug: "email", transporte: "stdio", comando: "node", declaracao: "nao-toca" });
+      const turno = await repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
+      const deps = depsSobre(repos, MARLON, { services: servicosDeTeste({}), trx });
+      const decisao = await repos.decisoes.criar({ tipo: "aprovacao", agenteId, conversaId, turnoId: turno?.id ?? null, prazoDecisaoEm: Date.now() + 600_000, frase: "enviar 3" });
+      const itens = await repos.itensAprovacao.criarLote(decisao?.id ?? "", ["ana", "bia", "caio"].map((t, idx) => ({ idx, texto: t, destino: destino(t), origemSensivel: false })));
+      const [ana, bia, caio] = itens;
+      if (!ana || !bia || !caio || !decisao || !turno) throw new Error("cenário");
+      const lote = {
+        decisaoId: decisao.id, conversaId, turnoId: turno.id, agenteId, regra: "regra:modo_automatico" as const, regraVersao: 3,
+        aExecutar: [{ item: ana, conectorId: email?.id ?? "" }, { item: bia, conectorId: email?.id ?? "", regra: "regra:aprovacao_permanente", regraVersao: 2 }, { item: caio, conectorId: email?.id ?? "" }],
+      };
+      const desfechos = [{ itemId: ana.id, desfecho: "executado" as const }, { itemId: bia.id, desfecho: "falhou_na_execucao" as const }, { itemId: caio.id, desfecho: "ja_executado" as const }];
+      await assentarLoteAutomatico(deps, { lote, desfechos });
+      await assentarLoteAutomatico(deps, { lote, desfechos });
+      const trilha = await repos.trilha.doTurno(turno.id);
+      expect(trilha.map((l) => [l.ferramenta, l.kind, l.regra, l.regraVersao, l.conectorId]).sort()).toEqual([
+        ["email__enviar", "tool_call", "regra:aprovacao_permanente", 2, email?.id],
+        ["email__enviar", "tool_call", "regra:modo_automatico", 3, email?.id],
+      ]);
     });
   });
 });

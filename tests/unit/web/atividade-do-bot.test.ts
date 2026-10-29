@@ -145,7 +145,7 @@ describe("o estado da Atividade (reducer)", () => {
 
   it("abrir o nível começa em hoje, em 'Tudo'; a tela pede a página do dia e o 'N hoje'", () => {
     const e = reduzir(base(), { tipo: "gaveta", agenteId: "ada", nivel: { tipo: "atividade" } });
-    expect(e.atividadeVista).toEqual({ agenteId: "ada", dia: HOJE, filtro: "tudo", aberta: null });
+    expect(e.atividadeVista).toEqual({ agenteId: "ada", dia: HOJE, filtro: "tudo", aberta: null, aba: "atividade", desfecho: "tudo", decisao: null, exportar: null });
     expect(invalidacoesDaTela(e)).toEqual(expect.arrayContaining([`atividade:ada:${HOJE}`, "atividade-hoje:ada"]));
     const lida = reduzir(reduzir(e, { tipo: "hidratar-atividade", agenteId: "ada", dia: HOJE, atividade: dto([]) }), { tipo: "hidratar-atividade-hoje", agenteId: "ada", dia: HOJE, total: 0 });
     expect(invalidacoesDaTela(lida).filter((q) => q.startsWith("atividade"))).toEqual([]);

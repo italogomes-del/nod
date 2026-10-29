@@ -16,6 +16,7 @@ import { PRAZO_DECISAO_MS } from "./pedir-a-pessoa.ts";
 import { autoriaDaPessoa } from "./registrar-negacao.ts";
 import type { CasoDeUso, Deps, Services } from "./tipos.ts";
 import { sincronizarDasDecisoes } from "./trabalhos.ts";
+import { registrarCliques } from "./trilha-decisoes.ts";
 
 export type MarcacaoItem = { id: string; selecionado: boolean; textoFinal?: string };
 
@@ -28,6 +29,9 @@ export type ItemAExecutar = {
   computador?: { tenantId: string; pessoaId: string; agenteId: string; turnoId: string; acaoId: string };
   /** ADR-048: a dona da decisão — item `execucao: "maquina"` só roda no gh do Mac DELA. */
   dono?: { tenantId: string; pessoaId: string };
+  /** NOD-70: a regra que liberou ESTE item no lote automático (a trilha grava por item; o lote guarda a que mais concede). */
+  regra?: string;
+  regraVersao?: number;
   /** ADR-048: a decisão veio de turno de rotina; só então o GitHub App da organização pode atender. */
   rotina?: boolean;
   /** ADR-055: comando no terminal do Mac — aprovar LIBERA; quem roda é o hook do turno, no Mac da pessoa. */
@@ -254,6 +258,9 @@ export const assentarAprovacao: CasoDeUso<EntradaAssentarAprovacao, SaidaAssenta
   if (!decisao) throw new ErroDeDominio("nao_encontrado", { cause: "decisão" });
   for (const d of input.desfechos) await deps.repos.itensAprovacao.registrarDesfecho(d.itemId, d.desfecho);
   const itens = await deps.repos.itensAprovacao.listar(decisao.id);
+  // NOD-70: o que a pessoa decidiu no cartão vai à trilha na mesma tx do desfecho (a fase repetida desfaz junto).
+  const destinoDe = new Map(itens.map((i) => [i.id, i.destino]));
+  await registrarCliques(deps, { agenteId: decisao.agenteId, turnoId: decisao.turnoId, itens: input.desfechos.flatMap((d) => { const destino = destinoDe.get(d.itemId); return destino ? [{ destino, desfecho: d.desfecho }] : []; }) });
   const executados = new Set(input.desfechos.filter((d) => d.desfecho === "executado").map((d) => d.itemId));
   await limparFalhasDosExecutados(deps, itens.filter((i) => executados.has(i.id)).map((i) => ({ slug: i.destino.conector, desfecho: "executado" })), decisao.agenteId);
   const noMac = itens.filter((i) => i.selecionado && i.desfecho === null && i.destino.execucao === "maquina");

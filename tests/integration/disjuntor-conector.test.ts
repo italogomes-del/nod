@@ -205,6 +205,8 @@ describeIntegracao("disjuntor por app (NOD-374)", () => {
       await registrarNegacao(deps, { turnoId: randomUUID(), agenteId: outroBot.agenteId, conversaId: outroBot.conversaId, nome: "gmail__buscar", motivo: "conector_indisponivel", classe: "conector_indisponivel", conectorId: outroApp.id, viaGateDeRotina: false });
       await aplicarResultadoDaSonda(deps, { conectorId: conector.id, slug: "linear", resultado: { ok: false, motivo: "conector_indisponivel" } });
       await registrarFalhaDaChamada(deps, { conectorId: outroApp.id, tipo: "acesso_recusado" });
+      // NOD-70: a recusa no cartão é negação NESTE app, mas não é queda — esse bot não ganha a volta.
+      await repos.trilha.registrar({ agenteId: outroBot.agenteId, conectorId: conector.id, ferramenta: "linear__criar", kind: "negacao", motivo: "retirado_pela_pessoa", regra: "regra:clique", regraVersao: 1 });
       expect((await repos.conectores.comFalhaAberta()).map((c) => c.id)).toEqual([conector.id]);
       t += 2 * MIN;
       expect((await aplicarResultadoDaSonda(deps, { conectorId: conector.id, slug: "linear", resultado: { ok: true } })).data.recuperado).toBe(true);

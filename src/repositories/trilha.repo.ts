@@ -1,5 +1,6 @@
 import type { LinhaTrilha } from "../db/schema/trilha.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
+import { MOTIVOS_DE_CONECTOR_FORA, MOTIVOS_FORA_DA_DECISAO } from "../domain/decisoes.ts";
 import { data, iso } from "./conversao.ts";
 
 interface Linha {
@@ -16,6 +17,16 @@ interface Linha {
   regra_versao: number;
   em: Date;
 }
+
+/**
+ * definido em 2026-10-29 (NOD-70): o recorte da decisão de autorização, igual a `ehDecisao` (src/domain/decisoes.ts).
+ * O predicado é o MESMO do índice parcial 0128 (um teste compara os dois): mudar aqui exige migração nova do índice.
+ * Texto fixo, só com os enums de MOTIVOS_FORA_DA_DECISAO (^[a-z_]+$), sem valor de fora.
+ */
+export const FILTRO_DECISAO =
+  "kind in ('tool_call', 'negacao', 'cartao') and (conector_id is not null or regra <> 'regra:chamar_ferramenta') and coalesce(motivo, '') not in (" +
+  MOTIVOS_FORA_DA_DECISAO.map((m) => `'${m}'`).join(", ") +
+  ")";
 
 const COLUNAS = "tenant_id, id, owner_id, agente_id, turno_id, conector_id, ferramenta, kind, motivo, regra, regra_versao, em";
 
@@ -84,9 +95,48 @@ export function trilhaRepo(conn: Conn, escopo: Escopo) {
       const linhas = await conn<{ agente_id: string }[]>`
         select distinct t.agente_id from agentes a
         join trilha t on t.tenant_id = a.tenant_id and t.agente_id = a.id and t.kind = 'negacao' and t.em >= ${data(desde)}
+          and t.motivo = any(${[...MOTIVOS_DE_CONECTOR_FORA]}::text[])
         where a.tenant_id = ${escopo.tenantId} and a.owner_id = ${escopo.pessoaId} and t.owner_id = ${escopo.pessoaId} and t.conector_id = ${conectorId}
         order by t.agente_id limit 50`;
       return linhas.map((l) => l.agente_id);
+    },
+
+    /**
+     * definido em 2026-10-29 (NOD-70): as decisões de autorização de UM bot em [desde, ate), as mais novas primeiro.
+     * Decisão = tool_call, negacao ou cartao; a chamada de ferramenta do próprio nod (sem conector, regra legada) não
+     * entra. `cursor` é o id da última linha da página anterior: a comparação (em, id) é feita no banco, sem perder os
+     * microssegundos. Devolve até `limite` linhas (quem chama pede limite+1 para saber se há próxima). Índice 0128.
+     */
+    async decisoesDoAgente(f: { agenteId: string; desde: number; ate: number; kinds: readonly string[]; cursor?: string | null; limite: number }): Promise<LinhaTrilha[]> {
+      const linhas = await conn<Linha[]>`
+        select ${conn.unsafe(COLUNAS)} from trilha
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and agente_id = ${f.agenteId}
+          and em >= ${data(f.desde)} and em < ${data(f.ate)}
+          and ${conn.unsafe(FILTRO_DECISAO)} and kind = any(${[...f.kinds]}::text[])
+          ${f.cursor ? conn`and (em, id) < (select c.em, c.id from trilha c where c.tenant_id = ${escopo.tenantId} and c.owner_id = ${escopo.pessoaId} and c.agente_id = ${f.agenteId} and c.id = ${f.cursor})` : conn``}
+        order by em desc, id desc limit ${f.limite}`;
+      return linhas.map(paraLinha);
+    },
+
+    /** As contagens por kind das decisões do bot no período (os chips "Permitidas · Negadas · Cartões"). */
+    async contarDecisoesDoAgente(f: { agenteId: string; desde: number; ate: number }): Promise<Record<string, number>> {
+      const linhas = await conn<{ kind: string; n: number }[]>`
+        select kind, count(*)::int as n from trilha
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and agente_id = ${f.agenteId}
+          and em >= ${data(f.desde)} and em < ${data(f.ate)}
+          and ${conn.unsafe(FILTRO_DECISAO)}
+        group by kind`;
+      return Object.fromEntries(linhas.map((l) => [l.kind, l.n]));
+    },
+
+    /** Há alguma decisão do bot antes de `antes`? ("Dia anterior" e a primeira vez da aba Decisões; índice 0128.) */
+    async temDecisaoAntes(f: { agenteId: string; antes: number }): Promise<boolean> {
+      const [l] = await conn<{ um: number }[]>`
+        select 1 as um from trilha
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and agente_id = ${f.agenteId}
+          and em < ${data(f.antes)} and ${conn.unsafe(FILTRO_DECISAO)}
+        limit 1`;
+      return !!l;
     },
 
     /**

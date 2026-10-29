@@ -1,5 +1,6 @@
 import type { ItemDeAtividade } from "../../src/contracts/atividade.ts";
 import type { EventoLinha } from "../../src/contracts/trabalho.ts";
+import type { ExportarCsv, FiltroDecisoes } from "./decisoes-do-bot.ts";
 
 /**
  * A Atividade do bot na tela (definido em 2026-10-18, chat limpo, PR 2; ADR-114): tudo o que saiu do chat, um dia por vez,
@@ -23,8 +24,27 @@ export const FILTROS_DA_ATIVIDADE: readonly { filtro: FiltroAtividade; rotulo: s
   { filtro: "maquina_ia", rotulo: "Máquina e IA" },
 ];
 
-/** O que a gaveta mostra da Atividade: de que bot, que dia, que filtro e que mensagem está aberta (o texto inteiro). */
-export type VistaDaAtividade = { agenteId: string; dia: string; filtro: FiltroAtividade; aberta: string | null };
+/**
+ * O que a gaveta mostra da Atividade: de que bot, que dia, que filtro e que mensagem está aberta (o texto inteiro). NOD-70:
+ * a aba (Atividade | Decisões, o dia é o mesmo nas duas), o filtro das Decisões, a decisão aberta e o Exportar CSV.
+ */
+export type VistaDaAtividade = {
+  agenteId: string;
+  dia: string;
+  filtro: FiltroAtividade;
+  aberta: string | null;
+  aba: AbaDaAtividade;
+  desfecho: FiltroDecisoes;
+  decisao: string | null;
+  exportar: ExportarCsv | null;
+};
+
+export type AbaDaAtividade = "atividade" | "decisoes";
+
+/** A vista de quem acaba de abrir a Atividade: hoje, aba Atividade, tudo. */
+export function vistaInicial(agenteId: string, dia: string): VistaDaAtividade {
+  return { agenteId, dia, filtro: "tudo", aberta: null, aba: "atividade", desfecho: "tudo", decisao: null, exportar: null };
+}
 
 const dois = (n: number): string => String(n).padStart(2, "0");
 

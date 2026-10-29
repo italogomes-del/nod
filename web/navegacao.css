@@ -931,6 +931,34 @@ div.mac-medidor { padding-right: 36px; }
 .atv-navegacao { display: flex; justify-content: space-between; padding: 0 4px; }
 .atv-dia { min-height: 32px; padding: 4px 8px; border: 0; border-radius: 8px; background: none; color: var(--ink-2); font: inherit; font-size: 13px; cursor: pointer; }
 .atv-dia:hover, .atv-dia:focus-visible { background: var(--surface-raised); color: var(--ink); }
+/* NOD-70 (protótipo v2, W2): as abas Atividade | Decisões e a aba Decisões. O desfecho fica à direita em tinta, sem cor
+   própria (✕ na tinta forte, ✓ na tinta 3, ◇ na tinta 2); o vermelho só no ícone pequeno do erro. */
+.atv-abas { display: flex; gap: 4px; padding: 0 4px; border-bottom: 1px solid var(--line); }
+.atv-aba { min-height: 32px; padding: 6px 10px; margin-bottom: -1px; border: 0; border-bottom: 2px solid transparent; background: none; color: var(--ink-2); font: inherit; font-size: 13px; cursor: pointer; }
+.atv-aba:hover { color: var(--ink); }
+.atv-aba[aria-selected="true"] { border-bottom-color: var(--ink); color: var(--ink); font-weight: 600; }
+.dec { display: flex; flex-direction: column; gap: 12px; }
+.dec-n { color: inherit; opacity: .7; font-variant-numeric: tabular-nums; }
+.dec-item .atv-texto { flex: 1; }
+.dec-desfecho { flex: none; margin-left: auto; font-size: 12px; white-space: nowrap; }
+.dec-desfecho.dec-negada { color: var(--ink); font-weight: 600; }
+.dec-desfecho.dec-permitida { color: var(--ink-3); }
+.dec-desfecho.dec-cartao { color: var(--ink-2); }
+.dec-detalhe p { white-space: normal; }
+.dec-regra { font-family: var(--font-mono); font-size: 12px; color: var(--ink); overflow-wrap: anywhere; }
+.dec-mais { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; padding: 0 8px; font-size: 13px; }
+.dec-erro { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 6px; margin: 0; padding: 4px 8px; font-size: 13px; color: var(--ink-2); }
+.dec-erro-icone { display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; background: var(--danger); color: var(--surface); font-size: 11px; font-weight: 700; }
+.dec-primeira { margin: 0; padding: 8px; font-size: 13.5px; color: var(--ink-2); }
+.dec-csv-linha { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; padding: 4px 8px 0; border-top: 1px solid var(--line); padding-top: 10px; font-size: 13px; }
+.dec-csv { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 0 8px 8px; font-size: 13px; }
+.dec-csv .dec-periodos { padding: 0; }
+.dec-csv .atv-filtro[aria-checked="true"] { border-color: var(--action); background: var(--action); color: var(--on-action); }
+.dec-csv-arquivo { margin: 0; overflow-wrap: anywhere; }
+.dec-csv-arquivo code { font-family: var(--font-mono); font-size: 12px; }
+.dec-baixar { min-height: 32px; padding: 6px 14px; border: 0; border-radius: 999px; background: var(--action); color: var(--on-action); font: inherit; font-size: 13px; cursor: pointer; }
+.dec-baixar[aria-busy="true"] { opacity: .7; cursor: progress; }
+.dec-baixado { color: var(--ink-3); }
 
 /* ADR-125 (NOD-349; protótipo prot/nod-349): a gaveta do bot minimalista. No topo, só compartilhar e fechar (ícones
    redondos de contorno); no centro, o avatar, o nome e o subtítulo, editáveis ali; embaixo, as abas de texto da NOD-326.

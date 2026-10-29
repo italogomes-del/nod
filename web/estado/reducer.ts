@@ -34,7 +34,9 @@ import type { Escopo } from "../../src/shared/types.ts";
 import type { LeituraAtual } from "../lib/ouvir.ts";
 import { FALA_SAINDO_MS } from "../lib/fala-viva.ts";
 import { acoesFechadas, acoesSemNota, ATIVIDADE_VAZIA, linhasDoResumo, comFerramenta, comFimDaAcao, comSubagentes, comTarefas, comTexto, comVigia, SEM_NOME_DA_FERRAMENTA, semFerramentaAberta, soSubagentes, subagentesParados, textoDaFala, type AtividadeTurno, type FerramentaEmUso, type SubagentesDoTurno, type VigiaDaAtividade, comCabecalho, comFrentesEm } from "../lib/atividade.ts";
-import { chaveDaAtividade, diaLocal, type VistaDaAtividade } from "../lib/atividade-do-bot.ts";
+import { chaveDaAtividade, diaLocal, vistaInicial, type VistaDaAtividade } from "../lib/atividade-do-bot.ts";
+import { chaveDasDecisoes, type PaginaDasDecisoes } from "../lib/decisoes-do-bot.ts";
+import type { DecisoesDto } from "../../src/contracts/decisoes-do-bot.ts";
 import { AGENDA_INICIAL, agendaPorLer, ehAcaoDaAgenda, reduzirAgenda, type AcaoAgenda, type EstadoAgenda } from "./agenda.ts";
 import { diaDe } from "../lib/agenda.ts";
 import type { PaginaDaBiblioteca } from "../../src/contracts/biblioteca.ts";
@@ -307,7 +309,7 @@ export type EscolhaComposer = { outroAssunto: boolean; alvoId: string | null };
  */
 export type CitacaoNoCampo = { mensagemId: string; trecho: string };
 
-export type Invalidacao = "onboarding" | "ligacao" | "trabalhos" | `trabalho:${string}` | `disponibilidade:${string}` | "gestao" | "frota" | "sua-vez" | "nao-lidos" | "rotinas" | "conectores" | "inventario" | "executor" | "ias" | "uso-plano" | "salas" | "chaves" | "maquinas" | "nuvem" | "contas" | "relatos" | "agenda" | `conversa:${string}` | `vivos:${string}` | `memoria:${string}` | `diario:${string}` | `concessoes:${string}` | `execucoes:${string}` | `atividade:${string}` | `atividade-hoje:${string}` | `biblioteca:${string}`;
+export type Invalidacao = "onboarding" | "ligacao" | "trabalhos" | `trabalho:${string}` | `disponibilidade:${string}` | "gestao" | "frota" | "sua-vez" | "nao-lidos" | "rotinas" | "conectores" | "inventario" | "executor" | "ias" | "uso-plano" | "salas" | "chaves" | "maquinas" | "nuvem" | "contas" | "relatos" | "agenda" | `conversa:${string}` | `vivos:${string}` | `memoria:${string}` | `diario:${string}` | `concessoes:${string}` | `execucoes:${string}` | `atividade:${string}` | `atividade-hoje:${string}` | `decisoes:${string}` | `biblioteca:${string}`;
 
 export type Estado = {
   sessao: Escopo | null;
@@ -424,8 +426,14 @@ export type Estado = {
    * sem número); e o que a gaveta mostra (dia, filtro e a mensagem aberta).
    */
   atividadeDoBot: Record<string, AtividadeDto | null>;
-  atividadeHoje: Record<string, { dia: string; total: number | null }>;
+  /** NOD-70: `negadas` é o "· N negadas" da linha Atividade em Ajustes (undefined/null: ainda não leu, ou falhou). */
+  atividadeHoje: Record<string, { dia: string; total: number | null; negadas?: number | null }>;
   atividadeVista: VistaDaAtividade | null;
+  /**
+   * NOD-70: a aba Decisões, por `bot:dia:filtro` (chaveDasDecisoes). null = indisponível (servidor de antes ou bot de outra
+   * pessoa, 404); "erro" = a leitura falhou (a aba mostra o erro com Tentar de novo).
+   */
+  decisoesDoBot: Record<string, PaginaDasDecisoes | null | "erro">;
   /**
    * NOD-326: a Biblioteca da gaveta, por `conversaId` — as páginas lidas, o cursor, o erro e quantos itens cada grupo
    * mostra. Ausente = ainda não lida (a falta `biblioteca:<id>` só existe com a aba aberta na visão geral).
@@ -566,11 +574,14 @@ export type Acao =
   | { tipo: "computador-acao"; acao: { agenteId: string; tipo: "acordar" | "religar" } | null }
   | { tipo: "agente-local"; agenteId: string; mudanca: { nome?: string; titulo?: string; forma?: FormaAgente; cor?: CorAgente } }
   | { tipo: "hidratar-atividade"; agenteId: string; dia: string; atividade: AtividadeDto | null }
-  | { tipo: "hidratar-atividade-hoje"; agenteId: string; dia: string; total: number | null }
+  | { tipo: "hidratar-atividade-hoje"; agenteId: string; dia: string; total: number | null; negadas?: number | null }
+  | { tipo: "hidratar-decisoes"; chave: string; pagina: DecisoesDto | null | "erro" }
+  | { tipo: "mais-decisoes"; chave: string; cursor: string; resultado: "carregando" | "erro" | DecisoesDto }
+  | { tipo: "esquecer-decisoes"; chave: string }
   | { tipo: "hidratar-biblioteca"; conversaId: string; pagina: PaginaDaBiblioteca | null; seguinte: boolean }
   | { tipo: "biblioteca-mais"; conversaId: string; grupo: GrupoBiblioteca }
   | { tipo: "biblioteca-tentar"; conversaId: string }
-  | { tipo: "atividade-vista"; mudanca: Partial<Pick<VistaDaAtividade, "dia" | "filtro" | "aberta">> }
+  | { tipo: "atividade-vista"; mudanca: Partial<Omit<VistaDaAtividade, "agenteId">> }
   | { tipo: "aviso-conexao"; texto: string | null }
   | { tipo: "sessao"; escopo: Escopo | null }
   | { tipo: "navegar"; tela: Tela }
@@ -712,6 +723,7 @@ export const estadoInicial: Estado = {
   bibliotecaDoBot: {},
   atividadeHoje: {},
   atividadeVista: null,
+  decisoesDoBot: {},
   avisoConexao: null,
   concessoes: {},
   liberacoesDispensadas: {},
@@ -1231,6 +1243,9 @@ function atividadeDoFrame(e: Estado, f: FrameSse): Invalidacao[] {
   const quais: Invalidacao[] = [];
   if (e.atividadeHoje[bot.id]) quais.push(`atividade-hoje:${bot.id}`);
   if (e.atividadeVista?.agenteId === bot.id) quais.push(`atividade:${chaveDaAtividade(bot.id, e.atividadeVista.dia)}`);
+  // NOD-70: a aba Decisões aberta relê a página (a decisão nova entra no topo; "Carregar mais" recomeça da 1ª página).
+  const v = e.atividadeVista;
+  if (v?.agenteId === bot.id && v.aba === "decisoes") quais.push(`decisoes:${chaveDasDecisoes(bot.id, v.dia, v.desfecho)}`);
   return quais;
 }
 
@@ -1478,7 +1493,7 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
         falhaLeitura: acao.escopo?.pessoaId === estado.sessao?.pessoaId && acao.escopo?.tenantId === estado.sessao?.tenantId ? estado.falhaLeitura : null,
         // NOD-326 (revisão 3): a Biblioteca também some na troca de tenant (não fica dado de um tenant no outro).
         ...(acao.escopo?.tenantId === estado.sessao?.tenantId ? {} : { bibliotecaDoBot: {} }),
-        ...(acao.escopo?.pessoaId === estado.sessao?.pessoaId ? {} : { onboarding: undefined, onboardingAberto: false, onboardingResolvido: false, agenda: AGENDA_INICIAL, trabalhos: null, trabalhoDetalhe: {}, pressao: null, atividadeDoBot: {}, atividadeHoje: {}, atividadeVista: null, bibliotecaDoBot: {} }) };
+        ...(acao.escopo?.pessoaId === estado.sessao?.pessoaId ? {} : { onboarding: undefined, onboardingAberto: false, onboardingResolvido: false, agenda: AGENDA_INICIAL, trabalhos: null, trabalhoDetalhe: {}, pressao: null, atividadeDoBot: {}, atividadeHoje: {}, atividadeVista: null, decisoesDoBot: {}, bibliotecaDoBot: {} }) };
     case "navegar": {
       // definido em 2026-10-08 (revisão W5): reabrir uma task já vista relê as mensagens dela (o detalhe guardado é de
       // quando ela foi aberta da última vez); W11: sair da tela da task de um bot cuja conversa não está carregada apaga o
@@ -1684,7 +1699,7 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
     case "gaveta": {
       // O rascunho da Inteligência (2B) e o menu rápido (2A) não sobrevivem à troca de nível.
       // ADR-114: a Atividade abre sempre no dia de hoje, em "Tudo"; sair dela esquece o dia, o filtro e o item aberto.
-      const atividadeVista: VistaDaAtividade | null = acao.nivel?.tipo === "atividade" ? { agenteId: acao.agenteId, dia: diaLocal(estado.agora > 0 ? estado.agora : Date.now()), filtro: "tudo", aberta: null } : null;
+      const atividadeVista: VistaDaAtividade | null = acao.nivel?.tipo === "atividade" ? vistaInicial(acao.agenteId, diaLocal(estado.agora > 0 ? estado.agora : Date.now())) : null;
       const depois = { ...estado, avatarAberto: null, gaveta: acao.nivel ? { agenteId: acao.agenteId, nivel: acao.nivel } : null, rascunhoIa: acao.nivel?.tipo === "inteligencia" && estado.rascunhoIa?.agenteId === acao.agenteId ? estado.rascunhoIa : null, menuIa: null, atividadeVista };
       // Reabrir a Atividade relê o dia (a página guardada aparece enquanto a nova não chega): fechada, nenhum frame a relia.
       return atividadeVista && chaveDaAtividade(atividadeVista.agenteId, atividadeVista.dia) in estado.atividadeDoBot ? invalidar(depois, `atividade:${chaveDaAtividade(atividadeVista.agenteId, atividadeVista.dia)}`) : depois;
@@ -1710,11 +1725,47 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
     case "hidratar-atividade": {
       // A página do dia de hoje também é o "N hoje" da linha (o mesmo total, nas mesmas três fontes).
       const hoje = estado.atividadeHoje[acao.agenteId];
-      const atividadeHoje = acao.atividade && hoje?.dia === acao.dia ? { ...estado.atividadeHoje, [acao.agenteId]: { dia: acao.dia, total: acao.atividade.total } } : estado.atividadeHoje;
+      const atividadeHoje = acao.atividade && hoje?.dia === acao.dia ? { ...estado.atividadeHoje, [acao.agenteId]: { ...hoje, dia: acao.dia, total: acao.atividade.total } } : estado.atividadeHoje;
       return { ...estado, atividadeDoBot: { ...estado.atividadeDoBot, [chaveDaAtividade(acao.agenteId, acao.dia)]: acao.atividade }, atividadeHoje };
     }
     case "hidratar-atividade-hoje":
-      return { ...estado, atividadeHoje: { ...estado.atividadeHoje, [acao.agenteId]: { dia: acao.dia, total: acao.total } } };
+      return { ...estado, atividadeHoje: { ...estado.atividadeHoje, [acao.agenteId]: { dia: acao.dia, total: acao.total, ...(acao.negadas === undefined ? {} : { negadas: acao.negadas }) } } };
+    case "hidratar-decisoes": {
+      const p = acao.pagina;
+      const atual = estado.decisoesDoBot[acao.chave];
+      let pagina: PaginaDasDecisoes | null | "erro" = p === null || p === "erro" ? p : { linhas: p.linhas, contagem: p.contagem, proximo: p.proximo, haAntes: p.haAntes, carregandoMais: false, erroMais: false };
+      // Revisão A3 (NOD-70): a releitura (SSE) traz só a 1ª página. Se a pessoa já tinha carregado mais e a 1ª página nova
+      // ainda encosta na lista (a última linha dela está lá), as novas entram em cima e o resto carregado fica, com o
+      // cursor e o "carregando" de antes; senão (muita coisa nova, outro recorte), a lista recomeça.
+      if (pagina && pagina !== "erro" && p && p !== "erro" && atual && atual !== "erro" && p.proximo !== null && atual.linhas.length > p.linhas.length) {
+        const ultima = p.linhas.at(-1)?.id;
+        const i = ultima === undefined ? -1 : atual.linhas.findIndex((l) => l.id === ultima);
+        if (i >= 0) {
+          const novas = new Set(p.linhas.map((l) => l.id));
+          const resto = atual.linhas.slice(i + 1).filter((l) => !novas.has(l.id));
+          pagina = { ...pagina, linhas: [...p.linhas, ...resto], proximo: atual.proximo, carregandoMais: atual.carregandoMais, erroMais: atual.erroMais };
+        }
+      }
+      return { ...estado, decisoesDoBot: { ...estado.decisoesDoBot, [acao.chave]: pagina } };
+    }
+    case "mais-decisoes": {
+      const atual = estado.decisoesDoBot[acao.chave];
+      if (!atual || atual === "erro") return estado;
+      const r = acao.resultado;
+      // A página que chega só entra se ainda continua a lista que a pediu: se a lista foi relida no meio (SSE, filtro,
+      // Tentar de novo), o cursor dela mudou e a página velha pularia o pedaço do meio (revisão do /codex, NOD-70).
+      if (atual.proximo !== acao.cursor || (r !== "carregando" && !atual.carregandoMais)) return estado;
+      const pagina: PaginaDasDecisoes =
+        r === "carregando" ? { ...atual, carregandoMais: true, erroMais: false }
+        : r === "erro" ? { ...atual, carregandoMais: false, erroMais: true }
+        // As linhas novas vão no fim; uma que já está (a página releu no meio) não se repete.
+        : { ...atual, linhas: [...atual.linhas, ...r.linhas.filter((l) => !atual.linhas.some((x) => x.id === l.id))], contagem: r.contagem, proximo: r.proximo, carregandoMais: false, erroMais: false };
+      return { ...estado, decisoesDoBot: { ...estado.decisoesDoBot, [acao.chave]: pagina } };
+    }
+    case "esquecer-decisoes": {
+      const { [acao.chave]: _fora, ...resto } = estado.decisoesDoBot;
+      return { ...estado, decisoesDoBot: resto };
+    }
     case "hidratar-biblioteca": {
       const antes = estado.bibliotecaDoBot[acao.conversaId];
       // Revisão 1 da NOD-326: a página seguinte só entra se ainda é esperada (a lista não foi trocada por erro nem por
@@ -1741,8 +1792,15 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
       const { [acao.conversaId]: _fora, ...resto } = estado.bibliotecaDoBot;
       return { ...estado, bibliotecaDoBot: resto };
     }
-    case "atividade-vista":
-      return estado.atividadeVista ? { ...estado, atividadeVista: { ...estado.atividadeVista, ...acao.mudanca } } : estado;
+    case "atividade-vista": {
+      if (!estado.atividadeVista) return estado;
+      const vista = { ...estado.atividadeVista, ...acao.mudanca };
+      const depois = { ...estado, atividadeVista: vista };
+      // NOD-70: voltar à aba Decisões (ou trocar o dia ou o filtro para uma página já lida) relê, mostrando a guardada.
+      const chave = chaveDasDecisoes(vista.agenteId, vista.dia, vista.desfecho);
+      const releu = vista.aba === "decisoes" && (acao.mudanca.aba === "decisoes" || acao.mudanca.dia !== undefined || acao.mudanca.desfecho !== undefined) && chave in estado.decisoesDoBot;
+      return releu ? invalidar(depois, `decisoes:${chave}`) : depois;
+    }
     case "lista-de-pasta":
       return { ...estado, listaDePasta: { ...estado.listaDePasta, [acao.propostaId]: acao.lista } };
     case "aviso-conexao":
@@ -2126,6 +2184,8 @@ export function invalidacoesDaTela(estado: Estado): Invalidacao[] {
   // painel à vista). Lida num dia que já passou (a meia-noite virou com a tela aberta), relê.
   const vista = estado.atividadeVista;
   if (nivel?.tipo === "atividade" && vista && !(chaveDaAtividade(vista.agenteId, vista.dia) in estado.atividadeDoBot)) faltas.push(`atividade:${chaveDaAtividade(vista.agenteId, vista.dia)}`);
+  // NOD-70: a página da aba Decisões, no dia e no filtro abertos.
+  if (nivel?.tipo === "atividade" && vista?.aba === "decisoes" && !(chaveDasDecisoes(vista.agenteId, vista.dia, vista.desfecho) in estado.decisoesDoBot)) faltas.push(`decisoes:${chaveDasDecisoes(vista.agenteId, vista.dia, vista.desfecho)}`);
   if (t.tipo === "conversa" && estado.frota?.agentes.some((a) => a.id === t.agenteId && a.ownerId === estado.sessao?.pessoaId)) {
     const lida = estado.atividadeHoje[t.agenteId];
     if (!lida || (estado.agora > 0 && lida.dia < diaLocal(estado.agora))) faltas.push(`atividade-hoje:${t.agenteId}`);

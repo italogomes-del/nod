@@ -106,7 +106,7 @@ describe("o filtro 'Sem aprovação' da Atividade (Y3)", () => {
     const base = estadoCom(Y1);
     const dia = "2026-10-18";
     const bot = base.frota!.agentes[0]!;
-    const comItens: Estado = { ...base, atividadeVista: { agenteId: "ze", dia, filtro: "sem_aprovacao", aberta: null }, atividadeDoBot: { [`ze:${dia}`]: { dia, itens, total: 3, truncados: 0, diaAnterior: null } } };
+    const comItens: Estado = { ...base, atividadeVista: { agenteId: "ze", dia, filtro: "sem_aprovacao", aberta: null, aba: "atividade", desfecho: "tudo", decisao: null, exportar: null }, atividadeDoBot: { [`ze:${dia}`]: { dia, itens, total: 3, truncados: 0, diaAnterior: null } } };
     const html = renderAtividade(comItens, bot);
     expect(html).toContain('data-filtro="sem_aprovacao" aria-pressed="true">Sem aprovação</button>');
     // QA do PR 6: uma linha só, cortada com "…" no CSS (Y3); o texto inteiro fica no title.

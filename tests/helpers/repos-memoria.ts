@@ -1,5 +1,6 @@
 import { contasIaMemoria, estadoContasIaMemoria, type EstadoContasIaMemoria } from "./contas-ia-memoria.ts";
 import { temFalha, type EstadoDisjuntor } from "../../src/domain/disjuntor-conector.ts";
+import { ehDecisao, MOTIVOS_DE_CONECTOR_FORA } from "../../src/domain/decisoes.ts";
 import type { ConfigGithubApp } from "../../src/repositories/github-app.repo.ts";
 import type { AnexoDaConversa, MimeAnexo, RecusasMidia } from "../../src/contracts/anexo.ts";
 import type { LinhaOnboarding } from "../../src/repositories/onboarding.repo.ts";
@@ -3013,8 +3014,29 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         return doTenant(b.trilha).filter((l) => l.turnoId !== null && turnoIds.includes(l.turnoId));
       },
       async agentesComNegacaoDoConector(conectorId, desde) {
-        const ids = doTenant(b.trilha).filter((l) => l.ownerId === escopo.pessoaId && l.kind === "negacao" && l.conectorId === conectorId && Date.parse(l.em) >= desde).map((l) => l.agenteId);
+        const ids = doTenant(b.trilha).filter((l) => l.ownerId === escopo.pessoaId && l.kind === "negacao" && (MOTIVOS_DE_CONECTOR_FORA as readonly string[]).includes(l.motivo ?? "") && l.conectorId === conectorId && Date.parse(l.em) >= desde).map((l) => l.agenteId);
         return [...new Set(ids)].sort();
+      },
+      async decisoesDoAgente(f) {
+        const decisoes = doTenant(b.trilha)
+          .filter((l) => l.ownerId === escopo.pessoaId && l.agenteId === f.agenteId && f.kinds.includes(l.kind) && ehDecisao(l))
+          .filter((l) => Date.parse(l.em) >= f.desde && Date.parse(l.em) < f.ate)
+          .sort((x, y) => (x.em === y.em ? (x.id < y.id ? 1 : -1) : x.em < y.em ? 1 : -1));
+        const i = f.cursor ? decisoes.findIndex((l) => l.id === f.cursor) : -1;
+        if (f.cursor && i < 0) return [];
+        return decisoes.slice(i + 1, i + 1 + f.limite);
+      },
+      async contarDecisoesDoAgente(f) {
+        const n: Record<string, number> = {};
+        for (const l of doTenant(b.trilha)) {
+          if (l.ownerId !== escopo.pessoaId || l.agenteId !== f.agenteId || !ehDecisao(l)) continue;
+          if (Date.parse(l.em) < f.desde || Date.parse(l.em) >= f.ate) continue;
+          n[l.kind] = (n[l.kind] ?? 0) + 1;
+        }
+        return n;
+      },
+      async temDecisaoAntes(f) {
+        return doTenant(b.trilha).some((l) => l.ownerId === escopo.pessoaId && l.agenteId === f.agenteId && ehDecisao(l) && Date.parse(l.em) < f.antes);
       },
       async filtrar(f = {}) {
         return doTenant(b.trilha)

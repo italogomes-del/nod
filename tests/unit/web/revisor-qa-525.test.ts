@@ -61,7 +61,7 @@ describe("depois de 'Devia ter perguntado'", () => {
     const dia = "2026-10-18";
     const item: ItemDeAtividade = { id: "modo:a1", em: new Date(2026, 9, 18, 14, 20).getTime(), categoria: "sem_aprovacao", titulo: "Revisor liberou", detalhe: "rm -rf build", codigo: true, revisor: { acaoId: "a1", motivo: "você pediu", contestada: true } };
     const agente = { id: "ze", nome: "Ze", conversaId: "c", cor: "c-bleu", forma: "shape-square", ownerId: "p" };
-    const e: Estado = { ...estadoInicial, frota: { agentes: [agente] } as never, atividadeVista: { agenteId: "ze", dia, filtro: "sem_aprovacao", aberta: null }, atividadeDoBot: { [`ze:${dia}`]: { dia, itens: [item], total: 1, truncados: 0, diaAnterior: null } } };
+    const e: Estado = { ...estadoInicial, frota: { agentes: [agente] } as never, atividadeVista: { agenteId: "ze", dia, filtro: "sem_aprovacao", aberta: null, aba: "atividade", desfecho: "tudo", decisao: null, exportar: null }, atividadeDoBot: { [`ze:${dia}`]: { dia, itens: [item], total: 1, truncados: 0, diaAnterior: null } } };
     expect(renderAtividade(e, agente as never)).toContain('<span class="atv-contestada" data-acao="a1" tabindex="-1">Você marcou: devia ter perguntado</span>');
     const main = readFileSync(new URL("../../../web/main.ts", import.meta.url), "utf8");
     const acao = main.slice(main.indexOf('"contestar-revisor":'), main.indexOf('"ver-sem-aprovacao":'));

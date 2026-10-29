@@ -2,6 +2,7 @@ import type { Assunto } from "../contracts/destino-no-chat.ts";
 import type { Mensagem } from "../contracts/mensagem.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
 import { assuntoNaLeitura } from "../domain/assunto-do-texto.ts";
+import { MOTIVOS_DE_CONECTOR_FORA } from "../domain/decisoes.ts";
 import { colunaPrimeira, COLUNAS_MENSAGEM, paraMensagem, type LinhaMensagem } from "./mensagens.repo.ts";
 
 /**
@@ -27,7 +28,7 @@ import { colunaPrimeira, COLUNAS_MENSAGEM, paraMensagem, type LinhaMensagem } fr
 export type Faixa = { ini: Date; fim: Date };
 
 /** Os motivos da negação de conector indisponível (adapters/mcp-proxy/negacao.ts): a trilha não grava a classe. */
-export const MOTIVOS_DE_CONECTOR = ["conector_indisponivel", "timeout_transporte", "falha_tecnica"] as const;
+export const MOTIVOS_DE_CONECTOR = MOTIVOS_DE_CONECTOR_FORA;
 
 export type LinhaNegacaoDeConector = { chave: string; motivo: string; ferramenta: string; conector: string | null; vezes: number; em: Date };
 /** definido em 2026-10-27 (NOD-374): as voltas de um app (kind conector_recuperado), uma linha por app, com a mais recente. */

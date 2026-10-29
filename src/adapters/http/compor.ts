@@ -115,6 +115,7 @@ import type { Rota } from "./roteador.ts";
 import { criarRotasAgentes } from "./rotas/agentes.ts";
 import { criarRotasTrabalhos } from "./rotas/trabalhos.ts";
 import { criarRotasAtividade } from "./rotas/atividade.ts";
+import { criarRotasDecisoesDoBot } from "./rotas/decisoes-do-bot.ts";
 import { criarTrabalhosVivos } from "../fundo/trabalhos-vivos.ts";
 import { criarRotasArtefatos } from "./rotas/artefatos.ts";
 import { rotasMaquinas } from "./rotas/maquinas.ts";
@@ -1386,6 +1387,7 @@ export function comporApp(o: OpcoesCompor): App {
     ...criarRotasBusca(depsRotas, { poolMax: lerPoolMax(env) }),
     ...criarRotasTrabalhos(depsRotas),
     ...criarRotasAtividade(depsRotas),
+    ...criarRotasDecisoesDoBot(depsRotas),
     ...criarRotasArtefatos(depsRotas),
     ...criarRotasRelatos(depsRotas),
     ...criarRotasPropostas(depsRotas),

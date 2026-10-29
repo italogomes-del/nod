@@ -13,6 +13,7 @@ import { revisarAcaoFase1, type PedidoNaFila } from "./revisar-acao.ts";
 import { PRAZO_DECISAO_MS } from "./pedir-a-pessoa.ts";
 import { autoriaDoAgente } from "./registrar-negacao.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
+import { registrarCartoes } from "./trilha-decisoes.ts";
 
 /** O destino do item de aprovação de um comando: não é conector, é o terminal do Mac da pessoa (ADR-055). */
 export const DESTINO_TERMINAL = { conector: "terminal", ferramenta: "bash" } as const;
@@ -250,6 +251,8 @@ export const autorizarComando: CasoDeUso<EntradaAutorizar, SaidaAutorizarComando
   await deps.repos.itensAprovacao.criarLote(decisao.id, [{ idx: 0, texto, destino, origemSensivel: false, motivoManual: doModo?.motivo ?? "destino_terminal",
     // ADR-059: o porquê do arriscado, em frase fixa do domínio (nunca texto do modelo), para o card dizer o que parou.
     ...(doModo?.motivo === "acao_arriscada" && risco ? { justificativa: risco } : {}) }]);
+  // NOD-70: o comando que parou no cartão vira linha `cartao` (o hook não grava nada ao aguardar).
+  await registrarCartoes(deps, { agenteId: plano.agenteId, turnoId: plano.turnoId, itens: [{ destino, motivo: doModo?.motivo ?? "destino_terminal" }] });
   const evento: RuntimeEvent = {
     tenantId: deps.escopo.tenantId,
     id: randomUUID(),

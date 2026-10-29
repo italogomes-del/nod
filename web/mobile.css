@@ -461,6 +461,13 @@
   .atv-filtro { min-height: 40px; padding: 8px 14px; }
   .atv-botao { min-height: 44px; }
   .atv-dia { min-height: 44px; }
+  /* NOD-70: abas, Carregar mais, Exportar e Baixar com 44 px; os filtros das Decisões rolam de lado numa linha; a decisão
+     aberta vira um cartão (folha) por cima da linha seguinte. */
+  .atv-aba, .dec-baixar, .dec-mais .atv-link, .dec-exportar, .dec-detalhe .atv-link, .atv-revisor .atv-link[data-act="decisoes-negadas"] { min-height: 44px; }
+  .dec-filtros { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+  .dec-filtros .atv-filtro { flex: none; }
+  .dec-item.aberto .dec-detalhe { margin: 0 4px 8px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface-raised); }
+  .dec-dia { touch-action: pan-y; }
   .tb-frente-passo { display: none; }
   .tb-frentes { margin-left: 22px; }
   .tb-frente { min-height: 40px; }

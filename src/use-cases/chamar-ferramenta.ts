@@ -5,7 +5,7 @@ import type { MotivoNegacao } from "../contracts/motivos.ts";
 import type { Negacao } from "../contracts/negacao.ts";
 import type { FerramentaPlano, PlanoTurno } from "../contracts/plano-turno.ts";
 import { USE_CASE_POR_FERRAMENTA, type ContextoFerramenta, type SaidaCasoDeUso } from "../contracts/servicos.ts";
-import { acaoArriscadaNoApp, decidirAprovacao, envioParaForaNoApp, sempreServe } from "../domain/aprovacao-permanente.ts";
+import { acaoArriscadaNoApp, decidirAprovacao, envioParaForaNoApp, REGRA_CONSULTA_SEM_DECISAO, sempreServe, VERSAO_CONSULTA_SEM_DECISAO } from "../domain/aprovacao-permanente.ts";
 import type { GatilhoDeRevisao } from "../domain/modo-aprovacao.ts";
 import { RISCO_APAGAR_NO_APP, RISCO_DO_GATILHO } from "../domain/revisor.ts";
 import { conectorTrazConteudoDeFora } from "../domain/conteudo-de-fora.ts";
@@ -263,8 +263,10 @@ export const chamarFerramentaFase1: CasoDeUso<EntradaChamarFerramenta, SaidaFase
   // O plano viaja no contexto para a regra do ADR-042 ser avaliada LOCALMENTE em pedir_aprovacao,
   // a partir do que já foi puxado — nunca por consulta na hora da chamada (ADR-013).
   const ctx: ContextoFerramenta = { turnoId: input.turnoId, agenteId: input.agenteId, conversaId: plano.conversaId, plano };
-  const registrarChamada = (conectorId: string | null) =>
-    deps.repos.trilha.registrar({ agenteId: input.agenteId, turnoId: input.turnoId, conectorId, ferramenta: nomeParaTrilha(input.nome), kind: "tool_call", regra: REGRA_CHAMADA, regraVersao: VERSAO_REGRA_CHAMADA, em: agora });
+  // NOD-70: a linha leva a regra que de fato decidiu (leitura, Sempre permitir, Automático, Total); a ferramenta nod segue
+  // com a genérica, porque não passa por decisão de app.
+  const registrarChamada = (conectorId: string | null, regra: { regra: string; versao: number } = { regra: REGRA_CHAMADA, versao: VERSAO_REGRA_CHAMADA }) =>
+    deps.repos.trilha.registrar({ agenteId: input.agenteId, turnoId: input.turnoId, conectorId, ferramenta: nomeParaTrilha(input.nome), kind: "tool_call", regra: regra.regra, regraVersao: regra.versao, em: agora });
 
   if (ferramenta.origem === "nod") {
     if (!ehNomeNod(ferramenta.nome)) return negar("fora_do_catalogo", "ferramenta_negada");
@@ -297,6 +299,8 @@ export const chamarFerramentaFase1: CasoDeUso<EntradaChamarFerramenta, SaidaFase
   // automático o que, pedido por item, pararia em `acao_arriscada`. Quem não passaria sozinho no card recebe a
   // negação transitória "peça aprovação" e cai no pedir_aprovacao, com o motivo gravado no item.
   let medir: (() => Promise<unknown>) | null = null;
+  // A leitura declarada pelo conector não passa por decidirAprovacao: é a regra `consulta_sem_decisao` (passo 5 dela).
+  let regraDaChamada: { regra: string; versao: number } = { regra: REGRA_CONSULTA_SEM_DECISAO, versao: VERSAO_CONSULTA_SEM_DECISAO };
   let revisar: { gatilho: GatilhoDeRevisao; arriscada: boolean; contaminadoTurno: boolean; contaminado: boolean; agente: Awaited<ReturnType<Deps["repos"]["agentes"]["buscar"]>> } | null = null;
   if (!ferramenta.readOnlyHint) {
     const agente = await deps.repos.agentes.buscar(input.agenteId);
@@ -318,6 +322,7 @@ export const chamarFerramentaFase1: CasoDeUso<EntradaChamarFerramenta, SaidaFase
     const d = decidirAprovacao({ plano: { ...plano, semprePermitir }, destino, origemSensivel: false, modo, arriscada, contaminado, ...(revisor ? { revisor, envioParaFora, contaminadoParaRevisor } : {}) });
     if ("revisar" in d) revisar = { gatilho: d.gatilho, arriscada, contaminadoTurno, contaminado: contaminadoParaRevisor, agente };
     else if (!d.automatico) return negar("alcance_insuficiente", "ferramenta_negada", conectorId, true);
+    else regraDaChamada = { regra: d.regra, versao: d.versao };
     // PR 1 dos modos de aprovação (medir antes): a chamada que roda agora conta aqui; a que voltou com "peça aprovação"
     // conta no lote do pedir_aprovacao, para cada ação contar uma vez só. Depois do schema (revisão do PR #402): a chamada
     // recusada por argumento não roda, e a corrigida contaria de novo.
@@ -352,7 +357,7 @@ export const chamarFerramentaFase1: CasoDeUso<EntradaChamarFerramenta, SaidaFase
     return { data: { emRevisao: { aguardar: r.data.aguardar, fila: r.data.revisao } }, events: [...events, ...(r.events ?? []), ...daTask] };
   }
 
-  await registrarChamada(conectorId);
+  await registrarChamada(conectorId, regraDaChamada);
   // definido em 2026-10-01 (ADR-066): chamar um app de fora (Gmail, GitHub, MCP próprio) marca o turno, como a web já
   // marcava — também quando roda no gh do Mac (ADR-048). Substitui a rotina "desconfiada" pelo nome do app na fonte: a
   // marca vem do que o bot leu, não do que a instrução cita. Só pesa no manual (a regra "Sempre permitir" cai).

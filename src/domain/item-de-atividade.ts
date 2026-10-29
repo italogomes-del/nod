@@ -1,3 +1,4 @@
+import { MOTIVOS_FORA_DA_DECISAO } from "./decisoes.ts";
 import type { ItemDeAtividade } from "../contracts/atividade.ts";
 import type { Assunto } from "../contracts/destino-no-chat.ts";
 import type { Mensagem } from "../contracts/mensagem.ts";
@@ -141,6 +142,8 @@ export function itemDaMensagem(m: Mensagem, assunto: Assunto): ItemDeAtividade {
     detalhe,
     ...(texto ? { texto } : {}),
     ...(vezes ? { vezes } : {}),
+    // NOD-70: "ver nas decisões" só na negação que a aba Decisões mostra (o mesmo recorte de ehDecisao).
+    ...(m.payload?.kind === "negacao" && m.payload.classe !== "plano_ausente" && !(MOTIVOS_FORA_DA_DECISAO as readonly string[]).includes(m.payload.motivo) ? { negacao: true as const } : {}),
     alvo,
   };
 }

@@ -28,6 +28,8 @@ export type ItemDeAtividade = {
   texto?: string;
   /** O detalhe é um comando ou um caminho (PR 6 dos modos de aprovação, tela Y3): a web o mostra em fonte de código. */
   codigo?: true;
+  /** NOD-70: a linha é uma negação (a aba Atividade leva às Decisões no filtro Negadas, "ver nas decisões"). */
+  negacao?: true;
   /** Negações repetidas (mesma ferramenta, mesma causa) numa linha só. */
   vezes?: number;
   /**

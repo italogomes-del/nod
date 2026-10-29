@@ -12,6 +12,10 @@ describe("itens da Atividade", () => {
   it("a negação diz nome e causa, junta as repetidas e abre a mensagem (ADR-029, ADR-041)", () => {
     const i = itemDaMensagem(msg({ kind: "negacao", texto: "Bash negada: esperando aprovação", payload: { kind: "negacao", classe: "ferramenta_negada", nome: "Bash", motivo: "alcance_insuficiente", terminal: false, vezes: 4 } }), "negacao.ferramenta");
     expect(i).toEqual({ id: "m1", em: 1_000, categoria: "bloqueios", titulo: "Bash negada", detalhe: "Bash negada: esperando aprovação", vezes: 4, alvo: { mensagemId: "m1" } });
+    // NOD-70: o "peça aprovação" não aparece em Decisões, então não leva "ver nas decisões"; a negação de verdade leva.
+    expect(itemDaMensagem(msg({ kind: "negacao", texto: "Gmail negada", payload: { kind: "negacao", classe: "ferramenta_negada", nome: "gmail_enviar", motivo: "capacidade_desligada", terminal: false } }), "negacao.ferramenta").negacao).toBe(true);
+    // NOD-70: o plano ausente não é decisão de autorização (não leva "ver nas decisões").
+    expect(itemDaMensagem(msg({ kind: "negacao", texto: "Sem plano", payload: { kind: "negacao", classe: "plano_ausente", nome: "Bash", motivo: "alcance_insuficiente", terminal: false, vezes: 1 } as never }), "negacao.ferramenta").negacao).toBeUndefined();
   });
 
   it("frentes e tasks redigem de novo pelo payload; a task abre a tela dela", () => {

@@ -5,6 +5,7 @@ import { FERRAMENTAS_NOD_COM_EFEITO } from "../domain/passagem-de-bastao.ts";
 import type { DadosDoResumo } from "../domain/recomeco.ts";
 import { redigirSegredos } from "../domain/segredos.ts";
 import { capacidadesQueEscrevem } from "./passagem-de-bastao.ts";
+import { ehLinhaDeItemDeAprovacao } from "../domain/decisoes.ts";
 import type { Deps } from "./tipos.ts";
 
 /** NOD-312: quantos turnos de conversa anteriores o resumo do recomeço lê (a emissão do plano não pode ficar cara). */
@@ -34,6 +35,8 @@ export async function dadosDoResumo(deps: Pick<Deps, "repos">, turnos: readonly 
   const escrevem = capacidadesQueEscrevem(conectores);
   const porFerramenta = new Map<string, { vezes: number; ultima: number; efeito: boolean }>();
   for (const l of trilha) {
+    // NOD-70: cartão, clique e lote já entram abaixo pelo item de aprovação; a linha da trilha deles não conta de novo.
+    if (ehLinhaDeItemDeAprovacao(l)) continue;
     const em = Date.parse(l.em);
     if (l.kind === "negacao") { erros.push({ texto: `Negado: ${l.ferramenta}${l.motivo ? ` (${l.motivo})` : ""}.`, em }); continue; }
     if (l.kind !== "tool_call") continue;

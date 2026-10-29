@@ -6,6 +6,7 @@ import type { ItemAprovacao } from "../contracts/item-aprovacao.ts";
 import type { DesfechoItem, MotivoAprovacaoManual } from "../contracts/motivos.ts";
 import type { CasoNod } from "../contracts/servicos.ts";
 import { montarItens, type PropostaItem } from "../domain/aprovacao-item.ts";
+import { MOTIVO_ITEM_DE_APROVACAO, MOTIVO_LOTE_MISTO } from "../domain/decisoes.ts";
 import { acaoArriscadaNoApp, decidirLote, envioParaForaNoApp, REGRA_APROVACAO_PERMANENTE, sempreServe, type DecisaoAutomatica } from "../domain/aprovacao-permanente.ts";
 import { REGRA_MODO_AUTOMATICO, REGRA_MODO_TOTAL, REGRA_REVISOR } from "../domain/modo-aprovacao.ts";
 import { RISCO_APAGAR_NO_APP, RISCO_DO_GATILHO } from "../domain/revisor.ts";
@@ -20,6 +21,7 @@ import { revisarAcaoFase1, type PedidoNaFila } from "./revisar-acao.ts";
 import { PRAZO_DECISAO_MS } from "./pedir-a-pessoa.ts";
 import { semprePermitirVivo } from "./regras-vivas.ts";
 import { autoriaDoAgente } from "./registrar-negacao.ts";
+import { ferramentaDoItem, registrarAutorizadosNaMaquina, registrarCartoes } from "./trilha-decisoes.ts";
 import type { Deps } from "./tipos.ts";
 
 /**
@@ -199,6 +201,9 @@ const montarFase1 = (computador: boolean, comRevisor = false) => async (deps: De
       decisao.id,
       itens.map((i, idx) => ({ idx: i.idx, texto: i.textoOriginal, destino: i.destino, origemSensivel: i.origemSensivel, justificativa: i.justificativa, motivoManual: motivoDe(porItem[idx]) })),
     );
+    // NOD-70: cada item que parou no cartão vira linha `cartao` com o motivo, na tx em que o cartão nasce. O item que
+    // seria automático e parou porque o lote tem outro que precisa da pessoa (ADR-042) leva `lote_misto`.
+    await registrarCartoes(deps, { agenteId: input.agenteId, turnoId: input.turnoId, itens: itens.map((i, idx) => ({ destino: i.destino, motivo: motivoDe(porItem[idx]) ?? MOTIVO_LOTE_MISTO })) });
     return { saida: { data: { estado: "pendente", decisao_id: decisao.id, instrucao: "encerre o turno; a decisão retoma depois" }, events: [eventoCriada(deps, input, decisao.id, itens, agora)] } };
   }
 
@@ -219,17 +224,20 @@ const montarFase1 = (computador: boolean, comRevisor = false) => async (deps: De
   const regra = quemMaisConcede?.automatico ? quemMaisConcede.regra : primeiraRegra(porItem);
   const regraVersao = quemMaisConcede?.automatico ? quemMaisConcede.versao : primeiraVersao(porItem);
   await deps.repos.decisoes.fecharPorRegra(decisao.id, { regra, regraVersao, agora });
-  return {
-    lote: {
-      decisaoId: decisao.id,
-      conversaId: input.conversaId,
-      turnoId: input.turnoId,
-      agenteId: input.agenteId,
-      aExecutar: criados.map((item, idx) => ({ item, conectorId: conectorIdPorIdx[idx] ?? null, dono: deps.escopo, rotina })),
-      regra,
-      regraVersao,
-    },
+  const lote: LoteAutomatico = {
+    decisaoId: decisao.id,
+    conversaId: input.conversaId,
+    turnoId: input.turnoId,
+    agenteId: input.agenteId,
+    aExecutar: criados.map((item, idx) => {
+      const d = porItem[idx];
+      return { item, conectorId: conectorIdPorIdx[idx] ?? null, dono: deps.escopo, rotina, ...(d?.automatico ? { regra: d.regra, regraVersao: d.versao } : {}) };
+    }),
+    regra,
+    regraVersao,
   };
+  await registrarAutorizadosNaMaquina(deps, lote);
+  return { lote };
 };
 
 export type EntradaAssentarLote = { lote: LoteAutomatico; desfechos: readonly DesfechoExecutado[] };
@@ -244,8 +252,28 @@ export const assentarLoteAutomatico = async (deps: Deps, input: EntradaAssentarL
   const agora = deps.agora();
   const { lote, desfechos } = input;
   let gravados = 0;
-  for (const d of desfechos) if (await deps.repos.itensAprovacao.registrarDesfechoSeAberto(d.itemId, d.desfecho)) gravados++;
   const criados = lote.aExecutar.map((a) => a.item);
+  const regraDoItem = new Map(lote.aExecutar.map((a) => [a.item.id, a]));
+  for (const d of desfechos) {
+    if (!(await deps.repos.itensAprovacao.registrarDesfechoSeAberto(d.itemId, d.desfecho))) continue;
+    gravados++;
+    // NOD-70: o item que esta fase gravou vai à trilha com a regra que o liberou (a do item; senão a do lote). Só quem foi
+    // gravado agora: a fase repetida não duplica a linha. O item do Mac já foi à trilha na autorização
+    // (registrarAutorizadosNaMaquina); no modo local ele chega aqui com desfecho e não pode gravar de novo (revisão 6).
+    const a = regraDoItem.get(d.itemId);
+    if (!a || a.item.destino.execucao === "maquina" || (d.desfecho !== "executado" && d.desfecho !== "falhou_na_execucao")) continue;
+    await deps.repos.trilha.registrar({
+      agenteId: lote.agenteId,
+      turnoId: lote.turnoId,
+      conectorId: a.conectorId,
+      ferramenta: ferramentaDoItem(a.item.destino),
+      kind: "tool_call",
+      motivo: MOTIVO_ITEM_DE_APROVACAO,
+      regra: a.regra ?? lote.regra,
+      regraVersao: a.regraVersao ?? lote.regraVersao,
+      em: agora,
+    });
+  }
   // Revisão 7 do PR #538 (NOD-374): o item do lote que deu certo fecha a falha do app, como a chamada direta.
   const desfechoDe = new Map(desfechos.map((d) => [d.itemId, d.desfecho]));
   await limparFalhasDosExecutados(deps, lote.aExecutar.filter((a) => a.conectorId !== null).map((a) => ({ slug: a.item.destino.conector, desfecho: desfechoDe.get(a.item.id) ?? null })), lote.agenteId);

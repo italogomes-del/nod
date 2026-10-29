@@ -176,7 +176,8 @@ import { mimeDe, motivoRecusa, POR_MENSAGEM, renderItens as renderItensAnexo, re
 import type { EstadoTrabalho, TipoLinha } from "../src/contracts/trabalho.ts";
 import { aberto, abertosDoBot, leituraDoMac, listaPararTasks, telaAoFechar, telaDaTask, textoPararTasks, trabalhoPorId, trabalhosConhecidos } from "./lib/trabalhos.ts";
 import { criarTelemetria } from "./lib/telemetria-linhas.ts";
-import { chaveDaAtividade, criarVigiaDaAtividade, diaLocal, ehFiltroAtividade, fusoLocal } from "./lib/atividade-do-bot.ts";
+import { chaveDaAtividade, criarVigiaDaAtividade, diaLocal, ehFiltroAtividade, fusoLocal, rotuloDoDia } from "./lib/atividade-do-bot.ts";
+import { anuncioDoFiltro, chaveDasDecisoes, diaDoDeslize, ehFiltroDecisoes, ehPeriodoDoCsv, periodoDoCsv, totalDoFiltro, type ExportarCsv } from "./lib/decisoes-do-bot.ts";
 import { anuncioDosSubagentes, blocosAoVivoDaTask, blocosDoHistoricoDaTask, htmlAcoesDaTask, renderIconeTrabalhos, renderTelaLinha, renderTodosOsTrabalhos, renderTopoTrabalho } from "./telas/trabalhos.ts";
 import { renderTrabalhosPorBot, sinalDoBot } from "./telas/linha-do-dono.ts";
 import { temDonos } from "./lib/dono.ts";
@@ -728,7 +729,7 @@ const releituraAtividade = criarReleituraAdiada(JANELA_ATIVIDADE_MS, (fn, ms) =>
   return () => window.clearTimeout(t);
 }, () => void reidratar());
 // NOD-326: a releitura ao vivo da Biblioteca vai na mesma janela (a rajada de falas de um turno vira uma leitura só).
-const daAtividade = (q: Invalidacao): boolean => q.startsWith("atividade:") || q.startsWith("atividade-hoje:") || q.startsWith("biblioteca:");
+const daAtividade = (q: Invalidacao): boolean => q.startsWith("atividade:") || q.startsWith("atividade-hoje:") || q.startsWith("decisoes:") || q.startsWith("biblioteca:");
 
 /**
  * NOD-370: o destino do foco depois de excluir ou ocultar (web/lib/posicao-da-lista.ts); um clique ou uma tecla o descartam.
@@ -1242,8 +1243,20 @@ async function buscar(q: Invalidacao): Promise<Acao | null> {
   if (q.startsWith("atividade-hoje:")) {
     const agenteId = q.slice(15);
     const dia = diaLocal(Date.now());
-    const total = await api.contagemAtividade(agenteId, dia, fusoLocal()).then((c) => c.total, () => null);
-    return { tipo: "hidratar-atividade-hoje", agenteId, dia, total };
+    // NOD-70: o "· N negadas" de Ajustes vem da contagem das Decisões de hoje (só do bot da pessoa; a rota é dela).
+    const dono = estado.frota?.agentes.some((a) => a.id === agenteId && a.ownerId === estado.sessao?.pessoaId) ?? false;
+    const [total, negadas] = await Promise.all([
+      api.contagemAtividade(agenteId, dia, fusoLocal()).then((c) => c.total, () => null),
+      dono ? api.decisoes(agenteId, { de: dia, fuso: fusoLocal(), limite: 1 }).then((d) => d.contagem.negada, () => null) : Promise.resolve(null),
+    ]);
+    return { tipo: "hidratar-atividade-hoje", agenteId, dia, total, negadas };
+  }
+  // NOD-70: a 1ª página da aba Decisões (404: indisponível, sem faixa; outra falha: o erro da aba, com Tentar de novo).
+  if (q.startsWith("decisoes:")) {
+    const chave = q.slice(9);
+    const [agenteId = "", dia = "", filtro = "tudo"] = chave.split(":");
+    const pagina = await api.decisoes(agenteId, { de: dia, fuso: fusoLocal(), desfecho: filtro }).catch((e: unknown) => (e instanceof ErroApi && e.status === 404 ? null : ("erro" as const)));
+    return { tipo: "hidratar-decisoes", chave, pagina };
   }
   // NOD-326: a 1ª página da Biblioteca. Qualquer falha vira o estado de erro da aba (com Tentar de novo), sem faixa vermelha.
   if (q.startsWith("biblioteca:")) {
@@ -1394,6 +1407,10 @@ function relevante(q: Invalidacao): boolean {
   if (q.startsWith("atividade:")) {
     const v = estado.atividadeVista;
     return t.tipo === "conversa" && estado.gaveta?.nivel.tipo === "atividade" && !!v && q.slice(10) === chaveDaAtividade(v.agenteId, v.dia);
+  }
+  if (q.startsWith("decisoes:")) {
+    const v = estado.atividadeVista;
+    return t.tipo === "conversa" && estado.gaveta?.nivel.tipo === "atividade" && v?.aba === "decisoes" && q.slice(9) === chaveDasDecisoes(v.agenteId, v.dia, v.desfecho);
   }
   return true;
 }
@@ -3563,6 +3580,100 @@ function focarQuandoAparecer(seletor: string, origem: Element, ate = Date.now() 
   if (Date.now() < ate) window.setTimeout(() => focarQuandoAparecer(seletor, origem, ate), 100);
 }
 
+/** NOD-70: a próxima página das Decisões (o cursor é a última linha); falhou, a linha "Carregar mais" mostra o erro. */
+async function maisDecisoes(): Promise<void> {
+  const v = estado.atividadeVista;
+  const cliente = api;
+  if (!v || !cliente) return;
+  const chave = chaveDasDecisoes(v.agenteId, v.dia, v.desfecho);
+  const atual = estado.decisoesDoBot[chave];
+  if (!atual || atual === "erro" || !atual.proximo || atual.carregandoMais) return;
+  const cursor = atual.proximo;
+  dispatch({ tipo: "mais-decisoes", chave, cursor, resultado: "carregando" });
+  try {
+    const r = await cliente.decisoes(v.agenteId, { de: v.dia, fuso: fusoLocal(), desfecho: v.desfecho, cursor });
+    if (api !== cliente) return;
+    dispatch({ tipo: "mais-decisoes", chave, cursor, resultado: r });
+    anunciar(`Mais ${r.linhas.length} ${r.linhas.length === 1 ? "decisão" : "decisões"}.`);
+    if (r.linhas[0]) focarQuandoAparecer(`#detalhes [data-act="decisoes-abrir"][data-id="${CSS.escape(r.linhas[0].id)}"]`, document.activeElement ?? document.body);
+  } catch {
+    dispatch({ tipo: "mais-decisoes", chave, cursor, resultado: "erro" });
+  }
+}
+
+/** NOD-70: escolhe o período do CSV e lê quantas decisões ele tem (o "N decisões" antes de baixar). */
+function escolherPeriodoDoCsv(dias: ExportarCsv["periodo"]): void {
+  const v = estado.atividadeVista;
+  const cliente = api;
+  if (!v || !cliente) return;
+  dispatch({ tipo: "atividade-vista", mudanca: { exportar: { periodo: dias, fase: "opcoes", previa: null, linhas: null } } });
+  const { de, ate } = periodoDoCsv(v.dia, dias);
+  const mesmo = () => estado.atividadeVista?.agenteId === v.agenteId && estado.atividadeVista.dia === v.dia && estado.atividadeVista.desfecho === v.desfecho && estado.atividadeVista.exportar?.periodo === dias && estado.atividadeVista.exportar.fase === "opcoes";
+  void cliente.decisoes(v.agenteId, { de, ate, fuso: fusoLocal(), desfecho: v.desfecho, limite: 1 }).then(
+    (r) => {
+      const ex = estado.atividadeVista?.exportar;
+      if (api === cliente && mesmo() && ex) dispatch({ tipo: "atividade-vista", mudanca: { exportar: { ...ex, previa: totalDoFiltro(r.contagem, v.desfecho) } } });
+    },
+    () => undefined,
+  );
+}
+
+/**
+ * NOD-70: baixa o CSV do período com o filtro da lista. No celular, com compartilhamento de arquivo, abre a folha do
+ * sistema (salvar em Arquivos, mandar por e-mail); senão, o download normal pelo link.
+ */
+async function baixarCsv(): Promise<void> {
+  const v = estado.atividadeVista;
+  const cliente = api;
+  const ex = v?.exportar;
+  if (!v || !cliente || !ex || ex.fase === "gerando") return;
+  const fase = (f: ExportarCsv["fase"], linhas: number | null = null, cortado = false) => {
+    const atual = estado.atividadeVista?.exportar;
+    if (atual) dispatch({ tipo: "atividade-vista", mudanca: { exportar: { ...atual, fase: f, linhas, cortado } } });
+  };
+  fase("gerando");
+  anunciar("Gerando o arquivo…");
+  try {
+    const { de, ate } = periodoDoCsv(v.dia, ex.periodo);
+    const r = await cliente.decisoesCsv(v.agenteId, { de, ate, fuso: fusoLocal(), desfecho: v.desfecho });
+    if (api !== cliente) return;
+    const arquivo = new File([r.blob], r.nome, { type: "text/csv" });
+    if (ehCelular() && typeof navigator.canShare === "function" && navigator.canShare({ files: [arquivo] })) {
+      await navigator.share({ files: [arquivo], title: r.nome }).catch((e: unknown) => { if (!(e instanceof DOMException && e.name === "AbortError")) throw e; });
+    } else {
+      const url = URL.createObjectURL(r.blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = r.nome;
+      document.body.append(a);
+      a.click();
+      a.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+    fase("baixado", r.linhas, r.cortado);
+    anunciar(`Arquivo baixado: ${r.linhas} ${r.linhas === 1 ? "decisão" : "decisões"}${r.cortado ? ", o limite do arquivo" : ""}.`);
+  } catch {
+    fase("erro");
+    anunciar("O arquivo não saiu.");
+  }
+}
+
+/** NOD-70: no celular, deslizar a lista das Decisões troca o dia (para a esquerda, o anterior; para a direita, o seguinte). */
+let deslizeDasDecisoes: { x: number; y: number } | null = null;
+document.addEventListener("touchstart", (ev) => {
+  const t = ev.touches[0];
+  deslizeDasDecisoes = t && ev.touches.length === 1 && (ev.target as Element | null)?.closest?.("#detalhes [data-deslize-dia]") ? { x: t.clientX, y: t.clientY } : null;
+}, { passive: true });
+document.addEventListener("touchend", (ev) => {
+  const ini = deslizeDasDecisoes;
+  deslizeDasDecisoes = null;
+  const t = ev.changedTouches[0];
+  if (!ini || !t) return;
+  const passo = diaDoDeslize(t.clientX - ini.x, t.clientY - ini.y);
+  if (passo === 0) return;
+  document.querySelector<HTMLElement>(`#detalhes [data-act="decisoes-dia"][data-direcao="${passo < 0 ? "anterior" : "seguinte"}"]`)?.click();
+}, { passive: true });
+
 /** Fala oculta para quem lê a tela: a região viva da pergunta também serve às ações na fala (ADR-113), sem mexer no foco. */
 function anunciar(texto: string): void {
   const anuncio = document.getElementById("anuncio-pergunta");
@@ -5138,6 +5249,65 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     dispatch({ tipo: "atividade-vista", mudanca: { aberta: estado.atividadeVista?.aberta === id ? null : id } });
     document.querySelector<HTMLElement>(`#detalhes [data-act="atividade-abrir"][data-id="${CSS.escape(id)}"]`)?.focus({ preventScroll: true });
   },
+  // NOD-70: a aba Decisões (filtros, decisão aberta, Carregar mais, dia, Ver tudo) e o Exportar CSV.
+  "atividade-aba": (el) => {
+    const aba = el.dataset.aba === "decisoes" ? "decisoes" : "atividade";
+    dispatch({ tipo: "atividade-vista", mudanca: { aba, decisao: null, exportar: null } });
+    document.querySelector<HTMLElement>(`#detalhes [data-act="atividade-aba"][data-aba="${aba}"]`)?.focus({ preventScroll: true });
+  },
+  "decisoes-filtro": (el) => {
+    const desfecho = el.dataset.filtro;
+    const v = estado.atividadeVista;
+    if (!v || !ehFiltroDecisoes(desfecho)) return;
+    dispatch({ tipo: "atividade-vista", mudanca: { desfecho, decisao: null, exportar: null } });
+    document.querySelector<HTMLElement>(`#detalhes [data-act="decisoes-filtro"][data-filtro="${CSS.escape(desfecho)}"]`)?.focus({ preventScroll: true });
+    // A contagem é do dia, igual em todos os filtros: qualquer página já lida do dia serve para anunciar.
+    const lida = Object.entries(estado.decisoesDoBot).find(([k, p]) => k.startsWith(`${v.agenteId}:${v.dia}:`) && p && p !== "erro")?.[1];
+    if (lida && lida !== "erro") anunciar(anuncioDoFiltro(desfecho, lida.contagem, rotuloDoDia(v.dia, diaLocal(Date.now()))));
+  },
+  "decisoes-ver-tudo": () => {
+    dispatch({ tipo: "atividade-vista", mudanca: { desfecho: "tudo", decisao: null } });
+    document.querySelector<HTMLElement>('#detalhes [data-act="decisoes-filtro"][data-filtro="tudo"]')?.focus({ preventScroll: true });
+  },
+  "decisoes-abrir": (el) => {
+    const id = el.dataset.id ?? "";
+    dispatch({ tipo: "atividade-vista", mudanca: { decisao: estado.atividadeVista?.decisao === id ? null : id } });
+    document.querySelector<HTMLElement>(`#detalhes [data-act="decisoes-abrir"][data-id="${CSS.escape(id)}"]`)?.focus({ preventScroll: true });
+  },
+  "decisoes-dia": (el) => {
+    const dia = el.dataset.dia ?? "";
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dia) || dia > diaLocal(Date.now())) return;
+    dispatch({ tipo: "atividade-vista", mudanca: { dia, decisao: null, exportar: null } });
+    document.querySelector<HTMLElement>("#detalhes .atv-dia-titulo")?.focus({ preventScroll: false });
+  },
+  "decisoes-tentar": () => {
+    const v = estado.atividadeVista;
+    if (v) dispatch({ tipo: "esquecer-decisoes", chave: chaveDasDecisoes(v.agenteId, v.dia, v.desfecho) });
+  },
+  "decisoes-mais": () => void maisDecisoes(),
+  // Da linha de negação na Atividade e do "N negadas" de Ajustes: as Decisões do dia, no filtro Negadas.
+  "decisoes-negadas": (el) => {
+    const agenteId = el.dataset.agente ?? estado.atividadeVista?.agenteId ?? "";
+    const dia = el.dataset.dia ?? "";
+    if (estado.gaveta?.nivel.tipo !== "atividade" || estado.atividadeVista?.agenteId !== agenteId) abrirNivel(agenteId, { tipo: "atividade" });
+    if (estado.atividadeVista) dispatch({ tipo: "atividade-vista", mudanca: { aba: "decisoes", desfecho: "negada", decisao: null, exportar: null, ...(/^\d{4}-\d{2}-\d{2}$/.test(dia) ? { dia } : {}) } });
+    focarQuandoAparecer('#detalhes [data-act="atividade-aba"][data-aba="decisoes"]', el);
+  },
+  "exportar-csv": () => {
+    const v = estado.atividadeVista;
+    if (!v) return;
+    if (v.exportar && v.exportar.fase !== "baixado") {
+      dispatch({ tipo: "atividade-vista", mudanca: { exportar: null } });
+      document.querySelector<HTMLElement>('#detalhes [data-act="exportar-csv"]')?.focus({ preventScroll: true });
+      return;
+    }
+    escolherPeriodoDoCsv(1);
+  },
+  "exportar-periodo": (el) => {
+    const dias = Number(el.dataset.dias);
+    if (ehPeriodoDoCsv(dias)) escolherPeriodoDoCsv(dias);
+  },
+  "baixar-csv": () => void baixarCsv(),
   // PR 6 dos modos de aprovação (tela Y3): "ver na Atividade" da linha embaixo da fala abre a Atividade do bot no dia da
   // ação, no filtro "Sem aprovação".
   // PR 4 dos modos de aprovação: "Devia ter perguntado" grava a contestação (não desfaz nada) e relê a página do dia.

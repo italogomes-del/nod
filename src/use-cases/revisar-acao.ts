@@ -24,6 +24,7 @@ import { PRAZO_DECISAO_MS } from "./pedir-a-pessoa.ts";
 import { autoriaDoAgente } from "./registrar-negacao.ts";
 import { JANELA_CONVERSA_DE_FORA_MS } from "./medir-revisao.ts";
 import { sincronizarTrabalho } from "./trabalhos.ts";
+import { registrarAutorizadosNaMaquina, registrarCartoes } from "./trilha-decisoes.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
 import type { LoteAutomatico } from "./pedir-aprovacao.ts";
 
@@ -190,6 +191,8 @@ export const revisarAcaoFase1: CasoDeUso<EntradaRevisarAcao, SaidaRevisarAcao> =
   if (naoVai || montado?.tipo !== "pedido") {
     const causa = naoVai ?? { falha: "sem_revisor" as const, frase: FRASE_DA_FALHA.sem_revisor };
     await deps.repos.acoesPeloModo.registrar({ ...base, decisaoId: decisao.id, veredito: "nao_revisado", falha: causa.falha, motivo: causa.frase });
+    // NOD-70: sem revisão, o cartão nasce pendente aqui — a linha `cartao` também.
+    await registrarCartoes(deps, { agenteId: e.plano.agenteId, turnoId: e.plano.turnoId, itens: e.itens.map((i) => ({ destino: i.destino, motivo: "revisor_falhou" })) });
     log("info", "revisao_sem_revisor", { turno_id: e.plano.turnoId, decisao_id: decisao.id, gatilho: e.gatilho, falha: causa.falha });
     return { data: { aguardar: decisao.id, revisao: null }, events: [eventoDecisaoCriada(deps, decisao, e.itens.length)] };
   }
@@ -266,6 +269,8 @@ export const assentarRevisao: CasoDeUso<{ decisaoId: string; resultado: Resultad
   const pediu = veredito?.decisao === "pede";
   const justificativa = pediu ? veredito.motivo : (frase ?? FRASE_DA_FALHA[falha ?? "saida"]);
   for (const i of itens) await deps.repos.itensAprovacao.marcarRevisao(i.id, { motivoManual: pediu ? "revisor_pediu" : "revisor_falhou", justificativa });
+  // NOD-70: a revisão virou cartão — uma linha `cartao` por item, com o motivo de agora (só a fase que abriu o cartão grava).
+  await registrarCartoes(deps, { agenteId: antes.agenteId, turnoId: antes.turnoId, itens: itens.map((i) => ({ destino: i.destino, motivo: pediu ? "revisor_pediu" : "revisor_falhou" })) });
   await deps.repos.acoesPeloModo.concluir(decisaoId, { veredito: veredito?.decisao ?? "falhou", falha: pediu ? null : falha, motivo: justificativa, ...medidas });
   log("info", pediu ? "revisao_pediu" : "revisao_falhou", { turno_id: antes.turnoId, decisao_id: decisaoId, falha: pediu ? null : falha, ms: resultado.ms ?? null });
   // O frame só agora: a tela nunca viu a revisão. A task do turno vai a "precisa de você" (revisão de engenharia 23).
@@ -284,7 +289,9 @@ async function loteLiberado(deps: Deps, decisao: Pick<Decisao, "id" | "agenteId"
   const rotina = (await rotinaDoTurno(deps.repos, decisao.turnoId)) !== null;
   const aExecutar = [];
   for (const item of itens) aExecutar.push({ item, conectorId: (await deps.repos.conectores.buscarPorSlug(item.destino.conector))?.id ?? null, dono: deps.escopo, rotina });
-  return { decisaoId: decisao.id, conversaId: decisao.conversaId, turnoId: decisao.turnoId, agenteId: decisao.agenteId, aExecutar, regra: REGRA_REVISOR, regraVersao: VERSAO_REGRA_REVISOR };
+  const lote = { decisaoId: decisao.id, conversaId: decisao.conversaId, turnoId: decisao.turnoId, agenteId: decisao.agenteId, aExecutar, regra: REGRA_REVISOR, regraVersao: VERSAO_REGRA_REVISOR };
+  await registrarAutorizadosNaMaquina(deps, lote);
+  return lote;
 }
 
 /**

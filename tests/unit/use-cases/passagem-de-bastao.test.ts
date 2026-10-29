@@ -91,6 +91,20 @@ describe("NOD-310: a task levada para a outra IA começa com a passagem de bast�
     });
   }
 
+  it("NOD-70: as linhas da trilha do cartão, do clique e do lote não repetem o item de aprovação na passagem", async () => {
+    const c = await cenario("claude-cli");
+    const linha = { agenteId: c.bot.id, turnoId: c.turno.id, ferramenta: "github__criar_pr", regraVersao: 1 };
+    await c.deps.repos.trilha.registrar({ ...linha, kind: "cartao", motivo: "acao_arriscada", regra: "regra:cartao" });
+    await c.deps.repos.trilha.registrar({ ...linha, kind: "negacao", motivo: "retirado_pela_pessoa", regra: "regra:clique" });
+    await c.deps.repos.trilha.registrar({ ...linha, ferramenta: "pedir_a_bot", kind: "tool_call", motivo: "item_de_aprovacao", regra: "regra:modo_automatico" });
+    await c.bateNoLimite();
+    await executar(c.deps, decidirTrocaDeIa, { agenteId: c.bot.id, decisao: "levar" });
+    const texto = (await c.emitir(c.voltaDe()!.id)).data!.entrada.texto;
+    expect(texto).toMatch(/Negado: Bash \(fora_da_pasta\)\./);
+    expect(texto).not.toContain("Negado: github__criar_pr");
+    expect(texto).not.toContain("pedir_a_bot: chamada");
+  });
+
   it("o turno que retoma a mesma sessão não ganha passagem", async () => {
     const c = await cenario("claude-cli");
     const { data: plano } = await c.emitir(c.turno.id);

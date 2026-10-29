@@ -5,7 +5,9 @@ import { FERRAMENTAS_NOD } from "../../src/contracts/ferramentas-nod.ts";
 import { NATIVAS_DO_TERMINAL } from "../../src/domain/nativas.ts";
 import { criarTokenTurno } from "../../src/services/token-turno.ts";
 import { PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
-import { dentroEmMemoria, planoDeTeste, servicosDeTeste } from "../helpers/l5.ts";
+import { decidir } from "../../src/use-cases/decidir.ts";
+import { liberarNaTarefa } from "../../src/use-cases/liberar-na-tarefa.ts";
+import { dentroEmMemoria, depsSobre, planoDeTeste, servicosDeTeste } from "../helpers/l5.ts";
 import { servidorDeTeste, type ServidorDeTeste } from "../helpers/servidor-de-teste.ts";
 
 const MARLON = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
@@ -64,7 +66,7 @@ describe("rota /interno/nativas: confirmação do hook e turno contaminado (ADR-
     const enviar = async () => (await (await interno("POST", `ferramentas/${slug}__enviar`, { argumentos: {} })).json()) as { ok: boolean; negacao?: { motivo: string } };
     /** O "Sempre permitir" que a pessoa clicou em enviar (ADR-042). */
     const semprePermitirEnviar = () => repos.permissoesPermanentes.criar({ agenteId, conectorId: email?.id ?? "", capacidade: "enviar", itemOrigemId: randomUUID(), mensagemId: randomUUID(), regraVersao: 1 });
-    return { repos, turnoId, slug, interno, agenteId, enviar, semprePermitirEnviar };
+    return { repos, turnoId, slug, interno, agenteId, enviar, semprePermitirEnviar, deps: depsSobre(repos, MARLON, { services, agora }) };
   }
 
   it("só a nativa que está no plano é confirmada, e cada uma deixa linha na trilha", async () => {
@@ -181,6 +183,43 @@ describe("rota /interno/nativas: confirmação do hook e turno contaminado (ADR-
     await t.repos.agentes.definirModoAprovacao(t.agenteId, "automatico");
     expect(await (await t.interno("POST", "nativas", { ferramenta: "NotebookEdit", arquivo: "/Users/m/notas/analise.ipynb" })).json()).toEqual({ ok: true });
     const trilha = await t.repos.trilha.doTurno(t.turnoId);
-    expect(trilha.map((l) => [l.ferramenta, l.regra])).toEqual([["nativa__Write", "regra:chamar_ferramenta"], ["nativa__NotebookEdit", "regra:modo_automatico"]]);
+    // NOD-70: o cartão do manual também vira linha (`cartao`, com o motivo).
+    expect(trilha.map((l) => [l.ferramenta, l.regra])).toEqual([["nativa__Write", "regra:chamar_ferramenta"], ["terminal__bash", "regra:cartao"], ["nativa__NotebookEdit", "regra:modo_automatico"]]);
+  });
+
+  it("NOD-70: cada linha da trilha leva a regra real — cartão, clique, liberado na tarefa, Sempre permitir, leitura", async () => {
+    const t = await turno(NATIVAS_DO_TERMINAL);
+    const bash = async (comando: string) => (await (await t.interno("POST", "nativas", { ferramenta: "Bash", comando })).json()) as { ok?: true; aguardar?: string };
+    const ultima = async () => (await t.repos.trilha.doTurno(t.turnoId)).at(-1);
+    const card = await bash("npm install");
+    expect(typeof card.aguardar).toBe("string");
+    expect(await ultima()).toMatchObject({ ferramenta: "terminal__bash", kind: "cartao", motivo: "destino_terminal", regra: "regra:cartao", regraVersao: 1 });
+    const { data } = await decidir(t.deps, { decisaoId: card.aguardar ?? "" });
+    expect(await bash("npm install")).toEqual({ ok: true });
+    expect(await ultima()).toMatchObject({ ferramenta: "nativa__Bash", kind: "tool_call", regra: "regra:clique", regraVersao: 1 });
+    await liberarNaTarefa(t.deps, { decisao: data.decisao });
+    expect(await bash("git checkout -b feat/y")).toEqual({ ok: true });
+    expect(await ultima()).toMatchObject({ ferramenta: "nativa__Bash", regra: "regra:liberado_na_tarefa", regraVersao: 1 });
+    expect(await bash("git status")).toEqual({ ok: true });
+    expect(await ultima()).toMatchObject({ ferramenta: "nativa__Bash", regra: "regra:chamar_ferramenta" });
+    await t.semprePermitirEnviar();
+    expect((await t.enviar()).ok).toBe(true);
+    expect(await ultima()).toMatchObject({ ferramenta: `${t.slug}__enviar`, kind: "tool_call", regra: "regra:aprovacao_permanente" });
+    expect((await ultima())?.conectorId).not.toBeNull();
+  });
+
+  it("NOD-70: o cartão recusado pela pessoa vira `negacao` com o desfecho; o modo automático leva a regra do modo na chamada direta", async () => {
+    const t = await turno(NATIVAS_DO_TERMINAL);
+    const card = (await (await t.interno("POST", "nativas", { ferramenta: "Bash", comando: "rm -rf dist" })).json()) as { aguardar?: string };
+    const [item] = await t.repos.itensAprovacao.listar(card.aguardar ?? "");
+    await decidir(t.deps, { decisaoId: card.aguardar ?? "", itens: [{ id: item?.id ?? "", selecionado: false }] });
+    expect((await t.repos.trilha.doTurno(t.turnoId)).map((l) => [l.ferramenta, l.kind, l.motivo, l.regra])).toEqual([
+      ["terminal__bash", "cartao", "destino_terminal", "regra:cartao"],
+      ["terminal__bash", "negacao", "retirado_pela_pessoa", "regra:clique"],
+    ]);
+    const auto = await turno(NATIVAS_DO_TERMINAL);
+    await auto.repos.agentes.definirModoAprovacao(auto.agenteId, "automatico");
+    expect((await auto.enviar()).ok).toBe(true);
+    expect((await auto.repos.trilha.doTurno(auto.turnoId)).at(-1)).toMatchObject({ ferramenta: `${auto.slug}__enviar`, regra: "regra:modo_automatico" });
   });
 });

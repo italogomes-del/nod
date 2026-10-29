@@ -14,6 +14,7 @@ import { chamarFerramentaFase1, concluirChamada, executarEfeito, respostaSemFase
 import { executarLiberacao, type EntradaExecutarLiberacao } from "../../src/use-cases/liberar-no-app.ts";
 import { mudarModoAprovacao } from "../../src/use-cases/mudar-modo-aprovacao.ts";
 import { permitirSempre, podeVirarRegra } from "../../src/use-cases/permitir-sempre.ts";
+import { FILTRO_DECISAO } from "../../src/repositories/trilha.repo.ts";
 import { assentarRevisao, type SaidaAssentarRevisao } from "../../src/use-cases/revisar-acao.ts";
 import type { Deps } from "../../src/use-cases/tipos.ts";
 import { agenteComConversa, autoriaPessoa } from "../helpers/fabricas.ts";
@@ -383,6 +384,8 @@ describeIntegracao("revisor nos apps (PR 5 dos modos de aprovação, ADR-115)", 
       expect(e.decisao?.estado).toBe("decidida");
       expect(e.itens[0]).toMatchObject({ desfecho: null, destino: { execucao: "maquina" } });
       expect((await c.repos.itensAprovacao.pendentesNaMaquina()).map((x) => x.item.id)).toContain(e.itens[0]!.id);
+      // NOD-70: a autorização do revisor vai à trilha na hora, antes de o Mac puxar (que o relato não grava outra está provado em github-conector.test.ts).
+      expect((await trx<{ ferramenta: string; regra: string; motivo: string }[]>`select ferramenta, regra, motivo from trilha where turno_id = ${c.turno.id} and kind = 'tool_call' and motivo = 'item_de_aprovacao'`).map((l) => [l.ferramenta, l.regra])).toEqual([[`${c.slug}__MAILX_DELETE_EMAIL`, "regra:revisor"]]);
     });
   });
 
@@ -402,6 +405,59 @@ describeIntegracao("revisor nos apps (PR 5 dos modos de aprovação, ADR-115)", 
       expect((await rotina.ler(card)).itens[0]?.sempreServe).toBeUndefined();
       expect(c.naFila() + rotina.naFila()).toBe(0);
       expect(await c.repos.acoesPeloModo.doTurno(c.turno.id)).toEqual([]);
+    });
+  });
+
+  it("NOD-70: cada caminho dos apps grava a sua regra e o seu motivo na trilha (leitura, Automático, Total, revisor libera/pede/falha, lote misto)", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const trilha = async (c: Awaited<ReturnType<typeof cenario>>, desde = 0) =>
+        (await trx<{ ferramenta: string; kind: string; motivo: string | null; regra: string }[]>`
+          select ferramenta, kind, motivo, regra from trilha where agente_id = ${c.agenteId} and ${trx.unsafe(FILTRO_DECISAO)} order by em, id`)
+          .slice(desde)
+          .map((l) => [l.ferramenta.split("__")[1] ?? l.ferramenta, l.kind, l.motivo, l.regra]);
+
+      const c = await cenario(trx);
+      // Escrita comum no Automático, turno limpo: a regra do modo.
+      expect(await c.chamar("MAILX_ADD_LABEL", { id: "e-1" })).toMatchObject({ ok: true });
+      expect(await trilha(c)).toEqual([["MAILX_ADD_LABEL", "tool_call", null, "regra:modo_automatico"]]);
+
+      // O revisor libera: o lote fecha por regra:revisor (uma linha por item, sem cartão).
+      let n = (await trilha(c)).length;
+      aguardarDe(await c.chamar("MAILX_DELETE_EMAIL", { id: "r-1" }));
+      await c.revisar(() => texto(LIBERA));
+      expect(await trilha(c, n)).toEqual([["MAILX_DELETE_EMAIL", "tool_call", "item_de_aprovacao", "regra:revisor"]]);
+
+      // O revisor pede: cartão com revisor_pediu.
+      n = (await trilha(c)).length;
+      aguardarDe(await c.chamar("MAILX_DELETE_EMAIL", { id: "r-2" }));
+      await c.revisar(() => texto(PEDE));
+      expect(await trilha(c, n)).toEqual([["MAILX_DELETE_EMAIL", "cartao", "revisor_pediu", "regra:cartao"]]);
+
+      // O revisor falha: cartão com revisor_falhou.
+      n = (await trilha(c)).length;
+      aguardarDe(await c.chamar("MAILX_DELETE_EMAIL", { id: "r-3" }));
+      await c.revisar(() => falhaDaApi(429));
+      expect(await trilha(c, n)).toEqual([["MAILX_DELETE_EMAIL", "cartao", "revisor_falhou", "regra:cartao"]]);
+
+      // Leitura de app (por último: ela contamina o turno): não passa pela decisão, grava a regra da consulta.
+      n = (await trilha(c)).length;
+      expect(await c.chamar("MAILX_FETCH_EMAILS", {})).toMatchObject({ ok: true });
+      expect(await trilha(c, n)).toEqual([["MAILX_FETCH_EMAILS", "tool_call", null, "regra:consulta_sem_decisao"]]);
+
+      // Total, mesmo contaminado: a regra do modo Total.
+      const total = await cenario(trx, { modo: "total" });
+      await total.repos.turnos.contaminar(total.turno.id, Date.now());
+      expect(await total.chamar("MAILX_DELETE_EMAIL", { id: "t" })).toMatchObject({ ok: true });
+      expect(await trilha(total)).toEqual([["MAILX_DELETE_EMAIL", "tool_call", null, "regra:modo_total"]]);
+
+      // Lote misto: o item que sairia sozinho para no cartão com lote_misto; o outro leva o seu motivo.
+      const misto = await cenario(trx, { semNoPlano: ["MAILX_SEND_EMAIL"] });
+      aguardarDe(await misto.pedirAprovacao([{ texto: "Etiquetar", ferramenta: "MAILX_ADD_LABEL" }, { texto: "Enviar", ferramenta: "MAILX_SEND_EMAIL" }]));
+      // As linhas do lote têm o mesmo instante: a ordem é a do id (aleatório), então compara ordenado.
+      expect((await trilha(misto)).sort()).toEqual([
+        ["MAILX_ADD_LABEL", "cartao", "lote_misto", "regra:cartao"],
+        ["MAILX_SEND_EMAIL", "cartao", "fora_do_catalogo", "regra:cartao"],
+      ]);
     });
   });
 

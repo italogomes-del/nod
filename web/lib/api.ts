@@ -1,4 +1,5 @@
 import type { AtividadeDto, ContagemDaAtividade } from "../../src/contracts/atividade.ts";
+import type { DecisoesDto } from "../../src/contracts/decisoes-do-bot.ts";
 import type { PaginaDaBiblioteca } from "../../src/contracts/biblioteca.ts";
 import type { PaginaDaBusca } from "../../src/contracts/busca.ts";
 import type { AnexoMeta } from "../../src/contracts/anexo.ts";
@@ -162,6 +163,13 @@ function subir(url: string, arquivo: File, mime: string, aoProgresso?: (fracao: 
 
 export type Api = ReturnType<typeof criarApi>;
 
+/** `de`, `ate`, `fuso` e o filtro (sem "tudo"): a mesma consulta na lista e no CSV, para as linhas baterem. */
+function consultaDasDecisoes(q: { de: string; ate?: string; fuso: string; desfecho?: string }): string {
+  const p = new URLSearchParams({ de: q.de, ate: q.ate ?? q.de, fuso: q.fuso });
+  if (q.desfecho && q.desfecho !== "tudo") p.set("desfecho", q.desfecho);
+  return p.toString();
+}
+
 export type { MotivoAvaliacaoLigacao };
 
 /** O corpo da decisão por voz (plano, "Aprovação por voz" §5): o servidor confere o comando e monta o resto. */
@@ -292,6 +300,27 @@ export function criarApi(escopo: Escopo) {
     revisarDiario: (agenteId: string, entradaId?: string) => post<{ revisadas: number; aRevisar: number }>(`agentes/${agenteId}/memoria/diario/revisar`, entradaId ? { entradaId } : {}),
     // Chat limpo (ADR-114, PR 2): a Atividade do bot, um dia por página, e só o "N hoje" da gaveta (contagem=1).
     atividade: (agenteId: string, dia: string, fuso: string) => get<AtividadeDto>(`agentes/${encodeURIComponent(agenteId)}/atividade?dia=${encodeURIComponent(dia)}&fuso=${encodeURIComponent(fuso)}`),
+    /** NOD-70: a aba Decisões (uma página do período, com a contagem) e o CSV, que vem como arquivo (blob). */
+    decisoes: (agenteId: string, q: { de: string; ate?: string; fuso: string; desfecho?: string; cursor?: string | null; limite?: number }) =>
+      get<DecisoesDto>(`agentes/${encodeURIComponent(agenteId)}/decisoes?${consultaDasDecisoes(q)}${q.cursor ? `&cursor=${encodeURIComponent(q.cursor)}` : ""}${q.limite ? `&limite=${q.limite}` : ""}`),
+    async decisoesCsv(agenteId: string, q: { de: string; ate: string; fuso: string; desfecho?: string }): Promise<{ blob: Blob; nome: string; linhas: number; cortado: boolean }> {
+      const url = `${base}/agentes/${encodeURIComponent(agenteId)}/decisoes.csv?${consultaDasDecisoes(q)}`;
+      let r: Response;
+      try {
+        r = await fetch(url, { credentials: "same-origin" });
+      } catch (e) {
+        if (ehAbort(e)) throw e;
+        throw falhaDeTransporte(rotaDe("GET", url));
+      }
+      if (!r.ok) {
+        let lido: unknown = null;
+        try { lido = await r.json(); } catch { lido = null; }
+        throw erroDaResposta(r.status, lido, rotaDe("GET", url));
+      }
+      const blob = await r.blob();
+      const nome = /filename="?([^";]+)"?/.exec(r.headers.get("content-disposition") ?? "")?.[1] ?? "decisoes.csv";
+      return { blob, nome, linhas: Number(r.headers.get("x-nod-csv-linhas") ?? "0") || 0, cortado: r.headers.get("x-nod-csv-cortado") === "1" };
+    },
     /** NOD-326: a Biblioteca da gaveta do bot; `antes` é o cursor opaco da página anterior. */
     biblioteca: (conversaId: string, antes?: string | null) => get<PaginaDaBiblioteca>(`conversas/${encodeURIComponent(conversaId)}/biblioteca${antes ? `?antes=${encodeURIComponent(antes)}` : ""}`),
     // PR 4 dos modos de aprovação: "Devia ter perguntado" numa ação que o revisor liberou (grava; não desfaz nada).

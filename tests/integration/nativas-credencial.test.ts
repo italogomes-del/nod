@@ -76,11 +76,14 @@ describe("rota /interno/nativas com a credencial (PR 6)", () => {
     expect(await t.repos.acoesPeloModo.doTurno(t.turnoId)).toHaveLength(1);
   });
 
-  it("manual: 403 com a frase de sempre, que o hook passa ao modelo; nada na trilha", async () => {
+  it("manual: 403 com a frase de sempre, que o hook passa ao modelo; NOD-70: a negação vira uma linha `negacao` na trilha", async () => {
     const t = await turno("manual");
     expect(await t.nativas({ ferramenta: "Read", contamina: false, credencial: AWS })).toEqual({ status: 403, corpo: { codigo: "nao_permitido", mensagem: FRASE_ARQUIVO_DE_CREDENCIAL } });
     expect((await t.hook("Read", { file_path: AWS })).hookSpecificOutput).toMatchObject({ permissionDecision: "deny", permissionDecisionReason: `nod: ${FRASE_ARQUIVO_DE_CREDENCIAL}` });
-    expect(await t.repos.trilha.doTurno(t.turnoId)).toEqual([]);
+    // O hook consulta o servidor duas vezes acima (a rota e o hook de verdade): duas negações, que a tela agrupa.
+    const trilha = await t.repos.trilha.doTurno(t.turnoId);
+    expect(trilha.map((l) => [l.ferramenta, l.kind, l.motivo, l.regra])).toEqual(Array(trilha.length).fill(["nativa__Read", "negacao", "credencial_no_manual", "regra:parada_alcada"]));
+    expect(trilha.length).toBeGreaterThan(0);
   });
 
   it("automático: aguardar; aprovado o cartão, a segunda consulta volta com a confirmação explícita", async () => {
@@ -89,7 +92,9 @@ describe("rota /interno/nativas com a credencial (PR 6)", () => {
     expect(typeof r.corpo.aguardar).toBe("string");
     await decidir(t.deps, { decisaoId: String(r.corpo.aguardar) });
     expect(await t.nativas({ ferramenta: "Write", contamina: false, credencial: "/Users/m/.ssh/config" })).toEqual({ status: 200, corpo: { ok: true, credencial: "permitida" } });
-    expect((await t.repos.trilha.doTurno(t.turnoId)).at(-1)).toMatchObject({ ferramenta: "nativa__Write", regra: "regra:chamar_ferramenta" });
+    expect((await t.repos.trilha.doTurno(t.turnoId)).at(-1)).toMatchObject({ ferramenta: "nativa__Write", kind: "tool_call", regra: "regra:clique", regraVersao: 1 });
+    // NOD-70: o cartão também ficou na trilha, com o motivo dele.
+    expect((await t.repos.trilha.doTurno(t.turnoId)).filter((l) => l.kind === "cartao")).toHaveLength(1);
   });
 
   it("a `credencial` só vale nas nativas em que o hook a manda: no Bash ela é ignorada e o comando segue a decisão de sempre", async () => {

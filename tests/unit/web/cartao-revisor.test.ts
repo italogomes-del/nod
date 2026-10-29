@@ -235,7 +235,7 @@ describe("'Devia ter perguntado' na Atividade", () => {
   const liberada = (contestada: boolean, motivo: string | null = "você pediu"): ItemDeAtividade => ({ id: "modo:a1", em: T0, categoria: "sem_aprovacao", titulo: "Revisor liberou", detalhe: "git push --force origin feat/login", codigo: true, revisor: { acaoId: "a1", motivo, contestada } });
   const com = (itens: ItemDeAtividade[]): string => {
     const base = estadoCom([]);
-    const e: Estado = { ...base, atividadeVista: { agenteId: "ze", dia, filtro: "sem_aprovacao", aberta: null }, atividadeDoBot: { [`ze:${dia}`]: { dia, itens, total: itens.length, truncados: 0, diaAnterior: null } } };
+    const e: Estado = { ...base, atividadeVista: { agenteId: "ze", dia, filtro: "sem_aprovacao", aberta: null, aba: "atividade", desfecho: "tudo", decisao: null, exportar: null }, atividadeDoBot: { [`ze:${dia}`]: { dia, itens, total: itens.length, truncados: 0, diaAnterior: null } } };
     return renderAtividade(e, base.frota!.agentes[0]!);
   };
 

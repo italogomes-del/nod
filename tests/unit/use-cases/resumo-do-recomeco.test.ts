@@ -44,6 +44,21 @@ describe("resumo do recomeço", () => {
     expect(resumo).not.toContain("OPENAI_API_KEY"); // revisão 1: só a 1ª linha do texto entra
   });
 
+  it("NOD-70: cartão, clique e lote vêm pelo item de aprovação, não pela linha da trilha", async () => {
+    const { deps } = depsEmMemoria(MARLON);
+    const { data: bot } = await executar(deps, criarAgente, { dono: "pessoa", nome: "Gil" });
+    const turno = (await deps.repos.turnos.enfileirar({ conversaId: bot.conversa.id, agenteId: bot.agente.id, origem: "conversa", prazoEm: Date.now() + 60_000, profundidade: 0, entradaTexto: "roda", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli", executor: "local" }))!;
+    const linha = { agenteId: bot.agente.id, turnoId: turno.id, ferramenta: "github__comentar", regraVersao: 1 };
+    await deps.repos.trilha.registrar({ ...linha, kind: "cartao", motivo: "acao_arriscada", regra: "regra:cartao" });
+    await deps.repos.trilha.registrar({ ...linha, kind: "tool_call", motivo: "item_de_aprovacao", regra: "regra:clique" });
+    await deps.repos.trilha.registrar({ ...linha, kind: "negacao", motivo: "retirado_pela_pessoa", regra: "regra:clique" });
+    await deps.repos.trilha.registrar({ ...linha, kind: "tool_call", motivo: "item_de_aprovacao", regra: "regra:modo_automatico" });
+    await deps.repos.trilha.registrar({ ...linha, ferramenta: "Bash", kind: "tool_call", regra: "regra:nativas" });
+    const dados = await dadosDoResumo(deps, [turno], []);
+    expect(dados.ferramentas.map((i) => i.texto)).toEqual(["Bash × 1"]);
+    expect([...dados.efeitos, ...dados.erros].map((i) => i.texto).join("\n")).not.toContain("github__comentar");
+  });
+
   it("montarResumoDoRecomeco redige o segredo que chega cru em qualquer seção (revisão 7)", () => {
     const resumo = montarResumoDoRecomeco({ ferramentas: [], efeitos: [{ texto: `deploy com ${GITHUB}`, em: 1 }], erros: [{ texto: `falhou: ${OPENAI}`, em: 2 }], decisoes: [] })!;
     expect(resumo).toContain("deploy com");

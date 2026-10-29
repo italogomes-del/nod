@@ -4,6 +4,7 @@ import type { Trabalho } from "../contracts/trabalho.ts";
 import type { Turno } from "../contracts/turno.ts";
 import { entradaDoRetornoARefazer } from "../domain/cota-da-ia.ts";
 import { FERRAMENTAS_NOD_COM_EFEITO, type DadosDaPassagem, type ItemDaPassagem } from "../domain/passagem-de-bastao.ts";
+import { ehLinhaDeItemDeAprovacao } from "../domain/decisoes.ts";
 import type { Deps } from "./tipos.ts";
 
 /** NOD-310: o que a passagem lê, sempre com limite (a emissão do plano não pode ficar cara). */
@@ -100,6 +101,8 @@ export async function dadosDaPassagem(deps: Pick<Deps, "repos">, trabalho: Pick<
   const escrevem = capacidadesQueEscrevem(conectores);
   const porFerramenta = new Map<string, { vezes: number; ultima: number }>();
   for (const l of trilha) {
+    // NOD-70: cartão, clique e lote já entram abaixo pelo item de aprovação; a linha da trilha deles não conta de novo.
+    if (ehLinhaDeItemDeAprovacao(l)) continue;
     const em = Date.parse(l.em);
     if (l.kind === "negacao") { erros.push({ texto: `Negado: ${l.ferramenta}${l.motivo ? ` (${l.motivo})` : ""}.`, em }); continue; }
     if (l.kind !== "tool_call" || !(escrevem.has(l.ferramenta) || FERRAMENTAS_NOD_COM_EFEITO.has(l.ferramenta))) continue;
