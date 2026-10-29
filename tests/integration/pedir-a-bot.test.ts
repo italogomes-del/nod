@@ -356,6 +356,17 @@ describeIntegracao("pedir_a_bot (ADR-058): quem recebe usa os acessos dele", () 
       // 30 h e com trabalhoId: passa pelos ramos do turno da task e da cadeia de retomadas.
       await trx`update mensagens set criado_em = ${new Date(AGORA - 30 * 3_600_000)}, payload = payload || ${trx.json({ trabalhoId: w.id })}
         where kind = 'handoff' and payload->>'tarefaId' = ${tarefaId}`;
+      // Estabilização (CI de 29/10, run 40801477655): com `mensagens` quase vazia e sem ANALYZE (banco novo do CI, antes
+      // do autovacuum passar), o custo de `mensagens_por_conversa` (tenant_id, conversa_id, criado_em) empata com o dos
+      // parciais da 0115 e, no empate, ganha o índice mais antigo (0002). O que muda entre execuções é o reltuples/relpages
+      // e o tamanho físico da tabela (ANALYZE/VACUUM do autovacuum, linhas mortas dos rollbacks em paralelo). Com o volume
+      // de produção (falas comuns, que não são handoff nem peer_ask), os parciais ganham por tamanho: as falas abaixo (na
+      // janela, rolam com a transação) dão esse volume ao teste, com ou sem estatísticas, sem mudar o que ele prova. Não
+      // suba o volume a ponto de o planejador abrir plano paralelo: o scan de worker não entra em pg_stat_get_xact_numscans.
+      await trx`insert into mensagens (tenant_id, owner_id, visibility, conversa_id, autor_tipo, autor_id, conta_de_execucao, executor, locality, locality_reason, decidido_por, regra_versao, kind, texto, confianca, payload, criado_em)
+        select tenant_id, owner_id, visibility, conversa_id, autor_tipo, autor_id, conta_de_execucao, executor, locality, locality_reason, decidido_por, regra_versao, 'texto', 'fala', confianca,
+          '{}'::jsonb, ${new Date(AGORA - 3_600_000)}::timestamptz - make_interval(secs => g)
+        from (select * from mensagens where kind = 'handoff' and payload->>'tarefaId' = ${tarefaId} limit 1) m, generate_series(1, 5000) g`;
       await trx`set local enable_seqscan = off`;
       // Em `turnos` o índice escolhido varia com o volume (pkey, turnos_vivos, turnos_por_trabalho); o que não pode é varrer.
       const indices = ["mensagens_handoffs_por_tempo", "mensagens_peer_ask_por_conversa", "trabalhos_pkey"];
