@@ -212,8 +212,8 @@ describe("aplicarFrame por TipoFrame", () => {
   it("proposta.nova e sala.handoff invalidam a conversa; rotina.criada invalida rotinas; rotina.executou também as execuções da rotina", () => {
     expect(aplicarFrame(estadoInicial, frame("proposta.nova", { conversaId: CONVERSA }), AGORA).invalidacoes).toEqual([`conversa:${CONVERSA}`]);
     expect(aplicarFrame(estadoInicial, frame("sala.handoff", { conversaId: CONVERSA }), AGORA).invalidacoes).toEqual([`conversa:${CONVERSA}`]);
-    expect(aplicarFrame(estadoInicial, frame("rotina.criada", { conversaId: CONVERSA }), AGORA).invalidacoes).toEqual(["rotinas", `conversa:${CONVERSA}`]);
-    expect(aplicarFrame(estadoInicial, frame("rotina.executou", { conversaId: CONVERSA, rotinaId: "r1" }), AGORA).invalidacoes).toEqual(["rotinas", `conversa:${CONVERSA}`, "execucoes:r1"]);
+    expect(aplicarFrame(estadoInicial, frame("rotina.criada", { conversaId: CONVERSA }), AGORA).invalidacoes).toEqual(["rotinas", `conversa:${CONVERSA}`, "agenda"]);
+    expect(aplicarFrame(estadoInicial, frame("rotina.executou", { conversaId: CONVERSA, rotinaId: "r1" }), AGORA).invalidacoes).toEqual(["rotinas", `conversa:${CONVERSA}`, "execucoes:r1", "agenda"]);
   });
 
   it("negacao vira estado ESCRITO por classe com relógio (ADR-029), 20 mais recentes; frame malformado só invalida", () => {
@@ -246,7 +246,7 @@ describe("aplicarFrame por TipoFrame", () => {
 
   it("resumed:false reidrata TUDO (replay parcial nunca é aplicado, ADR-016); resumed:true não faz nada", () => {
     const e = aplicarFrame(comConversa(), frame("resumed", { resumed: false }), AGORA);
-    expect(e.invalidacoes).toEqual(["frota", "sua-vez", "nao-lidos", "rotinas", "conectores", "inventario", "executor", "ias", "uso-plano", "salas", `conversa:${CONVERSA}`]);
+    expect(e.invalidacoes).toEqual(["frota", "sua-vez", "nao-lidos", "rotinas", "conectores", "inventario", "executor", "ias", "uso-plano", "salas", `conversa:${CONVERSA}`, "agenda"]);
     expect(aplicarFrame(comConversa(), frame("resumed", { resumed: true }), AGORA).invalidacoes).toEqual([]);
   });
 });

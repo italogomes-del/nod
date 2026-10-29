@@ -117,6 +117,9 @@ import { renderNovaRotina } from "./telas/nova-rotina.ts";
 import { contextoInteligencia, nivelDaGaveta, paiDoNivel } from "./telas/detalhes.ts";
 import { avisarNaIdentidade, criarFilaDePerfil, criarSalvarAvatar, ERRO_AO_SALVAR, instalarIdentidade, sobreporPendentes } from "./lib/gaveta-identidade.ts";
 import { renderEspaco } from "./telas/espaco.ts";
+import { diaDe, inicioDoDia } from "./lib/agenda.ts";
+import { agendaPorLer, escNaAgenda } from "./estado/agenda.ts";
+import { diaParaFocarNoMes } from "./telas/agenda-rotinas.ts";
 import { confirmarCriarBot, criarRapido } from "./telas/confirmar-criar-bot.ts";
 import { USOS } from "./telas/este-mac.ts";
 import { botsDaPessoa, maquinaNova, maquinasDeTrabalho, nomeDeInstanciaSugerido, soComputador } from "./telas/maquinas.ts";
@@ -1161,6 +1164,13 @@ async function buscar(q: Invalidacao): Promise<Acao | null> {
   // ADR-090: servidor sem a rota (404, versão anterior) fica sem máquinas; nenhum erro sobe.
   if (q === "maquinas") return { tipo: "hidratar-maquinas", maquinas: await api.maquinas().catch((e: unknown) => { if (e instanceof ErroApi && e.status === 404) return { maquinas: [], padraoId: null }; throw e; }) };
   // NOD-367: a falha vira a linha "Tentar de novo" em Feedback, sem a faixa vermelha e sem pedir de novo a cada quadro.
+  if (q === "agenda") {
+    // NOD-85: lê a janela do estado; a resposta de uma janela que já mudou é ignorada no reducer.
+    const janela = estado.agenda.janela;
+    if (!janela) return null;
+    const fuso = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+    return await api.agenda(inicioDoDia(janela.de), inicioDoDia(janela.ate), fuso).then((dto): Acao => ({ tipo: "hidratar-agenda", janela, dto }), (): Acao => ({ tipo: "agenda-falhou", janela }));
+  }
   if (q === "relatos") return await api.relatos().then((r): Acao => ({ tipo: "hidratar-relatos", relatos: r.relatos }), (): Acao => ({ tipo: "hidratar-relatos", relatos: null, erro: true }));
   // ADR-121 (NOD-92): sem NOD_MAQUINA_NUVEM a rota dá 404 e a seção fica como antes. Outra falha mantém a última leitura
   // (ou fecha, se não havia): a nuvem é um extra da seção, nunca a quebra.
@@ -1347,7 +1357,10 @@ async function reidratar(): Promise<void> {
   // pede o que lhe falta; antes a conversa esperava o próximo tique (15 s). Só quando a tela mudou: há falta que não se
   // resolve buscando (sem nenhuma sala, "salas" continua faltando) e voltaria a buscar sem parar.
   const telaMudou = estado.tela !== telaAntes && invalidacoesDaTela(estado).some((q) => relevante(q));
-  if (telaMudou || estado.invalidacoes.some((q) => relevante(q))) void reidratar();
+  // NOD-85 (Codex no PR 595): ir a um dia fora da janela durante a leitura troca a janela; a resposta velha é descartada
+  // e a nova janela precisa ser lida já, não no próximo tique. agendaPorLer é falso depois de ler ou falhar: não gira.
+  const agendaNova = agendaPorLer(estado.agenda) && invalidacoesDaTela(estado).includes("agenda");
+  if (telaMudou || agendaNova || estado.invalidacoes.some((q) => relevante(q))) void reidratar();
 }
 
 function relevante(q: Invalidacao): boolean {
@@ -1358,7 +1371,8 @@ function relevante(q: Invalidacao): boolean {
   if (q.startsWith("disponibilidade:")) return t.tipo === "conversa" && t.agenteId === q.slice(16);
   const secao = secaoAberta(estado);
   if (q === "gestao") return secao === "agentes";
-  if (q === "rotinas") return t.tipo === "rotinas" || t.tipo === "conversa";
+  if (q === "rotinas") return t.tipo === "rotinas" || t.tipo === "conversa" || secao === "rotinas";
+  if (q === "agenda") return secao === "rotinas";
   if (q === "conectores") return t.tipo === "conectores" || t.tipo === "conversa" || t.tipo === "sala";
   if (q === "chaves") return secao === "maquinas";
   if (q === "maquinas") return secao === "maquinas" || secao === "agentes" || secao === "conexao" || t.tipo === "conversa" || t.tipo === "trabalho";
@@ -2483,7 +2497,8 @@ function render(): void {
     contaPagina: contas?.minhaConta && estado.configUi.abertos.includes("conta-pagina") ? telaMinhaConta.render() : null,
     tema: lerTema(),
     conexao: resumoConexao(),
-  }) : "", { seletor: ".espaco-conteudo", chave: secaoAberta(estado) === "agentes" ? "agentes" : null });
+  }) : "", { seletor: ".espaco-conteudo", chave: secaoAberta(estado) === "agentes" || secaoAberta(estado) === "rotinas" ? secaoAberta(estado) : null });
+  rolarAgenda();
   devolverSegredosSsh();
   document.getElementById("espaco")?.toggleAttribute("hidden", !estado.espaco);
   // A ligação em tela cheia também deixa a .app (e Seu espaço) inerte; a pílula não: a pessoa usa o nod com a ligação aberta.
@@ -2700,6 +2715,16 @@ const chaveDaRolagem = new Map<string, string | null>();
  * Revisão do #228 (2026-10-09): regrava a região e reabre os `<details data-disclosure>` que estavam abertos, devolvendo
  * o foco ao que o tinha. Este Mac é relida a cada 30 s (ADR-091), e o "porquê" aberto pela pessoa fechava sozinho.
  */
+// NOD-85: com a agenda carregada, abre no agora (ou vai até o dia pedido pela régua, mini mês ou link) e avisa o estado
+// para não rolar de novo no próximo quadro. O movimento suave sai com prefers-reduced-motion.
+function rolarAgenda(): void {
+  const ui = estado.agenda.ui;
+  if (!estado.espaco || secaoAberta(estado) !== "rotinas" || !estado.agenda.dto || (ui.alvo === null && !ui.rolarAgora)) return;
+  const alvo = ui.alvo ? document.getElementById(`ag-dia-${ui.alvo}`) : document.querySelector<HTMLElement>("#espaco .ag-agora");
+  const suave = !window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+  alvo?.scrollIntoView({ block: ui.alvo ? "start" : "center", behavior: suave ? "smooth" : "auto" });
+  queueMicrotask(() => dispatch({ tipo: "agenda-rolou" }));
+}
 function regiaoReabrindo(id: string, html: string, rolagem?: { seletor: string; chave: string | null }): void {
   const raiz = document.getElementById(id);
   const chaveAntes = chaveDaRolagem.get(id) ?? null;
@@ -2984,7 +3009,18 @@ function propostaDoEstado(id: string): Proposta | null {
 // ---------------------------------------------------------------------------------------------
 // Ações (delegação por data-act e data-form). A web só pede; o servidor decide.
 
+/**
+ * NOD-85: Rotinas é uma seção das Configurações (por cima da tela). Vindo do formulário de nova rotina (criar ou
+ * cancelar), sai dele antes: fechar as Configurações não pode voltar ao formulário já enviado (Codex no PR 595).
+ */
+function abrirRotinas(): void {
+  if (estado.tela.tipo === "nova-rotina") navegar({ tipo: "inicio" });
+  abrirEspaco("rotinas");
+}
+
 function navegar(tela: Tela): void {
+  // NOD-85: a tela antiga de Rotinas virou a agenda das Configurações; todo caminho que levava a ela abre a seção.
+  if (tela.tipo === "rotinas") { abrirRotinas(); return; }
   const antes = estado.tela;
   // NOD-379: no celular o "início" é a tela inicial (fechar um Trabalho, voltar da conexão), não a conversa que o reducer
   // escolhe para ele; saindo dela, empilha uma entrada no histórico (o voltar do navegador volta a ela).
@@ -4585,7 +4621,8 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   navegar: (el) => {
     const tela = el.dataset.tela;
     if (tela === "conectores") abrirMarketplace();
-    else if (tela === "sua-vez" || tela === "nao-lidos" || tela === "rotinas" || tela === "nova-sala" || tela === "novo-bot" || tela === "nova-rotina" || tela === "trabalhos") navegar({ tipo: tela });
+    else if (tela === "rotinas") abrirRotinas();
+    else if (tela === "sua-vez" || tela === "nao-lidos" || tela === "nova-sala" || tela === "novo-bot" || tela === "nova-rotina" || tela === "trabalhos") navegar({ tipo: tela });
     // As antigas telas da conta são seções de Seu espaço desde 2026-09-30.
     else if (tela === "chaves") abrirEspaco("computadores");
     else if (tela === "relatos") abrirEspaco("relatos");
@@ -4595,6 +4632,45 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   // NOD-383: no celular, "Configurações" (a Geral do menu) abre a lista das seções; os outros itens abrem a seção direto.
   "menu-conta": (el) => abrirMenuConta(el, dadosMenuConta(), { secao: (s) => abrirEspaco(s, s === "geral" && celular.ativo()), conta: (qual) => void abrirDoMenuConta(qual) }, celular.ativo()),
   "secao-espaco": (el) => abrirEspaco((el.dataset.secao as SecaoEspaco | undefined) ?? "conexao"),
+  // NOD-85: a agenda das rotinas (Configurações › Rotinas).
+  "agenda-ir": (el) => { if (el.dataset.dia) dispatch({ tipo: "agenda-ir", dia: el.dataset.dia }); },
+  "agenda-mes": (el) => {
+    const ui = estado.agenda.ui;
+    const mes = el.dataset.mes ?? (ui.mes === null ? (ui.foco ?? diaDe(estado.agora)).slice(0, 7) : null);
+    dispatch({ tipo: "agenda-ui", mudanca: { mes, aberto: null, menu: null } });
+    if (mes !== null && !el.dataset.mes) requestAnimationFrame(() => diaParaFocarNoMes((sel) => document.querySelector<HTMLElement>(sel))?.focus());
+  },
+  "agenda-bot": (el) => { if (el.dataset.id) dispatch({ tipo: "agenda-bot", id: el.dataset.id }); },
+  "agenda-linha": (el) => {
+    const chave = el.dataset.chave ?? null;
+    const ui = estado.agenda.ui;
+    dispatch({ tipo: "agenda-ui", mudanca: { aberto: ui.aberto === chave ? null : chave, menu: null, mes: null } });
+    // QA do PR #595 (B5): no celular a linha abre numa folha por cima; o foco vai para ela (o Esc o devolve à linha).
+    if (celular.ativo() && ui.aberto !== chave) requestAnimationFrame(() => document.querySelector<HTMLElement>("#espaco .ag-folha")?.focus());
+  },
+  "agenda-bloco": (el) => {
+    const chave = el.dataset.chave ?? null;
+    dispatch({ tipo: "agenda-ui", mudanca: { bloco: estado.agenda.ui.bloco === chave ? null : chave, aberto: null } });
+  },
+  "agenda-tentar": () => dispatch({ tipo: "agenda-tentar" }),
+  "agenda-so-problema": () => dispatch({ tipo: "agenda-ui", mudanca: { soProblema: false } }),
+  "agenda-todos": () => dispatch({ tipo: "agenda-ui", mudanca: { bots: [], soProblema: false, busca: null } }),
+  "agenda-busca-abrir": () => {
+    dispatch({ tipo: "agenda-ui", mudanca: { busca: "" } });
+    requestAnimationFrame(() => document.querySelector<HTMLInputElement>("[data-agenda-busca]")?.focus());
+  },
+  "agenda-busca-fechar": () => {
+    dispatch({ tipo: "agenda-ui", mudanca: { busca: null } });
+    requestAnimationFrame(() => document.querySelector<HTMLElement>('[data-act="agenda-busca-abrir"]')?.focus());
+  },
+  "agenda-pausadas": () => dispatch({ tipo: "agenda-ui", mudanca: { pausadasAbertas: !estado.agenda.ui.pausadasAbertas } }),
+  "agenda-fechar": () => dispatch({ tipo: "agenda-ui", mudanca: { aberto: null, menu: null, mes: null } }),
+  // O link "Abrir na agenda" que o bot escreve (ver_agenda): abre Rotinas no dia, com o filtro de problema.
+  "abrir-agenda": (el) => {
+    const dia = el.dataset.dia;
+    abrirEspaco("rotinas");
+    dispatch({ tipo: "agenda-abrir", hoje: diaDe(estado.agora), ...(dia ? { dia } : {}), soProblema: el.dataset.problema === "1" });
+  },
   // NOD-312: a carona "relê o necessário" e a marca "recomeçou" abrem e fecham a explicação logo abaixo (no DOM, sem
   // re-render: o foco fica no botão); o estado sobrevive ao próximo render da timeline (web/lib/recomeco.ts).
   "recomeco-explicar": (el) => {
@@ -5762,7 +5838,7 @@ const FORMS: Record<string, (form: HTMLFormElement) => Promise<void>> = {
     dispatch({ tipo: "invalidar", quais: ["rotinas"] });
     // Da gaveta, a rotina criada aparece na visão geral do bot; da tela cheia, na lista de rotinas.
     if (naGaveta) fecharNivel();
-    else navegar({ tipo: "rotinas" });
+    else abrirRotinas();
   }); },
   // definido em 2026-09-30: o perfil enxuto da gaveta não traz a escolha de modelo — sem o campo, ela não muda (antes,
   // o formulário sem "inteligencia" voltaria o bot para Automático).
@@ -5898,6 +5974,8 @@ document.addEventListener("click", (ev) => {
   const el = (ev.target as HTMLElement).closest<HTMLElement>("[data-act]");
   if (!el || el.tagName === "BUTTON" && (el as HTMLButtonElement).type === "submit" && el.closest("form[data-form]")) return;
   const acao = ACOES[el.dataset.act ?? ""];
+  // NOD-85: a ação escolhida na folha ou no menu da agenda (celular) fecha a folha antes de agir.
+  if (acao && el.closest(".ag-folha") && !el.dataset.act?.startsWith("agenda-")) dispatch({ tipo: "agenda-ui", mudanca: { aberto: null, menu: null, mes: null } });
   if (acao) void acao(el);
 });
 
@@ -6254,6 +6332,13 @@ document.addEventListener("keydown", (ev) => {
   // não fecha Seu espaço por trás do diálogo.
   if (ev.key === "Escape" && estado.espaco && !(ev.target as HTMLElement).closest?.("dialog") && !document.querySelector("dialog[open]")) {
     ev.preventDefault();
+    // NOD-85: na agenda, o Esc fecha antes o que está aberto (o mês, a busca, a folha ou a linha), um por vez.
+    const ag = secaoAberta(estado) === "rotinas" ? escNaAgenda(estado.agenda.ui) : null;
+    if (ag) {
+      dispatch({ tipo: "agenda-ui", mudanca: ag.mudanca });
+      requestAnimationFrame(() => document.querySelector<HTMLElement>(`#espaco ${ag.foco}`)?.focus());
+      return;
+    }
     // NOD-383: no celular, Esc numa seção volta para a lista, como o ‹.
     if (escNoEspaco(celular.ativo(), estado) === "lista") void ACOES["cfg-lista"]?.(document.body);
     else fecharEspaco();
@@ -6329,6 +6414,7 @@ document.addEventListener("compositionend", (ev) => {
 document.addEventListener("input", (ev) => {
   const ta = ev.target as HTMLTextAreaElement;
   if ((ta as HTMLElement).dataset?.actInput === "midia-audio-ir") { irNoAudio(ta as unknown as HTMLInputElement); return; }
+  if ((ta as HTMLElement).matches?.("[data-agenda-busca]")) { dispatch({ tipo: "agenda-ui", mudanca: { busca: ta.value } }); return; }
   // O código do Claude atravessa o redesenho do cartão (o foco volta pelo `manterFocoDoCodigo`).
   const iaDoCodigo = (ta as HTMLElement).dataset?.iaCodigo;
   if (ehIa(iaDoCodigo)) { dispatch({ tipo: "ias-mac", mudanca: { codigo: { ...estado.iasMac.codigo, [iaDoCodigo]: ta.value } } }); return; }
@@ -6586,6 +6672,27 @@ document.addEventListener("pointerdown", (ev) => {
   const row = celular.ativo() && ev.pointerType !== "mouse" && ev.isPrimary ? (ev.target as HTMLElement).closest<HTMLElement>("#sidebar [data-bot-contexto]") : null;
   if (row) toqueLongo.comecar(row, ev.clientX, ev.clientY);
   else toqueLongo.esquecer();
+}, true);
+// NOD-85: no celular, segurar uma linha da agenda abre o menu dela (Ver na conversa, Testar, Pausar).
+const toqueNaAgenda = criarToqueLongo<HTMLElement>({ agendar: (fn, ms) => window.setTimeout(fn, ms), cancelar: (id) => clearTimeout(id), agora: () => performance.now() }, (linha) => {
+  const chave = linha.dataset.chave;
+  if (!chave || !linha.isConnected) return false;
+  navigator.vibrate?.(10);
+  dispatch({ tipo: "agenda-ui", mudanca: { menu: chave, aberto: null } });
+  // QA do PR #595 (B5): o menu do toque longo recebe o foco no primeiro item.
+  requestAnimationFrame(() => document.querySelector<HTMLElement>('#espaco .ag-menu [role="menuitem"]')?.focus());
+  return true;
+});
+document.addEventListener("pointerdown", (ev) => {
+  const linha = celular.ativo() && ev.pointerType !== "mouse" && ev.isPrimary ? (ev.target as HTMLElement).closest<HTMLElement>('#espaco .ag-cel [data-act="agenda-linha"]') : null;
+  if (linha) toqueNaAgenda.comecar(linha, ev.clientX, ev.clientY);
+  else toqueNaAgenda.esquecer();
+}, true);
+document.addEventListener("pointermove", (ev) => toqueNaAgenda.mover(ev.clientX, ev.clientY));
+document.addEventListener("pointerup", () => toqueNaAgenda.soltar());
+document.addEventListener("pointercancel", () => toqueNaAgenda.soltar());
+document.addEventListener("click", (ev) => {
+  if (toqueNaAgenda.engolirClique()) { ev.preventDefault(); ev.stopPropagation(); }
 }, true);
 document.addEventListener("pointermove", (ev) => toqueLongo.mover(ev.clientX, ev.clientY));
 document.addEventListener("pointerup", () => toqueLongo.soltar());

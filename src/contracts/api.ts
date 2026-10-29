@@ -145,7 +145,7 @@ export const ROTAS = [
   { metodo: "POST", caminho: "rotinas/:id/pausar", lane: "L7" },
   { metodo: "POST", caminho: "rotinas/:id/ativar", lane: "L7" }, { metodo: "POST", caminho: "rotinas/:id/ritmo", lane: "L7" }, // ritmo: NOD-313
   { metodo: "POST", caminho: "rotinas/:id/executar", lane: "L7" },
-  { metodo: "GET", caminho: "rotinas/:id/execucoes", lane: "L7" },
+  { metodo: "GET", caminho: "rotinas/:id/execucoes", lane: "L7" }, { metodo: "GET", caminho: "rotinas/agenda", lane: "L7" }, // agenda: NOD-85
   { metodo: "GET", caminho: "salas", lane: "L7" },
   { metodo: "POST", caminho: "salas", lane: "L7" },
   { metodo: "POST", caminho: "salas/:id/membros", lane: "L7" },

@@ -65,6 +65,17 @@ export const FERRAMENTAS_ROTINA = {
     required: [],
     additionalProperties: false,
   },
+  ver_agenda: {
+    type: "object",
+    description: "Mostra a agenda das rotinas da pessoa (o que rodou e o que vai rodar) em até 5 linhas, com o link que abre a agenda. Leitura: nada muda. Para \"o que roda amanhã?\" mande dia amanha; para \"o que deu problema essa semana?\" mande dia ultimos_7 e so_problema.",
+    properties: {
+      dia: { type: "string", description: "hoje, amanha, ontem, ultimos_7 (os 7 dias até hoje) ou o primeiro dia em AAAA-MM-DD, no fuso da pessoa (o das rotinas dela; volta em `fuso`). Omitido = hoje.", minLength: 4, maxLength: 10 },
+      dias: { type: "integer", description: "Quantos dias a partir de dia (1 a 7). Omitido = 1; com ultimos_7 é ignorado." },
+      so_problema: { type: "boolean", description: "Só execuções que falharam, foram interrompidas, bloqueadas ou não rodaram." },
+    },
+    required: [],
+    additionalProperties: false,
+  },
   pausar_rotina: {
     type: "object",
     description: "Pausa uma rotina existente: ela para de executar até ser reativada. Use o id exato do inventário; a rotina de um colega (id de ver_colegas) só quando a pessoa pedir.",
@@ -120,6 +131,13 @@ export type ArgsCriarRotina = {
 /** Sem argumentos: o agente só pode listar as rotinas DELE, que vêm do contexto do turno. */
 export type ArgsListarRotinas = object;
 export type ArgsPausarRotina = { rotina_id: string };
+/** NOD-85: a mini-agenda. `dia` relativo (hoje, amanha, ontem, ultimos_7) ou AAAA-MM-DD no fuso da pessoa; `dias` de 1 a 7. */
+export type ArgsVerAgenda = { dia?: string; dias?: number; so_problema?: boolean };
+/**
+ * `linhas`: até 5, na ordem do tempo; `total` conta todas do intervalo (o resto está na agenda). `link` é o interno
+ * (nod:agenda?dia=…) que a web mostra como o botão "Abrir na agenda".
+ */
+export type ResultadoVerAgenda = { de: string; ate: string; fuso: string; linhas: string[]; total: number; link: string; instrucao: string } | { erro: CodigoErro };
 export type ArgsReativarRotina = { rotina_id: string };
 
 /** A rotina como o modelo a lê de volta: mesma forma do inventário do prompt de sistema. */

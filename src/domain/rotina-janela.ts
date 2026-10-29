@@ -11,12 +11,14 @@ export class RotinaInvalida extends ErroDeDominio {
   }
 }
 
-/** Offset numérico é recusado ANTES de perguntar ao Intl: "UTC-3", "-03:00", "GMT+3" (ADR-011). */
+/**
+ * Offset numérico é recusado ANTES de perguntar ao Intl: "UTC-3", "-03:00", "GMT+3", "Etc/GMT+3" (ADR-011). Todo offset
+ * tem dígito; o hífen sozinho não conta, porque há nome IANA com ele (America/Port-au-Prince, Asia/Ust-Nera — revisão 2
+ * do PR 595).
+ */
 function pareceOffset(fuso: string): boolean {
   const f = fuso.trim();
-  if (f === "") return true;
-  for (const c of f) if (c === "+" || c === "-" || (c >= "0" && c <= "9")) return true;
-  return false;
+  return f === "" || /\d/.test(f) || /^[+-]/.test(f);
 }
 
 export function assertFusoIana(fusoIana: string): void {
@@ -148,4 +150,73 @@ export function proximaJanela(entrada: { cron: string; fusoIana: string; agora: 
     cursor += (!diaValido || !cron.hora.includes(p.h) ? 60 - p.mi : 1) * 60_000;
   }
   throw new RotinaInvalida("cron_sem_futuro", "essa periodicidade não tem execução futura em 400 dias");
+}
+
+/**
+ * NOD-85: o teto de janelas por rotina na agenda. Cobre o intervalo máximo (42 dias) de uma rotina de minuto em minuto,
+ * então dentro da agenda nada é cortado (revisão 1 do PR #595: com 500, a rotina de 5 em 5 min sumia do 3º dia em diante).
+ */
+export const TETO_JANELAS_AGENDA = 42 * 24 * 60;
+
+const diaCasa = (cron: CampoCron, p: PartesZona): boolean =>
+  (cron.diasMes === "*" || cron.diasMes.includes(p.d)) &&
+  (cron.mes === "*" || cron.mes.includes(p.mo)) &&
+  (cron.diasSemana === "*" || (cron.diasSemana === "uteis" ? p.w >= 1 && p.w <= 5 : cron.diasSemana.includes(p.w)));
+
+/**
+ * NOD-85 (definido em 2026-10-29): as janelas do cron em [de, ate), com o mesmo casamento de `proximaJanela` (fuso IANA,
+ * hora que não existe no horário de verão pulada, hora repetida com instantes distintos). `cortado` = parou no `teto`
+ * antes de `ate`.
+ *
+ * Revisão 1 do PR #595 (custo): uma consulta ao fuso por hora, não por minuto. Dia que não casa salta até perto da
+ * meia-noite e hora que não casa salta até perto da próxima hora do cron — sempre com duas horas de folga, porque o horário
+ * de verão adianta o relógio local no meio do salto (até duas horas em Antarctica/Troll; revisão 2 do PR 595). Dentro de uma hora que casa, os minutos do cron saem
+ * por conta; a conta só vale se o último deles ainda cai na mesma hora local no minuto esperado (fuso com mudança de 30
+ * min, como Lord Howe) — senão a hora volta ao passo de minuto em minuto.
+ */
+export function janelasEntre(entrada: { cron: string; fusoIana: string; de: number; ate: number; teto?: number }): { janelas: number[]; cortado: boolean } {
+  assertFusoIana(entrada.fusoIana);
+  const cron = parseCron5(entrada.cron);
+  const teto = entrada.teto ?? TETO_JANELAS_AGENDA;
+  const fmt = formatador(entrada.fusoIana);
+  const minutos = [...new Set(cron.minuto)].sort((a, b) => a - b);
+  const janelas: number[] = [];
+  const empurrar = (t: number): boolean => {
+    if (t >= entrada.ate) return true;
+    if (janelas.length >= teto) return false;
+    janelas.push(t);
+    return true;
+  };
+  let cursor = Math.ceil(entrada.de / 60_000) * 60_000;
+  let lida: PartesZona | null = null;
+  while (cursor < entrada.ate) {
+    const p = lida ?? partesNoFuso(cursor, fmt);
+    lida = null;
+    if (!diaCasa(cron, p) || !cron.hora.includes(p.h)) {
+      const maiores = diaCasa(cron, p) ? cron.hora.filter((h) => h > p.h) : [];
+      const alvo = maiores.length > 0 ? Math.min(...maiores) : 24;
+      const salto = (Math.max(0, alvo - p.h - 3) * 60 + 60 - p.mi) * 60_000;
+      // O relógio local que voltou no meio do salto (fim do horário de verão) repete horas que o salto pularia: aí anda
+      // só até a próxima hora cheia (Codex no PR 595: Antarctica/Troll volta 2 h e repetia a 01:15).
+      if (salto > 3_600_000) {
+        const q = partesNoFuso(cursor + salto, fmt);
+        if (Date.UTC(q.y, q.mo - 1, q.d, q.h, q.mi) - Date.UTC(p.y, p.mo - 1, p.d, p.h, p.mi) !== salto) { cursor += (60 - p.mi) * 60_000; continue; }
+        lida = q;
+      }
+      cursor += salto;
+      continue;
+    }
+    const daHora = minutos.filter((m) => m >= p.mi);
+    const ultimo = daHora[daHora.length - 1];
+    const fim = ultimo === undefined ? null : partesNoFuso(cursor + (ultimo - p.mi) * 60_000, fmt);
+    if (ultimo === undefined || (fim !== null && fim.h === p.h && fim.mi === ultimo && fim.d === p.d)) {
+      for (const m of daHora) if (!empurrar(cursor + (m - p.mi) * 60_000)) return { janelas, cortado: true };
+      cursor += (60 - p.mi) * 60_000;
+      continue;
+    }
+    // A hora local andou fora do passo (mudança de 30 min): minuto a minuto, como proximaJanela.
+    if (casa(cron, p) && !empurrar(cursor)) return { janelas, cortado: true };
+    cursor += 60_000;
+  }
+  return { janelas, cortado: false };
 }

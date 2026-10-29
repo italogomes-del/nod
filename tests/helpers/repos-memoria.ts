@@ -2550,6 +2550,10 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async listar(rotinaId, limite = EXECUCOES_GUARDADAS) {
         return doTenant(b.execucoes).filter((e) => e.rotinaId === rotinaId).sort((x, y) => y.em - x.em || y.id.localeCompare(x.id)).slice(0, limite);
       },
+      async dasRotinas(rotinaIds) {
+        const ids = new Set(rotinaIds);
+        return doTenant(b.execucoes).filter((e) => ids.has(e.rotinaId)).sort((x, y) => x.instanteAgendado - y.instanteAgendado || x.id.localeCompare(y.id));
+      },
       async podar(rotinaId, guardar = EXECUCOES_GUARDADAS) {
         const minhas = doTenant(b.execucoes).filter((e) => e.rotinaId === rotinaId).sort((x, y) => y.em - x.em || y.id.localeCompare(x.id));
         const sobra = new Set(minhas.slice(guardar).map((e) => e.id));

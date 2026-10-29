@@ -22,6 +22,7 @@ import type { Experimentos, Preferencias, RaioXConversa, RaioXTurno } from "../.
 import type { ComandosDto } from "../../src/contracts/comandos.ts";
 import type { NaoLidosDto } from "../../src/contracts/nao-lidos.ts";
 import type { Conector } from "../../src/contracts/conector.ts";
+import type { AgendaDto } from "../../src/contracts/agenda.ts";
 import type { Conversa } from "../../src/contracts/conversa.ts";
 import type { EstadoExecutor, IdExecutor } from "../../src/contracts/executor.ts";
 import type { Inventario } from "../../src/contracts/inventario.ts";
@@ -305,6 +306,8 @@ export function criarApi(escopo: Escopo) {
     criarRotina: (entrada: { agenteId: string; cron: string; fusoIana: string; instrucao: string; fonte: string; entregavel: string; limitesAprovacao: string; politicaSemDado: string }) => post<RespostaMutacao>("rotinas", entrada),
     executarRotina: (id: string, opcoes?: { confirmar?: boolean }) => post<RespostaMutacao>(`rotinas/${id}/executar`, opcoes?.confirmar ? { confirmar: true } : undefined),
     rotinas: () => get<{ rotinas: RotinaDto[] }>("rotinas"),
+    /** NOD-85: a agenda das rotinas entre `de` e `ate` (epoch ms, `ate` exclusivo), com os dias no fuso do navegador. */
+    agenda: (de: number, ate: number, fuso: string) => get<AgendaDto>(`rotinas/agenda?de=${de}&ate=${ate}&fuso=${encodeURIComponent(fuso)}`),
     execucoes: (rotinaId: string) => get<{ execucoes: ExecucaoRotina[] }>(`rotinas/${rotinaId}/execucoes`),
     pausarRotina: (id: string) => post<RespostaMutacao>(`rotinas/${id}/pausar`),
     ativarRotina: (id: string) => post<RespostaMutacao>(`rotinas/${id}/ativar`),

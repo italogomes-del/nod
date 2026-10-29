@@ -60,8 +60,8 @@ describe("menu do avatar (critério 1)", () => {
 });
 
 describe("as 6 seções (critério 2)", () => {
-  it("Conta, Geral, Provedores de IA, Máquinas, Agentes e Feedback, nesta ordem", () => {
-    expect(SECOES_ESPACO.map((s) => s.nome)).toEqual(["Conta", "Geral", "Provedores de IA", "Máquinas", "Agentes", "Feedback"]);
+  it("Conta, Geral, Provedores de IA, Máquinas, Agentes, Rotinas e Feedback, nesta ordem (NOD-85)", () => {
+    expect(SECOES_ESPACO.map((s) => s.nome)).toEqual(["Conta", "Geral", "Provedores de IA", "Máquinas", "Agentes", "Rotinas", "Feedback"]);
   });
 
   it("os pedidos de antes caem na seção que os absorveu", () => {
@@ -85,7 +85,7 @@ describe("as 6 seções (critério 2)", () => {
       const html = renderEspaco(estado, avisos, volta, extras);
       expect(html).toContain('<h1 id="espaco-titulo">Configurações</h1>');
       expect(html).toContain('aria-label="Seções das Configurações"');
-      expect([...html.matchAll(/data-act="secao-espaco" data-secao="([^"]+)"/g)].map((m) => m[1])).toEqual(["conta", "geral", "conexao", "maquinas", "agentes", "feedback"]);
+      expect([...html.matchAll(/data-act="secao-espaco" data-secao="([^"]+)"/g)].map((m) => m[1])).toEqual(["conta", "geral", "conexao", "maquinas", "agentes", "rotinas", "feedback"]);
       expect(html).not.toContain("espaco-banco");
     }
   });

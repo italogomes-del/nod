@@ -92,6 +92,10 @@ import { FERRAMENTAS_WORKSPACE } from "../contracts/ferramentas-workspace.ts";
  * retomada, lote de um pedido) ficam sem as duas: quem pediu pode ser de outra pessoa ou estar numa sala, e a resposta volta
  * para lá com o histórico largo do bot.
  *
+ * ver_agenda (definido em 2026-10-29, NOD-85, revisão 1 do PR #595): lê as rotinas de TODOS os bots que a pessoa vê, não
+ * só as do bot do turno (listar_rotinas). Por isso segue a regra do histórico: fora da sala (outras pessoas leem) e fora
+ * do pedido de outro bot (a resposta volta para quem pediu).
+ *
  * Frentes (definido em 2026-10-12, ADR-099, I2): abrir_frentes e mandar_para_frente entram no lugar de abrir_task e
  * mandar_para_task (que seguem atendidos como sinônimos, fora do catálogo). O turno de uma frente perde me_chame_as e
  * esperar_comando (ela devolve o fato e termina; quem espera é o dono) e ganha devolver_resumo (montarPlano).
@@ -101,12 +105,12 @@ import { FERRAMENTAS_WORKSPACE } from "../contracts/ferramentas-workspace.ts";
  * Por isso a delegação e a rotina têm as duas; `podeAbrirTask`/`podeMandarParaTask` as tiram do turno que já é trabalho
  * (a task de colega de antes, a filha de rotina, a frente), e a execução de rotina com mãe só abre, como antes.
  */
-const FERRAMENTAS_DO_HISTORICO: readonly NomeFerramentaNod[] = ["buscar_conversas", "ler_conversa"];
+const FERRAMENTAS_DO_HISTORICO: readonly NomeFerramentaNod[] = ["buscar_conversas", "ler_conversa", "ver_agenda"];
 const aPedidoDeOutroBot = (t: { sobProcuracaoDe?: string | null }) => !!t.sobProcuracaoDe;
 
 export const FERRAMENTAS_NOD_POR_MODO: Record<ModoTurno, readonly NomeFerramentaNod[]> = {
-  criacao: ["atualizar_perfil", "lembrar", "pedir_aprovacao", "pedir_acesso", "pedir_credencial", "criar_rotina", "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "ver_colegas", "pedir_a_bot", "pedir_a_pessoa", "publicar_artefato", "ler_artefato", "abrir_frentes", "mandar_para_frente", "me_chame_as", "avisar_pessoa", "buscar_conversas", "ler_conversa"],
-  conversa: ["lembrar", "pedir_aprovacao", "pedir_acesso", "pedir_credencial", "criar_rotina", "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "ver_colegas", "pedir_a_bot", "pedir_a_pessoa", "publicar_artefato", "ler_artefato", "abrir_frentes", "mandar_para_frente", "me_chame_as", "avisar_pessoa", "buscar_conversas", "ler_conversa"],
+  criacao: ["atualizar_perfil", "lembrar", "pedir_aprovacao", "pedir_acesso", "pedir_credencial", "criar_rotina", "listar_rotinas", "ver_agenda", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "ver_colegas", "pedir_a_bot", "pedir_a_pessoa", "publicar_artefato", "ler_artefato", "abrir_frentes", "mandar_para_frente", "me_chame_as", "avisar_pessoa", "buscar_conversas", "ler_conversa"],
+  conversa: ["lembrar", "pedir_aprovacao", "pedir_acesso", "pedir_credencial", "criar_rotina", "listar_rotinas", "ver_agenda", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "ver_colegas", "pedir_a_bot", "pedir_a_pessoa", "publicar_artefato", "ler_artefato", "abrir_frentes", "mandar_para_frente", "me_chame_as", "avisar_pessoa", "buscar_conversas", "ler_conversa"],
   sala: ["lembrar", "pedir_aprovacao", "pedir_acesso", "pedir_credencial", "criar_rotina", "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "ver_colegas", "pedir_a_bot", "pedir_a_pessoa", "passar", "encaminhar", "buscar_conversas", "ler_conversa"],
   // NOD-50 (revisão 6 do PR #553): rotina sem pedir_credencial — o cartão não segura a execução seguinte, que abriria outro a cada
   // disparo; a rotina que precisa de chave pede pela pessoa (pedir_a_pessoa) ou pela conversa.
@@ -116,7 +120,7 @@ export const FERRAMENTAS_NOD_POR_MODO: Record<ModoTurno, readonly NomeFerramenta
   delegacao: ["lembrar", "pedir_acesso", "pedir_credencial", "pedir_aprovacao", "ver_colegas", "pedir_a_pessoa", "pedir_a_bot", "publicar_artefato", "ler_artefato", "abrir_frentes", "mandar_para_frente", "me_chame_as", "avisar_pessoa"],
   // definido em 2026-10-04 (ADR-072): a ligação fala com a pessoa ao vivo. O kit da conversa sem pedir_a_pessoa (a
   // pergunta é a própria fala) e sem artefatos (não há tela para lê-los); trabalho demorado vai por iniciar_tarefa.
-  ligacao: ["lembrar", "pedir_aprovacao", "pedir_acesso", "criar_rotina", "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "ver_colegas", "pedir_a_bot", "iniciar_tarefa", "desligar", "buscar_conversas", "ler_conversa"],
+  ligacao: ["lembrar", "pedir_aprovacao", "pedir_acesso", "criar_rotina", "listar_rotinas", "ver_agenda", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "ver_colegas", "pedir_a_bot", "iniciar_tarefa", "desligar", "buscar_conversas", "ler_conversa"],
 };
 
 /**
@@ -171,7 +175,7 @@ export const PLANO_SEM_VALIDADE = Number.MAX_SAFE_INTEGER;
 
 export const REGRA_MONTAGEM = "regra:montagem-ferramentas" as const;
 
-const SO_LEITURA: ReadonlySet<NomeFerramentaNod> = new Set(["ler_artefato", "buscar_conversas", "ler_conversa"]);
+const SO_LEITURA: ReadonlySet<NomeFerramentaNod> = new Set(["ler_artefato", "buscar_conversas", "ler_conversa", "ver_agenda"]);
 
 function ferramentaNod(nome: NomeFerramentaNod): FerramentaPlano {
   const base: FerramentaPlano = { nome, nomeMcp: `mcp__nod__${nome}`, origem: "nod", conectorId: null, readOnlyHint: false, tocaDadoPessoal: false, schema: FERRAMENTAS_NOD[nome] };

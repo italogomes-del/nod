@@ -15,6 +15,7 @@ import { renderConta, renderContaPagina, type DadosConta } from "./config-conta.
 import { iniciaisDeQuem } from "./menu-conta.ts";
 import { renderAgentes } from "./config-agentes.ts";
 import { renderGeral } from "./config-geral.ts";
+import { renderAgendaRotinas, tituloDaAgendaCelular, valorDaAgenda } from "./agenda-rotinas.ts";
 
 /**
  * "Seu espaço" (definido em 2026-09-18): o que é da CONTA, não de um bot. definido em 2026-09-30 (canvas "Menu, sidebar e
@@ -23,7 +24,7 @@ import { renderGeral } from "./config-geral.ts";
  * veio>" (mais o Esc), que diz para onde a pessoa volta. Sem ×: os dois fariam a mesma coisa.
  * NOD-367 (protótipo v2 do Gil, aprovado em 2026-10-26): passa a se chamar Configurações, com 6 seções fixas, nesta ordem.
  * Avisos e Preferências viram Geral; Este Mac, Computadores (as chaves) e o computador do bot (v2) viram Máquinas;
- * Relatos vira Feedback. A v2 não acrescenta seção.
+ * Relatos vira Feedback. A v2 não acrescenta seção. NOD-85: Rotinas entra entre Agentes e Feedback.
  */
 export const SECOES_ESPACO: readonly { id: SecaoEspaco; nome: string; icone: string }[] = [
   { id: "conta", nome: "Conta", icone: ICONE.pessoa },
@@ -32,6 +33,8 @@ export const SECOES_ESPACO: readonly { id: SecaoEspaco; nome: string; icone: str
   { id: "conexao", nome: "Provedores de IA", icone: pilhaDeAvatares(true) },
   { id: "maquinas", nome: "Máquinas", icone: ICONE.servidor },
   { id: "agentes", nome: "Agentes", icone: ICONE.agentes },
+  // NOD-85: a agenda das rotinas, depois de Agentes (rotina é o que os agentes fazem sozinhos).
+  { id: "rotinas", nome: "Rotinas", icone: ICONE.relogio },
   { id: "feedback", nome: "Feedback", icone: ICONE.bandeira },
 ];
 
@@ -89,7 +92,7 @@ function renderEspacoCelular(estado: Estado, avisos: EstadoAvisos, volta: Volta,
   const nome = SECOES_ESPACO.find((s) => s.id === secao)?.nome ?? "Configurações";
   const corpo = comSaibaMais({ celular: true, abertos: estado.configUi.abertos }, () => conteudo(estado, secao, avisos, extras, true));
   return `<div class="espaco cfg-espaco cfg-celular cfg-secao-tela" role="dialog" aria-modal="true" aria-labelledby="espaco-titulo">
-    <div class="cfg-topo"><button type="button" class="espaco-voltar cfg-redondo" data-act="cfg-lista" aria-label="Voltar para Configurações">${ICONE.voltar}</button><h1 id="espaco-titulo" class="cfg-topo-tit">${esc(nome)}</h1></div>
+    <div class="cfg-topo"><button type="button" class="espaco-voltar cfg-redondo" data-act="cfg-lista" aria-label="Voltar para Configurações">${ICONE.voltar}</button><h1 id="espaco-titulo" class="cfg-topo-tit">${secao === "rotinas" ? tituloDaAgendaCelular(estado) : esc(nome)}</h1></div>
     <main class="espaco-conteudo" data-secao-aberta="${secao}">${corpo}</main>
   </div>`;
 }
@@ -106,7 +109,7 @@ function listaDeSecoes(estado: Estado, extras: ExtrasEspaco): string {
   const grupo = (html: string) => `<div class="cfg-grupo">${html}</div>`;
   // Toda seção de SECOES_ESPACO entra aqui (a emenda da ADR-094 manda reverter se uma ficar de fora): a Conta no topo, o
   // Feedback sozinho embaixo, as outras no meio, na ordem do desktop.
-  const valores: Partial<Record<SecaoEspaco, string>> = { conexao: extras.conexao ?? "", maquinas, agentes };
+  const valores: Partial<Record<SecaoEspaco, string>> = { conexao: extras.conexao ?? "", maquinas, agentes, rotinas: valorDaAgenda(estado) };
   const meio = SECOES_ESPACO.filter((s) => s.id !== "conta" && s.id !== "feedback").map((s) => linha(s, valores[s.id])).join("");
   return `<nav aria-label="Seções das Configurações">${grupo(conta)}${grupo(meio)}${grupo(linha(secao("feedback")))}</nav>`;
 }
@@ -128,6 +131,8 @@ function conteudo(estado: Estado, secao: SecaoEspaco, avisos: EstadoAvisos, extr
       return renderSecaoMaquinas(estado);
     case "agentes":
       return renderAgentes(estado);
+    case "rotinas":
+      return renderAgendaRotinas(estado, celular);
     case "feedback":
       return renderRelatos(estado);
   }

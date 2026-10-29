@@ -1,4 +1,5 @@
 import { esc } from "./escape.ts";
+import { lerLinkDaAgenda } from "./agenda.ts";
 import { VIVO } from "./copiar.ts";
 import { aparaUrl, chipDoLink, lerLink, linkComNome } from "./links.ts";
 
@@ -258,6 +259,9 @@ function token(t: string, opcoes: OpcoesTexto, dentroDeEnfase: boolean): string 
     // NOD-323 (J6): o link para um arquivo da pasta do bot virou `nod-anexo:<id>` — abre a mídia anexada nesta fala.
     const anexo = LINK_ANEXO_WEB.exec(t.slice(meio + 2, -1));
     if (anexo) return `<button type="button" class="md-midia-link" data-act="midia-abrir" data-anexo-id="${esc(anexo[1]!.toLowerCase())}">${esc(t.slice(1, meio))}</button>`;
+    // NOD-85: o link da mini-agenda (`ver_agenda`) abre Configurações › Rotinas no dia, com o filtro de problema.
+    const agenda = lerLinkDaAgenda(t.slice(meio + 2, -1));
+    if (agenda) return `<button type="button" class="md-midia-link md-agenda-link" data-act="abrir-agenda" data-dia="${agenda.dia}"${agenda.soProblema ? ' data-problema="1"' : ""}>${esc(t.slice(1, meio))}</button>`;
     // Só http(s) vira link; o resto ([abrir](javascript:…), file:, mailto:) fica como o bot escreveu.
     return quebras(t);
   }

@@ -15,6 +15,7 @@ const NOD: Record<string, readonly [passado: string, presente: string]> = {
   pedir_acesso: ["Pediu um acesso", "Pedindo um acesso"],
   criar_rotina: ["Propôs uma rotina", "Propondo uma rotina"],
   listar_rotinas: ["Consultou as rotinas", "Consultando as rotinas"],
+  ver_agenda: ["Consultou a agenda", "Consultando a agenda"],
   pausar_rotina: ["Pausou uma rotina", "Pausando uma rotina"],
   reativar_rotina: ["Reativou uma rotina", "Reativando uma rotina"],
   atualizar_rotina: ["Propôs mudança numa rotina", "Propondo mudança numa rotina"],

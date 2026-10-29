@@ -11,6 +11,7 @@ import { decidirRitmoRotina } from "../../../use-cases/ritmo-rotina.ts";
 import type { CasoDeUso, Deps, Services, UseCasesNod } from "../../../use-cases/tipos.ts";
 import type { Rota } from "../roteador.ts";
 import { executarRotinaAgora } from "../../../use-cases/executar-rotina-agora.ts";
+import { verAgenda } from "../../../use-cases/ver-agenda.ts";
 import type { Executor } from "../../../contracts/evento.ts";
 
 /**
@@ -82,6 +83,23 @@ export function criarRotasRotinas(deps: DepsRotasL7): Rota[] {
         const naFila: Record<string, string> = r.jaNaFila ? { jaNaFila: r.jaNaFila.turnoId, jaNaFilaEm: String(r.jaNaFila.instanteAgendado), fusoIana: r.jaNaFila.fusoIana } : {};
         const resposta: RespostaMutacao = { ok: true, ids: { conversaId: r.conversaId, ...(r.turnoId ? { turnoId: r.turnoId } : {}), ...bloqueio, ...naFila } };
         ctx.json(200, resposta);
+      },
+    },
+    {
+      // NOD-85: a agenda (só leitura). `de`/`ate` em epoch ms, `fuso` IANA da pessoa (UTC sem ele), `agente` opcional.
+      metodo: "GET",
+      padrao: /^\/rotinas\/agenda$/,
+      async handler(ctx) {
+        const url = new URL(ctx.req.url ?? "/", "http://127.0.0.1");
+        const numero = (campo: string): number => {
+          const v = url.searchParams.get(campo);
+          if (v === null || !/^\d{1,15}$/.test(v)) throw new ErroDeDominio("entrada_invalida", { cause: `parâmetro ${campo}` });
+          return Number(v);
+        };
+        const agente = url.searchParams.get("agente");
+        ctx.json(200, await executar(deps, ctx.escopo, verAgenda, {
+          de: numero("de"), ate: numero("ate"), fuso: url.searchParams.get("fuso") || "UTC", ...(agente ? { agenteId: uuid(agente, "agente") } : {}),
+        }));
       },
     },
     {

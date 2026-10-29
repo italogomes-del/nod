@@ -131,6 +131,7 @@ export function useCasesDeTeste(): UseCasesNod {
     pedirAcesso: naoImplementado("pedirAcesso (L5)"),
     criarRotina: naoImplementado("criarRotina (L7)"),
     listarRotinasDoAgente: naoImplementado("listarRotinasDoAgente (L7)"),
+    verAgendaPeloAgente: naoImplementado("verAgendaPeloAgente (L7)"),
     pausarRotinaPeloAgente: naoImplementado("pausarRotinaPeloAgente (L7)"),
     reativarRotinaPeloAgente: naoImplementado("reativarRotinaPeloAgente (L7)"),
     atualizarRotinaPeloAgente: naoImplementado("atualizarRotinaPeloAgente (L7)"),

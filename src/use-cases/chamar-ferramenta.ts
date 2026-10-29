@@ -129,6 +129,7 @@ const DESPACHO: Despacho = {
   pedir_acesso: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.pedir_acesso](deps, { ...ctx, ...args }),
   criar_rotina: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.criar_rotina](deps, { ...ctx, ...args }),
   listar_rotinas: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.listar_rotinas](deps, { ...ctx, ...args }),
+  ver_agenda: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.ver_agenda](deps, { ...ctx, ...args }),
   pausar_rotina: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.pausar_rotina](deps, { ...ctx, ...args }),
   reativar_rotina: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.reativar_rotina](deps, { ...ctx, ...args }),
   atualizar_rotina: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.atualizar_rotina](deps, { ...ctx, ...args }),

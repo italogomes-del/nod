@@ -138,7 +138,7 @@ describe("NOD-370: a fiação em main.ts", () => {
 
   it("a rolagem é guardada no elemento que rola de Seu espaço, e o foco pendente é aplicado a cada desenho (critério 1)", async () => {
     const [main, espaco, css] = await Promise.all([ler("../../../web/main.ts"), ler("../../../web/telas/espaco.ts"), ler("../../../web/navegacao.css")]);
-    expect(main).toMatch(/regiaoReabrindo\("espaco", estado\.espaco \? renderEspaco\([\s\S]{0,400}?\) : "", \{ seletor: "\.espaco-conteudo", chave: secaoAberta\(estado\) === "agentes" \? "agentes" : null \}\);/);
+    expect(main).toMatch(/regiaoReabrindo\("espaco", estado\.espaco \? renderEspaco\([\s\S]{0,400}?\) : "", \{ seletor: "\.espaco-conteudo", chave: secaoAberta\(estado\) === "agentes" \|\| secaoAberta\(estado\) === "rotinas" \? secaoAberta\(estado\) : null \}\);/);
     expect(espaco).toContain('<main class="espaco-conteudo">');
     expect(css).toMatch(/\.espaco-conteudo \{[^}]*overflow: auto/);
     expect(corpo(main, "function render(): void {")).toMatch(/focoPendente\.aplicar\(\);\s*$/);

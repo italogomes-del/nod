@@ -134,7 +134,7 @@ export interface UseCasesNod<Deps> {
   atualizarPerfil: CasoNod<Deps, "atualizar_perfil">;
   pedirAcesso: CasoNod<Deps, "pedir_acesso">;
   criarRotina: CasoNod<Deps, "criar_rotina">;
-  listarRotinasDoAgente: CasoNod<Deps, "listar_rotinas">;
+  listarRotinasDoAgente: CasoNod<Deps, "listar_rotinas">; verAgendaPeloAgente: CasoNod<Deps, "ver_agenda">;
   pausarRotinaPeloAgente: CasoNod<Deps, "pausar_rotina">;
   reativarRotinaPeloAgente: CasoNod<Deps, "reativar_rotina">;
   atualizarRotinaPeloAgente: CasoNod<Deps, "atualizar_rotina">;
@@ -171,7 +171,7 @@ export const USE_CASE_POR_FERRAMENTA = {
   atualizar_perfil: "atualizarPerfil",
   pedir_acesso: "pedirAcesso",
   criar_rotina: "criarRotina",
-  listar_rotinas: "listarRotinasDoAgente",
+  listar_rotinas: "listarRotinasDoAgente", ver_agenda: "verAgendaPeloAgente",
   pausar_rotina: "pausarRotinaPeloAgente",
   reativar_rotina: "reativarRotinaPeloAgente",
   atualizar_rotina: "atualizarRotinaPeloAgente",

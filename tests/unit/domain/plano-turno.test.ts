@@ -144,6 +144,14 @@ describe("montarPlano", () => {
     expect(nomes(montarPlano({ ...base, modo: "conversa", turno: { ...turno, sobProcuracaoDe: null } }))).toContain("buscar_conversas");
   });
 
+  it("NOD-85 (revisão 1 do PR #595): ver_agenda só onde a pessoa dona lê — nem na sala nem a pedido de outro bot", () => {
+    for (const modo of ["conversa", "criacao", "ligacao"] as const) expect(nomes(montarPlano({ ...base, modo })), modo).toContain("ver_agenda");
+    expect(nomes(montarPlano({ ...base, modo: "sala" }))).not.toContain("ver_agenda");
+    // Revisão 2 do PR 595: leitura pura, marcada como só leitura.
+    expect(montarPlano({ ...base, modo: "conversa" }).catalogo.ferramentas.find((f) => f.nome === "ver_agenda")).toMatchObject({ origem: "nod", readOnlyHint: true });
+    for (const sob of [turno.ownerId, "outra-pessoa"]) expect(nomes(montarPlano({ ...base, modo: "conversa", turno: { ...turno, sobProcuracaoDe: sob } })), sob).not.toContain("ver_agenda");
+  });
+
   it("NOD-317: o \"A fazer\" saiu — nenhum modo tem ferramenta de pendência, nem o prompt fala dela", () => {
     for (const modo of Object.keys(FERRAMENTAS_NOD_POR_MODO) as (keyof typeof FERRAMENTAS_NOD_POR_MODO)[]) {
       expect(FERRAMENTAS_NOD_POR_MODO[modo].filter((n) => n.includes("pendencia")), modo).toEqual([]);

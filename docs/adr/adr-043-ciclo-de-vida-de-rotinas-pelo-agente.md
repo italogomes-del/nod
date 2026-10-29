@@ -86,3 +86,22 @@ o primeiro corte é a instrução — reduzir `INSTRUCAO_ROTINA_NO_PROMPT` —, 
 
 Restaurar rotina excluída (não há tela nem ferramenta; a linha continua no banco, então é possível
 depois), purga definitiva, e edição de rotina de outra pessoa sobre agente de equipe.
+
+## Emenda — ver_agenda (NOD-85, 2026-10-29)
+
+O inventário no prompt e as ferramentas de escrita continuam só com as rotinas do agente do turno. A
+NOD-85 abre uma exceção de LEITURA: `ver_agenda` ("o que roda amanhã?", "o que deu problema essa
+semana?") projeta a agenda de TODAS as rotinas da própria pessoa, de todos os bots dela, porque a
+pergunta é sobre o dia dela e não sobre um bot. Decidido pela PM (Ada) na issue.
+
+- Só as rotinas cuja dona é a pessoa do escopo (`ownerId === pessoaId`). A de colega sobre bot de
+  equipe fica fora: a instrução dela é texto de outra pessoa e não chega ao modelo como conteúdo
+  confiável. Ela aparece só na tela (GET rotinas/agenda), sem ações.
+- Só leitura (`readOnlyHint`), até 5 linhas com título curto; nada muda por ela. Mudar horário segue
+  por `atualizar_rotina` (card), pausar pelo chat aplica direto, como na decisão acima.
+- Nos modos em que a pessoa dona lê o histórico (conversa, criação, ligação), junto de
+  `buscar_conversas`/`ler_conversa`; fora da sala e de turno feito a pedido de outro bot.
+
+Gatilho de reversão: se um bot passar a agir sobre rotina de outro bot a partir do que leu na
+agenda (pedir para pausar, mudar ou "rodar agora" uma rotina que não é dele), restringir
+`ver_agenda` às rotinas do agente do turno e deixar a visão geral só na tela.

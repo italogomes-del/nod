@@ -80,6 +80,18 @@ export function rotinaExecucoesRepo(conn: Conn, escopo: Escopo) {
       return linhas.map(paraExecucao);
     },
 
+    /**
+     * NOD-85: todas as guardadas das rotinas dadas (≤ 20 por rotina, a poda garante), numa query só — a agenda precisa
+     * da mais antiga de cada uma para dizer desde quando há registro.
+     */
+    async dasRotinas(rotinaIds: readonly string[]): Promise<ExecucaoRotina[]> {
+      if (rotinaIds.length === 0) return [];
+      const linhas = await conn<Linha[]>`
+        select ${conn.unsafe(COLUNAS)} from rotina_execucoes where tenant_id = ${escopo.tenantId} and rotina_id = any(${[...rotinaIds]}::uuid[])
+        order by instante_agendado, id`;
+      return linhas.map(paraExecucao);
+    },
+
     /** Poda o que passa das `guardar` mais recentes; devolve quantas saíram (src/domain/rotina-limites.ts decide o número). */
     async podar(rotinaId: string, guardar = EXECUCOES_GUARDADAS): Promise<number> {
       const r = await conn`

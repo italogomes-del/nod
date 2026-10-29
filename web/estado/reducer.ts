@@ -35,6 +35,8 @@ import type { LeituraAtual } from "../lib/ouvir.ts";
 import { FALA_SAINDO_MS } from "../lib/fala-viva.ts";
 import { acoesFechadas, acoesSemNota, ATIVIDADE_VAZIA, linhasDoResumo, comFerramenta, comFimDaAcao, comSubagentes, comTarefas, comTexto, comVigia, SEM_NOME_DA_FERRAMENTA, semFerramentaAberta, soSubagentes, subagentesParados, textoDaFala, type AtividadeTurno, type FerramentaEmUso, type SubagentesDoTurno, type VigiaDaAtividade, comCabecalho, comFrentesEm } from "../lib/atividade.ts";
 import { chaveDaAtividade, diaLocal, type VistaDaAtividade } from "../lib/atividade-do-bot.ts";
+import { AGENDA_INICIAL, agendaPorLer, ehAcaoDaAgenda, reduzirAgenda, type AcaoAgenda, type EstadoAgenda } from "./agenda.ts";
+import { diaDe } from "../lib/agenda.ts";
 import type { PaginaDaBiblioteca } from "../../src/contracts/biblioteca.ts";
 import { gruposVisiveis, juntarPagina, POR_VEZ, type BibliotecaDaConversa, type GrupoBiblioteca } from "../lib/biblioteca.ts";
 import type { EstadoConexao } from "../lib/live-events.ts";
@@ -151,8 +153,8 @@ export type ConectarMaquina = {
   conviteAte?: number | null;
 };
 
-/** NOD-367 (protótipo v2): as 6 seções das Configurações, nesta ordem na lateral. */
-export type SecaoEspaco = "conta" | "geral" | "conexao" | "maquinas" | "agentes" | "feedback";
+/** NOD-367 (protótipo v2): as seções das Configurações, nesta ordem na lateral. NOD-85: Rotinas entre Agentes e Feedback. */
+export type SecaoEspaco = "conta" | "geral" | "conexao" | "maquinas" | "agentes" | "rotinas" | "feedback";
 /**
  * O que um ponto de entrada pode pedir: as 6 seções, as de antes da NOD-367 (avisos, preferências, este Mac,
  * computadores, computador do bot, relatos), que caem na seção que as absorveu, e "ajuda" (Geral, no bloco Ajuda).
@@ -305,7 +307,7 @@ export type EscolhaComposer = { outroAssunto: boolean; alvoId: string | null };
  */
 export type CitacaoNoCampo = { mensagemId: string; trecho: string };
 
-export type Invalidacao = "onboarding" | "ligacao" | "trabalhos" | `trabalho:${string}` | `disponibilidade:${string}` | "gestao" | "frota" | "sua-vez" | "nao-lidos" | "rotinas" | "conectores" | "inventario" | "executor" | "ias" | "uso-plano" | "salas" | "chaves" | "maquinas" | "nuvem" | "contas" | "relatos" | `conversa:${string}` | `vivos:${string}` | `memoria:${string}` | `diario:${string}` | `concessoes:${string}` | `execucoes:${string}` | `atividade:${string}` | `atividade-hoje:${string}` | `biblioteca:${string}`;
+export type Invalidacao = "onboarding" | "ligacao" | "trabalhos" | `trabalho:${string}` | `disponibilidade:${string}` | "gestao" | "frota" | "sua-vez" | "nao-lidos" | "rotinas" | "conectores" | "inventario" | "executor" | "ias" | "uso-plano" | "salas" | "chaves" | "maquinas" | "nuvem" | "contas" | "relatos" | "agenda" | `conversa:${string}` | `vivos:${string}` | `memoria:${string}` | `diario:${string}` | `concessoes:${string}` | `execucoes:${string}` | `atividade:${string}` | `atividade-hoje:${string}` | `biblioteca:${string}`;
 
 export type Estado = {
   sessao: Escopo | null;
@@ -476,6 +478,8 @@ export type Estado = {
   relatos: Relato[] | null;
   /** NOD-367: a lista de Feedback não carregou (a seção mostra "Tentar de novo" em vez de pedir de novo sozinha). */
   relatosErro?: boolean;
+  /** NOD-85: a agenda das rotinas (Configurações › Rotinas). */
+  agenda: EstadoAgenda;
   /**
    * Modo dev (definido em 2026-09-28, 0036): a preferência vem do servidor (o app desktop limpa o localStorage)
    * e, ligada, cada conversa aberta traz o resumo do Raio-X de cada turno e o total do dia.
@@ -549,6 +553,7 @@ export type Estado = {
 };
 
 export type Acao =
+  | AcaoAgenda
   | { tipo: "conexao-app"; slug: string; valor: ConexaoApp | null }
   | { tipo: "gaveta"; agenteId: string; nivel: NivelGaveta | null }
   | { tipo: "perfil-celular"; perfil: PerfilCelular | null }
@@ -728,6 +733,7 @@ export const estadoInicial: Estado = {
   contasUi: UI_CONTAS_INICIAL,
   nuvem: UI_NUVEM_INICIAL,
   relatos: null,
+  agenda: AGENDA_INICIAL,
   modoDev: { ligado: false, raioX: {} },
   chaveEmitida: null,
   negacoes: [],
@@ -789,7 +795,9 @@ function texto(v: unknown): string | null {
   return typeof v === "string" && v !== "" ? v : null;
 }
 
-function invalidar(estado: Estado, ...quais: (Invalidacao | null)[]): Estado {
+function invalidar(estado: Estado, ...pedidas: (Invalidacao | null)[]): Estado {
+  // NOD-85: o que muda uma rotina (pausar, ativar, rodar, criar, excluir o bot) muda a agenda também.
+  const quais = pedidas.includes("rotinas") && !pedidas.includes("agenda") ? [...pedidas, "agenda" as const] : pedidas;
   const novas = quais.filter((q): q is Invalidacao => q !== null && !estado.invalidacoes.includes(q));
   return novas.length === 0 ? estado : { ...estado, invalidacoes: [...estado.invalidacoes, ...novas] };
 }
@@ -1454,6 +1462,7 @@ export function aplicarFrame(estado: Estado, frame: FrameSse, agora: number): Es
 }
 
 export function reduzir(estado: Estado, acao: Acao): Estado {
+  if (ehAcaoDaAgenda(acao)) return { ...estado, agenda: reduzirAgenda(estado.agenda, acao) };
   switch (acao.tipo) {
     case "sessao":
       // Trocou a pessoa: chaves E relatos somem. Relato carrega correlationId, machineId e o erro
@@ -1469,7 +1478,7 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
         falhaLeitura: acao.escopo?.pessoaId === estado.sessao?.pessoaId && acao.escopo?.tenantId === estado.sessao?.tenantId ? estado.falhaLeitura : null,
         // NOD-326 (revisão 3): a Biblioteca também some na troca de tenant (não fica dado de um tenant no outro).
         ...(acao.escopo?.tenantId === estado.sessao?.tenantId ? {} : { bibliotecaDoBot: {} }),
-        ...(acao.escopo?.pessoaId === estado.sessao?.pessoaId ? {} : { onboarding: undefined, onboardingAberto: false, onboardingResolvido: false, trabalhos: null, trabalhoDetalhe: {}, pressao: null, atividadeDoBot: {}, atividadeHoje: {}, atividadeVista: null, bibliotecaDoBot: {} }) };
+        ...(acao.escopo?.pessoaId === estado.sessao?.pessoaId ? {} : { onboarding: undefined, onboardingAberto: false, onboardingResolvido: false, agenda: AGENDA_INICIAL, trabalhos: null, trabalhoDetalhe: {}, pressao: null, atividadeDoBot: {}, atividadeHoje: {}, atividadeVista: null, bibliotecaDoBot: {} }) };
     case "navegar": {
       // definido em 2026-10-08 (revisão W5): reabrir uma task já vista relê as mensagens dela (o detalhe guardado é de
       // quando ela foi aberta da última vez); W11: sair da tela da task de um bot cuja conversa não está carregada apaga o
@@ -1500,6 +1509,8 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
         // NOD-367 (revisão 2): o relato.criado não invalida nada (ADR-041), então entrar em Feedback relê "Seus envios" e
         // esquece o erro de antes; o envio feito na conversa com o Nod aparece ao voltar.
         ...(acao.secao === "feedback" && !acao.lista && secaoAberta(estado) !== "feedback" ? { relatos: null, relatosErro: false } : {}),
+        // NOD-85: entrar em Rotinas abre a agenda em hoje, no agora (o link do chat abre num dia com `agenda-abrir` depois).
+        ...(acao.secao === "rotinas" && !acao.lista && secaoAberta(estado) !== "rotinas" ? { agenda: reduzirAgenda(estado.agenda, { tipo: "agenda-abrir", hoje: diaDe(estado.agora) }) } : {}),
       };
     case "config-ui":
       return { ...estado, configUi: { ...estado.configUi, ...acao.mudanca } };
@@ -2150,6 +2161,9 @@ export function invalidacoesDaTela(estado: Estado): Invalidacao[] {
   if (estado.sessao && !estado.contasIa && (secao === "maquinas" || secao === "conexao" || t.tipo === "conversa" || t.tipo === "trabalho" || conversaAbertaTemNotaDeContas(estado))) faltas.push("contas");
   // O frame relato.criado não invalida nada (é registro), então a seção busca quando ainda não tem.
   if (secao === "feedback" && !estado.relatos && !estado.relatosErro) faltas.push("relatos");
+  // NOD-85: a agenda lê a janela dela e as rotinas (a parada por falta de acesso e o "Permitir" vêm de GET rotinas).
+  if (secao === "rotinas" && agendaPorLer(estado.agenda)) faltas.push("agenda");
+  if (secao === "rotinas" && !estado.carregado.rotinas) faltas.push("rotinas");
   return faltas.filter((f) => !estado.invalidacoes.includes(f));
 }
 
