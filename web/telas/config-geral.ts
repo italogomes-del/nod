@@ -4,7 +4,8 @@ import { detalheDoTema } from "../lib/aparelho.ts";
 import { linhasDaFolha, lugarAtual, type LugarTeclado } from "../lib/atalhos.ts";
 import type { EstadoAvisos } from "../lib/avisos.ts";
 import { ehCelular } from "../lib/celular.ts";
-import { grupoConfig, linhaConfig, listaAninhada, type TomStatus } from "../lib/linha-config.ts";
+import { ESCOLHAS_DENSIDADE, type Densidade } from "../lib/densidade.ts";
+import { grupoConfig, linhaConfig, listaAninhada, segmentado, type TomStatus } from "../lib/linha-config.ts";
 import { esc } from "../lib/render.ts";
 import { ESCOLHAS_TEMA, type EscolhaTema } from "../lib/tema.ts";
 
@@ -90,15 +91,27 @@ export type DadosGeral = {
   avisos: EstadoAvisos;
   modoDev: boolean;
   experimentos: Experimentos;
+  /** NOD-119: a densidade da barra neste computador (ausente = Confortável). */
+  densidade?: Densidade;
 };
+
+/** NOD-119: a frase que ensina o atalho da borda. */
+export const AJUDA_DENSIDADE = "Para ver só os avatares, arraste a borda da barra para a esquerda.";
 
 /** NOD-383: no celular não há teclado de atalhos: a Ajuda fica só com o onboarding, e o Tema fala do aparelho. */
 export function renderGeral(d: DadosGeral, ui: ConfigUi, celular = ehCelular(), lugar: LugarTeclado = lugarAtual()): string {
+  const densidade = d.densidade ?? "confortavel";
+  // NOD-119 (C1): no celular a barra é a gaveta de sempre; a linha "Barra lateral" não aparece.
+  const barra = celular ? [] : [linhaConfig({
+    titulo: "Barra lateral",
+    detalheHtml: `<span id="densidade-ajuda">${esc(AJUDA_DENSIDADE)}</span>`,
+    controle: { tipo: "html", html: segmentado({ acao: "escolher-densidade", rotulo: "Barra lateral", descritoPor: "densidade-ajuda", opcoes: ESCOLHAS_DENSIDADE.map((o) => ({ valor: o.id, rotulo: o.nome, selecionado: o.id === densidade })) }) },
+  })];
   const tema = grupoConfig("Aparência", [linhaConfig({
     titulo: "Tema",
     detalhe: detalheDoTema(celular),
     controle: { tipo: "seletor", acao: "escolher-tema", rotulo: "Tema", opcoes: ESCOLHAS_TEMA.map((t) => ({ valor: t.id, rotulo: t.nome, selecionado: t.id === d.tema })) },
-  })]);
+  }), ...barra]);
   // NOD-117: a folha de atalhos é este bloco, com as teclas do lugar onde o nod roda (web/lib/atalhos.ts).
   const ajuda = grupoConfig("Ajuda", [
     linhaConfig({ titulo: "Ver o onboarding de novo", detalhe: "A apresentação do nod, do começo", controle: { tipo: "link", acao: "ver-onboarding" } }),

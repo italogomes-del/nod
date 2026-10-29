@@ -45,6 +45,9 @@ import { HTML_SELETOR_IA } from "./seletor-ia.ts";
 import { avisoDeEstado } from "../lib/aviso-estado.ts";
 import { inventarioEmUso } from "./frota.ts";
 import { cartaoRitmoRotina } from "./ritmo-rotina.ts";
+import { cartaoAjusteBarra } from "./card-barra.ts";
+import { lerBarra } from "../lib/densidade.ts";
+import { ehCelular } from "../lib/celular.ts";
 import { alvosDoRecomeco, marcaDoRecomeco, notaDasEtapas, type AlvoDoRecomeco } from "../lib/recomeco.ts";
 import { avisoContaSemAcesso, avisoHarnessFora, avisoModeloRecusado, ehIa, inventarioDaIa, cartaoTrocaDeIa, linhaContaSeguiu, linhaContaTrocada, linhaIaDoBotTrocada, linhaIaTrocada, linhaIaVoltou, linhaLimiteSemOutra, prontaDepois, type IdIa } from "./ia-fora.ts";
 import { escolhaEfetiva, iasDaTela, inteligenciaDoBot } from "./inteligencia.ts";
@@ -213,6 +216,10 @@ function corpoMensagem(m: Mensagem, estado: Estado): string {
   if (p?.kind === "artefato") return renderCardArtefato(m, p, versaoMaisRecente(estado, m.conversaId, p.artefatoId, p.versao));
   // definido em 2026-10-04 (ADR-075): a linha "Chat de voz · mm:ss"; a ligação aberta nesta página oferece voltar a ela.
   if (p?.kind === "ligacao") return renderLinhaLigacao(m, p, estado.ligacaoViva?.local === true && estado.ligacaoViva.ligacaoId === p.ligacaoId);
+  // NOD-119 (C1): o card que propõe mudar a barra lateral; a barra é deste computador, então lê a daqui.
+  if (m.kind === "sistema" && p?.kind === "ajuste_barra") {
+    return cartaoAjusteBarra(m, { barra: lerBarra(), celular: ehCelular() }) ?? "";
+  }
   if (m.kind === "sistema") return cartaoRitmoRotina(m) ?? linhaDeIa(m, estado) ?? linhaDaMemoria(m, estado) ?? linhaDoTurnoPreso(m, estado) ?? `<div class="msg-sistema">${paragrafos(m.texto)}</div>`;
   if (p?.kind === "handoff") {
     // definido em 2026-09-24 (ADR-047): a tarefa delegada assina "Taga · por você" — autoria composta (ADR-023).

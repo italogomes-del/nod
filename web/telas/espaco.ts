@@ -11,6 +11,7 @@ import { botsDaPessoa, renderMaquinas } from "./maquinas.ts";
 import { renderRelatos } from "./relatos.ts";
 import { htmlPainelComputadorDoBot } from "../lib/computador-pessoa.ts";
 import type { EscolhaTema } from "../lib/tema.ts";
+import type { Densidade } from "../lib/densidade.ts";
 import { renderConta, renderContaPagina, type DadosConta } from "./config-conta.ts";
 import { iniciaisDeQuem } from "./menu-conta.ts";
 import { renderAgentes } from "./config-agentes.ts";
@@ -54,6 +55,8 @@ export type ExtrasEspaco = {
   /** A página de Minha conta aberta dentro de Conta (NOD-346); null = a lista. */
   contaPagina: string | null;
   tema: EscolhaTema;
+  /** NOD-119: a densidade da barra neste computador. */
+  densidade?: Densidade;
   /** O valor curto de Provedores de IA na lista do celular ("Conectada", "Simulação"…), o mesmo do menu da conta. */
   conexao?: string;
 };
@@ -124,6 +127,7 @@ function conteudo(estado: Estado, secao: SecaoEspaco, avisos: EstadoAvisos, extr
         avisos,
         modoDev: estado.modoDev.ligado,
         experimentos: estado.experimentos,
+        densidade: extras.densidade,
       }, estado.configUi, celular);
     case "conexao":
       return renderProvedores(estado);

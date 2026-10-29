@@ -75,6 +75,8 @@ export const ASSUNTOS = [
   "pedido.respondido",
   // NOD-114: o bot avisou a pessoa por conta própria (avisar_pessoa); o desktop e o navegador mostram o aviso.
   "aviso.pessoa",
+  // NOD-119: o card que pergunta se muda a barra lateral (ajustar_barra_lateral); a pessoa confirma nele.
+  "barra.ajuste",
   // O resto do que o sistema escreve (Atividade).
   "memoria.anotada",
   "memoria.task_fechada",

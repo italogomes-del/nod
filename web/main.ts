@@ -91,6 +91,7 @@ import { alvoDoAtalho, atalhoDoNovoBot, atalhoDoTeclado, lugarAtual, SELETOR_CAM
 import { rotuloDoMac } from "./lib/aparelho.ts";
 import { criarCelular } from "./lib/gaveta-bots.ts";
 import { tentarFrotaAgora } from "./lib/tentar-frota.ts";
+import { listaVaziaDaBarra } from "./lib/lista-vazia-da-barra.ts";
 import { criarToqueLongo, dicaJaVista, alturaDaLista, escolherRedesenhada, lugarDoMenuSegurado, marcarDicaVista, MS_DICA } from "./lib/toque-longo.ts";
 import { escondidosNoCelular, estadoDaLista, FAVORITOS_VISIVEIS, gruposSemResultado, horaDaLinha, PREFIXO_DO_PEDIDO } from "./lib/inicio-celular.ts";
 import "./pwa.ts";
@@ -98,6 +99,11 @@ import { avatar, botao, esc, iconeAgente } from "./lib/render.ts";
 import { COPIADO_MS, mostrarCopia, ROTULO_COPIADO, type RelogioDoCopiar } from "./lib/copiar.ts";
 import { avisoDeEstado } from "./lib/aviso-estado.ts";
 import { aplicarTema, lerTema, type EscolhaTema } from "./lib/tema.ts";
+import { adiar, aplicarBarra, escolherDensidade, lerBarra, pedidoDoChat, pintarBarra, serializar, type Barra, type PedidoBarra } from "./lib/densidade.ts";
+import type { BarraDesktop } from "../src/contracts/desktop-barra.ts";
+import { gravarDecisao, versaoDasDecisoesDaBarra } from "./telas/card-barra.ts";
+import { atualizarBorda, ligarBorda, ligarEtiqueta } from "./lib/borda-barra.ts";
+import { proximoDoSegmentado } from "./lib/linha-config.ts";
 import type { DadosConta } from "./telas/config-conta.ts";
 import { estadoMascoteNaConversa, mascoteComAviso, proximaViradaDoMascote } from "./lib/mascote.ts";
 import { lembrar } from "./lib/lembrar.ts";
@@ -302,6 +308,32 @@ let painelAbertoNaHora = false;
 // NOD-379 (emenda da ADR-094): a gaveta virou a tela inicial do celular; o ☰ virou o ‹ que volta a ela.
 // A pílula da conversa diz se a gaveta do bot está aberta; mostrar a inicial fecha a gaveta (gaveta-bots.ts).
 const celular = criarCelular(() => { render(); marcarPainelNaPilula(); });
+// NOD-119: a densidade e a largura da barra (web/lib/densidade.ts). O index.html já pintou antes do primeiro quadro;
+// mudarBarra é o caminho único da escolha em Configurações, da borda e do card do chat.
+let barraAtual: Barra = lerBarra();
+// A conversa depende da barra só pelo card do chat: ela lê `barraNaConversa`, que acompanha a barra quando o arrasto para.
+let barraNaConversa = serializar(barraAtual);
+const acompanharNaConversa = adiar<null>(250, () => { barraNaConversa = serializar(barraAtual); render(); });
+const gravarNoMac = adiar<BarraDesktop | null>(250, (v) => { void window.nodDesktop?.definirBarra?.(v).catch(() => undefined); });
+function mudarBarra(nova: Barra, naHora = false): void {
+  const gravarFora = naHora ? gravarNoMac.agora : gravarNoMac;
+  barraAtual = aplicarBarra(nova, document.documentElement, celular.ativo(), undefined, gravarFora);
+  acompanharNaConversa(null);
+  const borda = document.getElementById("borda-barra");
+  if (borda) atualizarBorda(borda, barraAtual);
+  etiquetaDaBarra?.esconder();
+  render();
+}
+// A etiqueta só vale com a barra desenhada recolhida (com a busca por cima, a barra está aberta).
+const recolhida = () => document.documentElement.dataset.largura === "recolhida";
+let etiquetaDaBarra: { esconder(): void } | null = null;
+{
+  const borda = document.getElementById("borda-barra");
+  const sidebar = document.getElementById("sidebar");
+  const etiqueta = document.getElementById("etiqueta-barra");
+  if (borda) ligarBorda(borda, { obter: () => barraAtual, mudar: mudarBarra });
+  if (sidebar && etiqueta) etiquetaDaBarra = ligarEtiqueta(sidebar, etiqueta, recolhida);
+}
 // NOD-379: a barra que ficou sem redesenhar enquanto a busca do celular tinha o foco. Ela é refeita um pouco depois do
 // focusout, para não trocar o DOM entre o toque e o clique na linha que a pessoa foi abrir.
 let sidebarAdiada = false;
@@ -1433,6 +1465,8 @@ function renderSidebar(estado: Estado): string {
   // NOD-379: no celular a barra é a tela inicial (topo do web, favoritos em grade, conversas como num mensageiro e a barra
   // flutuante de Buscar). O HTML do computador não muda.
   const ehCelular = celular.ativo();
+  // NOD-119: na barra recolhida a etiqueta própria (web/lib/borda-barra.ts) substitui o title.
+  const semTitle = !ehCelular && barraAtual.largura === "recolhida" && !(buscaAberta || termoBusca() !== "");
   const agentes = estado.frota?.agentes ?? [];
   const abertas = abertasPorAgente(estado);
   const perguntas = perguntasPorAgente(estado);
@@ -1469,7 +1503,12 @@ function renderSidebar(estado: Estado): string {
     // definido em 2026-09-30 (canvas "Menu, sidebar e gaveta"): sem ••• na linha nem no fixado — o menu do bot abre no
     // clique direito (ou Shift+F10). O nome inteiro, com o título, fica no title. ADR-125 (NOD-349): o ⋯ saiu do topo da
     // gaveta e mora aqui, à vista só no toque (sem clique direito); no mouse ele segue escondido.
-    return `<div class="bot-row${escondida ? " escondida" : ""}" data-bot-contexto="${esc(a.id)}"${arrastavel(a)} data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}"><button class="row"${atual(a.conversaId)} data-act="abrir-conversa" data-conversa="${esc(a.conversaId)}" data-agente="${esc(a.id)}" data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}" aria-label="Abrir conversa com ${esc(a.nome)}${emLigacao ? " (em ligação)" : ""}${rotuloAviso}" title="${esc(a.titulo ? `${a.nome} · ${a.titulo}` : a.nome)}">${iconeAgente(a, "", estadoVisual, aviso ? `data-aviso="${aviso}"` : "")}<span class="txt"><span class="nome-linha"><b>${esc(a.nome)}</b>${chip}</span>${subtitulo}</span></button><button type="button" class="bot-mais" data-act="menu-agente" data-id="${esc(a.id)}" aria-label="Ações de ${esc(a.nome)}" aria-haspopup="menu">⋯</button></div>`;
+    // NOD-119: na barra recolhida o chip vira anel ou ponto (data-estado-barra) e o resto do que a linha diz vai no aria-label.
+    const foraDoAr = !!a.computadorForaDoAr && a.ownerId === estado.sessao?.pessoaId;
+    const estadoBarra = emLigacao ? "ligacao" : foraDoAr ? "fora" : paradas.has(a.id) ? "parada" : "";
+    const extraAria = `${foraDoAr ? ", computador fora do ar" : ""}${!foraDoAr && paradas.has(a.id) ? ", rotina parada" : ""}${rotuloDoSinal(chip)}`;
+    const nomeCompleto = a.titulo ? `${a.nome} · ${a.titulo}` : a.nome;
+    return `<div class="bot-row${escondida ? " escondida" : ""}" data-bot-contexto="${esc(a.id)}"${arrastavel(a)}${estadoBarra ? ` data-estado-barra="${estadoBarra}"` : ""} data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}"><button class="row"${atual(a.conversaId)} data-act="abrir-conversa" data-conversa="${esc(a.conversaId)}" data-agente="${esc(a.id)}" data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}" data-etiqueta="${esc(nomeCompleto)}" aria-label="Abrir conversa com ${esc(a.nome)}${emLigacao ? " (em ligação)" : ""}${rotuloAviso}${esc(extraAria)}"${semTitle ? "" : ` title="${esc(nomeCompleto)}"`}>${iconeAgente(a, "", estadoVisual, aviso ? `data-aviso="${aviso}"` : "")}<span class="txt"><span class="nome-linha"><b>${esc(a.nome)}</b>${chip}</span>${subtitulo}</span></button><button type="button" class="bot-mais" data-act="menu-agente" data-id="${esc(a.id)}" aria-label="Ações de ${esc(a.nome)}" aria-haspopup="menu">⋯</button></div>`;
   };
   /**
    * NOD-379 (protótipo v3): a linha de mensageiro — mascote de 48, nome e título, a hora à direita e a prévia embaixo. Quando
@@ -1511,7 +1550,11 @@ function renderSidebar(estado: Estado): string {
     const mascote = estadoMascoteNaConversa(estado, a.conversaId);
     const rotulo = aviso ? ` (${ESPERA[aviso]})` : "";
     const emLigacao = estado.ligacaoViva?.agenteId === a.id;
-    return `<div class="fixado${emLigacao ? " em-ligacao" : ""}${alem}" data-bot-contexto="${esc(a.id)}"${arrastavel(a)} data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}"><button class="fixado-bt"${atual(a.conversaId)} data-act="abrir-conversa" data-conversa="${esc(a.conversaId)}" data-agente="${esc(a.id)}" aria-label="Abrir conversa com ${esc(a.nome)}${rotulo}" title="${esc(a.titulo ? `${a.nome} · ${a.titulo}` : a.nome)}">${iconeAgente(a, "lg", mascoteComAviso(mascote, aviso), aviso ? `data-aviso="${aviso}"` : "")}<b>${esc(a.nome)}</b>${emLigacao ? `<i class="chip chip-em-ligacao">${ICONE_LIGACAO.fone(11)}Em ligação</i>` : sinalDoBot(estado, a) || (a.titulo ? `<i class="chip">${esc(a.titulo)}</i>` : "")}</button><button type="button" class="bot-mais bot-mais-fixado" data-act="menu-agente" data-id="${esc(a.id)}" aria-label="Ações de ${esc(a.nome)}" aria-haspopup="menu">⋯</button></div>`;
+    const foraDoAr = !ehCelular && !!a.computadorForaDoAr && a.ownerId === estado.sessao?.pessoaId;
+    const estadoBarra = ehCelular ? "" : emLigacao ? "ligacao" : foraDoAr ? "fora" : paradas.has(a.id) ? "parada" : "";
+    const extraAria = ehCelular ? "" : `${emLigacao ? " (em ligação)" : ""}${foraDoAr ? ", computador fora do ar" : ""}${!foraDoAr && paradas.has(a.id) ? ", rotina parada" : ""}${rotuloDoSinal(sinalDoBot(estado, a))}`;
+    const nomeCompleto = a.titulo ? `${a.nome} · ${a.titulo}` : a.nome;
+    return `<div class="fixado${emLigacao ? " em-ligacao" : ""}${alem}" data-bot-contexto="${esc(a.id)}"${arrastavel(a)}${estadoBarra ? ` data-estado-barra="${estadoBarra}"` : ""} data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}"><button class="fixado-bt"${atual(a.conversaId)} data-act="abrir-conversa" data-conversa="${esc(a.conversaId)}" data-agente="${esc(a.id)}" data-etiqueta="${esc(nomeCompleto)}" aria-label="Abrir conversa com ${esc(a.nome)}${rotulo}${esc(extraAria)}"${semTitle ? "" : ` title="${esc(nomeCompleto)}"`}>${iconeAgente(a, "lg", mascoteComAviso(mascote, aviso), aviso ? `data-aviso="${aviso}"` : "")}<b>${esc(a.nome)}</b>${emLigacao ? `<i class="chip chip-em-ligacao">${ICONE_LIGACAO.fone(11)}Em ligação</i>` : sinalDoBot(estado, a) || (a.titulo ? `<i class="chip">${esc(a.titulo)}</i>` : "")}</button><button type="button" class="bot-mais bot-mais-fixado" data-act="menu-agente" data-id="${esc(a.id)}" aria-label="Ações de ${esc(a.nome)}" aria-haspopup="menu">⋯</button></div>`;
   };
   // definido em 2026-10-07 (ADR-081): o Nod nunca entra numa seção. Fixado, é o primeiro da grade; desafixado (discreto),
   // vira o botão com o logo e o nome na barra de cima, à esquerda da lupa (canvas "Nod — bot fixo", Alt E).
@@ -1580,23 +1623,34 @@ function renderSidebar(estado: Estado): string {
     </div>
     <div class="inicio-barra"><label class="search inicio-busca">${LUPA}<input id="busca-bots" type="search" enterkeyhint="search" placeholder="Buscar" aria-label="Buscar agentes" autocomplete="off" /></label></div>`;
   }
-  return `<div class="search-wrap">
+  const html = `<div class="search-wrap">
       <div class="sh">${nodDiscreto}<button class="icone-topo" data-act="abrir-busca" aria-label="Buscar agentes" aria-keyshortcuts="Meta+K Control+K" title="Buscar (⌘K)">${LUPA}</button>${naoLidos}${renderIconeTrabalhos(estado)}${renderChamada(estado)}<span class="create-actions"><button class="create-trigger" data-act="navegar" data-tela="novo-bot" data-segurar="segurar-mais" aria-label="Nova conversa (segure para criar um bot direto)" aria-keyshortcuts="${ATALHO_NOVO_BOT.aria} Shift+Enter Shift+Space" title="Nova conversa (${ATALHO_NOVO_BOT.texto})"><span class="segurar-anel" aria-hidden="true"></span>+</button></span></div>
       <label class="search"${buscando ? "" : " hidden"}><span>⌕</span><input id="busca-bots" placeholder="Buscar agentes…" aria-label="Buscar agentes" autocomplete="off" /><kbd>esc</kbd></label>
     </div>
     ${renderIncidentes(estado)}
     <div class="list">
       ${grade}
-      ${bots || '<p class="mudo">Nenhum agente visível.</p>'}
+      ${bots || listaVaziaDaBarra({ falhou: frotaFalhou, temFrota: !!estado.frota, botsDaEquipe: daEquipe.length }, SILHUETAS_DA_BARRA)}
       ${equipe}
     </div>
     ${ambiente}
     ${falhaMotor ? avisoDeEstado({ tom: "alerta", texto: situacaoMotor, papel: "status", classe: "aviso-compacto", acao: botao("secao-espaco", motorDesatualizado(estado) ? "Atualizar" : "Conectar", { classe: "pri sm", dados: { secao: "conexao" } }) }) : ""}
     <div class="rodape">
-      <button class="me${falhaMotor ? " me-falha" : ""}" data-act="menu-conta" aria-haspopup="menu" aria-expanded="${estado.espaco ? "true" : "false"}" aria-label="Menu da conta: ${esc(situacaoMotor)}${avisoUso ? ` · ${esc(avisoUso.resumo)}` : ""}" title="Menu da conta · ${esc(situacaoMotor)}${avisoUso ? ` · ${esc(avisoUso.resumo)}` : ""}"><span class="av-me">eu</span>${avisoUso ? '<span class="me-ponto" aria-hidden="true"></span>' : ""}<span class="me-conexao conexao-${esc(estado.conexao.estado)}" title="eventos ao vivo: ${esc(estado.conexao.estado)}"></span></button>
-      <button class="marketplace-bt" data-act="navegar" data-tela="conectores" aria-current="${t.tipo === "conectores" ? "true" : "false"}">${LOJA}Marketplace</button>
+      <button class="me${falhaMotor ? " me-falha" : ""}" data-act="menu-conta" aria-haspopup="menu" aria-expanded="${estado.espaco ? "true" : "false"}"${falhaMotor ? ' data-etiqueta="Sua IA não está conectada"' : ""} aria-label="Menu da conta: ${esc(situacaoMotor)}${avisoUso ? ` · ${esc(avisoUso.resumo)}` : ""}" title="Menu da conta · ${esc(situacaoMotor)}${avisoUso ? ` · ${esc(avisoUso.resumo)}` : ""}"><span class="av-me">eu</span>${falhaMotor ? '<span class="me-fora" aria-hidden="true">!</span>' : avisoUso ? '<span class="me-ponto" aria-hidden="true"></span>' : ""}<span class="me-conexao conexao-${esc(estado.conexao.estado)}" title="eventos ao vivo: ${esc(estado.conexao.estado)}"></span></button>
+      <button class="marketplace-bt" data-act="navegar" data-tela="conectores" aria-current="${t.tipo === "conectores" ? "true" : "false"}" data-etiqueta="Marketplace">${LOJA}<span class="marketplace-nome">Marketplace</span></button>
     </div>`;
+  // NOD-119: na barra recolhida nenhum title nativo (a etiqueta escura o substitui; dois balões juntos confundem).
+  return semTitle ? html.replace(/ title="[^"]*"/g, "") : html;
 }
+
+/** NOD-119: o que o chip de trabalhos diz (o aria-label dele), para o aria-label do bot quando a barra está recolhida. */
+function rotuloDoSinal(html: string): string {
+  const m = /class="chip-trab[^"]*"[^>]*aria-label="([^"]*)"/.exec(html) ?? /aria-label="([^"]*)"/.exec(html);
+  return m ? `, ${m[1]}` : "";
+}
+
+/** NOD-119: o carregando da barra — silhuetas de mascote no tamanho da densidade, nunca "Nenhum agente visível". */
+const SILHUETAS_DA_BARRA = `<div class="silhuetas-barra" role="status" aria-label="Carregando seus bots">${'<span class="silhueta-barra" aria-hidden="true"><i></i><b></b></span>'.repeat(6)}</div>`;
 
 // NOD-379: o ‹ da conversa volta à inicial do celular (era o ☰ da gaveta).
 const MENU = '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>';
@@ -1983,7 +2037,7 @@ function anunciarSubagentes(id: string): void {
 
 /** A tela da task em duas partes: o histórico lembrado (só muda com mensagem nova) e o ao vivo do turno do trabalho. */
 function partesDaTask(id: string): PartesDaTimeline {
-  return { historico: lembrar("task-historico", estado, [id, versaoDasFases()], (e) => blocosDoHistoricoDaTask(e, id)), aoVivo: blocosAoVivoDaTask(estado, id) };
+  return { historico: lembrar("task-historico", estado, [id, versaoDasFases(), versaoDasDecisoesDaBarra(), barraNaConversa, ehCelular()], (e) => blocosDoHistoricoDaTask(e, id)), aoVivo: blocosAoVivoDaTask(estado, id) };
 }
 
 function partesDaTimeline(): PartesDaTimeline | null {
@@ -1992,7 +2046,7 @@ function partesDaTimeline(): PartesDaTimeline | null {
   // O chip de link do Slack diz "mensagem das HH:MM" no mesmo dia e "de DD/MM" depois: o dia é um extra.
   // Chat limpo (PR 7): o progresso das frentes na fala lê o ao vivo e o relógio, então não entra aqui — a fala leva só o
   // lugar dele, que `progressoNaTela` enche depois (web/telas/progresso-na-fala.ts); a fala não é regravada quando uma frente anda.
-  const historico = lembrar("timeline-historico", estado, [new Date().toDateString(), versaoDasFases()], (e) => {
+  const historico = lembrar("timeline-historico", estado, [new Date().toDateString(), versaoDasFases(), versaoDasDecisoesDaBarra(), barraNaConversa, ehCelular()], (e) => {
     const conversa = conversaDaTela(e);
     return conversa ? blocosDoHistorico(conversa, e) : [];
   });
@@ -2513,6 +2567,7 @@ function render(): void {
     conta: dadosConta(),
     contaPagina: contas?.minhaConta && estado.configUi.abertos.includes("conta-pagina") ? telaMinhaConta.render() : null,
     tema: lerTema(),
+    densidade: barraAtual.densidade,
     conexao: resumoConexao(),
   }) : "", { seletor: ".espaco-conteudo", chave: secaoAberta(estado) === "agentes" || secaoAberta(estado) === "rotinas" ? secaoAberta(estado) : null });
   rolarAgenda();
@@ -2601,7 +2656,9 @@ function prenderFocoNaGaveta(slug: string | null): void {
  * (digitar na busca filtra direto, no ouvinte de input).
  */
 function redesenharSidebar(): void {
-  const html = lembrar("sidebar", estado, [ambienteBanco, buscaAberta, termoBusca() !== "", naFrente(), deixarNaoLida, secoesRecolhidas, celular.ativo(), celular.botsAbertos(), frotaFalhou, favoritosTodos, celular.ativo() ? new Date().toDateString() : ""], renderSidebar);
+  const html = lembrar("sidebar", estado, [ambienteBanco, buscaAberta, termoBusca() !== "", naFrente(), deixarNaoLida, secoesRecolhidas, celular.ativo(), celular.botsAbertos(), frotaFalhou, favoritosTodos, celular.ativo() ? new Date().toDateString() : "", serializar(barraAtual)], renderSidebar);
+  // NOD-119: no celular a barra é a gaveta de sempre; o <html> só leva a densidade no computador (virar o aparelho muda).
+  pintarBarra(barraAtual, document.documentElement, celular.ativo(), buscaAberta || termoBusca() !== "");
   if (!regiaoMudaria("sidebar", html)) return;
   const busca = document.getElementById("busca-bots") as HTMLInputElement | null;
   const valorBusca = busca?.value ?? "";
@@ -4581,7 +4638,34 @@ function criarBotAgora(): Promise<void> {
   });
 }
 
+function pedidoDoCard(el: HTMLElement): PedidoBarra | null {
+  const p = el.dataset.pedido;
+  return p === "compacta" || p === "so_avatares" || p === "normal" ? p : null;
+}
+
 const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
+  // NOD-119: Configurações › Aparência › Barra lateral; recolhida continua recolhida.
+  "escolher-densidade": (el) => {
+    const d = el.dataset.valor === "compacta" ? "compacta" : "confortavel";
+    mudarBarra(escolherDensidade(barraAtual, d), true);
+    document.querySelector<HTMLElement>(`.segmentado [data-act="escolher-densidade"][data-valor="${d}"]`)?.focus();
+  },
+  // NOD-119 (C1): o card do chat. Só o clique da pessoa muda a barra; a decisão fica neste computador.
+  "aplicar-barra": (el) => {
+    const pedido = pedidoDoCard(el);
+    const id = el.dataset.mensagem;
+    if (!pedido || !id || celular.ativo()) return;
+    gravarDecisao(id, "aplicada");
+    void window.nodDesktop?.definirDecisaoBarra?.(id, "aplicada").catch(() => undefined);
+    mudarBarra(pedidoDoChat(barraAtual, pedido), true);
+  },
+  "recusar-barra": (el) => {
+    const id = el.dataset.mensagem;
+    if (!id) return;
+    gravarDecisao(id, "recusada");
+    void window.nodDesktop?.definirDecisaoBarra?.(id, "recusada").catch(() => undefined);
+    render();
+  },
   ...telaOnboarding.acoes,
   // NOD-323: a mídia do bot.
   "midia-abrir": abrirMidia,
@@ -5339,7 +5423,11 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     dispatch({ tipo: "invalidar", quais: ["rotinas", `execucoes:${el.dataset.id ?? ""}`, ...(r.ids.bloqueada ? (["sua-vez", `conversa:${r.ids.conversaId ?? ""}`] as const) : [])] });
     navegar({ tipo: "conversa", conversaId: r.ids.conversaId ?? "", agenteId: el.dataset.agente ?? "" });
   }),
-  "abrir-conversa": (el) => navegar({ tipo: "conversa", conversaId: el.dataset.conversa ?? "", agenteId: el.dataset.agente ?? "" }),
+  "abrir-conversa": (el) => {
+    // NOD-119: escolher um bot na barra aberta por cima (recolhida + busca) fecha a busca, para a barra voltar a recolher.
+    if (document.documentElement.dataset.sobreposta && el.closest("#sidebar")) fecharBusca();
+    navegar({ tipo: "conversa", conversaId: el.dataset.conversa ?? "", agenteId: el.dataset.agente ?? "" });
+  },
   "marcar-lida": (el) => agir(async () => { await api!.marcarLida(el.dataset.conversa ?? ""); dispatch({ tipo: "invalidar", quais: ["nao-lidos", "frota"] }); }),
   "marcar-tudo-lido": () => agir(async () => { await api!.marcarTudoLido(); dispatch({ tipo: "invalidar", quais: ["nao-lidos", "frota"] }); }),
   "abrir-sala": (el) => navegar({ tipo: "sala", salaId: el.dataset.sala ?? "", conversaId: el.dataset.conversa ?? "" }),
@@ -6140,6 +6228,21 @@ const FORMS: Record<string, (form: HTMLFormElement) => Promise<void>> = {
 
 instalarDicaDeLink(document);
 
+// NOD-119: o seletor segmentado das Configurações (radiogroup): setas, Home e End escolhem a opção ao lado e levam o foco.
+document.addEventListener("keydown", (ev) => {
+  const el = (ev.target as HTMLElement | null)?.closest<HTMLElement>('.segmentado [role="radio"]');
+  if (!el) return;
+  const opcoes = [...(el.parentElement?.querySelectorAll<HTMLElement>('[role="radio"]') ?? [])];
+  const prox = proximoDoSegmentado(opcoes.indexOf(el), opcoes.length, ev.key);
+  if (prox === null) return;
+  ev.preventDefault();
+  const alvo = opcoes[prox];
+  if (!alvo || alvo === el) return;
+  const acao = ACOES[alvo.dataset.act ?? ""];
+  if (acao) void acao(alvo);
+  else alvo.focus();
+});
+
 document.addEventListener("click", (ev) => {
   const el = (ev.target as HTMLElement).closest<HTMLElement>("[data-act]");
   if (!el || el.tagName === "BUTTON" && (el as HTMLButtonElement).type === "submit" && el.closest("form[data-form]")) return;
@@ -6410,6 +6513,10 @@ document.addEventListener("focusout", (ev) => {
   if (campo.value.trim()) return;
   buscaAberta = false;
   campo.closest("label")?.setAttribute("hidden", "");
+  // NOD-119: a barra aberta por cima da conversa (recolhida + busca) volta a recolher. Se o foco foi para dentro da barra
+  // (o clique numa linha), quem recolhe é o abrir-conversa: encolher agora tiraria a linha de baixo do clique.
+  const para = ev.relatedTarget;
+  if (!(para instanceof Node && document.getElementById("sidebar")?.contains(para))) redesenharSidebar();
 });
 
 // NOD-368 (celular = CONSULTA_CELULAR, revisão 3): o toque longo numa linha de Agentes marca o bot e liga a seleção; no modo seleção, tocar na

@@ -17,6 +17,8 @@
     <meta name="apple-mobile-web-app-title" content="Nod" />
     <!-- Tema escolhido em Preferências (web/lib/tema.ts, mesma chave): aplicado antes do primeiro quadro, senão o app pisca claro. -->
     <script>try { var t = localStorage.getItem("nod.tema"); if (t === "claro" || t === "escuro") document.documentElement.dataset.theme = t === "claro" ? "light" : "dark"; } catch (e) {}</script>
+    <!-- NOD-119: densidade e largura da barra (web/lib/densidade.ts, mesma chave, valores e consulta do celular): aplicadas antes do primeiro quadro, senão a barra abre larga e encolhe. -->
+    <script>try { var d = localStorage.getItem("nod.densidade"), px = { "compacta": 200, "compacta:recolhida": 56, "compacta:larga": 340, "confortavel:recolhida": 72 }; if (Object.prototype.hasOwnProperty.call(px, d) && !matchMedia("(hover: none) and (pointer: coarse) and (max-width: 600px), (hover: none) and (pointer: coarse) and (max-height: 500px)").matches) { var h = document.documentElement, p = d.split(":"); h.dataset.densidade = p[0]; if (p[1]) h.dataset.largura = p[1]; h.style.setProperty("--largura-barra", px[d] + "px"); } } catch (e) {}</script>
     <!-- A Geist pedida já com o HTML, sem esperar o tokens.css: menos tempo com a fonte do sistema e o texto mudando de largura. -->
     <link rel="preload" href="/fontes/geist-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="stylesheet" href="/tokens.css" />
@@ -31,6 +33,7 @@
     <link rel="stylesheet" href="/agentes-lote.css" />
     <link rel="stylesheet" href="/agenda.css" />
     <link rel="stylesheet" href="/busca-celular.css" />
+    <link rel="stylesheet" href="/densidade.css" />
     <link rel="stylesheet" href="/mobile.css" />
   </head>
   <body>
@@ -41,6 +44,8 @@
     <div id="anuncio-config" class="sr-only" role="status" aria-live="polite"></div>
     <div id="anuncio-subagentes" class="sr-only" aria-live="polite"></div>
     <div id="anuncio-gestao" class="sr-only" aria-live="polite"></div>
+    <!-- NOD-119: a etiqueta do "só avatares" (nome e título no mouse e no foco); visual, o leitor de tela já ouve o aria-label. -->
+    <div class="etiqueta-barra" id="etiqueta-barra" aria-hidden="true" hidden></div>
     <div class="app">
       <aside class="sidebar" id="sidebar" aria-label="Bots e salas"></aside>
       <main class="stage">
@@ -58,6 +63,8 @@
         <footer class="composer-wrap" id="composer"></footer>
       </main>
       <aside class="detalhes" id="detalhes" aria-label="Detalhes do bot"></aside>
+      <!-- NOD-119: a borda da barra (web/lib/borda-barra.ts), fora do #sidebar regravado; encaixa nas larguras de web/lib/densidade.ts. -->
+      <div class="borda-barra" id="borda-barra" role="separator" aria-orientation="vertical" aria-controls="sidebar" aria-label="Largura da barra lateral" aria-valuemin="0" aria-valuemax="100" tabindex="0"></div>
     </div>
     <!-- Seu espaço (2026-09-30): camada de tela cheia por cima do app; a tela de baixo continua montada. -->
     <div id="espaco" hidden></div>

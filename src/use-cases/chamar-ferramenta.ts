@@ -165,6 +165,7 @@ const DESPACHO: Despacho = {
   abrir_conta: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.abrir_conta](deps, { ...ctx, ...args }),
   buscar_conversas: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.buscar_conversas](deps, { ...ctx, ...args }),
   ler_conversa: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.ler_conversa](deps, { ...ctx, ...args }),
+  ajustar_barra_lateral: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.ajustar_barra_lateral](deps, { ...ctx, ...args }),
 };
 
 /**

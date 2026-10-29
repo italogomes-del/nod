@@ -123,7 +123,7 @@ describe("QA do PR 553: a conversa lembra o histórico, e o erro do cartão prec
   it("os dois históricos lembrados da web (conversa e task) levam a versão das fases nos extras", async () => {
     const { readFileSync } = await import("node:fs");
     const main = readFileSync(new URL("../../../web/main.ts", import.meta.url), "utf8");
-    expect(main).toMatch(/lembrar\("timeline-historico", estado, \[[^\]]*versaoDasFases\(\)\]/);
-    expect(main).toMatch(/lembrar\("task-historico", estado, \[[^\]]*versaoDasFases\(\)\]/);
+    expect(main).toMatch(/lembrar\("timeline-historico", estado, \[[^\]]*versaoDasFases\(\)[^\]]*\]/);
+    expect(main).toMatch(/lembrar\("task-historico", estado, \[[^\]]*versaoDasFases\(\)[^\]]*\]/);
   });
 });

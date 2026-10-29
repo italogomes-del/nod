@@ -20,6 +20,8 @@
 .pilula-txt { display: contents; }
 
 @media (hover: none) and (pointer: coarse) and (max-width: 600px), (hover: none) and (pointer: coarse) and (max-height: 500px) {
+  /* NOD-119: no celular a barra não tem borda nem densidade — a gaveta de hoje. */
+  .borda-barra, .etiqueta-barra { display: none !important; }
   /* ADR-125 (NOD-349): a gaveta do bot com alvos de 44 px no toque. */
   .gvn-redondo, .gvn-cor { width: 44px; height: 44px; }
   .gvn-cores { gap: 0; }

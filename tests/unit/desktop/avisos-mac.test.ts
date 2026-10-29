@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { GRUPO_AVISOS, lerAviso, lerContador, lerPreferencias, lerTemaDesktop, opcoesDoAviso, origemDe, remetenteWebValido } from "../../../desktop/avisos-mac.ts";
+import { barraDoPedido, comDecisaoBarra, criarFilaDeGravacao, decisoesComPedido, GRUPO_AVISOS, respostaSincrona, lerAviso, lerBarraDesktop, lerDecisaoBarra, lerDecisoesBarra, lerContador, lerPreferencias, lerTemaDesktop, opcoesDoAviso, origemDe, remetenteWebValido } from "../../../desktop/avisos-mac.ts";
 
 /**
  * O que o processo principal aceita da janela web (definido em 2026-09-24, "aviso no Mac"): a página é
@@ -55,15 +55,15 @@ describe("argumentos", () => {
   });
 
   it("preferencias.json: ausente ou corrompido, os avisos nascem ligados e o tema segue o sistema", () => {
-    expect(lerPreferencias(null)).toEqual({ avisos: true, tema: "sistema", som: true });
-    expect(lerPreferencias("{")).toEqual({ avisos: true, tema: "sistema", som: true });
-    expect(lerPreferencias('{"avisos":"sim"}')).toEqual({ avisos: true, tema: "sistema", som: true });
-    expect(lerPreferencias('{"avisos":false}')).toEqual({ avisos: false, tema: "sistema", som: true });
+    expect(lerPreferencias(null)).toEqual({ avisos: true, tema: "sistema", som: true, barra: null });
+    expect(lerPreferencias("{")).toEqual({ avisos: true, tema: "sistema", som: true, barra: null });
+    expect(lerPreferencias('{"avisos":"sim"}')).toEqual({ avisos: true, tema: "sistema", som: true, barra: null });
+    expect(lerPreferencias('{"avisos":false}')).toEqual({ avisos: false, tema: "sistema", som: true, barra: null });
   });
 
   it("preferencias.json: o tema só aceita sistema, claro e escuro (ADR-070)", () => {
-    expect(lerPreferencias('{"avisos":false,"tema":"escuro"}')).toEqual({ avisos: false, tema: "escuro", som: true });
-    expect(lerPreferencias('{"tema":"roxo"}')).toEqual({ avisos: true, tema: "sistema", som: true });
+    expect(lerPreferencias('{"avisos":false,"tema":"escuro"}')).toEqual({ avisos: false, tema: "escuro", som: true, barra: null });
+    expect(lerPreferencias('{"tema":"roxo"}')).toEqual({ avisos: true, tema: "sistema", som: true, barra: null });
     expect(lerTemaDesktop("claro")).toBe("claro");
     expect(lerTemaDesktop("<script>")).toBeNull();
     expect(lerTemaDesktop(1)).toBeNull();
@@ -77,23 +77,23 @@ describe("argumentos", () => {
     expect(lerPreferencias('{"som":"nao"}').som).toBe(true);
     expect(lerPreferencias('{"som":0}').som).toBe(true);
     expect(lerPreferencias('{"som":null}').som).toBe(true);
-    expect(lerPreferencias('{"som":false}')).toEqual({ avisos: true, tema: "sistema", som: false });
+    expect(lerPreferencias('{"som":false}')).toEqual({ avisos: true, tema: "sistema", som: false, barra: null });
     // Com os avisos desligados, a escolha do som continua guardada.
-    expect(lerPreferencias('{"avisos":false,"tema":"claro","som":false}')).toEqual({ avisos: false, tema: "claro", som: false });
+    expect(lerPreferencias('{"avisos":false,"tema":"claro","som":false}')).toEqual({ avisos: false, tema: "claro", som: false, barra: null });
   });
 
   it("preferencias.json: gravar e reler (JSON.stringify, como gravarPreferencias) mantém avisos, tema e som", () => {
     // definirSom grava `{ ...preferencias, som }`: trocar o som não pode apagar avisos nem tema, e vice-versa.
     for (const p of [
-      { avisos: false, tema: "escuro" as const, som: false },
-      { avisos: true, tema: "claro" as const, som: false },
-      { avisos: false, tema: "sistema" as const, som: true },
+      { avisos: false, tema: "escuro" as const, som: false, barra: null },
+      { avisos: true, tema: "claro" as const, som: false, barra: null },
+      { avisos: false, tema: "sistema" as const, som: true, barra: null },
     ]) {
       expect(lerPreferencias(JSON.stringify(p))).toEqual(p);
       expect(lerPreferencias(JSON.stringify({ ...p, som: !p.som }))).toEqual({ ...p, som: !p.som });
     }
     // Arquivo de antes da NOD-196 (sem `som`): avisos e tema ficam, o som nasce ligado.
-    expect(lerPreferencias(JSON.stringify({ avisos: false, tema: "escuro" }))).toEqual({ avisos: false, tema: "escuro", som: true });
+    expect(lerPreferencias(JSON.stringify({ avisos: false, tema: "escuro" }))).toEqual({ avisos: false, tema: "escuro", som: true, barra: null });
   });
 });
 
@@ -131,3 +131,84 @@ describe("NOD-114: alvo da task e um grupo por bot", () => {
     expect(opcoesDoAviso({ ...aviso!, grupo: "ag-2" }, { som: true }).groupId).not.toBe(opcoesDoAviso(aviso!, { som: true }).groupId);
   });
 });
+
+describe("NOD-119: a barra lateral guardada no app do Mac", () => {
+  it("só os valores do contrato; o resto vira o padrão (null)", () => {
+    for (const v of ["compacta", "compacta:recolhida", "compacta:larga", "confortavel:recolhida"]) expect(lerBarraDesktop(v)).toBe(v);
+    for (const v of ["", "confortavel", "__proto__", "constructor", 1, null, undefined, {}]) expect(lerBarraDesktop(v)).toBeNull();
+  });
+  it("lerPreferencias traz a barra, e sem ela fica no padrão", () => {
+    expect(lerPreferencias(JSON.stringify({ barra: "compacta:larga" })).barra).toBe("compacta:larga");
+    expect(lerPreferencias(JSON.stringify({ barra: "toString" })).barra).toBeNull();
+    expect(lerPreferencias(JSON.stringify({ avisos: false })).barra).toBeNull();
+    expect(lerPreferencias(null).barra).toBeNull();
+  });
+});
+
+describe("NOD-119 (revisão 4): as decisões do card da barra no preferencias.json", () => {
+  const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+  it("só aceita id de mensagem (uuid) e aplicada/recusada", () => {
+    expect(lerDecisaoBarra(id(1), "aplicada")).toEqual([id(1), "aplicada"]);
+    expect(lerDecisaoBarra(id(1), "recusada")).toEqual([id(1), "recusada"]);
+    expect(lerDecisaoBarra(id(1), "talvez")).toBeNull();
+    expect(lerDecisaoBarra("__proto__", "aplicada")).toBeNull();
+    expect(lerDecisaoBarra("x".repeat(36), "aplicada")).toBeNull();
+    expect(lerDecisaoBarra(42, "aplicada")).toBeNull();
+  });
+  it("a mais nova vai ao fim, a repetida não duplica e passando de 50 saem as mais antigas", () => {
+    let d = {};
+    for (let n = 0; n < 55; n++) d = comDecisaoBarra(d, id(n), "aplicada");
+    expect(Object.keys(d)).toHaveLength(50);
+    expect(Object.keys(d)[0]).toBe(id(5));
+    d = comDecisaoBarra(d, id(10), "recusada");
+    expect(Object.keys(d)).toHaveLength(50);
+    expect(Object.keys(d).at(-1)).toBe(id(10));
+    expect((d as Record<string, string>)[id(10)]).toBe("recusada");
+  });
+  it("lê o campo do arquivo: sem arquivo, corrompido ou com lixo, só o que é válido", () => {
+    expect(lerDecisoesBarra(null)).toEqual({});
+    expect(lerDecisoesBarra("{")).toEqual({});
+    expect(lerDecisoesBarra('{"decisoesBarra":[1]}')).toEqual({});
+    expect(lerDecisoesBarra(JSON.stringify({ barra: "compacta", decisoesBarra: { [id(1)]: "aplicada", ruim: "aplicada", [id(2)]: "x" } }))).toEqual({ [id(1)]: "aplicada" });
+    const muitas = Object.fromEntries(Array.from({ length: 60 }, (_, n) => [id(n), "recusada"]));
+    expect(Object.keys(lerDecisoesBarra(JSON.stringify({ decisoesBarra: muitas })))).toHaveLength(50);
+  });
+});
+
+describe("NOD-119 (revisão 5): a fila do preferencias.json", () => {
+  it("uma gravação só começa quando a anterior termina, na ordem de chegada; a que falha não trava as seguintes", async () => {
+    const fila = criarFilaDeGravacao();
+    const log: string[] = [];
+    const lenta = (n: string, ms: number) => async () => { log.push(`inicio ${n}`); await new Promise((r) => setTimeout(r, ms)); log.push(`fim ${n}`); };
+    const a = fila(lenta("a", 20));
+    const b = fila(async () => { log.push("b"); throw new Error("disco"); });
+    const c = fila(lenta("c", 1));
+    await a;
+    await expect(b).rejects.toThrow("disco");
+    await c;
+    expect(log).toEqual(["inicio a", "fim a", "b", "inicio c", "fim c"]);
+  });
+});
+
+describe("NOD-119 (revisão 6): os canais da barra no processo principal", () => {
+  const id = "00000000-0000-4000-8000-000000000001";
+  const recusa = () => { throw new Error("origem_invalida"); };
+  it("o sendSync devolve o guardado à janela web e o padrão a qualquer outro remetente", () => {
+    expect(respostaSincrona(() => undefined, () => "compacta", null)).toBe("compacta");
+    expect(respostaSincrona(recusa, () => "compacta", null)).toBeNull();
+    expect(respostaSincrona<Record<string, string>>(recusa, () => ({ [id]: "aplicada" }), {})).toEqual({});
+    expect(respostaSincrona(() => undefined, () => { throw new Error("x"); }, {})).toEqual({});
+  });
+  it("definirBarra: valor conhecido ou null; o resto é recusado", () => {
+    expect(barraDoPedido("compacta:recolhida")).toBe("compacta:recolhida");
+    expect(barraDoPedido(null)).toBeNull();
+    expect(() => barraDoPedido("gigante")).toThrow("entrada_invalida");
+    expect(() => barraDoPedido(undefined)).toThrow("entrada_invalida");
+  });
+  it("definirDecisaoBarra: guarda a decisão válida e recusa id ou decisão inválidos sem mexer nas guardadas", () => {
+    expect(decisoesComPedido({}, id, "recusada")).toEqual({ [id]: "recusada" });
+    expect(() => decisoesComPedido({}, "__proto__", "aplicada")).toThrow("entrada_invalida");
+    expect(() => decisoesComPedido({}, id, "talvez")).toThrow("entrada_invalida");
+  });
+});
+

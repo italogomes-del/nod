@@ -18,12 +18,13 @@ const ESPERADAS = [
   "criar_bots", "responder_pedido",
   "pedir_credencial",
   "avisar_pessoa",
+  "ajustar_barra_lateral",
   "abrir_conta",
   "buscar_conversas", "ler_conversa",
 ];
 
 describe("FERRAMENTAS_NOD", () => {
-  it("lista fechada com as QUARENTA E UMA ferramentas (o número é o de ESPERADAS, que o teste confere; 2026-10-29 traz ver_agenda, NOD-85, e buscar_conversas e ler_conversa, NOD-61; 2026-10-28 traz avisar_pessoa, NOD-114, abrir_conta, NOD-351, e pedir_credencial, NOD-50; 2026-10-15 traz responder_pedido, NOD-262; 2026-10-13 traz criar_bots, ADR-104; 2026-10-12 traz esperar_comando, abrir_frentes, mandar_para_frente e devolver_resumo, ADR-099; 2026-10-08 traz me_chame_as, ADR-086; 2026-10-07 traz abrir_task e mandar_para_task, ADR-083, e gerir_bots, ver_apps_conectados e registrar_relato, só do Nod, ADR-081/082; 2026-10-04 traz anotar_entrevista, concluir_entrevista e propor_bot, ADR-077; iniciar_tarefa e desligar, ADR-072; EMENDA 16 inclui pedir_a_pessoa; 2026-09-21 traz sem_novidade e o ciclo de vida de rotina; 2026-09-28 traz ver_colegas e o artefato, ADR-051; 2026-09-29 troca perguntar_a_bot e delegar_tarefa por pedir_a_bot, ADR-058; 2026-09-30 traz as pendências, ADR-064)", () => {
+  it("lista fechada com as QUARENTA E DUAS ferramentas (o número é o de ESPERADAS, que o teste confere; 2026-10-29 traz ajustar_barra_lateral, NOD-119, ver_agenda, NOD-85, e buscar_conversas e ler_conversa, NOD-61; 2026-10-28 traz avisar_pessoa, NOD-114, abrir_conta, NOD-351, e pedir_credencial, NOD-50; 2026-10-15 traz responder_pedido, NOD-262; 2026-10-13 traz criar_bots, ADR-104; 2026-10-12 traz esperar_comando, abrir_frentes, mandar_para_frente e devolver_resumo, ADR-099; 2026-10-08 traz me_chame_as, ADR-086; 2026-10-07 traz abrir_task e mandar_para_task, ADR-083, e gerir_bots, ver_apps_conectados e registrar_relato, só do Nod, ADR-081/082; 2026-10-04 traz anotar_entrevista, concluir_entrevista e propor_bot, ADR-077; iniciar_tarefa e desligar, ADR-072; EMENDA 16 inclui pedir_a_pessoa; 2026-09-21 traz sem_novidade e o ciclo de vida de rotina; 2026-09-28 traz ver_colegas e o artefato, ADR-051; 2026-09-29 troca perguntar_a_bot e delegar_tarefa por pedir_a_bot, ADR-058; 2026-09-30 traz as pendências, ADR-064)", () => {
     expect([...NOMES_FERRAMENTAS_NOD].sort()).toEqual([...ESPERADAS].sort());
     expect(NOMES_FERRAMENTAS_NOD).toHaveLength(ESPERADAS.length);
   });

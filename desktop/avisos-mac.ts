@@ -1,3 +1,4 @@
+import { MAX_DECISOES_BARRA_DESKTOP, VALORES_BARRA_DESKTOP, type BarraDesktop, type DecisaoBarraDesktop, type DecisoesBarraDesktop } from "../src/contracts/desktop-barra.ts";
 import { LIMITES_AVISO, type AlvoAviso, type AvisoDesktop, type PreferenciasDesktop, type TemaDesktop } from "../src/contracts/desktop.ts";
 
 /**
@@ -73,11 +74,88 @@ export function lerTemaDesktop(valor: unknown): TemaDesktop | null {
   return valor === "sistema" || valor === "claro" || valor === "escuro" ? valor : null;
 }
 
+/** NOD-119: a densidade da barra que a página pede (ou que está no arquivo); null = o padrão ou valor desconhecido. */
+export function lerBarraDesktop(valor: unknown): BarraDesktop | null {
+  return typeof valor === "string" && (VALORES_BARRA_DESKTOP as readonly string[]).includes(valor) ? (valor as BarraDesktop) : null;
+}
+
+/**
+ * NOD-119: as gravações entram numa fila (o arrasto da borda grava a cada passo): sem corrida no rename do .tmp, e cada
+ * uma roda depois da anterior, então a última vence. Uma falha não trava a fila; quem chamou recebe o erro.
+ */
+export function criarFilaDeGravacao(): (tarefa: () => Promise<void>) => Promise<void> {
+  let fila: Promise<void> = Promise.resolve();
+  return (tarefa) => {
+    const vez = fila.then(tarefa);
+    fila = vez.catch(() => undefined);
+    return vez;
+  };
+}
+
+/** NOD-119: o id de mensagem (uuid) e a decisão do card; qualquer outra coisa é recusada (null). */
+const ID_MENSAGEM = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export function lerDecisaoBarra(mensagemId: unknown, decisao: unknown): [string, DecisaoBarraDesktop] | null {
+  if (typeof mensagemId !== "string" || !ID_MENSAGEM.test(mensagemId)) return null;
+  return decisao === "aplicada" || decisao === "recusada" ? [mensagemId, decisao] : null;
+}
+
+/** A decisão nova vai para o fim (a mais recente); passando do teto, saem as mais antigas. */
+export function comDecisaoBarra(atuais: DecisoesBarraDesktop, mensagemId: string, decisao: DecisaoBarraDesktop): DecisoesBarraDesktop {
+  const entradas = Object.entries(atuais).filter(([id]) => id !== mensagemId);
+  entradas.push([mensagemId, decisao]);
+  return Object.fromEntries(entradas.slice(-MAX_DECISOES_BARRA_DESKTOP));
+}
+
+/**
+ * NOD-119: a resposta do sendSync do preload (a barra e as decisões guardadas). Remetente fora da janela web (validar
+ * lança) ou leitura que falha recebem o padrão: o preload nunca fica sem returnValue.
+ */
+export function respostaSincrona<T>(validar: () => void, valor: () => T, padrao: T): T {
+  try {
+    validar();
+    return valor();
+  } catch {
+    return padrao;
+  }
+}
+
+/** NOD-119: a barra pedida pela página; null volta ao padrão, valor desconhecido é erro. */
+export function barraDoPedido(barra: unknown): BarraDesktop | null {
+  const lida = lerBarraDesktop(barra);
+  if (barra !== null && lida === null) throw new Error("entrada_invalida");
+  return lida;
+}
+
+/** NOD-119: a decisão do card que chega pelo IPC entra nas guardadas; id ou decisão inválidos são erro. */
+export function decisoesComPedido(atuais: DecisoesBarraDesktop, mensagemId: unknown, decisao: unknown): DecisoesBarraDesktop {
+  const lida = lerDecisaoBarra(mensagemId, decisao);
+  if (!lida) throw new Error("entrada_invalida");
+  return comDecisaoBarra(atuais, lida[0], lida[1]);
+}
+
+/** O campo `decisoesBarra` do preferencias.json: sem arquivo, corrompido ou com lixo, só o que é válido (até o teto). */
+export function lerDecisoesBarra(conteudo: string | null): DecisoesBarraDesktop {
+  let lido: unknown = null;
+  try {
+    lido = conteudo === null ? null : JSON.parse(conteudo);
+  } catch {
+    // arquivo corrompido: sem decisões
+  }
+  const campo = typeof lido === "object" && lido !== null && "decisoesBarra" in lido ? lido.decisoesBarra : null;
+  if (typeof campo !== "object" || campo === null || Array.isArray(campo)) return {};
+  let r: DecisoesBarraDesktop = {};
+  for (const [id, d] of Object.entries(campo)) {
+    const ok = lerDecisaoBarra(id, d);
+    if (ok) r = comDecisaoBarra(r, ok[0], ok[1]);
+  }
+  return r;
+}
+
 /**
  * preferencias.json: sem arquivo, corrompido ou sem o campo, os avisos e o som (NOD-196) nascem ligados e o tema segue
  * o sistema.
  */
-export function lerPreferencias(conteudo: string | null): Pick<PreferenciasDesktop, "avisos" | "tema" | "som"> {
+export function lerPreferencias(conteudo: string | null): Pick<PreferenciasDesktop, "avisos" | "tema" | "som"> & { barra: BarraDesktop | null } {
   let lido: unknown = null;
   try {
     lido = conteudo === null ? null : JSON.parse(conteudo);
@@ -89,6 +167,7 @@ export function lerPreferencias(conteudo: string | null): Pick<PreferenciasDeskt
     avisos: "avisos" in obj && typeof obj.avisos === "boolean" ? obj.avisos : true,
     tema: ("tema" in obj ? lerTemaDesktop(obj.tema) : null) ?? "sistema",
     som: "som" in obj && typeof obj.som === "boolean" ? obj.som : true,
+    barra: "barra" in obj ? lerBarraDesktop(obj.barra) : null,
   };
 }
 

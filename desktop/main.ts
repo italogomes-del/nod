@@ -51,7 +51,8 @@ import { cabeAprovacao, criarElevador, depsReaisDoElevador } from "./elevar-mac.
 import { ambienteDoBinarioDoNod, ativarPrefixo, candidatosDoNod, descartarPrefixo, escolherBinario, nomeDaVersao, pastasFerramentas, prefixoAtivo, prepararPrefixoNovo, type Candidato } from "./ferramentas.ts";
 import { criarVigiaDasIas, type Veredito, type VigiaDasIas } from "./vigia-ias.ts";
 import { criarFilaDeepLink, criarLogAdiado, criarReceptorDeepLink, deepLinkDoArgv } from "./deep-link.ts";
-import { lerAviso, lerContador, lerPreferencias, lerTemaDesktop, opcoesDoAviso, origemDe, remetenteWebValido } from "./avisos-mac.ts";
+import type { BarraDesktop, DecisoesBarraDesktop } from "../src/contracts/desktop-barra.ts";
+import { barraDoPedido, criarFilaDeGravacao, decisoesComPedido, lerAviso, lerContador, lerDecisoesBarra, lerPreferencias, respostaSincrona, lerTemaDesktop, opcoesDoAviso, origemDe, remetenteWebValido } from "./avisos-mac.ts";
 import { abreNoNavegador } from "./links-externos.ts";
 import { arquivoDaMidia } from "./midia-mac.ts";
 import { CANAIS_MIDIA } from "../src/contracts/midia-desktop.ts";
@@ -209,7 +210,7 @@ function caminhoConfig() { return join(app.getPath("userData"), "conexao.enc"); 
 // A preferência mora em userData/preferencias.json: o localStorage da janela web é apagado a cada
 // conexão (clearStorageData abaixo). O aviso sai daqui, do processo principal — a página continua sem
 // permissão nenhuma (proteger) —, e só com a janela fora de foco.
-let preferencias: Pick<PreferenciasDesktop, "avisos" | "tema" | "som"> = { avisos: true, tema: "sistema", som: true };
+let preferencias: Pick<PreferenciasDesktop, "avisos" | "tema" | "som"> & { barra: BarraDesktop | null; decisoesBarra: DecisoesBarraDesktop } = { avisos: true, tema: "sistema", som: true, barra: null, decisoesBarra: {} };
 /** O último aviso falhou ao aparecer (o macOS bloqueou); o próximo que aparecer desfaz. */
 let bloqueados = false;
 let contadorAtual = 0;
@@ -219,13 +220,19 @@ const MAX_AVISOS_VIVOS = 20;
 function caminhoPreferencias() { return join(app.getPath("userData"), "preferencias.json"); }
 function estadoPreferencias(): PreferenciasDesktop { return { avisos: preferencias.avisos, tema: preferencias.tema, som: preferencias.som, bloqueados }; }
 async function carregarPreferencias() {
-  preferencias = lerPreferencias(await readFile(caminhoPreferencias(), "utf8").catch(() => null));
+  const conteudo = await readFile(caminhoPreferencias(), "utf8").catch(() => null);
+  preferencias = { ...lerPreferencias(conteudo), decisoesBarra: lerDecisoesBarra(conteudo) };
 }
-async function gravarPreferencias() {
-  await mkdir(app.getPath("userData"), { recursive: true });
-  const tmp = `${caminhoPreferencias()}.tmp`;
-  await writeFile(tmp, JSON.stringify(preferencias), { mode: 0o600 });
-  await rename(tmp, caminhoPreferencias());
+// NOD-119: as escritas entram numa fila (o arrasto da borda grava a cada passo): sem corrida no rename do .tmp, e cada
+// uma grava as preferências do momento em que roda, então a última vence.
+const naFilaDePreferencias = criarFilaDeGravacao();
+function gravarPreferencias(): Promise<void> {
+  return naFilaDePreferencias(async () => {
+    await mkdir(app.getPath("userData"), { recursive: true });
+    const tmp = `${caminhoPreferencias()}.tmp`;
+    await writeFile(tmp, JSON.stringify(preferencias), { mode: 0o600 });
+    await rename(tmp, caminhoPreferencias());
+  });
 }
 // ---- Estado da janela web (definido em 2026-10-05, NOD-137) ---------------------------------------------------------
 // Posição, tamanho e maximizada em userData/janela.json, lidos uma vez no boot e mantidos em memória: a reconexão recria a
@@ -1376,6 +1383,25 @@ else {
       const lido = lerTemaDesktop(tema);
       if (!lido) throw new Error("entrada_invalida");
       return definirTema(lido);
+    });
+    // NOD-119: a densidade da barra. O preload pede o valor de forma síncrona e o repõe no localStorage antes da página
+    // (apagado a cada conexão), para a barra abrir sem piscar. Remetente fora da janela web recebe null.
+    ipcMain.on(CANAIS_DESKTOP.barraInicial, (e) => {
+      e.returnValue = respostaSincrona(() => validarRemetenteWeb(e), () => preferencias.barra, null);
+    });
+    ipcMain.handle(CANAIS_DESKTOP.definirBarra, async (e, barra: unknown) => {
+      validarRemetenteWeb(e);
+      preferencias = { ...preferencias, barra: barraDoPedido(barra) };
+      await gravarPreferencias();
+    });
+    // NOD-119 (revisão 4): a decisão do card da barra, que o preload repõe no localStorage junto com a barra.
+    ipcMain.on(CANAIS_DESKTOP.decisoesBarraIniciais, (e) => {
+      e.returnValue = respostaSincrona(() => validarRemetenteWeb(e), () => preferencias.decisoesBarra, {});
+    });
+    ipcMain.handle(CANAIS_DESKTOP.definirDecisaoBarra, async (e, mensagemId: unknown, decisao: unknown) => {
+      validarRemetenteWeb(e);
+      preferencias = { ...preferencias, decisoesBarra: decisoesComPedido(preferencias.decisoesBarra, mensagemId, decisao) };
+      await gravarPreferencias();
     });
     ipcMain.handle(CANAIS_DESKTOP.microfone, (e) => { validarRemetenteWeb(e); return acessoAoMicrofone(); });
     ipcMain.handle(CANAIS_DESKTOP.emLigacao, (e, ativa: unknown) => {

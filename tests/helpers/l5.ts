@@ -27,6 +27,7 @@ import { pedirAprovacao } from "../../src/use-cases/pedir-aprovacao.ts";
 import type { Deps, Services, UseCasesNod } from "../../src/use-cases/tipos.ts";
 import { criarBancoMemoria, type BancoMemoria } from "./repos-memoria.ts";
 import { avisarPessoa } from "../../src/use-cases/avisar-pessoa.ts";
+import { ajustarBarraLateral } from "../../src/use-cases/ajustar-barra-lateral.ts";
 import { buscarConversas, lerConversa } from "../../src/use-cases/buscar-conversas.ts";
 
 /**
@@ -143,6 +144,7 @@ export function useCasesDeTeste(sobrescrita: Partial<UseCasesNod> = {}): UseCase
     responderPedido,
     pedirCredencial,
     avisarPessoa,
+    ajustarBarraLateral,
     buscarConversas,
     lerConversa,
     abrirConta,

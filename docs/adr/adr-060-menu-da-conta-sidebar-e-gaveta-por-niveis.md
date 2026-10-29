@@ -1,6 +1,6 @@
 # ADR-060 — Menu da conta, sidebar arrastável e a gaveta do bot por níveis
 
-Status: aceito · Data: 2026-09-30 · Emendada pela ADR-125 (itens 3 e 5, 2026-10-23) e pela NOD-370 (2026-10-26, a conversa do bot que saiu) · Emenda ADR-032 (painel do bot) e a regra de 2026-09-18 de "Seu espaço". Canvas "Nod —
+Status: aceito · Data: 2026-09-30 · Emendada pela ADR-125 (itens 3 e 5, 2026-10-23), pela NOD-370 (2026-10-26, a conversa do bot que saiu) e pela NOD-119 (2026-10-29, densidade e largura da barra) · Emenda ADR-032 (painel do bot) e a regra de 2026-09-18 de "Seu espaço". Canvas "Nod —
 tela do agente", página "Menu, sidebar e gaveta".
 
 ## Contexto
@@ -84,3 +84,19 @@ mesma seção, e "‹ <de onde veio>" e Esc levam a essa tela. Excluir e Ocultar
 conta própria. Com Agentes aberto, a lista fica na mesma rolagem e o foco vai para o ⋯ da linha seguinte do mesmo time
 (a anterior se era a última; com o time vazio, a mais próxima da lista); pela barra lateral, para a linha vizinha. O
 leitor de tela ouve "‹nome› foi para Excluídos/Ocultos." numa região viva fora da `.app`.
+
+## Emenda de 2026-10-29 — Densidade e largura da barra (NOD-119)
+
+"Sidebar de 340 px" passa a ser o padrão, não a única largura. Em Configurações › Aparência a pessoa escolhe a densidade:
+Confortável (340 px, a de hoje) ou Compacta (200 px, linhas de 36 px sem a prévia). A borda direita da barra é um separador
+focável que **encaixa** em larguras fixas, sem redimensionar livremente: Confortável 340 ↔ 72 ("só avatares"); Compacta
+200 ↔ 56, e 340 alargada. Teclado (← → Home End Enter Espaço), dois cliques e arrasto de 40 px por passo. Vale por
+computador (localStorage; no app do Mac, `preferencias.json`); no celular nada muda (a gaveta de hoje). Na barra
+recolhida o `title` sai e uma etiqueta escura mostra "nome · título" no mouse e no foco, porque o `title` do sistema
+demora e não aparece no teclado. Um bot também pode propor a mudança pelo chat (`ajustar_barra_lateral`): um card que
+só muda a barra no clique da pessoa.
+
+Gatilho de reversão: a preferência vive só no computador (localStorage e preferencias.json), sem métrica no servidor;
+então o gatilho é observável na equipe: se em 30 dias (até 2026-11-28) ninguém do time estiver usando a Compacta ou a
+recolhida (conferido na retro), ou se a borda virar pedido de largura livre, voltar à barra fixa de 340 px e tirar a
+borda.

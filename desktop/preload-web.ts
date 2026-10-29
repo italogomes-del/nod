@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 import { CANAIS_DESKTOP, type AlvoAviso, type AvisoDesktop, type ContasNaTela, type IaDesktop, type NodDesktop, type PonteContas, type PonteIas, type TemaDesktop } from "../src/contracts/desktop.ts";
+import type { BarraDesktop, DecisaoBarraDesktop } from "../src/contracts/desktop-barra.ts";
 import type { AcaoDeBusca } from "./menu.ts";
 import type { EstadoIa } from "../src/contracts/estado-ia.ts";
 import { CANAIS_MIDIA, type PonteMidia } from "../src/contracts/midia-desktop.ts";
@@ -49,6 +50,25 @@ const midia: PonteMidia = {
   existe: (caminhoRelativo: string) => ipcRenderer.invoke(CANAIS_MIDIA.existe, caminhoRelativo),
   mostrarNoFinder: (caminhoRelativo: string) => ipcRenderer.invoke(CANAIS_MIDIA.mostrarNoFinder, caminhoRelativo),
 };
+// NOD-119: o localStorage da janela web é apagado a cada conexão; a densidade da barra volta dele antes do script inline
+// do index.html (mesma chave de web/lib/densidade.ts), senão a barra abriria larga e depois encolheria.
+try {
+  const barra: unknown = ipcRenderer.sendSync(CANAIS_DESKTOP.barraInicial);
+  if (typeof barra === "string") localStorage.setItem("nod.densidade", barra);
+  else localStorage.removeItem("nod.densidade");
+} catch {
+  // sem preferência ou sem armazenamento: a barra abre no padrão
+}
+// NOD-119 (revisão 4): as decisões do card da barra também voltam (mesma chave de web/telas/card-barra.ts), senão o card
+// já decidido voltaria a pedir clique a cada conexão.
+try {
+  const decisoes: unknown = ipcRenderer.sendSync(CANAIS_DESKTOP.decisoesBarraIniciais);
+  if (typeof decisoes === "object" && decisoes !== null) {
+    for (const [id, d] of Object.entries(decisoes)) if (d === "aplicada" || d === "recusada") localStorage.setItem(`nod.barra.decisao.${id}`, d);
+  }
+} catch {
+  // sem decisões guardadas: os cards pedem o clique
+}
 const ponte: NodDesktop = {
   avisar: (aviso: AvisoDesktop) => ipcRenderer.invoke(CANAIS_DESKTOP.avisar, aviso),
   contador: (n: number) => ipcRenderer.invoke(CANAIS_DESKTOP.contador, n),
@@ -57,6 +77,9 @@ const ponte: NodDesktop = {
   definirTema: (tema: TemaDesktop) => ipcRenderer.invoke(CANAIS_DESKTOP.definirTema, tema),
   // NOD-196: o som dos avisos; o processo principal valida o booleano.
   definirSom: (ligado: boolean) => ipcRenderer.invoke(CANAIS_DESKTOP.definirSom, ligado),
+  // NOD-119: a densidade da barra lateral; o processo principal valida o valor.
+  definirBarra: (barra: BarraDesktop | null) => ipcRenderer.invoke(CANAIS_DESKTOP.definirBarra, barra),
+  definirDecisaoBarra: (mensagemId: string, decisao: DecisaoBarraDesktop) => ipcRenderer.invoke(CANAIS_DESKTOP.definirDecisaoBarra, mensagemId, decisao),
   // Modo ligação (definido em 2026-10-04, ADR-071): o acesso do macOS ao microfone e o aviso de ligação aberta.
   microfone: () => ipcRenderer.invoke(CANAIS_DESKTOP.microfone),
   emLigacao: (ativa: boolean) => ipcRenderer.invoke(CANAIS_DESKTOP.emLigacao, ativa),

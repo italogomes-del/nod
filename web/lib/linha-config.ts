@@ -59,6 +59,25 @@ export function switchLinha(c: Extract<ControleLinha, { tipo: "switch" }>, rotul
   return `<button type="button" class="lc-switch" role="switch" aria-checked="${c.ligado}" aria-label="${esc(rotulo)}" data-act="${esc(c.acao)}"${dadosAttr(c.dados)}${c.descritoPor ? ` aria-describedby="${esc(c.descritoPor)}"` : ""}${c.desabilitado ? " disabled" : ""}><span></span></button>`;
 }
 
+/**
+ * NOD-119: o seletor segmentado (radiogroup com foco itinerante). Só a opção marcada entra no Tab; setas, Home e End
+ * mudam a escolha (proximoDoSegmentado); o clique vai em `data-act` com `data-valor`.
+ */
+export function segmentado(c: { acao: string; rotulo: string; opcoes: readonly OpcaoSeletor[]; descritoPor?: string }): string {
+  const botoes = c.opcoes.map((o) => `<button type="button" role="radio" class="seg-opcao" aria-checked="${o.selecionado ? "true" : "false"}" tabindex="${o.selecionado ? "0" : "-1"}" data-act="${esc(c.acao)}" data-valor="${esc(o.valor)}">${esc(o.rotulo)}</button>`).join("");
+  return `<div class="segmentado" role="radiogroup" aria-label="${esc(c.rotulo)}"${c.descritoPor ? ` aria-describedby="${esc(c.descritoPor)}"` : ""}>${botoes}</div>`;
+}
+
+/** A tecla no segmentado: o índice da próxima opção (setas giram, Home/End vão às pontas) ou null se a tecla não é dele. */
+export function proximoDoSegmentado(atual: number, total: number, tecla: string): number | null {
+  if (total <= 0) return null;
+  if (tecla === "ArrowRight" || tecla === "ArrowDown") return (atual + 1) % total;
+  if (tecla === "ArrowLeft" || tecla === "ArrowUp") return (atual - 1 + total) % total;
+  if (tecla === "Home") return 0;
+  if (tecla === "End") return total - 1;
+  return null;
+}
+
 export function seletorLinha(c: Extract<ControleLinha, { tipo: "seletor" }>): string {
   const opcoes = c.opcoes.map((o) => `<option value="${esc(o.valor)}"${o.selecionado ? " selected" : ""}${o.desabilitado ? " disabled" : ""}>${esc(o.rotulo)}</option>`).join("");
   return `<select class="lc-seletor" aria-label="${esc(c.rotulo)}" data-act-change="${esc(c.acao)}"${dadosAttr(c.dados)}>${opcoes}</select>`;

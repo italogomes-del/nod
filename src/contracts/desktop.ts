@@ -91,7 +91,7 @@ export type PonteIas = {
 // ADR-101: as várias contas ficam em contas-desktop.ts (o teto de 200 linhas por contrato).
 export type { ContaNaTela, ContasNaTela, DetalheDaConta, DetalhesDasContas, PonteContas } from "./contas-desktop.ts";
 
-export type NodDesktop = {
+export type NodDesktop = import("./desktop-barra.ts").PonteBarraDesktop & { // NOD-119: definirBarra, definirDecisaoBarra
   /** Mostra o aviso só se a janela do nod não estiver na frente; devolve se mostrou. */
   avisar(aviso: AvisoDesktop): Promise<boolean>;
   /** O número no ícone do Dock: pedidos abertos (0 apaga). */
@@ -159,7 +159,7 @@ export const CANAIS_DESKTOP = {
   preferencias: "nod:preferencias",
   definirAvisos: "nod:definir-avisos",
   definirTema: "nod:definir-tema",
-  definirSom: "nod:definir-som",
+  definirSom: "nod:definir-som", definirBarra: "nod:definir-barra", barraInicial: "nod:barra-inicial", definirDecisaoBarra: "nod:definir-decisao-barra", decisoesBarraIniciais: "nod:decisoes-barra-iniciais", // NOD-119: a barra
   abrir: "nod:abrir", buscar: "nod:buscar", deepLink: "nod:deep-link", deepLinkPendente: "nod:deep-link-pendente", // NOD-42, NOD-136
   microfone: "nod:microfone",
   emLigacao: "nod:em-ligacao",
