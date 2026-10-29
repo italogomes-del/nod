@@ -6,6 +6,7 @@
 # Actions pinadas por SHA imutável (verificados em 2026-09-16 na API do GitHub):
 #   actions/checkout v4.2.2  = 11bd71901bbe5b1630ceea73d27597364c9af683
 #   actions/setup-node v4.4.0 = 49933ea5288caeca8642d1e84afbd3f7d6820020
+#   actions/upload-artifact   = ea165f8d65b6e75b540449e92b4886f43607fa02 (o mesmo do desktop-release.yml)
 name: ci
 on:
   push:
@@ -61,6 +62,9 @@ jobs:
   integration:
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: [self-hosted, linux, nod-integracao]
+    # NOD-398: um teto para o job (na main, medido em 2026-10-28: 17 a 21 min; o fuzz e o bot de QA somam ~2 min).
+    # Travou, cai, não segura o runner (o padrão do GitHub é 6 h).
+    timeout-minutes: 40
     services:
       postgres:
         image: postgres:16
@@ -90,5 +94,57 @@ jobs:
       - run: npm run test:integration
       # A catraca C da paridade (NOD-391) compara o piso com o da main: o checkout raso não traz a origin/main.
       - run: git fetch --no-tags --depth=1 origin +main:refs/remotes/origin/main
+      # NOD-398: o bot de QA e a tela.capturar precisam da web montada (dist/web) e de um Chromium. O playwright NÃO é
+      # dependência do projeto (a issue pede assim): a versão fica fixa aqui para o Chromium não mudar de um run para o
+      # outro, e o binário fica no cache do runner (~/.cache/ms-playwright), baixado só na primeira vez. As libs do
+      # sistema vêm do startup.sh do runner; o runner provisionado antes desta issue não as tem (o startup só roda uma vez),
+      # então, faltando alguma, o job instala pelo apt da distro a lista FIXA de infra/gcp/runner/libs-chromium.txt. O sudo
+      # do runner é amplo (startup.sh); este passo só o usa para o apt dessa lista.
+      - run: npx vite build
+      - run: |
+          npx --yes playwright@1.64.1 install chromium
+          # O binário DA versão fixada (o cache do runner pode ter revisões mais novas de outros jobs), exportado como
+          # NOD_CHROME para os testes: nada de "o maior do cache".
+          DIR=$(npx --yes playwright@1.64.1 install --dry-run chromium 2>/dev/null | grep -m1 'Install location' | awk '{print $NF}')
+          if [ -z "$DIR" ] || [ ! -d "$DIR" ]; then echo "::error::não achei a pasta do Chromium do playwright@1.64.1 ('$DIR')"; exit 1; fi
+          CHROME=$(ls -d "$DIR"/chrome-linux*/chrome | head -1)
+          test -x "$CHROME"
+          if ldd "$CHROME" | grep -q "not found"; then
+            sudo apt-get update -q && xargs sudo DEBIAN_FRONTEND=noninteractive apt-get install -yq < infra/gcp/runner/libs-chromium.txt
+            if ldd "$CHROME" | grep "not found"; then echo "::error::faltam libs do Chromium mesmo depois do apt"; exit 1; fi
+          fi
+          # ubuntu 24.04: o AppArmor trava user namespaces sem privilégio e o sandbox do Chrome não sobe. Só nesse caso a
+          # captura roda com --no-sandbox (NOD_CAPTURA_SEM_SANDBOX; a página é só o próprio servidor no loopback).
+          SEM_SANDBOX=""
+          if [ "$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null || echo 0)" = "1" ]; then
+            SEM_SANDBOX="--no-sandbox"
+            echo "NOD_CAPTURA_SEM_SANDBOX=1" >> "$GITHUB_ENV"
+          fi
+          timeout 30 "$CHROME" --headless=new $SEM_SANDBOX --dump-dom about:blank >/dev/null
+          echo "NOD_CHROME=$CHROME" >> "$GITHUB_ENV"
       - run: npm run test:conformidade
+      # O fuzz das ações (NOD-398) roda aqui, serial: grava linhas de verdade e limpa no fim (revisão 5).
       - run: npm run test:concurrency
+        env:
+          FUZZ_N: "20"
+          # Critério 7 do NOD-398: a meta é o fuzz do PR (N=20) em menos de 90 s, e o tempo de cada rodada vai ao resumo do job.
+          # O teto que reprova tem folga para a fila da VM compartilhada (revisão 7). Só aqui: o desktop-release roda sem teto.
+          FUZZ_TETO_S: "150"
+          QA_RELATORIO_DIR: ${{ github.workspace }}/qa-relatorio
+          # Só neste job (que montou a web e o Chromium) a falta deles reprova; no desktop-release o check pula a captura.
+          NOD_QA_EXIGE_CHROME: "1"
+      # O relatório do bot de QA (qa-relatorio.md + o print da tela final em 390 e 1440), também quando o QA falha. Sem
+      # arquivo é aviso, não um 2º passo vermelho: o teste do QA já reprova o job quando não grava o relatório.
+      # Revisão 13: cota de artefatos do repositório cheia derrubava o job com todos os testes verdes; o relatório é
+      # diagnóstico (também vai ao resumo abaixo), então a falha do upload não reprova.
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: success() || failure()
+        continue-on-error: true
+        with:
+          name: qa-relatorio
+          path: qa-relatorio/
+          if-no-files-found: warn
+          retention-days: 14
+      # O relatório também no resumo do job (revisão 7): lê sem baixar o zip; os prints seguem no artefato.
+      - if: success() || failure()
+        run: if [ -f qa-relatorio/qa-relatorio.md ]; then cat qa-relatorio/qa-relatorio.md >> "$GITHUB_STEP_SUMMARY"; fi

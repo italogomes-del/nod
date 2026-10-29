@@ -186,3 +186,50 @@ describe("catálogo e prompt do Nod (ADR-081/082)", () => {
     expect(comum.promptSistema).not.toContain("Você é o Nod");
   });
 });
+
+describe("mudar_modo com modo fora da lista (NOD-398, achado do fuzz, FUZZ_SEMENTE=261899740)", () => {
+  it("recusa na validação, antes de virar cartão: o modo com byte nulo ou surrogate solto estourava no JSON do Postgres", () => {
+    for (const modo of ["a\u0000b", "\ud800", "Total", ""]) {
+      const r = valida([{ tipo: "mudar_modo", bot: "Dev 2", modo } as unknown as AcaoLote]);
+      expect(r.ok, JSON.stringify(modo)).toBe(false);
+    }
+    expect(valida([{ tipo: "mudar_modo", bot: "Dev 2", modo: "automatico" }]).ok).toBe(true);
+  });
+});
+
+describe("texto mal formado em qualquer campo do lote (NOD-398, revisão 6)", () => {
+  it("surrogate solto ou byte nulo em nome, descrição, instrução: recusa na validação, antes de virar cartão no jsonb", () => {
+    for (const ruim of ["\ud800", "a\udc00", "x\u0000y"]) {
+      for (const acao of [
+        { tipo: "editar", bot: "Dev 2", nome: ruim },
+        { tipo: "editar", bot: "Dev 2", descricao: ruim },
+        { tipo: "criar_rotina", bot: "Dev 2", cron: "0 9 * * *", fuso_iana: "America/Sao_Paulo", instrucao: ruim },
+      ]) {
+        const r = valida([acao as unknown as AcaoLote]);
+        expect(r.ok, `${acao.tipo} ${JSON.stringify(ruim)}`).toBe(false);
+      }
+    }
+    expect(valida([{ tipo: "editar", bot: "Dev 2", nome: "Dev 😀" }]).ok).toBe(true);
+  });
+
+  it("o resumo do lote (vai ao cartão e à frase da decisão) também: recusa com problema geral (revisão 8)", () => {
+    const acao = [{ tipo: "editar", bot: "Dev 2", nome: "Dev 3" }] as AcaoLote[];
+    for (const ruim of ["\ud800", "a\udc00", "x\u0000y"]) {
+      const r = validarLote(acao, BOTS, APPS, P, ruim);
+      expect(r.ok, JSON.stringify(ruim)).toBe(false);
+      if (!r.ok) expect(r.problemas).toEqual([{ i: -1, motivo: expect.stringMatching(/resumo/) }]);
+    }
+    expect(validarLote(acao, BOTS, APPS, P, "Renomeia 😀").ok).toBe(true);
+  });
+
+  it("modo mal formado sai uma vez, sem o texto ruim no motivo (revisão 9)", () => {
+    const r = validarLote([{ tipo: "mudar_modo", bot: "Dev 2", modo: "\u0000" } as unknown as AcaoLote], BOTS, APPS, P);
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.problemas).toHaveLength(1);
+      expect(r.problemas[0]!.motivo).toMatch(/texto inválido/);
+      expect(r.problemas[0]!.motivo).not.toContain("\u0000");
+    }
+  });
+});
+

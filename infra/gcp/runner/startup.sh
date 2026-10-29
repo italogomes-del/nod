@@ -18,6 +18,14 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update -q
 # O que o ci usa do ubuntu-latest: git, psql (init dos roles), build-essential (deps nativas do npm), jq, docker.
 apt-get install -yq ca-certificates curl git jq unzip zip build-essential python3 postgresql-client docker.io
+# NOD-398: as libs do sistema que o Chromium headless do bot de QA e da tela.capturar pede (o Chromium em si vem de
+# `npx playwright install chromium`, no cache do runner). Com elas aqui, o job não precisa de apt a cada run.
+# A imagem é ubuntu-2404 (provisionar-runner.sh): nela várias libs mudaram para o nome *t64 (a transição do time_t de 64
+# bits) e o nome antigo é só virtual, então o apt-get falha. Os nomes abaixo são os da 24.04 e são os MESMOS de
+# libs-chromium.txt (o ci.yml usa aquela lista no runner já provisionado; tests/unit/infra confere que batem).
+apt-get install -yq libnss3 libnspr4 libatk1.0-0t64 libatk-bridge2.0-0t64 libcups2t64 libdrm2 libxkbcommon0 libxcomposite1 \
+  libxdamage1 libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2t64 libatspi2.0-0t64 libdbus-1-3 \
+  libglib2.0-0t64 fonts-liberation
 systemctl enable --now docker
 
 id runner >/dev/null 2>&1 || useradd -m -s /bin/bash -G docker runner

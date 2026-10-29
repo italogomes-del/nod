@@ -15,7 +15,8 @@ export function lerPedido(p: { get(nome: string): string | null }): PedidoPaream
   const porta = Number(p.get("porta"));
   const estado = p.get("estado") ?? "";
   const desafio = p.get("desafio") ?? "";
-  const nome = (p.get("nome") ?? "").trim().slice(0, 60);
+  // Corta por code point (revisão 9): emoji na posição 60 não vira meio caractere, que o servidor recusa.
+  const nome = [...(p.get("nome") ?? "").trim()].slice(0, 60).join("");
   if (!Number.isInteger(porta) || porta < 1024 || porta > 65535) return null;
   if (!B64URL.test(estado) || !DESAFIO.test(desafio) || nome === "") return null;
   return { porta, estado, desafio, nome };

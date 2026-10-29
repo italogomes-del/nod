@@ -321,7 +321,8 @@ export function iniciarMotorLigacao(o: OpcoesMotor): MotorLigacao {
       enviar({ t: "mudo", ativo });
     },
     enviarTexto(texto) {
-      const conteudo = texto.trim().slice(0, TEXTO_MAX);
+      // Por code point (NOD-398): o corte não deixa meio emoji (surrogate solto) no texto que vai à fala.
+      const conteudo = [...texto.trim()].slice(0, TEXTO_MAX).join("");
       return conteudo !== "" && enviar({ t: "texto", conteudo });
     },
     resolvendo() {

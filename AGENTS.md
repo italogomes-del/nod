@@ -153,6 +153,13 @@ feature que estavam corretos (docs/praticas-herdadas.md §8). Se algo falhar sem
 conexões de verdade, serial, limpeza própria por id). Testes nunca dependem do seed: criam as próprias
 linhas com `randomUUID` dentro do envelope; só `tests/helpers/ids.ts` (identidade) é fixo.
 
+**Fuzz das ações e bot de QA** (NOD-398, ADR-135). `tests/concurrency/fuzz-acoes.test.ts` chama toda ação do registro
+contra o servidor de verdade: `FUZZ_N` entradas por ação (20 no PR, 200 no `fuzz-noturno.yml`) e `FUZZ_SEMENTE` para
+reproduzir (no PR ela sai do `GITHUB_SHA`; a falha imprime a linha de comando). `tests/concurrency/qa-pelas-acoes.test.ts`
+e `tela-capturar.test.ts` precisam da web montada (`npx vite build`) e de um Chromium (`NOD_CHROME`); sem eles pulam,
+menos com `NOD_QA_EXIGE_CHROME=1` (só o job integration). A ação `tela.capturar` fica atrás de `NOD_CAPTURA_TELA=1`,
+desligada em produção (503 `indisponivel`).
+
 **Teste sob carga** (NOD-194, 2026-10-07). O Mac roda a suíte de vários bots ao mesmo tempo (load 600–950),
 e o relógio de parede mede a fila, não o código. Guarda de desempenho (regex O(n²), backtracking) não usa
 `performance.now() < N`: usa `razaoDeCrescimento` de `tests/helpers/crescimento.ts` (tempo de CPU, entrada 4x

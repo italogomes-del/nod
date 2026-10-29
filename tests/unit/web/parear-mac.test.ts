@@ -24,6 +24,10 @@ describe("pedido de pareamento na URL (ADR-069)", () => {
 
   it("corta o nome em 60 caracteres, o limite da chave", () => {
     expect(lerPedido(params({ ...bom, nome: "x".repeat(80) }))?.nome).toHaveLength(60);
+    // Revisão 9: o corte é por code point; o emoji na posição 60 entra inteiro, sem surrogate solto.
+    const nome = lerPedido(params({ ...bom, nome: `${"x".repeat(59)}😀resto` }))?.nome ?? "";
+    expect(nome).toBe(`${"x".repeat(59)}😀`);
+    expect(/[\ud800-\udbff](?![\udc00-\udfff])/.test(nome)).toBe(false);
   });
 
   it("o guardado volta igual e o lixo vira null", () => {

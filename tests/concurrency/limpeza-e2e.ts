@@ -75,5 +75,65 @@ export async function limparPessoaE2E(db: Db, dbDono: Db, escopo: Escopo, ids: {
     await trx`delete from events_outbox where owner_id = ${p}`;
     await trx`delete from events where owner_id = ${p}`;
   });
+  // As tabelas de conta (0109) não têm RLS de pessoa: o dono apaga o que as rotas de /api/conta criaram (o fuzz do
+  // NOD-398 chama todas elas e pode deixar sessão, pareamento ou entrada da pessoa).
+  const t = escopo.tenantId;
+  await dbDono`delete from entradas_conta where (destino_tenant_id = ${t} and destino_pessoa_id = ${p}) or sessao_id in (select id from sessoes where tenant_id = ${t} and pessoa_id = ${p})`;
+  await dbDono`delete from pareamentos_conta where tenant_id = ${t} and pessoa_id = ${p}`;
+  await dbDono`delete from bootstrap_instalacoes where tenant_id = ${t} and pessoa_id = ${p}`;
+  await dbDono`delete from sessoes_corte where tenant_id = ${t} and pessoa_id = ${p}`;
+  await dbDono`delete from sessoes where tenant_id = ${t} and pessoa_id = ${p}`;
   await dbDono`delete from pessoas where tenant_id = ${escopo.tenantId} and id = ${p}`;
+}
+
+/** Um tenant criado só para o teste sai no fim, se nada mais aponta para ele (a trilha é imutável: se registrou algo nele, ele fica). */
+export async function limparTenantE2E(dbDono: Db, tenantId: string): Promise<void> {
+  // Esperado falhar quando algo do teste ficou apontando para ele (a trilha é imutável); o log diz qual, para não esconder
+  // um vazamento de verdade.
+  await dbDono`delete from tenants where id = ${tenantId}`.catch((e: unknown) => {
+    // eslint-disable-next-line no-console
+    console.warn(`limparTenantE2E: o tenant ${tenantId} ficou (${(e as Error).message.slice(0, 160)})`);
+  });
+}
+
+/**
+ * A varredura das sobras (revisão 5, médio 3): a limpeza do e2e apaga uma lista fixa de tabelas, e o fuzz chama TODA ação
+ * do registro (maquinas.criar_chave grava em maquina_tokens, que a lista não tinha). Aqui a lista vem do catálogo: toda
+ * tabela do schema public com owner_id, apagada pela própria pessoa (RLS ligado, escopo vinculado), em passadas até a
+ * ordem das chaves estrangeiras se resolver. Devolve as tabelas que ainda têm linha da pessoa ou que a contagem não leu (vazio = limpo).
+ */
+export async function varrerSobrasDaPessoa(db: Db, dbDono: Db, escopo: Escopo): Promise<string[]> {
+  const tabelas = (await db<{ t: string }[]>`select c.table_name as t from information_schema.columns c join information_schema.tables x on x.table_schema = c.table_schema and x.table_name = c.table_name where c.table_schema = 'public' and c.column_name = 'owner_id' and x.table_type = 'BASE TABLE' order by 1`).map((r) => r.t);
+  const contar = async (): Promise<string[]> => {
+    const sobras: string[] = [];
+    // A contagem é do DONO (vê toda tabela, com ou sem grant à app) com o escopo vinculado (as de FORCE RLS também). Não
+    // conseguir ler é sobra, não "limpo" (revisão 6): a falha aparece com a tabela e o erro.
+    await dbDono.begin(async (trx) => {
+      await vincularEscopo(trx, escopo);
+      for (const t of tabelas) {
+        const r = await trx.savepoint((s) => s<{ n: number }[]>`select count(*)::int as n from ${s(t)} where owner_id = ${escopo.pessoaId}`).then(([x]) => x?.n ?? 0, (e: Error) => e);
+        if (r instanceof Error) sobras.push(`${t} (não li: ${r.message.slice(0, 80)})`);
+        else if (r > 0) sobras.push(`${t} (${r})`);
+      }
+    });
+    return sobras;
+  };
+  for (let passada = 0; passada < 6; passada++) {
+    let apagou = 0;
+    let falhou = 0;
+    await db.begin(async (trx) => {
+      await vincularEscopo(trx, escopo);
+      for (const t of tabelas) {
+        await trx
+          .savepoint(async (s) => {
+            apagou += (await s`delete from ${s(t)} where owner_id = ${escopo.pessoaId}`).count;
+          })
+          .catch(() => {
+            falhou++;
+          });
+      }
+    });
+    if (falhou === 0 || apagou === 0) break;
+  }
+  return contar();
 }

@@ -66,14 +66,14 @@ const GRUPOS_UUID = new Set(["id", "mid", "aid", "eid"]);
 const PREFIXO_INTERNO = /^\/api\/interno(\/.*)$/;
 const PREFIXO_PUBLICO = /^\/api(\/.*)$/;
 
-function montarCtx(req: IncomingMessage, res: ServerResponse, escopo: Escopo | null, params: Record<string, string>): CtxPublico {
+function montarCtx(req: IncomingMessage, res: ServerResponse, escopo: Escopo | null, params: Record<string, string>, daPessoa = false): CtxPublico {
   let corpoLido: Promise<unknown> | null = null;
   return {
     req,
     res,
     escopo,
     params,
-    corpo: () => (corpoLido ??= lerCorpo(req)),
+    corpo: () => (corpoLido ??= lerCorpo(req, { daPessoa })),
     json: (status, body) => json(res, status, body),
   };
 }
@@ -160,7 +160,7 @@ export function criarRoteador(rotas: Rota[], deps: DepsRoteador): (req: Incoming
         json(res, 404, { codigo: "nao_encontrado", mensagem: "rota não encontrada" });
         return;
       }
-      const ctx = montarCtx(req, res, escopo, achado.params);
+      const ctx = montarCtx(req, res, escopo, achado.params, true);
       ctx.sessaoAindaVale = async () => {
         // Erro ao conferir não fecha o canal (o próximo ping confere de novo): só a resposta "não vale" fecha.
         const agora = await Promise.resolve(deps.resolverEscopo(req)).catch(() => escopo);
@@ -174,7 +174,7 @@ export function criarRoteador(rotas: Rota[], deps: DepsRoteador): (req: Incoming
     if (publico) {
       const achado = casar(rotas, metodo, publico[1] ?? "/", (r) => r.publica === true);
       if (achado) {
-        await achado.rota.handler(montarCtx(req, res, await deps.resolverEscopo(req), achado.params) as Ctx);
+        await achado.rota.handler(montarCtx(req, res, await deps.resolverEscopo(req), achado.params, true) as Ctx);
         return;
       }
       json(res, 404, { codigo: "nao_encontrado", mensagem: "rota não encontrada" });

@@ -27,7 +27,7 @@ import { iniciarLacoMinhaConta } from "../fundo/laco-minha-conta.ts";
 import { limiteDoAmbiente } from "../../domain/computador.ts";
 import { iniciarVarredorExpiracao } from "../fundo/varredor-expiracao.ts";
 import { INTERVALO_VARREDOR_LEASE_MS, iniciarVarredorLease } from "../fundo/varredor-lease.ts";
-import { comporApp, type App, type AtivarDriver, type EnvApp } from "./compor.ts";
+import { comporApp, type App, type AtivarDriver, type EnvApp, type OpcoesCompor } from "./compor.ts";
 import { lerModelosLigacao } from "../../domain/modelo-ligacao.ts";
 import { lerDominiosAdmitidos } from "../../domain/dominios-admitidos.ts";
 import { identidadeDoEmail } from "../../domain/identidade-do-email.ts";
@@ -83,6 +83,8 @@ export type OpcoesBoot = {
   corAtiva?: { arquivo?: string; intervaloMs?: number };
   /** Só em teste: o intervalo do varredor de presença das máquinas (default 15 s). */
   varredorMaquinasMs?: number;
+  /** NOD-398, só em teste: o capturador de tela (vale com NOD_CAPTURA_TELA=1). Default: o Chrome via CDP. */
+  capturador?: OpcoesCompor["capturador"];
 };
 
 /** `lacos_prazo_vencido` (NOD-331): parar os laços de fundo passou de `PRAZO_PARAR_LACOS_MS` e a drenagem seguiu. */
@@ -196,7 +198,7 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
 
   // 2. composição + 3. listen (a URL do servidor é insumo do driver catcher e do claude-cli).
   let canaisVoz: { fechar(): Promise<void> } | null = null;
-  const app = comporApp({ db, computador: o.computador, voz: o.voz, env: { ...env, NOD_MACHINE_ID: machineId }, relogio: agora, listarPessoas: o.listarPessoas, redeMs: o.redeMs, inicioDoProcesso });
+  const app = comporApp({ db, computador: o.computador, voz: o.voz, env: { ...env, NOD_MACHINE_ID: machineId, NOD_HOST: o.host ?? env.NOD_HOST }, relogio: agora, listarPessoas: o.listarPessoas, redeMs: o.redeMs, inicioDoProcesso, capturador: o.capturador });
   // NOD-267 (emenda à ADR-017): a saúde olha o banco e, só no compartilhado, o batimento do agendador e do varredor de
   // lease — no Mac, acordar do sono deixaria o batimento velho e daria 503 falso. A rota e o watchdog usam a MESMA
   // verificação, para compartilharem o `select 1` em voo.

@@ -92,7 +92,8 @@ export function gerarParidadeMd(registro: readonly DefinicaoAcao[], rotas: reado
     "",
     "<!-- Gerado por `npm run paridade` a partir de src/domain/acoes/ (NOD-391, ADR-135). Não edite à mão: a catraca (tests/conformidade/paridade.test.ts) compara. -->",
     "",
-    `Ações de pessoa que mudam algo: **${registro.length}**. No chat: **${n.vivo} vivas**, ${n.parcial} parciais, ${n.falta} faltando e ${n.nunca} que nunca vão para o chat. Piso de vivas: ${piso.vivo}.`,
+    // NOD-398: o registro também tem ação só de leitura (tela.capturar, exceção da ADR-135); ela não conta como "muda algo".
+    `Ações de pessoa que mudam algo: **${registro.filter((d) => d.risco !== "leitura").length}**${registro.some((d) => d.risco === "leitura") ? `, mais ${registro.filter((d) => d.risco === "leitura").length} só de leitura` : ""}. No chat: **${n.vivo} vivas**, ${n.parcial} parciais, ${n.falta} faltando e ${n.nunca} que nunca vão para o chat. Piso de vivas: ${piso.vivo}.`,
     "",
     "Estados: **vivo** = o chat faz pelo mesmo executor da tela, com teste de contrato; **parcial** = o chat faz, mas diverge ou falta parâmetro; **falta** = a onda dona ainda vai ligar; **nunca** = exceção escrita.",
     "",

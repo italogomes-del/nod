@@ -2,7 +2,7 @@
 
 <!-- Gerado por `npm run paridade` a partir de src/domain/acoes/ (NOD-391, ADR-135). Não edite à mão: a catraca (tests/conformidade/paridade.test.ts) compara. -->
 
-Ações de pessoa que mudam algo: **133**. No chat: **6 vivas**, 3 parciais, 91 faltando e 33 que nunca vão para o chat. Piso de vivas: 6.
+Ações de pessoa que mudam algo: **132**, mais 2 só de leitura. No chat: **6 vivas**, 3 parciais, 91 faltando e 34 que nunca vão para o chat. Piso de vivas: 6.
 
 Estados: **vivo** = o chat faz pelo mesmo executor da tela, com teste de contrato; **parcial** = o chat faz, mas diverge ou falta parâmetro; **falta** = a onda dona ainda vai ligar; **nunca** = exceção escrita.
 
@@ -253,6 +253,12 @@ Estados: **vivo** = o chat faz pelo mesmo executor da tela, com teste de contrat
 | `conta.remover_google` | Tirar o login Google da conta | pessoa_confirma | falta (NOD-395) | rota pública de conta (/api/conta, ADR-124) |
 | `conta.exportar` | Exportar os dados da conta | muda | falta (NOD-395) | rota pública de conta (/api/conta, ADR-124) |
 | `conta.excluir` | Excluir a conta (ou desfazer a exclusão) | pessoa_confirma | falta (NOD-395) | rota pública de conta (/api/conta, ADR-124) |
+
+## tela
+
+| Ação | O que faz | Risco | No chat | Rotas |
+| --- | --- | --- | --- | --- |
+| `tela.capturar` | Capturar uma tela do Nod | leitura | nunca: só no dev, no CI e no efêmero (NOD_CAPTURA_TELA); captura no chat da pessoa pede revisão de privacidade à parte | `POST ^\/tela\/captura$` |
 
 ## O que cada onda leva
 

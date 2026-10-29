@@ -52,6 +52,8 @@ export type OpcoesServidorCompleto = {
   watchdog?: OpcoesBoot["watchdog"];
   /** NOD-218: o marcador da cor ativa (arquivo temporário do teste) e o intervalo de releitura. Vale com `env.NOD_COR`. */
   corAtiva?: OpcoesBoot["corAtiva"];
+  /** NOD-398: o capturador de tela (vale com `env.NOD_CAPTURA_TELA: "1"`); ausente = o Chrome de verdade. */
+  capturador?: OpcoesBoot["capturador"];
 };
 
 /**
@@ -88,6 +90,8 @@ export async function servidorCompleto(o: OpcoesServidorCompleto = {}): Promise<
     // ADR-096: a limpeza das tasks liga por padrão e lê o disco a cada 5 min. O servidor de teste roda no modo local, com o
     // HOME de quem roda a suíte: ligada, ela mexeria no ~/nod e nos caches dessa pessoa. O teste que precisa dela liga.
     NOD_LIMPEZA_TASKS: "desligada",
+    // NOD-398 (revisão 12): o servidor de teste escuta e é chamado em 127.0.0.1; um NOD_HOST herdado do shell não vale.
+    NOD_HOST: "127.0.0.1",
     ...(o.env ?? {}),
   };
   const servidor = await boot({
@@ -105,6 +109,7 @@ export async function servidorCompleto(o: OpcoesServidorCompleto = {}): Promise<
     // NOD-267: o `process.exit` do watchdog derrubaria o worker do vitest numa suíte lenta; o teste que quer ver a saída injeta.
     watchdog: { sair: () => undefined, ...o.watchdog },
     corAtiva: o.corAtiva,
+    capturador: o.capturador,
   });
 
   const sessaoDe = (e: Escopo): SessaoDeTeste => ({ cookie: `nod_sessao=${cunharCookie(e, SEGREDO_DE_TESTE)}`, tenantId: e.tenantId, pessoaId: e.pessoaId });

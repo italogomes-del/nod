@@ -13,3 +13,4 @@ release/
 
 # wrangler dev do site (NOD-321)
 .wrangler
+qa-relatorio/

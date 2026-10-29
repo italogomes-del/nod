@@ -128,6 +128,8 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { rotasConcessoes } from "./rotas/concessoes.ts";
 import { rotasMarketplace } from "./rotas/marketplace.ts";
+import { rotasTela } from "./rotas/tela.ts";
+import { criarCapturadorCdp, type Capturador } from "../tela/capturador-cdp.ts";
 import { rotasConectores } from "./rotas/conectores.ts";
 import { rotasCredencial } from "./rotas/credencial.ts";
 import { criarRotasBusca } from "./rotas/busca.ts";
@@ -234,6 +236,8 @@ export type OpcoesCompor = {
   enviadorEmail?: EnviadorEmail;
   /** ADR-115 (revisor no servidor): só em teste — a API falsa (url ou fetch) e quantas chamadas em voo. Default: a da Anthropic. */
   revisor?: { url?: string; fetchImpl?: typeof fetch; emVoo?: number };
+  /** NOD-398: só em teste — o capturador de tela falso. Vale só com NOD_CAPTURA_TELA=1. Default: o Chrome via CDP. */
+  capturador?: Capturador;
 };
 
 export type App = {
@@ -1424,6 +1428,13 @@ export function comporApp(o: OpcoesCompor): App {
       fusoPadrao: env.NOD_FUSO_PADRAO ?? "America/Sao_Paulo",
     }),
     ...rotasConcessoes({ dentro }),
+    // NOD-398: a captura de tela só com NOD_CAPTURA_TELA=1 (dev, CI, efêmero); produção não liga e responde `indisponivel`.
+    // Revisão 6: no servidor compartilhado (várias pessoas, produção) a flag é ignorada mesmo ligada por engano: subir um
+    // Chrome que renderiza o conteúdo da pessoa no servidor pede uma revisão à parte.
+    // Revisão 10: a captura abre `127.0.0.1:<porta>`; com NOD_HOST num IP fora do loopback essa porta pode ser outro
+    // serviço, que receberia o cookie da pessoa. Só liga quando o servidor escuta no loopback (ou em todas as interfaces).
+    // Revisão 12: o boot passa o host EFETIVO do listen (`o.host` vence o env); flag ligada e host recusado deixam aviso.
+    ...rotasTela({ capturador: capturaDeTelaLigada(env, compartilhado) ? (o.capturador ?? criarCapturadorCdp()) : null }),
     ...rotasMarketplace({ dentro, cifrar: (t) => cifrar(t, chave), decifrar: (t) => decifrar(t, chave), admins: (env.NOD_ADMINS ?? "").split(",").map((e) => e.trim().toLowerCase()).filter(Boolean), aoTrocarApp: (t) => cofreDoApp.esquecer(t) }),
     ...rotasConectores({ dentro, cifrar: (t) => cifrar(t, chave), decifrar: (t) => decifrar(t, chave) }),
     ...rotasCredencial({ dentro, cifrar: (t) => cifrar(t, chave), decifrar: (t) => decifrar(t, chave) }),
@@ -1620,4 +1631,20 @@ export function comporApp(o: OpcoesCompor): App {
       await conectoresVivos.fechar();
     },
   };
+}
+
+/** NOD-398: a captura de tela só sobe com a flag, fora do modo compartilhado e com o host no loopback (revisão 12). */
+function capturaDeTelaLigada(env: Readonly<Record<string, string | undefined>>, compartilhado: boolean): boolean {
+  if (env.NOD_CAPTURA_TELA !== "1" || compartilhado) return false;
+  if (hostServeLoopback(env.NOD_HOST)) return true;
+  log("aviso", "captura_tela_desligada_pelo_host", { host: env.NOD_HOST });
+  return false;
+}
+
+/**
+ * NOD-398 (revisões 10 e 11): o host em que o servidor escuta com certeza atende em 127.0.0.1, que é onde a captura abre a
+ * página? `::1` só escuta no IPv6 e `localhost` pode cair nele: aí 127.0.0.1 pode ser outro serviço, que receberia o cookie.
+ */
+export function hostServeLoopback(host: string | undefined): boolean {
+  return host === undefined || host === "" || ["127.0.0.1", "0.0.0.0", "::"].includes(host);
 }

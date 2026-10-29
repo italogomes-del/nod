@@ -1,4 +1,5 @@
-import type { Agente, ModoAprovacao } from "../contracts/agente.ts";
+import { MODOS_APROVACAO, type Agente, type ModoAprovacao } from "../contracts/agente.ts";
+import { acharTextoMalFormado } from "./texto-bem-formado.ts";
 import type { MotivoCardDoLote } from "../contracts/conversa.ts";
 import type { AcaoLote, AppConectado, TipoAcaoLote } from "../contracts/ferramentas-do-nod.ts";
 import { MAX_ACOES_LOTE } from "../contracts/ferramentas-do-nod.ts";
@@ -48,8 +49,10 @@ function vazio(v: string | undefined): boolean {
  * chama de novo). `bots` são os bots da pessoa que o lote pode tocar (já filtrados por dona; excluídos e o Nod entram
  * para a mensagem de erro dizer por quê); `apps`, os que ela conectou.
  */
-export function validarLote(acoes: readonly AcaoLote[], bots: readonly BotDoLote[], apps: readonly AppConectado[], pessoaId: string): { ok: true; acoes: AcaoResolvida[] } | { ok: false; problemas: Problema[] } {
+export function validarLote(acoes: readonly AcaoLote[], bots: readonly BotDoLote[], apps: readonly AppConectado[], pessoaId: string, resumo?: string): { ok: true; acoes: AcaoResolvida[] } | { ok: false; problemas: Problema[] } {
   const problemas: Problema[] = [];
+  // Revisão 8 do #590: o resumo vai ao cartão (jsonb) e à frase da decisão; byte nulo ou surrogate solto nele dava 500.
+  if (resumo !== undefined && acharTextoMalFormado(resumo) !== null) problemas.push({ i: -1, motivo: "texto inválido no resumo (byte nulo ou caractere partido)" });
   if (acoes.length === 0) problemas.push({ i: -1, motivo: "nenhuma ação" });
   if (acoes.length > MAX_ACOES_LOTE) problemas.push({ i: -1, motivo: `no máximo ${MAX_ACOES_LOTE} ações por pedido; divida em partes` });
   const refs = new Map<string, number>();
@@ -57,6 +60,10 @@ export function validarLote(acoes: readonly AcaoLote[], bots: readonly BotDoLote
 
   acoes.forEach((a, i) => {
     const erro = (motivo: string) => problemas.push({ i, motivo });
+    // NOD-398 (revisão 6): byte nulo ou surrogate solto em qualquer campo virava cartão e estourava no jsonb (500). Vale
+    // também para a rota interna do gerir_bots, que não passa pelo filtro do corpo da pessoa.
+    const malFormado = acharTextoMalFormado(a);
+    if (malFormado !== null) erro(`texto inválido em ${malFormado.replace(/^\$\.?/, "") || "um campo"} (byte nulo ou caractere partido)`);
     let alvoId: string | null = null;
     let alvoDaAcao: number | null = null;
     let alvoNome = "";
@@ -111,7 +118,10 @@ export function validarLote(acoes: readonly AcaoLote[], bots: readonly BotDoLote
         break;
       }
       case "mudar_modo":
+        // NOD-398 (achado do fuzz): o modo fora da lista ia para o cartão e o texto com byte nulo estourava no JSON do Postgres.
         if (!a.modo) erro("mudar_modo precisa do modo");
+        // O modo mal formado já saiu acima, sem repetir o texto ruim no motivo (revisão 9).
+        else if (malFormado === null && !(MODOS_APROVACAO as readonly string[]).includes(a.modo)) erro(`modo "${[...String(a.modo)].slice(0, 20).join("")}" não existe: manual, automatico ou total`);
         break;
       default:
         break;

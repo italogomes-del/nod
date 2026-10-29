@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { acharTextoMalFormado } from "../../domain/texto-bem-formado.ts";
 
 export function json(res: ServerResponse, status: number, body: unknown): void {
   const data = JSON.stringify(body);
@@ -12,7 +13,12 @@ export function json(res: ServerResponse, status: number, body: unknown): void {
 /** definido em 2026-09-16: 1 MiB de corpo é folga para qualquer rota do nod; acima disso é abuso. */
 const CORPO_MAX = 1_048_576;
 
-export async function lerCorpo(req: IncomingMessage): Promise<unknown> {
+/**
+ * `daPessoa`: a rota é da pessoa (escopada no tenant ou pública). Só nela o corpo com byte nulo ou `null` é recusado;
+ * as rotas de máquina e internas (o executor, a ponte do computador) seguem como antes: o que elas recebem é saída de
+ * ferramenta e de terminal, onde o NUL é dado legítimo e cada rota trata (revisão 2 do #590).
+ */
+export async function lerCorpo(req: IncomingMessage, o: { daPessoa?: boolean } = {}): Promise<unknown> {
   const pedacos: Buffer[] = [];
   let total = 0;
   for await (const c of req) {
@@ -22,7 +28,16 @@ export async function lerCorpo(req: IncomingMessage): Promise<unknown> {
     pedacos.push(buf);
   }
   if (pedacos.length === 0) return {};
-  return JSON.parse(Buffer.concat(pedacos).toString("utf8"));
+  const texto = Buffer.concat(pedacos).toString("utf8");
+  const corpo: unknown = JSON.parse(texto);
+  // NOD-398 (achado do fuzz): `null` é JSON válido, mas nenhuma rota o aceita e o handler que faz `corpo.campo` estourava
+  // TypeError (500). Recusado aqui como corpo malformado: o roteador responde 400 entrada_invalida.
+  if (o.daPessoa && corpo === null) throw new SyntaxError("corpo null");
+  // NOD-398 (achado do fuzz): byte nulo (\u0000) e surrogate solto o Postgres recusa (22021/22P05 no text, 22P05 no jsonb) e
+  // o erro do driver virava 500. Recusado na entrada, onde é certamente dado da pessoa; o 22021 que vier de outro lugar
+  // continua 500 (é falha nossa). Uma regra só (revisão 7): a procura é iterativa, sem reviver recursivo que estoura a pilha.
+  if (o.daPessoa && acharTextoMalFormado(corpo) !== null) throw new SyntaxError("texto mal formado no corpo");
+  return corpo;
 }
 
 /**
