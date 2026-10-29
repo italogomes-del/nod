@@ -42,7 +42,8 @@ import { criarMarcaDoPerfil, planoDaSaida } from "./lib/lista-apos-saida.ts";
 import { rascunhoMudou } from "./telas/memoria.ts";
 import { abrirLuz } from "./telas/luz.ts";
 import { baixarUrl } from "./telas/luz-html.ts";
-import { htmlDoMenuDaBiblioteca } from "./telas/biblioteca.ts";
+import { desmarcarIrCarregando, htmlDaNotaDoMenu, htmlDoMenuDaBiblioteca, marcarIrCarregando, NOTA_FALA_DEMOROU, NOTA_FALA_FORA, TEXTO_IR_CARREGANDO } from "./telas/biblioteca.ts";
+import { abrirDetalhesAcima, criarMenuDoIr, criarMundoDaFala, irParaFalaDaBiblioteca, levarAFalaComAte, notarVeio, soltarAlvoNaoDesenhado, type AlvoDaFala } from "./lib/ir-para-a-fala.ts";
 import { lerSeAindaVale } from "./lib/biblioteca.ts";
 import { acaoDoAlvo, indiceNaLuz } from "./lib/link-anexo.ts";
 import { alternarAudio, alternarGif, instalarMidiaDom, irNoAudio, mostrarNoFinder, tentarDeNovo, velocidadeDoAudio, type OpcoesMidiaDom } from "./lib/midia-dom.ts";
@@ -162,7 +163,7 @@ import { criarTelaOnboarding, guardarFocoDaCamada } from "./telas/onboarding-con
 import { movimentoReduzido } from "./lib/movimento.ts";
 import { alvoDoQueEspera, levarAoAlvo, passoDoAtalho, type AlvoDoAtalho } from "./lib/levar-ao-alvo.ts";
 import { criarBuscaCelular, limparEntradaDaBusca } from "./telas/busca-celular.ts";
-import { alvoDepoisDeFalar, alvoNoFimDaConversa, apagarTodosOsRecentes, appInerte, buscarSemOcupado, chaveDosRecentes, dataCurta, ESPERA_DESENHO_MS, vizinhaDesenhada } from "./lib/busca-celular.ts";
+import { alvoDepoisDeFalar, alvoNoFimDaConversa, apagarTodosOsRecentes, appInerte, buscarSemOcupado, chaveDosRecentes, dataCurta } from "./lib/busca-celular.ts";
 import type { MensagemAchada } from "../src/contracts/busca.ts";
 import { gavetaPrendeFoco, irmaosAteARaiz, seletoresDaOrigem, voltaDoTab } from "./lib/foco-gaveta.ts";
 import type { Ligacao } from "../src/contracts/ligacao.ts";
@@ -3759,20 +3760,14 @@ function appInerteSemBusca(): boolean {
  * nova) e, quando a timeline a desenha, leva até ela com o destaque de 2 s. Sair da conversa ou mandar uma fala nela (a
  * pessoa voltou para o fim) esquece o alvo, e a janela volta à normal.
  */
-let alvoDaBusca: { conversaId: string; mensagemId: string; veio?: boolean; veioEm?: number; desenhado?: boolean } | null = null;
+let alvoDaBusca: AlvoDaFala | null = null;
 const ateDaBusca = (conversaId: string): string | undefined => (alvoDaBusca?.conversaId === conversaId ? alvoDaBusca.mensagemId : undefined);
 /** A resposta diz se a fala veio na janela (e não o relógio): rede lenta não vira o aviso de "antiga demais". */
 function notarAlvoDaBusca<C extends { mensagens: readonly { id: string }[] }>(conversaId: string, ate: string | undefined, conversa: C): C {
-  // Só a resposta pedida com este `ate` conta: uma leitura sem ele, já em voo antes do toque, não vira "antiga demais".
-  if (ate && alvoDaBusca?.conversaId === conversaId && alvoDaBusca.mensagemId === ate) {
-    alvoDaBusca.veio = conversa.mensagens.some((x) => x.id === ate);
-    if (alvoDaBusca.veio) alvoDaBusca.veioEm ??= Date.now();
-  }
+  notarVeio(alvoDaBusca, conversaId, ate, conversa.mensagens.map((x) => x.id), Date.now());
   return conversa;
 }
 const DESTAQUE_BUSCA_MS = 2000;
-/** Quanto esperar a resposta e o desenho da fala achada (rede lenta com a janela de até 1000). */
-const ESPERA_ALVO_MS = 20_000;
 
 function abrirMensagemAchada(m: MensagemAchada): void {
   if (!(m.conversaTipo === "sala" && m.salaId) && !m.agenteId) return;
@@ -3780,45 +3775,33 @@ function abrirMensagemAchada(m: MensagemAchada): void {
   alvoDaBusca = { conversaId: m.conversaId, mensagemId: m.id };
   if (m.conversaTipo === "sala" && m.salaId) navegar({ tipo: "sala", salaId: m.salaId, conversaId: m.conversaId });
   else if (m.agenteId) navegar({ tipo: "conversa", conversaId: m.conversaId, agenteId: m.agenteId });
-  // A conversa já lida tinha a janela das recentes: relê com o `ate`.
-  dispatch({ tipo: "invalidar", quais: [`conversa:${m.conversaId}` as Invalidacao] });
-  const id = CSS.escape(m.id);
-  const desiste = Date.now() + ESPERA_ALVO_MS;
-  const tentar = (): void => {
-    const t = estado.tela;
-    if ((t.tipo !== "conversa" && t.tipo !== "sala") || t.conversaId !== m.conversaId) return;
-    const alvo = document.querySelector<HTMLElement>(`#timeline [data-mensagem="${id}"]`);
-    if (!alvo) {
-      const veio = alvoDaBusca?.mensagemId === m.id ? alvoDaBusca.veio : undefined;
-      // A resposta chegou sem a fala (mais de 1000 falas depois dela): avisa em vez de parar calado na conversa.
-      if (veio === false) {
-        dispatch({ tipo: "erro", erro: { codigo: "busca_alvo_fora", mensagem: "Essa mensagem é antiga demais para abrir aqui. A conversa abriu nas mais recentes." } });
-        return;
-      }
-      // Veio, mas a timeline não a desenha (fala do meio de um turno de rotina ou colega, recolhida): leva à vizinha.
-      const veioEm = alvoDaBusca?.mensagemId === m.id ? alvoDaBusca.veioEm : undefined;
-      if (veio === true && veioEm !== undefined && Date.now() - veioEm >= ESPERA_DESENHO_MS) {
-        const timeline = document.querySelector("#timeline");
-        const ids = (estado.conversas[m.conversaId]?.mensagens ?? []).map((x) => x.id);
-        const perto = timeline ? vizinhaDesenhada(ids, m.id, (x) => !!timeline.querySelector(`[data-mensagem="${CSS.escape(x)}"]`)) : null;
-        const el = perto ? timeline?.querySelector<HTMLElement>(`[data-mensagem="${CSS.escape(perto)}"]`) : null;
-        if (el) return destacar(el);
-      }
-      if (Date.now() < desiste) window.setTimeout(tentar, 120);
-      else dispatch({ tipo: "erro", erro: { codigo: "busca_alvo_fora", mensagem: "Não deu para levar até essa mensagem. A conversa abriu nas mais recentes." } });
-      return;
-    }
-    destacar(alvo);
-  };
-  const destacar = (alvo: HTMLElement): void => {
-    if (alvoDaBusca?.mensagemId === m.id) alvoDaBusca.desenhado = true;
-    rolagem.soltar();
-    levarAoAlvo(alvo, { reduzido: movimentoReduzido(), agendar: (fn, ms) => window.setTimeout(fn, ms), realcar: false });
-    alvo.classList.add("achada-na-busca");
-    window.setTimeout(() => alvo.classList.remove("achada-na-busca"), DESTAQUE_BUSCA_MS);
-  };
-  window.setTimeout(tentar, 0);
+  levarAFalaComAte(mundoDaFala, m.conversaId, m.id, {
+    aoChegar: (alvo) => {
+      abrirDetalhesAcima(alvo);
+      rolagem.soltar();
+      levarAoAlvo(alvo, { reduzido: movimentoReduzido(), agendar: (fn, ms) => window.setTimeout(fn, ms), realcar: false });
+      alvo.classList.add("achada-na-busca");
+      window.setTimeout(() => alvo.classList.remove("achada-na-busca"), DESTAQUE_BUSCA_MS);
+    },
+    aoFalhar: (antiga) => {
+      // Revisão 2 (achado 6): a fala que não veio não deixa a janela crescida até um alvo que nunca se desenha.
+      soltarAlvoNaoDesenhado(mundoDaFala, m.conversaId, m.id);
+      dispatch({ tipo: "erro", erro: { codigo: "busca_alvo_fora", mensagem: antiga ? "Essa mensagem é antiga demais para abrir aqui. A conversa abriu nas mais recentes." : "Não deu para levar até essa mensagem. A conversa abriu nas mais recentes." } });
+    },
+  });
 }
+
+/** NOD-363: o mundo de levarAFalaComAte (web/lib/ir-para-a-fala.ts) — a tela, o alvo da janela, a timeline e o relógio. */
+const mundoDaFala = criarMundoDaFala<HTMLElement>({
+  tela: () => estado.tela,
+  alvo: { ler: () => alvoDaBusca, gravar: (a) => { alvoDaBusca = a; } },
+  mensagens: (id) => estado.conversas[id]?.mensagens,
+  noTimeline: (sel) => document.querySelector<HTMLElement>(sel),
+  escapar: (x) => CSS.escape(x),
+  invalidar: (q) => dispatch({ tipo: "invalidar", quais: [q as Invalidacao] }),
+  agendar: (fn, ms) => window.setTimeout(fn, ms),
+  agora: () => Date.now(),
+});
 
 document.getElementById("timeline")?.addEventListener(
   "scroll",
@@ -7239,46 +7222,86 @@ async function mostrarMaisNaBiblioteca(conversaId: string, grupo: string): Promi
 }
 
 /**
- * NOD-326: o "…" de um item da Biblioteca — Baixar (só com os bytes no nod) e Ir para a mensagem (só com a fala desenhada
- * no chat: a conversa carrega uma janela). No celular, a gaveta sobreposta fecha antes de levar à mensagem.
+ * NOD-326: o "…" de um item da Biblioteca — Baixar (só com os bytes no nod) e Ir para a mensagem. NOD-363: o Ir está em
+ * todo item (irParaFalaDaBiblioteca): com a fala desenhada leva na hora, sem rede; fora da janela o item diz
+ * "Carregando…" (anunciado), a conversa relê com `?ate=` e, quando a fala chega, o menu fecha, a gaveta sobreposta do
+ * celular fecha e só então rola. Sem a fala, a nota diz isso no menu. Fechar o menu ou trocar de tela cancela a espera.
  */
 function abrirMenuDaBiblioteca(ancora: HTMLElement): void {
-  const { url, nome = "arquivo", mensagemDe = "" } = ancora.dataset;
-  const fala = mensagemDe ? document.querySelector<HTMLElement>(`#timeline [data-mensagem="${CSS.escape(mensagemDe)}"], [data-mensagem="${CSS.escape(mensagemDe)}"]:not(#detalhes *)`) : null;
-  const d = dialogo(htmlDoMenuDaBiblioteca({ nome, baixar: Boolean(url), fala: fala !== null }), true);
+  const { url, nome = "arquivo", mensagemDe = "", conversa = "", id = "" } = ancora.dataset;
+  // Revisão 2 (achado 2): a Biblioteca redesenha durante a espera (SSE, a releitura com `ate`) e troca o botão "…";
+  // posição, aria-expanded e o foco de volta seguem o botão que está na tela.
+  const ancoraViva = (): HTMLElement => (ancora.isConnected ? ancora : document.querySelector<HTMLElement>(`#detalhes [data-act="biblioteca-menu"][data-id="${CSS.escape(id)}"]`)) ?? ancora;
+  const d = dialogo(htmlDoMenuDaBiblioteca({ nome, baixar: Boolean(url) }), true);
   d.setAttribute("aria-label", `Ações de ${nome}`);
   d.classList.add("menu-compartilhar");
   ancora.setAttribute("aria-expanded", "true");
-  d.addEventListener("close", () => ancora.setAttribute("aria-expanded", "false"));
-  const r = ancora.getBoundingClientRect();
-  d.style.left = `${Math.max(12, Math.min(r.right - d.offsetWidth, window.innerWidth - d.offsetWidth - 12))}px`;
-  d.style.top = `${Math.max(12, Math.min(r.bottom + 6, window.innerHeight - d.offsetHeight - 12))}px`;
-  d.addEventListener("click", (e) => {
-    const acao = (e.target as HTMLElement).closest<HTMLElement>("[data-gestao]")?.dataset.gestao;
-    if (!acao) return;
-    d.close();
-    if (acao === "baixar" && url) {
-      const a = document.createElement("a");
-      a.href = baixarUrl(url);
-      a.download = nome;
-      a.click();
-    } else if (acao === "ir" && fala?.isConnected) {
+  let aberto = true;
+  let espera: { soltar(): void } | null = null;
+  d.addEventListener("close", () => {
+    aberto = false;
+    const viva = ancoraViva();
+    viva.setAttribute("aria-expanded", "false");
+    espera?.soltar();
+    if (!ancora.isConnected && viva.isConnected && (document.activeElement === document.body || document.activeElement === null)) viva.focus();
+  });
+  const posicionar = (): void => {
+    const r = ancoraViva().getBoundingClientRect();
+    d.style.left = `${Math.max(12, Math.min(r.right - d.offsetWidth, window.innerWidth - d.offsetWidth - 12))}px`;
+    d.style.top = `${Math.max(12, Math.min(r.bottom + 6, window.innerHeight - d.offsetHeight - 12))}px`;
+  };
+  posicionar();
+  const ui = criarMenuDoIr<HTMLElement>({
+    item: d.querySelector<HTMLButtonElement>('[data-gestao="ir"]'),
+    status: d.querySelector<HTMLElement>(".menu-status"),
+    // `dialogo()` de outro menu remove este sem disparar close: o desconectado também não vale mais.
+    // Revisão 4: o `close` chega numa tarefa depois do close(); `d.open` já fica falso na hora.
+    aberto: () => aberto && d.open && d.isConnected,
+    marcar: marcarIrCarregando,
+    desmarcar: desmarcarIrCarregando,
+    textoCarregando: TEXTO_IR_CARREGANDO,
+    nota: (antiga) => htmlDaNotaDoMenu(antiga ? NOTA_FALA_FORA : NOTA_FALA_DEMOROU),
+    trocarNota: (html) => {
+      d.querySelector(".menu-nota")?.remove();
+      if (html) d.insertAdjacentHTML("beforeend", html);
+    },
+    posicionar,
+    focarNota: () => d.querySelector<HTMLElement>(".menu-nota")?.focus(),
+    fechar: () => { if (d.open) d.close(); },
+    irAte: (fala, vizinha) => {
+      if (d.open) d.close();
+      abrirDetalhesAcima(fala);
       // NOD-382: no celular, ir para a mensagem fecha o perfil de verdade (o estado junto), e a pessoa fica no chat.
       if (ehCelular() && estado.perfilCelular) fecharPerfil("chat", false);
       else if (window.matchMedia("(max-width: 1099px)").matches) {
         document.querySelector(".app")?.classList.remove("detalhes-abertos");
         marcarPainelNaPilula();
       }
-      levarAo(fala);
+      // Revisão 3 (B5): a vizinha não leva o realce de "é esta" (como o alvoDoQueEspera de levar-ao-alvo.ts).
+      levarAo(fala, !vizinha);
+    },
+  });
+  d.addEventListener("click", (e) => {
+    const bt = (e.target as HTMLElement).closest<HTMLButtonElement>("[data-gestao]");
+    const acao = bt?.dataset.gestao;
+    if (!acao || !bt || bt.getAttribute("aria-disabled") === "true") return;
+    if (acao === "baixar" && url) {
+      d.close();
+      const a = document.createElement("a");
+      a.href = baixarUrl(url);
+      a.download = nome;
+      a.click();
+    } else if (acao === "ir" && mensagemDe) {
+      espera = irParaFalaDaBiblioteca(mundoDaFala, ui, conversa, mensagemDe);
     }
   });
   d.addEventListener("keydown", (e) => {
     if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) return;
     e.preventDefault();
     const bts = [...d.querySelectorAll<HTMLButtonElement>("button")];
-    const atual = bts.indexOf(document.activeElement as HTMLButtonElement);
-    const proximo = e.key === "Home" ? 0 : e.key === "End" ? bts.length - 1 : (atual + (e.key === "ArrowDown" ? 1 : -1) + bts.length) % bts.length;
-    bts[proximo]?.focus();
+    // Revisão 2 (achado 8): com o foco na nota (fora dos itens), ↑ vai ao último item (NOD-367).
+    const i = proximoItemDoMenu(bts.length, bts.indexOf(document.activeElement as HTMLButtonElement), e.key);
+    if (i !== null) bts[i]?.focus();
   });
   (d.querySelector<HTMLElement>('[role="menuitem"]') ?? d.querySelector<HTMLElement>(".menu-nota"))?.focus();
 }

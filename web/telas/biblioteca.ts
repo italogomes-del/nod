@@ -104,21 +104,47 @@ export function renderListaBiblioteca(b: BibliotecaDaConversa | undefined, c: Co
   return `<div class="msg-midias gvb-lista" data-biblioteca="${esc(c.conversaId)}" data-luz="${esc(JSON.stringify(luz))}">${secoes}</div>`;
 }
 
-/** O "Ir para a mensagem" só existe quando a fala está desenhada no chat (a conversa carrega uma janela, não tudo). */
-export function itensDoMenu(o: { baixar: boolean; irParaMensagem: boolean }): ("baixar" | "ir")[] {
-  return [...(o.baixar ? (["baixar"] as const) : []), ...(o.irParaMensagem ? (["ir"] as const) : [])];
+/**
+ * NOD-363: o "Ir para a mensagem" está em todo item; a fala fora da janela do chat é trazida (`?ate=`) quando a pessoa pede.
+ * Baixar só com os bytes no nod.
+ */
+export function itensDoMenu(o: { baixar: boolean }): ("baixar" | "ir")[] {
+  return [...(o.baixar ? (["baixar"] as const) : []), "ir"];
 }
 
-export const NOTA_MENSAGEM_ACIMA = "A mensagem está mais acima no chat.";
+export const TEXTO_IR = "Ir para a mensagem";
+export const TEXTO_IR_CARREGANDO = "Carregando…";
+/** NOD-363 (critério 4): a fala não veio (apagada, ou mais de 1000 falas atrás) ou não chegou no prazo. */
+export const NOTA_FALA_FORA = "Não deu para chegar a essa mensagem: ela é antiga demais ou saiu do chat.";
+export const NOTA_FALA_DEMOROU = "A mensagem demorou para carregar. Tente de novo.";
 
 /**
- * O conteúdo do "…": os itens num `role=menu` e, sem a fala no chat, a nota visível fora dele. Sem nenhuma ação (o
- * arquivo ficou no Mac e a fala está fora da janela), só a nota, sem menu vazio (revisão 2: o clique mostra algo).
+ * O conteúdo do "…": os itens num `role=menu` e, fora dele, a região `role=status` (só para o leitor de tela) que anuncia
+ * o "Carregando…". A nota da falha entra depois, também fora do menu (`htmlDaNotaDoMenu`).
  */
-export function htmlDoMenuDaBiblioteca(o: { nome: string; baixar: boolean; fala: boolean }): string {
-  const itens = itensDoMenu({ baixar: o.baixar, irParaMensagem: o.fala });
+export function htmlDoMenuDaBiblioteca(o: { nome: string; baixar: boolean }): string {
   const botao = (acao: string, texto: string) => `<button type="button" role="menuitem" data-gestao="${acao}">${texto}</button>`;
-  const menu = itens.length ? `<div role="menu" aria-label="${esc(`Ações de ${o.nome}`)}">${itens.map((i) => (i === "baixar" ? botao("baixar", "Baixar") : botao("ir", "Ir para a mensagem"))).join("")}</div>` : "";
-  const nota = o.fala ? "" : `<p class="menu-nota"${itens.length ? "" : ' role="status" tabindex="-1"'}>${NOTA_MENSAGEM_ACIMA}</p>`;
-  return menu + nota;
+  return `<div role="menu" aria-label="${esc(`Ações de ${o.nome}`)}">${itensDoMenu(o).map((i) => (i === "baixar" ? botao("baixar", "Baixar") : botao("ir", TEXTO_IR))).join("")}</div><p class="menu-status sr-only" role="status"></p>`;
 }
+
+type ItemDoIr = { textContent: string | null; setAttribute(n: string, v: string): void; removeAttribute(n: string): void };
+
+/**
+ * O item Ir enquanto a conversa relê até a fala. `aria-disabled` e não `disabled` (revisão 1, achado 2): o `disabled` tira
+ * o foco do item e o joga no body; assim o foco fica e as setas do menu seguem funcionando. O clique confere o atributo.
+ */
+export function marcarIrCarregando(bt: ItemDoIr): void {
+  bt.textContent = TEXTO_IR_CARREGANDO;
+  bt.setAttribute("aria-disabled", "true");
+}
+
+export function desmarcarIrCarregando(bt: ItemDoIr): void {
+  bt.textContent = TEXTO_IR;
+  bt.removeAttribute("aria-disabled");
+}
+
+/** A nota visível da falha, fora do role=menu, anunciada e focável. */
+export function htmlDaNotaDoMenu(texto: string): string {
+  return `<p class="menu-nota" role="status" tabindex="-1">${esc(texto)}</p>`;
+}
+

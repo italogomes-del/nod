@@ -4,7 +4,7 @@ import type { FrotaDto } from "../../../src/contracts/api.ts";
 import type { ItemDaBiblioteca } from "../../../src/contracts/biblioteca.ts";
 import { estadoInicial, invalidacoesAoReconectar, invalidacoesAoRetomar, invalidacoesDaTela, reduzir, bibliotecaAberta, type Acao, type Estado } from "../../../web/estado/reducer.ts";
 import { grupoDe, gruposVisiveis, juntarPagina, lerSeAindaVale, type BibliotecaDaConversa } from "../../../web/lib/biblioteca.ts";
-import { acaoDoItem, htmlDoMenuDaBiblioteca, itensDoMenu, renderListaBiblioteca, type ContextoBiblioteca } from "../../../web/telas/biblioteca.ts";
+import { acaoDoItem, desmarcarIrCarregando, htmlDaNotaDoMenu, htmlDoMenuDaBiblioteca, itensDoMenu, marcarIrCarregando, NOTA_FALA_DEMOROU, NOTA_FALA_FORA, renderListaBiblioteca, TEXTO_IR, type ContextoBiblioteca } from "../../../web/telas/biblioteca.ts";
 import { renderDetalhes } from "../../../web/telas/detalhes.ts";
 
 /** NOD-326: a aba Biblioteca da gaveta do bot — grupos, paginação, estados, ações e a releitura ao vivo. */
@@ -268,8 +268,8 @@ describe("a tela da Biblioteca", () => {
     expect(html).toContain('class="gvb-item gvb-sumiu"');
     expect(html).toContain('<div class="gv-linha gvb-abrir gvb-inerte">');
     expect(html.match(/data-act="biblioteca-menu"[^>]*data-url=/g)).toBeNull();
-    expect(itensDoMenu({ baixar: false, irParaMensagem: true })).toEqual(["ir"]);
-    expect(itensDoMenu({ baixar: true, irParaMensagem: false })).toEqual(["baixar"]);
+    expect(itensDoMenu({ baixar: false })).toEqual(["ir"]);
+    expect(itensDoMenu({ baixar: true })).toEqual(["baixar", "ir"]);
   });
 
   // Revisão 1: o arquivo que ficou NESTE Mac é conferido na pasta do bot; o de outro Mac, não.
@@ -297,19 +297,36 @@ describe("a tela da Biblioteca", () => {
 });
 
 describe("o menu \"…\" e a guarda de sessão (revisão 2)", () => {
-  it("com Baixar e Ir: só o menu; sem a fala, a nota visível fica fora do role=menu", () => {
-    const tudo = htmlDoMenuDaBiblioteca({ nome: "a.pdf", baixar: true, fala: true });
-    expect(tudo).toBe('<div role="menu" aria-label="Ações de a.pdf"><button type="button" role="menuitem" data-gestao="baixar">Baixar</button><button type="button" role="menuitem" data-gestao="ir">Ir para a mensagem</button></div>');
-    const semFala = htmlDoMenuDaBiblioteca({ nome: "a.pdf", baixar: true, fala: false });
-    expect(semFala).toMatch(/<\/div><p class="menu-nota">A mensagem está mais acima no chat\.<\/p>$/);
+  it("NOD-363: o Ir está em todo item, com ou sem Baixar, e não há mais nota fixa de 'mais acima'", () => {
+    const tudo = htmlDoMenuDaBiblioteca({ nome: "a.pdf", baixar: true });
+    expect(tudo).toBe('<div role="menu" aria-label="Ações de a.pdf"><button type="button" role="menuitem" data-gestao="baixar">Baixar</button><button type="button" role="menuitem" data-gestao="ir">Ir para a mensagem</button></div><p class="menu-status sr-only" role="status"></p>');
+    const soIr = htmlDoMenuDaBiblioteca({ nome: "<b>x</b>", baixar: false });
+    expect(soIr).toBe('<div role="menu" aria-label="Ações de &lt;b&gt;x&lt;/b&gt;"><button type="button" role="menuitem" data-gestao="ir">Ir para a mensagem</button></div><p class="menu-status sr-only" role="status"></p>');
+    expect(soIr).not.toContain("menu-nota");
   });
-  it("sem nenhuma ação, não há menu vazio: só a nota, que recebe o foco e é anunciada", () => {
-    const nada = htmlDoMenuDaBiblioteca({ nome: "<b>x</b>", baixar: false, fala: false });
-    expect(nada).not.toContain('role="menu"');
-    expect(nada).toBe('<p class="menu-nota" role="status" tabindex="-1">A mensagem está mais acima no chat.</p>');
+  it("NOD-363 (revisão 1, achado 2): o Ir carregando usa aria-disabled (o foco fica nele), diz Carregando… e volta", () => {
+    const attrs = new Map<string, string>();
+    const bt = { textContent: TEXTO_IR as string | null, setAttribute: (n: string, v: string) => { attrs.set(n, v); }, removeAttribute: (n: string) => { attrs.delete(n); } };
+    marcarIrCarregando(bt);
+    expect(bt.textContent).toBe("Carregando…");
+    expect(Object.fromEntries(attrs)).toEqual({ "aria-disabled": "true" });
+    expect(bt).not.toHaveProperty("disabled");
+    desmarcarIrCarregando(bt);
+    expect(bt.textContent).toBe("Ir para a mensagem");
+    expect(attrs.size).toBe(0);
+  });
+  it("NOD-363: a nota da falha é curta, anunciada, focável e escapada", () => {
+    expect(htmlDaNotaDoMenu(NOTA_FALA_FORA)).toBe('<p class="menu-nota" role="status" tabindex="-1">Não deu para chegar a essa mensagem: ela é antiga demais ou saiu do chat.</p>');
+    expect(htmlDaNotaDoMenu("<i>")).toContain("&lt;i&gt;");
+    expect(htmlDaNotaDoMenu(NOTA_FALA_DEMOROU)).toContain("A mensagem demorou para carregar. Tente de novo.");
+  });
+  it("NOD-363 (revisão 2, achado 3): o \"…\" de cada item leva a conversa e a fala de origem que o Ir usa", () => {
+    const i = it_(local(24, 9), { nome: "a.pdf", mime: "application/pdf", mensagemId: "fala-<1>" });
+    const html = renderListaBiblioteca(base([i]), ctx({ conversaId: "c&1" }));
+    expect(html).toContain(`data-act="biblioteca-menu" data-id="${i.id}" data-conversa="c&amp;1" data-mensagem-de="fala-&lt;1&gt;"`);
   });
   it("o nome vai escapado no rótulo do menu", () => {
-    expect(htmlDoMenuDaBiblioteca({ nome: '"><img>', baixar: true, fala: true })).toContain('aria-label="Ações de &quot;&gt;&lt;img&gt;"');
+    expect(htmlDoMenuDaBiblioteca({ nome: '"><img>', baixar: true })).toContain('aria-label="Ações de &quot;&gt;&lt;img&gt;"');
   });
   it("a resposta que chega depois da troca de sessão é descartada; a falha vira null", async () => {
     let sessao = "a";
@@ -334,7 +351,34 @@ describe("a fiação no main", () => {
     for (const act of ["biblioteca-mais", "biblioteca-tentar", "biblioteca-menu"]) expect(main).toContain(`"${act}": (el) =>`);
   });
   it("os handlers usam o menu e a guarda de sessão testados aqui", () => {
-    expect(main).toContain("htmlDoMenuDaBiblioteca({ nome, baixar: Boolean(url), fala: fala !== null })");
+    expect(main).toContain("htmlDoMenuDaBiblioteca({ nome, baixar: Boolean(url) })");
+  });
+  it("NOD-363: o Ir passa por irParaFalaDaBiblioteca; a gaveta fecha antes do levarAo; fechar solta o alvo; aria-disabled barra o clique", () => {
+    const corpo = main.slice(main.indexOf("function abrirMenuDaBiblioteca("), main.indexOf("function escolherAba("));
+    expect(corpo).toContain("espera = irParaFalaDaBiblioteca(mundoDaFala, ui, conversa, mensagemDe)");
+    const ir = corpo.slice(corpo.indexOf("irAte: (fala, vizinha) =>"));
+    // Revisão 3 (M3): cada passo tem de existir (indexOf -1 passaria no toBeLessThan) e vir antes do levarAo.
+    const levar = ir.indexOf("levarAo(fala, !vizinha)");
+    expect(levar).toBeGreaterThan(-1);
+    for (const passo of ['fecharPerfil("chat", false)', 'classList.remove("detalhes-abertos")', "marcarPainelNaPilula()", "d.close()", "abrirDetalhesAcima(fala)"]) {
+      const i = ir.indexOf(passo);
+      expect(i, passo).toBeGreaterThan(-1);
+      expect(i, passo).toBeLessThan(levar);
+    }
+    expect(corpo).toContain("espera?.soltar();");
+    // Revisão 2 (achado 2): a âncora redesenhada é reencontrada para posicionar, aria-expanded e foco.
+    expect(corpo).toContain('[data-act="biblioteca-menu"][data-id="${CSS.escape(id)}"]');
+    expect(corpo).toContain("ancoraViva().getBoundingClientRect()");
+    expect(corpo).toContain("proximoItemDoMenu(bts.length,");
+    expect(corpo).toContain("aberto: () => aberto && d.open && d.isConnected");
+    // QA (mutantes M7, M8, M11): o mundo lê a tela de verdade e relê pelo invalidar; o celular fecha o perfil.
+    expect(main).toContain("tela: () => estado.tela,");
+    expect(main).toContain('invalidar: (q) => dispatch({ tipo: "invalidar", quais: [q as Invalidacao] }),');
+    expect(ir).toContain('if (ehCelular() && estado.perfilCelular) fecharPerfil("chat", false);');
+    expect(corpo).toContain("htmlDaNotaDoMenu(antiga ? NOTA_FALA_FORA : NOTA_FALA_DEMOROU)");
+    expect(corpo).toContain('#detalhes [data-act="biblioteca-menu"]');
+    expect(corpo).toContain('bt.getAttribute("aria-disabled") === "true") return;');
+    expect(corpo).toContain("NOTA_FALA_FORA : NOTA_FALA_DEMOROU");
     expect(main.match(/lerSeAindaVale\(/g)).toHaveLength(2);
   });
   it("a tela cheia reencontra a lista da Biblioteca (sem data-mensagem)", () => {

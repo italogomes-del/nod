@@ -197,6 +197,19 @@ export function alvoNoFimDaConversa<A extends { desenhado?: boolean }>(alvo: A |
 /** Quanto esperar o desenho da fala depois que a resposta a trouxe, antes de levar à vizinha. */
 export const ESPERA_DESENHO_MS = 600;
 
+/**
+ * NOD-363: o passo da espera por uma fala pedida com `?ate=` (a busca do celular e o "Ir para a mensagem" da Biblioteca).
+ * `veio` é o que a resposta pedida com o `ate` disse (undefined = ainda não chegou); quem decide "antiga" é a resposta, não o
+ * relógio. A fala que veio e não se desenha (recolhida no meio de um turno) leva à vizinha depois de ESPERA_DESENHO_MS.
+ */
+export type PassoDoAlvo = "levar" | "vizinha" | "esperar" | "antiga" | "desistiu";
+export function passoDoAlvo(p: { desenhada: boolean; veio: boolean | undefined; veioEm: number | undefined; agora: number; desiste: number }): PassoDoAlvo {
+  if (p.desenhada) return "levar";
+  if (p.veio === false) return "antiga";
+  if (p.veio === true && p.veioEm !== undefined && p.agora - p.veioEm >= ESPERA_DESENHO_MS) return "vizinha";
+  return p.agora < p.desiste ? "esperar" : "desistiu";
+}
+
 export function appInerte(c: { outraCamada: boolean; buscaAberta: boolean }): boolean {
   return c.outraCamada || c.buscaAberta;
 }

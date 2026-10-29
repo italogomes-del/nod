@@ -378,12 +378,35 @@ describe("NOD-380 revisão 7: a fala achada que a timeline recolhe", () => {
     expect(vizinhaDesenhada(ids, "z", () => true)).toBeNull();
   });
 
-  it("main.ts: veio e não desenhada leva à vizinha depois da espera do desenho; esgotada a espera, avisa em vez de calar", async () => {
+  it("passoDoAlvo (NOD-363): desenhada leva; não veio é antiga; veio e não desenhada vai à vizinha só depois da espera; prazo vencido desiste", async () => {
+    const { passoDoAlvo, ESPERA_DESENHO_MS } = await import("../../../web/lib/busca-celular.ts");
+    const base = { desenhada: false, veio: undefined, veioEm: undefined, agora: 1000, desiste: 5000 } as const;
+    expect(passoDoAlvo({ ...base, desenhada: true, veio: false })).toBe("levar");
+    expect(passoDoAlvo({ ...base, veio: false })).toBe("antiga");
+    expect(passoDoAlvo({ ...base, veio: false, agora: 9000 })).toBe("antiga");
+    expect(passoDoAlvo(base)).toBe("esperar");
+    expect(passoDoAlvo({ ...base, veio: true, veioEm: 1000 - ESPERA_DESENHO_MS + 1 })).toBe("esperar");
+    expect(passoDoAlvo({ ...base, veio: true, veioEm: 1000 - ESPERA_DESENHO_MS })).toBe("vizinha");
+    expect(passoDoAlvo({ ...base, veio: true, veioEm: undefined })).toBe("esperar");
+    expect(passoDoAlvo({ ...base, agora: 5000 })).toBe("desistiu");
+    expect(passoDoAlvo({ ...base, agora: 4999 })).toBe("esperar");
+  });
+
+  it("main.ts: a busca e a Biblioteca usam o mesmo levarAFalaComAte (web/lib/ir-para-a-fala.ts); a falha da busca avisa", async () => {
     const { readFileSync } = await import("node:fs");
     const main = readFileSync(new URL("../../../web/main.ts", import.meta.url), "utf8");
-    expect(main).toMatch(/veio === true && veioEm !== undefined && Date\.now\(\) - veioEm >= ESPERA_DESENHO_MS/u);
-    expect(main).toMatch(/vizinhaDesenhada\(ids, m\.id/u);
-    expect(main).toMatch(/else dispatch\(\{ tipo: "erro", erro: \{ codigo: "busca_alvo_fora"/u);
+    expect(main).toContain("levarAFalaComAte(mundoDaFala, m.conversaId, m.id, {");
+    const busca = main.slice(main.indexOf("function abrirMensagemAchada("), main.indexOf("const mundoDaFala"));
+    expect(busca.indexOf("soltarAlvoNaoDesenhado(mundoDaFala, m.conversaId, m.id)")).toBeLessThan(busca.indexOf('codigo: "busca_alvo_fora"'));
+    expect(busca.indexOf("soltarAlvoNaoDesenhado")).toBeGreaterThan(-1);
+    expect(main).toContain("const mundoDaFala = criarMundoDaFala<HTMLElement>({");
+    expect(main).toContain("notarVeio(alvoDaBusca, conversaId, ate,");
+    // Revisão 3 (B1): a leitura da conversa (na tela e a dos vivos) sai com o `ate` do alvo — sem isso a janela não cresce.
+    for (const p of ["9", "6"]) {
+      expect(main).toContain(`const ate = ateDaBusca(q.slice(${p}));`);
+      expect(main).toContain(`notarAlvoDaBusca(q.slice(${p}), ate, await api.conversa(q.slice(${p}), ate))`);
+    }
+    expect(main).toContain("const ateDaBusca = (conversaId: string): string | undefined => (alvoDaBusca?.conversaId === conversaId ? alvoDaBusca.mensagemId : undefined);");
   });
 });
 

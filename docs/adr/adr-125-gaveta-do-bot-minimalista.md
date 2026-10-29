@@ -52,7 +52,7 @@ em abas e num nível de ajustes.
 - Se o nome for apagado por engano (relato de nome trocado sem querer) mais de uma vez, a edição inline passa a pedir
   um clique em "Renomear" antes de virar campo.
 
-## Emenda (2026-10-24, NOD-326): a aba Biblioteca
+## Emenda (2026-10-24, NOD-326): a aba Biblioteca (o Ir para a mensagem revisto pela NOD-363)
 
 - A chave `BIBLIOTECA_NA_GAVETA` foi removida: as abas são Detalhes · Biblioteca · Computador (o bot de outra pessoa,
   Detalhes · Biblioteca).
@@ -79,3 +79,23 @@ tela. No computador nada muda.
 No celular, a gaveta vira o perfil do bot da [ADR-133](adr-133-perfil-do-bot-no-celular.md): lista agrupada no lugar das
 abas, menu do toque longo com até 5 itens (Ocultar vai para Ajustes › Na lista) e Ajustes sem as descrições longas. O
 desktop segue esta ADR.
+
+## Emenda (2026-10-28, NOD-363): Ir para a mensagem em todo item da Biblioteca
+
+O desvio da emenda NOD-326 sai: o "…" de todo item tem Ir para a mensagem. Com a fala desenhada, leva na hora, sem rede.
+Fora da janela, o item vira "Carregando…" e a conversa relê com o `?ate=<mensagem>` da busca do celular (NOD-380): a
+janela cresce até a fala (teto de 1000 falas depois dela) e continua assim nas releituras até a pessoa voltar ao fim.
+Quando a fala chega, o menu fecha, a gaveta sobreposta do celular fecha e só então rola e realça. Se a fala foi apagada
+ou passa do teto, a nota "Não deu para chegar a essa mensagem: ela é antiga demais ou saiu do chat." aparece no menu;
+sem resposta em 20 s, a nota "A mensagem demorou para carregar. Tente de novo.". A fala que veio mas a timeline recolhe
+(no meio de um turno) leva à vizinha desenhada. Fechar o menu cancela a espera e devolve a janela de antes (o alvo
+anterior, se um Ir ou a busca já a tinham feito crescer). Ir a uma fala já carregada também marca o alvo (sem
+rede), para a fala nova não a tirar de debaixo de quem lê. Limite aceito: perto do teto (1000 falas depois da fala), cada
+fala nova desliza a janela em uma, e a fala pode sair dela. Não há paginação para trás com `antes` nem mescla de páginas no cliente: a janela
+crescida é contínua, e o DTO inteiro trocado na releitura não tem buraco nem duplicata. A rolagem infinita para cima,
+quando vier, é que cria a paginação.
+
+Desvio do detalhamento: a issue sugeria `antes`/`limite` na rota, mescla no reducer e teto de 2000 falas. Ficou o `?ate=`
+da NOD-380, com teto de 1000, porque a janela contínua elimina a mescla e o caso de buraco e de duplicata. Gatilho de
+reversão: relato de "antiga demais" para fala dentro de 2000, ou a rolagem infinita para cima entrando no roadmap. Aí
+entra a paginação com cursor (`antes`) e a mescla no cliente.
