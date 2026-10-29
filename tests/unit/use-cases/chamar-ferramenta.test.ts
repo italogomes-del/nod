@@ -120,6 +120,16 @@ describe("chamarFerramenta: gates, despacho por tabela e trilha (ADR-013, EMENDA
     expect(c.banco.catcher.map((r) => r.tipo)).toEqual(["tool_call"]);
   });
 
+  it("NOD-61 (ADR-026): buscar_conversas e ler_conversa voltam nao_confiavel — o histórico tem conteúdo de fora; args fora do schema não despacham", async () => {
+    const c = await cenario();
+    const p = { ...c.plano, catalogo: { ...c.plano.catalogo, ferramentas: [...c.plano.catalogo.ferramentas, nod("buscar_conversas"), nod("ler_conversa")] } };
+    c.deps.useCases.buscarConversas = async () => ({ data: { resultados: [], mais_antigos: null } });
+    c.deps.useCases.lerConversa = async () => ({ data: { erro: "nao_encontrado" } });
+    expect((await c.chamar("buscar_conversas", { termo: "orçamento" }, p)).data).toEqual({ ok: true, conteudo: JSON.stringify({ resultados: [], mais_antigos: null }), confianca: "nao_confiavel" });
+    expect((await c.chamar("ler_conversa", { mensagem_id: "x" }, p)).data).toEqual({ ok: true, conteudo: JSON.stringify({ erro: "nao_encontrado" }), confianca: "nao_confiavel" });
+    expect((await c.chamar("buscar_conversas", { termo: "a" }, p)).data).toMatchObject({ ok: false, negacao: { motivo: "args_invalidos" } });
+  });
+
   it("pedir_aprovacao pendente vira {aguardar}; pedir_a_pessoa malformado vira decisão tipo 'pergunta', nunca 'permissao' (EMENDA 16)", async () => {
     const c = await cenario();
     const email = await c.deps.repos.conectores.criar({ nome: "Email", slug: "email", transporte: "stdio", comando: "node", declaracao: "nao-toca" });

@@ -28,6 +28,8 @@ const NOD: Record<string, readonly [passado: string, presente: string]> = {
   ver_colegas: ["Viu o que os colegas fazem", "Vendo o que os colegas fazem"],
   publicar_artefato: ["Publicou um artefato", "Publicando um artefato"],
   ler_artefato: ["Leu um artefato", "Lendo um artefato"],
+  buscar_conversas: ["Buscou nas conversas passadas", "Buscando nas conversas passadas"],
+  ler_conversa: ["Leu uma conversa passada", "Lendo uma conversa passada"],
   // ADR-083 (#193): a conversa coordena as tasks.
   abrir_task: ["Abriu uma task", "Abrindo uma task"],
   mandar_para_task: ["Repassou a uma task", "Repassando a uma task"],

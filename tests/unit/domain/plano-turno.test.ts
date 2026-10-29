@@ -85,11 +85,12 @@ describe("montarPlano", () => {
     for (const n of ["ver_colegas", "pedir_a_bot", "pedir_a_pessoa"]) expect(criacao).toContain(n);
     expect(nomes(montarPlano(base))).not.toContain("atualizar_perfil");
     // ADR-044: pedir_acesso só propõe (a pessoa decide num botão); sem ele a rotina pedia acesso em texto a cada disparo.
-    expect(nomes(montarPlano({ ...base, modo: "rotina" })).filter((n) => !n.includes("__") && n !== "ler_mais")).toEqual(["lembrar", "pedir_aprovacao", "pedir_acesso", "ver_colegas", "pedir_a_pessoa", "pedir_a_bot", "sem_novidade", "publicar_artefato", "ler_artefato", "abrir_frentes", "mandar_para_frente", "me_chame_as", "avisar_pessoa"]);
+    expect(nomes(montarPlano({ ...base, modo: "rotina" })).filter((n) => !n.includes("__") && n !== "ler_mais")).toEqual(["lembrar", "pedir_aprovacao", "pedir_acesso", "ver_colegas", "pedir_a_pessoa", "pedir_a_bot", "sem_novidade", "publicar_artefato", "ler_artefato", "abrir_frentes", "mandar_para_frente", "me_chame_as", "avisar_pessoa", "buscar_conversas", "ler_conversa"]);
     // ADR-051: a rotina também publica e lê o artefato (a checklist do meio-dia atualiza a da manhã).
     // definido em 2026-09-28: com ferramenta de fora (conector) vem ler_mais, atendida pelo proxy; sem nenhuma, não.
     expect(nomes(montarPlano({ ...base, modo: "rotina" }))).toContain("ler_mais");
-    expect(nomes(montarPlano({ ...base, modo: "rotina", conectores: [], concessoes: [] }))).not.toContain("ler_mais");
+    // Sem nenhuma (e sem ler_conversa, NOD-61), não: o peer só lembra.
+    expect(nomes(montarPlano({ ...base, modo: "peer", profundidade: 1, conectores: [], concessoes: [] }))).not.toContain("ler_mais");
     const sala = nomes(montarPlano({ ...base, modo: "sala" }));
     expect(sala).toContain("passar");
     expect(sala).toContain("encaminhar");
@@ -119,6 +120,28 @@ describe("montarPlano", () => {
     expect(plano.promptSistema).toContain("publicar_artefato");
     expect(plano.promptSistema).toContain("window.nod.salvar");
     expect(montarPlano({ ...base, modo: "sala" }).promptSistema).not.toContain("window.nod.salvar");
+  });
+
+  it("NOD-61: buscar_conversas e ler_conversa onde o bot trabalha (sala inclusive, menos o peer legado), só leitura, com a linha do prompt", () => {
+    for (const modo of ["conversa", "criacao", "rotina", "ligacao", "sala"] as const) {
+      const plano = montarPlano({ ...base, modo });
+      for (const n of ["buscar_conversas", "ler_conversa"]) expect(plano.catalogo.ferramentas.find((f) => f.nome === n), `${modo}: ${n}`).toMatchObject({ origem: "nod", readOnlyHint: true });
+    }
+    const peer = montarPlano({ ...base, modo: "peer", profundidade: 1 });
+    expect(nomes(peer)).not.toContain("buscar_conversas");
+    expect(nomes(peer)).not.toContain("ler_conversa");
+    expect(montarPlano({ ...base, modo: "conversa" }).promptSistema).toContain("buscar_conversas");
+    expect(peer.promptSistema).not.toContain("buscar_conversas");
+    // Revisão do /codex (P2): sem conector nenhum, ler_mais vem pelo ler_conversa (20 falas de 2.000 passam do corte do proxy).
+    expect(nomes(montarPlano({ ...base, modo: "rotina", conectores: [], concessoes: [] }))).toContain("ler_mais");
+    // Revisão 3 (M1/M2): pedido de outro bot — a delegação (pedir_a_bot grava sobProcuracaoDe = quem pediu, igual ao ownerId)
+    // e a frente/retomada que herdou sobProcuracaoDe — não leva o histórico, nem com a mesma pessoa (pode ter vindo de uma sala).
+    for (const p of [{ modo: "delegacao" as const, turno: { ...turno, sobProcuracaoDe: turno.ownerId } }, { modo: "delegacao" as const, turno }, { modo: "conversa" as const, turno: { ...turno, sobProcuracaoDe: turno.ownerId } }, { modo: "conversa" as const, turno: { ...turno, sobProcuracaoDe: "outra-pessoa" } }]) {
+      const n = nomes(montarPlano({ ...base, ...p }));
+      expect(n, `${p.modo} ${p.turno.sobProcuracaoDe ?? "-"}`).not.toContain("buscar_conversas");
+      expect(n).not.toContain("ler_conversa");
+    }
+    expect(nomes(montarPlano({ ...base, modo: "conversa", turno: { ...turno, sobProcuracaoDe: null } }))).toContain("buscar_conversas");
   });
 
   it("NOD-317: o \"A fazer\" saiu — nenhum modo tem ferramenta de pendência, nem o prompt fala dela", () => {

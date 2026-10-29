@@ -86,6 +86,12 @@ import { FERRAMENTAS_WORKSPACE } from "../contracts/ferramentas-workspace.ts";
  * tasks (profundidade 1). Quem decide no turno é `podeAbrirTask`/`podeMandarParaTask` pelo trabalho dele: o turno de uma
  * task da pessoa, de colega, da rede ou filha de rotina não abre nem repassa (montarPlano filtra).
  *
+ * buscar_conversas/ler_conversa (definido em 2026-10-29, NOD-61): leitura do histórico do próprio bot em todo modo em que ele
+ * trabalha para a pessoa (criação, conversa, sala, rotina e ligação); não no peer. O recorte por bot (e o de membro na sala)
+ * é do repo. Revisão 3 (M1/M2): nem no pedido de outro bot — a delegação e todo turno que herdou `sobProcuracaoDe` (frente,
+ * retomada, lote de um pedido) ficam sem as duas: quem pediu pode ser de outra pessoa ou estar numa sala, e a resposta volta
+ * para lá com o histórico largo do bot.
+ *
  * Frentes (definido em 2026-10-12, ADR-099, I2): abrir_frentes e mandar_para_frente entram no lugar de abrir_task e
  * mandar_para_task (que seguem atendidos como sinônimos, fora do catálogo). O turno de uma frente perde me_chame_as e
  * esperar_comando (ela devolve o fato e termina; quem espera é o dono) e ganha devolver_resumo (montarPlano).
@@ -95,19 +101,22 @@ import { FERRAMENTAS_WORKSPACE } from "../contracts/ferramentas-workspace.ts";
  * Por isso a delegação e a rotina têm as duas; `podeAbrirTask`/`podeMandarParaTask` as tiram do turno que já é trabalho
  * (a task de colega de antes, a filha de rotina, a frente), e a execução de rotina com mãe só abre, como antes.
  */
+const FERRAMENTAS_DO_HISTORICO: readonly NomeFerramentaNod[] = ["buscar_conversas", "ler_conversa"];
+const aPedidoDeOutroBot = (t: { sobProcuracaoDe?: string | null }) => !!t.sobProcuracaoDe;
+
 export const FERRAMENTAS_NOD_POR_MODO: Record<ModoTurno, readonly NomeFerramentaNod[]> = {
-  criacao: ["atualizar_perfil", "lembrar", "pedir_aprovacao", "pedir_acesso", "pedir_credencial", "criar_rotina", "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "ver_colegas", "pedir_a_bot", "pedir_a_pessoa", "publicar_artefato", "ler_artefato", "abrir_frentes", "mandar_para_frente", "me_chame_as", "avisar_pessoa"],
-  conversa: ["lembrar", "pedir_aprovacao", "pedir_acesso", "pedir_credencial", "criar_rotina", "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "ver_colegas", "pedir_a_bot", "pedir_a_pessoa", "publicar_artefato", "ler_artefato", "abrir_frentes", "mandar_para_frente", "me_chame_as", "avisar_pessoa"],
-  sala: ["lembrar", "pedir_aprovacao", "pedir_acesso", "pedir_credencial", "criar_rotina", "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "ver_colegas", "pedir_a_bot", "pedir_a_pessoa", "passar", "encaminhar"],
+  criacao: ["atualizar_perfil", "lembrar", "pedir_aprovacao", "pedir_acesso", "pedir_credencial", "criar_rotina", "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "ver_colegas", "pedir_a_bot", "pedir_a_pessoa", "publicar_artefato", "ler_artefato", "abrir_frentes", "mandar_para_frente", "me_chame_as", "avisar_pessoa", "buscar_conversas", "ler_conversa"],
+  conversa: ["lembrar", "pedir_aprovacao", "pedir_acesso", "pedir_credencial", "criar_rotina", "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "ver_colegas", "pedir_a_bot", "pedir_a_pessoa", "publicar_artefato", "ler_artefato", "abrir_frentes", "mandar_para_frente", "me_chame_as", "avisar_pessoa", "buscar_conversas", "ler_conversa"],
+  sala: ["lembrar", "pedir_aprovacao", "pedir_acesso", "pedir_credencial", "criar_rotina", "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "ver_colegas", "pedir_a_bot", "pedir_a_pessoa", "passar", "encaminhar", "buscar_conversas", "ler_conversa"],
   // NOD-50 (revisão 6 do PR #553): rotina sem pedir_credencial — o cartão não segura a execução seguinte, que abriria outro a cada
   // disparo; a rotina que precisa de chave pede pela pessoa (pedir_a_pessoa) ou pela conversa.
-  rotina: ["lembrar", "pedir_aprovacao", "pedir_acesso", "ver_colegas", "pedir_a_pessoa", "pedir_a_bot", "sem_novidade", "publicar_artefato", "ler_artefato", "abrir_frentes", "mandar_para_frente", "me_chame_as", "avisar_pessoa"],
+  rotina: ["lembrar", "pedir_aprovacao", "pedir_acesso", "ver_colegas", "pedir_a_pessoa", "pedir_a_bot", "sem_novidade", "publicar_artefato", "ler_artefato", "abrir_frentes", "mandar_para_frente", "me_chame_as", "avisar_pessoa", "buscar_conversas", "ler_conversa"],
   peer: ["lembrar"],
   // NOD-114: avisar_pessoa na conversa e na criação (a task que roda sem a pessoa olhando), na rotina e no pedido de colega.
   delegacao: ["lembrar", "pedir_acesso", "pedir_credencial", "pedir_aprovacao", "ver_colegas", "pedir_a_pessoa", "pedir_a_bot", "publicar_artefato", "ler_artefato", "abrir_frentes", "mandar_para_frente", "me_chame_as", "avisar_pessoa"],
   // definido em 2026-10-04 (ADR-072): a ligação fala com a pessoa ao vivo. O kit da conversa sem pedir_a_pessoa (a
   // pergunta é a própria fala) e sem artefatos (não há tela para lê-los); trabalho demorado vai por iniciar_tarefa.
-  ligacao: ["lembrar", "pedir_aprovacao", "pedir_acesso", "criar_rotina", "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "ver_colegas", "pedir_a_bot", "iniciar_tarefa", "desligar"],
+  ligacao: ["lembrar", "pedir_aprovacao", "pedir_acesso", "criar_rotina", "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "ver_colegas", "pedir_a_bot", "iniciar_tarefa", "desligar", "buscar_conversas", "ler_conversa"],
 };
 
 /**
@@ -162,11 +171,14 @@ export const PLANO_SEM_VALIDADE = Number.MAX_SAFE_INTEGER;
 
 export const REGRA_MONTAGEM = "regra:montagem-ferramentas" as const;
 
+const SO_LEITURA: ReadonlySet<NomeFerramentaNod> = new Set(["ler_artefato", "buscar_conversas", "ler_conversa"]);
+
 function ferramentaNod(nome: NomeFerramentaNod): FerramentaPlano {
   const base: FerramentaPlano = { nome, nomeMcp: `mcp__nod__${nome}`, origem: "nod", conectorId: null, readOnlyHint: false, tocaDadoPessoal: false, schema: FERRAMENTAS_NOD[nome] };
   // definido em 2026-09-28 (ADR-051): ler_artefato só lê, e o resultado dela tem orçamento próprio no
   // proxy — o do turno (8 000) cortaria o HTML que a ferramenta promete devolver.
-  return nome === "ler_artefato" ? { ...base, readOnlyHint: true } : base;
+  // NOD-61: buscar_conversas e ler_conversa também só leem.
+  return SO_LEITURA.has(nome) ? { ...base, readOnlyHint: true } : base;
 }
 
 /** conector habilitado ∩ concessão do agente por capacidade → `${slug}__${tool}` (E6). */
@@ -319,6 +331,9 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
   const nod = [...(reconfigura ? [FERRAMENTA_RECONFIGURACAO] : []), ...FERRAMENTAS_NOD_POR_MODO[modo], ...esperaComando, ...(modo === "ligacao" && entrada.onboarding ? FERRAMENTAS_NOD_ONBOARDING : []), ...doNod, ...criaBots, ...respondePedido, ...abreConta]
     .filter((n) => (n !== "abrir_frentes" || podeAbrirTask(entrada.trabalho ?? null)) && (n !== "mandar_para_frente" || podeMandarParaTask(entrada.trabalho ?? null)))
     .filter((n) => !frente || !FERRAMENTAS_FORA_DA_FRENTE.includes(n))
+    // NOD-61 (revisões 2 e 3 do PR #594): pedido de outro bot (sobProcuracaoDe, herdado por frente/retomada/lote) não leva o
+    // histórico. Aceito na revisão 5: o turno da conversa com responder_pedido mantém — a pessoa está ali e responde ela.
+    .filter((n) => !aPedidoDeOutroBot(entrada.turno) || !FERRAMENTAS_DO_HISTORICO.includes(n))
     .concat(frente ? [FERRAMENTA_DA_FRENTE] : [])
     .map(ferramentaNod);
   const { ferramentas: deConectores, servidores } = ferramentasDeConectores(entrada.conectores, entrada.concessoes, entrada.agente.id);
@@ -347,8 +362,9 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
   let ferramentas = montarFerramentas({ catalogo: [...nod, ...deConectores, ...computador, ...workspace], allowlistAgente: null, alcanceCanal: null, profundidade: entrada.profundidade });
   const decididoPor: `regra:${string}` = REGRA_MONTAGEM;
   // definido em 2026-09-28: quem pode receber resposta grande (conector, computador, pasta) recebe também
-  // `ler_mais`, atendida pelo proxy. Leitura pura, em todo turno.
-  if (ferramentas.some((f) => f.origem !== "nod")) ferramentas = [...ferramentas, FERRAMENTA_LER_MAIS];
+  // `ler_mais`, atendida pelo proxy. Leitura pura, em todo turno. NOD-61 (revisão do /codex no PR #594, P2): ler_conversa
+  // também — 20 falas de 2.000 caracteres podem passar do orçamento do proxy, que manda chamar ler_mais.
+  if (ferramentas.some((f) => f.origem !== "nod" || f.nome === "ler_conversa")) ferramentas = [...ferramentas, FERRAMENTA_LER_MAIS];
   const conectoresUsados = new Set(ferramentas.map((f) => f.conectorId));
   const servidoresUsados = servidores.filter((s) => conectoresUsados.has(s.conectorId));
 

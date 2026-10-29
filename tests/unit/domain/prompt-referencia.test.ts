@@ -57,7 +57,7 @@ const rotinas = [
 /** O kit de um bot de conversa completo: colegas, rotinas, apps, computador, pasta, artefato e pendência. */
 const kitConversa = [
   f("pedir_aprovacao"), f("pedir_a_pessoa"), f("pedir_a_bot"), f("ver_colegas"), f("lembrar"),
-  f("publicar_artefato"), f("criar_rotina"), f("pausar_rotina"), f("pedir_acesso"), f("abrir_frentes"), f("mandar_para_frente"), f("criar_bots"),
+  f("publicar_artefato"), f("criar_rotina"), f("pausar_rotina"), f("pedir_acesso"), f("abrir_frentes"), f("mandar_para_frente"), f("criar_bots"), f("buscar_conversas"), f("ler_conversa"),
   daOrigem("computador_observar", "computador"), daOrigem("workspace_propor_pasta", "workspace"),
   doConector(conectorTarefas, "TAREFAS_LISTAR"),
 ];

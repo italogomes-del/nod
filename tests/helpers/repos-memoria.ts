@@ -949,6 +949,8 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       ultimaComAssunto: soNoPostgres,
       // NOD-380: a busca depende do nod_sem_acento e da RLS do Postgres; os testes são de integração.
       buscarTexto: soNoPostgres,
+      buscarDoAgente: soNoPostgres,
+      janelaDoAgente: soNoPostgres,
       async contarDesde(conversaId, mensagemId) {
         const todas = doTenant(b.mensagens).filter((m) => m.conversaId === conversaId);
         const alvo = todas.find((m) => m.id === mensagemId);

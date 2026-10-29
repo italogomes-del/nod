@@ -16,6 +16,7 @@ import type { Deps, Services, UseCasesNod } from "../../src/use-cases/tipos.ts";
 import { PESSOA_MARLON, TENANT_PADRAO } from "./ids.ts";
 import { criarBancoMemoria, type BancoMemoria } from "./repos-memoria.ts";
 import { avisarPessoa } from "../../src/use-cases/avisar-pessoa.ts";
+import { buscarConversas, lerConversa } from "../../src/use-cases/buscar-conversas.ts";
 
 /**
  * Deps de teste da L7 (arquivo extra da lane): Services e UseCasesNod FALSOS com o que os casos de
@@ -102,6 +103,8 @@ export function useCasesFalsos(): UseCasesNod {
     responderPedido: naoImplementado("useCases.responderPedido"),
     pedirCredencial: naoImplementado("useCases.pedirCredencial"),
     avisarPessoa,
+    buscarConversas,
+    lerConversa,
     abrirConta: naoImplementado("useCases.abrirConta"),
     gerirBots: naoImplementado("useCases.gerirBots"),
     verAppsConectados: naoImplementado("useCases.verAppsConectados"),

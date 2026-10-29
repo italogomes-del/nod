@@ -25,6 +25,7 @@ import type { CasoDeUso, Deps, Services, UseCasesNod } from "../../src/use-cases
 import { PESSOA_ANA, PESSOA_MARLON, TENANT_PADRAO } from "./ids.ts";
 import { criarBancoMemoria, type BancoMemoria } from "./repos-memoria.ts";
 import { avisarPessoa } from "../../src/use-cases/avisar-pessoa.ts";
+import { buscarConversas, lerConversa } from "../../src/use-cases/buscar-conversas.ts";
 
 /**
  * Deps de teste da L6. As fatias de Services das outras lanes (planos ← L5, rotinas ← L7, tokenTurno ← L5,
@@ -159,6 +160,8 @@ export function useCasesDeTeste(): UseCasesNod {
     responderPedido,
     pedirCredencial,
     avisarPessoa,
+    buscarConversas,
+    lerConversa,
     abrirConta,
     gerirBots,
     verAppsConectados,

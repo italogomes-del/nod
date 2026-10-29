@@ -162,14 +162,17 @@ const DESPACHO: Despacho = {
   pedir_credencial: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.pedir_credencial](deps, { ...ctx, ...args }),
   avisar_pessoa: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.avisar_pessoa](deps, { ...ctx, ...args }),
   abrir_conta: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.abrir_conta](deps, { ...ctx, ...args }),
+  buscar_conversas: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.buscar_conversas](deps, { ...ctx, ...args }),
+  ler_conversa: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.ler_conversa](deps, { ...ctx, ...args }),
 };
 
 /**
  * Ferramentas nod cujo resultado é conteúdo que o modelo NÃO escreveu agora e que chega marcado como não
  * confiável (ADR-026): definido em 2026-09-28 (ADR-051), ler_artefato — o estado foi gravado pela página,
- * que é código do bot rodando no navegador, e o HTML pode ter vindo de um turno que leu conteúdo de fora.
+ * que é código do bot rodando no navegador, e o HTML pode ter vindo de um turno que leu conteúdo de fora. NOD-61: buscar_conversas e
+ * ler_conversa — o histórico tem falas de outros bots, de salas e resultados que vieram de fora.
  */
-const NOD_DE_CONTEUDO_NAO_CONFIAVEL: ReadonlySet<NomeFerramentaNod> = new Set(["ler_artefato"]);
+const NOD_DE_CONTEUDO_NAO_CONFIAVEL: ReadonlySet<NomeFerramentaNod> = new Set(["ler_artefato", "buscar_conversas", "ler_conversa"]);
 
 /** As ferramentas nod que deixam uma decisão aberta para a pessoa (o estado da task do turno muda, ADR-083). */
 const FERRAMENTAS_QUE_PEDEM_A_PESSOA: ReadonlySet<NomeFerramentaNod> = new Set(["pedir_a_pessoa", "pedir_aprovacao", "pedir_acesso", "pedir_credencial"]);

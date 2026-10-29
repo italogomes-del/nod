@@ -8,7 +8,7 @@ import type { PedidoDeColega } from "../contracts/troca-entre-bots.ts";
 import type { MotivoRecomeco, OrigemTurno } from "../contracts/turno.ts";
 import { assuntoNaLeitura } from "../domain/assunto-do-texto.ts";
 import { ASSUNTOS_ANEXO, ASSUNTOS_ATIVIDADE, assuntoDe, destinoDe } from "../domain/destino-no-chat.ts";
-import type { Conn, Escopo } from "../shared/types.ts";
+import type { Conn, Escopo, Tx } from "../shared/types.ts";
 import { PRAZO_DESFAZENDO_MS, RETEM_MS } from "../domain/checkpoints.ts";
 import { checkpointDaFala } from "./checkpoints.repo.ts";
 import { data, ms } from "./conversao.ts";
@@ -218,6 +218,57 @@ function selectComTurno(conn: Conn, tenantId: string, recorte: ReturnType<Conn>)
     order by m.criado_em, m.id`;
 }
 
+/** NOD-61: uma fala lida por buscar_conversas/ler_conversa, com o nome do autor resolvido no banco. */
+export interface LinhaDoBot {
+  id: string;
+  autor_tipo: Autoria["autor_tipo"];
+  autor_id: string;
+  /** O nome do bot ou da pessoa; null quando a RLS não mostra o autor (o bot de outra pessoa numa sala). */
+  autor_nome: string | null;
+  conversa_tipo?: "propria" | "sala";
+  sala_nome?: string | null;
+  texto: string;
+  /** A marca da fala (ADR-026): reler uma não confiável marca o turno, como ler o app de fora. */
+  confianca: Confianca;
+  cortado_inicio?: boolean;
+  cortado_fim?: boolean;
+  /** ler_conversa: o texto passou do teto e veio só o começo. */
+  texto_cortado: boolean;
+  criado_em_txt: string;
+}
+
+/**
+ * NOD-61: as conversas do bot — a própria dele, ou as salas de que ele é membro ativo. É o único recorte entre um bot e as
+ * conversas dos outros bots da mesma pessoa (a RLS mostra todas a ela). Revisão do PR #594 (A1): num turno de SALA só a
+ * própria sala, porque a sala pode ter leitor de outra pessoa (ADR-027) e o bot traria para ela a conversa privada.
+ * Resolvido antes como lista de ids, para `m.conversa_id = any(...)` usar o índice por conversa (revisão, M3).
+ */
+const conversasDoBot = (conn: Conn, tenantId: string, agenteId: string, conversaDoTurno: string) => conn`array(
+  select c.id from conversas c
+  where c.tenant_id = ${tenantId}
+    and ((c.tipo = 'propria' and c.agente_id = ${agenteId})
+      or (c.tipo = 'sala' and exists (select 1 from sala_membros sm where sm.tenant_id = ${tenantId} and sm.sala_id = c.sala_id
+            and sm.agente_id = ${agenteId} and sm.removido_em is null)))
+    -- Revisão 2 (B1): falha fechada — o escopo largo só quando o turno é da conversa PRÓPRIA deste bot; qualquer outra
+    -- (sala, ou uma que a RLS não mostra) fica só nela.
+    and (c.id = ${conversaDoTurno}::uuid
+      or exists (select 1 from conversas t where t.tenant_id = ${tenantId} and t.id = ${conversaDoTurno}::uuid and t.tipo = 'propria' and t.agente_id = ${agenteId})))`;
+
+/**
+ * NOD-61 (revisão do /codex no PR #594, P1): a marca efetiva de uma fala relida. A resposta do bot é gravada com a confiança da
+ * ENTRADA do turno; se o turno leu conteúdo de fora depois (contaminado_em), a fala carrega o que ele leu e volta não confiável.
+ * Fala de turno que a RLS não mostra (bot de outra pessoa numa sala) também: na dúvida, não confiável. Revisão 4 (A1): só é
+ * confiável o que foi escrito no escopo de quem roda o turno (owner_id) — a fala da dona da sala lida pelo bot de outra
+ * pessoa, na conversa própria dele, é texto de terceiro (ADR-026/027).
+ */
+const confiancaEfetiva = (conn: Conn, pessoaId: string) => conn`case when m.confianca = 'confiavel' and m.owner_id = ${pessoaId}::uuid and (m.turno_id is null or exists (
+    select 1 from turnos tc where tc.tenant_id = m.tenant_id and tc.id = m.turno_id and tc.contaminado_em is null))
+  then 'confiavel' else 'nao_confiavel' end`;
+
+const autorDaLinha = (conn: Conn) => conn`case when m.autor_tipo = 'agente'
+  then (select ag.nome from agentes ag where ag.tenant_id = m.tenant_id and ag.id = m.autor_id)
+  else (select p.nome from pessoas p where p.tenant_id = m.tenant_id and p.id = m.autor_id) end`;
+
 /**
  * A fala de um turno de trabalho (task ou frente) na passada do corte (definido em 2026-10-18, chat limpo, PR 2; revisão
  * de engenharia, item 8): tem assunto nulo, mas a web a esconde (mora na tela da task); conta como `anexo`, senão um dia de
@@ -382,6 +433,101 @@ export function mensagensRepo(conn: Conn, escopo: Escopo) {
         limit ${limite + 1}`;
       const linhas = await consulta;
       return { linhas: linhas.slice(0, limite), temMais: linhas.length > limite };
+    },
+
+    /**
+     * NOD-61 (buscar_conversas): a busca de buscarTexto, mas só nas conversas do BOT `agenteId` — a própria dele (com as falas
+     * das tasks e frentes, que moram nela) e as salas de que ele é membro ativo. A RLS da pessoa vê as conversas de todos os
+     * bots dela; o recorte por bot é este `where`, e é ele que impede o bot A de achar a fala do bot B (ADR-058/066). Fora os
+     * anexos (cartões, uploads): o resto da fala de texto conta, inclusive a da task. O nome da sala e do autor vão junto.
+     */
+    async buscarDoAgente(p: { agenteId: string; conversaDoTurno: string; turnoId?: string; termo: string; antes: { criadoEm: string; id: string } | null; limite: number }): Promise<{ linhas: LinhaDoBot[]; temMais: boolean } | "demorou"> {
+      const { termo, antes, limite } = p;
+      // Revisão 2 do PR #594 (M1, desempenho): o filtro barato (`nod_sem_acento(texto) like`) roda em toda fala; o que junta
+      // espaços (regexp_replace) só quando o termo tem espaço — sem espaço os dois acham o mesmo. O trecho é montado só para as
+      // até limite+1 falas achadas (a subconsulta), não para cada fala da conversa.
+      const padrao = (x: Conn, t: string) => x`'%' || replace(replace(replace(nod_sem_acento(${t}), '\\', '\\\\'), '%', '\\%'), '_', '\\_') || '%'`;
+      const maiorPalavra = termo.split(" ").reduce((a, b) => (b.length > a.length ? b : a), "");
+      const casa = (x: Conn) => termo.includes(" ")
+        ? x`nod_sem_acento(m.texto) like ${padrao(x, maiorPalavra)} escape '\\' and regexp_replace(nod_sem_acento(m.texto), '\\s+', ' ', 'g') like ${padrao(x, termo)} escape '\\'`
+        : x`nod_sem_acento(m.texto) like ${padrao(x, termo)} escape '\\'`;
+      const consulta = (c: Conn) => c<LinhaDoBot[]>`
+        select m.id, m.autor_tipo, m.autor_id, ${autorDaLinha(c)} as autor_nome, ${confiancaEfetiva(c, escopo.pessoaId)} as confianca, c.tipo as conversa_tipo, s.nome as sala_nome,
+          substr(j.junto, j.de, ${JANELA_TRECHO}) as texto, j.de > 1 as cortado_inicio, j.de + ${JANELA_TRECHO} <= length(j.junto) as cortado_fim, false as texto_cortado,
+          to_char(m.criado_em at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as criado_em_txt
+        from (
+          select m.* from mensagens m
+          where m.tenant_id = ${escopo.tenantId} and m.conversa_id = any(${conversasDoBot(c, escopo.tenantId, p.agenteId, p.conversaDoTurno)})
+            and m.kind = 'texto' and not m.parcial
+            and (m.assunto is null or m.assunto <> all(${[...ASSUNTOS_ANEXO, ...ASSUNTOS_ATIVIDADE]}::text[]))
+            and ${casa(c)}
+            ${p.turnoId ? c`and m.turno_id is distinct from ${p.turnoId}::uuid
+            and not exists (select 1 from turnos tq where tq.tenant_id = m.tenant_id and tq.id = ${p.turnoId}::uuid and tq.mensagem_origem_id = m.id)` : c``}
+            ${antes ? c`and (m.criado_em, m.id) < (${antes.criadoEm}::text::timestamptz, ${antes.id}::uuid)` : c``}
+          order by m.criado_em desc, m.id desc
+          limit ${limite + 1}
+        ) m
+        join conversas c on c.tenant_id = m.tenant_id and c.id = m.conversa_id
+        left join salas s on s.tenant_id = c.tenant_id and s.id = c.sala_id
+        cross join lateral (select regexp_replace(m.texto, '\\s+', ' ', 'g') as junto) jj
+        cross join lateral (select greatest(1, strpos(nod_sem_acento(jj.junto), nod_sem_acento(${termo})) - ${FOLGA_TRECHO}) as de, jj.junto) j
+        order by m.criado_em desc, m.id desc`;
+      // Revisão do PR #594 (M2): o teto de 4 s vale num SAVEPOINT próprio e volta ao de antes; estourou, só o savepoint
+      // volta e o bot ouve "demorou" — a trilha e o catcher da chamada seguem na transação (padrão de conversaLeuDeFora).
+      const comTeto = async (c: Conn) => {
+        const [antesDoTeto] = await c<{ t: string }[]>`select current_setting('statement_timeout') as t`;
+        await c`set local statement_timeout = '4s'`;
+        const linhas = await consulta(c);
+        await c`select set_config('statement_timeout', ${antesDoTeto?.t ?? "0"}, true)`;
+        return linhas;
+      };
+      let linhas: LinhaDoBot[];
+      try {
+        // Revisão 2 (B2) e 3 (B1): só dentro da transação do turno (escopo da RLS vinculado); no pool, uma transação nova
+        // nasceria sem nod.tenant_id/nod.pessoa_id — melhor falhar alto.
+        const tx = conn as Partial<Tx>;
+        if (typeof tx.savepoint !== "function") throw new Error("buscarDoAgente precisa da transação do turno para o teto de 4 s");
+        linhas = await (conn as Tx).savepoint((sp) => comTeto(sp));
+      } catch (e) {
+        if ((e as { code?: unknown }).code === "57014") return "demorou";
+        throw e;
+      }
+      return { linhas: linhas.slice(0, limite), temMais: linhas.length > limite };
+    },
+
+    /**
+     * NOD-61 (ler_conversa): a fala `mensagemId` e até `antes`/`depois` falas de texto vizinhas da MESMA conversa, em ordem
+     * crescente, cada uma com até `tetoTexto` + 1 caracteres a partir do caractere `aPartirDe` (quem chama corta e marca).
+     * null quando a fala não é de texto, não existe ou não é de uma conversa do bot (o mesmo null: quem pede não sabe se existe).
+     */
+    async janelaDoAgente(p: { agenteId: string; conversaDoTurno: string; mensagemId: string; antes: number; depois: number; tetoTexto: number; aPartirDe: number }): Promise<{ conversaTipo: "propria" | "sala"; salaNome: string | null; linhas: LinhaDoBot[] } | null> {
+      const { mensagemId, antes, depois, tetoTexto, aPartirDe } = p;
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(mensagemId)) return null;
+      const deTexto = conn`m.kind = 'texto' and not m.parcial and (m.assunto is null or m.assunto <> all(${[...ASSUNTOS_ANEXO, ...ASSUNTOS_ATIVIDADE]}::text[]))`;
+      const confianca = confiancaEfetiva(conn, escopo.pessoaId);
+      const [ancora] = await conn<{ conversa_id: string; conversa_tipo: "propria" | "sala"; sala_nome: string | null }[]>`
+        select m.conversa_id, c.tipo as conversa_tipo, s.nome as sala_nome
+        from mensagens m
+        join conversas c on c.tenant_id = m.tenant_id and c.id = m.conversa_id
+        left join salas s on s.tenant_id = c.tenant_id and s.id = c.sala_id
+        where m.tenant_id = ${escopo.tenantId} and m.id = ${mensagemId} and ${deTexto}
+          and m.conversa_id = any(${conversasDoBot(conn, escopo.tenantId, p.agenteId, p.conversaDoTurno)})`;
+      if (!ancora) return null;
+      const colunas = conn`m.id, m.autor_tipo, m.autor_id, ${autorDaLinha(conn)} as autor_nome, ${confianca} as confianca, substr(m.texto, ${aPartirDe + 1}, ${tetoTexto + 1}) as texto,
+        length(m.texto) > ${aPartirDe + tetoTexto} as texto_cortado, to_char(m.criado_em at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as criado_em_txt`;
+      const daConversa = conn`m.tenant_id = ${escopo.tenantId} and m.conversa_id = ${ancora.conversa_id} and ${deTexto}`;
+      const ponto = conn`(select m0.criado_em from mensagens m0 where m0.tenant_id = ${escopo.tenantId} and m0.id = ${mensagemId})`;
+      const linhas = await conn<LinhaDoBot[]>`
+        select * from (
+          (select ${colunas} from mensagens m where ${daConversa} and (m.criado_em, m.id) < (${ponto}, ${mensagemId}::uuid)
+            order by m.criado_em desc, m.id desc limit ${antes})
+          union all
+          (select ${colunas} from mensagens m where m.tenant_id = ${escopo.tenantId} and m.id = ${mensagemId})
+          union all
+          (select ${colunas} from mensagens m where ${daConversa} and (m.criado_em, m.id) > (${ponto}, ${mensagemId}::uuid)
+            order by m.criado_em, m.id limit ${depois})
+        ) janela order by criado_em_txt, id`;
+      return { conversaTipo: ancora.conversa_tipo, salaNome: ancora.sala_nome, linhas };
     },
 
     /**
