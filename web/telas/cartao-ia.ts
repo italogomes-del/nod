@@ -137,6 +137,27 @@ export function estadoNaTela(ia: IaMac, servidor: IaDaPessoa | undefined, ui: Ui
   return base;
 }
 
+/** Pronta ou no limite: conectada (no limite volta sozinha). */
+export const iaServe = (e: EstadoNaTela): boolean => e.estado === "pronta" || e.estado === "no_limite";
+
+/**
+ * NOD-424 (2026-10-29, bug em produção): o estado da IA para o BOT — o seletor do campo, a linha e o painel Inteligência,
+ * o Automático, a linha do limite (ia-fora.ts). O bot roda numa máquina da pessoa, não no Mac da tela: a IA serve se estiver pronta em alguma máquina viva
+ * dela (o inventário do `GET /ias`, que já junta as máquinas com "pronto" vencendo) OU no Mac da tela (o servidor pode
+ * ainda não saber). Pronta vence no_limite (outra conta/máquina atende); o limite do servidor vale por cima das duas
+ * (`estadoNaTela`). Sem nenhuma das duas servindo, vale o estado do Mac no app (o que a pessoa resolve ali). O cartão de
+ * Provedores de IA continua no `estadoNaTela` (instalar e entrar NESTE Mac).
+ */
+export function estadoParaOBot(ia: IaMac, servidor: IaDaPessoa | undefined, ui: UiIas, agora: number): EstadoNaTela {
+  const daTela = estadoNaTela(ia, servidor, ui, agora);
+  if (!ui.noApp || !servidor) return daTela;
+  const dasMaquinas = estadoNaTela(ia, servidor, { ...ui, noApp: false }, agora);
+  if (daTela.estado === "pronta") return daTela;
+  if (dasMaquinas.estado === "pronta") return dasMaquinas;
+  if (iaServe(daTela)) return daTela;
+  return iaServe(dasMaquinas) ? dasMaquinas : daTela;
+}
+
 // ---- a vista do cartão --------------------------------------------------------------------------------------------------
 
 export type AcaoIa = "ia-instalar" | "ia-atualizar" | "ia-entrar" | "ia-trocar" | "ia-cancelar" | "ia-testar" | "ia-verificar" | "ia-abrir-link" | "ia-colar-codigo" | "ia-copiar-codigo" | "ia-ajuda" | "ia-detalhe" | "secao-espaco";
@@ -441,7 +462,8 @@ export function vistaDaIa(ia: IaMac, c: ContextoCartao): VistaIa {
       const deNovo = noApp && a && (a.fase === "insuficiente" || (a.fase === "falhou" && a.motivo !== "configurado"))
         ? { botao: b("ia-atualizar", "Tentar de novo", false), terminal: terminalDaAtualizacao(ia, e) }
         : {};
-      return vista(textoPronta(ia, c, estados), "ok", { ...trocar, ...(aviso ? { explica: aviso } : {}), ...deNovo });
+      // "em uso"/"assume" fala de qual IA o BOT usa: mesma regra do chip (estadoParaOBot), não só o Mac (NOD-424).
+      return vista(textoPronta(ia, c, Object.fromEntries(IAS_MAC.map((x) => [x, estadoParaOBot(x, porId.get(x), c.ui, c.agora)])) as Record<IaMac, EstadoNaTela>), "ok", { ...trocar, ...(aviso ? { explica: aviso } : {}), ...deNovo });
     }
   }
 }

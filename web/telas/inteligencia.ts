@@ -5,7 +5,7 @@ import type { EscolhasIa, IaDaPessoa, IasDaPessoa, InteligenciaBot, ModoIntelige
 import type { Inventario } from "../../src/contracts/inventario.ts";
 import { ICONE } from "../lib/icones.ts";
 import { esc } from "../lib/render.ts";
-import { ehIaMac, estadoNaTela, logoDaIa, ordemDasIas, PROVEDOR, type IaMac, type UiIas } from "./cartao-ia.ts";
+import { ehIaMac, estadoParaOBot, iaServe, logoDaIa, ordemDasIas, PROVEDOR, type IaMac, type UiIas } from "./cartao-ia.ts";
 import { desatualizado, versaoLegivel } from "./ia-fora.ts";
 import { versaoAbaixo } from "../lib/atualizacao-ia.ts";
 
@@ -106,13 +106,11 @@ export function iasDaTela(e: { ias?: IasDaPessoa | null; executor: EstadoExecuto
 
 export type ContextoInteligencia = { ias: readonly IaDaPessoa[]; ui: UiIas; agora: number };
 
-/** A IA serve agora? Pronta, ou no limite (conectada, volta sozinha). As outras pedem "Conectar" em Provedores de IA. */
+/** A IA serve agora? Pronta, ou no limite (conectada, volta sozinha), no Mac da tela ou numa máquina da pessoa (NOD-424). */
 export function conectada(ia: IaDaPessoa, c: ContextoInteligencia): boolean {
-  if (!ehIaMac(ia.id)) return false;
-  const e = estadoNaTela(ia.id, ia, c.ui, c.agora).estado;
-  return e === "pronta" || e === "no_limite";
+  return ehIaMac(ia.id) && iaServe(estadoParaOBot(ia.id, ia, c.ui, c.agora));
 }
-export const noLimite = (ia: IaDaPessoa, c: ContextoInteligencia): boolean => ehIaMac(ia.id) && estadoNaTela(ia.id, ia, c.ui, c.agora).estado === "no_limite";
+export const noLimite = (ia: IaDaPessoa, c: ContextoInteligencia): boolean => ehIaMac(ia.id) && estadoParaOBot(ia.id, ia, c.ui, c.agora).estado === "no_limite";
 
 /** A IA que o Automático usaria agora: a primeira pronta da ordem fora do limite (a mesma regra de `iaDoAutomatico`). */
 export function iaEmUso(i: InteligenciaBot, c: ContextoInteligencia): IaDaPessoa | null {
@@ -159,7 +157,9 @@ export function modelosDoMenu(ia: IaDaPessoa, escolhido: string | null): IaDaPes
  */
 export function precisaDoCli(ia: IaDaPessoa, modelo: { versaoMinima?: string }, c: ContextoInteligencia): string | null {
   if (!ehIaMac(ia.id) || !modelo.versaoMinima) return null;
-  const instalada = estadoNaTela(ia.id, ia, c.ui, c.agora).versao;
+  // NOD-424 (revisão): o turno roda numa máquina da pessoa; com a IA pronta lá, vale a versão de lá (a do inventário),
+  // senão a do Mac (estadoParaOBot).
+  const instalada = ia.inventario.estado === "pronto" ? ia.inventario.versao : estadoParaOBot(ia.id, ia, c.ui, c.agora).versao;
   return instalada && versaoAbaixo(instalada, modelo.versaoMinima) ? modelo.versaoMinima : null;
 }
 
@@ -303,7 +303,7 @@ export function renderInteligencia(r: RascunhoInteligencia, nomeDoBot: string, c
     return `<div class="${classe}" data-ordem-item="${id}"><div class="int-linha">${alca}${radioFixa}${logoDaIa(id, "ia-logo")}<span class="int-nome">${esc(nome)}${emUso}</span>${pilula}</div>${painel}</div>`;
   }).join("");
   const propria = auto && r.ordem !== null ? `<div class="int-fora"><span>Ordem própria de ${esc(nomeDoBot)}</span><button type="button" data-act="int-ordem-pessoa">Usar a minha ordem</button></div>` : "";
-  const foraTexto = fora.length ? `${fora.join(", ")} não ${fora.length === 1 ? "está conectado" : "estão conectados"}${c.ui.noApp ? " neste Mac" : ""}` : "Outras IAs aparecem aqui quando conectadas";
+  const foraTexto = fora.length ? `${fora.join(", ")} não ${fora.length === 1 ? "está conectado" : "estão conectados"}` : "Outras IAs aparecem aqui quando conectadas";
   const foraAcao = fora.length ? "Conectar" : "Provedores de IA";
   // NOD-312: antes de Salvar, a troca que muda a sessão diz o que acontece na conversa.
   const nota = salvo && sessaoMudou(salvo, r, c, ordemDaPessoa) ? `<p class="p312-nota-ia" id="int-nota-recomeco" role="status">Ao trocar, ${esc(nomeDoBot)} leva a conversa e relê o necessário no próximo pedido.</p>` : "";

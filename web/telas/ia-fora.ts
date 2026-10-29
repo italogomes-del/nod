@@ -10,7 +10,7 @@ import { formatoData } from "../lib/formato-data.ts";
 import { botao, esc, hora, paragrafos } from "../lib/render.ts";
 import { CARONA_TEXTO, ICONE_TROCA, caronaClicavel, explicacaoDaCarona, fraseDoDetalheDaIa, type AlvoDoRecomeco } from "../lib/recomeco.ts";
 import { LOGOS_IA } from "./onboarding-logos.ts";
-import { estadoNaTela, type UiIas } from "./cartao-ia.ts";
+import { estadoParaOBot, type UiIas } from "./cartao-ia.ts";
 import type { IaDaPessoa } from "../../src/contracts/inteligencia.ts";
 
 /**
@@ -500,11 +500,11 @@ const ICONE_CADEADO = '<svg width="15" height="15" viewBox="0 0 24 24" fill="non
 const ICONE_RELOGIO = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><path d="M12 7.5V12l3 2"/></svg>';
 const GIRA_LINHA = '<span class="ob-gira" aria-hidden="true"></span>';
 
-/** O passo da linha do limite, pelo estado da outra IA (no app, o do Mac; fora dele, o do servidor). */
+/** O passo da linha do limite, pelo estado da outra IA para o bot (NOD-424: pronta numa máquina da pessoa ou no Mac). */
 function acaoSemOutra(ia: IdIa, p: { agenteId: string | null; agora: number; ui: UiIas; ias: readonly IaDaPessoa[] | null; fixa: boolean; nomeDoBot: string | null }): { html: string; substitui?: true } | null {
   const outra = OUTRA[ia];
   const { nome, cli } = PROVEDOR_DA_IA[outra];
-  const e = estadoNaTela(outra, p.ias?.find((x) => x.id === outra), p.ui, p.agora);
+  const e = estadoParaOBot(outra, p.ias?.find((x) => x.id === outra), p.ui, p.agora);
   const link = (act: string, rotulo: string, dados = "") => `<button type="button" class="linha-link" data-act="${act}" data-ia="${outra}"${dados}>${esc(rotulo)}</button>`;
   const provedores = (rotulo: string) => `<button type="button" class="linha-link" data-act="secao-espaco" data-secao="conexao">${esc(rotulo)}</button>`;
   const noApp = p.ui.noApp;

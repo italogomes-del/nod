@@ -305,6 +305,14 @@ describe("conversa: o limite do plano sem outra IA (tela 4 do plano das IAs)", (
     expect(renderMensagem(limite("claude-cli", voltaEm), mac("nao_instalada"))).toMatch(/data-act="ia-instalar" data-ia="codex-cli">Instalar o ChatGPT</);
   });
 
+  it("NOD-424: no app do Mac, a outra pronta numa máquina da pessoa (não no Mac) não pede login neste Mac", () => {
+    const base = com({ claude: PRONTO, codex: PRONTO });
+    const semCodexNoMac: Estado = { ...base, iasMac: { ...base.iasMac, noApp: true, estados: { "codex-cli": { ia: "codex-cli", estado: "falta_entrar", mensagem: "", em: 0 } } } };
+    const html = renderMensagem(limite("claude-cli", base.agora + 3_600_000), semCodexNoMac);
+    expect(html).not.toContain("Continuar pelo ChatGPT");
+    expect(html).toContain('data-act="inteligencia" data-id="gil">Usar o ChatGPT</button>');
+  });
+
   it("o Codex no limite sem hora: 'chegou ao limite'; passada uma hora, vira registro sem cor", () => {
     const estado = com({ claude: AUSENTE, codex: PRONTO });
     expect(renderMensagem(limite("codex-cli", null, estado.agora - 60_000), estado)).toContain("ChatGPT chegou ao limite");

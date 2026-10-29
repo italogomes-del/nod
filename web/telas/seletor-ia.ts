@@ -147,7 +147,15 @@ export function seguirDaDecisao(d: DecisaoSeAcabar): SeguirSeAcabar {
  * nenhuma das duas, vale qualquer máquina com a conta pronta.
  */
 export function seguirSeAcabar(estado: Estado, p: { ia: IaDaPessoa; auto: boolean; ordem: Parameters<typeof iasDoBot>[1]; c: ContextoInteligencia; atual: ContaIa | null; maquina: string | null }): SeguirSeAcabar {
-  const contas = estado.contasIa?.contas ?? [];
+  // NOD-424 (revisão): o menu não pode dizer "segue no X" com o grupo X "não conectado". Por construção, só entram as contas
+  // de IA conectada na tela (a conta em uso sempre entra). E o vínculo conta↔máquina guarda "pronta" mesmo com a máquina
+  // desligada; o servidor só troca para máquina motor viva com a IA pronta (prontosPorMaquinaDaPessoa, NOD-94). Com a lista
+  // de máquinas na tela, o vínculo só vale numa delas; sem a lista (ainda não chegou), vale o filtro por IA.
+  const vivas = estado.maquinas ? new Map(estado.maquinas.maquinas.filter((m) => m.conectada && m.papel !== "computador").map((m) => [m.id, m])) : null;
+  const iaConectada = (ia: IdHarness) => p.c.ias.some((x) => x.id === ia && conectada(x, p.c));
+  const contas = (estado.contasIa?.contas ?? [])
+    .filter((c) => c.id === p.atual?.id || iaConectada(c.ia))
+    .map((c) => (vivas ? { ...c, maquinas: c.maquinas.filter((v) => vivas.get(v.maquinaId)?.ias[c.ia] === "pronto") } : c));
   if (p.atual) {
     return seguirDaDecisao(decidirSeAcabar(contas, { atualId: p.atual.id, maquina: p.maquina, iaFixa: p.auto ? null : p.atual.ia, ordemDoBot: p.ordem, agora: p.c.agora }));
   }
