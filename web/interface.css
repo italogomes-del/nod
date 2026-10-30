@@ -2285,8 +2285,8 @@ img.luz-midia { display: block; flex: none; width: min(var(--w), calc(100cqw - 1
 ::highlight(nod-busca) { background-color: var(--realce-busca); color: var(--realce-busca-texto); }
 ::highlight(nod-busca-atual) { background-color: var(--realce-busca-atual); color: var(--realce-busca-tinta);
   text-decoration: underline 2px; text-underline-offset: 2px; }
-/* NOD-431, definido em 2026-10-30: no balão da pessoa (na cor do bot) o âmbar do realce pode encostar no fundo (âmbar,
-   creme, verde; laranja e cinza no escuro). As ocorrências ganham sublinhado pontilhado (a forma marca onde a cor não
+/* NOD-431, definido em 2026-10-30: no balão da pessoa (na cor do bot) o realce não pode depender só da cor do
+   fundo (NOD-436: o balão ficou escuro e a tinta, branca). As ocorrências ganham sublinhado pontilhado (a forma marca onde a cor não
    marca) e a atual inverte tinta e fundo do balão (≥ 4,5:1 por construção), com o sublinhado cheio. */
 .message.you .bubble::highlight(nod-busca), .message.you .bubble ::highlight(nod-busca) { text-decoration: underline dotted 1.5px; text-underline-offset: 2px; }
 .message.you .bubble::highlight(nod-busca-atual), .message.you .bubble ::highlight(nod-busca-atual) { background-color: var(--balao-tinta, var(--on-action)); color: var(--balao-fundo, var(--action)); text-decoration: underline 2px; text-underline-offset: 2px; }

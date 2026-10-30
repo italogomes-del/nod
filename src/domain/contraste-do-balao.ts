@@ -1,20 +1,16 @@
 /**
- * NOD-431, definido em 2026-10-30: o balão da pessoa ganha a cor do bot da conversa, com o texto sempre legível (WCAG AA, 4,5:1).
+ * NOD-431 e NOD-436, definido em 2026-10-30: o balão da pessoa ganha a cor do bot da conversa, com o texto sempre legível (WCAG AA, 4,5:1).
  *
  * As cores moram como literais em web/tokens.css (o único arquivo da web com cor literal, ADR-070); esta função é a
  * fonte de onde esses literais saem e o teste tests/unit/domain/contraste-do-balao.test.ts confere, para as 12 skins nos
  * dois temas, que o tokens.css tem exatamente o que ela calcula e que o contraste passa. Determinística: mesma entrada,
  * mesma saída, sem aleatório nem relógio.
  *
- * Regra:
- * 1. O balão precisa se separar da página (`surface`) e do balão do bot (`surface-raised`) por SEPARACAO_MINIMA; se não
- *    separa (creme no claro, preto no escuro), a luminosidade anda para longe deles primeiro.
- * 2. A tinta é a escura do tema claro (#18181b) ou o branco, a que tiver mais contraste com o fundo. Se a escura não
- *    passa e o preto puro passa (o violeta), a tinta é o preto: o critério só manda ajustar a cor quando nem preto nem
- *    branco chegam a 4,5:1.
- * 3. Só se nem assim o texto passar de 4,5:1, o fundo muda a luminosidade (HSL; matiz e saturação ficam, o tom do bot
- *    fica) em passos de 1%, para longe da tinta. O fundo do código é o balão 10% para longe da tinta (ou para perto
- *    dela, nas pontas em que o outro lado não separa o chip); nos dois casos o texto do chip passa de 4,5:1.
+ * Regra (correção de 2026-10-30, pedido do Marlon comparando com o Grok): o texto do balão é sempre branco. O fundo é a
+ * cor do bot ou, quando o branco não passa de 4,5:1 nela, a cor mais próxima no mesmo tom (só a luminosidade anda, em
+ * passos de 1%) em que passa; ele também precisa se separar da página e do balão do bot por SEPARACAO_MINIMA. O fundo
+ * do código é o balão 10% para o preto (ou para o branco, nas pontas em que o preto não separa o chip), também
+ * com o branco ≥ 4,5:1.
  */
 
 export const CONTRASTE_MINIMO = 4.5;
@@ -22,7 +18,6 @@ export const CONTRASTE_MINIMO = 4.5;
 export const SEPARACAO_MINIMA = 1.2;
 /** Quanto o fundo do chip de comando se afasta do balão (para longe da tinta). */
 export const MISTURA_DO_CODIGO = 0.1;
-export const TINTA_ESCURA = "#18181b";
 export const TINTA_CLARA = "#ffffff";
 export const TINTA_PRETA = "#000000";
 
@@ -92,7 +87,8 @@ const deHsl = (h: number, s: number, l: number): string => {
   return rgbParaHex([canal(h + 1 / 3) * 255, canal(h) * 255, canal(h - 1 / 3) * 255]);
 };
 
-const comLuminosidade = (hex: string, l: number): string => {
+/** A mesma cor (matiz e saturação HSL) com outra luminosidade, de 0 a 1. */
+export const comLuminosidade = (hex: string, l: number): string => {
   const [h, s] = paraHsl(hex);
   return deHsl(h, s, Math.min(1, Math.max(0, l)));
 };
@@ -101,14 +97,19 @@ const comLuminosidade = (hex: string, l: number): string => {
 const SEPARACAO_DO_CHIP = 1.1;
 
 /**
- * O fundo do chip: 10% para longe da tinta, que nunca tem menos contraste que o balão. Nas pontas (balão quase preto ou
- * quase branco) esse lado não separa o chip do balão, e ele vai 10% para o lado da tinta; o contraste é conferido no
- * passo 3 de coresDoBalao.
+ * O fundo do chip: 10% para longe da tinta (com a tinta branca, para o preto), o que nunca tira contraste. Nas pontas
+ * (balão quase preto) esse lado não separa o chip do balão, e ele vai 10% para o lado da tinta; coresDoBalao confere
+ * o contraste do chip em todo candidato.
  */
 const codigoDe = (fundo: string, tinta: string): string => {
   const longe = misturar(fundo, luminancia(tinta) < 0.5 ? TINTA_CLARA : TINTA_PRETA, MISTURA_DO_CODIGO);
   return contraste(longe, fundo) >= SEPARACAO_DO_CHIP ? longe : misturar(fundo, tinta, MISTURA_DO_CODIGO);
 };
+
+/** Luminosidade HSL, de 0 a 1. */
+export function luminosidade(hex: string): number {
+  return paraHsl(hex)[2];
+}
 
 /** Matiz HSL em graus (0 a 360); um cinza devolve 0. */
 export function matiz(hex: string): number {
@@ -117,28 +118,23 @@ export function matiz(hex: string): number {
 
 /**
  * As cores do balão da pessoa para uma cor de bot, contra o que está em volta dele no tema: a página (`surface`) e o
- * balão do bot (`surface-raised`). Lança se não achar: uma skin nova que caia aqui precisa de decisão de design.
+ * balão do bot (`surface-raised`). A tinta é sempre branca, como no Grok; o fundo é a cor do bot com a menor mudança de
+ * luminosidade (HSL: matiz e saturação ficam) que faz o branco passar de 4,5:1 (no texto e no chip) e separa o balão do
+ * que está em volta. Lança se não achar: uma skin nova que caia aqui precisa de decisão de design.
  */
 export function coresDoBalao(corDoBot: string, balaoDoBot: string, pagina: string): CoresDoBalao {
+  const tinta = TINTA_CLARA;
   const separa = (f: string): boolean => Math.min(contraste(f, balaoDoBot), contraste(f, pagina)) >= SEPARACAO_MINIMA;
-  const passa = (f: string, t: string): boolean => contraste(f, t) >= CONTRASTE_MINIMO && contraste(codigoDe(f, t), t) >= CONTRASTE_MINIMO;
+  const serve = (f: string): boolean => separa(f) && contraste(f, tinta) >= CONTRASTE_MINIMO && contraste(codigoDe(f, tinta), tinta) >= CONTRASTE_MINIMO;
   const [, , l0] = paraHsl(corDoBot);
-  // 1. Separar do que está em volta: no tema claro escurece, no escuro clareia.
-  const temaClaro = luminancia(pagina) > 0.18;
-  let fundo = corDoBot.toLowerCase();
-  for (let i = 1; !separa(fundo); i++) {
-    if (i > 100) throw new Error(`sem separação para ${corDoBot}`);
-    fundo = comLuminosidade(corDoBot, l0 + (temaClaro ? -i : i) / 100);
+  // A cor do bot fica se já serve; senão, a luminosidade mais perto dela que serve. Escurecer vem antes de clarear
+  // (clarear só ajuda o preto a se separar da página escura).
+  for (let i = 0; i <= 100; i++) {
+    for (const l of i === 0 ? [l0] : [l0 - i / 100, l0 + i / 100]) {
+      if (l < 0 || l > 1) continue;
+      const fundo = i === 0 ? corDoBot.toLowerCase() : comLuminosidade(corDoBot, l);
+      if (serve(fundo)) return { fundo, tinta, codigo: codigoDe(fundo, tinta) };
+    }
   }
-  // 2. A tinta com mais contraste; o preto puro antes de mexer na cor do bot.
-  const melhor = contraste(fundo, TINTA_ESCURA) >= contraste(fundo, TINTA_CLARA) ? TINTA_ESCURA : TINTA_CLARA;
-  const tinta = !passa(fundo, melhor) && passa(fundo, TINTA_PRETA) ? TINTA_PRETA : melhor;
-  // 3. Só se nem assim passar: afastar da tinta, sem perder a separação.
-  const [, , l1] = paraHsl(fundo);
-  const base = fundo;
-  for (let i = 1; !passa(fundo, tinta) || !separa(fundo); i++) {
-    if (i > 100) throw new Error(`sem contraste para ${corDoBot}`);
-    fundo = comLuminosidade(base, l1 + (luminancia(tinta) < 0.5 ? i : -i) / 100);
-  }
-  return { fundo, tinta, codigo: codigoDe(fundo, tinta) };
+  throw new Error(`sem contraste para ${corDoBot}`);
 }

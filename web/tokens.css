@@ -108,21 +108,21 @@
   --agent-olho-creme: #18181b;
 
   /* NOD-431 (emenda da ADR-070): o balão da pessoa na cor do bot da conversa. Fundo, tinta e fundo do código de cada
-     skin saem de src/domain/contraste-do-balao.ts (texto ≥ 4,5:1 sobre o fundo e sobre o chip; separado da página e do
-     balão do bot; o fundo só muda de luminosidade quando precisa, mantendo o tom); tests/unit/domain/contraste-do-balao.test.ts confere estes valores. */
+     skin saem de src/domain/contraste-do-balao.ts (texto sempre branco, como no Grok, ≥ 4,5:1 sobre o fundo e sobre o chip;
+     separado da página e do balão do bot; o fundo só muda de luminosidade quando precisa, mantendo o tom); tests/unit/domain/contraste-do-balao.test.ts confere estes valores. */
   --balao-encre: #0a0a0c; --balao-encre-tinta: #ffffff; --balao-encre-codigo: #232324;
   --balao-brun: #8b5e3c; --balao-brun-tinta: #ffffff; --balao-brun-codigo: #7d5536;
-  --balao-rouge: #e8483f; --balao-rouge-tinta: #18181b; --balao-rouge-codigo: #ea5a52;
-  --balao-orange: #f08a24; --balao-orange-tinta: #18181b; --balao-orange-codigo: #da7f23;
-  --balao-ambre: #f0b429; --balao-ambre-tinta: #18181b; --balao-ambre-codigo: #daa428;
-  --balao-vert: #3ecf8e; --balao-vert-tinta: #18181b; --balao-vert-codigo: #3abd83;
-  --balao-turquoise: #2fbfa0; --balao-turquoise-tinta: #18181b; --balao-turquoise-codigo: #2dae93;
-  --balao-bleu: #3b93f0; --balao-bleu-tinta: #18181b; --balao-bleu-codigo: #4f9ef2;
-  --balao-violet: #8b5cf6; --balao-violet-tinta: #000000; --balao-violet-codigo: #976cf7;
-  --balao-rose: #e152b0; --balao-rose-tinta: #18181b; --balao-rose-codigo: #e463b8;
-  --balao-gris: #a3a3a3; --balao-gris-tinta: #18181b; --balao-gris-codigo: #acacac;
-  /* Creme no claro escurece até se separar do balão do bot (surface-raised); no escuro fica o creme da skin. */
-  --balao-creme: #dfdbcd; --balao-creme-tinta: #18181b; --balao-creme-codigo: #cbc8bb;
+  --balao-rouge: #e42a1f; --balao-rouge-tinta: #ffffff; --balao-rouge-codigo: #cd261c;
+  --balao-orange: #b15f0c; --balao-orange-tinta: #ffffff; --balao-orange-codigo: #9f560b;
+  --balao-ambre: #996e0b; --balao-ambre-tinta: #ffffff; --balao-ambre-codigo: #8a630a;
+  --balao-vert: #218659; --balao-vert-tinta: #ffffff; --balao-vert-codigo: #1e7950;
+  --balao-turquoise: #20826d; --balao-turquoise-tinta: #ffffff; --balao-turquoise-codigo: #1d7562;
+  --balao-bleu: #1174dd; --balao-bleu-tinta: #ffffff; --balao-bleu-codigo: #0f68c7;
+  --balao-violet: #8452f5; --balao-violet-tinta: #ffffff; --balao-violet-codigo: #774add;
+  --balao-rose: #d62599; --balao-rose-tinta: #ffffff; --balao-rose-codigo: #c1218a;
+  --balao-gris: #757575; --balao-gris-tinta: #ffffff; --balao-gris-codigo: #696969;
+  /* Creme e cinza escurecem no mesmo tom até o branco passar. */
+  --balao-creme: #807451; --balao-creme-tinta: #ffffff; --balao-creme-codigo: #736849;
 
   /* Tipografia */
   --font-sans: "Geist", system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -181,8 +181,6 @@
     --arquivo-apresentacao: #f08a52;
     --arquivo-pdf: #f06b5f;
     --papel: #ffffff;
-    --balao-creme: #f1efe9;
-    --balao-creme-codigo: #dbdad4;
     --balao-encre: #31313b;
     --balao-encre-codigo: #46464f;
   }
@@ -232,8 +230,6 @@
   --arquivo-apresentacao: #f08a52;
   --arquivo-pdf: #f06b5f;
   --papel: #ffffff;
-  --balao-creme: #f1efe9;
-  --balao-creme-codigo: #dbdad4;
   --balao-encre: #31313b;
   --balao-encre-codigo: #46464f;
 }

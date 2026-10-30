@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { CORES_AGENTE } from "../../../src/contracts/agente.ts";
-import { CONTRASTE_MINIMO, SEPARACAO_MINIMA, contraste, coresDoBalao, luminancia, matiz, misturar } from "../../../src/domain/contraste-do-balao.ts";
+import { CONTRASTE_MINIMO, SEPARACAO_MINIMA, comLuminosidade, contraste, coresDoBalao, luminancia, luminosidade, matiz, misturar } from "../../../src/domain/contraste-do-balao.ts";
 
 /**
  * NOD-431: o balão da pessoa na cor do bot. Este teste percorre a paleta inteira (as 12 skins) nos dois temas e confere
@@ -57,27 +57,45 @@ describe("contraste WCAG", () => {
     expect(r.fundo).toMatch(/^#([0-9a-f]{2})\1\1$/);
   });
 
-  it("o ajuste (passo 3): uma cor cujo chip não passa com nenhuma tinta muda só a luminosidade, para longe da tinta", () => {
-    // Nenhuma skin de hoje cai aqui; #be14ff cai: com branco o texto passa raspando e o chip, 10% mais escuro, não.
-    const cru = "#be14ff";
+  it("o texto é sempre branco, como no Grok, em qualquer cor de bot e nos dois temas", () => {
+    for (const cor of ["#f0b429", "#3ecf8e", "#e8483f", "#8b5cf6", "#f1efe9", "#a3a3a3", "#0a0a0c", "#ffffff"]) {
+      for (const [balaoDoBot, pagina] of [["#f0f0f2", "#ffffff"], ["#232327", "#131315"]] as const) {
+        const r = coresDoBalao(cor, balaoDoBot, pagina);
+        expect(r.tinta, `${cor} sobre ${pagina}`).toBe("#ffffff");
+        expect(contraste(r.fundo, r.tinta)).toBeGreaterThanOrEqual(CONTRASTE_MINIMO);
+        expect(contraste(r.codigo, r.tinta)).toBeGreaterThanOrEqual(CONTRASTE_MINIMO);
+      }
+    }
+  });
+
+  it("a cor clara do bot vira uma cor próxima, no mesmo tom e mais escura, até o branco passar", () => {
+    // Âmbar cru com branco dá ~1,9:1: escurece só a luminosidade, o mínimo para chegar a 4,5:1.
+    const cru = "#f0b429";
     const r = coresDoBalao(cru, "#f0f0f2", "#ffffff");
-    expect(r).toEqual({ fundo: "#bb0aff", tinta: "#ffffff", codigo: "#a809e6" });
-    expect(contraste(r.fundo, r.tinta)).toBeGreaterThanOrEqual(CONTRASTE_MINIMO);
-    expect(contraste(r.codigo, r.tinta)).toBeGreaterThanOrEqual(CONTRASTE_MINIMO);
-    // Para longe da tinta branca: o fundo escureceu.
+    expect(r).toEqual({ fundo: "#996e0b", tinta: "#ffffff", codigo: "#8a630a" });
+    expect(contraste(cru, "#ffffff")).toBeLessThan(CONTRASTE_MINIMO);
     expect(luminancia(r.fundo)).toBeLessThan(luminancia(cru));
     const d = Math.abs(matiz(r.fundo) - matiz(cru));
     expect(Math.min(d, 360 - d)).toBeLessThanOrEqual(2);
+    // A menor mudança: 1% mais perto da cor do bot, o branco já não passa no balão ou no chip.
+    const umPassoAntes = coresDoBalao(comLuminosidade(cru, luminosidade(cru)), "#f0f0f2", "#ffffff");
+    expect(umPassoAntes.fundo).toBe(r.fundo);
+    const vizinho = comLuminosidade(cru, Math.round(luminosidade(r.fundo) * 100) / 100 + 0.01);
+    expect(vizinho).not.toBe(r.fundo);
+    expect(Math.min(contraste(vizinho, "#ffffff"), contraste(misturar(vizinho, "#000000", 0.1), "#ffffff"))).toBeLessThan(CONTRASTE_MINIMO);
   });
 
-  it("só mexe no fundo quando o critério manda: a cor que já passa com uma das tintas fica igual", () => {
-    // Vermelho com a tinta escura dá 4,6:1 cru: não pode mudar. Violeta não passa com #18181b nem com branco, mas passa
-    // com preto puro (4,96:1): fica igual, com tinta preta.
-    expect(coresDoBalao("#e8483f", "#f0f0f2", "#ffffff").fundo).toBe("#e8483f");
-    expect(coresDoBalao("#8b5cf6", "#f0f0f2", "#ffffff")).toMatchObject({ fundo: "#8b5cf6", tinta: "#000000" });
-    // Com preto e branco puros toda cor chega a 4,5:1 (o pior caso, no cruzamento, dá 4,58:1): o passo 3 só age quando o
-    // chip ou a separação não passam. Por isso o cinza médio também fica igual.
-    expect(coresDoBalao("#777777", "#f0f0f2", "#ffffff").fundo).toBe("#777777");
+  it("só mexe no fundo quando o branco não passa: a cor que já passa com branco fica igual", () => {
+    // Marrom e preto já passam com branco: ficam exatamente a cor do bot.
+    expect(coresDoBalao("#8b5e3c", "#f0f0f2", "#ffffff")).toMatchObject({ fundo: "#8b5e3c", tinta: "#ffffff" });
+    expect(coresDoBalao("#0a0a0c", "#f0f0f2", "#ffffff")).toMatchObject({ fundo: "#0a0a0c", tinta: "#ffffff" });
+    // Vermelho (3,9:1 com branco) e violeta (4,2:1) ficam um pouco mais escuros, no mesmo tom.
+    expect(coresDoBalao("#e8483f", "#f0f0f2", "#ffffff").fundo).toBe("#e42a1f");
+    expect(coresDoBalao("#8b5cf6", "#f0f0f2", "#ffffff").fundo).toBe("#8452f5");
+  });
+
+  it("no tema escuro o preto clareia só o bastante para se separar da página, com texto branco", () => {
+    expect(coresDoBalao("#0a0a0c", "#232327", "#131315")).toEqual({ fundo: "#31313b", tinta: "#ffffff", codigo: "#46464f" });
   });
 });
 
