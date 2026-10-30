@@ -66,7 +66,9 @@ describe("cores só por token", () => {
       return tokens.slice(i, tokens.indexOf("}", i));
     };
     const nomes = (texto: string): string[] => [...texto.matchAll(/(--[a-z0-9-]+)\s*:/g)].map((m) => m[1] ?? "");
-    const fixos = /^--(agent-|font-)/;
+    // --balao-* (NOD-431) são calculados de --agent-* e só mudam no escuro onde o cálculo muda (creme); o teste
+    // tests/unit/domain/contraste-do-balao.test.ts confere os dois temas.
+    const fixos = /^--(agent-|font-|balao-)/;
     const claro = nomes(bloco(":root {")).filter((n) => !fixos.test(n) && n !== "--focus-ring");
     for (const escuro of [bloco(':root:not([data-theme="light"])'), bloco(':root[data-theme="dark"]')]) {
       expect(claro.filter((n) => !nomes(escuro).includes(n))).toEqual([]);

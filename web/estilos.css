@@ -92,6 +92,21 @@ body.ocupado { cursor: progress; }
 .c-brown { --mascote-cor: var(--agent-brun); } .c-amber { --mascote-cor: var(--agent-ambre); }
 .c-gray { --mascote-cor: var(--agent-gris); } .c-cream { --mascote-cor: var(--agent-creme); }
 
+/* NOD-431 (emenda da ADR-070): o balão da pessoa veste a cor do bot da conversa. A classe balao-c-* vai no
+   .message.you (classeDoBalao, web/telas/conversa.ts) e aponta para os tokens da skin, já com contraste garantido. */
+.balao-c-red { --balao-fundo: var(--balao-rouge); --balao-tinta: var(--balao-rouge-tinta); --balao-codigo: var(--balao-rouge-codigo); }
+.balao-c-pink { --balao-fundo: var(--balao-rose); --balao-tinta: var(--balao-rose-tinta); --balao-codigo: var(--balao-rose-codigo); }
+.balao-c-purple, .balao-c-lilac { --balao-fundo: var(--balao-violet); --balao-tinta: var(--balao-violet-tinta); --balao-codigo: var(--balao-violet-codigo); }
+.balao-c-blue { --balao-fundo: var(--balao-bleu); --balao-tinta: var(--balao-bleu-tinta); --balao-codigo: var(--balao-bleu-codigo); }
+.balao-c-teal { --balao-fundo: var(--balao-turquoise); --balao-tinta: var(--balao-turquoise-tinta); --balao-codigo: var(--balao-turquoise-codigo); }
+.balao-c-green { --balao-fundo: var(--balao-vert); --balao-tinta: var(--balao-vert-tinta); --balao-codigo: var(--balao-vert-codigo); }
+.balao-c-orange { --balao-fundo: var(--balao-orange); --balao-tinta: var(--balao-orange-tinta); --balao-codigo: var(--balao-orange-codigo); }
+.balao-c-black { --balao-fundo: var(--balao-encre); --balao-tinta: var(--balao-encre-tinta); --balao-codigo: var(--balao-encre-codigo); }
+.balao-c-brown { --balao-fundo: var(--balao-brun); --balao-tinta: var(--balao-brun-tinta); --balao-codigo: var(--balao-brun-codigo); }
+.balao-c-amber { --balao-fundo: var(--balao-ambre); --balao-tinta: var(--balao-ambre-tinta); --balao-codigo: var(--balao-ambre-codigo); }
+.balao-c-gray { --balao-fundo: var(--balao-gris); --balao-tinta: var(--balao-gris-tinta); --balao-codigo: var(--balao-gris-codigo); }
+.balao-c-cream { --balao-fundo: var(--balao-creme); --balao-tinta: var(--balao-creme-tinta); --balao-codigo: var(--balao-creme-codigo); }
+
 /* avatares vazados (mensagens de sistema / membros de sala) — mantidos do shell antigo */
 .av { display: inline-grid; place-items: center; font-size: 11px; font-weight: 700; flex: none; }
 .av-pessoa { border-radius: 50%; background: var(--surface-raised); color: var(--ink-2); }
@@ -199,7 +214,7 @@ body.ocupado { cursor: progress; }
 .bubble-wrap { position: relative; max-width: min(76%, 740px); }
 .bubble { border-radius: 15px; padding: 9px 12px; font-size: 13.5px; line-height: 1.5; }
 .message.bot .bubble { background: var(--surface-raised); color: var(--ink); border-top-left-radius: 8px; }
-.message.you .bubble { background: var(--action); color: var(--on-action); border-top-right-radius: 8px; }
+.message.you .bubble { background: var(--balao-fundo, var(--action)); color: var(--balao-tinta, var(--on-action)); border-top-right-radius: 8px; }
 .bubble .sender { display: block; font-size: 11px; font-weight: 700; color: var(--ink-2); margin-bottom: 2px; }
 .bubble .meta-tags { margin-top: 4px; display: flex; gap: 5px; flex-wrap: wrap; }
 /* Ações da mensagem: fora do balão, na margem, alinhadas ao topo do texto. `top: -16px` (a regra

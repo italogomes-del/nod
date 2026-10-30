@@ -315,7 +315,7 @@ describe("busca do celular (NOD-380): o que a tela mostra", () => {
     expect(htmlDaBusca(modelo({ termo: "gir", mensagens: pronto(true) }))).toMatch(/data-bc="mais" aria-disabled="true" aria-busy="true">Carregando…/u);
   });
 
-  it("CSS: alvos de 44, reduced motion sem animação, a regra de celular na consulta canônica, balão da pessoa igual ao do bot", () => {
+  it("CSS: alvos de 44, reduced motion sem animação, a regra de celular na consulta canônica, balão da pessoa na cor do bot", () => {
     const css = readFileSync(new URL("../../../web/busca-celular.css", import.meta.url), "utf8");
     for (const sel of [".bc-limpar", ".bc-tirar"]) expect(css).toMatch(new RegExp(`\\${sel} \\{[^}]*width: 44px; height: 44px`, "u"));
     for (const sel of [".bc-cancelar", ".bc-texto", ".bc-recente-termo"]) expect(css).toMatch(new RegExp(`\\${sel} \\{[^}]*min-height: 44px`, "u"));
@@ -327,7 +327,8 @@ describe("busca do celular (NOD-380): o que a tela mostra", () => {
     // O balão é casca do celular: mora no mobile.css (ADR-094), dentro da consulta canônica.
     expect(css).not.toContain(".message.you");
     const mobile = readFileSync(new URL("../../../web/mobile.css", import.meta.url), "utf8");
-    expect(mobile).toMatch(new RegExp(`@media ${CONSULTA_CELULAR.replace(/[()]/g, "\\$&")} \\{\\s*\\.message\\.you \\.bubble \\{ background: var\\(--surface-raised\\); color: var\\(--ink\\); \\}`, "u"));
+    // NOD-431 desfez o balão cinza da NOD-380: no celular o balão da pessoa também veste a cor do bot (interface.css).
+    expect(mobile).not.toMatch(/\.message\.you \.bubble \{ background: var\(--surface-raised\)/u);
     // --signal só no cursor.
     expect(css.match(/var\(--signal\)/g)).toHaveLength(1);
     expect(css).toContain("caret-color: var(--signal)");

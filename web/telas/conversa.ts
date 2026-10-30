@@ -543,6 +543,23 @@ export function chipDaFalaNaFrente(situacao: "na_fila" | "entregue" | "lendo", b
   return `<div class="fila-chip" role="status"><span class="fila-relogio" aria-hidden="true"></span>${esc(texto)}</div>`;
 }
 
+/**
+ * NOD-431 (emenda da ADR-070): o balão da pessoa veste a cor do bot da conversa. A classe `balao-c-*` (web/estilos.css)
+ * aponta `--balao-fundo`, `--balao-tinta` e `--balao-codigo` para os tokens da skin (web/tokens.css, calculados com
+ * contraste ≥ 4,5:1 por src/domain/contraste-do-balao.ts). Sem bot dono (sala) ou com cor fora da paleta, nada: o balão
+ * fica no grafite (`--action`) de sempre. A classe sai da conversa e não da mensagem: trocar a cor do bot repinta todas.
+ * Com a conversa ainda não carregada (a fala desenhada no detalhe de uma task), a frota diz de quem ela é.
+ */
+export function classeDoBalao(estado: Estado, conversaId: string): string {
+  const carregada = estado.conversas[conversaId]?.conversa;
+  const cor = carregada
+    ? (carregada.agenteId ? agenteDe(estado, carregada.agenteId)?.cor : undefined)
+    : estado.frota?.agentes.find((a) => a.conversaId === conversaId)?.cor;
+  // A web não importa valor de src/contracts (ADR-018): vale o formato c-<nome>, que vira classe sem risco de injeção;
+  // uma c-* sem balao-c-* em web/estilos.css cai no grafite pelo fallback do CSS.
+  return cor && /^c-[a-z]+$/.test(cor) ? ` balao-${cor}` : "";
+}
+
 /** "/review 420" na mensagem da pessoa: o comando vira chip e o resto segue como texto (canvas "Comandos /", C4). */
 export function comChipDeComando(texto: string): string {
   const m = /^\/([\w.:-]+)(\s[\s\S]*)?$/.exec(texto.trim());
@@ -622,7 +639,7 @@ export function renderMensagem(m: Mensagem, estado: Estado, sala = false, opcoes
   const telaAberta = motivoTela !== null && pergunta ? estadoDaPergunta(estado, estado.conversas[m.conversaId]?.mensagens ?? [], pergunta.decisaoId).tipo === "aberta" : false;
   const ouvivel = podeOuvir(m, estado, sala);
   const lendo = estado.leitura?.mensagemId === m.id && ouvivel;
-  const classes = `message ${ehPessoa ? "you" : "bot"}${ouvivel ? " ouvivel" : ""}${lendo ? " lendo" : ""}${pergunta ? " pergunta" : ""}${motivoTela !== null ? " com-tela" : ""}${resposta ? " respondendo" : ""}${fila ? ` fila-${fila.tipo}` : ""}`;
+  const classes = `message ${ehPessoa ? "you" : "bot"}${ehPessoa ? classeDoBalao(estado, m.conversaId) : ""}${ouvivel ? " ouvivel" : ""}${lendo ? " lendo" : ""}${pergunta ? " pergunta" : ""}${motivoTela !== null ? " com-tela" : ""}${resposta ? " respondendo" : ""}${fila ? ` fila-${fila.tipo}` : ""}`;
   // O progresso vai dentro do balão do bot; no da pessoa (a rede) e no cartão da pergunta (o turno que abriu frentes e
   // terminou perguntando), embaixo dele — o cartão não tem onde recebê-lo, e sem isso o bloco sumia (revisão do PR 398).
   const progressoDentro = !ehPessoa && !pergunta ? (opcoes.progresso ?? "") : "";

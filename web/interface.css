@@ -54,9 +54,14 @@
 /* definido em 2026-10-03 (canvas "Uma conversa de verdade · depois"): o balão de quem escreve se destaca do bot, com o
    canto de cima mais reto do lado de quem fala — espelho do balão do bot. Cinza contra cinza não separava as vozes.
    Revisto em 2026-10-04 (ADR-070): grafite (action) em vez do azul da marca — o azul é só do que é novo. */
-.message.you .bubble { background: var(--action); color: var(--on-action); border-top-right-radius: 8px; }
-.message.you .bubble .chip-comando { background: color-mix(in srgb, var(--on-action) 18%, transparent); color: var(--on-action); }
-.message.you .bubble a { color: var(--on-action); }
+/* NOD-431 (emenda da ADR-070): o fundo é a cor do bot da conversa (--balao-*, web/estilos.css), em cor sólida, com a
+   tinta que dá 4,5:1; sem bot dono (sala), o grafite de antes. O texto da pessoa é escapado (sem markdown): dentro do balão
+   só há texto, o chip de comando e, se um dia vier, link; os três e a seleção herdam a tinta, e o realce da busca tem
+   token próprio. Nada de opacidade no balão: ela mistura a cor com a página e derruba o contraste. */
+.message.you .bubble { background: var(--balao-fundo, var(--action)); color: var(--balao-tinta, var(--on-action)); border-top-right-radius: 8px; }
+.message.you .bubble .chip-comando { background: var(--balao-codigo, color-mix(in srgb, var(--on-action) 14%, var(--action))); color: inherit; }
+.message.you .bubble a { color: inherit; text-decoration: underline; }
+.message.you .bubble::selection, .message.you .bubble ::selection { background: var(--balao-tinta, var(--on-action)); color: var(--balao-fundo, var(--action)); }
 .msg-autor { display: flex; gap: 10px; align-items: center; margin: 0 0 6px; font-size: 12px; }
 .msg-autor b { font-weight: 600; }
 .msg-autor time { color: var(--ink-3); font-size: 10px; }
@@ -648,13 +653,18 @@
 
 /* Fila da conversa (2026-09-24): cada mensagem que espera mostra onde está e um Cancelar só dela. */
 /* Parte 1 do plano "o pensamento no chat" (2026-10-26): a fala da pessoa entre o clique e a confirmação do servidor. */
-.fala-pendente[data-envio="enviando"] .message.you .bubble { opacity: .6; transition: opacity .25s ease; }
-.fala-pendente[data-envio="falhou"] .message.you .bubble { background: var(--surface); color: var(--ink); border: 1px dashed var(--danger); }
+/* NOD-431 (definido em 2026-10-30): os estados claros (falhou, na fila, cancelando, cancelada) redefinem --balao-* para
+   surface/ink, e a seleção e o realce da busca, que leem esses tokens, continuam visíveis no balão claro.
+   "enviando" sem opacidade (a 60% a cor do bot cai para 2,3:1); o contorno tracejado na tinta pura (≥ 4,5:1, acima dos 3:1 da WCAG 1.4.11) diz que ainda não
+   foi, e o texto fica com os 4,5:1. */
+.fala-pendente[data-envio="enviando"] .message.you .bubble { outline: 1.5px dashed var(--balao-tinta, var(--on-action)); outline-offset: -4px; }
+.fala-pendente[data-envio="falhou"] .message.you .bubble { --balao-fundo: var(--surface); --balao-tinta: var(--ink); --balao-codigo: var(--surface-raised); background: var(--surface); color: var(--ink); border: 1px dashed var(--danger); }
+.fala-pendente[data-envio="falhou"] .message.you .bubble .chip-comando { background: var(--surface-raised); color: var(--ink-2); }
 .fala-pendente .envio-erro { display: flex; justify-content: flex-end; align-items: center; gap: 10px; font-size: 12px; color: var(--danger); margin: -17px 0 22px; }
 .fala-pendente .envio-erro .bt.envio-bt { font-size: 12px; font-weight: 500; color: var(--ink); background: var(--surface); border: 1px solid var(--line-strong); border-radius: 7px; padding: 2px 8px; }
-.message.you.fila-na_fila .bubble, .message.you.fila-cancelando .bubble { background: var(--surface); border: 1px dashed var(--ink-3); color: var(--ink); }
+.message.you.fila-na_fila .bubble, .message.you.fila-cancelando .bubble { --balao-fundo: var(--surface); --balao-tinta: var(--ink); --balao-codigo: var(--surface-raised); background: var(--surface); border: 1px dashed var(--ink-3); color: var(--ink); }
 .message.you.fila-na_fila .bubble .chip-comando, .message.you.fila-cancelando .bubble .chip-comando, .message.you.fila-cancelada .bubble .chip-comando { background: var(--surface-raised); color: var(--ink-2); }
-.message.you.fila-cancelada .bubble { background: var(--surface); border: 1px dashed var(--line-strong); color: var(--ink-3); text-decoration: line-through; }
+.message.you.fila-cancelada .bubble { --balao-fundo: var(--surface); --balao-tinta: var(--ink); --balao-codigo: var(--surface-raised); background: var(--surface); border: 1px dashed var(--line-strong); color: var(--ink-3); text-decoration: line-through; }
 .fila-chip { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 4px; font-size: 12px; color: var(--ink-2); }
 .fila-chip.cancelada { color: var(--ink-3); }
 .fila-chip .bt.link { min-height: 32px; padding: 0 4px; font-size: 12px; font-weight: 500; }
@@ -2275,10 +2285,17 @@ img.luz-midia { display: block; flex: none; width: min(var(--w), calc(100cqw - 1
 ::highlight(nod-busca) { background-color: var(--realce-busca); color: var(--realce-busca-texto); }
 ::highlight(nod-busca-atual) { background-color: var(--realce-busca-atual); color: var(--realce-busca-tinta);
   text-decoration: underline 2px; text-underline-offset: 2px; }
+/* NOD-431, definido em 2026-10-30: no balão da pessoa (na cor do bot) o âmbar do realce pode encostar no fundo (âmbar,
+   creme, verde; laranja e cinza no escuro). As ocorrências ganham sublinhado pontilhado (a forma marca onde a cor não
+   marca) e a atual inverte tinta e fundo do balão (≥ 4,5:1 por construção), com o sublinhado cheio. */
+.message.you .bubble::highlight(nod-busca), .message.you .bubble ::highlight(nod-busca) { text-decoration: underline dotted 1.5px; text-underline-offset: 2px; }
+.message.you .bubble::highlight(nod-busca-atual), .message.you .bubble ::highlight(nod-busca-atual) { background-color: var(--balao-tinta, var(--on-action)); color: var(--balao-fundo, var(--action)); text-decoration: underline 2px; text-underline-offset: 2px; }
 .bnc-atual-sem-api { outline: 2px solid var(--realce-busca-atual); outline-offset: 4px; border-radius: 12px; }
 @media (forced-colors: active) {
   ::highlight(nod-busca) { background-color: Mark; color: MarkText; }
   ::highlight(nod-busca-atual) { background-color: Highlight; color: HighlightText; }
+  .message.you .bubble::highlight(nod-busca), .message.you .bubble ::highlight(nod-busca) { background-color: Mark; color: MarkText; }
+  .message.you .bubble::highlight(nod-busca-atual), .message.you .bubble ::highlight(nod-busca-atual) { background-color: Highlight; color: HighlightText; }
   .bnc-pilula { border: 1px solid CanvasText; }
   .bnc-pilula:focus-within { outline: 2px solid Highlight; outline-offset: 2px; }
 }

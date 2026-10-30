@@ -779,9 +779,10 @@
   .esqueleto-conversa i { display: block; height: 44px; width: 70%; border-radius: 18px; background: var(--surface-raised); animation: esqueleto-pulsa 1.4s ease-in-out infinite; }
   .esqueleto-conversa .eq-voce { align-self: flex-end; width: 52%; }
   .esqueleto-conversa .curto { width: 40%; }
-  /* Não enviada: o balão a 60% e a linha "Não foi enviada · Tentar de novo" em 13 px, sem o vermelho (o erro é da rede,
-     não da pessoa). */
-  .fala-pendente[data-envio="falhou"] .message.you .bubble { opacity: .6; border: 0; background: var(--action); color: var(--on-action); }
+  /* Não enviada: o balão claro com contorno tracejado e a linha "Não foi enviada · Tentar de novo" em 13 px, sem o
+     vermelho (o erro é da rede, não da pessoa). NOD-431: sem a opacidade de antes, que com a cor do bot caía abaixo de
+     4,5:1. */
+  .fala-pendente[data-envio="falhou"] .message.you .bubble { --balao-fundo: var(--surface); --balao-tinta: var(--ink); --balao-codigo: var(--surface-raised); border: 1px dashed var(--line-strong); background: var(--surface); color: var(--ink); }
   .fala-pendente .envio-erro { font-size: 13px; color: var(--ink-2); }
   .fala-pendente .envio-erro .bt.envio-bt { min-height: 44px; font-size: 13px; border: 0; background: none; color: var(--ink); text-decoration: underline; }
 }
@@ -816,16 +817,12 @@
   .cabecalho.cabecalho-pilula .pilula-bot.bnc-cutuca { animation: bnc-cutuca .9s cubic-bezier(.2, .8, .2, 1) 1; }
   @keyframes bnc-cutuca { 0% { transform: none; } 30% { transform: translateY(6px); } 100% { transform: none; } }
 }
-/* NOD-380 (protótipo v3): no celular o balão da pessoa tem a mesma cor do balão do bot. Aqui, e não na busca-celular.css,
-   porque é casca do celular (ADR-094: o mobile.css é a última folha e quem decide o celular). */
+/* NOD-380 (protótipo v3) deixava aqui o balão da pessoa com a mesma cor do balão do bot; a NOD-431 desfez isso (o
+   feedback foi que as duas vozes não se separavam): no celular o balão da pessoa também veste a cor do bot (interface.css).
+   Este bloco é casca do celular (ADR-094: o mobile.css é a última folha e quem decide o celular). */
 @media (hover: none) and (pointer: coarse) and (max-width: 600px), (hover: none) and (pointer: coarse) and (max-height: 500px) {
-  .message.you .bubble { background: var(--surface-raised); color: var(--ink); }
-  .message.you .bubble a { color: inherit; }
-  .message.you .bubble .chip-comando { background: color-mix(in srgb, var(--ink) 10%, transparent); color: var(--ink); }
   /* Na conversa com o topo em pílula (NOD-381), a lupa é o par do ‹: o mesmo círculo de vidro de 44, à direita. */
   .cabecalho.cabecalho-pilula .buscar-celular { position: absolute; right: max(12px, env(safe-area-inset-right)); top: calc(env(safe-area-inset-top) + 4px);
     margin: 0; border: 1px solid var(--line); border-radius: 50%; color: var(--ink);
     background: color-mix(in srgb, var(--surface) 82%, transparent); -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px); box-shadow: var(--shadow-pop); }
-  /* A não enviada (NOD-381) segue a mesma cor, só a 60%: sem isto ela voltava ao --action. */
-  .fala-pendente[data-envio="falhou"] .message.you .bubble { background: var(--surface-raised); color: var(--ink); }
 }

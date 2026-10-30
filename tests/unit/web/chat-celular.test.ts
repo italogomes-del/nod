@@ -159,9 +159,9 @@ describe("NOD-381: alvos de 44 px e estados", () => {
     expect(html).toMatch(/<div class="esqueleto-conversa" aria-hidden="true">(<i[^>]*><\/i>){3}<\/div>/);
   });
 
-  it("não enviada no celular: o balão a 60% e a linha em 13 px sem o vermelho", () => {
+  it("não enviada no celular: o balão claro sem opacidade (NOD-431) e a linha em 13 px sem o vermelho", () => {
     const m = css("mobile.css");
-    expect(m).toMatch(/\.fala-pendente\[data-envio="falhou"\] \.message\.you \.bubble \{ opacity: \.6;/);
+    expect(m).toMatch(/\.fala-pendente\[data-envio="falhou"\] \.message\.you \.bubble \{ --balao-fundo: var\(--surface\); --balao-tinta: var\(--ink\); --balao-codigo: var\(--surface-raised\); border: 1px dashed var\(--line-strong\); background: var\(--surface\); color: var\(--ink\); \}/);
     expect(m).toContain(".fala-pendente .envio-erro { font-size: 13px; color: var(--ink-2); }");
   });
 });

@@ -89,3 +89,29 @@ ocorrências também troca de cor, porque a bolha da própria pessoa tem texto b
 identidade, e o realce não se confunde com o bot âmbar. No modo de alto contraste do sistema, `Mark` e `Highlight`.
 
 Gatilho: o texto de um tema perder o contraste de 4,5:1 sobre o realce reverte para um novo par de valores.
+
+## Emenda (2026-10-30): o balão da pessoa na cor do bot
+
+NOD-431 (pedido do Marlon). O balão da fala da pessoa ganha a cor do bot dono da conversa como fundo sólido; o balão do
+bot não muda. Para o texto nunca perder legibilidade, a cor não entra crua: `src/domain/contraste-do-balao.ts` calcula,
+por skin e por tema, o fundo, a tinta (#18181b, branco ou, se só ele passa, preto puro) e o fundo do chip de comando, e os literais moram em
+web/tokens.css (`--balao-<skin>`, `-tinta`, `-codigo`). O balão precisa se separar da página e do balão do bot por
+1,2:1 (escurece o creme no claro e clareia o preto no escuro); depois o fundo só anda na luminosidade (o tom fica) se nem
+preto nem branco passarem de 4,5:1, ou se o chip de comando não chegar lá (nenhuma skin de hoje; o violeta passa com preto puro, 4,96:1, e por isso é a única
+com tinta #000). Nada de opacidade no balão: "enviando" ganha contorno tracejado na tinta pura (≥ 3:1, WCAG 1.4.11), e
+"falhou" fica claro com tracejado. As classes `balao-c-*` (web/estilos.css) mapeiam a cor do bot nesses tokens; sem bot dono (sala) o balão fica
+no grafite de antes (`--action`). Vale também no celular, desfazendo o balão cinza da NOD-380. Dentro do balão, o link e a
+seleção herdam a tinta; fora dele, botão, foco, aviso e a interface em volta seguem grafite. Isso abre duas exceções a
+regras de cima: a emenda de 26/10 tirava a seleção da cor do agente, e no balão da pessoa a seleção inverte tinta e fundo
+(o texto selecionado aparece na cor do bot); e a alternativa C rejeitou a interface na cor do agente porque "um bot
+vermelho deixa o enviar com cara de erro". Aqui o vermelho fica só no balão de uma fala já enviada, nunca no botão nem no
+estado: o erro de envio continua marcado pelo balão claro com tracejado e pelo aviso (vermelho no computador, cinza no celular), então as duas leituras
+não se misturam. Se o teste de uso mostrar que um balão vermelho lê como erro, o gatilho abaixo vale. O realce da busca
+(emenda de 28/10) escolheu um âmbar próprio para não se confundir com o bot âmbar; no balão da pessoa ele pode encostar
+no fundo (âmbar, creme, verde; laranja e cinza no escuro), então ali as ocorrências ganham sublinhado pontilhado e a
+atual inverte tinta e fundo do balão (o mesmo par da seleção, ≥ 4,5:1), com sublinhado cheio. Nos estados claros
+(falhou, fila) o balão redefine os tokens para surface/ink, e a seleção e o realce seguem o balão claro. O teste tests/unit/domain/contraste-do-balao.test.ts
+percorre as 12 skins nos dois temas e falha se o tokens.css divergir do cálculo.
+
+Gatilho: o Marlon ou o teste de uso dizer que as duas vozes voltaram a se confundir, ou que a conversa ficou colorida
+demais, reverte para o grafite único; uma skin nova entra só com os tokens que o cálculo der.
