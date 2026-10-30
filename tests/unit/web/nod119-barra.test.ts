@@ -148,7 +148,7 @@ describe("NOD-119: a borda da barra", () => {
 });
 
 describe("NOD-119: Configurações › Aparência", () => {
-  const d: DadosGeral = { tema: "claro", avisos: { onde: "mac", situacao: "ligados", som: true }, modoDev: false, experimentos: { calibracao: false, memoriaLonga: false, whatsapp: false } };
+  const d: DadosGeral = { tema: "claro", avisos: { onde: "mac", situacao: "ligados", som: true }, modoDev: false, experimentos: { calibracao: false, memoriaLonga: false, whatsapp: false, quadro: false } };
   it("o segmentado Confortável · Compacta, com a frase da borda, fora do celular", () => {
     const html = renderGeral({ ...d, densidade: "compacta" }, CONFIG_UI_INICIAL, false);
     expect(html).toContain('role="radiogroup" aria-label="Barra lateral"');

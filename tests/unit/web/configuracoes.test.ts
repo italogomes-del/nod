@@ -140,7 +140,7 @@ describe("Conta (critério 3)", () => {
 });
 
 describe("Geral (critérios 4 e 5)", () => {
-  const d: DadosGeral = { tema: "claro", avisos: { onde: "mac", situacao: "ligados", som: true }, modoDev: true, experimentos: { calibracao: true, memoriaLonga: false, whatsapp: false } };
+  const d: DadosGeral = { tema: "claro", avisos: { onde: "mac", situacao: "ligados", som: true }, modoDev: true, experimentos: { calibracao: true, memoriaLonga: false, whatsapp: false, quadro: false } };
 
   it("Aparência, Avisos, Ajuda e Avançado recolhido; os interruptores só aparecem com Avançado aberto e o banco não aparece (NOD-373)", () => {
     const fechado = renderGeral(d, CONFIG_UI_INICIAL);

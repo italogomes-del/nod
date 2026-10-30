@@ -1,11 +1,13 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import type { ConversaDto } from "../../../src/contracts/api.ts";
-import { estadoInicial, reduzir, type Estado } from "../../../web/estado/reducer.ts";
+import { EXPERIMENTOS_DESLIGADOS } from "../../../src/contracts/raio-x.ts";
+import { CONFIG_UI_INICIAL, estadoInicial, reduzir, type Estado } from "../../../web/estado/reducer.ts";
 import { CONSULTA_CELULAR } from "../../../web/lib/celular.ts";
 import {
-  colunasPadrao, conversaAVista, DESLIZE_PX, direcaoDaTroca, ehModo, FADE_MS, modoPelaTecla, movimentoDaTroca, quadroLigado, quadroNaConversa, STATUS, trilhaDaColuna, TROCA_MS,
+  colunasPadrao, conversaAVista, DESLIZE_PX, direcaoDaTroca, ehModo, FADE_MS, modoPelaTecla, movimentoDaTroca, ehChaveDeExperimento, quadroDoEstado, quadroNaConversa, STATUS, trilhaDaColuna, TROCA_MS,
 } from "../../../web/lib/quadro.ts";
+import { EXPERIMENTOS, renderGeral, type DadosGeral } from "../../../web/telas/config-geral.ts";
 import { renderCabecalhoConversa } from "../../../web/telas/conversa.ts";
 import { anel, aviso, avatar, barra, card, coluna, confiar, linha, meta as metaDoQuadro, quadro, quadroVazio, rotuloDoCard, segmento } from "../../../web/telas/quadro.ts";
 
@@ -84,14 +86,33 @@ describe("NOD-429 · vocabulário (web/lib/quadro.ts)", () => {
     expect(ehModo("lista")).toBe(false);
   });
 
-  it("a chave do teste nasce desligada; só '1' liga; armazém que explode conta como desligado", () => {
-    expect(quadroLigado(undefined)).toBe(false);
-    expect(quadroLigado({ getItem: () => null })).toBe(false);
-    expect(quadroLigado({ getItem: () => "true" })).toBe(false);
-    expect(quadroLigado({ getItem: () => "1" })).toBe(true);
-    expect(quadroLigado({ getItem: () => { throw new Error("SecurityError"); } })).toBe(false);
-    // No Node não há localStorage: o padrão também é desligado.
-    expect(quadroLigado()).toBe(false);
+  it("o main.ts liga o quadro pelo experimento da pessoa, só no bot dela; a ação aceita a chave quadro", () => {
+    const desligado = { experimentos: { quadro: false }, sessao: { pessoaId: "p1" } };
+    const ligado = { experimentos: { quadro: true }, sessao: { pessoaId: "p1" } };
+    expect(quadroDoEstado(desligado, "p1")).toBe(false);
+    expect(quadroDoEstado(ligado, "p1")).toBe(true);
+    expect(quadroDoEstado(ligado, "p2")).toBe(false);
+    expect(quadroDoEstado({ ...ligado, sessao: null }, undefined)).toBe(false);
+    for (const e of EXPERIMENTOS) expect(ehChaveDeExperimento(e.chave)).toBe(true);
+    expect(ehChaveDeExperimento("quadro")).toBe(true);
+    expect(ehChaveDeExperimento("outra")).toBe(false);
+    expect(ehChaveDeExperimento(undefined)).toBe(false);
+  });
+
+  it("o Quadro é um experimento das Configurações: nasce desligado e o switch só aparece com o Modo dev (decisão do Marlon, 30/10)", () => {
+    expect(EXPERIMENTOS_DESLIGADOS.quadro).toBe(false);
+    expect(EXPERIMENTOS.map((e) => e.chave)).toContain("quadro");
+    const ui = { ...CONFIG_UI_INICIAL, abertos: ["avancado"] };
+    const d: DadosGeral = { tema: "claro", avisos: { onde: "mac", situacao: "ligados", som: true }, modoDev: false, experimentos: { ...EXPERIMENTOS_DESLIGADOS } };
+    const botao = (html: string) => html.match(/<button[^>]*data-experimento="quadro"[^>]*>/)?.[0];
+    expect(botao(renderGeral(d, ui, false))).toBeUndefined();
+    expect(renderGeral(d, ui, false)).toContain('data-experimento="whatsapp"');
+    const dev = botao(renderGeral({ ...d, modoDev: true }, ui, false));
+    expect(dev).toContain('aria-checked="false"');
+    expect(dev).toContain('aria-label="Quadro"');
+    expect(estadoInicial.experimentos.quadro).toBe(false);
+    // Ligado e com o Modo dev desligado depois: a linha fica, para dar para desligar.
+    expect(botao(renderGeral({ ...d, experimentos: { ...EXPERIMENTOS_DESLIGADOS, quadro: true } }, ui, false))).toContain('aria-checked="true"');
   });
 });
 

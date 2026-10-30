@@ -265,7 +265,7 @@ export function criarApi(escopo: Escopo) {
     // Modo dev (0036): a preferência mora no servidor e o Raio-X é lido por conversa (a faixa) e por turno (a gaveta).
     preferencias: () => get<Preferencias>("preferencias"),
     // ADR-083: a faixa de Trabalhos recolhida também é preferência (só o campo que mudou vai no corpo).
-    // ADR-111: `experimentos` leva só a chave que mudou ({ calibracao }, { memoriaLonga } ou, ADR-112, { whatsapp }).
+    // ADR-111: `experimentos` leva só a chave que mudou ({ calibracao }, { memoriaLonga } ou, ADR-112, { whatsapp }; NOD-429, { quadro }).
     gravarPreferencias: (p: Partial<Pick<Preferencias, "modoDev" | "usoDoMac">> & { experimentos?: Partial<Experimentos> }) => pedir<Preferencias>("PUT", `${base}/preferencias`, p),
     raioXDaConversa: (id: string, desde: number) => get<RaioXConversa>(`conversas/${encodeURIComponent(id)}/raio-x?desde=${desde}`),
     raioXDoTurno: (id: string) => get<RaioXTurno>(`turnos/${encodeURIComponent(id)}/raio-x`),

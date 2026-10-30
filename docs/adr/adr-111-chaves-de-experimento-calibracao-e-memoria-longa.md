@@ -56,3 +56,11 @@ padrão — como faz com o modo dev.
   longas ou cheias de ressalva; a Memória longa estoura a janela ou dispara compactação ("Autocompact") nos turnos sem
   sessão, o que aparece no Raio-X como compactações.
 - Retirar = desligar a chave e, no PR seguinte, tirar o código. As colunas ficam no banco (migração só adiciona).
+
+## Emenda (2026-10-30, NOD-429): chave só da tela
+
+`quadro` (0130, `exp_quadro`) é a primeira chave que **não** vale no turno: liga o par Conversa | Quadro na pílula
+das conversas com os bots da pessoa. Não entra no prompt nem em `composicao.experimentos` (os itens 1 e 4 não se
+aplicam a ela), e a linha só aparece em Avançado com o Modo dev ligado (ou com ela já ligada, para desligar). Decisão
+do Marlon: ligar o quadro antes da NOD-415 sem devtools no app do Mac, desligado para os outros. A flag do servidor da
+NOD-415 a substitui.

@@ -23,7 +23,7 @@ const conta: DadosConta = { contas: true, minhaConta: false, nome: "Ana Lima", e
 const extras = { conta, contaPagina: null, tema: "sistema" as const, conexao: "Simulação" };
 const avisos = { onde: "navegador" as const, situacao: "ligados" as const };
 const volta = { rotulo: "Téo", icone: "" };
-const geral: DadosGeral = { tema: "sistema", avisos: { onde: "mac", situacao: "ligados" }, modoDev: false, experimentos: { calibracao: false, memoriaLonga: false, whatsapp: false } };
+const geral: DadosGeral = { tema: "sistema", avisos: { onde: "mac", situacao: "ligados" }, modoDev: false, experimentos: { calibracao: false, memoriaLonga: false, whatsapp: false, quadro: false } };
 /** O que o critério 1 e o 2 proíbem no celular, em qualquer texto. */
 const PROIBIDO_CELULAR = /<kbd|⌘|⇧|>esc<|macOS|este computador|neste computador|Este Mac/i;
 

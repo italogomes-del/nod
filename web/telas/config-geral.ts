@@ -16,11 +16,12 @@ import { ESCOLHAS_TEMA, type EscolhaTema } from "../lib/tema.ts";
  * e, na NOD-373, também do Avançado: o banco é do nod e serve a todos, não é um ajuste da pessoa.
  */
 
-/** As chaves de experimento (ADR-111; ADR-112 soma o Modo WhatsApp), com a dica que antes ficava no title do menu. */
+/** As chaves de experimento (ADR-111; ADR-112 soma o Modo WhatsApp; a NOD-429, o Quadro), com a dica que antes ficava no title do menu. */
 export const EXPERIMENTOS: readonly { chave: keyof Experimentos; nome: string; dica: string }[] = [
   { chave: "calibracao", nome: "Calibração", dica: "O bot diz que não achou em vez de afirmar que algo não existe." },
   { chave: "memoriaLonga", nome: "Memória longa", dica: "Sem sessão retomada, o bot recebe as falas recentes inteiras (até 8 mil caracteres) e os anexos de antes." },
   { chave: "whatsapp", nome: "Modo WhatsApp", dica: "Respostas curtas, como no WhatsApp: uma a três frases, sem títulos nem listas." },
+  { chave: "quadro", nome: "Quadro", dica: "Nas conversas com os seus bots, a pílula ganha Conversa | Quadro: o trabalho do bot em colunas." },
 ];
 
 const SITUACAO: Record<EstadoAvisos["onde"], Record<EstadoAvisos["situacao"], string>> = {
@@ -124,7 +125,8 @@ export function renderGeral(d: DadosGeral, ui: ConfigUi, celular = ehCelular(), 
       detalhe: "Mostra, em cada resposta, o custo, os tokens e o que foi enviado ao modelo. Só você vê. O texto enviado fica guardado a partir dos turnos que rodarem com ele ligado.",
       controle: { tipo: "switch", ligado: d.modoDev, acao: "alternar-modo-dev" },
     }),
-    ...EXPERIMENTOS.map((e) => linhaConfig({
+    // NOD-429: o Quadro é tela em teste: a linha só aparece com o Modo dev ligado (ou com o Quadro já ligado, para desligar).
+    ...EXPERIMENTOS.filter((e) => e.chave !== "quadro" || d.modoDev || d.experimentos.quadro).map((e) => linhaConfig({
       titulo: e.nome,
       detalhe: e.dica,
       controle: { tipo: "switch", ligado: d.experimentos[e.chave] ?? false, acao: "alternar-experimento", dados: { experimento: e.chave } },

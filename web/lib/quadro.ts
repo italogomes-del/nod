@@ -1,3 +1,4 @@
+import type { Experimentos } from "../../src/contracts/raio-x.ts";
 /**
  * NOD-429 (definido em 2026-10-30, protótipo base v3 aprovado pelo Marlon): o vocabulário do quadro-agente, sem DOM.
  * Os componentes (web/telas/quadro.ts) e a troca Conversa ↔ Quadro na pílula (web/lib/quadro-na-tela.ts) leem daqui;
@@ -92,7 +93,17 @@ export function modoPelaTecla(atual: ModoDaConversa, tecla: string): ModoDaConve
   return null;
 }
 
-/** O par Conversa | Quadro só aparece com a chave do teste ligada e num bot da própria pessoa (nunca no de outra). */
+/** O par Conversa | Quadro só aparece com o experimento Quadro ligado (Configurações › Avançado) e num bot da própria pessoa (nunca no de outra). */
+/** NOD-429: as chaves que a ação `alternar-experimento` aceita (o `data-experimento` do switch). */
+export function ehChaveDeExperimento(v: unknown): v is keyof Experimentos {
+  return v === "calibracao" || v === "memoriaLonga" || v === "whatsapp" || v === "quadro";
+}
+
+/** NOD-429: o que o main.ts pergunta para a conversa aberta: o experimento Quadro da pessoa e o dono do bot. */
+export function quadroDoEstado(e: { experimentos: Pick<Experimentos, "quadro">; sessao?: { pessoaId?: string | null } | null }, donoDoBot: string | null | undefined): boolean {
+  return quadroNaConversa({ ligado: e.experimentos.quadro, pessoaId: e.sessao?.pessoaId, donoDoBot });
+}
+
 export function quadroNaConversa(o: { ligado: boolean; pessoaId: string | null | undefined; donoDoBot: string | null | undefined }): boolean {
   return o.ligado && !!o.pessoaId && o.donoDoBot === o.pessoaId;
 }
@@ -107,17 +118,4 @@ export function conversaAVista(o: { naFrente: boolean; botsAbertos: boolean; mod
 
 export function ehModo(v: unknown): v is ModoDaConversa {
   return v === "conversa" || v === "quadro";
-}
-
-/**
- * A chave local do teste (definido em 2026-10-30): a flag do servidor "só para o Marlon" nasce na NOD-415 (NOD-343). Até
- * lá o quadro só aparece com `localStorage nod.quadro = 1`, desligado para todos. A NOD-415 troca esta função pela flag.
- */
-export const CHAVE_DO_TESTE = "nod.quadro";
-export function quadroLigado(armazem: Pick<Storage, "getItem"> | undefined = armazemDaJanela()): boolean {
-  try { return armazem?.getItem(CHAVE_DO_TESTE) === "1"; } catch { return false; }
-}
-
-function armazemDaJanela(): Pick<Storage, "getItem"> | undefined {
-  try { return (globalThis as { localStorage?: Storage }).localStorage; } catch { return undefined; }
 }

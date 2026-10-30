@@ -33,12 +33,12 @@ describeIntegracao("Modo WhatsApp (ADR-112)", () => {
   it("a preferência: nasce desligada, muda sozinha sem mexer nas outras chaves e recusa o que não é booleano", async () => {
     await withRollback(escopo, async (trx) => {
       const m = await montar(trx);
-      expect((await m.repos.preferencias.buscar()).experimentos).toEqual({ calibracao: false, memoriaLonga: false, whatsapp: false });
+      expect((await m.repos.preferencias.buscar()).experimentos).toEqual({ calibracao: false, memoriaLonga: false, whatsapp: false, quadro: false });
       await gravarPreferencias(m.deps, { experimentos: { calibracao: true } });
       const ligada = (await gravarPreferencias(m.deps, { experimentos: { whatsapp: true } })).data;
-      expect(ligada.experimentos).toEqual({ calibracao: true, memoriaLonga: false, whatsapp: true });
+      expect(ligada.experimentos).toEqual({ calibracao: true, memoriaLonga: false, whatsapp: true, quadro: false });
       expect(ligada.modoDev).toBe(false);
-      expect((await gravarPreferencias(m.deps, { experimentos: { calibracao: false } })).data.experimentos).toEqual({ calibracao: false, memoriaLonga: false, whatsapp: true });
+      expect((await gravarPreferencias(m.deps, { experimentos: { calibracao: false } })).data.experimentos).toEqual({ calibracao: false, memoriaLonga: false, whatsapp: true, quadro: false });
       for (const ruim of [{ whatsapp: "sim" }, { whatsapp: 1 }, { whatsApp: true }]) {
         await expect(gravarPreferencias(m.deps, { experimentos: ruim })).rejects.toMatchObject({ codigo: "entrada_invalida" });
       }

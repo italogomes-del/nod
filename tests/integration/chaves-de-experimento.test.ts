@@ -21,8 +21,8 @@ const pronto: Inventario = { estado: "pronto", versao: "teste", em: Date.now() }
 const LONGA = `${"a".repeat(4000)} FIM-DA-TABELA`;
 
 describeIntegracao("chaves de experimento (ADR-111)", () => {
-  async function montar(trx: Parameters<Parameters<typeof withRollback>[1]>[0]) {
-    const base = await agenteComConversa(trx, escopo);
+  async function montar(trx: Parameters<Parameters<typeof withRollback>[1]>[0], nome?: string) {
+    const base = await agenteComConversa(trx, escopo, nome ? { nome } : {});
     const agora = () => Date.now();
     const deps = depsSobre(base.repos, escopo, { services: servicosDeTeste({ agora }), agora, trx });
     const fala = (await base.repos.mensagens.criar({ conversaId: base.conversaId, autoria: autoriaPessoa(escopo), kind: "texto", texto: "segue o playbook", confianca: "confiavel" }))!;
@@ -37,12 +37,17 @@ describeIntegracao("chaves de experimento (ADR-111)", () => {
   it("a preferência: cada chave muda sozinha, nasce desligada e recusa o que não é booleano", async () => {
     await withRollback(escopo, async (trx) => {
       const m = await montar(trx);
-      expect((await m.repos.preferencias.buscar()).experimentos).toEqual({ calibracao: false, memoriaLonga: false, whatsapp: false });
-      expect((await gravarPreferencias(m.deps, { experimentos: { calibracao: true } })).data.experimentos).toEqual({ calibracao: true, memoriaLonga: false, whatsapp: false });
+      expect((await m.repos.preferencias.buscar()).experimentos).toEqual({ calibracao: false, memoriaLonga: false, whatsapp: false, quadro: false });
+      expect((await gravarPreferencias(m.deps, { experimentos: { calibracao: true } })).data.experimentos).toEqual({ calibracao: true, memoriaLonga: false, whatsapp: false, quadro: false });
       const ambas = (await gravarPreferencias(m.deps, { experimentos: { memoriaLonga: true } })).data;
-      expect(ambas.experimentos).toEqual({ calibracao: true, memoriaLonga: true, whatsapp: false });
+      expect(ambas.experimentos).toEqual({ calibracao: true, memoriaLonga: true, whatsapp: false, quadro: false });
       expect(ambas.modoDev).toBe(false);
-      for (const ruim of [{}, [], { calibracao: "sim" }, { outra: true }, null]) {
+      // NOD-429 (0130): o Quadro liga e desliga sozinho, sem mexer nas outras chaves.
+      expect((await gravarPreferencias(m.deps, { experimentos: { quadro: true } })).data.experimentos).toEqual({ calibracao: true, memoriaLonga: true, whatsapp: false, quadro: true });
+      expect((await m.repos.preferencias.buscar()).experimentos?.quadro).toBe(true);
+      expect((await gravarPreferencias(m.deps, { experimentos: { calibracao: false } })).data.experimentos?.quadro).toBe(true);
+      expect((await gravarPreferencias(m.deps, { experimentos: { quadro: false } })).data.experimentos).toEqual({ calibracao: false, memoriaLonga: true, whatsapp: false, quadro: false });
+      for (const ruim of [{}, [], { calibracao: "sim" }, { quadro: 1 }, { outra: true }, null]) {
         await expect(gravarPreferencias(m.deps, { experimentos: ruim })).rejects.toMatchObject({ codigo: "entrada_invalida" });
       }
     });
@@ -59,6 +64,20 @@ describeIntegracao("chaves de experimento (ADR-111)", () => {
       expect(p.entrada.anexos).toBeUndefined();
       expect((await m.repos.raioX.doTurno(m.turno.id))?.composicao?.experimentos).toEqual({ calibracao: false, memoriaLonga: false, whatsapp: false, anexosAnteriores: 0 });
     });
+  });
+
+  it("NOD-429: o Quadro é só da tela — ligado, o prompt sai igual ao desligado e o Raio-X não o grava", async () => {
+    const prompt = async (quadro: boolean) => withRollback(escopo, async (trx) => {
+      // Nome fixo: o padrão da fábrica leva 8 caracteres do id, e o prompt começa com o nome do bot.
+      const m = await montar(trx, "Bot do quadro");
+      if (quadro) await m.repos.preferencias.gravar({ experimentos: { quadro: true } });
+      const p = await m.plano();
+      const composicao = (await m.repos.raioX.doTurno(m.turno.id))?.composicao?.experimentos;
+      return { texto: p.promptSistema.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g, "<id>"), composicao };
+    });
+    const [desligado, ligado] = [await prompt(false), await prompt(true)];
+    expect(ligado.texto).toBe(desligado.texto);
+    expect(ligado.composicao).toEqual({ calibracao: false, memoriaLonga: false, whatsapp: false, anexosAnteriores: 0 });
   });
 
   it("ligadas: a linha da Calibração entra, a fala vai inteira e o anexo anterior volta marcado; o Raio-X grava", async () => {

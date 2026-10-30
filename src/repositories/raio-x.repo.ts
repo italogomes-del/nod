@@ -99,12 +99,12 @@ export function raioXRepo(conn: Conn, escopo: Escopo) {
 }
 
 /** Preferências da pessoa (0036). Sem linha = tudo desligado. */
-/** ADR-111 (0088): `exp_calibracao` e `exp_memoria_longa`, as chaves de experimento. ADR-112 (0089): `exp_whatsapp`. */
-const COLUNAS_PREFERENCIAS = "modo_dev, avisos_fechados, uso_do_mac, maquina_padrao_id, ordem_ias, ias_no_limite, exp_calibracao, exp_memoria_longa, exp_whatsapp";
+/** ADR-111 (0088): `exp_calibracao` e `exp_memoria_longa`, as chaves de experimento. ADR-112 (0089): `exp_whatsapp`. NOD-429 (0130): `exp_quadro`. */
+const COLUNAS_PREFERENCIAS = "modo_dev, avisos_fechados, uso_do_mac, maquina_padrao_id, ordem_ias, ias_no_limite, exp_calibracao, exp_memoria_longa, exp_whatsapp, exp_quadro";
 
 export function preferenciasRepo(conn: Conn, escopo: Escopo) {
-  type Linha = { modo_dev: boolean; avisos_fechados: string[]; uso_do_mac: UsoDoMac; maquina_padrao_id: string | null; ordem_ias: IdHarness[] | null; ias_no_limite: LimitesIa | null; exp_calibracao: boolean; exp_memoria_longa: boolean; exp_whatsapp: boolean };
-  const paraPreferencias = (l: Linha | undefined): Preferencias => ({ modoDev: l?.modo_dev ?? false, avisosFechados: l?.avisos_fechados ?? [], usoDoMac: l?.uso_do_mac ?? USO_DO_MAC_PADRAO, maquinaPadraoId: l?.maquina_padrao_id ?? null, ordemIas: l?.ordem_ias ?? null, iasNoLimite: l?.ias_no_limite ?? {}, experimentos: { calibracao: l?.exp_calibracao ?? false, memoriaLonga: l?.exp_memoria_longa ?? false, whatsapp: l?.exp_whatsapp ?? false } });
+  type Linha = { modo_dev: boolean; avisos_fechados: string[]; uso_do_mac: UsoDoMac; maquina_padrao_id: string | null; ordem_ias: IdHarness[] | null; ias_no_limite: LimitesIa | null; exp_calibracao: boolean; exp_memoria_longa: boolean; exp_whatsapp: boolean; exp_quadro: boolean };
+  const paraPreferencias = (l: Linha | undefined): Preferencias => ({ modoDev: l?.modo_dev ?? false, avisosFechados: l?.avisos_fechados ?? [], usoDoMac: l?.uso_do_mac ?? USO_DO_MAC_PADRAO, maquinaPadraoId: l?.maquina_padrao_id ?? null, ordemIas: l?.ordem_ias ?? null, iasNoLimite: l?.ias_no_limite ?? {}, experimentos: { calibracao: l?.exp_calibracao ?? false, memoriaLonga: l?.exp_memoria_longa ?? false, whatsapp: l?.exp_whatsapp ?? false, quadro: l?.exp_quadro ?? false } });
   return {
     async buscar(): Promise<Preferencias> {
       const [l] = await conn<Linha[]>`
@@ -120,14 +120,16 @@ export function preferenciasRepo(conn: Conn, escopo: Escopo) {
       const calibracao = p.experimentos?.calibracao ?? null;
       const memoriaLonga = p.experimentos?.memoriaLonga ?? null;
       const whatsapp = p.experimentos?.whatsapp ?? null;
+      const quadro = p.experimentos?.quadro ?? null;
       const [l] = await conn<Linha[]>`
-        insert into preferencias (tenant_id, owner_id, modo_dev, uso_do_mac, ordem_ias, exp_calibracao, exp_memoria_longa, exp_whatsapp)
-        values (${escopo.tenantId}, ${escopo.pessoaId}, ${p.modoDev ?? false}, ${p.usoDoMac ?? USO_DO_MAC_PADRAO}, ${ordem}::jsonb, ${calibracao ?? false}, ${memoriaLonga ?? false}, ${whatsapp ?? false})
+        insert into preferencias (tenant_id, owner_id, modo_dev, uso_do_mac, ordem_ias, exp_calibracao, exp_memoria_longa, exp_whatsapp, exp_quadro)
+        values (${escopo.tenantId}, ${escopo.pessoaId}, ${p.modoDev ?? false}, ${p.usoDoMac ?? USO_DO_MAC_PADRAO}, ${ordem}::jsonb, ${calibracao ?? false}, ${memoriaLonga ?? false}, ${whatsapp ?? false}, ${quadro ?? false})
         on conflict (tenant_id, owner_id) do update set
           modo_dev = coalesce(${p.modoDev ?? null}::boolean, preferencias.modo_dev),
           exp_calibracao = coalesce(${calibracao}::boolean, preferencias.exp_calibracao),
           exp_memoria_longa = coalesce(${memoriaLonga}::boolean, preferencias.exp_memoria_longa),
           exp_whatsapp = coalesce(${whatsapp}::boolean, preferencias.exp_whatsapp),
+          exp_quadro = coalesce(${quadro}::boolean, preferencias.exp_quadro),
           uso_do_mac = coalesce(${p.usoDoMac ?? null}::text, preferencias.uso_do_mac),
           ordem_ias = case when ${p.ordemIas !== undefined} then ${ordem}::jsonb else preferencias.ordem_ias end,
           atualizado_em = clock_timestamp()

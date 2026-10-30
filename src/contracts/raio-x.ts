@@ -93,7 +93,7 @@ export type ComposicaoRaioX = {
    * ADR-111: as chaves de experimento que valeram neste turno e o que a memória longa trouxe a mais (anexos de falas
    * anteriores). Ausente = turno de antes da 0088. ADR-112: `whatsapp` ausente = turno de antes da 0089 (desligada).
    */
-  experimentos?: Omit<Experimentos, "whatsapp"> & { whatsapp?: boolean; anexosAnteriores: number };
+  experimentos?: Omit<Experimentos, "whatsapp" | "quadro"> & { whatsapp?: boolean; anexosAnteriores: number };
   /**
    * NOD-312: o turno recomeçou sem a sessão (o motivo) e o tamanho do que foi no lugar dela: o aviso e o resumo do
    * trabalho (na entrada) e as últimas falas (no contexto). Ausente = turno normal ou de antes da NOD-312.
@@ -171,7 +171,9 @@ export const USO_DO_MAC_PADRAO: UsoDoMac = "equilibrado";
  * até 8 mil caracteres e os anexos anteriores da conversa. Ausente = as duas desligadas.
  * `whatsapp` (definido em 2026-10-17, ADR-112, 0089): o prompt de texto troca a "Formatação:" pela linha "Tom:" de
  * respostas curtas, como no WhatsApp.
+ * `quadro` (definido em 2026-10-30, NOD-429, 0130): o par Conversa | Quadro na pílula das conversas com os bots da pessoa.
+ * Só a web lê; não muda o turno nem entra no Raio-X.
  */
-export type Experimentos = { calibracao: boolean; memoriaLonga: boolean; whatsapp: boolean };
-export const EXPERIMENTOS_DESLIGADOS: Experimentos = { calibracao: false, memoriaLonga: false, whatsapp: false };
+export type Experimentos = { calibracao: boolean; memoriaLonga: boolean; whatsapp: boolean; quadro: boolean };
+export const EXPERIMENTOS_DESLIGADOS: Experimentos = { calibracao: false, memoriaLonga: false, whatsapp: false, quadro: false };
 export type Preferencias = { modoDev: boolean; avisosFechados: string[]; usoDoMac?: UsoDoMac; maquinaPadraoId?: string | null; ordemIas?: IdHarness[] | null; iasNoLimite?: LimitesIa; experimentos?: Experimentos };

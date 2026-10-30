@@ -105,7 +105,7 @@ import type { BarraDesktop } from "../src/contracts/desktop-barra.ts";
 import { gravarDecisao, versaoDasDecisoesDaBarra } from "./telas/card-barra.ts";
 import { atualizarBorda, ligarBorda, ligarEtiqueta } from "./lib/borda-barra.ts";
 import { proximoDoSegmentado } from "./lib/linha-config.ts";
-import { conversaAVista, quadroLigado, quadroNaConversa } from "./lib/quadro.ts";
+import { conversaAVista, ehChaveDeExperimento, quadroDoEstado } from "./lib/quadro.ts";
 import { criarQuadroNaTela } from "./lib/quadro-na-tela.ts";
 import type { DadosConta } from "./telas/config-conta.ts";
 import { estadoMascoteNaConversa, mascoteComAviso, proximaViradaDoMascote } from "./lib/mascote.ts";
@@ -413,9 +413,9 @@ function painelVisivel(): boolean {
   return !painelOculto();
 }
 
-/** NOD-429: o par Conversa | Quadro aparece na conversa com um bot da pessoa, com a chave local do teste ligada. */
+/** NOD-429: o par Conversa | Quadro aparece na conversa com um bot da pessoa, com o experimento Quadro ligado. */
 function comQuadro(agenteId: string): boolean {
-  return quadroNaConversa({ ligado: quadroLigado(), pessoaId: estado.sessao?.pessoaId, donoDoBot: botGerido(agenteId)?.ownerId });
+  return quadroDoEstado(estado, botGerido(agenteId)?.ownerId);
 }
 
 /**
@@ -429,7 +429,7 @@ function marcarPainelNaPilula(): void {
 }
 window.matchMedia("(max-width: 1099px)").addEventListener("change", marcarPainelNaPilula);
 
-// NOD-429: Conversa | Quadro na pílula, só com a chave do teste ligada e no bot da própria pessoa (web/lib/quadro.ts).
+// NOD-429: Conversa | Quadro na pílula, só com o experimento Quadro ligado (Configurações › Geral › Avançado) e no bot da própria pessoa (web/lib/quadro.ts).
 // NOD-429: de volta à Conversa, a conversa passa a estar "na tela" de novo e é lida.
 const quadroNaTela = criarQuadroNaTela(document, { aoTrocar: (m) => { if (m === "conversa") { lerConversaDaTela(); render(); } } });
 
@@ -4917,7 +4917,7 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   "lote-tentar": (el) => (el.dataset.id ? tentarDeNovoNoLote(el.dataset.id) : undefined),
   "alternar-experimento": (el) => {
     const chave = el.dataset.experimento;
-    if (chave === "calibracao" || chave === "memoriaLonga" || chave === "whatsapp") return agir(() => alternarExperimento(chave));
+    if (ehChaveDeExperimento(chave)) return agir(() => alternarExperimento(chave));
   },
   "ver-onboarding": () => { fecharEspaco(); void telaOnboarding.deNovo(); },
   "cfg-conta": (el) => {
