@@ -96,13 +96,19 @@ descrever("NOD-429 no Chrome real", () => {
     await avaliar(cdp, `window.__montar(${comQuadro})`);
   }
 
-  /** Clica numa aba e devolve os quadros-chave das animações de quem entra e de quem sai. */
-  const trocar = (modo: string) => avaliar<{ quadro: string[]; timeline: string[]; ms: number; easing: string }>(cdp, `(() => {
+  /**
+   * Clica numa aba e devolve os quadros-chave das animações de quem entra e de quem sai. Com `pausarEm`, para tudo (o
+   * deslize e a transição do indicador) nesse ponto, no mesmo passo do clique: a máquina carregada não chega ao fim antes.
+   */
+  const trocar = (modo: string, pausarEm?: number) => avaliar<{ quadro: string[]; timeline: string[]; ms: number; easing: string }>(cdp, `(() => {
     document.querySelector('#cabecalho [data-modo="${modo}"]').click();
+    ${pausarEm === undefined ? "" : `for (const a of document.getAnimations()) { a.pause(); a.currentTime = ${pausarEm}; }`}
     const kf = (id) => (document.getElementById(id).getAnimations()[0]?.effect.getKeyframes() ?? []).map((k) => (k.transform ?? "-").replace("(0px)", "(0)"));
     const t = document.getElementById("quadro").getAnimations()[0]?.effect.getTiming();
     return { quadro: kf("quadro"), timeline: kf("timeline"), ms: t?.duration ?? 0, easing: t?.easing ?? "" };
   })()`);
+  /** Espera as animações e transições em curso acabarem de fato (prazo fixo estoura na máquina carregada) e mais um respiro. */
+  const acabar = () => avaliar(cdp, `Promise.all(document.getAnimations().map((a) => a.finished.catch(() => null))).then(() => new Promise((r) => setTimeout(r, 50)))`);
   const xDoIndicador = () => avaliar<number>(cdp, `new DOMMatrix(getComputedStyle(document.querySelector(".qd-seg-ind")).transform).m41`);
   const xDaVista = () => avaliar<number>(cdp, `new DOMMatrix(getComputedStyle(document.getElementById("quadro")).transform).m41`);
   const estadoFinal = () => avaliar<{ atual: string; quadroOculto: boolean; timelineVis: string; timelineInert: boolean; selecionada: string | null }>(cdp, `({
@@ -122,7 +128,7 @@ descrever("NOD-429 no Chrome real", () => {
   it("j4-5 · 1440px: na coluna real do quadro (a mais estreita), a recusa da trava fica dentro do card, quebrando linha, com o texto inteiro no title", async () => {
     await abrir(1440, true);
     await trocar("quadro");
-    await esperar(250);
+    await acabar();
     // A coluna mais estreita da grade: o card entra nela, como a NOD-415 vai pôr.
     await avaliar(cdp, `(() => {
       const cols = [...document.querySelectorAll("#quadro .qd-so-largo .qd-col:not(.qd-col-recolhida)")];
@@ -140,7 +146,7 @@ descrever("NOD-429 no Chrome real", () => {
   it("j4-5 · 390px (celular, toque): o quadro vira lista, e a recusa na linha fica dentro dela; a cápsula da pílula cabe na tela", async () => {
     await abrir(390, true);
     await trocar("quadro");
-    await esperar(250);
+    await acabar();
     expect(await avaliar<string>(cdp, `getComputedStyle(document.querySelector("#quadro .qd-so-largo")).display`)).toBe("none");
     await avaliar(cdp, `document.querySelector("#quadro .qd-so-estreito .qd-lg-lista").innerHTML = window.__linha`);
     const l = await medirRecusa("#quadro .qd-so-estreito");
@@ -163,7 +169,7 @@ descrever("NOD-429 no Chrome real", () => {
     it(`revisão 4 do PR 606: celular ${deitado ? "deitado (844×390, a grade)" : "em pé (390, a lista)"}: todo alvo do quadro e da cápsula tem 44 px e nada rola de lado`, async () => {
       await abrir(largura, false, true, deitado);
       await trocar("quadro");
-      await esperar(300);
+      await acabar();
       const r = await avaliar<{ pequenos: string[]; rolagem: number; botoes: number }>(cdp, `(() => {
         const bts = [...document.querySelectorAll("#quadro button, #cabecalho .qd-pil button")].filter((b) => b.getClientRects().length);
         const pequenos = bts.filter((b) => b.getBoundingClientRect().height < 44).map((b) => b.className + ":" + Math.round(b.getBoundingClientRect().height));
@@ -178,16 +184,18 @@ descrever("NOD-429 no Chrome real", () => {
   it("j7-1 · 1440px: ida e volta deslizam de lado (220 ms) e o indicador anda na pílula", async () => {
     await abrir(1440, false);
     const largura = await avaliar<number>(cdp, `document.querySelector(".qd-seg-ind").getBoundingClientRect().width`);
-    const ida = await trocar("quadro");
+    const ida = await trocar("quadro", 110);
     expect(ida.ms).toBe(220);
     expect(ida.easing).toMatch(/cubic-bezier\(0\.2, 0\.8, 0\.2, 1\)/);
     expect(ida.quadro).toEqual(["translateX(48px)", "translateX(0)"]);
     expect(ida.timeline).toEqual(["translateX(0)", "translateX(-48px)"]);
-    await esperar(90);
+    // Parado no meio (110 de 220 ms): o indicador está a caminho, e a transição dele existe (sem ela, já estaria no fim).
+    expect(await avaliar<number>(cdp, `document.querySelector(".qd-seg-ind").getAnimations().length`)).toBeGreaterThan(0);
     const meio = await xDoIndicador();
     expect(meio).toBeGreaterThan(1);
     expect(meio).toBeLessThan(largura - 1);
-    await esperar(300);
+    await avaliar(cdp, `for (const a of document.getAnimations()) a.play()`);
+    await acabar();
     // Pousa exatamente na aba Quadro, e a cápsula não mudou de largura com a troca.
     expect(await xDoIndicador()).toBeCloseTo(largura, 0);
     expect(await avaliar<number>(cdp, `document.querySelector(".qd-seg-ind").getBoundingClientRect().left - document.querySelector('.qd-seg [data-modo="quadro"]').getBoundingClientRect().left`)).toBeCloseTo(0, 0);
@@ -197,7 +205,7 @@ descrever("NOD-429 no Chrome real", () => {
     const volta = await trocar("conversa");
     expect(volta.quadro).toEqual(["translateX(0)", "translateX(48px)"]);
     expect(volta.timeline).toEqual(["translateX(-48px)", "translateX(0)"]);
-    await esperar(400);
+    await acabar();
     expect(await xDoIndicador()).toBeCloseTo(0, 0);
     expect(await estadoFinal()).toEqual({ atual: "conversa", quadroOculto: true, timelineVis: "visible", timelineInert: false, selecionada: "conversa" });
   }, 30_000);
@@ -211,12 +219,21 @@ descrever("NOD-429 no Chrome real", () => {
     expect(antes).toBeLessThan(46);
     await avaliar(cdp, `document.querySelector('#cabecalho [data-modo="conversa"]').click()`);
     const depois = await xDaVista();
-    await avaliar(cdp, `for (const a of document.getAnimations()) a.play()`);
-    // A mesma animação anda para trás a partir dos 80 ms (não recomeça nem segue para a frente).
-    await esperar(40);
-    expect(await avaliar<number>(cdp, `Number(document.getElementById("quadro").getAnimations()[0]?.currentTime ?? 0)`)).toBeLessThan(80);
+    // A mesma animação anda para trás a partir dos 80 ms (não recomeça nem segue para a frente). Sem medir o relógio: depois do
+    // `ready` a taxa pendente do reverse() já vale, então ela é negativa e o tempo não passou de 80 (a CI da main pegou o
+    // "currentTime < 80" com a máquina carregada, sem nenhum quadro entre o play e a leitura).
+    const inv = await avaliar<{ taxa: number; t: number }>(cdp, `(async () => {
+      for (const a of document.getAnimations()) a.play();
+      const a = document.getElementById("quadro").getAnimations()[0];
+      await a.ready;
+      return { taxa: a.playbackRate, t: Number(a.currentTime) };
+    })()`);
+    expect(inv.taxa).toBeLessThan(0);
+    expect(inv.t).toBeLessThanOrEqual(80);
+    expect(inv.t).toBeGreaterThan(0);
     expect(Math.abs(depois - antes)).toBeLessThan(6);
-    await esperar(400);
+    // Espera a volta acabar de fato (não um prazo fixo, que a máquina carregada estoura) e mais um quadro para o assentar.
+    await acabar();
     expect(await estadoFinal()).toEqual({ atual: "conversa", quadroOculto: true, timelineVis: "visible", timelineInert: false, selecionada: "conversa" });
     // A inversão também avisa quem ouve, já com o modo novo.
     expect(await avaliar<string[]>(cdp, `window.__trocas`)).toEqual(["quadro:quadro", "conversa:conversa"]);
@@ -225,9 +242,9 @@ descrever("NOD-429 no Chrome real", () => {
   it("revisão 2 do PR 606: quem ouve a troca (a leitura da conversa na volta) já vê o modo novo", async () => {
     await abrir(1440, false);
     await trocar("quadro");
-    await esperar(300);
+    await acabar();
     await trocar("conversa");
-    await esperar(300);
+    await acabar();
     expect(await avaliar<string[]>(cdp, `window.__trocas`)).toEqual(["quadro:quadro", "conversa:conversa"]);
   }, 30_000);
 
@@ -261,7 +278,7 @@ descrever("NOD-429 no Chrome real", () => {
     expect(await avaliar<string>(cdp, `document.querySelector(".qd-seg").dataset.atual`)).toBe("conversa");
     await tecla();
     expect(await avaliar<string>(cdp, `document.activeElement.dataset.modo`)).toBe("quadro");
-    await esperar(400);
+    await acabar();
     await avaliar(cdp, `window.__regravar()`);
     expect(await avaliar<string>(cdp, `document.activeElement.dataset.modo`)).toBe("quadro");
     // O segmento novo nasce no lugar: sem transição do indicador desde a Conversa.
@@ -286,7 +303,7 @@ descrever("NOD-429 no Chrome real", () => {
       expect(ida.timeline).toEqual(["-", "-"]);
       await esperar(40);
       expect(await avaliar<string>(cdp, `getComputedStyle(document.querySelector(".qd-seg-ind")).transform`)).toBe("none");
-      await esperar(250);
+      await acabar();
       // Sem o indicador andando, a aba escolhida precisa de marca própria (fundo).
       expect(await avaliar<string>(cdp, `getComputedStyle(document.querySelector('.qd-seg [aria-selected="true"]')).backgroundColor`)).not.toBe("rgba(0, 0, 0, 0)");
       expect(await estadoFinal()).toMatchObject({ atual: "quadro", quadroOculto: false, timelineVis: "hidden" });
