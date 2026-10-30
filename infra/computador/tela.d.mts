@@ -102,3 +102,6 @@ export function caminhoDaCaptura(tmp: string): string;
 export function areaDoChrome(g: { x: number; y: number; largura: number; altura: number } | null, alturaDoChrome: number): { x: number; y: number; largura: number; altura: number } | null;
 export const PRAZO_DO_CDP_MS: number;
 export const ACOES_DE_ENTRADA: readonly string[];
+export function tmpEhDesta(dono: string | null, token: string): boolean;
+export function apagarTmpSeDesta(tmp: string, token: string, entre?: (fase: 'lido' | 'movido' | 'devolvendo', destino?: string) => Promise<void>): Promise<boolean>;
+export function apagarTmpEVizinhosSeDesta(tmp: string, token: string, entre?: (fase: 'lido' | 'movido' | 'devolvendo', destino?: string) => Promise<void>): Promise<boolean>;

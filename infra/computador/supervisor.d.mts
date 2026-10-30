@@ -35,6 +35,8 @@ export function criarSupervisor(op: {
   tela?: string; ambienteTela?: Record<string, string>; leitura?: () => { memoria: unknown; processador: unknown }; agora?: () => number; log?: (m: string) => void; batimentoMs?: number; varreduraMs?: number;
   /** Chamado logo depois do `ok` do Atualizar: no serviço, sai para o systemd subir de novo com os arquivos novos. */
   aoAtualizar?: () => void;
+  /** NOD-433: gancho do teste; segura o fecharTela depois do `fechada` da tela, antes do recolhimento. */
+  antesDeRecolher?: (agenteId: string) => Promise<void>;
 }): Supervisor;
 export function servirControle(s: Supervisor): Server;
 export function escutarControle(servidor: Server, caminho: string): Promise<void>;

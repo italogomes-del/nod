@@ -158,6 +158,12 @@ Bot) mostra o desktop inteiro ao vivo, com "Take control", e a pessoa usa como u
   copiar só um arquivo (uri-list) ou uma imagem não muda a impressão (risco aceito, baixo: o bot cola por ctrl+v num
   campo de texto do Chrome). O bwrap do dock não isola a rede: o Terminal é o da pessoa, como no computador dela. A ligação dos relatos da VM ao preparo (`ligacaoDaVm`) ganhou teste próprio.
 
+- O ensaio manual da tela ao vivo (`scripts/ensaio-computador/vivo.ts`, NOD-433) usa o login stub e só roda fora de CI e
+  contra loopback, salvo `NOD_ENSAIO_REMOTO=1`. Ele não assume nem devolve a tela do bot que pediu ajuda: isso fecharia
+  o pedido e retomaria o turno com um passo que ninguém fez. Ele fecha na dúvida: sem a lista de telas, ou sem a tela do
+  bot depois de abri-la, não segue. Por isso recusa o computador dedicado (sem telas por bot); o ensaio é para o
+  computador da pessoa.
+
 ## Gatilho de reversão
 
 - Mais de 1 em 5 sessões ao vivo caindo em 14 dias (log `computador_vivo_*`): rever o transporte (parear por WebRTC ou

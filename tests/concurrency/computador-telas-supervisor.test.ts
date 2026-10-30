@@ -27,7 +27,7 @@ type Nivel = "verde" | "amarela" | "vermelha";
 type Tela = { url: string; titulo: string; texto: string; storage?: string; senhas?: number; geracao?: number | null };
 type Resultado = { desfecho: string; motivo?: string; quem?: string[]; supervisorPub?: string; resultado?: { tela?: Tela } };
 
-async function montar(o: { ambienteTela?: Record<string, string> } = {}) {
+async function montar(o: { ambienteTela?: Record<string, string>; antesDeRecolher?: (agenteId: string) => Promise<void> } = {}) {
   const dir = await mkdtemp(join(tmpdir(), "nod-telas-e2e-"));
   limpar.push(() => rm(dir, { recursive: true, force: true }));
   const bin = async (nome: string, corpo: string) => {
@@ -53,7 +53,7 @@ async function montar(o: { ambienteTela?: Record<string, string> } = {}) {
   const agora = () => Date.now() + maquina.desvio;
   const logs: string[] = [];
   const sup = criarSupervisor({
-    raiz: join(dir, "raiz"), run: join(dir, "run"), terminal, bin: binarios, tela: TELA_FALSA, ambienteTela: o.ambienteTela,
+    raiz: join(dir, "raiz"), run: join(dir, "run"), terminal, bin: binarios, tela: TELA_FALSA, ambienteTela: o.ambienteTela, antesDeRecolher: o.antesDeRecolher,
     leitura: () => ({ memoria: (dePe() >= maquina.limite ? "vermelha" : "verde") as Nivel, processador: "verde" }), agora, log: (m) => logs.push(m),
   });
   limpar.push(() => sup.encerrar());
@@ -101,6 +101,14 @@ async function salvarSenhaNoPerfil(perfil: string, valor: string, url = "https:/
   db.prepare("INSERT INTO logins (origin_url, username_element, username_value, password_element, password_value, signon_realm, date_created, date_password_modified) VALUES (?, 'u', 'ana', 'p', ?, ?, ?, ?)")
     .run(url, Buffer.from(valor), url, 13_380_000_000_000_000n, 13_380_000_000_000_000n);
   db.close();
+}
+
+/** Codex (PR 602): o `fechada` da tela falsa espera o teste abrir o portão, em vez de um atraso que a CPU lenta vence. */
+async function portaoDoFechar(): Promise<{ arquivo: string; abrir: () => Promise<void> }> {
+  const pasta = await mkdtemp(join(tmpdir(), "nod-portao-"));
+  limpar.push(() => rm(pasta, { recursive: true, force: true }));
+  const arquivo = join(pasta, "abrir");
+  return { arquivo, abrir: () => writeFile(arquivo, "") };
 }
 
 describe("computador da pessoa: várias telas no supervisor real (NOD-96 PR 7)", () => {
@@ -207,6 +215,86 @@ describe("computador da pessoa: várias telas no supervisor real (NOD-96 PR 7)",
     expect(m.telas().ana).toBe("fechada");
     expect(await m.cookiesEm("ana", MAIL)).toEqual({ sid: "15min" });
     expect(m.telas().ana).toBe("aberta");
+  });
+
+  it("NOD-433: a ação que chega com a tela do bot ainda fechando espera o fechar e abre uma tela nova, que não é marcada fechada", async () => {
+    const portao = await portaoDoFechar();
+    const m = await montar({ ambienteTela: { NOD_TELA_FALSA_FECHAR_PORTAO: portao.arquivo } });
+    await m.iniciar();
+    await m.navegar("ana", `${MAIL}?entrar=sid:fechando`);
+    const fechar = m.tratar({ tipo: "fechar_tela", agenteId: "ana" });
+    await vi.waitFor(() => expect(m.telas().ana).toBe("fechando"));
+    const acao = m.navegar("ana", MAIL);
+    // A tela antiga segue fechando (o portão fechado) enquanto a ação chega ao supervisor.
+    await new Promise((r) => setTimeout(r, 200));
+    expect(m.telas().ana).toBe("fechando");
+    await portao.abrir();
+    const [f, a] = await Promise.all([fechar, acao]);
+    expect(f.desfecho).toBe("ok");
+    expect(a.desfecho, JSON.stringify(a)).toBe("ok");
+    expect(m.telas().ana).toBe("aberta");
+    expect(await m.cookiesEm("ana", MAIL)).toEqual({ sid: "fechando" });
+  });
+
+  it("NOD-433 (revisão r2): dois fechar com a tela do bot fechando: o segundo espera o primeiro (não fecha a tela nova) e a ação abre uma só", async () => {
+    const diario = join(await mkdtemp(join(tmpdir(), "nod-diario-")), "telas.jsonl");
+    limpar.push(() => rm(join(diario, ".."), { recursive: true, force: true }));
+    const portao = await portaoDoFechar();
+    const m = await montar({ ambienteTela: { NOD_TELA_FALSA_FECHAR_PORTAO: portao.arquivo, NOD_TELA_FALSA_DIARIO: diario } });
+    await m.iniciar();
+    await m.navegar("ana", `${MAIL}?entrar=sid:dupla`);
+    const fechar1 = m.tratar({ tipo: "fechar_tela", agenteId: "ana" });
+    await vi.waitFor(() => expect(m.telas().ana).toBe("fechando"));
+    const fechar2 = m.tratar({ tipo: "fechar_tela", agenteId: "ana" });
+    const acoes = Promise.all([m.navegar("ana", MAIL), m.navegar("ana", MAIL)]);
+    await new Promise((r) => setTimeout(r, 200));
+    expect(m.telas().ana).toBe("fechando");
+    await portao.abrir();
+    const [a1, a2] = await acoes;
+    expect((await fechar1).desfecho).toBe("ok");
+    expect((await fechar2).desfecho).toBe("ok");
+    expect(a1.desfecho, JSON.stringify(a1)).toBe("ok");
+    expect(["ok", "ocupado"]).toContain(a2.desfecho === "ok" ? "ok" : a2.motivo);
+    await m.assentar();
+    expect(m.telas().ana).toBe("aberta");
+    expect(await m.cookiesEm("ana", MAIL)).toEqual({ sid: "dupla" });
+    // Revisão r3: o estado final não basta (a guarda de dona no fecharTela o disfarça). Pelo diário dos processos da
+    // tela: a nova só abre depois do `fechada` da antiga, nunca há duas vivas, e cada processo recebe um fechar só.
+    const eventos = (await readFile(diario, "utf8")).trim().split("\n").map((l) => JSON.parse(l) as { pid: number; agente: string; ev: string }).filter((e) => e.agente === "ana");
+    const vivas = new Set<number>();
+    const fechares = new Map<number, number>();
+    for (const e of eventos) {
+      if (e.ev === "abrir") { expect([...vivas], JSON.stringify(eventos)).toEqual([]); vivas.add(e.pid); }
+      if (e.ev === "fechar") fechares.set(e.pid, (fechares.get(e.pid) ?? 0) + 1);
+      if (e.ev === "fechada") vivas.delete(e.pid);
+    }
+    expect(eventos.filter((e) => e.ev === "abrir")).toHaveLength(2);
+    expect([...fechares.values()]).toEqual([1]);
+  });
+
+  it("NOD-433 (revisão r4): a tela que sai logo depois do fechada não libera a nova antes do fecharTela terminar", async () => {
+    const diario = join(await mkdtemp(join(tmpdir(), "nod-diario-")), "telas.jsonl");
+    limpar.push(() => rm(join(diario, ".."), { recursive: true, force: true }));
+    let soltar = () => {};
+    const segura = new Promise<void>((r) => { soltar = r; });
+    let segurando = false;
+    const m = await montar({ ambienteTela: { NOD_TELA_FALSA_DIARIO: diario }, antesDeRecolher: async (id) => { if (id === "ana" && !segurando) { segurando = true; await segura; } } });
+    await m.iniciar();
+    await m.navegar("ana", `${MAIL}?entrar=sid:r4`);
+    const ler = async () => (await readFile(diario, "utf8")).trim().split("\n").map((l) => JSON.parse(l) as { pid: number; agente: string; ev: string }).filter((e) => e.agente === "ana");
+    const fechar = m.tratar({ tipo: "fechar_tela", agenteId: "ana" });
+    // A tela antiga respondeu `fechada` e o processo já saiu; o fecharTela ainda está preso antes do recolhimento.
+    const antiga = (await ler())[0]!.pid;
+    await vi.waitFor(() => { expect(segurando).toBe(true); expect(() => process.kill(antiga, 0)).toThrow(); }, { timeout: 5_000 });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(m.telas().ana).toBe("fechando");
+    const acao = m.navegar("ana", MAIL);
+    await new Promise((r) => setTimeout(r, 200));
+    expect((await ler()).filter((e) => e.ev === "abrir")).toHaveLength(1);
+    soltar();
+    expect((await fechar).desfecho).toBe("ok");
+    expect((await acao).desfecho).toBe("ok");
+    expect((await ler()).filter((e) => e.ev === "abrir")).toHaveLength(2);
   });
 
   it("Atualizar e Redefinir fecham as telas e mantêm os logins; Sair de todos não", async () => {

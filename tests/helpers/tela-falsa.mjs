@@ -8,10 +8,12 @@
 // depois de cada ação (como mandarStorage), guarda o que o supervisor repassa e aplica ao navegar para a origem; a
 // resposta traz `storage` = o localStorage da origem atual em JSON.
 // NOD-97 PR 5: a resposta traz `senhas` = quantas senhas salvas a tela recebeu no config (só a contagem, nunca o valor).
-// NOD_TELA_FALSA_ATRASO_MS segura o `pronta` (o boot lento); NOD_TELA_FALSA_ACAO_MS segura cada ação.
+// NOD_TELA_FALSA_ATRASO_MS segura o `pronta` (o boot lento); NOD_TELA_FALSA_ACAO_MS segura cada ação;
+// NOD_TELA_FALSA_FECHAR_MS segura o `fechada`; NOD_TELA_FALSA_DIARIO anota abrir/fechar/fechada num arquivo.
 // NOD_TELA_FALSA_LIMPAR_FALHA=cookies|storage faz o limpar_cookies ou o limpar_storage responder com erro (o CDP que
 // falha na tela real), sem limpar.
 import { randomBytes } from 'node:crypto';
+import { appendFileSync, existsSync } from 'node:fs';
 import process from 'node:process';
 import { setTimeout } from 'node:timers';
 import { URL } from 'node:url';
@@ -21,7 +23,14 @@ import { hashDosDados, origemDe, origemTemLogin } from '../../infra/computador/l
 const esperar = (ms) => new Promise((r) => setTimeout(r, ms));
 const ATRASO_ABRIR = Number(process.env.NOD_TELA_FALSA_ATRASO_MS ?? 0);
 const ATRASO_ACAO = Number(process.env.NOD_TELA_FALSA_ACAO_MS ?? 0);
+/** NOD-433: segura o `fechada` (o Chrome que demora a sair), para a tela nova chegar com a antiga ainda fechando. */
+const ATRASO_FECHAR = Number(process.env.NOD_TELA_FALSA_FECHAR_MS ?? 0);
+/** Codex (PR 602): com NOD_TELA_FALSA_FECHAR_PORTAO=<arquivo>, o `fechada` só sai quando o teste cria o arquivo (sem corrida de relógio). */
+const PORTAO_FECHAR = process.env.NOD_TELA_FALSA_FECHAR_PORTAO ?? '';
 const LIMPAR_FALHA = process.env.NOD_TELA_FALSA_LIMPAR_FALHA ?? '';
+/** NOD-433 (revisão r3): NOD_TELA_FALSA_DIARIO grava, uma linha JSON por evento, quando cada processo abre, recebe o fechar e responde fechada. */
+const DIARIO = process.env.NOD_TELA_FALSA_DIARIO ?? '';
+const anotar = (ev) => { if (DIARIO) appendFileSync(DIARIO, `${JSON.stringify({ pid: process.pid, agente: config?.agenteId ?? null, ev })}\n`); };
 // NOD_TELA_FALSA_ERRO_DA_ACAO=<código> faz toda ação responder esse erro (o `ocupado` da graça, revisão 17 do PR #600).
 const ERRO_DA_ACAO = process.env.NOD_TELA_FALSA_ERRO_DA_ACAO ?? '';
 
@@ -110,6 +119,7 @@ process.on('message', async (m) => {
   try {
     if (m.tipo === 'abrir') {
       config = m.config;
+      anotar('abrir');
       geracao = config.geracao ?? null;
       for (const c of config.cookies ?? []) pote.set(chaveDoCookie(c), c);
       conhecidos = new Map(pote);
@@ -149,8 +159,12 @@ process.on('message', async (m) => {
       pendentes.clear();
       enviar({ tipo: 'resposta', id: m.id, resultado: {} });
     } else if (m.tipo === 'fechar') {
+      anotar('fechar');
+      if (ATRASO_FECHAR) await esperar(ATRASO_FECHAR);
+      if (PORTAO_FECHAR) while (!existsSync(PORTAO_FECHAR)) await esperar(10);
       mandarCookies();
       mandarStorage();
+      anotar('fechada');
       enviar({ tipo: 'fechada' });
       setTimeout(() => process.exit(0), 20);
     }

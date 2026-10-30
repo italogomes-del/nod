@@ -181,6 +181,24 @@ Com `NOD_VM_LOCAL=1`, o computador da pessoa pode morar numa VM Linux que o app 
 mesmo driver Docker, apontado para o dockerd da VM por `DOCKER_HOST`/`DOCKER_CONFIG` próprios. A imagem passa a sair
 em `linux/arm64` e `linux/amd64` (`npm run computador:build`). Limites, ciclo de vida e órfãos não mudam.
 
+## Emenda de 2026-10-30 — reserva renovada e reserva órfã (NOD-433)
+
+O 1º ensaio no Mac mostrou o custo do lease fixo: o servidor reiniciado no meio de uma ação deixava a reserva no banco por até cinco minutos, e nesse tempo a tela recusava tudo (409), inclusive o assumir da pessoa. Muda o seguinte:
+
+- **A reserva é renovada.** Ela continua com `agora + 5 min`, mas quem a segura (a ação, o iniciar da pessoa, o `parar` da ociosidade) a renova a cada 5 s, sob a trava e só se ela ainda é dele. Assim, `ocupado_ate − 5 min` é a última renovação.
+- **Reserva órfã.** Uma reserva que não é deste processo vale enquanto é renovada. Sem renovação há 15 s, o dono morreu e a próxima reserva passa por cima. As reservas deste processo valem até o fim, mesmo sem renovação. A outra cor do azul/verde, que drena por até 10 min, segue protegida, porque renova.
+- **Marca da reserva renovada.** A regra da órfã só vale para a reserva que se sabe renovada: a operação nova é um UUID versão 8 (`novaOperacao`). A cor de antes deste PR, no primeiro deploy, cria UUID v4 e não renova; a reserva dela vale pela regra antiga (até `ocupado_ate`). Sem migração: `operacao_id` é `uuid` e aceita a versão 8. Depois do primeiro deploy, uma v4 que sobrar segura no máximo os 5 min de antes.
+- **Ociosidade.** A reserva de 90 s × N antes do `parar` (emenda de 2026-10-05) vira a reserva de 5 min renovada, com uma operação por alvo. A ação que chega no meio continua recebendo `estado_invalido`. Antes de cada `parar`, a ociosidade confere sob a trava que a reserva ainda é dela; se outra operação a tomou, pula a tela (`computador_ociosidade_pulou`) e a máquina não dorme nessa volta. Antes de pôr a máquina para dormir, relê as telas: uma que ganhou reserva, atividade ou a pessoa durante os `parar` a mantém acordada. Se a conferência falha (banco fora), não fecha.
+- **Supervisor.** A tela que abre com a anterior do mesmo bot ainda fechando espera o fechar. O tmp da tela leva uma marca de dono por instância, e a tela que fecha só o apaga se ainda é dela: primeiro o move (rename atômico) e confere a marca já movida; se a nova marcou no meio, ele volta. Se a nova já recriou o tmp no lugar, o conteúdo volta entrada por entrada com `rename`, sem sobrescrever o que a nova gravou de novo; se algo não volta, o `*.fechando-*` fica no disco. A tela que sai logo depois do `fechada` não libera a vaga: quem marca a tela fechada é o fecharTela, depois de recolher o Login Data. No primeiro deploy, a tela velha ainda roda o código antigo e apaga o tmp sem conferir; a regra vale do segundo deploy em diante.
+- **A marca não é confiável** (revisão do PR #602). O tmp é gravável pelo Chrome no bwrap, então a marca é lida sem seguir symlink, sem travar em FIFO, só se for arquivo comum e só os primeiros 64 bytes. Ela é recriada com `O_EXCL`, depois de apagar o que sobrou (mesmo se for pasta), como o dock da ADR-138. Uma renovação que volta da trava depois do fim da ação não recoloca a operação entre as deste processo: se a transação de saída falha, a reserva cai órfã em 15 s.
+- **Sinal.** `computador_reserva_renovada_tarde` (renovação depois de 10 s) e `computador_reserva_perdida` (a reserva já era de outra operação) vão ao log; são o termômetro do gatilho abaixo.
+- **Teto da renovação.** Uma operação renova por no máximo 15 min (`computador_reserva_teto` no log). Passado o teto, a reserva vale o último lease e cai sozinha: um `await` preso não segura a tela para sempre.
+- **O que a web vê.** O `consultar` devolve `ocupadoAte` nulo para a reserva órfã, para a tela não mostrar "Bot trabalhando" enquanto o servidor já deixa assumir.
+
+**Gatilho de reversão:** qualquer um dos dois abaixo.
+- `computador_reserva_perdida` com `tomada: true`: a renovação da ação ainda viva não chegou em 15 s (banco lento) e outra operação tomou a tela. Sai um aviso por reserva perdida, e a renovação para.
+- Um 409 de reserva presa depois de um reinício.
+
 ## Emenda de 2026-10-30 — piso de versão do app e a causa real no 409 (NOD-407)
 
 O computador do motor tem piso próprio de versão do app, `NOD_COMPUTADOR_VERSAO_MINIMA` (semver; vazio ou inválido =

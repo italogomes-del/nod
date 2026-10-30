@@ -188,7 +188,7 @@ function esperarDoFilho(filho, cond, prazoMs) {
  * O supervisor, sem socket (o socket é `servirControle`). Opções: raiz (/var/lib/nod-computador), run
  * (/run/nod-computador), terminal (socket do terminal), x11 (/tmp/.X11-unix), bin, sandbox, xvfbArgs, ambienteTela,
  * resolv (o resolv.conf que a tela vê; padrão: o do stub do systemd-resolved, se existir), leitura
- * (() => {memoria, processador}), agora.
+ * (() => {memoria, processador}), agora, antesDeRecolher (gancho do teste: segura o fecharTela depois do `fechada`).
  */
 export function criarSupervisor(op) {
   const raiz = op.raiz ?? '/var/lib/nod-computador';
@@ -394,6 +394,9 @@ export function criarSupervisor(op) {
 
   async function abrirTela(c, agenteId, uso) {
     let t = c.telas.get(agenteId);
+    // NOD-433: a tela deste agente ainda fecha (ociosidade, parar): a nova só nasce depois, senão as duas dividiam o tmp
+    // e o `fechada` da antiga caía por cima da nova.
+    if (t?.estado === 'fechando' && t.fechou) { await t.fechou; t = c.telas.get(agenteId); }
     if (t?.estado === 'aberta') return { ok: true };
     if (t?.estado === 'abrindo') return t.abrindo;
     for (let volta = 0; volta < 10; volta++) {
@@ -407,6 +410,11 @@ export function criarSupervisor(op) {
       relatarEstado(c);
       return { esperando: d.quem };
     }
+    // NOD-433: duas ações do mesmo bot que acordaram do mesmo `fechou` (ou de um `fecharTela` no laço): a primeira já
+    // abriu; a segunda espera aquela em vez de abrir outra tela do mesmo agente.
+    t = c.telas.get(agenteId);
+    if (t?.estado === 'aberta') return { ok: true };
+    if (t?.estado === 'abrindo') return t.abrindo;
     const display = novoDisplay();
     if (display === null) return { esperando: [...c.telas.keys()].filter((k) => k !== agenteId) };
     const proc = fork(op.tela ?? process.env.NOD_PC_TELA ?? path.join(AQUI, 'tela.mjs'), [], { stdio: ['ignore', 'inherit', 'inherit', 'ipc'], env: { ...process.env, ...(op.ambienteTela ?? {}) } });
@@ -423,7 +431,9 @@ export function criarSupervisor(op) {
       displaysEmUso.delete(display);
       for (const r of t.pendentes.values()) r({ erro: 'sem_resposta' });
       t.pendentes.clear();
-      if (c.telas.get(agenteId) === t && t.estado !== 'fechada') { c.telas.set(agenteId, { estado: 'fechada', ultimaAcaoEm: t.ultimaAcaoEm }); relatarEstado(c); }
+      // NOD-433 (revisão r4): a tela que fecha sai logo depois do `fechada`, com o fecharTela ainda recolhendo o Login
+      // Data. Quem marca a fechada é ele; trocar a entrada aqui deixava outra ação abrir a tela nova no meio.
+      if (c.telas.get(agenteId) === t && t.estado !== 'fechada' && t.estado !== 'fechando') { c.telas.set(agenteId, { estado: 'fechada', ultimaAcaoEm: t.ultimaAcaoEm }); relatarEstado(c); }
     });
     t.abrindo = (async () => {
       // NOD-96: lê na fila da máquina, DEPOIS das fusões em curso. A tela manda o diff de cookies antes da resposta da
@@ -462,19 +472,30 @@ export function criarSupervisor(op) {
 
   async function fecharTela(c, agenteId) {
     const t = c.telas.get(agenteId);
+    if (t?.estado === 'fechando' && t.fechou) return t.fechou;
     if (!t?.proc || t.estado === 'fechada') { c.telas.delete(agenteId); return; }
     t.estado = 'fechando';
     relatarEstado(c);
-    if (t.proc.exitCode === null) {
-      mandarAoFilho(t.proc, { tipo: 'fechar' });
-      const m = await esperarDoFilho(t.proc, (x) => x?.tipo === 'fechada', PRAZO_FECHAR_TELA_MS);
-      if (m.tipo === 'prazo') { try { t.proc.kill('SIGKILL'); } catch { /* segue */ } }
-    }
-    await c.fila;
-    // NOD-97 PR 5: o Chrome fechou e soltou o Login Data; recolhe a senha que a tela possa ter salvado nesta sessão.
-    if (c.ligado) await recolherDaTela(c, agenteId);
-    c.telas.set(agenteId, { estado: 'fechada', ultimaAcaoEm: t.ultimaAcaoEm });
-    relatarEstado(c);
+    t.fechou = (async () => {
+      if (t.proc.exitCode === null) {
+        mandarAoFilho(t.proc, { tipo: 'fechar' });
+        const m = await esperarDoFilho(t.proc, (x) => x?.tipo === 'fechada', PRAZO_FECHAR_TELA_MS);
+        if (m.tipo === 'prazo') { try { t.proc.kill('SIGKILL'); } catch { /* segue */ } }
+      }
+      await op.antesDeRecolher?.(agenteId);
+      await c.fila;
+      // NOD-97 PR 5: o Chrome fechou e soltou o Login Data; recolhe a senha que a tela possa ter salvado nesta sessão.
+      if (c.ligado) await recolherDaTela(c, agenteId);
+      // Só marca fechada se a entrada ainda é desta tela (uma nova não sobrescreve).
+      if (c.telas.get(agenteId) === t) c.telas.set(agenteId, { estado: 'fechada', ultimaAcaoEm: t.ultimaAcaoEm });
+      relatarEstado(c);
+    })().catch((e) => {
+      // O canal com a tela já fechou (ela morreu no meio): o `exit` marca a entrada; quem espera o `fechou` segue.
+      log(`tela ${agenteId} fechou com erro: ${e?.message}`);
+      try { t.proc.kill('SIGKILL'); } catch { /* segue */ }
+      if (c.telas.get(agenteId) === t) { c.telas.set(agenteId, { estado: 'fechada', ultimaAcaoEm: t.ultimaAcaoEm }); relatarEstado(c); }
+    });
+    return t.fechou;
   }
 
   function pedirATela(t, mensagem, prazoMs = PRAZO_ACAO_MS) {

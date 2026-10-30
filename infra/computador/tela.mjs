@@ -8,7 +8,7 @@ import { constants, open as abrirDescritor } from 'node:fs';
 import net from 'node:net';
 import { promisify } from 'node:util';
 import { createHash, randomBytes } from 'node:crypto';
-import { access, chmod, cp, mkdir, readFile, readdir, realpath, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
+import { access, chmod, cp, link, lstat, mkdir, open, readFile, readdir, realpath, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { URL, pathToFileURL } from 'node:url';
 import process from 'node:process';
@@ -1199,6 +1199,97 @@ export async function caminhoNoWorkspace(raiz, c, novo = false) {
 }
 
 /**
+ * NOD-433: ler a marca e apagar não é atômico — a tela nova pode marcar o tmp entre os dois, e o `rm -r` levaria o
+ * Xauthority dela. O tmp sai primeiro do lugar (rename atômico para um nome só desta tela) e a marca é conferida lá:
+ * se a nova marcou no meio, ele volta para o lugar; senão, só então é apagado. `entre(fase)` é o gancho do teste da
+ * corrida: 'lido' (marca conferida, tmp no lugar), 'movido' (tmp já fora do lugar) e 'devolvendo' (logo antes de cada
+ * entrada voltar sem sobrescrever).
+ */
+/**
+ * Revisão independente (PR 602): o tmp é gravável pelo Chrome no bwrap, então a marca pode ter sido plantada. Lê sem
+ * seguir symlink e sem travar em FIFO: só um arquivo comum vale; o resto ('') não é desta tela. Sem marca: null.
+ */
+const MARCA_MAX = 64;
+async function lerMarca(arquivo) {
+  let h;
+  try { h = await open(arquivo, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK); } catch (e) { return e?.code === 'ENOENT' ? null : ''; }
+  // Rodada 2: só os primeiros bytes (o token tem 32); a marca esparsa de GBs não entra inteira na memória do host.
+  try {
+    if (!(await h.stat()).isFile()) return '';
+    const buf = Buffer.alloc(MARCA_MAX);
+    const { bytesRead } = await h.read(buf, 0, MARCA_MAX, 0);
+    return buf.subarray(0, bytesRead).toString('utf8');
+  } catch { return ''; } finally { await h.close().catch(() => {}); }
+}
+
+export async function apagarTmpSeDesta(tmp, token, entre = async () => {}) {
+  if (!tmpEhDesta(await lerMarca(path.join(tmp, 'dono')), token)) return false;
+  await entre('lido');
+  const lixo = `${tmp}.fechando-${token}`;
+  if (!await rename(tmp, lixo).then(() => true, () => false)) return false;
+  await entre('movido');
+  if (tmpEhDesta(await lerMarca(path.join(lixo, 'dono')), token)) {
+    await rm(lixo, { recursive: true, force: true }).catch(() => {});
+    return true;
+  }
+  // QA (BUG-1): enquanto o tmp estava fora do lugar, a tela nova pode tê-lo recriado (o `mkdir -p` do dock) e o rename
+  // de volta falha. Junta o conteúdo: o que a nova recriou fica (é o mais novo), o resto volta, e o lixo sai.
+  if (!await rename(lixo, tmp).then(() => true, () => false)) {
+    // A nova recriou o tmp enquanto ele estava fora (o `mkdir -p` do dock): devolve entrada por entrada, com `rename`
+    // (socket, FIFO e symlink vão como estão; revisão r6). O que a nova já gravou de novo no lugar fica. Se algo não
+    // voltar, o lixo fica no disco (`*.fechando-*`) em vez de levar junto o que a nova precisa.
+    if (await devolverEntradas(lixo, tmp, entre)) await rm(lixo, { recursive: true, force: true }).catch(() => {});
+  }
+  return false;
+}
+
+/**
+ * Move cada entrada do 1º nível de `de` para `para` sem sobrescrever o que a nova gravou. Diz se tudo voltou.
+ * Revisão rodada 4 (PR 602): não entra em subpastas. As subpastas do tmp são graváveis pelo Chrome da tela nova, que
+ * poderia trocar `tmp/x` por um symlink para fora entre a conferência e o `link`/`mkdir` dentro dela (que seguem o link
+ * nos componentes do meio). Só o nome final em `para` é tocado, e nem `rename` nem `link` seguem o nome final.
+ */
+async function devolverEntradas(de, para, entre = async () => {}) {
+  const entradas = await readdir(de, { withFileTypes: true }).catch(() => null);
+  if (!entradas) return false;
+  let tudo = true;
+  for (const e of entradas) {
+    const origem = path.join(de, e.name);
+    const destino = path.join(para, e.name);
+    await entre('devolvendo', destino);
+    if (e.isDirectory()) {
+      // A pasta volta inteira com `rename`. Se a nova já tem algo com esse nome (pasta com conteúdo, arquivo, link),
+      // `rename` recusa (ENOTEMPTY/ENOTDIR/EISDIR) e vale o dela; a antiga fica no lixo. Sobre uma pasta vazia da nova o
+      // `rename` troca uma pela outra, sem perder nada.
+      if (!await rename(origem, destino).then(() => true, () => false)) tudo = false;
+      continue;
+    }
+    // `link` é a operação sem-sobrescrita atômica para arquivo, symlink, FIFO e socket no mesmo tmp. Só depois de o
+    // nome existir no destino a entrada antiga sai; EEXIST significa que a nova venceu a corrida.
+    const ligou = await link(origem, destino).then(() => true, (erro) => erro?.code === 'EEXIST' ? false : null);
+    if (ligou === true) await unlink(origem).catch(() => { tudo = false; });
+    else if (ligou === null) tudo = false;
+  }
+  return tudo;
+}
+/**
+ * NOD-433 sobre o #600: o dock e a captura moram ao lado do tmp (`vizinhosDoTmp`). Eles só saem junto quando o tmp era
+ * desta tela e nenhuma tela nova marcou o lugar depois — a nova grava a marca antes de criar o dock, então com marca no
+ * lugar os vizinhos já são dela. Diz se apagou.
+ */
+export async function apagarTmpEVizinhosSeDesta(tmp, token, entre = async () => {}) {
+  if (!await apagarTmpSeDesta(tmp, token, entre)) return false;
+  if (await lstat(path.join(tmp, 'dono')).then(() => true, () => false)) return true;
+  for (const v of vizinhosDoTmp(tmp)) await rm(v, { recursive: true, force: true }).catch(() => {});
+  return true;
+}
+
+/** NOD-433: o tmp é desta tela se a marca `dono` é dela; sem marca (tela de antes da marca), é. */
+export function tmpEhDesta(dono, token) {
+  return dono === null || dono.trim() === token;
+}
+
+/**
  * Uma tela viva. `config` (do supervisor): agenteId, display (número), raiz, run (a raiz do run, some no bwrap), ocultar
  * (outras pastas que somem no bwrap), resolv (o resolv.conf do stub, ou nada) e resolvEm (onde montá-lo), perfil, perfilBase, workspace, logins,
  * tmp, x11, bus (pasta) e busEndereco, bin {xvfb, openbox, chromium, bwrap (null = sem bwrap), xdotool, xclip, scrot, x11vnc},
@@ -1328,8 +1419,21 @@ export function criarTela(config, avisar) {
     alturaDoChrome = 800 - DOCK_ALTURA;
   }
 
+  const donoDoTmp = randomBytes(16).toString('hex');
   async function subir() {
     await mkdir(config.tmp, { recursive: true, mode: 0o700 });
+    // 30/10 (NOD-433): a tela que fecha só apaga o tmp se ainda é dela. Num reinício do serviço, a tela nova (mesmo
+    // agente, mesmo tmp) nascia enquanto a antiga ainda fechava, e o `rm` da antiga levava o Xauthority e o dock da nova.
+    // Um token por instância (não o PID, que se repete entre reinícios); no mesmo supervisor, abrirTela espera o fechar.
+    // Revisão independente (PR 602): a marca que sobrou (talvez plantada como symlink pelo Chrome da sessão de antes)
+    // sai antes, e a nova nasce com O_EXCL, que não segue symlink: a gravação nunca cai fora do tmp (como o dock, ADR-138).
+    // Rodada 2: `recursive` (a marca plantada como pasta travava a tela para sempre; o rm não segue symlink) e uma nova
+    // tentativa se algo a recriou entre o rm e o O_EXCL (um Chrome que ainda não saiu).
+    const marca = path.join(config.tmp, 'dono');
+    for (let i = 0; ; i++) {
+      await rm(marca, { recursive: true, force: true });
+      try { await writeFile(marca, donoDoTmp, { mode: 0o600, flag: 'wx' }); break; } catch (e) { if (e?.code !== 'EEXIST' || i >= 2) throw e; }
+    }
     // NOD-96: com PrivateTmp na unit, o /tmp nasce vazio e o bwrap não monta o /tmp/.X11-unix que não existe.
     await mkdir(config.x11, { recursive: true, mode: 0o1777 }).catch(() => {});
     await mkdir(ambienteX.HOME, { recursive: true, mode: 0o700 });
@@ -1874,8 +1978,7 @@ export function criarTela(config, avisar) {
         process.kill(-p.pid, 'SIGKILL');
       } catch { /* segue */ }
     }
-    await rm(config.tmp, { recursive: true, force: true }).catch(() => {});
-    for (const v of vizinhosDoTmp(config.tmp)) await rm(v, { recursive: true, force: true }).catch(() => {});
+    await apagarTmpEVizinhosSeDesta(config.tmp, donoDoTmp);
   }
 
   return {

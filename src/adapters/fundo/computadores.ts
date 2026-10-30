@@ -57,11 +57,11 @@ const daTela = (p: ComputadorDaPessoa, t: TelaComputadorBot): Vaga => ({
 
 // definido em 2026-09-18: reserva confirmada ANTES do efeito; watchdog do runtime encerra em 55 s.
 const LEASE_MS = 300_000;
-/**
- * definido em 2026-10-05 (NOD-170): a reserva do varredor de ociosidade cobre o `parar` (stop da máquina e do
- * proxy, 20 s cada com 30 s de prazo, mais os inspects). Uma ação que chega no meio recebe estado_invalido (livre()).
+/*
+ * revisto em 2026-10-30 (NOD-433): a reserva do varredor de ociosidade era de 90 s × N (cobrindo os `parar` em fila).
+ * Agora é LEASE_MS renovado por `segurarReservas` enquanto o `parar` dele não acaba, uma operação por alvo. Uma ação
+ * que chega no meio continua recebendo estado_invalido (livre()).
  */
-const LEASE_OCIOSIDADE_MS = 90_000;
 /**
  * definido em 2026-10-22 (NOD-96 PR 4, protótipo v2 aprovado): sem memória para a tela, a ação do bot espera a vez na
  * fila em vez de voltar "Nada foi executado". A janela cabe no prazo da ferramenta no proxy (240 s, cliente-nod.ts) com
@@ -110,12 +110,45 @@ function esperandoTelaParaAgente(quem: string[]): string {
   const uso = quem.length ? ` ${quem.join(", ")} ${quem.length === 1 ? "está" : "estão"} usando o computador agora.` : "";
   return JSON.stringify({ estado: "esperando_tela", quem, instrucao: `Ainda esperando uma tela livre no computador; seu lugar na fila continua.${uso} Chame a mesma ferramenta de novo para seguir esperando; não diga que o computador está fora do ar.` });
 }
+/**
+ * definido em 2026-10-30 (1º ensaio no Mac; NOD-433, ADR-037 emenda de 30/10): as reservas que ESTE processo segura. Um
+ * servidor reiniciado no meio de uma ação deixava a reserva no banco até o lease de 5 min vencer, e nesse tempo a tela
+ * recusava tudo (409) — a pessoa não assumia, o bot não agia. Toda reserva viva é RENOVADA a cada RENOVAR_RESERVA_MS
+ * (`segurarReservas`) para `agora + LEASE_MS`, inclusive durante o `iniciar` (até ~2 min) e a ação (até 90 s); por isso
+ * `ocupadoAte - LEASE_MS` é a última renovação. A reserva de outro processo (a outra cor no azul/verde, que drena até
+ * 10 min) vale enquanto é renovada; sem renovação há ORFA_APOS_MS, o dono morreu e a próxima reserva passa por cima.
+ * Toda reserva usa LEASE_MS (a da ociosidade também): um lease de outro tamanho quebraria a conta da última renovação.
+ * A reserva renovada se reconhece pelo id (`novaOperacao`, UUID versão 8): a cor velha do primeiro deploy cria v4 e não
+ * renova, e a reserva dela vale pela regra de antes (até `ocupadoAte`) — sem isso a cor nova a via órfã em 15 s e
+ * atropelava as ações que a velha ainda drenava. Sem migração: `operacao_id` é uuid e aceita a versão 8.
+ */
+const operacoesVivas = new Set<string>();
+const ORFA_APOS_MS = 15_000;
+const RENOVAR_RESERVA_MS = 5_000;
+/**
+ * Revisão r3: a renovação tem teto. Sem ele, um `await` preso na ação renovava a reserva para sempre e a tela recusava
+ * tudo até o processo reiniciar. Cabe nos prazos do driver (90 s por ação, 10 min por operação); passado o teto, a
+ * reserva vale o último LEASE_MS e cai sozinha, como antes do NOD-433.
+ */
+const TETO_RENOVACAO_MS = 15 * 60_000;
+type ReservaPerdida = { vaga_id: string; tomada: boolean };
+/** Um UUID v4 com o dígito da versão trocado por 8 (RFC 9562, "custom"): a marca de "esta reserva é renovada". */
+export function novaOperacao(): string {
+  const id = randomUUID();
+  return `${id.slice(0, 14)}8${id.slice(15)}`;
+}
+const ehRenovada = (operacaoId: string): boolean => operacaoId[14] === "8";
+export function reservaViva(c: { ocupadoAte: number | null; operacaoId: string | null }, agora: number): boolean {
+  if (!c.ocupadoAte || c.ocupadoAte <= agora) return false;
+  if (!c.operacaoId || !ehRenovada(c.operacaoId) || operacoesVivas.has(c.operacaoId)) return true;
+  return agora - (c.ocupadoAte - LEASE_MS) < ORFA_APOS_MS;
+}
 function livre(c: Computador, agora: number): void {
-  if (c.ocupadoAte && c.ocupadoAte > agora) throw new ErroDeDominio("estado_invalido", { cause: "ocupado" });
+  if (reservaViva(c, agora)) throw new ErroDeDominio("estado_invalido", { cause: "ocupado" });
 }
 async function reservarCom(lugar: Lugar, d: Deps, c: Vaga, acao: AcaoComputador, autor: "bot" | "pessoa", turnoId?: string, registroId?: string): Promise<Reserva> {
   livre(c, d.agora());
-  const operacao = randomUUID();
+  const operacao = novaOperacao();
   // NOD-161: `forcar` é decisão do servidor; o runtime recebe o observar de sempre.
   if (acao.tipo === "observar") acao = { tipo: "observar" };
   const registro = registroId ?? (await lugar.registrar(d, c, { turnoId, autor, tipo: acao.tipo, estado: "executando" })).id;
@@ -240,8 +273,8 @@ const lugarDocker: Lugar = {
     return c && doDocker(c);
   },
   configurar: (d, v, c) => d.repos.computadores.configurar(v.id, c),
-  ocupar: (d, v, operacao, ate) => d.repos.computadores.ocupar(v.id, operacao, ate),
-  liberar: (d, v, operacao, em) => d.repos.computadores.liberar(v.id, operacao, em),
+  ocupar: async (d, v, operacao, ate) => { operacoesVivas.add(operacao); await d.repos.computadores.ocupar(v.id, operacao, ate); },
+  liberar: async (d, v, operacao, em) => { operacoesVivas.delete(operacao); await d.repos.computadores.liberar(v.id, operacao, em); },
   registrar: (d, v, e) => d.repos.computadores.registrar({ ...e, computadorId: v.id }),
   emUsoPor: (d, v) => d.repos.computadores.emUsoPor(v.id),
 };
@@ -265,8 +298,8 @@ const criarLugarTela = (lugarPadraoNaCriacao: (escopo: Escopo) => string | null)
     return t && p && p.id === t.computadorId ? daTela(p, t) : null;
   },
   async configurar(d, v, { habilitado: _, ...c }) { await d.repos.computadorTelas.configurar(v.id, c); },
-  ocupar: (d, v, operacao, ate) => d.repos.computadorTelas.ocupar(v.id, operacao, ate),
-  liberar: (d, v, operacao, em) => d.repos.computadorTelas.liberar(v.id, operacao, em),
+  ocupar: async (d, v, operacao, ate) => { operacoesVivas.add(operacao); await d.repos.computadorTelas.ocupar(v.id, operacao, ate); },
+  liberar: async (d, v, operacao, em) => { operacoesVivas.delete(operacao); await d.repos.computadorTelas.liberar(v.id, operacao, em); },
   registrar: (d, v, e) => d.repos.computadores.registrar({ ...e, computadorId: v.computadorId, telaId: v.id, ...(e.autor === "bot" ? { agenteId: v.agenteId } : {}) }),
   emUsoPor: (d, v) => d.repos.computadores.emUsoPor(v.computadorId, v.id),
 });
@@ -306,6 +339,80 @@ export function criarComputadores(o: Opcoes) {
     esperando.set(turnoId, por);
     // Turno que acabou esperando não volta para tirar a marca: guarda as 500 mais novas.
     if (esperando.size > 500) esperando.delete(esperando.keys().next().value!);
+  }
+  /**
+   * NOD-433: renova, a cada RENOVAR_RESERVA_MS e enquanto a operação vive, as reservas que ela segura (`renovar` confere,
+   * sob a trava, que a reserva ainda é dela). É o que separa a reserva viva de outro processo da órfã (reservaViva).
+   * Devolve a função que para a renovação; chame-a antes de liberar.
+   */
+  /**
+   * `restam` diz quantas reservas a volta ainda segura: a ação tem uma só (0 depois de perdê-la); a ociosidade, as do
+   * mapa. Sem nenhuma, a renovação para, e a reserva perdida vira UM aviso, não um a cada volta (revisão r4).
+   */
+  function segurarReservas(escopo: Escopo, renovar: (d: Deps) => Promise<ReservaPerdida[]>, restam: () => number = () => 0): () => void {
+    let emCurso = false;
+    let parado = false;
+    const inicio = Date.now();
+    let renovadaEm = inicio;
+    const parar = () => { parado = true; clearInterval(timer); };
+    const timer = setInterval(() => {
+      // A volta anterior ainda roda (banco lento): não empilha outra. O atraso aparece no log abaixo.
+      if (emCurso) return;
+      if (Date.now() - inicio >= TETO_RENOVACAO_MS) {
+        log("aviso", "computador_reserva_teto", { duracao_ms: Date.now() - inicio });
+        parar();
+        return;
+      }
+      emCurso = true;
+      o.dentro(escopo, renovar)
+        .then((perdidas) => {
+          // A volta que já estava no ar quando a operação soltou a reserva a acha liberada: não é reserva perdida.
+          if (!parado) for (const p of perdidas) log("aviso", "computador_reserva_perdida", p);
+          if (perdidas.length && restam() === 0) parar();
+          // O gatilho de reversão da emenda (ADR-037): a renovação que chega perto dos 15 s deixa a reserva parecer órfã.
+          const atraso = Date.now() - renovadaEm;
+          if (atraso > ORFA_APOS_MS - RENOVAR_RESERVA_MS) log("aviso", "computador_reserva_renovada_tarde", { atraso_ms: atraso });
+          renovadaEm = Date.now();
+        })
+        .catch((e: unknown) => log("aviso", "computador_reserva_nao_renovada", { motivo: e instanceof Error ? e.message : String(e) }))
+        .finally(() => { emCurso = false; });
+    }, RENOVAR_RESERVA_MS);
+    timer.unref?.();
+    return parar;
+  }
+  /**
+   * A reserva `operacao` na vaga, se ainda é dela, vai para agora + LEASE_MS. A que outra operação tomou (a renovação
+   * atrasou além de ORFA_APOS_MS) não volta: fica o log, e o `aindaPermitido` da ação a vê e recusa o resto.
+   */
+  async function renovarReserva(d: Deps, vaga: Vaga, operacao: string): Promise<ReservaPerdida[]> {
+    const c = await lugar.travar(d, vaga);
+    // Codex (PR 602): a ação acabou enquanto esta volta esperava a trava (o `finally` já tirou a operação do Set). O
+    // `lugar.ocupar` a poria de volta e, se a transação de saída falhou, a reserva seguraria a tela 5 min em vez de cair
+    // órfã em 15 s. Conferido logo depois do `await`, sem outro no meio: o `finally` não entra entre os dois.
+    if (!operacoesVivas.has(operacao)) return [];
+    if (c?.operacaoId === operacao && c.ocupadoAte && c.ocupadoAte > d.agora()) { await lugar.ocupar(d, c, operacao, d.agora() + LEASE_MS); return []; }
+    return [{ vaga_id: vaga.id, tomada: Boolean(c?.operacaoId && c.operacaoId !== operacao) }];
+  }
+  /** O mesmo, por id, para as reservas da ociosidade (uma por tela ou computador). */
+  async function renovarDaOciosidade(d: Deps, operacoes: Map<string, string>, travar: (id: string) => Promise<{ operacaoId: string | null; ocupadoAte: number | null } | null>, ocupar: (id: string, operacao: string, ate: number) => Promise<void>): Promise<ReservaPerdida[]> {
+    const perdidas: ReservaPerdida[] = [];
+    for (const [id, operacao] of operacoes) {
+      const v = await travar(id);
+      if (v?.operacaoId === operacao && v.ocupadoAte && v.ocupadoAte > d.agora()) { await ocupar(id, operacao, d.agora() + LEASE_MS); continue; }
+      operacoes.delete(id);
+      perdidas.push({ vaga_id: id, tomada: Boolean(v?.operacaoId && v.operacaoId !== operacao) });
+    }
+    return perdidas;
+  }
+  /**
+   * Revisão r5: logo antes do `parar`, a reserva da ociosidade ainda é dela? A renovação que achou a reserva tomada já a
+   * tirou do mapa; senão, confere no banco sob a trava. Perdida (ou o banco falhou), sai do mapa e do Set e não para:
+   * desligar a tela ou a máquina onde a ação da outra operação já roda é pior que deixar a ociosidade para a próxima volta.
+   */
+  async function aindaDaOciosidade(escopo: Escopo, operacoes: Map<string, string>, id: string, operacao: string, travar: (d: Deps, id: string) => Promise<{ operacaoId: string | null } | null>): Promise<boolean> {
+    const minha = operacoes.has(id) && await o.dentro(escopo, async (d) => (await travar(d, id))?.operacaoId === operacao).catch(() => false);
+    if (!minha) { operacoes.delete(id); operacoesVivas.delete(operacao); }
+    return minha;
   }
   const observacoes = new Map<string, HashesObservacao & { em: number }>();
   const chaveObservacao = (turnoId: string, computadorId: string) => `${turnoId}:${computadorId}`;
@@ -447,7 +554,7 @@ export function criarComputadores(o: Opcoes) {
         if (!atual.permitido || !atual.vaga?.telaId) return "nao" as const;
         await d.repos.computadorTelas.mudarEstado(atual.vaga.telaId, "esperando", d.agora());
         await lugar.ocupar(d, atual.vaga, r.operacao, d.agora() + LEASE_MS);
-        const primeiraDaFila = (await d.repos.computadorTelas.fila(atual.vaga.computadorId)).find((t) => t.id === atual.vaga!.telaId || (t.ocupadoAte !== null && t.ocupadoAte > d.agora()));
+        const primeiraDaFila = (await d.repos.computadorTelas.fila(atual.vaga.computadorId)).find((t) => t.id === atual.vaga!.telaId || reservaViva(t, d.agora()));
         return primeiraDaFila?.id === atual.vaga.telaId ? "tentar" as const : "esperar" as const;
       });
       if (vez === "nao") throw new ErroDeDominio("nao_permitido");
@@ -493,6 +600,8 @@ export function criarComputadores(o: Opcoes) {
     let esperou = false;
     /** A janela acabou com o lugar guardado de propósito (EsperaEsgotada): a tela fica na fila. */
     let guardouLugar = false;
+    // NOD-433: a reserva é renovada enquanto a ação vive (iniciar, espera, executar); sem isso outro processo a via órfã.
+    const soltarReserva = segurarReservas(escopo, (d) => renovarReserva(d, r.computador, r.operacao));
     try {
       let resultado: ResultadoComputador;
       let ligado = false;
@@ -539,6 +648,10 @@ export function criarComputadores(o: Opcoes) {
       }
       throw e;
     } finally {
+      soltarReserva();
+      // Revisão r7: antes da transação, como na ociosidade. Se ela falhar, a reserva fica no banco e cai como órfã em
+      // 15 s; sem isto, este processo a trataria como dele até o fim (409 por 5 min).
+      operacoesVivas.delete(r.operacao);
       const saude = await o.dentro(escopo, async (d) => {
         const c = await lugar.travar(d, r.computador);
         await d.repos.computadores.concluir(r.registroId, estado, falha?.motivo ?? motivoSemFalha);
@@ -560,12 +673,13 @@ export function criarComputadores(o: Opcoes) {
    * (sem reserva viva) sai da fila. Reserva sob trava, como no docker; o `parar` vai fora da transação.
    */
   async function desligarOciososDaPessoa(escopo: Escopo, ligados: ReadonlySet<string>, limiteMs: number): Promise<number> {
-    const operacao = randomUUID();
+    /** NOD-433: uma operação por tela; liberar uma não tira a reserva das outras que ainda esperam o `parar`. */
+    const operacoes = new Map<string, string>();
     const plano = await o.dentro(escopo, async (d) => {
       const p = await d.repos.computadores.daPessoa();
       if (!p) return null;
       const agora = d.agora();
-      const ocupada = (t: TelaComputadorBot) => t.ocupadoAte !== null && t.ocupadoAte > agora;
+      const ocupada = (t: TelaComputadorBot) => reservaViva(t, agora);
       const fechar: TelaComputadorBot[] = [];
       for (const lida of await d.repos.computadorTelas.doComputador(p.id)) {
         if (lida.estado === "esperando" && !ocupada(lida) && (lida.esperandoDesde ?? agora) < agora - limiteMs) {
@@ -576,7 +690,10 @@ export function criarComputadores(o: Opcoes) {
         // Rechecar DEPOIS da trava: uma ação ou o assumir pode ter chegado entre a leitura e o lock.
         const t = await d.repos.computadorTelas.travar(lida.id);
         if (!t || t.controle !== "bot" || ocupada(t) || t.ultimaAtividadeEm >= agora - limiteMs) continue;
-        await d.repos.computadorTelas.ocupar(t.id, operacao, agora + LEASE_OCIOSIDADE_MS * (fechar.length + 1));
+        const operacao = novaOperacao();
+        operacoes.set(t.id, operacao);
+        operacoesVivas.add(operacao);
+        await d.repos.computadorTelas.ocupar(t.id, operacao, agora + LEASE_MS);
         await d.repos.computadorTelas.mudarEstado(t.id, "fechando", agora);
         fechar.push(t);
       }
@@ -587,26 +704,53 @@ export function criarComputadores(o: Opcoes) {
       // também tem atividade (o Acordar da pessoa, 29/10): acordado há menos que o limite, não dorme — antes o primeiro
       // tique do varredor desligava o computador sem tela segundos depois de a pessoa o acordar.
       const deveDormir = ligados.has(p.id) && !operacaoViva(p, agora) && p.ultimaAtividadeEm < agora - limiteMs && !telas.some(segura);
-      return { p, fechar, deveDormir, abertas: telas.filter((t) => t.estado !== "fechada" && t.estado !== "esperando").map((t) => t.id) };
+      return { p, fechar, deveDormir, operacoes: new Map(operacoes), abertas: telas.filter((t) => t.estado !== "fechada" && t.estado !== "esperando").map((t) => t.id) };
     });
     if (!plano) return 0;
     let desligados = 0;
-    for (const t of plano.fechar) {
-      try {
-        await o.driver.parar(t.id, escopo);
-        desligados++;
-        log("info", "computador_tela_fechada_por_ociosidade", { computador_id: plano.p.id, tela_id: t.id, agente_id: t.agenteId, ocioso_min: Math.round(limiteMs / 60_000) });
-      } catch (e) {
-        log("aviso", "computador_ociosidade_falhou", { computador_id: plano.p.id, tela_id: t.id, agente_id: t.agenteId, motivo: ehFalhaComputador(e) ? e.motivo : "desconhecido" });
-      } finally {
-        await o.dentro(escopo, async (d) => {
-          await d.repos.computadorTelas.mudarEstado(t.id, "fechada", d.agora(), ["fechando"]);
-          await d.repos.computadorTelas.liberar(t.id, operacao);
-        });
-        o.mudou(escopo, t.agenteId);
+    // Os `parar` vão um depois do outro (até ~70 s cada): as reservas das telas que ainda esperam a vez são renovadas.
+    const soltarReservas = segurarReservas(escopo, (d) => renovarDaOciosidade(d, operacoes, (id) => d.repos.computadorTelas.travar(id), (id, op, ate) => d.repos.computadorTelas.ocupar(id, op, ate)), () => operacoes.size);
+    let pulou = false;
+    try {
+      for (const t of plano.fechar) {
+        const operacao = plano.operacoes.get(t.id)!;
+        if (!await aindaDaOciosidade(escopo, operacoes, t.id, operacao, (d, id) => d.repos.computadorTelas.travar(id))) {
+          // Outra operação tomou a tela: não a fecha nem a marca fechada, e a máquina não dorme nesta volta.
+          pulou = true;
+          log("aviso", "computador_ociosidade_pulou", { computador_id: plano.p.id, tela_id: t.id, agente_id: t.agenteId });
+          continue;
+        }
+        try {
+          await o.driver.parar(t.id, escopo);
+          desligados++;
+          log("info", "computador_tela_fechada_por_ociosidade", { computador_id: plano.p.id, tela_id: t.id, agente_id: t.agenteId, ocioso_min: Math.round(limiteMs / 60_000) });
+        } catch (e) {
+          log("aviso", "computador_ociosidade_falhou", { computador_id: plano.p.id, tela_id: t.id, agente_id: t.agenteId, motivo: ehFalhaComputador(e) ? e.motivo : "desconhecido" });
+        } finally {
+          // Antes da transação: se ela falhar, a reserva fica no banco e some como órfã em 15 s, não em 5 min.
+          operacoes.delete(t.id);
+          operacoesVivas.delete(operacao);
+          // Por tela: a transação que falha numa não deixa as seguintes presas em 'fechando'.
+          await o.dentro(escopo, async (d) => {
+            await d.repos.computadorTelas.mudarEstado(t.id, "fechada", d.agora(), ["fechando"]);
+            await d.repos.computadorTelas.liberar(t.id, operacao);
+          }).catch((e: unknown) => log("aviso", "computador_ociosidade_nao_liberou", { tela_id: t.id, motivo: e instanceof Error ? e.message : String(e) }));
+          o.mudou(escopo, t.agenteId);
+        }
       }
+    } finally {
+      soltarReservas();
     }
-    if (plano.deveDormir) {
+    // Revisão r6: o laço de `parar` leva até ~70 s por tela; uma ação do bot pode ter reservado outra tela nesse meio.
+    // Relê antes de pôr a máquina para dormir (resta a janela da releitura até o `parar`, de milissegundos).
+    const aindaDorme = plano.deveDormir && !pulou && await o.dentro(escopo, async (d) => {
+      const agora = d.agora();
+      const p = await d.repos.computadores.daPessoa();
+      if (!p || operacaoViva(p, agora) || p.ultimaAtividadeEm >= agora - limiteMs) return false;
+      const telas = await d.repos.computadorTelas.doComputador(p.id);
+      return !telas.some((t) => reservaViva(t, agora) || t.ultimaAtividadeEm >= agora - limiteMs || (t.estado !== "fechada" && t.controle !== "bot"));
+    }).catch(() => false);
+    if (aindaDorme) {
       try {
         await o.driver.parar(plano.p.id, escopo);
         desligados++;
@@ -632,7 +776,8 @@ export function criarComputadores(o: Opcoes) {
     async desligarOciosos(escopo: Escopo, ligados: ReadonlySet<string>, limiteMs: number): Promise<number> {
       if (!ligados.size || limiteMs <= 0) return 0;
       if (porPessoa) return desligarOciososDaPessoa(escopo, ligados, limiteMs);
-      const operacao = randomUUID();
+      /** NOD-433: uma operação por computador; liberar um não tira a reserva dos que ainda esperam o `parar`. */
+      const operacoes = new Map<string, string>();
       const alvos = await o.dentro(escopo, async (d) => {
         const agora = d.agora();
         const reservados: Computador[] = [];
@@ -642,25 +787,42 @@ export function criarComputadores(o: Opcoes) {
           if (!await d.repos.computadores.travar(c.id)) continue;
           const [ainda] = await d.repos.computadores.ociosos(limiteMs, agora, c.id);
           if (!ainda) continue;
-          // Os `parar` vão um depois do outro (até ~70 s cada): a reserva do N-ésimo cobre os N anteriores, senão
-          // venceria antes da vez dele e uma ação do bot entraria na máquina que está sendo desligada.
-          await d.repos.computadores.ocupar(c.id, operacao, agora + LEASE_OCIOSIDADE_MS * (reservados.length + 1));
+          const operacao = novaOperacao();
+          operacoes.set(c.id, operacao);
+          operacoesVivas.add(operacao);
+          await d.repos.computadores.ocupar(c.id, operacao, agora + LEASE_MS);
           reservados.push(ainda);
         }
         return reservados;
       });
       let desligados = 0;
-      for (const c of alvos) {
-        try {
-          await o.driver.parar(c.id, escopo);
-          desligados++;
-          log("info", "computador_desligado_por_ociosidade", { computador_id: c.id, agente_id: c.agenteId, ocioso_min: Math.round(limiteMs / 60_000) });
-        } catch (e) {
-          log("aviso", "computador_ociosidade_falhou", { computador_id: c.id, agente_id: c.agenteId, motivo: ehFalhaComputador(e) ? e.motivo : "desconhecido" });
-        } finally {
-          await o.dentro(escopo, (d) => d.repos.computadores.liberar(c.id, operacao));
-          o.mudou(escopo, c.agenteId);
+      // Os `parar` vão um depois do outro (até ~70 s cada): as reservas dos que ainda esperam a vez são renovadas, senão
+      // pareceriam órfãs e uma ação do bot entraria na máquina que está sendo desligada.
+      const daOciosidade = new Map(operacoes);
+      const soltarReservas = segurarReservas(escopo, (d) => renovarDaOciosidade(d, operacoes, (id) => d.repos.computadores.travar(id), (id, op, ate) => d.repos.computadores.ocupar(id, op, ate)), () => operacoes.size);
+      try {
+        for (const c of alvos) {
+          const operacao = daOciosidade.get(c.id)!;
+          if (!await aindaDaOciosidade(escopo, operacoes, c.id, operacao, (d, id) => d.repos.computadores.travar(id))) {
+            log("aviso", "computador_ociosidade_pulou", { computador_id: c.id, agente_id: c.agenteId });
+            continue;
+          }
+          try {
+            await o.driver.parar(c.id, escopo);
+            desligados++;
+            log("info", "computador_desligado_por_ociosidade", { computador_id: c.id, agente_id: c.agenteId, ocioso_min: Math.round(limiteMs / 60_000) });
+          } catch (e) {
+            log("aviso", "computador_ociosidade_falhou", { computador_id: c.id, agente_id: c.agenteId, motivo: ehFalhaComputador(e) ? e.motivo : "desconhecido" });
+          } finally {
+            operacoes.delete(c.id);
+            operacoesVivas.delete(operacao);
+            await o.dentro(escopo, (d) => d.repos.computadores.liberar(c.id, operacao))
+              .catch((e: unknown) => log("aviso", "computador_ociosidade_nao_liberou", { computador_id: c.id, motivo: e instanceof Error ? e.message : String(e) }));
+            o.mudou(escopo, c.agenteId);
+          }
         }
+      } finally {
+        soltarReservas();
       }
       return desligados;
     },
@@ -718,7 +880,10 @@ export function criarComputadores(o: Opcoes) {
       });
       if (!c) return { computador: computadorPadrao(agenteId), ativo: false, atividade: [], ...await o.driver.ambiente() };
       const { estadoDe, ...dto } = c;
-      return { ...dto, ...await o.driver.estado(estadoDe, escopo) };
+      // Revisão r3 (NOD-433): a reserva órfã não segura mais a tela (reservaViva); a web lê `ocupadoAte` para mostrar
+      // "Bot trabalhando" e não pedir a captura. Ela sai como nula, senão a tela ficava "ocupada" por até 5 min.
+      const computador = reservaViva(dto.computador, agora()) ? dto.computador : { ...dto.computador, ocupadoAte: null };
+      return { ...dto, computador, ...await o.driver.estado(estadoDe, escopo) };
     },
     /**
      * revisto em 2026-10-22 (NOD-97, parte 3): `origem` diz de onde veio a troca (ORIGENS_CONTROLE; sem ela, "botao").
@@ -729,7 +894,7 @@ export function criarComputadores(o: Opcoes) {
      * poder dormir (`ociosos()` só olha controle = 'bot').
      */
     async configurar(escopo: Escopo, agenteId: string, operacao: string, origem: OrigemControle = "botao"): Promise<void> {
-      const operacaoId = randomUUID();
+      const operacaoId = novaOperacao();
       let registroId: string | undefined;
       const fechouTela = operacao === "devolver" && origem === "fechou_tela";
       const c = await o.dentro(escopo, async (d) => {
@@ -775,6 +940,7 @@ export function criarComputadores(o: Opcoes) {
       let sucesso = false;
       let falha: FalhaComputador | null = null;
       let ligou = false;
+      const soltarReserva = operacao === "iniciar" ? segurarReservas(escopo, (d) => renovarReserva(d, c, operacaoId)) : () => {};
       try {
         if (operacao === "iniciar") {
           await o.driver.iniciar(c.id, escopo);
@@ -789,6 +955,9 @@ export function criarComputadores(o: Opcoes) {
         if (ehFalhaComputador(e)) falha = e;
         throw comoErroDeDominio(e);
       } finally {
+        soltarReserva();
+        // Revisão r7: como no executar; a transação que falha deixa a reserva cair como órfã.
+        operacoesVivas.delete(operacaoId);
         const saude = await o.dentro(escopo, async d => {
           if (operacao === "iniciar") await lugar.liberar(d, c, operacaoId, d.agora());
           if (registroId) await d.repos.computadores.concluir(registroId, sucesso ? "concluida" : "falhou", falha?.motivo ?? null);
@@ -891,13 +1060,13 @@ export function criarComputadores(o: Opcoes) {
         }
         const args = argumentos as Record<string, unknown>;
         // ADR-083 (S5): ocupado por outra ação (outra task do bot, a conversa ou a pessoa) volta como resultado.
-        if (c.ocupadoAte && c.ocupadoAte > d.agora()) {
+        if (reservaViva(c, d.agora())) {
           if (d.agora() < ateOcupado) return "ocupado_por_instante";
           const uso = (await lugar.emUsoPor(d, c)) ?? { titulo: "outra tarefa", deFora: false };
           marcarEspera(plano.turnoId, uso.titulo);
           // Revisão do épico (S24, 2026-10-08): o título de uma task de colega (ou que leu conteúdo de fora) é texto de
           // fora — o resultado vai marcado não confiável, como todo conteúdo de fora que entra no turno.
-          return { ok: true, isError: true, conteudo: ocupadoParaAgente(uso.titulo, c.ocupadoAte, d.agora()), confianca: uso.deFora ? "nao_confiavel" : "confiavel" };
+          return { ok: true, isError: true, conteudo: ocupadoParaAgente(uso.titulo, c.ocupadoAte ?? d.agora(), d.agora()), confianca: uso.deFora ? "nao_confiavel" : "confiavel" };
         }
         esperando.delete(plano.turnoId);
         if (nome === "computador_pedir_ajuda") {

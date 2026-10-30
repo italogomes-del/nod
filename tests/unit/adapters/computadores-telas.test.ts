@@ -1,8 +1,8 @@
 import type { LugarDoComputador } from "../../../src/contracts/computador.ts";
-import { beforeEach, expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { AcaoComputador, DriverComputador, ResultadoComputador } from "../../../src/contracts/computador.ts";
 import type { ComputadorDaPessoa, EstadoTelaComputador, TelaComputadorBot } from "../../../src/contracts/computador-motor.ts";
-import { criarComputadores, reconciliarTelas } from "../../../src/adapters/fundo/computadores.ts";
+import { criarComputadores, novaOperacao, reconciliarTelas, reservaViva } from "../../../src/adapters/fundo/computadores.ts";
 import { EsperandoTela } from "../../../src/domain/computador.ts";
 import { MARLON } from "../use-cases/deps-l5.ts";
 
@@ -15,6 +15,9 @@ const A = "00000000-0000-4000-8000-00000000000a";
 const B = "00000000-0000-4000-8000-00000000000b";
 const NOMES: Record<string, string> = { [A]: "Ana Bot", [B]: "Beto Bot" };
 const T0 = 1_700_000_000_000;
+/** NOD-433: uma reserva renovada (UUID v8, `novaOperacao`) de outro processo; a v4 é da cor velha, que não renova. */
+const RENOVADA = "00000000-0000-8000-8000-0000000000aa";
+const DA_COR_VELHA = "00000000-0000-4000-8000-0000000000bb";
 
 let agora: number;
 let pessoa: ComputadorDaPessoa;
@@ -41,6 +44,18 @@ let iniciados: string[];
 /** Turnos que já acabaram (turnoPermitido nega). */
 let concluidos: Set<string>;
 let lugarPedidoNaCriacao: string | null;
+/** NOD-433: roda no meio do driver.executar / driver.parar (a ação ou o `parar` ainda em curso). */
+let aoExecutar: ((id: string) => Promise<void>) | null;
+let aoParar: ((id: string) => Promise<void>) | null;
+let aoIniciar: ((id: string) => Promise<void>) | null;
+/** NOD-433 (revisão r6): faz o `travar` da tela lançar (o banco caiu) a partir da N-ésima chamada. */
+let travarLancaDesde: number | null = null;
+let travarChamadas = 0;
+/** NOD-433 (revisão r7): a transação de saída falha (o `concluir` / o `mudarEstado` para 'fechada' lança). */
+let concluirLanca = false;
+let fecharLanca = false;
+/** Codex (PR 602): o próximo `travar` da tela espera esta promessa (a renovação presa no banco). Vale uma vez. */
+let travarEspera: Promise<void> | null = null;
 
 const tela = (agenteId: string, t: Partial<TelaComputadorBot> = {}): TelaComputadorBot => ({
   id: `tela-${agenteId.slice(-1)}`, computadorId: "pessoa-1", agenteId, estado: "fechada", esperandoDesde: null, controle: "bot", politica: "autonomo",
@@ -52,14 +67,15 @@ const daTelaDo = (agenteId: string) => [...telas.values()].find((t) => t.agenteI
 const driver: DriverComputador = {
   ambiente: async () => ({ disponivel: true, motivo: null }),
   estado: async () => ({ disponivel: true, ativo: true, motivo: null }),
-  iniciar: async (id) => { iniciados.push(id); },
-  parar: async (id) => { paradas.push(id); },
+  iniciar: async (id) => { iniciados.push(id); if (aoIniciar) { const f = aoIniciar; aoIniciar = null; await f(id); } },
+  parar: async (id) => { paradas.push(id); await aoParar?.(id); },
   ligados: async () => new Set<string>(),
   operar: async (_id, tipo) => { operacoes.push(tipo); return operar(tipo); },
   apagarPerfil: async (id, agenteId) => { perfisApagados.push(`${id}:${agenteId}`); },
   maquinaDoComputador: async () => ({ id: "maq-1", nome: "Servidor de casa", contato: T0, foto: { ligadoDesde: T0 - 60_000, memoriaTotalMb: 8000, titulos: { [A]: "Gmail" } } }),
   executar: async (id, acao): Promise<ResultadoComputador> => {
     enviadas.push({ id, acao });
+    if (aoExecutar) { const f = aoExecutar; aoExecutar = null; await f(id); }
     if (semMemoria > 0) { semMemoria--; throw new EsperandoTela([B, "nao-e-uuid"]); }
     return { tela: { quadro: "q", imagem: "iVBORw0KGgo=", largura: 1280, altura: 800, url: "https://example.com", titulo: "Exemplo", texto: "ok", abas: [] } };
   },
@@ -73,7 +89,7 @@ const deps = () => ({
       obterDaPessoa: async (maquinaId: string | null = null) => { lugarPedidoNaCriacao = maquinaId; return pessoa; }, daPessoa: async () => pessoa, travarDaPessoa: async (id: string) => (id === pessoa.id ? pessoa : null),
       vincularBot: async (_c: string, agenteId: string) => !excluidos.has(agenteId) && agenteId in NOMES,
       registrar: async (r: Omit<(typeof registros)[number], "id">) => { const id = `registro-${registros.length + 1}`; registros.push({ ...r, id }); return { id }; },
-      concluir: async (id: string, estado: string, motivo?: string | null) => { const r = registros.find((x) => x.id === id); if (r) { r.estado = estado; r.motivo = motivo ?? null; } },
+      concluir: async (id: string, estado: string, motivo?: string | null) => { if (concluirLanca) throw new Error("banco caiu"); const r = registros.find((x) => x.id === id); if (r) { r.estado = estado; r.motivo = motivo ?? null; } },
       registrarSucesso: async () => false,
       registrarFalha: async () => null,
       // 4ª revisão: o último freio (assumir ou parar) desta tela, como o repositório.
@@ -95,10 +111,15 @@ const deps = () => ({
     computadorTelas: {
       obter: async (_c: string, agenteId: string) => (excluidos.has(agenteId) ? null : daTelaDo(agenteId)),
       buscar: async (_c: string, agenteId: string) => daTelaDo(agenteId),
-      travar: async (id: string) => telas.get(id) ?? null,
+      travar: async (id: string) => {
+        if (travarLancaDesde !== null && ++travarChamadas >= travarLancaDesde) throw new Error("banco caiu");
+        if (travarEspera) { const espera = travarEspera; travarEspera = null; await espera; }
+        return telas.get(id) ?? null;
+      },
       doComputador: async () => [...telas.values()].sort((x, y) => y.ultimaAtividadeEm - x.ultimaAtividadeEm),
       fila: async () => [...telas.values()].filter((t) => t.estado === "esperando").sort((x, y) => x.esperandoDesde! - y.esperandoDesde!),
       mudarEstado: async (id: string, estado: EstadoTelaComputador, em: number, de?: readonly EstadoTelaComputador[]) => {
+        if (fecharLanca && estado === "fechada" && de?.includes("fechando")) throw new Error("banco caiu");
         const t = telas.get(id);
         if (!t || (de && !de.includes(t.estado))) return false;
         mudar(id, { estado, esperandoDesde: estado === "esperando" ? (t.esperandoDesde ?? em) : null });
@@ -165,7 +186,16 @@ beforeEach(() => {
   guardado = null;
   iniciados = [];
   concluidos = new Set();
+  aoExecutar = null;
+  aoParar = null;
+  travarLancaDesde = null;
+  travarChamadas = 0;
+  concluirLanca = false;
+  fecharLanca = false;
+  aoIniciar = null;
+  travarEspera = null;
 });
+afterEach(() => { vi.useRealTimers(); });
 
 it("NOD-365: o lugar padrão é entregue ao INSERT do computador, não escolhido pelo primeiro iniciar", async () => {
   await observar(A);
@@ -308,12 +338,157 @@ it("ação aprovada que esgota a espera: guarda 'ainda esperando' para o turno, 
 });
 
 it("a reserva é por tela: a tela de A ocupada não segura a de B", async () => {
-  mudar("tela-a", { operacaoId: "outra", ocupadoAte: T0 + 60_000 });
+  // Reserva de outro processo nascida há 5 s (o lease é de 5 min): ainda vale.
+  mudar("tela-a", { operacaoId: "outra", ocupadoAte: T0 + 300_000 - 5_000 });
   const ra = await observar(A);
   expect(JSON.parse((ra as { conteudo: string }).conteudo).erro).toBe("computador_ocupado");
   const rb = await observar(B);
   expect("isError" in rb && rb.isError).toBeFalsy();
   expect(enviadas.map((e) => e.id)).toEqual(["tela-b"]);
+});
+
+it("reserva órfã (de outro processo, nascida há mais de 15 s): o bot e a pessoa passam por cima (1º ensaio no Mac, 30/10)", async () => {
+  // O servidor reiniciou no meio de uma ação: a reserva ficou no banco com o lease de 5 min pela frente.
+  mudar("tela-a", { operacaoId: RENOVADA, ocupadoAte: T0 + 300_000 - 20_000 });
+  const ra = await observar(A);
+  expect("isError" in ra && ra.isError).toBeFalsy();
+  expect(enviadas.map((e) => e.id)).toEqual(["tela-a"]);
+  mudar("tela-a", { controle: "pessoa", operacaoId: RENOVADA, ocupadoAte: T0 + 300_000 - 20_000 });
+  await expect(computadores.humano(MARLON, A, { tipo: "observar" })).resolves.toBeTruthy();
+});
+
+it("NOD-433: a reserva deste processo segue valendo além dos 15 s (ação longa): outra ação na mesma tela recebe ocupado", async () => {
+  let segunda: unknown;
+  aoExecutar = async () => {
+    agora += 60_000;
+    segunda = await observar(A);
+  };
+  await observar(A);
+  expect(JSON.parse((segunda as { conteudo: string }).conteudo).erro).toBe("computador_ocupado");
+  expect(enviadas).toHaveLength(1);
+});
+
+it("NOD-433: a reserva é renovada a cada 5 s enquanto a ação vive (a outra cor do azul/verde não a vê órfã) e a renovação para no fim", async () => {
+  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+  let renovadaAte: number | null = null;
+  let operacaoDaAcao: string | null = null;
+  aoExecutar = async () => {
+    operacaoDaAcao = telas.get("tela-a")!.operacaoId;
+    agora += 20_000;
+    await vi.advanceTimersByTimeAsync(5_000);
+    renovadaAte = telas.get("tela-a")!.ocupadoAte;
+  };
+  await observar(A);
+  expect(operacaoDaAcao).not.toBeNull();
+  expect(renovadaAte).toBe(agora + 300_000);
+  expect(telas.get("tela-a")).toMatchObject({ operacaoId: null, ocupadoAte: null });
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it("NOD-433: a renovação não ressuscita a reserva que já não é da ação (a pessoa assumiu e outra reserva entrou)", async () => {
+  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+  aoExecutar = async () => {
+    mudar("tela-a", { operacaoId: "de-outra-acao", ocupadoAte: agora + 1_000 });
+    await vi.advanceTimersByTimeAsync(5_000);
+  };
+  await observar(A);
+  expect(telas.get("tela-a")).toMatchObject({ operacaoId: "de-outra-acao", ocupadoAte: T0 + 1_000 });
+});
+
+it("NOD-433 (revisão r2): a reserva da cor velha (UUID v4, sem renovação) vale até o prazo dela no 1º deploy azul/verde", async () => {
+  // A cor velha ainda drena uma ação de 60 s atrás: a reserva dela não é renovada, mas não é órfã.
+  mudar("tela-a", { operacaoId: DA_COR_VELHA, ocupadoAte: T0 + 300_000 - 60_000 });
+  const ra = await observar(A);
+  expect(JSON.parse((ra as { conteudo: string }).conteudo).erro).toBe("computador_ocupado");
+  // A reserva da ociosidade da cor velha (agora + 90 s × N) também segura até vencer.
+  mudar("tela-a", { operacaoId: DA_COR_VELHA, ocupadoAte: T0 + 90_000 });
+  expect(JSON.parse(((await observar(A)) as { conteudo: string }).conteudo).erro).toBe("computador_ocupado");
+  expect(enviadas).toEqual([]);
+  // Vencida, passa como antes.
+  agora = T0 + 90_001;
+  const vencida = await observar(A);
+  expect("isError" in vencida && vencida.isError).toBeFalsy();
+  expect(enviadas.map((e) => e.id)).toEqual(["tela-a"]);
+});
+
+it("NOD-433 (revisão r3): a web não vê a reserva órfã como ocupada; a viva e a da cor velha, sim", async () => {
+  const ocupadoAte = async () => (await computadores.consultar(MARLON, A)).computador.ocupadoAte;
+  mudar("tela-a", { operacaoId: RENOVADA, ocupadoAte: T0 + 300_000 - 20_000 });
+  expect(await ocupadoAte()).toBeNull();
+  mudar("tela-a", { operacaoId: RENOVADA, ocupadoAte: T0 + 300_000 - 5_000 });
+  expect(await ocupadoAte()).toBe(T0 + 300_000 - 5_000);
+  mudar("tela-a", { operacaoId: DA_COR_VELHA, ocupadoAte: T0 + 90_000 });
+  expect(await ocupadoAte()).toBe(T0 + 90_000);
+});
+
+it("NOD-433: as operações deste processo são UUID v8; a órfã vale a partir de 15 s exatos sem renovação", () => {
+  const op = novaOperacao();
+  expect(op).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-8[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  expect(reservaViva({ operacaoId: RENOVADA, ocupadoAte: T0 + 300_000 - 14_999 }, T0)).toBe(true);
+  expect(reservaViva({ operacaoId: RENOVADA, ocupadoAte: T0 + 300_000 - 15_000 }, T0)).toBe(false);
+  expect(reservaViva({ operacaoId: DA_COR_VELHA, ocupadoAte: T0 + 1 }, T0)).toBe(true);
+  expect(reservaViva({ operacaoId: DA_COR_VELHA, ocupadoAte: T0 }, T0)).toBe(false);
+});
+
+it("NOD-433: a renovação não ressuscita a reserva da própria ação que já venceu", async () => {
+  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+  let depois: number | null = null;
+  aoExecutar = async () => {
+    mudar("tela-a", { ocupadoAte: agora - 1 });
+    await vi.advanceTimersByTimeAsync(5_000);
+    depois = telas.get("tela-a")!.ocupadoAte;
+  };
+  await observar(A);
+  expect(depois).toBe(T0 - 1);
+});
+
+it("NOD-433: o iniciar da pessoa renova a reserva enquanto liga e para a renovação no fim", async () => {
+  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+  mudar("tela-a", { controle: "pessoa" });
+  let renovadaAte: number | null = null;
+  aoIniciar = async () => {
+    agora += 20_000;
+    await vi.advanceTimersByTimeAsync(5_000);
+    renovadaAte = telas.get("tela-a")!.ocupadoAte;
+  };
+  await computadores.configurar(MARLON, A, "iniciar");
+  expect(renovadaAte).toBe(agora + 300_000);
+  expect(telas.get("tela-a")).toMatchObject({ operacaoId: null, ocupadoAte: null });
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it("NOD-433 (revisão r3): a renovação para no teto de 15 min e a reserva presa cai sozinha depois do último lease", async () => {
+  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+  mudar("tela-a", { controle: "pessoa" });
+  let aposTeto: { ocupadoAte: number | null; timers: number; agora: number } | null = null;
+  aoIniciar = async () => {
+    // O iniciar "preso" por 20 min: o relógio do banco (agora) anda junto com o dos timers.
+    for (let i = 0; i < 240; i++) { agora += 5_000; await vi.advanceTimersByTimeAsync(5_000); }
+    aposTeto = { ocupadoAte: telas.get("tela-a")!.ocupadoAte, timers: vi.getTimerCount(), agora };
+  };
+  await computadores.configurar(MARLON, A, "iniciar");
+  expect(aposTeto!.timers).toBe(0);
+  // A última renovação foi no teto (15 min); 5 min depois dela a reserva já venceu.
+  expect(aposTeto!.ocupadoAte).toBeLessThanOrEqual(aposTeto!.agora);
+  expect(aposTeto!.ocupadoAte).toBeGreaterThan(aposTeto!.agora - 300_000);
+});
+
+it("NOD-433 (revisão r4): a reserva tomada vira um aviso só e a renovação para", async () => {
+  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+  const saida = vi.spyOn(console, "log").mockImplementation(() => undefined);
+  mudar("tela-a", { controle: "pessoa" });
+  let timers = -1;
+  aoIniciar = async () => {
+    // Outro processo tomou a reserva (a renovação atrasou além dos 15 s); a ação segue mais 60 s.
+    telas.set("tela-a", { ...telas.get("tela-a")!, operacaoId: novaOperacao() });
+    for (let i = 0; i < 12; i++) { agora += 5_000; await vi.advanceTimersByTimeAsync(5_000); }
+    timers = vi.getTimerCount();
+  };
+  await computadores.configurar(MARLON, A, "iniciar");
+  const perdidas = saida.mock.calls.map(([l]) => String(l)).filter((l) => l.includes("computador_reserva_perdida"));
+  expect(perdidas).toHaveLength(1);
+  expect(JSON.parse(perdidas[0]!)).toMatchObject({ vaga_id: "tela-a", tomada: true });
+  expect(timers).toBe(0);
 });
 
 it("excluir o bot fecha só a tela dele; a máquina e a outra tela seguem", async () => {
@@ -333,7 +508,8 @@ it("ociosidade: fecha a tela parada há 15 min; a máquina só dorme quando nenh
   agora = T0 + limite + 1;
   mudar("tela-a", { estado: "aberta", ultimaAtividadeEm: T0 - 1 });
   mudar("tela-b", { estado: "aberta", ultimaAtividadeEm: agora - 60_000 });
-  expect(await computadores.desligarOciosos(MARLON, new Set(["pessoa-1", "tela-a", "tela-b"]), limite)).toBe(1);
+  // A tela B não está ligada no supervisor: fica fora do plano e só a releitura antes de dormir a vê.
+  expect(await computadores.desligarOciosos(MARLON, new Set(["pessoa-1", "tela-a"]), limite)).toBe(1);
   expect(paradas).toEqual(["tela-a"]);
   expect(telas.get("tela-a")).toMatchObject({ estado: "fechada", operacaoId: null });
 
@@ -348,6 +524,168 @@ it("ociosidade: fecha a tela parada há 15 min; a máquina só dorme quando nenh
   mudar("tela-a", { estado: "aberta", controle: "pessoa", ultimaAtividadeEm: T0 });
   expect(await computadores.desligarOciosos(MARLON, new Set(["pessoa-1", "tela-a"]), limite)).toBe(0);
   expect(paradas).toEqual([]);
+});
+
+it("NOD-433: ociosidade com duas telas: a segunda segue reservada (operação própria, renovada) enquanto a primeira fecha", async () => {
+  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+  const limite = 15 * 60_000;
+  agora = T0 + limite + 1;
+  mudar("tela-a", { estado: "aberta", ultimaAtividadeEm: T0 - 2 });
+  mudar("tela-b", { estado: "aberta", ultimaAtividadeEm: T0 - 1 });
+  let durante: { opA: string | null; opB: string | null; bAte: number | null; renovadaEm: number; acaoB: unknown } | null = null;
+  aoParar = async (id) => {
+    if (durante) return;
+    const outra = id === "tela-a" ? "tela-b" : "tela-a";
+    agora += 20_000;
+    await vi.advanceTimersByTimeAsync(5_000);
+    const renovadaEm = agora;
+    durante = { opA: telas.get(id)!.operacaoId, opB: telas.get(outra)!.operacaoId, bAte: telas.get(outra)!.ocupadoAte, renovadaEm, acaoB: await observar(telas.get(outra)!.agenteId) };
+  };
+  expect(await computadores.desligarOciosos(MARLON, new Set(["tela-a", "tela-b"]), limite)).toBe(2);
+  expect(durante!.opA).not.toBeNull();
+  expect(durante!.opB).not.toBeNull();
+  expect(durante!.opB).not.toBe(durante!.opA);
+  expect(durante!.bAte).toBe(durante!.renovadaEm + 300_000);
+  expect(JSON.parse((durante!.acaoB as { conteudo: string }).conteudo).erro).toBe("computador_ocupado");
+  expect(telas.get("tela-a")).toMatchObject({ estado: "fechada", operacaoId: null });
+  expect(telas.get("tela-b")).toMatchObject({ estado: "fechada", operacaoId: null });
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it("NOD-433: a ociosidade segura as próprias reservas sem renovação (Set) e as solta no fim; não renova a que outra tomou", async () => {
+  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+  const limite = 15 * 60_000;
+  agora = T0 + limite + 1;
+  mudar("tela-a", { estado: "aberta", ultimaAtividadeEm: T0 - 2 });
+  mudar("tela-b", { estado: "aberta", ultimaAtividadeEm: T0 - 1 });
+  let opB: string | null = null;
+  let semRenovar: unknown = null;
+  let tomada: TelaComputadorBot | null = null;
+  aoParar = async (id) => {
+    if (opB) return;
+    const outra = id === "tela-a" ? "tela-b" : "tela-a";
+    opB = telas.get(outra)!.operacaoId;
+    // 20 s sem tique de renovação: a reserva é deste processo (Set), não órfã.
+    agora += 20_000;
+    semRenovar = await observar(telas.get(outra)!.agenteId);
+    // Outra operação tomou a reserva da segunda tela: a renovação não a devolve à ociosidade.
+    mudar(outra, { operacaoId: RENOVADA, ocupadoAte: agora + 1_000 });
+    await vi.advanceTimersByTimeAsync(5_000);
+    tomada = { ...telas.get(outra)! };
+    mudar(outra, { operacaoId: opB, ocupadoAte: agora + 300_000 });
+  };
+  await computadores.desligarOciosos(MARLON, new Set(["tela-a", "tela-b"]), limite);
+  expect(JSON.parse((semRenovar as { conteudo: string }).conteudo).erro).toBe("computador_ocupado");
+  expect(tomada).toMatchObject({ operacaoId: RENOVADA, ocupadoAte: agora + 1_000 });
+  // Solta do Set: a mesma operação, parada há 20 s no banco, agora é órfã.
+  expect(reservaViva({ operacaoId: opB, ocupadoAte: agora + 300_000 - 20_000 }, agora)).toBe(false);
+});
+
+it("NOD-433 (revisão r5): três telas ociosas, outra operação toma uma no meio: a terceira segue renovada, a tomada não fecha e a máquina não dorme", async () => {
+  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+  const C = "00000000-0000-4000-8000-00000000000c";
+  const limite = 15 * 60_000;
+  agora = T0 + limite + 1;
+  mudar("tela-a", { estado: "aberta", ultimaAtividadeEm: T0 - 3 });
+  mudar("tela-b", { estado: "aberta", ultimaAtividadeEm: T0 - 2 });
+  telas.set("tela-c", tela(C, { estado: "aberta", ultimaAtividadeEm: T0 - 1 }));
+  let tomadaId: string | null = null;
+  let resto: string | null = null;
+  let depoisDaPerda: number | null = null;
+  aoParar = async (id) => {
+    if (tomadaId) return;
+    [tomadaId, resto] = ["tela-a", "tela-b", "tela-c"].filter((x) => x !== id) as [string, string];
+    mudar(tomadaId, { operacaoId: RENOVADA, ocupadoAte: agora + 300_000 });
+    for (let i = 0; i < 2; i++) { agora += 5_000; await vi.advanceTimersByTimeAsync(5_000); }
+    depoisDaPerda = telas.get(resto)!.ocupadoAte;
+  };
+  expect(await computadores.desligarOciosos(MARLON, new Set(["pessoa-1", "tela-a", "tela-b", "tela-c"]), limite)).toBe(2);
+  expect(depoisDaPerda).toBe(agora + 300_000);
+  expect(paradas).not.toContain(tomadaId);
+  expect(paradas).not.toContain("pessoa-1");
+  expect(paradas).toContain(resto);
+  expect(telas.get(tomadaId!)).toMatchObject({ operacaoId: RENOVADA });
+  expect(telas.get(resto!)).toMatchObject({ estado: "fechada", operacaoId: null });
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it("NOD-433 (revisão r6): uma ação reserva outra tela durante o `parar`: a máquina não dorme", async () => {
+  const limite = 15 * 60_000;
+  agora = T0 + limite + 1;
+  mudar("tela-a", { estado: "aberta", ultimaAtividadeEm: T0 - 1 });
+  mudar("tela-b", { estado: "fechada", ultimaAtividadeEm: T0 - 1 });
+  aoParar = async (id) => {
+    // A tela B estava fechada no plano; o bot dela começou uma ação enquanto a A fechava.
+    if (id === "tela-a") mudar("tela-b", { operacaoId: crypto.randomUUID(), ocupadoAte: agora + 300_000 });
+  };
+  // A tela B não está ligada no supervisor: fica fora do plano e só a releitura antes de dormir a vê.
+  expect(await computadores.desligarOciosos(MARLON, new Set(["pessoa-1", "tela-a"]), limite)).toBe(1);
+  expect(paradas).toEqual(["tela-a"]);
+});
+
+it("NOD-433 (revisão r6): se a conferência no banco falha, a tela não fecha e a máquina não dorme", async () => {
+  const limite = 15 * 60_000;
+  agora = T0 + limite + 1;
+  mudar("tela-a", { estado: "aberta", ultimaAtividadeEm: T0 - 1 });
+  // 1ª chamada: o plano trava a tela; a 2ª (a conferência antes do `parar`) lança.
+  travarLancaDesde = 2;
+  expect(await computadores.desligarOciosos(MARLON, new Set(["pessoa-1", "tela-a"]), limite)).toBe(0);
+  expect(paradas).toEqual([]);
+});
+
+it("NOD-433 (revisão r7): a transação de saída da ação falha: a reserva cai como órfã em 15 s, não segura 5 min", async () => {
+  mudar("tela-a", { estado: "aberta" });
+  concluirLanca = true;
+  await observar(A).catch(() => undefined);
+  const presa = telas.get("tela-a")!;
+  expect(presa.operacaoId).not.toBeNull();
+  expect(reservaViva(presa, agora + 15_000)).toBe(false);
+});
+
+it("Codex (PR 602): a renovação presa no banco quando a ação acaba não devolve a reserva a este processo (cai órfã em 15 s)", async () => {
+  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+  mudar("tela-a", { estado: "aberta" });
+  let soltar!: () => void;
+  aoExecutar = async () => {
+    // A renovação de 5 s entra e fica presa no `travar`; a ação acaba antes dela voltar.
+    travarEspera = new Promise<void>((r) => { soltar = r; });
+    await vi.advanceTimersByTimeAsync(5_000);
+  };
+  concluirLanca = true;
+  await observar(A).catch(() => undefined);
+  soltar();
+  await vi.advanceTimersByTimeAsync(0);
+  const presa = telas.get("tela-a")!;
+  expect(presa.operacaoId).not.toBeNull();
+  expect(reservaViva(presa, agora + 15_000)).toBe(false);
+});
+
+it("NOD-433 (revisão r7): a transação de saída da ociosidade falha: a reserva cai como órfã", async () => {
+  const limite = 15 * 60_000;
+  agora = T0 + limite + 1;
+  mudar("tela-a", { estado: "aberta", ultimaAtividadeEm: T0 - 1 });
+  fecharLanca = true;
+  await computadores.desligarOciosos(MARLON, new Set(["tela-a"]), limite).catch(() => undefined);
+  const presa = telas.get("tela-a")!;
+  expect(presa.operacaoId).not.toBeNull();
+  expect(reservaViva(presa, agora + 15_000)).toBe(false);
+});
+
+it("NOD-433: a ociosidade fecha a tela parada com reserva órfã (servidor caiu no meio de uma ação)", async () => {
+  const limite = 15 * 60_000;
+  agora = T0 + limite + 1;
+  mudar("tela-a", { estado: "aberta", ultimaAtividadeEm: T0 - 1, operacaoId: RENOVADA, ocupadoAte: agora + 300_000 - 30_000 });
+  expect(await computadores.desligarOciosos(MARLON, new Set(["tela-a"]), limite)).toBe(1);
+  expect(telas.get("tela-a")).toMatchObject({ estado: "fechada", operacaoId: null });
+});
+
+it("NOD-433: a fila ignora a tela 'esperando' com reserva órfã (o servidor caiu durante a espera)", async () => {
+  semMemoria = 1;
+  mudar("tela-b", { estado: "esperando", esperandoDesde: T0 - 60_000, operacaoId: RENOVADA, ocupadoAte: T0 + 300_000 - 30_000 });
+  const r = await observar(A);
+  expect("isError" in r && r.isError).toBeFalsy();
+  expect(JSON.parse((r as { conteudo: string }).conteudo).tela.url).toBe("https://example.com");
+  expect(agora - T0).toBeLessThan(120_000);
 });
 
 it("ociosidade: tela que esperou na fila além do limite sem reserva viva sai da fila", async () => {
