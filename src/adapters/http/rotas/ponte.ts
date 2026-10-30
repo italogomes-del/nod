@@ -17,6 +17,7 @@ import { log } from "../../../obs/log.ts";
 import type { DesfechoAdocao, PonteInternaNod } from "../../fundo/ponte-interna.ts";
 import { VERSAO_MINIMA_APP } from "../../fundo/ponte-interna.ts";
 import type { Ctx, Rota } from "../roteador.ts";
+import { CORPO_MAX_RESULTADO_COMPUTADOR } from "../util.ts";
 import { cabecalhoCookieSessao } from "../sessao-cookie.ts";
 import type { CanalComputador } from "../../computador/canal.ts";
 import type { EstadoComputadorRelatado } from "../../../contracts/computador-motor.ts";
@@ -236,8 +237,8 @@ export function criarPonteHttpServidor(d: {
     c.planos.set(turnoId, r.plano);
     return r.plano;
   }
-  function rota(nome: string, fn: (ctx: Ctx, corpo: Record<string, unknown>) => Promise<void>): Rota {
-    return { metodo: "POST", padrao: new RegExp(`^/${nome}$`), maquina: true, async handler(ctx) {
+  function rota(nome: string, fn: (ctx: Ctx, corpo: Record<string, unknown>) => Promise<void>, o: { corpoMax?: number } = {}): Rota {
+    return { metodo: "POST", padrao: new RegExp(`^/${nome}$`), maquina: true, ...(o.corpoMax ? { corpoMax: o.corpoMax } : {}), async handler(ctx) {
       ctx.res.setHeader("x-nod-versao-minima", VERSAO_MINIMA_APP);
       if (!versaoAceita(ctx.req.headers["x-nod-versao"], VERSAO_MINIMA_APP)) { ctx.json(426, { codigo: "atualize_app", versaoMinimaApp: VERSAO_MINIMA_APP }); return; }
       await fn(ctx, objeto(await ctx.corpo()));
@@ -501,7 +502,7 @@ export function criarPonteHttpServidor(d: {
       const r = resultadoComandoComputador(b);
       c.ultimo = d.agora();
       ctx.json(200, { aceito: d.computador.canal.resultado(ctx.escopo, ctx.params.chaveId!, r) });
-    }),
+    }, { corpoMax: CORPO_MAX_RESULTADO_COMPUTADOR }),
     /** A foto do computador (a cada 15 s e a cada mudança): o canal guarda; a composição reconcilia o banco. */
     rota("computador/estado", async (ctx, b) => {
       const c = conexao(ctx);

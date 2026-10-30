@@ -75,8 +75,10 @@ export type ComputadorUi = {
   /** NOD-365: a troca de lugar pedida (a confirmação aberta) e a recusa da origem sem contato, com o texto do servidor. */
   trocarPara?: string | null;
   recusaDaTroca?: { maquinaId: string; texto: string } | null;
+  /** NOD-407: o Acordar/Tentar de novo recusado, com a frase do servidor (a causa real); some no próximo pedido ou quando liga. */
+  recusa?: string | null;
 };
-export const UI_INICIAL: ComputadorUi = { realce: null, confirmar: null, etapasAbertas: false, preparoAberto: false, trocarPara: null, recusaDaTroca: null };
+export const UI_INICIAL: ComputadorUi = { realce: null, confirmar: null, etapasAbertas: false, preparoAberto: false, trocarPara: null, recusaDaTroca: null, recusa: null };
 
 type BotVisto = Pick<Agente, "id" | "nome" | "cor" | "forma">;
 
@@ -304,17 +306,20 @@ function htmlSono(bot: BotVisto, titulo: string, sub: string, acao: string): str
 }
 
 /** O topo da gaveta (só a dona): miniatura com Abrir, a linha "sem tela", o mascote dormindo ou acordando. */
-export function htmlGavetaTela(dto: ComputadorPessoaDto, bot: BotVisto): string {
+export function htmlGavetaTela(dto: ComputadorPessoaDto, bot: BotVisto, recusa: string | null = null): string {
   const g = estadoDaGaveta(dto, bot.id);
-  const corpo = g === "miniatura"
+  // NOD-407: o Acordar recusado fica aqui, na aba, com a causa real e o Tentar de novo — não no banner vermelho do chat.
+  const aviso = recusa && (g === "dormindo" || g === "fora" || g === "sem_tela") ? htmlAviso({ titulo: "O computador não acordou", apoio: recusa, acoes: [link("Tentar de novo", 'data-act="operar-computador" data-op="tentar_de_novo"')], tom: "aviso" }) : "";
+  const corpo = aviso || (g === "miniatura"
     ? htmlMiniatura(bot)
     : g === "sem_tela"
-      ? `<p class="cb-gv-linha" role="status">${ICONE_CB.monitor}<span>${esc(bot.nome)} não está usando o navegador agora.</span></p>`
+      // NOD-410 (pedido do Marlon, 29/10): a pessoa abre o computador ela mesma, já no controle; ao Parar, volta ao bot.
+      ? `<p class="cb-gv-linha" role="status">${ICONE_CB.monitor}<span>${esc(bot.nome)} não está usando o navegador agora.</span></p><p class="cb-acoes">${link("Abrir o computador", `data-act="abrir-computador" data-id="${esc(bot.id)}" data-assumir="1"`)}</p>`
       : g === "dormindo"
         ? htmlSono(bot, "Zzz… o computador está descansando", "Acorda sozinho quando um bot precisar.", ghost("Acordar", 'data-act="operar-computador" data-op="acordar"', "gv-acordar"))
         : g === "acordando"
-          ? `<div class="cb-acordando">${htmlSono(bot, "Acordando…", `Abrindo a tela de ${bot.nome}`, "")}</div>`
-          : htmlAviso({ titulo: "O computador parou de responder", apoio: dto.falha ? textoDaFalha(dto.falha.motivo) : "Atualizar costuma resolver.", acoes: [link("Tentar de novo", 'data-act="operar-computador" data-op="tentar_de_novo"'), link("Ver computador do bot", 'data-act="ver-computador-do-bot" data-realce="atualizar"')] });
+          ? `<div class="cb-acordando">${htmlSono(bot, "Acordando…", dto.preparo?.estado === "ligando" || dto.preparo?.estado === "esperando_memoria" ? "Ligando o computador no seu Mac · pode levar até 3 min" : `Abrindo a tela de ${bot.nome}`, "")}</div>`
+          : htmlAviso({ titulo: "O computador parou de responder", apoio: dto.falha ? textoDaFalha(dto.falha.motivo) : "Atualizar costuma resolver.", acoes: [link("Tentar de novo", 'data-act="operar-computador" data-op="tentar_de_novo"'), link("Ver computador do bot", 'data-act="ver-computador-do-bot" data-realce="atualizar"')] }));
   // `data-comp-bot`: a aba Computador da gaveta (ADR-125) à vista — o laço de web/telas/tela-do-bot.ts só observa com ela.
   return `<section class="gv-secao gv-tela" data-comp-bot="${esc(bot.id)}" data-gaveta-computador="${g}">${corpo}</section>`;
 }
@@ -441,7 +446,7 @@ export function htmlPilula(nome: string, estado: EstadoPilula): string {
 
 /** A tela cheia: quase a janela toda, título pequeno, ✕ discreto, a imagem inteira e a pílula. */
 export function htmlTelaCheia(nome: string, pedido: string | null): string {
-  return `<div class="cb-tela"><header class="cb-tela-cab"><h2 class="cb-tela-tit">Tela de ${esc(nome)}</h2><span class="cb-tela-pedido">${esc(pedido ?? "")}</span><button type="button" class="cb-tela-x" data-c="fechar" aria-label="Fechar a tela de ${esc(nome)}">${ICONE_CB.fechar}</button></header><div class="cb-tela-vista"><img alt="Tela de ${esc(nome)}" tabindex="0" draggable="false" hidden /><p class="cb-gv-linha cb-tela-vazia" role="status">${ICONE_CB.monitor}<span>${esc(nome)} não está usando o navegador agora.</span></p><div class="cb-tela-pilula"></div></div></div>`;
+  return `<div class="cb-tela"><header class="cb-tela-cab"><h2 class="cb-tela-tit">Tela de ${esc(nome)}</h2><span class="cb-tela-pedido">${esc(pedido ?? "")}</span><button type="button" class="cb-tela-x" data-c="fechar" aria-label="Fechar a tela de ${esc(nome)}">${ICONE_CB.fechar}</button></header><div class="cb-tela-vista"><img alt="Tela de ${esc(nome)}" tabindex="0" draggable="false" hidden /><div class="cb-tela-vivo" hidden></div><p class="cb-gv-linha cb-tela-vazia" role="status">${ICONE_CB.monitor}<span>${esc(nome)} não está usando o navegador agora.</span></p><div class="cb-tela-pilula"></div></div></div>`;
 }
 
 /** O pedido de login leve (duas linhas, sem caixa): a miniatura é o clique. */

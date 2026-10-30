@@ -14,6 +14,7 @@ import { mkdir, readFile, readdir, rename, rm, writeFile, chmod } from 'node:fs/
 import { existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { availableParallelism, totalmem } from 'node:os';
 import net from 'node:net';
+import { StringDecoder } from 'node:string_decoder';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -31,7 +32,7 @@ import { desempacotar, desmarcarSaida, empacotar, gravarLoja as gravarLojaImport
 
 const AQUI = path.dirname(fileURLToPath(import.meta.url));
 export const ID_VALIDO = /^[A-Za-z0-9_-]{1,64}$/;
-export const TIPOS = ['iniciar', 'abrir_tela', 'acao', 'fechar_tela', 'parar', 'atualizar', 'redefinir', 'sair_de_todos', 'esquecer_senhas', 'apagar_perfil', 'exportar_logins', 'importar_logins', 'cancelar_exportacao', 'marcar_saida'];
+export const TIPOS = ['iniciar', 'abrir_tela', 'acao', 'fechar_tela', 'parar', 'atualizar', 'redefinir', 'sair_de_todos', 'esquecer_senhas', 'apagar_perfil', 'exportar_logins', 'importar_logins', 'cancelar_exportacao', 'marcar_saida', 'vivo'];
 /**
  * NOD-365 (definido em 2026-10-28): os comandos que podem chegar antes de o computador conhecer a chave do servidor e
  * a fixam (TOFU), como o `iniciar`: a troca de máquina começa na origem e no destino antes de qualquer `iniciar` lá.
@@ -42,9 +43,12 @@ export const VARREDURA_MS = 6 * 60 * 60_000;
 /** NOD-365: trava durável da origem entre o snapshot e `marcar_saida`/`cancelar_exportacao`. */
 export const MARCA_TROCA_EM_CURSO = '.troca-em-curso';
 /** Os comandos que dizem a tela (levam `agenteId`). */
-export const TIPOS_DA_TELA = ['abrir_tela', 'acao', 'fechar_tela', 'apagar_perfil'];
+export const TIPOS_DA_TELA = ['abrir_tela', 'acao', 'fechar_tela', 'apagar_perfil', 'vivo'];
 export const PRAZO_ABRIR_TELA_MS = 60_000;
 export const PRAZO_ACAO_MS = 55_000;
+/** NOD-95 (ADR-138): a tela tem 10 s para subir o x11vnc; e, com a pessoa ao vivo, a tela conta como ativa a cada 30 s. */
+export const PRAZO_VIVO_MS = 10_000;
+export const TOQUE_VIVO_MS = 30_000;
 export const BATIMENTO_MS = 30_000;
 /** Displays :100 a :199 (ADR-122: Xvfb :1NN). */
 export const DISPLAY_BASE = 100;
@@ -109,12 +113,16 @@ export function binariosDoAmbiente(env = process.env) {
   return {
     xvfb: env.NOD_PC_XVFB ?? 'Xvfb', openbox: env.NOD_PC_OPENBOX ?? 'openbox', chromium: env.NOD_PC_CHROMIUM ?? chromiumDoPlaywright(env),
     bwrap: env.NOD_PC_BWRAP === 'nao' ? null : (env.NOD_PC_BWRAP ?? 'bwrap'), xdotool: env.NOD_PC_XDOTOOL ?? 'xdotool', xclip: env.NOD_PC_XCLIP ?? 'xclip',
-    scrot: env.NOD_PC_SCROT ?? 'scrot', dbus: env.NOD_PC_DBUS ?? 'dbus-daemon', keyring: env.NOD_PC_KEYRING ?? 'gnome-keyring-daemon', secretTool: env.NOD_PC_SECRET_TOOL ?? 'secret-tool',
+    scrot: env.NOD_PC_SCROT ?? 'scrot', x11vnc: env.NOD_PC_X11VNC ?? 'x11vnc', dbus: env.NOD_PC_DBUS ?? 'dbus-daemon', keyring: env.NOD_PC_KEYRING ?? 'gnome-keyring-daemon', secretTool: env.NOD_PC_SECRET_TOOL ?? 'secret-tool',
   };
 }
 
-/** As pastas do Chromium do Playwright no Linux: chrome-linux64 no x64, chrome-linux no arm64 (a VM do Mac, ADR-127 §4). */
-export const PASTAS_DO_CHROME = ['chrome-linux64', 'chrome-linux'];
+/**
+ * As pastas do Chromium do Playwright no Linux: chrome-linux64 no x64; no arm64 (a VM do Mac, ADR-127 §4),
+ * chrome-linux-arm64 no Playwright atual (chromium-1243, visto no disco 1.0.0-rc.2 em 29/10) e chrome-linux nos antigos.
+ * Sem a do arm64, o 1º ensaio no Mac lançava o chrome-linux64 que não existe (`bwrap: execvp ... No such file`).
+ */
+export const PASTAS_DO_CHROME = ['chrome-linux64', 'chrome-linux-arm64', 'chrome-linux'];
 
 /** O Chromium fixado pelo Playwright em PLAYWRIGHT_BROWSERS_PATH (o instalador usa /opt/nod-motor/chromium). */
 export function chromiumDoPlaywright(env = process.env) {
@@ -588,6 +596,28 @@ export function criarSupervisor(op) {
         if (!c.ligado) return falhou(cmd.id, 'nao_iniciou');
         if (!cmd.acao || typeof cmd.acao.tipo !== 'string') return falhou(cmd.id, 'acao_falhou');
         return acao(c, cmd);
+      case 'vivo': {
+        // NOD-95 (ADR-138): a tela ao vivo da pessoa. Pede à tela o socket do VNC dela; quem liga o fluxo é o
+        // servirControle, na própria conexão que trouxe o comando. `vnc` é o caminho do socket e fica só entre os dois:
+        // nunca sobe ao servidor. 5ª revisão: o vivo não abre tela (a web a abre pela captura antes). Ele vem por uma
+        // conexão própria e pode chegar depois do `fechar_tela` do Parar: reabrir deixaria a tela da pessoa segurando a
+        // máquina acordada. Só a tela aberta, ou abrindo, serve.
+        if (!c.ligado) return falhou(cmd.id, 'nao_iniciou');
+        const estado = c.telas.get(cmd.agenteId)?.estado;
+        if (estado !== 'aberta' && estado !== 'abrindo') return falhou(cmd.id, 'tela_alterada');
+        const aberta = await abrirTela(c, cmd.agenteId, cmd.uso);
+        if (aberta.esperando) return resultado(cmd.id, 'esperando_tela', { quem: aberta.esperando });
+        if (!aberta.ok) return falhou(cmd.id, aberta.motivo);
+        const t = c.telas.get(cmd.agenteId);
+        if (t?.estado !== 'aberta') return falhou(cmd.id, 'tela_alterada');
+        const m = await pedirATela(t, { tipo: 'vivo' }, PRAZO_VIVO_MS);
+        if (m.erro) {
+          log(`vivo de ${cmd.agenteId}: ${m.erro} ${m.detalhe ?? ''}`);
+          return falhou(cmd.id, m.erro === 'faltam_pacotes' ? 'faltam_pacotes' : 'acao_falhou');
+        }
+        t.ultimaAcaoEm = agora();
+        return resultado(cmd.id, 'ok', { vnc: m.resultado.socket });
+      }
       case 'fechar_tela':
         await fecharTela(c, cmd.agenteId);
         return resultado(cmd.id, 'ok');
@@ -808,9 +838,9 @@ export function criarSupervisor(op) {
   async function tratar(cmd) {
     const id = typeof cmd?.id === 'string' ? cmd.id : '';
     try {
-      if (!cmd || typeof cmd !== 'object' || !ID_VALIDO.test(String(cmd.computadorId ?? '')) || !TIPOS.includes(cmd.tipo)) return falhou(id, 'acao_falhou');
-      if (cmd.agenteId !== undefined && !ID_VALIDO.test(String(cmd.agenteId))) return falhou(id, 'acao_falhou');
-      if (TIPOS_DA_TELA.includes(cmd.tipo) && !cmd.agenteId) return falhou(id, 'acao_falhou');
+      if (!cmd || typeof cmd !== 'object' || !ID_VALIDO.test(String(cmd.computadorId ?? '')) || !TIPOS.includes(cmd.tipo)) { log(`comando ${id} recusado: forma (${cmd?.tipo ?? 'sem tipo'})`); return falhou(id, 'acao_falhou'); }
+      if (cmd.agenteId !== undefined && !ID_VALIDO.test(String(cmd.agenteId))) { log(`comando ${id} recusado: agenteId`); return falhou(id, 'acao_falhou'); }
+      if (TIPOS_DA_TELA.includes(cmd.tipo) && !cmd.agenteId) { log(`comando ${id} recusado: ${cmd.tipo} sem agenteId`); return falhou(id, 'acao_falhou'); }
       const novo = !computadores.has(cmd.computadorId);
       const c = await obter(cmd.computadorId);
       // NOD-96 PR 7 (definido em 2026-10-22): o computador que nasce aqui (instalação limpa, a sonda do driver) é
@@ -883,6 +913,14 @@ export function criarSupervisor(op) {
     varrer,
     estados: () => [...computadores.values()].map(estadoDe),
     ouvir(f) { ouvintes.add(f); return () => ouvintes.delete(f); },
+    /** NOD-95: a pessoa está ao vivo nesta tela: conta como ação (a régua e o servidor não a fecham por ociosidade). */
+    tocarTela(computadorId, agenteId) {
+      const c = computadores.get(computadorId);
+      const t = c?.telas.get(agenteId);
+      if (!t || t.estado !== 'aberta') return;
+      t.ultimaAcaoEm = agora();
+      relatarEstado(c);
+    },
     /** Espera as fusões de cookies em curso (testes). */
     async assentar() { for (const c of computadores.values()) await c.fila; },
     async encerrar() {
@@ -893,18 +931,55 @@ export function criarSupervisor(op) {
   };
 }
 
-/** O socket de controle: uma linha JSON por mensagem. Devolve o net.Server. */
+/**
+ * O socket de controle: uma linha JSON por mensagem. Devolve o net.Server.
+ *
+ * NOD-95 (ADR-138): a mensagem `vivo` muda o que a conexão é. Até ela, linhas JSON (e os estados que o supervisor
+ * manda a todos). Aceita, a conexão vira o fluxo cru do VNC da tela (RFB), nos dois sentidos, e os estados param de
+ * chegar nela; o motor abre uma conexão só para isso. Recusada, a conexão fecha depois do `ok: false`.
+ */
 export function servirControle(supervisor) {
   return net.createServer((socket) => {
-    socket.setEncoding('utf8');
     socket.on('error', () => {});
     const escrever = (m) => { if (!socket.destroyed) socket.write(`${JSON.stringify(m)}\n`); };
-    const parar = supervisor.ouvir(escrever);
-    socket.on('close', parar);
+    let parar = supervisor.ouvir(escrever);
+    socket.on('close', () => parar());
     for (const e of supervisor.estados()) escrever({ tipo: 'estado', ...e });
+    const decoder = new StringDecoder('utf8');
     let buf = '';
+    /** O socket do x11vnc, depois do `vivo` aceito: daqui em diante os bytes passam direto. */
+    let vnc = null;
+    async function abrirVivo(cmd) {
+      const r = await supervisor.tratar(cmd?.tipo === 'vivo' ? cmd : null);
+      // Revisão do PR #599: o motor desistiu enquanto a tela subia; não abre o VNC (nem o toque que a mantém ativa).
+      if (socket.destroyed) return;
+      if (r.desfecho !== 'ok' || typeof r.vnc !== 'string') {
+        process.stderr.write(`[supervisor] vivo ${cmd?.id ?? '?'} recusado: ${r.desfecho} ${r.motivo ?? ''} ${r.desfecho === 'ok' ? 'sem vnc' : ''}\n`);
+        escrever({ tipo: 'vivo', ok: false, motivo: r.motivo ?? 'acao_falhou' });
+        socket.end();
+        return;
+      }
+      const v = net.connect(r.vnc);
+      v.on('error', () => {});
+      // Fechou antes de o VNC atender: o socket do VNC não fica pendurado.
+      socket.on('close', () => v.destroy());
+      v.once('connect', () => {
+        if (socket.destroyed) { v.destroy(); return; }
+        parar();
+        parar = () => {};
+        vnc = v;
+        escrever({ tipo: 'vivo', ok: true });
+        // Contrapressão nos dois sentidos (revisão do PR #599): quem escreve pausa quem lê até o outro drenar.
+        v.on('data', (b) => { if (!socket.destroyed && !socket.write(b)) { v.pause(); socket.once('drain', () => v.resume()); } });
+        v.on('close', () => socket.destroy());
+        const toque = setInterval(() => supervisor.tocarTela?.(cmd.computadorId, cmd.agenteId), TOQUE_VIVO_MS);
+        socket.on('close', () => clearInterval(toque));
+      });
+      v.once('close', () => { if (vnc !== v) { escrever({ tipo: 'vivo', ok: false, motivo: 'acao_falhou' }); socket.end(); } });
+    }
     socket.on('data', (b) => {
-      buf += b;
+      if (vnc) { if (!vnc.write(b)) { socket.pause(); vnc.once('drain', () => socket.resume()); } return; }
+      buf += decoder.write(b);
       if (buf.length > 4_000_000) { socket.destroy(); return; }
       let i;
       while ((i = buf.indexOf('\n')) >= 0) {
@@ -915,8 +990,11 @@ export function servirControle(supervisor) {
         try { m = JSON.parse(linha); } catch { escrever({ tipo: 'resultado', id: '', desfecho: 'falhou', motivo: 'acao_falhou' }); continue; }
         // MensagemAoSupervisor (NOD-96 PR 3) é o envelope do motor; o comando cru segue aceito.
         if (m?.tipo === 'pedir_estado') { for (const e of supervisor.estados()) escrever({ tipo: 'estado', ...e }); continue; }
+        if (m?.tipo === 'vivo') { void abrirVivo(m.comando); return; }
         const cmd = m?.tipo === 'comando' && m.comando && typeof m.comando === 'object' ? m.comando : m;
-        void supervisor.tratar(cmd).then((r) => escrever({ tipo: 'resultado', ...r }));
+        // O `vivo` só vale como mensagem própria (acima): pelo envelope comum ele não tem como ligar o fluxo.
+        if (cmd?.tipo === 'vivo') { escrever({ tipo: 'resultado', id: typeof cmd.id === 'string' ? cmd.id : '', desfecho: 'falhou', motivo: 'acao_falhou' }); continue; }
+        void supervisor.tratar(cmd).then((r) => { const { vnc: _v, ...semVnc } = r; escrever({ tipo: 'resultado', ...semVnc }); });
       }
     });
   });

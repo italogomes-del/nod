@@ -315,6 +315,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       foraDoAr: async () => new Map(),
       atividadeDoBot: async () => [],
       atividadeDaTela: async () => [],
+      ultimoFreio: async () => null,
       // NOD-96: o computador da pessoa no motor só existe no banco (tests/integration/computador-da-pessoa.test.ts).
       daPessoa: async () => null, travarDaPessoa: async () => null, vincularBot: async () => false,
       obterDaPessoa: async () => { throw new Error("use o banco para testar o computador da pessoa"); },

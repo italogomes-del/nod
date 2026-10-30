@@ -18,6 +18,20 @@ let quadroValido: string | null;
 const enviadas: AcaoComputador[] = [];
 /** Resposta pronta para a próxima ação (sem tela, com erro…); null = a tela de sempre. */
 let proxima: ResultadoComputador | null;
+/** Revisão do PR #599: quando a pessoa assumiu (null = nunca) e quando o turno nasceu. */
+let assumiuEm: number | null = null;
+let turnoCriadoEm = 0;
+/** 4ª revisão: o último freio pode ser o Parar. */
+let freioTipo: "assumir" | "parar" = "assumir";
+let daPessoa: boolean | undefined = true;
+let turnoOrigem = "conversa";
+/** 3ª revisão: a mensagem que originou o turno (quem escreveu e quando) decide a retomada, não o turno. */
+let msgOrigemId: string | null = "msg-1";
+let msgCriadoEm = 2_000;
+let msgAutor: { autor_tipo: "pessoa" | "agente"; autor_id: string } = { autor_tipo: "pessoa", autor_id: MARLON.pessoaId };
+/** 2ª revisão: o que a retomada grava (controle, registro) e as sessões ao vivo que ela fecha. */
+const registrosTipo: string[] = [];
+const vivoFechado: string[] = [];
 
 /** A máquina falsa reproduz o runtime: quadro novo a cada tela e clique só com o quadro da última. */
 const driver: DriverComputador = {
@@ -39,15 +53,17 @@ const deps = {
   repos: {
     computadores: {
       obter: async () => computador, travar: async () => computador,
-      registrar: async () => ({ id: "registro-1" }), concluir: async () => {},
+      registrar: async (r: { tipo: string }) => { registrosTipo.push(r.tipo); return { id: "registro-1" }; }, concluir: async () => {},
       ocupar: async (_id: string, operacao: string, ate: number) => { computador = { ...computador, operacaoId: operacao, ocupadoAte: ate }; },
       liberar: async () => { computador = { ...computador, operacaoId: null, ocupadoAte: null }; },
       registrarSucesso: async () => false,
-      configurar: async () => {},
+      configurar: async (_id: string, ajuste: { controle?: Computador["controle"] }) => { if (ajuste.controle) computador = { ...computador, controle: ajuste.controle }; },
       buscarAcao: async (id: string) => ({ id, computadorId: computador.id, turnoId: "turno-1", estado: "pendente", argumentosCifrados: JSON.stringify({ tipo: "navegar", url: "https://example.com" }) }),
       gravarResultado: async () => {},
+      ultimoFreio: async () => (assumiuEm === null ? null : { tipo: freioTipo, em: assumiuEm }),
     },
-    turnos: { buscar: async (id: string) => ({ id, estado: "executando", agenteId: AGENTE, ownerId: MARLON.pessoaId, pararSolicitadoEm: null, motivoInterrupcao: null }) },
+    turnos: { buscar: async (id: string) => ({ id, estado: "executando", agenteId: AGENTE, ownerId: MARLON.pessoaId, pararSolicitadoEm: null, motivoInterrupcao: null, criadoEm: turnoCriadoEm, origem: turnoOrigem, mensagemOrigemId: msgOrigemId }) },
+    mensagens: { buscar: async (id: string) => (id === msgOrigemId ? { id, autoria: msgAutor, criadoEm: msgCriadoEm } : null) },
     agentes: { buscar: async () => ({ id: AGENTE, modoAprovacao: "manual" }), execucaoBloqueada: async () => false },
     paradas: { ativa: async () => false },
     events: { gravarComOutbox: async () => {} },
@@ -56,12 +72,12 @@ const deps = {
 
 let agora = 1_700_000_000_000;
 const opcoes = { executor: () => "catcher" as const, dentro: async <T>(_e: unknown, fn: (d: never) => Promise<T>) => fn(deps as never), driver, cifrar: (s: string) => s, decifrar: (s: string) => s, mudou: () => {}, agora: () => agora };
-const computadores = criarComputadores({ ...opcoes, guardarTelas: true });
+const computadores = criarComputadores({ ...opcoes, guardarTelas: true, vivo: { fecharDaTela: (_e: unknown, agenteId: string) => { vivoFechado.push(agenteId); } } });
 const semChave = criarComputadores(opcoes);
 
 const plano = (turnoId = "turno-1") => ({
   tenantId: MARLON.tenantId, turnoId, agenteId: AGENTE, conversaId: "conversa-1", expiraEm: Number.MAX_SAFE_INTEGER, confiancaEntrada: "nao_confiavel",
-  autoria: { conta_de_execucao: MARLON.pessoaId },
+  autoria: { conta_de_execucao: MARLON.pessoaId }, ...(daPessoa === undefined ? {} : { daPessoa }),
   catalogo: { ferramentas: ["computador_observar", "computador_navegar", "computador_interagir", "computador_pedir_ajuda"].map((nome) => ({ nome, origem: "computador" })) },
 }) as never;
 
@@ -78,6 +94,8 @@ beforeEach(() => {
   quadroValido = null;
   enviadas.length = 0;
   proxima = null;
+  assumiuEm = null; freioTipo = "assumir"; turnoCriadoEm = 0; daPessoa = true; turnoOrigem = "conversa"; msgOrigemId = "msg-1"; msgCriadoEm = 2_000; msgAutor = { autor_tipo: "pessoa", autor_id: MARLON.pessoaId };
+  registrosTipo.length = 0; vivoFechado.length = 0;
   agora += 3_600_000; // turnos de um teste não vazam para o outro
 });
 
@@ -115,13 +133,19 @@ it("não cresce: no máximo 200 turnos (sai o mais antigo) e nada passa de 2 h",
   expect(computadores.ultimaTela("t-teto-200")).toBeNull();
 });
 
-it("pessoa no controle, aguardando a pessoa ou resultado com erro não viram captura", async () => {
-  for (const controle of ["pessoa", "aguardando_pessoa"] as const) {
-    computador = { ...computador, controle };
-    const r = await chamar("computador_observar", {}, `t-${controle}`);
-    expect(r.json.estado).toBe("aguardando_pessoa");
-    expect(computadores.ultimaTela(`t-${controle}`)).toBeNull();
-  }
+it("aguardando a pessoa ou resultado com erro não viram captura; a pessoa no controle o bot retoma (29/10)", async () => {
+  computador = { ...computador, controle: "aguardando_pessoa" };
+  const r = await chamar("computador_observar", {}, "t-aguardando");
+  expect(r.json.estado).toBe("aguardando_pessoa");
+  expect(computadores.ultimaTela("t-aguardando")).toBeNull();
+  // A pessoa pediu algo ao bot depois de assumir: ele retoma o computador em vez de esperar a devolução, e a ação segue.
+  computador = { ...computador, controle: "pessoa" };
+  assumiuEm = 1_000; turnoCriadoEm = 2_000;
+  const retomada = await chamar("computador_observar", {}, "t-pessoa");
+  expect(retomada.json.estado).toBeUndefined();
+  expect(computador.controle).toBe("bot");
+  expect(registrosTipo).toContain("retomar");
+  expect(vivoFechado).toEqual([AGENTE]);
   computador = { ...computador, controle: "bot" };
   proxima = { codigoSaida: 1, tela: { quadro: "q", imagem: png(9), largura: 1, altura: 1, url: "", titulo: "", texto: "", abas: [] } } as ResultadoComputador;
   await chamar("computador_observar", {}, "t-erro");
@@ -151,4 +175,44 @@ it("capturas: desligado é sempre null; ligado lê os bytes sem esquecer (a repe
   expect(capturas.ler("t-ligado")).toBeNull();
   expect(computadores.ultimaTela("t-ligado")).toBeNull();
   expect(criarCapturas({ ligado: true }).ler("t-ligado")).toBeNull();
+});
+
+it("revisão do PR #599: com a pessoa no controle, rotina/colega, turno anterior ao assumir ou ajuda aberta seguem esperando", async () => {
+  const casos: Array<[string, () => void]> = [
+    ["turno que não é da pessoa (rotina, colega, frente)", () => { daPessoa = false; }],
+    ["plano sem daPessoa", () => { daPessoa = undefined; }],
+    ["turno que já corria quando ela assumiu", () => { turnoCriadoEm = 500; msgCriadoEm = 500; }],
+    ["turno repetido depois do assumir (cota, troca de IA, adiar) de uma mensagem anterior", () => { msgCriadoEm = 500; }],
+    ["turno da sala nascido da fala de um bot", () => { turnoOrigem = "sala"; msgAutor = { autor_tipo: "agente", autor_id: "outro-bot" }; }],
+    ["mensagem de outra pessoa", () => { msgAutor = { autor_tipo: "pessoa", autor_id: "outra-pessoa" }; }],
+    ["turno sem mensagem de origem (ligação)", () => { turnoOrigem = "ligacao"; msgOrigemId = null; }],
+    ["sem registro do assumir", () => { assumiuEm = null; }],
+    ["volta automática (retomada: cota, erro transitório, me-chame-às) criada depois do assumir", () => { turnoOrigem = "retomada"; }],
+    ["rotina com daPessoa por engano", () => { turnoOrigem = "rotina"; }],
+    ["mensagem anterior ao Parar (assumiu, pediu, o bot retomou, ela parou)", () => { freioTipo = "parar"; assumiuEm = 3_000; }],
+    ["pedido de ajuda do bot aberto", () => { computador = { ...computador, ajudaDecisaoId: "decisao-1" }; }],
+  ];
+  for (const [nome, preparar] of casos) {
+    computador = { ...computador, controle: "pessoa", ajudaDecisaoId: null };
+    assumiuEm = 1_000; freioTipo = "assumir"; turnoCriadoEm = 2_000; daPessoa = true; turnoOrigem = "conversa";
+    msgOrigemId = "msg-1"; msgCriadoEm = 2_000; msgAutor = { autor_tipo: "pessoa", autor_id: MARLON.pessoaId };
+    preparar();
+    const antes = enviadas.length;
+    const r = await chamar("computador_observar", {}, `t-${nome}`);
+    expect(r.json.estado, nome).toBe("aguardando_pessoa");
+    expect(enviadas.length, nome).toBe(antes);
+    expect(computador.controle, nome).toBe("pessoa");
+    expect(vivoFechado, nome).toEqual([]);
+  }
+});
+
+it("4ª revisão: a retomada desfeita por erro na mesma transação não derruba o ao vivo dela", async () => {
+  computador = { ...computador, controle: "pessoa", ajudaDecisaoId: null };
+  assumiuEm = 1_000;
+  const ocupar = deps.repos.computadores.ocupar;
+  deps.repos.computadores.ocupar = async () => { throw new Error("banco caiu"); };
+  try {
+    await expect(chamar("computador_observar", {}, "t-rollback")).rejects.toThrow();
+  } finally { deps.repos.computadores.ocupar = ocupar; }
+  expect(vivoFechado).toEqual([]);
 });

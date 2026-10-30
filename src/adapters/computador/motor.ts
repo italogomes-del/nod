@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
 import type { AcaoComputador, AmbienteComputador, DriverComputador, LugarDoComputador, ProgressoDaTroca, ResultadoComputador } from "../../contracts/computador.ts";
 import type { ComandoComputador, ResultadoComandoComputador, TipoComandoComputador } from "../../contracts/computador-motor.ts";
+import type { SessaoVivo } from "../../contracts/computador-vivo.ts";
 import type { UsoDoMac } from "../../contracts/raio-x.ts";
 import type { VmLocalAnunciada } from "../../contracts/vm-local.ts";
-import { escolherMaquina, type MaquinaCandidata, motivoParaFicarAcordada, opcoesDeLugar, PRAZO_COMANDO_MS, TETO_PRONTO_MS } from "../../domain/computador-canal.ts";
+import { escolherMaquina, type MaquinaCandidata, motivoParaFicarAcordada, opcoesDeLugar, PRAZO_COMANDO_MS, TETO_PRONTO_MS, TETO_PRONTO_VM_LOCAL_MS } from "../../domain/computador-canal.ts";
 import type { PapelMaquina } from "../../contracts/maquina.ts";
 import { ehFalhaComputador, EsperandoTela, FalhaComputador } from "../../domain/computador.ts";
 import { log } from "../../obs/log.ts";
@@ -82,7 +83,7 @@ export const PRAZO_RESPOSTA_ACAO_MS = 90_000;
 /** definido em 2026-10-22: o `parar` não segura quem chamou; sem resposta em 30 s, segue (a ociosidade da máquina desliga). */
 const PRAZO_RESPOSTA_PARAR_MS = 30_000;
 /** Os comandos que falam de uma tela (o `agenteId` vai junto); os outros são do computador inteiro. */
-const TIPOS_DA_TELA = new Set<TipoComandoComputador>(["abrir_tela", "acao", "fechar_tela", "apagar_perfil"]);
+const TIPOS_DA_TELA = new Set<TipoComandoComputador>(["abrir_tela", "acao", "fechar_tela", "apagar_perfil", "vivo"]);
 /** A cada quanto o driver confere se a máquina ainda tem contato enquanto espera. */
 const PASSO_MS = 250;
 /** NOD-93: o intervalo entre os `iniciar` enquanto o Mac responde esperando_tela (preparo da VM local). */
@@ -173,7 +174,8 @@ export function criarDriverMotor(o: OpcoesDriverMotor): DriverComputador & { mot
     const loc = await localizar(idDoPortao, escopo);
     const id = loc.computadorId ?? idDoPortao;
     const maquina = await maquinaViva(id, loc);
-    const ate = agora() + TETO_PRONTO_MS;
+    // O Mac com a VM local pode estar religando a VM (ou criando-a pela 1ª vez): o teto dele é maior.
+    const ate = agora() + (maquina.vmLocal ? TETO_PRONTO_VM_LOCAL_MS : TETO_PRONTO_MS);
     const foto = () => o.canal.foto(loc.escopo, maquina.machineId);
     if (foto()?.computadorId === id && foto()?.ligado) {
       entregarSaidaPendente(idDoPortao, loc, id, maquina.machineId);
@@ -422,6 +424,20 @@ export function criarDriverMotor(o: OpcoesDriverMotor): DriverComputador & { mot
       ultimaAcao.set(maquina.machineId, agora());
       if (r.desfecho === "ok") return r.resultado ?? {};
       // NOD-96 PR 4: sem tela livre a ação não falha; o portão põe a tela na fila e tenta de novo na vez dela.
+      if (r.desfecho === "esperando_tela") throw new EsperandoTela(r.quem ?? []);
+      throw new FalhaComputador(r.motivo ?? "acao_falhou", { maquina: maquina.nome });
+    },
+    /**
+     * NOD-95 (ADR-138): a tela ao vivo deste bot. O comando leva a sessão e o token; o motor abre o WebSocket de volta e
+     * responde `ok` com o VNC já ligado. Sem tela livre, espera como a ação (o portão decide).
+     */
+    async vivo(id: string, sessao: SessaoVivo, escopo?: Escopo): Promise<void> {
+      const loc = await localizar(id, escopo);
+      const maquina = await maquinaViva(id, loc);
+      ultimaAcao.set(maquina.machineId, agora());
+      const r = await enviar(id, loc, maquina, "vivo", agora() + PRAZO_RESPOSTA_ACAO_MS, () => new FalhaComputador("sem_resposta", { maquina: maquina.nome }), { vivo: sessao });
+      ultimaAcao.set(maquina.machineId, agora());
+      if (r.desfecho === "ok") return;
       if (r.desfecho === "esperando_tela") throw new EsperandoTela(r.quem ?? []);
       throw new FalhaComputador(r.motivo ?? "acao_falhou", { maquina: maquina.nome });
     },

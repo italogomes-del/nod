@@ -76,6 +76,11 @@ const deps = () => ({
       concluir: async (id: string, estado: string, motivo?: string | null) => { const r = registros.find((x) => x.id === id); if (r) { r.estado = estado; r.motivo = motivo ?? null; } },
       registrarSucesso: async () => false,
       registrarFalha: async () => null,
+      // 4ª revisão: o último freio (assumir ou parar) desta tela, como o repositório.
+      ultimoFreio: async (_c: string, telaId: string | null) => {
+        const r = registros.filter((x) => (x as { telaId?: string | null }).telaId === telaId && (x.tipo === "assumir" || x.tipo === "parar")).at(-1);
+        return r ? { tipo: r.tipo as "assumir" | "parar", em: agora } : null;
+      },
       emUsoPor: async () => ({ titulo: "outra tarefa", deFora: false }),
       atividadeDaTela: async () => [],
       iniciarOperacao: async (_id: string, tipo: "atualizar", em: number) => { if (pessoa.operacao) return false; pessoa = { ...pessoa, operacao: { tipo, progresso: 0, etapa: null, desde: em } }; return true; },
@@ -605,4 +610,69 @@ it("trocar de máquina: valida o destino, uma troca por vez, avança o progresso
     delete driver.lugares;
     delete driver.trocar;
   }
+});
+
+it("revisão do PR #599: o ao vivo só com a pessoa no controle, no ar e sem operação; devolver, parar e iniciar fecham a sessão da tela (assumir não)", async () => {
+  const pedidos: string[] = [];
+  const fechadas: string[] = [];
+  const comVivo = criarComputadores({
+    executor: () => "catcher", porPessoa: true, driver: { ...driver, vivo: async (id) => { pedidos.push(id); } }, cifrar: (s) => s, decifrar: (s) => s, mudou: () => {}, agora: () => agora,
+    lugarPadraoNaCriacao: () => "maquina-inicial",
+    dentro: async <T>(_e: unknown, fn: (d: never) => Promise<T>) => fn(deps() as never),
+    dormir: async (ms) => { agora += ms; },
+    vivo: { fecharDaTela: (_e, agenteId) => { fechadas.push(agenteId); } },
+  });
+  const sessao = { sessao: "s", token: "t" };
+  mudar("tela-a", { estado: "aberta" });
+  // Assistindo (o bot no controle): nao_permitido, e nada vai à máquina.
+  await expect(comVivo.vivo(MARLON, A, sessao)).rejects.toMatchObject({ codigo: "nao_permitido" });
+  expect(await comVivo.vivoAindaPode(MARLON, A)).toBe(false);
+  await comVivo.configurar(MARLON, A, "assumir");
+  expect(fechadas).toEqual([]);
+  expect(await comVivo.vivoAindaPode(MARLON, A)).toBe(true);
+  await comVivo.vivo(MARLON, A, sessao);
+  expect(pedidos).toEqual(["tela-a"]);
+  // Fora do ar ou com operação em curso: estado_invalido.
+  pessoa = { ...pessoa, indisponivelDesde: agora };
+  await expect(comVivo.vivo(MARLON, A, sessao)).rejects.toMatchObject({ codigo: "estado_invalido" });
+  expect(await comVivo.vivoAindaPode(MARLON, A)).toBe(false); // 3ª revisão: a sessão aberta também cai
+  pessoa = { ...pessoa, indisponivelDesde: null, operacao: { tipo: "atualizar", progresso: 0, etapa: null, desde: agora } };
+  await expect(comVivo.vivo(MARLON, A, sessao)).rejects.toMatchObject({ codigo: "estado_invalido" });
+  pessoa = { ...pessoa, operacao: null };
+  expect(pedidos).toEqual(["tela-a"]);
+  for (const op of ["devolver", "parar", "iniciar"] as const) {
+    fechadas.length = 0;
+    await comVivo.configurar(MARLON, A, op);
+    expect(fechadas, op).toEqual([A]);
+    // 3ª revisão: o Parar grava controle "pessoa" com a tela desabilitada; a reconferência não pode aprovar.
+    expect(await comVivo.vivoAindaPode(MARLON, A), op).toBe(false);
+  }
+  // 4ª revisão: depois do Parar (a tela fecha, o controle fica com ela), o ao vivo não reabre a tela; um assumir novo, sim.
+  await comVivo.configurar(MARLON, A, "assumir");
+  await comVivo.configurar(MARLON, A, "parar");
+  await expect(comVivo.vivo(MARLON, A, sessao)).rejects.toMatchObject({ codigo: "nao_permitido" });
+  expect(await comVivo.vivoAindaPode(MARLON, A)).toBe(false);
+  await comVivo.configurar(MARLON, A, "assumir");
+  expect(await comVivo.vivoAindaPode(MARLON, A)).toBe(true);
+  pedidos.length = 0;
+  await comVivo.vivo(MARLON, A, sessao);
+  expect(pedidos).toEqual(["tela-a"]);
+});
+
+it("revisão do PR #599 (NOD-410): bot sem tela no computador ligado da pessoa — o painel vem com o ativo dela, para o Abrir o computador assumir", async () => {
+  const perguntados: string[] = [];
+  const espiao = criarComputadores({
+    executor: () => "catcher", porPessoa: true, cifrar: (s) => s, decifrar: (s) => s, mudou: () => {}, agora: () => agora,
+    driver: { ...driver, estado: async (id) => { perguntados.push(id); return { disponivel: true, ativo: true, motivo: null }; } },
+    lugarPadraoNaCriacao: () => "maquina-inicial",
+    dentro: async <T>(_e: unknown, fn: (d: never) => Promise<T>) => fn(deps() as never),
+    dormir: async (ms) => { agora += ms; },
+  });
+  telas.delete("tela-b");
+  const semTela = await espiao.consultar(MARLON, B);
+  expect(semTela).toMatchObject({ ativo: true, computador: { id: null, agenteId: B, controle: "bot" }, atividade: [] });
+  expect(perguntados).toEqual(["pessoa-1"]);
+  perguntados.length = 0;
+  expect(await espiao.consultar(MARLON, A)).toMatchObject({ ativo: true, computador: { id: "tela-a" } });
+  expect(perguntados).toEqual(["tela-a"]);
 });

@@ -30,8 +30,8 @@ export type SondaComputador = {
 export function anuncioDoComputador(s: SondaComputador): AnuncioComputador | undefined {
   if (!s.existe(PASTA_DO_COMPUTADOR)) return undefined;
   const falta: string[] = BINARIOS_DO_COMPUTADOR.filter((b) => !s.noPath(b));
-  // chrome-linux64 no x64, chrome-linux no arm64 (a VM do Mac, ADR-127 §4).
-  const chromium = s.pastas(CHROMIUM_DO_COMPUTADOR).some((p) => /^chromium-\d+$/.test(p) && ["chrome-linux64", "chrome-linux"].some((d) => s.existe(join(CHROMIUM_DO_COMPUTADOR, p, d, "chrome"))));
+  // chrome-linux64 no x64; chrome-linux-arm64 (Playwright atual) ou chrome-linux (antigo) no arm64 (a VM do Mac, ADR-127 §4).
+  const chromium = s.pastas(CHROMIUM_DO_COMPUTADOR).some((p) => /^chromium-\d+$/.test(p) && ["chrome-linux64", "chrome-linux-arm64", "chrome-linux"].some((d) => s.existe(join(CHROMIUM_DO_COMPUTADOR, p, d, "chrome"))));
   if (!chromium) falta.push("chromium");
   for (const arquivo of ["supervisor.mjs", "tela.mjs", "terminal.mjs", "node_modules/playwright-core/package.json"]) {
     if (!s.existe(join(PASTA_DO_COMPUTADOR, arquivo))) falta.push(arquivo.startsWith("node_modules") ? "playwright-core" : arquivo);

@@ -66,6 +66,7 @@
     "*.ts": "eslint --fix"
   },
   "dependencies": {
+    "@novnc/novnc": "^1.7.0",
     "mermaid": "12.2.0",
     "pdfjs-dist": "6.4.299",
     "postgres": "^3.4.9",

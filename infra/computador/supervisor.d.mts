@@ -7,6 +7,8 @@ export const VARREDURA_MS: number;
 export const MARCA_TROCA_EM_CURSO: string;
 export const PRAZO_ABRIR_TELA_MS: number;
 export const PRAZO_ACAO_MS: number;
+export const PRAZO_VIVO_MS: number;
+export const TOQUE_VIVO_MS: number;
 export const BATIMENTO_MS: number;
 export const DISPLAY_BASE: number;
 export function memoriaDaArvore(pid: number | undefined): number | null;
@@ -20,6 +22,8 @@ export type Supervisor = {
   varrer(): Promise<string[]>;
   estados(): Array<{ computadorId: string; ligado: boolean; supervisorPub: string; ligadoDesde: number | null; memoriaTotalMb: number; operacao: { tipo: string; pct: number; etapa: string } | null; telas: Array<{ agenteId: string; estado: string; ultimaAcaoEm: number | null; titulo: string | null; memoriaMb: number | null }> }>;
   ouvir(f: (m: unknown) => void): () => void;
+  /** NOD-95: a pessoa está ao vivo na tela; conta como ação dela. */
+  tocarTela(computadorId: string, agenteId: string): void;
   assentar(): Promise<void>;
   encerrar(): Promise<void>;
 };

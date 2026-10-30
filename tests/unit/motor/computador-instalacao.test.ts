@@ -34,6 +34,8 @@ describe("instalação do computador da pessoa (ADR-122)", () => {
   it("instala os pacotes (com scrot), os usuários, o Chromium fixo e as quatro units", () => {
     const b = blocoDoComputador();
     expect(PACOTES_DO_COMPUTADOR).toContain("scrot");
+    // NOD-95 (ADR-138): a tela ao vivo precisa do x11vnc na máquina.
+    expect(PACOTES_DO_COMPUTADOR).toContain("x11vnc");
     expect(b).toContain(`install -y -qq ${PACOTES_DO_COMPUTADOR.join(" ")}`);
     expect(b).toContain("useradd --system --no-create-home --home-dir /var/lib/nod-computador --shell /usr/sbin/nologin --gid nod-pc-arquivos nod-pc\n");
     expect(b).toContain("--gid nod-pc-arquivos nod-pc-term");
@@ -169,6 +171,19 @@ describe("anúncio do computador no motor", () => {
       expect(anuncioDoComputador(sonda())).toEqual({ estado: "pronto" });
     } finally {
       tudo.delete("/opt/nod-motor/chromium/chromium-1200/chrome-linux/chrome");
+      tudo.add(x64);
+    }
+  });
+
+  it("no arm64 do Playwright atual o Chromium vem em chrome-linux-arm64 (1º ensaio no Mac)", () => {
+    const x64 = "/opt/nod-motor/chromium/chromium-1200/chrome-linux64/chrome";
+    const arm = "/opt/nod-motor/chromium/chromium-1200/chrome-linux-arm64/chrome";
+    tudo.delete(x64);
+    tudo.add(arm);
+    try {
+      expect(anuncioDoComputador(sonda())).toEqual({ estado: "pronto" });
+    } finally {
+      tudo.delete(arm);
       tudo.add(x64);
     }
   });

@@ -194,6 +194,8 @@ export function criarApi(escopo: Escopo) {
     revogarWorkspace: (id: string) => del(`conversas/${id}/workspace`),
     permitirPasta: (propostaId: string, pasta: string) => post(`propostas/${propostaId}/permitir-pasta`, { pasta }),
     computador: (id: string) => get<ComputadorDto>(`agentes/${encodeURIComponent(id)}/computador`),
+    /** NOD-95 (ADR-138): o WebSocket da tela ao vivo do bot (mesma origem; o cookie da sessão vai sozinho). */
+    urlVivo: (id: string) => `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}${base}/agentes/${encodeURIComponent(id)}/computador/vivo`,
     /** NOD-97: `origem` diz de onde veio a troca de controle (o servidor de antes ignora o campo). */
     configurarComputador: (id: string, operacao: string, origem?: "botao" | "clique" | "fechou_tela") => post<{ ok: true }>(`agentes/${encodeURIComponent(id)}/computador`, origem === undefined ? { operacao } : { operacao, origem }),
     /**

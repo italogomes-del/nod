@@ -1,7 +1,8 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { zstdCompressSync } from "node:zlib";
 import { afterAll, describe, expect, it } from "vitest";
 import { servirControle } from "../../../infra/computador/supervisor.mjs";
 import {
@@ -10,6 +11,7 @@ import {
   caminhosVmLocal,
   conectarSocket,
   criarRuntimeVmLocal,
+  descompactarDisco,
   FalhaVmLocal,
   gerarLimaYaml,
   lerStatus,
@@ -56,6 +58,10 @@ describe("desktop/vm-local/lima.yaml (NOD-93)", () => {
   it("o usuário do Lima entra no grupo nod (dono do ctl.sock) e o probe espera o socket do supervisor", () => {
     const sistema = yaml.slice(yaml.indexOf("- mode: system"), yaml.indexOf("probes:"));
     expect(sistema).toContain('usermod -aG nod "{{.User}}"');
+    // 1º ensaio no Mac: a sessão ssh do encaminhamento nasce antes do `mode: system`; o grupo tem de vir do boot.
+    const boot = yaml.slice(yaml.indexOf("- mode: boot"), yaml.indexOf("- mode: system"));
+    expect(yaml.indexOf("- mode: boot")).toBeGreaterThan(-1);
+    expect(boot).toContain("/etc/group");
     expect(yaml).not.toContain("mode: yq");
     expect(yaml.slice(yaml.indexOf("probes:"), yaml.indexOf("portForwards:"))).toContain("test -S /run/nod-computador/ctl.sock");
   });
@@ -208,7 +214,8 @@ describe("desktop/vm-local/runtime.ts (NOD-93)", () => {
       };
       const conexoes: Array<[string, number]> = [];
       const conectar = async (socket: string, prazoMs: number) => { conexoes.push([socket, prazoMs]); return status === "Running" && supervisorDe; };
-      const rt = criarRuntimeVmLocal({ dadosApp, recursos, ambiente: { HOME: "/h", DOCKER_HOST: "tcp://x" }, executar, conectar });
+      const descompactar = async (zst: string) => { chamadas.push(`descompactar ${zst}`); return zst.replace(/\.zst$/, ""); };
+      const rt = criarRuntimeVmLocal({ dadosApp, recursos, ambiente: { HOME: "/h", DOCKER_HOST: "tcp://x" }, executar, conectar, descompactar });
       return { rt, c, chamadas, envs, conexoes, quebrar: () => { status = "Broken"; }, supervisorCaiu: () => { supervisorDe = false; }, setFalha: (f: Executar) => criarRuntimeVmLocal({ dadosApp, recursos, ambiente: {}, executar: f }) };
     }
     const pedido = { imagem: "/cache/nod-vm-1.0.0-arm64.img.zst", versao: "1.0.0", arch: "arm64" as const, memoriaGiB: 3, cpus: 4 };
@@ -218,10 +225,13 @@ describe("desktop/vm-local/runtime.ts (NOD-93)", () => {
       await rt.ligar(pedido);
       expect(chamadas).toEqual([
         "limactl disk create nod-dados --size 64GiB --format raw",
+        "descompactar /cache/nod-vm-1.0.0-arm64.img.zst",
         `limactl create --name=nod --tty=false ${c.yaml}`,
         "limactl start --tty=false nod",
       ]);
       expect(readFileSync(c.yaml, "utf8")).toContain(`hostSocket: "${c.socket}"`);
+      // O Lima recebe o raw: o `.zst` ele só abriria com um `zstd` no PATH, que o Mac não tem.
+      expect(readFileSync(c.yaml, "utf8")).toContain('location: "/cache/nod-vm-1.0.0-arm64.img"');
       for (const env of envs) expect(env).toEqual({ HOME: "/h", PATH: "/usr/bin:/bin:/usr/sbin:/sbin", LIMA_HOME: c.limaHome });
       expect(await rt.status()).toBe("ligada");
       expect(await rt.supervisorResponde()).toBe(true);
@@ -245,8 +255,8 @@ describe("desktop/vm-local/runtime.ts (NOD-93)", () => {
       await rt.ligar(pedido);
       chamadas.length = 0;
       await rt.ligar({ ...pedido, versao: "1.1.0", imagem: "/cache/nod-vm-1.1.0-arm64.img.zst" });
-      expect(chamadas).toEqual(["limactl stop nod", "limactl delete --force nod", `limactl create --name=nod --tty=false ${c.yaml}`, "limactl start --tty=false nod"]);
-      expect(readFileSync(c.yaml, "utf8")).toContain("nod-vm-1.1.0-arm64.img.zst");
+      expect(chamadas).toEqual(["limactl stop nod", "limactl delete --force nod", "descompactar /cache/nod-vm-1.1.0-arm64.img.zst", `limactl create --name=nod --tty=false ${c.yaml}`, "limactl start --tty=false nod"]);
+      expect(readFileSync(c.yaml, "utf8")).toContain('location: "/cache/nod-vm-1.1.0-arm64.img"');
     });
 
     it("só a memória mudou: para, ajusta e liga, sem recriar", async () => {
@@ -263,7 +273,7 @@ describe("desktop/vm-local/runtime.ts (NOD-93)", () => {
       quebrar();
       chamadas.length = 0;
       await rt.ligar(pedido);
-      expect(chamadas).toEqual(["limactl delete --force nod", `limactl create --name=nod --tty=false ${c.yaml}`, "limactl start --tty=false nod"]);
+      expect(chamadas).toEqual(["limactl delete --force nod", "descompactar /cache/nod-vm-1.0.0-arm64.img.zst", `limactl create --name=nod --tty=false ${c.yaml}`, "limactl start --tty=false nod"]);
     });
 
     it("arquitetura mudou na mesma versão: recria (QA)", async () => {
@@ -271,7 +281,7 @@ describe("desktop/vm-local/runtime.ts (NOD-93)", () => {
       await rt.ligar(pedido);
       chamadas.length = 0;
       await rt.ligar({ ...pedido, arch: "x64" });
-      expect(chamadas).toEqual(["limactl stop nod", "limactl delete --force nod", `limactl create --name=nod --tty=false ${c.yaml}`, "limactl start --tty=false nod"]);
+      expect(chamadas).toEqual(["limactl stop nod", "limactl delete --force nod", "descompactar /cache/nod-vm-1.0.0-arm64.img.zst", `limactl create --name=nod --tty=false ${c.yaml}`, "limactl start --tty=false nod"]);
       expect(readFileSync(c.yaml, "utf8")).toMatch(/^arch: x86_64$/m);
     });
 
@@ -304,6 +314,68 @@ describe("desktop/vm-local/runtime.ts (NOD-93)", () => {
       const erro = await rt.ligar(pedido).catch((e: unknown) => e);
       expect(erro).toBeInstanceOf(FalhaVmLocal);
       expect(erro).toMatchObject({ etapa: "criar o disco de dados", detalhe: "b | c | vz: não suportado" });
+    });
+
+    it("depois do create, o raw do cache sai e o .zst fica (1º ensaio no Mac)", async () => {
+      const dadosApp = join(tmp, "app-raw");
+      const recursos = join(dadosApp, "Resources");
+      mkdirSync(join(recursos, "vm-local"), { recursive: true });
+      writeFileSync(join(recursos, "vm-local/lima.yaml"), MODELO);
+      const cache = join(dadosApp, "cache");
+      mkdirSync(cache, { recursive: true });
+      const zst = join(cache, "nod-vm-1.0.0-arm64.img.zst");
+      writeFileSync(zst, zstdCompressSync(Buffer.from("disco")));
+      const c = caminhosVmLocal(dadosApp);
+      let rawNoCreate = false;
+      const rt = criarRuntimeVmLocal({ dadosApp, recursos, ambiente: {}, conectar: async () => true, executar: async (_b, args) => {
+        if (args[0] === "list") return { codigo: 0, saida: `${JSON.stringify({ name: "nod", status: "Stopped" })}\n`, erro: "" };
+        if (args[0] === "create") { rawNoCreate = existsSync(join(cache, "nod-vm-1.0.0-arm64.img")); mkdirSync(c.instancia, { recursive: true }); }
+        return { codigo: 0, saida: "", erro: "" };
+      } });
+      await rt.ligar({ ...pedido, imagem: zst });
+      expect(rawNoCreate).toBe(true);
+      expect(existsSync(join(cache, "nod-vm-1.0.0-arm64.img"))).toBe(false);
+      expect(existsSync(zst)).toBe(true);
+    });
+  });
+
+  describe("descompactarDisco (1º ensaio no Mac: o Lima não tem zstd)", () => {
+    it("descompacta ao lado, com o mesmo conteúdo, e mantém o .zst", async () => {
+      const dir = join(tmp, "desc-1");
+      mkdirSync(dir, { recursive: true });
+      // Zeros no meio e no fim: o raw esparso tem de ter o tamanho e os bytes do original, buracos incluídos.
+      const original = Buffer.concat([Buffer.from("cabeça"), Buffer.alloc(300_000), Buffer.from("meio"), Buffer.alloc(200_001)]);
+      const zst = join(dir, "nod-vm-1.0.0-arm64.img.zst");
+      writeFileSync(zst, zstdCompressSync(original));
+      const raw = await descompactarDisco(zst);
+      expect(raw).toBe(join(dir, "nod-vm-1.0.0-arm64.img"));
+      expect(statSync(raw).size).toBe(original.length);
+      expect(readFileSync(raw).equals(original)).toBe(true);
+      expect(existsSync(zst)).toBe(true);
+      expect(existsSync(`${raw}.parcial`)).toBe(false);
+    });
+
+    it("um .img que já existe é reaproveitado; sem .zst no nome, nada a fazer", async () => {
+      const dir = join(tmp, "desc-2");
+      mkdirSync(dir, { recursive: true });
+      const zst = join(dir, "d.img.zst");
+      writeFileSync(zst, "não é zstd");
+      writeFileSync(join(dir, "d.img"), "pronto");
+      expect(await descompactarDisco(zst)).toBe(join(dir, "d.img"));
+      expect(readFileSync(join(dir, "d.img"), "utf8")).toBe("pronto");
+      expect(await descompactarDisco("/x/d.img")).toBe("/x/d.img");
+    });
+
+    it("zst corrompido: falha com a etapa e não deixa raw nem parcial", async () => {
+      const dir = join(tmp, "desc-3");
+      mkdirSync(dir, { recursive: true });
+      const zst = join(dir, "d.img.zst");
+      writeFileSync(zst, "não é zstd");
+      const erro = await descompactarDisco(zst).catch((e: unknown) => e);
+      expect(erro).toBeInstanceOf(FalhaVmLocal);
+      expect(erro).toMatchObject({ etapa: "descompactar o disco" });
+      expect(existsSync(join(dir, "d.img"))).toBe(false);
+      expect(existsSync(join(dir, "d.img.parcial"))).toBe(false);
     });
   });
 });

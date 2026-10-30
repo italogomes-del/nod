@@ -36,7 +36,7 @@ export type Metodo = "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
  * que muda algo declara o seu; a catraca (tests/conformidade/paridade.test.ts) falha sem ele. Id fora do registro não compila.
  */
 export type Rota =
-  | { metodo: Metodo; padrao: RegExp; handler(ctx: Ctx): Promise<void>; interno?: true; maquina?: true; publica?: undefined; acao?: IdAcao }
+  | { metodo: Metodo; padrao: RegExp; handler(ctx: Ctx): Promise<void>; interno?: true; maquina?: true; publica?: undefined; acao?: IdAcao; /** Teto do corpo desta rota (padrão: CORPO_MAX). */ corpoMax?: number }
   | { metodo: Metodo; padrao: RegExp; handler(ctx: CtxPublico): Promise<void>; publica: true; interno?: undefined; maquina?: undefined; acao?: IdAcao };
 
 /** Identidade derivada do token de turno (L5 implementa services.tokenTurno.autorizar). */
@@ -66,14 +66,14 @@ const GRUPOS_UUID = new Set(["id", "mid", "aid", "eid"]);
 const PREFIXO_INTERNO = /^\/api\/interno(\/.*)$/;
 const PREFIXO_PUBLICO = /^\/api(\/.*)$/;
 
-function montarCtx(req: IncomingMessage, res: ServerResponse, escopo: Escopo | null, params: Record<string, string>, daPessoa = false): CtxPublico {
+function montarCtx(req: IncomingMessage, res: ServerResponse, escopo: Escopo | null, params: Record<string, string>, daPessoa = false, corpoMax?: number): CtxPublico {
   let corpoLido: Promise<unknown> | null = null;
   return {
     req,
     res,
     escopo,
     params,
-    corpo: () => (corpoLido ??= lerCorpo(req, { daPessoa })),
+    corpo: () => (corpoLido ??= lerCorpo(req, { daPessoa, ...(corpoMax ? { max: corpoMax } : {}) })),
     json: (status, body) => json(res, status, body),
   };
 }
@@ -113,7 +113,7 @@ export function criarRoteador(rotas: Rota[], deps: DepsRoteador): (req: Incoming
       }
       const achado = casar(rotas, metodo, caminho.slice("/api/maquina".length), (r) => r.maquina === true);
       if (!achado) { json(res, 404, { codigo: "nao_encontrado" }); return; }
-      await (achado.rota.handler as (c: CtxPublico) => Promise<void>)(montarCtx(req, res, identidade, { ...achado.params, chaveId: identidade.chaveId }));
+      await (achado.rota.handler as (c: CtxPublico) => Promise<void>)(montarCtx(req, res, identidade, { ...achado.params, chaveId: identidade.chaveId }, false, achado.rota.publica ? undefined : achado.rota.corpoMax));
       return;
     }
 

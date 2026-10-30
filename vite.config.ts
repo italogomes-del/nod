@@ -38,12 +38,21 @@ export default defineConfig({
       // Modo ligação (definido em 2026-10-04, ADR-071): o canal de mídia é WebSocket. Antes do "/api" genérico (o
       // primeiro que casa ganha) e com changeOrigin: false, porque o servidor confere o Origin do upgrade.
       "^/api/t/[^/]+/voz": { target: api, changeOrigin: false, ws: true },
+      // NOD-95 (ADR-138): a tela ao vivo também é WebSocket, com o mesmo Origin.
+      "^/api/t/[^/]+/agentes/[^/]+/computador/vivo": { target: api, changeOrigin: false, ws: true },
       "/api": api,
     },
   },
+  // NOD-95 (ADR-138): o noVNC entra por import dinâmico ao assumir o controle; no 1º ensaio o otimizador do dev o
+  // descobria na hora, falhava ao empacotá-lo e o navegador ficava com um 504 "Outdated Optimize Dep".
+  // Fora do pré-bundle: o noVNC 1.7 usa `await` no topo do módulo, que o esbuild do otimizador (alvo es2020) recusa; o
+  // dev serve o ESM dele direto, e o build (abaixo) mira es2022, onde o `await` de topo existe.
+  optimizeDeps: { exclude: ["@novnc/novnc"] },
   build: {
     outDir: path.resolve("dist/web"),
     emptyOutDir: true,
+    // NOD-95: o noVNC usa `await` de topo; es2022 é o primeiro alvo que o aceita (Chrome 89+, Safari 15+, Firefox 89+).
+    target: "es2022",
     // NOD-328: o renderizador de diagramas é uma 2ª entrada, com nome fixo fora de /assets (o iframe sandbox pede pelo
     // nome; no-cache em estatico.ts). O mermaid e os chunks dele ficam em /assets, com hash, e só baixam no 1º diagrama.
     rollupOptions: {

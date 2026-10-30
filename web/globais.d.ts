@@ -28,3 +28,20 @@ declare module "*?url" {
   const url: string;
   export default url;
 }
+
+/** NOD-95 (ADR-138): o noVNC não publica tipos; só o que web/lib/tela-vivo.ts usa. */
+declare module "@novnc/novnc" {
+  export default class RFB extends EventTarget {
+    constructor(target: HTMLElement, url: string, options?: { shared?: boolean; credentials?: Record<string, string> });
+    scaleViewport: boolean;
+    clipViewport: boolean;
+    viewOnly: boolean;
+    focusOnClick: boolean;
+    background: string;
+    disconnect(): void;
+    focus(): void;
+    blur(): void;
+    clipboardPasteFrom(texto: string): void;
+    sendKey(keysym: number, code: string | null, down?: boolean): void;
+  }
+}

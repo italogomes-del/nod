@@ -69,6 +69,7 @@ export function criarCanalComputador(o: { agora: () => number }) {
         return false;
       }
       pendentes.delete(r.id);
+      if (r.desfecho === "falhou") log("aviso", "computador_comando_falhou", { comando_id: r.id, tipo: p.comando.tipo, maquina_id: maquinaId, motivo: r.motivo ?? null });
       p.resolver(r);
       return true;
     },

@@ -48,6 +48,7 @@ export function acharChrome(env: Record<string, string | undefined> = process.en
       "chrome-mac-x64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
       "chrome-mac/Chromium.app/Contents/MacOS/Chromium",
       "chrome-linux64/chrome",
+      "chrome-linux-arm64/chrome",
       "chrome-linux/chrome",
     ]) {
       const p = join(cache, v, rel);

@@ -1891,7 +1891,9 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
       const fimDaOperacao = !acao.dto.operacao && estado.computadorUi.etapasAbertas;
       const fimDoPreparo = estado.computadorUi.preparoAberto && !acao.dto.preparo?.estado.match(/^(baixando|pausado_sem_internet|preparando|ligando|esperando_memoria)$/);
       const computadorUi = fimDaOperacao || fimDoPreparo ? { ...estado.computadorUi, ...(fimDaOperacao ? { etapasAbertas: false } : {}), ...(fimDoPreparo ? { preparoAberto: false } : {}) } : estado.computadorUi;
-      return { ...estado, computadorPessoa: acao.dto, computadorMemoria, computadorUi };
+      // NOD-407: ligou (ou está ligando): a recusa do Acordar anterior não vale mais.
+      const semRecusa = computadorUi.recusa && (acao.dto.estado === "pronto" || acao.dto.estado === "ligando") ? { ...computadorUi, recusa: null } : computadorUi;
+      return { ...estado, computadorPessoa: acao.dto, computadorMemoria, computadorUi: semRecusa };
     }
     case "computador-ui":
       return { ...estado, computadorUi: { ...estado.computadorUi, ...acao.ui } };

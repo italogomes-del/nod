@@ -1,5 +1,6 @@
 export const COOKIES_DO_PERFIL: readonly string[];
 export function urlPermitida(url: unknown): boolean;
+export function argumentosDoX11vnc(display: string, xauthority: string, sock: string): string[];
 export const ganchos: Record<string, (...a: unknown[]) => unknown>;
 export function forkDoPerfil(perfilBase: string, perfil: string): Promise<void>;
 export function perfilSaiuLimpo(perfil: string): Promise<boolean>;

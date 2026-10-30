@@ -59,6 +59,157 @@ describe("laço do computador no motor", () => {
     expect(p.estados[0]).toEqual({ computadorId: "", ligado: false, supervisorPub: "p", telas: [] });
   });
 
+  it("vivo (NOD-95): abre uma conexão só dele, manda o comando, e depois do ok liga o VNC ao fluxo do servidor nos dois sentidos", async () => {
+    const sock = pasta();
+    const linhasDoVivo: string[] = [];
+    const brutoDoVivo: Buffer[] = [];
+    const sup = await supervisorFalso(sock, (m, s) => {
+      if (m.tipo !== "vivo") return;
+      linhasDoVivo.push(JSON.stringify(m));
+      s.setEncoding(undefined as unknown as BufferEncoding);
+      s.removeAllListeners("data");
+      s.on("data", (b: Buffer) => brutoDoVivo.push(Buffer.from(b)));
+      // Como o supervisor de verdade: um estado antes, o ok, e o servidor do VNC fala primeiro, no mesmo pedaço.
+      s.write(`${JSON.stringify({ tipo: "estado", computadorId: "", ligado: true, supervisorPub: "p", telas: [] })}\n${JSON.stringify({ tipo: "vivo", ok: true })}\nRFB 003.008\n`);
+    });
+    const p = ponteFalsa([[{ ...comando("v1"), tipo: "vivo", agenteId: "a1", vivo: { sessao: "s1", token: "t1" } }]]);
+    const aoServidor: Buffer[] = [];
+    let aoMotor: ((b: Uint8Array) => void) | null = null;
+    const fluxo = { enviar: (b: Uint8Array) => aoServidor.push(Buffer.from(b)), aoDados: (fn: (b: Uint8Array) => void) => { aoMotor = fn; }, aoFechar: () => {}, fechar: () => {} };
+    const pedidos: unknown[] = [];
+    p.canal.vivo = async (sessao) => { pedidos.push(sessao); return fluxo; };
+    laco(iniciarComputador({ canal: p.canal, socket: sock, batimentoMs: 60_000, dormir: async () => undefined }));
+    await esperarAte(() => p.resultados.length === 1 && aoServidor.length >= 1);
+    expect(pedidos).toEqual([{ sessao: "s1", token: "t1" }]);
+    expect(JSON.parse(linhasDoVivo[0]!)).toMatchObject({ tipo: "vivo", comando: { id: "v1", tipo: "vivo" } });
+    expect(p.resultados[0]).toEqual({ id: "v1", desfecho: "ok" });
+    expect(Buffer.concat(aoServidor).toString()).toBe("RFB 003.008\n");
+    aoMotor!(new Uint8Array([1, 2, 3]));
+    await esperarAte(() => brutoDoVivo.length >= 1);
+    expect([...Buffer.concat(brutoDoVivo)]).toEqual([1, 2, 3]);
+    // A conexão de sempre não viu o vivo.
+    expect(sup.recebidas.filter((m) => m.tipo === "comando")).toEqual([]);
+  });
+
+  it("vivo recusado pelo supervisor volta com o motivo; sem servidor para o fluxo, sem_resposta", async () => {
+    const sock = pasta();
+    let vez = 0;
+    await supervisorFalso(sock, (m, s) => {
+      if (m.tipo !== "vivo") return;
+      s.write(`${JSON.stringify(vez++ === 0 ? { tipo: "vivo", ok: false, motivo: "faltam_pacotes" } : { tipo: "vivo", ok: true })}\n`);
+    });
+    const v = (id: string) => ({ ...comando(id), tipo: "vivo" as const, agenteId: "a1", vivo: { sessao: id, token: "t" } });
+    const p = ponteFalsa([[v("v1")], [v("v2")]]);
+    p.canal.vivo = async () => null;
+    laco(iniciarComputador({ canal: p.canal, socket: sock, batimentoMs: 60_000, dormir: async () => undefined }));
+    await esperarAte(() => p.resultados.length === 2);
+    expect([...p.resultados].sort((a, b) => a.id.localeCompare(b.id))).toEqual([{ id: "v1", desfecho: "falhou", motivo: "faltam_pacotes" }, { id: "v2", desfecho: "falhou", motivo: "sem_resposta" }]);
+  });
+
+  /** Um supervisor que aceita o vivo e devolve, por `vnc`, o lado cru da conexão (como o x11vnc). */
+  async function vivoAceito(sock: string, depoisDoOk?: (s: Socket) => void) {
+    const vnc: { socket: Socket | null; recebido: Buffer[] } = { socket: null, recebido: [] };
+    const sup = await supervisorFalso(sock, (m, s) => {
+      if (m.tipo === "comando") { s.write(`${JSON.stringify({ tipo: "resultado", id: m.comando.id, desfecho: "ok" })}\n`); return; }
+      if (m.tipo !== "vivo") return;
+      s.setEncoding(undefined as unknown as BufferEncoding);
+      s.removeAllListeners("data");
+      s.on("data", (b: Buffer) => vnc.recebido.push(Buffer.from(b)));
+      vnc.socket = s;
+      s.write(`${JSON.stringify({ tipo: "vivo", ok: true })}\n`);
+      depoisDoOk?.(s);
+    });
+    return { sup, vnc };
+  }
+  const fluxoFalso = (atraso: () => number = () => 0) => {
+    const aoServidor: Buffer[] = [];
+    return { aoServidor, fluxo: { enviar: (b: Uint8Array) => aoServidor.push(Buffer.from(b)), aoDados: () => {}, aoFechar: () => {}, fechar: () => {}, atraso } };
+  };
+
+  it("revisão do PR #599: a saudação do VNC num pedaço próprio, antes de o WebSocket abrir, chega ao servidor", async () => {
+    const sock = pasta();
+    await vivoAceito(sock, (s) => { setTimeout(() => s.write("RFB 003.008\n"), 5); });
+    const p = ponteFalsa([[{ ...comando("v1"), tipo: "vivo", agenteId: "a1", vivo: { sessao: "s1", token: "t1" } }]]);
+    const { aoServidor, fluxo } = fluxoFalso();
+    // O WebSocket demora a abrir: a saudação já chegou e precisa esperar no socket, não sumir.
+    p.canal.vivo = async () => { await new Promise((r) => setTimeout(r, 60)); return fluxo; };
+    laco(iniciarComputador({ canal: p.canal, socket: sock, batimentoMs: 60_000, dormir: async () => undefined }));
+    await esperarAte(() => p.resultados.length === 1 && aoServidor.length >= 1);
+    expect(Buffer.concat(aoServidor).toString()).toBe("RFB 003.008\n");
+  });
+
+  it("revisão do PR #599: o vivo esperando o WebSocket não segura os outros comandos da fila", async () => {
+    const sock = pasta();
+    await vivoAceito(sock);
+    const p = ponteFalsa([[{ ...comando("v1"), tipo: "vivo", agenteId: "a1", vivo: { sessao: "s1", token: "t1" } }, comando("c2")]]);
+    p.canal.vivo = () => new Promise(() => {});
+    laco(iniciarComputador({ canal: p.canal, socket: sock, batimentoMs: 60_000, dormir: async () => undefined }));
+    await esperarAte(() => p.resultados.some((r) => r.id === "c2"));
+    expect(p.resultados.find((r) => r.id === "v1")).toBeUndefined();
+  });
+
+  it("revisão do PR #599: com o WebSocket atrasado, o motor para de ler o VNC até a fila baixar", async () => {
+    const sock = pasta();
+    const { vnc } = await vivoAceito(sock, (s) => { s.write(Buffer.from("A")); });
+    const p = ponteFalsa([[{ ...comando("v1"), tipo: "vivo", agenteId: "a1", vivo: { sessao: "s1", token: "t1" } }]]);
+    let atraso = 5 * 1024 * 1024;
+    const { aoServidor, fluxo } = fluxoFalso(() => atraso);
+    p.canal.vivo = async () => fluxo;
+    laco(iniciarComputador({ canal: p.canal, socket: sock, batimentoMs: 60_000, dormir: async () => undefined }));
+    await esperarAte(() => Buffer.concat(aoServidor).toString() === "A");
+    vnc.socket!.write(Buffer.from("B"));
+    await new Promise((r) => setTimeout(r, 80));
+    expect(Buffer.concat(aoServidor).toString()).toBe("A");
+    atraso = 0;
+    await esperarAte(() => Buffer.concat(aoServidor).toString() === "AB");
+  });
+
+  // QA do PR #599 (2026-10-30): o mutante que tirava o teto do lado do VNC sobrevivia; o motor crescia a memória sem fim.
+  it("QA do PR #599: o VNC que parou de ler derruba o ao vivo em vez de acumular no motor", async () => {
+    const sock = pasta();
+    const { vnc } = await vivoAceito(sock, (s) => { s.pause(); });
+    const p = ponteFalsa([[{ ...comando("v1"), tipo: "vivo", agenteId: "a1", vivo: { sessao: "s1", token: "t1" } }]]);
+    let aoDados: ((b: Uint8Array) => void) | null = null;
+    let fechou = false;
+    p.canal.vivo = async () => ({ enviar: () => {}, aoDados: (fn) => { aoDados = fn; }, aoFechar: () => {}, fechar: () => { fechou = true; } });
+    laco(iniciarComputador({ canal: p.canal, socket: sock, batimentoMs: 60_000, dormir: async () => undefined }));
+    await esperarAte(() => aoDados !== null && p.resultados.length === 1);
+    const mega = new Uint8Array(1024 * 1024);
+    for (let i = 0; i < 12 && !fechou; i++) { aoDados!(mega); await new Promise((r) => setTimeout(r, 5)); }
+    await esperarAte(() => fechou);
+    expect(vnc.socket).not.toBeNull();
+  });
+
+  it("revisão do PR #599 (codex, 4ª rodada): parar o laço derruba o ao vivo ligado e o que ainda abria o WebSocket", async () => {
+    const sock = pasta();
+    const fechados: number[] = [];
+    const conexoes: Socket[] = [];
+    await supervisorFalso(sock, (m, s) => {
+      if (m.tipo !== "vivo") return;
+      s.removeAllListeners("data");
+      conexoes.push(s);
+      s.on("close", () => fechados.push(conexoes.indexOf(s)));
+      s.write(`${JSON.stringify({ tipo: "vivo", ok: true })}\n`);
+    });
+    const v = (id: string) => ({ ...comando(id), tipo: "vivo" as const, agenteId: "a1", vivo: { sessao: id, token: "t" } });
+    const p = ponteFalsa([[v("ligado"), v("abrindo")]]);
+    let fluxoFechado = 0;
+    let soltar: (() => void) | null = null;
+    p.canal.vivo = async (sessao) => {
+      const fluxo = { enviar: () => {}, aoDados: () => {}, aoFechar: () => {}, fechar: () => { fluxoFechado++; } };
+      if (sessao.sessao === "abrindo") await new Promise<void>((r) => { soltar = r; });
+      return fluxo;
+    };
+    const l = iniciarComputador({ canal: p.canal, socket: sock, batimentoMs: 60_000, dormir: async () => undefined });
+    await esperarAte(() => p.resultados.some((r) => r.id === "ligado") && conexoes.length === 2 && soltar !== null);
+    l.parar();
+    await esperarAte(() => fechados.length === 2);
+    // O WebSocket que abriu depois do parar fecha na hora e não liga nada.
+    soltar!();
+    await esperarAte(() => fluxoFechado === 2);
+    expect(p.resultados.find((r) => r.id === "abrindo")).toBeUndefined();
+  });
+
   it("supervisor fora do ar: o comando volta na hora como nao_iniciou", async () => {
     const p = ponteFalsa([[comando("c1")]]);
     laco(iniciarComputador({ canal: p.canal, socket: pasta(), batimentoMs: 60_000, dormir: async () => undefined }));

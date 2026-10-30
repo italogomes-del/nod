@@ -11,20 +11,27 @@ export function json(res: ServerResponse, status: number, body: unknown): void {
 }
 
 /** definido em 2026-09-16: 1 MiB de corpo é folga para qualquer rota do nod; acima disso é abuso. */
-const CORPO_MAX = 1_048_576;
+export const CORPO_MAX = 1_048_576;
+/**
+ * definido em 2026-10-29 (1º ensaio no Mac): a resposta de uma ação do computador leva a captura da tela (PNG de
+ * 1280×800 em base64) mais o texto da página; uma página pesada (ge.globo) passava de 1 MiB, o resultado caía em 400 e
+ * a ação ficava presa até o prazo — a reserva da tela segurava até o Parar. Só a rota `computador/resultado` usa este.
+ */
+export const CORPO_MAX_RESULTADO_COMPUTADOR = 16 * 1_048_576;
 
 /**
  * `daPessoa`: a rota é da pessoa (escopada no tenant ou pública). Só nela o corpo com byte nulo ou `null` é recusado;
  * as rotas de máquina e internas (o executor, a ponte do computador) seguem como antes: o que elas recebem é saída de
  * ferramenta e de terminal, onde o NUL é dado legítimo e cada rota trata (revisão 2 do #590).
  */
-export async function lerCorpo(req: IncomingMessage, o: { daPessoa?: boolean } = {}): Promise<unknown> {
+export async function lerCorpo(req: IncomingMessage, o: { daPessoa?: boolean; max?: number } = {}): Promise<unknown> {
   const pedacos: Buffer[] = [];
   let total = 0;
+  const max = o.max ?? CORPO_MAX;
   for await (const c of req) {
     const buf = c as Buffer;
     total += buf.length;
-    if (total > CORPO_MAX) throw new SyntaxError("corpo grande demais");
+    if (total > max) throw new SyntaxError("corpo grande demais");
     pedacos.push(buf);
   }
   if (pedacos.length === 0) return {};

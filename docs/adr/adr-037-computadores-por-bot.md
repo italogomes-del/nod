@@ -44,14 +44,14 @@ Playwright faz navegação, abas, uploads e downloads. Mouse, teclado, rolagem e
 
 O quadro é uma revisão da interação, não o hash dos pixels: animações e vídeos não invalidam um clique. Navegação, troca de aba e ações anteriores invalidam a revisão. O limite de dois minutos evita executar aprovações sobre uma observação muito antiga. A página pode mudar espontaneamente dentro desse intervalo; isso não fornece uma transação atômica sobre um site externo. Após falha ou timeout, a instrução é observar e verificar antes de repetir.
 
-Áudio tem captura explícita em WAV por até dez segundos, encaminhada como conteúdo MCP de áudio. O modelo/harness precisa aceitar e interpretar esse conteúdo; screenshot sozinho não permite ouvir. A interface permite escutar a captura. O fluxo visual usa screenshots periódicos, não streaming de vídeo de baixa latência.
+Áudio tem captura explícita em WAV por até dez segundos, encaminhada como conteúdo MCP de áudio. O modelo/harness precisa aceitar e interpretar esse conteúdo; screenshot sozinho não permite ouvir. A interface permite escutar a captura. O fluxo visual usa screenshots periódicos, não streaming de vídeo de baixa latência (emendado pela [ADR-138](adr-138-tela-ao-vivo-por-vnc.md), 2026-10-29: com a pessoa no controle, a tela cheia é ao vivo por VNC; assistindo e para o bot, seguem as capturas).
 
 ## Acesso e efeitos
 
 - Cada recurso é acessado por bot sob a pessoa proprietária. Compartilhar o perfil do bot em leitura com a equipe não compartilha o computador.
 - O token identifica o turno e seu catálogo. O corpo nunca escolhe tenant, pessoa, computador ou permissões. A permissão é verificada novamente depois da inicialização, antes do efeito.
 - A reserva é confirmada no banco antes de executar fora da transação. Um identificador de operação impede uma conclusão atrasada de liberar outra reserva. O runtime recusa concorrência e tem watchdog de 55 segundos. A inicialização tem prazo de dois minutos; a reserva dura cinco minutos e cobre inicialização e ação.
-- `Assumir controle` bloqueia ferramentas do bot até `Devolver`. Não há devolução automática por tempo. O pedido de login cria uma decisão; devolver a resolve e retoma usando a inteligência original.
+- `Assumir controle` bloqueia ferramentas do bot até `Devolver`. Não há devolução automática por tempo (emendado pela [ADR-138](adr-138-tela-ao-vivo-por-vnc.md) §6, 2026-10-30: a mensagem nova da pessoa ao bot, depois de assumir, também devolve; rotina, colega e o turno que já corria seguem bloqueados). O pedido de login cria uma decisão; devolver a resolve e retoma usando a inteligência original.
 - A política inicial é supervisionada. A pessoa pode permitir ações nas tarefas pedidas. Rotinas que exigem aprovação continuam exigindo, mesmo com esse modo ligado. A aprovação é vinculada à ação cifrada; sua descrição não pode ser editada separadamente dos argumentos.
 - Ações da pessoa não gravam texto digitado, senhas, comandos ou screenshots no registro de atividade. Argumentos de ações pendentes do bot são cifrados e descartados após execução/recusa. A descrição de uma aprovação é visível à pessoa.
 - A saída web, imagens e arquivos chegam ao modelo como dados não confiáveis. Isso reduz confusão entre conteúdo e autorização; não elimina o problema de prompt injection em agentes com acesso a contas.
@@ -70,7 +70,7 @@ Limites iniciais: tela 1280×800; upload/download pela API de arquivos até 512 
 
 ## Fora deste recorte
 
-Compartilhamento de computadores ou sessões, streaming com baixa latência, snapshots/migração de host, quotas globais por conta, coleta automática de volumes órfãos e provisionamento de nuvem. Excluir o bot impede novas ações e desliga seus processos; os volumes permanecem para recuperação. Desligar encerra processos e preserva os volumes. Restaurar o bot recupera o vínculo anterior; duplicar cria outro vínculo e não copia sessões.
+Compartilhamento de computadores ou sessões, streaming com baixa latência (a pessoa no controle saiu daqui: ADR-138), snapshots/migração de host, quotas globais por conta, coleta automática de volumes órfãos e provisionamento de nuvem. Excluir o bot impede novas ações e desliga seus processos; os volumes permanecem para recuperação. Desligar encerra processos e preserva os volumes. Restaurar o bot recupera o vínculo anterior; duplicar cria outro vínculo e não copia sessões.
 
 ## Emenda de 2026-09-24 — erro real e aviso único
 

@@ -1,7 +1,7 @@
 import type { GanchosDoComputador, RespostaDoGancho } from "../../src/adapters/executor/computador.ts";
 import type { ComandoComputador, EstadoComputadorRelatado } from "../../src/contracts/computador-motor.ts";
 import type { UsoDoMac } from "../../src/contracts/raio-x.ts";
-import { motivoParaFicarAcordada } from "../../src/domain/computador-canal.ts";
+import { motivoParaFicarAcordada, VM_LOCAL_ACORDADA_APOS_ACAO_MS } from "../../src/domain/computador-canal.ts";
 import type { Fase } from "../../src/domain/preparo-vm-local.ts";
 import { log } from "../../src/obs/log.ts";
 import type { PedidoLigar, RuntimeVmLocal } from "./runtime.ts";
@@ -14,7 +14,9 @@ import type { PedidoLigar, RuntimeVmLocal } from "./runtime.ts";
  *   preparo baixando/pausado/preparando     → esperando_tela (o servidor segura até o TETO_PRONTO_MS)
  *   macos_antigo ou falhou                  → falhou, com o motivo
  *   deveSegurar(c.uso) (memória apertada)   → esperando_tela, etapa esperando_memoria (Livre nunca segura)
- *   senão                                   → liga a VM e espera o supervisor responder (60 s; estourou: nao_iniciou)
+ *   senão                                   → liga a VM em segundo plano e responde esperando_tela (etapa ligando) até
+ *                                             o supervisor responder; quem desiste é o teto do servidor (nunca segura o
+ *                                             comando, que vence em 2 min)
  *
  * No `aoRelato`, a VM ociosa (nenhuma tela viva, nenhum comando há 15 min: `motivoParaFicarAcordada`) dorme.
  * Depois do resume do Mac (`aoAcordarDoMac`), se o supervisor não responde, a VM é religada; o chrony acerta o relógio.
@@ -23,6 +25,12 @@ import type { PedidoLigar, RuntimeVmLocal } from "./runtime.ts";
 /** definido em 2026-10-24 (plano da NOD-93, passo 8): o supervisor tem 60 s para responder depois do `limactl start`. */
 export const PRAZO_LIGAR_MS = 60_000;
 const PASSO_LIGAR_MS = 1_000;
+/**
+ * Revisão do PR #599 (NOD-407): o `limactl start` que falha (disco cheio, imagem corrompida) vira `nao_iniciou` para os
+ * pedidos desta janela, em vez de `esperando_tela` até o teto do servidor (4 min) e um ligar novo a cada 1 s. Passada a
+ * janela, a próxima tentativa liga de novo.
+ */
+export const JANELA_FALHA_LIGAR_MS = 30_000;
 
 export type DepsComputadorDaVm = {
   runtime: Pick<RuntimeVmLocal, "status" | "ligar" | "parar" | "supervisorResponde">;
@@ -74,17 +82,22 @@ export function criarComputadorDaVm(d: DepsComputadorDaVm): ComputadorDaVm {
   let ultimoUso: UsoDoMac = "equilibrado";
   let ligando: Promise<boolean> | null = null;
   let parando = false;
+  let falhouAoLigarEm: number | null = null;
 
   /** Liga (idempotente) e espera o supervisor. Uma ligação por vez: comandos juntos esperam a mesma. */
   function ligarEEsperar(uso: UsoDoMac): Promise<boolean> {
     ligando ??= (async () => {
-      const ate = d.agora() + PRAZO_LIGAR_MS;
       try {
         await d.runtime.ligar(d.pedido(uso));
+        falhouAoLigarEm = null;
       } catch (e) {
         log("aviso", "vm_local_nao_ligou", { erro: String(e) });
+        falhouAoLigarEm = d.agora();
         return false;
       }
+      // Os 60 s contam depois do `limactl start`, como diz o PRAZO_LIGAR_MS: no 1º ensaio no Mac (29/10) o prazo nascia
+      // antes do ligar, e descompactar + criar + 1º boot (~3 min) o estourava com a VM a segundos de responder.
+      const ate = d.agora() + PRAZO_LIGAR_MS;
       while (!(await d.runtime.supervisorResponde())) {
         if (d.agora() >= ate) {
           log("aviso", "vm_local_supervisor_mudo", { prazo_ms: PRAZO_LIGAR_MS });
@@ -107,11 +120,16 @@ export function criarComputadorDaVm(d: DepsComputadorDaVm): ComputadorDaVm {
       if (doPreparo) return doPreparo;
       if (ligada && (await d.runtime.supervisorResponde())) return null;
       if (d.deveSegurar(c.uso)) return { desfecho: "esperando_tela", progresso: { pct: 0, etapa: "esperando_memoria" } };
-      return (await ligarEEsperar(c.uso)) ? null : { desfecho: "falhou", motivo: "nao_iniciou" };
+      // definido em 2026-10-29 (1º ensaio no Mac): religar a VM leva 1 a 3 min, e o comando assinado vale 2 min — segurá-lo
+      // aqui até a VM subir o entregava vencido ao supervisor. A VM liga em segundo plano e a resposta é esperando_tela:
+      // o servidor pede de novo a cada 1 s, com comando novo, até o teto dele (4 min no Mac), e o painel mostra o progresso.
+      if (!ligando && falhouAoLigarEm !== null && d.agora() - falhouAoLigarEm < JANELA_FALHA_LIGAR_MS) return { desfecho: "falhou", motivo: "nao_iniciou" };
+      void ligarEEsperar(c.uso);
+      return { desfecho: "esperando_tela", progresso: { pct: 0, etapa: "ligando" } };
     },
 
     aoRelato(e: EstadoComputadorRelatado) {
-      if (parando || ligando || motivoParaFicarAcordada([e], ultimoComandoEm, d.agora())) return;
+      if (parando || ligando || motivoParaFicarAcordada([e], ultimoComandoEm, d.agora(), VM_LOCAL_ACORDADA_APOS_ACAO_MS)) return;
       parando = true;
       void d.runtime.parar()
         .then(() => log("info", "vm_local_dormiu", {}))

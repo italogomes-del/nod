@@ -71,3 +71,11 @@ When built with `NOD_VM_LOCAL=1` (NOD-93, ADR-123, ADR-127), the macOS app bundl
 [Lima](https://github.com/lima-vm/lima) 2.2.1 (`limactl` and the Linux guest agent), Copyright The Lima Authors, licensed under the
 Apache License 2.0 and redistributed unmodified (re-signed for notarization). Pinned by sha256 in
 `scripts/desktop/vm-local-binarios.ts`. Full license: `Contents/Resources/vm-local/LICENSE`.
+
+## noVNC
+
+The live screen of the bot's computer (`web/lib/tela-vivo.ts`, NOD-95, ADR-138) uses the noVNC client
+(`@novnc/novnc` 1.7.0, https://github.com/novnc/noVNC), Copyright (C) 2019 The noVNC Authors, licensed
+under the Mozilla Public License 2.0. It is consumed unmodified as an npm dependency; the MPL-2.0 text
+ships in `node_modules/@novnc/novnc/LICENSE.txt`. The server side uses `x11vnc` (GPL-2.0) as a separate
+process on the person's machine, never linked into nod.

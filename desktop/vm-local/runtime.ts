@@ -1,7 +1,9 @@
 import { execFile } from "node:child_process";
+import { createReadStream } from "node:fs";
 import { createConnection } from "node:net";
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { createZstdDecompress } from "node:zlib";
 
 /**
  * definido em 2026-10-22 (NOD-93, PR 2, ADR-123; canal trocado pela ADR-127 em 2026-10-24): a VM local do Mac. O app
@@ -11,7 +13,7 @@ import { join } from "node:path";
  *
  *   vm/lima          LIMA_HOME próprio (nunca ~/.lima): a instância `nod` e o disco `nod-dados` (_disks/)
  *   vm/ctl.sock      o único canal com a VM: o /run/nod-computador/ctl.sock do supervisor, encaminhado pelo Lima
- *   vm/cache         o disco baixado (desktop/vm-local/download.ts, PR 3)
+ *   vm/cache         o disco baixado (desktop/vm-local/download.ts, PR 3) e, só durante o `create`, o raw dele
  *
  * Atrás de NOD_VM_LOCAL=1 até o aceite nos dois Macs. Este módulo é o spike: monta o ambiente, gera o lima.yaml e
  * conduz o ciclo do `limactl`; quem decide quando ligar e dormir é o preparo (src/domain/preparo-vm-local.ts, PR 3).
@@ -192,7 +194,46 @@ export type DepsRuntime = {
   ambiente: Record<string, string | undefined>;
   executar?: Executar;
   conectar?: Conectar;
+  /** Troca o `.img.zst` do cache pelo raw que o Lima recebe; injetado nos testes. */
+  descompactar?: (zst: string) => Promise<string>;
 };
+
+/** Pedaço em que o raw é conferido: só zeros vira buraco no arquivo em vez de bloco gravado. */
+const BLOCO_ESPARSO = 64 * 1024;
+const ZEROS = Buffer.alloc(BLOCO_ESPARSO);
+
+/**
+ * definido em 2026-10-29 (NOD-93, 1º ensaio no Mac): o Lima só descompacta `.zst` chamando o `zstd` do PATH, que o
+ * macOS não traz (e o PATH do limactl é só o do sistema): o `create` morria com `decompressor "zstd" not found`. O app
+ * descompacta antes, com o zstd do próprio Node, para `<disco>.img` ao lado do `.zst`, esparso (o disco base é quase
+ * todo zero: 8 GiB de raw, ~2 GiB de dados). Grava em `.parcial` e só renomeia no fim; um `.img` que já existe é de
+ * uma descompactação completa e é reaproveitado. O `.zst` fica: é ele que o sha256 do app confere.
+ */
+export async function descompactarDisco(zst: string): Promise<string> {
+  if (!zst.endsWith(".zst")) return zst;
+  const raw = zst.slice(0, -".zst".length);
+  if (await existe(raw)) return raw;
+  const parcial = `${raw}.parcial`;
+  const arquivo = await open(parcial, "w");
+  let posicao = 0;
+  try {
+    for await (const pedaco of createReadStream(zst).pipe(createZstdDecompress()) as AsyncIterable<Buffer>) {
+      for (let i = 0; i < pedaco.length; i += BLOCO_ESPARSO) {
+        const bloco = pedaco.subarray(i, i + BLOCO_ESPARSO);
+        if (!bloco.equals(ZEROS.subarray(0, bloco.length))) await arquivo.write(bloco, 0, bloco.length, posicao);
+        posicao += bloco.length;
+      }
+    }
+    await arquivo.truncate(posicao);
+  } catch (e) {
+    await arquivo.close();
+    await rm(parcial, { force: true });
+    throw new FalhaVmLocal("descompactar o disco", e instanceof Error ? e.message : String(e));
+  }
+  await arquivo.close();
+  await rename(parcial, raw);
+  return raw;
+}
 
 export type PedidoLigar = { imagem: string; versao: string; arch: ArchMac; memoriaGiB: number; cpus: number };
 
@@ -218,6 +259,7 @@ export function criarRuntimeVmLocal(deps: DepsRuntime) {
   const c = caminhosVmLocal(deps.dadosApp);
   const b = binariosVmLocal(deps.recursos);
   const executar = deps.executar ?? executarProcesso;
+  const descompactar = deps.descompactar ?? descompactarDisco;
   const envLima = ambienteLima(c, deps.ambiente);
 
   async function limactl(etapa: string, ...args: string[]): Promise<Resultado> {
@@ -251,8 +293,11 @@ export function criarRuntimeVmLocal(deps: DepsRuntime) {
       if (!(await existe(c.discoDados))) await limactl("criar o disco de dados", "disk", "create", DISCO_DADOS, "--size", `${DADOS_GIB}GiB`, "--format", "raw");
       if (atual === "ausente") {
         const modelo = await readFile(b.modelo, "utf8");
-        await writeFile(c.yaml, gerarLimaYaml(modelo, { imagem: p.imagem, arch: p.arch, memoriaGiB: p.memoriaGiB, cpus: p.cpus, socket: c.socket }));
+        const imagem = await descompactar(p.imagem);
+        await writeFile(c.yaml, gerarLimaYaml(modelo, { imagem, arch: p.arch, memoriaGiB: p.memoriaGiB, cpus: p.cpus, socket: c.socket }));
         await limactl("criar", "create", `--name=${INSTANCIA}`, "--tty=false", c.yaml);
+        // O Lima copiou o disco para a instância (basedisk): o raw do cache sai; recriar descompacta de novo.
+        if (imagem !== p.imagem) await rm(imagem, { force: true });
         atual = "parada";
       } else if (registro && (registro.memoriaGiB !== p.memoriaGiB || registro.cpus !== p.cpus)) {
         if (atual === "ligada") await limactl("parar", "stop", INSTANCIA);

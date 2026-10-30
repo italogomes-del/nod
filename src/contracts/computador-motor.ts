@@ -1,6 +1,7 @@
 import type { AcaoComputador, ControleComputador, LugarDoComputador, PoliticaComputador, ResultadoComputador } from "./computador.ts";
 import type { EpochMs } from "./ids.ts";
 import type { MotivoFalhaComputador } from "./motivos.ts";
+import type { SessaoVivo } from "./computador-vivo.ts";
 import type { UsoDoMac } from "./raio-x.ts";
 import type { VmLocalAnunciada } from "./vm-local.ts";
 
@@ -58,7 +59,7 @@ export type TelaComputadorBot = {
   criadoEm: EpochMs;
 };
 
-export const TIPOS_COMANDO_COMPUTADOR = ["iniciar", "abrir_tela", "acao", "fechar_tela", "parar", "atualizar", "redefinir", "sair_de_todos", "esquecer_senhas", "apagar_perfil", "exportar_logins", "importar_logins", "cancelar_exportacao", "marcar_saida"] as const;
+export const TIPOS_COMANDO_COMPUTADOR = ["iniciar", "abrir_tela", "acao", "fechar_tela", "parar", "atualizar", "redefinir", "sair_de_todos", "esquecer_senhas", "apagar_perfil", "exportar_logins", "importar_logins", "cancelar_exportacao", "marcar_saida", "vivo"] as const;
 export type TipoComandoComputador = (typeof TIPOS_COMANDO_COMPUTADOR)[number];
 
 /**
@@ -72,8 +73,7 @@ export type ComandoComputador = {
   id: string;
   computadorId: string;
   tipo: TipoComandoComputador;
-  agenteId?: string;
-  acao?: AcaoComputador;
+  agenteId?: string; acao?: AcaoComputador;
   uso: UsoDoMac;
   segredoSelado?: string;
   /**
@@ -89,9 +89,9 @@ export type ComandoComputador = {
   troca?: string;
   /** Época monotônica da troca nesta máquina; cerca comandos atrasados mesmo depois de reiniciar o supervisor. */
   epocaTroca?: number;
-  parte?: number;
-  total?: number;
-  dados?: string;
+  parte?: number; total?: number; dados?: string;
+  /** NOD-95 (ADR-138): só em `tipo: "vivo"`; ver `SessaoVivo`. */
+  vivo?: SessaoVivo;
   /** Epoch em ms até quando o comando vale (no máximo 2 min à frente). */
   prazoMs: number;
   /** Ed25519 em base64 sobre a forma canônica do comando sem este campo. */
@@ -147,7 +147,7 @@ export type AnuncioComputador = { estado: EstadoAnuncioComputador; falta?: strin
  * sem ser perguntado quando algo muda). O supervisor ainda sem computador (antes do primeiro `iniciar`) manda a foto com
  * `computadorId: ""`: o servidor só aprende a X25519 dele para selar o `iniciar`.
  */
-export type MensagemAoSupervisor = { tipo: "comando"; comando: ComandoComputador } | { tipo: "pedir_estado" };
+export type MensagemAoSupervisor = { tipo: "comando"; comando: ComandoComputador } | { tipo: "pedir_estado" } | { tipo: "vivo"; comando: ComandoComputador };
 
 /**
  * definido em 2026-10-22 (NOD-96 PR 5): o computador da pessoa como a web o vê (`GET /computador`). `estado`:

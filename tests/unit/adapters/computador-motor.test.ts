@@ -3,7 +3,7 @@ import { criarCanalComputador } from "../../../src/adapters/computador/canal.ts"
 import { type ComputadorLocalizado, criarDriverMotor, type MaquinaDaPessoa } from "../../../src/adapters/computador/motor.ts";
 import { abrirSelo, chaveDaMaquina, conferirAssinatura, gerarParX25519, publicaDeAssinatura } from "../../../src/adapters/computador/selo.ts";
 import type { ComandoComputador } from "../../../src/contracts/computador-motor.ts";
-import { TETO_PRONTO_MS } from "../../../src/domain/computador-canal.ts";
+import { TETO_PRONTO_MS, TETO_PRONTO_VM_LOCAL_MS } from "../../../src/domain/computador-canal.ts";
 import { EsperandoTela, ehFalhaComputador, instrucaoDaFalha } from "../../../src/domain/computador.ts";
 
 const CHAVE = "cd".repeat(32);
@@ -147,6 +147,14 @@ describe("driver motor: iniciar", () => {
     expect((await falha(m.driver.iniciar(ID))).motivo).toBe("nao_ficou_pronto");
     expect(m.agora() - antes).toBeGreaterThanOrEqual(TETO_PRONTO_MS);
     expect(m.canal.pendentes()).toEqual([]);
+  });
+
+  it("NOD-93 (1º ensaio no Mac): a máquina com a VM local tem 4 min, não 60 s, para ficar pronta (religar ou criar a VM)", async () => {
+    const m = mundo({ mac: { estado: "ligando", desde: 0 }, responder: (c) => ({ id: c.id, desfecho: "esperando_tela", progresso: { pct: 0, etapa: "ligando" } }) });
+    const antes = m.agora();
+    expect((await falha(m.driver.iniciar(ID))).motivo).toBe("nao_ficou_pronto");
+    expect(m.agora() - antes).toBeGreaterThanOrEqual(TETO_PRONTO_VM_LOCAL_MS);
+    expect(m.agora() - antes).toBeLessThan(TETO_PRONTO_VM_LOCAL_MS + 2_000);
   });
 
   it("instalação limpa (NOD-96 PR 7): a sonda sem assinatura faz o supervisor relatar a chave; liga bem antes dos 60 s", async () => {

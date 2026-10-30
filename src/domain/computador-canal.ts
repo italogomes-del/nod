@@ -11,11 +11,22 @@ import type { PlataformaMaquina } from "../contracts/ponte.ts";
 export const PRAZO_COMANDO_MS = 120_000;
 /** definido em 2026-10-22 (ADR-122, risco 6): do pedido até a máquina pronta. Conta depois de acordar (NOD-92). */
 export const TETO_PRONTO_MS = 60_000;
+/**
+ * definido em 2026-10-29 (NOD-93, 1º ensaio no Mac): a VM do Mac dorme sozinha e religar leva até ~1 min; a 1ª criação
+ * (descompactar o disco, criar e o 1º boot) leva 3 a 4 min. Para uma máquina que anuncia a VM local, o teto é este.
+ */
+export const TETO_PRONTO_VM_LOCAL_MS = 4 * 60_000;
 /** definido em 2026-10-22: o motor relata o estado a cada 15 s; sem relato há 45 s (3 batimentos), o computador não conta como ligado. */
 export const BATIMENTO_ESTADO_MS = 15_000;
 export const ESTADO_VALIDO_MS = 3 * BATIMENTO_ESTADO_MS;
 /** definido em 2026-10-22 (gancho da NOD-92): ação há menos de 15 min segura a máquina acordada. */
 export const ACORDADA_APOS_ACAO_MS = 15 * 60_000;
+/**
+ * definido em 2026-10-29 (1º ensaio no Mac): a VM do Mac leva ~1 min para religar e a pessoa sentia isso a cada 15 min
+ * de pausa. Ela fica acordada 1 h depois da última ação ou tela; a memória (2 GiB) é o preço, e o Mac em "Pouco" a
+ * recupera pelo sono normal depois disso.
+ */
+export const VM_LOCAL_ACORDADA_APOS_ACAO_MS = 60 * 60_000;
 
 /**
  * A forma canônica de um valor JSON: chaves em ordem, sem espaços, sem `undefined`. É o que a assinatura Ed25519 cobre
@@ -114,7 +125,7 @@ export function opcoesDeLugar(conectadas: readonly LugarCandidato[], atual: { ma
  * Gancho da NOD-92: a máquina gerenciada não dorme enquanto o computador dela tem tela abrindo, aberta ou esperando, ou
  * teve ação há menos de 15 min.
  */
-export function motivoParaFicarAcordada(estados: readonly Pick<EstadoComputadorRelatado, "telas">[], ultimaAcaoEm: number | null, agora: number): boolean {
-  if (ultimaAcaoEm !== null && agora - ultimaAcaoEm < ACORDADA_APOS_ACAO_MS) return true;
-  return estados.some((e) => e.telas.some((t) => t.estado === "abrindo" || t.estado === "aberta" || t.estado === "esperando" || (t.ultimaAcaoEm !== null && agora - t.ultimaAcaoEm < ACORDADA_APOS_ACAO_MS)));
+export function motivoParaFicarAcordada(estados: readonly Pick<EstadoComputadorRelatado, "telas">[], ultimaAcaoEm: number | null, agora: number, janelaMs = ACORDADA_APOS_ACAO_MS): boolean {
+  if (ultimaAcaoEm !== null && agora - ultimaAcaoEm < janelaMs) return true;
+  return estados.some((e) => e.telas.some((t) => t.estado === "abrindo" || t.estado === "aberta" || t.estado === "esperando" || (t.ultimaAcaoEm !== null && agora - t.ultimaAcaoEm < janelaMs)));
 }

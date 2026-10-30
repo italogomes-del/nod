@@ -121,6 +121,15 @@ export function computadoresRepo(conn: Conn, escopo: Escopo) {
       return linhas.map(acao);
     },
 
+    /**
+     * Revisão do PR #599: o último freio da pessoa neste computador (ou nesta tela do computador dela): "assumir" ou
+     * "parar" (4ª revisão), com quando; null = nunca. Sem o teto de 30 linhas da Atividade.
+     */
+    async ultimoFreio(id: string, telaId: string | null): Promise<{ tipo: "assumir" | "parar"; em: number } | null> {
+      const [l] = await conn<{ tipo: "assumir" | "parar"; em: Date }[]>`select tipo, em from computador_acoes where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and computador_id = ${id}
+        and tela_id is not distinct from ${telaId} and tipo in ('assumir', 'parar') order by em desc limit 1`;
+      return l ? { tipo: l.tipo, em: l.em.getTime() } : null;
+    },
     /** NOD-96 PR 4: a Atividade da tela de um bot (as ações dele e as da pessoa nela), com a mesma regra do observar. */
     async atividadeDaTela(id: string, telaId: string): Promise<RegistroComputador[]> {
       const linhas = await conn<LinhaAcao[]>`select * from computador_acoes where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and computador_id = ${id} and tela_id = ${telaId}

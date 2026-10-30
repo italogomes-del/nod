@@ -17,7 +17,7 @@ const ID = "pc1";
 const limpar: Array<() => Promise<unknown> | unknown> = [];
 afterEach(async () => { for (const f of limpar.splice(0).reverse()) await f(); });
 
-async function montar(leitura = () => ({ memoria: "verde" as unknown, processador: "verde" as unknown }), aoAtualizar?: () => void, agora?: () => number) {
+async function montar(leitura = () => ({ memoria: "verde" as unknown, processador: "verde" as unknown }), aoAtualizar?: () => void, agora?: () => number, extra: { tela?: string } = {}) {
   const dir = await mkdtemp(join(tmpdir(), "nod-supervisor-test-"));
   limpar.push(() => rm(dir, { recursive: true, force: true }));
   const bin = async (nome: string, corpo: string) => {
@@ -41,7 +41,7 @@ async function montar(leitura = () => ({ memoria: "verde" as unknown, processado
   await escutar(st, terminal);
   limpar.push(() => new Promise((r) => st.close(r)));
   const logs: string[] = [];
-  const sup = criarSupervisor({ raiz: join(dir, "raiz"), run: join(dir, "run"), terminal, bin: binarios, leitura, log: (m) => logs.push(m), aoAtualizar, agora });
+  const sup = criarSupervisor({ raiz: join(dir, "raiz"), run: join(dir, "run"), terminal, bin: binarios, leitura, log: (m) => logs.push(m), aoAtualizar, agora, ...extra });
   limpar.push(() => sup.encerrar());
   return { dir, sup, registro, logs, terminal, binarios };
 }
@@ -286,6 +286,83 @@ describe("supervisor", () => {
     const fotosAntes = linhas.filter((m) => m.tipo === "estado").length;
     s.write(`${JSON.stringify({ tipo: "pedir_estado" })}\n`);
     await chegou(() => linhas.filter((m) => m.tipo === "estado").length > fotosAntes);
+  });
+});
+
+describe("NOD-95 (ADR-138): o `vivo` no socket de controle", () => {
+  /** Uma tela de mentira: abre na hora e, no `vivo`, serve um "VNC" num socket unix que fala primeiro e ecoa em maiúsculas. */
+  const TELA_FALSA = `
+import net from "node:net";
+import path from "node:path";
+import { mkdir } from "node:fs/promises";
+let cfg = null;
+process.on("message", async (m) => {
+  if (m.tipo === "abrir") { cfg = m.config; await mkdir(cfg.tmp, { recursive: true }); process.send({ tipo: "pronta" }); }
+  else if (m.tipo === "vivo") {
+    const socket = path.join(cfg.tmp, "vnc.sock");
+    const srv = net.createServer((s) => { s.write("RFB 003.008\\n"); s.on("data", (b) => s.write(b.toString().toUpperCase())); });
+    srv.listen(socket, () => process.send({ tipo: "resposta", id: m.id, resultado: { socket } }));
+  }
+  else if (m.tipo === "acao") process.send({ tipo: "resposta", id: m.id, resultado: { quadro: "q", imagem: "", largura: 1280, altura: 800, url: "", titulo: "", texto: "", abas: [] } });
+  else if (m.tipo === "fechar") { process.send({ tipo: "fechada" }); process.exit(0); }
+});
+`;
+
+  it("aceito, a conexão vira o fluxo cru do VNC; o envelope comum recusa o vivo; a tela conta como ativa", async () => {
+    const tela = join(tmpdir(), `nod-tela-falsa-${process.pid}-${Date.now()}.mjs`);
+    await writeFile(tela, TELA_FALSA);
+    limpar.push(() => rm(tela, { force: true }));
+    const { sup, dir } = await montar(undefined, undefined, undefined, { tela });
+    await iniciar(sup);
+    const caminho = join(dir, "ctl.sock");
+    const srv = servirControle(sup);
+    await escutarControle(srv, caminho);
+    limpar.push(() => new Promise((r) => srv.close(r)));
+    const abrir = () => {
+      const s = connect(caminho);
+      limpar.push(() => s.destroy());
+      const pedacos: Buffer[] = [];
+      s.on("data", (b: Buffer) => pedacos.push(Buffer.from(b)));
+      const texto = () => Buffer.concat(pedacos).toString("utf8");
+      const ate = async (cond: () => boolean) => { for (let i = 0; i < 300 && !cond(); i++) await new Promise((r) => setTimeout(r, 10)); expect(cond()).toBe(true); };
+      return { s, texto, ate, pedacos };
+    };
+    // 5ª revisão: o vivo não abre tela. Um vivo atrasado que chega depois do `fechar_tela` do Parar é recusado e a
+    // tela continua fechada (antes ele a reabria e ela segurava a máquina acordada com a pessoa no controle).
+    const tarde = abrir();
+    const ct = cmd({ tipo: "vivo", agenteId: "bot1", vivo: { sessao: "st", token: "tt" } });
+    tarde.s.write(`${JSON.stringify({ tipo: "vivo", comando: ct })}\n`);
+    await tarde.ate(() => tarde.texto().includes('"tipo":"vivo","ok":false'));
+    expect(tarde.texto()).toContain('{"tipo":"vivo","ok":false,"motivo":"tela_alterada"}');
+    expect(sup.estados().find((e) => e.computadorId === ID)?.telas.find((t) => t.agenteId === "bot1")?.estado ?? "fechada").toBe("fechada");
+    // A web abre a tela pela captura (`observar`) antes de pedir o ao vivo.
+    expect((await sup.tratar(cmd({ tipo: "abrir_tela", agenteId: "bot1" }))).desfecho).toBe("ok");
+    // Pelo envelope comum, o vivo é recusado: não tem como ligar o fluxo ali.
+    const comum = abrir();
+    const c0 = cmd({ tipo: "vivo", agenteId: "bot1", vivo: { sessao: "s0", token: "t0" } });
+    comum.s.write(`${JSON.stringify({ tipo: "comando", comando: c0 })}\n`);
+    await comum.ate(() => comum.texto().includes(`"id":"${c0.id}"`));
+    expect(comum.texto()).toContain(`{"tipo":"resultado","id":"${c0.id}","desfecho":"falhou","motivo":"acao_falhou"}`);
+    // Pela mensagem própria: ok, e depois dele só VNC — a tela de mentira fala primeiro e ecoa em maiúsculas.
+    const vivo = abrir();
+    const c1 = cmd({ tipo: "vivo", agenteId: "bot1", vivo: { sessao: "s1", token: "t1" } });
+    vivo.s.write(`${JSON.stringify({ tipo: "vivo", comando: c1 })}\n`);
+    await vivo.ate(() => vivo.texto().includes('{"tipo":"vivo","ok":true}'));
+    await vivo.ate(() => vivo.texto().includes("RFB 003.008\n"));
+    const antes = vivo.texto().length;
+    vivo.s.write("ola");
+    await vivo.ate(() => vivo.texto().length >= antes + 3);
+    expect(vivo.texto().slice(antes)).toBe("OLA");
+    // Depois do ok, nenhum estado JSON entra no fluxo (o supervisor relata ao tocar a tela e ao mudar).
+    sup.tocarTela(ID, "bot1");
+    await new Promise((r) => setTimeout(r, 50));
+    expect(vivo.texto().slice(antes)).toBe("OLA");
+    expect(sup.estados().find((e) => e.computadorId === ID)?.telas.find((t) => t.agenteId === "bot1")?.estado).toBe("aberta");
+    // O vivo sem assinatura válida é recusado antes de qualquer fluxo.
+    const falso = abrir();
+    falso.s.write(`${JSON.stringify({ tipo: "vivo", comando: { ...c1, id: "x", assinatura: "errada" } })}\n`);
+    await falso.ate(() => falso.texto().includes('"tipo":"vivo","ok":false'));
+    expect(falso.texto()).toContain('{"tipo":"vivo","ok":false,"motivo":"acao_falhou"}');
   });
 });
 

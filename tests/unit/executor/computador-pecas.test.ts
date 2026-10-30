@@ -327,6 +327,10 @@ describe("chromiumDoPlaywright (ADR-127 §4)", () => {
       await mkdir(join(base, "chromium-1200", "chrome-linux"), { recursive: true });
       await writeFile(join(base, "chromium-1200", "chrome-linux", "chrome"), "");
       expect(chromiumDoPlaywright({ PLAYWRIGHT_BROWSERS_PATH: base })).toBe(join(base, "chromium-1200", "chrome-linux", "chrome"));
+      // O Playwright atual põe o do arm64 em chrome-linux-arm64 (1º ensaio no Mac, 29/10): vale antes do nome antigo.
+      await mkdir(join(base, "chromium-1200", "chrome-linux-arm64"), { recursive: true });
+      await writeFile(join(base, "chromium-1200", "chrome-linux-arm64", "chrome"), "");
+      expect(chromiumDoPlaywright({ PLAYWRIGHT_BROWSERS_PATH: base })).toBe(join(base, "chromium-1200", "chrome-linux-arm64", "chrome"));
       await mkdir(join(base, "chromium-1200", "chrome-linux64"), { recursive: true });
       await writeFile(join(base, "chromium-1200", "chrome-linux64", "chrome"), "");
       expect(chromiumDoPlaywright({ PLAYWRIGHT_BROWSERS_PATH: base })).toBe(join(base, "chromium-1200", "chrome-linux64", "chrome"));

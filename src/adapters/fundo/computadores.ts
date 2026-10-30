@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { AcaoComputador, Computador, ComputadorDto, ControleComputador, DriverComputador, OrigemControle, PoliticaComputador, RegistroComputador, ResultadoComputador } from "../../contracts/computador.ts";
 import type { ComputadorDaPessoa, ComputadorDaPessoaDto, EstadoComputadorDaPessoa, EstadoComputadorRelatado, OperacaoComputador, OperacaoDaPessoa, TelaComputadorBot } from "../../contracts/computador-motor.ts";
+import type { SessaoVivo } from "../../contracts/computador-vivo.ts";
 import { FERRAMENTAS_COMPUTADOR } from "../../contracts/ferramentas-computador.ts";
 import type { MotivoFalhaComputador } from "../../contracts/motivos.ts";
 import type { PlanoTurno } from "../../contracts/plano-turno.ts";
@@ -33,6 +34,8 @@ type Opcoes = { executor(): "local" | "catcher"; dentro: Dentro; driver: DriverC
   porPessoa?: boolean;
   /** NOD-365: escolhido uma vez, no INSERT do computador da pessoa; mudanças posteriores no inventário não o movem. */
   lugarPadraoNaCriacao?: (escopo: Escopo) => string | null;
+  /** NOD-95 (ADR-138): as sessões da tela ao vivo, para acabarem quando o controle sai da pessoa. */
+  vivo?: { fecharDaTela(escopo: Escopo, agenteId: string): void };
   dormir?: (ms: number) => Promise<void> };
 /**
  * NOD-96 PR 4: onde a ação roda. No modo docker é o computador do bot (`telaId` nulo, `computadorId` = `id`). No modo
@@ -64,6 +67,13 @@ const LEASE_OCIOSIDADE_MS = 90_000;
  * novo, sem perder o lugar. A fila anda em fatias de 5 s (a vez é da tela que chegou primeiro).
  */
 const JANELA_ESPERA_TELA_MS = 120_000;
+/**
+ * definido em 2026-10-29 (1º ensaio no Mac): a pessoa assistindo a tela reserva-a por um instante a cada captura de
+ * 2 s, e o bot que agia nesse instante recebia "em uso por você" sem ela ter assumido nada. O bot espera até isto pela
+ * vaga (em passos curtos, fora da transação) antes de responder que está ocupado.
+ */
+const ESPERA_OCUPADO_MS = 6_000;
+const PASSO_OCUPADO_MS = 300;
 const FATIA_ESPERA_TELA_MS = 5_000;
 /** A janela acabou e a tela ainda não abriu: não é falha, é a vez que não chegou. */
 class EsperaEsgotada extends Error {
@@ -178,6 +188,31 @@ function ocupadoParaAgente(emUsoPor: string, ocupadoAte: number, agora: number):
 
 type DadosRegistro = { turnoId?: string; autor: RegistroComputador["autor"]; tipo: string; estado: RegistroComputador["estado"]; argumentosCifrados?: string };
 type Ajuste = { habilitado?: boolean; controle?: ControleComputador; politica?: PoliticaComputador; ajuda?: string | null; ajudaDecisaoId?: string | null; atividadeEm?: number };
+/**
+ * Revisão do PR #599: o turno é um pedido que a pessoa fez DEPOIS de assumir (o sinal de que terminou)? Só num turno
+ * da pessoa (ADR-131 `daPessoa`), sem pedido de ajuda do bot aberto e com o turno criado depois do último "assumir"
+ * deste computador (ou desta tela). Rotina, colega, turno que já corria quando ela assumiu: não retoma. 2ª revisão:
+ * só um turno nascido de mensagem dela (conversa, sala, ligação) — a `retomada` (cota, erro transitório, volta que o
+ * bot agendou, repetição sem sessão) herda o `daPessoa` do turno de origem e ganha `criadoEm` novo sem pedido nenhum.
+ */
+const ORIGENS_DE_PEDIDO: ReadonlySet<string> = new Set(["conversa", "sala", "ligacao"]);
+/**
+ * 3ª revisão: o que conta é a MENSAGEM que originou o turno, não o turno. A repetição (cota, troca de IA, adiar a fala)
+ * reenfileira com origem "conversa" e `criadoEm` novo, mas aponta para a mensagem antiga; e a sala gera turnos a partir
+ * da fala de um bot. Então: mensagem de origem escrita pela própria pessoa dona do computador, depois do último assumir.
+ * O turno de ligação não tem mensagem dela (a linha da ligação é do sistema): não retoma, ela devolve na tela.
+ */
+async function pedidoNovoDaPessoa(d: Deps, c: Vaga, plano: { turnoId: string; daPessoa?: boolean }): Promise<boolean> {
+  if (c.ajudaDecisaoId !== null || plano.daPessoa !== true) return false;
+  const turno = await d.repos.turnos.buscar(plano.turnoId);
+  if (!turno || !ORIGENS_DE_PEDIDO.has(turno.origem) || !turno.mensagemOrigemId) return false;
+  const msg = await d.repos.mensagens.buscar(turno.mensagemOrigemId);
+  if (!msg || msg.autoria.autor_tipo !== "pessoa" || msg.autoria.autor_id !== d.escopo.pessoaId) return false;
+  // 4ª revisão: o freio é o último assumir OU parar — depois do Parar, a mensagem de antes não reabre a tela.
+  const freio = await d.repos.computadores.ultimoFreio(c.computadorId, c.telaId);
+  return freio !== null && msg.criadoEm > freio.em;
+}
+
 /** NOD-96 PR 4: as operações do portão sobre a vaga, uma implementação por modelo (docker por bot; tela no da pessoa). */
 type Lugar = {
   obter(d: Deps, agenteId: string): Promise<Vaga>;
@@ -546,8 +581,10 @@ export function criarComputadores(o: Opcoes) {
       const fechando = new Set(fechar.map((t) => t.id));
       const telas = await d.repos.computadorTelas.doComputador(p.id);
       const segura = (t: TelaComputadorBot) => !fechando.has(t.id) && (ocupada(t) || t.ultimaAtividadeEm >= agora - limiteMs || (t.estado !== "fechada" && t.controle !== "bot"));
-      // Operação presa (o servidor caiu no meio, passou do teto) não segura a máquina acordada.
-      const deveDormir = ligados.has(p.id) && !operacaoViva(p, agora) && !telas.some(segura);
+      // Operação presa (o servidor caiu no meio, passou do teto) não segura a máquina acordada. O próprio computador
+      // também tem atividade (o Acordar da pessoa, 29/10): acordado há menos que o limite, não dorme — antes o primeiro
+      // tique do varredor desligava o computador sem tela segundos depois de a pessoa o acordar.
+      const deveDormir = ligados.has(p.id) && !operacaoViva(p, agora) && p.ultimaAtividadeEm < agora - limiteMs && !telas.some(segura);
       return { p, fechar, deveDormir, abertas: telas.filter((t) => t.estado !== "fechada" && t.estado !== "esperando").map((t) => t.id) };
     });
     if (!plano) return 0;
@@ -665,16 +702,21 @@ export function criarComputadores(o: Opcoes) {
         if (!agente || agente.ownerId !== escopo.pessoaId) throw new ErroDeDominio("nao_encontrado");
         const p = await d.repos.computadores.daPessoa();
         const t = p && await d.repos.computadorTelas.buscar(p.id, agenteId);
-        if (!p || !t) return null;
+        if (!p) return null;
+        // Revisão do PR #599 (NOD-410): bot sem tela ainda, com o computador da pessoa existente — o padrão, mas o
+        // `ativo` vem do computador dela. Sem isso o "Abrir o computador" via ativo=false, não assumia e a tela não
+        // nascia (a tela nasce no `obter` do assumir).
+        if (!t) return { computador: computadorPadrao(agenteId), atividade: [], estadoDe: p.id };
         const { computadorId: _c, telaId: _t, ...computador } = daTela(p, t);
-        return { computador, atividade: await d.repos.computadores.atividadeDaTela(p.id, t.id) };
+        return { computador, atividade: await d.repos.computadores.atividadeDaTela(p.id, t.id), estadoDe: t.id };
       }) : await o.dentro(escopo, async (d) => {
         const computador = await d.repos.computadores.buscarDoAgente(agenteId);
         if (computador === undefined) throw new ErroDeDominio("nao_encontrado");
-        return computador && { computador, atividade: await d.repos.computadores.atividade(computador.id) };
+        return computador && { computador, atividade: await d.repos.computadores.atividade(computador.id), estadoDe: computador.id };
       });
       if (!c) return { computador: computadorPadrao(agenteId), ativo: false, atividade: [], ...await o.driver.ambiente() };
-      return { ...c, ...await o.driver.estado(c.computador.id, escopo) };
+      const { estadoDe, ...dto } = c;
+      return { ...dto, ...await o.driver.estado(estadoDe, escopo) };
     },
     /**
      * revisto em 2026-10-22 (NOD-97, parte 3): `origem` diz de onde veio a troca (ORIGENS_CONTROLE; sem ela, "botao").
@@ -693,7 +735,10 @@ export function criarComputadores(o: Opcoes) {
         if (fechouTela && (c.ajudaDecisaoId !== null || c.controle === "bot" || !c.habilitado)) return null;
         // NOD-96 PR 4: assumir a tela que espera na fila não espera a vez (o laço da espera vê o controle mudar e sai).
         const naFila = c.telaId !== null && operacao === "assumir" && (await d.repos.computadorTelas.buscar(c.computadorId, agenteId))?.estado === "esperando";
-        if (operacao !== "parar" && !naFila && !fechouTela) livre(c, d.agora());
+        // Devolver nunca espera a reserva (29/10): com as capturas de 2 s há quase sempre uma ação da pessoa em voo, e o
+        // Parar caía em 409 — a tela ficava "com a pessoa" para sempre e o bot preso. A ação em curso só termina; o
+        // supervisor já serializa por tela (`ocupado`), então o bot não entra no meio dela.
+        if (operacao !== "parar" && operacao !== "devolver" && !naFila && !fechouTela) livre(c, d.agora());
         if (operacao === "assumir") await lugar.configurar(d, c, { controle: "pessoa", atividadeEm: d.agora() });
         else if (operacao === "devolver") {
           await lugar.configurar(d, c, { controle: "bot", ajuda: null, ajudaDecisaoId: null, atividadeEm: d.agora() });
@@ -722,6 +767,9 @@ export function criarComputadores(o: Opcoes) {
       if (!c) return;
       // NOD-161: a tela mudou fora do bot; a próxima observação do turno vai completa.
       if (operacao === "assumir" || operacao === "devolver" || operacao === "parar") esquecerComputador(c.id);
+      // NOD-95: a pessoa deixou o controle; a tela ao vivo dela (se houver) acaba junto. O "iniciar" também devolve o
+      // controle ao bot (revisão do PR #599): sem fechar aqui, um cliente VNC seguia mandando teclado e mouse.
+      if (operacao === "devolver" || operacao === "parar" || operacao === "iniciar") o.vivo?.fecharDaTela(escopo, agenteId);
       let sucesso = false;
       let falha: FalhaComputador | null = null;
       let ligou = false;
@@ -749,6 +797,39 @@ export function criarComputadores(o: Opcoes) {
         o.mudou(escopo, agenteId, saude);
       }
     },
+    /**
+     * NOD-95 (ADR-138): a tela ao vivo. Só com a pessoa no controle (como as ações dela), computador no ar e sem
+     * operação em curso; o driver manda o `vivo` à máquina com a sessão que o WebSocket da web abriu. Não passa pela
+     * reserva das ações: o que corre depois é um fluxo, não uma ação, e o bot já está parado pelo controle.
+     */
+    async vivo(escopo: Escopo, agenteId: string, sessao: SessaoVivo): Promise<void> {
+      if (!porPessoa || !o.driver.vivo) throw new ErroDeDominio("nao_encontrado");
+      const c = await o.dentro(escopo, async (d) => {
+        const c = await obter(d, agenteId);
+        if (!c.habilitado || c.controle !== "pessoa") throw new ErroDeDominio("nao_permitido");
+        if (c.indisponivelDesde !== null) throw new ErroDeDominio("estado_invalido", { cause: "computador fora do ar" });
+        if (c.telaId && operacaoViva(await d.repos.computadores.daPessoa(), d.agora())) throw new ErroDeDominio("estado_invalido", { cause: "atualizando" });
+        // 4ª revisão: depois do Parar (controle "pessoa", tela fechando) o ao vivo não reabre a tela; só um assumir novo.
+        if ((await d.repos.computadores.ultimoFreio(c.computadorId, c.telaId))?.tipo === "parar") throw new ErroDeDominio("nao_permitido");
+        return c;
+      });
+      await o.driver.vivo(c.id, sessao, escopo).catch((e: unknown) => { throw comoErroDeDominio(e); });
+    },
+    /** Revisão do PR #599: a sessão ao vivo reconfere isto; só a pessoa no controle, com a tela habilitada, segue. */
+    async vivoAindaPode(escopo: Escopo, agenteId: string): Promise<boolean> {
+      if (!porPessoa) return false;
+      // 2ª revisão: só lê (como o `consultar`) — o `obter` vincula, cria e trava a tela a cada 10 s por sessão.
+      return o.dentro(escopo, async (d) => {
+        const agente = await d.repos.agentes.buscar(agenteId);
+        if (!agente || agente.ownerId !== escopo.pessoaId) return false;
+        const p = await d.repos.computadores.daPessoa();
+        const t = p && await d.repos.computadorTelas.buscar(p.id, agenteId);
+        // 3ª revisão: o Parar grava controle "pessoa" e fecha a tela (a tela não tem `habilitado`); fora do ar também derruba.
+        // 4ª revisão: o Parar vale pelo freio, não pelo estado da tela (logo depois do assumir, a tela pode estar fechada).
+        if (!p || !t || t.controle !== "pessoa" || p.indisponivelDesde !== null) return false;
+        return (await d.repos.computadores.ultimoFreio(p.id, t.id))?.tipo !== "parar";
+      });
+    },
     async humano(escopo: Escopo, agenteId: string, valor: unknown): Promise<ResultadoComputador> {
       const acao = validarAcaoComputador(valor);
       const r = await o.dentro(escopo, async (d) => {
@@ -763,7 +844,18 @@ export function criarComputadores(o: Opcoes) {
     },
     async chamar(escopo: Escopo, plano: PlanoTurno, nome: string, argumentos: unknown): Promise<ResultadoChamada> {
       let forcar = false;
-      const resultado = await o.dentro(escopo, async (d): Promise<ResultadoChamada | Reserva> => {
+      /** O id do computador cuja tela o bot retomou da pessoa nesta chamada (a sessão ao vivo dela acaba). */
+      let retomou: string | null = null;
+      /** 4ª revisão: a retomada desta tentativa só vale depois do commit; a tentativa que lança volta atrás no banco. */
+      let retomouNaTentativa: string | null = null;
+      const ateOcupado = agora() + ESPERA_OCUPADO_MS;
+      const tentar = async () => {
+        retomouNaTentativa = null;
+        const r = await tentarDentro();
+        if (retomouNaTentativa) retomou = retomouNaTentativa;
+        return r;
+      };
+      const tentarDentro = () => o.dentro(escopo, async (d): Promise<ResultadoChamada | Reserva | "ocupado_por_instante"> => {
         const negar = async (motivo: "parada_ativa" | "fora_do_catalogo" | "args_invalidos" | "capacidade_desligada" | "plano_expirado") => {
           const n = await registrarNegacao(d, { turnoId: plano.turnoId, agenteId: plano.agenteId, conversaId: plano.conversaId, nome, motivo, classe: "ferramenta_negada", autoria: plano.autoria });
           if (n.events?.length) await d.repos.events.gravarComOutbox(n.events);
@@ -779,10 +871,26 @@ export function criarComputadores(o: Opcoes) {
         // definido em 2026-09-24 (emenda da ADR-037): fora do ar, a ferramenta responde na hora — sem
         // Docker, sem reserva. O plano seguinte já sai sem as ferramentas computador_*.
         if (c.indisponivelDesde !== null) return { ok: true, isError: true, conteudo: JSON.stringify(foraDoArParaAgente(c)), confianca: "confiavel" };
-        if (c.controle !== "bot") { esquecerObservacao(plano.turnoId, c.id); return { ok: true, conteudo: JSON.stringify({ estado: "aguardando_pessoa", instrucao: "A pessoa está com o computador. Encerre o turno e aguarde a devolução." }), confianca: "confiavel" }; }
+        const aguardarPessoa = (): ResultadoChamada => { esquecerObservacao(plano.turnoId, c.id); return { ok: true, conteudo: JSON.stringify({ estado: "aguardando_pessoa", instrucao: "A pessoa está com o computador. Encerre o turno e aguarde a devolução." }), confianca: "confiavel" }; };
+        if (c.controle === "aguardando_pessoa") return aguardarPessoa();
+        // Revisão do PR #599 (ADR-037 emendada, ADR-138 §6): a retomada abaixo só vale para o pedido NOVO da pessoa. Um
+        // turno de rotina, de colega ou que já corria quando ela assumiu, ou um pedido de ajuda do bot ainda aberto,
+        // seguem esperando: o Assumir continua sendo o freio dela.
+        if (c.controle === "pessoa" && !(await pedidoNovoDaPessoa(d, c, plano))) return aguardarPessoa();
+        // definido em 2026-10-29 (1º ensaio no Mac, pedido do Marlon; revê a NOD-97): a pessoa estava no controle e PEDIU
+        // algo ao bot — a mensagem é o sinal de que terminou. O bot retoma na hora, como no Grok: controle volta ao bot,
+        // a tela ao vivo dela acaba (fora da transação) e a linha "retomou o computador" fica no painel. Só o pedido de
+        // ajuda do próprio bot (aguardando_pessoa, acima) segue esperando a pessoa.
+        if (c.controle === "pessoa") {
+          await lugar.configurar(d, c, { controle: "bot", atividadeEm: d.agora() });
+          await lugar.registrar(d, c, { turnoId: plano.turnoId, autor: "bot", tipo: "retomar", estado: "concluida" });
+          esquecerObservacao(plano.turnoId, c.id);
+          retomouNaTentativa = c.id;
+        }
         const args = argumentos as Record<string, unknown>;
         // ADR-083 (S5): ocupado por outra ação (outra task do bot, a conversa ou a pessoa) volta como resultado.
         if (c.ocupadoAte && c.ocupadoAte > d.agora()) {
+          if (d.agora() < ateOcupado) return "ocupado_por_instante";
           const uso = (await lugar.emUsoPor(d, c)) ?? { titulo: "outra tarefa", deFora: false };
           marcarEspera(plano.turnoId, uso.titulo);
           // Revisão do épico (S24, 2026-10-08): o título de uma task de colega (ou que leu conteúdo de fora) é texto de
@@ -825,7 +933,24 @@ export function criarComputadores(o: Opcoes) {
         forcar = acao.tipo === "observar" && acao.forcar === true;
         return reservar(d, c, acao, "bot", plano.turnoId);
       });
-      o.mudou(escopo, plano.agenteId);
+      let resultado: Awaited<ReturnType<typeof tentar>>;
+      // Revisão do PR #599: a retomada já gravou (commit) numa tentativa; se a seguinte lançar, a tela dela fecha mesmo assim.
+      // 2ª revisão: a sessão ao vivo dela fecha logo depois do commit que retomou, não ao fim da espera de até 6 s.
+      let fechouVivo = false;
+      const fecharVivoSeRetomou = () => { if (retomou && !fechouVivo) { fechouVivo = true; o.vivo?.fecharDaTela(escopo, plano.agenteId); } };
+      try {
+        resultado = await tentar();
+        fecharVivoSeRetomou();
+        while (resultado === "ocupado_por_instante") {
+          await dormir(PASSO_OCUPADO_MS);
+          resultado = await tentar();
+          fecharVivoSeRetomou();
+        }
+      } finally {
+        fecharVivoSeRetomou();
+        if (retomou) esquecerComputador(retomou);
+        o.mudou(escopo, plano.agenteId);
+      }
       if (!("operacao" in resultado)) return resultado;
       try {
         const r = await executar(escopo, resultado);
@@ -939,6 +1064,8 @@ export function criarComputadores(o: Opcoes) {
           const saude = await o.dentro(escopo, async (d) => {
             await d.repos.computadores.concluir(registroId, ligou ? "concluida" : "falhou", falha?.motivo ?? null);
             if (!await d.repos.computadores.travarDaPessoa(id)) return false;
+            // Acordar é atividade da pessoa: o varredor de ociosidade conta o limite a partir daqui.
+            if (ligou) await d.repos.computadores.configurar(id, { atividadeEm: d.agora() });
             if (ligou) return d.repos.computadores.registrarSucesso(id);
             if (!falha || !CONTA_PARA_SAUDE.has(falha.motivo)) return false;
             return Boolean((await d.repos.computadores.registrarFalha(id, { motivo: falha.motivo, em: d.agora(), limite: LIMITE_FALHAS_SEGUIDAS }))?.virouIndisponivel);

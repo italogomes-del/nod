@@ -10,6 +10,7 @@ import type { PlataformaMaquina } from "../../contracts/ponte.ts";
 import type { DriverComputador } from "../../contracts/computador.ts";
 import { criarDriverDocker } from "../computador/docker.ts";
 import { criarCanalComputador } from "../computador/canal.ts";
+import { criarSessoesVivo } from "../computador/vivo.ts";
 import { criarDriverMotor } from "../computador/motor.ts";
 import { lugarPadrao } from "../../domain/computador-canal.ts";
 import type { EstadoComputadorRelatado } from "../../contracts/computador-motor.ts";
@@ -32,6 +33,7 @@ import type { EventoStream, SubagenteVivo } from "../../contracts/turno.ts";
 import { chaveDe, cifrar, decifrar } from "../../db/cifra.ts";
 import { abrirTxEscopada, exigirForaDaTx, txEscopadaOuDoContexto } from "../../db/tx.ts";
 import { ErroDeDominio } from "../../domain/erro.ts";
+import { ehFalhaComputador } from "../../domain/computador.ts";
 import { iaAtualDoCatalogo, opcoesDoCatalogo } from "../../domain/harness.ts";
 import { iaDoAutomatico, iasNoLimite, inteligenciaDoAgente, ordemEfetiva } from "../../domain/inteligencia.ts";
 import { frameDaFerramenta, frameVivoDoEvento } from "../../domain/rotulo-ferramenta.ts";
@@ -650,6 +652,8 @@ export function comporApp(o: OpcoesCompor): App {
    */
   const computadorNoMotor = !o.computador && env.NOD_COMPUTADORES === "motor";
   const canalComputador = computadorNoMotor ? criarCanalComputador({ agora: relogio }) : null;
+  // NOD-95 (ADR-138): as sessões da tela ao vivo, só com o computador no motor.
+  const sessoesVivo = computadorNoMotor ? criarSessoesVivo() : null;
   const driverMotor = canalComputador ? criarDriverMotor({
     env,
     canal: canalComputador,
@@ -700,6 +704,7 @@ export function comporApp(o: OpcoesCompor): App {
   }
   const computadores = criarComputadores({ dentro, driver: o.computador ?? driverMotor ?? criarDriverDocker(env), executor: () => executorAtual, guardarTelas: capturaNoTranscript,
     porPessoa: computadorNoMotor,
+    ...(sessoesVivo ? { vivo: sessoesVivo } : {}),
     lugarPadraoNaCriacao: computadorNoMotor ? (escopo) => lugarPadrao(ponteHttp.maquinasComComputador(escopo)) : undefined,
     cifrar: (s) => cifrar(s, chave), decifrar: (s) => decifrar(s, chave),
     // `saude` (emenda da ADR-037): o computador entrou ou saiu do ar — a web relê a frota só nesse caso.
@@ -1623,6 +1628,18 @@ export function comporApp(o: OpcoesCompor): App {
         anexarMidia: ({ escopo, ligacaoId, retomar, canal }) => voz.anexarMidia({ pessoaId: escopo.pessoaId, ligacaoId, retomar, canal }),
         anexarCerebro: ({ identidade, ligacaoId, canal }) => voz.anexarCerebro({ turnoId: identidade.turnoId, ligacaoId, canal }),
         anexarDitado: ({ escopo, canal }) => anexarDitado(escopo, canal),
+        ...(sessoesVivo ? { computadorVivo: {
+          web(escopo, agenteId, canal) {
+            const s = sessoesVivo.abrir({ escopo, agenteId, web: canal, conferir: () => computadores.vivoAindaPode(escopo, agenteId) });
+            computadores.vivo(escopo, agenteId, { sessao: s.sessao, token: s.token }).catch((e: unknown) => {
+              const motivo = e instanceof ErroDeDominio ? e.codigo : ehFalhaComputador(e) ? e.motivo : "acao_falhou";
+              const causa = e instanceof Error && e.cause !== undefined ? String(e.cause) : null;
+              log("aviso", "computador_vivo_recusado", { agente_id: agenteId, motivo, causa });
+              sessoesVivo.recusar(s.sessao, motivo);
+            });
+          },
+          motor: (sessao, token, canal) => sessoesVivo.anexarMotor(sessao, token, canal),
+        } } : {}),
       });
     },
     async fechar() {

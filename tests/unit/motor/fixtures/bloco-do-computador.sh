@@ -1,7 +1,7 @@
 
 # ADR-122 (NOD-96): o computador da pessoa nesta máquina (NOD_COMPUTADORES=motor no servidor). Idempotente: perfis,
 # logins e workspace em /var/lib/nod-computador ficam.
-$SUDO env DEBIAN_FRONTEND=noninteractive $APT install -y -qq xvfb openbox xdotool xclip scrot dbus-x11 gnome-keyring libsecret-tools pulseaudio ffmpeg fonts-liberation fonts-noto-color-emoji bubblewrap >/dev/null
+$SUDO env DEBIAN_FRONTEND=noninteractive $APT install -y -qq xvfb openbox xdotool xclip scrot x11vnc dbus-x11 gnome-keyring libsecret-tools pulseaudio ffmpeg fonts-liberation fonts-noto-color-emoji bubblewrap >/dev/null
 passo "pacotes do computador (tela, keyring e isolamento)"
 # DNS da tela e do terminal pelo stub do systemd-resolved (o IP do resolvedor da nuvem é bloqueado com a metadata).
 # Sem o stub, instala o resolved mantendo os servidores de hoje como upstream.

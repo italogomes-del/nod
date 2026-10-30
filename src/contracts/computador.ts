@@ -148,6 +148,11 @@ export interface DriverComputador {
   /** O `iniciar` deste computador está em curso. */
   ligando?(id: string): boolean;
   /**
+   * NOD-95 (ADR-138, só o driver motor): pede à máquina a tela ao vivo deste bot. A máquina liga o VNC da tela e abre o
+   * WebSocket de volta ao servidor com `sessao` e `token`; resolve quando o supervisor aceitou (o fluxo chega em seguida).
+   */
+  vivo?(id: string, sessao: { sessao: string; token: string }, escopo?: EscopoDoDriver): Promise<void>;
+  /**
    * NOD-365: muda o computador para a máquina `destinoId`, levando a loja de logins cifrada (sem `semLogins`), liga lá e
    * marca a pasta da origem para sair em 30 dias. Se o `iniciar` no destino falhar, o banco volta a apontar para a origem.
    */

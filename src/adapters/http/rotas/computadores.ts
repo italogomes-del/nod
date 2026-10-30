@@ -8,6 +8,35 @@ import { ORIGENS_CONTROLE, type OrigemControle } from "../../../contracts/comput
 /** NOD-365: a recusa da troca com a origem sem contato; a tela troca "A máquina de agora" pelo nome que vem em `maquina`. */
 export const MENSAGEM_ORIGEM_SEM_CONTATO = "A máquina de agora está sem contato. Ligue-a para levar os logins.";
 
+/**
+ * NOD-407 (definido em 2026-10-29, 1º ensaio no Mac): o 409 das rotas do computador diz a causa real, em vez do
+ * "Atualize a página" genérico, que mandava a pessoa fazer o que não resolvia nada. Só estas causas saem no corpo,
+ * como `motivo` (lista branca, como a da Minha conta); qualquer outra fica só no log. Frases fixas, sem dado da pessoa.
+ */
+export const MOTIVOS_DO_COMPUTADOR: Readonly<Record<string, string>> = {
+  esperando_tela: "O computador ainda está ligando. Tente de novo em instantes.",
+  ligando: "O computador ainda está ligando. Tente de novo em instantes.",
+  maquina_sem_contato: "A máquina onde o computador mora não está respondendo.",
+  nao_ficou_pronto: "O computador não ficou pronto a tempo. Tente de novo.",
+  nao_iniciou: "O computador não conseguiu ligar.",
+  acao_falhou: "A máquina do computador recusou o pedido. Tente de novo.",
+  sem_resposta: "A máquina do computador não respondeu. Tente de novo.",
+  atualizando: "O computador está sendo atualizado. Espere terminar.",
+  fora_do_ar: "O computador está fora do ar. Tente de novo para religar.",
+  ocupado: "Uma ação anterior ainda está terminando. Tente de novo em instantes.",
+};
+
+/** O 409 `estado_invalido` do computador com a causa: a frase da tabela e o `motivo`; sem causa conhecida, a reserva viva. */
+function responderCausa(ctx: { json(status: number, corpo: unknown): void }, e: unknown): boolean {
+  if (!(e instanceof ErroDeDominio) || e.codigo !== "estado_invalido") return false;
+  const bruta = typeof e.cause === "string" ? e.cause : "ocupado";
+  const motivo = bruta === "computador fora do ar" ? "fora_do_ar" : bruta;
+  const mensagem = MOTIVOS_DO_COMPUTADOR[motivo];
+  if (!mensagem) return false;
+  ctx.json(409, { codigo: "estado_invalido", mensagem, motivo });
+  return true;
+}
+
 export function rotasComputadores(computadores: Computadores): Rota[] {
   return [
     // NOD-96 PR 5: o computador da pessoa (NOD_COMPUTADORES=motor); com a flag desligada, 404.
@@ -16,7 +45,12 @@ export function rotasComputadores(computadores: Computadores): Rota[] {
       const corpo = await ctx.corpo() as { operacao?: unknown } | null;
       if (!corpo || typeof corpo.operacao !== "string" || !(OPERACOES_DA_PESSOA as readonly string[]).includes(corpo.operacao)) throw new ErroDeDominio("entrada_invalida");
       // Atualizar, Redefinir e Sair de todos seguem em segundo plano; o progresso vem pelo GET.
-      await computadores.operarDaPessoa(ctx.escopo, corpo.operacao as OperacaoDaPessoa);
+      try {
+        await computadores.operarDaPessoa(ctx.escopo, corpo.operacao as OperacaoDaPessoa);
+      } catch (e) {
+        if (responderCausa(ctx, e)) return;
+        throw e;
+      }
       ctx.json(200, { ok: true });
     } },
     // NOD-365: onde o computador mora. `semLogins` troca sem levar os logins (a origem sem contato); a troca segue em
@@ -40,9 +74,21 @@ export function rotasComputadores(computadores: Computadores): Rota[] {
       if (!corpo || typeof corpo.operacao !== "string") throw new ErroDeDominio("entrada_invalida");
       // NOD-97: `origem` é opcional (sem ela, "botao"); fora do enum é entrada inválida.
       if (corpo.origem !== undefined && !ORIGENS_CONTROLE.includes(corpo.origem as OrigemControle)) throw new ErroDeDominio("entrada_invalida");
-      await computadores.configurar(ctx.escopo, ctx.params.id!, corpo.operacao, corpo.origem as OrigemControle | undefined);
+      try {
+        await computadores.configurar(ctx.escopo, ctx.params.id!, corpo.operacao, corpo.origem as OrigemControle | undefined);
+      } catch (e) {
+        if (responderCausa(ctx, e)) return;
+        throw e;
+      }
       ctx.json(200, { ok: true });
     } },
-    { metodo: "POST", acao: "computador.usar_tela", padrao: /^\/agentes\/(?<id>[^/]+)\/computador\/acoes$/, async handler(ctx) { ctx.json(200, await computadores.humano(ctx.escopo, ctx.params.id!, await ctx.corpo())); } },
+    { metodo: "POST", acao: "computador.usar_tela", padrao: /^\/agentes\/(?<id>[^/]+)\/computador\/acoes$/, async handler(ctx) {
+      try {
+        ctx.json(200, await computadores.humano(ctx.escopo, ctx.params.id!, await ctx.corpo()));
+      } catch (e) {
+        if (responderCausa(ctx, e)) return;
+        throw e;
+      }
+    } },
   ];
 }

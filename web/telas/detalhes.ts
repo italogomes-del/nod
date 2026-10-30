@@ -230,7 +230,7 @@ export function abaComputador(estado: Estado, a: Bot): string {
   // NOD-96 (v2): com o computador da pessoa, a aba mostra a miniatura com Abrir, "não está usando o navegador",
   // dormindo/Acordar e o fora do ar com o caminho — o estado vem do computador da pessoa, não do pulso deste bot.
   const v2 = estado.computadorPessoa;
-  if (v2) return htmlGavetaTela(v2, a);
+  if (v2) return htmlGavetaTela(v2, a, estado.computadorUi.recusa ?? null);
   const visto = estadoDoComputadorNaGaveta(estado, a);
   const acao = estado.computadorAcao?.agenteId === a.id ? estado.computadorAcao.tipo : null;
   const legenda = `<p class="tela-legenda">Tela de ${esc(a.nome)}</p>`;

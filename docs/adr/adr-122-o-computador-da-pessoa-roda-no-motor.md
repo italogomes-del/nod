@@ -361,8 +361,10 @@ só repassa e nunca decifra. A chave da loja deriva do id do computador, então 
 
 ## Fora
 
+(Tela ao vivo saiu daqui: [ADR-138](adr-138-tela-ao-vivo-por-vnc.md), 2026-10-29.)
+
 Compartilhar por workspace (bots de colegas); mais de uma máquina por pessoa; compartilhar
-extensões (NOD-97); tela ao vivo (NOD-95); rotear o navegador pelo Mac da pessoa; computador no Mac (NOD-93) e na
+extensões (NOD-97); rotear o navegador pelo Mac da pessoa; computador no Mac (NOD-93) e na
 nuvem gerenciada (NOD-92/NOD-89).
 
 ## Gatilho de reversão

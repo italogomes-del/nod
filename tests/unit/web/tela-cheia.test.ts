@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { abrirTelaCheia } from "../../../web/telas/tela-cheia.ts";
 
+/** A tela ao vivo (noVNC) não roda no jsdom; aqui ela só não liga e a captura segue. */
+const semVivo = async () => null;
+
 /**
  * NOD-96, PR 6: a tela cheia v2 num DOM de mentira (o unit não tem jsdom). Fechar devolve ao bot — inclusive
  * fechando durante "Assumindo…" e abrindo pelo pedido de ajuda (assumir: true) e fechando logo.
@@ -60,6 +63,7 @@ function api(controleInicial: "bot" | "pessoa") {
     segurarAssumir() { assumir = pendente(); return assumir; },
     segurarLeitura() { ler = pendente(); return ler; },
     computador: vi.fn(async () => { if (ler) { const p = ler; ler = null; await p.promessa; } return dto(controle); }),
+    urlVivo: () => "ws://teste/vivo",
     acaoComputador: vi.fn(async () => ({ tela: { imagem: "AA", quadro: 1 } })),
     configurarComputador: vi.fn(async (_id: string, op: string) => {
       chamadas.push(op);
@@ -89,7 +93,7 @@ const BOT = { id: "a", nome: "Dev 2" };
 describe("tela cheia v2: fechar devolve ao bot", () => {
   it("fechar com a pessoa no controle devolve", async () => {
     const a = api("pessoa");
-    abrirTelaCheia(a as never, BOT);
+    abrirTelaCheia(a as never, BOT, { vivo: semVivo });
     await esvaziar();
     dialog.close();
     await esvaziar();
@@ -98,7 +102,7 @@ describe("tela cheia v2: fechar devolve ao bot", () => {
 
   it("fechar assistindo não mexe no controle", async () => {
     const a = api("bot");
-    abrirTelaCheia(a as never, BOT);
+    abrirTelaCheia(a as never, BOT, { vivo: semVivo });
     await esvaziar();
     dialog.close();
     await esvaziar();
@@ -107,7 +111,7 @@ describe("tela cheia v2: fechar devolve ao bot", () => {
 
   it("fechar durante Assumindo… devolve quando o assumir termina, nunca antes", async () => {
     const a = api("bot");
-    abrirTelaCheia(a as never, BOT);
+    abrirTelaCheia(a as never, BOT, { vivo: semVivo });
     await esvaziar();
     const segura = a.segurarAssumir();
     // O clique em "Assumir o controle": o ouvinte de click lê data-c pelo closest do alvo.
@@ -125,7 +129,7 @@ describe("tela cheia v2: fechar devolve ao bot", () => {
   it("aberta pelo pedido de ajuda e fechada logo: se o assumir já saiu, devolve no fim", async () => {
     const a = api("bot");
     const segura = a.segurarAssumir();
-    abrirTelaCheia(a as never, BOT, { assumir: true });
+    abrirTelaCheia(a as never, BOT, { assumir: true, vivo: semVivo });
     await esvaziar();
     expect(a.chamadas).toEqual(["assumir"]);
     dialog.close();
@@ -137,7 +141,7 @@ describe("tela cheia v2: fechar devolve ao bot", () => {
   it("aberta pelo pedido de ajuda e fechada antes da primeira leitura: nem assume", async () => {
     const a = api("bot");
     const leitura = a.segurarLeitura();
-    abrirTelaCheia(a as never, BOT, { assumir: true });
+    abrirTelaCheia(a as never, BOT, { assumir: true, vivo: semVivo });
     await esvaziar();
     dialog.close();
     leitura.resolver();
@@ -147,7 +151,7 @@ describe("tela cheia v2: fechar devolve ao bot", () => {
 
   it("Esc com o foco na tela, no controle, vai para o site e não fecha; com o foco fora, fecha", async () => {
     const a = api("pessoa");
-    abrirTelaCheia(a as never, BOT);
+    abrirTelaCheia(a as never, BOT, { vivo: semVivo });
     await esvaziar();
     const imagem = dialog.querySelector(".cb-tela-vista > img");
     imagem.focus();

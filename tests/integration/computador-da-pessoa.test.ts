@@ -163,6 +163,16 @@ describeIntegracao("computador da pessoa no motor (0106)", () => {
       // PR 4: a Atividade da tela traz as ações do bot e as da pessoa nela; "em uso por" olha só a tela pedida.
       expect((await a.repos.computadores.atividadeDaTela(c.id, tb.id)).map((r) => r.tipo).sort()).toEqual(["clicar", "navegar"]);
       expect((await a.repos.computadorTelas.porId(tb.id))!.agenteId).toBe(b.agenteId);
+      // Revisão do PR #599: o último "assumir" é da tela pedida, sem o teto de 30 linhas da Atividade.
+      expect(await a.repos.computadores.ultimoFreio(c.id, tb.id)).toBeNull();
+      await a.repos.computadores.registrar({ computadorId: c.id, autor: "pessoa", tipo: "assumir", estado: "concluida", telaId: tb.id });
+      for (let i = 0; i < 31; i++) await a.repos.computadores.registrar({ computadorId: c.id, autor: "pessoa", tipo: "clicar", estado: "concluida", telaId: tb.id });
+      expect(await a.repos.computadores.ultimoFreio(c.id, tb.id)).toEqual({ tipo: "assumir", em: expect.any(Number) });
+      expect(await a.repos.computadores.ultimoFreio(c.id, ta.id)).toBeNull();
+      expect(await a.repos.computadores.ultimoFreio(c.id, null)).toBeNull();
+      // 4ª revisão: o Parar também é freio (a mensagem de antes não retoma, o ao vivo não reabre a tela).
+      await a.repos.computadores.registrar({ computadorId: c.id, autor: "pessoa", tipo: "parar", estado: "concluida", telaId: ta.id });
+      expect(await a.repos.computadores.ultimoFreio(c.id, ta.id)).toEqual({ tipo: "parar", em: expect.any(Number) });
       await a.repos.computadores.registrar({ computadorId: c.id, autor: "pessoa", tipo: "digitar", estado: "executando", telaId: ta.id });
       expect(await a.repos.computadores.emUsoPor(c.id, ta.id)).toEqual({ titulo: "a pessoa", deFora: false });
       expect(await a.repos.computadores.emUsoPor(c.id, tb.id)).toBeNull();

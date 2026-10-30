@@ -1,4 +1,6 @@
+import type { FluxoVivo } from "./computador.ts";
 import type { ComandoComputador, EstadoComputadorRelatado, ResultadoComandoComputador } from "../../contracts/computador-motor.ts";
+import type { SessaoVivo } from "../../contracts/computador-vivo.ts";
 import { IAS_COM_CONTA, type IaComConta, type ProgressoDoLogin, type PuxadaDeContas } from "../../contracts/contas-ia.ts";
 import type { PedidoDeInstalacao, ProgressoDeInstalacao } from "../../contracts/instalacoes-ssh.ts";
 import type { AnuncioMaquina, PastaParaLimpar, PonteInterna, RespostaRenovar, TrechoVivo, VigiaVivo } from "../../contracts/ponte.ts";
@@ -357,6 +359,30 @@ export function criarPonteHttp(o: { url: string; chave: string; versao: string; 
       },
       async estado(e: EstadoComputadorRelatado): Promise<boolean> {
         try { await chamar("computador/estado", e, { rota404: true }); return true; } catch { return false; }
+      },
+      /**
+       * NOD-95 (ADR-138): o fluxo da tela ao vivo. Um WebSocket de SAÍDA (o servidor nunca disca, ADR-021) para
+       * `/api/maquina/computador/vivo/:sessao`, autenticado pelo token de uso único que veio no comando assinado — não
+       * pela chave da máquina: o WebSocket global do Node e do Electron não leva header próprio. Só bytes, nos dois sentidos.
+       */
+      async vivo(sessao: SessaoVivo): Promise<FluxoVivo | null> {
+        const WS = (globalThis as { WebSocket?: typeof WebSocket }).WebSocket;
+        if (!WS) return null;
+        const url = new URL(`${o.url}/api/maquina/computador/vivo/${encodeURIComponent(sessao.sessao)}`);
+        url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+        url.searchParams.set("t", sessao.token);
+        const ws = new WS(url);
+        ws.binaryType = "arraybuffer";
+        const aberto = await new Promise<boolean>((r) => { ws.onopen = () => r(true); ws.onerror = () => r(false); ws.onclose = () => r(false); });
+        if (!aberto) return null;
+        ws.onerror = () => {};
+        return {
+          enviar: (bytes) => { if (ws.readyState === ws.OPEN) ws.send(bytes); },
+          aoDados: (fn) => { ws.onmessage = (e) => { if (e.data instanceof ArrayBuffer) fn(new Uint8Array(e.data)); }; },
+          aoFechar: (fn) => { ws.onclose = () => fn(); },
+          fechar: () => ws.close(),
+          atraso: () => ws.bufferedAmount,
+        };
       },
     },
     /**

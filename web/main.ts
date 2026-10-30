@@ -7277,13 +7277,19 @@ function trocarLugarDoComputador(maquinaId: string, semLogins: boolean): Promise
 
 function operarComputador(op: OperacaoPessoa): Promise<void> {
   const longa = op === "atualizar" || op === "redefinir" || op === "sair_de_todos" || op === "esquecer_senhas";
-  dispatch({ tipo: "computador-ui", ui: { confirmar: null, realce: null, etapasAbertas: longa && secaoAberta(estado) === "maquinas" } });
+  dispatch({ tipo: "computador-ui", ui: { confirmar: null, realce: null, recusa: null, etapasAbertas: longa && secaoAberta(estado) === "maquinas" } });
   // Uma leitura que saiu antes do POST chegaria sem a operação e apagaria o diálogo de etapas: a geração nova a descarta.
   window.clearTimeout(computadorTimer);
   ++computadorGeracao;
+  // Acordar reage na hora (29/10): a gaveta mostra "Acordando…" antes de o servidor confirmar; a leitura seguinte corrige.
+  if ((op === "acordar" || op === "tentar_de_novo") && estado.computadorPessoa) dispatch({ tipo: "hidratar-computador-pessoa", dto: { ...estado.computadorPessoa, estado: "ligando", falha: null }, agora: Date.now() });
   return agir(async () => {
     try {
       await api!.operarComputador(op);
+    } catch (e) {
+      // NOD-407: o 409 do computador traz a causa real; ela fica na aba Computador, não no banner vermelho do chat.
+      if ((op === "acordar" || op === "tentar_de_novo") && e instanceof ErroApi && e.status === 409) { dispatch({ tipo: "computador-ui", ui: { recusa: e.message } }); return; }
+      throw e;
     } finally {
       // O diálogo de etapas só existe quando a leitura traz a operação: o foco vai para ele depois dela.
       await lerComputadorAgora();

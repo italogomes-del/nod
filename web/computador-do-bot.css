@@ -109,7 +109,7 @@
 /* ---------- Acordando: abre os olhos (dormindo → meio → acordado), espreguiça, e a tela entra ---------- */
 .cb-acordando { display: grid; }
 .cb-acordando > * { grid-area: 1 / 1; }
-.cb-acordando .cb-sono { animation: cb-sai .35s 2.05s both; }
+/* 29/10: o "Acordando…" fica à vista enquanto o computador liga (a VM do Mac leva minutos); antes sumia em 2 s e deixava a aba vazia. */
 .cb-acordando .cb-zzz { animation: cb-sai .3s both; }
 .cb-acordando .cb-sono-masc { animation: cb-espreguica 1.9s ease-in-out both; }
 .cb-acordando .tela-preview { animation: cb-entra .45s 2s both; }
@@ -135,6 +135,9 @@ dialog.cb-veu::backdrop { background: var(--backdrop); }
 /* A moldura abraça a tela (16:10, a resolução do computador): sobra fundo escurecido em volta, não faixa preta. Se não couber na altura, encolhe e a imagem fica inteira (contain). */
 .cb-tela-vista { position: relative; flex: 0 1 auto; min-height: 0; aspect-ratio: 16 / 10; display: grid; place-items: center; background: #000; } /* cor-fixa: a tela do bot é sempre escura */
 .cb-tela-vista > img { position: absolute; inset: 0; display: block; width: 100%; height: 100%; object-fit: contain; } /* a imagem inteira, na proporção */
+/* NOD-95: a tela ao vivo (noVNC) ocupa o mesmo lugar da imagem; o cliente escala o canvas para caber inteiro. */
+.cb-tela-vista > .cb-tela-vivo { position: absolute; inset: 0; z-index: 1; overflow: hidden; }
+.cb-tela-vista > .cb-tela-vivo[hidden] { display: none; }
 .cb-tela-vista.no-controle::after { content: ""; position: absolute; inset: 0; z-index: 2; border: 3px solid #4ea3f0; pointer-events: none; } /* cor-fixa: a borda do controle, como na v1 */
 /* A pílula: estado + ação em link, embaixo e no meio, translúcida. */
 .cb-pilula { position: absolute; z-index: 3; left: 50%; bottom: 16px; transform: translateX(-50%); display: flex; align-items: center; gap: 8px; width: max-content; max-width: calc(100% - 24px); box-sizing: border-box; padding: 7px 14px; border: 1px solid #ffffff1f; border-radius: 999px; background: #1c1c1ecc; color: #d4d4d8; font-size: 13px; line-height: 1.35; box-shadow: 0 6px 20px #0005; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); } /* cor-fixa: sobre a tela */

@@ -19,7 +19,7 @@ import type { VmLocalAnunciada } from "../contracts/vm-local.ts";
 export const BACKOFF_MIN_MS = 2_000;
 export const BACKOFF_MAX_MS = 60_000;
 /** definido em 2026-10-22 (plano da NOD-93): a VM dorme 15 min depois que a última tela do computador fechou. */
-export const DORMIR_APOS_MS = 15 * 60_000;
+export const DORMIR_APOS_MS = 60 * 60_000;
 /** definido em 2026-10-22: com memória curta, mede de novo a cada 30 s. */
 export const REMEDIR_MEMORIA_MS = 30_000;
 /** definido em 2026-10-22 (plano da NOD-93): sha256 ruim baixa de novo uma vez; a segunda é falha. */

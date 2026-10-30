@@ -22,9 +22,9 @@ export type ArquivoDoComputador = (typeof ARQUIVOS_DO_COMPUTADOR)[number];
 /** A versão do playwright-core do supervisor (a mesma de infra/computador/package.json; um teste confere). */
 export const PLAYWRIGHT_DO_COMPUTADOR = "1.63.0";
 
-/** Pacotes do apt. scrot: a tela captura com ele, como o runtime (desvio registrado na ADR-122). */
+/** Pacotes do apt. scrot: a tela captura com ele, como o runtime (desvio registrado na ADR-122). x11vnc: a tela ao vivo (NOD-95, ADR-138). */
 export const PACOTES_DO_COMPUTADOR = [
-  "xvfb", "openbox", "xdotool", "xclip", "scrot", "dbus-x11", "gnome-keyring", "libsecret-tools", "pulseaudio", "ffmpeg",
+  "xvfb", "openbox", "xdotool", "xclip", "scrot", "x11vnc", "dbus-x11", "gnome-keyring", "libsecret-tools", "pulseaudio", "ffmpeg",
   "fonts-liberation", "fonts-noto-color-emoji", "bubblewrap",
 ] as const;
 

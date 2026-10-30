@@ -22,6 +22,16 @@ import { importarNoPerfil } from './login-senhas.mjs';
 const exec = promisify(execFile);
 
 /** Arquivos do SQLite de cookies que o fork do perfil-base não leva: os cookies vêm da loja. */
+/**
+ * NOD-95 (ADR-138): o x11vnc só no socket unix. `-rfbport 0`/`-rfbportv6 0` tiram a porta TCP; `-localhost` e `-noipv6`
+ * (revisão do PR #599) garantem que, se uma versão ignorar o 0, a porta não sai do loopback. `-noshm`: o Xvfb está no
+ * bwrap com --unshare-ipc, e o x11vnc, fora dele, morria no MIT-SHM (1º ensaio no Mac, 29/10). `-noremote` e
+ * `-novncconnect` (2ª revisão): um cliente X do mesmo display (o Chromium) não reconfigura o x11vnc pela propriedade X.
+ */
+export function argumentosDoX11vnc(display, xauthority, sock) {
+  return ['-display', display, '-auth', xauthority, '-unixsock', sock, '-rfbport', '0', '-rfbportv6', '0', '-localhost', '-noipv6', '-nopw', '-shared', '-forever', '-quiet', '-xkb', '-noshm', '-noremote', '-novncconnect'];
+}
+
 export const COOKIES_DO_PERFIL = ['Default/Cookies', 'Default/Cookies-journal', 'Default/Network/Cookies', 'Default/Network/Cookies-journal'];
 
 /** Esquemas que a tela navega. file:, chrome: e afins ficam de fora: o disco da máquina não é do bot. */
@@ -362,7 +372,7 @@ export async function caminhoNoWorkspace(raiz, c, novo = false) {
 /**
  * Uma tela viva. `config` (do supervisor): agenteId, display (número), raiz, run (a raiz do run, some no bwrap), ocultar
  * (outras pastas que somem no bwrap), resolv (o resolv.conf do stub, ou nada) e resolvEm (onde montá-lo), perfil, perfilBase, workspace, logins,
- * tmp, x11, bus (pasta) e busEndereco, bin {xvfb, openbox, chromium, bwrap (null = sem bwrap), xdotool, xclip, scrot},
+ * tmp, x11, bus (pasta) e busEndereco, bin {xvfb, openbox, chromium, bwrap (null = sem bwrap), xdotool, xclip, scrot, x11vnc},
  * sandbox (sandbox do Chromium), cookies (a loja aplicada na subida).
  */
 export function criarTela(config, avisar) {
@@ -529,6 +539,34 @@ export function criarTela(config, avisar) {
   async function atual() {
     if (page.isClosed()) page = context.pages().at(-1) ?? (await context.newPage());
     return page;
+  }
+
+  /**
+   * NOD-95 (ADR-138): a tela ao vivo. Sobe o x11vnc desta tela no 1º pedido, só num socket unix no tmp dela (sem porta
+   * TCP: `-rfbport 0 -rfbportv6 0`, senão outra tela, que vê a rede, enxergaria esta), e o deixa até a tela fechar
+   * (`filhos`). Fora do bwrap, como o scrot e o xdotool: fala com o Xvfb pelo cookie desta tela. Devolve o socket.
+   */
+  let vnc = null;
+  async function vivo() {
+    // O caminho de um socket unix tem teto de 108 bytes e o tmp da tela (run/<uuid>/telas/<uuid>) passa disso, como o
+    // SingletonSocket do Chrome (NOD-96, 28/10). Fica no /tmp do serviço (PrivateTmp): o supervisor o alcança (mesma
+    // unit) e as outras telas não (o /tmp delas no bwrap é outro).
+    const sock = `/tmp/nod-vnc-${config.display}.sock`;
+    if (!vnc || vnc.exitCode !== null) {
+      await unlink(sock).catch(() => {});
+      let erro = null;
+      vnc = iniciar(config.bin.x11vnc, argumentosDoX11vnc(DISPLAY, XAUTHORITY, sock));
+      vnc.on('error', (e) => { erro = e?.code ?? e?.message ?? String(e); });
+      for (let i = 0; i < 50; i++) {
+        if (await access(sock).then(() => true, () => false)) break;
+        if (erro || vnc.exitCode !== null) throw falhaDe(erro === 'ENOENT' ? 'faltam_pacotes' : 'acao_falhou', `o x11vnc não abriu${erro ? ` (${erro})` : ''}`);
+        if (i === 49) throw falhaDe('acao_falhou', 'o x11vnc não abriu o socket');
+        await esperar(100);
+      }
+    }
+    // A pessoa vai mexer sem passar pelas ações: a revisão que o bot conhecia não vale mais.
+    mudar();
+    return { socket: sock };
   }
 
   async function observar() {
@@ -761,6 +799,7 @@ export function criarTela(config, avisar) {
   return {
     subir,
     observar,
+    vivo,
     receberCookies,
     limparCookies,
     limparStorage,
@@ -807,6 +846,12 @@ async function principal() {
           enviar({ tipo: 'resposta', id: m.id, resultado: await tela.executar(m.acao) });
         } catch (e) {
           enviar({ tipo: 'resposta', id: m.id, erro: codigoDaAcao(e), detalhe: primeiraLinha(e?.message) });
+        }
+      } else if (m.tipo === 'vivo') {
+        try {
+          enviar({ tipo: 'resposta', id: m.id, resultado: await tela.vivo() });
+        } catch (e) {
+          enviar({ tipo: 'resposta', id: m.id, erro: e?.codigo ?? 'acao_falhou', detalhe: primeiraLinha(e?.message) });
         }
       } else if (m.tipo === 'repasse') {
         await tela?.receberCookies(m);
