@@ -59,6 +59,8 @@ describe("o lote do Nod sai do registro", () => {
     if (!s.contaminado) return null;
     if (a.tipo === "dar_acesso" || a.tipo === "criar_rotina" || (a.tipo === "duplicar" && s.alvoTemAcessos)) return "conteudo_de_fora";
     if (a.tipo === "editar" && (a.descricao !== undefined || a.titulo !== undefined)) return "conteudo_de_fora";
+    // NOD-20 (tipo novo, depois do oráculo): restaurar pode trazer de volta a descrição, como o editar com descrição.
+    if (a.tipo === "restaurar_versao") return "conteudo_de_fora";
     return null;
   }
 

@@ -20,6 +20,8 @@ import type { Incidente } from "../../src/contracts/incidente.ts";
 import type { Inventario } from "../../src/contracts/inventario.ts";
 import type { ItemAprovacao } from "../../src/contracts/item-aprovacao.ts";
 import type { Memoria } from "../../src/contracts/memoria.ts";
+import { MAX_VERSOES_PERFIL, type VersaoPerfil, VERSOES_POR_PAGINA } from "../../src/contracts/versoes-perfil.ts";
+import { redigirPerfil, temRedacao } from "../../src/domain/versoes-perfil.ts";
 import type { Mensagem } from "../../src/contracts/mensagem.ts";
 import type { ExecucaoRotina, Rotina } from "../../src/contracts/rotina.ts";
 import type { MembroSala, Sala } from "../../src/contracts/sala.ts";
@@ -80,6 +82,8 @@ export type BancoMemoria = {
   /** agentes.geracao_execucao (ADR-034): ausente = 0. */
   geracoes: Map<string, number>;
   memorias: Memoria[];
+  /** NOD-20: as versões do perfil (tenantId junto, para o filtro do escopo). */
+  versoesPerfil: (VersaoPerfil & { tenantId: string })[];
   conversas: Conversa[];
   mensagens: Mensagem[];
   /** NOD-156: `tenant:conversa:idEnvio` → id da mensagem (a coluna id_envio não sai em Mensagem). */
@@ -190,6 +194,7 @@ export function criarBancoMemoria(): { banco: BancoMemoria; repos(escopo?: Escop
     agentes: [],
     geracoes: new Map(),
     memorias: [],
+    versoesPerfil: [],
     conversas: [],
     mensagens: [],
     idsDeEnvio: new Map(),
@@ -697,6 +702,55 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       ultimaDaMemoria: async () => null,
       marcarDesfeita: soNoPostgres,
       revisar: soNoPostgres,
+    },
+
+    // NOD-20: as versões do perfil; a poda real (SECURITY DEFINER) se prova no Postgres, aqui é o mesmo corte das 50.
+    versoesPerfil: {
+      async inserir(v) {
+        if (b.versoesPerfil.some((x) => x.tenantId === escopo.tenantId && x.agenteId === v.agenteId && x.versao === v.versao)) throw new Error("versão duplicada");
+        const nova: VersaoPerfil = {
+          id: randomUUID(),
+          agenteId: v.agenteId,
+          versao: v.versao,
+          origem: v.origem,
+          autor: v.autor ?? "pessoa",
+          propostaId: v.propostaId ?? null,
+          restauradaDe: v.restauradaDe ?? null,
+          perfil: redigirPerfil(v.perfil),
+          campos: [...v.campos],
+          criadoEm: agora(),
+          redigida: temRedacao(redigirPerfil(v.perfil)),
+        };
+        b.versoesPerfil.push({ ...nova, tenantId: escopo.tenantId });
+        return nova;
+      },
+      async listar(agenteId, antes, limite = VERSOES_POR_PAGINA) {
+        const todas = b.versoesPerfil.filter((x) => x.tenantId === escopo.tenantId && x.agenteId === agenteId && (!antes || x.versao < antes)).sort((x, y) => y.versao - x.versao);
+        return { versoes: todas.slice(0, limite).map(({ tenantId: _t, ...v }) => v), mais: todas.length > limite };
+      },
+      async buscar(agenteId, versao) {
+        const v = b.versoesPerfil.find((x) => x.tenantId === escopo.tenantId && x.agenteId === agenteId && x.versao === versao);
+        if (!v) return null;
+        const { tenantId: _t, ...resto } = v;
+        return resto;
+      },
+      async ultima(agenteId) {
+        const todas = b.versoesPerfil.filter((x) => x.tenantId === escopo.tenantId && x.agenteId === agenteId).sort((x, y) => y.versao - x.versao);
+        const v = todas[0];
+        if (!v) return null;
+        const { tenantId: _t, ...resto } = v;
+        return resto;
+      },
+      async contar(agenteId) {
+        return b.versoesPerfil.filter((x) => x.tenantId === escopo.tenantId && x.agenteId === agenteId).length;
+      },
+      async podar(agenteId) {
+        const minhas = b.versoesPerfil.filter((x) => x.tenantId === escopo.tenantId && x.agenteId === agenteId);
+        const max = Math.max(0, ...minhas.map((x) => x.versao));
+        const antes = b.versoesPerfil.length;
+        b.versoesPerfil = b.versoesPerfil.filter((x) => !(x.tenantId === escopo.tenantId && x.agenteId === agenteId && x.versao <= max - MAX_VERSOES_PERFIL));
+        return antes - b.versoesPerfil.length;
+      },
     },
 
     conversas: {

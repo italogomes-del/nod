@@ -8,6 +8,7 @@ import type { ChaveEmitidaDto, ChaveMaquinaDto, ConversaDto, FrotaDto, RotinaDto
 import type { MaquinasDto } from "../../src/contracts/maquina.ts";
 import type { InstalacaoSshDto, MetodoSsh } from "../../src/contracts/instalacoes-ssh.ts";
 import type { ResumoDaChave } from "../lib/chave-ssh.ts";
+import { HISTORICO_INICIAL, type HistoricoDoBot } from "../lib/historico-perfil.ts";
 import type { ContasIaDto } from "../../src/contracts/contas-ia.ts";
 import type { DetalhesDasContas } from "../../src/contracts/desktop.ts";
 import type { Concessao } from "../../src/contracts/concessao.ts";
@@ -215,6 +216,9 @@ export type NivelGaveta =
   | { tipo: "atividade" }
   /** ADR-125 (NOD-349): Atalhos, Perfil (Missão e voz), Acessos, Ambiente e o Modo dev, fora da visão geral. */
   | { tipo: "ajustes" }
+  /** NOD-20: o histórico de versões do perfil (Ajustes › Perfil › Histórico) e uma versão aberta (`id` = o número). */
+  | { tipo: "historico" }
+  | { tipo: "versao"; id: string }
   /** NOD-382: as telas das linhas do perfil do celular (web/telas/perfil-celular.ts); o desktop não as abre. */
   | { tipo: "codigo" }
   | { tipo: "rotinas" }
@@ -429,6 +433,8 @@ export type Estado = {
   /** NOD-70: `negadas` é o "· N negadas" da linha Atividade em Ajustes (undefined/null: ainda não leu, ou falhou). */
   atividadeHoje: Record<string, { dia: string; total: number | null; negadas?: number | null }>;
   atividadeVista: VistaDaAtividade | null;
+  /** NOD-20: o histórico de versões do perfil por bot (web/telas/historico-perfil.ts). */
+  historicoPerfil: Record<string, HistoricoDoBot>;
   /**
    * NOD-70: a aba Decisões, por `bot:dia:filtro` (chaveDasDecisoes). null = indisponível (servidor de antes ou bot de outra
    * pessoa, 404); "erro" = a leitura falhou (a aba mostra o erro com Tentar de novo).
@@ -564,6 +570,7 @@ export type Acao =
   | AcaoAgenda
   | { tipo: "conexao-app"; slug: string; valor: ConexaoApp | null }
   | { tipo: "gaveta"; agenteId: string; nivel: NivelGaveta | null }
+  | { tipo: "historico-perfil"; agenteId: string; mudanca: Partial<HistoricoDoBot> }
   | { tipo: "perfil-celular"; perfil: PerfilCelular | null }
   | { tipo: "rotinas-falharam" }
   | { tipo: "rotinas-tentando" }
@@ -723,6 +730,7 @@ export const estadoInicial: Estado = {
   bibliotecaDoBot: {},
   atividadeHoje: {},
   atividadeVista: null,
+  historicoPerfil: {},
   decisoesDoBot: {},
   avisoConexao: null,
   concessoes: {},
@@ -1493,7 +1501,7 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
         falhaLeitura: acao.escopo?.pessoaId === estado.sessao?.pessoaId && acao.escopo?.tenantId === estado.sessao?.tenantId ? estado.falhaLeitura : null,
         // NOD-326 (revisão 3): a Biblioteca também some na troca de tenant (não fica dado de um tenant no outro).
         ...(acao.escopo?.tenantId === estado.sessao?.tenantId ? {} : { bibliotecaDoBot: {} }),
-        ...(acao.escopo?.pessoaId === estado.sessao?.pessoaId ? {} : { onboarding: undefined, onboardingAberto: false, onboardingResolvido: false, agenda: AGENDA_INICIAL, trabalhos: null, trabalhoDetalhe: {}, pressao: null, atividadeDoBot: {}, atividadeHoje: {}, atividadeVista: null, decisoesDoBot: {}, bibliotecaDoBot: {} }) };
+        ...(acao.escopo?.pessoaId === estado.sessao?.pessoaId ? {} : { onboarding: undefined, onboardingAberto: false, onboardingResolvido: false, agenda: AGENDA_INICIAL, trabalhos: null, trabalhoDetalhe: {}, pressao: null, atividadeDoBot: {}, atividadeHoje: {}, atividadeVista: null, historicoPerfil: {}, decisoesDoBot: {}, bibliotecaDoBot: {} }) };
     case "navegar": {
       // definido em 2026-10-08 (revisão W5): reabrir uma task já vista relê as mensagens dela (o detalhe guardado é de
       // quando ela foi aberta da última vez); W11: sair da tela da task de um bot cuja conversa não está carregada apaga o
@@ -1700,7 +1708,7 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
       // O rascunho da Inteligência (2B) e o menu rápido (2A) não sobrevivem à troca de nível.
       // ADR-114: a Atividade abre sempre no dia de hoje, em "Tudo"; sair dela esquece o dia, o filtro e o item aberto.
       const atividadeVista: VistaDaAtividade | null = acao.nivel?.tipo === "atividade" ? vistaInicial(acao.agenteId, diaLocal(estado.agora > 0 ? estado.agora : Date.now())) : null;
-      const depois = { ...estado, avatarAberto: null, gaveta: acao.nivel ? { agenteId: acao.agenteId, nivel: acao.nivel } : null, rascunhoIa: acao.nivel?.tipo === "inteligencia" && estado.rascunhoIa?.agenteId === acao.agenteId ? estado.rascunhoIa : null, menuIa: null, atividadeVista };
+      const depois = { ...estado, avatarAberto: null, gaveta: acao.nivel ? { agenteId: acao.agenteId, nivel: acao.nivel } : null, rascunhoIa: acao.nivel?.tipo === "inteligencia" && estado.rascunhoIa?.agenteId === acao.agenteId ? estado.rascunhoIa : null, menuIa: null, atividadeVista, historicoPerfil: historicoAoTrocarNivel(estado.historicoPerfil, acao.agenteId, acao.nivel) };
       // Reabrir a Atividade relê o dia (a página guardada aparece enquanto a nova não chega): fechada, nenhum frame a relia.
       return atividadeVista && chaveDaAtividade(atividadeVista.agenteId, atividadeVista.dia) in estado.atividadeDoBot ? invalidar(depois, `atividade:${chaveDaAtividade(atividadeVista.agenteId, atividadeVista.dia)}`) : depois;
     }
@@ -1727,6 +1735,10 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
       const hoje = estado.atividadeHoje[acao.agenteId];
       const atividadeHoje = acao.atividade && hoje?.dia === acao.dia ? { ...estado.atividadeHoje, [acao.agenteId]: { ...hoje, dia: acao.dia, total: acao.atividade.total } } : estado.atividadeHoje;
       return { ...estado, atividadeDoBot: { ...estado.atividadeDoBot, [chaveDaAtividade(acao.agenteId, acao.dia)]: acao.atividade }, atividadeHoje };
+    }
+    case "historico-perfil": {
+      const atual = estado.historicoPerfil[acao.agenteId] ?? HISTORICO_INICIAL;
+      return { ...estado, historicoPerfil: { ...estado.historicoPerfil, [acao.agenteId]: { ...atual, ...acao.mudanca } } };
     }
     case "hidratar-atividade-hoje":
       return { ...estado, atividadeHoje: { ...estado.atividadeHoje, [acao.agenteId]: { dia: acao.dia, total: acao.total, ...(acao.negadas === undefined ? {} : { negadas: acao.negadas }) } } };
@@ -2258,4 +2270,15 @@ export function invalidacoesAoRetomar(estado: Estado): Invalidacao[] {
     ...(t.tipo === "trabalho" ? [`trabalho:${t.id}` as Invalidacao] : []),
   ];
   return [...new Set(todas)];
+}
+
+/**
+ * NOD-20: trocar de nível fecha a confirmação de restaurar e o erro dela; fechar a gaveta (nível null) também tira o
+ * Desfazer e o anúncio ("o link some quando a pessoa sai da gaveta", protótipo v5).
+ */
+export function historicoAoTrocarNivel(h: Record<string, HistoricoDoBot>, agenteId: string, nivel: NivelGaveta | null): Record<string, HistoricoDoBot> {
+  const atual = h[agenteId];
+  if (!atual) return h;
+  const limpo: HistoricoDoBot = { ...atual, confirmando: null, erroRestaurar: false, ...(nivel ? {} : { desfazer: null, anuncio: "" }) };
+  return { ...h, [agenteId]: limpo };
 }

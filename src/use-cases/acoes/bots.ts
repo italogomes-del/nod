@@ -6,6 +6,7 @@ import { editarPerfil } from "../editar-perfil.ts";
 import { gerirAgente } from "../gerir-agente.ts";
 import { mudarModoAprovacao } from "../mudar-modo-aprovacao.ts";
 import type { CasoDeUso } from "../tipos.ts";
+import { restaurarVersaoDoPerfil } from "../versoes-perfil.ts";
 
 /**
  * Os executores únicos do piloto `bots.*` (definido em 2026-10-28, NOD-391, ADR-135): a rota de pessoa
@@ -45,4 +46,5 @@ export const EXECUTORES_BOTS = {
   "bots.mover": moverBot,
   "bots.excluir": excluirBot,
   "bots.mudar_modo": mudarModoAprovacao,
+  "bots.restaurar_versao": restaurarVersaoDoPerfil,
 } as const satisfies Partial<Record<IdAcao, CasoDeUso<never, unknown>>>;

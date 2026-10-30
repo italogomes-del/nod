@@ -10,7 +10,10 @@ import { fixarAgente, ocultarAgente } from "../../../use-cases/fixar-ocultar-age
 import { registrarMemoria } from "../../../use-cases/lembrar.ts";
 import { definirInteligenciaDoBot, lerInteligenciaDoBot } from "../../../use-cases/inteligencia.ts";
 import { decidirTrocaDeIa } from "../../../use-cases/trocas-de-ia.ts";
+import { listarVersoesDoPerfil, verVersaoDoPerfil } from "../../../use-cases/versoes-perfil.ts";
 import type { Rota } from "../roteador.ts";
+import { ErroDeDominio } from "../../../domain/erro.ts";
+import { TABELA_ERROS } from "../erros.ts";
 import { corpoObjeto, criarExecutor, texto, textoOpcional, type DepsRotas } from "./executar-caso.ts";
 
 const ID = "(?<id>[^/]+)";
@@ -61,8 +64,51 @@ export function criarRotasAgentes(d: DepsRotas, prontosPorMaquina?: (escopo: Esc
           forma: corpo.forma as FormaAgente | undefined,
           cor: corpo.cor as CorAgente | undefined,
           dono: corpo.dono,
+          // NOD-20: a voz vai no mesmo Salvar da tela (uma versão só, não duas).
+          ...(corpo.voz !== undefined ? { voz: corpo.voz } : {}),
+          ...(corpo.vozVelocidade !== undefined ? { vozVelocidade: corpo.vozVelocidade } : {}),
         });
         ctx.json(200, r);
+      },
+    },
+    {
+      // definido em 2026-10-30 (NOD-20): o histórico de versões do perfil. `antes` = a última versão já mostrada (página).
+      metodo: "GET",
+      padrao: new RegExp(`^/agentes/${ID}/perfil/versoes$`),
+      async handler(ctx) {
+        const antes = new URL(ctx.req.url ?? "/", "http://127.0.0.1").searchParams.get("antes");
+        ctx.json(200, await executar(ctx.escopo, listarVersoesDoPerfil, { agenteId: ctx.params.id ?? "", antes: antes === null ? null : Number(antes) }));
+      },
+    },
+    {
+      metodo: "GET",
+      padrao: new RegExp(`^/agentes/${ID}/perfil/versoes/(?<versao>[0-9]+)$`),
+      async handler(ctx) {
+        ctx.json(200, await executar(ctx.escopo, verVersaoDoPerfil, { agenteId: ctx.params.id ?? "", versao: Number(ctx.params.versao) }));
+      },
+    },
+    {
+      metodo: "POST", acao: "bots.restaurar_versao",
+      padrao: new RegExp(`^/agentes/${ID}/perfil/versoes/(?<versao>[0-9]+)/restaurar$`),
+      async handler(ctx) {
+        // `esperada` = a versão vigente que a tela mostrou (409 perfil_mudou se outra escrita entrou depois);
+        // `aceitarRedacao` = a pessoa confirmou o aviso de que partes com segredo voltam redigidas.
+        const corpo = corpoObjeto(await ctx.corpo());
+        try {
+          ctx.json(200, await executar(ctx.escopo, EXECUTORES_BOTS["bots.restaurar_versao"], {
+            agenteId: ctx.params.id ?? "",
+            versao: Number(ctx.params.versao),
+            // Ausente = sem guarda; presente tem de ser um número de versão (null, texto ou 0 → 400, não desliga a guarda).
+            esperada: corpo.esperada === undefined ? null : ((corpo.esperada ?? Number.NaN) as number),
+            aceitarRedacao: corpo.aceitarRedacao === true,
+          }));
+        } catch (erro) {
+          // Só estas duas causas saem no corpo (`motivo`, como em /eu): a tela precisa distinguir; o resto fica no log.
+          const causa = erro instanceof ErroDeDominio && typeof erro.cause === "string" ? erro.cause : null;
+          if (!(erro instanceof ErroDeDominio) || (causa !== "perfil_mudou" && causa !== "versao_redigida")) throw erro;
+          const { status, mensagem } = TABELA_ERROS[erro.codigo];
+          ctx.json(status, { codigo: erro.codigo, mensagem, motivo: causa });
+        }
       },
     },
     {

@@ -24,6 +24,7 @@ import type { maquinasNuvemRepo } from "./maquinas-nuvem.repo.ts";
 import type { credenciaisNuvemRepo } from "./credenciais-nuvem.repo.ts";
 import type { memoriasRepo } from "./memorias.repo.ts";
 import type { memoriasDiarioRepo } from "./memorias-diario.repo.ts";
+import type { versoesPerfilRepo } from "./versoes-perfil.repo.ts";
 import type { mensagensRepo } from "./mensagens.repo.ts";
 import type { outboxRepo } from "./outbox.repo.ts";
 import type { paradasRepo } from "./paradas.repo.ts";
@@ -83,6 +84,7 @@ export interface Repos {
   agentes: ReturnType<typeof agentesRepo>;
   memorias: ReturnType<typeof memoriasRepo>;
   memoriasDiario: ReturnType<typeof memoriasDiarioRepo>;
+  versoesPerfil: ReturnType<typeof versoesPerfilRepo>;
   conversas: ReturnType<typeof conversasRepo>;
   mensagens: ReturnType<typeof mensagensRepo>;
   anexos: ReturnType<typeof anexosRepo>;

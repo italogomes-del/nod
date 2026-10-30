@@ -7,7 +7,7 @@ import { caminhoDaPastaDoBot } from "../lib/pasta-do-bot.ts";
 import { mostraCaminhoDaPasta } from "../lib/capacidades.ts";
 import { interpolar } from "../lib/relogio.ts";
 import { botaoLigar, ICONE_LIGACAO } from "./ligacao.ts";
-import { abaBiblioteca, capitalizar, chaveCelular, estadoDoComputadorNaGaveta, fraseDaParada, identidadeEditavel, nivelAjustes, nomeEditavel, paiDoNivel, popoverAvatar, renderNivel, segundoPlano, semFuso, type Nivel } from "./detalhes.ts";
+import { abaBiblioteca, capitalizar, chaveCelular, classeDoRodape, destinoDoVoltar, estadoDoComputadorNaGaveta, fraseDaParada, identidadeEditavel, nivelAjustes, nomeEditavel, paiDoNivel, popoverAvatar, renderNivel, segundoPlano, semFuso, type Nivel } from "./detalhes.ts";
 import { secaoOnboardingDetalhes } from "./onboarding.ts";
 import { botaoDaParada } from "../lib/execucao.ts";
 import { ehRotinaWebhook, quandoNaLista } from "./webhook.ts";
@@ -33,10 +33,10 @@ export function renderPerfilCelular(estado: Estado): string {
   }
   const n = nivelCelular(estado, a, dona, nivel);
   const pai = paiDoNivel(nivel, true);
-  const destino = pai ? (pai.tipo === "rotinas" ? "Rotinas" : "Ajustes") : a.nome;
+  const destino = pai ? destinoDoVoltar(pai) : a.nome;
   const voltar = `<button type="button" class="gv-icone gv-voltar pfc-voltar" data-act="gaveta-voltar" aria-label="Voltar para ${esc(destino)}" title="Voltar">${ICONE.voltar}</button>`;
   const topo = `<div class="gv-topo pfc-topo pfc-topo-nivel"><span class="gv-lado">${voltar}</span><h2 class="gv-titulo pfc-titulo" title="${esc(n.titulo)}">${esc(n.titulo)}</h2><span class="gv-lado"></span></div>`;
-  const corpo = `<div class="gv-corpo pfc-corpo">${n.corpo}</div>${n.rodape ? `<div class="gv-rodape">${n.rodape}</div>` : ""}`;
+  const corpo = `<div class="gv-corpo pfc-corpo">${n.corpo}</div>${n.rodape ? `<div class="${classeDoRodape(n)}">${n.rodape}</div>` : ""}`;
   return topo + (n.form ? `<form class="gv-form" ${n.form}>${corpo}</form>` : corpo);
 }
 

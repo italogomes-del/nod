@@ -6,6 +6,7 @@ import * as repoMinhaConta from "../../src/repositories/minha-conta.repo.ts";
 import type { Tx } from "../../src/shared/types.ts";
 import type { Quem } from "../../src/use-cases/conta.ts";
 import { criarAgente } from "../../src/use-cases/criar-agente.ts";
+import { editarPerfil } from "../../src/use-cases/editar-perfil.ts";
 import { enviarMensagem } from "../../src/use-cases/enviar-mensagem.ts";
 import { lerZip } from "../../src/services/zip.ts";
 import { depsSobreTrx, executar, MARLON } from "../helpers/deps-l6.ts";
@@ -217,6 +218,9 @@ describeIntegracao("minha conta (NOD-346): perfil, acesso, e-mail, exportação 
       // NOD-58: o diário da memória vai no arquivo.
       await dp.repos.memorias.criar({ agenteId: bot.agente.id, tipo: "fato", texto: "gosta de café sem açúcar", origem: "agente" });
 
+      // NOD-20: as versões do perfil vão no arquivo.
+      await executar(dp, editarPerfil, { agenteId: bot.agente.id, descricao: "Cuida da agenda da Ana." });
+
       const p = await m.mc.pedirExportacao(q);
       expect(p.estado).toBe("pedida");
       // Pedir de novo enquanto prepara devolve a mesma.
@@ -229,12 +233,13 @@ describeIntegracao("minha conta (NOD-346): perfil, acesso, e-mail, exportação 
       await expect(m.mc.baixarExportacao(q, p.id)).rejects.toMatchObject({ cause: "reautenticar" });
       await confirmar(m, q);
       const arquivos = lerZip(await m.mc.baixarExportacao(q, p.id));
-      expect([...arquivos.keys()]).toEqual(expect.arrayContaining(["LEIA-ME.txt", "perfil.json", "bots.json", "conversas.json", "memorias.json", "memoria_diario.json", "rotinas.json", "decisoes.json", "trilha.json", "foto.png", `conversas/${bot.conversa.id}.json`]));
+      expect([...arquivos.keys()]).toEqual(expect.arrayContaining(["LEIA-ME.txt", "perfil.json", "bots.json", "conversas.json", "memorias.json", "memoria_diario.json", "perfil_versoes.json", "rotinas.json", "decisoes.json", "trilha.json", "foto.png", `conversas/${bot.conversa.id}.json`]));
       const texto = (n: string) => new TextDecoder().decode(arquivos.get(n));
       expect(JSON.parse(texto("perfil.json"))).toMatchObject({ email: q.email, nome: "Ana", sobre_mim: "Sou designer." });
       expect(texto(`conversas/${bot.conversa.id}.json`)).toContain("oi, guarda isso");
       expect(texto(`conversas/${bot.conversa.id}.json`)).not.toContain("fala do Bruno");
       expect(JSON.parse(texto("memoria_diario.json"))).toEqual(expect.arrayContaining([expect.objectContaining({ acao: "criada", autor: "agente", depois_texto: "gosta de café sem açúcar" })]));
+      expect((JSON.parse(texto("perfil_versoes.json")) as Record<string, unknown>[]).map((v) => [v.versao, v.origem, v.agente_id])).toEqual([[1, "inicial", bot.agente.id], [2, "tela", bot.agente.id]]);
       const tudo = [...arquivos].filter(([n]) => n !== "LEIA-ME.txt").map(([, b]) => new TextDecoder().decode(b)).join("\n");
       expect(tudo).not.toMatch(/senha_hash|scrypt|nodm_|token|refresh/i);
       const trilha = JSON.parse(texto("trilha.json")) as Record<string, unknown>[];

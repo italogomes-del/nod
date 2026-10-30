@@ -1,6 +1,6 @@
 import type { Agente } from "../contracts/agente.ts";
 import { ehNod } from "../domain/nod.ts";
-import type { AppDoColega, ColegaListado } from "../contracts/ferramentas-perfil.ts";
+import type { AppDoColega, ColegaListado, VersaoListada } from "../contracts/ferramentas-perfil.ts";
 import type { CasoNod } from "../contracts/servicos.ts";
 import { INSTRUCAO_ROTINA_NO_PROMPT } from "../domain/prompt-sistema.ts";
 import { quandoDaRotina } from "../domain/rotina-texto.ts";
@@ -14,6 +14,8 @@ import type { Deps } from "./tipos.ts";
  */
 const DESCRICAO_RESUMIDA = 300;
 const INSTRUCAO_INTEIRA = 1_500;
+/** NOD-20: com `agente`, as últimas versões do perfil (o número que o restaurar_versao do gerir_bots pede). */
+const VERSOES_NO_COLEGA = 5;
 
 function cortar(texto: string, teto: number): string {
   return texto.length > teto ? `${texto.slice(0, teto - 1)}…` : texto;
@@ -69,7 +71,14 @@ export const verColegas: CasoNod<Deps, "ver_colegas"> = async (deps, input) => {
       descricao: inteiro ? a.descricao : cortar(a.descricao, DESCRICAO_RESUMIDA),
       rotinas: rotinas.map((r) => ({ id: r.id, quando: quandoDaRotina(r), estado: r.estado, instrucao: cortar(r.instrucao, inteiro ? INSTRUCAO_INTEIRA : INSTRUCAO_ROTINA_NO_PROMPT) })),
       apps,
+      ...(inteiro ? { versoes: await versoesDoColega(deps, a.id) } : {}),
     });
   }
   return { data: { colegas: lista } };
 };
+
+/** Só número, enum e a lista dos campos: o texto das versões fica no Histórico (é a pessoa quem o lê). */
+async function versoesDoColega(deps: Deps, agenteId: string): Promise<VersaoListada[]> {
+  const { versoes } = await deps.repos.versoesPerfil.listar(agenteId, null, VERSOES_NO_COLEGA);
+  return versoes.map((v, i) => ({ versao: v.versao, origem: v.origem, autor: v.autor, campos: [...v.campos], atual: i === 0 }));
+}

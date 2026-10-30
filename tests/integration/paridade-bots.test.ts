@@ -83,6 +83,8 @@ describeIntegracao("paridade tela × chat do piloto bots.* (NOD-391, ADR-135)", 
     chat: (alvo: string) => AcaoLote;
     /** Os bots cujo estado final é comparado (nomes do lado da tela). */
     comparar: string[];
+    /** Preparo igual nos dois bots antes da ação (NOD-20: restaurar precisa de uma versão anterior). */
+    preparar?: (d: Deps, agenteId: string) => Promise<void>;
   };
   const CENARIOS: Cenario[] = [
     { id: "bots.criar", tela: () => ({ metodo: "POST", caminho: "/agentes", corpo: { dono: "pessoa", nome: "Novo Tela", titulo: "Revisor", descricao: "Revisa PR." }, status: 201 }), chat: () => ({ tipo: "criar", nome: "Novo Chat", titulo: "Revisor", descricao: "Revisa PR." }), comparar: ["Novo Tela"] },
@@ -90,6 +92,8 @@ describeIntegracao("paridade tela × chat do piloto bots.* (NOD-391, ADR-135)", 
     { id: "bots.editar", tela: (a) => ({ metodo: "PATCH", caminho: `/agentes/${a}`, corpo: { titulo: "Dev", descricao: "Escreve código.", modelo: "opus", esforco: "high" }, status: 200 }), chat: (a) => ({ tipo: "editar", bot: a, titulo: "Dev", descricao: "Escreve código.", modelo: "opus", esforco: "high" }), comparar: ["Bot Tela"] },
     { id: "bots.mover", tela: (a) => ({ metodo: "PATCH", caminho: `/agentes/${a}/organizacao`, corpo: { secao: "Engenharia" }, status: 200 }), chat: (a) => ({ tipo: "mover", bot: a, secao: "Engenharia" }), comparar: ["Bot Tela"] },
     { id: "bots.mudar_modo", tela: (a) => ({ metodo: "POST", caminho: `/agentes/${a}/modo-aprovacao`, corpo: { modo: "automatico" }, status: 200 }), chat: (a) => ({ tipo: "mudar_modo", bot: a, modo: "automatico" }), comparar: ["Bot Tela"] },
+    // NOD-20: os dois bots ganham a v2 (missão nova) e voltam à v1 — mesma descrição, mesma versão nova (3, restauracao).
+    { id: "bots.restaurar_versao", preparar: async (d, a) => void (await executar(d, EXECUTORES_BOTS["bots.editar"], { agenteId: a, descricao: "Missão nova." })), tela: (a) => ({ metodo: "POST", caminho: `/agentes/${a}/perfil/versoes/1/restaurar`, status: 200 }), chat: (a) => ({ tipo: "restaurar_versao", bot: a, versao: 1 }), comparar: ["Bot Tela"] },
     { id: "bots.excluir", tela: (a) => ({ metodo: "DELETE", caminho: `/agentes/${a}`, status: 200 }), chat: (a) => ({ tipo: "excluir", bot: a }), comparar: ["Bot Tela"] },
   ];
 
@@ -110,6 +114,7 @@ describeIntegracao("paridade tela × chat do piloto bots.* (NOD-391, ADR-135)", 
       const [tela, chat] = [await pessoaBot(d, "Bot Tela"), await pessoaBot(d, "Bot Chat")];
       for (const b of [tela, chat]) await d.repos.rotinas.criar({ agenteId: b.agente.id, conversaId: b.conversa.id, cron: "0 8 * * *", fusoIana: "UTC", instrucao: "Olhar PRs", fonte: "f", entregavel: "e", limitesAprovacao: "l", politicaSemDado: "p", proximaExecucao: Date.now() + 60_000 });
       expect(comoChat(retrato(tela.agente))).toEqual(retrato(chat.agente));
+      for (const b of [tela, chat]) await c.preparar?.(d, b.agente.id);
 
       const t = c.tela(tela.agente.id);
       expect((await servidor.chamar(sessao, t.metodo, t.caminho, t.corpo)).status).toBe(t.status);
@@ -120,6 +125,18 @@ describeIntegracao("paridade tela × chat do piloto bots.* (NOD-391, ADR-135)", 
         const doLadoDaTela = await estadoDe(d, nome);
         expect(doLadoDaTela).not.toBeNull();
         expect(await estadoDe(d, nome.replace("Tela", "Chat"))).toEqual(comoChat(doLadoDaTela));
+      }
+
+      if (c.id === "bots.restaurar_versao") {
+        const versoes = async (id: string) => (await d.repos.versoesPerfil.listar(id, null, 10)).versoes.map((v) => [v.versao, v.origem, v.restauradaDe, v.perfil.descricao]);
+        expect(await versoes(tela.agente.id)).toEqual(comoChat(await versoes(chat.agente.id)).map((v) => v.map((x) => (typeof x === "string" ? x.replaceAll("Chat", "Tela") : x))));
+        expect((await versoes(tela.agente.id))[0]).toEqual([3, "restauracao", 1, "Bot Tela trabalha."]);
+        // QA (bug 3): quem restaurou pelo chat foi o Nod; pela tela, a pessoa.
+        const autor = async (id: string) => (await d.repos.versoesPerfil.listar(id, null, 1)).versoes[0]?.autor;
+        expect([await autor(chat.agente.id), await autor(tela.agente.id)]).toEqual(["nod", "pessoa"]);
+        // Revisão 3 M2: a falha leva a causa ao Nod (a Atual: igual_a_atual), não só o código.
+        const igual = await gerirBots(dChat, { ...ctx, resumo: "de novo", acoes: [{ tipo: "restaurar_versao", bot: chat.agente.id, versao: 3 }] });
+        expect(igual.data).toMatchObject({ ok: true, falhas: [{ i: 0, erro: "igual_a_atual" }] });
       }
 
       if (c.id === "bots.criar") {

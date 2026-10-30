@@ -71,7 +71,7 @@ describe("minha conta (NOD-346): regras puras", () => {
       0,
     );
     const nomes = a.map((x) => x.nome);
-    expect(nomes).toEqual(["LEIA-ME.txt", "perfil.json", "bots.json", "conversas.json", "memorias.json", "memoria_diario.json", "rotinas.json", "decisoes.json", "trilha.json", `conversas/${conversa}.json`, "foto.jpg"]);
+    expect(nomes).toEqual(["LEIA-ME.txt", "perfil.json", "bots.json", "conversas.json", "memorias.json", "memoria_diario.json", "perfil_versoes.json", "rotinas.json", "decisoes.json", "trilha.json", `conversas/${conversa}.json`, "foto.jpg"]);
     expect(JSON.parse(a.find((x) => x.nome === "perfil.json")!.dados as string)).toEqual({ email: "ana@exemplo.com", nome: "Ana" });
     expect(a.find((x) => x.nome === "LEIA-ME.txt")!.dados).toContain("Fica de fora: senhas");
     // QA do PR 506: a fala dela numa sala criada por outra pessoa também sai (a conversa não é dela, a mensagem é).

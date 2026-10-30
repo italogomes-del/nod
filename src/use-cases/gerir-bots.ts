@@ -46,10 +46,12 @@ const VERBO: Record<AcaoLote["tipo"], string> = {
   criar_rotina: "Criar rotina",
   dar_acesso: "Dar acesso",
   mudar_modo: "Mudar modo",
+  restaurar_versao: "Restaurar versão do perfil de",
 };
 
 /** Uma linha legível da ação (a mensagem de sistema do desfecho). */
-export function linhaDaAcao(a: Pick<AcaoNoLote, "tipo" | "alvoNome" | "secao" | "app" | "nivel" | "modo">): string {
+export function linhaDaAcao(a: Pick<AcaoNoLote, "tipo" | "alvoNome" | "secao" | "app" | "nivel" | "modo" | "versao">): string {
+  if (a.tipo === "restaurar_versao") return `Restaurar a versão ${a.versao ?? "?"} do perfil de ${a.alvoNome}`;
   const extra = a.tipo === "mover" ? ` para ${a.secao ? `"${a.secao}"` : "fora da seção"}` : a.tipo === "dar_acesso" ? ` ao ${a.app} (${a.nivel === "escrita" ? "ler e alterar" : "ler"})` : a.tipo === "mudar_modo" ? ` para ${a.modo}` : "";
   return `${VERBO[a.tipo]} ${a.alvoNome}${extra}`;
 }
@@ -78,7 +80,7 @@ async function executarAcao(deps: Deps, a: AcaoLote & { alvoNome: string }, botI
       return { botId: r.data.agente.id, nome: r.data.agente.nome, events: r.events ?? [], ...(r.data.rotinasPausadasNaCopia > 0 ? { aviso: AVISO_ROTINAS_PAUSADAS } : {}) };
     }
     case "editar": {
-      const r = await EXECUTORES_BOTS["bots.editar"](deps, { agenteId: exigirAlvo(), nome: a.nome, titulo: a.titulo, descricao: a.descricao, modelo: a.modelo, esforco: a.esforco === undefined ? undefined : a.esforco === "" ? null : a.esforco });
+      const r = await EXECUTORES_BOTS["bots.editar"](deps, { agenteId: exigirAlvo(), nome: a.nome, titulo: a.titulo, descricao: a.descricao, modelo: a.modelo, esforco: a.esforco === undefined ? undefined : a.esforco === "" ? null : a.esforco, peloNod: true });
       return { botId: r.data.agente.id, nome: r.data.agente.nome, events: r.events ?? [] };
     }
     case "mover": {
@@ -99,6 +101,11 @@ async function executarAcao(deps: Deps, a: AcaoLote & { alvoNome: string }, botI
       // (`pelaPessoa`, que só decidirLoteDeBots liga) a dá; o modo do Nod nunca. `decidirLote` já manda essa ação ao card;
       // isto é a segunda cerca. Revisão do PR #401: não usa `porRegra === null`, que também é o Nod no manual.
       const r = await EXECUTORES_BOTS["bots.mudar_modo"](deps, { agenteId: exigirAlvo(), modo: a.modo, confirmado: ctx.pelaPessoa });
+      return { botId: r.data.agente.id, nome: r.data.agente.nome, events: r.events ?? [] };
+    }
+    case "restaurar_versao": {
+      // NOD-20: o mesmo executor da rota POST /agentes/:id/perfil/versoes/:versao/restaurar.
+      const r = await EXECUTORES_BOTS["bots.restaurar_versao"](deps, { agenteId: exigirAlvo(), versao: a.versao ?? 0, peloNod: true });
       return { botId: r.data.agente.id, nome: r.data.agente.nome, events: r.events ?? [] };
     }
     case "dar_acesso": {
@@ -153,11 +160,15 @@ async function executarEmOrdem(
     } catch (e) {
       if (!ehErroDeDominio(e)) throw e;
       a.estado = "falhou";
-      a.erro = e.codigo;
+      // NOD-20 (revisão 3 M2): no restaurar_versao a causa diz ao Nod o que fazer (igual_a_atual, versao_redigida =
+      // um segredo sumiria e só a pessoa aceita isso, pelo Histórico). Só as causas da lista branca; o resto é o código.
+      a.erro = a.tipo === "restaurar_versao" && typeof e.cause === "string" && CAUSAS_DO_RESTAURAR.has(e.cause) ? e.cause : e.codigo;
     }
   }
   return events;
 }
+
+const CAUSAS_DO_RESTAURAR: ReadonlySet<string> = new Set(["igual_a_atual", "versao_redigida", "perfil_mudou"]);
 
 /** A regra do modo que aprovou a ação (para a autoria); null = a pessoa. */
 function porRegraDoModo(modo: Parameters<typeof decidirPeloModo>[0], risco: MotivoCardDoLote | null): PorRegra | null {

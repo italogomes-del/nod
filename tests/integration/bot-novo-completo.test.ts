@@ -9,6 +9,7 @@ import { modoDoTurno } from "../../src/use-cases/emitir-plano-turno.ts";
 import { recusarProposta } from "../../src/use-cases/recusar-proposta.ts";
 import { pausarRotinaPeloAgente } from "../../src/use-cases/rotinas-do-agente.ts";
 import { verColegas } from "../../src/use-cases/ver-colegas.ts";
+import { editarPerfil } from "../../src/use-cases/editar-perfil.ts";
 import { FERRAMENTAS_NOD_POR_MODO } from "../../src/domain/plano-turno.ts";
 import { depsSobre } from "../helpers/deps-l7.ts";
 import { agenteComConversa, autoriaPessoa } from "../helpers/fabricas.ts";
@@ -89,6 +90,15 @@ describeIntegracao("bot novo é bot completo (ADR-050)", () => {
 
       const so = await verColegas(c.deps, { ...c.ctx, agente: "@ada" });
       expect("colegas" in so.data && so.data.colegas.map((x) => x.id)).toEqual([c.ada.agenteId]);
+      // NOD-20 (revisão 3 M2): só com `agente` vêm as versões do perfil (número, origem, campos), para o restaurar_versao.
+      expect("colegas" in so.data && so.data.colegas[0]?.versoes).toEqual([]);
+      expect(data.colegas.every((x) => x.versoes === undefined)).toBe(true);
+      await editarPerfil(c.deps, { agenteId: c.ada.agenteId, descricao: "Organiza o backlog." });
+      const comVersoes = await verColegas(c.deps, { ...c.ctx, agente: "ada" });
+      expect("colegas" in comVersoes.data && comVersoes.data.colegas[0]?.versoes).toEqual([
+        { versao: 2, origem: "tela", autor: "pessoa", campos: ["descricao"], atual: true },
+        { versao: 1, origem: "inicial", autor: "pessoa", campos: [], atual: false },
+      ]);
       expect((await verColegas(c.deps, { ...c.ctx, agente: "Rascunho" })).data).toEqual({ erro: "nao_encontrado" });
       expect((await verColegas(c.deps, { ...c.ctx, agente: "Tarsila" })).data).toEqual({ erro: "nao_encontrado" });
     });

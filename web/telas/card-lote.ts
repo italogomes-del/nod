@@ -13,6 +13,7 @@ const VERBO_DO_LOTE: Record<AcaoNoLote["tipo"], string> = {
   criar_rotina: "Criar rotina",
   dar_acesso: "Dar acesso",
   mudar_modo: "Mudar modo",
+  restaurar_versao: "Restaurar versão de",
 };
 const MODO_HUMANO: Record<NonNullable<AcaoNoLote["modo"]>, string> = { manual: "manual", automatico: "automático", total: "sem aprovações" };
 /** Por que a ação esperou você, quando não foi só o modo manual (QA de 2026-10-07: uma frase por tipo, não uma genérica). */
@@ -33,6 +34,7 @@ function detalheDaAcao(a: AcaoNoLote): string {
     case "criar_rotina": return [a.cron ? `${a.cron} (${a.fuso_iana ?? ""})` : "", a.instrucao ?? ""].filter(Boolean).join(" · ");
     case "dar_acesso": return `${a.app ?? ""}, ${a.nivel === "escrita" ? "ler e alterar" : "ler"}`;
     case "mudar_modo": return a.modo ? `para ${MODO_HUMANO[a.modo]}` : "";
+    case "restaurar_versao": return a.versao ? `volta o perfil à versão ${a.versao}; vira uma versão nova, dá para desfazer pelo Histórico` : "";
     default: return "";
   }
 }

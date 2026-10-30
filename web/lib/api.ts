@@ -1,3 +1,4 @@
+import type { DetalheVersaoPerfil, ListaVersoesPerfil, VersaoPerfil } from "../../src/contracts/versoes-perfil.ts";
 import type { AtividadeDto, ContagemDaAtividade } from "../../src/contracts/atividade.ts";
 import type { DecisoesDto } from "../../src/contracts/decisoes-do-bot.ts";
 import type { PaginaDaBiblioteca } from "../../src/contracts/biblioteca.ts";
@@ -288,7 +289,14 @@ export function criarApi(escopo: Escopo) {
     telemetriaLinhas: (eventos: readonly EventoLinha[]) => pedir<RespostaMutacao>("POST", `${base}/telemetria/linhas`, { eventos }, { keepalive: true, silencioso: true }),
     taxasLinhas: () => get<TaxaDeAbertura[]>("telemetria/linhas"),
     criarAgente: (nome?: string, perfil?: { titulo?: string; descricao?: string; interativo?: boolean }) => post<{ agente: Agente; conversa: Conversa }>("agentes", { dono: "pessoa", nome, ...perfil }),
-    editarPerfil: (id: string, perfil: { nome?: string; titulo?: string; descricao?: string; modelo?: string; harness?: PreferenciaHarness; esforco?: string; forma?: FormaAgente; cor?: CorAgente }) => patch<{ agente: Agente }>(`agentes/${id}`, perfil),
+    /** NOD-20: voz e vozVelocidade vão no mesmo PATCH; `versao` = a versão do perfil que a mudança gravou (null = nada mudou). */
+    editarPerfil: (id: string, perfil: { nome?: string; titulo?: string; descricao?: string; modelo?: string; harness?: PreferenciaHarness; esforco?: string; forma?: FormaAgente; cor?: CorAgente; voz?: IdVozNod | null; vozVelocidade?: VelocidadeVoz }) =>
+      patch<{ agente: Agente; versao?: number | null }>(`agentes/${id}`, perfil),
+    /** NOD-20: o histórico de versões do perfil (só da dona), da mais nova para a mais velha; `antes` pagina. */
+    versoesPerfil: (id: string, antes?: number) => get<ListaVersoesPerfil>(`agentes/${encodeURIComponent(id)}/perfil/versoes${antes ? `?antes=${antes}` : ""}`),
+    versaoPerfil: (id: string, n: number) => get<DetalheVersaoPerfil>(`agentes/${encodeURIComponent(id)}/perfil/versoes/${n}`),
+    restaurarVersao: (id: string, n: number, guarda: { esperada: number; aceitarRedacao?: boolean }) =>
+      post<{ agente: Agente; versao: VersaoPerfil; propostasObsoletas: string[] }>(`agentes/${encodeURIComponent(id)}/perfil/versoes/${n}/restaurar`, guarda),
     // ADR-059: o botão de aprovações do campo; o servidor escreve a troca na conversa do bot. O total exige `confirmado`
     // (o segundo clique do menu, emenda de 2026-10-18): sem ele o servidor responde 400.
     mudarModoAprovacao: (id: string, modo: ModoAprovacao, confirmado = false) => post<{ agente: Agente; mudou: boolean }>(`agentes/${id}/modo-aprovacao`, confirmado ? { modo, confirmado: true } : { modo }),

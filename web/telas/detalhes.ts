@@ -30,6 +30,7 @@ import { renderListaBiblioteca } from "./biblioteca.ts";
 import { lembrancaDaMidia } from "../lib/midia.ts";
 import { seletorLinha } from "../lib/linha-config.ts";
 import { maquinasDeTrabalho, opcoesDeMaquina } from "./maquinas.ts";
+import { linhaHistorico, nivelHistorico, nivelVersao, statusDesfazer } from "./historico-perfil.ts";
 
 /**
  * O "N hoje" da linha "Atividade" (ADR-114, chat limpo, PR 2; decisão tomada 1: o dia inteiro). Antes de a contagem chegar
@@ -56,6 +57,9 @@ export function nivelDaGaveta(tipo: string | undefined, id = ""): NivelGaveta | 
   if (tipo === "dar-acesso" || tipo === "perfil" || tipo === "memoria" || tipo === "inteligencia" || tipo === "nova-rotina" || tipo === "trabalhos" || tipo === "atividade" || tipo === "ajustes") return { tipo };
   // NOD-382: as telas das linhas do perfil do celular.
   if (tipo === "codigo" || tipo === "rotinas" || tipo === "biblioteca" || tipo === "computador") return { tipo };
+  // NOD-20: o histórico de versões do perfil e uma versão dele (data-id = o número).
+  if (tipo === "historico") return { tipo };
+  if (tipo === "versao") return /^[1-9]\d*$/.test(id) ? { tipo, id } : null;
   return null;
 }
 
@@ -68,6 +72,8 @@ export function paiDoNivel(nivel: NivelGaveta, celular = false): NivelGaveta | n
   // (Código, Rotinas, Biblioteca, Computador) voltam ao perfil.
   if (nivel.tipo === "codigo" || nivel.tipo === "rotinas" || nivel.tipo === "biblioteca" || nivel.tipo === "computador") return null;
   if (celular && (nivel.tipo === "rotina" || nivel.tipo === "nova-rotina")) return { tipo: "rotinas" };
+  // NOD-20: a versão volta para o Histórico; o Histórico volta para Ajustes.
+  if (nivel.tipo === "versao") return { tipo: "historico" };
   return nivel.tipo === "rotina" || nivel.tipo === "nova-rotina" || nivel.tipo === "ajustes" ? null : { tipo: "ajustes" };
 }
 
@@ -108,12 +114,20 @@ export function renderDetalhes(estado: Estado): string {
   }
   const n = renderNivel(estado, a, dona, nivel);
   const pai = paiDoNivel(nivel);
-  const destino = pai ? "Ajustes" : a.nome;
+  const destino = pai ? destinoDoVoltar(pai) : a.nome;
   const voltar = `<button type="button" class="gv-icone gv-voltar" data-act="gaveta-voltar" aria-label="Voltar para ${esc(destino)}" title="Voltar (Esc)">${ICONE.voltar}</button>`;
   const topo = `<div class="gv-topo"><span class="gv-lado">${voltar}</span><h2 class="gv-titulo" title="${esc(n.titulo)}">${esc(n.titulo)}</h2><span class="gv-lado gv-direita">${fechar}</span></div>`;
-  const corpo = `<div class="gv-corpo">${n.corpo}</div>${n.rodape ? `<div class="gv-rodape">${n.rodape}</div>` : ""}`;
+  const corpo = `<div class="gv-corpo">${n.corpo}</div>${n.rodape ? `<div class="${classeDoRodape(n)}">${n.rodape}</div>` : ""}`;
   return topo + (n.form ? `<form class="gv-form" ${n.form}>${corpo}</form>` : corpo);
 }
+
+/** O nome do nível para onde o ‹ volta (o aria-label "Voltar para …"). */
+export function destinoDoVoltar(pai: NivelGaveta): string {
+  return pai.tipo === "rotinas" ? "Rotinas" : pai.tipo === "historico" ? "Histórico" : "Ajustes";
+}
+
+/** NOD-20: o rodapé da versão leva a classe dele (a confirmação de restaurar). */
+export const classeDoRodape = (n: Pick<Nivel, "rodapeClasse">): string => (n.rodapeClasse ? `gv-rodape ${n.rodapeClasse}` : "gv-rodape");
 
 // ---- visão geral ----------------------------------------------------------------------------------------------------
 
@@ -155,7 +169,7 @@ function identidade(estado: Estado, a: Bot, dona: boolean): string {
     <input id="gvn-nome" class="gvn-nome" data-campo="nome" data-id="${esc(a.id)}" data-salvo="${esc(a.nome)}" value="${esc(a.nome)}" maxlength="60" autocomplete="off" spellcheck="false" title="Enter salva · Esc desfaz" aria-describedby="gvn-erro" />` : `<h2 class="gvn-nome-fixo" title="${esc(a.nome)}">${esc(a.nome)}</h2>`}
     <label class="sr-only" for="gvn-sub">Subtítulo do bot</label>
     <input id="gvn-sub" class="gvn-sub" data-campo="titulo" data-id="${esc(a.id)}" data-salvo="${esc(a.titulo)}" value="${esc(a.titulo)}" maxlength="80" autocomplete="off" placeholder="Adicionar um rótulo" title="Enter salva · Esc desfaz" aria-describedby="gvn-erro" />
-    <span class="gvn-erro-linha"><span class="gvn-erro-icone" aria-hidden="true">${ICONE.alerta}</span><span class="gvn-erro" id="gvn-erro" role="status"></span></span></div>`;
+    <span class="gvn-erro-linha"><span class="gvn-erro-icone" aria-hidden="true">${ICONE.alerta}</span><span class="gvn-erro" id="gvn-erro" role="status"></span></span>${nomeEditavel(a, dona) ? statusDesfazer(a, estado.historicoPerfil[a.id], "identidade") : ""}</div>`;
 }
 
 /** ADR-125: o popover do avatar, com as 8 formas e as 12 cores do mascote (rádios com setas) e Redefinir. */
@@ -292,7 +306,7 @@ export function nivelAjustes(estado: Estado, a: Bot, dona: boolean, celular = fa
       ${dona ? linha(`${ICONE.pulso}<span class="gv-linha-txt">Atividade</span>${linhaAtividadeHoje(estado, a.id)}`, origem("atividade"), ICONE.seta) : ""}
     </div></section>`;
   const perfil = dona
-    ? `<section class="gv-secao"><h3>Perfil</h3><div class="gv-cartao">${linha(`${ICONE.pessoa}<span class="gv-linha-txt">Missão e voz${celular ? "" : `<small>O que ${esc(a.nome)} faz e como fala nas ligações</small>`}</span>`, origem("perfil"), ICONE.seta)}</div></section>`
+    ? `<section class="gv-secao"><h3>Perfil</h3><div class="gv-cartao">${linha(`${ICONE.pessoa}<span class="gv-linha-txt">Missão e voz${celular ? "" : `<small>O que ${esc(a.nome)} faz e como fala nas ligações</small>`}</span>`, origem("perfil"), ICONE.seta)}${linhaHistorico(a, estado.historicoPerfil[a.id], celular)}</div>${statusDesfazer(a, estado.historicoPerfil[a.id], "ajustes")}</section>`
     : `<section class="gv-secao"><h3>Perfil</h3><p class="gv-descricao">${esc(a.descricao || "Sem missão escrita.")}</p></section>`;
   const acessos = grupos
     .map((g) => `<li class="acesso">${linha(`${logoApp(estado, g.slug, g.nome)}<span class="gv-linha-txt"><b>${esc(g.nome)}</b><small>${esc(nivelDoGrupo(g).rotulo)}${g.indisponivel ? " · indisponível" : ""}</small></span>${g.indisponivel ? `<span class="gvn-alerta-icone" aria-hidden="true" title="o conector está fora do ar">${ICONE.alerta}</span>` : ""}`, `${irPara(a, "acesso", g.chave)} data-origem="acesso:${esc(g.chave)}"`, ICONE.seta)}</li>`)
@@ -342,9 +356,11 @@ function linhaDaPasta(estado: Estado, a: Bot): string {
   return linha(`${ICONE.pasta}<span class="gv-linha-txt">Pasta de trabalho${mostraCaminhoDaPasta(estado.executor?.harnesses, a.harness) ? `<small><code>${esc(caminhoDaPastaDoBot(a.nome))}</code></small>` : ""}</span>`, `data-act="abrir-workspace" data-id="${esc(a.id)}"`);
 }
 
+const agoraDe = (estado: Pick<Estado, "agora">): number => (estado.agora > 0 ? estado.agora : Date.now());
+
 // ---- níveis ---------------------------------------------------------------------------------------------------------
 
-export type Nivel = { titulo: string; corpo: string; rodape?: string; form?: string };
+export type Nivel = { titulo: string; corpo: string; rodape?: string; form?: string; rodapeClasse?: string };
 
 export function renderNivel(estado: Estado, a: Bot, dona: boolean, nivel: NivelGaveta): Nivel {
   switch (nivel.tipo) {
@@ -356,6 +372,14 @@ export function renderNivel(estado: Estado, a: Bot, dona: boolean, nivel: NivelG
       return { titulo: `Dar acesso a ${a.nome}`, corpo: darAcesso(estado, a.id, a.nome) };
     case "perfil":
       return nivelPerfil(a);
+    // NOD-20: o histórico é só da dona (o servidor também recusa o de outra pessoa).
+    case "historico":
+      return dona ? nivelHistorico(a, estado.historicoPerfil[a.id], agoraDe(estado)) : { titulo: "Histórico", corpo: "" };
+    case "versao": {
+      if (!dona) return { titulo: "Versão", corpo: "" };
+      const v = nivelVersao(a, estado.historicoPerfil[a.id], Number(nivel.id), agoraDe(estado));
+      return v.rodape ? { ...v, rodapeClasse: "p20-rodape" } : v;
+    }
     case "memoria":
       return { titulo: "Memória", corpo: renderMemoriaNaGaveta(estado, a.id, { nome: a.nome, dona, nivel }) };
     case "inteligencia": {

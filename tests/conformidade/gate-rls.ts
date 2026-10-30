@@ -61,6 +61,8 @@ export const POLICIES_EXTRAS: Record<string, string> = {
     "PERMISSIVE só FOR UPDATE, USING e WITH CHECK por EXISTS na decisão (decisor_id). Mesma ressalva: o trigger nod_item_aprovacao_pernas_imutaveis fecha a lista para quem não é a dona: selecionado, marcado_por, marcado_em, texto_final, editado_por",
   "composio_configuracoes.nod_equipe_update":
     "PERMISSIVE só FOR UPDATE (INSERT/DELETE continuam da dona), USING e WITH CHECK pela perna do tenant: ADR-041 põe a chave Composio no tenant e qualquer pessoa a troca, senão quem cadastrou é a única que troca. A policy concede UPDATE de QUALQUER coluna; o trigger nod_composio_pernas_imutaveis (BEFORE UPDATE, P0001) fecha a lista para quem não é a dona: só chave_cifrada",
+  "agente_perfil_versoes.nod_poda_versoes":
+    "NOD-20 (0132): a poda das 50 últimas versões do perfil. TO nod_dono e só com os GUCs nod.poda_versoes_tenant/agente, que só a função SECURITY DEFINER nod_podar_versoes_perfil liga (e desliga) dentro dela, presa ao tenant e à pessoa do escopo vinculado; nod_app segue sem UPDATE/DELETE na tabela (tests/integration/perfil-versoes.test.ts)",
 };
 
 export interface Tabela {

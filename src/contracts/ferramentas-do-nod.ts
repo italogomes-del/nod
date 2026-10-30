@@ -15,7 +15,7 @@ import type { ModoAprovacao } from "./agente.ts";
 /** definido em 2026-10-07: um pedido do Nod mexe em até 20 bots — acima disso, é melhor ele dividir e a pessoa ver. */
 export const MAX_ACOES_LOTE = 20;
 
-export const TIPOS_ACAO_LOTE = ["criar", "duplicar", "editar", "mover", "excluir", "criar_rotina", "dar_acesso", "mudar_modo"] as const;
+export const TIPOS_ACAO_LOTE = ["criar", "duplicar", "editar", "mover", "excluir", "criar_rotina", "dar_acesso", "mudar_modo", "restaurar_versao"] as const;
 export type TipoAcaoLote = (typeof TIPOS_ACAO_LOTE)[number];
 
 /** Teto do título e do texto de um relato contado ao Nod (o texto é o mesmo teto do relato pelo botão, TETO_TEXTO_RELATO). */
@@ -25,7 +25,7 @@ export const FERRAMENTAS_DO_NOD = {
   gerir_bots: {
     type: "object",
     description:
-      "Muda vários bots da pessoa de uma vez, na ordem: criar, duplicar, editar, mover de seção, excluir, criar rotina, dar acesso a um app já conectado e mudar o modo de aprovação. Uma chamada só por pedido. O seu modo decide: o que precisa da pessoa vira UM card com as ações marcáveis; o resto é feito na hora. Para usar um bot criado ou duplicado no mesmo pedido, dê a ele um ref e aponte as ações seguintes para \"@ref\".",
+      "Muda vários bots da pessoa de uma vez, na ordem: criar, duplicar, editar, mover de seção, excluir, criar rotina, dar acesso a um app já conectado, mudar o modo de aprovação e restaurar uma versão antiga do perfil (ver_colegas com o agente lista as últimas versões e o número de cada uma; se falhar com versao_redigida, um segredo sumiria: só a pessoa decide isso, no Histórico do bot). Uma chamada só por pedido. O seu modo decide: o que precisa da pessoa vira UM card com as ações marcáveis; o resto é feito na hora. Para usar um bot criado ou duplicado no mesmo pedido, dê a ele um ref e aponte as ações seguintes para \"@ref\".",
     properties: {
       resumo: { type: "string", description: "O pedido em uma frase, como a pessoa vai ler no card.", minLength: 1, maxLength: 200 },
       acoes: {
@@ -52,6 +52,7 @@ export const FERRAMENTAS_DO_NOD = {
             app: { type: "string", description: "dar_acesso: o slug do app já conectado (veja ver_apps_conectados).", minLength: 1 },
             nivel: { type: "string", enum: ["leitura", "escrita"], description: "dar_acesso." },
             modo: { type: "string", enum: ["manual", "automatico", "total"], description: "mudar_modo. \"total\" (Ignorar todas as aprovações) sempre espera a pessoa num card." },
+            versao: { type: "integer", description: "restaurar_versao: o número (a partir de 1) da versão do perfil a restaurar (o Histórico do perfil do bot). Vira uma versão nova." },
           },
           required: ["tipo"],
           additionalProperties: false,
@@ -100,6 +101,7 @@ export type AcaoLote = {
   app?: string;
   nivel?: "leitura" | "escrita";
   modo?: ModoAprovacao;
+  versao?: number;
 };
 export type ArgsGerirBots = { resumo: string; acoes: AcaoLote[] };
 

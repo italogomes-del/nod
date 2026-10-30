@@ -1,4 +1,5 @@
 import type { SuaVezDto } from "../../src/contracts/api.ts";
+import { ESPERA_AJUSTE_VOZ_MS, juntarAjustes } from "../lib/juntar-ajustes.ts";
 import type { Ligacao, LigacaoCriada } from "../../src/contracts/ligacao.ts";
 import type { CamposEntrevista, EtapaOnboarding } from "../../src/contracts/onboarding.ts";
 import type { IaDaLigacao } from "../../src/contracts/voz.ts";
@@ -353,23 +354,30 @@ export function criarTelaLigacao(deps: DepsTelaLigacao) {
     const r = ancora.getBoundingClientRect();
     d.style.left = `${Math.max(12, Math.min(window.innerWidth - d.offsetWidth - 12, r.left))}px`;
     d.style.top = `${r.top - d.offsetHeight - 10 > 12 ? r.top - d.offsetHeight - 10 : r.bottom + 10}px`;
+    // NOD-20: cada ajuste salvo vira uma versão do perfil. Percorrer as vozes com as setas dispara um `change` por opção;
+    // só a última escolha, depois de uma pausa, vai ao servidor (senão a ligação enche o Histórico e a poda das 50 leva
+    // as versões da missão).
+    // Codex P2: o envio atrasado fica preso ao bot e à ligação de quando a pessoa escolheu (não ao `t` da hora do disparo).
+    const origem = { agenteId: atual.agente.id, ligacaoId: atual.ligacao.id };
+    const enviar = juntarAjustes<{ voz?: IdVozNod; vozVelocidade?: VelocidadeVoz }>((a) => void ajustar(origem, a, d.querySelector(".la-nota-ajuste")), ESPERA_AJUSTE_VOZ_MS, window);
     d.addEventListener("change", (e) => {
       const sel = e.target as HTMLSelectElement;
-      const nota = d.querySelector(".la-nota-ajuste");
       const voz = VOZES.find((v) => v.id === sel.value)?.id;
       const velocidade = VELOCIDADES.find((v) => String(v) === sel.value);
-      if (sel.dataset.ajuste === "voz" && voz) void ajustar({ voz }, nota);
-      else if (sel.dataset.ajuste === "velocidade" && velocidade !== undefined) void ajustar({ vozVelocidade: velocidade }, nota);
+      if (sel.dataset.ajuste === "voz" && voz) enviar({ voz });
+      else if (sel.dataset.ajuste === "velocidade" && velocidade !== undefined) enviar({ vozVelocidade: velocidade });
     });
+    d.addEventListener("close", () => enviar.agora());
     d.querySelector<HTMLSelectElement>("select")?.focus();
   }
 
-  async function ajustar(a: { voz?: IdVozNod; vozVelocidade?: VelocidadeVoz }, nota: Element | null): Promise<void> {
+  async function ajustar(origem: { agenteId: string; ligacaoId: string }, a: { voz?: IdVozNod; vozVelocidade?: VelocidadeVoz }, nota: Element | null): Promise<void> {
     const api = deps.api();
-    if (!api || !t) return;
+    if (!api) return;
     try {
-      await api.ajustarVoz(t.agente.id, a);
-      mudar((e) => ({ ...e, voz: a.voz ?? e.voz, velocidade: a.vozVelocidade ?? e.velocidade }));
+      // A voz é do bot: salva mesmo se a ligação acabou na espera; o estado da tela só muda se ainda é a mesma ligação.
+      await api.ajustarVoz(origem.agenteId, a);
+      if (t?.ligacao.id === origem.ligacaoId) mudar((e) => ({ ...e, voz: a.voz ?? e.voz, velocidade: a.vozVelocidade ?? e.velocidade }));
       if (nota) nota.textContent = "Vale a partir da próxima frase.";
     } catch {
       if (nota) nota.textContent = "Não foi possível mudar agora.";
@@ -501,4 +509,3 @@ export function criarTelaLigacao(deps: DepsTelaLigacao) {
     },
   };
 }
-

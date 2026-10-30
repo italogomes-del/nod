@@ -14,6 +14,7 @@ import { payloadDaPropostaDecidida } from "./proposta-decidida.ts";
 import { recusarRotinasDoCard } from "./recusar-proposta.ts";
 import { retomarAposPerfil } from "./retomar-apos-perfil.ts";
 import type { Deps } from "./tipos.ts";
+import { registrarVersaoDoPerfil } from "./versoes-perfil.ts";
 
 /** `obsoleta` (NOD-190): o perfil mudou depois do card; nada foi aplicado e a proposta saiu recusada. */
 export type SaidaConfirmarPerfil = { proposta: Proposta; agente: Agente | null; rotina: Rotina | null; decisao: null; obsoleta?: true };
@@ -49,8 +50,9 @@ async function ativarRotinasDoPerfil(deps: Deps, ids: readonly string[]): Promis
  * tela enquanto ele esperava). Falha fechada SEM lançar: a confirmação roda dentro da transação da rota, e um throw
  * desfaria a recusa, o aviso e a decisão fechada. Quem chama traduz `obsoleta` em erroPerfilMudou() depois do commit.
  * Não reusa recusarProposta inteira: ela grava a frase genérica de recusa, e aqui o aviso é um só, o da revisão.
+ * Desde 2026-10-30 (NOD-20) também é a recusa das propostas pendentes quando a pessoa restaura uma versão do perfil.
  */
-async function recusarObsoleta(deps: Deps, proposta: Proposta, p: PayloadPropostaPerfil, atual: Agente): Promise<{ data: SaidaConfirmarPerfil; events: RuntimeEvent[] }> {
+export async function recusarPropostaObsoleta(deps: Deps, proposta: Proposta, p: PayloadPropostaPerfil, atual: Agente): Promise<{ data: SaidaConfirmarPerfil; events: RuntimeEvent[] }> {
   const agora = deps.agora();
   const recusada = await deps.repos.propostas.decidir(proposta.id, "recusada");
   if (!recusada) throw new ErroDeDominio("estado_invalido", { cause: `proposta ${proposta.estado}` });
@@ -99,7 +101,7 @@ export async function confirmarPerfil(deps: Deps, lida: Proposta): Promise<{ dat
   if (proposta.estado === "confirmada") return { data: { proposta, agente: atual, rotina: null, decisao: null }, events: [] };
   if (proposta.estado !== "pendente") throw new ErroDeDominio("estado_invalido", { cause: `proposta ${proposta.estado}` });
   const p = proposta.payload;
-  if (mudouDesdeAProposta(p.revisao, atual)) return recusarObsoleta(deps, proposta, p, atual);
+  if (mudouDesdeAProposta(p.revisao, atual)) return recusarPropostaObsoleta(deps, proposta, p, atual);
 
   const confirmada = await deps.repos.propostas.decidir(proposta.id, "confirmada");
   if (!confirmada) throw new ErroDeDominio("estado_invalido", { cause: `proposta ${proposta.estado}` });
@@ -107,6 +109,8 @@ export async function confirmarPerfil(deps: Deps, lida: Proposta): Promise<{ dat
   const autoria = autoriaPessoa(deps.escopo);
   const agente = await deps.repos.agentes.atualizarPerfil(proposta.agenteId, { nome: p.nome, titulo: p.titulo, descricao: p.descricao, confirmado: true });
   if (!agente) throw new ErroDeDominio("nao_permitido");
+  // NOD-20: a proposta confirmada vira uma versão (a linha do agente está travada desde buscarParaAtualizar).
+  await registrarVersaoDoPerfil(deps, { antes: atual, depois: agente, origem: "proposta", propostaId: proposta.id });
   // NOD-23: perfil confirmado fecha a reconfiguração (a linha do agente já está travada desde buscarParaAtualizar).
   await deps.repos.agentes.encerrarConfiguracao(agente.id, proposta.payload.turnoId ?? null);
   const events: RuntimeEvent[] = [];

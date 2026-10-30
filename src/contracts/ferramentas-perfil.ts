@@ -51,5 +51,7 @@ export type ResultadoAtualizarPerfil = { proposta_id: string; rotinas: { resumo:
 export type ArgsVerColegas = { agente?: string };
 /** `nivel` pelo que foi concedido de fato: escrita se alguma capacidade concedida não é de leitura. */
 export type AppDoColega = { slug: string; nome: string; nivel: "leitura" | "escrita" };
-export type ColegaListado = { id: string; nome: string; titulo: string; descricao: string; rotinas: RotinaListada[]; apps: AppDoColega[] };
+/** definido em 2026-10-30 (NOD-20, revisão 3 M2): as últimas versões do perfil, para o Nod escolher o número do restaurar_versao. */
+export type VersaoListada = { versao: number; origem: string; autor: string; campos: string[]; atual: boolean };
+export type ColegaListado = { id: string; nome: string; titulo: string; descricao: string; rotinas: RotinaListada[]; apps: AppDoColega[]; versoes?: VersaoListada[] };
 export type ResultadoVerColegas = { colegas: ColegaListado[] } | { erro: CodigoErro };

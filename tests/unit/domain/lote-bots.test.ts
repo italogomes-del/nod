@@ -233,3 +233,14 @@ describe("texto mal formado em qualquer campo do lote (NOD-398, revisão 6)", ()
   });
 });
 
+
+describe("restaurar_versao no lote (NOD-20)", () => {
+  it("exige a versão inteira a partir de 1 e um bot alvo", () => {
+    expect(valida([{ tipo: "restaurar_versao", bot: "Dev 2", versao: 3 }]).ok).toBe(true);
+    for (const versao of [undefined, 0, -1, 1.5, "2"] as unknown[]) {
+      const r = valida([{ tipo: "restaurar_versao", bot: "Dev 2", versao } as unknown as AcaoLote]);
+      expect(r).toEqual({ ok: false, problemas: [{ i: 0, motivo: "restaurar_versao precisa da versao (inteiro a partir de 1)" }] });
+    }
+    expect(valida([{ tipo: "restaurar_versao", versao: 2 }]).ok).toBe(false);
+  });
+});

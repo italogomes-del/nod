@@ -5,6 +5,7 @@ import type { Turno } from "../contracts/turno.ts";
 import type { IaDaLigacao, MotivoFimLigacao } from "../contracts/voz.ts";
 import { VELOCIDADES_VOZ, VOZES_NOD } from "../contracts/vozes.ts";
 import { ehIdVoz, generoDaVoz } from "../domain/vozes.ts";
+import { registrarVersaoDoPerfil } from "./versoes-perfil.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import type { PerfilComando } from "../domain/comando-de-voz.ts";
 import { FECHO_LEITURA, redigirLeituraDeAprovacao, rotuloDoItemFalado, type PedidoDeLeitura } from "../domain/leitura-aprovacao.ts";
@@ -338,8 +339,12 @@ export const definirVozDoAgente: CasoDeUso<{ agenteId: string; voz: unknown; voz
   const voz = input.voz === null ? null : input.voz === undefined ? undefined : ehIdVoz(input.voz) ? input.voz : false;
   const velocidade = input.vozVelocidade === undefined ? undefined : (VELOCIDADES_VOZ as readonly unknown[]).includes(input.vozVelocidade) ? (input.vozVelocidade as number) : false;
   if (voz === false || velocidade === false) throw new ErroDeDominio("entrada_invalida", { cause: "voz" });
+  // NOD-20: trava antes de ler o perfil de antes; o ajuste de voz (na ligação) vira uma versão de origem `voz`.
+  const antes = await deps.repos.agentes.buscarParaAtualizar(input.agenteId);
+  if (!antes) throw new ErroDeDominio("nao_encontrado");
   const agente = await deps.repos.agentes.definirVoz(input.agenteId, { voz, velocidade });
   if (!agente) throw new ErroDeDominio("nao_encontrado");
+  await registrarVersaoDoPerfil(deps, { antes, depois: agente, origem: "voz" });
   return { data: { voz: agente.voz ?? null, vozVelocidade: agente.vozVelocidade ?? 1 }, events: [evento(deps.escopo, { kind: "agente_atualizado", autoria: autoriaPessoa(deps.escopo), agora: deps.agora(), dados: { agente_id: agente.id } })] };
 };
 

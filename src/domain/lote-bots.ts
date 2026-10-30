@@ -3,6 +3,7 @@ import { acharTextoMalFormado } from "./texto-bem-formado.ts";
 import type { MotivoCardDoLote } from "../contracts/conversa.ts";
 import type { AcaoLote, AppConectado, TipoAcaoLote } from "../contracts/ferramentas-do-nod.ts";
 import { MAX_ACOES_LOTE } from "../contracts/ferramentas-do-nod.ts";
+import { VERSAO_MAXIMA } from "../contracts/versoes-perfil.ts";
 import { deForaNoLote, riscoNoLote } from "./acoes/index.ts";
 import { decidirPeloModo, semRevisor } from "./modo-aprovacao.ts";
 import { ehNod, nomeReservadoAoNod } from "./nod.ts";
@@ -37,7 +38,7 @@ export type AcaoResolvida = AcaoLote & {
 
 export type Problema = { i: number; motivo: string };
 
-const PRECISA_DE_BOT: ReadonlySet<TipoAcaoLote> = new Set(["duplicar", "editar", "mover", "excluir", "criar_rotina", "dar_acesso", "mudar_modo"]);
+const PRECISA_DE_BOT: ReadonlySet<TipoAcaoLote> = new Set(["duplicar", "editar", "mover", "excluir", "criar_rotina", "dar_acesso", "mudar_modo", "restaurar_versao"]);
 const CRIA_BOT: ReadonlySet<TipoAcaoLote> = new Set(["criar", "duplicar"]);
 
 function vazio(v: string | undefined): boolean {
@@ -122,6 +123,10 @@ export function validarLote(acoes: readonly AcaoLote[], bots: readonly BotDoLote
         if (!a.modo) erro("mudar_modo precisa do modo");
         // O modo mal formado já saiu acima, sem repetir o texto ruim no motivo (revisão 9).
         else if (malFormado === null && !(MODOS_APROVACAO as readonly string[]).includes(a.modo)) erro(`modo "${[...String(a.modo)].slice(0, 20).join("")}" não existe: manual, automatico ou total`);
+        break;
+      case "restaurar_versao":
+        // NOD-20: o número da versão (o Histórico do perfil); se ela existe e muda algo, quem diz é o caso de uso.
+        if (typeof a.versao !== "number" || !Number.isSafeInteger(a.versao) || a.versao < 1 || a.versao > VERSAO_MAXIMA) erro("restaurar_versao precisa da versao (inteiro a partir de 1)");
         break;
       default:
         break;

@@ -2,7 +2,7 @@
 
 <!-- Gerado por `npm run paridade` a partir de src/domain/acoes/ (NOD-391, ADR-135). Não edite à mão: a catraca (tests/conformidade/paridade.test.ts) compara. -->
 
-Ações de pessoa que mudam algo: **134**, mais 2 só de leitura. No chat: **6 vivas**, 3 parciais, 93 faltando e 34 que nunca vão para o chat. Piso de vivas: 6.
+Ações de pessoa que mudam algo: **135**, mais 2 só de leitura. No chat: **7 vivas**, 3 parciais, 93 faltando e 34 que nunca vão para o chat. Piso de vivas: 7.
 
 Estados: **vivo** = o chat faz pelo mesmo executor da tela, com teste de contrato; **parcial** = o chat faz, mas diverge ou falta parâmetro; **falta** = a onda dona ainda vai ligar; **nunca** = exceção escrita.
 
@@ -16,6 +16,7 @@ Estados: **vivo** = o chat faz pelo mesmo executor da tela, com teste de contrat
 | `bots.mover` | Mover um bot de seção (e organizar a barra lateral) | muda | vivo (`gerir_bots mover`) | `PATCH ^\/agentes\/(?<id>[^/]+)\/organizacao$` |
 | `bots.excluir` | Excluir um bot (e desligar o computador dele) | arriscada | vivo (`gerir_bots excluir`) | `DELETE ^\/agentes\/(?<id>[^/]+)$` |
 | `bots.mudar_modo` | Mudar o modo de aprovação de um bot | arriscada | vivo (`gerir_bots mudar_modo`) | `POST ^\/agentes\/(?<id>[^/]+)\/modo-aprovacao$` |
+| `bots.restaurar_versao` | Restaurar uma versão do perfil de um bot | muda | vivo (`gerir_bots restaurar_versao`) | `POST ^\/agentes\/(?<id>[^/]+)\/perfil\/versoes\/(?<versao>[0-9]+)\/restaurar$` |
 | `bots.restaurar` | Restaurar um bot excluído | muda | falta (NOD-393) | `POST ^\/agentes\/(?<id>[^/]+)\/restaurar$` |
 | `bots.fixar` | Fixar um bot no topo | muda | falta (NOD-393) | `POST ^\/agentes\/(?<id>[^/]+)\/fixar$` |
 | `bots.ocultar` | Ocultar um bot da barra | muda | falta (NOD-393) | `POST ^\/agentes\/(?<id>[^/]+)\/ocultar$` |

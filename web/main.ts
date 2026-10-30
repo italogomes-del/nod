@@ -1,4 +1,5 @@
 import { escNoEspaco, focoAoAbrirEspaco, voltarParaLista } from "./lib/navegacao-config.ts";
+import { perfilMudou } from "./lib/perfil-mudou.ts";
 import "./lib/mascote-elemento.ts";
 import { alternarExplicacao, detailsParaFecharComEsc } from "./lib/recomeco.ts";
 import { abrirCapturaAmpliada } from "./telas/captura-ampliada.ts";
@@ -67,6 +68,7 @@ import type { Experimentos } from "../src/contracts/raio-x.ts";
 import type { Escopo } from "../src/shared/types.ts";
 import type { FrameSse } from "../src/contracts/frame.ts";
 import type { AnexoDaConversa } from "../src/contracts/anexo.ts";
+import { confirmacaoCaducou, HISTORICO_INICIAL, type HistoricoDoBot } from "./lib/historico-perfil.ts";
 import { agenteDaTela, bibliotecaAberta, conversaAbertaTemNotaDeContas, conversaDaTela, estadoInicial, invalidacoesAoReconectar, invalidacoesAoRetomar, invalidacoesDaTela, mudouNaTela, reduzir, secaoAberta, secaoDoPedido, type Acao, type Estado, type FalaPendente, type Invalidacao, type NivelGaveta, type PedidoSecao, type PerfilCelular, type SecaoEspaco, type Tela } from "./estado/reducer.ts";
 import { mascararDormindo, RetryDoAcordar, type PassosDoRetry } from "./lib/retry-computador.ts";
 import { contaApi, criarApi, minhaContaApi, ErroApi, observarRede, sessao as sessaoApi, type Api } from "./lib/api.ts";
@@ -1171,6 +1173,15 @@ async function buscarFrota(): Promise<Acao | null> {
   }
   if (!vez()) return null;
   frotaFalhou = false;
+  // NOD-20 (revisão 2 M6): o perfil do bot da gaveta mudou por fora com o Histórico aberto: a lista e o detalhe releem.
+  const g = estado.gaveta;
+  if (g && (g.nivel.tipo === "historico" || g.nivel.tipo === "versao" || g.nivel.tipo === "ajustes")) {
+    const id = g.agenteId;
+    if (perfilMudou(estado.frota?.agentes.find((a) => a.id === id), frota.agentes.find((a) => a.id === id))) {
+      const nivel = g.nivel;
+      setTimeout(() => { if (estado.gaveta?.agenteId === id && estado.gaveta.nivel.tipo === nivel.tipo) carregarAoAbrirNivel(id, estado.gaveta.nivel); }, 0);
+    }
+  }
   return { tipo: "hidratar-frota", frota };
 }
 
@@ -5344,6 +5355,27 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     if (nivel) abrirNivel(el.dataset.agente ?? "", nivel);
   },
   "gaveta-voltar": () => voltarNivel(),
+  // NOD-20: o histórico de versões do perfil (web/telas/historico-perfil.ts).
+  "historico-recarregar": (el) => carregarHistorico(el.dataset.agente ?? ""),
+  "historico-mais": (el) => carregarHistorico(el.dataset.agente ?? "", true),
+  "versao-recarregar": (el) => carregarVersao(el.dataset.agente ?? "", Number(el.dataset.versao)),
+  "restaurar-versao-pedir": (el) => {
+    mudarHistorico(el.dataset.agente ?? "", { confirmando: Number(el.dataset.versao), erroRestaurar: false });
+    document.querySelector<HTMLElement>('#detalhes [data-act="restaurar-versao-cancelar"]')?.focus();
+  },
+  "restaurar-versao-cancelar": (el) => {
+    mudarHistorico(el.dataset.agente ?? "", { confirmando: null, erroRestaurar: false });
+    document.querySelector<HTMLElement>('#detalhes [data-act="restaurar-versao-pedir"]')?.focus();
+  },
+  "restaurar-versao": (el) => restaurarVersao(el.dataset.agente ?? "", Number(el.dataset.versao), null),
+  "desfazer-versao": (el) => {
+    const agenteId = el.dataset.agente ?? "";
+    const d = historicoDe(agenteId).desfazer;
+    if (!d || d.versao !== Number(el.dataset.versao) || !api) return;
+    // O servidor confere que o perfil ainda está na versão que o salvar criou (`esperada`); se mudou depois (uma proposta
+    // confirmada, a voz numa ligação, o Nod pelo chat), voltar desfaria isso também: responde perfil_mudou.
+    return agir(() => restaurarVersao(agenteId, d.versao, d));
+  },
   // NOD-382: o perfil do bot no celular (web/telas/perfil-celular.ts).
   "perfil-voltar": () => fecharPerfil(),
   "perfil-mensagem": () => fecharPerfil("chat"),
@@ -6188,14 +6220,15 @@ const FORMS: Record<string, (form: HTMLFormElement) => Promise<void>> = {
   "editar-perfil": (form) => {
     const d = new FormData(form);
     return agir(async () => {
-      // ADR-125: Missão e voz só manda a missão; nome, subtítulo, forma e cor se editam no topo da gaveta.
-      await api!.editarPerfil(form.dataset.id ?? "", { descricao: String(d.get("descricao") ?? "") });
-      // ADR-071: a voz nas ligações mora em rota própria (vale na próxima frase de uma ligação em curso).
+      // ADR-125: Missão e voz só manda a missão e a voz; nome, subtítulo, forma e cor se editam no topo da gaveta.
+      // NOD-20: missão e voz num PATCH só, para virar UMA versão do perfil (antes a voz ia pela rota própria, ADR-071).
+      const agenteId = form.dataset.id ?? "";
       const voz = VOZES.find((v) => v.id === d.get("voz"))?.id;
       const vozVelocidade = VELOCIDADES.find((v) => String(v) === d.get("vozVelocidade"));
-      if (voz || vozVelocidade) await api!.ajustarVoz(form.dataset.id ?? "", { ...(voz ? { voz } : {}), ...(vozVelocidade ? { vozVelocidade } : {}) });
+      const r = await api!.editarPerfil(agenteId, { descricao: String(d.get("descricao") ?? ""), ...(voz ? { voz } : {}), ...(vozVelocidade ? { vozVelocidade } : {}) });
       dispatch({ tipo: "invalidar", quais: ["frota", "gestao"] });
       fecharNivel();
+      depoisDeSalvarPerfil(agenteId, r.versao ?? null);
     });
   },
   inteligencia: (form) => {
@@ -7583,6 +7616,7 @@ function abrirNivel(agenteId: string, nivel: NivelGaveta): void {
   else if (painelOculto()) painelAbertoNaHora = true;
   dispatch({ tipo: "gaveta", agenteId: a.id, nivel });
   if (nivel.tipo === "atividade") vigiaAtividade.atividadeAberta(a.id);
+  carregarAoAbrirNivel(a.id, nivel);
   document.querySelector<HTMLElement>("#detalhes .gv-voltar")?.focus();
 }
 
@@ -7676,9 +7710,154 @@ function fecharNivel(): void {
   if (!g) { document.querySelector<HTMLElement>("#detalhes .gv-painel")?.focus(); return; }
   const pai = paiDoNivel(g.nivel, ehCelular());
   dispatch({ tipo: "gaveta", agenteId: g.agenteId, nivel: pai });
+  if (pai) carregarAoAbrirNivel(g.agenteId, pai);
   const id = "id" in g.nivel ? g.nivel.id : "";
   const origem = document.querySelector<HTMLElement>(`#detalhes [data-act="gaveta"][data-nivel="${g.nivel.tipo}"]${id ? `[data-id="${CSS.escape(id)}"]` : ""}`);
   (origem ?? document.querySelector<HTMLElement>(pai ? "#detalhes .gv-voltar" : "#detalhes .gv-painel"))?.focus();
+}
+
+// ---- NOD-20: histórico de versões do perfil ----------------------------------------------------------------------------
+
+const mudarHistorico = (agenteId: string, mudanca: Partial<HistoricoDoBot>): void => {
+  dispatch({ tipo: "historico-perfil", agenteId, mudanca });
+  // Revisão 3 M3: o anúncio vai ao nó fixo #anuncio-config (fora da gaveta, que o render troca inteira): numa região
+  // recriada já com o texto, o leitor de tela não lê nada.
+  if (mudanca.anuncio) anunciarEm(document.getElementById("anuncio-config"), mudanca.anuncio, (fn) => window.setTimeout(fn, 50));
+};
+const historicoDe = (agenteId: string): HistoricoDoBot => estado.historicoPerfil[agenteId] ?? HISTORICO_INICIAL;
+/** A última carga pedida por bot: a resposta de uma carga mais velha não sobrescreve a nova. */
+const cargaDoHistorico = new Map<string, number>();
+const cargaDaVersao = new Map<string, number>();
+/** O "Mostrar versões anteriores" tem a sua vez (revisão 2 M5): dividir a do refresh deixava o `carregando` preso. */
+const cargaDoMais = new Map<string, number>();
+const proximaCarga = (m: Map<string, number>, id: string): number => { const n = (m.get(id) ?? 0) + 1; m.set(id, n); return n; };
+
+/** A primeira página do histórico (substitui a lista); `mais` pede a página antes da última versão mostrada. */
+async function carregarHistorico(agenteId: string, mais = false): Promise<void> {
+  if (!api) return;
+  if (mais) {
+    const h = historicoDe(agenteId);
+    const ultima = h.lista?.versoes[h.lista.versoes.length - 1];
+    if (!ultima || h.carregandoMais) return;
+    const n = proximaCarga(cargaDoMais, agenteId);
+    const lista = cargaDoHistorico.get(agenteId);
+    // Vale só se nenhum refresh começou no meio (ele troca a lista e zera o carregandoMais) nem outro "mais".
+    const vale = () => cargaDoMais.get(agenteId) === n && cargaDoHistorico.get(agenteId) === lista;
+    mudarHistorico(agenteId, { carregandoMais: true });
+    try {
+      const r = await api.versoesPerfil(agenteId, ultima.versao);
+      if (!vale()) return;
+      const atual = historicoDe(agenteId).lista;
+      mudarHistorico(agenteId, { lista: atual ? { ...r, versoes: [...atual.versoes, ...r.versoes.filter((v) => !atual.versoes.some((x) => x.versao === v.versao))] } : r, carregandoMais: false });
+    } catch (e) {
+      if (vale()) mudarHistorico(agenteId, { carregandoMais: false });
+      mostrarErro(e);
+    }
+    return;
+  }
+  const n = proximaCarga(cargaDoHistorico, agenteId);
+  proximaCarga(cargaDoMais, agenteId);
+  mudarHistorico(agenteId, { carregando: true, erro: false, carregandoMais: false });
+  try {
+    const lista = await api.versoesPerfil(agenteId);
+    if (cargaDoHistorico.get(agenteId) === n) mudarHistorico(agenteId, { lista, carregando: false, erro: false });
+  } catch {
+    if (cargaDoHistorico.get(agenteId) === n) mudarHistorico(agenteId, { carregando: false, erro: true, anuncio: "Não deu para carregar o histórico." });
+  }
+}
+
+async function carregarVersao(agenteId: string, numero: number): Promise<void> {
+  if (!api) return;
+  const n = proximaCarga(cargaDaVersao, agenteId);
+  const h = historicoDe(agenteId);
+  mudarHistorico(agenteId, { erroDetalhe: false, ...(h.detalhe?.versao.versao === numero ? {} : { detalhe: null }) });
+  try {
+    const detalhe = await api.versaoPerfil(agenteId, numero);
+    if (cargaDaVersao.get(agenteId) !== n) return;
+    // Revisão 4 M1: o perfil mudou por fora com a confirmação aberta: ela caduca (a guarda e o aviso eram do perfil de antes).
+    const caducou = confirmacaoCaducou(historicoDe(agenteId), numero, detalhe);
+    mudarHistorico(agenteId, { detalhe, erroDetalhe: false, ...(caducou ? { confirmando: null, erroRestaurar: false, anuncio: "O perfil mudou enquanto você conferia. Confira de novo antes de restaurar." } : {}) });
+  } catch {
+    if (cargaDaVersao.get(agenteId) === n) mudarHistorico(agenteId, { erroDetalhe: true, anuncio: "Não deu para abrir esta versão." });
+  }
+}
+
+/** O que cada nível pede ao abrir (só no bot da pessoa: o servidor recusa o histórico de outra). */
+function carregarAoAbrirNivel(agenteId: string, nivel: NivelGaveta): void {
+  const a = botGerido(agenteId);
+  if (!a || a.ownerId !== estado.sessao?.pessoaId) return;
+  if (nivel.tipo === "ajustes" || nivel.tipo === "historico") void carregarHistorico(a.id);
+  if (nivel.tipo === "versao") void carregarVersao(a.id, Number(nivel.id));
+}
+
+/** Salvou Missão e voz e virou a versão `versao`: o Desfazer embaixo do cartão Perfil restaura a de antes. */
+function depoisDeSalvarPerfil(agenteId: string, versao: number | null): void {
+  if (versao === null || versao < 2) { mudarHistorico(agenteId, { anuncio: "Missão salva." }); return; }
+  mudarHistorico(agenteId, {
+    anuncio: "Missão salva.",
+    desfazer: { versao: versao - 1, criada: versao, rotulo: "Desfazer", aria: "Desfazer a mudança na missão e na voz", onde: "ajustes", desfeito: "Desfeito: a missão voltou a como estava." },
+  });
+  void carregarHistorico(agenteId);
+}
+
+/**
+ * Restaura a versão `numero`. Pela confirmação (desfazer = null): volta ao Histórico com o Desfazer no topo, que restaura a
+ * que era a atual. Pelo Desfazer: anuncia e tira o link. Falhou: nada mudou; a confirmação mostra o erro.
+ */
+async function restaurarVersao(agenteId: string, numero: number, desfazer: HistoricoDoBot["desfazer"]): Promise<void> {
+  const h = historicoDe(agenteId);
+  if (!api || h.restaurando) return;
+  const anterior = h.detalhe?.numeroAtual ?? h.lista?.atual ?? null;
+  // A guarda: a versão em que a pessoa estava olhando (o Desfazer, a que o salvar criou). Sem ela não há o que comparar.
+  const esperada = desfazer ? desfazer.criada : anterior;
+  if (esperada === null) return;
+  // A confirmação avisou que um segredo some (perdeSegredo, do servidor); confirmar é a pessoa aceitando. O Desfazer não
+  // avisa: se o servidor recusar com versao_redigida, a confirmação abre (abaixo).
+  const aceitarRedacao = !desfazer && h.confirmando === numero && h.detalhe?.versao.versao === numero && h.detalhe.perdeSegredo === true;
+  mudarHistorico(agenteId, { restaurando: true, erroRestaurar: false });
+  try {
+    const r = await api.restaurarVersao(agenteId, numero, { esperada, aceitarRedacao });
+    dispatch({ tipo: "invalidar", quais: ["frota", "gestao"] });
+    if (desfazer) {
+      mudarHistorico(agenteId, { restaurando: false, desfazer: null, anuncio: desfazer.desfeito });
+    } else {
+      mudarHistorico(agenteId, {
+        restaurando: false,
+        confirmando: null,
+        anuncio: `Perfil restaurado para a versão ${numero}.`,
+        desfazer: anterior ? { versao: anterior, criada: r.versao.versao, rotulo: "Desfazer", aria: `Desfazer: voltar à versão ${anterior}`, onde: "historico", desfeito: `Desfeito: o perfil voltou à versão ${anterior}.` } : null,
+      });
+      if (estado.gaveta?.agenteId === agenteId && estado.gaveta.nivel.tipo === "versao") {
+        gavetaSuja = null;
+        dispatch({ tipo: "gaveta", agenteId, nivel: { tipo: "historico" } });
+        // O reducer limpa a confirmação ao trocar de nível; o Desfazer e o anúncio ficam (a gaveta não fechou).
+      }
+    }
+    await carregarHistorico(agenteId);
+    const nova = document.querySelector<HTMLElement>(`#detalhes [data-nivel="versao"][data-id="${r.versao.versao}"]`);
+    (nova ?? document.querySelector<HTMLElement>("#detalhes .gv-voltar"))?.focus();
+  } catch (e) {
+    if (e instanceof ErroApi && e.motivo === "perfil_mudou") {
+      // Outra mudança chegou antes: o Desfazer some e a lista relê, para a pessoa ver o que mudou e escolher de novo.
+      const msg = "O perfil mudou depois disso. Use o Histórico para voltar.";
+      mudarHistorico(agenteId, { restaurando: false, confirmando: null, desfazer: null, anuncio: msg });
+      dispatch({ tipo: "erro", erro: { codigo: "perfil_mudou", mensagem: msg } });
+      await carregarHistorico(agenteId).catch(() => undefined);
+    } else if (desfazer && e instanceof ErroApi && e.motivo === "versao_redigida") {
+      // Revisão 2 (A2): voltar apagaria um segredo. O Desfazer some e abre a versão com a confirmação e o aviso: a pessoa
+      // decide lá (sem isto, cada clique dava o mesmo 409).
+      mudarHistorico(agenteId, { restaurando: false, desfazer: null, anuncio: "Voltar apaga um segredo do perfil. Confira antes de restaurar." });
+      abrirNivel(agenteId, { tipo: "versao", id: String(numero) });
+      mudarHistorico(agenteId, { confirmando: numero, erroRestaurar: false });
+    } else if (desfazer) {
+      mudarHistorico(agenteId, { restaurando: false });
+      mostrarErro(e);
+    } else {
+      // Revisão 4 M2: o erro vai pelo nó fixo de anúncio (o da gaveta nasce já com o texto e não é lido) e o foco volta ao botão.
+      mudarHistorico(agenteId, { restaurando: false, erroRestaurar: true, anuncio: "Não deu para restaurar. Nada mudou no perfil." });
+      document.querySelector<HTMLElement>('#detalhes [data-act="restaurar-versao"]')?.focus();
+    }
+  }
 }
 
 /** ADR-125: Acordar e Tentar de novo ligam o computador; o botão diz "Acordando…" até a resposta, e a frota relê. */
@@ -7840,7 +8019,15 @@ try {
 type MudancaDePerfil = { nome?: string; titulo?: string; forma?: FormaAgente; cor?: CorAgente };
 const filaDePerfil = criarFilaDePerfil<MudancaDePerfil>(async (agenteId, mudanca) => {
   try {
-    await api!.editarPerfil(agenteId, mudanca);
+    const r = await api!.editarPerfil(agenteId, mudanca);
+    // NOD-20 (protótipo v2): o nome salvo ganha o Desfazer embaixo dele; o subtítulo, a forma e a cor não (ficam no Histórico).
+    const soNome = Object.keys(mudanca).length === 1 && mudanca.nome !== undefined;
+    if (soNome && typeof r.versao === "number" && r.versao >= 2) {
+      mudarHistorico(agenteId, { anuncio: "Nome salvo.", desfazer: { versao: r.versao - 1, criada: r.versao, rotulo: "Desfazer", aria: "Desfazer a mudança no nome", onde: "identidade", desfeito: "Desfeito: o nome voltou a como estava." } });
+    } else if (typeof r.versao === "number" && historicoDe(agenteId).desfazer) {
+      // Outra mudança gravou versão depois: o Desfazer de antes desfaria ela também.
+      mudarHistorico(agenteId, { desfazer: null });
+    }
   } finally {
     // A fila esvaziou e nada espera no debounce: a frota relida já é a verdade (com o erro, desfaz o otimista).
     if (filaDePerfil.semEspera(agenteId) && !salvarAvatar.pendente(agenteId)) {

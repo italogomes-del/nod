@@ -183,6 +183,9 @@ describeIntegracao("purga da conta (NOD-346): 30 dias depois, tudo some e o logi
         values (${escopo.tenantId}, ${escopo.pessoaId}, ${agenteId}, ${turno.id}, ${frente!.id}) returning id`;
       await trx`update trabalhos set lote_id = ${lote!.id} where id = ${frente!.id}`;
       await repos.memorias.criar({ agenteId, tipo: "preferencia", texto: "resumos curtos", origem: "pessoa" });
+      // NOD-20: versões do perfil (só acrescenta para o nod_app; a purga tem de levá-las).
+      await repos.versoesPerfil.inserir({ agenteId, versao: 1, origem: "inicial", perfil: { nome: "Zé", titulo: "", descricao: "", forma: "shape-hex", cor: "c-purple", voz: null, vozVelocidade: 1 }, campos: [] });
+      await repos.versoesPerfil.inserir({ agenteId, versao: 2, origem: "tela", perfil: { nome: "Zé", titulo: "", descricao: "Missão.", forma: "shape-hex", cor: "c-purple", voz: null, vozVelocidade: 1 }, campos: ["descricao"] });
       await repos.rotinas.criar({ agenteId, conversaId, cron: "*/30 * * * *", fusoIana: "UTC", instrucao: "PRs", fonte: "f", entregavel: "e", limitesAprovacao: "l", politicaSemDado: "p", proximaExecucao: Date.now() + 3_600_000 });
       await trx`insert into decisoes (tenant_id, owner_id, decisor_id, agente_id, conversa_id, tipo, prazo_decisao_em, frase)
         values (${escopo.tenantId}, ${escopo.pessoaId}, ${escopo.pessoaId}, ${agenteId}, ${conversaId}, 'pergunta', now() + interval '1 day', 'posso?')`;

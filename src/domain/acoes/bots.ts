@@ -42,6 +42,9 @@ export const ACOES_BOTS = [
   {
     id: "bots.editar",
     titulo: "Editar o perfil de um bot",
+    // definido em 2026-10-30 (NOD-20): o PATCH da tela também leva voz e vozVelocidade (o Salvar da missão com a voz vira
+    // UMA versão), como já levava forma e cor; o gerir_bots edita só texto e inteligência. A voz no chat é a da ligação
+    // (definirVozDoAgente), que também grava versão. Divergência de parâmetro registrada; não muda o estado da catraca.
     schema: objeto({ bot: BOT, nome: P.nome, titulo: P.titulo, descricao: P.descricao, modelo: P.modelo, esforco: P.esforco }, ["bot"]),
     risco: "muda",
     cartaoNoChat: false,
@@ -78,6 +81,17 @@ export const ACOES_BOTS = [
     chat: { estado: "vivo", via: { ferramenta: VIA, tipoNoLote: "mudar_modo" }, contrato: CONTRATO },
     casoDeUso: "bots.mudar_modo",
     lote: { tipo: "mudar_modo", riscoDe: (a) => (a.modo === "total" ? "pessoa_confirma" : "arriscada") },
+  },
+  {
+    id: "bots.restaurar_versao",
+    titulo: "Restaurar uma versão do perfil de um bot",
+    schema: objeto({ bot: BOT, versao: P.versao }, ["bot", "versao"]),
+    risco: "muda",
+    cartaoNoChat: false,
+    chat: { estado: "vivo", via: { ferramenta: VIA, tipoNoLote: "restaurar_versao" }, contrato: CONTRATO },
+    casoDeUso: "bots.restaurar_versao",
+    // NOD-20: restaurar pode trazer de volta a descrição (o prompt do bot): depois de conteúdo de fora, vira cartão.
+    lote: { tipo: "restaurar_versao", deFora: () => true },
   },
   { id: "bots.restaurar", titulo: "Restaurar um bot excluído", risco: "muda", cartaoNoChat: false, chat: { estado: "falta", onda: "NOD-393" } },
   { id: "bots.fixar", titulo: "Fixar um bot no topo", risco: "muda", cartaoNoChat: false, chat: { estado: "falta", onda: "NOD-393" } },
