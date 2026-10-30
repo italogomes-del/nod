@@ -37,6 +37,7 @@ import { acaoHumana, detalheAcesso, idsGemeas, marcaGemeas, marcaRotinaParada, p
 import { renderCardPasta } from "./card-pasta.ts";
 import { dadosDoEncolhido, pedidoDoRecibo, renderCartaoEncolhido, turnoDoEncolhido } from "./cartao-encolhido.ts";
 import { renderCardLote } from "./card-lote.ts";
+import { segmento } from "./quadro.ts";
 import { idsNoPerfil, renderCardPerfil } from "./card-perfil.ts";
 import { renderCardArtefato } from "./card-artefato.ts";
 import { faixaDaMensagem } from "./modo-dev.ts";
@@ -1575,7 +1576,11 @@ function comPedidosAncorados(blocos: BlocoDaTimeline[], c: ConversaEstado, estad
  * abertas" e o Ligar foram para a gaveta (web/telas/detalhes.ts); o Parar foi para o campo, ao lado do Enviar
  * (`botoesDoCampo`).
  */
-export function renderCabecalhoConversa(estado: Estado, agenteId: string): string {
+/**
+ * NOD-429: com `comQuadro` (a flag do teste ligada e o bot é da pessoa), a pílula e o par Conversa | Quadro viram uma
+ * cápsula só (`.qd-pil`); a presença (`.pilula-sub`) continua irmã, logo depois.
+ */
+export function renderCabecalhoConversa(estado: Estado, agenteId: string, o: { comQuadro?: boolean } = {}): string {
   const a = agenteDe(estado, agenteId);
   const nome = a?.nome ?? "agente";
   const { html, ativa } = presencaDoBot(estado, agenteId);
@@ -1586,7 +1591,8 @@ export function renderCabecalhoConversa(estado: Estado, agenteId: string): strin
   // NOD-381 (definido em 2026-10-27): no celular a presença vai dentro da pílula, em 12px abaixo do nome; o computador
   // continua com o ponto e a linha de baixo (`.pilula-txt` é `display: contents` e `.pilula-presenca` fica escondida).
   const presencaNaPilula = disponivel ? "" : `<span class="pilula-presenca" aria-hidden="true">${html}</span>`;
-  return `<button type="button" class="pilula-bot" data-act="alternar-detalhes" aria-controls="detalhes" aria-label="${esc(`Painel de ${rotulo}`)}" title="${esc(rotulo)}">${a ? iconeAgente(a, "sm", estadoMascoteNaConversa(estado, a.conversaId)) : ""}<span class="pilula-txt"><span class="pilula-nome">${esc(nome)}</span>${presencaNaPilula}</span><span class="presenca${ativa ? " ativa" : ""}" aria-hidden="true"></span><span class="pilula-seta" aria-hidden="true">›</span>${a?.ownerId === estado.sessao?.pessoaId ? htmlFio(estado.computadorPessoa) : ""}</button>${sub}`;
+  const pilula = `<button type="button" class="pilula-bot" data-act="alternar-detalhes" aria-controls="detalhes" aria-label="${esc(`Painel de ${rotulo}`)}" title="${esc(rotulo)}">${a ? iconeAgente(a, "sm", estadoMascoteNaConversa(estado, a.conversaId)) : ""}<span class="pilula-txt"><span class="pilula-nome">${esc(nome)}</span>${presencaNaPilula}</span><span class="presenca${ativa ? " ativa" : ""}" aria-hidden="true"></span><span class="pilula-seta" aria-hidden="true">›</span>${a?.ownerId === estado.sessao?.pessoaId ? htmlFio(estado.computadorPessoa) : ""}</button>`;
+  return o.comQuadro ? `<div class="qd-pil">${pilula}${segmento({ nome })}</div>${sub}` : `${pilula}${sub}`;
 }
 
 /**

@@ -121,6 +121,14 @@ export type PaiDoCabecalho<N> = {
 
 const filhoComClasse = <N extends FilhoDoCabecalho<N>>(n: PaiDoCabecalho<N>, c: string): N | undefined => Array.from(n.childNodes).find((f) => f.classList?.contains(c));
 
+/**
+ * NOD-429: com o quadro liberado, a pílula do bot mora numa cápsula `.qd-pil` junto do segmento Conversa ↔ Quadro. A
+ * cápsula inteira é "a pílula" para a busca (anda junto para o miolo e volta junto); o modificador vai no botão.
+ */
+const pilulaDe = <N extends FilhoDoCabecalho<N>>(n: PaiDoCabecalho<N>): N | undefined => filhoComClasse(n, "qd-pil") ?? filhoComClasse(n, "pilula-bot");
+const botaoDa = <N extends FilhoDoCabecalho<N>>(p: N): N | undefined =>
+  p.classList?.contains("qd-pil") ? filhoComClasse(p as unknown as PaiDoCabecalho<N>, "pilula-bot") : p;
+
 /** Troca os filhos de `raiz` pelos `novos`, menos o `manter`, que fica onde está (os novos entram antes dele). */
 export function trocarEmVolta<N extends FilhoDoCabecalho<N>>(raiz: PaiDoCabecalho<N>, novos: N[], manter: N): void {
   for (const f of Array.from(raiz.childNodes)) if (f !== manter) f.remove();
@@ -133,10 +141,10 @@ export function trocarEmVolta<N extends FilhoDoCabecalho<N>>(raiz: PaiDoCabecalh
  * `.pilula-sub` (ou no fim); se já está no cabeçalho, quem anda é o resto, nunca ele.
  */
 export function encaixarNoCabecalho<N extends FilhoDoCabecalho<N>>(cab: PaiDoCabecalho<N>, miolo: N, lugar: PaiDoCabecalho<N>): void {
-  const pilula = filhoComClasse(cab, "pilula-bot");
+  const pilula = pilulaDe(cab);
   if (pilula) {
     lugar.replaceChildren(pilula);
-    pilula.classList?.add("bnc-pb");
+    botaoDa(pilula)?.classList?.add("bnc-pb");
   } else if (miolo.parentNode !== cab) lugar.replaceChildren();
   const sub = filhoComClasse(cab, "pilula-sub");
   if (miolo.parentNode !== cab) {
@@ -151,9 +159,9 @@ export function encaixarNoCabecalho<N extends FilhoDoCabecalho<N>>(cab: PaiDoCab
 
 /** Tira o miolo: a pílula volta ao lugar dela no cabeçalho, sem o modificador, e o cabeçalho deixa de estar "buscando". */
 export function soltarDoCabecalho<N extends FilhoDoCabecalho<N>>(cab: PaiDoCabecalho<N> | null, miolo: N, lugar: PaiDoCabecalho<N>): void {
-  const pilula = filhoComClasse(lugar, "pilula-bot");
+  const pilula = pilulaDe(lugar);
   if (pilula) {
-    pilula.classList?.remove("bnc-pb");
+    botaoDa(pilula)?.classList?.remove("bnc-pb");
     if (cab && miolo.parentNode === cab) miolo.before(pilula); else pilula.remove();
   }
   cab?.classList?.remove("buscando");

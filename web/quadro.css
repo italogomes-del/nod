@@ -1,0 +1,268 @@
+/* NOD-429 (definido em 2026-10-30): o quadro-agente, portado da base da v3 do protótipo (gamefik/nod-prototipos,
+   _nod/quadro/base.css, PR #16). Par de web/telas/quadro.ts; classes qd-. Só tokens do nod (ADR-070), sem cor nova.
+   - Colunas sem borda num cinza leve, card branco de 4 linhas; a cor fica só nos ícones de estado.
+   - Camadas (issue 225 dos protótipos): fundo cinza leve, colunas cinza, card branco; no escuro, os mesmos três níveis.
+   - Quem executa ganha um anel girando no avatar (issue 223 dos protótipos); com menos movimento, o anel para e fica tracejado.
+   Os dois comentários finais do Marlon (2026-10-30):
+   - j4-5: a recusa da trava ("Feito só aceita vindo de Em revisão · Mandar para Em revisão") quebra linha DENTRO do card;
+     no protótipo a linha 1 era `nowrap` e o texto vazava. O texto inteiro vai no `title` (web/telas/quadro.ts, `aviso`).
+   - j7-1: a troca Conversa ↔ Quadro desliza nos dois sentidos: o indicador do segmento anda na pílula e o conteúdo anda
+     de lado (web/lib/quadro-na-tela.ts), 220 ms com a curva de saída. Com menos movimento, fade curto sem deslocamento. */
+
+:root {
+  --qd-col-min: 192px; --qd-tira: 44px; --qd-raio: 10px;
+  --qd-troca: 220ms; --qd-curva: cubic-bezier(.2, .8, .2, 1);
+  --qd-fundo: color-mix(in srgb, var(--surface-side) 50%, var(--surface-raised));
+  --qd-col-fundo: var(--surface-selected);
+  --qd-card: var(--surface);
+}
+:root[data-theme="dark"] { --qd-fundo: var(--surface); --qd-col-fundo: var(--surface-side); --qd-card: var(--surface-raised); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --qd-fundo: var(--surface); --qd-col-fundo: var(--surface-side); --qd-card: var(--surface-raised); }
+}
+
+.qd-ic { flex: none; }
+.qd-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.qd-link:focus-visible, .qd-seg-bt:focus-visible, .qd-col-tira:focus-visible, .qd-col-bt:focus-visible, .qd-filtro-bt:focus-visible, .qd-q-mais:focus-visible,
+.qd-l-bt:focus-visible, .qd-lg-bt:focus-visible, .qd-lg-mais:focus-visible {
+  outline: 2px solid var(--focus-ring, var(--signal)); outline-offset: 2px; }
+/* O título é o botão, mas o clique vale no card inteiro: o contorno é desenhado no card. */
+.qd-card-bt:focus-visible { outline: 0; }
+.qd-card:has(.qd-card-bt:focus-visible) { outline: 2px solid var(--focus-ring, var(--signal)); outline-offset: 2px; }
+
+.qd-link { padding: 0; border: 0; background: none; color: var(--ink-2); font: inherit; font-size: inherit; font-weight: 500; text-decoration: underline;
+  text-decoration-color: var(--line-strong); text-underline-offset: 3px; cursor: pointer; }
+.qd-link:hover { color: var(--ink); text-decoration-color: var(--ink); }
+
+/* ---------- Conversa | Quadro dentro da pílula (alternativa A) ---------- */
+/* Uma cápsula só: a pílula de sempre e o par colado nela. O botão da pílula perde a borda; a cápsula a desenha. */
+.qd-pil { display: inline-flex; align-items: center; gap: 2px; max-width: 100%; padding: 2px 3px 2px 2px; border: 1px solid var(--line); border-radius: 999px;
+  background: var(--surface); box-shadow: var(--shadow-pop); pointer-events: auto; }
+.cabecalho.cabecalho-pilula .qd-pil > .pilula-bot { min-width: 0; border: 0; box-shadow: none; background: transparent; -webkit-backdrop-filter: none; backdrop-filter: none; }
+.qd-pil:has(> .pilula-bot:hover, > .pilula-bot:focus-visible) { border-color: var(--ink); }
+/* Com a busca aberta, a cápsula vai para o miolo dela: só o nome do bot fica, sem o segmento nem a borda da cápsula. */
+.bnc-pilula .qd-pil { display: contents; }
+.bnc-pilula .qd-pil > .qd-seg { display: none; }
+.qd-pil:has(> .pilula-bot:hover) + .pilula-sub, .qd-pil:has(> .pilula-bot:focus-visible) + .pilula-sub { display: block; }
+
+/* Duas abas de largura igual: o indicador é metade da faixa e anda 100% da própria largura. Sem medir nada em JS. */
+.qd-seg { position: relative; display: inline-grid; grid-template-columns: 1fr 1fr; align-items: center; flex: none; padding: 2px; border-radius: 999px;
+  background: var(--surface-raised); isolation: isolate; }
+.qd-seg-ind { position: absolute; z-index: -1; top: 2px; bottom: 2px; left: 2px; width: calc(50% - 2px); border-radius: 999px; background: var(--surface);
+  box-shadow: 0 0 0 1px var(--line), 0 1px 2px color-mix(in srgb, var(--ink) 6%, transparent); transform: translateX(0); transition: transform var(--qd-troca) var(--qd-curva); }
+.qd-seg[data-atual="quadro"] .qd-seg-ind { transform: translateX(100%); }
+.qd-seg-bt { display: inline-flex; align-items: center; justify-content: center; gap: 5px; height: 28px; padding: 0 10px; border: 0; border-radius: 999px;
+  background: transparent; color: var(--ink-3); font: inherit; font-size: 12.5px; font-weight: 500; cursor: pointer; transition: color var(--qd-troca) var(--qd-curva); }
+.qd-seg-bt:hover { color: var(--ink); }
+/* A aba escolhida muda só a cor: negrito mudaria a largura da cápsula no meio do deslize. */
+.qd-seg-bt[aria-selected="true"] { color: var(--ink); }
+.qd-seg-compacto .qd-seg-bt { width: 32px; padding: 0; }
+.qd-seg-compacto .qd-seg-bt span { display: none; }
+
+/* ---------- A vista do quadro: por cima da conversa, sem regravá-la ---------- */
+/* A conversa (timeline e campo) fica no lugar, por baixo; o quadro cobre o palco abaixo da pílula. O main troca o
+   `hidden` e o quadro-na-tela anima quem sai e quem entra. */
+.qd-vista { position: absolute; inset: 0; z-index: 3; display: flex; flex-direction: column; gap: 12px; min-width: 0; overflow: auto;
+  padding: 72px clamp(12px, 3vw, 24px) calc(env(safe-area-inset-bottom) + 24px); background: var(--qd-fundo); container-type: inline-size; }
+.qd-vista[hidden] { display: none; }
+.qd-vista > * { width: 100%; max-width: 1240px; margin-left: auto; margin-right: auto; }
+.stage.qd-no-quadro .cabecalho.cabecalho-pilula::before {
+  background: linear-gradient(180deg, var(--qd-fundo) 0%, color-mix(in srgb, var(--qd-fundo) 94%, transparent) 34%, transparent 100%); }
+/* Fora da tela durante e depois da troca: não recebe clique nem foco (o main também põe `inert`). */
+.qd-saiu { visibility: hidden; pointer-events: none; }
+/* Os avisos de erro (envio, conexão) ficam por cima da vista no modo Quadro: não somem enquanto a pessoa está nele. */
+.stage.qd-no-quadro #erro:not(:empty) { position: relative; z-index: 5; }
+.qd-so-estreito { display: none; }
+.qd-vista .qd-barra-q .qd-flag { margin-left: 8px; }
+
+/* ---------- Meta e o selo do teste ---------- */
+.qd-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 0; font-size: 12.5px; line-height: 20px; color: var(--ink-3); }
+.qd-meta > * + *::before { content: "·"; margin: 0 8px; color: var(--line-strong); }
+.qd-meta > .qd-barra::before, .qd-meta > .qd-barra + *::before, .qd-meta > .qd-flag::before { content: none; }
+.qd-meta-obj { color: var(--ink-2); font-weight: 600; }
+.qd-barra { position: relative; display: inline-block; width: 72px; height: 4px; margin: 0 8px 0 12px; border-radius: 2px; background: var(--line); overflow: hidden; }
+.qd-barra > i { position: absolute; inset: 0 auto 0 0; border-radius: 2px; background: var(--ink-2); }
+.qd-meta-n { color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.qd-risco { display: inline-flex; align-items: center; color: var(--ink); font-weight: 500; }
+.qd-risco::after { content: ""; width: 6px; height: 6px; margin-left: 6px; border-radius: 50%; background: var(--warning); }
+.qd-flag { margin-left: auto; padding: 0 9px; border: 1px dashed var(--line-strong); border-radius: 999px; font-size: 11.5px; line-height: 20px; color: var(--ink-3); white-space: nowrap; }
+
+/* ---------- A barra do quadro ---------- */
+.qd-barra-q { position: relative; display: flex; align-items: center; gap: 12px; min-height: 32px; }
+.qd-filtros { display: inline-flex; align-items: center; gap: 2px; }
+.qd-filtro-bt { height: 28px; padding: 0 11px; border: 0; border-radius: 999px; background: transparent; color: var(--ink-3); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; }
+.qd-filtro-bt:hover { color: var(--ink); }
+.qd-filtro-bt[aria-pressed="true"] { background: var(--surface-raised); color: var(--ink); font-weight: 600; }
+.qd-barra-dir { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; }
+.qd-trabalhando { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--ink-2); white-space: nowrap; }
+.qd-q-mais { display: grid; place-items: center; width: 32px; height: 32px; border: 0; border-radius: 8px; background: transparent; color: var(--ink-2); cursor: pointer; }
+.qd-q-mais:hover, .qd-q-mais[aria-expanded="true"] { background: var(--surface-raised); color: var(--ink); }
+
+/* ---------- O quadro: colunas sem borda ---------- */
+.qd-quadro { position: relative; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.qd-grade { display: grid; column-gap: 8px; align-items: stretch; overflow-x: auto; padding-bottom: 6px; scrollbar-width: thin; }
+.qd-col { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 6px 6px 8px; border-radius: 12px; background: var(--qd-col-fundo); }
+.qd-col-cab { display: flex; align-items: center; gap: 7px; min-width: 0; min-height: 28px; margin: 0; padding: 0 4px; font: inherit; font-size: 13px; font-weight: 600; color: var(--ink); }
+.qd-col-nome { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.qd-n { flex: none; font-size: 12px; font-weight: 500; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.qd-col-trava { display: inline-flex; flex: none; color: var(--ink-3); }
+.qd-col-lista { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; min-height: 40px; }
+.qd-col-vazio { padding: 12px 6px; font-size: 12px; color: var(--ink-3); text-align: center; }
+.qd-col-mais { padding: 2px 6px; font-size: 12.5px; }
+/* A cor só no ícone: a forma diz o grupo. */
+.qd-st-backlog, .qd-st-afazer, .qd-st-cancelado { color: var(--ink-3); }
+.qd-st-fazendo { color: var(--warning); }
+.qd-st-voce { color: var(--signal); }
+.qd-st-revisao { color: var(--success); }
+.qd-st-bloqueado { color: var(--danger); }
+.qd-st-feito { color: var(--ink-2); }
+/* Recolhida: uma tira estreita com o ícone, o nome e a contagem. */
+.qd-col-recolhida { padding: 0; background: transparent; }
+.qd-col-bt { display: flex; align-items: center; gap: 7px; min-width: 0; min-height: 28px; margin: 0 -4px; padding: 0 4px; border: 0; border-radius: 8px;
+  background: transparent; font: inherit; color: inherit; cursor: pointer; }
+.qd-col-bt:hover { background: color-mix(in srgb, var(--qd-col-fundo) 70%, var(--line)); }
+.qd-col-tira { display: flex; flex-direction: column; align-items: center; gap: 8px; width: 100%; height: 100%; min-height: 180px; padding: 10px 0; border: 0;
+  border-radius: 12px; background: var(--qd-col-fundo); color: var(--ink-2); font: inherit; font-size: 12.5px; font-weight: 500; cursor: pointer; }
+.qd-col-tira:hover { color: var(--ink); background: color-mix(in srgb, var(--qd-col-fundo) 70%, var(--line)); }
+.qd-col-tira .qd-col-nome { writing-mode: vertical-rl; transform: rotate(180deg); }
+
+/* ---------- O card: branco, 4 linhas. O título é o botão; o clique vale no card inteiro. ---------- */
+.qd-card { position: relative; display: flex; flex-direction: column; gap: 5px; min-width: 0; padding: 9px 10px 10px; border: 1px solid var(--line); border-radius: var(--qd-raio);
+  background: var(--qd-card); box-shadow: 0 1px 1px color-mix(in srgb, var(--ink) 3%, transparent); }
+.qd-card:hover { border-color: var(--line-strong); }
+.qd-card-l1 { display: flex; flex-wrap: wrap; align-items: center; column-gap: 8px; row-gap: 2px; min-height: 18px; min-width: 0; }
+.qd-card-bt { display: block; width: 100%; padding: 0; border: 0; background: transparent; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+.qd-card-bt::after { content: ""; position: absolute; inset: 0; border-radius: inherit; }
+.qd-id { font-family: var(--font-mono); font-size: 11px; color: var(--ink-3); letter-spacing: -.01em; white-space: nowrap; }
+.qd-card-tit { font-size: 13px; font-weight: 500; line-height: 1.35; color: var(--ink); overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.qd-tags { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.qd-tag { display: inline-flex; align-items: center; max-width: 100%; height: 20px; padding: 0 7px; border: 1px solid var(--line); border-radius: 6px; font-size: 11.5px;
+  color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.qd-card-pe { display: flex; align-items: center; gap: 8px; min-width: 0; margin-top: 1px; }
+.qd-quem { display: inline-flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px; color: var(--ink-2); }
+.qd-quem > span:not(.qd-avs) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.qd-quem .icon.mascote, .qd-quem nod-mascote { width: 18px !important; height: 18px !important; min-width: 18px; border-radius: 6px; }
+.qd-quem .icon.mascote svg { width: 15px; height: 15px; }
+.qd-quem .qd-anel { width: 18px; height: 18px; font-size: 8.5px; border-width: 1.5px; }
+.qd-quando { margin-left: auto; flex: none; font-size: 11.5px; color: var(--ink-3); white-space: nowrap; }
+/* Linha 1: o estado do trabalho, em tinta 3; o ícone carrega a cor. Texto longo quebra dentro do card. */
+.qd-estado { display: inline-flex; align-items: center; gap: 5px; min-width: 0; max-width: 100%; font-size: 11.5px; line-height: 1.35; color: var(--ink-3); overflow-wrap: anywhere; }
+.qd-estado > span { min-width: 0; }
+.qd-ic-fila { color: var(--ink-3); }
+.qd-ic-falhou, .qd-ic-bloq { color: var(--danger); }
+.qd-ic-ok { color: var(--success); }
+.qd-e-falhou { color: var(--ink-2); }
+.qd-e-bloqueado { color: var(--ink-2); align-items: flex-start; }
+.qd-e-bloqueado .qd-ic { margin-top: 1px; }
+.qd-voce-frase { font-size: 12px; line-height: 1.35; color: var(--signal); font-weight: 500; overflow-wrap: anywhere; }
+
+/* O aviso de alguns segundos na linha 1 ("Movido por você · Desfazer") e a recusa da trava. O Desfazer fica acima do
+   botão esticado do card. Comentário do Marlon na j4-5: quebra linha, nunca passa da largura do card. */
+.qd-aviso { position: relative; z-index: 1; display: inline-flex; flex-wrap: wrap; align-items: baseline; column-gap: 6px; min-width: 0; max-width: 100%;
+  font-size: 11.5px; line-height: 1.35; color: var(--ink); font-weight: 500; overflow-wrap: anywhere; animation: qd-aviso-in .35s ease-out both; }
+.qd-aviso-txt { min-width: 0; }
+.qd-aviso > span + .qd-link::before { content: "·"; margin-right: 6px; color: var(--ink-3); text-decoration: none; display: inline-block; }
+/* ADR-070: link é neutro (o azul fica para quem precisa da pessoa). */
+.qd-aviso .qd-link { color: var(--ink); text-decoration: none; font-weight: 600; text-align: left; overflow-wrap: anywhere; }
+.qd-aviso .qd-link:hover { text-decoration: underline; }
+/* Durante o aviso a linha 1 é só o aviso (o id volta junto com o estado). */
+.qd-card-l1:has(.qd-aviso) .qd-id { display: none; }
+.qd-card-l1 .qd-aviso { flex: 1 1 100%; }
+.qd-aviso-recusa .qd-aviso-txt { color: var(--ink-2); font-weight: 500; }
+@keyframes qd-aviso-in { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: none; } }
+/* O brilho: o card que acabou de chegar (some em 3 s). */
+.qd-brilho { box-shadow: 0 0 0 1.5px var(--signal); animation: qd-brilho 3s ease-out 1 both; }
+@keyframes qd-brilho { 0% { background-color: var(--signal-soft); } 100% { background-color: var(--qd-card); } }
+
+/* ---------- Quem executa: o anel em volta do avatar (issue 223 dos protótipos) ---------- */
+.qd-avs { position: relative; z-index: 1; display: inline-flex; align-items: center; flex: none; }
+.qd-av { position: relative; display: inline-grid; place-items: center; flex: none; border-radius: 7px; }
+.qd-av > :first-child { position: relative; }
+.qd-av-rodando { margin: 0 3px; }
+.qd-av-rodando::before, .qd-av-rodando::after { content: ""; position: absolute; inset: -4px; border-radius: 50%; pointer-events: none; }
+.qd-av-rodando::before { border: 1.5px solid color-mix(in srgb, var(--success) 22%, transparent); }
+.qd-av-rodando::after { background: conic-gradient(from 0deg, transparent 0 58%, color-mix(in srgb, var(--success) 35%, transparent) 72%, var(--success) 100%);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 1.75px), #000 calc(100% - 1.5px)); /* cor-fixa: canal alfa da máscara, não é cor visível */
+  mask: radial-gradient(farthest-side, transparent calc(100% - 1.75px), #000 calc(100% - 1.5px)); /* cor-fixa: canal alfa da máscara, não é cor visível */
+  animation: qd-giro 1.2s linear infinite; }
+@keyframes qd-giro { to { transform: rotate(1turn); } }
+.qd-av-sobre { margin-left: -6px; }
+.qd-av-sobre > :first-child { box-shadow: 0 0 0 2px var(--qd-card); }
+.qd-av-rodando + .qd-av-rodando { margin-left: 4px; }
+.qd-av:not(.qd-av-rodando) + .qd-av-sobre.qd-av-rodando { margin-left: -4px; }
+.qd-av-sel { position: absolute; right: -4px; bottom: -4px; display: grid; width: 11px; height: 11px; border-radius: 50%; box-shadow: 0 0 0 1.5px var(--qd-card); line-height: 0; }
+.qd-av-sel svg { display: block; }
+.qd-avs-pilha .icon.mascote, .qd-avs-pilha nod-mascote { width: 16px !important; height: 16px !important; min-width: 16px; border-radius: 5px; }
+.qd-avs-pilha .icon.mascote svg { width: 13px; height: 13px; }
+.qd-avs-pilha .qd-av-rodando::before, .qd-avs-pilha .qd-av-rodando::after { inset: -3.5px; }
+.qd-avs-pilha .qd-av-rodando + .qd-av-rodando { margin-left: 3px; }
+
+.qd-anel { display: inline-grid; place-items: center; width: 24px; height: 24px; border: 1.5px solid var(--signal); border-radius: 50%; background: var(--surface);
+  color: var(--signal); font-size: 10px; font-weight: 700; line-height: 1; box-sizing: border-box; flex: none; }
+.qd-anel-voce { background: var(--signal); color: var(--on-signal); }
+
+/* ---------- Celular: o quadro vira lista agrupada por estado ---------- */
+.qd-lista { display: flex; flex-direction: column; gap: 4px; }
+.qd-lg-cab { display: flex; align-items: center; gap: 0; margin: 0; border-radius: 10px; background: var(--qd-col-fundo); font: inherit; }
+.qd-lg-bt { flex: 1; display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 8px; border: 0; border-radius: 10px; background: transparent;
+  color: var(--ink); font: inherit; font-size: 14px; font-weight: 600; text-align: left; cursor: pointer; }
+.qd-lg-bt .qd-ic-chev { margin-left: auto; color: var(--ink-3); }
+.qd-lg-mais { width: 44px; height: 44px; border: 0; border-radius: 10px; background: transparent; color: var(--ink-2); font: inherit; font-size: 20px; line-height: 1; cursor: pointer; }
+.qd-lg-lista { list-style: none; margin: 2px 0 8px; padding: 0 4px; border: 1px solid var(--line); border-radius: 12px; background: var(--qd-card); }
+.qd-lg-recolhido .qd-lg-bt { font-weight: 500; color: var(--ink-2); }
+.qd-l { position: relative; display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 48px; padding: 0 8px; border-bottom: 1px solid var(--line); }
+.qd-l:last-child { border-bottom: 0; }
+.qd-l-bt { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 0; border: 0; background: transparent; color: var(--ink);
+  font: inherit; font-size: 15px; text-align: left; cursor: pointer; }
+.qd-l-bt::after { content: ""; position: absolute; inset: 0; }
+.qd-l-tit { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.qd-l-fim { position: relative; z-index: 1; flex: 0 1 auto; min-width: 0; max-width: 55%; display: inline-flex; align-items: center; gap: 8px; pointer-events: none; }
+.qd-l-fim .qd-aviso { pointer-events: auto; font-size: 13px; }
+.qd-l-fim .qd-aviso .qd-link { min-height: 44px; display: inline-flex; align-items: center; }
+.qd-l-est { display: inline-flex; }
+.qd-l .qd-id { font-size: 12px; }
+.qd-l .icon.mascote, .qd-l nod-mascote { width: 22px !important; height: 22px !important; min-width: 22px; border-radius: 7px; }
+.qd-l .icon.mascote svg { width: 18px; height: 18px; }
+.qd-l .qd-anel { width: 22px; height: 22px; font-size: 9px; }
+
+/* ---------- Vista estreita: a grade vira a lista por estado ---------- */
+/* Layout pela largura da própria vista (container query, como a agenda), não pela janela: vale para a janela estreita no
+   computador e para o celular; o que é só de toque fica na CONSULTA_CELULAR abaixo (AGENTS.md, ADR-094). */
+@container (max-width: 700px) {
+  .qd-so-largo { display: none; }
+  .qd-so-estreito { display: block; }
+  .qd-flag { margin-left: 0; }
+  .qd-barra-q { flex-wrap: wrap; row-gap: 4px; }
+}
+
+/* ---------- Celular (a mesma CONSULTA_CELULAR do mobile.css, ADR-094) ---------- */
+@media (hover: none) and (pointer: coarse) and (max-width: 600px), (hover: none) and (pointer: coarse) and (max-height: 500px) {
+  .qd-vista { padding-top: calc(env(safe-area-inset-top) + 64px); }
+  .qd-link, .qd-filtro-bt, .qd-q-mais, .qd-col-bt, .qd-col-cab { min-height: 44px; }
+  .qd-q-mais { width: 44px; height: 44px; }
+  /* Na pílula do celular o par fica só com os ícones, em alvos de 44 (ADR-094); o nome segue no aria-label. */
+  .qd-seg-bt { width: 44px; height: 44px; padding: 0; }
+  .qd-seg-bt span { display: none; }
+  /* Puxar e o cutucão (web/mobile.css) movem a cápsula inteira quando há quadro. */
+  .cabecalho.cabecalho-pilula .qd-pil.bnc-puxando { transition: none; }
+  .cabecalho.cabecalho-pilula .qd-pil.bnc-cutuca { animation: bnc-cutuca .9s cubic-bezier(.2, .8, .2, 1) 1; }
+  .cabecalho.cabecalho-pilula .qd-pil { background: color-mix(in srgb, var(--surface) 82%, transparent); -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px);
+    box-shadow: var(--shadow-pop); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* A troca vira um fade curto: o indicador não anda, a aba escolhida acende no lugar. */
+  .qd-seg-ind { transition: opacity 120ms ease-out; transform: none !important; opacity: 0; }
+  .qd-seg-bt { transition: background-color 120ms ease-out, color 120ms ease-out; }
+  .qd-seg-bt[aria-selected="true"] { background: var(--surface); box-shadow: 0 0 0 1px var(--line); }
+  .qd-av-rodando::after { animation: none; display: none; }
+  .qd-av-rodando::before { border: 1.5px dashed var(--success); }
+  .qd-aviso { animation: none; }
+  .qd-brilho { animation: none; background-color: var(--qd-card); }
+}
+
+@media (forced-colors: active) {
+  .qd-card-bt:focus-visible { outline: 2px solid CanvasText; outline-offset: 2px; }
+  .qd-seg-bt[aria-selected="true"] { outline: 1px solid CanvasText; }
+}

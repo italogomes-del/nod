@@ -1,0 +1,333 @@
+/**
+ * NOD-429 (definido em 2026-10-30): os componentes do quadro-agente, portados da v3 do protótipo base
+ * (gamefik/nod-prototipos, `_nod/quadro/quadro.js`, PR #16) para TS. O par é web/quadro.css (classes `qd-`).
+ *
+ * Diferença do protótipo: lá título, motivo e descrição entravam como HTML cru. Aqui todo campo `string` é TEXTO e passa
+ * por `esc`; só entra como HTML o que tem o tipo `Html` — o que os próprios componentes geram, o mascote do nod
+ * (`iconeAgente`) e o texto formatado do produto, marcados com `confiar` por quem os produziu.
+ *
+ * Os componentes não sabem de estado nem de dados: recebem o que mostrar e devolvem a string. As NOD-415 a 422 e 430
+ * montam o quadro de verdade com eles.
+ */
+import { esc } from "../lib/escape.ts";
+import { colunasPadrao, GRUPO_DO_STATUS, trilhaDaColuna, type ModoDaConversa, type Status } from "../lib/quadro.ts";
+
+declare const MARCA: unique symbol;
+/** HTML já seguro. Só sai de um componente daqui ou de `confiar`. */
+export type Html = string & { readonly [MARCA]: true };
+/** Marca como seguro um HTML que o próprio nod gerou (o mascote, o texto formatado). Nunca texto de fora. */
+export function confiar(html: string): Html { return html as Html; }
+const h = (s: string): Html => s as Html;
+const juntar = (partes: readonly (Html | "" | false | null | undefined)[]): Html => h(partes.filter(Boolean).join(""));
+const cl = (...c: (string | false | null | undefined)[]): string => c.filter(Boolean).join(" ");
+
+const svg = (d: string, classe: string, w = 16, sw = 1.8): Html =>
+  h(`<svg class="qd-ic ${classe}" width="${w}" height="${w}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`);
+
+/** Os ícones de estado das colunas: a forma diz o grupo (vazio = não iniciado, meio = iniciado, cheio = fechado). */
+export const ICONE_DO_STATUS: Readonly<Record<Status, Html>> = {
+  backlog: svg('<circle cx="12" cy="12" r="8" stroke-dasharray="2.6 2.6"/>', "qd-st qd-st-backlog", 14, 2),
+  afazer: svg('<circle cx="12" cy="12" r="8"/>', "qd-st qd-st-afazer", 14, 2),
+  fazendo: svg('<circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor" stroke="none"/>', "qd-st qd-st-fazendo", 14, 2),
+  voce: svg('<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/>', "qd-st qd-st-voce", 14, 2),
+  revisao: svg('<circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 1 1-8 8h8z" fill="currentColor" stroke="none"/>', "qd-st qd-st-revisao", 14, 2),
+  bloqueado: svg('<circle cx="12" cy="12" r="8"/><path d="m6.5 17.5 11-11"/>', "qd-st qd-st-bloqueado", 14, 2),
+  feito: svg('<circle cx="12" cy="12" r="9" fill="currentColor" stroke="none"/><path d="m8 12.2 2.8 2.8L16.2 9.6" stroke="var(--surface)" stroke-width="2.2"/>', "qd-st qd-st-feito", 14, 2),
+  cancelado: svg('<circle cx="12" cy="12" r="9" fill="currentColor" stroke="none"/><path d="m9 9 6 6M15 9l-6 6" stroke="var(--surface)" stroke-width="2.2"/>', "qd-st qd-st-cancelado", 14, 2),
+};
+
+export const ICONE = {
+  fila: svg('<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>', "qd-ic-fila", 12, 2),
+  falhou: svg('<circle cx="12" cy="12" r="8.5"/><path d="m9 9 6 6M15 9l-6 6"/>', "qd-ic-falhou", 13, 2),
+  pausa: svg('<circle cx="12" cy="12" r="8.5"/><path d="m6.5 17.5 11-11"/>', "qd-ic-bloq", 12, 2),
+  ok: svg('<circle cx="12" cy="12" r="8.5"/><path d="m8.5 12.2 2.4 2.4 4.6-4.8"/>', "qd-ic-ok", 14, 1.9),
+  voltar: svg('<path d="m15 5-7 7 7 7"/>', "qd-ic-voltar", 16, 1.9),
+  chev: svg('<path d="m9 6 6 6-6 6"/>', "qd-ic-chev", 12, 2),
+  trava: svg('<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>', "qd-ic-trava", 12, 2),
+  quadro: svg('<rect x="3.5" y="4.5" width="5" height="15" rx="1.2"/><rect x="9.5" y="4.5" width="5" height="10" rx="1.2"/><rect x="15.5" y="4.5" width="5" height="12" rx="1.2"/>', "qd-ic-quadro", 14, 1.6),
+  conversa: svg('<path d="M4.5 18.5V6.5a2 2 0 0 1 2-2h11a2 2 0 0 1 2 2V14a2 2 0 0 1-2 2H8z"/>', "qd-ic-conversa", 14, 1.7),
+  mais: svg('<circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/>', "qd-ic-mais", 16, 1.6),
+} as const;
+
+/* ---------- Estado do trabalho, aviso e avatar ---------- */
+
+export type EstadoDoTrabalho = "rodando" | "fila" | "falhou";
+const FRASE: Record<EstadoDoTrabalho, { curta: string; longa: string }> = {
+  rodando: { curta: "", longa: "o agente está trabalhando nela agora" },
+  fila: { curta: "na fila", longa: "esperando o agente terminar a anterior" },
+  falhou: { curta: "falhou", longa: "falhou e vai tentar de novo" },
+};
+const VERBO: Record<EstadoDoTrabalho, string> = { rodando: "executando", fila: "na fila", falhou: "falhou" };
+
+/** O anel com a inicial: uma pessoa; você, cheio. */
+export function anel(iniciais: string, rotulo: string, voce = false): Html {
+  return h(`<span class="${cl("qd-anel", voce && "qd-anel-voce")}" role="img" aria-label="${esc(rotulo)}">${esc(iniciais)}</span>`);
+}
+
+/**
+ * O aviso de alguns segundos na linha 1 do card ("Movido por você · Desfazer") ou a recusa da trava ("Feito só aceita
+ * vindo de Em revisão · Mandar para Em revisão"). Comentário final do Marlon na j4-5 (definido em 2026-10-30): a recusa
+ * cabe no card — quebra linha no CSS e leva o texto inteiro no `title` (o leitor de tela lê o próprio texto, em `role=status`).
+ */
+export interface Aviso { texto: string; acao?: string | false; recusa?: boolean; act?: string; id?: string }
+export function aviso(a: Aviso): Html {
+  const rotulo = a.acao === false ? "" : (a.acao ?? "Desfazer");
+  const dados = `${a.act ? ` data-act="${esc(a.act)}"` : ""}${a.id ? ` data-id="${esc(a.id)}"` : ""}`;
+  const acao = rotulo ? `<button type="button" class="qd-link qd-aviso-acao"${dados}>${esc(rotulo)}</button>` : "";
+  const inteiro = rotulo ? `${a.texto} · ${rotulo}` : a.texto;
+  return h(`<span class="${cl("qd-aviso", a.recusa && "qd-aviso-recusa")}" role="status" title="${esc(inteiro)}"><span class="qd-aviso-txt">${esc(a.texto)}</span>${acao}</span>`);
+}
+
+/** Quem está executando: o avatar (mascote ou anel), o nome e, opcional, o que faz e há quanto tempo. */
+export interface QuemRoda { avatar: Html; nome: string; acao?: string; tempo?: string }
+
+function rotuloDoAvatar(nome: string, estado: EstadoDoTrabalho | null, acao?: string, tempo?: string): string {
+  const verbo = acao || (estado ? VERBO[estado] : "");
+  return [nome, verbo].filter(Boolean).join(" ") + (tempo ? ` · ${tempo}` : "");
+}
+
+/** O mascote por dentro fica mudo: quem lê o estado é o title e o aria-label do avatar. */
+function emudecer(av: Html): string {
+  return av.replace(/ role="img"/g, ' aria-hidden="true"').replace(/ aria-label="[^"]*"/g, "").replace(/ title="[^"]*"/g, "");
+}
+
+const SELO: Partial<Record<EstadoDoTrabalho, string>> = {
+  falhou: '<svg viewBox="0 0 12 12" width="11" height="11" aria-hidden="true"><circle cx="6" cy="6" r="6" fill="var(--danger)"/><path d="m4 4 4 4M8 4 4 8" stroke="var(--qd-card, var(--surface))" stroke-width="1.6" stroke-linecap="round"/></svg>',
+  fila: '<svg viewBox="0 0 12 12" width="11" height="11" aria-hidden="true"><circle cx="6" cy="6" r="5.25" fill="var(--qd-card, var(--surface))" stroke="var(--ink-3)" stroke-width="1.3"/><path d="M6 3.4V6l1.7 1.1" fill="none" stroke="var(--ink-3)" stroke-width="1.3" stroke-linecap="round"/></svg>',
+};
+
+/**
+ * O avatar com o estado da execução (#223 da v3): rodando, um anel girando em volta; na fila, um relógio; falhou, um ⊗.
+ * `sobre`: quem roda no lugar do responsável entra sobreposto a ele. Sem estado, é o avatar puro.
+ */
+export function avatar(a: { avatar: Html; nome: string; estado?: EstadoDoTrabalho | null; acao?: string; tempo?: string; sobre?: boolean }): Html {
+  if (!a.estado && !a.sobre) return a.avatar;
+  const rot = rotuloDoAvatar(a.nome, a.estado ?? null, a.acao, a.tempo);
+  const selo = a.estado && SELO[a.estado] ? `<i class="qd-av-sel">${SELO[a.estado]}</i>` : "";
+  return h(`<span class="${cl("qd-av", a.estado && `qd-av-${a.estado}`, a.sobre && "qd-av-sobre")}" role="img" aria-label="${esc(rot)}" title="${esc(rot)}">${emudecer(a.avatar)}${selo}</span>`);
+}
+
+/* ---------- O card ---------- */
+
+export interface Card {
+  id: string;
+  titulo: string;
+  /** O responsável: o avatar e o nome. */
+  responsavel?: { avatar: Html; nome: string };
+  estado?: EstadoDoTrabalho;
+  /** Troca a frase curta do estado ("na fila · após NOD-512"). */
+  estadoTexto?: string;
+  /** Bloqueado: o motivo vai na linha 1. */
+  motivo?: string;
+  /** Precisa de você: a pergunta, em azul, na linha 3. */
+  voce?: string;
+  tags?: string[];
+  quando?: string;
+  /** Quem executa agora. Sem isto, com estado "rodando", é o próprio responsável. */
+  rodam?: QuemRoda[];
+  /** O aviso de alguns segundos no lugar do estado. */
+  aviso?: Aviso;
+  brilho?: boolean;
+  classe?: string;
+}
+
+function quemRodaNoCard(c: Card): QuemRoda[] {
+  if (c.rodam) return c.rodam;
+  if (c.estado === "rodando" && !c.motivo && c.responsavel) return [{ ...c.responsavel, acao: c.estadoTexto, tempo: c.quando }];
+  return [];
+}
+
+/** O responsável (com o anel se é ele quem roda, ou o relógio/⊗) e, por cima, quem roda no lugar dele. */
+function avataresDoCard(c: Card): { html: Html; rodam: QuemRoda[] } {
+  const rodam = quemRodaNoCard(c);
+  const r = c.responsavel;
+  const dele = r ? rodam.find((q) => q.nome === r.nome) : undefined;
+  const k: EstadoDoTrabalho | null = dele ? "rodando" : !c.motivo && (c.estado === "fila" || c.estado === "falhou") ? c.estado : null;
+  const base = r ? avatar(dele ? { ...dele, avatar: r.avatar, estado: "rodando" } : { avatar: r.avatar, nome: r.nome, estado: k, acao: k ? c.estadoTexto : undefined }) : "";
+  const outros = rodam.filter((q) => q !== dele).map((q) => avatar({ ...q, estado: "rodando", sobre: true }));
+  return { html: juntar([base, ...outros]), rodam };
+}
+
+function estadoDoCard(c: Card): Html {
+  if (c.motivo) {
+    return h(`<span class="qd-estado qd-e-bloqueado" title="${esc(`bloqueada: ${c.motivo}`)}">${ICONE.pausa}<span>${esc(c.motivo)}</span></span>`);
+  }
+  if (!c.estado || c.estado === "rodando") return h("");
+  const f = FRASE[c.estado];
+  return h(`<span class="qd-estado qd-e-${c.estado}" title="${esc(f.longa)}"><span>${esc(c.estadoTexto || f.curta)}</span></span>`);
+}
+
+/** O que o leitor de tela ouve do card inteiro, numa frase. */
+export function rotuloDoCard(c: Card): string {
+  const { rodam } = avataresDoCard(c);
+  return [
+    c.id, c.titulo, c.responsavel?.nome,
+    c.motivo ? `bloqueada: ${c.motivo}` : "",
+    c.voce ? `precisa de você: ${c.voce}` : "",
+    ...rodam.map((q) => rotuloDoAvatar(q.nome, "rodando", q.acao, q.tempo)),
+    !c.motivo && c.estado && c.estado !== "rodando" ? FRASE[c.estado].longa : "",
+    c.aviso ? c.aviso.texto : "",
+  ].filter(Boolean).join(", ");
+}
+
+/**
+ * O card: branco, 4 linhas. 1) id + o que não é execução (na fila, falhou, o motivo do bloqueio) ou o aviso; 2) o título
+ * (até 2 linhas), que é o botão — o clique vale no card inteiro; 3) as tags ou a pergunta de quem precisa de você;
+ * 4) os avatares (com o anel de quem roda) e quando mudou.
+ */
+export function card(c: Card): Html {
+  const av = avataresDoCard(c);
+  const r = c.responsavel;
+  const quem = r || av.rodam.length ? `<span class="qd-quem"><span class="qd-avs">${av.html}</span><span>${esc(r?.nome ?? "")}</span></span>` : "";
+  const quando = c.quando ? `<span class="qd-quando">${esc(c.quando)}</span>` : "";
+  const l1 = c.aviso ? aviso(c.aviso) : estadoDoCard(c);
+  const l3 = c.voce ? `<span class="qd-voce-frase">${esc(c.voce)}</span>`
+    : c.tags?.length ? `<span class="qd-tags">${c.tags.map((t) => `<span class="qd-tag">${esc(t)}</span>`).join("")}</span>` : "";
+  const classe = cl("qd-card", c.motivo && "qd-bloqueado", c.voce && "qd-precisa", c.brilho && "qd-brilho", c.aviso && "qd-com-aviso", c.classe && esc(c.classe));
+  return h(`<li class="${classe}" data-tarefa="${esc(c.id)}">` +
+    `<div class="qd-card-l1"><span class="qd-id">${esc(c.id)}</span>${l1}</div>` +
+    `<button type="button" class="qd-card-bt" data-act="abrir-tarefa" data-id="${esc(c.id)}" aria-label="${esc(rotuloDoCard(c))}"><span class="qd-card-tit">${esc(c.titulo)}</span></button>` +
+    l3 + (quem || quando ? `<div class="qd-card-pe">${quem}${quando}</div>` : "") + `</li>`);
+}
+
+/* ---------- Coluna, quadro, barra e meta ---------- */
+
+export interface Coluna {
+  status: Status;
+  nome: string;
+  cards?: Html[];
+  /** A contagem, quando os cards mostrados são só uma parte. */
+  n?: number;
+  recolhida?: boolean;
+  /** Aberta, mas a pessoa pode recolher: o nome vira o botão que recolhe (o mesmo `abrir-coluna` da tira). */
+  recolhivel?: boolean;
+  /** A regra da coluna ("Feito só aceita vindo de Em revisão"), num cadeado com o texto no title e para o leitor de tela. */
+  trava?: string;
+  vazio?: string;
+  mais?: number;
+  /** O `data-act` do "e mais N" (a ação de mostrar o resto da coluna). */
+  maisAcao?: string;
+  classe?: string;
+}
+
+export function coluna(c: Coluna): Html {
+  const cards = c.cards ?? [];
+  const n = c.n ?? cards.length;
+  const ic = ICONE_DO_STATUS[c.status];
+  const base = cl("qd-col", `qd-col-${esc(c.status)}`, `qd-grupo-${GRUPO_DO_STATUS[c.status]}`, c.recolhida && "qd-col-recolhida", c.classe && esc(c.classe));
+  if (c.recolhida) {
+    return h(`<section class="${base}" aria-label="${esc(`${c.nome}, ${n}, recolhida`)}" data-status="${esc(c.status)}">` +
+      `<button type="button" class="qd-col-tira" data-act="abrir-coluna" data-status="${esc(c.status)}" aria-expanded="false" title="${esc(`Mostrar ${c.nome}`)}">${ic}<span class="qd-col-nome">${esc(c.nome)}</span><span class="qd-n">${n}</span></button></section>`);
+  }
+  const trava = c.trava ? `<span class="qd-col-trava" title="${esc(c.trava)}">${ICONE.trava}<span class="qd-sr">${esc(c.trava)}</span></span>` : "";
+  // "e mais N" só com a ação que mostra o resto (NOD-415): botão sem ação não aparece, só a contagem.
+  const mais = !c.mais ? "" : c.maisAcao
+    ? `<li class="qd-col-mais"><button type="button" class="qd-link" data-act="${esc(c.maisAcao)}" data-status="${esc(c.status)}">${esc(`e mais ${c.mais}`)}</button></li>`
+    : `<li class="qd-col-mais">${esc(`e mais ${c.mais}`)}</li>`;
+  const vazio = !cards.length && !c.mais ? `<li class="qd-col-vazio">${esc(c.vazio ?? "Nada aqui")}</li>` : "";
+  return h(`<section class="${base}" aria-label="${esc(`${c.nome}, ${n}`)}" data-status="${esc(c.status)}">` +
+    `<h3 class="qd-col-cab">${c.recolhivel
+      ? `<button type="button" class="qd-col-bt" data-act="abrir-coluna" data-status="${esc(c.status)}" aria-expanded="true" title="${esc(`Recolher ${c.nome}`)}">${ic}<span class="qd-col-nome">${esc(c.nome)}</span><span class="qd-n">${n}</span></button>`
+      : `${ic}<span class="qd-col-nome">${esc(c.nome)}</span><span class="qd-n">${n}</span>`}${trava}</h3>` +
+    `<ul class="qd-col-lista">${cards.join("")}${mais}${vazio}</ul></section>`);
+}
+
+/** O quadro: as colunas numa grade que rola de lado; a tira recolhida é estreita. */
+export function quadro(o: { colunas: Coluna[]; rotulo?: string; antes?: Html; classe?: string }): Html {
+  const trilhas = o.colunas.map(trilhaDaColuna).join(" ");
+  return h(`<div class="${cl("qd-quadro", o.classe && esc(o.classe))}" role="region" aria-label="${esc(o.rotulo ?? "Quadro")}">${o.antes ?? ""}` +
+    `<div class="qd-grade" style="grid-template-columns: ${trilhas}">${o.colunas.map(coluna).join("")}</div></div>`);
+}
+
+export type Filtro = "todos" | "pessoas" | "agentes";
+
+/** A barra do quadro: Todos · Pessoas · Agentes e, à direita, quem está trabalhando (com o anel) e o "…". */
+export function barra(o: { filtro: Filtro; trabalhando?: QuemRoda[]; curto?: boolean; extra?: Html; ajustes?: boolean }): Html {
+  const f = (k: Filtro, rot: string): string => `<button type="button" class="qd-filtro-bt" data-act="filtro-do-quadro" data-filtro="${k}" aria-pressed="${o.filtro === k}">${rot}</button>`;
+  const quem = o.trabalhando ?? [];
+  const avs = quem.map((q) => avatar({ ...q, estado: "rodando" })).join("");
+  const n = quem.length;
+  const frase = o.curto ? `${n} trabalhando` : n === 1 ? "1 agente trabalhando" : `${n} agentes trabalhando`;
+  const trab = n ? `<span class="qd-trabalhando">${`<span class="qd-avs qd-avs-pilha" aria-hidden="true">${avs}</span>`}${frase}</span>` : "";
+  // Só com o menu de ajustes ligado (NOD-421): botão sem ação não aparece.
+  const mais = !o.ajustes ? "" : `<button type="button" class="qd-q-mais" aria-label="Ajustes do quadro" aria-haspopup="menu" aria-expanded="false">${ICONE.mais}</button>`;
+  return h(`<div class="qd-barra-q"><div class="qd-filtros" role="group" aria-label="Mostrar">${f("todos", "Todos")}${f("pessoas", "Pessoas")}${f("agentes", "Agentes")}</div>` +
+    `${o.extra ?? ""}<span class="qd-barra-dir">${trab}${mais}</span></div>`);
+}
+
+/** O selo do recurso em teste (decisão da NOD-343: o quadro nasce só para o Marlon). */
+export function seloEmTeste(texto = "Em teste · só você vê", titulo = "Recurso em teste, liberado só para a sua conta"): Html {
+  return h(`<span class="qd-flag" title="${esc(titulo)}">${esc(texto)}</span>`);
+}
+
+/** Meta, prazo e progresso: uma linha discreta acima do quadro. */
+export function meta(o: { objetivo: string; prazo: string; feitas: number; total: number; falta?: string; risco?: string; selo?: Html }): Html {
+  const inteiro = (n: number): number => (Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0);
+  const total = inteiro(o.total);
+  const feitas = Math.min(inteiro(o.feitas), total);
+  const pct = total ? Math.round((100 * feitas) / total) : 0;
+  return h(`<div class="qd-meta"><span class="qd-meta-obj">${esc(o.objetivo)}</span><span class="qd-meta-prazo">${esc(o.prazo)}</span>` +
+    `<span class="qd-barra" role="progressbar" aria-label="Progresso da meta" aria-valuemin="0" aria-valuemax="${total}" aria-valuenow="${feitas}"><i style="width:${pct}%"></i></span>` +
+    `<span class="qd-meta-n">${feitas} de ${total} feitas</span>${o.falta ? `<span class="qd-meta-falta">${esc(o.falta)}</span>` : ""}` +
+    `${o.risco ? `<span class="qd-risco">${esc(o.risco)}</span>` : ""}${o.selo ?? ""}</div>`);
+}
+
+/* ---------- Celular: o quadro vira lista agrupada por estado ---------- */
+
+export function linha(c: Card): Html {
+  const av = avataresDoCard(c);
+  const est = c.motivo ? `<span class="qd-l-est qd-e-bloqueado" title="${esc(`bloqueada: ${c.motivo}`)}">${ICONE.pausa}</span>` : "";
+  const fim = c.aviso ? aviso(c.aviso) : `${est}<span class="qd-id">${esc(c.id)}</span>`;
+  return h(`<li class="${cl("qd-l", c.aviso && "qd-com-aviso", c.classe && esc(c.classe))}" data-tarefa="${esc(c.id)}">` +
+    `<button type="button" class="qd-l-bt" data-act="abrir-tarefa" data-id="${esc(c.id)}" aria-label="${esc(rotuloDoCard(c))}">${av.html ? `<span class="qd-avs">${av.html}</span>` : ""}<span class="qd-l-tit">${esc(c.titulo)}</span></button>` +
+    `<span class="qd-l-fim">${fim}</span></li>`);
+}
+
+export function lista(o: { grupos: { status: Status; nome: string; linhas: Html[]; n?: number; recolhido?: boolean; vazio?: string }[]; rotulo?: string; novaTarefa?: boolean }): Html {
+  const g = o.grupos.map((gr) => {
+    const n = gr.n ?? gr.linhas.length;
+    const cab = `<h3 class="qd-lg-cab"><button type="button" class="qd-lg-bt" data-act="abrir-coluna" data-status="${esc(gr.status)}" aria-expanded="${!gr.recolhido}">${ICONE_DO_STATUS[gr.status]}<span>${esc(gr.nome)}</span><span class="qd-n">${n}</span>${gr.recolhido ? ICONE.chev : ""}</button>` +
+      `${gr.recolhido || !o.novaTarefa ? "" : `<button type="button" class="qd-lg-mais" aria-label="${esc(`Nova tarefa em ${gr.nome}`)}">+</button>`}</h3>`;
+    // Aberto e vazio diz que está vazio (como a coluna da grade), em vez de abrir nada.
+    const corpo = gr.linhas.length ? gr.linhas.join("") : `<li class="qd-col-vazio">${esc(gr.vazio ?? "Nada aqui")}</li>`;
+    return `<section class="${cl("qd-lg", gr.recolhido && "qd-lg-recolhido")}" aria-label="${esc(gr.nome)}">${cab}${gr.recolhido ? "" : `<ul class="qd-lg-lista">${corpo}</ul>`}</section>`;
+  }).join("");
+  return h(`<div class="qd-lista" role="region" aria-label="${esc(o.rotulo ?? "Quadro")}">${g}</div>`);
+}
+
+/* ---------- Conversa | Quadro dentro da pílula ---------- */
+
+/**
+ * O par Conversa | Quadro (alternativa A da v3). A ordem segue o gesto: o Quadro fica à direita e entra pela direita.
+ *
+ * O HTML não depende do modo (como o `aria-expanded` da pílula, revisão do PR 1 de 2026-10-16): quem marca o modo atual
+ * (`data-atual`, `aria-selected` e `tabindex`) é web/lib/quadro-na-tela.ts, nos nós vivos. Assim a troca não regrava o
+ * cabeçalho e o indicador DESLIZA (transição de CSS) em vez de saltar. O `modo` aqui é só o estado inicial do HTML.
+ */
+export function segmento(o: { nome: string; modo?: ModoDaConversa; compacto?: boolean }): Html {
+  const atual = o.modo ?? "conversa";
+  const aba = (m: ModoDaConversa, rot: string, ic: Html): string => {
+    const s = m === atual;
+    return `<button type="button" role="tab" class="qd-seg-bt" data-act="modo-da-conversa" data-modo="${m}" aria-selected="${s}" tabindex="${s ? 0 : -1}" id="qd-aba-${m}"${m === "quadro" ? ' aria-controls="quadro"' : ""} aria-label="${rot}">${ic}<span>${rot}</span></button>`;
+  };
+  return h(`<span class="${cl("qd-seg", o.compacto && "qd-seg-compacto")}" role="tablist" aria-label="${esc(`Ver ${o.nome} como`)}" data-atual="${atual}">` +
+    `<i class="qd-seg-ind" aria-hidden="true"></i>${aba("conversa", "Conversa", ICONE.conversa)}${aba("quadro", "Quadro", ICONE.quadro)}</span>`);
+}
+
+/* ---------- O modo Quadro de uma conversa, antes dos dados (NOD-415) ---------- */
+
+/**
+ * O quadro de uma conversa sem tarefa nenhuma: a barra com o selo do teste, as colunas padrão (grade no computador) e a
+ * lista por estado (celular); o CSS mostra uma ou outra. `alternadas` são as colunas que a pessoa abriu ou recolheu, ao
+ * contrário do padrão (RECOLHIDAS_PADRAO): toda coluna e todo grupo alterna.
+ */
+export function quadroVazio(o: { nome: string; filtro?: Filtro; alternadas?: ReadonlySet<Status> }): Html {
+  const alternadas = o.alternadas ?? new Set<Status>();
+  const cols = colunasPadrao().map((c) => ({ ...c, recolhida: c.recolhida !== alternadas.has(c.status) }));
+  const rotulo = `Quadro de ${o.nome}`;
+  return juntar([
+    barra({ filtro: o.filtro ?? "todos", extra: seloEmTeste() }),
+    quadro({ colunas: cols.map((c) => ({ status: c.status, nome: c.nome, recolhida: c.recolhida, recolhivel: true })), rotulo, classe: "qd-so-largo" }),
+    h(`<div class="qd-so-estreito">${lista({ rotulo, grupos: cols.map((c) => ({ status: c.status, nome: c.nome, linhas: [], recolhido: c.recolhida })) })}</div>`),
+  ]);
+}

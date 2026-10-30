@@ -38,6 +38,9 @@ export async function abrirChrome(porta: number, perfil: string): Promise<{ cdp:
     "--disable-renderer-backgrounding",
     "--disable-backgrounding-occluded-windows",
     "--disable-extensions",
+    // Só no runner de CI com user namespaces travados pelo AppArmor (ubuntu 24.04; o ci.yml liga a variável): sem isso o
+    // Chrome não sobe e a porta de depuração nunca abre (NOD-429, o teste no Chrome real travava o beforeAll na CI).
+    ...(process.env.NOD_CAPTURA_SEM_SANDBOX === "1" ? ["--no-sandbox"] : []),
     "about:blank",
   ], { stdio: "ignore" });
   // medido em 2026-09-30: a primeira abertura do Chrome for Testing no macOS levou 19 s até a porta responder.

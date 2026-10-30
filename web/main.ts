@@ -105,6 +105,8 @@ import type { BarraDesktop } from "../src/contracts/desktop-barra.ts";
 import { gravarDecisao, versaoDasDecisoesDaBarra } from "./telas/card-barra.ts";
 import { atualizarBorda, ligarBorda, ligarEtiqueta } from "./lib/borda-barra.ts";
 import { proximoDoSegmentado } from "./lib/linha-config.ts";
+import { conversaAVista, quadroLigado, quadroNaConversa } from "./lib/quadro.ts";
+import { criarQuadroNaTela } from "./lib/quadro-na-tela.ts";
 import type { DadosConta } from "./telas/config-conta.ts";
 import { estadoMascoteNaConversa, mascoteComAviso, proximaViradaDoMascote } from "./lib/mascote.ts";
 import { lembrar } from "./lib/lembrar.ts";
@@ -411,6 +413,11 @@ function painelVisivel(): boolean {
   return !painelOculto();
 }
 
+/** NOD-429: o par Conversa | Quadro aparece na conversa com um bot da pessoa, com a chave local do teste ligada. */
+function comQuadro(agenteId: string): boolean {
+  return quadroNaConversa({ ligado: quadroLigado(), pessoaId: estado.sessao?.pessoaId, donoDoBot: botGerido(agenteId)?.ownerId });
+}
+
 /**
  * A pílula do cabeçalho diz se o painel está aberto. O HTML dela não depende do painel (revisão do PR 1, 2026-10-16): o
  * atributo é posto aqui depois de cada desenho do cabeçalho, a cada clique que muda as classes sem redesenhar e quando a
@@ -421,6 +428,10 @@ function marcarPainelNaPilula(): void {
   document.querySelector<HTMLElement>("#cabecalho .pilula-bot")?.setAttribute("aria-expanded", String(aberto));
 }
 window.matchMedia("(max-width: 1099px)").addEventListener("change", marcarPainelNaPilula);
+
+// NOD-429: Conversa | Quadro na pílula, só com a chave do teste ligada e no bot da própria pessoa (web/lib/quadro.ts).
+// NOD-429: de volta à Conversa, a conversa passa a estar "na tela" de novo e é lida.
+const quadroNaTela = criarQuadroNaTela(document, { aoTrocar: (m) => { if (m === "conversa") { lerConversaDaTela(); render(); } } });
 
 /**
  * Avisos (definido em 2026-09-24, "aviso no Mac"): depois de cada leitura de "Sua vez" o avisador decide
@@ -713,7 +724,7 @@ const lendo = new Set<string>();
 
 function lerConversaDaTela(): void {
   const t = estado.tela;
-  if (!api || !estado.naoLidos || (t.tipo !== "conversa" && t.tipo !== "sala") || !naFrente() || estado.espaco || celular.botsAbertos()) return;
+  if (!api || !estado.naoLidos || (t.tipo !== "conversa" && t.tipo !== "sala") || estado.espaco || !conversaAVista({ naFrente: naFrente(), botsAbertos: celular.botsAbertos(), modo: quadroNaTela.modo() })) return;
   const conversaId = t.conversaId;
   const comLinha = linhaEm === conversaId || primeiraLeitura;
   linhaEm = null;
@@ -739,7 +750,8 @@ function temNovas(conversaId: string, e: Estado = estado): boolean {
   const t = e.tela;
   const aberta = (t.tipo === "conversa" || t.tipo === "sala") && t.conversaId === conversaId;
   // NOD-379: com a inicial do celular por cima, a conversa de baixo não está sendo lida.
-  return !(aberta && naFrente() && !celular.botsAbertos() && deixarNaoLida !== conversaId);
+  // NOD-429: no modo Quadro a conversa fica por baixo, invisível: também não está sendo lida.
+  return !(aberta && conversaAVista({ naFrente: naFrente(), botsAbertos: celular.botsAbertos(), modo: quadroNaTela.modo() }) && deixarNaoLida !== conversaId);
 }
 
 /**
@@ -1699,7 +1711,7 @@ const buscaNaConversa = criarBuscaNaConversa({
   // No celular o foco abriria o teclado: lá o foco não vai ao campo de mensagem.
   // No celular o foco volta à pílula do bot (não abre o teclado, e o leitor de tela não perde a posição).
   aoFechar: () => {
-    const alvo = celular.ativo() ? document.querySelector<HTMLElement>("#cabecalho > .pilula-bot") : document.getElementById("composer-texto");
+    const alvo = celular.ativo() ? document.querySelector<HTMLElement>("#cabecalho .pilula-bot:not(.bnc-pb)") : document.getElementById("composer-texto");
     alvo?.focus({ preventScroll: true });
   },
 });
@@ -1745,6 +1757,8 @@ function camadaSobreABusca(): boolean {
 
 function abrirBuscaNaConversa(): void {
   telaDaBusca = chaveDaTelaDeBusca();
+  // NOD-429: a busca é na conversa; aberta no modo Quadro, a conversa volta à vista antes.
+  quadroNaTela.trocar("conversa");
   document.getElementById("cabecalho")?.classList.remove("bnc-dica"); // a dica "⌘F busca" não fica dentro da busca aberta
   buscaNaConversa.abrir(document.getElementById("cabecalho"));
 }
@@ -1776,7 +1790,9 @@ document.getElementById("timeline")?.addEventListener("scroll", (ev) => {
   const area = ev.currentTarget as HTMLElement;
   const distanciaDoFim = area.scrollHeight - area.scrollTop - area.clientHeight;
   if (!deveCutucar({ jaCutucou: cutucaoVisto, celular: celular.ativo(), reduzido: movimentoReduzido(), distanciaDoFim, area: area.clientHeight })) return;
-  const pilula = document.querySelector<HTMLElement>("#cabecalho > .pilula-bot");
+  const botao = document.querySelector<HTMLElement>("#cabecalho .pilula-bot:not(.bnc-pb)");
+  // Com o quadro, a pílula é a cápsula inteira (o bot e o segmento): ela desce junto.
+  const pilula = botao?.closest<HTMLElement>(".qd-pil") ?? botao;
   if (!pilula) return;
   cutucaoVisto = true;
   gravarMarca(marcasDaBusca, MARCA_CUTUCAO);
@@ -1812,7 +1828,9 @@ document.addEventListener("pointerdown", (ev) => {
   if (!celular.ativo() || ev.pointerType === "mouse" || chaveDaTelaDeBusca() === null) return;
   const alvo = ev.target as HTMLElement;
   const aberta = buscaNaConversa.aberta();
-  const el = aberta ? alvo.closest?.<HTMLElement>("#cabecalho .bnc-pilula") : alvo.closest?.<HTMLElement>("#cabecalho > .pilula-bot");
+  const bot = aberta ? null : alvo.closest?.<HTMLElement>("#cabecalho .pilula-bot:not(.bnc-pb)");
+  // Puxar move a cápsula inteira quando há quadro (o bot e o segmento juntos); o segmento em si não é alça.
+  const el = aberta ? alvo.closest?.<HTMLElement>("#cabecalho .bnc-pilula") : bot?.closest<HTMLElement>(".qd-pil") ?? bot;
   // Aberta: empurrar vale de qualquer ponto do miolo (inclusive a pílula do bot nele), menos o campo e os botões da busca.
   if (!el || (aberta && alvo.closest("input, .bnc-bt"))) return;
   const segurar = aberta ? 0 : window.setTimeout(() => {
@@ -1857,7 +1875,7 @@ document.addEventListener("click", (ev) => {
   ev.stopPropagation();
 }, true);
 document.addEventListener("contextmenu", (ev) => {
-  if (celular.ativo() && (ev.target as HTMLElement).closest?.("#cabecalho > .pilula-bot")) ev.preventDefault();
+  if (celular.ativo() && (ev.target as HTMLElement).closest?.("#cabecalho .pilula-bot:not(.bnc-pb)")) ev.preventDefault();
 }, true);
 
 function renderPrincipal(): void {
@@ -1909,7 +1927,7 @@ function renderPrincipal(): void {
       corpo = `<div class="timeline tk-timeline">${renderTelaLinha(estado, t)}</div>`;
       break;
     case "conversa":
-      cabecalho = renderCabecalhoConversa(estado, t.agenteId);
+      cabecalho = renderCabecalhoConversa(estado, t.agenteId, { comQuadro: comQuadro(t.agenteId) });
       partes = partesDaTimeline();
       corpo = partes ? CASCA_TIMELINE : renderTimeline(null, estado);
       composer = { chave: `conversa:${t.conversaId}`, html: htmlComposer(placeholderPadrao(), (estado.frota?.agentes ?? []).filter((a) => a.id !== t.agenteId && a.ownerId === estado.sessao?.pessoaId && a.confirmado).map((a) => a.nome), { anexos: aceitaDo(botGerido(t.agenteId)?.harness), comandos: true, aprovacao: true, bot: botGerido(t.agenteId)?.nome }) };
@@ -1938,6 +1956,9 @@ function renderPrincipal(): void {
   // Plano "tela limpa" (2026-10-16, T1): na conversa própria o cabeçalho é a pílula flutuante sobre o chat.
   document.getElementById("cabecalho")?.classList.toggle("cabecalho-pilula", t.tipo === "conversa");
   marcarPainelNaPilula();
+  quadroNaTela.sincronizar(t.tipo === "conversa" && comQuadro(t.agenteId)
+    ? { chave: t.conversaId, nome: botGerido(t.agenteId)?.nome ?? "agente" }
+    : { chave: null, nome: "" });
   regiao("erro", erro);
   const cascaMuda = regiaoMudaria("timeline", corpo);
   const historicoMuda = cascaMuda || (partes !== null && blocosMudariam("timeline-historico", partes.historico));
@@ -6502,6 +6523,8 @@ document.addEventListener("drop", (ev) => {
   ev.preventDefault();
   arrastando = 0;
   areaSoltar(false);
+  // NOD-429: soltou no modo Quadro: volta para a Conversa, onde o anexo aparece no campo (como a busca faz).
+  quadroNaTela.trocar("conversa");
   adicionarArquivos([...(ev.dataTransfer?.files ?? [])]);
 });
 

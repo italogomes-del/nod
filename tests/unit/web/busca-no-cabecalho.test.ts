@@ -92,4 +92,23 @@ describe("miolo da busca no cabeçalho", () => {
     encaixarNoCabecalho(cab, miolo, lugar);
     expect(nomes(cab)).toEqual(["titulo", "miolo"]);
   });
+  it("NOD-429: com o quadro, a cápsula .qd-pil (pílula + segmento) anda inteira para o miolo e volta; o modificador fica no botão", () => {
+    const cab = new No("cab");
+    const caps = new No("caps", "qd-pil");
+    const bot = new No("pilula", "pilula-bot");
+    caps.append(bot, new No("seg", "qd-seg"));
+    cab.append(new No("voltar", "voltar-bots"), caps, new No("sub", "pilula-sub"));
+    const miolo = new No("miolo", "bnc");
+    const lugar = new No("lugar");
+    miolo.append(lugar);
+    encaixarNoCabecalho(cab, miolo, lugar);
+    expect(nomes(cab)).toEqual(["voltar", "miolo", "sub"]);
+    expect(nomes(lugar)).toEqual(["caps"]);
+    expect(nomes(caps)).toEqual(["pilula", "seg"]);
+    expect(bot.classList.contains("bnc-pb")).toBe(true);
+    expect(caps.classList.contains("bnc-pb")).toBe(false);
+    soltarDoCabecalho(cab, miolo, lugar);
+    expect(nomes(cab)).toEqual(["voltar", "caps", "sub"]);
+    expect(bot.classList.contains("bnc-pb")).toBe(false);
+  });
 });
