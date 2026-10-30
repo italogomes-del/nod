@@ -133,7 +133,7 @@ export interface DriverComputador {
   estado(id: string, escopo?: EscopoDoDriver): Promise<{ disponivel: boolean; ativo: boolean; motivo: string | null; reinicios?: number | null; limite?: { maximo: number; ociosoMin: number } }>;
   iniciar(id: string, escopo?: EscopoDoDriver): Promise<void>;
   parar(id: string, escopo?: EscopoDoDriver): Promise<void>;
-  executar(id: string, acao: AcaoComputador, escopo?: EscopoDoDriver): Promise<ResultadoComputador>;
+  executar(id: string, acao: AcaoComputador, escopo?: EscopoDoDriver, autor?: "bot" | "pessoa"): Promise<ResultadoComputador>;
   /** NOD-170: os ids dos computadores ligados NESTE host (de qualquer pessoa; os proxies nod-egress-* não contam). */
   ligados(): Promise<Set<string>>;
   // NOD-96 PR 5 (só o driver motor): as operações do computador da pessoa, o perfil do bot excluído e a máquina dele.

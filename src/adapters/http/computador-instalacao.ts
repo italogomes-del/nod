@@ -22,10 +22,15 @@ export type ArquivoDoComputador = (typeof ARQUIVOS_DO_COMPUTADOR)[number];
 /** A versão do playwright-core do supervisor (a mesma de infra/computador/package.json; um teste confere). */
 export const PLAYWRIGHT_DO_COMPUTADOR = "1.63.0";
 
-/** Pacotes do apt. scrot: a tela captura com ele, como o runtime (desvio registrado na ADR-122). x11vnc: a tela ao vivo (NOD-95, ADR-138). */
+/**
+ * Pacotes do apt. scrot: a tela captura com ele, como o runtime (desvio registrado na ADR-122). x11vnc: a tela ao vivo
+ * (NOD-95, ADR-138). tint2, pcmanfm, xfce4-terminal, adwaita-icon-theme e x11-xserver-utils: o dock do desktop (NOD-410,
+ * 30/10): o painel com Chrome, Arquivos e Terminal, os ícones e o fundo da tela.
+ */
 export const PACOTES_DO_COMPUTADOR = [
   "xvfb", "openbox", "xdotool", "xclip", "scrot", "x11vnc", "dbus-x11", "gnome-keyring", "libsecret-tools", "pulseaudio", "ffmpeg",
   "fonts-liberation", "fonts-noto-color-emoji", "bubblewrap",
+  "tint2", "pcmanfm", "xfce4-terminal", "adwaita-icon-theme", "x11-xserver-utils",
 ] as const;
 
 /**

@@ -90,8 +90,8 @@ export type ComandoComputador = {
   /** Época monotônica da troca nesta máquina; cerca comandos atrasados mesmo depois de reiniciar o supervisor. */
   epocaTroca?: number;
   parte?: number; total?: number; dados?: string;
-  /** NOD-95 (ADR-138): só em `tipo: "vivo"`; ver `SessaoVivo`. */
-  vivo?: SessaoVivo;
+  pessoa?: true; // PR #600: só na `acao` da pessoa no controle (solta a trava do dock); assinado como o resto
+  vivo?: SessaoVivo; // NOD-95 (ADR-138): só em `tipo: "vivo"`; ver `SessaoVivo`
   /** Epoch em ms até quando o comando vale (no máximo 2 min à frente). */
   prazoMs: number;
   /** Ed25519 em base64 sobre a forma canônica do comando sem este campo. */

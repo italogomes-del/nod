@@ -245,11 +245,11 @@ describe.skipIf(!CHROMIUM || !playwright || !XVFB)("Sair de todos numa tela aber
     await writeFile(scrot, "#!/bin/sh\nfor a; do f=$a; done\nprintf '\\211PNG\\r\\n\\032\\n' > \"$f\"\n");
     await chmod(nada, 0o755);
     await chmod(scrot, 0o755);
+    const bin = { xvfb: XVFB, openbox: nada, chromium: CHROMIUM, xdotool: nada, scrot, xclip: nada };
     const tela = criarTela({
       agenteId: "bot1", display: 90 + (process.pid % 100), raiz, run: join(raiz, "run"), ocultar: [], perfil: join(raiz, "perfis", "bot1"),
       perfilBase: join(raiz, "base"), workspace: join(raiz, "ws", "bot1"), logins: join(raiz, "logins"), tmp: join(raiz, "run/telas/bot1"),
-      x11: "/tmp/.X11-unix", sandbox: false, xvfbArgs: ["-noreset"], cookies: [], storage: [], geracao: 0,
-      bin: { xvfb: XVFB, openbox: nada, chromium: CHROMIUM, xdotool: nada, scrot, xclip: nada },
+      x11: "/tmp/.X11-unix", sandbox: false, xvfbArgs: ["-noreset"], cookies: [], storage: [], geracao: 0, bin,
     }, () => {});
     const ver = async (host: string, caminho = "/") => {
       await tela.executar({ tipo: "navegar", url: `http://${host}:${porta}${caminho}` });
@@ -280,10 +280,21 @@ describe.skipIf(!CHROMIUM || !playwright || !XVFB)("Sair de todos numa tela aber
       expect(await ver("127.0.0.3", "/login")).toBe("estado=logado");
       const origens = join(raiz, "perfis", "bot1", "nod-origens.json");
       expect(JSON.parse(await readFile(origens, "utf8"))).toContain(`http://127.0.0.3:${porta}`);
+      // PR #600 (revisão rodada 3): a pessoa fecha o Chrome (dock) e clica Sair de todos. Antes, sem context, nada era
+      // apagado e a geração ficava gravada como feita; agora o Chrome volta e o storage sai de verdade.
       spawnSync("pkill", ["-KILL", "-f", `user-data-dir=${join(raiz, "perfis", "bot1")}`]);
       await new Promise((r) => setTimeout(r, 1000));
-      await expect(tela.limparStorage(3)).rejects.toThrow();
+      await tela.limparCookies();
+      await tela.limparStorage(3);
+      expect(await ver("127.0.0.3")).toBe("estado=deslogado");
+      expect(await ver("127.0.0.3", "/login")).toBe("estado=logado");
+      // E se o Chrome não volta, o Sair de todos falha sem esquecer as origens visitadas.
+      spawnSync("pkill", ["-KILL", "-f", `user-data-dir=${join(raiz, "perfis", "bot1")}`]);
+      await new Promise((r) => setTimeout(r, 1000));
+      bin.chromium = nada;
+      await expect(tela.limparStorage(4)).rejects.toThrow();
       expect(JSON.parse(await readFile(origens, "utf8"))).toContain(`http://127.0.0.3:${porta}`);
+      bin.chromium = CHROMIUM;
     } finally {
       await tela.fechar();
       srv.close();

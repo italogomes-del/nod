@@ -264,10 +264,22 @@ describe("driver motor: executar, parar, estado", () => {
     const acao = { tipo: "observar" as const };
     await expect(m.driver.executar(ID, acao)).resolves.toEqual({ saida: "a" });
     expect(m.vistos.find((c) => c.tipo === "acao")).toMatchObject({ agenteId: "bot-1", acao });
+    // Revisão 10 do PR #600: a ação do bot não leva `pessoa`; só a da pessoa (a tela solta a trava do dock para ela).
+    expect(m.vistos.find((c) => c.tipo === "acao")).not.toHaveProperty("pessoa");
     expect((await falha(m.driver.executar(ID, acao))).motivo).toBe("tela_alterada");
     const e = await m.driver.executar(ID, acao).catch((x: unknown) => x);
     expect(e).toBeInstanceOf(EsperandoTela);
     expect((e as EsperandoTela).quem).toEqual(["bot-2"]);
+  });
+
+  it("a ação da pessoa vai assinada com `pessoa: true` (revisão 10 do PR #600)", async () => {
+    const m = mundo({ responder: (c) => ({ id: c.id, desfecho: "ok" }) });
+    await m.driver.iniciar(ID);
+    await m.driver.executar(ID, { tipo: "observar" }, undefined, "pessoa");
+    await m.driver.executar(ID, { tipo: "observar" }, undefined, "bot");
+    const acoes = m.vistos.filter((c) => c.tipo === "acao");
+    expect(acoes[0]).toMatchObject({ pessoa: true });
+    expect(acoes[1]).not.toHaveProperty("pessoa");
   });
 
   it("parar a tela de um bot manda fechar_tela com o bot; o computador da pessoa (sem bot) manda parar", async () => {

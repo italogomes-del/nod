@@ -136,12 +136,12 @@ describe("desktop/vm-local/computador.ts (NOD-93)", () => {
   it("relato ocioso (sem tela viva, 1 h sem comando, 1º ensaio no Mac) para a VM; com tela aberta ou comando recente, não", async () => {
     const { vm, chamadas, avancar } = cenario();
     await ligar(vm);
-    vm.aoRelato(foto());
+    vm.aoRelato([foto()]);
     avancar(VM_LOCAL_ACORDADA_APOS_ACAO_MS);
-    vm.aoRelato(foto([{ agenteId: "a", estado: "aberta", ultimaAcaoEm: null, memoriaMb: null }]));
+    vm.aoRelato([foto([{ agenteId: "a", estado: "aberta", ultimaAcaoEm: null, memoriaMb: null }])]);
     await Promise.resolve();
     expect(chamadas).toEqual(["ligar"]);
-    vm.aoRelato(foto([{ agenteId: "a", estado: "fechada", ultimaAcaoEm: null, memoriaMb: null }]));
+    vm.aoRelato([foto([{ agenteId: "a", estado: "fechada", ultimaAcaoEm: null, memoriaMb: null }])]);
     await new Promise((r) => setTimeout(r, 0));
     expect(chamadas).toEqual(["ligar", "parar"]);
   });

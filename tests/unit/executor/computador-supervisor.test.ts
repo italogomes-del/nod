@@ -580,3 +580,26 @@ describe("NOD-365: a loja de logins muda de máquina", () => {
     await expect(stat(join(dir, "raiz", ID))).rejects.toThrow();
   });
 });
+
+describe("a ação da pessoa chega à tela marcada (revisão 11 do PR #600)", () => {
+  it("o comando assinado com `pessoa: true` leva a marca à tela; o do bot, não (a trava do dock é só contra o bot)", async () => {
+    const pasta = await mkdtemp(join(tmpdir(), "nod-tela-pessoa-"));
+    limpar.push(() => rm(pasta, { recursive: true, force: true }));
+    const registro = join(pasta, "acoes");
+    const tela = join(pasta, "tela.mjs");
+    await writeFile(tela, `
+import { appendFileSync, mkdirSync } from "node:fs";
+process.on("message", (m) => {
+  if (m.tipo === "abrir") { mkdirSync(m.config.tmp, { recursive: true }); process.send({ tipo: "pronta" }); }
+  else if (m.tipo === "acao") { appendFileSync(${JSON.stringify(registro)}, JSON.stringify({ tipo: m.acao.tipo, pessoa: m.pessoa ?? null }) + "\\n"); process.send({ tipo: "resposta", id: m.id, resultado: { quadro: "q", imagem: "", largura: 1280, altura: 800, url: "", titulo: "", texto: "", abas: [] } }); }
+  else if (m.tipo === "fechar") { process.send({ tipo: "fechada" }); process.exit(0); }
+});
+`);
+    const { sup } = await montar(undefined, undefined, undefined, { tela });
+    await iniciar(sup);
+    expect((await sup.tratar(cmd({ tipo: "acao", agenteId: "bot1", acao: { tipo: "clicar", x: 10, y: 790 }, pessoa: true }))).desfecho).toBe("ok");
+    expect((await sup.tratar(cmd({ tipo: "acao", agenteId: "bot1", acao: { tipo: "clicar", x: 10, y: 790 } }))).desfecho).toBe("ok");
+    const linhas = (await readFile(registro, "utf8")).trim().split("\n").map((l) => JSON.parse(l));
+    expect(linhas).toEqual([{ tipo: "clicar", pessoa: true }, { tipo: "clicar", pessoa: null }]);
+  });
+});

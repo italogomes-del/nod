@@ -267,6 +267,14 @@ describe("computador da pessoa: várias telas no supervisor real (NOD-96 PR 7)",
     expect((await m.navegar("beto", MAIL)).resultado?.tela?.geracao).toBe(1);
   });
 
+  it("revisão 17 do PR #600: o `ocupado` da tela (um pedido anterior termina na graça) chega como `ocupado`, que não conta para a saúde", async () => {
+    const m = await montar({ ambienteTela: { NOD_TELA_FALSA_ERRO_DA_ACAO: "ocupado" } });
+    await m.iniciar();
+    const r = await m.navegar("ana", MAIL);
+    expect(r.desfecho).toBe("falhou");
+    expect(r.motivo).toBe("ocupado");
+  });
+
   it.each(["cookies", "storage"])("Sair de todos (NOD-97 PR 6): a tela que falha ao limpar %s faz a operação falhar, e a fila segue", async (qual) => {
     const m = await montar({ ambienteTela: { NOD_TELA_FALSA_LIMPAR_FALHA: qual } });
     await m.iniciar();

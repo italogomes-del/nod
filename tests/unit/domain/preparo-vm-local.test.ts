@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  DESLIGAR_LEVA_MS,
   DORMIR_APOS_MS,
   esperaDoBackoff,
   memoriaDaVm,
@@ -206,6 +207,40 @@ describe("preparo da VM local (NOD-93)", () => {
       const ligou = rodar([[memoria(8), T0], [{ tipo: "ligou" }, T0], [{ tipo: "tick" }, T0 + 99 * DORMIR_APOS_MS]], r.preparo);
       // Ligou com a tela aberta: não dorme.
       expect(ligou.fases).toEqual(["ligando", "pronto", "pronto"]);
+    });
+
+    it("a VM já respondeu (o fio religou sozinho): dormindo/ligando/esperando_memoria vão a pronto sem medir a memória (revisão 4 do PR #600)", () => {
+      const dormindo = transicao(pronta(), { tipo: "tick" }, T0 + DORMIR_APOS_MS).preparo;
+      const t = T0 + 2 * DORMIR_APOS_MS;
+      // Revisão 9: o batimento em voo logo depois do desligar não a traz de volta a pronto.
+      expect(transicao(dormindo, { tipo: "vm_respondeu" }, T0 + DORMIR_APOS_MS + DESLIGAR_LEVA_MS - 1)).toEqual({ preparo: dormindo, efeitos: [] });
+      expect(transicao(dormindo, { tipo: "vm_respondeu" }, t)).toEqual({ preparo: { ...dormindo, fase: { tipo: "pronto", semTelaDesde: t } }, efeitos: [{ tipo: "agendar", em: t + DORMIR_APOS_MS }] });
+      // Com a tela que chega no mesmo relato: pronto e sem sono.
+      const comTela = rodar([[{ tipo: "vm_respondeu" }, t], [{ tipo: "tela_abriu" }, t], [{ tipo: "tick" }, t + 99 * DORMIR_APOS_MS]], dormindo);
+      expect(comTela.fases).toEqual(["pronto", "pronto", "pronto"]);
+      expect(comTela.trilha.flatMap((x) => x.efeitos.map((e) => e.tipo))).not.toContain("medir_memoria");
+      // Presa em esperando_memoria pela RAM que a própria VM ocupa: o relato a destrava.
+      const esperando = rodar([[{ tipo: "tela_abriu" }, t], [memoria(1), t]], dormindo);
+      expect(esperando.fases).toEqual(["ligando", "esperando_memoria"]);
+      expect(transicao(esperando.p, { tipo: "vm_respondeu" }, t).preparo.fase).toEqual({ tipo: "pronto", semTelaDesde: null });
+      // Pronta já, nada muda (não reagenda o sono a cada relato).
+      expect(transicao(pronta(), { tipo: "vm_respondeu" }, t)).toEqual({ preparo: pronta(), efeitos: [] });
+      // Revisão 7: um comando com a VM pronta e sem tela recomeça o sono; o fio a religou e o tick não a derruba no boot.
+      const semTela = rodar([[{ tipo: "tela_abriu" }, T0], [{ tipo: "tela_fechou" }, T0]], pronta()).p;
+      const t2 = T0 + DORMIR_APOS_MS - 1_000;
+      // Revisão 9: com o sono já marcado, o comando só empurra o relógio (sem timer novo); o tick que vence antes remarca.
+      expect(transicao(semTela, { tipo: "atividade" }, t2)).toEqual({ preparo: { ...semTela, fase: { tipo: "pronto", semTelaDesde: t2 } }, efeitos: [] });
+      const empurrado = rodar([[{ tipo: "atividade" }, t2], [{ tipo: "tick" }, T0 + DORMIR_APOS_MS]], semTela);
+      expect(empurrado.fases).toEqual(["pronto", "pronto"]);
+      expect(empurrado.trilha.at(-1)?.efeitos).toEqual([{ tipo: "agendar", em: t2 + DORMIR_APOS_MS }]);
+      expect(transicao(empurrado.p, { tipo: "tick" }, t2 + DORMIR_APOS_MS).preparo.fase.tipo).toBe("dormindo");
+      // Com tela aberta ou fora de pronto, nada.
+      const comTela1 = rodar([[{ tipo: "tela_abriu" }, T0]], pronta()).p;
+      expect(transicao(comTela1, { tipo: "atividade" }, t2)).toEqual({ preparo: comTela1, efeitos: [] });
+      expect(transicao(dormindo, { tipo: "atividade" }, t2)).toEqual({ preparo: dormindo, efeitos: [] });
+      // Antes do disco (baixando/preparando/falhou), o relato não pula etapas.
+      const baixando = transicao(preparoInicial(), iniciar(), T0).preparo;
+      expect(transicao(baixando, { tipo: "vm_respondeu" }, t).preparo.fase.tipo).toBe("baixando");
     });
   });
 

@@ -435,11 +435,11 @@ export function criarDriverMotor(o: OpcoesDriverMotor): DriverComputador & { mot
         log("aviso", "computador_parar_falhou", { computador_id: id, tipo, motivo: ehFalhaComputador(e) ? e.motivo : "desconhecido" });
       }
     },
-    async executar(id: string, acao: AcaoComputador, escopo?: Escopo): Promise<ResultadoComputador> {
+    async executar(id: string, acao: AcaoComputador, escopo?: Escopo, autor?: "bot" | "pessoa"): Promise<ResultadoComputador> {
       const loc = await localizar(id, escopo);
       const maquina = await maquinaViva(id, loc);
       ultimaAcao.set(maquina.machineId, agora());
-      const r = await enviar(id, loc, maquina, "acao", agora() + PRAZO_RESPOSTA_ACAO_MS, () => new FalhaComputador("sem_resposta", { maquina: maquina.nome }), { acao });
+      const r = await enviar(id, loc, maquina, "acao", agora() + PRAZO_RESPOSTA_ACAO_MS, () => new FalhaComputador("sem_resposta", { maquina: maquina.nome }), { acao, ...(autor === "pessoa" ? { pessoa: true as const } : {}) });
       ultimaAcao.set(maquina.machineId, agora());
       if (r.desfecho === "ok") return r.resultado ?? {};
       // NOD-96 PR 4: sem tela livre a ação não falha; o portão põe a tela na fila e tenta de novo na vez dela.

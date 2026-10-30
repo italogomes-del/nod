@@ -43,6 +43,73 @@ export type VmLocalDoApp = {
   parar(): Promise<void>;
 };
 
+/** As telas que seguram a VM acordada: aberta, abrindo ou esperando (o login da pessoa). Desligado, nenhuma. */
+export function telasAbertas(e: { ligado: boolean; telas?: ReadonlyArray<{ estado: string }> }): number {
+  if (!e.ligado || !e.telas) return 0;
+  return e.telas.filter((t) => t.estado === "aberta" || t.estado === "abrindo" || t.estado === "esperando").length;
+}
+
+/** Revisão 9 do PR #600: quanto vale o último relato de um computador (o batimento do supervisor é de 30 s). */
+export const RELATO_DA_VM_VALE_MS = 120_000;
+
+/**
+ * Revisão 11 do PR #600: o fio só decide dormir depois de uma rodada inteira de relatos (o batimento do supervisor é de
+ * 30 s, com folga). Ao conectar, o supervisor relata um computador por linha: com só o primeiro (sem tela) visto, o fio
+ * dormia a VM com a tela de outro computador aberta.
+ */
+export const RODADA_DE_RELATOS_MS = 45_000;
+
+/**
+ * O relato do supervisor alimenta o preparo (com tela aberta a VM não dorme, 30/10) e depois o fio. Relato ligado
+ * prova que a VM está de pé: o preparo vai a pronto antes de contar as telas (revisão 4 do PR #600). O supervisor
+ * relata um computador por vez: a contagem e a decisão de dormir olham o último relato de CADA computador (revisão 9),
+ * senão o batimento do computador sem tela fazia a VM dormir com a tela de outro bot aberta. O relato que parou de
+ * chegar há mais de `RELATO_DA_VM_VALE_MS` (computador que saiu) não segura a VM.
+ */
+export function aoRelatoDaVm<E extends { computadorId?: string; ligado: boolean; telas?: ReadonlyArray<{ estado: string }> }>(preparador: { telas(abertas: number): void; vmRespondeu(): void }, fio: { aoRelato(estados: readonly E[]): void }, agora: () => number = Date.now): (e: E) => void {
+  const ultimos = new Map<string, { e: E; em: number }>();
+  const desde = agora();
+  return (e) => {
+    const t = agora();
+    ultimos.set(e.computadorId ?? "", { e, em: t });
+    for (const [id, u] of ultimos) if (t - u.em > RELATO_DA_VM_VALE_MS) ultimos.delete(id);
+    const estados = [...ultimos.values()].map((u) => u.e);
+    if (e.ligado) preparador.vmRespondeu();
+    preparador.telas(estados.reduce((n, x) => n + telasAbertas(x), 0));
+    if (t - desde >= RODADA_DE_RELATOS_MS) fio.aoRelato(estados);
+  };
+}
+
+/** Todo comando do bot conta como atividade para o sono do preparo, antes do fio decidir (revisão 7 do PR #600). */
+export function antesDeRepassarDaVm<C, R>(preparador: { atividade(): void }, fio: { antesDeRepassar(c: C): Promise<R> }): (c: C) => Promise<R> {
+  return (c) => {
+    preparador.atividade();
+    return fio.antesDeRepassar(c);
+  };
+}
+
+/**
+ * Revisão 26 do PR #600: a ligação do fio do motor à VM, fora do `montarVmLocal` para ter teste. Cada conexão zera as
+ * telas (o supervisor relata de novo) e liga os relatos ao preparo antes do fio; a conexão que cai zera as telas, senão a
+ * VM ficava acordada por uma tela que ninguém relata mais.
+ */
+export function ligacaoDaVm<C, R, E extends { computadorId?: string; ligado: boolean; telas?: ReadonlyArray<{ estado: string }> }, K>(o: {
+  preparador: { telas(abertas: number): void; vmRespondeu(): void; atividade(): void };
+  fio: { aoRelato(estados: readonly E[]): void; antesDeRepassar(c: C): Promise<R> };
+  iniciar: (canal: K, ganchos: { antesDeRepassar: (c: C) => Promise<R>; aoRelato: (e: E) => void }) => { parar(): void };
+  agora?: () => number;
+}): { conectar(canal: K): void; desconectar(): void } {
+  let laco: { parar(): void } | null = null;
+  return {
+    conectar(canal) {
+      laco?.parar();
+      o.preparador.telas(0);
+      laco = o.iniciar(canal, { antesDeRepassar: antesDeRepassarDaVm(o.preparador, o.fio), aoRelato: aoRelatoDaVm(o.preparador, o.fio, o.agora ?? Date.now) });
+    },
+    desconectar() { laco?.parar(); laco = null; o.preparador.telas(0); },
+  };
+}
+
 export function anuncioDaVm(v: VmLocalAnunciada): { computador: AnuncioComputador; vmLocal: VmLocalAnunciada } {
   return { computador: { estado: v.estado === "macos_antigo" ? "sem_suporte" : "pronto" }, vmLocal: v };
 }
@@ -92,20 +159,21 @@ export function montarVmLocal(o: {
     deveSegurar: (u) => { usar(u); const l = o.leitura(); return deveSegurar(u, l?.nivel ?? null, l?.processador?.nivel ?? null); },
     agora: Date.now,
   });
-  let laco: LacoComputador | null = null;
+  const ligacao = ligacaoDaVm({
+    preparador,
+    fio,
+    iniciar: (canal: CanalDoMotor, g): LacoComputador => iniciarComputador({ canal, socket: runtime.caminhos.socket, ...g }),
+  });
   void preparador.iniciar();
   return {
     preparador,
     anuncio: () => anuncioDaVm(preparador.anuncio()),
-    conectar(canal) {
-      laco?.parar();
-      laco = iniciarComputador({ canal, socket: runtime.caminhos.socket, antesDeRepassar: fio.antesDeRepassar, aoRelato: fio.aoRelato });
-    },
+    conectar: (canal) => ligacao.conectar(canal),
     memoriaMb: () => ligadaGiB * 1024,
     aoAcordarDoMac: () => fio.aoAcordarDoMac(),
-    desconectar() { laco?.parar(); laco = null; },
+    desconectar: () => ligacao.desconectar(),
     async parar() {
-      laco?.parar(); laco = null;
+      ligacao.desconectar();
       preparador.parar();
       await runtime.parar().catch(() => undefined);
     },

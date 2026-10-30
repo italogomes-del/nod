@@ -4,7 +4,9 @@
  * chega como evento (o download terminou, a rede caiu, a memória livre medida, a VM ligou, a tela abriu). A saída é o
  * estado novo e os efeitos que o desktop executa (baixar, apagar a parte, medir a memória, ligar, desligar, agendar).
  *
- *   baixando → preparando → ligando → pronto → (15 min sem tela) → dormindo → (tela abriu) → ligando
+ *   baixando → preparando → ligando → pronto → (60 min sem tela) → dormindo → (tela abriu) → ligando
+ *   dormindo/ligando/esperando_memoria → (a VM respondeu: o fio já a religou) → pronto
+ *   pronto sem tela → (chegou um comando) → o sono recomeça a contar
  *   baixando ⇄ pausado_sem_internet   (queda de rede; volta no tick do backoff de 2 s a 60 s, ou em "Tentar agora")
  *   ligando ⇄ esperando_memoria       (memória livre menor que a da VM; mede de novo a cada 30 s)
  *
@@ -18,8 +20,10 @@ import type { VmLocalAnunciada } from "../contracts/vm-local.ts";
 /** definido em 2026-10-22 (plano da NOD-93): a espera depois de cada queda de rede dobra de 2 s até 60 s, sem limite de tentativas. */
 export const BACKOFF_MIN_MS = 2_000;
 export const BACKOFF_MAX_MS = 60_000;
-/** definido em 2026-10-22 (plano da NOD-93): a VM dorme 15 min depois que a última tela do computador fechou. */
+/** definido em 2026-10-22 (plano da NOD-93): a VM dorme depois que a última tela do computador fechou (valor atual: 60 min). */
 export const DORMIR_APOS_MS = 60 * 60_000;
+/** Revisão 9 do PR #600: quanto o desligar leva; o relato da VM que chega antes disso é um batimento em voo. */
+export const DESLIGAR_LEVA_MS = 60_000;
 /** definido em 2026-10-22: com memória curta, mede de novo a cada 30 s. */
 export const REMEDIR_MEMORIA_MS = 30_000;
 /** definido em 2026-10-22 (plano da NOD-93): sha256 ruim baixa de novo uma vez; a segunda é falha. */
@@ -54,7 +58,8 @@ export type Fase =
   | { tipo: "esperando_memoria"; precisaGiB: number; livreGiB: number; remedeEm: number }
   | { tipo: "ligando"; pediuLigar: boolean }
   | { tipo: "pronto"; semTelaDesde: number | null }
-  | { tipo: "dormindo" }
+  /** `desde`: quando o preparo mandou desligar (revisão 9 do PR #600: o relato em voo não a traz de volta). */
+  | { tipo: "dormindo"; desde?: number }
   | { tipo: "macos_antigo" }
   | { tipo: "falhou"; motivo: string };
 
@@ -88,6 +93,10 @@ export type Evento =
   | { tipo: "tentar_agora" }
   | { tipo: "tela_abriu" }
   | { tipo: "tela_fechou" }
+  /** O supervisor de dentro da VM relatou: ela já está de pé (o fio a religou sozinho, ADR-127 §3). */
+  | { tipo: "vm_respondeu" }
+  /** Chegou um comando do bot para o computador: pronto e sem tela, o sono recomeça a contar (revisão 7 do PR #600). */
+  | { tipo: "atividade" }
   | { tipo: "tick" }
   /** O uso da pessoa mudou (chega em cada comando do computador): memória e régua novas; no Livre a espera acaba. */
   | { tipo: "uso"; modo: ModoMemoria; memoriaGiB: number };
@@ -210,10 +219,32 @@ export function transicao(p: Preparo, e: Evento, agora: number): Passo {
       if (f.tipo === "esperando_memoria") return com(p, { modo: e.modo, memoriaGiB: e.memoriaGiB, fase: { tipo: "ligando", pediuLigar: false } }, { tipo: "medir_memoria" });
       return com(p, { modo: e.modo, memoriaGiB: e.memoriaGiB });
 
+    case "vm_respondeu": {
+      // definido em 2026-10-30 (revisão 4 do PR #600): com a VM já de pé, medir a memória daria esperando_memoria
+      // pela RAM que ela mesma ocupa, e os comandos voltariam esperando_tela com a tela aberta. Vai direto a pronto.
+      if (f.tipo !== "dormindo" && f.tipo !== "ligando" && f.tipo !== "esperando_memoria") return ficar(p);
+      // Revisão 9 do PR #600: o batimento que já vinha a caminho quando o preparo mandou desligar não é a VM religada.
+      if (f.tipo === "dormindo" && f.desde !== undefined && agora - f.desde < DESLIGAR_LEVA_MS) return ficar(p);
+      const semTelaDesde = p.telas === 0 ? agora : null;
+      return com(p, { fase: { tipo: "pronto", semTelaDesde } }, ...(semTelaDesde !== null ? [{ tipo: "agendar" as const, em: semTelaDesde + DORMIR_APOS_MS }] : []));
+    }
+
+    case "atividade": {
+      // definido em 2026-10-30 (revisão 7 do PR #600): o fio religa a VM dormida por um comando; sem isto o sono do
+      // preparo, contado desde a última tela, a desligava no meio do boot.
+      if (f.tipo !== "pronto" || p.telas !== 0) return ficar(p);
+      // Revisão 9: com o sono já marcado, só empurra o relógio; o tick que vence antes remarca (um timer por vez, não um
+      // por comando).
+      if (f.semTelaDesde !== null) return com(p, { fase: { tipo: "pronto", semTelaDesde: agora } });
+      return com(p, { fase: { tipo: "pronto", semTelaDesde: agora } }, { tipo: "agendar", em: agora + DORMIR_APOS_MS });
+    }
+
     case "tick":
       if (f.tipo === "pausado_sem_internet" && agora >= f.retomaEm) return com(p, { fase: retomar(f) }, { tipo: "baixar" });
       if (f.tipo === "esperando_memoria" && agora >= f.remedeEm) return com(p, { fase: { tipo: "ligando", pediuLigar: false } }, { tipo: "medir_memoria" });
-      if (venceuOSono(f, p.telas, agora)) return com(p, { fase: { tipo: "dormindo" } }, { tipo: "desligar" });
+      if (venceuOSono(f, p.telas, agora)) return com(p, { fase: { tipo: "dormindo", desde: agora } }, { tipo: "desligar" });
+      // O sono foi empurrado por um comando (`atividade`) depois de marcado: remarca para o novo prazo.
+      if (f.tipo === "pronto" && p.telas === 0 && f.semTelaDesde !== null) return com(p, {}, { tipo: "agendar", em: f.semTelaDesde + DORMIR_APOS_MS });
       return ficar(p);
   }
 }

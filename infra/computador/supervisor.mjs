@@ -27,7 +27,7 @@ import { atualizarLoja, cookiesVivos, fundir, lerLoja, zerar } from './loja-cook
 import { decidirAbertura, leituraLocal } from './regua.mjs';
 import { gravarOrigem, lerEstado, lerTudo, limparStorage, pastaDoStorage } from './login-storage.mjs';
 import { arquivoDasSenhas, esquecerSenhas, lerSenhas, recolherSenhas } from './login-senhas.mjs';
-import { RESOLV_DO_STUB } from './isolamento.mjs';
+import { RESOLV_DO_STUB, vizinhosDoTmp } from './isolamento.mjs';
 import { desempacotar, desmarcarSaida, empacotar, gravarLoja as gravarLojaImportada, marcarSaida, PARTE_BYTES, partir, recuperar, saiuEm, TETO_LOJA_BYTES, VALIDADE_IMPORTACAO_MS, venceu } from './troca-logins.mjs';
 
 const AQUI = path.dirname(fileURLToPath(import.meta.url));
@@ -46,6 +46,26 @@ export const MARCA_TROCA_EM_CURSO = '.troca-em-curso';
 export const TIPOS_DA_TELA = ['abrir_tela', 'acao', 'fechar_tela', 'apagar_perfil', 'vivo'];
 export const PRAZO_ABRIR_TELA_MS = 60_000;
 export const PRAZO_ACAO_MS = 55_000;
+/** Quanto o supervisor espera a tela fechar antes do SIGKILL (o orçamento do fechar da tela cabe nele). */
+export const PRAZO_FECHAR_TELA_MS = 15_000;
+/** Revisão 12 do PR #600: o Sair de todos pode relançar o Chrome que a pessoa fechou pelo dock antes de limpar. */
+export const PRAZO_LIMPAR_STORAGE_MS = 45_000;
+
+/**
+ * Revisão 15 do PR #600: manda ao filho sem derrubar o supervisor. Entre o filho soltar o canal (a tela que sai sozinha
+ * depois de um pedido preso) e o 'exit', o `send` sem callback vira um 'error' sem ouvinte e mata o supervisor com as
+ * telas de todos os bots. Devolve false se o canal já fechou; `aoFalhar` recebe o erro de um envio que falhou depois.
+ */
+export function mandarAoFilho(proc, mensagem, aoFalhar = () => {}) {
+  if (!proc?.connected) return false;
+  try {
+    proc.send(mensagem, (e) => { if (e) aoFalhar(e); });
+    return true;
+  } catch (e) {
+    aoFalhar(e);
+    return false;
+  }
+}
 /** NOD-95 (ADR-138): a tela tem 10 s para subir o x11vnc; e, com a pessoa ao vivo, a tela conta como ativa a cada 30 s. */
 export const PRAZO_VIVO_MS = 10_000;
 export const TOQUE_VIVO_MS = 30_000;
@@ -113,7 +133,9 @@ export function binariosDoAmbiente(env = process.env) {
   return {
     xvfb: env.NOD_PC_XVFB ?? 'Xvfb', openbox: env.NOD_PC_OPENBOX ?? 'openbox', chromium: env.NOD_PC_CHROMIUM ?? chromiumDoPlaywright(env),
     bwrap: env.NOD_PC_BWRAP === 'nao' ? null : (env.NOD_PC_BWRAP ?? 'bwrap'), xdotool: env.NOD_PC_XDOTOOL ?? 'xdotool', xclip: env.NOD_PC_XCLIP ?? 'xclip',
-    scrot: env.NOD_PC_SCROT ?? 'scrot', x11vnc: env.NOD_PC_X11VNC ?? 'x11vnc', dbus: env.NOD_PC_DBUS ?? 'dbus-daemon', keyring: env.NOD_PC_KEYRING ?? 'gnome-keyring-daemon', secretTool: env.NOD_PC_SECRET_TOOL ?? 'secret-tool',
+    scrot: env.NOD_PC_SCROT ?? 'scrot', x11vnc: env.NOD_PC_X11VNC ?? 'x11vnc', dbus: env.NOD_PC_DBUS ?? 'dbus-daemon',
+    // NOD-410: o dock do desktop. Ausentes na máquina, a tela sobe sem dock (só o Chrome), como antes.
+    tint2: env.NOD_PC_TINT2 ?? 'tint2', xsetroot: env.NOD_PC_XSETROOT ?? 'xsetroot', terminalGrafico: env.NOD_PC_TERMINAL_GRAFICO ?? 'xfce4-terminal', arquivos: env.NOD_PC_ARQUIVOS ?? 'pcmanfm', keyring: env.NOD_PC_KEYRING ?? 'gnome-keyring-daemon', secretTool: env.NOD_PC_SECRET_TOOL ?? 'secret-tool',
   };
 }
 
@@ -339,7 +361,7 @@ export function criarSupervisor(op) {
       if (!c.chaveLoja) return;
       const { efetivo } = await atualizarLoja(c.d.loja, c.chaveLoja, (loja) => fundir(loja, m.diff, m.em, agora()));
       if (!efetivo.postos.length && !efetivo.removidos.length) return;
-      for (const [outro, t] of c.telas) if (outro !== agenteId && t.estado === 'aberta') t.proc.send({ tipo: 'repasse', ...efetivo });
+      for (const [outro, t] of c.telas) if (outro !== agenteId && t.estado === 'aberta') mandarAoFilho(t.proc, { tipo: 'repasse', ...efetivo });
     }).catch((e) => log(`loja de cookies: ${e?.message}`));
   }
 
@@ -351,7 +373,7 @@ export function criarSupervisor(op) {
       const r = await gravarOrigem(c.d.storage, c.chaveStorage, item);
       if (r === 'grande') log(`storage de ${agenteId}: origem acima do teto, fica só no perfil`);
       if (r !== 'gravou') return;
-      for (const [outro, t] of c.telas) if (outro !== agenteId && t.estado === 'aberta') t.proc.send({ tipo: 'storage', ...item });
+      for (const [outro, t] of c.telas) if (outro !== agenteId && t.estado === 'aberta') mandarAoFilho(t.proc, { tipo: 'storage', ...item });
     }).catch((e) => log(`storage: ${e?.message}`));
   }
 
@@ -395,6 +417,8 @@ export function criarSupervisor(op) {
       aoMensagemDaTela(c, agenteId, m);
       if (m?.tipo === 'resposta') { t.pendentes.get(m.id)?.(m); t.pendentes.delete(m.id); }
     });
+    // Revisão 15: um envio a um canal que fechou emite 'error'; sem ouvinte, derrubava o supervisor. O 'exit' trata a saída.
+    proc.on('error', (e) => log(`tela ${agenteId}: ${e?.message}`));
     proc.on('exit', () => {
       displaysEmUso.delete(display);
       for (const r of t.pendentes.values()) r({ erro: 'sem_resposta' });
@@ -442,8 +466,8 @@ export function criarSupervisor(op) {
     t.estado = 'fechando';
     relatarEstado(c);
     if (t.proc.exitCode === null) {
-      t.proc.send({ tipo: 'fechar' });
-      const m = await esperarDoFilho(t.proc, (x) => x?.tipo === 'fechada', 15_000);
+      mandarAoFilho(t.proc, { tipo: 'fechar' });
+      const m = await esperarDoFilho(t.proc, (x) => x?.tipo === 'fechada', PRAZO_FECHAR_TELA_MS);
       if (m.tipo === 'prazo') { try { t.proc.kill('SIGKILL'); } catch { /* segue */ } }
     }
     await c.fila;
@@ -457,8 +481,9 @@ export function criarSupervisor(op) {
     const id = randomUUID();
     return new Promise((resolve) => {
       const timer = setTimeout(() => { t.pendentes.delete(id); try { t.proc.kill('SIGKILL'); } catch { /* segue */ } resolve({ erro: 'sem_resposta' }); }, prazoMs);
-      t.pendentes.set(id, (m) => { clearTimeout(timer); resolve(m); });
-      t.proc.send({ ...mensagem, id });
+      const responder = (m) => { clearTimeout(timer); t.pendentes.delete(id); resolve(m); };
+      t.pendentes.set(id, responder);
+      if (!mandarAoFilho(t.proc, { ...mensagem, id }, () => responder({ erro: 'sem_resposta' }))) responder({ erro: 'sem_resposta' });
     });
   }
 
@@ -493,10 +518,11 @@ export function criarSupervisor(op) {
         extra = r.resultado;
         pedido = { tipo: 'observar' };
       }
-      const m = await pedirATela(t, { tipo: 'acao', acao: pedido });
+      // Revisão 10 do PR #600: a tela sabe se a ação é da pessoa (a trava do dock é só contra o bot).
+      const m = await pedirATela(t, { tipo: 'acao', acao: pedido, ...(cmd.pessoa === true ? { pessoa: true } : {}) });
       if (m.erro) {
         log(`ação ${cmd.acao.tipo} de ${cmd.agenteId}: ${m.erro} ${m.detalhe ?? ''}`);
-        return falhou(cmd.id, ['tela_alterada', 'sem_resposta'].includes(m.erro) ? m.erro : 'acao_falhou');
+        return falhou(cmd.id, ['tela_alterada', 'sem_resposta', 'ocupado'].includes(m.erro) ? m.erro : 'acao_falhou');
       }
       if (typeof m.resultado?.titulo === 'string') t.titulo = m.resultado.titulo.slice(0, 200);
       return resultado(cmd.id, 'ok', { resultado: { ...extra, ...m.resultado } });
@@ -551,6 +577,7 @@ export function criarSupervisor(op) {
     c.telas.delete(agenteId);
     await rm(path.join(c.d.perfis, agenteId), { recursive: true, force: true });
     await rm(path.join(c.d.run, 'telas', agenteId), { recursive: true, force: true });
+    for (const v of vizinhosDoTmp(path.join(c.d.run, 'telas', agenteId))) await rm(v, { recursive: true, force: true });
     await rm(path.join(c.d.raiz, 'bwrap', agenteId), { recursive: true, force: true });
     relatarEstado(c);
   }
@@ -644,7 +671,7 @@ export function criarSupervisor(op) {
         for (const [agenteId, t] of abertas) {
           // Tela que não limpou (erro ou sem resposta) ainda tem a sessão: a operação falha, mas as outras seguem.
           for (const pedido of [{ tipo: 'limpar_cookies' }, { tipo: 'limpar_storage', geracao }]) {
-            const r = await pedirATela(t, pedido, 15_000);
+            const r = await pedirATela(t, pedido, pedido.tipo === 'limpar_storage' ? PRAZO_LIMPAR_STORAGE_MS : 15_000);
             if (r?.erro) {
               falha ??= new Error(r.erro);
               log(`${pedido.tipo} em ${agenteId}: ${r.erro}${r.detalhe ? ` (${r.detalhe})` : ''}`);

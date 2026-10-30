@@ -44,6 +44,8 @@ type Opcoes = { executor(): "local" | "catcher"; dentro: Dentro; driver: DriverC
  */
 type Vaga = Computador & { computadorId: string; telaId: string | null };
 type Reserva = { computador: Vaga; operacao: string; acao: AcaoComputador; registroId: string; turnoId?: string; aprovado: boolean;
+  /** Quem pediu (revisão 10 do PR #600): a tela do motor solta a trava do dock para a pessoa. */
+  autor: "bot" | "pessoa";
   /** NOD-96 PR 4: até quando a ação do bot espera a vez na fila de telas; ausente = não espera (a da pessoa). */
   esperaAte?: number };
 const doDocker = (c: Computador): Vaga => ({ ...c, computadorId: c.id, telaId: null });
@@ -120,7 +122,7 @@ async function reservarCom(lugar: Lugar, d: Deps, c: Vaga, acao: AcaoComputador,
   if (registroId) await d.repos.computadores.concluir(registroId, "executando");
   await lugar.ocupar(d, c, operacao, d.agora() + LEASE_MS);
   // A ação do bot espera a vez na fila de telas (só no computador da pessoa); a da pessoa não espera.
-  return { computador: c, operacao, acao, registroId: registro, turnoId, aprovado: Boolean(registroId), ...(c.telaId && autor === "bot" ? { esperaAte: d.agora() + JANELA_ESPERA_TELA_MS } : {}) };
+  return { computador: c, operacao, acao, autor, registroId: registro, turnoId, aprovado: Boolean(registroId), ...(c.telaId && autor === "bot" ? { esperaAte: d.agora() + JANELA_ESPERA_TELA_MS } : {}) };
 }
 /** revisto em 2026-10-01 (ADR-067): sem o `prazoEm` — o turno vivo usa o computador enquanto não acabou, sem relógio. */
 async function turnoPermitido(d: Deps, turnoId: string, agenteId: string, aprovado = false): Promise<boolean> {
@@ -506,7 +508,7 @@ export function criarComputadores(o: Opcoes) {
             if (!estadoAtual.permitido) { if (estadoAtual.desligar) await o.driver.parar(r.computador.id, escopo); throw new ErroDeDominio("nao_permitido"); }
             ligado = true;
           }
-          resultado = await o.driver.executar(r.computador.id, r.acao, escopo);
+          resultado = await o.driver.executar(r.computador.id, r.acao, escopo, r.autor);
           break;
         } catch (e) {
           // A operação começou entre a leitura e o comando: o supervisor responde "atualizando"; espera e tenta de novo

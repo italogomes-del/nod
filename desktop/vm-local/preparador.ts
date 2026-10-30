@@ -50,6 +50,12 @@ export type Preparador = {
   tentarAgora(): void;
   /** O uso que veio no último comando: a memória da VM e a régua do `esperando_memoria` passam a ser as dele. */
   usar(uso: ModoMemoria): void;
+  /** Quantas telas o supervisor relata abertas (o sono por falta de tela conta a partir disso). */
+  telas(abertas: number): void;
+  /** O supervisor de dentro da VM relatou: ela já está de pé, então o preparo não mede memória para religá-la. */
+  vmRespondeu(): void;
+  /** Um comando do bot chegou: o sono sem tela recomeça a contar. */
+  atividade(): void;
   parar(): void;
 };
 
@@ -66,7 +72,8 @@ export function criarPreparador(d: DepsPreparador): Preparador {
   let ultimoAnuncio = 0;
   let anunciado: VmLocalAnunciada | null = null;
   let pendente: { cancelar(): void } | null = null;
-  const timers = new Set<{ cancelar(): void }>();
+  // Um timer por instante (revisão 9 do PR #600): o tick que remarca o sono para o mesmo prazo não acumula timers.
+  const timers = new Map<number, { cancelar(): void }>();
   let parado = false;
 
   function anunciar(): void {
@@ -126,8 +133,8 @@ export function criarPreparador(d: DepsPreparador): Preparador {
           await d.parar();
           return;
         case "agendar": {
-          const t = agendar(() => { timers.delete(t); aplicar({ tipo: "tick" }); }, ef.em - d.agora());
-          timers.add(t);
+          if (timers.has(ef.em)) return;
+          timers.set(ef.em, agendar(() => { timers.delete(ef.em); aplicar({ tipo: "tick" }); }, ef.em - d.agora()));
           return;
         }
       }
@@ -149,10 +156,27 @@ export function criarPreparador(d: DepsPreparador): Preparador {
     pedido: (uso) => ({ imagem: destino, versao: d.versao, arch: d.arch, memoriaGiB: uso ? memoriaDaVm(uso, d.ramBytes) : p.memoriaGiB, cpus: d.cpus }),
     tentarAgora: () => aplicar({ tipo: "tentar_agora" }),
     usar: (uso) => aplicar({ tipo: "uso", modo: uso, memoriaGiB: memoriaDaVm(uso, d.ramBytes) }),
+    /**
+     * definido em 2026-10-30 (1º ensaio no Mac): quantas telas o supervisor relata abertas. Ninguém mandava os
+     * `tela_abriu`/`tela_fechou`, a contagem ficava em zero e a VM dormia 1 h depois de pronta, no meio do uso (a
+     * pessoa logada no e-mail, o bot lendo). O relato alimenta a contagem; o sono conta da última tela que fechou.
+     */
+    telas(abertas: number) {
+      // Com teto: parado, ou numa fase que não conta telas (macos_antigo), `aplicar` não muda p.telas e um `while`
+      // travaria o processo principal do Electron (revisão do PR #600).
+      const alvo = Math.max(0, Math.floor(abertas));
+      for (let i = Math.abs(alvo - p.telas); i > 0 && !parado && p.telas !== alvo; i--) {
+        const antes = p.telas;
+        aplicar({ tipo: p.telas < alvo ? "tela_abriu" : "tela_fechou" });
+        if (p.telas === antes) break;
+      }
+    },
+    vmRespondeu: () => aplicar({ tipo: "vm_respondeu" }),
+    atividade: () => aplicar({ tipo: "atividade" }),
     parar() {
       parado = true;
       pendente?.cancelar();
-      for (const t of timers) t.cancelar();
+      for (const t of timers.values()) t.cancelar();
       timers.clear();
     },
   };

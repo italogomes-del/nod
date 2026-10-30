@@ -7,6 +7,8 @@ export const VARREDURA_MS: number;
 export const MARCA_TROCA_EM_CURSO: string;
 export const PRAZO_ABRIR_TELA_MS: number;
 export const PRAZO_ACAO_MS: number;
+export const PRAZO_FECHAR_TELA_MS: number;
+export const PRAZO_LIMPAR_STORAGE_MS: number;
 export const PRAZO_VIVO_MS: number;
 export const TOQUE_VIVO_MS: number;
 export const BATIMENTO_MS: number;
@@ -36,3 +38,4 @@ export function criarSupervisor(op: {
 }): Supervisor;
 export function servirControle(s: Supervisor): Server;
 export function escutarControle(servidor: Server, caminho: string): Promise<void>;
+export function mandarAoFilho(proc: { connected?: boolean; send(m: unknown, cb?: (e: Error | null) => void): unknown } | null | undefined, mensagem: unknown, aoFalhar?: (e: unknown) => void): boolean;

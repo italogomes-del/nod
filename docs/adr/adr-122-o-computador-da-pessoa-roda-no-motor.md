@@ -52,7 +52,9 @@ O computador por bot (ADR-037) está desligado em produção (sem `NOD_COMPUTADO
      (`ComandoComputador.assinatura`, Ed25519, semente `HKDF(NOD_CREDENTIAL_KEY, "nod-computador-assina:"+id)`); o
      supervisor confere a assinatura, a validade de 2 min e o id não repetido. A chave X25519 do supervisor fica em
      `computadores.supervisor_pub` no primeiro contato (TOFU) e só troca pelo Redefinir.
-   O terminal (`nod-pc-term`) só escreve em `/workspace`, não tem `DISPLAY` e tem o mesmo `IPAddressDeny`.
+   O terminal (`nod-pc-term`) só escreve em `/workspace`, não tem `DISPLAY` e tem o mesmo `IPAddressDeny`. Vale para o
+   terminal do bot; o Terminal do dock, que a pessoa usa pelo VNC (PR #600), roda como `nod-pc` num bwrap próprio e
+   com o display da tela: ver os riscos aceitos 1 a 3 da ADR-138.
 5. **Admissão pela régua e espera em fila.** Antes de abrir uma tela, o supervisor aplica `deveSegurar(uso, memória,
    processador, regra)` com a leitura local do motor e o modo de uso da pessoa (Pouco / Equilibrado / Livre; o `uso` vai
    em cada comando). Se segura, fecha a tela ociosa mais antiga e reavalia; sem ociosa, responde `esperando_tela` com

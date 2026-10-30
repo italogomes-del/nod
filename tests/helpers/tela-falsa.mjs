@@ -22,6 +22,8 @@ const esperar = (ms) => new Promise((r) => setTimeout(r, ms));
 const ATRASO_ABRIR = Number(process.env.NOD_TELA_FALSA_ATRASO_MS ?? 0);
 const ATRASO_ACAO = Number(process.env.NOD_TELA_FALSA_ACAO_MS ?? 0);
 const LIMPAR_FALHA = process.env.NOD_TELA_FALSA_LIMPAR_FALHA ?? '';
+// NOD_TELA_FALSA_ERRO_DA_ACAO=<código> faz toda ação responder esse erro (o `ocupado` da graça, revisão 17 do PR #600).
+const ERRO_DA_ACAO = process.env.NOD_TELA_FALSA_ERRO_DA_ACAO ?? '';
 
 let config = null;
 let url = 'about:blank';
@@ -117,6 +119,7 @@ process.on('message', async (m) => {
     } else if (m.tipo === 'acao') {
       // Como na tela real (o finally de executar), os cookies saem ANTES da resposta.
       let resposta;
+      if (ERRO_DA_ACAO) { enviar({ tipo: 'resposta', id: m.id, erro: ERRO_DA_ACAO, detalhe: 'tela falsa' }); return; }
       try {
         await esperar(ATRASO_ACAO);
         if (m.acao.tipo === 'navegar') navegar(m.acao.url);

@@ -44,7 +44,9 @@ export type DepsComputadorDaVm = {
   esperar?: (ms: number) => Promise<void>;
 };
 
-export type ComputadorDaVm = Required<GanchosDoComputador> & {
+export type ComputadorDaVm = Omit<Required<GanchosDoComputador>, "aoRelato"> & {
+  /** Revisão 9 do PR #600: o último relato de cada computador da VM (o `aoRelatoDaVm` junta). */
+  aoRelato(estados: readonly EstadoComputadorRelatado[]): void;
   /** powerMonitor `resume`: a VM ligada que não responde é parada e ligada de novo. */
   aoAcordarDoMac(): Promise<void>;
 };
@@ -128,8 +130,9 @@ export function criarComputadorDaVm(d: DepsComputadorDaVm): ComputadorDaVm {
       return { desfecho: "esperando_tela", progresso: { pct: 0, etapa: "ligando" } };
     },
 
-    aoRelato(e: EstadoComputadorRelatado) {
-      if (parando || ligando || motivoParaFicarAcordada([e], ultimoComandoEm, d.agora(), VM_LOCAL_ACORDADA_APOS_ACAO_MS)) return;
+    // Revisão 9 do PR #600: o último relato de cada computador da VM, não só o que acabou de chegar.
+    aoRelato(estados: readonly EstadoComputadorRelatado[]) {
+      if (parando || ligando || motivoParaFicarAcordada(estados, ultimoComandoEm, d.agora(), VM_LOCAL_ACORDADA_APOS_ACAO_MS)) return;
       parando = true;
       void d.runtime.parar()
         .then(() => log("info", "vm_local_dormiu", {}))

@@ -189,6 +189,8 @@ describe("isolamento e tela", () => {
     expect(s).toContain("--ro-bind /l /l");
     expect(s).toContain("--bind /x /tmp/.X11-unix");
     expect(scriptDoBwrap({ args: ["--x", "it's"], binario: "/c" })).toBe(`#!/bin/sh\nexec 'bwrap' '--x' 'it'\\''s' -- '/c' "$@"\n`);
+    // Revisão 13 do PR #600: o PID do bwrap (o exec mantém o do shell) vai para o pidfile, para a tela matar o Chrome preso.
+    expect(scriptDoBwrap({ args: [], binario: "/c", pidfile: "/t/x's.pid" })).toBe(`#!/bin/sh\necho $$ > '/t/x'\\''s.pid'\nexec 'bwrap'  -- '/c' "$@"\n`);
   });
 
   it("o bwrap esconde a raiz do run (as outras telas e os sockets) e só devolve o tmp e o bus desta tela", () => {
