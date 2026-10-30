@@ -34,6 +34,8 @@ import type { relatosRepo } from "./relatos.repo.ts";
 import type { reacoesRepo } from "./reacoes.repo.ts";
 import type { rotinaExecucoesRepo } from "./rotina-execucoes.repo.ts";
 import type { rotinaJanelasRepo } from "./rotina-janelas.repo.ts";
+import type { rotinaGatilhosRepo } from "./rotina-gatilhos.repo.ts";
+import type { rotinaChamadasRepo } from "./rotina-chamadas.repo.ts";
 import type { rotinasRepo } from "./rotinas.repo.ts";
 import type { salasRepo } from "./salas.repo.ts";
 import type { trilhaRepo } from "./trilha.repo.ts";
@@ -117,6 +119,8 @@ export interface Repos {
   itensAprovacao: ReturnType<typeof itensAprovacaoRepo>;
   rotinas: ReturnType<typeof rotinasRepo>;
   rotinaJanelas: ReturnType<typeof rotinaJanelasRepo>;
+  rotinaGatilhos: ReturnType<typeof rotinaGatilhosRepo>;
+  rotinaChamadas: ReturnType<typeof rotinaChamadasRepo>;
   rotinaExecucoes: ReturnType<typeof rotinaExecucoesRepo>;
   salas: ReturnType<typeof salasRepo>;
   conectores: ReturnType<typeof conectoresRepo>;

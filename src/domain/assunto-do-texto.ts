@@ -81,10 +81,13 @@ const FORA_DO_CATALOGO: readonly Molde[] = [
   // Rotinas (apoio-l7.ts textoRotinaAtiva, pausar-rotina.ts, aplicar-proposta-rotina.ts, rotinas-do-agente.ts,
   // decidir-acesso.ts). "Rotina pausada: {resto}" cobre também o rotina-pausada-sem-acesso do catálogo.
   { nome: "rotina-ativa", molde: `${moldeDaRedacao("rotina-proxima-execucao")}{resto}`, assunto: "rotina.evento" },
+  { nome: "rotina-webhook-ativa", molde: moldeDaRedacao("rotina-webhook-ativa"), assunto: "rotina.evento" },
   { nome: "rotina-atualizada", molde: "Rotina atualizada. {resto}", assunto: "rotina.evento" },
   { nome: "rotina-excluida", molde: "Rotina excluída: {resumo}. Nada mais será disparado por ela.", assunto: "rotina.evento" },
   { nome: "rotina-pausada", molde: "Rotina pausada: {resto}", assunto: "rotina.evento" },
   { nome: "rotina-pausada-por-colega", molde: "{quem} pausou esta rotina a seu pedido: nada será disparado até você reativar.{resto}", assunto: "rotina.evento" },
+  // receber-webhook.ts (NOD-84): a linha cinza de cada chamada que disparou a rotina.
+  { nome: "rotina-webhook-disparou", molde: "O webhook do {provedor} disparou a rotina{resto}", assunto: "rotina.evento" },
   { nome: "rotina-mudou", molde: "Esta mudança não foi aplicada: a rotina mudou depois da proposta. Peça de novo ao bot.", assunto: "rotina.evento" },
   { nome: "rotina-adiada", molde: "Esta rotina não rodou nas últimas {n} janelas porque {resto}", assunto: "rotina.adiada" },
   { nome: "parada-encerrada", molde: "Parada encerrada: você usou Executar agora e a rotina voltou a rodar.", assunto: "parada" },

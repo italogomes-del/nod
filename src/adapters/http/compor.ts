@@ -163,6 +163,7 @@ import { criarRotaAmbiente } from "./rotas/ambiente.ts";
 import { criarRotaMetricas } from "./rotas/metricas.ts";
 import { criarRotasPropostas } from "./rotas/propostas.ts";
 import { criarRotasRotinas, type DepsRotasL7 } from "./rotas/rotinas.ts";
+import { criarRotasWebhook } from "./rotas/webhook.ts";
 import { criarRotasSalas } from "./rotas/salas.ts";
 import { criarRotasSuaVez } from "./rotas/sua-vez.ts";
 import { rotasTrilha } from "./rotas/trilha.ts";
@@ -510,6 +511,7 @@ export function comporApp(o: OpcoesCompor): App {
   const fundoLinuxSoVermelha = env.NOD_FUNDO_LINUX_SO_VERMELHA === "1";
   const services: Services = {
     trabalhosVivos,
+    ...(compartilhado ? { webhooks: { cifrar: (s: string) => cifrar(s, chave) } } : {}),
     // A tela fala por máquina (2026-10-09): o nome de cada máquina e se é um Mac. Com o servidor no Mac (ADR-092), a
     // máquina deste processo é "Este Mac" e o turno sem alvo é dela.
     maquinas: {
@@ -1460,6 +1462,8 @@ export function comporApp(o: OpcoesCompor): App {
     ...rotasWorkspaces(workspaces, dentro),
     ...rotasInternas({ dentro, computadores, workspaces, tokens, agora: relogio, revisor, disjuntor, pressao: (pessoaId) => trabalhosVivos.memoria(pessoaId)?.nivel ?? null, longpollMs: env.NOD_LONGPOLL_MS ? numero(env.NOD_LONGPOLL_MS, 20_000) : undefined }),
     ...criarRotasRotinas(depsL7),
+    // NOD-84 (ADR-139): a rota pública do webhook só no compartilhado — o nod local, no Mac, não é alcançável de fora.
+    ...(compartilhado ? criarRotasWebhook({ ...depsL7, cifrar: (s) => cifrar(s, chave), decifrar: (s) => decifrar(s, chave) }) : []),
     ...criarRotasSalas(depsL7),
     ...criarRotasSuaVez(dentro),
     ...criarRotasDecisoes({

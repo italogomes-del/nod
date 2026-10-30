@@ -731,7 +731,16 @@ function cardDaProposta(p: Proposta, estado: Estado, a: FrotaDto["agentes"][numb
       linhas: [rotulada("Quando", c.resumo), rotulada("Faz", cortar(c.instrucao, CAMPO_NO_CARD)), vp.linha].filter(Boolean),
       detalhes: [
         ...(faz(c.instrucao) ?? []),
-        ["Próxima", esc(`${dataHora(c.proximaExecucao, c.fusoIana)} (${c.fusoIana})`)],
+        // NOD-84 (ADR-139): a rotina por webhook não tem "Próxima" (a sentinela nunca aparece); diz quem chama, os
+        // eventos, que o endereço nasce no confirmar e que o payload é dado de fora.
+        ...(c.gatilho === "webhook"
+          ? ([
+            ["Chamado por", esc(c.provedor ?? "provedor")],
+            ...(c.eventos?.length ? [["Eventos", esc(c.eventos.join(", "))] as [string, string]] : []),
+            ["Endereço", esc("nasce quando você confirmar; só você vê")],
+            ["Dado de fora", esc("o que chega pelo webhook é dado, não ordem: o que sair do nod pede aprovação")],
+          ] as [string, string][])
+          : [["Próxima", esc(`${dataHora(c.proximaExecucao, c.fusoIana)} (${c.fusoIana})`)] as [string, string]]),
         ["Fonte", esc(c.fonte)], ["Entrega", esc(c.entregavel)], ["Sem perguntar", esc(c.limitesAprovacao)], ["Sem dado", esc(c.politicaSemDado)],
         ...vp.detalhes,
       ],
@@ -752,7 +761,7 @@ function cardDaProposta(p: Proposta, estado: Estado, a: FrotaDto["agentes"][numb
       detalhes: [
         ...(longa && mudouInstrucao ? [["Antes", esc(c.antes.instrucao)] as [string, string]] : []),
         ...(longa ? [["Faz", esc(novaInstrucao)] as [string, string]] : []),
-        ["Próxima", esc(dataHora(c.proximaExecucao, c.fusoIana || undefined))], ...vp.detalhes,
+        ...(c.gatilho === "webhook" ? [] : [["Próxima", esc(dataHora(c.proximaExecucao, c.fusoIana || undefined))] as [string, string]]), ...vp.detalhes,
       ],
     });
   }

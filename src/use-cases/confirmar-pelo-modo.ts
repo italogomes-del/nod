@@ -2,7 +2,7 @@ import type { Decisao } from "../contracts/decisao.ts";
 import type { Autoria, RuntimeEvent } from "../contracts/evento.ts";
 import type { PlanoTurno } from "../contracts/plano-turno.ts";
 import { conversaComAPessoa, decidirPeloModo, semRevisor, type DecisaoSemRevisor, type RegraDoModo } from "../domain/modo-aprovacao.ts";
-import { autoriaAgente, autoriaPessoa } from "./apoio-l7.ts";
+import { autoriaAgente, autoriaPessoa, rotinaDoTurno } from "./apoio-l7.ts";
 import type { Deps } from "./tipos.ts";
 import { sincronizarDasDecisoes } from "./trabalhos.ts";
 
@@ -49,12 +49,19 @@ export async function fecharDecisaoDaProposta(deps: Deps, id: string, agora: num
  * chave `NOD_REVISOR` ligada, `gravaInstrucao` (criar ou mudar rotina) num turno contaminado vira card no automático
  * (revisão de engenharia 9, como a cerca 3 do gerir_bots): a instrução da rotina é o "pedido" em que o revisor confia
  * depois ("é o que a rotina pede"), e uma página lida pelo bot não pode plantá-la sem a pessoa ver.
+ *
+ * NOD-84 (ADR-139, revisão 5): no turno disparado por webhook (origem rotina com a entrada não confiável — o payload é
+ * 100% de terceiros e chega sozinho), `gravaInstrucao` nunca passa pelo modo, nem no Total: um título de PR num
+ * repositório público não cria nem muda rotina sem a pessoa ver o card. Revisão 6: a retomada (resposta de colega, volta
+ * da cota) herda o contexto do payload, então a regra segue a cadeia de `retomaTurnoId` até o turno da rotina webhook.
+ * Suposição registrada no PR, a validar com a Ada.
  */
 export async function confirmacaoPeloModo(deps: Deps, ctx: { agenteId: string; turnoId: string; plano?: PlanoTurno | null }, o: { arriscada: boolean; gravaInstrucao?: boolean }): Promise<PorRegra | null> {
   if (!ctx.plano) return null;
   const agente = await deps.repos.agentes.buscar(ctx.agenteId);
   const modo = agente?.modoAprovacao;
   if (!modo || modo === "manual") return null;
+  if (o.gravaInstrucao === true && ctx.plano.confiancaEntrada === "nao_confiavel" && (await rotinaDoTurno(deps.repos, ctx.turnoId))?.rotina.gatilho === "webhook") return null;
   const revisor = deps.services.revisor?.config.ligado === true;
   const plantada = revisor && o.gravaInstrucao === true && (ctx.plano.confiancaEntrada !== "confiavel" || (await deps.repos.turnos.contaminado(ctx.turnoId)));
   // revisto em 2026-10-01 (ADR-066): conteúdo de fora e a trava herdada não param mais o modo.

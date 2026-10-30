@@ -341,6 +341,10 @@ export function criarApi(escopo: Escopo) {
     agenda: (de: number, ate: number, fuso: string) => get<AgendaDto>(`rotinas/agenda?de=${de}&ate=${ate}&fuso=${encodeURIComponent(fuso)}`),
     execucoes: (rotinaId: string) => get<{ execucoes: ExecucaoRotina[] }>(`rotinas/${rotinaId}/execucoes`),
     pausarRotina: (id: string) => post<RespostaMutacao>(`rotinas/${id}/pausar`),
+    /** NOD-84: o endereço inteiro e o segredo do GitHub, só para o Copiar (no-store; nunca vai ao estado da tela). */
+    enderecoWebhook: (id: string) => get<{ caminho: string; segredo: string; prefixo: string }>(`rotinas/${id}/endereco`),
+    gerarEnderecoWebhook: (id: string) => post<RespostaMutacao>(`rotinas/${id}/endereco`),
+    testarWebhook: (id: string) => post<RespostaMutacao>(`rotinas/${id}/testar-webhook`),
     ativarRotina: (id: string) => post<RespostaMutacao>(`rotinas/${id}/ativar`),
     salas: () => get<{ salas: SalaDto[] }>("salas"),
     criarSala: (nome: string, agenteIds: string[]) => post<RespostaMutacao>("salas", { nome, agenteIds }),

@@ -29,7 +29,8 @@ function frequencia(cron: string): number {
 const COM_PROBLEMA: ReadonlySet<DesfechoRotina> = new Set(DESFECHOS_COM_PROBLEMA);
 export const temProblema = (d: DesfechoRotina): boolean => COM_PROBLEMA.has(d);
 
-export type RotinaParaAgenda = { id: string; cron: string; fusoIana: string; estado: EstadoRotina };
+/** `gatilho` webhook (NOD-84): só o passado (as execuções guardadas); o cron dela é sentinela, não há janela prevista. */
+export type RotinaParaAgenda = { id: string; cron: string; fusoIana: string; estado: EstadoRotina; gatilho?: "horario" | "webhook" };
 
 const formatadores = new Map<string, Intl.DateTimeFormat>();
 /** AAAA-MM-DD do instante no fuso (en-CA formata assim). */
@@ -92,7 +93,7 @@ export function projetarAgenda(entrada: {
     const doIntervalo = todas.filter((e) => e.instanteAgendado >= de && e.instanteAgendado < ate);
     const jaTem = new Set(doIntervalo.map((e) => e.instanteAgendado));
     let previstas: number[] = [];
-    if (r.estado === "ativa" && Math.max(de, agora) < ate) {
+    if (r.estado === "ativa" && r.gatilho !== "webhook" && Math.max(de, agora) < ate) {
       try {
         const chave = `${r.cron}\u0000${r.fusoIana}`;
         let j = projecoes.get(chave);

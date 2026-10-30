@@ -1,4 +1,5 @@
 import { assertFusoIana, parseCron5, proximaJanela, RotinaInvalida } from "./rotina-janela.ts";
+import { CRON_SENTINELA_WEBHOOK, type GatilhoWebhook, PROXIMA_WEBHOOK, quandoWebhook, resumoWebhook } from "./rotina-webhook.ts";
 
 /**
  * Regra 9: NENHUM parser de intenção sobrevive aqui. interpretarRotinaTexto/textoTemRecorrencia
@@ -17,7 +18,30 @@ export type RotinaNormalizada = {
   exigeAprovacao: true;
   proximaExecucao: number;
   resumo: string;
+  /** NOD-84: presente = a rotina dispara por webhook; `cron` é a sentinela e `proximaExecucao` nunca vence. */
+  webhook?: GatilhoWebhook;
 };
+
+/** O mínimo de uma rotina para dizer QUANDO ela roda (NOD-84: horário ou webhook). */
+export type QuandoDaRotina = { cron: string; fusoIana: string; gatilho?: "horario" | "webhook"; provedor?: string | null; eventos?: readonly string[] | null };
+
+/** definido em 2026-10-30 (NOD-84): quem lê `rotina.cron` pergunta isto antes — a rotina webhook guarda um cron sentinela. */
+export function ehWebhook(r: { gatilho?: "horario" | "webhook" }): boolean {
+  return r.gatilho === "webhook";
+}
+
+/**
+ * O "quando" em português de qualquer rotina: "dias úteis às 08:00 (…)" ou "Quando o Stripe avisa" (NOD-84). Nenhum
+ * texto mostra o cron sentinela de uma rotina webhook.
+ */
+export function quandoDaRotina(r: QuandoDaRotina): string {
+  return ehWebhook(r) ? resumoWebhook(r.provedor ?? "provedor") : resumoCron(r.cron, r.fusoIana);
+}
+
+/** A próxima execução de qualquer rotina: a rotina webhook nunca vence pelo relógio (NOD-84). */
+export function proximaDaRotina(r: QuandoDaRotina, agora: number): number {
+  return ehWebhook(r) ? PROXIMA_WEBHOOK : proximaJanela({ cron: r.cron, fusoIana: r.fusoIana, agora });
+}
 
 const NOMES_DIA = ["domingo", "segunda", "terça", "quarta", "quinta", "sexta", "sábado"] as const;
 const NOMES_MES = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"] as const;
@@ -62,11 +86,14 @@ export function validarRotinaNormalizada(entrada: {
   limitesAprovacao: string;
   politicaSemDado: string;
   agora: number;
+  /** NOD-84: rotina por webhook — o cron recebido é ignorado e vira a sentinela. */
+  webhook?: GatilhoWebhook;
 }): RotinaNormalizada {
   assertFusoIana(entrada.fusoIana);
-  const cron = textoObrigatorio(entrada.cron, "cron");
+  const webhook = entrada.webhook;
+  const cron = webhook ? CRON_SENTINELA_WEBHOOK : textoObrigatorio(entrada.cron, "cron");
   parseCron5(cron);
-  const proximaExecucao = proximaJanela({ cron, fusoIana: entrada.fusoIana, agora: entrada.agora });
+  const proximaExecucao = webhook ? PROXIMA_WEBHOOK : proximaJanela({ cron, fusoIana: entrada.fusoIana, agora: entrada.agora });
   return {
     cron,
     fusoIana: entrada.fusoIana,
@@ -77,7 +104,8 @@ export function validarRotinaNormalizada(entrada: {
     politicaSemDado: textoObrigatorio(entrada.politicaSemDado, "politicaSemDado"),
     exigeAprovacao: true,
     proximaExecucao,
-    resumo: resumoCron(cron, entrada.fusoIana),
+    resumo: webhook ? quandoWebhook(webhook) : resumoCron(cron, entrada.fusoIana),
+    ...(webhook ? { webhook } : {}),
   };
 }
 
@@ -93,11 +121,15 @@ export type CamposRotinaAtualizaveis = Partial<Pick<RotinaNormalizada, "cron" | 
  * 2026-09-24, "rotina nasce com o acesso"): a mudança que só declara acessos novos também é mudança.
  */
 export function validarAtualizacaoRotina(entrada: {
-  atual: Pick<RotinaNormalizada, "cron" | "fusoIana" | "instrucao" | "fonte" | "entregavel" | "limitesAprovacao" | "politicaSemDado">;
+  atual: Pick<RotinaNormalizada, "cron" | "fusoIana" | "instrucao" | "fonte" | "entregavel" | "limitesAprovacao" | "politicaSemDado"> & Pick<QuandoDaRotina, "gatilho" | "provedor" | "eventos">;
   pedido: CamposRotinaAtualizaveis;
   agora: number;
   mudaAcessos?: boolean;
 }): { normalizada: RotinaNormalizada; mudou: (keyof CamposRotinaAtualizaveis)[] } {
+  // NOD-84 (definido em 2026-10-30): a rotina webhook não tem horário; mudar o cron dela seria trocar o gatilho, que
+  // fica fora desta issue (o endereço do provedor ficaria órfão). O resto muda e "o endereço não muda".
+  const webhook = ehWebhook(entrada.atual) ? { provedor: entrada.atual.provedor ?? "provedor", eventos: [...(entrada.atual.eventos ?? [])] } : undefined;
+  if (webhook && entrada.pedido.cron !== undefined) throw new RotinaInvalida("entrada_invalida", "rotina por webhook não tem horário");
   const chaves = ["cron", "fusoIana", "instrucao", "fonte", "entregavel", "limitesAprovacao", "politicaSemDado"] as const;
   const fundido = { ...entrada.atual };
   const mudou: (keyof CamposRotinaAtualizaveis)[] = [];
@@ -110,5 +142,5 @@ export function validarAtualizacaoRotina(entrada: {
     mudou.push(k);
   }
   if (mudou.length === 0 && entrada.mudaAcessos !== true) throw new RotinaInvalida("entrada_invalida", "nenhum campo muda");
-  return { normalizada: validarRotinaNormalizada({ ...fundido, agora: entrada.agora }), mudou };
+  return { normalizada: validarRotinaNormalizada({ ...fundido, agora: entrada.agora, ...(webhook ? { webhook } : {}) }), mudou };
 }

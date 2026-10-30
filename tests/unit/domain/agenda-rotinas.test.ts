@@ -26,6 +26,16 @@ describe("projetarAgenda (NOD-85)", () => {
     for (const d of ["executou", "sem_novidade", "passou_em_branco", "adiada"] as const) expect(temProblema(d)).toBe(false);
   });
 
+  it("NOD-84: a rotina webhook entra com o histórico e o registroDesde, sem nenhuma prevista (Codex, revisão)", () => {
+    const w: RotinaParaAgenda = { id: "w", cron: "0 0 31 2 *", fusoIana: FUSO, estado: "ativa", gatilho: "webhook" };
+    const ontem = Date.parse("2026-10-28T15:00Z");
+    const execs = [exec("w", ontem), ...Array.from({ length: 19 }, (_, i) => exec("w", ontem - (i + 1) * DIA))];
+    const p = projetar([w], execs);
+    expect(p.itens.filter((i) => i.tipo === "prevista")).toHaveLength(0);
+    expect(p.itens.some((i) => i.tipo === "execucao" && i.instante === ontem)).toBe(true);
+    expect(p.registroDesde.get("w")).toBe(ontem - 19 * DIA);
+  });
+
   it("passado vem das execuções guardadas e futuro das janelas do cron, por dia no fuso da pessoa", () => {
     const r = rotina("a", "0 9 * * *"); // 9h SP = 12:00Z
     const ontem = Date.parse("2026-10-28T12:00Z");

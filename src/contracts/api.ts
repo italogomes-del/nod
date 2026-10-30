@@ -10,7 +10,7 @@ import type { Mensagem } from "./mensagem.ts";
 import type { MotivoFalhaComputador } from "./motivos.ts";
 import type { Negacao } from "./negacao.ts";
 import type { FioDaPergunta, FioDoItem, PedidoDoItem } from "./pedido.ts";
-import type { BloqueioRotina, EsperaRotinaDto, JanelasPuladasDaRotina, OndeRodaDto, ParadaDaRotina, PerguntaPendenteDaRotina, Rotina } from "./rotina.ts";
+import type { BloqueioRotina, ChamadaWebhook, EsperaRotinaDto, JanelasPuladasDaRotina, OndeRodaDto, ParadaDaRotina, PerguntaPendenteDaRotina, Rotina } from "./rotina.ts";
 import type { DonoNaConversa, TrabalhoDto } from "./trabalho.ts";
 import type { TrocasNaConversa } from "./troca-entre-bots.ts";
 import type { AcoesDoModoNaConversa } from "./acoes-do-modo.ts";
@@ -87,7 +87,8 @@ export type SuaVezDto = {
 export type DecisaoDto = { decisao: Decisao; itens: ItemAprovacao[] };
 /** `bloqueio` (definido em 2026-09-24, emenda da ADR-044): parada por falta de conexão ou acesso, com o card aberto; null = roda. */
 /** `resumo` (definido em 2026-09-30): o cron em palavras, com o fuso — "dias úteis às 08:00 (America/Sao_Paulo)"; a gaveta do bot mostra. `ondeRoda` (NOD-89): ausente no modo local e nas rotinas de outra pessoa. */
-export type RotinaDto = { rotina: Rotina; proximaExecucao: EpochMs; bloqueio: BloqueioRotina | null; resumo: string; espera: EsperaRotinaDto | null; perguntaPendente?: PerguntaPendenteDaRotina; esperaDaCota?: { ia: string; voltaEm: EpochMs }; ondeRoda?: OndeRodaDto } & JanelasPuladasDaRotina;
+export type RotinaDto = { rotina: Rotina; proximaExecucao: EpochMs; bloqueio: BloqueioRotina | null; resumo: string; espera: EsperaRotinaDto | null; perguntaPendente?: PerguntaPendenteDaRotina; esperaDaCota?: { ia: string; voltaEm: EpochMs }; ondeRoda?: OndeRodaDto; webhook?: WebhookDaRotinaDto } & JanelasPuladasDaRotina;
+/** NOD-84: o card e a gaveta da rotina webhook (só a dona); o endereço inteiro só sai por GET rotinas/:id/endereco. */ export type WebhookDaRotinaDto = { prefixo: string | null; provedor: string | null; eventos: string[]; chamadasHoje: number; recusadasHoje: number; recusaPendente: boolean; ultimas: ChamadaWebhook[] };
 
 export type MetodoHttp = "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
 export type EntradaRota = { metodo: MetodoHttp; caminho: string; lane: "L1" | "L4" | "L5" | "L6" | "L7" | "L8" | "L9" };
@@ -142,10 +143,9 @@ export const ROTAS = [
   { metodo: "POST", caminho: "propostas/:id/recusar", lane: "L6" },
   { metodo: "GET", caminho: "rotinas", lane: "L7" },
   { metodo: "POST", caminho: "rotinas", lane: "L7" },
-  { metodo: "POST", caminho: "rotinas/:id/pausar", lane: "L7" },
-  { metodo: "POST", caminho: "rotinas/:id/ativar", lane: "L7" }, { metodo: "POST", caminho: "rotinas/:id/ritmo", lane: "L7" }, // ritmo: NOD-313
-  { metodo: "POST", caminho: "rotinas/:id/executar", lane: "L7" },
-  { metodo: "GET", caminho: "rotinas/:id/execucoes", lane: "L7" }, { metodo: "GET", caminho: "rotinas/agenda", lane: "L7" }, // agenda: NOD-85
+  { metodo: "POST", caminho: "rotinas/:id/pausar", lane: "L7" }, { metodo: "POST", caminho: "rotinas/:id/ativar", lane: "L7" }, { metodo: "POST", caminho: "rotinas/:id/ritmo", lane: "L7" }, // ritmo: NOD-313
+  { metodo: "POST", caminho: "rotinas/:id/executar", lane: "L7" }, { metodo: "GET", caminho: "rotinas/:id/execucoes", lane: "L7" }, { metodo: "GET", caminho: "rotinas/:id/endereco", lane: "L7" }, { metodo: "POST", caminho: "rotinas/:id/endereco", lane: "L7" }, { metodo: "POST", caminho: "rotinas/:id/testar-webhook", lane: "L7" }, // NOD-84
+  { metodo: "POST", caminho: "/api/w/:token", lane: "L7" }, { metodo: "POST", caminho: "/api/w", lane: "L7" }, { metodo: "GET", caminho: "rotinas/agenda", lane: "L7" }, // agenda: NOD-85
   { metodo: "GET", caminho: "salas", lane: "L7" },
   { metodo: "POST", caminho: "salas", lane: "L7" },
   { metodo: "POST", caminho: "salas/:id/membros", lane: "L7" },

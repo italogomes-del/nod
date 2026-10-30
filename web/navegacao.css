@@ -1242,3 +1242,29 @@ div.mac-medidor { padding-right: 36px; }
   .mem-salvar { padding: 0 18px; }
   .mem-mem.mem-apagada .mem-acao { min-height: 44px; min-width: 44px; }
 }
+
+/* NOD-84 (ADR-139, protótipo v3 do Gil): o endereço do webhook (no card encolhido e na gaveta), as últimas chamadas e o
+   "!" da recusada. Só tokens; o vermelho é só o "!". O mesmo bloco vai para o componente comum da NOD-399 quando entrar. */
+.wh-endereco { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.wh-end-campo { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 4px 4px 4px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-raised); }
+.wh-url { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: 12.5px; color: var(--ink-2); }
+.wh-copiar { position: relative; display: grid; place-items: center; flex-shrink: 0; width: 32px; height: 32px; min-height: 0; padding: 0; border-radius: 8px; color: var(--ink-2); }
+.wh-copiar:hover { color: var(--ink); background: var(--surface-selected); }
+.wh-copiar svg { grid-area: 1 / 1; transition: opacity .14s ease, transform .14s ease; }
+.wh-copiar .wh-cp-b { opacity: 0; transform: scale(.7); color: var(--success); }
+.wh-copiar.wh-ok .wh-cp-a { opacity: 0; transform: scale(.7); }
+.wh-copiar.wh-ok .wh-cp-b { opacity: 1; transform: none; }
+.wh-copiar.wh-falhou { color: var(--danger); }
+.wh-excl { display: inline-grid; place-items: center; flex-shrink: 0; width: 13px; height: 13px; font-size: 13px; font-weight: 700; line-height: 1; color: var(--danger); }
+.wh-gv-resumo { padding: 0 4px 8px; font-size: 13px; color: var(--ink-2); }
+.wh-ch { flex-wrap: wrap; }
+.wh-motivo { flex-basis: 100%; padding-left: 23px; font-size: 12px; line-height: 1.5; color: var(--ink-3); }
+.wh-acoes { display: flex; flex-wrap: wrap; gap: 4px 14px; padding: 6px 4px 0; }
+.wh-acoes .bt.link { min-height: 0; padding: 0; font-size: 13px; text-decoration: underline; text-decoration-color: var(--line-strong); text-underline-offset: 2px; }
+.wh-confirma { margin-top: 8px; padding: 10px 12px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--surface); font-size: 13px; color: var(--ink); }
+.wh-confirma .acoes { display: flex; gap: 8px; margin-top: 8px; }
+@media (prefers-reduced-motion: reduce) { .wh-copiar svg { transition: none; } }
+@media (max-width: 640px) {
+  .wh-copiar { width: 44px; height: 44px; }
+  .wh-acoes .bt.link, .wh-confirma .bt { min-height: 44px; }
+}

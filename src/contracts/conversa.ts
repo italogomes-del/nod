@@ -68,6 +68,10 @@ export type PayloadPropostaRotina = {
    * Confirmar concede o que estiver conectado. Ausente = a rotina não declarou (proposta anterior).
    */
   acessos?: AcessoPedido[];
+  /** NOD-84 (ADR-139): rotina por webhook. Ausente = de horário. O endereço só nasce na ativação, nunca no payload. */
+  gatilho?: "webhook";
+  provedor?: string;
+  eventos?: string[];
 };
 /**
  * definido em 2026-09-21: atualizar uma rotina que já existe. Guarda só o que MUDA (campo ausente
@@ -91,6 +95,8 @@ export type PayloadPropostaRotinaAtualizacao = {
   proximaExecucao: EpochMs;
   resumo: string;
   antes: { resumo: string; instrucao: string };
+  /** NOD-84: a rotina é por webhook (o card não mostra "Próxima"; a sentinela nunca aparece). Ausente = de horário. */
+  gatilho?: "webhook";
   /**
    * definido em 2026-10-06 (NOD-159): revisaoDaRotina (src/domain/revisao-rotina.ts) de quando a proposta nasceu.
    * Confirmar só aplica se a rotina ainda tiver esta revisão. Ausente = proposta anterior, aplica como antes.

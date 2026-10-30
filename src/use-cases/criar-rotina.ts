@@ -9,6 +9,7 @@ import type { CasoNod } from "../contracts/servicos.ts";
 import { ehErroDeDominio, ErroDeDominio } from "../domain/erro.ts";
 import { normalizarAcessosDeclarados } from "../domain/rotina-acessos.ts";
 import { podeCriarRotina } from "../domain/rotina-limites.ts";
+import { normalizarGatilhoWebhook, type GatilhoWebhook } from "../domain/rotina-webhook.ts";
 import { validarRotinaNormalizada, type RotinaNormalizada } from "../domain/rotina-texto.ts";
 import { agenteVisivel, assertUuid, autoriaAgente, autoriaPessoa, carimbo, evento, eventoDeRotina, PRAZO_DECISAO_MS, textoRotinaAtiva } from "./apoio-l7.ts";
 import { ativarRotina } from "./ativar-rotina.ts";
@@ -18,6 +19,8 @@ import type { CasoDeUso, Deps } from "./tipos.ts";
 
 export type EntradaRotina = {
   cron: string;
+  /** NOD-84: rotina por webhook (o cron vira a sentinela). */
+  webhook?: GatilhoWebhook;
   fusoIana: string;
   instrucao: string;
   fonte: string;
@@ -58,8 +61,12 @@ export async function acessosDeclarados(deps: Deps, pedidos: readonly ArgsPedirA
  * (ADR-050): atualizar_perfil aceita as rotinas que vêm com o perfil e as valida pelo mesmo caminho.
  */
 export async function prepararRotina(deps: Deps, agenteId: string, args: ArgsCriarRotina): Promise<PayloadPropostaRotina> {
+  // NOD-84: o modo local não tem endereço público; o webhook é só do compartilhado (services.webhooks).
+  if (args.quando_webhook !== undefined && !deps.services.webhooks) throw new ErroDeDominio("webhook_so_compartilhado");
+  const webhook = args.quando_webhook !== undefined ? normalizarGatilhoWebhook(args.quando_webhook) : undefined;
   const normalizada = await normalizarComLimite(deps, agenteId, {
-    cron: args.cron,
+    cron: args.cron ?? "",
+    ...(webhook ? { webhook } : {}),
     fusoIana: args.fuso_iana,
     instrucao: args.instrucao,
     fonte: args.fonte,
@@ -80,6 +87,7 @@ export async function prepararRotina(deps: Deps, agenteId: string, args: ArgsCri
     proximaExecucao: normalizada.proximaExecucao,
     resumo: normalizada.resumo,
     ...(acessos !== undefined ? { acessos } : {}),
+    ...(webhook ? { gatilho: "webhook" as const, provedor: webhook.provedor, eventos: webhook.eventos } : {}),
   };
 }
 
@@ -110,7 +118,7 @@ export const criarRotina: CasoNod<Deps, "criar_rotina"> = async (deps, input) =>
     conversaId: input.conversaId,
     turnoId: input.turnoId,
     prazoDecisaoEm: deps.agora() + PRAZO_DECISAO_MS,
-    frase: `Rotina proposta: ${payload.resumo} · próxima execução ${carimbo(payload.proximaExecucao, payload.fusoIana)}`,
+    frase: fraseDaRotinaProposta(payload),
   });
   const autoria = autoriaAgente(input.agenteId, deps.escopo.pessoaId);
   const events: RuntimeEvent[] = [
@@ -121,7 +129,8 @@ export const criarRotina: CasoNod<Deps, "criar_rotina"> = async (deps, input) =>
   if (porRegra) {
     try {
       const ativada = await ativarRotina(deps, { propostaId: proposta.id, porRegra });
-      return { data: { proposta_id: proposta.id, proxima_execucao: ativada.data.rotina.proximaExecucao, resumo: payload.resumo, aplicada: true }, events: [...events, ...(ativada.events ?? [])] };
+      const endereco = ativada.data.prefixo ? { endereco: enderecoMascarado(ativada.data.prefixo) } : {};
+      return { data: { proposta_id: proposta.id, proxima_execucao: ativada.data.rotina.proximaExecucao, resumo: payload.resumo, aplicada: true, ...endereco }, events: [...events, ...(ativada.events ?? [])] };
     } catch (e) {
       // Teto de rotinas etc.: a proposta fica no card, como no manual, e o modelo lê o código.
       if (!ehErroDeDominio(e)) throw e;
@@ -155,7 +164,7 @@ async function criarRotinaParaBot(deps: Deps, input: Parameters<CasoNod<Deps, "c
     conversaId: alvo.conversaId,
     turnoId: null,
     prazoDecisaoEm: deps.agora() + PRAZO_DECISAO_MS,
-    frase: `Rotina proposta: ${payload.resumo} · próxima execução ${carimbo(payload.proximaExecucao, payload.fusoIana)}`,
+    frase: fraseDaRotinaProposta(payload),
   });
   const autoria = autoriaAgente(input.agenteId, deps.escopo.pessoaId);
   const events: RuntimeEvent[] = [evento(deps, "proposta_criada", autoria, { propostaId: proposta.id, kind: "rotina", proximaExecucao: payload.proximaExecucao }, { conversaId: alvo.conversaId })];
@@ -172,6 +181,7 @@ export type SaidaCriarRotinaPelaPessoa = { rotina: Rotina; proposta: Proposta | 
  * entrada_invalida (400), limite_atingido (429), nao_encontrado (agente).
  */
 export const criarRotinaPelaPessoa: CasoDeUso<EntradaRotina & { agenteId: string }, SaidaCriarRotinaPelaPessoa> = async (deps, input) => {
+  if (input.webhook) throw new ErroDeDominio("entrada_invalida", { cause: "webhook pela tela ainda não" });
   const normalizada = await normalizarComLimite(deps, input.agenteId, input);
   const conversa = await deps.repos.conversas.buscarPropriaDoAgente(input.agenteId);
   if (!conversa) throw new ErroDeDominio("nao_encontrado", { cause: "conversa própria do agente" });
@@ -202,3 +212,13 @@ export const criarRotinaPelaPessoa: CasoDeUso<EntradaRotina & { agenteId: string
     events: [evento(deps, "rotina_criada", autoria, { rotinaId: rotina.id, proximaExecucao: rotina.proximaExecucao, fusoIana: rotina.fusoIana }, { conversaId: conversa.id })],
   };
 };
+
+/** O que o bot e o card mostram do endereço: o prefixo e reticências. O inteiro só sai pela tela da dona (Copiar). */
+export function enderecoMascarado(prefixo: string): string {
+  return `/api/w/${prefixo}…`;
+}
+
+/** A frase da decisão em "Sua vez". NOD-84: a rotina por webhook não tem próxima execução (a sentinela nunca aparece). */
+export function fraseDaRotinaProposta(payload: Pick<PayloadPropostaRotina, "resumo" | "proximaExecucao" | "fusoIana" | "gatilho">): string {
+  return payload.gatilho === "webhook" ? `Rotina proposta: ${payload.resumo}` : `Rotina proposta: ${payload.resumo} · próxima execução ${carimbo(payload.proximaExecucao, payload.fusoIana)}`;
+}

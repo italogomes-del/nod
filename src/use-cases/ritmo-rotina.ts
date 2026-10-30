@@ -45,7 +45,8 @@ export function textoResolvido(p: PayloadRotinaRitmo, opcao: OpcaoRitmo, extra =
  */
 export async function contarRitmo(deps: Pick<Deps, "repos" | "escopo" | "agora" | "fusoPadrao">, rotina: Rotina, desfecho: DesfechoRotina, turnoId: string | null): Promise<RuntimeEvent[]> {
   const efeito = efeitoNaContagem(desfecho);
-  if (efeito === "neutro") return [];
+  // NOD-84 (definido em 2026-10-30): a rotina webhook roda quando o provedor chama; não há ritmo para espaçar.
+  if (efeito === "neutro" || rotina.gatilho === "webhook") return [];
   // A rotina pausada ou apagada no meio da execução não ganha card (o clique não teria o que aplicar).
   if (rotina.estado !== "ativa" || rotina.excluidoEm !== null) {
     if (efeito === "zera") await deps.repos.rotinaRitmo.contar(rotina.id, "zera");

@@ -16,6 +16,7 @@ export type ChaveRedacao =
   | "memoria-nao-e-fonte"
   | "proposta-confirmada"
   | "rotina-proxima-execucao"
+  | "rotina-webhook-ativa"
   | "rotina-passou-em-branco"
   | "rotina-falhou"
   | "rotina-parada-aberta"
@@ -87,6 +88,8 @@ const CATALOGO: Record<ChaveRedacao, string> = {
   // NOD-378 (27/10): o {resumo} (resumoCron) já termina em "({fuso})"; o molde repetia o fuso. O texto antigo, com
   // "({fuso})" no fim, continua casando com este molde no classificador (assunto-do-texto.ts), porque {proxima} o absorve.
   "rotina-proxima-execucao": "Rotina ativa: {resumo} · próxima execução: {proxima}.",
+  // NOD-84: a rotina webhook não tem próxima; o endereço a pessoa copia na tela da rotina (o bot nunca o vê).
+  "rotina-webhook-ativa": "Rotina ativa: {resumo}. Copie o endereço na tela de rotinas e cole no {provedor}.",
   "rotina-passou-em-branco": "A rotina passou em branco: {motivo}. Nada foi enviado.",
   "rotina-falhou": "A rotina falhou por erro técnico: {motivo}. Nada foi enviado; a próxima execução segue agendada.",
   // definido em 2026-10-15 (NOD-256, NOD-225): a parada segura a rotina, nunca em silêncio — a linha diz o que destrava.

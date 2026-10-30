@@ -37,6 +37,14 @@ export type Rotina = {
    * pré-voo lê a fonte. Presente, mesmo vazia, ganha da fonte.
    */
   acessos: AcessoPedido[] | null;
+  /**
+   * definido em 2026-10-30 (NOD-84, ADR-139, migração 0130): 'webhook' = roda quando chega uma chamada no endereço
+   * secreto; o cron é sentinela e a próxima execução fica em 9999-01-01. Quem escreve o "quando" pergunta isto antes.
+   */
+  gatilho: "horario" | "webhook";
+  /** Só no webhook: quem chama ("Stripe", "GitHub") e os eventos aceitos (vazio = todos). */
+  provedor: string | null;
+  eventos: string[] | null;
 };
 
 /**
@@ -122,3 +130,17 @@ export type PayloadRotinaEvento = { kind: "rotina_evento"; rotinaId: string; aca
  */
 export type OndeRodaDto = { modo: "maquina" | "qualquer"; maquina: { id: string; nome: string; plataforma: PlataformaMaquina | null } | null; dependeDoMac: boolean };
 export type { PayloadRotinaRitmo } from "./rotina-ritmo.ts";
+
+/** NOD-84 (ADR-139, 0130): uma chamada recebida no endereço secreto da rotina, como o log da gaveta a mostra. */
+export type ChamadaWebhook = {
+  id: string;
+  rotinaId: string;
+  em: number;
+  desfecho: "rodou" | "ignorada" | "fila_cheia" | "recusada" | "pausada" | "bloqueada" | "teste";
+  motivo: "endereco" | "assinatura" | null;
+  evento: string | null;
+  turnoId: string | null;
+};
+
+/** NOD-84: o endereço vivo da rotina, sem o token. `assinadoEm` = a 1ª chamada assinada (dali em diante, obrigatória). */
+export type GatilhoDaRotina = { id: string; rotinaId: string; prefixo: string; criadoEm: number; assinadoEm: number | null };

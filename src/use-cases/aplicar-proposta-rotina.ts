@@ -4,8 +4,7 @@ import type { RuntimeEvent } from "../contracts/evento.ts";
 import type { Rotina } from "../contracts/rotina.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { revisaoDaRotina } from "../domain/revisao-rotina.ts";
-import { proximaJanela } from "../domain/rotina-janela.ts";
-import { resumoCron } from "../domain/rotina-texto.ts";
+import { quandoDaRotina, proximaDaRotina } from "../domain/rotina-texto.ts";
 import { log } from "../obs/log.ts";
 import { evento, eventoDeRotina, exigir, textoRotinaAtiva } from "./apoio-l7.ts";
 import { concederAcessosDaRotina } from "./conceder-acessos-da-rotina.ts";
@@ -117,7 +116,7 @@ export const aplicarAtualizacaoRotina: CasoDeUso<{ propostaId: string; porRegra?
   const agora = deps.agora();
   // O instante guardado na proposta pode ter passado enquanto ninguém confirmava (mesma regra de
   // ativarRotina): recalcula do cron JÁ VALIDADO do payload, sem reinterpretar texto.
-  const proximaExecucao = proximaJanela({ cron: p.cron ?? atual.cron, fusoIana: p.fusoIana ?? atual.fusoIana, agora });
+  const proximaExecucao = proximaDaRotina({ ...atual, cron: p.cron ?? atual.cron, fusoIana: p.fusoIana ?? atual.fusoIana }, agora);
   await confirmarOuAbortar(deps, proposta.id);
   const rotina = await deps.repos.rotinas.atualizar(p.rotinaId, {
     cron: p.cron,
@@ -185,13 +184,15 @@ export const aplicarExclusaoRotina: CasoDeUso<{ propostaId: string; porRegra?: P
   await confirmarOuAbortar(deps, proposta.id);
   const rotina = await deps.repos.rotinas.excluir(p.rotinaId, agora);
   if (!rotina) throw new ErroDeDominio("nao_permitido", { cause: "só a dona exclui a rotina" });
+  // NOD-84: excluir revoga o endereço do webhook na mesma transação (a chamada seguinte é 401, como endereço errado).
+  await deps.repos.rotinaGatilhos.revogarDaRotina(rotina.id, agora);
   const ritmo = await invalidarCardDeRitmo(deps, rotina); // NOD-313: o card de ritmo aberto fecha sem aplicar nada.
   const autoria = autoriaDeQuemConfirma(deps, proposta.agenteId, input.porRegra);
   await deps.repos.mensagens.criar({
     conversaId: rotina.conversaId,
     autoria,
     kind: "sistema",
-    texto: `Rotina excluída: ${resumoCron(rotina.cron, rotina.fusoIana)}. Nada mais será disparado por ela.`,
+    texto: `Rotina excluída: ${quandoDaRotina(rotina)}. Nada mais será disparado por ela.`,
     payload: eventoDeRotina(rotina, "excluida"),
     confianca: "confiavel",
   });

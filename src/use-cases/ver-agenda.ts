@@ -5,7 +5,7 @@ import { ehErroDeDominio, ErroDeDominio } from "../domain/erro.ts";
 import { DIA_AGENDA, linkDaAgenda, miniAgenda, tituloDaRotina } from "../domain/mini-agenda.ts";
 import { FUSO_DA_PESSOA_PADRAO } from "../domain/ritmo-rotina.ts";
 import { assertFusoIana } from "../domain/rotina-janela.ts";
-import { resumoCron } from "../domain/rotina-texto.ts";
+import { quandoDaRotina } from "../domain/rotina-texto.ts";
 import type { Rotina } from "../contracts/rotina.ts";
 import { EXECUCOES_GUARDADAS } from "../shared/constantes.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
@@ -13,8 +13,8 @@ import type { CasoDeUso, Deps } from "./tipos.ts";
 const DIA_MS = 86_400_000;
 
 /** Um cron que o parser não aceita (linha antiga, gravada à mão) não derruba a agenda: fica o cron cru. */
-function resumoDe(cron: string, fusoIana: string): string {
-  try { return resumoCron(cron, fusoIana); } catch { return `${cron} (${fusoIana})`; }
+function resumoDe(r: Rotina): string {
+  try { return quandoDaRotina(r); } catch { return `${r.cron} (${r.fusoIana})`; }
 }
 
 export type EntradaAgenda = { de: number; ate: number; fuso: string; agenteId?: string };
@@ -37,12 +37,14 @@ async function agendaDe(deps: Deps, input: EntradaAgenda, todas: readonly Rotina
   const rotinas = todas.filter((r) => r.excluidoEm === null && (input.agenteId === undefined || r.agenteId === input.agenteId));
   const execucoes = await deps.repos.rotinaExecucoes.dasRotinas(rotinas.map((r) => r.id));
   const agora = deps.agora();
+  // NOD-84 (definido em 2026-10-30): a rotina webhook não tem janela prevista — o cron dela é sentinela. Ela continua na
+  // lista, no histórico (as execuções dela) e no registroDesde; o domínio só não projeta o futuro dela.
   const p = projetarAgenda({ rotinas, execucoes, de, ate, agora, fuso, guardadas: EXECUCOES_GUARDADAS });
   return {
     data: {
       de, ate, agora, fuso,
       rotinas: rotinas.map((r) => ({
-        id: r.id, agenteId: r.agenteId, conversaId: r.conversaId, instrucao: r.instrucao, resumo: resumoDe(r.cron, r.fusoIana),
+        id: r.id, agenteId: r.agenteId, conversaId: r.conversaId, instrucao: r.instrucao, resumo: resumoDe(r),
         fusoIana: r.fusoIana, estado: r.estado, registroDesde: p.registroDesde.get(r.id) ?? null, cortado: p.cortado.has(r.id), minha: r.ownerId === deps.escopo.pessoaId,
       })),
       itens: p.itens,

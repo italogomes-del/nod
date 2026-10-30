@@ -37,7 +37,7 @@ import { anexosAnteriores, cortarFalas } from "../domain/historico-do-plano.ts";
 import { textoParaOBot } from "../domain/citacao.ts";
 import { composicaoDoPlano } from "../domain/raio-x.ts";
 import type { BastidorNoPrompt, ComputadorFora } from "../domain/prompt-sistema.ts";
-import { resumoCron } from "../domain/rotina-texto.ts";
+import { quandoDaRotina } from "../domain/rotina-texto.ts";
 import type { TokenTurno } from "../services/token-turno.ts";
 import type { Services } from "./tipos.ts";
 import type { CasoDeUso } from "./tipos.ts";
@@ -357,7 +357,7 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   // geração antiga do agente lê como 'pausada'). resumoCron traduz o cron para o texto humano.
   const rotinasDoAgente = (await deps.repos.rotinas.listarDoAgente(agente.id)).map((r) => ({
     id: r.id,
-    resumo: resumoCron(r.cron, r.fusoIana),
+    resumo: quandoDaRotina(r),
     instrucao: r.instrucao,
     estado: r.estado,
   }));

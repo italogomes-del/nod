@@ -31,6 +31,8 @@ const PREFIXOS: RegExp[] = [
   /\bxai-[A-Za-z0-9_-]{20,}/g, // xai
   /\bgsk_[A-Za-z0-9]{40,}/g, // groq
   /\bhf_[A-Za-z0-9]{30,}/g, // hugging face
+  /gt_[A-Za-z0-9_-]{8,256}\.[A-Za-z0-9_-]{16,64}/g, // NOD-84: o endereço do webhook (gt_<alegado>.<segredo>); com teto, senão O(n²); sem \b, para pegar o ecoado depois de %2F ou \u002F
+  /ghs_[A-Za-z0-9_-]{30,64}/g, // NOD-84: o segredo HMAC do webhook (base64url) — antes do clássico, que pararia no "-"
   /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}/g, // github clássico
   /\bgithub_pat_[A-Za-z0-9_]{20,}/g, // github fine-grained
   /\bxox[abposr]-[A-Za-z0-9-]{20,}/g, // slack

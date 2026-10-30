@@ -57,6 +57,9 @@ export async function limparPessoaE2E(db: Db, dbDono: Db, escopo: Escopo, ids: {
     await trx`delete from ligacoes where owner_id = ${p}`;
     await trx`delete from preferencias where owner_id = ${p}`;
     // 0108 (NOD-313): a contagem e o card de ritmo apontam para a rotina — saem antes dela (a FK também cascateia).
+    // 0130 (NOD-84): o endereço e o log de chamadas do webhook apontam para a rotina.
+    await trx`delete from rotina_chamadas where owner_id = ${p}`;
+    await trx`delete from rotina_gatilhos where owner_id = ${p}`;
     await trx`delete from rotina_ritmo where owner_id = ${p}`;
     await trx`delete from rotinas where owner_id = ${p}`;
     await trx`delete from sala_membros where owner_id = ${p}`;

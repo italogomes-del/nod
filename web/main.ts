@@ -191,6 +191,7 @@ import { anuncioDosSubagentes, blocosAoVivoDaTask, blocosDoHistoricoDaTask, html
 import { renderTrabalhosPorBot, sinalDoBot } from "./telas/linha-do-dono.ts";
 import { temDonos } from "./lib/dono.ts";
 import { executarRotinaComConfirmacao } from "./lib/executar-rotina.ts";
+import { copiarPorSelecao, type DocParaCopiar } from "./lib/copiar-por-selecao.ts";
 import { criarBuscaNaConversa } from "./telas/busca-na-conversa.ts";
 import { DICA_MS, MARCA_CUTUCAO, MARCA_DICA, SEGURAR_MS, deslocamentoDoPuxar, deveCutucar, cliqueDepoisDoGesto, criarFiltroDeEco, deveMostrarDica, escFechaABusca, fimDoGesto, gravarMarca, lerMarca, tremeu, type GestoAnterior, type Marcas, type ViaDaBusca } from "./lib/descoberta-da-busca.ts";
 // NOD-117: as teclas dos atalhos mudam com o lugar (app do Mac, navegador no Mac, Windows/Linux): web/lib/atalhos.ts.
@@ -3756,6 +3757,49 @@ document.addEventListener("touchend", (ev) => {
 }, { passive: true });
 
 /** Fala oculta para quem lê a tela: a região viva da pergunta também serve às ações na fala (ADR-113), sem mexer no foco. */
+const FALHA_AO_COPIAR = "Não deu para copiar: libere a área de transferência no navegador e tente de novo";
+/** NOD-84: copia o que `valor` busca (o endereço ou o segredo) e marca o botão: `.wh-ok` por 2 s, ou "Não copiou". */
+async function copiarDoWebhook(el: HTMLElement, valor: (id: string) => Promise<string>, anuncio: string): Promise<void> {
+  const id = el.dataset.id ?? "";
+  let ok = false;
+  try {
+    if (typeof ClipboardItem !== "undefined" && navigator.clipboard.write) {
+      const blob = valor(id).then((t) => new Blob([t], { type: "text/plain" }));
+      await navigator.clipboard.write([new ClipboardItem({ "text/plain": blob })]);
+    } else {
+      await navigator.clipboard.writeText(await valor(id));
+    }
+    ok = true;
+  } catch {
+    // Plano B (QA da NOD-84): a tela só mostra o mascarado, então "selecione o texto" não tinha saída.
+    ok = await valor(id).then((t) => copiarPorSelecao(document as unknown as DocParaCopiar, t)).catch(() => false);
+  }
+  const vivo = el.querySelector(".wh-vivo");
+  if (vivo) vivo.textContent = ok ? "Copiado" : FALHA_AO_COPIAR;
+  if (el.classList.contains("wh-copiar")) {
+    el.classList.toggle("wh-ok", ok);
+    el.classList.toggle("wh-falhou", !ok);
+  } else {
+    mostrarCopia(el, ok, relogioDoCopiar);
+  }
+  if (!ok && !vivo) anunciar(FALHA_AO_COPIAR);
+  else if (!vivo) anunciar(anuncio);
+  clearTimeout(timersCopiarCodigo.get(el));
+  timersCopiarCodigo.set(el, window.setTimeout(() => { el.classList.remove("wh-ok", "wh-falhou"); if (vivo) vivo.textContent = ""; }, COPIADO_MS));
+}
+
+/** "Gerar novo endereço" confirma no lugar (sem modal): abre a caixa, foca o botão de confirmar; Cancelar volta. */
+function alternarConfirmaWebhook(el: HTMLElement, abrir: boolean): void {
+  const id = el.dataset.id ?? "";
+  const caixa = document.getElementById(`wh-confirma-${id}`);
+  const gatilho = document.querySelector<HTMLElement>(`[data-act="webhook-gerar"][data-id="${CSS.escape(id)}"]`);
+  if (!caixa) return;
+  caixa.hidden = !abrir;
+  gatilho?.setAttribute("aria-expanded", String(abrir));
+  if (abrir) caixa.querySelector<HTMLElement>('[data-act="webhook-gerar-confirmar"]')?.focus();
+  else gatilho?.focus();
+}
+
 function anunciar(texto: string): void {
   const anuncio = document.getElementById("anuncio-pergunta");
   if (!anuncio) return;
@@ -5445,6 +5489,23 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     const r = await executarRotinaComConfirmacao((o) => api!.executarRotina(id, o), (p) => abrirRodarMaisUma(p, el));
     if (!r) return;
     dispatch({ tipo: "invalidar", quais: ["rotinas", `execucoes:${el.dataset.id ?? ""}`, ...(r.ids.bloqueada ? (["sua-vez", `conversa:${r.ids.conversaId ?? ""}`] as const) : [])] });
+    navegar({ tipo: "conversa", conversaId: r.ids.conversaId ?? "", agenteId: el.dataset.agente ?? "" });
+  }),
+  // NOD-84: o Copiar do endereço busca o inteiro na hora (só a dona; nunca fica no estado). ClipboardItem com a promessa
+  // para o Safari não perder o gesto; sem ele, writeText. O ícone vira ✓ por 2 s e a região viva diz "Copiado".
+  "webhook-copiar": (el) => copiarDoWebhook(el, async (id) => `${location.origin}${(await api!.enderecoWebhook(id)).caminho}`, "Endereço copiado"),
+  "webhook-copiar-segredo": (el) => copiarDoWebhook(el, async (id) => (await api!.enderecoWebhook(id)).segredo, "Segredo copiado"),
+  "webhook-gerar": (el) => alternarConfirmaWebhook(el, true),
+  "webhook-gerar-cancelar": (el) => alternarConfirmaWebhook(el, false),
+  "webhook-gerar-confirmar": (el) => agir(async () => {
+    await api!.gerarEnderecoWebhook(el.dataset.id ?? "");
+    anunciar("Endereço novo gerado. O antigo parou de valer; cole o novo no provedor.");
+    dispatch({ tipo: "invalidar", quais: ["rotinas"] });
+  }),
+  // "Enviar teste": um turno de verdade com um payload de exemplo; abre a conversa para ver a resposta com a etiqueta teste.
+  "webhook-testar": (el) => agir(async () => {
+    const r = await api!.testarWebhook(el.dataset.id ?? "");
+    dispatch({ tipo: "invalidar", quais: ["rotinas", ...(r.ids.bloqueada ? (["sua-vez", `conversa:${r.ids.conversaId ?? ""}`] as const) : [])] });
     navegar({ tipo: "conversa", conversaId: r.ids.conversaId ?? "", agenteId: el.dataset.agente ?? "" });
   }),
   "abrir-conversa": (el) => {

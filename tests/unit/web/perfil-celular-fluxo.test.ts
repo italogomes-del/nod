@@ -50,6 +50,14 @@ describe("valores e estados (critérios 2 e 8)", () => {
     const h = renderPerfilCelular({ ...com(nina(), carregadas([rotina("r1", { bloqueio: { slug: "gmail" } })])), gaveta: { agenteId: "a1", nivel: { tipo: "rotinas" } } });
     expect(h).toMatch(/class="pfc-rotina-conserto"><button[^>]*data-act="abrir-conexao"/);
   });
+  it("NOD-84: a rotina webhook no celular não diz 'próxima'; mostra o 'quando' do webhook e o '!' da recusa pendente (Codex, revisão)", () => {
+    const wh = { prefixo: "Ab3", provedor: "Stripe", eventos: [], chamadasHoje: 0, recusadasHoje: 1, recusaPendente: true, ultimas: [{ id: "c", rotinaId: "r1", em: 0, desfecho: "recusada", motivo: "endereco", evento: null, turnoId: null }] };
+    const dto = rotina("r1", { resumo: "Quando o Stripe avisa", webhook: wh, rotina: { id: "r1", agenteId: "a1", instrucao: "Lançar a venda", estado: "ativa", gatilho: "webhook", fusoIana: "America/Sao_Paulo", cron: "0 0 31 2 *" } });
+    const h = renderPerfilCelular({ ...com(nina(), carregadas([dto])), gaveta: { agenteId: "a1", nivel: { tipo: "rotinas" } } });
+    expect(h).toContain("Quando o Stripe avisa");
+    expect(h).not.toContain("próxima");
+    expect(h).toContain("chamada recusada");
+  });
   it("o avatar do bot da pessoa troca forma e cor; o do bot de outra pessoa não", () => {
     expect(renderPerfilCelular(com(nina()))).toContain('data-act="gaveta-avatar" data-id="a1"');
     expect(renderPerfilCelular(com(nina({ ownerId: "outra" })))).not.toContain("gaveta-avatar");

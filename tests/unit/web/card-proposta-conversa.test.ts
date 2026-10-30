@@ -29,6 +29,18 @@ describe("card de proposta na conversa (NOD-399)", () => {
     expect(html.match(/cp-seta/g)).toHaveLength(1);
   });
 
+  it("NOD-84: rotina por webhook no card comum — sem a 'Próxima' sentinela, com o provedor, os eventos e o aviso de dado de fora", () => {
+    const p: Proposta = { tenantId: "t", id: "w1", conversaId: "c", agenteId: "a", kind: "rotina", estado: "pendente", criadoEm: 0, payload: { kind: "rotina", cron: "0 0 1 1 *", fusoIana: "America/Sao_Paulo", instrucao: "Agradecer o pagamento", fonte: "o payload", entregavel: "uma linha", limitesAprovacao: "nada sai", politicaSemDado: "avisar", proximaExecucao: Date.UTC(9999, 0, 1), resumo: "a cada payment_intent.succeeded no Stripe, na hora", gatilho: "webhook", provedor: "Stripe", eventos: ["payment_intent.succeeded"] } };
+    const html = renderTimeline(conversa([p]), estado);
+    expect(linhasVisiveis(html)[0]).toBe("Quando: a cada payment_intent.succeeded no Stripe, na hora");
+    expect(html).not.toContain("<dt>Próxima</dt>");
+    expect(html).not.toContain("9999");
+    expect(html).toContain("<dt>Chamado por</dt><dd>Stripe</dd>");
+    expect(html).toContain("<dt>Eventos</dt><dd>payment_intent.succeeded</dd>");
+    expect(html).toMatch(/<dt>Endereço<\/dt><dd>[^<]*nasce quando você confirmar/);
+    expect(html).toMatch(/<dt>Dado de fora<\/dt><dd>[^<]*pede aprovação/);
+  });
+
   it("rotina com instrução longa: a linha corta e o texto inteiro fica em Detalhes", () => {
     const p: Proposta = { tenantId: "t", id: "r1", conversaId: "c", agenteId: "a", kind: "rotina", estado: "pendente", criadoEm: 0, payload: { kind: "rotina", cron: "0 8 * * *", fusoIana: "America/Sao_Paulo", instrucao: LONGA, fonte: "Gmail", entregavel: "resumo", limitesAprovacao: "nada sai", politicaSemDado: "silêncio", proximaExecucao: 0, resumo: "todo dia às 08:00" } };
     const html = renderTimeline(conversa([p]), estado);

@@ -1,4 +1,5 @@
-import type { RotinaDto } from "../contracts/api.ts";
+import type { RotinaDto, WebhookDaRotinaDto } from "../contracts/api.ts";
+import { meiaNoiteNoFuso } from "../domain/custo-do-dia.ts";
 import type { EsperaRotinaDto } from "../contracts/rotina.ts";
 import { MOTIVOS_ADIADA, type MotivoAdiada } from "../contracts/motivos.ts";
 import type { Concessao } from "../contracts/concessao.ts";
@@ -9,7 +10,7 @@ import { ENTRADA_DA_VOLTA_DA_COTA } from "../domain/cota-da-ia.ts";
 import { iaDaVoltaDaCota } from "../domain/espera-da-cota.ts";
 import { avisoDeJanelasPuladas, janelasPuladas } from "../domain/janelas-puladas.ts";
 import { ondeRodaDaRotina, type MaquinaViva } from "../domain/onde-roda.ts";
-import { resumoCron } from "../domain/rotina-texto.ts";
+import { quandoDaRotina, ehWebhook } from "../domain/rotina-texto.ts";
 import { EXECUCOES_GUARDADAS } from "../shared/constantes.ts";
 import { exigir } from "./apoio-l7.ts";
 import { alvoDoBot } from "./alvo-do-bot.ts";
@@ -32,6 +33,10 @@ export const listarRotinas: CasoDeUso<Record<string, never>, { rotinas: RotinaDt
   const comOndeRoda = minhas.length > 0 && !deps.services.maquinas?.macDoServidor;
   const vivas: MaquinaViva[] = comOndeRoda ? await deps.repos.maquinaTokens.vivasComPlataforma() : [];
   const alvos = new Map<string, Awaited<ReturnType<typeof alvoDoBot>>>();
+  // NOD-84: os endereços vivos e o "!" saem uma vez por chamada, não por rotina.
+  const comWebhook = minhas.some(ehWebhook);
+  const prefixos = new Map(comWebhook ? (await deps.repos.rotinaGatilhos.vivosDaPessoa()).map((g) => [g.rotinaId, g.prefixo]) : []);
+  const pendentes = new Set(comWebhook ? await deps.repos.rotinaChamadas.comRecusaPendente() : []);
   const dtos: RotinaDto[] = [];
   for (const rotina of rotinas) {
     let bloqueio: RotinaDto["bloqueio"] = null;
@@ -39,6 +44,7 @@ export const listarRotinas: CasoDeUso<Record<string, never>, { rotinas: RotinaDt
     let perguntaPendente: RotinaDto["perguntaPendente"];
     let esperaDaCota: RotinaDto["esperaDaCota"];
     let ondeRoda: RotinaDto["ondeRoda"];
+    let webhook: WebhookDaRotinaDto | undefined;
     if (minhas.includes(rotina)) {
       espera = await esperaDaRotina(deps, rotina.id);
       if (!concessoes.has(rotina.agenteId)) concessoes.set(rotina.agenteId, await deps.repos.concessoes.doAgente(rotina.agenteId));
@@ -49,12 +55,29 @@ export const listarRotinas: CasoDeUso<Record<string, never>, { rotinas: RotinaDt
         if (!alvos.has(rotina.agenteId)) alvos.set(rotina.agenteId, await alvoDoBot(deps, rotina.agenteId));
         ondeRoda = ondeRodaDaRotina(alvos.get(rotina.agenteId) ?? null, vivas);
       }
+      if (ehWebhook(rotina)) webhook = await webhookDaRotina(deps, rotina, prefixos.get(rotina.id) ?? null, pendentes.has(rotina.id));
     }
     const puladas = await puladasDe(deps, rotina);
-    dtos.push({ rotina, proximaExecucao: rotina.proximaExecucao, bloqueio, resumo: resumoDe(rotina.cron, rotina.fusoIana), espera, ...(perguntaPendente ? { perguntaPendente } : {}), ...(esperaDaCota ? { esperaDaCota } : {}), ...(ondeRoda ? { ondeRoda } : {}), ...(puladas !== null ? { janelasPuladas: puladas } : {}) });
+    dtos.push({ rotina, proximaExecucao: rotina.proximaExecucao, bloqueio, resumo: resumoDe(rotina), espera, ...(perguntaPendente ? { perguntaPendente } : {}), ...(esperaDaCota ? { esperaDaCota } : {}), ...(ondeRoda ? { ondeRoda } : {}), ...(webhook ? { webhook } : {}), ...(puladas !== null ? { janelasPuladas: puladas } : {}) });
   }
   return { data: { rotinas: dtos } };
 };
+
+/** As chamadas mostradas na gaveta (o log guarda até 50 + 72 h; a tela mostra as mais novas). */
+export const ULTIMAS_CHAMADAS = 20;
+
+async function webhookDaRotina(deps: Deps, rotina: Rotina, prefixo: string | null, recusaPendente: boolean): Promise<WebhookDaRotinaDto> {
+  const hoje = meiaNoiteNoFuso(deps.agora(), rotina.fusoIana);
+  return {
+    prefixo,
+    provedor: rotina.provedor ?? null,
+    eventos: rotina.eventos ?? [],
+    chamadasHoje: await deps.repos.rotinaChamadas.contarDesde(rotina.id, hoje),
+    recusadasHoje: await deps.repos.rotinaChamadas.contarDesde(rotina.id, hoje, "recusada"),
+    recusaPendente,
+    ultimas: await deps.repos.rotinaChamadas.listar(rotina.id, ULTIMAS_CHAMADAS),
+  };
+}
 
 /**
  * definido em 2026-10-16 (NOD-243): a lista diz por que a rotina não está rodando — só quando a ÚLTIMA execução foi
@@ -84,7 +107,7 @@ function ehMotivoAdiada(m: string | null): m is MotivoAdiada {
  * (ADR-045). Conta os horários do cron desde a janela dela até agora; a partir de 3, a lista avisa. Pausada não avisa.
  */
 async function puladasDe(deps: Parameters<typeof listarRotinas>[0], rotina: RotinaDto["rotina"]): Promise<number | null> {
-  if (rotina.estado !== "ativa" || rotina.excluidoEm !== null) return null;
+  if (rotina.estado !== "ativa" || rotina.excluidoEm !== null || ehWebhook(rotina)) return null;
   const aberta = await deps.repos.rotinaJanelas.execucaoAberta(rotina.id, deps.agora());
   if (!aberta) return null;
   return avisoDeJanelasPuladas(janelasPuladas({ cron: rotina.cron, fusoIana: rotina.fusoIana, desde: aberta.instanteAgendado, agora: deps.agora() }));
@@ -113,8 +136,8 @@ async function esperaDaCotaDaRotina(repos: Repos, rotina: Rotina, agora: number)
 }
 
 /** Um cron que o parser não aceita (linha antiga, gravada à mão) não derruba a lista: fica o cron cru. */
-function resumoDe(cron: string, fusoIana: string): string {
-  try { return resumoCron(cron, fusoIana); } catch { return `${cron} (${fusoIana})`; }
+function resumoDe(r: Rotina): string {
+  try { return quandoDaRotina(r); } catch { return `${r.cron} (${r.fusoIana})`; }
 }
 
 /** GET rotinas/:id/execucoes: as 20 mais recentes (Grok Bot), mais recente primeiro. */

@@ -1,4 +1,6 @@
+import { novoEnderecoDaRotina } from "./endereco-webhook.ts";
 import { randomUUID } from "node:crypto";
+import { proximaDaRotina } from "../domain/rotina-texto.ts";
 import type { Agente } from "../contracts/agente.ts";
 import type { Conversa } from "../contracts/conversa.ts";
 import type { RuntimeEvent } from "../contracts/evento.ts";
@@ -8,7 +10,6 @@ import { ehNod } from "../domain/nod.ts";
 import { nomeDaCopia } from "../domain/nome-da-copia.ts";
 import { ordemComCopia } from "../domain/ordem-barra.ts";
 import { redigir } from "../domain/redacao.ts";
-import { proximaJanela } from "../domain/rotina-janela.ts";
 import { eventoDeRotina, textoRotinaAtiva } from "./apoio-l7.ts";
 import { autoriaPessoa, evento } from "./autoria-evento.ts";
 import { concederLote } from "./conceder.ts";
@@ -79,7 +80,10 @@ export const duplicarAgente: CasoDeUso<{ agenteId: string; rotinasPausadas?: boo
 
   let rotinasPausadasNaCopia = 0;
   for (const r of await deps.repos.rotinas.listarDoAgente(original.id)) {
-    const pausar = !dona || input.rotinasPausadas === true;
+    // NOD-84: a rotina webhook da cópia ganha endereço e segredo PRÓPRIOS (o do original continua só dele). Sem a cifra
+    // (modo local) não há endereço: a cópia nasce pausada.
+    const webhook = r.gatilho === "webhook";
+    const pausar = !dona || input.rotinasPausadas === true || (webhook && !deps.services.webhooks);
     if (pausar && r.estado === "ativa") rotinasPausadasNaCopia++;
     const rotina = await deps.repos.rotinas.criar({
       ...r,
@@ -88,9 +92,11 @@ export const duplicarAgente: CasoDeUso<{ agenteId: string; rotinasPausadas?: boo
       conversaId: conversa.id,
       estado: pausar ? "pausada" : r.estado,
       exigeAprovacao: undefined,
-      proximaExecucao: proximaJanela({ cron: r.cron, fusoIana: r.fusoIana, agora }),
+      proximaExecucao: proximaDaRotina(r, agora),
     });
     if (!rotina) throw new ErroDeDominio("estado_invalido", { cause: "rotina não copiada" });
+    const cifra = deps.services.webhooks;
+    if (webhook && cifra) await novoEnderecoDaRotina(deps, rotina.id, (t) => cifra.cifrar(t));
     // Ativa na cópia = a mesma frase de quando a pessoa confirma uma rotina: a conversa diz que ela já roda.
     if (rotina.estado === "ativa") {
       await deps.repos.mensagens.criar({ conversaId: conversa.id, autoria, kind: "sistema", texto: textoRotinaAtiva(rotina, agora), payload: eventoDeRotina(rotina, "criada"), confianca: "confiavel" });

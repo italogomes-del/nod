@@ -114,6 +114,21 @@ export function rotinaJanelasRepo(conn: Conn, escopo: Escopo) {
     },
 
     /**
+     * NOD-84 (ADR-139): quantas execuções desta rotina ainda estão abertas (a mesma régua de `turnoAberto`, 7 dias). A
+     * rotina webhook não espera a anterior acabar, mas recusa a chamada com 429 quando já há PENDENTES_MAX abertas.
+     */
+    async contarAbertas(rotinaId: string, agora: number): Promise<number> {
+      const [l] = await conn<{ n: number }[]>`
+        select count(*)::int as n
+        from rotina_janelas j
+        join turnos t on t.tenant_id = j.tenant_id and t.id = j.turno_id
+        where j.tenant_id = ${escopo.tenantId} and j.rotina_id = ${rotinaId}
+          and j.turno_id is not null and j.instante_agendado > ${data(agora)}::timestamptz - interval '7 days'
+          and (${conn.unsafe(ABERTO)})`;
+      return l?.n ?? 0;
+    },
+
+    /**
      * definido em 2026-10-15 (pacote A3): a mesma execução aberta de `turnoAberto`, com o instante da janela dela — a lista
      * de rotinas conta os horários pulados desde ali (src/domain/janelas-puladas.ts). revisto em 2026-10-16 (integração
      * no #335): lê `turnoAberto` (a mesma régua de 7 dias da NOD-271).

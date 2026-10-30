@@ -164,7 +164,7 @@ export const CODIGOS_ERRO = [
   "integracao_autenticacao",
   // ADR-081 (0060): o Nod não se exclui, não se oculta, não se renomeia, não se move nem se duplica.
   "nod_protegido", "mudou_depois", // NOD-58 (0117): desfazer recusado, a memória mudou depois (409).
-  "cota_provisorio", // NOD-408 (0126): o espaço sem conta usou a cota de turnos novos (429).
+  "cota_provisorio", "webhook_so_compartilhado", // NOD-408 (0126): cota de turnos do espaço sem conta (429). NOD-84 (0131): webhook no modo local (400).
 ] as const;
 export type CodigoErro = (typeof CODIGOS_ERRO)[number];
 /**

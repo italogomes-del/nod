@@ -5,7 +5,7 @@ import type { CasoNod, ContextoFerramenta } from "../contracts/servicos.ts";
 import { ehErroDeDominio, ErroDeDominio } from "../domain/erro.ts";
 import { nomeDoApp } from "../domain/pedido-acesso.ts";
 import { mesmosAcessos } from "../domain/rotina-acessos.ts";
-import { resumoCron, validarAtualizacaoRotina } from "../domain/rotina-texto.ts";
+import { ehWebhook, validarAtualizacaoRotina, quandoDaRotina } from "../domain/rotina-texto.ts";
 import type { PlanoTurno } from "../contracts/plano-turno.ts";
 import { agenteVisivel, assertUuid, autoriaAgente, carimbo, evento, PRAZO_DECISAO_MS } from "./apoio-l7.ts";
 import { aplicarAtualizacaoRotina, aplicarExclusaoRotina, erroRotinaMudou, revisaoAtual } from "./aplicar-proposta-rotina.ts";
@@ -34,7 +34,7 @@ export const listarRotinasDoAgente: CasoNod<Deps, "listar_rotinas"> = async (dep
     data: {
       rotinas: rotinas.map((r) => ({
         id: r.id,
-        quando: resumoCron(r.cron, r.fusoIana),
+        quando: quandoDaRotina(r),
         estado: r.estado,
         instrucao: r.instrucao,
       })),
@@ -167,12 +167,13 @@ export const atualizarRotinaPeloAgente: CasoNod<Deps, "atualizar_rotina"> = asyn
       proximaExecucao: normalizada.proximaExecucao,
       resumo: normalizada.resumo,
       ...(mudaAcessos && acessos ? { acessos } : {}),
-      antes: { resumo: resumoCron(atual.cron, atual.fusoIana), instrucao: atual.instrucao },
+      antes: { resumo: quandoDaRotina(atual), instrucao: atual.instrucao },
+      ...(ehWebhook(atual) ? { gatilho: "webhook" as const } : {}),
       // NOD-159: a confirmação só aplica se a rotina ainda for a que o card mostra.
       revisao: revisaoAtual(atual),
     };
     const precisa = payload.acessos?.length ? ` · precisa de ${payload.acessos.map((a) => `${nomeDoApp(a.conector)} (${a.nivel})`).join(", ")}` : "";
-    const { proposta, events } = await propor(deps, input, payload, `Mudança de rotina proposta: de ${payload.antes.resumo} para ${normalizada.resumo} · próxima execução ${carimbo(normalizada.proximaExecucao, normalizada.fusoIana)}${precisa}`);
+    const { proposta, events } = await propor(deps, input, payload, `Mudança de rotina proposta: de ${payload.antes.resumo} para ${normalizada.resumo}${ehWebhook(atual) ? "" : ` · próxima execução ${carimbo(normalizada.proximaExecucao, normalizada.fusoIana)}`}${precisa}`);
     // ADR-059 (emenda de 2026-09-30): no automático e no total o modo confirma na hora — a proposta fica como
     // registro do que mudou, fechada pela regra, e a rotina já vale.
     const porRegra = await confirmacaoPeloModo(deps, input, { arriscada: false, gravaInstrucao: true });
@@ -192,7 +193,7 @@ export const atualizarRotinaPeloAgente: CasoNod<Deps, "atualizar_rotina"> = asyn
 export const excluirRotinaPeloAgente: CasoNod<Deps, "excluir_rotina"> = async (deps, input) => {
   try {
     const atual = await rotinaDoAgente(deps, input.agenteId, input.rotina_id);
-    const resumo = resumoCron(atual.cron, atual.fusoIana);
+    const resumo = quandoDaRotina(atual);
     const payload: PayloadPropostaRotinaExclusao = { kind: "rotina_exclusao", rotinaId: atual.id, resumo, instrucao: atual.instrucao, revisao: revisaoAtual(atual) };
     const { proposta, events } = await propor(deps, input, payload, `Exclusão de rotina proposta: ${resumo} — ${atual.instrucao}`);
     // ADR-059: excluir é o "apagar" da rotina — o automático só confirma quando a pessoa pediu na conversa.

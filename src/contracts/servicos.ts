@@ -73,7 +73,7 @@ export interface ServicesNod<Trx> {
   };
   /** A tela fala por máquina (2026-10-09): a leitura e o nome de cada máquina (trabalho.ts). Ausente = só a junta. */ maquinas?: ServicoDasMaquinas;
   /** ADR-115 (2026-10-18): o revisor do Automático (revisao.ts). Ausente ou `config.ligado: false` = a decisão de hoje. */ revisor?: ServicoRevisor;
-  relogio: () => number;
+  /** NOD-84 (ADR-139): a cifra do endereço do webhook; ausente = modo local. */ webhooks?: { cifrar(texto: string): string }; relogio: () => number;
   tokenTurno: {
     /** definido em 2026-09-16 (L9, pendência L5 §2): cunhar RECEBE a identidade — `autorizar` a devolve, logo ela entra aqui. */
     cunhar(turnoId: string, identidade: IdentidadeSemTurno): string;

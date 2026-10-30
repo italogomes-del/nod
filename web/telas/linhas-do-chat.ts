@@ -10,6 +10,7 @@ import { custoDaFrente } from "./modo-dev.ts";
 import { linhaDaFila } from "../lib/fila-do-pedido.ts";
 import { textoFormatado } from "../lib/texto-formatado.ts";
 import { mesmoDia, PAUSA_QUE_ABRE_BLOCO_MS } from "./divisores-de-data.ts";
+import { etiquetaDoWebhook } from "./webhook.ts";
 
 /**
  * Chat limpo (definido em 2026-10-07, #191/#195, ADR-083): o que NÃO é a conversa entre a pessoa e o bot sai do caminho.
@@ -311,7 +312,9 @@ export function planejarLinhas(mensagens: readonly Mensagem[], estado: Estado): 
     if (!u.tipo) continue;
     const execucoes = u.mensagens.flatMap((m) => (m.payload?.kind === "rotina_execucao" ? [m.payload.desfecho] : []));
     const falou = u.tipo !== "rotina" || execucoes.some((d) => !DESFECHOS_SILENCIOSOS.has(d));
-    const etiqueta = u.tipo === "rotina" ? `da rotina ${nomeDaRotina(estado, u) ?? ""}`.trim() : `da task ${tituloDe(u)}`;
+    // NOD-84: a resposta da rotina por webhook leva "webhook" (ou "teste", a do Enviar teste) no lugar de "da rotina …".
+    const doWebhook = u.tipo === "rotina" ? etiquetaDoWebhook(estado.rotinas.find((r) => r.rotina.id === u.rotinaId), u.mensagens.map((m) => m.turnoId)) : null;
+    const etiqueta = doWebhook ?? (u.tipo === "rotina" ? `da rotina ${nomeDaRotina(estado, u) ?? ""}`.trim() : `da task ${tituloDe(u)}`);
     // ADR-099 (I7 revista): na rotina, o turno do dono que abriu frentes ("comecei…") não é o resultado — o resultado é o
     // do retorno das frentes; até ele chegar a execução não acabou.
     const abriramFrentes = new Set(u.tipo === "rotina" ? u.mensagens.flatMap((m) => (m.payload?.kind === "frentes_abertas" && m.turnoId ? [m.turnoId] : [])) : []);

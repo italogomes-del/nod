@@ -28,6 +28,9 @@ const ROTINA: Rotina = {
   criadoEm: 500,
   excluidoEm: null,
   acessos: [GMAIL, SLACK],
+  gatilho: "horario",
+  provedor: null,
+  eventos: null,
 };
 const rev = (r: Rotina) => revisaoDaRotina(r, sha256);
 

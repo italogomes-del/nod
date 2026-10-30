@@ -34,6 +34,7 @@ export const TABELA_ERROS: Readonly<Record<CodigoErro, { status: number; mensage
   dono_imutavel: { status: 403, mensagem: "O dono do agente não pode ser trocado." },
   texto_vazio: { status: 400, mensagem: "Escreva algo antes de enviar." },
   cota_provisorio: { status: 429, mensagem: "Você usou as mensagens sem conta. Crie uma conta para continuar: nada do que você fez se perde, e sua mensagem ficou no campo." },
+  webhook_so_compartilhado: { status: 400, mensagem: "Rotina por webhook só funciona no nod compartilhado, que tem um endereço público." },
   nod_protegido: { status: 403, mensagem: "O Nod fica sempre com você: não dá para excluir, ocultar, renomear, mover nem duplicar." },
 };
 
@@ -58,6 +59,14 @@ export type OrigemRequisicao = { metodo: string; caminho: string };
 
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
 
+/** NOD-84 (ADR-139): o token do webhook mora no path (`/api/w/<token>`) e nunca vai ao log. */
+const TOKEN_WEBHOOK = /\/w\/[^/?]+/g;
+
+/** A rota da requisição para o log: sem query, ids viram `:id` e o token do webhook vira `:token`. */
+export function rotaDoLog(origem: OrigemRequisicao | undefined): string | undefined {
+  return origem?.caminho.split("?")[0]?.replace(TOKEN_WEBHOOK, "/w/:token").replace(UUID, ":id");
+}
+
 /**
  * definido em 2026-09-24: a recusa de domínio (4xx) também vai para o log, com a rota e o `cause`.
  * Motivo: um banner `entrada_invalida` na tela da Nina não deixou rastro nenhum no servidor — havia
@@ -70,7 +79,7 @@ function logarRecusa(err: ErroDeDominio, status: number, origem: OrigemRequisica
     codigo: err.codigo,
     status,
     metodo: origem?.metodo,
-    rota: origem?.caminho.split("?")[0]?.replace(UUID, ":id"),
+    rota: rotaDoLog(origem),
     // NOD-158: redige antes de cortar; cortar primeiro deixaria um pedaço de segredo que o log não reconhece.
     causa: redigirECortar(bruta, 200) ?? undefined,
   });
@@ -92,7 +101,7 @@ export function responderErro(res: ServerResponse, err: unknown, origem?: Origem
   if (err instanceof ErroBancoOcupado) {
     // NOD-266: pool cheio além do prazo. 503 com a mensagem genérica (nada do driver sai) e o correlation_id do log
     // `banco_ocupado`, gerado antes do BEGIN — a requisição ainda não tinha contexto de tx.
-    log("aviso", "requisicao_recusada", { codigo: "banco_ocupado", status: 503, metodo: origem?.metodo, rota: origem?.caminho.split("?")[0]?.replace(UUID, ":id"), correlation_id: err.correlationId });
+    log("aviso", "requisicao_recusada", { codigo: "banco_ocupado", status: 503, metodo: origem?.metodo, rota: rotaDoLog(origem), correlation_id: err.correlationId });
     const corpo: ErroDto = { codigo: "banco_ocupado", mensagem: MENSAGEM_FALHA_INTERNA, correlation_id: err.correlationId };
     json(res, 503, corpo);
     return;
@@ -101,7 +110,7 @@ export function responderErro(res: ServerResponse, err: unknown, origem?: Origem
   if (ehTimeoutDaTx(err)) {
     // Revisão do PR #321: timeout da tx (57014/55P03/25P02) é o banco sob pressão, não erro de programa: 503 como o
     // banco_ocupado do prazo de conexão. O sqlstate vai para o log (a causa), nunca a mensagem do driver.
-    log("aviso", "requisicao_recusada", { codigo: "banco_ocupado", status: 503, metodo: origem?.metodo, rota: origem?.caminho.split("?")[0]?.replace(UUID, ":id"), causa: String(Reflect.get(Object(err), "code")), correlation_id: correlationId });
+    log("aviso", "requisicao_recusada", { codigo: "banco_ocupado", status: 503, metodo: origem?.metodo, rota: rotaDoLog(origem), causa: String(Reflect.get(Object(err), "code")), correlation_id: correlationId });
     json(res, 503, { codigo: "banco_ocupado", mensagem: MENSAGEM_FALHA_INTERNA, correlation_id: correlationId } satisfies ErroDto);
     return;
   }

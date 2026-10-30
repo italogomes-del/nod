@@ -4,6 +4,7 @@ import { botao, esc, hora, paragrafos } from "../lib/render.ts";
 import { iconeDaLinha } from "../lib/card-proposta.ts";
 import { ondeLegivel } from "./card-pasta.ts";
 import { acaoHumana } from "./sua-vez.ts";
+import { ehRotinaWebhook, enderecoNoCard, origemDaTela } from "./webhook.ts";
 
 /**
  * O cartão encolhido (definido em 2026-10-18, plano do chat limpo, Parte 3 · 3A, PR 4; protótipo "D3A · Cartão encolhido",
@@ -164,8 +165,12 @@ function daProposta(m: Mensagem, p: Payload<"proposta_decidida">, estado: Estado
       ? { decisaoId: p.propostaId, titulo: p.titulo, resultado: "Guardada no cofre", marca: "ok", anuncio: `${p.titulo}: guardada no cofre`, rodape: `<p class="ce-rodape"><span>O bot não vê a chave.</span>${botao("abrir-avancado", "Trocar", { classe: "link", aria: "Trocar a chave em Configurações avançadas" })}</p>` }
       : { decisaoId: p.propostaId, titulo: p.titulo, resultado: `Deixada de lado${quem}`, marca: null, anuncio: `${p.titulo}: deixada de lado` };
   }
+  // NOD-84: a rotina por webhook confirmada guarda o endereço no card encolhido (mascarado, copiar e Enviar teste). O id
+  // da proposta de rotina é o id da rotina.
+  const webhook = p.estado === "confirmada" && p.tipo === "rotina" ? estado.rotinas.find((r) => r.rotina.id === p.propostaId && r.rotina.ownerId === estado.sessao?.pessoaId) : undefined;
+  const rodape = webhook && ehRotinaWebhook(webhook) && webhook.rotina.excluidoEm === null ? enderecoNoCard(webhook, origemDaTela(), estado.agora) : "";
   return p.estado === "confirmada"
-    ? { decisaoId: p.propostaId, titulo: p.titulo, resultado: `Confirmado${quem}`, marca: "ok", anuncio: `Confirmado: ${p.titulo}` }
+    ? { decisaoId: p.propostaId, titulo: p.titulo, resultado: `Confirmado${quem}`, marca: "ok", anuncio: `Confirmado: ${p.titulo}`, ...(rodape ? { rodape } : {}) }
     : { decisaoId: p.propostaId, titulo: p.titulo, resultado: `Recusado${quem}`, marca: null, anuncio: `Recusado: ${p.titulo}` };
 }
 

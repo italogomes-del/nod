@@ -3,7 +3,7 @@ import { ehNod } from "../domain/nod.ts";
 import type { AppDoColega, ColegaListado } from "../contracts/ferramentas-perfil.ts";
 import type { CasoNod } from "../contracts/servicos.ts";
 import { INSTRUCAO_ROTINA_NO_PROMPT } from "../domain/prompt-sistema.ts";
-import { resumoCron } from "../domain/rotina-texto.ts";
+import { quandoDaRotina } from "../domain/rotina-texto.ts";
 import { agenteVisivel, assertUuid } from "./apoio-l7.ts";
 import type { Deps } from "./tipos.ts";
 
@@ -67,7 +67,7 @@ export const verColegas: CasoNod<Deps, "ver_colegas"> = async (deps, input) => {
       nome: a.nome,
       titulo: a.titulo,
       descricao: inteiro ? a.descricao : cortar(a.descricao, DESCRICAO_RESUMIDA),
-      rotinas: rotinas.map((r) => ({ id: r.id, quando: resumoCron(r.cron, r.fusoIana), estado: r.estado, instrucao: cortar(r.instrucao, inteiro ? INSTRUCAO_INTEIRA : INSTRUCAO_ROTINA_NO_PROMPT) })),
+      rotinas: rotinas.map((r) => ({ id: r.id, quando: quandoDaRotina(r), estado: r.estado, instrucao: cortar(r.instrucao, inteiro ? INSTRUCAO_INTEIRA : INSTRUCAO_ROTINA_NO_PROMPT) })),
       apps,
     });
   }

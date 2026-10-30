@@ -35,6 +35,8 @@ import { relatosRepo } from "./relatos.repo.ts";
 import { reacoesRepo } from "./reacoes.repo.ts";
 import { rotinaExecucoesRepo } from "./rotina-execucoes.repo.ts";
 import { rotinaJanelasRepo } from "./rotina-janelas.repo.ts";
+import { rotinaGatilhosRepo } from "./rotina-gatilhos.repo.ts";
+import { rotinaChamadasRepo } from "./rotina-chamadas.repo.ts";
 import { rotinasRepo } from "./rotinas.repo.ts";
 import { salasRepo } from "./salas.repo.ts";
 import type { Repos } from "./tipos.ts";
@@ -99,6 +101,8 @@ export function criarRepos(conn: Conn, escopo: Escopo): Repos {
     itensAprovacao: itensAprovacaoRepo(conn, escopo),
     rotinas: rotinasRepo(conn, escopo),
     rotinaJanelas: rotinaJanelasRepo(conn, escopo),
+    rotinaGatilhos: rotinaGatilhosRepo(conn, escopo),
+    rotinaChamadas: rotinaChamadasRepo(conn, escopo),
     rotinaExecucoes: rotinaExecucoesRepo(conn, escopo),
     salas: salasRepo(conn, escopo),
     composio: composioRepo(conn, escopo),

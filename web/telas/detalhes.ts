@@ -20,6 +20,7 @@ import { blocoEsperando, conectorDoApp, nivelDoBot, ROTULO_NIVEL, situacaoDoApp,
 import { logoApp } from "./marketplace.ts";
 import { renderMemoriaNaGaveta } from "./memoria.ts";
 import { renderNovaRotinaNaGaveta } from "./nova-rotina.ts";
+import { blocoDasChamadas, blocoDoEndereco, ehRotinaWebhook, ICONE_RAIO, origemDaTela, quandoNaLista } from "./webhook.ts";
 import { textoMotivo } from "./negacao.ts";
 import { falhaVisivel } from "../lib/fora-do-ar.ts";
 import { renderGavetaTrabalhos } from "./trabalhos.ts";
@@ -179,13 +180,17 @@ function abaDetalhes(estado: Estado, a: Bot, dona: boolean): string {
   // definido em 2026-09-24 (revisão da interface): a chave liga/desliga fica na linha; o resto da rotina abre no nível
   // dela. Revisto em 2026-10-23 (ADR-125): a parada por falta de acesso é uma linha neutra (só o ícone tem cor), com o
   // botão de texto de um clique (emenda da ADR-044).
-  const linhaRotina = ({ rotina: r, proximaExecucao, bloqueio, resumo }: RotinaDto) => {
+  const linhaRotina = (dto: RotinaDto) => {
+    const { rotina: r, proximaExecucao, bloqueio, resumo } = dto;
     const ativa = r.estado === "ativa";
     const rotulo = bloqueio ? "Parada" : ativa ? "Ativa" : "Pausada";
-    const quando = [resumo ? capitalizar(semFuso(resumo)) : "", ativa && !bloqueio ? `próxima ${interpolar(proximaExecucao, estado.agora)}` : ""].filter(Boolean).join(" · ");
+    // NOD-84: a rotina por webhook não tem "próxima"; o resumo é "Quando o Stripe avisa · última às 10:42", e a recusa
+    // ainda sem chamada aceita depois dela acende o "!" (com texto ao leitor de tela).
+    const wh = ehRotinaWebhook(dto) ? quandoNaLista(dto) : null;
+    const quando = wh ? wh.quando : [resumo ? capitalizar(semFuso(resumo)) : "", ativa && !bloqueio ? `próxima ${interpolar(proximaExecucao, estado.agora)}` : ""].filter(Boolean).join(" · ");
     const chave = dona ? `<button type="button" class="chave" role="switch" aria-checked="${ativa}" data-act="${ativa ? "pausar-rotina" : "ativar-rotina"}" data-id="${esc(r.id)}" aria-label="${ativa ? "Pausar" : "Ativar"} a rotina ${esc(r.instrucao)}"><span></span></button>` : "";
     const parada = bloqueio ? `<div class="gvn-parada"><span class="gvn-parada-icone" aria-hidden="true">${ICONE.alerta}</span><span>${esc(`${fraseDaParada(bloqueio)} ${desdeDaParada(bloqueio, estado.agora)}.`)}</span>${dona ? botaoDaParada(bloqueio, "gvn-acao-texto") : ""}</div>` : "";
-    return `<li class="detalhe-rotina rotina-${esc(r.estado)}${bloqueio ? " gvn-rotina-parada" : ""}">${linha(`<span class="gv-linha-txt"><b title="${esc(r.instrucao)}">${esc(r.instrucao)}</b><small><span class="gvn-estado">${rotulo}</span>${quando ? ` · ${esc(quando)}` : ""}</small></span>`, irPara(a, "rotina", r.id))}${chave}${parada}</li>`;
+    return `<li class="detalhe-rotina rotina-${esc(r.estado)}${bloqueio ? " gvn-rotina-parada" : ""}">${linha(`<span class="gv-linha-txt"><b title="${esc(r.instrucao)}">${esc(r.instrucao)}</b><small>${wh?.marca ?? ""}<span class="gvn-estado">${rotulo}</span>${quando ? ` · ${esc(quando)}` : ""}</small></span>`, irPara(a, "rotina", r.id))}${chave}${parada}</li>`;
   };
   const rotinasHtml = `<section class="gv-secao"><div class="gv-secao-cab"><h3>Rotinas</h3>${dona ? `<button type="button" class="gv-link" ${irPara(a, "nova-rotina")}>+ Nova</button>` : ""}</div>
       ${rotinas.length ? `<ul class="gv-cartao">${rotinas.map(linhaRotina).join("")}</ul>` : `<p class="gvn-vazio">Nenhuma rotina ainda. Peça a ${esc(a.nome)} para fazer algo toda manhã e ela aparece aqui.</p>`}
@@ -408,6 +413,7 @@ function nivelRotina(estado: Estado, a: Bot, id: string): Nivel {
       : `<ul class="gv-execucoes">${exec.slice(0, 5).map((e, i) => `<li class="exec exec-${esc(e.desfecho)}"><span class="gv-exec-ponto" aria-hidden="true"></span><span class="gv-exec-quando">${esc(dataHora(e.em, r.fusoIana))}</span><span>${esc(rotuloExecucao(e, r.fusoIana))}</span>${i === 0 && atalhoNaExecucao ? `<span class="exec-acao">${ATALHO_SEMPRE_LIGADA}</span>` : ""}</li>`).join("")}</ul>`;
   const parada = bloqueio ? `<div class="gvn-parada" role="status"><span class="gvn-parada-icone" aria-hidden="true">${ICONE.alerta}</span><span>${esc(`${fraseDaParada(bloqueio)} ${desdeDaParada(bloqueio, estado.agora)}.`)}</span>${botaoDaParada(bloqueio, "gvn-acao-texto")}</div>` : "";
   const detalhe = (rotulo: string, valor: string) => (valor ? `<dt>${esc(rotulo)}</dt><dd>${esc(valor)}</dd>` : "");
+  if (ehRotinaWebhook(dto)) return nivelRotinaWebhook(estado, dto, parada);
   const corpo = `${parada}
     <section class="gv-bloco"><h3>Instrução</h3><p class="gv-texto">${esc(r.instrucao)}</p></section>
     <section class="gv-bloco"><h3>Quando executar</h3><p class="gv-quando">${ICONE.relogio}<span>${esc(resumo ? capitalizar(resumo) : `${r.cron} (${r.fusoIana})`)}</span></p>
@@ -418,6 +424,30 @@ function nivelRotina(estado: Estado, a: Bot, id: string): Nivel {
   const ajustar = `Ajuste a rotina “${resumirInstrucao(r.instrucao)}”: `;
   const rodape = `<button type="button" class="gv-bt" data-act="${ativa ? "pausar-rotina" : "ativar-rotina"}" data-id="${esc(r.id)}">${ativa ? "Pausar" : "Ativar"}</button>
        <button type="button" class="gv-bt" data-act="executar-rotina" data-id="${esc(r.id)}" data-agente="${esc(r.agenteId)}"${estado.ocupado ? " disabled" : ""}>Testar agora</button>
+       <button type="button" class="gv-bt" data-act="preencher-prompt" data-texto="${esc(ajustar)}" title="Escreve o pedido de ajuste no campo da conversa">Ajustar</button>`;
+  return { titulo: r.instrucao, corpo, rodape };
+}
+
+/**
+ * NOD-84 (protótipo v3, "O detalhe do webhook"): os mesmos blocos da rotina, com três trocas — "Quando disparar" (o raio),
+ * o Endereço (mascarado, copiar, gerar novo) e as Últimas chamadas. "Testar agora" vira "Enviar teste" (avisa que roda
+ * um turno de verdade). Excluir continua pela conversa (não há rota de excluir; suposição registrada no PR).
+ */
+function nivelRotinaWebhook(estado: Estado, dto: RotinaDto, parada: string): Nivel {
+  const r = dto.rotina;
+  const ativa = r.estado === "ativa";
+  const dona = r.ownerId === estado.sessao?.pessoaId;
+  const eventos = dto.webhook?.eventos.length ? `<small class="gv-proxima">Só ${esc(dto.webhook.eventos.join(", "))}</small>` : "";
+  const detalhe = (rotulo: string, valor: string) => (valor ? `<dt>${esc(rotulo)}</dt><dd>${esc(valor)}</dd>` : "");
+  const corpo = `${parada}
+    <section class="gv-bloco"><h3>Instrução</h3><p class="gv-texto">${esc(r.instrucao)}</p></section>
+    <section class="gv-bloco"><h3>Quando disparar</h3><p class="gv-quando">${ICONE_RAIO}<span>${esc(dto.resumo ? capitalizar(dto.resumo) : "Quando o provedor avisa")}</span></p>${ativa ? eventos : '<small class="gv-proxima">Pausada: as chamadas ficam no registro e não rodam.</small>'}</section>
+    ${blocoDoEndereco(dto, origemDaTela(), dona)}
+    ${blocoDasChamadas(dto)}
+    <section class="gv-bloco"><h3>Combinado</h3><dl class="gv-dl">${detalhe("Resultado", r.entregavel)}${detalhe("Antes de agir fora do nod", r.limitesAprovacao)}${detalhe("Se faltar informação", r.politicaSemDado)}</dl></section>`;
+  const ajustar = `Ajuste a rotina “${resumirInstrucao(r.instrucao)}”: `;
+  const rodape = `<button type="button" class="gv-bt" data-act="${ativa ? "pausar-rotina" : "ativar-rotina"}" data-id="${esc(r.id)}">${ativa ? "Pausar" : "Ativar"}</button>
+       ${dona ? `<button type="button" class="gv-bt" data-act="webhook-testar" data-id="${esc(r.id)}" data-agente="${esc(r.agenteId)}" title="${ativa ? "Roda um turno de verdade com um payload de exemplo; o bot não lança nada" : "Ative a rotina para testar"}"${estado.ocupado || !ativa ? " disabled" : ""}>Enviar teste</button>` : ""}
        <button type="button" class="gv-bt" data-act="preencher-prompt" data-texto="${esc(ajustar)}" title="Escreve o pedido de ajuste no campo da conversa">Ajustar</button>`;
   return { titulo: r.instrucao, corpo, rodape };
 }

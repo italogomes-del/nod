@@ -132,7 +132,7 @@ describe("redigirSegredos (NOD-158)", () => {
   // 4000 fica bem acima do maior teto (256), senão o próprio teto ainda pareceria quadrático.
   // São 11 execuções por caso (aquecimento + 5 de cada tamanho): com load ~950 o `eyJ-` passou dos 5 s padrão
   // (medido em 2026-10-07), daí o PRAZO_GUARDA (30 s) por caso. Uma regex quadrática falha pela razão, não pelo prazo.
-  it.each(["a=", "a-", "a.", "ab-", "a-ke", "eyJ-", "token=", "x://", "senha=", "a_password", "password:\"", "Authorization: Basic ", "APASSWORD", "-u a", "--user ", "sshpass -p", "mysql a -p", "?sig=", "SG.aaaaaaaaaaaaaaaa", "1234567:AA"])("o custo de `%s` repetido cresce linear (4000 → 16000 caracteres)", PRAZO_GUARDA, (unidade) => {
+  it.each(["a=", "a-", "a.", "ab-", "a-ke", "eyJ-", "token=", "x://", "senha=", "a_password", "password:\"", "Authorization: Basic ", "APASSWORD", "-u a", "--user ", "sshpass -p", "mysql a -p", "?sig=", "SG.aaaaaaaaaaaaaaaa", "1234567:AA", "gt_aaaaaaaa-", "ghs_a-"])("o custo de `%s` repetido cresce linear (4000 → 16000 caracteres)", PRAZO_GUARDA, (unidade) => {
     const razao = razaoDeCrescimento((n) => rep(unidade, Math.ceil(n / unidade.length)), redigirSegredos, 4000);
     expect(razao).toBeLessThan(RAZAO_MAXIMA_LINEAR);
   });
@@ -210,5 +210,16 @@ describe("as costuras dos fornecedores saem redigidas", () => {
     expect(ultimaLinhaUtil(`2026-10-05T14:47:05Z ERROR boot\n2026-10-05T14:47:06Z ERROR env OPENAI_API_KEY=${OPENAI} rejeitada\n`)).toBe(`ERROR env OPENAI_API_KEY=${m(OPENAI.length)} rejeitada`);
     expect(interpretarCodex(JSON.stringify({ type: "turn.failed", error: { message: `auth ${OPENAI}` } }))).toMatchObject([{ erroCru: `auth ${m(OPENAI.length)}` }]);
     expect(erroDoCodex(JSON.stringify({ type: "error", message: `token=${OPENAI}` }))).toBe(`token=${m(OPENAI.length)}`);
+  });
+});
+
+describe("NOD-84: o endereço do webhook e o segredo HMAC no redator comum", () => {
+  it("gt_<alegado>.<segredo> e ghs_<base64url> saem inteiros", () => {
+    const token = `gt_${Buffer.from('{"t":"a","p":"b","r":"c"}').toString("base64url")}.${"x_Y-".repeat(10)}abc`;
+    const ghs = `ghs_${"Ab-_".repeat(10)}xyz`;
+    const out = redigirSegredos(`url=https://nod/api/w/${token} e ${ghs}`);
+    expect(out).not.toContain("x_Y-");
+    expect(out).not.toContain("Ab-_");
+    expect(out).toContain("https://nod/api/w/«redigido");
   });
 });

@@ -40,6 +40,7 @@ import { ehMotivoDaQueda } from "../../src/domain/incidente.ts";
 import { MOTIVOS_DE_QUEDA, MOTIVOS_FALHA_SEM_QUEDA, QUEDAS_FORA_DO_TETO } from "../../src/domain/pedido-parado.ts";
 import { cotaSegura, ehVoltaDoFundo, ENTRADA_DA_RETOMADA_DA_QUEDA, ENTRADA_DA_VOLTA_DA_COTA, entradaLevadaComPedido, tipoParaCota, type PortaoDaCota } from "../../src/domain/cota-da-ia.ts";
 import { MODO_APROVACAO_INICIAL } from "../../src/domain/modo-aprovacao.ts";
+import { recusaPendente } from "../../src/domain/rotina-webhook.ts";
 import { harnessFixado } from "../../src/domain/harness.ts";
 import { iaDoModelo } from "../../src/domain/ia-do-modelo.ts";
 import { HARNESS_LEGADO } from "../../src/contracts/harness.ts";
@@ -55,6 +56,8 @@ import type { RitmoRotina } from "../../src/contracts/rotina-ritmo.ts";
 import type { Parada } from "../../src/repositories/paradas.repo.ts";
 import type { Pessoa } from "../../src/repositories/pessoas.repo.ts";
 import type { JanelaReivindicada } from "../../src/repositories/rotina-janelas.repo.ts";
+import type { GatilhoVivo } from "../../src/repositories/rotina-gatilhos.repo.ts";
+import type { ChamadaWebhook } from "../../src/contracts/rotina.ts";
 import type { Repos } from "../../src/repositories/tipos.ts";
 import { EXECUCOES_GUARDADAS, LEASE_MS } from "../../src/shared/constantes.ts";
 import type { Escopo } from "../../src/shared/types.ts";
@@ -168,6 +171,9 @@ export type BancoMemoria = {
   catcher: { tenantId: string; id: string; turnoId: string; tipo: string; dados: Record<string, unknown>; em: number }[];
   events: (EventoGravavel & { tenantId: string; id: string; createdAt: number })[];
   outbox: (ItemOutbox & { tenantId: string; ownerId: string; entregueEm: number | null; abandonadoEm: number | null; canceladoEm: number | null })[];
+  /** NOD-84 (0130): endereço secreto e log de chamadas do webhook. */
+  rotinaGatilhos: (GatilhoVivo & { tenantId: string; ownerId: string; revogadoEm: number | null })[];
+  rotinaChamadas: (ChamadaWebhook & { tenantId: string; ownerId: string; entregaId: string | null })[];
   maquinaTokens: { tenantId: string; ownerId: string; id: string; nome: string; prefixo: string; hash: Buffer; criadaEm: number; ultimoUsoEm: number | null; expiraEm: number | null; revogadaEm: number | null; plataforma?: "darwin" | "linux" | null; papel?: "motor" | "computador" }[];
   /** NOD-94 (0105): máquinas instaladas por SSH. */
   maquinasSsh: (MaquinaSsh & { tenantId: string; ownerId: string })[];
@@ -247,6 +253,8 @@ export function criarBancoMemoria(): { banco: BancoMemoria; repos(escopo?: Escop
     catcher: [],
     events: [],
     outbox: [],
+    rotinaGatilhos: [],
+    rotinaChamadas: [],
     maquinaTokens: [],
     maquinasSsh: [],
     lotes: [],
@@ -273,6 +281,24 @@ const semDonoTrabalho = ({ ownerId: _dona, ...t }: Trabalho & { ownerId: string 
 
 function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
   const doTenant = <T extends { tenantId: string }>(lista: T[]) => lista.filter((x) => x.tenantId === escopo.tenantId);
+  const daDona = <T extends { tenantId: string; ownerId: string }>(lista: T[]) => lista.filter((x) => x.tenantId === escopo.tenantId && x.ownerId === escopo.pessoaId);
+  /** As execuções abertas da rotina, mais nova primeiro (a régua de turnoAberto; NOD-84 conta para o teto do webhook). */
+  const abertasDaRotina = async (rotinaId: string, ref: number) => {
+    const minhas = doTenant(b.janelas).filter((j) => j.rotinaId === rotinaId && j.turnoId !== null);
+    const vivo = (x: Turno) => x.estado === "pendente" || x.estado === "despachando";
+    const abertas = minhas
+      .filter((j) => j.instanteAgendado > ref - 7 * 86_400_000)
+      .filter((j) => {
+        const t = doTenant(b.turnos).find((x) => x.id === j.turnoId);
+        // ADR-099 (I7 revista): sem trabalho, a cadeia de retomadas da execução (até 10 saltos).
+        const cadeia = new Set([t?.id]);
+        for (let n = 0; n < 10; n++) for (const v of doTenant(b.turnos)) if (v.origem === "retomada" && v.retomaTurnoId && cadeia.has(v.retomaTurnoId)) cadeia.add(v.id);
+        return t !== undefined && (vivo(t) || (Boolean(t.trabalhoId) && doTenant(b.turnos).some((v) => v.trabalhoId === t.trabalhoId && vivo(v)))
+          || (!t.trabalhoId && doTenant(b.turnos).some((v) => cadeia.has(v.id) && vivo(v))));
+      })
+      .sort((x, y) => y.instanteAgendado - x.instanteAgendado);
+    return abertas;
+  };
   /** A regra de seguradoPelaCotaSql (turnos.repo.ts): a IA fixada (ou a do modelo), o tipo do turno e o portão da cota. */
   const seguradoPelaCota = (t: Turno, cota: PortaoDaCota): boolean => {
     if (t.origem === "ligacao") return false;
@@ -2393,6 +2419,9 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           criadoEm: agora(),
           excluidoEm: null,
           acessos: r.acessos ?? null,
+          gatilho: r.gatilho ?? "horario",
+          provedor: r.provedor ?? null,
+          eventos: r.eventos ?? null,
         };
         b.rotinas.push(rotina);
         return rotina;
@@ -2477,20 +2506,11 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         for (let n = 0; n < 10; n++) for (const v of doTenant(b.turnos)) if (v.origem === "retomada" && v.retomaTurnoId && cadeia.has(v.retomaTurnoId)) cadeia.add(v.id);
         return doTenant(b.turnos).find((v) => v.id !== raizId && v.id !== exceto && cadeia.has(v.id) && (v.estado === "pendente" || v.estado === "despachando"))?.id ?? null;
       },
+      async contarAbertas(rotinaId, ref) {
+        return (await abertasDaRotina(rotinaId, ref)).length;
+      },
       async turnoAberto(rotinaId, ref) {
-        const minhas = doTenant(b.janelas).filter((j) => j.rotinaId === rotinaId && j.turnoId !== null);
-        const vivo = (x: Turno) => x.estado === "pendente" || x.estado === "despachando";
-        const abertas = minhas
-          .filter((j) => j.instanteAgendado > ref - 7 * 86_400_000)
-          .filter((j) => {
-            const t = doTenant(b.turnos).find((x) => x.id === j.turnoId);
-            // ADR-099 (I7 revista): sem trabalho, a cadeia de retomadas da execução (até 10 saltos).
-            const cadeia = new Set([t?.id]);
-            for (let n = 0; n < 10; n++) for (const v of doTenant(b.turnos)) if (v.origem === "retomada" && v.retomaTurnoId && cadeia.has(v.retomaTurnoId)) cadeia.add(v.id);
-            return t !== undefined && (vivo(t) || (Boolean(t.trabalhoId) && doTenant(b.turnos).some((v) => v.trabalhoId === t.trabalhoId && vivo(v)))
-              || (!t.trabalhoId && doTenant(b.turnos).some((v) => cadeia.has(v.id) && vivo(v))));
-          })
-          .sort((x, y) => y.instanteAgendado - x.instanteAgendado);
+        const abertas = await abertasDaRotina(rotinaId, ref);
         const j = abertas[0];
         const t = j ? doTenant(b.turnos).find((x) => x.id === j.turnoId) : undefined;
         return j && t
@@ -3114,6 +3134,62 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           .sort((x, y) => y.em - x.em)
           .slice(0, limite)
           .map(({ tenantId: _t, ...r }) => r);
+      },
+    },
+    rotinaGatilhos: {
+      async criar(e, agora) {
+        for (const g of daDona(b.rotinaGatilhos)) if (g.rotinaId === e.rotinaId && g.revogadoEm === null) g.revogadoEm = agora;
+        const g = { tenantId: escopo.tenantId, ownerId: escopo.pessoaId, id: randomUUID(), rotinaId: e.rotinaId, prefixo: e.prefixo, hash: e.hash, tokenCifrado: e.tokenCifrado, segredoHmacCifrado: e.segredoHmacCifrado, criadoEm: agora, assinadoEm: null, revogadoEm: null };
+        b.rotinaGatilhos.push(g);
+        return { id: g.id, rotinaId: g.rotinaId, prefixo: g.prefixo, criadoEm: g.criadoEm, assinadoEm: null };
+      },
+      async vivoDaRotina(rotinaId) {
+        const g = daDona(b.rotinaGatilhos).find((x) => x.rotinaId === rotinaId && x.revogadoEm === null);
+        return g ? { id: g.id, rotinaId: g.rotinaId, prefixo: g.prefixo, criadoEm: g.criadoEm, assinadoEm: g.assinadoEm, hash: g.hash, tokenCifrado: g.tokenCifrado, segredoHmacCifrado: g.segredoHmacCifrado } : null;
+      },
+      async vivosDaPessoa() {
+        return daDona(b.rotinaGatilhos).filter((x) => x.revogadoEm === null).map((g) => ({ id: g.id, rotinaId: g.rotinaId, prefixo: g.prefixo, criadoEm: g.criadoEm, assinadoEm: g.assinadoEm }));
+      },
+      async revogarDaRotina(rotinaId, agora) {
+        let n = 0;
+        for (const g of daDona(b.rotinaGatilhos)) if (g.rotinaId === rotinaId && g.revogadoEm === null) { g.revogadoEm = agora; n++; }
+        return n;
+      },
+      async marcarAssinado(id, agora) {
+        const g = daDona(b.rotinaGatilhos).find((x) => x.id === id && x.revogadoEm === null);
+        if (!g) return false;
+        g.assinadoEm ??= agora;
+        return true;
+      },
+    },
+    rotinaChamadas: {
+      async registrar(c) {
+        if (c.entregaId && daDona(b.rotinaChamadas).some((x) => x.rotinaId === c.rotinaId && x.entregaId === c.entregaId)) return null;
+        const l = { tenantId: escopo.tenantId, ownerId: escopo.pessoaId, id: randomUUID(), rotinaId: c.rotinaId, em: c.em, desfecho: c.desfecho, motivo: c.motivo ?? null, evento: c.evento ?? null, entregaId: c.entregaId ?? null, turnoId: c.turnoId ?? null };
+        b.rotinaChamadas.push(l);
+        const { tenantId: _t, ownerId: _o, entregaId: _e, ...dto } = l;
+        return dto;
+      },
+      async jaEntregue(rotinaId, entregaId) {
+        return daDona(b.rotinaChamadas).some((x) => x.rotinaId === rotinaId && x.entregaId === entregaId);
+      },
+      async listar(rotinaId, n) {
+        return daDona(b.rotinaChamadas).filter((x) => x.rotinaId === rotinaId).sort((x, y) => y.em - x.em).slice(0, n)
+          .map(({ tenantId: _t, ownerId: _o, entregaId: _e, ...dto }) => dto);
+      },
+      async contarDesde(rotinaId, desde, desfecho) {
+        return daDona(b.rotinaChamadas).filter((x) => x.rotinaId === rotinaId && x.em >= desde && (!desfecho || x.desfecho === desfecho)).length;
+      },
+      async comRecusaPendente() {
+        const ids = new Set(daDona(b.rotinaChamadas).map((x) => x.rotinaId));
+        return [...ids].filter((id) => recusaPendente(daDona(b.rotinaChamadas).filter((x) => x.rotinaId === id)));
+      },
+      async podar(rotinaId, agora, manter) {
+        const dela = daDona(b.rotinaChamadas).filter((x) => x.rotinaId === rotinaId).sort((x, y) => y.em - x.em);
+        const fica = new Set(dela.slice(0, manter).map((x) => x.id));
+        const sai = dela.filter((x) => !fica.has(x.id) && x.em < agora - 72 * 3_600_000).map((x) => x.id);
+        b.rotinaChamadas = b.rotinaChamadas.filter((x) => !sai.includes(x.id));
+        return sai.length;
       },
     },
     maquinaTokens: {

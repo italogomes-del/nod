@@ -15,7 +15,8 @@ const UUID = "00000000-0000-4000-8000-000000000000";
  * verdade, ADR-031) ou nunca terminam (SSE): fora da varredura da tabela, que promete não commitar.
  * As chaves têm o próprio teste em tests/concurrency/chaves-maquina-http.test.ts (mora lá porque COMMITA).
  */
-const FORA_DA_VARREDURA = new Set(["parar", "eventos", "maquinas/chaves"]);
+// NOD-84: as do webhook só existem no modo compartilhado (compor.ts); este app é o local. Provadas em rotina-webhook-rota.test.ts.
+const FORA_DA_VARREDURA = new Set(["parar", "eventos", "maquinas/chaves", "rotinas/:id/endereco", "rotinas/:id/testar-webhook"]);
 
 /**
  * A forma HTTP do app composto (critério de pronto da L9): sessão ausente 401, tenant ≠ sessão 404,

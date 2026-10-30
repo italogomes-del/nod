@@ -10,6 +10,7 @@ import { botaoLigar, ICONE_LIGACAO } from "./ligacao.ts";
 import { abaBiblioteca, capitalizar, chaveCelular, estadoDoComputadorNaGaveta, fraseDaParada, identidadeEditavel, nivelAjustes, nomeEditavel, paiDoNivel, popoverAvatar, renderNivel, segundoPlano, semFuso, type Nivel } from "./detalhes.ts";
 import { secaoOnboardingDetalhes } from "./onboarding.ts";
 import { botaoDaParada } from "../lib/execucao.ts";
+import { ehRotinaWebhook, quandoNaLista } from "./webhook.ts";
 
 type Bot = NonNullable<Estado["frota"]>["agentes"][number];
 
@@ -220,13 +221,16 @@ function telaRotinas(estado: Estado, a: Bot, dona: boolean): string {
     const criar = dona ? `<button type="button" class="pfc-contorno" data-act="gaveta" data-nivel="nova-rotina" data-agente="${esc(a.id)}">Criar rotina</button>` : "";
     return `${nova}<div class="pfc-vazio"><b>Nenhuma rotina ainda</b>${criar}</div>`;
   }
-  const linhaRotina = ({ rotina: r, proximaExecucao, bloqueio, resumo }: RotinaDto) => {
+  const linhaRotina = (dto: RotinaDto) => {
+    const { rotina: r, proximaExecucao, bloqueio, resumo } = dto;
     const ativa = r.estado === "ativa";
-    const quando = bloqueio ? fraseDaParada(bloqueio) : [resumo ? capitalizar(semFuso(resumo)) : "", ativa ? `próxima ${interpolar(proximaExecucao, estado.agora)}` : "Pausada"].filter(Boolean).join(" · ");
+    // NOD-84: a rotina por webhook não tem "próxima" (o cron é sentinela); o "quando" e o "!" são os do desktop.
+    const wh = ehRotinaWebhook(dto) ? quandoNaLista(dto) : null;
+    const quando = bloqueio ? fraseDaParada(bloqueio) : wh ? [wh.quando, ativa ? "" : "Pausada"].filter(Boolean).join(" · ") : [resumo ? capitalizar(semFuso(resumo)) : "", ativa ? `próxima ${interpolar(proximaExecucao, estado.agora)}` : "Pausada"].filter(Boolean).join(" · ");
     const chave = dona ? chaveCelular(ativa, ativa ? "pausar-rotina" : "ativar-rotina", r.id, `Rotina ${r.instrucao}`) : "";
     // A rotina parada mantém o conserto de um toque (Conectar / Permitir), como no desktop.
     const conserto = dona && bloqueio ? `<li class="pfc-rotina-conserto">${botaoDaParada(bloqueio, "pfc-contorno")}</li>` : "";
-    return `<li class="pfc-rotina${bloqueio ? " pfc-rotina-parada" : ""}"><button type="button" class="pfc-rotina-abrir" data-act="gaveta" data-nivel="rotina" data-agente="${esc(a.id)}" data-id="${esc(r.id)}"><b>${esc(r.instrucao)}</b><small>${esc(quando)}</small></button>${chave}</li>${conserto}`;
+    return `<li class="pfc-rotina${bloqueio ? " pfc-rotina-parada" : ""}"><button type="button" class="pfc-rotina-abrir" data-act="gaveta" data-nivel="rotina" data-agente="${esc(a.id)}" data-id="${esc(r.id)}"><b>${esc(r.instrucao)}</b><small>${wh?.marca ?? ""}${esc(quando)}</small></button>${chave}</li>${conserto}`;
   };
   return `${nova}<ul class="pfc-grupo">${minhas.map(linhaRotina).join("")}</ul>`;
 }

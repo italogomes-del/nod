@@ -5,6 +5,7 @@ import { editarPerfil } from "../../../src/use-cases/editar-perfil.ts";
 import { gerirAgente } from "../../../src/use-cases/gerir-agente.ts";
 import { enviarMensagem } from "../../../src/use-cases/enviar-mensagem.ts";
 import { registrarMemoria } from "../../../src/use-cases/lembrar.ts";
+import { CRON_SENTINELA_WEBHOOK, PROXIMA_WEBHOOK } from "../../../src/domain/rotina-webhook.ts";
 import { depsEmMemoria, esperarErro, executar } from "../../helpers/deps-l6.ts";
 
 describe("duplicarAgente (Grok Bot: Duplicate; a dona leva o bot inteiro, nunca o histórico)", () => {
@@ -76,6 +77,27 @@ describe("duplicarAgente (Grok Bot: Duplicate; a dona leva o bot inteiro, nunca 
       const { data } = await executar(deps, duplicarAgente, { agenteId: criado.agente.id });
       expect(data.agente.modoAprovacao).toBe("automatico");
       expect(await deps.repos.rotinas.listarDoAgente(data.agente.id)).toMatchObject([{ exigeAprovacao: true, estado: "ativa" }]);
+    }
+  });
+
+  it("NOD-84: a rotina webhook copiada ganha endereço próprio; sem a cifra (modo local) nasce pausada", async () => {
+    for (const comCifra of [true, false]) {
+      const { deps } = depsEmMemoria();
+      const d = comCifra ? { ...deps, services: { ...deps.services, webhooks: { cifrar: (t: string) => `c:${t}` } } } : deps;
+      const { data: criado } = await executar(d, criarAgente, { dono: "pessoa", nome: "Caixa" });
+      const r = await d.repos.rotinas.criar({ agenteId: criado.agente.id, conversaId: criado.conversa.id, cron: CRON_SENTINELA_WEBHOOK, fusoIana: "America/Sao_Paulo", instrucao: "lance a venda", fonte: "payload", entregavel: "linha", limitesAprovacao: "", politicaSemDado: "", proximaExecucao: PROXIMA_WEBHOOK, gatilho: "webhook", provedor: "Stripe", eventos: [] });
+      const original = await d.repos.rotinaGatilhos.criar({ rotinaId: r?.id ?? "", prefixo: "orig0000", hash: Buffer.alloc(32, 1), tokenCifrado: "c:orig", segredoHmacCifrado: "c:s" }, 0);
+      const { data } = await executar(d, duplicarAgente, { agenteId: criado.agente.id });
+      const [copia] = await d.repos.rotinas.listarDoAgente(data.agente.id);
+      expect(copia).toMatchObject({ gatilho: "webhook", estado: comCifra ? "ativa" : "pausada", proximaExecucao: PROXIMA_WEBHOOK });
+      const g = await d.repos.rotinaGatilhos.vivoDaRotina(copia?.id ?? "");
+      if (comCifra) {
+        expect(g?.prefixo).toBeTruthy();
+        expect(g?.prefixo).not.toBe(original?.prefixo);
+        expect(g?.hash.equals(Buffer.alloc(32, 1))).toBe(false);
+      } else expect(g).toBeNull();
+      // O endereço do original continua vivo e só dele.
+      expect((await d.repos.rotinaGatilhos.vivoDaRotina(r?.id ?? ""))?.prefixo).toBe("orig0000");
     }
   });
 

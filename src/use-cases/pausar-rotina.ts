@@ -1,7 +1,7 @@
 import type { Autoria, RuntimeEvent } from "../contracts/evento.ts";
+import { proximaDaRotina } from "../domain/rotina-texto.ts";
 import type { EstadoRotina, Rotina } from "../contracts/rotina.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
-import { proximaJanela } from "../domain/rotina-janela.ts";
 import { autoriaPessoa, evento, eventoDeRotina, exigir, textoRotinaAtiva } from "./apoio-l7.ts";
 import { registrarDesfechoRotina } from "./disparar-rotina.ts";
 import { invalidarCardDeRitmo } from "./ritmo-card.ts";
@@ -24,7 +24,7 @@ export const pausarRotina: CasoDeUso<{ rotinaId: string; estado: EstadoRotina; a
   if (atual.estado === input.estado) return { data: { rotina: atual } };
   const agora = deps.agora();
   if (input.estado === "ativa") {
-    const proxima = proximaJanela({ cron: atual.cron, fusoIana: atual.fusoIana, agora });
+    const proxima = proximaDaRotina(atual, agora);
     exigir(await deps.repos.rotinas.reagendar(atual.id, proxima), "nao_encontrado", "rotina (não é a dona)");
   }
   const rotina = await deps.repos.rotinas.atualizarEstado(atual.id, input.estado);

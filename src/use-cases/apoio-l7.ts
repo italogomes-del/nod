@@ -8,7 +8,7 @@ import { ErroDeDominio } from "../domain/erro.ts";
 import { ehNod } from "../domain/nod.ts";
 import { redigir } from "../domain/redacao.ts";
 import { assentar, HANDOFFS_POR_RODADA, type DesfechoRodada, type Fala } from "../domain/rodada-sala.ts";
-import { resumoCron } from "../domain/rotina-texto.ts";
+import { ehWebhook, quandoDaRotina } from "../domain/rotina-texto.ts";
 import type { Repos } from "../repositories/tipos.ts";
 import type { Escopo } from "../shared/types.ts";
 import type { Deps } from "./tipos.ts";
@@ -111,9 +111,10 @@ export function carimbo(instante: number, fusoIana = "UTC", { rotulo = true }: {
 }
 
 /** Texto fixo de "rotina ativa" com periodicidade, próxima execução e fuso NOMEADO uma vez, no resumo (E7.1, NOD-378). */
-export function textoRotinaAtiva(rotina: Pick<Rotina, "cron" | "fusoIana" | "proximaExecucao">, agora: number): string {
+export function textoRotinaAtiva(rotina: Pick<Rotina, "cron" | "fusoIana" | "proximaExecucao"> & Partial<Pick<Rotina, "gatilho" | "provedor">>, agora: number): string {
+  if (ehWebhook(rotina)) return redigir("rotina-webhook-ativa", agora, { resumo: quandoDaRotina(rotina), provedor: rotina.provedor ?? "serviço" });
   return redigir("rotina-proxima-execucao", agora, {
-    resumo: resumoCron(rotina.cron, rotina.fusoIana),
+    resumo: quandoDaRotina(rotina),
     // NOD-378: o fuso já está nomeado no resumo; o rótulo " UTC" do carimbo o repetiria.
     proxima: carimbo(rotina.proximaExecucao, rotina.fusoIana, { rotulo: false }),
   });
@@ -124,7 +125,7 @@ export function textoRotinaAtiva(rotina: Pick<Rotina, "cron" | "fusoIana" | "pro
  * reativar, apagar e a mudança não aplicada. Sem ele a linha era `sistema` sem payload, como os avisos que saem do chat.
  */
 export function eventoDeRotina(rotina: Pick<Rotina, "id" | "cron" | "fusoIana">, acao: AcaoRotinaEvento): PayloadRotinaEvento {
-  return { kind: "rotina_evento", rotinaId: rotina.id, acao, resumo: resumoCron(rotina.cron, rotina.fusoIana) };
+  return { kind: "rotina_evento", rotinaId: rotina.id, acao, resumo: quandoDaRotina(rotina) };
 }
 
 export function exigir<T>(valor: T | null | undefined, codigo: "nao_encontrado" | "estado_invalido" = "nao_encontrado", cause?: string): T {
