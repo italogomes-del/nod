@@ -68,6 +68,7 @@ import type { Escopo } from "../src/shared/types.ts";
 import type { FrameSse } from "../src/contracts/frame.ts";
 import type { AnexoDaConversa } from "../src/contracts/anexo.ts";
 import { agenteDaTela, bibliotecaAberta, conversaAbertaTemNotaDeContas, conversaDaTela, estadoInicial, invalidacoesAoReconectar, invalidacoesAoRetomar, invalidacoesDaTela, mudouNaTela, reduzir, secaoAberta, secaoDoPedido, type Acao, type Estado, type FalaPendente, type Invalidacao, type NivelGaveta, type PedidoSecao, type PerfilCelular, type SecaoEspaco, type Tela } from "./estado/reducer.ts";
+import { mascararDormindo, RetryDoAcordar, type PassosDoRetry } from "./lib/retry-computador.ts";
 import { contaApi, criarApi, minhaContaApi, ErroApi, observarRede, sessao as sessaoApi, type Api } from "./lib/api.ts";
 import { reagirACota } from "./lib/cota-provisorio.ts";
 import { resolverProvaNoNavegador } from "./lib/prova-trabalho.ts";
@@ -2705,6 +2706,8 @@ async function iniciarSessao(escopo: Escopo): Promise<void> {
   conexoes.cancelarTodas();
   // NOD-106: outra pessoa ou outro tenant, a leitura da sessão velha para (o reducer zera o estado, o som ia seguir).
   if (escopo.tenantId !== estado.sessao?.tenantId || escopo.pessoaId !== estado.sessao?.pessoaId) tocador.parar("saiu");
+  // NOD-407: o retry do Acordar é da sessão que clicou; nunca acorda o computador de outra pessoa.
+  cancelarRetryDoComputador();
   // Os rascunhos são da pessoa: outra sessão, outros rascunhos.
   rascunhos.usar(`${escopo.tenantId}.${escopo.pessoaId}`);
   api = criarApi(escopo);
@@ -7234,6 +7237,11 @@ function atualizarConectar(p: Partial<NonNullable<typeof estado.conectarMaquina>
  */
 let computadorTimer = 0;
 let computadorGeracao = 0;
+/** NOD-407: a repetição do Acordar depois de um 409 transitório (web/lib/retry-computador.ts). */
+const retryDoAcordar = new RetryDoAcordar({ setTimeout: (f, ms) => window.setTimeout(f, ms), clearTimeout: (id) => window.clearTimeout(id) });
+function cancelarRetryDoComputador(): void {
+  retryDoAcordar.cancelar();
+}
 function lerComputadorAgora(): Promise<void> {
   window.clearTimeout(computadorTimer);
   const minha = ++computadorGeracao;
@@ -7242,8 +7250,10 @@ function lerComputadorAgora(): Promise<void> {
 async function pulsoDoComputador(minha: number): Promise<void> {
   if (minha !== computadorGeracao || !api) return;
   if (!document.hidden) {
-    const dto = await api.computadorDaPessoa();
+    const lido = await api.computadorDaPessoa();
     if (minha !== computadorGeracao) return;
+    // NOD-407: com o retry em curso, o "dormindo" do servidor é a ação anterior terminando; a aba segue em Acordando….
+    const dto = mascararDormindo(lido, retryDoAcordar.emCurso);
     dispatch({ tipo: "hidratar-computador-pessoa", dto, agora: Date.now() });
   }
   const c = estado.computadorPessoa;
@@ -7253,6 +7263,8 @@ async function pulsoDoComputador(minha: number): Promise<void> {
 /** NOD-365: muda o computador de máquina. A troca segue em segundo plano; o progresso vem pela leitura do computador. */
 function trocarLugarDoComputador(maquinaId: string, semLogins: boolean): Promise<void> {
   if (!maquinaId) return Promise.resolve();
+  // NOD-407: a troca mata a repetição pendente do Acordar (ela religaria a máquina de antes no meio da troca).
+  cancelarRetryDoComputador();
   dispatch({ tipo: "computador-ui", ui: { trocarPara: null, recusaDaTroca: null, etapasAbertas: secaoAberta(estado) === "maquinas" } });
   window.clearTimeout(computadorTimer);
   ++computadorGeracao;
@@ -7275,7 +7287,15 @@ function trocarLugarDoComputador(maquinaId: string, semLogins: boolean): Promise
   });
 }
 
+const passosDoRetry: PassosDoRetry = {
+  tentar: () => (api ? api.operarComputador("tentar_de_novo") : Promise.reject(new Error("sem sessão"))),
+  ler: () => lerComputadorAgora(),
+  recusar: (recusa) => dispatch({ tipo: "computador-ui", ui: { recusa } }),
+};
+
 function operarComputador(op: OperacaoPessoa): Promise<void> {
+  // Um clique da pessoa começa outra cadeia: a repetição pendente da anterior morre.
+  const minhaCadeia = retryDoAcordar.cancelar();
   const longa = op === "atualizar" || op === "redefinir" || op === "sair_de_todos" || op === "esquecer_senhas";
   dispatch({ tipo: "computador-ui", ui: { confirmar: null, realce: null, recusa: null, etapasAbertas: longa && secaoAberta(estado) === "maquinas" } });
   // Uma leitura que saiu antes do POST chegaria sem a operação e apagaria o diálogo de etapas: a geração nova a descarta.
@@ -7284,15 +7304,29 @@ function operarComputador(op: OperacaoPessoa): Promise<void> {
   // Acordar reage na hora (29/10): a gaveta mostra "Acordando…" antes de o servidor confirmar; a leitura seguinte corrige.
   if ((op === "acordar" || op === "tentar_de_novo") && estado.computadorPessoa) dispatch({ tipo: "hidratar-computador-pessoa", dto: { ...estado.computadorPessoa, estado: "ligando", falha: null }, agora: Date.now() });
   return agir(async () => {
+    let repetir: number | null = null;
     try {
       await api!.operarComputador(op);
     } catch (e) {
       // NOD-407: o 409 do computador traz a causa real; ela fica na aba Computador, não no banner vermelho do chat.
-      if ((op === "acordar" || op === "tentar_de_novo") && e instanceof ErroApi && e.status === 409) { dispatch({ tipo: "computador-ui", ui: { recusa: e.message } }); return; }
+      if ((op === "acordar" || op === "tentar_de_novo") && e instanceof ErroApi && e.status === 409) {
+        // Transitório: repete com espera crescente (2, 4, 8, 16 s); passados ~30 s, o Tentar de novo volta à pessoa.
+        if (!retryDoAcordar.viva(minhaCadeia)) return;
+        repetir = retryDoAcordar.esperaPara(e, 0);
+        if (repetir === null) dispatch({ tipo: "computador-ui", ui: { recusa: e.message } });
+        return;
+      }
       throw e;
     } finally {
+      if (retryDoAcordar.viva(minhaCadeia)) retryDoAcordar.emCurso = repetir !== null;
       // O diálogo de etapas só existe quando a leitura traz a operação: o foco vai para ele depois dela.
       await lerComputadorAgora();
+      if (repetir !== null && retryDoAcordar.viva(minhaCadeia)) {
+        // A leitura pode ainda dizer dormindo enquanto a ação anterior termina; para a pessoa, segue como uma espera.
+        const mascarado = mascararDormindo(estado.computadorPessoa, true);
+        if (mascarado && mascarado !== estado.computadorPessoa) dispatch({ tipo: "hidratar-computador-pessoa", dto: mascarado, agora: Date.now() });
+        retryDoAcordar.agendar(minhaCadeia, 1, repetir, passosDoRetry);
+      }
       if (longa) focarNovo();
     }
   });

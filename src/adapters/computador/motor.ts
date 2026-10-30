@@ -11,6 +11,7 @@ import { log } from "../../obs/log.ts";
 import type { Escopo } from "../../shared/types.ts";
 import type { CanalComputador } from "./canal.ts";
 import { assinarComando, publicaDeAssinatura, seloDoIniciar } from "./selo.ts";
+import { versaoAceita } from "../../domain/versao-app.ts";
 
 /**
  * O driver "motor" do computador (definido em 2026-10-22, NOD-96 PR 3, ADR-122): o computador da pessoa roda numa
@@ -41,7 +42,7 @@ export type ComputadorLocalizado = {
   uso: UsoDoMac;
 };
 /** `vmLocal`: o preparo da VM local que o Mac anuncia (NOD-93); ausente nas Linux e no app antigo. */
-export type MaquinaDaPessoa = MaquinaCandidata & { nome: string; vmLocal?: VmLocalAnunciada; papel?: PapelMaquina };
+export type MaquinaDaPessoa = MaquinaCandidata & { nome: string; vmLocal?: VmLocalAnunciada; papel?: PapelMaquina; versaoApp?: string };
 /** NOD-365: onde o computador mora no banco (maquina_id, hospedeira_id e a X25519 fixada). */
 export type LugarGravado = { maquinaId: string | null; hospedeiraId: string | null; supervisorPub: string | null; saidasPendentesDe: string[] };
 /** NOD-365: o pacote vazio da loja (versão 1, sem arquivos): a troca sem os logins zera a loja que o destino tivesse. */
@@ -95,9 +96,25 @@ const PASSO_ESPERANDO_MS = 1_000;
 export const PRAZO_RESPOSTA_OPERACAO_MS = 10 * 60_000;
 /** definido em 2026-10-28 (NOD-365): cada parte da loja de logins tem 2 min para ir e voltar (~512 KiB pela ponte). */
 export const PRAZO_RESPOSTA_PARTE_MS = 2 * 60_000;
+/**
+ * NOD-407: piso próprio do protocolo do computador (o restante do app segue no piso geral da ponte). Vem de
+ * `NOD_COMPUTADOR_VERSAO_MINIMA` e fica desligado sem ela (ou com valor fora de x.y.z[-rc.N]): processo-de-release.md
+ * só deixa subir o piso depois de a release correspondente estar publicada e validada.
+ */
+export function pisoDoComputador(env: Record<string, string | undefined>): string | null {
+  const v = env.NOD_COMPUTADOR_VERSAO_MINIMA?.trim();
+  if (!v) return null;
+  if (versaoAceita(v, "0.0.0")) return v;
+  // Valor que não é semver (ex.: "v1.0.0") desliga o piso, mas não em silêncio.
+  log("aviso", "computador_versao_minima_invalida", { valor: v.slice(0, 40) });
+  return null;
+}
 
 export function criarDriverMotor(o: OpcoesDriverMotor): DriverComputador & { motivoParaFicarAcordada(maquinaId: string): boolean } {
   const agora = o.agora ?? Date.now;
+  const pisoApp = pisoDoComputador(o.env);
+  /** A versão abaixo do piso ligado; sem piso ou sem versão anunciada, nada a pedir. */
+  const abaixoDoPiso = (m: MaquinaDaPessoa): boolean => pisoApp !== null && m.versaoApp !== undefined && !versaoAceita(m.versaoApp, pisoApp);
   const dormir = o.dormir ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const novoId = o.novoId ?? randomUUID;
   let ultimaEpocaTroca = 0;
@@ -146,6 +163,8 @@ export function criarDriverMotor(o: OpcoesDriverMotor): DriverComputador & { mot
       log("aviso", "computador_maquina_sem_contato", { computador_id: id, maquina_id: alvo });
       throw new FalhaComputador("maquina_sem_contato", { maquina: nome ?? "a máquina do computador" });
     }
+    // App abaixo do piso primeiro: um app velho pode nem anunciar o computador, e o caminho é atualizar.
+    if (abaixoDoPiso(viva)) throw new FalhaComputador("app_desatualizado", { maquina: viva.nome });
     if (viva.computador === null || viva.computador === "sem_suporte") throw new FalhaComputador("sem_suporte", { maquina: viva.nome });
     if (viva.computador === "faltam_pacotes") throw new FalhaComputador("faltam_pacotes", { maquina: viva.nome });
     return viva;
@@ -499,7 +518,11 @@ export function criarDriverMotor(o: OpcoesDriverMotor): DriverComputador & { mot
         ? { ligadoDesde: f.ligadoDesde ?? null, memoriaTotalMb: f.memoriaTotalMb ?? null, titulos: Object.fromEntries(f.telas.map((t) => [t.agenteId, t.titulo ?? null])) }
         : null;
       // NOD-93 (passo 9): a máquina escolhida é o Mac com a VM local — o preparo vai junto para a tela.
-      return { id: alvo, nome: viva.nome, contato: viva.ultimoContato, foto, ...(viva.plataforma === "darwin" && viva.vmLocal ? { preparo: viva.vmLocal } : {}) };
+      return {
+        id: alvo, nome: viva.nome, contato: viva.ultimoContato, foto,
+        ...(abaixoDoPiso(viva) ? { appDesatualizado: { atual: viva.versaoApp!, minima: pisoApp!, plataforma: viva.plataforma } } : {}),
+        ...(viva.plataforma === "darwin" && viva.vmLocal ? { preparo: viva.vmLocal } : {}),
+      };
     },
     ligando(id) {
       return iniciando.has(id);

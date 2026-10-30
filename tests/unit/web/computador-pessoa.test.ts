@@ -23,6 +23,9 @@ import {
   htmlLinhaDoPreparo,
   htmlDialogoDoPainel,
   tamanhoEmPalavras,
+  retryAutomaticoDoComputador,
+  esperaDoRetryDoComputador,
+  URL_ATUALIZAR_APP,
 } from "../../../web/lib/computador-pessoa.ts";
 import { htmlCenaDoPreparo } from "../../../web/lib/cena-do-preparo.ts";
 import { readFileSync } from "node:fs";
@@ -82,6 +85,46 @@ describe("gaveta e tela cheia", () => {
     expect(htmlGavetaTela(pc(), BOTS[0] as never)).toContain("Dev 2 não está usando o navegador agora.");
     expect(htmlGavetaTela(pc({ estado: "dormindo" }), BOTS[0] as never)).toContain('data-op="acordar"');
     expect(htmlGavetaTela(pc({ estado: "ligando" }), BOTS[0] as never)).toContain("Acordando…");
+  });
+
+  it("sem contato diz desde quando; app antigo mostra as duas versões e Atualizar app", () => {
+    const desde = Date.UTC(2026, 9, 30, 6, 15);
+    const semContato = pc({ estado: "fora_do_ar", maquina: { id: "vm", nome: "Mac da Ana", contato: null }, falha: { motivo: "maquina_sem_contato", desde }, semContatoDesde: desde });
+    const fora = htmlGavetaTela(semContato, BOTS[0] as never);
+    expect(fora).toContain("Mac da Ana está sem contato desde");
+    expect(fora).not.toContain("Atualize a página");
+    // O 409 do Tentar de novo não apaga o "desde HH:MM": a leitura do servidor passa na frente da recusa.
+    const depoisDoClique = htmlGavetaTela(semContato, BOTS[0] as never, "A máquina onde o computador mora não está respondendo.");
+    expect(depoisDoClique).toContain("Mac da Ana está sem contato desde");
+    expect(depoisDoClique).toContain("Onde o computador mora");
+    expect(depoisDoClique).not.toContain("O computador não acordou");
+    const app = htmlGavetaTela(pc({ estado: "dormindo", appDesatualizado: { atual: "1.0.0-rc.1", minima: "1.0.0-rc.2", plataforma: "darwin" } }), BOTS[0] as never, "Atualize o app do nod para usar o computador.");
+    expect(app).toContain("Seu app está na versão 1.0.0-rc.1; o computador precisa da 1.0.0-rc.2.");
+    expect(app).toContain(`href="${URL_ATUALIZAR_APP}"`);
+    expect(app).toContain("Atualizar app");
+    expect(app).not.toContain("Atualize a página");
+    expect(app.match(/cb-aviso"/g)).toHaveLength(1);
+  });
+
+  it("app antigo no motor Linux pede o instalador naquela máquina; o painel mostra o mesmo aviso", () => {
+    const linux = pc({ estado: "dormindo", appDesatualizado: { atual: "0.9.0", minima: "1.0.0-rc.2", plataforma: "linux" } });
+    const gaveta = htmlGavetaTela(linux, BOTS[0] as never);
+    expect(gaveta).toContain("vm-sp está na versão 0.9.0; o computador precisa da 1.0.0-rc.2.");
+    expect(gaveta).not.toContain(URL_ATUALIZAR_APP);
+    const painel = htmlPainelComputadorDoBot(pc({ estado: "dormindo", appDesatualizado: { atual: "1.0.0-rc.1", minima: "1.0.0-rc.2" } }), BOTS as never, UI_INICIAL, 0);
+    expect(painel).toContain("Atualize o app para usar o computador");
+    expect(painel).toContain("Atualizar app");
+  });
+
+  it("retry automático fica só nas causas transitórias", () => {
+    for (const motivo of ["ocupado", "ligando", "esperando_tela", "atualizando"]) expect(retryAutomaticoDoComputador(motivo)).toBe(true);
+    for (const motivo of ["maquina_sem_contato", "app_desatualizado", "fora_do_ar", null]) expect(retryAutomaticoDoComputador(motivo)).toBe(false);
+  });
+
+  it("retry cresce 2, 4, 8, 16 s (com jitter de até 20%) e para depois de ~30 s", () => {
+    expect([0, 1, 2, 3].map((n) => esperaDoRetryDoComputador(n, 0))).toEqual([2_000, 4_000, 8_000, 16_000]);
+    expect(esperaDoRetryDoComputador(0, 1)).toBe(2_400);
+    expect(esperaDoRetryDoComputador(4, 0)).toBeNull();
   });
 
   it("a pílula: Assistindo · Assumir o controle, depois Você está no controle · Parar", () => {

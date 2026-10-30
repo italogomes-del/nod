@@ -116,6 +116,8 @@ export type MaquinaDoComputador = {
   preparo?: VmLocalAnunciada;
   /** NOD-365: sem contato agora, o último contato que a ponte viu (para "sem contato desde HH:MM"); null = nunca. */
   ultimoContato?: number | null;
+  /** NOD-407: só quando o app conectado não atende ao protocolo mínimo do computador. */
+  appDesatualizado?: { atual: string; minima: string; plataforma?: string };
 };
 
 /** NOD-365: uma opção da seção "Onde o computador mora" (domínio: opcoesDeLugar). */

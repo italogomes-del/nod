@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { criarCanalComputador } from "../../../src/adapters/computador/canal.ts";
-import { type ComputadorLocalizado, criarDriverMotor, type MaquinaDaPessoa } from "../../../src/adapters/computador/motor.ts";
+import { type ComputadorLocalizado, criarDriverMotor, type MaquinaDaPessoa, pisoDoComputador } from "../../../src/adapters/computador/motor.ts";
 import { abrirSelo, chaveDaMaquina, conferirAssinatura, gerarParX25519, publicaDeAssinatura } from "../../../src/adapters/computador/selo.ts";
 import type { ComandoComputador } from "../../../src/contracts/computador-motor.ts";
 import { TETO_PRONTO_MS, TETO_PRONTO_VM_LOCAL_MS } from "../../../src/domain/computador-canal.ts";
@@ -15,7 +15,7 @@ const outra = { tenantId: "t1", pessoaId: "p2" };
  * Um mundo falso: relógio que só anda no `dormir`, uma máquina "vm" da pessoa e um motor falso que, a cada passo,
  * puxa a fila e responde pelo `responder` (null = não responde).
  */
-function mundo(o: { mac?: MaquinaDaPessoa["vmLocal"]; conectada?: boolean; anuncio?: MaquinaDaPessoa["computador"]; loc?: Partial<ComputadorLocalizado>; relataPub?: boolean | "apos_sonda"; aoPasso?: (t: number, canal: ReturnType<typeof criarCanalComputador>, estado: { conectada: boolean }) => void; responder?: (c: ComandoComputador, t: number) => Parameters<ReturnType<typeof criarCanalComputador>["resultado"]>[2] | null } = {}) {
+function mundo(o: { mac?: MaquinaDaPessoa["vmLocal"]; conectada?: boolean; anuncio?: MaquinaDaPessoa["computador"]; versaoApp?: string; piso?: string; loc?: Partial<ComputadorLocalizado>; relataPub?: boolean | "apos_sonda"; aoPasso?: (t: number, canal: ReturnType<typeof criarCanalComputador>, estado: { conectada: boolean }) => void; responder?: (c: ComandoComputador, t: number) => Parameters<ReturnType<typeof criarCanalComputador>["resultado"]>[2] | null } = {}) {
   let t = 1_000_000;
   const sup = gerarParX25519();
   const canal = criarCanalComputador({ agora: () => t });
@@ -23,7 +23,7 @@ function mundo(o: { mac?: MaquinaDaPessoa["vmLocal"]; conectada?: boolean; anunc
   /** NOD-96 PR 7: as sondas sem assinatura (o supervisor só conhece o computador depois de um comando com o id). */
   const sondas: ComandoComputador[] = [];
   const estado = { conectada: o.conectada ?? true, hospedeira: null as string | null, supervisor: null as string | null };
-  const maquinas = (e: typeof escopo): MaquinaDaPessoa[] => e.pessoaId === "p1" && estado.conectada ? [{ machineId: "vm", nome: "vm-1", plataforma: o.mac ? "darwin" : "linux", computador: o.anuncio === undefined ? "pronto" : o.anuncio, ultimoContato: t, ...(o.mac ? { vmLocal: o.mac } : {}) }] : [];
+  const maquinas = (e: typeof escopo): MaquinaDaPessoa[] => e.pessoaId === "p1" && estado.conectada ? [{ machineId: "vm", nome: "vm-1", plataforma: o.mac ? "darwin" : "linux", computador: o.anuncio === undefined ? "pronto" : o.anuncio, ultimoContato: t, ...(o.versaoApp ? { versaoApp: o.versaoApp } : {}), ...(o.mac ? { vmLocal: o.mac } : {}) }] : [];
   const passo = () => {
     o.aoPasso?.(t, canal, estado);
     if (!estado.conectada) return;
@@ -37,7 +37,7 @@ function mundo(o: { mac?: MaquinaDaPessoa["vmLocal"]; conectada?: boolean; anunc
     }
   };
   const driver = criarDriverMotor({
-    env: { NOD_CREDENTIAL_KEY: CHAVE },
+    env: { NOD_CREDENTIAL_KEY: CHAVE, ...(o.piso ? { NOD_COMPUTADOR_VERSAO_MINIMA: o.piso } : {}) },
     canal,
     localizar: async (id) => (id === ID ? { escopo, agenteId: "bot-1", maquinaId: null, hospedeiraId: estado.hospedeira, supervisorPub: estado.supervisor, padraoId: null, uso: "equilibrado", ...o.loc } : null),
     maquinas,
@@ -112,6 +112,30 @@ describe("driver motor: iniciar", () => {
     const texto = instrucaoDaFalha(e.motivo, null, e.maquina);
     expect(texto).toContain("Não consegui ligar o computador: vm-1 está sem contato");
     expect(texto).not.toMatch(/ERR_/);
+  });
+
+  it("app abaixo do piso: app_desatualizado antes de enviar comando (iniciar e executar); no piso liga", async () => {
+    const antigo = mundo({ versaoApp: "1.0.0-rc.1", piso: "1.0.0-rc.2" });
+    expect((await falha(antigo.driver.iniciar(ID))).motivo).toBe("app_desatualizado");
+    expect((await falha(antigo.driver.executar(ID, { tipo: "navegar", url: "https://exemplo.com" }))).motivo).toBe("app_desatualizado");
+    expect(antigo.vistos).toEqual([]);
+    const atual = mundo({ versaoApp: "1.0.0-rc.2", piso: "1.0.0-rc.2" });
+    await expect(atual.driver.iniciar(ID)).resolves.toBeUndefined();
+    expect(atual.vistos.some((c) => c.tipo === "iniciar")).toBe(true);
+  });
+
+  it("app velho que nem anuncia o computador: pede para atualizar o app, não 'sem suporte' (QA F4)", async () => {
+    const velho = mundo({ versaoApp: "0.9.0", piso: "1.0.0-rc.2", anuncio: "sem_suporte" });
+    expect((await falha(velho.driver.iniciar(ID))).motivo).toBe("app_desatualizado");
+    expect((await falha(mundo({ versaoApp: "1.0.0-rc.2", piso: "1.0.0-rc.2", anuncio: "sem_suporte" }).driver.iniciar(ID))).motivo).toBe("sem_suporte");
+  });
+
+  it("sem NOD_COMPUTADOR_VERSAO_MINIMA (ou inválida) o piso fica desligado: app antigo liga", async () => {
+    expect(pisoDoComputador({})).toBeNull();
+    expect(pisoDoComputador({ NOD_COMPUTADOR_VERSAO_MINIMA: "rc2" })).toBeNull();
+    expect(pisoDoComputador({ NOD_COMPUTADOR_VERSAO_MINIMA: " 1.0.0-rc.2 " })).toBe("1.0.0-rc.2");
+    const m = mundo({ versaoApp: "0.1.0" });
+    await expect(m.driver.iniciar(ID)).resolves.toBeUndefined();
   });
 
   it("nenhuma máquina conectada: sem contato, sem nome inventado", async () => {
@@ -358,6 +382,12 @@ describe("driver motor: operações da pessoa (NOD-96 PR 5)", () => {
     const preparo = { estado: "baixando" as const, bytes: 870, total: 1100, desde: 1 };
     expect((await mundo({ mac: preparo, loc: { agenteId: null } }).driver.maquinaDoComputador!(ID))?.preparo).toEqual(preparo);
     expect((await mundo({ loc: { agenteId: null } }).driver.maquinaDoComputador!(ID))).not.toHaveProperty("preparo");
+  });
+
+  it("maquinaDoComputador traz appDesatualizado (versões e plataforma) só abaixo do piso ligado (NOD-407)", async () => {
+    expect((await mundo({ versaoApp: "1.0.0-rc.1", piso: "1.0.0-rc.2", loc: { agenteId: null } }).driver.maquinaDoComputador!(ID))?.appDesatualizado).toEqual({ atual: "1.0.0-rc.1", minima: "1.0.0-rc.2", plataforma: "linux" });
+    expect(await mundo({ versaoApp: "1.0.0-rc.2", piso: "1.0.0-rc.2", loc: { agenteId: null } }).driver.maquinaDoComputador!(ID)).not.toHaveProperty("appDesatualizado");
+    expect(await mundo({ versaoApp: "0.1.0", loc: { agenteId: null } }).driver.maquinaDoComputador!(ID)).not.toHaveProperty("appDesatualizado");
   });
 
   it("maquinaDoComputador diz o nome e o contato; ligando enquanto o iniciar corre", async () => {

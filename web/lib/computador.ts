@@ -201,6 +201,7 @@ export const MOTIVO_FALHA_TEXTO: Readonly<Record<MotivoFalhaComputador, string>>
   sem_suporte: "a máquina não consegue rodar o computador",
   nao_ficou_pronto: "o computador ligou mas não ficou pronto a tempo",
   atualizando: "o computador está sendo atualizado",
+  app_desatualizado: "o app do nod precisa ser atualizado para usar o computador",
 };
 
 /**

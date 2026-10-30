@@ -285,7 +285,7 @@ export function criarPonteHttpServidor(d: {
       if (anunciado && anunciado !== c.papel) log("aviso", "papel_anunciado_difere", { machine_id: id, anunciado, gravado: c.papel });
       // O só-computador não pega turno: sem gh nem laço de voz, nada da fila nem dos itens locais chega a ele.
       if (c.papel === "computador") c.gh = false;
-      c.anuncio = { machineId: id, nome: b.nome, plataforma: c.plataforma, inventario: c.inv, versaoContrato: 1, harnesses: a.harnessesAusente ? { "claude-cli": c.inv } : a.motores, ligacao: b.ligacao === true && c.papel === "motor", papel: c.papel, ...(a.semLacoDeVoz.length > 0 ? { semLacoDeVoz: a.semLacoDeVoz } : {}), ...(a.capacidades ? { capacidades: a.capacidades } : {}), ...(a.sobreviveReinicio ? { sobreviveReinicio: true } : {}), ...(a.computador ? { computador: a.computador } : {}), ...(a.vmLocal ? { vmLocal: a.vmLocal } : {}), ...(b.atualizaIas === true ? { atualizaIas: true } : {}) };
+      c.anuncio = { machineId: id, nome: b.nome, plataforma: c.plataforma, ...(typeof ctx.req.headers["x-nod-versao"] === "string" ? { versaoApp: ctx.req.headers["x-nod-versao"] } : {}), inventario: c.inv, versaoContrato: 1, harnesses: a.harnessesAusente ? { "claude-cli": c.inv } : a.motores, ligacao: b.ligacao === true && c.papel === "motor", papel: c.papel, ...(a.semLacoDeVoz.length > 0 ? { semLacoDeVoz: a.semLacoDeVoz } : {}), ...(a.capacidades ? { capacidades: a.capacidades } : {}), ...(a.sobreviveReinicio ? { sobreviveReinicio: true } : {}), ...(a.computador ? { computador: a.computador } : {}), ...(a.vmLocal ? { vmLocal: a.vmLocal } : {}), ...(b.atualizaIas === true ? { atualizaIas: true } : {}) };
       await c.ponte.conectar(c.anuncio);
       await persistir(c);
       await d.registrarPlataforma?.(ctx.escopo, id, plataforma);
@@ -316,8 +316,8 @@ export function criarPonteHttpServidor(d: {
       c.inv = a.inv; c.ultimo = d.agora(); c.gh = a.gh && c.papel === "motor"; c.rebaixada = false;
       // A conexão só nasce no `conectar`, que grava o anúncio: daqui saem o nome e o laço de voz, que não mudam aqui.
       // ADR-090: a plataforma também é do `conectar` — o motor na VM Linux não vira "darwin" ao reanunciar.
-      const { nome, ligacao, atualizaIas } = c.anuncio ?? { nome: c.nome, ligacao: false, atualizaIas: false };
-      c.anuncio = { machineId: ctx.params.chaveId!, nome, plataforma: c.plataforma, inventario: c.inv, versaoContrato: 1, harnesses: a.harnessesAusente ? { "claude-cli": c.inv } : a.motores, ligacao, papel: c.papel, ...(a.semLacoDeVoz.length > 0 ? { semLacoDeVoz: a.semLacoDeVoz } : {}), ...(a.capacidades ? { capacidades: a.capacidades } : {}), ...(a.sobreviveReinicio ? { sobreviveReinicio: true } : {}), ...(a.computador ? { computador: a.computador } : {}), ...(a.vmLocal ? { vmLocal: a.vmLocal } : {}), ...(atualizaIas ? { atualizaIas: true } : {}) };
+      const { nome, ligacao, atualizaIas, versaoApp } = c.anuncio ?? { nome: c.nome, ligacao: false, atualizaIas: false, versaoApp: undefined };
+      c.anuncio = { machineId: ctx.params.chaveId!, nome, plataforma: c.plataforma, ...(versaoApp ? { versaoApp } : {}), inventario: c.inv, versaoContrato: 1, harnesses: a.harnessesAusente ? { "claude-cli": c.inv } : a.motores, ligacao, papel: c.papel, ...(a.semLacoDeVoz.length > 0 ? { semLacoDeVoz: a.semLacoDeVoz } : {}), ...(a.capacidades ? { capacidades: a.capacidades } : {}), ...(a.sobreviveReinicio ? { sobreviveReinicio: true } : {}), ...(a.computador ? { computador: a.computador } : {}), ...(a.vmLocal ? { vmLocal: a.vmLocal } : {}), ...(atualizaIas ? { atualizaIas: true } : {}) };
       // O `conectar` da ponte interna só registra o anúncio da máquina (idempotente): seguro com turno rodando.
       await c.ponte.conectar(c.anuncio);
       await persistir(c);
@@ -735,7 +735,7 @@ export function criarPonteHttpServidor(d: {
   function maquinasComComputador(escopo: Escopo): MaquinaDaPessoa[] {
     return [...conexoes.entries()].flatMap(([id, c]) => {
       if (c.escopo.pessoaId !== escopo.pessoaId || c.escopo.tenantId !== escopo.tenantId || d.agora() - c.ultimo >= 60_000) return [];
-      return [{ machineId: id, nome: c.nome, plataforma: c.plataforma, papel: c.papel, computador: c.anuncio?.computador?.estado ?? null, ultimoContato: c.ultimo, ...(c.anuncio?.vmLocal ? { vmLocal: c.anuncio.vmLocal } : {}) }];
+      return [{ machineId: id, nome: c.nome, plataforma: c.plataforma, papel: c.papel, computador: c.anuncio?.computador?.estado ?? null, ultimoContato: c.ultimo, ...(c.anuncio?.versaoApp ? { versaoApp: c.anuncio.versaoApp } : {}), ...(c.anuncio?.vmLocal ? { vmLocal: c.anuncio.vmLocal } : {}) }];
     });
   }
   /** ADR-102: a pessoa renomeou a máquina; a conexão viva passa a usar o nome novo. */

@@ -16,13 +16,11 @@ import type { ResultadoTurno, SinaisTurno, SubagenteVivo, TarefaDoBot } from "./
 export type AnuncioMaquina = {
   machineId: string;
   nome: string;
+  versaoApp?: string; // NOD-407: o header x-nod-versao; o computador usa um piso próprio
   inventario: Inventario;
   versaoContrato: number;
   harnesses?: Partial<Record<IdHarness, Inventario>>;
-  /**
-   * definido em 2026-09-24 (ADR-048): `gh auth status` NESTA máquina. O servidor só usa o gh para a
-   * pessoa dona da chave desta máquina — o login do gh serve a quem o fez, nunca a um colega.
-   */
+  /** definido em 2026-09-24 (ADR-048): `gh auth status` NESTA máquina; o gh só serve à pessoa dona da chave dela. */
   github?: { gh: boolean };
   /**
    * definido em 2026-10-04 (ADR-072): este app roda o laço de voz (abre o canal do cérebro da ligação). Ausente = app

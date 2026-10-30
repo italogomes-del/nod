@@ -57,6 +57,7 @@ Os volumes têm nomes `nod-computador-<id>-home` e `nod-computador-<id>-workspac
 | Variável | Padrão | O que faz |
 |---|---|---|
 | `NOD_COMPUTADORES_MAX` | 3 | Máximo de computadores ligados neste host, somando todas as pessoas. O seguinte não liga: o bot recebe `limite_de_computadores`, nada é executado e não há fila. Não conta para a saúde do computador. |
+| `NOD_COMPUTADOR_VERSAO_MINIMA` | vazio (desligado) | NOD-407: versão mínima do app do nod (semver) para usar o computador do motor. Abaixo dela o bot recebe `app_desatualizado` e a aba Computador mostra "Atualizar app" com a versão atual e a exigida. Só ligue depois que essa versão estiver publicada em Releases. Não conta para a saúde do computador. |
 | `NOD_COMPUTADOR_OCIOSO_MIN` | 15 | Minutos sem ação do bot nem da pessoa até o computador desligar sozinho (varredura a cada 60 s). `0` desliga a varredura. Pula computador com a pessoa no controle, aguardando a pessoa ou com ação em andamento. O fora do ar também desliga (a ação do bot não chega a ele, e ele seguraria uma vaga do teto) e segue fora do ar até o "Tentar de novo". Os volumes ficam; a próxima ação liga de novo. |
 
 Valor ausente ou inválido usa o padrão. Reinicie o servidor nod depois de mudar. Os eventos no log são `computador_limite`, `computador_desligado_por_ociosidade`, `computador_imagem_recriada` e `computador_iniciado`.

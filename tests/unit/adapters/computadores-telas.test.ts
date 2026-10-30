@@ -429,6 +429,14 @@ it("Esquecer senhas (NOD-97 PR 6): avisa no chat de cada bot com tela aberta, n�
   expect(registros.filter((r) => r.tipo === "esquecer_senhas")).toEqual([expect.objectContaining({ autor: "pessoa", estado: "concluida", computadorId: "pessoa-1" })]);
 });
 
+it("NOD-407: Acordar durante uma operação em curso é 409 'atualizando', que a web repete sozinha (critério 3)", async () => {
+  const { retryAutomaticoDoComputador } = await import("../../../web/lib/computador-pessoa.ts");
+  pessoa = { ...pessoa, operacao: { tipo: "atualizar", progresso: 40, etapa: "Reiniciando", desde: T0 } };
+  const erro = await computadores.operarDaPessoa(MARLON, "acordar").then(() => null, (e: unknown) => e as { codigo: string; cause: unknown });
+  expect(erro).toMatchObject({ codigo: "estado_invalido", cause: "atualizando" });
+  expect(retryAutomaticoDoComputador(erro!.cause as string)).toBe(true);
+});
+
 it("Esquecer senhas com outra operação em curso é recusado; a que falha no supervisor fica registrada como falhou", async () => {
   pessoa = { ...pessoa, operacao: { tipo: "atualizar", progresso: 40, etapa: "Reiniciando", desde: T0 } };
   await expect(computadores.operarDaPessoa(MARLON, "esquecer_senhas")).rejects.toMatchObject({ codigo: "estado_invalido" });
@@ -516,6 +524,17 @@ it("GET /computador: estado, máquina, telas com título, fila, memória com o t
 
   pessoa = { ...pessoa, falhasSeguidas: 3, falhaMotivo: "sem_resposta", indisponivelDesde: T0 - 5000 };
   expect(await computadores.consultarDaPessoa(MARLON)).toMatchObject({ estado: "fora_do_ar", falha: { motivo: "sem_resposta", desde: T0 - 5000 } });
+  // NOD-407: já fora do ar por sem_resposta e a máquina some: a causa mostrada é o sem contato, com a hora do último contato.
+  const antes = driver.maquinaDoComputador;
+  driver.maquinaDoComputador = async () => ({ id: "maq-1", nome: "Servidor de casa", contato: null, foto: null, ultimoContato: T0 - 9000 });
+  try {
+    expect(await computadores.consultarDaPessoa(MARLON)).toMatchObject({ estado: "fora_do_ar", falha: { motivo: "maquina_sem_contato", desde: T0 - 5000 }, semContatoDesde: T0 - 9000 });
+  } finally { driver.maquinaDoComputador = antes; }
+  // NOD-407 (QA M10): o aviso de app desatualizado do driver chega à aba.
+  driver.maquinaDoComputador = async () => ({ id: "maq-1", nome: "Servidor de casa", contato: T0, foto: null, appDesatualizado: { atual: "1.0.0-rc.1", minima: "1.0.0-rc.2", plataforma: "mac" } });
+  try {
+    expect(await computadores.consultarDaPessoa(MARLON)).toMatchObject({ appDesatualizado: { atual: "1.0.0-rc.1", minima: "1.0.0-rc.2", plataforma: "mac" } });
+  } finally { driver.maquinaDoComputador = antes; }
 });
 
 it("fora do ar no computador da pessoa: o aviso no chat traz a ação do painel que resolve", async () => {

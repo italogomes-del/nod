@@ -3,7 +3,7 @@ import { CODIGOS_RUNTIME, codigoDaAcao, codigoDaSubida, falhaDe, primeiraLinha, 
 import type { Agente } from "../../../src/contracts/agente.ts";
 import { MOTIVOS_FALHA_COMPUTADOR } from "../../../src/contracts/motivos.ts";
 import type { Turno } from "../../../src/contracts/turno.ts";
-import { acaoDaFalha, CONTA_PARA_SAUDE, FalhaComputador, ehFalhaComputador, instrucaoDaFalha, LIMITE_FALHAS_SEGUIDAS, limiteDoAmbiente, MOTIVO_FALHA_EM_PORTUGUES, resumirDetalhe, textoDoLimite } from "../../../src/domain/computador.ts";
+import { acaoDaFalha, CONTA_PARA_SAUDE, FalhaComputador, ehFalhaComputador, instrucaoDaFalha, LIMITE_FALHAS_SEGUIDAS, limiteDoAmbiente, maquinaRespondeu, MOTIVO_FALHA_EM_PORTUGUES, resumirDetalhe, textoDoLimite } from "../../../src/domain/computador.ts";
 import { montarPlano, type EntradaPlano } from "../../../src/domain/plano-turno.ts";
 import { redigir } from "../../../src/domain/redacao.ts";
 import { MOTIVO_FALHA_TEXTO, textoDoLimite as textoDoLimiteWeb } from "../../../web/lib/computador.ts";
@@ -13,6 +13,16 @@ const agente: Agente = { tenantId: "t", id: "a1", ownerId: "p", visibility: "pri
 const turno: Turno = { executor: "catcher", tenantId: "t", id: "t1", conversaId: "c1", agenteId: "a1", ownerId: "p", origem: "conversa", estado: "despachando", sinais: { attempted: true, rejected: false, promptSubmitted: false, producedOutput: false }, machineId: null, leaseAte: null, prazoEm: agora + 86_400_000, motivoInterrupcao: null, motivoFalha: null, semNovidadeMotivo: null, retomaTurnoId: null, profundidade: 0, reenvios: 0, pararSolicitadoEm: null, entradaTexto: "oi", entradaAnexos: [], entradaConfianca: "confiavel", custoUsd: null, modelo: "claude-haiku-4-5-20251001", criadoEm: agora };
 const base: EntradaPlano = { turno, agente, memorias: [], concessoes: [], conectores: [], modo: "conversa", confianca: "confiavel", profundidade: 0, inventario: { estado: "pronto", versao: "2.1.272", em: agora }, executor: "local", sessaoCli: null, pessoaNome: "Marlon", agora, computador: true };
 const doComputador = (p: ReturnType<typeof montarPlano>) => p.catalogo.ferramentas.filter((f) => f.origem === "computador").map((f) => f.nome);
+
+describe("NOD-407: o que prova que a máquina respondeu", () => {
+  it("teto do host e app abaixo do piso são neutros; tela_alterada respondeu; sem_resposta é falha", () => {
+    expect(maquinaRespondeu("app_desatualizado")).toBe(false);
+    expect(maquinaRespondeu("limite_de_computadores")).toBe(false);
+    expect(maquinaRespondeu("tela_alterada")).toBe(true);
+    expect(maquinaRespondeu("sem_resposta")).toBe(false);
+    expect(CONTA_PARA_SAUDE.has("app_desatualizado")).toBe(false);
+  });
+});
 
 describe("saúde do computador do bot (emenda da ADR-037)", () => {
   it("só a MÁQUINA sem responder conta; a ação que falhou numa máquina viva não conta", () => {

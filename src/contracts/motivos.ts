@@ -193,5 +193,7 @@ export const MOTIVOS_FALHA_COMPUTADOR = [
   "sem_suporte",
   "nao_ficou_pronto",
   "atualizando",
+  // NOD-407 (0129): o app conectado não entende o protocolo atual do computador. Neutro para a saúde.
+  "app_desatualizado",
 ] as const;
 export type MotivoFalhaComputador = (typeof MOTIVOS_FALHA_COMPUTADOR)[number];

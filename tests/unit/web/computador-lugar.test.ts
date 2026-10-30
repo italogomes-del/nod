@@ -109,4 +109,12 @@ describe("fora do ar com a máquina sem contato (NOD-365)", () => {
     expect(htmlAvisoDeFalha({ ...fora, falha: { motivo: "nao_ficou_pronto", desde } })).toContain("Não consegui ligar o computador");
     expect(tituloSemContato(pc())).toBeNull();
   });
+
+  it("NOD-407: a máquina voltou (contato atual, sem semContatoDesde): não diz 'sem contato desde' com a hora de agora", () => {
+    const voltou = pc({ estado: "fora_do_ar", falha: { motivo: "maquina_sem_contato", desde }, maquina: { id: "m-nod", nome: "nod-motor", contato: desde + 60_000 } });
+    expect(tituloSemContato(voltou)).toBeNull();
+    expect(htmlAvisoDeFalha(voltou)).not.toContain("sem contato");
+    const sumiu = pc({ estado: "fora_do_ar", falha: { motivo: "maquina_sem_contato", desde }, maquina: { id: "m-nod", nome: "nod-motor", contato: null } });
+    expect(tituloSemContato(sumiu)).toBe("Não consegui ligar o computador: nod-motor está sem contato");
+  });
 });

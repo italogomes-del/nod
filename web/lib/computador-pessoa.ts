@@ -61,6 +61,8 @@ export type ComputadorPessoaDto = {
   lugares?: LugarDoComputador[];
   /** NOD-365: desde quando a máquina do computador está sem contato (epoch ms), para o "desde HH:MM". */
   semContatoDesde?: number | null;
+  /** NOD-407: o app conectado e o piso próprio do computador, só quando precisa atualizar. */
+  appDesatualizado?: { atual: string; minima: string; plataforma?: string };
 };
 
 /**
@@ -308,9 +310,12 @@ function htmlSono(bot: BotVisto, titulo: string, sub: string, acao: string): str
 /** O topo da gaveta (só a dona): miniatura com Abrir, a linha "sem tela", o mascote dormindo ou acordando. */
 export function htmlGavetaTela(dto: ComputadorPessoaDto, bot: BotVisto, recusa: string | null = null): string {
   const g = estadoDaGaveta(dto, bot.id);
+  const atualizarApp = textoAppDesatualizado(dto);
+  const semContato = tituloSemContato(dto);
   // NOD-407: o Acordar recusado fica aqui, na aba, com a causa real e o Tentar de novo — não no banner vermelho do chat.
   const aviso = recusa && (g === "dormindo" || g === "fora" || g === "sem_tela") ? htmlAviso({ titulo: "O computador não acordou", apoio: recusa, acoes: [link("Tentar de novo", 'data-act="operar-computador" data-op="tentar_de_novo"')], tom: "aviso" }) : "";
-  const corpo = aviso || (g === "miniatura"
+  // NOD-407: a leitura do servidor manda — app antigo e "sem contato desde HH:MM" passam na frente da recusa do clique.
+  const corpo = (atualizarApp ? htmlAviso({ ...atualizarApp, tom: "aviso" }) : "") || (semContato ? htmlAvisoSemContato(semContato) : "") || aviso || (g === "miniatura"
     ? htmlMiniatura(bot)
     : g === "sem_tela"
       // NOD-410 (pedido do Marlon, 29/10): a pessoa abre o computador ela mesma, já no controle; ao Parar, volta ao bot.
@@ -362,14 +367,48 @@ export function horaCurta(ms: number): string {
   return new Date(ms).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
 }
 
+function htmlAvisoSemContato(titulo: string): string {
+  return htmlAviso({ titulo, apoio: "Ligue a máquina, ou mude o computador para outra.", acoes: [link("Tentar de novo", 'data-act="operar-computador" data-op="tentar_de_novo"'), link("Onde o computador mora", 'data-act="ver-lugar-do-computador"')] });
+}
+
+/** O download do app (o DMG do Mac). A lista, não `latest`: até a 1.0.0 toda release sai como pré-release (processo-de-release.md). */
+export const URL_ATUALIZAR_APP = "https://github.com/gamefik/nod/releases";
+/**
+ * NOD-407: o app conectado está abaixo do piso do computador. No Mac, o link Atualizar app; no motor Linux (instalado
+ * pelo script), não há DMG: a frase pede para atualizar o nod naquela máquina.
+ */
+export function textoAppDesatualizado(dto: ComputadorPessoaDto): { titulo: string; apoio: string; acoes: string[] } | null {
+  const app = dto.appDesatualizado;
+  if (!app) return null;
+  const mac = app.plataforma === undefined || app.plataforma === "darwin";
+  return mac
+    ? { titulo: "Atualize o app para usar o computador", apoio: `Seu app está na versão ${app.atual}; o computador precisa da ${app.minima}.`, acoes: [`<a class="cb-link" href="${URL_ATUALIZAR_APP}" target="_blank" rel="noopener">Atualizar app</a>`] }
+    : { titulo: "Atualize o nod nesta máquina para usar o computador", apoio: `${dto.maquina?.nome ?? "A máquina do computador"} está na versão ${app.atual}; o computador precisa da ${app.minima}. Rode de novo o instalador do nod nela.`, acoes: [link("Onde o computador mora", 'data-act="ver-lugar-do-computador"')] };
+}
+
 /**
  * NOD-365: a máquina do computador sumiu. "Não consegui ligar o computador: <nome> está sem contato desde HH:MM".
  * O computador nunca muda de máquina sozinho: o caminho é o link para Onde o computador mora.
  */
 export function tituloSemContato(dto: ComputadorPessoaDto): string | null {
   if (dto.estado !== "fora_do_ar" || dto.falha?.motivo !== "maquina_sem_contato" || !dto.maquina) return null;
-  const desde = dto.semContatoDesde ?? dto.maquina.contato;
+  // NOD-407: a hora é só a do último contato antes de sumir; com a máquina de volta (contato atual), o "sem contato" sai.
+  const desde = dto.semContatoDesde ?? null;
+  if (desde === null && dto.maquina.contato !== null) return null;
   return `Não consegui ligar o computador: ${dto.maquina.nome} está sem contato${desde ? ` desde ${horaCurta(desde)}` : ""}`;
+}
+
+/** NOD-407: só recusas transitórias repetem o Acordar; erro permanente vira a mensagem sutil já existente. */
+const MOTIVOS_RETRY_COMPUTADOR = new Set(["ocupado", "ligando", "esperando_tela", "atualizando"]);
+export function retryAutomaticoDoComputador(motivo: string | null | undefined): boolean {
+  return motivo !== null && motivo !== undefined && MOTIVOS_RETRY_COMPUTADOR.has(motivo);
+}
+/** NOD-407 (protótipo do Gil, 30/10): esperas de 2, 4, 8 e 16 s (~30 s); depois, o Tentar de novo manual. */
+export const ESPERAS_RETRY_COMPUTADOR_MS: readonly number[] = [2_000, 4_000, 8_000, 16_000];
+/** Quanto esperar antes da tentativa automática `n` (0 = a primeira repetição), com jitter de até 20%; null = parar. */
+export function esperaDoRetryDoComputador(n: number, sorteio: number = Math.random()): number | null {
+  const base = ESPERAS_RETRY_COMPUTADOR_MS[n];
+  return base === undefined ? null : Math.round(base * (1 + 0.2 * Math.min(Math.max(sorteio, 0), 1)));
 }
 
 // ---- a linha de espera no chat ---------------------------------------------------------------------------------------
@@ -508,7 +547,10 @@ export function htmlPainelComputadorDoBot(dto: ComputadorPessoaDto, bots: readon
     ? `<div class="pc-faixa" role="status">${ICONE_CB.info}<div><b>Entre nos sites de novo uma vez</b><p>O computador do bot foi recriado e os logins não vieram junto. Da próxima vez que um bot precisar de um site com login, ele pede para você entrar; o login vale para todos.</p></div>${ghost("Entendi", 'data-act="entendi-computador"')}</div>`
     : "";
   const semContato = tituloSemContato(dto);
-  const fora = semContato
+  const app = textoAppDesatualizado(dto);
+  const fora = app
+    ? `<div class="pc-faixa" role="status">${ICONE_CB.info}<div><b>${esc(app.titulo)}</b><p>${esc(app.apoio)}</p></div>${app.acoes.join("")}</div>`
+    : semContato
     ? `<div class="pc-faixa alerta" role="status">${ICONE_CB.info}<div><b>${esc(semContato)}</b><p>Ligue a máquina, ou mude o computador para outra em ${link("Onde o computador mora", 'data-act="ver-lugar-do-computador"')}.</p></div>${ghost("Tentar de novo", 'data-act="operar-computador" data-op="tentar_de_novo"')}</div>`
     : dto.estado === "fora_do_ar"
       ? `<div class="pc-faixa alerta" role="status">${ICONE_CB.info}<div><b>O computador parou de responder</b><p>${esc(dto.falha ? textoDaFalha(dto.falha.motivo) : "Atualizar costuma resolver.")}</p></div>${ghost("Tentar de novo", 'data-act="operar-computador" data-op="tentar_de_novo"')}</div>`

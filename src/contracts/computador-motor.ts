@@ -187,8 +187,8 @@ export type ComputadorDaPessoaDto = {
   aviso_recriado?: boolean;
   /** NOD-365: as máquinas onde o computador pode morar (a atual marcada). */
   lugares?: LugarDoComputador[];
-  /** NOD-365: a máquina do computador está sem contato desde este instante (o último contato que a ponte viu). */
-  semContatoDesde?: EpochMs | null;
+  semContatoDesde?: EpochMs | null; // NOD-365: sem contato desde este instante (o último contato que a ponte viu)
+  appDesatualizado?: { atual: string; minima: string; plataforma?: string }; // NOD-407: só quando o app está abaixo do piso do computador
 };
 
 /**

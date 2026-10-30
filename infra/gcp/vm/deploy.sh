@@ -211,6 +211,7 @@ if [ "$NOD_REVISOR" = ligado ]; then REVISOR_CHAVE="$(segredo nod-anthropic-revi
 # ADR-122 (NOD-96) e ADR-121 (NOD-92): o servidor compara as flags por igualdade exata (`=== "motor"`); um config.env com
 # CRLF ou espaço nas pontas desligaria em silêncio. Mesma limpeza do NOD_REVISOR (`limpo`, definida no topo).
 NOD_COMPUTADORES="$(limpo "${NOD_COMPUTADORES:-}")"
+NOD_COMPUTADOR_VERSAO_MINIMA="$(limpo "${NOD_COMPUTADOR_VERSAO_MINIMA:-}")"
 NOD_MAQUINA_NUVEM="$(limpo "${NOD_MAQUINA_NUVEM:-}")"
 NOD_NUVEM_CONTA_FATURAMENTO="$(limpo "${NOD_NUVEM_CONTA_FATURAMENTO:-}")"
 # Só o env da cor nova muda: a velha, que ainda drena, nunca recebe config nova.
@@ -258,6 +259,7 @@ NOD_DRENAGEM_MAX_MS=600000
 NOD_URL_PUBLICA=https://$NOD_DOMINIO
 # ADR-122 (NOD-96): motor liga o computador da pessoa, que roda na máquina dela pelo motor. Vazio = desligado.
 NOD_COMPUTADORES=$NOD_COMPUTADORES
+NOD_COMPUTADOR_VERSAO_MINIMA=$NOD_COMPUTADOR_VERSAO_MINIMA
 # ADR-121 (NOD-92): gcp liga a máquina na nuvem da pessoa. Só depois de cadastrar a URI abaixo no cliente OAuth.
 NOD_MAQUINA_NUVEM=$NOD_MAQUINA_NUVEM
 NOD_NUVEM_REDIRECT_URI=https://$NOD_DOMINIO/api/nuvem/google/callback

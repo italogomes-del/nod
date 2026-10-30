@@ -180,3 +180,12 @@ está. No modelo do motor:
 Com `NOD_VM_LOCAL=1`, o computador da pessoa pode morar numa VM Linux que o app do Mac liga (Lima/vz, ADR-123). É o
 mesmo driver Docker, apontado para o dockerd da VM por `DOCKER_HOST`/`DOCKER_CONFIG` próprios. A imagem passa a sair
 em `linux/arm64` e `linux/amd64` (`npm run computador:build`). Limites, ciclo de vida e órfãos não mudam.
+
+## Emenda de 2026-10-30 — piso de versão do app e a causa real no 409 (NOD-407)
+
+O computador do motor tem piso próprio de versão do app, `NOD_COMPUTADOR_VERSAO_MINIMA` (semver; vazio ou inválido =
+desligado, com log). Abaixo dele, `iniciar`/`executar` falham `app_desatualizado` antes de mandar comando, e a aba
+Computador mostra "Atualizar app" com a versão atual e a exigida. Como `limite_de_computadores`, o motivo é neutro para
+a saúde. Só se liga depois que a versão exigida estiver publicada em Releases. O 409 das rotas do computador passa a
+trazer `motivo` (lista branca; fora dela, `indisponivel`), e a web repete sozinha só os transitórios (ocupado, ligando,
+esperando_tela, atualizando) com espera de 2, 4, 8 e 16 s.

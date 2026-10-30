@@ -54,6 +54,13 @@ export function ehEsperandoTela(e: unknown): e is EsperandoTela {
 
 /** Só a MÁQUINA sem responder conta para a saúde; a ação que falhou numa máquina viva não conta. */
 export const CONTA_PARA_SAUDE: ReadonlySet<MotivoFalhaComputador> = new Set<MotivoFalhaComputador>(["docker_indisponivel", "imagem_ausente", "nao_iniciou", "cofre_invalido", "navegador_nao_abriu", "sem_resposta", "maquina_sem_contato", "nao_ficou_pronto"]);
+/**
+ * A falha prova que a máquina respondeu (zera `falhas_seguidas`)? O teto do host (NOD-170) e o app abaixo do piso
+ * (NOD-407) são recusas do servidor antes de qualquer comando: neutros, nem somam nem zeram.
+ */
+export function maquinaRespondeu(motivo: MotivoFalhaComputador): boolean {
+  return !CONTA_PARA_SAUDE.has(motivo) && motivo !== "limite_de_computadores" && motivo !== "app_desatualizado";
+}
 
 /**
  * definido em 2026-09-24, NÃO medido: três falhas seguidas da máquina tiram o computador das próximas
@@ -79,6 +86,7 @@ export const MOTIVO_FALHA_EM_PORTUGUES: Readonly<Record<MotivoFalhaComputador, s
   sem_suporte: "a máquina não consegue rodar o computador",
   nao_ficou_pronto: "o computador ligou mas não ficou pronto a tempo",
   atualizando: "o computador está sendo atualizado",
+  app_desatualizado: "o app do nod precisa ser atualizado para usar o computador",
 };
 
 /**
@@ -131,6 +139,7 @@ export function instrucaoDaFalha(motivo: MotivoFalhaComputador, limite: LimiteDe
   if (motivo === "faltam_pacotes" || motivo === "sem_suporte") return `O computador não está disponível: ${MOTIVO_FALHA_EM_PORTUGUES[motivo]}. Nada foi executado. Não tente de novo neste turno; siga com os acessos que você tem e diga em uma frase o que ficou de fora.`;
   // NOD-96 PR 5: a operação da pessoa (Atualizar, Redefinir, Sair de todos) é espera, não erro.
   if (motivo === "atualizando") return TEXTO_ATUALIZANDO;
+  if (motivo === "app_desatualizado") return "O app do nod precisa ser atualizado para usar o computador. Nada foi executado; diga à pessoa para atualizar o nod na máquina do computador (o aviso está na aba Computador).";
   if (CONTA_PARA_SAUDE.has(motivo)) return `O computador não respondeu: ${MOTIVO_FALHA_EM_PORTUGUES[motivo]}. Não tente de novo neste turno; siga com os acessos que você tem e diga em uma frase o que ficou de fora.${caminhoParaAPessoa(motivo)}`;
   if (motivo === "tela_alterada") return "A tela mudou desde a sua observação. Observe de novo e reavalie antes de agir; nada foi executado.";
   if (motivo === "ocupado") return "Outra ação estava em andamento no computador. Observe a tela antes de tentar de novo; nada foi executado.";

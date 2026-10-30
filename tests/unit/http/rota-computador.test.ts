@@ -51,7 +51,7 @@ describe("rotas computador/* da ponte", () => {
     const { p, chamar } = montar();
     await chamar(ana, "vm", "conectar", { versaoContrato: 1, nome: "vm", plataforma: "linux", inventario: pronto, computador: { estado: "pronto" } });
     await chamar(ana, "mac", "conectar", { versaoContrato: 1, nome: "mac", inventario: pronto, computador: { estado: "voando" } });
-    expect(p.maquinasComComputador(ana).map((m) => [m.machineId, m.plataforma, m.computador])).toEqual([["vm", "linux", "pronto"], ["mac", "darwin", null]]);
+    expect(p.maquinasComComputador(ana).map((m) => [m.machineId, m.plataforma, m.computador, m.versaoApp])).toEqual([["vm", "linux", "pronto", VERSAO_MINIMA_APP], ["mac", "darwin", null, VERSAO_MINIMA_APP]]);
     expect(p.maquinasComComputador(bia)).toEqual([]);
     await chamar(ana, "vm", "inventario", { versaoContrato: 1, inventario: pronto, computador: { estado: "faltam_pacotes", falta: ["bubblewrap", "Rm -rf"] } });
     expect(p.maquinasComComputador(ana)[0]!.computador).toBe("faltam_pacotes");

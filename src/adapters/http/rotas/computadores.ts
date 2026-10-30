@@ -24,16 +24,20 @@ export const MOTIVOS_DO_COMPUTADOR: Readonly<Record<string, string>> = {
   atualizando: "O computador está sendo atualizado. Espere terminar.",
   fora_do_ar: "O computador está fora do ar. Tente de novo para religar.",
   ocupado: "Uma ação anterior ainda está terminando. Tente de novo em instantes.",
+  app_desatualizado: "Atualize o app do nod para usar o computador.",
+  // NOD-407: recusa sem causa conhecida (ex.: computador desligado pela pessoa). Não é transitória: a web não repete.
+  indisponivel: "O computador não pode fazer isso agora.",
 };
 
-/** O 409 `estado_invalido` do computador com a causa: a frase da tabela e o `motivo`; sem causa conhecida, a reserva viva. */
+/** O 409 `estado_invalido` do computador com a causa: a frase da tabela e o `motivo`; sem causa, `indisponivel` (não repete). */
 function responderCausa(ctx: { json(status: number, corpo: unknown): void }, e: unknown): boolean {
   if (!(e instanceof ErroDeDominio) || e.codigo !== "estado_invalido") return false;
-  const bruta = typeof e.cause === "string" ? e.cause : "ocupado";
+  const bruta = typeof e.cause === "string" ? e.cause : "indisponivel";
   const motivo = bruta === "computador fora do ar" ? "fora_do_ar" : bruta;
-  const mensagem = MOTIVOS_DO_COMPUTADOR[motivo];
-  if (!mensagem) return false;
-  ctx.json(409, { codigo: "estado_invalido", mensagem, motivo });
+  // Causa fora da lista (sem_suporte, faltam_pacotes…): vira `indisponivel`, nunca o "Atualize a página" genérico.
+  const conhecido = Object.hasOwn(MOTIVOS_DO_COMPUTADOR, motivo);
+  const final = conhecido ? motivo : "indisponivel";
+  ctx.json(409, { codigo: "estado_invalido", mensagem: MOTIVOS_DO_COMPUTADOR[final], motivo: final });
   return true;
 }
 

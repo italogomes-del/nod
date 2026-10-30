@@ -5,7 +5,7 @@ import type { SessaoVivo } from "../../contracts/computador-vivo.ts";
 import { FERRAMENTAS_COMPUTADOR } from "../../contracts/ferramentas-computador.ts";
 import type { MotivoFalhaComputador } from "../../contracts/motivos.ts";
 import type { PlanoTurno } from "../../contracts/plano-turno.ts";
-import { acaoDaFalha, alteraComputador, computadorPadrao, CONTA_PARA_SAUDE, ehEsperandoTela, ehFalhaComputador, FalhaComputador, instrucaoDaFalha, LIMITE_FALHAS_SEGUIDAS, MOTIVO_FALHA_EM_PORTUGUES, resumirDetalhe, resumoAcaoComputador, TEXTO_ATUALIZANDO, textoDaAtividade, textoPedidoDeTela, validarAcaoComputador } from "../../domain/computador.ts";
+import { acaoDaFalha, alteraComputador, computadorPadrao, CONTA_PARA_SAUDE, ehEsperandoTela, ehFalhaComputador, FalhaComputador, instrucaoDaFalha, LIMITE_FALHAS_SEGUIDAS, maquinaRespondeu, MOTIVO_FALHA_EM_PORTUGUES, resumirDetalhe, resumoAcaoComputador, TEXTO_ATUALIZANDO, textoDaAtividade, textoPedidoDeTela, validarAcaoComputador } from "../../domain/computador.ts";
 import { ehErroDeDominio, ErroDeDominio } from "../../domain/erro.ts";
 import { deduplicarObservacao, type HashesObservacao } from "../../domain/observacao-computador.ts";
 import { decidirPeloModo, semRevisor } from "../../domain/modo-aprovacao.ts";
@@ -109,7 +109,7 @@ function esperandoTelaParaAgente(quem: string[]): string {
   return JSON.stringify({ estado: "esperando_tela", quem, instrucao: `Ainda esperando uma tela livre no computador; seu lugar na fila continua.${uso} Chame a mesma ferramenta de novo para seguir esperando; não diga que o computador está fora do ar.` });
 }
 function livre(c: Computador, agora: number): void {
-  if (c.ocupadoAte && c.ocupadoAte > agora) throw new ErroDeDominio("estado_invalido");
+  if (c.ocupadoAte && c.ocupadoAte > agora) throw new ErroDeDominio("estado_invalido", { cause: "ocupado" });
 }
 async function reservarCom(lugar: Lugar, d: Deps, c: Vaga, acao: AcaoComputador, autor: "bot" | "pessoa", turnoId?: string, registroId?: string): Promise<Reserva> {
   livre(c, d.agora());
@@ -533,7 +533,7 @@ export function criarComputadores(o: Opcoes) {
         falha = e;
         // A ação falhou numa máquina que RESPONDEU (tela alterada, ocupado…): ela está viva. O teto do host
         // (NOD-170) não é resposta nem falha da máquina: não zera nem soma falhas_seguidas.
-        respondeu = !CONTA_PARA_SAUDE.has(e.motivo) && e.motivo !== "limite_de_computadores";
+        respondeu = maquinaRespondeu(e.motivo);
       }
       throw e;
     } finally {
@@ -1018,12 +1018,14 @@ export function criarComputadores(o: Opcoes) {
         telas: telas.map((t) => ({ agenteId: t.agenteId, estado: t.estado, controle: t.controle, memoriaMb: t.memoriaMb, titulo: titulos[t.agenteId] ?? null, ultimaAcaoEm: t.ultimaAtividadeEm, ajuda: t.ajuda })),
         esperando: fila.map((t) => t.agenteId),
         operacao: operando && p.operacao ? { tipo: p.operacao.tipo, pct: p.operacao.progresso, etapa: p.operacao.etapa } : null,
-        falha: estado === "fora_do_ar" ? { motivo: p.indisponivelDesde !== null ? p.falhaMotivo ?? "sem_resposta" : "maquina_sem_contato", desde: p.indisponivelDesde ?? agoraMs } : null,
+        // NOD-407: a máquina sem contato agora é a causa a mostrar, mesmo com o computador já fora do ar por outra falha.
+        falha: estado === "fora_do_ar" ? { motivo: semContato ? "maquina_sem_contato" : p.falhaMotivo ?? "sem_resposta", desde: p.indisponivelDesde ?? agoraMs } : null,
         memoria: totalMb && totalMb > 0 ? { usadaMb, totalMb } : null,
         ligadoDesde: ativo ? m?.foto?.ligadoDesde ?? null : null,
         atividade: lido.atividade.map((a) => ({ agenteId: a.agenteId, texto: textoDaAtividade(a.tipo, a.estado), em: a.em })),
         aviso_recriado: lido.aviso,
         ...(m?.preparo ? { preparo: m.preparo } : {}),
+        ...(m?.appDesatualizado ? { appDesatualizado: m.appDesatualizado } : {}),
         // NOD-365: a seção "Onde o computador mora" e o "sem contato desde HH:MM" da faixa de fora do ar.
         lugares: (await o.driver.lugares?.(p.id, escopo)) ?? [],
         ...(m && m.contato === null && m.ultimoContato ? { semContatoDesde: m.ultimoContato } : {}),
