@@ -2,6 +2,7 @@ import type { AppComLogo } from "../../src/contracts/marketplace.ts";
 import type { Conector } from "../../src/contracts/conector.ts";
 import type { Estado } from "../estado/reducer.ts";
 import { botao, esc, iconeAgente } from "../lib/render.ts";
+import { avisoErro } from "../lib/card-proposta.ts";
 import { haQuanto } from "../lib/relogio.ts";
 import { ICONE } from "../lib/icones.ts";
 import { voltaDaTela } from "../lib/volta.ts";
@@ -98,9 +99,10 @@ function faixaAtencao(estado: Estado, apps: readonly AppComLogo[]): string {
     const c = conectorDoApp(estado, app.slug);
     const bots = c ? botsQueUsam(estado, c).map((b) => b.agente.nome) : [];
     const quem = bots.length === 0 ? "Nenhum bot depende dele agora." : `${bots.length === 1 ? bots[0] : `${bots.slice(0, -1).join(", ")} e ${bots.at(-1)}`} ${bots.length === 1 ? "não consegue" : "não conseguem"} usar o ${app.nome}${c?.ultimaFalha ? ` desde ${haQuanto(estado.agora - c.ultimaFalha.em)}` : ""}.`;
-    return `<div class="atencao-linha">${logoApp(estado, app.slug, app.nome)}<div><b>O ${esc(app.nome)} ${esc(motivoDaFalha(c))}</b><small>${esc(quem)} Entrar de novo costuma resolver.</small></div>${botao("conectar-app", "Entrar de novo", { classe: "pri sm", id: app.slug })}</div>`;
+    // NOD-399: cada app é o aviso neutro, de largura toda, com a ação à direita (nada de faixa âmbar).
+    return avisoErro({ frase: `O ${app.nome} ${motivoDaFalha(c)}.`, mais: `${quem} Entrar de novo costuma resolver.`, acoes: botao("conectar-app", "Entrar de novo", { classe: "cp-acao sm", id: app.slug }), pleno: true, classe: "atencao-linha" });
   });
-  return linhas.length ? `<section class="mkt-atencao" aria-label="Precisam de atenção">${linhas.join("")}</section>` : "";
+  return linhas.length ? `<section class="mkt-atencao cp-faixa" aria-label="Precisam de atenção">${linhas.join("")}</section>` : "";
 }
 
 function filtros(atual: Filtro, conectados: number, atencao: number): string {
@@ -155,7 +157,7 @@ function gaveta(estado: Estado, app: AppComLogo, passo: "detalhes" | "quem-usa")
     rodape = botao("cancelar-conexao", "Cancelar", { classe: "link", id: app.slug });
   } else if ((s === "conectado" || s === "atencao") && c) {
     const status = s === "atencao"
-      ? `<div class="gaveta-status atencao">${blocoFalhou(`O ${app.nome} ${motivoDaFalha(c)}. Entrar de novo costuma resolver.`)}</div>`
+      ? `<div class="gaveta-status">${blocoFalhou(`O ${app.nome} ${motivoDaFalha(c)}.`, "", "Entrar de novo costuma resolver.")}</div>`
       : `<div class="gaveta-status"><span class="bolinha-ok" aria-hidden="true"></span><div><b>Conectado</b><small>${c.sondadoEm ? `Funcionando · verificado ${esc(haQuanto(estado.agora - c.sondadoEm))}` : "Funcionando"}</small></div></div>`;
     corpo = `${status}${quemPodeUsar(estado, c, passo === "quem-usa" ? `Quem pode usar o ${app.nome}?` : "Quem usa")}${detalhesTecnicos(c)}`;
     rodape = passo === "quem-usa"

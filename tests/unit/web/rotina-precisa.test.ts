@@ -28,15 +28,12 @@ const LER_GMAIL = [{ conector: "gmail", capacidades: LEITURA, nivel: "leitura" a
 describe("card da rotina proposta com acessos (chat)", () => {
   it("Gmail conectado: linha 'Precisa' com o app, 'Ler seu Gmail', o 'Não inclui' curado e as ações atrás do <details>; botão 'Criar rotina e permitir leitura'", () => {
     const html = renderTimeline(conversa(proposta(LER_GMAIL)), estado([gmail(true)]));
-    expect(html).toContain('class="rotina-precisa" data-app="gmail"');
-    expect(html).toContain('class="app-logo app-gmail"');
-    expect(html).toContain("Precisa");
-    expect(html).toContain("Ler seu Gmail");
-    expect(html).toContain("Não inclui: enviar, apagar, arquivar.");
-    expect(html).toContain("Ver as 2 ações");
-    expect(html.indexOf("Ver as 2 ações")).toBeLessThan(html.indexOf("gmail.GMAIL_FETCH_EMAILS"));
-    expect(html).toMatch(/<button type="button" class="bt pri" data-act="confirmar-proposta" data-id="pr">Criar rotina e permitir leitura<\/button>/);
-    expect(html).toContain('data-act="recusar-proposta" data-id="pr">Deixar de lado</button>');
+    // NOD-399: "Vai poder" é uma das 3 linhas; o que fica de fora e as ações vão para Detalhes, recolhido.
+    expect(html).toContain('<span class="cp-rot">Vai poder:</span> Ler seu Gmail');
+    expect(html).toContain("<dt>Fora (Gmail)</dt><dd>enviar, apagar, arquivar</dd>");
+    expect(html.indexOf("<summary>Detalhes</summary>")).toBeLessThan(html.indexOf("gmail.GMAIL_FETCH_EMAILS"));
+    expect(html).toMatch(/<button type="button" class="bt pri cp-sim" data-act="confirmar-proposta" data-id="pr">Criar rotina e permitir leitura<\/button>/);
+    expect(html).toContain('data-act="recusar-proposta" data-id="pr">Agora não</button>');
     expect(html).not.toContain("Conectar Gmail");
     expect(html).not.toContain("Liberado assim que");
   });
@@ -47,15 +44,15 @@ describe("card da rotina proposta com acessos (chat)", () => {
     const declarado = [{ conector: "gmail", capacidades: [], nivel: "leitura" as const, naoPedido: [], conectar: true as const }];
     const html = renderTimeline(conversa(proposta(declarado)), estado([]));
     expect(html).toContain("Ler seu Gmail");
-    expect(html).toMatch(/class="bt pri" data-act="conectar-e-confirmar" data-id="gmail" data-proposta="pr" data-ato="confirmar-proposta">Conectar Gmail e criar rotina/);
+    expect(html).toMatch(/class="bt pri cp-sim" data-act="conectar-e-confirmar" data-id="gmail" data-proposta="pr" data-ato="confirmar-proposta">Conectar Gmail e criar rotina/);
     expect(html).not.toContain('data-act="confirmar-proposta" data-id="pr"');
     const esperando = renderTimeline(conversa(proposta(declarado)), { ...estado([]), conectando: { gmail: { url: null, falhou: null } } });
     expect(esperando).toContain("Esperando você entrar no Gmail");
     expect(esperando).toContain('data-act="cancelar-conexao" data-id="gmail"');
     // Conectou: o mesmo card libera o botão, com as ferramentas de leitura do catálogo de agora.
     const depois = renderTimeline(conversa(proposta(declarado)), estado([gmail(true)]));
-    expect(depois).toMatch(/class="bt pri" data-act="confirmar-proposta" data-id="pr">Criar rotina e permitir leitura/);
-    expect(depois).toContain("Ver as 2 ações");
+    expect(depois).toMatch(/class="bt pri cp-sim" data-act="confirmar-proposta" data-id="pr">Criar rotina e permitir leitura/);
+    expect(depois).toContain("gmail.GMAIL_FETCH_EMAILS");
     expect(depois).not.toContain("conectar-e-confirmar");
   });
 
@@ -63,13 +60,13 @@ describe("card da rotina proposta com acessos (chat)", () => {
     const html = renderTimeline(conversa(proposta([{ conector: "gmail", capacidades: [...LEITURA, "GMAIL_SEND_EMAIL"], nivel: "escrita", naoPedido: [] }])), estado([gmail(true)]));
     expect(html).toContain("Ler e alterar seu Gmail");
     expect(html).toContain("Criar rotina e permitir acesso");
-    expect(html).toContain("Ver as 3 ações");
+    expect(html).toContain("gmail.GMAIL_SEND_EMAIL");
   });
 
   it("rotina sem acessos declarados segue com o card de sempre", () => {
     const html = renderTimeline(conversa(proposta(undefined)), estado([gmail(true)]));
-    expect(html).not.toContain("rotina-precisa");
-    expect(html).toContain('data-act="confirmar-proposta" data-id="pr">Confirmar</button>');
+    expect(html).not.toContain("Vai poder");
+    expect(html).toContain('data-act="confirmar-proposta" data-id="pr">Criar rotina</button>');
   });
 });
 
@@ -83,7 +80,7 @@ describe("card da rotina proposta com acessos (Sua vez)", () => {
     const pronto: Estado = { ...estado([gmail(true)]), tela: { tipo: "sua-vez" }, suaVez: { itens: [item(proposta(LER_GMAIL))], incidentes: [], foraDoAr: [], vazio: false, ultimaDecisaoEm: null } };
     const html = renderSuaVez(pronto);
     expect(html).toContain("Ler seu Gmail");
-    expect(html).toContain('class="bt pri" data-act="decidir-proposta" data-id="pr">Criar rotina e permitir leitura</button>');
+    expect(html).toContain('class="bt pri cp-sim" data-act="decidir-proposta" data-id="pr">Criar rotina e permitir leitura</button>');
     expect(html).toContain('data-act="recusar-decisao" data-id="pr">Deixar de lado</button>');
     const semGmail = renderSuaVez({ ...pronto, conectores: [gmail(false)] });
     expect(semGmail).toContain('data-act="conectar-e-confirmar" data-id="gmail" data-proposta="pr" data-ato="decidir-proposta">Conectar Gmail e criar rotina');

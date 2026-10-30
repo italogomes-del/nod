@@ -237,10 +237,9 @@
   /* NOD-106, re-QA de 20/10: a reserva de 216 px do balão ouvível (interface.css) é do desktop, onde a barra fica ao lado.
      No celular a barra fica dentro da coluna; sem isto o balão encolhia para 150 px em 390 px e o Ouvir e a dica saíam da tela. */
   .message.bot.ouvivel .bubble-wrap { max-width: calc(100% - 36px); }
-  .msg-encolhido > .cartao-encolhido { margin-left: 36px; width: calc(100% - 36px); }
   .bubble { font-size: 15px; }
-  .msg-handoff, .msg-peer, .msg-rotina, .msg-consentimento, .connection-card, .acesso-card, .card-pasta, .welcome-options,
-  .liberar-card, .perfil-card { margin-left: 0; max-width: 100%; }
+  .msg-handoff, .msg-peer, .msg-rotina, .msg-consentimento, .connection-card, .card-pasta, .welcome-options,
+  .liberar-card { margin-left: 0; max-width: 100%; }
   .bubble pre, .msg-peer pre { max-width: 100%; }
   /* As ações da fala (reagir, responder, reportar e ⋯; ADR-113) só aparecem depois de um toque nela (web/lib/gaveta-bots.ts),
      dentro da coluna, nunca ao lado, com alvos de 44 px: no toque, o ⋯ fica sempre à vista junto das outras. */
@@ -351,9 +350,7 @@
   /* ---- O cartão da pergunta (plano "pergunta com botões", tela "Celular", 2026-10-18): linhas de 52 px, letra de 28,
      "Recomendo" embaixo do texto da opção, título 17 px e o × com alvo de 44 px ---- */
   .cartao-pergunta { border-radius: 22px; padding: 16px 14px 14px; }
-  /* O cartão encolhido (chat limpo, PR 4; QA de 2026-10-18) usa as classes da pergunta e herdava o 22 px e o respiro dela;
-     no celular ele segue a medida do protótipo D3A, a mesma do computador. O "Trocar" ganha alvo de toque de 32 px. */
-  .cartao-encolhido { border-radius: 18px; padding: 12px 14px; }
+  /* O "Trocar" do cartão encolhido (NOD-399: a .cp-linha) ganha alvo de toque de 32 px. */
   .ce-rodape .bt.link { min-height: 32px; }
   .pq-titulo { font-size: 17px; }
   .pq-fechar { width: 44px; height: 44px; margin: -10px -10px -10px 0; }
@@ -825,4 +822,19 @@
   .cabecalho.cabecalho-pilula .buscar-celular { position: absolute; right: max(12px, env(safe-area-inset-right)); top: calc(env(safe-area-inset-top) + 4px);
     margin: 0; border: 1px solid var(--line); border-radius: 50%; color: var(--ink);
     background: color-mix(in srgb, var(--surface) 82%, transparent); -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px); box-shadow: var(--shadow-pop); }
+}
+/* NOD-399 (card de proposta, web/card-proposta.css): no celular o card acompanha a fala do bot (ícone de 28 + vão de 8 =
+   36 px de recuo) e todo alvo de toque tem 44 px. Os botões aparecem com 36 px e a área de toque cresce 4 px em cima e
+   embaixo; os links da linha decidida crescem só a área (::after), sem esticar a linha. */
+@media (hover: none) and (pointer: coarse) and (max-width: 600px), (hover: none) and (pointer: coarse) and (max-height: 500px) {
+  .cp, .cp-linha, .cp-erro { --cp-recuo: 36px; }
+  .cp .cp-sim, .cp .cp-nao, .cp-erro .cp-acao { min-height: 36px; padding-inline: 14px; font-size: 14px; }
+  .cp .cp-sim::after, .cp .cp-nao::after, .cp-erro .cp-acao::after { content: ""; position: absolute; inset: -4px 0; }
+  .cp-detalhes { margin-top: 0; }
+  .cp-detalhes > summary { min-height: 44px; }
+  .cp-detalhes + .cp-acoes { margin-top: 4px; }
+  .cp-acoes { row-gap: 8px; }
+  .cp-linha .cp-link, .cp-linha .ce-rodape .bt.link { position: relative; }
+  .cp-linha .cp-link::after, .cp-linha .ce-rodape .bt.link::after { content: ""; position: absolute; inset: -14px -2px; }
+  .cp-linha .ce-detalhes > summary { min-height: 44px; display: flex; align-items: center; }
 }

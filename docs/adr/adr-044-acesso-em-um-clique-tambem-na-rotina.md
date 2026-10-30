@@ -341,3 +341,17 @@ decisão, o turno que pediu e a frase do pedido (`decisaoId`, `turnoId`, `frase`
 (`regra_permanente { decisaoId, turnoId, acoes }`); a linha antiga, sem payload, continua reconhecida pela frase e
 desenhada como antes. O consentimento dado pela aprovação automática (`decidido_por` de regra) não encolhe: não houve
 cartão nem clique, e ele mora na Atividade do bot (ADR-114).
+
+## Emenda de 2026-10-30 — o card comum da NOD-399
+
+Na conversa, o card de proposta passou a ser o componente comum da NOD-399 (`web/lib/card-proposta.ts`, protótipo
+v2 aprovado pelo Marlon). O que muda aqui:
+
+- O secundário de toda proposta na conversa é **"Agora não"**: substitui o "Deixar de lado" e o "Não permitir". A
+  exceção é o pedido de acesso de uma rotina parada, que mantém **"Pausar rotina"**, porque a consequência é outra.
+- Na mudança de rotina sem acessos, o verbo passa a ser **"Salvar"**. Com acessos, continua "Aplicar mudança e
+  permitir…" (o botão é o mesmo de "Sua vez"), e a criação continua "Criar rotina e permitir…".
+- A linha "Precisa" vira "Vai poder" no card. As ações técnicas e os grupos para desmarcar ficam em Detalhes,
+  recolhido.
+- "Sua vez" continua com os rótulos de antes ("Deixar de lado", "Aplicar mudança"): a tela não entrou na NOD-399.
+- A mecânica (`decidir-proposta`, `permitir-acesso`, a concessão em lote) não muda.

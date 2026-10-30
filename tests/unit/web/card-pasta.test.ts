@@ -60,7 +60,7 @@ describe("card de pasta", () => {
     expect(html).toContain(`value="${HOME}/Inhouse/acme" data-pasta-de="pp" checked`);
     expect(html).toContain("Marquei a próxima mais provável.");
     expect(html).toContain('aria-expanded="false">Mostrar mais 2');
-    expect(html).toContain('aria-labelledby="cp-titulo-pp"');
+    expect(html).toContain('aria-labelledby="pa-titulo-pp"');
     expect(html).toContain("Procurar em outro lugar…");
     // Com a lista aberta, o botão lê a opção marcada: não carrega pasta fixa.
     expect(html).not.toContain("data-pasta=");
@@ -104,7 +104,7 @@ describe("card de pasta", () => {
     expect(html).toContain("Qual destas pastas?");
     expect(html).toContain("Achei 2 pastas parecidas.");
     expect(html).not.toContain("sem Git");
-    expect(html).not.toContain("cp-quando");
+    expect(html).not.toContain("pa-quando");
   });
 
   it("escapa o que vem da busca, do modelo e do sistema de arquivos", () => {
@@ -127,10 +127,10 @@ describe("registro da pasta aberta", () => {
 
   it("vira o cartão encolhido (chat limpo, PR 4): o pedido, 'acme aberta para Dev 1' com ✓, o local e o Trocar para quem é dona", () => {
     const html = renderMensagem(registro, estado);
-    expect(html).toContain('class="cartao-pergunta respondida cartao-encolhido"');
+    expect(html).toContain('class="cp-linha cp-ok cartao-encolhido cp-com-extra"');
     expect(html).toContain('data-cartao-encolhido="pp"');
-    expect(html).toContain(">Abrir o projeto acme</div>");
-    expect(html).toContain('<span class="pq-rotulo">acme aberta para Dev 1</span><svg class="ce-marca ce-ok"');
+    expect(html).toContain('tabindex="-1">Abrir o projeto acme</span>');
+    expect(html).toContain('<span class="ce-resultado">acme aberta para Dev 1</span>');
     expect(html).toContain("code › acme › main-repos");
     expect(html).toContain('data-act="abrir-workspace"');
     expect(html).not.toContain("msg-sistema");

@@ -2,6 +2,7 @@ import type { FrotaDto } from "../../src/contracts/api.ts";
 import type { PayloadPropostaRotina, Proposta } from "../../src/contracts/conversa.ts";
 import type { Estado } from "../estado/reducer.ts";
 import { botao, esc, iconeAgente } from "../lib/render.ts";
+import { cardProposta, rotulada } from "../lib/card-proposta.ts";
 import { conectorDoApp, nomeDoApp } from "./app-acesso.ts";
 import { logoApp } from "./marketplace.ts";
 
@@ -52,30 +53,31 @@ export function renderCardPerfil(p: Proposta, propostas: readonly Proposta[], es
   const c = p.payload;
   const nome = c.nome ?? agente?.nome ?? "O bot";
   const titulo = c.titulo ?? agente?.titulo ?? "";
-  const icone = agente ? iconeAgente({ ...agente, nome }, "lg") : "";
-  const cab = `<div class="ac-cab">${icone}<div class="ac-titulo"><b>${esc(titulo ? `${nome} · ${titulo}` : nome)}</b>${c.descricao ? `<small>${esc(c.descricao)}</small>` : ""}</div></div>`;
-
-  const lista = rotinas.map((r) => `<li><b title="${esc(r.payload.instrucao)}">${esc(cortar(r.payload.instrucao, INSTRUCAO_NO_CARD))}</b><small>${esc(r.payload.resumo)}</small></li>`).join("");
-  const blocoRotinas = `<div class="pc-secao"><div class="pc-rotulo">${rotinas.length === 1 ? "1 rotina" : `${rotinas.length} rotinas`}</div><ul class="pc-rotinas">${lista}</ul></div>`;
-
+  // NOD-399 (definido em 2026-10-30): o componente comum. Título com o verbo, até 3 linhas (quem é, as rotinas, os apps),
+  // o resto — cada rotina, a descrição, o que falta conectar — em Detalhes. Sem o "Nada vale antes de você confirmar".
+  const quem = titulo ? `${nome} · ${titulo}` : nome;
+  const rotulo = rotinas.length === 1 ? "1 rotina" : `${rotinas.length} rotinas`;
+  const resumoRotinas = rotinas.length === 1 ? cortar(rotinas[0]?.payload.instrucao ?? "", INSTRUCAO_NO_CARD) : rotinas.map((r) => r.payload.resumo).join(" · ");
   const apps = appsDe(rotinas);
-  let blocoApps = "";
-  if (apps.length > 0) {
-    const chips = apps.map(({ slug }) => {
-      const nomeApp = nomeDoApp(estado, slug);
-      return `<span class="pc-app">${logoApp(estado, slug, nomeApp)}${esc(nomeApp)}</span>`;
-    }).join("");
-    // App ainda por conectar não trava o card: a rotina nasce e pede o acesso quando precisar (pré-voo, ADR-044).
-    const faltam = apps.filter(({ slug }) => !conectorDoApp(estado, slug)?.habilitado).map(({ slug }) => nomeDoApp(estado, slug));
-    const falta = faltam.length > 0 ? `<p class="pc-falta">Falta conectar ${esc(faltam.join(", "))}: ${esc(nome)} pede quando a rotina precisar.</p>` : "";
-    const rotulo = apps.some((a) => a.escrita) ? "Lê e altera · confirmar já permite" : "Lê, sem mudar nada · confirmar já permite";
-    blocoApps = `<div class="pc-secao"><div class="pc-rotulo">${rotulo}</div><div class="pc-apps">${chips}</div>${falta}</div>`;
-  }
-
-  const botoes = [
-    botao("confirmar-proposta", "Confirmar", { classe: "pri", id: p.id }),
-    botao("preencher-prompt", "Ajustar", { classe: "link", dados: { texto: "Quero ajustar a proposta: " } }),
-    botao("recusar-proposta", "Deixar de lado", { classe: "link", id: p.id }),
+  const nomesApps = apps.map(({ slug }) => nomeDoApp(estado, slug));
+  // App ainda por conectar não trava o card: a rotina nasce e pede o acesso quando precisar (pré-voo, ADR-044).
+  const faltam = apps.filter(({ slug }) => !conectorDoApp(estado, slug)?.habilitado).map(({ slug }) => nomeDoApp(estado, slug));
+  const lerOuAlterar = apps.some((a) => a.escrita) ? "Ler e alterar" : "Ler";
+  const linhas = [
+    rotulada("Quem", quem),
+    rotulada(rotulo === "1 rotina" ? "Rotina" : rotulo, resumoRotinas),
+    ...(apps.length > 0 ? [rotulada("Vai poder", `${lerOuAlterar} ${nomesApps.join(", ")}`)] : []),
+  ];
+  const detalhes: [string, string][] = [
+    ...(c.descricao ? [["Descrição", esc(c.descricao)] as [string, string]] : []),
+    ...rotinas.map((r, i): [string, string] => [rotinas.length === 1 ? "Quando" : `Rotina ${i + 1}`, esc(rotinas.length === 1 ? r.payload.resumo : `${r.payload.resumo} · ${r.payload.instrucao}`)]),
+    ...(apps.length > 0 ? [["Apps", apps.map(({ slug }) => `<span class="pc-app">${logoApp(estado, slug, nomeDoApp(estado, slug))}${esc(nomeDoApp(estado, slug))}</span>`).join(" ")] as [string, string]] : []),
+    ...(faltam.length > 0 ? [["Falta conectar", esc(`${faltam.join(", ")}: ${nome} pede quando a rotina precisar.`)] as [string, string]] : []),
+  ];
+  const acoes = [
+    botao("confirmar-proposta", apps.length > 0 ? "Salvar e permitir" : "Salvar", { classe: "cp-sim", id: p.id }),
+    botao("preencher-prompt", "Ajustar", { classe: "cp-nao", dados: { texto: "Quero ajustar a proposta: " } }),
+    botao("recusar-proposta", "Agora não", { classe: "cp-nao", id: p.id }),
   ].join("");
-  return `<section class="acesso-card perfil-card" data-proposta="${esc(p.id)}">${cab}${blocoRotinas}${blocoApps}<div class="ac-rodape">${botoes}<span class="ac-nota">Nada vale antes de você confirmar</span></div></section>`;
+  return cardProposta({ id: p.id, classe: "perfil-card", titulo: `Configurar o bot ${nome}`, logo: agente ? iconeAgente({ ...agente, nome }, "sm") : "", linhas, detalhes, chaveDetalhes: `proposta-${p.id}`, acoes });
 }

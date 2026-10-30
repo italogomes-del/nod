@@ -37,21 +37,21 @@ export function ondeLegivel(c: { caminho: string; onde?: string }): string {
 function miolo(x: Candidata, agora: number, algumGit: boolean): string {
   const quando = typeof x.modificadoEm === "number" && agora > 0 ? mudouQuando(x.modificadoEm, agora, FUSO_LOCAL) : "";
   const semGit = algumGit && !x.git ? " · sem Git" : "";
-  return `<span class="cp-nome"><b>${esc(x.nome)}</b><small>${esc(ondeLegivel(x))}${semGit}</small></span>${quando ? `<span class="cp-quando">${esc(quando)}</span>` : ""}`;
+  return `<span class="pa-nome"><b>${esc(x.nome)}</b><small>${esc(ondeLegivel(x))}${semGit}</small></span>${quando ? `<span class="pa-quando">${esc(quando)}</span>` : ""}`;
 }
 
 /** A moldura dos três estados: cabeça (o título nomeia o card e a lista), corpo, a linha de acesso e o rodapé. */
 function moldura(p: Proposta, cab: { icone: string; titulo: string; sub: string; mudo?: boolean }, corpo: string, agente: Agente | undefined, rodape: string): string {
-  const id = `cp-titulo-${esc(p.id)}`;
-  return `<section class="card-pasta" data-proposta="${esc(p.id)}" aria-labelledby="${id}"><div class="cp-corpo">
-    <div class="cp-cabeca"><span class="cp-icone${cab.mudo ? " mudo" : ""}">${cab.icone}</span><div><b class="cp-titulo" id="${id}">${cab.titulo}</b><p class="cp-sub">${cab.sub}</p></div></div>
-    ${corpo}<p class="cp-acesso">${CADEADO}${esc(agente?.nome ?? "O agente")} só mexe nas pastas que você abrir.</p></div>
-    <div class="cp-rodape">${rodape}</div></section>`;
+  const id = `pa-titulo-${esc(p.id)}`;
+  return `<section class="card-pasta" data-proposta="${esc(p.id)}" aria-labelledby="${id}"><div class="pa-corpo">
+    <div class="pa-cabeca"><span class="pa-icone${cab.mudo ? " mudo" : ""}">${cab.icone}</span><div><b class="pa-titulo" id="${id}">${cab.titulo}</b><p class="pa-sub">${cab.sub}</p></div></div>
+    ${corpo}<p class="pa-acesso">${CADEADO}${esc(agente?.nome ?? "O agente")} só mexe nas pastas que você abrir.</p></div>
+    <div class="pa-rodape">${rodape}</div></section>`;
 }
 
 /** O card da proposta de pasta: a sugerida, a lista (depois de "Não é essa") ou o "não achei". */
 export function renderCardPasta(p: Proposta, c: PayloadPropostaPasta, estado: Estado, agente: Agente | undefined): string {
-  const recusar = botao("recusar-proposta", "Agora não", { classe: "link cp-agora-nao", id: p.id });
+  const recusar = botao("recusar-proposta", "Agora não", { classe: "link pa-agora-nao", id: p.id });
   const procurar = (rotulo: string, classe: string) => botao("abrir-workspace", rotulo, { classe, id: p.agenteId });
   const sugerida = c.candidatas[0];
   if (!sugerida) {
@@ -63,21 +63,21 @@ export function renderCardPasta(p: Proposta, c: PayloadPropostaPasta, estado: Es
     const outra = c.candidatas.length > 1
       ? botao("lista-de-pasta", "Não é essa", { id: p.id, dados: { lista: "curta" }, expandido: false })
       : procurar("Não é essa", "");
-    const pasta = `<div class="cp-pasta" title="${esc(sugerida.caminho)}">${sugerida.git ? RAMO : PASTA}${miolo(sugerida, estado.agora, algumGit)}</div>`;
+    const pasta = `<div class="pa-pasta" title="${esc(sugerida.caminho)}">${sugerida.git ? RAMO : PASTA}${miolo(sugerida, estado.agora, algumGit)}</div>`;
     return moldura(p, { icone: PASTA, titulo: `Abrir o projeto ${esc(sugerida.nome)}?`, sub: esc(c.motivo) }, pasta, agente,
       `${botao("permitir-pasta", "Usar esta pasta", { classe: "pri", id: p.id, dados: { pasta: sugerida.caminho } })}${outra}${recusar}`);
   }
   const mesmoNome = c.candidatas.every((x) => x.nome.toLowerCase() === sugerida.nome.toLowerCase());
   const visiveis = lista === "todas" ? c.candidatas : c.candidatas.slice(0, CURTA);
   // A lista só abre depois de "Não é essa": a marcada é a próxima mais provável, não a que a pessoa recusou.
-  const opcoes = visiveis.map((x, i) => `<label class="cp-opcao" title="${esc(x.caminho)}"><input type="radio" name="pasta-${esc(p.id)}" value="${esc(x.caminho)}" data-pasta-de="${esc(p.id)}"${i === 1 ? " checked" : ""}>${miolo(x, estado.agora, algumGit)}</label>`).join("");
+  const opcoes = visiveis.map((x, i) => `<label class="pa-opcao" title="${esc(x.caminho)}"><input type="radio" name="pasta-${esc(p.id)}" value="${esc(x.caminho)}" data-pasta-de="${esc(p.id)}"${i === 1 ? " checked" : ""}>${miolo(x, estado.agora, algumGit)}</label>`).join("");
   // Sem "Mostrar menos": recolher escondia a opção marcada e armava outra pasta sem a pessoa ver.
   const resto = c.candidatas.length - CURTA;
   const mais = resto > 0 && lista !== "todas"
     ? botao("lista-de-pasta", `Mostrar mais ${resto}`, { classe: "link", id: p.id, dados: { lista: "todas" }, expandido: false })
     : "";
-  const corpo = `<fieldset class="cp-lista" aria-labelledby="cp-titulo-${esc(p.id)}">${opcoes}</fieldset>
-    <div class="cp-links">${mais}${procurar("Procurar em outro lugar…", "link")}</div>`;
+  const corpo = `<fieldset class="pa-lista" aria-labelledby="pa-titulo-${esc(p.id)}">${opcoes}</fieldset>
+    <div class="pa-links">${mais}${procurar("Procurar em outro lugar…", "link")}</div>`;
   return moldura(p, {
     icone: PASTA,
     titulo: mesmoNome ? `Qual é o ${esc(sugerida.nome)} certo?` : "Qual destas pastas?",

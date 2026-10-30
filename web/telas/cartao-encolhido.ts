@@ -1,6 +1,7 @@
 import type { Mensagem, PayloadMensagem } from "../../src/contracts/mensagem.ts";
 import type { Estado } from "../estado/reducer.ts";
 import { botao, esc, hora, paragrafos } from "../lib/render.ts";
+import { iconeDaLinha } from "../lib/card-proposta.ts";
 import { ondeLegivel } from "./card-pasta.ts";
 import { acaoHumana } from "./sua-vez.ts";
 
@@ -34,16 +35,22 @@ export type DadosDoEncolhido = {
   rodape?: string;
 };
 
+/** O desenho de cada marca; `null` é a recusa (o traço do protótipo). Só o ícone tem cor: a linha é neutra (NOD-399). */
 const MARCA: Record<Exclude<MarcaDoEncolhido, null>, string> = {
-  ok: '<svg class="ce-marca ce-ok" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>',
-  falha: '<svg class="ce-marca ce-falha" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5"/><path d="M12 16.5v.01"/></svg>',
-  regra: '<svg class="ce-marca ce-regra" width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="7.5" width="9" height="6" rx="1.5"/><path d="M5.5 7.5V5.5a2.5 2.5 0 0 1 4.9-.7"/></svg>',
+  ok: iconeDaLinha("ok"),
+  falha: '<svg class="cp-ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="6"/><path d="M8 5v3.6"/><path d="M8 11v.01"/></svg>',
+  regra: '<svg class="cp-ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="7.5" width="9" height="6" rx="1.5"/><path d="M5.5 7.5V5.5a2.5 2.5 0 0 1 4.9-.7"/></svg>',
 };
 
 /** O leitor de tela ouve o estado depois da linha (a marca é desenho). */
 const NOME_DA_MARCA: Record<Exclude<MarcaDoEncolhido, null>, string> = { ok: "feito", falha: "não saiu", regra: "regra" };
 
 /**
+ * NOD-399: o card decidido vira UMA linha (`.cp-linha` de web/card-proposta.css): a marca, o resultado ("✓ Confirmado
+ * por você") e, depois do separador, o título do pedido, discreto. O que abre (registro, itens) e o rodapé da pasta ficam
+ * numa segunda linha (`cp-extra`). O título continua focável (tabindex -1, web/lib/foco-do-encolhido.ts) e dá o nome ao
+ * grupo.
+ *
  * `mensagemId` é o recibo: o id do título sai dele, e não da decisão, porque "Sempre permitir" grava dois recibos da
  * mesma decisão (o resultado e a regra) e os dois cartões teriam o mesmo `id` no DOM (o `aria-labelledby` de um apontaria
  * o título do outro).
@@ -51,12 +58,16 @@ const NOME_DA_MARCA: Record<Exclude<MarcaDoEncolhido, null>, string> = { ok: "fe
 export function renderCartaoEncolhido(d: DadosDoEncolhido, mensagemId: string): string {
   const id = esc(d.decisaoId);
   const titulo = `ce-t-${esc(mensagemId)}`;
-  const linha = d.marca === null
-    ? `<p class="pq-estado ce-resultado">${esc(d.resultado)}</p>`
-    : `<div class="pq-escolhida ce-resultado ce-${d.marca}"><span class="pq-rotulo">${esc(d.resultado)}</span>${MARCA[d.marca]}<span class="sr-only">${NOME_DA_MARCA[d.marca]}</span></div>`;
+  const tipo = d.marca === null ? "recusado" : d.marca;
+  const marca = d.marca === null ? iconeDaLinha("recusado") : `${MARCA[d.marca]}`;
+  const sr = d.marca === null ? "" : `<span class="sr-only"> (${NOME_DA_MARCA[d.marca]})</span>`;
   const detalhes = d.detalhes ? `<details class="ce-detalhes" data-disclosure="${esc(d.detalhes.chave)}"><summary>${esc(d.detalhes.rotulo)}</summary><div class="ce-corpo">${d.detalhes.html}</div></details>` : "";
+  const extra = `${d.rodape ?? ""}${detalhes}`;
   // O título leva tabindex -1: o foco vai para ele quando o cartão nasce de um clique nesta aba (o botão clicado já saiu).
-  return `<div class="cartao-pergunta respondida cartao-encolhido" role="group" aria-labelledby="${titulo}" data-cartao-encolhido="${id}" data-anuncio="${esc(d.anuncio)}"><div class="pq-cab"><div class="pq-titulo" id="${titulo}" tabindex="-1">${esc(d.titulo)}</div></div>${linha}${d.rodape ?? ""}${detalhes}</div>`;
+  return `<div class="cp-linha cp-${tipo} cartao-encolhido${extra ? " cp-com-extra" : ""}" role="group" aria-labelledby="${titulo}" data-cartao-encolhido="${id}" data-anuncio="${esc(d.anuncio)}">`
+    + `${marca}<span class="cp-texto"><span class="ce-resultado">${esc(d.resultado)}</span>${sr} <span class="cp-sep" aria-hidden="true">·</span> <span class="pq-titulo ce-titulo" id="${titulo}" tabindex="-1">${esc(d.titulo)}</span></span>`
+    + (extra ? `<div class="cp-extra">${extra}</div>` : "")
+    + "</div>";
 }
 
 type Payload<K extends NonNullable<PayloadMensagem>["kind"]> = Extract<PayloadMensagem, { kind: K }>;

@@ -3,7 +3,7 @@ import type { Proposta } from "../../src/contracts/conversa.ts";
 import type { Estado } from "../estado/reducer.ts";
 import { botao, esc } from "../lib/render.ts";
 import { logoApp } from "./marketplace.ts";
-import { blocoEsperando, SETA_EXTERNA } from "./app-acesso.ts";
+import { blocoEsperando, blocoFalhou, SETA_EXTERNA } from "./app-acesso.ts";
 
 /**
  * "Rotina nasce com o acesso" (definido em 2026-09-24, emenda da ADR-044): o card da rotina proposta diz,
@@ -35,7 +35,7 @@ function listaDeApps(nomes: readonly string[]): string {
   return com.length <= 1 ? (com[0] ?? "") : `${com.slice(0, -1).join(", ")} e ${com.at(-1) ?? ""}`;
 }
 
-type LinhaPrecisa = { slug: string; nome: string; conectado: boolean; escrita: boolean; html: string };
+type LinhaPrecisa = { slug: string; nome: string; conectado: boolean; escrita: boolean; html: string; verbo: string; fora: string; capacidades: readonly string[] };
 
 function linha(a: AcessoPedido, ctx: Contexto, chave: string): LinhaPrecisa {
   const nome = nomeDoApp(ctx, a.conector);
@@ -64,13 +64,31 @@ function linha(a: AcessoPedido, ctx: Contexto, chave: string): LinhaPrecisa {
     ? `<details class="ap-detalhe" data-disclosure="rotina-precisa-${esc(chave)}-${esc(a.conector)}"><summary>${n === 1 ? "Ver a ação" : `Ver as ${n} ações`}</summary><ul class="acesso-acoes">${capacidades.map((c) => `<li><code>${esc(a.conector)}.${esc(c)}</code></li>`).join("")}</ul></details>`
     : "";
   const html = `<div class="rotina-precisa" data-app="${esc(a.conector)}">${logoApp(ctx, a.conector, nome)}<div class="rp-corpo"><b class="rp-rotulo">Precisa</b><div class="rp-oque">${esc(verbo)} seu ${esc(nome)}</div>${fora ? `<small class="rp-fora">${esc(fora)}</small>` : ""}${detalhe}</div></div>`;
-  return { slug: a.conector, nome, conectado, escrita: temEscrita, html };
+  return { slug: a.conector, nome, conectado, escrita: temEscrita, html, verbo, fora, capacidades };
 }
 
 /** As linhas "Precisa" do card (vazio quando a proposta não declara acessos). */
 export function linhasPrecisa(p: Proposta | null | undefined, ctx: Contexto): string {
   if (!p) return "";
   return acessosDaProposta(p).map((a) => linha(a, ctx, p.id).html).join("");
+}
+
+/**
+ * NOD-399 (definido em 2026-10-30): no card novo da conversa, o "Precisa" vira UMA linha ("Vai poder: Ler seu Gmail e
+ * Alterar seu Slack") e o resto — o que não inclui e as ações — vai para Detalhes. Sem acessos: linha vazia.
+ */
+export function vaiPoder(p: Proposta | null | undefined, ctx: Contexto): { linha: string; detalhes: [string, string][] } {
+  if (!p) return { linha: "", detalhes: [] };
+  const linhas = acessosDaProposta(p).map((a) => linha(a, ctx, p.id));
+  if (linhas.length === 0) return { linha: "", detalhes: [] };
+  const frases = linhas.map((l) => `${l.verbo} seu ${l.nome}`);
+  const juntas = frases.length <= 1 ? (frases[0] ?? "") : `${frases.slice(0, -1).join(", ")} e ${frases.at(-1) ?? ""}`;
+  const detalhes = linhas.flatMap((l): [string, string][] => {
+    const fora: [string, string][] = l.fora ? [[`Fora (${l.nome})`, esc(l.fora.replace(/^Não inclui:?\s*/, "").replace(/\.$/, ""))]] : [];
+    const acoesDe: [string, string][] = l.capacidades.length > 0 ? [[`Ações (${l.nome})`, l.capacidades.map((c) => `<code>${esc(l.slug)}.${esc(c)}</code>`).join(" ")]] : [];
+    return [...fora, ...acoesDe];
+  });
+  return { linha: `<span class="cp-rot">Vai poder:</span> ${esc(juntas)}`, detalhes };
 }
 
 /**
@@ -84,7 +102,7 @@ export function acoesComAcesso(p: Proposta | null | undefined, ctx: Contexto, at
   const linhas = acessosDaProposta(p).map((a) => linha(a, ctx, p.id));
   if (linhas.length === 0) return null;
   const inicio = p.payload.kind === "rotina_atualizacao" ? "Aplicar mudança" : "Criar rotina";
-  const recusar = botao(atos.recusar, atos.rotuloRecusar, { id: p.id });
+  const recusar = botao(atos.recusar, atos.rotuloRecusar, { classe: "cp-nao", id: p.id });
   const faltam = linhas.filter((l) => !l.conectado);
   const primeiro = faltam[0];
   if (primeiro) {
@@ -95,12 +113,12 @@ export function acoesComAcesso(p: Proposta | null | undefined, ctx: Contexto, at
     const ajuda = depois ? `<p class="rp-liberado mudo">${esc(depois)}</p>` : "";
     if (login && !login.falhou) return { botoes: `${blocoEsperando(primeiro.nome, login.url, true, login.semJanela === true)}${botao("cancelar-conexao", "Cancelar", { classe: "link", id: primeiro.slug })}`, ajuda };
     const rotulo = `Conectar ${esc(primeiro.nome)} e ${inicio === "Criar rotina" ? "criar rotina" : "aplicar mudança"} ${SETA_EXTERNA}`;
-    const conectar = botao("conectar-e-confirmar", rotulo, { classe: "pri", id: primeiro.slug, dados: { proposta: p.id, ato: atos.confirmar } });
-    const falhou = login?.falhou ? `<p class="conexao-falhou" role="status">${esc(login.falhou)}</p>` : "";
+    const conectar = botao("conectar-e-confirmar", rotulo, { classe: "pri cp-sim", id: primeiro.slug, dados: { proposta: p.id, ato: atos.confirmar } });
+    const falhou = login?.falhou ? blocoFalhou(login.falhou) : "";
     return { botoes: `${conectar}${recusar}`, ajuda: `${falhou}${ajuda}` };
   }
   const rotulo = `${inicio} e permitir ${linhas.some((l) => l.escrita) ? "acesso" : "leitura"}`;
-  return { botoes: `${botao(atos.confirmar, rotulo, { classe: "pri", id: p.id })}${recusar}`, ajuda: "" };
+  return { botoes: `${botao(atos.confirmar, rotulo, { classe: "pri cp-sim", id: p.id })}${recusar}`, ajuda: "" };
 }
 
 /** Os apps que a proposta declara e ainda não estão conectados (main.ts cria a rotina quando fica vazio). */

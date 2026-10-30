@@ -30,18 +30,21 @@ describe("card do perfil com rotinas (ADR-050)", () => {
   it("um card só: nome e título, as rotinas dentro, os apps que elas leem e Confirmar", () => {
     const html = renderTimeline(conversa([manha, tarde, perfil]), estado);
     expect(html.match(/data-proposta="/g)).toHaveLength(1);
-    expect(html).toContain('class="acesso-card perfil-card" data-proposta="p1"');
-    expect(html).toContain("<b>Tarsila · Assistente pessoal</b><small>Cuida do seu dia</small>");
-    expect(html).toContain('<div class="pc-rotulo">2 rotinas</div>');
-    expect(html).toContain("Resumo da manhã: e-mails novos, ToDos do dia e menções no Slack");
-    expect(html).toContain("dias úteis às 13:00 e 18:00 (America/Sao_Paulo)");
-    expect(html).toContain("Lê, sem mudar nada · confirmar já permite");
+    // NOD-399: o componente comum: título com o verbo, 3 linhas (quem, rotinas, o que vai poder) e o resto em Detalhes.
+    expect(html).toContain('class="cp perfil-card" role="group" aria-label="Configurar o bot Tarsila" data-proposta="p1"');
+    expect(html).toContain('<span class="cp-rot">Quem:</span> Tarsila · Assistente pessoal');
+    expect(html).toContain('<span class="cp-rot">2 rotinas:</span>');
+    expect(html).toContain('<span class="cp-rot">Vai poder:</span> Ler Gmail, slack');
+    expect(html.match(/<ul class="cp-linhas">(.*?)<\/ul>/)?.[1]?.match(/<li>/g)).toHaveLength(3);
+    const detalhes = html.slice(html.indexOf("<summary>Detalhes</summary>"));
+    expect(detalhes).toContain("Resumo da manhã: e-mails novos, ToDos do dia e menções no Slack");
+    expect(detalhes).toContain("dias úteis às 13:00 e 18:00 (America/Sao_Paulo)");
     // Gmail aparece uma vez mesmo pedido pelas duas rotinas; o Slack ainda não está conectado.
     expect(html.match(/class="pc-app"/g)).toHaveLength(2);
-    expect(html).toContain("Falta conectar slack: Tarsila pede quando a rotina precisar.");
-    expect(html).toContain('data-act="confirmar-proposta" data-id="p1">Confirmar');
+    expect(detalhes).toContain("<dt>Falta conectar</dt><dd>slack: Tarsila pede quando a rotina precisar.</dd>");
+    expect(html).toContain('data-act="confirmar-proposta" data-id="p1">Salvar e permitir');
     expect(html).toContain('data-act="preencher-prompt" data-texto="Quero ajustar a proposta: ">Ajustar');
-    expect(html).toContain('data-act="recusar-proposta" data-id="p1">Deixar de lado');
+    expect(html).toContain('data-act="recusar-proposta" data-id="p1">Agora não');
   });
 
   it("perfil sem rotinas segue no card de sempre; rotina solta (fora de um perfil) continua com o dela", () => {

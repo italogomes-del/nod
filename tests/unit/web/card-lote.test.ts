@@ -22,8 +22,16 @@ describe("card do lote do Nod", () => {
 
   it("aberto: uma caixa marcada por ação que espera, o motivo do arriscado e do conteúdo de fora, 'feito' na que o modo fez, e os botões", () => {
     const h = renderCardLote({ id: "p1" }, lote, true);
-    expect(h).toContain("3 mudanças esperam você");
-    expect(h).toContain("O Nod propõe · Duplicar e criar em Engenharia");
+    // NOD-399: sem "O Nod propõe"; o resumo do Nod é o título.
+    expect(h).not.toContain("propõe");
+    // Revisão 3 do PR #607: o título tem o verbo; o resumo do Nod vira a linha.
+    expect(h).toContain("<span>Aplicar 3 mudanças nos seus bots</span>");
+    expect(h).toContain("<li>Duplicar e criar em Engenharia</li>");
+    // Revisão 4: as 3 que esperam ficam à vista (o "feito" vai para "Mais 1"), com o motivo do dar_acesso.
+    const [vista] = h.split('<details class="cp-detalhes lote-mais"');
+    expect(vista?.match(/data-lote-i="/g)).toHaveLength(3);
+    expect(vista).toContain("O Nod leu conteúdo de fora nesta conversa, então dar acesso");
+    expect(h).toMatch(/<summary>Mais 1<\/summary><div class="lote-acoes"><label class="lote-acao"><span class="lote-texto"><span><i class="lote-verbo">Duplicar/);
     expect(h.match(/data-lote-i="/g)).toHaveLength(3);
     expect(h).not.toContain('data-lote-i="0"');
     expect(h).toContain('<span class="tag tag-ok">feito</span>');
@@ -33,6 +41,21 @@ describe("card do lote do Nod", () => {
     expect(h).toContain("github, ler e alterar");
     expect(h).toContain('data-act="decidir-lote"');
     expect(h).toContain('data-act="recusar-decisao"');
+  });
+
+  it("revisão 3/4 do PR #607: o que espera nunca fica recolhido; só o que já tem desfecho vai para 'Mais N'", () => {
+    const feitas = [0, 1, 2].map((i) => acao(i, { alvoNome: `Feito ${i}`, estado: "feita", motivo: null }));
+    const esperam = [3, 4, 5, 6].map((i) => acao(i, { tipo: i === 6 ? "excluir" : "criar", alvoNome: `Bot ${i}`, motivo: i === 6 ? "arriscada" : "manual" }));
+    const h = renderCardLote({ id: "p9" }, { kind: "lote_bots", resumo: "", acoes: [...feitas, ...esperam] }, true);
+    const [vista, mais] = h.split('<details class="cp-detalhes lote-mais" data-disclosure="lote-p9"><summary>Mais 3</summary>');
+    expect(vista?.match(/data-lote-i="\d" checked/g)).toHaveLength(4);
+    expect(vista).toContain("Excluir é arriscado");
+    expect(mais).not.toContain("data-lote-i");
+    expect(mais?.match(/tag-ok">feito/g)).toHaveLength(3);
+    expect(h).not.toContain("<details open");
+    // decidido: nada espera, até 3 à vista e o resto recolhido
+    const d = renderCardLote({ id: "p9" }, { kind: "lote_bots", resumo: "", acoes: [...feitas, ...esperam.map((a) => ({ ...a, estado: "recusada" as const }))] }, false);
+    expect(d).toContain("<summary>Mais 4</summary>");
   });
 
   it("NOD-289: o duplicar diz que as rotinas da cópia vêm pausadas", () => {

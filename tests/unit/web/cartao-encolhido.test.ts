@@ -66,8 +66,9 @@ describe("cada tipo de cartão encolhido", () => {
     const m = msg("cs", AGORA, { autoria: pessoa, kind: "consentimento", texto: "Concedido por Marlon em 2026-10-18 11:00 UTC: gmail.GMAIL_FETCH_EMAILS; não inclui: …", payload: { kind: "consentimento", conectorId: "k", slug: "gmail", capacidades: ["GMAIL_FETCH_EMAILS"], naoInclui: [], decisaoId: "d7", turnoId: "t1", frase: "Clarice quer ler seus e-mails no Gmail" } });
     const html = renderMensagem(m, e);
     expect(html).toContain('data-cartao-encolhido="d7"');
-    expect(html).toContain(">Clarice quer ler seus e-mails no Gmail</div>");
-    expect(html).toContain('<span class="pq-rotulo">Acesso permitido · Gmail</span>');
+    expect(html).toContain('tabindex="-1">Clarice quer ler seus e-mails no Gmail</span>');
+    // NOD-399: uma linha: ✓, o resultado e, depois do separador, o pedido.
+    expect(html).toMatch(/class="cp-linha cp-ok cartao-encolhido cp-com-extra"[^>]*><svg class="cp-ic"[^]*?<span class="ce-resultado">Acesso permitido · Gmail<\/span><span class="sr-only"> \(feito\)<\/span>/);
     expect(html).toContain("<summary>Ver registro de autorização</summary>");
     expect(html).toContain("Concedido por Marlon em 2026-10-18 11:00 UTC");
   });
@@ -178,7 +179,7 @@ describe("onde o cartão encolhido fica", () => {
     const { e, c } = cenario([sem(daPessoa("m1", t0)), aviso("a1", t0 + MIN), aviso("a2", t0 + 2 * MIN), decidida, aviso("a3", t0 + 5 * MIN)]);
     const html = blocosDoHistorico(c, e).map((b) => b.html).join("");
     expect(html).not.toContain("avisos do sistema");
-    expect(html).toContain(">Perfil · Clarice</div>");
+    expect(html).toContain('tabindex="-1">Perfil · Clarice</span>');
   });
 });
 

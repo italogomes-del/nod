@@ -3,9 +3,10 @@ import type { Decisao } from "../../src/contracts/decisao.ts";
 import type { Estado } from "../estado/reducer.ts";
 import { linhaNaoRodaram } from "../lib/execucao.ts";
 import { botao, esc } from "../lib/render.ts";
-import { acoes, blocoEsperando, blocoFalhou, checkboxesDosGrupos, conectorDoApp, gruposDe, ICONE_OK, listaPodeENao, nomeDoApp, passos, podeENao, SETA_EXTERNA } from "./app-acesso.ts";
+import { acoes, blocoFalhou, checkboxesDosGrupos, conectorDoApp, gruposDe, ICONE_OK, nomeDoApp, podeENao, SETA_EXTERNA } from "./app-acesso.ts";
+import { MAX_LINHAS, paraBot, cardProposta, linhaProposta, rotulada } from "../lib/card-proposta.ts";
 import { logoApp } from "./marketplace.ts";
-import { detalheAcesso, marcaGemeas, marcaRotinaParada, rotulosAcesso } from "./sua-vez.ts";
+import { marcaGemeas, marcaRotinaParada, rotulosAcesso } from "./sua-vez.ts";
 
 /**
  * O card de acesso do chat (definido em 2026-09-25, jornadas de conexão): UM card do pedido até a
@@ -39,41 +40,97 @@ function notaRevogar(bot: string | null): string {
   return `Dá para revogar no painel do ${bot ?? "bot"}.`;
 }
 
-function cabecalho(p: Proposta, estado: Estado, verbo: string, marcas = "", decisao: Decisao | null = null): string {
+/** "ler" → "leia": o verbo do título do permitir ("Permitir que a Ada leia seu Gmail"). */
+function noSubjuntivo(verbo: string): string {
+  return verbo.replace(/\bler\b/g, "leia").replace(/\balterar\b/g, "altere");
+}
+
+/** QA do PR #607: até 3 linhas no card; o que passa vai para o começo de Detalhes ("Também"), não some. */
+function ateTres(todas: string[], detalhes: [string, string][]): string[] {
+  if (todas.length > MAX_LINHAS) detalhes.unshift(["Também", todas.slice(MAX_LINHAS).join("<br>")]);
+  return todas.slice(0, MAX_LINHAS);
+}
+
+/** Os grupos do pedido e o verbo do título ("ler", "alterar", "ler e alterar"); o mesmo no card e na linha expirada. */
+function gruposDoPedido(estado: Estado, c: Extract<Proposta["payload"], { kind: "acesso" }>) {
+  const catalogo = conectorDoApp(estado, c.conector)?.catalogo ?? [];
+  // Sem o catálogo à mão (conector de outra pessoa, estado ainda carregando), o nível do pedido decide —
+  // nunca chamar de "alterar" o que não se sabe.
+  const conhecidas = c.capacidades.length > 0 && c.capacidades.every((n) => catalogo.some((x) => x.nome === n));
+  const grupos = conhecidas ? gruposDe(catalogo, c.capacidades) : [{ id: c.nivel === "leitura" ? ("ler" as const) : ("alterar" as const), rotulo: "", capacidades: c.capacidades }];
+  const soLer = grupos.every((g) => g.id === "ler");
+  const verbo = soLer ? "ler" : grupos.some((g) => g.id === "ler") || !conhecidas ? "ler e alterar" : "alterar";
+  return { conhecidas, grupos, soLer, verbo };
+}
+
+/** O título do permitir de um pedido de acesso (revisão 4: o verbo vem dos grupos, igual ao card aberto). */
+export function tituloDoPedidoDeAcesso(estado: Estado, p: Proposta, bot: string | null | undefined): string {
   if (p.payload.kind !== "acesso") return "";
-  const slug = p.payload.conector;
-  const nome = nomeDoApp(estado, slug);
-  const bot = nomeDoBot(estado, p) ?? "O bot";
-  const sub = subtitulo(p, decisao);
-  return `<div class="ac-cab">${logoApp(estado, slug, nome)}<div class="ac-titulo"><b>${esc(bot)} quer ${esc(verbo)} seu ${esc(nome)}</b>${sub ? `<small>${esc(sub)}</small>` : ""}</div>${marcas}</div>`;
+  return tituloDoPermitir(bot, gruposDoPedido(estado, p.payload).verbo, nomeDoApp(estado, p.payload.conector));
 }
 
-function rodape(botoes: string, nota = ""): string {
-  return `<div class="ac-rodape">${botoes}${nota ? `<span class="ac-nota">${esc(nota)}</span>` : ""}</div>`;
+/** O título do permitir, igual no card aberto e na linha que expirou (QA do PR #607). Texto, sem escape. */
+export function tituloDoPermitir(bot: string | null | undefined, verbo: string, nomeDoApp: string): string {
+  return `Permitir que ${bot ?? "o bot"} ${noSubjuntivo(verbo)} seu ${nomeDoApp}`;
 }
 
-/** O card de conexão: o app ainda não está pronto para este pedido. */
+/** As linhas de "pode" e o "não pode" em Detalhes, a partir de podeENao. */
+function podeEmLinhas(pn: { pode: string[]; nao: string[] }): { linhas: string[]; fora: [string, string][] } {
+  return {
+    linhas: pn.pode.map((t) => rotulada("Vai poder", t)),
+    fora: pn.nao.length ? [["Fica de fora", pn.nao.map((t) => esc(t)).join("<br>")]] : [],
+  };
+}
+
+/**
+ * O card de conexão: o app ainda não está pronto para este pedido. NOD-399 (definido em 2026-10-30): o componente
+ * comum — "Conectar o Figma à Ada", o "para quê" e o que vai poder; servidor, o que fica de fora e o login em Detalhes.
+ * Esperando o login, o card encolhe numa linha que gira ("Esperando você entrar no Figma · Abrir o login de novo");
+ * o login falhou, o aviso neutro dentro do card e o verbo vira "Tentar de novo".
+ */
 function cardConectar(p: Proposta, estado: Estado): string {
   if (p.payload.kind !== "acesso") return "";
   const slug = p.payload.conector;
   const nome = nomeDoApp(estado, slug);
-  const bot = nomeDoBot(estado, p) ?? "bot";
-  const verbo = p.payload.nivel === "escrita" ? "ler e alterar" : "ler";
-  const pn = listaPodeENao(podeENao(estado, slug, p.payload.nivel, p.payload.naoPedido));
-  const agoraNao = botao("recusar-proposta", "Agora não", { classe: "link", id: p.id });
+  const bot = nomeDoBot(estado, p);
   const login = estado.conectando[slug];
   const conector = conectorDoApp(estado, slug);
-  let corpo: string;
   if (login && !login.falhou) {
-    corpo = `${blocoEsperando(nome, login.url, false, login.semJanela === true)}${passos(nome, bot, 1)}${rodape(botao("cancelar-conexao", "Cancelar", { classe: "link", id: slug }))}`;
-  } else if (conector?.habilitado) {
-    // O login terminou por outro caminho e o card ainda não virou: um clique abre o de permitir.
-    corpo = `<p class="ac-conectado">${ICONE_OK}${esc(nome)} conectado</p>${pn}${passos(nome, bot, 2)}${rodape(botao("confirmar-proposta", "Continuar", { classe: "pri", id: p.id }) + agoraNao)}`;
-  } else {
-    const falha = login?.falhou ? blocoFalhou(login.falhou) : "";
-    corpo = `${falha}${pn}${passos(nome, bot, 1)}${rodape(botao("conectar-app", `${login?.falhou ? "Tentar de novo" : `Conectar ${esc(nome)}`} ${SETA_EXTERNA}`, { classe: "pri", id: slug }) + agoraNao, `Você entra no ${nome}; o Nod não vê sua senha.`)}`;
+    const abrir = login.url ? `<a class="cp-link" href="${esc(login.url)}" target="_blank" rel="noopener noreferrer">${login.semJanela ? "Abrir o login" : "Abrir o login de novo"}</a> <span class="cp-sep" aria-hidden="true">·</span> ` : "";
+    return linhaProposta({
+      tipo: "aguarda",
+      texto: login.url ? `Esperando você entrar no ${esc(nome)}…` : `Preparando o login do ${esc(nome)}…`,
+      link: `${abrir}${botao("cancelar-conexao", "Cancelar", { classe: "cp-link", id: slug })}`,
+      classe: "cp-esperando",
+      attrs: ` data-proposta="${esc(p.id)}"`,
+    });
   }
-  return `<section class="acesso-card" data-proposta="${esc(p.id)}">${cabecalho(p, estado, verbo)}${corpo}</section>`;
+  const pn = podeEmLinhas(podeENao(estado, slug, p.payload.nivel, p.payload.naoPedido));
+  const sub = subtitulo(p, null);
+  const agoraNao = botao("recusar-proposta", "Agora não", { classe: "cp-nao", id: p.id });
+  const detalhes: [string, string][] = [
+    ...pn.fora,
+    ["Passos", esc(`1. Entrar no ${nome} · 2. Permitir ${paraBot(bot)}`)],
+    ["Login", esc(`Você entra no ${nome}; o Nod não vê sua senha.`)],
+  ];
+  const base = { id: p.id, titulo: `Conectar o ${nome} ${paraBot(bot)}`, logo: logoApp(estado, slug, nome), chaveDetalhes: `cp-acesso-${p.id}` };
+  if (conector?.habilitado) {
+    // O login terminou por outro caminho e o card ainda não virou: um clique abre o de permitir.
+    return cardProposta({
+      ...base,
+      linhas: ateTres([`${ICONE_OK} ${esc(nome)} conectado`, ...(sub ? [esc(sub)] : []), ...pn.linhas], detalhes),
+      detalhes,
+      acoes: botao("confirmar-proposta", "Continuar", { classe: "cp-sim", id: p.id }) + agoraNao,
+    });
+  }
+  const falha = login?.falhou ? blocoFalhou(login.falhou) : "";
+  return cardProposta({
+    ...base,
+    linhas: ateTres([...(sub ? [esc(sub)] : []), ...pn.linhas], detalhes),
+    detalhes,
+    extra: falha,
+    acoes: botao("conectar-app", `${login?.falhou ? "Tentar de novo" : "Conectar"} ${SETA_EXTERNA}`, { classe: "cp-sim", id: slug, aria: login?.falhou ? `Tentar conectar o ${nome} de novo` : `Conectar o ${nome}` }) + agoraNao,
+  });
 }
 
 /** O card de permitir: proposta e decisão de mesmo id, o app conectado. */
@@ -84,31 +141,51 @@ function cardPermitir(p: Proposta, decisao: Decisao, aberto: ItemAberto | undefi
   const bot = nomeDoBot(estado, p);
   const conector = conectorDoApp(estado, c.conector);
   const catalogo = conector?.catalogo ?? [];
-  // Sem o catálogo à mão (conector de outra pessoa, estado ainda carregando), o nível do pedido decide —
-  // nunca chamar de "alterar" o que não se sabe.
-  const conhecidas = c.capacidades.length > 0 && c.capacidades.every((n) => catalogo.some((x) => x.nome === n));
-  const grupos = conhecidas ? gruposDe(catalogo, c.capacidades) : [{ id: c.nivel === "leitura" ? ("ler" as const) : ("alterar" as const), rotulo: "", capacidades: c.capacidades }];
-  const soLer = grupos.every((g) => g.id === "ler");
-  const verbo = soLer ? "ler" : grupos.some((g) => g.id === "ler") || !conhecidas ? "ler e alterar" : "alterar";
+  const { grupos, soLer, verbo } = gruposDoPedido(estado, c);
   const marcas = `${marcaRotinaParada(p, aberto?.rotinaParada, estado.agora)}${marcaGemeas(aberto)}`;
-  let oQue: string;
+  const sub = subtitulo(p, decisao);
+  let linhas: string[];
+  let fora: [string, string][];
+  let caixas = "";
   if (soLer || grupos.length <= 1) {
-    oQue = listaPodeENao(podeENao(estado, c.conector, soLer ? "leitura" : "escrita", c.naoPedido));
+    const pn = podeEmLinhas(podeENao(estado, c.conector, soLer ? "leitura" : "escrita", c.naoPedido));
+    linhas = pn.linhas;
+    fora = pn.fora;
   } else {
     // Mais de um grupo: a pessoa desmarca o que não quer dar. O input fica sob [data-decisao] para o
     // render preservar a marcação (main.ts), e Permitir manda só as capacidades dos grupos marcados.
-
     const pedidos = new Set(c.capacidades);
     const deFora = catalogo.filter((x) => !pedidos.has(x.nome) && (x.grupo === "apagar" || x.grupo === "outras")).length;
-    const fora = [...(deFora > 0 ? [`Ficam de fora: ${acoes(deFora)} de apagar, desfazer e outras`] : []), ...c.naoPedido.map((n) => `Não inclui: ${n}`)];
-    oQue = `${checkboxesDosGrupos(catalogo, c.capacidades)}${fora.length ? listaPodeENao({ pode: [], nao: fora }) : ""}`;
+    const nao = [...(deFora > 0 ? [`${acoes(deFora)} de apagar, desfazer e outras`] : []), ...c.naoPedido.map((n) => `Não inclui: ${n}`)];
+    linhas = [];
+    fora = nao.length ? [["Fica de fora", nao.map((t) => esc(t)).join("<br>")]] : [];
+    caixas = checkboxesDosGrupos(catalogo, c.capacidades);
   }
   const r = rotulosAcesso(p);
-  const permitir = botao("permitir-acesso", r.permitir, { classe: "pri", id: decisao.id });
-  const recusar = botao("recusar-decisao", r.recusar, { id: decisao.id });
-  const conectado = conector?.habilitado ? `<p class="ac-conectado">${ICONE_OK}${esc(nome)} conectado</p>` : "";
+  const permitir = botao("permitir-acesso", r.permitir, { classe: "cp-sim", id: decisao.id });
+  // NOD-399: "Agora não" em toda proposta; "Pausar rotina" fica, porque recusar ali pausa a rotina (outra consequência).
+  const recusar = botao("recusar-decisao", r.recusar === "Não permitir" ? "Agora não" : r.recusar, { classe: "cp-nao", id: decisao.id });
+  const conectado = conector?.habilitado ? `${ICONE_OK} ${esc(nome)} conectado` : "";
   const naoRodaram = linhaNaoRodaram(aberto?.rotinaParada ?? null, estado.agora);
-  return `<section class="acesso-card" data-proposta="${esc(p.id)}" data-decisao="${esc(decisao.id)}">${cabecalho(p, estado, verbo, marcas, decisao)}${conectado}${oQue}${naoRodaram}${detalheAcesso(p)}${rodape(permitir + recusar, notaRevogar(bot))}</section>`;
+  const detalhes: [string, string][] = [
+    ...fora,
+    ...(c.capacidades.length ? [["Ações", c.capacidades.map((cap) => `<code>${esc(c.conector)}.${esc(cap)}</code>`).join(" ")] as [string, string]] : []),
+    ...(c.naoPedido.length ? [["Não pedido", esc(c.naoPedido.join(", "))] as [string, string]] : []),
+    ["Revogar", esc(notaRevogar(bot))],
+  ];
+  const visiveis = ateTres([...(sub ? [esc(sub)] : []), ...linhas, ...(conectado ? [conectado] : [])], detalhes);
+  return cardProposta({
+    id: p.id,
+    attrs: ` data-decisao="${esc(decisao.id)}"`,
+    titulo: tituloDoPermitir(bot, verbo, nome),
+    logo: logoApp(estado, c.conector, nome),
+    linhas: visiveis,
+    // As permissões (os grupos para desmarcar) ficam dentro de Detalhes, todas marcadas (padrão do protótipo v2).
+    detalhes: `${caixas ? `<p class="cp-rot cp-permissoes">Permissões</p>${caixas}` : ""}<dl>${detalhes.map(([t, d]) => `<dt>${esc(t)}</dt><dd>${d}</dd>`).join("")}</dl>`,
+    chaveDetalhes: `cp-acesso-${p.id}`,
+    extra: `${marcas ? `<p class="cp-marcas">${marcas}</p>` : ""}${naoRodaram}`,
+    acoes: permitir + recusar,
+  });
 }
 
 /** null = não é um card que este arquivo desenha (pedido antigo sem decisão: o card de revisão de antes). */

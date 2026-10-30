@@ -30,10 +30,13 @@ import { cartaoDaPergunta, desenharFios, linhaDaRetomada, respostaPorOpcao, rotu
 import { comDivisores, type TempoDoBloco } from "./divisores-de-data.ts";
 import { linhaNaoRodaram } from "../lib/execucao.ts";
 import { chaveDoItem, estadoDaPergunta } from "../lib/perguntas.ts";
-import { acoesComAcesso, linhasPrecisa } from "./rotina-precisa.ts";
-import { renderCardAcesso } from "./card-acesso.ts";
+import { acoesComAcesso, vaiPoder } from "./rotina-precisa.ts";
+import { avisoErro, cardProposta, de, doBot, linhaProposta, rotulada } from "../lib/card-proposta.ts";
+import { cortar } from "../lib/avisos.ts";
+import { nomeDoApp } from "./app-acesso.ts";
+import { renderCardAcesso, tituloDoPedidoDeAcesso } from "./card-acesso.ts";
 import { ehCartaoCredencial, renderCardCredencial } from "./card-credencial.ts";
-import { acaoHumana, detalheAcesso, idsGemeas, marcaGemeas, marcaRotinaParada, pedidosAncoraveis, renderDecisaoAncorada, renderDecisoesDaConversa, rotulosAcesso } from "./sua-vez.ts";
+import { acaoHumana, idsGemeas, marcaGemeas, marcaRotinaParada, pedidosAncoraveis, renderDecisaoAncorada, renderDecisoesDaConversa, rotulosAcesso } from "./sua-vez.ts";
 import { renderCardPasta } from "./card-pasta.ts";
 import { dadosDoEncolhido, pedidoDoRecibo, renderCartaoEncolhido, turnoDoEncolhido } from "./cartao-encolhido.ts";
 import { renderCardLote } from "./card-lote.ts";
@@ -208,8 +211,10 @@ function corpoMensagem(m: Mensagem, estado: Estado): string {
     if (estado.computadorPessoa && bot?.ownerId === estado.sessao?.pessoaId) return htmlAvisoForaDoArRegistrado(estado.computadorPessoa);
     const aindaFora = Boolean(bot?.computadorForaDoAr);
     const dono = bot?.ownerId === estado.sessao?.pessoaId;
-    const acoes = aindaFora && dono ? `<div class="mcf-acoes">${botao("religar-computador", "Tentar de novo", { id: p.agenteId, classe: "pri sm" })}${botao("abrir-computador", "Abrir computador", { id: p.agenteId, classe: "sm" })}</div>` : bot && !aindaFora ? '<p class="mudo sm">O computador voltou a responder.</p>' : "";
-    return `<div class="msg-computador-fora" role="status"><div class="mcf-titulo"><b>Computador do bot fora do ar</b><span class="mudo">desde ${esc(dataHora(p.desde))}</span></div><p>${paragrafos(m.texto)}</p>${acoes}</div>`;
+    // NOD-399: o aviso neutro (círculo com "!", uma frase, botões normais); depois que volta, a linha com ✓.
+    if (bot && !aindaFora) return linhaProposta({ tipo: "ok", texto: `O computador do bot voltou a responder <span class="mudo">· ficou fora desde ${esc(dataHora(p.desde))}</span>`, classe: "msg-computador-fora" });
+    const acoes = aindaFora && dono ? `${botao("religar-computador", "Tentar de novo", { id: p.agenteId, classe: "cp-acao sm" })}${botao("abrir-computador", "Abrir computador", { id: p.agenteId, classe: "cp-acao sm" })}` : "";
+    return avisoErro({ frase: `Computador do bot fora do ar desde ${dataHora(p.desde)}.`, ...(m.texto.trim() ? { mais: m.texto.trim() } : {}), acoes, classe: "msg-computador-fora" });
   }
   // NOD-97 PR 5: o Chrome preencheu a senha salva; a linha cinza leva o selo "‹bot› não vê a senha".
   if (p?.kind === "computador_senha_preenchida") return htmlLinhaSenhaSalva(agenteDe(estado, p.agenteId)?.nome ?? "O bot");
@@ -686,43 +691,128 @@ function renderProposta(p: Proposta, estado: Estado, propostas: readonly Propost
   }
   // definido em 2026-10-07 (ADR-082): as mudanças em vários bots que o Nod pediu de uma vez — um card, uma linha por ação.
   if (p.payload.kind === "lote_bots") return renderCardLote(p, p.payload, p.estado === "pendente" && decisaoAbertaDoCard(p, estado) !== null);
-  let itens = "";
-  if (p.payload.kind === "perfil") {
-    const c = p.payload;
-    itens = [c.nome ? `<div class="it"><b>nome</b>${esc(c.nome)}</div>` : "", c.titulo ? `<div class="it"><b>título</b>${esc(c.titulo)}</div>` : "", c.descricao ? `<div class="it"><b>descrição</b>${esc(c.descricao)}</div>` : ""].join("");
-  } else if (p.payload.kind === "rotina") {
-    const c = p.payload;
-    itens = `<div class="it"><b>quando</b>${esc(c.resumo)} · próxima execução ${esc(dataHora(c.proximaExecucao, c.fusoIana))} (${esc(c.fusoIana)})</div><div class="it"><b>instrução</b>${esc(c.instrucao)}</div><div class="it"><b>fonte</b>${esc(c.fonte)}</div><div class="it"><b>entregável</b>${esc(c.entregavel)}</div><div class="it"><b>limites de aprovação</b>${esc(c.limitesAprovacao)}</div><div class="it"><b>sem dado</b>${esc(c.politicaSemDado)}</div>${linhasPrecisa(p, estado)}`;
-  } else if (p.payload.kind === "rotina_atualizacao") {
-    const c = p.payload;
-    // de→para: a pessoa confirma sem precisar abrir outra tela para lembrar como era.
-    itens = `<div class="it"><b>quando</b>${esc(c.antes.resumo)} → ${esc(c.resumo)} · próxima execução ${esc(dataHora(c.proximaExecucao, c.fusoIana ?? ""))}</div><div class="it"><b>instrução</b>${c.instrucao && c.instrucao !== c.antes.instrucao ? `${esc(c.antes.instrucao)} → ${esc(c.instrucao)}` : esc(c.antes.instrucao)}</div>${linhasPrecisa(p, estado)}`;
-  } else if (p.payload.kind === "bot") {
-    // definido em 2026-10-04 (ADR-077): o bot que a Nina propõe no onboarding — nome e o que faz; nasce pela decisão.
-    const c = p.payload;
-    itens = `<div class="it"><b>nome</b>${esc(c.nome)}</div><div class="it"><b>o que faz</b>${esc(c.descricao)}</div>`;
-  } else if (p.payload.kind === "rotina_exclusao") {
-    const c = p.payload;
-    itens = `<div class="it"><b>quando</b>${esc(c.resumo)}</div><div class="it"><b>instrução</b>${esc(c.instrucao)}</div><div class="it">Depois de excluída, nada mais é disparado por ela. Para só interromper por um tempo, peça para pausar.</div>`;
-  } else if (p.payload.kind === "acesso") {
-    const c = p.payload;
-    const decisao = decisaoAbertaDoCard(p, estado);
-    // definido em 2026-09-24 (ADR-044): com a decisão de mesmo id aberta, o card é a frase do domínio e
-    // um botão; os nomes técnicos vão para o <details>. Sem ela (pedido anterior), o card de revisão.
-    // Pedido de rotina (emenda de 2026-09-24): as janelas que não rodaram enquanto o card espera.
-    itens = decisao
-      ? `<div class="it">${esc(decisao.frase)}${linhaNaoRodaram(itemAbertoDoCard(p, estado)?.rotinaParada ?? null, estado.agora)}</div>${detalheAcesso(p)}`
-      : `<div class="it"><b>conector</b>${esc(c.conector)}</div><div class="it"><b>capacidades</b>${esc(c.capacidades.join(", "))} (${esc(c.nivel)})</div><div class="it"><b>não pedido</b>${esc(c.naoPedido.join(", ") || "—")}</div><div class="it">Revise o pedido. A autorização final aparecerá aqui na conversa.</div>`;
-  }
+  return cardDaProposta(p, estado, a);
+}
+
+/**
+ * NOD-399 (definido em 2026-10-30, protótipo v2 aprovado): o card das propostas simples (perfil sem rotinas, bot,
+ * rotina, mudança e exclusão de rotina, acesso sem o card de conexão) é o componente comum (web/lib/card-proposta.ts):
+ * sem o cabeçalho "X propõe · nada vale antes de você confirmar", o título é a frase com o verbo, até 3 linhas com
+ * antes → depois, o resto em Detalhes, o verbo + "Agora não". As `data-act` são as mesmas de antes.
+ */
+function cardDaProposta(p: Proposta, estado: Estado, a: FrotaDto["agentes"][number] | undefined): string {
+  const bot = a?.nome;
   const aberto = itemAbertoDoCard(p, estado);
-  const rotinaParada = p.payload.kind === "acesso" && aberto ? marcaRotinaParada(p, aberto.rotinaParada, estado.agora) : "";
   const comAcesso = acoesDaRotinaComAcesso(p, estado);
-  return `<div class="card-prop" data-proposta="${esc(p.id)}">
-    <div class="hd">${esc(a?.nome ?? "o agente")} propõe · nada vale antes de você confirmar</div>
-    <div class="ttl">${p.payload.kind === "perfil" ? "Perfil" : p.payload.kind === "bot" ? "Novo bot" : p.payload.kind === "rotina" ? "Rotina" : p.payload.kind === "rotina_atualizacao" ? "Mudança de rotina" : p.payload.kind === "rotina_exclusao" ? "Excluir rotina" : "Acesso a conector"}${rotinaParada}${marcaGemeas(aberto)}</div>
-    ${itens}
-    <div class="ft">${comAcesso?.botoes ?? acoesProposta(p, estado)}</div>${comAcesso?.ajuda ?? ""}
-  </div>`;
+  const acoes = comAcesso?.botoes ?? acoesProposta(p, estado);
+  const extra = comAcesso?.ajuda ?? "";
+  const chaveDetalhes = `proposta-${p.id}`;
+  const base = { id: p.id, acoes, extra, chaveDetalhes };
+  const c = p.payload;
+  if (c.kind === "perfil") {
+    // Antes → depois quando o bot já tem o valor (critério 3 da NOD-399); a descrição longa só em Detalhes.
+    const campo = (rotulo: string, atual: string | undefined, novo: string | undefined): string => !novo ? "" : atual && atual !== novo ? de(cortar(atual, CAMPO_NO_CARD), cortar(novo, CAMPO_NO_CARD), rotulo) : rotulada(rotulo, cortar(novo, CAMPO_NO_CARD));
+    return cardProposta({
+      ...base,
+      titulo: `Mudar o perfil ${doBot(bot)}`,
+      linhas: [campo("Nome", a?.nome, c.nome), campo("Título", a?.titulo, c.titulo), campo("Descrição", undefined, c.descricao)].filter(Boolean),
+      detalhes: c.descricao && c.descricao.length > CAMPO_NO_CARD ? [["Descrição", esc(c.descricao)]] : undefined,
+    });
+  }
+  if (c.kind === "bot") {
+    // definido em 2026-10-04 (ADR-077): o bot que a Nina propõe no onboarding — nome e o que faz; nasce pela decisão.
+    return cardProposta({ ...base, titulo: `Criar o bot ${c.nome}`, linhas: [rotulada("Faz", cortar(c.descricao, CAMPO_NO_CARD))], detalhes: faz(c.descricao) });
+  }
+  if (c.kind === "rotina") {
+    const vp = vaiPoder(p, estado);
+    return cardProposta({
+      ...base,
+      titulo: `Criar uma rotina para ${bot ?? "o bot"}`,
+      linhas: [rotulada("Quando", c.resumo), rotulada("Faz", cortar(c.instrucao, CAMPO_NO_CARD)), vp.linha].filter(Boolean),
+      detalhes: [
+        ...(faz(c.instrucao) ?? []),
+        ["Próxima", esc(`${dataHora(c.proximaExecucao, c.fusoIana)} (${c.fusoIana})`)],
+        ["Fonte", esc(c.fonte)], ["Entrega", esc(c.entregavel)], ["Sem perguntar", esc(c.limitesAprovacao)], ["Sem dado", esc(c.politicaSemDado)],
+        ...vp.detalhes,
+      ],
+    });
+  }
+  if (c.kind === "rotina_atualizacao") {
+    // de→para: a pessoa confirma sem precisar abrir outra tela para lembrar como era.
+    const vp = vaiPoder(p, estado);
+    const mudouInstrucao = c.instrucao !== undefined && c.instrucao !== c.antes.instrucao;
+    const quando = c.resumo !== c.antes.resumo ? de(c.antes.resumo, c.resumo, "Quando") : rotulada("Quando", c.resumo);
+    const novaInstrucao = c.instrucao ?? c.antes.instrucao;
+    const linhaFaz = mudouInstrucao ? de(cortar(c.antes.instrucao, CAMPO_NO_CARD), cortar(novaInstrucao, CAMPO_NO_CARD), "Faz") : rotulada("Faz", cortar(c.antes.instrucao, CAMPO_NO_CARD));
+    const longa = c.antes.instrucao.length > CAMPO_NO_CARD || novaInstrucao.length > CAMPO_NO_CARD;
+    return cardProposta({
+      ...base,
+      titulo: `Mudar uma rotina ${doBot(bot)}`,
+      linhas: [quando, linhaFaz, vp.linha].filter(Boolean),
+      detalhes: [
+        ...(longa && mudouInstrucao ? [["Antes", esc(c.antes.instrucao)] as [string, string]] : []),
+        ...(longa ? [["Faz", esc(novaInstrucao)] as [string, string]] : []),
+        ["Próxima", esc(dataHora(c.proximaExecucao, c.fusoIana || undefined))], ...vp.detalhes,
+      ],
+    });
+  }
+  if (c.kind === "rotina_exclusao") {
+    return cardProposta({
+      ...base,
+      titulo: `Excluir uma rotina ${doBot(bot)}`,
+      linhas: [rotulada("Quando", c.resumo), rotulada("Faz", cortar(c.instrucao, CAMPO_NO_CARD))],
+      detalhes: `${c.instrucao.length > CAMPO_NO_CARD ? `<dl><dt>Faz</dt><dd>${esc(c.instrucao)}</dd></dl>` : ""}<p>Depois de excluída, nada mais é disparado por ela. Para só interromper por um tempo, peça para pausar.</p>`,
+    });
+  }
+  if (c.kind === "acesso") {
+    const decisao = decisaoAbertaDoCard(p, estado);
+    // definido em 2026-09-24 (ADR-044): com a decisão de mesmo id aberta, o card é a frase do domínio e um botão; os nomes
+    // técnicos vão para Detalhes. Sem ela (pedido anterior), o card de revisão. Pedido de rotina (emenda de 2026-09-24):
+    // a rotina parada e as janelas que não rodaram enquanto o card espera.
+    const parada = aberto ? marcaRotinaParada(p, aberto.rotinaParada, estado.agora) : "";
+    const naoRodaram = linhaNaoRodaram(aberto?.rotinaParada ?? null, estado.agora);
+    const tecnicos: [string, string][] = [
+      ["Ações", c.capacidades.map((cap) => `<code>${esc(c.conector)}.${esc(cap)}</code>`).join(" ") || "—"],
+      ...(c.naoPedido.length ? [["Não pedido", esc(c.naoPedido.join(", "))] as [string, string]] : []),
+    ];
+    return cardProposta({
+      ...base,
+      titulo: decisao ? tituloDoPedidoDeAcesso(estado, p, bot) : `Revisar o acesso ${doBot(bot)} ao ${nomeDoApp(estado, c.conector)}`,
+      linhas: decisao ? [esc(decisao.frase)] : [rotulada("Nível", c.nivel === "escrita" ? "ler e alterar" : "ler"), esc("A autorização final aparece aqui na conversa.")],
+      detalhes: tecnicos,
+      extra: `${parada || marcaGemeas(aberto) ? `<p class="cp-marcas">${parada}${marcaGemeas(aberto)}</p>` : ""}${naoRodaram}${extra}`,
+    });
+  }
+  return "";
+}
+
+/** NOD-399 (revisão 1): o texto longo (o "Faz" de uma rotina, a descrição) fica cortado no card e inteiro em Detalhes. */
+const CAMPO_NO_CARD = 140;
+function faz(texto: string): [string, string][] | undefined {
+  return texto.length > CAMPO_NO_CARD ? [["Faz", esc(texto)]] : undefined;
+}
+
+/** O título curto de uma proposta que pode vencer (`comDecisaoVencida`), para a linha "expirado". */
+function tituloDaVencida(p: Proposta, estado: Estado): string {
+  const bot = agenteDe(estado, p.agenteId)?.nome;
+  const c = p.payload;
+  if (c.kind === "rotina_atualizacao") return `Mudar uma rotina ${doBot(bot)}`;
+  if (c.kind === "rotina_exclusao") return `Excluir uma rotina ${doBot(bot)}`;
+  if (c.kind === "acesso") return tituloDoPedidoDeAcesso(estado, p, bot);
+  if (c.kind === "credencial") return `Guardar a chave do ${c.app}`;
+  return `Pedido ${doBot(bot)}`;
+}
+
+/** NOD-399 (critério 7, revisão 1): a proposta cuja decisão venceu encolhe numa linha, no lugar dela, com Reabrir. */
+function linhaDaVencida(p: Proposta, estado: Estado): string {
+  return linhaProposta({
+    tipo: "expirado",
+    texto: `${esc(tituloDaVencida(p, estado))} <span class="mudo">· expirou sem resposta, nada mudou</span>`,
+    // Revisão 2: "Dispensar" tira a linha (o servidor recusa a proposta junto, dispensar-decisao.ts) — ela não fica
+    // acumulada no fim da conversa.
+    link: `${botao("reabrir", "Reabrir", { classe: "cp-link", id: p.id })} <span class="cp-sep" aria-hidden="true">·</span> ${botao("dispensar", "Dispensar", { classe: "cp-link", id: p.id, titulo: "Tirar da conversa" })}`,
+    attrs: ` data-proposta="${esc(p.id)}"`,
+  });
 }
 
 /** O item de mesmo id ainda aberto em "Sua vez" (pedir-acesso.ts cria proposta e decisão juntas). */
@@ -741,14 +831,17 @@ function decisaoAbertaDoCard(p: Proposta, estado: Estado): Decisao | null {
  *  definido em 2026-09-24 (ADR-044): acesso também — um clique concede e continua. "Revisar acesso"
  *  fica só para o pedido anterior, cuja decisão ainda não existe. */
 function acoesProposta(p: Proposta, estado: Estado): string {
-  if (p.payload.kind === "bot") return `${botao("decidir-proposta", "Criar bot", { classe: "pri", id: p.id })}${botao("recusar-decisao", "Deixar de lado", { id: p.id })}`;
-  if (p.payload.kind === "rotina_atualizacao") return `${botao("decidir-proposta", "Aplicar mudança", { classe: "pri", id: p.id })}${botao("recusar-decisao", "Manter como está", { id: p.id })}`;
-  if (p.payload.kind === "rotina_exclusao") return `${botao("decidir-proposta", "Excluir rotina", { classe: "pri", id: p.id })}${botao("recusar-decisao", "Manter rotina", { id: p.id })}`;
+  const sim = (act: string, rotulo: string, perigo = false) => botao(act, rotulo, { classe: `cp-sim${perigo ? " cp-perigo" : ""}`, id: p.id });
+  const nao = (act: string, rotulo = "Agora não") => botao(act, rotulo, { classe: "cp-nao", id: p.id });
+  if (p.payload.kind === "bot") return `${sim("decidir-proposta", "Criar bot")}${nao("recusar-decisao")}`;
+  if (p.payload.kind === "rotina_atualizacao") return `${sim("decidir-proposta", "Salvar")}${nao("recusar-decisao")}`;
+  if (p.payload.kind === "rotina_exclusao") return `${sim("decidir-proposta", "Excluir", true)}${nao("recusar-decisao")}`;
   if (p.payload.kind === "acesso" && decisaoAbertaDoCard(p, estado)) {
     const r = rotulosAcesso(p);
-    return `${botao("decidir-proposta", r.permitir, { classe: "pri", id: p.id })}${botao("recusar-decisao", r.recusar, { id: p.id })}`;
+    return `${sim("decidir-proposta", r.permitir)}${nao("recusar-decisao", r.recusar === "Não permitir" ? "Agora não" : r.recusar)}`;
   }
-  return `${botao("confirmar-proposta", p.payload.kind === "acesso" ? "Revisar acesso" : "Confirmar", { classe: "pri", id: p.id })}${botao("recusar-proposta", "Deixar de lado", { id: p.id })}`;
+  const rotulo = p.payload.kind === "acesso" ? "Revisar acesso" : p.payload.kind === "perfil" ? "Salvar" : p.payload.kind === "rotina" ? "Criar rotina" : "Confirmar";
+  return `${sim("confirmar-proposta", rotulo)}${nao("recusar-proposta")}`;
 }
 
 /**
@@ -757,13 +850,13 @@ function acoesProposta(p: Proposta, estado: Estado): string {
  * acessos, pela decisão (como acoesProposta). null = não declara: os botões de sempre.
  */
 function acoesDaRotinaComAcesso(p: Proposta, estado: Estado): { botoes: string; ajuda: string } | null {
-  if (p.payload.kind === "rotina") return acoesComAcesso(p, estado, { confirmar: "confirmar-proposta", recusar: "recusar-proposta", rotuloRecusar: "Deixar de lado" });
-  if (p.payload.kind === "rotina_atualizacao") return acoesComAcesso(p, estado, { confirmar: "decidir-proposta", recusar: "recusar-decisao", rotuloRecusar: "Manter como está" });
+  if (p.payload.kind === "rotina") return acoesComAcesso(p, estado, { confirmar: "confirmar-proposta", recusar: "recusar-proposta", rotuloRecusar: "Agora não" });
+  if (p.payload.kind === "rotina_atualizacao") return acoesComAcesso(p, estado, { confirmar: "decidir-proposta", recusar: "recusar-decisao", rotuloRecusar: "Agora não" });
   return null;
 }
 
 /** A proposta de rotina existente continua 'pendente' quando a decisão dela vence (o varredor só
- *  vence decisões). Os botões do card dariam estado_invalido; sai o card e fica a decisão vencida,
+ *  vence decisões). Os botões do card dariam estado_invalido; sai o card e fica a linha "expirado" (NOD-399),
  *  em cinza e com Reabrir, como em "Sua vez". Reaberta, o card volta com os botões funcionando.
  *  Pedido de acesso idem desde 2026-09-24 (ADR-044): também nasce com a decisão de mesmo id. E o pedido de
  *  credencial (NOD-50): vencido, o campo da chave sai e fica o Reabrir. */
@@ -1380,13 +1473,17 @@ export function blocosDoHistorico(c: ConversaEstado, estado: Estado): BlocoDaTim
   const gemeas = idsGemeas(estado);
   // As rotinas que vêm com um perfil (ADR-050) aparecem dentro do card dele, não soltas.
   const noPerfil = idsNoPerfil(c.propostas);
-  const propostas = c.propostas.filter((p) => !comDecisaoVencida(p, estado) && !gemeas.has(p.id) && !noPerfil.has(p.id));
+  const visiveis = c.propostas.filter((p) => !gemeas.has(p.id) && !noPerfil.has(p.id));
+  const propostas = visiveis.filter((p) => !comDecisaoVencida(p, estado));
+  // NOD-399 (critério 7): a vencida vira a linha "expirado" no lugar do card (antes ia para "N pedidos vencidos · ver").
+  const vencidas = visiveis.filter((p) => comDecisaoVencida(p, estado));
   // Chat limpo (PR 4): o pedido que já tem o recibo na conversa é o cartão encolhido; o aberto de mesmo id não sai de novo
   // (a fila "Sua vez" e as propostas são relidas um instante depois do frame da mensagem, e por esse instante os dois
   // estariam na tela).
   const decididos = new Set(c.mensagens.map(pedidoDoRecibo).filter((id): id is string => id !== null));
   const abertas = propostas.filter((p) => !decididos.has(p.id));
-  const idsDasPropostas = new Set([...abertas.map((p) => p.id), ...decididos]);
+  const expiradas = vencidas.filter((p) => !decididos.has(p.id));
+  const idsDasPropostas = new Set([...abertas.map((p) => p.id), ...expiradas.map((p) => p.id), ...decididos]);
   // Parte 1 do plano "o pensamento no chat": a gravada de uma fala que nasceu pendente fica com a chave do bloco da
   // pendente, e as pendentes entram depois das mensagens (são as mais novas), antes das propostas e das decisões.
   const chaveDaPendente = (b: BlocoDaTimeline): BlocoDaTimeline => (c.enviadas?.[b.chave] ? { ...b, chave: `pendente:${c.enviadas[b.chave]}` } : b);
@@ -1423,6 +1520,7 @@ export function blocosDoHistorico(c: ConversaEstado, estado: Estado): BlocoDaTim
     ...pendentes,
     { chave: "acolhimento", html: acolhimento },
     ...abertas.map((p) => ({ chave: `proposta:${p.id}`, html: renderProposta(p, estado, c.propostas) })),
+    ...expiradas.map((p) => ({ chave: `proposta:${p.id}`, html: linhaDaVencida(p, estado) })),
     { chave: "decisoes", html: renderDecisoesDaConversa(estado, c.conversa.id, idsDasPropostas, ancoradas) },
     // revisto em 2026-10-06 (pedido do Marlon): sai a oferta de liberar apps recém-conectados (card-liberar.ts, PR #141).
     // Ela aparecia sozinha em bot novo e a cada reconexão do Mac, porque valia para todo bot sem acesso por 24 h depois de

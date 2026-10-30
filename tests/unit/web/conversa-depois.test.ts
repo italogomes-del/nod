@@ -485,13 +485,13 @@ describe("revisão de 2026-10-03: o card da lista, o artefato e os recibos", () 
     const { e } = cenario([]);
     const resultado = (itens: { idx: number; desfecho: string; texto?: string }[], frase = "Atualizar a planilha de metas") => renderMensagem(msg("r", "pessoa", Date.parse("2026-10-03T14:44:00Z"), { kind: "resultado_aprovacao", texto: "Marlon aprovou 0 de 1; não enviado: … (falhou na execução).", payload: { kind: "resultado_aprovacao", decisaoId: "d1", frase, itens } as never }), e);
     const falhou = resultado([{ idx: 0, desfecho: "falhou_na_execucao", texto: "Atualizar metas" }]);
-    expect(falhou).toContain('class="cartao-pergunta respondida cartao-encolhido"');
-    expect(falhou).toContain(">Atualizar a planilha de metas</div>");
-    expect(falhou).toContain('<span class="pq-rotulo">Aprovado · não saiu</span><svg class="ce-marca ce-falha"');
+    expect(falhou).toContain('class="cp-linha cp-falha cartao-encolhido cp-com-extra"');
+    expect(falhou).toContain('tabindex="-1">Atualizar a planilha de metas</span>');
+    expect(falhou).toContain('<span class="ce-resultado">Aprovado · não saiu</span><span class="sr-only"> (não saiu)</span>');
     expect(falhou).toContain("<summary>detalhes</summary>");
     expect(falhou).toContain("falhou ao executar");
     const feito = resultado([{ idx: 0, desfecho: "executado", texto: "Atualizar metas" }]);
-    expect(feito).toMatch(/<span class="pq-rotulo">Aprovado por você · feito \d\d:\d\d<\/span><svg class="ce-marca ce-ok"/);
+    expect(feito).toMatch(/class="cp-linha cp-ok cartao-encolhido"[^>]*><svg class="cp-ic"[^]*?<span class="ce-resultado">Aprovado por você · feito \d\d:\d\d<\/span>/);
     expect(feito).not.toContain("<details");
     const varios = resultado([{ idx: 0, desfecho: "executado", texto: "a" }, { idx: 1, desfecho: "retirado_pela_pessoa", texto: "b" }, { idx: 2, desfecho: "executado", texto: "c" }]);
     expect(varios).toContain(">Aprovado por você · 2 de 3 feitas<");
@@ -499,9 +499,9 @@ describe("revisão de 2026-10-03: o card da lista, o artefato e os recibos", () 
     const parcial = resultado([{ idx: 0, desfecho: "executado", texto: "a" }, { idx: 1, desfecho: "falhou_na_execucao", texto: "b" }, { idx: 2, desfecho: "executado", texto: "c" }]);
     expect(parcial).toContain(">Aprovado · 1 de 3 não saiu<");
     const recusado = resultado([{ idx: 0, desfecho: "retirado_pela_pessoa", texto: "a" }, { idx: 1, desfecho: "retirado_pela_pessoa", texto: "b" }], "Posso mandar estes 2 avisos?");
-    expect(recusado).toContain(">Posso mandar estes 2 avisos?</div>");
-    expect(recusado).toContain('<p class="pq-estado ce-resultado">Recusado por você</p>');
-    expect(recusado).not.toContain("pq-escolhida");
+    expect(recusado).toContain('tabindex="-1">Posso mandar estes 2 avisos?</span>');
+    expect(recusado).toContain('class="cp-linha cp-recusado cartao-encolhido"');
+    expect(recusado).toContain('<span class="ce-resultado">Recusado por você</span>');
     expect(recusado).not.toContain("<details");
   });
 
@@ -517,8 +517,9 @@ describe("revisão de 2026-10-03: o card da lista, o artefato e os recibos", () 
     const { e } = cenario([]);
     const html = renderMensagem(msg("r", "pessoa", 1, { kind: "consentimento", texto: "Marlon permitiu para sempre: googlesheets.update_values. Vale já…", payload: { kind: "regra_permanente", decisaoId: "d1", turnoId: "t1", acoes: ["googlesheets.update_values"] } }), e);
     expect(html).toContain('data-cartao-encolhido="d1"');
-    expect(html).toContain(">Sempre permitir editar no Google Sheets</div>");
-    expect(html).toContain('<span class="pq-rotulo">Regra nova</span><svg class="ce-marca ce-regra"');
+    expect(html).toContain('tabindex="-1">Sempre permitir editar no Google Sheets</span>');
+    expect(html).toContain('class="cp-linha cp-regra cartao-encolhido cp-com-extra"');
+    expect(html).toContain('<span class="ce-resultado">Regra nova</span>');
     expect(html).toContain("<summary>Ver registro de autorização</summary>");
     expect(html).toContain('data-anuncio="Regra nova: sempre permitir editar no Google Sheets"');
   });

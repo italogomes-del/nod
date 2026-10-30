@@ -134,13 +134,14 @@ describe("computador do bot: erro real e aviso único na web (emenda da ADR-037)
 
   it("painel: fora do ar, a aba Computador diz o motivo numa linha neutra, com 'Tentar de novo' e 'Abrir computador' (sem cartão vermelho)", () => {
     const html = renderDetalhes(naAbaComputador(comFrota(nina(FORA))));
-    expect(html).toContain('class="gv-linha gvn-alerta gvn-danger" role="status"');
+    // NOD-399: o aviso neutro (círculo com "!", sem caixa vermelha).
+    expect(html).toContain('<div class="cp-fora"><div class="cp-erro cp-solto" role="status"><i class="cp-erro-ic" aria-hidden="true">!</i>');
     expect(html).toContain("o navegador do computador não abriu");
     expect(html).toContain('data-act="religar-computador"');
     expect(html).toContain('data-act="abrir-computador"');
     expect(html).not.toContain("tag-vermelha");
     expect(renderDetalhes({ ...naAbaComputador(comFrota(nina(FORA))), computadorAcao: { agenteId: "a1", tipo: "religar" } })).toContain("Tentando de novo…");
-    expect(renderDetalhes(naAbaComputador(comFrota(nina(null)), "ligado"))).not.toContain("gvn-alerta");
+    expect(renderDetalhes(naAbaComputador(comFrota(nina(null)), "ligado"))).not.toContain("cp-erro");
   });
 
   it("conversa: a mensagem única é um cartão de estado; depois que o computador volta, fica sem botões", () => {
@@ -149,7 +150,10 @@ describe("computador do bot: erro real e aviso único na web (emenda da ADR-037)
     expect(fora).toContain("Computador do bot fora do ar");
     expect(fora).toContain('data-act="religar-computador"');
     const voltou = renderMensagem(m, comFrota(nina(null)));
-    expect(voltou).toContain("O computador voltou a responder.");
+    expect(voltou).toContain("O computador do bot voltou a responder");
+    expect(voltou).toContain('class="cp-linha cp-ok msg-computador-fora"');
+    expect(fora).toContain('class="cp-erro msg-computador-fora" role="status"');
+    expect(fora).not.toMatch(/danger-soft|tag-vermelha/);
     expect(voltou).not.toContain('data-act="religar-computador"');
   });
 

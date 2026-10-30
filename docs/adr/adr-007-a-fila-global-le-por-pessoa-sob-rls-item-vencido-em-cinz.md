@@ -46,3 +46,9 @@ Este ADR já se chamava 'lê por PESSOA' — estava certo por antecipação e a 
 - Validação: `tests/integration/sua-vez.test.ts` (HTTP: `?ver=0` não carimba nem a gêmea; sem o parâmetro, carimba).
 - Mostrar o aviso não carimba: a notificação não prova leitura. Clicar nela traz a janela para a frente, e a releitura carimba. Quem só lê a frase no aviso e não abre o nod deixa o pedido vencer como "ninguém chegou a ver" — aceito.
 - Gatilho de revisão: se a medição mostrar pedidos lidos só pelo aviso (a pessoa diz que viu e o rótulo diz que não), o carimbo passa a ter um terceiro estado ("avisada") em vez de reusar `vista_em`.
+
+## Emenda (2026-10-30 — NOD-399: a proposta vencida vira a linha "expirado" no lugar dela)
+
+- Na CONVERSA, a proposta cuja decisão venceu (`comDecisaoVencida`: mudança e exclusão de rotina, acesso e credencial) não vai mais para o `<details>` "N pedidos vencidos · ver": encolhe numa linha no lugar do card (critério 7 da NOD-399, protótipo v2) — "Excluir uma rotina de Ada · expirou sem resposta, nada mudou · Reabrir · Dispensar". Uma vez só: a proposta que já tem recibo de decidida não volta como linha.
+- Continua valendo "recolher não é suprimir": a linha tem o Reabrir e o Dispensar (que recusa a proposta junto, como no refinamento de 2026-09-24). Os outros vencidos (pergunta, falta de dado, aprovação, retomar) seguem no `<details>` e em "Limpar vencidos". "Sua vez" não muda.
+- Gatilho de reversão: se a conversa voltar a acumular linhas "expirado" no fim (o caso da Nina, cinco cartões fixos), as linhas entram no "Limpar vencidos (N)" ou voltam para o `<details>` a partir de duas.

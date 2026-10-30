@@ -1,4 +1,5 @@
 import type { AcaoNoLote, MotivoCardDoLote, PayloadPropostaLoteBots, Proposta } from "../../src/contracts/conversa.ts";
+import { cardProposta, MAX_LINHAS } from "../lib/card-proposta.ts";
 import { botao, esc } from "../lib/render.ts";
 
 /** O card do lote do Nod (definido em 2026-10-07, ADR-082), fora de conversa.ts como card-perfil e card-pasta. */
@@ -43,21 +44,33 @@ function detalheDaAcao(a: AcaoNoLote): string {
  */
 export function renderCardLote(p: Pick<Proposta, "id">, c: PayloadPropostaLoteBots, aberto: boolean): string {
   const esperando = c.acoes.filter((a) => a.estado === "esperando").length;
-  const linhas = c.acoes.map((a) => {
-    const marca = a.estado === "feita" ? '<span class="tag tag-ok">feito</span>' : a.estado === "falhou" ? `<span class="tag tag-ambar">não deu certo${a.erro ? ` (${esc(a.erro.replaceAll("_", " "))})` : ""}</span>` : a.estado === "recusada" ? '<span class="tag tag-cinza">não feito</span>' : !aberto ? '<span class="tag tag-cinza">não decidido</span>' : "";
+  const linhas = c.acoes.map((a) => ({ espera: a.estado === "esperando", html: linhaDaAcao(a) }));
+  function linhaDaAcao(a: AcaoNoLote): string {
+    const marca = a.estado === "feita" ? '<span class="tag tag-ok">feito</span>' : a.estado === "falhou" ? `<span class="tag tag-cinza">não deu certo${a.erro ? ` (${esc(a.erro.replaceAll("_", " "))})` : ""}</span>` : a.estado === "recusada" ? '<span class="tag tag-cinza">não feito</span>' : !aberto ? '<span class="tag tag-cinza">não decidido</span>' : "";
     const caixa = a.estado === "esperando" && aberto ? `<input type="checkbox" data-lote-i="${a.i}" checked aria-label="${esc(`${VERBO_DO_LOTE[a.tipo]} ${a.alvoNome}`)}" />` : "";
     const detalhe = detalheDaAcao(a);
     const motivo = a.estado === "esperando" && a.motivo && a.motivo !== "manual" ? `<small class="lote-motivo">${esc(motivoDoLote(a, a.motivo))}</small>` : "";
     return `<label class="lote-acao">${caixa}<span class="lote-texto"><span><i class="lote-verbo">${esc(VERBO_DO_LOTE[a.tipo])}</i><b>${esc(a.alvoNome)}</b>${marca}</span>${detalhe ? `<small>${esc(detalhe)}</small>` : ""}${motivo}</span></label>`;
-  }).join("");
-  const titulo = aberto ? `${esperando} ${esperando === 1 ? "mudança espera" : "mudanças esperam"} você` : "Mudanças nos seus bots";
-  const botoes = aberto ? `${botao("decidir-lote", "Aprovar marcadas", { classe: "pri", id: p.id })}${botao("recusar-decisao", "Recusar", { id: p.id })}` : "";
-  return `<div class="card-prop card-lote" data-proposta="${esc(p.id)}">
-    <div class="hd">O Nod propõe · ${esc(c.resumo)}</div>
-    <div class="ttl">${esc(titulo)}</div>
-    <div class="lote-acoes">${linhas}</div>
-    ${botoes ? `<div class="ft">${botoes}</div>` : ""}
-  </div>`;
+  }
+  // NOD-399 (definido em 2026-10-30): o componente comum. Sem o cabeçalho "O Nod propõe". Revisão 3 do PR #607: o título
+  // é uma frase com o verbo ("Aplicar 3 mudanças nos seus bots") e o resumo do Nod vira a linha; até 3 ações ficam à
+  // vista e o resto em "Mais N", recolhido — as caixas continuam no DOM (marcadas) sob o [data-proposta].
+  const titulo = aberto ? `Aplicar ${esperando} ${esperando === 1 ? "mudança" : "mudanças"} nos seus bots` : "Mudanças nos seus bots";
+  const botoes = aberto ? `${botao("decidir-lote", "Aprovar marcadas", { classe: "cp-sim", id: p.id })}${botao("recusar-decisao", "Agora não", { classe: "cp-nao", id: p.id })}` : "";
+  // Revisão 4: o que espera a pessoa (marcado, o que "Aprovar marcadas" faz) NUNCA fica recolhido — a pessoa vê o que
+  // aprova antes do clique (ADR-082, cerca 3). Só o que já tem desfecho (feito, não feito, falhou) vai para "Mais N".
+  const vista = aberto ? [...linhas.filter((l) => l.espera), ...linhas.filter((l) => !l.espera)] : linhas;
+  const nVista = Math.max(MAX_LINHAS, aberto ? linhas.filter((l) => l.espera).length : 0);
+  const resto = vista.slice(nVista).map((l) => l.html);
+  const mais = resto.length ? `<details class="cp-detalhes lote-mais" data-disclosure="lote-${esc(p.id)}"><summary>Mais ${resto.length}</summary><div class="lote-acoes">${resto.join("")}</div></details>` : "";
+  return cardProposta({
+    id: p.id,
+    classe: "card-lote",
+    titulo,
+    linhas: c.resumo ? [esc(c.resumo)] : [],
+    extra: `<div class="lote-acoes">${vista.slice(0, nVista).map((l) => l.html).join("")}</div>${mais}`,
+    acoes: botoes,
+  });
 }
 
 /**

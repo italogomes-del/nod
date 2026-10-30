@@ -3,6 +3,7 @@ import type { CapacidadeConector, Conector } from "../../src/contracts/conector.
 import { falhaVisivel } from "../lib/fora-do-ar.ts";
 import type { Estado } from "../estado/reducer.ts";
 import { esc } from "../lib/render.ts";
+import { avisoErro } from "../lib/card-proposta.ts";
 
 /**
  * O que o card do chat, o marketplace e o painel do bot dizem sobre um app (definido em 2026-09-25,
@@ -150,8 +151,10 @@ export function blocoEsperando(nome: string, url: string | null, curto = false, 
     : `<div class="esperando">${GIRO}<div><b>Esperando você entrar no ${esc(nome)}</b><p>${frase}</p>${link}</div></div>`;
 }
 
-export function blocoFalhou(frase: string): string {
-  return `<p class="conexao-falhou" role="status">${esc(frase)}</p>`;
+export function blocoFalhou(frase: string, acoes = "", mais?: string): string {
+  // NOD-399 (definido em 2026-10-30): o aviso neutro do componente comum — círculo vermelho com "!" e a frase, nunca o
+  // texto em vermelho. Solto: dentro de um card, gaveta ou lista, sem caixa própria.
+  return avisoErro({ frase, acoes, solto: true, classe: "conexao-falhou", ...(mais ? { mais } : {}) });
 }
 
 /**

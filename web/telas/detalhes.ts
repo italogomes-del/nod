@@ -1,3 +1,4 @@
+import { avisoErro } from "../lib/card-proposta.ts";
 import { secaoOnboardingDetalhes } from "./onboarding.ts";
 import type { RotinaDto } from "../../src/contracts/api.ts";
 import type { AbaGaveta, Estado, EstadoComputadorBot, NivelGaveta } from "../estado/reducer.ts";
@@ -242,8 +243,7 @@ export function abaComputador(estado: Estado, a: Bot): string {
     const f = a.computadorForaDoAr;
     const motivo = f ? `Desde ${dataHora(f.desde)} · ${MOTIVO_FALHA_TEXTO[f.motivo]}.` : "O computador parou de responder.";
     corpo = `<div class="tela-preview gvn-tela-fora" role="img" aria-label="Tela de ${esc(a.nome)} fora do ar"><span>Fora do ar</span></div>${legenda}
-      <div class="gv-linha gvn-alerta gvn-danger" role="status"><span class="gvn-alerta-icone" aria-hidden="true">${ICONE.alerta}</span><span class="gv-linha-txt"><b>Fora do ar</b><small>${esc(motivo)}</small></span></div>
-      <div class="gvn-acoes-texto">${botao("religar-computador", acao === "religar" ? "Tentando de novo…" : "Tentar de novo", { classe: "gvn-acao-texto", id: a.id, desabilitado: acao === "religar" })}${botao("abrir-computador", "Abrir computador", { classe: "gvn-acao-texto", id: a.id })}</div>`;
+      <div class="cp-fora">${avisoErro({ frase: "Fora do ar", mais: motivo, solto: true, acoes: `${botao("religar-computador", acao === "religar" ? "Tentando de novo…" : "Tentar de novo", { classe: "cp-acao sm", id: a.id, desabilitado: acao === "religar" })}${botao("abrir-computador", "Abrir computador", { classe: "cp-acao sm", id: a.id })}` })}</div>`;
   } else if (visto === "dormindo") {
     corpo = `<div class="gvn-sono"><b>O computador está dormindo</b><small>Acorda sozinho quando ${esc(a.nome)} precisar.</small>${botao("computador-acordar", acao === "acordar" ? "Acordando…" : "Acordar", { classe: "gvn-acao-texto", id: a.id, desabilitado: acao === "acordar" })}${botao("abrir-computador", "Abrir computador", { classe: "gvn-acao-texto", id: a.id })}</div>`;
   } else if (visto === "sem") {
@@ -434,7 +434,7 @@ function nivelAcesso(estado: Estado, a: Bot, dona: boolean, chave: string): Nive
   const conector = conectorDoApp(estado, g.slug);
   const falha = g.falha ? textoMotivo(g.falha.motivo) : "";
   const fora = g.indisponivel
-    ? `<div class="gv-aviso" role="status"><b>Fora do ar${g.falha ? ` desde ${esc(dataHora(g.falha.em))}` : ""}.</b>${falha ? ` ${esc(capitalizar(falha))}.` : ""} Enquanto isso, ${esc(a.nome)} não consegue usar o ${esc(g.nome)}.${conector ? `<div>${botao("sondar-conector", "Tentar de novo", { classe: "sm", id: conector.id })}</div>` : ""}</div>`
+    ? `<div class="cp-fora">${avisoErro({ frase: `Fora do ar${g.falha ? ` desde ${dataHora(g.falha.em)}` : ""}.`, mais: `${falha ? `${capitalizar(falha)}. ` : ""}Enquanto isso, ${a.nome} não consegue usar o ${g.nome}.`, solto: true, ...(conector ? { acoes: botao("sondar-conector", "Tentar de novo", { classe: "cp-acao sm", id: conector.id }) } : {}) })}</div>`
     : "";
   const seg = dona && conector?.habilitado ? segmentado(a.id, a.nome, conector.id, nivelDoBot(estado, a.id, conector)) : "";
   const linhas = (itens: Concessoes) => itens.map((i) => `<li title="${esc(g.descricaoDe.get(i.id) ?? i.capacidade)}">${esc(nomeLegivel(i.capacidade, g.slug || g.nome))}</li>`).join("");

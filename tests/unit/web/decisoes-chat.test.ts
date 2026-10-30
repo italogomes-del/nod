@@ -177,8 +177,9 @@ describe("decisões no chat", () => {
     const html = renderTimeline({ ...conversa, propostas }, { ...estadoInicial });
     expect(html).not.toContain('data-act="confirmar-proposta"');
     expect(html).not.toContain('data-act="recusar-proposta"');
-    expect(html).toContain("Aplicar mudança");
-    expect(html).toContain("Excluir rotina");
+    // NOD-399: o verbo no botão ("Salvar", "Excluir") e o destrutivo só com o verbo em vermelho.
+    expect(html).toContain('data-id="pa">Salvar</button>');
+    expect(html).toMatch(/class="bt cp-sim cp-perigo" data-act="decidir-proposta" data-id="pe">Excluir<\/button>/);
     expect(html.match(/data-act="decidir-proposta"/g)).toHaveLength(2);
     expect(html.match(/data-act="recusar-decisao"/g)).toHaveLength(2);
   });
@@ -191,11 +192,22 @@ describe("decisões no chat", () => {
     expect(html).not.toContain("Manter rotina");
     expect(html).not.toContain('data-act="decidir-proposta"');
     expect(html).toContain('data-act="reabrir"');
+    // NOD-399 (critério 7): o card encolhe na linha "expirado", no lugar dele, uma vez só (não repete em "N pedidos vencidos").
+    expect(html).toContain('class="cp-linha cp-expirado" role="status" data-proposta="d"');
+    expect(html).toContain("Excluir uma rotina do bot <span class=\"mudo\">· expirou sem resposta, nada mudou</span>");
+    expect(html).not.toContain("pedido vencido · ver");
+    expect(html.match(/data-act="reabrir"/g)).toHaveLength(1);
+    // Revisão 2: a linha não fica acumulada — "Dispensar" a tira (o servidor recusa a proposta junto).
+    expect(html).toMatch(/cp-expirado.*data-act="dispensar" data-id="d"[^>]*>Dispensar<\/button>/);
+
+    // QA do PR #607 (mutante M16): a proposta que já tem recibo de decidida na conversa não volta como "expirado".
+    const recibo = { tenantId: "t", id: "pd", conversaId: "c", turnoId: null, autoria: { autor_tipo: "pessoa", autor_id: "p", sob_procuracao_de: null, conta_de_execucao: "p", executor: "catcher", locality: "local", locality_reason: "tudo_local_nesta_rodada", machine_id: null, decidido_por: "pessoa", regra_versao: 1 }, kind: "sistema", texto: "…", payload: { kind: "proposta_decidida", propostaId: "d", tipo: "rotina_exclusao", titulo: "Excluir rotina", estado: "confirmada", turnoId: null }, confianca: "confiavel", parcial: false, criadoEm: 1, destino: "chat" } as unknown as Mensagem;
+    expect(renderTimeline({ ...conversa, propostas: [proposta], mensagens: [recibo] }, vencido)).not.toContain("cp-expirado");
 
     const reaberta: Estado = { ...estado, sessao: { pessoaId: "p" } as Estado["sessao"], suaVez: { ...estado.suaVez!, itens: [{ ...item, estadoColuna: "pendente", decisao: { ...decisao, estado: "reaberta" } }] } };
     const aberto = renderTimeline({ ...conversa, propostas: [proposta] }, reaberta);
     expect(aberto.match(/data-act="decidir-proposta"/g)).toHaveLength(1);
-    expect(aberto).toContain("Excluir rotina");
+    expect(aberto).toContain(">Excluir</button>");
   });
 
   it("NOD-50: pedido de credencial vencido tira o campo da chave e deixa a decisão vencida com Reabrir", () => {
@@ -240,15 +252,15 @@ describe("decisões no chat", () => {
       // O card da proposta e o item da decisão são o MESMO pedido: aparece uma vez só.
       expect(html).not.toContain("Preciso da sua decisão para continuar");
       expect(html.indexOf("<details")).toBeLessThan(html.indexOf("GMAIL_FETCH_EMAILS"));
-      expect(html).toContain("Ver as 2 ações pedidas");
+      expect(html).toContain("<summary>Detalhes</summary>");
     });
 
     it("pedido da conversa: 'Permitir e continuar' / 'Não permitir'", () => {
       const daConversa: Proposta = { ...deRotina, payload: { kind: "acesso", conector: "gmail", capacidades: ["GMAIL_FETCH_EMAILS"], nivel: "leitura", naoPedido: [], turnoId: "t1" } };
       const html = renderTimeline({ ...conversa, propostas: [daConversa] }, comDecisao(daConversa));
       expect(html).toContain("Permitir e continuar");
-      expect(html).toContain("Não permitir");
-      expect(html).toContain("Ver a ação pedida");
+      expect(html).toContain(">Agora não</button>");
+      expect(html.indexOf("<summary>Detalhes</summary>")).toBeLessThan(html.indexOf("GMAIL_FETCH_EMAILS"));
     });
 
     it("pedido anterior, sem decisão em Sua vez, continua com 'Revisar acesso'", () => {
@@ -258,11 +270,27 @@ describe("decisões no chat", () => {
       expect(html).not.toContain('data-act="decidir-proposta"');
     });
 
-    it("decisão de acesso vencida tira o card e deixa a decisão vencida com Reabrir", () => {
+    it("decisão de acesso vencida tira o card e deixa a linha 'expirado' com Reabrir", () => {
       const html = renderTimeline({ ...conversa, propostas: [deRotina] }, comDecisao(deRotina, "vencido"));
       expect(html).not.toContain("Pausar rotina");
       expect(html).not.toContain('data-act="decidir-proposta"');
       expect(html).toContain('data-act="reabrir"');
+      expect(html).toContain("cp-linha cp-expirado");
+      expect(html).toContain("expirou sem resposta, nada mudou");
+      // QA do PR #607: o título da linha é o mesmo do card aberto ("Permitir que X leia seu Gmail").
+      expect(html).toMatch(/cp-expirado[^]*?<span>Permitir que [^<]+ leia seu [^<]+ <span class="mudo">/);
+    });
+
+    it("revisão 5: só capacidades de alterar no catálogo — 'altere' no card aberto e na linha expirada, o mesmo título", () => {
+      const soAlterar: Proposta = { ...deRotina, id: "d", payload: { kind: "acesso", conector: "gmail", capacidades: ["GMAIL_SEND_EMAIL"], nivel: "escrita", naoPedido: [], turnoId: "t1", rotinaId: "r1" } };
+      const conectores = [{ slug: "gmail", nome: "Gmail", habilitado: true, ownerId: "p", catalogo: [{ nome: "GMAIL_SEND_EMAIL", descricao: "", schema: {}, readOnlyHint: false, grupo: "criar" }] }] as never;
+      const comApp = (e: Estado): Estado => ({ ...e, sessao: { tenantId: "t", pessoaId: "p" } as Estado["sessao"], conectores });
+      const titulo = (h: string, re: RegExp): string => re.exec(h)?.[1] ?? "";
+      const aberto = renderTimeline({ ...conversa, propostas: [soAlterar] }, comApp(comDecisao(soAlterar)));
+      const vencido = renderTimeline({ ...conversa, propostas: [soAlterar] }, comApp(comDecisao(soAlterar, "vencido")));
+      const tAberto = titulo(aberto, /<p class="cp-titulo">(?:<[^>]+>[^<]*<\/[^>]+>)*<span>(Permitir que [^<]+)<\/span>/);
+      expect(tAberto).toMatch(/^Permitir que .+ altere seu Gmail$/);
+      expect(titulo(vencido, /cp-expirado[^]*?<span>(Permitir que [^<]+) <span class="mudo">/)).toBe(tAberto);
     });
 
     // revisto em 2026-09-25 (jornadas de conexão): o card conecta ali mesmo e espera o login sozinho; quando o
@@ -306,11 +334,14 @@ describe("decisões no chat", () => {
       const p: Proposta = { ...deRotina, id: "d", payload: { kind: "acesso", conector: "clickup", capacidades: ["CLICKUP_GET_TASKS", "CLICKUP_CREATE_TASK"], nivel: "escrita", naoPedido: [], turnoId: "t1" } };
       const base = comDecisao(p);
       const html = renderTimeline({ ...conversa, propostas: [p] }, { ...base, conectores: [clickup] });
-      expect(html).toContain("quer ler e alterar seu ClickUp");
+      expect(html).toContain("Permitir que o bot leia e altere seu ClickUp");
       expect(html).toContain('data-caps="CLICKUP_GET_TASKS"');
       expect(html).toContain('data-caps="CLICKUP_CREATE_TASK"');
       expect(html).not.toContain('data-caps="CLICKUP_DELETE_TASK"');
-      expect(html).toContain("Ficam de fora: 1 ação de apagar, desfazer e outras");
+      expect(html).toContain("<dt>Fica de fora</dt><dd>1 ação de apagar, desfazer e outras</dd>");
+      // NOD-399: as permissões ficam dentro de Detalhes; o recusar é "Agora não".
+      expect(html.indexOf("<summary>Detalhes</summary>")).toBeLessThan(html.indexOf('data-caps="CLICKUP_GET_TASKS"'));
+      expect(html).toContain('data-act="recusar-decisao" data-id="d">Agora não</button>');
       expect(html).toContain('data-act="permitir-acesso"');
     });
 
