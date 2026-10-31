@@ -84,7 +84,11 @@ const SO_404_403_ACEITAS = new Set([
  * Revisão 16: ação NOVA (fora de ACOES_CONHECIDAS_NOD398) que não dá para semear sai do veredito só por aqui, com a issue
  * que vai semeá-la (o teste exige o id NOD-n). SO_404_403_ACEITAS só pode ter ações da foto: não serve de saída para nova.
  */
-const ISENCOES_DE_ACOES_NOVAS: Readonly<Record<string, string>> = {};
+const ISENCOES_DE_ACOES_NOVAS: Readonly<Record<string, string>> = {
+  // A main vermelha em 849a2d14 (semente 2224696596): o fuzz não semeia versão de perfil, e só a semente que sorteia um número
+  // existente passa da busca. Semear a versão do perfil no fuzz é da NOD-20.
+  "bots.restaurar_versao": "NOD-20",
+};
 const duracoes: number[] = [];
 // Revisão 14: a leitura da entrada acumulada entre os servidores, para a regra das ações novas valer só no fim.
 const fuzzadasTodas = new Set<string>();
@@ -179,6 +183,11 @@ for (const [ordem, config] of CONFIGURACOES.entries()) {
           }),
         );
       const [minhaRotina, rotinaDela] = [await rotinaDe(sessao, meu), await rotinaDe(outra, dela)];
+      // NOD-442: um quadro com um lote no bot da pessoa. Sem ele o `quadro.desfazer` só passava da busca na semente em que um
+      // `quadro.criar` válido saía antes, com o experimento ligado por um `preferencias.salvar` sorteado (a main vermelha com
+      // a semente 1644694243). O experimento Quadro fica ligado para o fuzz passar da guarda dele.
+      await srv.json("PUT", "preferencias", { experimentos: { quadro: true } });
+      await srv.json("POST", `agentes/${meu.agente.id}/quadro`, { meta: "Quadro do fuzz" });
       const plano = planoDoServidor({
         registro: REGISTRO_DE_ACOES as readonly DefinicaoAcao[],
         pendentes: faltando,
