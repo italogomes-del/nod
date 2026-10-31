@@ -66,7 +66,7 @@ describeIntegracao("chaves de experimento (ADR-111)", () => {
     });
   });
 
-  it("NOD-429: o Quadro é só da tela — ligado, o prompt sai igual ao desligado e o Raio-X não o grava", async () => {
+  it("NOD-429/NOD-442: o Quadro ligado só acrescenta gerir_quadro ao catálogo — o resto do prompt sai igual e o Raio-X não o grava", async () => {
     const prompt = async (quadro: boolean) => withRollback(escopo, async (trx) => {
       // Nome fixo: o padrão da fábrica leva 8 caracteres do id, e o prompt começa com o nome do bot.
       const m = await montar(trx, "Bot do quadro");
@@ -76,7 +76,9 @@ describeIntegracao("chaves de experimento (ADR-111)", () => {
       return { texto: p.promptSistema.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g, "<id>"), composicao };
     });
     const [desligado, ligado] = [await prompt(false), await prompt(true)];
-    expect(ligado.texto).toBe(desligado.texto);
+    // NOD-442 (ADR-135): com o experimento ligado, qualquer bot mexe no quadro pelo chat; desligado, a ferramenta some.
+    expect(desligado.texto).not.toContain("mcp__nod__gerir_quadro");
+    expect(ligado.texto.replace(" mcp__nod__gerir_quadro,", "")).toBe(desligado.texto);
     expect(ligado.composicao).toEqual({ calibracao: false, memoriaLonga: false, whatsapp: false, anexosAnteriores: 0 });
   });
 

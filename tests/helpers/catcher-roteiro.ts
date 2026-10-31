@@ -19,6 +19,8 @@ import type { EventoStream } from "../../src/contracts/turno.ts";
  *                                    CLI (definido em 2026-10-18, chat limpo, PR 2: o e2e da negação que vai para a
  *                                    Atividade precisa de uma negação nativa NÃO terminal, que o proxy não produz)
  *
+ * Marcador numa linha citada ("> …") não conta: é contexto devolvido ao turno, não roteiro.
+ *
  * Sem marcador, `roteiroPadrao` responde "catcher: recebi N caracteres; ferramentas: […]".
  */
 export type PassoRoteiro =
@@ -51,6 +53,13 @@ function* marcadores(prompt: string): Generator<{ tipo: string; corpo: string }>
     const inicio = prompt.indexOf("[[", i);
     if (inicio === -1) return;
     const m = ABERTURA.exec(prompt.slice(inicio));
+    // Linha citada ("> …") é contexto que o turno recebe de volta (a descrição da tarefa no turno da resposta,
+    // NOD-442), não roteiro: um modelo de verdade não refaz o que lê citado.
+    const linha = prompt.lastIndexOf("\n", inicio - 1) + 1;
+    if (m && prompt.startsWith("> ", linha)) {
+      i = inicio + 2;
+      continue;
+    }
     if (!m) {
       i = inicio + 2;
       continue;

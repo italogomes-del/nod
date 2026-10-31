@@ -5,7 +5,7 @@ import type { Conector } from "../../../src/contracts/conector.ts";
 import type { Turno } from "../../../src/contracts/turno.ts";
 import { ErroDeDominio } from "../../../src/domain/erro.ts";
 import { NATIVAS_DO_TERMINAL } from "../../../src/domain/nativas.ts";
-import { FERRAMENTAS_NOD_POR_MODO, montarPlano, PLANO_SEM_VALIDADE, type EntradaPlano } from "../../../src/domain/plano-turno.ts";
+import { FERRAMENTAS_NOD_POR_MODO, MODOS_DO_QUADRO, montarPlano, PLANO_SEM_VALIDADE, type EntradaPlano } from "../../../src/domain/plano-turno.ts";
 
 const agora = 1_000_000;
 const agente: Agente = { tenantId: "t", id: "a1", ownerId: "p", visibility: "privado", nome: "Vera", titulo: "", descricao: "revisa PRs", dono: "pessoa", forma: "shape-square", cor: "c-red", fixado: false, oculto: false, confirmado: true, modelo: "claude-haiku-4-5-20251001", duplicadoDe: null, criadoEm: 0 };
@@ -22,6 +22,12 @@ const base: EntradaPlano = { turno, agente, memorias: [], concessoes, conectores
 const nomes = (p: ReturnType<typeof montarPlano>) => p.catalogo.ferramentas.map((f) => f.nome);
 
 describe("montarPlano", () => {
+  // NOD-442: gerir_quadro é de QUALQUER bot, mas só com o experimento ligado e nos modos de trabalho.
+  it("gerir_quadro só com o experimento Quadro e nos modos do quadro", () => {
+    expect(nomes(montarPlano(base))).not.toContain("gerir_quadro");
+    for (const modo of MODOS_DO_QUADRO) expect(nomes(montarPlano({ ...base, modo, quadro: true }))).toContain("gerir_quadro");
+    expect(nomes(montarPlano({ ...base, modo: "sala", quadro: true }))).not.toContain("gerir_quadro");
+  });
   it("conversa: ferramentas nod do modo + conector ∩ concessão como slug__tool com nomeMcp exato", () => {
     const p = montarPlano(base);
     for (const n of FERRAMENTAS_NOD_POR_MODO.conversa) expect(nomes(p)).toContain(n);

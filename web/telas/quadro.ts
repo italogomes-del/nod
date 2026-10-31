@@ -111,6 +111,8 @@ export function avatar(a: { avatar: Html; nome: string; estado?: EstadoDoTrabalh
 
 export interface Card {
   id: string;
+  /** O código à vista (NOD-442: o do Linear ou o curto do quadro); sem ele, o próprio id. O `data-id` segue sendo o id. */
+  codigo?: string;
   titulo: string;
   /** O responsável: o avatar e o nome. */
   responsavel?: { avatar: Html; nome: string };
@@ -161,7 +163,7 @@ function estadoDoCard(c: Card): Html {
 export function rotuloDoCard(c: Card): string {
   const { rodam } = avataresDoCard(c);
   return [
-    c.id, c.titulo, c.responsavel?.nome,
+    c.codigo ?? c.id, c.titulo, c.responsavel?.nome,
     c.motivo ? `bloqueada: ${c.motivo}` : "",
     c.voce ? `precisa de você: ${c.voce}` : "",
     ...rodam.map((q) => rotuloDoAvatar(q.nome, "rodando", q.acao, q.tempo)),
@@ -185,7 +187,7 @@ export function card(c: Card): Html {
     : c.tags?.length ? `<span class="qd-tags">${c.tags.map((t) => `<span class="qd-tag">${esc(t)}</span>`).join("")}</span>` : "";
   const classe = cl("qd-card", c.motivo && "qd-bloqueado", c.voce && "qd-precisa", c.brilho && "qd-brilho", c.aviso && "qd-com-aviso", c.classe && esc(c.classe));
   return h(`<li class="${classe}" data-tarefa="${esc(c.id)}">` +
-    `<div class="qd-card-l1"><span class="qd-id">${esc(c.id)}</span>${l1}</div>` +
+    `<div class="qd-card-l1"><span class="qd-id">${esc(c.codigo ?? c.id)}</span>${l1}</div>` +
     `<button type="button" class="qd-card-bt" data-act="abrir-tarefa" data-id="${esc(c.id)}" aria-label="${esc(rotuloDoCard(c))}"><span class="qd-card-tit">${esc(c.titulo)}</span></button>` +
     l3 + (quem || quando ? `<div class="qd-card-pe">${quem}${quando}</div>` : "") + `</li>`);
 }
@@ -277,7 +279,7 @@ export function meta(o: { objetivo: string; prazo: string; feitas: number; total
 export function linha(c: Card): Html {
   const av = avataresDoCard(c);
   const est = c.motivo ? `<span class="qd-l-est qd-e-bloqueado" title="${esc(`bloqueada: ${c.motivo}`)}">${ICONE.pausa}</span>` : "";
-  const fim = c.aviso ? aviso(c.aviso) : `${est}<span class="qd-id">${esc(c.id)}</span>`;
+  const fim = c.aviso ? aviso(c.aviso) : `${est}<span class="qd-id">${esc(c.codigo ?? c.id)}</span>`;
   return h(`<li class="${cl("qd-l", c.aviso && "qd-com-aviso", c.classe && esc(c.classe))}" data-tarefa="${esc(c.id)}">` +
     `<button type="button" class="qd-l-bt" data-act="abrir-tarefa" data-id="${esc(c.id)}" aria-label="${esc(rotuloDoCard(c))}">${av.html ? `<span class="qd-avs">${av.html}</span>` : ""}<span class="qd-l-tit">${esc(c.titulo)}</span></button>` +
     `<span class="qd-l-fim">${fim}</span></li>`);

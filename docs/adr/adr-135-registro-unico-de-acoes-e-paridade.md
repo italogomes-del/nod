@@ -62,6 +62,12 @@ dois caminhos já divergiam: excluir um bot pela tela desligava o computador del
 - **O efeito pós-commit pelo Nod roda antes de a ferramenta (ou o clique no cartão do lote) responder** (até 20
   desligamentos em série num lote).
   Aceito no piloto; se pesar, disparar depois da resposta, como a limpeza do NOD-374.
+- **As ações `quadro.*` (NOD-442) são `muda` com `cartaoNoChat: false`**: o `gerir_quadro` aplica direto, sem o cartão
+  do modo do bot. O quadro é da pessoa, todo lote tem Desfazer na tela, e o que tem efeito fora (o turno que a tarefa
+  abre) segue as aprovações do bot responsável. O turno não limpo não escreve a meta, não responde nem desfaz, e o que
+  ele escreve fica marcado de fora (`de_fora`). Gatilho de reversão: um lote de bot que a pessoa precisou desfazer por
+  engano mais de uma vez por semana, ou uma tarefa excluída sem volta, passa as ações destrutivas (excluir, trocar de
+  responsável) a seguir o modo, como o `gerir_bots` com o `riscoDaAcao`.
 
 ## Alternativas descartadas
 

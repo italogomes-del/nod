@@ -127,7 +127,8 @@ Tudo no **mesmo PR** (registro, rota, executor, ferramenta, teste de contrato, p
 piloto `bots.*`: `src/domain/acoes/bots.ts`, `src/use-cases/acoes/bots.ts` e `tests/integration/paridade-bots.test.ts`.
 A tabela id → executor do piloto é `EXECUTORES_BOTS`, e o `casoDeUso` da ação é o id; domínio novo cria a sua tabela e,
 em `tests/unit/use-cases/acoes-executores.test.ts` (que compara as chaves com o `casoDeUso` das ações `vivo`), troca
-`EXECUTORES_BOTS` pela união das tabelas.
+`EXECUTORES_BOTS` pela união das tabelas. Hoje a união é `EXECUTORES` (`src/use-cases/acoes/index.ts`: `bots.*` e
+`quadro.*`); domínio novo entra nela.
 Efeito fora do banco vai em `Deps.aposCommit` (ADR-135 §4); efeito de tipo novo entra na união `EfeitoAposCommit` e
 ganha o seu ramo em `rodarAposCommit` (`src/adapters/http/compor.ts`), que hoje só desliga o computador. Tabela de
 executores ou efeito novo também atualizam o "hoje" desta skill e o teste dela (`tests/unit/skills/acao-no-chat.test.ts`).

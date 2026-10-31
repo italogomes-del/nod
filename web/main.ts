@@ -98,7 +98,7 @@ import { listaVaziaDaBarra } from "./lib/lista-vazia-da-barra.ts";
 import { criarToqueLongo, dicaJaVista, alturaDaLista, escolherRedesenhada, lugarDoMenuSegurado, marcarDicaVista, MS_DICA } from "./lib/toque-longo.ts";
 import { escondidosNoCelular, estadoDaLista, FAVORITOS_VISIVEIS, gruposSemResultado, horaDaLinha, PREFIXO_DO_PEDIDO } from "./lib/inicio-celular.ts";
 import "./pwa.ts";
-import { avatar, botao, esc, iconeAgente } from "./lib/render.ts";
+import { avatar, botao, esc, hora as horaDaFala, iconeAgente } from "./lib/render.ts";
 import { COPIADO_MS, mostrarCopia, ROTULO_COPIADO, type RelogioDoCopiar } from "./lib/copiar.ts";
 import { avisoDeEstado } from "./lib/aviso-estado.ts";
 import { aplicarTema, lerTema, type EscolhaTema } from "./lib/tema.ts";
@@ -109,6 +109,7 @@ import { atualizarBorda, ligarBorda, ligarEtiqueta } from "./lib/borda-barra.ts"
 import { proximoDoSegmentado } from "./lib/linha-config.ts";
 import { conversaAVista, ehChaveDeExperimento, quadroDoEstado } from "./lib/quadro.ts";
 import { criarQuadroNaTela } from "./lib/quadro-na-tela.ts";
+import { confiar as confiarHtml } from "./telas/quadro.ts";
 import type { DadosConta } from "./telas/config-conta.ts";
 import { estadoMascoteNaConversa, mascoteComAviso, proximaViradaDoMascote } from "./lib/mascote.ts";
 import { lembrar } from "./lib/lembrar.ts";
@@ -435,7 +436,15 @@ window.matchMedia("(max-width: 1099px)").addEventListener("change", marcarPainel
 
 // NOD-429: Conversa | Quadro na pílula, só com o experimento Quadro ligado (Configurações › Geral › Avançado) e no bot da própria pessoa (web/lib/quadro.ts).
 // NOD-429: de volta à Conversa, a conversa passa a estar "na tela" de novo e é lida.
-const quadroNaTela = criarQuadroNaTela(document, { aoTrocar: (m) => { if (m === "conversa") { lerConversaDaTela(); render(); } } });
+const quadroNaTela = criarQuadroNaTela(document, {
+  aoTrocar: (m) => { if (m === "conversa") { lerConversaDaTela(); render(); } },
+  // NOD-442: o quadro de verdade (busca, frames, a pílula). O avatar é o mascote do próprio nod (HTML que o nod gera).
+  dados: {
+    api: () => api,
+    agente: (id) => { const b = botGerido(id); return b ? { avatar: confiarHtml(iconeAgente(b, "sm")), nome: b.nome } : null; },
+    hora: horaDaFala,
+  },
+});
 
 /**
  * Avisos (definido em 2026-09-24, "aviso no Mac"): depois de cada leitura de "Sua vez" o avisador decide
@@ -889,6 +898,7 @@ function receberFrame(frame: FrameSse): void {
   const antes = estado;
   estado = reduzir(estado, { tipo: "frame", frame, agora: Date.now() });
   if (mudouNaTela(antes, estado)) renderNoQuadro();
+  quadroNaTela.aoFrame(frame);
   telaOnboarding.aoFrame();
   // Só quem marcou algo para buscar precisa do REST; um pedaço de texto nunca marca.
   if (estado.invalidacoes === antes.invalidacoes) return;
@@ -1970,7 +1980,7 @@ function renderPrincipal(): void {
   document.getElementById("cabecalho")?.classList.toggle("cabecalho-pilula", t.tipo === "conversa");
   marcarPainelNaPilula();
   quadroNaTela.sincronizar(t.tipo === "conversa" && comQuadro(t.agenteId)
-    ? { chave: t.conversaId, nome: botGerido(t.agenteId)?.nome ?? "agente" }
+    ? { chave: t.conversaId, nome: botGerido(t.agenteId)?.nome ?? "agente", agenteId: t.agenteId }
     : { chave: null, nome: "" });
   regiao("erro", erro);
   const cascaMuda = regiaoMudaria("timeline", corpo);
@@ -2777,6 +2787,7 @@ async function iniciarSessao(escopo: Escopo): Promise<void> {
   live = criarLiveEvents(api.urlEventos, {
     aoReidratar: () => {
       dispatch({ tipo: "invalidar", quais: invalidacoesAoRetomar(estado) });
+      quadroNaTela.reler(); // NOD-442: o quadro vive fora do reducer
       // NOD-324: o aviso de voz pode ter mudado enquanto a conexão estava fora; relê sem descartar a fala em curso.
       void ditado.reler();
     },

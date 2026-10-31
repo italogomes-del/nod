@@ -102,3 +102,10 @@ describe("[[negada: …]] (chat limpo, PR 2): a negação nativa não terminal d
     expect(result).toMatchObject({ tipo: "result", texto: "tentei", negacoesPermissao: ["Bash", "Write"] });
   });
 });
+
+describe("linha citada (NOD-442)", () => {
+  it("marcador em linha \"> \" é contexto, não roteiro; fora dela continua valendo", () => {
+    const r = interpretarRoteiro(["contexto:", '> [[tool: gerir_quadro {"a":1}]]', "> [[texto: velho]]", "[[texto: novo]]"].join("\n"));
+    expect(r.passos).toEqual([{ tipo: "texto", texto: "novo" }]);
+  });
+});

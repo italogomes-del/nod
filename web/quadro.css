@@ -226,6 +226,120 @@
 .qd-l .icon.mascote svg { width: 18px; height: 18px; }
 .qd-l .qd-anel { width: 22px; height: 22px; font-size: 9px; }
 
+/* ---------- NOD-442 (definido em 2026-10-31): o quadro de verdade, a tarefa aberta e a conversa no quadro ----------
+   Portado de gamefik/nod-prototipos (nod-442/proposta.css, passo 9, e _nod/quadro/base.css @ fbfc5ec, issue 247). A vista rola
+   por inteiro; a pílula fica presa no pé (sticky), com a faixa da resposta por cima dela. Só tokens do nod (ADR-070). */
+.qd-vista:has(> .qd-conteudo) { padding-bottom: 0; }
+.qd-conteudo { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.qd-sem-quadro { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; max-width: 520px; margin: 48px auto 0; padding: 0 4px; }
+.qd-sem-tit { margin: 0; font-size: 17px; font-weight: 600; color: var(--ink); }
+.qd-sem-txt { margin: 0; font-size: 14px; line-height: 1.5; color: var(--ink-2); }
+.qd-bt { display: inline-flex; align-items: center; justify-content: center; min-height: 32px; padding: 0 12px; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--surface); color: var(--ink); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; }
+.qd-bt:hover { background: var(--surface-raised); }
+.qd-bt-pri { border-color: transparent; background: var(--action); color: var(--on-action); }
+.qd-bt-pri:hover { background: var(--action); opacity: .9; }
+.qd-bt:disabled { opacity: .55; cursor: default; }
+.qd-bt:focus-visible, .qd-voltar:focus-visible, .qd-chip:focus-visible, .qd-resp-in:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+
+/* A tarefa aberta: o corpo à esquerda, o painel (232px) à direita; abaixo de 700px o painel desce. */
+.qd-tarefa { width: 100%; max-width: 1040px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+.qd-t-cab { position: relative; display: flex; align-items: center; gap: 8px; min-height: 32px; min-width: 0; }
+.qd-voltar { display: inline-flex; align-items: center; gap: 2px; min-height: 30px; min-width: 0; padding: 0 8px 0 4px; border: 0; border-radius: 8px; background: transparent;
+  color: var(--ink-2); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; }
+.qd-voltar > span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.qd-voltar:hover { background: var(--surface-raised); color: var(--ink); }
+.qd-t-sep { color: var(--line-strong); }
+.qd-t-cab .qd-id { font-size: 12px; flex: none; }
+.qd-t-corpo { display: grid; grid-template-columns: minmax(0, 1fr); gap: 32px; align-items: start; }
+.qd-com-lado .qd-t-corpo { grid-template-columns: minmax(0, 1fr) 232px; gap: 28px; }
+.qd-t-principal { display: flex; flex-direction: column; gap: 14px; min-width: 0; padding: 22px 28px 28px; border: 1px solid var(--line); border-radius: 14px; background: var(--qd-card); }
+.qd-t-tit { margin: 4px 0 0; font-size: 24px; font-weight: 600; line-height: 1.25; letter-spacing: -.015em; color: var(--ink); overflow-wrap: anywhere; }
+/* foco-ok: recebe o foco só pelo código (tabindex -1, ao abrir a tarefa); não é parada do Tab */
+.qd-t-tit:focus { outline: none; }
+.qd-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.qd-chip { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border: 1px solid transparent; border-radius: 8px; background: var(--qd-col-fundo);
+  color: var(--ink); font: inherit; font-size: 12.5px; font-weight: 500; white-space: nowrap; text-decoration: none; }
+a.qd-chip:hover { background: var(--surface-raised); }
+.qd-chip-vazio { color: var(--ink-3); border: 1px dashed var(--line-strong); background: transparent; }
+.qd-chip .icon.mascote { width: 16px !important; height: 16px !important; min-width: 16px; border-radius: 5px; }
+.qd-chip .qd-anel { width: 16px; height: 16px; font-size: 7.5px; border-width: 1.5px; }
+.qd-t-desc { font-size: 14.5px; line-height: 1.65; color: var(--ink); padding: 6px 0 4px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.qd-t-desc-vazia { color: var(--ink-3); }
+.qd-t-sec { margin: 6px 0 0; padding-top: 14px; border-top: 1px solid var(--line); font-size: 13px; font-weight: 600; color: var(--ink); }
+.qd-t-principal .qd-voce-frase, .qd-t-resposta { margin: 0; font-size: 14px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.qd-t-resposta { color: var(--ink-2); }
+.qd-resp-form { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.qd-resp-in { width: 100%; min-height: 64px; padding: 10px 12px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--surface); color: var(--ink);
+  font: 14px/1.45 var(--font-sans); resize: vertical; }
+.qd-rotulo { margin: 0 0 8px; font-size: 12px; font-weight: 500; color: var(--ink-3); }
+.qd-lado { display: flex; flex-direction: column; padding: 6px 2px 0; font-size: 12.5px; min-width: 0; }
+.qd-lado-sec { padding: 16px 0; }
+.qd-lado-sec:first-child { padding-top: 0; }
+.qd-lado-sec + .qd-lado-sec { border-top: 1px solid var(--line); }
+.qd-lado-sec .qd-rotulo { margin-bottom: 6px; }
+.qd-lado-vazio { margin: 0; color: var(--ink-3); }
+.qd-props { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 6px 10px; margin: 0; align-items: center; }
+.qd-props dt { color: var(--ink-3); }
+.qd-props dd { margin: 0; min-width: 0; color: var(--ink); overflow-wrap: anywhere; }
+.qd-lado ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; color: var(--ink-2); }
+.qd-lado li { display: flex; align-items: flex-start; gap: 6px; min-width: 0; }
+.qd-lado li .qd-ic { color: var(--ink-3); margin-top: 2px; }
+
+/* A conversa no quadro: a pílula de vidro no pé, 640px no máximo; a resposta numa faixa fina por cima. */
+.qd-vista > .qc-wrap { position: sticky; bottom: 0; z-index: 5; margin-top: auto; padding: 10px 24px calc(env(safe-area-inset-bottom) + 16px);
+  --qc-vidro: color-mix(in srgb, var(--surface) 86%, transparent); --qc-vidro-forte: color-mix(in srgb, var(--surface) 94%, transparent); --qc-desfoque: blur(24px) saturate(1.8); }
+.qc-caixa { position: relative; max-width: 640px; margin: 0 auto; }
+.qc-pil { position: relative; z-index: 2; min-height: 46px; border-radius: 23px; display: flex; align-items: center; gap: 2px; padding: 0 4px 0 14px;
+  background: var(--qc-vidro); -webkit-backdrop-filter: var(--qc-desfoque); backdrop-filter: var(--qc-desfoque);
+  border: 1px solid color-mix(in srgb, var(--line) 85%, transparent); box-shadow: var(--shadow-pop); }
+.qc-pil:focus-within { border-color: var(--line-strong); }
+/* foco-ok: o campo não tem contorno próprio; a pílula inteira ganha a borda (:focus-within) e, no forced-colors, o contorno. */
+.qc-txt { flex: 1; min-width: 0; border: 0; outline: 0; resize: none; background: none; color: var(--ink); font: 15px/1.4 var(--font-sans); padding: 12px 4px;
+  field-sizing: content; min-height: 44px; max-height: 132px; overflow-y: auto; }
+.qc-txt::placeholder { color: var(--ink-3); }
+.qc-bt { width: 38px; height: 38px; border-radius: 50%; display: inline-grid; place-items: center; flex: none; border: 0; background: none; color: var(--ink-2); cursor: pointer; }
+.qc-bt svg { width: 20px; height: 20px; }
+.qc-bt.qc-enviar { width: 34px; height: 34px; margin-right: 2px; background: var(--action); color: var(--on-action); }
+.qc-bt.qc-enviar:hover { opacity: .9; }
+.qc-bt.qc-enviar svg { width: 18px; height: 18px; }
+.qc-bt:focus-visible, .qc-hist-bt:focus-visible, .qc-link:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.qc-faixa { position: absolute; z-index: 1; left: 16px; right: 16px; bottom: calc(100% - 4px); }
+.qc-faixa:empty { display: none; }
+.qc-resp { border-radius: 14px; background: var(--qc-vidro-forte); -webkit-backdrop-filter: var(--qc-desfoque); backdrop-filter: var(--qc-desfoque);
+  border: 1px solid color-mix(in srgb, var(--line) 80%, transparent); box-shadow: 0 6px 20px -8px color-mix(in srgb, var(--ink) 18%, transparent); animation: qc-sobe .24s ease-out both; }
+@keyframes qc-sobe { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.qc-linha { display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 4px 6px 8px 10px; font-size: 13.5px; line-height: 1.35; color: var(--ink-2); }
+.qc-linha .icon.mascote { width: 20px !important; height: 20px !important; min-width: 20px; flex: none; }
+.qc-resp-txt { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.qc-giro { width: 14px; height: 14px; flex: none; border-radius: 50%; border: 2px solid var(--line-strong); border-top-color: var(--ink-2); animation: qd-giro .9s linear infinite; }
+.qc-erro-ic { display: inline-grid; place-items: center; width: 16px; height: 16px; flex: none; border-radius: 50%; font: 700 11px/1 var(--font-sans); font-style: normal;
+  color: var(--danger); border: 1.5px solid currentColor; }
+.qc-erro .qc-resp-txt { color: var(--ink); }
+.qc-aguarda .qc-resp-txt { color: var(--ink-3); }
+.qc-link { flex: none; color: var(--signal); text-decoration: none; font-weight: 600; font-size: 13.5px; }
+.qc-link:hover { color: var(--signal); text-decoration: underline; }
+.qc-hist-bt { flex: none; width: 28px; height: 28px; border-radius: 8px; display: inline-grid; place-items: center; border: 0; background: none; color: var(--ink-3); cursor: pointer; }
+.qc-hist-bt:hover { background: var(--surface-raised); color: var(--ink); }
+.qc-hist-bt svg { width: 14px; height: 14px; transition: transform .16s ease; }
+.qc-hist-bt[aria-expanded="true"] svg { transform: rotate(180deg); }
+.qc-hist { max-height: min(320px, 40vh); overflow-y: auto; overscroll-behavior: contain; padding: 10px 12px 6px; border-bottom: 1px solid color-mix(in srgb, var(--line) 70%, transparent); }
+.qc-hist-lista { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.qc-hist-lista li { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 10px; font-size: 13px; line-height: 1.4; }
+.qc-hist-lista p { margin: 0; grid-column: 1; overflow-wrap: anywhere; }
+.qc-hist-lista time { grid-column: 2; grid-row: 1; color: var(--ink-3); font-size: 12px; }
+.qc-h-eu { color: var(--ink); }
+.qc-h-bot { color: var(--ink-2); }
+.qc-hist-abrir { margin-top: 10px; font-size: 13px; }
+
+/* Issue 247 (NOD-429 v4, Gil a pedido do Marlon): com o painel ao lado, a caixa de recado segue o eixo e a largura da coluna
+   da tarefa (.qd-t-principal) e o painel vira uma coluna própria à direita. As contas repetem as da .qd-tarefa (no
+   máximo 1040px, centrada) e da .qd-t-corpo (painel de 232px + 28px de vão). Só acima de 700px: no celular nada muda. */
+@container (min-width: 701px) {
+  .qd-vista:has(.qd-tarefa.qd-com-lado) > .qc-wrap { padding-inline: max(0px, calc((min(100%, 1240px) - 1040px) / 2)); }
+  .qd-vista:has(.qd-tarefa.qd-com-lado) > .qc-wrap > .qc-caixa { max-width: none; margin: 0 calc(232px + 28px) 0 0; }
+}
+
 /* ---------- Vista estreita: a grade vira a lista por estado ---------- */
 /* Layout pela largura da própria vista (container query, como a agenda), não pela janela: vale para a janela estreita no
    computador e para o celular; o que é só de toque fica na CONSULTA_CELULAR abaixo (AGENTS.md, ADR-094). */
@@ -234,6 +348,15 @@
   .qd-so-estreito { display: block; }
   .qd-flag { margin-left: 0; }
   .qd-barra-q { flex-wrap: wrap; row-gap: 4px; }
+  .qd-com-lado .qd-t-corpo { grid-template-columns: minmax(0, 1fr); gap: 22px; }
+  .qd-lado { padding: 4px 2px 0; }
+  .qd-t-principal { padding: 18px 16px 20px; }
+  .qd-t-tit { font-size: 22px; }
+  .qd-vista > .qc-wrap { padding: 8px 0 calc(env(safe-area-inset-bottom) + 12px); }
+  .qc-faixa { left: 8px; right: 8px; }
+  /* A resposta quebra em até 3 linhas em vez de cortar; o histórico cresce até metade da tela. */
+  .qc-resp-txt { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+  .qc-hist { max-height: 50vh; }
 }
 
 /* ---------- Celular (a mesma CONSULTA_CELULAR do mobile.css, ADR-094) ---------- */
@@ -241,6 +364,12 @@
   .qd-vista { padding-top: calc(env(safe-area-inset-top) + 64px); }
   .qd-link, .qd-filtro-bt, .qd-q-mais, .qd-col-bt, .qd-col-cab { min-height: 44px; }
   .qd-q-mais { width: 44px; height: 44px; }
+  .qd-bt, .qd-voltar, .qd-chip { min-height: 44px; }
+  .qc-bt, .qc-bt.qc-enviar, .qc-hist-bt { width: 44px; height: 44px; }
+  .qc-bt.qc-enviar { background: none; color: var(--on-action); position: relative; }
+  .qc-bt.qc-enviar::before { content: ""; position: absolute; inset: 5px; border-radius: 50%; background: var(--action); }
+  .qc-bt.qc-enviar svg { position: relative; }
+  .qc-link { min-height: 44px; display: inline-flex; align-items: center; }
   /* Na pílula do celular o par fica só com os ícones, em alvos de 44 (ADR-094); o nome segue no aria-label. */
   .qd-seg-bt { width: 44px; height: 44px; padding: 0; }
   .qd-seg-bt span { display: none; }
@@ -260,9 +389,13 @@
   .qd-av-rodando::before { border: 1.5px dashed var(--success); }
   .qd-aviso { animation: none; }
   .qd-brilho { animation: none; background-color: var(--qd-card); }
+  .qc-resp { animation: none; }
+  .qc-hist-bt svg { transition: none; }
+  .qc-giro { animation: none; border-style: dashed; }
 }
 
 @media (forced-colors: active) {
+  .qc-pil:focus-within { outline: 2px solid CanvasText; outline-offset: 2px; }
   .qd-card-bt:focus-visible { outline: 2px solid CanvasText; outline-offset: 2px; }
   .qd-seg-bt[aria-selected="true"] { outline: 1px solid CanvasText; }
 }

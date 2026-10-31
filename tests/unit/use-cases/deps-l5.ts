@@ -22,6 +22,7 @@ import { PESSOA_MARLON, TENANT_PADRAO } from "../../helpers/ids.ts";
 import { criarBancoMemoria, type BancoMemoria } from "../../helpers/repos-memoria.ts";
 import { avisarPessoa } from "../../../src/use-cases/avisar-pessoa.ts";
 import { ajustarBarraLateral } from "../../../src/use-cases/ajustar-barra-lateral.ts";
+import { gerirQuadro } from "../../../src/use-cases/gerir-quadro.ts";
 import { buscarConversas, lerConversa } from "../../../src/use-cases/buscar-conversas.ts";
 
 export const MARLON: Escopo = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
@@ -110,6 +111,7 @@ export function depsFalsos(opcoes: OpcoesDepsFalsos = {}): { deps: Deps; banco: 
     pedirCredencial,
     avisarPessoa,
     ajustarBarraLateral,
+    gerirQuadro,
     buscarConversas,
     lerConversa,
     abrirConta,

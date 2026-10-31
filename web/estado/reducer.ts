@@ -1454,6 +1454,8 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
   "checkpoint.mudou": (e, f) => invalidar(e, conv(f)),
   // NOD-351: o cartão de conta é do controlador de conta-no-chat (main.ts), fora do estado: o reducer não muda nada.
   "conta.abrir": (e) => e,
+  // NOD-442: o quadro mora fora do estado do chat (web/lib/quadro-na-tela.ts relê por REST ao ver o frame).
+  "quadro.mudou": (e) => e,
   // ADR-083: um trabalho nasceu ou mudou — relê a lista (faixa, barra, gaveta), a conversa do bot (a linha "Abriu a
   // task", a pergunta e o resultado) e a tela da task, se ela já foi aberta.
   "trabalho.mudou": (e, f) => {

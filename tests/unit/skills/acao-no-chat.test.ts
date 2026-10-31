@@ -4,7 +4,7 @@ import { FORMATO_ID_ACAO, REGISTRO_DE_ACOES } from "../../../src/domain/acoes/in
 import { contarEstados } from "../../../src/domain/acoes/paridade.ts";
 import { decidirLote } from "../../../src/domain/lote-bots.ts";
 import { decidirPeloModo, semRevisor } from "../../../src/domain/modo-aprovacao.ts";
-import { EXECUTORES_BOTS } from "../../../src/use-cases/acoes/bots.ts";
+import { EXECUTORES } from "../../../src/use-cases/acoes/index.ts";
 
 /**
  * NOD-392: a skill /acao-no-chat é a fonte única da regra "todo botão novo tem ação no registro e caminho no chat" para o
@@ -157,7 +157,8 @@ describe("skill /acao-no-chat (NOD-392)", () => {
     // o que a skill diz da tabela vale em runtime: casoDeUso = id, e as chaves são os vivos
     const vivos = REGISTRO_DE_ACOES.filter((a) => a.chat.estado === "vivo");
     for (const a of vivos) expect("casoDeUso" in a ? a.casoDeUso : undefined, a.id).toBe(a.id);
-    expect(Object.keys(EXECUTORES_BOTS).sort(), "domínio novo com executor: atualize o \"hoje\" da skill e este teste").toEqual(vivos.map((a) => a.id).sort());
+    expect(so(plano)).toContain("Hoje a união é `EXECUTORES` (`src/use-cases/acoes/index.ts`: `bots.*` e `quadro.*`)");
+    expect(Object.keys(EXECUTORES).sort(), "domínio novo com executor: atualize o \"hoje\" da skill e este teste").toEqual(vivos.map((a) => a.id).sort());
     // a ferramenta: onde mora, como entra no turno, o cartão e o lote só do gerir_bots
     expect(modelo).toContain("schema em `src/contracts/ferramentas-nod.ts` (ou no arquivo do domínio espalhado em `FERRAMENTAS_NOD`; as só do Nod em `src/contracts/ferramentas-do-nod.ts`), nome em `NOMES_FERRAMENTAS_NOD`, caso de uso em `USE_CASE_POR_FERRAMENTA` (`src/contracts/servicos.ts`), despacho em `src/use-cases/chamar-ferramenta.ts`, rótulo (opcional) em `src/domain/rotulo-ferramenta.ts` (e o que os testes das ferramentas pedirem: `ESPERADAS`, `DESPACHO`); entra no turno por `src/domain/plano-turno.ts` (`FERRAMENTAS_NOD_POR_MODO` = todo bot, por modo; `FERRAMENTAS_DO_NOD` = só o Nod, somado;");
     // por que a skill manda segurar pessoa_confirma antes do modo: o modo total aprova até o arriscado, e o lote o segura antes

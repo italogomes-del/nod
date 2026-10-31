@@ -40,6 +40,7 @@ import type { ConfirmarEmailDto, ExportacaoDto, FormasDto, MinhaContaDto, Perfil
 import type { ExecucaoRotina } from "../../src/contracts/rotina.ts";
 import type { MembroSala, Sala } from "../../src/contracts/sala.ts";
 import type { FaixaParada, Turno } from "../../src/contracts/turno.ts";
+import type { LoteQuadro, QuadroDto, StatusTarefa } from "../../src/contracts/quadro.ts";
 import type { EventoLinha, TaxaDeAbertura, TrabalhoDetalheDto, TrabalhosDto } from "../../src/contracts/trabalho.ts";
 import type { DisponibilidadeLigacao, FalaLigacao, Ligacao, LigacaoCriada } from "../../src/contracts/ligacao.ts";
 import type { IaDaLigacao } from "../../src/contracts/voz.ts";
@@ -181,6 +182,9 @@ export function decidirPorVoz(tenantId: string, decisaoId: string, corpo: Decisa
   return pedir<RespostaMutacao>("POST", `/api/t/${encodeURIComponent(tenantId)}/decisoes/${encodeURIComponent(decisaoId)}/decidir`, corpo);
 }
 
+/** NOD-442: a resposta de uma mutação do quadro (a rota devolve o lote inteiro; a web lê o quadro e o lote). */
+export type MutacaoQuadro = { ok: true; quadro: QuadroDto | null; lote: LoteQuadro | null; desfeito: boolean };
+
 export function criarApi(escopo: Escopo) {
   const base = `/api/t/${encodeURIComponent(escopo.tenantId)}`;
   const get = <T>(caminho: string) => pedirDeNovoSeCair<T>("GET", `${base}/${caminho}`);
@@ -240,6 +244,14 @@ export function criarApi(escopo: Escopo) {
     gravarOrdemIas: (ordemIas: IdHarness[] | null) => pedir<Preferencias>("PUT", `${base}/preferencias`, { ordemIas }),
     gravarInteligencia: (agenteId: string, pedido: PedidoInteligencia) => pedir<{ agente: Agente }>("PUT", `${base}/agentes/${encodeURIComponent(agenteId)}/inteligencia`, pedido),
     inteligencia: (agenteId: string) => get<{ inteligencia: InteligenciaBot }>(`agentes/${encodeURIComponent(agenteId)}/inteligencia`),
+    /** NOD-442 (ADR-135): a aba Quadro de um bot. Cada mutação devolve o quadro montado e o lote (o Desfazer usa o id dele). */
+    quadro: (agenteId: string) => get<{ quadro: QuadroDto | null }>(`agentes/${encodeURIComponent(agenteId)}/quadro`),
+    mudarTarefa: (agenteId: string, tarefaId: string, campos: { status?: StatusTarefa; agente?: string | null; titulo?: string; descricao?: string }) =>
+      patch<MutacaoQuadro>(`agentes/${encodeURIComponent(agenteId)}/quadro/tarefas/${encodeURIComponent(tarefaId)}`, campos),
+    responderTarefa: (agenteId: string, tarefaId: string, resposta: string) =>
+      post<MutacaoQuadro>(`agentes/${encodeURIComponent(agenteId)}/quadro/tarefas/${encodeURIComponent(tarefaId)}/resposta`, { resposta }),
+    desfazerLoteQuadro: (agenteId: string, loteId: string) =>
+      post<MutacaoQuadro>(`agentes/${encodeURIComponent(agenteId)}/quadro/lotes/${encodeURIComponent(loteId)}/desfazer`),
     /** NOD-380: `ate` (o id de uma fala achada na busca) faz a janela crescer até ela, mesmo fora das 200 recentes. */
     conversa: (id: string, ate?: string) => get<ConversaDto>(`conversas/${id}/mensagens${ate ? `?ate=${encodeURIComponent(ate)}` : ""}`),
     /** NOD-380: a busca de mensagens do celular; 20 por página, `cursor` vem da página anterior; `signal` cancela o pedido velho. */

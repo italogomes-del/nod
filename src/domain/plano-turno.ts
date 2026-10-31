@@ -289,6 +289,12 @@ export type EntradaPlano = {
    */
   contas?: boolean;
   /**
+   * NOD-442: o experimento "Quadro" da pessoa ligado. Põe gerir_quadro no catálogo de QUALQUER bot (o Nod também) na
+   * conversa, na criação, na rotina e no pedido de colega (a tarefa que o quadro começou é uma delegação). Desligado,
+   * a ferramenta nem aparece (o caso de uso recusa de novo).
+   */
+  quadro?: boolean;
+  /**
    * definido em 2026-10-15 (NOD-262): os pedidos de colegas na fila do bot (delegações pendentes), os mais antigos
    * primeiro. Na conversa e na sala, com ao menos um, entram a linha do prompt e responder_pedido; ausente ou vazio = nada.
    */
@@ -309,6 +315,8 @@ export type EntradaPlano = {
 /** NOD-351: os modos com a pessoa na conversa, onde abrir_conta entra com NOD_CONTAS=1. Fora de task e frente: a tela delas não mostra o cartão. */
 const MODOS_DA_CONTA: readonly ModoTurno[] = ["conversa", "criacao", "sala"];
 const FERRAMENTA_ABRIR_CONTA: NomeFerramentaNod = "abrir_conta";
+/** NOD-442: os modos com gerir_quadro (com o experimento ligado): onde a pessoa fala, a rotina e a tarefa delegada. */
+export const MODOS_DO_QUADRO: readonly ModoTurno[] = ["conversa", "criacao", "rotina", "delegacao"];
 
 export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTurno" | "machineId"> {
   const esforco = entrada.raciocinio ?? entrada.agente.esforco ?? undefined;
@@ -333,7 +341,8 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
   const frente = ehFrente(entrada.trabalho);
   const reconfigura = emReconfiguracaoNoPlano(entrada);
   const abreConta: readonly NomeFerramentaNod[] = entrada.contas && MODOS_DA_CONTA.includes(modo) && !entrada.trabalho ? [FERRAMENTA_ABRIR_CONTA] : [];
-  const nod = [...(reconfigura ? [FERRAMENTA_RECONFIGURACAO] : []), ...FERRAMENTAS_NOD_POR_MODO[modo], ...esperaComando, ...(modo === "ligacao" && entrada.onboarding ? FERRAMENTAS_NOD_ONBOARDING : []), ...doNod, ...criaBots, ...respondePedido, ...abreConta]
+  const geraQuadro: readonly NomeFerramentaNod[] = entrada.quadro && MODOS_DO_QUADRO.includes(modo) ? ["gerir_quadro"] : [];
+  const nod = [...(reconfigura ? [FERRAMENTA_RECONFIGURACAO] : []), ...FERRAMENTAS_NOD_POR_MODO[modo], ...esperaComando, ...(modo === "ligacao" && entrada.onboarding ? FERRAMENTAS_NOD_ONBOARDING : []), ...doNod, ...criaBots, ...respondePedido, ...abreConta, ...geraQuadro]
     .filter((n) => (n !== "abrir_frentes" || podeAbrirTask(entrada.trabalho ?? null)) && (n !== "mandar_para_frente" || podeMandarParaTask(entrada.trabalho ?? null)))
     .filter((n) => !frente || !FERRAMENTAS_FORA_DA_FRENTE.includes(n))
     // NOD-61 (revisões 2 e 3 do PR #594): pedido de outro bot (sobProcuracaoDe, herdado por frente/retomada/lote) não leva o
