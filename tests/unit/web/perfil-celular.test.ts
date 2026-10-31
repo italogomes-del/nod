@@ -230,7 +230,10 @@ describe("6: alvos de 44 px, inclusive os interruptores das rotinas e Nova rotin
   });
   it("Rotinas: Nova rotina é a primeira linha; cada rotina tem o interruptor do celular", () => {
     const h = renderPerfilCelular(nivel(com(nina(), carregadas([rotina("r1", "ativa"), rotina("r2", "pausada")])), { tipo: "rotinas" }));
-    expect(h.indexOf('data-nivel="nova-rotina"')).toBeLessThan(h.indexOf('data-nivel="rotina"'));
+    // NOD-444: "Nova rotina" leva à conversa do bot, não ao formulário.
+    expect(h.indexOf('data-act="rotina-no-chat" data-agente="a1"')).toBeGreaterThan(-1);
+    expect(h.indexOf('data-act="rotina-no-chat"')).toBeLessThan(h.indexOf('data-nivel="rotina"'));
+    expect(h).not.toContain('data-nivel="nova-rotina"');
     expect(h).toContain('class="pfc-chave" role="switch" aria-checked="true" data-act="pausar-rotina" data-id="r1"');
     expect(h).toContain('class="pfc-chave" role="switch" aria-checked="false" data-act="ativar-rotina" data-id="r2"');
   });
@@ -262,11 +265,13 @@ describe("8: carregando, erro e vazio sem fundo colorido chapado", () => {
     // Carregar de novo limpa o erro.
     expect(reduzir(e, { tipo: "hidratar-rotinas", rotinas: [] }).rotinasFalharam).toBe(false);
   });
-  it("vazio: Nenhuma rotina ainda e Criar rotina de contorno, sem frase em cinza", () => {
+  it("vazio: Nenhuma rotina ainda e a dica da conversa; um botão só (Nova rotina), sem o Criar rotina duplicado", () => {
     const h = renderPerfilCelular(nivel(com(nina(), carregadas([])), { tipo: "rotinas" }));
     expect(h).toContain("<b>Nenhuma rotina ainda</b>");
     expect(h).not.toContain("repete uma tarefa");
-    expect(h).toContain('class="pfc-contorno" data-act="gaveta" data-nivel="nova-rotina"');
+    expect(h).toContain("<p class=\"pfc-dica\">Peça na conversa, do seu jeito: «todo dia útil às 8, me mande as pautas»</p>");
+    expect(h).not.toContain("Criar rotina");
+    expect(h.match(/data-act="rotina-no-chat"/g)).toHaveLength(1);
   });
   it("Biblioteca e Computador com erro mostram —", () => {
     expect(valorBiblioteca(com(nina(), biblioteca(0, null, true)), nina())).toEqual({ tipo: "erro" });

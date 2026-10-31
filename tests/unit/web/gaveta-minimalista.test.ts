@@ -124,7 +124,11 @@ describe("6: as abas", () => {
 describe("7: Detalhes com as Rotinas e a linha Ajustes", () => {
   it("vazio, convida; a linha 'Ajustes ›' leva ao nível", () => {
     const html = renderDetalhes(com(nina()));
-    expect(html).toContain("Nenhuma rotina ainda. Peça a Nina para fazer algo toda manhã e ela aparece aqui.");
+    // NOD-444: o vazio ensina a pedir na conversa; o "+ Nova" leva à conversa (não abre o formulário).
+    expect(html).toContain("Nenhuma rotina ainda. Peça na conversa, do seu jeito: «todo dia útil às 8, me mande as pautas»");
+    expect(html).not.toContain("ela aparece aqui");
+    expect(html).toContain('data-act="rotina-no-chat" data-agente="a1"');
+    expect(html).not.toContain('data-nivel="nova-rotina"');
     expect(html).toContain('data-act="gaveta" data-nivel="ajustes" data-agente="a1" data-origem="ajustes"');
     expect(html).toContain("Ligar, trabalhos, memória, missão e acessos");
   });
@@ -232,6 +236,7 @@ describe("13: bot de outra pessoa e o Nod", () => {
     expect(html).not.toContain('data-aba="computador"');
     expect(html).not.toContain('data-comp-bot');
     expect(html).not.toContain('data-act="gaveta" data-nivel="nova-rotina"');
+    expect(html).not.toContain('data-act="rotina-no-chat"');
   });
 
   it("o Nod não se renomeia (o servidor recusa), mas o subtítulo, a forma e a cor dele mudam (nada some)", () => {

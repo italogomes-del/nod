@@ -64,6 +64,7 @@ import { acoesDaFala, chipsDeReacao, citacaoAcimaDoBalao } from "./acoes-da-fala
 import { desfazerDaFala } from "./desfazer.ts";
 import { ancorasDoProgresso, comProgressoNaFala, marcadorDoProgresso } from "./progresso-na-fala.ts";
 import { ancorasDoModo, renderLinhaDoModo } from "./linha-do-modo.ts";
+import { ROTULO_SUGESTAO } from "../lib/rotina-no-chat.ts";
 
 /** id → nome (agentes da frota + a pessoa da sessão); id desconhecido cai no genérico, nunca no uuid. */
 export function nomesDe(estado: Estado): Record<string, string> {
@@ -1775,6 +1776,11 @@ const MAIS = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke
 
 const CLIPE = '<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5 12.6 19.9a5.5 5.5 0 0 1-7.8-7.8l8.5-8.5a3.7 3.7 0 0 1 5.2 5.2l-8.5 8.5a1.8 1.8 0 0 1-2.6-2.6l7.8-7.8"/></svg>';
 
+/** NOD-444: a frase da nova rotina como sugestão, quando a caixa já tem rascunho. Nasce escondida; o "+ Nova" mostra. */
+export function htmlSugestaoRotina(): string {
+  return `<div class="composer-sugestao" id="composer-sugestao" hidden><button type="button" class="composer-chip" data-act="usar-sugestao-rotina" aria-label="Usar a sugestão: ${ROTULO_SUGESTAO}">${ROTULO_SUGESTAO}</button></div>`;
+}
+
 /**
  * Composer criado UMA vez por conversa (main.ts não o regrava): textarea + enviar. Com `anexos`
  * (ADR-046, só conversa própria) ganha o clipe, a fila de arquivos e o input escondido; a fila é
@@ -1811,6 +1817,6 @@ export function htmlComposer(placeholder: string, sugestoes: readonly string[] =
   // NOD-381 (definido em 2026-10-27): no celular o clipe, o modo e a IA saem de dentro do campo e moram na folha do +
   // (web/telas/folha-mais.ts); o + só nasce quando há o que abrir e o computador nunca o vê (web/mobile.css).
   const mais = aceita || opcoes.aprovacao ? `<button type="button" class="mais-campo" data-act="abrir-mais" aria-label="Anexar, modo e IA" aria-haspopup="menu" aria-expanded="false">${MAIS}</button>` : "";
-  return `<div class="composer"><div class="composer-pergunta" id="composer-pergunta"></div>${barra}<div class="box${aceita ? " com-anexos" : ""}${chip ? " com-modo" : ""}${mais ? " com-mais" : ""}">${lista}${mais}${anexar}${chip}<textarea id="composer-texto" rows="1" placeholder="${esc(placeholder)}" data-sugestoes="${esc(JSON.stringify(sugestoes))}"></textarea>${resumo}${seletor}${htmlPilulaDitado()}${htmlBotaoDitado()}${parar}<button class="send" data-act="enviar" aria-label="Enviar">➤</button></div>
+  return `<div class="composer"><div class="composer-pergunta" id="composer-pergunta"></div>${htmlSugestaoRotina()}${barra}<div class="box${aceita ? " com-anexos" : ""}${chip ? " com-modo" : ""}${mais ? " com-mais" : ""}">${lista}${mais}${anexar}${chip}<textarea id="composer-texto" rows="1" placeholder="${esc(placeholder)}" data-sugestoes="${esc(JSON.stringify(sugestoes))}"></textarea>${resumo}${seletor}${htmlPilulaDitado()}${htmlBotaoDitado()}${parar}<button class="send" data-act="enviar" aria-label="Enviar">➤</button></div>
   <p class="nota" id="composer-nota" data-padrao=""></p></div>`;
 }

@@ -173,6 +173,26 @@ describe("montarPromptSistema", () => {
     expect(montarPromptSistema({ agente, memorias: [], ferramentas: [], pessoaNome: "Marlon", modo: "conversa" })).not.toContain("declare em acessos");
   });
 
+  it("NOD-444: perguntar o horário e repropor sem duplicar só na conversa — nunca na rotina nem entre bots", () => {
+    const base = { agente, memorias: [], ferramentas: [f("criar_rotina")], pessoaNome: "Marlon" };
+    const conversa = montarPromptSistema({ ...base, modo: "conversa" });
+    expect(conversa).toContain("Se o pedido de rotina não diz quando, pergunte o dia e o horário");
+    expect(conversa).toContain("chame criar_rotina na hora com o horário novo e diga que a proposta anterior ficou de lado");
+    // Rotina e delegação: ninguém responde. Sala, ligação e criação: fora do "+ Nova" (a frase só entra na caixa de um bot).
+    for (const modo of ["rotina", "delegacao", "sala", "ligacao", "criacao"] as const) {
+      expect(montarPromptSistema({ ...base, modo })).not.toContain("pergunte o dia e o horário");
+    }
+    expect(montarPromptSistema({ ...base, ferramentas: [], modo: "conversa" })).not.toContain("pergunte o dia e o horário");
+    expect(conversa).toContain("corrigir o horário da rotina que acabou de pedir (não é uma segunda rotina)");
+    // Sem atualizar_rotina no plano, a linha não manda usar uma ferramenta que o bot não tem.
+    expect(conversa).not.toContain("atualizar_rotina");
+    const comAtualizar = montarPromptSistema({ ...base, ferramentas: [f("criar_rotina"), f("atualizar_rotina")], modo: "conversa" });
+    expect(comAtualizar).toContain("mude só o horário com atualizar_rotina, usando o id dela (o do inventário, ou o proposta_id que criar_rotina devolveu, que é o id da rotina), nunca criando outra");
+    // Revisão 4 do PR #613: no Manual, com o card já confirmado, a rotina está no inventário e não se propõe outra.
+    expect(comAtualizar).toContain("ou ela já está no inventário de rotinas porque a pessoa confirmou o card");
+    expect(comAtualizar).toContain("Se ainda é só uma proposta sem confirmar, chame criar_rotina na hora");
+  });
+
   it("ADR-044: na rotina entram só os slugs — o catálogo de cada conexão (~4-5 mil tokens) fica de fora", () => {
     const conectores = [{ tenantId: "t", id: "k1", ownerId: "p", visibility: "privado" as const, nome: "Interno", slug: "interno", transporte: "stdio" as const, comando: "node", args: [], url: null, env: {}, declaracao: "nao-toca" as const, habilitado: true, catalogo: [{ nome: "LER_TUDO", descricao: "lê tudo", schema: { type: "object" as const }, readOnlyHint: true }], sondadoEm: 1, ultimaFalha: null, criadoEm: 0 }];
     const rotina = montarPromptSistema({ agente, memorias: [], ferramentas: [f("pedir_acesso")], pessoaNome: "Marlon", modo: "rotina", conectores });
@@ -332,10 +352,10 @@ describe("NOD-155: o prompt em parte estável e parte volátil (cache por prefix
     // linha nova do "já liberei" (pedir_acesso na hora) em conversa e delegação. Regenerado em 2026-10-20 (NOD-317): saiu a
     // menção a anotar_pendencia na linha do terminal (a entrada não tem mais pendências nem a ferramenta). Regenerado em
     // 2026-10-19 (PR 6 dos modos de aprovação): as linhas "Aprovações:" e "Terminal:" do total não dizem mais que a
-    // credencial para.
+    // credencial para. Regenerado em 2026-10-31 (NOD-444): linha nova só na conversa (perguntar o horário e repropor sem duplicar); rotina e delegação seguem iguais.
     const digital = (s: string) => createHash("sha256").update([...s.split("\n")].sort().join("\n")).digest("hex");
     const esperado = {
-      conversa: "a0c22940971edd931e2decbcc49476174c0a89e022dc3e74a098c9dd595e8dc6",
+      conversa: "130f8999654cf0c4be9687808c8f93b4d09a197cb038794b39c843a62b1264d0",
       rotina: "8bf80039d21e1818db0f51276851dbc4086d24fcf50455f39b4ef70fa44509c3",
       delegacao: "e72dc08f94bde1c4694c3445b27f28f2b55f4b9c523c14878da958dbaf54b092",
     };

@@ -95,7 +95,7 @@ describe("computador do bot: erro real e aviso único na web (emenda da ADR-037)
     const detalhes = renderDetalhes(comFrota(nina(null)));
     expect(detalhes).not.toContain('data-tela-bot="a1"');
     expect(detalhes).toContain("<h3>Rotinas</h3>");
-    expect(detalhes).toContain("Nenhuma rotina ainda. Peça a Nina para fazer algo toda manhã e ela aparece aqui.");
+    expect(detalhes).toContain("Nenhuma rotina ainda. Peça na conversa, do seu jeito: «todo dia útil às 8, me mande as pautas»");
     const ligado = renderDetalhes(naAbaComputador(comFrota(nina(null)), "ligado"));
     expect(ligado).toContain('data-tela-bot="a1"');
     expect(ligado).toContain('data-comp-bot="a1"');

@@ -1,7 +1,7 @@
 # ADR-133 — O perfil do bot no celular
 
 Status: aceita · Data: 2026-10-28 · NOD-382 (PR #546) · Protótipo
-<https://gamefik.github.io/nod-prototipos/nod-382/> · Emenda da ADR-094 (item 3) e da ADR-125 (itens 1, 2, 4 e 6),
+<https://gamefik.github.io/nod-prototipos/nod-382/> · Emendada pela NOD-444 (2026-10-31, item 3: o vazio de Rotinas) · Emenda da ADR-094 (item 3) e da ADR-125 (itens 1, 2, 4 e 6),
 só no celular (`CONSULTA_CELULAR`). O desktop segue a ADR-125 sem mudança.
 
 ## Contexto
@@ -48,3 +48,17 @@ longas em cinza. A NOD-382 troca isso por um perfil no padrão do iOS (Contatos/
 
 Se em 30 dias a pessoa abrir o perfil e sair sem tocar em nada na maioria das vezes (o perfil vira passagem) ou pedir
 de volta o arrastar no celular, revisitar o item 1 (voltar às abas) ou o item 5.
+
+## Emenda de 2026-10-31 — O vazio de Rotinas ensina a conversa (NOD-444)
+
+Esta emenda abre uma exceção ao item 3 ("os vazios são só o título e um botão"). O vazio de Rotinas passa a ter o
+título "Nenhuma rotina ainda" e uma dica: "Peça na conversa, do seu jeito: «todo dia útil às 8, me mande as pautas»".
+O botão sai do vazio, porque o "Nova rotina" de cima já é o caminho e agora leva à conversa. Dois botões para a
+mesma coisa eram o duplicado que a NOD-444 tirou.
+
+A dica fica em `--ink-2` (corpo secundário) e não no cinza de nota (`--ink-3`), para não ser a frase longa em cinza
+que o item 3 tirou. É o único vazio com dica. Os outros continuam só com o título e o botão.
+
+Gatilho de reversão: se em 30 dias (até 2026-11-30) quem chega a esse vazio no celular não cria a rotina pela
+conversa e volta ao perfil, na maioria dos casos (visto na retro, lendo as conversas), voltar ao vazio de título e
+botão.

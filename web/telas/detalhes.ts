@@ -31,6 +31,7 @@ import { lembrancaDaMidia } from "../lib/midia.ts";
 import { seletorLinha } from "../lib/linha-config.ts";
 import { maquinasDeTrabalho, opcoesDeMaquina } from "./maquinas.ts";
 import { linhaHistorico, nivelHistorico, nivelVersao, statusDesfazer } from "./historico-perfil.ts";
+import { VAZIO_ROTINAS } from "../lib/rotina-no-chat.ts";
 
 /**
  * O "N hoje" da linha "Atividade" (ADR-114, chat limpo, PR 2; decisão tomada 1: o dia inteiro). Antes de a contagem chegar
@@ -206,8 +207,8 @@ function abaDetalhes(estado: Estado, a: Bot, dona: boolean): string {
     const parada = bloqueio ? `<div class="gvn-parada"><span class="gvn-parada-icone" aria-hidden="true">${ICONE.alerta}</span><span>${esc(`${fraseDaParada(bloqueio)} ${desdeDaParada(bloqueio, estado.agora)}.`)}</span>${dona ? botaoDaParada(bloqueio, "gvn-acao-texto") : ""}</div>` : "";
     return `<li class="detalhe-rotina rotina-${esc(r.estado)}${bloqueio ? " gvn-rotina-parada" : ""}">${linha(`<span class="gv-linha-txt"><b title="${esc(r.instrucao)}">${esc(r.instrucao)}</b><small>${wh?.marca ?? ""}<span class="gvn-estado">${rotulo}</span>${quando ? ` · ${esc(quando)}` : ""}</small></span>`, irPara(a, "rotina", r.id))}${chave}${parada}</li>`;
   };
-  const rotinasHtml = `<section class="gv-secao"><div class="gv-secao-cab"><h3>Rotinas</h3>${dona ? `<button type="button" class="gv-link" ${irPara(a, "nova-rotina")}>+ Nova</button>` : ""}</div>
-      ${rotinas.length ? `<ul class="gv-cartao">${rotinas.map(linhaRotina).join("")}</ul>` : `<p class="gvn-vazio">Nenhuma rotina ainda. Peça a ${esc(a.nome)} para fazer algo toda manhã e ela aparece aqui.</p>`}
+  const rotinasHtml = `<section class="gv-secao"><div class="gv-secao-cab"><h3>Rotinas</h3>${dona ? `<button type="button" class="gv-link" data-act="rotina-no-chat" data-agente="${esc(a.id)}" aria-label="Nova rotina: pedir a ${esc(a.nome)} na conversa">+ Nova</button>` : ""}</div>
+      ${rotinas.length ? `<ul class="gv-cartao">${rotinas.map(linhaRotina).join("")}</ul>` : `<p class="gvn-vazio">${VAZIO_ROTINAS}</p>`}
       ${rotinas.length ? linhaOndeRoda(rotinas.find((r) => r.ondeRoda)?.ondeRoda, { plural: true, comAtalho: true }) : ""}
     </section>`;
   const ajustes = `<section class="gv-secao"><div class="gv-cartao">${linha(`${ICONE.ajustes}<span class="gv-linha-txt">Ajustes<small>${dona ? "Ligar, trabalhos, memória, missão e acessos" : "Trabalhos, memória e acessos"}</small></span>`, `${irPara(a, "ajustes")} data-origem="ajustes"`, ICONE.seta)}</div></section>`;

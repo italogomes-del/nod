@@ -11,6 +11,7 @@ import { abaBiblioteca, capitalizar, chaveCelular, classeDoRodape, destinoDoVolt
 import { secaoOnboardingDetalhes } from "./onboarding.ts";
 import { botaoDaParada } from "../lib/execucao.ts";
 import { ehRotinaWebhook, quandoNaLista } from "./webhook.ts";
+import { DICA_ROTINAS } from "../lib/rotina-no-chat.ts";
 
 type Bot = NonNullable<Estado["frota"]>["agentes"][number];
 
@@ -209,7 +210,7 @@ function grupos(estado: Estado, a: Bot, dona: boolean): string {
 
 /** Rotinas: "Nova rotina" primeiro; cada rotina em 64 (nome 16/500, horário 13) com o interruptor de 51 × 31. */
 function telaRotinas(estado: Estado, a: Bot, dona: boolean): string {
-  const nova = dona ? `<div class="pfc-grupo"><button type="button" class="pfc-linha pfc-nova" data-act="gaveta" data-nivel="nova-rotina" data-agente="${esc(a.id)}"><span class="pfc-icone" aria-hidden="true">${ICONE.mais}</span><span class="pfc-rotulo">Nova rotina</span></button></div>` : "";
+  const nova = dona ? `<div class="pfc-grupo"><button type="button" class="pfc-linha pfc-nova" data-act="rotina-no-chat" data-agente="${esc(a.id)}" aria-label="Nova rotina: pedir a ${esc(a.nome)} na conversa"><span class="pfc-icone" aria-hidden="true">${ICONE.mais}</span><span class="pfc-rotulo">Nova rotina</span></button></div>` : "";
   if (estado.rotinasFalharam) {
     return `${nova}<p class="pfc-erro" role="status">As rotinas não carregaram · <button type="button" class="pfc-link" data-act="perfil-tentar-rotinas">Tentar de novo</button></p>`;
   }
@@ -218,8 +219,8 @@ function telaRotinas(estado: Estado, a: Bot, dona: boolean): string {
   }
   const minhas = estado.rotinas.filter((r) => r.rotina.agenteId === a.id);
   if (minhas.length === 0) {
-    const criar = dona ? `<button type="button" class="pfc-contorno" data-act="gaveta" data-nivel="nova-rotina" data-agente="${esc(a.id)}">Criar rotina</button>` : "";
-    return `${nova}<div class="pfc-vazio"><b>Nenhuma rotina ainda</b>${criar}</div>`;
+    // NOD-444: um botão só ("Nova rotina", acima); o vazio ensina a pedir na conversa.
+    return `${nova}<div class="pfc-vazio"><b>Nenhuma rotina ainda</b><p class="pfc-dica">${DICA_ROTINAS}</p></div>`;
   }
   const linhaRotina = (dto: RotinaDto) => {
     const { rotina: r, proximaExecucao, bloqueio, resumo } = dto;

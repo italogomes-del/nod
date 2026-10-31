@@ -753,6 +753,12 @@
 /* Acima do campo: a caixa "Respondendo" (Parte 3a, tela "Duas perguntas abertas") com duas ou mais perguntas abertas — a
    que a próxima mensagem responde, com "Trocar" e o × que manda como assunto novo — e "N coisas esperam você". */
 .composer-pergunta:empty { display: none; }
+/* NOD-444: a frase da nova rotina como sugestão, quando a caixa já tem rascunho (protótipo aprovado, pílula de 28px). */
+.composer-sugestao[hidden] { display: none; }
+.composer-sugestao { display: flex; margin: 0 0 6px 4px; }
+.composer-chip { min-height: 28px; padding: 0 12px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--ink-2); font: inherit; font-size: 13px; cursor: pointer; }
+.composer-chip:hover { background: var(--surface-raised); }
+.composer-chip:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 .caixa-respondendo { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; padding: 8px 8px 8px 14px; border-radius: 16px; background: var(--surface-raised); color: var(--ink); font-size: 14px; }
 .rp-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .rp-rotulo { font-size: 12.5px; color: var(--ink-3); }

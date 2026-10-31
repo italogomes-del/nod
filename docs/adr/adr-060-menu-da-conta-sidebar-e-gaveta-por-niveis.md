@@ -1,6 +1,6 @@
 # ADR-060 — Menu da conta, sidebar arrastável e a gaveta do bot por níveis
 
-Status: aceito · Data: 2026-09-30 · Emendada pela ADR-125 (itens 3 e 5, 2026-10-23), pela NOD-370 (2026-10-26, a conversa do bot que saiu) e pela NOD-119 (2026-10-29, densidade e largura da barra) · Emenda ADR-032 (painel do bot) e a regra de 2026-09-18 de "Seu espaço". Canvas "Nod —
+Status: aceito · Data: 2026-09-30 · Emendada pela ADR-125 (itens 3 e 5, 2026-10-23), pela NOD-370 (2026-10-26, a conversa do bot que saiu), pela NOD-119 (2026-10-29, densidade e largura da barra) e pela NOD-444 (2026-10-31, nova rotina começa no chat) · Emenda ADR-032 (painel do bot) e a regra de 2026-09-18 de "Seu espaço". Canvas "Nod —
 tela do agente", página "Menu, sidebar e gaveta".
 
 ## Contexto
@@ -100,3 +100,37 @@ Gatilho de reversão: a preferência vive só no computador (localStorage e pref
 então o gatilho é observável na equipe: se em 30 dias (até 2026-11-28) ninguém do time estiver usando a Compacta ou a
 recolhida (conferido na retro), ou se a borda virar pedido de largura livre, voltar à barra fixa de 340 px e tirar a
 borda.
+
+## Emenda de 2026-10-31 — Nova rotina começa no chat (NOD-444)
+
+O "+ Nova" das Rotinas, na gaveta e no perfil do celular, não abre mais o nível "Nova rotina". Ele leva à conversa
+com o bot e põe "Crie uma rotina para " na caixa, com o cursor no fim, sem enviar nada. Se já houver rascunho, ele
+fica e a frase vira uma pílula de sugestão acima da caixa. A rotina nasce pelo fluxo de criar_rotina. No computador
+largo (1100 px ou mais) a gaveta fica aberta. Entre 760 e 1099 px ela é sobreposta e cobriria a caixa, então fecha,
+como o perfil no celular. O vazio passa a ensinar o caminho: "Peça na conversa, do seu jeito: «…»".
+
+O nível "Nova rotina" da gaveta fica no código, sem entrada pela gaveta: o nível salvo de antes ainda o abre, e o
+formulário segue vivo nas telas Rotinas e agenda, que estão fora do escopo. Sai junto com elas, quando a agenda também
+começar no chat.
+
+Com pergunta do bot em aberto: quando a frase entra na caixa (vazia, ou pelo toque na pílula) e a caixa "Respondendo"
+está à vista (duas ou mais perguntas), o pedido sai como assunto novo, como o × dela, e a caixa some. Só mostrar a
+pílula não muda o destino do rascunho. Com uma pergunta só, a mensagem responde a ela (decisão 1 do plano "pergunta
+com botões", emenda da ADR-045). Sem caixa à vista, mudar o destino seria invisível, que é o que a revisão do PR #389
+proibiu. O bot recebe o texto inteiro como resposta e cria a rotina a partir dele. Se isso confundir os bots,
+mostrar a caixa "Respondendo" já com uma pergunta e deixar o × valer.
+
+O prompt da conversa (só nela, nunca na rotina, entre bots, na sala ou na ligação) ganhou uma linha: se o pedido
+de rotina não diz quando, o bot pergunta o dia e o horário com um exemplo antes de chamar criar_rotina. Isso vale
+para todo pedido de rotina na conversa, não só para o "+ Nova". Quando a pessoa corrige o horário, o que o bot faz
+depende de a rotina já existir:
+
+- se existe (veio aplicada: true, ou a pessoa confirmou o card e ela está no inventário de rotinas), ele muda a rotina
+  por atualizar_rotina, com o id dela (o proposta_id é o id da rotina);
+- se ainda é só proposta, ele repropõe e avisa que a proposta anterior pode ser recusada.
+
+No Manual ficam dois cards pendentes até a pessoa recusar um. Expirar a proposta anterior no servidor é follow-up.
+
+Gatilho de reversão: se em 30 dias (até 2026-11-30) as rotinas criadas na conversa a partir do "+ Nova" exigirem mais
+de duas idas e voltas para acertar o horário, na maioria dos casos (visto na retro, lendo as conversas), voltar a dar
+um atalho de horário no próprio card.

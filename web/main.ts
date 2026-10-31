@@ -117,6 +117,7 @@ import { blocosMudariam, esquecerRegiao, regiao, regiaoEmVoltaDe, regiaoMudaria,
 import { mudancaSujaAGaveta, reporSeletor, salvarOuRepor } from "./lib/salvar-ou-repor.ts";
 import { criarAnunciador, criarRelogioDaFala, escreverEstados, escreverTempos, lerFalasNaTela, TICK_CURTO_MS, type FalaNaTela } from "./lib/fala-viva.ts";
 import { criarRascunhos } from "./lib/rascunhos.ts";
+import { juntarSugestao, planoNovaRotina } from "./lib/rotina-no-chat.ts";
 import { criarRolagem } from "./lib/rolagem-na-tela.ts";
 import { rolaAoTopoAoNavegar } from "./lib/rolagem.ts";
 import { anunciosDeFim, aoEsconder, aoSumir, SEM_PROGRESSO, teclaNaPilula, type ProgressoNaTela } from "./lib/pilula.ts";
@@ -2247,6 +2248,8 @@ function atualizarParar(): void {
  * dispara quando a pessoa digita, e sem isto o botão ficava o de antes (revisão do PR 1, 2026-10-16).
  */
 function escreverNoCampo(ta: HTMLTextAreaElement, valor: string): void {
+  // NOD-444: texto trocado por código (ditado, sugestão de prompt) deixa de ser o rascunho da pílula.
+  mostrarSugestaoRotina(false);
   ta.value = valor;
   atualizarParar();
 }
@@ -3432,6 +3435,8 @@ function ajustarAltura(ta: HTMLTextAreaElement): void {
  * a mensagem ia ao servidor, ou numa conversa para onde ela foi no meio, fica onde está.
  */
 function limparDepoisDeEnviar(ta: HTMLTextAreaElement, chave: string | null, texto: string): void {
+  // NOD-444: a pílula some quando o envio é aceito (não no upload em andamento nem com a caixa vazia).
+  mostrarSugestaoRotina(false);
   const naTela = ta.isConnected && composerDe === chave;
   if (naTela && ta.value.trim() === texto) {
     escreverNoCampo(ta, "");
@@ -5343,6 +5348,14 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     void reidratar();
     try { localStorage.setItem(CHAVE_PAINEL_ABERTO, oculto ? "0" : "1"); } catch { /* sem storage, vale só nesta aba */ }
   },
+  // NOD-444: o "+ Nova" das Rotinas leva à conversa do bot com a frase começada; nada é enviado, rascunho nunca se perde.
+  "rotina-no-chat": (el) => rotinaNoChat(el.dataset.agente ?? ""),
+  "usar-sugestao-rotina": () => {
+    const ta = document.getElementById("composer-texto") as HTMLTextAreaElement | null;
+    mostrarSugestaoRotina(false);
+    frasePedeAssuntoNovo();
+    if (ta) escreverNaCaixa(ta, juntarSugestao(ta.value));
+  },
   "preencher-prompt": (el) => {
     // NOD-382: no celular o perfil cobre o chat; "Ajustar" fecha o perfil para o campo aparecer.
     if (ehCelular() && estado.perfilCelular) fecharPerfil("chat", false);
@@ -6370,6 +6383,21 @@ document.addEventListener("click", (ev) => {
   if (acao) void acao(el);
 });
 
+// NOD-444: Esc no campo tira a sugestão da nova rotina (o resto do Esc do campo segue igual).
+document.addEventListener("keydown", (ev) => {
+  if (ev.key !== "Escape") return;
+  const alvo = ev.target as HTMLElement;
+  const pilula = document.getElementById("composer-sugestao");
+  if (!pilula || pilula.hidden || !(alvo.id === "composer-texto" || alvo.closest("#composer-sugestao"))) return;
+  // A lista do "/" e o ditado têm o Esc antes: fecham primeiro, a pílula fica para o próximo Esc.
+  if (document.getElementById("barra-lista")?.hidden === false || ditado.ativo()) return;
+  // Um Esc faz uma coisa só: com a pílula à vista, tira a pílula e para (a citação e a caixa "Respondendo" ficam).
+  ev.preventDefault();
+  ev.stopImmediatePropagation();
+  mostrarSugestaoRotina(false);
+  document.getElementById("composer-texto")?.focus();
+});
+
 // NOD-312: Esc dentro da explicação do recomeço (ou no botão que a abriu) fecha e devolve o foco ao botão.
 document.addEventListener("keydown", (ev) => {
   if (ev.key !== "Escape") return;
@@ -6810,6 +6838,8 @@ document.addEventListener("compositionend", (ev) => {
 });
 document.addEventListener("input", (ev) => {
   const ta = ev.target as HTMLTextAreaElement;
+  // NOD-444: digitar no campo tira a sugestão da nova rotina.
+  if ((ta as HTMLElement).id === "composer-texto") mostrarSugestaoRotina(false);
   if ((ta as HTMLElement).dataset?.actInput === "midia-audio-ir") { irNoAudio(ta as unknown as HTMLInputElement); return; }
   if ((ta as HTMLElement).matches?.("[data-agenda-busca]")) { dispatch({ tipo: "agenda-ui", mudanca: { busca: ta.value } }); return; }
   // O código do Claude atravessa o redesenho do cartão (o foco volta pelo `manterFocoDoCodigo`).
@@ -7597,6 +7627,56 @@ let gavetaSuja: string | null = null;
 
 function chaveDaGaveta(): string {
   return JSON.stringify(estado.gaveta);
+}
+
+/**
+ * NOD-444: o "+ Nova" das Rotinas. No celular o perfil fecha e a conversa abre com o teclado; na janela estreita (gaveta
+ * por cima da caixa, ≤1099px) a gaveta fecha; no computador ela fica aberta. Se a conversa na tela é de outro bot, vai
+ * para a do bot. A caixa recebe a frase (vazia) ou fica com o rascunho e mostra a frase como pílula (web/lib/rotina-no-chat.ts).
+ */
+function rotinaNoChat(agenteId: string): void {
+  const a = botGerido(agenteId);
+  if (!a) return;
+  if (ehCelular() && estado.perfilCelular) fecharPerfil("chat", false);
+  else if (window.matchMedia("(max-width: 1099px)").matches) { document.querySelector(".app")?.classList.remove("detalhes-abertos"); marcarPainelNaPilula(); }
+  const t = telaDeOrigem();
+  if (t.tipo !== "conversa" || t.agenteId !== a.id) navegar({ tipo: "conversa", conversaId: a.conversaId, agenteId: a.id });
+  const ta = document.getElementById("composer-texto") as HTMLTextAreaElement | null;
+  if (!ta) return;
+  const plano = planoNovaRotina(ta.value);
+  mostrarSugestaoRotina(plano.sugestao);
+  if (!plano.sugestao) frasePedeAssuntoNovo();
+  escreverNaCaixa(ta, plano.valor);
+}
+
+/**
+ * A frase entrou na caixa (vazia, ou pelo toque na pílula): com a caixa "Respondendo" à vista (duas ou mais perguntas), o
+ * pedido de rotina vai como assunto novo, como o × dela, e a caixa mostra isso. Só a pílula à vista não muda o destino do
+ * rascunho. Com uma pergunta só, a mensagem digitada responde (decisão 1 do plano "pergunta com botões", emenda da
+ * ADR-045): sem caixa à vista, mudar o destino seria invisível (revisão do PR #389).
+ */
+function frasePedeAssuntoNovo(): void {
+  const alvo = conversaAtual();
+  if (alvo && comCaixaRespondendo(alvo.conversaId)) dispatch({ tipo: "composer", conversaId: alvo.conversaId, escolha: { outroAssunto: true, alvoId: estado.composer[alvo.conversaId]?.alvoId ?? null } });
+}
+
+/** Escreve na caixa (se mudou), foca com o cursor no fim e guarda o rascunho da conversa. */
+function escreverNaCaixa(ta: HTMLTextAreaElement, valor: string): void {
+  if (ta.value !== valor) { ta.value = valor; atualizarParar(); ajustarAltura(ta); }
+  ta.focus();
+  ta.selectionStart = ta.selectionEnd = ta.value.length;
+  if (composerDe) rascunhos.guardar(composerDe, ta.value);
+}
+
+/** A pílula da frase acima da caixa (nasce escondida em cada composer; some ao digitar, com Esc ou ao enviar). */
+function mostrarSugestaoRotina(mostrar: boolean): void {
+  const el = document.getElementById("composer-sugestao");
+  if (!el || el.hidden === !mostrar) return;
+  el.hidden = !mostrar;
+  // Leitor de tela: o foco fica na caixa; a caixa passa a descrever a sugestão enquanto ela está à vista.
+  const ta = document.getElementById("composer-texto");
+  if (mostrar) ta?.setAttribute("aria-describedby", "composer-sugestao");
+  else if (ta?.getAttribute("aria-describedby") === "composer-sugestao") ta.removeAttribute("aria-describedby");
 }
 
 /** Abre o nível na gaveta do bot; se a conversa na tela é de outro bot, vai para a dele antes. Escondida, a gaveta aparece. */
