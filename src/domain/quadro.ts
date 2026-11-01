@@ -86,21 +86,22 @@ export function lerOp(v: unknown): OpQuadro | ErroOp {
   if (!ehObjeto(v)) return { erro: "ação não é objeto" };
   switch (v.tipo) {
     case "criar_quadro": {
-      const meta = textoObrigatorio(v.meta, "meta", LIMITES_QUADRO.meta);
+      // NOD-415 (ADR-141): a meta é opcional; sem ela (ou vazia) o quadro nasce no fluxo contínuo.
+      const meta = nulavel(v.meta, "meta", LIMITES_QUADRO.meta);
       if (falhou(meta)) return meta;
       const prazo = nulavel(v.prazo, "prazo", 10);
       if (falhou(prazo)) return prazo;
       if (prazo && !prazoValido(prazo)) return { erro: "prazo fora do formato AAAA-MM-DD" };
-      return { tipo: "criar_quadro", meta, prazo: prazo ?? null };
+      return { tipo: "criar_quadro", meta: meta || null, prazo: prazo ?? null };
     }
     case "editar_quadro": {
-      const meta = textoOpcional(v.meta, "meta", LIMITES_QUADRO.meta);
+      // null ou "" tira a meta (volta ao fluxo contínuo).
+      const meta = nulavel(v.meta, "meta", LIMITES_QUADRO.meta);
       if (falhou(meta)) return meta;
-      if (meta === "") return { erro: "meta vazia" };
       const prazo = nulavel(v.prazo, "prazo", 10);
       if (falhou(prazo)) return prazo;
       if (prazo && !prazoValido(prazo)) return { erro: "prazo fora do formato AAAA-MM-DD" };
-      return { tipo: "editar_quadro", ...(meta !== undefined ? { meta } : {}), ...(prazo !== undefined ? { prazo } : {}) };
+      return { tipo: "editar_quadro", ...(meta !== undefined ? { meta: meta || null } : {}), ...(prazo !== undefined ? { prazo } : {}) };
     }
     case "criar_tarefa": {
       const titulo = textoObrigatorio(v.titulo, "titulo", LIMITES_QUADRO.titulo);
@@ -219,6 +220,11 @@ export function lerOp(v: unknown): OpQuadro | ErroOp {
       if (falhou(lote)) return lote;
       return { tipo: "desfazer", ...(lote ? { lote } : {}) };
     }
+    case "remover_quadro": {
+      const bot = textoOpcional(v.bot, "bot", 200);
+      if (falhou(bot)) return bot;
+      return { tipo: "remover_quadro", ...(bot ? { bot } : {}) };
+    }
     default:
       return { erro: `tipo desconhecido: ${String(v.tipo)}` };
   }
@@ -236,6 +242,8 @@ export function lerOps(v: unknown): OpQuadro[] | (ErroOp & { indice: number }) {
   }
   const desfazer = ops.filter((o) => o.tipo === "desfazer").length;
   if (desfazer > 0 && ops.length > 1) return { erro: "desfazer vai sozinho na chamada", indice: ops.findIndex((o) => o.tipo === "desfazer") };
+  const remover = ops.findIndex((o) => o.tipo === "remover_quadro");
+  if (remover >= 0 && ops.length > 1) return { erro: "remover_quadro vai sozinho na chamada", indice: remover };
   const troca = ops.findIndex((o) => o.tipo === "substituir_colunas");
   if (troca >= 0 && ops.length > 1) return { erro: "substituir_colunas vai sozinho na chamada", indice: troca };
   return ops;
@@ -287,6 +295,27 @@ export function deveComecar(antes: Corte | null, depois: Corte, autorAgenteId: s
   return false;
 }
 
+/**
+ * As tarefas que contam para a meta (NOD-415, revisão 2): tudo o que está em jogo, menos o que já tinha terminado
+ * (feito ou cancelado) antes de a meta ser posta — num quadro de fluxo contínuo que ganha meta depois, o histórico não
+ * entra no "N de M", no cumprimento nem no risco. Decide pelo `terminadaEm` (revisão 3), não pelo `mudadoEm`: renomear
+ * uma tarefa feita antiga não a devolve à meta.
+ */
+export function tarefasDaMeta<T extends Pick<TarefaQuadro, "status" | "terminadaEm">>(tarefas: readonly T[], metaDesde: number, colunas: readonly ColunaQuadro[]): T[] {
+  return tarefas.filter((t) => !(terminou(colunas, t.status) && t.terminadaEm !== null && t.terminadaEm < metaDesde));
+}
+
+/** Terminou = numa coluna do grupo Feito ou Fechado (NOD-448): a classificação é pelo grupo, não pelo id. */
+export const terminou = (colunas: readonly ColunaQuadro[], status: IdColuna): boolean => {
+  const g = grupoDe(colunas, status);
+  return g === "feito" || g === "fechado";
+};
+
+/** O `terminadaEm` depois de uma mudança: entra num grupo Feito/Fechado = agora; continua lá = o mesmo; aberta = null. */
+export function terminadaDepois(t: Pick<TarefaQuadro, "status" | "terminadaEm">, agora: number, colunas: readonly ColunaQuadro[]): number | null {
+  return terminou(colunas, t.status) ? t.terminadaEm ?? agora : null;
+}
+
 /** A meta fecha quando há tarefa e toda tarefa não cancelada está feita (NOD-422). */
 export function metaCumprida(tarefas: readonly Pick<TarefaQuadro, "status">[], colunas: readonly ColunaQuadro[] = COLUNAS_PADRAO): boolean {
   const validas = tarefas.filter((t) => grupoDe(colunas, t.status) !== "fechado");
@@ -323,19 +352,20 @@ export function resumoDaMeta(q: { prazo: string | null; colunas?: readonly Colun
 
 /** O que o lote fez, numa frase (a faixa do quadro e o histórico mostram). */
 export function resumoDoLote(ops: readonly OpQuadro[], frasesDasColunas: readonly string[] = []): string {
-  const n = { quadro: 0, criadas: 0, trazidas: 0, mudadas: 0, respostas: 0, editado: 0 };
+  const n = { quadro: 0, criadas: 0, trazidas: 0, mudadas: 0, respostas: 0, meta: 0, prazo: 0 };
   for (const o of ops) {
     if (o.tipo === "criar_quadro") n.quadro++;
     else if (o.tipo === "criar_tarefa") n.criadas++;
     else if (o.tipo === "importar_linear") n.trazidas += o.itens.length;
     else if (o.tipo === "mudar_tarefa") n.mudadas++;
     else if (o.tipo === "responder") n.respostas++;
-    else if (o.tipo === "editar_quadro") n.editado++;
+    else if (o.tipo === "editar_quadro") { if (o.meta !== undefined) n.meta++; if (o.prazo !== undefined) n.prazo++; }
   }
   const plural = (k: number, s: string, p: string) => `${k} ${k === 1 ? s : p}`;
   const tarefas = [
     n.quadro ? "Criou o quadro" : "",
-    n.editado ? "Mudou a meta" : "",
+    n.meta ? "Mudou a meta" : "",
+    n.prazo ? "mudou o prazo" : "",
     n.criadas ? `criou ${plural(n.criadas, "tarefa", "tarefas")}` : "",
     n.trazidas ? `trouxe ${plural(n.trazidas, "tarefa", "tarefas")} do Linear` : "",
     n.mudadas ? `mudou ${plural(n.mudadas, "tarefa", "tarefas")}` : "",
@@ -349,14 +379,15 @@ export function resumoDoLote(ops: readonly OpQuadro[], frasesDasColunas: readonl
  * O turno que a tarefa abre no bot responsável (NOD-417). O texto diz o que fazer e como devolver ao quadro; o
  * conteúdo da tarefa vai cercado como dado (pode ter vindo do Linear, ADR-062).
  */
-export function entradaDaTarefa(p: { quadroId: string; meta: string; prazo: string | null; tarefa: Pick<TarefaQuadro, "id" | "titulo" | "descricao" | "linearId" | "linearUrl">; pessoaNome: string; deQuem: string | null }): string {
+export function entradaDaTarefa(p: { quadroId: string; meta: string | null; prazo: string | null; tarefa: Pick<TarefaQuadro, "id" | "titulo" | "descricao" | "linearId" | "linearUrl">; pessoaNome: string; deQuem: string | null }): string {
   const t = p.tarefa;
   return [
     `Tarefa de um quadro de ${p.pessoaNome}${p.deQuem ? `, passada por ${p.deQuem}` : ""}${p.prazo ? ` (prazo ${prazoLegivel(p.prazo)})` : ""}.`,
     `quadro: ${p.quadroId} · tarefa: ${t.id}${t.linearId ? ` · Linear ${t.linearId}${t.linearUrl ? ` (${t.linearUrl})` : ""}` : ""}`,
     "",
     "<tarefa>",
-    `meta: ${cercado(p.meta)}`,
+    // Sem meta (fluxo contínuo), sem a linha.
+    ...(p.meta ? [`meta: ${cercado(p.meta)}`] : []),
     `título: ${cercado(t.titulo)}`,
     t.descricao ? `\n${cercado(t.descricao)}` : "",
     "</tarefa>",
@@ -410,7 +441,7 @@ export type TarefaPlanejada = TarefaQuadro & { nova: boolean };
 
 export type PlanoLote = {
   /** O quadro como fica: `novo` = nasce no lote. `colunas` null = as padrão. */
-  quadro: { novo: boolean; meta: string; prazo: string | null; colunas: ColunaQuadro[] | null };
+  quadro: { novo: boolean; meta: string | null; prazo: string | null; colunas: ColunaQuadro[] | null };
   /** O lote mexeu nas colunas (grava e vira lote mesmo sem tarefa tocada). */
   mudouColunas: boolean;
   /** A frase de cada passo de coluna ("Embalagem criada depois de Finalização"), para o resumo do lote. */
@@ -461,7 +492,7 @@ export function resolverTarefa(tarefas: readonly TarefaPlanejada[], ref: string)
  * quadro (null = ainda não existe), as tarefas dele, os bots da pessoa e quem é o autor (null = a pessoa, na tela).
  */
 export function planejarLote(p: {
-  quadro: { meta: string; prazo: string | null; colunas?: readonly ColunaQuadro[] | null } | null;
+  quadro: { meta: string | null; prazo: string | null; colunas?: readonly ColunaQuadro[] | null } | null;
   quadroId: string;
   tarefas: readonly TarefaQuadro[];
   agentes: readonly AgenteDoQuadro[];
@@ -518,8 +549,9 @@ export function planejarLote(p: {
     const t: TarefaPlanejada = {
       id: `novo:${novas++}`, quadroId: p.quadroId, titulo: c.titulo, descricao: c.descricao ?? "", status: c.status ?? colunaDeEspera(colunas), voltarPara: null, agenteId: c.agenteId,
       ordem: ordemMax() + 1, linearId: c.linearId ?? null, linearUrl: c.linearUrl ?? null, prUrl: null, pergunta: null, resposta: null, deFora: p.origemConfiavel === false,
-      turnoId: null, criadoEm: p.agora, mudadoEm: p.agora, nova: true,
+      turnoId: null, criadoEm: p.agora, mudadoEm: p.agora, terminadaEm: null, nova: true,
     };
+    t.terminadaEm = terminadaDepois(t, p.agora, colunas);
     tarefas.push(t);
     tocar(t.id);
     return t;
@@ -537,7 +569,7 @@ export function planejarLote(p: {
 
   for (const [indice, op] of p.ops.entries()) {
     const erro = (e: string) => ({ erro: e, indice });
-    if (op.tipo === "desfazer") return erro("desfazer vai sozinho na chamada");
+    if (op.tipo === "desfazer" || op.tipo === "remover_quadro") return erro(`${op.tipo} vai sozinho na chamada`);
     // A meta entra em todo turno de tarefa do quadro: só um turno confiável a escreve (revisão rodada 3, ADR-062).
     const escreveMeta = op.tipo === "criar_quadro" || (op.tipo === "editar_quadro" && op.meta !== undefined);
     if (escreveMeta && p.origemConfiavel === false) return erro("a meta só muda num turno limpo, em que a pessoa falou com você e nada de fora entrou: peça a ela");
@@ -546,7 +578,7 @@ export function planejarLote(p: {
     if (mexeColuna && p.origemConfiavel === false) return erro("as colunas só mudam num turno limpo, em que a pessoa falou com você e nada de fora entrou: peça a ela");
     if (op.tipo === "criar_quadro") {
       if (quadro) return erro(quadro.novo ? "o quadro já foi criado neste lote" : "este bot já tem um quadro: use editar_quadro para trocar a meta");
-      quadro = { novo: true, meta: op.meta, prazo: op.prazo ?? null };
+      quadro = { novo: true, meta: op.meta ?? null, prazo: op.prazo ?? null };
       continue;
     }
     if (!quadro) return erro("não há quadro: comece por criar_quadro");
@@ -718,7 +750,8 @@ export function planejarLote(p: {
     if (grupoDe(colunas, t.status) !== "iniciado") t.status = colunaDeAndamento(colunas) ?? t.status;
     comecam.push(id);
   }
-  for (const t of tarefas) if (tocadas.includes(t.id)) t.mudadoEm = p.agora;
+  // terminada_em (NOD-415, revisão 3): pelo grupo da coluna em que a tarefa ficou, com as colunas finais do lote.
+  for (const t of tarefas) if (tocadas.includes(t.id)) { t.mudadoEm = p.agora; t.terminadaEm = terminadaDepois(t, p.agora, colunas); }
   const colunasFinais = mudouColunas ? (saoPadrao(colunas) ? null : colunas) : (p.quadro?.colunas ? colunas : null);
   return { quadro: { ...quadro, colunas: colunasFinais }, mudouColunas, frasesDasColunas, ajustada, tarefas, tocadas, apagadas, respondidas: respondidasVivas, comecam, seguradas };
 }

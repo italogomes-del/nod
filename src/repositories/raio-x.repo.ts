@@ -1,7 +1,8 @@
 import type { IdHarness } from "../contracts/harness.ts";
 import type { LimiteDaIa, LimitesIa } from "../contracts/inteligencia.ts";
-import { USO_DO_MAC_PADRAO, type ComposicaoRaioX, type ExecucaoRaioX, type Experimentos, type Preferencias, type UsoDoMac } from "../contracts/raio-x.ts";
+import { EXPERIMENTOS_DESLIGADOS, USO_DO_MAC_PADRAO, type ComposicaoRaioX, type ExecucaoRaioX, type Experimentos, type Preferencias, type UsoDoMac } from "../contracts/raio-x.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
+import { QUADROS_PARA_TODOS, quadroLiberadoPara, type LiberacaoQuadros } from "../domain/flag-quadros.ts";
 import { data, jsonb, ms } from "./conversao.ts";
 
 /** Um turno com o que o Raio-X guardou dele; o caso de uso monta o resumo (domain/raio-x.ts). */
@@ -102,14 +103,36 @@ export function raioXRepo(conn: Conn, escopo: Escopo) {
 /** ADR-111 (0088): `exp_calibracao` e `exp_memoria_longa`, as chaves de experimento. ADR-112 (0089): `exp_whatsapp`. NOD-429 (0130): `exp_quadro`. */
 const COLUNAS_PREFERENCIAS = "modo_dev, avisos_fechados, uso_do_mac, maquina_padrao_id, ordem_ias, ias_no_limite, exp_calibracao, exp_memoria_longa, exp_whatsapp, exp_quadro";
 
+/**
+ * NOD-415 (ADR-141): a liberação dos quadros (NOD_QUADROS) deste processo, que o compor configura ao subir. Fica aqui,
+ * na leitura das preferências, porque todo caminho do quadro (tela, pílula, `gerir_quadro`, rotas) lê
+ * `experimentos.quadro` por este repo: quem não está liberado lê a chave desligada e não consegue ligá-la.
+ */
+let liberacaoQuadros: LiberacaoQuadros = QUADROS_PARA_TODOS;
+export function configurarLiberacaoQuadros(l: LiberacaoQuadros): void {
+  liberacaoQuadros = l;
+}
+
 export function preferenciasRepo(conn: Conn, escopo: Escopo) {
+  let liberado: Promise<boolean> | null = null;
+  const quadroLiberado = (): Promise<boolean> => (liberado ??= (async () => {
+    const l = liberacaoQuadros;
+    if (l.modo !== "admins") return quadroLiberadoPara(l, { id: escopo.pessoaId });
+    const [p] = await conn<{ email: string | null }[]>`select email from pessoas where tenant_id = ${escopo.tenantId} and id = ${escopo.pessoaId}`;
+    return quadroLiberadoPara(l, { id: escopo.pessoaId, email: p?.email ?? null });
+  })());
+  /** A chave `quadro` só vale para quem está liberado; `quadroLiberado` diz à web se mostra a chave. */
+  const comLiberacao = async (p: Preferencias): Promise<Preferencias> => {
+    const lib = await quadroLiberado();
+    return { ...p, quadroLiberado: lib, experimentos: { ...(p.experimentos ?? EXPERIMENTOS_DESLIGADOS), quadro: lib && (p.experimentos?.quadro ?? false) } };
+  };
   type Linha = { modo_dev: boolean; avisos_fechados: string[]; uso_do_mac: UsoDoMac; maquina_padrao_id: string | null; ordem_ias: IdHarness[] | null; ias_no_limite: LimitesIa | null; exp_calibracao: boolean; exp_memoria_longa: boolean; exp_whatsapp: boolean; exp_quadro: boolean };
   const paraPreferencias = (l: Linha | undefined): Preferencias => ({ modoDev: l?.modo_dev ?? false, avisosFechados: l?.avisos_fechados ?? [], usoDoMac: l?.uso_do_mac ?? USO_DO_MAC_PADRAO, maquinaPadraoId: l?.maquina_padrao_id ?? null, ordemIas: l?.ordem_ias ?? null, iasNoLimite: l?.ias_no_limite ?? {}, experimentos: { calibracao: l?.exp_calibracao ?? false, memoriaLonga: l?.exp_memoria_longa ?? false, whatsapp: l?.exp_whatsapp ?? false, quadro: l?.exp_quadro ?? false } });
   return {
     async buscar(): Promise<Preferencias> {
       const [l] = await conn<Linha[]>`
         select ${conn.unsafe(COLUNAS_PREFERENCIAS)} from preferencias where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId}`;
-      return paraPreferencias(l);
+      return comLiberacao(paraPreferencias(l));
     },
 
     /** O que vier muda; o que faltar fica como está. ADR-099 (I10): `faixa_trabalhos_recolhida` fica no banco, sem uso. */
@@ -120,7 +143,8 @@ export function preferenciasRepo(conn: Conn, escopo: Escopo) {
       const calibracao = p.experimentos?.calibracao ?? null;
       const memoriaLonga = p.experimentos?.memoriaLonga ?? null;
       const whatsapp = p.experimentos?.whatsapp ?? null;
-      const quadro = p.experimentos?.quadro ?? null;
+      // NOD-415: sem liberação, ligar o quadro não grava (a chave guardada fica como está).
+      const quadro = p.experimentos?.quadro !== undefined && (await quadroLiberado()) ? p.experimentos.quadro : null;
       const [l] = await conn<Linha[]>`
         insert into preferencias (tenant_id, owner_id, modo_dev, uso_do_mac, ordem_ias, exp_calibracao, exp_memoria_longa, exp_whatsapp, exp_quadro)
         values (${escopo.tenantId}, ${escopo.pessoaId}, ${p.modoDev ?? false}, ${p.usoDoMac ?? USO_DO_MAC_PADRAO}, ${ordem}::jsonb, ${calibracao ?? false}, ${memoriaLonga ?? false}, ${whatsapp ?? false}, ${quadro ?? false})
@@ -134,7 +158,7 @@ export function preferenciasRepo(conn: Conn, escopo: Escopo) {
           ordem_ias = case when ${p.ordemIas !== undefined} then ${ordem}::jsonb else preferencias.ordem_ias end,
           atualizado_em = clock_timestamp()
         returning ${conn.unsafe(COLUNAS_PREFERENCIAS)}`;
-      return paraPreferencias(l);
+      return comLiberacao(paraPreferencias(l));
     },
 
     /** ADR-090: a máquina onde bot sem escolha trabalha (id da chave; null = qualquer uma). Quem chama já conferiu a chave. */
@@ -144,7 +168,7 @@ export function preferenciasRepo(conn: Conn, escopo: Escopo) {
         values (${escopo.tenantId}, ${escopo.pessoaId}, ${maquinaId})
         on conflict (tenant_id, owner_id) do update set maquina_padrao_id = ${maquinaId}, atualizado_em = clock_timestamp()
         returning ${conn.unsafe(COLUNAS_PREFERENCIAS)}`;
-      return paraPreferencias(l);
+      return comLiberacao(paraPreferencias(l));
     },
 
     /**
@@ -179,7 +203,7 @@ export function preferenciasRepo(conn: Conn, escopo: Escopo) {
             else array_append(preferencias.avisos_fechados, ${chave}) end,
           atualizado_em = clock_timestamp()
         returning ${conn.unsafe(COLUNAS_PREFERENCIAS)}`;
-      return paraPreferencias(l);
+      return comLiberacao(paraPreferencias(l));
     },
   };
 }

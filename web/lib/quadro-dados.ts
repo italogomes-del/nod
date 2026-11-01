@@ -89,3 +89,37 @@ export function historicoDaFaixa(mensagens: readonly Pick<Mensagem, "id" | "auto
 export function tarefaNoQuadro(q: QuadroDto | null, id: string | null): TarefaDto | null {
   return id && q ? (q.tarefas.find((t) => t.id === id) ?? null) : null;
 }
+
+/* ---------- NOD-415 (ADR-141): meta opcional e o menu de prazo ---------- */
+
+const DIA_MS = 86_400_000;
+/** O dia de hoje em São Paulo (UTC−3), AAAA-MM-DD. */
+export function hojeEmSP(agora: number): string {
+  return new Date(agora - 3 * 3_600_000).toISOString().slice(0, 10);
+}
+const somarDias = (dia: string, n: number): string => new Date(Date.parse(`${dia}T12:00:00Z`) + n * DIA_MS).toISOString().slice(0, 10);
+
+/** Os atalhos do menu de prazo (o protótipo): Hoje, Amanhã, Sexta (a próxima, ou hoje se for sexta), Sábado e Fim do mês. */
+export function atalhosDePrazo(agora: number): { rotulo: string; valor: string }[] {
+  const hoje = hojeEmSP(agora);
+  const dow = new Date(`${hoje}T12:00:00Z`).getUTCDay();
+  const ate = (alvo: number): number => (alvo - dow + 7) % 7;
+  const [a, m] = [Number(hoje.slice(0, 4)), Number(hoje.slice(5, 7))];
+  const fimDoMes = new Date(Date.UTC(a, m, 0, 12)).toISOString().slice(0, 10);
+  return [
+    { rotulo: "Hoje", valor: hoje },
+    { rotulo: "Amanhã", valor: somarDias(hoje, 1) },
+    { rotulo: "Sexta", valor: somarDias(hoje, ate(5)) },
+    { rotulo: "Sábado", valor: somarDias(hoje, ate(6)) },
+    { rotulo: "Fim do mês", valor: fimDoMes },
+  ];
+}
+
+/** Quanto falta para o prazo, pela data de São Paulo: "vence hoje", "falta 1 dia", "faltam 3 dias", "venceu". */
+export function faltaParaOPrazo(prazo: string | null, agora: number): string {
+  if (!prazo || !/^\d{4}-\d{2}-\d{2}$/.test(prazo)) return "";
+  const dias = Math.round((Date.parse(`${prazo}T12:00:00Z`) - Date.parse(`${hojeEmSP(agora)}T12:00:00Z`)) / DIA_MS);
+  if (dias < 0) return "venceu";
+  if (dias === 0) return "vence hoje";
+  return dias === 1 ? "falta 1 dia" : `faltam ${dias} dias`;
+}

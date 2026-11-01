@@ -104,7 +104,7 @@ describe("NOD-429 · vocabulário (web/lib/quadro.ts)", () => {
     expect(EXPERIMENTOS_DESLIGADOS.quadro).toBe(false);
     expect(EXPERIMENTOS.map((e) => e.chave)).toContain("quadro");
     const ui = { ...CONFIG_UI_INICIAL, abertos: ["avancado"] };
-    const d: DadosGeral = { tema: "claro", avisos: { onde: "mac", situacao: "ligados", som: true }, modoDev: false, experimentos: { ...EXPERIMENTOS_DESLIGADOS } };
+    const d: DadosGeral = { tema: "claro", avisos: { onde: "mac", situacao: "ligados", som: true }, modoDev: false, experimentos: { ...EXPERIMENTOS_DESLIGADOS }, quadroLiberado: true };
     const botao = (html: string) => html.match(/<button[^>]*data-experimento="quadro"[^>]*>/)?.[0];
     expect(botao(renderGeral(d, ui, false))).toBeUndefined();
     expect(renderGeral(d, ui, false)).toContain('data-experimento="whatsapp"');
@@ -114,6 +114,9 @@ describe("NOD-429 · vocabulário (web/lib/quadro.ts)", () => {
     expect(estadoInicial.experimentos.quadro).toBe(false);
     // Ligado e com o Modo dev desligado depois: a linha fica, para dar para desligar.
     expect(botao(renderGeral({ ...d, experimentos: { ...EXPERIMENTOS_DESLIGADOS, quadro: true } }, ui, false))).toContain('aria-checked="true"');
+    // NOD-415 (ADR-141): quem a flag NOD_QUADROS não libera não vê a chave, nem com o Modo dev.
+    expect(botao(renderGeral({ ...d, modoDev: true, quadroLiberado: false }, ui, false))).toBeUndefined();
+    expect(botao(renderGeral({ ...d, modoDev: true, quadroLiberado: undefined }, ui, false))).toBeUndefined();
   });
 });
 

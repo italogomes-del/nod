@@ -25,11 +25,14 @@ export function rotasQuadro(d: DepsRotas): Rota[] {
     } },
     { metodo: "POST", acao: "quadro.criar", padrao: new RegExp(`^/agentes/${ID}/quadro$`), async handler(ctx) {
       const c = corpoObjeto(await ctx.corpo());
-      ctx.json(201, await executar(ctx.escopo, EXECUTORES_QUADRO["quadro.criar"], { ...base(ctx.params.id ?? ""), meta: c.meta as string, prazo: c.prazo as string | null | undefined }));
+      ctx.json(201, await executar(ctx.escopo, EXECUTORES_QUADRO["quadro.criar"], { ...base(ctx.params.id ?? ""), meta: c.meta as string | null | undefined, prazo: c.prazo as string | null | undefined }));
     } },
     { metodo: "PATCH", acao: "quadro.editar", padrao: new RegExp(`^/agentes/${ID}/quadro$`), async handler(ctx) {
       const c = corpoObjeto(await ctx.corpo());
-      ctx.json(200, await executar(ctx.escopo, EXECUTORES_QUADRO["quadro.editar"], { ...base(ctx.params.id ?? ""), meta: c.meta as string | undefined, prazo: c.prazo as string | null | undefined }));
+      ctx.json(200, await executar(ctx.escopo, EXECUTORES_QUADRO["quadro.editar"], { ...base(ctx.params.id ?? ""), meta: c.meta as string | null | undefined, prazo: c.prazo as string | null | undefined }));
+    } },
+    { metodo: "DELETE", acao: "quadro.remover", padrao: new RegExp(`^/agentes/${ID}/quadro$`), async handler(ctx) {
+      ctx.json(200, await executar(ctx.escopo, EXECUTORES_QUADRO["quadro.remover"], base(ctx.params.id ?? "")));
     } },
     { metodo: "POST", acao: "quadro.criar_tarefa", padrao: new RegExp(`^/agentes/${ID}/quadro/tarefas$`), async handler(ctx) {
       const c = corpoObjeto(await ctx.corpo());

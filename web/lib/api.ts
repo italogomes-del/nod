@@ -250,6 +250,10 @@ export function criarApi(escopo: Escopo) {
     inteligencia: (agenteId: string) => get<{ inteligencia: InteligenciaBot }>(`agentes/${encodeURIComponent(agenteId)}/inteligencia`),
     /** NOD-442 (ADR-135): a aba Quadro de um bot. Cada mutação devolve o quadro montado e o lote (o Desfazer usa o id dele). */
     quadro: (agenteId: string) => get<{ quadro: QuadroDto | null }>(`agentes/${encodeURIComponent(agenteId)}/quadro`),
+    /** NOD-415 (ADR-141): meta e prazo opcionais; meta null tira (fluxo contínuo). */
+    criarQuadro: (agenteId: string, campos: { meta?: string | null; prazo?: string | null }) => post<MutacaoQuadro>(`agentes/${encodeURIComponent(agenteId)}/quadro`, campos),
+    editarQuadro: (agenteId: string, campos: { meta?: string | null; prazo?: string | null }) => patch<MutacaoQuadro>(`agentes/${encodeURIComponent(agenteId)}/quadro`, campos),
+    removerQuadro: (agenteId: string) => del<MutacaoQuadro>(`agentes/${encodeURIComponent(agenteId)}/quadro`),
     mudarTarefa: (agenteId: string, tarefaId: string, campos: { status?: StatusTarefa; agente?: string | null; titulo?: string; descricao?: string }) =>
       patch<MutacaoQuadro>(`agentes/${encodeURIComponent(agenteId)}/quadro/tarefas/${encodeURIComponent(tarefaId)}`, campos),
     responderTarefa: (agenteId: string, tarefaId: string, resposta: string) =>

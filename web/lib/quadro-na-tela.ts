@@ -27,6 +27,11 @@ export interface ApiDoQuadro {
   enviar(conversaId: string, texto: string, anexos?: readonly string[], idEnvio?: string): Promise<RespostaMutacao>;
   responderTarefa(agenteId: string, tarefaId: string, resposta: string): Promise<MutacaoQuadro>;
   desfazerLoteQuadro(agenteId: string, loteId: string): Promise<MutacaoQuadro>;
+  /** NOD-415 (ADR-141): criar o quadro e mudar a meta e o prazo pela tela (meta null tira). */
+  criarQuadro(agenteId: string, campos: { meta?: string | null; prazo?: string | null }): Promise<MutacaoQuadro>;
+  editarQuadro(agenteId: string, campos: { meta?: string | null; prazo?: string | null }): Promise<MutacaoQuadro>;
+  /** Voltar a agente comum: apaga o quadro (sem Desfazer); a conversa e a memória ficam. */
+  removerQuadro(agenteId: string): Promise<MutacaoQuadro>;
   /** NOD-448: as colunas (cada uma um lote com Desfazer). Opcionais: sem elas, o quadro não edita colunas. */
   criarColuna?(agenteId: string, c: { nome: string; grupo: GrupoColuna; depois_de?: string }): Promise<MutacaoQuadro>;
   renomearColuna?(agenteId: string, coluna: string, nome: string): Promise<MutacaoQuadro>;
@@ -43,6 +48,8 @@ export interface DadosDoQuadro {
   recolherEm?: number;
   /** A janela que junta frames em rajada numa releitura só (ms). */
   juntarEm?: number;
+  /** NOD-415: a confirmação antes de remover o quadro (padrão: window.confirm). */
+  confirmar?: (texto: string) => boolean;
 }
 
 /** Os pedaços do palco que são "a conversa": saem juntos quando o Quadro entra. */
@@ -99,12 +106,14 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
   let timerReler: ReturnType<typeof setTimeout> | null = null;
   let timerRecolher: ReturnType<typeof setTimeout> | null = null;
   let dica: string[] = [];
+  /** NOD-415: a meta no topo virou campo (Enter salva, Esc desiste). */
+  let editandoMeta = false;
   /** NOD-448: o pedaço da edição das colunas que está aberto (menu, renomear, remover, coluna nova, a folha do celular). */
   let edicao: EdicaoDeColuna | null = null;
 
   function zerarDados(): void {
     agenteId = null; q = null; carga = "nada"; aberta = null; acesas = new Set(); faixa = { tipo: "nada" }; loteAntes = null;
-    historico = []; histAberto = false; leitura++; leituraConversa++; dica = []; edicao = null;
+    historico = []; histAberto = false; leitura++; leituraConversa++; dica = []; editandoMeta = false; edicao = null;
     if (timerReler) clearTimeout(timerReler);
     if (timerRecolher) clearTimeout(timerRecolher);
     timerReler = timerRecolher = null;
@@ -114,10 +123,10 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     if (!dd) return quadroVazio({ nome, filtro, alternadas });
     if (carga === "nada" || carga === "carregando") return quadroCarregando();
     if (carga === "erro") return quadroComErro();
-    if (!q) return semQuadro(nome);
+    if (!q) return semQuadro(nome, Date.now());
     const t = tarefaNoQuadro(q, aberta);
     if (t) return tarefaAberta({ t, q, agente: dd.agente });
-    return quadroDaMeta({ q, nome, agente: dd.agente, filtro, alternadas, acesas, edicao });
+    return quadroDaMeta({ q, nome, agente: dd.agente, filtro, alternadas, acesas, edicao, agora: Date.now(), editandoMeta });
   }
 
   /**
@@ -145,7 +154,7 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     for (const [id, valor] of rascunhos) { const c = doc.getElementById(id); if (c instanceof HTMLTextAreaElement || c instanceof HTMLInputElement) c.value = valor; }
     if (focoId) doc.getElementById(focoId)?.focus();
     const form = v.querySelector<HTMLElement>('[data-form="conversa-no-quadro"]');
-    const rot = q ? `Conversar com o quadro ${q.meta}` : `Conversar com ${nome} sobre o quadro`;
+    const rot = q?.meta ? `Conversar com o quadro ${q.meta}` : `Conversar com ${nome} sobre o quadro`;
     if (form && form.getAttribute("aria-label") !== rot) form.setAttribute("aria-label", rot);
     const txt = v.querySelector<HTMLTextAreaElement>("#qc-txt");
     const t = tarefaNoQuadro(q, aberta);
@@ -287,6 +296,60 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
       if (botao) botao.disabled = false;
       mudarFaixa({ tipo: "erro", texto: "Não consegui mandar a resposta. Ela continua no campo." });
     }
+  }
+
+  /**
+   * NOD-415 (ADR-141): criar o quadro e mudar a meta ou o prazo pela tela. A resposta sobe na faixa com o Desfazer do lote
+   * (o mesmo lote do gerir_quadro). Trocar de bot no meio: a resposta de um não entra na tela do outro.
+   */
+  async function mexerNoQuadro(tipo: "criar" | "editar", campos: { meta?: string | null; prazo?: string | null }): Promise<void> {
+    const a = dd?.api();
+    if (!a || !agenteId) return;
+    const c = chave;
+    const de = agenteId;
+    try {
+      const r = tipo === "criar" ? await a.criarQuadro(de, campos) : await a.editarQuadro(de, campos);
+      if (c !== chave || de !== agenteId) return;
+      const ok = (r as { ok?: boolean }).ok !== false;
+      if (!ok) throw new Error("recusado");
+      editandoMeta = false;
+      aplicarQuadro(r.quadro);
+      const texto = tipo === "criar" ? "Quadro criado." : campos.meta !== undefined ? (campos.meta ? "Meta trocada." : "Meta tirada: fluxo contínuo.") : campos.prazo ? "Prazo trocado." : "Prazo tirado.";
+      mudarFaixa({ tipo: "resposta", texto, loteId: r.lote?.id ?? null, mensagemId: "" });
+      if (tipo === "editar" && campos.meta !== undefined) vista()?.querySelector<HTMLElement>('.qd-conteudo [data-act="editar-meta"]')?.focus();
+    } catch {
+      if (c !== chave) return;
+      mudarFaixa({ tipo: "erro", texto: tipo === "criar" ? "Não consegui criar o quadro." : "Não consegui mudar o quadro." });
+    }
+  }
+
+  /** NOD-415 (ADR-141): voltar a agente comum. Confirma antes (não tem Desfazer); depois, a vista mostra o "criar quadro". */
+  async function removerQuadro(): Promise<void> {
+    const a = dd?.api();
+    if (!a || !agenteId || !q) return;
+    const confirmar = dd?.confirmar ?? ((t: string) => doc.defaultView?.confirm(t) ?? false);
+    if (!confirmar(`Remover o quadro de ${nome}? As tarefas e o histórico do quadro somem e não dá para desfazer. A conversa e a memória de ${nome} ficam.`)) return;
+    const c = chave;
+    const de = agenteId;
+    try {
+      const r = await a.removerQuadro(de);
+      if (c !== chave || de !== agenteId) return;
+      if ((r as { ok?: boolean }).ok === false) throw new Error("recusado");
+      editandoMeta = false;
+      aplicarQuadro(null);
+      mudarFaixa({ tipo: "resposta", texto: `Quadro removido: ${nome} voltou a ser um bot comum.`, loteId: null, mensagemId: "" });
+    } catch {
+      if (c !== chave) return;
+      mudarFaixa({ tipo: "erro", texto: "Não consegui remover o quadro." });
+    }
+  }
+
+  function editarMeta(sim: boolean): void {
+    editandoMeta = sim;
+    desenharVista();
+    const alvo = vista()?.querySelector<HTMLElement>(sim ? "#qd-meta-in" : '.qd-conteudo [data-act="editar-meta"]');
+    alvo?.focus();
+    if (sim && alvo instanceof HTMLInputElement) alvo.select();
   }
 
   async function desfazer(loteId: string): Promise<void> {
@@ -620,6 +683,8 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
       if (act === "abrir-tarefa" && id) { abrirTarefa(id); return; }
       if (act === "voltar-ao-quadro") { voltarAoQuadro(); return; }
       if (act === "qd-reler") { carga = "nada"; void lerQuadro(); return; }
+      if (act === "editar-meta") { editarMeta(true); return; }
+      if (act === "remover-quadro") { void removerQuadro(); return; }
       if (act === "qc-desfazer" && id) { void desfazer(id); return; }
       if (act === "qc-historico") {
         histAberto = !histAberto;
@@ -690,10 +755,62 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     if (!dd || !form?.closest("#quadro")) return;
     const qual = form.dataset["form"];
     if (qual === "col-renomear" || qual === "col-nova" || qual === "col-remover") { ev.preventDefault(); enviarColuna(form); return; }
-    if (qual !== "conversa-no-quadro" && qual !== "responder-tarefa") return;
+    if (qual !== "conversa-no-quadro" && qual !== "responder-tarefa" && qual !== "criar-quadro" && qual !== "editar-meta") return;
     ev.preventDefault();
     if (qual === "conversa-no-quadro") void enviarPedido(form);
-    else void responder(form);
+    else if (qual === "responder-tarefa") void responder(form);
+    else if (qual === "criar-quadro") {
+      const meta = form.querySelector<HTMLInputElement>('[name="meta"]')?.value.trim() ?? "";
+      const prazo = prazoDoForm(form);
+      const botao = form.querySelector<HTMLButtonElement>('button[type="submit"]');
+      if (botao) botao.disabled = true;
+      void mexerNoQuadro("criar", { meta: meta || null, prazo }).finally(() => { if (botao) botao.disabled = false; });
+    } else {
+      const meta = form.querySelector<HTMLInputElement>('[name="meta"]')?.value.trim() ?? "";
+      if (meta === (q?.meta ?? "")) { editarMeta(false); return; }
+      void mexerNoQuadro("editar", { meta: meta || null });
+    }
+  });
+
+  /** O prazo escolhido no menu (ou no campo de "Outra data…"); "" = sem prazo. */
+  function prazoDoForm(lugar: ParentNode): string | null {
+    const sel = lugar.querySelector<HTMLSelectElement>('[data-campo="prazo"]');
+    const data = lugar.querySelector<HTMLInputElement>('[data-campo="prazo-data"]');
+    const v = sel?.value === "outra" ? data?.value ?? "" : sel?.value ?? "";
+    return /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null;
+  }
+
+  // NOD-415: o menu de prazo. "Outra data…" abre o campo de data; no topo, a troca grava na hora (no criar, só no envio).
+  doc.addEventListener("change", (ev) => {
+    const el = ev.target as Element | null;
+    if (!dd || !el?.closest?.("#quadro .qd-conteudo")) return;
+    const campo = (el as HTMLElement).dataset?.["campo"];
+    if (campo !== "prazo" && campo !== "prazo-data") return;
+    const caixa = el.closest<HTMLElement>(".qd-prazo");
+    const data = caixa?.querySelector<HTMLInputElement>('[data-campo="prazo-data"]');
+    if (campo === "prazo" && (el as HTMLSelectElement).value === "outra") {
+      if (data) { data.hidden = false; data.focus(); try { data.showPicker?.(); } catch { /* sem gesto: o campo fica à vista */ } }
+      return;
+    }
+    if (el.closest('[data-form="criar-quadro"]') || !q || !caixa) return;
+    const prazo = prazoDoForm(caixa);
+    if (campo === "prazo-data" && !prazo) return;
+    if (prazo === q.prazo) return;
+    void mexerNoQuadro("editar", { prazo });
+  });
+  // QA do PR #617: sair do campo sem Enter nem Esc desiste (como o Esc), e "Outra data…" sem data volta ao prazo de
+  // antes. Sem redesenhar agora: o clique que tirou o foco ainda vai chegar ao alvo dele.
+  doc.addEventListener("focusout", (ev) => {
+    // Trocar de janela ou de aba também tira o foco: aí o campo fica como está (revisão 4).
+    if (!dd || !doc.hasFocus()) return;
+    const el = ev.target as Element | null;
+    if (editandoMeta && el instanceof HTMLInputElement && el.id === "qd-meta-in") {
+      editandoMeta = false;
+      setTimeout(() => { if (!editandoMeta && doc.activeElement?.id !== "qd-meta-in" && vista()?.querySelector("#qd-meta-in")) desenharVista(); }, 200);
+    } else if (el instanceof HTMLInputElement && el.dataset["campo"] === "prazo-data" && !el.value) {
+      const sel = el.closest(".qd-prazo")?.querySelector<HTMLSelectElement>('[data-campo="prazo"]');
+      if (sel?.value === "outra") { sel.value = el.closest('[data-form="criar-quadro"]') ? "" : q?.prazo ?? ""; el.hidden = true; }
+    }
   });
   doc.addEventListener("keydown", (ev) => {
     if (!dd) return;
@@ -701,6 +818,9 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     if (ev.key === "Enter" && !ev.shiftKey && !ev.isComposing && el instanceof HTMLTextAreaElement && el.id === "qc-txt") {
       ev.preventDefault();
       el.form?.requestSubmit();
+    } else if (ev.key === "Escape" && editandoMeta && el instanceof HTMLInputElement && el.id === "qd-meta-in") {
+      ev.preventDefault();
+      editarMeta(false);
     } else if (ev.key === "Escape" && edicao && el?.closest?.("#quadro .qd-conteudo")) {
       ev.preventDefault();
       if (edicao.tipo === "ordem") editar(null, '.qd-so-estreito [data-act="col-folha"]');

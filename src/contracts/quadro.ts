@@ -56,12 +56,15 @@ export type TarefaQuadro = {
   turnoId: string | null;
   criadoEm: number;
   mudadoEm: number;
+  /** Quando entrou em feito/cancelado (null enquanto aberta). Só muda com o status, não com título ou ordem (revisão 3). */
+  terminadaEm: number | null;
 };
 
 export type Quadro = {
   id: string;
   agenteId: string;
-  meta: string;
+  /** NOD-415 (ADR-141): opcional. Sem meta é o fluxo contínuo: sem fração, sem progresso, sem risco de prazo. */
+  meta: string | null;
   /** AAAA-MM-DD, ou null. */
   prazo: string | null;
   cumpridoEm: number | null;
@@ -70,6 +73,8 @@ export type Quadro = {
   colunas: ColunaQuadro[] | null;
   criadoEm: number;
   atualizadoEm: number;
+  /** NOD-415 (revisão 2): quando a meta foi posta (de sem meta para com meta); o risco e o "N de M" partem dali. */
+  metaDesde: number;
 };
 
 /** Quem fez o lote: a pessoa (na tela) ou um bot (pela ferramenta). */
@@ -100,13 +105,15 @@ export type QuadroDto = Omit<Quadro, "colunas"> & {
 
 /** Uma operação no quadro (a ferramenta manda uma lista; a rota, uma). Cada tipo é um id do registro `quadro.*`. */
 export type OpQuadro =
-  | { tipo: "criar_quadro"; meta: string; prazo?: string | null }
+  | { tipo: "criar_quadro"; meta?: string | null; prazo?: string | null }
   | { tipo: "criar_tarefa"; titulo: string; descricao?: string; status?: string; agente?: string | null }
   | { tipo: "importar_linear"; itens: ItemLinear[] }
   | { tipo: "mudar_tarefa"; tarefa: string; titulo?: string; descricao?: string; status?: string; agente?: string | null; pr_url?: string | null; pergunta?: string | null; excluir?: boolean }
   | { tipo: "responder"; tarefa: string; resposta: string }
-  | { tipo: "editar_quadro"; meta?: string; prazo?: string | null }
+  | { tipo: "editar_quadro"; meta?: string | null; prazo?: string | null }
   | { tipo: "desfazer"; lote?: string }
+  /** NOD-415 (ADR-141): o bot volta a ser um agente comum. Apaga o quadro, as tarefas e o histórico; conversa e memória ficam. */
+  | { tipo: "remover_quadro"; bot?: string }
   /* NOD-448: as colunas. `coluna`, `depois_de`, `antes_de`, `destino` = o id ou o nome da coluna. */
   | { tipo: "criar_coluna"; nome: string; grupo: GrupoColuna; depois_de?: string }
   | { tipo: "renomear_coluna"; coluna: string; nome: string }
@@ -133,7 +140,7 @@ export type ResultadoGerirQuadro =
 export type ResumoQuadroParaBot = {
   id: string;
   anfitriao: string;
-  meta: string;
+  meta: string | null;
   prazo: string | null;
   cumprida: boolean;
   resumo: string | null;

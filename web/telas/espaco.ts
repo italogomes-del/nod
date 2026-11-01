@@ -127,6 +127,7 @@ function conteudo(estado: Estado, secao: SecaoEspaco, avisos: EstadoAvisos, extr
         avisos,
         modoDev: estado.modoDev.ligado,
         experimentos: estado.experimentos,
+        quadroLiberado: estado.quadroLiberado ?? false,
         densidade: extras.densidade,
       }, estado.configUi, celular);
     case "conexao":

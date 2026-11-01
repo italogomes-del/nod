@@ -19,7 +19,7 @@ const AGENTE = { anyOf: [{ type: "string", minLength: 1 }, { type: "null" }], de
 
 /** As propriedades de cada tipo de ação; o registro (src/domain/acoes/quadro.ts) reusa as mesmas. */
 export const PROPRIEDADES_QUADRO = {
-  meta: { type: "string", description: "A meta em uma frase (o que é 'pronto').", minLength: 1, maxLength: LIMITES_QUADRO.meta },
+  meta: ouNull({ type: "string", maxLength: LIMITES_QUADRO.meta }, "Opcional: a meta em uma frase (o que é 'pronto'). Sem meta é o fluxo contínuo (sem progresso nem risco de prazo); null tira."),
   prazo: ouNull({ type: "string" }, "O prazo, AAAA-MM-DD; null tira."),
   titulo: { type: "string", minLength: 1, maxLength: LIMITES_QUADRO.titulo },
   descricao: { type: "string", maxLength: LIMITES_QUADRO.descricao },
@@ -31,6 +31,7 @@ export const PROPRIEDADES_QUADRO = {
   excluir: { type: "boolean", description: "true tira a tarefa do quadro (o Desfazer a traz de volta)." },
   resposta: { type: "string", minLength: 1, maxLength: LIMITES_QUADRO.resposta },
   lote: { type: "string", description: "O lote a desfazer; sem ele, o último." },
+  bot: { type: "string", minLength: 1, maxLength: 200, description: "remover_quadro: o nome do bot dono do quadro, como a pessoa confirmou (obrigatório para o bot)." },
   nome: { type: "string", description: "O nome da coluna.", minLength: 1, maxLength: LIMITES_QUADRO.coluna },
   grupo: GRUPO,
   coluna: COLUNA,
@@ -80,7 +81,7 @@ export const FERRAMENTAS_QUADRO = {
   gerir_quadro: {
     type: "object",
     description:
-      "Mexe no quadro de tarefas da pessoa (a aba Quadro de um bot), do mesmo jeito que ela faria na tela. Uma chamada = um lote atômico com Desfazer. Tipos: criar_quadro {meta, prazo?}; editar_quadro {meta?, prazo?}; criar_tarefa {titulo, descricao?, status?, agente?}; importar_linear {itens} (busque os itens no Linear antes, com a sua ferramenta); mudar_tarefa {tarefa, titulo?, descricao?, status?, agente?, pr_url?, pergunta?, excluir?}; responder {tarefa, resposta}; desfazer {lote?} (sozinho no lote). Colunas: criar_coluna {nome, grupo, depois_de?}; renomear_coluna {coluna, nome}; mover_coluna {coluna, antes_de? | depois_de?} (só dentro do grupo); remover_coluna {coluna, destino?} (com tarefas, o destino é obrigatório; Precisa de você e Cancelado não saem); substituir_colunas {colunas, destinos?} (sozinho no lote; vira uma proposta que a pessoa confirma num card). Criar, renomear, mover e remover não pedem confirmação: conte o que mudou em uma frase, a pessoa tem Desfazer. Tarefa em afazer com responsável faz o bot responsável começar sozinho. Ao terminar a sua tarefa, ponha o PR (vai para revisao) e depois status feito; quando travar numa decisão da pessoa, use status voce com a pergunta.",
+      "Mexe no quadro de tarefas da pessoa (a aba Quadro de um bot), do mesmo jeito que ela faria na tela. Uma chamada = um lote atômico com Desfazer. Tipos: criar_quadro {meta?, prazo?} (meta só se a pessoa quiser uma; o padrão é o fluxo contínuo, sem meta); editar_quadro {meta?, prazo?} (meta null tira); criar_tarefa {titulo, descricao?, status?, agente?}; importar_linear {itens} (busque os itens no Linear antes, com a sua ferramenta); mudar_tarefa {tarefa, titulo?, descricao?, status?, agente?, pr_url?, pergunta?, excluir?}; responder {tarefa, resposta}; desfazer {lote?} (sozinho no lote); remover_quadro {bot} (sozinho; só o SEU quadro; o bot volta a agente comum: apaga o quadro, as tarefas e o histórico, sem Desfazer; a conversa e a memória ficam; só quando a pessoa pedir: pergunte antes e passe em bot o seu nome, como ela confirmou). Colunas: criar_coluna {nome, grupo, depois_de?}; renomear_coluna {coluna, nome}; mover_coluna {coluna, antes_de? | depois_de?} (só dentro do grupo); remover_coluna {coluna, destino?} (com tarefas, o destino é obrigatório; Precisa de você e Cancelado não saem); substituir_colunas {colunas, destinos?} (sozinho no lote; vira uma proposta que a pessoa confirma num card). Criar, renomear, mover e remover coluna não pedem confirmação: conte o que mudou em uma frase, a pessoa tem Desfazer. Tarefa em afazer com responsável faz o bot responsável começar sozinho. Ao terminar a sua tarefa, ponha o PR (vai para revisao) e depois status feito; quando travar numa decisão da pessoa, use status voce com a pergunta.",
     properties: {
       quadro: { type: "string", description: "O quadro: o id ou o nome do bot anfitrião. Sem ele, o seu; senão, o único da pessoa." },
       acoes: {
@@ -90,7 +91,7 @@ export const FERRAMENTAS_QUADRO = {
         items: {
           type: "object",
           properties: {
-            tipo: { type: "string", enum: ["criar_quadro", "editar_quadro", "criar_tarefa", "importar_linear", "mudar_tarefa", "responder", "desfazer", "criar_coluna", "renomear_coluna", "mover_coluna", "remover_coluna", "substituir_colunas"] },
+            tipo: { type: "string", enum: ["criar_quadro", "editar_quadro", "criar_tarefa", "importar_linear", "mudar_tarefa", "responder", "desfazer", "remover_quadro", "criar_coluna", "renomear_coluna", "mover_coluna", "remover_coluna", "substituir_colunas"] },
             ...P,
           },
           required: ["tipo"],

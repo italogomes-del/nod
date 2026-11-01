@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { QuadroDto, TarefaDto } from "../../../src/contracts/quadro.ts";
-import { acesos, codigoDaTarefa, fraseDoPrazo, historicoDaFaixa, linhaUnica, respostaDoBot, tarefaNoQuadro, tarefasPorStatus } from "../../../web/lib/quadro-dados.ts";
-import { cardDaTarefa, faixaDoQuadro, pilulaDoQuadro, quadroDaMeta, tarefaAberta } from "../../../web/telas/quadro-real.ts";
+import { acesos, atalhosDePrazo, codigoDaTarefa, faltaParaOPrazo, fraseDoPrazo, historicoDaFaixa, linhaUnica, respostaDoBot, tarefaNoQuadro, tarefasPorStatus } from "../../../web/lib/quadro-dados.ts";
+import { cardDaTarefa, faixaDoQuadro, menuDePrazo, pilulaDoQuadro, quadroDaMeta, semQuadro, tarefaAberta, topoDoQuadro } from "../../../web/telas/quadro-real.ts";
 import { confiar } from "../../../web/telas/quadro.ts";
 import { COLUNAS_PADRAO, colunasDto } from "../../../src/domain/colunas.ts";
 
@@ -10,10 +10,10 @@ import { COLUNAS_PADRAO, colunasDto } from "../../../src/domain/colunas.ts";
 const MAL = `<img src=x onerror="alert(1)">"'&`;
 const t = (id: string, extra: Partial<TarefaDto> = {}): TarefaDto => ({
   id, quadroId: "q1", titulo: `Tarefa ${id}`, descricao: "", status: "afazer", voltarPara: null, agenteId: "a", ordem: 1, linearId: null, linearUrl: null, prUrl: null,
-  pergunta: null, resposta: null, deFora: false, turnoId: null, criadoEm: 1, mudadoEm: 1, execucao: null, agenteNome: "Ada", ...extra,
+  pergunta: null, resposta: null, deFora: false, turnoId: null, criadoEm: 1, mudadoEm: 1, terminadaEm: null, execucao: null, agenteNome: "Ada", ...extra,
 });
 const q = (tarefas: TarefaDto[], extra: Partial<QuadroDto> = {}): QuadroDto => ({
-  id: "q1", agenteId: "a", meta: "Meta", prazo: null, cumpridoEm: null, resumo: null, criadoEm: 1, atualizadoEm: 1, agenteNome: "Ada",
+  id: "q1", agenteId: "a", meta: "Meta", prazo: null, cumpridoEm: null, resumo: null, criadoEm: 1, atualizadoEm: 1, metaDesde: 1, agenteNome: "Ada",
   colunas: colunasDto(COLUNAS_PADRAO), tarefas, ultimoLote: null, feitas: 0, total: tarefas.length, ...extra,
 });
 const agente = (id: string) => (id === "a" ? { avatar: confiar(`<span class="av">A</span>`), nome: "Ada" } : null);
@@ -119,5 +119,76 @@ describe("quadro-real (o html)", () => {
     expect(faixaDoQuadro({ ...base, faixa: { tipo: "aguardando", pedidoId: "p" } })).toContain("Mexendo no quadro");
     expect(faixaDoQuadro({ ...base, faixa: { tipo: "resposta", texto: "ok", loteId: "L1", mensagemId: "m" } })).toContain(`data-act="qc-desfazer" data-id="L1"`);
     expect(faixaDoQuadro({ ...base, faixa: { tipo: "resposta", texto: "ok", loteId: null, mensagemId: "m" } })).not.toContain("qc-desfazer");
+  });
+});
+
+describe("NOD-415 (ADR-141): meta opcional, prazo e criar pela tela", () => {
+  // Quarta, 04/11/2026, 10h em São Paulo.
+  const QUARTA = Date.parse("2026-11-04T13:00:00Z");
+
+  it("os atalhos de prazo: hoje, amanhã, a próxima sexta e sábado, e o fim do mês, pela data de São Paulo", () => {
+    expect(atalhosDePrazo(QUARTA)).toEqual([
+      { rotulo: "Hoje", valor: "2026-11-04" }, { rotulo: "Amanhã", valor: "2026-11-05" }, { rotulo: "Sexta", valor: "2026-11-06" },
+      { rotulo: "Sábado", valor: "2026-11-07" }, { rotulo: "Fim do mês", valor: "2026-11-30" },
+    ]);
+    // 01h UTC de quinta ainda é quarta em São Paulo.
+    expect(atalhosDePrazo(Date.parse("2026-11-05T01:00:00Z"))[0]?.valor).toBe("2026-11-04");
+    // Na sexta, "Sexta" é hoje; fim de dezembro vira o 31.
+    expect(atalhosDePrazo(Date.parse("2026-12-04T13:00:00Z")).map((a) => a.valor)).toEqual(["2026-12-04", "2026-12-05", "2026-12-04", "2026-12-05", "2026-12-31"]);
+  });
+
+  it("quanto falta para o prazo", () => {
+    expect(faltaParaOPrazo(null, QUARTA)).toBe("");
+    expect(faltaParaOPrazo("2026-11-04", QUARTA)).toBe("vence hoje");
+    expect(faltaParaOPrazo("2026-11-05", QUARTA)).toBe("falta 1 dia");
+    expect(faltaParaOPrazo("2026-11-11", QUARTA)).toBe("faltam 7 dias");
+    expect(faltaParaOPrazo("2026-11-03", QUARTA)).toBe("venceu");
+  });
+
+  it("sem meta (fluxo contínuo): só + Meta e o prazo, nenhuma fração nem barra", () => {
+    const h = String(topoDoQuadro(q([t("1"), t("2", { status: "feito" })], { meta: null, feitas: 1, total: 2, prazo: "2026-11-11" }), { agora: QUARTA }));
+    expect(h).toContain("qd-meta-fluxo");
+    expect(h).toContain(">+ Meta<");
+    expect(h).toContain("faltam 7 dias");
+    expect(h).not.toMatch(/de 2 feitas|progressbar|qd-barra/);
+  });
+
+  it("com meta: a meta clicável, a barra, N de M feitas e quanto falta; cumprida no lugar do falta", () => {
+    const h = String(topoDoQuadro(q([], { meta: MAL, feitas: 1, total: 4, prazo: "2026-11-05" }), { agora: QUARTA }));
+    expect(h).toContain('data-act="editar-meta"');
+    expect(h).not.toContain("<img");
+    expect(h).toContain('aria-valuenow="1"');
+    expect(h).toContain("1 de 4 feitas");
+    expect(h).toContain("falta 1 dia");
+    expect(String(topoDoQuadro(q([], { meta: "M", feitas: 4, total: 4, cumpridoEm: 9 }), { agora: QUARTA }))).toContain(">cumprida<");
+    expect(String(topoDoQuadro(q([], { meta: "M", total: 0 }), { agora: QUARTA }))).toContain("nenhuma tarefa ainda");
+  });
+
+  it("editando a meta: o campo com a meta atual, escapada", () => {
+    const h = String(topoDoQuadro(q([], { meta: MAL }), { agora: QUARTA, editandoMeta: true }));
+    expect(h).toContain('data-form="editar-meta"');
+    expect(h).toContain('id="qd-meta-in"');
+    expect(h).not.toContain("<img");
+  });
+
+  it("o menu de prazo: o atual selecionado, Sem prazo, os atalhos e Outra data", () => {
+    const fora = menuDePrazo("2026-12-25", QUARTA);
+    expect(fora).toMatch(/<option value="2026-12-25" selected>/);
+    expect(fora).toContain('<option value="">Sem prazo</option>');
+    expect(fora).toContain('value="outra"');
+    expect(menuDePrazo(null, QUARTA)).toContain('<option value="" selected>Sem prazo</option>');
+    // O atual se lê "até …" mesmo quando é um atalho; só ele vem selecionado.
+    const amanha = menuDePrazo("2026-11-05", QUARTA);
+    expect(amanha).toMatch(/^<span class="qd-prazo">.*<select[^>]*><option value="2026-11-05" selected>até /);
+    expect(amanha.match(/ selected/g)).toHaveLength(1);
+  });
+
+  it("sem quadro: o form de criar com meta opcional e o botão sempre habilitado", () => {
+    const h = String(semQuadro(MAL, QUARTA));
+    expect(h).toContain('data-form="criar-quadro"');
+    expect(h).toContain('id="qd-criar-prazo"');
+    expect(h).toMatch(/<button type="submit" class="qd-bt qd-bt-pri">Criar quadro<\/button>/);
+    expect(h).not.toMatch(/required|disabled/);
+    expect(h).not.toContain("<img");
   });
 });

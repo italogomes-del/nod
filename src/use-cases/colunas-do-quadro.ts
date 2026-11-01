@@ -80,13 +80,12 @@ export const decidirColunasDoQuadro: CasoDeUso<{ decisaoId: string; recusar: boo
     texto = `Colunas do quadro de ${payload.anfitriaoNome} mantidas.`;
   } else {
     const travado = await deps.repos.quadros.buscarTravado(payload.quadroId);
-    if (!travado) throw new ErroDeDominio("nao_encontrado", { cause: "o quadro sumiu" });
-    if (revisaoDasColunas(colunasDe(travado)) !== payload.revisao) {
-      // O quadro mudou depois do card: aplicar seria trocar outra coisa. Fecha como recusada e avisa.
+    // O quadro sumiu (removido, NOD-415) ou mudou depois do card: aplicar seria trocar outra coisa. Fecha como recusada e avisa.
+    if (!travado || revisaoDasColunas(colunasDe(travado)) !== payload.revisao) {
       const fechada = await deps.repos.decisoes.decidir(input.decisaoId, { por: deps.escopo.pessoaId, agora });
       if (!fechada) throw new ErroDeDominio("estado_invalido", { cause: "decisão já fechada" });
       await deps.repos.propostas.decidir(proposta.id, "recusada");
-      await registrar(deps, proposta.conversaId, "As colunas mudaram depois desta proposta: nada foi trocado. Peça de novo se ainda quiser.", events);
+      await registrar(deps, proposta.conversaId, travado ? "As colunas mudaram depois desta proposta: nada foi trocado. Peça de novo se ainda quiser." : "O quadro foi removido depois desta proposta: nada foi trocado.", events);
       // As outras abas e a Sua vez fecham o card também (revisão 3 do PR #615): o mesmo evento, como recusa.
       events.push(evento(deps.escopo, { kind: "decisao_decidida", autoria, agora, conversaId: proposta.conversaId, turnoId: fechada.turnoId, dados: { decisao_id: fechada.id, tipo: "colunas_quadro", recusada: true } }));
       // Sem lançar: a recusa precisa ficar gravada; a rota devolve 409 depois do commit (o molde da NOD-159).

@@ -83,6 +83,22 @@
 .qd-barra { position: relative; display: inline-block; width: 72px; height: 4px; margin: 0 8px 0 12px; border-radius: 2px; background: var(--line); overflow: hidden; }
 .qd-barra > i { position: absolute; inset: 0 auto 0 0; border-radius: 2px; background: var(--ink-2); }
 .qd-meta-n { color: var(--ink-2); font-variant-numeric: tabular-nums; }
+/* NOD-415 (ADR-141): meta e prazo editáveis no topo; sem meta (fluxo contínuo), só "+ Meta" e o prazo, sem número. */
+.qd-editavel { padding: 0 2px; margin: 0 -2px; border: 0; border-radius: 4px; background: none; font: inherit; font-weight: 600; color: var(--ink-2); cursor: text; text-align: left; }
+.qd-editavel:hover { background: var(--line); }
+.qd-meta-mais { color: var(--ink-3); text-decoration: none; }
+.qd-remover { margin-left: auto; color: var(--ink-3); font-size: 12px; text-decoration: none; }
+.qd-remover:hover { color: var(--ink-2); }
+.qd-meta-mais:hover { color: var(--ink-2); }
+.qd-meta-form { display: inline-flex; }
+.qd-meta-in { min-width: 220px; max-width: 100%; height: 28px; padding: 0 8px; border: 1px solid var(--line-strong); border-radius: 6px; background: transparent; color: var(--ink); font: inherit; font-size: 13px; }
+.qd-prazo { display: inline-flex; align-items: center; gap: 6px; }
+.qd-prazo-sel { height: 24px; padding: 0 4px; border: 0; border-radius: 4px; background: none; color: inherit; font: inherit; cursor: pointer; }
+.qd-prazo-sel:hover { background: var(--line); }
+.qd-prazo-data { height: 24px; border: 1px solid var(--line-strong); border-radius: 4px; background: transparent; color: var(--ink); font: inherit; }
+.qd-criar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; width: 100%; }
+.qd-criar .qd-meta-in { flex: 1 1 240px; height: 36px; }
+.qd-criar .qd-prazo-sel { height: 36px; padding: 0 8px; border: 1px solid var(--line-strong); }
 .qd-risco { display: inline-flex; align-items: center; color: var(--ink); font-weight: 500; }
 .qd-risco::after { content: ""; width: 6px; height: 6px; margin-left: 6px; border-radius: 50%; background: var(--warning); }
 .qd-flag { margin-left: auto; padding: 0 9px; border: 1px dashed var(--line-strong); border-radius: 999px; font-size: 11.5px; line-height: 20px; color: var(--ink-3); white-space: nowrap; }

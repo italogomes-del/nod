@@ -1,3 +1,4 @@
+import { varrerRiscosDosQuadros } from "../../use-cases/risco-quadro.ts";
 import type { Decisao } from "../../contracts/decisao.ts";
 import { ehErroDeDominio } from "../../domain/erro.ts";
 import { redigir } from "../../domain/redacao.ts";
@@ -40,6 +41,8 @@ export type OpcoesVarredor = {
    * janela de idade; uma a cada INTERVALO_ESPERAS_DE_COLEGA_MS basta (o prazo é de 24 h). Ausente = toda passada (testes).
    */
   esperasPassadas?: Map<string, number>;
+  /** NOD-415: a última passada dos riscos de prazo dos quadros, por pessoa; uma a cada INTERVALO_RISCOS_QUADRO_MS. Ausente = toda passada (testes). */
+  riscosPassados?: Map<string, number>;
   /** NOD-219: quando cada turno velho na fila foi observado (turnos-orfaos.ts); o laço cria um mapa só para o processo. */
   turnosObservados?: TurnosObservados;
   /** ADR-115: a idade a partir da qual a decisão `em_revisao` vira cartão; ausente = RECOLHER_REVISAO_MS (2 × o prazo). Só o teste muda. */
@@ -48,6 +51,8 @@ export type OpcoesVarredor = {
 
 /** NOD-377: o intervalo entre duas passadas das esperas de colega da mesma pessoa. */
 export const INTERVALO_ESPERAS_DE_COLEGA_MS = 5 * 60_000;
+/** NOD-415 (ADR-141): o risco de prazo chega com o tempo; uma passada a cada 15 min basta (o aviso é de dias). */
+export const INTERVALO_RISCOS_QUADRO_MS = 15 * 60_000;
 
 /** ADR-115 (0093): a retenção de `acoes_pelo_modo` (o resumo da ação e o motivo do revisor são texto livre). */
 export const RETENCAO_ACOES_PELO_MODO_MS = 90 * 24 * 60 * 60_000;
@@ -107,6 +112,18 @@ export async function varrerPessoa(escopo: Escopo, tx: Transacao, opcoes: Opcoes
     if (duracaoMs > 1_000) log("aviso", "esperas_de_colega_lenta", { tenant_id: escopo.tenantId, duracao_ms: duracaoMs, entregues: r.data.entregues.length, avisados: r.data.avisados.length, limpos: r.data.limpos.length });
   } catch (e) {
     log("erro", "esperas_de_colega_falhou", { erro: ehErroDeDominio(e) ? e.codigo : e instanceof Error ? e.name : "desconhecido" });
+  }
+  // NOD-415 (ADR-141): o risco de prazo dos quadros, em transação própria; o aviso sai uma vez por (quadro, meta, prazo).
+  const ultimaRiscos = opcoes.riscosPassados?.get(chaveEsperas);
+  if (ultimaRiscos === undefined || opcoes.agora() - ultimaRiscos >= INTERVALO_RISCOS_QUADRO_MS) try {
+    opcoes.riscosPassados?.set(chaveEsperas, opcoes.agora());
+    await tx(async (trx) => {
+      const deps: Deps = { repos: criarRepos(trx, escopo), services: opcoes.services, useCases: opcoes.useCases, tx, escopo, agora: opcoes.agora };
+      const r = await varrerRiscosDosQuadros(deps);
+      if (r.events.length) await deps.repos.events.gravarComOutbox(r.events);
+    });
+  } catch (e) {
+    log("erro", "riscos_quadro_falhou", { erro: ehErroDeDominio(e) ? e.codigo : e instanceof Error ? e.name : "desconhecido" });
   }
   // definido em 2026-10-12 (ADR-099, I9): as frentes de lote que caíram (frentes-caidas.ts), também em transação própria.
   try {
@@ -289,7 +306,7 @@ export async function varrer(db: Db, opcoes: OpcoesVarredor, laco: OpcoesLaco = 
 }
 
 export function iniciarVarredorExpiracao(db: Db, opcoesIniciais: OpcoesVarredor & { intervaloMs?: number }, laco: OpcoesLaco = {}): { parar(): Promise<void> } {
-  const opcoes = { ...opcoesIniciais, pedidosAdiados: opcoesIniciais.pedidosAdiados ?? new Map<string, number>(), esperasAdiadas: opcoesIniciais.esperasAdiadas ?? new Map<string, number>(), esperasPassadas: opcoesIniciais.esperasPassadas ?? new Map<string, number>(), turnosObservados: opcoesIniciais.turnosObservados ?? new Map<string, number>() };
+  const opcoes = { ...opcoesIniciais, pedidosAdiados: opcoesIniciais.pedidosAdiados ?? new Map<string, number>(), esperasAdiadas: opcoesIniciais.esperasAdiadas ?? new Map<string, number>(), esperasPassadas: opcoesIniciais.esperasPassadas ?? new Map<string, number>(), riscosPassados: opcoesIniciais.riscosPassados ?? new Map<string, number>(), turnosObservados: opcoesIniciais.turnosObservados ?? new Map<string, number>() };
   let rodando = false;
   let emVoo: Promise<unknown> | null = null;
   const timer = setInterval(() => {

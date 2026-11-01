@@ -28,7 +28,7 @@ const ENTRADA = `
 import { criarQuadroNaTela } from "./web/lib/quadro-na-tela.ts";
 const agora = 1_700_000_000_000;
 const tarefa = (id, titulo, status, extra = {}) => ({ id, quadroId: "q1", titulo, descricao: "Descrição de " + titulo, status, agenteId: "a", ordem: Number(id.slice(1)),
-  linearId: null, linearUrl: null, prUrl: null, pergunta: null, resposta: null, deFora: false, turnoId: null, criadoEm: agora, mudadoEm: agora,
+  linearId: null, linearUrl: null, prUrl: null, pergunta: null, resposta: null, deFora: false, turnoId: null, criadoEm: agora, mudadoEm: agora, terminadaEm: null,
   execucao: null, agenteNome: "Ada", ...extra });
 const base = () => ({ id: "q1", agenteId: "a", meta: "Lançar a jornada do quadro", prazo: "2026-11-06", cumpridoEm: null, resumo: null, criadoEm: agora, atualizadoEm: agora,
   agenteNome: "Ada", ultimoLote: null, feitas: 1, total: 4, tarefas: [

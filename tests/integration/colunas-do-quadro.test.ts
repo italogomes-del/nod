@@ -245,6 +245,21 @@ describeIntegracao("colunas do quadro (NOD-448, ADR-140)", () => {
     });
   });
 
+  it("card de colunas depois de remover o quadro (NOD-415): confirmar fecha como obsoleto, sem preso na Sua vez", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      ok(await m.pessoa([{ tipo: "criar_quadro", meta: "M" }]));
+      const r = ok(await executar(m.d, gerirQuadro, { ...(await m.turno()), acoes: [{ tipo: "substituir_colunas", colunas: DOCES }] }));
+      if (!r.data.ok || !r.data.proposta_id) throw new Error("sem proposta");
+      ok(await m.pessoa([{ tipo: "remover_quadro" }]));
+      const obs = await executar(m.d, decidirColunasDoQuadro, { decisaoId: r.data.proposta_id, recusar: false, executor: "catcher" });
+      expect(obs.data).toMatchObject({ aplicado: false, obsoleta: true });
+      expect(obs.events.map((e) => e.kind)).toContain("decisao_decidida");
+      expect((await m.d.repos.propostas.buscar(r.data.proposta_id))?.estado).toBe("recusada");
+      expect(await m.d.repos.quadros.doAgente(m.doces.agenteId)).toBeNull();
+    });
+  });
+
   it("o recibo do card conta as tarefas que mudaram ao confirmar, mesmo as criadas depois do card (revisão do PR #615)", async () => {
     await withRollback(MARLON, async (trx) => {
       const m = await montar(trx);

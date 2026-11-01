@@ -92,6 +92,8 @@ export type DadosGeral = {
   avisos: EstadoAvisos;
   modoDev: boolean;
   experimentos: Experimentos;
+  /** NOD-415 (ADR-141): a flag NOD_QUADROS libera os quadros para esta pessoa; sem ela, a chave do Quadro nem aparece. */
+  quadroLiberado?: boolean;
   /** NOD-119: a densidade da barra neste computador (ausente = Confortável). */
   densidade?: Densidade;
 };
@@ -126,7 +128,8 @@ export function renderGeral(d: DadosGeral, ui: ConfigUi, celular = ehCelular(), 
       controle: { tipo: "switch", ligado: d.modoDev, acao: "alternar-modo-dev" },
     }),
     // NOD-429: o Quadro é tela em teste: a linha só aparece com o Modo dev ligado (ou com o Quadro já ligado, para desligar).
-    ...EXPERIMENTOS.filter((e) => e.chave !== "quadro" || d.modoDev || d.experimentos.quadro).map((e) => linhaConfig({
+    // NOD-415: e só para quem a flag NOD_QUADROS libera.
+    ...EXPERIMENTOS.filter((e) => e.chave !== "quadro" || (d.quadroLiberado === true && (d.modoDev || d.experimentos.quadro))).map((e) => linhaConfig({
       titulo: e.nome,
       detalhe: e.dica,
       controle: { tipo: "switch", ligado: d.experimentos[e.chave] ?? false, acao: "alternar-experimento", dados: { experimento: e.chave } },

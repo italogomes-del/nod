@@ -25,7 +25,7 @@ import { withRollback } from "../helpers/with-rollback.ts";
  * bot comum chegam ao mesmo quadro. É o arquivo que o registro cita como `contrato` (src/domain/acoes/quadro.ts).
  */
 
-type Retrato = { meta: string; prazo: string | null; cumprida: boolean; resumo: string | null; colunas: unknown[]; tarefas: unknown[]; turnosAbertos: number };
+type Retrato = { meta: string | null; prazo: string | null; cumprida: boolean; resumo: string | null; colunas: unknown[]; tarefas: unknown[]; turnosAbertos: number };
 const retrato = (q: QuadroDto | null, turnos: number): Retrato | null =>
   q
     ? {
@@ -98,6 +98,10 @@ describeIntegracao("paridade tela × chat do quadro.* (NOD-442, ADR-135)", () =>
     preparar?: (m: M) => OpQuadro[][];
     tela: (m: M, q: { anfitriao: string; tarefa: (titulo: string) => Promise<string>; ultimoLote: () => Promise<string> }) => Promise<{ metodo: string; caminho: string; corpo?: unknown; status: number }>;
     chat: (m: M) => OpQuadro;
+    /** A ação apaga o quadro: os dois lados terminam sem quadro. */
+    semQuadroNoFim?: boolean;
+    /** Quem chama o gerir_quadro é o próprio anfitrião (o remover é só do próprio quadro). */
+    peloAnfitriao?: boolean;
     /** O chat abre um card: a pessoa confirma antes da comparação. */
     confirmar?: true;
   };
@@ -135,6 +139,15 @@ describeIntegracao("paridade tela × chat do quadro.* (NOD-442, ADR-135)", () =>
       preparar: (m) => [...BASE(m), [{ tipo: "mudar_tarefa", tarefa: "T1", status: "feito" }, { tipo: "criar_tarefa", titulo: "T4" }]],
       tela: async (_m, q) => ({ metodo: "POST", caminho: `/agentes/${q.anfitriao}/quadro/lotes/${await q.ultimoLote()}/desfazer`, status: 200 }),
       chat: () => ({ tipo: "desfazer" }),
+    },
+    {
+      // NOD-415 (ADR-141): voltar a agente comum. O preparo deixa um turno de tarefa rodando: a remoção o para.
+      id: "quadro.remover",
+      preparar: (m) => [...BASE(m), [{ tipo: "mudar_tarefa", tarefa: "T1", status: "afazer", agente: m.nomeCaio }]],
+      tela: async (_m, q) => ({ metodo: "DELETE", caminho: `/agentes/${q.anfitriao}/quadro`, status: 200 }),
+      chat: (m) => ({ tipo: "remover_quadro", bot: m.nomeChat }),
+      semQuadroNoFim: true,
+      peloAnfitriao: true,
     },
     // NOD-448 (ADR-140): as colunas.
     {
@@ -197,7 +210,8 @@ describeIntegracao("paridade tela × chat do quadro.* (NOD-442, ADR-135)", () =>
       const resp = await servidor.chamar(sessao, t.metodo, t.caminho, t.corpo);
       expect(resp.status, await resp.clone().text()).toBe(t.status);
 
-      const ctx = await turnoDe(m.d, m.gil.agenteId, m.gil.conversaId);
+      const quem = c.peloAnfitriao ? m.chat : m.gil;
+      const ctx = await turnoDe(m.d, quem.agenteId, quem.conversaId);
       const r = await executar(m.d, gerirQuadro, { ...ctx, quadro: m.nomeChat, acoes: [c.chat(m)] });
       expect(r.data, JSON.stringify(r.data)).toMatchObject({ ok: true });
       if (c.confirmar) {
@@ -208,7 +222,8 @@ describeIntegracao("paridade tela × chat do quadro.* (NOD-442, ADR-135)", () =>
       }
 
       const doLadoDaTela = await estado(m, m.tela.agenteId);
-      expect(doLadoDaTela).not.toBeNull();
+      if (c.semQuadroNoFim) expect(doLadoDaTela).toBeNull();
+      else expect(doLadoDaTela).not.toBeNull();
       expect(await estado(m, m.chat.agenteId)).toEqual(doLadoDaTela);
     });
   });
@@ -260,12 +275,17 @@ describeIntegracao("paridade tela × chat do quadro.* (NOD-442, ADR-135)", () =>
       const sessao = await servidor.entrar("marlon");
       const base = `/agentes/${m.tela.agenteId}/quadro`;
       expect(await (await servidor.chamar(sessao, "GET", base)).json()).toEqual({ quadro: null });
-      expect((await servidor.chamar(sessao, "POST", base, { meta: "" })).status).toBe(400);
+      // A meta é opcional (NOD-415): vazia cria no fluxo contínuo; tipo errado ou longa demais é 400.
+      expect((await servidor.chamar(sessao, "POST", base, { meta: 3 })).status).toBe(400);
+      expect((await servidor.chamar(sessao, "POST", base, { meta: "x".repeat(201) })).status).toBe(400);
       expect((await servidor.chamar(sessao, "POST", `${base}/tarefas`, { titulo: "x".repeat(201) })).status).toBe(400);
       expect((await servidor.chamar(sessao, "POST", base, { meta: "M" })).status).toBe(201);
       expect((await servidor.chamar(sessao, "PATCH", `${base}/tarefas/00000000-0000-4000-8000-000000000000`, { status: "feito" })).status).toBe(404);
       const corpo = (await (await servidor.chamar(sessao, "GET", base)).json()) as { quadro: QuadroDto };
       expect(corpo.quadro.meta).toBe("M");
+      // Tirar a meta pela tela (PATCH meta null) volta ao fluxo contínuo.
+      expect((await servidor.chamar(sessao, "PATCH", base, { meta: null })).status).toBe(200);
+      expect(((await (await servidor.chamar(sessao, "GET", base)).json()) as { quadro: QuadroDto }).quadro.meta).toBeNull();
       await m.d.repos.preferencias.gravar({ experimentos: { quadro: false } });
       expect((await servidor.chamar(sessao, "GET", base)).status).toBe(403);
       expect((await servidor.chamar(sessao, "PATCH", base, { meta: "N" })).status).toBe(403);

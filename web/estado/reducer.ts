@@ -562,6 +562,8 @@ export type Estado = {
   usoDoMac: UsoDoMac;
   /** ADR-111: as chaves de experimento do menu da conta (Calibração, Memória longa, ADR-112 Modo WhatsApp e, NOD-429, Quadro), lidas de `GET preferencias`. */
   experimentos: Experimentos;
+  /** NOD-415 (ADR-141): a flag NOD_QUADROS libera os quadros para esta pessoa (ausente = não liberado). */
+  quadroLiberado?: boolean;
   /** O cartão do tempo aberto no topo da task (protótipo "Nod — tempo da task"): o id da task, ou null. */
   tempoTaskAberto: string | null;
 };
@@ -684,7 +686,7 @@ export type Acao =
   /** ADR-099 (parte 5): abre (o id do bot) ou fecha (null) as frentes de um bot na tela Trabalhos. */
   | { tipo: "bot-trabalhos"; agenteId: string | null }
   | { tipo: "uso-do-mac"; uso: UsoDoMac }
-  | { tipo: "experimentos"; experimentos: Experimentos }
+  | { tipo: "experimentos"; experimentos: Experimentos; quadroLiberado?: boolean }
   | { tipo: "tempo-task"; id: string | null }
   | { tipo: "hidratar-taxas-linhas"; taxas: TaxaDeAbertura[] };
 
@@ -2015,7 +2017,7 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
     case "uso-do-mac":
       return estado.usoDoMac === acao.uso ? estado : { ...estado, usoDoMac: acao.uso };
     case "experimentos":
-      return { ...estado, experimentos: acao.experimentos };
+      return { ...estado, experimentos: acao.experimentos, ...(acao.quadroLiberado !== undefined ? { quadroLiberado: acao.quadroLiberado } : {}) };
     case "tempo-task":
       return estado.tempoTaskAberto === acao.id ? estado : { ...estado, tempoTaskAberto: acao.id };
     case "hidratar-taxas-linhas":

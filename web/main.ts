@@ -1414,7 +1414,7 @@ async function alternarModoDev(): Promise<void> {
 async function alternarExperimento(chave: keyof Experimentos): Promise<void> {
   if (!api) return;
   const p = await api.gravarPreferencias({ experimentos: { [chave]: !estado.experimentos[chave] } });
-  if (p.experimentos) dispatch({ tipo: "experimentos", experimentos: p.experimentos });
+  if (p.experimentos) dispatch({ tipo: "experimentos", experimentos: p.experimentos, quadroLiberado: p.quadroLiberado ?? false });
 }
 
 async function reidratar(): Promise<void> {
@@ -2807,7 +2807,7 @@ async function iniciarSessao(escopo: Escopo): Promise<void> {
     if (p.usoDoMac) dispatch({ tipo: "uso-do-mac", uso: p.usoDoMac });
     atualizarModoNoComposer();
     dispatch({ tipo: "modo-dev", ligado: p.modoDev });
-    if (p.experimentos) dispatch({ tipo: "experimentos", experimentos: p.experimentos });
+    if (p.experimentos) dispatch({ tipo: "experimentos", experimentos: p.experimentos, quadroLiberado: p.quadroLiberado ?? false });
     aplicarModoDevNoComputador(p.modoDev);
     const c = conversaDaTela(estado);
     if (p.modoDev && c) void carregarRaioX(c.conversa.id);

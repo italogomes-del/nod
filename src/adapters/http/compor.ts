@@ -205,6 +205,8 @@ import { criarServicoDitado } from "../voz/ditado.ts";
 import { autorizarDitado, type ContextoDitado } from "../../use-cases/ditado.ts";
 import { atenderLigacao, encerrarLigacao, gravarFalaLigacao, leituraDaDecisao, mandarNoChatDaLigacao, reabrirCerebroDaLigacao, resultadoDaTarefaDaLigacao, type ContextoLigacao } from "../../use-cases/ligacoes.ts";
 import { cancelarTurno } from "../../use-cases/cancelar-turno.ts";
+import { lerLiberacaoQuadros } from "../../domain/flag-quadros.ts";
+import { configurarLiberacaoQuadros } from "../../repositories/raio-x.repo.ts";
 import type { IncomingMessage, Server } from "node:http";
 
 /**
@@ -411,6 +413,8 @@ export function comporApp(o: OpcoesCompor): App {
   // contas nascem depois, sobre `dentro`; false = desligadas, e abrir_conta volta `indisponivel`.
   // NOD-351: a mesma regra de comporContas (null sem NOD_CONTAS=1): o catálogo e a situação da conta saem dela.
   const contasLigadas = env.NOD_CONTAS === "1";
+  // NOD-415 (ADR-141): NOD_QUADROS libera os quadros (desligado | admins | todos; produção = admins).
+  configurarLiberacaoQuadros(lerLiberacaoQuadros(env));
   const depsDe = (trx: Tx, escopo: Escopo): Deps => ({ repos: criarRepos(trx, escopo), services, useCases, tx: (fn) => fn(trx), escopo, agora: relogio, fusoPadrao, modeloPadrao, ...(contasLigadas ? { situacaoConta: () => situacaoDaConta(trx, escopo) } : {}) });
   const depsSobre = (trx: Tx): Deps => depsDe(trx, escopoDoContexto());
   const gravar = async (trx: Tx, events: RuntimeEvent[]): Promise<void> => {

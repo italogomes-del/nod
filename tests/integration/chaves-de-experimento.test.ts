@@ -1,7 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import type { Inventario } from "../../src/contracts/inventario.ts";
+import { QUADROS_PARA_TODOS } from "../../src/domain/flag-quadros.ts";
 import { LINHA_CALIBRACAO } from "../../src/domain/prompt-sistema.ts";
+import { configurarLiberacaoQuadros, preferenciasRepo } from "../../src/repositories/raio-x.repo.ts";
+import { aplicarLoteQuadro } from "../../src/use-cases/quadro.ts";
 import { autoriaPessoa } from "../../src/use-cases/autoria-evento.ts";
 import { emitirPlanoTurno } from "../../src/use-cases/emitir-plano-turno.ts";
 import { gravarPreferencias } from "../../src/use-cases/raio-x.ts";
@@ -80,6 +83,41 @@ describeIntegracao("chaves de experimento (ADR-111)", () => {
     expect(desligado.texto).not.toContain("mcp__nod__gerir_quadro");
     expect(ligado.texto.replace(" mcp__nod__gerir_quadro,", "")).toBe(desligado.texto);
     expect(ligado.composicao).toEqual({ calibracao: false, memoriaLonga: false, whatsapp: false, anexosAnteriores: 0 });
+  });
+
+  describe("NOD-415 (ADR-141): a flag NOD_QUADROS", () => {
+    afterEach(() => configurarLiberacaoQuadros(QUADROS_PARA_TODOS));
+
+    /** O que a pessoa enxerga do quadro com a liberação dada: a chave, a ferramenta no plano e o lote. */
+    async function oQueVe(liberacao: Parameters<typeof configurarLiberacaoQuadros>[0]) {
+      return withRollback(escopo, async (trx) => {
+        const m = await montar(trx, "Bot do quadro");
+        // A chave ligada ANTES (como quem ligou quando era para todos): a flag tem de valer mesmo assim.
+        configurarLiberacaoQuadros(QUADROS_PARA_TODOS);
+        await m.repos.preferencias.gravar({ experimentos: { quadro: true } });
+        configurarLiberacaoQuadros(liberacao);
+        // Repo novo: a liberação é lida uma vez por repo (um por transação, como no servidor).
+        const deps = { ...m.deps, repos: { ...m.deps.repos, preferencias: preferenciasRepo(trx, escopo) } };
+        const prefs = (await gravarPreferencias(deps, { experimentos: { quadro: true } })).data;
+        const plano = (await emitirPlanoTurno(deps, { turnoId: m.turno.id, machineId: randomUUID(), executor: "local", harnesses: { "claude-cli": pronto } })).data;
+        const r = (await aplicarLoteQuadro(deps, { anfitriaoId: m.agenteId, ops: [{ tipo: "criar_quadro", meta: "Lançar" }], autor: { tipo: "pessoa" }, executor: "local" })).data;
+        const lote = r.ok ? "ok" : r.erro;
+        return { liberado: prefs.quadroLiberado, chave: prefs.experimentos?.quadro, ferramenta: plano.promptSistema.includes("mcp__nod__gerir_quadro"), lote };
+      });
+    }
+
+    it("em admins, quem não é admin não vê a chave, a ferramenta nem consegue criar quadro", async () => {
+      expect(await oQueVe({ modo: "admins", admins: ["outra@pessoa.com"] })).toMatchObject({ liberado: false, chave: false, ferramenta: false, lote: "experimento_desligado" });
+    });
+
+    it("em admins, o admin por id vê tudo", async () => {
+      expect(await oQueVe({ modo: "admins", admins: [escopo.pessoaId] })).toMatchObject({ liberado: true, chave: true, ferramenta: true, lote: "ok" });
+    });
+
+    it("desligado fecha para todos; todos abre para todos", async () => {
+      expect(await oQueVe({ modo: "desligado", admins: [escopo.pessoaId] })).toMatchObject({ liberado: false, chave: false, ferramenta: false, lote: "experimento_desligado" });
+      expect(await oQueVe(QUADROS_PARA_TODOS)).toMatchObject({ liberado: true, chave: true, ferramenta: true, lote: "ok" });
+    });
   });
 
   it("ligadas: a linha da Calibração entra, a fala vai inteira e o anexo anterior volta marcado; o Raio-X grava", async () => {

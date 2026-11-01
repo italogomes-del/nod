@@ -19,10 +19,11 @@ async function montar(trx: Tx, o: { experimento?: boolean } = {}) {
   const sufixo = Math.random().toString(36).slice(2, 7);
   const ana = await agenteComConversa(trx, MARLON, { nome: `Ana ${sufixo}` });
   const beto = await agenteComConversa(trx, MARLON, { nome: `Beto ${sufixo}` });
-  const { deps, repos } = depsSobre(trx, MARLON, { agora: () => AGORA });
+  const relogio = { agora: AGORA };
+  const { deps, repos } = depsSobre(trx, MARLON, { agora: () => relogio.agora });
   if (o.experimento !== false) await repos.preferencias.gravar({ experimentos: { quadro: true } });
   const lote = (p: Partial<PedidoLote> & Pick<PedidoLote, "ops">) => aplicarLoteQuadro(deps, { autor: { tipo: "agente", agenteId: ana.agenteId }, executor: "catcher", ...p });
-  return { ana, beto, anaNome: `Ana ${sufixo}`, betoNome: `Beto ${sufixo}`, deps, repos, lote };
+  return { ana, beto, anaNome: `Ana ${sufixo}`, betoNome: `Beto ${sufixo}`, deps, repos, lote, relogio };
 }
 
 describeIntegracao("quadro-agente (NOD-442)", () => {
@@ -54,6 +55,21 @@ describeIntegracao("quadro-agente (NOD-442)", () => {
     });
   });
 
+  it("um bot que é quadro pode ser responsável por tarefa de outro quadro: começa na conversa dele e o quadro dele não muda (NOD-415, critério 10)", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const doBeto = await m.lote({ autor: { tipo: "agente", agenteId: m.beto.agenteId }, ops: [{ tipo: "criar_quadro", meta: null }, { tipo: "criar_tarefa", titulo: "Revisar copy" }] });
+      if (!doBeto.data.ok) throw new Error(doBeto.data.detalhe);
+      const antes = await m.repos.quadros.tarefas(doBeto.data.quadro!.id);
+      const r = await m.lote({ ops: [{ tipo: "criar_quadro", meta: "Lançar" }, { tipo: "criar_tarefa", titulo: "Tela", agente: m.betoNome }] });
+      if (!r.data.ok) throw new Error(r.data.detalhe);
+      expect(r.data.quadro!.tarefas.map((t) => [t.titulo, t.status, t.agenteNome])).toEqual([["Tela", "fazendo", m.betoNome]]);
+      const turno = await m.repos.turnos.buscar(r.data.comecaram[0]!.turnoId);
+      expect(turno).toMatchObject({ agenteId: m.beto.agenteId, conversaId: m.beto.conversaId, origem: "delegacao" });
+      expect(await m.repos.quadros.tarefas(doBeto.data.quadro!.id)).toEqual(antes);
+    });
+  });
+
   it("tudo ou nada: uma ação inválida não grava nem o quadro", async () => {
     await withRollback(MARLON, async (trx) => {
       const m = await montar(trx);
@@ -77,6 +93,88 @@ describeIntegracao("quadro-agente (NOD-442)", () => {
       // Sair de feito reabre a meta.
       const volta = await m.lote({ autor: { tipo: "pessoa" }, anfitriaoId: m.ana.agenteId, ops: [{ tipo: "mudar_tarefa", tarefa: "T1", status: "revisao" }] });
       expect(volta.data).toMatchObject({ ok: true, quadro: { cumpridoEm: null, resumo: null } });
+    });
+  });
+
+  it("meta opcional (NOD-415, ADR-141): nasce sem meta no fluxo contínuo, nunca cumpre; ganha meta, o feito antes não conta, cumpre; tirar a meta reabre", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const pessoa = { autor: { tipo: "pessoa" }, anfitriaoId: m.ana.agenteId } as const;
+      const c = await m.lote({ ...pessoa, ops: [{ tipo: "criar_quadro" }, { tipo: "criar_tarefa", titulo: "T1" }] });
+      if (!c.data.ok) throw new Error(c.data.detalhe);
+      expect(c.data.quadro).toMatchObject({ meta: null, prazo: null, cumpridoEm: null });
+      const feito = await m.lote({ ops: [{ tipo: "mudar_tarefa", tarefa: "T1", status: "feito" }] });
+      expect(feito.data).toMatchObject({ ok: true, quadro: { meta: null, cumpridoEm: null, resumo: null } });
+      // A meta vem depois: T1, feita antes dela, não a cumpre nem entra no "N de M" (revisões 2 e 3).
+      m.relogio.agora = AGORA + 60_000;
+      const comMeta = await m.lote({ ...pessoa, ops: [{ tipo: "editar_quadro", meta: "Lançar", prazo: "2026-11-06" }, { tipo: "criar_tarefa", titulo: "T2" }] });
+      expect(comMeta.data).toMatchObject({ ok: true, quadro: { meta: "Lançar", prazo: "2026-11-06", cumpridoEm: null, feitas: 0, total: 1 } });
+      // Renomear T1 (mexe no mudado_em) não a devolve à meta (revisão 3); corrigir o texto da meta não recomeça a contagem.
+      m.relogio.agora = AGORA + 120_000;
+      const renomeia = await m.lote({ ...pessoa, ops: [{ tipo: "mudar_tarefa", tarefa: "T1", titulo: "T1 (antiga)" }, { tipo: "editar_quadro", meta: "Lançar!" }] });
+      expect(renomeia.data).toMatchObject({ ok: true, quadro: { cumpridoEm: null, feitas: 0, total: 1 } });
+      m.relogio.agora = AGORA + 180_000;
+      const cumpre = await m.lote({ ops: [{ tipo: "mudar_tarefa", tarefa: "T2", status: "feito" }] });
+      expect(cumpre.data).toMatchObject({ ok: true, quadro: { cumpridoEm: AGORA + 180_000, feitas: 1, total: 1 } });
+      // Meta NOVA depois de cumprida recomeça: nasce aberta, sem o resumo da anterior, e T2 não conta (revisão 4).
+      m.relogio.agora = AGORA + 240_000;
+      const nova = await m.lote({ ...pessoa, ops: [{ tipo: "editar_quadro", meta: "Fase 2" }, { tipo: "criar_tarefa", titulo: "T3" }] });
+      expect(nova.data).toMatchObject({ ok: true, quadro: { meta: "Fase 2", cumpridoEm: null, resumo: null, feitas: 0, total: 1 } });
+      expect((await m.lote({ ...pessoa, ops: [{ tipo: "desfazer" }] })).data).toMatchObject({ ok: true, quadro: { meta: "Lançar!", metaDesde: AGORA + 60_000, cumpridoEm: AGORA + 180_000, feitas: 1, total: 1 } });
+      // O Desfazer devolveu também o meta_desde: o lote seguinte mantém a meta cumprida (revisão 5).
+      m.relogio.agora = AGORA + 300_000;
+      expect((await m.lote({ ops: [{ tipo: "mudar_tarefa", tarefa: "T2", descricao: "ok" }] })).data).toMatchObject({ ok: true, quadro: { cumpridoEm: AGORA + 180_000, feitas: 1 } });
+      const sem = await m.lote({ ...pessoa, ops: [{ tipo: "editar_quadro", meta: null, prazo: null }] });
+      expect(sem.data).toMatchObject({ ok: true, quadro: { meta: null, prazo: null, cumpridoEm: null, resumo: null } });
+      expect((await m.repos.quadros.doAgente(m.ana.agenteId))?.meta).toBeNull();
+      // O Desfazer do lote devolve a meta.
+      const d = await m.lote({ ...pessoa, ops: [{ tipo: "desfazer" }] });
+      expect(d.data).toMatchObject({ ok: true, quadro: { meta: "Lançar!", prazo: "2026-11-06" } });
+    });
+  });
+
+  it("virar quadro e voltar (NOD-415, ADR-141): remover para o turno da tarefa e apaga o quadro; conversa, memória e o bot ficam; dá para virar de novo", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const memoria = await m.repos.memorias.criar({ agenteId: m.ana.agenteId, tipo: "fato", texto: "gosta de resumos curtos", origem: "pessoa" });
+      const antes = await m.repos.mensagens.listarDaConversa(m.ana.conversaId);
+      const c = await m.lote({ autor: { tipo: "pessoa" }, anfitriaoId: m.ana.agenteId, ops: [{ tipo: "criar_quadro", meta: "M" }, { tipo: "criar_tarefa", titulo: "T1", agente: m.betoNome }] });
+      if (!c.data.ok) throw new Error(c.data.detalhe);
+      const turnoId = c.data.comecaram[0]!.turnoId;
+      const r = await m.lote({ autor: { tipo: "pessoa" }, anfitriaoId: m.ana.agenteId, ops: [{ tipo: "remover_quadro" }] });
+      expect(r.data).toMatchObject({ ok: true, quadro: null, removido: true });
+      expect(r.events?.map((e) => e.kind)).toEqual(["quadro_mudou"]);
+      expect(await m.repos.quadros.doAgente(m.ana.agenteId)).toBeNull();
+      expect((await m.repos.turnos.buscar(turnoId))?.estado).not.toMatch(/pendente|despachando/);
+      expect(await m.repos.agentes.buscar(m.ana.agenteId)).not.toBeNull();
+      expect((await m.repos.memorias.listarDoAgente(m.ana.agenteId)).map((x) => x.id)).toContain(memoria!.id);
+      expect((await m.repos.mensagens.listarDaConversa(m.ana.conversaId)).map((x) => x.id)).toEqual(antes.map((x) => x.id));
+      expect(await m.repos.conversas.buscarPropriaDoAgente(m.ana.agenteId)).toMatchObject({ id: m.ana.conversaId });
+      // Sem quadro, mexer nele recusa; e o bot vira quadro de novo.
+      expect((await m.lote({ ops: [{ tipo: "criar_tarefa", titulo: "x" }] })).data).toMatchObject({ ok: false, erro: "sem_quadro" });
+      expect((await m.lote({ ops: [{ tipo: "remover_quadro" }] })).data).toMatchObject({ ok: false });
+      expect((await m.lote({ autor: { tipo: "pessoa" }, anfitriaoId: m.ana.agenteId, ops: [{ tipo: "criar_quadro" }] })).data).toMatchObject({ ok: true, quadro: { meta: null } });
+    });
+  });
+
+  it("remover_quadro: vai sozinho; um bot só remove o PRÓPRIO quadro, a pedido da pessoa, num turno limpo dela e com o nome confirmado", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      await m.lote({ ops: [{ tipo: "criar_quadro" }] });
+      await m.lote({ autor: { tipo: "agente", agenteId: m.beto.agenteId }, ops: [{ tipo: "criar_quadro" }] });
+      const limpo = { autorNaConversa: true, origemConfiavel: true } as const;
+      expect((await m.lote({ ops: [{ tipo: "remover_quadro", bot: m.anaNome }, { tipo: "criar_tarefa", titulo: "x" }] })).data).toMatchObject({ ok: false, erro: "entrada_invalida" });
+      expect((await m.lote({ ops: [{ tipo: "remover_quadro", bot: m.anaNome }] })).data).toMatchObject({ ok: false, detalhe: expect.stringContaining("só a pedido da pessoa") });
+      expect((await m.lote({ ops: [{ tipo: "remover_quadro", bot: m.anaNome }], autorNaConversa: true, origemConfiavel: false })).data).toMatchObject({ ok: false });
+      // Sem o nome, ou com outro nome: recusa (a confirmação explícita).
+      expect((await m.lote({ ops: [{ tipo: "remover_quadro" }], ...limpo })).data).toMatchObject({ ok: false, detalhe: expect.stringContaining("passe em bot o seu nome") });
+      expect((await m.lote({ ops: [{ tipo: "remover_quadro", bot: m.betoNome }], ...limpo })).data).toMatchObject({ ok: false, detalhe: expect.stringContaining("passe em bot o seu nome") });
+      // O quadro de outro bot: nunca, nem com o nome dele.
+      expect((await m.lote({ quadro: m.betoNome, ops: [{ tipo: "remover_quadro", bot: m.betoNome }], ...limpo })).data).toMatchObject({ ok: false, detalhe: expect.stringContaining("só remove o próprio quadro") });
+      expect(await m.repos.quadros.doAgente(m.beto.agenteId)).not.toBeNull();
+      expect(await m.repos.quadros.doAgente(m.ana.agenteId)).not.toBeNull();
+      expect((await m.lote({ ops: [{ tipo: "remover_quadro", bot: `@${m.anaNome.toUpperCase()}` }], ...limpo })).data).toMatchObject({ ok: true, removido: true });
+      expect(await m.repos.quadros.doAgente(m.beto.agenteId)).not.toBeNull();
     });
   });
 

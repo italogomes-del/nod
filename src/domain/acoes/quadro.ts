@@ -20,8 +20,8 @@ const vivo = { estado: "vivo", via: VIA, contrato: CONTRATO } as const;
 export const ACOES_QUADRO = [
   {
     id: "quadro.criar",
-    titulo: "Criar o quadro de um bot (meta e prazo)",
-    schema: objeto({ meta: P.meta, prazo: P.prazo }, ["meta"]),
+    titulo: "Criar o quadro de um bot (meta e prazo opcionais)",
+    schema: objeto({ meta: P.meta, prazo: P.prazo }, []),
     risco: "muda",
     cartaoNoChat: false,
     chat: vivo,
@@ -80,6 +80,17 @@ export const ACOES_QUADRO = [
     cartaoNoChat: false,
     chat: vivo,
     casoDeUso: "quadro.desfazer",
+  },
+  {
+    // NOD-415 (ADR-141): virar quadro e voltar. Arriscada: sem Desfazer. A tela confirma antes; o bot só remove o PRÓPRIO
+    // quadro, num turno limpo em que a pessoa falou com ele, com o nome dele em `bot` (src/use-cases/quadro.ts, removerQuadro).
+    id: "quadro.remover",
+    titulo: "Remover o quadro (o bot volta a ser um agente comum; conversa e memória ficam)",
+    schema: objeto({ bot: P.bot }, []),
+    risco: "arriscada",
+    cartaoNoChat: false,
+    chat: vivo,
+    casoDeUso: "quadro.remover",
   },
   // NOD-448 (ADR-140): as colunas. Pela conversa, criar, renomear, mover e remover saem na hora com Desfazer; substituir
   // o conjunto vira um card que a pessoa confirma (cartaoNoChat).

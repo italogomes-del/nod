@@ -42,13 +42,14 @@ function umaAcao<I extends object>(tipo: OpQuadro["tipo"]): CasoDeUso<Base & I, 
 type CamposTarefa = { titulo?: string; descricao?: string; status?: string; agente?: string | null };
 
 export const EXECUTORES_QUADRO = {
-  "quadro.criar": umaAcao<{ meta: string; prazo?: string | null }>("criar_quadro"),
-  "quadro.editar": umaAcao<{ meta?: string; prazo?: string | null }>("editar_quadro"),
+  "quadro.criar": umaAcao<{ meta?: string | null; prazo?: string | null }>("criar_quadro"),
+  "quadro.editar": umaAcao<{ meta?: string | null; prazo?: string | null }>("editar_quadro"),
   "quadro.criar_tarefa": umaAcao<CamposTarefa & { titulo: string }>("criar_tarefa"),
   "quadro.importar_linear": umaAcao<{ itens: ItemLinear[] }>("importar_linear"),
   "quadro.mudar_tarefa": umaAcao<CamposTarefa & { tarefa: string; pr_url?: string | null; pergunta?: string | null; excluir?: boolean }>("mudar_tarefa"),
   "quadro.responder": umaAcao<{ tarefa: string; resposta: string }>("responder"),
   "quadro.desfazer": umaAcao<{ lote?: string }>("desfazer"),
+  "quadro.remover": umaAcao<{ bot?: string }>("remover_quadro"),
   "quadro.criar_coluna": umaAcao<{ nome: string; grupo: string; depois_de?: string }>("criar_coluna"),
   "quadro.renomear_coluna": umaAcao<{ coluna: string; nome: string }>("renomear_coluna"),
   "quadro.mover_coluna": umaAcao<{ coluna: string; antes_de?: string; depois_de?: string }>("mover_coluna"),

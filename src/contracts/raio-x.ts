@@ -176,4 +176,5 @@ export const USO_DO_MAC_PADRAO: UsoDoMac = "equilibrado";
  */
 export type Experimentos = { calibracao: boolean; memoriaLonga: boolean; whatsapp: boolean; quadro: boolean };
 export const EXPERIMENTOS_DESLIGADOS: Experimentos = { calibracao: false, memoriaLonga: false, whatsapp: false, quadro: false };
-export type Preferencias = { modoDev: boolean; avisosFechados: string[]; usoDoMac?: UsoDoMac; maquinaPadraoId?: string | null; ordemIas?: IdHarness[] | null; iasNoLimite?: LimitesIa; experimentos?: Experimentos };
+/** NOD-415 (ADR-141): `quadroLiberado` = a flag NOD_QUADROS libera os quadros para esta pessoa (a web só mostra a chave assim). */
+export type Preferencias = { modoDev: boolean; avisosFechados: string[]; usoDoMac?: UsoDoMac; maquinaPadraoId?: string | null; ordemIas?: IdHarness[] | null; iasNoLimite?: LimitesIa; experimentos?: Experimentos; quadroLiberado?: boolean };
