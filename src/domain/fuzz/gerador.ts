@@ -155,9 +155,9 @@ export type RotaDoFuzz = { metodo: string; padrao: string; acao?: string; public
 
 /** Ids para os parâmetros de caminho: absurdo, da pessoa (existe) e de outra pessoa (o RLS tem de esconder). */
 /**
- * Ids reais para os grupos do caminho. `porRecurso` (revisão 9) leva os ids de cada recurso pelo primeiro segmento do
- * caminho (`conversas`, `rotinas`...): a rota `/rotinas/:id` recebe id de rotina, não só de bot, e passa da busca da
- * entidade. O recurso sem entrada usa `daPessoa`/`deOutraPessoa`.
+ * Ids reais para os grupos do caminho. `porRecurso` (revisão 9) leva os ids de cada recurso pelo segmento logo antes do
+ * grupo e, sem ele, pelo primeiro segmento do caminho (`conversas`, `rotinas`, `colunas`...): a rota `/rotinas/:id`
+ * recebe id de rotina, não só de bot, e passa da busca da entidade. O recurso sem entrada usa `daPessoa`/`deOutraPessoa`.
  */
 export type IdsDoFuzz = {
   daPessoa: readonly string[];
@@ -204,8 +204,11 @@ export function caminhoDoPadrao(padrao: string, sorteio: () => number, ids: IdsD
   return semAncoras.replace(GRUPO, (_m, ...args) => {
     const g = args.at(-1) as { nome?: string; sub: string };
     const pos = args.at(-3) as number;
-    const recurso = /^\\\/([a-z_-]+)\\\//.exec(semAncoras.slice(0, pos))?.[1];
-    const doRecurso = recurso ? ids.porRecurso?.[recurso] : undefined;
+    // O segmento logo antes do grupo (`/quadro/colunas/:cid` → `colunas`) vale antes do primeiro (NOD-415).
+    const antes = semAncoras.slice(0, pos);
+    const vizinho = /\\\/([a-z_-]+)\\\/$/.exec(antes)?.[1];
+    const recurso = /^\\\/([a-z_-]+)\\\//.exec(antes)?.[1];
+    const doRecurso = (vizinho ? ids.porRecurso?.[vizinho] : undefined) ?? (recurso ? ids.porRecurso?.[recurso] : undefined);
     return encodeURIComponent(valorDoGrupo(g.nome ?? "", g.sub, sorteio, doRecurso ?? ids));
   }).replace(/\\\//g, "/");
 }
@@ -235,8 +238,11 @@ export function planoDeFuzz(o: { registro: readonly DefinicaoAcao[]; rotas: read
   });
   // As que destroem vão por último (excluir o bot-alvo no meio deixaria as outras ações só com 404), e as públicas (a
   // conta: sair, excluir a conta) depois de todas, porque derrubam a sessão. Ordenação estável: a semente reproduz.
+  // Entre as que destroem, a do recurso mais fundo antes (NOD-415: `bots.excluir` antes de `quadro.remover_coluna`
+  // deixava a coluna só com 404, e a main ficou vermelha com a semente 3044290320): o filho sai antes do pai.
   const peso = (c: CasoDeFuzz) => (c.publica ? 2 : c.metodo === "DELETE" ? 1 : 0);
-  casos.sort((a, b) => peso(a) - peso(b));
+  const fundura = (c: CasoDeFuzz) => (c.metodo === "DELETE" && !c.publica ? c.caminho.split("/").length : 0);
+  casos.sort((a, b) => peso(a) - peso(b) || fundura(b) - fundura(a));
   return { casos, semRota };
 }
 

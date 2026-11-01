@@ -87,6 +87,15 @@ describe("fuzz: gerador puro (NOD-398)", () => {
     expect([...agente].some((c) => c.includes(ROTINA))).toBe(false);
   });
 
+  it("caminhoDoPadrao: o segmento logo antes do grupo vale antes do primeiro (NOD-415): a coluna recebe id de coluna, o bot id de bot", () => {
+    const s = prng(5);
+    const BOT = "22222222-2222-4222-8222-222222222222";
+    const ids = { daPessoa: [BOT], deOutraPessoa: [], porRecurso: { colunas: { daPessoa: ["voce"], deOutraPessoa: [] } } };
+    const caminhos = Array.from({ length: 60 }, () => caminhoDoPadrao("^\\/agentes\\/(?<id>[^/]+)\\/quadro\\/colunas\\/(?<cid>[^/]+)$", s, ids));
+    expect(caminhos).toContain(`/agentes/${BOT}/quadro/colunas/voce`);
+    expect(caminhos.some((c) => c.startsWith("/agentes/voce/") || c.endsWith(`/colunas/${BOT}`))).toBe(false);
+  });
+
   it("planoDeFuzz cobre toda ação com rota e devolve as sem rota", () => {
     const registro = [{ id: "x.criar", titulo: "x", risco: "muda", cartaoNoChat: false, chat: { estado: "nunca", motivo: "t" } }, { id: "x.sem", titulo: "y", risco: "muda", cartaoNoChat: false, chat: { estado: "nunca", motivo: "t" } }] satisfies DefinicaoAcao[];
     const p = planoDeFuzz({ registro, rotas: [{ metodo: "POST", padrao: "^\\/x$", acao: "x.criar" }, { metodo: "GET", padrao: "^\\/x$" }], semente: 3, n: 10, ids: IDS });
@@ -94,6 +103,19 @@ describe("fuzz: gerador puro (NOD-398)", () => {
     expect(p.casos).toHaveLength(10);
     expect(p.casos.every((c) => c.acao === "x.criar" && c.metodo === "POST" && c.caminho === "/x")).toBe(true);
     expect(planoDeFuzz({ registro, rotas: [{ metodo: "POST", padrao: "^\\/x$", acao: "x.criar" }], semente: 3, n: 10, ids: IDS })).toEqual(p);
+  });
+
+  it("planoDeFuzz: entre os DELETE, o recurso mais fundo vai antes (a coluna antes do quadro, o quadro antes do bot)", () => {
+    const def = (id: string) => ({ id, titulo: id, risco: "muda", cartaoNoChat: false, chat: { estado: "nunca", motivo: "t" } }) satisfies DefinicaoAcao;
+    const registro = [def("bots.excluir"), def("quadro.remover"), def("quadro.remover_coluna"), def("bots.editar")];
+    const rotas = [
+      { metodo: "DELETE", padrao: "^\\/agentes\\/(?<id>[^/]+)$", acao: "bots.excluir" },
+      { metodo: "DELETE", padrao: "^\\/agentes\\/(?<id>[^/]+)\\/quadro$", acao: "quadro.remover" },
+      { metodo: "DELETE", padrao: "^\\/agentes\\/(?<id>[^/]+)\\/quadro\\/colunas\\/(?<cid>[^/]+)$", acao: "quadro.remover_coluna" },
+      { metodo: "PATCH", padrao: "^\\/agentes\\/(?<id>[^/]+)$", acao: "bots.editar" },
+    ];
+    const ordem = [...new Set(planoDeFuzz({ registro, rotas, semente: 7, n: 3, ids: IDS }).casos.map((c) => c.acao))];
+    expect(ordem).toEqual(["bots.editar", "quadro.remover_coluna", "quadro.remover", "bots.excluir"]);
   });
 
   it("lerSemente: a do ambiente reproduz; vazia sorteia; inválida é erro claro", () => {

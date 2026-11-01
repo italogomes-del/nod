@@ -188,6 +188,9 @@ for (const [ordem, config] of CONFIGURACOES.entries()) {
       // a semente 1644694243). O experimento Quadro fica ligado para o fuzz passar da guarda dele.
       await srv.json("PUT", "preferencias", { experimentos: { quadro: true } });
       await srv.json("POST", `agentes/${meu.agente.id}/quadro`, { meta: "Quadro do fuzz" });
+      // Uma coluna removível (id `c-…`): o primeiro `quadro.remover_coluna` que a sortear remove de verdade.
+      const comColuna = await srv.json<{ quadro: { colunas: { id: string; nome: string }[] } }>("POST", `agentes/${meu.agente.id}/quadro/colunas`, { nome: "Coluna do fuzz", grupo: "iniciado" });
+      const colunaDoFuzz = comColuna.quadro.colunas.find((c) => c.nome === "Coluna do fuzz")!.id;
       const plano = planoDoServidor({
         registro: REGISTRO_DE_ACOES as readonly DefinicaoAcao[],
         pendentes: faltando,
@@ -200,6 +203,10 @@ for (const [ordem, config] of CONFIGURACOES.entries()) {
           porRecurso: {
             conversas: { daPessoa: [meu.conversa.id], deOutraPessoa: [dela.conversa.id] },
             rotinas: { daPessoa: [minhaRotina], deOutraPessoa: [rotinaDela] },
+            // NOD-415: a main ficou vermelha com a semente 3044290320 porque `bots.excluir` e `quadro.remover` rodavam antes
+            // de `quadro.remover_coluna` (o plano agora vai do DELETE mais fundo ao mais raso). O `:cid` recebe ainda ids
+            // reais: a coluna semeada (a remoção de verdade) e as fixas (o id não muda ao renomear; remover dá 400).
+            colunas: { daPessoa: [colunaDoFuzz, "voce", "cancelado"], deOutraPessoa: [] },
           },
         },
       });
