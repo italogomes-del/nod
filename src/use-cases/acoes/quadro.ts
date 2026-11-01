@@ -1,5 +1,5 @@
 import type { Executor } from "../../contracts/evento.ts";
-import type { ItemLinear, OpQuadro, StatusTarefa } from "../../contracts/quadro.ts";
+import type { ItemLinear, OpQuadro } from "../../contracts/quadro.ts";
 import { lerOp } from "../../domain/quadro.ts";
 import type { IdAcao } from "../../domain/acoes/index.ts";
 import type { CodigoErro } from "../../domain/erro.ts";
@@ -39,7 +39,7 @@ function umaAcao<I extends object>(tipo: OpQuadro["tipo"]): CasoDeUso<Base & I, 
   };
 }
 
-type CamposTarefa = { titulo?: string; descricao?: string; status?: StatusTarefa; agente?: string | null };
+type CamposTarefa = { titulo?: string; descricao?: string; status?: string; agente?: string | null };
 
 export const EXECUTORES_QUADRO = {
   "quadro.criar": umaAcao<{ meta: string; prazo?: string | null }>("criar_quadro"),
@@ -49,4 +49,10 @@ export const EXECUTORES_QUADRO = {
   "quadro.mudar_tarefa": umaAcao<CamposTarefa & { tarefa: string; pr_url?: string | null; pergunta?: string | null; excluir?: boolean }>("mudar_tarefa"),
   "quadro.responder": umaAcao<{ tarefa: string; resposta: string }>("responder"),
   "quadro.desfazer": umaAcao<{ lote?: string }>("desfazer"),
+  "quadro.criar_coluna": umaAcao<{ nome: string; grupo: string; depois_de?: string }>("criar_coluna"),
+  "quadro.renomear_coluna": umaAcao<{ coluna: string; nome: string }>("renomear_coluna"),
+  "quadro.mover_coluna": umaAcao<{ coluna: string; antes_de?: string; depois_de?: string }>("mover_coluna"),
+  "quadro.remover_coluna": umaAcao<{ coluna: string; destino?: string }>("remover_coluna"),
+  // Pela tela a pessoa é a confirmação; pela conversa o gerir_quadro abre o card (proposta colunas_quadro).
+  "quadro.substituir_colunas": umaAcao<{ colunas: unknown; destinos?: unknown }>("substituir_colunas"),
 } as const satisfies Partial<Record<IdAcao, CasoDeUso<never, unknown>>>;

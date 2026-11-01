@@ -1,3 +1,4 @@
+import type { PayloadPropostaColunasQuadro } from "./quadro.ts";
 import type { PayloadPropostaCredencial } from "./ferramentas-credencial.ts";
 import type { AcaoLote } from "./ferramentas-do-nod.ts";
 import type { AcessoPedido } from "./acesso.ts";
@@ -33,7 +34,7 @@ export type Conversa = {
   criadoEm: EpochMs;
 };
 
-export type KindProposta = "perfil" | "rotina" | "acesso" | "pasta" | "rotina_atualizacao" | "rotina_exclusao" | "bot" | "lote_bots" | "credencial";
+export type KindProposta = "perfil" | "rotina" | "acesso" | "pasta" | "rotina_atualizacao" | "rotina_exclusao" | "bot" | "lote_bots" | "credencial" | "colunas_quadro";
 export type EstadoProposta = "pendente" | "confirmada" | "recusada";
 
 /**
@@ -180,7 +181,9 @@ export type PayloadPropostaLoteBots = { kind: "lote_bots"; resumo: string; acoes
 /** O cartão de pedido de credencial (NOD-50) mora em ferramentas-credencial.ts pelo teto de 200 linhas. */
 export type { AlvoCredencial, PayloadPropostaCredencial } from "./ferramentas-credencial.ts";
 
-export type PayloadProposta = PayloadPropostaCredencial | PayloadPropostaLoteBots | PayloadPropostaBot | PayloadPropostaPerfil | PayloadPropostaRotina | PayloadPropostaAcesso | PayloadPropostaPasta | PayloadPropostaRotinaAtualizacao | PayloadPropostaRotinaExclusao;
+/** O card de trocar as colunas do quadro (NOD-448) mora em quadro.ts pelo teto de 200 linhas. */
+export type { ColunaNaProposta, PayloadPropostaColunasQuadro } from "./quadro.ts";
+export type PayloadProposta = PayloadPropostaColunasQuadro | PayloadPropostaCredencial | PayloadPropostaLoteBots | PayloadPropostaBot | PayloadPropostaPerfil | PayloadPropostaRotina | PayloadPropostaAcesso | PayloadPropostaPasta | PayloadPropostaRotinaAtualizacao | PayloadPropostaRotinaExclusao;
 
 /** Proposta do modelo (ferramenta tipada) — nada é aplicado antes da confirmação da pessoa (E1.1). */
 export type Proposta = {

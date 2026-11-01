@@ -6,6 +6,10 @@ import { corpoObjeto, criarExecutor, type DepsRotas } from "./executar-caso.ts";
 const ID = "(?<id>[^/]+)";
 const TID = "(?<tid>[^/]+)";
 const LID = "(?<lid>[^/]+)";
+const CID = "(?<cid>[^/]+)";
+/** O id da coluna (o nome também serve, como na conversa). O roteador já decodificou: decodificar de novo quebra "100%". */
+const coluna = (cid: string | undefined) => cid ?? "";
+const texto = (v: unknown) => (typeof v === "string" ? v : undefined);
 
 /**
  * A aba Quadro de um bot (definido em 2026-10-31, NOD-442, ADR-135). Cada mutação é um lote de uma ação pelo executor
@@ -45,6 +49,27 @@ export function rotasQuadro(d: DepsRotas): Rota[] {
     { metodo: "POST", acao: "quadro.responder", padrao: new RegExp(`^/agentes/${ID}/quadro/tarefas/${TID}/resposta$`), async handler(ctx) {
       const c = corpoObjeto(await ctx.corpo());
       ctx.json(200, await executar(ctx.escopo, EXECUTORES_QUADRO["quadro.responder"], { ...base(ctx.params.id ?? ""), tarefa: ctx.params.tid ?? "", resposta: c.resposta as string }));
+    } },
+    // NOD-448 (ADR-140): as colunas.
+    { metodo: "POST", acao: "quadro.criar_coluna", padrao: new RegExp(`^/agentes/${ID}/quadro/colunas$`), async handler(ctx) {
+      const c = corpoObjeto(await ctx.corpo());
+      ctx.json(201, await executar(ctx.escopo, EXECUTORES_QUADRO["quadro.criar_coluna"], { ...base(ctx.params.id ?? ""), nome: c.nome as string, grupo: c.grupo as string, depois_de: texto(c.depois_de) }));
+    } },
+    { metodo: "PUT", acao: "quadro.substituir_colunas", padrao: new RegExp(`^/agentes/${ID}/quadro/colunas$`), async handler(ctx) {
+      const c = corpoObjeto(await ctx.corpo());
+      ctx.json(200, await executar(ctx.escopo, EXECUTORES_QUADRO["quadro.substituir_colunas"], { ...base(ctx.params.id ?? ""), colunas: c.colunas, destinos: c.destinos }));
+    } },
+    { metodo: "PATCH", acao: "quadro.renomear_coluna", padrao: new RegExp(`^/agentes/${ID}/quadro/colunas/${CID}$`), async handler(ctx) {
+      const c = corpoObjeto(await ctx.corpo());
+      ctx.json(200, await executar(ctx.escopo, EXECUTORES_QUADRO["quadro.renomear_coluna"], { ...base(ctx.params.id ?? ""), coluna: coluna(ctx.params.cid), nome: c.nome as string }));
+    } },
+    { metodo: "POST", acao: "quadro.mover_coluna", padrao: new RegExp(`^/agentes/${ID}/quadro/colunas/${CID}/mover$`), async handler(ctx) {
+      const c = corpoObjeto(await ctx.corpo());
+      ctx.json(200, await executar(ctx.escopo, EXECUTORES_QUADRO["quadro.mover_coluna"], { ...base(ctx.params.id ?? ""), coluna: coluna(ctx.params.cid), antes_de: texto(c.antes_de), depois_de: texto(c.depois_de) }));
+    } },
+    { metodo: "DELETE", acao: "quadro.remover_coluna", padrao: new RegExp(`^/agentes/${ID}/quadro/colunas/${CID}$`), async handler(ctx) {
+      const destino = new URL(ctx.req.url ?? "/", "http://127.0.0.1").searchParams.get("destino");
+      ctx.json(200, await executar(ctx.escopo, EXECUTORES_QUADRO["quadro.remover_coluna"], { ...base(ctx.params.id ?? ""), coluna: coluna(ctx.params.cid), ...(destino ? { destino } : {}) }));
     } },
     { metodo: "POST", acao: "quadro.desfazer", padrao: new RegExp(`^/agentes/${ID}/quadro/lotes/${LID}/desfazer$`), async handler(ctx) {
       ctx.json(200, await executar(ctx.escopo, EXECUTORES_QUADRO["quadro.desfazer"], { ...base(ctx.params.id ?? ""), lote: ctx.params.lid ?? "" }));

@@ -1,6 +1,7 @@
 import type { CasoNod } from "../contracts/servicos.ts";
 import type { ResultadoGerirQuadro } from "../contracts/quadro.ts";
 import { lerOps, MAX_COMECOS_POR_LOTE } from "../domain/quadro.ts";
+import { proporColunas } from "./colunas-do-quadro.ts";
 import { aplicarLoteQuadro, resumoParaBot } from "./quadro.ts";
 import type { Deps } from "./tipos.ts";
 import type { Turno } from "../contracts/turno.ts";
@@ -42,6 +43,32 @@ export const gerirQuadro: CasoNod<Deps, "gerir_quadro"> = async (deps, input) =>
   if (ops.some((o) => o.tipo === "responder") && !(naConversa(turno) && limpo)) {
     return recusa("entrada_invalida", "responder é a resposta da pessoa: só num turno em que ela falou com você e nada de fora entrou (não numa tarefa, rotina, pedido de colega ou depois de ler uma página). Peça a ela no card (status voce com a pergunta)");
   }
+  // As colunas são da pessoa (ADR-140): o bot só mexe nelas a pedido dela, na conversa — não no turno de uma tarefa,
+  // rotina ou pedido de colega (revisão do PR #615, o mesmo corte do Desfazer de lote alheio).
+  const COLUNA = new Set(["criar_coluna", "renomear_coluna", "mover_coluna", "remover_coluna", "substituir_colunas"]);
+  if (ops.some((o) => COLUNA.has(o.tipo)) && !naConversa(turno)) {
+    return recusa("entrada_invalida", "as colunas só mudam a pedido da pessoa, num turno em que ela falou com você (não numa tarefa, rotina ou pedido de colega). Diga a ela o que sugere e deixe que ela peça");
+  }
+  // NOD-448 (ADR-140, decisão 3 do Gil): trocar o conjunto inteiro de colunas não sai sozinho — vira o card compacto na
+  // conversa e só se aplica quando a pessoa confirma. Os outros passos de coluna saem na hora, com Desfazer.
+  const troca = ops[0]?.tipo === "substituir_colunas" ? ops[0] : null;
+  if (troca) {
+    const pr = await proporColunas(deps, {
+      autor: { tipo: "agente", agenteId: input.agenteId },
+      ...(input.quadro !== undefined ? { quadro: input.quadro } : {}),
+      ops, op: troca, executor: turno.executor, agenteId: input.agenteId, conversaId: input.conversaId, turnoId: turno.id,
+      profundidade: turno.profundidade, origemConfiavel: limpo, autorNaConversa: naConversa(turno),
+    });
+    if (!pr.data.ok) return { data: { ok: false, erro: pr.data.erro, instrucao: `${pr.data.detalhe}. ${INSTRUCAO[pr.data.erro]}` }, events: pr.events };
+    const n = pr.data.payload.movidas.reduce((s, m) => s + m.tarefas, 0);
+    return {
+      data: {
+        ok: true, quadro: null, lote_id: null, comecaram: [], proposta_id: pr.data.propostaId,
+        instrucao: `Nada mudou ainda: a troca (${pr.data.payload.depois.map((c) => c.nome).join(" → ")}${n ? `; ${n} ${n === 1 ? "tarefa muda" : "tarefas mudam"} de coluna` : ""}) espera a pessoa no card desta conversa. Diga isso em uma frase e encerre.`,
+      },
+      events: pr.events,
+    };
+  }
   const r = await aplicarLoteQuadro(deps, {
     autor: { tipo: "agente", agenteId: input.agenteId },
     ...(input.quadro !== undefined ? { quadro: input.quadro } : {}),
@@ -60,7 +87,8 @@ export const gerirQuadro: CasoNod<Deps, "gerir_quadro"> = async (deps, input) =>
   if (limpo && quadro?.tarefas.some((t) => t.deFora)) await deps.repos.turnos.contaminar(turno.id, deps.agora());
   const partes = [desfeito ? "Desfeito." : "Feito."];
   if (comecaram.length) partes.push(`Começaram: ${comecaram.map((c) => c.agenteNome).join(", ")} (cada um recebeu a tarefa como pedido).`);
-  if (r.data.seguradas) partes.push(`${r.data.seguradas === 1 ? "Uma tarefa ficou" : `${r.data.seguradas} tarefas ficaram`} em A fazer sem começar: a corrente de bots chegou ao limite ou o lote passou de ${MAX_COMECOS_POR_LOTE} começos. Diga à pessoa: ela começa a tarefa pela conversa com você (mudar_tarefa com status afazer, num turno dela).`);
+  if (r.data.seguradas) partes.push(`${r.data.seguradas === 1 ? "Uma tarefa ficou" : `${r.data.seguradas} tarefas ficaram`} na espera sem começar: a corrente de bots chegou ao limite ou o lote passou de ${MAX_COMECOS_POR_LOTE} começos. Diga à pessoa: ela começa a tarefa pela conversa com você (mudar_tarefa com status afazer, num turno dela).`);
+  if (r.data.ajustada) partes.push("Um passo de coluna foi para a posição válida mais próxima: as colunas só mudam de lugar dentro do próprio grupo.");
   if (quadro?.cumpridoEm) partes.push(`Meta cumprida: ${quadro.resumo ?? ""}`.trim());
   if (lote && !desfeito) partes.push(`A pessoa vê um Desfazer; para desfazer você mesmo: {tipo: "desfazer", lote: "${lote.id}"}.`);
   return {
@@ -70,6 +98,7 @@ export const gerirQuadro: CasoNod<Deps, "gerir_quadro"> = async (deps, input) =>
       lote_id: lote?.id ?? null,
       comecaram: comecaram.map((c) => ({ tarefa_id: c.tarefaId, agente: c.agenteNome })),
       instrucao: partes.join(" "),
+      ...(r.data.ajustada ? { ajustada: true } : {}),
     },
     events: r.events,
   };

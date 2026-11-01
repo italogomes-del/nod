@@ -6,7 +6,7 @@ import type { Experimentos } from "../../src/contracts/raio-x.ts";
  */
 
 /** Os status padrão de um quadro, na ordem das colunas. A forma do ícone diz o grupo; a cor fica só nele. */
-export const STATUS = ["backlog", "afazer", "fazendo", "voce", "revisao", "bloqueado", "feito", "cancelado"] as const;
+export const STATUS = ["backlog", "afazer", "fazendo", "revisao", "bloqueado", "voce", "feito", "cancelado"] as const;
 export type Status = (typeof STATUS)[number];
 
 /** Os 4 grupos: vazio = não iniciado, meio = iniciado, cheio = feito ou fechado. */
@@ -34,7 +34,7 @@ export function colunasPadrao(): ColunaPadrao[] {
 }
 
 /** Como a coluna se encaixa na grade: tira estreita, "Precisa de você" um pouco mais larga, as outras iguais. */
-export function trilhaDaColuna(c: { status?: Status; recolhida?: boolean }): string {
+export function trilhaDaColuna(c: { status?: string; recolhida?: boolean }): string {
   if (c.recolhida) return "var(--qd-tira)";
   if (c.status === "voce") return "minmax(calc(var(--qd-col-min) + 20px), 1fr)";
   return "minmax(var(--qd-col-min), 1fr)";

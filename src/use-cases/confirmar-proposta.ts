@@ -110,6 +110,8 @@ export const confirmarProposta: CasoDeUso<{ propostaId: string; prazoMs?: number
   // decide primeiro, e a recusa por perfil mudado teria de sair de `confirmada`.
   if (existente.payload.kind === "perfil") return confirmarPerfil(deps, existente);
   if (existente.payload.kind === "lote_bots") throw new ErroDeDominio("estado_invalido", { cause: "lote do Nod se decide pela decisão do card" });
+  // NOD-448: a troca de colunas se decide pela decisão do card (POST decisoes/:id/decidir → decidirColunasDoQuadro).
+  if (existente.payload.kind === "colunas_quadro") throw new ErroDeDominio("estado_invalido", { cause: "colunas do quadro se decidem pela decisão do card" });
   // NOD-50: o cartão de credencial só se resolve guardando o valor (POST propostas/:id/credencial) ou recusando; confirmar
   // sem valor não tem o que aplicar.
   if (existente.payload.kind === "credencial") throw new ErroDeDominio("estado_invalido", { cause: "credencial se guarda pelo cartão" });
@@ -154,6 +156,8 @@ export const confirmarProposta: CasoDeUso<{ propostaId: string; prazoMs?: number
     throw new ErroDeDominio("estado_invalido", { cause: "lote do Nod se decide pela decisão do card" });
   } else if (proposta.payload.kind === "credencial") {
     throw new ErroDeDominio("estado_invalido", { cause: "credencial se guarda pelo cartão" });
+  } else if (proposta.payload.kind === "colunas_quadro") {
+    throw new ErroDeDominio("estado_invalido", { cause: "colunas do quadro se decidem pela decisão do card" });
   } else {
     const p = proposta.payload;
     const agenteDaProposta = await deps.repos.agentes.buscar(proposta.agenteId);

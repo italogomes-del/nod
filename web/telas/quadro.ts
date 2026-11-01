@@ -10,7 +10,7 @@
  * montam o quadro de verdade com eles.
  */
 import { esc } from "../lib/escape.ts";
-import { colunasPadrao, GRUPO_DO_STATUS, trilhaDaColuna, type ModoDaConversa, type Status } from "../lib/quadro.ts";
+import { colunasPadrao, GRUPO_DO_STATUS, trilhaDaColuna, type Grupo, type ModoDaConversa, type Status } from "../lib/quadro.ts";
 
 declare const MARCA: unique symbol;
 /** HTML já seguro. Só sai de um componente daqui ou de `confiar`. */
@@ -47,6 +47,11 @@ export const ICONE = {
   quadro: svg('<rect x="3.5" y="4.5" width="5" height="15" rx="1.2"/><rect x="9.5" y="4.5" width="5" height="10" rx="1.2"/><rect x="15.5" y="4.5" width="5" height="12" rx="1.2"/>', "qd-ic-quadro", 14, 1.6),
   conversa: svg('<path d="M4.5 18.5V6.5a2 2 0 0 1 2-2h11a2 2 0 0 1 2 2V14a2 2 0 0 1-2 2H8z"/>', "qd-ic-conversa", 14, 1.7),
   mais: svg('<circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/>', "qd-ic-mais", 16, 1.6),
+  novo: svg('<path d="M12 5v14M5 12h14"/>', "qd-ic-novo", 14, 2),
+  alca: svg('<path d="M5 9h14M5 15h14"/>', "qd-ic-alca", 16, 2),
+  subir: svg('<path d="m6 15 6-6 6 6"/>', "qd-ic-subir", 14, 2),
+  descer: svg('<path d="m6 9 6 6 6-6"/>', "qd-ic-descer", 14, 2),
+  tirar: svg('<path d="M5 7h14M10 11v6M14 11v6M7 7l1 12h8l1-12M9.5 7V4.5h5V7"/>', "qd-ic-tirar", 14, 1.7),
 } as const;
 
 /* ---------- Estado do trabalho, aviso e avatar ---------- */
@@ -195,14 +200,30 @@ export function card(c: Card): Html {
 /* ---------- Coluna, quadro, barra e meta ---------- */
 
 export interface Coluna {
-  status: Status;
+  /** O id da coluna (o `status` das tarefas): um dos padrão ou `c-<slug>` (NOD-448). */
+  status: string;
   nome: string;
+  /** NOD-448: o grupo (dá a cor do fundo); sem ele, o da coluna padrão. */
+  grupo?: Grupo;
+  /** NOD-448: o ícone (a forma do grupo); sem ele, o da coluna padrão. */
+  icone?: Status;
+  /** NOD-448 (decisão 8 do Gil): coluna criada pela pessoa, com o ícone cinza. */
+  pessoa?: boolean;
   cards?: Html[];
   /** A contagem, quando os cards mostrados são só uma parte. */
   n?: number;
   recolhida?: boolean;
   /** Aberta, mas a pessoa pode recolher: o nome vira o botão que recolhe (o mesmo `abrir-coluna` da tira). */
   recolhivel?: boolean;
+  /**
+   * NOD-448 (decisão 6): o cabeçalho edita. Clique recolhe, clique duplo ou F2 renomeia, Alt ← → move, arrastar move
+   * (só dentro do grupo). `fixa` não move.
+   */
+  editavel?: { fixa: boolean };
+  /** NOD-448: o cabeçalho inteiro trocado (o campo de renomear). */
+  cab?: Html;
+  /** NOD-448: o que vem depois do nome no cabeçalho (o ⋯ e o menu ou o popover dele). */
+  apos?: Html;
   /** A regra da coluna ("Feito só aceita vindo de Em revisão"), num cadeado com o texto no title e para o leitor de tela. */
   trava?: string;
   vazio?: string;
@@ -210,35 +231,54 @@ export interface Coluna {
   /** O `data-act` do "e mais N" (a ação de mostrar o resto da coluna). */
   maisAcao?: string;
   classe?: string;
+  /** NOD-448 / NOD-429: tira presa à direita (o `right` dela, quando há outras presas depois). */
+  presa?: string;
 }
+
+const iconeDe = (c: Pick<Coluna, "status" | "icone" | "pessoa">): Html => {
+  const ic = ICONE_DO_STATUS[c.icone ?? (c.status as Status)] ?? ICONE_DO_STATUS.afazer;
+  return c.pessoa ? h(ic.replace('class="qd-ic qd-st ', 'class="qd-ic qd-st qd-st-pessoa ')) : ic;
+};
 
 export function coluna(c: Coluna): Html {
   const cards = c.cards ?? [];
   const n = c.n ?? cards.length;
-  const ic = ICONE_DO_STATUS[c.status];
-  const base = cl("qd-col", `qd-col-${esc(c.status)}`, `qd-grupo-${GRUPO_DO_STATUS[c.status]}`, c.recolhida && "qd-col-recolhida", c.classe && esc(c.classe));
+  const ic = iconeDe(c);
+  const grupo = c.grupo ?? GRUPO_DO_STATUS[c.status as Status] ?? "iniciado";
+  const id = esc(c.status);
+  const presa = c.presa !== undefined ? ` style="right: ${esc(c.presa)}"` : "";
+  const base = cl("qd-col", `qd-col-${id}`, `qd-grupo-${grupo}`, c.recolhida && "qd-col-recolhida", c.pessoa && "qd-col-pessoa", c.presa !== undefined && "qd-fixa", c.classe && esc(c.classe));
+  const dados = `data-status="${id}" data-coluna="${id}" data-grupo="${grupo}"`;
   if (c.recolhida) {
-    return h(`<section class="${base}" aria-label="${esc(`${c.nome}, ${n}, recolhida`)}" data-status="${esc(c.status)}">` +
-      `<button type="button" class="qd-col-tira" data-act="abrir-coluna" data-status="${esc(c.status)}" aria-expanded="false" title="${esc(`Mostrar ${c.nome}`)}">${ic}<span class="qd-col-nome">${esc(c.nome)}</span><span class="qd-n">${n}</span></button></section>`);
+    return h(`<section class="${base}" aria-label="${esc(`${c.nome}, ${n}, recolhida`)}" ${dados}${presa}>` +
+      `<button type="button" class="qd-col-tira" data-act="abrir-coluna" data-status="${id}" aria-expanded="false" title="${esc(`Mostrar ${c.nome}`)}">${ic}<span class="qd-col-nome">${esc(c.nome)}</span><span class="qd-n">${n}</span></button></section>`);
   }
   const trava = c.trava ? `<span class="qd-col-trava" title="${esc(c.trava)}">${ICONE.trava}<span class="qd-sr">${esc(c.trava)}</span></span>` : "";
   // "e mais N" só com a ação que mostra o resto (NOD-415): botão sem ação não aparece, só a contagem.
   const mais = !c.mais ? "" : c.maisAcao
-    ? `<li class="qd-col-mais"><button type="button" class="qd-link" data-act="${esc(c.maisAcao)}" data-status="${esc(c.status)}">${esc(`e mais ${c.mais}`)}</button></li>`
+    ? `<li class="qd-col-mais"><button type="button" class="qd-link" data-act="${esc(c.maisAcao)}" data-status="${id}">${esc(`e mais ${c.mais}`)}</button></li>`
     : `<li class="qd-col-mais">${esc(`e mais ${c.mais}`)}</li>`;
   const vazio = !cards.length && !c.mais ? `<li class="qd-col-vazio">${esc(c.vazio ?? "Nada aqui")}</li>` : "";
-  return h(`<section class="${base}" aria-label="${esc(`${c.nome}, ${n}`)}" data-status="${esc(c.status)}">` +
-    `<h3 class="qd-col-cab">${c.recolhivel
-      ? `<button type="button" class="qd-col-bt" data-act="abrir-coluna" data-status="${esc(c.status)}" aria-expanded="true" title="${esc(`Recolher ${c.nome}`)}">${ic}<span class="qd-col-nome">${esc(c.nome)}</span><span class="qd-n">${n}</span></button>`
-      : `${ic}<span class="qd-col-nome">${esc(c.nome)}</span><span class="qd-n">${n}</span>`}${trava}</h3>` +
+  const ed = c.editavel;
+  const dica = ed ? (ed.fixa ? `Recolher ${c.nome} · clique duplo renomeia` : `Recolher ${c.nome} · clique duplo renomeia · arraste para mover`) : `Recolher ${c.nome}`;
+  const atalhos = ed ? ` aria-keyshortcuts="${ed.fixa ? "F2" : "F2 Alt+ArrowLeft Alt+ArrowRight"}"${ed.fixa ? "" : " data-arrasta"}` : "";
+  const cab = c.cab ?? (c.recolhivel
+    ? `<button type="button" class="qd-col-bt" data-act="abrir-coluna" data-status="${id}" aria-expanded="true" data-coluna="${id}" title="${esc(dica)}"${atalhos}>${ic}<span class="qd-col-nome">${esc(c.nome)}</span><span class="qd-n">${n}</span></button>`
+    : `${ic}<span class="qd-col-nome">${esc(c.nome)}</span><span class="qd-n">${n}</span>`);
+  return h(`<section class="${base}" aria-label="${esc(`${c.nome}, ${n}`)}" ${dados}${presa}>` +
+    `<h3 class="qd-col-cab">${cab}${trava}${c.apos ?? ""}</h3>` +
     `<ul class="qd-col-lista">${cards.join("")}${mais}${vazio}</ul></section>`);
 }
 
-/** O quadro: as colunas numa grade que rola de lado; a tira recolhida é estreita. */
-export function quadro(o: { colunas: Coluna[]; rotulo?: string; antes?: Html; classe?: string }): Html {
-  const trilhas = o.colunas.map(trilhaDaColuna).join(" ");
+/** Uma coluna extra na grade (a coluna nova, o "+"): o html e a trilha dela. */
+export interface ExtraDaGrade { html: Html; trilha: string; em?: number }
+
+/** O quadro: as colunas numa grade que rola de lado; a tira recolhida é estreita. `extras` entram na posição `em` (ou no fim). */
+export function quadro(o: { colunas: Coluna[]; rotulo?: string; antes?: Html; classe?: string; extras?: ExtraDaGrade[] }): Html {
+  const itens: { html: string; trilha: string }[] = o.colunas.map((c) => ({ html: coluna(c), trilha: trilhaDaColuna(c) }));
+  for (const x of [...(o.extras ?? [])].reverse()) itens.splice(Math.min(x.em ?? itens.length, itens.length), 0, { html: x.html, trilha: x.trilha });
   return h(`<div class="${cl("qd-quadro", o.classe && esc(o.classe))}" role="region" aria-label="${esc(o.rotulo ?? "Quadro")}">${o.antes ?? ""}` +
-    `<div class="qd-grade" style="grid-template-columns: ${trilhas}">${o.colunas.map(coluna).join("")}</div></div>`);
+    `<div class="qd-grade" style="grid-template-columns: ${itens.map((i) => i.trilha).join(" ")}">${itens.map((i) => i.html).join("")}</div></div>`);
 }
 
 export type Filtro = "todos" | "pessoas" | "agentes";
@@ -285,16 +325,16 @@ export function linha(c: Card): Html {
     `<span class="qd-l-fim">${fim}</span></li>`);
 }
 
-export function lista(o: { grupos: { status: Status; nome: string; linhas: Html[]; n?: number; recolhido?: boolean; vazio?: string }[]; rotulo?: string; novaTarefa?: boolean }): Html {
+export function lista(o: { grupos: { status: string; nome: string; icone?: Status; pessoa?: boolean; linhas: Html[]; n?: number; recolhido?: boolean; vazio?: string }[]; rotulo?: string; novaTarefa?: boolean; antes?: Html }): Html {
   const g = o.grupos.map((gr) => {
     const n = gr.n ?? gr.linhas.length;
-    const cab = `<h3 class="qd-lg-cab"><button type="button" class="qd-lg-bt" data-act="abrir-coluna" data-status="${esc(gr.status)}" aria-expanded="${!gr.recolhido}">${ICONE_DO_STATUS[gr.status]}<span>${esc(gr.nome)}</span><span class="qd-n">${n}</span>${gr.recolhido ? ICONE.chev : ""}</button>` +
+    const cab = `<h3 class="qd-lg-cab"><button type="button" class="qd-lg-bt" data-act="abrir-coluna" data-status="${esc(gr.status)}" aria-expanded="${!gr.recolhido}">${iconeDe(gr)}<span>${esc(gr.nome)}</span><span class="qd-n">${n}</span>${gr.recolhido ? ICONE.chev : ""}</button>` +
       `${gr.recolhido || !o.novaTarefa ? "" : `<button type="button" class="qd-lg-mais" aria-label="${esc(`Nova tarefa em ${gr.nome}`)}">+</button>`}</h3>`;
     // Aberto e vazio diz que está vazio (como a coluna da grade), em vez de abrir nada.
     const corpo = gr.linhas.length ? gr.linhas.join("") : `<li class="qd-col-vazio">${esc(gr.vazio ?? "Nada aqui")}</li>`;
     return `<section class="${cl("qd-lg", gr.recolhido && "qd-lg-recolhido")}" aria-label="${esc(gr.nome)}">${cab}${gr.recolhido ? "" : `<ul class="qd-lg-lista">${corpo}</ul>`}</section>`;
   }).join("");
-  return h(`<div class="qd-lista" role="region" aria-label="${esc(o.rotulo ?? "Quadro")}">${g}</div>`);
+  return h(`<div class="qd-lista" role="region" aria-label="${esc(o.rotulo ?? "Quadro")}">${o.antes ?? ""}${g}</div>`);
 }
 
 /* ---------- Conversa | Quadro dentro da pílula ---------- */
@@ -323,8 +363,8 @@ export function segmento(o: { nome: string; modo?: ModoDaConversa; compacto?: bo
  * lista por estado (celular); o CSS mostra uma ou outra. `alternadas` são as colunas que a pessoa abriu ou recolheu, ao
  * contrário do padrão (RECOLHIDAS_PADRAO): toda coluna e todo grupo alterna.
  */
-export function quadroVazio(o: { nome: string; filtro?: Filtro; alternadas?: ReadonlySet<Status> }): Html {
-  const alternadas = o.alternadas ?? new Set<Status>();
+export function quadroVazio(o: { nome: string; filtro?: Filtro; alternadas?: ReadonlySet<string> }): Html {
+  const alternadas = o.alternadas ?? new Set<string>();
   const cols = colunasPadrao().map((c) => ({ ...c, recolhida: c.recolhida !== alternadas.has(c.status) }));
   const rotulo = `Quadro de ${o.nome}`;
   return juntar([

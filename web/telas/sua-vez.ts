@@ -1,3 +1,4 @@
+import { listaDasColunasParaSuaVez } from "./card-colunas.ts";
 import type { SuaVezDto } from "../../src/contracts/api.ts";
 import type { Proposta } from "../../src/contracts/conversa.ts";
 import type { TIPOS_DISPENSAVEIS_ABERTOS, TipoDecisao } from "../../src/contracts/decisao.ts";
@@ -32,6 +33,7 @@ const TIPO_HUMANO: Record<TipoDecisao, string> = {
   falta_de_dado: "falta um dado",
   permissao: "pedido de permissão",
   credencial: "pedido de chave",
+  colunas_quadro: "colunas do quadro",
 };
 
 const recusaAutomatica = (em: string): string => `recusa automática ${em}`;
@@ -66,6 +68,7 @@ const PRAZO_POR_TIPO: Record<TipoDecisao, (em: string, item: Item) => string> = 
   falta_de_dado: vence,
   permissao: vence,
   credencial: vence,
+  colunas_quadro: nadaMudaSemVoce,
 };
 
 /** Regras que fecham decisão sem pessoa (ADR-042), em frase curta; regra sem tradução cai no genérico. */
@@ -468,6 +471,11 @@ function renderAcoes(item: Item, aberta: boolean, estado: Pick<Estado, "conector
       const p = item.proposta?.payload.kind === "lote_bots" ? item.proposta.payload : null;
       const n = p ? p.acoes.filter((a) => a.estado === "esperando").length : 0;
       return `${p ? listaDoLoteParaSuaVez(p) : ""}<div class="acoes">${botao("decidir-proposta", n > 1 ? `Aprovar as ${n}` : "Aprovar", { classe: "pri", id: d.id })}${botao("recusar-decisao", "Recusar", { id: d.id })}</div>`;
+    }
+    // NOD-448 (ADR-140): a ordem nova à vista antes do clique.
+    case "colunas_quadro": {
+      const p = item.proposta?.payload.kind === "colunas_quadro" ? item.proposta.payload : null;
+      return `${p ? listaDasColunasParaSuaVez(p) : ""}<div class="acoes">${botao("decidir-proposta", "Trocar colunas", { classe: "pri", id: d.id })}${botao("recusar-decisao", "Manter", { id: d.id })}</div>`;
     }
     // Verbo próprio: "Confirmar" não diz que o que se confirma é uma exclusão.
     case "rotina_exclusao":

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { TarefaQuadro } from "../../../src/contracts/quadro.ts";
 import { cercado, deveComecar, entradaDaResposta, entradaDaTarefa, lerOps, metaCumprida, numeroDoPr, planejarLote, MAX_COMECOS_POR_LOTE, prazoValido, resumoDaMeta, resumoDoLote } from "../../../src/domain/quadro.ts";
+import { COLUNAS_PADRAO } from "../../../src/domain/colunas.ts";
 
 /** NOD-442: o quadro-agente puro — a leitura das ações, quem começa sozinho, o lote tudo ou nada e o fecho da meta. */
 const AGORA = Date.parse("2026-10-31T12:00:00Z");
@@ -10,7 +11,7 @@ const NOD = { id: "00000000-0000-4000-8000-000000000003", nome: "Nod", nod: true
 const AGENTES = [ZE, ADA, NOD];
 
 const tarefa = (o: Partial<TarefaQuadro> = {}): TarefaQuadro => ({
-  id: "10000000-0000-4000-8000-000000000001", quadroId: "q", titulo: "Login", descricao: "", status: "afazer", agenteId: null, ordem: 1,
+  id: "10000000-0000-4000-8000-000000000001", quadroId: "q", titulo: "Login", descricao: "", status: "afazer", voltarPara: null, agenteId: null, ordem: 1,
   linearId: null, linearUrl: null, prUrl: null, pergunta: null, resposta: null, deFora: false, turnoId: null, criadoEm: AGORA, mudadoEm: AGORA, ...o,
 });
 
@@ -27,7 +28,7 @@ describe("lerOps", () => {
     expect(lerOps([{ tipo: "criar_quadro", meta: " " }])).toMatchObject({ erro: "meta vazio", indice: 0 });
     expect(lerOps([{ tipo: "criar_quadro", meta: "M", prazo: "2026-02-30" }])).toMatchObject({ indice: 0 });
     expect(lerOps([{ tipo: "mudar_tarefa", tarefa: "x", pr_url: "https://evil.com/pull/1" }])).toMatchObject({ indice: 0 });
-    expect(lerOps([{ tipo: "mudar_tarefa", tarefa: "x", status: "inventado" }])).toMatchObject({ erro: "status inválido" });
+    expect(lerOps([{ tipo: "mudar_tarefa", tarefa: "x", status: "x".repeat(61) }])).toMatchObject({ erro: "status inválido" });
     expect(lerOps([{ tipo: "desfazer" }, { tipo: "criar_tarefa", titulo: "a" }])).toMatchObject({ erro: "desfazer vai sozinho na chamada" });
     expect(lerOps("x")).toMatchObject({ indice: -1 });
     expect(lerOps(Array.from({ length: 51 }, () => ({ tipo: "desfazer" })))).toMatchObject({ indice: -1 });
@@ -63,11 +64,38 @@ describe("deveComecar (NOD-417/418): só na transição", () => {
   });
 });
 
+describe("deveComecar por grupo (NOD-448, revisão do PR #615): a frase da tela é a regra do motor", () => {
+  const cs = [...COLUNAS_PADRAO.slice(0, 2), { id: "c-pedido", nome: "Pedido", grupo: "nao_iniciado" as const }, { id: "c-compras", nome: "Compras", grupo: "iniciado" as const }, { id: "c-producao", nome: "Produção", grupo: "iniciado" as const }, ...COLUNAS_PADRAO.slice(2)];
+  const de = (a: string, b: string, viva = false) => deveComecar({ status: a, agenteId: ZE.id }, { status: b, agenteId: ZE.id }, null, cs, viva);
+  it("entrar no andamento vindo de fora aciona: Backlog → Fazendo, Pedido → Fazendo, Pedido → Compras", () => {
+    expect(de("backlog", "fazendo")).toBe(true);
+    expect(de("c-pedido", "fazendo")).toBe(true);
+    expect(de("c-pedido", "c-compras")).toBe(true);
+    expect(de("feito", "c-compras")).toBe(true);
+  });
+  it("andar dentro do andamento, com turno vivo, ou em Revisão/Bloqueado/Precisa de você não aciona", () => {
+    expect(de("c-compras", "c-producao")).toBe(false);
+    expect(de("c-compras", "fazendo")).toBe(false);
+    expect(de("backlog", "fazendo", true)).toBe(false);
+    expect(de("c-pedido", "c-compras", true)).toBe(false);
+    expect(de("backlog", "revisao")).toBe(false);
+    expect(de("backlog", "bloqueado")).toBe(false);
+    expect(de("c-pedido", "c-pedido")).toBe(false);
+    expect(deveComecar({ status: "backlog", agenteId: ZE.id }, { status: "fazendo", agenteId: ZE.id }, ZE.id, cs)).toBe(false);
+  });
+  it("mudança consciente da ADR-140: Feito → Fazendo com o mesmo responsável aciona; trocar de mão no andamento aciona o novo mesmo com turno vivo", () => {
+    expect(de("feito", "fazendo")).toBe(true);
+    const outro = "00000000-0000-4000-8000-0000000000aa";
+    expect(deveComecar({ status: "c-compras", agenteId: ZE.id }, { status: "c-compras", agenteId: outro }, null, cs, true)).toBe(true);
+    expect(deveComecar({ status: "c-compras", agenteId: ZE.id }, { status: "c-compras", agenteId: outro }, outro, cs, true)).toBe(false);
+  });
+});
+
 describe("planejarLote: tudo ou nada", () => {
   it("cria o quadro, as tarefas e põe para andar quem tem responsável", () => {
     const p = planejar([{ tipo: "criar_quadro", meta: "Lançar login", prazo: "2026-11-06" }, { tipo: "criar_tarefa", titulo: "Tela", agente: "ze 1" }, { tipo: "criar_tarefa", titulo: "Copy" }], { semQuadro: true });
     if ("erro" in p) throw new Error(p.erro);
-    expect(p.quadro).toEqual({ novo: true, meta: "Lançar login", prazo: "2026-11-06" });
+    expect(p.quadro).toEqual({ novo: true, meta: "Lançar login", prazo: "2026-11-06", colunas: null });
     expect(p.tarefas.map((t) => [t.titulo, t.status, t.agenteId])).toEqual([["Tela", "fazendo", ZE.id], ["Copy", "afazer", null]]);
     expect(p.comecam).toEqual(["novo:0"]);
   });

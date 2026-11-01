@@ -1,6 +1,6 @@
 import type { QuadroDto, TarefaDto } from "../../src/contracts/quadro.ts";
 import type { Mensagem } from "../../src/contracts/mensagem.ts";
-import { STATUS, type Status } from "./quadro.ts";
+import { STATUS, } from "./quadro.ts";
 
 /**
  * NOD-442 (definido em 2026-10-31): o quadro de verdade na tela, sem DOM. Quem desenha é web/telas/quadro.ts; quem busca e
@@ -13,9 +13,10 @@ export function codigoDaTarefa(t: Pick<TarefaDto, "id" | "linearId">): string {
   return t.linearId ?? `#${t.id.replace(/-/g, "").slice(0, 4)}`;
 }
 
-/** As tarefas por status, na ordem do quadro. */
-export function tarefasPorStatus(q: Pick<QuadroDto, "tarefas">): Record<Status, TarefaDto[]> {
-  const por = Object.fromEntries(STATUS.map((s) => [s, [] as TarefaDto[]])) as Record<Status, TarefaDto[]>;
+/** As tarefas por coluna (o status é o id dela, NOD-448), na ordem do quadro. */
+export function tarefasPorStatus(q: Pick<QuadroDto, "tarefas"> & { colunas?: readonly { id: string }[] }): Record<string, TarefaDto[]> {
+  const ids: readonly string[] = q.colunas?.map((c) => c.id) ?? STATUS;
+  const por: Record<string, TarefaDto[]> = Object.fromEntries(ids.map((s) => [s, [] as TarefaDto[]]));
   for (const t of [...q.tarefas].sort((a, b) => a.ordem - b.ordem)) por[t.status]?.push(t);
   return por;
 }

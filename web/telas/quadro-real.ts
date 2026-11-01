@@ -9,9 +9,11 @@
  */
 import type { QuadroDto, TarefaDto } from "../../src/contracts/quadro.ts";
 import { esc } from "../lib/escape.ts";
-import { colunasPadrao, NOME_DO_STATUS, type Status } from "../lib/quadro.ts";
+import { NOME_DO_STATUS, type Status } from "../lib/quadro.ts";
+import { comColunas, iconeDaColuna, inicioDoFimPreso, LIMITE_COLUNAS, type EdicaoDeColuna } from "../lib/colunas.ts";
+import { aposDoCabecalho, botaoDeNova, campoDeRenomear, colunaNova, folhaDasColunas, naFolha } from "./colunas-quadro.ts";
 import { codigoDaTarefa, fraseDoPrazo, tarefasPorStatus, type Faixa } from "../lib/quadro-dados.ts";
-import { anel, avatar, barra, card, confiar, ICONE, ICONE_DO_STATUS, linha, lista, meta, quadro, seloEmTeste, type Card, type Filtro, type Html, type QuemRoda } from "./quadro.ts";
+import { anel, avatar, barra, card, confiar, ICONE, ICONE_DO_STATUS, linha, lista, meta, quadro, seloEmTeste, type Card, type Coluna, type ExtraDaGrade, type Filtro, type Html, type QuemRoda } from "./quadro.ts";
 
 /** Quem é o agente de um id (o avatar com o mascote dele e o nome); null = não é um bot da pessoa. */
 export type AgenteDoQuadro = (agenteId: string) => { avatar: Html; nome: string } | null;
@@ -69,25 +71,47 @@ function metaDoQuadro(q: QuadroDto): Html {
 /**
  * O quadro com as tarefas. `alternadas`: as colunas que a pessoa abriu ou recolheu ao contrário do padrão; coluna com
  * tarefa abre sozinha (o Backlog que acende com as 8 do passo 3). `acesas`: os cards que mudaram na última releitura.
+ *
+ * NOD-448: as colunas são as do quadro (`q.colunas`), com o cabeçalho que edita, o "+" e as tiras de Feito e Fechado
+ * presas à direita (NOD-429). `edicao` é o pedaço aberto (menu, renomear, remover, coluna nova, a folha do celular).
  */
-export function quadroDaMeta(o: { q: QuadroDto; nome: string; agente: AgenteDoQuadro; filtro: Filtro; alternadas: ReadonlySet<Status>; acesas: ReadonlySet<string> }): Html {
+export function quadroDaMeta(o: { q: QuadroDto; nome: string; agente: AgenteDoQuadro; filtro: Filtro; alternadas: ReadonlySet<string>; acesas: ReadonlySet<string>; edicao?: EdicaoDeColuna | null }): Html {
   const por = tarefasPorStatus(o.q);
+  const ed = o.edicao ?? null;
+  const cs = comColunas(o.q).colunas;
   const rotulo = `Quadro ${o.q.meta} de ${o.nome}`;
-  const cols = colunasPadrao().map((c) => {
-    const tarefas = por[c.status].filter((t) => passaNoFiltro(t, o.filtro));
-    const padrao = c.recolhida && por[c.status].length === 0;
-    return { ...c, tarefas, recolhida: padrao !== o.alternadas.has(c.status) };
+  const contagem: Record<string, number> = Object.fromEntries(cs.map((c) => [c.id, (por[c.id] ?? []).length]));
+  const cols = cs.map((c) => {
+    const tarefas = (por[c.id] ?? []).filter((t) => passaNoFiltro(t, o.filtro));
+    const padrao = c.recolhida && (contagem[c.id] ?? 0) === 0;
+    // Renomear ou remover (o popover) abre a coluna, para o campo ter onde ficar.
+    const editando = !naFolha(ed) && (ed?.tipo === "renomear" || ed?.tipo === "remover") && ed.coluna === c.id;
+    return { c, tarefas, recolhida: !editando && padrao !== o.alternadas.has(c.id) };
   });
   const cartoes = (ts: TarefaDto[]): Card[] => ts.map((t) => cardDaTarefa(t, o.agente, o.acesas.has(t.id)));
-  const vazio = (s: Status): string => (s === "backlog" && o.q.total === 0 ? VAZIO_DO_BACKLOG : "Nada aqui");
+  const vazio = (id: string): string => (id === "backlog" && o.q.total === 0 ? VAZIO_DO_BACKLOG : "Nada aqui");
+  const preso = inicioDoFimPreso(cols.map((x) => ({ grupo: x.c.grupo, recolhida: x.recolhida })));
+  const larguraPresa = (depois: number) => `calc(${depois} * (var(--qd-tira) + 8px) + var(--qd-tira) + 8px)`;
+  const colunas: Coluna[] = cols.map(({ c, tarefas, recolhida }, i) => ({
+    status: c.id, nome: c.nome, grupo: c.grupo, icone: iconeDaColuna(c), pessoa: c.daPessoa, recolhida, recolhivel: true,
+    editavel: { fixa: c.fixa }, n: tarefas.length, cards: cartoes(tarefas).map(card), vazio: vazio(c.id),
+    ...(!recolhida ? { apos: aposDoCabecalho(cs, c, ed, contagem[c.id] ?? 0, o.nome) } : {}),
+    ...(ed?.tipo === "renomear" && ed.coluna === c.id && !naFolha(ed) ? { cab: campoDeRenomear(c, ed.erro) } : {}),
+    ...(i >= preso ? { presa: larguraPresa(cols.length - 1 - i) } : {}),
+  }));
+  const cheio = cs.length >= LIMITE_COLUNAS;
+  const extras: ExtraDaGrade[] = [{ html: botaoDeNova(cheio), trilha: "var(--qd-tira)" }];
+  if (ed?.tipo === "nova" && !naFolha(ed)) {
+    const depois = ed.depoisDe ? cs.findIndex((c) => c.id === ed.depoisDe) : -1;
+    extras.unshift({ html: confiar(`<section class="qd-col qd-col-nova" aria-label="Nova coluna">${colunaNova(ed)}</section>`), trilha: "minmax(var(--qd-col-min), 1fr)", em: depois >= 0 && depois < preso ? depois + 1 : preso });
+  }
+  const ordem = `<button type="button" class="qd-link qd-lg-ordem" data-act="col-folha">Ordem das colunas</button>`;
   return confiar([
     metaDoQuadro(o.q),
     barra({ filtro: o.filtro, trabalhando: trabalhando(o.q, o.agente) }),
-    quadro({
-      rotulo, classe: "qd-so-largo",
-      colunas: cols.map((c) => ({ status: c.status, nome: c.nome, recolhida: c.recolhida, recolhivel: true, n: c.tarefas.length, cards: cartoes(c.tarefas).map(card), vazio: vazio(c.status) })),
-    }),
-    `<div class="qd-so-estreito">${lista({ rotulo, grupos: cols.map((c) => ({ status: c.status, nome: c.nome, recolhido: c.recolhida, linhas: cartoes(c.tarefas).map(linha), vazio: vazio(c.status) })) })}</div>`,
+    quadro({ rotulo, classe: "qd-so-largo", colunas, extras }),
+    `<div class="qd-so-estreito">${lista({ rotulo, antes: confiar(ordem), grupos: cols.map(({ c, tarefas, recolhida }) => ({ status: c.id, nome: c.nome, icone: iconeDaColuna(c), pessoa: c.daPessoa, recolhido: recolhida, linhas: cartoes(tarefas).map(linha), vazio: vazio(c.id) })) })}` +
+      `${naFolha(ed) ? folhaDasColunas(cs, ed, contagem, o.nome) : ""}</div>`,
   ].join(""));
 }
 
@@ -123,8 +147,11 @@ export function tarefaAberta(o: { t: TarefaDto; q: QuadroDto; agente: AgenteDoQu
   const { t } = o;
   const codigo = codigoDaTarefa(t);
   const resp = t.status === "voce" ? VOCE : t.agenteId ? o.agente(t.agenteId) : null;
-  const st = t.status as Status;
-  const chipSt = `<span class="qd-chip">${ICONE_DO_STATUS[st]}<span>${esc(NOME_DO_STATUS[st])}</span></span>`;
+  // NOD-448: o nome e o ícone da coluna do quadro (renomeada ou criada pela pessoa); o padrão só para um dado velho.
+  const col = comColunas(o.q).colunas.find((c) => c.id === t.status);
+  const nomeSt = col?.nome ?? NOME_DO_STATUS[t.status as Status] ?? t.status;
+  const icSt = ICONE_DO_STATUS[col ? iconeDaColuna(col) : (t.status as Status)] ?? ICONE_DO_STATUS.afazer;
+  const chipSt = `<span class="qd-chip">${icSt}<span>${esc(nomeSt)}</span></span>`;
   const chipResp = resp ? `<span class="qd-chip">${avatar({ avatar: resp.avatar, nome: resp.nome, estado: t.execucao })}<span>${esc(resp.nome)}</span></span>` : `<span class="qd-chip qd-chip-vazio">Sem responsável</span>`;
   const pr = linkSeguro(t.prUrl);
   const lin = linkSeguro(t.linearUrl);
@@ -140,7 +167,7 @@ export function tarefaAberta(o: { t: TarefaDto; q: QuadroDto; agente: AgenteDoQu
     `<div class="qd-t-cab"><button type="button" class="qd-voltar" data-act="voltar-ao-quadro">${ICONE.voltar}<span>${esc(o.q.meta)}</span></button><span class="qd-t-sep" aria-hidden="true">/</span><span class="qd-id">${esc(codigo)}</span></div>` +
     `<div class="qd-t-corpo"><div class="qd-t-principal"><h1 class="qd-t-tit" id="qd-t-tit" tabindex="-1">${esc(t.titulo)}</h1><div class="qd-chips">${chipSt}${chipResp}${chipPr}</div>${desc}${pergunta}${resposta}</div>` +
     `<aside class="qd-lado" aria-label="Detalhes da tarefa"><section class="qd-lado-sec"><h2 class="qd-rotulo">Propriedades</h2><dl class="qd-props">` +
-    `<dt>Status</dt><dd>${esc(NOME_DO_STATUS[st])}</dd><dt>Responsável</dt><dd>${esc(resp?.nome ?? "ninguém")}</dd><dt>Quadro</dt><dd>${esc(o.q.meta)}</dd></dl></section>` +
+    `<dt>Status</dt><dd>${esc(nomeSt)}</dd><dt>Responsável</dt><dd>${esc(resp?.nome ?? "ninguém")}</dd><dt>Quadro</dt><dd>${esc(o.q.meta)}</dd></dl></section>` +
     `${entregaveis}${noLinear}</aside></div></article>`);
 }
 

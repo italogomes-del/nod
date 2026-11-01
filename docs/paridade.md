@@ -2,7 +2,7 @@
 
 <!-- Gerado por `npm run paridade` a partir de src/domain/acoes/ (NOD-391, ADR-135). Não edite à mão: a catraca (tests/conformidade/paridade.test.ts) compara. -->
 
-Ações de pessoa que mudam algo: **143**, mais 2 só de leitura. No chat: **18 vivas**, 3 parciais, 90 faltando e 34 que nunca vão para o chat. Piso de vivas: 18.
+Ações de pessoa que mudam algo: **148**, mais 2 só de leitura. No chat: **23 vivas**, 3 parciais, 90 faltando e 34 que nunca vão para o chat. Piso de vivas: 23.
 
 Estados: **vivo** = o chat faz pelo mesmo executor da tela, com teste de contrato; **parcial** = o chat faz, mas diverge ou falta parâmetro; **falta** = a onda dona ainda vai ligar; **nunca** = exceção escrita.
 
@@ -275,6 +275,11 @@ Estados: **vivo** = o chat faz pelo mesmo executor da tela, com teste de contrat
 | `quadro.mudar_tarefa` | Mudar uma tarefa (status, responsável, PR, pergunta) ou tirá-la do quadro | muda | vivo (`gerir_quadro`) | `DELETE ^\/agentes\/(?<id>[^/]+)\/quadro\/tarefas\/(?<tid>[^/]+)$`<br>`PATCH ^\/agentes\/(?<id>[^/]+)\/quadro\/tarefas\/(?<tid>[^/]+)$` |
 | `quadro.responder` | Responder a pergunta de uma tarefa bloqueada | muda | vivo (`gerir_quadro`) | `POST ^\/agentes\/(?<id>[^/]+)\/quadro\/tarefas\/(?<tid>[^/]+)\/resposta$` |
 | `quadro.desfazer` | Desfazer a última mudança no quadro | muda | vivo (`gerir_quadro`) | `POST ^\/agentes\/(?<id>[^/]+)\/quadro\/lotes\/(?<lid>[^/]+)\/desfazer$` |
+| `quadro.criar_coluna` | Criar uma coluna no quadro (com o grupo) | muda | vivo (`gerir_quadro`) | `POST ^\/agentes\/(?<id>[^/]+)\/quadro\/colunas$` |
+| `quadro.renomear_coluna` | Renomear uma coluna do quadro | muda | vivo (`gerir_quadro`) | `PATCH ^\/agentes\/(?<id>[^/]+)\/quadro\/colunas\/(?<cid>[^/]+)$` |
+| `quadro.mover_coluna` | Mudar uma coluna de lugar (dentro do grupo) | muda | vivo (`gerir_quadro`) | `POST ^\/agentes\/(?<id>[^/]+)\/quadro\/colunas\/(?<cid>[^/]+)\/mover$` |
+| `quadro.remover_coluna` | Remover uma coluna (as tarefas vão para o destino) | muda | vivo (`gerir_quadro`) | `DELETE ^\/agentes\/(?<id>[^/]+)\/quadro\/colunas\/(?<cid>[^/]+)$` |
+| `quadro.substituir_colunas` | Trocar o conjunto de colunas do quadro | muda | vivo (`gerir_quadro`) | `PUT ^\/agentes\/(?<id>[^/]+)\/quadro\/colunas$` |
 
 ## O que cada onda leva
 

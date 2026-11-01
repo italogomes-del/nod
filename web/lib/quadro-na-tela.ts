@@ -10,8 +10,10 @@
  *   onde ela está (sem salto).
  * - O modo é por conversa e só em memória: trocar de conversa (ou sair dela) volta para Conversa, sem animação.
  */
-import { STATUS, direcaoDaTroca, ehModo, modoPelaTecla, movimentoDaTroca, type ModoDaConversa, type Status } from "./quadro.ts";
-import type { QuadroDto } from "../../src/contracts/quadro.ts";
+import { direcaoDaTroca, ehModo, modoPelaTecla, movimentoDaTroca, type ModoDaConversa } from "./quadro.ts";
+import { comColunas, fraseDoErroDeColuna, nomeRepetido, passoDeMover, porqueNaoRemove, saidaComErroDesiste, seletorDoFocoDaColuna, soltarEm, type EdicaoDeColuna, type Lado } from "./colunas.ts";
+import { ErroApi } from "./erro-api.ts";
+import type { GrupoColuna, QuadroDto } from "../../src/contracts/quadro.ts";
 import type { ConversaDto, RespostaMutacao } from "../../src/contracts/api.ts";
 import type { MutacaoQuadro } from "./api.ts";
 import { acesos, historicoDaFaixa, respostaDoBot, tarefaNoQuadro, type Faixa } from "./quadro-dados.ts";
@@ -25,6 +27,11 @@ export interface ApiDoQuadro {
   enviar(conversaId: string, texto: string, anexos?: readonly string[], idEnvio?: string): Promise<RespostaMutacao>;
   responderTarefa(agenteId: string, tarefaId: string, resposta: string): Promise<MutacaoQuadro>;
   desfazerLoteQuadro(agenteId: string, loteId: string): Promise<MutacaoQuadro>;
+  /** NOD-448: as colunas (cada uma um lote com Desfazer). Opcionais: sem elas, o quadro não edita colunas. */
+  criarColuna?(agenteId: string, c: { nome: string; grupo: GrupoColuna; depois_de?: string }): Promise<MutacaoQuadro>;
+  renomearColuna?(agenteId: string, coluna: string, nome: string): Promise<MutacaoQuadro>;
+  moverColuna?(agenteId: string, coluna: string, onde: { antes_de?: string; depois_de?: string }): Promise<MutacaoQuadro>;
+  removerColuna?(agenteId: string, coluna: string, destino?: string): Promise<MutacaoQuadro>;
 }
 
 /** NOD-442: o que o quadro de verdade precisa do main. Sem isto (os testes da NOD-429), a vista é o quadro vazio. */
@@ -41,7 +48,6 @@ export interface DadosDoQuadro {
 /** Os pedaços do palco que são "a conversa": saem juntos quando o Quadro entra. */
 export const LADO_DA_CONVERSA = ["timeline", "pilula-novas", "faixa-trabalhos", "composer"] as const;
 
-const ehStatus = (v: unknown): v is Status => (STATUS as readonly unknown[]).includes(v);
 
 export interface QuadroNaTela {
   /** Depois de cada desenho: `chave` é a conversa à vista com o quadro liberado, ou null (outra tela, flag desligada). */
@@ -61,7 +67,7 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
   let modo: ModoDaConversa = "conversa";
   let filtro: Filtro = "todos";
   /** As colunas que a pessoa abriu ou recolheu, ao contrário do padrão. */
-  let alternadas = new Set<Status>();
+  let alternadas = new Set<string>();
   let animacoes: Animation[] = [];
   /** Quem está saindo na animação em curso (fica `inert`); na inversão, troca com quem entra. */
   let saindo: HTMLElement[] = [];
@@ -93,10 +99,12 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
   let timerReler: ReturnType<typeof setTimeout> | null = null;
   let timerRecolher: ReturnType<typeof setTimeout> | null = null;
   let dica: string[] = [];
+  /** NOD-448: o pedaço da edição das colunas que está aberto (menu, renomear, remover, coluna nova, a folha do celular). */
+  let edicao: EdicaoDeColuna | null = null;
 
   function zerarDados(): void {
     agenteId = null; q = null; carga = "nada"; aberta = null; acesas = new Set(); faixa = { tipo: "nada" }; loteAntes = null;
-    historico = []; histAberto = false; leitura++; leituraConversa++; dica = [];
+    historico = []; histAberto = false; leitura++; leituraConversa++; dica = []; edicao = null;
     if (timerReler) clearTimeout(timerReler);
     if (timerRecolher) clearTimeout(timerRecolher);
     timerReler = timerRecolher = null;
@@ -109,7 +117,7 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     if (!q) return semQuadro(nome);
     const t = tarefaNoQuadro(q, aberta);
     if (t) return tarefaAberta({ t, q, agente: dd.agente });
-    return quadroDaMeta({ q, nome, agente: dd.agente, filtro, alternadas, acesas });
+    return quadroDaMeta({ q, nome, agente: dd.agente, filtro, alternadas, acesas, edicao });
   }
 
   /**
@@ -127,11 +135,14 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     }
     if (!conteudo) return;
     const rascunhos = new Map<string, string>();
-    for (const c of conteudo.querySelectorAll<HTMLTextAreaElement>("textarea[id]")) if (c.value) rascunhos.set(c.id, c.value);
+    // NOD-448: o nome que a pessoa digita numa coluna (renomear, nova) sobrevive ao frame que regrava o quadro.
+    for (const c of conteudo.querySelectorAll<HTMLTextAreaElement | HTMLInputElement>("textarea[id], input.qd-col-in[id]")) if (c.value) rascunhos.set(c.id, c.value);
     const ativo = doc.activeElement;
     const focoId = ativo instanceof HTMLElement && conteudo.contains(ativo) && ativo.id ? ativo.id : null;
+    const focoColuna = ativo instanceof HTMLElement && conteudo.contains(ativo) && !ativo.id ? seletorDoFocoDaColuna(ativo) : null;
     conteudo.innerHTML = conteudoHtml();
-    for (const [id, valor] of rascunhos) { const c = doc.getElementById(id); if (c instanceof HTMLTextAreaElement) c.value = valor; }
+    if (focoColuna) conteudo.querySelector<HTMLElement>(focoColuna)?.focus();
+    for (const [id, valor] of rascunhos) { const c = doc.getElementById(id); if (c instanceof HTMLTextAreaElement || c instanceof HTMLInputElement) c.value = valor; }
     if (focoId) doc.getElementById(focoId)?.focus();
     const form = v.querySelector<HTMLElement>('[data-form="conversa-no-quadro"]');
     const rot = q ? `Conversar com o quadro ${q.meta}` : `Conversar com ${nome} sobre o quadro`;
@@ -177,6 +188,7 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
   }
 
   function aplicarQuadro(novo: QuadroDto | null, extra: readonly string[] = []): void {
+    if (novo) novo = comColunas(novo);
     const novas = acesos(q, novo, [...dica, ...extra]);
     // Uma releitura sem mudança (a do frame e a da resposta chegam juntas) não apaga o brilho que a anterior acendeu.
     if (novas.size || !q || !novo || q.id !== novo.id) acesas = novas;
@@ -292,6 +304,149 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
       mudarFaixa({ tipo: "erro", texto: "Não deu para desfazer: o quadro mudou depois deste pedido." });
     }
   }
+
+  /* ---------- NOD-448: as colunas pela tela ---------- */
+
+  const colunaDe = (id: string | undefined) => (id ? q?.colunas.find((c) => c.id === id) ?? null : null);
+  const tarefasNa = (id: string): number => q?.tarefas.filter((t) => t.status === id).length ?? 0;
+
+  /** Abre (ou fecha) um pedaço da edição e leva o foco a ele. */
+  function editar(ed: EdicaoDeColuna | null, foco?: string): void {
+    edicao = ed;
+    desenharVista();
+    const v = vista();
+    if (!v) return;
+    if (foco) { v.querySelector<HTMLElement>(foco)?.focus(); return; }
+    const alvo = ed?.tipo === "renomear" ? "#qd-col-in" : ed?.tipo === "nova" ? ".qd-col-nova-f input[name=nome]" : ed?.tipo === "remover" ? "#qd-col-destino"
+      : ed?.tipo === "menu" ? '#qd-menu [role="menuitem"]:not([aria-disabled])' : ed?.tipo === "ordem" ? ".qd-folha-tit" : null;
+    const el = alvo ? v.querySelector<HTMLElement>(alvo) : null;
+    if (ed?.tipo === "ordem" && el) el.tabIndex = -1;
+    el?.focus();
+    if (el instanceof HTMLInputElement && ed?.tipo === "renomear") el.select();
+  }
+
+  /** Fecha o que está aberto; dentro da folha do celular, volta para a folha. */
+  const fechar = (): void => {
+    const volta = edicao && "naFolha" in edicao && edicao.naFolha ? ({ tipo: "ordem" } as const) : null;
+    const col = edicao && "coluna" in edicao ? edicao.coluna : null;
+    editar(volta, col && !volta ? `.qd-so-largo .qd-col-bt[data-coluna="${CSS.escape(col)}"]` : undefined);
+  };
+
+  /** Uma mudança de coluna: aplica o quadro que volta e diz o que mudou na faixa, com o Desfazer do lote. */
+  async function mexer(fazer: (a: ApiDoQuadro, de: string) => Promise<MutacaoQuadro> | undefined, recibo: string, foco?: string, depois: EdicaoDeColuna | null = null, texto?: string): Promise<void> {
+    const a = dd?.api();
+    // Uma de cada vez: o Enter e a saída do campo não mandam o mesmo renomear duas vezes.
+    if (!a || !agenteId || mexendo) return;
+    const c = chave;
+    const de = agenteId;
+    mexendo = true;
+    try {
+      const p = fazer(a, de);
+      if (!p) return;
+      const r = await p;
+      if (c !== chave || de !== agenteId) return;
+      edicao = depois;
+      aplicarQuadro(r.quadro);
+      mudarFaixa({ tipo: "resposta", texto: recibo, loteId: r.lote && !r.lote.desfeitoEm ? r.lote.id : null, mensagemId: "" });
+      if (foco) vista()?.querySelector<HTMLElement>(foco)?.focus();
+    } catch (e) {
+      if (c !== chave) return;
+      const f = fraseDoErroDeColuna(e instanceof ErroApi ? e.codigo : null);
+      // Recusado pelo dado (ou sem conexão): o campo fica aberto com o que foi digitado, e o porquê nele.
+      const aberta = edicao;
+      if (f.manter && texto !== undefined && aberta && (aberta.tipo === "renomear" || aberta.tipo === "nova")) {
+        editar({ ...aberta, erro: f.texto });
+        restaurar(texto);
+        return;
+      }
+      edicao = depois;
+      mudarFaixa({ tipo: "erro", texto: f.texto });
+      if (!f.manter) void lerQuadro();
+    } finally {
+      mexendo = false;
+    }
+  }
+
+  function moverColuna(id: string, lado: Lado, foco?: string): void {
+    if (!q) return;
+    const passo = passoDeMover(q.colunas, id, lado);
+    const c = colunaDe(id);
+    if (!c) return;
+    if (!passo.ok) { mudarFaixa({ tipo: "erro", texto: passo.porque }); return; }
+    const { ok: _ok, ...onde } = passo;
+    void mexer((a, de) => a.moverColuna?.(de, id, onde), `${c.nome} mudou de lugar`, foco, naFolha() ? { tipo: "ordem" } : null);
+  }
+
+  function soltar(id: string, alvo: string): void {
+    if (!q) return;
+    const onde = soltarEm(q.colunas, id, alvo);
+    const c = colunaDe(id);
+    if (!onde || !c) return;
+    void mexer((a, de) => a.moverColuna?.(de, id, onde), `${c.nome} mudou de lugar`, undefined, naFolha() ? { tipo: "ordem" } : null);
+  }
+
+  const naFolha = (): boolean => !!edicao && (edicao.tipo === "ordem" || ("naFolha" in edicao && !!edicao.naFolha));
+
+  function pedirRemover(id: string, el: HTMLElement): void {
+    const c = colunaDe(id);
+    if (!c || !q) return;
+    const porque = porqueNaoRemove(q.colunas, id, nome);
+    if (porque) { mudarFaixa({ tipo: "erro", texto: porque }); return; }
+    const folha = !!el.closest(".qd-folha");
+    // Decisão 9 do Gil: a vazia sai na hora (com Desfazer); com tarefas, pergunta para onde elas vão.
+    if (tarefasNa(id) === 0) { void mexer((a, de) => a.removerColuna?.(de, id), `${c.nome} removida`, undefined, folha ? { tipo: "ordem" } : null); return; }
+    editar({ tipo: "remover", coluna: id, ...(folha ? { naFolha: true } : {}) });
+  }
+
+  function enviarColuna(form: HTMLFormElement): void {
+    if (!q) return;
+    const qual = form.dataset["form"];
+    const folha = !!form.closest(".qd-folha");
+    const depois: EdicaoDeColuna | null = folha ? { tipo: "ordem" } : null;
+    const campo = form.querySelector<HTMLInputElement>("input[name=nome]");
+    const texto = (campo?.value ?? "").trim().replace(/\s+/g, " ");
+    if (qual === "col-renomear") {
+      const id = form.dataset["coluna"] ?? "";
+      const c = colunaDe(id);
+      if (!c) { editar(depois); return; }
+      if (!texto || texto === c.nome) { fechar(); return; }
+      const outra = nomeRepetido(q.colunas, texto, id);
+      if (outra) { editar({ tipo: "renomear", coluna: id, erro: `Já existe uma coluna ${outra.nome}`, ...(folha ? { naFolha: true } : {}) }); restaurar(texto); return; }
+      void mexer((a, de) => a.renomearColuna?.(de, id, texto), `${c.nome} agora é ${texto}`, folha ? undefined : `.qd-so-largo .qd-col-bt[data-coluna="${CSS.escape(id)}"]`, depois, texto);
+    } else if (qual === "col-nova") {
+      const grupo = form.querySelector<HTMLInputElement>("input[name=grupo]:checked")?.value as GrupoColuna | undefined;
+      const depoisDe = form.dataset["depois"];
+      const base = { tipo: "nova" as const, ...(depoisDe ? { depoisDe } : {}), ...(grupo ? { grupo } : {}), ...(folha ? { naFolha: true } : {}) };
+      if (!texto) return;
+      if (!grupo) { editar({ ...base, erro: "Escolha o grupo da coluna" }); restaurar(texto); return; }
+      const outra = nomeRepetido(q.colunas, texto);
+      if (outra) { editar({ ...base, erro: `Já existe uma coluna ${outra.nome}` }); restaurar(texto); return; }
+      const junto = depoisDe ? colunaDe(depoisDe) : null;
+      const recibo = junto && junto.grupo === grupo && !junto.fixa ? `${texto} criada, junto de ${junto.nome}` : `${texto} criada`;
+      void mexer((a, de) => a.criarColuna?.(de, { nome: texto, grupo, ...(junto && junto.grupo === grupo && !junto.fixa ? { depois_de: junto.id } : {}) }), recibo, undefined, depois, texto);
+    } else if (qual === "col-remover") {
+      const id = form.dataset["coluna"] ?? "";
+      const c = colunaDe(id);
+      const destino = form.querySelector<HTMLSelectElement>("select[name=destino]")?.value ?? "";
+      const para = colunaDe(destino);
+      if (!c || !para) return;
+      const n = tarefasNa(id);
+      void mexer((a, de) => a.removerColuna?.(de, id, destino), `${c.nome} removida · ${n === 1 ? "1 tarefa" : `${n} tarefas`} em ${para.nome}`, undefined, depois);
+    }
+  }
+
+  /** Depois de regravar com o erro, o que a pessoa digitou volta ao campo. */
+  function restaurar(texto: string): void {
+    const c = vista()?.querySelector<HTMLInputElement>("#qd-col-in, .qd-col-nova-f input[name=nome]");
+    if (c) { c.value = texto; c.focus(); }
+  }
+
+  /** O clique simples recolhe; o duplo renomeia (decisão 6). O simples espera um pouco para o duplo não recolher antes. */
+  let timerClique: ReturnType<typeof setTimeout> | null = null;
+  /** O arrasto de uma coluna (o cabeçalho no computador, a alça ≡ na folha): só dentro do grupo. */
+  let arrasto: { id: string; x: number; y: number; ativo: boolean; alvo: HTMLElement | null; origem: HTMLElement | null } | null = null;
+  let engolirClique = false;
+  let mexendo = false;
 
   function aoFrame(frame: { tipo: string; dados: Record<string, unknown> }): void {
     if (!dd || chave === null || !agenteId) return;
@@ -439,6 +594,7 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
       modo = "conversa";
       filtro = "todos";
       alternadas = new Set();
+      edicao = null;
       const v = vista();
       if (v) v.innerHTML = "";
     }
@@ -453,6 +609,9 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     const alvo = ev.target as Element | null;
     // Clicar no quadro recolhe o histórico da faixa (passo 9).
     if (histAberto && alvo?.closest?.("#quadro .qd-conteudo")) { histAberto = false; desenharFaixa(); }
+    if (engolirClique) { engolirClique = false; ev.preventDefault(); ev.stopPropagation(); return; }
+    // NOD-448: clicar fora do menu ou do popover fecha (a coluna nova e a folha fecham pelo Cancelar, Pronto ou Esc).
+    if ((edicao?.tipo === "menu" || (edicao?.tipo === "remover" && !edicao.naFolha)) && alvo?.closest?.("#quadro") && !alvo.closest(".qd-menu, .qd-pop, .qd-col-mais")) { edicao = null; desenharVista(); }
     const el = alvo?.closest?.<HTMLElement>("[data-act]");
     if (!el) return;
     const act = el.dataset["act"];
@@ -471,6 +630,14 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
         return;
       }
       if (act === "qc-abrir-conversa") { histAberto = false; desenharFaixa(); trocar("conversa", { foco: true }); return; }
+      if (act?.startsWith("col-")) { aoClicarColuna(el, act); return; }
+      // Clique simples no nome de uma coluna que edita: espera o duplo (que renomeia) antes de recolher.
+      if (act === "abrir-coluna" && el.matches(".qd-col-bt[aria-keyshortcuts]") && ev.detail >= 1) {
+        if (timerClique) clearTimeout(timerClique);
+        if (ev.detail >= 2) { timerClique = null; editar({ tipo: "renomear", coluna: el.dataset["coluna"] ?? "" }); return; }
+        timerClique = setTimeout(() => { timerClique = null; if (el.isConnected) alternarColuna(el); }, 260);
+        return;
+      }
     }
     if (act === "modo-da-conversa" && el.closest("#cabecalho")) {
       const m = el.dataset["modo"];
@@ -479,22 +646,50 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
       if (act === "filtro-do-quadro") {
         const f = el.dataset["filtro"];
         if (f === "todos" || f === "pessoas" || f === "agentes") filtro = f;
-      } else {
-        const st = el.dataset["status"];
-        if (ehStatus(st)) { if (alternadas.has(st)) alternadas.delete(st); else alternadas.add(st); }
-      }
-      const sel = act === "abrir-coluna" ? `[data-act="abrir-coluna"][data-status="${CSS.escape(el.dataset["status"] ?? "")}"]` : `[data-act="filtro-do-quadro"][data-filtro="${filtro}"]`;
-      const lugar = act === "filtro-do-quadro" ? ".qd-barra-q" : el.closest(".qd-so-estreito") ? ".qd-so-estreito" : ".qd-so-largo";
-      desenharVista();
-      vista()?.querySelector<HTMLElement>(`${lugar} ${sel}`)?.focus();
+        desenharVista();
+        vista()?.querySelector<HTMLElement>(`.qd-barra-q [data-act="filtro-do-quadro"][data-filtro="${filtro}"]`)?.focus();
+      } else alternarColuna(el);
     }
   });
+
+  function alternarColuna(el: HTMLElement): void {
+    const st = el.dataset["status"];
+    if (st) { if (alternadas.has(st)) alternadas.delete(st); else alternadas.add(st); }
+    const lugar = el.closest(".qd-so-estreito") ? ".qd-so-estreito" : ".qd-so-largo";
+    if (edicao?.tipo === "menu") edicao = null;
+    desenharVista();
+    vista()?.querySelector<HTMLElement>(`${lugar} [data-act="abrir-coluna"][data-status="${CSS.escape(st ?? "")}"]`)?.focus();
+  }
+
+  function aoClicarColuna(el: HTMLElement, act: string): void {
+    const id = el.dataset["coluna"] ?? "";
+    const folha = !!el.closest(".qd-folha");
+    const desabilitado = el.getAttribute("aria-disabled") === "true";
+    if (desabilitado) { const porque = el.getAttribute("title"); if (porque) mudarFaixa({ tipo: "erro", texto: porque }); return; }
+    if (act === "col-menu") { editar(edicao?.tipo === "menu" && edicao.coluna === id ? null : { tipo: "menu", coluna: id }); return; }
+    if (act === "col-renomear") { editar({ tipo: "renomear", coluna: id, ...(folha ? { naFolha: true } : {}) }); return; }
+    if (act === "col-esquerda" || act === "col-direita") {
+      const foco = folha ? `.qd-folha [data-act="${act}"][data-coluna="${CSS.escape(id)}"]` : `.qd-so-largo .qd-col-bt[data-coluna="${CSS.escape(id)}"]`;
+      moverColuna(id, act === "col-esquerda" ? "esquerda" : "direita", foco);
+      return;
+    }
+    if (act === "col-nova") {
+      const c = colunaDe(id);
+      editar({ tipo: "nova", ...(c && !c.fixa ? { depoisDe: c.id } : {}), ...(c ? { grupo: c.grupo } : {}), ...(folha ? { naFolha: true } : {}) });
+      return;
+    }
+    if (act === "col-remover") { pedirRemover(id, el); return; }
+    if (act === "col-fechar") { fechar(); return; }
+    if (act === "col-folha") { editar({ tipo: "ordem" }); return; }
+    if (act === "col-fechar-folha") { editar(null, '.qd-so-estreito [data-act="col-folha"]'); return; }
+  }
 
   // NOD-442: a pílula e a resposta do bloqueio. Enter envia na pílula (Shift+Enter quebra a linha); Esc na tarefa volta.
   doc.addEventListener("submit", (ev) => {
     const form = ev.target instanceof HTMLFormElement ? ev.target : null;
     if (!dd || !form?.closest("#quadro")) return;
     const qual = form.dataset["form"];
+    if (qual === "col-renomear" || qual === "col-nova" || qual === "col-remover") { ev.preventDefault(); enviarColuna(form); return; }
     if (qual !== "conversa-no-quadro" && qual !== "responder-tarefa") return;
     ev.preventDefault();
     if (qual === "conversa-no-quadro") void enviarPedido(form);
@@ -506,11 +701,72 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     if (ev.key === "Enter" && !ev.shiftKey && !ev.isComposing && el instanceof HTMLTextAreaElement && el.id === "qc-txt") {
       ev.preventDefault();
       el.form?.requestSubmit();
+    } else if (ev.key === "Escape" && edicao && el?.closest?.("#quadro .qd-conteudo")) {
+      ev.preventDefault();
+      if (edicao.tipo === "ordem") editar(null, '.qd-so-estreito [data-act="col-folha"]');
+      else fechar();
     } else if (ev.key === "Escape" && aberta && el?.closest?.("#quadro .qd-conteudo")) {
       ev.preventDefault();
       voltarAoQuadro();
+    } else if (el instanceof HTMLElement && el.matches("#quadro .qd-so-largo .qd-col-bt[aria-keyshortcuts]")) {
+      // Decisão 6: F2 renomeia; Alt ← → move dentro do grupo.
+      const id = el.dataset["coluna"] ?? "";
+      if (ev.key === "F2") { ev.preventDefault(); editar({ tipo: "renomear", coluna: id }); }
+      else if (ev.altKey && (ev.key === "ArrowLeft" || ev.key === "ArrowRight")) {
+        ev.preventDefault();
+        moverColuna(id, ev.key === "ArrowLeft" ? "esquerda" : "direita", `.qd-so-largo .qd-col-bt[data-coluna="${CSS.escape(id)}"]`);
+      }
+    } else if (el instanceof HTMLElement && el.matches('#qd-menu [role="menuitem"]') && (ev.key === "ArrowDown" || ev.key === "ArrowUp" || ev.key === "Home" || ev.key === "End")) {
+      ev.preventDefault();
+      const itens = [...(el.parentElement?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [])];
+      const i = itens.indexOf(el);
+      const j = ev.key === "Home" ? 0 : ev.key === "End" ? itens.length - 1 : (i + (ev.key === "ArrowDown" ? 1 : -1) + itens.length) % itens.length;
+      itens[j]?.focus();
     }
   });
+
+  // NOD-448: renomear grava ao sair do campo (Esc desiste antes: a edição já fechou quando o campo sai).
+  doc.addEventListener("focusout", (ev) => {
+    const el = ev.target;
+    if (!(el instanceof HTMLInputElement) || el.id !== "qd-col-in" || edicao?.tipo !== "renomear") return;
+    const form = el.form;
+    if (!form?.isConnected) return;
+    // O foco foi para outro lugar do próprio formulário (nada além do campo): deixa.
+    if (ev.relatedTarget instanceof Node && form.contains(ev.relatedTarget)) return;
+    // Com o erro na tela, sair do campo sem corrigir desiste (não prende a pessoa nele); corrigido, grava (revisão do PR #615).
+    if (edicao.erro && saidaComErroDesiste(q?.colunas ?? [], edicao.coluna, el.value)) { fechar(); return; }
+    enviarColuna(form);
+  });
+
+  // NOD-448: arrastar a coluna (o cabeçalho, ou a alça ≡ na folha do celular), só dentro do grupo.
+  doc.addEventListener("pointerdown", (ev) => {
+    const el = (ev.target as Element | null)?.closest?.<HTMLElement>("#quadro [data-arrasta][data-coluna]");
+    if (!el || ev.button !== 0 || !q) return;
+    arrasto = { id: el.dataset["coluna"] ?? "", x: ev.clientX, y: ev.clientY, ativo: false, alvo: null, origem: el.closest<HTMLElement>("section[data-coluna], li[data-coluna]") };
+    if (el.classList.contains("qd-alca")) { ev.preventDefault(); el.setPointerCapture?.(ev.pointerId); }
+  });
+  doc.addEventListener("pointermove", (ev) => {
+    if (!arrasto || !q) return;
+    if (!arrasto.ativo && Math.hypot(ev.clientX - arrasto.x, ev.clientY - arrasto.y) < 6) return;
+    arrasto.ativo = true;
+    arrasto.origem?.classList.add("qd-arrastando");
+    const sob = doc.elementFromPoint?.(ev.clientX, ev.clientY)?.closest?.<HTMLElement>("#quadro section[data-coluna], #quadro li[data-coluna][data-grupo]") ?? null;
+    const valido = sob && soltarEm(q.colunas, arrasto.id, sob.dataset["coluna"] ?? "") ? sob : null;
+    if (valido !== arrasto.alvo) { arrasto.alvo?.classList.remove("qd-alvo"); valido?.classList.add("qd-alvo"); arrasto.alvo = valido; }
+  });
+  const fimDoArrasto = (soltou: boolean): void => {
+    const a = arrasto;
+    arrasto = null;
+    if (!a?.ativo) return;
+    a.origem?.classList.remove("qd-arrastando");
+    a.alvo?.classList.remove("qd-alvo");
+    // O pointerup vira um click no cabeçalho: ele não recolhe a coluna que acabou de ser arrastada.
+    engolirClique = true;
+    setTimeout(() => { engolirClique = false; }, 0);
+    if (soltou && a.alvo) soltar(a.id, a.alvo.dataset["coluna"] ?? "");
+  };
+  doc.addEventListener("pointerup", () => fimDoArrasto(true));
+  doc.addEventListener("pointercancel", () => fimDoArrasto(false));
 
   // O teclado do tablist (APG, ativação automática): ← → Home End trocam e levam o foco.
   doc.addEventListener("keydown", (ev) => {

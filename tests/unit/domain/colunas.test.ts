@@ -1,0 +1,156 @@
+import { describe, expect, it } from "vitest";
+import {
+  COLUNAS_PADRAO, colunaDeAndamento, colunaDeEspera, colunasDe, colunasDto, criarColuna, idNovo, moverColuna, papelDe,
+  removerColuna, renomearColuna, resolverColuna, saoPadrao, substituirColunas, validarColunas,
+} from "../../../src/domain/colunas.ts";
+import type { ColunaQuadro } from "../../../src/contracts/quadro.ts";
+import { progresso } from "../../../src/domain/quadro.ts";
+
+const ok = <T,>(r: T | { erro: string }): T => {
+  if (r && typeof r === "object" && "erro" in r) throw new Error((r as { erro: string }).erro);
+  return r as T;
+};
+const ids = (cs: readonly ColunaQuadro[]) => cs.map((c) => c.id);
+
+// O quadro dos doces (o e2e da NOD-448): Pedido → Compras → Produção → Finalização → Embalagem → Entrega → Pago.
+const DOCES = [
+  { nome: "Pedido", grupo: "nao_iniciado" as const },
+  { nome: "Compras", grupo: "iniciado" as const },
+  { nome: "Produção", grupo: "iniciado" as const },
+  { nome: "Finalização", grupo: "iniciado" as const },
+  { nome: "Embalagem", grupo: "iniciado" as const },
+  { nome: "Entrega", grupo: "iniciado" as const },
+  { nome: "Pago", grupo: "feito" as const },
+];
+
+describe("colunas: padrão", () => {
+  it("quadro sem colunas gravadas usa o padrão, que é válido e reconhecido como padrão", () => {
+    expect(colunasDe({ colunas: null })).toEqual(COLUNAS_PADRAO);
+    expect(validarColunas(COLUNAS_PADRAO)).toBeNull();
+    expect(saoPadrao(COLUNAS_PADRAO)).toBe(true);
+    expect(ids(COLUNAS_PADRAO).at(-3)).toBe("voce");
+  });
+
+  it("DTO marca fixas, da pessoa e recolhidas", () => {
+    const c = ok(criarColuna(COLUNAS_PADRAO, { nome: "Teste", grupo: "iniciado" }));
+    const dto = colunasDto(c.colunas);
+    expect(dto.find((x) => x.id === "voce")).toMatchObject({ fixa: true, daPessoa: false, recolhida: false });
+    expect(dto.find((x) => x.id === c.id)).toMatchObject({ fixa: false, daPessoa: true, recolhida: false });
+    expect(dto.find((x) => x.id === "feito")!.recolhida).toBe(true);
+    expect(dto.find((x) => x.id === "backlog")!.recolhida).toBe(true);
+  });
+});
+
+describe("colunas: criar", () => {
+  it("exige grupo e nasce no fim do grupo, antes de Precisa de você", () => {
+    expect(criarColuna(COLUNAS_PADRAO, { nome: "X", grupo: "qualquer" as never })).toMatchObject({ erro: expect.stringContaining("grupo") });
+    const c = ok(criarColuna(COLUNAS_PADRAO, { nome: "Testes", grupo: "iniciado" }));
+    expect(c.id).toBe("c-testes");
+    expect(ids(c.colunas).slice(-4)).toEqual(["c-testes", "voce", "feito", "cancelado"]);
+    expect(c.ajustada).toBe(false);
+  });
+
+  it("depois_de do mesmo grupo entra ao lado; de outro grupo, ajusta", () => {
+    const c = ok(criarColuna(COLUNAS_PADRAO, { nome: "Testes", grupo: "iniciado", depois_de: "fazendo" }));
+    expect(ids(c.colunas).indexOf("c-testes")).toBe(ids(c.colunas).indexOf("fazendo") + 1);
+    const d = ok(criarColuna(COLUNAS_PADRAO, { nome: "Testes", grupo: "iniciado", depois_de: "feito" }));
+    expect(d.ajustada).toBe(true);
+    expect(validarColunas(d.colunas)).toBeNull();
+  });
+
+  it("nome repetido (sem acento/caixa) é recusado; id não colide", () => {
+    expect(criarColuna(COLUNAS_PADRAO, { nome: "a fazer", grupo: "nao_iniciado" })).toMatchObject({ erro: expect.stringContaining("Já existe") });
+    expect(idNovo("Produção", ["c-producao"])).toBe("c-producao-2");
+  });
+});
+
+describe("colunas: renomear e mover", () => {
+  it("renomeia qualquer uma, inclusive Precisa de você e Cancelado", () => {
+    const r = ok(renomearColuna(COLUNAS_PADRAO, { coluna: "Precisa de você", nome: "Comigo" }));
+    expect(r.colunas.find((c) => c.id === "voce")!.nome).toBe("Comigo");
+    expect(r.antes).toBe("Precisa de você");
+    expect(ok(renomearColuna(COLUNAS_PADRAO, { coluna: "cancelado", nome: "Arquivado" })).id).toBe("cancelado");
+  });
+
+  it("move só dentro do grupo; fixas não se movem", () => {
+    const m = ok(moverColuna(COLUNAS_PADRAO, { coluna: "bloqueado", antes_de: "fazendo" }));
+    expect(ids(m.colunas).indexOf("bloqueado")).toBeLessThan(ids(m.colunas).indexOf("fazendo"));
+    expect(m.ajustada).toBe(false);
+    const fora = ok(moverColuna(COLUNAS_PADRAO, { coluna: "fazendo", depois_de: "feito" }));
+    expect(fora.ajustada).toBe(true);
+    expect(validarColunas(fora.colunas)).toBeNull();
+    expect(moverColuna(COLUNAS_PADRAO, { coluna: "voce", antes_de: "fazendo" })).toMatchObject({ erro: expect.stringContaining("não muda de lugar") });
+    expect(moverColuna(COLUNAS_PADRAO, { coluna: "fazendo" })).toMatchObject({ erro: expect.any(String) });
+  });
+});
+
+describe("colunas: remover", () => {
+  it("vazia sai na hora; fixas não saem", () => {
+    const r = ok(removerColuna(COLUNAS_PADRAO, { coluna: "revisao" }, []));
+    expect(ids(r.colunas)).not.toContain("revisao");
+    expect(r.movidas).toBe(0);
+    expect(removerColuna(COLUNAS_PADRAO, { coluna: "voce" }, [])).toMatchObject({ erro: expect.stringContaining("não sai") });
+    expect(removerColuna(COLUNAS_PADRAO, { coluna: "cancelado" }, [])).toMatchObject({ erro: expect.stringContaining("não sai") });
+  });
+
+  it("com tarefas pede destino (e lista os possíveis), sem Precisa de você nem ela mesma", () => {
+    const tarefas = [{ status: "revisao" }, { status: "revisao" }, { status: "afazer" }];
+    expect(removerColuna(COLUNAS_PADRAO, { coluna: "revisao" }, tarefas)).toMatchObject({ erro: expect.stringMatching(/^coluna_com_tarefas: .*2 tarefas.*Destinos:/) });
+    expect(removerColuna(COLUNAS_PADRAO, { coluna: "revisao", destino: "voce" }, tarefas)).toMatchObject({ erro: expect.any(String) });
+    expect(removerColuna(COLUNAS_PADRAO, { coluna: "revisao", destino: "revisao" }, tarefas)).toMatchObject({ erro: expect.any(String) });
+    const r = ok(removerColuna(COLUNAS_PADRAO, { coluna: "revisao", destino: "fazendo" }, tarefas));
+    expect(r).toMatchObject({ destino: "fazendo", movidas: 2 });
+  });
+
+  it("não deixa o quadro sem coluna em Feito", () => {
+    expect(removerColuna(COLUNAS_PADRAO, { coluna: "feito" }, [])).toMatchObject({ erro: expect.any(String) });
+  });
+
+  it("não deixa o quadro sem onde o trabalho anda: Fazendo só sai se há uma coluna de andamento da pessoa (revisão do PR #615)", () => {
+    expect(removerColuna(COLUNAS_PADRAO, { coluna: "fazendo" }, [])).toMatchObject({ erro: expect.stringContaining("onde o trabalho anda") });
+    const comCompras = ok(criarColuna(COLUNAS_PADRAO, { nome: "Compras", grupo: "iniciado" })).colunas;
+    expect(ok(removerColuna(comCompras, { coluna: "fazendo" }, [])).colunas.map((c) => c.id)).toContain("c-compras");
+  });
+});
+
+describe("colunas: substituir (o quadro dos doces)", () => {
+  it("troca o conjunto, mantém as fixas e leva cada tarefa ao destino do grupo, sem perder nenhuma", () => {
+    const tarefas = [
+      { id: "t1", status: "afazer" }, { id: "t2", status: "fazendo" }, { id: "t3", status: "feito" },
+      { id: "t4", status: "voce" }, { id: "t5", status: "revisao" }, { id: "t6", status: "backlog" },
+    ];
+    const s = ok(substituirColunas(COLUNAS_PADRAO, { colunas: DOCES }, tarefas));
+    expect(s.colunas.map((c) => c.nome)).toEqual(["Pedido", "Compras", "Produção", "Finalização", "Embalagem", "Entrega", "Precisa de você", "Pago", "Cancelado"]);
+    expect(validarColunas(s.colunas)).toBeNull();
+    expect(s.ajustada).toBe(true);
+    const para = Object.fromEntries(s.movidas.map((m) => [m.tarefa, m.para]));
+    expect(para).toEqual({ t1: "c-pedido", t2: "c-compras", t3: "c-pago", t5: "c-compras", t6: "c-pedido" });
+    // nenhuma some: quem não foi movida está numa coluna que ficou
+    const finais = new Set(ids(s.colunas));
+    for (const t of tarefas) expect(finais.has(para[t.id] ?? t.status)).toBe(true);
+  });
+
+  it("destinos explícitos valem, mas nunca para Precisa de você", () => {
+    const tarefas = [{ id: "t2", status: "fazendo" }];
+    const s = ok(substituirColunas(COLUNAS_PADRAO, { colunas: DOCES, destinos: [{ de: "fazendo", para: "Produção" }] }, tarefas));
+    expect(s.movidas).toEqual([{ tarefa: "t2", de: "fazendo", para: "c-producao" }]);
+    expect(substituirColunas(COLUNAS_PADRAO, { colunas: DOCES, destinos: [{ de: "fazendo", para: "voce" }] }, tarefas)).toMatchObject({ erro: expect.any(String) });
+  });
+
+  it("grupo não muda e é obrigatório; precisa de uma coluna em Feito", () => {
+    expect(substituirColunas(COLUNAS_PADRAO, { colunas: [{ id: "feito", nome: "Feito", grupo: "iniciado" }] }, [])).toMatchObject({ erro: expect.stringContaining("grupo") });
+    expect(substituirColunas(COLUNAS_PADRAO, { colunas: [{ nome: "Só", grupo: "iniciado" }] }, [])).toMatchObject({ erro: expect.any(String) });
+  });
+
+  it("papel, andamento e espera nas colunas dos doces; progresso = Feito ÷ (total − Fechado)", () => {
+    const s = ok(substituirColunas(COLUNAS_PADRAO, { colunas: DOCES }, []));
+    expect(colunaDeEspera(s.colunas)).toBe("c-pedido");
+    expect(colunaDeAndamento(s.colunas)).toBe("c-compras");
+    expect(papelDe(s.colunas, "c-entrega")).toBe("fazendo");
+    expect(papelDe(s.colunas, "c-pago")).toBe("feito");
+    expect(resolverColuna(s.colunas, "produção")).toBe("c-producao");
+    expect(resolverColuna(s.colunas, "nada")).toMatchObject({ erro: expect.stringContaining("não existe") });
+    const p = progresso([{ status: "c-pago" }, { status: "c-entrega" }, { status: "cancelado" }, { status: "c-pedido" }] as never, s.colunas);
+    expect(p).toMatchObject({ feitas: 1, total: 3 });
+  });
+});

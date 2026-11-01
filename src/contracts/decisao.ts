@@ -16,6 +16,8 @@ export type TipoDecisao =
   | "lote_bots"
   /** definido em 2026-10-28 (NOD-50, 0115): o cartão de pedido de credencial (pedir_credencial). Só a pessoa resolve. */
   | "credencial"
+  /** definido em 2026-11-01 (NOD-448, 0135): trocar as colunas do quadro pela conversa (substituir_colunas). */
+  | "colunas_quadro"
   | "pergunta"
   | "falta_de_dado"
   | "permissao";

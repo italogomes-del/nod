@@ -1,4 +1,5 @@
 import { decidirLoteDeBots } from "../../../use-cases/gerir-bots.ts";
+import { decidirColunasDoQuadro } from "../../../use-cases/colunas-do-quadro.ts";
 import { randomUUID } from "node:crypto";
 import type { RespostaMutacao } from "../../../contracts/api.ts";
 import type { Decisao } from "../../../contracts/decisao.ts";
@@ -218,7 +219,18 @@ export function criarRotasDecisoes(d: DepsRotasDecisoes): Rota[] {
           return;
         }
 
-        if (atual.tipo === "perfil" || atual.tipo === "rotina" || atual.tipo === "rotina_atualizacao" || atual.tipo === "rotina_exclusao") {
+        if (atual.tipo === "colunas_quadro") {
+          // NOD-448 (ADR-140): trocar o conjunto de colunas pela conversa. Roda como a DONA (o quadro é dela). Quadro que
+          // mudou depois do card: o caso recusa e avisa sem lançar; o 409 sai DEPOIS do commit (padrão NOD-159).
+          const r = await comoDona(ctx.escopo, atual, (deps) => executar(deps, decidirColunasDoQuadro, { decisaoId: atual.id, recusar: recusada(corpo), executor: d.executor ?? "catcher" }));
+          if (r.obsoleta) throw new ErroDeDominio("estado_invalido", { cause: "colunas_mudaram" });
+          if (r.loteId) ids.lote = r.loteId;
+          const resposta: RespostaMutacao = { ok: true, ids };
+          ctx.json(200, resposta);
+          return;
+        }
+
+        if (atual.tipo === "perfil" || atual.tipo === "rotina" ||atual.tipo === "rotina_atualizacao" || atual.tipo === "rotina_exclusao") {
           // Proposta confirmada por botão em "Sua vez": decisao.id === proposta.id (criar-rotina.ts, rotinas-do-agente.ts).
           // NOD-159/NOD-190: a rotina (ou o perfil) mudou depois da proposta — o caso recusou e avisou sem lançar; o erro
           // sai DEPOIS do commit.

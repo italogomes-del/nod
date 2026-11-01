@@ -37,8 +37,9 @@ const bloco = (css: string, inicio: string): string => {
 describe("NOD-429 · vocabulário (web/lib/quadro.ts)", () => {
   it("8 colunas na ordem do protótipo; Backlog, Feito e Cancelado nascem recolhidas", () => {
     const c = colunasPadrao();
+    // NOD-448 (decisão 2 do Gil): Precisa de você passa a ser a última do andamento.
+    expect(c.map((x) => x.nome)).toEqual(["Backlog", "A fazer", "Fazendo", "Em revisão", "Bloqueado", "Precisa de você", "Feito", "Cancelado"]);
     expect(c.map((x) => x.status)).toEqual([...STATUS]);
-    expect(c.map((x) => x.nome)).toEqual(["Backlog", "A fazer", "Fazendo", "Precisa de você", "Em revisão", "Bloqueado", "Feito", "Cancelado"]);
     expect(c.filter((x) => x.recolhida).map((x) => x.status)).toEqual(["backlog", "feito", "cancelado"]);
     expect(trilhaDaColuna({ recolhida: true })).toBe("var(--qd-tira)");
     expect(trilhaDaColuna({ status: "voce" })).toContain("+ 20px");

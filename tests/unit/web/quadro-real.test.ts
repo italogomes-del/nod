@@ -3,17 +3,18 @@ import type { QuadroDto, TarefaDto } from "../../../src/contracts/quadro.ts";
 import { acesos, codigoDaTarefa, fraseDoPrazo, historicoDaFaixa, linhaUnica, respostaDoBot, tarefaNoQuadro, tarefasPorStatus } from "../../../web/lib/quadro-dados.ts";
 import { cardDaTarefa, faixaDoQuadro, pilulaDoQuadro, quadroDaMeta, tarefaAberta } from "../../../web/telas/quadro-real.ts";
 import { confiar } from "../../../web/telas/quadro.ts";
+import { COLUNAS_PADRAO, colunasDto } from "../../../src/domain/colunas.ts";
 
 /** NOD-442: o quadro de verdade na tela, sem DOM (o Chrome real fica em tests/concurrency/quadro-jornada-chrome.test.ts). */
 
 const MAL = `<img src=x onerror="alert(1)">"'&`;
 const t = (id: string, extra: Partial<TarefaDto> = {}): TarefaDto => ({
-  id, quadroId: "q1", titulo: `Tarefa ${id}`, descricao: "", status: "afazer", agenteId: "a", ordem: 1, linearId: null, linearUrl: null, prUrl: null,
+  id, quadroId: "q1", titulo: `Tarefa ${id}`, descricao: "", status: "afazer", voltarPara: null, agenteId: "a", ordem: 1, linearId: null, linearUrl: null, prUrl: null,
   pergunta: null, resposta: null, deFora: false, turnoId: null, criadoEm: 1, mudadoEm: 1, execucao: null, agenteNome: "Ada", ...extra,
 });
 const q = (tarefas: TarefaDto[], extra: Partial<QuadroDto> = {}): QuadroDto => ({
   id: "q1", agenteId: "a", meta: "Meta", prazo: null, cumpridoEm: null, resumo: null, criadoEm: 1, atualizadoEm: 1, agenteNome: "Ada",
-  tarefas, ultimoLote: null, feitas: 0, total: tarefas.length, ...extra,
+  colunas: colunasDto(COLUNAS_PADRAO), tarefas, ultimoLote: null, feitas: 0, total: tarefas.length, ...extra,
 });
 const agente = (id: string) => (id === "a" ? { avatar: confiar(`<span class="av">A</span>`), nome: "Ada" } : null);
 const fala = (id: string, de: "eu" | "a" | "b", texto: string, extra = {}) => ({
@@ -29,8 +30,8 @@ describe("quadro-dados", () => {
 
   it("as tarefas por status, na ordem", () => {
     const por = tarefasPorStatus(q([t("b", { ordem: 2 }), t("a", { ordem: 1 }), t("c", { status: "feito" })]));
-    expect(por.afazer.map((x) => x.id)).toEqual(["a", "b"]);
-    expect(por.feito.map((x) => x.id)).toEqual(["c"]);
+    expect(por.afazer!.map((x) => x.id)).toEqual(["a", "b"]);
+    expect(por.feito!.map((x) => x.id)).toEqual(["c"]);
   });
 
   it("acende o que mudou e o que a dica do frame disse; a primeira leitura e a troca de quadro não acendem nada", () => {

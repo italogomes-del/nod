@@ -40,7 +40,7 @@ import type { ConfirmarEmailDto, ExportacaoDto, FormasDto, MinhaContaDto, Perfil
 import type { ExecucaoRotina } from "../../src/contracts/rotina.ts";
 import type { MembroSala, Sala } from "../../src/contracts/sala.ts";
 import type { FaixaParada, Turno } from "../../src/contracts/turno.ts";
-import type { LoteQuadro, QuadroDto, StatusTarefa } from "../../src/contracts/quadro.ts";
+import type { GrupoColuna, LoteQuadro, QuadroDto, StatusTarefa } from "../../src/contracts/quadro.ts";
 import type { EventoLinha, TaxaDeAbertura, TrabalhoDetalheDto, TrabalhosDto } from "../../src/contracts/trabalho.ts";
 import type { DisponibilidadeLigacao, FalaLigacao, Ligacao, LigacaoCriada } from "../../src/contracts/ligacao.ts";
 import type { IaDaLigacao } from "../../src/contracts/voz.ts";
@@ -256,6 +256,15 @@ export function criarApi(escopo: Escopo) {
       post<MutacaoQuadro>(`agentes/${encodeURIComponent(agenteId)}/quadro/tarefas/${encodeURIComponent(tarefaId)}/resposta`, { resposta }),
     desfazerLoteQuadro: (agenteId: string, loteId: string) =>
       post<MutacaoQuadro>(`agentes/${encodeURIComponent(agenteId)}/quadro/lotes/${encodeURIComponent(loteId)}/desfazer`),
+    /** NOD-448 (ADR-140): as colunas pela tela; cada uma é um lote com Desfazer. */
+    criarColuna: (agenteId: string, c: { nome: string; grupo: GrupoColuna; depois_de?: string }) =>
+      post<MutacaoQuadro>(`agentes/${encodeURIComponent(agenteId)}/quadro/colunas`, c),
+    renomearColuna: (agenteId: string, coluna: string, nome: string) =>
+      patch<MutacaoQuadro>(`agentes/${encodeURIComponent(agenteId)}/quadro/colunas/${encodeURIComponent(coluna)}`, { nome }),
+    moverColuna: (agenteId: string, coluna: string, onde: { antes_de?: string; depois_de?: string }) =>
+      post<MutacaoQuadro>(`agentes/${encodeURIComponent(agenteId)}/quadro/colunas/${encodeURIComponent(coluna)}/mover`, onde),
+    removerColuna: (agenteId: string, coluna: string, destino?: string) =>
+      del<MutacaoQuadro>(`agentes/${encodeURIComponent(agenteId)}/quadro/colunas/${encodeURIComponent(coluna)}${destino ? `?destino=${encodeURIComponent(destino)}` : ""}`),
     /** NOD-380: `ate` (o id de uma fala achada na busca) faz a janela crescer até ela, mesmo fora das 200 recentes. */
     conversa: (id: string, ate?: string) => get<ConversaDto>(`conversas/${id}/mensagens${ate ? `?ate=${encodeURIComponent(ate)}` : ""}`),
     /** NOD-380: a busca de mensagens do celular; 20 por página, `cursor` vem da página anterior; `signal` cancela o pedido velho. */

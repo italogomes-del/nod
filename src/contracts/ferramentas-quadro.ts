@@ -1,5 +1,5 @@
 import type { JsonSchema } from "./json-schema.ts";
-import { LIMITES_QUADRO, STATUS_TAREFA, type ArgsGerirQuadro, type ResultadoGerirQuadro } from "./quadro.ts";
+import { GRUPOS_COLUNA, LIMITES_QUADRO, type ArgsGerirQuadro, type ResultadoGerirQuadro } from "./quadro.ts";
 
 /**
  * gerir_quadro (definido em 2026-10-31, NOD-442, ADR-135): QUALQUER bot faz no quadro o que a pessoa faz na tela — criar o
@@ -9,7 +9,10 @@ import { LIMITES_QUADRO, STATUS_TAREFA, type ArgsGerirQuadro, type ResultadoGeri
  * ferramentas-nod.ts pelo gatilho de 200 linhas da EMENDA 26 e é espalhada em FERRAMENTAS_NOD.
  */
 
-const STATUS = { type: "string", enum: [...STATUS_TAREFA], description: "backlog, afazer (o bot responsável começa sozinho), fazendo, voce (bloqueada esperando a pessoa; exige pergunta), revisao (PR aberto), bloqueado, feito ou cancelado." } as const satisfies JsonSchema;
+// NOD-448: o status é a coluna (o id ou o nome que o quadro mostra). O padrão: backlog, afazer, fazendo, revisao, bloqueado, voce, feito, cancelado.
+const STATUS = { type: "string", minLength: 1, maxLength: 60, description: "A coluna: o id ou o nome (resumo_quadro traz as colunas). Padrão: backlog, afazer (o bot responsável começa sozinho; num quadro sem A fazer, leva à coluna de andamento), fazendo, revisao (PR aberto), bloqueado, voce (Precisa de você; exige pergunta), feito, cancelado." } as const satisfies JsonSchema;
+const COLUNA = { type: "string", minLength: 1, maxLength: 60, description: "A coluna: o id ou o nome." } as const satisfies JsonSchema;
+const GRUPO = { type: "string", enum: [...GRUPOS_COLUNA], description: "nao_iniciado (espera), iniciado (andamento: o bot começa ao entrar), feito (conta no progresso) ou fechado (sai da conta). Não muda depois." } as const satisfies JsonSchema;
 const TAREFA = { type: "string", description: "A tarefa: o id, o identificador do Linear (NOD-12) ou o título exato.", minLength: 1 } as const satisfies JsonSchema;
 const ouNull = (s: JsonSchema, description: string): JsonSchema => ({ anyOf: [s, { type: "null" }], description });
 const AGENTE = { anyOf: [{ type: "string", minLength: 1 }, { type: "null" }], description: "O bot responsável: id ou nome exato (sem o Nod). null tira o responsável." } as const satisfies JsonSchema;
@@ -28,6 +31,30 @@ export const PROPRIEDADES_QUADRO = {
   excluir: { type: "boolean", description: "true tira a tarefa do quadro (o Desfazer a traz de volta)." },
   resposta: { type: "string", minLength: 1, maxLength: LIMITES_QUADRO.resposta },
   lote: { type: "string", description: "O lote a desfazer; sem ele, o último." },
+  nome: { type: "string", description: "O nome da coluna.", minLength: 1, maxLength: LIMITES_QUADRO.coluna },
+  grupo: GRUPO,
+  coluna: COLUNA,
+  depois_de: { ...COLUNA, description: "A coluna (do mesmo grupo) que fica antes." },
+  antes_de: { ...COLUNA, description: "A coluna (do mesmo grupo) que fica depois." },
+  destino: { ...COLUNA, description: "Para onde vão as tarefas da coluna removida (obrigatório se ela tiver tarefas)." },
+  colunas: {
+    type: "array",
+    minItems: 1,
+    maxItems: LIMITES_QUADRO.colunas,
+    description: "O conjunto novo, na ordem. Mantenha o id das que continuam.",
+    items: {
+      type: "object",
+      properties: { id: { type: "string", minLength: 1, maxLength: 48 }, nome: { type: "string", minLength: 1, maxLength: LIMITES_QUADRO.coluna }, grupo: GRUPO },
+      required: ["nome", "grupo"],
+      additionalProperties: false,
+    },
+  },
+  destinos: {
+    type: "array",
+    maxItems: LIMITES_QUADRO.colunas,
+    description: "Para onde vão as tarefas das colunas que saem; sem isso, para a primeira do mesmo grupo.",
+    items: { type: "object", properties: { de: COLUNA, para: COLUNA }, required: ["de", "para"], additionalProperties: false },
+  },
   itens: {
     type: "array",
     maxItems: LIMITES_QUADRO.itens,
@@ -53,7 +80,7 @@ export const FERRAMENTAS_QUADRO = {
   gerir_quadro: {
     type: "object",
     description:
-      "Mexe no quadro de tarefas da pessoa (a aba Quadro de um bot), do mesmo jeito que ela faria na tela. Uma chamada = um lote atômico com Desfazer. Tipos: criar_quadro {meta, prazo?}; editar_quadro {meta?, prazo?}; criar_tarefa {titulo, descricao?, status?, agente?}; importar_linear {itens} (busque os itens no Linear antes, com a sua ferramenta); mudar_tarefa {tarefa, titulo?, descricao?, status?, agente?, pr_url?, pergunta?, excluir?}; responder {tarefa, resposta}; desfazer {lote?} (sozinho no lote). Tarefa em afazer com responsável faz o bot responsável começar sozinho. Ao terminar a sua tarefa, ponha o PR (vai para revisao) e depois status feito; quando travar numa decisão da pessoa, use status voce com a pergunta.",
+      "Mexe no quadro de tarefas da pessoa (a aba Quadro de um bot), do mesmo jeito que ela faria na tela. Uma chamada = um lote atômico com Desfazer. Tipos: criar_quadro {meta, prazo?}; editar_quadro {meta?, prazo?}; criar_tarefa {titulo, descricao?, status?, agente?}; importar_linear {itens} (busque os itens no Linear antes, com a sua ferramenta); mudar_tarefa {tarefa, titulo?, descricao?, status?, agente?, pr_url?, pergunta?, excluir?}; responder {tarefa, resposta}; desfazer {lote?} (sozinho no lote). Colunas: criar_coluna {nome, grupo, depois_de?}; renomear_coluna {coluna, nome}; mover_coluna {coluna, antes_de? | depois_de?} (só dentro do grupo); remover_coluna {coluna, destino?} (com tarefas, o destino é obrigatório; Precisa de você e Cancelado não saem); substituir_colunas {colunas, destinos?} (sozinho no lote; vira uma proposta que a pessoa confirma num card). Criar, renomear, mover e remover não pedem confirmação: conte o que mudou em uma frase, a pessoa tem Desfazer. Tarefa em afazer com responsável faz o bot responsável começar sozinho. Ao terminar a sua tarefa, ponha o PR (vai para revisao) e depois status feito; quando travar numa decisão da pessoa, use status voce com a pergunta.",
     properties: {
       quadro: { type: "string", description: "O quadro: o id ou o nome do bot anfitrião. Sem ele, o seu; senão, o único da pessoa." },
       acoes: {
@@ -63,7 +90,7 @@ export const FERRAMENTAS_QUADRO = {
         items: {
           type: "object",
           properties: {
-            tipo: { type: "string", enum: ["criar_quadro", "editar_quadro", "criar_tarefa", "importar_linear", "mudar_tarefa", "responder", "desfazer"] },
+            tipo: { type: "string", enum: ["criar_quadro", "editar_quadro", "criar_tarefa", "importar_linear", "mudar_tarefa", "responder", "desfazer", "criar_coluna", "renomear_coluna", "mover_coluna", "remover_coluna", "substituir_colunas"] },
             ...P,
           },
           required: ["tipo"],
