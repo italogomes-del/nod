@@ -1,5 +1,6 @@
 import type { EpochMs } from "../contracts/ids.ts";
 import type { Mensagem } from "../contracts/mensagem.ts";
+import type { LeituraMarcada } from "../contracts/nao-lidos.ts";
 import type { OrigemTurno } from "../contracts/turno.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
 import { ms } from "./conversao.ts";
@@ -7,6 +8,9 @@ import { COLUNAS_MENSAGEM, paraMensagem, type LinhaMensagem } from "./mensagens.
 
 /** Uma conversa com fala nova para a pessoa: quantas, desde quando, a mais recente. */
 export type ResumoNaoLida = { conversaId: string; tipo: "propria" | "sala"; agenteId: string | null; salaId: string | null; total: number; desde: EpochMs; ultimaEm: EpochMs };
+
+/** O instante em texto exato (µs, UTC), a forma que o Desfazer devolve; -infinity e null viram null. */
+const textoUtc = (conn: Conn, expr: string) => conn.unsafe(`(case when isfinite(${expr}) then to_char(${expr} at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US') end)`);
 
 /** A primeira não lida (onde a linha "Novas" entra), as últimas e se alguma veio de rotina. */
 export type NaoLidasDaConversa = { primeira: Mensagem; ultimas: Mensagem[]; avisos: Mensagem[]; daRotina: boolean };
@@ -29,9 +33,38 @@ export function leiturasRepo(conn: Conn, escopo: Escopo) {
    * pela regra que decidiu (disparar-rotina.ts), então não passa pelo filtro da fala da própria pessoa. A interrompida fica
    * de fora: é o Parar dela; a bloqueada não escreve no chat.
    */
-  const nova = () =>
-    conn`((m.kind in ('texto', 'artefato') and not (m.autor_tipo = 'pessoa' and m.autor_id = ${escopo.pessoaId})) or (m.kind = 'rotina_execucao' and m.payload->>'desfecho' in ('falhou', 'nao_rodou')))`;
   const avisa = () => conn`(coalesce(m.payload->>'kind', '') = 'aviso_pessoa' or (m.kind = 'rotina_execucao' and m.payload->>'desfecho' in ('falhou', 'nao_rodou')))`;
+  /**
+   * definido em 2026-11-01 (NOD-449, decisões 1 e 8): a fala entre bots não é fala para a pessoa. Fica de fora o pedido de
+   * um colega (`peer_pedido`, a fala do remetente na conversa do destinatário) e o que o bot diz no turno que esse pedido
+   * abriu: origem peer, delegação com um `peer_pedido` no próprio turno (a triagem; o pedir_a_bot grava os dois juntos),
+   * a frente aberta para um trabalho que um colega pediu (`trabalhos.pedido_por_agente_id`) e as retomadas de qualquer um
+   * deles (a raiz da cadeia, como delegacaoDoTurno; revisão 2 do PR #616). A
+   * delegação sem pedido de colega — a tarefa que a pessoa moveu no quadro — é trabalho dela e conta (revisão do PR #616:
+   * `sob_procuracao_de` é sempre a própria pessoa e não separa nada). Sai do badge, da lista e dos pontos, que usam esta
+   * mesma condição; continua na conversa. O aviso (avisar_pessoa, rotina que falhou) conta sempre: é dirigido a ela.
+   * As subconsultas vão pelo índice (pkey de turnos e trabalhos, mensagens_por_turno), só rodam para mensagem com turno, e a
+   * cadeia só para turno de retomada.
+   * Medido em 2026-11-01 (32 conversas, 14,4 mil mensagens, um terço com turno): resumo() 16 → 22 ms; o listar da tela
+   * fica igual ao da main (~380 ms, quem pesa são as janelas de mensagens()). Pior caso (revisão 3 do PR #616): uma
+   * delegação de colega com retomada e N mensagens na mesma conversa — N = 100/400/1600/3200 dá resumo() 19/14/18/18 ms;
+   * o Postgres memoiza a subconsulta por turno (Memoize), então não é quadrático e não precisa de índice novo.
+   */
+  /** A raiz de um turno é de pedido de colega: `peer`, ou delegação com peer_pedido (a triagem) ou aberta para o trabalho que um colega pediu (a frente). */
+  const deColega = (t: string) =>
+    conn.unsafe(`(${t}.origem = 'peer' or (${t}.origem = 'delegacao' and (exists (select 1 from mensagens pp where pp.tenant_id = ${t}.tenant_id and pp.turno_id = ${t}.id and pp.payload->>'kind' = 'peer_pedido') or exists (select 1 from trabalhos w where w.tenant_id = ${t}.tenant_id and w.id = ${t}.trabalho_id and w.pedido_por_agente_id is not null))))`);
+  const entreBots = () =>
+    conn`(coalesce(m.payload->>'kind', '') = 'peer_pedido' or (m.turno_id is not null and exists (
+      select 1 from turnos tb where tb.tenant_id = m.tenant_id and tb.id = m.turno_id and (${deColega("tb")} or (tb.origem = 'retomada' and exists (
+        -- A retomada (cartão, reenvio, espera de colega) é da raiz: o mesmo delegacaoDoTurno, com o teto SALTOS_DE_RETOMADA.
+        with recursive c(id, origem, retoma, n) as (
+          select tb.id, tb.origem, tb.retoma_turno_id, 0
+          union all
+          select p.id, p.origem, p.retoma_turno_id, c.n + 1 from c join turnos p on p.tenant_id = tb.tenant_id and p.id = c.retoma
+          where c.origem = 'retomada' and c.n < 10
+        ) select 1 from c join turnos rz on rz.tenant_id = tb.tenant_id and rz.id = c.id where c.origem <> 'retomada' and ${deColega("rz")}))))))`;
+  const nova = () =>
+    conn`(((m.kind in ('texto', 'artefato') and not (m.autor_tipo = 'pessoa' and m.autor_id = ${escopo.pessoaId})) or (m.kind = 'rotina_execucao' and m.payload->>'desfecho' in ('falhou', 'nao_rodou'))) and (${avisa()} or not ${entreBots()}))`;
   return {
     /**
      * As conversas da pessoa (os bots dela e as salas que ela lê) com fala nova, a mais recente primeiro.
@@ -109,14 +142,46 @@ export function leiturasRepo(conn: Conn, escopo: Escopo) {
       return saida;
     },
 
-    /** Lida até a última mensagem da conversa. Nunca anda para trás (duas abas, um clique atrasado). */
-    async marcarLida(conversaId: string): Promise<void> {
-      await conn`
-        insert into leituras (tenant_id, owner_id, conversa_id, lido_ate)
-        values (${escopo.tenantId}, ${escopo.pessoaId}, ${conversaId}, coalesce(
-          (select max(criado_em) from mensagens where tenant_id = ${escopo.tenantId} and conversa_id = ${conversaId}), clock_timestamp()))
-        on conflict (tenant_id, owner_id, conversa_id)
-        do update set lido_ate = greatest(leituras.lido_ate, excluded.lido_ate), atualizado_em = clock_timestamp()`;
+    /**
+     * Lida até a última mensagem da conversa. Nunca anda para trás (duas abas, um clique atrasado).
+     * NOD-449: devolve o "lido até" de antes e o de depois (texto exato em µs, UTC; null = sem leitura), a chave do
+     * Desfazer: os dois saem do mesmo instantâneo (CTE), então o antes é o valor que o upsert substituiu.
+     */
+    async marcarLida(conversaId: string): Promise<LeituraMarcada> {
+      const [l] = await conn<{ antes: string | null; depois: string | null }[]>`
+        with antes as (
+          select lido_ate from leituras where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and conversa_id = ${conversaId}
+        ), feito as (
+          insert into leituras (tenant_id, owner_id, conversa_id, lido_ate)
+          values (${escopo.tenantId}, ${escopo.pessoaId}, ${conversaId}, coalesce(
+            (select max(criado_em) from mensagens where tenant_id = ${escopo.tenantId} and conversa_id = ${conversaId}), clock_timestamp()))
+          on conflict (tenant_id, owner_id, conversa_id)
+          do update set lido_ate = greatest(leituras.lido_ate, excluded.lido_ate), atualizado_em = clock_timestamp()
+          returning lido_ate
+        )
+        select ${textoUtc(conn, "(select lido_ate from antes)")} as antes, ${textoUtc(conn, "feito.lido_ate")} as depois from feito`;
+      return { conversaId, antes: l?.antes ?? null, depois: l?.depois ?? null };
+    },
+
+    /**
+     * NOD-449: o Desfazer de um "marcar como lido". Volta o "lido até" ao `antes` só se ele ainda é o `depois` que a marcação
+     * gravou: se a pessoa leu a conversa de novo (outra aba, abriu a conversa), o Desfazer não reabre essa leitura. `antes`
+     * null = a conversa não tinha leitura (tudo novo, '-infinity'). Devolve quantas mudaram. Os instantes vão como text[] de
+   * propósito: com o parâmetro tipado como timestamp, o driver o serializa por Date e corta os microssegundos (a
+   * comparação nunca bateria).
+     */
+    async restaurarLeituras(ls: readonly LeituraMarcada[]): Promise<number> {
+      // Um UPDATE só para o lote (revisão 3 e CI do PR #616: uma query por leitura deixava o Desfazer de 5000 leituras em
+      // ~10 mil idas ao banco). Quem chama já tirou as conversas repetidas: com duas linhas para a mesma leitura, o
+      // UPDATE … FROM aplicaria uma qualquer.
+      const validas = ls.filter((l) => l.depois !== null);
+      if (!validas.length) return 0;
+      const r = await conn`
+        update leituras set lido_ate = case when u.antes is null then '-infinity'::timestamptz else (u.antes::timestamp at time zone 'UTC') end, atualizado_em = clock_timestamp()
+        from unnest(${validas.map((l) => l.conversaId)}::uuid[], ${validas.map((l) => l.antes)}::text[], ${validas.map((l) => l.depois)}::text[]) as u(conversa_id, antes, depois)
+        where leituras.tenant_id = ${escopo.tenantId} and leituras.owner_id = ${escopo.pessoaId} and leituras.conversa_id = u.conversa_id
+          and leituras.lido_ate = (u.depois::timestamp at time zone 'UTC')`;
+      return r.count;
     },
 
     /**
@@ -124,14 +189,14 @@ export function leiturasRepo(conn: Conn, escopo: Escopo) {
      * dela). Sem fala nenhuma na conversa, não há o que marcar: devolve false.
      */
     async marcarNaoLida(conversaId: string): Promise<boolean> {
+      // Só reabre o que está lido de fato (lido até ≥ a última fala nova). Sem leitura, ou já com fala depois do "lido
+      // até", a conversa já está em Não lidos: mexer aqui baixaria a contagem (2 novas virariam 1). QA do PR #616.
       const r = await conn`
-        insert into leituras (tenant_id, owner_id, conversa_id, lido_ate)
-        select ${escopo.tenantId}, ${escopo.pessoaId}, ${conversaId}, max(m.criado_em) - interval '1 microsecond'
-        from mensagens m
-        where m.tenant_id = ${escopo.tenantId} and m.conversa_id = ${conversaId} and ${nova()}
-        having max(m.criado_em) is not null
-        on conflict (tenant_id, owner_id, conversa_id)
-        do update set lido_ate = excluded.lido_ate, atualizado_em = clock_timestamp()`;
+        update leituras l set lido_ate = u.ultima - interval '1 microsecond', atualizado_em = clock_timestamp()
+        from (select max(m.criado_em) as ultima from mensagens m
+              where m.tenant_id = ${escopo.tenantId} and m.conversa_id = ${conversaId} and ${nova()}) u
+        where l.tenant_id = ${escopo.tenantId} and l.owner_id = ${escopo.pessoaId} and l.conversa_id = ${conversaId}
+          and u.ultima is not null and l.lido_ate >= u.ultima`;
       return r.count === 1;
     },
   };

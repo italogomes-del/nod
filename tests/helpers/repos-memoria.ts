@@ -3550,7 +3550,17 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
     },
     leituras: (() => {
       const chave = (conversaId: string) => `${escopo.tenantId}:${escopo.pessoaId}:${conversaId}`;
-      const nova = (m: Mensagem) => (m.kind === "texto" || m.kind === "artefato") && !(m.autoria.autor_tipo === "pessoa" && m.autoria.autor_id === escopo.pessoaId);
+      // NOD-449: o mesmo nova() do Postgres (leituras.repo.ts): fala de bot ou rotina que falhou; a fala entre bots (pedido
+      // de colega, o turno peer, a triagem, a frente do trabalho de um colega e as retomadas deles) não, salvo o aviso.
+      const deColega = (t: Turno) => t.origem === "peer" || (t.origem === "delegacao" && (doTenant(b.mensagens).some((p) => p.turnoId === t.id && p.payload?.kind === "peer_pedido") || doTenant(b.trabalhos).some((w) => w.id === t.trabalhoId && w.pedidoPorAgenteId)));
+      const raiz = (id: string) => {
+        let t = doTenant(b.turnos).find((x) => x.id === id);
+        for (let n = 0; t?.origem === "retomada" && t.retomaTurnoId && n < 10; n++) t = doTenant(b.turnos).find((x) => x.id === t!.retomaTurnoId);
+        return t;
+      };
+      const entreBots = (m: Mensagem) => m.payload?.kind === "peer_pedido" || (m.turnoId !== null && (() => { const t = raiz(m.turnoId!); return t !== undefined && t.origem !== "retomada" && deColega(t); })());
+      const avisa = (m: Mensagem) => m.payload?.kind === "aviso_pessoa" || (m.kind === "rotina_execucao" && (m.payload as { desfecho?: string } | null)?.desfecho !== undefined && ["falhou", "nao_rodou"].includes((m.payload as { desfecho: string }).desfecho));
+      const nova = (m: Mensagem) => (((m.kind === "texto" || m.kind === "artefato") && !(m.autoria.autor_tipo === "pessoa" && m.autoria.autor_id === escopo.pessoaId)) || avisa(m)) && (avisa(m) || !entreBots(m));
       const naoLidas = (conversaId: string) => {
         const ate = b.leituras.get(chave(conversaId)) ?? -Infinity;
         return doTenant(b.mensagens).filter((m) => m.conversaId === conversaId && m.criadoEm > ate && nova(m)).sort((x, y) => x.criadoEm - y.criadoEm);
@@ -3578,11 +3588,28 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         async marcarLida(conversaId: string) {
           const ultima = Math.max(...doTenant(b.mensagens).filter((m) => m.conversaId === conversaId).map((m) => m.criadoEm), -Infinity);
           const ate = Number.isFinite(ultima) ? ultima : agora();
-          b.leituras.set(chave(conversaId), Math.max(b.leituras.get(chave(conversaId)) ?? -Infinity, ate));
+          const antes = b.leituras.get(chave(conversaId));
+          const depois = Math.max(antes ?? -Infinity, ate);
+          b.leituras.set(chave(conversaId), depois);
+          // NOD-449: o texto exato do banco (µs, UTC) a partir do ms da memória.
+          const texto = (v: number | undefined) => (v === undefined || !Number.isFinite(v) ? null : `${new Date(v).toISOString().slice(0, 23)}000`);
+          return { conversaId, antes: texto(antes), depois: texto(depois) };
+        },
+        async restaurarLeituras(ls: readonly import("../../src/contracts/nao-lidos.ts").LeituraMarcada[]) {
+          let n = 0;
+          for (const l of ls) {
+            const atual = b.leituras.get(chave(l.conversaId));
+            if (l.depois === null || atual === undefined || Date.parse(`${l.depois.slice(0, 23)}Z`) !== Math.floor(atual)) continue;
+            b.leituras.set(chave(l.conversaId), l.antes === null ? -Infinity : Date.parse(`${l.antes.slice(0, 23)}Z`));
+            n++;
+          }
+          return n;
         },
         async marcarNaoLida(conversaId: string) {
           const ultima = Math.max(...doTenant(b.mensagens).filter((m) => m.conversaId === conversaId && nova(m)).map((m) => m.criadoEm), -Infinity);
-          if (!Number.isFinite(ultima)) return false;
+          const lido = b.leituras.get(chave(conversaId));
+          // Como o Postgres: só reabre o que está lido de fato (sem leitura, ou com fala depois, já está em Não lidos).
+          if (!Number.isFinite(ultima) || lido === undefined || lido < ultima) return false;
           b.leituras.set(chave(conversaId), ultima - 0.001);
           return true;
         },

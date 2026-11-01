@@ -1,5 +1,7 @@
 import type { DefinicaoAcao } from "../../contracts/acoes.ts";
 import { FERRAMENTAS_DO_NOD } from "../../contracts/ferramentas-do-nod.ts";
+import { PROPRIEDADES_NAO_LIDOS } from "../../contracts/ferramentas-nao-lidos.ts";
+import type { JsonSchema } from "../../contracts/json-schema.ts";
 
 /**
  * Conversa, cartões, salas, trabalhos, voz e preferências (NOD-391, ADR-135; Onda 5, NOD-397). Nunca pelo chat:
@@ -8,6 +10,16 @@ import { FERRAMENTAS_DO_NOD } from "../../contracts/ferramentas-do-nod.ts";
  */
 
 const falta = { estado: "falta", onda: "NOD-397" } as const;
+/**
+ * NOD-449 (definido em 2026-11-01): a leitura das conversas é `vivo` — a tela Não lidos e a ferramenta nao_lidos de
+ * QUALQUER bot chamam os mesmos executores (src/use-cases/acoes/conversa.ts); o contrato prova o mesmo "lido até".
+ */
+const LEITURA = { estado: "vivo", via: { ferramenta: "nao_lidos" }, contrato: "tests/integration/paridade-nao-lidos.test.ts" } as const;
+const objeto = (properties: Record<string, JsonSchema>, required: readonly string[]): JsonSchema => ({ type: "object", properties, required, additionalProperties: false });
+const UMA_CONVERSA = objeto({ conversas: PROPRIEDADES_NAO_LIDOS.conversas }, ["conversas"]);
+const INSTANTE: JsonSchema = { anyOf: [{ type: "string", minLength: 1, maxLength: 40 }, { type: "null" }] };
+/** O que a marcação devolveu (o "lido até" de antes e de depois); o Desfazer só volta se nada mudou desde então. */
+const LEITURAS = objeto({ leituras: { type: "array", minItems: 1, maxItems: 5000, items: objeto({ conversaId: { type: "string", minLength: 1, maxLength: 64 }, antes: INSTANTE, depois: INSTANTE }, ["conversaId", "antes", "depois"]) } }, ["leituras"]);
 const PROPRIO_CHAT = { estado: "nunca", motivo: "é o próprio chat" } as const;
 const CARTAO = { estado: "nunca", motivo: "cartão se decide no cartão: aprovar pelo chat não (decisão do Marlon)" } as const;
 const ONBOARDING = { estado: "nunca", motivo: "passo do onboarding da tela; no chat, o mesmo efeito é bots.criar ou rotinas.criar" } as const;
@@ -21,9 +33,10 @@ export const ACOES_CONVERSA = [
   { id: "conversas.parar", titulo: "Parar o bot desta conversa", risco: "muda", cartaoNoChat: false, chat: falta },
   { id: "conversas.parar_tudo", titulo: "Parar todos os bots", risco: "muda", cartaoNoChat: false, chat: falta },
   { id: "conversas.nova_sessao", titulo: "Começar uma sessão nova", risco: "muda", cartaoNoChat: false, chat: falta },
-  { id: "conversas.marcar_lida", titulo: "Marcar a conversa como lida", risco: "muda", cartaoNoChat: false, chat: falta },
-  { id: "conversas.marcar_nao_lida", titulo: "Marcar a conversa como não lida", risco: "muda", cartaoNoChat: false, chat: falta },
-  { id: "conversas.marcar_tudo_lido", titulo: "Marcar tudo como lido", risco: "muda", cartaoNoChat: false, chat: falta },
+  { id: "conversas.marcar_lida", titulo: "Marcar a conversa como lida", schema: UMA_CONVERSA, risco: "muda", cartaoNoChat: false, chat: LEITURA, casoDeUso: "conversas.marcar_lida" },
+  { id: "conversas.marcar_nao_lida", titulo: "Marcar a conversa como não lida", schema: UMA_CONVERSA, risco: "muda", cartaoNoChat: false, chat: LEITURA, casoDeUso: "conversas.marcar_nao_lida" },
+  { id: "conversas.marcar_tudo_lido", titulo: "Marcar tudo como lido", schema: objeto({ todas: PROPRIEDADES_NAO_LIDOS.todas }, ["todas"]), risco: "muda", cartaoNoChat: false, chat: LEITURA, casoDeUso: "conversas.marcar_tudo_lido" },
+  { id: "conversas.desfazer_leitura", titulo: "Desfazer a marcação como lida", schema: LEITURAS, risco: "muda", cartaoNoChat: false, chat: LEITURA, casoDeUso: "conversas.desfazer_leitura" },
   { id: "conversas.definir_pasta", titulo: "Escolher a pasta de trabalho da conversa", risco: "muda", cartaoNoChat: false, chat: falta },
   { id: "conversas.criar_pasta", titulo: "Criar uma pasta de trabalho", risco: "muda", cartaoNoChat: false, chat: falta },
   { id: "conversas.tirar_pasta", titulo: "Tirar a pasta de trabalho da conversa", risco: "muda", cartaoNoChat: false, chat: falta },

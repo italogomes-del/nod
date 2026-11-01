@@ -156,7 +156,11 @@ import { renderRotinas } from "./telas/rotinas.ts";
 import { nomesDosMembros, renderCabecalhoSala, renderNovaSala } from "./telas/sala.ts";
 import { abertasPorAgente, perguntasPorAgente, renderChamada, renderIncidentes, renderSuaVez, rotinasParadasPorAgente, SUBTITULO_ESPERANDO, SUBTITULO_ROTINA_PARADA } from "./telas/sua-vez.ts";
 import { aparenciaDoComposer } from "./telas/pergunta.ts";
-import { BANDEJA, naoLidaDe, renderNaoLidos, rotuloNaoLidos } from "./telas/nao-lidos.ts";
+import { BANDEJA, naoLidaDe, nomeDaConversa, renderNaoLidos, rotuloNaoLidos } from "./telas/nao-lidos.ts";
+import { mostrarAvisoDesfazer } from "./lib/aviso-desfazer.ts";
+import { instalarDeslizeLida } from "./lib/deslize-lida-dom.ts";
+import { teclaNaoLidos } from "./lib/teclado-nao-lidos.ts";
+import { fraseDaContagemNoAviso, fraseDoAviso } from "./lib/frase-leitura.ts";
 import { frotaAoSoltar, ordemAoSoltar, velocidadeAutoRolagem, type Destino } from "./lib/arrastar.ts";
 import { rolagemDaBarra, type Faixa } from "./lib/rolagem-barra.ts";
 import { comandoNoTexto, listaDaBarra, nomeDigitado, recentesDaConversa, type ItemDaBarra } from "./lib/barra.ts";
@@ -1135,6 +1139,40 @@ function decidirRitmo(el: HTMLElement): Promise<void> {
     await api!.decidirRitmoRotina(el.dataset.rotina ?? "", el.dataset.mensagem ?? "", opcao);
     const conversaId = el.dataset.conversa;
     dispatch({ tipo: "invalidar", quais: [...(conversaId ? [`conversa:${conversaId}` as Invalidacao] : []), "rotinas"] });
+  });
+}
+
+/** NOD-449: depois de marcar ou desfazer, a lista, os pontos da barra e a conversa aberta (o card e o recibo do chat). */
+function invalidarLeitura(): void {
+  const t = estado.tela;
+  const aberta = t.tipo === "conversa" || t.tipo === "sala" ? [`conversa:${t.conversaId}` as Invalidacao] : [];
+  dispatch({ tipo: "invalidar", quais: ["nao-lidos", "frota", ...aberta] });
+}
+
+/** NOD-449: marca uma conversa como lida e mostra "X marcada como lida · Desfazer" (o Desfazer volta o "lido até" de antes). */
+function marcarComDesfazer(conversaId: string, nome: string): Promise<void> {
+  document.querySelector(`.nl-item[data-conversa="${CSS.escape(conversaId)}"]`)?.classList.add("nl-sai");
+  return agir(async () => {
+    try {
+      const r = await api!.marcarLida(conversaId);
+      mostrarAvisoDesfazer({ texto: fraseDoAviso([nome || "Conversa"]), aoDesfazer: () => agir(async () => { await api!.desfazerLeitura(r.leituras); invalidarLeitura(); }) });
+    } finally {
+      invalidarLeitura();
+    }
+  });
+}
+
+function marcarTudoComDesfazer(): Promise<void> {
+  const nomePorId = new Map((estado.naoLidos?.conversas ?? []).map((c) => [c.conversaId, nomeDaConversa(c, estado)]));
+  return agir(async () => {
+    try {
+      const r = await api!.marcarTudoLido();
+      // Os nomes saem das leituras que o servidor marcou (revisão 2 do PR #616): se alguma não está na lista da tela, só a contagem.
+      const nomes = r.leituras.map((l) => nomePorId.get(l.conversaId));
+      if (r.leituras.length) mostrarAvisoDesfazer({ texto: nomes.every((n): n is string => Boolean(n)) ? fraseDoAviso(nomes as string[]) : fraseDaContagemNoAviso(r.leituras.length), aoDesfazer: () => agir(async () => { await api!.desfazerLeitura(r.leituras); invalidarLeitura(); }) });
+    } finally {
+      invalidarLeitura();
+    }
   });
 }
 
@@ -3257,7 +3295,9 @@ function acaoDoBot(a: BotGerido, acao: AcaoGestao): void {
     // desfeito pela leitura automática: ela fica não lida até a pessoa sair dela.
     const nova = a.naoLido === true;
     if (!nova) deixarNaoLida = a.conversaId;
-    void agir(async () => { await (nova ? api!.marcarLida(a.conversaId) : api!.marcarNaoLida(a.conversaId)); dispatch({ tipo: "invalidar", quais: ["nao-lidos", "frota"] }); });
+    // NOD-449: todo "marcar como lido" tem Desfazer no aviso (revisão do PR #616).
+    if (nova) { void marcarComDesfazer(a.conversaId, a.nome); return; }
+    void agir(async () => { await api!.marcarNaoLida(a.conversaId); dispatch({ tipo: "invalidar", quais: ["nao-lidos", "frota"] }); });
     return;
   }
   executar(() => acao === "fixar" ? api!.fixar(a.id, !a.fixado) : acao === "restaurar" ? api!.restaurarAgente(a.id) : api!.ocultar(a.id, false));
@@ -5569,8 +5609,11 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     if (document.documentElement.dataset.sobreposta && el.closest("#sidebar")) fecharBusca();
     navegar({ tipo: "conversa", conversaId: el.dataset.conversa ?? "", agenteId: el.dataset.agente ?? "" });
   },
-  "marcar-lida": (el) => agir(async () => { await api!.marcarLida(el.dataset.conversa ?? ""); dispatch({ tipo: "invalidar", quais: ["nao-lidos", "frota"] }); }),
-  "marcar-tudo-lido": () => agir(async () => { await api!.marcarTudoLido(); dispatch({ tipo: "invalidar", quais: ["nao-lidos", "frota"] }); }),
+  "marcar-lida": (el) => marcarComDesfazer(el.dataset.conversa ?? "", el.dataset.nome ?? ""),
+  "marcar-tudo-lido": () => marcarTudoComDesfazer(),
+  // NOD-449: o ✓ de uma linha já lida no card do chat devolve a conversa para Não lidos.
+  "marcar-nao-lida-card": (el) => agir(async () => { await api!.marcarNaoLida(el.dataset.conversa ?? ""); dispatch({ tipo: "invalidar", quais: ["nao-lidos", "frota"] }); }),
+  "desfazer-recibo-leitura": (el) => agir(async () => { await api!.desfazerRecibo(el.dataset.id ?? ""); invalidarLeitura(); }),
   "abrir-sala": (el) => navegar({ tipo: "sala", salaId: el.dataset.sala ?? "", conversaId: el.dataset.conversa ?? "" }),
   "menu-agente": (el) => menuDoBot(el),
   "inteligencia": (el) => abrirInteligencia(el.dataset.id),
@@ -6393,6 +6436,29 @@ document.addEventListener("click", (ev) => {
   if (acao && el.closest(".ag-folha") && !el.dataset.act?.startsWith("agenda-")) dispatch({ tipo: "agenda-ui", mudanca: { aberto: null, menu: null, mes: null } });
   if (acao) void acao(el);
 });
+
+// NOD-449: o teclado da tela Não lidos (↑ ↓, J K, Enter, E) e o deslize para a direita no celular.
+document.addEventListener("keydown", (ev) => {
+  if (estado.tela.tipo !== "nao-lidos" || ev.defaultPrevented) return;
+  const alvo = ev.target as HTMLElement;
+  if (alvo.closest("input, textarea, select, [contenteditable=''], [contenteditable='true'], [role='dialog'], [role='menu']")) return;
+  const linhas = [...document.querySelectorAll<HTMLElement>(".tela-nao-lidos .nl-item:not(.nl-sai)")];
+  const atual = linhas.findIndex((l) => l.contains(alvo));
+  const r = teclaNaoLidos(ev.key, atual, linhas.length, { ctrl: ev.ctrlKey, meta: ev.metaKey, alt: ev.altKey });
+  if (!r) return;
+  ev.preventDefault();
+  if (r.tipo === "mover") linhas[r.indice]?.querySelector<HTMLElement>(".nl-abrir")?.focus();
+  else {
+    const l = linhas[atual]!;
+    // O foco segue para a próxima linha (ou a anterior, se era a última): dá para marcar várias seguidas com E.
+    const prox = linhas[atual + 1] ?? linhas[atual - 1];
+    void marcarComDesfazer(l.dataset.conversa ?? "", l.dataset.nome ?? "").then(() => {
+      const c = prox?.dataset.conversa;
+      if (c) document.querySelector<HTMLElement>(`.nl-item[data-conversa="${CSS.escape(c)}"] .nl-abrir`)?.focus();
+    });
+  }
+});
+instalarDeslizeLida(document, (item) => void marcarComDesfazer(item.dataset.conversa ?? "", item.dataset.nome ?? ""));
 
 // NOD-444: Esc no campo tira a sugestão da nova rotina (o resto do Esc do campo segue igual).
 document.addEventListener("keydown", (ev) => {

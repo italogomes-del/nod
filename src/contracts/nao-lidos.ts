@@ -22,3 +22,13 @@ export type ConversaNaoLida = {
   daRotina: boolean;
 };
 export type NaoLidosDto = { conversas: ConversaNaoLida[] };
+
+/**
+ * NOD-449: o "lido até" de antes e de depois de uma marcação como lida, em texto exato (AAAA-MM-DDTHH:MM:SS.ffffff, UTC;
+ * null = sem leitura). É a chave do Desfazer: volta ao `antes` só onde o "lido até" ainda é o `depois`.
+ */
+export type LeituraMarcada = { conversaId: string; antes: string | null; depois: string | null };
+/** A resposta de marcar como lida (uma ou todas): as leituras para o Desfazer. */
+export type RespostaLeitura = { ok: true; leituras: LeituraMarcada[] };
+/** Quantas o Desfazer cabe de uma vez (o "Marcar tudo" de uma pessoa com muitos bots e salas). */
+export const MAX_LEITURAS_DESFAZER = 5000;

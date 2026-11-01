@@ -1225,29 +1225,92 @@ nod-mascote[data-aviso="pergunta"], nod-mascote[data-aviso="nao-lido"] { --nod-a
 .pilula-novas:focus-visible { border-radius: 999px; }
 @keyframes pilula-surge { from { opacity: 0; transform: translate(-50%, 4px); } }
 @media (prefers-reduced-motion: reduce) { .pilula-novas { animation: none; } }
-.tela-nao-lidos { max-width: 820px; margin: 0 auto; padding: 8px 40px 40px; }
-.nl-topo { display: flex; align-items: center; gap: 14px; padding: 12px 0 18px; border-bottom: 1px solid var(--line); }
-.nl-topo > div { flex: 1; }
+/* NOD-449 (protótipo aprovado gamefik.github.io/nod-prototipos/nod-449): uma linha por conversa, prévia em até 3 linhas
+   sem balão, ✓ no lugar da hora (mouse ou foco; no toque, sempre), Marcar tudo discreto, Tudo em dia e o aviso com Desfazer.
+   Só os tokens do nod: sem cor nova, sem fundo chapado, sem botão cheio. */
+.tela-nao-lidos { max-width: 760px; margin: 0 auto; padding: 8px 40px 40px; }
+.nl-topo { display: flex; align-items: flex-end; gap: 14px; padding: 12px 0 14px; }
+.nl-topo > div { flex: 1; min-width: 0; }
 .nl-topo h1 { margin: 0; font-size: 19px; font-weight: 600; letter-spacing: -.3px; }
 .nl-topo p { margin: 3px 0 0; font-size: 12.5px; color: var(--ink-3); }
-.nl-grupo { display: flex; flex-direction: column; gap: 10px; padding: 18px 0; border-bottom: 1px solid var(--line); }
-.nl-cab { display: flex; align-items: center; gap: 10px; }
+.nl-tudo { flex: none; color: var(--ink-2); }
+.nl-lista { list-style: none; margin: 4px -12px 0; padding: 0; }
+.nl-item { position: relative; overflow: hidden; border-radius: 12px; }
+.nl-item + .nl-item::before { content: ""; position: absolute; z-index: 1; top: 0; left: 52px; right: 12px; border-top: 1px solid var(--line); opacity: .7; }
+.nl-item:hover::before, .nl-item:hover + .nl-item::before, .nl-item:focus-within::before, .nl-item:focus-within + .nl-item::before { opacity: 0; }
+.nl-linha { position: relative; background: var(--surface); transition: transform .22s cubic-bezier(.2,.8,.2,1); touch-action: pan-y; }
+.nl-abrir { display: grid; grid-template-columns: 28px minmax(0, 1fr); column-gap: 12px; row-gap: 3px; width: 100%; padding: 12px; border: 0; border-radius: 12px;
+  background: transparent; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+.nl-abrir > .icon.mascote, .nl-abrir > .nl-sala { grid-row: 1 / 3; width: 28px; height: 28px; margin-top: 1px; }
+.nl-item:hover .nl-abrir { background: color-mix(in srgb, var(--ink) 4%, transparent); }
+.nl-abrir:focus-visible { outline: 2px solid var(--focus-ring, var(--signal)); outline-offset: -2px; }
 .nl-sala { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; background: var(--surface-raised); color: var(--ink-3); font-size: 14px; }
-.nl-nome { flex: 1; min-width: 0; display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
-.nl-nome b { font-size: 14.5px; font-weight: 600; color: var(--ink); }
-.nl-nome > span:not(.tag) { font-size: 12.5px; color: var(--ink-3); }
-.nl-nome .tag { font-size: 11px; padding: 1px 7px; }
-.nl-cab time { font-size: 12px; color: var(--ink-3); white-space: nowrap; }
-.nl-corpo { display: flex; flex-direction: column; gap: 8px; padding-left: 38px; }
-.nl-msg { background: var(--surface-raised); border-radius: 14px; padding: 10px 14px; font-size: 13.5px; line-height: 1.6; color: var(--ink);
-  max-height: 11.5em; overflow: hidden; }
-.nl-msg > small { display: block; font-size: 11.5px; color: var(--ink-3); margin-bottom: 2px; }
-.nl-msg p { margin: 0 0 6px; }
-.nl-msg p:last-child { margin-bottom: 0; }
-.nl-antes { margin: 0; font-size: 12px; color: var(--ink-3); }
-.nl-acoes { display: flex; gap: 12px; padding-left: 38px; }
-.nl-acoes .mudo-bt { color: var(--ink-2); }
-.nl-vazio { margin: 28px 0; font-size: 13.5px; line-height: 1.6; color: var(--ink-3); max-width: 520px; }
+.nl-l1 { display: flex; align-items: center; gap: 7px; min-width: 0; height: 22px; }
+.nl-l1 b { flex: none; max-width: 50%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14.5px; font-weight: 600; }
+.nl-l1 .chip { min-width: 0; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nl-meta { flex: none; margin-left: auto; padding-right: 2px; font-size: 12px; color: var(--ink-3); white-space: nowrap; }
+.nl-meta > span { color: var(--ink-2); font-weight: 500; }
+.nl-previa { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden; overflow-wrap: anywhere; font-size: 13.5px; line-height: 1.55; color: var(--ink); }
+.nl-autor { font-weight: 500; color: var(--ink-2); }
+.nl-etiqueta { display: inline-flex; align-items: center; gap: 5px; height: 20px; margin: 0 2px; padding: 0 7px; border: 1px solid var(--line); border-radius: 6px;
+  font-size: 12px; color: var(--ink-2); vertical-align: 1px; white-space: nowrap; }
+.nl-etiqueta svg { color: var(--ink-3); }
+.nl-check { position: absolute; top: 9px; right: 8px; display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 8px;
+  background: transparent; color: var(--ink-2); cursor: pointer; opacity: 0; transition: opacity .12s; }
+.nl-check:hover { background: color-mix(in srgb, var(--ink) 7%, transparent); color: var(--ink); }
+.nl-check:focus-visible { opacity: 1; outline: 2px solid var(--focus-ring, var(--signal)); outline-offset: 0; }
+.nl-item:hover .nl-check, .nl-item:focus-within .nl-check { opacity: 1; }
+.nl-item:hover .nl-meta, .nl-item:focus-within .nl-meta { visibility: hidden; }
+@media (hover: none) {
+  .nl-check { opacity: 1; }
+  .nl-meta { padding-right: 34px; }
+  .nl-item .nl-meta { visibility: visible !important; }
+}
+.nl-deslize { position: absolute; inset: 0 auto 0 0; display: flex; align-items: center; gap: 8px; padding-left: 22px; width: 100%; box-sizing: border-box;
+  background: var(--surface-raised); color: var(--ink-3); font-size: 14px; font-weight: 500; visibility: hidden; }
+.nl-arrasta .nl-deslize { visibility: visible; }
+.nl-passou .nl-deslize { color: var(--ink); }
+.nl-arrasta .nl-linha { transition: none; }
+.nl-item.nl-sai { opacity: 0; transform: translateX(8px); transition: opacity .16s, transform .16s; pointer-events: none; }
+.nl-kbd { display: none; margin: 14px 0 0; font-size: 12px; color: var(--ink-3); }
+.tela-nao-lidos:has(.nl-lista :focus-visible) .nl-kbd { display: block; }
+.nl-kbd kbd { display: inline-block; min-width: 18px; margin-right: 2px; padding: 0 4px; border: 1px solid var(--line); border-radius: 5px; font: inherit; font-size: 11px; text-align: center; }
+.nl-vazio { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 72px 16px; text-align: center; }
+.nl-vazio-ic { display: grid; place-items: center; width: 44px; height: 44px; margin-bottom: 6px; border: 1px solid var(--line); border-radius: 50%; color: var(--ink-2); }
+.nl-vazio-ic svg { width: 22px; height: 22px; }
+.nl-vazio b { font-size: 15px; font-weight: 600; color: var(--ink); }
+.nl-vazio p { margin: 0; font-size: 13px; color: var(--ink-3); }
+/* O aviso com Desfazer: no pé, centralizado; sai sozinho (web/lib/aviso-desfazer.ts). */
+.nl-aviso { position: fixed; z-index: 60; left: 50%; bottom: 24px; transform: translateX(-50%); display: flex; align-items: center; gap: 12px;
+  max-width: calc(100vw - 32px); padding: 8px 8px 8px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow-pop);
+  font-size: 13px; color: var(--ink); white-space: nowrap; animation: nl-sobe .22s cubic-bezier(.2,.8,.2,1) both; }
+.nl-aviso > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+@keyframes nl-sobe { from { opacity: 0; transform: translateX(-50%) translateY(8px); } }
+.nl-desfazer { flex: none; height: 28px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+.nl-aviso .nl-desfazer:hover { background: color-mix(in srgb, var(--ink) 6%, transparent); }
+.nl-desfazer:focus-visible { outline: 2px solid var(--focus-ring, var(--signal)); outline-offset: 1px; }
+/* O card dos não lidos no chat (ferramenta nao_lidos): uma linha por conversa, o ✓ sempre à vista. */
+.msg-nao-lidos { margin-bottom: 6px; }
+.nlc { width: min(460px, 100%); margin: 0 0 18px; border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+.nlc ul { list-style: none; margin: 0; padding: 4px; }
+.nlc-i { position: relative; }
+.nlc-abrir { display: grid; grid-template-columns: 22px auto minmax(0, 1fr) auto; align-items: center; gap: 10px; width: 100%; min-height: 40px; padding: 6px 44px 6px 10px;
+  border: 0; border-radius: 10px; background: transparent; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+.nlc-abrir:hover { background: color-mix(in srgb, var(--ink) 4%, transparent); }
+.nlc-abrir:focus-visible { outline: 2px solid var(--focus-ring, var(--signal)); outline-offset: -2px; }
+.nlc-abrir > .icon.mascote, .nlc-abrir > .nl-sala { width: 22px; height: 22px; font-size: 12px; }
+.nlc-abrir b { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13.5px; font-weight: 600; }
+.nlc-res { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; color: var(--ink-2); }
+.nlc-abrir time { font-size: 12px; color: var(--ink-3); }
+.nlc-check { top: 50%; right: 6px; transform: translateY(-50%); opacity: 1; color: var(--ink-3); }
+.nlc-lida .nlc-check { color: var(--ink); }
+.nlc-lida b { font-weight: 500; color: var(--ink-2); }
+/* .nlc à frente: .cp-link (card-proposta.css, carregado depois) não pode tirar o padding e a divisória (QA do PR 616). */
+.nlc .nlc-tudo { display: block; width: 100%; margin: 0; padding: 9px 14px 10px; border: 0; border-top: 1px solid var(--line); border-radius: 0; background: transparent; text-align: left; }
+.nl-recibo.nl-desfeito .cp-ic { color: var(--ink-3); }
+@media (prefers-reduced-motion: reduce) {
+  .nl-aviso, .nl-linha, .nl-check, .nl-item.nl-sai { animation: none; transition: none; }
+}
 
 /* definido em 2026-09-29 (ADR-059; canvas "Nod — tela do agente", página "Aprovações"): o botão do modo de aprovação
    ao lado do clipe e o menu dos três modos acima dele. Manual é neutro; automático, em tinta (revisto em 2026-10-04: sem

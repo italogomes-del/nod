@@ -42,6 +42,9 @@ export const DESTINO: Readonly<Record<Assunto, RegraDeDestino>> = {
   "aviso.pessoa": { destino: "chat", categoria: null },
   // NOD-119: o card da barra lateral pede o clique da pessoa.
   "barra.ajuste": { destino: "chat", categoria: null },
+  // NOD-449: o card dos não lidos tem ✓ por item; o recibo tem Desfazer.
+  "leitura.lista": { destino: "chat", categoria: null },
+  "leitura.recibo": { destino: "chat", categoria: null },
   // O aviso único de janelas adiadas (NOD-243): diz por que a rotina não roda e quando volta.
   "rotina.adiada": { destino: "chat", categoria: null },
   // A linha "Rotina executou" (ou "passou em branco"): a silenciosa (sem_novidade) não grava linha nenhuma, então é ela que
@@ -214,6 +217,10 @@ export function assuntoDe(kind: KindMensagem, payload: PayloadMensagem | null, a
         return "aviso.pessoa";
       case "ajuste_barra":
         return "barra.ajuste";
+      case "nao_lidos_lista":
+        return "leitura.lista";
+      case "recibo_leitura":
+        return "leitura.recibo";
       case "boas_vindas":
       case "acoes_do_turno": // NOD-353: a fala final com o resumo das ações continua fala.
       case "pedido_a_pessoa":

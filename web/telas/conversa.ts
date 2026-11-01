@@ -31,6 +31,7 @@ import { comDivisores, type TempoDoBloco } from "./divisores-de-data.ts";
 import { linhaNaoRodaram } from "../lib/execucao.ts";
 import { chaveDoItem, estadoDaPergunta } from "../lib/perguntas.ts";
 import { acoesComAcesso, vaiPoder } from "./rotina-precisa.ts";
+import { cartaoNaoLidos, reciboLeitura } from "./nao-lidos-no-chat.ts";
 import { avisoErro, cardProposta, de, doBot, linhaProposta, rotulada } from "../lib/card-proposta.ts";
 import { cortar } from "../lib/avisos.ts";
 import { nomeDoApp } from "./app-acesso.ts";
@@ -227,6 +228,9 @@ function corpoMensagem(m: Mensagem, estado: Estado): string {
   if (m.kind === "sistema" && p?.kind === "ajuste_barra") {
     return cartaoAjusteBarra(m, { barra: lerBarra(), celular: ehCelular() }) ?? "";
   }
+  // NOD-449: o card dos não lidos e o recibo de "marcada como lida", da ferramenta nao_lidos de qualquer bot.
+  if (m.kind === "sistema" && p?.kind === "nao_lidos_lista") return cartaoNaoLidos(p, estado);
+  if (m.kind === "sistema" && p?.kind === "recibo_leitura") return reciboLeitura(m, p);
   if (m.kind === "sistema") return cartaoRitmoRotina(m) ?? linhaDeIa(m, estado) ?? linhaDaMemoria(m, estado) ?? linhaDoTurnoPreso(m, estado) ?? `<div class="msg-sistema">${paragrafos(m.texto)}</div>`;
   if (p?.kind === "handoff") {
     // definido em 2026-09-24 (ADR-047): a tarefa delegada assina "Taga · por você" — autoria composta (ADR-023).

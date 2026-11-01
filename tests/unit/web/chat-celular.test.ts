@@ -177,7 +177,9 @@ describe("NOD-381: o computador não muda", () => {
       "@keyframes inicio-folha { from { transform: translateY(100%); } to { transform: none; } } " +
       ".abrir-bots { display: none; } .cabecalho.so-menu { display: none; } " +
       ".mais-campo, .pilula-presenca, .esqueleto-conversa { display: none; } .pilula-txt { display: contents; } " +
-      "@keyframes esqueleto-pulsa { 50% { opacity: .55; } }",
+      "@keyframes esqueleto-pulsa { 50% { opacity: .55; } } " +
+      // NOD-449: o aviso do Desfazer sobe do pé no celular (só a consulta usa este nome).
+      "@keyframes nl-sobe-c { from { opacity: 0; transform: translateY(8px); } }",
     );
   });
 

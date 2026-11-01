@@ -2,7 +2,7 @@
 
 <!-- Gerado por `npm run paridade` a partir de src/domain/acoes/ (NOD-391, ADR-135). Não edite à mão: a catraca (tests/conformidade/paridade.test.ts) compara. -->
 
-Ações de pessoa que mudam algo: **142**, mais 2 só de leitura. No chat: **14 vivas**, 3 parciais, 93 faltando e 34 que nunca vão para o chat. Piso de vivas: 14.
+Ações de pessoa que mudam algo: **143**, mais 2 só de leitura. No chat: **18 vivas**, 3 parciais, 90 faltando e 34 que nunca vão para o chat. Piso de vivas: 18.
 
 Estados: **vivo** = o chat faz pelo mesmo executor da tela, com teste de contrato; **parcial** = o chat faz, mas diverge ou falta parâmetro; **falta** = a onda dona ainda vai ligar; **nunca** = exceção escrita.
 
@@ -140,9 +140,10 @@ Estados: **vivo** = o chat faz pelo mesmo executor da tela, com teste de contrat
 | `conversas.parar` | Parar o bot desta conversa | muda | falta (NOD-397) | `POST ^\/conversas\/(?<id>[^/]+)\/parar$` |
 | `conversas.parar_tudo` | Parar todos os bots | muda | falta (NOD-397) | `POST ^\/parar$` |
 | `conversas.nova_sessao` | Começar uma sessão nova | muda | falta (NOD-397) | `POST ^\/conversas\/(?<id>[^/]+)\/nova-sessao$` |
-| `conversas.marcar_lida` | Marcar a conversa como lida | muda | falta (NOD-397) | `POST ^\/conversas\/(?<id>[^/]+)\/lida$` |
-| `conversas.marcar_nao_lida` | Marcar a conversa como não lida | muda | falta (NOD-397) | `POST ^\/conversas\/(?<id>[^/]+)\/nao-lida$` |
-| `conversas.marcar_tudo_lido` | Marcar tudo como lido | muda | falta (NOD-397) | `POST ^\/nao-lidos\/marcar-tudo$` |
+| `conversas.marcar_lida` | Marcar a conversa como lida | muda | vivo (`nao_lidos`) | `POST ^\/conversas\/(?<id>[^/]+)\/lida$` |
+| `conversas.marcar_nao_lida` | Marcar a conversa como não lida | muda | vivo (`nao_lidos`) | `POST ^\/conversas\/(?<id>[^/]+)\/nao-lida$` |
+| `conversas.marcar_tudo_lido` | Marcar tudo como lido | muda | vivo (`nao_lidos`) | `POST ^\/nao-lidos\/marcar-tudo$` |
+| `conversas.desfazer_leitura` | Desfazer a marcação como lida | muda | vivo (`nao_lidos`) | `POST ^\/nao-lidos\/desfazer$`<br>`POST ^\/nao-lidos\/recibos\/(?<id>[^/]+)\/desfazer$` |
 | `conversas.definir_pasta` | Escolher a pasta de trabalho da conversa | muda | falta (NOD-397) | `POST ^\/conversas\/(?<id>[^/]+)\/workspace$` |
 | `conversas.criar_pasta` | Criar uma pasta de trabalho | muda | falta (NOD-397) | `POST ^\/conversas\/(?<id>[^/]+)\/workspace\/pastas$` |
 | `conversas.tirar_pasta` | Tirar a pasta de trabalho da conversa | muda | falta (NOD-397) | `DELETE ^\/conversas\/(?<id>[^/]+)\/workspace$` |
@@ -281,5 +282,5 @@ Estados: **vivo** = o chat faz pelo mesmo executor da tela, com teste de contrat
 - **NOD-394** (Onda 2: apps e acessos): `acessos.conceder`, `acessos.liberar`, `acessos.dispensar`, `acessos.revogar`, `apps.criar`, `apps.sondar`, `apps.habilitar`, `apps.desabilitar`, `apps.conectar`, `apps.verificar`
 - **NOD-395** (Onda 3: conta e segurança): `conta.sair_das_outras`, `conta.editar_perfil`, `conta.trocar_email`, `conta.remover_google`, `conta.exportar`, `conta.excluir`
 - **NOD-396** (Onda 4: máquinas e computadores): `maquinas.revogar_chave`, `maquinas.convidar`, `maquinas.editar`, `maquinas.desconectar`, `maquinas.atualizar_ia`, `maquinas.definir_padrao`, `maquinas.escolher_do_bot`, `maquinas.definir_bots`, `maquinas.rodar_desta_vez`, `maquinas.instalar_ssh`, `maquinas.confiar_ssh`, `maquinas.cancelar_ssh`, `nuvem.criar_maquina`, `nuvem.excluir_maquina`, `nuvem.dormir`, `nuvem.acordar`, `nuvem.dormir_apos`, `computador.operar`, `computador.trocar_lugar`, `computador.operar_do_bot`
-- **NOD-397** (Onda 5: conversa, salas, voz e preferências): `bots.mudar_voz`, `conversas.reagir`, `conversas.desfazer_turno`, `conversas.parar`, `conversas.parar_tudo`, `conversas.nova_sessao`, `conversas.marcar_lida`, `conversas.marcar_nao_lida`, `conversas.marcar_tudo_lido`, `conversas.definir_pasta`, `conversas.criar_pasta`, `conversas.tirar_pasta`, `turnos.retomar_decisao`, `turnos.cancelar`, `turnos.retomar`, `incidentes.dispensar`, `modo.contestar`, `salas.criar`, `salas.adicionar_membro`, `salas.parar`, `trabalhos.parar`, `trabalhos.depois`, `trabalhos.fazer_aqui`, `voz.ligar`, `voz.encerrar`, `voz.continuar`, `voz.apagar_falas`, `voz.avaliar`, `preferencias.salvar`
+- **NOD-397** (Onda 5: conversa, salas, voz e preferências): `bots.mudar_voz`, `conversas.reagir`, `conversas.desfazer_turno`, `conversas.parar`, `conversas.parar_tudo`, `conversas.nova_sessao`, `conversas.definir_pasta`, `conversas.criar_pasta`, `conversas.tirar_pasta`, `turnos.retomar_decisao`, `turnos.cancelar`, `turnos.retomar`, `incidentes.dispensar`, `modo.contestar`, `salas.criar`, `salas.adicionar_membro`, `salas.parar`, `trabalhos.parar`, `trabalhos.depois`, `trabalhos.fazer_aqui`, `voz.ligar`, `voz.encerrar`, `voz.continuar`, `voz.apagar_falas`, `voz.avaliar`, `preferencias.salvar`
 - **NOD-400** (Onda 4b: contas de IA): `bots.decidir_troca_de_ia`, `contas_ia.ordenar`, `contas_ia.mudar_modo`, `contas_ia.editar`, `contas_ia.sair`, `contas_ia.remover`, `contas_ia.seguir`, `contas_ia.tentar_de_novo`, `contas_ia.entrar`, `contas_ia.codigo_do_login`, `contas_ia.cancelar_login`, `contas_ia.trocar_executor`

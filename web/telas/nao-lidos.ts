@@ -1,9 +1,8 @@
 import type { ConversaNaoLida } from "../../src/contracts/nao-lidos.ts";
-import type { Mensagem } from "../../src/contracts/mensagem.ts";
 import type { Estado } from "../estado/reducer.ts";
 import { assinatura } from "../lib/assinatura.ts";
 import { botao, dataHora, esc, hora, iconeAgente } from "../lib/render.ts";
-import { textoFormatado } from "../lib/texto-formatado.ts";
+import { htmlDaPrevia } from "../lib/previa-nao-lida.ts";
 import { nomesDe } from "./conversa.ts";
 import { abertasPorAgente, perguntasPorAgente } from "./sua-vez.ts";
 
@@ -38,45 +37,61 @@ export function rotuloNaoLidos(estado: Pick<Estado, "naoLidos">): string {
   return n ? `Não lidos: ${conversas(n)}` : "Não lidos: nada novo";
 }
 
-function corpoDa(m: Mensagem): string {
-  if (m.payload?.kind === "artefato") return `<p>▣ ${esc(m.payload.titulo)}</p>`;
-  return textoFormatado(m.texto, { chave: `nao-lido:${m.id}` });
+export const CHECK = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7"/></svg>';
+
+/** "11:03" hoje, "ontem" ou "12/10": a hora curta da linha, ao lado da contagem. */
+export function horaCurta(instante: number, agora: number): string {
+  const dia = (t: number) => new Date(t).toDateString();
+  if (dia(instante) === dia(agora)) return hora(instante);
+  if (dia(instante) === dia(agora - 86_400_000)) return "ontem";
+  return new Date(instante).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
 }
 
-function grupo(c: ConversaNaoLida, estado: Estado, decisoes: Map<string, number>, perguntas: Map<string, number>): string {
+/** O subtítulo: "4 conversas · desde as 11:02" (hoje), "· desde ontem, 18:40" ou "· desde 12/10/2026, 09:00". */
+export function subtitulo(n: number, maisAntigo: number, agora: number): string {
+  const q = quando(maisAntigo, agora);
+  return `${conversas(n)} · desde ${q.startsWith("hoje, ") ? `as ${q.slice(6)}` : q}`;
+}
+
+/** O nome que a linha mostra (e que o aviso "X marcada como lida" usa). */
+export function nomeDaConversa(c: ConversaNaoLida, estado: Pick<Estado, "frota" | "salas">): string {
+  if (c.tipo === "sala") return `# ${estado.salas.find((s) => s.sala.id === c.salaId)?.sala.nome ?? "sala"}`;
+  return estado.frota?.agentes.find((a) => a.id === c.agenteId)?.nome ?? "bot";
+}
+
+/**
+ * NOD-449 (protótipo aprovado): uma linha por conversa. A linha inteira abre a conversa; o ✓ fica no lugar da hora e
+ * aparece com o mouse ou o foco (no toque, sempre); deslizar para a direita no celular também marca (web/lib/deslize-lida.ts).
+ */
+function linha(c: ConversaNaoLida, estado: Estado, decisoes: Map<string, number>, perguntas: Map<string, number>): string {
   const agente = c.agenteId ? estado.frota?.agentes.find((a) => a.id === c.agenteId) : undefined;
-  const sala = c.salaId ? estado.salas.find((s) => s.sala.id === c.salaId)?.sala : undefined;
   const nomes = nomesDe(estado);
-  const esperando = c.agenteId && (decisoes.get(c.agenteId) ?? 0) > 0 ? "esperando sua decisão" : c.agenteId && (perguntas.get(c.agenteId) ?? 0) > 0 ? "esperando sua resposta" : "";
-  const marca = c.tipo === "sala" ? '<span class="nl-sala" aria-hidden="true">#</span>' : agente ? iconeAgente(agente, "sm", "disponivel", esperando ? `data-aviso="${esperando === "esperando sua decisão" ? "decisao" : "pergunta"}"` : "") : "";
-  const nome = c.tipo === "sala" ? `# ${sala?.nome ?? "sala"}` : (agente?.nome ?? "bot");
-  const detalhe = c.daRotina ? `rotina das ${hora(c.desde)}` : `${c.total} ${c.total === 1 ? "nova" : "novas"}`;
-  const chip = agente?.titulo ? `<i class="chip">${esc(agente.titulo)}</i>` : "";
-  const tag = esperando ? `<span class="tag tag-ambar">${esc(esperando)}</span>` : "";
-  const antes = c.total - c.mensagens.length;
-  const mensagens = c.mensagens
-    .map((m) => `<div class="nl-msg">${c.tipo === "sala" ? `<small>${esc(assinatura(m.autoria, nomes))}</small>` : ""}${corpoDa(m)}</div>`)
-    .join("");
+  const esperando = c.agenteId && (decisoes.get(c.agenteId) ?? 0) > 0 ? "decisao" : c.agenteId && (perguntas.get(c.agenteId) ?? 0) > 0 ? "pergunta" : "";
+  const marca = c.tipo === "sala" ? '<span class="nl-sala" aria-hidden="true">#</span>' : agente ? iconeAgente(agente, "sm", "disponivel", esperando ? `data-aviso="${esperando}"` : "") : '<span class="nl-sala" aria-hidden="true"></span>';
+  const nome = nomeDaConversa(c, estado);
+  const chip = agente?.titulo ? `<i class="chip" title="${esc(agente.titulo)}">${esc(agente.titulo)}</i>` : "";
+  const novas = `${c.total} ${c.total === 1 ? "nova" : "novas"}`;
+  const h = horaCurta(c.ultimaEm, estado.agora);
+  const previa = htmlDaPrevia(c.mensagens, c.tipo === "sala" ? (m) => assinatura(m.autoria, nomes) : undefined);
   const abrir = c.tipo === "sala" && c.salaId
-    ? botao("abrir-sala", "Abrir conversa", { classe: "link sm", dados: { sala: c.salaId, conversa: c.conversaId } })
-    : botao("abrir-conversa", "Abrir conversa", { classe: "link sm", dados: { conversa: c.conversaId, agente: c.agenteId ?? "" } });
-  return `<section class="nl-grupo" aria-label="${esc(`${nome}: ${c.total} ${c.total === 1 ? "mensagem nova" : "mensagens novas"}`)}">
-    <div class="nl-cab">${marca}<div class="nl-nome"><b>${esc(nome)}</b>${chip}<span>· ${esc(detalhe)}</span>${tag}</div><time>${esc(quando(c.ultimaEm, estado.agora))}</time></div>
-    <div class="nl-corpo">${antes > 0 ? `<p class="nl-antes">${antes} ${antes === 1 ? "anterior" : "anteriores"} na conversa</p>` : ""}${mensagens}</div>
-    <div class="nl-acoes">${abrir}${botao("marcar-lida", "Marcar como lido", { classe: "link sm mudo-bt", dados: { conversa: c.conversaId } })}</div>
-  </section>`;
+    ? `data-act="abrir-sala" data-sala="${esc(c.salaId)}" data-conversa="${esc(c.conversaId)}"`
+    : `data-act="abrir-conversa" data-conversa="${esc(c.conversaId)}" data-agente="${esc(c.agenteId ?? "")}"`;
+  return `<li class="nl-item" data-conversa="${esc(c.conversaId)}" data-nome="${esc(nome)}">
+    <span class="nl-deslize" aria-hidden="true">${CHECK}Lido</span>
+    <div class="nl-linha"><button type="button" class="nl-abrir" ${abrir} aria-label="${esc(`${nome}, ${novas}, ${quando(c.ultimaEm, estado.agora)}. Abrir conversa`)}">${marca}<span class="nl-l1"><b>${esc(nome)}</b>${chip}<span class="nl-meta"><span>${esc(novas)}</span> · <time>${esc(h)}</time></span></span><span class="nl-previa">${previa}</span></button>
+    <button type="button" class="nl-check" data-act="marcar-lida" data-conversa="${esc(c.conversaId)}" data-nome="${esc(nome)}" aria-label="${esc(`Marcar ${nome} como lido`)}" aria-keyshortcuts="E" title="Marcar como lido · E">${CHECK}</button></div>
+  </li>`;
 }
 
 export function renderNaoLidos(estado: Estado): string {
   if (!estado.naoLidos) return '<div class="tela-nao-lidos"><p class="mudo">carregando…</p></div>';
   const lista = estado.naoLidos.conversas;
+  if (!lista.length) {
+    return `<div class="tela-nao-lidos"><header class="nl-topo"><div><h1>Não lidos</h1><p>Nada novo</p></div></header><div class="nl-vazio"><span class="nl-vazio-ic">${CHECK}</span><b>Tudo em dia</b><p>Quando um bot falar com você, aparece aqui.</p></div></div>`;
+  }
   const maisAntigo = lista.reduce((min, c) => Math.min(min, c.desde), Infinity);
-  const sub = lista.length ? `${conversas(lista.length)} · o mais antigo é de ${quando(maisAntigo, estado.agora)}` : "Nada novo";
-  const acao = lista.length ? botao("marcar-tudo-lido", "Marcar tudo como lido", { classe: "sm" }) : "";
   const decisoes = abertasPorAgente(estado);
   const perguntas = perguntasPorAgente(estado);
-  const corpo = lista.length
-    ? lista.map((c) => grupo(c, estado, decisoes, perguntas)).join("")
-    : '<p class="nl-vazio">Quando um bot responder, uma rotina entregar ou alguém escrever numa sala enquanto você estiver em outra conversa, aparece aqui.</p>';
-  return `<div class="tela-nao-lidos"><header class="nl-topo"><div><h1>Não lidos</h1><p>${esc(sub)}</p></div>${acao}</header>${corpo}</div>`;
+  const itens = lista.map((c) => linha(c, estado, decisoes, perguntas)).join("");
+  return `<div class="tela-nao-lidos"><header class="nl-topo"><div><h1>Não lidos</h1><p>${esc(subtitulo(lista.length, maisAntigo, estado.agora))}</p></div>${botao("marcar-tudo-lido", "Marcar tudo como lido", { classe: "link sm mudo-bt nl-tudo" })}</header><ul class="nl-lista" aria-label="Conversas com mensagens novas para você">${itens}</ul><p class="nl-kbd" aria-hidden="true"><kbd>↑</kbd><kbd>↓</kbd> anda · <kbd>Enter</kbd> abre · <kbd>E</kbd> marca como lido</p></div>`;
 }

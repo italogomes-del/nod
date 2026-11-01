@@ -105,13 +105,14 @@ import { FERRAMENTAS_WORKSPACE } from "../contracts/ferramentas-workspace.ts";
  * Por isso a delegação e a rotina têm as duas; `podeAbrirTask`/`podeMandarParaTask` as tiram do turno que já é trabalho
  * (a task de colega de antes, a filha de rotina, a frente), e a execução de rotina com mãe só abre, como antes.
  */
-const FERRAMENTAS_DO_HISTORICO: readonly NomeFerramentaNod[] = ["buscar_conversas", "ler_conversa", "ver_agenda"];
+/** NOD-449: nao_lidos também (quem falou com a pessoa e quando; marcar é dela): fora do turno a pedido de outro bot. */
+const FERRAMENTAS_DO_HISTORICO: readonly NomeFerramentaNod[] = ["buscar_conversas", "ler_conversa", "ver_agenda", "nao_lidos"];
 const aPedidoDeOutroBot = (t: { sobProcuracaoDe?: string | null }) => !!t.sobProcuracaoDe;
 
 export const FERRAMENTAS_NOD_POR_MODO: Record<ModoTurno, readonly NomeFerramentaNod[]> = {
-  criacao: ["atualizar_perfil", "lembrar", "pedir_aprovacao", "pedir_acesso", "pedir_credencial", "criar_rotina", "listar_rotinas", "ver_agenda", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "ver_colegas", "pedir_a_bot", "pedir_a_pessoa", "publicar_artefato", "ler_artefato", "abrir_frentes", "mandar_para_frente", "me_chame_as", "avisar_pessoa", "buscar_conversas", "ler_conversa", "ajustar_barra_lateral"],
-  // NOD-119: o card da barra lateral só onde a pessoa olha o chat (conversa e criação).
-  conversa: ["lembrar", "pedir_aprovacao", "pedir_acesso", "pedir_credencial", "criar_rotina", "listar_rotinas", "ver_agenda", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "ver_colegas", "pedir_a_bot", "pedir_a_pessoa", "publicar_artefato", "ler_artefato", "abrir_frentes", "mandar_para_frente", "me_chame_as", "avisar_pessoa", "buscar_conversas", "ler_conversa", "ajustar_barra_lateral"],
+  criacao: ["atualizar_perfil", "lembrar", "pedir_aprovacao", "pedir_acesso", "pedir_credencial", "criar_rotina", "listar_rotinas", "ver_agenda", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "ver_colegas", "pedir_a_bot", "pedir_a_pessoa", "publicar_artefato", "ler_artefato", "abrir_frentes", "mandar_para_frente", "me_chame_as", "avisar_pessoa", "buscar_conversas", "ler_conversa", "ajustar_barra_lateral", "nao_lidos"],
+  // NOD-119: o card da barra lateral só onde a pessoa olha o chat (conversa e criação). NOD-449: nao_lidos também (o card e o recibo).
+  conversa: ["lembrar", "pedir_aprovacao", "pedir_acesso", "pedir_credencial", "criar_rotina", "listar_rotinas", "ver_agenda", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "ver_colegas", "pedir_a_bot", "pedir_a_pessoa", "publicar_artefato", "ler_artefato", "abrir_frentes", "mandar_para_frente", "me_chame_as", "avisar_pessoa", "buscar_conversas", "ler_conversa", "ajustar_barra_lateral", "nao_lidos"],
   sala: ["lembrar", "pedir_aprovacao", "pedir_acesso", "pedir_credencial", "criar_rotina", "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "ver_colegas", "pedir_a_bot", "pedir_a_pessoa", "passar", "encaminhar", "buscar_conversas", "ler_conversa"],
   // NOD-50 (revisão 6 do PR #553): rotina sem pedir_credencial — o cartão não segura a execução seguinte, que abriria outro a cada
   // disparo; a rotina que precisa de chave pede pela pessoa (pedir_a_pessoa) ou pela conversa.

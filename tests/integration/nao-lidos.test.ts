@@ -6,7 +6,7 @@ import { criarSala } from "../../src/use-cases/criar-sala.ts";
 import { fixarAgente, ocultarAgente } from "../../src/use-cases/fixar-ocultar-agente.ts";
 import { gerirAgente } from "../../src/use-cases/gerir-agente.ts";
 import { listarFrota } from "../../src/use-cases/listar-frota.ts";
-import { listarNaoLidos, marcarConversaLida, marcarConversaNaoLida, marcarTudoLido } from "../../src/use-cases/nao-lidos.ts";
+import { desfazerLeitura, listarNaoLidos, marcarConversaLida, marcarConversaNaoLida, marcarTudoLido } from "../../src/use-cases/nao-lidos.ts";
 import { autoriaPessoa as autoriaDaRegra } from "../../src/use-cases/apoio-l7.ts";
 import { autoriaPessoa } from "../../src/use-cases/autoria-evento.ts";
 import { autoriaDoAgente } from "../../src/use-cases/registrar-negacao.ts";
@@ -194,6 +194,100 @@ describeIntegracao("não lidos: o que chegou depois do lido até", () => {
 
       await vincularEscopo(tx, MARLON);
       expect((await listarNaoLidos(d, {})).data.conversas.find((x) => x.conversaId === b.conversa.id)?.total).toBe(1);
+    });
+  });
+
+  it("NOD-449: fala entre bots não entra (pedido de colega e o turno dele); a tarefa do quadro e o aviso à pessoa entram; frota igual", async () => {
+    await withRollback(MARLON, async (tx) => {
+      const d = depsSobreTrx(tx, MARLON);
+      const { data: b } = await criarAgente(d, { dono: "pessoa", nome: "Recebedor" });
+      const c = b.conversa.id;
+      const autoria = autoriaDoAgente(MARLON, b.agente.id);
+      const turnoDe = async (origem: "peer" | "delegacao" | "conversa") => {
+        const t = await d.repos.turnos.enfileirar({ executor: "catcher", conversaId: c, agenteId: b.agente.id, origem, prazoEm: d.agora() + 600_000, profundidade: origem === "conversa" ? 0 : 1, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m", ...(origem === "delegacao" ? { sobProcuracaoDe: MARLON.pessoaId } : {}) });
+        if (!t) throw new Error("turno");
+        return t.id;
+      };
+      await marcarConversaLida(d, { conversaId: c });
+      // O pedir_a_bot: o turno de triagem (delegação) e, nele, o peer_pedido; o que o bot responde nesse turno é entre bots.
+      const triagem = await turnoDe("delegacao");
+      await d.repos.mensagens.criar({ conversaId: c, turnoId: triagem, autoria, kind: "texto", texto: "revisa o PR 1", payload: { kind: "peer_pedido", conversaOrigemId: c, turnoOrigemId: await turnoDe("conversa"), nome: "Taga" }, confianca: "confiavel" });
+      await d.repos.mensagens.criar({ conversaId: c, turnoId: triagem, autoria, kind: "texto", texto: "Revisei, Taga.", confianca: "confiavel" });
+      await d.repos.mensagens.criar({ conversaId: c, turnoId: await turnoDe("peer"), autoria, kind: "texto", texto: "Combinado.", confianca: "confiavel" });
+      expect((await listarNaoLidos(d, {})).data.conversas.some((x) => x.conversaId === c)).toBe(false);
+      expect((await listarFrota(d, {})).data.agentes.find((a) => a.id === b.agente.id)?.naoLido).toBe(false);
+
+      // O aviso dirigido à pessoa, mesmo num turno de colega, conta.
+      const aviso = await d.repos.mensagens.criar({ conversaId: c, turnoId: await turnoDe("peer"), autoria, kind: "texto", texto: "Marlon, a NOD-1 travou.", payload: { kind: "aviso_pessoa" }, confianca: "confiavel" });
+      expect((await listarNaoLidos(d, {})).data.conversas.find((x) => x.conversaId === c)).toMatchObject({ total: 1, primeiraId: aviso!.id });
+      expect((await listarFrota(d, {})).data.agentes.find((a) => a.id === b.agente.id)?.naoLido).toBe(true);
+
+      // A tarefa que a pessoa moveu no quadro (delegação sob a procuração dela, sem pedido de colega) é trabalho dela: conta.
+      await marcarConversaLida(d, { conversaId: c });
+      const doQuadro = await d.repos.mensagens.criar({ conversaId: c, turnoId: await turnoDe("delegacao"), autoria, kind: "texto", texto: "Terminei a T1.", confianca: "confiavel" });
+      expect((await listarNaoLidos(d, {})).data.conversas.find((x) => x.conversaId === c)).toMatchObject({ total: 1, primeiraId: doQuadro!.id });
+
+      // Revisão 2: a retomada da triagem (cartão, reenvio) e a frente aberta para o trabalho de um colega, e a retomada
+      // dela, são entre bots; a retomada da tarefa do quadro continua contando.
+      await marcarConversaLida(d, { conversaId: c });
+      const retomar = async (de: string) => (await d.repos.turnos.enfileirar({ executor: "catcher", conversaId: c, agenteId: b.agente.id, origem: "retomada", retomaTurnoId: de, prazoEm: d.agora() + 600_000, profundidade: 1, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" }))!.id;
+      const retomadaDaTriagem = await retomar(await retomar(triagem));
+      await d.repos.mensagens.criar({ conversaId: c, turnoId: retomadaDaTriagem, autoria, kind: "texto", texto: "Aprovado, sigo, Taga.", confianca: "confiavel" });
+      const frente = (await d.repos.trabalhos.criar({ agenteId: b.agente.id, conversaId: c, titulo: "PR do Taga", origem: "colega", pedidoPorAgenteId: b.agente.id }))!;
+      const turnoDaFrente = (await d.repos.turnos.enfileirar({ executor: "catcher", conversaId: c, agenteId: b.agente.id, origem: "delegacao", trabalhoId: frente.id, prazoEm: d.agora() + 600_000, profundidade: 1, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" }))!.id;
+      await d.repos.mensagens.criar({ conversaId: c, turnoId: turnoDaFrente, autoria, kind: "texto", texto: "Frente: abri o PR.", confianca: "confiavel" });
+      await d.repos.mensagens.criar({ conversaId: c, turnoId: await retomar(turnoDaFrente), autoria, kind: "texto", texto: "Frente: CI verde.", confianca: "confiavel" });
+      expect((await listarNaoLidos(d, {})).data.conversas.some((x) => x.conversaId === c)).toBe(false);
+      expect((await listarFrota(d, {})).data.agentes.find((a) => a.id === b.agente.id)?.naoLido).toBe(false);
+      const turnoDoQuadro = (await d.repos.mensagens.buscar(doQuadro!.id))!.turnoId!;
+      const retomadaDoQuadro = await d.repos.mensagens.criar({ conversaId: c, turnoId: await retomar(turnoDoQuadro), autoria, kind: "texto", texto: "T1 aprovada, terminei.", confianca: "confiavel" });
+      expect((await listarNaoLidos(d, {})).data.conversas.find((x) => x.conversaId === c)).toMatchObject({ total: 1, primeiraId: retomadaDoQuadro!.id });
+    });
+  });
+
+  it("NOD-449: Desfazer volta a contar; leitura posterior não reabre; repetir não muda; a Ana não desfaz pelo Marlon", async () => {
+    await withRollback(MARLON, async (tx) => {
+      const d = depsSobreTrx(tx, MARLON);
+      const { data: b } = await criarAgente(d, { dono: "pessoa", nome: "Desfazível" });
+      const c = b.conversa.id;
+      await falaDoBot(d, MARLON, c, b.agente.id, "Uma.");
+      const { data: r1 } = await marcarConversaLida(d, { conversaId: c });
+      expect(r1.leituras).toHaveLength(1);
+      expect(r1.leituras[0]).toMatchObject({ conversaId: c, antes: null });
+      expect((await listarNaoLidos(d, {})).data.conversas.some((x) => x.conversaId === c)).toBe(false);
+
+      // A Ana não desfaz pelo Marlon.
+      await vincularEscopo(tx, ANA);
+      await esperarErro(() => desfazerLeitura(depsSobreTrx(tx, ANA), { leituras: r1.leituras }), "nao_encontrado");
+      // Nem pelo repo direto: a leitura é do Marlon (owner_id), não da Ana. QA do PR #616 (M12).
+      expect(await depsSobreTrx(tx, ANA).repos.leituras.restaurarLeituras(r1.leituras)).toBe(0);
+      await vincularEscopo(tx, MARLON);
+
+      expect((await desfazerLeitura(d, { leituras: r1.leituras })).data.restauradas).toBe(1);
+      expect((await listarNaoLidos(d, {})).data.conversas.find((x) => x.conversaId === c)?.total).toBe(1);
+      expect((await desfazerLeitura(d, { leituras: r1.leituras })).data.restauradas).toBe(0);
+
+      // Marcou de novo e depois leu mais: o Desfazer da primeira marcação não reabre.
+      const { data: r2 } = await marcarConversaLida(d, { conversaId: c });
+      await falaDoBot(d, MARLON, c, b.agente.id, "Outra.");
+      await marcarConversaLida(d, { conversaId: c });
+      expect((await desfazerLeitura(d, { leituras: r2.leituras })).data.restauradas).toBe(0);
+      expect((await listarNaoLidos(d, {})).data.conversas.some((x) => x.conversaId === c)).toBe(false);
+
+      // Com leitura anterior (antes não nulo): volta exatamente a ela, e só a fala nova conta.
+      const nova = await falaDoBot(d, MARLON, c, b.agente.id, "Terceira.");
+      const { data: r3 } = await marcarConversaLida(d, { conversaId: c });
+      expect(r3.leituras[0]?.antes).not.toBeNull();
+      expect((await desfazerLeitura(d, { leituras: r3.leituras })).data.restauradas).toBe(1);
+      expect((await listarNaoLidos(d, {})).data.conversas.find((x) => x.conversaId === c)).toMatchObject({ total: 1, primeiraId: nova.id });
+
+      // O lote cheio da mesma conversa (o que o fuzz manda): uma busca, um UPDATE, vale a primeira leitura.
+      const { data: r4 } = await marcarConversaLida(d, { conversaId: c });
+      const t0 = Date.now();
+      expect((await desfazerLeitura(d, { leituras: Array.from({ length: 5000 }, () => r4.leituras[0]) })).data.restauradas).toBe(1);
+      expect(Date.now() - t0).toBeLessThan(2000);
+
+      await esperarErro(() => desfazerLeitura(d, { leituras: "x" }), "entrada_invalida");
     });
   });
 });

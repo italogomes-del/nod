@@ -68,6 +68,13 @@ dois caminhos já divergiam: excluir um bot pela tela desligava o computador del
   ele escreve fica marcado de fora (`de_fora`). Gatilho de reversão: um lote de bot que a pessoa precisou desfazer por
   engano mais de uma vez por semana, ou uma tarefa excluída sem volta, passa as ações destrutivas (excluir, trocar de
   responsável) a seguir o modo, como o `gerir_bots` com o `riscoDaAcao`.
+- **As leituras `conversas.marcar_lida`, `marcar_nao_lida`, `marcar_tudo_lido` e `desfazer_leitura` (NOD-449,
+  2026-11-01) são `muda` com `cartaoNoChat: false`**: o `nao_lidos` de qualquer bot aplica direto, sem o cartão do modo.
+  Só mexem no "lido até" da própria pessoa, não têm efeito fora, e toda marcação tem Desfazer (o aviso da tela e o recibo
+  do chat), que só volta se o "lido até" não mudou desde então. Só o turno limpo (entrada confiável e não contaminado)
+  marca; o turno de fora só lista, e procuração de outra pessoa ou corrente (profundidade > 0) nem lista. Gatilho de
+  reversão: uma marcação feita por bot que a pessoa não pediu e precisou desfazer mais de uma vez por semana passa as
+  marcações pelo chat a seguir o modo do bot.
 
 ## Alternativas descartadas
 

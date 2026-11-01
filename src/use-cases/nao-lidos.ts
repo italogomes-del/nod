@@ -1,4 +1,5 @@
-import type { ConversaNaoLida, NaoLidosDto } from "../contracts/nao-lidos.ts";
+import type { ConversaNaoLida, LeituraMarcada, NaoLidosDto } from "../contracts/nao-lidos.ts";
+import { lerLeituras } from "../domain/nao-lidos.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import type { ResumoNaoLida } from "../repositories/leituras.repo.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
@@ -31,10 +32,12 @@ async function conversaDaPessoa(deps: Deps, conversaId: string): Promise<string>
   return conversa.id;
 }
 
-/** Abrir a conversa, ou "Marcar como lido" na tela Não lidos: lida até a última mensagem. */
-export const marcarConversaLida: CasoDeUso<{ conversaId: string }, { ok: true }> = async (deps, input) => {
-  await deps.repos.leituras.marcarLida(await conversaDaPessoa(deps, input.conversaId));
-  return { data: { ok: true } };
+/**
+ * Abrir a conversa, ou "Marcar como lido" na tela Não lidos: lida até a última mensagem. NOD-449: devolve a leitura de
+ * antes e de depois, para o Desfazer.
+ */
+export const marcarConversaLida: CasoDeUso<{ conversaId: string }, { leituras: LeituraMarcada[] }> = async (deps, input) => {
+  return { data: { leituras: [await deps.repos.leituras.marcarLida(await conversaDaPessoa(deps, input.conversaId))] } };
 };
 
 /** "Marcar como não lido" do menu do bot: a última fala dele volta a ser nova. */
@@ -42,9 +45,25 @@ export const marcarConversaNaoLida: CasoDeUso<{ conversaId: string }, { marcada:
   return { data: { marcada: await deps.repos.leituras.marcarNaoLida(await conversaDaPessoa(deps, input.conversaId)) } };
 };
 
-/** "Marcar tudo como lido": as conversas que a tela Não lidos mostra. */
-export const marcarTudoLido: CasoDeUso<Record<string, never>, { marcadas: number }> = async (deps) => {
+/** "Marcar tudo como lido": as conversas que a tela Não lidos mostra. NOD-449: com as leituras, para o Desfazer. */
+export const marcarTudoLido: CasoDeUso<Record<string, never>, { marcadas: number; leituras: LeituraMarcada[] }> = async (deps) => {
   const conversas = await visiveis(deps);
-  for (const c of conversas) await deps.repos.leituras.marcarLida(c.conversaId);
-  return { data: { marcadas: conversas.length } };
+  const leituras: LeituraMarcada[] = [];
+  for (const c of conversas) leituras.push(await deps.repos.leituras.marcarLida(c.conversaId));
+  return { data: { marcadas: conversas.length, leituras } };
+};
+
+/**
+ * NOD-449 (decisão 5): o Desfazer de qualquer "marcar como lido" (uma, todas, pela tela ou pelo chat). Cada leitura volta
+ * ao `antes` só se o "lido até" ainda é o `depois` (restaurarLeituras): o que a pessoa leu depois não reabre. A conversa
+ * tem de ser dela (o mesmo conversaDaPessoa das marcações; RLS por baixo). Repetir não muda nada.
+ */
+export const desfazerLeitura: CasoDeUso<{ leituras: unknown }, { restauradas: number }> = async (deps, input) => {
+  const leituras = lerLeituras(input.leituras);
+  if (!leituras) throw new ErroDeDominio("entrada_invalida");
+  // Uma busca por conversa distinta (a cerca da dona) e um UPDATE para o lote. A mesma conversa repetida no lote: vale a
+  // primeira leitura (o Desfazer de uma marcação nunca repete conversa).
+  const porConversa = new Map<string, LeituraMarcada>();
+  for (const l of leituras) if (!porConversa.has(l.conversaId)) porConversa.set(l.conversaId, { ...l, conversaId: await conversaDaPessoa(deps, l.conversaId) });
+  return { data: { restauradas: await deps.repos.leituras.restaurarLeituras([...porConversa.values()]) } };
 };

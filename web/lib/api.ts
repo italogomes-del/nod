@@ -22,7 +22,7 @@ import type { CodigoCifrado, ContasIaDto, FrenteAtivaDaConta, IaComConta, LoginN
 import type { EntradaRelato, Relato } from "../../src/contracts/relato.ts";
 import type { Experimentos, Preferencias, RaioXConversa, RaioXTurno } from "../../src/contracts/raio-x.ts";
 import type { ComandosDto } from "../../src/contracts/comandos.ts";
-import type { NaoLidosDto } from "../../src/contracts/nao-lidos.ts";
+import type { LeituraMarcada, NaoLidosDto, RespostaLeitura } from "../../src/contracts/nao-lidos.ts";
 import type { Conector } from "../../src/contracts/conector.ts";
 import type { AgendaDto } from "../../src/contracts/agenda.ts";
 import type { Conversa } from "../../src/contracts/conversa.ts";
@@ -228,9 +228,13 @@ export function criarApi(escopo: Escopo) {
     organizarAgente: (id: string, campos: { secao?: string; naoLido?: boolean; fixado?: boolean; ordem?: string[] }) => patch<{ agente: Agente }>(`agentes/${id}/organizacao`, campos),
     /** Não lidos (definido em 2026-09-29, 0039). */
     naoLidos: () => get<NaoLidosDto>("nao-lidos"),
-    marcarLida: (conversaId: string) => post<RespostaMutacao>(`conversas/${conversaId}/lida`),
+    marcarLida: (conversaId: string) => post<RespostaLeitura>(`conversas/${conversaId}/lida`),
     marcarNaoLida: (conversaId: string) => post<RespostaMutacao>(`conversas/${conversaId}/nao-lida`),
-    marcarTudoLido: () => post<RespostaMutacao>("nao-lidos/marcar-tudo"),
+    marcarTudoLido: () => post<RespostaLeitura>("nao-lidos/marcar-tudo"),
+    /** NOD-449: o Desfazer de qualquer marcação como lida (as leituras que ela devolveu). */
+    desfazerLeitura: (leituras: LeituraMarcada[]) => post<{ restauradas: number }>("nao-lidos/desfazer", { leituras }),
+    /** NOD-449: o Desfazer do recibo que um bot deixou no chat ("Bia marcada como lida · Desfazer"). */
+    desfazerRecibo: (mensagemId: string) => post<{ restauradas: number }>(`nao-lidos/recibos/${mensagemId}/desfazer`),
     excluirAgente: (id: string) => del<{ agente: Agente }>(`agentes/${id}`),
     restaurarAgente: (id: string) => post<{ agente: Agente }>(`agentes/${id}/restaurar`),
     inventario: (forcar = false) => get<Inventario>(`inventario${forcar ? "?forcar=1" : ""}`),
