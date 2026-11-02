@@ -11,8 +11,10 @@ import { abrirChrome, avaliar, type Cdp } from "../../scripts/carga-tela/cdp.ts"
  * NOD-429: os dois comentários finais do Marlon provados no Chrome de verdade, com o CSS e o JS do app (sem servidor):
  *  - j4-5: a recusa da trava ("Feito só aceita vindo de Em revisão · Mandar para Em revisão") cabe no card, na coluna
  *    mais estreita (192 px) e na lista do celular (390);
- *  - j7-1: a troca Conversa ↔ Quadro desliza nos dois sentidos (indicador e conteúdo, 220 ms) e, com Reduzir movimento,
- *    vira um fade sem deslocamento.
+ *  - j7-1: a troca Conversa ↔ Quadro desliza nos dois sentidos (conteúdo, 220 ms) e, com Reduzir movimento, vira um
+ *    fade sem deslocamento.
+ * NOD-445: o par Conversa | Quadro virou a pílula de páginas (Conversa, Tarefas e os apps do bot), com a
+ * doca na mola, os pontinhos, a roda, o arrasto no toque e o anúncio para o leitor de tela.
  * Sem Chrome na máquina, o teste é pulado (o CI instala o do playwright).
  */
 
@@ -24,6 +26,17 @@ const ENTRADA = `
 import { estadoInicial, reduzir } from "./web/estado/reducer.ts";
 import { criarQuadroNaTela } from "./web/lib/quadro-na-tela.ts";
 import { renderCabecalhoConversa } from "./web/telas/conversa.ts";
+import { aoGuardarOrdem, definirPaginas, esquecerPaginas, ordemDoAgente, paginasDoAgente } from "./web/lib/ordem-das-paginas.ts";
+import { cenario } from "./tests/helpers/paginas-do-bot.ts";
+// As páginas como o servidor as daria (Conversa, Tarefas, Painel, Doc). O "servidor" é o sessionStorage: o PUT da ordem
+// grava lá (e em __salvos), e a página recarregada lê de volta, como o GET das páginas faria em outro aparelho.
+const SERVIDOR = "teste.servidor.ordem";
+const guardada = JSON.parse(sessionStorage.getItem(SERVIDOR) ?? "null");
+definirPaginas(guardada ? { ...cenario(3), ordem: guardada } : cenario(3));
+const PAGINAS = paginasDoAgente("a");
+window.__salvos = [];
+aoGuardarOrdem((ag, ids) => { window.__salvos.push(ag + ":" + JSON.stringify(ids)); sessionStorage.setItem(SERVIDOR, JSON.stringify(ids)); });
+window.__zerarOrdem = () => { sessionStorage.removeItem(SERVIDOR); definirPaginas(cenario(3)); window.__salvos = []; };
 import { card, linha } from "./web/telas/quadro.ts";
 const C = "c1";
 const conversa = { conversa: { tenantId: "t", id: C, ownerId: "p", visibility: "privado", tipo: "propria", agenteId: "a", salaId: null, sessaoCli: null, criadoEm: 1 },
@@ -39,19 +52,62 @@ window.__linha = linha(tarefa);
 window.__montar = (comQuadro) => {
   const cab = document.getElementById("cabecalho");
   cab.classList.add("cabecalho-pilula");
-  cab.innerHTML = renderCabecalhoConversa(e, "a", { comQuadro });
+  cab.innerHTML = renderCabecalhoConversa(e, "a", { comQuadro, paginas: PAGINAS });
   document.getElementById("timeline").innerHTML = "<p>conversa</p>";
   document.getElementById("composer").innerHTML = "<textarea></textarea>";
   window.__trocas = [];
   // Quem ouve a troca (o main lê a conversa na volta) precisa ver o modo novo no momento da chamada.
   const q = criarQuadroNaTela(document, { aoTrocar: (m) => window.__trocas.push(m + ":" + q.modo()) });
-  q.sincronizar(comQuadro ? { chave: C, nome: "Ada" } : { chave: null, nome: "" });
+  q.sincronizar(comQuadro ? { chave: C, nome: "Ada", paginas: PAGINAS } : { chave: null, nome: "" });
   window.__quadro = q;
 };
-/** O render regrava o cabeçalho (mascote, presença): o segmento é outro nó. */
+/** Com o agente e a ordem guardada (arrastar um ícone muda a casa): monta como o main, que redesenha ao mudar a ordem. */
+window.__montarComOrdem = () => {
+  const cab = document.getElementById("cabecalho");
+  cab.classList.add("cabecalho-pilula");
+  const desenhar = () => { cab.innerHTML = renderCabecalhoConversa(e, "a", { comQuadro: true, paginas: PAGINAS, ordem: ordemDoAgente("a", PAGINAS) }); };
+  desenhar();
+  document.getElementById("timeline").innerHTML = "<p>conversa</p>";
+  document.getElementById("composer").innerHTML = "<textarea></textarea>";
+  const q = criarQuadroNaTela(document, { aoMudarOrdem: () => { desenhar(); q.sincronizar({ chave: C, nome: "Ada", agenteId: "a", paginas: PAGINAS }); } });
+  q.sincronizar({ chave: C, nome: "Ada", agenteId: "a", paginas: PAGINAS });
+  window.__quadro = q;
+};
+/**
+ * NOD-445 (revisão 2, achado 1): a primeira visita ao bot na sessão, como o main: a conversa abre ANTES de o GET das
+ * páginas voltar (só a Conversa na pílula) e cada render chama \`sincronizar\` de novo. \`__chegaramPaginas(ordem)\` é a
+ * resposta do servidor chegando (o \`aoLer\` do main, que redesenha).
+ */
+window.__montarSemPaginas = () => {
+  esquecerPaginas();
+  const cab = document.getElementById("cabecalho");
+  cab.classList.add("cabecalho-pilula");
+  document.getElementById("timeline").innerHTML = "<p>conversa</p>";
+  document.getElementById("composer").innerHTML = "<textarea></textarea>";
+  window.__trocas = [];
+  const q = criarQuadroNaTela(document, { aoTrocar: (m) => window.__trocas.push(m + ":" + q.modo()) });
+  const desenhar = () => {
+    const ps = paginasDoAgente("a");
+    cab.innerHTML = renderCabecalhoConversa(e, "a", { comQuadro: true, paginas: ps, ordem: ordemDoAgente("a", ps) });
+    q.sincronizar({ chave: C, nome: "Ada", agenteId: "a", paginas: ps });
+  };
+  desenhar();
+  window.__desenhar = desenhar;
+  window.__chegaramPaginas = (ordem) => { definirPaginas({ ...cenario(3), ordem }); desenhar(); };
+  window.__quadro = q;
+};
+/** O app à vista some do servidor (removido em outro aparelho): a próxima leitura das páginas já não o traz. */
+window.__removerNoOutro = (id) => {
+  const d = cenario(3);
+  definirPaginas({ ...d, apps: d.apps.filter((a) => a.id !== id), ordem: d.ordem.filter((o) => o !== "app:" + id) });
+  const ps = paginasDoAgente("a");
+  document.getElementById("cabecalho").innerHTML = renderCabecalhoConversa(e, "a", { comQuadro: true, paginas: ps });
+  window.__quadro.sincronizar({ chave: C, nome: "Ada", paginas: ps });
+};
+/** O render regrava o cabeçalho (mascote, presença): a doca é outro nó. */
 window.__regravar = () => {
-  document.getElementById("cabecalho").innerHTML = renderCabecalhoConversa(e, "a", { comQuadro: true });
-  window.__quadro.sincronizar({ chave: C, nome: "Ada" });
+  document.getElementById("cabecalho").innerHTML = renderCabecalhoConversa(e, "a", { comQuadro: true, paginas: PAGINAS });
+  window.__quadro.sincronizar({ chave: C, nome: "Ada", paginas: PAGINAS });
 };
 `;
 
@@ -83,7 +139,7 @@ descrever("NOD-429 no Chrome real", () => {
   afterAll(() => { cdp?.fechar(); rmSync(dir, { recursive: true, force: true }); });
 
   /** 1440 é o computador; 390 é o celular de verdade (toque, sem hover: a CONSULTA_CELULAR do mobile.css casa). */
-  async function abrir(largura: number, reduzido: boolean, comQuadro = true, deitado = false): Promise<void> {
+  async function abrir(largura: number, reduzido: boolean, comQuadro = true, deitado = false, montagem = `window.__montar(${comQuadro})`): Promise<void> {
     const celular = largura < 700 || deitado;
     await cdp.enviar("Emulation.setDeviceMetricsOverride", { width: largura, height: deitado ? 390 : celular ? 844 : 900, deviceScaleFactor: 1, mobile: celular });
     await cdp.enviar("Emulation.setTouchEmulationEnabled", { enabled: celular, maxTouchPoints: celular ? 5 : 1 });
@@ -93,28 +149,35 @@ descrever("NOD-429 no Chrome real", () => {
     ] });
     await cdp.enviar("Page.navigate", { url });
     for (let i = 0; i < 100 && !(await avaliar<boolean>(cdp, "!!window.__montar")); i++) await esperar(50);
-    await avaliar(cdp, `window.__montar(${comQuadro})`);
+    await avaliar(cdp, montagem);
   }
 
   /**
    * Clica numa aba e devolve os quadros-chave das animações de quem entra e de quem sai. Com `pausarEm`, para tudo (o
    * deslize e a transição do indicador) nesse ponto, no mesmo passo do clique: a máquina carregada não chega ao fim antes.
    */
-  const trocar = (modo: string, pausarEm?: number) => avaliar<{ quadro: string[]; timeline: string[]; ms: number; easing: string }>(cdp, `(() => {
-    document.querySelector('#cabecalho [data-modo="${modo}"]').click();
+  const PAGINA: Record<string, number> = { conversa: 0, quadro: 1 };
+  const aba = (modo: string) => `#cabecalho .pg-ic[data-pagina="${PAGINA[modo] ?? modo}"]`;
+  const trocar = (modo: string, pausarEm?: number) => avaliar<{ quadro: string[]; timeline: string[]; ms: number; easing: string; ponto: number }>(cdp, `(() => {
+    document.querySelector('${aba(modo)}').click();
+    // Lido no mesmo tique do clique: na máquina carregada a mola do pontinho (350 ms) acaba antes da próxima ida ao CDP.
+    const ponto = document.querySelector("#cabecalho .pg-pt.pg-pt-atual")?.getAnimations().length ?? 0;
     ${pausarEm === undefined ? "" : `for (const a of document.getAnimations()) { a.pause(); a.currentTime = ${pausarEm}; }`}
     const kf = (id) => (document.getElementById(id).getAnimations()[0]?.effect.getKeyframes() ?? []).map((k) => (k.transform ?? "-").replace("(0px)", "(0)"));
     const t = document.getElementById("quadro").getAnimations()[0]?.effect.getTiming();
-    return { quadro: kf("quadro"), timeline: kf("timeline"), ms: t?.duration ?? 0, easing: t?.easing ?? "" };
+    return { quadro: kf("quadro"), timeline: kf("timeline"), ms: t?.duration ?? 0, easing: t?.easing ?? "", ponto };
   })()`);
   /** Espera as animações e transições em curso acabarem de fato (prazo fixo estoura na máquina carregada) e mais um respiro. */
   const acabar = () => avaliar(cdp, `Promise.all(document.getAnimations().map((a) => a.finished.catch(() => null))).then(() => new Promise((r) => setTimeout(r, 50)))`);
-  const xDoIndicador = () => avaliar<number>(cdp, `new DOMMatrix(getComputedStyle(document.querySelector(".qd-seg-ind")).transform).m41`);
   const xDaVista = () => avaliar<number>(cdp, `new DOMMatrix(getComputedStyle(document.getElementById("quadro")).transform).m41`);
-  const estadoFinal = () => avaliar<{ atual: string; quadroOculto: boolean; timelineVis: string; timelineInert: boolean; selecionada: string | null }>(cdp, `({
-    atual: document.querySelector(".qd-seg").dataset.atual, quadroOculto: document.getElementById("quadro").hidden,
-    timelineVis: getComputedStyle(document.getElementById("timeline")).visibility, timelineInert: document.getElementById("timeline").inert,
-    selecionada: document.querySelector('.qd-seg [aria-selected="true"]')?.dataset.modo ?? null })`);
+  const NOME = ["conversa", "quadro", "painel", "doc"];
+  const estadoFinal = () => avaliar<{ atual: string; quadroOculto: boolean; timelineVis: string; timelineInert: boolean; selecionada: string | null }>(cdp, `(() => {
+    const n = ${JSON.stringify(NOME)};
+    return { atual: n[Number(document.querySelector("#cabecalho .qd-pil").dataset.pagina)], quadroOculto: document.getElementById("quadro").hidden,
+      timelineVis: getComputedStyle(document.getElementById("timeline")).visibility, timelineInert: document.getElementById("timeline").inert,
+      selecionada: n[Number(document.querySelector('#cabecalho .pg-ic[aria-selected="true"]')?.dataset.pagina)] ?? null };
+  })()`);
+  const pontoAtual = () => avaliar<number>(cdp, `Number(document.querySelector("#cabecalho .pg-pt.pg-pt-atual")?.dataset.pagina ?? -1)`);
 
   /** Onde o aviso de recusa fica em relação ao seu card (ou linha), dentro da vista real do quadro. */
   const medirRecusa = (sel: string) => avaliar<{ dentro: boolean; transborda: boolean; linhas: number; title: string; largura: number }>(cdp, `(() => {
@@ -155,14 +218,14 @@ descrever("NOD-429 no Chrome real", () => {
     expect(l.title).toBe("Feito só aceita vindo de Em revisão · Mandar para Em revisão");
     const pil = await avaliar<{ esq: number; dir: number; abas: number[]; nomes: string[] }>(cdp, `(() => {
       const r = document.querySelector("#cabecalho .qd-pil").getBoundingClientRect();
-      const abas = [...document.querySelectorAll("#cabecalho .qd-seg-bt")];
+      const abas = [...document.querySelectorAll("#cabecalho .pg-ic")];
       return { esq: r.left, dir: r.right, abas: abas.map((a) => a.getBoundingClientRect().width), nomes: abas.map((a) => a.getAttribute("aria-label")) };
     })()`);
     expect(pil.esq).toBeGreaterThanOrEqual(0);
     expect(pil.dir).toBeLessThanOrEqual(390);
     // Só ícones no celular (a CONSULTA_CELULAR casou), e o nome segue para o leitor de tela.
-    expect(pil.abas).toEqual([44, 44]);
-    expect(pil.nomes).toEqual(["Conversa", "Quadro"]);
+    expect(pil.abas).toEqual([44, 44, 44, 44]);
+    expect(pil.nomes).toEqual(["Conversa", "Tarefas", "Painel", "Doc"]);
   }, 30_000);
 
   for (const [largura, deitado] of [[390, false], [844, true]] as const) {
@@ -171,7 +234,8 @@ descrever("NOD-429 no Chrome real", () => {
       await trocar("quadro");
       await acabar();
       const r = await avaliar<{ pequenos: string[]; rolagem: number; botoes: number }>(cdp, `(() => {
-        const bts = [...document.querySelectorAll("#quadro button, #cabecalho .qd-pil button")].filter((b) => b.getClientRects().length);
+        // Os ícones da doca fechada estão recolhidos (largura 0): só contam com a doca aberta, onde têm 44 px.
+        const bts = [...document.querySelectorAll("#quadro button, #cabecalho .qd-pil button")].filter((b) => b.getClientRects().length && !(b.closest(".pg-doca") && !b.closest(".pg-aberta")));
         const pequenos = bts.filter((b) => b.getBoundingClientRect().height < 44).map((b) => b.className + ":" + Math.round(b.getBoundingClientRect().height));
         return { pequenos, rolagem: document.documentElement.scrollWidth, botoes: bts.length };
       })()`);
@@ -181,43 +245,244 @@ descrever("NOD-429 no Chrome real", () => {
     }, 30_000);
   }
 
-  it("j7-1 · 1440px: ida e volta deslizam de lado (220 ms) e o indicador anda na pílula", async () => {
+  it("j7-1 · 1440px: ida e volta deslizam de lado (220 ms) e o pontinho da página anda", async () => {
     await abrir(1440, false);
-    const largura = await avaliar<number>(cdp, `document.querySelector(".qd-seg-ind").getBoundingClientRect().width`);
+    expect(await pontoAtual()).toBe(0);
     const ida = await trocar("quadro", 110);
     expect(ida.ms).toBe(220);
     expect(ida.easing).toMatch(/cubic-bezier\(0\.2, 0\.8, 0\.2, 1\)/);
     expect(ida.quadro).toEqual(["translateX(48px)", "translateX(0)"]);
-    expect(ida.timeline).toEqual(["translateX(0)", "translateX(-48px)"]);
-    // Parado no meio (110 de 220 ms): o indicador está a caminho, e a transição dele existe (sem ela, já estaria no fim).
-    expect(await avaliar<number>(cdp, `document.querySelector(".qd-seg-ind").getAnimations().length`)).toBeGreaterThan(0);
-    const meio = await xDoIndicador();
-    expect(meio).toBeGreaterThan(1);
-    expect(meio).toBeLessThan(largura - 1);
+    expect(ida.timeline).toEqual(["translateX(-48px)", "translateX(0)"].reverse());
+    // O pontinho da página nova alonga já no clique (transição de largura, com mola no CSS).
+    expect(await pontoAtual()).toBe(1);
+    expect(ida.ponto).toBeGreaterThan(0);
     await avaliar(cdp, `for (const a of document.getAnimations()) a.play()`);
     await acabar();
-    // Pousa exatamente na aba Quadro, e a cápsula não mudou de largura com a troca.
-    expect(await xDoIndicador()).toBeCloseTo(largura, 0);
-    expect(await avaliar<number>(cdp, `document.querySelector(".qd-seg-ind").getBoundingClientRect().left - document.querySelector('.qd-seg [data-modo="quadro"]').getBoundingClientRect().left`)).toBeCloseTo(0, 0);
+    expect(await avaliar<number>(cdp, `document.querySelector("#cabecalho .pg-pt.pg-pt-atual").getBoundingClientRect().width`)).toBeCloseTo(14, 0);
     expect(await estadoFinal()).toEqual({ atual: "quadro", quadroOculto: false, timelineVis: "hidden", timelineInert: true, selecionada: "quadro" });
     expect(await avaliar<number>(cdp, `document.querySelectorAll("#quadro .qd-so-largo .qd-col").length`)).toBe(8);
+    expect(await avaliar<string>(cdp, `document.getElementById("pg-anuncio").textContent`)).toBe("página 2 de 4, Tarefas");
 
     const volta = await trocar("conversa");
     expect(volta.quadro).toEqual(["translateX(0)", "translateX(48px)"]);
     expect(volta.timeline).toEqual(["translateX(-48px)", "translateX(0)"]);
     await acabar();
-    expect(await xDoIndicador()).toBeCloseTo(0, 0);
+    expect(await pontoAtual()).toBe(0);
     expect(await estadoFinal()).toEqual({ atual: "conversa", quadroOculto: true, timelineVis: "visible", timelineInert: false, selecionada: "conversa" });
+  }, 30_000);
+
+  it("NOD-445 · de Tarefas a um app, só o conteúdo da vista desliza; a conversa fica por baixo e volta direto do app", async () => {
+    await abrir(1440, false);
+    await trocar("quadro");
+    await acabar();
+    const r = await avaliar<{ kf: string[]; titulo: string }>(cdp, `(() => {
+      document.querySelector('${aba("2")}').click();
+      const c = document.querySelector("#quadro > *");
+      for (const a of document.getAnimations()) a.pause();
+      return { kf: (c.getAnimations()[0]?.effect.getKeyframes() ?? []).map((k) => (k.transform ?? "-").replace("(0px)", "(0)")), titulo: document.querySelector("#quadro .pg-app h2")?.textContent ?? "" };
+    })()`);
+    expect(r.kf).toEqual(["translateX(48px)", "translateX(0)"]);
+    expect(r.titulo).toBe("Painel");
+    await avaliar(cdp, `for (const a of document.getAnimations()) a.play()`);
+    await acabar();
+    expect(await estadoFinal()).toMatchObject({ atual: "painel", quadroOculto: false, timelineInert: true, selecionada: "painel" });
+    expect(await avaliar<string[]>(cdp, `window.__trocas`)).toEqual(["quadro:quadro"]);
+    await trocar("conversa");
+    await acabar();
+    expect(await estadoFinal()).toMatchObject({ atual: "conversa", quadroOculto: true, timelineInert: false });
+    // Voltar à vista pelo trocar("quadro") de fora (o main) volta à última página dela.
+    await avaliar(cdp, `window.__quadro.trocar("quadro")`);
+    await acabar();
+    expect(await estadoFinal()).toMatchObject({ atual: "painel" });
+  }, 30_000);
+
+  it("NOD-445 · hover abre a doca na mola macia (no máximo um fio além do alvo) e sair fecha sem rebote; a roda troca uma página por gesto", async () => {
+    await abrir(1440, false);
+    const nome = await avaliar<{ x: number; y: number }>(cdp, `(() => { const r = document.querySelector("#cabecalho .pilula-bot").getBoundingClientRect(); return { x: r.left + 10, y: r.top + r.height / 2 }; })()`);
+    expect(await avaliar<number>(cdp, `document.querySelector("#cabecalho .pg-doca").getBoundingClientRect().width`)).toBe(0);
+    await cdp.enviar("Input.dispatchMouseEvent", { type: "mouseMoved", x: nome.x, y: nome.y });
+    // Amostra a largura a cada quadro até assentar: a mola passa do alvo antes de parar.
+    const m = await avaliar<{ max: number; fim: number; alvo: number; aberta: boolean }>(cdp, `new Promise((ok) => {
+      const d = document.querySelector("#cabecalho .pg-doca");
+      let max = 0, n = 0, parada = 0, antes = -1;
+      const passo = () => {
+        const w = d.getBoundingClientRect().width;
+        max = Math.max(max, w);
+        parada = w > 0 && Math.abs(w - antes) < 0.01 ? parada + 1 : 0;
+        antes = w;
+        if (parada > 10 || ++n > 300) ok({ max, fim: w, alvo: d.firstElementChild.scrollWidth, aberta: d.parentElement.classList.contains("pg-aberta") });
+        else requestAnimationFrame(passo);
+      };
+      requestAnimationFrame(passo);
+    })`);
+    expect(m.aberta).toBe(true);
+    expect(m.fim).toBeCloseTo(m.alvo, 0);
+    // Pedido do Marlon (2026-11-02): abrir mais suave, sem balançar.
+    expect(m.max).toBeLessThan(m.alvo + 2);
+    // A roda: um gesto de trackpad (vários eventos) anda uma página só. O gesto é disparado na página com o relógio
+    // dela controlado (8 eventos a cada 100 ms, 700 ms ao todo, mais que a trava de 380 ms) e, entre um evento e outro,
+    // espera a troca assentar: é o pior caso, o do CI carregado (os 6 eventos do CDP levaram mais que a trava e a troca
+    // já tinha acabado, então o meio do gesto andou outra página). Não depende de quanto o CDP demora entre eventos.
+    // O relógio do gesto termina 2 s atrás do real, então a roda de verdade logo depois já é outro gesto.
+    expect(await avaliar<number>(cdp, `(async () => {
+      const real = Date.now;
+      let t = real() - 2000;
+      Date.now = () => t;
+      try {
+        const alvo = document.querySelector("#cabecalho .pilula-bot");
+        let canceladas = 0;
+        for (let i = 0; i < 8; i++, t += 100) {
+          if (!alvo.dispatchEvent(new WheelEvent("wheel", { deltaY: 30, bubbles: true, cancelable: true }))) canceladas++;
+          await Promise.all(document.getAnimations().map((a) => a.finished.catch(() => null)));
+        }
+        return canceladas;
+      } finally { Date.now = real; }
+    })()`)).toBe(8);
+    await acabar();
+    expect(await estadoFinal()).toMatchObject({ atual: "quadro" });
+    // Um gesto novo, pela roda de verdade (CDP), anda mais uma.
+    await cdp.enviar("Input.dispatchMouseEvent", { type: "mouseWheel", x: nome.x, y: nome.y, deltaX: 0, deltaY: 30 });
+    await acabar();
+    expect(await estadoFinal()).toMatchObject({ atual: "painel" });
+    await cdp.enviar("Input.dispatchMouseEvent", { type: "mouseMoved", x: 700, y: 600 });
+    // Fechar só encolhe: nenhum quadro cresce de novo (o rebote abaixo de zero tremia a pílula).
+    const f = await avaliar<{ cresceu: number; fim: number }>(cdp, `new Promise((ok) => {
+      const d = document.querySelector("#cabecalho .pg-doca");
+      let antes = d.getBoundingClientRect().width, cresceu = 0, n = 0;
+      const passo = () => {
+        const w = d.getBoundingClientRect().width;
+        cresceu = Math.max(cresceu, w - antes);
+        antes = w;
+        if (++n > 90) ok({ cresceu, fim: w }); else requestAnimationFrame(passo);
+      };
+      requestAnimationFrame(passo);
+    })`);
+    expect(f.cresceu).toBeLessThan(0.5);
+    expect(f.fim).toBeLessThan(1);
+  }, 30_000);
+
+  it("NOD-445 · 390px (toque): arrastar a pílula para a esquerda estica e vai à próxima página; o toque não abre o painel", async () => {
+    await abrir(390, false);
+    const c = await avaliar<{ x: number; y: number }>(cdp, `(() => { const r = document.querySelector("#cabecalho .pilula-bot").getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+    await avaliar(cdp, `window.__painel = 0; document.addEventListener("click", (e) => { if (e.target.closest('[data-act="alternar-detalhes"]')) window.__painel++; })`);
+    const toque = (type: string, x: number) => cdp.enviar("Input.dispatchTouchEvent", { type, touchPoints: type === "touchEnd" ? [] : [{ x, y: c.y, id: 1 }] });
+    await toque("touchStart", c.x);
+    for (const dx of [-10, -25, -45, -60]) await toque("touchMove", c.x + dx);
+    const esticada = await avaliar<string>(cdp, `document.querySelector("#cabecalho .qd-pil").style.transform`);
+    const [sx, sy] = (esticada.match(/scale\(([\d.]+), ([\d.]+)\)/) ?? []).slice(1).map(Number);
+    expect(sx).toBeGreaterThan(1.05);
+    expect(sy).toBeLessThan(0.98);
+    await toque("touchEnd", c.x - 60);
+    await acabar();
+    expect(await estadoFinal()).toMatchObject({ atual: "quadro" });
+    expect(await avaliar<number>(cdp, `window.__painel`)).toBe(0);
+    // A mola devolve a pílula ao tamanho.
+    await avaliar(cdp, `new Promise((ok) => setTimeout(ok, 1200))`);
+    expect(await avaliar<string>(cdp, `document.querySelector("#cabecalho .qd-pil").style.transform`)).toBe("");
+  }, 30_000);
+
+  it("Arrastar o ícone de Tarefas para a 1ª posição: ela vira a casa (guardada no servidor) e o agente passa a abrir nela", async () => {
+    // Uma montagem só (o __montar do abrir() ligaria outra pílula, sem agente, no mesmo documento).
+    const montar = async (): Promise<void> => {
+      await cdp.enviar("Page.navigate", { url });
+      for (let i = 0; i < 100 && !(await avaliar<boolean>(cdp, "!!window.__montarComOrdem")); i++) await esperar(50);
+      await avaliar(cdp, `window.__montarComOrdem()`);
+    };
+    await abrir(1440, false);
+    await avaliar(cdp, `window.__zerarOrdem()`);
+    await montar();
+    const nome = await avaliar<{ x: number; y: number }>(cdp, `(() => { const r = document.querySelector("#cabecalho .pilula-bot").getBoundingClientRect(); return { x: r.left + 10, y: r.top + r.height / 2 }; })()`);
+    await cdp.enviar("Input.dispatchMouseEvent", { type: "mouseMoved", x: nome.x, y: nome.y });
+    await avaliar(cdp, `new Promise((ok) => setTimeout(ok, 900))`);
+    const ic = (i: number) => avaliar<{ x: number; y: number }>(cdp, `(() => { const r = document.querySelector('#cabecalho .pg-ic[data-pagina="${i}"]').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+    const de = await ic(1);
+    const para = await ic(0);
+    await cdp.enviar("Input.dispatchMouseEvent", { type: "mousePressed", x: de.x, y: de.y, button: "left", clickCount: 1 });
+    for (const t of [0.2, 0.5, 0.8, 1.1]) await cdp.enviar("Input.dispatchMouseEvent", { type: "mouseMoved", x: de.x + (para.x - de.x) * t - 4, y: de.y, button: "left", buttons: 1 });
+    expect(await avaliar<boolean>(cdp, `document.querySelector("#cabecalho .pg-doca").classList.contains("pg-reordenando")`)).toBe(true);
+    await cdp.enviar("Input.dispatchMouseEvent", { type: "mouseReleased", x: para.x - 4, y: de.y, button: "left", clickCount: 1 });
+    await acabar();
+    expect(await avaliar<string[]>(cdp, `window.__salvos`)).toEqual(['a:["tarefas","conversa","app:id-painel","app:id-doc"]']);
+    expect(await avaliar<string[]>(cdp, `[...document.querySelectorAll("#cabecalho .pg-ic")].map((b) => b.dataset.pagina)`)).toEqual(["1", "0", "2", "3"]);
+    expect(await avaliar<string>(cdp, `document.querySelector("#cabecalho .pg-ic.pg-casa").dataset.pagina`)).toBe("1");
+    // O clique do fim do arrasto não trocou de página; o anúncio diz a posição nova.
+    expect(await estadoFinal()).toMatchObject({ atual: "conversa" });
+    expect(await avaliar<string>(cdp, `document.getElementById("pg-anuncio").textContent`)).toBe("Tarefas, página 1 de 4");
+    // Abrir o agente de novo (outra montagem, como ao clicar nele na lista) cai direto em Tarefas, sem animação.
+    await montar();
+    expect(await estadoFinal()).toMatchObject({ atual: "quadro", quadroOculto: false, timelineInert: true });
+    // Alt+→ na aba focada devolve Tarefas à 2ª posição; aí o agente volta a abrir na conversa.
+    await avaliar(cdp, `document.querySelector('#cabecalho .pg-ic[data-pagina="1"]').focus()`);
+    await cdp.enviar("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39, modifiers: 1 });
+    expect(await avaliar<string[]>(cdp, `window.__salvos`)).toEqual(['a:["conversa","tarefas","app:id-painel","app:id-doc"]']);
+    await avaliar(cdp, `window.__zerarOrdem()`);
+  }, 30_000);
+
+  it("NOD-445 revisão 2 · primeira visita na sessão: as páginas chegam depois de a conversa abrir e, com Tarefas em 1º, o bot abre no quadro", async () => {
+    // Uma montagem só (a do __montar ligaria outra pílula no mesmo documento).
+    await abrir(1440, false, true, false, `window.__montarSemPaginas()`);
+    // Antes da resposta: só a Conversa, à vista.
+    expect(await avaliar<{ modo: string; oculto: boolean }>(cdp, `({ modo: window.__quadro.modo(), oculto: document.getElementById("quadro").hidden })`)).toEqual({ modo: "conversa", oculto: true });
+    await avaliar(cdp, `window.__chegaramPaginas(["tarefas", "conversa", "app:id-painel", "app:id-doc"])`);
+    expect(await estadoFinal()).toMatchObject({ atual: "quadro", quadroOculto: false, timelineInert: true, selecionada: "quadro" });
+    // Abrir na casa não é uma troca da pessoa (sem animação, ninguém ouve uma volta).
+    expect(await avaliar<string[]>(cdp, `window.__trocas`)).toEqual([]);
+    // A casa vale uma vez: voltar à conversa e redesenhar (outro frame, a mesma resposta) não puxa de novo para o quadro.
+    await trocar("conversa");
+    await acabar();
+    await avaliar(cdp, `window.__chegaramPaginas(["tarefas", "conversa", "app:id-painel", "app:id-doc"])`);
+    expect(await estadoFinal()).toMatchObject({ atual: "conversa", quadroOculto: true });
+  }, 30_000);
+
+  it("NOD-445 revisão 2 · primeira visita: se a pessoa já saiu do lugar antes de as páginas chegarem (a busca, um anexo), a casa não a arrasta", async () => {
+    await abrir(1440, false, true, false, `window.__montarSemPaginas(); window.__quadro.trocar("conversa")`);
+    await avaliar(cdp, `window.__chegaramPaginas(["tarefas", "conversa", "app:id-painel", "app:id-doc"])`);
+    expect(await estadoFinal()).toMatchObject({ atual: "conversa", quadroOculto: true });
+  }, 30_000);
+
+  it("NOD-445 revisão 2 · 390px: o app à vista é removido em outro aparelho, a tela volta à conversa avisando quem ouve, e o composer não cobre o pé do card", async () => {
+    await abrir(390, true);
+    // O fim da conversa é um card (o Criar / Ajustar do app): o pé dele tem de ficar acima do composer na volta.
+    await avaliar(cdp, `document.getElementById("timeline").innerHTML = '<div class="timeline">' + "<p>conversa</p>".repeat(30) + '<div class="decisao" id="card-fim" style="height:120px">card<footer id="pe-do-card">Criar · Ajustar</footer></div></div>'`);
+    await avaliar(cdp, `window.__quadro.irPara(2)`);
+    await acabar();
+    expect(await estadoFinal()).toMatchObject({ atual: "painel" });
+    await avaliar(cdp, `window.__trocas = []; window.__removerNoOutro("id-painel")`);
+    await avaliar(cdp, `new Promise((ok) => setTimeout(ok, 0))`);
+    await acabar();
+    expect(await avaliar<string[]>(cdp, `window.__trocas`)).toEqual(["conversa:conversa"]);
+    expect(await avaliar<{ atual: number; oculto: boolean; inert: boolean }>(cdp, `({ atual: Number(document.querySelector("#cabecalho .qd-pil").dataset.pagina), oculto: document.getElementById("quadro").hidden, inert: document.getElementById("timeline").inert })`)).toEqual({ atual: 0, oculto: true, inert: false });
+    const m = await avaliar<{ pe: number; composer: number; composerVisivel: boolean }>(cdp, `(() => {
+      const tl = document.getElementById("timeline");
+      tl.scrollTop = tl.scrollHeight;
+      document.getElementById("pe-do-card").scrollIntoView({ block: "end" });
+      const c = document.getElementById("composer");
+      return { pe: document.getElementById("pe-do-card").getBoundingClientRect().bottom, composer: c.getBoundingClientRect().top,
+        composerVisivel: !c.inert && !c.classList.contains("qd-saiu") && getComputedStyle(c).visibility !== "hidden" };
+    })()`);
+    expect(m.composerVisivel).toBe(true);
+    expect(m.pe).toBeLessThanOrEqual(m.composer + 0.5);
+  }, 30_000);
+
+  it("NOD-445 · a dica aparece uma vez só, sob a pílula, com o texto do ponteiro", async () => {
+    await abrir(1440, false);
+    await avaliar(cdp, `localStorage.removeItem("nod.paginas.dica"); window.__regravar()`);
+    await avaliar(cdp, `new Promise((ok) => setTimeout(ok, 50))`);
+    expect(await avaliar<string>(cdp, `document.querySelector(".pg-dica")?.textContent ?? ""`)).toBe("role ou passe o mouse na pílula");
+    await avaliar(cdp, `window.__quadro.irPara(1)`);
+    // Abrir a doca (aqui pelo foco) guarda a marca.
+    await avaliar(cdp, `document.querySelector('${aba("quadro")}').focus()`);
+    expect(await avaliar<string | null>(cdp, `localStorage.getItem("nod.paginas.dica")`)).toBe("1");
   }, 30_000);
 
   it("j7-1 · voltar no meio da ida inverte do ponto onde está, sem salto, e assenta na Conversa", async () => {
     await abrir(1440, false);
     // Pausa a ida em 80 ms (sem depender do relógio da máquina, que sob carga atrasa o primeiro quadro) e mede de lá.
-    await avaliar(cdp, `document.querySelector('#cabecalho [data-modo="quadro"]').click(); for (const a of document.getAnimations()) { a.pause(); a.currentTime = 80; }`);
+    await avaliar(cdp, `document.querySelector('${aba("quadro")}').click(); for (const a of document.getAnimations()) { a.pause(); a.currentTime = 80; }`);
     const antes = await xDaVista();
     expect(antes).toBeGreaterThan(2);
     expect(antes).toBeLessThan(46);
-    await avaliar(cdp, `document.querySelector('#cabecalho [data-modo="conversa"]').click()`);
+    await avaliar(cdp, `document.querySelector('${aba("conversa")}').click()`);
     const depois = await xDaVista();
     // A mesma animação anda para trás a partir dos 80 ms (não recomeça nem segue para a frente). Sem medir o relógio: depois do
     // `ready` a taxa pendente do reverse() já vale, então ela é negativa e o tempo não passou de 80 (a CI da main pegou o
@@ -253,21 +518,25 @@ descrever("NOD-429 no Chrome real", () => {
     const clicar = async (x: number, y: number) => {
       for (const type of ["mousePressed", "mouseReleased"]) await cdp.enviar("Input.dispatchMouseEvent", { type, x, y, button: "left", clickCount: 1 });
     };
-    const aba = await avaliar<{ x: number; y: number }>(cdp, `(() => { const r = document.querySelector('#cabecalho [data-modo="conversa"]').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
-    await clicar(aba.x, aba.y);
-    expect(await avaliar<string>(cdp, `document.activeElement.dataset.modo ?? ""`)).toBe("conversa");
+    // A aba só tem tamanho com a doca aberta: o foco abre (o hover também).
+    await avaliar(cdp, `document.querySelector('${aba("conversa")}').focus()`);
+    await acabar();
+    await avaliar(cdp, `new Promise((ok) => setTimeout(ok, 700))`);
+    const xy = await avaliar<{ x: number; y: number }>(cdp, `(() => { const r = document.querySelector('${aba("conversa")}').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+    await clicar(xy.x, xy.y);
+    expect(await avaliar<string>(cdp, `document.activeElement.dataset.pagina ?? ""`)).toBe("0");
     // Regravar com o foco ainda na aba: o foco vai para a aba nova.
     await avaliar(cdp, `window.__regravar()`);
-    expect(await avaliar<string>(cdp, `document.activeElement.dataset.modo ?? ""`)).toBe("conversa");
-    await clicar(700, 500); // o vazio da conversa: o foco cai no body
+    expect(await avaliar<string>(cdp, `document.activeElement.dataset.pagina ?? ""`)).toBe("0");
+    await clicar(700, 700); // o vazio da conversa: o foco cai no body
     expect(await avaliar<string>(cdp, `document.activeElement.tagName`)).toBe("BODY");
     await avaliar(cdp, `window.__regravar()`);
     expect(await avaliar<string>(cdp, `document.activeElement.tagName`)).toBe("BODY");
   }, 30_000);
 
-  it("j7-1 · teclado: → vai ao Quadro com o foco na aba, ⇧→ não troca, e o foco sobrevive à regravação do cabeçalho", async () => {
+  it("j7-1 · teclado: → vai a Tarefas com o foco na aba, ⇧→ não troca, End vai ao último app e o foco sobrevive à regravação do cabeçalho", async () => {
     await abrir(1440, false);
-    await avaliar(cdp, `document.querySelector('#cabecalho [data-modo="conversa"]').focus()`);
+    await avaliar(cdp, `document.querySelector('${aba("conversa")}').focus()`);
     const tecla = async (modifiers = 0) => {
       await cdp.enviar("Input.dispatchKeyEvent", { type: "keyDown", key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39, modifiers });
       await cdp.enviar("Input.dispatchKeyEvent", { type: "keyUp", key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39, modifiers });
@@ -275,37 +544,41 @@ descrever("NOD-429 no Chrome real", () => {
     await avaliar(cdp, `window.__teclas = []; document.addEventListener("keydown", (e) => window.__teclas.push(e.key + ":" + e.shiftKey), true)`);
     await tecla(8); // ⇧→ (seleção/atalho): não é a seta da aba
     expect(await avaliar<string[]>(cdp, `window.__teclas`)).toEqual(["ArrowRight:true"]);
-    expect(await avaliar<string>(cdp, `document.querySelector(".qd-seg").dataset.atual`)).toBe("conversa");
+    expect(await estadoFinal()).toMatchObject({ atual: "conversa" });
     await tecla();
-    expect(await avaliar<string>(cdp, `document.activeElement.dataset.modo`)).toBe("quadro");
+    expect(await avaliar<string>(cdp, `document.activeElement.dataset.pagina`)).toBe("1");
     await acabar();
     await avaliar(cdp, `window.__regravar()`);
-    expect(await avaliar<string>(cdp, `document.activeElement.dataset.modo`)).toBe("quadro");
-    // O segmento novo nasce no lugar: sem transição do indicador desde a Conversa.
-    expect(await xDoIndicador()).toBeGreaterThan(20);
+    expect(await avaliar<string>(cdp, `document.activeElement.dataset.pagina`)).toBe("1");
+    // A doca nova nasce aberta (o foco está nela), sem mola desde o zero.
+    expect(await avaliar<number>(cdp, `document.querySelector("#cabecalho .pg-doca").getBoundingClientRect().width`)).toBeGreaterThan(100);
     expect(await estadoFinal()).toMatchObject({ atual: "quadro", selecionada: "quadro" });
+    await cdp.enviar("Input.dispatchKeyEvent", { type: "keyDown", key: "End", code: "End", windowsVirtualKeyCode: 35 });
+    await acabar();
+    expect(await estadoFinal()).toMatchObject({ atual: "doc", selecionada: "doc" });
+    expect(await avaliar<string>(cdp, `document.getElementById("pg-anuncio").textContent`)).toBe("página 4 de 4, Doc");
   }, 30_000);
 
   it("flag desligada: a pílula é a de sempre e a troca não mexe no palco (nem no inert de outra camada)", async () => {
     await abrir(1440, false, false);
-    expect(await avaliar<number>(cdp, `document.querySelectorAll("#cabecalho .qd-pil, #cabecalho .qd-seg").length`)).toBe(0);
+    expect(await avaliar<number>(cdp, `document.querySelectorAll("#cabecalho .qd-pil, #cabecalho .pg-doca").length`)).toBe(0);
     await avaliar(cdp, `document.getElementById("timeline").inert = true; window.__quadro.sincronizar({ chave: null, nome: "" })`);
     expect(await avaliar<boolean>(cdp, `document.getElementById("timeline").inert`)).toBe(true);
     expect(await avaliar<boolean>(cdp, `document.getElementById("quadro").hidden`)).toBe(true);
   }, 30_000);
 
   for (const largura of [1440, 390]) {
-    it(`j7-1 · ${largura}px com Reduzir movimento: fade curto, sem transform no conteúdo nem no indicador`, async () => {
+    it(`j7-1 · ${largura}px com Reduzir movimento: fade curto, sem transform no conteúdo nem nos ícones da doca`, async () => {
       await abrir(largura, true);
       const ida = await trocar("quadro");
       expect(ida.ms).toBe(120);
       expect(ida.quadro).toEqual(["-", "-"]);
       expect(ida.timeline).toEqual(["-", "-"]);
       await esperar(40);
-      expect(await avaliar<string>(cdp, `getComputedStyle(document.querySelector(".qd-seg-ind")).transform`)).toBe("none");
+      expect(await avaliar<string>(cdp, `getComputedStyle(document.querySelector("#cabecalho .pg-ic")).transform`)).toBe("none");
       await acabar();
-      // Sem o indicador andando, a aba escolhida precisa de marca própria (fundo).
-      expect(await avaliar<string>(cdp, `getComputedStyle(document.querySelector('.qd-seg [aria-selected="true"]')).backgroundColor`)).not.toBe("rgba(0, 0, 0, 0)");
+      // A aba escolhida tem marca própria (fundo), sem depender de movimento.
+      expect(await avaliar<string>(cdp, `getComputedStyle(document.querySelector('#cabecalho .pg-ic[aria-selected="true"]')).backgroundColor`)).not.toBe("rgba(0, 0, 0, 0)");
       expect(await estadoFinal()).toMatchObject({ atual: "quadro", quadroOculto: false, timelineVis: "hidden" });
       const volta = await trocar("conversa");
       expect(volta.quadro).toEqual(["-", "-"]);

@@ -74,6 +74,8 @@ export const FRAME_POR_EVENTO: Record<KindEvento, TipoFrame> = {
   conta_abrir: "conta.abrir",
   // NOD-442: o frame diz "este quadro mudou" (e quais cards); a web relê o quadro por REST e acende os cards.
   quadro_mudou: "quadro.mudou",
+  // NOD-445: o frame diz "as páginas deste bot mudaram"; a web relê por REST.
+  paginas_mudaram: "paginas.mudaram",
   // Telemetria das linhas (#191): gravada sem outbox, nunca vira frame. A chave existe porque a tabela é total; se uma
   // linha dessas cair no outbox por engano, o frame inofensivo "agente.mudou" só faz a web reler o bot.
   linha_mostrada: "agente.mudou",

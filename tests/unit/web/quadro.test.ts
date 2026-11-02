@@ -9,6 +9,8 @@ import {
 } from "../../../web/lib/quadro.ts";
 import { EXPERIMENTOS, renderGeral, type DadosGeral } from "../../../web/telas/config-geral.ts";
 import { renderCabecalhoConversa } from "../../../web/telas/conversa.ts";
+import { paginasDoDto } from "../../../web/lib/paginas.ts";
+import { cenario } from "../../helpers/paginas-do-bot.ts";
 import { anel, aviso, avatar, barra, card, coluna, confiar, linha, meta as metaDoQuadro, quadro, quadroVazio, rotuloDoCard, segmento } from "../../../web/telas/quadro.ts";
 
 /** NOD-429: o vocabulário, os componentes e o CSS do quadro-agente (a prova no Chrome real é tests/concurrency/quadro-chrome.test.ts). */
@@ -254,13 +256,16 @@ describe("NOD-429 · a pílula da conversa", () => {
     frota: { agentes: [{ id: "a", nome: "Ada", conversaId: C, cor: "blue", forma: "square", ownerId: "p" }] } as never,
   };
 
-  it("sem a flag a pílula é a de sempre; com ela, pílula e segmento numa cápsula, e a presença continua irmã", () => {
+  it("sem a flag a pílula é a de sempre; com ela (NOD-445), pílula e doca de páginas numa cápsula, e a presença continua irmã", () => {
     const sem = renderCabecalhoConversa(e, "a");
     expect(sem).toMatch(/^<button type="button" class="pilula-bot"/);
     expect(sem).not.toContain("qd-");
-    const com = renderCabecalhoConversa(e, "a", { comQuadro: true });
-    expect(com).toMatch(/^<div class="qd-pil"><button type="button" class="pilula-bot"[\s\S]*<\/button><span class="qd-seg" role="tablist" aria-label="Ver Ada como"/);
-    expect(com.replace(/^<div class="qd-pil">|<span class="qd-seg"[\s\S]*$/g, "")).toBe(sem.replace(/<span class="pilula-sub"[\s\S]*$/, ""));
+    // Com uma página só (0 app), a pílula é a de hoje mesmo com a flag.
+    expect(renderCabecalhoConversa(e, "a", { comQuadro: true, paginas: paginasDoDto(cenario(0)) })).toBe(sem);
+    const com = renderCabecalhoConversa(e, "a", { comQuadro: true, paginas: paginasDoDto(cenario(1)) });
+    expect(com).toMatch(/^<div class="qd-pil pg-pil"><button type="button" class="pilula-bot"[\s\S]*<\/button><span class="pg-doca" data-pg-doca><span class="pg-doca-in"><span class="pg-abas" role="tablist" aria-label="Páginas de Ada"/);
+    expect(com).toContain('data-act="pagina" data-pagina="1" data-pg-id="tarefas" data-pos="1" id="pg-aba-1" aria-selected="false" tabindex="-1" aria-label="Tarefas"');
+    expect(com.replace(/^<div class="qd-pil pg-pil">|<span class="pg-doca"[\s\S]*$/g, "")).toBe(sem.replace(/<span class="pilula-sub"[\s\S]*$/, ""));
   });
 });
 

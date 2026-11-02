@@ -44,8 +44,25 @@ describe("NOD-117: atalhoDoTeclado", () => {
     const m = { ...MOD[lugar], shiftKey: true };
     expect(atalhoDoTeclado(tecla("BracketLeft", "{", m), ctx(lugar))).toEqual({ tipo: "vizinho", passo: -1 });
     expect(atalhoDoTeclado(tecla("BracketRight", "}", m), ctx(lugar))).toEqual({ tipo: "vizinho", passo: 1 });
-    // Sem Shift, ⌘[ é voltar do navegador/app: não é nosso.
+  });
+
+  it.each(LUGARES)("sem Shift, ⌘[ é voltar do navegador/app: não é nosso sem páginas na pílula (%s)", (lugar) => {
+    // Experimento desligado, outra tela ou o bot só com a Conversa: o navegador (ou o app) fica com a tecla.
     expect(atalhoDoTeclado(tecla("BracketLeft", "[", MOD[lugar]), ctx(lugar))).toBeNull();
+    expect(atalhoDoTeclado(tecla("BracketRight", "]", MOD[lugar]), ctx(lugar, { paginas: 0 }))).toBeNull();
+    expect(atalhoDoTeclado(tecla("BracketLeft", "[", MOD[lugar]), ctx(lugar, { paginas: 1 }))).toBeNull();
+  });
+
+  it.each(LUGARES)("NOD-445: sem Shift, com mais de uma página, o colchete anda pelas páginas da pílula (%s)", (lugar) => {
+    const c = ctx(lugar, { paginas: 3 });
+    expect(atalhoDoTeclado(tecla("BracketLeft", "[", MOD[lugar]), c)).toEqual({ tipo: "pagina", passo: -1 });
+    expect(atalhoDoTeclado(tecla("BracketRight", "]", MOD[lugar]), c)).toEqual({ tipo: "pagina", passo: 1 });
+    // No ABNT2 o "[" fica na BracketRight: vale o caractere.
+    expect(atalhoDoTeclado(tecla("BracketRight", "[", MOD[lugar]), c)).toEqual({ tipo: "pagina", passo: -1 });
+    // Ditando ou num diálogo, não.
+    expect(atalhoDoTeclado(tecla("BracketLeft", "[", MOD[lugar]), { ...c, ditando: true })).toBeNull();
+    // Com Shift continua sendo o bot vizinho, com ou sem páginas.
+    expect(atalhoDoTeclado(tecla("BracketLeft", "{", { ...MOD[lugar], shiftKey: true }), c)).toEqual({ tipo: "vizinho", passo: -1 });
   });
 
   it("colchete no ABNT2: vale o caractere, não a posição", () => {
@@ -208,22 +225,23 @@ describe("NOD-117: índice e vizinho", () => {
 });
 
 describe("NOD-117: folha e rótulo do +", () => {
-  it("7 linhas, com as teclas do lugar", () => {
+  it("8 linhas, com as teclas do lugar", () => {
     const app = linhasDaFolha("app-mac");
-    expect(app.map((l) => l.titulo)).toEqual(["Nova conversa (novo bot)", "Ir ao bot 1 a 9 da barra", "Bot anterior e próximo", "Folha de atalhos", "Buscar agentes", "Modo dev", "Fechar e voltar"]);
+    expect(app.map((l) => l.titulo)).toEqual(["Nova conversa (novo bot)", "Ir ao bot 1 a 9 da barra", "Bot anterior e próximo", "Página anterior e próxima do bot", "Folha de atalhos", "Buscar agentes", "Modo dev", "Fechar e voltar"]);
     expect(app[0]!.combinacoes).toEqual([["⌘", "N"]]);
-    expect(app[3]!.combinacoes).toEqual([["?"], ["⌘", "/"]]);
-    expect(app[5]!.combinacoes).toEqual([["⌘", "⇧", "D"]]);
+    expect(app[4]!.combinacoes).toEqual([["?"], ["⌘", "/"]]);
+    expect(app[6]!.combinacoes).toEqual([["⌘", "⇧", "D"]]);
     const nav = linhasDaFolha("navegador-mac");
     expect(nav[0]!.combinacoes).toEqual([["⌃", "N"]]);
-    expect(nav[3]!.combinacoes).toEqual([["?"], ["⌃", "/"]]);
-    expect(nav[4]!.combinacoes).toEqual([["⌘", "K"]]);
+    expect(nav[4]!.combinacoes).toEqual([["?"], ["⌃", "/"]]);
+    expect(nav[5]!.combinacoes).toEqual([["⌘", "K"]]);
     const win = linhasDaFolha("outro");
     expect(win[0]!.combinacoes).toEqual([["Alt", "N"]]);
     expect(win[2]!.combinacoes).toEqual([["Alt", "Shift", "["], ["Alt", "Shift", "]"]]);
-    expect(win[3]!.combinacoes).toEqual([["?"], ["Ctrl", "/"]]);
-    expect(win[4]!.combinacoes).toEqual([["Ctrl", "K"]]);
-    expect(win[5]!.combinacoes).toEqual([["Ctrl", "Shift", "D"]]);
+    expect(win[3]!.combinacoes).toEqual([["Alt", "["], ["Alt", "]"]]);
+    expect(win[4]!.combinacoes).toEqual([["?"], ["Ctrl", "/"]]);
+    expect(win[5]!.combinacoes).toEqual([["Ctrl", "K"]]);
+    expect(win[6]!.combinacoes).toEqual([["Ctrl", "Shift", "D"]]);
     for (const l of [...app, ...nav, ...win]) expect(l.falado.length).toBeGreaterThan(0);
     expect(nav[0]!.falado).toBe("Control N");
   });

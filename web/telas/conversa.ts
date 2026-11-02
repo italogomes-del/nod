@@ -1,4 +1,5 @@
 import { renderCardColunas } from "./card-colunas.ts";
+import { renderCardApp } from "./card-app.ts";
 import { renderCardQuadroExclusao } from "./card-quadro-exclusao.ts";
 import { renderAnexosDaMensagem, type Aceita } from "../lib/anexos.ts";
 import { lembrancaDaMidia, linhaRecusas, renderMidiasDoBot } from "../lib/midia.ts";
@@ -43,7 +44,8 @@ import { acaoHumana, idsGemeas, marcaGemeas, marcaRotinaParada, pedidosAncoravei
 import { renderCardPasta } from "./card-pasta.ts";
 import { dadosDoEncolhido, pedidoDoRecibo, renderCartaoEncolhido, turnoDoEncolhido } from "./cartao-encolhido.ts";
 import { renderCardLote } from "./card-lote.ts";
-import { segmento } from "./quadro.ts";
+import { docaDePaginas, type PedirApp } from "./paginas.ts";
+import type { Pagina } from "../lib/paginas.ts";
 import { idsNoPerfil, renderCardPerfil } from "./card-perfil.ts";
 import { renderCardArtefato } from "./card-artefato.ts";
 import { faixaDaMensagem } from "./modo-dev.ts";
@@ -699,6 +701,8 @@ function renderProposta(p: Proposta, estado: Estado, propostas: readonly Propost
   // definido em 2026-10-07 (ADR-082): as mudanças em vários bots que o Nod pediu de uma vez — um card, uma linha por ação.
   if (p.payload.kind === "lote_bots") return renderCardLote(p, p.payload, p.estado === "pendente" && decisaoAbertaDoCard(p, estado) !== null);
   if (p.payload.kind === "colunas_quadro") return renderCardColunas(p, p.payload, p.estado === "pendente" && decisaoAbertaDoCard(p, estado) !== null);
+  // NOD-445: o card Criar / Ajustar do app pedido pela conversa.
+  if (p.payload.kind === "app") return renderCardApp(p, p.payload, p.estado === "pendente" && decisaoAbertaDoCard(p, estado) !== null);
   if (p.payload.kind === "quadro_exclusao") return renderCardQuadroExclusao(p, p.payload, p.estado === "pendente" && decisaoAbertaDoCard(p, estado) !== null);
   return cardDaProposta(p, estado, a);
 }
@@ -1696,7 +1700,7 @@ function comPedidosAncorados(blocos: BlocoDaTimeline[], c: ConversaEstado, estad
  * NOD-429: com `comQuadro` (a flag do teste ligada e o bot é da pessoa), a pílula e o par Conversa | Quadro viram uma
  * cápsula só (`.qd-pil`); a presença (`.pilula-sub`) continua irmã, logo depois.
  */
-export function renderCabecalhoConversa(estado: Estado, agenteId: string, o: { comQuadro?: boolean } = {}): string {
+export function renderCabecalhoConversa(estado: Estado, agenteId: string, o: { comQuadro?: boolean; paginas?: readonly Pagina[]; ordem?: readonly number[]; pedirApp?: PedirApp } = {}): string {
   const a = agenteDe(estado, agenteId);
   const nome = a?.nome ?? "agente";
   const { html, ativa } = presencaDoBot(estado, agenteId);
@@ -1708,7 +1712,10 @@ export function renderCabecalhoConversa(estado: Estado, agenteId: string, o: { c
   // continua com o ponto e a linha de baixo (`.pilula-txt` é `display: contents` e `.pilula-presenca` fica escondida).
   const presencaNaPilula = disponivel ? "" : `<span class="pilula-presenca" aria-hidden="true">${html}</span>`;
   const pilula = `<button type="button" class="pilula-bot" data-act="alternar-detalhes" aria-controls="detalhes" aria-label="${esc(`Painel de ${rotulo}`)}" title="${esc(rotulo)}">${a ? iconeAgente(a, "sm", estadoMascoteNaConversa(estado, a.conversaId)) : ""}<span class="pilula-txt"><span class="pilula-nome">${esc(nome)}</span>${presencaNaPilula}</span><span class="presenca${ativa ? " ativa" : ""}" aria-hidden="true"></span><span class="pilula-seta" aria-hidden="true">›</span>${a?.ownerId === estado.sessao?.pessoaId ? htmlFio(estado.computadorPessoa) : ""}</button>`;
-  return o.comQuadro ? `<div class="qd-pil">${pilula}${segmento({ nome })}</div>${sub}` : `${pilula}${sub}`;
+  // NOD-445: a cápsula leva a doca dos ícones (e o "+ pedir um app") e, com mais de uma página, os pontinhos (a página
+  // atual é marcada depois). Sem as páginas do servidor ainda, a pílula de hoje.
+  const paginas = o.paginas ?? [];
+  return o.comQuadro && (paginas.length > 1 || o.pedirApp) ? `<div class="qd-pil pg-pil">${pilula}${docaDePaginas({ nome, paginas, ordem: o.ordem, pedirApp: o.pedirApp })}</div>${sub}` : `${pilula}${sub}`;
 }
 
 /**

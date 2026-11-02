@@ -108,6 +108,9 @@ import { gravarDecisao, versaoDasDecisoesDaBarra } from "./telas/card-barra.ts";
 import { atualizarBorda, ligarBorda, ligarEtiqueta } from "./lib/borda-barra.ts";
 import { proximoDoSegmentado } from "./lib/linha-config.ts";
 import { conversaAVista, ehChaveDeExperimento, quadroDoEstado } from "./lib/quadro.ts";
+import { caixaComFrase, FRASE_DE_PEDIR_APP, fraseDeEditarApp, fraseDeReconectar, idDoApp, type Pagina } from "./lib/paginas.ts";
+import { aoGuardarOrdem, definirPaginas, ordemDoAgente, paginasDoAgente, paginasDtoDe } from "./lib/ordem-das-paginas.ts";
+import { criarPaginasDoServidor } from "./lib/paginas-do-servidor.ts";
 import { criarQuadroNaTela } from "./lib/quadro-na-tela.ts";
 import { PARAMETRO_TAREFA, botDoLink, responsaveisDaTarefa } from "./lib/quadro-dados.ts";
 import { confiar as confiarHtml } from "./telas/quadro.ts";
@@ -159,6 +162,7 @@ import { abertasPorAgente, perguntasPorAgente, renderChamada, renderIncidentes, 
 import { aparenciaDoComposer } from "./telas/pergunta.ts";
 import { BANDEJA, naoLidaDe, nomeDaConversa, renderNaoLidos, rotuloNaoLidos } from "./telas/nao-lidos.ts";
 import { mostrarAvisoDesfazer } from "./lib/aviso-desfazer.ts";
+import { tentarNoApp } from "./lib/recusa-de-app.ts";
 import { criarRecolherAdiado } from "./lib/recolher-adiado.ts";
 import { atalhoDoCabecalho, avisoDoNome, cabecalhoDoTime, campoDoNome, chaveDoTime, comCabecalho, destinoAoMover, ehCliqueDuplo, fraseDoExcluido, fraseDoMovido, itensDoMenuDoTime, juntarNomes, nomeDoTime, nomeLimpo, NOTA_SEM_TIME, ordemAoSoltarTime, recolhidosParaMigrar, selecionar, textoDaSelecao, textoDoVazio, timesComBots, type AcaoDoTime, type TimeDaBarra } from "./lib/times-da-barra.ts";
 import type { TimeNaLista } from "../src/contracts/time.ts";
@@ -449,6 +453,62 @@ function comQuadro(agenteId: string): boolean {
 }
 
 /**
+ * NOD-445 (ADR-146): as páginas da pílula vêm do servidor (`GET /agentes/:id/paginas`), com a ordem que vale em todos
+ * os aparelhos. Lidas ao abrir a conversa e de novo a cada `paginas.mudaram` (um app chegou, saiu, mudou o retrato ou a
+ * ordem) e `quadro.mudou` (Tarefas liga sozinho com a primeira tarefa). Sem resposta ainda, só a conversa.
+ */
+const tarefasQuePedem = new Set<string>();
+const paginasDaPilula = (agenteId: string): Pagina[] => paginasDoAgente(agenteId, { tarefasPedem: tarefasQuePedem.has(agenteId) });
+// A conversa com o servidor (leituras, PUT da ordem e as respostas fora de ordem) mora em web/lib/paginas-do-servidor.ts.
+const paginasDoServidor = criarPaginasDoServidor({
+  ler: (agenteId) => (api ? api.paginas(agenteId) : Promise.reject(new Error("sem api"))),
+  ordenar: (agenteId, ids) => (api ? api.ordenarPaginas(agenteId, ids) : Promise.reject(new Error("sem api"))),
+  aoLer: (_agenteId, chegaram) => {
+    render();
+    for (const id of chegaram) quadroNaTela.marcarChegada(idDoApp(id));
+  },
+  aoGuardar: () => render(),
+  // Revisão 6 do #626: o PUT da ordem nunca recusa por limite, nome ou Conversa (ordenarPaginas só falha com entrada
+  // inválida, página que não existe ou o experimento desligado): a falha vai para o aviso de erro de sempre.
+  aoFalharOrdem: (_agenteId, e) => mostrarErro(e),
+});
+function lerPaginas(agenteId: string, forcar = false): void {
+  if (api) paginasDoServidor.ler(agenteId, forcar);
+}
+aoGuardarOrdem((agenteId, ids) => {
+  if (api) void paginasDoServidor.guardar(agenteId, ids);
+});
+
+/**
+ * A frase começada na caixa da conversa (padrão da NOD-444): nada é enviado. O rascunho que a pessoa escreveu fica (a
+ * frase vai depois dele); uma frase pré-preenchida antes é trocada pela nova (caixaComFrase).
+ */
+function fraseNaConversa(frase: string): void {
+  quadroNaTela.trocar("conversa");
+  const ta = document.getElementById("composer-texto") as HTMLTextAreaElement | null;
+  if (!ta) return;
+  frasePedeAssuntoNovo();
+  escreverNaCaixa(ta, caixaComFrase(ta.value, frase));
+}
+
+/** Remover pelo menu do ícone: sai na hora, com um Desfazer sutil (restaurar devolve no mesmo lugar). O dado fica. */
+function removerAppDaPilula(p: Pagina): void {
+  const t = telaDeOrigem();
+  if (!api || !p.app || t.tipo !== "conversa") return;
+  const agenteId = t.agenteId;
+  const appId = p.app.id;
+  // QA do #626: a recusa de uma regra (o limite no Desfazer, o nome já em uso, a Conversa) diz a frase dela num aviso
+  // neutro (web/lib/recusa-de-app.ts), não o vermelho genérico do estado_invalido.
+  const avisar = (texto: string) => void mostrarAvisoDesfazer({ texto });
+  void agir(() => tentarNoApp(async () => {
+    const r = await api!.removerApp(agenteId, appId);
+    definirPaginas(r.paginas);
+    render();
+    mostrarAvisoDesfazer({ texto: `${p.nome} saiu da pílula`, aoDesfazer: () => agir(() => tentarNoApp(async () => { const v = await api!.restaurarApp(agenteId, appId); definirPaginas(v.paginas); render(); }, avisar)) });
+  }, avisar));
+}
+
+/**
  * A pílula do cabeçalho diz se o painel está aberto. O HTML dela não depende do painel (revisão do PR 1, 2026-10-16): o
  * atributo é posto aqui depois de cada desenho do cabeçalho, a cada clique que muda as classes sem redesenhar e quando a
  * janela cruza a largura em que o painel passa de lado a sobreposto.
@@ -463,6 +523,21 @@ window.matchMedia("(max-width: 1099px)").addEventListener("change", marcarPainel
 // NOD-429: de volta à Conversa, a conversa passa a estar "na tela" de novo e é lida.
 const quadroNaTela = criarQuadroNaTela(document, {
   aoTrocar: (m) => { if (m === "conversa") { lerConversaDaTela(); render(); } },
+  // A pessoa arrastou um ícone da pílula: a doca é redesenhada na ordem nova.
+  aoMudarOrdem: () => render(),
+  aoTarefasPedirem: (pedem) => {
+    const t = telaDeOrigem();
+    if (t.tipo !== "conversa") return;
+    if (pedem) tarefasQuePedem.add(t.agenteId); else tarefasQuePedem.delete(t.agenteId);
+    render();
+  },
+  paginas: {
+    pedirApp: () => fraseNaConversa(FRASE_DE_PEDIR_APP),
+    editarApp: (p) => fraseNaConversa(fraseDeEditarApp(p.nome)),
+    removerApp: (p) => removerAppDaPilula(p),
+    reconectar: (p) => fraseNaConversa(fraseDeReconectar(p.nome)),
+    lendo: (agenteId) => paginasDoServidor.lendo(agenteId),
+  },
   // NOD-442: o quadro de verdade (busca, frames, a pílula). O avatar é o mascote do próprio nod (HTML que o nod gera).
   dados: {
     api: () => api,
@@ -941,6 +1016,11 @@ function receberFrame(frame: FrameSse): void {
   estado = reduzir(estado, { tipo: "frame", frame, agora: Date.now() });
   if (mudouNaTela(antes, estado)) renderNoQuadro();
   quadroNaTela.aoFrame(frame);
+  // NOD-445: um app chegou, saiu ou mudou (ou a ordem), ou o quadro nasceu: relê as páginas do bot.
+  if (frame.tipo === "paginas.mudaram" || frame.tipo === "quadro.mudou") {
+    const ag = (frame.dados as { agenteId?: unknown }).agenteId;
+    if (typeof ag === "string" && paginasDoServidor.conhece(ag)) lerPaginas(ag, true);
+  }
   if (frame.tipo === "quadro.mudou" && typeof frame.dados["agenteId"] === "string") {
     const ag = frame.dados["agenteId"];
     if (frame.dados["removido"] === true) semQuadroAgora.set(ag, botGerido(ag)?.ultimaMensagem?.em ?? null);
@@ -2048,7 +2128,12 @@ function renderPrincipal(): void {
       corpo = `<div class="timeline tk-timeline">${renderTelaLinha(estado, t)}</div>`;
       break;
     case "conversa":
-      cabecalho = renderCabecalhoConversa(estado, t.agenteId, { comQuadro: comQuadro(t.agenteId) });
+      if (comQuadro(t.agenteId)) lerPaginas(t.agenteId);
+      {
+        const ps = paginasDaPilula(t.agenteId);
+        const dto = paginasDtoDe(t.agenteId);
+        cabecalho = renderCabecalhoConversa(estado, t.agenteId, { comQuadro: comQuadro(t.agenteId), paginas: ps, ordem: ordemDoAgente(t.agenteId, ps), pedirApp: dto ? { cabeMais: dto.cabeMais, limite: dto.limite } : undefined });
+      }
       partes = partesDaTimeline();
       corpo = partes ? CASCA_TIMELINE : renderTimeline(null, estado);
       composer = { chave: `conversa:${t.conversaId}`, html: htmlComposer(placeholderPadrao(), (estado.frota?.agentes ?? []).filter((a) => a.id !== t.agenteId && a.ownerId === estado.sessao?.pessoaId && a.confirmado).map((a) => a.nome), { anexos: aceitaDo(botGerido(t.agenteId)?.harness), comandos: true, aprovacao: true, bot: botGerido(t.agenteId)?.nome }) };
@@ -2078,7 +2163,7 @@ function renderPrincipal(): void {
   document.getElementById("cabecalho")?.classList.toggle("cabecalho-pilula", t.tipo === "conversa");
   marcarPainelNaPilula();
   quadroNaTela.sincronizar(t.tipo === "conversa" && comQuadro(t.agenteId)
-    ? { chave: t.conversaId, nome: botGerido(t.agenteId)?.nome ?? "agente", agenteId: t.agenteId }
+    ? { chave: t.conversaId, nome: botGerido(t.agenteId)?.nome ?? "agente", agenteId: t.agenteId, paginas: paginasDaPilula(t.agenteId) }
     : { chave: null, nome: "", agenteId: t.tipo === "conversa" ? t.agenteId : null });
   regiao("erro", erro);
   const cascaMuda = regiaoMudaria("timeline", corpo);
@@ -5926,7 +6011,9 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     await api!.decidir(el.dataset.id ?? "", { selecionados });
     dispatch({ tipo: "invalidar", quais: ["sua-vez", "rotinas", "frota", "gestao", ...(conversaAtual() ? [`conversa:${conversaAtual()?.conversaId}` as Invalidacao] : [])] });
   }),
-  "decidir-proposta": (el) => agir(async () => void (marcarDecidida(el, el.dataset.id), await api!.decidir(el.dataset.id ?? "", {}), dispatch({ tipo: "invalidar", quais: ["sua-vez", "rotinas", "frota", ...(conversaAtual() ? [`conversa:${conversaAtual()?.conversaId}` as Invalidacao] : [])] }))),
+  // Revisão 6 do #626: o card do app que não vale mais volta 409 com o `motivo`; a frase dele sai no aviso neutro (o card
+  // fechou como recusado e o recibo foi gravado, então a conversa relê do mesmo jeito). Outros cards não mandam motivo.
+  "decidir-proposta": (el) => agir(async () => void (marcarDecidida(el, el.dataset.id), await tentarNoApp(() => api!.decidir(el.dataset.id ?? "", {}).then(() => undefined), (texto) => void mostrarAvisoDesfazer({ texto }), "card"), dispatch({ tipo: "invalidar", quais: ["sua-vez", "rotinas", "frota", ...(conversaAtual() ? [`conversa:${conversaAtual()?.conversaId}` as Invalidacao] : [])] }))),
   // NOD-50: o cartão de credencial. Mostrar troca o tipo do campo sem redesenhar (o valor fica onde está); a fase guarda
   // só o "mostrando", para o próximo frame não esconder o que a pessoa pediu para ver.
   "mostrar-credencial": (el) => {
@@ -6892,7 +6979,7 @@ document.addEventListener("keydown", (ev) => {
   // Primeiro sem olhar o DOM (cada letra digitada passa aqui); só a tecla que pode ser atalho lê o contexto.
   // A repetição (tecla segurada) não age, mas também não vaza: Alt+2 segurado no Chrome do Linux trocaria de aba.
   const teclaSemRepetir = { code: ev.code, key: ev.key, metaKey: ev.metaKey, ctrlKey: ev.ctrlKey, altKey: ev.altKey, shiftKey: ev.shiftKey, isComposing: ev.isComposing, keyCode: ev.keyCode };
-  if (estado.sessao && atalhoDoTeclado(teclaSemRepetir, { lugar: LUGAR_TECLADO, emCampo: false, dialogo: false, celular: false })) {
+  if (estado.sessao && atalhoDoTeclado(teclaSemRepetir, { lugar: LUGAR_TECLADO, emCampo: false, dialogo: false, celular: false, paginas: quadroNaTela.totalDePaginas() })) {
     const alvo = ev.target as HTMLElement;
     const atalho = atalhoDoTeclado(teclaSemRepetir, {
       lugar: LUGAR_TECLADO,
@@ -6903,6 +6990,8 @@ document.addEventListener("keydown", (ev) => {
       ditando: ditado.ativo(),
       // Campo da gaveta (memória, missão e voz…): navegar a zeraria com o texto pela metade.
       editando: !!alvo.closest?.("#detalhes") && !!alvo.closest?.(SELETOR_CAMPO),
+      // NOD-445: ⌘[ só é nosso com a pílula de mais de uma página; senão é o voltar do app/navegador.
+      paginas: quadroNaTela.totalDePaginas(),
     });
     // Atalho reconhecido sempre para aqui: ⌘5 com 3 bots não faz nada (critério 2), em vez de cair no navegador.
     if (atalho) { ev.preventDefault(); if (!ev.repeat) void executarAtalho(atalho); return; }
@@ -8200,6 +8289,8 @@ function executarAtalho(a: AcaoAtalho): boolean {
     requestAnimationFrame(() => document.getElementById("busca-destinatario")?.focus());
     return true;
   }
+  // NOD-445: ⌘[ ⌘] andam pelas páginas da pílula; só chegam aqui com mais de uma página (atalhoDoTeclado, `paginas`).
+  if (a.tipo === "pagina") return quadroNaTela.andar(a.passo);
   const bot = botaoDoBotNoAtalho(a);
   if (!bot) return false;
   const nome = bot.querySelector("b")?.textContent ?? "";

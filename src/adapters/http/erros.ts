@@ -44,6 +44,7 @@ export const MENSAGEM_FALHA_INTERNA = "Algo deu errado do nosso lado. Tente de n
 export interface ErroDto {
   codigo: string;
   mensagem: string;
+  motivo?: string;
   correlation_id?: string | null;
 }
 
@@ -85,11 +86,15 @@ function logarRecusa(err: ErroDeDominio, status: number, origem: OrigemRequisica
   });
 }
 
-export function responderErro(res: ServerResponse, err: unknown, origem?: OrigemRequisicao): void {
+/**
+ * `motivo` (QA do #626): só quem chama com um valor de lista fechada o passa (ex.: MOTIVOS_RECUSA_APP); vai ao corpo ao lado
+ * do código e da frase fixa, para a tela dizer a frase dele. Nunca o `cause`.
+ */
+export function responderErro(res: ServerResponse, err: unknown, origem?: OrigemRequisicao, motivo?: string): void {
   if (ehErroDeDominio(err)) {
     const { status, mensagem } = TABELA_ERROS[err.codigo];
     logarRecusa(err, status, origem);
-    const corpo: ErroDto = { codigo: err.codigo, mensagem };
+    const corpo: ErroDto = { codigo: err.codigo, mensagem, ...(motivo ? { motivo } : {}) };
     json(res, status, corpo);
     return;
   }

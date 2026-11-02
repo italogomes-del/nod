@@ -3856,6 +3856,22 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       progresso: async () => null,
       finalizar: async () => null,
     },
+    // NOD-445 (0145): os apps do bot são do Postgres (tests/integration/apps-do-bot.test.ts); aqui, nenhum app.
+    appsDoBot: {
+      travar: async () => {},
+      doAgente: async () => [],
+      buscar: async () => null,
+      criar: soNoPostgres,
+      salvar: soNoPostgres,
+      remover: soNoPostgres,
+      restaurar: soNoPostgres,
+      nomeTomado: async () => false,
+      removidos: async () => [],
+      removidoPorNome: async () => null,
+      apagarRemovidosAntigos: soNoPostgres,
+      ordem: async () => null,
+      gravarOrdem: soNoPostgres,
+    },
     // NOD-442 (0133): o quadro-agente é do Postgres (tests/integration/quadro*.test.ts); aqui, nenhum quadro.
     quadros: {
       buscar: async () => null,

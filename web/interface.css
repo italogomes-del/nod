@@ -1285,6 +1285,9 @@ nod-mascote[data-aviso="pergunta"], nod-mascote[data-aviso="nao-lido"] { --nod-a
   max-width: calc(100vw - 32px); padding: 8px 8px 8px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow-pop);
   font-size: 13px; color: var(--ink); white-space: nowrap; animation: nl-sobe .22s cubic-bezier(.2,.8,.2,1) both; }
 .nl-aviso > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* Só a frase, sem Desfazer (a recusa das páginas, revisão 6 do PR 626): quebra a linha em vez de cortar com reticências. */
+.nl-aviso.nl-aviso-frase { width: max-content; max-width: min(460px, calc(100vw - 32px)); padding: 10px 14px; white-space: normal; line-height: 18px; }
+.nl-aviso.nl-aviso-frase > span { overflow: visible; text-overflow: clip; }
 @keyframes nl-sobe { from { opacity: 0; transform: translateX(-50%) translateY(8px); } }
 .nl-desfazer { flex: none; height: 28px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
 .nl-aviso .nl-desfazer:hover { background: color-mix(in srgb, var(--ink) 6%, transparent); }

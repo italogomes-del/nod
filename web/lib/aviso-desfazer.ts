@@ -7,6 +7,11 @@ import { esc } from "./render.ts";
  */
 
 export const DURACAO_AVISO_MS = 6000;
+/**
+ * Definido em 2026-11-02 (revisão 6 do #626): o aviso só com a frase (a recusa das páginas, ~130 caracteres) quebra a linha
+ * e fica 12 s, o dobro do com Desfazer: a 390 px a frase ocupa até três linhas e precisa ser lida inteira.
+ */
+export const DURACAO_AVISO_FRASE_MS = 12_000;
 
 let atual: { el: HTMLElement; timer: ReturnType<typeof setTimeout> } | null = null;
 
@@ -17,20 +22,25 @@ export function fecharAvisoDesfazer(): void {
   atual = null;
 }
 
-export function mostrarAvisoDesfazer(o: { texto: string; aoDesfazer: () => void | Promise<void>; ms?: number }): HTMLElement {
+/**
+ * Sem `aoDesfazer`, o mesmo aviso neutro só com a frase (QA do #626: a recusa das páginas, sem o vermelho do erro); essa
+ * variante (`nl-aviso-frase`) quebra a linha e dura DURACAO_AVISO_FRASE_MS (revisão 6).
+ */
+export function mostrarAvisoDesfazer(o: { texto: string; aoDesfazer?: () => void | Promise<void>; ms?: number }): HTMLElement {
   fecharAvisoDesfazer();
   const el = document.createElement("div");
-  el.className = "nl-aviso";
+  const aoDesfazer = o.aoDesfazer;
+  el.className = aoDesfazer ? "nl-aviso" : "nl-aviso nl-aviso-frase";
   el.setAttribute("role", "status");
-  el.innerHTML = `<span>${esc(o.texto)}</span><button type="button" class="nl-desfazer">Desfazer</button>`;
-  el.querySelector("button")!.addEventListener("click", () => {
+  el.innerHTML = `<span>${esc(o.texto)}</span>${aoDesfazer ? '<button type="button" class="nl-desfazer">Desfazer</button>' : ""}`;
+  el.querySelector("button")?.addEventListener("click", () => {
     fecharAvisoDesfazer();
-    void o.aoDesfazer();
+    if (aoDesfazer) void aoDesfazer();
   });
   document.body.appendChild(el);
   const timer = setTimeout(() => {
     if (atual?.el === el) fecharAvisoDesfazer();
-  }, o.ms ?? DURACAO_AVISO_MS);
+  }, o.ms ?? (aoDesfazer ? DURACAO_AVISO_MS : DURACAO_AVISO_FRASE_MS));
   atual = { el, timer };
   return el;
 }

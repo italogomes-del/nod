@@ -6,6 +6,7 @@ import { estadoInicial, reduzir, type ConversaEstado, type Estado } from "../../
 import { renderMensagem, renderMensagensAgrupadas, renderTimeline } from "../../../web/telas/conversa.ts";
 import { renderDecisoesDaConversa, renderSuaVez, rotuloVencido } from "../../../web/telas/sua-vez.ts";
 import { REGRA_JANELA_SEGUINTE } from "../../../src/use-cases/disparar-rotina.ts";
+import { REGRA_APP_SUBSTITUIDO } from "../../../src/use-cases/apps-do-bot.ts";
 
 const item: SuaVezDto["itens"][number] = {
   decisao: { tenantId: "t", id: "d", ownerId: "p", decisorId: "p", agenteId: "a", conversaId: "c", turnoId: null, tipo: "acesso", estado: "pendente", prazoDecisaoEm: "2026-09-18T00:00:00Z", prazoExecucaoEm: null, frase: "Ler Slack <script>alert(1)</script>", desfecho: null, vistaEm: null, criadoEm: "2026-09-17T00:00:00Z", fioId: null },
@@ -473,6 +474,7 @@ describe("fila honesta: vencidos recolhidos, ×N, prazo por tipo e rótulos em p
     expect(rotulo({ tipo: "decidida_por_regra", regra: "regra:gemea_resolvida", regraVersao: 1, em })).toBe("resolvido junto do pedido igual");
     expect(rotulo({ tipo: "decidida_por_regra", regra: "regra:janela_seguinte", regraVersao: 1, em })).toBe("fechada: a janela seguinte já rodou");
     expect(rotulo({ tipo: "decidida_por_regra", regra: "regra:acesso_ja_concedido", regraVersao: 1, em })).toBe("fechado: o acesso já tinha sido dado");
+    expect(rotulo({ tipo: "decidida_por_regra", regra: REGRA_APP_SUBSTITUIDO, regraVersao: 1, em })).toBe("fechado: um card mais novo do mesmo app tomou o lugar");
     // re-QA do #335 (73204844): a regra que o agendador grava é a mesma chave do rótulo — com hífen caía no genérico.
     expect(rotulo({ tipo: "decidida_por_regra", regra: REGRA_JANELA_SEGUINTE, regraVersao: 1, em })).toBe("fechada: a janela seguinte já rodou");
     expect(rotulo({ tipo: "decidida_por_regra", regra: "regra:uma_nova", regraVersao: 1, em })).toBe("fechado automaticamente");

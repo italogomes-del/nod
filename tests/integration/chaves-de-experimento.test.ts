@@ -69,7 +69,7 @@ describeIntegracao("chaves de experimento (ADR-111)", () => {
     });
   });
 
-  it("NOD-429/NOD-442: o Quadro ligado só acrescenta gerir_quadro ao catálogo — o resto do prompt sai igual e o Raio-X não o grava", async () => {
+  it("NOD-429/NOD-442/NOD-445: o Quadro ligado só acrescenta gerir_quadro e gerir_apps ao catálogo — o resto do prompt sai igual e o Raio-X não o grava", async () => {
     const prompt = async (quadro: boolean) => withRollback(escopo, async (trx) => {
       // Nome fixo: o padrão da fábrica leva 8 caracteres do id, e o prompt começa com o nome do bot.
       const m = await montar(trx, "Bot do quadro");
@@ -80,8 +80,10 @@ describeIntegracao("chaves de experimento (ADR-111)", () => {
     });
     const [desligado, ligado] = [await prompt(false), await prompt(true)];
     // NOD-442 (ADR-135): com o experimento ligado, qualquer bot mexe no quadro pelo chat; desligado, a ferramenta some.
+    // NOD-445 (ADR-146): as páginas do bot vêm no mesmo experimento, com gerir_apps.
     expect(desligado.texto).not.toContain("mcp__nod__gerir_quadro");
-    expect(ligado.texto.replace(" mcp__nod__gerir_quadro,", "")).toBe(desligado.texto);
+    expect(desligado.texto).not.toContain("mcp__nod__gerir_apps");
+    expect(ligado.texto.replace(" mcp__nod__gerir_apps,", "").replace(" mcp__nod__gerir_quadro,", "")).toBe(desligado.texto);
     expect(ligado.composicao).toEqual({ calibracao: false, memoriaLonga: false, whatsapp: false, anexosAnteriores: 0 });
   });
 

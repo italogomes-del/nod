@@ -10,7 +10,7 @@
  *   onde ela está (sem salto).
  * - O modo é por conversa e só em memória: trocar de conversa (ou sair dela) volta para Conversa, sem animação.
  */
-import { direcaoDaTroca, ehModo, modoPelaTecla, movimentoDaTroca, type ModoDaConversa } from "./quadro.ts";
+import { direcaoDaTroca, ehModo, movimentoDaTroca, type ModoDaConversa } from "./quadro.ts";
 import { comColunas, FAIXA_DO_PRAZO, fraseDoErroDeColuna, nomeRepetido, passoDeMover, pedeConfirmacao, porqueNaoRecebeCard, porqueNaoRemove, prazoEmMin, prazoLegivelMin, reciboDaResposta, reciboDeMover, saidaComErroDesiste, seletorDoFocoDaColuna, soltarEm, type EdicaoDeColuna, type Lado, type UnidadeDePrazo } from "./colunas.ts";
 import { ErroApi } from "./erro-api.ts";
 import { anunciarEm } from "./posicao-da-lista.ts";
@@ -21,6 +21,10 @@ import { RESP_VOCE, acesos, fraseDoErroDoMover, reciboDaNovaTarefa, codigoNaUrl,
 import { quadroVazio, type Aviso, type Filtro, type Html } from "../telas/quadro.ts";
 import { decidirSoltura, fraseDaTrava, RECUSA_MS, relogioDaRecusa, type RelogioDaRecusa } from "./freios.ts";
 import { faixaDoQuadro, pilulaDoQuadro, quadroCarregando, quadroComErro, quadroDaMeta, semQuadro, tarefaAberta, type AgenteDoQuadro, type TrocaDaFaixa } from "../telas/quadro-real.ts";
+import { anuncioDaOrdem, anuncioDaPagina, CONVERSA, ehForma, indicePeloId, moverNaOrdem, paginaPelaTecla, passoDaTeclaDeMover, presa, TAREFAS, type FormaDasTarefas, type Pagina } from "./paginas.ts";
+import { guardarOrdem, ordemDoAgente, paginasDtoDe } from "./ordem-das-paginas.ts";
+import { formaDasTarefas, menuDaPagina, paginaDoApp } from "../telas/paginas.ts";
+import { ligarGestosDaPilula } from "./paginas-na-tela.ts";
 import { criarComentariosNaTela, type ApiDosComentarios } from "./comentarios-na-tela.ts";
 import { criarTrabalhosDaTarefa, type ApiDosTrabalhos } from "./trabalhos-da-tarefa.ts";
 
@@ -89,7 +93,17 @@ export interface QuadroNaTela {
    * Depois de cada desenho: `chave` é a conversa à vista com o quadro liberado, ou null (outra tela, flag desligada).
    * `agenteId` com `chave` null: a conversa desse bot está na tela, mas ele não tem quadro.
    */
-  sincronizar(o: { chave: string | null; nome: string; agenteId?: string | null }): void;
+  sincronizar(o: { chave: string | null; nome: string; agenteId?: string | null; paginas?: readonly Pagina[] }): void;
+  /** NOD-445: ir a uma página da pílula (índice de dentro: 0 = Conversa, depois Tarefas, se houver, e os apps). */
+  irPara(i: number, o?: { foco?: boolean }): void;
+  /** ⌘[ ⌘]: a página anterior/seguinte na ordem da pílula. */
+  andar(passo: -1 | 1): boolean;
+  totalDePaginas(): number;
+  /** Abre a página pelo id ("tarefas", "app:<id>"): o app que acabou de chegar. */
+  abrirPagina(id: string): void;
+  /** O app que acabou de chegar: o ícone e o pontinho entram com uma animação curta. */
+  marcarChegada(id: string): void;
+  pagina(): number;
   /** NOD-442: cada frame do SSE. `quadro.mudou` relê o quadro (os cards que mudaram acendem); a fala do bot sobe na faixa. */
   aoFrame(frame: { tipo: string; dados: Record<string, unknown> }): void;
   trocar(para: ModoDaConversa, o?: { foco?: boolean }): void;
@@ -105,11 +119,34 @@ export interface QuadroNaTela {
   abrirTarefa(agenteId: string, tarefaId: string): void;
 }
 
-export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; aoTrocar?: (m: ModoDaConversa) => void; dados?: DadosDoQuadro } = {}): QuadroNaTela {
+/** NOD-445: o que a pílula de páginas pede ao main (a conversa, a API dos apps). */
+export interface AcoesDasPaginas {
+  /** "+ pedir um app": a caixa da conversa com a frase começada. */
+  pedirApp(): void;
+  /** O menu do ícone: "Editar pela conversa". */
+  editarApp(p: Pagina): void;
+  /** O menu do ícone: "Remover da pílula" (o main mostra o Desfazer). */
+  removerApp(p: Pagina): void;
+  /** O erro de fonte: "Pedir acesso de novo". */
+  reconectar(p: Pagina): void;
+  /** O GET das páginas do bot está no ar: um app ainda vazio mostra o esqueleto, não o "Nada aqui ainda". */
+  lendo?(agenteId: string): boolean;
+}
+
+export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; aoTrocar?: (m: ModoDaConversa) => void; aoMudarOrdem?: () => void; aoTarefasPedirem?: (pedem: boolean) => void; dados?: DadosDoQuadro; paginas?: AcoesDasPaginas } = {}): QuadroNaTela {
   const reduzido = o.reduzido ?? (() => doc.defaultView?.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false);
   let chave: string | null = null;
   let nome = "";
   let modo: ModoDaConversa = "conversa";
+  /**
+   * NOD-445: as páginas da pílula. A 0 é a conversa e as outras moram na vista `#quadro`, então `modo` continua valendo
+   * para o resto do main: "conversa" na página 0, "quadro" em qualquer outra.
+   */
+  let paginas: readonly Pagina[] = [CONVERSA, TAREFAS];
+  let pagina = 0;
+  /** A última página da vista (Tarefas ou um app): o `trocar("quadro")` de fora volta a ela. */
+  let ultimaDaVista = 1;
+  let forma: FormaDasTarefas = "quadro";
   let filtro: Filtro = "todos";
   /** As colunas que a pessoa abriu ou recolheu, ao contrário do padrão. */
   let alternadas = new Set<string>();
@@ -122,7 +159,7 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
    * A aba que tem o foco: se o render regravar o cabeçalho, o nó dela sai do DOM e o foco cai no body; aí ele vai para a aba
    * nova do mesmo modo. Zera quando a pessoa leva o foco para outro lugar (clique, toque, Tab), para não puxá-lo de volta.
    */
-  let abaFocada: { el: HTMLElement; modo: ModoDaConversa } | null = null;
+  let abaFocada: { el: HTMLElement; pagina: number } | null = null;
 
   const vista = (): HTMLElement | null => doc.getElementById("quadro");
   const conversa = (): HTMLElement[] => LADO_DA_CONVERSA.map((id) => doc.getElementById(id)).filter((e): e is HTMLElement => !!e);
@@ -130,6 +167,12 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
   /* ---------- NOD-442: o quadro de verdade ---------- */
   const dd = o.dados;
   let agenteId: string | null = null;
+  /**
+   * NOD-445 (revisão 2, achado 1): a casa (1ª posição da pílula) ainda não foi decidida porque as páginas do servidor não
+   * tinham chegado quando a conversa abriu (a primeira visita ao bot na sessão). Liga na troca de conversa sem o DTO e é
+   * consumida no primeiro `sincronizar` com o DTO, se a pessoa não trocou de página no meio (`trocar`/`irPara` desligam).
+   */
+  let homePendente = false;
   let q: QuadroDto | null = null;
   let carga: "nada" | "carregando" | "ok" | "erro" = "nada";
   let aberta: string | null = null;
@@ -148,6 +191,7 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
   let editandoMeta = false;
   /** NOD-448: o pedaço da edição das colunas que está aberto (menu, renomear, remover, coluna nova, a folha do celular). */
   let edicao: EdicaoDeColuna | null = null;
+  let tarefasPedem = false;
   /**
    * NOD-419: a recusa da trava no card que a pessoa soltou. Some sozinha (sem a pessoa no card), no Esc ou no próximo
    * gesto; ao sumir com o foco nela, o foco volta ao card.
@@ -185,13 +229,15 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     if (aberta) dd?.naUrl?.(null);
     histTarefa = null; quadros = null; leituraHist++;
     agenteId = null; q = null; carga = "nada"; aberta = null; acesas = new Set(); faixa = { tipo: "nada" }; loteAntes = null;
-    historico = []; histAberto = false; leitura++; leituraConversa++; dica = []; editandoMeta = false; edicao = null; soltarNaAberta = null; coms.fechar(); trabs.fechar();
+    historico = []; histAberto = false; tarefasPedem = false; leitura++; leituraConversa++; dica = []; editandoMeta = false; edicao = null; soltarNaAberta = null; coms.fechar(); trabs.fechar();
     if (timerReler) clearTimeout(timerReler);
     if (timerRecolher) clearTimeout(timerRecolher);
     timerReler = timerRecolher = null;
   }
 
   function conteudoHtml(): Html | string {
+    const p = paginas[pagina];
+    if (p?.app) return paginaDoApp(p, nome, { lendo: agenteId !== null && (o.paginas?.lendo?.(agenteId) ?? false) });
     if (!dd) return quadroVazio({ nome, filtro, alternadas });
     if (carga === "nada" || carga === "carregando") return quadroCarregando();
     if (carga === "erro") return quadroComErro();
@@ -214,7 +260,9 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
   function desenharVista(): void {
     const v = vista();
     if (!v) return;
-    if (!dd) { v.innerHTML = quadroVazio({ nome, filtro, alternadas }); return; }
+    v.dataset["forma"] = forma;
+    v.dataset["pagina"] = paginas[pagina]?.id ?? "";
+    if (!dd) { v.innerHTML = conteudoHtml(); return; }
     let conteudo = v.querySelector<HTMLElement>(":scope > .qd-conteudo");
     if (!conteudo) {
       // Merge da main (#623): a região do quadro (rodapé) vem primeiro; a do trabalho (NOD-418) depois, as duas fora da .qd-conteudo.
@@ -229,6 +277,8 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     const focoId = ativo instanceof HTMLElement && conteudo.contains(ativo) && ativo.id ? ativo.id : null;
     const focoColuna = ativo instanceof HTMLElement && conteudo.contains(ativo) && !ativo.id ? seletorDoFocoDaColuna(ativo) : null;
     conteudo.innerHTML = conteudoHtml();
+    // NOD-445: Lista | Quadro em Tarefas, na barra dos filtros (só com o quadro de verdade e nenhuma tarefa aberta).
+    conteudo.querySelector(".qd-barra-q .qd-barra-dir")?.insertAdjacentHTML("afterbegin", formaDasTarefas(forma));
     if (focoColuna) conteudo.querySelector<HTMLElement>(focoColuna)?.focus();
     for (const [id, valor] of rascunhos) { const c = doc.getElementById(id); if (c instanceof HTMLTextAreaElement || c instanceof HTMLInputElement) c.value = valor; }
     if (focoId) doc.getElementById(focoId)?.focus();
@@ -277,6 +327,9 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
 
   function aplicarQuadro(novo: QuadroDto | null, extra: readonly string[] = []): void {
     if (novo) novo = comColunas(novo);
+    // NOD-445: Tarefas acende o laranja na pílula quando alguma tarefa está em "Precisa de você".
+    const pedem = !!novo?.tarefas.some((t) => t.status === "voce");
+    if (pedem !== tarefasPedem) { tarefasPedem = pedem; o.aoTarefasPedirem?.(pedem); }
     const novas = acesos(q, novo, [...dica, ...extra]);
     // Uma releitura sem mudança (a do frame e a da resposta chegam juntas) não apaga o brilho que a anterior acendeu.
     if (novas.size || !q || !novo || q.id !== novo.id) acesas = novas;
@@ -885,8 +938,14 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     if (!pedidoDoChat || chave === null || agenteId !== pedidoDoChat.agenteId) return;
     const { tarefaId } = pedidoDoChat;
     pedidoDoChat = null;
+    // NOD-445 (merge com o #627): a tarefa abre na página Tarefas da pílula, não na última página da vista (um app).
+    const t = paginaDasTarefas();
+    if (modo !== "quadro") { marcarAberta(tarefaId); trocar("quadro", { pagina: t }); return; }
+    // O irPara entre páginas da vista fecha a tarefa aberta: a pedida é marcada depois.
+    if (pagina !== t) irPara(t);
     marcarAberta(tarefaId);
-    if (modo === "quadro") { desenharVista(); void lerQuadro(); } else trocar("quadro");
+    desenharVista();
+    void lerQuadro();
   }
 
   /** A tarefa aberta passa a ser `id` (o histórico, a lista do "Mover para…" e os comentários dela são lidos). */
@@ -959,6 +1018,7 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
   }
 
   function marcar(): void {
+    if (pagina > 0) ultimaDaVista = pagina;
     const seg = doc.querySelector<HTMLElement>("#cabecalho .qd-seg");
     if (seg) {
       // Segmento recém-desenhado (cabeçalho regravado): nó novo não tem estilo anterior, então o indicador nasce no lugar.
@@ -969,9 +1029,86 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
         b.tabIndex = s ? 0 : -1;
       }
     }
+    // NOD-445: a doca e os pontinhos (nós novos a cada desenho do cabeçalho; marcar de novo não anima nada).
+    const pil = doc.querySelector<HTMLElement>("#cabecalho .qd-pil");
+    if (pil) pil.dataset["pagina"] = String(pagina);
+    for (const b of doc.querySelectorAll<HTMLElement>("#cabecalho .pg-ic")) {
+      const s = Number(b.dataset["pagina"]) === pagina;
+      if (b.getAttribute("aria-selected") !== String(s)) b.setAttribute("aria-selected", String(s));
+      b.tabIndex = s ? 0 : -1;
+    }
+    for (const p of doc.querySelectorAll<HTMLElement>("#cabecalho .pg-pt")) p.classList.toggle("pg-pt-atual", Number(p.dataset["pagina"]) === pagina);
+    if (chegou && Date.now() > chegou.ate) chegou = null;
+    for (const e of doc.querySelectorAll<HTMLElement>("#cabecalho .pg-ic, #cabecalho .pg-pt")) e.classList.toggle("pg-chegou", !!chegou && e.dataset["pgId"] === chegou.id);
     doc.querySelector(".stage")?.classList.toggle("qd-no-quadro", modo === "quadro");
     const ativo = doc.activeElement;
-    if (abaFocada && !abaFocada.el.isConnected && (!ativo || ativo === doc.body)) focarAba(abaFocada.modo);
+    if (abaFocada && !abaFocada.el.isConnected && (!ativo || ativo === doc.body)) focarPagina(abaFocada.pagina);
+  }
+
+  /** O leitor de tela ouve a troca de página ("página 2 de 3, Tarefas"); a região mora no body, fora do cabeçalho regravado. */
+  function anunciarPagina(texto?: string): void {
+    if (paginas.length < 2) return;
+    let r = doc.getElementById("pg-anuncio");
+    if (!r) {
+      r = doc.createElement("div");
+      r.id = "pg-anuncio";
+      r.className = "sr-only";
+      r.setAttribute("aria-live", "polite");
+      doc.body.append(r);
+    }
+    r.textContent = texto ?? anuncioDaPagina(posDe(pagina), paginas.length, paginas[pagina]?.nome ?? "");
+  }
+
+  /** A página de dentro é Tarefas (o quadro de verdade)? Sem Tarefas, a vista é só dos apps. */
+  const ehTarefas = (i: number): boolean => { const p = paginas[i]; return !p || p.id === TAREFAS.id; };
+
+  /* A ordem da pílula (por agente): a pílula mostra e anda nela; a 1ª posição é a casa, onde o agente abre. */
+  const ordem = (): number[] => ordemDoAgente(agenteId, paginas);
+  const posDe = (i: number): number => Math.max(0, ordem().indexOf(i));
+  const naPos = (pos: number): number => ordem()[presa(pos, paginas.length)] ?? 0;
+  /** Leva a página da posição `de` para `para` e guarda; a doca é redesenhada pelo main (`aoMudarOrdem`). */
+  function moverPagina(de: number, para: number, op: { foco?: boolean } = {}): void {
+    if (!agenteId || chave === null || paginas.length < 2) return;
+    const atual = ordem();
+    const i = atual[de];
+    if (i === undefined) return;
+    const nova = moverNaOrdem(atual, de, para);
+    if (nova.join() === atual.join()) return;
+    guardarOrdem(agenteId, paginas, nova);
+    o.aoMudarOrdem?.();
+    marcar();
+    anunciarPagina(anuncioDaOrdem(paginas[i]?.nome ?? "", nova.indexOf(i), nova.length));
+    if (op.foco) focarPagina(i);
+  }
+
+  /**
+   * NOD-445: ir a uma página. Entre a conversa e uma página da vista é a troca de sempre (`trocar`); entre duas páginas da
+   * vista, só o conteúdo desliza (a pílula de baixo e a faixa ficam).
+   */
+  function irPara(i: number, op: { foco?: boolean } = {}): void {
+    if (chave === null || paginas.length < 2) return;
+    homePendente = false;
+    const alvo = presa(i, paginas.length);
+    if (alvo === pagina) { if (op.foco) focarPagina(alvo); return; }
+    const de = pagina;
+    if (alvo === 0 || de === 0 || animacoes.length) {
+      trocar(alvo === 0 ? "conversa" : "quadro", { ...op, pagina: alvo });
+      return;
+    }
+    pagina = alvo;
+    aberta = null;
+    edicao = null;
+    desenharVista();
+    if (ehTarefas(alvo) && dd) void lerQuadro();
+    marcar();
+    anunciarPagina();
+    const c = vista()?.querySelector<HTMLElement>(":scope > .qd-conteudo") ?? vista()?.firstElementChild;
+    if (c instanceof HTMLElement && typeof c.animate === "function") {
+      const mv = movimentoDaTroca(alvo > de ? "ida" : "volta", reduzido());
+      c.animate(mv.entra, { duration: mv.ms, easing: mv.curva });
+    }
+    vista()?.scrollTo?.({ top: 0 });
+    if (op.foco) focarPagina(alvo);
   }
 
   function cancelar(): void {
@@ -990,28 +1127,43 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     marcar();
   }
 
-  function trocar(para: ModoDaConversa, op: { foco?: boolean } = {}): void {
+  function trocar(para: ModoDaConversa, op: { foco?: boolean; pagina?: number } = {}): void {
+    homePendente = false;
     const direcao = chave === null ? null : direcaoDaTroca(modo, para);
-    if (!direcao) { if (op.foco) focarAba(para); return; }
+    // A página que vai ficar: a pedida, ou (pelo `trocar("quadro")` de fora) a última da vista, Tarefas na primeira vez.
+    const alvo = para === "conversa" ? 0 : presa(op.pagina ?? (pagina || ultimaDaVista), Math.max(2, paginas.length));
+    const focar = (): void => { if (op.foco) focarPagina(pagina); };
+    if (!direcao) {
+      if (para === "quadro" && alvo !== pagina && chave !== null) { irPara(alvo, op); return; }
+      if (op.foco) focarPagina(pagina);
+      return;
+    }
     if (animacoes.length) {
       // Volta no meio: a mesma animação anda para trás, do ponto onde está; quem saía passa a entrar.
       modo = para;
+      const outra = alvo !== pagina && para === "quadro";
+      pagina = alvo;
+      if (outra) desenharVista();
       marcar();
+      anunciarPagina();
       o.aoTrocar?.(para);
       [saindo, entrando] = [entrando, saindo];
       for (const e of saindo) e.inert = true;
       for (const e of entrando) e.inert = false;
       for (const a of animacoes) a.reverse();
-      if (op.foco) focarAba(para);
+      focar();
       return;
     }
     cancelar();
     const v = vista();
     if (!v) return;
-    if (para === "quadro" && !v.firstElementChild) desenharVista();
-    if (para === "quadro" && dd) void lerQuadro();
+    const outraPagina = para === "quadro" && alvo !== pagina;
+    pagina = alvo;
+    if (para === "quadro" && (!v.firstElementChild || outraPagina || v.dataset["pagina"] !== paginas[pagina]?.id)) desenharVista();
+    if (para === "quadro" && dd && ehTarefas(pagina)) void lerQuadro();
     modo = para;
     marcar();
+    anunciarPagina();
     // Depois de `modo = para`: quem ouve (o main, que marca a conversa como lida na volta) já vê o modo novo.
     o.aoTrocar?.(para);
     const sai = para === "quadro" ? conversa() : [v];
@@ -1022,7 +1174,7 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     for (const e of sai) e.inert = true;
     const mv = movimentoDaTroca(direcao, reduzido());
     const pode = typeof v.animate === "function";
-    if (!pode) { assentar(); if (op.foco) focarAba(para); return; }
+    if (!pode) { assentar(); if (op.foco) focarPagina(pagina); return; }
     const opcoes: KeyframeAnimationOptions = { duration: mv.ms, easing: mv.curva };
     animacoes = [...sai.map((e) => e.animate(mv.sai, opcoes)), ...entra.map((e) => e.animate(mv.entra, opcoes))];
     const minha = vez;
@@ -1034,30 +1186,81 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
       assentar();
     };
     void Promise.all(animacoes.map((a) => a.finished)).then(fim, fim);
-    if (op.foco) focarAba(para);
+    if (op.foco) focarPagina(pagina);
   }
 
-  function focarAba(m: ModoDaConversa): void {
-    doc.querySelector<HTMLElement>(`#cabecalho .qd-seg [role="tab"][data-modo="${m}"]`)?.focus();
+  /** O app que acabou de chegar acende por um instante (o cabeçalho é regravado: a marca vai de novo a cada desenho). */
+  let chegou: { id: string; ate: number } | null = null;
+
+  function focarPagina(i: number): void {
+    doc.querySelector<HTMLElement>(`#cabecalho .pg-ic[data-pagina="${i}"]`)?.focus();
   }
 
-  function sincronizar(s: { chave: string | null; nome: string; agenteId?: string | null }): void {
+  /** Abre a casa do agente sem animação (só chamada com a conversa à vista e nada animando). */
+  function irParaCasa(): void {
+    const v = vista();
+    const casa = chave === null ? 0 : (ordem()[0] ?? 0);
+    if (casa > 0 && v) {
+      pagina = casa;
+      ultimaDaVista = casa;
+      modo = "quadro";
+      desenharVista();
+      if (ehTarefas(casa) && dd) void lerQuadro();
+    }
+  }
+
+  function sincronizar(s: { chave: string | null; nome: string; agenteId?: string | null; paginas?: readonly Pagina[] }): void {
     // NOD-430 (revisão 1 do PR #627): a conversa do dono da tarefa pedida chegou sem quadro (excluído): o pedido cai aqui,
     // senão a tarefa velha abriria sozinha quando ele ganhasse um quadro novo.
     if (pedidoDoChat && s.chave === null && s.agenteId === pedidoDoChat.agenteId) pedidoDoChat = null;
     // Fora de uma conversa com quadro, e já sem quadro: nada a mexer (o palco é de outra tela).
     if (s.chave === null && chave === null) return;
+    const assinatura = (ps: readonly Pagina[]): string => ps.map((p) => `${p.id}${p.pedeVoce ? "!" : ""}${p.apagado ? "~" : ""}${p.app ? `@${p.app.atualizadoEm}` : ""}`).join();
+    if (s.paginas && assinatura(s.paginas) !== assinatura(paginas)) {
+      const idAtual = paginas[pagina]?.id;
+      const idUltima = paginas[ultimaDaVista]?.id;
+      paginas = s.paginas.length ? s.paginas : [CONVERSA];
+      if (chave === s.chave) {
+        // A página à vista segue pelo id; se ela sumiu (app removido), volta para a conversa.
+        const i = indicePeloId(paginas, idAtual);
+        if (i < 0) {
+          // O app à vista saiu (removido em outro aparelho): volta à conversa e avisa quem ouve, como numa troca.
+          const estava = modo;
+          cancelar();
+          pagina = 0;
+          modo = "conversa";
+          // Fora do desenho em curso (o main desenha de novo ao ouvir a volta): numa microtarefa, se nada mudou no meio.
+          const c = chave;
+          if (estava !== "conversa") queueMicrotask(() => { if (c === chave && modo === "conversa") o.aoTrocar?.("conversa"); });
+        } else pagina = i;
+        const u = indicePeloId(paginas, idUltima);
+        ultimaDaVista = u > 0 ? u : 1;
+        // O retrato do app à vista mudou: redesenha.
+        if (modo === "quadro" && paginas[pagina]?.app && vista()?.firstElementChild) desenharVista();
+      }
+    }
+    // O esqueleto é só da leitura em curso: acabou (com ou sem novidade), o app vazio volta à frase e ao exemplo.
+    if (s.chave === chave && modo === "quadro" && paginas[pagina]?.app && vista()?.querySelector('.pg-app[aria-busy="true"]') && !(agenteId !== null && o.paginas?.lendo?.(agenteId))) desenharVista();
     if (s.chave !== chave) {
       cancelar();
       zerarDados();
       agenteId = s.chave === null ? null : (s.agenteId ?? null);
       chave = s.chave;
       modo = "conversa";
+      pagina = 0;
+      ultimaDaVista = 1;
       filtro = "todos";
       alternadas = new Set();
       edicao = null;
       const v = vista();
       if (v) v.innerHTML = "";
+      // A casa do agente (1ª posição da pílula) não é a conversa: ele abre direto nela, sem animação.
+      homePendente = chave !== null && !paginasDtoDe(agenteId);
+      if (!homePendente) irParaCasa();
+    } else if (homePendente && paginasDtoDe(agenteId)) {
+      // As páginas chegaram depois de a conversa abrir e a pessoa ficou onde estava: a casa vale agora.
+      homePendente = false;
+      if (modo === "conversa" && pagina === 0 && !animacoes.length) irParaCasa();
     }
     if (s.nome !== nome) { nome = s.nome; if (vista()?.firstElementChild) desenharVista(); }
     // No meio de uma animação o estado é dela; só o segmento (o cabeçalho pode ter sido regravado) é remarcado.
@@ -1119,7 +1322,12 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
         return;
       }
     }
-    if (act === "modo-da-conversa" && el.closest("#cabecalho")) {
+    if (act === "pagina" && el.closest("#cabecalho")) {
+      irPara(Number(el.dataset["pagina"]));
+    } else if (act === "forma-das-tarefas" && el.closest("#quadro")) {
+      const f = el.dataset["forma"];
+      if (ehForma(f) && f !== forma) { forma = f; desenharVista(); vista()?.querySelector<HTMLElement>(`[data-act="forma-das-tarefas"][data-forma="${f}"]`)?.focus(); }
+    } else if (act === "modo-da-conversa" && el.closest("#cabecalho")) {
       const m = el.dataset["modo"];
       if (ehModo(m)) trocar(m);
     } else if (el.closest("#quadro") && (act === "abrir-coluna" || act === "filtro-do-quadro")) {
@@ -1509,21 +1717,31 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
   doc.addEventListener("pointerup", () => fimDoArrasto(true));
   doc.addEventListener("pointercancel", () => fimDoArrasto(false));
 
-  // O teclado do tablist (APG, ativação automática): ← → Home End trocam e levam o foco.
+  // O teclado do tablist (APG, ativação automática): ← → Home End trocam de página e levam o foco. No nome do bot (a
+  // pílula), só as setas: Home e End ficam para quem lê.
   doc.addEventListener("keydown", (ev) => {
-    const el = (ev.target as Element | null)?.closest?.<HTMLElement>('#cabecalho .qd-seg [role="tab"]');
-    if (!el || ev.altKey || ev.ctrlKey || ev.metaKey || ev.shiftKey) return;
-    const prox = modoPelaTecla(modo, ev.key);
-    if (!prox) return;
+    const alvo = ev.target as Element | null;
+    const aba = alvo?.closest?.<HTMLElement>("#cabecalho .pg-ic");
+    const noNome = !aba && !!alvo?.closest?.("#cabecalho .qd-pil > .pilula-bot") && (ev.key === "ArrowLeft" || ev.key === "ArrowRight");
+    // Alt+← → no ícone focado move a página na ordem (a alternativa ao arrasto).
+    const mover = aba && ev.altKey && !ev.ctrlKey && !ev.metaKey && !ev.shiftKey ? passoDaTeclaDeMover(ev.key) : null;
+    if (mover && aba) {
+      ev.preventDefault();
+      const de = posDe(Number(aba.dataset["pagina"]));
+      moverPagina(de, de + mover, { foco: true });
+      return;
+    }
+    if ((!aba && !noNome) || ev.altKey || ev.ctrlKey || ev.metaKey || ev.shiftKey) return;
+    const prox = paginaPelaTecla(posDe(pagina), paginas.length, ev.key);
+    if (prox === null) return;
     ev.preventDefault();
-    trocar(prox, { foco: true });
+    irPara(naPos(prox), { foco: !!aba });
   });
 
-  const abaDe = (alvo: EventTarget | null): HTMLElement | null => (alvo as Element | null)?.closest?.<HTMLElement>('#cabecalho .qd-seg [role="tab"]') ?? null;
+  const abaDe = (alvo: EventTarget | null): HTMLElement | null => (alvo as Element | null)?.closest?.<HTMLElement>("#cabecalho .pg-ic") ?? null;
   doc.addEventListener("focusin", (ev) => {
     const el = abaDe(ev.target);
-    const m = el?.dataset["modo"];
-    abaFocada = el && ehModo(m) ? { el, modo: m } : null;
+    abaFocada = el ? { el, pagina: Number(el.dataset["pagina"]) } : null;
   });
   // A recusa da trava não some com a pessoa no card: o foco ou o ponteiro seguram a conta (revisão 2 do PR #629).
   doc.addEventListener("focusin", (ev) => { if (naRecusa(ev.target)) relogio?.segurar("foco"); else relogio?.soltar("foco"); });
@@ -1540,6 +1758,104 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     if (faixa.tipo === "aguardando" || histAberto) void lerConversa();
   }
 
+  /* ---------- NOD-445: o menu do ícone (segurar, botão direito, Shift+F10 ou a tecla de menu) ---------- */
+  let menu: { id: string; volta: string } | null = null;
+  function fecharMenu(foco = false): void {
+    const m = doc.getElementById("pg-menu");
+    if (m) m.remove();
+    const volta = menu?.volta;
+    menu = null;
+    if (foco && volta) doc.querySelector<HTMLElement>(`#cabecalho .pg-ic[data-pg-id="${volta}"]`)?.focus();
+  }
+  function abrirMenu(i: number, ancora: HTMLElement | null): void {
+    const p = paginas[i];
+    if (!p || chave === null || paginas.length < 2) return;
+    fecharMenu();
+    const r = ancora?.getBoundingClientRect();
+    doc.body.insertAdjacentHTML("beforeend", menuDaPagina({ p, pos: posDe(i), total: paginas.length }));
+    const m = doc.getElementById("pg-menu");
+    if (!m) return;
+    if (r) { m.style.top = `${Math.round(r.bottom + 6)}px`; m.style.left = `${Math.round(Math.max(8, r.left))}px`; }
+    menu = { id: p.id, volta: p.id };
+    m.querySelector<HTMLElement>('[role="menuitem"]:not([aria-disabled])')?.focus();
+  }
+  function noMenu(act: string): void {
+    const i = indicePeloId(paginas, menu?.id);
+    const p = paginas[i];
+    if (!p) { fecharMenu(); return; }
+    if (act === "pagina-antes" || act === "pagina-depois") {
+      fecharMenu();
+      const de = posDe(i);
+      moverPagina(de, de + (act === "pagina-antes" ? -1 : 1), { foco: true });
+      return;
+    }
+    fecharMenu();
+    if (act === "app-editar") o.paginas?.editarApp(p);
+    else if (act === "app-remover") o.paginas?.removerApp(p);
+  }
+  doc.addEventListener("click", (ev) => {
+    const alvo = ev.target as Element | null;
+    const m = alvo?.closest?.<HTMLElement>("#pg-menu");
+    if (m) {
+      const it = alvo?.closest?.<HTMLElement>('[role="menuitem"]');
+      if (it && it.getAttribute("aria-disabled") !== "true") noMenu(it.dataset["act"] ?? "");
+      return;
+    }
+    if (menu) fecharMenu();
+    const el = alvo?.closest?.<HTMLElement>("[data-act]");
+    const act = el?.dataset["act"];
+    if (act === "pedir-app" && el?.closest("#cabecalho")) {
+      if (el.getAttribute("aria-disabled") === "true") anunciarPagina(el.getAttribute("aria-label") ?? "");
+      else o.paginas?.pedirApp();
+    } else if (act === "app-reconectar" && el?.closest("#quadro")) {
+      const p = paginas.find((x) => x.app?.id === el.dataset["app"]);
+      if (p) o.paginas?.reconectar(p);
+    }
+  });
+  doc.addEventListener("contextmenu", (ev) => {
+    const ic = (ev.target as Element | null)?.closest?.<HTMLElement>("#cabecalho .pg-ic");
+    if (!ic) return;
+    ev.preventDefault();
+    abrirMenu(Number(ic.dataset["pagina"]), ic);
+  });
+  doc.addEventListener("keydown", (ev) => {
+    const alvo = ev.target as Element | null;
+    const m = alvo?.closest?.<HTMLElement>("#pg-menu");
+    if (m) {
+      const itens = [...m.querySelectorAll<HTMLElement>('[role="menuitem"]:not([aria-disabled])')];
+      const at = itens.indexOf(alvo as HTMLElement);
+      if (ev.key === "Escape" || ev.key === "Tab") { ev.preventDefault(); fecharMenu(true); return; }
+      if (ev.key === "ArrowDown" || ev.key === "ArrowUp") { ev.preventDefault(); itens[(at + (ev.key === "ArrowDown" ? 1 : itens.length - 1)) % itens.length]?.focus(); return; }
+      return;
+    }
+    const ic = alvo?.closest?.<HTMLElement>("#cabecalho .pg-ic");
+    if (ic && (ev.key === "ContextMenu" || (ev.shiftKey && ev.key === "F10"))) { ev.preventDefault(); abrirMenu(Number(ic.dataset["pagina"]), ic); }
+  });
+
+  /** false = não andou (sem pílula, uma página só ou já na ponta). */
+  function andar(passo: -1 | 1): boolean {
+    if (chave === null || paginas.length < 2) return false;
+    const pos = posDe(pagina) + passo;
+    if (pos < 0 || pos >= paginas.length) return false;
+    irPara(naPos(pos));
+    return true;
+  }
+  /** Quantas páginas a pílula mostra agora (0 = sem pílula: experimento desligado ou outra tela). */
+  const totalDePaginas = (): number => (chave === null ? 0 : paginas.length);
+  function abrirPagina(id: string): void {
+    const i = indicePeloId(paginas, id);
+    if (i >= 0) irPara(i);
+  }
+  function marcarChegada(id: string): void {
+    chegou = { id, ate: Date.now() + 1200 };
+    marcar();
+  }
+
+  ligarGestosDaPilula(doc, {
+    irPara: (pos) => irPara(naPos(pos)), atual: () => posDe(pagina), total: totalDePaginas, reduzido,
+    mover: (de, para) => moverPagina(de, para), menu: (pos, el) => abrirMenu(naPos(pos), el),
+  });
+
   /**
    * NOD-416: o link da tarefa. Com o quadro já lido, abre; senão espera a leitura (aplicarQuadro). Sem o quadro liberado
    * ainda (chave nula: as preferências chegam depois da frota no boot), guarda o pedido; o próximo `sincronizar` com a
@@ -1550,14 +1866,21 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     if (chave === null) { pendente = { agenteId: de, tarefaId }; return; }
     if (agenteId !== de) return;
     if (carga === "ok" && tarefaNoQuadro(q, tarefaId)) {
-      if (modo !== "quadro") trocar("quadro");
+      if (modo !== "quadro") trocar("quadro", { pagina: paginaDasTarefas() });
+      else if (pagina !== paginaDasTarefas()) irPara(paginaDasTarefas());
       abrirTarefa(tarefaId);
       return;
     }
     pendente = { agenteId: de, tarefaId };
-    if (modo !== "quadro") trocar("quadro");
+    if (modo !== "quadro") trocar("quadro", { pagina: paginaDasTarefas() });
+    else if (pagina !== paginaDasTarefas()) irPara(paginaDasTarefas());
     else void lerQuadro();
   }
 
-  return { sincronizar, trocar, aoFrame, reler, abrirTarefaDe, modo: () => modo, abrirTarefa: abrirPeloLink };
+  /** NOD-445: a página Tarefas da pílula (a 1 sem pílula). */
+  function paginaDasTarefas(): number {
+    return Math.max(1, indicePeloId(paginas, TAREFAS.id));
+  }
+
+  return { sincronizar, trocar, irPara, andar, totalDePaginas, abrirPagina, marcarChegada, aoFrame, reler, abrirTarefaDe, modo: () => modo, pagina: () => pagina, abrirTarefa: abrirPeloLink };
 }

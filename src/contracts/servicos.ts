@@ -162,7 +162,7 @@ export interface UseCasesNod<Deps> {
   registrarRelatoDoNod: CasoNod<Deps, "registrar_relato">;
   criarBots: CasoNod<Deps, "criar_bots">; responderPedido: CasoNod<Deps, "responder_pedido">; pedirCredencial: CasoNod<Deps, "pedir_credencial">;
   avisarPessoa: CasoNod<Deps, "avisar_pessoa">; ajustarBarraLateral: CasoNod<Deps, "ajustar_barra_lateral">;
-  abrirConta: CasoNod<Deps, "abrir_conta">; buscarConversas: CasoNod<Deps, "buscar_conversas">; lerConversa: CasoNod<Deps, "ler_conversa">; gerirQuadro: CasoNod<Deps, "gerir_quadro">; naoLidosNoChat: CasoNod<Deps, "nao_lidos">; gerirTimes: CasoNod<Deps, "gerir_times">;
+  abrirConta: CasoNod<Deps, "abrir_conta">; buscarConversas: CasoNod<Deps, "buscar_conversas">; lerConversa: CasoNod<Deps, "ler_conversa">; gerirQuadro: CasoNod<Deps, "gerir_quadro">; gerirApps: CasoNod<Deps, "gerir_apps">; naoLidosNoChat: CasoNod<Deps, "nao_lidos">; gerirTimes: CasoNod<Deps, "gerir_times">;
 }
 
 /** Mapa nome da ferramenta → chave em UseCasesNod (o despacho é por tabela, não por if). */
@@ -195,5 +195,5 @@ export const USE_CASE_POR_FERRAMENTA = {
   gerir_bots: "gerirBots",
   ver_apps_conectados: "verAppsConectados",
   registrar_relato: "registrarRelatoDoNod",
-  criar_bots: "criarBots", responder_pedido: "responderPedido", pedir_credencial: "pedirCredencial", avisar_pessoa: "avisarPessoa", abrir_conta: "abrirConta", buscar_conversas: "buscarConversas", ler_conversa: "lerConversa", ajustar_barra_lateral: "ajustarBarraLateral", gerir_quadro: "gerirQuadro", nao_lidos: "naoLidosNoChat", gerir_times: "gerirTimes",
+  criar_bots: "criarBots", responder_pedido: "responderPedido", pedir_credencial: "pedirCredencial", avisar_pessoa: "avisarPessoa", abrir_conta: "abrirConta", buscar_conversas: "buscarConversas", ler_conversa: "lerConversa", ajustar_barra_lateral: "ajustarBarraLateral", gerir_quadro: "gerirQuadro", gerir_apps: "gerirApps", nao_lidos: "naoLidosNoChat", gerir_times: "gerirTimes",
 } as const satisfies Record<NomeFerramentaNod, keyof UseCasesNod<unknown>>;

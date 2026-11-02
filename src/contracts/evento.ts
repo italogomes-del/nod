@@ -66,7 +66,9 @@ export type KindEvento =
   /** definido em 2026-10-28 (NOD-351): um bot abriu um cartão de conta na conversa ({etapa}). Só para a pessoa do escopo. */
   | "conta_abrir"
   /** definido em 2026-10-31 (NOD-442): um lote mudou o quadro ({quadroId, agenteId, loteId, tarefas, autor}). Só ids. */
-  | "quadro_mudou";
+  | "quadro_mudou"
+  /** definido em 2026-11-02 (NOD-445, ADR-146): as páginas de um bot mudaram ({agenteId, motivo}). Só ids. */
+  | "paginas_mudaram";
 
 /** Dados do evento: só escalares (o CHECK da trilha e o outbox não aceitam prosa aninhada). */
 export type DadosEvento = Record<string, string | number | boolean | null>;

@@ -16,7 +16,7 @@ import type { ModoAprovacao } from "../../src/contracts/agente.ts";
 import { gerirBots } from "../../src/use-cases/gerir-bots.ts";
 import { gerirTimes } from "../../src/use-cases/gerir-times.ts";
 import { garantirNod } from "../../src/use-cases/onboarding.ts";
-import { acoesNovasSemLeitura, acoesSemHandler, bloquearRedeExterna, rotasPublicasSemHandler, vereditoDeDecisao, sementeDoPr, chegouNoHandler, custoDoFuzz, enxugarCasos, executarFuzz, lerN, marcaDoBanco, processosBloqueados, quietude, planoDoServidor, relatarViolacoes, sqlDoRetrato, sqlDoRetratoDaConta, zerarCustoDoFuzz, type AlvoDoFuzz, type Retrato } from "../helpers/fuzz.ts";
+import { CAMINHOS_DAS_ACOES_DE_CONTA, acoesNovasSemLeitura, acoesSemHandler, bloquearRedeExterna, rotasPublicasSemHandler, vereditoDeDecisao, sementeDoPr, chegouNoHandler, custoDoFuzz, enxugarCasos, executarFuzz, lerN, marcaDoBanco, processosBloqueados, quietude, planoDoServidor, relatarViolacoes, sqlDoRetrato, sqlDoRetratoDaConta, zerarCustoDoFuzz, type AlvoDoFuzz, type Retrato } from "../helpers/fuzz.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { servidorCompleto, type ServidorCompleto, type SessaoDeTeste } from "../helpers/servidor-completo.ts";
 import { limparPessoaE2E, limparTenantE2E, varrerSobrasDaPessoa } from "./limpeza-e2e.ts";
@@ -61,7 +61,13 @@ const CONFIGURACOES: { nome: string; env: Record<string, string> }[] = [
   { nome: "padrão", env: { NOD_CAPTURA_TELA: "1" } },
   { nome: "compartilhado + contas + nuvem", env: { NOD_MODO: "compartilhado", NOD_CONTAS: "1", NOD_MINHA_CONTA: "1", NOD_MAQUINA_NUVEM: "gcp" } },
 ];
-let faltando: readonly string[] = REGISTRO_DE_ACOES.map((a) => a.id);
+/**
+ * NOD-445 (ADR-146): ação sem rota nenhuma (`semRotaDePessoa` fora das de conta, que moram nas rotas públicas de
+ * /api/conta) não tem o que o fuzz HTTP mandar: a tela leva à conversa e o caminho é a ferramenta, provada no teste de
+ * contrato da ação. Sai da cobertura por aqui, derivada do registro (nunca uma lista à mão).
+ */
+const SO_PELA_CONVERSA = new Set<string>((REGISTRO_DE_ACOES as readonly DefinicaoAcao[]).filter((a) => a.semRotaDePessoa && !Object.hasOwn(CAMINHOS_DAS_ACOES_DE_CONTA, a.id)).map((a) => a.id));
+let faltando: readonly string[] = REGISTRO_DE_ACOES.map((a) => a.id).filter((id) => !SO_PELA_CONVERSA.has(id));
 /**
  * Revisão 10: as ações que hoje só recebem 404 (o fuzz não semeia a entidade delas) ou 403 (guarda). É um TETO: ação
  * fora desta lista que só receba 404/403 reprova (a cobertura rasa não cresce em silêncio). Semear e tirar daqui: NOD-409.
@@ -199,6 +205,17 @@ for (const [ordem, config] of CONFIGURACOES.entries()) {
       // NOD-417: uma tarefa (em Backlog, sem acionar ninguém) para o `:tid` (`quadro.terminei` só passava da busca com ela).
       const comTarefa = await srv.json<{ quadro: { tarefas: { id: string; titulo: string }[] } }>("POST", `agentes/${meu.agente.id}/quadro/tarefas`, { titulo: "Tarefa do fuzz", status: "backlog" });
       const tarefaDoFuzz = comTarefa.quadro.tarefas.find((t) => t.titulo === "Tarefa do fuzz")!.id;
+      // NOD-445: um app ativo e um removido no bot da pessoa e um no da outra, para `paginas.remover_app` e
+      // `paginas.restaurar_app` passarem da busca (o `:app` recebe estes ids pelo segmento `apps`).
+      const appDe = (s: SessaoDeTeste, b: Criado, nome: string, removido: boolean) =>
+        srv.app.dentro({ tenantId: s.tenantId, pessoaId: s.pessoaId }, (d) =>
+          d.tx(async (trx) => {
+            const [r] = await trx<{ id: string }[]>`insert into apps_do_bot (tenant_id, owner_id, agente_id, nome, nome_chave, fonte, forma, removido_em)
+              values (${s.tenantId}, ${s.pessoaId}, ${b.agente.id}, ${nome}, ${nome.toLowerCase()}, 'bot', 'lista', ${removido ? new Date() : null}) returning id`;
+            return r!.id;
+          }),
+        );
+      const [meuApp, meuAppRemovido, appDela] = [await appDe(sessao, meu, "Vagas", false), await appDe(sessao, meu, "Leads", true), await appDe(outra, dela, "Vagas", false)];
       // NOD-437: um time de cada pessoa (e o Sem time da pessoa) para o `/times/:id`: renomear e excluir passam da busca.
       type ComTime = { time: { id: string } };
       const timeDoFuzz = (await srv.json<ComTime>("POST", "times", { nome: "Time do fuzz" })).time.id;
@@ -221,10 +238,34 @@ for (const [ordem, config] of CONFIGURACOES.entries()) {
             // reais: a coluna semeada (a remoção de verdade) e as fixas (o id não muda ao renomear; remover dá 400).
             colunas: { daPessoa: [colunaDoFuzz, "voce", "cancelado"], deOutraPessoa: [] },
             tarefas: { daPessoa: [tarefaDoFuzz], deOutraPessoa: [] },
+            apps: { daPessoa: [meuApp, meuAppRemovido], deOutraPessoa: [appDela] },
             times: { daPessoa: [timeDoFuzz, semTimeDoFuzz], deOutraPessoa: [timeDela] },
           },
         },
       });
+      // NOD-445, custo no PR (N <= 20; a noturna fica inteira): as rotas de remover e restaurar app não leem o corpo, então
+      // as N entradas viravam N sorteios do mesmo caminho (com a semente 1257342993: 2 de 20 e 1 de 20 passaram da busca).
+      // Cada uma fica com um caso por id que importa (o app vivo, o removido, o da outra pessoa pelo bot dela e pelo meu,
+      // um id quebrado), na posição do plano. A ordenar lê o corpo: fica com as 10 primeiras entradas (as fixas + 7).
+      if (N <= 20) {
+        const apps = [meuApp, meuAppRemovido, appDela, "nao-e-uuid"].map((app) => ({ bot: meu.agente.id, app }));
+        apps.push({ bot: dela.agente.id, app: appDela });
+        const enxuto: typeof plano.casos = [];
+        const vistos = new Map<string, number>();
+        for (const c of plano.casos) {
+          const n = (vistos.get(c.acao) ?? 0) + 1;
+          vistos.set(c.acao, n);
+          if (c.acao === "paginas.ordenar" && n > 10) continue;
+          if (c.acao === "paginas.remover_app" || c.acao === "paginas.restaurar_app") {
+            if (n > 1) continue;
+            const fim = c.acao === "paginas.restaurar_app" ? "/restaurar" : "";
+            for (const a of apps) enxuto.push({ ...c, caminho: `/agentes/${a.bot}/apps/${encodeURIComponent(a.app)}${fim}` });
+            continue;
+          }
+          enxuto.push(c);
+        }
+        plano.casos.splice(0, plano.casos.length, ...enxuto);
+      }
       // NOD-420: no PR (N ≤ 20) as ações do quadro levam metade das entradas por rota (as fixas e um caso que passa da
       // busca sempre ficam), menos as que a NOD-420 mudou (criar_coluna e renomear_coluna, o prazo_min), que levam N.
       // O quadro é 17 rotas das ~150 do padrão; a noturna (N ≥ 100) fuzza tudo com N.
@@ -335,7 +376,7 @@ for (const [ordem, config] of CONFIGURACOES.entries()) {
       // com ela refaz exatamente os mesmos casos neste servidor (revisão 2: imprimir SEMENTE + ordem reproduzia outra coisa).
       // Antes de qualquer expect (QA do #590): uma falha aqui não pode deixar `faltando` com o registro inteiro e fazer o
       // próximo servidor fuzzar tudo (e acusar em cascata o que só vale no padrão).
-      faltando = [...plano.semRota, ...semHandler.filter((a) => (REGISTRO_DE_ACOES as readonly DefinicaoAcao[]).some((d) => d.id === a))];
+      faltando = [...plano.semRota.filter((a) => !SO_PELA_CONVERSA.has(a)), ...semHandler.filter((a) => (REGISTRO_DE_ACOES as readonly DefinicaoAcao[]).some((d) => d.id === a))];
       // Revisão 15: soft e antes dos outros expects, para aparecer junto de qualquer outra falha do último servidor. A
       // ação nova que não dá para semear sai por ISENCOES_DE_ACOES_NOVAS, com a issue de semear.
       if (ordem === CONFIGURACOES.length - 1) expect.soft(acoesNovasSemLeitura({ fuzzadas: fuzzadasTodas, alemDaBusca: alemDaBuscaTodas, conhecidas: new Set([...ACOES_CONHECIDAS_NOD398, ...Object.keys(ISENCOES_DE_ACOES_NOVAS)]) }), `semente ${SEMENTE}: ações novas do registro que em nenhum servidor passaram de 404/403/401/429 (semear a entidade no fuzz; se não der, pôr em ISENCOES_DE_ACOES_NOVAS com a issue)`).toEqual([]);

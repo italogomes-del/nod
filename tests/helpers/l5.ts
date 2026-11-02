@@ -29,6 +29,7 @@ import { criarBancoMemoria, type BancoMemoria } from "./repos-memoria.ts";
 import { avisarPessoa } from "../../src/use-cases/avisar-pessoa.ts";
 import { ajustarBarraLateral } from "../../src/use-cases/ajustar-barra-lateral.ts";
 import { gerirQuadro } from "../../src/use-cases/gerir-quadro.ts";
+import { gerirApps } from "../../src/use-cases/gerir-apps.ts";
 import { gerirTimes } from "../../src/use-cases/gerir-times.ts";
 import { naoLidosNoChat } from "../../src/use-cases/nao-lidos-no-chat.ts";
 import { buscarConversas, lerConversa } from "../../src/use-cases/buscar-conversas.ts";
@@ -149,6 +150,7 @@ export function useCasesDeTeste(sobrescrita: Partial<UseCasesNod> = {}): UseCase
     avisarPessoa,
     ajustarBarraLateral,
     gerirQuadro,
+    gerirApps,
     naoLidosNoChat,
     gerirTimes,
     buscarConversas,

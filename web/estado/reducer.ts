@@ -1458,6 +1458,8 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
   "conta.abrir": (e) => e,
   // NOD-442: o quadro mora fora do estado do chat (web/lib/quadro-na-tela.ts relê por REST ao ver o frame).
   "quadro.mudou": (e) => e,
+  // NOD-445: as páginas do bot moram fora do estado (web/lib/paginas-na-tela.ts relê por REST ao ver o frame).
+  "paginas.mudaram": (e) => e,
   // ADR-083: um trabalho nasceu ou mudou — relê a lista (faixa, barra, gaveta), a conversa do bot (a linha "Abriu a
   // task", a pergunta e o resultado) e a tela da task, se ela já foi aberta.
   "trabalho.mudou": (e, f) => {

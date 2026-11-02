@@ -57,6 +57,8 @@ export type TipoFrame =
   | "checkpoint.mudou"
   /** NOD-442: o quadro mudou: {quadroId, agenteId, loteId, tarefas (ids separados por vírgula), autor, removido? (NOD-430)}. A web relê o quadro. */
   | "quadro.mudou"
+  /** NOD-445 (ADR-146): as páginas de um bot mudaram: {agenteId, motivo}. A web relê as páginas. */
+  | "paginas.mudaram"
   /** NOD-351: abra o cartão de conta nesta conversa: {conversaId, etapa}. A web confere a etapa contra a lista dela. */
   | "conta.abrir"
   /** definido em 2026-10-27 (NOD-374): um app da pessoa entrou ou saiu de "Fora do ar" ({}). A web relê a frota e os conectores. */

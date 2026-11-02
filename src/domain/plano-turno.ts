@@ -318,6 +318,8 @@ const MODOS_DA_CONTA: readonly ModoTurno[] = ["conversa", "criacao", "sala"];
 const FERRAMENTA_ABRIR_CONTA: NomeFerramentaNod = "abrir_conta";
 /** NOD-442: os modos com gerir_quadro (com o experimento ligado): onde a pessoa fala, a rotina e a tarefa delegada. */
 export const MODOS_DO_QUADRO: readonly ModoTurno[] = ["conversa", "criacao", "rotina", "delegacao"];
+/** NOD-445: os modos com gerir_apps (o mesmo experimento): a conversa (pedir, ordenar, remover) e a rotina (o retrato do app). */
+export const MODOS_DOS_APPS: readonly ModoTurno[] = ["conversa", "criacao", "rotina"];
 
 export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTurno" | "machineId"> {
   const esforco = entrada.raciocinio ?? entrada.agente.esforco ?? undefined;
@@ -342,7 +344,7 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
   const frente = ehFrente(entrada.trabalho);
   const reconfigura = emReconfiguracaoNoPlano(entrada);
   const abreConta: readonly NomeFerramentaNod[] = entrada.contas && MODOS_DA_CONTA.includes(modo) && !entrada.trabalho ? [FERRAMENTA_ABRIR_CONTA] : [];
-  const geraQuadro: readonly NomeFerramentaNod[] = entrada.quadro && MODOS_DO_QUADRO.includes(modo) ? ["gerir_quadro"] : [];
+  const geraQuadro: readonly NomeFerramentaNod[] = entrada.quadro && MODOS_DO_QUADRO.includes(modo) ? ["gerir_quadro", ...(MODOS_DOS_APPS.includes(modo) ? (["gerir_apps"] as const) : [])] : [];
   const nod = [...(reconfigura ? [FERRAMENTA_RECONFIGURACAO] : []), ...FERRAMENTAS_NOD_POR_MODO[modo], ...esperaComando, ...(modo === "ligacao" && entrada.onboarding ? FERRAMENTAS_NOD_ONBOARDING : []), ...doNod, ...criaBots, ...respondePedido, ...abreConta, ...geraQuadro]
     .filter((n) => (n !== "abrir_frentes" || podeAbrirTask(entrada.trabalho ?? null)) && (n !== "mandar_para_frente" || podeMandarParaTask(entrada.trabalho ?? null)))
     .filter((n) => !frente || !FERRAMENTAS_FORA_DA_FRENTE.includes(n))

@@ -1,5 +1,6 @@
 import { decidirLoteDeBots } from "../../../use-cases/gerir-bots.ts";
 import { decidirColunasDoQuadro } from "../../../use-cases/colunas-do-quadro.ts";
+import { EXECUTORES_APPS, RecusaDasPaginas } from "../../../use-cases/acoes/apps.ts";
 import { decidirQuadroExclusao } from "../../../use-cases/quadro-exclusao.ts";
 import { randomUUID } from "node:crypto";
 import type { RespostaMutacao } from "../../../contracts/api.ts";
@@ -23,6 +24,7 @@ import { fecharPedidoDeCredencial } from "../../../use-cases/guardar-credencial.
 import { retomarTurno } from "../../../use-cases/retomar-turno.ts";
 import type { Deps, Services } from "../../../use-cases/tipos.ts";
 import { sincronizarDasDecisoes } from "../../../use-cases/trabalhos.ts";
+import { responderErro } from "../erros.ts";
 import type { Rota } from "../roteador.ts";
 import { executar, textoDoCorpo, type DentroDeTx } from "./dentro-de-tx.ts";
 
@@ -215,6 +217,22 @@ export function criarRotasDecisoes(d: DepsRotasDecisoes): Rota[] {
           const r = await comoDona(ctx.escopo, atual, (deps) => executar(deps, decidirLoteDeBots, { decisaoId: atual.id, recusar: recusada(corpo), selecionados: c.selecionados }));
           ids.feitas = String(r.feitas);
           if (r.falhas > 0) ids.falhas = String(r.falhas);
+          const resposta: RespostaMutacao = { ok: true, ids };
+          ctx.json(200, resposta);
+          return;
+        }
+
+        if (atual.tipo === "app") {
+          // NOD-445 (ADR-146): o card Criar/Ajustar do app. Roda como a DONA (as páginas são dela). O card que não vale
+          // mais (o nome foi tomado, o limite chegou) fecha como recusado e avisa; o 409 sai DEPOIS do commit.
+          const r = await comoDona(ctx.escopo, atual, (deps) => executar(deps, EXECUTORES_APPS["paginas.criar_app"], { decisaoId: atual.id, recusar: recusada(corpo) }));
+          // Revisão 6 do #626: o motivo da lista fechada (limite, nome em uso) vai no corpo, como nas rotas das páginas.
+          if (r.obsoleta && r.motivo) {
+            responderErro(ctx.res, new RecusaDasPaginas("estado_invalido", r.motivo, "app_nao_cabe"), { metodo: ctx.req.method ?? "?", caminho: ctx.req.url ?? "" }, r.motivo);
+            return;
+          }
+          if (r.obsoleta) throw new ErroDeDominio("estado_invalido", { cause: "app_nao_cabe" });
+          if (r.criado) ids.app = r.criado.id;
           const resposta: RespostaMutacao = { ok: true, ids };
           ctx.json(200, resposta);
           return;

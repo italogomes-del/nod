@@ -1,4 +1,5 @@
 import type { PayloadPropostaColunasQuadro } from "./quadro.ts";
+import type { PayloadPropostaApp } from "./apps.ts";
 import type { PayloadPropostaQuadroExclusao } from "./quadro-exclusao.ts";
 import type { PayloadPropostaCredencial } from "./ferramentas-credencial.ts";
 import type { AcaoLote } from "./ferramentas-do-nod.ts";
@@ -35,7 +36,7 @@ export type Conversa = {
   criadoEm: EpochMs;
 };
 
-export type KindProposta = "perfil" | "rotina" | "acesso" | "pasta" | "rotina_atualizacao" | "rotina_exclusao" | "bot" | "lote_bots" | "credencial" | "colunas_quadro" | "quadro_exclusao";
+export type KindProposta = "perfil" | "rotina" | "acesso" | "pasta" | "rotina_atualizacao" | "rotina_exclusao" | "bot" | "lote_bots" | "credencial" | "colunas_quadro" | "quadro_exclusao" | "app";
 export type EstadoProposta = "pendente" | "confirmada" | "recusada";
 
 /**
@@ -179,12 +180,10 @@ export type AcaoNoLote = AcaoLote & {
 };
 export type PayloadPropostaLoteBots = { kind: "lote_bots"; resumo: string; acoes: AcaoNoLote[]; turnoId?: string };
 
-/** O cartão de pedido de credencial (NOD-50) mora em ferramentas-credencial.ts pelo teto de 200 linhas. */
+/** Pelo teto de 200 linhas: a credencial (NOD-50) mora em ferramentas-credencial.ts e as colunas (NOD-448) em quadro.ts. */
 export type { AlvoCredencial, PayloadPropostaCredencial } from "./ferramentas-credencial.ts";
-
-/** O card de trocar as colunas do quadro (NOD-448) mora em quadro.ts pelo teto de 200 linhas. */
 export type { ColunaNaProposta, PayloadPropostaColunasQuadro } from "./quadro.ts";
-export type PayloadProposta = PayloadPropostaColunasQuadro | PayloadPropostaQuadroExclusao | PayloadPropostaCredencial | PayloadPropostaLoteBots | PayloadPropostaBot | PayloadPropostaPerfil | PayloadPropostaRotina | PayloadPropostaAcesso | PayloadPropostaPasta | PayloadPropostaRotinaAtualizacao | PayloadPropostaRotinaExclusao;
+export type PayloadProposta = PayloadPropostaApp | PayloadPropostaColunasQuadro | PayloadPropostaQuadroExclusao | PayloadPropostaCredencial | PayloadPropostaLoteBots | PayloadPropostaBot | PayloadPropostaPerfil | PayloadPropostaRotina | PayloadPropostaAcesso | PayloadPropostaPasta | PayloadPropostaRotinaAtualizacao | PayloadPropostaRotinaExclusao;
 
 /** Proposta do modelo (ferramenta tipada) — nada é aplicado antes da confirmação da pessoa (E1.1). */
 export type Proposta = {

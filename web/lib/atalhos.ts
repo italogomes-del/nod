@@ -53,12 +53,19 @@ export type ContextoTecla = {
   ditando?: boolean;
   /** Foco num campo de edição da gaveta (memória, missão e voz…): ir a outro bot perderia o texto. */
   editando?: boolean;
+  /**
+   * NOD-445: quantas páginas a pílula do bot aberto tem (0 = sem pílula: experimento desligado, outra tela). O colchete
+   * sem Shift só é nosso com mais de uma; senão ⌘[ / ⌃[ / Alt+[ seguem sendo o voltar do app ou do navegador.
+   */
+  paginas?: number;
 };
 
 export type AcaoAtalho =
   | { tipo: "novo-bot" }
   | { tipo: "ir-ao-bot"; n: number }
   | { tipo: "vizinho"; passo: 1 | -1 }
+  /** NOD-445: página anterior/próxima da pílula do bot (o mesmo colchete, sem Shift). */
+  | { tipo: "pagina"; passo: 1 | -1 }
   | { tipo: "folha" };
 
 type Mod = "meta" | "ctrl" | "alt";
@@ -97,13 +104,19 @@ function acaoDaTecla(t: Tecla, c: ContextoTecla): AcaoAtalho | null {
     if (t.code === "KeyN") return { tipo: "novo-bot" };
     const digito = /^Digit([1-9])$/.exec(t.code);
     if (digito) return { tipo: "ir-ao-bot", n: Number(digito[1]) };
-    return null;
+    const col = colchete(t);
+    return col && (c.paginas ?? 0) > 1 ? { tipo: "pagina", passo: col } : null;
   }
-  // Colchete: primeiro pelo caractere (no ABNT2 o "[" fica na tecla BracketRight), depois pela posição.
-  if (t.key === "[" || t.key === "{") return { tipo: "vizinho", passo: -1 };
-  if (t.key === "]" || t.key === "}") return { tipo: "vizinho", passo: 1 };
-  if (t.code === "BracketLeft") return { tipo: "vizinho", passo: -1 };
-  if (t.code === "BracketRight") return { tipo: "vizinho", passo: 1 };
+  const col = colchete(t);
+  return col ? { tipo: "vizinho", passo: col } : null;
+}
+
+/** Colchete: primeiro pelo caractere (no ABNT2 o "[" fica na tecla BracketRight), depois pela posição. */
+function colchete(t: Tecla): -1 | 1 | null {
+  if (t.key === "[" || t.key === "{") return -1;
+  if (t.key === "]" || t.key === "}") return 1;
+  if (t.code === "BracketLeft") return -1;
+  if (t.code === "BracketRight") return 1;
   return null;
 }
 
@@ -189,7 +202,7 @@ export type LinhaDaFolha = {
   falado: string;
 };
 
-/** As 7 linhas da folha, nas teclas do lugar. ⌘K e ⌘⇧D aceitam ⌘ ou Ctrl: no Mac mostram ⌘, fora dele Ctrl. */
+/** As 8 linhas da folha, nas teclas do lugar. ⌘K e ⌘⇧D aceitam ⌘ ou Ctrl: no Mac mostram ⌘, fora dele Ctrl. */
 export function linhasDaFolha(lugar: LugarTeclado): LinhaDaFolha[] {
   const m = MOD_DE[lugar];
   const f = MOD_DA_FOLHA[lugar];
@@ -202,6 +215,7 @@ export function linhasDaFolha(lugar: LugarTeclado): LinhaDaFolha[] {
     { titulo: "Nova conversa (novo bot)", combinacoes: [[k(m), "N"]], falado: `${fala(m)} N` },
     { titulo: "Ir ao bot 1 a 9 da barra", combinacoes: [[k(m), "1–9"]], falado: `${fala(m)} 1 a 9` },
     { titulo: "Bot anterior e próximo", combinacoes: [[k(m), shift, "["], [k(m), shift, "]"]], falado: `${fala(m)} Shift colchete esquerdo e ${fala(m)} Shift colchete direito` },
+    { titulo: "Página anterior e próxima do bot", combinacoes: [[k(m), "["], [k(m), "]"]], falado: `${fala(m)} colchete esquerdo e ${fala(m)} colchete direito` },
     { titulo: "Folha de atalhos", combinacoes: [["?"], [k(f), "/"]], falado: `Interrogação, ou ${fala(f)} barra` },
     { titulo: "Buscar agentes", combinacoes: [[k(busca), "K"]], falado: `${fala(busca)} K` },
     { titulo: "Modo dev", combinacoes: [[k(busca), shift, "D"]], falado: `${fala(busca)} Shift D` },

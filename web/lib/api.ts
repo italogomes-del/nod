@@ -43,6 +43,7 @@ import type { MembroSala, Sala } from "../../src/contracts/sala.ts";
 import type { FaixaParada, Turno } from "../../src/contracts/turno.ts";
 import type { ComentarioDto, ComentarioTarefa, EntradaHistoricoDto, GrupoColuna, LoteQuadro, QuadroDaPessoaDto, QuadroDto, StatusTarefa, TarefaPorCodigoDto } from "../../src/contracts/quadro.ts";
 import type { EstadoExecucao, ExecucoesDaTarefa } from "../../src/contracts/quadro-execucoes.ts";
+import type { AppDto, PaginasDto } from "../../src/contracts/apps.ts";
 import type { AtividadeTarefa } from "../../src/contracts/quadro-pela-conversa.ts";
 import type { EventoLinha, TaxaDeAbertura, TrabalhoDetalheDto, TrabalhosDto } from "../../src/contracts/trabalho.ts";
 import type { DisponibilidadeLigacao, FalaLigacao, Ligacao, LigacaoCriada } from "../../src/contracts/ligacao.ts";
@@ -262,6 +263,11 @@ export function criarApi(escopo: Escopo) {
     gravarOrdemIas: (ordemIas: IdHarness[] | null) => pedir<Preferencias>("PUT", `${base}/preferencias`, { ordemIas }),
     gravarInteligencia: (agenteId: string, pedido: PedidoInteligencia) => pedir<{ agente: Agente }>("PUT", `${base}/agentes/${encodeURIComponent(agenteId)}/inteligencia`, pedido),
     inteligencia: (agenteId: string) => get<{ inteligencia: InteligenciaBot }>(`agentes/${encodeURIComponent(agenteId)}/inteligencia`),
+    /** NOD-445 (ADR-146): as páginas do bot (a ordem no servidor) e os apps. Criar e editar vão pela conversa. */
+    paginas: (agenteId: string) => get<{ paginas: PaginasDto }>(`agentes/${encodeURIComponent(agenteId)}/paginas`),
+    ordenarPaginas: (agenteId: string, ordem: string[]) => pedir<{ paginas: PaginasDto }>("PUT", `${base}/agentes/${encodeURIComponent(agenteId)}/paginas/ordem`, { ordem }),
+    removerApp: (agenteId: string, appId: string) => del<{ paginas: PaginasDto; app: AppDto }>(`agentes/${encodeURIComponent(agenteId)}/apps/${encodeURIComponent(appId)}`),
+    restaurarApp: (agenteId: string, appId: string) => post<{ paginas: PaginasDto; app: AppDto }>(`agentes/${encodeURIComponent(agenteId)}/apps/${encodeURIComponent(appId)}/restaurar`),
     /** NOD-442 (ADR-135): a aba Quadro de um bot. Cada mutação devolve o quadro montado e o lote (o Desfazer usa o id dele). */
     quadro: (agenteId: string) => get<{ quadro: QuadroDto | null }>(`agentes/${encodeURIComponent(agenteId)}/quadro`),
     /** NOD-415 (ADR-141): meta e prazo opcionais; meta null tira (fluxo contínuo). */

@@ -48,6 +48,7 @@ const NOD: Record<string, readonly [passado: string, presente: string]> = {
   responder_pedido: ["Respondeu a um pedido de colega", "Respondendo a um pedido de colega"],
   avisar_pessoa: ["Avisou você", "Avisando você"],
   gerir_quadro: ["Mexeu no quadro", "Mexendo no quadro"],
+  gerir_apps: ["Mexeu nas páginas", "Mexendo nas páginas"],
   gerir_times: ["Organizou os times", "Organizando os times"],
   // NOD-449: a tela Não lidos pela conversa (listar, marcar, desfazer).
   nao_lidos: ["Mexeu nos não lidos", "Mexendo nos não lidos"],

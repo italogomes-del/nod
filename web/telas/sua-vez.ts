@@ -34,6 +34,7 @@ const TIPO_HUMANO: Record<TipoDecisao, string> = {
   permissao: "pedido de permissão",
   credencial: "pedido de chave",
   colunas_quadro: "colunas do quadro",
+  app: "app do bot",
   quadro_exclusao: "excluir quadro",
 };
 
@@ -70,6 +71,7 @@ const PRAZO_POR_TIPO: Record<TipoDecisao, (em: string, item: Item) => string> = 
   permissao: vence,
   credencial: vence,
   colunas_quadro: nadaMudaSemVoce,
+  app: nadaMudaSemVoce,
   quadro_exclusao: nadaMudaSemVoce,
 };
 
@@ -88,6 +90,8 @@ const REGRA_HUMANA: Readonly<Record<string, string>> = {
   // de acesso venceu com o acesso já dado por outro caminho.
   "regra:janela_seguinte": "fechada: a janela seguinte já rodou",
   "regra:acesso_ja_concedido": "fechado: o acesso já tinha sido dado",
+  // definido em 2026-11-02 (revisão 5 do #626, NOD-445): o card Criar/Ajustar de um app que um card novo do mesmo app trocou.
+  "regra:app_substituido": "fechado: um card mais novo do mesmo app tomou o lugar",
 };
 
 /**
@@ -478,6 +482,11 @@ function renderAcoes(item: Item, aberta: boolean, estado: Pick<Estado, "conector
     case "colunas_quadro": {
       const p = item.proposta?.payload.kind === "colunas_quadro" ? item.proposta.payload : null;
       return `${p ? listaDasColunasParaSuaVez(p) : ""}<div class="acoes">${botao("decidir-proposta", "Trocar colunas", { classe: "pri", id: d.id })}${botao("recusar-decisao", "Manter", { id: d.id })}</div>`;
+    }
+    // NOD-445: o card Criar app (o Ajustar é pela conversa): o nome, a forma e o bot que ganha a página.
+    case "app": {
+      const p = item.proposta?.payload.kind === "app" ? item.proposta.payload : null;
+      return `${p ? `<p class="mini">${esc(p.nome)} · ${esc(p.forma)} · em ${esc(p.alvoNome)}</p>` : ""}<div class="acoes">${botao("decidir-proposta", "Criar", { classe: "pri", id: d.id })}${botao("recusar-decisao", "Agora não", { id: d.id })}</div>`;
     }
     // NOD-430: o mesmo verbo do card da conversa; não tem Desfazer. Sutil como ele (pedido da Ada, revisão 1 do PR #627):
     // botão neutro com só o verbo em vermelho (`danger`), sem o botão cheio (`pri`).
