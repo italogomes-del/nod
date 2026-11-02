@@ -3,7 +3,7 @@ import { LIMITES_QUADRO } from "../contracts/quadro.ts";
 import { RECADO_MAX } from "../contracts/quadro-execucoes.ts";
 import {
   acionaNaColuna, COLUNAS_PADRAO, colunaDeAndamento, colunaDeEntrada, colunaDeEspera, colunasDe, criarColuna, definirPassagem, ehGrupo, ehReservada, grupoDe, moverColuna, papelDe,
-  proximaColuna, removerColuna, normalizarNome, renomearColuna, resolverColuna, responsavelDe, saoPadrao, substituirColunas,
+  proximaColuna, removerColuna, normalizarNome, FAIXA_DO_PRAZO, prazoLegivelMin, renomearColuna, resolverColuna, responsavelDe, saoPadrao, substituirColunas,
 } from "./colunas.ts";
 import { formatarCodigo, lerCodigo } from "./codigo-tarefa.ts";
 
@@ -32,6 +32,13 @@ function textoObrigatorio(v: unknown, campo: string, max: number): string | Erro
   if (typeof v !== "string" || v.trim() === "") return { erro: `${campo} vazio` };
   if (v.length > max) return { erro: `${campo} passa de ${max} caracteres` };
   return v.trim();
+}
+
+/** NOD-420: o prazo da coluna em minutos (inteiro de 1 a 30 dias); null tira. */
+function prazoDaColuna(v: unknown): number | null | undefined | ErroOp {
+  if (v === undefined || v === null) return v;
+  if (typeof v !== "number" || !Number.isInteger(v) || v < 1 || v > LIMITES_QUADRO.prazoMin) return { erro: `prazo_min é um inteiro de minutos, de 1 a ${LIMITES_QUADRO.prazoMin} (${FAIXA_DO_PRAZO}); diga a faixa à pessoa` };
+  return v;
 }
 
 function textoOpcional(v: unknown, campo: string, max: number): string | undefined | ErroOp {
@@ -185,14 +192,21 @@ export function lerOp(v: unknown): OpQuadro | ErroOp {
       if (!ehGrupo(v.grupo)) return { erro: "coluna nova precisa de grupo: nao_iniciado, iniciado, feito ou fechado" };
       const depois = textoOpcional(v.depois_de, "depois_de", 60);
       if (falhou(depois)) return depois;
-      return { tipo: "criar_coluna", nome, grupo: v.grupo, ...(depois ? { depois_de: depois } : {}) };
+      const prazo = prazoDaColuna(v.prazo_min);
+      if (falhou(prazo)) return prazo;
+      return { tipo: "criar_coluna", nome, grupo: v.grupo, ...(depois ? { depois_de: depois } : {}), ...(prazo !== undefined ? { prazo_min: prazo } : {}) };
     }
     case "renomear_coluna": {
       const coluna = textoObrigatorio(v.coluna, "coluna", 60);
       if (falhou(coluna)) return coluna;
+      const prazo = prazoDaColuna(v.prazo_min);
+      if (falhou(prazo)) return prazo;
+      // NOD-420: só o prazo também vale (sem trocar o nome).
+      if (v.nome === undefined && prazo !== undefined) return { tipo: "renomear_coluna", coluna, prazo_min: prazo };
+      if (v.nome === undefined) return { erro: "renomear_coluna precisa de nome ou prazo_min" };
       const nome = textoObrigatorio(v.nome, "nome", LIMITES_QUADRO.coluna);
       if (falhou(nome)) return nome;
-      return { tipo: "renomear_coluna", coluna, nome };
+      return { tipo: "renomear_coluna", coluna, nome, ...(prazo !== undefined ? { prazo_min: prazo } : {}) };
     }
     case "mover_coluna": {
       const coluna = textoObrigatorio(v.coluna, "coluna", 60);
@@ -994,7 +1008,8 @@ export function planejarLote(p: {
       case "renomear_coluna": {
         const r = renomearColuna(colunas, op);
         if (falhou(r)) return erro(r.erro);
-        if (r.antes !== op.nome.trim()) frasesDasColunas.push(`${r.antes} agora é ${op.nome.trim()}`);
+        if (op.nome !== undefined && r.antes !== op.nome.trim()) frasesDasColunas.push(`${r.antes} agora é ${op.nome.trim()}`);
+        if (op.prazo_min !== undefined) frasesDasColunas.push(op.prazo_min === null ? `${r.antes} sem prazo` : `prazo de ${prazoLegivelMin(op.prazo_min)} em ${op.nome?.trim() || r.antes}`);
         mudarColunas(r.colunas, new Map());
         break;
       }

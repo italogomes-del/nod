@@ -124,6 +124,18 @@
 .qd-col-nome { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .qd-n { flex: none; font-size: 12px; font-weight: 500; color: var(--ink-2); font-variant-numeric: tabular-nums; }
 .qd-col-trava { display: inline-flex; flex: none; color: var(--ink-3); }
+/* NOD-420: o Responder no card e na linha; fica acima do ::after que torna o card inteiro clicável. */
+.qd-card-resp { position: relative; z-index: 1; display: flex; align-items: flex-end; gap: 6px; margin-top: 6px; }
+.qd-card-resp-in { min-height: 32px; padding: 6px 8px; font-size: 13px; resize: vertical; }
+.qd-card-resp-bt { flex: none; }
+.qd-l:has(.qd-card-resp) { flex-wrap: wrap; padding-bottom: 8px; }
+.qd-l .qd-card-resp { flex-basis: 100%; margin-top: 0; }
+.qd-quando.qd-atrasada { display: inline-flex; align-items: center; gap: 3px; color: var(--warning); font-weight: 600; }
+.qd-prz-campos { display: flex; gap: 6px; }
+.qd-prz-valor { width: 6em; }
+/* QA do PR 624: o prazo é um chip que não quebra nem espreme o nome (ver .qd-col-cab > .qd-col-bt). */
+.qd-col-prazo { flex: none; padding: 1px 6px; border-radius: 999px; background: color-mix(in srgb, var(--qd-col-fundo) 60%, var(--line)); font-size: 11px;
+  font-weight: 500; line-height: 16px; color: var(--ink-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .qd-col-lista { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; min-height: 40px; }
 .qd-col-vazio { padding: 12px 6px; font-size: 12px; color: var(--ink-3); text-align: center; }
 .qd-col-mais { padding: 2px 6px; font-size: 12.5px; }
@@ -149,7 +161,9 @@
 .qd-st.qd-st-pessoa { color: var(--ink-3); }
 .qd-st.qd-st-pessoa.qd-st-feito { color: var(--ink-2); }
 .qd-col-cab { position: relative; }
-.qd-col-cab > .qd-col-bt { flex: 1; }
+/* QA do PR 624, medido em 2026-11-02 (Chrome headless, coluna de 232 px com prazo, "Passar para…" e ⋯): sem piso o nome
+   ficava com 17 px ("Fazendo"). O botão do nome guarda ~6 caracteres; quem encolhe antes é o "Passar para…". */
+.qd-col-cab > .qd-col-bt { flex: 1 1 auto; min-width: min(6.5em, 50%); }
 .qd-col-bt[data-arrasta] { touch-action: none; }
 /* Decisão 6: o ⋯ só no hover ou no foco (no toque, sempre). */
 .qd-col-mais { flex: none; display: grid; place-items: center; width: 24px; height: 24px; margin-left: auto; padding: 0; border: 0; border-radius: 6px;
@@ -159,7 +173,7 @@
 .qd-col-mais:focus-visible, .qd-col-novo-bt:focus-visible, .qd-menu-it:focus-visible, .qd-chip-g:focus-within, .qd-fo-bt:focus-visible, .qd-fo-nome:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
 @media (hover: none) { .qd-col-mais { opacity: 1; } }
 /* ADR-142: a passagem da coluna. O nome do responsável fica à vista, em cinza; o "Passar para…" só no hover ou no foco. */
-.qd-col-passa { flex: none; margin-left: auto; max-width: 9em; padding: 2px 6px; border: 0; border-radius: 6px; background: none; color: var(--ink-3);
+.qd-col-passa { flex: 0 1000 auto; min-width: 2.5em; margin-left: auto; max-width: 9em; padding: 2px 6px; border: 0; border-radius: 6px; background: none; color: var(--ink-3);
   font: inherit; font-size: 12px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; opacity: 0; transition: opacity .12s; }
 .qd-col-passa-com, .qd-col-cab:hover .qd-col-passa, .qd-col-cab:focus-within .qd-col-passa, .qd-col-passa[aria-expanded="true"] { opacity: 1; }
 .qd-col-passa:hover, .qd-col-passa[aria-expanded="true"] { color: var(--ink); }
@@ -270,6 +284,8 @@ li.qd-card[draggable="true"] { cursor: grab; }
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: text; }
 .qd-fo-bt { display: grid; place-items: center; width: 40px; height: 44px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--ink-2); cursor: pointer; }
 .qd-fo-bt[aria-disabled="true"] { opacity: .35; cursor: default; }
+.qd-fo-prazo { min-height: 44px; padding: 0 8px; border: 0; border-radius: 8px; background: transparent; color: var(--ink-2); font: inherit; font-size: 12px; white-space: nowrap; cursor: pointer; }
+.qd-fo-prazo:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
 .qd-fo-nova { align-self: flex-start; gap: 6px; min-height: 44px; }
 
 /* ---------- O card: branco, 4 linhas. O título é o botão; o clique vale no card inteiro. ---------- */
@@ -572,6 +588,8 @@ a.qd-chip:hover { background: var(--surface-raised); }
   .qc-bt.qc-enviar::before { content: ""; position: absolute; inset: 5px; border-radius: 50%; background: var(--action); }
   .qc-bt.qc-enviar svg { position: relative; }
   .qc-link { min-height: 44px; display: inline-flex; align-items: center; }
+  /* NOD-420: o Responder do card em alvo de 44 e 16px (o iOS não dá zoom no foco). */
+  .qd-card-resp-in, .qd-card-resp-bt { min-height: 44px; font-size: 16px; }
   /* Na pílula do celular o par fica só com os ícones, em alvos de 44 (ADR-094); o nome segue no aria-label. */
   .qd-seg-bt { width: 44px; height: 44px; padding: 0; }
   .qd-seg-bt span { display: none; }

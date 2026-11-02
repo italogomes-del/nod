@@ -217,4 +217,13 @@ describe("quadroDaMeta com colunas da pessoa", () => {
     expect(seletorDoFocoDaColuna(el("qd-card", "fazendo", true))).toBeNull();
     expect(seletorDoFocoDaColuna(el("qd-col-bt", 'x"]', true))).toBeNull();
   });
+
+  it("o foco do ⋯, do Passar para… e do prazo na folha volta depois do quadro.mudou da própria mudança (QA do PR #624)", () => {
+    const el = (act: string, coluna: string, onde: ".qd-so-largo" | ".qd-folha") => ({ classList: { contains: (c: string) => c === "qd-col-mais" }, dataset: { act, coluna }, closest: (sel: string) => (sel === onde ? {} : null) });
+    expect(seletorDoFocoDaColuna(el("col-menu", "revisao", ".qd-so-largo"))).toBe('.qd-so-largo [data-act="col-menu"][data-coluna="revisao"]');
+    expect(seletorDoFocoDaColuna(el("col-passagem", "revisao", ".qd-so-largo"))).toBe('.qd-so-largo [data-act="col-passagem"][data-coluna="revisao"]');
+    expect(seletorDoFocoDaColuna(el("col-prazo", "fazendo", ".qd-folha"))).toBe('.qd-folha [data-act="col-prazo"][data-coluna="fazendo"]');
+    expect(seletorDoFocoDaColuna(el("tarefa-mover", "fazendo", ".qd-so-largo"))).toBeNull();
+    expect(seletorDoFocoDaColuna(el("col-menu", 'x"]', ".qd-so-largo"))).toBeNull();
+  });
 });

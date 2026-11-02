@@ -34,6 +34,7 @@ export type ColunaQuadro = {
   responsavel?: string | null;
   /** "O que essa etapa faz": vai no contexto do turno de quem pega a tarefa nesta coluna. */
   instrucoes?: string | null;
+  prazoMin?: number; // NOD-420 (só onde o trabalho anda): a tarefa parada além disso nesta coluna faz o quadro cobrar o responsável
 };
 
 /** A coluna como a web e o bot a recebem: `fixa` = não move nem sai (Precisa de você, Cancelado). */
@@ -125,6 +126,7 @@ export type TarefaDto = TarefaQuadro & {
   codigo: string;
   /** NOD-416: o branch sugerido (o código e o título em slug, ex.: ze-12-secao-de-planos). */
   branch: string;
+  naColunaDesde?: number | null; // NOD-420: epoch ms da entrada na coluna atual; null fora do Postgres
   /** NOD-421: os PRs ligados e as linhas de sistema (CI, conflito, merge). */
   prs?: PrNaTela[];
   linhas?: LinhaDeSistema[];
@@ -164,8 +166,8 @@ export type OpQuadro =
    */
   | { tipo: "mover_quadro"; tarefa: string; quadro: string }
   /* NOD-448: as colunas. `coluna`, `depois_de`, `antes_de`, `destino` = o id ou o nome da coluna. */
-  | { tipo: "criar_coluna"; nome: string; grupo: GrupoColuna; depois_de?: string }
-  | { tipo: "renomear_coluna"; coluna: string; nome: string }
+  | { tipo: "criar_coluna"; nome: string; grupo: GrupoColuna; depois_de?: string; prazo_min?: number | null }
+  | { tipo: "renomear_coluna"; coluna: string; nome?: string; prazo_min?: number | null } // NOD-420: prazo_min põe/tira (null) o prazo; com ele, nome pode faltar
   | { tipo: "mover_coluna"; coluna: string; antes_de?: string; depois_de?: string }
   | { tipo: "remover_coluna"; coluna: string; destino?: string }
   | { tipo: "definir_passagem"; coluna: string; agente?: string | null; instrucoes?: string | null }
@@ -191,7 +193,7 @@ export type ResultadoGerirQuadro =
 export type { ResumoQuadroParaBot } from "./quadro-resumo-bot.ts";
 
 /** Os tetos do quadro (a ferramenta, o domínio e a tela usam os mesmos). */
-export const LIMITES_QUADRO = { meta: 200, titulo: 200, descricao: 4000, pergunta: 1000, resposta: 4000, comentario: 4000, ops: 50, itens: 50, identificador: 40, url: 500, coluna: 40, colunas: 30, instrucoes: 500 } as const;
+export const LIMITES_QUADRO = { meta: 200, titulo: 200, descricao: 4000, pergunta: 1000, resposta: 4000, comentario: 4000, ops: 50, itens: 50, identificador: 40, url: 500, coluna: 40, colunas: 30, instrucoes: 500, prazoMin: 30 * 24 * 60 } as const;
 
 /** NOD-448 (ADR-140): o card de substituir as colunas mora em quadro-proposta-colunas.ts (teto de linhas dos contratos). */
 export type { ColunaNaProposta, PayloadPropostaColunasQuadro } from "./quadro-proposta-colunas.ts";

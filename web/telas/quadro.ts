@@ -54,6 +54,8 @@ export const ICONE = {
   alca: svg('<path d="M5 9h14M5 15h14"/>', "qd-ic-alca", 16, 2),
   subir: svg('<path d="m6 15 6-6 6 6"/>', "qd-ic-subir", 14, 2),
   descer: svg('<path d="m6 9 6 6 6-6"/>', "qd-ic-descer", 14, 2),
+  /** NOD-420: a tarefa parada além do prazo da coluna (ao lado do "há quanto", decorativo: o texto diz). */
+  prazo: svg('<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>', "qd-ic-prazo", 11, 2),
   tirar: svg('<path d="M5 7h14M10 11v6M14 11v6M7 7l1 12h8l1-12M9.5 7V4.5h5V7"/>', "qd-ic-tirar", 14, 1.7),
 } as const;
 
@@ -143,6 +145,10 @@ export interface Card {
   classe?: string;
   /** ADR-142: o card se arrasta para outra coluna (só no quadro que edita); com ele vem o "Mover para…" (teclado e toque). */
   arrastavel?: boolean;
+  /** NOD-420: o campo Responder no próprio card (Bloqueado e Precisa de você); o valor é o teto da resposta. */
+  responder?: number;
+  /** NOD-420: parada além do prazo da coluna (o "parada há" fica em destaque). */
+  atrasada?: boolean;
   /** ADR-142: o menu do "Mover para…", quando aberto neste card. */
   menu?: Html;
 }
@@ -179,6 +185,16 @@ function estadoDoCard(c: Card): Html {
   return h(`<span class="qd-estado qd-e-${c.estado}" title="${esc(f.longa)}"><span>${esc(c.estadoTexto || f.curta)}</span></span>`);
 }
 
+/** NOD-420 (revisão 4 do PR #624): o que o leitor de tela ouve da tarefa parada além do prazo da coluna. */
+export const PASSOU_DO_PRAZO = "passou do prazo";
+
+/** O "há quanto" do card e da linha; atrasada, com o relógio (aria-hidden) e o "passou do prazo" para o leitor de tela. */
+function quandoDoCard(c: Card): string {
+  if (!c.quando) return "";
+  if (!c.atrasada) return `<span class="qd-quando">${esc(c.quando)}</span>`;
+  return `<span class="qd-quando qd-atrasada" title="Passou do prazo da coluna">${ICONE.prazo}${esc(c.quando)}<span class="qd-sr">, ${PASSOU_DO_PRAZO}</span></span>`;
+}
+
 /** O que o leitor de tela ouve do card inteiro, numa frase. */
 export function rotuloDoCard(c: Card): string {
   const { rodam } = avataresDoCard(c);
@@ -189,7 +205,20 @@ export function rotuloDoCard(c: Card): string {
     ...rodam.map((q) => rotuloDoAvatar(q.nome, "rodando", q.acao, q.tempo)),
     !c.motivo && c.estado && c.estado !== "rodando" ? FRASE[c.estado].longa : "",
     c.aviso ? c.aviso.texto : "",
+    c.atrasada ? PASSOU_DO_PRAZO : "",
   ].filter(Boolean).join(", ");
+}
+
+/**
+ * NOD-420: o campo Responder no card (e na linha do celular). Enter envia, Shift+Enter quebra a linha; quem ouve o
+ * teclado e o envio é web/lib/quadro-na-tela.ts. O id deixa o rascunho sobreviver à regravação do quadro.
+ */
+function formDoResponder(c: Card, onde: "card" | "linha"): string {
+  if (!c.responder) return "";
+  const id = `qd-cresp-${onde}-${esc(c.id)}`;
+  return `<form class="qd-card-resp" data-form="responder-tarefa" data-id="${esc(c.id)}">` +
+    `<textarea id="${id}" class="qd-resp-in qd-card-resp-in" name="resposta" rows="1" maxlength="${c.responder}" required placeholder="Responder" aria-label="${esc(`Responder: ${c.titulo}`)}"></textarea>` +
+    `<button type="submit" class="qd-bt qd-bt-pri qd-card-resp-bt" aria-label="${esc(`Enviar resposta: ${c.titulo}`)}">Enviar</button></form>`;
 }
 
 /**
@@ -201,7 +230,8 @@ export function card(c: Card): Html {
   const av = avataresDoCard(c);
   const r = c.responsavel;
   const quem = r || av.rodam.length ? `<span class="qd-quem"><span class="qd-avs">${av.html}</span><span>${esc(r?.nome ?? "")}</span></span>` : "";
-  const quando = c.quando ? `<span class="qd-quando">${esc(c.quando)}</span>` : "";
+  const quando = quandoDoCard(c);
+  const resp = formDoResponder(c, "card");
   const l1 = c.aviso ? aviso(c.aviso) : estadoDoCard(c);
   const l3 = c.voce ? `<span class="qd-voce-frase">${esc(c.voce)}</span>`
     : c.pr || c.tags?.length ? `<span class="qd-tags">${c.pr ? `<span class="qd-tag qd-tag-pr" title="${esc(c.pr.titulo)}"><i class="qd-pr-ponto qd-pr-${c.pr.tom}" aria-hidden="true"></i>${esc(c.pr.texto)}<span class="qd-sr"> (${esc(c.pr.titulo)})</span></span>` : ""}${(c.tags ?? []).map((t) => `<span class="qd-tag">${esc(t)}</span>`).join("")}</span>` : "";
@@ -209,7 +239,7 @@ export function card(c: Card): Html {
   return h(`<li class="${classe}" data-tarefa="${esc(c.id)}"${c.arrastavel ? ' draggable="true"' : ""}>` +
     `<div class="qd-card-l1"><span class="qd-id">${esc(c.codigo ?? c.id)}</span>${l1}</div>` +
     `<button type="button" class="qd-card-bt" data-act="abrir-tarefa" data-id="${esc(c.id)}" aria-label="${esc(rotuloDoCard(c))}"><span class="qd-card-tit">${esc(c.titulo)}</span></button>` +
-    l3 + (quem || quando ? `<div class="qd-card-pe">${quem}${quando}</div>` : "") + botaoDeMover(c) + (c.menu ?? "") + `</li>`);
+    l3 + resp + (quem || quando ? `<div class="qd-card-pe">${quem}${quando}</div>` : "") + botaoDeMover(c) + (c.menu ?? "") + `</li>`);
 }
 
 /* ---------- Coluna, quadro, barra e meta ---------- */
@@ -241,6 +271,8 @@ export interface Coluna {
   apos?: Html;
   /** A regra da coluna ("Feito só aceita vindo de Em revisão"), num cadeado com o texto no title e para o leitor de tela. */
   trava?: string;
+  /** NOD-420: o prazo (SLA) da coluna, em palavras ("2 h"), discreto ao lado do nome. */
+  prazo?: string;
   vazio?: string;
   mais?: number;
   /** O `data-act` do "e mais N" (a ação de mostrar o resto da coluna). */
@@ -269,6 +301,9 @@ export function coluna(c: Coluna): Html {
       `<button type="button" class="qd-col-tira" data-act="abrir-coluna" data-status="${id}" aria-expanded="false" title="${esc(`Mostrar ${c.nome}`)}">${ic}<span class="qd-col-nome">${esc(c.nome)}</span><span class="qd-n">${n}</span></button></section>`);
   }
   const trava = c.trava ? `<span class="qd-col-trava" title="${esc(c.trava)}">${ICONE.trava}<span class="qd-sr">${esc(c.trava)}</span></span>` : "";
+  // QA do PR #624: o prazo é um chip que não quebra; o nome cortado por reticências leva o nome inteiro no title.
+  const prazo = c.prazo ? `<span class="qd-col-prazo" title="${esc(`Prazo da coluna: ${c.prazo}`)}"><span class="qd-sr">Prazo: </span>${esc(c.prazo)}</span>` : "";
+  const nome = `<span class="qd-col-nome" title="${esc(c.nome)}">${esc(c.nome)}</span>`;
   // "e mais N" só com a ação que mostra o resto (NOD-415): botão sem ação não aparece, só a contagem.
   const mais = !c.mais ? "" : c.maisAcao
     ? `<li class="qd-col-mais"><button type="button" class="qd-link" data-act="${esc(c.maisAcao)}" data-status="${id}">${esc(`e mais ${c.mais}`)}</button></li>`
@@ -278,10 +313,10 @@ export function coluna(c: Coluna): Html {
   const dica = ed ? (ed.fixa ? `Recolher ${c.nome} · clique duplo renomeia` : `Recolher ${c.nome} · clique duplo renomeia · arraste para mover`) : `Recolher ${c.nome}`;
   const atalhos = ed ? ` aria-keyshortcuts="${ed.fixa ? "F2" : "F2 Alt+ArrowLeft Alt+ArrowRight"}"${ed.fixa ? "" : " data-arrasta"}` : "";
   const cab = c.cab ?? (c.recolhivel
-    ? `<button type="button" class="qd-col-bt" data-act="abrir-coluna" data-status="${id}" aria-expanded="true" data-coluna="${id}" title="${esc(dica)}"${atalhos}>${ic}<span class="qd-col-nome">${esc(c.nome)}</span><span class="qd-n">${n}</span></button>`
-    : `${ic}<span class="qd-col-nome">${esc(c.nome)}</span><span class="qd-n">${n}</span>`);
+    ? `<button type="button" class="qd-col-bt" data-act="abrir-coluna" data-status="${id}" aria-expanded="true" data-coluna="${id}" title="${esc(dica)}"${atalhos}>${ic}${nome}<span class="qd-n">${n}</span></button>`
+    : `${ic}${nome}<span class="qd-n">${n}</span>`);
   return h(`<section class="${base}" aria-label="${esc(`${c.nome}, ${n}`)}" ${dados}${presa}>` +
-    `<h3 class="qd-col-cab">${cab}${trava}${c.apos ?? ""}</h3>` +
+    `<h3 class="qd-col-cab">${cab}${trava}${prazo}${c.apos ?? ""}</h3>` +
     `<ul class="qd-col-lista">${cards.join("")}${mais}${vazio}</ul></section>`);
 }
 
@@ -337,7 +372,7 @@ export function linha(c: Card): Html {
   const fim = c.aviso ? aviso(c.aviso) : `${est}<span class="qd-id">${esc(c.codigo ?? c.id)}</span>`;
   return h(`<li class="${cl("qd-l", c.menu && "qd-com-menu", c.aviso && "qd-com-aviso", c.classe && esc(c.classe))}" data-tarefa="${esc(c.id)}">` +
     `<button type="button" class="qd-l-bt" data-act="abrir-tarefa" data-id="${esc(c.id)}" aria-label="${esc(rotuloDoCard(c))}">${av.html ? `<span class="qd-avs">${av.html}</span>` : ""}<span class="qd-l-tit">${esc(c.titulo)}</span></button>` +
-    `<span class="qd-l-fim">${fim}</span>${botaoDeMover(c)}${c.menu ?? ""}</li>`);
+    `<span class="qd-l-fim">${quandoDoCard(c)}${fim}</span>${botaoDeMover(c)}${c.menu ?? ""}${formDoResponder(c, "linha")}</li>`);
 }
 
 export function lista(o: { grupos: { status: string; nome: string; icone?: Status; pessoa?: boolean; linhas: Html[]; n?: number; recolhido?: boolean; vazio?: string }[]; rotulo?: string; novaTarefa?: boolean; antes?: Html }): Html {

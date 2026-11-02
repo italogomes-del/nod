@@ -1,4 +1,6 @@
 import { varrerRiscosDosQuadros } from "../../use-cases/risco-quadro.ts";
+import { varrerAvisosDosQuadros } from "../../use-cases/avisos-quadro.ts";
+import type { Executor } from "../../contracts/evento.ts";
 import { cuidarDasExecucoesDoQuadro } from "../../use-cases/quadro-execucoes.ts";
 import type { Decisao } from "../../contracts/decisao.ts";
 import { ehErroDeDominio } from "../../domain/erro.ts";
@@ -46,6 +48,11 @@ export type OpcoesVarredor = {
   riscosPassados?: Map<string, number>;
   /** NOD-219: quando cada turno velho na fila foi observado (turnos-orfaos.ts); o laço cria um mapa só para o processo. */
   turnosObservados?: TurnosObservados;
+  /**
+   * NOD-420 (revisão 3 do PR #624): o executor configurado agora (valor vivo, como o scheduler), para o turno que a
+   * cobrança do prazo de coluna abre. Ausente: o do turno anterior da tarefa, senão "local".
+   */
+  executor?: () => Executor;
   /** ADR-115: a idade a partir da qual a decisão `em_revisao` vira cartão; ausente = RECOLHER_REVISAO_MS (2 × o prazo). Só o teste muda. */
   recolherRevisaoMs?: number;
 };
@@ -125,6 +132,17 @@ export async function varrerPessoa(escopo: Escopo, tx: Transacao, opcoes: Opcoes
     });
   } catch (e) {
     log("erro", "riscos_quadro_falhou", { erro: ehErroDeDominio(e) ? e.codigo : e instanceof Error ? e.name : "desconhecido" });
+  }
+  // NOD-420: as decisões pendentes (janela curta) e o prazo das colunas, a cada passada, em transação própria. O `tx` dos
+  // deps é esta mesma transação: cada quadro e cada cobrança vão num SAVEPOINT dela (revisão do PR #624).
+  try {
+    await tx(async (trx) => {
+      const deps: Deps = { repos: criarRepos(trx, escopo), services: opcoes.services, useCases: opcoes.useCases, tx: (fn) => fn(trx), escopo, agora: opcoes.agora };
+      const r = await varrerAvisosDosQuadros(deps, { executor: opcoes.executor?.() });
+      if (r.events.length) await deps.repos.events.gravarComOutbox(r.events);
+    });
+  } catch (e) {
+    log("erro", "avisos_quadro_falhou", { erro: ehErroDeDominio(e) ? e.codigo : e instanceof Error ? e.name : "desconhecido" });
   }
   // definido em 2026-11-02 (NOD-418): o fim de cada trabalho de tarefa do quadro (nova tentativa, Bloqueado, o recado que
   // a sessão não leu), em transação própria; cada tarefa decide com o quadro travado. O trabalho novo roda onde o

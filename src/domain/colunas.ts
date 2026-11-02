@@ -171,6 +171,10 @@ export function validarColunas(colunas: readonly ColunaQuadro[]): ErroColuna | n
     ids.add(c.id);
     if (!ehGrupo(c.grupo)) return { erro: `grupo inválido: ${String(c.grupo)} (use nao_iniciado, iniciado, feito ou fechado)` };
     if (ehReservada(c.id) && GRUPO_PADRAO[c.id] !== c.grupo) return { erro: `o grupo de "${c.nome}" não muda` };
+    if (c.prazoMin !== undefined) {
+      if (!Number.isInteger(c.prazoMin) || c.prazoMin < 1 || c.prazoMin > LIMITES_QUADRO.prazoMin) return { erro: `prazo de "${c.nome}" inválido (minutos, de 1 a ${LIMITES_QUADRO.prazoMin}, ou seja, ${FAIXA_DO_PRAZO})` };
+      if (!podeTerPrazo({ id: c.id, grupo: c.grupo })) return { erro: `prazo só vale numa coluna onde o trabalho anda, não em "${c.nome}"` };
+    }
     const n = nomeValido(c.nome);
     if (typeof n !== "string") return n;
     const chave = normalizarNome(n);
@@ -209,8 +213,28 @@ function faixaMovel(colunas: readonly ColunaQuadro[], g: GrupoColuna): [number, 
 
 export type Mudanca = { colunas: ColunaQuadro[]; ajustada: boolean };
 
+/**
+ * A coluna exige a pessoa ("só uma pessoa tira daqui", NOD-419)? Estrutural: lê `trava.soPessoa` se a coluna tiver,
+ * sem depender do tipo da trava (a NOD-419 traz o tipo).
+ */
+export type ComTrava = { trava?: { soPessoa?: boolean } | null };
+export function exigePessoa(coluna: (Partial<ColunaQuadro> & ComTrava) | undefined): boolean {
+  return coluna?.trava?.soPessoa === true;
+}
+
+/**
+ * NOD-420: o prazo só vale onde o trabalho anda; esperar a pessoa (Bloqueado, Precisa de você e a coluna "só a pessoa
+ * tira daqui") já chama a pessoa, e ninguém além dela tira a tarefa de lá (revisão 4 do PR #624: o prazo ali seria
+ * cobrar o responsável por algo que ele não pode fazer). A coluna que ganha a trava depois de ter prazo guarda o número,
+ * mas ele fica dormente: `validarColunas` só olha o grupo (ligar a trava não falha por causa do prazo), o varredor
+ * (`atrasosDePrazo`) e a tela ignoram; tirada a trava, o prazo volta a valer.
+ */
+export function podeTerPrazo(c: Pick<ColunaQuadro, "id" | "grupo"> & ComTrava): boolean {
+  return c.grupo === "iniciado" && c.id !== "voce" && c.id !== "bloqueado" && !exigePessoa(c);
+}
+
 /** Coluna nova: no fim do grupo, ou logo depois de `depois_de` se ela for do mesmo grupo. */
-export function criarColuna(atuais: readonly ColunaQuadro[], op: { nome: string; grupo: GrupoColuna; depois_de?: string }): (Mudanca & { id: string }) | ErroColuna {
+export function criarColuna(atuais: readonly ColunaQuadro[], op: { nome: string; grupo: GrupoColuna; depois_de?: string; prazo_min?: number | null }): (Mudanca & { id: string }) | ErroColuna {
   if (!ehGrupo(op.grupo)) return { erro: "coluna nova precisa de grupo: nao_iniciado, iniciado, feito ou fechado" };
   const nome = nomeValido(op.nome);
   if (typeof nome !== "string") return nome;
@@ -226,20 +250,26 @@ export function criarColuna(atuais: readonly ColunaQuadro[], op: { nome: string;
     if (i >= ini && i < fim) pos = i + 1;
     else ajustada = true;
   }
-  colunas.splice(pos, 0, { id, nome, grupo: op.grupo });
+  colunas.splice(pos, 0, { id, nome, grupo: op.grupo, ...(typeof op.prazo_min === "number" ? { prazoMin: op.prazo_min } : {}) });
   const e = validarColunas(colunas);
   return e ?? { colunas, id, ajustada };
 }
 
-export function renomearColuna(atuais: readonly ColunaQuadro[], op: { coluna: string; nome: string }): (Mudanca & { id: string; antes: string }) | ErroColuna {
+export function renomearColuna(atuais: readonly ColunaQuadro[], op: { coluna: string; nome?: string; prazo_min?: number | null }): (Mudanca & { id: string; antes: string }) | ErroColuna {
   const id = resolverColuna(atuais, op.coluna);
   if (typeof id !== "string") return id;
-  const nome = nomeValido(op.nome);
-  if (typeof nome !== "string") return nome;
+  const nome = op.nome === undefined ? undefined : nomeValido(op.nome);
+  if (nome !== undefined && typeof nome !== "string") return nome;
   const colunas = atuais.map((c) => ({ ...c }));
   const c = colunas.find((x) => x.id === id)!;
   const antes = c.nome;
-  c.nome = nome;
+  if (nome !== undefined) c.nome = nome;
+  // NOD-420: null tira o prazo; ausente não mexe. Pôr prazo onde só a pessoa tira a tarefa não vale (revisão 4 do PR #624).
+  if (op.prazo_min === null) delete c.prazoMin;
+  else if (op.prazo_min !== undefined) {
+    if (exigePessoa(c as ComTrava)) return { erro: `só a pessoa tira a tarefa de "${c.nome}": essa coluna não tem prazo` };
+    c.prazoMin = op.prazo_min;
+  }
   const e = validarColunas(colunas);
   return e ?? { colunas, id, antes, ajustada: false };
 }
@@ -331,10 +361,14 @@ export function substituirColunas(
     if (tomados.has(id)) return { erro: `coluna repetida: ${nome}` };
     tomados.add(id);
     usados.add(id);
-    // A passagem (ADR-142) segue com a coluna que continua; a que nasce agora vem sem. Revisão 3 do PR #622: só se a
-    // coluna aceita passagem no grupo novo (uma passagem gravada onde não vale não derruba a troca do conjunto).
-    const { responsavel, instrucoes } = aceitaPassagem({ id, grupo: x.grupo }) ? atuais.find((c) => c.id === id) ?? {} : {};
-    novas.push({ id, nome, grupo: x.grupo, ...(responsavel ? { responsavel } : {}), ...(instrucoes ? { instrucoes } : {}) });
+    // A passagem (ADR-142) e o prazo (NOD-420) seguem com a coluna que continua; a que nasce agora vem sem. Revisão 3 do
+    // PR #622: a passagem só se a coluna aceita passagem no grupo novo (uma passagem gravada onde não vale não derruba a
+    // troca do conjunto). O prazo só fica se ela continua onde o trabalho anda.
+    const atual = atuais.find((c) => c.id === id);
+    const { responsavel, instrucoes } = aceitaPassagem({ id, grupo: x.grupo }) ? atual ?? {} : {};
+    const prazoMin = atual?.prazoMin;
+    const comPrazo = prazoMin !== undefined && podeTerPrazo({ id, grupo: x.grupo });
+    novas.push({ id, nome, grupo: x.grupo, ...(responsavel ? { responsavel } : {}), ...(instrucoes ? { instrucoes } : {}), ...(comPrazo ? { prazoMin } : {}) });
   }
   let ajustada = false;
   for (const fixa of ["voce", "cancelado"] as const) {
@@ -376,11 +410,23 @@ export function colunasDto(colunas: readonly ColunaQuadro[]): ColunaDto[] {
   return colunas.map((c) => ({ ...c, fixa: COLUNAS_FIXAS.has(c.id), daPessoa: !ehReservada(c.id), recolhida: nasceRecolhida(c) }));
 }
 
+/** NOD-420: o prazo em palavras ("30 min", "2 h", "1 h 30 min", "3 dias"). */
+export function prazoLegivelMin(min: number): string {
+  if (min < 60) return `${min} min`;
+  if (min % 1440 === 0) return min === 1440 ? "1 dia" : `${min / 1440} dias`;
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  return m ? `${h} h ${m} min` : `${h} h`;
+}
+
+/** A faixa do prazo em palavras ("de 1 min a 30 dias"): o que a tela e o bot dizem à pessoa (QA do PR #624). */
+export const FAIXA_DO_PRAZO = `de 1 min a ${prazoLegivelMin(LIMITES_QUADRO.prazoMin)}`;
+
 /** Iguais às padrão? (a gravação guarda null, e o quadro de antes segue "sem mudança"). */
 export function saoPadrao(colunas: readonly ColunaQuadro[]): boolean {
   return colunas.length === COLUNAS_PADRAO.length && colunas.every((c, i) => {
     const p = COLUNAS_PADRAO[i]!;
-    return c.id === p.id && c.nome === p.nome && c.grupo === p.grupo && !c.responsavel && !c.instrucoes;
+    return c.id === p.id && c.nome === p.nome && c.grupo === p.grupo && !c.responsavel && !c.instrucoes && c.prazoMin === undefined;
   });
 }
 

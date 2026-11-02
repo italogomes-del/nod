@@ -1,7 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { expect, it } from "vitest";
+import { ErroDeDominio } from "../../src/domain/erro.ts";
+import { definirDestinoDoLog } from "../../src/obs/log.ts";
 import type { Tx } from "../../src/shared/types.ts";
-import { aplicarLoteQuadro, type PedidoLote } from "../../src/use-cases/quadro.ts";
+import { JANELA_AGRUPAR_MS } from "../../src/domain/avisos-quadro.ts";
+import { avisarDoQuadro, varrerAvisosDosQuadros } from "../../src/use-cases/avisos-quadro.ts";
+import { aplicarLoteQuadro, type PedidoLote, resumoParaBot } from "../../src/use-cases/quadro.ts";
 import { depsSobre } from "../helpers/deps-l7.ts";
 import { agenteComConversa } from "../helpers/fabricas.ts";
 import { PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
@@ -188,19 +192,349 @@ describeIntegracao("quadro-agente (NOD-442)", () => {
     });
   });
 
-  it("Com você avisa a pessoa na conversa do responsável, uma vez, como aviso não confiável (revisão do PR #612)", async () => {
+  it("Bloqueado e Com você avisam a pessoa juntos, uma vez, depois da janela curta, como fala confiável do bot (NOD-420)", async () => {
     await withRollback(MARLON, async (trx) => {
       const m = await montar(trx);
-      await m.lote({ ops: [{ tipo: "criar_quadro", meta: "M" }, { tipo: "criar_tarefa", titulo: "T1", agente: m.betoNome, status: "afazer" }] });
+      // O relógio do banco marca a entrada na coluna (na_coluna_desde): o do teste anda a partir de agora.
+      m.relogio.agora = Date.now();
+      await m.lote({ ops: [{ tipo: "criar_quadro", meta: "M" }, { tipo: "criar_tarefa", titulo: "T1", agente: m.betoNome, status: "afazer" }, { tipo: "criar_tarefa", titulo: "T2", agente: m.betoNome, status: "afazer" }, { tipo: "criar_tarefa", titulo: "T3", agente: m.betoNome, status: "afazer" }] });
       const beto = { tipo: "agente", agenteId: m.beto.agenteId } as const;
       const r = await m.lote({ autor: beto, quadro: m.anaNome, ops: [{ tipo: "mudar_tarefa", tarefa: "T1", status: "voce", pergunta: "Azul ou verde?" }] });
       if (!r.data.ok) throw new Error(r.data.detalhe);
+      const r2 = await m.lote({ autor: beto, quadro: m.anaNome, ops: [{ tipo: "mudar_tarefa", tarefa: "T2", status: "bloqueado", pergunta: "Cadê o acesso?" }, { tipo: "mudar_tarefa", tarefa: "T3", status: "revisao" }] });
+      if (!r2.data.ok) throw new Error(r2.data.detalhe);
+      // O bot lê a pergunta de Bloqueado também; a tela recebe a entrada na coluna.
+      expect(resumoParaBot(r2.data.quadro!).tarefas.find((t) => t.titulo === "T2")).toMatchObject({ status: "bloqueado", pergunta: "Cadê o acesso?" });
+      expect(r2.data.quadro!.tarefas.every((t) => typeof t.naColunaDesde === "number")).toBe(true);
       const avisos = async () => (await m.repos.mensagens.listarDaConversa(m.beto.conversaId)).filter((x) => x.payload?.kind === "aviso_pessoa");
-      expect(await avisos()).toMatchObject([{ texto: `Preciso de você no quadro, em "T1": Azul ou verde?`, confianca: "nao_confiavel", autoria: { autor_tipo: "agente", autor_id: m.beto.agenteId } }]);
-      expect(r.events?.find((e) => e.kind === "mensagem_criada")?.dados).toMatchObject({ aviso: true });
-      // Continuar em voce (mudar o texto) não avisa de novo.
+      // Dentro da janela, nada: as que chegam perto saem juntas.
+      expect(await avisos()).toEqual([]);
+      m.relogio.agora = Date.now() + JANELA_AGRUPAR_MS + 1000;
+      const v = await varrerAvisosDosQuadros(m.deps);
+      const lista = await avisos();
+      expect(lista).toHaveLength(1);
+      expect(lista[0]).toMatchObject({ confianca: "confiavel", autoria: { autor_tipo: "agente", autor_id: m.beto.agenteId } });
+      // Na conversa do Beto (não a do anfitrião), o aviso diz de qual quadro é (revisão do PR #624, achado 3).
+      expect(lista[0]!.texto).toContain(`2 decisões esperam você no quadro de ${m.anaNome}:`);
+      expect(lista[0]!.texto).toContain(`"T1", ${m.betoNome}: Azul ou verde?`);
+      expect(lista[0]!.texto).toContain(`"T2" (Bloqueado), ${m.betoNome}: Cadê o acesso?`);
+      expect(lista[0]!.texto).not.toContain("T3");
+      expect(v.events.find((e) => e.kind === "mensagem_criada")?.dados).toMatchObject({ aviso: true });
+      // Outra volta do varredor, ou mexer no texto sem sair da coluna, não avisa de novo.
+      await varrerAvisosDosQuadros(m.deps);
       await m.lote({ autor: beto, quadro: m.anaNome, ops: [{ tipo: "mudar_tarefa", tarefa: "T1", descricao: "mais" }] });
       expect(await avisos()).toHaveLength(1);
+    });
+  });
+
+  it("a resposta na tarefa devolve à coluna de antes (Em revisão) e aciona o responsável; voltar a esperar avisa de novo (NOD-420)", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      m.relogio.agora = Date.now();
+      await m.lote({ ops: [{ tipo: "criar_quadro", meta: "M" }, { tipo: "criar_tarefa", titulo: "T1", agente: m.betoNome, status: "afazer" }] });
+      const beto = { tipo: "agente", agenteId: m.beto.agenteId } as const;
+      await m.lote({ autor: beto, quadro: m.anaNome, ops: [{ tipo: "mudar_tarefa", tarefa: "T1", status: "revisao" }] });
+      await m.lote({ autor: beto, quadro: m.anaNome, ops: [{ tipo: "mudar_tarefa", tarefa: "T1", status: "voce", pergunta: "Pode publicar?" }] });
+      m.relogio.agora = Date.now() + JANELA_AGRUPAR_MS + 1000;
+      await varrerAvisosDosQuadros(m.deps);
+      const r = await m.lote({ autor: { tipo: "pessoa" }, anfitriaoId: m.ana.agenteId, ops: [{ tipo: "responder", tarefa: "T1", resposta: "Pode" }] });
+      if (!r.data.ok) throw new Error(r.data.detalhe);
+      expect(r.data.quadro?.tarefas[0]).toMatchObject({ status: "revisao", resposta: "Pode" });
+      expect(r.data.comecaram).toHaveLength(1);
+      const entrada = (await m.repos.turnos.buscar(r.data.comecaram[0]!.turnoId))?.entradaTexto;
+      expect(entrada).toContain("Pode publicar?");
+      expect(entrada).toContain("resposta: Pode");
+      // Entrou de novo em Precisa de você: é outra espera, avisa outra vez.
+      await m.lote({ autor: beto, quadro: m.anaNome, ops: [{ tipo: "mudar_tarefa", tarefa: "T1", status: "voce", pergunta: "E o título?" }] });
+      m.relogio.agora = Date.now() + 2 * (JANELA_AGRUPAR_MS + 1000);
+      await varrerAvisosDosQuadros(m.deps);
+      const avisos = (await m.repos.mensagens.listarDaConversa(m.beto.conversaId)).filter((x) => x.payload?.kind === "aviso_pessoa");
+      expect(avisos.map((a) => a.texto)).toEqual([expect.stringContaining("Pode publicar?"), expect.stringContaining("E o título?")]);
+    });
+  });
+
+  it("prazo da coluna: parada além dele, o quadro cobra o responsável uma vez (turno novo); continuou parada, avisa a pessoa uma vez (NOD-420)", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const base = Date.now();
+      m.relogio.agora = base;
+      await m.lote({ ops: [{ tipo: "criar_quadro", meta: "M" }, { tipo: "renomear_coluna", coluna: "revisao", prazo_min: 60 }, { tipo: "criar_tarefa", titulo: "T1", agente: m.betoNome, status: "afazer" }] });
+      const beto = { tipo: "agente", agenteId: m.beto.agenteId } as const;
+      const r = await m.lote({ autor: beto, quadro: m.anaNome, ops: [{ tipo: "mudar_tarefa", tarefa: "T1", status: "revisao" }] });
+      if (!r.data.ok) throw new Error(r.data.detalhe);
+      expect(r.data.quadro?.colunas.find((c) => c.id === "revisao")).toMatchObject({ prazoMin: 60 });
+      expect(resumoParaBot(r.data.quadro!).colunas.find((c) => c.id === "revisao")).toMatchObject({ prazo_min: 60 });
+      const quadroId = r.data.quadro!.id;
+      const tarefa = async () => (await m.repos.quadros.tarefas(quadroId))[0]!;
+      const turnoAntes = (await tarefa()).turnoId!;
+      await trx`update turnos set estado = 'interrompido', motivo_interrupcao = 'parado_pela_pessoa' where id = ${turnoAntes}`;
+      const avisos = async () => (await m.repos.mensagens.listarDaConversa(m.beto.conversaId)).filter((x) => x.payload?.kind === "aviso_pessoa");
+
+      m.relogio.agora = base + 59 * 60_000;
+      await varrerAvisosDosQuadros(m.deps);
+      expect((await tarefa()).turnoId).toBe(turnoAntes);
+
+      m.relogio.agora = base + 61 * 60_000;
+      const v = await varrerAvisosDosQuadros(m.deps);
+      const cobranca = (await tarefa()).turnoId!;
+      expect(cobranca).not.toBe(turnoAntes);
+      const turnoCobranca = await m.repos.turnos.buscar(cobranca);
+      expect(turnoCobranca?.entradaTexto).toContain("parada em Em revisão há mais de 1 h");
+      // Revisão 3 do PR #624: o turno da cobrança é confiável (tarefa sem dado de fora), um passe a mais (profundidade 1)
+      // e o turno_criado sai em nome do agente anfitrião do quadro (a Ana), sob a conta da pessoa.
+      expect(turnoCobranca).toMatchObject({ agenteId: m.beto.agenteId, entradaConfianca: "confiavel", profundidade: 1, origem: "delegacao" });
+      const criado = v.events.find((e) => e.kind === "turno_criado");
+      expect(criado?.autoria).toMatchObject({ autor_tipo: "agente", autor_id: m.ana.agenteId });
+      expect(criado?.dados).toMatchObject({ turnoId: cobranca, agenteId: m.beto.agenteId, profundidade: 1 });
+      expect(await avisos()).toEqual([]);
+      // Não cobra em dobro.
+      await trx`update turnos set estado = 'interrompido', motivo_interrupcao = 'parado_pela_pessoa' where id = ${cobranca}`;
+      m.relogio.agora = base + 90 * 60_000;
+      await varrerAvisosDosQuadros(m.deps);
+      expect((await tarefa()).turnoId).toBe(cobranca);
+
+      m.relogio.agora = base + 122 * 60_000;
+      await varrerAvisosDosQuadros(m.deps);
+      await varrerAvisosDosQuadros(m.deps);
+      const lista = await avisos();
+      expect(lista).toHaveLength(1);
+      expect(lista[0]!.texto).toContain(`"T1" em Em revisão, com ${m.betoNome} (prazo de 1 h) continua parada depois da cobrança.`);
+    });
+  });
+
+  it("prazo: a tarefa sem turno anterior é cobrada no executor configurado, não no \"local\" (revisão 3 do PR #624, NOD-420)", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const base = Date.now();
+      m.relogio.agora = base;
+      await m.lote({ ops: [{ tipo: "criar_quadro", meta: "M" }, { tipo: "renomear_coluna", coluna: "revisao", prazo_min: 60 }, { tipo: "criar_tarefa", titulo: "T1", agente: m.betoNome, status: "afazer" }] });
+      const beto = { tipo: "agente", agenteId: m.beto.agenteId } as const;
+      const r = await m.lote({ autor: beto, quadro: m.anaNome, ops: [{ tipo: "mudar_tarefa", tarefa: "T1", status: "revisao" }] });
+      if (!r.data.ok) throw new Error(r.data.detalhe);
+      const quadroId = r.data.quadro!.id;
+      const tarefa = async () => (await m.repos.quadros.tarefas(quadroId))[0]!;
+      // Sem turno anterior (a tarefa nunca começou um, ou ele foi limpo): nada de onde herdar o executor.
+      await trx`update quadro_tarefas set turno_id = null where id = ${(await tarefa()).id}`;
+      m.relogio.agora = base + 61 * 60_000;
+      await varrerAvisosDosQuadros(m.deps, { executor: "catcher" });
+      const cobranca = (await tarefa()).turnoId;
+      expect(cobranca).not.toBeNull();
+      expect((await m.repos.turnos.buscar(cobranca!))).toMatchObject({ executor: "catcher", agenteId: m.beto.agenteId });
+    });
+  });
+
+  it("prazo: sem prazo não cobra; com o turno da tarefa ainda na fila, não abre outro; Desfazer da saída reavisa (NOD-420)", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const base = Date.now();
+      m.relogio.agora = base;
+      await m.lote({ ops: [{ tipo: "criar_quadro", meta: "M" }, { tipo: "renomear_coluna", coluna: "revisao", prazo_min: 30 }, { tipo: "criar_tarefa", titulo: "T1", agente: m.betoNome, status: "afazer" }, { tipo: "criar_tarefa", titulo: "T2", agente: m.betoNome, status: "afazer" }] });
+      const beto = { tipo: "agente", agenteId: m.beto.agenteId } as const;
+      const r = await m.lote({ autor: beto, quadro: m.anaNome, ops: [{ tipo: "mudar_tarefa", tarefa: "T1", status: "revisao" }] });
+      if (!r.data.ok) throw new Error(r.data.detalhe);
+      const quadroId = r.data.quadro!.id;
+      const porTitulo = async (t: string) => (await m.repos.quadros.tarefas(quadroId)).find((x) => x.titulo === t)!;
+      const turnoT1 = (await porTitulo("T1")).turnoId!;
+      const turnoT2 = (await porTitulo("T2")).turnoId!;
+      // T1 em revisão com o turno ainda pendente; T2 em Fazendo (sem prazo) há horas.
+      m.relogio.agora = base + 5 * 60 * 60_000;
+      await varrerAvisosDosQuadros(m.deps);
+      expect((await porTitulo("T1")).turnoId).toBe(turnoT1);
+      expect((await porTitulo("T2")).turnoId).toBe(turnoT2);
+      expect((await m.repos.turnos.buscar(turnoT1))?.estado).toBe("pendente");
+      const [marcaT1] = await trx<{ cobrada_em: Date | null }[]>`select cobrada_em from quadro_tarefas where id = ${(await porTitulo("T1")).id}`;
+      expect(marcaT1!.cobrada_em).not.toBeNull();
+      // T2 em Fazendo, sem prazo: nem a marca da cobrança.
+      const [marcaT2] = await trx<{ cobrada_em: Date | null }[]>`select cobrada_em from quadro_tarefas where id = ${(await porTitulo("T2")).id}`;
+      expect(marcaT2!.cobrada_em).toBeNull();
+
+      // Desfazer devolve a tarefa a uma espera da pessoa: é uma entrada nova, avisa de novo.
+      m.relogio.agora = Date.now();
+      await m.lote({ autor: beto, quadro: m.anaNome, ops: [{ tipo: "mudar_tarefa", tarefa: "T2", status: "voce", pergunta: "Qual?" }] });
+      m.relogio.agora = Date.now() + JANELA_AGRUPAR_MS + 1000;
+      await varrerAvisosDosQuadros(m.deps);
+      await m.lote({ autor: { tipo: "pessoa" }, anfitriaoId: m.ana.agenteId, ops: [{ tipo: "responder", tarefa: "T2", resposta: "Essa" }] });
+      await m.lote({ autor: { tipo: "pessoa" }, anfitriaoId: m.ana.agenteId, ops: [{ tipo: "desfazer" }] });
+      expect((await porTitulo("T2")).status).toBe("voce");
+      m.relogio.agora = Date.now() + 2 * (JANELA_AGRUPAR_MS + 1000);
+      await varrerAvisosDosQuadros(m.deps);
+      const avisos = (await m.repos.mensagens.listarDaConversa(m.beto.conversaId)).filter((x) => x.payload?.kind === "aviso_pessoa");
+      expect(avisos.map((a) => a.texto)).toEqual([expect.stringContaining("Qual?"), expect.stringContaining("Qual?")]);
+    });
+  });
+
+  it("cota esgotada na cobrança: a edição passa, os outros avisos saem e o log registra (revisão do PR #624)", async () => {
+    const logs: string[] = [];
+    definirDestinoDoLog((l) => void logs.push(l));
+    try {
+      await withRollback(MARLON, async (trx) => {
+        const m = await montar(trx);
+        const base = Date.now();
+        m.relogio.agora = base;
+        await m.lote({ ops: [{ tipo: "criar_quadro", meta: "M" }, { tipo: "renomear_coluna", coluna: "revisao", prazo_min: 30 }, { tipo: "criar_tarefa", titulo: "T1", agente: m.betoNome, status: "afazer" }, { tipo: "criar_tarefa", titulo: "T2", agente: m.betoNome, status: "afazer" }, { tipo: "criar_tarefa", titulo: "T3", agente: m.betoNome, status: "afazer" }] });
+        const beto = { tipo: "agente", agenteId: m.beto.agenteId } as const;
+        const r = await m.lote({ autor: beto, quadro: m.anaNome, ops: [{ tipo: "mudar_tarefa", tarefa: "T1", status: "revisao" }, { tipo: "mudar_tarefa", tarefa: "T2", status: "voce", pergunta: "Qual cor?" }] });
+        if (!r.data.ok) throw new Error(r.data.detalhe);
+        const quadroId = r.data.quadro!.id;
+        const porTitulo = async (t: string) => (await m.repos.quadros.tarefas(quadroId)).find((x) => x.titulo === t)!;
+        const turnoT1 = (await porTitulo("T1")).turnoId!;
+        await trx`update turnos set estado = 'interrompido', motivo_interrupcao = 'parado_pela_pessoa' where id = ${turnoT1}`;
+        // O espaço provisório no teto: o enfileirar lança, como o comCotaDoProvisorio.
+        m.repos.turnos.enfileirar = async () => {
+          throw new ErroDeDominio("cota_provisorio");
+        };
+        const avisos = async () => (await m.repos.mensagens.listarDaConversa(m.beto.conversaId)).filter((x) => x.payload?.kind === "aviso_pessoa");
+
+        // T1 passou do prazo; T2 espera a pessoa além da janela. A edição da pessoa grava e a decisão sai junto.
+        m.relogio.agora = base + 40 * 60_000;
+        const ed = await m.lote({ autor: { tipo: "pessoa" }, anfitriaoId: m.ana.agenteId, ops: [{ tipo: "mudar_tarefa", tarefa: "T1", descricao: "mais contexto" }] });
+        if (!ed.data.ok) throw new Error(ed.data.detalhe);
+        expect((await porTitulo("T1")).descricao).toBe("mais contexto");
+        expect((await avisos()).map((a) => a.texto)).toEqual([expect.stringContaining("Qual cor?")]);
+
+        // O varredor: a cobrança falha sozinha (log com o código), a T1 segue com o turno de antes, e a decisão da T3 sai.
+        const r3 = await m.lote({ autor: beto, quadro: m.anaNome, ops: [{ tipo: "mudar_tarefa", tarefa: "T3", status: "bloqueado", pergunta: "Cadê a chave?" }] });
+        if (!r3.data.ok) throw new Error(r3.data.detalhe);
+        m.relogio.agora = Date.now() + 40 * 60_000 + JANELA_AGRUPAR_MS;
+        await varrerAvisosDosQuadros(m.deps);
+        expect((await porTitulo("T1")).turnoId).toBe(turnoT1);
+        expect(logs.map((l) => JSON.parse(l) as Record<string, unknown>).filter((l) => l.evento === "cobranca_quadro_falhou")).toEqual([expect.objectContaining({ nivel: "erro", erro: "cota_provisorio", tarefaId: (await porTitulo("T1")).id })]);
+        expect((await avisos()).map((a) => a.texto)).toEqual([expect.stringContaining("Qual cor?"), expect.stringContaining("Cadê a chave?")]);
+
+        // A cobrança marcada não tenta de novo; continuou parada, a pessoa fica sabendo.
+        m.relogio.agora = Date.now() + 80 * 60_000 + JANELA_AGRUPAR_MS;
+        await varrerAvisosDosQuadros(m.deps);
+        expect(logs.filter((l) => l.includes("cobranca_quadro_falhou"))).toHaveLength(1);
+        expect((await avisos()).at(-1)?.texto).toContain("continua parada depois da cobrança");
+      });
+    } finally {
+      definirDestinoDoLog(null);
+    }
+  });
+
+  it("um quadro que falha no varredor (erro do banco) não segura os outros: savepoint e log (revisão do PR #624)", async () => {
+    const logs: string[] = [];
+    definirDestinoDoLog((l) => void logs.push(l));
+    try {
+      await withRollback(MARLON, async (trx) => {
+        const m = await montar(trx);
+        m.relogio.agora = Date.now();
+        const daAna = await m.lote({ ops: [{ tipo: "criar_quadro", meta: "M" }, { tipo: "criar_tarefa", titulo: "T1", agente: m.betoNome, status: "afazer" }] });
+        const doBeto = await m.lote({ autor: { tipo: "agente", agenteId: m.beto.agenteId }, ops: [{ tipo: "criar_quadro", meta: "N" }, { tipo: "criar_tarefa", titulo: "U1", agente: m.anaNome, status: "afazer" }] });
+        if (!daAna.data.ok || !doBeto.data.ok) throw new Error("montagem");
+        const quadroDaAna = daAna.data.quadro!.id;
+        await m.lote({ autor: { tipo: "agente", agenteId: m.beto.agenteId }, quadro: m.anaNome, ops: [{ tipo: "mudar_tarefa", tarefa: "T1", status: "voce", pergunta: "Do Beto?" }] });
+        await m.lote({ autor: { tipo: "agente", agenteId: m.ana.agenteId }, quadro: m.betoNome, ops: [{ tipo: "mudar_tarefa", tarefa: "U1", status: "voce", pergunta: "Da Ana?" }] });
+        // As marcas do quadro da Ana dão erro no Postgres: sem o savepoint, a transação inteira abortaria.
+        const marcas = m.repos.quadros.marcasDeAviso.bind(m.repos.quadros);
+        m.repos.quadros.marcasDeAviso = async (id) => {
+          if (id === quadroDaAna) await trx`select 1 / 0`;
+          return marcas(id);
+        };
+        m.relogio.agora = Date.now() + JANELA_AGRUPAR_MS + 1000;
+        await varrerAvisosDosQuadros(m.deps);
+        const falas = async (conversaId: string) => (await m.repos.mensagens.listarDaConversa(conversaId)).filter((x) => x.payload?.kind === "aviso_pessoa").map((x) => x.texto);
+        expect(await falas(m.ana.conversaId)).toEqual([expect.stringContaining("Da Ana?")]);
+        expect(await falas(m.beto.conversaId)).toEqual([]);
+        expect(logs.map((l) => JSON.parse(l) as Record<string, unknown>).filter((l) => l.evento === "avisos_quadro_falhou")).toEqual([expect.objectContaining({ quadroId: quadroDaAna })]);
+      });
+    } finally {
+      definirDestinoDoLog(null);
+    }
+  });
+
+  it("marcarAviso é condicional: a mesma marca duas vezes devolve [id] e depois [] (revisão do PR #624)", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const r = await m.lote({ ops: [{ tipo: "criar_quadro", meta: "M" }, { tipo: "criar_tarefa", titulo: "T1" }] });
+      if (!r.data.ok) throw new Error(r.data.detalhe);
+      const id = r.data.quadro!.tarefas[0]!.id;
+      expect(await m.repos.quadros.marcarAviso([id], "avisada_em", AGORA)).toEqual([id]);
+      expect(await m.repos.quadros.marcarAviso([id], "avisada_em", AGORA + 1000)).toEqual([]);
+    });
+  });
+
+  it("marcar duas vezes não reescreve a marca nem dispara de novo: a passada que leu as marcas antes da outra gravar não cobra outra vez e não adia a escalada (QA do PR #624, NOD-420)", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const base = Date.now();
+      m.relogio.agora = base;
+      await m.lote({ ops: [{ tipo: "criar_quadro", meta: "M" }, { tipo: "renomear_coluna", coluna: "revisao", prazo_min: 60 }, { tipo: "criar_tarefa", titulo: "T1", agente: m.betoNome, status: "afazer" }, { tipo: "criar_tarefa", titulo: "T2" }] });
+      const r = await m.lote({ autor: { tipo: "agente", agenteId: m.beto.agenteId }, quadro: m.anaNome, ops: [{ tipo: "mudar_tarefa", tarefa: "T1", status: "revisao" }] });
+      if (!r.data.ok) throw new Error(r.data.detalhe);
+      const quadroId = r.data.quadro!.id;
+      const repo = m.repos.quadros;
+      const t1 = async () => (await repo.tarefas(quadroId)).find((t) => t.titulo === "T1")!;
+      const marcas = async () => (await repo.marcasDeAviso(quadroId)).get((await t1()).id)!;
+      await trx`update turnos set estado = 'interrompido', motivo_interrupcao = 'parado_pela_pessoa' where id = ${(await t1()).turnoId!}`;
+
+      // Direto no repositório, as três marcas: a segunda chamada não devolve o id e não regrava a hora.
+      const t2 = (await repo.tarefas(quadroId)).find((t) => t.titulo === "T2")!.id;
+      for (const campo of ["avisada_em", "cobrada_em", "escalada_em"] as const) {
+        expect(await repo.marcarAviso([t2], campo, base)).toEqual([t2]);
+        expect(await repo.marcarAviso([t2], campo, base + 5_000)).toEqual([]);
+      }
+      expect((await repo.marcasDeAviso(quadroId)).get(t2)).toMatchObject({ avisadaEm: base, cobradaEm: base, escaladaEm: base });
+
+      // Pelo varredor: a cobrança sai uma vez. Uma passada que leu as marcas antes dela gravar (a foto velha) chega depois.
+      m.relogio.agora = base + 61 * 60_000;
+      const fotoVelha = await repo.marcasDeAviso(quadroId);
+      expect(fotoVelha.get((await t1()).id)).toMatchObject({ cobradaEm: null });
+      await varrerAvisosDosQuadros(m.deps);
+      const cobranca = (await t1()).turnoId!;
+      expect((await marcas()).cobradaEm).toBe(base + 61 * 60_000);
+      // O turno da cobrança terminou: nada além da marca segura uma segunda cobrança.
+      await trx`update turnos set estado = 'interrompido', motivo_interrupcao = 'parado_pela_pessoa' where id = ${cobranca}`;
+      m.relogio.agora = base + 90 * 60_000;
+      const atrasada = { ...m.deps, repos: { ...m.deps.repos, quadros: { ...repo, marcasDeAviso: async () => fotoVelha } } };
+      const travado = await repo.buscarTravado(quadroId);
+      expect(await avisarDoQuadro(atrasada, travado!)).toEqual([]);
+      expect((await t1()).turnoId).toBe(cobranca);
+      expect((await marcas()).cobradaEm).toBe(base + 61 * 60_000);
+
+      // A escalada conta da primeira cobrança: 1 h depois dela, a pessoa fica sabendo (uma vez).
+      m.relogio.agora = base + 122 * 60_000;
+      await varrerAvisosDosQuadros(m.deps);
+      const avisos = (await m.repos.mensagens.listarDaConversa(m.beto.conversaId)).filter((x) => x.payload?.kind === "aviso_pessoa");
+      expect(avisos.map((x) => x.texto)).toEqual([expect.stringContaining("continua parada depois da cobrança")]);
+    });
+  });
+
+  it("o mesmo aviso duas vezes (a marca perdida) cria uma mensagem só: o idEnvio sai das tarefas@entrada (revisão do PR #624)", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      m.relogio.agora = Date.now();
+      await m.lote({ ops: [{ tipo: "criar_quadro", meta: "M" }, { tipo: "criar_tarefa", titulo: "T1", agente: m.betoNome, status: "afazer" }] });
+      const r = await m.lote({ autor: { tipo: "agente", agenteId: m.beto.agenteId }, quadro: m.anaNome, ops: [{ tipo: "mudar_tarefa", tarefa: "T1", status: "voce", pergunta: "Uma vez?" }] });
+      if (!r.data.ok) throw new Error(r.data.detalhe);
+      m.relogio.agora = Date.now() + JANELA_AGRUPAR_MS + 1000;
+      await varrerAvisosDosQuadros(m.deps);
+      // Como se a outra passada não tivesse visto a marca: a mesma chave cai no índice único das mensagens.
+      await trx`update quadro_tarefas set avisada_em = null where quadro_id = ${r.data.quadro!.id}`;
+      await varrerAvisosDosQuadros(m.deps);
+      const avisos = (await m.repos.mensagens.listarDaConversa(m.beto.conversaId)).filter((x) => x.payload?.kind === "aviso_pessoa");
+      expect(avisos).toHaveLength(1);
+    });
+  });
+
+  it("experimento do quadro desligado: o varredor não avisa nem cobra nada (NOD-420)", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const base = Date.now();
+      m.relogio.agora = base;
+      // T1 espera a pessoa; T2 fica parada em Em revisão (prazo de 30 min) além do prazo (revisão 4 do PR #624).
+      await m.lote({ ops: [{ tipo: "criar_quadro", meta: "M" }, { tipo: "renomear_coluna", coluna: "revisao", prazo_min: 30 }, { tipo: "criar_tarefa", titulo: "T1", agente: m.betoNome, status: "afazer" }, { tipo: "criar_tarefa", titulo: "T2", agente: m.betoNome, status: "afazer" }] });
+      await m.lote({ autor: { tipo: "agente", agenteId: m.beto.agenteId }, quadro: m.anaNome, ops: [{ tipo: "mudar_tarefa", tarefa: "T1", status: "voce", pergunta: "?" }] });
+      const r = await m.lote({ autor: { tipo: "agente", agenteId: m.beto.agenteId }, quadro: m.anaNome, ops: [{ tipo: "mudar_tarefa", tarefa: "T2", status: "revisao" }] });
+      if (!r.data.ok) throw new Error(r.data.detalhe);
+      const t2 = r.data.quadro!.tarefas.find((t) => t.titulo === "T2")!;
+      const turnoAntes = (await m.repos.quadros.tarefas(r.data.quadro!.id)).find((t) => t.id === t2.id)!.turnoId;
+      await m.repos.preferencias.gravar({ experimentos: { quadro: false } });
+      m.relogio.agora = base + Math.max(JANELA_AGRUPAR_MS, 61 * 60_000) + 1000;
+      expect((await varrerAvisosDosQuadros(m.deps)).events).toEqual([]);
+      expect((await m.repos.mensagens.listarDaConversa(m.beto.conversaId)).filter((x) => x.payload?.kind === "aviso_pessoa")).toEqual([]);
+      const [marca] = await trx<{ cobrada_em: Date | null; escalada_em: Date | null; turno_id: string | null }[]>`select cobrada_em, escalada_em, turno_id from quadro_tarefas where id = ${t2.id}`;
+      expect(marca).toEqual({ cobrada_em: null, escalada_em: null, turno_id: turnoAntes });
     });
   });
 

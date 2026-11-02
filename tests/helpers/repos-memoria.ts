@@ -3882,6 +3882,9 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       ultimoLote: async () => null,
       mudouDeQuadroDepois: async () => false,
       marcarDesfeito: soNoPostgres,
+      // NOD-420: as marcas do aviso são do gatilho da 0141 (tests/integration/quadro.test.ts e tests/concurrency/quadro-avisos-corrida.test.ts).
+      marcasDeAviso: async () => new Map(),
+      marcarAviso: soNoPostgres,
       travarPrefixos: soNoPostgres,
       prefixosUsados: async () => new Set<string>(),
       definirPrefixo: soNoPostgres,

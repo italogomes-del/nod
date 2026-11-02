@@ -14,7 +14,7 @@ export type ResumoQuadroParaBot = {
   prazo: string | null;
   cumprida: boolean;
   resumo: string | null;
-  colunas: { id: string; nome: string; grupo: GrupoColuna; passa_para?: string; instrucoes?: string }[];
+  colunas: { id: string; nome: string; grupo: GrupoColuna; passa_para?: string; instrucoes?: string; prazo_min?: number }[];
   tarefas: { id: string; codigo: string; titulo: string; status: IdColuna; agente: string | null; linear: string | null; pr: string | null; pergunta: string | null; execucao: ExecucaoTarefa; trabalho?: TrabalhoParaBot; prs?: string[] }[];
   avisoGithub?: string; // NOD-421: por que os PRs não aparecem
 };

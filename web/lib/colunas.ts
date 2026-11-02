@@ -176,7 +176,9 @@ export function saidaComErroDesiste(cs: readonly ColunaDto[], id: string, valor:
  * ADR-002; nunca o texto cru do erro). `manter`: a edição fica aberta com o que a pessoa digitou; senão, relê o quadro.
  * Revisão do PR #615: antes, todo erro virava "o quadro mudou".
  */
-export function fraseDoErroDeColuna(codigo: string | null | undefined): { texto: string; manter: boolean } {
+export function fraseDoErroDeColuna(codigo: string | null | undefined, onde?: "prazo"): { texto: string; manter: boolean } {
+  // QA do PR #624: o 400 ao salvar o prazo é a faixa ou a coluna que não aceita prazo, não "o nome e o grupo".
+  if (codigo === "entrada_invalida" && onde === "prazo") return { texto: `Não deu para salvar o prazo: use ${FAIXA_DO_PRAZO}, numa coluna onde o trabalho anda.`, manter: true };
   if (codigo === "entrada_invalida") return { texto: "Não deu para salvar assim: confira o nome e o grupo e tente de novo.", manter: true };
   if (codigo === "servidor_indisponivel" || codigo === "sem_internet") return { texto: "Sem conexão com o servidor agora. Tente de novo em instantes.", manter: true };
   return { texto: "Não deu para mudar as colunas: o quadro mudou. Relendo.", manter: false };
@@ -193,6 +195,9 @@ export type EdicaoDeColuna =
   | { tipo: "passagem"; coluna: string }
   /** ADR-142: o card solto numa coluna com responsável espera "Confirmar · Não iniciar ainda". */
   | { tipo: "soltar"; coluna: string; tarefa: string }
+  /** NOD-420: o prazo (SLA) da coluna, no ⋯. */
+  | { tipo: "prazo"; coluna: string; erro?: string; naFolha?: boolean }
+
   /**
    * ADR-142 (revisão do PR #622): o "Mover para…" do card, o caminho do teclado e do toque até o mesmo "soltar".
    * `estreito`: aberto na lista do celular (o menu só aparece na vista de onde veio).
@@ -206,6 +211,74 @@ export type EdicaoDeColuna =
  */
 export function seletorDoFocoDaColuna(el: { classList: { contains(c: string): boolean }; dataset: Record<string, string | undefined>; closest(sel: string): unknown }): string | null {
   const id = el.dataset["coluna"];
-  if (!el.classList.contains("qd-col-bt") || !id || !/^[a-z0-9-]{1,48}$/.test(id)) return null;
-  return `${el.closest(".qd-so-largo") ? ".qd-so-largo " : ""}.qd-col-bt[data-coluna="${id}"]`;
+  if (!id || !/^[a-z0-9-]{1,48}$/.test(id)) return null;
+  if (el.classList.contains("qd-col-bt")) return `${el.closest(".qd-so-largo") ? ".qd-so-largo " : ""}.qd-col-bt[data-coluna="${id}"]`;
+  // QA do PR #624 (NOD-420): depois de Salvar o prazo ou a passagem, o foco volta ao ⋯ da coluna, ao "Passar para…" ou
+  // ao botão do prazo na folha; o quadro.mudou da própria mudança regrava o quadro e jogava esse foco no body.
+  const act = el.dataset["act"];
+  if (!act || !CONTROLES_DA_COLUNA.has(act)) return null;
+  const onde = el.closest(".qd-folha") ? ".qd-folha " : el.closest(".qd-so-largo") ? ".qd-so-largo " : "";
+  return `${onde}[data-act="${act}"][data-coluna="${id}"]`;
+}
+
+/** Os controles de coluna sem id que recebem o foco de volta depois de uma mudança (ver seletorDoFocoDaColuna). */
+const CONTROLES_DA_COLUNA: ReadonlySet<string> = new Set(["col-menu", "col-passagem", "col-prazo", "col-renomear"]);
+
+/** NOD-420: o prazo da coluna em palavras ("30 min", "2 h", "1 h 30 min", "3 dias"); espelha o do servidor. */
+export function prazoLegivelMin(min: number): string {
+  if (min < 60) return `${min} min`;
+  if (min % 1440 === 0) return min === 1440 ? "1 dia" : `${min / 1440} dias`;
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  return m ? `${h} h ${m} min` : `${h} h`;
+}
+
+/** NOD-420: o teto do prazo (espelha LIMITES_QUADRO.prazoMin, 30 dias em minutos). */
+export const LIMITE_PRAZO_MIN = 30 * 24 * 60;
+/** Espelha FAIXA_DO_PRAZO do domínio ("de 1 min a 30 dias"). */
+export const FAIXA_DO_PRAZO = `de 1 min a ${prazoLegivelMin(LIMITE_PRAZO_MIN)}`;
+
+/**
+ * NOD-420 (espelha podeTerPrazo do domínio): só as colunas do andamento, fora Bloqueado, Precisa de você e a coluna "só a
+ * pessoa tira daqui" (NOD-419; lida estrutural, revisão 4 do PR #624). O prazo gravado numa delas fica dormente.
+ */
+export const podeTerPrazo = (c: Pick<ColunaDto, "id" | "grupo"> & { trava?: { soPessoa?: boolean } | null }): boolean =>
+  c.grupo === "iniciado" && c.id !== "voce" && c.id !== "bloqueado" && c.trava?.soPessoa !== true;
+
+export type UnidadeDePrazo = "min" | "h" | "dias";
+const MIN_DA_UNIDADE: Readonly<Record<UnidadeDePrazo, number>> = { min: 1, h: 60, dias: 1440 };
+
+/** O prazo do popover em minutos; null se o número não serve (vazio, zero, quebrado, acima do teto). */
+export function prazoEmMin(valor: string, unidade: UnidadeDePrazo): number | null {
+  const n = Number(valor.trim().replace(",", "."));
+  if (!Number.isFinite(n) || n <= 0) return null;
+  const min = Math.round(n * MIN_DA_UNIDADE[unidade]);
+  return min >= 1 && min <= LIMITE_PRAZO_MIN ? min : null;
+}
+
+/** O prazo atual no popover: a maior unidade que o divide inteiro (90 → 90 min, 120 → 2 h, 2880 → 2 dias). */
+export function prazoNoPopover(min: number | undefined): { valor: string; unidade: UnidadeDePrazo } {
+  if (!min) return { valor: "", unidade: "h" };
+  if (min % 1440 === 0) return { valor: String(min / 1440), unidade: "dias" };
+  if (min % 60 === 0) return { valor: String(min / 60), unidade: "h" };
+  return { valor: String(min), unidade: "min" };
+}
+
+/** "parada há 5 min", "parada há 3 h", "parada há 2 dias" (pelo relógio, sem segundos). */
+export function paradaHa(desde: number, agora: number): string {
+  const min = Math.max(0, Math.floor((agora - desde) / 60_000));
+  if (min < 1) return "parada agora";
+  if (min < 60) return `parada há ${min} min`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `parada há ${h} h`;
+  const d = Math.floor(h / 24);
+  return `parada há ${d === 1 ? "1 dia" : `${d} dias`}`;
+}
+
+/** NOD-420: o recibo da resposta, "Voltou para Em revisão · Beto segue" (sem Desfazer: a resposta já acionou). */
+export function reciboDaResposta(q: { colunas: readonly Pick<ColunaDto, "id" | "nome">[]; tarefas: readonly { id: string; status: string; agenteNome: string | null }[] } | null, tarefaId: string): string {
+  const t = q?.tarefas.find((x) => x.id === tarefaId);
+  if (!t) return "Resposta enviada";
+  const nome = q?.colunas.find((c) => c.id === t.status)?.nome ?? NOME_DO_STATUS[t.status as Status] ?? t.status;
+  return t.agenteNome ? `Voltou para ${nome} · ${t.agenteNome} segue` : `Voltou para ${nome}`;
 }

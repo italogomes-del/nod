@@ -1,9 +1,11 @@
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { rotasQuadro } from "../../src/adapters/http/rotas/quadro.ts";
 import type { DepsRotas } from "../../src/adapters/http/rotas/executar-caso.ts";
-import type { OpQuadro, QuadroDto } from "../../src/contracts/quadro.ts";
+import { LIMITES_QUADRO, type OpQuadro, type QuadroDto } from "../../src/contracts/quadro.ts";
 import { vincularEscopo } from "../../src/db/tx.ts";
 import { ACOES_QUADRO } from "../../src/domain/acoes/quadro.ts";
+import { FAIXA_DO_PRAZO } from "../../src/domain/colunas.ts";
+import { JANELA_AGRUPAR_MS } from "../../src/domain/avisos-quadro.ts";
 import { criarRepos } from "../../src/repositories/index.ts";
 import type { Escopo, Tx } from "../../src/shared/types.ts";
 import { EXECUTORES_QUADRO } from "../../src/use-cases/acoes/quadro.ts";
@@ -12,6 +14,7 @@ import { gerirQuadro } from "../../src/use-cases/gerir-quadro.ts";
 import { decidirColunasDoQuadro } from "../../src/use-cases/colunas-do-quadro.ts";
 import { decidirQuadroExclusao } from "../../src/use-cases/quadro-exclusao.ts";
 import { aplicarLoteQuadro, historicoDaTarefa, montarQuadro } from "../../src/use-cases/quadro.ts";
+import { varrerAvisosDosQuadros } from "../../src/use-cases/avisos-quadro.ts";
 import type { Deps } from "../../src/use-cases/tipos.ts";
 import { depsSobreTrx, executar, MARLON, servicosDeTeste, useCasesDeTeste } from "../helpers/deps-l6.ts";
 import { agenteComConversa } from "../helpers/fabricas.ts";
@@ -34,7 +37,7 @@ const retrato = (q: QuadroDto | null, turnos: number): Retrato | null =>
         prazo: q.prazo,
         cumprida: q.cumpridoEm !== null,
         resumo: q.resumo,
-        colunas: q.colunas.map((c) => [c.id, c.nome, c.grupo, c.responsavelNome ?? null, c.instrucoes ?? null]),
+        colunas: q.colunas.map((c) => [c.id, c.nome, c.grupo, c.responsavelNome ?? null, c.instrucoes ?? null, c.prazoMin ?? null]),
         tarefas: q.tarefas.map((t) => [t.titulo, t.descricao, t.status, t.agenteNome, t.linearId, t.prUrl, t.pergunta, t.resposta, t.execucao]),
         turnosAbertos: turnos,
       }
@@ -332,6 +335,64 @@ describeIntegracao("paridade tela × chat do quadro.* (NOD-442, ADR-135)", () =>
     });
   });
 
+  it("NOD-420: o prazo da coluna pela tela (PATCH prazo_min) e pelo chat (renomear_coluna) chega ao mesmo quadro, e o null tira nos dois", async () => {
+    await withRollback(MARLON, async (trx) => {
+      trxAtual = trx;
+      const m = await montar(trx);
+      for (const anfitriao of [m.tela.agenteId, m.chat.agenteId]) expect((await pessoa(m.d, anfitriao, BASE(m)[0]!)).data).toMatchObject({ ok: true });
+      const sessao = await servidor.entrar("marlon");
+      const ctx = await turnoDe(m.d, m.gil.agenteId, m.gil.conversaId);
+      const prazoDe = async (a: string) => (await estado(m, a))?.colunas.find((c) => (c as unknown[])[0] === "revisao") as unknown[] | undefined;
+      for (const prazo_min of [120, null]) {
+        const resp = await servidor.chamar(sessao, "PATCH", `/agentes/${m.tela.agenteId}/quadro/colunas/revisao`, { prazo_min });
+        expect(resp.status, await resp.clone().text()).toBe(200);
+        const r = await executar(m.d, gerirQuadro, { ...ctx, quadro: m.nomeChat, acoes: [{ tipo: "renomear_coluna", coluna: "Em revisão", prazo_min }] });
+        expect(r.data, JSON.stringify(r.data)).toMatchObject({ ok: true });
+        expect((await prazoDe(m.tela.agenteId))?.at(-1)).toBe(prazo_min);
+        expect(await estado(m, m.chat.agenteId)).toEqual(await estado(m, m.tela.agenteId));
+      }
+      // Fora do andamento (Precisa de você), a tela e o chat recusam do mesmo jeito.
+      expect((await servidor.chamar(sessao, "PATCH", `/agentes/${m.tela.agenteId}/quadro/colunas/voce`, { prazo_min: 60 })).status).toBe(400);
+      expect((await executar(m.d, gerirQuadro, { ...ctx, quadro: m.nomeChat, acoes: [{ tipo: "renomear_coluna", coluna: "Precisa de você", prazo_min: 60 }] })).data).toMatchObject({ ok: false });
+      // O tipo do prazo_min é da rota (revisão 3 do PR #624): texto, fração ou booleano é 400 e o quadro não muda.
+      const antes = await estado(m, m.tela.agenteId);
+      for (const prazo_min of ["60", 1.5, true]) {
+        expect((await servidor.chamar(sessao, "PATCH", `/agentes/${m.tela.agenteId}/quadro/colunas/revisao`, { prazo_min })).status).toBe(400);
+        expect((await servidor.chamar(sessao, "POST", `/agentes/${m.tela.agenteId}/quadro/colunas`, { nome: "Teste", grupo: "andamento", prazo_min })).status).toBe(400);
+      }
+      expect(await estado(m, m.tela.agenteId)).toEqual(antes);
+    });
+  });
+
+  it("NOD-420 (QA do PR #624): prazo_min fora da faixa diz a faixa permitida na tela e no chat, não um erro genérico", async () => {
+    await withRollback(MARLON, async (trx) => {
+      trxAtual = trx;
+      const m = await montar(trx);
+      for (const anfitriao of [m.tela.agenteId, m.chat.agenteId]) expect((await pessoa(m.d, anfitriao, BASE(m)[0]!)).data).toMatchObject({ ok: true });
+      const sessao = await servidor.entrar("marlon");
+      const ctx = await turnoDe(m.d, m.gil.agenteId, m.gil.conversaId);
+      const faixa = `de 1 a ${LIMITES_QUADRO.prazoMin}`;
+      const antes = await estado(m, m.tela.agenteId);
+      for (const prazo_min of [0, -5, LIMITES_QUADRO.prazoMin + 1]) {
+        for (const [metodo, url, corpo] of [
+          ["PATCH", `/agentes/${m.tela.agenteId}/quadro/colunas/revisao`, { prazo_min }],
+          ["POST", `/agentes/${m.tela.agenteId}/quadro/colunas`, { nome: "Teste", grupo: "iniciado", prazo_min }],
+        ] as const) {
+          const resp = await servidor.chamar(sessao, metodo, url, corpo);
+          const txt = await resp.text();
+          // A mensagem do HTTP é da tabela fixa (ADR-002); a frase da faixa na tela é da web (fraseDoErroDeColuna).
+          expect(resp.status, txt).toBe(400);
+        }
+        const r = await executar(m.d, gerirQuadro, { ...ctx, quadro: m.nomeChat, acoes: [{ tipo: "renomear_coluna", coluna: "Em revisão", prazo_min }] });
+        expect(r.data).toMatchObject({ ok: false });
+        // O bot lê a faixa em minutos (o que ele passa) e em palavras (o que ele diz à pessoa).
+        expect(JSON.stringify(r.data), `chat ${prazo_min}`).toContain(faixa);
+        expect(JSON.stringify(r.data), `chat ${prazo_min}`).toContain(FAIXA_DO_PRAZO);
+      }
+      expect(await estado(m, m.tela.agenteId)).toEqual(antes);
+    });
+  });
+
   it("a coluna pela URL com % no nome: o roteador já decodificou, a rota não decodifica de novo (revisão do PR #615)", async () => {
     await withRollback(MARLON, async (trx) => {
       trxAtual = trx;
@@ -488,7 +549,7 @@ describeIntegracao("paridade tela × chat do quadro.* (NOD-442, ADR-135)", () =>
     });
   });
 
-  it("a confiança do turno da tarefa vem de quem fez o lote; o Linear é interno; turno contaminado contamina, e o aviso Com você não sai (ADR-062, revisão do PR #612)", async () => {
+  it("a confiança do turno da tarefa vem de quem fez o lote; o Linear é interno; turno contaminado contamina, e o Com você de fora avisa sem título nem pergunta (ADR-062, revisões dos PRs #612 e #624)", async () => {
     await withRollback(MARLON, async (trx) => {
       trxAtual = trx;
       const m = await montar(trx);
@@ -524,16 +585,30 @@ describeIntegracao("paridade tela × chat do quadro.* (NOD-442, ADR-135)", () =>
       const leitor = await turnoDe(m.d, m.caio.agenteId, m.caio.conversaId);
       expect((await executar(m.d, gerirQuadro, { ...leitor, quadro: m.tela.agenteId, acoes: [{ tipo: "editar_quadro", prazo: "2026-11-30" }] })).data).toMatchObject({ ok: true });
       expect(await m.d.repos.turnos.contaminado(leitor.turnoId)).toBe(true);
-      // O turno contaminado não escreve a meta, e o Com você dele muda só o card (sem aviso na conversa).
+      // O turno contaminado não escreve a meta.
       const meta = await executar(m.d, gerirQuadro, { ...ctx, quadro: m.tela.agenteId, acoes: [{ tipo: "editar_quadro", meta: "Outra" }] });
       expect(JSON.stringify(meta.data)).toContain("a meta só muda num turno limpo");
       // Nem cria um quadro novo com a meta dele (codex rodada 4, P1): o planejamento prévio da criação vê a confiança.
       const novo = await executar(m.d, gerirQuadro, { ...ctx, acoes: [{ tipo: "criar_quadro", meta: "Meta de fora" }] });
       expect(JSON.stringify(novo.data)).toContain("a meta só muda num turno limpo");
       expect(await m.d.repos.quadros.doAgente(m.gil.agenteId)).toBeNull();
-      const antes = (await m.d.repos.mensagens.listarDaConversa(m.caio.conversaId)).filter((x) => x.payload?.kind === "aviso_pessoa").length;
+      // O Com você do turno contaminado (tarefa deFora) avisa depois da janela, sem o título nem a pergunta dele: o caminho
+      // real até o varredor (revisão do PR #624, achado 1; antes o teste olhava dentro da janela e passava sempre).
+      // NOD-430: o "Do bot" é do Gil (a pessoa o passou a ele): o aviso vai à conversa dele.
+      const avisos = async () => (await m.d.repos.mensagens.listarDaConversa(m.gil.conversaId)).filter((x) => x.payload?.kind === "aviso_pessoa");
+      const antes = (await avisos()).length;
       expect((await executar(m.d, gerirQuadro, { ...ctx, quadro: m.tela.agenteId, acoes: [{ tipo: "mudar_tarefa", tarefa: "Do bot", status: "voce", pergunta: "Entre em https://x" }] })).data).toMatchObject({ ok: true });
-      expect((await m.d.repos.mensagens.listarDaConversa(m.caio.conversaId)).filter((x) => x.payload?.kind === "aviso_pessoa")).toHaveLength(antes);
+      expect(await avisos()).toHaveLength(antes);
+      await varrerAvisosDosQuadros({ ...m.d, agora: () => Date.now() + JANELA_AGRUPAR_MS + 1000 });
+      const depois = await avisos();
+      expect(depois).toHaveLength(antes + 1);
+      const aviso = depois.at(-1)!;
+      expect(aviso).toMatchObject({ confianca: "confiavel" });
+      expect(aviso.texto).toContain("a pergunta está no quadro");
+      expect(aviso.texto).not.toContain("https://x");
+      expect(aviso.texto).not.toContain("Do bot");
+      // Na conversa do responsável, não na do anfitrião: o aviso diz de qual quadro é (achado 3).
+      expect(aviso.texto).toContain(`no quadro de Tela `);
       // E responder, num turno de conversa contaminado (leu uma página), é recusado (revisão rodada 3, alto 1).
       const resp = await executar(m.d, gerirQuadro, { ...ctx, quadro: m.tela.agenteId, acoes: [{ tipo: "responder", tarefa: "Do bot", resposta: "pode" }] });
       expect(JSON.stringify(resp.data)).toContain("resposta da pessoa");

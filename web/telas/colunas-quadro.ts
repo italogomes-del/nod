@@ -10,7 +10,7 @@
  */
 import type { ColunaDto, GrupoColuna, TarefaDto } from "../../src/contracts/quadro.ts";
 import { esc } from "../lib/escape.ts";
-import { aceitaPassagem, acionaNaColuna, LIMITE_COLUNAS, LIMITE_INSTRUCOES, LIMITE_NOME_COLUNA, destinosAoRemover, FRASE_DO_GRUPO, fraseDaColuna, GRUPOS, iconeDaColuna, NOME_DO_GRUPO, passoDeMover, porqueNaoRecebeCard, porqueNaoRemove, type EdicaoDeColuna } from "../lib/colunas.ts";
+import { aceitaPassagem, acionaNaColuna, podeTerPrazo, prazoLegivelMin, prazoNoPopover, LIMITE_COLUNAS, LIMITE_INSTRUCOES, LIMITE_NOME_COLUNA, destinosAoRemover, FRASE_DO_GRUPO, fraseDaColuna, GRUPOS, iconeDaColuna, NOME_DO_GRUPO, passoDeMover, porqueNaoRecebeCard, porqueNaoRemove, type EdicaoDeColuna } from "../lib/colunas.ts";
 import { confiar, ICONE, ICONE_DO_STATUS, type Html } from "./quadro.ts";
 
 const ICONE_DO_GRUPO: Readonly<Record<GrupoColuna, Html>> = {
@@ -43,6 +43,7 @@ export function menuDaColuna(cs: readonly ColunaDto[], c: ColunaDto, nomeDoBot: 
     item({ act: "col-esquerda", coluna: c.id, rotulo: "Mover para a esquerda", tecla: "Alt ←", porque: esq.ok ? null : esq.porque }) +
     item({ act: "col-direita", coluna: c.id, rotulo: "Mover para a direita", tecla: "Alt →", porque: dir.ok ? null : dir.porque }) +
     item({ act: "col-nova", coluna: c.id, grupo: c.grupo, rotulo: "Adicionar coluna à direita", porque: cheio }) +
+    (podeTerPrazo(c) ? item({ act: "col-prazo", coluna: c.id, rotulo: c.prazoMin ? `Prazo: ${prazoLegivelMin(c.prazoMin)}` : "Definir prazo" }) : "") +
     `<hr class="qd-menu-sep">` +
     item({ act: "col-remover", coluna: c.id, rotulo: "Remover coluna", porque: naoSai, perigo: true }) +
     `</div>`);
@@ -91,6 +92,24 @@ export function popoverDePassagem(c: ColunaDto, agentes: readonly AgenteDaPassag
 }
 
 /**
+ * NOD-420: o prazo da coluna. Parada além dele, o quadro cobra o responsável; continuou parada mais um prazo, avisa você.
+ * Número e unidade (min, h, dias); "Sem prazo" tira.
+ */
+export function popoverDePrazo(c: ColunaDto, erro?: string): Html {
+  const { valor, unidade } = prazoNoPopover(c.prazoMin);
+  const op = (v: string, r: string) => `<option value="${v}"${v === unidade ? " selected" : ""}>${r}</option>`;
+  const err = erro ? `<p class="qd-col-erro" id="qd-prz-erro" role="alert">${esc(erro)}</p>` : "";
+  return confiar(`<div class="qd-pop qd-pop-prazo" role="dialog" aria-labelledby="qd-prz-tit">` +
+    `<form data-form="col-prazo" data-coluna="${esc(c.id)}" novalidate><p class="qd-pop-tit" id="qd-prz-tit">Prazo em <b>${esc(c.nome)}</b></p>` +
+    `<div class="qd-prz-campos"><label class="qd-sr" for="qd-prz-valor">Quanto tempo</label>` +
+    `<input id="qd-prz-valor" class="qd-sel qd-prz-valor" name="valor" type="number" inputmode="decimal" step="any" value="${esc(valor)}"${erro ? ' aria-invalid="true" aria-describedby="qd-prz-erro"' : ""}>` +
+    `<label class="qd-sr" for="qd-prz-unidade">Unidade</label><select id="qd-prz-unidade" class="qd-sel" name="unidade">${op("min", "min")}${op("h", "horas")}${op("dias", "dias")}</select></div>${err}` +
+    `<p class="qd-dica">Parada além disso, o quadro cobra o responsável; se continuar, avisa você.</p>` +
+    `<div class="qd-pop-bts">${c.prazoMin ? `<button type="button" class="qd-bt" data-act="col-prazo-tirar" data-coluna="${esc(c.id)}">Sem prazo</button>` : ""}` +
+    `<button type="button" class="qd-bt" data-act="col-fechar">Cancelar</button><button type="submit" class="qd-bt qd-bt-pri">Salvar</button></div></form></div>`);
+}
+
+/**
  * O card solto numa coluna com responsável (revisão do PR #622, decisão da PM): uma linha discreta no topo da lista da
  * coluna de destino, no lugar onde o card cai. Não é diálogo nem popover: um grupo com o nome, e os dois links. Confirmar
  * (o padrão, com o foco) começa; "Não iniciar ainda" só move; Esc desiste.
@@ -131,7 +150,8 @@ export function aposDoCabecalho(cs: readonly ColunaDto[], c: ColunaDto, ed: Edic
   const passa = agentes ? passagemDoCabecalho(c, passaAberta) : "";
   const dentro = menuAberto ? menuDaColuna(cs, c, nomeDoBot)
     : ed?.tipo === "remover" && ed.coluna === c.id && !naFolha(ed) ? popoverDeRemover(cs, c, n)
-      : passaAberta && agentes ? popoverDePassagem(c, agentes) : "";
+      : passaAberta && agentes ? popoverDePassagem(c, agentes)
+        : ed?.tipo === "prazo" && ed.coluna === c.id && !naFolha(ed) ? popoverDePrazo(c, ed.erro) : "";
   return confiar(passa + bt + dentro);
 }
 
@@ -166,13 +186,14 @@ export const naFolha = (ed: EdicaoDeColuna | null): boolean => !!ed && (ed.tipo 
 
 /**
  * A folha do celular: as colunas por grupo, cada uma com a alça ≡ (arrastar dentro do grupo), subir e descer (os mesmos
- * passos do Alt ← →), o nome que renomeia ao tocar e o remover. No fim, a coluna nova.
+ * passos do Alt ← →), o nome que renomeia ao tocar, o prazo (onde o trabalho anda) e o remover. No fim, a coluna nova.
  */
 export function folhaDasColunas(cs: readonly ColunaDto[], ed: EdicaoDeColuna | null, contagem: Readonly<Record<string, number>>, nomeDoBot: string): Html {
   const grupos = GRUPOS.map((g) => {
     const linhas = cs.filter((c) => c.grupo === g).map((c) => {
       if (ed?.tipo === "renomear" && ed.coluna === c.id) return `<li class="qd-fo-l qd-fo-edit" data-coluna="${esc(c.id)}">${campoDeRenomear(c, ed.erro)}</li>`;
       if (ed?.tipo === "remover" && ed.coluna === c.id) return `<li class="qd-fo-l qd-fo-edit" data-coluna="${esc(c.id)}">${popoverDeRemover(cs, c, contagem[c.id] ?? 0)}</li>`;
+      if (ed?.tipo === "prazo" && ed.coluna === c.id) return `<li class="qd-fo-l qd-fo-edit" data-coluna="${esc(c.id)}">${popoverDePrazo(c, ed.erro)}</li>`;
       const sobe = passoDeMover(cs, c.id, "esquerda");
       const desce = passoDeMover(cs, c.id, "direita");
       const naoSai = porqueNaoRemove(cs, c.id, nomeDoBot);
@@ -182,6 +203,8 @@ export function folhaDasColunas(cs: readonly ColunaDto[], ed: EdicaoDeColuna | n
       return `<li class="qd-fo-l" data-coluna="${esc(c.id)}" data-grupo="${g}">${alca}${icone(c)}` +
         `<button type="button" class="qd-fo-nome" data-act="col-renomear" data-coluna="${esc(c.id)}" aria-label="${esc(`Renomear ${c.nome}`)}">${esc(c.nome)}</button>` +
         `<span class="qd-n">${contagem[c.id] ?? 0}</span>` +
+        // NOD-420 (revisão 4 do PR #624): o prazo também no celular, onde o ⋯ da coluna não aparece.
+        (podeTerPrazo(c) ? `<button type="button" class="qd-fo-prazo" data-act="col-prazo" data-coluna="${esc(c.id)}" aria-label="${esc(c.prazoMin ? `Prazo de ${c.nome}: ${prazoLegivelMin(c.prazoMin)}` : `Definir prazo de ${c.nome}`)}">${esc(c.prazoMin ? prazoLegivelMin(c.prazoMin) : "Prazo")}</button>` : "") +
         bt("col-esquerda", ICONE.subir, `Subir ${c.nome}`, sobe.ok ? null : sobe.porque) +
         bt("col-direita", ICONE.descer, `Descer ${c.nome}`, desce.ok ? null : desce.porque) +
         bt("col-remover", ICONE.tirar, `Remover ${c.nome}`, naoSai) + `</li>`;

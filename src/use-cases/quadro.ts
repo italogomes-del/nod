@@ -18,6 +18,8 @@ import { podeRepassar, proximaProfundidade } from "../domain/profundidade.ts";
 import type { Profundidade } from "../contracts/turno.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
 import { avisarRiscoDoQuadro } from "./risco-quadro.ts";
+import { avisarNoLote } from "./avisos-quadro.ts";
+import { esperaPessoa } from "../domain/avisos-quadro.ts";
 import { sincronizarDasDecisoes } from "./trabalhos.ts";
 
 /**
@@ -233,6 +235,8 @@ export async function montarQuadro(deps: Pick<Deps, "repos">, q: Quadro): Promis
   const ultimoSemBarreira = await repo.ultimoLote(q.id);
   // O lote que um mover_quadro invalidou não aparece para desfazer (revisão 2 do PR #623).
   const ultimo = ultimoSemBarreira && !(await repo.mudouDeQuadroDepois(ultimoSemBarreira.id, q.id)) ? ultimoSemBarreira : null;
+  // NOD-420: desde quando a tarefa está na coluna (a tela mostra "parada há" e o prazo).
+  const marcas = await repo.marcasDeAviso(q.id);
   // NOD-421: os PRs ligados e as linhas de sistema (uma consulta cada, agrupadas por tarefa).
   // O branch fica de fora do DTO: nome de fora que a tela não mostra (o casamento é no servidor).
   const prs = new Map<string, PrNaTela[]>();
@@ -242,6 +246,7 @@ export async function montarQuadro(deps: Pick<Deps, "repos">, q: Quadro): Promis
   for (const { tarefaId, ...l } of await repo.linhasDoQuadro(q.id)) linhas.set(tarefaId, [...(linhas.get(tarefaId) ?? []), l]);
   const dtos: TarefaDto[] = tarefas.map((t) => ({
     ...t,
+    naColunaDesde: marcas.get(t.id)?.naColunaDesde ?? null,
     codigo: codigoDaTarefa(q.prefixo, t),
     branch: branchSugerido(codigoDaTarefa(q.prefixo, t), t.titulo),
     // Só o que ainda está em jogo mostra a execução (um turno concluído de uma tarefa feita não acende nada).
@@ -274,8 +279,9 @@ export function resumoParaBot(q: QuadroDto, trabalhos: ReadonlyMap<string, Traba
     prazo: q.prazo,
     cumprida: q.cumpridoEm !== null,
     resumo: q.resumo,
-    colunas: q.colunas.map((c) => ({ id: c.id, nome: c.nome, grupo: c.grupo, ...(c.responsavelNome ? { passa_para: c.responsavelNome } : {}), ...(c.instrucoes ? { instrucoes: c.instrucoes } : {}) })),
-    tarefas: q.tarefas.map((t) => ({ id: t.id, codigo: t.codigo, titulo: t.titulo, status: t.status, agente: t.agenteNome, linear: t.linearId, pr: t.prUrl, pergunta: t.status === "voce" ? t.pergunta : null, execucao: t.execucao, ...(trabalhos.has(t.id) ? { trabalho: trabalhos.get(t.id)! } : {}), ...(t.prs?.length ? { prs: t.prs.map(resumoDoPr) } : {}) })),
+    colunas: q.colunas.map((c) => ({ id: c.id, nome: c.nome, grupo: c.grupo, ...(c.responsavelNome ? { passa_para: c.responsavelNome } : {}), ...(c.instrucoes ? { instrucoes: c.instrucoes } : {}), ...(c.prazoMin ? { prazo_min: c.prazoMin } : {}) })),
+    // NOD-420: a pergunta de Bloqueado também (o bot responde "o que está travado?" sem abrir o card).
+    tarefas: q.tarefas.map((t) => ({ id: t.id, codigo: t.codigo, titulo: t.titulo, status: t.status, agente: t.agenteNome, linear: t.linearId, pr: t.prUrl, pergunta: esperaPessoa(q.colunas, t.status) ? t.pergunta : null, execucao: t.execucao, ...(trabalhos.has(t.id) ? { trabalho: trabalhos.get(t.id)! } : {}), ...(t.prs?.length ? { prs: t.prs.map(resumoDoPr) } : {}) })),
     ...(q.avisoGithub ? { avisoGithub: q.avisoGithub } : {}),
   };
 }
@@ -875,18 +881,6 @@ async function aplicarNoQuadro(deps: Deps, p: PedidoLote, qSemPrefixo: Quadro, a
     await abrir(r.id, (t) => entradaDaResposta({ quadroId: q.id, tarefa: t, resposta: r.resposta, pessoaNome }), "resposta");
   }
 
-  // "Com você": a pessoa fica sabendo sem abrir o quadro (revisão do PR #612). Um aviso na conversa do responsável, como
-  // o avisar_pessoa (o sino e o push da web); marcado não confiável, porque a pergunta pode ter vindo de conteúdo de fora.
-  for (const id of plano.tocadas) {
-    const t = gravadas.get(idReal.get(id) ?? id);
-    const a = antesPorId.get(idReal.get(id) ?? id);
-    if (!t || t.status !== "voce" || a?.status === "voce" || !t.agenteId) continue;
-    // Como o avisar_pessoa: de turno não confiável ou com pergunta de fora, só o card muda (revisão rodada 3).
-    if (p.origemConfiavel === false || t.deFora) continue;
-    const ev = await avisarComVoce(deps, t, autorAgenteId ?? t.agenteId);
-    if (ev) events.push(ev);
-  }
-
   // A meta fecha (ou reabre) pelo estado final das tarefas. Sem meta (fluxo contínuo, ADR-141) nada fecha.
   const finais = await repo.tarefas(q.id);
   // A meta foi POSTA neste lote (não havia), ou uma meta NOVA veio depois de a anterior ser cumprida: ela conta a partir
@@ -922,6 +916,10 @@ async function aplicarNoQuadro(deps: Deps, p: PedidoLote, qSemPrefixo: Quadro, a
   // NOD-415 (ADR-141): o risco de prazo (só com meta e prazo), uma vez por (quadro, meta, prazo).
   const risco = await avisarRiscoDoQuadro(deps, atualizado, finais);
   if (risco) events.push(risco);
+  // NOD-420: o que espera a pessoa (avisos-quadro.ts). A janela junta as decisões: a que acabou de entrar sai com as
+  // outras no próximo lote ou na volta do varredor, não agora. A cobrança do prazo fica só no varredor e o aviso corre
+  // isolado (revisão do PR #624): nenhum dos dois falha a edição.
+  events.push(...(await avisarNoLote(deps, atualizado)));
   // No limite da corrente: o que ia começar e ficou em A fazer (o bot avisa; a pessoa começa pelo quadro).
   const seguradas = plano.seguradas.length;
   const criadas = plano.criadas.map((id) => idReal.get(id) ?? null);

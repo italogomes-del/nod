@@ -11,7 +11,7 @@
  * - O modo é por conversa e só em memória: trocar de conversa (ou sair dela) volta para Conversa, sem animação.
  */
 import { direcaoDaTroca, ehModo, modoPelaTecla, movimentoDaTroca, type ModoDaConversa } from "./quadro.ts";
-import { comColunas, fraseDoErroDeColuna, nomeRepetido, passoDeMover, pedeConfirmacao, porqueNaoRecebeCard, porqueNaoRemove, reciboDeMover, saidaComErroDesiste, seletorDoFocoDaColuna, soltarEm, type EdicaoDeColuna, type Lado } from "./colunas.ts";
+import { comColunas, FAIXA_DO_PRAZO, fraseDoErroDeColuna, nomeRepetido, passoDeMover, pedeConfirmacao, porqueNaoRecebeCard, porqueNaoRemove, prazoEmMin, prazoLegivelMin, reciboDaResposta, reciboDeMover, saidaComErroDesiste, seletorDoFocoDaColuna, soltarEm, type EdicaoDeColuna, type Lado, type UnidadeDePrazo } from "./colunas.ts";
 import { ErroApi } from "./erro-api.ts";
 import { anunciarEm } from "./posicao-da-lista.ts";
 import type { EntradaHistoricoDto, GrupoColuna, QuadroDaPessoaDto, QuadroDto, TarefaDto } from "../../src/contracts/quadro.ts";
@@ -38,6 +38,7 @@ export interface ApiDoQuadro extends ApiDosComentarios, ApiDosTrabalhos {
   /** NOD-448: as colunas (cada uma um lote com Desfazer). Opcionais: sem elas, o quadro não edita colunas. */
   criarColuna?(agenteId: string, c: { nome: string; grupo: GrupoColuna; depois_de?: string }): Promise<MutacaoQuadro>;
   renomearColuna?(agenteId: string, coluna: string, nome: string): Promise<MutacaoQuadro>;
+  prazoDaColuna?(agenteId: string, coluna: string, prazoMin: number | null): Promise<MutacaoQuadro>;
   moverColuna?(agenteId: string, coluna: string, onde: { antes_de?: string; depois_de?: string }): Promise<MutacaoQuadro>;
   removerColuna?(agenteId: string, coluna: string, destino?: string): Promise<MutacaoQuadro>;
   /** ADR-142: a passagem da coluna e o card arrastado (o mesmo mudar_tarefa; `sem_iniciar` = "Não iniciar ainda"). */
@@ -528,7 +529,11 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     const resposta = campo?.value.trim() ?? "";
     if (!a || !agenteId || !id || !campo || !resposta) return;
     const botao = form.querySelector<HTMLButtonElement>('button[type="submit"]');
+    // Enquanto envia, nem o botão nem o Enter mandam de novo (NOD-420).
+    if (form.dataset["enviando"] === "1") return;
+    form.dataset["enviando"] = "1";
     if (botao) botao.disabled = true;
+    campo.readOnly = true;
     // A pessoa pode trocar de bot antes da resposta voltar: o quadro de um não entra na tela do outro.
     const c = chave;
     const de = agenteId;
@@ -537,10 +542,15 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
       if (c !== chave || de !== agenteId) return;
       campo.value = "";
       aplicarQuadro(r.quadro, [id]);
+      // NOD-420: o recibo diz para onde voltou e quem segue; sem Desfazer (a resposta já acionou o responsável).
+      mudarFaixa({ tipo: "resposta", texto: reciboDaResposta(r.quadro, id), loteId: null, mensagemId: "" });
     } catch {
       if (c !== chave) return;
-      if (botao) botao.disabled = false;
       mudarFaixa({ tipo: "erro", texto: "Não consegui mandar a resposta. Ela continua no campo." });
+    } finally {
+      delete form.dataset["enviando"];
+      if (botao) botao.disabled = false;
+      campo.readOnly = false;
     }
   }
 
@@ -628,7 +638,8 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     if (foco) { visivel(v, foco)?.focus(); return; }
     const alvo = ed?.tipo === "renomear" ? "#qd-col-in" : ed?.tipo === "nova" ? ".qd-col-nova-f input[name=nome]" : ed?.tipo === "remover" ? "#qd-col-destino"
       : ed?.tipo === "menu" || ed?.tipo === "mover" ? '#qd-menu [role="menuitem"]:not([aria-disabled])' : ed?.tipo === "ordem" ? ".qd-folha-tit"
-      : ed?.tipo === "passagem" ? ".qd-pop-passa input[name=modo]:checked" : ed?.tipo === "soltar" ? '.qd-soltar [data-act="col-soltar"]' : null;
+      : ed?.tipo === "passagem" ? ".qd-pop-passa input[name=modo]:checked" : ed?.tipo === "soltar" ? '.qd-soltar [data-act="col-soltar"]'
+      : ed?.tipo === "prazo" ? "#qd-prz-valor" : null;
     const el = alvo ? visivel(v, alvo) : null;
     if (ed?.tipo === "ordem" && el) el.tabIndex = -1;
     el?.focus();
@@ -644,11 +655,22 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     return els.find((x) => x.getClientRects().length > 0) ?? els[0] ?? null;
   };
 
+  /** Onde o foco volta depois do prazo: o ⋯ da coluna, ou o botão do prazo na folha do celular. */
+  const focoDoPrazo = (id: string, folha: boolean): string =>
+    folha ? `.qd-folha [data-act="col-prazo"][data-coluna="${CSS.escape(id)}"]` : `.qd-so-largo [data-act="col-menu"][data-coluna="${CSS.escape(id)}"]`;
+
   /** Fecha o que está aberto; dentro da folha do celular, volta para a folha. O card que se movia leva o foco de volta. */
   const fechar = (): void => {
     if (edicao?.tipo === "soltar" || edicao?.tipo === "mover") {
       const t = CSS.escape(edicao.tarefa);
       editar(null, `[data-act="tarefa-mover"][data-tarefa="${t}"]`);
+      return;
+    }
+    // NOD-420 (revisão 3 do PR #624): o prazo abre pelo ⋯ da coluna; fechar devolve o foco a ele. Na folha do celular
+    // (revisão 4), volta para a folha, no botão do prazo.
+    if (edicao?.tipo === "prazo") {
+      if (edicao.naFolha) editar({ tipo: "ordem" }, focoDoPrazo(edicao.coluna, true));
+      else editar(null, focoDoPrazo(edicao.coluna, false));
       return;
     }
     const volta = edicao && "naFolha" in edicao && edicao.naFolha ? ({ tipo: "ordem" } as const) : null;
@@ -657,7 +679,7 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
   };
 
   /** Uma mudança de coluna: aplica o quadro que volta e diz o que mudou na faixa, com o Desfazer do lote. */
-  async function mexer(fazer: (a: ApiDoQuadro, de: string) => Promise<MutacaoQuadro> | undefined, recibo: string, foco?: string, depois: EdicaoDeColuna | null = null, texto?: string): Promise<void> {
+  async function mexer(fazer: (a: ApiDoQuadro, de: string) => Promise<MutacaoQuadro> | undefined, recibo: string, foco?: string, depois: EdicaoDeColuna | null = null, texto?: string, restaurarPrazoDigitado?: () => void): Promise<void> {
     const a = dd?.api();
     // Uma de cada vez: o Enter e a saída do campo não mandam o mesmo renomear duas vezes.
     if (!a || !agenteId || mexendo) return;
@@ -675,9 +697,14 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
       if (foco) vista()?.querySelector<HTMLElement>(foco)?.focus();
     } catch (e) {
       if (c !== chave) return;
-      const f = fraseDoErroDeColuna(e instanceof ErroApi ? e.codigo : null);
-      // Recusado pelo dado (ou sem conexão): o campo fica aberto com o que foi digitado, e o porquê nele.
       const aberta = edicao;
+      const f = fraseDoErroDeColuna(e instanceof ErroApi ? e.codigo : null, aberta?.tipo === "prazo" ? "prazo" : undefined);
+      // Recusado pelo dado (ou sem conexão): o campo fica aberto com o que foi digitado, e o porquê nele.
+      if (f.manter && aberta?.tipo === "prazo" && restaurarPrazoDigitado) {
+        editar({ ...aberta, erro: f.texto });
+        restaurarPrazoDigitado();
+        return;
+      }
       if (f.manter && texto !== undefined && aberta && (aberta.tipo === "renomear" || aberta.tipo === "nova")) {
         editar({ ...aberta, erro: f.texto });
         restaurar(texto);
@@ -761,6 +788,16 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
       const quem = agente ? dd?.agentes?.().find((x) => x.id === agente)?.nome ?? "o agente" : null;
       const recibo = quem ? `${c.nome} passa para ${quem}` : agente === (c.responsavel ?? null) ? `${c.nome}: etapa descrita` : `${c.nome} sem passagem`;
       void mexer((a, de) => a.definirPassagem?.(de, id, { agente, instrucoes }), recibo, `.qd-so-largo [data-act="col-passagem"][data-coluna="${CSS.escape(id)}"]`);
+    } else if (qual === "col-prazo") {
+      const id = form.dataset["coluna"] ?? "";
+      const c = colunaDe(id);
+      if (!c) { editar(null); return; }
+      const valor = form.querySelector<HTMLInputElement>("input[name=valor]")?.value ?? "";
+      const unidade = (form.querySelector<HTMLSelectElement>("select[name=unidade]")?.value ?? "h") as UnidadeDePrazo;
+      const min = prazoEmMin(valor, unidade);
+      if (min === null) { editar({ tipo: "prazo", coluna: id, erro: `Use um número ${FAIXA_DO_PRAZO}`, ...(folha ? { naFolha: true } : {}) }); restaurarPrazo(valor, unidade); return; }
+      if (min === (c.prazoMin ?? null)) { fechar(); return; }
+      void mexer((a, de) => a.prazoDaColuna?.(de, id, min), `${c.nome}: prazo de ${prazoLegivelMin(min)}`, focoDoPrazo(id, folha), depois, undefined, () => restaurarPrazo(valor, unidade));
     } else if (qual === "col-remover") {
       const id = form.dataset["coluna"] ?? "";
       const c = colunaDe(id);
@@ -776,6 +813,14 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
   function restaurar(texto: string): void {
     const c = vista()?.querySelector<HTMLInputElement>("#qd-col-in, .qd-col-nova-f input[name=nome]");
     if (c) { c.value = texto; c.focus(); }
+  }
+
+  /** NOD-420: o prazo recusado volta ao popover com o que foi digitado. */
+  function restaurarPrazo(valor: string, unidade: string): void {
+    const v = vista()?.querySelector<HTMLInputElement>("#qd-prz-valor");
+    const u = vista()?.querySelector<HTMLSelectElement>("#qd-prz-unidade");
+    if (u) u.value = unidade;
+    if (v) { v.value = valor; v.focus(); }
   }
 
   /** O clique simples recolhe; o duplo renomeia (decisão 6). O simples espera um pouco para o duplo não recolher antes. */
@@ -1107,6 +1152,12 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
       return;
     }
     if (act === "col-remover") { pedirRemover(id, el); return; }
+    if (act === "col-prazo") { editar({ tipo: "prazo", coluna: id, ...(folha ? { naFolha: true } : {}) }); return; }
+    if (act === "col-prazo-tirar") {
+      const c = colunaDe(id);
+      if (c) void mexer((a, de) => a.prazoDaColuna?.(de, id, null), `${c.nome} sem prazo`, focoDoPrazo(id, folha), folha ? { tipo: "ordem" } : null);
+      return;
+    }
     if (act === "col-passagem") { editar(edicao?.tipo === "passagem" && edicao.coluna === id ? null : { tipo: "passagem", coluna: id }); return; }
     if (act === "col-soltar" || act === "col-soltar-sem") {
       const t = soltarNaAberta && el.closest(".qd-t-soltar") ? tarefaNoQuadro(q, soltarNaAberta.tarefa) : null;
@@ -1124,7 +1175,7 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     const form = ev.target instanceof HTMLFormElement ? ev.target : null;
     if (!dd || !form?.closest("#quadro")) return;
     const qual = form.dataset["form"];
-    if (qual === "col-renomear" || qual === "col-nova" || qual === "col-remover" || qual === "col-passagem") { ev.preventDefault(); enviarColuna(form); return; }
+    if (qual === "col-renomear" || qual === "col-nova" || qual === "col-remover" || qual === "col-passagem" || qual === "col-prazo") { ev.preventDefault(); enviarColuna(form); return; }
     if (qual === "recado-trabalho") { ev.preventDefault(); trabs.enviarRecado(form); return; }
     if (qual === "comentar-tarefa") {
       ev.preventDefault();
@@ -1228,8 +1279,11 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
   doc.addEventListener("keydown", (ev) => {
     if (!dd) return;
     const el = ev.target as Element | null;
-    if (ev.key === "Enter" && !ev.shiftKey && !ev.isComposing && el instanceof HTMLTextAreaElement && (el.id === "qc-txt" || el.classList.contains("qd-com-in"))) {
+    // NOD-420: a resposta também (no card e na tarefa aberta); a composição do IME (keyCode 229) não envia.
+    if (ev.key === "Enter" && !ev.shiftKey && !ev.isComposing && ev.keyCode !== 229 && el instanceof HTMLTextAreaElement && (el.id === "qc-txt" || el.classList.contains("qd-com-in") || el.classList.contains("qd-resp-in"))) {
       ev.preventDefault();
+      // Responder vazio não envia (revisão do PR #624): o Enter só não pula linha.
+      if (el.classList.contains("qd-resp-in") && !el.value.trim()) return;
       el.form?.requestSubmit();
     } else if (ev.key === "Escape" && editandoMeta && el instanceof HTMLInputElement && el.id === "qd-meta-in") {
       ev.preventDefault();
@@ -1287,8 +1341,31 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
   }
   let cardArrastado: string | null = null;
   const colunaSob = (alvo: EventTarget | null): HTMLElement | null => (alvo as Element | null)?.closest?.<HTMLElement>("#quadro section.qd-col[data-coluna]") ?? null;
+  // NOD-420 (revisão do PR #624): o campo Responder mora dentro do card arrastável. Medido em 2026-11-02 no Chrome (teste
+  // quadro-jornada-chrome): selecionar sobre o texto já funcionava, mas apertar na borda de dentro do campo (o padding,
+  // que ainda é o textarea) e arrastar pegava o card. Desligar no pointerdown chega tarde (o Chrome decide no apertar):
+  // o card deixa de arrastar quando o ponteiro entra no campo ou o foco chega nele, e volta quando os dois saem.
+  const cardDoCampo = (alvo: EventTarget | null): HTMLElement | null =>
+    alvo instanceof HTMLTextAreaElement || alvo instanceof HTMLInputElement ? alvo.closest<HTMLElement>("#quadro li.qd-card[data-tarefa]") : null;
+  const segurarCard = (ev: Event) => {
+    const li = cardDoCampo(ev.target);
+    if (li?.getAttribute("draggable") === "true") { li.setAttribute("draggable", "false"); li.dataset["arrastavel"] = "1"; }
+  };
+  const soltarCard = (ev: Event) => {
+    const campo = ev.target as HTMLElement;
+    const li = cardDoCampo(campo);
+    if (li?.dataset["arrastavel"] !== "1") return;
+    // Saiu o ponteiro mas o foco segue no campo (ou o contrário): continua sem arrastar.
+    if (ev.type === "pointerout" ? doc.activeElement === campo : campo.matches(":hover")) return;
+    li.setAttribute("draggable", "true");
+    delete li.dataset["arrastavel"];
+  };
+  doc.addEventListener("pointerover", segurarCard);
+  doc.addEventListener("focusin", segurarCard);
+  doc.addEventListener("pointerout", soltarCard);
+  doc.addEventListener("focusout", soltarCard);
   doc.addEventListener("dragstart", (ev) => {
-    const li = (ev.target as Element | null)?.closest?.<HTMLElement>("#quadro li.qd-card[draggable][data-tarefa]");
+    const li = (ev.target as Element | null)?.closest?.<HTMLElement>("#quadro li.qd-card[draggable='true'][data-tarefa]");
     if (!li || !q) return;
     cardArrastado = li.dataset["tarefa"] ?? null;
     ev.dataTransfer?.setData("text/plain", cardArrastado ?? "");

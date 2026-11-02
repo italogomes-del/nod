@@ -118,7 +118,7 @@ export const ACOES_QUADRO = [
   {
     id: "quadro.criar_coluna",
     titulo: "Criar uma coluna no quadro (com o grupo)",
-    schema: objeto({ nome: P.nome, grupo: P.grupo, depois_de: P.depois_de }, ["nome", "grupo"]),
+    schema: objeto({ nome: P.nome, grupo: P.grupo, depois_de: P.depois_de, prazo_min: P.prazo_min }, ["nome", "grupo"]),
     risco: "muda",
     cartaoNoChat: false,
     chat: vivo,
@@ -126,8 +126,8 @@ export const ACOES_QUADRO = [
   },
   {
     id: "quadro.renomear_coluna",
-    titulo: "Renomear uma coluna do quadro",
-    schema: objeto({ coluna: P.coluna, nome: P.nome }, ["coluna", "nome"]),
+    titulo: "Renomear uma coluna do quadro (ou pôr/tirar o prazo dela)",
+    schema: objeto({ coluna: P.coluna, nome: P.nome, prazo_min: P.prazo_min }, ["coluna"]),
     risco: "muda",
     cartaoNoChat: false,
     chat: vivo,

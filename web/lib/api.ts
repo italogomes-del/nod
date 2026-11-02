@@ -304,6 +304,9 @@ export function criarApi(escopo: Escopo) {
       post<MutacaoQuadro>(`agentes/${encodeURIComponent(agenteId)}/quadro/colunas`, c),
     renomearColuna: (agenteId: string, coluna: string, nome: string) =>
       patch<MutacaoQuadro>(`agentes/${encodeURIComponent(agenteId)}/quadro/colunas/${encodeURIComponent(coluna)}`, { nome }),
+    /** NOD-420: o prazo (SLA) da coluna em minutos; null tira. */
+    prazoDaColuna: (agenteId: string, coluna: string, prazoMin: number | null) =>
+      patch<MutacaoQuadro>(`agentes/${encodeURIComponent(agenteId)}/quadro/colunas/${encodeURIComponent(coluna)}`, { prazo_min: prazoMin }),
     moverColuna: (agenteId: string, coluna: string, onde: { antes_de?: string; depois_de?: string }) =>
       post<MutacaoQuadro>(`agentes/${encodeURIComponent(agenteId)}/quadro/colunas/${encodeURIComponent(coluna)}/mover`, onde),
     removerColuna: (agenteId: string, coluna: string, destino?: string) =>

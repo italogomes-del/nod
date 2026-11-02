@@ -10,7 +10,7 @@
 import type { EntradaHistoricoDto, QuadroDto, TarefaDto } from "../../src/contracts/quadro.ts";
 import { esc } from "../lib/escape.ts";
 import { NOME_DO_STATUS, type Status } from "../lib/quadro.ts";
-import { comColunas, iconeDaColuna, inicioDoFimPreso, LIMITE_COLUNAS, type EdicaoDeColuna } from "../lib/colunas.ts";
+import { comColunas, iconeDaColuna, paradaHa, podeTerPrazo, prazoLegivelMin, inicioDoFimPreso, LIMITE_COLUNAS, type EdicaoDeColuna } from "../lib/colunas.ts";
 import { aposDoCabecalho, botaoDeNova, campoDeRenomear, colunaNova, confirmacaoDeSoltar, folhaDasColunas, menuDeMover, naFolha, type AgenteDaPassagem } from "./colunas-quadro.ts";
 import { RESP_VOCE, atalhosDePrazo, codigoDaTarefa, faltaParaOPrazo, fraseDoPrazo, linhaDoHistorico, opcoesDeStatus, tarefasPorStatus, type Faixa } from "../lib/quadro-dados.ts";
 import { anel, avatar, barra, card, confiar, ICONE, ICONE_DO_STATUS, linha, lista, quadro, seloEmTeste, type Card, type Coluna, type ExtraDaGrade, type Filtro, type Html, type QuemRoda } from "./quadro.ts";
@@ -56,7 +56,7 @@ export const prMaisProblematico = (prs: readonly PrDto[]): PrDto =>
 const horaDaLinha = (ms: number): string => new Date(ms).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
 
 /** A tarefa como card: o responsável (bot ou você), a execução, o motivo do bloqueio e a pergunta para você. */
-export function cardDaTarefa(t: TarefaDto, agente: AgenteDoQuadro, acesa = false): Card {
+export function cardDaTarefa(t: TarefaDto, agente: AgenteDoQuadro, acesa = false, o: { agora?: number; prazoMin?: number; responder?: boolean } = {}): Card {
   const resp = t.status === "voce" ? VOCE : t.agenteId ? agente(t.agenteId) : null;
   // NOD-421 (🧭 da Ada): o PR mais problemático com o ponto do estado, mais "+N"; sem PR ligado, o pr_url do agente, como antes.
   const pior = t.prs?.length ? prMaisProblematico(t.prs) : null;
@@ -73,6 +73,10 @@ export function cardDaTarefa(t: TarefaDto, agente: AgenteDoQuadro, acesa = false
     ...(pr ? { pr } : {}),
     ...(tags.length ? { tags } : {}),
     ...(acesa ? { brilho: true } : {}),
+    // NOD-420: responder sem abrir a tarefa, e há quanto tempo ela espera (na espera da pessoa ou numa coluna com prazo).
+    ...(o.responder && (t.status === "voce" || t.status === "bloqueado") ? { responder: LIMITE_RESPOSTA } : {}),
+    ...(o.agora && t.naColunaDesde && (o.prazoMin || t.status === "voce" || t.status === "bloqueado")
+      ? { quando: paradaHa(t.naColunaDesde, o.agora), ...(o.prazoMin && o.agora - t.naColunaDesde >= o.prazoMin * 60_000 ? { atrasada: true } : {}) } : {}),
   };
 }
 
@@ -163,15 +167,17 @@ export function quadroDaMeta(o: { q: QuadroDto; nome: string; agente: AgenteDoQu
     const tarefas = (por[c.id] ?? []).filter((t) => passaNoFiltro(t, o.filtro));
     const padrao = c.recolhida && (contagem[c.id] ?? 0) === 0;
     // Renomear ou remover (o popover) abre a coluna, para o campo ter onde ficar.
-    const editando = !naFolha(ed) && (ed?.tipo === "renomear" || ed?.tipo === "remover" || ed?.tipo === "passagem" || ed?.tipo === "soltar") && ed.coluna === c.id;
+    const editando = !naFolha(ed) && (ed?.tipo === "renomear" || ed?.tipo === "remover" || ed?.tipo === "passagem" || ed?.tipo === "soltar" || ed?.tipo === "prazo") && ed.coluna === c.id;
     return { c, tarefas, recolhida: !editando && padrao !== o.alternadas.has(c.id) };
   });
+  // O prazo dormente (coluna que passou a "só a pessoa tira daqui") não marca atraso (revisão 4 do PR #624).
+  const prazoDe = new Map(cs.flatMap((c) => (c.prazoMin && podeTerPrazo(c) ? [[c.id, c.prazoMin] as const] : [])));
   // ADR-142: o "Mover para…" abre o menu só no card (e na vista) de onde veio; o card solto vira uma linha no topo da
   // lista de destino, com o card de origem apagado até a pessoa confirmar ou desistir.
   const cartoes = (ts: TarefaDto[], estreito: boolean): Card[] => ts.map((t) => {
     const menu = o.agentes && ed?.tipo === "mover" && ed.tarefa === t.id && !!ed.estreito === estreito ? { menu: menuDeMover(cs, t, o.nome) } : {};
     const saindo = ed?.tipo === "soltar" && ed.tarefa === t.id ? { classe: "qd-saindo" } : {};
-    return { ...cardDaTarefa(t, o.agente, o.acesas.has(t.id)), ...(o.agentes ? { arrastavel: true } : {}), ...menu, ...saindo };
+    return { ...cardDaTarefa(t, o.agente, o.acesas.has(t.id), { ...(o.agora ? { agora: o.agora } : {}), ...(prazoDe.has(t.status) ? { prazoMin: prazoDe.get(t.status)! } : {}), responder: true }), ...(o.agentes ? { arrastavel: true } : {}), ...menu, ...saindo };
   });
   const solta = (c: (typeof cs)[number]): Html[] => {
     if (ed?.tipo !== "soltar" || ed.coluna !== c.id) return [];
@@ -182,7 +188,7 @@ export function quadroDaMeta(o: { q: QuadroDto; nome: string; agente: AgenteDoQu
   const larguraPresa = (depois: number) => `calc(${depois} * (var(--qd-tira) + 8px) + var(--qd-tira) + 8px)`;
   const colunas: Coluna[] = cols.map(({ c, tarefas, recolhida }, i) => ({
     status: c.id, nome: c.nome, grupo: c.grupo, icone: iconeDaColuna(c), pessoa: c.daPessoa, recolhida, recolhivel: true,
-    editavel: { fixa: c.fixa }, n: tarefas.length, cards: [...solta(c), ...cartoes(tarefas, false).map(card)], vazio: vazio(c.id),
+    editavel: { fixa: c.fixa }, ...(c.prazoMin && podeTerPrazo(c) ? { prazo: prazoLegivelMin(c.prazoMin) } : {}), n: tarefas.length, cards: [...solta(c), ...cartoes(tarefas, false).map(card)], vazio: vazio(c.id),
     ...(!recolhida ? { apos: aposDoCabecalho(cs, c, ed, contagem[c.id] ?? 0, o.nome, o.agentes) } : {}),
     ...(ed?.tipo === "renomear" && ed.coluna === c.id && !naFolha(ed) ? { cab: campoDeRenomear(c, ed.erro) } : {}),
     ...(i >= preso ? { presa: larguraPresa(cols.length - 1 - i) } : {}),
@@ -282,7 +288,7 @@ export function tarefaAberta(o: { t: TarefaDto; q: QuadroDto; agente: AgenteDoQu
   const chipPr = pr ? `<a class="qd-chip" href="${esc(pr)}" target="_blank" rel="noopener noreferrer">${esc(numeroDoPr(pr))}</a>` : "";
   const desc = t.descricao.trim() ? `<div class="qd-t-desc">${esc(t.descricao)}</div>` : `<div class="qd-t-desc qd-t-desc-vazia">Sem descrição.</div>`;
   const pergunta = t.pergunta && (t.status === "voce" || t.status === "bloqueado")
-    ? `<h2 class="qd-t-sec">${t.status === "voce" ? "Precisa de você" : "Bloqueada"}</h2><p class="qd-voce-frase">${esc(t.pergunta)}</p>${t.status === "voce" ? formResposta(t) : ""}` : "";
+    ? `<h2 class="qd-t-sec">${t.status === "voce" ? "Precisa de você" : "Bloqueada"}</h2><p class="qd-voce-frase">${esc(t.pergunta)}</p>${formResposta(t)}` : "";
   const resposta = t.resposta ? `<h2 class="qd-t-sec">Sua resposta</h2><p class="qd-t-resposta">${esc(t.resposta)}</p>` : "";
   // NOD-421: os PRs que o laço ligou (repo #N · estado); sem nenhum, o pr_url que o agente gravou, como antes.
   const prs = (t.prs ?? []).flatMap((p) => { const u = linkSeguro(p.url); return u ? [{ ...p, url: u }] : []; });

@@ -1,3 +1,4 @@
+import { ErroDeDominio } from "../../../domain/erro.ts";
 import { ErroDoMover, EXECUTORES_QUADRO } from "../../../use-cases/acoes/quadro.ts";
 import { verComentarios } from "../../../use-cases/comentar-tarefa.ts";
 import { verTrabalhos } from "../../../use-cases/quadro-execucoes.ts";
@@ -13,6 +14,15 @@ const CID = "(?<cid>[^/]+)";
 /** O id da coluna (o nome também serve, como na conversa). O roteador já decodificou: decodificar de novo quebra "100%". */
 const coluna = (cid: string | undefined) => cid ?? "";
 const texto = (v: unknown) => (typeof v === "string" ? v : undefined);
+/**
+ * NOD-420 (revisão 3 do PR #624): o prazo_min da coluna vem como inteiro ou null (tira o prazo); ausente não mexe. Outro
+ * tipo ("60", 1.5, true) é 400 aqui, antes do lote; a faixa (1..) é do domínio (lerOp).
+ */
+function prazoMin(c: Record<string, unknown>): { prazo_min?: number | null } {
+  if (c.prazo_min === undefined) return {};
+  if (c.prazo_min === null || Number.isInteger(c.prazo_min)) return { prazo_min: c.prazo_min as number | null };
+  throw new ErroDeDominio("entrada_invalida", { cause: "prazo_min" });
+}
 
 /**
  * Revisão 2 do PR #623: a recusa do mover que a tela distingue sai com a chave como `motivo` (lista branca, como a NOD-346
@@ -112,7 +122,7 @@ export function rotasQuadro(d: DepsRotas): Rota[] {
     // NOD-448 (ADR-140): as colunas.
     { metodo: "POST", acao: "quadro.criar_coluna", padrao: new RegExp(`^/agentes/${ID}/quadro/colunas$`), async handler(ctx) {
       const c = corpoObjeto(await ctx.corpo());
-      ctx.json(201, await executar(ctx.escopo, EXECUTORES_QUADRO["quadro.criar_coluna"], { ...base(ctx.params.id ?? ""), nome: c.nome as string, grupo: c.grupo as string, depois_de: texto(c.depois_de) }));
+      ctx.json(201, await executar(ctx.escopo, EXECUTORES_QUADRO["quadro.criar_coluna"], { ...base(ctx.params.id ?? ""), nome: c.nome as string, grupo: c.grupo as string, depois_de: texto(c.depois_de), ...prazoMin(c) }));
     } },
     { metodo: "PUT", acao: "quadro.substituir_colunas", padrao: new RegExp(`^/agentes/${ID}/quadro/colunas$`), async handler(ctx) {
       const c = corpoObjeto(await ctx.corpo());
@@ -120,7 +130,7 @@ export function rotasQuadro(d: DepsRotas): Rota[] {
     } },
     { metodo: "PATCH", acao: "quadro.renomear_coluna", padrao: new RegExp(`^/agentes/${ID}/quadro/colunas/${CID}$`), async handler(ctx) {
       const c = corpoObjeto(await ctx.corpo());
-      ctx.json(200, await executar(ctx.escopo, EXECUTORES_QUADRO["quadro.renomear_coluna"], { ...base(ctx.params.id ?? ""), coluna: coluna(ctx.params.cid), nome: c.nome as string }));
+      ctx.json(200, await executar(ctx.escopo, EXECUTORES_QUADRO["quadro.renomear_coluna"], { ...base(ctx.params.id ?? ""), coluna: coluna(ctx.params.cid), ...(c.nome !== undefined ? { nome: c.nome as string } : {}), ...prazoMin(c) }));
     } },
     { metodo: "POST", acao: "quadro.mover_coluna", padrao: new RegExp(`^/agentes/${ID}/quadro/colunas/${CID}/mover$`), async handler(ctx) {
       const c = corpoObjeto(await ctx.corpo());

@@ -1,5 +1,6 @@
 import type { AutorLote, CampoHistorico, ColunaQuadro, IdColuna, LinhaDeSistema, LoteQuadro, MudancaTarefa, PrDaTarefa, Quadro, TarefaQuadro, TipoLinhaTarefa } from "../contracts/quadro.ts";
 import type { EstadoTurno } from "../contracts/turno.ts";
+import type { MarcasAviso } from "../domain/avisos-quadro.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
 import { jsonb, ms, msOuNull } from "./conversao.ts";
 
@@ -289,6 +290,21 @@ export function quadrosRepo(conn: Conn, escopo: Escopo) {
           select t.id, d.n + 1 from turnos t join desce d on t.tenant_id = ${escopo.tenantId} and t.retoma_turno_id = d.id where d.n < 50
         )
         select t.id, t.estado from desce d join turnos t on t.tenant_id = ${escopo.tenantId} and t.id = d.id`;
+    },
+
+    /** NOD-420 (0141): as marcas da estadia de cada tarefa na coluna atual (o gatilho as zera quando o status muda). */
+    async marcasDeAviso(quadroId: string): Promise<Map<string, MarcasAviso>> {
+      const ls = await conn<{ id: string; na_coluna_desde: Date; avisada_em: Date | null; cobrada_em: Date | null; escalada_em: Date | null }[]>`
+        select id, na_coluna_desde, avisada_em, cobrada_em, escalada_em from quadro_tarefas where ${dona()} and quadro_id = ${quadroId}`;
+      return new Map(ls.map((l) => [l.id, { naColunaDesde: ms(l.na_coluna_desde), avisadaEm: msOuNull(l.avisada_em), cobradaEm: msOuNull(l.cobrada_em), escaladaEm: msOuNull(l.escalada_em) }]));
+    },
+    /** Marca o que saiu, só onde ainda não estava marcado: devolve os ids que ESTA chamada marcou (os outros, alguém já marcou). */
+    async marcarAviso(ids: readonly string[], campo: "avisada_em" | "cobrada_em" | "escalada_em", agora: number): Promise<string[]> {
+      if (ids.length === 0) return [];
+      const ls = await conn<{ id: string }[]>`
+        update quadro_tarefas set ${conn.unsafe(campo)} = ${new Date(agora)}
+        where ${dona()} and id = any(${conn.array([...ids])}::uuid[]) and ${conn.unsafe(campo)} is null returning id`;
+      return ls.map((l) => l.id);
     },
 
     /** NOD-430: `pedidoPor` = a pessoa que pediu ao bot autor na conversa (só com autor agente; o bot é o `autor_agente_id`). */

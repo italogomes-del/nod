@@ -75,8 +75,8 @@ export const EXECUTORES_QUADRO = {
   "quadro.desfazer": umaAcao<{ lote?: string }>("desfazer"),
   "quadro.mover_tarefa": umaAcao<{ tarefa: string; quadro: string }>("mover_quadro"),
   "quadro.remover": umaAcao<{ bot?: string }>("remover_quadro"),
-  "quadro.criar_coluna": umaAcao<{ nome: string; grupo: string; depois_de?: string }>("criar_coluna"),
-  "quadro.renomear_coluna": umaAcao<{ coluna: string; nome: string }>("renomear_coluna"),
+  "quadro.criar_coluna": umaAcao<{ nome: string; grupo: string; depois_de?: string; prazo_min?: number | null }>("criar_coluna"),
+  "quadro.renomear_coluna": umaAcao<{ coluna: string; nome?: string; prazo_min?: number | null }>("renomear_coluna"),
   "quadro.mover_coluna": umaAcao<{ coluna: string; antes_de?: string; depois_de?: string }>("mover_coluna"),
   "quadro.remover_coluna": umaAcao<{ coluna: string; destino?: string }>("remover_coluna"),
   // Pela tela a pessoa é a confirmação; pela conversa o gerir_quadro abre o card (proposta colunas_quadro).

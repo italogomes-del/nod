@@ -585,8 +585,9 @@ describeIntegracao("tarefa: código, histórico e mover de quadro (NOD-416)", ()
       const tarefas = vi.spyOn(m.repos.quadros, "tarefas");
       await m.ok({ anfitriaoId: m.ze.agenteId, ops: [{ tipo: "criar_tarefa", titulo: "B" }] });
       expect(semNumero).toHaveBeenCalledTimes(1);
-      // O lote lê as tarefas antes do plano, no fecho da meta e ao montar a resposta; o numerar não soma uma (antes, 4).
-      expect(tarefas).toHaveBeenCalledTimes(3);
+      // O lote lê as tarefas antes do plano, no fecho da meta, nos avisos (NOD-420) e ao montar a resposta; o numerar não
+      // soma uma (antes, 5).
+      expect(tarefas).toHaveBeenCalledTimes(4);
       semNumero.mockRestore();
       tarefas.mockRestore();
     });

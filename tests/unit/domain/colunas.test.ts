@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
-  COLUNAS_PADRAO, colunaDeAndamento, colunaDeEspera, colunasDe, colunasDto, criarColuna, idNovo, moverColuna, papelDe,
-  removerColuna, renomearColuna, resolverColuna, saoPadrao, substituirColunas, validarColunas,
+  COLUNAS_PADRAO, colunaDeAndamento, colunaDeEspera, colunasDe, colunasDto, criarColuna, idNovo, moverColuna, papelDe, podeTerPrazo,
+  prazoLegivelMin, removerColuna, renomearColuna, resolverColuna, saoPadrao, substituirColunas, validarColunas,
 } from "../../../src/domain/colunas.ts";
 import type { ColunaQuadro } from "../../../src/contracts/quadro.ts";
-import { progresso } from "../../../src/domain/quadro.ts";
+import { lerOp, progresso } from "../../../src/domain/quadro.ts";
 
 const ok = <T,>(r: T | { erro: string }): T => {
   if (r && typeof r === "object" && "erro" in r) throw new Error((r as { erro: string }).erro);
@@ -152,5 +152,59 @@ describe("colunas: substituir (o quadro dos doces)", () => {
     expect(resolverColuna(s.colunas, "nada")).toMatchObject({ erro: expect.stringContaining("não existe") });
     const p = progresso([{ status: "c-pago" }, { status: "c-entrega" }, { status: "cancelado" }, { status: "c-pedido" }] as never, s.colunas);
     expect(p).toMatchObject({ feitas: 1, total: 3 });
+  });
+});
+
+describe("colunas: prazo (NOD-420)", () => {
+  it("só onde o trabalho anda: Fazendo, Em revisão e as da pessoa no Iniciado; nunca Bloqueado, Precisa de você ou fora do Iniciado", () => {
+    expect(COLUNAS_PADRAO.filter(podeTerPrazo).map((c) => c.id)).toEqual(["fazendo", "revisao"]);
+    expect(ok(renomearColuna(COLUNAS_PADRAO, { coluna: "revisao", prazo_min: 30 })).colunas.find((c) => c.id === "revisao")).toMatchObject({ nome: "Em revisão", prazoMin: 30 });
+    for (const coluna of ["bloqueado", "voce", "afazer", "feito"]) {
+      expect(renomearColuna(COLUNAS_PADRAO, { coluna, prazo_min: 30 })).toMatchObject({ erro: expect.stringContaining("prazo só vale") });
+    }
+    const nova = ok(criarColuna(COLUNAS_PADRAO, { nome: "QA", grupo: "iniciado", prazo_min: 120 }));
+    expect(nova.colunas.find((c) => c.id === nova.id)).toMatchObject({ prazoMin: 120 });
+  });
+
+  it("a coluna 'só a pessoa tira daqui' (NOD-419) não aceita prazo; o gravado antes da trava fica dormente (revisão 4 do PR #624)", () => {
+    const trava = { soPessoa: true };
+    const travada = COLUNAS_PADRAO.map((c) => (c.id === "revisao" ? { ...c, trava } as ColunaQuadro : c));
+    expect(podeTerPrazo({ id: "revisao", grupo: "iniciado", trava })).toBe(false);
+    expect(podeTerPrazo({ id: "revisao", grupo: "iniciado", trava: { soPessoa: false } })).toBe(true);
+    expect(travada.filter(podeTerPrazo).map((c) => c.id)).toEqual(["fazendo"]);
+    expect(renomearColuna(travada, { coluna: "revisao", prazo_min: 30 })).toMatchObject({ erro: expect.stringContaining("só a pessoa tira a tarefa") });
+    // Tirar segue valendo; e o prazo que já estava (a trava veio depois) não derruba a validação do conjunto.
+    const dormente = travada.map((c) => (c.id === "revisao" ? { ...c, prazoMin: 30 } : c));
+    expect(validarColunas(dormente)).toBeNull();
+    expect(ok(renomearColuna(dormente, { coluna: "revisao", nome: "Revisão" })).colunas.find((c) => c.id === "revisao")).toMatchObject({ prazoMin: 30 });
+    expect(ok(renomearColuna(dormente, { coluna: "revisao", prazo_min: null })).colunas.find((c) => c.id === "revisao")?.prazoMin).toBeUndefined();
+  });
+
+  it("null tira, ausente não mexe; coluna com prazo não é padrão; o limite vale no domínio", () => {
+    const com = ok(renomearColuna(COLUNAS_PADRAO, { coluna: "fazendo", prazo_min: 60 })).colunas;
+    expect(saoPadrao(com)).toBe(false);
+    expect(ok(renomearColuna(com, { coluna: "fazendo", nome: "Fazendo agora" })).colunas[2]).toMatchObject({ prazoMin: 60 });
+    const sem = ok(renomearColuna(com, { coluna: "fazendo", prazo_min: null })).colunas;
+    expect(sem.find((c) => c.id === "fazendo")?.prazoMin).toBeUndefined();
+    expect(saoPadrao(sem)).toBe(true);
+    expect(validarColunas(COLUNAS_PADRAO.map((c) => (c.id === "fazendo" ? { ...c, prazoMin: 0 } : c)))).toMatchObject({ erro: expect.stringContaining("inválido") });
+    expect(validarColunas(COLUNAS_PADRAO.map((c) => (c.id === "fazendo" ? { ...c, prazoMin: 30 * 24 * 60 + 1 } : c)))).toMatchObject({ erro: expect.stringContaining("inválido") });
+  });
+
+  it("substituir guarda o prazo da coluna que fica", () => {
+    const com = ok(renomearColuna(COLUNAS_PADRAO, { coluna: "fazendo", prazo_min: 45 })).colunas;
+    const r = ok(substituirColunas(com, { colunas: [{ id: "afazer", nome: "A fazer", grupo: "nao_iniciado" }, { id: "fazendo", nome: "Fazendo", grupo: "iniciado" }, { id: "feito", nome: "Feito", grupo: "feito" }] }, []));
+    expect(r.colunas.find((c) => c.id === "fazendo")?.prazoMin).toBe(45);
+  });
+
+  it("lerOp: renomear aceita só o prazo, null tira, e pede nome ou prazo; prazo fora do limite volta erro com o limite", () => {
+    expect(lerOp({ tipo: "renomear_coluna", coluna: "fazendo", prazo_min: 30 })).toEqual({ tipo: "renomear_coluna", coluna: "fazendo", prazo_min: 30 });
+    expect(lerOp({ tipo: "renomear_coluna", coluna: "fazendo", prazo_min: null })).toEqual({ tipo: "renomear_coluna", coluna: "fazendo", prazo_min: null });
+    expect(lerOp({ tipo: "renomear_coluna", coluna: "fazendo" })).toEqual({ erro: "renomear_coluna precisa de nome ou prazo_min" });
+    expect(lerOp({ tipo: "criar_coluna", nome: "QA", grupo: "iniciado", prazo_min: 1.5 })).toMatchObject({ erro: expect.stringContaining("43200") });
+  });
+
+  it("o prazo em palavras", () => {
+    expect([30, 60, 90, 120, 1440, 4320].map(prazoLegivelMin)).toEqual(["30 min", "1 h", "1 h 30 min", "2 h", "1 dia", "3 dias"]);
   });
 });

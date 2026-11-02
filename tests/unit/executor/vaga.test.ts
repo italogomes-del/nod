@@ -3,7 +3,7 @@ import { mkdtemp, readdir, readFile, rm, writeFile, mkdir } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { invocarDoHook, pastaDaFila } from "../../../src/adapters/executor/drivers/claude-cli.ts";
 import { decidirHook, filaDaMaquina, type Confirmar } from "../../../src/adapters/executor/hook-nativas.ts";
 import { criarVaga, TETO_DA_VEZ_MS } from "../../../src/adapters/executor/vaga.ts";
@@ -162,14 +162,21 @@ describe("a fila numa pasta (ADR-097)", () => {
   it("o vigia guarda o pico da árvore do shell; o comando morto pela falta de memória (137) reserva mais na próxima", async () => {
     const dir = await pasta();
     let rss = 100 * 1024;
-    const v = criarVaga({ dir, livreMb: async () => 9999, vivo: () => true, soltarVigia: () => null, ps: async () => `  500   1  1000\n  501 500 ${rss}\n  777 500 99999\n`, dormir: () => new Promise((r) => setTimeout(r, 10)), avisar: () => {} });
+    // Sem relógio de parede (flake no CI sob carga): cada fase dura até o vigia medir DUAS vezes com o valor dela (a
+    // segunda começa depois da troca, então a medida é do valor novo, e não de uma volta em curso).
+    let medidas = 0;
+    const v = criarVaga({ dir, livreMb: async () => 9999, vivo: () => true, soltarVigia: () => null, ps: async () => { medidas++; return `  500   1  1000\n  501 500 ${rss}\n  777 500 99999\n`; }, dormir: () => new Promise((r) => setTimeout(r, 1)), avisar: () => {} });
     const id = await v.pegar("g\nnpm test", 500);
     const vigiando = v.vigiar(id, 777);
-    await new Promise((r) => setTimeout(r, 60));
+    const medir = async () => {
+      const alvo = medidas + 2;
+      await vi.waitFor(() => expect(medidas).toBeGreaterThanOrEqual(alvo), { timeout: 10_000, interval: 2 });
+    };
+    await medir();
     rss = 900 * 1024;
-    await new Promise((r) => setTimeout(r, 60));
+    await medir();
     rss = 200 * 1024;
-    await new Promise((r) => setTimeout(r, 60));
+    await medir();
     await v.soltar(id, "137");
     await vigiando;
     expect((await lerHistorico(dir))?.["g\nnpm test"]).toMatchObject({ picos: [900], faltou: true });
