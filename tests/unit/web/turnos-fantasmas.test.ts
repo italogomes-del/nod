@@ -141,7 +141,7 @@ describe("reconciliação dos turnos vivos (NOD-216)", () => {
 
   it("o stream que volta relê os trabalhos e as conversas carregadas", () => {
     const e = reduzir(base(), { tipo: "hidratar-conversa", conversa: conversa(), agora: AGORA });
-    expect(invalidacoesAoReconectar(e)).toEqual(["trabalhos", `conversa:${C}`]);
+    expect(invalidacoesAoReconectar(e)).toEqual(["trabalhos", "frota", "nao-lidos", `conversa:${C}`]);
     expect(invalidacoesAoReconectar(estadoInicial)).toEqual([]);
   });
 });
@@ -219,7 +219,7 @@ describe("revisão do PR #302 (NOD-216)", () => {
 
   it("o stream que volta com a tela da task aberta relê a task", () => {
     const e = { ...base(), tela: { tipo: "trabalho", id: "w1", voltar: { tipo: "inicio" } } } as Estado;
-    expect(invalidacoesAoReconectar(e)).toEqual(["trabalhos", "trabalho:w1"]);
+    expect(invalidacoesAoReconectar(e)).toEqual(["trabalhos", "frota", "nao-lidos", "trabalho:w1"]);
   });
 
   it("mascoteComAviso: o aviso ganha do mascote parado (disponível ou na fila), nunca do animado", () => {

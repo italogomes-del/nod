@@ -77,3 +77,28 @@ export function cabecalhoSecao(nome: string, chave: string, o: { recolhida: bool
   const rotulo = o.recolhida ? [nome, o.total ? `${o.total} ${o.total === 1 ? "bot" : "bots"}` : "", o.aviso ? ESPERA[o.aviso] : ""].filter(Boolean).join(", ") : nome;
   return `<h3><button type="button" class="secao-cab" data-act="recolher-secao" data-chave="${esc(chave)}" aria-expanded="${o.recolhida ? "false" : "true"}" aria-label="${esc(rotulo)}" title="${o.recolhida ? "Mostrar" : "Recolher"} ${esc(nome)}"><span class="secao-nome">${esc(nome)}</span>${ICONE.seta}${total}${ponto}</button></h3>`;
 }
+
+/** O mínimo de um bot que decide onde ele mora na barra. */
+type BotDaBarra = { ownerId: string; papel?: string | null; fixado: boolean; secao?: string | null };
+
+/**
+ * NOD-450: onde cada bot da frota mora na barra lateral — o Nod, a grade de fixados, "Meus agentes" (sem seção), as
+ * seções da pessoa (em ordem alfabética) e os da equipe. É a mesma regra que o `renderSidebar` desenha; fora dele, o
+ * teste prova que o bot recém-criado (com ou sem seção) entra na barra assim que a frota relida chega.
+ * ADR-081: o Nod nunca entra numa seção; no celular (NOD-379) ele é sempre o primeiro favorito.
+ */
+export function gruposDaBarra<A extends BotDaBarra>(agentes: readonly A[], pessoaId: string, celular: boolean): { meus: A[]; nod: A | null; comuns: A[]; fixados: A[]; soltos: A[]; secoes: { nome: string; bots: A[] }[]; equipe: A[] } {
+  const meus = agentes.filter((a) => a.ownerId === pessoaId);
+  const nod = meus.find((a) => a.papel === "nod") ?? null;
+  const comuns = meus.filter((a) => a.papel !== "nod");
+  const nomes = [...new Set(comuns.filter((a) => !a.fixado && a.secao).map((a) => a.secao!))].sort((a, b) => a.localeCompare(b));
+  return {
+    meus,
+    nod,
+    comuns,
+    fixados: [...(nod && (nod.fixado || celular) ? [nod] : []), ...comuns.filter((a) => a.fixado)],
+    soltos: comuns.filter((a) => !a.fixado && !a.secao),
+    secoes: nomes.map((nome) => ({ nome, bots: comuns.filter((a) => !a.fixado && a.secao === nome) })),
+    equipe: agentes.filter((a) => a.ownerId !== pessoaId),
+  };
+}

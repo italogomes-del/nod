@@ -69,7 +69,7 @@ import type { Escopo } from "../src/shared/types.ts";
 import type { FrameSse } from "../src/contracts/frame.ts";
 import type { AnexoDaConversa } from "../src/contracts/anexo.ts";
 import { confirmacaoCaducou, HISTORICO_INICIAL, type HistoricoDoBot } from "./lib/historico-perfil.ts";
-import { agenteDaTela, bibliotecaAberta, conversaAbertaTemNotaDeContas, conversaDaTela, estadoInicial, invalidacoesAoReconectar, invalidacoesAoRetomar, invalidacoesDaTela, mudouNaTela, reduzir, secaoAberta, secaoDoPedido, type Acao, type Estado, type FalaPendente, type Invalidacao, type NivelGaveta, type PedidoSecao, type PerfilCelular, type SecaoEspaco, type Tela } from "./estado/reducer.ts";
+import { agenteDaTela, bibliotecaAberta, conversaAbertaTemNotaDeContas, conversaDaTela, estadoInicial, acoesAoMudarConexao, invalidacoesAoRetomar, sempreRelevante, invalidacoesDaTela, mudouNaTela, reduzir, secaoAberta, secaoDoPedido, type Acao, type Estado, type FalaPendente, type Invalidacao, type NivelGaveta, type PedidoSecao, type PerfilCelular, type SecaoEspaco, type Tela } from "./estado/reducer.ts";
 import { mascararDormindo, RetryDoAcordar, type PassosDoRetry } from "./lib/retry-computador.ts";
 import { contaApi, criarApi, minhaContaApi, ErroApi, observarRede, sessao as sessaoApi, type Api } from "./lib/api.ts";
 import { reagirACota } from "./lib/cota-provisorio.ts";
@@ -140,7 +140,7 @@ import { botsDaPessoa, maquinaNova, maquinasDeTrabalho, nomeDeInstanciaSugerido,
 import { erroDoConectar, erroDoCriar, erroDoExcluir, recusaDoDormir, REGIAO_PADRAO, relerEnquantoCria, ZONA_PADRAO } from "./lib/maquina-nuvem.ts";
 import type { DormirAposMin, TamanhoMaquinaNuvem } from "../src/contracts/provedor-nuvem.ts";
 import { voltaDaTela } from "./lib/volta.ts";
-import { cabecalhoSecao, CHAVE_SECOES_RECOLHIDAS, chaveDaSecao, definirSecaoRecolhida, ESPERA, estadoDaSecao, lerSecoesRecolhidas, type AvisoBot } from "./lib/secoes.ts";
+import { cabecalhoSecao, CHAVE_SECOES_RECOLHIDAS, chaveDaSecao, definirSecaoRecolhida, ESPERA, estadoDaSecao, gruposDaBarra, lerSecoesRecolhidas, type AvisoBot } from "./lib/secoes.ts";
 import { faixaDeConectores, faixaDoUso, type AvisoDoUso, type DadosMenuConta } from "./telas/menu-conta.ts";
 import { renderConectores } from "./telas/conectores.ts";
 import { appsQueFaltam } from "./telas/rotina-precisa.ts";
@@ -1488,7 +1488,7 @@ async function reidratar(): Promise<void> {
 function relevante(q: Invalidacao): boolean {
   const t = estado.tela;
   if (q === "uso-plano") return t.tipo === "conversa";
-  if (q === "frota" || q === "inventario" || q === "executor" || q === "ias" || q === "sua-vez" || q === "salas" || q === "nao-lidos" || q === "ligacao" || q === "trabalhos" || q.startsWith("vivos:")) return true;
+  if (sempreRelevante(q)) return true;
   if (q.startsWith("trabalho:")) return t.tipo === "trabalho" && t.id === q.slice(9);
   if (q.startsWith("disponibilidade:")) return t.tipo === "conversa" && t.agenteId === q.slice(16);
   const secao = secaoAberta(estado);
@@ -1602,7 +1602,6 @@ function renderSidebar(estado: Estado): string {
     const busca = esc(`${a.nome} ${a.titulo}`.toLowerCase());
     return `<div class="bot-row inicio-linha${tom}${o.escondida ? " escondida" : ""}" data-bot-contexto="${esc(a.id)}" data-busca="${busca}"><button class="row" data-act="abrir-conversa" data-conversa="${esc(a.conversaId)}" data-agente="${esc(a.id)}" data-busca="${busca}" aria-label="Abrir conversa com ${esc(a.nome)}${o.emLigacao ? " (em ligação)" : ""}${o.rotuloAviso}">${iconeAgente(a, "", o.estadoVisual, o.aviso ? `data-aviso="${o.aviso}"` : "")}<span class="txt"><span class="nome-linha"><b>${esc(a.nome)}</b>${o.chip}${hora}</span>${sub}</span></button><button type="button" class="bot-mais" data-act="menu-agente" data-id="${esc(a.id)}" aria-label="Ações de ${esc(a.nome)}" aria-haspopup="menu">⋯</button></div>`;
   };
-  const meus = agentes.filter((a) => a.ownerId === estado.sessao?.pessoaId);
   // definido em 2026-10-04 (web/lib/secoes.ts): a seção recolhe pelo título. Recolhida, ficam à vista o bot da conversa
   // aberta e os com problema (computador fora do ar, em ligação); os outros continuam no HTML, escondidos pelo CSS — a
   // busca os mostra (data-buscando, em filtrarBots) e o arrasto abre a seção para medir a posição deles.
@@ -1635,20 +1634,17 @@ function renderSidebar(estado: Estado): string {
   };
   // definido em 2026-10-07 (ADR-081): o Nod nunca entra numa seção. Fixado, é o primeiro da grade; desafixado (discreto),
   // vira o botão com o logo e o nome na barra de cima, à esquerda da lupa (canvas "Nod — bot fixo", Alt E).
-  const nod = meus.find((a) => a.papel === "nod") ?? null;
-  const comuns = meus.filter((a) => a.papel !== "nod");
-  const secoes = [...new Set(comuns.filter((a) => !a.fixado && a.secao).map((a) => a.secao!))].sort((a, b) => a.localeCompare(b));
+  // NOD-450: a regra de onde cada bot mora é pura (web/lib/secoes.ts, gruposDaBarra), para o teste provar a barra.
   // NOD-379 (suposição registrada no PR): no celular não há barra de cima para o Nod discreto; ele é sempre o primeiro favorito.
-  const fixados = [...(nod && (nod.fixado || ehCelular) ? [nod] : []), ...comuns.filter((a) => a.fixado)];
+  const { meus, nod, comuns, fixados, soltos, secoes, equipe: daEquipe } = gruposDaBarra(agentes, pessoaId, ehCelular);
   const grade = !meus.length ? "" : ehCelular
     ? gradeDoCelular(fixados.map(bloco).join(""), fixados.length)
     : `<section class="fixados" aria-label="Fixados" data-grupo="fixados"${fixados.length ? "" : " data-vazio"}>${fixados.map(bloco).join("")}${fixados.length ? "" : '<p class="fixados-vazio">Solte aqui para fixar</p>'}</section>`;
-  const bots = meus.length ? grupo("Meus agentes", "", comuns.filter((a) => !a.fixado && !a.secao)) + secoes.map((s) => grupo(s, s, comuns.filter((a) => !a.fixado && a.secao === s))).join("") + '<div class="nova-secao-alvo" data-grupo="nova-secao" aria-hidden="true">+ Nova seção</div>' : "";
+  const bots = meus.length ? grupo("Meus agentes", "", soltos) + secoes.map((s) => grupo(s.nome, s.nome, s.bots)).join("") + '<div class="nova-secao-alvo" data-grupo="nova-secao" aria-hidden="true">+ Nova seção</div>' : "";
   const avisoNod = nod ? avisoDe(nod) : "";
   const nodDiscreto = nod && !nod.fixado && !ehCelular
     ? `<button class="nod-topo" data-bot-contexto="${esc(nod.id)}"${atual(nod.conversaId)} data-act="abrir-conversa" data-conversa="${esc(nod.conversaId)}" data-agente="${esc(nod.id)}" aria-label="Abrir o Nod${avisoNod ? ` (${ESPERA[avisoNod]})` : ""}" title="Nod">${LOGO_NOD}<span>Nod</span>${avisoNod ? `<span class="nod-topo-aviso" data-aviso="${avisoNod}" aria-hidden="true"></span>` : ""}</button>`
     : "";
-  const daEquipe = agentes.filter((a) => a.ownerId !== estado.sessao?.pessoaId);
   const equipe = daEquipe.length ? secaoDeBots("Agentes da equipe", chaveDaSecao(pessoaId, null), daEquipe, "") : "";
   // definido em 2026-10-04: a seção Salas saiu da barra — só poluía. As salas voltam como uma feature pensada na
   // jornada inteira; até lá, a tela da sala continua existindo e abre por Não lidos e pelos avisos.
@@ -2838,9 +2834,7 @@ async function iniciarSessao(escopo: Escopo): Promise<void> {
     else if (ev.tipo === "conexao") {
       // NOD-216: o stream que volta depois de cair relê os turnos vivos (a conversa aberta e os donos da barra), mesmo
       // com o replay: um turno.encerrado de antes do buffer deixaria o mascote animado para sempre.
-      const voltou = ev.estado === "aberto" && estado.conexao.estado === "reconectando";
-      dispatch({ tipo: "conexao", estado: ev.estado, tentativa: ev.tentativa, proximaEmMs: ev.proximaEmMs });
-      if (voltou) dispatch({ tipo: "invalidar", quais: invalidacoesAoReconectar(estado) });
+      for (const acao of acoesAoMudarConexao(estado, ev)) dispatch(acao);
       if (ev.estado === "reconectando" && ev.proximaEmMs !== null) conferirSessaoAoCair();
     }
   });
@@ -7008,7 +7002,8 @@ document.addEventListener("visibilitychange", aoVoltarParaFrente);
 document.addEventListener("visibilitychange", () => { if (!document.hidden && estado.computadorPessoa) void lerComputadorAgora(); });
 // ADR-094: voltar ao app (celular desbloqueado, aba à frente, janela em foco, rede de volta) só reabre o stream se ele
 // caiu de fato ou ficou mudo além do prazo (NOD-254); o que se perdeu chega pelo replay do `since` ou, sem replay
-// possível, pela releitura do aoReidratar. `focus` porque no Mac a janela coberta pode voltar sem `visibilitychange`.
+// possível, pela releitura do aoReidratar. NOD-216/NOD-450: além disso, o stream que volta relê a barra, os turnos e os
+// não lidos mesmo com o replay (acoesAoMudarConexao), como rede de segurança barata. `focus` porque no Mac a janela coberta pode voltar sem `visibilitychange`.
 function retomarStream(): void {
   if (document.visibilityState === "visible" && navigator.onLine) live?.retomar();
 }

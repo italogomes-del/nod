@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import { CONFIRMACOES_POR_PESSOA, criarDisjuntor } from "../../src/adapters/fundo/disjuntor-conectores.ts";
 import type { DentroDeTx } from "../../src/adapters/http/rotas/dentro-de-tx.ts";
 import type { Conector } from "../../src/contracts/conector.ts";
@@ -229,13 +229,14 @@ describeIntegracao("disjuntor por app (NOD-374)", () => {
       for (const id of ids.slice(0, CONFIRMACOES_POR_PESSOA + 1)) disjuntor.confirmar(MARLON, id);
       // Outra pessoa tem a vaga dela (o teto é por pessoa).
       disjuntor.confirmar({ ...MARLON, pessoaId: randomUUID() }, ids[CONFIRMACOES_POR_PESSOA + 1]!);
+      // NOD-450 (CI): espera a condição em vez de 30 ms fixos — com o runner carregado as sondas demoravam a começar.
+      await vi.waitFor(() => expect(sondas).toBe(CONFIRMACOES_POR_PESSOA + 1), { timeout: 5000, interval: 10 });
       await new Promise((r) => setTimeout(r, 30));
-      expect(sondas).toBe(CONFIRMACOES_POR_PESSOA + 1);
+      expect(sondas).toBe(CONFIRMACOES_POR_PESSOA + 1); // o teto segura a 5ª da mesma pessoa
       soltar();
       await new Promise((r) => setTimeout(r, 30));
       disjuntor.confirmar(MARLON, ids[CONFIRMACOES_POR_PESSOA]!);
-      await new Promise((r) => setTimeout(r, 30));
-      expect(sondas).toBe(CONFIRMACOES_POR_PESSOA + 2);
+      await vi.waitFor(() => expect(sondas).toBe(CONFIRMACOES_POR_PESSOA + 2), { timeout: 5000, interval: 10 });
       await disjuntor.parar();
     });
   });

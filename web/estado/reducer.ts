@@ -2248,13 +2248,45 @@ export function invalidacoesDaTela(estado: Estado): Invalidacao[] {
 /**
  * O que o stream que voltou a `aberto` relê (definido em 2026-10-13, NOD-216): os turnos vivos — `GET trabalhos` traz o
  * dono de cada bot (os mascotes da barra) e cada conversa carregada, os turnos dela. Só a aberta é buscada na hora.
+ * NOD-450: e a barra, por defesa, no espírito da NOD-216. O replay (ADR-016) cobre o que este stream publicou, mas a
+ * barra não pode depender de nenhum frame ter chegado: um `agente.mudou` do bot criado pelo chat (ou o `turno.encerrado`,
+ * que também relê a frota) que não chegou à aba a deixava sem o bot até o F5. Relê a frota, os não lidos (a prévia e o
+ * ponto do fim do turno) e, se já foi lida, a gestão (Agentes; `relevante` só busca com a seção aberta).
+ * Com `resumed:false` o `aoReidratar` (invalidacoesAoRetomar) pede tudo de novo logo depois: a frota pode ser lida duas
+ * vezes nessa reconexão (aceito: reconexão é rara e a NOD-370 ordena as leituras).
  */
 export function invalidacoesAoReconectar(estado: Estado): Invalidacao[] {
   if (!estado.sessao) return [];
   // Revisão: a tela da task aberta também — é a leitura dela que tira o turno fantasma da task (hidratar-trabalho).
   const t = estado.tela;
   // NOD-326 (revisão 2): a Biblioteca já lida também — o stream que caiu pode ter perdido o frame do arquivo novo.
-  return ["trabalhos", ...Object.keys(estado.conversas).map((id): Invalidacao => `conversa:${id}`), ...Object.keys(estado.bibliotecaDoBot).map((id): Invalidacao => `biblioteca:${id}`), ...(t.tipo === "trabalho" ? [`trabalho:${t.id}` as Invalidacao] : [])];
+  return ["trabalhos", "frota", "nao-lidos", ...(estado.gestao ? ["gestao" as const] : []), ...Object.keys(estado.conversas).map((id): Invalidacao => `conversa:${id}`), ...Object.keys(estado.bibliotecaDoBot).map((id): Invalidacao => `biblioteca:${id}`), ...(t.tipo === "trabalho" ? [`trabalho:${t.id}` as Invalidacao] : [])];
+}
+
+/**
+ * NOD-450 (revisão 1): o que a mudança de conexão relê. Só o stream que volta (`reconectando` → `aberto`) relê
+ * (invalidacoesAoReconectar); a primeira conexão e as quedas não. `estado` é o de antes de aplicar a mudança.
+ */
+export function invalidacoesAoMudarConexao(estado: Estado, novo: EstadoConexao): Invalidacao[] {
+  return novo === "aberto" && estado.conexao.estado === "reconectando" ? invalidacoesAoReconectar(estado) : [];
+}
+
+/**
+ * NOD-450 (revisão 3): as faltas que o main busca já, seja qual for a tela (a barra, os turnos e os avisos estão sempre à
+ * vista). As outras dependem da tela ou da seção aberta (`relevante`, no main).
+ */
+export function sempreRelevante(q: Invalidacao): boolean {
+  return q === "frota" || q === "inventario" || q === "executor" || q === "ias" || q === "sua-vez" || q === "salas" || q === "nao-lidos" || q === "ligacao" || q === "trabalhos" || q.startsWith("vivos:");
+}
+
+/**
+ * NOD-450 (revisão 2): as ações que o main despacha, em ordem, quando a conexão muda. A decisão olha o estado de ANTES
+ * da mudança (depois dela o stream já está `aberto` e não haveria o que reler); o main só despacha a lista.
+ */
+export function acoesAoMudarConexao(estado: Estado, ev: { estado: EstadoConexao; tentativa: number; proximaEmMs: number | null }): Acao[] {
+  const releituras = invalidacoesAoMudarConexao(estado, ev.estado);
+  const conexao: Acao = { tipo: "conexao", estado: ev.estado, tentativa: ev.tentativa, proximaEmMs: ev.proximaEmMs };
+  return releituras.length ? [conexao, { tipo: "invalidar", quais: releituras }] : [conexao];
 }
 
 /**
@@ -2268,6 +2300,8 @@ export function invalidacoesAoRetomar(estado: Estado): Invalidacao[] {
   const t = estado.tela;
   const todas: Invalidacao[] = [
     "frota", "sua-vez", "nao-lidos", "inventario", "executor", "ias", "uso-plano", "salas", "rotinas", "ligacao", "trabalhos",
+    // NOD-450: a gestão já lida (Agentes) também pode ter perdido o bot novo; só busca com a seção aberta.
+    ...(estado.gestao ? ["gestao" as const] : []),
     ...Object.keys(estado.conversas).map((id): Invalidacao => `conversa:${id}`),
     ...Object.keys(estado.bibliotecaDoBot).map((id): Invalidacao => `biblioteca:${id}`),
     ...(t.tipo === "conversa" || t.tipo === "sala" || t.tipo === "linha" ? [`conversa:${t.conversaId}` as Invalidacao] : []),
