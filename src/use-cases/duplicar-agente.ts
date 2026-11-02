@@ -11,6 +11,7 @@ import { nomeDaCopia } from "../domain/nome-da-copia.ts";
 import { ordemComCopia } from "../domain/ordem-barra.ts";
 import { redigir } from "../domain/redacao.ts";
 import { eventoDeRotina, textoRotinaAtiva } from "./apoio-l7.ts";
+import { secaoComTime } from "./acoes/times.ts";
 import { autoriaPessoa, evento } from "./autoria-evento.ts";
 import { concederLote } from "./conceder.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
@@ -117,7 +118,7 @@ async function chaveViva(deps: Deps, maquinaId: string): Promise<boolean> {
  * gravada é a do grupo inteiro, como no arrasto (0041).
  */
 async function porLogoAbaixo(deps: Deps, original: Agente, copiaId: string): Promise<void> {
-  if (original.secao) await deps.repos.agentes.organizar(copiaId, { secao: original.secao });
+  if (original.secao) await deps.repos.agentes.organizar(copiaId, { secao: await secaoComTime(deps, original.secao) });
   if (original.fixado) await deps.repos.agentes.fixar(copiaId, true);
   const frota = await deps.repos.agentes.listar({ incluirOcultos: true });
   await deps.repos.agentes.ordenar(ordemComCopia(frota, original, copiaId));

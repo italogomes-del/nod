@@ -135,6 +135,16 @@ export function agentesRepo(conn: Conn, escopo: Escopo) {
       return l ? paraAgente(l) : null;
     },
     /**
+     * NOD-437: troca o time (agentes.secao) de vários bots da pessoa de uma vez — renomear e excluir um time. Leva também
+     * os excluídos (restaurar um bot não pode ressuscitar um time excluído com o nome antigo).
+     */
+    async mudarSecao(ids: readonly string[], secao: string): Promise<number> {
+      if (ids.length === 0) return 0;
+      const r = await conn`update agentes set secao = ${secao}
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = any(${[...ids]}::uuid[])`;
+      return r.count;
+    },
+    /**
      * A ordem inteira de um grupo da barra (0041): cada id recebe o próprio índice. Só os bots da pessoa mudam —
      * id de outra pessoa, excluído ou inexistente fica de fora em silêncio. Devolve quantos mudaram.
      */

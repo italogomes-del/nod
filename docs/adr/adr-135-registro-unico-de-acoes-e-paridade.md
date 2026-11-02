@@ -185,3 +185,13 @@ pode pedir para excluir o quadro de **outro** bot, e o caminho do chat passa a s
 
 A tela continua removendo direto (aba Quadro → Remover quadro, com confirmação). O gatilho de reversão da emenda
 NOD-415 está cumprido pelo cartão.
+
+## Emenda (NOD-437): os times de bots pelo chat
+
+As ações `times.*` (criar, renomear, ordenar, recolher) e o `bots.mover` em lote são `muda` e, pelo `gerir_times` de
+qualquer bot, rodam direto em todo modo, sem card: só reorganizam a barra da própria pessoa, nenhum bot some e tudo se
+desfaz pela tela ou pedindo de novo. As cercas no servidor: turno de conversa ou criação, profundidade 0, sem procuração
+de colega, não parado e limpo (nada de fora). `times.excluir` é `arriscada`: com bots, vira card (o lote dos bots, tipo
+`excluir_time`) no manual e no automático e roda direto só no "Ignorar todas as aprovações" (`decidirPeloModo`, sem
+revisor na v1); time vazio sai direto. Gatilho de reversão: um time excluído ou reorganizado por um bot sem a pessoa
+querer → as `times.*` passam a seguir o modo (card no manual).

@@ -36,7 +36,7 @@ export type FrotaDto = {
    * do Grok): a prévia de uma linha da última mensagem da conversa própria; null sem conversa ou sem texto.
    */
   agentes: (Agente & { conversaId: string; descricaoEstado: string; computadorForaDoAr: { desde: EpochMs; motivo: MotivoFalhaComputador } | null; ultimaMensagem: { previa: string; em: EpochMs } | null })[];
-  inventario: Inventario;
+  inventario: Inventario; /** NOD-437: os times da pessoa, na ordem da barra (Sem time incluso); quem está em cada um é o `secao` do bot. */ times?: import("./time.ts").TimeNaLista[];
   /** `revisor` (ADR-115, modos PR 4): o revisor do Automático ligado (`NOD_REVISOR`); o menu diz o Automático com ele. */ negacoes: Negacao[]; revisor?: true;
 };
 

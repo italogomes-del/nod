@@ -1268,3 +1268,45 @@ div.mac-medidor { padding-right: 36px; }
   .wh-copiar { width: 44px; height: 44px; }
   .wh-acoes .bt.link, .wh-confirma .bt { min-height: 44px; }
 }
+
+/* ---- Times de bots (NOD-437, protótipo aprovado) ------------------------------------------------------------------------
+   O cabeçalho do time é o título que recolhe (como as seções de antes) mais o ⋯, que aparece no hover e no foco. O foco no
+   cabeçalho é um fundo tonal. O "+ Novo time" fica sempre à vista, discreto, no fim; arrastando um bot, vira o alvo
+   tracejado de antes. Time vazio diz o que fazer; a multisseleção tem fundo de destaque suave e um rodapé fixo. */
+.time-cab { display: flex; align-items: center; gap: 2px; }
+.time-cab[draggable="true"] { cursor: grab; }
+.time-cab .secao-cab { border-radius: 8px; padding: 2px 6px; margin: 0 -6px; }
+.time-cab .secao-cab:focus-visible { outline: none; background: var(--surface-selected, var(--surface-raised)); color: var(--ink); box-shadow: 0 0 0 2px var(--focus-ring); }
+.time-mais { flex: none; width: 24px; height: 24px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 6px; background: none;
+  color: var(--ink-3); font: inherit; font-size: 15px; line-height: 1; cursor: pointer; opacity: 0; }
+.time-cab:hover .time-mais, .time-cab:focus-within .time-mais, .time-mais[aria-expanded="true"] { opacity: 1; }
+.time-mais:hover, .time-mais:focus-visible { color: var(--ink); background: var(--surface-raised); }
+@media (hover: none) { .time-mais { opacity: .7; width: 44px; height: 44px; } }
+#sidebar[data-buscando] .time-mais { display: none; }
+.time-vazio { margin: 2px 8px 6px; padding: 10px 12px; border: 1px dashed var(--line); border-radius: 10px; font-size: 12.5px; color: var(--ink-3); }
+.section[data-recolhida] > .time-vazio, #sidebar[data-buscando] .time-vazio { display: none; }
+.time-editando { margin-bottom: 4px; }
+.time-nome-campo { flex: 1; min-width: 0; height: 30px; padding: 0 8px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface);
+  color: var(--ink); font: inherit; font-size: 13px; font-weight: 600; }
+.time-nome-campo:focus { outline: none; border-color: var(--ink-3); box-shadow: 0 0 0 2px var(--focus-ring); }
+@media (forced-colors: active) { .time-cab .secao-cab:focus-visible, .time-nome-campo:focus { outline: 2px solid Highlight; } }
+.time-nome-aviso { margin: 0 8px 6px; font-size: 12px; color: var(--ink-3); }
+.time-nome-aviso:empty { display: none; }
+.novo-time.nova-secao-alvo { display: block; width: calc(100% - 8px); margin: 2px 4px 10px; padding: 6px 8px; border: 0; border-radius: 8px; background: none;
+  text-align: left; font: inherit; font-size: 12.5px; color: var(--ink-3); cursor: pointer; }
+.novo-time.nova-secao-alvo[hidden] { display: none; }
+.novo-time:hover, .novo-time:focus-visible { color: var(--ink); background: var(--surface-raised); }
+.arrastando-bot .novo-time.nova-secao-alvo { display: block; padding: 12px; border: 1.5px dashed var(--line-strong); border-radius: 12px; text-align: center; }
+.bot-row.selecionado { border-radius: 10px; background: color-mix(in srgb, var(--action) 12%, transparent); }
+.selecao-rodape { position: sticky; bottom: 0; z-index: 2; display: flex; align-items: center; gap: 8px; margin: 8px 0 0; padding: 8px 10px; border: 1px solid var(--line);
+  border-radius: 12px; background: var(--surface-raised); box-shadow: var(--shadow-pop); font-size: 12.5px; color: var(--ink-2); }
+.selecao-rodape > span { flex: 1; }
+.selecao-rodape button { padding: 4px 8px; border: 0; border-radius: 8px; background: none; color: var(--ink); font: inherit; cursor: pointer; }
+.selecao-rodape button:hover, .selecao-rodape button:focus-visible { background: var(--surface); }
+.linha-time { margin: 2px 6px; }
+.time.origem-arrasto { opacity: .4; }
+@media (prefers-reduced-motion: no-preference) {
+  .bot-row.recem-movido { animation: time-recem-movido 1.6s ease-out; }
+}
+@media (prefers-reduced-motion: reduce) { .bot-row.recem-movido { background: color-mix(in srgb, var(--action) 10%, transparent); } }
+@keyframes time-recem-movido { from { background: color-mix(in srgb, var(--action) 22%, transparent); } to { background: transparent; } }

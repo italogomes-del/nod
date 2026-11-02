@@ -1,4 +1,5 @@
 import type { FrotaDto } from "../../src/contracts/api.ts";
+import { chaveDoTime } from "./times-da-barra.ts";
 
 type Bot = FrotaDto["agentes"][number];
 
@@ -9,7 +10,8 @@ type Bot = FrotaDto["agentes"][number];
  */
 export type Destino = { grupo: "fixados" } | { grupo: "secao"; secao: string };
 
-const noGrupo = (b: Bot, destino: Destino): boolean => (destino.grupo === "fixados" ? b.fixado : !b.fixado && (b.secao ?? "") === destino.secao);
+// NOD-437: o time casa pela chave do nome ("produção" e "Produção" são o mesmo time).
+const noGrupo = (b: Bot, destino: Destino): boolean => (destino.grupo === "fixados" ? b.fixado : !b.fixado && chaveDoTime(b.secao ?? "") === chaveDoTime(destino.secao));
 
 /** A mesma ordem do servidor: fixados primeiro, depois a posição (null por último), depois a criação. */
 export function compararNaBarra(x: Bot, y: Bot): number {

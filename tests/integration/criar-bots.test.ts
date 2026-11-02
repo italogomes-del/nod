@@ -44,6 +44,9 @@ describeIntegracao("criar_bots (NOD-210, ADR-104)", () => {
         expect(r.data).toMatchObject({ ok: true, criados: [{ nome: "Copy de LP", secao: "LPs" }, { nome: "Layout de LP", secao: "Time de LPs" }, { nome: "QA de LP", secao: "LPs" }] });
         if (!r.data.ok) return;
         expect(await d.repos.decisoes.pendentesDaConversa(ctx.conversaId)).toEqual([]);
+        // NOD-437 (revisão 3): o time de cada seção nasce junto (a barra não fica com time provisório).
+        const times = await trx<{ nome: string }[]>`select nome from times where owner_id = ${MARLON.pessoaId} and nome in ('LPs', 'Time de LPs') order by nome`;
+        expect(times.map((t) => t.nome)).toEqual(["LPs", "Time de LPs"]);
 
         for (const c of r.data.criados) {
           const novo = await d.repos.agentes.buscar(c.bot_id);

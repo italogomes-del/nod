@@ -5,6 +5,7 @@ import { linhaDoDesfecho, mensagemDeNascimento, validarBotsNovos } from "../doma
 import { ehErroDeDominio, ErroDeDominio } from "../domain/erro.ts";
 import { log } from "../obs/log.ts";
 import { evento } from "./autoria-evento.ts";
+import { secaoComTime } from "./acoes/times.ts";
 import { criarAgente } from "./criar-agente.ts";
 import { turnoComAPessoa } from "./nod.ts";
 import { autoriaDoAgente } from "./registrar-negacao.ts";
@@ -71,7 +72,9 @@ export async function criarBots(deps: Deps, input: ContextoFerramenta & ArgsCria
           mensagem: mensagemDeNascimento({ nome: b.nome, quem: quem.nome, pessoa, agora, descricao: b.descricao }),
         });
         events.push(...(r.events ?? []));
-        const secao = b.secao ?? secaoDeQuem;
+        const pedida = b.secao ?? secaoDeQuem;
+        // NOD-437 (revisão 3): o time da seção nasce junto (a barra não fica com time provisório).
+        const secao = pedida ? await secaoComTime(deps, pedida) : pedida;
         // A seção com a mesma autoria do nascimento (o bot, pela regra), não a da pessoa como no gerir_agente da tela.
         if (secao && !(await deps.repos.agentes.organizar(r.data.agente.id, { secao }))) throw new ErroDeDominio("estado_invalido", { cause: "seção" });
         if (secao) events.push(evento(deps.escopo, { kind: "agente_atualizado", autoria, agora, conversaId: r.data.conversa.id, dados: { agente_id: r.data.agente.id, acao: "organizar" } }));

@@ -128,6 +128,10 @@ export function validarLote(acoes: readonly AcaoLote[], bots: readonly BotDoLote
         // NOD-20: o número da versão (o Histórico do perfil); se ela existe e muda algo, quem diz é o caso de uso.
         if (typeof a.versao !== "number" || !Number.isSafeInteger(a.versao) || a.versao < 1 || a.versao > VERSAO_MAXIMA) erro("restaurar_versao precisa da versao (inteiro a partir de 1)");
         break;
+      case "excluir_time":
+        // NOD-437: excluir um time é do gerir_times (que monta o card); o gerir_bots não o recebe.
+        erro("excluir um time é com gerir_times");
+        break;
       default:
         break;
     }

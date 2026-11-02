@@ -80,6 +80,8 @@ export const ASSUNTOS = [
   // NOD-449: o card com a lista de não lidos e o recibo de "marcadas como lidas" (nao_lidos); a pessoa age neles.
   "leitura.lista",
   "leitura.recibo",
+  // NOD-437: o recibo do gerir_times (o que mudou nos times e quem pediu por qual bot).
+  "times.organizados",
   // O resto do que o sistema escreve (Atividade).
   "memoria.anotada",
   "memoria.task_fechada",

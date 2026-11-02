@@ -33,7 +33,7 @@ export const FERRAMENTAS_CRIAR_BOTS = {
             nome: { type: "string", description: "O nome do bot, único entre os bots da pessoa (ex.: \"Copywriter de LP\").", minLength: 1, maxLength: TETO_NOME_BOT },
             titulo: { type: "string", description: "O papel em poucas palavras (ex.: \"Textos da página\").", maxLength: TETO_TITULO_BOT },
             descricao: { type: "string", description: "O que o bot faz, em segunda pessoa: vira as instruções dele.", minLength: 1, maxLength: TETO_DESCRICAO_BOT },
-            secao: { type: "string", description: "Opcional: a seção da barra lateral (ex.: \"LPs\"); sem ela, a sua.", maxLength: TETO_SECAO_BOT },
+            secao: { type: "string", description: "Opcional: o time da barra lateral (ex.: \"LPs\"); sem ele, o seu.", maxLength: TETO_SECAO_BOT },
           },
           required: ["nome", "descricao"],
           additionalProperties: false,

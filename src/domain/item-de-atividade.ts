@@ -33,6 +33,7 @@ const ROTULO: Readonly<Record<Assunto, string>> = {
   "barra.ajuste": "Sugeriu mudar a barra lateral",
   "leitura.lista": "Mostrou os não lidos",
   "leitura.recibo": "Marcou conversas como lidas",
+  "times.organizados": "Organizou os times",
   "rotina.adiada": "Rotina adiada",
   "rotina.execucao": "A rotina rodou",
   "agente.criado": "Bot criado",

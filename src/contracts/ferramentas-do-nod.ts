@@ -15,7 +15,9 @@ import type { ModoAprovacao } from "./agente.ts";
 /** definido em 2026-10-07: um pedido do Nod mexe em até 20 bots — acima disso, é melhor ele dividir e a pessoa ver. */
 export const MAX_ACOES_LOTE = 20;
 
-export const TIPOS_ACAO_LOTE = ["criar", "duplicar", "editar", "mover", "excluir", "criar_rotina", "dar_acesso", "mudar_modo", "restaurar_versao"] as const;
+export const TIPOS_ACAO_LOTE = ["criar", "duplicar", "editar", "mover", "excluir", "criar_rotina", "dar_acesso", "mudar_modo", "restaurar_versao", "excluir_time"] as const;
+/** NOD-437: o que o gerir_bots aceita — o lote sem o excluir_time, que só o gerir_times põe no card. */
+export const TIPOS_ACAO_GERIR_BOTS = TIPOS_ACAO_LOTE.filter((t) => t !== "excluir_time");
 export type TipoAcaoLote = (typeof TIPOS_ACAO_LOTE)[number];
 
 /** Teto do título e do texto de um relato contado ao Nod (o texto é o mesmo teto do relato pelo botão, TETO_TEXTO_RELATO). */
@@ -25,7 +27,7 @@ export const FERRAMENTAS_DO_NOD = {
   gerir_bots: {
     type: "object",
     description:
-      "Muda vários bots da pessoa de uma vez, na ordem: criar, duplicar, editar, mover de seção, excluir, criar rotina, dar acesso a um app já conectado, mudar o modo de aprovação e restaurar uma versão antiga do perfil (ver_colegas com o agente lista as últimas versões e o número de cada uma; se falhar com versao_redigida, um segredo sumiria: só a pessoa decide isso, no Histórico do bot). Uma chamada só por pedido. O seu modo decide: o que precisa da pessoa vira UM card com as ações marcáveis; o resto é feito na hora. Para usar um bot criado ou duplicado no mesmo pedido, dê a ele um ref e aponte as ações seguintes para \"@ref\".",
+      "Muda vários bots da pessoa de uma vez, na ordem: criar, duplicar, editar, mover de time, excluir, criar rotina, dar acesso a um app já conectado, mudar o modo de aprovação e restaurar uma versão antiga do perfil (ver_colegas com o agente lista as últimas versões e o número de cada uma; se falhar com versao_redigida, um segredo sumiria: só a pessoa decide isso, no Histórico do bot). Uma chamada só por pedido. O seu modo decide: o que precisa da pessoa vira UM card com as ações marcáveis; o resto é feito na hora. Para usar um bot criado ou duplicado no mesmo pedido, dê a ele um ref e aponte as ações seguintes para \"@ref\".",
     properties: {
       resumo: { type: "string", description: "O pedido em uma frase, como a pessoa vai ler no card.", minLength: 1, maxLength: 200 },
       acoes: {
@@ -36,13 +38,13 @@ export const FERRAMENTAS_DO_NOD = {
         items: {
           type: "object",
           properties: {
-            tipo: { type: "string", enum: TIPOS_ACAO_LOTE },
+            tipo: { type: "string", enum: TIPOS_ACAO_GERIR_BOTS },
             bot: { type: "string", description: "O bot alvo (todos menos criar): id, nome exato ou \"@ref\" de uma ação anterior.", minLength: 1 },
             ref: { type: "string", description: "Só em criar e duplicar: um apelido curto para o bot novo, usado depois como \"@ref\".", minLength: 1, maxLength: 30 },
             nome: { type: "string", description: "criar (obrigatório) e editar.", minLength: 1, maxLength: 60 },
             titulo: { type: "string", description: "criar e editar: o papel em poucas palavras (ex.: \"Revisor\").", maxLength: 120 },
             descricao: { type: "string", description: "criar (obrigatório) e editar: o que o bot faz, em segunda pessoa.", maxLength: 8000 },
-            secao: { type: "string", description: "criar e mover: a seção da barra lateral; \"\" tira da seção.", maxLength: 60 },
+            secao: { type: "string", description: "criar e mover: o time da barra lateral; \"\" põe em Sem time.", maxLength: 60 },
             modelo: { type: "string", description: "criar e editar: o modelo (ex.: \"auto\", \"sonnet\", \"opus\").", minLength: 1 },
             esforco: { type: "string", enum: ["low", "medium", "high", "xhigh", "max", ""], description: "editar: o esforço; \"\" volta ao padrão do modelo." },
             cron: { type: "string", description: "criar_rotina: cron de 5 campos, ex.: '0 8 * * 1-5'.", minLength: 1 },
@@ -102,6 +104,9 @@ export type AcaoLote = {
   nivel?: "leitura" | "escrita";
   modo?: ModoAprovacao;
   versao?: number;
+  /** NOD-437, só em excluir_time (o gerir_times monta): o time e os nomes dos bots dele, para o card ler sem consultar. */
+  time_id?: string;
+  membros?: string[];
 };
 export type ArgsGerirBots = { resumo: string; acoes: AcaoLote[] };
 

@@ -70,6 +70,8 @@ export async function limparPessoaE2E(db: Db, dbDono: Db, escopo: Escopo, ids: {
     await trx`delete from conversas where owner_id = ${p}`;
     if (ids.agentes.length) await trx`delete from agentes where id in ${trx(ids.agentes)}`;
     await trx`delete from agentes where owner_id = ${p}`;
+    // 0147 (NOD-437): os times da pessoa.
+    await trx`delete from times where owner_id = ${p}`;
     await trx`delete from computadores where owner_id = ${p}`;
     await trx`delete from composio_sessoes where owner_id = ${p}`;
     await trx`delete from composio_configuracoes where owner_id = ${p}`;

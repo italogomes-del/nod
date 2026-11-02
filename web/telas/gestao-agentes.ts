@@ -45,7 +45,7 @@ export function corpoDoMenu(a: BotGerido, dona: boolean, celular: boolean): stri
   const rotulo: Partial<Record<AcaoGestao, [string, string, boolean?]>> = {
     fixar: ["♧", a.papel === "nod" ? (a.fixado ? "Deixar discreto" : "Voltar ao topo") : a.fixado ? "Desafixar" : "Fixar"],
     "nao-lido": ["◉", a.naoLido ? "Marcar como lido" : "Marcar como não lido"],
-    mover: ["▱", "Mover para…"],
+    mover: ["▱", `Time · ${esc(a.secao?.trim() || "Sem time")}`],
     "ver-perfil": ["◎", "Ver perfil"],
     ocultar: ["◌", "Mostrar na lista"],
     excluir: ["♲", "Excluir", true],
@@ -57,7 +57,7 @@ export function corpoDoMenu(a: BotGerido, dona: boolean, celular: boolean): stri
     ? itensDoMenuCelular(a, dona).map((acao) => { const [ic, txt, perigo] = rotulo[acao]!; return item(acao, ic, txt, perigo); }).join("")
     : a.papel === "nod"
     ? item("fixar", "♧", a.fixado ? "Deixar discreto" : "Voltar ao topo") + item("nao-lido", "◉", a.naoLido ? "Marcar como lido" : "Marcar como não lido") + '<hr>' + item("perfil", "⚙", "Editar perfil") + item("copiar", "▢", "Copiar ID da conversa") + '<hr><p class="menu-nota">O Nod fica sempre com você: não dá para excluir, ocultar nem renomear.</p>'
-    : `${dona ? item("fixar", "♧", a.fixado ? "Desafixar" : "Fixar") + item("mover", "▱", "Mover para…") + item("nao-lido", "◉", a.naoLido ? "Marcar como lido" : "Marcar como não lido") + '<hr>' + item("renomear", "✎", "Renomear bot") + item("perfil", "⚙", "Editar perfil") : ""}${item("duplicar", "▣", "Duplicar")}<hr>${item("copiar", "▢", "Copiar ID da conversa")}${dona ? '<hr>' + item("ocultar", "◌", a.oculto ? "Mostrar na barra lateral" : "Ocultar da barra lateral") + item("excluir", "♲", "Excluir", true) : ""}`;
+    : `${dona ? item("fixar", "♧", a.fixado ? "Desafixar" : "Fixar") + item("mover", "▱", `Time · ${esc(a.secao?.trim() || "Sem time")}`) + item("nao-lido", "◉", a.naoLido ? "Marcar como lido" : "Marcar como não lido") + '<hr>' + item("renomear", "✎", "Renomear bot") + item("perfil", "⚙", "Editar perfil") : ""}${item("duplicar", "▣", "Duplicar")}<hr>${item("copiar", "▢", "Copiar ID da conversa")}${dona ? '<hr>' + item("ocultar", "◌", a.oculto ? "Mostrar na barra lateral" : "Ocultar da barra lateral") + item("excluir", "♲", "Excluir", true) : ""}`;
 }
 
 export function abrirMenu(a: BotGerido, dona: boolean, ancora: HTMLElement, executar: (acao: AcaoGestao) => void, ponto?: { x: number; y: number }): void {

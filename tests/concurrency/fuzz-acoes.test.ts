@@ -14,6 +14,7 @@ import { ehErroDeDominio } from "../../src/domain/erro.ts";
 import type { AcaoLote } from "../../src/contracts/ferramentas-do-nod.ts";
 import type { ModoAprovacao } from "../../src/contracts/agente.ts";
 import { gerirBots } from "../../src/use-cases/gerir-bots.ts";
+import { gerirTimes } from "../../src/use-cases/gerir-times.ts";
 import { garantirNod } from "../../src/use-cases/onboarding.ts";
 import { acoesNovasSemLeitura, acoesSemHandler, bloquearRedeExterna, rotasPublicasSemHandler, vereditoDeDecisao, sementeDoPr, chegouNoHandler, custoDoFuzz, enxugarCasos, executarFuzz, lerN, marcaDoBanco, processosBloqueados, quietude, planoDoServidor, relatarViolacoes, sqlDoRetrato, sqlDoRetratoDaConta, zerarCustoDoFuzz, type AlvoDoFuzz, type Retrato } from "../helpers/fuzz.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
@@ -198,6 +199,11 @@ for (const [ordem, config] of CONFIGURACOES.entries()) {
       // NOD-417: uma tarefa (em Backlog, sem acionar ninguém) para o `:tid` (`quadro.terminei` só passava da busca com ela).
       const comTarefa = await srv.json<{ quadro: { tarefas: { id: string; titulo: string }[] } }>("POST", `agentes/${meu.agente.id}/quadro/tarefas`, { titulo: "Tarefa do fuzz", status: "backlog" });
       const tarefaDoFuzz = comTarefa.quadro.tarefas.find((t) => t.titulo === "Tarefa do fuzz")!.id;
+      // NOD-437: um time de cada pessoa (e o Sem time da pessoa) para o `/times/:id`: renomear e excluir passam da busca.
+      type ComTime = { time: { id: string } };
+      const timeDoFuzz = (await srv.json<ComTime>("POST", "times", { nome: "Time do fuzz" })).time.id;
+      const timeDela = (await srv.json<ComTime>("POST", "times", { nome: "Time dela" }, outra)).time.id;
+      const semTimeDoFuzz = (await srv.json<{ times: { id: string; semTime: boolean }[] }>("POST", "times/sincronizar", {})).times.find((t) => t.semTime)!.id;
       const plano = planoDoServidor({
         registro: REGISTRO_DE_ACOES as readonly DefinicaoAcao[],
         pendentes: faltando,
@@ -215,6 +221,7 @@ for (const [ordem, config] of CONFIGURACOES.entries()) {
             // reais: a coluna semeada (a remoção de verdade) e as fixas (o id não muda ao renomear; remover dá 400).
             colunas: { daPessoa: [colunaDoFuzz, "voce", "cancelado"], deOutraPessoa: [] },
             tarefas: { daPessoa: [tarefaDoFuzz], deOutraPessoa: [] },
+            times: { daPessoa: [timeDoFuzz, semTimeDoFuzz], deOutraPessoa: [timeDela] },
           },
         },
       });
@@ -377,7 +384,13 @@ for (const [ordem, config] of CONFIGURACOES.entries()) {
       const arriscadas = (REGISTRO_DE_ACOES as readonly DefinicaoAcao[]).filter((d) => d.lote && (d.lote.riscoDe !== undefined || d.risco === "arriscada" || d.risco === "pessoa_confirma"));
       expect(arriscadas.map((d) => d.id).sort(), "o registro perdeu as ações arriscadas do lote").toEqual(expect.arrayContaining(["bots.excluir", "bots.mudar_modo"]));
       const linha = async () => (await srv.dbDono<{ l: string }[]>`select row_to_json(a)::text as l from (select nome, descricao, modo_aprovacao, excluido_em from agentes where id = ${botId}) a`)[0]?.l;
-      const antes = await linha();
+      // NOD-437: times.excluir (arriscada) tem a via do gerir_times: o time do invariante, com o bot alvo dentro, não pode sumir.
+      const TIME_DO_INVARIANTE = "Time do invariante";
+      await srv.json("POST", "times", { nome: TIME_DO_INVARIANTE, bots: [botId] });
+      const linhaDoBot = linha;
+      const linhaDoTime = async () => (await srv.dbDono<{ l: string }[]>`select coalesce((select row_to_json(t)::text from (select nome, nome_chave from times where nome_chave = 'time do invariante' and owner_id = ${srv.pessoa.pessoaId}) t), 'sumiu') as l`)[0]?.l;
+      const ambas = async () => `${await linhaDoBot()} | ${await linhaDoTime()}`;
+      const antes = await ambas();
       const violacoes: { acao: string; caso: string; motivo: string }[] = [];
       const esperas = new Map<string, number>();
       for (const def of arriscadas) {
@@ -387,6 +400,7 @@ for (const [ordem, config] of CONFIGURACOES.entries()) {
         });
         const itens = [...fixos.map((v, i) => ({ rotulo: `fixo ${i}`, v })), ...doFuzz];
         for (const { rotulo, v } of itens) {
+          const viaTimes = def.chat.estado === "vivo" && def.chat.via.ferramenta === "gerir_times";
           const item = { ...v, tipo: def.lote!.tipo, bot: botId } as unknown as AcaoLote;
           const risco = def.lote!.riscoDe?.(item) ?? def.risco;
           if (risco !== "arriscada" && risco !== "pessoa_confirma") continue;
@@ -400,7 +414,9 @@ for (const [ordem, config] of CONFIGURACOES.entries()) {
                 const nod = r0.data.nod;
                 await d.repos.agentes.definirModoAprovacao(nod.id, modo);
                 const t = await d.repos.turnos.enfileirar({ executor: "catcher", conversaId: nod.conversaId, agenteId: nod.id, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "fuzz do invariante", entradaConfianca: "confiavel", modelo: "auto" });
-                const lote = await gerirBots(d, { turnoId: t!.id, agenteId: nod.id, conversaId: nod.conversaId, resumo: "fuzz", acoes: [item] });
+                const lote = viaTimes
+                  ? await gerirTimes(d, { turnoId: t!.id, agenteId: nod.id, conversaId: nod.conversaId, resumo: "fuzz", acoes: [{ time: TIME_DO_INVARIANTE, ...v, tipo: "excluir" } as never] })
+                  : await gerirBots(d, { turnoId: t!.id, agenteId: nod.id, conversaId: nod.conversaId, resumo: "fuzz", acoes: [item] });
                 if (lote.events?.length) await d.repos.events.gravarComOutbox(lote.events);
                 return lote.data;
               });
@@ -408,12 +424,14 @@ for (const [ordem, config] of CONFIGURACOES.entries()) {
               const veredito = vereditoDeDecisao(r);
               // eslint-disable-next-line no-console
               if (process.env.FUZZ_DEBUG && rotulo.startsWith("fixo")) console.log(`INV ${def.id} ${caso} ${veredito} ${JSON.stringify(r).slice(0, 200)}`);
-              if (veredito === "rodou") violacoes.push({ acao: def.id, caso, motivo: `rodou sem decisão (${risco}): ${JSON.stringify(r).slice(0, 160)}` });
+              // NOD-437: no gerir_times, excluir um time VAZIO roda direto (emenda da ADR-135); a violação é o time com bots
+              // sumir sem decisão, que a linha do time do invariante confere logo abaixo.
+              if (veredito === "rodou" && !viaTimes) violacoes.push({ acao: def.id, caso, motivo: `rodou sem decisão (${risco}): ${JSON.stringify(r).slice(0, 160)}` });
               if (veredito === "esperou") esperas.set(def.id, (esperas.get(def.id) ?? 0) + 1);
             } catch (e) {
               if (!ehErroDeDominio(e)) violacoes.push({ acao: def.id, caso, motivo: `erro inesperado: ${(e as Error).message.slice(0, 160)}` });
             }
-            const depois = await linha();
+            const depois = await ambas();
             if (depois !== antes) violacoes.push({ acao: def.id, caso, motivo: `o bot alvo mudou sem decisão: ${antes} → ${depois}` });
           }
         }

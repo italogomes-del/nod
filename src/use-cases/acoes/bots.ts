@@ -1,3 +1,5 @@
+import { ehNod } from "../../domain/nod.ts";
+import { garantirTime } from "./times.ts";
 import type { Agente } from "../../contracts/agente.ts";
 import type { IdAcao } from "../../domain/acoes/index.ts";
 import { criarAgente, type EntradaCriarAgente, type SaidaCriarAgente } from "../criar-agente.ts";
@@ -20,12 +22,24 @@ export const criarBot: CasoDeUso<EntradaCriarAgente & { secao?: string }, SaidaC
   const { secao, ...entrada } = input;
   const r = await criarAgente(deps, { ...entrada, modelo: entrada.modelo ?? deps.modeloPadrao });
   if (secao === undefined || secao.trim() === "") return r;
-  const organizado = await gerirAgente(deps, { agenteId: r.data.agente.id, acao: "organizar", secao });
+  // NOD-437: a seção é um time; o nome vira o do time (criado no fim se não existe).
+  const { nome } = await garantirTime(deps, secao);
+  const organizado = await gerirAgente(deps, { agenteId: r.data.agente.id, acao: "organizar", secao: nome });
   return { data: r.data, events: [...(r.events ?? []), ...(organizado.events ?? [])] };
 };
 
-/** bots.mover: a seção, e na tela também o não lido, o fixado e a ordem da barra (o arrastar é um pedido só). */
-export const moverBot: CasoDeUso<{ agenteId: string; secao?: string; naoLido?: boolean; fixado?: boolean; ordem?: string[] }, { agente: Agente }> = (deps, input) => gerirAgente(deps, { ...input, acao: "organizar" });
+/**
+ * bots.mover: o time (`secao`, o nome dele), e na tela também o não lido, o fixado e a ordem da barra (o arrastar é um
+ * pedido só). NOD-437: o nome vira o do time que casa pela chave ("producao" → "Produção"); sem time, ele é criado no fim.
+ */
+export const moverBot: CasoDeUso<{ agenteId: string; secao?: string; naoLido?: boolean; fixado?: boolean; ordem?: string[] }, { agente: Agente }> = async (deps, input) => {
+  if (typeof input.secao !== "string") return gerirAgente(deps, { ...input, acao: "organizar" });
+  const alvo = await deps.repos.agentes.buscar(input.agenteId);
+  // Revisão 1 (M3): todo bot da pessoa passa pelo time (nome longo dá o erro do nome, não uma seção sem time).
+  // O Nod e o bot de outro dono seguem para o gerirAgente, que os recusa como antes (sem criar time no caminho).
+  const secao = alvo && alvo.ownerId === deps.escopo.pessoaId && !ehNod(alvo) ? (await garantirTime(deps, input.secao)).nome : input.secao;
+  return gerirAgente(deps, { ...input, secao, acao: "organizar" });
+};
 
 /**
  * bots.excluir: exclui e, depois do commit, desliga o computador do bot (ADR-135 §4). Antes do NOD-391 só a rota

@@ -1,3 +1,4 @@
+import { timesDaBarra } from "./acoes/times.ts";
 import type { FrotaDto } from "../contracts/api.ts";
 import type { Inventario } from "../contracts/inventario.ts";
 import { abertaPorTimeouts, falhaVisivel } from "../domain/disjuntor-conector.ts";
@@ -66,5 +67,6 @@ export const listarFrota: CasoDeUso<{ agora?: number; gerenciar?: boolean }, Fro
       ...(c.habilitado ? {} : { semRessonda: true as const }),
     }));
 
-  return { data: { agentes: linhas, inventario, negacoes, ...(deps.services.revisor?.config.ligado ? { revisor: true as const } : {}) } };
+  const times = await timesDaBarra(deps);
+  return { data: { agentes: linhas, inventario, negacoes, times, ...(deps.services.revisor?.config.ligado ? { revisor: true as const } : {}) } };
 };

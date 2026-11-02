@@ -1,3 +1,4 @@
+import type { Time, TimeNaLista } from "../../src/contracts/time.ts";
 import type { DetalheVersaoPerfil, ListaVersoesPerfil, VersaoPerfil } from "../../src/contracts/versoes-perfil.ts";
 import type { AtividadeDto, ContagemDaAtividade } from "../../src/contracts/atividade.ts";
 import type { DecisoesDto } from "../../src/contracts/decisoes-do-bot.ts";
@@ -227,6 +228,14 @@ export function criarApi(escopo: Escopo) {
     frota: () => get<FrotaDto>("frota"),
     gestaoAgentes: () => get<FrotaDto>("gestao-agentes"),
     organizarAgente: (id: string, campos: { secao?: string; naoLido?: boolean; fixado?: boolean; ordem?: string[] }) => patch<{ agente: Agente }>(`agentes/${id}/organizacao`, campos),
+    /** NOD-437: os times de bots da barra (cada mutação chama o mesmo executor do gerir_times). */
+    sincronizarTimes: () => post<{ times: TimeNaLista[] }>("times/sincronizar", {}),
+    criarTime: (campos: { nome: string; posicao?: number; recolhido?: boolean; bots?: string[] }) => post<{ time: Time; movidos: string[] }>("times", campos),
+    renomearTime: (id: string, nome: string) => patch<{ time: Time }>(`times/${encodeURIComponent(id)}`, { nome }),
+    ordenarTime: (id: string, posicao: number) => patch<{ time: Time }>(`times/${encodeURIComponent(id)}/posicao`, { posicao }),
+    recolherTime: (id: string, recolhido: boolean) => patch<{ time: Time }>(`times/${encodeURIComponent(id)}/recolhido`, { recolhido }),
+    excluirTime: (id: string) => del<{ time: Time; bots: { id: string; nome: string }[] }>(`times/${encodeURIComponent(id)}`),
+    moverBotsParaTime: (bots: string[], time: string) => post<{ time: string; movidos: string[] }>("agentes/mover", { bots, time }),
     /** Não lidos (definido em 2026-09-29, 0039). */
     naoLidos: () => get<NaoLidosDto>("nao-lidos"),
     marcarLida: (conversaId: string) => post<RespostaLeitura>(`conversas/${conversaId}/lida`),

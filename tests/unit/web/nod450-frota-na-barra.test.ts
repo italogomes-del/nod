@@ -87,10 +87,10 @@ describe("NOD-450: bot criado pelo chat entra na barra sem recarregar", () => {
     expect(soFixados.secoes).toEqual([]);
   });
 
-  it("a barra desenhada usa os grupos (renderSidebar: Meus agentes = soltos, cada seção com os bots dela)", () => {
+  it("a barra desenhada usa os grupos (renderSidebar: os comuns não fixados vão para os times, NOD-437)", () => {
     const main = readFileSync(new URL("../../../web/main.ts", import.meta.url), "utf8");
     expect(main).toContain("gruposDaBarra(agentes, pessoaId, ehCelular)");
-    expect(main).toContain('grupo("Meus agentes", "", soltos) + secoes.map((s) => grupo(s.nome, s.nome, s.bots))');
+    expect(main).toContain("timesComBots(comuns.filter((a) => !a.fixado), estado.frota?.times)");
     expect(main).toContain("for (const acao of acoesAoMudarConexao(estado, ev)) dispatch(acao);");
     // O elo falta → busca: a falta `frota` é buscada em qualquer tela e vira hidratar-frota.
     expect(main).toContain("if (sempreRelevante(q)) return true;");

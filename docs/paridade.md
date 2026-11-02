@@ -2,7 +2,7 @@
 
 <!-- Gerado por `npm run paridade` a partir de src/domain/acoes/ (NOD-391, ADR-135). Não edite à mão: a catraca (tests/conformidade/paridade.test.ts) compara. -->
 
-Ações de pessoa que mudam algo: **152**, mais 2 só de leitura. No chat: **27 vivas**, 3 parciais, 90 faltando e 34 que nunca vão para o chat. Piso de vivas: 27.
+Ações de pessoa que mudam algo: **157**, mais 2 só de leitura. No chat: **32 vivas**, 3 parciais, 90 faltando e 34 que nunca vão para o chat. Piso de vivas: 32.
 
 Estados: **vivo** = o chat faz pelo mesmo executor da tela, com teste de contrato; **parcial** = o chat faz, mas diverge ou falta parâmetro; **falta** = a onda dona ainda vai ligar; **nunca** = exceção escrita.
 
@@ -13,7 +13,7 @@ Estados: **vivo** = o chat faz pelo mesmo executor da tela, com teste de contrat
 | `bots.criar` | Criar um bot | muda | vivo (`gerir_bots criar`) | `POST ^\/agentes$` |
 | `bots.duplicar` | Duplicar um bot | muda | vivo (`gerir_bots duplicar`) | `POST ^\/agentes\/(?<id>[^/]+)\/duplicar$` |
 | `bots.editar` | Editar o perfil de um bot | muda | vivo (`gerir_bots editar`) | `PATCH ^\/agentes\/(?<id>[^/]+)$` |
-| `bots.mover` | Mover um bot de seção (e organizar a barra lateral) | muda | vivo (`gerir_bots mover`) | `PATCH ^\/agentes\/(?<id>[^/]+)\/organizacao$` |
+| `bots.mover` | Mover um bot de time (e organizar a barra lateral) | muda | vivo (`gerir_bots mover`) | `PATCH ^\/agentes\/(?<id>[^/]+)\/organizacao$`<br>`POST ^\/agentes\/mover$` |
 | `bots.excluir` | Excluir um bot (e desligar o computador dele) | arriscada | vivo (`gerir_bots excluir`) | `DELETE ^\/agentes\/(?<id>[^/]+)$` |
 | `bots.mudar_modo` | Mudar o modo de aprovação de um bot | arriscada | vivo (`gerir_bots mudar_modo`) | `POST ^\/agentes\/(?<id>[^/]+)\/modo-aprovacao$` |
 | `bots.restaurar_versao` | Restaurar uma versão do perfil de um bot | muda | vivo (`gerir_bots restaurar_versao`) | `POST ^\/agentes\/(?<id>[^/]+)\/perfil\/versoes\/(?<versao>[0-9]+)\/restaurar$` |
@@ -284,6 +284,16 @@ Estados: **vivo** = o chat faz pelo mesmo executor da tela, com teste de contrat
 | `quadro.substituir_colunas` | Trocar o conjunto de colunas do quadro | muda | vivo (`gerir_quadro`) | `PUT ^\/agentes\/(?<id>[^/]+)\/quadro\/colunas$` |
 | `quadro.definir_passagem` | Definir quem pega a tarefa ao entrar numa coluna | muda | vivo (`gerir_quadro`) | `PUT ^\/agentes\/(?<id>[^/]+)\/quadro\/colunas\/(?<cid>[^/]+)\/passagem$` |
 | `quadro.terminei` | Terminar a etapa (a tarefa vai para a próxima coluna) | muda | vivo (`gerir_quadro`) | `POST ^\/agentes\/(?<id>[^/]+)\/quadro\/tarefas\/(?<tid>[^/]+)\/terminei$` |
+
+## times
+
+| Ação | O que faz | Risco | No chat | Rotas |
+| --- | --- | --- | --- | --- |
+| `times.criar` | Criar um time de bots (no lugar pedido, já com bots) | muda | vivo (`gerir_times`) | `POST ^\/times\/sincronizar$`<br>`POST ^\/times$` |
+| `times.renomear` | Renomear um time | muda | vivo (`gerir_times`) | `PATCH ^\/times\/(?<id>[^/]+)$` |
+| `times.excluir` | Excluir um time (os bots vão para Sem time) | arriscada | vivo (`gerir_times excluir_time`) | `DELETE ^\/times\/(?<id>[^/]+)$` |
+| `times.ordenar` | Mudar um time de lugar na barra | muda | vivo (`gerir_times`) | `PATCH ^\/times\/(?<id>[^/]+)\/posicao$` |
+| `times.recolher` | Recolher ou abrir um time | muda | vivo (`gerir_times`) | `PATCH ^\/times\/(?<id>[^/]+)\/recolhido$` |
 
 ## O que cada onda leva
 

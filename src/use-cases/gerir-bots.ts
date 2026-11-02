@@ -11,6 +11,8 @@ import { log } from "../obs/log.ts";
 import { autoriaPessoa, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
 import { semCard, type PorRegra } from "./confirmar-pelo-modo.ts";
 import { EXECUTORES_BOTS } from "./acoes/bots.ts";
+import { EXECUTORES_TIMES } from "./acoes/times.ts";
+import { listaFalada } from "../domain/times.ts";
 import { criarRotinaPelaPessoa } from "./criar-rotina.ts";
 import { decidirAcesso } from "./decidir-acesso.ts";
 import { appsDaPessoa, turnoDoNodComAPessoa } from "./nod.ts";
@@ -47,16 +49,18 @@ const VERBO: Record<AcaoLote["tipo"], string> = {
   dar_acesso: "Dar acesso",
   mudar_modo: "Mudar modo",
   restaurar_versao: "Restaurar versão do perfil de",
+  excluir_time: "Excluir o time",
 };
 
 /** Uma linha legível da ação (a mensagem de sistema do desfecho). */
-export function linhaDaAcao(a: Pick<AcaoNoLote, "tipo" | "alvoNome" | "secao" | "app" | "nivel" | "modo" | "versao">): string {
+export function linhaDaAcao(a: Pick<AcaoNoLote, "tipo" | "alvoNome" | "secao" | "app" | "nivel" | "modo" | "versao" | "membros">): string {
+  if (a.tipo === "excluir_time") return `Excluir o time ${a.alvoNome} (${a.membros?.length ? `${listaFalada(a.membros)} ${a.membros.length === 1 ? "foi" : "foram"} para Sem time` : "sem bots"})`;
   if (a.tipo === "restaurar_versao") return `Restaurar a versão ${a.versao ?? "?"} do perfil de ${a.alvoNome}`;
-  const extra = a.tipo === "mover" ? ` para ${a.secao ? `"${a.secao}"` : "fora da seção"}` : a.tipo === "dar_acesso" ? ` ao ${a.app} (${a.nivel === "escrita" ? "ler e alterar" : "ler"})` : a.tipo === "mudar_modo" ? ` para ${a.modo}` : "";
+  const extra = a.tipo === "mover" ? ` para ${a.secao ? `"${a.secao}"` : "Sem time"}` : a.tipo === "dar_acesso" ? ` ao ${a.app} (${a.nivel === "escrita" ? "ler e alterar" : "ler"})` : a.tipo === "mudar_modo" ? ` para ${a.modo}` : "";
   return `${VERBO[a.tipo]} ${a.alvoNome}${extra}`;
 }
 
-type Feito = { botId: string; nome: string; events: RuntimeEvent[]; aviso?: string };
+type Feito = { botId: string | null; nome: string; events: RuntimeEvent[]; aviso?: string; membros?: string[] };
 
 /** NOD-289 (M2): o que a pessoa precisa saber da cópia pedida ao Nod. */
 export const AVISO_ROTINAS_PAUSADAS = "rotinas da cópia vieram pausadas; ative em Rotinas";
@@ -122,10 +126,19 @@ async function executarAcao(deps: Deps, a: AcaoLote & { alvoNome: string }, botI
       const decidido = await decidirAcesso(deps, { decisaoId: aberto.proposta.id, recusar: false, executor: "catcher", ...(ctx.porRegra ? { porRegra: ctx.porRegra } : {}) });
       return { botId: alvo, nome: a.alvoNome, events: [...semCard(aberto.events), ...(decidido.events ?? [])] };
     }
+    case "excluir_time": {
+      // NOD-437: o card de "Excluir o time Produção?" aprovado roda o mesmo executor da tela (DELETE /times/:id).
+      const r = await EXECUTORES_TIMES["times.excluir"](deps, { timeId: a.time_id ?? "", ...(ctx.pelaPessoa ? {} : { autoria: autoriaDoAgente(deps.escopo, ctx.nodId) }) });
+      // Revisão 1 (M6): o recibo diz quem foi de verdade para Sem time agora, não quem estava quando o card abriu.
+      return { botId: null, nome: r.data.time.nome, events: r.events ?? [], membros: r.data.bots.map((b) => b.nome) };
+    }
     default:
       throw new ErroDeDominio("entrada_invalida", { cause: "tipo de ação" });
   }
 }
+
+/** As ações do lote que pegam a trava `times:` (garantirTime ou o excluir do time). */
+const TOCAM_TIMES: ReadonlySet<AcaoNoLote["tipo"]> = new Set(["criar", "duplicar", "mover", "excluir_time"]);
 
 /** Executa, na ordem, as ações indicadas, resolvendo os "@ref" pelos bots que as anteriores criaram. */
 async function executarEmOrdem(
@@ -135,6 +148,9 @@ async function executarEmOrdem(
   ctx: { nodId: string; porRegraDe: (a: AcaoNoLote) => PorRegra | null; pelaPessoa: boolean },
 ): Promise<RuntimeEvent[]> {
   const events: RuntimeEvent[] = [];
+  // NOD-437 (revisão 4, M1): a trava dos times vem ANTES de qualquer linha de agente. Um "editar Otto" seguido de
+  // "mover Otto" segurava a linha e depois pedia `times:`, enquanto o excluir/renomear da tela faz o contrário: 40P01.
+  if (acoes.some((a) => rodar(a) && TOCAM_TIMES.has(a.tipo))) await deps.repos.times.travar();
   for (const a of acoes) {
     if (!rodar(a)) continue;
     const origem = a.alvoDaAcao !== null ? acoes[a.alvoDaAcao] : null;
@@ -154,6 +170,7 @@ async function executarEmOrdem(
       a.erro = null;
       a.botId = feito.botId;
       if (feito.aviso) a.aviso = feito.aviso;
+      if (feito.membros) a.membros = feito.membros;
       // QA de 2026-10-07: no duplicar o card e o desfecho falam do ORIGINAL ("Duplicar Dev 1"); a cópia só vira alvo de "@ref".
       if (a.tipo === "criar") a.alvoNome = feito.nome;
       events.push(...feito.events);
@@ -166,6 +183,11 @@ async function executarEmOrdem(
     }
   }
   return events;
+}
+
+async function linhaDoPedidoViaBot(deps: Deps, agenteId: string): Promise<string> {
+  const [pessoa, bot] = await Promise.all([deps.repos.pessoas.buscar(deps.escopo.pessoaId), deps.repos.agentes.buscar(agenteId)]);
+  return `Pedido por ${pessoa?.nome ?? "você"} ${bot ? `via bot ${bot.nome}` : "via um bot"}.`;
 }
 
 const CAUSAS_DO_RESTAURAR: ReadonlySet<string> = new Set(["igual_a_atual", "versao_redigida", "perfil_mudou"]);
@@ -254,9 +276,11 @@ export const decidirLoteDeBots: CasoDeUso<{ decisaoId: string; recusar: boolean;
   const falhas = daVez.filter((a) => a.estado === "falhou");
   const recusadas = daVez.filter((a) => a.estado === "recusada");
   const autoria = autoriaPessoa(deps.escopo);
+  // NOD-437 (revisão 1, M6): o excluir_time veio de um bot (gerir_times); o histórico diz quem pediu e por qual bot.
+  const viaBot = feitas.some((a) => a.tipo === "excluir_time") ? await linhaDoPedidoViaBot(deps, proposta.agenteId) : null;
   const texto = input.recusar
     ? `Recusado: ${recusadas.length} ${recusadas.length === 1 ? "mudança" : "mudanças"} nos seus bots.`
-    : [`${feitas.length} de ${daVez.length} ${daVez.length === 1 ? "mudança feita" : "mudanças feitas"}.`, ...feitas.map((a) => `✓ ${linhaDaAcao(a)}${a.aviso ? ` (${a.aviso})` : ""}`), ...falhas.map((a) => `✗ ${linhaDaAcao(a)} — não deu certo (${a.erro ?? "falhou"})`), ...recusadas.map((a) => `– ${linhaDaAcao(a)} (desmarcada)`)].join("\n");
+    : [`${feitas.length} de ${daVez.length} ${daVez.length === 1 ? "mudança feita" : "mudanças feitas"}.`, ...feitas.map((a) => `✓ ${linhaDaAcao(a)}${a.aviso ? ` (${a.aviso})` : ""}`), ...falhas.map((a) => `✗ ${linhaDaAcao(a)} — não deu certo (${a.erro ?? "falhou"})`), ...recusadas.map((a) => `– ${linhaDaAcao(a)} (desmarcada)`), ...(viaBot ? [viaBot] : [])].join("\n");
   const msg = await deps.repos.mensagens.criar({ conversaId: proposta.conversaId, autoria, kind: "sistema", assunto: "aprovacao.recibo", texto, confianca: "confiavel" });
   events.push(evento(deps.escopo, { kind: "decisao_decidida", autoria, agora, conversaId: proposta.conversaId, turnoId: decidida.turnoId, dados: { decisao_id: decidida.id, tipo: "lote_bots", recusada: input.recusar } }));
   if (msg) events.push(evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: proposta.conversaId, dados: { mensagem_id: msg.id, kind: "sistema" } }));

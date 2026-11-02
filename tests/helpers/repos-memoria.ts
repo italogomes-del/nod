@@ -188,6 +188,17 @@ export type BancoMemoria = {
 /** NOD-282 (G7): o resumo_anterior das frentes, por banco em memória. */
 const RESUMOS_ANTERIORES = new WeakMap<object, Map<string, ResumoFrente | Record<string, never>>>();
 
+/** Os times em memória (NOD-437), por banco e pessoa: o banco de teste não tem tabela de times. */
+type TimeEmMemoria = { id: string; nome: string; chave: string; posicao: number; recolhido: boolean };
+const TIMES_POR_BANCO = new WeakMap<object, Map<string, TimeEmMemoria[]>>();
+function timesDoBanco(b: object, dono: string): TimeEmMemoria[] {
+  let porDono = TIMES_POR_BANCO.get(b);
+  if (!porDono) TIMES_POR_BANCO.set(b, (porDono = new Map()));
+  let l = porDono.get(dono);
+  if (!l) porDono.set(dono, (l = []));
+  return l;
+}
+
 export function criarBancoMemoria(): { banco: BancoMemoria; repos(escopo?: Escopo): Repos } {
   const banco: BancoMemoria = {
     pessoas: [],
@@ -333,6 +344,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
   /** ADR-108 (turnos.repo daIa): as tasks pendentes do bot na IA — fixadas nela, ou no Automático com a sessão nela. */
   const tasksNaIa = (agenteId: string, ia: string | null) => doTenant(b.turnos).filter((t) => t.ownerId === escopo.pessoaId && t.agenteId === agenteId && t.estado === "pendente" && t.trabalhoId
     && (ia === null || t.harness === ia || (t.harness === "auto" && b.trabalhos.some((w) => w.tenantId === escopo.tenantId && w.id === t.trabalhoId && w.sessaoHarness === ia))));
+  const timesEmMemoria = timesDoBanco(b, `${escopo.tenantId}:${escopo.pessoaId}`);
   const repos = {
     computadores: {
       buscarVinculo: async () => null, buscarDoAgente: async () => undefined,
@@ -484,6 +496,11 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       // A geração sobe a cada exclusão (agentes.geracao_execucao, 0012); em memória, um contador por agente.
       async geracaoExecucao(id) {
         return doTenant(b.agentes).some((a) => a.id === id) ? (b.geracoes.get(id) ?? 0) : null;
+      },
+      async mudarSecao(ids, secao) {
+        let n = 0;
+        for (const a of doTenant(b.agentes)) if (ids.includes(a.id) && a.ownerId === escopo.pessoaId) { a.secao = secao; n++; }
+        return n;
       },
       async organizar(id, campos) {
         const a = doTenant(b.agentes).find((a) => a.id === id && a.ownerId === escopo.pessoaId && !a.excluidoEm);
@@ -3880,6 +3897,40 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       temDeOutroNoQuadro: async () => false,
       pedidoAbertoNaTarefa: async () => false,
       turnoNaFila: async () => null,
+    },
+    // NOD-437: os times são do Postgres (tests/integration/times.test.ts); aqui não há nenhum.
+    times: {
+      async listar() {
+        return [...timesEmMemoria].sort((a, b) => a.posicao - b.posicao || a.nome.localeCompare(b.nome)).map(({ chave: _c, ...t }) => ({ ...t }));
+      },
+      travar: async () => {},
+      async criar(p) {
+        if (timesEmMemoria.some((t) => t.chave === p.chave)) return null;
+        const t = { id: crypto.randomUUID(), nome: p.nome, chave: p.chave, posicao: p.posicao, recolhido: p.recolhido ?? false };
+        timesEmMemoria.push(t);
+        return { id: t.id, nome: t.nome, posicao: t.posicao, recolhido: t.recolhido };
+      },
+      async renomear(id, p) {
+        const t = timesEmMemoria.find((x) => x.id === id && x.nome !== "");
+        if (!t) return null;
+        Object.assign(t, { nome: p.nome, chave: p.chave });
+        return { id: t.id, nome: t.nome, posicao: t.posicao, recolhido: t.recolhido };
+      },
+      async recolher(id, recolhido) {
+        const t = timesEmMemoria.find((x) => x.id === id);
+        if (!t) return null;
+        t.recolhido = recolhido;
+        return { id: t.id, nome: t.nome, posicao: t.posicao, recolhido: t.recolhido };
+      },
+      async ordenar(ids) {
+        ids.forEach((id, i) => { const t = timesEmMemoria.find((x) => x.id === id); if (t) t.posicao = i; });
+      },
+      async excluir(id) {
+        const i = timesEmMemoria.findIndex((x) => x.id === id && x.nome !== "");
+        if (i < 0) return false;
+        timesEmMemoria.splice(i, 1);
+        return true;
+      },
     },
     // NOD-346: o "Sobre mim" é do Postgres (tests/integration/minha-conta.test.ts); aqui fica vazio.
     perfil: {

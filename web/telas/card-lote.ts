@@ -14,14 +14,20 @@ const VERBO_DO_LOTE: Record<AcaoNoLote["tipo"], string> = {
   dar_acesso: "Dar acesso",
   mudar_modo: "Mudar modo",
   restaurar_versao: "Restaurar versão de",
+  excluir_time: "Excluir o time",
 };
 const MODO_HUMANO: Record<NonNullable<AcaoNoLote["modo"]>, string> = { manual: "manual", automatico: "automático", total: "sem aprovações" };
 /** Por que a ação esperou você, quando não foi só o modo manual (QA de 2026-10-07: uma frase por tipo, não uma genérica). */
 function motivoDoLote(a: AcaoNoLote, motivo: Exclude<MotivoCardDoLote, "manual">): string {
   // Emenda de 2026-10-18 da ADR-059: ligar o total é sempre da pessoa, em qualquer modo do Nod.
   if (motivo === "ligar_total") return "Ignorar todas as aprovações só liga com o seu ok: o Nod nunca põe um bot nesse modo sozinho.";
+  if (a.tipo === "excluir_time") return "Excluir um time com bots espera o seu ok. Dá para criar o time de novo depois.";
   if (motivo === "arriscada") return a.tipo === "excluir" ? "Excluir é arriscado: o Nod sempre pergunta antes. Dá para restaurar depois em Configurações › Agentes." : "Mudar o modo de um bot é arriscado: o Nod sempre pergunta antes.";
   return a.tipo === "dar_acesso" ? "O Nod leu conteúdo de fora nesta conversa, então dar acesso a um app espera você." : "O Nod leu conteúdo de fora nesta conversa, então esta mudança espera você.";
+}
+
+function juntar(nomes: readonly string[]): string {
+  return nomes.length <= 1 ? (nomes[0] ?? "") : `${nomes.slice(0, -1).join(", ")} e ${nomes[nomes.length - 1]}`;
 }
 
 function detalheDaAcao(a: AcaoNoLote): string {
@@ -29,11 +35,12 @@ function detalheDaAcao(a: AcaoNoLote): string {
     case "criar": return [a.secao ? `em ${a.secao}` : "", a.descricao ?? ""].filter(Boolean).join(" · ");
     case "duplicar": return "leva memória, acessos e rotinas do original; as rotinas vêm pausadas; começa em Aprovar automaticamente; mude em Aprovações";
     case "editar": return [a.nome ? `nome: ${a.nome}` : "", a.titulo !== undefined ? `título: ${a.titulo || "—"}` : "", a.modelo ? `modelo: ${a.modelo}` : "", a.esforco !== undefined ? `esforço: ${a.esforco || "padrão"}` : "", a.descricao ? "descrição nova" : ""].filter(Boolean).join(" · ");
-    case "mover": return a.secao ? `para ${a.secao}` : "para fora da seção";
+    case "mover": return a.secao ? `para ${a.secao}` : "para Sem time";
     case "excluir": return "dá para restaurar depois em Configurações › Agentes";
     case "criar_rotina": return [a.cron ? `${a.cron} (${a.fuso_iana ?? ""})` : "", a.instrucao ?? ""].filter(Boolean).join(" · ");
     case "dar_acesso": return `${a.app ?? ""}, ${a.nivel === "escrita" ? "ler e alterar" : "ler"}`;
     case "mudar_modo": return a.modo ? `para ${MODO_HUMANO[a.modo]}` : "";
+    case "excluir_time": return a.membros?.length ? `${juntar(a.membros)} ${a.membros.length === 1 ? "vai" : "vão"} para Sem time, na mesma ordem. Nenhum bot é excluído.` : "o time está vazio";
     case "restaurar_versao": return a.versao ? `volta o perfil à versão ${a.versao}; vira uma versão nova, dá para desfazer pelo Histórico` : "";
     default: return "";
   }
@@ -46,6 +53,19 @@ function detalheDaAcao(a: AcaoNoLote): string {
  */
 export function renderCardLote(p: Pick<Proposta, "id">, c: PayloadPropostaLoteBots, aberto: boolean): string {
   const esperando = c.acoes.filter((a) => a.estado === "esperando").length;
+  // NOD-437 (protótipo aprovado): o card de excluir um time é uma pergunta direta, com o verbo no botão.
+  const soTime = c.acoes.filter((a) => a.estado === "esperando");
+  if (aberto && soTime.length === 1 && soTime[0]!.tipo === "excluir_time") {
+    const t = soTime[0]!;
+    return cardProposta({
+      id: p.id,
+      classe: "card-lote card-excluir-time",
+      titulo: `Excluir o time ${t.alvoNome}?`,
+      linhas: [esc(detalheDaAcao(t))],
+      extra: `<input type="checkbox" data-lote-i="${t.i}" checked hidden aria-hidden="true" />`,
+      acoes: `${botao("decidir-lote", "Excluir time", { classe: "cp-sim", id: p.id })}${botao("recusar-decisao", "Agora não", { classe: "cp-nao", id: p.id })}`,
+    });
+  }
   const linhas = c.acoes.map((a) => ({ espera: a.estado === "esperando", html: linhaDaAcao(a) }));
   function linhaDaAcao(a: AcaoNoLote): string {
     const marca = a.estado === "feita" ? '<span class="tag tag-ok">feito</span>' : a.estado === "falhou" ? `<span class="tag tag-cinza">não deu certo${a.erro ? ` (${esc(a.erro.replaceAll("_", " "))})` : ""}</span>` : a.estado === "recusada" ? '<span class="tag tag-cinza">não feito</span>' : !aberto ? '<span class="tag tag-cinza">não decidido</span>' : "";

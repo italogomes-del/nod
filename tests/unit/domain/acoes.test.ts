@@ -56,6 +56,8 @@ describe("o lote do Nod sai do registro", () => {
   function riscoDeAntes(a: Pick<AcaoLote, "tipo" | "descricao" | "titulo" | "modo">, s: { contaminado: boolean; alvoTemAcessos: boolean }): MotivoCardDoLote | null {
     if (a.tipo === "mudar_modo" && a.modo === "total") return "ligar_total";
     if (a.tipo === "excluir" || a.tipo === "mudar_modo") return "arriscada";
+    // NOD-437 (revisão 1, A2; emenda da ADR-135): excluir um time é arriscado (card no manual e no automático).
+    if (a.tipo === "excluir_time") return "arriscada";
     if (!s.contaminado) return null;
     if (a.tipo === "dar_acesso" || a.tipo === "criar_rotina" || (a.tipo === "duplicar" && s.alvoTemAcessos)) return "conteudo_de_fora";
     if (a.tipo === "editar" && (a.descricao !== undefined || a.titulo !== undefined)) return "conteudo_de_fora";

@@ -159,6 +159,9 @@ import { abertasPorAgente, perguntasPorAgente, renderChamada, renderIncidentes, 
 import { aparenciaDoComposer } from "./telas/pergunta.ts";
 import { BANDEJA, naoLidaDe, nomeDaConversa, renderNaoLidos, rotuloNaoLidos } from "./telas/nao-lidos.ts";
 import { mostrarAvisoDesfazer } from "./lib/aviso-desfazer.ts";
+import { criarRecolherAdiado } from "./lib/recolher-adiado.ts";
+import { atalhoDoCabecalho, avisoDoNome, cabecalhoDoTime, campoDoNome, chaveDoTime, comCabecalho, destinoAoMover, ehCliqueDuplo, fraseDoExcluido, fraseDoMovido, itensDoMenuDoTime, juntarNomes, nomeDoTime, nomeLimpo, NOTA_SEM_TIME, ordemAoSoltarTime, recolhidosParaMigrar, selecionar, textoDaSelecao, textoDoVazio, timesComBots, type AcaoDoTime, type TimeDaBarra } from "./lib/times-da-barra.ts";
+import type { TimeNaLista } from "../src/contracts/time.ts";
 import { instalarDeslizeLida } from "./lib/deslize-lida-dom.ts";
 import { teclaNaoLidos } from "./lib/teclado-nao-lidos.ts";
 import { fraseDaContagemNoAviso, fraseDoAviso } from "./lib/frase-leitura.ts";
@@ -412,6 +415,12 @@ const LOJA = '<svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke
 
 // definido em 2026-10-04: as seções recolhidas da barra (web/lib/secoes.ts); um conjunto novo a cada troca.
 let secoesRecolhidas: ReadonlySet<string> = lerSecoesRecolhidas();
+// NOD-437: o time em edição na barra ("novo" ou o id do time), a multisseleção de bots e se os recolhidos de antes
+// (localStorage) já foram levados para a conta.
+let edicaoTime: { alvo: string; valor: string } | null = null;
+let selecaoBots: ReadonlySet<string> = new Set();
+let ancoraSelecao: string | null = null;
+let migrouRecolhidos = false;
 
 function painelOculto(): boolean {
   return !painelAberto && !painelAbertoNaHora;
@@ -1242,6 +1251,10 @@ async function buscarFrota(): Promise<Acao | null> {
   }
   if (!vez()) return null;
   frotaFalhou = false;
+  // NOD-437: os recolhidos de antes vão para a conta (uma vez) e quem mudou de time pisca de leve na barra.
+  if (frota.times) frota = { ...frota, times: migrarRecolhidos(frota) };
+  sincronizarTimesSePreciso(frota);
+  destacarMovidos(estado.frota?.agentes, frota.agentes);
   // NOD-20 (revisão 2 M6): o perfil do bot da gaveta mudou por fora com o Histórico aberto: a lista e o detalhe releem.
   const g = estado.gaveta;
   if (g && (g.nivel.tipo === "historico" || g.nivel.tipo === "versao" || g.nivel.tipo === "ajustes")) {
@@ -1602,7 +1615,8 @@ function renderSidebar(estado: Estado): string {
     const estadoBarra = emLigacao ? "ligacao" : foraDoAr ? "fora" : paradas.has(a.id) ? "parada" : "";
     const extraAria = `${foraDoAr ? ", computador fora do ar" : ""}${!foraDoAr && paradas.has(a.id) ? ", rotina parada" : ""}${rotuloDoSinal(chip)}`;
     const nomeCompleto = a.titulo ? `${a.nome} · ${a.titulo}` : a.nome;
-    return `<div class="bot-row${escondida ? " escondida" : ""}" data-bot-contexto="${esc(a.id)}"${arrastavel(a)}${estadoBarra ? ` data-estado-barra="${estadoBarra}"` : ""} data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}"><button class="row"${atual(a.conversaId)} data-act="abrir-conversa" data-conversa="${esc(a.conversaId)}" data-agente="${esc(a.id)}" data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}" data-etiqueta="${esc(nomeCompleto)}" aria-label="Abrir conversa com ${esc(a.nome)}${emLigacao ? " (em ligação)" : ""}${rotuloAviso}${esc(extraAria)}"${semTitle ? "" : ` title="${esc(nomeCompleto)}"`}>${iconeAgente(a, "", estadoVisual, aviso ? `data-aviso="${aviso}"` : "")}<span class="txt"><span class="nome-linha"><b>${esc(a.nome)}</b>${chip}</span>${subtitulo}</span></button><button type="button" class="bot-mais" data-act="menu-agente" data-id="${esc(a.id)}" aria-label="Ações de ${esc(a.nome)}" aria-haspopup="menu">⋯</button></div>`;
+    const selecionado = selecaoBots.has(a.id);
+    return `<div class="bot-row${escondida ? " escondida" : ""}${selecionado ? " selecionado" : ""}" data-bot-contexto="${esc(a.id)}"${selecionado ? ' aria-selected="true"' : ""}${arrastavel(a)}${estadoBarra ? ` data-estado-barra="${estadoBarra}"` : ""} data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}"><button class="row"${atual(a.conversaId)} data-act="abrir-conversa" data-conversa="${esc(a.conversaId)}" data-agente="${esc(a.id)}" data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}" data-etiqueta="${esc(nomeCompleto)}" aria-label="Abrir conversa com ${esc(a.nome)}${emLigacao ? " (em ligação)" : ""}${rotuloAviso}${esc(extraAria)}${selecionado ? ", selecionado" : ""}"${semTitle ? "" : ` title="${esc(nomeCompleto)}"`}>${iconeAgente(a, "", estadoVisual, aviso ? `data-aviso="${aviso}"` : "")}<span class="txt"><span class="nome-linha"><b>${esc(a.nome)}</b>${chip}</span>${subtitulo}</span></button><button type="button" class="bot-mais" data-act="menu-agente" data-id="${esc(a.id)}" aria-label="Ações de ${esc(a.nome)}" aria-haspopup="menu">⋯</button></div>`;
   };
   /**
    * NOD-379 (protótipo v3): a linha de mensageiro — mascote de 48, nome e título, a hora à direita e a prévia embaixo. Quando
@@ -1632,8 +1646,6 @@ function renderSidebar(estado: Estado): string {
     const escondidos = ehCelular ? escondidosNoCelular(s.recolhida, bots) : s.escondidos;
     return `<section class="section"${atributos}${s.recolhida ? " data-recolhida" : ""}>${cabecalhoSecao(nome, chave, { recolhida: s.recolhida, total: lista.length, aviso: ehCelular ? "" : s.aviso })}${lista.map((a, i) => linha(a, escondidos[i])).join("")}</section>`;
   };
-  // Cada seção é um alvo de soltar (data-grupo); "Meus agentes" é a seção "" e continua alvo mesmo vazia (só aparece arrastando).
-  const grupo = (nome: string, secao: string, lista: typeof agentes) => secaoDeBots(nome, chaveDaSecao(pessoaId, secao), lista, ` data-grupo="secao" data-secao="${esc(secao)}"${lista.length ? "" : " data-vazio"}`);
   // definido em 2026-09-24 (sidebar no estilo do Grok): fixados em grade de 4 — avatar grande, nome e o
   // título num chip. Mesmo aviso no mascote e o mesmo menu (clique direito / •••) da linha.
   const bloco = (a: (typeof agentes)[number], i: number) => {
@@ -1653,11 +1665,28 @@ function renderSidebar(estado: Estado): string {
   // vira o botão com o logo e o nome na barra de cima, à esquerda da lupa (canvas "Nod — bot fixo", Alt E).
   // NOD-450: a regra de onde cada bot mora é pura (web/lib/secoes.ts, gruposDaBarra), para o teste provar a barra.
   // NOD-379 (suposição registrada no PR): no celular não há barra de cima para o Nod discreto; ele é sempre o primeiro favorito.
-  const { meus, nod, comuns, fixados, soltos, secoes, equipe: daEquipe } = gruposDaBarra(agentes, pessoaId, ehCelular);
+  const { meus, nod, comuns, fixados, equipe: daEquipe } = gruposDaBarra(agentes, pessoaId, ehCelular);
   const grade = !meus.length ? "" : ehCelular
     ? gradeDoCelular(fixados.map(bloco).join(""), fixados.length)
     : `<section class="fixados" aria-label="Fixados" data-grupo="fixados"${fixados.length ? "" : " data-vazio"}>${fixados.map(bloco).join("")}${fixados.length ? "" : '<p class="fixados-vazio">Solte aqui para fixar</p>'}</section>`;
-  const bots = meus.length ? grupo("Meus agentes", "", soltos) + secoes.map((s) => grupo(s.nome, s.nome, s.bots)).join("") + '<div class="nova-secao-alvo" data-grupo="nova-secao" aria-hidden="true">+ Nova seção</div>' : "";
+  // NOD-437 (protótipo aprovado): as seções viraram times, na ordem da conta; o Sem time é um deles (sozinho, sem
+  // cabeçalho). Cada time é um alvo de soltar (data-grupo); o "+ Novo time" fica sempre à vista, no fim, e também recebe
+  // o bot arrastado (cria o time com ele).
+  const times = timesComBots(comuns.filter((a) => !a.fixado), estado.frota?.times);
+  const blocoDoTime = (tm: TimeDaBarra<(typeof agentes)[number]>, i: number) => {
+    const lista = tm.bots.map((a) => ({ conversaId: a.conversaId, aviso: avisoDe(a), alerta: alertaDe(a) }));
+    const s = estadoDaSecao({ chave: "t", recolhidas: tm.recolhido ? new Set(["t"]) : new Set(), conversaAberta, bots: lista });
+    const escondidos = ehCelular ? escondidosNoCelular(s.recolhida, lista) : s.escondidos;
+    const cab = tm.id && edicaoTime?.alvo === tm.id
+      ? campoDoNome({ alvo: edicaoTime.alvo, valor: edicaoTime.valor, aviso: avisoDoNome(edicaoTime.valor, times, tm.id)?.texto ?? null })
+      : comCabecalho(tm, times.length) ? cabecalhoDoTime(tm, { indice: i, total: times.length, bots: tm.bots.length, aviso: ehCelular ? "" : s.aviso, arrastavel: !ehCelular }) : "";
+    const vazio = !tm.bots.length && !tm.semTime ? `<p class="time-vazio">${esc(textoDoVazio(ehCelular))}</p>` : "";
+    const rotulo = comCabecalho(tm, times.length) ? "" : ` aria-label="${esc(nomeDoTime(tm))}"`;
+    return `<section class="section time" data-grupo="secao" data-secao="${esc(tm.semTime ? "" : tm.nome)}"${tm.id ? ` data-time-id="${esc(tm.id)}"` : ""}${tm.semTime && !tm.bots.length ? " data-vazio" : ""}${s.recolhida ? " data-recolhida" : ""}${rotulo}>${cab}${vazio}${tm.bots.map((a, j) => linha(a, escondidos[j])).join("")}</section>`;
+  };
+  const novoTime = edicaoTime?.alvo === "novo" ? `<section class="section time time-novo">${campoDoNome({ alvo: "novo", valor: edicaoTime.valor, aviso: avisoDoNome(edicaoTime.valor, times)?.texto ?? null })}</section>` : "";
+  const selecao = selecaoBots.size && !ehCelular ? `<div class="selecao-rodape" role="toolbar" aria-label="Bots selecionados"><span>${textoDaSelecao(selecaoBots.size)}</span><button type="button" data-act="mudar-time-selecao" aria-haspopup="menu">Mudar de time…</button><button type="button" class="selecao-limpar" data-act="limpar-selecao" aria-label="Limpar seleção">✕</button></div>` : "";
+  const bots = meus.length ? times.map(blocoDoTime).join("") + novoTime + `<button type="button" class="novo-time nova-secao-alvo" data-act="novo-time" data-grupo="nova-secao"${novoTime ? " hidden" : ""}>+ Novo time</button>` + selecao : "";
   const avisoNod = nod ? avisoDe(nod) : "";
   const nodDiscreto = nod && !nod.fixado && !ehCelular
     ? `<button class="nod-topo" data-bot-contexto="${esc(nod.id)}"${atual(nod.conversaId)} data-act="abrir-conversa" data-conversa="${esc(nod.conversaId)}" data-agente="${esc(nod.id)}" aria-label="Abrir o Nod${avisoNod ? ` (${ESPERA[avisoNod]})` : ""}" title="Nod">${LOGO_NOD}<span>Nod</span>${avisoNod ? `<span class="nod-topo-aviso" data-aviso="${avisoNod}" aria-hidden="true"></span>` : ""}</button>`
@@ -2757,7 +2786,7 @@ function prenderFocoNaGaveta(slug: string | null): void {
  * (digitar na busca filtra direto, no ouvinte de input).
  */
 function redesenharSidebar(): void {
-  const html = lembrar("sidebar", estado, [ambienteBanco, buscaAberta, termoBusca() !== "", naFrente(), deixarNaoLida, secoesRecolhidas, celular.ativo(), celular.botsAbertos(), frotaFalhou, favoritosTodos, celular.ativo() ? new Date().toDateString() : "", serializar(barraAtual)], renderSidebar);
+  const html = lembrar("sidebar", estado, [ambienteBanco, buscaAberta, termoBusca() !== "", naFrente(), deixarNaoLida, secoesRecolhidas, edicaoTime?.alvo ?? "", [...selecaoBots].join(","), celular.ativo(), celular.botsAbertos(), frotaFalhou, favoritosTodos, celular.ativo() ? new Date().toDateString() : "", serializar(barraAtual)], renderSidebar);
   // NOD-119: no celular a barra é a gaveta de sempre; o <html> só leva a densidade no computador (virar o aparelho muda).
   pintarBarra(barraAtual, document.documentElement, celular.ativo(), buscaAberta || termoBusca() !== "");
   if (!regiaoMudaria("sidebar", html)) return;
@@ -2768,7 +2797,9 @@ function redesenharSidebar(): void {
   // em composição. O filtro segue ao vivo; a lista se atualiza logo depois que a busca perde o foco.
   if (focoBusca && celular.ativo()) { sidebarAdiada = true; return; }
   const rolagem = document.querySelector<HTMLElement>("#sidebar .list")?.scrollTop ?? 0;
+  const focoNoTime = focoDoTime();
   regiao("sidebar", html);
+  devolverFocoDoTime(focoNoTime);
   const novaBusca = document.getElementById("busca-bots") as HTMLInputElement | null;
   if (novaBusca) { novaBusca.value = valorBusca; if (focoBusca) novaBusca.focus({ preventScroll: true }); }
   filtrarBots(valorBusca);
@@ -3278,10 +3309,8 @@ function acaoDoBot(a: BotGerido, acao: AcaoGestao): void {
   if (ehCelular() && acao === "excluir") { excluirNoCelular(a); return; }
   // ADR-125 (NOD-349): Renomear abre a gaveta com o nome em edição (saiu o diálogo); Enter ou blur salva, Esc desfaz.
   if (acao === "renomear") { renomearNaGaveta(a); return; }
-  if (acao === "mover") {
-    const secoes = [...new Set((estado.gestao?.agentes ?? estado.frota?.agentes ?? []).filter((b) => b.ownerId === estado.sessao?.pessoaId && !b.excluidoEm).map((b) => b.secao).filter(Boolean))];
-    pedirGestao("Mover para", `<p>Escolha uma seção ou escreva um novo nome. Deixe vazio para tirar da seção.</p><label>Seção<input name="secao" value="${esc(a.secao ?? "")}" maxlength="60" list="secoes-bots" placeholder="Sem seção" /></label><datalist id="secoes-bots">${secoes.map((n) => `<option value="${esc(n!)}"></option>`).join("")}</datalist>`, "Mover", async (d) => mudarGestao(() => api!.organizarAgente(a.id, { secao: String(d.get("secao")) }))); return;
-  }
+  // NOD-437: "Time · Produto" abre a escolha do time (no celular, a folha que sobe).
+  if (acao === "mover") { abrirEscolhaDeTime([a.id], document.querySelector<HTMLElement>(`#sidebar [data-bot-contexto="${CSS.escape(a.id)}"]`), a.nome); return; }
   if (acao === "duplicar") {
     const texto = textoDuplicar(a.ownerId === estado.sessao?.pessoaId);
     pedirGestao(`Duplicar ${a.nome}?`, texto, "Duplicar", async () => {
@@ -5186,6 +5215,21 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     // A barra é refeita: quem recolheu pelo teclado continua no mesmo título.
     if (comFoco) document.querySelector<HTMLElement>(`#sidebar .secao-cab[data-chave="${CSS.escape(chave)}"]`)?.focus({ preventScroll: true });
   },
+  "recolher-time": (el) => {
+    if (document.getElementById("sidebar")?.hasAttribute("data-buscando")) return;
+    const id = el.dataset.time;
+    if (!id) return;
+    const agora = performance.now();
+    const duplo = ehCliqueDuplo(ultimoCliqueNoTime, id, agora);
+    ultimoCliqueNoTime = duplo ? null : { id, em: agora };
+    // O segundo clique desfaz o recolher do primeiro (o PATCH nem sai: espera o estado final) e abre o nome.
+    recolherTime(id);
+    if (duplo) acaoDoTime(id, "renomear");
+  },
+  "menu-time": (el) => { if (el.dataset.time) abrirMenuDoTime(el.dataset.time, el); },
+  "novo-time": () => comecarEdicaoDoTime("novo", ""),
+  "mudar-time-selecao": (el) => abrirEscolhaDeTime([...selecaoBots], el),
+  "limpar-selecao": () => limparSelecao(true),
   "abrir-avancado": () => abrirMarketplace(true),
   "navegar-marketplace": () => abrirMarketplace(),
   "nivel-bot": (el) => agir(async () => {
@@ -7140,6 +7184,14 @@ document.addEventListener("keydown", (ev) => {
 // O menu do bot na barra lateral: abre onde o cursor está; pelo teclado (Shift+F10, tecla de menu) o evento vem sem
 // posição e o menu abre ao lado do bot.
 document.addEventListener("contextmenu", (ev) => {
+  // NOD-437: o clique direito no cabeçalho do time abre o mesmo menu do ⋯.
+  const cab = (ev.target as HTMLElement).closest<HTMLElement>("#sidebar .time-cab");
+  const idTime = cab?.querySelector<HTMLElement>("[data-time]")?.dataset.time;
+  if (cab && idTime) {
+    ev.preventDefault();
+    abrirMenuDoTime(idTime, cab, ev.clientX || ev.clientY ? { x: ev.clientX, y: ev.clientY } : undefined);
+    return;
+  }
   const row = (ev.target as HTMLElement).closest<HTMLElement>("[data-bot-contexto]");
   if (!row) return;
   ev.preventDefault();
@@ -7222,6 +7274,27 @@ document.addEventListener("pointercancel", () => toqueNaAgenda.soltar());
 document.addEventListener("click", (ev) => {
   if (toqueNaAgenda.engolirClique()) { ev.preventDefault(); ev.stopPropagation(); }
 }, true);
+// QA do PR #632 (bug 2): no celular, segurar o cabeçalho do time abre o menu dele (o iOS não dispara contextmenu), e
+// soltar o dedo depois não recolhe o time.
+const toqueNoTime = criarToqueLongo<HTMLElement>({ agendar: (fn, ms) => window.setTimeout(fn, ms), cancelar: (id) => clearTimeout(id), agora: () => performance.now() }, (cab) => {
+  const idTime = cab.querySelector<HTMLElement>("[data-time]")?.dataset.time;
+  const atual = idTime ? document.querySelector<HTMLElement>(`#sidebar .secao-cab[data-time="${CSS.escape(idTime)}"]`)?.closest<HTMLElement>(".time-cab") : null;
+  if (!idTime || !atual) return false;
+  navigator.vibrate?.(10);
+  abrirMenuDoTime(idTime, atual);
+  return true;
+});
+document.addEventListener("pointerdown", (ev) => {
+  const cab = celular.ativo() && ev.pointerType !== "mouse" && ev.isPrimary ? (ev.target as HTMLElement).closest<HTMLElement>("#sidebar .time-cab") : null;
+  if (cab?.querySelector("[data-time]")) toqueNoTime.comecar(cab, ev.clientX, ev.clientY);
+  else toqueNoTime.esquecer();
+}, true);
+document.addEventListener("pointermove", (ev) => toqueNoTime.mover(ev.clientX, ev.clientY));
+document.addEventListener("pointerup", () => toqueNoTime.soltar());
+document.addEventListener("pointercancel", () => toqueNoTime.soltar());
+document.addEventListener("click", (ev) => {
+  if (toqueNoTime.engolirClique()) { ev.preventDefault(); ev.stopPropagation(); }
+}, true);
 document.addEventListener("pointermove", (ev) => toqueLongo.mover(ev.clientX, ev.clientY));
 document.addEventListener("pointerup", () => toqueLongo.soltar());
 document.addEventListener("pointercancel", () => toqueLongo.soltar());
@@ -7252,6 +7325,463 @@ function mostrarDicaToqueLongo(): void {
   marcarDicaVista(armazenamento());
   timerDica = window.setTimeout(() => esconderDicaToqueLongo(false), MS_DICA);
 }
+
+// ---- times de bots na barra (NOD-437, protótipo aprovado) ---------------------------------------------------------------
+// Criar, renomear, excluir (com Desfazer), reordenar (⌥↑/⌥↓, menu ou arrastando o cabeçalho), recolher (gravado na
+// conta) e mover vários bots de uma vez. A regra pura mora em web/lib/times-da-barra.ts; aqui só o DOM e o servidor.
+type BotDaFrota = NonNullable<typeof estado.frota>["agentes"][number];
+
+/** Os times como a barra os desenha agora (a mesma conta do renderSidebar). */
+function timesNaBarra(): TimeDaBarra<BotDaFrota>[] {
+  const { comuns } = gruposDaBarra(estado.frota?.agentes ?? [], estado.sessao?.pessoaId ?? "", celular.ativo());
+  return timesComBots(comuns.filter((a) => !a.fixado), estado.frota?.times);
+}
+
+/** O bot com outro time (null = Sem time: sem `secao`). */
+function comSecao(a: BotDaFrota, secao: string | null): BotDaFrota {
+  const { secao: _antes, ...resto } = a;
+  return secao ? { ...resto, secao } : resto;
+}
+
+const chaveDeTela = (t: { nome: string; semTime: boolean }): string => `time:${t.semTime ? "" : chaveDoTime(t.nome)}`;
+
+/** Muda os times da frota na hora: a barra se redesenha sem esperar o servidor (a frota relida confirma). */
+function trocarFrota(fn: (f: NonNullable<typeof estado.frota>) => Partial<NonNullable<typeof estado.frota>>): void {
+  const f = estado.frota;
+  if (f) dispatch({ tipo: "hidratar-frota", frota: { ...f, ...fn(f) } });
+}
+
+/** Grava no servidor; com erro, mostra e relê a frota (a barra volta ao que está gravado). */
+async function gravarTime(fn: () => Promise<unknown>): Promise<void> {
+  try { await fn(); } catch (e) { mostrarErro(e); }
+  dispatch({ tipo: "invalidar", quais: ["frota", "gestao"] });
+}
+
+/** O foco no cabeçalho, no ⋯ ou no campo do nome sobrevive à barra redesenhada (a frota relida, o recolher). */
+type FocoDoTime = { tipo: "cab" | "mais"; chave: string } | { tipo: "campo"; alvo: string; ini: number | null; fim: number | null } | null;
+function focoDoTime(): FocoDoTime {
+  const a = document.activeElement;
+  if (!(a instanceof HTMLElement) || !a.closest("#sidebar")) return null;
+  if (a instanceof HTMLInputElement && a.dataset.timeCampo) return { tipo: "campo", alvo: a.dataset.timeCampo, ini: a.selectionStart, fim: a.selectionEnd };
+  const chave = a.closest(".time-cab")?.querySelector<HTMLElement>(".secao-cab")?.dataset.chave;
+  if (!chave || !(a.classList.contains("secao-cab") || a.classList.contains("time-mais"))) return null;
+  return { tipo: a.classList.contains("time-mais") ? "mais" : "cab", chave };
+}
+function devolverFocoDoTime(f: FocoDoTime): void {
+  if (!f) return;
+  if (f.tipo !== "campo") { focarTime(f.chave, f.tipo === "mais"); return; }
+  const c = document.querySelector<HTMLInputElement>(`#sidebar [data-time-campo="${CSS.escape(f.alvo)}"]`);
+  if (c && document.activeElement !== c) { c.focus({ preventScroll: true }); c.setSelectionRange(f.ini, f.fim); }
+}
+function focarTime(chave: string, mais = false): boolean {
+  const cab = document.querySelector<HTMLElement>(`#sidebar .secao-cab[data-chave="${CSS.escape(chave)}"]`);
+  const alvo = mais ? cab?.parentElement?.querySelector<HTMLElement>(".time-mais") : cab;
+  if (alvo && document.activeElement !== alvo) alvo.focus({ preventScroll: true });
+  return !!alvo;
+}
+
+function recolherTime(id: string, recolhido?: boolean): void {
+  const t = estado.frota?.times?.find((x) => x.id === id);
+  if (!t || !api) return;
+  const novo = recolhido ?? !t.recolhido;
+  if (novo === t.recolhido) return;
+  trocarFrota((f) => ({ times: f.times?.map((x) => (x.id === id ? { ...x, recolhido: novo } : x)) }));
+  // Revisão 2 do PR #632 (M): os dois cliques do duplo clique (que renomeia) não viram dois PATCHes em corrida. O PATCH
+  // espera um instante, sai só com o estado final e só se ele mudou; a fila por time garante a ordem (web/lib/recolher-adiado).
+  recolherAdiado.pedir(id, t.recolhido, novo);
+}
+const recolherAdiado = criarRecolherAdiado(
+  (id, recolhido) => gravarTime(() => api!.recolherTime(id, recolhido)),
+  { agendar: (fn, ms) => window.setTimeout(fn, ms), cancelar: (t) => window.clearTimeout(t) },
+);
+// Revisão 4 do PR #632: quem recolhe e recarrega logo em seguida não perde o recolher.
+window.addEventListener("pagehide", () => recolherAdiado.enviarJa());
+
+function comecarEdicaoDoTime(alvo: string, valor: string): void {
+  limparSelecao(false);
+  edicaoTime = { alvo, valor };
+  render();
+  const c = document.querySelector<HTMLInputElement>(`#sidebar [data-time-campo="${CSS.escape(alvo)}"]`);
+  if (!c) return;
+  c.focus();
+  c.select();
+  c.scrollIntoView({ block: "nearest" });
+}
+
+function cancelarEdicaoDoTime(): void {
+  const e = edicaoTime;
+  if (!e) return;
+  edicaoTime = null;
+  render();
+  const t = timesNaBarra().find((x) => x.id === e.alvo);
+  if (!t || !focarTime(chaveDeTela(t))) document.querySelector<HTMLElement>("#sidebar .novo-time")?.focus();
+}
+
+let confirmandoTime = false;
+async function confirmarEdicaoDoTime(): Promise<void> {
+  const e = edicaoTime;
+  if (!e || !api || confirmandoTime) return;
+  const nome = nomeLimpo(e.valor);
+  const times = timesNaBarra();
+  const proprio = e.alvo === "novo" ? undefined : e.alvo;
+  const atual = times.find((t) => t.id === proprio);
+  if (!nome || (atual && nome === atual.nome)) { cancelarEdicaoDoTime(); return; }
+  const aviso = avisoDoNome(nome, times, proprio);
+  if (aviso?.existente) {
+    // Nome repetido: o Enter leva até o time que já existe (aberto), em vez de criar outro.
+    const ex = times.find((t) => t.id === aviso.existente?.id);
+    edicaoTime = null;
+    if (ex?.id && ex.recolhido) recolherTime(ex.id, false);
+    render();
+    if (ex) focarTime(chaveDeTela(ex));
+    anunciarGestao(`O time ${aviso.existente.nome} já existe.`);
+    return;
+  }
+  if (aviso) { anunciarGestao(aviso.texto); return; }
+  confirmandoTime = true;
+  try {
+    if (!atual) {
+      const r = await api.criarTime({ nome });
+      edicaoTime = null;
+      trocarFrota((f) => ({ times: [...(f.times ?? []).filter((t) => t.id !== r.time.id), { ...r.time, semTime: false }] }));
+      focarTime(`time:${chaveDoTime(r.time.nome)}`);
+      anunciarGestao(`Time ${r.time.nome} criado.`);
+    } else {
+      const r = await api.renomearTime(atual.id ?? "", nome);
+      edicaoTime = null;
+      const membros = new Set(atual.bots.map((b) => b.id));
+      trocarFrota((f) => ({ times: f.times?.map((t) => (t.id === atual.id ? { ...t, nome: r.time.nome } : t)), agentes: f.agentes.map((a) => (membros.has(a.id) ? { ...a, secao: r.time.nome } : a)) }));
+      focarTime(`time:${chaveDoTime(r.time.nome)}`);
+      anunciarGestao(`Time renomeado para ${r.time.nome}.`);
+    }
+  } catch (err) {
+    mostrarErro(err);
+  } finally {
+    confirmandoTime = false;
+  }
+  dispatch({ tipo: "invalidar", quais: ["frota", "gestao"] });
+}
+
+function acaoDoTime(id: string, acao: AcaoDoTime): void {
+  const times = timesNaBarra();
+  const i = times.findIndex((t) => t.id === id);
+  const t = times[i];
+  if (!t || !api) return;
+  if ((acao === "renomear" || acao === "excluir") && t.semTime) { anunciarGestao(NOTA_SEM_TIME); return; }
+  if (acao === "renomear") { comecarEdicaoDoTime(id, t.nome); return; }
+  if (acao === "excluir") { void excluirTimeDaBarra(t); return; }
+  const destino = destinoAoMover(i, times.length, acao);
+  if (destino === null) { anunciarGestao(`${nomeDoTime(t)} já é o ${acao === "subir" ? "primeiro" : "último"} time.`); return; }
+  moverTime(id, destino);
+}
+
+function moverTime(id: string, destino: number): void {
+  const ids = (estado.frota?.times ?? []).map((x) => x.id);
+  if (!ids.includes(id) || ids.indexOf(id) === destino || !api) return;
+  const ordem = ids.filter((x) => x !== id);
+  ordem.splice(destino, 0, id);
+  trocarFrota((f) => ({ times: ordem.map((x, posicao) => ({ ...(f.times ?? []).find((y) => y.id === x)!, posicao })) }));
+  const t = estado.frota?.times?.find((x) => x.id === id);
+  if (t) { focarTime(chaveDeTela(t)); anunciarGestao(fraseDoMovido(nomeDoTime(t), destino, ordem.length)); }
+  void gravarTime(() => api!.ordenarTime(id, destino));
+}
+
+/** Excluir não pergunta (decisão da Ada): os bots vão para o Sem time, na mesma ordem, e o aviso traz Desfazer. */
+async function excluirTimeDaBarra(t: TimeDaBarra<BotDaFrota>): Promise<void> {
+  const id = t.id;
+  if (!id || !api) return;
+  const gravado = estado.frota?.times?.find((x) => x.id === id);
+  const times = timesNaBarra();
+  const i = times.findIndex((x) => x.id === id);
+  const vizinho = times[i + 1] ?? times[i - 1];
+  try {
+    const r = await api.excluirTime(id);
+    const membros = new Set(r.bots.map((b) => b.id));
+    trocarFrota((f) => ({ times: f.times?.filter((x) => x.id !== id), agentes: f.agentes.map((a) => (membros.has(a.id) ? comSecao(a, null) : a)) }));
+    if (!vizinho || !focarTime(chaveDeTela(vizinho))) document.querySelector<HTMLElement>("#sidebar .novo-time")?.focus();
+    const texto = fraseDoExcluido(t.nome, r.bots.map((b) => b.nome));
+    anunciarGestao(texto);
+    mostrarAvisoDesfazer({
+      texto,
+      aoDesfazer: () => gravarTime(() => api!.criarTime({ nome: t.nome, posicao: gravado?.posicao, recolhido: gravado?.recolhido ?? false, bots: r.bots.map((b) => b.id) })),
+    });
+  } catch (e) {
+    mostrarErro(e);
+  }
+  dispatch({ tipo: "invalidar", quais: ["frota", "gestao"] });
+}
+
+/** O menu de um item: as setas andam pelos botões habilitados; abre no cursor (clique direito) ou ao lado da âncora. */
+function abrirMenuDaBarra(html: string, ancora: HTMLElement | null, ponto: { x: number; y: number } | undefined, aoEscolher: (b: HTMLButtonElement) => void, folha = false): HTMLDialogElement {
+  const d = dialogo(html, true);
+  if (folha) d.classList.add("pfc-folha");
+  else {
+    const r = ancora?.getBoundingClientRect();
+    const x = ponto ? ponto.x + 4 : (r?.right ?? 12);
+    const y = ponto ? ponto.y + 4 : (r?.top ?? 12);
+    d.style.left = `${Math.max(12, Math.min(x, window.innerWidth - d.offsetWidth - 12))}px`;
+    d.style.top = `${Math.max(12, Math.min(y, window.innerHeight - d.offsetHeight - 12))}px`;
+  }
+  d.addEventListener("click", (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLButtonElement>("button:not([disabled])");
+    if (b) { d.close(); aoEscolher(b); }
+  });
+  d.addEventListener("keydown", (e) => {
+    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) return;
+    e.preventDefault();
+    const itens = [...d.querySelectorAll<HTMLButtonElement>("button:not([disabled])")];
+    const atual = itens.indexOf(document.activeElement as HTMLButtonElement);
+    const proximo = e.key === "Home" ? 0 : e.key === "End" ? itens.length - 1 : (atual + (e.key === "ArrowDown" ? 1 : -1) + itens.length) % itens.length;
+    itens[proximo]?.focus();
+  });
+  d.querySelector<HTMLButtonElement>("button:not([disabled])")?.focus();
+  return d;
+}
+
+/** O ⋯ do time (e o clique direito no cabeçalho): Renomear, Mover para cima/baixo, Excluir time. O Sem time só se move. */
+function abrirMenuDoTime(id: string, ancora: HTMLElement, ponto?: { x: number; y: number }): void {
+  const times = timesNaBarra();
+  const i = times.findIndex((t) => t.id === id);
+  const t = times[i];
+  if (!t) return;
+  const nome = nomeDoTime(t);
+  const itens = itensDoMenuDoTime(t, i, times.length).map((it) => `${it.perigo ? "<hr>" : ""}<button type="button" role="menuitem" data-acao-time="${it.acao}"${it.perigo ? ' class="danger"' : ""}${it.desabilitado ? " disabled" : ""}>${esc(it.texto)}</button>`).join("");
+  const nota = t.semTime ? `<hr><p class="menu-nota">${esc(NOTA_SEM_TIME)}</p>` : "";
+  abrirMenuDaBarra(`<div role="menu" aria-label="Ações do time ${esc(nome)}"><p class="menu-nome">${esc(nome)}</p>${itens}${nota}</div>`, ancora, ponto, (b) => acaoDoTime(id, b.dataset.acaoTime as AcaoDoTime));
+}
+
+/** "Para qual time?": os times, com o de agora marcado, e "+ Novo time" (no celular, a folha que sobe). */
+function abrirEscolhaDeTime(ids: string[], ancora: HTMLElement | null, nomeDoBot?: string): void {
+  if (!ids.length || !api) return;
+  const times = timesNaBarra();
+  const agentes = estado.frota?.agentes ?? [];
+  const chaves = new Set(ids.map((x) => chaveDoTime(agentes.find((a) => a.id === x)?.secao ?? "")));
+  const atual = chaves.size === 1 ? [...chaves][0] : null;
+  const titulo = ids.length === 1 && nomeDoBot ? `Time · ${nomeDoBot}` : "Para qual time?";
+  const opcoes = times.map((t) => {
+    const marcado = (t.semTime ? "" : chaveDoTime(t.nome)) === atual;
+    return `<button type="button" role="menuitemradio" aria-checked="${marcado}" data-time-destino="${esc(t.semTime ? "" : t.nome)}">${esc(nomeDoTime(t))}${marcado ? ' <span aria-hidden="true">✓</span>' : ""}</button>`;
+  }).join("");
+  abrirMenuDaBarra(`<div role="menu" aria-label="${esc(titulo)}"><p class="menu-nome">${esc(titulo)}</p>${opcoes}<hr><button type="button" role="menuitem" data-time-novo>+ Novo time</button></div>`, ancora, undefined, (b) => {
+    if (b.hasAttribute("data-time-novo")) { pedirNovoTimeCom(ids); return; }
+    const destino = b.dataset.timeDestino ?? "";
+    if (chaveDoTime(destino) !== atual) moverBots(ids, destino);
+  }, celular.ativo());
+}
+
+function moverBots(ids: string[], time: string): void {
+  if (!api) return;
+  const nomes = ids.map((x) => estado.frota?.agentes.find((a) => a.id === x)?.nome ?? "").filter(Boolean);
+  const alvo = timesNaBarra().find((t) => !t.semTime && chaveDoTime(t.nome) === chaveDoTime(time));
+  const secao = time === "" ? null : (alvo?.nome ?? nomeLimpo(time));
+  const movidos = new Set(ids);
+  trocarFrota((f) => ({ agentes: f.agentes.map((a) => (movidos.has(a.id) ? { ...comSecao(a, secao), fixado: false } : a)) }));
+  if (alvo?.id && alvo.recolhido) recolherTime(alvo.id, false);
+  limparSelecao(false);
+  void agir(async () => {
+    await mudarGestao(() => api!.moverBotsParaTime(ids, time));
+    anunciarGestao(`${juntarNomes(nomes)} ${nomes.length === 1 ? "foi" : "foram"} para ${secao ?? "Sem time"}.`);
+  });
+}
+
+/** O time novo já com bots (arrastar até "+ Novo time" ou "Novo time" na escolha). Nome repetido move para o que existe. */
+function pedirNovoTimeCom(ids: string[]): void {
+  const nomes = ids.map((x) => botGerido(x)?.nome ?? "").filter(Boolean);
+  const quem = nomes.length > 3 ? `${nomes.length} bots` : juntarNomes(nomes) || "O bot";
+  pedirGestao("Novo time", `<p>${esc(quem)} ${nomes.length > 1 ? "vão" : "vai"} para o time novo.</p><label>Nome do time<input name="time" required maxlength="60" placeholder="Produto" autocomplete="off" /></label>`, "Criar time", async (d) => {
+    const nome = nomeLimpo(String(d.get("time") ?? ""));
+    if (!nome) return;
+    const aviso = avisoDoNome(nome, timesNaBarra());
+    if (aviso?.existente) { moverBots(ids, aviso.existente.nome); return; }
+    if (aviso) throw new Error(aviso.texto);
+    limparSelecao(false);
+    await mudarGestao(() => api!.criarTime({ nome, bots: ids }));
+  });
+}
+
+function limparSelecao(anunciar: boolean): void {
+  if (!selecaoBots.size) return;
+  selecaoBots = new Set();
+  ancoraSelecao = null;
+  render();
+  if (anunciar) anunciarGestao("Seleção limpa.");
+}
+
+function alternarSelecao(id: string, o: { alternar: boolean; intervalo: boolean }): void {
+  const ordem = [...document.querySelectorAll<HTMLElement>("#sidebar .time .bot-row:not(.escondida)")].map((n) => n.dataset.botContexto ?? "");
+  const r = selecionar({ atual: selecaoBots, ancora: ancoraSelecao, ordem, id, ...o });
+  selecaoBots = r.selecao;
+  ancoraSelecao = r.ancora;
+  render();
+  document.querySelector<HTMLElement>(`#sidebar [data-bot-contexto="${CSS.escape(id)}"] .row`)?.focus({ preventScroll: true });
+  anunciarGestao(selecaoBots.size ? textoDaSelecao(selecaoBots.size) : "Seleção limpa.");
+}
+
+/** Os bots que mudaram de time entre duas leituras da frota: na barra, eles piscam de leve (o outro aparelho vê a mudança). */
+function destacarMovidos(antes: readonly BotDaFrota[] | undefined, depois: readonly BotDaFrota[]): void {
+  if (!antes) return;
+  const era = new Map(antes.map((a) => [a.id, chaveDoTime(a.secao ?? "")]));
+  const ids = depois.filter((a) => era.has(a.id) && era.get(a.id) !== chaveDoTime(a.secao ?? "")).map((a) => a.id);
+  if (!ids.length) return;
+  window.setTimeout(() => {
+    for (const id of ids) {
+      const el = document.querySelector<HTMLElement>(`#sidebar [data-bot-contexto="${CSS.escape(id)}"]`);
+      if (!el) continue;
+      el.classList.add("recem-movido");
+      window.setTimeout(() => el.classList.remove("recem-movido"), 1600);
+    }
+  }, 30);
+}
+
+/**
+ * Os recolhidos de antes (deste navegador) vão para a conta e saem do localStorage. A chave cuja seção ainda não virou
+ * time espera a próxima frota (depois do sincronizar), para não perder o recolhido (revisão 2 do PR #632, A).
+ */
+const recolhidosEmVoo = new Set<string>();
+function migrarRecolhidos(frota: NonNullable<Estado["frota"]>): TimeNaLista[] {
+  const times = frota.times ?? [];
+  const pessoaId = estado.sessao?.pessoaId;
+  if (migrouRecolhidos || !pessoaId || !api) return [...times];
+  const antigas = new Set([...secoesRecolhidas].filter((k) => !recolhidosEmVoo.has(k)));
+  const m = recolhidosParaMigrar(antigas, pessoaId, times, { descartarOrfas: !temTimeProvisorio(frota) });
+  if (m.restam === 0) migrouRecolhidos = true;
+  if (!m.chaves.length) return [...times];
+  for (const k of m.chaves) recolhidosEmVoo.add(k);
+  const cliente = api;
+  // A chave antiga só sai depois de a conta gravar (revisão do PR #632, L2): falhou, a próxima sessão tenta de novo.
+  void Promise.all(m.ids.map((id) => cliente.recolherTime(id, true))).then(() => {
+    for (const k of m.chaves) secoesRecolhidas = definirSecaoRecolhida(secoesRecolhidas, k, false);
+  }).catch(() => {}).finally(() => { for (const k of m.chaves) recolhidosEmVoo.delete(k); });
+  return times.map((t) => (m.ids.includes(t.id) ? { ...t, recolhido: true } : t));
+}
+
+function temTimeProvisorio(frota: NonNullable<Estado["frota"]>): boolean {
+  return provisoriosDaBarra(frota).length > 0;
+}
+
+/** As chaves dos times que a barra desenha sem id (a seção que ainda não virou time); o Sem time sozinho não conta. */
+function provisoriosDaBarra(frota: NonNullable<Estado["frota"]>): string[] {
+  const { comuns } = gruposDaBarra(frota.agentes, estado.sessao?.pessoaId ?? "", celular.ativo());
+  const times = timesComBots(comuns.filter((a) => !a.fixado), frota.times);
+  if (times.length <= 1) return [];
+  return times.filter((t) => t.id === null).map((t) => (t.semTime ? "" : chaveDoTime(t.nome)));
+}
+
+/**
+ * A frota só lê os times (revisão do PR #632, A1): a seção que ainda não virou time (o servidor de antes, a conta que
+ * nunca mudou um time) a barra desenha como provisória, sem ⋯ — e pede uma vez por sessão que o servidor a materialize.
+ */
+// Revisão 3: cada chave provisória pede uma vez (o time que o Nod cria depois da primeira leitura também materializa).
+const timesSincronizados = new Set<string>();
+function sincronizarTimesSePreciso(frota: NonNullable<Estado["frota"]>): void {
+  if (!api || !frota.times) return;
+  const novas = provisoriosDaBarra(frota).filter((c) => !timesSincronizados.has(c));
+  if (!novas.length) return;
+  for (const c of novas) timesSincronizados.add(c);
+  void api.sincronizarTimes().then(() => dispatch({ tipo: "invalidar", quais: ["frota"] })).catch(() => {
+    // Revisão 4: a falha (rede, 5xx) não marca a chave como resolvida; a próxima frota tenta de novo.
+    for (const c of novas) timesSincronizados.delete(c);
+  });
+}
+
+document.addEventListener("input", (ev) => {
+  const c = ev.target;
+  if (!(c instanceof HTMLInputElement) || !c.dataset.timeCampo || !edicaoTime) return;
+  edicaoTime = { ...edicaoTime, valor: c.value };
+  const aviso = document.getElementById("time-nome-aviso");
+  if (aviso) aviso.textContent = avisoDoNome(c.value, timesNaBarra(), edicaoTime.alvo === "novo" ? undefined : edicaoTime.alvo)?.texto ?? "";
+});
+// Sair do campo confirma (como o nome na gaveta); vazio ou igual, cancela. A barra redesenhada devolve o foco ao campo novo.
+document.addEventListener("focusout", (ev) => {
+  const c = ev.target;
+  if (!(c instanceof HTMLInputElement) || !c.dataset.timeCampo) return;
+  window.setTimeout(() => {
+    const agora = document.activeElement;
+    if (!edicaoTime || confirmandoTime || (agora instanceof HTMLInputElement && agora.dataset.timeCampo)) return;
+    void confirmarEdicaoDoTime();
+  }, 0);
+});
+document.addEventListener("keydown", (ev) => {
+  const alvo = ev.target as HTMLElement;
+  if (alvo instanceof HTMLInputElement && alvo.dataset.timeCampo) {
+    if (ev.key === "Enter" && !ev.isComposing) { ev.preventDefault(); void confirmarEdicaoDoTime(); }
+    else if (ev.key === "Escape") { ev.preventDefault(); ev.stopPropagation(); cancelarEdicaoDoTime(); }
+    return;
+  }
+  const cab = alvo.closest?.<HTMLElement>("#sidebar .secao-cab[data-time]");
+  if (cab?.dataset.time) {
+    const acao = atalhoDoCabecalho(ev);
+    if (acao) { ev.preventDefault(); ev.stopPropagation(); acaoDoTime(cab.dataset.time, acao); }
+    return;
+  }
+  // ⌘/Ctrl+Espaço no bot alterna a seleção (o clique com ⌘/Ctrl pelo teclado); Esc na barra limpa.
+  const row = alvo.closest?.<HTMLElement>("#sidebar .time .bot-row");
+  if (row && ev.key === " " && (ev.metaKey || ev.ctrlKey) && !celular.ativo()) { ev.preventDefault(); alternarSelecao(row.dataset.botContexto ?? "", { alternar: true, intervalo: false }); return; }
+  if (ev.key === "Escape" && selecaoBots.size && alvo.closest?.("#sidebar")) { ev.preventDefault(); ev.stopPropagation(); limparSelecao(true); }
+}, true);
+// ⌘/Ctrl+clique alterna um bot; Shift+clique pega o intervalo. O clique simples abre a conversa e desfaz a seleção.
+document.addEventListener("click", (ev) => {
+  if (celular.ativo()) return;
+  const alvo = ev.target as HTMLElement;
+  const row = alvo.closest?.<HTMLElement>("#sidebar .time .bot-row");
+  if (!row || alvo.closest(".bot-mais")) return;
+  const alternar = ev.metaKey || ev.ctrlKey;
+  if (!alternar && !ev.shiftKey) { if (selecaoBots.size) limparSelecao(false); return; }
+  ev.preventDefault();
+  ev.stopPropagation();
+  alternarSelecao(row.dataset.botContexto ?? "", { alternar, intervalo: ev.shiftKey && !alternar });
+}, true);
+// O duplo clique no nome do time renomeia: quem detecta é o "recolher-time" (ehCliqueDuplo), porque o primeiro clique
+// redesenha a barra e o navegador não dispara dblclick (QA do PR #632, bug 1).
+let ultimoCliqueNoTime: { id: string; em: number } | null = null;
+
+// Arrastar o cabeçalho reordena os times (no computador); a linha mostra onde ele cai.
+let arrastandoTime: string | null = null;
+let antesDoTime = -1;
+function encerrarArrastoDeTime(): void {
+  arrastandoTime = null;
+  antesDoTime = -1;
+  for (const n of document.querySelectorAll("#sidebar .linha-insercao")) n.remove();
+  for (const n of document.querySelectorAll("#sidebar .time.origem-arrasto")) n.classList.remove("origem-arrasto");
+}
+document.addEventListener("dragstart", (ev) => {
+  const cab = (ev.target as HTMLElement).closest?.<HTMLElement>("#sidebar [data-time-arrastavel]");
+  if (!cab || !ev.dataTransfer) return;
+  arrastandoTime = cab.dataset.timeArrastavel ?? null;
+  ev.dataTransfer.effectAllowed = "move";
+  ev.dataTransfer.setData("application/x-nod-time", arrastandoTime ?? "");
+  window.requestAnimationFrame(() => cab.closest(".time")?.classList.add("origem-arrasto"));
+});
+document.addEventListener("dragover", (ev) => {
+  if (!arrastandoTime) return;
+  const sec = (ev.target as HTMLElement).closest?.<HTMLElement>("#sidebar .time[data-time-id]");
+  if (!sec) return;
+  ev.preventDefault();
+  if (ev.dataTransfer) ev.dataTransfer.dropEffect = "move";
+  const secs = [...document.querySelectorAll<HTMLElement>("#sidebar .time[data-time-id]")];
+  const r = sec.getBoundingClientRect();
+  const antes = secs.indexOf(sec) + (ev.clientY > r.top + r.height / 2 ? 1 : 0);
+  if (antes === antesDoTime) return;
+  antesDoTime = antes;
+  for (const n of document.querySelectorAll("#sidebar .linha-insercao")) n.remove();
+  const marca = document.createElement("div");
+  marca.className = "linha-insercao linha-time";
+  marca.setAttribute("aria-hidden", "true");
+  const ref = secs[antes];
+  if (ref) ref.before(marca);
+  else secs[secs.length - 1]?.after(marca);
+});
+document.addEventListener("drop", (ev) => {
+  if (!arrastandoTime) return;
+  ev.preventDefault();
+  const id = arrastandoTime;
+  const ids = [...document.querySelectorAll<HTMLElement>("#sidebar .time[data-time-id]")].map((n) => n.dataset.timeId ?? "");
+  const antes = antesDoTime;
+  encerrarArrastoDeTime();
+  if (antes < 0) return;
+  moverTime(id, ordemAoSoltarTime(ids, id, antes).destino);
+});
+document.addEventListener("dragend", () => { if (arrastandoTime) encerrarArrastoDeTime(); });
 
 // ---- arrastar na barra lateral (definido em 2026-09-30, canvas "Menu, sidebar e gaveta") ---------------------------------
 // Soltar na grade fixa, numa seção move, em "+ Nova seção" pede o nome. A barra se reorganiza na hora (frotaAoSoltar) e o
@@ -7351,15 +7881,7 @@ function soltarBot(id: string, destino: Destino, indice: number): void {
 }
 
 function pedirNovaSecao(id: string): void {
-  const nome = botGerido(id)?.nome ?? "o bot";
-  pedirGestao("Nova seção", `<p>${esc(nome)} vai para a seção nova.</p><label>Nome da seção<input name="secao" required maxlength="60" placeholder="Produto e Engenharia" /></label>`, "Criar seção", async (d) => {
-    const secao = String(d.get("secao") ?? "").trim();
-    if (!secao) return;
-    // Seção nova nasce aberta, mesmo que uma antiga com o mesmo nome tenha ficado recolhida neste navegador.
-    const chave = chaveDaSecao(estado.sessao?.pessoaId ?? "", secao);
-    if (secoesRecolhidas.has(chave)) secoesRecolhidas = definirSecaoRecolhida(secoesRecolhidas, chave, false);
-    await mudarGestao(() => api!.organizarAgente(id, { fixado: false, secao, ordem: [id] }));
-  });
+  pedirNovoTimeCom([id]);
 }
 
 document.addEventListener("dragstart", (ev) => {
@@ -7408,8 +7930,8 @@ document.addEventListener("drop", (ev) => {
   const id = arrastandoBot;
   const alvo = alvoArrasto;
   // Soltou numa seção recolhida: ela fica aberta, para o bot não sumir da vista.
-  const chave = alvo && alvo.destino !== "nova" && alvo.destino.grupo === "secao" ? alvo.el.querySelector<HTMLElement>(".secao-cab")?.dataset.chave : undefined;
-  if (chave && secoesRecolhidas.has(chave)) secoesRecolhidas = definirSecaoRecolhida(secoesRecolhidas, chave, false);
+  const idTime = alvo && alvo.destino !== "nova" && alvo.destino.grupo === "secao" ? alvo.el.dataset.timeId : undefined;
+  if (idTime && estado.frota?.times?.find((t) => t.id === idTime)?.recolhido) recolherTime(idTime, false);
   encerrarArrasto();
   if (!alvo) return;
   if (alvo.destino === "nova") pedirNovaSecao(id);

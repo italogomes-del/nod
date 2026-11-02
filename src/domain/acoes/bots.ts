@@ -54,7 +54,7 @@ export const ACOES_BOTS = [
   },
   {
     id: "bots.mover",
-    titulo: "Mover um bot de seção (e organizar a barra lateral)",
+    titulo: "Mover um bot de time (e organizar a barra lateral)",
     schema: objeto({ bot: BOT, secao: P.secao }, ["bot", "secao"]),
     risco: "muda",
     cartaoNoChat: false,

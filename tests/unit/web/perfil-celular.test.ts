@@ -178,6 +178,13 @@ describe("4: o menu do celular tem no máximo 5 itens; o desktop segue com os 9"
     expect(d).not.toContain("ver-perfil");
     for (const acao of ["fixar", "mover", "nao-lido", "renomear", "perfil", "duplicar", "copiar", "ocultar", "excluir"]) expect(d).toContain(`data-gestao="${acao}"`);
   });
+  it("NOD-437: o item Time · X escapa o nome do time no celular e no desktop", () => {
+    for (const celular of [true, false]) {
+      const m = corpoDoMenu(nina({ secao: '<img src=x onerror=alert(1)>' } as Partial<AgenteFrota>), true, celular);
+      expect(m).not.toContain("<img");
+      expect(m).toContain("Time · &lt;img");
+    }
+  });
 });
 
 describe("5: Excluir pede confirmação e não aparece no Nod nem no bot de outra pessoa", () => {
