@@ -7,7 +7,6 @@
  * pessoa mexe nele pelas mesmas ações (ADR-135, domínio `quadro`).
  */
 import type { LinkDeTarefa } from "./quadro-pela-conversa.ts";
-
 import type { LinhaDeSistema, PrNaTela } from "./prs-da-tarefa.ts";
 export type { CiPr, EstadoPr, LinhaDeSistema, PrDaTarefa, PrLido, PrNaTela, TipoLinhaTarefa } from "./prs-da-tarefa.ts";
 
