@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { rotasQuadro } from "../../src/adapters/http/rotas/quadro.ts";
 import type { DepsRotas } from "../../src/adapters/http/rotas/executar-caso.ts";
-import { LIMITES_QUADRO, type OpQuadro, type QuadroDto } from "../../src/contracts/quadro.ts";
+import { LIMITES_QUADRO, type OpQuadro, type QuadroDto, type ResultadoGerirQuadro } from "../../src/contracts/quadro.ts";
 import { vincularEscopo } from "../../src/db/tx.ts";
 import { ACOES_QUADRO } from "../../src/domain/acoes/quadro.ts";
 import { FAIXA_DO_PRAZO } from "../../src/domain/colunas.ts";
@@ -37,7 +37,7 @@ const retrato = (q: QuadroDto | null, turnos: number): Retrato | null =>
         prazo: q.prazo,
         cumprida: q.cumpridoEm !== null,
         resumo: q.resumo,
-        colunas: q.colunas.map((c) => [c.id, c.nome, c.grupo, c.responsavelNome ?? null, c.instrucoes ?? null, c.prazoMin ?? null]),
+        colunas: q.colunas.map((c) => [c.id, c.nome, c.grupo, c.responsavelNome ?? null, c.instrucoes ?? null, c.trava ?? null, c.prazoMin ?? null]),
         tarefas: q.tarefas.map((t) => [t.titulo, t.descricao, t.status, t.agenteNome, t.linearId, t.prUrl, t.pergunta, t.resposta, t.execucao]),
         turnosAbertos: turnos,
       }
@@ -105,12 +105,23 @@ describeIntegracao("paridade tela × chat do quadro.* (NOD-442, ADR-135)", () =>
     return r ? { ...r, trabalhos } : null;
   };
 
+  const ultimoMovimento = async (m: M, anfitriaoId: string, titulo: string) => {
+    const q = (await m.d.repos.quadros.doAgente(anfitriaoId))!;
+    const t = (await m.d.repos.quadros.tarefas(q.id)).find((x) => x.titulo === titulo)!;
+    return (await m.d.repos.quadros.ultimosMovimentos(q.id, 1)).find((x) => x.tarefaId === t.id)!.id;
+  };
   type Cenario = {
     id: (typeof ACOES_QUADRO)[number]["id"];
     /** O mesmo preparo nos dois quadros (pela pessoa). */
     preparar?: (m: M) => OpQuadro[][];
-    tela: (m: M, q: { anfitriao: string; tarefa: (titulo: string) => Promise<string>; ultimoLote: () => Promise<string> }) => Promise<{ metodo: string; caminho: string; corpo?: unknown; status: number }>;
-    chat: (m: M) => OpQuadro;
+    tela: (m: M, q: { anfitriao: string; tarefa: (titulo: string) => Promise<string>; ultimoLote: () => Promise<string>; ultimoMovimento: (titulo: string) => Promise<string> }) => Promise<{ metodo: string; caminho: string; corpo?: unknown; status: number }>;
+    /**
+     * NOD-419: o chat lê o id do movimento como o bot lê, na saída do gerir_quadro (revisão do PR #629: não do
+     * repositório). `movimentoNaSaida` = o mais novo da tarefa no resumo da última chamada do preparo pelo bot.
+     */
+    chat: (m: M, q: { movimentoNaSaida: (titulo: string) => string }) => OpQuadro | Promise<OpQuadro>;
+    /** O último passo do preparo, no quadro do chat, sai pelo gerir_quadro do Gil (a pessoa na conversa), não pela pessoa. */
+    ultimoPreparoPeloBot?: true;
     /** A ação apaga o quadro: os dois lados terminam sem quadro. */
     semQuadroNoFim?: boolean;
     /** O chat abre um card: a pessoa confirma antes da comparação (as colunas, ou a exclusão do quadro da NOD-430). */
@@ -228,6 +239,20 @@ describeIntegracao("paridade tela × chat do quadro.* (NOD-442, ADR-135)", () =>
       tela: async (_m, q) => ({ metodo: "POST", caminho: `/agentes/${q.anfitriao}/quadro/tarefas/${await q.tarefa("T1")}/terminei`, status: 200 }),
       chat: () => ({ tipo: "terminei", tarefa: "T1" }),
     },
+    // NOD-419: a trava da coluna e o Desfazer de um movimento do histórico.
+    {
+      id: "quadro.travar_coluna",
+      preparar: BASE,
+      tela: async (_m, q) => ({ metodo: "PATCH", caminho: `/agentes/${q.anfitriao}/quadro/colunas/revisao/trava`, corpo: { sai_para: ["feito"], so_pessoa: true }, status: 200 }),
+      chat: () => ({ tipo: "travar_coluna", coluna: "Em revisão", sai_para: ["Feito"], so_pessoa: true }),
+    },
+    {
+      id: "quadro.desfazer_movimento",
+      preparar: (m) => [...BASE(m), [{ tipo: "mudar_tarefa", tarefa: "T2", status: "revisao" }]],
+      ultimoPreparoPeloBot: true,
+      tela: async (_m, q) => ({ metodo: "POST", caminho: `/agentes/${q.anfitriao}/quadro/tarefas/${await q.tarefa("T2")}/movimentos/${await q.ultimoMovimento("T2")}/desfazer`, status: 200 }),
+      chat: (_m, q) => ({ tipo: "desfazer_movimento", tarefa: "T2", movimento: q.movimentoNaSaida("T2") }),
+    },
     // NOD-418: o trabalho da tarefa. O preparo deixa T1 em A fazer com o Caio (o trabalho #1 na fila).
     {
       id: "quadro.repetir_trabalho",
@@ -260,7 +285,20 @@ describeIntegracao("paridade tela × chat do quadro.* (NOD-442, ADR-135)", () =>
     await withRollback(MARLON, async (trx) => {
       trxAtual = trx;
       const m = await montar(trx);
-      for (const ops of c.preparar?.(m) ?? []) for (const anfitriao of [m.tela.agenteId, m.chat.agenteId]) expect((await pessoa(m.d, anfitriao, ops)).data).toMatchObject({ ok: true });
+      const preparo = c.preparar?.(m) ?? [];
+      let saidaDoPreparo: ResultadoGerirQuadro | null = null;
+      for (const [i, ops] of preparo.entries()) {
+        expect((await pessoa(m.d, m.tela.agenteId, ops)).data).toMatchObject({ ok: true });
+        if (c.ultimoPreparoPeloBot && i === preparo.length - 1) {
+          saidaDoPreparo = (await executar(m.d, gerirQuadro, { ...(await turnoDe(m.d, m.gil.agenteId, m.gil.conversaId)), quadro: m.nomeChat, acoes: ops })).data;
+          expect(saidaDoPreparo, JSON.stringify(saidaDoPreparo)).toMatchObject({ ok: true });
+        } else expect((await pessoa(m.d, m.chat.agenteId, ops)).data).toMatchObject({ ok: true });
+      }
+      const movimentoNaSaida = (titulo: string): string => {
+        const id = saidaDoPreparo?.ok ? saidaDoPreparo.quadro?.tarefas.find((t) => t.titulo === titulo)?.movimentos?.[0]?.id : undefined;
+        if (!id) throw new Error(`sem movimento de ${titulo} na saída do gerir_quadro: ${JSON.stringify(saidaDoPreparo)}`);
+        return id;
+      };
       if (c.terminarTrabalhos) await trx`update turnos set estado = 'concluido' where id in (select turno_id from quadro_execucoes where owner_id = ${MARLON.pessoaId})`;
       expect(await estado(m, m.tela.agenteId)).toEqual(await estado(m, m.chat.agenteId));
       for (const destino of c.destinos?.(m) ?? []) expect((await pessoa(m.d, destino, [{ tipo: "criar_quadro", meta: "Lançar login", prazo: "2026-11-06" }])).data).toMatchObject({ ok: true });
@@ -273,6 +311,7 @@ describeIntegracao("paridade tela × chat do quadro.* (NOD-442, ADR-135)", () =>
           return (await m.d.repos.quadros.tarefas(q!.id)).find((t) => t.titulo === titulo)!.id;
         },
         ultimoLote: async () => (await m.d.repos.quadros.ultimoLote((await m.d.repos.quadros.doAgente(m.tela.agenteId))!.id))!.id,
+        ultimoMovimento: (titulo: string) => ultimoMovimento(m, m.tela.agenteId, titulo),
       };
       const t = await c.tela(m, auxiliares);
       const resp = await servidor.chamar(sessao, t.metodo, t.caminho, t.corpo);
@@ -280,7 +319,7 @@ describeIntegracao("paridade tela × chat do quadro.* (NOD-442, ADR-135)", () =>
 
       const quem = m.gil;
       const ctx = await turnoDe(m.d, quem.agenteId, quem.conversaId);
-      const r = await executar(m.d, gerirQuadro, { ...ctx, quadro: m.nomeChat, acoes: [c.chat(m)] });
+      const r = await executar(m.d, gerirQuadro, { ...ctx, quadro: m.nomeChat, acoes: [await c.chat(m, { movimentoNaSaida })] });
       expect(r.data, JSON.stringify(r.data)).toMatchObject({ ok: true });
       if (c.confirmar) {
         if (!r.data.ok || !r.data.proposta_id) throw new Error("sem card");

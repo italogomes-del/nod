@@ -148,6 +148,14 @@ export function rotasQuadro(d: DepsRotas): Rota[] {
     { metodo: "POST", acao: "quadro.terminei", padrao: new RegExp(`^/agentes/${ID}/quadro/tarefas/${TID}/terminei$`), async handler(ctx) {
       ctx.json(200, await executar(ctx.escopo, EXECUTORES_QUADRO["quadro.terminei"], { ...base(ctx.params.id ?? ""), tarefa: ctx.params.tid ?? "" }));
     } },
+    // NOD-419: a trava da coluna e o Desfazer de um movimento.
+    { metodo: "PATCH", acao: "quadro.travar_coluna", padrao: new RegExp(`^/agentes/${ID}/quadro/colunas/${CID}/trava$`), async handler(ctx) {
+      const c = corpoObjeto(await ctx.corpo());
+      ctx.json(200, await executar(ctx.escopo, EXECUTORES_QUADRO["quadro.travar_coluna"], { ...base(ctx.params.id ?? ""), coluna: coluna(ctx.params.cid), sai_para: c.sai_para as string[] | null | undefined, so_pessoa: c.so_pessoa as boolean | undefined }));
+    } },
+    { metodo: "POST", acao: "quadro.desfazer_movimento", padrao: new RegExp(`^/agentes/${ID}/quadro/tarefas/${TID}/movimentos/(?<mid>[^/]+)/desfazer$`), async handler(ctx) {
+      ctx.json(200, await executar(ctx.escopo, EXECUTORES_QUADRO["quadro.desfazer_movimento"], { ...base(ctx.params.id ?? ""), tarefa: ctx.params.tid ?? "", movimento: ctx.params.mid ?? "" }));
+    } },
     { metodo: "POST", acao: "quadro.desfazer", padrao: new RegExp(`^/agentes/${ID}/quadro/lotes/${LID}/desfazer$`), async handler(ctx) {
       ctx.json(200, await executar(ctx.escopo, EXECUTORES_QUADRO["quadro.desfazer"], { ...base(ctx.params.id ?? ""), lote: ctx.params.lid ?? "" }));
     } },

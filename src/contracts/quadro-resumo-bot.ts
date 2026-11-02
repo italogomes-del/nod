@@ -1,4 +1,5 @@
 import type { ExecucaoTarefa, GrupoColuna, IdColuna } from "./quadro.ts";
+import type { MovimentoParaBot } from "./freios-quadro.ts";
 import type { TrabalhoParaBot } from "./quadro-execucoes.ts";
 
 /**
@@ -14,7 +15,7 @@ export type ResumoQuadroParaBot = {
   prazo: string | null;
   cumprida: boolean;
   resumo: string | null;
-  colunas: { id: string; nome: string; grupo: GrupoColuna; passa_para?: string; instrucoes?: string; prazo_min?: number }[];
-  tarefas: { id: string; codigo: string; titulo: string; status: IdColuna; agente: string | null; linear: string | null; pr: string | null; pergunta: string | null; execucao: ExecucaoTarefa; trabalho?: TrabalhoParaBot; prs?: string[] }[];
+  colunas: { id: string; nome: string; grupo: GrupoColuna; passa_para?: string; instrucoes?: string; prazo_min?: number; trava?: string }[];
+  tarefas: { id: string; codigo: string; titulo: string; status: IdColuna; agente: string | null; linear: string | null; pr: string | null; pergunta: string | null; execucao: ExecucaoTarefa; trabalho?: TrabalhoParaBot; prs?: string[]; movimentos?: MovimentoParaBot[] }[];
   avisoGithub?: string; // NOD-421: por que os PRs não aparecem
 };

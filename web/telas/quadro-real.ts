@@ -7,13 +7,14 @@
  * - `pilulaDoQuadro`: a conversa no próprio quadro (passo 9 do protótipo), que fala com o bot anfitrião.
  * Todo texto (título, descrição, pergunta, resposta, meta) é dado e passa por `esc`.
  */
-import type { EntradaHistoricoDto, QuadroDto, TarefaDto } from "../../src/contracts/quadro.ts";
+import type { ColunaDto, EntradaHistoricoDto, QuadroDto, TarefaDto } from "../../src/contracts/quadro.ts";
 import { esc } from "../lib/escape.ts";
 import { NOME_DO_STATUS, type Status } from "../lib/quadro.ts";
 import { comColunas, iconeDaColuna, paradaHa, podeTerPrazo, prazoLegivelMin, inicioDoFimPreso, LIMITE_COLUNAS, type EdicaoDeColuna } from "../lib/colunas.ts";
 import { aposDoCabecalho, botaoDeNova, campoDeRenomear, colunaNova, confirmacaoDeSoltar, folhaDasColunas, menuDeMover, naFolha, type AgenteDaPassagem } from "./colunas-quadro.ts";
 import { RESP_VOCE, atalhosDePrazo, codigoDaTarefa, faltaParaOPrazo, fraseDoPrazo, linhaDoHistorico, opcoesDeStatus, tarefasPorStatus, type Faixa } from "../lib/quadro-dados.ts";
-import { anel, avatar, barra, card, confiar, ICONE, ICONE_DO_STATUS, linha, lista, quadro, seloEmTeste, type Card, type Coluna, type ExtraDaGrade, type Filtro, type Html, type QuemRoda } from "./quadro.ts";
+import { ecoDoAgente, fraseDaTrava, fraseDoMovimento, porqueNaoDesfaz } from "../lib/freios.ts";
+import { anel, avatar, barra, card, confiar, ICONE, ICONE_DO_STATUS, linha, lista, quadro, seloEmTeste, type Aviso, type Card, type Coluna, type ExtraDaGrade, type Filtro, type Html, type QuemRoda } from "./quadro.ts";
 
 /** Quem é o agente de um id (o avatar com o mascote dele e o nome); null = não é um bot da pessoa. */
 export type AgenteDoQuadro = (agenteId: string) => { avatar: Html; nome: string } | null;
@@ -55,9 +56,15 @@ export const prMaisProblematico = (prs: readonly PrDto[]): PrDto =>
   [...prs].sort((a, b) => GRAVIDADE[tomDoPr(a)] - GRAVIDADE[tomDoPr(b)] || b.numero - a.numero)[0]!;
 const horaDaLinha = (ms: number): string => new Date(ms).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
 
-/** A tarefa como card: o responsável (bot ou você), a execução, o motivo do bloqueio e a pergunta para você. */
-export function cardDaTarefa(t: TarefaDto, agente: AgenteDoQuadro, acesa = false, o: { agora?: number; prazoMin?: number; responder?: boolean } = {}): Card {
+/**
+ * A tarefa como card: o responsável (bot ou você), a execução, o motivo do bloqueio e a pergunta para você. NOD-419: `eco`
+ * (com as colunas e a hora) põe na linha 1 o "Ada terminou · Desfazer" do último movimento de um agente; `aviso` (a
+ * recusa da trava, vinda da tela) passa na frente. NOD-420: `responder`, `agora` e `prazoMin` (o "parada há" e o atraso).
+ */
+export function cardDaTarefa(t: TarefaDto, agente: AgenteDoQuadro, acesa = false, o: { eco?: { colunas: readonly { id: string }[]; agora: number }; aviso?: Aviso; agora?: number; prazoMin?: number; responder?: boolean } = {}): Card {
   const resp = t.status === "voce" ? VOCE : t.agenteId ? agente(t.agenteId) : null;
+  const eco = o.eco ? ecoDoAgente(t, o.eco.colunas, o.eco.agora) : null;
+  const av: Aviso | null = o.aviso ?? (eco ? { texto: eco.texto, act: "tarefa-desfazer-movimento", id: eco.movimento } : null);
   // NOD-421 (🧭 da Ada): o PR mais problemático com o ponto do estado, mais "+N"; sem PR ligado, o pr_url do agente, como antes.
   const pior = t.prs?.length ? prMaisProblematico(t.prs) : null;
   const pr = pior ? { texto: `PR #${pior.numero}${t.prs!.length > 1 ? ` +${t.prs!.length - 1}` : ""}`, tom: tomDoPr(pior), titulo: estadoDoPr(pior) } : null;
@@ -73,6 +80,7 @@ export function cardDaTarefa(t: TarefaDto, agente: AgenteDoQuadro, acesa = false
     ...(pr ? { pr } : {}),
     ...(tags.length ? { tags } : {}),
     ...(acesa ? { brilho: true } : {}),
+    ...(av ? { aviso: av } : {}),
     // NOD-420: responder sem abrir a tarefa, e há quanto tempo ela espera (na espera da pessoa ou numa coluna com prazo).
     ...(o.responder && (t.status === "voce" || t.status === "bloqueado") ? { responder: LIMITE_RESPOSTA } : {}),
     ...(o.agora && t.naColunaDesde && (o.prazoMin || t.status === "voce" || t.status === "bloqueado")
@@ -157,7 +165,7 @@ const rotuloDoQuadro = (q: QuadroDto, nome: string): string => (q.meta ? `Quadro
  * NOD-448: as colunas são as do quadro (`q.colunas`), com o cabeçalho que edita, o "+" e as tiras de Feito e Fechado
  * presas à direita (NOD-429). `edicao` é o pedaço aberto (menu, renomear, remover, coluna nova, a folha do celular).
  */
-export function quadroDaMeta(o: { q: QuadroDto; nome: string; agente: AgenteDoQuadro; filtro: Filtro; alternadas: ReadonlySet<string>; acesas: ReadonlySet<string>; edicao?: EdicaoDeColuna | null; agora?: number; editandoMeta?: boolean; agentes?: readonly AgenteDaPassagem[] }): Html {
+export function quadroDaMeta(o: { q: QuadroDto; nome: string; agente: AgenteDoQuadro; filtro: Filtro; alternadas: ReadonlySet<string>; acesas: ReadonlySet<string>; edicao?: EdicaoDeColuna | null; agora?: number; editandoMeta?: boolean; agentes?: readonly AgenteDaPassagem[]; /** NOD-419: a recusa da trava no card que a pessoa soltou. */ avisos?: ReadonlyMap<string, Aviso> }): Html {
   const por = tarefasPorStatus(o.q);
   const ed = o.edicao ?? null;
   const cs = comColunas(o.q).colunas;
@@ -167,7 +175,7 @@ export function quadroDaMeta(o: { q: QuadroDto; nome: string; agente: AgenteDoQu
     const tarefas = (por[c.id] ?? []).filter((t) => passaNoFiltro(t, o.filtro));
     const padrao = c.recolhida && (contagem[c.id] ?? 0) === 0;
     // Renomear ou remover (o popover) abre a coluna, para o campo ter onde ficar.
-    const editando = !naFolha(ed) && (ed?.tipo === "renomear" || ed?.tipo === "remover" || ed?.tipo === "passagem" || ed?.tipo === "soltar" || ed?.tipo === "prazo") && ed.coluna === c.id;
+    const editando = !naFolha(ed) && (ed?.tipo === "renomear" || ed?.tipo === "remover" || ed?.tipo === "passagem" || ed?.tipo === "trava" || ed?.tipo === "soltar" || ed?.tipo === "prazo") && ed.coluna === c.id;
     return { c, tarefas, recolhida: !editando && padrao !== o.alternadas.has(c.id) };
   });
   // O prazo dormente (coluna que passou a "só a pessoa tira daqui") não marca atraso (revisão 4 do PR #624).
@@ -177,7 +185,8 @@ export function quadroDaMeta(o: { q: QuadroDto; nome: string; agente: AgenteDoQu
   const cartoes = (ts: TarefaDto[], estreito: boolean): Card[] => ts.map((t) => {
     const menu = o.agentes && ed?.tipo === "mover" && ed.tarefa === t.id && !!ed.estreito === estreito ? { menu: menuDeMover(cs, t, o.nome) } : {};
     const saindo = ed?.tipo === "soltar" && ed.tarefa === t.id ? { classe: "qd-saindo" } : {};
-    return { ...cardDaTarefa(t, o.agente, o.acesas.has(t.id), { ...(o.agora ? { agora: o.agora } : {}), ...(prazoDe.has(t.status) ? { prazoMin: prazoDe.get(t.status)! } : {}), responder: true }), ...(o.agentes ? { arrastavel: true } : {}), ...menu, ...saindo };
+    const av = o.avisos?.get(t.id);
+    return { ...cardDaTarefa(t, o.agente, o.acesas.has(t.id), { eco: { colunas: cs, agora: o.agora ?? Date.now() }, ...(av ? { aviso: av } : {}), ...(o.agora ? { agora: o.agora } : {}), ...(prazoDe.has(t.status) ? { prazoMin: prazoDe.get(t.status)! } : {}), responder: true }), ...(o.agentes ? { arrastavel: true } : {}), ...menu, ...saindo };
   });
   const solta = (c: (typeof cs)[number]): Html[] => {
     if (ed?.tipo !== "soltar" || ed.coluna !== c.id) return [];
@@ -192,6 +201,7 @@ export function quadroDaMeta(o: { q: QuadroDto; nome: string; agente: AgenteDoQu
     ...(!recolhida ? { apos: aposDoCabecalho(cs, c, ed, contagem[c.id] ?? 0, o.nome, o.agentes) } : {}),
     ...(ed?.tipo === "renomear" && ed.coluna === c.id && !naFolha(ed) ? { cab: campoDeRenomear(c, ed.erro) } : {}),
     ...(i >= preso ? { presa: larguraPresa(cols.length - 1 - i) } : {}),
+    ...(c.trava && fraseDaTrava(cs, c.trava) ? { trava: `Travada: ${fraseDaTrava(cs, c.trava)}` } : {}),
   }));
   const cheio = cs.length >= LIMITE_COLUNAS;
   const extras: ExtraDaGrade[] = [{ html: botaoDeNova(cheio), trilha: "var(--qd-tira)" }];
@@ -262,6 +272,8 @@ export type ExtrasDaTarefa = {
    * solto ("Confirmar · Não iniciar ainda") aparece logo abaixo do Status, antes de mandar a mudança.
    */
   soltar?: string;
+  /** NOD-419: a hora curta do histórico de movimentos. */
+  hora?: (em: number) => string;
 };
 
 const opcao = (valor: string, rotulo: string, marcada: boolean, titulo?: string): string => `<option value="${esc(valor)}"${marcada ? " selected" : ""}${titulo ? ` title="${esc(titulo)}"` : ""}>${esc(rotulo)}</option>`;
@@ -287,6 +299,8 @@ export function tarefaAberta(o: { t: TarefaDto; q: QuadroDto; agente: AgenteDoQu
   const lin = linkSeguro(t.linearUrl);
   const chipPr = pr ? `<a class="qd-chip" href="${esc(pr)}" target="_blank" rel="noopener noreferrer">${esc(numeroDoPr(pr))}</a>` : "";
   const desc = t.descricao.trim() ? `<div class="qd-t-desc">${esc(t.descricao)}</div>` : `<div class="qd-t-desc qd-t-desc-vazia">Sem descrição.</div>`;
+  // Revisão 3 do PR #629: Bloqueado com pergunta (o motivo do agente, do laço ou do freio) também pede resposta, como o
+  // servidor aceita o `responder` ali (paridade, ADR-135).
   const pergunta = t.pergunta && (t.status === "voce" || t.status === "bloqueado")
     ? `<h2 class="qd-t-sec">${t.status === "voce" ? "Precisa de você" : "Bloqueada"}</h2><p class="qd-voce-frase">${esc(t.pergunta)}</p>${formResposta(t)}` : "";
   const resposta = t.resposta ? `<h2 class="qd-t-sec">Sua resposta</h2><p class="qd-t-resposta">${esc(t.resposta)}</p>` : "";
@@ -325,12 +339,31 @@ export function tarefaAberta(o: { t: TarefaDto; q: QuadroDto; agente: AgenteDoQu
       `<button type="button" class="qd-bt" data-act="mover-quadro" data-id="${esc(t.id)}"${escolhido ? "" : " disabled"}>Mover</button></dd>` : "";
   return confiar(`<article class="qd-tarefa qd-com-lado" aria-labelledby="qd-t-tit" data-tarefa="${esc(t.id)}">` +
     `<div class="qd-t-cab"><button type="button" class="qd-voltar" data-act="voltar-ao-quadro">${ICONE.voltar}<span>${esc(o.q.meta ?? "Quadro")}</span></button><span class="qd-t-sep" aria-hidden="true">/</span><span class="qd-id">${esc(codigo)}</span></div>` +
-    `<div class="qd-t-corpo"><div class="qd-t-principal"><h1 class="qd-t-tit" id="qd-t-tit" tabindex="-1">${esc(t.titulo)}</h1><div class="qd-chips">${chipSt}${chipResp}${chipPr}</div>${desc}${pergunta}${resposta}${o.trabalhos ?? ""}${secaoDoHistorico(o.historico)}${linhas}${o.comentarios ?? ""}</div>` +
+    `<div class="qd-t-corpo"><div class="qd-t-principal"><h1 class="qd-t-tit" id="qd-t-tit" tabindex="-1">${esc(t.titulo)}</h1><div class="qd-chips">${chipSt}${chipResp}${chipPr}</div>${desc}${pergunta}${resposta}${o.trabalhos ?? ""}${secaoDoHistorico(o.historico)}${linhas}${historicoDaTarefa(t, comColunas(o.q).colunas, o.hora)}${o.comentarios ?? ""}</div>` +
     `<aside class="qd-lado" aria-label="Detalhes da tarefa"><section class="qd-lado-sec"><h2 class="qd-rotulo">Propriedades</h2><dl class="qd-props">` +
     `<dt><label for="qd-t-status">Status</label></dt><dd>${campoStatus}${soltar ? `<ul class="qd-t-soltar">${confirmacaoDeSoltar(soltar, t.id, t.titulo)}</ul>` : ""}</dd><dt>${rotuloResp}</dt><dd>${campoResp}</dd>` +
     `<dt>Quadro</dt><dd>${esc(o.q.agenteNome)}${o.q.meta ? ` · ${esc(o.q.meta)}` : ""}</dd>${campoMover}` +
     `${t.branch ? `<dt>Branch</dt><dd><code class="qd-branch">${esc(t.branch)}</code></dd>` : ""}</dl></section>` +
     `${entregaveis}${noLinear}</aside></div></article>`);
+}
+
+/**
+ * NOD-419: o histórico discreto da tarefa (recolhido: "› N movimentos"). Uma linha por movimento (quem · de → para ·
+ * hora); o Desfazer só no último, e só se a tarefa ainda está onde ele a deixou (senão, o porquê no title).
+ */
+export function historicoDaTarefa(t: TarefaDto, cs: readonly ColunaDto[], hora: (em: number) => string = (em) => new Date(em).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })): string {
+  const ms = t.movimentos ?? [];
+  if (!ms.length) return "";
+  const linhas = ms.map((m) => {
+    const porque = porqueNaoDesfaz(t, m, cs);
+    const desfeito = m.desfeitoEm !== null;
+    // Revisão 4 do PR #629: o porquê vai também num texto para o leitor de tela (o title só aparece no hover).
+    const bt = !porque ? `<button type="button" class="qd-link qd-hist-desfazer" data-act="tarefa-desfazer-movimento" data-id="${esc(m.id)}">Desfazer</button>` : "";
+    return `<li class="qd-hist-l${desfeito ? " qd-hist-desfeito" : ""}"${porque && !desfeito ? ` title="${esc(porque)}"` : ""}><span>${esc(fraseDoMovimento(m, cs))}</span>` +
+      `<time class="qd-hist-hora" datetime="${esc(new Date(m.criadoEm).toISOString())}">${esc(hora(m.criadoEm))}</time>${desfeito ? `<span class="qd-sr"> (desfeito)</span>` : ""}${porque && !desfeito ? `<span class="qd-sr"> (${esc(porque)})</span>` : ""}${bt}</li>`;
+  }).join("");
+  const n = ms.length === 1 ? "1 movimento" : `${ms.length} movimentos`;
+  return `<details class="qd-hist"><summary class="qd-hist-sum">${esc(n)}</summary><ol class="qd-hist-lista">${linhas}</ol></details>`;
 }
 
 /* ---------- A conversa no quadro: a faixa e a pílula ---------- */

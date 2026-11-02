@@ -123,7 +123,7 @@ describeIntegracao("pedir a qualquer agente para mexer num quadro (NOD-430)", ()
         await recusa([{ tipo: "criar_tarefa", titulo: "X", status: "afazer" }], recusaDoLimite("criar fora de Backlog"));
         await recusa([{ tipo: "criar_tarefa", titulo: "X", agente: m.nomeEng }], recusaDoLimite("atribuir tarefa"));
         await recusa([{ tipo: "mudar_tarefa", tarefa: "Do Eng", status: "feito" }], recusaDoLimite("mexer em tarefa de outro (só na sua)"));
-        await recusa([{ tipo: "mudar_tarefa", tarefa: "Da Ada", excluir: true }], recusaDoLimite("excluir tarefa (para fechar uma duplicada, mude o status para cancelado)"));
+        await recusa([{ tipo: "mudar_tarefa", tarefa: "Da Ada", excluir: true }], recusaDoLimite("excluir tarefa (para fechar uma duplicada, mude o status para cancelado, com o motivo)"));
         await recusa([{ tipo: "mudar_tarefa", tarefa: "Da Ada", agente: m.nomeEng }], recusaDoLimite("atribuir tarefa"));
         await recusa([{ tipo: "editar_quadro", meta: "Outra" }], sujo ? "a meta só muda num turno limpo" : recusaDoLimite("criar ou editar o quadro (meta, prazo)"));
         await recusa([{ tipo: "criar_coluna", nome: "Nova", grupo: "iniciado" }], sujo ? "as colunas só mudam num turno limpo" : "as colunas só mudam a pedido da pessoa");
@@ -140,7 +140,7 @@ describeIntegracao("pedir a qualquer agente para mexer num quadro (NOD-430)", ()
         ok(await m.pela([{ tipo: "criar_tarefa", titulo: "Ideia" }], caso.o));
         ok(await m.pela([{ tipo: "importar_linear", itens: [{ identificador: "ENG-9", titulo: "Ideia do Linear" }] }], caso.o));
         ok(await m.pela([{ tipo: "terminei", tarefa: "Etapa da Ada" }], caso.o));
-        ok(await m.pela([{ tipo: "mudar_tarefa", tarefa: "Da Ada", status: "cancelado" }], caso.o));
+        ok(await m.pela([{ tipo: "mudar_tarefa", tarefa: "Da Ada", status: "cancelado", motivo: "duplicada" }], caso.o));
         const ts = await m.tarefas();
         expect(ts.find((t) => t.titulo === "Ideia")).toMatchObject({ status: "backlog", agenteId: null });
         expect(ts.find((t) => t.titulo === "Ideia do Linear")).toMatchObject({ status: "backlog", agenteId: null, linearId: "ENG-9" });

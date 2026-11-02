@@ -373,7 +373,7 @@ describe("NOD-430: o bot sozinho, quem fez e as candidatas", () => {
     expect(planejar([{ tipo: "criar_tarefa", titulo: "x", agente: "Ze 1" }], n)).toMatchObject({ erro: expect.stringContaining("atribuir") });
     expect(planejar([{ tipo: "mudar_tarefa", tarefa: "Do Ze", status: "feito" }], { ...n, tarefas: [doZe] })).toMatchObject({ erro: expect.stringContaining("só na sua") });
     expect(planejar([{ tipo: "mudar_tarefa", tarefa: "Minha", excluir: true }], { ...n, tarefas: [minha] })).toMatchObject({ erro: expect.stringContaining("cancelado") });
-    expect("erro" in planejar([{ tipo: "mudar_tarefa", tarefa: "Minha", status: "cancelado" }], { ...n, tarefas: [minha] })).toBe(false);
+    expect("erro" in planejar([{ tipo: "mudar_tarefa", tarefa: "Minha", status: "cancelado", motivo: "duplicada" }], { ...n, tarefas: [minha] })).toBe(false);
     // Total (a pedido da pessoa): o mesmo lote passa.
     expect("erro" in planejar([{ tipo: "mudar_tarefa", tarefa: "Do Ze", status: "feito" }], { autor: ADA.id, limite: "total", tarefas: [doZe] })).toBe(false);
   });

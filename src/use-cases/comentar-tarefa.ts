@@ -1,10 +1,12 @@
 import type { RuntimeEvent } from "../contracts/evento.ts";
+import type { NovoMovimento } from "../contracts/freios-quadro.ts";
 import type { OpQuadro } from "../contracts/quadro.ts";
 import { entradaDoComentario, mencionados, quemAcionar } from "../domain/comentarios-quadro.ts";
 import { colunasDe, papelDe } from "../domain/colunas.ts";
+import { LIMITE_ACIONAMENTOS_HORA } from "../domain/freios-quadro.ts";
 import { podeRepassar, proximaProfundidade } from "../domain/profundidade.ts";
 import { andando, quemFez, resolverTarefa } from "../domain/quadro.ts";
-import { abrirTurno, acharQuadro, agentesDaPessoa, codigosAntigosDaqui, falhaDoAchado, pedidoDaPessoa, type Comecou, eventoQuadro, experimentoLigado, montarQuadro, paraAgenteDoQuadro, type PedidoLote, type ResultadoLote } from "./quadro.ts";
+import { abrirTurno, acharQuadro, agentesDaPessoa, avisarComVoce, avisoDoFreio, codigosAntigosDaqui, falhaDoAchado, pedidoDaPessoa, type Comecou, eventoQuadro, experimentoLigado, montarQuadro, paraAgenteDoQuadro, type PedidoLote, type ResultadoLote } from "./quadro.ts";
 import type { ComentarioDto } from "../contracts/quadro.ts";
 import type { AtividadeTarefa } from "../contracts/quadro-pela-conversa.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
@@ -20,6 +22,11 @@ import type { CasoDeUso, Deps } from "./tipos.ts";
  * Texto de bot é dado de fora (ADR-047/062): o comentário fica `deFora` e o turno que ele abre nasce contaminado. A tarefa
  * só fica `deFora` (pegajoso) quando o bot comentou de um turno não confiável, como o mudar_tarefa: o comentário limpo de
  * um bot não contamina para sempre os turnos do responsável. Não é lote: não entra no Desfazer.
+ *
+ * Freio (revisão do PR #629, ADR-142): cada bot acionado (turno aberto ou juntado) grava um movimento `acionou`, e o
+ * comentário de BOT numa tarefa que já passou de LIMITE_ACIONAMENTOS_HORA acionamentos na hora não aciona ninguém (e o que
+ * chega perto aciona só até o limite; revisão 5): fica gravado, com um movimento `freio` na mesma coluna (sem ir para
+ * Bloqueado, porque comentário não move a tarefa). O comentário da pessoa sempre aciona (é ela respondendo), mas conta. O pedir_a_bot com a tarefa passa por aqui.
  */
 
 type Comentar = Extract<OpQuadro, { tipo: "comentar" }>;
@@ -76,11 +83,23 @@ export async function comentarTarefa(deps: Deps, p: PedidoLote, op: Comentar, ex
   const contaminar = deBot || tarefa.deFora || p.origemConfiavel === false;
   // No limite da corrente (ADR-063) o comentário fica gravado e ninguém é acionado: dois bots não se mencionam sem fim.
   const podeAcionar = podeRepassar(p.profundidade ?? 0);
+  // A conta é do banco (o mesmo relógio que grava `criado_em`), como no lote, e roda sob a trava do quadro (buscarTravado
+  // acima, a mesma ordem do lote) até gravar os movimentos: dois comentários no limite não acionam os dois (revisão 2 do
+  // PR #629, tests/concurrency/freios-corrida.test.ts).
+  // Revisão 5 do PR #629: o comentário de bot aciona no máximo o que falta até o limite na hora; os alvos além dele ficam
+  // sem acionar, com o movimento `freio` registrado (como o comentário que já chega passado o freio).
+  const vaga = podeAcionar && deBot && alvos.length > 0 ? Math.max(0, LIMITE_ACIONAMENTOS_HORA - ((await repo.acionamentosNaHora(q.id)).get(tarefa.id) ?? 0)) : alvos.length;
+  const acionaveis = podeAcionar ? alvos.slice(0, vaga) : [];
+  const excedentes = podeAcionar ? alvos.length - acionaveis.length : 0;
+  const freado = excedentes > 0;
+  // Revisão 3 do PR #629: no `acionou` do comentário, `agenteDepois` é o bot acionado (o responsável ou o mencionado): o
+  // histórico diz "acionou X pelo comentário". Não muda a mão da tarefa (mudouATarefa ignora o `acionou`).
+  const mov = (tipo: "acionou" | "freio", motivo: string | null, acionado: string | null = tarefa.agenteId): NovoMovimento => ({ tarefaId: tarefa.id, tipo, de: tarefa.status, para: tarefa.status, agenteAntes: tarefa.agenteId, agenteDepois: acionado, autor: p.autor, motivo, acionou: tipo === "acionou" });
   const comecaram: Comecou[] = [];
   const events: RuntimeEvent[] = [];
   const turnos: string[] = [];
   let juntados = 0;
-  for (const id of podeAcionar ? alvos : []) {
+  for (const id of acionaveis) {
     const agente = porId.get(id);
     if (!agente) continue;
     const responsavel = id === tarefa.agenteId;
@@ -112,13 +131,22 @@ export async function comentarTarefa(deps: Deps, p: PedidoLote, op: Comentar, ex
     }
   }
   await deps.repos.quadroComentarios.registrarTurnos(comentario.id, turnos);
+  const motivoDoFreio = `Freio: o responsável foi acionado mais de ${LIMITE_ACIONAMENTOS_HORA} vezes na última hora nesta tarefa. O comentário ficou gravado sem acionar ninguém; a pessoa responde para seguir.`;
+  await repo.inserirMovimentos(q.id, null, [...comecaram.map((c) => mov("acionou", null, c.agenteId)), ...(freado ? [mov("freio", motivoDoFreio)] : [])]);
+  // Revisão 7 do PR #629: o freio do comentário também avisa na conversa do responsável (ou de quem comentou), como o do
+  // lote; o texto é do sistema e o título sai se a tarefa ou o turno são de fora. Um aviso por tarefa e hora (o idEnvio).
+  const daConversa = tarefa.agenteId ?? autorBot;
+  if (freado && daConversa) {
+    const ev = await avisarComVoce(deps, tarefa, autorBot ?? daConversa, avisoDoFreio(tarefa, { tipo: "freio", motivo: motivoDoFreio }, p.origemConfiavel === false, false), daConversa, `quadro-freio-comentario:${tarefa.id}:${Math.floor(deps.agora() / 3_600_000)}`);
+    if (ev) events.push(ev);
+  }
   events.unshift(eventoQuadro(deps, p, q, null, [tarefa.id]));
   const seguradas = podeAcionar ? 0 : alvos.length;
   const parado = tarefa.agenteId && !responsavelAnda && tarefa.agenteId !== autorBot && !alvos.includes(tarefa.agenteId)
     ? { agenteNome: porId.get(tarefa.agenteId)?.nome ?? "o responsável", coluna: colunas.find((c) => c.id === tarefa.status)?.nome ?? tarefa.status }
     : null;
   return {
-    data: { ok: true, quadro: await montarQuadro(deps, q), lote: null, comecaram, desfeito: false, comentario, ...(juntados ? { juntados } : {}), ...(seguradas ? { seguradas } : {}), ...(parado ? { responsavelForaDoAndamento: parado } : {}) },
+    data: { ok: true, quadro: await montarQuadro(deps, q), lote: null, comecaram, desfeito: false, comentario, ...(juntados ? { juntados } : {}), ...(seguradas ? { seguradas } : {}), ...(freado ? { freados: excedentes } : {}), ...(parado ? { responsavelForaDoAndamento: parado } : {}) },
     events,
   };
 }

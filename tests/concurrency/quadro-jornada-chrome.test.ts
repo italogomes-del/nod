@@ -91,6 +91,8 @@ window.__mudouLa = () => {
   q = { ...q, tarefas: q.tarefas.map((t) => t.id === "t1" ? { ...t, status: "revisao", mudadoEm: agora + 5 } : t) };
   window.__q.aoFrame({ streamId: "s", seq: 3, pessoaId: "p", tipo: "quadro.mudou", dados: { quadroId: "q1", agenteId: "a", loteId: "L2", tarefas: "t1" } });
 };
+/** NOD-419: Em revisão só sai para Feito, e a tela tem os agentes (o "Mover para…" do card). */
+window.__comTrava = () => { q = { ...q, colunas: colunasDto(COLUNAS_PADRAO).map((c) => c.id === "revisao" ? { ...c, trava: { saiPara: ["feito"] } } : { ...c }) }; };
 /** NOD-417: Fazendo com responsável (o Caio): mover para lá pede confirmação. */
 window.__comPassagem = () => {
   q = { ...q, colunas: colunasDto(COLUNAS_PADRAO).map((c) => c.id === "fazendo" ? { ...c, responsavel: "c", responsavelNome: "Caio" } : { ...c }) };
@@ -426,4 +428,23 @@ descrever("NOD-442 no Chrome real", () => {
     const col = await avaliar<string>(cdp, `document.querySelector('#quadro .qd-so-largo [data-id="t1"]').closest(".qd-col").textContent`);
     expect(col).toContain("Em revisão");
   });
+
+  it("revisão 2 do PR #629 (a11y): a recusa da trava não some com o foco nela; o Esc a tira e o foco volta ao card", async () => {
+    await abrir(1440, true);
+    await avaliar(cdp, "window.__comTrava()");
+    await avaliar(cdp, `window.__q.aoFrame({ streamId: "s", seq: 9, pessoaId: "p", tipo: "quadro.mudou", dados: { quadroId: "q1", agenteId: "a", loteId: "L9", tarefas: "t3" } })`);
+    await ate(`document.querySelector('#quadro .qd-so-largo .qd-col-trava')`);
+    await avaliar(cdp, `document.querySelector('#quadro .qd-so-largo [data-act="tarefa-mover"][data-tarefa="t3"]').click()`);
+    await ate(`document.querySelector('#quadro [data-act="tarefa-mover-para"][data-coluna="fazendo"]')`);
+    await avaliar(cdp, `document.querySelector('#quadro [data-act="tarefa-mover-para"][data-coluna="fazendo"]').click()`);
+    await ate(`document.activeElement?.matches('[data-act="tarefa-mandar"][data-id="t3"]')`);
+    // Mais que os 8 s da recusa: com o foco no "Mandar para…", ela fica.
+    await esperar(9000);
+    expect(await avaliar<boolean>(cdp, `!!document.querySelector('#quadro .qd-so-largo [data-act="tarefa-mandar"][data-id="t3"]')`)).toBe(true);
+    expect(await avaliar<boolean>(cdp, `document.activeElement?.matches('[data-act="tarefa-mandar"]') ?? false`)).toBe(true);
+    await avaliar(cdp, `document.activeElement.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
+    await ate(`!document.querySelector('#quadro [data-act="tarefa-mandar"]')`);
+    expect(await avaliar<boolean>(cdp, `document.activeElement?.matches('#quadro .qd-so-largo [data-act="abrir-tarefa"][data-id="t3"]') ?? false`)).toBe(true);
+    expect(await avaliar(cdp, "window.__chamadas.filter((c) => c[0] === 'mudar')")).toEqual([]);
+  }, 30_000);
 });

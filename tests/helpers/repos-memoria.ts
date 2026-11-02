@@ -3882,6 +3882,16 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       ultimoLote: async () => null,
       mudouDeQuadroDepois: async () => false,
       marcarDesfeito: soNoPostgres,
+      // NOD-419 (0140): o histórico de movimentos é do Postgres (tests/integration/freios-quadro.test.ts); aqui some.
+      movimentos: async () => [],
+      acionamentosNaHora: async () => new Map(),
+      ultimosDesfaziveis: async () => [],
+      entradasNaEspera: async () => [],
+      ultimosMovimentos: async () => [],
+      inserirMovimentos: async () => {},
+      marcarMovimentosDesfeitos: async () => {},
+      desfazerMovimentosDoLote: async () => {},
+      paradasVivasDoLote: async () => [],
       // NOD-420: as marcas do aviso são do gatilho da 0141 (tests/integration/quadro.test.ts e tests/concurrency/quadro-avisos-corrida.test.ts).
       marcasDeAviso: async () => new Map(),
       marcarAviso: soNoPostgres,
@@ -3910,7 +3920,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
     },
     // NOD-417 (0138): os comentários das tarefas são do Postgres (tests/integration/quadro-comentarios.test.ts).
     quadroComentarios: {
-      inserir: soNoPostgres,
+      inserir: soNoPostgres, // a recusa (nao_e_comigo) grava o motivo aqui: só no Postgres
       registrarTurnos: async () => {},
       daTarefa: async () => [],
       temDeOutroNoQuadro: async () => false,

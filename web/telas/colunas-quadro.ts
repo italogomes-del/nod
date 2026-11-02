@@ -10,7 +10,8 @@
  */
 import type { ColunaDto, GrupoColuna, TarefaDto } from "../../src/contracts/quadro.ts";
 import { esc } from "../lib/escape.ts";
-import { aceitaPassagem, acionaNaColuna, podeTerPrazo, prazoLegivelMin, prazoNoPopover, LIMITE_COLUNAS, LIMITE_INSTRUCOES, LIMITE_NOME_COLUNA, destinosAoRemover, FRASE_DO_GRUPO, fraseDaColuna, GRUPOS, iconeDaColuna, NOME_DO_GRUPO, passoDeMover, porqueNaoRecebeCard, porqueNaoRemove, type EdicaoDeColuna } from "../lib/colunas.ts";
+import { aceitaPassagem, acionaNaColuna, colunaDeEspera, podeTerPrazo, prazoLegivelMin, prazoNoPopover, LIMITE_COLUNAS, LIMITE_INSTRUCOES, LIMITE_NOME_COLUNA, destinosAoRemover, FRASE_DO_GRUPO, fraseDaColuna, GRUPOS, iconeDaColuna, NOME_DO_GRUPO, passoDeMover, porqueNaoRecebeCard, porqueNaoRemove, type EdicaoDeColuna } from "../lib/colunas.ts";
+import { fraseDaTrava } from "../lib/freios.ts";
 import { confiar, ICONE, ICONE_DO_STATUS, type Html } from "./quadro.ts";
 
 const ICONE_DO_GRUPO: Readonly<Record<GrupoColuna, Html>> = {
@@ -44,9 +45,36 @@ export function menuDaColuna(cs: readonly ColunaDto[], c: ColunaDto, nomeDoBot: 
     item({ act: "col-direita", coluna: c.id, rotulo: "Mover para a direita", tecla: "Alt →", porque: dir.ok ? null : dir.porque }) +
     item({ act: "col-nova", coluna: c.id, grupo: c.grupo, rotulo: "Adicionar coluna à direita", porque: cheio }) +
     (podeTerPrazo(c) ? item({ act: "col-prazo", coluna: c.id, rotulo: c.prazoMin ? `Prazo: ${prazoLegivelMin(c.prazoMin)}` : "Definir prazo" }) : "") +
-    `<hr class="qd-menu-sep">` +
+    (itensDaTrava(cs, c) ? `<hr class="qd-menu-sep">` + itensDaTrava(cs, c) : "") + `<hr class="qd-menu-sep">` +
     item({ act: "col-remover", coluna: c.id, rotulo: "Remover coluna", porque: naoSai, perigo: true }) +
     `</div>`);
+}
+
+/**
+ * NOD-419: as travas no menu da coluna. "Só sai para…" abre o popover dos destinos; "Só a pessoa tira daqui" liga e
+ * desliga na hora (um lote com Desfazer). Precisa de você e Bloqueado são saída sempre, então não entram na lista.
+ */
+function itensDaTrava(cs: readonly ColunaDto[], c: ColunaDto): string {
+  // Revisão 2 do PR #629: A fazer não leva trava (travarColuna recusa; a saída dela é o começo). Os itens voltam só para
+  // tirar uma trava que já esteja lá. Revisão 3: a coluna é a de colunaDeEspera, como no servidor (sem A fazer, a
+  // primeira de Não iniciado).
+  if (c.id === colunaDeEspera(cs) && !c.trava) return "";
+  const destinos = fraseDaTrava(cs, c.trava?.saiPara?.length ? { saiPara: c.trava.saiPara } : undefined);
+  const so = c.trava?.soPessoa === true;
+  return `<button type="button" role="menuitem" class="qd-menu-it" data-act="col-trava" data-coluna="${esc(c.id)}"><span>${ICONE.trava}${esc(destinos ? destinos.replace(/^só/, "Só") : "Só sai para…")}</span></button>` +
+    `<button type="button" role="menuitemcheckbox" aria-checked="${so}" class="qd-menu-it" data-act="col-trava-pessoa" data-coluna="${esc(c.id)}"><span>${so ? "✓ " : ""}Só a pessoa tira daqui</span></button>`;
+}
+
+/** NOD-419: o popover do "Só sai para…": as colunas para onde a tarefa pode sair daqui (nenhuma marcada = sem trava). */
+export function popoverDeTrava(cs: readonly ColunaDto[], c: ColunaDto): Html {
+  const marcadas = new Set(c.trava?.saiPara ?? []);
+  const ops = cs.filter((x) => x.id !== c.id && x.id !== "voce" && x.id !== "bloqueado").map((x) =>
+    `<label class="qd-pas-op"><input type="checkbox" name="sai_para" value="${esc(x.id)}"${marcadas.has(x.id) ? " checked" : ""}><span>${esc(x.nome)}</span></label>`).join("");
+  return confiar(`<div class="qd-pop qd-pop-trava" role="dialog" aria-labelledby="qd-trv-tit">` +
+    `<form data-form="col-trava" data-coluna="${esc(c.id)}"><p class="qd-pop-tit" id="qd-trv-tit">De <b>${esc(c.nome)}</b> a tarefa só sai para</p>` +
+    `<fieldset class="qd-pas-modos"><legend class="qd-sr">Destinos</legend>${ops}</fieldset>` +
+    `<p class="qd-dica">Nenhuma marcada: sai para qualquer coluna. Precisa de você e Bloqueado valem sempre.</p>` +
+    `<div class="qd-pop-bts"><button type="button" class="qd-bt" data-act="col-fechar">Cancelar</button><button type="submit" class="qd-bt qd-bt-pri">Salvar</button></div></form></div>`);
 }
 
 /** Remover coluna com tarefas: para onde elas vão. Mudar de coluna aqui não aciona ninguém (decisão 4). */
@@ -151,6 +179,7 @@ export function aposDoCabecalho(cs: readonly ColunaDto[], c: ColunaDto, ed: Edic
   const dentro = menuAberto ? menuDaColuna(cs, c, nomeDoBot)
     : ed?.tipo === "remover" && ed.coluna === c.id && !naFolha(ed) ? popoverDeRemover(cs, c, n)
       : passaAberta && agentes ? popoverDePassagem(c, agentes)
+        : ed?.tipo === "trava" && ed.coluna === c.id ? popoverDeTrava(cs, c)
         : ed?.tipo === "prazo" && ed.coluna === c.id && !naFolha(ed) ? popoverDePrazo(c, ed.erro) : "";
   return confiar(passa + bt + dentro);
 }

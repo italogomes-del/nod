@@ -18,7 +18,8 @@ import type { EntradaHistoricoDto, GrupoColuna, QuadroDaPessoaDto, QuadroDto, Ta
 import type { ConversaDto, RespostaMutacao } from "../../src/contracts/api.ts";
 import type { MutacaoQuadro } from "./api.ts";
 import { RESP_VOCE, acesos, fraseDoErroDoMover, reciboDaNovaTarefa, codigoNaUrl, destinosDaTarefa, historicoDaFaixa, respostaDoBot, tarefaNoQuadro, type Faixa } from "./quadro-dados.ts";
-import { quadroVazio, type Filtro, type Html } from "../telas/quadro.ts";
+import { quadroVazio, type Aviso, type Filtro, type Html } from "../telas/quadro.ts";
+import { decidirSoltura, fraseDaTrava, RECUSA_MS, relogioDaRecusa, type RelogioDaRecusa } from "./freios.ts";
 import { faixaDoQuadro, pilulaDoQuadro, quadroCarregando, quadroComErro, quadroDaMeta, semQuadro, tarefaAberta, type AgenteDoQuadro, type TrocaDaFaixa } from "../telas/quadro-real.ts";
 import { criarComentariosNaTela, type ApiDosComentarios } from "./comentarios-na-tela.ts";
 import { criarTrabalhosDaTarefa, type ApiDosTrabalhos } from "./trabalhos-da-tarefa.ts";
@@ -46,6 +47,9 @@ export interface ApiDoQuadro extends ApiDosComentarios, ApiDosTrabalhos {
   /** NOD-416 (ADR-144): criar (cai no Backlog), mudar status e responsável, mudar de quadro, o histórico e os quadros. */
   criarTarefa?(agenteId: string, campos: { titulo: string }): Promise<MutacaoQuadro>;
   mudarTarefa?(agenteId: string, tarefaId: string, campos: { status?: string; agente?: string | null; sem_iniciar?: boolean }): Promise<MutacaoQuadro>;
+  /** NOD-419: a trava da coluna e o Desfazer de um movimento (o eco do agente e o histórico da tarefa). */
+  travarColuna?(agenteId: string, coluna: string, t: { sai_para?: string[] | null; so_pessoa?: boolean }): Promise<MutacaoQuadro>;
+  desfazerMovimento?(agenteId: string, tarefaId: string, movimentoId: string): Promise<MutacaoQuadro>;
   moverTarefa?(agenteId: string, tarefaId: string, quadro: string): Promise<MutacaoQuadro & { movida?: { codigo: string; codigoAntigo: string } }>;
   historicoTarefa?(agenteId: string, tarefaId: string): Promise<{ historico: EntradaHistoricoDto[] }>;
   quadros?(): Promise<{ quadros: QuadroDaPessoaDto[] }>;
@@ -144,10 +148,17 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
   let editandoMeta = false;
   /** NOD-448: o pedaço da edição das colunas que está aberto (menu, renomear, remover, coluna nova, a folha do celular). */
   let edicao: EdicaoDeColuna | null = null;
+  /**
+   * NOD-419: a recusa da trava no card que a pessoa soltou. Some sozinha (sem a pessoa no card), no Esc ou no próximo
+   * gesto; ao sumir com o foco nela, o foco volta ao card.
+   */
+  let recusa: { tarefa: string; destino: string; aviso: Aviso } | null = null;
+  let relogio: RelogioDaRecusa | null = null;
   /** NOD-416: o histórico da tarefa aberta (null = carregando), os quadros do "Mover para…" e o link que espera o quadro. */
   let histTarefa: EntradaHistoricoDto[] | null = null;
   let quadros: QuadroDaPessoaDto[] | null = null;
   let leituraHist = 0;
+  /** NOD-430: a tarefa pedida pelo código num chat (`nod-tarefa:`): abre quando a conversa do dono dela estiver na tela. */
   let pendente: { agenteId: string; tarefaId: string } | null = null;
   /** QA do PR #623 (D4): o aviso do mover, dito no quadro destino quando a tarefa movida abre lá. */
   let avisoDoMover: string | null = null;
@@ -190,10 +201,10 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
       const trabalhos = trabs.html(t.id, { bloqueada: t.status === "bloqueado" || (t.status === "voce" && t.voltarPara !== null && t.voltarPara !== t.status), agenteId: t.agenteId, conversaAtual: chave, hora: dd.hora });
       const resp = dd.agentes?.();
       const soltar = soltarNaAberta?.tarefa === t.id ? { soltar: soltarNaAberta.coluna } : {};
-      return tarefaAberta({ t, q, agente: dd.agente, comentarios: coms.html(t.id, dd.agente, dd.hora), historico: dd.api()?.historicoTarefa ? histTarefa : undefined, ...(resp ? { responsaveis: resp } : {}), ...(quadros ? { destinos: destinosDaTarefa(quadros, q.id), moverPara } : {}), ...soltar, ...(trabalhos !== undefined ? { trabalhos } : {}) });
+      return tarefaAberta({ t, q, agente: dd.agente, comentarios: coms.html(t.id, dd.agente, dd.hora), hora: dd.hora, historico: dd.api()?.historicoTarefa ? histTarefa : undefined, ...(resp ? { responsaveis: resp } : {}), ...(quadros ? { destinos: destinosDaTarefa(quadros, q.id), moverPara } : {}), ...soltar, ...(trabalhos !== undefined ? { trabalhos } : {}) });
     }
     const agentes = dd.agentes && dd.api()?.definirPassagem ? dd.agentes() : undefined;
-    return quadroDaMeta({ q, nome, agente: dd.agente, filtro, alternadas, acesas, edicao, agora: Date.now(), editandoMeta, ...(agentes ? { agentes } : {}) });
+    return quadroDaMeta({ q, nome, agente: dd.agente, filtro, alternadas, acesas, edicao, agora: Date.now(), editandoMeta, ...(agentes ? { agentes } : {}), ...(recusa ? { avisos: new Map([[recusa.tarefa, recusa.aviso]]) } : {}) });
   }
 
   /**
@@ -638,7 +649,7 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     if (foco) { visivel(v, foco)?.focus(); return; }
     const alvo = ed?.tipo === "renomear" ? "#qd-col-in" : ed?.tipo === "nova" ? ".qd-col-nova-f input[name=nome]" : ed?.tipo === "remover" ? "#qd-col-destino"
       : ed?.tipo === "menu" || ed?.tipo === "mover" ? '#qd-menu [role="menuitem"]:not([aria-disabled])' : ed?.tipo === "ordem" ? ".qd-folha-tit"
-      : ed?.tipo === "passagem" ? ".qd-pop-passa input[name=modo]:checked" : ed?.tipo === "soltar" ? '.qd-soltar [data-act="col-soltar"]'
+      : ed?.tipo === "passagem" ? ".qd-pop-passa input[name=modo]:checked" : ed?.tipo === "trava" ? ".qd-pop-trava input[name=sai_para]" : ed?.tipo === "soltar" ? '.qd-soltar [data-act="col-soltar"]'
       : ed?.tipo === "prazo" ? "#qd-prz-valor" : null;
     const el = alvo ? visivel(v, alvo) : null;
     if (ed?.tipo === "ordem" && el) el.tabIndex = -1;
@@ -788,6 +799,15 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
       const quem = agente ? dd?.agentes?.().find((x) => x.id === agente)?.nome ?? "o agente" : null;
       const recibo = quem ? `${c.nome} passa para ${quem}` : agente === (c.responsavel ?? null) ? `${c.nome}: etapa descrita` : `${c.nome} sem passagem`;
       void mexer((a, de) => a.definirPassagem?.(de, id, { agente, instrucoes }), recibo, `.qd-so-largo [data-act="col-passagem"][data-coluna="${CSS.escape(id)}"]`);
+    } else if (qual === "col-trava") {
+      const id = form.dataset["coluna"] ?? "";
+      const c = colunaDe(id);
+      if (!c) { editar(null); return; }
+      const sai = [...form.querySelectorAll<HTMLInputElement>("input[name=sai_para]:checked")].map((x) => x.value);
+      const antes = c.trava?.saiPara ?? [];
+      if (sai.length === antes.length && sai.every((x) => antes.includes(x))) { fechar(); return; }
+      const frase = fraseDaTrava(q.colunas, sai.length ? { saiPara: sai } : undefined);
+      void mexer((a, de) => a.travarColuna?.(de, id, { sai_para: sai.length ? sai : null }), frase ? `De ${c.nome} ${frase}` : `${c.nome} sem trava de destino`, `.qd-so-largo [data-act="col-menu"][data-coluna="${CSS.escape(id)}"]`);
     } else if (qual === "col-prazo") {
       const id = form.dataset["coluna"] ?? "";
       const c = colunaDe(id);
@@ -1058,7 +1078,7 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     if (histAberto && alvo?.closest?.("#quadro .qd-conteudo")) { histAberto = false; desenharFaixa(); }
     if (engolirClique) { engolirClique = false; ev.preventDefault(); ev.stopPropagation(); return; }
     // NOD-448: clicar fora do menu ou do popover fecha (a coluna nova e a folha fecham pelo Cancelar, Pronto ou Esc).
-    const solta = edicao?.tipo === "menu" || edicao?.tipo === "passagem" || edicao?.tipo === "soltar" || edicao?.tipo === "mover" || (edicao?.tipo === "remover" && !edicao.naFolha);
+    const solta = edicao?.tipo === "menu" || edicao?.tipo === "passagem" || edicao?.tipo === "trava" || edicao?.tipo === "soltar" || edicao?.tipo === "mover" || (edicao?.tipo === "remover" && !edicao.naFolha);
     if (solta && alvo?.closest?.("#quadro") && !alvo.closest(".qd-menu, .qd-pop, .qd-col-mais, .qd-col-passa, .qd-soltar, .qd-card-mover")) { edicao = null; desenharVista(); }
     if (soltarNaAberta && alvo?.closest?.("#quadro") && !alvo.closest(".qd-t-soltar, #qd-t-status")) desistirDoSoltarNaAberta();
     const el = alvo?.closest?.<HTMLElement>("[data-act]");
@@ -1079,6 +1099,8 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
       if (act === "editar-meta") { editarMeta(true); return; }
       if (act === "remover-quadro") { void removerQuadro(); return; }
       if (act === "qc-desfazer" && id) { void desfazer(id); return; }
+      if (act === "tarefa-desfazer-movimento" && id) { desfazerMovimento(id); return; }
+      if (act === "tarefa-mandar" && id) { const r = recusa; tirarRecusa(); const c = r?.tarefa === id ? colunaDe(r.destino) : null; if (c) pessoaSolta(id, c); return; }
       if (act === "qc-historico") {
         histAberto = !histAberto;
         if (timerRecolher && histAberto) { clearTimeout(timerRecolher); timerRecolher = null; }
@@ -1130,8 +1152,58 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     if (el.getAttribute("aria-disabled") === "true") { const porque = el.getAttribute("title"); if (porque) mudarFaixa({ tipo: "erro", texto: porque }); return; }
     const c = colunaDe(el.dataset["coluna"]);
     if (!c) return;
-    if (pedeConfirmacao(c)) { editar({ tipo: "soltar", coluna: c.id, tarefa }); return; }
+    pessoaSolta(tarefa, c);
+  }
+
+  /**
+   * A pessoa solta a tarefa numa coluna (o arrasto ou o "Mover para…"). A trava recusa no próprio card, com o "Mandar
+   * para…"; coluna com responsável pede a confirmação discreta da 417; as outras movem direto.
+   */
+  function pessoaSolta(tarefa: string, c: NonNullable<ReturnType<typeof colunaDe>>): void {
+    const t = q?.tarefas.find((x) => x.id === tarefa);
+    const r = decidirSoltura(q?.colunas ?? [], t, c);
+    if (r.tipo === "recusa") {
+      tirarRecusa();
+      recusa = { tarefa, destino: r.destino.id, aviso: { texto: r.texto, acao: `Mandar para ${r.destino.nome}`, recusa: true, act: "tarefa-mandar", id: tarefa } };
+      relogio = relogioDaRecusa(RECUSA_MS, () => { relogio = null; sairDaRecusa(); }, () => naRecusa(doc.activeElement) || !!cardDaRecusa()?.matches(":hover"));
+      edicao = null;
+      desenharVista();
+      visivel(vista() ?? doc, `[data-act="tarefa-mandar"][data-id="${CSS.escape(tarefa)}"]`)?.focus();
+      return;
+    }
+    tirarRecusa();
+    if (r.tipo === "confirmar") { editar({ tipo: "soltar", coluna: c.id, tarefa }); return; }
     moverTarefa(tarefa, c.id, false);
+  }
+
+  function tirarRecusa(): void {
+    relogio?.parar();
+    relogio = null;
+    recusa = null;
+  }
+
+  /** O card que tem a recusa, se o elemento está nele. */
+  const naRecusa = (alvo: EventTarget | null): boolean =>
+    !!recusa && !!(alvo as Element | null)?.closest?.(`#quadro li[data-tarefa="${CSS.escape(recusa.tarefa)}"].qd-com-aviso`);
+  const cardDaRecusa = (): Element | null =>
+    recusa ? visivel(vista() ?? doc, `li[data-tarefa="${CSS.escape(recusa.tarefa)}"].qd-com-aviso`) : null;
+
+  /** A recusa sai (o tempo ou o Esc). Se o foco estava nela (ou caiu no vazio), volta ao card, não ao começo da página. */
+  function sairDaRecusa(): void {
+    const tarefa = recusa?.tarefa;
+    const ativo = doc.activeElement;
+    const tinhaFoco = naRecusa(ativo) || !ativo || ativo === doc.body;
+    tirarRecusa();
+    desenharVista();
+    if (tarefa && tinhaFoco) visivel(vista() ?? doc, `[data-act="abrir-tarefa"][data-id="${CSS.escape(tarefa)}"]`)?.focus();
+  }
+
+  /** O Desfazer de um movimento (o eco do agente no card, ou o último do histórico da tarefa aberta). */
+  function desfazerMovimento(movimento: string): void {
+    const t = q?.tarefas.find((x) => x.movimentos?.some((m) => m.id === movimento));
+    const m = t?.movimentos?.find((x) => x.id === movimento);
+    if (!t || !m) return;
+    void mexer((a, de) => a.desfazerMovimento?.(de, t.id, movimento), `${t.titulo} voltou para ${colunaDe(m.de)?.nome ?? m.de}`);
   }
 
   function aoClicarColuna(el: HTMLElement, act: string): void {
@@ -1152,6 +1224,14 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
       return;
     }
     if (act === "col-remover") { pedirRemover(id, el); return; }
+    if (act === "col-trava") { editar(edicao?.tipo === "trava" && edicao.coluna === id ? null : { tipo: "trava", coluna: id }); return; }
+    if (act === "col-trava-pessoa") {
+      const c = colunaDe(id);
+      if (!c) return;
+      const so = c.trava?.soPessoa !== true;
+      void mexer((a, de) => a.travarColuna?.(de, id, { so_pessoa: so }), so ? `De ${c.nome} só você tira a tarefa` : `${c.nome}: o agente também tira a tarefa`);
+      return;
+    }
     if (act === "col-prazo") { editar({ tipo: "prazo", coluna: id, ...(folha ? { naFolha: true } : {}) }); return; }
     if (act === "col-prazo-tirar") {
       const c = colunaDe(id);
@@ -1175,7 +1255,7 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     const form = ev.target instanceof HTMLFormElement ? ev.target : null;
     if (!dd || !form?.closest("#quadro")) return;
     const qual = form.dataset["form"];
-    if (qual === "col-renomear" || qual === "col-nova" || qual === "col-remover" || qual === "col-passagem" || qual === "col-prazo") { ev.preventDefault(); enviarColuna(form); return; }
+    if (qual === "col-renomear" || qual === "col-nova" || qual === "col-remover" || qual === "col-passagem" || qual === "col-trava" || qual === "col-prazo") { ev.preventDefault(); enviarColuna(form); return; }
     if (qual === "recado-trabalho") { ev.preventDefault(); trabs.enviarRecado(form); return; }
     if (qual === "comentar-tarefa") {
       ev.preventDefault();
@@ -1285,6 +1365,9 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
       // Responder vazio não envia (revisão do PR #624): o Enter só não pula linha.
       if (el.classList.contains("qd-resp-in") && !el.value.trim()) return;
       el.form?.requestSubmit();
+    } else if (ev.key === "Escape" && naRecusa(el)) {
+      ev.preventDefault();
+      sairDaRecusa();
     } else if (ev.key === "Escape" && editandoMeta && el instanceof HTMLInputElement && el.id === "qd-meta-in") {
       ev.preventDefault();
       editarMeta(false);
@@ -1391,10 +1474,9 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     cardArrastado = null;
     const c = colunaDe(sec.dataset["coluna"]);
     if (!c || q?.tarefas.find((x) => x.id === tarefa)?.status === c.id) { desenharVista(); return; }
-    const recusa = porqueNaoRecebeCard(c, nome);
-    if (recusa) { desenharVista(); mudarFaixa({ tipo: "erro", texto: recusa }); return; }
-    if (pedeConfirmacao(c)) { editar({ tipo: "soltar", coluna: c.id, tarefa }); return; }
-    moverTarefa(tarefa, c.id, false);
+    const naoRecebe = porqueNaoRecebeCard(c, nome);
+    if (naoRecebe) { desenharVista(); mudarFaixa({ tipo: "erro", texto: naoRecebe }); return; }
+    pessoaSolta(tarefa, c);
   });
 
   // NOD-448: arrastar a coluna (o cabeçalho, ou a alça ≡ na folha do celular), só dentro do grupo.
@@ -1443,6 +1525,10 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     const m = el?.dataset["modo"];
     abaFocada = el && ehModo(m) ? { el, modo: m } : null;
   });
+  // A recusa da trava não some com a pessoa no card: o foco ou o ponteiro seguram a conta (revisão 2 do PR #629).
+  doc.addEventListener("focusin", (ev) => { if (naRecusa(ev.target)) relogio?.segurar("foco"); else relogio?.soltar("foco"); });
+  doc.addEventListener("focusout", (ev) => { if (!naRecusa(ev.relatedTarget)) relogio?.soltar("foco"); });
+  doc.addEventListener("pointerover", (ev) => { if (naRecusa(ev.target)) relogio?.segurar("ponteiro"); else relogio?.soltar("ponteiro"); });
   // A pessoa tirou o foco da aba com um clique ou toque fora dela (no vazio o foco cai no body, sem focusin): esquece.
   // Não dá para usar o focusout: o Chrome também o dispara quando a regravação tira o nó, e aí o foco tem de voltar.
   doc.addEventListener("pointerdown", (ev) => { if (!abaDe(ev.target)) abaFocada = null; }, true);

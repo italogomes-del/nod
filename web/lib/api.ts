@@ -311,6 +311,11 @@ export function criarApi(escopo: Escopo) {
       post<MutacaoQuadro>(`agentes/${encodeURIComponent(agenteId)}/quadro/colunas/${encodeURIComponent(coluna)}/mover`, onde),
     removerColuna: (agenteId: string, coluna: string, destino?: string) =>
       del<MutacaoQuadro>(`agentes/${encodeURIComponent(agenteId)}/quadro/colunas/${encodeURIComponent(coluna)}${destino ? `?destino=${encodeURIComponent(destino)}` : ""}`),
+    /** NOD-419: a trava da coluna (sai_para null tira o destino; so_pessoa false tira) e o Desfazer de um movimento. */
+    travarColuna: (agenteId: string, coluna: string, t: { sai_para?: string[] | null; so_pessoa?: boolean }) =>
+      patch<MutacaoQuadro>(`agentes/${encodeURIComponent(agenteId)}/quadro/colunas/${encodeURIComponent(coluna)}/trava`, t),
+    desfazerMovimento: (agenteId: string, tarefaId: string, movimentoId: string) =>
+      post<MutacaoQuadro>(`agentes/${encodeURIComponent(agenteId)}/quadro/tarefas/${encodeURIComponent(tarefaId)}/movimentos/${encodeURIComponent(movimentoId)}/desfazer`),
     /** ADR-142: a passagem da coluna (agente null tira; instrucoes null apaga). */
     definirPassagem: (agenteId: string, coluna: string, p: { agente: string | null; instrucoes: string | null }) =>
       pedir<MutacaoQuadro>("PUT", `${base}/agentes/${encodeURIComponent(agenteId)}/quadro/colunas/${encodeURIComponent(coluna)}/passagem`, p),

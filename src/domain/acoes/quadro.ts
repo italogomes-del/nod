@@ -57,7 +57,7 @@ export const ACOES_QUADRO = [
   {
     id: "quadro.mudar_tarefa",
     titulo: "Mudar uma tarefa (status, responsável, PR, pergunta) ou tirá-la do quadro",
-    schema: objeto({ tarefa: P.tarefa, titulo: P.titulo, descricao: P.descricao, status: P.status, agente: P.agente, pr_url: P.pr_url, pergunta: P.pergunta, excluir: P.excluir, sem_iniciar: P.sem_iniciar }, ["tarefa"]),
+    schema: objeto({ tarefa: P.tarefa, titulo: P.titulo, descricao: P.descricao, status: P.status, agente: P.agente, pr_url: P.pr_url, pergunta: P.pergunta, excluir: P.excluir, sem_iniciar: P.sem_iniciar, motivo: P.motivo }, ["tarefa"]),
     risco: "muda",
     cartaoNoChat: false,
     chat: vivo,
@@ -179,6 +179,27 @@ export const ACOES_QUADRO = [
     cartaoNoChat: false,
     chat: vivo,
     casoDeUso: "quadro.terminei",
+  },
+  // NOD-419: os freios da esteira. A trava da coluna (menu "…" da coluna) e o Desfazer de um movimento do histórico.
+  // O nao_e_comigo é só do bot (a pessoa troca o responsável pelo quadro.mudar_tarefa): não é ação da tela.
+  {
+    id: "quadro.travar_coluna",
+    titulo: "Travar a saída de uma coluna (só sai para…, só a pessoa tira daqui)",
+    schema: objeto({ coluna: P.coluna, sai_para: P.sai_para, so_pessoa: P.so_pessoa }, ["coluna"]),
+    risco: "muda",
+    cartaoNoChat: false,
+    chat: vivo,
+    casoDeUso: "quadro.travar_coluna",
+  },
+  {
+    id: "quadro.desfazer_movimento",
+    titulo: "Desfazer um movimento do histórico da tarefa",
+    // Revisão 3 do PR #629: `movimento` é opcional, como no gerir_quadro (sem ele, o último desfazível; ADR-142).
+    schema: objeto({ tarefa: P.tarefa, movimento: P.movimento }, ["tarefa"]),
+    risco: "muda",
+    cartaoNoChat: false,
+    chat: vivo,
+    casoDeUso: "quadro.desfazer_movimento",
   },
   // NOD-418: o trabalho da tarefa. Repetir e recado abrem um turno de delegação do responsável (como começar a tarefa);
   // cancelar para o turno vivo. O gerir_quadro só os aceita num turno da pessoa (a conversa com ela).

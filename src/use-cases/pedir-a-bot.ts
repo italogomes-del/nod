@@ -118,7 +118,7 @@ async function pedirNaTarefa(
   // Revisão 2 do PR #622: sem turno do colega (sem conversa própria, fora dos acionáveis), o erro é tipado como os outros
   // e o bot corrige a chamada; o comentário fica na tarefa (é da tarefa), mas nenhum pedido aberto é registrado.
   const turno = doAlvo ? await deps.repos.turnos.buscar(doAlvo.turnoId) : null;
-  if (!turno) return recusa("colega_nao_acionado", `${c.alvo.nome} não pôde ser acionado na tarefa`);
+  if (!turno) return recusa("colega_nao_acionado", r.data.freados ? `a tarefa passou do freio de acionamentos da hora (revisão do PR #629): ${c.alvo.nome} não foi acionado e a pessoa decide` : `${c.alvo.nome} não pôde ser acionado na tarefa`);
   const autoria = autoriaAgente(c.remetente.id, pessoaId, pessoaId);
   const jaPediu = (await deps.repos.mensagens.pedidoDaTarefa(turno.id))?.autoria.autor_id === c.remetente.id;
   const mensagem = jaPediu ? null : await deps.repos.mensagens.criar({

@@ -4,6 +4,8 @@ import type { Decisao } from "../contracts/decisao.ts";
 import type { Executor, RuntimeEvent } from "../contracts/evento.ts";
 import type { AutorLote, ColunaQuadro, ComentarioTarefa, EntradaHistoricoDto, LinhaDeSistema, LoteQuadro, MudancaTarefa, OpQuadro, PrNaTela, Quadro, QuadroDaPessoaDto, QuadroDto, ResumoQuadroParaBot, TarefaDto, TarefaPorCodigoDto, TarefaQuadro } from "../contracts/quadro.ts";
 import { ehNod } from "../domain/nod.ts";
+import type { MovimentoParaBot, MovimentoTarefa } from "../contracts/freios-quadro.ts";
+import { fraseDaTrava, MOTIVO_LACO_SEM_NOMES, mudouATarefa, nomeDaParada, paradaDaPessoa } from "../domain/freios-quadro.ts";
 import { branchSugerido, codigoDaTarefa, formatarCodigo, lerCodigo, prefixoDoNome } from "../domain/codigo-tarefa.ts";
 import { mudancasDaTarefa, statusNoDestino } from "../domain/historico-tarefa.ts";
 import { type AgenteDoQuadro, chaveDeBusca, entradaDaResposta, entradaDaTarefa, etapaDaTarefa, execucaoDoTurno, metaCumprida, planejarLote, progresso, recusaDoLimite, resolverTarefa, tarefasDaMeta, resumoDaMeta, resumoDoLote, terminadaDepois, terminou } from "../domain/quadro.ts";
@@ -84,7 +86,7 @@ export const pedidoDaPessoa =(p: PedidoLote): boolean => p.autor.tipo === "agent
 export type Comecou = { tarefaId: string; agenteId: string; agenteNome: string; turnoId: string };
 
 export type ResultadoLote =
-  | { ok: true; quadro: QuadroDto | null; lote: LoteQuadro | null; comecaram: Comecou[]; desfeito: boolean; /** NOD-416: a tarefa que mudou de quadro (o código novo e o antigo, que continua abrindo). */ movida?: { tarefaId: string; codigo: string; codigoAntigo: string }; /** No limite da corrente: o que ia começar e ficou em A fazer. */ seguradas?: number; /** Um passo de coluna foi para a posição válida mais próxima (NOD-448). */ ajustada?: boolean; /** NOD-415: o quadro foi removido (o bot voltou a agente comum). */ removido?: boolean; /** Revisão 3 do PR #623: o id da tarefa de cada criar_tarefa, na ordem dos passos (null se o mesmo lote a excluiu). */ criadas?: (string | null)[]; /** NOD-417: o comentário gravado (op comentar) e quantos gatilhos se juntaram a um turno da fila (comentário ou lote). */ comentario?: ComentarioTarefa; juntados?: number; /** NOD-418: Repetir, Cancelar ou recado: o trabalho que ficou e a vista da tarefa aberta. */ trabalho?: TrabalhoFeito; trabalhos?: ExecucoesDaTarefa; /** Revisão 4 do PR #622: o comentário numa tarefa fora do andamento não acionou o responsável. */ responsavelForaDoAndamento?: { agenteNome: string; coluna: string } }
+  | { ok: true; quadro: QuadroDto | null; lote: LoteQuadro | null; comecaram: Comecou[]; desfeito: boolean; /** NOD-416: a tarefa que mudou de quadro (o código novo e o antigo, que continua abrindo). */ movida?: { tarefaId: string; codigo: string; codigoAntigo: string }; /** No limite da corrente: o que ia começar e ficou em A fazer. */ seguradas?: number; /** Um passo de coluna foi para a posição válida mais próxima (NOD-448). */ ajustada?: boolean; /** NOD-415: o quadro foi removido (o bot voltou a agente comum). */ removido?: boolean; /** Revisão 3 do PR #623: o id da tarefa de cada criar_tarefa, na ordem dos passos (null se o mesmo lote a excluiu). */ criadas?: (string | null)[]; /** NOD-417: o comentário gravado (op comentar) e quantos gatilhos se juntaram a um turno da fila (comentário ou lote). */ comentario?: ComentarioTarefa; juntados?: number; /** Revisão do PR #629: o comentário de bot não acionou ninguém porque a tarefa passou do freio da hora. */ freados?: number; /** NOD-418: Repetir, Cancelar ou recado: o trabalho que ficou e a vista da tarefa aberta. */ trabalho?: TrabalhoFeito; trabalhos?: ExecucoesDaTarefa; /** Revisão 4 do PR #622: o comentário numa tarefa fora do andamento não acionou o responsável. */ responsavelForaDoAndamento?: { agenteNome: string; coluna: string } }
   | { ok: false; erro: FalhaQuadro; detalhe: string; /** Revisão 7 do PR #623: a chave da recusa do mover que a tela distingue (a rota não mapeia texto). */ motivo?: RecusaDoMover };
 
 const falha = (erro: FalhaQuadro, detalhe: string): { data: ResultadoLote } => ({ data: { ok: false, erro, detalhe } });
@@ -210,6 +212,13 @@ export async function acharQuadro(deps: Deps, p: PedidoLote, agentes: readonly A
   return todos.length === 0 ? null : { ambiguo: todos };
 }
 
+/**
+ * NOD-419: quantos movimentos de cada tarefa a tela recebe (fora os `acionou`, que têm o mesmo teto à parte: revisão 3 do
+ * PR #629, senão 11 comentários de bot empurravam o último movimento de verdade e o Desfazer sumia). A janela que as travas, o laço e o freio leem (24 h) é contada
+ * no banco, pelo relógio que grava `criado_em` (revisão do PR #629).
+ */
+const MOVIMENTOS_NA_TELA = 10;
+
 /** A falha de um quadro que não se achou de primeira (vários, ou nome que não bate), já com o que o bot pergunta. */
 export function falhaDoAchado(achado: { ambiguo: Quadro[] } | { semNome: string; nomes: string[] }, agentes: readonly Agente[]): { erro: FalhaQuadro; detalhe: string } {
   if ("semNome" in achado) {
@@ -226,7 +235,10 @@ export async function montarQuadro(deps: Pick<Deps, "repos">, q: Quadro): Promis
   const tarefas = await repo.tarefas(q.id);
   const estados = await repo.estadosDosTurnos(tarefas.map((t) => t.turnoId).filter((id): id is string => id !== null));
   const colunas = colunasDe(q);
-  const ids = new Set([q.agenteId, ...tarefas.map((t) => t.agenteId).filter((id): id is string => id !== null), ...colunas.map((c) => c.responsavel).filter((id): id is string => Boolean(id))]);
+  // NOD-419: os últimos movimentos de cada tarefa (de quem e para quem, com os nomes).
+  const movs = await repo.ultimosMovimentos(q.id, MOVIMENTOS_NA_TELA);
+  const ids = new Set([q.agenteId, ...tarefas.map((t) => t.agenteId).filter((id): id is string => id !== null), ...colunas.map((c) => c.responsavel).filter((id): id is string => Boolean(id)),
+    ...movs.flatMap((m) => [m.agenteAntes, m.agenteDepois, m.autor.tipo === "agente" ? m.autor.agenteId : null]).filter((id): id is string => id !== null)]);
   const nomes = new Map<string, string>();
   for (const id of ids) {
     const a = await deps.repos.agentes.buscar(id, true);
@@ -255,6 +267,7 @@ export async function montarQuadro(deps: Pick<Deps, "repos">, q: Quadro): Promis
     agenteNome: t.agenteId ? nomes.get(t.agenteId) ?? null : null,
     prs: prs.get(t.id) ?? [],
     linhas: linhas.get(t.id) ?? [],
+    movimentos: movs.filter((m) => m.tarefaId === t.id).map((m) => ({ ...m, autorNome: m.autor.tipo === "agente" ? nomes.get(m.autor.agenteId) ?? null : null, agenteAntesNome: m.agenteAntes ? nomes.get(m.agenteAntes) ?? null : null, agenteDepoisNome: m.agenteDepois ? nomes.get(m.agenteDepois) ?? null : null })),
   }));
   // NOD-415 (ADR-141): o que terminou antes de a meta ser posta não entra no "N de M".
   const { feitas, total } = progresso(tarefasDaMeta(tarefas, q.metaDesde, colunas), colunas);
@@ -279,11 +292,19 @@ export function resumoParaBot(q: QuadroDto, trabalhos: ReadonlyMap<string, Traba
     prazo: q.prazo,
     cumprida: q.cumpridoEm !== null,
     resumo: q.resumo,
-    colunas: q.colunas.map((c) => ({ id: c.id, nome: c.nome, grupo: c.grupo, ...(c.responsavelNome ? { passa_para: c.responsavelNome } : {}), ...(c.instrucoes ? { instrucoes: c.instrucoes } : {}), ...(c.prazoMin ? { prazo_min: c.prazoMin } : {}) })),
+    colunas: q.colunas.map((c) => ({ id: c.id, nome: c.nome, grupo: c.grupo, ...(c.responsavelNome ? { passa_para: c.responsavelNome } : {}), ...(c.instrucoes ? { instrucoes: c.instrucoes } : {}), ...(c.prazoMin ? { prazo_min: c.prazoMin } : {}), ...(fraseDaTrava(q.colunas, c.trava) ? { trava: fraseDaTrava(q.colunas, c.trava)! } : {}) })),
     // NOD-420: a pergunta de Bloqueado também (o bot responde "o que está travado?" sem abrir o card).
-    tarefas: q.tarefas.map((t) => ({ id: t.id, codigo: t.codigo, titulo: t.titulo, status: t.status, agente: t.agenteNome, linear: t.linearId, pr: t.prUrl, pergunta: esperaPessoa(q.colunas, t.status) ? t.pergunta : null, execucao: t.execucao, ...(trabalhos.has(t.id) ? { trabalho: trabalhos.get(t.id)! } : {}), ...(t.prs?.length ? { prs: t.prs.map(resumoDoPr) } : {}) })),
+    tarefas: q.tarefas.map((t) => ({ id: t.id, codigo: t.codigo, titulo: t.titulo, status: t.status, agente: t.agenteNome, linear: t.linearId, pr: t.prUrl, pergunta: esperaPessoa(q.colunas, t.status) ? t.pergunta : null, execucao: t.execucao, ...(trabalhos.has(t.id) ? { trabalho: trabalhos.get(t.id)! } : {}), ...(t.prs?.length ? { prs: t.prs.map(resumoDoPr) } : {}), ...movimentosParaBot(t) })),
     ...(q.avisoGithub ? { avisoGithub: q.avisoGithub } : {}),
   };
+}
+
+/** Quantos movimentos de cada tarefa o bot lê (o primeiro é o que o desfazer_movimento sem id desfaz). */
+const MOVIMENTOS_PARA_BOT = 3;
+
+function movimentosParaBot(t: TarefaDto): { movimentos?: MovimentoParaBot[] } {
+  const ms = (t.movimentos ?? []).filter((m) => m.desfeitoEm === null && mudouATarefa(m)).slice(0, MOVIMENTOS_PARA_BOT);
+  return ms.length === 0 ? {} : { movimentos: ms.map((m) => ({ id: m.id, de: m.de, para: m.para, por: m.autor.tipo === "agente" ? m.autorNome ?? "bot" : "pessoa", ...(paradaDaPessoa(m) ? { so_a_pessoa_desfaz: true as const } : {}) })) };
 }
 
 export function eventoQuadro(deps: Deps, p: Pick<PedidoLote, "autor" | "conversaId" | "turnoId">, q: { id: string; agenteId: string }, loteId: string | null, tarefas: readonly string[], removido = false): RuntimeEvent {
@@ -356,25 +377,42 @@ export async function pararTurno(deps: Deps, p: PedidoLote, turnoId: string): Pr
   }
 }
 
-/** O aviso na conversa própria do responsável. NOD-418: o Bloqueado manda o texto dele e a chave de dedup do trabalho. */
-export async function avisarComVoce(deps: Deps, t: TarefaQuadro, quemPergunta: string, outro?: { texto: string; chave: string }): Promise<RuntimeEvent | null> {
-  if (!t.agenteId) return null;
-  const conversa = await deps.repos.conversas.buscarPropriaDoAgente(t.agenteId);
+/**
+ * O aviso vai pela conversa de `agenteDaConversa` (o responsável). Revisão 4 do PR #629: o "não é comigo" sem candidato
+ * deixa a tarefa sem responsável; aí o aviso sai pela conversa de quem recusou, senão a pessoa não ficava sabendo.
+ */
+export async function avisarComVoce(deps: Deps, t: TarefaQuadro, quemPergunta: string, texto?: string, agenteDaConversa: string | null = t.agenteId, chave = `quadro-${texto ? "freio" : "voce"}:${t.id}:${t.mudadoEm}`): Promise<RuntimeEvent | null> {
+  if (!agenteDaConversa) return null;
+  const conversa = await deps.repos.conversas.buscarPropriaDoAgente(agenteDaConversa);
   if (!conversa) return null;
   // A autoria é de quem escreveu a pergunta (o bot do lote); a pessoa pela tela, o responsável.
   const autoria = autoriaAgente(quemPergunta, deps.escopo.pessoaId);
-  const h = createHash("sha256").update(outro ? `quadro-aviso:${outro.chave}` : `quadro-voce:${t.id}:${t.mudadoEm}`).digest("hex");
+  const h = createHash("sha256").update(chave).digest("hex");
   const m = await deps.repos.mensagens.criar({
     conversaId: conversa.id,
     turnoId: null,
     autoria,
     kind: "texto",
-    texto: outro?.texto ?? `Preciso de você no quadro, em "${t.titulo}": ${t.pergunta ?? ""}`.trim(),
+    texto: texto ?? `Preciso de você no quadro, em "${t.titulo}": ${t.pergunta ?? ""}`.trim(),
     payload: { kind: "aviso_pessoa" },
     confianca: "nao_confiavel",
     idEnvio: `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-8${h.slice(17, 20)}-${h.slice(20, 32)}`,
   });
   return m ? evento(deps, "mensagem_criada", autoria, { mensagem_id: m.id, kind: "texto", aviso: true }, { conversaId: conversa.id, turnoId: null }) : null;
+}
+
+/**
+ * Revisão 7 do PR #629: o aviso do laço e do freio na conversa. O texto é do sistema; o título da tarefa é o único conteúdo
+ * que pode ter vindo de fora, e sai quando a tarefa é de fora ou o turno que a mexeu não era confiável. `bloqueou` = o
+ * freio levou a tarefa a Bloqueado (o do comentário a deixa na coluna).
+ */
+export function avisoDoFreio(t: Pick<TarefaQuadro, "titulo" | "deFora">, f: { tipo: "laco" | "freio"; motivo: string }, deTurnoDeFora: boolean, bloqueou = true): string {
+  const semTitulo = t.deFora || deTurnoDeFora;
+  // Revisão 8 do PR #629: de turno não confiável, o motivo do laço sai sem os nomes das colunas (que um turno de fora pode
+  // ter escrito); o card guarda o motivo completo.
+  const motivo = deTurnoDeFora && f.tipo === "laco" ? MOTIVO_LACO_SEM_NOMES : f.motivo;
+  if (bloqueou) return semTitulo ? `Uma tarefa do quadro foi para Bloqueado: ${motivo}` : `"${t.titulo}" foi para Bloqueado: ${motivo}`;
+  return semTitulo ? `Numa tarefa do quadro: ${motivo}` : `Em "${t.titulo}": ${motivo}`;
 }
 
 /** O quadro é todo do bot: ele fez o lote da criação e nenhum comentário das tarefas é de outro (a pessoa ou outro bot). */
@@ -398,6 +436,13 @@ async function desfazer(deps: Deps, p: PedidoLote, q: Quadro, loteId: string | u
     // Revisão 3 do PR #627: no limite normal o bot só desfaz o que ele poderia ter feito nele, o lote dele sem a pessoa
     // (pedido_por nulo). O lote feito a pedido dela (o controle da tela) ou o de outro só se desfaz na conversa limpa.
     if (limiteDe(p) === "normal" && (!meu || ultimo.pedidoPor != null)) return falha("entrada_invalida", recusaDoLimite("desfazer um lote feito a pedido da pessoa ou por outro"));
+    // Revisão 5 do PR #629: a mesma regra do desfazer_movimento (SO_A_PESSOA_DESFAZ). O lote em que o laço ou o freio parou
+    // a tarefa o agente não desfaz sozinho; a pessoa pode, e o agente a pedido dela na conversa.
+    if (p.autorNaConversa !== true) {
+      // Revisão 10: o lote do 4º passe que levou a tarefa a Bloqueado também (paradaDaPessoa).
+      const parado = (await repo.paradasVivasDoLote(ultimo.id)).map(paradaDaPessoa).find((x) => x !== null);
+      if (parado) return falha("entrada_invalida", `${nomeDaParada(parado)} só a pessoa desfaz: o último lote parou a tarefa; deixe onde está e espere a resposta dela`);
+    }
   }
   // Revisão 2 do PR #623 (a barreira): um mover_quadro que entrou ou saiu deste quadro depois do lote o invalida. A foto
   // não conhece a tarefa que chegou: o Desfazer do lote que criou o quadro a apagava, e o de colunas a deixava fora delas.
@@ -453,6 +498,8 @@ async function desfazer(deps: Deps, p: PedidoLote, q: Quadro, loteId: string | u
   await repo.registrarHistorico(q.id, historico, null);
   await repo.salvar(q.id, foto.quadro);
   await repo.marcarDesfeito(ultimo.id);
+  // NOD-419: os movimentos do lote desfeito saem do jogo (o histórico os mostra riscados; não se desfazem de novo).
+  await repo.desfazerMovimentosDoLote(ultimo.id);
   const atualizado = await repo.buscar(q.id);
   return {
     data: { ok: true, quadro: atualizado ? await montarQuadro(deps, atualizado) : null, lote: null, comecaram: [], desfeito: true },
@@ -712,6 +759,30 @@ export async function fecharExclusoesPendentes(deps: Deps, quadroId: string, exc
 }
 
 /**
+ * O histórico que o lote lê: o das últimas 24 h e, de qualquer idade, o último desfazível e a entrada na espera SÓ das
+ * tarefas que podem precisar deles: a que o lote desfaz (revisão 2 do PR #629: a tela oferece o Desfazer no último
+ * movimento sem olhar a idade) e a que está numa espera (revisões 7 e 8: o laço ou o freio de mais de 24 h ainda a
+ * segura). Revisão 9: antes entravam os antigos de TODAS as tarefas, e o passe velho de outra tarefa contava no laço
+ * (`passagensEntre` não olha a idade). Exportado para o teste de integração.
+ */
+export async function historicoDoLote(deps: Deps, quadroId: string, ops: readonly OpQuadro[], tarefas: readonly TarefaQuadro[]): Promise<MovimentoTarefa[]> {
+  const recentes = await deps.repos.quadros.movimentos(quadroId);
+  const esperando = new Set(tarefas.filter((t) => t.status === "voce" || t.status === "bloqueado").map((t) => t.id));
+  const desfeitas = new Set<string>();
+  for (const o of ops) {
+    if (o.tipo !== "desfazer_movimento") continue;
+    const t = resolverTarefa(tarefas.map((x) => ({ ...x, nova: false })), o.tarefa);
+    if (!("erro" in t)) desfeitas.add(t.id);
+  }
+  if (esperando.size === 0 && desfeitas.size === 0) return recentes;
+  const ids = new Set(recentes.map((m) => m.id));
+  const entradas = esperando.size > 0 ? await deps.repos.quadros.entradasNaEspera(quadroId) : [];
+  const alvo = (m: MovimentoTarefa) => esperando.has(m.tarefaId) || desfeitas.has(m.tarefaId);
+  const velhos = [...new Map([...(await deps.repos.quadros.ultimosDesfaziveis(quadroId)), ...entradas].map((m) => [m.id, m])).values()].filter((m) => alvo(m) && !ids.has(m.id));
+  return velhos.length === 0 ? recentes : [...velhos, ...recentes].sort((a, b) => a.criadoEm - b.criadoEm);
+}
+
+/**
  * A prévia de um lote (NOD-448): o mesmo planejamento do aplicar, sem gravar nem travar. O substituir_colunas pela
  * conversa usa para validar e montar o card antes de a pessoa confirmar.
  */
@@ -723,7 +794,7 @@ export async function preverLoteQuadro(deps: Deps, p: PedidoLote): Promise<{ ok:
   if (!achado) return { ok: false, erro: "sem_quadro", detalhe: "não há quadro: crie com criar_quadro (meta e prazo são opcionais)" };
   const tarefas = await deps.repos.quadros.tarefas(achado.id);
   const codigosAntigos = await codigosAntigosDaqui(deps, p.ops, achado, tarefas);
-  const plano = planejarLote({ quadro: { meta: achado.meta, prazo: achado.prazo, colunas: achado.colunas, prefixo: achado.prefixo }, quadroId: achado.id, tarefas, agentes: agentes.map(paraAgenteDoQuadro), autorAgenteId: p.autor.tipo === "agente" ? p.autor.agenteId : null, ops: p.ops, agora: deps.agora(), origemConfiavel: p.origemConfiavel !== false, autorNaConversa: p.autorNaConversa === true, codigosAntigos, limite: limiteDe(p) });
+  const plano = planejarLote({ quadro: { meta: achado.meta, prazo: achado.prazo, colunas: achado.colunas, prefixo: achado.prefixo }, quadroId: achado.id, tarefas, agentes: agentes.map(paraAgenteDoQuadro), autorAgenteId: p.autor.tipo === "agente" ? p.autor.agenteId : null, ops: p.ops, agora: deps.agora(), origemConfiavel: p.origemConfiavel !== false, autorNaConversa: p.autorNaConversa === true, codigosAntigos, historico: await historicoDoLote(deps, achado.id, p.ops, tarefas), acionamentosNaHora: await deps.repos.quadros.acionamentosNaHora(achado.id), limite: limiteDe(p) });
   if ("erro" in plano) return { ok: false, erro: "entrada_invalida", detalhe: plano.indice >= 0 ? `ação ${plano.indice + 1}: ${plano.erro}` : plano.erro };
   return { ok: true, quadro: achado, tarefas, colunas: colunasDe(plano.quadro) };
 }
@@ -768,7 +839,9 @@ async function aplicarNoQuadro(deps: Deps, p: PedidoLote, qSemPrefixo: Quadro, a
   const vivas = new Set(tarefasAntes.filter((t) => t.turnoId && ["pendente", "despachando"].includes(estados.get(t.turnoId) ?? "")).map((t) => t.id));
   const codigosAntigos = await codigosAntigosDaqui(deps, p.ops, q, tarefasAntes);
   const tarefaDoTurno = autorAgenteId && p.turnoId && p.ops.some((o) => o.tipo === "terminei" && !o.tarefa) ? await tarefaDoTurnoDe(deps, tarefasAntes, autorAgenteId, p.turnoId) : null;
-  const plano = planejarLote({ quadro: { meta: q.meta, prazo: q.prazo, colunas: q.colunas, prefixo: q.prefixo }, quadroId: q.id, tarefas: tarefasAntes, agentes: agentes.map(paraAgenteDoQuadro), autorAgenteId, ops: p.ops, agora, podeComecar, vivas, origemConfiavel: p.origemConfiavel !== false, autorNaConversa: p.autorNaConversa === true, codigosAntigos, limite: limiteDe(p), tarefaDoTurno });
+  const historico = await historicoDoLote(deps, q.id, p.ops, tarefasAntes);
+  const acionamentosNaHora = await repo.acionamentosNaHora(q.id);
+  const plano = planejarLote({ quadro: { meta: q.meta, prazo: q.prazo, colunas: q.colunas, prefixo: q.prefixo }, quadroId: q.id, tarefas: tarefasAntes, agentes: agentes.map(paraAgenteDoQuadro), autorAgenteId, ops: p.ops, agora, podeComecar, vivas, origemConfiavel: p.origemConfiavel !== false, autorNaConversa: p.autorNaConversa === true, codigosAntigos, limite: limiteDe(p), tarefaDoTurno, historico, acionamentosNaHora });
   if ("erro" in plano) {
     // O quadro que nasceu neste lote não fica de pé sem o resto (tudo ou nada). Não acontece: criarComLote já planejou.
     if (nasceuAgora) await repo.apagar(q.id);
@@ -798,6 +871,13 @@ async function aplicarNoQuadro(deps: Deps, p: PedidoLote, qSemPrefixo: Quadro, a
     // Revisão 3 do PR #622: espera é onde a coluna não aciona (acionaNaColuna); com passagem ou sem, o Backlog para o turno.
     const naEspera = !!t && papel === "backlog" && !acionaNaColuna(colunasFinais, t.status);
     if (a?.turnoId && t && (t.agenteId !== a.agenteId || papel === "cancelado" || naEspera)) await pararTurno(deps, p, a.turnoId);
+  }
+  // NOD-419: desfazer o movimento que acionou um agente para o turno dele (como no Desfazer do lote, ADR-140).
+  for (const m of historico) {
+    if (!m.acionou || !plano.movimentosDesfeitos.includes(m.id)) continue;
+    const t = plano.tarefas.find((x) => x.id === m.tarefaId);
+    const a = antesPorId.get(m.tarefaId);
+    if (t && a?.turnoId) { await pararTurno(deps, p, a.turnoId); t.turnoId = null; }
   }
   // NOD-416: as novas pegam números seguidos do quadro (sob a trava dele) e o código delas fica guardado.
   const quantasNovas = plano.tarefas.filter((t) => t.nova && plano.tocadas.includes(t.id)).length;
@@ -881,6 +961,23 @@ async function aplicarNoQuadro(deps: Deps, p: PedidoLote, qSemPrefixo: Quadro, a
     await abrir(r.id, (t) => entradaDaResposta({ quadroId: q.id, tarefa: t, resposta: r.resposta, pessoaNome }), "resposta");
   }
 
+  // O "Com você" (e o Bloqueado do 4º "não é comigo") avisa pelo avisarNoLote do NOD-420, junto com as outras decisões.
+  // NOD-419: o laço e o freio mandaram para Bloqueado — uma linha na conversa do responsável, sem banner e sem acionar.
+  // Revisão 5 do PR #629: sem responsável o aviso sai pela conversa do agente que fez o lote. Revisão 7: o texto é do
+  // sistema e sai sempre; de turno não confiável ou com tarefa de fora, sem o título (o único conteúdo de fora nele).
+  for (const f of plano.freadas) {
+    const t = gravadas.get(idReal.get(f.id) ?? f.id);
+    const daConversa = t ? t.agenteId ?? autorAgenteId : null;
+    if (!t || !daConversa) continue;
+    const ev = await avisarComVoce(deps, t, autorAgenteId ?? daConversa, avisoDoFreio(t, f, p.origemConfiavel === false), daConversa);
+    if (ev) events.push(ev);
+  }
+  // NOD-419: a recusa deixa o motivo em comentário na tarefa (a linha na atividade), além do histórico.
+  for (const r of plano.recusas) {
+    // Revisão 9 do PR #629: a tarefa criada no mesmo lote tem o id do plano (`novo:N`) até ser gravada; o comentário vai no real.
+    await deps.repos.quadroComentarios.inserir({ quadroId: q.id, tarefaId: idReal.get(r.id) ?? r.id, autor: { tipo: "agente", agenteId: r.agenteId }, texto: `não é comigo — ${r.motivo}`, deFora: true }); // texto de bot é dado de fora (ADR-047/062; revisão do PR #629)
+  }
+
   // A meta fecha (ou reabre) pelo estado final das tarefas. Sem meta (fluxo contínuo, ADR-141) nada fecha.
   const finais = await repo.tarefas(q.id);
   // A meta foi POSTA neste lote (não havia), ou uma meta NOVA veio depois de a anterior ser cumprida: ela conta a partir
@@ -901,16 +998,19 @@ async function aplicarNoQuadro(deps: Deps, p: PedidoLote, qSemPrefixo: Quadro, a
   };
   const opsDoResumo: OpQuadro[] = nasceuAgora ? [{ tipo: "criar_quadro", meta: q.meta }, ...p.ops] : [...p.ops];
   const lote = nasceuAgora || tarefaIds.length > 0 || mudouQuadro || mudouColunas ? await repo.inserirLote({ quadroId: q.id, autor: p.autor, ...(pedidoDaPessoa(p) ? { pedidoPor: deps.escopo.pessoaId } : {}), resumo: resumoDoLote(opsDoResumo, plano.frasesDasColunas), antes: foto, tarefaIds }) : null;
+  // NOD-419: o histórico do lote (a tarefa nova já com o id real) e os movimentos que ele desfez.
+  await repo.inserirMovimentos(q.id, lote?.id ?? null, plano.movimentos.map((m) => ({ ...m, tarefaId: idReal.get(m.tarefaId) ?? m.tarefaId })));
+  await repo.marcarMovimentosDesfeitos(plano.movimentosDesfeitos);
   // NOD-416: o histórico de cada tarefa tocada: o que o autor pediu é dele; o que o motor fez depois, da regra.
-  const historico: MudancaTarefa[] = [];
+  const historicoDasTarefas: MudancaTarefa[] = [];
   for (const id of plano.tocadas) {
     const real = idReal.get(id) ?? id;
     const final = gravadas.get(real);
     const pedido = plano.pedidos.get(id);
     if (!final || !pedido) continue;
-    historico.push(...mudancasDaTarefa({ tarefaId: real, antes: antesPorId.get(real) ?? null, pedido, final, autor: p.autor, statusPorRegra: plano.porRegra.has(id) }));
+    historicoDasTarefas.push(...mudancasDaTarefa({ tarefaId: real, antes: antesPorId.get(real) ?? null, pedido, final, autor: p.autor, statusPorRegra: plano.porRegra.has(id) }));
   }
-  await repo.registrarHistorico(q.id, historico, lote?.id ?? null);
+  await repo.registrarHistorico(q.id, historicoDasTarefas, lote?.id ?? null);
   const atualizado = (await repo.buscar(q.id)) ?? q;
   events.unshift(eventoQuadro(deps, p, atualizado, lote?.id ?? null, tarefaIds));
   // NOD-415 (ADR-141): o risco de prazo (só com meta e prazo), uma vez por (quadro, meta, prazo).

@@ -245,6 +245,20 @@ describeIntegracao("colunas do quadro (NOD-448, ADR-140)", () => {
     });
   });
 
+  it("travar_coluna pelo bot fora da conversa (turno de rotina) é recusado no gerir_quadro e a coluna fica sem trava (revisão do PR #629)", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      ok(await m.pessoa([{ tipo: "criar_quadro", meta: "M" }]));
+      const r = await executar(m.d, gerirQuadro, { ...(await m.turno("rotina")), acoes: [{ tipo: "travar_coluna", coluna: "Em revisão", so_pessoa: true }] });
+      expect(r.data).toMatchObject({ ok: false, erro: "entrada_invalida" });
+      expect(JSON.stringify(r.data)).toContain("as colunas só mudam a pedido da pessoa");
+      expect((await m.quadro()).colunas.find((c) => c.id === "revisao")?.trava ?? null).toBeNull();
+      // Na conversa, passa.
+      ok(await executar(m.d, gerirQuadro, { ...(await m.turno()), acoes: [{ tipo: "travar_coluna", coluna: "Em revisão", so_pessoa: true }] }));
+      expect((await m.quadro()).colunas.find((c) => c.id === "revisao")?.trava).toEqual({ soPessoa: true });
+    });
+  });
+
   it("card de colunas depois de remover o quadro (NOD-415): confirmar fecha como obsoleto, sem preso na Sua vez", async () => {
     await withRollback(MARLON, async (trx) => {
       const m = await montar(trx);
@@ -299,7 +313,7 @@ describeIntegracao("colunas do quadro (NOD-448, ADR-140)", () => {
       expect((await m.quadro()).colunas.map((c) => c.nome)).toEqual(["Pedido", "Compras", "Produção", "Finalização", "Embalagem", "Entrega", "Precisa de você", "Pago", "Cancelado"]);
       ok(await executar(m.d, gerirQuadro, { ...ctx, acoes: [{ tipo: "criar_tarefa", titulo: "Brigadeiro", status: "Pedido" }, { tipo: "criar_tarefa", titulo: "Bolo", status: "Pedido" }, { tipo: "criar_tarefa", titulo: "Torta", status: "Pedido" }] }));
       for (const col of ["Compras", "Produção", "Finalização", "Embalagem", "Entrega", "Pago"]) ok(await executar(m.d, gerirQuadro, { ...ctx, acoes: [{ tipo: "mudar_tarefa", tarefa: "Brigadeiro", status: col }] }));
-      ok(await executar(m.d, gerirQuadro, { ...ctx, acoes: [{ tipo: "mudar_tarefa", tarefa: "Torta", status: "Cancelado" }] }));
+      ok(await executar(m.d, gerirQuadro, { ...ctx, acoes: [{ tipo: "mudar_tarefa", tarefa: "Torta", status: "Cancelado", motivo: "o cliente desistiu" }] }));
       const q = await m.quadro();
       expect(q.tarefas.map((t) => [t.titulo, t.status])).toEqual(expect.arrayContaining([["Brigadeiro", "c-pago"], ["Bolo", "c-pedido"], ["Torta", "cancelado"]]));
       // Feito ÷ (total − Fechado): 1 de 2, a Torta cancelada sai da conta.

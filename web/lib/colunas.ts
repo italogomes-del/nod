@@ -58,6 +58,15 @@ export const FRASE_DO_GRUPO: Readonly<Record<GrupoColuna, string>> = {
 };
 
 /**
+ * Espelho de colunaDeEspera (src/domain/colunas.ts; tests/unit/web/freios.test.ts confere): a coluna de onde a tarefa sai
+ * quando o responsável começa. A fazer, se houver; senão a primeira de Não iniciado; senão a primeira do andamento.
+ */
+export function colunaDeEspera(cs: readonly Pick<ColunaDto, "id" | "grupo">[]): string {
+  if (cs.some((c) => c.id === "afazer")) return "afazer";
+  return cs.find((c) => c.grupo === "nao_iniciado")?.id ?? cs.find((c) => c.grupo === "iniciado" && c.id !== "voce")?.id ?? cs[0]!.id;
+}
+
+/**
  * O que ESTA coluna faz (o topo do menu): a do grupo, com as exceções das padrão que o motor trata à parte
  * (`deveComecar`): A fazer aciona apesar de ser Não iniciado; Revisão, Bloqueado e Precisa de você não acionam.
  */
@@ -193,6 +202,8 @@ export type EdicaoDeColuna =
   | { tipo: "ordem"; erro?: string }
   /** ADR-142: a passagem da coluna (quem começa quando a tarefa entra e o que a etapa faz). */
   | { tipo: "passagem"; coluna: string }
+  /** NOD-419: o "Só sai para…" da coluna (os destinos da trava). */
+  | { tipo: "trava"; coluna: string }
   /** ADR-142: o card solto numa coluna com responsável espera "Confirmar · Não iniciar ainda". */
   | { tipo: "soltar"; coluna: string; tarefa: string }
   /** NOD-420: o prazo (SLA) da coluna, no ⋯. */

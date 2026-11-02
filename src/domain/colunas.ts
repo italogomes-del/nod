@@ -182,6 +182,8 @@ export function validarColunas(colunas: readonly ColunaQuadro[]): ErroColuna | n
     nomes.set(chave, n);
     const ep = erroDaPassagem(c);
     if (ep) return ep;
+    const et = erroDaTrava(c);
+    if (et) return et;
     const g = GRUPOS_COLUNA.indexOf(c.grupo);
     if (g < grupoAntes) return { erro: "os grupos ficam na ordem: não iniciado, iniciado, feito, fechado" };
     grupoAntes = g;
@@ -217,8 +219,8 @@ export type Mudanca = { colunas: ColunaQuadro[]; ajustada: boolean };
  * A coluna exige a pessoa ("só uma pessoa tira daqui", NOD-419)? Estrutural: lê `trava.soPessoa` se a coluna tiver,
  * sem depender do tipo da trava (a NOD-419 traz o tipo).
  */
-export type ComTrava = { trava?: { soPessoa?: boolean } | null };
-export function exigePessoa(coluna: (Partial<ColunaQuadro> & ComTrava) | undefined): boolean {
+export type ComTrava = Pick<Partial<ColunaQuadro>, "trava">;
+export function exigePessoa(coluna: Partial<ColunaQuadro> | undefined): boolean {
   return coluna?.trava?.soPessoa === true;
 }
 
@@ -267,7 +269,7 @@ export function renomearColuna(atuais: readonly ColunaQuadro[], op: { coluna: st
   // NOD-420: null tira o prazo; ausente não mexe. Pôr prazo onde só a pessoa tira a tarefa não vale (revisão 4 do PR #624).
   if (op.prazo_min === null) delete c.prazoMin;
   else if (op.prazo_min !== undefined) {
-    if (exigePessoa(c as ComTrava)) return { erro: `só a pessoa tira a tarefa de "${c.nome}": essa coluna não tem prazo` };
+    if (exigePessoa(c)) return { erro: `só a pessoa tira a tarefa de "${c.nome}": essa coluna não tem prazo` };
     c.prazoMin = op.prazo_min;
   }
   const e = validarColunas(colunas);
@@ -364,11 +366,13 @@ export function substituirColunas(
     // A passagem (ADR-142) e o prazo (NOD-420) seguem com a coluna que continua; a que nasce agora vem sem. Revisão 3 do
     // PR #622: a passagem só se a coluna aceita passagem no grupo novo (uma passagem gravada onde não vale não derruba a
     // troca do conjunto). O prazo só fica se ela continua onde o trabalho anda.
+    // A trava (NOD-419) é lida à parte e segue sempre: trocar o grupo não a apaga (revisão 2 do PR #629).
     const atual = atuais.find((c) => c.id === id);
     const { responsavel, instrucoes } = aceitaPassagem({ id, grupo: x.grupo }) ? atual ?? {} : {};
+    const trava = atual?.trava;
     const prazoMin = atual?.prazoMin;
-    const comPrazo = prazoMin !== undefined && podeTerPrazo({ id, grupo: x.grupo });
-    novas.push({ id, nome, grupo: x.grupo, ...(responsavel ? { responsavel } : {}), ...(instrucoes ? { instrucoes } : {}), ...(comPrazo ? { prazoMin } : {}) });
+    const comPrazo = prazoMin !== undefined && podeTerPrazo({ id, grupo: x.grupo, ...(trava ? { trava } : {}) });
+    novas.push({ id, nome, grupo: x.grupo, ...(responsavel ? { responsavel } : {}), ...(instrucoes ? { instrucoes } : {}), ...(comPrazo ? { prazoMin } : {}), ...(trava ? { trava } : {}) });
   }
   let ajustada = false;
   for (const fixa of ["voce", "cancelado"] as const) {
@@ -426,7 +430,7 @@ export const FAIXA_DO_PRAZO = `de 1 min a ${prazoLegivelMin(LIMITES_QUADRO.prazo
 export function saoPadrao(colunas: readonly ColunaQuadro[]): boolean {
   return colunas.length === COLUNAS_PADRAO.length && colunas.every((c, i) => {
     const p = COLUNAS_PADRAO[i]!;
-    return c.id === p.id && c.nome === p.nome && c.grupo === p.grupo && !c.responsavel && !c.instrucoes && c.prazoMin === undefined;
+    return c.id === p.id && c.nome === p.nome && c.grupo === p.grupo && !c.responsavel && !c.instrucoes && c.prazoMin === undefined && !c.trava;
   });
 }
 
@@ -443,6 +447,16 @@ function erroDaPassagem(c: ColunaQuadro): ErroColuna | null {
   if (c.responsavel != null && (typeof c.responsavel !== "string" || c.responsavel === "")) return { erro: `responsável inválido em "${c.nome}"` };
   if (c.responsavel && !aceitaPassagem(c)) return { erro: `"${c.nome}" não tem responsável: só as colunas onde o trabalho espera ou anda (fora Precisa de você e Bloqueado)` };
   if (c.instrucoes != null && (typeof c.instrucoes !== "string" || c.instrucoes.length > LIMITES_QUADRO.instrucoes)) return { erro: `o que a etapa "${c.nome}" faz passa de ${LIMITES_QUADRO.instrucoes} caracteres` };
+  return null;
+}
+
+/** A trava (NOD-419): `saiPara` é uma lista de ids de coluna; `soPessoa`, booleano. Destino que sumiu não vale (o domínio filtra). */
+function erroDaTrava(c: ColunaQuadro): ErroColuna | null {
+  const t = c.trava;
+  if (t === undefined) return null;
+  if (typeof t !== "object" || t === null) return { erro: `trava inválida em "${c.nome}"` };
+  if (t.soPessoa !== undefined && typeof t.soPessoa !== "boolean") return { erro: `trava inválida em "${c.nome}"` };
+  if (t.saiPara !== undefined && (!Array.isArray(t.saiPara) || t.saiPara.length > LIMITES_QUADRO.colunas || t.saiPara.some((x) => typeof x !== "string" || x === c.id))) return { erro: `trava inválida em "${c.nome}"` };
   return null;
 }
 

@@ -1,3 +1,4 @@
+import type { MovimentoDto, OpFreio, TravaColuna } from "./freios-quadro.ts";
 /**
  * O quadro-agente (definido em 2026-10-31, NOD-442; base visual NOD-429): uma meta com prazo, tarefas em colunas de
  * status, e cada tarefa com um bot responsável que começa sozinho. Só tipos (EMENDA 26): o domínio puro mora em
@@ -34,6 +35,7 @@ export type ColunaQuadro = {
   responsavel?: string | null;
   /** "O que essa etapa faz": vai no contexto do turno de quem pega a tarefa nesta coluna. */
   instrucoes?: string | null;
+  trava?: TravaColuna; // NOD-419: a trava ("só sai para…", "só a pessoa tira daqui"); ausente = flexível
   prazoMin?: number; // NOD-420 (só onde o trabalho anda): a tarefa parada além disso nesta coluna faz o quadro cobrar o responsável
 };
 
@@ -122,14 +124,14 @@ export type LoteQuadro = {
 export type TarefaDto = TarefaQuadro & {
   execucao: ExecucaoTarefa;
   agenteNome: string | null;
-  /** NOD-416: o código da tarefa (prefixo do quadro + número, ex.: ZE-12). */
-  codigo: string;
+  codigo: string; // NOD-416: o código da tarefa (prefixo do quadro + número, ex.: ZE-12)
   /** NOD-416: o branch sugerido (o código e o título em slug, ex.: ze-12-secao-de-planos). */
   branch: string;
   naColunaDesde?: number | null; // NOD-420: epoch ms da entrada na coluna atual; null fora do Postgres
   /** NOD-421: os PRs ligados e as linhas de sistema (CI, conflito, merge). */
   prs?: PrNaTela[];
   linhas?: LinhaDeSistema[];
+  movimentos?: MovimentoDto[]; // NOD-419: os últimos movimentos (o mais novo primeiro)
 };
 export type QuadroDto = Omit<Quadro, "colunas"> & {
   agenteNome: string;
@@ -148,7 +150,7 @@ export type OpQuadro =
   | { tipo: "criar_quadro"; meta?: string | null; prazo?: string | null }
   | { tipo: "criar_tarefa"; titulo: string; descricao?: string; status?: string; agente?: string | null }
   | { tipo: "importar_linear"; itens: ItemLinear[] }
-  | { tipo: "mudar_tarefa"; tarefa: string; titulo?: string; descricao?: string; status?: string; agente?: string | null; pr_url?: string | null; pergunta?: string | null; excluir?: boolean; sem_iniciar?: boolean }
+  | { tipo: "mudar_tarefa"; tarefa: string; titulo?: string; descricao?: string; status?: string; agente?: string | null; pr_url?: string | null; pergunta?: string | null; excluir?: boolean; sem_iniciar?: boolean; /** NOD-419: o porquê de bloquear ou cancelar (o agente precisa dizer). */ motivo?: string }
   | { tipo: "responder"; tarefa: string; resposta: string }
   /** NOD-417: um comentário na tarefa (sozinho no lote, sem Desfazer). Aciona o responsável e os @mencionados, nunca o autor. */
   | { tipo: "comentar"; tarefa: string; texto: string }
@@ -171,14 +173,12 @@ export type OpQuadro =
   | { tipo: "mover_coluna"; coluna: string; antes_de?: string; depois_de?: string }
   | { tipo: "remover_coluna"; coluna: string; destino?: string }
   | { tipo: "definir_passagem"; coluna: string; agente?: string | null; instrucoes?: string | null }
-  | { tipo: "terminei"; tarefa?: string }
+  | { tipo: "terminei"; tarefa?: string } | OpFreio // NOD-419: nao_e_comigo, desfazer_movimento, travar_coluna
   | { tipo: "substituir_colunas"; colunas: { id?: string; nome: string; grupo: GrupoColuna }[]; destinos?: { de: string; para: string }[] };
 
 export type TipoOpQuadro = OpQuadro["tipo"];
-
 /** Um item que o bot já buscou no Linear com a ferramenta dele (o servidor não fala com o Linear). */
 export type ItemLinear = { identificador: string; titulo: string; url?: string; descricao?: string; status?: string; agente?: string | null };
-
 export type ArgsGerirQuadro = {
   /** O quadro: o id, ou o nome do bot anfitrião. Sem ele, o do próprio bot, senão o único da pessoa. */
   quadro?: string;
@@ -193,7 +193,7 @@ export type ResultadoGerirQuadro =
 export type { ResumoQuadroParaBot } from "./quadro-resumo-bot.ts";
 
 /** Os tetos do quadro (a ferramenta, o domínio e a tela usam os mesmos). */
-export const LIMITES_QUADRO = { meta: 200, titulo: 200, descricao: 4000, pergunta: 1000, resposta: 4000, comentario: 4000, ops: 50, itens: 50, identificador: 40, url: 500, coluna: 40, colunas: 30, instrucoes: 500, prazoMin: 30 * 24 * 60 } as const;
+export const LIMITES_QUADRO = { meta: 200, titulo: 200, descricao: 4000, pergunta: 1000, resposta: 4000, comentario: 4000, ops: 50, itens: 50, identificador: 40, url: 500, coluna: 40, colunas: 30, instrucoes: 500, motivo: 600, prazoMin: 30 * 24 * 60 } as const;
 
 /** NOD-448 (ADR-140): o card de substituir as colunas mora em quadro-proposta-colunas.ts (teto de linhas dos contratos). */
 export type { ColunaNaProposta, PayloadPropostaColunasQuadro } from "./quadro-proposta-colunas.ts";

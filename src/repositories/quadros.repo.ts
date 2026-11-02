@@ -1,4 +1,5 @@
 import type { AutorLote, CampoHistorico, ColunaQuadro, IdColuna, LinhaDeSistema, LoteQuadro, MudancaTarefa, PrDaTarefa, Quadro, TarefaQuadro, TipoLinhaTarefa } from "../contracts/quadro.ts";
+import type { MovimentoTarefa, NovoMovimento } from "../contracts/freios-quadro.ts";
 import type { EstadoTurno } from "../contracts/turno.ts";
 import type { MarcasAviso } from "../domain/avisos-quadro.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
@@ -63,6 +64,43 @@ export type FotoLote = {
 
 const COLUNAS_Q = "id, agente_id, to_char(prazo, 'YYYY-MM-DD') as prazo, meta, cumprido_em, resumo, colunas, criado_em, atualizado_em, meta_desde, prefixo";
 const COLUNAS_T = "id, quadro_id, titulo, descricao, status, voltar_para, agente_id, ordem, linear_id, linear_url, pr_url, pergunta, resposta, de_fora, turno_id, criado_em, mudado_em, terminada_em, numero";
+interface LinhaMovimento {
+  id: string;
+  tarefa_id: string;
+  lote_id: string | null;
+  tipo: MovimentoTarefa["tipo"];
+  de: IdColuna;
+  para: IdColuna;
+  agente_antes: string | null;
+  agente_depois: string | null;
+  autor: "pessoa" | "agente";
+  autor_agente_id: string | null;
+  motivo: string | null;
+  acionou: boolean;
+  desfaz: string | null;
+  de_fora: boolean;
+  desfeito_em: Date | null;
+  criado_em: Date;
+}
+const COLUNAS_M = "id, tarefa_id, lote_id, tipo, de, para, agente_antes, agente_depois, autor, autor_agente_id, motivo, acionou, desfaz, de_fora, desfeito_em, criado_em";
+const paraMovimento = (l: LinhaMovimento): MovimentoTarefa => ({
+  id: l.id,
+  tarefaId: l.tarefa_id,
+  tipo: l.tipo,
+  de: l.de,
+  para: l.para,
+  agenteAntes: l.agente_antes,
+  agenteDepois: l.agente_depois,
+  autor: l.autor === "agente" && l.autor_agente_id ? { tipo: "agente", agenteId: l.autor_agente_id } : { tipo: "pessoa" },
+  motivo: l.motivo,
+  acionou: l.acionou,
+  loteId: l.lote_id,
+  desfaz: l.desfaz,
+  deFora: l.de_fora,
+  desfeitoEm: msOuNull(l.desfeito_em),
+  criadoEm: ms(l.criado_em),
+});
+
 const COLUNAS_L = "id, quadro_id, autor, autor_agente_id, pedido_por, resumo, antes, tarefa_ids, desfeito_em, criado_em";
 
 const paraQuadro = (l: LinhaQuadro): Quadro => ({
@@ -349,6 +387,112 @@ export function quadrosRepo(conn: Conn, escopo: Escopo) {
     async ultimoLote(quadroId: string): Promise<(LoteQuadro & { antes: FotoLote }) | null> {
       const [r] = await conn<LinhaLote[]>`select ${conn.unsafe(COLUNAS_L)} from quadro_lotes where ${dona()} and quadro_id = ${quadroId} order by criado_em desc, id desc limit 1`;
       return r && r.desfeito_em === null ? paraLote(r) : null;
+    },
+    // NOD-419: o histórico de movimentos (src/domain/freios-quadro.ts lê; o lote grava).
+    /**
+     * Os movimentos do quadro nas últimas `horas` (pelo relógio do banco, o mesmo que grava `criado_em`), mais todas as
+     * recusas (o limite de passes conta a vida da tarefa).
+     */
+    async movimentos(quadroId: string, horas = 24): Promise<MovimentoTarefa[]> {
+      const rs = await conn<LinhaMovimento[]>`
+        select ${conn.unsafe(COLUNAS_M)} from quadro_movimentos
+        where ${dona()} and quadro_id = ${quadroId} and (criado_em >= clock_timestamp() - make_interval(hours => ${horas}) or tipo = 'nao_e_comigo')
+        order by criado_em, id`;
+      return rs.map(paraMovimento);
+    },
+    /**
+     * Revisão 2 do PR #629: o último movimento desfazível de cada tarefa, sem a janela de `movimentos` (o espelho de
+     * `ultimoDesfazivel`). A tela mostra o Desfazer nos últimos movimentos da tarefa, de qualquer idade; o
+     * desfazer_movimento lê estes junto do histórico para aceitar o mesmo que a tela oferece.
+     */
+    async ultimosDesfaziveis(quadroId: string): Promise<MovimentoTarefa[]> {
+      const rs = await conn<LinhaMovimento[]>`
+        select distinct on (tarefa_id) ${conn.unsafe(COLUNAS_M)} from quadro_movimentos
+        where ${dona()} and quadro_id = ${quadroId} and desfeito_em is null and tipo <> 'acionou'
+          and (de is distinct from para or agente_antes is distinct from agente_depois)
+        order by tarefa_id, criado_em desc, id desc`;
+      return rs.map(paraMovimento);
+    },
+    /**
+     * Revisão 8 do PR #629: de cada tarefa que espera (Precisa de você, Bloqueado), o último movimento que valha e que a
+     * levou para a espera vindo de fora dela, de qualquer idade (o espelho do `paradaDaEspera`). O último desfazível não
+     * basta: um movimento dentro da espera (Bloqueado → Precisa de você, troca de responsável) o escondia. Revisão 10: o
+     * 4º passe de Precisa de você a Bloqueado também é entrada (`pelosPasses`).
+     */
+    async entradasNaEspera(quadroId: string): Promise<MovimentoTarefa[]> {
+      const rs = await conn<LinhaMovimento[]>`
+        select distinct on (tarefa_id) ${conn.unsafe(COLUNAS_M)} from quadro_movimentos m
+        where ${dona()} and quadro_id = ${quadroId} and desfeito_em is null
+          and para in ('voce', 'bloqueado')
+          and (de not in ('voce', 'bloqueado') or (tipo = 'nao_e_comigo' and para = 'bloqueado' and de <> 'bloqueado'))
+          and exists (select 1 from quadro_tarefas t where t.tenant_id = m.tenant_id and t.id = m.tarefa_id and t.status in ('voce', 'bloqueado'))
+        order by tarefa_id, criado_em desc, id desc`;
+      return rs.map(paraMovimento);
+    },
+    /**
+     * Revisão do PR #629: os acionamentos de cada tarefa na última hora, contados pelo relógio do banco (o freio lê).
+     * Revisão 4: a conta zera no último freio que levou a Bloqueado (de <> para), o espelho de
+     * `acionamentosNaHora` do domínio; o freio do comentário (de = para) não zera. Revisão 6: o freio desfeito também zera
+     * (desfazê-lo não devolve os acionamentos de antes dele à conta).
+     */
+    async acionamentosNaHora(quadroId: string): Promise<Map<string, number>> {
+      const rs = await conn<{ tarefa_id: string; n: number }[]>`
+        select m.tarefa_id, count(*)::int as n from quadro_movimentos m
+        where ${dona()} and m.quadro_id = ${quadroId} and m.acionou and m.criado_em > clock_timestamp() - interval '1 hour'
+          and not exists (
+            select 1 from quadro_movimentos f
+            where ${dona()} and f.quadro_id = ${quadroId} and f.tarefa_id = m.tarefa_id and f.tipo = 'freio'
+              and f.de <> f.para and f.criado_em >= m.criado_em)
+        group by m.tarefa_id`;
+      return new Map(rs.map((r) => [r.tarefa_id, r.n]));
+    },
+    /** Os últimos `porTarefa` movimentos de cada tarefa (o histórico discreto da tarefa aberta). */
+    async ultimosMovimentos(quadroId: string, porTarefa: number): Promise<MovimentoTarefa[]> {
+      // Por tarefa que ainda está no quadro, cada uma pelo índice da tarefa com LIMIT (revisão 2 do PR #629): o
+      // histórico cresce sem fim, e a janela sobre o quadro inteiro lia tudo, inclusive o das tarefas excluídas.
+      // Revisão 3 do PR #629: o teto vale à parte para os `acionou` (cada comentário que aciona grava um) e para o resto;
+      // num teto só, 11 comentários de bot empurravam o último movimento de verdade para fora (sumia o Desfazer e o eco).
+      // Revisão 4 do PR #629: os baldes se separam pelo critério de `mudouATarefa` (o mesmo de `ultimosDesfaziveis`), não
+      // pelo tipo: o `freio` do comentário (de = para, mesma mão) não mudou nada e caía no balde dos movimentos.
+      const rs = await conn<LinhaMovimento[]>`
+        select m.* from (select id as tid from quadro_tarefas where ${dona()} and quadro_id = ${quadroId}) t
+        cross join lateral (
+          (select ${conn.unsafe(COLUNAS_M)} from quadro_movimentos
+          where ${dona()} and quadro_id = ${quadroId} and tarefa_id = t.tid
+            and tipo <> 'acionou' and (de is distinct from para or agente_antes is distinct from agente_depois)
+          order by criado_em desc, id desc limit ${porTarefa})
+          union all
+          (select ${conn.unsafe(COLUNAS_M)} from quadro_movimentos
+          where ${dona()} and quadro_id = ${quadroId} and tarefa_id = t.tid
+            and not (tipo <> 'acionou' and (de is distinct from para or agente_antes is distinct from agente_depois))
+          order by criado_em desc, id desc limit ${porTarefa})
+        ) m order by m.criado_em desc, m.id desc`;
+      return rs.map(paraMovimento);
+    },
+    async inserirMovimentos(quadroId: string, loteId: string | null, ms: readonly NovoMovimento[]): Promise<void> {
+      for (const m of ms) {
+        await conn`
+          insert into quadro_movimentos (tenant_id, owner_id, quadro_id, tarefa_id, lote_id, tipo, de, para, agente_antes, agente_depois, autor, autor_agente_id, motivo, acionou, desfaz, de_fora)
+          values (${escopo.tenantId}, ${escopo.pessoaId}, ${quadroId}, ${m.tarefaId}, ${loteId}, ${m.tipo}, ${m.de}, ${m.para}, ${m.agenteAntes}, ${m.agenteDepois},
+            ${m.autor.tipo}, ${m.autor.tipo === "agente" ? m.autor.agenteId : null}, ${m.motivo}, ${m.acionou}, ${m.desfaz ?? null}, ${m.deFora === true})`;
+      }
+    },
+    async marcarMovimentosDesfeitos(ids: readonly string[]): Promise<void> {
+      if (ids.length === 0) return;
+      await conn`update quadro_movimentos set desfeito_em = clock_timestamp() where ${dona()} and id = any(${conn.array([...ids])}::uuid[]) and desfeito_em is null`;
+    },
+    /** Revisão 5 do PR #629: os tipos dos movimentos do lote que ainda valem (o Desfazer do agente não leva laço nem freio). */
+    /** Os movimentos que valem do lote, pelo que a regra "só a pessoa desfaz" lê (tipo, de, para; `paradaDaPessoa`). */
+    async paradasVivasDoLote(loteId: string): Promise<Pick<MovimentoTarefa, "tipo" | "de" | "para">[]> {
+      return conn<Pick<MovimentoTarefa, "tipo" | "de" | "para">[]>`select distinct tipo, de, para from quadro_movimentos where ${dona()} and lote_id = ${loteId} and desfeito_em is null`;
+    },
+    async desfazerMovimentosDoLote(loteId: string): Promise<void> {
+      // O lote desfez um movimento (desfazer_movimento): desfazer o lote devolve aquele movimento ao jogo (revisão do PR #629).
+      await conn`
+        update quadro_movimentos set desfeito_em = null
+        where ${dona()} and desfeito_em is not null and id in (
+          select desfaz from quadro_movimentos where ${dona()} and lote_id = ${loteId} and desfaz is not null and desfeito_em is null)`;
+      await conn`update quadro_movimentos set desfeito_em = clock_timestamp() where ${dona()} and lote_id = ${loteId} and desfeito_em is null`;
     },
     /**
      * Revisão 2 do PR #623: alguma tarefa entrou neste quadro ou saiu dele (mover_quadro) depois do lote? Aí o lote não se

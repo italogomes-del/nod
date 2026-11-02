@@ -429,6 +429,14 @@ a.qd-chip:hover { background: var(--surface-raised); }
 .qd-t-desc { font-size: 14.5px; line-height: 1.65; color: var(--ink); padding: 6px 0 4px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .qd-t-desc-vazia { color: var(--ink-3); }
 .qd-t-sec { margin: 6px 0 0; padding-top: 14px; border-top: 1px solid var(--line); font-size: 13px; font-weight: 600; color: var(--ink); }
+/* NOD-419: o histórico discreto da tarefa (recolhido) e o popover do "Só sai para…". */
+.qd-hist { margin: 6px 0 0; padding-top: 10px; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--ink-3); }
+.qd-hist-sum { cursor: pointer; width: max-content; }
+.qd-hist-lista { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 4px; }
+.qd-hist-l { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
+.qd-hist-desfeito > span:first-child { text-decoration: line-through; }
+.qd-hist-hora { font-variant-numeric: tabular-nums; }
+.qd-pop-trava .qd-pas-modos { display: grid; gap: 4px; }
 .qd-t-principal .qd-voce-frase, .qd-t-resposta { margin: 0; font-size: 14px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
 .qd-t-resposta { color: var(--ink-2); }
 .qd-resp-form { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
