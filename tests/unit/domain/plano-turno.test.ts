@@ -5,7 +5,7 @@ import type { Conector } from "../../../src/contracts/conector.ts";
 import type { Turno } from "../../../src/contracts/turno.ts";
 import { ErroDeDominio } from "../../../src/domain/erro.ts";
 import { NATIVAS_DO_TERMINAL } from "../../../src/domain/nativas.ts";
-import { FERRAMENTAS_NOD_POR_MODO, MODOS_DO_QUADRO, montarPlano, PLANO_SEM_VALIDADE, type EntradaPlano } from "../../../src/domain/plano-turno.ts";
+import { FERRAMENTAS_NOD_POR_MODO, FORA_DO_PEDIDO_DE_OUTRA_PESSOA, MODOS_DO_QUADRO, montarPlano, permitidaAPedidoDeOutraPessoa, PLANO_SEM_VALIDADE, type EntradaPlano } from "../../../src/domain/plano-turno.ts";
 
 const agora = 1_000_000;
 const agente: Agente = { tenantId: "t", id: "a1", ownerId: "p", visibility: "privado", nome: "Vera", titulo: "", descricao: "revisa PRs", dono: "pessoa", forma: "shape-square", cor: "c-red", fixado: false, oculto: false, confirmado: true, modelo: "claude-haiku-4-5-20251001", duplicadoDe: null, criadoEm: 0 };
@@ -148,6 +148,85 @@ describe("montarPlano", () => {
       expect(n).not.toContain("ler_conversa");
     }
     expect(nomes(montarPlano({ ...base, modo: "conversa", turno: { ...turno, sobProcuracaoDe: null } }))).toContain("buscar_conversas");
+  });
+
+  it("NOD-443 (revisão 4 do PR #628, achado 2): o turno a pedido de outra pessoa não grava estado da dona (memória, frentes, despertar, artefato, rotinas, perfil, barra, acesso)", () => {
+    const deOutra = { ...turno, sobProcuracaoDe: "outra-pessoa" };
+    for (const modo of ["conversa", "criacao", "delegacao", "rotina"] as const) {
+      const daDona = nomes(montarPlano({ ...base, modo, quadro: true }));
+      const n = nomes(montarPlano({ ...base, modo, quadro: true, turno: deOutra }));
+      for (const f of FORA_DO_PEDIDO_DE_OUTRA_PESSOA) expect(n, `${modo} ${f}`).not.toContain(f);
+      expect(n, modo).toContain("gerir_quadro");
+      expect(n, modo).toContain("pedir_aprovacao");
+      // A referência: o mesmo turno da dona tem as que o modo dá (lembrar em todos).
+      expect(daDona, modo).toContain("lembrar");
+    }
+    expect(FORA_DO_PEDIDO_DE_OUTRA_PESSOA).toEqual(expect.arrayContaining(["lembrar", "abrir_frentes", "me_chame_as", "publicar_artefato"]));
+    // A procuração da própria dona (pedido de colega dela) não perde nada disto.
+    expect(nomes(montarPlano({ ...base, turno: { ...turno, sobProcuracaoDe: turno.ownerId } }))).toEqual(expect.arrayContaining(["lembrar", "me_chame_as", "publicar_artefato", "abrir_frentes"]));
+  });
+
+  it("NOD-443 (revisão 5 do PR #628, achado 1): o turno a pedido de outra pessoa não leva conector da dona (nem leitura) nem as memórias dela", () => {
+    const memorias = [{ tenantId: "t", id: "m1", agenteId: "a1", tipo: "preferencia" as const, texto: "SEGREDO-DA-DONA", origem: "pessoa" as const, criadoEm: 0 }];
+    const daDona = montarPlano({ ...base, memorias });
+    expect(nomes(daDona)).toContain("exemplo__listar_contatos");
+    expect(daDona.promptSistema).toContain("SEGREDO-DA-DONA");
+    for (const modo of ["conversa", "criacao", "delegacao", "rotina"] as const) {
+      const p = montarPlano({ ...base, modo, memorias, turno: { ...turno, sobProcuracaoDe: "outra-pessoa" } });
+      expect(p.catalogo.ferramentas.filter((f) => f.origem === "conector"), modo).toEqual([]);
+      expect(p.catalogo.servidores, modo).toEqual([]);
+      expect(p.promptSistema, modo).not.toContain("SEGREDO-DA-DONA");
+      expect(p.promptSistema, modo).not.toContain("mcp__nod__exemplo__");
+    }
+    // A procuração da própria dona continua com tudo.
+    const propria = montarPlano({ ...base, memorias, turno: { ...turno, sobProcuracaoDe: turno.ownerId } });
+    expect(nomes(propria)).toContain("exemplo__listar_contatos");
+    expect(propria.promptSistema).toContain("SEGREDO-DA-DONA");
+  });
+
+  it("NOD-443 (revisão 6 do PR #628, achados 1, 2 e 4): a pedido de outra pessoa, nem o Sobre mim da dona, nem ver_colegas/ler_artefato/listar_rotinas, nem o diretório de colegas ou o inventário de rotinas no prompt", () => {
+    const daDona: Partial<EntradaPlano> = {
+      sobreMim: "SOBRE-MIM-DA-DONA",
+      colegas: [{ id: "a2", nome: "ColegaDaDona", titulo: "Financeiro", descricao: "DESCRICAO-DO-COLEGA" }],
+      rotinasDoAgente: [{ id: "r1", resumo: "toda sexta às 16h", instrucao: "ROTINA-DA-DONA", estado: "ativa" }],
+    };
+    // A referência: o turno da dona tem tudo isto.
+    const propria = montarPlano({ ...base, ...daDona, modo: "conversa" });
+    expect(nomes(propria)).toEqual(expect.arrayContaining(["ver_colegas", "ler_artefato", "listar_rotinas"]));
+    for (const s of ["SOBRE-MIM-DA-DONA", "ColegaDaDona", "DESCRICAO-DO-COLEGA", "ROTINA-DA-DONA", "Diretório de colegas"]) expect(propria.promptSistema, s).toContain(s);
+    for (const modo of ["conversa", "criacao", "delegacao", "rotina"] as const) {
+      const p = montarPlano({ ...base, ...daDona, modo, quadro: true, turno: { ...turno, sobProcuracaoDe: "outra-pessoa" } });
+      for (const f of ["ver_colegas", "ler_artefato", "listar_rotinas"]) expect(nomes(p), `${modo} ${f}`).not.toContain(f);
+      for (const s of ["SOBRE-MIM-DA-DONA", "ColegaDaDona", "DESCRICAO-DO-COLEGA", "ROTINA-DA-DONA", "Diretório de colegas", "Inventário de rotinas"]) expect(p.promptSistema, `${modo} ${s}`).not.toContain(s);
+      // O que fica no catálogo é exatamente o que o caso de uso deixa rodar (achado 5).
+      for (const f of p.catalogo.ferramentas) expect(permitidaAPedidoDeOutraPessoa(f), `${modo} ${f.nome}`).toBe(true);
+    }
+    // A procuração da própria dona (pedido de um bot dela) não perde nada disto.
+    const procuracaoDaDona = montarPlano({ ...base, ...daDona, modo: "conversa", turno: { ...turno, sobProcuracaoDe: turno.ownerId } });
+    expect(nomes(procuracaoDaDona)).toEqual(expect.arrayContaining(["ver_colegas", "ler_artefato", "listar_rotinas"]));
+    expect(procuracaoDaDona.promptSistema).toContain("SOBRE-MIM-DA-DONA");
+  });
+
+  it("NOD-443 (revisão 7 do PR #628, achado 1): a pedido de outra pessoa, nem as frentes e tasks abertas da dona no prompt", () => {
+    const trabalhosAbertos = [{ id: "w1", titulo: "FRENTE-DA-DONA", estado: "rodando" as const, ultimoPasso: "PASSO-DA-DONA" }];
+    // A referência: o turno da dona (conversa e delegação, sem trabalho) mostra as frentes dela.
+    for (const modo of ["conversa", "delegacao"] as const) {
+      const propria = montarPlano({ ...base, modo, trabalhosAbertos });
+      for (const s of ["FRENTE-DA-DONA", "PASSO-DA-DONA", "Trabalhos em andamento"]) expect(propria.promptSistema, `${modo} ${s}`).toContain(s);
+    }
+    for (const modo of ["conversa", "criacao", "delegacao", "rotina"] as const) {
+      const p = montarPlano({ ...base, modo, quadro: true, trabalhosAbertos, turno: { ...turno, sobProcuracaoDe: "outra-pessoa" } });
+      for (const s of ["FRENTE-DA-DONA", "PASSO-DA-DONA", "Trabalhos em andamento"]) expect(p.promptSistema, `${modo} ${s}`).not.toContain(s);
+    }
+    // A procuração da própria dona (pedido de um bot dela) continua vendo.
+    expect(montarPlano({ ...base, modo: "delegacao", trabalhosAbertos, turno: { ...turno, sobProcuracaoDe: turno.ownerId } }).promptSistema).toContain("FRENTE-DA-DONA");
+  });
+
+  it("NOD-443 (revisão 6 do PR #628, achado 5): a lista do pedido de outra pessoa só tem ferramenta do nod fora das da dona", () => {
+    expect(permitidaAPedidoDeOutraPessoa({ nome: "gerir_quadro", origem: "nod" })).toBe(true);
+    expect(permitidaAPedidoDeOutraPessoa({ nome: "pedir_aprovacao", origem: "nod" })).toBe(true);
+    for (const nome of [...FORA_DO_PEDIDO_DE_OUTRA_PESSOA, "buscar_conversas", "ler_conversa", "ver_agenda", "nao_lidos"]) expect(permitidaAPedidoDeOutraPessoa({ nome, origem: "nod" }), nome).toBe(false);
+    for (const origem of ["conector", "computador", "workspace", "proxy"] as const) expect(permitidaAPedidoDeOutraPessoa({ nome: "x", origem }), origem).toBe(false);
   });
 
   it("NOD-85 (revisão 1 do PR #595): ver_agenda só onde a pessoa dona lê — nem na sala nem a pedido de outro bot", () => {

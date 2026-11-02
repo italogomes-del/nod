@@ -3,6 +3,7 @@ import { ErroDoMover, EXECUTORES_QUADRO } from "../../../use-cases/acoes/quadro.
 import { verComentarios } from "../../../use-cases/comentar-tarefa.ts";
 import { verTrabalhos } from "../../../use-cases/quadro-execucoes.ts";
 import { historicoDaTarefa, listarQuadros, verQuadro, verTarefaPorCodigo } from "../../../use-cases/quadro.ts";
+import { muralDoQuadro, quadrosCompartilhados, verQuadroPorId } from "../../../use-cases/quadro-pessoas.ts";
 import { TABELA_ERROS } from "../erros.ts";
 import type { Rota } from "../roteador.ts";
 import { corpoObjeto, criarExecutor, type DepsRotas } from "./executar-caso.ts";
@@ -11,6 +12,8 @@ const ID = "(?<id>[^/]+)";
 const TID = "(?<tid>[^/]+)";
 const LID = "(?<lid>[^/]+)";
 const CID = "(?<cid>[^/]+)";
+const QID = "(?<qid>[^/]+)";
+const PID = "(?<pid>[^/]+)";
 /** O id da coluna (o nome também serve, como na conversa). O roteador já decodificou: decodificar de novo quebra "100%". */
 const coluna = (cid: string | undefined) => cid ?? "";
 const texto = (v: unknown) => (typeof v === "string" ? v : undefined);
@@ -40,9 +43,20 @@ export function motivoDoMover(erro: unknown): { status: number; corpo: { codigo:
  * único do id (src/use-cases/acoes/quadro.ts), o mesmo lote do gerir_quadro; o corpo passa pelo lerOp do domínio. A
  * resposta traz o quadro montado e o lote (para o Desfazer); o outro aparelho atualiza pelo frame quadro.mudou.
  */
+/**
+ * NOD-443 (revisão 1, achado 8): o PATCH da tarefa lê só os campos da tarefa. O resto do corpo (anfitriaoId, quadroId,
+ * executor) não chega à ação: o quadro vem da URL.
+ */
+const CAMPOS_DA_TAREFA = ["titulo", "descricao", "status", "agente", "pr_url", "pergunta", "excluir"] as const;
+function camposDaTarefa(c: Record<string, unknown>): Partial<Record<(typeof CAMPOS_DA_TAREFA)[number], never>> {
+  return Object.fromEntries(CAMPOS_DA_TAREFA.filter((k) => k in c).map((k) => [k, c[k]])) as never;
+}
+
 export function rotasQuadro(d: DepsRotas): Rota[] {
   const executar = criarExecutor(d);
   const base = (agenteId: string) => ({ anfitriaoId: agenteId, executor: d.executor ?? "catcher" });
+  // O corpo não escolhe o quadro: vem da URL (o id; um id que não é uuid não acha nada).
+  const doQuadro = (qid: string | undefined) => ({ quadroId: qid ?? "", executor: d.executor ?? "catcher" });
   return [
     { metodo: "GET", padrao: new RegExp(`^/agentes/${ID}/quadro$`), async handler(ctx) {
       ctx.json(200, await executar(ctx.escopo, verQuadro, { agenteId: ctx.params.id ?? "" }));
@@ -68,7 +82,7 @@ export function rotasQuadro(d: DepsRotas): Rota[] {
     } },
     { metodo: "PATCH", acao: "quadro.mudar_tarefa", padrao: new RegExp(`^/agentes/${ID}/quadro/tarefas/${TID}$`), async handler(ctx) {
       const c = corpoObjeto(await ctx.corpo());
-      ctx.json(200, await executar(ctx.escopo, EXECUTORES_QUADRO["quadro.mudar_tarefa"], { ...c, ...base(ctx.params.id ?? ""), tarefa: ctx.params.tid ?? "" }));
+      ctx.json(200, await executar(ctx.escopo, EXECUTORES_QUADRO["quadro.mudar_tarefa"], { ...camposDaTarefa(c), ...base(ctx.params.id ?? ""), tarefa: ctx.params.tid ?? "" }));
     } },
     { metodo: "DELETE", acao: "quadro.mudar_tarefa", padrao: new RegExp(`^/agentes/${ID}/quadro/tarefas/${TID}$`), async handler(ctx) {
       ctx.json(200, await executar(ctx.escopo, EXECUTORES_QUADRO["quadro.mudar_tarefa"], { ...base(ctx.params.id ?? ""), tarefa: ctx.params.tid ?? "", excluir: true }));
@@ -158,6 +172,57 @@ export function rotasQuadro(d: DepsRotas): Rota[] {
     } },
     { metodo: "POST", acao: "quadro.desfazer", padrao: new RegExp(`^/agentes/${ID}/quadro/lotes/${LID}/desfazer$`), async handler(ctx) {
       ctx.json(200, await executar(ctx.escopo, EXECUTORES_QUADRO["quadro.desfazer"], { ...base(ctx.params.id ?? ""), lote: ctx.params.lid ?? "" }));
+    } },
+    // NOD-443 (ADR-143): as pessoas, o modo, o comentário e o mural, pela aba Quadro da dona.
+    { metodo: "POST", acao: "quadro.adicionar_pessoa", padrao: new RegExp(`^/agentes/${ID}/quadro/pessoas$`), async handler(ctx) {
+      const c = corpoObjeto(await ctx.corpo());
+      ctx.json(200, await executar(ctx.escopo, EXECUTORES_QUADRO["quadro.adicionar_pessoa"], { ...base(ctx.params.id ?? ""), pessoa: c.pessoa as string, ...(c.modo !== undefined ? { modo: c.modo as string } : {}) }));
+    } },
+    { metodo: "DELETE", acao: "quadro.tirar_pessoa", padrao: new RegExp(`^/agentes/${ID}/quadro/pessoas/${PID}$`), async handler(ctx) {
+      ctx.json(200, await executar(ctx.escopo, EXECUTORES_QUADRO["quadro.tirar_pessoa"], { ...base(ctx.params.id ?? ""), pessoa: ctx.params.pid ?? "" }));
+    } },
+    { metodo: "PATCH", acao: "quadro.mudar_modo", padrao: new RegExp(`^/agentes/${ID}/quadro/modo$`), async handler(ctx) {
+      const c = corpoObjeto(await ctx.corpo());
+      ctx.json(200, await executar(ctx.escopo, EXECUTORES_QUADRO["quadro.mudar_modo"], { ...base(ctx.params.id ?? ""), modo: c.modo as string }));
+    } },
+    { metodo: "POST", acao: "quadro.comentar", padrao: new RegExp(`^/agentes/${ID}/quadro/comentarios$`), async handler(ctx) {
+      const c = corpoObjeto(await ctx.corpo());
+      ctx.json(201, await executar(ctx.escopo, EXECUTORES_QUADRO["quadro.comentar"], { ...base(ctx.params.id ?? ""), texto: c.texto as string, tarefa: texto(c.tarefa) }));
+    } },
+    { metodo: "GET", padrao: new RegExp(`^/agentes/${ID}/quadro/atividade$`), async handler(ctx) {
+      const q = new URL(ctx.req.url ?? "/", "http://127.0.0.1").searchParams;
+      ctx.json(200, await executar(ctx.escopo, muralDoQuadro, { agenteId: ctx.params.id ?? "", pessoa: q.get("pessoa") ?? undefined, tarefa: q.get("tarefa") ?? undefined }));
+    } },
+    // NOD-443: o quadro de outra pessoa, para quem participa, pelo id do quadro. As mutações são as mesmas ações (o lote
+    // entra pela porta da dona); pessoas, modo e colunas não têm rota aqui: são só da dona.
+    { metodo: "GET", padrao: /^\/quadros\/compartilhados$/, async handler(ctx) {
+      ctx.json(200, await executar(ctx.escopo, quadrosCompartilhados, {}));
+    } },
+    { metodo: "GET", padrao: new RegExp(`^/quadros/${QID}$`), async handler(ctx) {
+      ctx.json(200, await executar(ctx.escopo, verQuadroPorId, { quadroId: ctx.params.qid ?? "" }));
+    } },
+    { metodo: "GET", padrao: new RegExp(`^/quadros/${QID}/atividade$`), async handler(ctx) {
+      const q = new URL(ctx.req.url ?? "/", "http://127.0.0.1").searchParams;
+      ctx.json(200, await executar(ctx.escopo, muralDoQuadro, { quadroId: ctx.params.qid ?? "", pessoa: q.get("pessoa") ?? undefined, tarefa: q.get("tarefa") ?? undefined }));
+    } },
+    { metodo: "POST", acao: "quadro.criar_tarefa", padrao: new RegExp(`^/quadros/${QID}/tarefas$`), async handler(ctx) {
+      const c = corpoObjeto(await ctx.corpo());
+      ctx.json(201, await executar(ctx.escopo, EXECUTORES_QUADRO["quadro.criar_tarefa"], { titulo: c.titulo as string, descricao: c.descricao as string | undefined, status: c.status as never, agente: c.agente as string | null | undefined, ...doQuadro(ctx.params.qid) }));
+    } },
+    { metodo: "PATCH", acao: "quadro.mudar_tarefa", padrao: new RegExp(`^/quadros/${QID}/tarefas/${TID}$`), async handler(ctx) {
+      const c = corpoObjeto(await ctx.corpo());
+      ctx.json(200, await executar(ctx.escopo, EXECUTORES_QUADRO["quadro.mudar_tarefa"], { ...camposDaTarefa(c), ...doQuadro(ctx.params.qid), tarefa: ctx.params.tid ?? "" }));
+    } },
+    { metodo: "POST", acao: "quadro.responder", padrao: new RegExp(`^/quadros/${QID}/tarefas/${TID}/resposta$`), async handler(ctx) {
+      const c = corpoObjeto(await ctx.corpo());
+      ctx.json(200, await executar(ctx.escopo, EXECUTORES_QUADRO["quadro.responder"], { ...doQuadro(ctx.params.qid), tarefa: ctx.params.tid ?? "", resposta: c.resposta as string }));
+    } },
+    { metodo: "POST", acao: "quadro.desfazer", padrao: new RegExp(`^/quadros/${QID}/lotes/${LID}/desfazer$`), async handler(ctx) {
+      ctx.json(200, await executar(ctx.escopo, EXECUTORES_QUADRO["quadro.desfazer"], { ...doQuadro(ctx.params.qid), lote: ctx.params.lid ?? "" }));
+    } },
+    { metodo: "POST", acao: "quadro.comentar", padrao: new RegExp(`^/quadros/${QID}/comentarios$`), async handler(ctx) {
+      const c = corpoObjeto(await ctx.corpo());
+      ctx.json(201, await executar(ctx.escopo, EXECUTORES_QUADRO["quadro.comentar"], { ...doQuadro(ctx.params.qid), texto: c.texto as string, tarefa: texto(c.tarefa) }));
     } },
   ];
 }

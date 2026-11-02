@@ -607,11 +607,12 @@ describeIntegracao("quadro-agente (NOD-442)", () => {
   it("revisão 3 do PR #622: mandar para o Backlog com passagem para o turno vivo e apaga a execução", async () => {
     await withRollback(MARLON, async (trx) => {
       const m = await montar(trx);
+      // Criar sem status cai no Backlog (ADR-144): para começar, a tarefa nasce em A fazer.
       const c = await m.lote({ ops: [{ tipo: "criar_quadro", meta: "M" }, { tipo: "criar_tarefa", titulo: "T1", agente: m.betoNome, status: "afazer" }] });
       if (!c.data.ok) throw new Error(c.data.detalhe);
       const turnoId = c.data.comecaram[0]!.turnoId;
       await trx`update turnos set estado = 'despachando', machine_id = ${randomUUID()}, lease_ate = now() + interval '5 minutes' where id = ${turnoId}`;
-      const pessoa = { autor: { tipo: "pessoa" } as const, anfitriaoId: m.ana.agenteId };
+      const pessoa ={ autor: { tipo: "pessoa" } as const, anfitriaoId: m.ana.agenteId };
       const r = await m.lote({ ...pessoa, ops: [{ tipo: "definir_passagem", coluna: "backlog", agente: m.betoNome }, { tipo: "mudar_tarefa", tarefa: "T1", status: "backlog" }] });
       if (!r.data.ok) throw new Error(r.data.detalhe);
       expect(r.data.quadro?.tarefas[0]).toMatchObject({ status: "backlog", agenteNome: m.betoNome, execucao: null });

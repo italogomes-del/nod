@@ -14,13 +14,13 @@ import { direcaoDaTroca, ehModo, movimentoDaTroca, type ModoDaConversa } from ".
 import { comColunas, FAIXA_DO_PRAZO, fraseDoErroDeColuna, nomeRepetido, passoDeMover, pedeConfirmacao, porqueNaoRecebeCard, porqueNaoRemove, prazoEmMin, prazoLegivelMin, reciboDaResposta, reciboDeMover, saidaComErroDesiste, seletorDoFocoDaColuna, soltarEm, type EdicaoDeColuna, type Lado, type UnidadeDePrazo } from "./colunas.ts";
 import { ErroApi } from "./erro-api.ts";
 import { anunciarEm } from "./posicao-da-lista.ts";
-import type { EntradaHistoricoDto, GrupoColuna, QuadroDaPessoaDto, QuadroDto, TarefaDto } from "../../src/contracts/quadro.ts";
+import type { EntradaHistoricoDto, GrupoColuna, LinhaMuralDto, ModoConversa, QuadroDaPessoaDto, QuadroDto, TarefaDto } from "../../src/contracts/quadro.ts";
 import type { ConversaDto, RespostaMutacao } from "../../src/contracts/api.ts";
 import type { MutacaoQuadro } from "./api.ts";
 import { RESP_VOCE, acesos, fraseDoErroDoMover, reciboDaNovaTarefa, codigoNaUrl, destinosDaTarefa, historicoDaFaixa, respostaDoBot, tarefaNoQuadro, type Faixa } from "./quadro-dados.ts";
 import { quadroVazio, type Aviso, type Filtro, type Html } from "../telas/quadro.ts";
 import { decidirSoltura, fraseDaTrava, RECUSA_MS, relogioDaRecusa, type RelogioDaRecusa } from "./freios.ts";
-import { faixaDoQuadro, pilulaDoQuadro, quadroCarregando, quadroComErro, quadroDaMeta, semQuadro, tarefaAberta, type AgenteDoQuadro, type TrocaDaFaixa } from "../telas/quadro-real.ts";
+import { faixaDoQuadro, pilulaDoQuadro, quadroCarregando, quadroComErro, quadroDaMeta, rotuloDoModo, semQuadro, tarefaAberta, type AgenteDoQuadro, type PainelDoQuadro, type TrocaDaFaixa } from "../telas/quadro-real.ts";
 import { anuncioDaOrdem, anuncioDaPagina, CONVERSA, ehForma, indicePeloId, moverNaOrdem, paginaPelaTecla, passoDaTeclaDeMover, presa, TAREFAS, type FormaDasTarefas, type Pagina } from "./paginas.ts";
 import { guardarOrdem, ordemDoAgente, paginasDtoDe } from "./ordem-das-paginas.ts";
 import { formaDasTarefas, menuDaPagina, paginaDoApp } from "../telas/paginas.ts";
@@ -57,6 +57,11 @@ export interface ApiDoQuadro extends ApiDosComentarios, ApiDosTrabalhos {
   moverTarefa?(agenteId: string, tarefaId: string, quadro: string): Promise<MutacaoQuadro & { movida?: { codigo: string; codigoAntigo: string } }>;
   historicoTarefa?(agenteId: string, tarefaId: string): Promise<{ historico: EntradaHistoricoDto[] }>;
   quadros?(): Promise<{ quadros: QuadroDaPessoaDto[] }>;
+  /** NOD-443 (ADR-143): as pessoas, o modo e o mural. Opcionais: sem elas, o quadro não mostra "Pessoas" nem "Atividade". */
+  adicionarPessoa?(agenteId: string, pessoa: string, modo?: ModoConversa): Promise<MutacaoQuadro>;
+  tirarPessoa?(agenteId: string, pessoaId: string): Promise<MutacaoQuadro>;
+  mudarModo?(agenteId: string, modo: ModoConversa): Promise<MutacaoQuadro>;
+  atividadeQuadro?(agenteId: string): Promise<{ linhas: LinhaMuralDto[] }>;
 }
 
 /** NOD-442: o que o quadro de verdade precisa do main. Sem isto (os testes da NOD-429), a vista é o quadro vazio. */
@@ -204,6 +209,11 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
   let leituraHist = 0;
   /** NOD-430: a tarefa pedida pelo código num chat (`nod-tarefa:`): abre quando a conversa do dono dela estiver na tela. */
   let pendente: { agenteId: string; tarefaId: string } | null = null;
+  /** NOD-443: o painel aberto abaixo do topo (Pessoas ou Atividade), o mural (null = carregando) e o porquê de uma recusa. */
+  let painel: PainelDoQuadro = null;
+  let mural: LinhaMuralDto[] | null = null;
+  let erroPessoas: string | null = null;
+  let leituraMural = 0;
   /** QA do PR #623 (D4): o aviso do mover, dito no quadro destino quando a tarefa movida abre lá. */
   let avisoDoMover: string | null = null;
   /** Revisão 7 do PR #623: a coluna com responsável escolhida no Status da tarefa aberta, esperando "Confirmar · Não iniciar ainda". */
@@ -229,6 +239,7 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     if (aberta) dd?.naUrl?.(null);
     histTarefa = null; quadros = null; leituraHist++;
     agenteId = null; q = null; carga = "nada"; aberta = null; acesas = new Set(); faixa = { tipo: "nada" }; loteAntes = null;
+    painel = null; mural = null; erroPessoas = null; leituraMural++;
     historico = []; histAberto = false; tarefasPedem = false; leitura++; leituraConversa++; dica = []; editandoMeta = false; edicao = null; soltarNaAberta = null; coms.fechar(); trabs.fechar();
     if (timerReler) clearTimeout(timerReler);
     if (timerRecolher) clearTimeout(timerRecolher);
@@ -249,8 +260,9 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
       const soltar = soltarNaAberta?.tarefa === t.id ? { soltar: soltarNaAberta.coluna } : {};
       return tarefaAberta({ t, q, agente: dd.agente, comentarios: coms.html(t.id, dd.agente, dd.hora), hora: dd.hora, historico: dd.api()?.historicoTarefa ? histTarefa : undefined, ...(resp ? { responsaveis: resp } : {}), ...(quadros ? { destinos: destinosDaTarefa(quadros, q.id), moverPara } : {}), ...soltar, ...(trabalhos !== undefined ? { trabalhos } : {}) });
     }
+    const comPessoas = !!dd.api()?.adicionarPessoa;
     const agentes = dd.agentes && dd.api()?.definirPassagem ? dd.agentes() : undefined;
-    return quadroDaMeta({ q, nome, agente: dd.agente, filtro, alternadas, acesas, edicao, agora: Date.now(), editandoMeta, ...(agentes ? { agentes } : {}), ...(recusa ? { avisos: new Map([[recusa.tarefa, recusa.aviso]]) } : {}) });
+    return quadroDaMeta({ q, nome, agente: dd.agente, filtro, alternadas, acesas, edicao, agora: Date.now(), editandoMeta, ...(comPessoas ? { pessoas: { painel, mural, hora: dd.hora, erro: erroPessoas } } : {}), ...(agentes ? { agentes } : {}) , ...(recusa ? { avisos: new Map([[recusa.tarefa, recusa.aviso]]) } : {}) });
   }
 
   /**
@@ -288,6 +300,9 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     const txt = v.querySelector<HTMLTextAreaElement>("#qc-txt");
     const t = tarefaNoQuadro(q, aberta);
     if (txt) txt.placeholder = t ? `Recado sobre ${t.linearId ?? t.titulo}` : "Nova tarefa ou mensagem";
+    // NOD-443 (D2): o rótulo diz quem vê esta conversa, com gente no quadro.
+    const modo = v.querySelector<HTMLElement>("#qc-modo");
+    if (modo) { const m = q ? rotuloDoModo(q) : null; modo.hidden = !m; modo.textContent = m ?? ""; }
     desenharFaixa();
   }
 
@@ -354,6 +369,8 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
       avisoSemTarefa = aviso;
     }
     if (aberta && novas.has(aberta)) void lerHistorico();
+    // NOD-443: o mural aberto acompanha o quadro (cada pedido de qualquer pessoa entra nele).
+    if (painel === "atividade" && novas.size) void lerMural();
     desenharVista();
     // Revisão 7 do PR #623: a tarefa do link saiu deste quadro entre a busca do código e a leitura (mudou, foi apagada).
     // O quadro abre e o leitor de tela ouve por que a tarefa não abriu, em vez de silêncio.
@@ -686,6 +703,76 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
       if (c !== chave) return;
       mudarFaixa({ tipo: "erro", texto: "Não deu para desfazer: o quadro mudou depois deste pedido." });
     }
+  }
+
+  /* ---------- NOD-443: as pessoas, o modo e o mural ---------- */
+
+  async function lerMural(): Promise<void> {
+    const a = dd?.api();
+    if (!a?.atividadeQuadro || !agenteId) return;
+    const n = ++leituraMural;
+    const de = agenteId;
+    try {
+      const r = await a.atividadeQuadro(de);
+      if (n !== leituraMural || de !== agenteId) return;
+      mural = r.linhas;
+    } catch {
+      if (n !== leituraMural) return;
+      mural = [];
+      erroPessoas = "Não consegui ler a Atividade agora.";
+    }
+    if (painel === "atividade") desenharVista();
+  }
+
+  function abrirPainel(qual: Exclude<PainelDoQuadro, null>): void {
+    painel = painel === qual ? null : qual;
+    erroPessoas = null;
+    if (painel === "atividade") { mural = null; void lerMural(); }
+    desenharVista();
+    vista()?.querySelector<HTMLElement>(`.qd-conteudo [data-act="painel-${qual}"]`)?.focus();
+  }
+
+  /** Uma mudança nas pessoas ou no modo: um lote com Desfazer na faixa; a recusa do servidor fica no painel. */
+  async function mexerNasPessoas(fazer: (a: ApiDoQuadro, de: string) => Promise<MutacaoQuadro> | undefined, recibo: string, foco?: string): Promise<boolean> {
+    const a = dd?.api();
+    if (!a || !agenteId || mexendo) return false;
+    const c = chave;
+    const de = agenteId;
+    mexendo = true;
+    try {
+      const p = fazer(a, de);
+      if (!p) return false;
+      const r = await p;
+      if (c !== chave || de !== agenteId) return false;
+      erroPessoas = null;
+      aplicarQuadro(r.quadro);
+      mudarFaixa({ tipo: "resposta", texto: recibo, loteId: r.lote && !r.lote.desfeitoEm ? r.lote.id : null, mensagemId: "" });
+      desenharFaixa();
+      if (foco) vista()?.querySelector<HTMLElement>(foco)?.focus();
+      return true;
+    } catch (e) {
+      if (c !== chave) return false;
+      erroPessoas = e instanceof ErroApi && e.message ? e.message : "Não deu para mudar as pessoas do quadro agora.";
+      desenharVista();
+      return false;
+    } finally {
+      mexendo = false;
+    }
+  }
+
+  async function adicionarPessoa(form: HTMLFormElement): Promise<void> {
+    const campo = form.querySelector<HTMLInputElement>('[name="pessoa"]');
+    const pessoa = campo?.value.trim() ?? "";
+    if (!pessoa) return;
+    // D3: o modo escolhido junto com a primeira pessoa (o padrão já é "cada um na sua conversa") vai no MESMO lote
+    // (revisão 1, achado 11): se a pessoa não entra, o modo não muda, e um Desfazer volta os dois.
+    const escolhido = form.querySelector<HTMLInputElement>('[name="modo"]:checked')?.value as ModoConversa | undefined;
+    const modo = !(q?.membros?.length) && escolhido && escolhido !== q?.modoConversa ? escolhido : undefined;
+    const recibo = modo === "so_dono" ? `${pessoa} entrou no quadro; só você conversa com ele` : `${pessoa} entrou no quadro`;
+    const ok = await mexerNasPessoas((a, de) => a.adicionarPessoa?.(de, pessoa, modo), recibo, "#qd-pessoa-in");
+    if (!ok) return;
+    const c = doc.getElementById("qd-pessoa-in");
+    if (c instanceof HTMLInputElement) c.value = "";
   }
 
   /* ---------- NOD-448: as colunas pela tela ---------- */
@@ -1302,6 +1389,13 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
       if (act === "editar-meta") { editarMeta(true); return; }
       if (act === "remover-quadro") { void removerQuadro(); return; }
       if (act === "qc-desfazer" && id) { void desfazer(id); return; }
+      if (act === "painel-pessoas") { abrirPainel("pessoas"); return; }
+      if (act === "painel-atividade") { abrirPainel("atividade"); return; }
+      if (act === "tirar-pessoa" && id) {
+        const quem = q?.membros?.find((m) => m.pessoaId === id)?.nome ?? "A pessoa";
+        void mexerNasPessoas((a, de) => a.tirarPessoa?.(de, id), `${quem} saiu do quadro`, '.qd-conteudo [data-act="painel-pessoas"]');
+        return;
+      }
       if (act === "tarefa-desfazer-movimento" && id) { desfazerMovimento(id); return; }
       if (act === "tarefa-mandar" && id) { const r = recusa; tirarRecusa(); const c = r?.tarefa === id ? colunaDe(r.destino) : null; if (c) pessoaSolta(id, c); return; }
       if (act === "qc-historico") {
@@ -1464,6 +1558,7 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     if (!dd || !form?.closest("#quadro")) return;
     const qual = form.dataset["form"];
     if (qual === "col-renomear" || qual === "col-nova" || qual === "col-remover" || qual === "col-passagem" || qual === "col-trava" || qual === "col-prazo") { ev.preventDefault(); enviarColuna(form); return; }
+    if (qual === "adicionar-pessoa") { ev.preventDefault(); void adicionarPessoa(form); return; }
     if (qual === "recado-trabalho") { ev.preventDefault(); trabs.enviarRecado(form); return; }
     if (qual === "comentar-tarefa") {
       ev.preventDefault();
@@ -1515,6 +1610,12 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     const el = ev.target as Element | null;
     if (!dd || !el?.closest?.("#quadro .qd-conteudo")) return;
     const campo = (el as HTMLElement).dataset?.["campo"];
+    if (campo === "modo-conversa") {
+      const modo = (el as HTMLSelectElement).value as ModoConversa;
+      if (modo === q?.modoConversa) return;
+      void mexerNasPessoas((a, de) => a.mudarModo?.(de, modo), modo === "so_dono" ? "Agora só você conversa com o quadro" : "Agora cada um conversa pela própria conversa", "#qd-modo-sel");
+      return;
+    }
     // NOD-416: Status e Responsável da tarefa aberta (pelo teclado, a escolha espera o Enter ou a saída do campo).
     if (ehCampoDaTarefa(el)) { if (!el.dataset["teclado"]) aplicarCampoDaTarefa(el); return; }
     // "Mover para…": escolher só liga o botão Mover (revisão do PR #623).

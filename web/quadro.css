@@ -633,6 +633,17 @@ a.qd-chip:hover { background: var(--surface-raised); }
   .qd-seg-bt[aria-selected="true"] { outline: 1px solid CanvasText; }
   .qd-col-in { outline: 2px solid CanvasText; outline-offset: 1px; }
 }
+
+/* NOD-443 (ADR-143): as pessoas do quadro e o mural de Atividade. Discreto: links, sem modal, sem botão cheio. */
+.qd-pessoas { display: grid; gap: 6px; margin: 0 0 8px; font-size: 13px; }
+.qd-pessoas-links { display: flex; gap: 12px; }
+.qd-pessoas-painel { display: grid; gap: 8px; max-width: 520px; }
+.qd-pessoas-lista { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.qd-pessoas-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.qd-modos { border: 0; margin: 0; padding: 0; display: grid; gap: 4px; width: 100%; }
+.qd-desfeito .qd-hist-oque { text-decoration: line-through; }
+.qd-t-saiu { color: var(--ink-2, var(--ink)); font-size: 13px; margin: 4px 0; }
+.qc-modo { margin: 0 0 4px 12px; font-size: 12px; color: var(--ink-2, var(--ink)); }
 /* NOD-421: as linhas de sistema da tarefa (GitHub) e o estado do PR: texto menor, cinza, sem alerta. */
 .qd-t-linhas { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; font-size: 12px; color: var(--ink-3); }
 .qd-pr-estado { font-size: 12px; color: var(--ink-3); }

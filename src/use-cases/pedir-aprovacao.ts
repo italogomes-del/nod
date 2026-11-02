@@ -8,7 +8,7 @@ import type { CasoNod } from "../contracts/servicos.ts";
 import { montarItens, type PropostaItem } from "../domain/aprovacao-item.ts";
 import { MOTIVO_ITEM_DE_APROVACAO, MOTIVO_LOTE_MISTO } from "../domain/decisoes.ts";
 import { acaoArriscadaNoApp, decidirLote, envioParaForaNoApp, REGRA_APROVACAO_PERMANENTE, sempreServe, type DecisaoAutomatica } from "../domain/aprovacao-permanente.ts";
-import { REGRA_MODO_AUTOMATICO, REGRA_MODO_TOTAL, REGRA_REVISOR } from "../domain/modo-aprovacao.ts";
+import { aPedidoDeOutraPessoa, modoNoTurno, REGRA_MODO_AUTOMATICO, REGRA_MODO_TOTAL, REGRA_REVISOR } from "../domain/modo-aprovacao.ts";
 import { RISCO_APAGAR_NO_APP, RISCO_DO_GATILHO } from "../domain/revisor.ts";
 import { conectorTocaDadoPessoal } from "../domain/dado-pessoal.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
@@ -79,10 +79,25 @@ type SaidaPedido = Awaited<ReturnType<CasoNod<Deps, "pedir_aprovacao">>>;
  */
 export type SaidaFase1Pedido = { saida: SaidaPedido } | { lote: LoteAutomatico } | { revisao: { aguardar: string; fila: PedidoNaFila | null }; events: RuntimeEvent[] };
 
+/**
+ * NOD-443 (revisão 8 do PR #628): o turno da tarefa que quem participa do quadro pediu (o bot da dona sob a procuração
+ * dela) só pede aprovação enquanto ela participa. A dona tirou a pessoa do quadro: o pedido dela deixou de valer, e o
+ * cartão não chega à dona. Turno sob procuração que não é de tarefa de quadro (sem quadro) segue como antes.
+ */
+async function quemPediuSaiuDoQuadro(deps: Deps, turnoId: string): Promise<boolean> {
+  const turno = await deps.repos.turnos.buscar(turnoId);
+  if (!turno || !aPedidoDeOutraPessoa(turno.sobProcuracaoDe, deps.escopo.pessoaId) || !turno.sobProcuracaoDe) return false;
+  const q = await deps.repos.quadros.doTurno(turno.id);
+  return !!q && !(await deps.repos.quadros.ehMembro(q.id, turno.sobProcuracaoDe));
+}
+
 /** `comRevisor`: só o caminho da ferramenta (a rota interna sabe esperar a revisão e enfileirar o pedido); os outros, como hoje. */
 const montarFase1 = (computador: boolean, comRevisor = false) => async (deps: Deps, input: EntradaPedido): Promise<SaidaFase1Pedido> => {
   const agora = deps.agora();
   if (!Array.isArray(input.itens) || input.itens.length === 0) throw new ErroDeDominio("entrada_invalida", { cause: "itens vazios" });
+  if (await quemPediuSaiuDoQuadro(deps, input.turnoId)) {
+    return { saida: { data: { estado: "recusada", erros: ["quem pediu esta tarefa não participa mais do quadro: o pedido deixou de valer"], instrucao: "não peça de novo; encerre o turno" }, events: [] } };
+  }
   const propostas: PropostaItem[] = [];
   const conectorIdPorIdx: (string | null)[] = [];
   // ADR-059: a capacidade de destino é arriscada (apagar, merge, aprovar PR)? Lido do catálogo do CONECTOR.
@@ -150,7 +165,8 @@ const montarFase1 = (computador: boolean, comRevisor = false) => async (deps: De
   const plano = planoDoTurno ? { ...planoDoTurno, semprePermitir: await semprePermitirVivo(deps, input.agenteId, planoDoTurno) } : null;
   // ADR-059: o modo ATUAL do agente, não o do plano — trocar para mais restrito vale já na próxima ação.
   const agente = plano ? await deps.repos.agentes.buscar(input.agenteId) : null;
-  const modo = agente?.modoAprovacao ?? "manual";
+  // NOD-443 (ADR-143, revisão 3): no turno a pedido de outra pessoa vale o manual, qualquer que seja o modo da dona.
+  const modo = modoNoTurno(agente?.modoAprovacao, plano?.autoria) ?? "manual";
   if (input.plano) {
     // O lote vai ao revisor uma vez só (lote misto pergunta tudo, numa revisão só): arriscado se algum item é, senão envio.
     const candidatos = arriscadaPorIdx.filter((a, idx) => a || envioPorIdx[idx] === true).length;

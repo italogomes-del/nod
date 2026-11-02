@@ -170,8 +170,8 @@ export type ResultadoLembrar = { ok: true; id: string } | { ok: false; recusado:
 export type ResultadoPedirAprovacao =
   | { estado: "decidida"; itens: { idx: number; desfecho: string }[] }
   | { estado: "pendente"; decisao_id: string; instrucao: "encerre o turno; a decisão retoma depois" }
-  /** ADR-062: argumento fora do schema do conector — nenhum card nasce; o bot corrige e pede de novo. */
-  | { estado: "recusada"; erros: string[]; instrucao: "corrija os argumentos e chame pedir_aprovacao de novo" };
+  /** ADR-062: argumento fora do schema do conector — o bot corrige e pede de novo. NOD-443: quem pediu saiu do quadro. */
+  | { estado: "recusada"; erros: string[]; instrucao: "corrija os argumentos e chame pedir_aprovacao de novo" | "não peça de novo; encerre o turno" };
 export type ResultadoPedirAPessoa = { estado: "pendente"; decisao_id: string; instrucao: "encerre o turno; a resposta retoma depois" };
 export type ResultadoOk = { ok: true };
 export type ResultadoPedirABot = { ok: true; tarefa_id: string; instrucao: string; livres: { id: string; nome: string }[] } | { ok: false; erro: "espera_circular" | "ja_pedido" | "experimento_desligado" | "sem_quadro" | "tarefa_invalida" | "colega_fora_do_quadro" | "colega_nao_acionado"; instrucao: string }; // ADR-099: espera circular; NOD-259: ja_pedido; NOD-417: os da tarefa

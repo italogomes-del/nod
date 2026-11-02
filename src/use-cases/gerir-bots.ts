@@ -6,7 +6,7 @@ import type { ContextoFerramenta, SaidaCasoDeUso } from "../contracts/servicos.t
 import { ehErroDeDominio, ErroDeDominio } from "../domain/erro.ts";
 import { capacidadesDoNivel } from "../domain/grupos-de-acesso.ts";
 import { decidirLote, riscoDaAcao, validarLote, type AcaoResolvida } from "../domain/lote-bots.ts";
-import { decidirPeloModo, semRevisor } from "../domain/modo-aprovacao.ts";
+import { decidirPeloModo, modoNoTurno, semRevisor } from "../domain/modo-aprovacao.ts";
 import { log } from "../obs/log.ts";
 import { autoriaPessoa, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
 import { semCard, type PorRegra } from "./confirmar-pelo-modo.ts";
@@ -214,7 +214,9 @@ export async function gerirBots(deps: Deps, input: ContextoFerramenta & { resumo
     const alvoTemAcessos = a.tipo === "duplicar" && a.alvoId !== null ? (await deps.repos.concessoes.doAgente(a.alvoId)).length > 0 : false;
     riscos.push(riscoDaAcao(a, { contaminado, alvoTemAcessos }));
   }
-  const modo = ctx.agente.modoAprovacao;
+  // NOD-443 (revisão 5 do PR #628, achado 3): o modo vem de modoNoTurno, como em todo leitor do modo em runtime — o turno
+  // a pedido de outra pessoa roda no manual, seja qual for o modo do Nod. Sem plano, a autoria sai do turno.
+  const modo = modoNoTurno(ctx.agente.modoAprovacao, input.plano?.autoria ?? { sob_procuracao_de: ctx.turno.sobProcuracaoDe ?? null, conta_de_execucao: ctx.turno.ownerId });
   const espera = decidirLote(validado.acoes, modo, riscos);
   const acoes: AcaoNoLote[] = validado.acoes.map((a: AcaoResolvida): AcaoNoLote => {
     const { alvoId, alvoDaAcao, i, alvoNome, ...acao } = a;

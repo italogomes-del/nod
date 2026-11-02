@@ -22,6 +22,7 @@ import { comArquivoDoMac } from "./arquivo-do-mac.ts";
 import { resolverLocalidade } from "./localidade-turno.ts";
 import { montarFerramentas } from "./montagem-ferramentas.ts";
 import { ehPastaDeTask, motivoSemTerminal, nativasDoTurno, pastaDoBot } from "./nativas.ts";
+import { aPedidoDeOutraPessoa, modoNoTurno } from "./modo-aprovacao.ts";
 import { caminhoDoClone, CLONE_DA_MAQUINA, repoDoGithub, type MotivoSaida } from "./clone-da-maquina.ts";
 import { podeAbrirTask, podeMandarParaTask } from "./trabalho.ts";
 import { daFaixaDaPessoa } from "./triagem.ts";
@@ -108,6 +109,34 @@ import { FERRAMENTAS_WORKSPACE } from "../contracts/ferramentas-workspace.ts";
 /** NOD-449: nao_lidos também (quem falou com a pessoa e quando; marcar é dela): fora do turno a pedido de outro bot. */
 const FERRAMENTAS_DO_HISTORICO: readonly NomeFerramentaNod[] = ["buscar_conversas", "ler_conversa", "ver_agenda", "nao_lidos"];
 const aPedidoDeOutroBot = (t: { sobProcuracaoDe?: string | null }) => !!t.sobProcuracaoDe;
+/**
+ * NOD-443 (ADR-143, revisão 3 do PR #628): o turno a pedido de outra pessoa não fala com colegas nem pede a chave em nome
+ * da dona. pedir_a_bot e encaminhar levariam a procuração adiante (um salto a mais sob o pedido do membro); pedir_credencial
+ * abriria um cartão de chave para a dona por vontade de outra pessoa. O pedido_a_bot recusa também no caso de uso.
+ */
+/**
+ * Revisão 4 do PR #628, achado 2: nem grava estado da dona por vontade de outra pessoa. lembrar (a memória dela),
+ * abrir_frentes/mandar_para_frente (as frentes dela), me_chame_as (um despertar na conta dela), publicar_artefato (um
+ * artefato dela), as rotinas (automação dela), atualizar_perfil e ajustar_barra_lateral (o bot e a tela dela) e
+ * pedir_acesso (uma concessão de conector, como pedir_credencial). O resultado volta pela tarefa (gerir_quadro).
+ */
+export const FORA_DO_PEDIDO_DE_OUTRA_PESSOA: readonly NomeFerramentaNod[] = [
+  "pedir_a_bot", "encaminhar", "pedir_credencial", "pedir_acesso", "lembrar", "abrir_frentes", "mandar_para_frente", "me_chame_as", "publicar_artefato",
+  "criar_rotina", "atualizar_rotina", "excluir_rotina", "pausar_rotina", "reativar_rotina", "atualizar_perfil", "ajustar_barra_lateral",
+  // Revisão 6 do PR #628, achados 2 e 4: nem lê o que é da dona — os bots dela com rotinas e apps (ver_colegas), as rotinas
+  // do bot (listar_rotinas) e os artefatos da conversa dela (ler_artefato).
+  "ver_colegas", "listar_rotinas", "ler_artefato",
+];
+
+/**
+ * Revisão 6 do PR #628, achado 5: a lista que o caso de uso (chamarFerramenta) confere de novo no turno a pedido de outra
+ * pessoa, para qualquer plano que chegue — só ferramenta do nod, fora das que leem ou gravam o que é da dona e fora do
+ * histórico. montarPlano corta pelo mesmo critério.
+ */
+export function permitidaAPedidoDeOutraPessoa(f: Pick<FerramentaPlano, "nome" | "origem">): boolean {
+  const fora: readonly string[] = [...FORA_DO_PEDIDO_DE_OUTRA_PESSOA, ...FERRAMENTAS_DO_HISTORICO];
+  return f.origem === "nod" && !fora.includes(f.nome);
+}
 
 export const FERRAMENTAS_NOD_POR_MODO: Record<ModoTurno, readonly NomeFerramentaNod[]> = {
   criacao: ["atualizar_perfil", "lembrar", "pedir_aprovacao", "pedir_acesso", "pedir_credencial", "criar_rotina", "listar_rotinas", "ver_agenda", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "ver_colegas", "pedir_a_bot", "pedir_a_pessoa", "publicar_artefato", "ler_artefato", "abrir_frentes", "mandar_para_frente", "me_chame_as", "avisar_pessoa", "buscar_conversas", "ler_conversa", "ajustar_barra_lateral", "nao_lidos", "gerir_times"],
@@ -336,7 +365,11 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
   // NOD-262: responder_pedido só na conversa e na sala, e só com pedido de colega na fila (o caso de uso confere de novo).
   const comPedidos = temPedidosNoTurno(modo, entrada.pedidosPendentes);
   const respondePedido: readonly NomeFerramentaNod[] = comPedidos ? [FERRAMENTA_RESPONDER_PEDIDO] : [];
-  const nativas = nativasDoTurno({ modo, confianca: entrada.confianca, pastasAutorizadas: entrada.pastasAutorizadas === true, terminal: entrada.terminal === true, harness: entrada.harness ?? null });
+  // NOD-443 (ADR-143, revisão 3 do PR #628): o turno a pedido de outra pessoa (quem participa do quadro da dona) roda no
+  // manual, sem terminal, sem computador, sem pasta e sem pedir a colegas — o bot é da dona, a vontade é de outra pessoa
+  // (confused deputy). O que muda algo fora vira pedido de aprovação para a dona; nada nativo escapa do proxy.
+  const deOutraPessoa = aPedidoDeOutraPessoa(entrada.turno.sobProcuracaoDe, entrada.turno.ownerId);
+  const nativas = deOutraPessoa ? [] : nativasDoTurno({ modo, confianca: entrada.confianca, pastasAutorizadas: entrada.pastasAutorizadas === true, terminal: entrada.terminal === true, harness: entrada.harness ?? null });
   // definido em 2026-10-12 (ADR-099, parte 2): esperar_comando entra onde o bot espera com tempo (os modos do me_chame_as)
   // E tem terminal — o comando roda pelas regras do Bash dele, na máquina e na pasta do turno. Sem terminal (Codex, sala,
   // ligação), não há onde rodar: fica o me_chame_as.
@@ -351,14 +384,20 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
     // NOD-61 (revisões 2 e 3 do PR #594): pedido de outro bot (sobProcuracaoDe, herdado por frente/retomada/lote) não leva o
     // histórico. Aceito na revisão 5: o turno da conversa com responder_pedido mantém — a pessoa está ali e responde ela.
     .filter((n) => !aPedidoDeOutroBot(entrada.turno) || !FERRAMENTAS_DO_HISTORICO.includes(n))
+    .filter((n) => !deOutraPessoa || !FORA_DO_PEDIDO_DE_OUTRA_PESSOA.includes(n))
     .concat(frente ? [FERRAMENTA_DA_FRENTE] : [])
     .map(ferramentaNod);
-  const { ferramentas: deConectores, servidores } = ferramentasDeConectores(entrada.conectores, entrada.concessoes, entrada.agente.id);
+  // NOD-443 (revisão 5 do PR #628, achado 1): no pedido de outra pessoa, nenhuma ferramenta de conector da dona — nem a
+  // leitura (readOnlyHint sai sem aprovação no manual e devolveria o e-mail, a agenda ou o Drive dela a quem pediu). Pelo
+  // mesmo motivo a memória do bot e a lista de apps dele não entram no prompt (o histórico sai em emitir-plano-turno).
+  // Revisão 6 (achados 1 e 2): nem o "Sobre mim" da dona, nem o diretório dos bots dela, nem o inventário das rotinas.
+  const conectoresDoTurno = deOutraPessoa ? [] : entrada.conectores;
+  const { ferramentas: deConectores, servidores } = ferramentasDeConectores(conectoresDoTurno, entrada.concessoes, entrada.agente.id);
   // definido em 2026-09-24 (ADR-047): delegação sem computador na v1 — o alcance é o dos conectores concedidos.
   // revisto em 2026-09-28 (ADR-050): a criação também tem computador — bot novo é bot completo.
   // revisto em 2026-10-01 (ADR-066): a delegação também — era escopo da v1, sem argumento de risco, e a rotina, sem
   // ninguém olhando, já tinha. Só o peer legado fica sem.
-  const temComputador = entrada.computador === true && modo !== "peer";
+  const temComputador = entrada.computador === true && modo !== "peer" && !deOutraPessoa;
   const computador: FerramentaPlano[] = temComputador && !entrada.computadorFora ? Object.entries(FERRAMENTAS_COMPUTADOR).map(([nome, schema]) => ({ nome, nomeMcp: `mcp__nod__${nome}`, origem: "computador", conectorId: null, readOnlyHint: ["computador_observar", "computador_arquivos", "computador_ler_arquivo", "computador_ler_texto"].includes(nome), tocaDadoPessoal: true, schema })) : [];
   /**
    * definido em 2026-09-18: sem projeto autorizado o agente só enxerga consultar e propor. Ver um
@@ -367,7 +406,7 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
   const SEM_PROJETO = ["workspace_consultar", "workspace_propor_pasta"];
   // revisto em 2026-10-01 (ADR-066): em todo modo menos o peer legado — a emenda da ADR-039 já dizia "em qualquer turno",
   // e o corte só na conversa (18/09) não tinha motivo escrito. O workspace passa pelo proxy e o modo decide.
-  const workspace: FerramentaPlano[] = entrada.workspace && modo !== "peer"
+  const workspace: FerramentaPlano[] = entrada.workspace && modo !== "peer" && !deOutraPessoa
     ? Object.entries(FERRAMENTAS_WORKSPACE)
       .filter(([nome]) => entrada.workspaceVinculado || SEM_PROJETO.includes(nome))
       .map(([nome, schema]) => ({ nome, nomeMcp: `mcp__nod__${nome}`, origem: "workspace", conectorId: null, readOnlyHint: ["workspace_consultar", "workspace_arquivos", "workspace_ler_texto", "workspace_propor_pasta"].includes(nome), tocaDadoPessoal: true, schema }))
@@ -403,7 +442,7 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
   // NOD-323 (ADR-126): quem tem pasta e terminal gera arquivos; `anexar_midia` os mostra no chat (atendida pelo proxy).
   // A sala fica fora nesta PR (a fala da sala vai por postarNaSala, que não prende a mídia).
   if (pasta && modo !== "sala" && entrada.semAnexarMidia !== true) ferramentas = [...ferramentas, FERRAMENTA_ANEXAR_MIDIA];
-  const prompt = promptEmPartes({ agente: entrada.agente, memorias: entrada.memorias, ferramentas, nativas, pastaDoBot: pasta, pessoaNome: entrada.pessoaNome, modo, colegas: entrada.colegas, contextoConversa: entrada.contextoConversa, conectores: entrada.conectores, rotinas: entrada.rotinasDoAgente, computadorFora: temComputador ? entrada.computadorFora ?? null : null, delegacao: modo === "delegacao" ? entrada.delegacao ?? null : null, profundidade: entrada.profundidade, semTerminal: motivoSemTerminal({ modo, confianca: entrada.confianca, terminal: entrada.terminal === true }), harness: entrada.harness ?? null, trabalho: entrada.trabalho ?? null, trabalhosAbertos: podeAbrirTask(entrada.trabalho ?? null) ? entrada.trabalhosAbertos ?? [] : [], ...(comPedidos ? { pedidosPendentes: entrada.pedidosPendentes } : {}), ...(modo === "conversa" && entrada.bastidores?.length ? { bastidores: entrada.bastidores } : {}), ...(ehNod(entrada.agente) ? { manualDoNod: manualDoNod(entrada.revisor === true) } : {}), ...(entrada.maquina ? { maquina: entrada.maquina } : {}), ...(entrada.calibracao ? { calibracao: true } : {}), ...(entrada.whatsapp ? { whatsapp: true } : {}), ...(entrada.revisor ? { revisor: true } : {}), ...(entrada.sobreMim ? { sobreMim: entrada.sobreMim } : {}), ...(reconfigura ? { reconfiguracao: true } : {}) });
+  const prompt = promptEmPartes({ agente: deOutraPessoa ? { ...entrada.agente, modoAprovacao: "manual" } : entrada.agente, memorias: deOutraPessoa ? [] : entrada.memorias, ferramentas, nativas, pastaDoBot: pasta, pessoaNome: entrada.pessoaNome, modo, colegas: deOutraPessoa ? [] : entrada.colegas, contextoConversa: entrada.contextoConversa, conectores: conectoresDoTurno, rotinas: deOutraPessoa ? [] : entrada.rotinasDoAgente, computadorFora: temComputador ? entrada.computadorFora ?? null : null, delegacao: modo === "delegacao" ? entrada.delegacao ?? null : null, profundidade: entrada.profundidade, semTerminal: motivoSemTerminal({ modo, confianca: entrada.confianca, terminal: entrada.terminal === true, deOutraPessoa }), harness: entrada.harness ?? null, trabalho: entrada.trabalho ?? null, trabalhosAbertos: podeAbrirTask(entrada.trabalho ?? null) && !deOutraPessoa ? entrada.trabalhosAbertos ?? [] : [], ...(comPedidos ? { pedidosPendentes: entrada.pedidosPendentes } : {}), ...(modo === "conversa" && entrada.bastidores?.length ? { bastidores: entrada.bastidores } : {}), ...(ehNod(entrada.agente) ? { manualDoNod: manualDoNod(entrada.revisor === true) } : {}), ...(entrada.maquina ? { maquina: entrada.maquina } : {}), ...(entrada.calibracao ? { calibracao: true } : {}), ...(entrada.whatsapp ? { whatsapp: true } : {}), ...(entrada.revisor ? { revisor: true } : {}), ...(entrada.sobreMim && !deOutraPessoa ? { sobreMim: entrada.sobreMim } : {}), ...(reconfigura ? { reconfiguracao: true } : {}) });
   const clone = cloneDaMaquina(entrada, pasta, ferramentas, prompt.promptSistema);
   return {
     tenantId: entrada.turno.tenantId,
@@ -428,7 +467,7 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
       prazoMs,
       orcamentoResultadoChars: ORCAMENTO_RESULTADO_CHARS,
     },
-    modoAprovacao: entrada.agente.modoAprovacao ?? "manual",
+    modoAprovacao: modoNoTurno(entrada.agente.modoAprovacao, autoria) ?? "manual",
     modoTurno: modo,
     daPessoa: daFaixaDaPessoa(entrada.turno),
     /**

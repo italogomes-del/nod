@@ -4,7 +4,7 @@ import { colunasDe } from "../domain/colunas.ts";
 import { casaComTarefa, type DestinoDoMerge, desfechoDoMerge, fimDosPrs, fixarConflito, textoDaLinha, transicoes } from "../domain/prs-da-tarefa.ts";
 import { log } from "../obs/log.ts";
 import { autoriaPessoa, evento } from "./apoio-l7.ts";
-import { aplicarLoteQuadro } from "./quadro.ts";
+import { aplicarLoteQuadro, comMembros } from "./quadro.ts";
 import type { CasoDeUso } from "./tipos.ts";
 
 /**
@@ -139,5 +139,6 @@ export const sincronizarPrsDoQuadro: CasoDeUso<{ prs: readonly PrLido[]; aviso?:
     // Sem lote, a tela ainda precisa saber que a tarefa ganhou PR ou linha (o mesmo evento do quadro, autor regra).
     if (!lote) mudouQuadro(q, [...new Set([...salvar.map((s) => s.tarefaId), ...prUrls.map((u) => u.tarefaId)])]);
   }
-  return { data: r, events };
+  // Revisão 8 do PR #628: o PR ligado, a linha de CI e o aviso do topo chegam ao vivo também a quem participa do quadro.
+  return { data: r, events: await comMembros(deps, events) };
 };

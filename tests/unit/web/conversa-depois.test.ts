@@ -437,6 +437,16 @@ describe("4–6. o card da aprovação de um item", () => {
     expect(html).toContain('data-decisao="d1"');
   });
 
+  it("NOD-443 (revisão 7 do PR #628, achado 4): o cartão do turno a pedido de quem participa do quadro diz de quem é o pedido", () => {
+    const comPedido = { ...pedido("d1", { turnoId: "t1" }), aPedidoDe: "Ana <b>" };
+    const { e, c } = cenario([msg("m1", "agente", 1, { turnoId: "t1" })], [comPedido]);
+    const html = renderTimeline(c, e);
+    expect(html).toContain("<b>Ada precisa do seu ok</b><span class=\"aprov-pedido-de\">· a pedido de Ana &lt;b&gt;</span>");
+    // O pedido da própria dona não ganha a linha.
+    const daDona = cenario([msg("m1", "agente", 1, { turnoId: "t1" })], [pedido("d1", { turnoId: "t1" })]);
+    expect(renderTimeline(daDona.c, daDona.e)).not.toContain("a pedido de");
+  });
+
   it("5. vencido com um item só diz 'aprovação', nunca 'aprovação em lista'", () => {
     const vencido = { ...pedido("d1"), estadoColuna: "vencido" as const, decisao: { ...pedido("d1").decisao, estado: "vencida" as const } };
     const { e, c } = cenario([], [vencido]);

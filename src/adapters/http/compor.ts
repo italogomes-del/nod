@@ -133,6 +133,7 @@ import { criarProvedorGcp } from "../nuvem/gcp.ts";
 import { criarContaGcp } from "../nuvem/conta-gcp.ts";
 import type { ContaNuvem, ProvedorNuvem } from "../../contracts/provedor-nuvem.ts";
 import { ErroNuvemLancado, servidorPublicoValido } from "../../domain/maquina-nuvem.ts";
+import { comPortas } from "../../db/porta-da-dona.ts";
 import { criarRepos } from "../../repositories/index.ts";
 import { rotasMotor } from "./rotas/motor.ts";
 import { readFileSync } from "node:fs";
@@ -419,7 +420,9 @@ export function comporApp(o: OpcoesCompor): App {
   const contasLigadas = env.NOD_CONTAS === "1";
   // NOD-415 (ADR-141): NOD_QUADROS libera os quadros (desligado | admins | todos; produção = admins).
   configurarLiberacaoQuadros(lerLiberacaoQuadros(env));
-  const depsDe = (trx: Tx, escopo: Escopo): Deps => ({ repos: criarRepos(trx, escopo), services, useCases, tx: (fn) => fn(trx), escopo, agora: relogio, fusoPadrao, modeloPadrao, ...(contasLigadas ? { situacaoConta: () => situacaoDaConta(trx, escopo) } : {}) });
+  const depsSemPorta = (trx: Tx, escopo: Escopo): Deps => ({ repos: criarRepos(trx, escopo), services, useCases, tx: (fn) => fn(trx), escopo, agora: relogio, fusoPadrao, modeloPadrao, ...(contasLigadas ? { situacaoConta: () => situacaoDaConta(trx, escopo) } : {}) });
+  // NOD-443 (ADR-143): a porta para o quadro da dona, na mesma transação (o turno do bot de quem participa).
+  const depsDe = (trx: Tx, escopo: Escopo): Deps => comPortas(trx, escopo, (e) => depsSemPorta(trx, e));
   const depsSobre = (trx: Tx): Deps => depsDe(trx, escopoDoContexto());
   const gravar = async (trx: Tx, events: RuntimeEvent[]): Promise<void> => {
     if (events.length) await criarRepos(trx, escopoDoContexto()).events.gravarComOutbox(events);

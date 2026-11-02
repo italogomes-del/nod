@@ -3,6 +3,7 @@ import type { Executor } from "../../../contracts/evento.ts";
 import type { IdHarness } from "../../../contracts/harness.ts";
 import type { Inventario } from "../../../contracts/inventario.ts";
 import { criarRepos } from "../../../repositories/index.ts";
+import { comPortas } from "../../../db/porta-da-dona.ts";
 import type { Escopo, Relogio, Transacao } from "../../../shared/types.ts";
 import type { CasoDeUso, Deps, Services, UseCasesNod } from "../../../use-cases/tipos.ts";
 
@@ -33,7 +34,8 @@ export function criarExecutor(d: DepsRotas): Executar {
   return async (escopo, caso, input) => {
     const efeitos: EfeitoAposCommit[] = [];
     const data = await d.abrirTx(escopo)(async (trx) => {
-      const deps: Deps = { repos: criarRepos(trx, escopo), services: d.services, useCases: d.useCases, tx: (fn) => fn(trx), escopo, agora, modeloPadrao: d.modeloPadrao, aposCommit: (e) => void efeitos.push(e) };
+      const montar = (e: Escopo): Deps => ({ repos: criarRepos(trx, e), services: d.services, useCases: d.useCases, tx: (fn) => fn(trx), escopo: e, agora, modeloPadrao: d.modeloPadrao, aposCommit: (x) => void efeitos.push(x) });
+      const deps: Deps = comPortas(trx, escopo, montar);
       const r = await caso(deps, input);
       if (r.events?.length) await deps.repos.events.gravarComOutbox(r.events);
       return r.data;

@@ -133,6 +133,12 @@ export async function despacharPessoa(conn: Conn, escopo: Escopo, barramento: Ba
       const extra = item.tipo === "trabalho_mudou" ? await estadoDoDonoNoFrame(conn, repos, agora, item.dados.agenteId, donos) : item.tipo === "turno_criado" ? await bastidoresNoFrame(conn, repos, item.turnoId, item.dados) : {};
       // conversaId/turnoId do evento vão no frame: é como a web sabe qual conversa reidratar (definido em 2026-09-16, L9).
       barramento.publicar(escopo.pessoaId, frameDoEvento(item.tipo), { ...item.dados, ...extra, kind: item.tipo, eventoId: item.eventoId, conversaId: item.conversaId, turnoId: item.turnoId });
+      // NOD-443 (ADR-143): o quadro.mudou vai também a cada pessoa do quadro (o caso de uso põe `membros`). Só o aviso de
+      // que mudou: cada uma relê o quadro pela porta, e a conversa da dona não vai junto.
+      if (item.tipo === "quadro_mudou" && typeof item.dados.membros === "string" && item.dados.membros) {
+        const { membros: _m, ...dados } = item.dados;
+        for (const membro of item.dados.membros.split(",")) barramento.publicar(membro, frameDoEvento(item.tipo), { ...dados, kind: item.tipo, eventoId: item.eventoId, conversaId: null, turnoId: null });
+      }
       if (soPublicar) soPublicar.vistos.add(item.id);
       else await repos.outbox.marcarEntregue(item.id);
       resultado.publicados += 1;

@@ -248,6 +248,8 @@ async function tratarTerminados(deps: Deps, execs: readonly ExecucaoQuadro[], de
  */
 export async function trabalhoDaTarefa(deps: Deps, p: PedidoLote, op: OpTrabalho): Promise<{ data: ResultadoLote; events?: RuntimeEvent[] }> {
   if (!(await experimentoLigado(deps))) return falha("experimento_desligado", "o quadro está desligado nos experimentos da pessoa");
+  // NOD-443 × NOD-418: o trabalho da tarefa (repetir, cancelar, recado) é da dona do quadro; quem participa comenta (D7).
+  if (p.pedidoPor) return falha("nao_permitido", "o trabalho da tarefa é da dona do quadro: deixe um comentário (comentar) para ela");
   const agentes = await agentesDaPessoa(deps);
   const achado = await acharQuadro(deps, p, agentes);
   if (achado && ("ambiguo" in achado || "semNome" in achado)) { const f = falhaDoAchado(achado, agentes); return falha(f.erro, f.detalhe); }

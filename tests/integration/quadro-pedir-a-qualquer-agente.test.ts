@@ -145,7 +145,7 @@ describeIntegracao("pedir a qualquer agente para mexer num quadro (NOD-430)", ()
         expect(ts.find((t) => t.titulo === "Ideia")).toMatchObject({ status: "backlog", agenteId: null });
         expect(ts.find((t) => t.titulo === "Ideia do Linear")).toMatchObject({ status: "backlog", agenteId: null, linearId: "ENG-9" });
         if (!sujo) expect(ts.find((t) => t.titulo === "Para mim")).toMatchObject({ status: "backlog", agenteId: m.ada.agenteId });
-        // Ela já estava em Fazendo (a pessoa a deu à Ada em A fazer, e a tarefa começou): o terminei a passa para a próxima.
+        // Ela já estava em Fazendo (a pessoa a deu à Ada em A fazer — com a NOD-416, dito o status —, e a tarefa começou): o terminei a passa para a próxima.
         expect(ts.find((t) => t.titulo === "Etapa da Ada")?.status).toBe("revisao");
         expect(ts.find((t) => t.titulo === "Da Ada")).toMatchObject({ status: "cancelado" });
         expect(ts.find((t) => t.titulo === "Do Eng")?.status).not.toBe("feito");

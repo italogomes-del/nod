@@ -7,9 +7,7 @@ import type { MovimentoDto, OpFreio, TravaColuna } from "./freios-quadro.ts";
  * Um quadro por bot anfitrião (quem o criou): ele mora na aba Quadro da conversa desse bot (NOD-429). Qualquer bot da
  * pessoa mexe nele pelas mesmas ações (ADR-135, domínio `quadro`).
  */
-import type { LinkDeTarefa } from "./quadro-pela-conversa.ts";
 import type { LinhaDeSistema, PrNaTela } from "./prs-da-tarefa.ts";
-import type { ResumoQuadroParaBot } from "./quadro-resumo-bot.ts";
 export type { CiPr, EstadoPr, LinhaDeSistema, PrDaTarefa, PrLido, PrNaTela, TipoLinhaTarefa } from "./prs-da-tarefa.ts";
 
 /**
@@ -75,7 +73,11 @@ export type TarefaQuadro = {
   terminadaEm: number | null;
   /** NOD-416 (ADR-144): o número da tarefa no quadro (o código é o prefixo do quadro + ele). Null só na tarefa que o servidor de antes criou durante o deploy. */
   numero: number | null;
+  /** NOD-443 (ADR-143): quem pediu (a dona ou quem participa). Null antes da 0146 ou num turno do próprio quadro; ausente na foto de um lote de antes. */
+  pedidoPor?: string | null;
 };
+
+export { MODOS_CONVERSA, MODOS_ESCOLHIVEIS, type ModoConversa } from "./quadro-pessoas.ts";
 
 export type Quadro = {
   id: string;
@@ -94,14 +96,9 @@ export type Quadro = {
   metaDesde: number;
   /** NOD-416 (ADR-144): o prefixo do código das tarefas (ex.: ZE), fixo depois de criado. Null só no quadro que o servidor de antes criou. */
   prefixo: string | null;
+  /** NOD-443: como as pessoas conversam com o quadro (padrão: cada um na sua conversa). */
+  modoConversa: ModoConversa;
 };
-
-/**
- * NOD-417 (definido em 2026-11-02): um comentário numa tarefa. `deFora`: escrito por um bot (ADR-062): quem o recebe recebe
- * dado de fora. `acionados`: os bots que o comentário acionou (abriu turno ou se juntou ao que já estava na fila).
- */
-export type ComentarioTarefa = { id: string; quadroId: string; tarefaId: string; autor: AutorLote; texto: string; deFora: boolean; criadoEm: number; /** NOD-430: "Você, pela <bot>". */ pedidoPor?: string | null };
-export type ComentarioDto = ComentarioTarefa & { autorNome: string | null; acionados: string[] };
 
 /** Quem fez o lote: a pessoa (na tela) ou um bot (pela ferramenta). */
 export type AutorLote = { tipo: "pessoa" } | { tipo: "agente"; agenteId: string };
@@ -113,12 +110,20 @@ export type LoteQuadro = {
   id: string;
   quadroId: string;
   autor: AutorLote;
-  /** NOD-430: a pessoa que pediu ao bot autor, na conversa ("Você, pela <bot>"); null = o bot sozinho, ou a tela. */ pedidoPor?: string | null;
   resumo: string;
   tarefaIds: string[];
   desfeitoEm: number | null;
   criadoEm: number;
+  /** NOD-443/NOD-430 (0143): quem pediu (a dona ou quem participa). Null = o bot sozinho ou procuração: lido como da dona. */
+  pedidoPor?: string | null;
+  /** NOD-443: o nome do bot pelo qual a pessoa pediu ("Ana, pela Ada"), do momento. Null = pela tela. */
+  viaNome?: string | null;
 };
+
+/** NOD-443 (ADR-143): as pessoas, quem decide, o mural e os comentários moram em quadro-pessoas.ts. */
+export type { MembroQuadroDto, QuemDecideDto, LinhaMuralDto, ComentarioQuadroDto, ComentarioTarefa, ComentarioDto } from "./quadro-pessoas.ts";
+import type { ComentarioQuadroDto, MembroQuadroDto, ModoConversa, QuemDecideDto } from "./quadro-pessoas.ts";
+import type { ItemLinear } from "./quadro-bot.ts";
 
 /** O que a web e o bot recebem: o quadro com as tarefas, a execução de cada uma e o último lote que dá para desfazer. */
 export type TarefaDto = TarefaQuadro & {
@@ -127,6 +132,10 @@ export type TarefaDto = TarefaQuadro & {
   codigo: string; // NOD-416: o código da tarefa (prefixo do quadro + número, ex.: ZE-12)
   /** NOD-416: o branch sugerido (o código e o título em slug, ex.: ze-12-secao-de-planos). */
   branch: string;
+  /** NOD-443: "Movido por Ana" (o nome de quem pediu a última mudança; "você" para quem lê). Null = a dona, sem mais ninguém. */
+  pedidoPorNome?: string | null;
+  /** NOD-443 (D5): quem responde a pergunta, só com a tarefa esperando alguém ("Precisa de alguém"). */
+  decide?: QuemDecideDto | null;
   naColunaDesde?: number | null; // NOD-420: epoch ms da entrada na coluna atual; null fora do Postgres
   /** NOD-421: os PRs ligados e as linhas de sistema (CI, conflito, merge). */
   prs?: PrNaTela[];
@@ -142,6 +151,11 @@ export type QuadroDto = Omit<Quadro, "colunas"> & {
   ultimoLote: LoteQuadro | null;
   feitas: number;
   total: number;
+  /** NOD-443: quem lê (a dona ou quem participa), a dona e as pessoas do quadro. Ausente no quadro de uma pessoa só. */
+  voce?: { pessoaId: string; papel: "dona" | "membro"; podeDesfazer: boolean };
+  dona?: { pessoaId: string; nome: string };
+  membros?: MembroQuadroDto[];
+  comentarios?: ComentarioQuadroDto[];
   avisoGithub?: string | null; // NOD-421: a linha do GitHub no topo ("não conectado", "sem acesso a dono/repo")
 };
 
@@ -152,20 +166,13 @@ export type OpQuadro =
   | { tipo: "importar_linear"; itens: ItemLinear[] }
   | { tipo: "mudar_tarefa"; tarefa: string; titulo?: string; descricao?: string; status?: string; agente?: string | null; pr_url?: string | null; pergunta?: string | null; excluir?: boolean; sem_iniciar?: boolean; /** NOD-419: o porquê de bloquear ou cancelar (o agente precisa dizer). */ motivo?: string }
   | { tipo: "responder"; tarefa: string; resposta: string }
-  /** NOD-417: um comentário na tarefa (sozinho no lote, sem Desfazer). Aciona o responsável e os @mencionados, nunca o autor. */
-  | { tipo: "comentar"; tarefa: string; texto: string }
-  /** NOD-418: o trabalho da tarefa (sozinhos no lote, sem Desfazer). Repetir abre um novo; cancelar para o vivo; o recado entra nele. */
-  | { tipo: "repetir_trabalho"; tarefa: string }
-  | { tipo: "cancelar_trabalho"; tarefa: string }
-  | { tipo: "recado"; tarefa: string; texto: string }
+  /** NOD-418: o trabalho da tarefa (sozinhos, sem Desfazer). Repetir abre um novo; cancelar para o vivo; o recado entra nele. */
+  | { tipo: "repetir_trabalho"; tarefa: string } | { tipo: "cancelar_trabalho"; tarefa: string } | { tipo: "recado"; tarefa: string; texto: string }
   | { tipo: "editar_quadro"; meta?: string | null; prazo?: string | null }
   | { tipo: "desfazer"; lote?: string }
   /** NOD-415 (ADR-141): o bot volta a ser um agente comum. Apaga o quadro, as tarefas e o histórico; conversa e memória ficam. */
   | { tipo: "remover_quadro"; bot?: string }
-  /**
-   * NOD-416 (ADR-144): a tarefa vai para o quadro de outro bot. Ganha o código do destino (o antigo continua abrindo), cai
-   * na coluna de mesmo grupo e não aciona ninguém. `quadro` = o id do quadro, o nome do bot anfitrião ou o prefixo.
-   */
+  /** NOD-416 (ADR-144): para o quadro de outro bot, com o código do destino (o antigo abre), no mesmo grupo, sem acionar. `quadro` = id, nome do anfitrião ou prefixo. */
   | { tipo: "mover_quadro"; tarefa: string; quadro: string }
   /* NOD-448: as colunas. `coluna`, `depois_de`, `antes_de`, `destino` = o id ou o nome da coluna. */
   | { tipo: "criar_coluna"; nome: string; grupo: GrupoColuna; depois_de?: string; prazo_min?: number | null }
@@ -174,26 +181,19 @@ export type OpQuadro =
   | { tipo: "remover_coluna"; coluna: string; destino?: string }
   | { tipo: "definir_passagem"; coluna: string; agente?: string | null; instrucoes?: string | null }
   | { tipo: "terminei"; tarefa?: string } | OpFreio // NOD-419: nao_e_comigo, desfazer_movimento, travar_coluna
-  | { tipo: "substituir_colunas"; colunas: { id?: string; nome: string; grupo: GrupoColuna }[]; destinos?: { de: string; para: string }[] };
-
+  | { tipo: "substituir_colunas"; colunas: { id?: string; nome: string; grupo: GrupoColuna }[]; destinos?: { de: string; para: string }[] }
+  /* NOD-443 (ADR-143): pessoas e modo (só a dona) e o comentário, sozinhos. Um só comentar: no próprio quadro, numa tarefa, aciona (NOD-417); de quem participa ou sem tarefa, fica para a dona (D7). */
+  /** `modo`: o da conversa, escolhido junto com a primeira pessoa (D3), no mesmo lote (revisão 1, achado 11). */
+  | { tipo: "adicionar_pessoa"; pessoa: string; modo?: ModoConversa }
+  | { tipo: "tirar_pessoa"; pessoa: string }
+  | { tipo: "mudar_modo"; modo: ModoConversa }
+  | { tipo: "comentar"; texto: string; tarefa?: string };
 export type TipoOpQuadro = OpQuadro["tipo"];
-/** Um item que o bot já buscou no Linear com a ferramenta dele (o servidor não fala com o Linear). */
-export type ItemLinear = { identificador: string; titulo: string; url?: string; descricao?: string; status?: string; agente?: string | null };
-export type ArgsGerirQuadro = {
-  /** O quadro: o id, ou o nome do bot anfitrião. Sem ele, o do próprio bot, senão o único da pessoa. */
-  quadro?: string;
-  acoes: OpQuadro[];
-};
-
-export type ResultadoGerirQuadro =
-  | { ok: true; quadro: ResumoQuadroParaBot | null; lote_id: string | null; comecaram: { tarefa_id: string; agente: string }[]; instrucao: string; ajustada?: boolean; proposta_id?: string; movida?: { tarefa_id: string; codigo: string; codigo_antigo: string }; /** NOD-430: o link de cada tarefa tocada. */ tarefas?: LinkDeTarefa[]; aplicada?: boolean; /** NOD-418: o trabalho que ficou (repetir, cancelar, recado). */ trabalho?: { numero: number | null; estado: string | null } }
-  | { ok: false; erro: "experimento_desligado" | "sem_quadro" | "entrada_invalida" | "nao_encontrado" | "estado_invalido" | "conflito"; instrucao: string };
-
-/** O quadro como o bot o lê mora em quadro-resumo-bot.ts (teto de linhas dos contratos, merge da main no PR #623). */
+/** A ferramenta gerir_quadro (quadro-bot.ts) e o quadro como o bot o lê (quadro-resumo-bot.ts) moram fora (o teto de linhas). */
+export type { ItemLinear, ArgsGerirQuadro, ResultadoGerirQuadro } from "./quadro-bot.ts";
 export type { ResumoQuadroParaBot } from "./quadro-resumo-bot.ts";
-
 /** Os tetos do quadro (a ferramenta, o domínio e a tela usam os mesmos). */
-export const LIMITES_QUADRO = { meta: 200, titulo: 200, descricao: 4000, pergunta: 1000, resposta: 4000, comentario: 4000, ops: 50, itens: 50, identificador: 40, url: 500, coluna: 40, colunas: 30, instrucoes: 500, motivo: 600, prazoMin: 30 * 24 * 60 } as const;
+export const LIMITES_QUADRO = { comentario: 4000, comentariosPorPessoa: 50, membros: 50, meta: 200, titulo: 200, descricao: 4000, pergunta: 1000, resposta: 4000, ops: 50, itens: 50, identificador: 40, url: 500, coluna: 40, colunas: 30, instrucoes: 500, motivo: 600, prazoMin: 30 * 24 * 60 } as const;
 
 /** NOD-448 (ADR-140): o card de substituir as colunas mora em quadro-proposta-colunas.ts (teto de linhas dos contratos). */
 export type { ColunaNaProposta, PayloadPropostaColunasQuadro } from "./quadro-proposta-colunas.ts";

@@ -20,12 +20,12 @@ const tarefa = (o: Partial<TarefaQuadro> = {}): TarefaQuadro => ({
 const comPassagem = (id: string, responsavel: string | null, instrucoes?: string): ColunaQuadro[] =>
   COLUNAS_PADRAO.map((c) => (c.id === id ? { ...c, ...(responsavel ? { responsavel } : {}), ...(instrucoes ? { instrucoes } : {}) } : { ...c }));
 
-const planejar = (ops: unknown[], o: { colunas?: ColunaQuadro[]; tarefas?: TarefaQuadro[]; autor?: string | null; autorNaConversa?: boolean; tarefaDoTurno?: string | null; origemConfiavel?: boolean } = {}) => {
+const planejar = (ops: unknown[], o: { colunas?: ColunaQuadro[]; tarefas?: TarefaQuadro[]; autor?: string | null; autorNaConversa?: boolean; tarefaDoTurno?: string | null; origemConfiavel?: boolean; turnoConfiavel?: boolean } = {}) => {
   const lidas = lerOps(ops);
   if (!Array.isArray(lidas)) throw new Error(lidas.erro);
   return planejarLote({
     quadro: { meta: null, prazo: null, colunas: o.colunas ?? null }, quadroId: "q", tarefas: o.tarefas ?? [tarefa()], agentes: AGENTES, autorAgenteId: o.autor ?? null, ops: lidas, agora: AGORA, limite: "total",
-    ...(o.autorNaConversa ? { autorNaConversa: true } : {}), ...(o.tarefaDoTurno !== undefined ? { tarefaDoTurno: o.tarefaDoTurno } : {}), ...(o.origemConfiavel !== undefined ? { origemConfiavel: o.origemConfiavel } : {}),
+    ...(o.autorNaConversa ? { autorNaConversa: true } : {}), ...(o.tarefaDoTurno !== undefined ? { tarefaDoTurno: o.tarefaDoTurno } : {}), ...(o.origemConfiavel !== undefined ? { origemConfiavel: o.origemConfiavel } : {}), ...(o.turnoConfiavel !== undefined ? { turnoConfiavel: o.turnoConfiavel } : {}),
   });
 };
 const ok = (r: ReturnType<typeof planejar>) => {
@@ -226,6 +226,19 @@ describe("revisão 2 do PR #622", () => {
     expect(ok(planejar([{ tipo: "mudar_tarefa", tarefa: TID, status: "revisao" }], { colunas: comPassagem("revisao", ADA.id), autor: ZE.id, origemConfiavel: false })).comecam).toEqual([TID]);
     expect(ok(planejar([{ tipo: "mudar_tarefa", tarefa: TID, status: "revisao" }], { colunas, autor: ADA.id })).comecam).toEqual([TID]);
     expect(ok(planejar([{ tipo: "mudar_tarefa", tarefa: TID, status: "revisao" }], { colunas, origemConfiavel: false })).comecam).toEqual([TID]);
+  });
+
+  it("NOD-443 × NOD-417: o pedido de quem participa (conteúdo de fora, turno limpo do bot dela) aciona o bot que ela nomeia", () => {
+    // O bot dela não é da dona (autor fora dos agentes); o conteúdo fica de fora, mas o turno dele estava limpo.
+    const LIA = "00000000-0000-4000-8000-0000000000aa";
+    const criar = [{ tipo: "criar_tarefa", titulo: "Para a Ada", agente: "Ada", status: "afazer" }];
+    const limpo = ok(planejar(criar, { autor: LIA, origemConfiavel: false, turnoConfiavel: true, tarefas: [] }));
+    expect(limpo.comecam).toHaveLength(1);
+    expect(limpo.tarefas[0]).toMatchObject({ agenteId: ADA.id, deFora: true });
+    // Com o turno do bot dela sujo, vale a trava da NOD-417: a tarefa nasce com a Ada, sem acionar.
+    expect(ok(planejar(criar, { autor: LIA, origemConfiavel: false, turnoConfiavel: false, tarefas: [] })).comecam).toEqual([]);
+    // Sem turnoConfiavel, vale origemConfiavel (o caminho de antes).
+    expect(ok(planejar(criar, { autor: LIA, origemConfiavel: false, tarefas: [] })).comecam).toEqual([]);
   });
 
   it("o Nod nunca é o responsável de uma coluna (ADR-081), nem pelo domínio direto", () => {

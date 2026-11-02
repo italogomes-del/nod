@@ -1,4 +1,4 @@
-import type { AutorLote, CampoHistorico, ColunaQuadro, IdColuna, LinhaDeSistema, LoteQuadro, MudancaTarefa, PrDaTarefa, Quadro, TarefaQuadro, TipoLinhaTarefa } from "../contracts/quadro.ts";
+import type { AutorLote, CampoHistorico, ColunaQuadro, IdColuna, LinhaDeSistema, LoteQuadro, ModoConversa, MudancaTarefa, PrDaTarefa, Quadro, TarefaQuadro, TipoLinhaTarefa } from "../contracts/quadro.ts";
 import type { MovimentoTarefa, NovoMovimento } from "../contracts/freios-quadro.ts";
 import type { EstadoTurno } from "../contracts/turno.ts";
 import type { MarcasAviso } from "../domain/avisos-quadro.ts";
@@ -17,6 +17,7 @@ interface LinhaQuadro {
   atualizado_em: Date;
   meta_desde: Date;
   prefixo: string | null;
+  modo_conversa: ModoConversa;
 }
 
 interface LinhaTarefa {
@@ -39,6 +40,7 @@ interface LinhaTarefa {
   mudado_em: Date;
   terminada_em: Date | null;
   numero: number | null;
+  pedido_por: string | null;
 }
 
 interface LinhaLote {
@@ -46,12 +48,13 @@ interface LinhaLote {
   quadro_id: string;
   autor: "pessoa" | "agente";
   autor_agente_id: string | null;
-  pedido_por: string | null;
   resumo: string;
   antes: FotoLote;
   tarefa_ids: string[];
   desfeito_em: Date | null;
   criado_em: Date;
+  pedido_por: string | null;
+  via_nome: string | null;
 }
 
 /** A foto do antes de um lote (o Desfazer volta a ela). `antes: null` = nasceu no lote; `quadro: null` = o quadro nasceu no lote. */
@@ -60,10 +63,12 @@ export type FotoLote = {
    *  NOD-448 (o Desfazer não mexe nas colunas). */
   quadro: (Pick<Quadro, "meta" | "prazo" | "cumpridoEm" | "resumo"> & { metaDesde?: number; colunas?: ColunaQuadro[] | null }) | null;
   tarefas: { id: string; antes: TarefaQuadro | null }[];
+  /** NOD-443: o lote que mexeu nas pessoas ou no modo guarda o de antes (ausente = o lote não mexeu). */
+  pessoas?: { membros: string[]; modo: ModoConversa };
 };
 
-const COLUNAS_Q = "id, agente_id, to_char(prazo, 'YYYY-MM-DD') as prazo, meta, cumprido_em, resumo, colunas, criado_em, atualizado_em, meta_desde, prefixo";
-const COLUNAS_T = "id, quadro_id, titulo, descricao, status, voltar_para, agente_id, ordem, linear_id, linear_url, pr_url, pergunta, resposta, de_fora, turno_id, criado_em, mudado_em, terminada_em, numero";
+const COLUNAS_Q = "id, agente_id, to_char(prazo, 'YYYY-MM-DD') as prazo, meta, cumprido_em, resumo, colunas, criado_em, atualizado_em, meta_desde, prefixo, modo_conversa";
+const COLUNAS_T = "id, quadro_id, titulo, descricao, status, voltar_para, agente_id, ordem, linear_id, linear_url, pr_url, pergunta, resposta, de_fora, turno_id, criado_em, mudado_em, terminada_em, numero, pedido_por";
 interface LinhaMovimento {
   id: string;
   tarefa_id: string;
@@ -101,7 +106,7 @@ const paraMovimento = (l: LinhaMovimento): MovimentoTarefa => ({
   criadoEm: ms(l.criado_em),
 });
 
-const COLUNAS_L = "id, quadro_id, autor, autor_agente_id, pedido_por, resumo, antes, tarefa_ids, desfeito_em, criado_em";
+const COLUNAS_L = "id, quadro_id, autor, autor_agente_id, resumo, antes, tarefa_ids, desfeito_em, criado_em, pedido_por, via_nome";
 
 const paraQuadro = (l: LinhaQuadro): Quadro => ({
   id: l.id,
@@ -115,6 +120,7 @@ const paraQuadro = (l: LinhaQuadro): Quadro => ({
   atualizadoEm: ms(l.atualizado_em),
   metaDesde: ms(l.meta_desde),
   prefixo: l.prefixo ?? null,
+  modoConversa: l.modo_conversa ?? "individual",
 });
 
 /** O Desfazer devolve o `terminadaEm` da foto; a foto de antes da revisão 3 não tem o campo: fechada = o `mudadoEm` dela. */
@@ -143,24 +149,26 @@ const paraTarefa = (l: LinhaTarefa): TarefaQuadro => ({
   mudadoEm: ms(l.mudado_em),
   terminadaEm: l.terminada_em ? ms(l.terminada_em) : null,
   numero: l.numero ?? null,
+  pedidoPor: l.pedido_por ?? null,
 });
 
 const paraLote = (l: LinhaLote): LoteQuadro & { antes: FotoLote } => ({
   id: l.id,
   quadroId: l.quadro_id,
   autor: (l.autor === "agente" && l.autor_agente_id ? { tipo: "agente", agenteId: l.autor_agente_id } : { tipo: "pessoa" }) satisfies AutorLote,
-  pedidoPor: l.pedido_por,
   resumo: l.resumo,
   antes: l.antes,
   tarefaIds: l.tarefa_ids,
   desfeitoEm: msOuNull(l.desfeito_em),
   criadoEm: ms(l.criado_em),
+  pedidoPor: l.pedido_por ?? null,
+  viaNome: l.via_nome ?? null,
 });
 
-export type NovaTarefa = Pick<TarefaQuadro, "quadroId" | "titulo" | "descricao" | "status" | "agenteId"> & Partial<Pick<TarefaQuadro, "voltarPara" | "linearId" | "linearUrl" | "prUrl" | "pergunta" | "resposta" | "deFora" | "terminadaEm" | "numero">>;
+export type NovaTarefa = Pick<TarefaQuadro, "quadroId" | "titulo" | "descricao" | "status" | "agenteId"> & Partial<Pick<TarefaQuadro, "voltarPara" | "linearId" | "linearUrl" | "prUrl" | "pergunta" | "resposta" | "deFora" | "terminadaEm" | "numero" | "pedidoPor">>;
 
 /** O que muda numa tarefa (tudo menos ids e datas de criação). */
-export type CamposTarefa = Pick<TarefaQuadro, "titulo" | "descricao" | "status" | "voltarPara" | "agenteId" | "ordem" | "linearId" | "linearUrl" | "prUrl" | "pergunta" | "resposta" | "deFora" | "turnoId" | "terminadaEm">;
+export type CamposTarefa = Pick<TarefaQuadro, "titulo" | "descricao" | "status" | "voltarPara" | "agenteId" | "ordem" | "linearId" | "linearUrl" | "prUrl" | "pergunta" | "resposta" | "deFora" | "turnoId" | "terminadaEm"> & Partial<Pick<TarefaQuadro, "pedidoPor">>;
 
 /**
  * definido em 2026-10-31 (NOD-442): o quadro-agente, as tarefas e os lotes. Só primitivas: quem aplica um lote (e trava
@@ -216,10 +224,25 @@ export function quadrosRepo(conn: Conn, escopo: Escopo) {
           where qt.tenant_id = ${escopo.tenantId} and qt.owner_id = ${escopo.pessoaId} order by s.n limit 1)`;
       return l ? paraQuadro(l) : null;
     },
+    /**
+     * NOD-443 (revisão 2 do PR #628, achados 2 e 6): a tarefa que este turno executa (a mesma subida da cadeia de
+     * retomadas do doTurno). O turno da tarefa só mexe nela.
+     */
+    async tarefaDoTurno(turnoId: string): Promise<string | null> {
+      const [l] = await conn<{ id: string }[]>`
+        with recursive sobe(id, retoma, n) as (
+          select id, retoma_turno_id, 0 from turnos where tenant_id = ${escopo.tenantId} and id = ${turnoId}
+          union all
+          select t.id, t.retoma_turno_id, s.n + 1 from turnos t join sobe s on t.tenant_id = ${escopo.tenantId} and t.id = s.retoma where s.n < 50
+        )
+        select qt.id from quadro_tarefas qt join sobe s on qt.turno_id = s.id
+        where qt.tenant_id = ${escopo.tenantId} and qt.owner_id = ${escopo.pessoaId} order by s.n limit 1`;
+      return l?.id ?? null;
+    },
     /** Os quadros da pessoa (de bots não excluídos), mais recente primeiro. */
     async listar(): Promise<Quadro[]> {
       const ls = await conn<LinhaQuadro[]>`
-        select q.id, q.agente_id, to_char(q.prazo, 'YYYY-MM-DD') as prazo, q.meta, q.cumprido_em, q.resumo, q.colunas, q.criado_em, q.atualizado_em, q.meta_desde, q.prefixo
+        select q.id, q.agente_id, to_char(q.prazo, 'YYYY-MM-DD') as prazo, q.meta, q.cumprido_em, q.resumo, q.colunas, q.criado_em, q.atualizado_em, q.meta_desde, q.prefixo, q.modo_conversa
         from quadros q join agentes a on a.tenant_id = q.tenant_id and a.id = q.agente_id
         where q.tenant_id = ${escopo.tenantId} and q.owner_id = ${escopo.pessoaId} and a.excluido_em is null
         order by q.atualizado_em desc`;
@@ -267,10 +290,10 @@ export function quadrosRepo(conn: Conn, escopo: Escopo) {
     },
     async inserirTarefa(t: NovaTarefa): Promise<TarefaQuadro> {
       const [l] = await conn<LinhaTarefa[]>`
-        insert into quadro_tarefas (tenant_id, owner_id, quadro_id, titulo, descricao, status, voltar_para, agente_id, ordem, linear_id, linear_url, pr_url, pergunta, resposta, de_fora, terminada_em, numero)
+        insert into quadro_tarefas (tenant_id, owner_id, quadro_id, titulo, descricao, status, voltar_para, agente_id, ordem, linear_id, linear_url, pr_url, pergunta, resposta, de_fora, terminada_em, numero, pedido_por)
         values (${escopo.tenantId}, ${escopo.pessoaId}, ${t.quadroId}, ${t.titulo}, ${t.descricao}, ${t.status}, ${t.voltarPara ?? null}, ${t.agenteId},
           (select coalesce(max(ordem), 0) + 1 from quadro_tarefas where ${dona()} and quadro_id = ${t.quadroId}),
-          ${t.linearId ?? null}, ${t.linearUrl ?? null}, ${t.prUrl ?? null}, ${t.pergunta ?? null}, ${t.resposta ?? null}, ${t.deFora ?? false}, ${t.terminadaEm == null ? null : new Date(t.terminadaEm)}, ${t.numero ?? null})
+          ${t.linearId ?? null}, ${t.linearUrl ?? null}, ${t.prUrl ?? null}, ${t.pergunta ?? null}, ${t.resposta ?? null}, ${t.deFora ?? false}, ${t.terminadaEm == null ? null : new Date(t.terminadaEm)}, ${t.numero ?? null}, ${t.pedidoPor ?? null})
         returning ${conn.unsafe(COLUNAS_T)}`;
       return paraTarefa(l!);
     },
@@ -279,7 +302,8 @@ export function quadrosRepo(conn: Conn, escopo: Escopo) {
         update quadro_tarefas set titulo = ${c.titulo}, descricao = ${c.descricao}, status = ${c.status}, voltar_para = ${c.voltarPara ?? null}, agente_id = ${c.agenteId},
           ordem = ${c.ordem}, linear_id = ${c.linearId}, linear_url = ${c.linearUrl}, pr_url = ${c.prUrl}, pergunta = ${c.pergunta},
           resposta = ${c.resposta}, de_fora = ${c.deFora}, turno_id = ${c.turnoId}, mudado_em = clock_timestamp(),
-          terminada_em = ${c.terminadaEm === null ? null : new Date(c.terminadaEm)}
+          terminada_em = ${c.terminadaEm === null ? null : new Date(c.terminadaEm)},
+          pedido_por = coalesce(${c.pedidoPor ?? null}::uuid, pedido_por)
         where ${dona()} and id = ${id}
         returning ${conn.unsafe(COLUNAS_T)}`;
       return l ? paraTarefa(l) : null;
@@ -291,13 +315,13 @@ export function quadrosRepo(conn: Conn, escopo: Escopo) {
     /** O Desfazer de uma exclusão: a tarefa volta com o mesmo id e as mesmas datas. */
     async restaurarTarefa(t: TarefaQuadro): Promise<TarefaQuadro> {
       const [l] = await conn<LinhaTarefa[]>`
-        insert into quadro_tarefas (tenant_id, owner_id, id, quadro_id, titulo, descricao, status, voltar_para, agente_id, ordem, linear_id, linear_url, pr_url, pergunta, resposta, de_fora, turno_id, criado_em, mudado_em, terminada_em, numero)
+        insert into quadro_tarefas (tenant_id, owner_id, id, quadro_id, titulo, descricao, status, voltar_para, agente_id, ordem, linear_id, linear_url, pr_url, pergunta, resposta, de_fora, turno_id, criado_em, mudado_em, terminada_em, numero, pedido_por)
         values (${escopo.tenantId}, ${escopo.pessoaId}, ${t.id}, ${t.quadroId}, ${t.titulo}, ${t.descricao}, ${t.status}, ${t.voltarPara ?? null}, ${t.agenteId}, ${t.ordem},
-          ${t.linearId}, ${t.linearUrl}, ${t.prUrl}, ${t.pergunta}, ${t.resposta}, ${t.deFora ?? false}, ${t.turnoId}, ${new Date(t.criadoEm)}, clock_timestamp(), ${terminadaDaFoto(t)}, ${t.numero ?? null})
+          ${t.linearId}, ${t.linearUrl}, ${t.prUrl}, ${t.pergunta}, ${t.resposta}, ${t.deFora ?? false}, ${t.turnoId}, ${new Date(t.criadoEm)}, clock_timestamp(), ${terminadaDaFoto(t)}, ${t.numero ?? null}, ${t.pedidoPor ?? null})
         on conflict (tenant_id, id) do update set titulo = excluded.titulo, descricao = excluded.descricao, status = excluded.status, voltar_para = excluded.voltar_para,
           agente_id = excluded.agente_id, ordem = excluded.ordem, linear_id = excluded.linear_id, linear_url = excluded.linear_url,
           pr_url = excluded.pr_url, pergunta = excluded.pergunta, resposta = excluded.resposta, de_fora = excluded.de_fora, turno_id = excluded.turno_id, mudado_em = clock_timestamp(), terminada_em = excluded.terminada_em,
-          numero = coalesce(quadro_tarefas.numero, excluded.numero)
+          numero = coalesce(quadro_tarefas.numero, excluded.numero), pedido_por = excluded.pedido_por
         returning ${conn.unsafe(COLUNAS_T)}`;
       return paraTarefa(l!);
     },
@@ -346,13 +370,11 @@ export function quadrosRepo(conn: Conn, escopo: Escopo) {
     },
 
     /** NOD-430: `pedidoPor` = a pessoa que pediu ao bot autor na conversa (só com autor agente; o bot é o `autor_agente_id`). */
-    async inserirLote(l: { quadroId: string; autor: AutorLote; pedidoPor?: string | null; resumo: string; antes: FotoLote; tarefaIds: readonly string[] }): Promise<LoteQuadro> {
-      const pedidoPor = l.autor.tipo === "agente" && l.pedidoPor ? l.pedidoPor : null;
+    async inserirLote(l: { quadroId: string; autor: AutorLote; resumo: string; antes: FotoLote; tarefaIds: readonly string[]; pedidoPor?: string | null; viaNome?: string | null }): Promise<LoteQuadro> {
       const [r] = await conn<LinhaLote[]>`
-        insert into quadro_lotes (tenant_id, owner_id, quadro_id, autor, autor_agente_id, pedido_por, resumo, antes, tarefa_ids)
+        insert into quadro_lotes (tenant_id, owner_id, quadro_id, autor, autor_agente_id, resumo, antes, tarefa_ids, pedido_por, via_nome)
         values (${escopo.tenantId}, ${escopo.pessoaId}, ${l.quadroId}, ${l.autor.tipo}, ${l.autor.tipo === "agente" ? l.autor.agenteId : null},
-          ${pedidoPor},
-          ${l.resumo}, ${jsonb(conn, l.antes)}, ${conn.array([...l.tarefaIds])}::uuid[])
+          ${l.resumo}, ${jsonb(conn, l.antes)}, ${conn.array([...l.tarefaIds])}::uuid[], ${l.pedidoPor ?? null}, ${l.viaNome ?? null})
         returning ${conn.unsafe(COLUNAS_L)}`;
       const { antes: _antes, ...lote } = paraLote(r!);
       return lote;
@@ -596,6 +618,74 @@ export function quadrosRepo(conn: Conn, escopo: Escopo) {
           where ${dona()} and tarefa_id = ${tarefaId} order by criado_em desc, id desc limit 200
         ) h order by criado_em, id`;
       return ls.map((l) => ({ id: l.id, quadroId: l.quadro_id, campo: l.campo, de: l.de, para: l.para, autor: l.autor, autorAgenteId: l.autor_agente_id, criadoEm: ms(l.criado_em) }));
+    },
+    /* NOD-443 (ADR-143): as pessoas do quadro, o modo, o mural e os comentários. */
+
+    /** Os lotes do quadro, mais recente primeiro (o mural de Atividade). */
+    async lotes(quadroId: string, limite = 300): Promise<LoteQuadro[]> {
+      const ls = await conn<LinhaLote[]>`select ${conn.unsafe(COLUNAS_L)} from quadro_lotes where ${dona()} and quadro_id = ${quadroId} order by criado_em desc, id desc limit ${limite}`;
+      return ls.map((l) => { const { antes: _a, ...lote } = paraLote(l); return lote; });
+    },
+    async mudarModo(quadroId: string, modo: ModoConversa): Promise<void> {
+      await conn`update quadros set modo_conversa = ${modo}, atualizado_em = clock_timestamp() where ${dona()} and id = ${quadroId}`;
+    },
+    /** Quem participa do quadro (no escopo da dona), mais antigo primeiro, com o nome do catálogo de pessoas. */
+    async membros(quadroId: string): Promise<{ pessoaId: string; nome: string; adicionadoEm: number }[]> {
+      const ls = await conn<{ pessoa_id: string; nome: string | null; adicionado_em: Date }[]>`
+        select m.pessoa_id, p.nome, m.adicionado_em from quadro_membros m
+          left join pessoas p on p.tenant_id = m.tenant_id and p.id = m.pessoa_id
+        where m.tenant_id = ${escopo.tenantId} and m.owner_id = ${escopo.pessoaId} and m.quadro_id = ${quadroId}
+        order by m.adicionado_em, m.id`;
+      return ls.map((l) => ({ pessoaId: l.pessoa_id, nome: l.nome ?? "", adicionadoEm: ms(l.adicionado_em) }));
+    },
+    /** A pessoa ainda participa (conferido de novo no escopo da dona, ADR-143 §1). */
+    async ehMembro(quadroId: string, pessoaId: string): Promise<boolean> {
+      const [l] = await conn`select 1 from quadro_membros where ${dona()} and quadro_id = ${quadroId} and pessoa_id = ${pessoaId}`;
+      return !!l;
+    },
+    /** false = já estava. */
+    async adicionarMembro(quadroId: string, pessoaId: string): Promise<boolean> {
+      const r = await conn`
+        insert into quadro_membros (tenant_id, owner_id, quadro_id, pessoa_id) values (${escopo.tenantId}, ${escopo.pessoaId}, ${quadroId}, ${pessoaId})
+        on conflict (tenant_id, quadro_id, pessoa_id) do nothing`;
+      return r.count > 0;
+    },
+    async tirarMembro(quadroId: string, pessoaId: string): Promise<boolean> {
+      const r = await conn`delete from quadro_membros where ${dona()} and quadro_id = ${quadroId} and pessoa_id = ${pessoaId}`;
+      return r.count > 0;
+    },
+    /**
+     * Os quadros de outras pessoas em que EU participo: a perna da 0146 deixa ler só a minha linha (pessoa_id = eu). Não
+     * lê nada do quadro em si (é da dona); o caso de uso entra pela porta da dona.
+     */
+    async participacoes(): Promise<{ quadroId: string; donaId: string }[]> {
+      const ls = await conn<{ quadro_id: string; owner_id: string }[]>`
+        select quadro_id, owner_id from quadro_membros where tenant_id = ${escopo.tenantId} and pessoa_id = ${escopo.pessoaId} order by adicionado_em, id`;
+      return ls.map((l) => ({ quadroId: l.quadro_id, donaId: l.owner_id }));
+    },
+    async comentar(c: { quadroId: string; tarefaId: string | null; texto: string; pedidoPor: string | null; viaAgenteId: string | null; viaNome: string | null; deFora: boolean }): Promise<{ id: string; criadoEm: number }> {
+      const [l] = await conn<{ id: string; criado_em: Date }[]>`
+        insert into quadro_tarefa_comentarios (tenant_id, owner_id, quadro_id, tarefa_id, texto, pedido_por, via_agente_id, via_nome, de_fora)
+        values (${escopo.tenantId}, ${escopo.pessoaId}, ${c.quadroId}, ${c.tarefaId}, ${c.texto}, ${c.pedidoPor}, ${c.viaAgenteId}, ${c.viaNome}, ${c.deFora})
+        returning id, criado_em`;
+      return { id: l!.id, criadoEm: ms(l!.criado_em) };
+    },
+    /**
+     * Quantos comentários a pessoa deixou na tarefa (null = no quadro, sem tarefa): o teto de LIMITES_QUADRO. Sem pessoa
+     * (`pedidoPor` null: o bot da dona sob a procuração de quem participa), os do bot `viaAgenteId` sem pessoa.
+     */
+    async contarComentarios(quadroId: string, tarefaId: string | null, pedidoPor: string | null, viaAgenteId: string | null = null): Promise<number> {
+      const quem = pedidoPor !== null ? conn`pedido_por = ${pedidoPor}` : conn`pedido_por is null and via_agente_id is not distinct from ${viaAgenteId}::uuid`;
+      const [l] = await conn<{ n: number }[]>`
+        select count(*)::int as n from quadro_tarefa_comentarios
+        where ${dona()} and quadro_id = ${quadroId} and tarefa_id is not distinct from ${tarefaId}::uuid and ${quem}`;
+      return l?.n ?? 0;
+    },
+    async comentarios(quadroId: string, limite = 100): Promise<{ id: string; tarefaId: string | null; texto: string; pedidoPor: string | null; viaNome: string | null; deFora: boolean; criadoEm: number }[]> {
+      const ls = await conn<{ id: string; tarefa_id: string | null; texto: string; pedido_por: string | null; via_nome: string | null; de_fora: boolean; criado_em: Date }[]>`
+        select id, tarefa_id, texto, pedido_por, via_nome, de_fora, criado_em from quadro_tarefa_comentarios
+        where ${dona()} and quadro_id = ${quadroId} order by criado_em desc, id desc limit ${limite}`;
+      return ls.map((l) => ({ id: l.id, tarefaId: l.tarefa_id, texto: l.texto, pedidoPor: l.pedido_por, viaNome: l.via_nome, deFora: l.de_fora, criadoEm: ms(l.criado_em) }));
     },
     /** Vários quadros da pessoa numa leitura só (o de bot excluído também: o histórico ainda o cita). */
     async buscarVarios(ids: readonly string[]): Promise<Quadro[]> {

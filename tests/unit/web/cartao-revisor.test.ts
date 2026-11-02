@@ -72,6 +72,18 @@ describe("o cartão compacto do revisor (tela A3)", () => {
     expect(html).not.toContain('data-act="abrir-conversa"');
   });
 
+  it("NOD-443 (revisão 8 do PR #628): na conversa, o cartão a pedido de quem participa do quadro diz de quem é no corpo, escapado", () => {
+    const html = naConversa(estadoCom([cartao([itemAprov()], { aPedidoDe: "Ana <b>" })]));
+    expect(html).toContain('<div class="cr-corpo"><p class="cr-pedido-de">A pedido de Ana &lt;b&gt;</p><p class="cr-pergunta" id="cr-t-d1">');
+    expect(html).not.toContain("cr-cab");
+    // O pedido da própria dona não ganha a linha; em "Sua vez", o nome vai no cabeçalho e não repete no corpo.
+    expect(naConversa(estadoCom([cartao([itemAprov()])]))).not.toContain("cr-pedido-de");
+    const e = estadoCom([cartao([itemAprov()], { aPedidoDe: "Ana" })]);
+    const naLista = renderSuaVez(e);
+    expect(naLista).toContain('<span class="aprov-pedido-de">· a pedido de Ana</span>');
+    expect(naLista).not.toContain("cr-pedido-de");
+  });
+
   it("revisor_falhou: a frase da causa, sem rótulo repetido quando já diz 'revisor'; a justificativa de queda nunca vira 'Revisor:'", () => {
     const prazo = naConversa(estadoCom([cartao([itemAprov({ motivoManual: "revisor_falhou", justificativa: "O revisor não respondeu a tempo; confira você." })])]));
     expect(prazo).toContain('<p class="cr-motivo">O revisor não respondeu a tempo; confira você.</p>');

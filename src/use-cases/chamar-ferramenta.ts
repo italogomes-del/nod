@@ -6,8 +6,9 @@ import type { Negacao } from "../contracts/negacao.ts";
 import type { FerramentaPlano, PlanoTurno } from "../contracts/plano-turno.ts";
 import { USE_CASE_POR_FERRAMENTA, type ContextoFerramenta, type SaidaCasoDeUso } from "../contracts/servicos.ts";
 import { acaoArriscadaNoApp, decidirAprovacao, envioParaForaNoApp, REGRA_CONSULTA_SEM_DECISAO, sempreServe, VERSAO_CONSULTA_SEM_DECISAO } from "../domain/aprovacao-permanente.ts";
-import type { GatilhoDeRevisao } from "../domain/modo-aprovacao.ts";
+import { aPedidoDeOutraPessoa, modoNoTurno, type GatilhoDeRevisao } from "../domain/modo-aprovacao.ts";
 import { RISCO_APAGAR_NO_APP, RISCO_DO_GATILHO } from "../domain/revisor.ts";
+import { permitidaAPedidoDeOutraPessoa } from "../domain/plano-turno.ts";
 import { conectorTrazConteudoDeFora } from "../domain/conteudo-de-fora.ts";
 import { errosDoSchema } from "../domain/schema-args.ts";
 import { ehErroDeInfraDaTx } from "../db/tx.ts";
@@ -264,6 +265,10 @@ export const chamarFerramentaFase1: CasoDeUso<EntradaChamarFerramenta, SaidaFase
 
   const ferramenta: FerramentaPlano | undefined = plano.catalogo.ferramentas.find((f) => f.nome === input.nome);
   if (!ferramenta) return negar("fora_do_catalogo", "ferramenta_negada");
+  // NOD-443 (revisão 6 do PR #628, achado 5), defesa em profundidade: no turno a pedido de outra pessoa só roda o que a
+  // lista do pedido permite (permitidaAPedidoDeOutraPessoa: ferramenta do nod fora das que leem ou gravam o que é da dona).
+  // montarPlano já corta; um plano que chegue com outra (conector, computador, pasta, ver_colegas, lembrar...) é negado.
+  if (aPedidoDeOutraPessoa(plano.autoria.sob_procuracao_de, plano.autoria.conta_de_execucao) && !permitidaAPedidoDeOutraPessoa(ferramenta)) return negar("fora_do_catalogo", "ferramenta_negada", ferramenta.conectorId);
 
   // O plano viaja no contexto para a regra do ADR-042 ser avaliada LOCALMENTE em pedir_aprovacao,
   // a partir do que já foi puxado — nunca por consulta na hora da chamada (ADR-013).
@@ -285,6 +290,9 @@ export const chamarFerramentaFase1: CasoDeUso<EntradaChamarFerramenta, SaidaFase
     if (FERRAMENTAS_QUE_PEDEM_A_PESSOA.has(ferramenta.nome) && !("emRevisao" in r.resultado && r.resultado.emRevisao.fila !== null)) r.events.push(...(await sincronizarTrabalho(deps, (await deps.repos.turnos.buscar(input.turnoId))?.trabalhoId)));
     return { data: r.resultado, events: [...events, ...r.events] };
   }
+
+  // NOD-443 (revisão 5 do PR #628, achado 1): a ferramenta de conector da dona no turno a pedido de outra pessoa (nem a
+  // leitura, que a regra da consulta sem decisão abaixo devolveria a quem pediu) já foi negada acima (revisão 6, achado 5).
 
   // Conector: concessão ativa lida AGORA (E6.4) + conector habilitado + gate de rotina (EMENDA 15).
   const conectorId = ferramenta.conectorId;
@@ -309,7 +317,8 @@ export const chamarFerramentaFase1: CasoDeUso<EntradaChamarFerramenta, SaidaFase
   let revisar: { gatilho: GatilhoDeRevisao; arriscada: boolean; contaminadoTurno: boolean; contaminado: boolean; agente: Awaited<ReturnType<Deps["repos"]["agentes"]["buscar"]>> } | null = null;
   if (!ferramenta.readOnlyHint) {
     const agente = await deps.repos.agentes.buscar(input.agenteId);
-    const modo = agente?.modoAprovacao ?? "manual";
+    // NOD-443 (ADR-143, revisão 3): no turno a pedido de outra pessoa vale o manual, qualquer que seja o modo da dona.
+    const modo = modoNoTurno(agente?.modoAprovacao, plano.autoria) ?? "manual";
     const capacidade = conector.catalogo.find((c) => c.nome === tool);
     const semprePermitir = await semprePermitirVivo(deps, input.agenteId, plano);
     const destino = { conector: conector.slug, ferramenta: tool, argumentos: (input.argumentos ?? {}) as Record<string, unknown> };

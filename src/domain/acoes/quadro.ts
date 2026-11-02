@@ -74,8 +74,8 @@ export const ACOES_QUADRO = [
   },
   {
     id: "quadro.comentar",
-    titulo: "Comentar uma tarefa (aciona o responsável ou o bot @mencionado)",
-    schema: objeto({ tarefa: P.tarefa, texto: P.texto }, ["tarefa", "texto"]),
+    titulo: "Comentar uma tarefa (aciona o responsável ou o bot @mencionado; no quadro de outra pessoa, fica para a dona)",
+    schema: objeto({ tarefa: P.tarefa, texto: P.texto }, ["texto"]),
     risco: "muda",
     cartaoNoChat: false,
     chat: vivo,
@@ -179,6 +179,35 @@ export const ACOES_QUADRO = [
     cartaoNoChat: false,
     chat: vivo,
     casoDeUso: "quadro.terminei",
+  },
+  // NOD-443 (ADR-143): as pessoas do quadro e o modo de conversa (só a dona; um bot dela só a pedido dela, num turno
+  // limpo, como as colunas), cada um com Desfazer. O comentário é o caminho de quem participa no "só a dona" (D7).
+  {
+    id: "quadro.adicionar_pessoa",
+    titulo: "Pôr alguém do time no quadro",
+    schema: objeto({ pessoa: P.pessoa, modo: P.modo }, ["pessoa"]),
+    risco: "muda",
+    cartaoNoChat: false,
+    chat: vivo,
+    casoDeUso: "quadro.adicionar_pessoa",
+  },
+  {
+    id: "quadro.tirar_pessoa",
+    titulo: "Tirar alguém do quadro (as pendências dela voltam para a dona)",
+    schema: objeto({ pessoa: P.pessoa }, ["pessoa"]),
+    risco: "muda",
+    cartaoNoChat: false,
+    chat: vivo,
+    casoDeUso: "quadro.tirar_pessoa",
+  },
+  {
+    id: "quadro.mudar_modo",
+    titulo: "Escolher como as pessoas conversam com o quadro",
+    schema: objeto({ modo: P.modo }, ["modo"]),
+    risco: "muda",
+    cartaoNoChat: false,
+    chat: vivo,
+    casoDeUso: "quadro.mudar_modo",
   },
   // NOD-419: os freios da esteira. A trava da coluna (menu "…" da coluna) e o Desfazer de um movimento do histórico.
   // O nao_e_comigo é só do bot (a pessoa troca o responsável pelo quadro.mudar_tarefa): não é ação da tela.

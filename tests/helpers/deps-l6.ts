@@ -1,3 +1,4 @@
+import { comPortas } from "../../src/db/porta-da-dona.ts";
 import type { FrameSse } from "../../src/contracts/frame.ts";
 import type { PlanoTurno } from "../../src/contracts/plano-turno.ts";
 import type { Rotina } from "../../src/contracts/rotina.ts";
@@ -183,7 +184,9 @@ export function useCasesDeTeste(): UseCasesNod {
 /** Deps sobre a transação do withRollback (integração): repos reais, tx = `(fn) => fn(trx)`. */
 export function depsSobreTrx(trx: Tx, escopo: Escopo, opcoes: OpcoesServicos & { services?: Services } = {}): Deps & { services: ServicesDeTeste } {
   const services = (opcoes.services as ServicesDeTeste | undefined) ?? servicosDeTeste((t) => criarRepos(t, escopo), escopo, opcoes);
-  return { repos: criarRepos(trx, escopo), services, useCases: useCasesDeTeste(), tx: (fn) => fn(trx), escopo, agora: opcoes.relogio ?? (() => Date.now()) };
+  const montar = (e: Escopo): Deps & { services: ServicesDeTeste } => ({ repos: criarRepos(trx, e), services, useCases: useCasesDeTeste(), tx: (fn) => fn(trx), escopo: e, agora: opcoes.relogio ?? (() => Date.now()) });
+  // NOD-443 (ADR-143): a porta para o quadro da dona, na mesma transação, como a rota e o turno.
+  return comPortas(trx, escopo, montar);
 }
 
 /** Deps em memória (unitário): os repos de tests/helpers/repos-memoria.ts e tx = `(fn) => fn({} as never)`. */

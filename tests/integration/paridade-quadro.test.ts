@@ -19,6 +19,7 @@ import type { Deps } from "../../src/use-cases/tipos.ts";
 import { depsSobreTrx, executar, MARLON, servicosDeTeste, useCasesDeTeste } from "../helpers/deps-l6.ts";
 import { agenteComConversa } from "../helpers/fabricas.ts";
 import { PESSOA_ANA } from "../helpers/ids.ts";
+import { pessoaDeTeste } from "../helpers/pessoa-de-teste.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { servidorDeTeste, type ServidorDeTeste } from "../helpers/servidor-de-teste.ts";
 import { withRollback } from "../helpers/with-rollback.ts";
@@ -29,7 +30,7 @@ import { withRollback } from "../helpers/with-rollback.ts";
  * bot comum chegam ao mesmo quadro. É o arquivo que o registro cita como `contrato` (src/domain/acoes/quadro.ts).
  */
 
-type Retrato = { meta: string | null; prazo: string | null; cumprida: boolean; resumo: string | null; colunas: unknown[]; tarefas: unknown[]; turnosAbertos: number };
+type Retrato = { meta: string | null; prazo: string | null; cumprida: boolean; resumo: string | null; colunas: unknown[]; tarefas: unknown[]; turnosAbertos: number; modo: string; membros: string[]; comentarios: unknown[] };
 const retrato = (q: QuadroDto | null, turnos: number): Retrato | null =>
   q
     ? {
@@ -40,8 +41,14 @@ const retrato = (q: QuadroDto | null, turnos: number): Retrato | null =>
         colunas: q.colunas.map((c) => [c.id, c.nome, c.grupo, c.responsavelNome ?? null, c.instrucoes ?? null, c.trava ?? null, c.prazoMin ?? null]),
         tarefas: q.tarefas.map((t) => [t.titulo, t.descricao, t.status, t.agenteNome, t.linearId, t.prUrl, t.pergunta, t.resposta, t.execucao]),
         turnosAbertos: turnos,
+        // NOD-443: o modo, quem está no quadro e os comentários (o texto e a tarefa; a assinatura diz o bot, e difere).
+        modo: q.modoConversa,
+        membros: (q.membros ?? []).map((m) => m.nome),
+        comentarios: (q.comentarios ?? []).map((c) => [c.texto, c.tarefaId ? q.tarefas.find((t) => t.id === c.tarefaId)?.titulo : null]),
       }
     : null;
+
+const COLEGA = pessoaDeTeste("Paula Paridade");
 
 describeIntegracao("paridade tela × chat do quadro.* (NOD-442, ADR-135)", () => {
   let servidor: ServidorDeTeste;
@@ -66,6 +73,8 @@ describeIntegracao("paridade tela × chat do quadro.* (NOD-442, ADR-135)", () =>
       executor: "catcher",
     };
     servidor = await servidorDeTeste(rotasQuadro(deps));
+    // NOD-443: alguém do time para pôr no quadro.
+    await COLEGA.criar();
   });
   afterAll(() => servidor.close());
 
@@ -239,6 +248,15 @@ describeIntegracao("paridade tela × chat do quadro.* (NOD-442, ADR-135)", () =>
       tela: async (_m, q) => ({ metodo: "POST", caminho: `/agentes/${q.anfitriao}/quadro/tarefas/${await q.tarefa("T1")}/terminei`, status: 200 }),
       chat: () => ({ tipo: "terminei", tarefa: "T1" }),
     },
+    // NOD-443 (ADR-143): as pessoas e o modo.
+    { id: "quadro.adicionar_pessoa", preparar: BASE, tela: async (_m, q) => ({ metodo: "POST", caminho: `/agentes/${q.anfitriao}/quadro/pessoas`, corpo: { pessoa: COLEGA.nome }, status: 200 }), chat: () => ({ tipo: "adicionar_pessoa", pessoa: COLEGA.nome }) },
+    {
+      id: "quadro.tirar_pessoa",
+      preparar: (m) => [...BASE(m), [{ tipo: "adicionar_pessoa", pessoa: COLEGA.nome }]],
+      tela: async (_m, q) => ({ metodo: "DELETE", caminho: `/agentes/${q.anfitriao}/quadro/pessoas/${COLEGA.id}`, status: 200 }),
+      chat: () => ({ tipo: "tirar_pessoa", pessoa: COLEGA.nome }),
+    },
+    { id: "quadro.mudar_modo", preparar: BASE, tela: async (_m, q) => ({ metodo: "PATCH", caminho: `/agentes/${q.anfitriao}/quadro/modo`, corpo: { modo: "so_dono" }, status: 200 }), chat: () => ({ tipo: "mudar_modo", modo: "so_dono" }) },
     // NOD-419: a trava da coluna e o Desfazer de um movimento do histórico.
     {
       id: "quadro.travar_coluna",

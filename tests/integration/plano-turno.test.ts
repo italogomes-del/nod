@@ -1,15 +1,19 @@
 import { randomUUID } from "node:crypto";
-import { expect, it } from "vitest";
+import { beforeAll, expect, it } from "vitest";
 import { NATIVAS_DO_TERMINAL } from "../../src/domain/nativas.ts";
 import { criarTokenTurno } from "../../src/services/token-turno.ts";
 import { emitirPlanoTurno, modoDoTurno } from "../../src/use-cases/emitir-plano-turno.ts";
+import { abrirTurno } from "../../src/use-cases/quadro.ts";
 import { agenteComConversa, autoriaPessoa } from "../helpers/fabricas.ts";
 import { PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
+import { pessoaDeTeste } from "../helpers/pessoa-de-teste.ts";
 import { depsSobre, servicosDeTeste } from "../helpers/l5.ts";
 import { withRollback } from "../helpers/with-rollback.ts";
 
 const MARLON = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
+/** NOD-443: quem participa do quadro da dona (Marlon) e pede ao bot dela. */
+const PARTICIPANTE = pessoaDeTeste("Ana Participa Plano 443");
 
 const CATALOGO = [
   { nome: "listar_contatos", descricao: "lista", schema: { type: "object" as const }, readOnlyHint: true },
@@ -17,6 +21,10 @@ const CATALOGO = [
 ];
 
 describeIntegracao("emitirPlanoTurno (ADR-024): interseção, profundidade e token", () => {
+  beforeAll(async () => {
+    await PARTICIPANTE.criar();
+  });
+
   it("diretório só anuncia colegas confirmados e visíveis da mesma dona", async () => {
     await withRollback(MARLON, async (trx) => {
       const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON, { nome: "Origem" });
@@ -81,6 +89,93 @@ describeIntegracao("emitirPlanoTurno (ADR-024): interseção, profundidade e tok
       expect(r.events?.[0]?.dados).toMatchObject({ agente_id: agenteId });
       const gravado = await repos.events.gravarComOutbox(r.events ?? []);
       expect(gravado.ids).toHaveLength(1);
+    });
+  });
+
+  it("NOD-443 (revisão 5 do PR #628, achado 1): o turno a pedido de outra pessoa não leva o histórico da dona nem o conector dela", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON, { nome: "Vera" });
+      await repos.agentes.atualizarPerfil(agenteId, { confirmado: true });
+      const conector = await repos.conectores.criar({ nome: "Exemplo", slug: "exemplo", transporte: "stdio", comando: "node", declaracao: "nao-toca" });
+      await repos.conectores.registrarSonda(conector?.id ?? "", { ok: true, catalogo: CATALOGO, agora: Date.now() });
+      const consentimento = await repos.mensagens.criar({ conversaId, autoria: autoriaPessoa(PESSOA_MARLON), kind: "texto", texto: "SEGREDO-NA-CONVERSA", confianca: "confiavel" });
+      await repos.concessoes.conceder({ agenteId, conectorId: conector?.id ?? "", capacidade: "listar_contatos", mensagemId: consentimento?.id ?? "" });
+      const agora = () => Date.now();
+      const deps = depsSobre(repos, MARLON, { services: servicosDeTeste({ agora }), agora, trx });
+      const turnoCom = async (sobProcuracaoDe?: string) => {
+        const t = await repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem: "conversa", prazoEm: agora() + 600_000, profundidade: 0, entradaTexto: "o que tem aí?", entradaConfianca: "confiavel", modelo: "m", ...(sobProcuracaoDe ? { sobProcuracaoDe } : {}) });
+        return (await emitirPlanoTurno(deps, { turnoId: t?.id ?? "", machineId: randomUUID(), executor: "catcher" })).data;
+      };
+      // A referência: o turno da dona leva o histórico e a leitura do conector.
+      const daDona = await turnoCom();
+      expect(daDona.promptSistema).toContain("SEGREDO-NA-CONVERSA");
+      expect(daDona.catalogo.ferramentas.map((f) => f.nome)).toContain("exemplo__listar_contatos");
+      const deOutra = await turnoCom(randomUUID());
+      expect(deOutra.promptSistema).not.toContain("SEGREDO-NA-CONVERSA");
+      expect(deOutra.promptSistema).toContain('"historico":[]');
+      expect(deOutra.catalogo.ferramentas.filter((f) => f.origem === "conector")).toEqual([]);
+      expect(deOutra.catalogo.servidores).toEqual([]);
+    });
+  });
+
+  it("NOD-443 (revisão 6 do PR #628, achados 1, 2 e 4): o turno a pedido de quem participa não tem o Sobre mim, os colegas, as rotinas nem os artefatos da dona", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON, { nome: "Vera" });
+      await repos.agentes.atualizarPerfil(agenteId, { confirmado: true });
+      const colega = await agenteComConversa(trx, MARLON, { nome: "ColegaDaDona" });
+      await repos.agentes.atualizarPerfil(colega.agenteId, { confirmado: true, descricao: "DESCRICAO-DO-COLEGA" });
+      await repos.perfil.atualizar({ sobreMim: "SOBRE-MIM-DA-DONA" });
+      await repos.rotinas.criar({ agenteId, conversaId, cron: "0 8 * * *", fusoIana: "America/Sao_Paulo", instrucao: "ROTINA-DA-DONA", fonte: "f", entregavel: "e", limitesAprovacao: "l", politicaSemDado: "p", proximaExecucao: Date.now() + 3_600_000 });
+      await repos.preferencias.gravar({ experimentos: { quadro: true } });
+      const agora = () => Date.now();
+      const deps = depsSobre(repos, MARLON, { services: servicosDeTeste({ agora }), agora, trx });
+      const turnoCom = async (sobProcuracaoDe?: string) => {
+        const t = await repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem: "conversa", prazoEm: agora() + 600_000, profundidade: 0, entradaTexto: "o que tem aí?", entradaConfianca: "confiavel", modelo: "m", ...(sobProcuracaoDe ? { sobProcuracaoDe } : {}) });
+        return (await emitirPlanoTurno(deps, { turnoId: t?.id ?? "", machineId: randomUUID(), executor: "catcher" })).data;
+      };
+      const DA_DONA = ["SOBRE-MIM-DA-DONA", "ColegaDaDona", "DESCRICAO-DO-COLEGA", "ROTINA-DA-DONA"];
+      // A referência: o turno da dona leva tudo isto.
+      const daDona = await turnoCom();
+      for (const s of DA_DONA) expect(daDona.promptSistema, s).toContain(s);
+      expect(daDona.catalogo.ferramentas.map((f) => f.nome)).toEqual(expect.arrayContaining(["ver_colegas", "ler_artefato", "listar_rotinas"]));
+      const deOutra = await turnoCom(randomUUID());
+      for (const s of [...DA_DONA, "Diretório de colegas", "Inventário de rotinas"]) expect(deOutra.promptSistema, s).not.toContain(s);
+      const nomes = deOutra.catalogo.ferramentas.map((f) => f.nome);
+      for (const f of ["ver_colegas", "ler_artefato", "listar_rotinas", "pedir_a_bot", "lembrar"]) expect(nomes, f).not.toContain(f);
+      expect(nomes).toContain("gerir_quadro");
+    });
+  });
+
+  it("NOD-443 (revisão 7 do PR #628, achado 1): o turno que o quadro abre a pedido de quem participa (abrirTurno, delegação) não leva as frentes e tasks da dona, nem Sobre mim, colegas e rotinas", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON, { nome: "Vera" });
+      await repos.agentes.atualizarPerfil(agenteId, { confirmado: true });
+      const colega = await agenteComConversa(trx, MARLON, { nome: "ColegaDaDona" });
+      await repos.agentes.atualizarPerfil(colega.agenteId, { confirmado: true, descricao: "DESCRICAO-DO-COLEGA" });
+      await repos.perfil.atualizar({ sobreMim: "SOBRE-MIM-DA-DONA" });
+      await repos.rotinas.criar({ agenteId, conversaId, cron: "0 8 * * *", fusoIana: "America/Sao_Paulo", instrucao: "ROTINA-DA-DONA", fonte: "f", entregavel: "e", limitesAprovacao: "l", politicaSemDado: "p", proximaExecucao: Date.now() + 3_600_000 });
+      await repos.trabalhos.criar({ agenteId, conversaId, titulo: "FRENTE-DA-DONA", origem: "pessoa", forma: "frente" });
+      await repos.preferencias.gravar({ experimentos: { quadro: true } });
+      const agora = () => Date.now();
+      const deps = depsSobre(repos, MARLON, { services: servicosDeTeste({ agora }), agora, trx });
+      const agente = (await repos.agentes.buscar(agenteId))!;
+      // O caminho real: o lote do quadro abre o turno do bot responsável (origem "delegacao", sem trabalho).
+      const abrir = async (pedidoPor?: string) => {
+        const aberto = await abrirTurno(deps, { autor: { tipo: "pessoa" }, ops: [], executor: "catcher", ...(pedidoPor ? { pedidoPor } : {}) }, agente, "faça a tarefa do quadro", false);
+        const turno = await repos.turnos.buscar(aberto!.turnoId);
+        expect(turno).toMatchObject({ origem: "delegacao", trabalhoId: null, sobProcuracaoDe: pedidoPor ?? PESSOA_MARLON });
+        return (await emitirPlanoTurno(deps, { turnoId: aberto!.turnoId, machineId: randomUUID(), executor: "catcher" })).data;
+      };
+      const DA_DONA = ["FRENTE-DA-DONA", "Trabalhos em andamento", "SOBRE-MIM-DA-DONA", "ColegaDaDona", "DESCRICAO-DO-COLEGA"];
+      // A referência: o turno que a própria dona abre pelo quadro leva as frentes dela, o Sobre mim e os colegas (o
+      // inventário de rotinas não entra na delegação; a ausência dele no turno da participante é conferida abaixo).
+      const daDona = await abrir();
+      expect(daDona.modoTurno).toBe("delegacao");
+      for (const s of DA_DONA) expect(daDona.promptSistema, s).toContain(s);
+      const deOutra = await abrir(PARTICIPANTE.id);
+      expect(deOutra.modoTurno).toBe("delegacao");
+      expect(deOutra.autoria).toMatchObject({ sob_procuracao_de: PARTICIPANTE.id });
+      for (const s of [...DA_DONA, "ROTINA-DA-DONA", "Diretório de colegas", "Inventário de rotinas"]) expect(deOutra.promptSistema, s).not.toContain(s);
     });
   });
 

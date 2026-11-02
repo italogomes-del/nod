@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { expect, it } from "vitest";
 import type { ModoAprovacao } from "../../src/contracts/agente.ts";
 import type { AcaoLote } from "../../src/contracts/ferramentas-do-nod.ts";
@@ -104,6 +105,19 @@ describeIntegracao("as mãos do Nod (ADR-082)", () => {
       const total = await gerirBots(d, { ...ctx, resumo: "Excluir", acoes: [{ tipo: "excluir", bot: "Dev antigo" }, { tipo: "mudar_modo", bot: "Dev 1", modo: "automatico" }] });
       expect(total.data).toMatchObject({ ok: true, esperando: [], decisao_id: null });
       expect((await d.repos.agentes.buscar(velho.id, true))?.excluidoEm).not.toBeNull();
+    });
+  });
+
+  it("NOD-443 (revisão 5 do PR #628, achado 3): a pedido de outra pessoa, o Nod em total decide pelo manual — o lote vira card", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const d = depsSobreTrx(trx, MARLON);
+      const { nod } = await nodComTurno(d, { modo: "total" });
+      const turno = await d.repos.turnos.enfileirar({ executor: "catcher", conversaId: nod.conversaId, agenteId: nod.id, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "pedido", entradaConfianca: "confiavel", modelo: "auto", sobProcuracaoDe: randomUUID() });
+      const ctx = { turnoId: turno?.id ?? "", agenteId: nod.id, conversaId: nod.conversaId };
+      const antes = (await doMarlon(d)).length;
+      const r = await gerirBots(d, { ...ctx, resumo: "Criar", acoes: [{ tipo: "criar", nome: "Novo", descricao: "x." }] });
+      expect(r.data).toMatchObject({ ok: true, esperando: [0] });
+      expect((await doMarlon(d)).length).toBe(antes);
     });
   });
 

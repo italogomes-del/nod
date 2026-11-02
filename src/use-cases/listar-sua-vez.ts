@@ -2,8 +2,10 @@ import type { SuaVezDto } from "../contracts/api.ts";
 import type { Decisao, TipoDecisao } from "../contracts/decisao.ts";
 import type { ItemAprovacao } from "../contracts/item-aprovacao.ts";
 import type { PedidoDoItem } from "../contracts/pedido.ts";
+import type { Turno } from "../contracts/turno.ts";
 import { nuncaPermanente as ehNuncaPermanente } from "../domain/aprovacao-permanente.ts";
 import { montarFila } from "../domain/fila-frota.ts";
+import { aPedidoDeOutraPessoa } from "../domain/modo-aprovacao.ts";
 import { incidentesVisiveis } from "./dispensar-incidente.ts";
 import { fiosDosItens } from "./fios-da-pergunta.ts";
 import { fraseDoItem, type ConectoresDaLeitura } from "./frase-da-acao.ts";
@@ -83,12 +85,29 @@ export async function listarSuaVez(deps: DepsSuaVez, input: EntradaSuaVez = {}):
   const fios = await fiosDosItens(repos, fila.itens.map((i) => i.decisao));
   const pedidos = await pedidosDosItens(deps, fila.itens.map((i) => i.decisao));
 
+  // Revisão 8 do PR #628: cada turno da fila é lido uma vez só (os bastidores e o "a pedido de" usam a mesma leitura).
+  const turnos = new Map<string, Turno | null>();
+  for (const t of new Set(fila.itens.flatMap((i) => (i.decisao.turnoId ? [i.decisao.turnoId] : [])))) turnos.set(t, await repos.turnos.buscar(t));
+
   // NOD-402 (ADR-130): o pedido aberto de um turno dos bastidores (rotina, colega, sob procuração; não a frente) leva a
   // marca; a web segue para ele a regra da mensagem dos bastidores (segurado enquanto a pessoa conversa).
   const bastidores = new Set<string>();
   for (const t of new Set(fila.itens.flatMap((i) => (i.decisao.turnoId && i.estadoColuna !== "vencido" ? [i.decisao.turnoId] : [])))) {
-    const turno = await repos.turnos.buscar(t);
+    const turno = turnos.get(t);
     if (turno?.bastidores && !turno.trabalhoId) bastidores.add(t);
+  }
+
+  // NOD-443 (revisão 7 do PR #628, achado 4; ADR-143): o cartão que o turno a pedido de quem participa do quadro abriu
+  // (o bot da dona sob a procuração dela) diz de quem é o pedido — a dona decide sabendo que não foi ela quem pediu.
+  // Revisão 8: o nome de cada pessoa é lido uma vez por chamada (vários cartões da mesma Ana, uma leitura).
+  const aPedidoDe = new Map<string, string>();
+  const nomes = new Map<string, string>();
+  for (const [t, turno] of turnos) {
+    if (!turno?.sobProcuracaoDe || !aPedidoDeOutraPessoa(turno.sobProcuracaoDe, turno.ownerId)) continue;
+    const quem = turno.sobProcuracaoDe;
+    let nome = nomes.get(quem);
+    if (nome === undefined) nomes.set(quem, (nome = (await repos.pessoas.buscar(quem))?.nome ?? "outra pessoa"));
+    aPedidoDe.set(t, nome);
   }
 
   const itens: SuaVezDto["itens"] = [];
@@ -112,7 +131,7 @@ export async function listarSuaVez(deps: DepsSuaVez, input: EntradaSuaVez = {}):
     // parada e quais janelas não rodaram — só no aberto; o vencido já pausou a rotina.
     const rotinaParada = proposta && aberta && decisao.tipo === "acesso" ? await paradaDoPedido(repos, proposta) : null;
     const nuncaPermanente = itensAprovacao.filter((i) => ehNuncaPermanente(i.destino.ferramenta)).map((i) => i.id);
-    itens.push({ ...item, decisao, itensAprovacao, proposta, fio: fios.get(decisao.id) ?? null, rotinaParada, nuncaPermanente, pedido: pedidos.get(decisao.id) ?? null, trabalhoId: decisao.turnoId ? (trabalhos.get(decisao.turnoId) ?? null) : null, ...(decisao.turnoId && bastidores.has(decisao.turnoId) ? { bastidores: true } : {}) });
+    itens.push({ ...item, decisao, itensAprovacao, proposta, fio: fios.get(decisao.id) ?? null, rotinaParada, nuncaPermanente, pedido: pedidos.get(decisao.id) ?? null, trabalhoId: decisao.turnoId ? (trabalhos.get(decisao.turnoId) ?? null) : null, ...(decisao.turnoId && bastidores.has(decisao.turnoId) ? { bastidores: true } : {}), ...(decisao.turnoId && aPedidoDe.has(decisao.turnoId) ? { aPedidoDe: aPedidoDe.get(decisao.turnoId)! } : {}) });
   }
 
   const foraDoAr = (await repos.inventario.listar())

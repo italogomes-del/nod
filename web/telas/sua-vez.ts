@@ -300,6 +300,15 @@ export function previaDoItem(i: Pick<Item["itensAprovacao"][number], "destino">)
 }
 
 /**
+ * NOD-443 (revisão 7 do PR #628, achado 4; ADR-143): o pedido que veio de quem participa do quadro (o bot da dona sob a
+ * procuração dela) diz de quem é, como a assinatura "Vera · por Ana" (web/lib/assinatura.ts). Sem isso, a dona aprovava
+ * um app dela achando que o pedido era dela.
+ */
+export function aPedidoDe(item: Pick<Item, "aPedidoDe">): string {
+  return item.aPedidoDe ? `<span class="aprov-pedido-de">· a pedido de ${esc(item.aPedidoDe)}</span>` : "";
+}
+
+/**
  * O card da aprovação (definido em 2026-10-03, canvas "Uma conversa de verdade · depois"; revisto no mesmo dia para a
  * lista): no desenho do cartão de atividade — quem pede e há quanto, a frase, ONDE (o app como chip), o que vai
  * acontecer, os botões e, no rodapé, o prazo. Saem a tag "aprovação em lista" e a borda âmbar: o ponto âmbar já diz
@@ -339,7 +348,7 @@ function renderCardAprovacao(item: Item, estado: Estado): string {
     corpo = `<ul class="aprov-itens">${itens.map(linha).join("")}</ul>`;
   }
   return `<li class="decisao aprov-card dec-${esc(item.estadoColuna)} tipo-${esc(d.tipo)}" data-decisao="${esc(d.id)}">
-    <div class="aprov-cab"><span class="aprov-ponto" aria-hidden="true"></span><b>${esc(item.agenteNome)} precisa do seu ok</b><span>· ${esc(haQuanto(item.aguardandoHaMs))}</span>${marcaGemeas(item)}${item.estadoColuna === "reaberto" ? '<span class="tag tag-ambar">reaberta</span>' : ""}</div>
+    <div class="aprov-cab"><span class="aprov-ponto" aria-hidden="true"></span><b>${esc(item.agenteNome)} precisa do seu ok</b>${aPedidoDe(item)}<span>· ${esc(haQuanto(item.aguardandoHaMs))}</span>${marcaGemeas(item)}${item.estadoColuna === "reaberto" ? '<span class="tag tag-ambar">reaberta</span>' : ""}</div>
     <p class="aprov-titulo dec-frase">${esc(d.frase)}</p>
     ${umApp ? `<div class="aprov-onde">${chip(umApp)}</div>` : ""}
     ${corpo}
@@ -587,9 +596,11 @@ function renderCartaoDoRevisor(item: Item, estado: Estado, naConversa: boolean):
   const nomes = [...new Set(servem.map((i) => acaoHumana(estado.conectores, i.destino.conector, i.destino.ferramenta)))];
   const sempre = servem.length ? { titulo: `Vale já para ${nomes.join(" e ")}, em qualquer destino, enquanto o bot não tiver lido conteúdo de fora na tarefa.` } : null;
   const agente = estado.frota?.agentes.find((a) => a.id === d.agenteId);
-  const cabecalho = naConversa ? undefined : `<div class="cr-cab"><b>${esc(item.agenteNome)}</b><span>· ${esc(haQuanto(item.aguardandoHaMs))}</span>${marcaGemeas(item)}</div>`;
+  const cabecalho = naConversa ? undefined : `<div class="cr-cab"><b>${esc(item.agenteNome)}</b>${aPedidoDe(item)}<span>· ${esc(haQuanto(item.aguardandoHaMs))}</span>${marcaGemeas(item)}</div>`;
   const rodape = !naConversa && agente ? `<div class="cr-rodape">${botao("abrir-conversa", "abrir conversa", { classe: "link", dados: { conversa: d.conversaId, agente: d.agenteId } })}</div>` : undefined;
-  return renderCartaoRevisor({ decisaoId: d.id, ...perguntaDoCartao(d.frase, itens), motivo: motivoDoCartao(itens), detalhe, sempre, ...(cabecalho ? { cabecalho } : {}), ...(rodape ? { rodape } : {}) }, item.estadoColuna);
+  // Revisão 8 do PR #628: na conversa não há cabeçalho; o "a pedido de" vai no corpo, senão a dona não sabe de quem é.
+  const pedidoDe = naConversa && item.aPedidoDe ? { aPedidoDe: item.aPedidoDe } : {};
+  return renderCartaoRevisor({ decisaoId: d.id, ...perguntaDoCartao(d.frase, itens), motivo: motivoDoCartao(itens), detalhe, sempre, ...(cabecalho ? { cabecalho } : {}), ...(rodape ? { rodape } : {}), ...pedidoDe }, item.estadoColuna);
 }
 
 function renderItem(item: Item, estado: Estado, naConversa = false): string {
@@ -604,7 +615,7 @@ function renderItem(item: Item, estado: Estado, naConversa = false): string {
   const fechar = dispensavel(item) && !(aberta && d.tipo === "retomar_turno") ? botao("dispensar", "×", { classe: "dec-fechar", id: d.id, titulo: "Tirar da tela", aria: "Dispensar este pedido" }) : "";
   const conversa = estado.frota?.agentes.find((a) => a.id === d.agenteId);
   return `<li class="decisao dec-${esc(item.estadoColuna)} tipo-${esc(d.tipo)}" data-decisao="${esc(d.id)}">
-    <div class="dec-cab"><span class="tag ${aberta ? "tag-ambar" : "tag-cinza"}">${esc(d.tipo === "aprovacao" && item.itensAprovacao.length === 1 ? "aprovação" : TIPO_HUMANO[d.tipo])}</span>${parada.marca}${marcaGemeas(item)}<b>${esc(item.agenteNome)}</b><span class="mudo">${esc(relogio)}</span>${item.estadoColuna === "reaberto" ? '<span class="tag tag-ambar">reaberta</span>' : ""}${fechar}</div>
+    <div class="dec-cab"><span class="tag ${aberta ? "tag-ambar" : "tag-cinza"}">${esc(d.tipo === "aprovacao" && item.itensAprovacao.length === 1 ? "aprovação" : TIPO_HUMANO[d.tipo])}</span>${parada.marca}${marcaGemeas(item)}<b>${esc(item.agenteNome)}</b>${aPedidoDe(item)}<span class="mudo">${esc(relogio)}</span>${item.estadoColuna === "reaberto" ? '<span class="tag tag-ambar">reaberta</span>' : ""}${fechar}</div>
     <div class="dec-frase">${esc(d.frase)}</div>${parada.linha}
     ${d.tipo === "acesso" && aberta ? detalheAcesso(item.proposta) : ""}
     ${(d.tipo === "rotina" || d.tipo === "rotina_atualizacao") && aberta ? linhasPrecisa(item.proposta, estado) : ""}

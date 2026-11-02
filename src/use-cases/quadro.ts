@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 import type { Agente } from "../contracts/agente.ts";
 import type { Decisao } from "../contracts/decisao.ts";
-import type { Executor, RuntimeEvent } from "../contracts/evento.ts";
-import type { AutorLote, ColunaQuadro, ComentarioTarefa, EntradaHistoricoDto, LinhaDeSistema, LoteQuadro, MudancaTarefa, OpQuadro, PrNaTela, Quadro, QuadroDaPessoaDto, QuadroDto, ResumoQuadroParaBot, TarefaDto, TarefaPorCodigoDto, TarefaQuadro } from "../contracts/quadro.ts";
+import type { Autoria, Executor, RuntimeEvent } from "../contracts/evento.ts";
+import type { AutorLote, ColunaQuadro, ComentarioQuadroDto, ComentarioTarefa, EntradaHistoricoDto, LinhaDeSistema, LoteQuadro, MudancaTarefa, OpQuadro, PrNaTela, Quadro, QuadroDaPessoaDto, QuadroDto, ResumoQuadroParaBot, TarefaDto, TarefaPorCodigoDto, TarefaQuadro } from "../contracts/quadro.ts";
 import { ehNod } from "../domain/nod.ts";
 import type { MovimentoParaBot, MovimentoTarefa } from "../contracts/freios-quadro.ts";
 import { fraseDaTrava, MOTIVO_LACO_SEM_NOMES, mudouATarefa, nomeDaParada, paradaDaPessoa } from "../domain/freios-quadro.ts";
@@ -20,6 +20,10 @@ import { podeRepassar, proximaProfundidade } from "../domain/profundidade.ts";
 import type { Profundidade } from "../contracts/turno.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
 import { avisarRiscoDoQuadro } from "./risco-quadro.ts";
+import { OPS_DE_PESSOAS } from "../domain/quadro.ts";
+import { assinatura, podeDesfazer, quemDecide } from "../domain/quadro-pessoas.ts";
+import { aplicarPessoas, avisarQuemParticipa, pelaPorta, restaurarPessoas } from "./quadro-pessoas.ts";
+import { comentarTarefa } from "./comentar-tarefa.ts";
 import { avisarNoLote } from "./avisos-quadro.ts";
 import { esperaPessoa } from "../domain/avisos-quadro.ts";
 import { sincronizarDasDecisoes } from "./trabalhos.ts";
@@ -32,7 +36,7 @@ import { sincronizarDasDecisoes } from "./trabalhos.ts";
  */
 
 /** NOD-418: `estado_invalido` = o Repetir com o trabalho rodando (cancele antes). NOD-416: `conflito` = a tarefa mudou de quadro no meio do mover. */
-export type FalhaQuadro = "experimento_desligado" | "sem_quadro" | "entrada_invalida" | "nao_encontrado" | "estado_invalido" | "conflito";
+export type FalhaQuadro = "experimento_desligado" | "sem_quadro" | "entrada_invalida" | "nao_encontrado" | "nao_permitido" | "estado_invalido" | "conflito";
 
 export type PedidoLote = {
   autor: AutorLote;
@@ -58,6 +62,19 @@ export type PedidoLote = {
   origemConfiavel?: boolean;
   /** O bot fala num turno da pessoa (conversa/ligação): começa até a tarefa que já é dele. */
   autorNaConversa?: boolean;
+  /**
+   * NOD-443 (ADR-143): quem participa do quadro e pediu, quando o lote entrou pela porta (o escopo é o da dona). Ausente =
+   * a própria dona (pela tela ou por um bot dela).
+   */
+  pedidoPor?: string;
+  /** NOD-443: o nome do bot de quem participa, pelo qual ela pediu ("Ana, pela Ada"). O escopo da dona não lê o bot dela. */
+  viaNome?: string | null;
+  /**
+   * NOD-443 (revisão 2 do PR #628, achado 2): o lote é do bot da dona no turno que o pedido de quem participa abriu (sob a
+   * procuração dela, `pedidoPor`). As regras são as de quem pediu (o que ela não pode, o bot dela também não) e o turno só
+   * mexe na tarefa dele; mas o lote não é dela: não entra no mural nem vira "quem pediu" de nada.
+   */
+  porProcuracao?: boolean;
   /**
    * NOD-430: "total" = a pessoa pela tela (o padrão dela), ou o bot a pedido dela na conversa, num turno limpo (o lote grava
    * pedido_por = a pessoa, via = o bot). "normal" = o bot sozinho (tarefa, rotina, colega, turno contaminado); é o padrão do bot (limiteDe).
@@ -89,7 +106,7 @@ export type ResultadoLote =
   | { ok: true; quadro: QuadroDto | null; lote: LoteQuadro | null; comecaram: Comecou[]; desfeito: boolean; /** NOD-416: a tarefa que mudou de quadro (o código novo e o antigo, que continua abrindo). */ movida?: { tarefaId: string; codigo: string; codigoAntigo: string }; /** No limite da corrente: o que ia começar e ficou em A fazer. */ seguradas?: number; /** Um passo de coluna foi para a posição válida mais próxima (NOD-448). */ ajustada?: boolean; /** NOD-415: o quadro foi removido (o bot voltou a agente comum). */ removido?: boolean; /** Revisão 3 do PR #623: o id da tarefa de cada criar_tarefa, na ordem dos passos (null se o mesmo lote a excluiu). */ criadas?: (string | null)[]; /** NOD-417: o comentário gravado (op comentar) e quantos gatilhos se juntaram a um turno da fila (comentário ou lote). */ comentario?: ComentarioTarefa; juntados?: number; /** Revisão do PR #629: o comentário de bot não acionou ninguém porque a tarefa passou do freio da hora. */ freados?: number; /** NOD-418: Repetir, Cancelar ou recado: o trabalho que ficou e a vista da tarefa aberta. */ trabalho?: TrabalhoFeito; trabalhos?: ExecucoesDaTarefa; /** Revisão 4 do PR #622: o comentário numa tarefa fora do andamento não acionou o responsável. */ responsavelForaDoAndamento?: { agenteNome: string; coluna: string } }
   | { ok: false; erro: FalhaQuadro; detalhe: string; /** Revisão 7 do PR #623: a chave da recusa do mover que a tela distingue (a rota não mapeia texto). */ motivo?: RecusaDoMover };
 
-const falha = (erro: FalhaQuadro, detalhe: string): { data: ResultadoLote } => ({ data: { ok: false, erro, detalhe } });
+export const falha = (erro: FalhaQuadro, detalhe: string): { data: ResultadoLote } => ({ data: { ok: false, erro, detalhe } });
 /** Revisão 7 do PR #623: a recusa do mover leva a CHAVE tipada; o texto da lista segue como detalhe (bot e log). */
 const recusaDoMover = (erro: FalhaQuadro, motivo: RecusaDoMover): { data: ResultadoLote } => ({ data: { ok: false, erro, detalhe: RECUSAS_DO_MOVER[motivo], motivo } });
 
@@ -113,7 +130,7 @@ async function escolherPrefixo(deps: Deps, anfitriao: string, agentes: readonly 
   return prefixoDoNome(nome, await deps.repos.quadros.prefixosUsados());
 }
 
-async function comPrefixo(deps: Deps, q: Quadro, agentes: readonly Agente[]): Promise<Quadro> {
+export async function comPrefixo(deps: Deps, q: Quadro, agentes: readonly Agente[]): Promise<Quadro> {
   if (q.prefixo !== null) return q;
   await deps.repos.quadros.definirPrefixo(q.id, await escolherPrefixo(deps, q.agenteId, agentes));
   return (await deps.repos.quadros.buscar(q.id)) ?? q;
@@ -186,6 +203,10 @@ function anfitriaoPeloNome(ref: string, agentes: readonly Agente[]): string | nu
 /** Acha o quadro: id do quadro, ou o bot anfitrião (id ou nome); sem referência, o do bot da tela ou do autor, senão o único. */
 export async function acharQuadro(deps: Deps, p: PedidoLote, agentes: readonly Agente[]): Promise<Quadro | null | { ambiguo: Quadro[] } | { semNome: string; nomes: string[] }> {
   const repo = deps.repos.quadros;
+  // NOD-443 (revisão 7 do PR #628, achado 2): sob a procuração de quem participa, o quadro é o do próprio turno — nunca o
+  // que a referência nomeia. Sem isso, um nome que não bate devolvia a lista dos quadros (e bots) da dona antes da
+  // checagem de participação.
+  if (p.porProcuracao) return p.turnoId ? repo.doTurno(p.turnoId) : null;
   if (p.quadro !== undefined && p.quadro.trim() !== "") {
     const ref = p.quadro.trim().replace(/^@/, "");
     if (ehUuid(ref)) return (await repo.buscar(ref)) ?? (await repo.doAgente(ref));
@@ -229,9 +250,13 @@ export function falhaDoAchado(achado: { ambiguo: Quadro[] } | { semNome: string;
   return { erro: "sem_quadro", detalhe: `a pessoa tem ${achado.ambiguo.length} quadros: diga qual em quadro (o nome do bot anfitrião ou o id): ${nomes}. Se ela não disse, pergunte` };
 }
 
-/** O quadro como a tela e o bot leem (tarefas, execução de cada uma, nomes, o último lote). */
-export async function montarQuadro(deps: Pick<Deps, "repos">, q: Quadro): Promise<QuadroDto> {
+/**
+ * O quadro como a tela e o bot leem (tarefas, execução de cada uma, nomes, o último lote). Sempre no escopo da dona;
+ * NOD-443: `leitor` é quem lê (a dona, ou quem participa e entrou pela porta), para o "Você", o Desfazer e quem decide.
+ */
+export async function montarQuadro(deps: Pick<Deps, "repos" | "escopo">, q: Quadro, leitor: string = deps.escopo.pessoaId): Promise<QuadroDto> {
   const repo = deps.repos.quadros;
+  const donaId = deps.escopo.pessoaId;
   const tarefas = await repo.tarefas(q.id);
   const estados = await repo.estadosDosTurnos(tarefas.map((t) => t.turnoId).filter((id): id is string => id !== null));
   const colunas = colunasDe(q);
@@ -247,13 +272,38 @@ export async function montarQuadro(deps: Pick<Deps, "repos">, q: Quadro): Promis
   const ultimoSemBarreira = await repo.ultimoLote(q.id);
   // O lote que um mover_quadro invalidou não aparece para desfazer (revisão 2 do PR #623).
   const ultimo = ultimoSemBarreira && !(await repo.mudouDeQuadroDepois(ultimoSemBarreira.id, q.id)) ? ultimoSemBarreira : null;
+  // NOD-443: as pessoas do quadro, os nomes de quem pediu (quem saiu também tem nome) e quem decide cada pendência (D5).
+  const membros = await repo.membros(q.id);
+  const naLista = new Set(membros.map((m) => m.pessoaId));
+  const nomesPessoa = new Map<string, string>(membros.map((m) => [m.pessoaId, m.nome]));
+  const nomeDe = async (id: string): Promise<string> => {
+    if (!nomesPessoa.has(id)) nomesPessoa.set(id, (await deps.repos.pessoas.buscar(id))?.nome ?? "alguém");
+    return nomesPessoa.get(id)!;
+  };
+  const donaNome = await nomeDe(donaId);
+  const comentarios = await repo.comentarios(q.id, 50);
+  // Quem saiu também conta: a pendência dela volta à dona dizendo quem era.
+  const varias = membros.length > 0 || comentarios.length > 0 || tarefas.some((t) => t.pedidoPor && t.pedidoPor !== donaId);
+  const extras = new Map<string, Pick<TarefaDto, "pedidoPorNome" | "decide">>();
+  if (varias) {
+    for (const t of tarefas) {
+      const pedido = t.pedidoPor && t.pedidoPor !== donaId ? (t.pedidoPor === leitor ? "você" : await nomeDe(t.pedidoPor)) : null;
+      let decide: TarefaDto["decide"] = null;
+      if (t.status === "voce") {
+        const d = quemDecide({ pedidoPor: t.pedidoPor, donaId, membros: naLista });
+        decide = { pessoaId: d.pessoaId, nome: await nomeDe(d.pessoaId), voce: d.pessoaId === leitor, saiu: d.saiu ? await nomeDe(d.saiu) : null };
+      }
+      extras.set(t.id, { pedidoPorNome: pedido, decide });
+    }
+  }
   // NOD-420: desde quando a tarefa está na coluna (a tela mostra "parada há" e o prazo).
   const marcas = await repo.marcasDeAviso(q.id);
   // NOD-421: os PRs ligados e as linhas de sistema (uma consulta cada, agrupadas por tarefa).
   // O branch fica de fora do DTO: nome de fora que a tela não mostra (o casamento é no servidor).
   const prs = new Map<string, PrNaTela[]>();
   for (const { tarefaId, branch: _branch, mergePendente: _pendente, ...p } of await repo.prsDoQuadro(q.id)) prs.set(tarefaId, [...(prs.get(tarefaId) ?? []), p]);
-  const avisoGithub = await repo.avisoGithub(q.id);
+  // NOD-443 (revisão 5 do PR #628, achado 4): o aviso do GitHub fala da conexão e dos repos da dona — só ela o vê.
+  const avisoGithub = leitor === donaId ? await repo.avisoGithub(q.id) : null;
   const linhas = new Map<string, LinhaDeSistema[]>();
   for (const { tarefaId, ...l } of await repo.linhasDoQuadro(q.id)) linhas.set(tarefaId, [...(linhas.get(tarefaId) ?? []), l]);
   const dtos: TarefaDto[] = tarefas.map((t) => ({
@@ -265,6 +315,7 @@ export async function montarQuadro(deps: Pick<Deps, "repos">, q: Quadro): Promis
     // A coluna com passagem (ADR-142) é uma etapa em andamento onde ela aciona (revisão 3: o Backlog com passagem não).
     execucao: ["fazendo", "afazer"].includes(papelDe(colunas, t.status)) || (responsavelDe(colunas, t.status) && acionaNaColuna(colunas, t.status)) ? execucaoDoTurno(t.turnoId ? estados.get(t.turnoId) : null) : null,
     agenteNome: t.agenteId ? nomes.get(t.agenteId) ?? null : null,
+    ...(extras.get(t.id) ?? {}),
     prs: prs.get(t.id) ?? [],
     linhas: linhas.get(t.id) ?? [],
     movimentos: movs.filter((m) => m.tarefaId === t.id).map((m) => ({ ...m, autorNome: m.autor.tipo === "agente" ? nomes.get(m.autor.agenteId) ?? null : null, agenteAntesNome: m.agenteAntes ? nomes.get(m.agenteAntes) ?? null : null, agenteDepoisNome: m.agenteDepois ? nomes.get(m.agenteDepois) ?? null : null })),
@@ -279,9 +330,23 @@ export async function montarQuadro(deps: Pick<Deps, "repos">, q: Quadro): Promis
     ultimoLote: ultimo ? { id: ultimo.id, quadroId: ultimo.quadroId, autor: ultimo.autor, resumo: ultimo.resumo, tarefaIds: ultimo.tarefaIds, desfeitoEm: ultimo.desfeitoEm, criadoEm: ultimo.criadoEm } : null,
     feitas,
     total,
+    ...(varias || leitor !== donaId
+      ? {
+          voce: { pessoaId: leitor, papel: leitor === donaId ? ("dona" as const) : ("membro" as const), podeDesfazer: ultimo !== null && ultimo.desfeitoEm === null && podeDesfazer({ lotePedidoPor: ultimo.pedidoPor, quemPede: leitor, donaId }) },
+          dona: { pessoaId: donaId, nome: donaNome },
+          membros,
+          comentarios: await Promise.all(comentarios.map(async (c): Promise<ComentarioQuadroDto> => ({ id: c.id, tarefaId: c.tarefaId, texto: c.texto, deFora: c.deFora, criadoEm: c.criadoEm, assinatura: c.pedidoPor ? assinatura({ pessoaId: c.pedidoPor, pessoaNome: await nomeDe(c.pedidoPor), botNome: c.viaNome, quemLe: leitor }) : (c.viaNome ?? "Um bot") }))),
+        }
+      : {}),
     avisoGithub,
   };
 }
+
+/**
+ * Quem lê o quadro que o lote devolve. NOD-443 (revisão 7 do PR #628, achado 3; ADR-143 Rev5 achado 4): no turno do bot
+ * da dona sob a procuração de quem participa, quem lê é quem pediu — sem o aviso do GitHub da dona e com o "Você" dela.
+ */
+export const leitorDoLote = (deps: Pick<Deps, "escopo">, p: Pick<PedidoLote, "pedidoPor" | "porProcuracao">): string => (p.porProcuracao && p.pedidoPor ? p.pedidoPor : deps.escopo.pessoaId);
 
 /** `trabalhos`: o trabalho atual de cada tarefa (trabalhosParaBot); a tarefa que nunca teve trabalho fica sem o campo. */
 export function resumoParaBot(q: QuadroDto, trabalhos: ReadonlyMap<string, TrabalhoParaBot> = new Map()): ResumoQuadroParaBot {
@@ -294,9 +359,24 @@ export function resumoParaBot(q: QuadroDto, trabalhos: ReadonlyMap<string, Traba
     resumo: q.resumo,
     colunas: q.colunas.map((c) => ({ id: c.id, nome: c.nome, grupo: c.grupo, ...(c.responsavelNome ? { passa_para: c.responsavelNome } : {}), ...(c.instrucoes ? { instrucoes: c.instrucoes } : {}), ...(c.prazoMin ? { prazo_min: c.prazoMin } : {}), ...(fraseDaTrava(q.colunas, c.trava) ? { trava: fraseDaTrava(q.colunas, c.trava)! } : {}) })),
     // NOD-420: a pergunta de Bloqueado também (o bot responde "o que está travado?" sem abrir o card).
-    tarefas: q.tarefas.map((t) => ({ id: t.id, codigo: t.codigo, titulo: t.titulo, status: t.status, agente: t.agenteNome, linear: t.linearId, pr: t.prUrl, pergunta: esperaPessoa(q.colunas, t.status) ? t.pergunta : null, execucao: t.execucao, ...(trabalhos.has(t.id) ? { trabalho: trabalhos.get(t.id)! } : {}), ...(t.prs?.length ? { prs: t.prs.map(resumoDoPr) } : {}), ...movimentosParaBot(t) })),
+    tarefas: q.tarefas.map((t) => ({ id: t.id, codigo: t.codigo, titulo: t.titulo, status: t.status, agente: t.agenteNome, linear: t.linearId, pr: t.prUrl, pergunta: esperaPessoa(q.colunas, t.status) ? t.pergunta : null, execucao: t.execucao, ...(t.decide ? { decide: t.decide.voce ? "você" : t.decide.nome } : {}), ...(trabalhos.has(t.id) ? { trabalho: trabalhos.get(t.id)! } : {}), ...(t.prs?.length ? { prs: t.prs.map(resumoDoPr) } : {}), ...movimentosParaBot(t) })),
+    // NOD-443: o bot de quem participa sabe o modo (no "só a dona", comentar) e quem está no quadro.
+    ...(q.membros && q.dona ? { modo: q.modoConversa, dona: q.dona.nome, pessoas: q.membros.map((m) => m.nome) } : {}),
     ...(q.avisoGithub ? { avisoGithub: q.avisoGithub } : {}),
   };
+}
+
+/**
+ * Quem assina o lote. NOD-443 (revisão 2, achado 4): dentro da porta o escopo é o da dona, mas quem pediu é quem participa
+ * (a procuração é dela). Revisão 3, achado 4: a conta de execução é a de quem roda o bot. O bot de quem participa (pela
+ * porta, sem `porProcuracao`) roda na conta dela; o bot da dona agindo sob a procuração dela (`porProcuracao`) e o lote da
+ * própria dona rodam na conta da dona.
+ */
+function autoriaDoLote(deps: Deps, p: Pick<PedidoLote, "autor" | "pedidoPor" | "porProcuracao">): Autoria {
+  const quem = p.pedidoPor ?? deps.escopo.pessoaId;
+  if (p.autor.tipo !== "agente") return autoriaPessoa(quem);
+  const conta = p.pedidoPor && !p.porProcuracao ? p.pedidoPor : deps.escopo.pessoaId;
+  return autoriaAgente(p.autor.agenteId, conta, quem);
 }
 
 /** Quantos movimentos de cada tarefa o bot lê (o primeiro é o que o desfazer_movimento sem id desfaz). */
@@ -307,11 +387,23 @@ function movimentosParaBot(t: TarefaDto): { movimentos?: MovimentoParaBot[] } {
   return ms.length === 0 ? {} : { movimentos: ms.map((m) => ({ id: m.id, de: m.de, para: m.para, por: m.autor.tipo === "agente" ? m.autorNome ?? "bot" : "pessoa", ...(paradaDaPessoa(m) ? { so_a_pessoa_desfaz: true as const } : {}) })) };
 }
 
-export function eventoQuadro(deps: Deps, p: Pick<PedidoLote, "autor" | "conversaId" | "turnoId">, q: { id: string; agenteId: string }, loteId: string | null, tarefas: readonly string[], removido = false): RuntimeEvent {
-  const autoria = p.autor.tipo === "agente" ? autoriaAgente(p.autor.agenteId, deps.escopo.pessoaId, deps.escopo.pessoaId) : autoriaPessoa(deps.escopo.pessoaId);
+export function eventoQuadro(deps: Deps, p: Pick<PedidoLote, "autor" | "conversaId" | "turnoId" | "pedidoPor" | "porProcuracao">, q: { id: string; agenteId: string }, loteId: string | null, tarefas: readonly string[], removido = false): RuntimeEvent {
+  const autoria = autoriaDoLote(deps, p);
   return evento(deps, "quadro_mudou", autoria, { quadroId: q.id, agenteId: q.agenteId, loteId, tarefas: tarefas.join(","), autor: p.autor.tipo, ...(removido ? { removido: true } : {}) }, { conversaId: p.conversaId ?? null, turnoId: p.turnoId ?? null });
 }
 
+/**
+ * NOD-443 (revisão 1, achado 7): o turno do bot da dona roda no executor dela, não no de quem pediu (o bot de quem
+ * participa traz o executor do turno dele). O da dona: o do último turno dela na conversa do bot. Revisão 8 do PR #628:
+ * sem nenhum turno dela ali, o padrão dela (o palpite `catcher` de quem enfileira, NOD-206), nunca o de quem pediu — o
+ * executor real é decidido no plano (emitirPlanoTurno), pela máquina da dona.
+ */
+async function executorDaDona(deps: Deps, conversaId: string): Promise<Executor> {
+  const dela = (await deps.repos.turnos.listarDaConversa(conversaId, 20)).filter((t) => (t.sobProcuracaoDe ?? deps.escopo.pessoaId) === deps.escopo.pessoaId);
+  return dela.at(-1)?.executor ?? "catcher";
+}
+
+/** Abre o turno do bot responsável (o começo da tarefa ou a volta depois da resposta). null = o bot não tem conversa. */
 /**
  * O turno na fila serve para juntar mais um gatilho (NOD-417, revisão do PR #622)? Não quando ele já atende o pedido de
  * OUTRO bot (o `peer_pedido` dele): a entrega do resultado é pelo turno, e iria ao bot errado. `de` é quem pede agora
@@ -343,19 +435,22 @@ export async function abrirTurno(deps: Deps, p: PedidoLote, agente: Agente, entr
     // A corrente de quem moveu a tarefa, mais um (a pessoa pela tela começa em 0).
     profundidade: proximaProfundidade(p.profundidade ?? 0),
     entradaTexto,
-    // Confiável como o pedir_a_bot (ADR-062); contaminado logo abaixo quando o pedido traz dado de fora.
-    entradaConfianca: "confiavel",
-    sobProcuracaoDe: deps.escopo.pessoaId,
+    // Confiável como o pedir_a_bot (ADR-062); contaminado logo abaixo quando o pedido traz dado de fora. NOD-443 (revisão
+    // 1, achado 1): o pedido de quem participa é conteúdo de fora para o bot da dona (catálogo reduzido, sem "Sempre
+    // permitir") e a procuração é de quem pediu, não da dona.
+    entradaConfianca: p.pedidoPor ? "nao_confiavel" : "confiavel",
+    sobProcuracaoDe: p.pedidoPor ?? deps.escopo.pessoaId,
     modelo: agente.modelo,
     harness: agente.harness,
-    executor: p.executor,
+    executor: p.pedidoPor ? await executorDaDona(deps, conversa.id) : p.executor,
   });
   if (!turno) return null;
   // Dado de fora: a tarefa foi escrita por um turno não confiável (deFora, pegajoso) ou o turno de quem fez o lote não era
   // confiável. O Linear é conteúdo interno (ADR-062 §1, conteudoInterno). Suposição registrada no PR: tarefa criada pela
   // pessoa ou por um bot num turno limpo é pedido confiável.
-  if (deFora || p.origemConfiavel === false) await deps.repos.turnos.contaminar(turno.id, deps.agora());
-  const autoria = p.autor.tipo === "agente" ? autoriaAgente(p.autor.agenteId, deps.escopo.pessoaId, deps.escopo.pessoaId) : autoriaPessoa(deps.escopo.pessoaId);
+  if (deFora || p.origemConfiavel === false || p.pedidoPor) await deps.repos.turnos.contaminar(turno.id, deps.agora());
+  // Quem pediu assina: pela tela, a pessoa; pelo bot dela, o bot sob a procuração dela, na conta de quem o roda.
+  const autoria = autoriaDoLote(deps, p);
   return {
     turnoId: turno.id,
     events: [evento(deps, "turno_criado", autoria, { turnoId: turno.id, agenteId: agente.id, origem: "delegacao", profundidade: turno.profundidade }, { conversaId: conversa.id, turnoId: turno.id })],
@@ -415,9 +510,13 @@ export function avisoDoFreio(t: Pick<TarefaQuadro, "titulo" | "deFora">, f: { ti
   return semTitulo ? `Numa tarefa do quadro: ${motivo}` : `Em "${t.titulo}": ${motivo}`;
 }
 
-/** O quadro é todo do bot: ele fez o lote da criação e nenhum comentário das tarefas é de outro (a pessoa ou outro bot). */
+/**
+ * O quadro é todo do bot: ele fez o lote da criação e nenhum comentário das tarefas é de outro (a pessoa ou outro bot).
+ * Merge da NOD-443: nem tem gente do time nele (o quadro com pessoas não some por um Desfazer do bot).
+ */
 async function soDoBot(deps: Deps, q: Quadro, autorDoLote: AutorLote, agenteId: string): Promise<boolean> {
   if (autorDoLote.tipo !== "agente" || autorDoLote.agenteId !== agenteId) return false;
+  if ((await deps.repos.quadros.membros(q.id)).length > 0) return false;
   // Revisão 4 do PR #627: uma consulta pelo quadro (antes, uma por tarefa).
   return !(await deps.repos.quadroComentarios.temDeOutroNoQuadro(q.id, agenteId));
 }
@@ -428,6 +527,8 @@ async function desfazer(deps: Deps, p: PedidoLote, q: Quadro, loteId: string | u
   const ultimo = await repo.ultimoLote(q.id);
   if (!ultimo) return falha("nao_encontrado", "não há o que desfazer neste quadro");
   if (loteId && loteId !== ultimo.id) return falha("entrada_invalida", "só o último lote do quadro se desfaz");
+  // NOD-443 (D9): quem participa desfaz só o que ela mesma pediu; a dona, qualquer um.
+  if (p.pedidoPor && !podeDesfazer({ lotePedidoPor: ultimo.pedidoPor, quemPede: p.pedidoPor, donaId: deps.escopo.pessoaId })) return falha("entrada_invalida", "o último lote não é seu: só quem pediu e a dona do quadro o desfazem");
   // Um bot desfaz só num turno limpo; o lote da pessoa ou de outro bot, só a pedido dela na conversa (revisão rodada 4).
   if (p.autor.tipo === "agente") {
     if (p.origemConfiavel === false) return falha("entrada_invalida", "desfazer só num turno limpo, em que nada de fora entrou");
@@ -497,12 +598,14 @@ async function desfazer(deps: Deps, p: PedidoLote, q: Quadro, loteId: string | u
   await repo.apagarCodigosEHistorico(criadasNoLote);
   await repo.registrarHistorico(q.id, historico, null);
   await repo.salvar(q.id, foto.quadro);
+  // NOD-443: o lote das pessoas ou do modo volta quem estava e o modo de antes.
+  if (foto.pessoas) await restaurarPessoas(deps, q.id, foto.pessoas);
   await repo.marcarDesfeito(ultimo.id);
   // NOD-419: os movimentos do lote desfeito saem do jogo (o histórico os mostra riscados; não se desfazem de novo).
   await repo.desfazerMovimentosDoLote(ultimo.id);
   const atualizado = await repo.buscar(q.id);
   return {
-    data: { ok: true, quadro: atualizado ? await montarQuadro(deps, atualizado) : null, lote: null, comecaram: [], desfeito: true },
+    data: { ok: true, quadro: atualizado ? await montarQuadro(deps, atualizado, leitorDoLote(deps, p)) : null, lote: null, comecaram: [], desfeito: true },
     events: [eventoQuadro(deps, p, q, ultimo.id, foto.tarefas.map((t) => t.id))],
   };
 }
@@ -512,11 +615,46 @@ async function desfazer(deps: Deps, p: PedidoLote, q: Quadro, loteId: string | u
  * gravar nada), trava o quadro (um lote por vez: duas abas, dois bots), grava, começa as tarefas e fecha a meta.
  */
 export async function aplicarLoteQuadro(deps: Deps, p: PedidoLote): Promise<{ data: ResultadoLote; events?: RuntimeEvent[] }> {
+  // NOD-443 (ADR-143): o quadro de outra pessoa, em que quem pede participa, entra pela porta (o escopo da dona).
+  if (!p.pedidoPor) {
+    const pelaDona = await pelaPorta(deps, p);
+    if (pelaDona) return pelaDona;
+    // NOD-417 × NOD-443: no próprio quadro, o comentário numa tarefa é o da NOD-417 (grava e aciona o responsável e os
+    // @mencionados, sem lote). O de quem participa (pela porta, com pedidoPor) e o do quadro sem tarefa são o da NOD-443 (D7).
+    const so = p.ops[0];
+    if (p.ops.length === 1 && so?.tipo === "comentar" && so.tarefa) return comentarTarefa(deps, p, { ...so, tarefa: so.tarefa });
+  }
+  const r = await aplicarLoteDaDona(deps, p);
+  return { ...r, ...(r.events ? { events: await comMembros(deps, r.events) } : {}) };
+}
+
+/**
+ * NOD-443: o quadro.mudou vai também a cada pessoa do quadro (o despacho lê `membros`, depois do commit). Revisão 8: todo
+ * emissor de quadro_mudou passa por aqui (o lote, o comentário na tarefa e o laço dos PRs do GitHub); sem isso o frame
+ * chegava só à dona.
+ */
+export async function comMembros(deps: Deps, events: RuntimeEvent[]): Promise<RuntimeEvent[]> {
+  const cache = new Map<string, string>();
+  const out: RuntimeEvent[] = [];
+  for (const e of events) {
+    const qid = e.kind === "quadro_mudou" ? e.dados.quadroId : null;
+    if (typeof qid !== "string") { out.push(e); continue; }
+    if (!cache.has(qid)) cache.set(qid, (await deps.repos.quadros.membros(qid)).map((m) => m.pessoaId).join(","));
+    const membros = cache.get(qid)!;
+    out.push(membros ? { ...e, dados: { ...e.dados, membros } } : e);
+  }
+  return out;
+}
+
+async function aplicarLoteDaDona(deps: Deps, p: PedidoLote): Promise<{ data: ResultadoLote; events?: RuntimeEvent[] }> {
   if (!(await experimentoLigado(deps))) return falha("experimento_desligado", "o quadro está desligado nos experimentos da pessoa");
   if (p.ops.length === 0) return falha("entrada_invalida", "acoes vazio");
   const repo = deps.repos.quadros;
   const agentes = await agentesDaPessoa(deps);
   const criando = p.ops[0]!.tipo === "criar_quadro";
+  // NOD-443 (revisão 2, achado 2): sob a procuração de quem participa, o bot da dona só mexe na tarefa do turno.
+  const doQuadro = p.porProcuracao ? p.ops.find((o) => ["criar_quadro", "mover_quadro", "desfazer", "remover_quadro"].includes(o.tipo)) : undefined;
+  if (doQuadro) return falha("nao_permitido", `${doQuadro.tipo}: neste turno, o bot só mexe na tarefa que foi pedida a ele. Para o resto, peça a quem pediu ou à dona`);
 
   let q: Quadro | null;
   if (criando) {
@@ -537,9 +675,13 @@ export async function aplicarLoteQuadro(deps: Deps, p: PedidoLote): Promise<{ da
     if (achado && ("ambiguo" in achado || "semNome" in achado)) { const f = falhaDoAchado(achado, agentes); return falha(f.erro, f.detalhe); }
     q = achado;
   }
+  if (!q && p.porProcuracao) return falha("nao_encontrado", "quadro não encontrado");
   if (!q) return falha("sem_quadro", "não há quadro: crie com criar_quadro (meta e prazo são opcionais)");
   const travado = (await travarQuadros(deps, [q])).get(q.id) ?? null;
   if (!travado) return falha("sem_quadro", "o quadro sumiu");
+  // NOD-443 (revisão 1, achado 4): a porta conferiu a participação antes da trava. Tirar alguém também trava o quadro;
+  // com a trava na mão, quem saiu enquanto o lote dela esperava não grava mais nada (o mesmo "não encontrado").
+  if (p.pedidoPor && !(await repo.ehMembro(travado.id, p.pedidoPor))) return falha("nao_encontrado", "quadro não encontrado");
   // Com a trava na mão, de novo (codex rodada 4): o lote que trocou a tarefa de mão pode ter parado este turno enquanto
   // ele esperava a trava. O turno parado não escreve por cima do novo responsável.
   if (p.turnoId) {
@@ -547,6 +689,10 @@ export async function aplicarLoteQuadro(deps: Deps, p: PedidoLote): Promise<{ da
     if (meu && (meu.pararSolicitadoEm != null || meu.estado === "interrompido")) return falha("entrada_invalida", "este turno foi parado: a tarefa mudou de mão ou foi desfeita");
   }
   const so = p.ops[0]!;
+  if ((OPS_DE_PESSOAS as readonly string[]).includes(so.tipo)) {
+    if (p.ops.length > 1) return falha("entrada_invalida", `${so.tipo} vai sozinho na chamada`);
+    return aplicarPessoas(deps, p, travado, so);
+  }
   if (so.tipo === "desfazer") {
     if (p.ops.length > 1) return falha("entrada_invalida", "desfazer vai sozinho na chamada");
     return desfazer(deps, p, travado, so.lote);
@@ -567,8 +713,8 @@ async function tarefaDoMover(deps: Deps, p: PedidoLote, ref: string, agentes: re
   const r = ref.trim();
   if (ehUuid(r)) return (await repo.tarefa(r.toLowerCase())) ?? { erro: "nao_encontrado", detalhe: `tarefa "${r}" não encontrada` };
   const achado = await acharQuadro(deps, p, agentes);
-  const quadro = achado && !("ambiguo" in achado) && !("semNome" in achado) ? achado : null;
-  const daqui = quadro ? await repo.tarefas(quadro.id) : null;
+  const quadroAchado = achado && !("ambiguo" in achado) && !("semNome" in achado) ? achado : null;
+  const daqui = quadroAchado ? await repo.tarefas(quadroAchado.id) : null;
   const doLinear = daqui?.filter((t) => t.linearId !== null && chaveDeBusca(t.linearId) === chaveDeBusca(r)) ?? [];
   if (doLinear.length === 1) return doLinear[0]!;
   const c = lerCodigo(r);
@@ -579,8 +725,8 @@ async function tarefaDoMover(deps: Deps, p: PedidoLote, ref: string, agentes: re
   }
   if (achado && "ambiguo" in achado) return { erro: "sem_quadro", detalhe: `diga a tarefa pelo código (ex.: ZE-12) ou pelo id: a pessoa tem ${achado.ambiguo.length} quadros` };
   if (achado && "semNome" in achado) return falhaDoAchado(achado, agentes);
-  if (!quadro || !daqui) return { erro: "nao_encontrado", detalhe: `tarefa "${r}" não encontrada` };
-  const t = resolverTarefa(daqui, r, { prefixo: quadro.prefixo });
+  if (!quadroAchado || !daqui) return { erro: "nao_encontrado", detalhe: `tarefa "${r}" não encontrada` };
+  const t = resolverTarefa(daqui, r, { prefixo: quadroAchado.prefixo });
   return "erro" in t ? { erro: "nao_encontrado", detalhe: t.erro } : t;
 }
 
@@ -710,7 +856,7 @@ async function moverDeQuadro(deps: Deps, p: PedidoLote, op: OpQuadro, agentes: r
   }
   const atual = (await repo.buscar(destino.id)) ?? destino;
   return {
-    data: { ok: true, quadro: await montarQuadro(deps, atual), lote: null, comecaram: [], desfeito: false, movida: { tarefaId: t.id, codigo: codigoDaTarefa(atual.prefixo, movida), codigoAntigo } },
+    data: { ok: true, quadro: await montarQuadro(deps, atual, leitorDoLote(deps, p)), lote: null, comecaram: [], desfeito: false, movida: { tarefaId: t.id, codigo: codigoDaTarefa(atual.prefixo, movida), codigoAntigo } },
     events: [eventoQuadro(deps, p, origem, null, [t.id]), eventoQuadro(deps, p, atual, null, [t.id])],
   };
 }
@@ -834,14 +980,24 @@ async function aplicarNoQuadro(deps: Deps, p: PedidoLote, qSemPrefixo: Quadro, a
   await numerarFaltantes(deps, q);
   const tarefasAntes = await repo.tarefas(q.id);
   const autorAgenteId = p.autor.tipo === "agente" ? p.autor.agenteId : null;
+  // NOD-443: quem pediu. A dona pela tela ou na conversa com um bot dela; quem participa, pela porta. O turno que o próprio
+  // quadro abriu (a tarefa de um bot) não tem quem pediu: não entra no mural (D8) nem muda quem decide.
+  const quemPediu = p.pedidoPor ?? (p.autor.tipo === "pessoa" || p.autorNaConversa === true ? deps.escopo.pessoaId : null);
+  // Revisão 2, achado 2: o bot da dona sob a procuração de quem participa segue as regras dela, mas não pede em nome dela.
+  // Merge da NOD-430: o pedido_por da dona só vai no lote quando foi pedido dela (limite total, turno limpo): o bot num turno
+  // contaminado da conversa age sozinho e assina só com o nome dele.
+  const registraPedido = p.porProcuracao ? null : (p.pedidoPor ?? (p.autor.tipo === "pessoa" || pedidoDaPessoa(p) ? deps.escopo.pessoaId : null));
   const podeComecar = podeRepassar(p.profundidade ?? 0);
   const estados = await repo.estadosDosTurnos(tarefasAntes.map((t) => t.turnoId).filter((id): id is string => id !== null));
   const vivas = new Set(tarefasAntes.filter((t) => t.turnoId && ["pendente", "despachando"].includes(estados.get(t.turnoId) ?? "")).map((t) => t.id));
+  // NOD-443 (revisão 1, achado 1): o que quem participa escreve (título, descrição, pergunta, o Linear) é de fora para os
+  // bots da dona: a tarefa fica deFora, como a escrita por um turno não confiável.
+  const origemConfiavel = p.origemConfiavel !== false && !p.pedidoPor;
   const codigosAntigos = await codigosAntigosDaqui(deps, p.ops, q, tarefasAntes);
   const tarefaDoTurno = autorAgenteId && p.turnoId && p.ops.some((o) => o.tipo === "terminei" && !o.tarefa) ? await tarefaDoTurnoDe(deps, tarefasAntes, autorAgenteId, p.turnoId) : null;
   const historico = await historicoDoLote(deps, q.id, p.ops, tarefasAntes);
   const acionamentosNaHora = await repo.acionamentosNaHora(q.id);
-  const plano = planejarLote({ quadro: { meta: q.meta, prazo: q.prazo, colunas: q.colunas, prefixo: q.prefixo }, quadroId: q.id, tarefas: tarefasAntes, agentes: agentes.map(paraAgenteDoQuadro), autorAgenteId, ops: p.ops, agora, podeComecar, vivas, origemConfiavel: p.origemConfiavel !== false, autorNaConversa: p.autorNaConversa === true, codigosAntigos, limite: limiteDe(p), tarefaDoTurno, historico, acionamentosNaHora });
+  const plano = planejarLote({ quadro: { meta: q.meta, prazo: q.prazo, colunas: q.colunas, prefixo: q.prefixo }, quadroId: q.id, tarefas: tarefasAntes, agentes: agentes.map(paraAgenteDoQuadro), autorAgenteId, ops: p.ops, agora, podeComecar, vivas, origemConfiavel, turnoConfiavel: p.origemConfiavel !== false, autorNaConversa: p.autorNaConversa === true, codigosAntigos, limite: limiteDe(p), tarefaDoTurno, historico, acionamentosNaHora });
   if ("erro" in plano) {
     // O quadro que nasceu neste lote não fica de pé sem o resto (tudo ou nada). Não acontece: criarComLote já planejou.
     if (nasceuAgora) await repo.apagar(q.id);
@@ -851,6 +1007,23 @@ async function aplicarNoQuadro(deps: Deps, p: PedidoLote, qSemPrefixo: Quadro, a
     return falha(naoAchou ? "nao_encontrado" : "entrada_invalida", dica ? `${detalhe}. ${dica}` : detalhe);
   }
   const antesPorId = new Map(tarefasAntes.map((t) => [t.id, t]));
+  // Revisão 2, achados 2 e 6: a tarefa do turno de quem chamou (o turno que a tarefa abriu, ou um que o retoma).
+  const daTarefa = p.turnoId && (p.porProcuracao || !quemPediu) ? await repo.tarefaDoTurno(p.turnoId) : null;
+  if (p.porProcuracao) {
+    const fora = foraDaTarefaDoTurno(q, plano, daTarefa);
+    if (fora) return falha("nao_permitido", fora);
+  }
+  const alheia = quemPediu ? await pendenciaAlheia(deps, q, plano, antesPorId, quemPediu) : pendenciaDeOutraTarefa(plano, antesPorId, daTarefa);
+  if (alheia) return falha("nao_permitido", alheia);
+  const deOutra = p.pedidoPor ? tarefaDeOutraPessoa(plano, antesPorId, p.pedidoPor, p.porProcuracao === true) : null;
+  if (deOutra) return falha("nao_permitido", deOutra);
+  // NOD-443 (revisão 5 do PR #628, achado 5): quem participa não grava PR em tarefa nenhuma, nem na que ela pediu. O PR vai
+  // ao turno do bot da dona (entradaDaResposta) e ao resumo do quadro como coisa dela; quem grava é o bot da dona (no turno
+  // dele, também sob a procuração de quem pediu) e o laço do servidor (NOD-421, os PRs ligados).
+  if (p.pedidoPor && !p.porProcuracao) {
+    const comPr = plano.tarefas.find((t) => t.prUrl !== (antesPorId.get(t.id)?.prUrl ?? null));
+    if (comPr) return falha("nao_permitido", `o PR de "${comPr.titulo}" é do bot da dona do quadro, não de quem participa: peça ao bot (ponha a tarefa em A fazer) ou deixe um comentário (comentar)`);
+  }
   const colunasFinais = colunasDe(plano.quadro);
   const espera = colunaDeEspera(colunasFinais);
   const porAgente = new Map(agentes.map((a) => [a.id, a]));
@@ -881,6 +1054,9 @@ async function aplicarNoQuadro(deps: Deps, p: PedidoLote, qSemPrefixo: Quadro, a
   }
   // NOD-416: as novas pegam números seguidos do quadro (sob a trava dele) e o código delas fica guardado.
   const quantasNovas = plano.tarefas.filter((t) => t.nova && plano.tocadas.includes(t.id)).length;
+  // Quem pediu a tarefa (D5): quem a criou, e depois quem a pôs para andar ou respondeu a pergunta. Revisão 2, achado 1:
+  // só a dona troca quem pediu uma tarefa que já existe; quem participa (e o bot sob a procuração dela) nunca escreve por cima.
+  const pedidas = new Set(p.pedidoPor ? [] : [...plano.comecam, ...plano.respondidas.map((r) => r.id)]);
   let proximo = quantasNovas > 0 && q.prefixo !== null ? await repo.reservarNumeros(q.id, quantasNovas) : null;
   const codigos: { prefixo: string; numero: number; tarefaId: string }[] = [];
   for (const id of plano.tocadas) {
@@ -888,20 +1064,21 @@ async function aplicarNoQuadro(deps: Deps, p: PedidoLote, qSemPrefixo: Quadro, a
     if (!t) continue;
     if (t.nova) {
       const numero = proximo !== null ? proximo++ : null;
-      const nova = await repo.inserirTarefa({ quadroId: q.id, titulo: t.titulo, descricao: t.descricao, status: t.status, agenteId: t.agenteId, linearId: t.linearId, linearUrl: t.linearUrl, prUrl: t.prUrl, pergunta: t.pergunta, resposta: t.resposta, deFora: t.deFora, terminadaEm: t.terminadaEm, numero });
+      const nova = await repo.inserirTarefa({ quadroId: q.id, titulo: t.titulo, descricao: t.descricao, status: t.status, agenteId: t.agenteId, linearId: t.linearId, linearUrl: t.linearUrl, prUrl: t.prUrl, pergunta: t.pergunta, resposta: t.resposta, deFora: t.deFora, terminadaEm: t.terminadaEm, numero, pedidoPor: registraPedido });
       idReal.set(id, nova.id);
       gravadas.set(nova.id, nova);
       if (numero !== null && q.prefixo !== null) codigos.push({ prefixo: q.prefixo, numero, tarefaId: nova.id });
     } else {
-      const salva = await repo.salvarTarefa(id, t);
+      const salva = await repo.salvarTarefa(id, registraPedido && pedidas.has(id) ? { ...t, pedidoPor: registraPedido } : t);
       if (salva) gravadas.set(id, salva);
     }
   }
   await repo.guardarCodigos(codigos);
 
   // Quem começa: o turno nasce agora; a tarefa guarda o turno (o card mostra Na fila / Rodando / Falhou).
-  const pessoaNome = (await deps.repos.pessoas.buscar(deps.escopo.pessoaId))?.nome ?? "a pessoa";
-  const deQuem = autorAgenteId ? porAgente.get(autorAgenteId)?.nome ?? null : null;
+  // NOD-443: o pedido de quem participa chega ao bot com o nome dela (e o do bot dela, que não é da dona).
+  const pessoaNome = (await deps.repos.pessoas.buscar(p.pedidoPor ?? deps.escopo.pessoaId))?.nome ?? "a pessoa";
+  const deQuem = autorAgenteId ? porAgente.get(autorAgenteId)?.nome ?? p.viaNome ?? null : null;
   const comecaram: Comecou[] = [];
   const events: RuntimeEvent[] = [];
   let juntados = 0;
@@ -920,13 +1097,16 @@ async function aplicarNoQuadro(deps: Deps, p: PedidoLote, qSemPrefixo: Quadro, a
     // um comentário), o gatilho se junta a ele em vez de abrir outro.
     // Revisão 2 do PR #622: a mesma regra do pedir_a_bot com a tarefa (o turno que atende o pedido de outro bot não serve),
     // e o turno juntado fica com a maior profundidade (o gatilho não sai do limite da corrente por juntar).
-    let naFila = await deps.repos.quadroComentarios.turnoNaFila(id, agente.id, t.turnoId);
+    // Revisão 3 do PR #628 (pós-merge), achado 1: o pedido de quem participa nunca se junta a um turno da fila. Esse turno
+    // é da dona (confiável, sob a procuração dela) e o texto de outra pessoa entraria nele sem a degradação do abrirTurno
+    // (não confiável, sob a procuração de quem pediu, contaminado, manual); abre o turno dela pelo caminho de sempre.
+    let naFila = p.pedidoPor ? null : await deps.repos.quadroComentarios.turnoNaFila(id, agente.id, t.turnoId);
     if (naFila && !(await podeJuntarNoTurno(deps, naFila.id, autorAgenteId))) naFila = null;
     // Juntar num turno de comentário (não o da própria tarefa): a menção pedia para não mexer no status; agora pode.
     const junto = naFila && naFila.id !== t.turnoId ? `${TAREFA_PASSOU_A_VOCE}\n\n${texto(t)}` : texto(t);
     const juntada = naFila ? await deps.repos.turnos.juntarEntrada(naFila.id, junto, [], { profundidade: proximaProfundidade(p.profundidade ?? 0) }) : null;
     if (juntada) {
-      if (t.deFora || p.origemConfiavel === false) await deps.repos.turnos.contaminar(juntada.id, deps.agora());
+      if (t.deFora || !origemConfiavel) await deps.repos.turnos.contaminar(juntada.id, deps.agora());
       if (t.turnoId && t.turnoId !== juntada.id) await pararTurno(deps, p, t.turnoId);
       const salva = await repo.salvarTarefa(id, { ...t, turnoId: juntada.id });
       if (salva) gravadas.set(id, salva);
@@ -961,7 +1141,18 @@ async function aplicarNoQuadro(deps: Deps, p: PedidoLote, qSemPrefixo: Quadro, a
     await abrir(r.id, (t) => entradaDaResposta({ quadroId: q.id, tarefa: t, resposta: r.resposta, pessoaNome }), "resposta");
   }
 
-  // O "Com você" (e o Bloqueado do 4º "não é comigo") avisa pelo avisarNoLote do NOD-420, junto com as outras decisões.
+  // "Com você": a pendência da dona avisa pelo avisarNoLote do NOD-420, junto com as outras decisões (depois da janela).
+  // NOD-443 (D6; revisão 1, achado 5): a pendência de quem participa é dela. A conversa da dona não recebe o aviso (o
+  // avisarNoLote a pula); a de quem decide, sim (no escopo dela), a menos que tenha sido ela mesma a pôr em Com você.
+  for (const id of plano.tocadas) {
+    const t = gravadas.get(idReal.get(id) ?? id);
+    const a = antesPorId.get(idReal.get(id) ?? id);
+    if (!t || t.status !== "voce" || a?.status === "voce") continue;
+    const decide = t.pedidoPor && t.pedidoPor !== deps.escopo.pessoaId ? quemDecide({ pedidoPor: t.pedidoPor, donaId: deps.escopo.pessoaId, membros: new Set((await repo.membros(q.id)).map((m) => m.pessoaId)) }).pessoaId : deps.escopo.pessoaId;
+    if (decide === deps.escopo.pessoaId) continue;
+    // O bot da dona sob a procuração dela não é ela: quem pediu fica sabendo pelo bot dela.
+    if (decide !== p.pedidoPor || p.porProcuracao) await avisarQuemParticipa(deps, q, t, decide);
+  }
   // NOD-419: o laço e o freio mandaram para Bloqueado — uma linha na conversa do responsável, sem banner e sem acionar.
   // Revisão 5 do PR #629: sem responsável o aviso sai pela conversa do agente que fez o lote. Revisão 7: o texto é do
   // sistema e sai sempre; de turno não confiável ou com tarefa de fora, sem o título (o único conteúdo de fora nele).
@@ -997,7 +1188,7 @@ async function aplicarNoQuadro(deps: Deps, p: PedidoLote, qSemPrefixo: Quadro, a
     tarefas: tarefaIds.map((id) => ({ id, antes: antesPorId.get(id) ?? null })),
   };
   const opsDoResumo: OpQuadro[] = nasceuAgora ? [{ tipo: "criar_quadro", meta: q.meta }, ...p.ops] : [...p.ops];
-  const lote = nasceuAgora || tarefaIds.length > 0 || mudouQuadro || mudouColunas ? await repo.inserirLote({ quadroId: q.id, autor: p.autor, ...(pedidoDaPessoa(p) ? { pedidoPor: deps.escopo.pessoaId } : {}), resumo: resumoDoLote(opsDoResumo, plano.frasesDasColunas), antes: foto, tarefaIds }) : null;
+  const lote = nasceuAgora || tarefaIds.length > 0 || mudouQuadro || mudouColunas ? await repo.inserirLote({ quadroId: q.id, autor: p.autor, resumo: resumoDoLote(opsDoResumo, plano.frasesDasColunas), antes: foto, tarefaIds, pedidoPor: registraPedido, viaNome: deQuem }) : null;
   // NOD-419: o histórico do lote (a tarefa nova já com o id real) e os movimentos que ele desfez.
   await repo.inserirMovimentos(q.id, lote?.id ?? null, plano.movimentos.map((m) => ({ ...m, tarefaId: idReal.get(m.tarefaId) ?? m.tarefaId })));
   await repo.marcarMovimentosDesfeitos(plano.movimentosDesfeitos);
@@ -1023,7 +1214,94 @@ async function aplicarNoQuadro(deps: Deps, p: PedidoLote, qSemPrefixo: Quadro, a
   // No limite da corrente: o que ia começar e ficou em A fazer (o bot avisa; a pessoa começa pelo quadro).
   const seguradas = plano.seguradas.length;
   const criadas = plano.criadas.map((id) => idReal.get(id) ?? null);
-  return { data: { ok: true, quadro: await montarQuadro(deps, atualizado), lote, comecaram, desfeito: false, ...(seguradas ? { seguradas } : {}), ...(plano.ajustada ? { ajustada: true } : {}), ...(criadas.length ? { criadas } : {}), ...(juntados ? { juntados } : {}) }, events };
+  return { data: { ok: true, quadro: await montarQuadro(deps, atualizado, leitorDoLote(deps, p)), lote, comecaram, desfeito: false, ...(seguradas ? { seguradas } : {}), ...(plano.ajustada ? { ajustada: true } : {}), ...(criadas.length ? { criadas } : {}), ...(juntados ? { juntados } : {}) }, events };
+}
+
+/**
+ * NOD-443 (revisão 1, achado 2): só quem decide (D5) responde a pendência ou a tira de Com você. A dona não responde a de
+ * quem participa; quem participa não responde a da dona nem a de outra pessoa. O turno que o próprio quadro abriu (o bot
+ * na tarefa, sem quem pediu) não passa por aqui: ele não responde (gerir_quadro) e pode retirar a própria pergunta.
+ * Excluir não conta (é outra regra, achado 6). Devolve o detalhe da recusa, ou null.
+ */
+async function pendenciaAlheia(deps: Deps, q: Quadro, plano: Extract<ReturnType<typeof planejarLote>, { tarefas: unknown }>, antesPorId: ReadonlyMap<string, TarefaQuadro>, quem: string): Promise<string | null> {
+  const respondidas = new Set(plano.respondidas.map((r) => r.id));
+  const saem = plano.tocadas.filter((id) => antesPorId.get(id)?.status === "voce" && !paradaPeloLimite(plano, id) && (respondidas.has(id) || plano.tarefas.find((t) => t.id === id)?.status !== "voce"));
+  if (saem.length === 0) return null;
+  const membros = new Set((await deps.repos.quadros.membros(q.id)).map((m) => m.pessoaId));
+  for (const id of saem) {
+    const t = antesPorId.get(id)!;
+    const d = quemDecide({ pedidoPor: t.pedidoPor, donaId: deps.escopo.pessoaId, membros });
+    if (d.pessoaId === quem) continue;
+    const nome = (await deps.repos.pessoas.buscar(d.pessoaId))?.nome ?? "outra pessoa";
+    return `"${t.titulo}" espera ${nome}: só quem decide responde ou tira a tarefa de Com você. Diga a ${nome} ou deixe um comentário (comentar)`;
+  }
+  return null;
+}
+
+/**
+ * NOD-419 × NOD-443 (merge do PR #628): o 4º "não é comigo" leva a tarefa de Com você a Bloqueado pelo limite de recusas. Não
+ * é o bot respondendo a pendência: a parada é do sistema e só a pessoa a tira e desfaz, então as regras de quem decide não a
+ * barram.
+ */
+function paradaPeloLimite(plano: Extract<ReturnType<typeof planejarLote>, { tarefas: unknown }>, id: string): boolean {
+  return plano.recusas.some((r) => r.id === id) && plano.tarefas.find((t) => t.id === id)?.status === "bloqueado";
+}
+
+/**
+ * NOD-443 (revisão 2 do PR #628, achado 6): o turno que o próprio quadro abriu (sem quem pediu) só tira de Com você a
+ * tarefa dele; sem turno (ou sem tarefa ligada a ele), nenhuma. Devolve o detalhe da recusa, ou null.
+ */
+function pendenciaDeOutraTarefa(plano: Extract<ReturnType<typeof planejarLote>, { tarefas: unknown }>, antesPorId: ReadonlyMap<string, TarefaQuadro>, daTarefa: string | null): string | null {
+  const respondidas = new Set(plano.respondidas.map((r) => r.id));
+  for (const id of plano.tocadas) {
+    const a = antesPorId.get(id);
+    if (a?.status !== "voce" || id === daTarefa || paradaPeloLimite(plano, id)) continue;
+    if (respondidas.has(id) || plano.tarefas.find((t) => t.id === id)?.status !== "voce") return `"${a.titulo}" espera quem decide: este turno só mexe na pendência da tarefa dele. Deixe um comentário (comentar)`;
+  }
+  return null;
+}
+
+/**
+ * NOD-443 (revisão 2 do PR #628, achado 2): no turno que o pedido de quem participa abriu, o bot da dona age por ela, e
+ * só na tarefa do turno: não cria nem exclui outras, não mexe nas outras, nem na meta, no prazo ou nas colunas.
+ */
+function foraDaTarefaDoTurno(q: Quadro, plano: Extract<ReturnType<typeof planejarLote>, { tarefas: unknown }>, daTarefa: string | null): string | null {
+  const caminho = "neste turno, o bot só mexe na tarefa que foi pedida a ele. Para o resto, peça a quem pediu ou à dona";
+  if (plano.quadro.meta !== q.meta || plano.quadro.prazo !== q.prazo || plano.mudouColunas) return `A meta, o prazo e as colunas são da dona: ${caminho}`;
+  const outra = [...plano.tocadas, ...plano.apagadas].find((id) => id !== daTarefa);
+  if (outra === undefined) return null;
+  const titulo = plano.tarefas.find((t) => t.id === outra)?.titulo;
+  return `${titulo ? `"${titulo}"` : "Essa tarefa"} não é a deste turno: ${caminho}`;
+}
+
+/**
+ * NOD-443 (revisão 1, achado 6): quem participa não exclui nem reescreve (título, descrição, responsável) a tarefa que não
+ * pediu. Na dela, tudo; na dos outros, mudar o status, responder o que é dela (pendenciaAlheia) e comentar. A dona, tudo.
+ * Revisão 3 do PR #628 (pós-merge), achado 2: a pergunta e o PR também são de quem pediu (a pergunta vira a pendência de
+ * quem decide; o PR entra no turno da resposta). O bot da dona sob a procuração dela (`porProcuracao`) escreve os dois
+ * na tarefa do turno dele (é o trabalho dele: perguntar, abrir o PR); o que ele escreve fica de fora (planejarLote). Revisão
+ * 4, achado 1: o item do Linear (linearId, linearUrl) e o deFora também; os PRs ligados (NOD-421, quadro_tarefa_prs) não
+ * passam pelo lote (só o laço do servidor os grava, na tarefa da dona).
+ */
+function tarefaDeOutraPessoa(plano: Extract<ReturnType<typeof planejarLote>, { tarefas: unknown }>, antesPorId: ReadonlyMap<string, TarefaQuadro>, quem: string, porProcuracao: boolean): string | null {
+  const caminho = "Mude o status ou deixe um comentário (comentar) para quem pediu";
+  for (const id of plano.apagadas) {
+    const a = antesPorId.get(id);
+    if (a && a.pedidoPor !== quem) return `"${a.titulo}" não foi você quem pediu: só quem pediu e a dona a excluem. ${caminho}`;
+  }
+  for (const id of plano.tocadas) {
+    const a = antesPorId.get(id);
+    const t = plano.tarefas.find((x) => x.id === id);
+    if (!a || !t || a.pedidoPor === quem) continue;
+    if (t.titulo !== a.titulo || t.descricao !== a.descricao || t.agenteId !== a.agenteId) return `"${a.titulo}" não foi você quem pediu: o título, a descrição e o responsável são de quem pediu e da dona. ${caminho}`;
+    if (!porProcuracao && (t.pergunta !== a.pergunta || t.prUrl !== a.prUrl)) return `"${a.titulo}" não foi você quem pediu: a pergunta e o PR são de quem pediu e da dona. ${caminho}`;
+    // Revisão 4 do PR #628, achado 1: trazer de novo do Linear (importar_linear) reescrevia o link e marcava a tarefa da dona
+    // de fora sem mudar o título. O item do Linear e a proveniência também são de quem pediu e da dona; sob a procuração, o
+    // bot marca de fora o que ele escreve na tarefa do turno dele (a pergunta, o PR), e isso vale.
+    if (t.linearId !== a.linearId || t.linearUrl !== a.linearUrl) return `"${a.titulo}" não foi você quem pediu: o item do Linear dela é de quem pediu e da dona. ${caminho}`;
+    if (!porProcuracao && t.deFora !== a.deFora) return `"${a.titulo}" não foi você quem pediu: o conteúdo dela é de quem pediu e da dona. ${caminho}`;
+  }
+  return null;
 }
 
 /** A aba Quadro de um bot: o quadro dele montado (ou null, ainda sem quadro). Experimento desligado = nao_permitido. */

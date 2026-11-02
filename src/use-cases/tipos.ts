@@ -1,5 +1,7 @@
 import type { EfeitoAposCommit } from "../contracts/acoes.ts";
 import type { RuntimeEvent } from "../contracts/evento.ts";
+import type { Quadro } from "../contracts/quadro.ts";
+import type { AvisoComVoce } from "../contracts/quadro-pessoas.ts";
 import type { SituacaoConta } from "../contracts/ferramentas-conta.ts";
 import type { ServicesNod, UseCasesNod as UseCasesNodContrato } from "../contracts/servicos.ts";
 import type { Repos } from "../repositories/tipos.ts";
@@ -37,6 +39,21 @@ export interface Deps {
    * contas desligadas (NOD_CONTAS≠1): a ferramenta volta sem cartão, `indisponivel`.
    */
   situacaoConta?: () => Promise<SituacaoConta>;
+  /**
+   * NOD-443 (ADR-143, "a porta é a dona"): roda `fn` no escopo da dona do quadro `quadroId`, na MESMA transação (o escopo
+   * volta ao da pessoa no fim, com erro ou sem). A porta confere sozinha (revisão 1, achado 3): a participação da pessoa
+   * do escopo, lida no escopo dela e de novo no da dona, e o quadro; sem isso lança nao_encontrado e `fn` não roda. `fn`
+   * recebe os deps da dona (sem a porta: não se abre uma dentro da outra) e o quadro. Os eventos de `fn` são gravados
+   * dentro (o outbox é da dona). Ausente = quem montou os Deps não abre a porta: o quadro de outra pessoa não é achado.
+   */
+  quadroDaDona?: <T>(quadroId: string, fn: (deps: Deps, q: Quadro) => Promise<T>) => Promise<T>;
+  /**
+   * NOD-443 (revisão 1, achado 5; revisão 3, achado 7): a volta, só para avisar. Grava o aviso de "Com você" na conversa
+   * do bot de quem participa de um quadro da pessoa do escopo (conferido no escopo dela), no escopo de quem participa, na
+   * mesma transação, e volta. Não roda código do chamador lá dentro: a mensagem é fixa (src/db/porta-da-dona.ts).
+   * false = não participa, o bot não é dela ou o aviso já estava lá.
+   */
+  avisoComVoce?: (quadroId: string, pessoaId: string, aviso: AvisoComVoce) => Promise<boolean>;
 }
 
 export type UseCasesNod = UseCasesNodContrato<Deps>;

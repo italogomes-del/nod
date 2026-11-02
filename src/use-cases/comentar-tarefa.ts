@@ -1,12 +1,12 @@
 import type { RuntimeEvent } from "../contracts/evento.ts";
 import type { NovoMovimento } from "../contracts/freios-quadro.ts";
-import type { OpQuadro } from "../contracts/quadro.ts";
+import type { LoteQuadro, OpQuadro } from "../contracts/quadro.ts";
 import { entradaDoComentario, mencionados, quemAcionar } from "../domain/comentarios-quadro.ts";
 import { colunasDe, papelDe } from "../domain/colunas.ts";
 import { LIMITE_ACIONAMENTOS_HORA } from "../domain/freios-quadro.ts";
 import { podeRepassar, proximaProfundidade } from "../domain/profundidade.ts";
 import { andando, quemFez, resolverTarefa } from "../domain/quadro.ts";
-import { abrirTurno, acharQuadro, agentesDaPessoa, avisarComVoce, avisoDoFreio, codigosAntigosDaqui, falhaDoAchado, pedidoDaPessoa, type Comecou, eventoQuadro, experimentoLigado, montarQuadro, paraAgenteDoQuadro, type PedidoLote, type ResultadoLote } from "./quadro.ts";
+import { abrirTurno, acharQuadro, agentesDaPessoa, avisarComVoce, avisoDoFreio, codigosAntigosDaqui, comMembros, falhaDoAchado, pedidoDaPessoa, type Comecou, eventoQuadro, experimentoLigado, montarQuadro, paraAgenteDoQuadro, type PedidoLote, type ResultadoLote } from "./quadro.ts";
 import type { ComentarioDto } from "../contracts/quadro.ts";
 import type { AtividadeTarefa } from "../contracts/quadro-pela-conversa.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
@@ -29,7 +29,8 @@ import type { CasoDeUso, Deps } from "./tipos.ts";
  * Bloqueado, porque comentário não move a tarefa). O comentário da pessoa sempre aciona (é ela respondendo), mas conta. O pedir_a_bot com a tarefa passa por aqui.
  */
 
-type Comentar = Extract<OpQuadro, { tipo: "comentar" }>;
+// NOD-443: a op aceita tarefa opcional (o comentário do quadro, D7); aqui a tarefa é obrigatória.
+type Comentar = Extract<OpQuadro, { tipo: "comentar" }> & { tarefa: string };
 const falha = (erro: Extract<ResultadoLote, { ok: false }>["erro"], detalhe: string): { data: ResultadoLote } => ({ data: { ok: false, erro, detalhe } });
 
 /**
@@ -147,7 +148,8 @@ export async function comentarTarefa(deps: Deps, p: PedidoLote, op: Comentar, ex
     : null;
   return {
     data: { ok: true, quadro: await montarQuadro(deps, q), lote: null, comecaram, desfeito: false, comentario, ...(juntados ? { juntados } : {}), ...(seguradas ? { seguradas } : {}), ...(freado ? { freados: excedentes } : {}), ...(parado ? { responsavelForaDoAndamento: parado } : {}) },
-    events,
+    // Revisão 8 do PR #628: o comentário (da tela, do bot ou do pedir_a_bot) também chega ao vivo a quem participa.
+    events: await comMembros(deps, events),
   };
 }
 
@@ -160,9 +162,19 @@ export const verComentarios: CasoDeUso<{ agenteId: string; tarefaId: string }, {
   const q = await deps.repos.quadros.doAgente(input.agenteId);
   if (!q || !(await deps.repos.quadros.tarefas(q.id)).some((t) => t.id === input.tarefaId)) throw new ErroDeDominio("nao_encontrado", { cause: "tarefa fora do quadro" });
   const nomes = new Map((await agentesDaPessoa(deps)).map((a) => [a.id, a.nome]));
-  const nomeDe = (autor: { tipo: "pessoa" } | { tipo: "agente"; agenteId: string }) => (autor.tipo === "agente" ? (nomes.get(autor.agenteId) ?? null) : null);
-  const atividade = (await deps.repos.quadros.lotesDaTarefa(q.id, input.tarefaId)).map((l) => ({ loteId: l.id, resumo: l.resumo, quem: quemFez(l.autor, l.pedidoPor, nomeDe(l.autor)), criadoEm: l.criadoEm }));
+  // NOD-443: o bot de quem participa não é da dona (o escopo dela não o lê): vale o nome gravado no lote (via_nome).
+  const nomeDe = (l: LoteQuadro) => (l.autor.tipo === "agente" ? (nomes.get(l.autor.agenteId) ?? l.viaNome ?? null) : null);
+  // Merge NOD-430 × NOD-443: o pedido_por de quem participa (não de quem lê) vira o nome dela, não "Você".
+  const pessoas = new Map<string, string>();
+  const outraPessoa = async (l: LoteQuadro): Promise<string | null> => {
+    if (!l.pedidoPor || l.pedidoPor === deps.escopo.pessoaId) return null;
+    if (!pessoas.has(l.pedidoPor)) pessoas.set(l.pedidoPor, (await deps.repos.pessoas.buscar(l.pedidoPor))?.nome ?? "Alguém");
+    return pessoas.get(l.pedidoPor)!;
+  };
+  const quem = async (l: LoteQuadro) => quemFez(l.autor, l.pedidoPor, nomeDe(l), await outraPessoa(l));
+  const atividade: AtividadeTarefa[] = [];
+  for (const l of await deps.repos.quadros.lotesDaTarefa(q.id, input.tarefaId)) atividade.push({ loteId: l.id, resumo: l.resumo, quem: await quem(l), criadoEm: l.criadoEm });
   // O primeiro lote numa consulta própria (revisão 2 do PR #627): a Atividade traz só os 50 mais recentes.
   const primeiro = await deps.repos.quadros.primeiroLoteDaTarefa(q.id, input.tarefaId);
-  return { data: { comentarios: await deps.repos.quadroComentarios.daTarefa(input.tarefaId), atividade, criadaPor: primeiro ? quemFez(primeiro.autor, primeiro.pedidoPor, nomeDe(primeiro.autor)) : null } };
+  return { data: { comentarios: await deps.repos.quadroComentarios.daTarefa(input.tarefaId), atividade, criadaPor: primeiro ? await quem(primeiro) : null } };
 };

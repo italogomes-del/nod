@@ -4,7 +4,6 @@ import { LIMITE_ACIONAMENTOS_HORA } from "../domain/freios-quadro.ts";
 import type { LinkDeTarefa } from "../contracts/quadro-pela-conversa.ts";
 import { ehOpDeTrabalho, lerOps, MAX_COMECOS_POR_LOTE } from "../domain/quadro.ts";
 import { proporColunas } from "./colunas-do-quadro.ts";
-import { comentarTarefa } from "./comentar-tarefa.ts";
 import { proporExclusaoDoQuadro } from "./quadro-exclusao.ts";
 import { acharQuadro, agentesDaPessoa, aplicarLoteQuadro, experimentoLigado, falhaDoAchado, montarQuadro, type PedidoLote, resumoParaBot } from "./quadro.ts";
 import { trabalhoDaTarefa, trabalhosParaBot } from "./quadro-execucoes.ts";
@@ -23,6 +22,7 @@ const INSTRUCAO: Record<Extract<ResultadoGerirQuadro, { ok: false }>["erro"], st
   sem_quadro: "Nada mudou.",
   entrada_invalida: "Nada mudou: corrija a ação e chame de novo.",
   nao_encontrado: "Nada mudou: confira o id ou o nome e chame de novo.",
+  nao_permitido: "Nada mudou: não é você (nem a pessoa desta conversa) quem decide. Não tente de novo; diga isso a ela.",
   estado_invalido: "Nada mudou: conte à pessoa o motivo; só chame de novo depois que ela resolver.",
   conflito: "Nada mudou: outra mudança chegou antes; leia o quadro e chame de novo.",
 };
@@ -59,7 +59,24 @@ export function linksDasTarefas(q: QuadroDto, ids: ReadonlySet<string>): LinkDeT
 const naConversa = (t: Pick<Turno, "origem" | "profundidade" | "sobProcuracaoDe">): boolean =>
   (t.origem === "conversa" || t.origem === "ligacao") && t.profundidade === 0 && t.sobProcuracaoDe == null;
 
-/** Só leitura (acoes vazio): o resumo do quadro e os trabalhos; contamina o turno como a escrita (tarefa deFora). */
+/**
+ * NOD-443 (revisão 1, achado 1): o turno da tarefa que quem participa pediu nasce sob a procuração dela. O bot da dona,
+ * nesse turno, ainda mexe no quadro da dona (o card da própria tarefa): o quadro do turno é dela e quem pediu participa.
+ */
+async function tarefaDeQuemParticipa(deps: Deps, dono: string, turno: Pick<Turno, "id" | "sobProcuracaoDe">): Promise<boolean> {
+  if (dono !== deps.escopo.pessoaId || !turno.sobProcuracaoDe) return false;
+  const q = await deps.repos.quadros.doTurno(turno.id);
+  return !!q && (await deps.repos.quadros.ehMembro(q.id, turno.sobProcuracaoDe));
+}
+
+/** NOD-443 (revisão 2, achado 3): o quadro devolvido traz conteúdo que não é de quem lê (ADR-047). */
+function conteudoDeFora(q: QuadroDto, leitor: string): boolean {
+  if (q.voce?.papel === "membro" || (q.dona && q.dona.pessoaId !== leitor)) return true;
+  if (q.tarefas.some((t) => t.deFora || (t.pedidoPor != null && t.pedidoPor !== leitor))) return true;
+  return (q.comentarios ?? []).some((c) => c.deFora);
+}
+
+/** Só leitura (acoes vazio): o resumo do quadro e os trabalhos; contamina o turno como a escrita (conteudoDeFora). */
 async function consultar(deps: Deps, agenteId: string, quadro: string | undefined, turno: Pick<Turno, "id" | "executor">, limpo: boolean): Promise<{ data: ResultadoGerirQuadro }> {
   if (!(await experimentoLigado(deps))) return recusa("experimento_desligado", "o quadro está desligado nos experimentos da pessoa");
   const agentes = await agentesDaPessoa(deps);
@@ -67,7 +84,7 @@ async function consultar(deps: Deps, agenteId: string, quadro: string | undefine
   if (achado && ("ambiguo" in achado || "semNome" in achado)) { const f = falhaDoAchado(achado, agentes); return recusa(f.erro, f.detalhe); }
   if (!achado) return recusa("sem_quadro", "não há quadro: crie com criar_quadro");
   const dto = await montarQuadro(deps, achado);
-  if (limpo && dto.tarefas.some((t) => t.deFora)) await deps.repos.turnos.contaminar(turno.id, deps.agora());
+  if (limpo && conteudoDeFora(dto, deps.escopo.pessoaId)) await deps.repos.turnos.contaminar(turno.id, deps.agora());
   return {
     data: { ok: true, quadro: resumoParaBot(dto, await trabalhosParaBot(deps, dto.tarefas.map((t) => t.id))), lote_id: null, comecaram: [], instrucao: "Só leitura: nada mudou." },
   };
@@ -81,9 +98,7 @@ export const gerirQuadro: CasoNod<Deps, "gerir_quadro"> = async (deps, input) =>
   const agente = await deps.repos.agentes.buscar(input.agenteId);
   if (!agente) return recusa("nao_encontrado", "bot não encontrado");
   const deOutroDono = agente.ownerId !== deps.escopo.pessoaId || (turno.sobProcuracaoDe != null && turno.sobProcuracaoDe !== deps.escopo.pessoaId);
-  // Na profundidade 0, o bot de outro dono (sala de equipe, procuração) ainda passa por aqui com o limite que o turno der;
-  // o corte dele (o que pode no quadro de outra pessoa) é tratado na NOD-443, não nesta (revisão 3 do PR #627).
-  if (deOutroDono && turno.profundidade > 0) return recusa("entrada_invalida", "entre donos diferentes, a corrente é de um salto: este turno já veio de outro bot");
+  if (deOutroDono && turno.profundidade > 0 && !(await tarefaDeQuemParticipa(deps, agente.ownerId, turno))) return recusa("entrada_invalida", "entre donos diferentes, a corrente é de um salto: este turno já veio de outro bot");
   // O turno que mandaram parar (troca de responsável, Desfazer, cancelamento) não escreve mais no quadro (revisão rodada 3).
   if (turno.pararSolicitadoEm != null || turno.estado === "interrompido") return recusa("entrada_invalida", "este turno foi parado: a tarefa mudou de mão ou foi desfeita");
   // Limpo = confiável e nada de fora entrou durante o turno (a página lida, o e-mail): o mesmo corte do avisar_pessoa.
@@ -131,6 +146,9 @@ export const gerirQuadro: CasoNod<Deps, "gerir_quadro"> = async (deps, input) =>
       events: pr.events,
     };
   }
+  // NOD-443 (revisão 2 do PR #628, achado 2): no turno que o pedido de quem participa abriu no bot da dona, o bot age sob
+  // a procuração dela (as regras são as de quem pediu) e só na tarefa do turno. Sem isso, o lote sairia como da dona.
+  const procuracao = turno.sobProcuracaoDe && turno.sobProcuracaoDe !== deps.escopo.pessoaId && (await tarefaDeQuemParticipa(deps, agente.ownerId, turno)) ? turno.sobProcuracaoDe : null;
   // NOD-430: remover o quadro (o do próprio bot ou o de outro bot da pessoa) vira o card 'quadro_exclusao', como o
   // excluir_rotina; no automático/total o modo confirma na hora e volta `aplicada: true`.
   const remover = ops[0]?.tipo === "remover_quadro" ? ops[0] : null;
@@ -160,16 +178,20 @@ export const gerirQuadro: CasoNod<Deps, "gerir_quadro"> = async (deps, input) =>
     conversaId: input.conversaId,
     origemConfiavel: limpo,
     autorNaConversa: naConversa(turno),
+    ...(procuracao ? { pedidoPor: procuracao, porProcuracao: true } : {}),
     // NOD-430: controle total só a pedido da pessoa, na conversa e num turno limpo; senão o limite normal.
     limite: naConversa(turno) && limpo ? "total" : "normal",
   };
-  // NOD-417: comentar vai sozinho (lerOps) e não é lote — grava o comentário e aciona o responsável e os @mencionados (nunca o autor).
-  const r = ops[0]?.tipo === "comentar" ? await comentarTarefa(deps, pedido, ops[0]) : trabalhoOp ? await trabalhoDaTarefa(deps, pedido, trabalhoOp) : await aplicarLoteQuadro(deps, pedido);
+  // NOD-417: comentar numa tarefa do próprio quadro não é lote — grava o comentário e aciona o responsável e os @mencionados
+  // (nunca o autor). A escolha entre ele e o comentário de quem participa (NOD-443, D7) é do aplicarLoteQuadro.
+  // NOD-418: Repetir, Cancelar e recado não são lote: o trabalho da tarefa.
+  const r = trabalhoOp ? await trabalhoDaTarefa(deps, pedido, trabalhoOp) : await aplicarLoteQuadro(deps, pedido);
   if (!r.data.ok) return { data: { ok: false, erro: r.data.erro, instrucao: `${r.data.detalhe}. ${INSTRUCAO[r.data.erro]}` }, events: r.events };
   const { quadro, lote, comecaram, desfeito } = r.data;
   // O resultado mostra ao bot o título e a pergunta de cada tarefa: se alguma foi escrita por um turno não confiável
-  // (deFora), o turno de quem leu fica contaminado, como no buscar_conversas (ADR-062 §6; revisão rodada 5).
-  if (limpo && quadro?.tarefas.some((t) => t.deFora)) await deps.repos.turnos.contaminar(turno.id, deps.agora());
+  // (deFora), o turno de quem leu fica contaminado, como no buscar_conversas (ADR-062 §6; revisão rodada 5). NOD-443
+  // (revisão 2, achado 3; ADR-047): também o quadro de outra pessoa e o que outra pessoa pediu ou comentou.
+  if (limpo && quadro && conteudoDeFora(quadro, deps.escopo.pessoaId)) await deps.repos.turnos.contaminar(turno.id, deps.agora());
   const feito = r.data.trabalho;
   const partes = [feito ? fraseDoTrabalho(trabalhoOp!.tipo, feito) : r.data.removido ? "Quadro removido: o bot voltou a ser um agente comum (a conversa e a memória ficaram). Não tem Desfazer; para outro quadro, criar_quadro." : desfeito ? "Desfeito." : r.data.comentario ? "Comentário gravado na tarefa." : "Feito."];
   // NOD-416: mudar de quadro não tem lote (nem Desfazer) e não aciona ninguém; o código antigo continua abrindo.

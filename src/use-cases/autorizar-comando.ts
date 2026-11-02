@@ -4,7 +4,7 @@ import type { PlanoTurno } from "../contracts/plano-turno.ts";
 import { classificarComando, comandoArriscado, enviaPeloTerminal, tocaChaveDoNod, tocaCredencial } from "../domain/comando.ts";
 import { FRASE_ARQUIVO_DE_CREDENCIAL, FRASE_MCP_COM_CREDENCIAL, NATIVA_MCP_DA_PESSOA } from "../domain/nativas.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
-import { decidirPeloModo, REGRA_MODO_TOTAL, semRevisor, type DecisaoSemRevisor, type GatilhoDeRevisao } from "../domain/modo-aprovacao.ts";
+import { decidirPeloModo, modoNoTurno, REGRA_MODO_TOTAL, semRevisor, type DecisaoSemRevisor, type GatilhoDeRevisao } from "../domain/modo-aprovacao.ts";
 import { resumoDeTexto, RISCO_DO_GATILHO } from "../domain/revisor.ts";
 import type { GatilhoAcaoDoModo, TipoAcaoDoModo } from "../repositories/acoes-pelo-modo.repo.ts";
 import { terminalLiberadoNaTarefa } from "./liberar-na-tarefa.ts";
@@ -106,7 +106,7 @@ async function decidirComando(deps: Deps, plano: PlanoTurno, texto: string, pedi
   if (aprovado === "pessoa") return { permitir: true, porque: "aprovado" };
   // A liberação do REVISOR vale só enquanto ele vale (revisão do PR 3a): a pessoa que volta o bot para o manual, ou a
   // chave desligada no meio do turno, faz o mesmo comando seguir a regra de agora — não a liberação de antes.
-  if (aprovado === "revisor" && deps.services.revisor?.config.ligado === true && (await deps.repos.agentes.buscar(plano.agenteId))?.modoAprovacao === "automatico") {
+  if (aprovado === "revisor" && deps.services.revisor?.config.ligado === true && modoNoTurno((await deps.repos.agentes.buscar(plano.agenteId))?.modoAprovacao, plano.autoria) === "automatico") {
     return { permitir: true, porque: "revisor" };
   }
   const risco = pedido.tipo === "comando" ? comandoArriscado(texto) : null;
@@ -122,17 +122,19 @@ async function decidirComando(deps: Deps, plano: PlanoTurno, texto: string, pedi
     return { permitir: true, porque: "liberado_na_tarefa" };
   }
   const agente = await deps.repos.agentes.buscar(plano.agenteId);
+  // NOD-443 (ADR-143, revisão 3): no turno a pedido de outra pessoa vale o manual, qualquer que seja o modo da dona.
+  const modoAprovacao = modoNoTurno(agente?.modoAprovacao, plano.autoria);
   // ADR-115: a chave `NOD_REVISOR`. Desligada, a decisão é exatamente a de hoje (envio e contaminado não pesam).
   const revisor = deps.services.revisor?.config.ligado === true;
   // Envio para fora: no terminal, `enviaPeloTerminal`; todo MCP da pessoa (o nome não diz se só lê); gravar arquivo, nunca.
   const envioParaFora = pedido.tipo === "mcp" || (pedido.tipo === "comando" && enviaPeloTerminal(texto));
   const medida = { origem: ORIGEM_DO_PEDIDO[pedido.tipo], arriscada: risco !== null, credencial, envioParaFora, contaminado };
-  const avaliacao = medir ? await medirRevisao(deps, plano, agente?.modoAprovacao, medida) : revisor ? await avaliarRevisao(deps, plano, medida).catch(() => null) : null;
+  const avaliacao = medir ? await medirRevisao(deps, plano, modoAprovacao, medida) : revisor ? await avaliarRevisao(deps, plano, medida).catch(() => null) : null;
   // ADR-066: conteúdo de fora não para o automático nem o total — só o manual, que já chega aqui pedindo. Com o revisor
   // ligado, o envio para fora depois de conteúdo de fora (turno ou conversa em 24 h) vai a ele (plano, 3a). Se a leitura
   // da conversa falhou (avaliação nula), o lado seguro: conta como contaminado — o envio vai ao revisor, nunca roda direto.
   const contaminadoParaRevisor = avaliacao ? avaliacao.contaminado : revisor || contaminado;
-  const decidido = decidirPeloModo(agente?.modoAprovacao, { arriscada: risco !== null, credencial, chaveDoNod, envioParaFora, contaminado: contaminadoParaRevisor }, revisor);
+  const decidido = decidirPeloModo(modoAprovacao, { arriscada: risco !== null, credencial, chaveDoNod, envioParaFora, contaminado: contaminadoParaRevisor }, revisor);
   // O manual não muda (PR 6): o arquivo de credencial continua negado ali, com a frase que o hook dizia sozinho.
   if (decidido === null && pedido.tipo === "credencial") return { negar: pedido.acao === "mcp" ? FRASE_MCP_COM_CREDENCIAL : FRASE_ARQUIVO_DE_CREDENCIAL };
   // O `esperar_comando` (medir = false) não abre cartão nem tem revisor: o que seria revisado não roda por ali.

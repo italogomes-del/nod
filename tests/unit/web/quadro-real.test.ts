@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { EntradaHistoricoDto, QuadroDto, TarefaDto } from "../../../src/contracts/quadro.ts";
 import { lerCodigo } from "../../../src/domain/codigo-tarefa.ts";
 import { FORMATO_CODIGO, RESP_VOCE, botDoLink, fraseDoErroDoMover, reciboDaNovaTarefa, acesos, atalhosDePrazo, codigoDaTarefa, codigoNaUrl, destinosDaTarefa, responsaveisDaTarefa, faltaParaOPrazo, linhaDoHistorico, opcoesDeStatus, fraseDoPrazo, historicoDaFaixa, linhaUnica, respostaDoBot, tarefaNoQuadro, tarefasPorStatus } from "../../../web/lib/quadro-dados.ts";
-import { avisoDoGithub, cardDaTarefa, faixaDoQuadro, formNovaTarefa, menuDePrazo, pilulaDoQuadro, prMaisProblematico, quadroDaMeta, semQuadro, tarefaAberta, tomDoPr, topoDoQuadro } from "../../../web/telas/quadro-real.ts";
+import { avisoDoGithub, cardDaTarefa, esperandoOutro, faixaDoQuadro, formNovaTarefa, menuDePrazo, pessoasDoQuadro, pilulaDoQuadro, prMaisProblematico, quadroDaMeta, rotuloDoModo, semQuadro, tarefaAberta, tomDoPr, topoDoQuadro } from "../../../web/telas/quadro-real.ts";
 import { card, confiar } from "../../../web/telas/quadro.ts";
 import { COLUNAS_PADRAO, colunasDto } from "../../../src/domain/colunas.ts";
 import { RECUSAS_DO_MOVER } from "../../../src/use-cases/quadro.ts";
@@ -15,7 +15,7 @@ const t = (id: string, extra: Partial<TarefaDto> = {}): TarefaDto => ({
   pergunta: null, resposta: null, deFora: false, turnoId: null, criadoEm: 1, mudadoEm: 1, terminadaEm: null, execucao: null, agenteNome: "Ada", numero: null, codigo: `#${id}`, branch: "", ...extra,
 });
 const q = (tarefas: TarefaDto[], extra: Partial<QuadroDto> = {}): QuadroDto => ({
-  id: "q1", agenteId: "a", prefixo: null, meta: "Meta", prazo: null, cumpridoEm: null, resumo: null, criadoEm: 1, atualizadoEm: 1, metaDesde: 1, agenteNome: "Ada",
+  id: "q1", agenteId: "a", prefixo: null, modoConversa: "individual", meta: "Meta", prazo: null, cumpridoEm: null, resumo: null, criadoEm: 1, atualizadoEm: 1, metaDesde: 1, agenteNome: "Ada",
   colunas: colunasDto(COLUNAS_PADRAO), tarefas, ultimoLote: null, feitas: 0, total: tarefas.length, ...extra,
 });
 const agente = (id: string) => (id === "a" ? { avatar: confiar(`<span class="av">A</span>`), nome: "Ada" } : null);
@@ -446,5 +446,72 @@ describe("NOD-416 (ADR-144): criar, Status e Responsável na tela, histórico e 
   it("Nova tarefa… fica na barra do quadro", () => {
     expect(String(formNovaTarefa())).toContain(`data-form="nova-tarefa"`);
     expect(String(quadroDaMeta({ q: q([]), nome: "Ada", agente, filtro: "todos", alternadas: new Set(), acesas: new Set() }))).toContain(`data-form="nova-tarefa"`);
+  });
+});
+
+describe("NOD-443: o quadro com várias pessoas na tela", () => {
+  const ANA = { pessoaId: "ana", nome: "Ana", adicionadoEm: 1 };
+  const pend = (voce: boolean, saiu: string | null = null) => t("p", { status: "voce", pergunta: "Qual plano?", decide: { pessoaId: voce ? "eu" : "ana", nome: voce ? "Dora" : "Ana", voce, saiu } });
+  const hora = () => "10:00";
+
+  it("D6: a pendência de outra pessoa não é azul para quem lê; o card diz quem decide", () => {
+    const c = cardDaTarefa(pend(false), agente);
+    expect(c.voce).toBeUndefined();
+    expect(c.responsavel).toBeUndefined();
+    expect(c.tags).toContain("Esperando Ana");
+    expect(esperandoOutro(pend(false))).toBe("Ana");
+    // Quem decide vê o azul de sempre; o quadro de uma pessoa só (sem decide) também.
+    expect(cardDaTarefa(pend(true), agente).voce).toBe("Qual plano?");
+    expect(cardDaTarefa(t("x", { status: "voce", pergunta: "?" }), agente).voce).toBe("?");
+  });
+
+  it("D5: só quem decide tem o campo de resposta; a pendência que voltou diz de quem era", () => {
+    const fora = String(tarefaAberta({ t: pend(false), q: q([pend(false)], { membros: [ANA] }), agente }));
+    expect(fora).toContain("Esperando Ana");
+    expect(fora).not.toContain('data-form="responder-tarefa"');
+    const minha = String(tarefaAberta({ t: pend(true, "Bruno"), q: q([pend(true, "Bruno")]), agente }));
+    expect(minha).toContain('data-form="responder-tarefa"');
+    expect(minha).toContain("Era de Bruno, que saiu do quadro.");
+  });
+
+  it("D7: os comentários da tarefa aparecem nela, com a assinatura (escapados)", () => {
+    const tt = t("c");
+    const h = String(tarefaAberta({ t: tt, q: q([tt], { comentarios: [{ id: "k", tarefaId: "c", texto: MAL, assinatura: "Ana, pela Lia", deFora: true, criadoEm: 1 }, { id: "k2", tarefaId: "outra", texto: "não", assinatura: "Bruno", deFora: false, criadoEm: 1 }] }), agente }));
+    expect(h).toContain("Ana, pela Lia");
+    expect(h).not.toContain("<img");
+    expect(h).not.toContain(">não<");
+  });
+
+  it("D3: a primeira pessoa traz a escolha do modo, com cada um na sua conversa já marcado; sem botão cheio", () => {
+    const h = String(pessoasDoQuadro(q([]), { painel: "pessoas", mural: null, hora }));
+    expect(h).toContain('data-form="adicionar-pessoa"');
+    expect(h).toMatch(/value="individual" checked/);
+    expect(h).not.toContain("qd-bt-pri");
+    const com = String(pessoasDoQuadro(q([], { membros: [ANA], dona: { pessoaId: "eu", nome: "Dora" }, voce: { pessoaId: "eu", papel: "dona", podeDesfazer: true } }), { painel: "pessoas", mural: null, hora }));
+    expect(com).toContain("Pessoas · 1");
+    expect(com).toContain('data-act="tirar-pessoa" data-id="ana"');
+    expect(com).not.toContain('name="modo"');
+    expect(com).toContain('data-campo="modo-conversa"');
+    // Quem participa vê a lista, sem tirar, sem adicionar e sem o modo.
+    const membro = String(pessoasDoQuadro(q([], { membros: [ANA], dona: { pessoaId: "eu", nome: "Dora" }, voce: { pessoaId: "ana", papel: "membro", podeDesfazer: false } }), { painel: "pessoas", mural: null, hora }));
+    expect(membro).not.toContain("tirar-pessoa");
+    expect(membro).not.toContain("adicionar-pessoa");
+  });
+
+  it("D1, D8: o mural mostra os pedidos com a assinatura; o desfeito aparece marcado", () => {
+    const h = String(pessoasDoQuadro(q([]), { painel: "atividade", hora, mural: [{ id: "l", pessoaId: "ana", assinatura: "Ana, pela Lia", resumo: "moveu a SEC-1", codigos: ["SEC-1"], mudancas: 1, criadoEm: 1, desfeito: true }] }));
+    expect(h).toContain("Ana, pela Lia");
+    expect(h).toContain("moveu a SEC-1 (desfeito)");
+    expect(String(pessoasDoQuadro(q([]), { painel: "atividade", hora, mural: [] }))).toContain("Nada ainda.");
+  });
+
+  it("D2: o rótulo da pílula diz quem vê a conversa; a coluna padrão vira Precisa de alguém", () => {
+    expect(rotuloDoModo(q([]))).toBeNull();
+    expect(rotuloDoModo(q([], { membros: [ANA] }))).toBe("Só você vê esta conversa");
+    expect(rotuloDoModo(q([], { membros: [ANA], modoConversa: "so_dono" }))).toBe("Só você conversa · quem participa comenta");
+    expect(rotuloDoModo(q([], { modoConversa: "so_dono", dona: { pessoaId: "eu", nome: "Dora" }, voce: { pessoaId: "ana", papel: "membro", podeDesfazer: false } }))).toBe("Só Dora conversa · você comenta");
+    const base = { nome: "Ada", agente, filtro: "todos" as const, alternadas: new Set<string>(), acesas: new Set<string>() };
+    expect(String(quadroDaMeta({ ...base, q: q([], { membros: [ANA] }) }))).toContain("Precisa de alguém");
+    expect(String(quadroDaMeta({ ...base, q: q([]) }))).not.toContain("Precisa de alguém");
   });
 });

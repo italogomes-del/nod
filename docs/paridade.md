@@ -2,7 +2,7 @@
 
 <!-- Gerado por `npm run paridade` a partir de src/domain/acoes/ (NOD-391, ADR-135). Não edite à mão: a catraca (tests/conformidade/paridade.test.ts) compara. -->
 
-Ações de pessoa que mudam algo: **168**, mais 2 só de leitura. No chat: **43 vivas**, 3 parciais, 90 faltando e 34 que nunca vão para o chat. Piso de vivas: 43.
+Ações de pessoa que mudam algo: **171**, mais 2 só de leitura. No chat: **46 vivas**, 3 parciais, 90 faltando e 34 que nunca vão para o chat. Piso de vivas: 46.
 
 Estados: **vivo** = o chat faz pelo mesmo executor da tela, com teste de contrato; **parcial** = o chat faz, mas diverge ou falta parâmetro; **falta** = a onda dona ainda vai ligar; **nunca** = exceção escrita.
 
@@ -270,12 +270,12 @@ Estados: **vivo** = o chat faz pelo mesmo executor da tela, com teste de contrat
 | --- | --- | --- | --- | --- |
 | `quadro.criar` | Criar o quadro de um bot (meta e prazo opcionais) | muda | vivo (`gerir_quadro`) | `POST ^\/agentes\/(?<id>[^/]+)\/quadro$` |
 | `quadro.editar` | Mudar a meta ou o prazo do quadro | muda | vivo (`gerir_quadro`) | `PATCH ^\/agentes\/(?<id>[^/]+)\/quadro$` |
-| `quadro.criar_tarefa` | Criar uma tarefa no quadro | muda | vivo (`gerir_quadro`) | `POST ^\/agentes\/(?<id>[^/]+)\/quadro\/tarefas$` |
+| `quadro.criar_tarefa` | Criar uma tarefa no quadro | muda | vivo (`gerir_quadro`) | `POST ^\/agentes\/(?<id>[^/]+)\/quadro\/tarefas$`<br>`POST ^\/quadros\/(?<qid>[^/]+)\/tarefas$` |
 | `quadro.importar_linear` | Trazer itens do Linear para o quadro | muda | vivo (`gerir_quadro`) | `POST ^\/agentes\/(?<id>[^/]+)\/quadro\/linear$` |
-| `quadro.mudar_tarefa` | Mudar uma tarefa (status, responsável, PR, pergunta) ou tirá-la do quadro | muda | vivo (`gerir_quadro`) | `DELETE ^\/agentes\/(?<id>[^/]+)\/quadro\/tarefas\/(?<tid>[^/]+)$`<br>`PATCH ^\/agentes\/(?<id>[^/]+)\/quadro\/tarefas\/(?<tid>[^/]+)$` |
-| `quadro.responder` | Responder a pergunta de uma tarefa bloqueada | muda | vivo (`gerir_quadro`) | `POST ^\/agentes\/(?<id>[^/]+)\/quadro\/tarefas\/(?<tid>[^/]+)\/resposta$` |
-| `quadro.comentar` | Comentar uma tarefa (aciona o responsável ou o bot @mencionado) | muda | vivo (`gerir_quadro`) | `POST ^\/agentes\/(?<id>[^/]+)\/quadro\/tarefas\/(?<tid>[^/]+)\/comentarios$` |
-| `quadro.desfazer` | Desfazer a última mudança no quadro | muda | vivo (`gerir_quadro`) | `POST ^\/agentes\/(?<id>[^/]+)\/quadro\/lotes\/(?<lid>[^/]+)\/desfazer$` |
+| `quadro.mudar_tarefa` | Mudar uma tarefa (status, responsável, PR, pergunta) ou tirá-la do quadro | muda | vivo (`gerir_quadro`) | `DELETE ^\/agentes\/(?<id>[^/]+)\/quadro\/tarefas\/(?<tid>[^/]+)$`<br>`PATCH ^\/agentes\/(?<id>[^/]+)\/quadro\/tarefas\/(?<tid>[^/]+)$`<br>`PATCH ^\/quadros\/(?<qid>[^/]+)\/tarefas\/(?<tid>[^/]+)$` |
+| `quadro.responder` | Responder a pergunta de uma tarefa bloqueada | muda | vivo (`gerir_quadro`) | `POST ^\/agentes\/(?<id>[^/]+)\/quadro\/tarefas\/(?<tid>[^/]+)\/resposta$`<br>`POST ^\/quadros\/(?<qid>[^/]+)\/tarefas\/(?<tid>[^/]+)\/resposta$` |
+| `quadro.comentar` | Comentar uma tarefa (aciona o responsável ou o bot @mencionado; no quadro de outra pessoa, fica para a dona) | muda | vivo (`gerir_quadro`) | `POST ^\/agentes\/(?<id>[^/]+)\/quadro\/comentarios$`<br>`POST ^\/agentes\/(?<id>[^/]+)\/quadro\/tarefas\/(?<tid>[^/]+)\/comentarios$`<br>`POST ^\/quadros\/(?<qid>[^/]+)\/comentarios$` |
+| `quadro.desfazer` | Desfazer a última mudança no quadro | muda | vivo (`gerir_quadro`) | `POST ^\/agentes\/(?<id>[^/]+)\/quadro\/lotes\/(?<lid>[^/]+)\/desfazer$`<br>`POST ^\/quadros\/(?<qid>[^/]+)\/lotes\/(?<lid>[^/]+)\/desfazer$` |
 | `quadro.mover_tarefa` | Mudar a tarefa para o quadro de outro bot | muda | vivo (`gerir_quadro`) | `POST ^\/agentes\/(?<id>[^/]+)\/quadro\/tarefas\/(?<tid>[^/]+)\/mover$` |
 | `quadro.remover` | Remover o quadro (o bot volta a ser um agente comum; conversa e memória ficam) | arriscada | vivo (`gerir_quadro`) | `DELETE ^\/agentes\/(?<id>[^/]+)\/quadro$` |
 | `quadro.criar_coluna` | Criar uma coluna no quadro (com o grupo) | muda | vivo (`gerir_quadro`) | `POST ^\/agentes\/(?<id>[^/]+)\/quadro\/colunas$` |
@@ -285,6 +285,9 @@ Estados: **vivo** = o chat faz pelo mesmo executor da tela, com teste de contrat
 | `quadro.substituir_colunas` | Trocar o conjunto de colunas do quadro | muda | vivo (`gerir_quadro`) | `PUT ^\/agentes\/(?<id>[^/]+)\/quadro\/colunas$` |
 | `quadro.definir_passagem` | Definir quem pega a tarefa ao entrar numa coluna | muda | vivo (`gerir_quadro`) | `PUT ^\/agentes\/(?<id>[^/]+)\/quadro\/colunas\/(?<cid>[^/]+)\/passagem$` |
 | `quadro.terminei` | Terminar a etapa (a tarefa vai para a próxima coluna) | muda | vivo (`gerir_quadro`) | `POST ^\/agentes\/(?<id>[^/]+)\/quadro\/tarefas\/(?<tid>[^/]+)\/terminei$` |
+| `quadro.adicionar_pessoa` | Pôr alguém do time no quadro | muda | vivo (`gerir_quadro`) | `POST ^\/agentes\/(?<id>[^/]+)\/quadro\/pessoas$` |
+| `quadro.tirar_pessoa` | Tirar alguém do quadro (as pendências dela voltam para a dona) | muda | vivo (`gerir_quadro`) | `DELETE ^\/agentes\/(?<id>[^/]+)\/quadro\/pessoas\/(?<pid>[^/]+)$` |
+| `quadro.mudar_modo` | Escolher como as pessoas conversam com o quadro | muda | vivo (`gerir_quadro`) | `PATCH ^\/agentes\/(?<id>[^/]+)\/quadro\/modo$` |
 | `quadro.travar_coluna` | Travar a saída de uma coluna (só sai para…, só a pessoa tira daqui) | muda | vivo (`gerir_quadro`) | `PATCH ^\/agentes\/(?<id>[^/]+)\/quadro\/colunas\/(?<cid>[^/]+)\/trava$` |
 | `quadro.desfazer_movimento` | Desfazer um movimento do histórico da tarefa | muda | vivo (`gerir_quadro`) | `POST ^\/agentes\/(?<id>[^/]+)\/quadro\/tarefas\/(?<tid>[^/]+)\/movimentos\/(?<mid>[^/]+)\/desfazer$` |
 | `quadro.repetir_trabalho` | Repetir o trabalho de uma tarefa (abre um novo; a Bloqueada volta para onde estava) | muda | vivo (`gerir_quadro`) | `POST ^\/agentes\/(?<id>[^/]+)\/quadro\/tarefas\/(?<tid>[^/]+)\/trabalhos\/repetir$` |

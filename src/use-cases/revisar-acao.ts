@@ -4,7 +4,7 @@ import type { RuntimeEvent } from "../contracts/evento.ts";
 import type { DestinoItem, ItemAprovacao } from "../contracts/item-aprovacao.ts";
 import type { PlanoTurno } from "../contracts/plano-turno.ts";
 import { COMANDO_REVISOR_MAX, TETO_REVISOES_POR_TURNO, type FalhaRevisao, type PedidoRevisao } from "../contracts/revisao.ts";
-import { REGRA_REVISOR, VERSAO_REGRA_REVISOR, type GatilhoDeRevisao } from "../domain/modo-aprovacao.ts";
+import { aPedidoDeOutraPessoa, REGRA_REVISOR, VERSAO_REGRA_REVISOR, type GatilhoDeRevisao } from "../domain/modo-aprovacao.ts";
 import {
   FRASE_DA_FALHA,
   FRASE_TETO_DO_TURNO,
@@ -245,7 +245,8 @@ export const assentarRevisao: CasoDeUso<{ decisaoId: string; resultado: Resultad
   if (veredito?.decisao === "libera") {
     const agente = await deps.repos.agentes.buscar(antes.agenteId, true);
     const turnoVivo = turno?.estado === "despachando" && !turno.pararSolicitadoEm && !(await deps.repos.agentes.execucaoBloqueada(turno.id));
-    const modoAutomatico = agente !== null && !agente.excluidoEm && agente.modoAprovacao === "automatico";
+    // NOD-443 (ADR-143, revisão 3): o turno a pedido de outra pessoa nunca está no automático.
+    const modoAutomatico = agente !== null && !agente.excluidoEm && agente.modoAprovacao === "automatico" && !(turno && aPedidoDeOutraPessoa(turno.sobProcuracaoDe, turno.ownerId));
     if (turnoVivo && modoAutomatico) {
       const fechada = await deps.repos.decisoes.concluirRevisao(decisaoId, { liberar: { regra: REGRA_REVISOR, regraVersao: VERSAO_REGRA_REVISOR }, agora });
       if (!fechada) return { data: { estado: "ja_assentada", veredito: null } };

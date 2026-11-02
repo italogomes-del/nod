@@ -7,7 +7,7 @@
  * - `pilulaDoQuadro`: a conversa no próprio quadro (passo 9 do protótipo), que fala com o bot anfitrião.
  * Todo texto (título, descrição, pergunta, resposta, meta) é dado e passa por `esc`.
  */
-import type { ColunaDto, EntradaHistoricoDto, QuadroDto, TarefaDto } from "../../src/contracts/quadro.ts";
+import type { ColunaDto, EntradaHistoricoDto, LinhaMuralDto, ModoConversa, QuadroDto, TarefaDto } from "../../src/contracts/quadro.ts";
 import { esc } from "../lib/escape.ts";
 import { NOME_DO_STATUS, type Status } from "../lib/quadro.ts";
 import { comColunas, iconeDaColuna, paradaHa, podeTerPrazo, prazoLegivelMin, inicioDoFimPreso, LIMITE_COLUNAS, type EdicaoDeColuna } from "../lib/colunas.ts";
@@ -62,13 +62,15 @@ const horaDaLinha = (ms: number): string => new Date(ms).toLocaleTimeString("pt-
  * recusa da trava, vinda da tela) passa na frente. NOD-420: `responder`, `agora` e `prazoMin` (o "parada há" e o atraso).
  */
 export function cardDaTarefa(t: TarefaDto, agente: AgenteDoQuadro, acesa = false, o: { eco?: { colunas: readonly { id: string }[]; agora: number }; aviso?: Aviso; agora?: number; prazoMin?: number; responder?: boolean } = {}): Card {
-  const resp = t.status === "voce" ? VOCE : t.agenteId ? agente(t.agenteId) : null;
+  // NOD-443 (D6): a pendência de outra pessoa não fica azul para quem lê: o card diz quem decide.
+  const outro = esperandoOutro(t);
+  const resp = t.status === "voce" ? (outro ? null : VOCE) : t.agenteId ? agente(t.agenteId) : null;
   const eco = o.eco ? ecoDoAgente(t, o.eco.colunas, o.eco.agora) : null;
   const av: Aviso | null = o.aviso ?? (eco ? { texto: eco.texto, act: "tarefa-desfazer-movimento", id: eco.movimento } : null);
   // NOD-421 (🧭 da Ada): o PR mais problemático com o ponto do estado, mais "+N"; sem PR ligado, o pr_url do agente, como antes.
   const pior = t.prs?.length ? prMaisProblematico(t.prs) : null;
   const pr = pior ? { texto: `PR #${pior.numero}${t.prs!.length > 1 ? ` +${t.prs!.length - 1}` : ""}`, tom: tomDoPr(pior), titulo: estadoDoPr(pior) } : null;
-  const tags = [!pr && t.prUrl ? numeroDoPr(t.prUrl) : "", t.linearId ? "Linear" : ""].filter(Boolean);
+  const tags = [!pr && t.prUrl ? numeroDoPr(t.prUrl) : "", t.linearId ? "Linear" : "", outro ? `Esperando ${outro}` : ""].filter(Boolean);
   return {
     id: t.id,
     codigo: codigoDaTarefa(t),
@@ -76,7 +78,7 @@ export function cardDaTarefa(t: TarefaDto, agente: AgenteDoQuadro, acesa = false
     ...(resp ? { responsavel: resp } : {}),
     ...(t.execucao ? { estado: t.execucao } : {}),
     ...(t.status === "bloqueado" ? { motivo: t.pergunta ?? "bloqueada" } : {}),
-    ...(t.status === "voce" ? { voce: t.pergunta ?? "Precisa de você" } : {}),
+    ...(t.status === "voce" && !outro ? { voce: t.pergunta ?? "Precisa de você" } : {}),
     ...(pr ? { pr } : {}),
     ...(tags.length ? { tags } : {}),
     ...(acesa ? { brilho: true } : {}),
@@ -86,6 +88,11 @@ export function cardDaTarefa(t: TarefaDto, agente: AgenteDoQuadro, acesa = false
     ...(o.agora && t.naColunaDesde && (o.prazoMin || t.status === "voce" || t.status === "bloqueado")
       ? { quando: paradaHa(t.naColunaDesde, o.agora), ...(o.prazoMin && o.agora - t.naColunaDesde >= o.prazoMin * 60_000 ? { atrasada: true } : {}) } : {}),
   };
+}
+
+/** NOD-443 (D5, D6): o nome de quem decide a pendência, quando não é quem lê; null = é quem lê (ou o quadro é de uma pessoa só). */
+export function esperandoOutro(t: TarefaDto): string | null {
+  return t.status === "voce" && t.decide && !t.decide.voce ? t.decide.nome : null;
 }
 
 const passaNoFiltro = (t: TarefaDto, f: Filtro): boolean => (f === "todos" ? true : f === "pessoas" ? t.status === "voce" || !t.agenteId : !!t.agenteId && t.status !== "voce");
@@ -165,10 +172,12 @@ const rotuloDoQuadro = (q: QuadroDto, nome: string): string => (q.meta ? `Quadro
  * NOD-448: as colunas são as do quadro (`q.colunas`), com o cabeçalho que edita, o "+" e as tiras de Feito e Fechado
  * presas à direita (NOD-429). `edicao` é o pedaço aberto (menu, renomear, remover, coluna nova, a folha do celular).
  */
-export function quadroDaMeta(o: { q: QuadroDto; nome: string; agente: AgenteDoQuadro; filtro: Filtro; alternadas: ReadonlySet<string>; acesas: ReadonlySet<string>; edicao?: EdicaoDeColuna | null; agora?: number; editandoMeta?: boolean; agentes?: readonly AgenteDaPassagem[]; /** NOD-419: a recusa da trava no card que a pessoa soltou. */ avisos?: ReadonlyMap<string, Aviso> }): Html {
+export function quadroDaMeta(o: { q: QuadroDto; nome: string; agente: AgenteDoQuadro; filtro: Filtro; alternadas: ReadonlySet<string>; acesas: ReadonlySet<string>; edicao?: EdicaoDeColuna | null; agora?: number; editandoMeta?: boolean; pessoas?: PessoasNaTela; agentes?: readonly AgenteDaPassagem[]; /** NOD-419: a recusa da trava no card que a pessoa soltou. */ avisos?: ReadonlyMap<string, Aviso> }): Html {
   const por = tarefasPorStatus(o.q);
   const ed = o.edicao ?? null;
-  const cs = comColunas(o.q).colunas;
+  // NOD-443 (D6): com gente no quadro, a pendência pode ser de outra pessoa: o nome padrão vira "Precisa de alguém".
+  const varias = (o.q.membros?.length ?? 0) > 0;
+  const cs = comColunas(o.q).colunas.map((c) => (varias && c.id === "voce" && c.nome === "Precisa de você" ? { ...c, nome: "Precisa de alguém" } : c));
   const rotulo = rotuloDoQuadro(o.q, o.nome);
   const contagem: Record<string, number> = Object.fromEntries(cs.map((c) => [c.id, (por[c.id] ?? []).length]));
   const cols = cs.map((c) => {
@@ -212,6 +221,7 @@ export function quadroDaMeta(o: { q: QuadroDto; nome: string; agente: AgenteDoQu
   const ordem = `<button type="button" class="qd-link qd-lg-ordem" data-act="col-folha">Ordem das colunas</button>`;
   return confiar([
     topoDoQuadro(o.q, { agora: o.agora ?? Date.now(), ...(o.editandoMeta ? { editandoMeta: true } : {}) }),
+    o.pessoas ? pessoasDoQuadro(o.q, o.pessoas) : "",
     avisoDoGithub(o.q),
     barra({ filtro: o.filtro, trabalhando: trabalhando(o.q, o.agente), extra: formNovaTarefa() }),
     quadro({ rotulo, classe: "qd-so-largo", colunas, extras }),
@@ -288,7 +298,7 @@ function secaoDoHistorico(h: ExtrasDaTarefa["historico"]): string {
 export function tarefaAberta(o: { t: TarefaDto; q: QuadroDto; agente: AgenteDoQuadro } & ExtrasDaTarefa): Html {
   const { t } = o;
   const codigo = codigoDaTarefa(t);
-  const resp = t.status === "voce" ? VOCE : t.agenteId ? o.agente(t.agenteId) : null;
+  const resp = t.status === "voce" ? (esperandoOutro(t) ? null : VOCE) : t.agenteId ? o.agente(t.agenteId) : null;
   // NOD-448: o nome e o ícone da coluna do quadro (renomeada ou criada pela pessoa); o padrão só para um dado velho.
   const col = comColunas(o.q).colunas.find((c) => c.id === t.status);
   const nomeSt = col?.nome ?? NOME_DO_STATUS[t.status as Status] ?? t.status;
@@ -301,8 +311,15 @@ export function tarefaAberta(o: { t: TarefaDto; q: QuadroDto; agente: AgenteDoQu
   const desc = t.descricao.trim() ? `<div class="qd-t-desc">${esc(t.descricao)}</div>` : `<div class="qd-t-desc qd-t-desc-vazia">Sem descrição.</div>`;
   // Revisão 3 do PR #629: Bloqueado com pergunta (o motivo do agente, do laço ou do freio) também pede resposta, como o
   // servidor aceita o `responder` ali (paridade, ADR-135).
+  // NOD-443 (D5, D6): só quem decide responde; para os outros, quem decide e (se quem pediu saiu) de quem era.
+  const outro = esperandoOutro(t);
+  const saiu = t.status === "voce" && t.decide?.saiu ? `<p class="qd-t-saiu">Era de ${esc(t.decide.saiu)}, que saiu do quadro.</p>` : "";
   const pergunta = t.pergunta && (t.status === "voce" || t.status === "bloqueado")
-    ? `<h2 class="qd-t-sec">${t.status === "voce" ? "Precisa de você" : "Bloqueada"}</h2><p class="qd-voce-frase">${esc(t.pergunta)}</p>${formResposta(t)}` : "";
+    ? `<h2 class="qd-t-sec">${t.status === "voce" ? (outro ? `Esperando ${esc(outro)}` : "Precisa de você") : "Bloqueada"}</h2><p class="qd-voce-frase">${esc(t.pergunta)}</p>${saiu}${t.status === "voce" && outro ? "" : formResposta(t)}` : "";
+  const comentarios = (o.q.comentarios ?? []).filter((c) => c.tarefaId === t.id);
+  const secComentarios = comentarios.length
+    ? `<h2 class="qd-t-sec">Comentários</h2><ol class="qd-hist">${comentarios.map((c) => `<li><span class="qd-hist-quem">${esc(c.assinatura)}</span> <span class="qd-hist-oque">${esc(c.texto)}</span></li>`).join("")}</ol>` : "";
+  const porQuem = t.pedidoPorNome ? `<span class="qd-chip qd-chip-vazio">por ${esc(t.pedidoPorNome)}</span>` : "";
   const resposta = t.resposta ? `<h2 class="qd-t-sec">Sua resposta</h2><p class="qd-t-resposta">${esc(t.resposta)}</p>` : "";
   // NOD-421: os PRs que o laço ligou (repo #N · estado); sem nenhum, o pr_url que o agente gravou, como antes.
   const prs = (t.prs ?? []).flatMap((p) => { const u = linkSeguro(p.url); return u ? [{ ...p, url: u }] : []; });
@@ -339,7 +356,7 @@ export function tarefaAberta(o: { t: TarefaDto; q: QuadroDto; agente: AgenteDoQu
       `<button type="button" class="qd-bt" data-act="mover-quadro" data-id="${esc(t.id)}"${escolhido ? "" : " disabled"}>Mover</button></dd>` : "";
   return confiar(`<article class="qd-tarefa qd-com-lado" aria-labelledby="qd-t-tit" data-tarefa="${esc(t.id)}">` +
     `<div class="qd-t-cab"><button type="button" class="qd-voltar" data-act="voltar-ao-quadro">${ICONE.voltar}<span>${esc(o.q.meta ?? "Quadro")}</span></button><span class="qd-t-sep" aria-hidden="true">/</span><span class="qd-id">${esc(codigo)}</span></div>` +
-    `<div class="qd-t-corpo"><div class="qd-t-principal"><h1 class="qd-t-tit" id="qd-t-tit" tabindex="-1">${esc(t.titulo)}</h1><div class="qd-chips">${chipSt}${chipResp}${chipPr}</div>${desc}${pergunta}${resposta}${o.trabalhos ?? ""}${secaoDoHistorico(o.historico)}${linhas}${historicoDaTarefa(t, comColunas(o.q).colunas, o.hora)}${o.comentarios ?? ""}</div>` +
+    `<div class="qd-t-corpo"><div class="qd-t-principal"><h1 class="qd-t-tit" id="qd-t-tit" tabindex="-1">${esc(t.titulo)}</h1><div class="qd-chips">${chipSt}${chipResp}${chipPr}${porQuem}</div>${desc}${pergunta}${resposta}${o.trabalhos ?? ""}${secaoDoHistorico(o.historico)}${linhas}${historicoDaTarefa(t, comColunas(o.q).colunas, o.hora)}${o.comentarios ?? ""}${secComentarios}</div>` +
     `<aside class="qd-lado" aria-label="Detalhes da tarefa"><section class="qd-lado-sec"><h2 class="qd-rotulo">Propriedades</h2><dl class="qd-props">` +
     `<dt><label for="qd-t-status">Status</label></dt><dd>${campoStatus}${soltar ? `<ul class="qd-t-soltar">${confirmacaoDeSoltar(soltar, t.id, t.titulo)}</ul>` : ""}</dd><dt>${rotuloResp}</dt><dd>${campoResp}</dd>` +
     `<dt>Quadro</dt><dd>${esc(o.q.agenteNome)}${o.q.meta ? ` · ${esc(o.q.meta)}` : ""}</dd>${campoMover}` +
@@ -402,10 +419,65 @@ export function faixaDoQuadro(o: { faixa: Faixa; avatarBot: Html | null; histori
 }
 
 /** A pílula: "Nova tarefa ou mensagem" e Enviar. Com uma tarefa aberta, o pedido vai sobre ela (o placeholder diz qual). */
-export function pilulaDoQuadro(o: { meta: string | null; nome: string }): Html {
+export function pilulaDoQuadro(o: { meta: string | null; nome: string; modo?: string | null }): Html {
   const rot = o.meta ? `Conversar com o quadro ${o.meta}` : `Conversar com ${o.nome} sobre o quadro`;
   return confiar(`<div class="qc-caixa"><div class="qc-faixa" id="qc-faixa" role="status" aria-live="polite"></div>` +
+    `<p class="qc-modo" id="qc-modo"${o.modo ? "" : " hidden"}>${esc(o.modo ?? "")}</p>` +
     `<form class="qc-pil" role="group" aria-label="${esc(rot)}" data-form="conversa-no-quadro"><label class="qd-sr" for="qc-txt">${esc(rot)}</label>` +
     `<textarea id="qc-txt" class="qc-txt" rows="1" maxlength="${LIMITE_PEDIDO}" placeholder="Nova tarefa ou mensagem"></textarea>` +
     `<button type="submit" class="qc-bt qc-enviar" aria-label="Enviar ao quadro">${ENVIAR}</button></form></div>`);
+}
+
+/* ---------- NOD-443 (ADR-143): as pessoas do quadro, o modo e o mural de Atividade ---------- */
+
+export type PainelDoQuadro = "pessoas" | "atividade" | null;
+export type PessoasNaTela = { painel: PainelDoQuadro; mural: readonly LinhaMuralDto[] | null; hora: (em: number) => string; erro?: string | null };
+
+/** Os modos que a tela oferece. "Uma conversa do grupo" fica para a próxima etapa (revisão 8 do PR #628: o servidor recusa). */
+export const MODOS_NA_TELA: readonly { id: ModoConversa; nome: string; frase: string }[] = [
+  { id: "individual", nome: "Cada um na sua conversa", frase: "Cada pessoa pede pelo próprio bot; a conversa de cada um é só dela" },
+  { id: "so_dono", nome: "Só eu converso", frase: "Quem participa vê o quadro e comenta nas tarefas" },
+];
+
+/**
+ * D2: o que o rótulo da pílula diz sobre quem vê a conversa. Null = o quadro é de uma pessoa só (nada a dizer).
+ * D4: a conversa individual nunca vira pública, em nenhum modo.
+ */
+export function rotuloDoModo(q: Pick<QuadroDto, "modoConversa" | "membros" | "voce" | "dona">): string | null {
+  if (!q.membros?.length && q.voce?.papel !== "membro") return null;
+  const dona = q.voce?.papel === "membro" ? q.dona?.nome ?? "a dona" : null;
+  if (q.modoConversa === "so_dono") return dona ? `Só ${dona} conversa · você comenta` : "Só você conversa · quem participa comenta";
+  return "Só você vê esta conversa";
+}
+
+/** A linha discreta abaixo do topo: "Pessoas · N" e "Atividade", e o painel aberto (sem modal, sem botão cheio). */
+export function pessoasDoQuadro(q: QuadroDto, o: PessoasNaTela): Html {
+  const membros = q.membros ?? [];
+  const dona = q.voce?.papel !== "membro";
+  const bt = (act: string, painel: PainelDoQuadro, texto: string) =>
+    `<button type="button" class="qd-link" data-act="${act}" aria-expanded="${o.painel === painel}" aria-controls="qd-painel-pessoas">${esc(texto)}</button>`;
+  const links = `${bt("painel-pessoas", "pessoas", membros.length ? `Pessoas · ${membros.length}` : "Pessoas")}${bt("painel-atividade", "atividade", "Atividade")}`;
+  let painel = "";
+  if (o.painel === "pessoas") {
+    const lista = membros.length
+      ? `<ul class="qd-pessoas-lista">${q.dona ? `<li><span>${esc(q.dona.nome)}</span> <span class="qd-meta-falta">dona</span></li>` : ""}${membros.map((m) => `<li><span>${esc(m.nome)}</span>${dona ? ` <button type="button" class="qd-link" data-act="tirar-pessoa" data-id="${esc(m.pessoaId)}" aria-label="Tirar ${esc(m.nome)} do quadro">Tirar</button>` : ""}</li>`).join("")}</ul>`
+      : `<p class="qd-lado-vazio">Só você neste quadro.</p>`;
+    // D3: a escolha do modo aparece quando entra a primeira pessoa, com "Cada um na sua conversa" já marcado.
+    const radios = dona && !membros.length
+      ? `<fieldset class="qd-modos"><legend class="qd-rotulo">Como cada um conversa com o quadro</legend>${MODOS_NA_TELA.map((m) => `<label><input type="radio" name="modo" value="${m.id}"${m.id === "individual" ? " checked" : ""}> ${esc(m.nome)} <span class="qd-meta-falta">${esc(m.frase)}</span></label>`).join("")}</fieldset>` : "";
+    const form = dona
+      ? `<form class="qd-pessoas-form" data-form="adicionar-pessoa"><label class="qd-sr" for="qd-pessoa-in">Nome de alguém do time</label>` +
+        `<input id="qd-pessoa-in" class="qd-meta-in" name="pessoa" maxlength="200" placeholder="Nome de alguém do time" autocomplete="off">${radios}` +
+        `<button type="submit" class="qd-link">Adicionar</button></form>` : "";
+    const modo = dona && membros.length
+      ? `<p><label for="qd-modo-sel" class="qd-rotulo">Conversa</label> <select id="qd-modo-sel" class="qd-sel" data-campo="modo-conversa">${MODOS_NA_TELA.map((m) => `<option value="${m.id}"${m.id === q.modoConversa ? " selected" : ""}>${esc(m.nome)}</option>`).join("")}${MODOS_NA_TELA.some((m) => m.id === q.modoConversa) ? "" : `<option value="${esc(q.modoConversa)}" selected>${esc(q.modoConversa)}</option>`}</select></p>` : "";
+    painel = `${lista}${modo}${form}`;
+  } else if (o.painel === "atividade") {
+    const m = o.mural;
+    painel = m === null ? `<p class="qd-lado-vazio">Carregando…</p>`
+      : !m.length ? `<p class="qd-lado-vazio">Nada ainda.</p>`
+      : `<ol class="qd-hist">${m.map((l) => `<li${l.desfeito ? ' class="qd-desfeito"' : ""}><span class="qd-hist-quem">${esc(l.assinatura)}</span> <span class="qd-hist-oque">${esc(l.resumo)}${l.desfeito ? " (desfeito)" : ""}</span> <time class="qd-hist-quando" datetime="${esc(new Date(l.criadoEm).toISOString())}">${esc(o.hora(l.criadoEm))}</time></li>`).join("")}</ol>`;
+  }
+  const erro = o.erro ? `<p class="qd-t-saiu" role="alert">${esc(o.erro)}</p>` : "";
+  return confiar(`<div class="qd-pessoas"><div class="qd-pessoas-links">${links}</div>${painel || erro ? `<div class="qd-pessoas-painel" id="qd-painel-pessoas">${painel}${erro}</div>` : ""}</div>`);
 }

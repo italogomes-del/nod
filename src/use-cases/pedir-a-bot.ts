@@ -1,3 +1,4 @@
+import { aPedidoDeOutraPessoa } from "../domain/modo-aprovacao.ts";
 import type { Agente } from "../contracts/agente.ts";
 import type { Mensagem } from "../contracts/mensagem.ts";
 import type { CasoNod } from "../contracts/servicos.ts";
@@ -29,6 +30,10 @@ async function turnoDoRemetente(deps: Deps, turnoId: string, remetenteId: string
   const turno = await deps.repos.turnos.buscar(turnoId);
   if (!turno || turno.agenteId !== remetenteId) throw new ErroDeDominio("nao_permitido", { cause: "turno do remetente" });
   if (!podeRepassar(turno.profundidade)) throw new ErroDeDominio("nao_permitido", { cause: "limite da corrente de pedidos entre bots" });
+  // NOD-443 (ADR-143, revisão 3 do PR #628): o turno a pedido de outra pessoa (quem participa do quadro da dona) não pede
+  // a colegas. O plano já não traz pedir_a_bot; isto é a defesa em profundidade: o turno do colega nasceria sob a
+  // procuração da dona (abaixo), e a procuração do membro se perderia num salto que roda no modo da dona.
+  if (aPedidoDeOutraPessoa(turno.sobProcuracaoDe, turno.ownerId)) throw new ErroDeDominio("nao_permitido", { cause: "turno a pedido de outra pessoa não pede a colegas" });
   return turno;
 }
 
@@ -60,7 +65,7 @@ async function colegasLivres(deps: Deps, remetente: Agente, alvoId: string, agor
 
 /** Os erros do pedido com a tarefa (NOD-417, emenda da ADR-142): cada um diz o que corrigir; nada é pedido. */
 type ErroNaTarefa = Extract<Awaited<ReturnType<typeof pedirABot>>["data"], { ok: false }>["erro"];
-const ERRO_DO_QUADRO: Record<FalhaQuadro, ErroNaTarefa> = { experimento_desligado: "experimento_desligado", sem_quadro: "sem_quadro", nao_encontrado: "tarefa_invalida", entrada_invalida: "tarefa_invalida", estado_invalido: "tarefa_invalida", conflito: "tarefa_invalida" };
+const ERRO_DO_QUADRO: Record<FalhaQuadro, ErroNaTarefa> = { experimento_desligado: "experimento_desligado", sem_quadro: "sem_quadro", nao_encontrado: "tarefa_invalida", entrada_invalida: "tarefa_invalida", nao_permitido: "tarefa_invalida", estado_invalido: "tarefa_invalida", conflito: "tarefa_invalida" };
 const CORRECAO: Record<ErroNaTarefa, string> = {
   experimento_desligado: "O quadro está desligado nos experimentos da pessoa: chame sem a tarefa.",
   sem_quadro: "Diga o quadro certo ou chame sem a tarefa.",

@@ -1,3 +1,4 @@
+import { aPedidoDeOutraPessoa } from "../domain/modo-aprovacao.ts";
 import { semCitacao } from "../domain/citacao.ts";
 import { COMANDO_CONFIGURAR, emReconfiguracao, podeReconfigurar } from "../domain/reconfiguracao.ts";
 import type { Memoria } from "../contracts/memoria.ts";
@@ -340,7 +341,11 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
     return nomes.length ? `${cortes[i]} [anexou ${nomes.join(", ")}]` : (cortes[i] ?? "");
   };
   const historico = janela.map((m, i) => ({ autor: autorDe(m), texto: comAnexo(m, i), confianca: m.confianca }));
-  const anteriores = memoriaLonga ? anexosAnteriores({ falas: daPessoa, anexosPorFala: anexosDaJanela, jaNoTurno: turno.entradaAnexos, harness: escolha?.harness ?? null }) : [];
+  // NOD-443 (revisão 5 do PR #628, achado 1): no turno a pedido de outra pessoa (quem participa do quadro da dona), a
+  // conversa é a da dona com o bot dela: nem o histórico, nem os anexos de antes, nem o "desde a sua última vez" vão para
+  // quem pediu. O pedido dela chega pela entrada do turno.
+  const deOutraPessoa = aPedidoDeOutraPessoa(turno.sobProcuracaoDe ?? delegacao?.sobProcuracaoDe ?? null, turno.ownerId);
+  const anteriores = memoriaLonga && !deOutraPessoa ? anexosAnteriores({ falas: daPessoa, anexosPorFala: anexosDaJanela, jaNoTurno: turno.entradaAnexos, harness: escolha?.harness ?? null }) : [];
   // A sessão retomada não viu o que a conversa ganhou depois dela (rotina, colega, turno de outro harness):
   // entra aqui. A fala que disparou este turno e as que ele absorveu já vão na entrada (criadas depois dele).
   // Na sessão da cadeia, o que mudou desde ela (a decisão, a resposta do colega) já vem na entrada da retomada.
@@ -349,13 +354,14 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
     .filter((m) => m.criadoEm > vistaAte && m.criadoEm < turno.criadoEm && m.id !== turno.mensagemOrigemId)
     .slice(-HISTORICO_NO_PLANO)
     .map((m) => ({ autor: autorDe(m), texto: textoParaOBot(m).slice(0, TEXTO_DESDE_A_SESSAO), confianca: m.confianca }));
-  const contextoConversa = JSON.stringify({ ...(original ? { tarefaOriginal: original.entradaTexto.slice(0, 8000) } : {}), historico, ...(desdeSuaUltimaVez.length ? { desdeSuaUltimaVez } : {}) });
+  const contextoConversa = JSON.stringify({ ...(original ? { tarefaOriginal: original.entradaTexto.slice(0, 8000) } : {}), historico: deOutraPessoa ? [] : historico, ...(desdeSuaUltimaVez.length && !deOutraPessoa ? { desdeSuaUltimaVez } : {}) });
   // revisto em 2026-10-01 (ADR-066): saíram o gate da rotina (E7.3/ADR-044) e a trava da rotina de quem pediu
   // (ADR-058). Quem decide quando o bot para e pergunta é o modo de aprovação, igual em toda origem.
 
   // Inventário para o modelo escolher SOBRE QUAL rotina agir (o estado vem computado por COLUNAS:
   // geração antiga do agente lê como 'pausada'). resumoCron traduz o cron para o texto humano.
-  const rotinasDoAgente = (await deps.repos.rotinas.listarDoAgente(agente.id)).map((r) => ({
+  // NOD-443 (revisão 6 do PR #628, achado 2): as rotinas do bot são da dona — não vão ao turno a pedido de outra pessoa.
+  const rotinasDoAgente = (deOutraPessoa ? [] : await deps.repos.rotinas.listarDoAgente(agente.id)).map((r) => ({
     id: r.id,
     resumo: quandoDaRotina(r),
     instrucao: r.instrucao,
@@ -368,7 +374,9 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   // "rodando" — em 11/10 o orquestrador via 13 tasks rodando com uma trabalhando e empilhava mais.
   // revisto em 2026-10-12 (ADR-099 item 1a, I7 revista): a triagem do pedido de colega ou de rotina (fora de trabalho)
   // também — é olhando o que está em andamento que o dono decide começar, juntar ou esperar.
-  const trabalhosAbertos = podeAbrirTask(trabalho) && (trabalho ? modo === "rotina" : modo === "conversa" || modo === "criacao" || modo === "rotina" || modo === "delegacao") ? (await trabalhosParaDto(deps, await deps.repos.trabalhos.abertosDoAgente(agente.id))).map((t) => ({ id: t.id, titulo: t.titulo, estado: esperaDoTrabalho(t) ? "esperando" : t.estado, ultimoPasso: t.ultimoPasso, ...(t.deFora ? { cuidado: true } : {}) })) : [];
+  // NOD-443 (revisão 7 do PR #628, achado 1): as frentes e tasks abertas são da dona — não vão ao turno a pedido de
+  // outra pessoa (o turno do quadro não tem trabalho, e podeAbrirTask(null) é verdadeiro).
+  const trabalhosAbertos = !deOutraPessoa && podeAbrirTask(trabalho) && (trabalho ? modo === "rotina" : modo === "conversa" || modo === "criacao" || modo === "rotina" || modo === "delegacao") ? (await trabalhosParaDto(deps, await deps.repos.trabalhos.abertosDoAgente(agente.id))).map((t) => ({ id: t.id, titulo: t.titulo, estado: esperaDoTrabalho(t) ? "esperando" : t.estado, ultimoPasso: t.ultimoPasso, ...(t.deFora ? { cuidado: true } : {}) })) : [];
 
   // ADR-130: no turno da pessoa, o que o próprio bot faz agora nos bastidores desta conversa (rodam em paralelo desde a
   // 0121): a rotina pela instrução que a pessoa confirmou, o pedido de colega pelo nome de quem pediu.
@@ -417,7 +425,8 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   const onb = await deps.repos.onboarding.buscar();
   const pessoaNome = onb.campos.apelido ?? pessoa?.nome ?? "a pessoa";
   // NOD-346 (ADR-126): o "Sobre mim" vale só nos bots da própria pessoa; bot de empresa ou de outra pessoa não o lê.
-  const sobreMim = agente.dono === "pessoa" && agente.ownerId === deps.escopo.pessoaId ? await deps.repos.perfil.sobreMim() : null;
+  // NOD-443 (revisão 6 do PR #628, achado 1): nem no turno a pedido de outra pessoa — o "Sobre mim" é da dona.
+  const sobreMim = agente.dono === "pessoa" && agente.ownerId === deps.escopo.pessoaId && !deOutraPessoa ? await deps.repos.perfil.sobreMim() : null;
   const ligacaoDoTurno = modo === "ligacao" && turno.ligacaoId ? await deps.repos.ligacoes.buscar(turno.ligacaoId) : null;
   const onboarding = ligacaoDoTurno?.iniciadaPor === "produto" && onb.guiaId === agente.id && (onb.etapa === "chamando" || onb.etapa === "entrevista" || onb.etapa === "configurando");
   // definido em 2026-10-04: a guia no "auto" roda no mais potente do harness (MODELO_MAIS_POTENTE) no chat; um modelo
@@ -480,7 +489,8 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
     pessoaNome,
     ...(sobreMim ? { sobreMim } : {}),
     maquina: input.maquina ?? null,
-    colegas: visiveis.filter((a) => ehColega(agente, a)),
+    // NOD-443 (revisão 6 do PR #628, achado 2): o diretório dos bots da dona não vai ao turno a pedido de outra pessoa.
+    colegas: deOutraPessoa ? [] : visiveis.filter((a) => ehColega(agente, a)),
     rotinasDoAgente,
     onboarding,
     // ADR-042: a regra é gravada por (conector_id, capacidade) e o catálogo fala `${slug}__${tool}`.
@@ -513,7 +523,8 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
     agora,
   });
 
-  parcial.workspaceId = workspaceId;
+  // NOD-443 (ADR-143, revisão 3): o turno a pedido de outra pessoa não tem pasta (montarPlano tirou o workspace_*).
+  parcial.workspaceId = aPedidoDeOutraPessoa(sobProcuracaoDe, turno.ownerId) ? null : workspaceId;
   // NOD-315 (ADR-119): a frente com repo cujo bot não tem o GitHub concedido não recebe o clone da máquina; fica no log.
   const saidaDoClone = saidaDoCloneDaMaquina({ maquina: input.maquina ?? null, trabalho: dadosDoTrabalho }, parcial);
   if (saidaDoClone) log("info", "clone_da_maquina_saida", { turno_id: turno.id, repo: saidaDoClone.repo, motivo: saidaDoClone.motivo });

@@ -296,6 +296,11 @@ describe("planejarLote: tudo ou nada", () => {
     // Mover sem escrever conteúdo não marca; a pessoa editando a de fora não limpa.
     expect(planejar([{ tipo: "mudar_tarefa", tarefa: t.id, status: "feito" }], { tarefas: [t], origemConfiavel: false })).toMatchObject({ tarefas: [{ deFora: false }] });
     expect(planejar([{ tipo: "mudar_tarefa", tarefa: t.id, titulo: "y" }], { tarefas: [{ ...t, deFora: true }] })).toMatchObject({ tarefas: [{ deFora: true }] });
+    // Revisão 3 do PR #628 (pós-merge), achado 2: o PR entra no turno da resposta (entradaDaResposta); escrito de fora
+    // (turno não confiável ou pedido de quem participa), a tarefa fica de fora. Tirar o PR (null) não escreve conteúdo.
+    expect(planejar([{ tipo: "mudar_tarefa", tarefa: t.id, pr_url: "https://github.com/a/b/pull/1" }], { tarefas: [t], origemConfiavel: false })).toMatchObject({ tarefas: [{ deFora: true }] });
+    expect(planejar([{ tipo: "mudar_tarefa", tarefa: t.id, pr_url: null }], { tarefas: [t], origemConfiavel: false })).toMatchObject({ tarefas: [{ deFora: false }] });
+    expect(planejar([{ tipo: "mudar_tarefa", tarefa: t.id, pr_url: "https://github.com/a/b/pull/1" }], { tarefas: [t] })).toMatchObject({ tarefas: [{ deFora: false }] });
   });
 
   it("o identificador do Linear só no formato EQUIPE-123 (entra no cabeçalho do turno)", () => {
@@ -396,6 +401,9 @@ describe("NOD-430: o bot sozinho, quem fez e as candidatas", () => {
     expect(quemFez({ tipo: "pessoa" }, null, null)).toBe("Você");
     expect(quemFez({ tipo: "agente", agenteId: ADA.id }, "p", "Ada")).toBe("Você, pela Ada");
     expect(quemFez({ tipo: "agente", agenteId: ADA.id }, null, "Ada")).toBe("Ada");
+    // Merge NOD-430 × NOD-443: quem pediu foi outra pessoa do quadro, não quem lê.
+    expect(quemFez({ tipo: "agente", agenteId: ADA.id }, "p2", "Bia", "Ana")).toBe("Ana, pela Bia");
+    expect(quemFez({ tipo: "pessoa" }, "p2", null, "Ana")).toBe("Ana");
   });
   it("título repetido lista até 5 candidatas com código, coluna e responsável, sem o título", () => {
     const ts = Array.from({ length: 7 }, (_, i) => ({ ...tarefa({ id: `10000000-0000-4000-8000-00000000001${i}`, titulo: "Revisar", agenteId: i === 0 ? ADA.id : null }), nova: false }));

@@ -68,6 +68,27 @@ export function descricaoDoModo(modo: ModoAprovacao, revisor: boolean): string {
   return modo === "automatico" && revisor ? DESCRICAO_AUTOMATICO_COM_REVISOR : DESCRICAO_MODO[modo];
 }
 
+/**
+ * definido em 2026-11-02 (NOD-443, ADR-143, revisão 3 do PR #628): o turno é a pedido de OUTRA PESSOA quando a
+ * procuração (`sob_procuracao_de`) não é a dona da conta que executa (`conta_de_execucao`, o owner do turno). Hoje só o
+ * pedido de quem participa do quadro abre um turno assim: o bot da dona trabalha sob a procuração do membro. O pedido de
+ * colega (pedir_a_bot) e o entre pessoas (ADR-058) nascem com a procuração = a dona do escopo, e não entram aqui.
+ */
+export function aPedidoDeOutraPessoa(sobProcuracaoDe: string | null | undefined, contaDeExecucao: string): boolean {
+  return !!sobProcuracaoDe && sobProcuracaoDe !== contaDeExecucao;
+}
+
+/**
+ * O modo que vale NESTE turno (NOD-443, ADR-143, revisão 3 do PR #628): no turno a pedido de outra pessoa, o manual,
+ * qualquer que seja o modo que a dona escolheu. O "automático" e o "total" são a confiança da dona no PRÓPRIO pedido; o
+ * membro do quadro não herda isso (confused deputy). A ADR-066 já dizia: "Pedido de outra pessoa: sempre passa por você,
+ * em qualquer modo". Todo leitor do modo em runtime passa por aqui com a autoria do plano.
+ */
+export function modoNoTurno(modo: ModoAprovacao | null | undefined, autoria: { sob_procuracao_de: string | null; conta_de_execucao: string } | null | undefined): ModoAprovacao | undefined {
+  if (autoria && aPedidoDeOutraPessoa(autoria.sob_procuracao_de, autoria.conta_de_execucao)) return "manual";
+  return modo ?? undefined;
+}
+
 export function ehModoAprovacao(x: unknown): x is ModoAprovacao {
   return typeof x === "string" && (MODOS_APROVACAO as readonly string[]).includes(x);
 }

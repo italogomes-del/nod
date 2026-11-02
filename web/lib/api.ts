@@ -41,7 +41,7 @@ import type { ConfirmarEmailDto, ExportacaoDto, FormasDto, MinhaContaDto, Perfil
 import type { ExecucaoRotina } from "../../src/contracts/rotina.ts";
 import type { MembroSala, Sala } from "../../src/contracts/sala.ts";
 import type { FaixaParada, Turno } from "../../src/contracts/turno.ts";
-import type { ComentarioDto, ComentarioTarefa, EntradaHistoricoDto, GrupoColuna, LoteQuadro, QuadroDaPessoaDto, QuadroDto, StatusTarefa, TarefaPorCodigoDto } from "../../src/contracts/quadro.ts";
+import type { ComentarioDto, ComentarioTarefa, EntradaHistoricoDto, GrupoColuna, LinhaMuralDto, LoteQuadro, ModoConversa, QuadroDaPessoaDto, QuadroDto, StatusTarefa, TarefaPorCodigoDto } from "../../src/contracts/quadro.ts";
 import type { EstadoExecucao, ExecucoesDaTarefa } from "../../src/contracts/quadro-execucoes.ts";
 import type { AppDto, PaginasDto } from "../../src/contracts/apps.ts";
 import type { AtividadeTarefa } from "../../src/contracts/quadro-pela-conversa.ts";
@@ -305,6 +305,16 @@ export function criarApi(escopo: Escopo) {
       post<MutacaoDoTrabalho>(`agentes/${encodeURIComponent(agenteId)}/quadro/tarefas/${encodeURIComponent(tarefaId)}/trabalhos/recado`, { texto }),
     desfazerLoteQuadro: (agenteId: string, loteId: string) =>
       post<MutacaoQuadro>(`agentes/${encodeURIComponent(agenteId)}/quadro/lotes/${encodeURIComponent(loteId)}/desfazer`),
+    /** NOD-443 (ADR-143): as pessoas do quadro, o modo da conversa, o comentário e o mural de Atividade. */
+    adicionarPessoa: (agenteId: string, pessoa: string, modo?: ModoConversa) =>
+      post<MutacaoQuadro>(`agentes/${encodeURIComponent(agenteId)}/quadro/pessoas`, modo ? { pessoa, modo } : { pessoa }),
+    tirarPessoa: (agenteId: string, pessoaId: string) =>
+      del<MutacaoQuadro>(`agentes/${encodeURIComponent(agenteId)}/quadro/pessoas/${encodeURIComponent(pessoaId)}`),
+    mudarModo: (agenteId: string, modo: ModoConversa) =>
+      patch<MutacaoQuadro>(`agentes/${encodeURIComponent(agenteId)}/quadro/modo`, { modo }),
+    comentar: (agenteId: string, c: { texto: string; tarefa?: string }) =>
+      post<MutacaoQuadro>(`agentes/${encodeURIComponent(agenteId)}/quadro/comentarios`, c),
+    atividadeQuadro: (agenteId: string) => get<{ linhas: LinhaMuralDto[] }>(`agentes/${encodeURIComponent(agenteId)}/quadro/atividade`),
     /** NOD-448 (ADR-140): as colunas pela tela; cada uma é um lote com Desfazer. */
     criarColuna: (agenteId: string, c: { nome: string; grupo: GrupoColuna; depois_de?: string }) =>
       post<MutacaoQuadro>(`agentes/${encodeURIComponent(agenteId)}/quadro/colunas`, c),

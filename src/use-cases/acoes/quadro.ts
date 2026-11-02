@@ -4,7 +4,6 @@ import { ehOpDeTrabalho, lerOp } from "../../domain/quadro.ts";
 import type { IdAcao } from "../../domain/acoes/index.ts";
 import type { CodigoErro } from "../../domain/erro.ts";
 import { ErroDeDominio } from "../../domain/erro.ts";
-import { comentarTarefa } from "../comentar-tarefa.ts";
 import { trabalhoDaTarefa } from "../quadro-execucoes.ts";
 import { aplicarLoteQuadro, type FalhaQuadro, type RecusaDoMover, type ResultadoLote } from "../quadro.ts";
 import type { CasoDeUso } from "../tipos.ts";
@@ -15,8 +14,11 @@ import type { CasoDeUso } from "../tipos.ts";
  * contrato prova). Aqui o autor é a pessoa (a tela); o gerir_quadro passa o bot como autor.
  */
 
-/** O bot da aba Quadro (o anfitrião) e onde rodam os turnos que o lote começar. */
-type Base = { anfitriaoId: string; executor: Executor };
+/**
+ * O bot da aba Quadro (o anfitrião) e onde rodam os turnos que o lote começar. NOD-443: quem participa do quadro de outra
+ * pessoa chega pelo id do quadro (`quadroId`; o `quadro` da entrada é o destino do mover_tarefa), e o lote entra pela porta da dona.
+ */
+type Base = { anfitriaoId?: string; quadroId?: string; executor: Executor };
 export type SaidaQuadro = Extract<ResultadoLote, { ok: true }>;
 
 const CODIGO: Record<FalhaQuadro, CodigoErro> = {
@@ -24,6 +26,7 @@ const CODIGO: Record<FalhaQuadro, CodigoErro> = {
   sem_quadro: "nao_encontrado",
   nao_encontrado: "nao_encontrado",
   entrada_invalida: "entrada_invalida",
+  nao_permitido: "nao_permitido",
   estado_invalido: "estado_invalido",
   // Revisão 2 do PR #623: a tarefa mudou de quadro no meio do mover (409).
   conflito: "estado_invalido",
@@ -47,13 +50,13 @@ export class ErroDoMover extends ErroDeDominio {
  */
 function umaAcao<I extends object>(tipo: OpQuadro["tipo"]): CasoDeUso<Base & I, SaidaQuadro> {
   return async (deps, input) => {
-    const { anfitriaoId, executor, ...resto } = input;
+    const { anfitriaoId, quadroId, executor, ...resto } = input;
     const op = lerOp({ ...resto, tipo });
     if ("erro" in op) throw new ErroDeDominio("entrada_invalida", { cause: op.erro });
-    const pedido = { autor: { tipo: "pessoa" } as const, anfitriaoId, executor, ops: [op] };
-    // NOD-417: comentar não é lote (sem Desfazer): grava e aciona o responsável e os @mencionados.
-    // NOD-418: Repetir, Cancelar e recado também não são lote: o trabalho da tarefa.
-    const r = op.tipo === "comentar" ? await comentarTarefa(deps, pedido, op) : ehOpDeTrabalho(op) ? await trabalhoDaTarefa(deps, pedido, op) : await aplicarLoteQuadro(deps, pedido);
+    const pedido = { autor: { tipo: "pessoa" } as const, ...(anfitriaoId ? { anfitriaoId } : {}), ...(quadroId ? { quadro: quadroId } : {}), executor, ops: [op] };
+    // NOD-443: o comentar (na tarefa ou no mural) passa pelo aplicarLoteQuadro, que o despacha sem lote nem Desfazer.
+    // NOD-418: Repetir, Cancelar e recado não são lote: o trabalho da tarefa.
+    const r = ehOpDeTrabalho(op) ? await trabalhoDaTarefa(deps, pedido, op) : await aplicarLoteQuadro(deps, pedido);
     if (!r.data.ok) {
       if (r.data.motivo) throw new ErroDoMover(CODIGO[r.data.erro], r.data.motivo, r.data.detalhe);
       throw new ErroDeDominio(CODIGO[r.data.erro], { cause: r.data.detalhe });
@@ -71,7 +74,7 @@ export const EXECUTORES_QUADRO = {
   "quadro.importar_linear": umaAcao<{ itens: ItemLinear[] }>("importar_linear"),
   "quadro.mudar_tarefa": umaAcao<CamposTarefa & { tarefa: string; pr_url?: string | null; pergunta?: string | null; excluir?: boolean; sem_iniciar?: boolean; motivo?: string }>("mudar_tarefa"),
   "quadro.responder": umaAcao<{ tarefa: string; resposta: string }>("responder"),
-  "quadro.comentar": umaAcao<{ tarefa: string; texto: string }>("comentar"),
+  "quadro.comentar": umaAcao<{ texto: string; tarefa?: string }>("comentar"),
   "quadro.desfazer": umaAcao<{ lote?: string }>("desfazer"),
   "quadro.mover_tarefa": umaAcao<{ tarefa: string; quadro: string }>("mover_quadro"),
   "quadro.remover": umaAcao<{ bot?: string }>("remover_quadro"),
@@ -83,6 +86,9 @@ export const EXECUTORES_QUADRO = {
   "quadro.substituir_colunas": umaAcao<{ colunas: unknown; destinos?: unknown }>("substituir_colunas"),
   "quadro.definir_passagem": umaAcao<{ coluna: string; agente?: string | null; instrucoes?: string | null }>("definir_passagem"),
   "quadro.terminei": umaAcao<{ tarefa: string }>("terminei"),
+  "quadro.adicionar_pessoa": umaAcao<{ pessoa: string; modo?: string }>("adicionar_pessoa"),
+  "quadro.tirar_pessoa": umaAcao<{ pessoa: string }>("tirar_pessoa"),
+  "quadro.mudar_modo": umaAcao<{ modo: string }>("mudar_modo"),
   "quadro.travar_coluna": umaAcao<{ coluna: string; sai_para?: string[] | null; so_pessoa?: boolean }>("travar_coluna"),
   "quadro.desfazer_movimento": umaAcao<{ tarefa: string; movimento?: string }>("desfazer_movimento"),
   "quadro.repetir_trabalho": umaAcao<{ tarefa: string }>("repetir_trabalho"),

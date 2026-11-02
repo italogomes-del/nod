@@ -80,6 +80,11 @@ export type DadosDoCartaoRevisor = {
   cabecalho?: string;
   /** Em "Sua vez": "abrir conversa" (HTML pronto). */
   rodape?: string;
+  /**
+   * NOD-443 (revisão 8 do PR #628): na conversa, sem cabeçalho, de quem participa do quadro é o pedido (o bot da dona sob
+   * a procuração dela). Em "Sua vez" isso já vai no cabeçalho.
+   */
+  aPedidoDe?: string | null;
 };
 
 /**
@@ -99,5 +104,5 @@ export function renderCartaoRevisor(d: DadosDoCartaoRevisor, estadoColuna: strin
   // QA do PR 4 (2026-10-26): a dica do "Sempre permitir" só existia no `title`, que quem usa toque nunca vê. Agora é texto
   // embaixo dos botões onde não há ponteiro que paire (web/interface.css) e a descrição do botão para o leitor de tela.
   const dica = d.sempre ? `<p class="cr-sempre-dica" id="cr-d-${id}">${esc(d.sempre.titulo)}</p>` : "";
-  return `<li class="decisao cartao-revisor dec-${esc(estadoColuna)}" data-decisao="${id}"><div class="cr" role="group" aria-labelledby="${titulo}"><span class="cr-escudo">${ICONE_ESCUDO_PEDE}</span><div class="cr-corpo">${d.cabecalho ?? ""}<p class="cr-pergunta" id="${titulo}">${textoComCodigo(d.pergunta, d.codigo)}</p>${motivo}${detalhe}<div class="cr-acoes">${acoes}</div>${dica}${d.rodape ?? ""}</div></div></li>`;
+  return `<li class="decisao cartao-revisor dec-${esc(estadoColuna)}" data-decisao="${id}"><div class="cr" role="group" aria-labelledby="${titulo}"><span class="cr-escudo">${ICONE_ESCUDO_PEDE}</span><div class="cr-corpo">${d.cabecalho ?? ""}${d.aPedidoDe ? `<p class="cr-pedido-de">A pedido de ${esc(d.aPedidoDe)}</p>` : ""}<p class="cr-pergunta" id="${titulo}">${textoComCodigo(d.pergunta, d.codigo)}</p>${motivo}${detalhe}<div class="cr-acoes">${acoes}</div>${dica}${d.rodape ?? ""}</div></div></li>`;
 }

@@ -170,6 +170,39 @@ describe("chamarFerramenta: gates, despacho por tabela e trilha (ADR-013, EMENDA
     expect(c.banco.trilha[0]?.conectorId).toBe(c.conectorId);
   });
 
+  it("NOD-443 (revisão 5 do PR #628, achado 1): a pedido de outra pessoa, nenhuma ferramenta de conector roda — nem a leitura concedida", async () => {
+    const c = await cenario();
+    const deOutra = { ...c.plano, autoria: { ...c.plano.autoria, sob_procuracao_de: "outra-pessoa" } };
+    const r = await c.chamar("exemplo__somar", { a: 1, b: 2 }, deOutra);
+    expect(r.data).toMatchObject({ ok: false, negacao: { classe: "ferramenta_negada", motivo: "fora_do_catalogo" } });
+    expect(c.chamadas).toEqual([]);
+    expect(c.trilha()).toEqual([["negacao", "exemplo__somar", "fora_do_catalogo"]]);
+    expect(c.banco.trilha[0]?.conectorId).toBe(c.conectorId);
+    // A procuração da própria dona (pedido de colega dela) lê como antes (cenário novo: a negação acima é terminal).
+    const d = await cenario();
+    const daDona = { ...d.plano, autoria: { ...d.plano.autoria, sob_procuracao_de: d.plano.autoria.conta_de_execucao } };
+    expect((await d.chamar("exemplo__somar", { a: 1, b: 2 }, daDona)).data).toMatchObject({ ok: true });
+  });
+
+  it("NOD-443 (revisão 6 do PR #628, achado 5): a pedido de outra pessoa, nenhuma ferramenta fora da lista do pedido roda — nem do nod (ver_colegas, ler_artefato, lembrar) nem do computador", async () => {
+    const computador: FerramentaPlano = { nome: "computador_observar", nomeMcp: "mcp__nod__computador_observar", origem: "computador", conectorId: null, readOnlyHint: true, tocaDadoPessoal: true, schema: { type: "object" } };
+    const casos: [string, unknown][] = [["ver_colegas", {}], ["ler_artefato", { artefato_id: "00000000-0000-4000-8000-000000000000" }], ["lembrar", { tipo: "fato", texto: "x" }], ["computador_observar", {}]];
+    for (const [nome, args] of casos) {
+      const c = await cenario();
+      const deOutra: PlanoTurno = { ...c.plano, autoria: { ...c.plano.autoria, sob_procuracao_de: "outra-pessoa" }, catalogo: { ...c.plano.catalogo, ferramentas: [...c.plano.catalogo.ferramentas, nod("ver_colegas"), nod("ler_artefato"), computador] } };
+      const r = await c.chamar(nome, args, deOutra);
+      expect(r.data, nome).toMatchObject({ ok: false, negacao: { classe: "ferramenta_negada", motivo: "fora_do_catalogo" } });
+      expect(c.trilha(), nome).toEqual([["negacao", nome, "fora_do_catalogo"]]);
+    }
+    // O que a lista permite segue rodando (pedir_a_pessoa abre a pergunta), e a procuração da própria dona lê os colegas.
+    const d = await cenario();
+    const deOutra = { ...d.plano, autoria: { ...d.plano.autoria, sob_procuracao_de: "outra-pessoa" } };
+    expect((await d.chamar("pedir_a_pessoa", { pergunta: "qual?" }, deOutra)).data).not.toMatchObject({ ok: false });
+    const e = await cenario();
+    const daDona: PlanoTurno = { ...e.plano, autoria: { ...e.plano.autoria, sob_procuracao_de: e.plano.autoria.conta_de_execucao }, catalogo: { ...e.plano.catalogo, ferramentas: [...e.plano.catalogo.ferramentas, nod("ver_colegas")] } };
+    expect((await e.chamar("ver_colegas", {}, daDona)).data).toMatchObject({ ok: true });
+  });
+
   it("revogação entre enfileirar e chamar → capacidade_desligada; conector desabilitado idem", async () => {
     const c = await cenario();
     const [g] = await c.deps.repos.concessoes.doAgente(c.agenteId);

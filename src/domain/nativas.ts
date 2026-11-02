@@ -87,7 +87,7 @@ export function nativasDoTurno(t: { modo: ModoTurno; confianca: Confianca; pasta
 }
 
 /** Por que um turno de harness com terminal ficou sem ele: o modo, ou a entrada que veio de fora. */
-export type MotivoSemTerminal = "pedido_de_colega" | "rotina" | "sala" | "conteudo_de_fora" | "resposta_a_colega";
+export type MotivoSemTerminal = "pedido_de_colega" | "rotina" | "sala" | "conteudo_de_fora" | "resposta_a_colega" | "pedido_de_outra_pessoa";
 
 /**
  * definido em 2026-10-01 (ADR-065): o motivo vai ao prompt, porque sem ele o bot não sabe por que tem terminal num
@@ -96,8 +96,10 @@ export type MotivoSemTerminal = "pedido_de_colega" | "rotina" | "sala" | "conteu
  * desbloqueá-los. Sai da MESMA regra de `nativasDoTurno`: se ela mudar, o motivo acompanha. null = o turno tem o
  * terminal, ou o harness nunca o teria (Codex, máquina sem o hook) — aí não há o que explicar.
  */
-export function motivoSemTerminal(t: { modo: ModoTurno; confianca: Confianca; terminal?: boolean }): MotivoSemTerminal | null {
+export function motivoSemTerminal(t: { modo: ModoTurno; confianca: Confianca; terminal?: boolean; deOutraPessoa?: boolean }): MotivoSemTerminal | null {
   if (!t.terminal) return null;
+  // NOD-443 (ADR-143, revisão 3 do PR #628): o turno a pedido de outra pessoa não tem o terminal (montarPlano o tira).
+  if (t.deOutraPessoa) return "pedido_de_outra_pessoa";
   if (nativasDoTurno({ modo: t.modo, confianca: t.confianca, pastasAutorizadas: false, terminal: true }).includes("Bash")) return null;
   // Confiável, o mesmo modo teria o terminal: o que tirou foi a entrada.
   if (nativasDoTurno({ modo: t.modo, confianca: "confiavel", pastasAutorizadas: false, terminal: true }).includes("Bash")) return "conteudo_de_fora";

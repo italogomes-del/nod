@@ -1,7 +1,7 @@
 import type { Decisao } from "../contracts/decisao.ts";
 import type { Autoria, RuntimeEvent } from "../contracts/evento.ts";
 import type { PlanoTurno } from "../contracts/plano-turno.ts";
-import { conversaComAPessoa, decidirPeloModo, semRevisor, type DecisaoSemRevisor, type RegraDoModo } from "../domain/modo-aprovacao.ts";
+import { conversaComAPessoa, decidirPeloModo, modoNoTurno, semRevisor, type DecisaoSemRevisor, type RegraDoModo } from "../domain/modo-aprovacao.ts";
 import { autoriaAgente, autoriaPessoa, rotinaDoTurno } from "./apoio-l7.ts";
 import type { Deps } from "./tipos.ts";
 import { sincronizarDasDecisoes } from "./trabalhos.ts";
@@ -59,7 +59,8 @@ export async function fecharDecisaoDaProposta(deps: Deps, id: string, agora: num
 export async function confirmacaoPeloModo(deps: Deps, ctx: { agenteId: string; turnoId: string; plano?: PlanoTurno | null }, o: { arriscada: boolean; gravaInstrucao?: boolean }): Promise<PorRegra | null> {
   if (!ctx.plano) return null;
   const agente = await deps.repos.agentes.buscar(ctx.agenteId);
-  const modo = agente?.modoAprovacao;
+  // NOD-443 (ADR-143, revisão 3): no turno a pedido de outra pessoa vale o manual.
+  const modo = modoNoTurno(agente?.modoAprovacao, ctx.plano.autoria);
   if (!modo || modo === "manual") return null;
   if (o.gravaInstrucao === true && ctx.plano.confiancaEntrada === "nao_confiavel" && (await rotinaDoTurno(deps.repos, ctx.turnoId))?.rotina.gatilho === "webhook") return null;
   const revisor = deps.services.revisor?.config.ligado === true;

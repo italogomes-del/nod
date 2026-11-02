@@ -141,6 +141,7 @@ const PORQUE_SEM_TERMINAL: Record<MotivoSemTerminal, string> = {
   sala: "é uma sala",
   conteudo_de_fora: "a entrada deste turno é conteúdo de fora (não confiável)",
   resposta_a_colega: "é uma resposta a colega",
+  pedido_de_outra_pessoa: "é um pedido de quem participa do quadro, não da sua pessoa",
 };
 
 /**

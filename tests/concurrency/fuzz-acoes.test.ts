@@ -205,6 +205,10 @@ for (const [ordem, config] of CONFIGURACOES.entries()) {
       // NOD-417: uma tarefa (em Backlog, sem acionar ninguém) para o `:tid` (`quadro.terminei` só passava da busca com ela).
       const comTarefa = await srv.json<{ quadro: { tarefas: { id: string; titulo: string }[] } }>("POST", `agentes/${meu.agente.id}/quadro/tarefas`, { titulo: "Tarefa do fuzz", status: "backlog" });
       const tarefaDoFuzz = comTarefa.quadro.tarefas.find((t) => t.titulo === "Tarefa do fuzz")!.id;
+      // NOD-443: a outra pessoa do tenant no quadro, para o `:pid` (`quadro.tirar_pessoa` só passava da busca na semente em
+      // que um `quadro.adicionar_pessoa` sorteado acertava o nome dela antes; a 443 ficou vermelha com a semente 1735492939).
+      const comPessoa = await srv.json<{ ok: boolean; detalhe?: string }>("POST", `agentes/${meu.agente.id}/quadro/pessoas`, { pessoa: outraEscopo.pessoaId });
+      if (!comPessoa.ok) throw new Error(`a pessoa do fuzz não entrou no quadro: ${comPessoa.detalhe}`);
       // NOD-445: um app ativo e um removido no bot da pessoa e um no da outra, para `paginas.remover_app` e
       // `paginas.restaurar_app` passarem da busca (o `:app` recebe estes ids pelo segmento `apps`).
       const appDe = (s: SessaoDeTeste, b: Criado, nome: string, removido: boolean) =>
@@ -238,6 +242,7 @@ for (const [ordem, config] of CONFIGURACOES.entries()) {
             // reais: a coluna semeada (a remoção de verdade) e as fixas (o id não muda ao renomear; remover dá 400).
             colunas: { daPessoa: [colunaDoFuzz, "voce", "cancelado"], deOutraPessoa: [] },
             tarefas: { daPessoa: [tarefaDoFuzz], deOutraPessoa: [] },
+            pessoas: { daPessoa: [outraEscopo.pessoaId], deOutraPessoa: [] },
             apps: { daPessoa: [meuApp, meuAppRemovido], deOutraPessoa: [appDela] },
             times: { daPessoa: [timeDoFuzz, semTimeDoFuzz], deOutraPessoa: [timeDela] },
           },
@@ -274,7 +279,7 @@ for (const [ordem, config] of CONFIGURACOES.entries()) {
         plano.casos = enxugarCasos(plano.casos, {
           acoes: (a) => a.startsWith("quadro.") && !ACOES_DO_QUADRO_COM_N.has(a),
           k: Math.ceil(N / 2),
-          idsDaPessoa: new Set([meu.agente.id, colunaDoFuzz, "voce", "cancelado", tarefaDoFuzz]),
+          idsDaPessoa: new Set([meu.agente.id, colunaDoFuzz, "voce", "cancelado", tarefaDoFuzz, outraEscopo.pessoaId]),
         });
         // eslint-disable-next-line no-console
         console.log(`fuzz-acoes[${config.nome}]: ações do quadro com ${Math.ceil(N / 2)} entradas por rota: ${antes} → ${plano.casos.length} casos`);

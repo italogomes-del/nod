@@ -3,6 +3,7 @@ import type { Executor, RuntimeEvent } from "../contracts/evento.ts";
 import type { Quadro } from "../contracts/quadro.ts";
 import { atrasosDePrazo, decisoesParaAvisar, entradaDaCobranca, textoDasDecisoes, textoDosAtrasos, type TarefaComMarcas } from "../domain/avisos-quadro.ts";
 import { colunasDe } from "../domain/colunas.ts";
+import { quemDecide } from "../domain/quadro-pessoas.ts";
 import { ehErroDeDominio } from "../domain/erro.ts";
 import { log } from "../obs/log.ts";
 import { autoriaAgente, evento } from "./apoio-l7.ts";
@@ -87,7 +88,11 @@ async function vencidos(deps: Deps, q: Quadro, agora: number) {
     const m = marcas.get(t.id);
     return m ? [{ ...t, ...m }] : [];
   });
-  return { colunas, tarefas, decisoes: decisoesParaAvisar(tarefas, colunas, agora), atrasos: atrasosDePrazo(tarefas, colunas, agora) };
+  // Merge da NOD-443 (D6): a pendência de quem participa (Com você pedido por ela, que segue no quadro) é dela e o aviso
+  // vai pelo bot dela (avisarQuemParticipa); a conversa da dona não a recebe.
+  const membros = new Set((await repo.membros(q.id)).map((m) => m.pessoaId));
+  const daDona = (t: (typeof tarefas)[number]) => t.status !== "voce" || quemDecide({ pedidoPor: t.pedidoPor, donaId: deps.escopo.pessoaId, membros }).pessoaId === deps.escopo.pessoaId;
+  return { colunas, tarefas, decisoes: decisoesParaAvisar(tarefas, colunas, agora).filter(daDona), atrasos: atrasosDePrazo(tarefas, colunas, agora) };
 }
 
 /**

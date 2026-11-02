@@ -297,6 +297,31 @@ describeIntegracao("PRs na tarefa (NOD-421)", () => {
     });
   });
 
+  it("NOD-443 (revisão 5 do PR #628, achado 4): o aviso do GitHub é só da dona — quem participa não o vê, nem o bot dela", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      await m.sync([], "GitHub · sem acesso a gamefik/privado");
+      const q = (await m.repos.quadros.buscar(m.q.id))!;
+      expect((await montarQuadro(m.deps, q)).avisoGithub).toBe("GitHub · sem acesso a gamefik/privado");
+      const daAna = await montarQuadro(m.deps, q, PESSOA_ANA);
+      expect(daAna.avisoGithub).toBeNull();
+      expect(resumoParaBot(daAna)).not.toHaveProperty("avisoGithub");
+    });
+  });
+
+  it("NOD-443 (revisão 6 do PR #628, achado 6, decisão): os PRs e as linhas da tarefa são o estado dela no mural compartilhado — quem participa os vê; o aviso do GitHub não", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      await m.sync([pr()], "GitHub · sem acesso a gamefik/privado");
+      const q = (await m.repos.quadros.buscar(m.q.id))!;
+      const daAna = await montarQuadro(m.deps, q, PESSOA_ANA);
+      const t = daAna.tarefas.find((x) => x.id === m.tarefa.id)!;
+      expect(t.prs).toEqual([naTela(pr())]);
+      expect(t.linhas?.map((l) => l.texto)).toEqual(["GitHub · PR gamefik/nod #612 ligado"]);
+      expect(daAna.avisoGithub).toBeNull();
+    });
+  });
+
   it("revisão do PR #621: o aviso do topo do quadro é gravado uma vez até mudar, vai ao bot e limpa com null", async () => {
     await withRollback(MARLON, async (trx) => {
       const m = await montar(trx);

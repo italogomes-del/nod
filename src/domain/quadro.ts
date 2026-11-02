@@ -1,6 +1,6 @@
 import type { MovimentoTarefa, NovoMovimento } from "../contracts/freios-quadro.ts";
-import type { AutorLote, ColunaQuadro, ExecucaoTarefa, GrupoColuna, IdColuna, ItemLinear, OpQuadro, TarefaQuadro } from "../contracts/quadro.ts";
-import { LIMITES_QUADRO } from "../contracts/quadro.ts";
+import type { AutorLote, ColunaQuadro, ExecucaoTarefa, GrupoColuna, IdColuna, ItemLinear, ModoConversa, OpQuadro, TarefaQuadro } from "../contracts/quadro.ts";
+import { LIMITES_QUADRO, MODOS_ESCOLHIVEIS } from "../contracts/quadro.ts";
 import { RECADO_MAX } from "../contracts/quadro-execucoes.ts";
 import {
   acionaNaColuna, COLUNAS_PADRAO, colunaDeAndamento, colunaDeEntrada, colunaDeEspera, colunasDe, criarColuna, definirPassagem, ehGrupo, ehReservada, grupoDe, moverColuna, papelDe,
@@ -93,6 +93,17 @@ function lerItemLinear(v: unknown): ItemLinear | ErroOp {
 }
 
 /** Lê uma operação que veio de fora. Puro; o erro diz o que corrigir (o bot lê). */
+/**
+ * O modo de conversa pedido, ou o motivo da recusa (revisão 8 do PR #628). A conversa do grupo ainda não existe: o pedido
+ * dela recebe o caminho, não um "modo inválido" mudo. O lerOp (tela, rota e gerir_quadro) e o caso de uso (aplicarPessoas,
+ * para a op que chega sem passar pelo lerOp) usam a mesma regra.
+ */
+export function erroDoModo(modo: unknown): string | null {
+  if (typeof modo === "string" && (MODOS_ESCOLHIVEIS as readonly string[]).includes(modo)) return null;
+  if (modo === "grupo") return "a conversa do grupo ainda não existe: use so_dono (só a dona conversa) ou individual (cada um na sua conversa)";
+  return `modo inválido: use ${MODOS_ESCOLHIVEIS.join(" ou ")}`;
+}
+
 export function lerOp(v: unknown): OpQuadro | ErroOp {
   if (!ehObjeto(v)) return { erro: "ação não é objeto" };
   switch (v.tipo) {
@@ -170,13 +181,6 @@ export function lerOp(v: unknown): OpQuadro | ErroOp {
       const resposta = textoObrigatorio(v.resposta, "resposta", LIMITES_QUADRO.resposta);
       if (falhou(resposta)) return resposta;
       return { tipo: "responder", tarefa, resposta };
-    }
-    case "comentar": {
-      const tarefa = textoObrigatorio(v.tarefa, "tarefa", 200);
-      if (falhou(tarefa)) return tarefa;
-      const texto = textoObrigatorio(v.texto, "texto", LIMITES_QUADRO.comentario);
-      if (falhou(texto)) return texto;
-      return { tipo: "comentar", tarefa, texto };
     }
     case "repetir_trabalho":
     case "cancelar_trabalho": {
@@ -313,10 +317,35 @@ export function lerOp(v: unknown): OpQuadro | ErroOp {
       if (falhou(bot)) return bot;
       return { tipo: "remover_quadro", ...(bot ? { bot } : {}) };
     }
+    // NOD-443 (ADR-143): as pessoas do quadro, o modo e o comentário de quem participa.
+    case "adicionar_pessoa":
+    case "tirar_pessoa": {
+      const pessoa = textoObrigatorio(v.pessoa, "pessoa", 200);
+      if (falhou(pessoa)) return pessoa;
+      if (v.tipo === "tirar_pessoa" || v.modo === undefined || v.modo === null) return { tipo: v.tipo, pessoa };
+      const erroModo = erroDoModo(v.modo);
+      if (erroModo) return { erro: erroModo };
+      return { tipo: "adicionar_pessoa", pessoa, modo: v.modo as ModoConversa };
+    }
+    case "mudar_modo": {
+      const erroModo = erroDoModo(v.modo);
+      if (erroModo) return { erro: erroModo };
+      return { tipo: "mudar_modo", modo: v.modo as ModoConversa };
+    }
+    case "comentar": {
+      const texto = textoObrigatorio(v.texto, "texto", LIMITES_QUADRO.comentario);
+      if (falhou(texto)) return texto;
+      const tarefa = textoOpcional(v.tarefa, "tarefa", 200);
+      if (falhou(tarefa)) return tarefa;
+      return { tipo: "comentar", texto, ...(tarefa ? { tarefa } : {}) };
+    }
     default:
       return { erro: `tipo desconhecido: ${String(v.tipo)}` };
   }
 }
+
+/** NOD-443: as ações que vão sozinhas na chamada (não são lote de tarefas). */
+export const OPS_DE_PESSOAS = ["adicionar_pessoa", "tirar_pessoa", "mudar_modo", "comentar"] as const;
 
 /** Lê a lista inteira; a primeira falha recusa tudo (o lote é tudo ou nada). */
 export function lerOps(v: unknown): OpQuadro[] | (ErroOp & { indice: number }) {
@@ -336,8 +365,8 @@ export function lerOps(v: unknown): OpQuadro[] | (ErroOp & { indice: number }) {
   if (remover >= 0 && ops.length > 1) return { erro: "remover_quadro vai sozinho na chamada", indice: remover };
   const troca = ops.findIndex((o) => o.tipo === "substituir_colunas");
   if (troca >= 0 && ops.length > 1) return { erro: "substituir_colunas vai sozinho na chamada", indice: troca };
-  const comentar = ops.findIndex((o) => o.tipo === "comentar");
-  if (comentar >= 0 && ops.length > 1) return { erro: "comentar vai sozinho na chamada", indice: comentar };
+  const pessoas = ops.findIndex((o) => (OPS_DE_PESSOAS as readonly string[]).includes(o.tipo));
+  if (pessoas >= 0 && ops.length > 1) return { erro: `${ops[pessoas]!.tipo} vai sozinho na chamada`, indice: pessoas };
   const trabalho = ops.findIndex((o) => ehOpDeTrabalho(o));
   if (trabalho >= 0 && ops.length > 1) return { erro: `${ops[trabalho]!.tipo} vai sozinho na chamada`, indice: trabalho };
   return ops;
@@ -615,11 +644,14 @@ export function resolverAgenteDoQuadro(agentes: readonly AgenteDoQuadro[], ref: 
 
 /**
  * NOD-430 (decisão da Ada): quem fez, no histórico da tarefa. A pessoa pela tela: "Você". Um bot a pedido dela, na
- * conversa (pedido_por): "Você, pela Ada". O bot sozinho (tarefa, rotina, colega): só o nome dele.
+ * conversa (pedido_por): "Você, pela Ada". O bot sozinho (tarefa, rotina, colega): só o nome dele. NOD-443: quem pediu
+ * foi outra pessoa do quadro (não quem lê): "Ana, pela Bia".
  */
-export function quemFez(autor: AutorLote, pedidoPor: string | null | undefined, nomeDoBot: string | null): string {
-  if (autor.tipo === "pessoa") return "Você";
-  return pedidoPor ? `Você, pela ${nomeDoBot ?? "bot"}` : (nomeDoBot ?? "Um bot");
+export function quemFez(autor: AutorLote, pedidoPor: string | null | undefined, nomeDoBot: string | null, outraPessoa: string | null = null): string {
+  // Merge NOD-430 × NOD-443: pedido_por também guarda quem participa; `outraPessoa` é o nome dela quando não é quem lê.
+  const quem = outraPessoa ?? "Você";
+  if (autor.tipo === "pessoa") return quem;
+  return pedidoPor ? `${quem}, pela ${nomeDoBot ?? "bot"}` : (nomeDoBot ?? "Um bot");
 }
 
 /** Quantas candidatas o erro de tarefa ambígua lista (NOD-430): o bot pergunta à pessoa com elas. */
@@ -699,6 +731,12 @@ export function planejarLote(p: {
   vivas?: ReadonlySet<string>;
   /** false = quem fez o lote estava num turno não confiável: o conteúdo que ele escreve fica marcado de fora (ADR-062). */
   origemConfiavel?: boolean;
+  /**
+   * false = o turno do bot autor não é limpo: as travas de quem não cuida da tarefa (se tomar, passagem segurada, terminei
+   * alheio) valem. Sem ele, vale origemConfiavel. NOD-443 × NOD-417: o pedido de quem participa marca o conteúdo de fora
+   * (origemConfiavel false) sem dizer que o turno do bot dela estava sujo; num turno limpo dela, o bot que ela nomeia começa.
+   */
+  turnoConfiavel?: boolean;
   /** O autor fala num turno da pessoa (conversa/ligação): pode começar a própria tarefa (revisão rodada 3). */
   autorNaConversa?: boolean;
   /** Revisão 5 do PR #623: os códigos de outro prefixo que são de tarefas deste quadro (código → id), para o resolverTarefa. */
@@ -786,11 +824,12 @@ export function planejarLote(p: {
   };
   // Revisão 3 do PR #622: a tarefa era do autor no começo do lote (a nova, criada agora, não era).
   const eraDoAutor = (id: string) => p.autorAgenteId !== null && antes.get(id)?.agenteId === p.autorAgenteId;
+  const turnoSujo = (p.turnoConfiavel ?? p.origemConfiavel) === false;
   // Num turno com conteúdo de fora o bot não se toma uma tarefa (de outro bot ou sem responsável) nem cria uma para si:
   // senão o `terminei` e o status da chamada seguinte o tratariam como responsável (definido em 2026-11-02: a opção mais
   // segura; pegar tarefa sem responsável também acionaria a próxima etapa).
   const seToma = (id: string | null, agenteId: string | null | undefined) =>
-    p.autorAgenteId !== null && p.origemConfiavel === false && agenteId === p.autorAgenteId && (id === null || !eraDoAutor(id));
+    p.autorAgenteId !== null && turnoSujo && agenteId === p.autorAgenteId && (id === null || !eraDoAutor(id));
   const ERRO_SE_TOMA = "você só pega uma tarefa que não é sua num turno limpo, em que a pessoa falou com você e nada de fora entrou: peça à pessoa";
   // NOD-419: o agente que bloqueia diz o motivo e do que precisa (a pergunta); o que cancela, o motivo. A pergunta vem no
   // próprio passo (revisão do PR #629): a antiga, de uma espera anterior, não explica este bloqueio. Revisão 9: a mesma
@@ -813,7 +852,7 @@ export function planejarLote(p: {
   };
   // Entrou numa coluna com responsável e o passo não disse outro bot: a tarefa passa para ele (o mesmo caminho do status).
   // Num turno de fora, o bot que não cuidava da tarefa (a do início do lote; a nova não era dele) não aciona ninguém.
-  const foraDeQuemNaoCuida = (t: TarefaPlanejada) => p.autorAgenteId !== null && p.origemConfiavel === false && (t.nova || !eraDoAutor(t.id));
+  const foraDeQuemNaoCuida = (t: TarefaPlanejada) => p.autorAgenteId !== null && turnoSujo && (t.nova || !eraDoAutor(t.id));
   const passar = (t: TarefaPlanejada, de: IdColuna | null, agenteDoPasso: string | null | undefined): string | null => {
     // Revisão 4 do PR #622: a troca explícita de responsável é como a passagem: a mudança vale, sem acionar ninguém.
     if (agenteDoPasso !== undefined) { agenteDoAutor.delete(t.id); if (agenteDoPasso !== null && foraDeQuemNaoCuida(t)) passagemSegurada.add(t.id); return null; }
@@ -934,7 +973,10 @@ export function planejarLote(p: {
     const status = colunaDe(op.status);
     if (falhou(status)) return status.erro;
     // A proveniência anda com o conteúdo (codex, rodada 3): escrito por turno não confiável, a tarefa fica de fora.
-    if (p.origemConfiavel === false && (op.titulo !== undefined || op.descricao !== undefined || (op.pergunta !== undefined && op.pergunta !== null))) t.deFora = true;
+    // Revisão 3 do PR #628 (pós-merge), achado 2: o PR também (entra no turno da resposta, entradaDaResposta), e o pedido de
+    // quem participa chega aqui como origemConfiavel false.
+    const escreve = op.titulo !== undefined || op.descricao !== undefined || (op.pergunta !== undefined && op.pergunta !== null) || (op.pr_url !== undefined && op.pr_url !== null);
+    if (p.origemConfiavel === false && escreve) t.deFora = true;
     const de = t.status;
     const maoDeAntes = t.agenteId;
     if (op.titulo !== undefined) t.titulo = op.titulo;
@@ -981,7 +1023,7 @@ export function planejarLote(p: {
 
   for (const [indice, op] of p.ops.entries()) {
     const erro = (e: string) => ({ erro: e, indice });
-    if (op.tipo === "desfazer" || op.tipo === "remover_quadro" || op.tipo === "comentar" || op.tipo === "mover_quadro" || ehOpDeTrabalho(op)) return erro(`${op.tipo} vai sozinho na chamada`);
+    if (op.tipo === "desfazer" || op.tipo === "remover_quadro" || op.tipo === "mover_quadro" || (OPS_DE_PESSOAS as readonly string[]).includes(op.tipo) || ehOpDeTrabalho(op)) return erro(`${op.tipo} vai sozinho na chamada`);
     // A meta entra em todo turno de tarefa do quadro: só um turno confiável a escreve (revisão rodada 3, ADR-062).
     const escreveMeta = op.tipo === "criar_quadro" || (op.tipo === "editar_quadro" && op.meta !== undefined);
     if (escreveMeta && p.origemConfiavel === false) return erro("a meta só muda num turno limpo, em que a pessoa falou com você e nada de fora entrou: peça a ela");
@@ -1088,7 +1130,7 @@ export function planejarLote(p: {
         // Revisão do PR 622: empurrar a tarefa aciona o responsável da próxima coluna. Quem não cuida dela só faz isso num
         // turno limpo (como o definir_passagem); o responsável termina a própria etapa; a pessoa, sempre.
         // Revisão 3: vale o responsável do INÍCIO do lote; se tomar a tarefa antes, no mesmo lote, não destrava.
-        if (p.autorAgenteId && !eraDoAutor(t.id) && p.origemConfiavel === false) {
+        if (p.autorAgenteId && !eraDoAutor(t.id) && turnoSujo) {
           return erro("terminei de uma tarefa que não é sua só num turno limpo, em que a pessoa falou com você e nada de fora entrou: peça ao responsável ou à pessoa");
         }
         if (t.status === "voce" || t.status === "bloqueado") return erro("a tarefa espera resposta: ela volta a andar quando for respondida");
