@@ -4,6 +4,7 @@ import { lerOp } from "../../domain/quadro.ts";
 import type { IdAcao } from "../../domain/acoes/index.ts";
 import type { CodigoErro } from "../../domain/erro.ts";
 import { ErroDeDominio } from "../../domain/erro.ts";
+import { comentarTarefa } from "../comentar-tarefa.ts";
 import { aplicarLoteQuadro, type FalhaQuadro, type ResultadoLote } from "../quadro.ts";
 import type { CasoDeUso } from "../tipos.ts";
 
@@ -33,7 +34,9 @@ function umaAcao<I extends object>(tipo: OpQuadro["tipo"]): CasoDeUso<Base & I, 
     const { anfitriaoId, executor, ...resto } = input;
     const op = lerOp({ ...resto, tipo });
     if ("erro" in op) throw new ErroDeDominio("entrada_invalida", { cause: op.erro });
-    const r = await aplicarLoteQuadro(deps, { autor: { tipo: "pessoa" }, anfitriaoId, executor, ops: [op] });
+    const pedido = { autor: { tipo: "pessoa" } as const, anfitriaoId, executor, ops: [op] };
+    // NOD-417: comentar não é lote (sem Desfazer): grava e aciona o responsável e os @mencionados.
+    const r = op.tipo === "comentar" ? await comentarTarefa(deps, pedido, op) : await aplicarLoteQuadro(deps, pedido);
     if (!r.data.ok) throw new ErroDeDominio(CODIGO[r.data.erro], { cause: r.data.detalhe });
     return { data: r.data, events: r.events };
   };
@@ -46,8 +49,9 @@ export const EXECUTORES_QUADRO = {
   "quadro.editar": umaAcao<{ meta?: string | null; prazo?: string | null }>("editar_quadro"),
   "quadro.criar_tarefa": umaAcao<CamposTarefa & { titulo: string }>("criar_tarefa"),
   "quadro.importar_linear": umaAcao<{ itens: ItemLinear[] }>("importar_linear"),
-  "quadro.mudar_tarefa": umaAcao<CamposTarefa & { tarefa: string; pr_url?: string | null; pergunta?: string | null; excluir?: boolean }>("mudar_tarefa"),
+  "quadro.mudar_tarefa": umaAcao<CamposTarefa & { tarefa: string; pr_url?: string | null; pergunta?: string | null; excluir?: boolean; sem_iniciar?: boolean }>("mudar_tarefa"),
   "quadro.responder": umaAcao<{ tarefa: string; resposta: string }>("responder"),
+  "quadro.comentar": umaAcao<{ tarefa: string; texto: string }>("comentar"),
   "quadro.desfazer": umaAcao<{ lote?: string }>("desfazer"),
   "quadro.remover": umaAcao<{ bot?: string }>("remover_quadro"),
   "quadro.criar_coluna": umaAcao<{ nome: string; grupo: string; depois_de?: string }>("criar_coluna"),
@@ -56,4 +60,6 @@ export const EXECUTORES_QUADRO = {
   "quadro.remover_coluna": umaAcao<{ coluna: string; destino?: string }>("remover_coluna"),
   // Pela tela a pessoa é a confirmação; pela conversa o gerir_quadro abre o card (proposta colunas_quadro).
   "quadro.substituir_colunas": umaAcao<{ colunas: unknown; destinos?: unknown }>("substituir_colunas"),
+  "quadro.definir_passagem": umaAcao<{ coluna: string; agente?: string | null; instrucoes?: string | null }>("definir_passagem"),
+  "quadro.terminei": umaAcao<{ tarefa: string }>("terminei"),
 } as const satisfies Partial<Record<IdAcao, CasoDeUso<never, unknown>>>;

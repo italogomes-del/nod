@@ -4,7 +4,7 @@ import { criarAgente } from "../../src/use-cases/criar-agente.ts";
 import type { Tx } from "../../src/shared/types.ts";
 import { dbDono } from "../helpers/db-dono.ts";
 import { depsSobreTrx, executar, MARLON } from "../helpers/deps-l6.ts";
-import { executarFuzz, sqlDoRetrato, type AlvoDoFuzz } from "../helpers/fuzz.ts";
+import { executarFuzz, marcaDoBanco, sqlDoRetrato, type AlvoDoFuzz } from "../helpers/fuzz.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { withRollback } from "../helpers/with-rollback.ts";
 
@@ -40,6 +40,24 @@ describeIntegracao("fuzz: o retrato de verdade pega dado pela metade (NOD-398)",
       const v = await executarFuzz(alvo(true), PLANO.casos);
       expect(v.length).toBe(PLANO.casos.length);
       expect(v[0]?.motivo).toMatch(/status 400 e o banco da pessoa mudou em: .*agentes/);
+    });
+  });
+
+  // O corte de custo do PR (marcaDoBanco): o executor pula o retrato quando duas marcas são iguais e não nulas. A garantia
+  // é do Postgres: transação que gravou entre as duas (recebeu xid e terminou) muda a marca; com xid em curso, ela é nula.
+  // Só `pg_current_xact_id()` (dá o xid sem gravar linha): os outros arquivos deste projeto gravam ao mesmo tempo, então
+  // a sentinela só afirma o que vale com eles (nunca "a marca ficou igual").
+  it("a marca do banco nunca fica igual quando uma transação terminou no meio, e é nula com transação gravando em curso", async () => {
+    const xidQueTermina = async () => { await dbDono`select pg_current_xact_id()`; };
+    const antes = await marcaDoBanco(dbDono);
+    await xidQueTermina();
+    const depois = await marcaDoBanco(dbDono);
+    expect(antes !== null && antes === depois, `marca ${antes} → ${depois} com um xid que terminou no meio`).toBe(false);
+    await dbDono.begin(async (t) => {
+      await t`select pg_current_xact_id()`;
+      // Outro xid que termina depois do nosso: o nosso fica abaixo do xmax, em curso, e a marca não pode garantir nada.
+      await xidQueTermina();
+      expect(await marcaDoBanco(dbDono)).toBeNull();
     });
   });
 

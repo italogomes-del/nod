@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { createServer, connect } from "node:net";
 import { get as httpGet } from "node:http";
 import { get as httpsGet } from "node:https";
-import { acoesNovasSemLeitura, acoesSemHandler, bloquearRedeExterna, rotasPublicasSemHandler, vereditoDeDecisao, sementeDoPr, chegouNoHandler, executarFuzz, lerN, processosBloqueados, planoDoServidor, relatarViolacoes, type AlvoDoFuzz, type Retrato, type RotaDoServidor } from "../helpers/fuzz.ts";
+import { acoesNovasSemLeitura, acoesSemHandler, bloquearRedeExterna, rotasPublicasSemHandler, vereditoDeDecisao, sementeDoPr, chegouNoHandler, enxugarCasos, executarFuzz, lerN, processosBloqueados, planoDoServidor, relatarViolacoes, type AlvoDoFuzz, type Retrato, type RotaDoServidor } from "../helpers/fuzz.ts";
 import { ACOES_CONHECIDAS_NOD398 } from "../helpers/acoes-conhecidas-nod398.ts";
 
 /**
@@ -22,23 +22,26 @@ const IDS = { daPessoa: ["11111111-1111-4111-8111-111111111111"], deOutraPessoa:
 const acao = (id: string, schema?: DefinicaoAcao["schema"]): DefinicaoAcao => ({ id, titulo: id, risco: "muda", cartaoNoChat: false, chat: { estado: "nunca", motivo: "fixture" }, ...(schema ? { schema } : {}) });
 
 /** Um servidor em memória: `boa` responde 400 sem mexer em nada; `quebrada` faz o que o modo pedir. */
-function servidorFalso(modo: "500" | "escreve_no_erro" | "mexe_na_outra" | "morre" | "nada") {
+function servidorFalso(modo: "500" | "escreve_no_erro" | "mexe_na_outra" | "morre" | "nada", o: { marca?: boolean; retratos?: { minha: number; dela: number } } = {}) {
   let minha: Retrato = { bots: "0:" };
   let dela: Retrato = { bots: "1:abc" };
   let vivo = true;
+  // Como o xid do Postgres: toda escrita avança (é o que `marcaDoBanco` lê).
+  let escritas = 0;
   const alvo: AlvoDoFuzz = {
     async chamar(c: CasoDeFuzz) {
       if (!vivo) throw new Error("ECONNREFUSED");
       if (c.acao !== "f.quebrada" || modo === "nada") return { status: 400, corpo: '{"codigo":"entrada_invalida"}' };
       if (modo === "500") return { status: 500, corpo: '{"codigo":"interno"}' };
-      if (modo === "escreve_no_erro") { minha = { bots: `${Math.random()}` }; return { status: 400, corpo: "{}" }; }
-      if (modo === "mexe_na_outra") { dela = { bots: "1:mudou" }; return { status: 404, corpo: "{}" }; }
+      if (modo === "escreve_no_erro") { minha = { bots: `${Math.random()}` }; escritas++; return { status: 400, corpo: "{}" }; }
+      if (modo === "mexe_na_outra") { dela = { bots: "1:mudou" }; escritas++; return { status: 404, corpo: "{}" }; }
       vivo = false;
       throw new Error("socket hang up");
     },
     saude: async () => vivo,
-    retrato: async () => minha,
-    retratoDaOutra: async () => dela,
+    retrato: async () => { if (o.retratos) o.retratos.minha++; return minha; },
+    retratoDaOutra: async () => { if (o.retratos) o.retratos.dela++; return dela; },
+    ...(o.marca ? { marca: async () => String(escritas) } : {}),
   };
   return alvo;
 }
@@ -66,6 +69,21 @@ describe("sentinelas do fuzz (NOD-398)", () => {
   it("ação que mexe no banco de OUTRA pessoa é pega (mesmo num 404) e para o fuzz", async () => {
     const v = await executarFuzz(servidorFalso("mexe_na_outra"), plano().casos);
     expect(v.at(-1)?.motivo).toMatch(/OUTRA pessoa mudou em: bots/);
+  });
+
+  it("com a marca do banco, o caso que não gravou nada não paga retrato, e quem grava no erro segue pego (custo do PR)", async () => {
+    const retratos = { minha: 0, dela: 0 };
+    expect(await executarFuzz(servidorFalso("nada", { marca: true, retratos }), plano().casos)).toEqual([]);
+    // Só os retratos de partida: nenhum caso gravou, então nenhum retrato novo (sem a marca, um por caso).
+    expect(retratos).toEqual({ minha: 1, dela: 1 });
+    const v = await executarFuzz(servidorFalso("escreve_no_erro", { marca: true }), plano().casos);
+    expect(v.filter((x) => /banco da pessoa mudou em: bots/.test(x.motivo)).length).toBe(8);
+    expect((await executarFuzz(servidorFalso("mexe_na_outra", { marca: true }), plano().casos)).at(-1)?.motivo).toMatch(/OUTRA pessoa mudou em: bots/);
+    // Marca nula (escrita em curso no banco): retrato em todo caso, como sem marca.
+    const semGarantia = { minha: 0, dela: 0 };
+    const nula = { ...servidorFalso("nada", { retratos: semGarantia }), marca: async () => null };
+    expect(await executarFuzz(nula, plano().casos)).toEqual([]);
+    expect(semGarantia.minha).toBe(plano().casos.length + 1);
   });
 
   it("ação que derruba o servidor é pega e para o fuzz", async () => {
@@ -246,6 +264,30 @@ describe("sentinelas do fuzz (NOD-398)", () => {
       rmSync(dir, { recursive: true, force: true });
     }
     expect(execFileSync(process.execPath, ["-e", "process.stdout.write('rodou')"], { encoding: "utf8" })).toBe("rodou");
+  });
+
+  it("enxugarCasos (NOD-420): k por rota só nas ações escolhidas, com as fixas e um caso que passa da busca, na ordem do plano", () => {
+    const schema: DefinicaoAcao["schema"] = { type: "object", properties: { nome: { type: "string" }, n: { type: "integer" } }, required: ["nome"] };
+    const registro = [acao("q.mudar", schema), acao("q.excluir", schema), acao("f.boa", schema)];
+    const rotas = [
+      { metodo: "PATCH", padrao: "^\\/agentes\\/(?<id>[^/]+)\\/t\\/(?<tid>[^/]+)$", acao: "q.mudar" },
+      { metodo: "DELETE", padrao: "^\\/agentes\\/(?<id>[^/]+)\\/t\\/(?<tid>[^/]+)$", acao: "q.excluir" },
+      { metodo: "POST", padrao: "^\\/boa$", acao: "f.boa" },
+    ];
+    const ids = { ...IDS, porRecurso: { t: { daPessoa: ["t-1"], deOutraPessoa: [] } } };
+    for (const semente of [1, 2, 3, 4, 5]) {
+      const casos = planoDeFuzz({ registro, rotas, semente, n: 20, ids }).casos;
+      const menos = enxugarCasos(casos, { acoes: (a) => a.startsWith("q."), k: 10, idsDaPessoa: new Set([IDS.daPessoa[0]!, "t-1"]) });
+      for (const a of ["q.mudar", "q.excluir"]) {
+        const deA = menos.filter((c) => c.acao === a);
+        expect(deA.length).toBe(Math.min(10, casos.filter((c) => c.acao === a).length));
+        expect(deA.map((c) => c.entrada.rotulo)).toEqual(expect.arrayContaining(["base plausível", "json quebrado", "sem corpo"]));
+        if (casos.some((c) => c.acao === a && c.caminho.includes(IDS.daPessoa[0]!) && c.caminho.endsWith("/t-1"))) expect(deA.some((c) => c.caminho.includes(IDS.daPessoa[0]!) && c.caminho.endsWith("/t-1"))).toBe(true);
+      }
+      // As outras intactas, e a ordem do plano (o DELETE por último) mantida.
+      expect(menos.filter((c) => c.acao === "f.boa")).toEqual(casos.filter((c) => c.acao === "f.boa"));
+      expect(menos).toEqual(casos.filter((c) => menos.includes(c)));
+    }
   });
 
   it("FUZZ_N inválido é erro, nunca um fuzz verde de zero casos", () => {

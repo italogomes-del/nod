@@ -144,6 +144,8 @@ export function validarColunas(colunas: readonly ColunaQuadro[]): ErroColuna | n
     const chave = normalizarNome(n);
     if (nomes.has(chave)) return { erro: `Já existe uma coluna ${nomes.get(chave)}` };
     nomes.set(chave, n);
+    const ep = erroDaPassagem(c);
+    if (ep) return ep;
     const g = GRUPOS_COLUNA.indexOf(c.grupo);
     if (g < grupoAntes) return { erro: "os grupos ficam na ordem: não iniciado, iniciado, feito, fechado" };
     grupoAntes = g;
@@ -297,7 +299,10 @@ export function substituirColunas(
     if (tomados.has(id)) return { erro: `coluna repetida: ${nome}` };
     tomados.add(id);
     usados.add(id);
-    novas.push({ id, nome, grupo: x.grupo });
+    // A passagem (ADR-142) segue com a coluna que continua; a que nasce agora vem sem. Revisão 3 do PR #622: só se a
+    // coluna aceita passagem no grupo novo (uma passagem gravada onde não vale não derruba a troca do conjunto).
+    const { responsavel, instrucoes } = aceitaPassagem({ id, grupo: x.grupo }) ? atuais.find((c) => c.id === id) ?? {} : {};
+    novas.push({ id, nome, grupo: x.grupo, ...(responsavel ? { responsavel } : {}), ...(instrucoes ? { instrucoes } : {}) });
   }
   let ajustada = false;
   for (const fixa of ["voce", "cancelado"] as const) {
@@ -343,6 +348,68 @@ export function colunasDto(colunas: readonly ColunaQuadro[]): ColunaDto[] {
 export function saoPadrao(colunas: readonly ColunaQuadro[]): boolean {
   return colunas.length === COLUNAS_PADRAO.length && colunas.every((c, i) => {
     const p = COLUNAS_PADRAO[i]!;
-    return c.id === p.id && c.nome === p.nome && c.grupo === p.grupo;
+    return c.id === p.id && c.nome === p.nome && c.grupo === p.grupo && !c.responsavel && !c.instrucoes;
   });
+}
+
+/*
+ * Passagem por coluna (definido em 2026-11-02, ADR-142, revê a ADR-140): a coluna pode ter um responsável — o bot que
+ * pega a tarefa ao entrar nela e começa na hora — e "o que essa etapa faz". Sem responsável, o de antes continua.
+ * Precisa de você, Bloqueado e Cancelado são esperas, e Feito/Fechado não andam: nunca têm responsável.
+ */
+export function aceitaPassagem(c: Pick<ColunaQuadro, "id" | "grupo">): boolean {
+  return (c.grupo === "nao_iniciado" || c.grupo === "iniciado") && !COLUNAS_FIXAS.has(c.id) && c.id !== "bloqueado";
+}
+
+function erroDaPassagem(c: ColunaQuadro): ErroColuna | null {
+  if (c.responsavel != null && (typeof c.responsavel !== "string" || c.responsavel === "")) return { erro: `responsável inválido em "${c.nome}"` };
+  if (c.responsavel && !aceitaPassagem(c)) return { erro: `"${c.nome}" não tem responsável: só as colunas onde o trabalho espera ou anda (fora Precisa de você e Bloqueado)` };
+  if (c.instrucoes != null && (typeof c.instrucoes !== "string" || c.instrucoes.length > LIMITES_QUADRO.instrucoes)) return { erro: `o que a etapa "${c.nome}" faz passa de ${LIMITES_QUADRO.instrucoes} caracteres` };
+  return null;
+}
+
+/**
+ * A passagem aciona nesta coluna? (revisão 2 do PR #622) A fazer e as do andamento, sim: o responsável da coluna começa ao
+ * entrar. Nas outras de Não iniciado (Backlog, as da pessoa) a passagem só troca o responsável e a tarefa espera ali. A web
+ * espelha esta regra (web/lib/colunas.ts, o teste confere) para só pedir "Confirmar · Não iniciar ainda" e só dizer
+ * "começa" onde algo começa de verdade.
+ */
+export function acionaNaColuna(colunas: readonly ColunaQuadro[], id: IdColuna): boolean {
+  // Revisão 4: Precisa de você e Bloqueado esperam, como no `andando` do quadro (lá ninguém começa).
+  return id === "afazer" || (grupoDe(colunas, id) === "iniciado" && id !== "voce" && id !== "bloqueado");
+}
+
+/** Quem pega a tarefa ao entrar na coluna (null = o responsável continua). */
+export function responsavelDe(colunas: readonly ColunaQuadro[], id: IdColuna): string | null {
+  return colunas.find((c) => c.id === id)?.responsavel ?? null;
+}
+
+/** A próxima etapa do `terminei`: a coluna seguinte na ordem, pulando as esperas (Precisa de você, Bloqueado, Cancelado). */
+export function proximaColuna(colunas: readonly ColunaQuadro[], id: IdColuna): IdColuna | null {
+  const i = colunas.findIndex((c) => c.id === id);
+  if (i < 0) return null;
+  return colunas.slice(i + 1).find((c) => c.id !== "voce" && c.id !== "bloqueado" && c.id !== "cancelado")?.id ?? null;
+}
+
+/** Liga, troca ou tira a passagem de uma coluna. `responsavel` já é o id do bot (o lote resolve o nome). */
+export function definirPassagem(
+  atuais: readonly ColunaQuadro[],
+  op: { coluna: string; responsavel?: string | null; instrucoes?: string | null },
+  /** Os ids do Nod (ADR-081: não pega tarefa do quadro), que nunca é responsável de coluna. */
+  nods: ReadonlySet<string> = new Set(),
+): (Mudanca & { id: string; nome: string }) | ErroColuna {
+  if (op.responsavel && nods.has(op.responsavel)) return { erro: "o Nod não pega tarefa do quadro: escolha outro bot" };
+  const id = resolverColuna(atuais, op.coluna);
+  if (typeof id !== "string") return id;
+  const colunas = atuais.map((c) => {
+    if (c.id !== id) return { ...c };
+    const { responsavel: r0, instrucoes: i0, ...base } = c;
+    const responsavel = op.responsavel === undefined ? r0 ?? null : op.responsavel;
+    const instr = op.instrucoes === undefined ? i0 ?? null : op.instrucoes?.trim() || null;
+    return { ...base, ...(responsavel ? { responsavel } : {}), ...(instr ? { instrucoes: instr } : {}) };
+  });
+  const alvo = colunas.find((c) => c.id === id)!;
+  const e = erroDaPassagem(alvo);
+  if (e) return e;
+  return { colunas, ajustada: false, id, nome: alvo.nome };
 }

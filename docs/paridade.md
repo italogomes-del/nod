@@ -2,7 +2,7 @@
 
 <!-- Gerado por `npm run paridade` a partir de src/domain/acoes/ (NOD-391, ADR-135). Não edite à mão: a catraca (tests/conformidade/paridade.test.ts) compara. -->
 
-Ações de pessoa que mudam algo: **149**, mais 2 só de leitura. No chat: **24 vivas**, 3 parciais, 90 faltando e 34 que nunca vão para o chat. Piso de vivas: 24.
+Ações de pessoa que mudam algo: **152**, mais 2 só de leitura. No chat: **27 vivas**, 3 parciais, 90 faltando e 34 que nunca vão para o chat. Piso de vivas: 27.
 
 Estados: **vivo** = o chat faz pelo mesmo executor da tela, com teste de contrato; **parcial** = o chat faz, mas diverge ou falta parâmetro; **falta** = a onda dona ainda vai ligar; **nunca** = exceção escrita.
 
@@ -274,6 +274,7 @@ Estados: **vivo** = o chat faz pelo mesmo executor da tela, com teste de contrat
 | `quadro.importar_linear` | Trazer itens do Linear para o quadro | muda | vivo (`gerir_quadro`) | `POST ^\/agentes\/(?<id>[^/]+)\/quadro\/linear$` |
 | `quadro.mudar_tarefa` | Mudar uma tarefa (status, responsável, PR, pergunta) ou tirá-la do quadro | muda | vivo (`gerir_quadro`) | `DELETE ^\/agentes\/(?<id>[^/]+)\/quadro\/tarefas\/(?<tid>[^/]+)$`<br>`PATCH ^\/agentes\/(?<id>[^/]+)\/quadro\/tarefas\/(?<tid>[^/]+)$` |
 | `quadro.responder` | Responder a pergunta de uma tarefa bloqueada | muda | vivo (`gerir_quadro`) | `POST ^\/agentes\/(?<id>[^/]+)\/quadro\/tarefas\/(?<tid>[^/]+)\/resposta$` |
+| `quadro.comentar` | Comentar uma tarefa (aciona o responsável ou o bot @mencionado) | muda | vivo (`gerir_quadro`) | `POST ^\/agentes\/(?<id>[^/]+)\/quadro\/tarefas\/(?<tid>[^/]+)\/comentarios$` |
 | `quadro.desfazer` | Desfazer a última mudança no quadro | muda | vivo (`gerir_quadro`) | `POST ^\/agentes\/(?<id>[^/]+)\/quadro\/lotes\/(?<lid>[^/]+)\/desfazer$` |
 | `quadro.remover` | Remover o quadro (o bot volta a ser um agente comum; conversa e memória ficam) | arriscada | vivo (`gerir_quadro`) | `DELETE ^\/agentes\/(?<id>[^/]+)\/quadro$` |
 | `quadro.criar_coluna` | Criar uma coluna no quadro (com o grupo) | muda | vivo (`gerir_quadro`) | `POST ^\/agentes\/(?<id>[^/]+)\/quadro\/colunas$` |
@@ -281,6 +282,8 @@ Estados: **vivo** = o chat faz pelo mesmo executor da tela, com teste de contrat
 | `quadro.mover_coluna` | Mudar uma coluna de lugar (dentro do grupo) | muda | vivo (`gerir_quadro`) | `POST ^\/agentes\/(?<id>[^/]+)\/quadro\/colunas\/(?<cid>[^/]+)\/mover$` |
 | `quadro.remover_coluna` | Remover uma coluna (as tarefas vão para o destino) | muda | vivo (`gerir_quadro`) | `DELETE ^\/agentes\/(?<id>[^/]+)\/quadro\/colunas\/(?<cid>[^/]+)$` |
 | `quadro.substituir_colunas` | Trocar o conjunto de colunas do quadro | muda | vivo (`gerir_quadro`) | `PUT ^\/agentes\/(?<id>[^/]+)\/quadro\/colunas$` |
+| `quadro.definir_passagem` | Definir quem pega a tarefa ao entrar numa coluna | muda | vivo (`gerir_quadro`) | `PUT ^\/agentes\/(?<id>[^/]+)\/quadro\/colunas\/(?<cid>[^/]+)\/passagem$` |
+| `quadro.terminei` | Terminar a etapa (a tarefa vai para a próxima coluna) | muda | vivo (`gerir_quadro`) | `POST ^\/agentes\/(?<id>[^/]+)\/quadro\/tarefas\/(?<tid>[^/]+)\/terminei$` |
 
 ## O que cada onda leva
 

@@ -2,7 +2,8 @@ import type { CasoNod } from "../contracts/servicos.ts";
 import type { ResultadoGerirQuadro } from "../contracts/quadro.ts";
 import { lerOps, MAX_COMECOS_POR_LOTE } from "../domain/quadro.ts";
 import { proporColunas } from "./colunas-do-quadro.ts";
-import { aplicarLoteQuadro, resumoParaBot } from "./quadro.ts";
+import { comentarTarefa } from "./comentar-tarefa.ts";
+import { aplicarLoteQuadro, type PedidoLote, resumoParaBot } from "./quadro.ts";
 import type { Deps } from "./tipos.ts";
 import type { Turno } from "../contracts/turno.ts";
 
@@ -45,7 +46,7 @@ export const gerirQuadro: CasoNod<Deps, "gerir_quadro"> = async (deps, input) =>
   }
   // As colunas são da pessoa (ADR-140): o bot só mexe nelas a pedido dela, na conversa — não no turno de uma tarefa,
   // rotina ou pedido de colega (revisão do PR #615, o mesmo corte do Desfazer de lote alheio).
-  const COLUNA = new Set(["criar_coluna", "renomear_coluna", "mover_coluna", "remover_coluna", "substituir_colunas"]);
+  const COLUNA = new Set(["criar_coluna", "renomear_coluna", "mover_coluna", "remover_coluna", "substituir_colunas", "definir_passagem"]);
   if (ops.some((o) => COLUNA.has(o.tipo)) && !naConversa(turno)) {
     return recusa("entrada_invalida", "as colunas só mudam a pedido da pessoa, num turno em que ela falou com você (não numa tarefa, rotina ou pedido de colega). Diga a ela o que sugere e deixe que ela peça");
   }
@@ -69,7 +70,7 @@ export const gerirQuadro: CasoNod<Deps, "gerir_quadro"> = async (deps, input) =>
       events: pr.events,
     };
   }
-  const r = await aplicarLoteQuadro(deps, {
+  const pedido: PedidoLote = {
     autor: { tipo: "agente", agenteId: input.agenteId },
     ...(input.quadro !== undefined ? { quadro: input.quadro } : {}),
     ops,
@@ -79,15 +80,23 @@ export const gerirQuadro: CasoNod<Deps, "gerir_quadro"> = async (deps, input) =>
     conversaId: input.conversaId,
     origemConfiavel: limpo,
     autorNaConversa: naConversa(turno),
-  });
+  };
+  // NOD-417: comentar vai sozinho (lerOps) e não é lote — grava o comentário e aciona o responsável e os @mencionados (nunca o autor).
+  const r = ops[0]?.tipo === "comentar" ? await comentarTarefa(deps, pedido, ops[0]) : await aplicarLoteQuadro(deps, pedido);
   if (!r.data.ok) return { data: { ok: false, erro: r.data.erro, instrucao: `${r.data.detalhe}. ${INSTRUCAO[r.data.erro]}` }, events: r.events };
   const { quadro, lote, comecaram, desfeito } = r.data;
   // O resultado mostra ao bot o título e a pergunta de cada tarefa: se alguma foi escrita por um turno não confiável
   // (deFora), o turno de quem leu fica contaminado, como no buscar_conversas (ADR-062 §6; revisão rodada 5).
   if (limpo && quadro?.tarefas.some((t) => t.deFora)) await deps.repos.turnos.contaminar(turno.id, deps.agora());
-  const partes = [r.data.removido ? "Quadro removido: o bot voltou a ser um agente comum (a conversa e a memória ficaram). Não tem Desfazer; para outro quadro, criar_quadro." : desfeito ? "Desfeito." : "Feito."];
-  if (comecaram.length) partes.push(`Começaram: ${comecaram.map((c) => c.agenteNome).join(", ")} (cada um recebeu a tarefa como pedido).`);
-  if (r.data.seguradas) partes.push(`${r.data.seguradas === 1 ? "Uma tarefa ficou" : `${r.data.seguradas} tarefas ficaram`} na espera sem começar: a corrente de bots chegou ao limite ou o lote passou de ${MAX_COMECOS_POR_LOTE} começos. Diga à pessoa: ela começa a tarefa pela conversa com você (mudar_tarefa com status afazer, num turno dela).`);
+  const partes = [r.data.removido ? "Quadro removido: o bot voltou a ser um agente comum (a conversa e a memória ficaram). Não tem Desfazer; para outro quadro, criar_quadro." : desfeito ? "Desfeito." : r.data.comentario ? "Comentário gravado na tarefa." : "Feito."];
+  if (r.data.comentario) {
+    const juntados = r.data.juntados ?? 0;
+    if (!r.data.seguradas) partes.push(comecaram.length ? `Acionou: ${comecaram.map((c) => c.agenteNome).join(", ")}${juntados ? ` (${juntados === 1 ? "um já estava" : `${juntados} já estavam`} na fila para esta tarefa e o comentário se juntou ao trabalho dele)` : ""}.` : "Ninguém foi acionado: o comentário aciona o responsável da tarefa e os @nomes de outros bots do quadro, nunca quem escreveu.");
+  } else if (comecaram.length) partes.push(`Começaram: ${comecaram.map((c) => c.agenteNome).join(", ")} (cada um recebeu a tarefa como pedido).`);
+  const parado = r.data.responsavelForaDoAndamento;
+  if (parado) partes.push(`A tarefa está em ${parado.coluna}, fora do andamento: o comentário ficou nela e ${parado.agenteNome} (o responsável) não foi acionado.`);
+  if (r.data.seguradas && r.data.comentario) partes.push("A corrente de bots chegou ao limite: o comentário ficou gravado e ninguém foi acionado.");
+  else if (r.data.seguradas) partes.push(`${r.data.seguradas === 1 ? "Uma tarefa ficou" : `${r.data.seguradas} tarefas ficaram`} na espera sem começar: a corrente de bots chegou ao limite ou o lote passou de ${MAX_COMECOS_POR_LOTE} começos. Diga à pessoa: ela começa a tarefa pela conversa com você (mudar_tarefa com status afazer, num turno dela).`);
   if (r.data.ajustada) partes.push("Um passo de coluna foi para a posição válida mais próxima: as colunas só mudam de lugar dentro do próprio grupo.");
   if (quadro?.cumpridoEm) partes.push(`Meta cumprida: ${quadro.resumo ?? ""}`.trim());
   if (lote && !desfeito) partes.push(`A pessoa vê um Desfazer; para desfazer você mesmo: {tipo: "desfazer", lote: "${lote.id}"}.`);

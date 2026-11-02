@@ -8,9 +8,9 @@
  * - Celular: a folha "Colunas" com as alças ≡ (decisão 7), onde também se renomeia, cria e remove.
  * Todo nome é dado e passa por `esc`.
  */
-import type { ColunaDto, GrupoColuna } from "../../src/contracts/quadro.ts";
+import type { ColunaDto, GrupoColuna, TarefaDto } from "../../src/contracts/quadro.ts";
 import { esc } from "../lib/escape.ts";
-import { LIMITE_COLUNAS, LIMITE_NOME_COLUNA, destinosAoRemover, FRASE_DO_GRUPO, fraseDaColuna, GRUPOS, iconeDaColuna, NOME_DO_GRUPO, passoDeMover, porqueNaoRemove, type EdicaoDeColuna } from "../lib/colunas.ts";
+import { aceitaPassagem, acionaNaColuna, LIMITE_COLUNAS, LIMITE_INSTRUCOES, LIMITE_NOME_COLUNA, destinosAoRemover, FRASE_DO_GRUPO, fraseDaColuna, GRUPOS, iconeDaColuna, NOME_DO_GRUPO, passoDeMover, porqueNaoRecebeCard, porqueNaoRemove, type EdicaoDeColuna } from "../lib/colunas.ts";
 import { confiar, ICONE, ICONE_DO_STATUS, type Html } from "./quadro.ts";
 
 const ICONE_DO_GRUPO: Readonly<Record<GrupoColuna, Html>> = {
@@ -59,12 +59,80 @@ export function popoverDeRemover(cs: readonly ColunaDto[], c: ColunaDto, n: numb
     `<p class="qd-dica">Mudar de coluna não aciona ninguém.</p></form></div>`);
 }
 
-/** O que vem depois do nome no cabeçalho: o ⋯ e, se aberto, o menu ou o popover de remover. */
-export function aposDoCabecalho(cs: readonly ColunaDto[], c: ColunaDto, ed: EdicaoDeColuna | null, n: number, nomeDoBot: string): Html {
+/** Um agente que pode receber a passagem (ADR-142). */
+export type AgenteDaPassagem = { id: string; nome: string };
+
+/**
+ * ADR-142: quem começa quando a tarefa entra na coluna. Com responsável, o nome curto (sempre à vista); sem, o
+ * "Passar para…" discreto (como o ⋯, só no hover ou no foco). Só nas colunas que aceitam passagem.
+ */
+export function passagemDoCabecalho(c: ColunaDto, aberta: boolean): Html {
+  if (!aceitaPassagem(c)) return confiar("");
+  const nome = c.responsavel ? c.responsavelNome ?? "um agente" : null;
+  const rotulo = nome ? `${c.nome} passa para ${nome}. Mudar a passagem` : `Passar ${c.nome} para um agente`;
+  return confiar(`<button type="button" class="qd-col-passa${nome ? " qd-col-passa-com" : ""}" data-act="col-passagem" data-coluna="${esc(c.id)}" aria-label="${esc(rotulo)}" aria-haspopup="dialog" aria-expanded="${aberta}">` +
+    `${nome ? `<span aria-hidden="true">→</span> ${esc(nome)}` : "Passar para…"}</button>`);
+}
+
+/** O popover da passagem: sem passagem ou um agente (começa na hora só onde aciona; revisão 3 do PR #622), e o que a etapa faz. */
+export function popoverDePassagem(c: ColunaDto, agentes: readonly AgenteDaPassagem[]): Html {
+  const com = !!c.responsavel;
+  const ops = [`<option value="">Escolha o agente</option>`, ...agentes.map((a) => `<option value="${esc(a.id)}"${a.id === c.responsavel ? " selected" : ""}>${esc(a.nome)}</option>`)].join("");
+  const radio = (v: string, marcado: boolean, rotulo: string, dica: string) =>
+    `<label class="qd-pas-op"><input type="radio" name="modo" value="${v}"${marcado ? " checked" : ""}><span>${esc(rotulo)}<small>${esc(dica)}</small></span></label>`;
+  return confiar(`<div class="qd-pop qd-pop-passa" role="dialog" aria-labelledby="qd-pas-tit">` +
+    `<form data-form="col-passagem" data-coluna="${esc(c.id)}"><p class="qd-pop-tit" id="qd-pas-tit">Quando a tarefa entra em <b>${esc(c.nome)}</b></p>` +
+    `<fieldset class="qd-pas-modos"><legend class="qd-sr">Passagem</legend>` +
+    radio("sem", !com, "Sem passagem", "o responsável continua") + radio("agente", com, "Passar para um agente", acionaNaColuna(c) ? "começa na hora" : "passa para ele, sem acionar") + `</fieldset>` +
+    `<label class="qd-sr" for="qd-pas-agente">Agente</label><select id="qd-pas-agente" class="qd-sel" name="agente">${ops}</select>` +
+    `<label class="qd-rotulo" for="qd-pas-inst">O que essa etapa faz</label>` +
+    `<textarea id="qd-pas-inst" class="qd-pas-inst" name="instrucoes" rows="3" maxlength="${LIMITE_INSTRUCOES}" placeholder="Ex.: revise o PR e aponte o que falta">${esc(c.instrucoes ?? "")}</textarea>` +
+    `<div class="qd-pop-bts"><button type="button" class="qd-bt" data-act="col-fechar">Cancelar</button><button type="submit" class="qd-bt qd-bt-pri">Salvar</button></div></form></div>`);
+}
+
+/**
+ * O card solto numa coluna com responsável (revisão do PR #622, decisão da PM): uma linha discreta no topo da lista da
+ * coluna de destino, no lugar onde o card cai. Não é diálogo nem popover: um grupo com o nome, e os dois links. Confirmar
+ * (o padrão, com o foco) começa; "Não iniciar ainda" só move; Esc desiste.
+ */
+export function confirmacaoDeSoltar(c: ColunaDto, tarefa: string, titulo = "A tarefa"): Html {
+  const nome = c.responsavelNome ?? "o responsável";
+  return confiar(`<li class="qd-soltar" role="group" aria-label="${esc(`Mover ${titulo} para ${c.nome}`)}">` +
+    `<p class="qd-soltar-tit"><b>${esc(titulo)}</b> · ${esc(nome)} começa agora.</p>` +
+    `<p class="qd-pas-bts"><button type="button" class="qd-link qd-link-pri" data-act="col-soltar" data-coluna="${esc(c.id)}" data-tarefa="${esc(tarefa)}">Confirmar</button>` +
+    `<span aria-hidden="true">·</span><button type="button" class="qd-link" data-act="col-soltar-sem" data-coluna="${esc(c.id)}" data-tarefa="${esc(tarefa)}">Não iniciar ainda</button></p></li>`);
+}
+
+/**
+ * O menu do "Mover para…" do card: as outras colunas. Escolher a de responsável que aciona (`acionaNaColuna`) abre a
+ * mesma confirmação do card solto; as outras movem direto (como soltar). Precisa de você aparece desabilitada com o
+ * porquê (o servidor recusa sem a pergunta, revisão 2 do PR #622).
+ */
+export function menuDeMover(cs: readonly ColunaDto[], t: Pick<TarefaDto, "id" | "titulo" | "status">, nomeDoBot = "o bot"): Html {
+  const itens = cs.filter((c) => c.id !== t.status).map((c) => {
+    const porque = porqueNaoRecebeCard(c, nomeDoBot);
+    const nota = porque ?? (!c.responsavel ? null
+      : acionaNaColuna(c) ? `${c.responsavelNome ?? "O responsável"} começa` : `Passa para ${c.responsavelNome ?? "o responsável"}`);
+    const des = porque ? ` aria-disabled="true" title="${esc(porque)}"` : "";
+    return `<button type="button" role="menuitem" class="qd-menu-it" data-act="tarefa-mover-para" data-coluna="${esc(c.id)}" data-tarefa="${esc(t.id)}"${des}>` +
+      `${icone(c)}<span>${esc(c.nome)}</span>${nota ? `<small class="qd-menu-porque">${esc(nota)}</small>` : ""}</button>`;
+  }).join("");
+  return confiar(`<div class="qd-menu qd-menu-mover" role="menu" id="qd-menu" aria-label="${esc(`Mover ${t.titulo} para`)}">${itens}</div>`);
+}
+
+/**
+ * O que vem depois do nome no cabeçalho: a passagem (com `agentes`, ADR-142), o ⋯ e, se aberto, o menu, o popover de
+ * remover ou o da passagem (a confirmação do card solto fica na lista: `confirmacaoDeSoltar`).
+ */
+export function aposDoCabecalho(cs: readonly ColunaDto[], c: ColunaDto, ed: EdicaoDeColuna | null, n: number, nomeDoBot: string, agentes?: readonly AgenteDaPassagem[]): Html {
   const menuAberto = ed?.tipo === "menu" && ed.coluna === c.id;
+  const passaAberta = ed?.tipo === "passagem" && ed.coluna === c.id;
   const bt = `<button type="button" class="qd-col-mais" data-act="col-menu" data-coluna="${esc(c.id)}" aria-label="${esc(`Opções de ${c.nome}`)}" aria-haspopup="menu" aria-expanded="${menuAberto}"${menuAberto ? ' aria-controls="qd-menu"' : ""}>${ICONE.mais}</button>`;
-  const dentro = menuAberto ? menuDaColuna(cs, c, nomeDoBot) : ed?.tipo === "remover" && ed.coluna === c.id && !naFolha(ed) ? popoverDeRemover(cs, c, n) : "";
-  return confiar(bt + dentro);
+  const passa = agentes ? passagemDoCabecalho(c, passaAberta) : "";
+  const dentro = menuAberto ? menuDaColuna(cs, c, nomeDoBot)
+    : ed?.tipo === "remover" && ed.coluna === c.id && !naFolha(ed) ? popoverDeRemover(cs, c, n)
+      : passaAberta && agentes ? popoverDePassagem(c, agentes) : "";
+  return confiar(passa + bt + dentro);
 }
 
 /** O campo de renomear no lugar do nome: Enter grava, Esc desiste. */

@@ -156,6 +156,43 @@
 .qd-col-mais:hover, .qd-col-mais[aria-expanded="true"] { background: color-mix(in srgb, var(--qd-col-fundo) 70%, var(--line)); color: var(--ink); }
 .qd-col-mais:focus-visible, .qd-col-novo-bt:focus-visible, .qd-menu-it:focus-visible, .qd-chip-g:focus-within, .qd-fo-bt:focus-visible, .qd-fo-nome:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
 @media (hover: none) { .qd-col-mais { opacity: 1; } }
+/* ADR-142: a passagem da coluna. O nome do responsável fica à vista, em cinza; o "Passar para…" só no hover ou no foco. */
+.qd-col-passa { flex: none; margin-left: auto; max-width: 9em; padding: 2px 6px; border: 0; border-radius: 6px; background: none; color: var(--ink-3);
+  font: inherit; font-size: 12px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; opacity: 0; transition: opacity .12s; }
+.qd-col-passa-com, .qd-col-cab:hover .qd-col-passa, .qd-col-cab:focus-within .qd-col-passa, .qd-col-passa[aria-expanded="true"] { opacity: 1; }
+.qd-col-passa:hover, .qd-col-passa[aria-expanded="true"] { color: var(--ink); }
+.qd-col-passa:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.qd-col-passa + .qd-col-mais { margin-left: 2px; }
+@media (hover: none) { .qd-col-passa { opacity: 1; } }
+.qd-pas-modos { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; border: 0; }
+.qd-pas-op { display: flex; gap: 8px; align-items: flex-start; cursor: pointer; }
+.qd-pas-op small { display: block; color: var(--ink-3); font-size: 12px; }
+.qd-pas-inst { width: 100%; box-sizing: border-box; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: none; color: var(--ink); font: inherit; font-size: 13px; resize: vertical; }
+.qd-pas-inst:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.qd-pop-passa:not(:has(input[value="agente"]:checked)) #qd-pas-agente { display: none; }
+/* Revisão do PR 622 (decisão da PM): o card solto vira uma linha discreta no topo da lista de destino, sem popover. */
+.qd-soltar { padding: 7px 10px; border: 1px dashed color-mix(in srgb, var(--signal) 45%, var(--line)); border-radius: var(--qd-raio);
+  background: color-mix(in srgb, var(--signal) 5%, transparent); font-size: 12.5px; color: var(--ink-2); }
+.qd-soltar-tit { margin: 0; line-height: 1.35; overflow-wrap: anywhere; }
+.qd-soltar-tit b { color: var(--ink); font-weight: 500; }
+.qd-soltar .qd-pas-bts { margin-top: 3px; }
+.qd-lg-lista .qd-soltar { margin: 4px 0; }
+.qd-saindo { opacity: .45; }
+/* O "Mover para…" do card: aparece no hover e no foco (sempre no toque), acima do clique do card inteiro. */
+.qd-card-mover { position: relative; z-index: 1; align-self: flex-start; display: inline-flex; align-items: center; min-height: 24px; min-width: 24px; padding: 0 2px;
+  border: 0; background: none; color: var(--ink-3); font: inherit; font-size: 11.5px; cursor: pointer; opacity: 0; transition: opacity .12s; }
+.qd-card:hover .qd-card-mover, .qd-card:focus-within .qd-card-mover, .qd-card-mover[aria-expanded="true"] { opacity: 1; }
+.qd-card-mover:hover { color: var(--ink); text-decoration: underline; }
+.qd-card-mover:focus-visible { outline: 2px solid var(--focus-ring, var(--signal)); outline-offset: 2px; opacity: 1; }
+.qd-l .qd-card-mover { opacity: 1; min-height: 44px; flex: none; }
+@media (hover: none) { .qd-card-mover { opacity: 1; min-height: 44px; } }
+.qd-com-menu { z-index: 6; }
+.qd-menu-mover { left: 0; right: auto; }
+.qd-l .qd-menu-mover { left: auto; right: 0; }
+.qd-menu-mover .qd-menu-it .qd-st { color: var(--ink-3); }
+.qd-pas-bts { display: flex; gap: 6px; align-items: center; margin: 6px 0 0; color: var(--ink-3); }
+.qd-link-pri { color: var(--ink); font-weight: 600; }
+li.qd-card[draggable="true"] { cursor: grab; }
 /* Renomear no lugar e a coluna nova. */
 .qd-col-ren { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; flex: 1; min-width: 0; margin: 0; }
 .qd-col-in { flex: 1; min-width: 0; height: 28px; padding: 0 7px; border: 1px solid var(--signal); border-radius: 7px; background: var(--surface); color: var(--ink);
@@ -377,6 +414,22 @@ a.qd-chip:hover { background: var(--surface-raised); }
 .qd-resp-form { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
 .qd-resp-in { width: 100%; min-height: 64px; padding: 10px 12px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--surface); color: var(--ink);
   font: 14px/1.45 var(--font-sans); resize: vertical; }
+/* NOD-417: os comentários da tarefa, com cara de conversa (sem cartão nem fundo); "acionou" é uma linha fina. */
+.qd-coms { display: flex; flex-direction: column; gap: 10px; }
+.qd-com-lista { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
+.qd-com { display: flex; gap: 10px; min-width: 0; }
+.qd-com-av .qd-anel, .qd-com-av .icon.mascote { width: 22px !important; height: 22px !important; min-width: 22px; font-size: 9px; }
+.qd-com-corpo { min-width: 0; flex: 1; }
+.qd-com-cab { margin: 0 0 2px; display: flex; gap: 8px; align-items: baseline; font-size: 12.5px; }
+.qd-com-nome { font-weight: 600; color: var(--ink); }
+.qd-com-cab time { color: var(--ink-3); }
+.qd-com-txt { margin: 0; font-size: 14px; line-height: 1.5; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+.qd-com-acao, .qd-com-vazio { margin: 2px 0 0; font-size: 12px; color: var(--ink-3); }
+.qd-com-form { display: flex; align-items: flex-end; gap: 8px; border-bottom: 1px solid var(--line); padding: 2px 0 6px; }
+.qd-com-in { flex: 1; min-height: 32px; max-height: 160px; padding: 6px 0; border: 0; background: transparent; color: var(--ink); font: 14px/1.45 var(--font-sans); resize: none; field-sizing: content; }
+.qd-com-form:focus-within { border-bottom-color: var(--line-strong); }
+.qd-com-bt { border: 0; background: none; padding: 6px 2px; font: 500 13px var(--font-sans); color: var(--ink-3); cursor: pointer; }
+.qd-com-bt:hover, .qd-com-bt:focus-visible { color: var(--ink); }
 .qd-rotulo { margin: 0 0 8px; font-size: 12px; font-weight: 500; color: var(--ink-3); }
 .qd-lado { display: flex; flex-direction: column; padding: 6px 2px 0; font-size: 12.5px; min-width: 0; }
 .qd-lado-sec { padding: 16px 0; }

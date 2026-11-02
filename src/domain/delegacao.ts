@@ -72,8 +72,17 @@ export function neutralizarPedido(texto: string): string {
 export function entradaDoPedido(p: { pessoaNome: string; remetenteNome: string; pedidos: readonly string[]; pedido: string; contexto?: string | null }): string {
   const doColega = [`Pedido: ${p.pedido}`, ...(p.contexto ? [`Contexto: ${p.contexto}`] : [])].map(neutralizarBlocos).join("\n");
   // A mensagem da pessoa vem antes, como contexto; o pedido do colega fecha a entrada — é o que fazer.
-  const daPessoa = p.pedidos.length > 0 ? [`Mensagem de ${p.pessoaNome} que originou o pedido, literal:`, "<pedido_da_pessoa>", p.pedidos.map(neutralizarPedido).join("\n\n"), "</pedido_da_pessoa>", ""] : [];
+  const daPessoa = p.pedidos.length > 0 ? [blocoDaPessoa(p.pessoaNome, p.pedidos), ""] : [];
   return [...daPessoa, `Pedido de ${p.remetenteNome}:`, "<pedido_do_colega>", doColega, "</pedido_do_colega>"].join("\n");
+}
+
+/**
+ * O bloco (1) de `entradaDoPedido`: a mensagem literal da pessoa que originou o pedido. Também vai no turno que o
+ * pedir_a_bot com a tarefa do quadro abre (NOD-417), depois do comentário. Sem mensagens: string vazia.
+ */
+export function blocoDaPessoa(pessoaNome: string, pedidos: readonly string[]): string {
+  if (pedidos.length === 0) return "";
+  return [`Mensagem de ${pessoaNome} que originou o pedido, literal:`, "<pedido_da_pessoa>", pedidos.map(neutralizarPedido).join("\n\n"), "</pedido_da_pessoa>"].join("\n");
 }
 
 /**

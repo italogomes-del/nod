@@ -27,7 +27,26 @@ export type AlvoDoFuzz = {
   retratoDaOutra?(): Promise<Retrato>;
   /** Depois de um caso que derruba a sessão (sair, excluir conta): o alvo recunha a sessão. */
   depoisDe?(caso: CasoDeFuzz, status: number): Promise<void>;
+  /**
+   * Opcional (o custo do fuzz no PR): uma marca do banco INTEIRO tal que duas marcas iguais e não nulas provam que
+   * nenhuma transação gravou nada entre elas. Com ela o executor pula o retrato quando nada foi gravado (o retrato seria
+   * igual por construção). `null` = não dá para garantir (há escrita em curso): o retrato roda. Ver `marcaDoBanco`.
+   */
+  marca?(): Promise<string | null>;
 };
+
+/**
+ * A marca do Postgres para `AlvoDoFuzz.marca`: o `xmax` do snapshot (o próximo xid a ser dado), só quando não há
+ * transação com xid em curso. Toda transação que grava recebe um xid; se a marca de T1 não tinha nenhuma em curso e a de
+ * T2 tem o mesmo `xmax`, nenhum xid foi dado entre T1 e T2, logo nada foi gravado (nem por trabalho em segundo plano)
+ * e qualquer retrato tirado depois de T1 vale em T2. O xid é do cluster: outro banco gravando só faz a marca mudar e o
+ * retrato rodar (mais lento, nunca errado). Uma consulta solta, sem transação: não gasta xid.
+ */
+export async function marcaDoBanco(db: Db): Promise<string | null> {
+  const [l] = await db<{ s: string }[]>`select pg_current_snapshot()::text as s`;
+  const [, , xmax, emCurso] = /^(\d+):(\d+):(.*)$/.exec(l!.s) ?? [];
+  return xmax !== undefined && emCurso === "" ? xmax : null;
+}
 
 /**
  * Tabelas que mudam em QUALQUER pedido, por desenho, mesmo no erro: o fuzz não as conta como dado da pessoa.
@@ -126,14 +145,32 @@ const resumir = (s: string, n = 160) => (s.length > n ? `${s.slice(0, n)}…(${s
  * seguidas com `ocioso()` verdadeiro (sem turno na fila), até `prazoMs`; se não aquietar, segue com a última (o caso seguinte acusa, com o nome da tabela).
  */
 export const quietude = { esgotou: 0 };
+/** O que cada rodada do fuzz gastou, por tipo de chamada (contagem e ms somados): o teste o imprime no fim. */
+export const custoDoFuzz = { chamadas: 0, saude: 0, marcas: 0, retratos: 0, retratosPulados: 0, retratosDaOutra: 0, retratosDaOutraPulados: 0, ocioso: 0, esperasQuietas: 0, ms: { chamar: 0, conferir: 0, quieto: 0, outra: 0 } };
+export function zerarCustoDoFuzz(): void {
+  Object.assign(custoDoFuzz, { chamadas: 0, saude: 0, marcas: 0, retratos: 0, retratosPulados: 0, retratosDaOutra: 0, retratosDaOutraPulados: 0, ocioso: 0, esperasQuietas: 0 });
+  Object.assign(custoDoFuzz.ms, { chamar: 0, conferir: 0, quieto: 0, outra: 0 });
+}
+const cronometrar = async <T>(chave: keyof typeof custoDoFuzz.ms, f: () => Promise<T>): Promise<T> => {
+  const t0 = performance.now();
+  try {
+    return await f();
+  } finally {
+    custoDoFuzz.ms[chave] += performance.now() - t0;
+  }
+};
 type Quieto = { prazoMs: number; intervaloMs: number; ocioso?: () => Promise<boolean> };
 async function retratoQuieto(alvo: AlvoDoFuzz, primeiro: Retrato, q: Quieto): Promise<Retrato> {
   const { prazoMs, intervaloMs } = q;
   // Com `ocioso`, a fila vazia logo de cara dispensa a espera: só o sucesso que disparou trabalho paga o intervalo.
+  if (q.ocioso) custoDoFuzz.ocioso++;
   if (q.ocioso && (await q.ocioso())) return primeiro;
   const limite = Date.now() + prazoMs;
   let atual = primeiro;
   while (Date.now() < limite) {
+    custoDoFuzz.esperasQuietas++;
+    custoDoFuzz.retratos++;
+    if (q.ocioso) custoDoFuzz.ocioso++;
     await new Promise((ok) => setTimeout(ok, intervaloMs));
     const [seguinte, ocioso] = await Promise.all([alvo.retrato(), q.ocioso ? q.ocioso() : Promise.resolve(true)]);
     if (ocioso && diferenca(atual, seguinte).length === 0) return seguinte;
@@ -145,7 +182,15 @@ async function retratoQuieto(alvo: AlvoDoFuzz, primeiro: Retrato, q: Quieto): Pr
 
 export async function executarFuzz(alvo: AlvoDoFuzz, casos: readonly CasoDeFuzz[], o: { aoProgredir?: (i: number) => void; quieto?: Quieto } = {}): Promise<Violacao[]> {
   const violacoes: Violacao[] = [];
+  // A marca é tirada ANTES do retrato: marca igual depois prova que nada foi gravado desde antes do retrato, então ele vale.
+  const marcar = async (): Promise<string | null> => {
+    if (!alvo.marca) return null;
+    custoDoFuzz.marcas++;
+    return alvo.marca();
+  };
+  let marcaDoAntes = await marcar();
   let antes = await alvo.retrato();
+  let marcaDaOutra = await marcar();
   const outraAntes = alvo.retratoDaOutra ? await alvo.retratoDaOutra() : null;
   // Desde onde a outra pessoa não foi conferida: a violação diz o intervalo de casos (o culpado está nele).
   let outraConferidaAte = -1;
@@ -155,7 +200,8 @@ export async function executarFuzz(alvo: AlvoDoFuzz, casos: readonly CasoDeFuzz[
     let status: number;
     let corpo = "";
     try {
-      ({ status, corpo } = await alvo.chamar(caso));
+      custoDoFuzz.chamadas++;
+      ({ status, corpo } = await cronometrar("chamar", () => alvo.chamar(caso)));
     } catch (e) {
       violacoes.push({ acao: caso.acao, caso: rotulo, motivo: `a chamada não voltou: ${(e as Error).message}` });
       if (!(await alvo.saude().catch(() => false))) return [...violacoes, { acao: caso.acao, caso: rotulo, motivo: "o servidor morreu" }];
@@ -163,24 +209,43 @@ export async function executarFuzz(alvo: AlvoDoFuzz, casos: readonly CasoDeFuzz[
     }
     if (status >= 500) violacoes.push({ acao: caso.acao, caso: rotulo, motivo: `status ${status}: ${resumir(corpo)}` });
     // A saúde e o retrato não dependem um do outro: em paralelo, o fuzz do PR cabe no orçamento de 90 s (revisão 5).
-    const [vivo, depois] = await Promise.all([
+    custoDoFuzz.saude++;
+    const [vivo, depois] = await cronometrar("conferir", () => Promise.all([
       alvo.saude().catch(() => false),
       (async () => {
         await alvo.depoisDe?.(caso, status);
+        const marca = await marcar();
+        // Nada gravado desde a marca do retrato de referência: o retrato de agora seria ele mesmo (a conferência não cai).
+        if (marca !== null && marca === marcaDoAntes) {
+          custoDoFuzz.retratosPulados++;
+          return antes;
+        }
+        marcaDoAntes = marca;
+        custoDoFuzz.retratos++;
         return alvo.retrato();
       })(),
-    ]);
+    ]));
     if (!vivo) return [...violacoes, { acao: caso.acao, caso: rotulo, motivo: "o servidor parou de responder /api/saude" }];
     // Erro (4xx/5xx) não deixa dado da pessoa pela metade; sucesso vira o novo retrato de referência.
     if (status >= 400) {
       const mudou = diferenca(antes, depois);
       if (mudou.length > 0) violacoes.push({ acao: caso.acao, caso: rotulo, motivo: `status ${status} e o banco da pessoa mudou em: ${mudou.join(", ")}` });
     }
-    antes = status < 400 && o.quieto ? await retratoQuieto(alvo, depois, o.quieto) : depois;
+    antes = status < 400 && o.quieto ? await cronometrar("quieto", () => retratoQuieto(alvo, depois, o.quieto!)) : depois;
+    // A espera tirou retratos novos sem marca antes deles: o próximo caso tira o retrato de novo.
+    if (antes !== depois) marcaDoAntes = null;
     // A outra pessoa: depois de todo sucesso (é onde um vazamento de RLS escreveria), a cada 25 chamadas e no fim — o
     // retrato dela custa uma consulta grande, e conferir a cada erro dobrava o tempo do fuzz sem pegar nada a mais.
     if (outraAntes && alvo.retratoDaOutra && (status < 400 || i % 25 === 24 || i === casos.length - 1)) {
-      const mudou = diferenca(outraAntes, await alvo.retratoDaOutra());
+      const marca = await marcar();
+      let mudou: string[] = [];
+      // Mesma regra: nada gravado desde a marca da última conferência que bateu, então o retrato dela seguiria igual.
+      if (marca !== null && marca === marcaDaOutra) custoDoFuzz.retratosDaOutraPulados++;
+      else {
+        custoDoFuzz.retratosDaOutra++;
+        mudou = diferenca(outraAntes, await cronometrar("outra", () => alvo.retratoDaOutra!()));
+        marcaDaOutra = marca;
+      }
       const intervalo = outraConferidaAte + 1 === i ? `no caso ${i}` : `entre os casos ${outraConferidaAte + 1} e ${i}: ${[...new Set(casos.slice(outraConferidaAte + 1, i + 1).map((c) => c.acao))].join(", ")}`;
       if (mudou.length > 0) return [...violacoes, { acao: caso.acao, caso: rotulo, motivo: `o banco de OUTRA pessoa mudou em: ${mudou.join(", ")} (RLS), ${intervalo}` }];
       outraConferidaAte = i;
@@ -340,6 +405,30 @@ export function bloquearRedeExterna(o: { unixPermitidos?: readonly string[] } = 
     Object.assign(cp, sincronasOriginais);
     syncBuiltinESMExports();
   };
+}
+
+/**
+ * NOD-420 (o teto de 150 s no PR): `k` casos por rota nas ações escolhidas, em vez de N. Fica, na ordem: as entradas fixas
+ * do gerador (base plausível, json quebrado, sem corpo), pelo menos um caso FUNDO (todo id do caminho é um id real da
+ * pessoa, o que passa da busca) e o resto na ordem do plano até `k`. A ordem do plano (DELETE do mais fundo ao mais raso)
+ * não muda; as outras ações ficam intactas.
+ */
+export function enxugarCasos(casos: readonly CasoDeFuzz[], o: { acoes: (acao: string) => boolean; k: number; idsDaPessoa: ReadonlySet<string> }): CasoDeFuzz[] {
+  const fixas = new Set(["base plausível", "json quebrado", "sem corpo"]);
+  const fundo = (c: CasoDeFuzz) => {
+    const grupos = (c.rota.match(/\(\?</g) ?? []).length;
+    return c.caminho.split("/").filter((s) => o.idsDaPessoa.has(decodeURIComponent(s))).length >= grupos;
+  };
+  const porRota = new Map<string, CasoDeFuzz[]>();
+  for (const c of casos) if (o.acoes(c.acao)) porRota.set(`${c.acao} ${c.rota}`, [...(porRota.get(`${c.acao} ${c.rota}`) ?? []), c]);
+  const ficam = new Set<CasoDeFuzz>();
+  for (const grupo of porRota.values()) {
+    const escolhidos = grupo.filter((c) => fixas.has(c.entrada.rotulo));
+    if (!escolhidos.some(fundo)) escolhidos.push(...grupo.filter((c) => fundo(c) && !escolhidos.includes(c)).slice(0, 1));
+    for (const c of grupo) if (escolhidos.length < o.k && !escolhidos.includes(c)) escolhidos.push(c);
+    for (const c of escolhidos) ficam.add(c);
+  }
+  return casos.filter((c) => !o.acoes(c.acao) || ficam.has(c));
 }
 
 /** FUZZ_N do ambiente: inteiro de 1 a 10 mil, senão erro claro (NaN viraria zero casos e um fuzz verde que não testou). */

@@ -11,7 +11,7 @@ import type { QuadroDto, TarefaDto } from "../../src/contracts/quadro.ts";
 import { esc } from "../lib/escape.ts";
 import { NOME_DO_STATUS, type Status } from "../lib/quadro.ts";
 import { comColunas, iconeDaColuna, inicioDoFimPreso, LIMITE_COLUNAS, type EdicaoDeColuna } from "../lib/colunas.ts";
-import { aposDoCabecalho, botaoDeNova, campoDeRenomear, colunaNova, folhaDasColunas, naFolha } from "./colunas-quadro.ts";
+import { aposDoCabecalho, botaoDeNova, campoDeRenomear, colunaNova, confirmacaoDeSoltar, folhaDasColunas, menuDeMover, naFolha, type AgenteDaPassagem } from "./colunas-quadro.ts";
 import { atalhosDePrazo, codigoDaTarefa, faltaParaOPrazo, fraseDoPrazo, tarefasPorStatus, type Faixa } from "../lib/quadro-dados.ts";
 import { anel, avatar, barra, card, confiar, ICONE, ICONE_DO_STATUS, linha, lista, quadro, seloEmTeste, type Card, type Coluna, type ExtraDaGrade, type Filtro, type Html, type QuemRoda } from "./quadro.ts";
 
@@ -116,7 +116,7 @@ const rotuloDoQuadro = (q: QuadroDto, nome: string): string => (q.meta ? `Quadro
  * NOD-448: as colunas são as do quadro (`q.colunas`), com o cabeçalho que edita, o "+" e as tiras de Feito e Fechado
  * presas à direita (NOD-429). `edicao` é o pedaço aberto (menu, renomear, remover, coluna nova, a folha do celular).
  */
-export function quadroDaMeta(o: { q: QuadroDto; nome: string; agente: AgenteDoQuadro; filtro: Filtro; alternadas: ReadonlySet<string>; acesas: ReadonlySet<string>; edicao?: EdicaoDeColuna | null; agora?: number; editandoMeta?: boolean }): Html {
+export function quadroDaMeta(o: { q: QuadroDto; nome: string; agente: AgenteDoQuadro; filtro: Filtro; alternadas: ReadonlySet<string>; acesas: ReadonlySet<string>; edicao?: EdicaoDeColuna | null; agora?: number; editandoMeta?: boolean; agentes?: readonly AgenteDaPassagem[] }): Html {
   const por = tarefasPorStatus(o.q);
   const ed = o.edicao ?? null;
   const cs = comColunas(o.q).colunas;
@@ -126,17 +126,27 @@ export function quadroDaMeta(o: { q: QuadroDto; nome: string; agente: AgenteDoQu
     const tarefas = (por[c.id] ?? []).filter((t) => passaNoFiltro(t, o.filtro));
     const padrao = c.recolhida && (contagem[c.id] ?? 0) === 0;
     // Renomear ou remover (o popover) abre a coluna, para o campo ter onde ficar.
-    const editando = !naFolha(ed) && (ed?.tipo === "renomear" || ed?.tipo === "remover") && ed.coluna === c.id;
+    const editando = !naFolha(ed) && (ed?.tipo === "renomear" || ed?.tipo === "remover" || ed?.tipo === "passagem" || ed?.tipo === "soltar") && ed.coluna === c.id;
     return { c, tarefas, recolhida: !editando && padrao !== o.alternadas.has(c.id) };
   });
-  const cartoes = (ts: TarefaDto[]): Card[] => ts.map((t) => cardDaTarefa(t, o.agente, o.acesas.has(t.id)));
+  // ADR-142: o "Mover para…" abre o menu só no card (e na vista) de onde veio; o card solto vira uma linha no topo da
+  // lista de destino, com o card de origem apagado até a pessoa confirmar ou desistir.
+  const cartoes = (ts: TarefaDto[], estreito: boolean): Card[] => ts.map((t) => {
+    const menu = o.agentes && ed?.tipo === "mover" && ed.tarefa === t.id && !!ed.estreito === estreito ? { menu: menuDeMover(cs, t, o.nome) } : {};
+    const saindo = ed?.tipo === "soltar" && ed.tarefa === t.id ? { classe: "qd-saindo" } : {};
+    return { ...cardDaTarefa(t, o.agente, o.acesas.has(t.id)), ...(o.agentes ? { arrastavel: true } : {}), ...menu, ...saindo };
+  });
+  const solta = (c: (typeof cs)[number]): Html[] => {
+    if (ed?.tipo !== "soltar" || ed.coluna !== c.id) return [];
+    return [confirmacaoDeSoltar(c, ed.tarefa, o.q.tarefas.find((t) => t.id === ed.tarefa)?.titulo)];
+  };
   const vazio = (id: string): string => (id === "backlog" && o.q.total === 0 ? VAZIO_DO_BACKLOG : "Nada aqui");
   const preso = inicioDoFimPreso(cols.map((x) => ({ grupo: x.c.grupo, recolhida: x.recolhida })));
   const larguraPresa = (depois: number) => `calc(${depois} * (var(--qd-tira) + 8px) + var(--qd-tira) + 8px)`;
   const colunas: Coluna[] = cols.map(({ c, tarefas, recolhida }, i) => ({
     status: c.id, nome: c.nome, grupo: c.grupo, icone: iconeDaColuna(c), pessoa: c.daPessoa, recolhida, recolhivel: true,
-    editavel: { fixa: c.fixa }, n: tarefas.length, cards: cartoes(tarefas).map(card), vazio: vazio(c.id),
-    ...(!recolhida ? { apos: aposDoCabecalho(cs, c, ed, contagem[c.id] ?? 0, o.nome) } : {}),
+    editavel: { fixa: c.fixa }, n: tarefas.length, cards: [...solta(c), ...cartoes(tarefas, false).map(card)], vazio: vazio(c.id),
+    ...(!recolhida ? { apos: aposDoCabecalho(cs, c, ed, contagem[c.id] ?? 0, o.nome, o.agentes) } : {}),
     ...(ed?.tipo === "renomear" && ed.coluna === c.id && !naFolha(ed) ? { cab: campoDeRenomear(c, ed.erro) } : {}),
     ...(i >= preso ? { presa: larguraPresa(cols.length - 1 - i) } : {}),
   }));
@@ -151,7 +161,7 @@ export function quadroDaMeta(o: { q: QuadroDto; nome: string; agente: AgenteDoQu
     topoDoQuadro(o.q, { agora: o.agora ?? Date.now(), ...(o.editandoMeta ? { editandoMeta: true } : {}) }),
     barra({ filtro: o.filtro, trabalhando: trabalhando(o.q, o.agente) }),
     quadro({ rotulo, classe: "qd-so-largo", colunas, extras }),
-    `<div class="qd-so-estreito">${lista({ rotulo, antes: confiar(ordem), grupos: cols.map(({ c, tarefas, recolhida }) => ({ status: c.id, nome: c.nome, icone: iconeDaColuna(c), pessoa: c.daPessoa, recolhido: recolhida, linhas: cartoes(tarefas).map(linha), vazio: vazio(c.id) })) })}` +
+    `<div class="qd-so-estreito">${lista({ rotulo, antes: confiar(ordem), grupos: cols.map(({ c, tarefas, recolhida }) => ({ status: c.id, nome: c.nome, icone: iconeDaColuna(c), pessoa: c.daPessoa, recolhido: recolhida, linhas: [...solta(c), ...cartoes(tarefas, true).map(linha)], vazio: vazio(c.id) })) })}` +
       `${naFolha(ed) ? folhaDasColunas(cs, ed, contagem, o.nome) : ""}</div>`,
   ].join(""));
 }
@@ -190,7 +200,7 @@ function formResposta(t: TarefaDto): string {
  * O detalhe de uma tarefa (o clique no card): à esquerda o título, os chips, a descrição e, se trava em você, a pergunta
  * com o campo da resposta; à direita o painel (Propriedades, Entregáveis, No Linear). Abaixo de 700px o painel desce.
  */
-export function tarefaAberta(o: { t: TarefaDto; q: QuadroDto; agente: AgenteDoQuadro }): Html {
+export function tarefaAberta(o: { t: TarefaDto; q: QuadroDto; agente: AgenteDoQuadro; /** NOD-417: a seção dos comentários (comentarios-tarefa.ts). */ comentarios?: string }): Html {
   const { t } = o;
   const codigo = codigoDaTarefa(t);
   const resp = t.status === "voce" ? VOCE : t.agenteId ? o.agente(t.agenteId) : null;
@@ -212,7 +222,7 @@ export function tarefaAberta(o: { t: TarefaDto; q: QuadroDto; agente: AgenteDoQu
   const noLinear = t.linearId ? `<section class="qd-lado-sec"><h2 class="qd-rotulo">No Linear</h2><ul><li>${lin ? `<a class="qd-link" href="${esc(lin)}" target="_blank" rel="noopener noreferrer">${esc(t.linearId)}</a>` : `<span>${esc(t.linearId)}</span>`}</li></ul></section>` : "";
   return confiar(`<article class="qd-tarefa qd-com-lado" aria-labelledby="qd-t-tit" data-tarefa="${esc(t.id)}">` +
     `<div class="qd-t-cab"><button type="button" class="qd-voltar" data-act="voltar-ao-quadro">${ICONE.voltar}<span>${esc(o.q.meta ?? "Quadro")}</span></button><span class="qd-t-sep" aria-hidden="true">/</span><span class="qd-id">${esc(codigo)}</span></div>` +
-    `<div class="qd-t-corpo"><div class="qd-t-principal"><h1 class="qd-t-tit" id="qd-t-tit" tabindex="-1">${esc(t.titulo)}</h1><div class="qd-chips">${chipSt}${chipResp}${chipPr}</div>${desc}${pergunta}${resposta}</div>` +
+    `<div class="qd-t-corpo"><div class="qd-t-principal"><h1 class="qd-t-tit" id="qd-t-tit" tabindex="-1">${esc(t.titulo)}</h1><div class="qd-chips">${chipSt}${chipResp}${chipPr}</div>${desc}${pergunta}${resposta}${o.comentarios ?? ""}</div>` +
     `<aside class="qd-lado" aria-label="Detalhes da tarefa"><section class="qd-lado-sec"><h2 class="qd-rotulo">Propriedades</h2><dl class="qd-props">` +
     `<dt>Status</dt><dd>${esc(nomeSt)}</dd><dt>Responsável</dt><dd>${esc(resp?.nome ?? "ninguém")}</dd><dt>Quadro</dt><dd>${esc(o.q.meta ?? "sem meta")}</dd></dl></section>` +
     `${entregaveis}${noLinear}</aside></div></article>`);

@@ -22,10 +22,18 @@ export const GRUPOS_COLUNA = ["nao_iniciado", "iniciado", "feito", "fechado"] as
 export type GrupoColuna = (typeof GRUPOS_COLUNA)[number];
 
 /** Uma coluna do quadro. `id` é uma das chaves de STATUS_TAREFA ou `c-<slug>` (criada pela pessoa; não muda ao renomear). */
-export type ColunaQuadro = { id: string; nome: string; grupo: GrupoColuna };
+export type ColunaQuadro = {
+  id: string;
+  nome: string;
+  grupo: GrupoColuna;
+  /** Passagem (ADR-142): o bot que pega a tarefa ao entrar na coluna; null/ausente = o responsável continua. */
+  responsavel?: string | null;
+  /** "O que essa etapa faz": vai no contexto do turno de quem pega a tarefa nesta coluna. */
+  instrucoes?: string | null;
+};
 
 /** A coluna como a web e o bot a recebem: `fixa` = não move nem sai (Precisa de você, Cancelado). */
-export type ColunaDto = ColunaQuadro & { fixa: boolean; daPessoa: boolean; recolhida: boolean };
+export type ColunaDto = ColunaQuadro & { fixa: boolean; daPessoa: boolean; recolhida: boolean; responsavelNome?: string | null };
 
 /** O id de uma coluna (o `status` da tarefa): uma chave padrão ou `c-<slug>`. */
 export type IdColuna = string;
@@ -77,6 +85,13 @@ export type Quadro = {
   metaDesde: number;
 };
 
+/**
+ * NOD-417 (definido em 2026-11-02): um comentário numa tarefa. `deFora`: escrito por um bot (ADR-062): quem o recebe recebe
+ * dado de fora. `acionados`: os bots que o comentário acionou (abriu turno ou se juntou ao que já estava na fila).
+ */
+export type ComentarioTarefa = { id: string; quadroId: string; tarefaId: string; autor: AutorLote; texto: string; deFora: boolean; criadoEm: number };
+export type ComentarioDto = ComentarioTarefa & { autorNome: string | null; acionados: string[] };
+
 /** Quem fez o lote: a pessoa (na tela) ou um bot (pela ferramenta). */
 export type AutorLote = { tipo: "pessoa" } | { tipo: "agente"; agenteId: string };
 
@@ -108,8 +123,10 @@ export type OpQuadro =
   | { tipo: "criar_quadro"; meta?: string | null; prazo?: string | null }
   | { tipo: "criar_tarefa"; titulo: string; descricao?: string; status?: string; agente?: string | null }
   | { tipo: "importar_linear"; itens: ItemLinear[] }
-  | { tipo: "mudar_tarefa"; tarefa: string; titulo?: string; descricao?: string; status?: string; agente?: string | null; pr_url?: string | null; pergunta?: string | null; excluir?: boolean }
+  | { tipo: "mudar_tarefa"; tarefa: string; titulo?: string; descricao?: string; status?: string; agente?: string | null; pr_url?: string | null; pergunta?: string | null; excluir?: boolean; sem_iniciar?: boolean }
   | { tipo: "responder"; tarefa: string; resposta: string }
+  /** NOD-417: um comentário na tarefa (sozinho no lote, sem Desfazer). Aciona o responsável e os @mencionados, nunca o autor. */
+  | { tipo: "comentar"; tarefa: string; texto: string }
   | { tipo: "editar_quadro"; meta?: string | null; prazo?: string | null }
   | { tipo: "desfazer"; lote?: string }
   /** NOD-415 (ADR-141): o bot volta a ser um agente comum. Apaga o quadro, as tarefas e o histórico; conversa e memória ficam. */
@@ -119,6 +136,8 @@ export type OpQuadro =
   | { tipo: "renomear_coluna"; coluna: string; nome: string }
   | { tipo: "mover_coluna"; coluna: string; antes_de?: string; depois_de?: string }
   | { tipo: "remover_coluna"; coluna: string; destino?: string }
+  | { tipo: "definir_passagem"; coluna: string; agente?: string | null; instrucoes?: string | null }
+  | { tipo: "terminei"; tarefa?: string }
   | { tipo: "substituir_colunas"; colunas: { id?: string; nome: string; grupo: GrupoColuna }[]; destinos?: { de: string; para: string }[] };
 
 export type TipoOpQuadro = OpQuadro["tipo"];
@@ -144,12 +163,12 @@ export type ResumoQuadroParaBot = {
   prazo: string | null;
   cumprida: boolean;
   resumo: string | null;
-  colunas: { id: string; nome: string; grupo: GrupoColuna }[];
+  colunas: { id: string; nome: string; grupo: GrupoColuna; passa_para?: string; instrucoes?: string }[];
   tarefas: { id: string; titulo: string; status: IdColuna; agente: string | null; linear: string | null; pr: string | null; pergunta: string | null; execucao: ExecucaoTarefa }[];
 };
 
 /** Os tetos do quadro (a ferramenta, o domínio e a tela usam os mesmos). */
-export const LIMITES_QUADRO = { meta: 200, titulo: 200, descricao: 4000, pergunta: 1000, resposta: 4000, ops: 50, itens: 50, identificador: 40, url: 500, coluna: 40, colunas: 30 } as const;
+export const LIMITES_QUADRO = { meta: 200, titulo: 200, descricao: 4000, pergunta: 1000, resposta: 4000, comentario: 4000, ops: 50, itens: 50, identificador: 40, url: 500, coluna: 40, colunas: 30, instrucoes: 500 } as const;
 
 /**
  * definido em 2026-11-01 (NOD-448, ADR-140): trocar o conjunto de colunas pela conversa (substituir_colunas). O card mostra

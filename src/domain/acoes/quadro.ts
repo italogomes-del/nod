@@ -57,7 +57,7 @@ export const ACOES_QUADRO = [
   {
     id: "quadro.mudar_tarefa",
     titulo: "Mudar uma tarefa (status, responsável, PR, pergunta) ou tirá-la do quadro",
-    schema: objeto({ tarefa: P.tarefa, titulo: P.titulo, descricao: P.descricao, status: P.status, agente: P.agente, pr_url: P.pr_url, pergunta: P.pergunta, excluir: P.excluir }, ["tarefa"]),
+    schema: objeto({ tarefa: P.tarefa, titulo: P.titulo, descricao: P.descricao, status: P.status, agente: P.agente, pr_url: P.pr_url, pergunta: P.pergunta, excluir: P.excluir, sem_iniciar: P.sem_iniciar }, ["tarefa"]),
     risco: "muda",
     cartaoNoChat: false,
     chat: vivo,
@@ -71,6 +71,15 @@ export const ACOES_QUADRO = [
     cartaoNoChat: false,
     chat: vivo,
     casoDeUso: "quadro.responder",
+  },
+  {
+    id: "quadro.comentar",
+    titulo: "Comentar uma tarefa (aciona o responsável ou o bot @mencionado)",
+    schema: objeto({ tarefa: P.tarefa, texto: P.texto }, ["tarefa", "texto"]),
+    risco: "muda",
+    cartaoNoChat: false,
+    chat: vivo,
+    casoDeUso: "quadro.comentar",
   },
   {
     id: "quadro.desfazer",
@@ -138,5 +147,25 @@ export const ACOES_QUADRO = [
     cartaoNoChat: true,
     chat: vivo,
     casoDeUso: "quadro.substituir_colunas",
+  },
+  // ADR-142: a passagem por coluna (quem pega a tarefa ao entrar nela) e o fim da etapa. O terminei leva à próxima
+  // coluna pelo mesmo mudar_tarefa da pessoa e do bot.
+  {
+    id: "quadro.definir_passagem",
+    titulo: "Definir quem pega a tarefa ao entrar numa coluna",
+    schema: objeto({ coluna: P.coluna, agente: P.agente, instrucoes: P.instrucoes }, ["coluna"]),
+    risco: "muda",
+    cartaoNoChat: false,
+    chat: vivo,
+    casoDeUso: "quadro.definir_passagem",
+  },
+  {
+    id: "quadro.terminei",
+    titulo: "Terminar a etapa (a tarefa vai para a próxima coluna)",
+    schema: objeto({ tarefa: P.tarefa }, []),
+    risco: "muda",
+    cartaoNoChat: false,
+    chat: vivo,
+    casoDeUso: "quadro.terminei",
   },
 ] as const satisfies readonly DefinicaoAcao[];

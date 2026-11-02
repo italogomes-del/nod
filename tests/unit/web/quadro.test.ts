@@ -265,6 +265,12 @@ describe("NOD-429 · a pílula da conversa", () => {
 });
 
 describe("NOD-429 · web/quadro.css", () => {
+  it("o Mover para… do card aparece com o foco dentro do card e tem alvo de 24px no desktop (revisão 2 do PR #622)", () => {
+    expect(CSS).toMatch(/\.qd-card:focus-within \.qd-card-mover[^{]*\{[^}]*opacity:\s*1/);
+    const r = regra(CSS, ".qd-card-mover");
+    expect(r).toMatch(/min-height:\s*24px/);
+    expect(r).toMatch(/min-width:\s*24px/);
+  });
   it("comentário do Marlon (j4-5): o aviso da linha 1 quebra linha e nunca passa da largura do card", () => {
     const l1 = regra(CSS, ".qd-card-l1 .qd-aviso");
     expect(l1).not.toMatch(/nowrap/);

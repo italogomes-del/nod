@@ -97,6 +97,27 @@ describe("deveComecar por grupo (NOD-448, revisão do PR #615): a frase da tela 
   });
 });
 
+describe("deveComecar (NOD-417): atribuir a um agente fora de Não iniciado gera um trabalho; em Não iniciado, não", () => {
+  it("ganhar ou trocar de responsável em Em revisão aciona o novo; só entrar nela com o mesmo, não", () => {
+    expect(deveComecar({ status: "revisao", agenteId: null }, { status: "revisao", agenteId: ZE.id })).toBe(true);
+    expect(deveComecar({ status: "revisao", agenteId: ZE.id }, { status: "revisao", agenteId: ADA.id })).toBe(true);
+    expect(deveComecar({ status: "fazendo", agenteId: ZE.id }, { status: "revisao", agenteId: ADA.id })).toBe(true);
+    expect(deveComecar(null, { status: "revisao", agenteId: ZE.id })).toBe(true);
+    expect(deveComecar({ status: "fazendo", agenteId: ZE.id }, { status: "revisao", agenteId: ZE.id })).toBe(false);
+  });
+  it("em Backlog, Bloqueado e Precisa de você a atribuição não aciona", () => {
+    expect(deveComecar({ status: "backlog", agenteId: null }, { status: "backlog", agenteId: ZE.id })).toBe(false);
+    expect(deveComecar({ status: "backlog", agenteId: ZE.id }, { status: "backlog", agenteId: ADA.id })).toBe(false);
+    expect(deveComecar({ status: "bloqueado", agenteId: null }, { status: "bloqueado", agenteId: ZE.id })).toBe(false);
+    expect(deveComecar({ status: "voce", agenteId: null }, { status: "voce", agenteId: ZE.id })).toBe(false);
+  });
+  it("ação própria não aciona: o bot que se atribui a tarefa não abre trabalho para si", () => {
+    expect(deveComecar({ status: "revisao", agenteId: null }, { status: "revisao", agenteId: ZE.id }, ZE.id)).toBe(false);
+    expect(deveComecar({ status: "fazendo", agenteId: null }, { status: "fazendo", agenteId: ZE.id }, ZE.id)).toBe(false);
+    expect(deveComecar({ status: "revisao", agenteId: ZE.id }, { status: "revisao", agenteId: ADA.id }, ZE.id)).toBe(true);
+  });
+});
+
 describe("planejarLote: tudo ou nada", () => {
   it("cria o quadro, as tarefas e põe para andar quem tem responsável", () => {
     const p = planejar([{ tipo: "criar_quadro", meta: "Lançar login", prazo: "2026-11-06" }, { tipo: "criar_tarefa", titulo: "Tela", agente: "ze 1" }, { tipo: "criar_tarefa", titulo: "Copy" }], { semQuadro: true });

@@ -1,4 +1,5 @@
 import { EXECUTORES_QUADRO } from "../../../use-cases/acoes/quadro.ts";
+import { verComentarios } from "../../../use-cases/comentar-tarefa.ts";
 import { verQuadro } from "../../../use-cases/quadro.ts";
 import type { Rota } from "../roteador.ts";
 import { corpoObjeto, criarExecutor, type DepsRotas } from "./executar-caso.ts";
@@ -53,6 +54,14 @@ export function rotasQuadro(d: DepsRotas): Rota[] {
       const c = corpoObjeto(await ctx.corpo());
       ctx.json(200, await executar(ctx.escopo, EXECUTORES_QUADRO["quadro.responder"], { ...base(ctx.params.id ?? ""), tarefa: ctx.params.tid ?? "", resposta: c.resposta as string }));
     } },
+    // NOD-417: os comentários da tarefa (o da pessoa aciona o responsável; @nome aciona o mencionado).
+    { metodo: "GET", padrao: new RegExp(`^/agentes/${ID}/quadro/tarefas/${TID}/comentarios$`), async handler(ctx) {
+      ctx.json(200, await executar(ctx.escopo, verComentarios, { agenteId: ctx.params.id ?? "", tarefaId: ctx.params.tid ?? "" }));
+    } },
+    { metodo: "POST", acao: "quadro.comentar", padrao: new RegExp(`^/agentes/${ID}/quadro/tarefas/${TID}/comentarios$`), async handler(ctx) {
+      const c = corpoObjeto(await ctx.corpo());
+      ctx.json(201, await executar(ctx.escopo, EXECUTORES_QUADRO["quadro.comentar"], { ...base(ctx.params.id ?? ""), tarefa: ctx.params.tid ?? "", texto: c.texto as string }));
+    } },
     // NOD-448 (ADR-140): as colunas.
     { metodo: "POST", acao: "quadro.criar_coluna", padrao: new RegExp(`^/agentes/${ID}/quadro/colunas$`), async handler(ctx) {
       const c = corpoObjeto(await ctx.corpo());
@@ -73,6 +82,14 @@ export function rotasQuadro(d: DepsRotas): Rota[] {
     { metodo: "DELETE", acao: "quadro.remover_coluna", padrao: new RegExp(`^/agentes/${ID}/quadro/colunas/${CID}$`), async handler(ctx) {
       const destino = new URL(ctx.req.url ?? "/", "http://127.0.0.1").searchParams.get("destino");
       ctx.json(200, await executar(ctx.escopo, EXECUTORES_QUADRO["quadro.remover_coluna"], { ...base(ctx.params.id ?? ""), coluna: coluna(ctx.params.cid), ...(destino ? { destino } : {}) }));
+    } },
+    // ADR-142: a passagem da coluna e o fim da etapa.
+    { metodo: "PUT", acao: "quadro.definir_passagem", padrao: new RegExp(`^/agentes/${ID}/quadro/colunas/${CID}/passagem$`), async handler(ctx) {
+      const c = corpoObjeto(await ctx.corpo());
+      ctx.json(200, await executar(ctx.escopo, EXECUTORES_QUADRO["quadro.definir_passagem"], { ...base(ctx.params.id ?? ""), coluna: coluna(ctx.params.cid), agente: c.agente as string | null | undefined, instrucoes: c.instrucoes as string | null | undefined }));
+    } },
+    { metodo: "POST", acao: "quadro.terminei", padrao: new RegExp(`^/agentes/${ID}/quadro/tarefas/${TID}/terminei$`), async handler(ctx) {
+      ctx.json(200, await executar(ctx.escopo, EXECUTORES_QUADRO["quadro.terminei"], { ...base(ctx.params.id ?? ""), tarefa: ctx.params.tid ?? "" }));
     } },
     { metodo: "POST", acao: "quadro.desfazer", padrao: new RegExp(`^/agentes/${ID}/quadro/lotes/${LID}/desfazer$`), async handler(ctx) {
       ctx.json(200, await executar(ctx.escopo, EXECUTORES_QUADRO["quadro.desfazer"], { ...base(ctx.params.id ?? ""), lote: ctx.params.lid ?? "" }));

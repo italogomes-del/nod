@@ -122,10 +122,7 @@ export const FERRAMENTAS_NOD = {
     required: ["motivo"],
     additionalProperties: false,
   },
-  /**
-   * definido em 2026-09-29 (ADR-058): UM jeito de pedir a um colega, pergunta ou tarefa. Quem recebe usa os
-   * acessos dele; a mensagem da pessoa que abriu este turno, se houver, o servidor lê do banco e leva junto.
-   */
+  /** ADR-058: UM jeito de pedir a um colega; a mensagem da pessoa que abriu o turno vai junto. NOD-417: `tarefa` vira comentário. */
   pedir_a_bot: {
     type: "object",
     description: "Pede a um colega (outro bot da pessoa) uma resposta ou um trabalho: explicar, consultar, levantar, revisar, corrigir, preparar. Ele resolve com os acessos e ferramentas DELE e pede o que faltar. Agenda trabalho assíncrono: diga que pediu e encerre; o resultado chega em um novo turno.",
@@ -133,6 +130,7 @@ export const FERRAMENTAS_NOD = {
       agente: { type: "string", description: "Id do diretório de colegas, ou nome único do bot.", minLength: 1 },
       pedido: { type: "string", description: "O que você precisa, autocontido: a pergunta ou a tarefa e o que deve voltar.", minLength: 1 },
       contexto: { type: "string", description: "Onde achar o trabalho: links, números, nomes, o que já se sabe." },
+      tarefa: { type: "string", description: "Id ou título de uma tarefa do quadro da pessoa: o pedido vira um comentário seu nela e aciona o colega (um bot da pessoa) sem trocar o responsável. O resultado volta a você como sem a tarefa.", minLength: 1 },
     },
     required: ["agente", "pedido"],
     additionalProperties: false,
@@ -165,7 +163,7 @@ export type ArgsPedirAprovacao = { resumo: string; itens: ItemPedidoAprovacao[] 
 export type ArgsPassar = { motivo: MotivoPasse };
 export type ArgsSemNovidade = { motivo: MotivoSemNovidade };
 export type ArgsEncaminhar = { para_agente: string; motivo: string };
-export type ArgsPedirABot = { agente: string; pedido: string; contexto?: string };
+export type ArgsPedirABot = { agente: string; pedido: string; contexto?: string; tarefa?: string };
 
 /** ADR-065: capacidade que muda de turno para turno não vira memória — volta recusada, com o motivo para o bot ler. */
 export type ResultadoLembrar = { ok: true; id: string } | { ok: false; recusado: string };
@@ -176,7 +174,7 @@ export type ResultadoPedirAprovacao =
   | { estado: "recusada"; erros: string[]; instrucao: "corrija os argumentos e chame pedir_aprovacao de novo" };
 export type ResultadoPedirAPessoa = { estado: "pendente"; decisao_id: string; instrucao: "encerre o turno; a resposta retoma depois" };
 export type ResultadoOk = { ok: true };
-export type ResultadoPedirABot = { ok: true; tarefa_id: string; instrucao: string; livres: { id: string; nome: string }[] } | { ok: false; erro: "espera_circular" | "ja_pedido"; instrucao: string }; // ADR-099 (I7 revista): triagem do dono ou espera circular; NOD-259: ja_pedido
+export type ResultadoPedirABot = { ok: true; tarefa_id: string; instrucao: string; livres: { id: string; nome: string }[] } | { ok: false; erro: "espera_circular" | "ja_pedido" | "experimento_desligado" | "sem_quadro" | "tarefa_invalida" | "colega_fora_do_quadro" | "colega_nao_acionado"; instrucao: string }; // ADR-099: espera circular; NOD-259: ja_pedido; NOD-417: os da tarefa
 
 /** Args ↔ resultado por nome: contrato entre proxy, chamar-ferramenta e UseCasesNod. */
 export type ContratoFerramentaNod = ContratoFerramentasArtefato & ContratoFerramentasLigacao & ContratoFerramentasTrabalho & ContratoFerramentasFrente & ContratoFerramentasDoNod & ContratoFerramentasCriarBots & ContratoFerramentasResponderPedido & ContratoFerramentasCredencial & ContratoFerramentasAviso & ContratoFerramentasBarra & ContratoFerramentasConta & ContratoFerramentasConversas & ContratoFerramentasQuadro & ContratoFerramentasNaoLidos & {

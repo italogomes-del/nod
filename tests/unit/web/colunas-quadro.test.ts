@@ -58,7 +58,7 @@ describe("web/lib/colunas", () => {
     expect(fraseDaColuna({ id: "backlog", grupo: "nao_iniciado" })).toBe("Não aciona ninguém");
     expect(fraseDaColuna({ id: "fazendo", grupo: "iniciado" })).toMatch(/aciona o responsável/);
     expect(fraseDaColuna({ id: "c-x", grupo: "iniciado" })).toMatch(/aciona o responsável/);
-    expect(fraseDaColuna({ id: "revisao", grupo: "iniciado" })).toBe("Não aciona ninguém");
+    expect(fraseDaColuna({ id: "revisao", grupo: "iniciado" })).toBe("Trocar o responsável aciona");
     expect(fraseDaColuna({ id: "bloqueado", grupo: "iniciado" })).toBe("Não aciona ninguém");
   });
 

@@ -27,7 +27,7 @@ import type { ExecucaoRotina, Rotina } from "../../src/contracts/rotina.ts";
 import type { MembroSala, Sala } from "../../src/contracts/sala.ts";
 import type { Relato } from "../../src/contracts/relato.ts";
 import type { EmojiDeReacao, ReacaoNaFala } from "../../src/contracts/reacao.ts";
-import type { Turno } from "../../src/contracts/turno.ts";
+import type { Profundidade, Turno } from "../../src/contracts/turno.ts";
 import type { CredencialTurno } from "../../src/repositories/turno-credenciais.repo.ts";
 import type { AcaoDoModo } from "../../src/repositories/acoes-pelo-modo.repo.ts";
 import type { Trabalho } from "../../src/contracts/trabalho.ts";
@@ -1715,9 +1715,10 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         for (const t of alvo) t.acordarEm = null;
         return alvo.length;
       },
-      async juntarEntrada(id: string, texto: string, anexos: readonly string[] = []) {
-        const t = doTenant(b.turnos).find((x) => x.id === id && x.ownerId === escopo.pessoaId && x.estado === "pendente");
+      async juntarEntrada(id: string, texto: string, anexos: readonly string[] = [], opcoes: { profundidade?: Profundidade } = {}) {
+        const t = doTenant(b.turnos).find((x) => x.id === id && x.ownerId === escopo.pessoaId && x.estado === "pendente" && x.pararSolicitadoEm == null);
         if (!t) return null;
+        if (opcoes.profundidade !== undefined && opcoes.profundidade > t.profundidade) t.profundidade = opcoes.profundidade;
         t.entradaTexto = `${t.entradaTexto}\n\n${texto}`;
         t.entradaAnexos = [...new Set([...t.entradaAnexos, ...anexos])];
         return t;
@@ -3857,6 +3858,14 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       lote: async () => null,
       ultimoLote: async () => null,
       marcarDesfeito: soNoPostgres,
+    },
+    // NOD-417 (0138): os comentários das tarefas são do Postgres (tests/integration/quadro-comentarios.test.ts).
+    quadroComentarios: {
+      inserir: soNoPostgres,
+      registrarTurnos: async () => {},
+      daTarefa: async () => [],
+      pedidoAbertoNaTarefa: async () => false,
+      turnoNaFila: async () => null,
     },
     // NOD-346: o "Sobre mim" é do Postgres (tests/integration/minha-conta.test.ts); aqui fica vazio.
     perfil: {

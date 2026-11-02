@@ -15,7 +15,7 @@ import type { AcaoLote } from "../../src/contracts/ferramentas-do-nod.ts";
 import type { ModoAprovacao } from "../../src/contracts/agente.ts";
 import { gerirBots } from "../../src/use-cases/gerir-bots.ts";
 import { garantirNod } from "../../src/use-cases/onboarding.ts";
-import { acoesNovasSemLeitura, acoesSemHandler, bloquearRedeExterna, rotasPublicasSemHandler, vereditoDeDecisao, sementeDoPr, chegouNoHandler, executarFuzz, lerN, processosBloqueados, quietude, planoDoServidor, relatarViolacoes, sqlDoRetrato, sqlDoRetratoDaConta, type AlvoDoFuzz, type Retrato } from "../helpers/fuzz.ts";
+import { acoesNovasSemLeitura, acoesSemHandler, bloquearRedeExterna, rotasPublicasSemHandler, vereditoDeDecisao, sementeDoPr, chegouNoHandler, custoDoFuzz, enxugarCasos, executarFuzz, lerN, marcaDoBanco, processosBloqueados, quietude, planoDoServidor, relatarViolacoes, sqlDoRetrato, sqlDoRetratoDaConta, zerarCustoDoFuzz, type AlvoDoFuzz, type Retrato } from "../helpers/fuzz.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { servidorCompleto, type ServidorCompleto, type SessaoDeTeste } from "../helpers/servidor-completo.ts";
 import { limparPessoaE2E, limparTenantE2E, varrerSobrasDaPessoa } from "./limpeza-e2e.ts";
@@ -47,6 +47,8 @@ const SEMENTE = lerSemente(process.env.FUZZ_SEMENTE, () => sementeDoPr(process.e
 const N = lerN(process.env.FUZZ_N, 20);
 // O prazo cresce com N: medido em 2026-10-28, N=20 leva ~55 s no servidor padrão e ~22 s no compartilhado (saúde e retrato em paralelo);
 // ~5 s por unidade de N com folga dobrada. N=200 (noturno) ganha ~33 min, dentro dos 45 do job.
+// NOD-417 (o teto de 150 s caindo em lote na CI carregada, com a main a 126,8 s): o executor pula os retratos quando a
+// marca do banco (marcaDoBanco) prova que nada foi gravado desde o último. Semente 1530664212 local: 106,5 s → 49,0 s.
 const PRAZO_DO_FUZZ_MS = Math.max(600_000, N * 10_000);
 
 /**
@@ -89,6 +91,8 @@ const ISENCOES_DE_ACOES_NOVAS: Readonly<Record<string, string>> = {
   // existente passa da busca. Semear a versão do perfil no fuzz é da NOD-20.
   "bots.restaurar_versao": "NOD-20",
 };
+/** As ações do quadro que a NOD-420 mudou (o prazo_min): no PR levam as N entradas; as outras do quadro, metade. */
+const ACOES_DO_QUADRO_COM_N = new Set(["quadro.criar_coluna", "quadro.renomear_coluna"]);
 const duracoes: number[] = [];
 // Revisão 14: a leitura da entrada acumulada entre os servidores, para a regra das ações novas valer só no fim.
 const fuzzadasTodas = new Set<string>();
@@ -191,6 +195,9 @@ for (const [ordem, config] of CONFIGURACOES.entries()) {
       // Uma coluna removível (id `c-…`): o primeiro `quadro.remover_coluna` que a sortear remove de verdade.
       const comColuna = await srv.json<{ quadro: { colunas: { id: string; nome: string }[] } }>("POST", `agentes/${meu.agente.id}/quadro/colunas`, { nome: "Coluna do fuzz", grupo: "iniciado" });
       const colunaDoFuzz = comColuna.quadro.colunas.find((c) => c.nome === "Coluna do fuzz")!.id;
+      // NOD-417: uma tarefa (em Backlog, sem acionar ninguém) para o `:tid` (`quadro.terminei` só passava da busca com ela).
+      const comTarefa = await srv.json<{ quadro: { tarefas: { id: string; titulo: string }[] } }>("POST", `agentes/${meu.agente.id}/quadro/tarefas`, { titulo: "Tarefa do fuzz", status: "backlog" });
+      const tarefaDoFuzz = comTarefa.quadro.tarefas.find((t) => t.titulo === "Tarefa do fuzz")!.id;
       const plano = planoDoServidor({
         registro: REGISTRO_DE_ACOES as readonly DefinicaoAcao[],
         pendentes: faltando,
@@ -207,9 +214,23 @@ for (const [ordem, config] of CONFIGURACOES.entries()) {
             // de `quadro.remover_coluna` (o plano agora vai do DELETE mais fundo ao mais raso). O `:cid` recebe ainda ids
             // reais: a coluna semeada (a remoção de verdade) e as fixas (o id não muda ao renomear; remover dá 400).
             colunas: { daPessoa: [colunaDoFuzz, "voce", "cancelado"], deOutraPessoa: [] },
+            tarefas: { daPessoa: [tarefaDoFuzz], deOutraPessoa: [] },
           },
         },
       });
+      // NOD-420: no PR (N ≤ 20) as ações do quadro levam metade das entradas por rota (as fixas e um caso que passa da
+      // busca sempre ficam), menos as que a NOD-420 mudou (criar_coluna e renomear_coluna, o prazo_min), que levam N.
+      // O quadro é 17 rotas das ~150 do padrão; a noturna (N ≥ 100) fuzza tudo com N.
+      if (N <= 20) {
+        const antes = plano.casos.length;
+        plano.casos = enxugarCasos(plano.casos, {
+          acoes: (a) => a.startsWith("quadro.") && !ACOES_DO_QUADRO_COM_N.has(a),
+          k: Math.ceil(N / 2),
+          idsDaPessoa: new Set([meu.agente.id, colunaDoFuzz, "voce", "cancelado", tarefaDoFuzz]),
+        });
+        // eslint-disable-next-line no-console
+        console.log(`fuzz-acoes[${config.nome}]: ações do quadro com ${Math.ceil(N / 2)} entradas por rota: ${antes} → ${plano.casos.length} casos`);
+      }
       // eslint-disable-next-line no-console
       console.log(`fuzz-acoes[${config.nome}]: ${plano.acoes} ações, ${plano.casos.length} casos; sem rota: ${plano.semRota.join(", ") || "nenhuma"}`);
       expect(plano.casos.length, "o plano do fuzz saiu vazio: nada seria testado").toBeGreaterThan(0);
@@ -268,6 +289,8 @@ for (const [ordem, config] of CONFIGURACOES.entries()) {
         },
         saude: async () => (await fetch(`${srv.url}/api/saude`, { signal: AbortSignal.timeout(5_000) })).ok,
         retrato: () => retratoDe(srv.pessoa),
+        // O custo no PR (o teto de 150 s): o caso que não gravou nada no banco não paga os retratos (ver marcaDoBanco).
+        marca: () => marcaDoBanco(srv.dbDono),
         retratoDaOutra: async () => {
           const [a, b] = await Promise.all([retratoDe(outra), retratoDe(deOutroTenant)]);
           return { ...Object.fromEntries(Object.entries(a).map(([k, v]) => [`mesmo tenant/${k}`, v])), ...Object.fromEntries(Object.entries(b).map(([k, v]) => [`outro tenant/${k}`, v])) };
@@ -286,6 +309,10 @@ for (const [ordem, config] of CONFIGURACOES.entries()) {
         },
       });
       const segundos = (Date.now() - inicio) / 1000;
+      // O custo deste servidor (contagens e ms por etapa), para medir corte de custo com a mesma FUZZ_SEMENTE.
+      // eslint-disable-next-line no-console
+      console.log(`fuzz-acoes[${config.nome}]: custo ${JSON.stringify({ ...custoDoFuzz, ms: Object.fromEntries(Object.entries(custoDoFuzz.ms).map(([k, v]) => [k, Math.round(v)])) })}`);
+      zerarCustoDoFuzz();
       duracoes.push(segundos);
       const semHandler = acoesSemHandler(plano.casos, chegaram);
       const rotasSemHandler = rotasPublicasSemHandler(plano.casos, rotasQueChegaram);

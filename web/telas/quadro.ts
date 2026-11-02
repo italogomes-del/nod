@@ -136,6 +136,16 @@ export interface Card {
   aviso?: Aviso;
   brilho?: boolean;
   classe?: string;
+  /** ADR-142: o card se arrasta para outra coluna (só no quadro que edita); com ele vem o "Mover para…" (teclado e toque). */
+  arrastavel?: boolean;
+  /** ADR-142: o menu do "Mover para…", quando aberto neste card. */
+  menu?: Html;
+}
+
+/** O "Mover para…" do card (ADR-142, revisão do PR #622): leva ao mesmo lugar que arrastar, sem precisar de mouse. */
+function botaoDeMover(c: Card): string {
+  if (!c.arrastavel) return "";
+  return `<button type="button" class="qd-card-mover" data-act="tarefa-mover" data-tarefa="${esc(c.id)}" aria-label="${esc(`Mover ${c.titulo} para…`)}" aria-haspopup="menu" aria-expanded="${!!c.menu}"${c.menu ? ' aria-controls="qd-menu"' : ""}>Mover para…</button>`;
 }
 
 function quemRodaNoCard(c: Card): QuemRoda[] {
@@ -190,11 +200,11 @@ export function card(c: Card): Html {
   const l1 = c.aviso ? aviso(c.aviso) : estadoDoCard(c);
   const l3 = c.voce ? `<span class="qd-voce-frase">${esc(c.voce)}</span>`
     : c.tags?.length ? `<span class="qd-tags">${c.tags.map((t) => `<span class="qd-tag">${esc(t)}</span>`).join("")}</span>` : "";
-  const classe = cl("qd-card", c.motivo && "qd-bloqueado", c.voce && "qd-precisa", c.brilho && "qd-brilho", c.aviso && "qd-com-aviso", c.classe && esc(c.classe));
-  return h(`<li class="${classe}" data-tarefa="${esc(c.id)}">` +
+  const classe = cl("qd-card", c.menu && "qd-com-menu", c.motivo && "qd-bloqueado", c.voce && "qd-precisa", c.brilho && "qd-brilho", c.aviso && "qd-com-aviso", c.classe && esc(c.classe));
+  return h(`<li class="${classe}" data-tarefa="${esc(c.id)}"${c.arrastavel ? ' draggable="true"' : ""}>` +
     `<div class="qd-card-l1"><span class="qd-id">${esc(c.codigo ?? c.id)}</span>${l1}</div>` +
     `<button type="button" class="qd-card-bt" data-act="abrir-tarefa" data-id="${esc(c.id)}" aria-label="${esc(rotuloDoCard(c))}"><span class="qd-card-tit">${esc(c.titulo)}</span></button>` +
-    l3 + (quem || quando ? `<div class="qd-card-pe">${quem}${quando}</div>` : "") + `</li>`);
+    l3 + (quem || quando ? `<div class="qd-card-pe">${quem}${quando}</div>` : "") + botaoDeMover(c) + (c.menu ?? "") + `</li>`);
 }
 
 /* ---------- Coluna, quadro, barra e meta ---------- */
@@ -320,9 +330,9 @@ export function linha(c: Card): Html {
   const av = avataresDoCard(c);
   const est = c.motivo ? `<span class="qd-l-est qd-e-bloqueado" title="${esc(`bloqueada: ${c.motivo}`)}">${ICONE.pausa}</span>` : "";
   const fim = c.aviso ? aviso(c.aviso) : `${est}<span class="qd-id">${esc(c.codigo ?? c.id)}</span>`;
-  return h(`<li class="${cl("qd-l", c.aviso && "qd-com-aviso", c.classe && esc(c.classe))}" data-tarefa="${esc(c.id)}">` +
+  return h(`<li class="${cl("qd-l", c.menu && "qd-com-menu", c.aviso && "qd-com-aviso", c.classe && esc(c.classe))}" data-tarefa="${esc(c.id)}">` +
     `<button type="button" class="qd-l-bt" data-act="abrir-tarefa" data-id="${esc(c.id)}" aria-label="${esc(rotuloDoCard(c))}">${av.html ? `<span class="qd-avs">${av.html}</span>` : ""}<span class="qd-l-tit">${esc(c.titulo)}</span></button>` +
-    `<span class="qd-l-fim">${fim}</span></li>`);
+    `<span class="qd-l-fim">${fim}</span>${botaoDeMover(c)}${c.menu ?? ""}</li>`);
 }
 
 export function lista(o: { grupos: { status: string; nome: string; icone?: Status; pessoa?: boolean; linhas: Html[]; n?: number; recolhido?: boolean; vazio?: string }[]; rotulo?: string; novaTarefa?: boolean; antes?: Html }): Html {

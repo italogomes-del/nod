@@ -33,7 +33,7 @@ const retrato = (q: QuadroDto | null, turnos: number): Retrato | null =>
         prazo: q.prazo,
         cumprida: q.cumpridoEm !== null,
         resumo: q.resumo,
-        colunas: q.colunas.map((c) => [c.id, c.nome, c.grupo]),
+        colunas: q.colunas.map((c) => [c.id, c.nome, c.grupo, c.responsavelNome ?? null, c.instrucoes ?? null]),
         tarefas: q.tarefas.map((t) => [t.titulo, t.descricao, t.status, t.agenteNome, t.linearId, t.prUrl, t.pergunta, t.resposta, t.execucao]),
         turnosAbertos: turnos,
       }
@@ -135,6 +135,14 @@ describeIntegracao("paridade tela × chat do quadro.* (NOD-442, ADR-135)", () =>
       chat: () => ({ tipo: "responder", tarefa: "T2", resposta: "Azul" }),
     },
     {
+      // NOD-417: não é lote e não muda a tarefa (o responsável segue o mesmo); o comentário da pessoa aciona o responsável,
+      // o do bot só o @mencionado — aqui os dois mencionam o responsável e chegam ao mesmo estado.
+      id: "quadro.comentar",
+      preparar: BASE,
+      tela: async (m, q) => ({ metodo: "POST", caminho: `/agentes/${q.anfitriao}/quadro/tarefas/${await q.tarefa("T2")}/comentarios`, corpo: { texto: `@${m.nomeCaio} dá uma olhada` }, status: 201 }),
+      chat: (m) => ({ tipo: "comentar", tarefa: "T2", texto: `@${m.nomeCaio} dá uma olhada` }),
+    },
+    {
       id: "quadro.desfazer",
       preparar: (m) => [...BASE(m), [{ tipo: "mudar_tarefa", tarefa: "T1", status: "feito" }, { tipo: "criar_tarefa", titulo: "T4" }]],
       tela: async (_m, q) => ({ metodo: "POST", caminho: `/agentes/${q.anfitriao}/quadro/lotes/${await q.ultimoLote()}/desfazer`, status: 200 }),
@@ -182,6 +190,19 @@ describeIntegracao("paridade tela × chat do quadro.* (NOD-442, ADR-135)", () =>
       tela: async (_m, q) => ({ metodo: "PUT", caminho: `/agentes/${q.anfitriao}/quadro/colunas`, corpo: { colunas: DOCES }, status: 200 }),
       chat: () => ({ tipo: "substituir_colunas", colunas: DOCES }),
       confirmar: true,
+    },
+    // ADR-142: a passagem por coluna e o fim da etapa (o terminei leva T1 a Em revisão, e o Caio começa).
+    {
+      id: "quadro.definir_passagem",
+      preparar: BASE,
+      tela: async (m, q) => ({ metodo: "PUT", caminho: `/agentes/${q.anfitriao}/quadro/colunas/revisao/passagem`, corpo: { agente: m.nomeCaio, instrucoes: "Revise o PR" }, status: 200 }),
+      chat: (m) => ({ tipo: "definir_passagem", coluna: "Em revisão", agente: m.nomeCaio, instrucoes: "Revise o PR" }),
+    },
+    {
+      id: "quadro.terminei",
+      preparar: (m) => [...BASE(m), [{ tipo: "definir_passagem", coluna: "revisao", agente: m.nomeCaio }, { tipo: "mudar_tarefa", tarefa: "T1", status: "fazendo" }]],
+      tela: async (_m, q) => ({ metodo: "POST", caminho: `/agentes/${q.anfitriao}/quadro/tarefas/${await q.tarefa("T1")}/terminei`, status: 200 }),
+      chat: () => ({ tipo: "terminei", tarefa: "T1" }),
     },
   ];
 
@@ -362,6 +383,11 @@ describeIntegracao("paridade tela × chat do quadro.* (NOD-442, ADR-135)", () =>
       await m.d.repos.turnos.contaminar(ctx.turnoId, Date.now());
       const r = await executar(m.d, gerirQuadro, { ...ctx, quadro: m.tela.agenteId, acoes: [{ tipo: "criar_tarefa", titulo: "Do bot", agente: m.nomeCaio }] });
       if (!r.data.ok) throw new Error(JSON.stringify(r.data));
+      // Revisão 4 do PR #622 (achado 2): o bot de fora que cria a tarefa para outro não aciona ninguém; quando a pessoa a
+      // começa, o turno nasce contaminado.
+      expect(r.data).toMatchObject({ comecaram: [] });
+      expect((await m.d.repos.quadros.tarefas((await m.d.repos.quadros.doAgente(m.tela.agenteId))!.id)).find((t) => t.titulo === "Do bot")).toMatchObject({ agenteId: m.caio.agenteId, turnoId: null, deFora: true });
+      expect((await pessoa(m.d, m.tela.agenteId, [{ tipo: "mudar_tarefa", tarefa: "Do bot", status: "fazendo" }])).data).toMatchObject({ ok: true });
       expect(await m.d.repos.turnos.contaminado(await turnoDa("Do bot"))).toBe(true);
       // A tarefa que o bot contaminado escreveu em Backlog continua de fora quando a pessoa a começa depois (codex, rodada 3).
       const sujo = await executar(m.d, gerirQuadro, { ...ctx, quadro: m.tela.agenteId, acoes: [{ tipo: "criar_tarefa", titulo: "Guardada", status: "backlog" }] });

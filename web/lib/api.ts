@@ -40,7 +40,7 @@ import type { ConfirmarEmailDto, ExportacaoDto, FormasDto, MinhaContaDto, Perfil
 import type { ExecucaoRotina } from "../../src/contracts/rotina.ts";
 import type { MembroSala, Sala } from "../../src/contracts/sala.ts";
 import type { FaixaParada, Turno } from "../../src/contracts/turno.ts";
-import type { GrupoColuna, LoteQuadro, QuadroDto, StatusTarefa } from "../../src/contracts/quadro.ts";
+import type { ComentarioDto, ComentarioTarefa, GrupoColuna, LoteQuadro, QuadroDto, StatusTarefa } from "../../src/contracts/quadro.ts";
 import type { EventoLinha, TaxaDeAbertura, TrabalhoDetalheDto, TrabalhosDto } from "../../src/contracts/trabalho.ts";
 import type { DisponibilidadeLigacao, FalaLigacao, Ligacao, LigacaoCriada } from "../../src/contracts/ligacao.ts";
 import type { IaDaLigacao } from "../../src/contracts/voz.ts";
@@ -254,10 +254,15 @@ export function criarApi(escopo: Escopo) {
     criarQuadro: (agenteId: string, campos: { meta?: string | null; prazo?: string | null }) => post<MutacaoQuadro>(`agentes/${encodeURIComponent(agenteId)}/quadro`, campos),
     editarQuadro: (agenteId: string, campos: { meta?: string | null; prazo?: string | null }) => patch<MutacaoQuadro>(`agentes/${encodeURIComponent(agenteId)}/quadro`, campos),
     removerQuadro: (agenteId: string) => del<MutacaoQuadro>(`agentes/${encodeURIComponent(agenteId)}/quadro`),
-    mudarTarefa: (agenteId: string, tarefaId: string, campos: { status?: StatusTarefa; agente?: string | null; titulo?: string; descricao?: string }) =>
+    mudarTarefa: (agenteId: string, tarefaId: string, campos: { status?: StatusTarefa; agente?: string | null; titulo?: string; descricao?: string; sem_iniciar?: boolean }) =>
       patch<MutacaoQuadro>(`agentes/${encodeURIComponent(agenteId)}/quadro/tarefas/${encodeURIComponent(tarefaId)}`, campos),
     responderTarefa: (agenteId: string, tarefaId: string, resposta: string) =>
       post<MutacaoQuadro>(`agentes/${encodeURIComponent(agenteId)}/quadro/tarefas/${encodeURIComponent(tarefaId)}/resposta`, { resposta }),
+    /** NOD-417: os comentários da tarefa; o da pessoa aciona o responsável e @nome aciona outro bot. */
+    comentariosDaTarefa: (agenteId: string, tarefaId: string) =>
+      get<{ comentarios: ComentarioDto[] }>(`agentes/${encodeURIComponent(agenteId)}/quadro/tarefas/${encodeURIComponent(tarefaId)}/comentarios`),
+    comentarTarefa: (agenteId: string, tarefaId: string, texto: string) =>
+      post<MutacaoQuadro & { comentario: ComentarioTarefa }>(`agentes/${encodeURIComponent(agenteId)}/quadro/tarefas/${encodeURIComponent(tarefaId)}/comentarios`, { texto }),
     desfazerLoteQuadro: (agenteId: string, loteId: string) =>
       post<MutacaoQuadro>(`agentes/${encodeURIComponent(agenteId)}/quadro/lotes/${encodeURIComponent(loteId)}/desfazer`),
     /** NOD-448 (ADR-140): as colunas pela tela; cada uma é um lote com Desfazer. */
@@ -269,6 +274,9 @@ export function criarApi(escopo: Escopo) {
       post<MutacaoQuadro>(`agentes/${encodeURIComponent(agenteId)}/quadro/colunas/${encodeURIComponent(coluna)}/mover`, onde),
     removerColuna: (agenteId: string, coluna: string, destino?: string) =>
       del<MutacaoQuadro>(`agentes/${encodeURIComponent(agenteId)}/quadro/colunas/${encodeURIComponent(coluna)}${destino ? `?destino=${encodeURIComponent(destino)}` : ""}`),
+    /** ADR-142: a passagem da coluna (agente null tira; instrucoes null apaga). */
+    definirPassagem: (agenteId: string, coluna: string, p: { agente: string | null; instrucoes: string | null }) =>
+      pedir<MutacaoQuadro>("PUT", `${base}/agentes/${encodeURIComponent(agenteId)}/quadro/colunas/${encodeURIComponent(coluna)}/passagem`, p),
     /** NOD-380: `ate` (o id de uma fala achada na busca) faz a janela crescer até ela, mesmo fora das 200 recentes. */
     conversa: (id: string, ate?: string) => get<ConversaDto>(`conversas/${id}/mensagens${ate ? `?ate=${encodeURIComponent(ate)}` : ""}`),
     /** NOD-380: a busca de mensagens do celular; 20 por página, `cursor` vem da página anterior; `signal` cancela o pedido velho. */

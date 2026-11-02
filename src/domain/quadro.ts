@@ -1,8 +1,8 @@
 import type { ColunaQuadro, ExecucaoTarefa, GrupoColuna, IdColuna, ItemLinear, OpQuadro, TarefaQuadro } from "../contracts/quadro.ts";
 import { LIMITES_QUADRO } from "../contracts/quadro.ts";
 import {
-  COLUNAS_PADRAO, colunaDeAndamento, colunaDeEspera, colunasDe, criarColuna, ehGrupo, ehReservada, grupoDe, moverColuna, papelDe, removerColuna,
-  normalizarNome, renomearColuna, resolverColuna, saoPadrao, substituirColunas,
+  acionaNaColuna, COLUNAS_PADRAO, colunaDeAndamento, colunaDeEspera, colunasDe, criarColuna, definirPassagem, ehGrupo, ehReservada, grupoDe, moverColuna, papelDe,
+  proximaColuna, removerColuna, normalizarNome, renomearColuna, resolverColuna, responsavelDe, saoPadrao, substituirColunas,
 } from "./colunas.ts";
 
 /**
@@ -141,12 +141,13 @@ export function lerOp(v: unknown): OpQuadro | ErroOp {
       const pergunta = nulavel(v.pergunta, "pergunta", LIMITES_QUADRO.pergunta);
       if (falhou(pergunta)) return pergunta;
       if (v.excluir !== undefined && typeof v.excluir !== "boolean") return { erro: "excluir não é booleano" };
+      if (v.sem_iniciar !== undefined && typeof v.sem_iniciar !== "boolean") return { erro: "sem_iniciar não é booleano" };
       return {
         tipo: "mudar_tarefa", tarefa,
         ...(titulo !== undefined ? { titulo } : {}), ...(descricao !== undefined ? { descricao } : {}),
         ...(v.status !== undefined ? { status: (v.status as string).trim() } : {}), ...(agente !== undefined ? { agente } : {}),
         ...(pr !== undefined ? { pr_url: pr } : {}), ...(pergunta !== undefined ? { pergunta } : {}),
-        ...(v.excluir === true ? { excluir: true } : {}),
+        ...(v.excluir === true ? { excluir: true } : {}), ...(v.sem_iniciar === true ? { sem_iniciar: true } : {}),
       };
     }
     case "responder": {
@@ -155,6 +156,13 @@ export function lerOp(v: unknown): OpQuadro | ErroOp {
       const resposta = textoObrigatorio(v.resposta, "resposta", LIMITES_QUADRO.resposta);
       if (falhou(resposta)) return resposta;
       return { tipo: "responder", tarefa, resposta };
+    }
+    case "comentar": {
+      const tarefa = textoObrigatorio(v.tarefa, "tarefa", 200);
+      if (falhou(tarefa)) return tarefa;
+      const texto = textoObrigatorio(v.texto, "texto", LIMITES_QUADRO.comentario);
+      if (falhou(texto)) return texto;
+      return { tipo: "comentar", tarefa, texto };
     }
     case "criar_coluna": {
       const nome = textoObrigatorio(v.nome, "nome", LIMITES_QUADRO.coluna);
@@ -187,6 +195,21 @@ export function lerOp(v: unknown): OpQuadro | ErroOp {
       const destino = textoOpcional(v.destino, "destino", 60);
       if (falhou(destino)) return destino;
       return { tipo: "remover_coluna", coluna, ...(destino ? { destino } : {}) };
+    }
+    case "definir_passagem": {
+      const coluna = textoObrigatorio(v.coluna, "coluna", 60);
+      if (falhou(coluna)) return coluna;
+      const agente = nulavel(v.agente, "agente", 200);
+      if (falhou(agente)) return agente;
+      const instrucoes = nulavel(v.instrucoes, "instrucoes", LIMITES_QUADRO.instrucoes);
+      if (falhou(instrucoes)) return instrucoes;
+      if (agente === undefined && instrucoes === undefined) return { erro: "definir_passagem precisa de agente (ou null para tirar) ou instrucoes" };
+      return { tipo: "definir_passagem", coluna, ...(agente !== undefined ? { agente } : {}), ...(instrucoes !== undefined ? { instrucoes } : {}) };
+    }
+    case "terminei": {
+      const tarefa = textoOpcional(v.tarefa, "tarefa", 200);
+      if (falhou(tarefa)) return tarefa;
+      return { tipo: "terminei", ...(tarefa ? { tarefa } : {}) };
     }
     case "substituir_colunas": {
       if (!Array.isArray(v.colunas) || v.colunas.length === 0) return { erro: "colunas vazio" };
@@ -246,6 +269,8 @@ export function lerOps(v: unknown): OpQuadro[] | (ErroOp & { indice: number }) {
   if (remover >= 0 && ops.length > 1) return { erro: "remover_quadro vai sozinho na chamada", indice: remover };
   const troca = ops.findIndex((o) => o.tipo === "substituir_colunas");
   if (troca >= 0 && ops.length > 1) return { erro: "substituir_colunas vai sozinho na chamada", indice: troca };
+  const comentar = ops.findIndex((o) => o.tipo === "comentar");
+  if (comentar >= 0 && ops.length > 1) return { erro: "comentar vai sozinho na chamada", indice: comentar };
   return ops;
 }
 
@@ -274,7 +299,8 @@ const podeReabrirEm = (colunas: readonly ColunaQuadro[], id: IdColuna, pedido: s
  * turno das tarefas falhas e o quadro virava um laço. Começa quando, com responsável:
  * - entra em A fazer, ou ganha (troca de) responsável estando em A fazer;
  * - em Fazendo (ou numa coluna de andamento da pessoa), troca de responsável (a passagem de mão, NOD-418) ou entra
- *   vindo de fora do andamento, a não ser que o novo responsável seja o próprio autor do lote (ele já está fazendo).
+ *   vindo de fora do andamento, a não ser que o novo responsável seja o próprio autor do lote (ele já está fazendo);
+ * - nas outras colunas que andam (Em revisão), ganha ou troca de responsável, que não seja o autor.
  */
 export function deveComecar(antes: Corte | null, depois: Corte, autorAgenteId: string | null = null, colunas: readonly ColunaQuadro[] = COLUNAS_PADRAO, viva = false, colunasAntes: readonly ColunaQuadro[] = colunas): boolean {
   if (!depois.agenteId) return false;
@@ -292,6 +318,10 @@ export function deveComecar(antes: Corte | null, depois: Corte, autorAgenteId: s
     if (trocouAgente) return true;
     return !viva && grupoDe(colunasAntes, antes!.status) !== "iniciado";
   }
+  // revisto em 2026-11-02 (NOD-417): atribuir a um agente fora de Não iniciado gera um trabalho. Nas outras colunas que
+  // andam (Em revisão e as da pessoa no grupo iniciado), ganhar ou trocar de responsável aciona o novo; só entrar nelas
+  // com o mesmo responsável, não. Bloqueado e Precisa de você esperam: lá a troca não aciona ninguém.
+  if (andando(colunas, depois.status)) return trocouAgente && depois.agenteId !== autorAgenteId;
   return false;
 }
 
@@ -357,7 +387,7 @@ export function resumoDoLote(ops: readonly OpQuadro[], frasesDasColunas: readonl
     if (o.tipo === "criar_quadro") n.quadro++;
     else if (o.tipo === "criar_tarefa") n.criadas++;
     else if (o.tipo === "importar_linear") n.trazidas += o.itens.length;
-    else if (o.tipo === "mudar_tarefa") n.mudadas++;
+    else if (o.tipo === "mudar_tarefa" || o.tipo === "terminei") n.mudadas++;
     else if (o.tipo === "responder") n.respostas++;
     else if (o.tipo === "editar_quadro") { if (o.meta !== undefined) n.meta++; if (o.prazo !== undefined) n.prazo++; }
   }
@@ -379,8 +409,13 @@ export function resumoDoLote(ops: readonly OpQuadro[], frasesDasColunas: readonl
  * O turno que a tarefa abre no bot responsável (NOD-417). O texto diz o que fazer e como devolver ao quadro; o
  * conteúdo da tarefa vai cercado como dado (pode ter vindo do Linear, ADR-062).
  */
-export function entradaDaTarefa(p: { quadroId: string; meta: string | null; prazo: string | null; tarefa: Pick<TarefaQuadro, "id" | "titulo" | "descricao" | "linearId" | "linearUrl">; pessoaNome: string; deQuem: string | null }): string {
+export function entradaDaTarefa(p: {
+  quadroId: string; meta: string | null; prazo: string | null; tarefa: Pick<TarefaQuadro, "id" | "titulo" | "descricao" | "linearId" | "linearUrl">; pessoaNome: string; deQuem: string | null;
+  /** A etapa (ADR-142): a coluna com passagem ou com "o que essa etapa faz". Ausente = o texto de antes. */
+  etapa?: EtapaDaTarefa | null;
+}): string {
   const t = p.tarefa;
+  const e = p.etapa;
   return [
     `Tarefa de um quadro de ${p.pessoaNome}${p.deQuem ? `, passada por ${p.deQuem}` : ""}${p.prazo ? ` (prazo ${prazoLegivel(p.prazo)})` : ""}.`,
     `quadro: ${p.quadroId} · tarefa: ${t.id}${t.linearId ? ` · Linear ${t.linearId}${t.linearUrl ? ` (${t.linearUrl})` : ""}` : ""}`,
@@ -397,7 +432,25 @@ export function entradaDaTarefa(p: { quadroId: string; meta: string | null; praz
     "- PR mergeado: mudar_tarefa status feito;",
     "- travou e precisa da pessoa: mudar_tarefa status voce com a pergunta (ela responde no card e você volta a andar);",
     "- passar a outro bot: mudar_tarefa só com agente (nome), sem status: a tarefa segue no andamento e o novo responsável começa.",
+    // Invariante (revisão do PR 622): `etapa.instrucoes` vem só da coluna, e a coluna só a pessoa define (definir_passagem e
+    // as outras ops de coluna exigem turno limpo; tests/unit/domain/passagem-quadro.test.ts trava). Por isso fica fora da
+    // cerca, como instrução de quem pede; nada da tarefa (título, descrição) chega aqui.
+    ...(e ? [
+      `- terminou esta etapa: terminei (a tarefa vai para ${e.proxima ?? "a próxima coluna"} e, se ela tiver responsável, ele começa).`,
+      "",
+      `Etapa: ${e.nome}.${e.instrucoes ? ` O que essa etapa faz: ${e.instrucoes}` : ""}`,
+    ] : []),
   ].filter((l, i, a) => !(l === "" && a[i - 1] === "")).join("\n");
+}
+
+/** A coluna em que a tarefa começa, quando ela tem passagem ou instruções (o turno conta a etapa e o `terminei`). */
+export type EtapaDaTarefa = { nome: string; instrucoes: string | null; proxima: string | null };
+
+export function etapaDaTarefa(colunas: readonly ColunaQuadro[], status: IdColuna): EtapaDaTarefa | null {
+  const c = colunas.find((x) => x.id === status);
+  if (!c || (!c.responsavel && !c.instrucoes)) return null;
+  const prox = proximaColuna(colunas, status);
+  return { nome: c.nome, instrucoes: c.instrucoes ?? null, proxima: prox ? colunas.find((x) => x.id === prox)?.nome ?? null : null };
 }
 
 /** O turno que a resposta da pessoa abre (NOD-420): a pergunta e a resposta, e o que fazer em seguida. */
@@ -507,6 +560,8 @@ export function planejarLote(p: {
   origemConfiavel?: boolean;
   /** O autor fala num turno da pessoa (conversa/ligação): pode começar a própria tarefa (revisão rodada 3). */
   autorNaConversa?: boolean;
+  /** A tarefa que o turno do autor executa: o `terminei` sem tarefa vale para ela (ADR-142). */
+  tarefaDoTurno?: string | null;
 }): PlanoLote | (ErroOp & { indice: number }) {
   let quadro = p.quadro ? { novo: false, meta: p.quadro.meta, prazo: p.quadro.prazo } : null;
   // NOD-448: as colunas andam no plano como as tarefas; cada passo de coluna confere o conjunto inteiro.
@@ -527,6 +582,13 @@ export function planejarLote(p: {
   const pedidoDoRecomeco = new Map<string, string>();
   // As tarefas que mudaram de coluna porque a coluna saiu (remover/substituir): não acionam ninguém (decisão do Gil).
   const semAcionar = new Set<string>();
+  // Passagem por coluna (ADR-142): as que entraram numa coluna com responsável e ficaram com ele; `terminei` destrava o
+  // próprio autor (a etapa dele acabou e a seguinte é dele também).
+  const passagens = new Set<string>();
+  const terminadas = new Set<string>();
+  // Revisão 2 do PR #622: a mesma trava do `terminei` no mudar_tarefa com status. O bot que não cuida da tarefa, num turno
+  // com conteúdo de fora, a muda de coluna (a passagem troca o responsável), mas não aciona ninguém por isso.
+  const passagemSegurada = new Set<string>();
   let novas = 0;
   const tocar = (id: string) => { if (!tocadas.includes(id)) tocadas.push(id); };
   const ordemMax = () => tarefas.reduce((m, t) => Math.max(m, t.ordem), 0);
@@ -537,6 +599,14 @@ export function planejarLote(p: {
     const a = resolverAgenteDoQuadro(p.agentes, ref);
     return falhou(a) ? a : a.id;
   };
+  // Revisão 3 do PR #622: a tarefa era do autor no começo do lote (a nova, criada agora, não era).
+  const eraDoAutor = (id: string) => p.autorAgenteId !== null && antes.get(id)?.agenteId === p.autorAgenteId;
+  // Num turno com conteúdo de fora o bot não se toma uma tarefa (de outro bot ou sem responsável) nem cria uma para si:
+  // senão o `terminei` e o status da chamada seguinte o tratariam como responsável (definido em 2026-11-02: a opção mais
+  // segura; pegar tarefa sem responsável também acionaria a próxima etapa).
+  const seToma = (id: string | null, agenteId: string | null | undefined) =>
+    p.autorAgenteId !== null && p.origemConfiavel === false && agenteId === p.autorAgenteId && (id === null || !eraDoAutor(id));
+  const ERRO_SE_TOMA = "você só pega uma tarefa que não é sua num turno limpo, em que a pessoa falou com você e nada de fora entrou: peça à pessoa";
   const colunaDe = (ref: string | undefined): IdColuna | undefined | ErroOp => (ref === undefined ? undefined : resolverColuna(colunas, ref) as IdColuna | ErroOp);
   // Para onde a tarefa volta quando a pessoa responde: a coluna de antes de esperar por ela.
   const entrarEm = (t: TarefaPlanejada, status: IdColuna) => {
@@ -545,7 +615,24 @@ export function planejarLote(p: {
     if (!espera) t.voltarPara = null;
     t.status = status;
   };
-  const nova = (c: { titulo: string; descricao?: string; status?: IdColuna; agenteId: string | null; linearId?: string | null; linearUrl?: string | null }): TarefaPlanejada => {
+  // Entrou numa coluna com responsável e o passo não disse outro bot: a tarefa passa para ele (o mesmo caminho do status).
+  // Num turno de fora, o bot que não cuidava da tarefa (a do início do lote; a nova não era dele) não aciona ninguém.
+  const foraDeQuemNaoCuida = (t: TarefaPlanejada) => p.autorAgenteId !== null && p.origemConfiavel === false && (t.nova || !eraDoAutor(t.id));
+  const passar = (t: TarefaPlanejada, de: IdColuna | null, agenteDoPasso: string | null | undefined): string | null => {
+    // Revisão 4 do PR #622: a troca explícita de responsável é como a passagem: a mudança vale, sem acionar ninguém.
+    if (agenteDoPasso !== undefined) { if (agenteDoPasso !== null && foraDeQuemNaoCuida(t)) passagemSegurada.add(t.id); return null; }
+    if (t.status === de) return null;
+    const dono = responsavelDe(colunas, t.status);
+    if (!dono || !p.agentes.some((a) => a.id === dono && !a.nod)) return null;
+    // Revisão 4: a passagem da coluna do próprio autor seria se tomar a tarefa (o `terminei` seguinte acionaria a próxima etapa).
+    if (foraDeQuemNaoCuida(t) && dono === p.autorAgenteId) return ERRO_SE_TOMA;
+    // Revisão 3: o responsável do INÍCIO do lote (se tomar a tarefa no mesmo lote não destrava).
+    if (foraDeQuemNaoCuida(t)) passagemSegurada.add(t.id);
+    t.agenteId = dono;
+    passagens.add(t.id);
+    return null;
+  };
+  const nova = (c: { titulo: string; descricao?: string; status?: IdColuna; agenteId: string | null; linearId?: string | null; linearUrl?: string | null }): TarefaPlanejada | ErroOp => {
     const t: TarefaPlanejada = {
       id: `novo:${novas++}`, quadroId: p.quadroId, titulo: c.titulo, descricao: c.descricao ?? "", status: c.status ?? colunaDeEspera(colunas), voltarPara: null, agenteId: c.agenteId,
       ordem: ordemMax() + 1, linearId: c.linearId ?? null, linearUrl: c.linearUrl ?? null, prUrl: null, pergunta: null, resposta: null, deFora: p.origemConfiavel === false,
@@ -554,7 +641,8 @@ export function planejarLote(p: {
     t.terminadaEm = terminadaDepois(t, p.agora, colunas);
     tarefas.push(t);
     tocar(t.id);
-    return t;
+    const r = c.status !== undefined ? passar(t, null, c.agenteId ?? undefined) : passar(t, t.status, c.agenteId ?? undefined);
+    return r ? { erro: r } : t;
   };
   // As tarefas da coluna que saiu vão para o destino; quem esperava voltar para ela volta para onde o trabalho espera.
   const mudarColunas = (novasColunas: ColunaQuadro[], mover: ReadonlyMap<string, IdColuna>) => {
@@ -567,14 +655,59 @@ export function planejarLote(p: {
     mudouColunas = true;
   };
 
+  // Mudar uma tarefa: o ÚNICO caminho de status e responsável, da pessoa, do bot, da passagem e do `terminei` (ADR-142).
+  const mudar = (op: Extract<OpQuadro, { tipo: "mudar_tarefa" }>): string | null => {
+    const t = resolverTarefa(tarefas, op.tarefa);
+    if (falhou(t)) return t.erro;
+    if (op.excluir) {
+      tarefas.splice(tarefas.indexOf(t), 1);
+      if (tocadas.includes(t.id)) tocadas.splice(tocadas.indexOf(t.id), 1);
+      if (!t.nova) apagadas.push(t.id);
+      return null;
+    }
+    const agenteId = agenteDe(op.agente);
+    if (falhou(agenteId)) return agenteId.erro;
+    if (seToma(t.nova ? null : t.id, agenteId)) return ERRO_SE_TOMA;
+    const status = colunaDe(op.status);
+    if (falhou(status)) return status.erro;
+    // A proveniência anda com o conteúdo (codex, rodada 3): escrito por turno não confiável, a tarefa fica de fora.
+    if (p.origemConfiavel === false && (op.titulo !== undefined || op.descricao !== undefined || (op.pergunta !== undefined && op.pergunta !== null))) t.deFora = true;
+    const de = t.status;
+    if (op.titulo !== undefined) t.titulo = op.titulo;
+    if (op.descricao !== undefined) t.descricao = op.descricao;
+    if (agenteId !== undefined) t.agenteId = agenteId;
+    if (op.pergunta !== undefined) {
+      t.pergunta = op.pergunta;
+      // Uma pergunta nova pede resposta nova.
+      if (op.pergunta !== null) t.resposta = null;
+    }
+    if (op.pr_url !== undefined) {
+      t.prUrl = op.pr_url;
+      // Abriu PR = Em revisão (NOD-419), a não ser que o mesmo passo diga outro status (ou o quadro não tenha a coluna).
+      if (op.pr_url !== null && status === undefined && grupoDe(colunas, t.status) !== "feito" && colunas.some((c) => c.id === "revisao")) entrarEm(t, "revisao");
+    }
+    const reabre = status !== undefined && status === antes.get(t.id)?.status && podeReabrirEm(colunas, status, op.status);
+    if (reabre && !t.nova && !p.vivas?.has(t.id)) { recomeco.add(t.id); pedidoDoRecomeco.set(t.id, op.status!); }
+    if (status !== undefined) entrarEm(t, status);
+    const passou = passar(t, de, agenteId);
+    if (passou) return passou;
+    if (t.status === "voce" && !t.pergunta) return "status voce precisa da pergunta à pessoa";
+    // Só volta a acionar quem o passo mandou de coluna ou de mão; editar o título não (revisão 3 do PR #615).
+    if (status !== undefined || agenteId !== undefined) semAcionar.delete(t.id);
+    // "Não iniciar ainda" (o arrasto na tela): a tarefa muda de coluna e de mão, sem acionar ninguém.
+    if (op.sem_iniciar) semAcionar.add(t.id);
+    tocar(t.id);
+    return null;
+  };
+
   for (const [indice, op] of p.ops.entries()) {
     const erro = (e: string) => ({ erro: e, indice });
-    if (op.tipo === "desfazer" || op.tipo === "remover_quadro") return erro(`${op.tipo} vai sozinho na chamada`);
+    if (op.tipo === "desfazer" || op.tipo === "remover_quadro" || op.tipo === "comentar") return erro(`${op.tipo} vai sozinho na chamada`);
     // A meta entra em todo turno de tarefa do quadro: só um turno confiável a escreve (revisão rodada 3, ADR-062).
     const escreveMeta = op.tipo === "criar_quadro" || (op.tipo === "editar_quadro" && op.meta !== undefined);
     if (escreveMeta && p.origemConfiavel === false) return erro("a meta só muda num turno limpo, em que a pessoa falou com você e nada de fora entrou: peça a ela");
     // As colunas também (o nome de uma coluna entra no turno das tarefas, NOD-448): só num turno limpo.
-    const mexeColuna = op.tipo === "criar_coluna" || op.tipo === "renomear_coluna" || op.tipo === "mover_coluna" || op.tipo === "remover_coluna" || op.tipo === "substituir_colunas";
+    const mexeColuna = op.tipo === "criar_coluna" || op.tipo === "renomear_coluna" || op.tipo === "mover_coluna" || op.tipo === "remover_coluna" || op.tipo === "substituir_colunas" || op.tipo === "definir_passagem";
     if (mexeColuna && p.origemConfiavel === false) return erro("as colunas só mudam num turno limpo, em que a pessoa falou com você e nada de fora entrou: peça a ela");
     if (op.tipo === "criar_quadro") {
       if (quadro) return erro(quadro.novo ? "o quadro já foi criado neste lote" : "este bot já tem um quadro: use editar_quadro para trocar a meta");
@@ -590,9 +723,11 @@ export function planejarLote(p: {
       case "criar_tarefa": {
         const agenteId = agenteDe(op.agente);
         if (falhou(agenteId)) return erro(agenteId.erro);
+        if (seToma(null, agenteId)) return erro(ERRO_SE_TOMA);
         const status = colunaDe(op.status);
         if (falhou(status)) return erro(status.erro);
-        nova({ titulo: op.titulo, ...(op.descricao !== undefined ? { descricao: op.descricao } : {}), ...(status !== undefined ? { status } : {}), agenteId: agenteId ?? null });
+        const criada = nova({ titulo: op.titulo, ...(op.descricao !== undefined ? { descricao: op.descricao } : {}), ...(status !== undefined ? { status } : {}), agenteId: agenteId ?? null });
+        if (falhou(criada)) return erro(criada.erro);
         break;
       }
       case "importar_linear":
@@ -602,57 +737,63 @@ export function planejarLote(p: {
           const status = colunaDe(item.status);
           if (falhou(status)) return erro(status.erro);
           const ja = tarefas.find((t) => t.linearId !== null && chaveDeBusca(t.linearId) === chaveDeBusca(item.identificador));
+          if (seToma(ja && !ja.nova ? ja.id : null, agenteId)) return erro(ERRO_SE_TOMA);
           if (ja) {
             // Trazer de novo atualiza (não duplica): título, descrição e url; status e bot só se vieram.
             ja.titulo = item.titulo;
             if (item.descricao !== undefined) ja.descricao = item.descricao;
             if (item.url !== undefined) ja.linearUrl = item.url;
+            const de = ja.status;
             if (status !== undefined) entrarEm(ja, status);
             if (agenteId !== undefined) ja.agenteId = agenteId;
+            const passou = passar(ja, de, agenteId);
+            if (passou) return erro(passou);
             if (p.origemConfiavel === false) ja.deFora = true;
             // Só volta a acionar quem o passo mandou de coluna ou de mão; atualizar o título não (revisão 3 do PR #615).
             if (status !== undefined || agenteId !== undefined) semAcionar.delete(ja.id);
             tocar(ja.id);
           } else {
-            nova({ titulo: item.titulo, ...(item.descricao !== undefined ? { descricao: item.descricao } : {}), ...(status !== undefined ? { status } : {}), agenteId: agenteId ?? null, linearId: item.identificador, linearUrl: item.url ?? null });
+            const criada = nova({ titulo: item.titulo, ...(item.descricao !== undefined ? { descricao: item.descricao } : {}), ...(status !== undefined ? { status } : {}), agenteId: agenteId ?? null, linearId: item.identificador, linearUrl: item.url ?? null });
+            if (falhou(criada)) return erro(criada.erro);
           }
         }
         break;
       case "mudar_tarefa": {
-        const t = resolverTarefa(tarefas, op.tarefa);
+        const r = mudar(op);
+        if (r) return erro(r);
+        break;
+      }
+      case "terminei": {
+        // A etapa acabou: a tarefa vai para a PRÓXIMA coluna pelo mesmo mudar_tarefa da pessoa e do bot (ADR-142).
+        const ref = op.tarefa ?? p.tarefaDoTurno ?? null;
+        if (!ref) return erro("terminei sem tarefa: diga qual (tarefa) ou chame no turno da tarefa");
+        const t = resolverTarefa(tarefas, ref);
         if (falhou(t)) return erro(t.erro);
-        if (op.excluir) {
-          tarefas.splice(tarefas.indexOf(t), 1);
-          if (tocadas.includes(t.id)) tocadas.splice(tocadas.indexOf(t.id), 1);
-          if (!t.nova) apagadas.push(t.id);
-          break;
+        // Revisão do PR 622: empurrar a tarefa aciona o responsável da próxima coluna. Quem não cuida dela só faz isso num
+        // turno limpo (como o definir_passagem); o responsável termina a própria etapa; a pessoa, sempre.
+        // Revisão 3: vale o responsável do INÍCIO do lote; se tomar a tarefa antes, no mesmo lote, não destrava.
+        if (p.autorAgenteId && !eraDoAutor(t.id) && p.origemConfiavel === false) {
+          return erro("terminei de uma tarefa que não é sua só num turno limpo, em que a pessoa falou com você e nada de fora entrou: peça ao responsável ou à pessoa");
         }
-        const agenteId = agenteDe(op.agente);
-        if (falhou(agenteId)) return erro(agenteId.erro);
-        const status = colunaDe(op.status);
-        if (falhou(status)) return erro(status.erro);
-        // A proveniência anda com o conteúdo (codex, rodada 3): escrito por turno não confiável, a tarefa fica de fora.
-        if (p.origemConfiavel === false && (op.titulo !== undefined || op.descricao !== undefined || (op.pergunta !== undefined && op.pergunta !== null))) t.deFora = true;
-        if (op.titulo !== undefined) t.titulo = op.titulo;
-        if (op.descricao !== undefined) t.descricao = op.descricao;
-        if (agenteId !== undefined) t.agenteId = agenteId;
-        if (op.pergunta !== undefined) {
-          t.pergunta = op.pergunta;
-          // Uma pergunta nova pede resposta nova.
-          if (op.pergunta !== null) t.resposta = null;
-        }
-        if (op.pr_url !== undefined) {
-          t.prUrl = op.pr_url;
-          // Abriu PR = Em revisão (NOD-419), a não ser que o mesmo passo diga outro status (ou o quadro não tenha a coluna).
-          if (op.pr_url !== null && status === undefined && grupoDe(colunas, t.status) !== "feito" && colunas.some((c) => c.id === "revisao")) entrarEm(t, "revisao");
-        }
-        const reabre = status !== undefined && status === antes.get(t.id)?.status && podeReabrirEm(colunas, status, op.status);
-        if (reabre && !t.nova && !p.vivas?.has(t.id)) { recomeco.add(t.id); pedidoDoRecomeco.set(t.id, op.status!); }
-        if (status !== undefined) entrarEm(t, status);
-        if (t.status === "voce" && !t.pergunta) return erro("status voce precisa da pergunta à pessoa");
-        // Só volta a acionar quem o passo mandou de coluna ou de mão; editar o título não (revisão 3 do PR #615).
-        if (status !== undefined || agenteId !== undefined) semAcionar.delete(t.id);
-        tocar(t.id);
+        if (t.status === "voce" || t.status === "bloqueado") return erro("a tarefa espera resposta: ela volta a andar quando for respondida");
+        if (terminou(colunas, t.status)) return erro("a tarefa já terminou");
+        const proxima = proximaColuna(colunas, t.status);
+        if (!proxima) return erro("a tarefa está na última coluna: não há próxima etapa");
+        const r = mudar({ tipo: "mudar_tarefa", tarefa: t.id, status: proxima });
+        if (r) return erro(r);
+        terminadas.add(t.id);
+        break;
+      }
+      case "definir_passagem": {
+        const responsavel = agenteDe(op.agente);
+        if (falhou(responsavel)) return erro(responsavel.erro);
+        const r = definirPassagem(colunas, { coluna: op.coluna, ...(responsavel !== undefined ? { responsavel } : {}), ...(op.instrucoes !== undefined ? { instrucoes: op.instrucoes } : {}) }, new Set(p.agentes.filter((a) => a.nod).map((a) => a.id)));
+        if (falhou(r)) return erro(r.erro);
+        const dono = r.colunas.find((c) => c.id === r.id)?.responsavel;
+        const nomeDono = dono ? p.agentes.find((a) => a.id === dono)?.nome ?? dono : null;
+        frasesDasColunas.push(op.agente === undefined ? `${r.nome}: etapa descrita` : nomeDono ? `${r.nome} passa para ${nomeDono}` : `${r.nome} sem passagem`);
+        // Só o que ENTRAR daqui em diante passa: as tarefas que já estão na coluna seguem com quem estão.
+        mudarColunas(r.colunas, new Map());
         break;
       }
       case "responder": {
@@ -739,15 +880,20 @@ export function planejarLote(p: {
   }
   for (const id of tocadas) {
     const t = tarefas.find((x) => x.id === id);
-    if (!t || respondidasIds.has(id) || semAcionar.has(id)) continue;
+    if (!t || respondidasIds.has(id) || semAcionar.has(id) || passagemSegurada.has(id)) continue;
     const podeRecomecar = podeReabrirEm(colunas, t.status, pedidoDoRecomeco.get(id));
     const recomeca = recomeco.has(id) && podeRecomecar && t.agenteId !== null && (autorQueTrava === null || t.agenteId !== autorQueTrava);
-    if (!recomeca && !deveComecar(antes.get(id) ?? null, t, autorQueTrava, colunas, p.vivas?.has(id) ?? false, colunasDoInicio)) continue;
+    // A passagem (ADR-142) aciona quem a coluna nomeia; o bot que se manda para a coluna dele não se reinicia (como em
+    // Fazendo), a não ser pelo `terminei`, que só anda para a frente. revisto em 2026-11-02 (NOD-417): em Não iniciado só
+    // A fazer aciona; numa coluna de espera da pessoa (Backlog renomeado, Ideias) a passagem troca o responsável e para aí.
+    const passou = passagens.has(id) && acionaNaColuna(colunas, t.status) && t.agenteId !== null && responsavelDe(colunas, t.status) === t.agenteId && (terminadas.has(id) || autorQueTrava === null || t.agenteId !== autorQueTrava);
+    if (!recomeca && !passou && !deveComecar(antes.get(id) ?? null, t, autorQueTrava, colunas, p.vivas?.has(id) ?? false, colunasDoInicio)) continue;
     // No limite da corrente, ou além do teto de começos por lote (revisão rodada 4): fica em espera, sem turno.
     // A passagem de mão segurada no andamento também volta à espera, sem o turno velho: ninguém a deixa "andando" (codex rodada 5).
     if (p.podeComecar === false || respondidasVivas.length + comecam.length >= MAX_COMECOS_POR_LOTE) { t.status = espera; t.turnoId = null; seguradas.push(id); continue; }
     // Começa: de A fazer vai ao andamento (Fazendo, ou a 1ª de andamento da pessoa); quem já entrou no andamento fica.
-    if (grupoDe(colunas, t.status) !== "iniciado") t.status = colunaDeAndamento(colunas) ?? t.status;
+    // A coluna com passagem é a própria etapa: a tarefa fica nela (menos A fazer, que segue indo ao andamento, ADR-140).
+    if (grupoDe(colunas, t.status) !== "iniciado" && (!passou || t.status === "afazer")) t.status = colunaDeAndamento(colunas) ?? t.status;
     comecam.push(id);
   }
   // terminada_em (NOD-415, revisão 3): pelo grupo da coluna em que a tarefa ficou, com as colunas finais do lote.

@@ -27,6 +27,7 @@ import { memoriasRepo } from "./memorias.repo.ts";
 import { memoriasDiarioRepo } from "./memorias-diario.repo.ts";
 import { versoesPerfilRepo } from "./versoes-perfil.repo.ts";
 import { quadrosRepo } from "./quadros.repo.ts";
+import { quadroComentariosRepo } from "./quadro-comentarios.repo.ts";
 import { mensagensRepo } from "./mensagens.repo.ts";
 import { outboxRepo } from "./outbox.repo.ts";
 import { paradasRepo } from "./paradas.repo.ts";
@@ -79,6 +80,7 @@ export function criarRepos(conn: Conn, escopo: Escopo): Repos {
     memoriasDiario: memoriasDiarioRepo(conn, escopo),
     versoesPerfil: versoesPerfilRepo(conn, escopo),
     quadros: quadrosRepo(conn, escopo),
+    quadroComentarios: quadroComentariosRepo(conn, escopo),
     conversas: conversasRepo(conn, escopo),
     mensagens: mensagensRepo(conn, escopo),
     anexos: anexosRepo(conn, escopo),

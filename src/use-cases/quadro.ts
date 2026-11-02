@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto";
 import type { Agente } from "../contracts/agente.ts";
 import type { Executor, RuntimeEvent } from "../contracts/evento.ts";
-import type { AutorLote, ColunaQuadro, LoteQuadro, OpQuadro, Quadro, QuadroDto, ResumoQuadroParaBot, TarefaDto, TarefaQuadro } from "../contracts/quadro.ts";
+import type { AutorLote, ColunaQuadro, ComentarioTarefa, LoteQuadro, OpQuadro, Quadro, QuadroDto, ResumoQuadroParaBot, TarefaDto, TarefaQuadro } from "../contracts/quadro.ts";
 import { ehNod } from "../domain/nod.ts";
-import { type AgenteDoQuadro, chaveDeBusca, entradaDaResposta, entradaDaTarefa, execucaoDoTurno, metaCumprida, planejarLote, progresso, tarefasDaMeta, resumoDaMeta, resumoDoLote, terminou } from "../domain/quadro.ts";
-import { colunaDeEspera, colunasDe, colunasDto, papelDe } from "../domain/colunas.ts";
+import { type AgenteDoQuadro, chaveDeBusca, entradaDaResposta, entradaDaTarefa, etapaDaTarefa, execucaoDoTurno, metaCumprida, planejarLote, progresso, tarefasDaMeta, resumoDaMeta, resumoDoLote, terminou } from "../domain/quadro.ts";
+import { acionaNaColuna, colunaDeEspera, colunasDe, colunasDto, papelDe, responsavelDe } from "../domain/colunas.ts";
+import { TAREFA_PASSOU_A_VOCE } from "../domain/comentarios-quadro.ts";
 import type { FotoLote } from "../repositories/quadros.repo.ts";
 import { autoriaAgente, autoriaPessoa, ehUuid, evento, PRAZO_DECISAO_MS } from "./apoio-l7.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
@@ -51,20 +52,20 @@ export type PedidoLote = {
 export type Comecou = { tarefaId: string; agenteId: string; agenteNome: string; turnoId: string };
 
 export type ResultadoLote =
-  | { ok: true; quadro: QuadroDto | null; lote: LoteQuadro | null; comecaram: Comecou[]; desfeito: boolean; /** No limite da corrente: o que ia começar e ficou em A fazer. */ seguradas?: number; /** Um passo de coluna foi para a posição válida mais próxima (NOD-448). */ ajustada?: boolean; /** NOD-415: o quadro foi removido (o bot voltou a agente comum). */ removido?: boolean }
+  | { ok: true; quadro: QuadroDto | null; lote: LoteQuadro | null; comecaram: Comecou[]; desfeito: boolean; /** No limite da corrente: o que ia começar e ficou em A fazer. */ seguradas?: number; /** Um passo de coluna foi para a posição válida mais próxima (NOD-448). */ ajustada?: boolean; /** NOD-415: o quadro foi removido (o bot voltou a agente comum). */ removido?: boolean; /** NOD-417: o comentário gravado (op comentar) e quantos gatilhos se juntaram a um turno da fila (comentário ou lote). */ comentario?: ComentarioTarefa; juntados?: number; /** Revisão 4 do PR #622: o comentário numa tarefa fora do andamento não acionou o responsável. */ responsavelForaDoAndamento?: { agenteNome: string; coluna: string } }
   | { ok: false; erro: FalhaQuadro; detalhe: string };
 
 const falha = (erro: FalhaQuadro, detalhe: string): { data: ResultadoLote } => ({ data: { ok: false, erro, detalhe } });
 
-async function experimentoLigado(deps: Deps): Promise<boolean> {
+export async function experimentoLigado(deps: Deps): Promise<boolean> {
   return (await deps.repos.preferencias.buscar()).experimentos?.quadro === true;
 }
 
-async function agentesDaPessoa(deps: Deps): Promise<Agente[]> {
+export async function agentesDaPessoa(deps: Deps): Promise<Agente[]> {
   return (await deps.repos.agentes.listar()).filter((a) => a.ownerId === deps.escopo.pessoaId);
 }
 
-const paraAgenteDoQuadro = (a: Agente): AgenteDoQuadro => ({ id: a.id, nome: a.nome, nod: ehNod(a) });
+export const paraAgenteDoQuadro = (a: Agente): AgenteDoQuadro => ({ id: a.id, nome: a.nome, nod: ehNod(a) });
 
 /** O bot anfitrião que a ferramenta nomeou ao criar o quadro: id ou nome exato (um só); o Nod também pode ter quadro. */
 function anfitriaoPeloNome(ref: string, agentes: readonly Agente[]): string | null {
@@ -75,7 +76,7 @@ function anfitriaoPeloNome(ref: string, agentes: readonly Agente[]): string | nu
 }
 
 /** Acha o quadro: id do quadro, ou o bot anfitrião (id ou nome); sem referência, o do bot da tela ou do autor, senão o único. */
-async function acharQuadro(deps: Deps, p: PedidoLote, agentes: readonly Agente[]): Promise<Quadro | null | { ambiguo: Quadro[] }> {
+export async function acharQuadro(deps: Deps, p: PedidoLote, agentes: readonly Agente[]): Promise<Quadro | null | { ambiguo: Quadro[] }> {
   const repo = deps.repos.quadros;
   if (p.quadro !== undefined && p.quadro.trim() !== "") {
     const ref = p.quadro.trim().replace(/^@/, "");
@@ -102,18 +103,19 @@ export async function montarQuadro(deps: Pick<Deps, "repos">, q: Quadro): Promis
   const repo = deps.repos.quadros;
   const tarefas = await repo.tarefas(q.id);
   const estados = await repo.estadosDosTurnos(tarefas.map((t) => t.turnoId).filter((id): id is string => id !== null));
-  const ids = new Set([q.agenteId, ...tarefas.map((t) => t.agenteId).filter((id): id is string => id !== null)]);
+  const colunas = colunasDe(q);
+  const ids = new Set([q.agenteId, ...tarefas.map((t) => t.agenteId).filter((id): id is string => id !== null), ...colunas.map((c) => c.responsavel).filter((id): id is string => Boolean(id))]);
   const nomes = new Map<string, string>();
   for (const id of ids) {
     const a = await deps.repos.agentes.buscar(id, true);
     if (a) nomes.set(id, a.nome);
   }
   const ultimo = await repo.ultimoLote(q.id);
-  const colunas = colunasDe(q);
   const dtos: TarefaDto[] = tarefas.map((t) => ({
     ...t,
     // Só o que ainda está em jogo mostra a execução (um turno concluído de uma tarefa feita não acende nada).
-    execucao: ["fazendo", "afazer"].includes(papelDe(colunas, t.status)) ? execucaoDoTurno(t.turnoId ? estados.get(t.turnoId) : null) : null,
+    // A coluna com passagem (ADR-142) é uma etapa em andamento onde ela aciona (revisão 3: o Backlog com passagem não).
+    execucao: ["fazendo", "afazer"].includes(papelDe(colunas, t.status)) || (responsavelDe(colunas, t.status) && acionaNaColuna(colunas, t.status)) ? execucaoDoTurno(t.turnoId ? estados.get(t.turnoId) : null) : null,
     agenteNome: t.agenteId ? nomes.get(t.agenteId) ?? null : null,
   }));
   // NOD-415 (ADR-141): o que terminou antes de a meta ser posta não entra no "N de M".
@@ -121,7 +123,7 @@ export async function montarQuadro(deps: Pick<Deps, "repos">, q: Quadro): Promis
   return {
     ...q,
     agenteNome: nomes.get(q.agenteId) ?? "",
-    colunas: colunasDto(colunas),
+    colunas: colunasDto(colunas).map((c) => (c.responsavel ? { ...c, responsavelNome: nomes.get(c.responsavel) ?? null } : c)),
     tarefas: dtos,
     ultimoLote: ultimo ? { id: ultimo.id, quadroId: ultimo.quadroId, autor: ultimo.autor, resumo: ultimo.resumo, tarefaIds: ultimo.tarefaIds, desfeitoEm: ultimo.desfeitoEm, criadoEm: ultimo.criadoEm } : null,
     feitas,
@@ -137,18 +139,37 @@ export function resumoParaBot(q: QuadroDto): ResumoQuadroParaBot {
     prazo: q.prazo,
     cumprida: q.cumpridoEm !== null,
     resumo: q.resumo,
-    colunas: q.colunas.map((c) => ({ id: c.id, nome: c.nome, grupo: c.grupo })),
+    colunas: q.colunas.map((c) => ({ id: c.id, nome: c.nome, grupo: c.grupo, ...(c.responsavelNome ? { passa_para: c.responsavelNome } : {}), ...(c.instrucoes ? { instrucoes: c.instrucoes } : {}) })),
     tarefas: q.tarefas.map((t) => ({ id: t.id, titulo: t.titulo, status: t.status, agente: t.agenteNome, linear: t.linearId, pr: t.prUrl, pergunta: t.status === "voce" ? t.pergunta : null, execucao: t.execucao })),
   };
 }
 
-function eventoQuadro(deps: Deps, p: PedidoLote, q: { id: string; agenteId: string }, loteId: string | null, tarefas: readonly string[]): RuntimeEvent {
+export function eventoQuadro(deps: Deps, p: PedidoLote, q: { id: string; agenteId: string }, loteId: string | null, tarefas: readonly string[]): RuntimeEvent {
   const autoria = p.autor.tipo === "agente" ? autoriaAgente(p.autor.agenteId, deps.escopo.pessoaId, deps.escopo.pessoaId) : autoriaPessoa(deps.escopo.pessoaId);
   return evento(deps, "quadro_mudou", autoria, { quadroId: q.id, agenteId: q.agenteId, loteId, tarefas: tarefas.join(","), autor: p.autor.tipo }, { conversaId: p.conversaId ?? null, turnoId: p.turnoId ?? null });
 }
 
 /** Abre o turno do bot responsável (o começo da tarefa ou a volta depois da resposta). null = o bot não tem conversa. */
-async function abrirTurno(deps: Deps, p: PedidoLote, agente: Agente, entradaTexto: string, deFora: boolean): Promise<{ turnoId: string; events: RuntimeEvent[] } | null> {
+/**
+ * O turno na fila serve para juntar mais um gatilho (NOD-417, revisão do PR #622)? Não quando ele já atende o pedido de
+ * OUTRO bot (o `peer_pedido` dele): a entrega do resultado é pelo turno, e iria ao bot errado. `de` é quem pede agora
+ * (o bot remetente ou o autor do lote; a pessoa = null). O pedir_a_bot com a tarefa e o lote usam a mesma regra.
+ */
+export async function podeJuntarNoTurno(deps: Deps, turnoId: string, de: string | null): Promise<boolean> {
+  const quem = (await deps.repos.mensagens.pedidoDaTarefa(turnoId))?.autoria.autor_id;
+  return quem === undefined || quem === de;
+}
+
+/** A tarefa que o turno executa (o dele ou uma retomada dele), entre as do autor: o `terminei` sem tarefa vale para ela. */
+async function tarefaDoTurnoDe(deps: Deps, tarefas: readonly TarefaQuadro[], agenteId: string, turnoId: string): Promise<string | null> {
+  for (const t of tarefas) {
+    if (t.agenteId !== agenteId || !t.turnoId) continue;
+    if (t.turnoId === turnoId || (await deps.repos.quadros.cadeiaDoTurno(t.turnoId)).some((x) => x.id === turnoId)) return t.id;
+  }
+  return null;
+}
+
+export async function abrirTurno(deps: Deps, p: PedidoLote, agente: Agente, entradaTexto: string, deFora: boolean): Promise<{ turnoId: string; events: RuntimeEvent[] } | null> {
   const conversa = await deps.repos.conversas.buscarPropriaDoAgente(agente.id);
   if (!conversa) return null;
   const turno = await deps.repos.turnos.enfileirar({
@@ -373,7 +394,8 @@ async function aplicarNoQuadro(deps: Deps, p: PedidoLote, q: Quadro, agentes: re
   const podeComecar = podeRepassar(p.profundidade ?? 0);
   const estados = await repo.estadosDosTurnos(tarefasAntes.map((t) => t.turnoId).filter((id): id is string => id !== null));
   const vivas = new Set(tarefasAntes.filter((t) => t.turnoId && ["pendente", "despachando"].includes(estados.get(t.turnoId) ?? "")).map((t) => t.id));
-  const plano = planejarLote({ quadro: { meta: q.meta, prazo: q.prazo, colunas: q.colunas }, quadroId: q.id, tarefas: tarefasAntes, agentes: agentes.map(paraAgenteDoQuadro), autorAgenteId, ops: p.ops, agora, podeComecar, vivas, origemConfiavel: p.origemConfiavel !== false, autorNaConversa: p.autorNaConversa === true });
+  const tarefaDoTurno = autorAgenteId && p.turnoId && p.ops.some((o) => o.tipo === "terminei" && !o.tarefa) ? await tarefaDoTurnoDe(deps, tarefasAntes, autorAgenteId, p.turnoId) : null;
+  const plano = planejarLote({ quadro: { meta: q.meta, prazo: q.prazo, colunas: q.colunas }, quadroId: q.id, tarefas: tarefasAntes, agentes: agentes.map(paraAgenteDoQuadro), autorAgenteId, ops: p.ops, agora, podeComecar, vivas, origemConfiavel: p.origemConfiavel !== false, autorNaConversa: p.autorNaConversa === true, tarefaDoTurno });
   if ("erro" in plano) {
     // O quadro que nasceu neste lote não fica de pé sem o resto (tudo ou nada). Não acontece: criarComLote já planejou.
     if (nasceuAgora) await repo.apagar(q.id);
@@ -397,7 +419,9 @@ async function aplicarNoQuadro(deps: Deps, p: PedidoLote, q: Quadro, agentes: re
     const t = plano.tarefas.find((x) => x.id === id);
     // NOD-448: pelo papel da coluna (a da pessoa em Não iniciado espera como o Backlog; em Fechado, como Cancelado).
     const papel = t ? papelDe(colunasFinais, t.status) : null;
-    if (a?.turnoId && t && (t.agenteId !== a.agenteId || papel === "cancelado" || papel === "backlog")) await pararTurno(deps, p, a.turnoId);
+    // Revisão 3 do PR #622: espera é onde a coluna não aciona (acionaNaColuna); com passagem ou sem, o Backlog para o turno.
+    const naEspera = !!t && papel === "backlog" && !acionaNaColuna(colunasFinais, t.status);
+    if (a?.turnoId && t && (t.agenteId !== a.agenteId || papel === "cancelado" || naEspera)) await pararTurno(deps, p, a.turnoId);
   }
   for (const id of plano.tocadas) {
     const t = plano.tarefas.find((x) => x.id === id);
@@ -417,6 +441,7 @@ async function aplicarNoQuadro(deps: Deps, p: PedidoLote, q: Quadro, agentes: re
   const deQuem = autorAgenteId ? porAgente.get(autorAgenteId)?.nome ?? null : null;
   const comecaram: Comecou[] = [];
   const events: RuntimeEvent[] = [];
+  let juntados = 0;
   const abrir = async (idPlano: string, texto: (t: TarefaQuadro) => string) => {
     const id = idReal.get(idPlano) ?? idPlano;
     const t = gravadas.get(id);
@@ -426,6 +451,24 @@ async function aplicarNoQuadro(deps: Deps, p: PedidoLote, q: Quadro, agentes: re
     if (!agente) {
       const volta = await repo.salvarTarefa(id, { ...t, status: espera, turnoId: null, terminadaEm: null });
       if (volta) gravadas.set(id, volta);
+      return;
+    }
+    // Um trabalho por gatilho (NOD-417): se o mesmo agente já tem um turno na fila para esta tarefa (o da tarefa ou o de
+    // um comentário), o gatilho se junta a ele em vez de abrir outro.
+    // Revisão 2 do PR #622: a mesma regra do pedir_a_bot com a tarefa (o turno que atende o pedido de outro bot não serve),
+    // e o turno juntado fica com a maior profundidade (o gatilho não sai do limite da corrente por juntar).
+    let naFila = await deps.repos.quadroComentarios.turnoNaFila(id, agente.id, t.turnoId);
+    if (naFila && !(await podeJuntarNoTurno(deps, naFila.id, autorAgenteId))) naFila = null;
+    // Juntar num turno de comentário (não o da própria tarefa): a menção pedia para não mexer no status; agora pode.
+    const junto = naFila && naFila.id !== t.turnoId ? `${TAREFA_PASSOU_A_VOCE}\n\n${texto(t)}` : texto(t);
+    const juntada = naFila ? await deps.repos.turnos.juntarEntrada(naFila.id, junto, [], { profundidade: proximaProfundidade(p.profundidade ?? 0) }) : null;
+    if (juntada) {
+      if (t.deFora || p.origemConfiavel === false) await deps.repos.turnos.contaminar(juntada.id, deps.agora());
+      if (t.turnoId && t.turnoId !== juntada.id) await pararTurno(deps, p, t.turnoId);
+      const salva = await repo.salvarTarefa(id, { ...t, turnoId: juntada.id });
+      if (salva) gravadas.set(id, salva);
+      comecaram.push({ tarefaId: id, agenteId: agente.id, agenteNome: agente.nome, turnoId: juntada.id });
+      juntados++;
       return;
     }
     // Um turno novo para a tarefa: o anterior não roda em dobro (na fila, cancela; rodando, pede a interrupção).
@@ -445,7 +488,7 @@ async function aplicarNoQuadro(deps: Deps, p: PedidoLote, q: Quadro, agentes: re
   const meta = plano.quadro.meta;
   const prazo = plano.quadro.prazo;
   for (const id of plano.comecam) {
-    await abrir(id, (t) => entradaDaTarefa({ quadroId: q.id, meta, prazo, tarefa: t, pessoaNome, deQuem: deQuem && t.agenteId !== autorAgenteId ? deQuem : null }));
+    await abrir(id, (t) => entradaDaTarefa({ quadroId: q.id, meta, prazo, tarefa: t, pessoaNome, deQuem: deQuem && t.agenteId !== autorAgenteId ? deQuem : null, etapa: etapaDaTarefa(colunasFinais, t.status) }));
   }
   for (const r of plano.respondidas) {
     await abrir(r.id, (t) => entradaDaResposta({ quadroId: q.id, tarefa: t, resposta: r.resposta, pessoaNome }));
@@ -494,7 +537,7 @@ async function aplicarNoQuadro(deps: Deps, p: PedidoLote, q: Quadro, agentes: re
   if (risco) events.push(risco);
   // No limite da corrente: o que ia começar e ficou em A fazer (o bot avisa; a pessoa começa pelo quadro).
   const seguradas = plano.seguradas.length;
-  return { data: { ok: true, quadro: await montarQuadro(deps, atualizado), lote, comecaram, desfeito: false, ...(seguradas ? { seguradas } : {}), ...(plano.ajustada ? { ajustada: true } : {}) }, events };
+  return { data: { ok: true, quadro: await montarQuadro(deps, atualizado), lote, comecaram, desfeito: false, ...(seguradas ? { seguradas } : {}), ...(plano.ajustada ? { ajustada: true } : {}), ...(juntados ? { juntados } : {}) }, events };
 }
 
 /** A aba Quadro de um bot: o quadro dele montado (ou null, ainda sem quadro). Experimento desligado = nao_permitido. */

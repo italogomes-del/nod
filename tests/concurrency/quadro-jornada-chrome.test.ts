@@ -26,6 +26,7 @@ const descrever = chrome ? describe : describe.skip;
 
 const ENTRADA = `
 import { criarQuadroNaTela } from "./web/lib/quadro-na-tela.ts";
+import { COLUNAS_PADRAO_DA_WEB } from "./web/lib/colunas.ts";
 const agora = 1_700_000_000_000;
 const tarefa = (id, titulo, status, extra = {}) => ({ id, quadroId: "q1", titulo, descricao: "Descrição de " + titulo, status, agenteId: "a", ordem: Number(id.slice(1)),
   linearId: null, linearUrl: null, prUrl: null, pergunta: null, resposta: null, deFora: false, turnoId: null, criadoEm: agora, mudadoEm: agora, terminadaEm: null,
@@ -47,6 +48,9 @@ const api = {
   conversa: async () => ({ mensagens: structuredClone(mensagens) }),
   enviar: async (c, texto) => { chamadas.push(["enviar", texto]); mensagens.push(fala("m" + mensagens.length, "eu", texto)); return { ok: true, ids: { mensagem: "m" + (mensagens.length - 1) } }; },
   responderTarefa: async (a, id, resposta) => { chamadas.push(["responder", id, resposta]); return { ok: true, quadro: q, lote: null, desfeito: false }; },
+  // NOD-417: o card que muda de coluna (o mesmo mudar_tarefa da pessoa e do agente).
+  mudarTarefa: async (a, id, campos) => { chamadas.push(["mudar", id, campos]); q = { ...q, tarefas: q.tarefas.map((t) => t.id === id ? { ...t, status: campos.status } : t) }; return { ok: true, quadro: q, lote: null, comecaram: [], desfeito: false }; },
+  definirPassagem: async () => ({ ok: true, quadro: q, lote: null, desfeito: false }),
   desfazerLoteQuadro: async (a, lote) => { chamadas.push(["desfazer", lote]); q = { ...q, tarefas: q.tarefas.filter((t) => t.id !== "t5"), ultimoLote: null }; return { ok: true, quadro: q, lote: null, desfeito: true }; },
 };
 window.__chamadas = chamadas;
@@ -68,12 +72,16 @@ window.__mudouLa = () => {
   q = { ...q, tarefas: q.tarefas.map((t) => t.id === "t1" ? { ...t, status: "revisao", mudadoEm: agora + 5 } : t) };
   window.__q.aoFrame({ streamId: "s", seq: 3, pessoaId: "p", tipo: "quadro.mudou", dados: { quadroId: "q1", agenteId: "a", loteId: "L2", tarefas: "t1" } });
 };
+/** NOD-417: Fazendo com responsável (o Caio): mover para lá pede confirmação. */
+window.__comPassagem = () => {
+  q = { ...q, colunas: COLUNAS_PADRAO_DA_WEB.map((c) => c.id === "fazendo" ? { ...c, responsavel: "c", responsavelNome: "Caio" } : { ...c }) };
+};
 window.__montar = () => {
   document.getElementById("timeline").innerHTML = "<p>conversa</p>";
   document.getElementById("composer").innerHTML = "<textarea></textarea>";
   const ad = '<span class="avatar">A</span>';
   const t = criarQuadroNaTela(document, { reduzido: () => true, dados: { api: () => api, agente: (id) => id === "a" ? { avatar: ad, nome: "Ada" } : null,
-    hora: () => "10:00", recolherEm: 60_000, juntarEm: 10 } });
+    hora: () => "10:00", recolherEm: 60_000, juntarEm: 10, agentes: () => [{ id: "a", nome: "Ada" }, { id: "c", nome: "Caio" }] } });
   t.sincronizar({ chave: "c1", nome: "Ada", agenteId: "a" });
   t.trocar("quadro");
   window.__q = t;
@@ -111,7 +119,7 @@ descrever("NOD-442 no Chrome real", () => {
     throw new Error(`não chegou: ${expr}`);
   };
 
-  async function abrir(largura: number): Promise<void> {
+  async function abrir(largura: number, passagem = false): Promise<void> {
     const celular = largura < 700;
     await cdp.enviar("Emulation.setDeviceMetricsOverride", { width: largura, height: celular ? 844 : 900, deviceScaleFactor: 1, mobile: celular });
     await cdp.enviar("Emulation.setTouchEmulationEnabled", { enabled: celular, maxTouchPoints: celular ? 5 : 1 });
@@ -121,6 +129,7 @@ descrever("NOD-442 no Chrome real", () => {
     ] });
     await cdp.enviar("Page.navigate", { url });
     await ate("window.__montar");
+    if (passagem) await avaliar(cdp, "window.__comPassagem()");
     await avaliar(cdp, "window.__montar()");
     await ate(`document.querySelector("#quadro .qd-card")`);
   }
@@ -195,6 +204,24 @@ descrever("NOD-442 no Chrome real", () => {
     expect(Math.abs(e.caixa.x - 195)).toBeLessThanOrEqual(2);
     expect(e.rolagem).toBeLessThanOrEqual(0);
   });
+
+  for (const [botao, semIniciar] of [["Não iniciar ainda", true], ["Confirmar", false]] as const) {
+    it(`NOD-417 · Mover para… uma coluna com responsável pede confirmação; "${botao}" manda ${semIniciar ? "sem_iniciar" : "sem o sem_iniciar"}`, async () => {
+      await abrir(1440, true);
+      await avaliar(cdp, `[...document.querySelectorAll('#quadro [data-act="tarefa-mover"][data-tarefa="t3"]')].find((b) => b.offsetParent).click()`);
+      await ate(`[...document.querySelectorAll('#quadro [data-act="tarefa-mover-para"][data-coluna="fazendo"]')].some((b) => b.offsetParent)`);
+      await avaliar(cdp, `[...document.querySelectorAll('#quadro [data-act="tarefa-mover-para"][data-coluna="fazendo"]')].find((b) => b.offsetParent).click()`);
+      // A confirmação aparece antes: nada foi mandado ainda.
+      const sel = semIniciar ? "col-soltar-sem" : "col-soltar";
+      await ate(`[...document.querySelectorAll('#quadro [data-act="${sel}"]')].some((b) => b.offsetParent)`);
+      expect(await avaliar(cdp, "window.__chamadas.filter((c) => c[0] === 'mudar').length")).toBe(0);
+      await avaliar(cdp, `[...document.querySelectorAll('#quadro [data-act="${sel}"]')].find((b) => b.offsetParent).click()`);
+      await ate(`window.__chamadas.some((c) => c[0] === "mudar")`);
+      expect(await avaliar(cdp, "window.__chamadas.filter((c) => c[0] === 'mudar')")).toEqual([
+        ["mudar", "t3", semIniciar ? { status: "fazendo", sem_iniciar: true } : { status: "fazendo" }],
+      ]);
+    });
+  }
 
   it("a resposta da tarefa em Você sai pela rota de responder, com o texto da pessoa", async () => {
     await abrir(1440);

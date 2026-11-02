@@ -2,11 +2,13 @@ import type { Agente } from "../contracts/agente.ts";
 import type { Mensagem } from "../contracts/mensagem.ts";
 import type { CasoNod } from "../contracts/servicos.ts";
 import type { Turno } from "../contracts/turno.ts";
-import { cotaSegura } from "../domain/cota-da-ia.ts";
-import { entradaDoPedido } from "../domain/delegacao.ts";
+import { cotaSegura, fraseDaEsperaDaCota } from "../domain/cota-da-ia.ts";
+import { blocoDaPessoa, entradaDoPedido } from "../domain/delegacao.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { podeRepassar, proximaProfundidade } from "../domain/profundidade.ts";
 import { cicloDoPedido, horarioDoPedido, instrucaoEsperaCircular, instrucaoJaPedido, instrucaoPedidoRecebido, instrucaoPedidosAbertos, repeticaoDoPedido } from "../domain/triagem.ts";
+import { comentarTarefa } from "./comentar-tarefa.ts";
+import { podeJuntarNoTurno, type FalhaQuadro } from "./quadro.ts";
 import { agenteVisivel, autoriaAgente, autorizarAlvo, evento, PRAZO_DECISAO_MS, resolverAlvo } from "./apoio-l7.ts";
 import { JANELA_PEDIDOS_ABERTOS_MS } from "./pedidos-abertos.ts";
 import type { Deps } from "./tipos.ts";
@@ -54,6 +56,103 @@ async function colegasLivres(deps: Deps, remetente: Agente, alvoId: string, agor
   const colegas = (await deps.repos.agentes.listar()).filter((a) => ehColega(remetente, a) && a.id !== alvoId);
   const livres = new Set(await deps.repos.pedidosDeColega.livres(colegas.map((a) => a.id), agora));
   return colegas.filter((a) => livres.has(a.id));
+}
+
+/** Os erros do pedido com a tarefa (NOD-417, emenda da ADR-142): cada um diz o que corrigir; nada é pedido. */
+type ErroNaTarefa = Extract<Awaited<ReturnType<typeof pedirABot>>["data"], { ok: false }>["erro"];
+const ERRO_DO_QUADRO: Record<FalhaQuadro, ErroNaTarefa> = { experimento_desligado: "experimento_desligado", sem_quadro: "sem_quadro", nao_encontrado: "tarefa_invalida", entrada_invalida: "tarefa_invalida" };
+const CORRECAO: Record<ErroNaTarefa, string> = {
+  experimento_desligado: "O quadro está desligado nos experimentos da pessoa: chame sem a tarefa.",
+  sem_quadro: "Diga o quadro certo ou chame sem a tarefa.",
+  tarefa_invalida: "Corrija a tarefa (o id ou o título exato) ou chame sem ela.",
+  colega_fora_do_quadro: "Chame sem a tarefa para pedir na conversa dele.",
+  colega_nao_acionado: "Chame sem a tarefa para pedir na conversa dele.",
+  espera_circular: "",
+  ja_pedido: "",
+};
+// Revisão 3 do PR #622: no colega_nao_acionado o comentário já ficou na tarefa; "Nada foi pedido" mentia.
+const recusa = (erro: ErroNaTarefa, detalhe: string) => ({
+  data: { ok: false as const, erro, instrucao: `${detalhe}. ${erro === "colega_nao_acionado" ? "O comentário ficou na tarefa, mas nenhum pedido ficou aberto." : "Nada foi pedido."} ${CORRECAO[erro]}` },
+});
+
+/**
+ * pedir_a_bot com a tarefa do quadro como contexto (definido em 2026-11-02, NOD-417; revisto na revisão do PR #622, emenda
+ * da ADR-142): o pedido vira um comentário do remetente na tarefa e aciona o colega por ele, sem trocar o responsável. Fora
+ * isso é o MESMO pedido do caminho sem tarefa: a mensagem da pessoa vai junto, o `peer_pedido` fica no turno de quem recebe
+ * e o `handoff` na conversa de quem pede (a espera circular e o `ja_pedido` o veem, o painel e o varredor de esperas
+ * também), e o resultado volta a quem pediu pela entrega de sempre (entregarRespostaPeer) quando o turno do colega acaba.
+ * Não passa pela triagem na conversa do colega: o turno é o da tarefa. O comentário é texto de bot (ADR-047): fica
+ * `deFora` e o turno de quem recebe nasce contaminado. O responsável da tarefa, se não é o remetente, também é acionado.
+ * Um trabalho por gatilho: com um turno do colega na fila para a tarefa, o pedido se junta a ele — menos quando esse turno
+ * já atende o pedido de outro bot (o resultado iria ao bot errado). `tarefa_id` é sempre o turno do colega, como sem tarefa.
+ */
+async function pedirNaTarefa(
+  deps: Deps,
+  input: Parameters<typeof pedirABot>[1],
+  c: { remetente: Agente; alvo: Agente; turnoRemetente: Turno; pedido: string; contexto: string | null; tarefa: string; aviso: string },
+): ReturnType<typeof pedirABot> {
+  // O quadro é da pessoa: um colega de outro dono (por procuração) não está nele e o comentário não o acionaria.
+  if (c.alvo.ownerId !== deps.escopo.pessoaId) return recusa("colega_fora_do_quadro", `${c.alvo.nome} não está no quadro desta pessoa`);
+  const pessoaId = deps.escopo.pessoaId;
+  const pessoaNome = (await deps.repos.pessoas.buscar(pessoaId))?.nome ?? "a pessoa";
+  const pedidos = (await mensagensDaPessoa(deps, c.turnoRemetente)).map((m) => m.texto);
+  const volta = `Este pedido é de ${c.remetente.nome} (pedir_a_bot): responda na tarefa e termine com o resultado, que volta a ${c.remetente.nome}.`;
+  const limpo = c.turnoRemetente.entradaConfianca === "confiavel" && !(await deps.repos.turnos.contaminado(c.turnoRemetente.id));
+  const texto = c.contexto ? `${c.pedido}\n\n${c.contexto}` : c.pedido;
+  const r = await comentarTarefa(
+    deps,
+    { autor: { tipo: "agente", agenteId: c.remetente.id }, ops: [], executor: c.turnoRemetente.executor, turnoId: c.turnoRemetente.id, conversaId: input.conversaId, profundidade: c.turnoRemetente.profundidade, origemConfiavel: limpo },
+    { tipo: "comentar", tarefa: c.tarefa, texto },
+    {
+      pedido: {
+        alvoId: c.alvo.id,
+        complemento: [blocoDaPessoa(pessoaNome, pedidos), volta].filter(Boolean).join("\n\n"),
+        podeJuntar: (turnoId) => podeJuntarNoTurno(deps, turnoId, c.remetente.id),
+      },
+    },
+  );
+  if (!r.data.ok) return recusa(ERRO_DO_QUADRO[r.data.erro], r.data.detalhe);
+  const doAlvo = r.data.comecaram.find((x) => x.agenteId === c.alvo.id);
+  // O remetente está abaixo do limite da corrente (turnoDoRemetente) e o colega é da pessoa: sem turno é estado quebrado,
+  // e o lançamento desfaz o comentário junto.
+  // Revisão 2 do PR #622: sem turno do colega (sem conversa própria, fora dos acionáveis), o erro é tipado como os outros
+  // e o bot corrige a chamada; o comentário fica na tarefa (é da tarefa), mas nenhum pedido aberto é registrado.
+  const turno = doAlvo ? await deps.repos.turnos.buscar(doAlvo.turnoId) : null;
+  if (!turno) return recusa("colega_nao_acionado", `${c.alvo.nome} não pôde ser acionado na tarefa`);
+  const autoria = autoriaAgente(c.remetente.id, pessoaId, pessoaId);
+  const jaPediu = (await deps.repos.mensagens.pedidoDaTarefa(turno.id))?.autoria.autor_id === c.remetente.id;
+  const mensagem = jaPediu ? null : await deps.repos.mensagens.criar({
+    conversaId: turno.conversaId,
+    turnoId: turno.id,
+    autoria,
+    kind: "texto",
+    texto,
+    payload: { kind: "peer_pedido", conversaOrigemId: input.conversaId, turnoOrigemId: input.turnoId, nome: c.remetente.nome },
+    confianca: "nao_confiavel",
+  });
+  const handoff = await deps.repos.mensagens.criar({
+    conversaId: input.conversaId,
+    turnoId: input.turnoId,
+    autoria,
+    kind: "handoff",
+    texto: `${c.remetente.nome} pediu a ${c.alvo.nome}: ${c.pedido}`,
+    payload: { kind: "handoff", de: c.remetente.id, para: c.alvo.id, motivo: c.pedido, tarefaId: turno.id, nomePara: c.alvo.nome },
+    confianca: "nao_confiavel",
+  });
+  const juntou = r.data.juntados ? " (o comentário se juntou ao trabalho dele que já estava na fila)" : "";
+  // A mesma checagem da cota do pedido sem tarefa (NOD-302; revisão 2 do PR #622): o turno da tarefa também é fundo novo, e
+  // quem pediu sabe que ele espera e até quando.
+  const cota = await situacaoDoBotPelaCota(deps, c.alvo);
+  const espera = cota.situacao !== "livre" && cota.ia && cotaSegura("fundo_novo", cota.situacao) ? ` Ele ainda não começa: ${fraseDaEsperaDaCota({ ia: cota.ia, situacao: cota.situacao, voltaEm: cota.voltaEm, agora: deps.agora() })}. Diga isso a quem espera a resposta.` : "";
+  const instrucao = `Pedido gravado como comentário na tarefa e ${c.alvo.nome} foi acionado${juntou}.${espera} A resposta chega a você num novo turno; diga em uma frase o que pediu e encerre.`;
+  return {
+    data: { ok: true, tarefa_id: turno.id, instrucao: [c.aviso, instrucao].filter(Boolean).join(" "), livres: [] },
+    events: [
+      ...(r.events ?? []),
+      evento(deps, "mensagem_criada", autoria, { mensagemId: handoff?.id ?? null, kind: "handoff", tarefaId: turno.id }, { conversaId: input.conversaId, turnoId: input.turnoId }),
+      ...(mensagem ? [evento(deps, "mensagem_criada", autoria, { mensagemId: mensagem.id, kind: "texto", tarefaId: turno.id }, { conversaId: turno.conversaId, turnoId: turno.id })] : []),
+    ],
+  };
 }
 
 /**
@@ -106,6 +205,8 @@ export const pedirABot: CasoNod<Deps, "pedir_a_bot"> = async (deps, input) => {
   if (repeticao.tipo === "recusa") {
     return { data: { ok: false, erro: "ja_pedido", instrucao: instrucaoJaPedido(alvo.nome, repeticao, horarioDoPedido(repeticao.desde, agora)) } };
   }
+  const aviso = repeticao.tipo === "aviso" ? instrucaoPedidosAbertos(alvo.nome, repeticao.abertos, horarioDoPedido(repeticao.desde, agora)) : "";
+  if (input.tarefa?.trim()) return pedirNaTarefa(deps, input, { remetente, alvo, turnoRemetente, pedido, contexto, tarefa: input.tarefa.trim(), aviso });
   const pessoaId = deps.escopo.pessoaId;
   const pessoaNome = (await deps.repos.pessoas.buscar(pessoaId))?.nome ?? "a pessoa";
   const pedidos = (await mensagensDaPessoa(deps, turnoRemetente)).map((m) => m.texto);
@@ -150,7 +251,6 @@ export const pedirABot: CasoNod<Deps, "pedir_a_bot"> = async (deps, input) => {
     confianca: "nao_confiavel",
   });
   const livres = await colegasLivres(deps, remetente, alvo.id, agora);
-  const aviso = repeticao.tipo === "aviso" ? instrucaoPedidosAbertos(alvo.nome, repeticao.abertos, horarioDoPedido(repeticao.desde, agora)) : "";
   // NOD-302 (continuação da NOD-253): a cota da IA de quem recebe segura o fundo novo (a triagem do pedido é fundo novo,
   // tipoParaCota) — quem pediu sabe que o pedido espera e até quando.
   const cota = await situacaoDoBotPelaCota(deps, alvo);

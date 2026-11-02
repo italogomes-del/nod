@@ -790,11 +790,16 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
 
     /** Junta mais uma entrada à retomada que ainda está na fila. Não toca no estado (sem-requeue segue valendo). */
     /** NOD-285 (2026-10-15): com `anexos`, eles se somam aos da retomada na fila (união, sem repetir, na ordem). */
-    async juntarEntrada(id: string, texto: string, anexos: readonly string[] = []): Promise<Turno | null> {
+    /**
+     * NOD-417 (revisão 2 do PR #622): o turno que já teve a parada pedida não recebe mais nada (0 linhas: quem chama abre um
+     * turno novo); com `profundidade`, o turno fica com a maior das duas (o gatilho juntado não sai do limite da corrente).
+     */
+    async juntarEntrada(id: string, texto: string, anexos: readonly string[] = [], opcoes: { profundidade?: Profundidade } = {}): Promise<Turno | null> {
       const [l] = await conn<Linha[]>`
         update turnos set entrada_texto = entrada_texto || ${`\n\n${texto}`},
-          entrada_anexos = array(select a from unnest(entrada_anexos || ${anexos as string[]}::uuid[]) with ordinality as u(a, i) group by a order by min(i))
-        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and estado = 'pendente'
+          entrada_anexos = array(select a from unnest(entrada_anexos || ${anexos as string[]}::uuid[]) with ordinality as u(a, i) group by a order by min(i)),
+          profundidade = greatest(profundidade, ${opcoes.profundidade ?? 0})
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and estado = 'pendente' and parar_solicitado_em is null
         returning ${conn.unsafe(COLUNAS)}`;
       return l ? paraTurno(l) : null;
     },

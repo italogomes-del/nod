@@ -109,6 +109,7 @@ import { atualizarBorda, ligarBorda, ligarEtiqueta } from "./lib/borda-barra.ts"
 import { proximoDoSegmentado } from "./lib/linha-config.ts";
 import { conversaAVista, ehChaveDeExperimento, quadroDoEstado } from "./lib/quadro.ts";
 import { criarQuadroNaTela } from "./lib/quadro-na-tela.ts";
+import { agentesDaPassagem } from "./lib/colunas.ts";
 import { confiar as confiarHtml } from "./telas/quadro.ts";
 import type { DadosConta } from "./telas/config-conta.ts";
 import { estadoMascoteNaConversa, mascoteComAviso, proximaViradaDoMascote } from "./lib/mascote.ts";
@@ -446,6 +447,8 @@ const quadroNaTela = criarQuadroNaTela(document, {
   dados: {
     api: () => api,
     agente: (id) => { const b = botGerido(id); return b ? { avatar: confiarHtml(iconeAgente(b, "sm")), nome: b.nome } : null; },
+    // ADR-142: quem pode receber a passagem de uma coluna (os bots da pessoa).
+    agentes: () => agentesDaPassagem(estado.frota?.agentes ?? []),
     hora: horaDaFala,
   },
 });
