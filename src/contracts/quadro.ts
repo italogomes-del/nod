@@ -150,6 +150,10 @@ export type OpQuadro =
   | { tipo: "responder"; tarefa: string; resposta: string }
   /** NOD-417: um comentário na tarefa (sozinho no lote, sem Desfazer). Aciona o responsável e os @mencionados, nunca o autor. */
   | { tipo: "comentar"; tarefa: string; texto: string }
+  /** NOD-418: o trabalho da tarefa (sozinhos no lote, sem Desfazer). Repetir abre um novo; cancelar para o vivo; o recado entra nele. */
+  | { tipo: "repetir_trabalho"; tarefa: string }
+  | { tipo: "cancelar_trabalho"; tarefa: string }
+  | { tipo: "recado"; tarefa: string; texto: string }
   | { tipo: "editar_quadro"; meta?: string | null; prazo?: string | null }
   | { tipo: "desfazer"; lote?: string }
   /** NOD-415 (ADR-141): o bot volta a ser um agente comum. Apaga o quadro, as tarefas e o histórico; conversa e memória ficam. */
@@ -180,8 +184,8 @@ export type ArgsGerirQuadro = {
 };
 
 export type ResultadoGerirQuadro =
-  | { ok: true; quadro: ResumoQuadroParaBot | null; lote_id: string | null; comecaram: { tarefa_id: string; agente: string }[]; instrucao: string; ajustada?: boolean; proposta_id?: string; movida?: { tarefa_id: string; codigo: string; codigo_antigo: string }; /** NOD-430: o link de cada tarefa tocada. */ tarefas?: LinkDeTarefa[]; aplicada?: boolean }
-  | { ok: false; erro: "experimento_desligado" | "sem_quadro" | "entrada_invalida" | "nao_encontrado" | "conflito"; instrucao: string };
+  | { ok: true; quadro: ResumoQuadroParaBot | null; lote_id: string | null; comecaram: { tarefa_id: string; agente: string }[]; instrucao: string; ajustada?: boolean; proposta_id?: string; movida?: { tarefa_id: string; codigo: string; codigo_antigo: string }; /** NOD-430: o link de cada tarefa tocada. */ tarefas?: LinkDeTarefa[]; aplicada?: boolean; /** NOD-418: o trabalho que ficou (repetir, cancelar, recado). */ trabalho?: { numero: number | null; estado: string | null } }
+  | { ok: false; erro: "experimento_desligado" | "sem_quadro" | "entrada_invalida" | "nao_encontrado" | "estado_invalido" | "conflito"; instrucao: string };
 
 /** O quadro como o bot o lê mora em quadro-resumo-bot.ts (teto de linhas dos contratos, merge da main no PR #623). */
 export type { ResumoQuadroParaBot } from "./quadro-resumo-bot.ts";

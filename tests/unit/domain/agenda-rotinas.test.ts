@@ -120,7 +120,8 @@ describe("projetarAgenda (NOD-85)", () => {
     const variadas = contar(Array.from({ length: n }, (_, i) => rotina(`v${i}`, `${i % 60} ${Math.floor(i / 60) % 24} * * *`)));
     expect(variadas.p.cortado.size).toBe(50);
     expect(variadas.chamadas).toBeLessThanOrEqual(uma.chamadas * TETO_PROJECOES_POR_PEDIDO * 2);
-  });
+    // O teste mede chamadas, não tempo: ~1,3 s local, 4,5–6,8 s no runner sob carga (main 41441244385, PR 625).
+  }, 30_000);
 
   it("diaNoFuso usa o fuso pedido", () => {
     expect(diaNoFuso(Date.parse("2026-10-30T02:00Z"), FUSO)).toBe("2026-10-29");

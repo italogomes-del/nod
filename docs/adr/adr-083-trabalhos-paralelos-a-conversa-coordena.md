@@ -38,7 +38,8 @@ Cowork Dispatch (uma conversa coordenadora abre uma thread por trabalho), Codex 
    `mensagemNoMeio`, `retomaSessao`, `bifurcaSessao`, `processoProprio` e `terminal`; o servidor lê por
    `capacidadesDe(harness)`. Harness desconhecido não tem nenhuma, e todo caminho tem a versão "sem a capacidade".
    Se a entrada está aberta agora continua sendo o `aceitaMensagens()` do adapter.
-6. **Mensagem no meio (emenda da ADR-067):** só entra em turno de conversa (nunca em rotina, colega ou trabalho);
+6. **Mensagem no meio (emenda da ADR-067):** só entra em turno de conversa (nunca em rotina, colega ou trabalho; a
+   exceção é o recado do dono da tarefa do quadro ao trabalho dela, emenda de 2026-11-02, NOD-418, no fim);
    chega com moldura ("responda a ela primeiro"); a primeira fala depois dela é sempre gravada; o CLI que morre entre
    absorver e escrever devolve a mensagem para `pendente`. O Codex do chat roda no app-server quando a sonda o acha
    (`turn/steer`), com `codex exec` como reserva.
@@ -148,3 +149,44 @@ Decisão do Marlon (19/10, revisão da NOD-225): o Parar da barra do chat princi
   (`arquivarResumo(..., { manterAtual })`); se um recado do dono, uma decisão ou um pedido novo desfaz a conversa e a
   frente devolve outro resumo, o retorno complementar (NOD-282 G7) sai como antes.
 - **Gatilho de reversão:** a moldura levar o bot a trocar o pedido da frente pela conversa.
+
+## Emenda (2026-11-02, NOD-418): o recado do dono entra no trabalho da tarefa do quadro
+
+- **Antes:** o §6 dizia que a mensagem no meio nunca entra em turno de rotina, colega ou trabalho.
+- **Agora, a única exceção:** o recado do dono da tarefa do quadro, mandado pela tela ("Recado ao agente") ou pela op
+  `recado` do `gerir_quadro`, entra no turno vivo do trabalho dessa tarefa. Rotina, colega e qualquer outro trabalho
+  seguem sem mensagem no meio. A op `recado` só vale num turno de conversa em que a pessoa falou com o bot e nada de
+  fora entrou (profundidade 0, sem rotina, sem tarefa, sem colega, sem contaminação); fora disso é `entrada_invalida`.
+- **Para onde vai:** o trabalho vivo mais recente da tarefa que está rodando (o do turno que a tarefa guarda ou o de um
+  comentário). A renovação da ponte (`ofertarRecadosDoQuadro`) só oferece recado a turno de trabalho (origem delegação
+  ou retomada) cuja cadeia é esse trabalho; a confirmação (`entregarRecados`) só marca o recado da mesma tarefa e da
+  mesma cadeia.
+- **Como é cercado:** o recado chega com moldura (`molduraDoRecado`, `src/domain/quadro-execucoes.ts`): "X mandou um
+  recado sobre a tarefa, com o trabalho em andamento. Leve em conta no próximo passo.", seguida do bloco `<recado>`
+  com o título da tarefa e o texto, cada um em `cercado` (o mesmo cerco das respostas e tarefas do quadro, que
+  neutraliza `</recado>` no texto). O bloco diz que o título é dado e não instrução, e que o texto é a fala da pessoa;
+  o recado que o bot passou da conversa diz "repassada por <bot> a partir da conversa" (`quadro_recados.repassado_por`).
+- **O recado não aceito fica pendente:** se a sessão não aceita mensagem agora (ou o trabalho está esperando a pessoa,
+  uma aprovação ou o CI), o recado fica pendente. Quando o trabalho termina sem ter lido e a tarefa ainda anda, o
+  varredor abre o próximo trabalho com origem `recado`, levando os pendentes na entrada, com o mesmo cerco. Se a
+  tarefa foi para Feito ou Cancelado, o recado pendente sai cancelado e não reabre trabalho. Sem trabalho vivo, o
+  recado já abre um trabalho novo na hora. Revisão 4 do PR #625: o varredor só abre o trabalho de recado onde o
+  Repetir abriria (`podeAbrirTrabalho`: Backlog não) e não depois de um trabalho que terminou cancelado (o Parar de
+  fora); nos dois casos o recado fica pendente e entra no próximo trabalho que a pessoa abrir.
+- **Entrega (revisão 4 do PR #625):** o trabalho novo toma os pendentes com `update ... returning` (`tomarPendentes`)
+  antes de montar o pedido, e o pedido leva só as linhas que esse update marcou; a confirmação da sessão viva que chega
+  no meio não os acha mais pendentes. Fica uma janela **pelo menos uma vez**, aceita: a sessão viva recebeu a oferta e
+  o trabalho terminou antes de confirmar — o recado segue pendente e entra também no trabalho seguinte. Duplicar o
+  recado é melhor que perdê-lo; a moldura diz que é o mesmo recado da pessoa.
+- **O recado guardado não prende a tarefa (revisão 5 do PR #625):** o varredor só olha o recado pendente da tarefa que
+  anda (`recadoAndaSql`: A fazer, coluna em andamento, Bloqueado, ou Precisa de você com a coluna de antes guardada) ou
+  que saiu (Feito, Cancelado: o recado sai cancelado), e cujo
+  último trabalho (sem contar o de comentário) não terminou cancelado. No Backlog ou depois do Parar de fora, o recado
+  fica guardado e vai no próximo Repetir ou início, e a tela diz isso.
+- **Repetir e Cancelar soltam os colegas (revisão 5 do PR #625):** além de parar a cadeia velha, fecham sem acordar o
+  pedido aberto a colega que essa cadeia fez (`pedidosAbertosDasCadeias` + `fecharPedidoSemAcordar`) e param o turno
+  do colega. Sem isso, o colega seguia trabalhando para um trabalho que já não existe e a resposta acordava a cadeia
+  substituída.
+- **Gatilho de reversão:** o agente tratar o recado como instrução que troca o pedido da tarefa quando o texto vem de
+  fora (um recado repassado que carregava conteúdo de terceiro), ou um recado entrar em turno que não é o trabalho da
+  tarefa.

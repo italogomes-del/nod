@@ -99,6 +99,9 @@ export const confirmarNaSessao: CasoDeUso<{ turnoId: string; executor: Executor;
   if (e.ids.length === 0) return { data: { confirmadas: 0 } };
   const turno = await deps.repos.turnos.buscar(e.turnoId);
   if (!turno) return { data: { confirmadas: 0 } };
+  // NOD-418 (emenda da ADR-083): os recados da tarefa do quadro oferecidos pela renovação saem lidos na confirmação.
+  // Os ids são de quadro_recados: os de turno não casam lá, e os de recado não casam nos turnos.
+  await deps.repos.quadroExecucoes.entregarRecados(e.ids, turno.id);
   // Revisão do épico (S18, 2026-10-08): no turno de um trabalho, as confirmadas são os recados da faixa DELE (a fala da
   // pessoa na tela da task, o mandar_para_task) — o absorverNaSessao só olha a conversa (`trabalho_id is null`).
   const absorvidos = turno.trabalhoId ? await deps.repos.turnos.absorverDoTrabalho(turno, e.ids) : await deps.repos.turnos.absorverNaSessao(turno, e.ids);

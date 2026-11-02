@@ -193,11 +193,14 @@ export function decisoesRepo(conn: Conn, escopo: Escopo) {
      * Também fecha a REABERTA (definido em 2026-09-24, ADR-045): um "Retomar" reaberto que uma queda
      * nova substitui (regra:retomada_substituida) senão ficaria para sempre ao lado do novo.
      */
-    async fecharPorRegra(id: string, p: { regra: `regra:${string}`; regraVersao: number; agora: number; tambemVencida?: boolean }): Promise<Decisao | null> {
+    async fecharPorRegra(id: string, p: { regra: `regra:${string}`; regraVersao: number; agora: number; tambemVencida?: boolean; tambemEmRevisao?: boolean }): Promise<Decisao | null> {
       const desfecho: DesfechoDecisao = { tipo: "decidida_por_regra", regra: p.regra, regraVersao: p.regraVersao, em: iso(p.agora) };
       // revisto em 2026-10-15 (NOD-270, I4): `tambemVencida` — o card de acesso que o varredor acabou de vencer, mas cujo
       // acesso já foi dado por outro caminho, fecha como atendido (regra:acesso_ja_concedido) em vez de pausar a rotina.
-      const estados = p.tambemVencida ? ["pendente", "reaberta", "vencida"] : ["pendente", "reaberta"];
+      // revisto em 2026-11-02 (NOD-418, revisão 3 do PR #625): `tambemEmRevisao` — a cadeia do trabalho do quadro que o
+      // Repetir, o Cancelar ou o varredor soltou fecha também a decisão que o revisor ainda olha; o veredito tardio acha
+      // a decisão fechada (concluirRevisao volta null) e não vira cartão nem libera.
+      const estados = ["pendente", "reaberta", ...(p.tambemVencida ? ["vencida"] : []), ...(p.tambemEmRevisao ? ["em_revisao"] : [])];
       const [l] = await conn<Linha[]>`
         update decisoes set estado = 'decidida', desfecho = ${conn.json(desfecho)}, decidida_em = ${data(p.agora)}
         where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and estado in ${conn(estados)}

@@ -102,6 +102,8 @@ export async function comentarTarefa(deps: Deps, p: PedidoLote, op: Comentar, ex
     turnos.push(aberto.turnoId);
     events.push(...aberto.events);
     comecaram.push({ tarefaId: tarefa.id, agenteId: id, agenteNome: agente.nome, turnoId: aberto.turnoId });
+    // NOD-418: o comentário que aciona o responsável é um trabalho da tarefa (o juntado já era).
+    if (responsavel) await deps.repos.quadroExecucoes.inserir({ tarefaId: tarefa.id, origem: "comentario", turnoId: aberto.turnoId });
     // O responsável no andamento sem turno vivo: o card passa a mostrar este (Na fila, Rodando) e o gerir_quadro dele
     // acha o quadro pelo turno. Fora do andamento, ou com outro turno vivo, a tarefa fica com o turno que tinha.
     if (responsavel && papelDe(colunas, tarefa.status) === "fazendo") {

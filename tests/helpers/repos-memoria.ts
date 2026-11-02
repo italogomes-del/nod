@@ -3914,6 +3914,33 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       pedidoAbertoNaTarefa: async () => false,
       turnoNaFila: async () => null,
     },
+    // NOD-418 (0139): os trabalhos e recados das tarefas são do Postgres (tests/integration/quadro-execucoes.test.ts).
+    quadroExecucoes: {
+      // O quadro em memória registra o gatilho sem guardar: os trabalhos só existem no Postgres.
+      inserir: async () => null,
+      daTarefa: async () => [],
+      atuaisDasTarefas: async () => [],
+      tarefasAbertas: async () => [],
+      doTurnoRaiz: async () => null,
+      tratar: soNoPostgres,
+      reabrir: soNoPostgres,
+      agendarNovaTentativa: soNoPostgres,
+      desagendarNovaTentativa: async () => 0,
+      cancelar: soNoPostgres,
+      desfechos: async () => new Map(),
+      decisoesAbertasDasCadeias: async () => [],
+      pedidosAbertosDasCadeias: async () => [],
+      cancelarEsperasDasCadeias: async () => 0,
+      inserirRecado: soNoPostgres,
+      temRecadoPendente: async () => false,
+      recadosPendentes: async () => [],
+      recadosDaTela: async () => [],
+      entregarRecados: async () => 0,
+      levarRecados: soNoPostgres,
+      tomarPendentes: async () => [],
+      devolverTomados: async () => {},
+      cancelarRecados: async () => 0,
+    },
     // NOD-437: os times são do Postgres (tests/integration/times.test.ts); aqui não há nenhum.
     times: {
       async listar() {

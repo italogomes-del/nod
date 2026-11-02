@@ -90,7 +90,16 @@ describeIntegracao("paridade tela × chat do quadro.* (NOD-442, ADR-135)", () =>
   const estado = async (m: M, anfitriaoId: string) => {
     const q = await m.d.repos.quadros.doAgente(anfitriaoId);
     const tarefas = q ? await m.d.repos.quadros.tarefas(q.id) : [];
-    return retrato(q ? await montarQuadro(m.d, q) : null, tarefas.filter((t) => t.turnoId).length);
+    const r = retrato(q ? await montarQuadro(m.d, q) : null, tarefas.filter((t) => t.turnoId).length);
+    // NOD-418: os trabalhos de cada tarefa (estado, origem, recados) entram na comparação.
+    const trabalhos: unknown[] = [];
+    for (const t of tarefas) {
+      const execs = await m.d.repos.quadroExecucoes.daTarefa(t.id);
+      const recados = await m.d.repos.quadroExecucoes.recadosDaTela(t.id);
+      const turnos = await Promise.all(execs.map((e) => m.d.repos.turnos.buscar(e.turnoId)));
+      trabalhos.push([t.titulo, execs.map((e, i) => [e.numero, e.origem, e.canceladaEm !== null, turnos[i]?.estado, turnos[i]?.pararSolicitadoEm != null, turnos[i]?.entradaTexto?.includes("use a branch y")]), recados.map((x) => [x.texto, x.entregueEm !== null, x.canceladoEm !== null])]);
+    }
+    return r ? { ...r, trabalhos } : null;
   };
 
   type Cenario = {
@@ -103,6 +112,8 @@ describeIntegracao("paridade tela × chat do quadro.* (NOD-442, ADR-135)", () =>
     semQuadroNoFim?: boolean;
     /** O chat abre um card: a pessoa confirma antes da comparação (as colunas, ou a exclusão do quadro da NOD-430). */
     confirmar?: "colunas" | "exclusao";
+    /** Depois do preparo, os turnos dos trabalhos terminam (o Repetir só vale sem trabalho rodando). */
+    terminarTrabalhos?: true;
     /** A ação leva a tarefa a outro quadro: o destino da tela e o do chat (criados vazios antes) também terminam iguais. */
     destinos?: (m: M) => [string, string];
   };
@@ -214,6 +225,27 @@ describeIntegracao("paridade tela × chat do quadro.* (NOD-442, ADR-135)", () =>
       tela: async (_m, q) => ({ metodo: "POST", caminho: `/agentes/${q.anfitriao}/quadro/tarefas/${await q.tarefa("T1")}/terminei`, status: 200 }),
       chat: () => ({ tipo: "terminei", tarefa: "T1" }),
     },
+    // NOD-418: o trabalho da tarefa. O preparo deixa T1 em A fazer com o Caio (o trabalho #1 na fila).
+    {
+      id: "quadro.repetir_trabalho",
+      // Com o trabalho vivo o Repetir é recusado (estado_invalido, revisão do PR #625): o #1 termina antes.
+      preparar: (m) => [...BASE(m), [{ tipo: "mudar_tarefa", tarefa: "T1", status: "afazer", agente: m.nomeCaio }]],
+      terminarTrabalhos: true,
+      tela: async (_m, q) => ({ metodo: "POST", caminho: `/agentes/${q.anfitriao}/quadro/tarefas/${await q.tarefa("T1")}/trabalhos/repetir`, status: 200 }),
+      chat: () => ({ tipo: "repetir_trabalho", tarefa: "T1" }),
+    },
+    {
+      id: "quadro.cancelar_trabalho",
+      preparar: (m) => [...BASE(m), [{ tipo: "mudar_tarefa", tarefa: "T1", status: "afazer", agente: m.nomeCaio }]],
+      tela: async (_m, q) => ({ metodo: "POST", caminho: `/agentes/${q.anfitriao}/quadro/tarefas/${await q.tarefa("T1")}/trabalhos/cancelar`, status: 200 }),
+      chat: () => ({ tipo: "cancelar_trabalho", tarefa: "T1" }),
+    },
+    {
+      id: "quadro.recado_trabalho",
+      preparar: (m) => [...BASE(m), [{ tipo: "mudar_tarefa", tarefa: "T1", status: "afazer", agente: m.nomeCaio }]],
+      tela: async (_m, q) => ({ metodo: "POST", caminho: `/agentes/${q.anfitriao}/quadro/tarefas/${await q.tarefa("T1")}/trabalhos/recado`, corpo: { texto: "use a branch y" }, status: 201 }),
+      chat: () => ({ tipo: "recado", tarefa: "T1", texto: "use a branch y" }),
+    },
   ];
 
   it("cobre exatamente as ações do quadro, e o executor de cada uma existe", () => {
@@ -226,6 +258,7 @@ describeIntegracao("paridade tela × chat do quadro.* (NOD-442, ADR-135)", () =>
       trxAtual = trx;
       const m = await montar(trx);
       for (const ops of c.preparar?.(m) ?? []) for (const anfitriao of [m.tela.agenteId, m.chat.agenteId]) expect((await pessoa(m.d, anfitriao, ops)).data).toMatchObject({ ok: true });
+      if (c.terminarTrabalhos) await trx`update turnos set estado = 'concluido' where id in (select turno_id from quadro_execucoes where owner_id = ${MARLON.pessoaId})`;
       expect(await estado(m, m.tela.agenteId)).toEqual(await estado(m, m.chat.agenteId));
       for (const destino of c.destinos?.(m) ?? []) expect((await pessoa(m.d, destino, [{ tipo: "criar_quadro", meta: "Lançar login", prazo: "2026-11-06" }])).data).toMatchObject({ ok: true });
 
@@ -544,6 +577,100 @@ describeIntegracao("paridade tela × chat do quadro.* (NOD-442, ADR-135)", () =>
       await trx`update agentes set oculto = true where id = ${m.caio.agenteId}`;
       expect((await pessoa(m.d, m.tela.agenteId, [{ tipo: "mudar_tarefa", tarefa: "Do oculto", status: "afazer" }])).data).toMatchObject({ ok: true });
       expect((await m.d.repos.quadros.tarefas(qTela.id)).find((t) => t.titulo === "Do oculto")).toMatchObject({ status: "afazer", turnoId: null });
+    });
+  });
+  it("NOD-418, revisão do PR #625: repetir, cancelar e recado só a pedido da pessoa, na conversa limpa", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      await pessoa(m.d, m.tela.agenteId, [{ tipo: "criar_quadro" }, { tipo: "criar_tarefa", titulo: "T1", status: "afazer", agente: m.nomeCaio }]);
+      const q = (await m.d.repos.quadros.doAgente(m.tela.agenteId))!;
+      const tarefa = async () => (await m.d.repos.quadros.tarefas(q.id)).find((t) => t.titulo === "T1")!;
+      const antes = await tarefa();
+      const execsAntes = (await m.d.repos.quadroExecucoes.daTarefa(antes.id)).length;
+      const turnoCom = async (origem: "conversa" | "rotina" | "delegacao" | "peer", profundidade: 0 | 1) => {
+        const t = await m.d.repos.turnos.enfileirar({ executor: "catcher", conversaId: m.gil.conversaId, agenteId: m.gil.agenteId, origem, prazoEm: Date.now() + 600_000, profundidade, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "auto" });
+        return { turnoId: t!.id, agenteId: m.gil.agenteId, conversaId: m.gil.conversaId };
+      };
+      const contaminado = await turnoCom("conversa", 0);
+      await m.d.repos.turnos.contaminar(contaminado.turnoId, Date.now());
+      const casos = [
+        ["contaminado", contaminado],
+        ["rotina", await turnoCom("rotina", 0)],
+        ["tarefa", await turnoCom("delegacao", 1)],
+        ["colega", await turnoCom("peer", 1)],
+      ] as const;
+      const acoes: OpQuadro[] = [{ tipo: "repetir_trabalho", tarefa: "T1" }, { tipo: "cancelar_trabalho", tarefa: "T1" }, { tipo: "recado", tarefa: "T1", texto: "faça outra coisa" }];
+      for (const [nome, ctx] of casos) {
+        for (const a of acoes) {
+          const r = await executar(m.d, gerirQuadro, { ...ctx, quadro: m.tela.agenteId, acoes: [a] });
+          expect(r.data, `${nome} / ${a.tipo}`).toMatchObject({ ok: false, erro: "entrada_invalida" });
+          expect(JSON.stringify(r.data), `${nome} / ${a.tipo}`).toContain("é pedido da pessoa");
+        }
+      }
+      // Nada mudou: nem trabalho novo, nem cancelado, nem recado.
+      const execs = await m.d.repos.quadroExecucoes.daTarefa(antes.id);
+      expect(execs).toHaveLength(execsAntes);
+      expect(execs.every((e) => e.canceladaEm === null)).toBe(true);
+      expect(await m.d.repos.quadroExecucoes.recadosDaTela(antes.id)).toEqual([]);
+      expect((await m.d.repos.turnos.buscar(antes.turnoId!))?.pararSolicitadoEm).toBeNull();
+      // A conversa limpa passa (o controle do teste).
+      const limpa = await turnoCom("conversa", 0);
+      expect((await executar(m.d, gerirQuadro, { ...limpa, quadro: m.tela.agenteId, acoes: [{ tipo: "cancelar_trabalho", tarefa: "T1" }] })).data).toMatchObject({ ok: true });
+    });
+  });
+
+  it("NOD-418, revisão 2 do PR #625: sem trabalho vivo, Repetir e recado fora do andamento (Feito, Cancelado, Backlog) não abrem trabalho", async () => {
+    await withRollback(MARLON, async (trx) => {
+      trxAtual = trx;
+      const m = await montar(trx);
+      await pessoa(m.d, m.tela.agenteId, [
+        { tipo: "criar_quadro" },
+        { tipo: "criar_tarefa", titulo: "No feito", status: "feito", agente: m.nomeCaio },
+        { tipo: "criar_tarefa", titulo: "No cancelado", status: "cancelado", agente: m.nomeCaio },
+        { tipo: "criar_tarefa", titulo: "No backlog", status: "backlog", agente: m.nomeCaio },
+      ]);
+      const q = (await m.d.repos.quadros.doAgente(m.tela.agenteId))!;
+      const tarefas = await m.d.repos.quadros.tarefas(q.id);
+      const sessao = await servidor.entrar("marlon");
+      const limpa = await turnoDe(m.d, m.gil.agenteId, m.gil.conversaId);
+      for (const titulo of ["No feito", "No cancelado", "No backlog"]) {
+        const t = tarefas.find((x) => x.titulo === titulo)!;
+        const base = `/agentes/${m.tela.agenteId}/quadro/tarefas/${t.id}/trabalhos`;
+        for (const [rota, corpo] of [["repetir", undefined], ["recado", { texto: "faça outra coisa" }]] as const) {
+          const resp = await servidor.chamar(sessao, "POST", `${base}/${rota}`, corpo);
+          expect(resp.status, `${titulo} / tela ${rota}`).toBe(409);
+        }
+        for (const a of [{ tipo: "repetir_trabalho", tarefa: titulo }, { tipo: "recado", tarefa: titulo, texto: "faça outra coisa" }] as OpQuadro[]) {
+          const r = await executar(m.d, gerirQuadro, { ...limpa, quadro: m.tela.agenteId, acoes: [a] });
+          expect(r.data, `${titulo} / chat ${a.tipo}`).toMatchObject({ ok: false, erro: "estado_invalido" });
+          expect(JSON.stringify(r.data), `${titulo} / chat ${a.tipo}`).toContain("a tarefa não está em andamento: mova-a antes");
+        }
+        expect(await m.d.repos.quadroExecucoes.daTarefa(t.id), titulo).toEqual([]);
+        expect(await m.d.repos.quadroExecucoes.recadosDaTela(t.id), titulo).toEqual([]);
+        expect((await m.d.repos.quadros.tarefa(t.id))?.status, titulo).toBe(t.status);
+      }
+    });
+  });
+
+  it("revisão 5 do PR #625: gerir_quadro com acoes [] só consulta, e o trabalho bate com o da tela", async () => {
+    await withRollback(MARLON, async (trx) => {
+      trxAtual = trx;
+      const m = await montar(trx);
+      await pessoa(m.d, m.tela.agenteId, [{ tipo: "criar_quadro", meta: "Lançar login" }, { tipo: "criar_tarefa", titulo: "T1", status: "afazer", agente: m.nomeCaio }, { tipo: "criar_tarefa", titulo: "T2" }]);
+      const antes = await estado(m, m.tela.agenteId);
+      const r = await executar(m.d, gerirQuadro, { ...(await turnoDe(m.d, m.gil.agenteId, m.gil.conversaId)), quadro: m.tela.agenteId, acoes: [] });
+      expect(r.data).toMatchObject({ ok: true, lote_id: null, comecaram: [], instrucao: "Só leitura: nada mudou." });
+      expect(await estado(m, m.tela.agenteId)).toEqual(antes);
+      const resumo = (r.data as { quadro: { meta: string; tarefas: { id: string; titulo: string; status: string; trabalho?: { numero: number; estado: string; novaTentativaEm: string | null } }[] } }).quadro;
+      expect(resumo.meta).toBe("Lançar login");
+      // O mesmo trabalho que a tela mostra (GET dos trabalhos da tarefa): número, estado e nova tentativa.
+      const sessao = await servidor.entrar("marlon");
+      for (const t of resumo.tarefas) {
+        const tela = (await (await servidor.chamar(sessao, "GET", `/agentes/${m.tela.agenteId}/quadro/tarefas/${t.id}/trabalhos`)).json()) as { execucoes: { numero: number; estado: string; novaTentativaEm: number | null; origem: string }[] };
+        const atual = tela.execucoes.filter((e) => e.origem !== "comentario").at(-1);
+        expect(t.trabalho ? [t.trabalho.numero, t.trabalho.estado, t.trabalho.novaTentativaEm] : null, t.titulo).toEqual(atual ? [atual.numero, atual.estado, atual.novaTentativaEm === null ? null : new Date(atual.novaTentativaEm).toISOString()] : null);
+      }
+      expect(resumo.tarefas.find((t) => t.titulo === "T1")?.trabalho).toMatchObject({ numero: 1 });
     });
   });
 });

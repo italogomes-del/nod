@@ -1,4 +1,5 @@
 import { varrerRiscosDosQuadros } from "../../use-cases/risco-quadro.ts";
+import { cuidarDasExecucoesDoQuadro } from "../../use-cases/quadro-execucoes.ts";
 import type { Decisao } from "../../contracts/decisao.ts";
 import { ehErroDeDominio } from "../../domain/erro.ts";
 import { redigir } from "../../domain/redacao.ts";
@@ -124,6 +125,26 @@ export async function varrerPessoa(escopo: Escopo, tx: Transacao, opcoes: Opcoes
     });
   } catch (e) {
     log("erro", "riscos_quadro_falhou", { erro: ehErroDeDominio(e) ? e.codigo : e instanceof Error ? e.name : "desconhecido" });
+  }
+  // definido em 2026-11-02 (NOD-418): o fim de cada trabalho de tarefa do quadro (nova tentativa, Bloqueado, o recado que
+  // a sessão não leu), em transação própria; cada tarefa decide com o quadro travado. O trabalho novo roda onde o
+  // anterior rodou (o executor vem do turno). Revisão 3 do PR #625: cada tarefa num SAVEPOINT desta tx (o padrão dos
+  // órfãos): a que lança volta sozinha, vai ao log com o id, e as outras saem.
+  try {
+    await tx(async (trx) => {
+      const deps: Deps = { repos: criarRepos(trx, escopo), services: opcoes.services, useCases: opcoes.useCases, tx, escopo, agora: opcoes.agora };
+      const isolar = async <T>(fn: () => Promise<T>): Promise<T> => {
+        const caixa: { valor?: T } = {};
+        await trx.savepoint(async () => {
+          caixa.valor = await fn();
+        });
+        return caixa.valor as T;
+      };
+      const r = await cuidarDasExecucoesDoQuadro(deps, { isolar });
+      if (r.events.length) await deps.repos.events.gravarComOutbox(r.events);
+    });
+  } catch (e) {
+    log("erro", "execucoes_quadro_falhou", { erro: ehErroDeDominio(e) ? e.codigo : e instanceof Error ? e.name : "desconhecido" });
   }
   // definido em 2026-10-12 (ADR-099, I9): as frentes de lote que caíram (frentes-caidas.ts), também em transação própria.
   try {

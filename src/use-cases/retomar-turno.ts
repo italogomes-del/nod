@@ -7,6 +7,7 @@ import { redigir } from "../domain/redacao.ts";
 import { autoriaPessoa, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
 import { fecharGemeas } from "./fechar-gemeas.ts";
 import { enfileirarRetomada } from "./enfileirar-retomada.ts";
+import { cadeiaDoQuadroEncerrada } from "./quadro-execucoes.ts";
 import { sincronizarTrabalho } from "./trabalhos.ts";
 import type { CasoDeUso } from "./tipos.ts";
 
@@ -43,6 +44,10 @@ export const retomarTurno: CasoDeUso<EntradaRetomarTurno, SaidaRetomarTurno> = a
   const original = await deps.repos.turnos.buscar(turnoId);
   if (!original) throw new ErroDeDominio("nao_encontrado");
   if (original.estado !== "interrompido") throw new ErroDeDominio("estado_invalido", { cause: `turno ${original.estado}` });
+  // Revisão 3 do PR #625 (NOD-418): a cadeia de um trabalho do quadro já substituído (nova tentativa, Repetir, Cancelar)
+  // ou tratado de vez (Bloqueado) não volta a rodar ao lado do trabalho novo ou com o card parado.
+  const encerrada = await cadeiaDoQuadroEncerrada(deps, original.id);
+  if (encerrada) throw new ErroDeDominio("estado_invalido", { cause: encerrada });
   const conversa = await deps.repos.conversas.buscar(original.conversaId);
   if (!conversa) throw new ErroDeDominio("nao_encontrado");
 

@@ -42,6 +42,7 @@ import type { ExecucaoRotina } from "../../src/contracts/rotina.ts";
 import type { MembroSala, Sala } from "../../src/contracts/sala.ts";
 import type { FaixaParada, Turno } from "../../src/contracts/turno.ts";
 import type { ComentarioDto, ComentarioTarefa, EntradaHistoricoDto, GrupoColuna, LoteQuadro, QuadroDaPessoaDto, QuadroDto, StatusTarefa, TarefaPorCodigoDto } from "../../src/contracts/quadro.ts";
+import type { EstadoExecucao, ExecucoesDaTarefa } from "../../src/contracts/quadro-execucoes.ts";
 import type { AtividadeTarefa } from "../../src/contracts/quadro-pela-conversa.ts";
 import type { EventoLinha, TaxaDeAbertura, TrabalhoDetalheDto, TrabalhosDto } from "../../src/contracts/trabalho.ts";
 import type { DisponibilidadeLigacao, FalaLigacao, Ligacao, LigacaoCriada } from "../../src/contracts/ligacao.ts";
@@ -187,6 +188,8 @@ export function decidirPorVoz(tenantId: string, decisaoId: string, corpo: Decisa
 /** NOD-442: a resposta de uma mutação do quadro (a rota devolve o lote inteiro; a web lê o quadro e o lote). */
 /** `comecaram`: os bots que este lote fez começar (revisão do PR #623: o recibo diz "Ada começou", com Desfazer). */
 export type MutacaoQuadro = { ok: true; quadro: QuadroDto | null; lote: LoteQuadro | null; desfeito: boolean; comecaram?: { tarefaId: string; agenteId: string; agenteNome: string; turnoId: string }[] };
+/** NOD-418: Repetir, Cancelar e recado devolvem o quadro, o trabalho que ficou e a vista da tarefa aberta. */
+export type MutacaoDoTrabalho = MutacaoQuadro & { trabalho?: { numero: number | null; estado: EstadoExecucao | null; entregue?: "agora" | "quando_comecar" | "novo"; cancelados?: number }; trabalhos?: ExecucoesDaTarefa };
 
 export function criarApi(escopo: Escopo) {
   const base = `/api/t/${encodeURIComponent(escopo.tenantId)}`;
@@ -285,6 +288,15 @@ export function criarApi(escopo: Escopo) {
       get<{ comentarios: ComentarioDto[]; atividade?: AtividadeTarefa[]; criadaPor?: string | null }>(`agentes/${encodeURIComponent(agenteId)}/quadro/tarefas/${encodeURIComponent(tarefaId)}/comentarios`),
     comentarTarefa: (agenteId: string, tarefaId: string, texto: string) =>
       post<MutacaoQuadro & { comentario: ComentarioTarefa }>(`agentes/${encodeURIComponent(agenteId)}/quadro/tarefas/${encodeURIComponent(tarefaId)}/comentarios`, { texto }),
+    /** NOD-418: os trabalhos da tarefa aberta (o atual, os anteriores, os recados) e Repetir, Cancelar e o recado. */
+    trabalhosDaTarefa: (agenteId: string, tarefaId: string) =>
+      get<ExecucoesDaTarefa>(`agentes/${encodeURIComponent(agenteId)}/quadro/tarefas/${encodeURIComponent(tarefaId)}/trabalhos`),
+    repetirTrabalho: (agenteId: string, tarefaId: string) =>
+      post<MutacaoDoTrabalho>(`agentes/${encodeURIComponent(agenteId)}/quadro/tarefas/${encodeURIComponent(tarefaId)}/trabalhos/repetir`),
+    cancelarTrabalho: (agenteId: string, tarefaId: string) =>
+      post<MutacaoDoTrabalho>(`agentes/${encodeURIComponent(agenteId)}/quadro/tarefas/${encodeURIComponent(tarefaId)}/trabalhos/cancelar`),
+    recadoTrabalho: (agenteId: string, tarefaId: string, texto: string) =>
+      post<MutacaoDoTrabalho>(`agentes/${encodeURIComponent(agenteId)}/quadro/tarefas/${encodeURIComponent(tarefaId)}/trabalhos/recado`, { texto }),
     desfazerLoteQuadro: (agenteId: string, loteId: string) =>
       post<MutacaoQuadro>(`agentes/${encodeURIComponent(agenteId)}/quadro/lotes/${encodeURIComponent(loteId)}/desfazer`),
     /** NOD-448 (ADR-140): as colunas pela tela; cada uma é um lote com Desfazer. */

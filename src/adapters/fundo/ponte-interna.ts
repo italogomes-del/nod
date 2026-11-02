@@ -28,6 +28,7 @@ import { despacharTurno } from "../../use-cases/despachar-turno.ts";
 import { avisarFundoSeguradoPelaCota, type EntradaFundoSegurado } from "../../use-cases/fundo-segurado-pela-cota.ts";
 import { absorverNaSessao, confirmarNaSessao, gravarFalasDaSessao } from "../../use-cases/sessao-viva.ts";
 import { absorverNoTrabalho, promoverNaRede } from "../../use-cases/coordenar-trabalhos.ts";
+import { ofertarRecadosDoQuadro } from "../../use-cases/quadro-execucoes.ts";
 import { eventoPressao, sincronizarTrabalho } from "../../use-cases/trabalhos.ts";
 import { camposDoRelato, pastaSemTrabalhoDoTurno, pastasParaLimpar, relatoValido } from "../../use-cases/limpeza-das-tasks.ts";
 import { relatarEspera as relatarEsperaDaMaquina } from "../../use-cases/esperar-comando.ts";
@@ -570,6 +571,15 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
           ids = [...ids, ...b.data.ids];
           semMoldura = b.data.ids;
           events.push(...(b.events ?? []));
+        }
+        // NOD-418 (emenda da ADR-083): o recado da pessoa ao trabalho da tarefa do quadro entra na sessão viva, já com a
+        // moldura dele (molduraDoRecado), nas mesmas duas fases: oferecido aqui, lido na confirmação (confirmarNaSessao).
+        if (r.ativo && p.aceitaMensagens) {
+          const recados = (await ofertarRecadosDoQuadro(d, p.turnoId)).filter((x) => !jaOferecidas.has(x.id));
+          if (!confirma) await d.repos.quadroExecucoes.entregarRecados(recados.map((x) => x.id), p.turnoId);
+          textos = [...textos, ...recados.map((x) => x.texto)];
+          ids = [...ids, ...recados.map((x) => x.id)];
+          semMoldura = [...semMoldura, ...recados.map((x) => x.id)];
         }
         const turno = r.ativo ? await d.repos.turnos.buscar(p.turnoId) : null;
         // A decisão respondida DENTRO do turno não passa por outro caminho: a renovação acerta o estado da task.

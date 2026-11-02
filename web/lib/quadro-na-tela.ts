@@ -21,9 +21,10 @@ import { RESP_VOCE, acesos, fraseDoErroDoMover, reciboDaNovaTarefa, codigoNaUrl,
 import { quadroVazio, type Filtro, type Html } from "../telas/quadro.ts";
 import { faixaDoQuadro, pilulaDoQuadro, quadroCarregando, quadroComErro, quadroDaMeta, semQuadro, tarefaAberta, type AgenteDoQuadro, type TrocaDaFaixa } from "../telas/quadro-real.ts";
 import { criarComentariosNaTela, type ApiDosComentarios } from "./comentarios-na-tela.ts";
+import { criarTrabalhosDaTarefa, type ApiDosTrabalhos } from "./trabalhos-da-tarefa.ts";
 
 /** O pedaço da API que o quadro usa (NOD-442); null = sem sessão ainda. */
-export interface ApiDoQuadro extends ApiDosComentarios {
+export interface ApiDoQuadro extends ApiDosComentarios, ApiDosTrabalhos {
   quadro(agenteId: string): Promise<{ quadro: QuadroDto | null }>;
   conversa(conversaId: string): Promise<Pick<ConversaDto, "mensagens">>;
   enviar(conversaId: string, texto: string, anexos?: readonly string[], idEnvio?: string): Promise<RespostaMutacao>;
@@ -157,12 +158,22 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
   let pedidoDoChat: { agenteId: string; tarefaId: string } | null = null;
   /** NOD-417: os comentários da tarefa aberta. */
   const coms = criarComentariosNaTela({ api: () => dd?.api() ?? null, redesenhar: () => { if (aberta) desenharVista(); } });
+  /** NOD-418: o trabalho da tarefa aberta (o atual ao vivo, os anteriores, Repetir, Cancelar e o recado). */
+  const trabs = criarTrabalhosDaTarefa({
+    api: () => dd?.api() ?? null,
+    redesenhar: () => { if (aberta) desenharVista(); },
+    log: () => vista()?.querySelector<HTMLElement>(".qd-trab-log") ?? null,
+    // Revisão 5 do PR #625: a região de status fica fora da .qd-conteudo (que o desenho recria): o mesmo nó, só o texto muda.
+    anuncio: () => vista()?.querySelector<HTMLElement>(":scope > #qd-trab-anuncio") ?? null,
+    aplicarQuadro: (novo) => aplicarQuadro(novo, aberta ? [aberta] : []),
+    ...(dd?.juntarEm !== undefined ? { juntarEm: dd.juntarEm } : {}),
+  });
 
   function zerarDados(): void {
     if (aberta) dd?.naUrl?.(null);
     histTarefa = null; quadros = null; leituraHist++;
     agenteId = null; q = null; carga = "nada"; aberta = null; acesas = new Set(); faixa = { tipo: "nada" }; loteAntes = null;
-    historico = []; histAberto = false; leitura++; leituraConversa++; dica = []; editandoMeta = false; edicao = null; soltarNaAberta = null; coms.fechar();
+    historico = []; histAberto = false; leitura++; leituraConversa++; dica = []; editandoMeta = false; edicao = null; soltarNaAberta = null; coms.fechar(); trabs.fechar();
     if (timerReler) clearTimeout(timerReler);
     if (timerRecolher) clearTimeout(timerRecolher);
     timerReler = timerRecolher = null;
@@ -175,9 +186,10 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     if (!q) return semQuadro(nome, Date.now());
     const t = tarefaNoQuadro(q, aberta);
     if (t) {
+      const trabalhos = trabs.html(t.id, { bloqueada: t.status === "bloqueado" || (t.status === "voce" && t.voltarPara !== null && t.voltarPara !== t.status), agenteId: t.agenteId, conversaAtual: chave, hora: dd.hora });
       const resp = dd.agentes?.();
       const soltar = soltarNaAberta?.tarefa === t.id ? { soltar: soltarNaAberta.coluna } : {};
-      return tarefaAberta({ t, q, agente: dd.agente, comentarios: coms.html(t.id, dd.agente, dd.hora), historico: dd.api()?.historicoTarefa ? histTarefa : undefined, ...(resp ? { responsaveis: resp } : {}), ...(quadros ? { destinos: destinosDaTarefa(quadros, q.id), moverPara } : {}), ...soltar });
+      return tarefaAberta({ t, q, agente: dd.agente, comentarios: coms.html(t.id, dd.agente, dd.hora), historico: dd.api()?.historicoTarefa ? histTarefa : undefined, ...(resp ? { responsaveis: resp } : {}), ...(quadros ? { destinos: destinosDaTarefa(quadros, q.id), moverPara } : {}), ...soltar, ...(trabalhos !== undefined ? { trabalhos } : {}) });
     }
     const agentes = dd.agentes && dd.api()?.definirPassagem ? dd.agentes() : undefined;
     return quadroDaMeta({ q, nome, agente: dd.agente, filtro, alternadas, acesas, edicao, agora: Date.now(), editandoMeta, ...(agentes ? { agentes } : {}) });
@@ -193,7 +205,8 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     if (!dd) { v.innerHTML = quadroVazio({ nome, filtro, alternadas }); return; }
     let conteudo = v.querySelector<HTMLElement>(":scope > .qd-conteudo");
     if (!conteudo) {
-      v.innerHTML = `<div class="qd-conteudo"></div><footer class="qc-wrap">${pilulaDoQuadro({ meta: q?.meta ?? null, nome })}<p class="qd-sr qd-anuncio" role="status" aria-live="polite"></p></footer>`;
+      // Merge da main (#623): a região do quadro (rodapé) vem primeiro; a do trabalho (NOD-418) depois, as duas fora da .qd-conteudo.
+      v.innerHTML = `<div class="qd-conteudo"></div><footer class="qc-wrap">${pilulaDoQuadro({ meta: q?.meta ?? null, nome })}<p class="qd-sr qd-anuncio" role="status" aria-live="polite"></p></footer><p class="qd-sr" id="qd-trab-anuncio" role="status" aria-atomic="true"></p>`;
       conteudo = v.querySelector<HTMLElement>(":scope > .qd-conteudo");
     }
     if (!conteudo) return;
@@ -780,9 +793,11 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
       const ids = typeof d["tarefas"] === "string" ? d["tarefas"].split(",").filter(Boolean) : [];
       dica = [...dica, ...ids];
       if (aberta && (!ids.length || ids.includes(aberta))) void coms.reler();
+      if (aberta) trabs.aoFrame(frame);
       pedirReleitura();
       return;
     }
+    if (aberta && frame.tipo.startsWith("turno.")) trabs.aoFrame(frame);
     // A execução dos cards (rodando, na fila, falhou) vem dos turnos: com o quadro à vista e com tarefas, relê.
     if (frame.tipo.startsWith("turno.") && q && q.tarefas.length && modo === "quadro") pedirReleitura();
     const daConversa = d["conversaId"] === chave;
@@ -820,7 +835,7 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     if (t) dd?.naUrl?.(codigoNaUrl(t));
     void lerHistorico();
     void lerQuadros();
-    if (agenteId) coms.abrir(agenteId, id);
+    if (agenteId) { coms.abrir(agenteId, id); trabs.abrir(agenteId, id); }
   }
 
   function abrirTarefa(id: string): void {
@@ -858,6 +873,7 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     leituraHist++;
     dd?.naUrl?.(null);
     coms.fechar();
+    trabs.fechar();
     desenharVista();
     if (id) vista()?.querySelector<HTMLElement>(`.qd-conteudo [data-act="abrir-tarefa"][data-id="${CSS.escape(id)}"]`)?.focus();
   }
@@ -1008,6 +1024,7 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
       if (act === "abrir-tarefa" && id) { abrirTarefa(id); return; }
       if (act === "tarefa-mover" || act === "tarefa-mover-para") { aoMoverCard(el, act); return; }
       if (act === "voltar-ao-quadro") { voltarAoQuadro(); return; }
+      if (act?.startsWith("trab-") && trabs.aoClicar(act)) return;
       if (act === "mover-quadro" && id) {
         const destino = el.closest(".qd-mover")?.querySelector<HTMLSelectElement>('[data-campo="mover"]')?.value ?? "";
         if (destino) void moverDeQuadro(id, destino);
@@ -1108,6 +1125,7 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     if (!dd || !form?.closest("#quadro")) return;
     const qual = form.dataset["form"];
     if (qual === "col-renomear" || qual === "col-nova" || qual === "col-remover" || qual === "col-passagem") { ev.preventDefault(); enviarColuna(form); return; }
+    if (qual === "recado-trabalho") { ev.preventDefault(); trabs.enviarRecado(form); return; }
     if (qual === "comentar-tarefa") {
       ev.preventDefault();
       const de = agenteId;

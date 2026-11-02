@@ -1,5 +1,6 @@
 import type { AutorLote, ColunaQuadro, ExecucaoTarefa, GrupoColuna, IdColuna, ItemLinear, OpQuadro, TarefaQuadro } from "../contracts/quadro.ts";
 import { LIMITES_QUADRO } from "../contracts/quadro.ts";
+import { RECADO_MAX } from "../contracts/quadro-execucoes.ts";
 import {
   acionaNaColuna, COLUNAS_PADRAO, colunaDeAndamento, colunaDeEntrada, colunaDeEspera, colunasDe, criarColuna, definirPassagem, ehGrupo, ehReservada, grupoDe, moverColuna, papelDe,
   proximaColuna, removerColuna, normalizarNome, renomearColuna, resolverColuna, responsavelDe, saoPadrao, substituirColunas,
@@ -165,6 +166,19 @@ export function lerOp(v: unknown): OpQuadro | ErroOp {
       if (falhou(texto)) return texto;
       return { tipo: "comentar", tarefa, texto };
     }
+    case "repetir_trabalho":
+    case "cancelar_trabalho": {
+      const tarefa = textoObrigatorio(v.tarefa, "tarefa", 200);
+      if (falhou(tarefa)) return tarefa;
+      return { tipo: v.tipo, tarefa };
+    }
+    case "recado": {
+      const tarefa = textoObrigatorio(v.tarefa, "tarefa", 200);
+      if (falhou(tarefa)) return tarefa;
+      const texto = textoObrigatorio(v.texto, "texto", RECADO_MAX);
+      if (falhou(texto)) return texto;
+      return { tipo: "recado", tarefa, texto };
+    }
     case "criar_coluna": {
       const nome = textoObrigatorio(v.nome, "nome", LIMITES_QUADRO.coluna);
       if (falhou(nome)) return nome;
@@ -281,8 +295,14 @@ export function lerOps(v: unknown): OpQuadro[] | (ErroOp & { indice: number }) {
   if (troca >= 0 && ops.length > 1) return { erro: "substituir_colunas vai sozinho na chamada", indice: troca };
   const comentar = ops.findIndex((o) => o.tipo === "comentar");
   if (comentar >= 0 && ops.length > 1) return { erro: "comentar vai sozinho na chamada", indice: comentar };
+  const trabalho = ops.findIndex((o) => ehOpDeTrabalho(o));
+  if (trabalho >= 0 && ops.length > 1) return { erro: `${ops[trabalho]!.tipo} vai sozinho na chamada`, indice: trabalho };
   return ops;
 }
+
+/** NOD-418: as ops do trabalho da tarefa (Repetir, Cancelar, recado) não são lote: vão sozinhas, sem Desfazer. */
+export const ehOpDeTrabalho = (o: OpQuadro): o is Extract<OpQuadro, { tipo: "repetir_trabalho" | "cancelar_trabalho" | "recado" }> =>
+  o.tipo === "repetir_trabalho" || o.tipo === "cancelar_trabalho" || o.tipo === "recado";
 
 /** A execução do card, pelo estado do turno ligado à tarefa (ou null sem turno). */
 export function execucaoDoTurno(estado: "pendente" | "despachando" | "concluido" | "interrompido" | null | undefined): ExecucaoTarefa {
@@ -488,7 +508,7 @@ export function entradaDaResposta(p: { quadroId: string; tarefa: Pick<TarefaQuad
  * (revisão do PR #612: um conteúdo do Linear fechava a cerca e o resto virava instrução).
  */
 export function cercado(texto: string): string {
-  return texto.replace(/<(\s*\/?\s*(?:tarefa|resposta)\b)/gi, "‹$1");
+  return texto.replace(/<(\s*\/?\s*(?:tarefa|resposta|recado)\b)/gi, "‹$1");
 }
 
 /** Normaliza para comparar título ou identificador ("NOD-12", "nod-12"). */
@@ -826,7 +846,7 @@ export function planejarLote(p: {
 
   for (const [indice, op] of p.ops.entries()) {
     const erro = (e: string) => ({ erro: e, indice });
-    if (op.tipo === "desfazer" || op.tipo === "remover_quadro" || op.tipo === "comentar" || op.tipo === "mover_quadro") return erro(`${op.tipo} vai sozinho na chamada`);
+    if (op.tipo === "desfazer" || op.tipo === "remover_quadro" || op.tipo === "comentar" || op.tipo === "mover_quadro" || ehOpDeTrabalho(op)) return erro(`${op.tipo} vai sozinho na chamada`);
     // A meta entra em todo turno de tarefa do quadro: só um turno confiável a escreve (revisão rodada 3, ADR-062).
     const escreveMeta = op.tipo === "criar_quadro" || (op.tipo === "editar_quadro" && op.meta !== undefined);
     if (escreveMeta && p.origemConfiavel === false) return erro("a meta só muda num turno limpo, em que a pessoa falou com você e nada de fora entrou: peça a ela");

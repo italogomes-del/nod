@@ -249,6 +249,8 @@ export type ExtrasDaTarefa = {
   historico?: readonly EntradaHistoricoDto[] | null;
   /** NOD-417: a seção dos comentários (comentarios-tarefa.ts). */
   comentarios?: string;
+  /** NOD-418: o trabalho da tarefa (trabalhos-da-tarefa.ts). */
+  trabalhos?: string;
   /**
    * Revisão 7 do PR #623: o Status escolhido é uma coluna com responsável que aciona (ADR-142). A mesma linha do card
    * solto ("Confirmar · Não iniciar ainda") aparece logo abaixo do Status, antes de mandar a mudança.
@@ -317,7 +319,7 @@ export function tarefaAberta(o: { t: TarefaDto; q: QuadroDto; agente: AgenteDoQu
       `<button type="button" class="qd-bt" data-act="mover-quadro" data-id="${esc(t.id)}"${escolhido ? "" : " disabled"}>Mover</button></dd>` : "";
   return confiar(`<article class="qd-tarefa qd-com-lado" aria-labelledby="qd-t-tit" data-tarefa="${esc(t.id)}">` +
     `<div class="qd-t-cab"><button type="button" class="qd-voltar" data-act="voltar-ao-quadro">${ICONE.voltar}<span>${esc(o.q.meta ?? "Quadro")}</span></button><span class="qd-t-sep" aria-hidden="true">/</span><span class="qd-id">${esc(codigo)}</span></div>` +
-    `<div class="qd-t-corpo"><div class="qd-t-principal"><h1 class="qd-t-tit" id="qd-t-tit" tabindex="-1">${esc(t.titulo)}</h1><div class="qd-chips">${chipSt}${chipResp}${chipPr}</div>${desc}${pergunta}${resposta}${secaoDoHistorico(o.historico)}${linhas}${o.comentarios ?? ""}</div>` +
+    `<div class="qd-t-corpo"><div class="qd-t-principal"><h1 class="qd-t-tit" id="qd-t-tit" tabindex="-1">${esc(t.titulo)}</h1><div class="qd-chips">${chipSt}${chipResp}${chipPr}</div>${desc}${pergunta}${resposta}${o.trabalhos ?? ""}${secaoDoHistorico(o.historico)}${linhas}${o.comentarios ?? ""}</div>` +
     `<aside class="qd-lado" aria-label="Detalhes da tarefa"><section class="qd-lado-sec"><h2 class="qd-rotulo">Propriedades</h2><dl class="qd-props">` +
     `<dt><label for="qd-t-status">Status</label></dt><dd>${campoStatus}${soltar ? `<ul class="qd-t-soltar">${confirmacaoDeSoltar(soltar, t.id, t.titulo)}</ul>` : ""}</dd><dt>${rotuloResp}</dt><dd>${campoResp}</dd>` +
     `<dt>Quadro</dt><dd>${esc(o.q.agenteNome)}${o.q.meta ? ` · ${esc(o.q.meta)}` : ""}</dd>${campoMover}` +

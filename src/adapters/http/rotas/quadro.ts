@@ -1,5 +1,6 @@
 import { ErroDoMover, EXECUTORES_QUADRO } from "../../../use-cases/acoes/quadro.ts";
 import { verComentarios } from "../../../use-cases/comentar-tarefa.ts";
+import { verTrabalhos } from "../../../use-cases/quadro-execucoes.ts";
 import { historicoDaTarefa, listarQuadros, verQuadro, verTarefaPorCodigo } from "../../../use-cases/quadro.ts";
 import { TABELA_ERROS } from "../erros.ts";
 import type { Rota } from "../roteador.ts";
@@ -73,6 +74,20 @@ export function rotasQuadro(d: DepsRotas): Rota[] {
     { metodo: "POST", acao: "quadro.comentar", padrao: new RegExp(`^/agentes/${ID}/quadro/tarefas/${TID}/comentarios$`), async handler(ctx) {
       const c = corpoObjeto(await ctx.corpo());
       ctx.json(201, await executar(ctx.escopo, EXECUTORES_QUADRO["quadro.comentar"], { ...base(ctx.params.id ?? ""), tarefa: ctx.params.tid ?? "", texto: c.texto as string }));
+    } },
+    // NOD-418: os trabalhos da tarefa (a lista ao vivo), Repetir, Cancelar e o recado. A resposta traz `trabalhos`.
+    { metodo: "GET", padrao: new RegExp(`^/agentes/${ID}/quadro/tarefas/${TID}/trabalhos$`), async handler(ctx) {
+      ctx.json(200, await executar(ctx.escopo, verTrabalhos, { agenteId: ctx.params.id ?? "", tarefaId: ctx.params.tid ?? "" }));
+    } },
+    { metodo: "POST", acao: "quadro.repetir_trabalho", padrao: new RegExp(`^/agentes/${ID}/quadro/tarefas/${TID}/trabalhos/repetir$`), async handler(ctx) {
+      ctx.json(200, await executar(ctx.escopo, EXECUTORES_QUADRO["quadro.repetir_trabalho"], { ...base(ctx.params.id ?? ""), tarefa: ctx.params.tid ?? "" }));
+    } },
+    { metodo: "POST", acao: "quadro.cancelar_trabalho", padrao: new RegExp(`^/agentes/${ID}/quadro/tarefas/${TID}/trabalhos/cancelar$`), async handler(ctx) {
+      ctx.json(200, await executar(ctx.escopo, EXECUTORES_QUADRO["quadro.cancelar_trabalho"], { ...base(ctx.params.id ?? ""), tarefa: ctx.params.tid ?? "" }));
+    } },
+    { metodo: "POST", acao: "quadro.recado_trabalho", padrao: new RegExp(`^/agentes/${ID}/quadro/tarefas/${TID}/trabalhos/recado$`), async handler(ctx) {
+      const c = corpoObjeto(await ctx.corpo());
+      ctx.json(201, await executar(ctx.escopo, EXECUTORES_QUADRO["quadro.recado_trabalho"], { ...base(ctx.params.id ?? ""), tarefa: ctx.params.tid ?? "", texto: c.texto as string }));
     } },
     // NOD-416 (ADR-144): mudar de quadro, o histórico, o link pelo código (?tarefa=ZE-12) e a lista do "Mover para…".
     { metodo: "POST", acao: "quadro.mover_tarefa", padrao: new RegExp(`^/agentes/${ID}/quadro/tarefas/${TID}/mover$`), async handler(ctx) {

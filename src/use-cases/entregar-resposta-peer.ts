@@ -7,6 +7,7 @@ import { proximaProfundidade } from "../domain/profundidade.ts";
 import { autoriaAgente, delegacaoDoTurno, evento, exigir, PRAZO_DECISAO_MS, SALTOS_DE_RETOMADA } from "./apoio-l7.ts";
 import { PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
 import { perguntaDaTarefa } from "./pedido-de-colega.ts";
+import { cadeiaDoQuadroEncerrada } from "./quadro-execucoes.ts";
 import { notaPedidosAbertos } from "./pedidos-abertos.ts";
 import type { Deps } from "./tipos.ts";
 import { sincronizarTrabalho } from "./trabalhos.ts";
@@ -237,7 +238,10 @@ async function entregar(deps: DepsEntrega, e: Entrega): Promise<{ data: SaidaEnt
   // revisto na revisão do PR #458: a marca `paradoPelaPessoa` (que torna final o aviso) só sai quando o Parar é do turno
   // que pediu ou do Parar do chat (`paradoPeloChat`); depois do Parar global, da sala ou da task, um resultado depois
   // do aviso (a pessoa retomou) segue saindo normalmente, como antes da NOD-311.
-  const parado = paradoAntes ? "turno" : e.semAcordar ? "sem_acordar" : await quemPediuParado(deps, pediu, conversaRemetente.id);
+  // Revisão 4 do PR #625 (NOD-418): quem pediu é a cadeia de um trabalho do quadro já substituído (Repetir, a nova
+  // tentativa sozinha) ou tratado de vez (Bloqueado): a resposta tardia só fica registrada; a continuação rodaria a
+  // cadeia velha junto do trabalho novo (ou com o card parado). Não é o Parar da pessoa: o registro não sai final.
+  const parado = paradoAntes ? "turno" : e.semAcordar ? "sem_acordar" : (await quemPediuParado(deps, pediu, conversaRemetente.id)) || (pediu && (await cadeiaDoQuadroEncerrada(deps, pediu.id)) ? "quadro" : null);
   if (parado) {
     const registro = await deps.repos.mensagens.criar({
       conversaId: conversaRemetente.id,

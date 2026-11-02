@@ -2,7 +2,7 @@
 
 <!-- Gerado por `npm run paridade` a partir de src/domain/acoes/ (NOD-391, ADR-135). Não edite à mão: a catraca (tests/conformidade/paridade.test.ts) compara. -->
 
-Ações de pessoa que mudam algo: **158**, mais 2 só de leitura. No chat: **33 vivas**, 3 parciais, 90 faltando e 34 que nunca vão para o chat. Piso de vivas: 33.
+Ações de pessoa que mudam algo: **161**, mais 2 só de leitura. No chat: **36 vivas**, 3 parciais, 90 faltando e 34 que nunca vão para o chat. Piso de vivas: 36.
 
 Estados: **vivo** = o chat faz pelo mesmo executor da tela, com teste de contrato; **parcial** = o chat faz, mas diverge ou falta parâmetro; **falta** = a onda dona ainda vai ligar; **nunca** = exceção escrita.
 
@@ -285,6 +285,9 @@ Estados: **vivo** = o chat faz pelo mesmo executor da tela, com teste de contrat
 | `quadro.substituir_colunas` | Trocar o conjunto de colunas do quadro | muda | vivo (`gerir_quadro`) | `PUT ^\/agentes\/(?<id>[^/]+)\/quadro\/colunas$` |
 | `quadro.definir_passagem` | Definir quem pega a tarefa ao entrar numa coluna | muda | vivo (`gerir_quadro`) | `PUT ^\/agentes\/(?<id>[^/]+)\/quadro\/colunas\/(?<cid>[^/]+)\/passagem$` |
 | `quadro.terminei` | Terminar a etapa (a tarefa vai para a próxima coluna) | muda | vivo (`gerir_quadro`) | `POST ^\/agentes\/(?<id>[^/]+)\/quadro\/tarefas\/(?<tid>[^/]+)\/terminei$` |
+| `quadro.repetir_trabalho` | Repetir o trabalho de uma tarefa (abre um novo; a Bloqueada volta para onde estava) | muda | vivo (`gerir_quadro`) | `POST ^\/agentes\/(?<id>[^/]+)\/quadro\/tarefas\/(?<tid>[^/]+)\/trabalhos\/repetir$` |
+| `quadro.cancelar_trabalho` | Cancelar o trabalho em andamento de uma tarefa (a tarefa fica onde está) | muda | vivo (`gerir_quadro`) | `POST ^\/agentes\/(?<id>[^/]+)\/quadro\/tarefas\/(?<tid>[^/]+)\/trabalhos\/cancelar$` |
+| `quadro.recado_trabalho` | Mandar um recado ao trabalho em andamento de uma tarefa | muda | vivo (`gerir_quadro`) | `POST ^\/agentes\/(?<id>[^/]+)\/quadro\/tarefas\/(?<tid>[^/]+)\/trabalhos\/recado$` |
 
 ## times
 

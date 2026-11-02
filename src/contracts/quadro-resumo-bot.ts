@@ -1,4 +1,5 @@
 import type { ExecucaoTarefa, GrupoColuna, IdColuna } from "./quadro.ts";
+import type { TrabalhoParaBot } from "./quadro-execucoes.ts";
 
 /**
  * Separado do quadro.ts no merge da main (NOD-421) no PR #623, para não passar do teto de linhas dos contratos; o
@@ -14,6 +15,6 @@ export type ResumoQuadroParaBot = {
   cumprida: boolean;
   resumo: string | null;
   colunas: { id: string; nome: string; grupo: GrupoColuna; passa_para?: string; instrucoes?: string }[];
-  tarefas: { id: string; codigo: string; titulo: string; status: IdColuna; agente: string | null; linear: string | null; pr: string | null; pergunta: string | null; execucao: ExecucaoTarefa; prs?: string[] }[];
+  tarefas: { id: string; codigo: string; titulo: string; status: IdColuna; agente: string | null; linear: string | null; pr: string | null; pergunta: string | null; execucao: ExecucaoTarefa; trabalho?: TrabalhoParaBot; prs?: string[] }[];
   avisoGithub?: string; // NOD-421: por que os PRs não aparecem
 };

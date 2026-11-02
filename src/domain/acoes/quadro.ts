@@ -180,4 +180,33 @@ export const ACOES_QUADRO = [
     chat: vivo,
     casoDeUso: "quadro.terminei",
   },
+  // NOD-418: o trabalho da tarefa. Repetir e recado abrem um turno de delegação do responsável (como começar a tarefa);
+  // cancelar para o turno vivo. O gerir_quadro só os aceita num turno da pessoa (a conversa com ela).
+  {
+    id: "quadro.repetir_trabalho",
+    titulo: "Repetir o trabalho de uma tarefa (abre um novo; a Bloqueada volta para onde estava)",
+    schema: objeto({ tarefa: P.tarefa }, ["tarefa"]),
+    risco: "muda",
+    cartaoNoChat: false,
+    chat: vivo,
+    casoDeUso: "quadro.repetir_trabalho",
+  },
+  {
+    id: "quadro.cancelar_trabalho",
+    titulo: "Cancelar o trabalho em andamento de uma tarefa (a tarefa fica onde está)",
+    schema: objeto({ tarefa: P.tarefa }, ["tarefa"]),
+    risco: "muda",
+    cartaoNoChat: false,
+    chat: vivo,
+    casoDeUso: "quadro.cancelar_trabalho",
+  },
+  {
+    id: "quadro.recado_trabalho",
+    titulo: "Mandar um recado ao trabalho em andamento de uma tarefa",
+    schema: objeto({ tarefa: P.tarefa, texto: P.texto }, ["tarefa", "texto"]),
+    risco: "muda",
+    cartaoNoChat: false,
+    chat: vivo,
+    casoDeUso: "quadro.recado_trabalho",
+  },
 ] as const satisfies readonly DefinicaoAcao[];

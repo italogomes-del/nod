@@ -66,6 +66,8 @@
   padding: 72px clamp(12px, 3vw, 24px) calc(env(safe-area-inset-bottom) + 24px); background: var(--qd-fundo); container-type: inline-size; }
 .qd-vista[hidden] { display: none; }
 .qd-vista > * { width: 100%; max-width: 1240px; margin-left: auto; margin-right: auto; }
+/* NOD-418: o anúncio do trabalho (#qd-trab-anuncio) é filho da vista; sem isto a regra acima o esticava a 100% e ele vazava pela direita. */
+.qd-vista > .qd-sr { width: 1px; margin: 0; }
 .stage.qd-no-quadro .cabecalho.cabecalho-pilula::before {
   background: linear-gradient(180deg, var(--qd-fundo) 0%, color-mix(in srgb, var(--qd-fundo) 94%, transparent) 34%, transparent 100%); }
 /* Fora da tela durante e depois da troca: não recebe clique nem foco (o main também põe `inert`). */
@@ -438,6 +440,24 @@ a.qd-chip:hover { background: var(--surface-raised); }
 .qd-com-form:focus-within { border-bottom-color: var(--line-strong); }
 .qd-com-bt { border: 0; background: none; padding: 6px 2px; font: 500 13px var(--font-sans); color: var(--ink-3); cursor: pointer; }
 .qd-com-bt:hover, .qd-com-bt:focus-visible { color: var(--ink); }
+/* NOD-418: o trabalho da tarefa ("só o atual"). Tudo cinza; vermelho só no ⊗ da falha. */
+.qd-trab { display: flex; flex-direction: column; gap: 6px; }
+.qd-trab-atual { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.qd-trab-linha { margin: 0; display: flex; gap: 8px; align-items: baseline; font-size: 13px; color: var(--ink-2); }
+.qd-trab-selo { width: 1em; text-align: center; color: var(--ink-3); }
+.qd-trab-selo[data-estado="falhou"] { color: var(--danger); }
+.qd-trab-est { min-width: 0; }
+.qd-trab-hora { margin-left: auto; color: var(--ink-3); font-size: 12px; }
+.qd-trab-frase { margin: 0 0 0 calc(1em + 8px); font-size: 13.5px; line-height: 1.5; color: var(--ink-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+.qd-trab-log, .qd-trab-acoes { margin: 0 0 0 calc(1em + 8px); font-size: 12.5px; color: var(--ink-3); }
+.qd-trab-tg { text-decoration: none; color: var(--ink-3); font-size: 12.5px; align-self: flex-start; }
+.qd-trab-passos, .qd-trab-anteriores { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 3px; color: var(--ink-3); }
+.qd-trab-passo { overflow-wrap: anywhere; }
+.qd-trab-passo[data-estado="rodando"] { color: var(--ink-2); }
+.qd-trab-anteriores { gap: 8px; margin-left: calc(1em + 8px); }
+.qd-trab-nota { margin: 0; font-size: 12.5px; color: var(--ink-3); overflow-wrap: anywhere; }
+.qd-trab-form { display: flex; align-items: flex-end; gap: 8px; border-bottom: 1px solid var(--line); padding: 2px 0 6px; }
+.qd-trab-form:focus-within { border-bottom-color: var(--line-strong); }
 .qd-rotulo { margin: 0 0 8px; font-size: 12px; font-weight: 500; color: var(--ink-3); }
 .qd-lado { display: flex; flex-direction: column; padding: 6px 2px 0; font-size: 12.5px; min-width: 0; }
 .qd-lado-sec { padding: 16px 0; }
@@ -541,6 +561,10 @@ a.qd-chip:hover { background: var(--surface-raised); }
 @media (hover: none) and (pointer: coarse) and (max-width: 600px), (hover: none) and (pointer: coarse) and (max-height: 500px) {
   .qd-vista { padding-top: calc(env(safe-area-inset-top) + 64px); }
   .qd-link, .qd-filtro-bt, .qd-q-mais, .qd-col-bt, .qd-col-cab { min-height: 44px; }
+  /* Revisão 4 do PR 625: os links curtos dos trabalhos ("Repetir" a 12,5 px tem ~42 px) e o "Mandar" do recado e do
+     comentário (6 px de padding) também ficam com 44×44 no toque. */
+  .qd-trab-acoes .qd-link, .qd-trab-tg { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; }
+  .qd-com-bt { min-height: 44px; min-width: 44px; }
   .qd-q-mais { width: 44px; height: 44px; }
   .qd-bt, .qd-voltar, .qd-chip { min-height: 44px; }
   .qc-bt, .qc-bt.qc-enviar, .qc-hist-bt { width: 44px; height: 44px; }

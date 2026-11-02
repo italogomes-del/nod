@@ -1,12 +1,14 @@
 import type { CasoNod } from "../contracts/servicos.ts";
 import type { QuadroDto, ResultadoGerirQuadro } from "../contracts/quadro.ts";
 import type { LinkDeTarefa } from "../contracts/quadro-pela-conversa.ts";
-import { lerOps, MAX_COMECOS_POR_LOTE } from "../domain/quadro.ts";
+import { ehOpDeTrabalho, lerOps, MAX_COMECOS_POR_LOTE } from "../domain/quadro.ts";
 import { proporColunas } from "./colunas-do-quadro.ts";
 import { comentarTarefa } from "./comentar-tarefa.ts";
 import { proporExclusaoDoQuadro } from "./quadro-exclusao.ts";
-import { aplicarLoteQuadro, type PedidoLote, resumoParaBot } from "./quadro.ts";
+import { acharQuadro, agentesDaPessoa, aplicarLoteQuadro, experimentoLigado, falhaDoAchado, montarQuadro, type PedidoLote, resumoParaBot } from "./quadro.ts";
+import { trabalhoDaTarefa, trabalhosParaBot } from "./quadro-execucoes.ts";
 import type { Deps } from "./tipos.ts";
+import type { TrabalhoFeito } from "./quadro.ts";
 import type { Turno } from "../contracts/turno.ts";
 
 /**
@@ -20,10 +22,22 @@ const INSTRUCAO: Record<Extract<ResultadoGerirQuadro, { ok: false }>["erro"], st
   sem_quadro: "Nada mudou.",
   entrada_invalida: "Nada mudou: corrija a ação e chame de novo.",
   nao_encontrado: "Nada mudou: confira o id ou o nome e chame de novo.",
+  estado_invalido: "Nada mudou: conte à pessoa o motivo; só chame de novo depois que ela resolver.",
   conflito: "Nada mudou: outra mudança chegou antes; leia o quadro e chame de novo.",
 };
 
 const recusa = (erro: keyof typeof INSTRUCAO, detalhe: string) => ({ data: { ok: false, erro, instrucao: `${detalhe}. ${INSTRUCAO[erro]}` } as ResultadoGerirQuadro });
+
+/** O que o bot conta à pessoa depois de Repetir, Cancelar ou recado (o número e o estado do trabalho). */
+function fraseDoTrabalho(tipo: "repetir_trabalho" | "cancelar_trabalho" | "recado", t: TrabalhoFeito): string {
+  if (tipo === "repetir_trabalho") return `Trabalho #${t.numero} aberto na tarefa (${t.estado === "rodando" ? "rodando" : "na fila"}).`;
+  if (tipo === "cancelar_trabalho") {
+    const recados = t.cancelados ? ` e ${t.cancelados === 1 ? "o recado que aguardava" : `${t.cancelados} recados que aguardavam`}` : "";
+    return t.numero !== null ? `Trabalho #${t.numero} cancelado${recados}. A tarefa ficou na mesma coluna.` : `Nenhum trabalho em andamento: nada a cancelar${recados ? `; cancelei${recados.slice(2)}` : ""}.`;
+  }
+  if (t.entregue === "novo") return `Sem trabalho em andamento: o recado virou o trabalho #${t.numero}.`;
+  return t.entregue === "quando_comecar" ? `Recado entregue ao trabalho #${t.numero}: entra quando ele começar.` : `Recado entregue ao trabalho #${t.numero}: entra no próximo passo dele.`;
+}
 
 /** NOD-430: `nod-tarefa:<anfitrião>:<tarefa>` (web/lib/texto-formatado.ts o vira o botão que abre a tarefa no quadro). */
 export const linkDaTarefa = (anfitriaoId: string, tarefaId: string) => `nod-tarefa:${anfitriaoId}:${tarefaId}`;
@@ -44,6 +58,20 @@ export function linksDasTarefas(q: QuadroDto, ids: ReadonlySet<string>): LinkDeT
 const naConversa = (t: Pick<Turno, "origem" | "profundidade" | "sobProcuracaoDe">): boolean =>
   (t.origem === "conversa" || t.origem === "ligacao") && t.profundidade === 0 && t.sobProcuracaoDe == null;
 
+/** Só leitura (acoes vazio): o resumo do quadro e os trabalhos; contamina o turno como a escrita (tarefa deFora). */
+async function consultar(deps: Deps, agenteId: string, quadro: string | undefined, turno: Pick<Turno, "id" | "executor">, limpo: boolean): Promise<{ data: ResultadoGerirQuadro }> {
+  if (!(await experimentoLigado(deps))) return recusa("experimento_desligado", "o quadro está desligado nos experimentos da pessoa");
+  const agentes = await agentesDaPessoa(deps);
+  const achado = await acharQuadro(deps, { autor: { tipo: "agente", agenteId }, ops: [], executor: turno.executor, ...(quadro !== undefined ? { quadro } : {}) }, agentes);
+  if (achado && ("ambiguo" in achado || "semNome" in achado)) { const f = falhaDoAchado(achado, agentes); return recusa(f.erro, f.detalhe); }
+  if (!achado) return recusa("sem_quadro", "não há quadro: crie com criar_quadro");
+  const dto = await montarQuadro(deps, achado);
+  if (limpo && dto.tarefas.some((t) => t.deFora)) await deps.repos.turnos.contaminar(turno.id, deps.agora());
+  return {
+    data: { ok: true, quadro: resumoParaBot(dto, await trabalhosParaBot(deps, dto.tarefas.map((t) => t.id))), lote_id: null, comecaram: [], instrucao: "Só leitura: nada mudou." },
+  };
+}
+
 export const gerirQuadro: CasoNod<Deps, "gerir_quadro"> = async (deps, input) => {
   const turno = await deps.repos.turnos.buscar(input.turnoId);
   if (!turno || turno.agenteId !== input.agenteId) return recusa("nao_encontrado", "turno de outro bot");
@@ -59,6 +87,9 @@ export const gerirQuadro: CasoNod<Deps, "gerir_quadro"> = async (deps, input) =>
   if (turno.pararSolicitadoEm != null || turno.estado === "interrompido") return recusa("entrada_invalida", "este turno foi parado: a tarefa mudou de mão ou foi desfeita");
   // Limpo = confiável e nada de fora entrou durante o turno (a página lida, o e-mail): o mesmo corte do avisar_pessoa.
   const limpo = turno.entradaConfianca === "confiavel" && !(await deps.repos.turnos.contaminado(turno.id));
+  // Revisão 5 do PR #625: `acoes: []` só consulta: o resumo do quadro com o trabalho atual de cada tarefa (a mesma vista
+  // da tela, verTrabalhos), sem lote nem Desfazer. Vem antes do lerOps (que recusa a lista vazia).
+  if (Array.isArray(input.acoes) && input.acoes.length === 0) return consultar(deps, input.agenteId, input.quadro, turno, limpo);
   const ops = lerOps(input.acoes);
   if ("erro" in ops) return recusa("entrada_invalida", ops.indice >= 0 ? `ação ${ops.indice + 1}: ${ops.erro}` : ops.erro);
   // Quem responde ao bloqueio é a pessoa (revisão do PR #612). O bot só repassa o que ela disse a ele agora, na
@@ -71,6 +102,13 @@ export const gerirQuadro: CasoNod<Deps, "gerir_quadro"> = async (deps, input) =>
   const COLUNA = new Set(["criar_coluna", "renomear_coluna", "mover_coluna", "remover_coluna", "substituir_colunas", "definir_passagem"]);
   if (ops.some((o) => COLUNA.has(o.tipo)) && !naConversa(turno)) {
     return recusa("entrada_invalida", "as colunas só mudam a pedido da pessoa, num turno em que ela falou com você (não numa tarefa, rotina ou pedido de colega). Diga a ela o que sugere e deixe que ela peça");
+  }
+  // NOD-418: Repetir, Cancelar e recado são da pessoa: o bot só repassa o pedido dela, na conversa, como o responder —
+  // turno dela, de primeira mão e limpo. Uma página lida no turno podia mandar repetir (gastar) ou cancelar o trabalho;
+  // o recado entra no trabalho como a fala dela.
+  const trabalhoOp = ops[0] && ehOpDeTrabalho(ops[0]) ? ops[0] : null;
+  if (trabalhoOp && !(naConversa(turno) && limpo)) {
+    return recusa("entrada_invalida", `${trabalhoOp.tipo} é pedido da pessoa: só num turno em que ela falou com você e nada de fora entrou (não numa tarefa, rotina, pedido de colega ou depois de ler uma página ou um e-mail)`);
   }
   // NOD-448 (ADR-140, decisão 3 do Gil): trocar o conjunto inteiro de colunas não sai sozinho — vira o card compacto na
   // conversa e só se aplica quando a pessoa confirma. Os outros passos de coluna saem na hora, com Desfazer.
@@ -125,13 +163,14 @@ export const gerirQuadro: CasoNod<Deps, "gerir_quadro"> = async (deps, input) =>
     limite: naConversa(turno) && limpo ? "total" : "normal",
   };
   // NOD-417: comentar vai sozinho (lerOps) e não é lote — grava o comentário e aciona o responsável e os @mencionados (nunca o autor).
-  const r = ops[0]?.tipo === "comentar" ? await comentarTarefa(deps, pedido, ops[0]) : await aplicarLoteQuadro(deps, pedido);
+  const r = ops[0]?.tipo === "comentar" ? await comentarTarefa(deps, pedido, ops[0]) : trabalhoOp ? await trabalhoDaTarefa(deps, pedido, trabalhoOp) : await aplicarLoteQuadro(deps, pedido);
   if (!r.data.ok) return { data: { ok: false, erro: r.data.erro, instrucao: `${r.data.detalhe}. ${INSTRUCAO[r.data.erro]}` }, events: r.events };
   const { quadro, lote, comecaram, desfeito } = r.data;
   // O resultado mostra ao bot o título e a pergunta de cada tarefa: se alguma foi escrita por um turno não confiável
   // (deFora), o turno de quem leu fica contaminado, como no buscar_conversas (ADR-062 §6; revisão rodada 5).
   if (limpo && quadro?.tarefas.some((t) => t.deFora)) await deps.repos.turnos.contaminar(turno.id, deps.agora());
-  const partes = [r.data.removido ? "Quadro removido: o bot voltou a ser um agente comum (a conversa e a memória ficaram). Não tem Desfazer; para outro quadro, criar_quadro." : desfeito ? "Desfeito." : r.data.comentario ? "Comentário gravado na tarefa." : "Feito."];
+  const feito = r.data.trabalho;
+  const partes = [feito ? fraseDoTrabalho(trabalhoOp!.tipo, feito) : r.data.removido ? "Quadro removido: o bot voltou a ser um agente comum (a conversa e a memória ficaram). Não tem Desfazer; para outro quadro, criar_quadro." : desfeito ? "Desfeito." : r.data.comentario ? "Comentário gravado na tarefa." : "Feito."];
   // NOD-416: mudar de quadro não tem lote (nem Desfazer) e não aciona ninguém; o código antigo continua abrindo.
   if (r.data.movida) partes.push(`A tarefa agora é ${r.data.movida.codigo}, no quadro de ${quadro?.agenteNome ?? "destino"} (${r.data.movida.codigoAntigo} continua abrindo). Ninguém começou nada; sem Desfazer: para voltar, mover_quadro de novo.`);
   // Revisão do PR #623: o bot que pôs um responsável sem status pode achar que ele começou (antes da NOD-416 começava).
@@ -148,7 +187,7 @@ export const gerirQuadro: CasoNod<Deps, "gerir_quadro"> = async (deps, input) =>
   if (r.data.comentario) {
     const juntados = r.data.juntados ?? 0;
     if (!r.data.seguradas) partes.push(comecaram.length ? `Acionou: ${comecaram.map((c) => c.agenteNome).join(", ")}${juntados ? ` (${juntados === 1 ? "um já estava" : `${juntados} já estavam`} na fila para esta tarefa e o comentário se juntou ao trabalho dele)` : ""}.` : "Ninguém foi acionado: o comentário aciona o responsável da tarefa e os @nomes de outros bots do quadro, nunca quem escreveu.");
-  } else if (comecaram.length) partes.push(`Começaram: ${comecaram.map((c) => c.agenteNome).join(", ")} (cada um recebeu a tarefa como pedido).`);
+  } else if (comecaram.length && !feito) partes.push(`Começaram: ${comecaram.map((c) => c.agenteNome).join(", ")} (cada um recebeu a tarefa como pedido).`);
   const parado = r.data.responsavelForaDoAndamento;
   if (parado) partes.push(`A tarefa está em ${parado.coluna}, fora do andamento: o comentário ficou nela e ${parado.agenteNome} (o responsável) não foi acionado.`);
   if (r.data.seguradas && r.data.comentario) partes.push("A corrente de bots chegou ao limite: o comentário ficou gravado e ninguém foi acionado.");
@@ -164,12 +203,13 @@ export const gerirQuadro: CasoNod<Deps, "gerir_quadro"> = async (deps, input) =>
   return {
     data: {
       ok: true,
-      quadro: quadro ? resumoParaBot(quadro) : null,
+      quadro: quadro ? resumoParaBot(quadro, await trabalhosParaBot(deps, quadro.tarefas.map((t) => t.id))) : null,
       lote_id: lote?.id ?? null,
       comecaram: comecaram.map((c) => ({ tarefa_id: c.tarefaId, agente: c.agenteNome })),
       instrucao: partes.join(" "),
       ...(tarefas.length ? { tarefas } : {}),
       ...(r.data.ajustada ? { ajustada: true } : {}),
+      ...(feito ? { trabalho: { numero: feito.numero, estado: feito.estado } } : {}),
       // O código novo estruturado, como a rota devolve em `movida` (paridade, QA do PR #623).
       ...(r.data.movida ? { movida: { tarefa_id: r.data.movida.tarefaId, codigo: r.data.movida.codigo, codigo_antigo: r.data.movida.codigoAntigo } } : {}),
     },

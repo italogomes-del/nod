@@ -60,7 +60,7 @@ async function colegasLivres(deps: Deps, remetente: Agente, alvoId: string, agor
 
 /** Os erros do pedido com a tarefa (NOD-417, emenda da ADR-142): cada um diz o que corrigir; nada é pedido. */
 type ErroNaTarefa = Extract<Awaited<ReturnType<typeof pedirABot>>["data"], { ok: false }>["erro"];
-const ERRO_DO_QUADRO: Record<FalhaQuadro, ErroNaTarefa> = { experimento_desligado: "experimento_desligado", sem_quadro: "sem_quadro", nao_encontrado: "tarefa_invalida", entrada_invalida: "tarefa_invalida", conflito: "tarefa_invalida" };
+const ERRO_DO_QUADRO: Record<FalhaQuadro, ErroNaTarefa> = { experimento_desligado: "experimento_desligado", sem_quadro: "sem_quadro", nao_encontrado: "tarefa_invalida", entrada_invalida: "tarefa_invalida", estado_invalido: "tarefa_invalida", conflito: "tarefa_invalida" };
 const CORRECAO: Record<ErroNaTarefa, string> = {
   experimento_desligado: "O quadro está desligado nos experimentos da pessoa: chame sem a tarefa.",
   sem_quadro: "Diga o quadro certo ou chame sem a tarefa.",
