@@ -24,6 +24,9 @@ import { sincronizarDominiosAdmitidos } from "../fundo/dominios-admitidos.ts";
 import { INTERVALO_SCHEDULER_MS, iniciarScheduler } from "../fundo/scheduler-rotina.ts";
 import { iniciarVarredorOciosidade } from "../fundo/varredor-ociosidade.ts";
 import { iniciarLacoMinhaConta } from "../fundo/laco-minha-conta.ts";
+import { iniciarLacoPrsDoQuadro, planoPrsDoQuadro } from "../fundo/prs-do-quadro.ts";
+import { sincronizarPrsDoQuadro } from "../../use-cases/prs-do-quadro.ts";
+import { executar } from "./rotas/dentro-de-tx.ts";
 import { limiteDoAmbiente } from "../../domain/computador.ts";
 import { iniciarVarredorExpiracao } from "../fundo/varredor-expiracao.ts";
 import { INTERVALO_VARREDOR_LEASE_MS, iniciarVarredorLease } from "../fundo/varredor-lease.ts";
@@ -56,7 +59,7 @@ export type OpcoesBoot = {
   porta?: number;
   host?: string;
   /** Intervalos dos laços (testes encurtam). */
-  intervalos?: { orquestradorMs?: number; schedulerMs?: number; leaseMs?: number; expiracaoMs?: number; outboxMs?: number; ociosidadeMs?: number; disjuntorMs?: number };
+  intervalos?: { orquestradorMs?: number; schedulerMs?: number; leaseMs?: number; expiracaoMs?: number; outboxMs?: number; ociosidadeMs?: number; disjuntorMs?: number; prsDoQuadroMs?: number };
   listarPessoas?: () => Promise<{ tenantId: string; id: string }[]>;
   /** Drivers do registry; default: catcher (+ claude-cli/codex-cli quando NOD_EXECUTOR os pede ou é auto). */
   drivers?: (p: { urlNod: string; app: App }) => Driver[];
@@ -306,6 +309,7 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
   let varredorMaquinas: Laco = nada;
   let lacoMinhaConta: Laco = nada;
   let lacoDisjuntor: Laco = nada;
+  let lacoPrsDoQuadro: Laco = nada;
   let despachante: DespachanteOutbox | null = null;
   let lacosLigados = false;
   let ligando: Promise<void> | null = null;
@@ -373,6 +377,23 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
     if (app.contas?.minhaConta) lacoMinhaConta = iniciarLacoMinhaConta({ db, servico: app.contas.minhaConta, opcoes: { listarPessoas: o.listarPessoas } });
     // NOD-374: re-sonda as falhas abertas dos apps (1, 2, 5, 15, 30 min); a confirmação depois da chamada vale nas duas cores.
     lacoDisjuntor = app.disjuntor.iniciarLaco({ intervaloMs: iv.disjuntorMs, opcoes: { listarPessoas: o.listarPessoas } });
+    // NOD-421: só com NOD_QUADRO_GITHUB_REPOS (sem a env, nada sobe). Com NOD_QUADRO_GITHUB_TOKEN lê pela API; sem ele,
+    // pelo gh desta máquina (no modo compartilhado, nunca: sem token o quadro diz "não conectado"). Sem credencial, o aviso
+    // fica no topo do quadro (gravado uma vez até mudar).
+    // ADR-145: só os tenants de NOD_QUADRO_GITHUB_TENANTS sincronizam, em qualquer jeito e modo (vazia = o laço não sobe).
+    const planoPrs = planoPrsDoQuadro(env);
+    if (planoPrs) {
+      lacoPrsDoQuadro = iniciarLacoPrsDoQuadro({
+        db,
+        fonte: planoPrs.fonte,
+        repos: planoPrs.repos,
+        tenants: planoPrs.tenants,
+        intervaloMs: iv.prsDoQuadroMs,
+        // O executor VIVO (o do interruptor), lido a cada volta: o lote que move para Feito abre turnos onde o servidor roda.
+        processar: async (escopo, l) => { await app.dentro(escopo, (d) => executar(d, sincronizarPrsDoQuadro, { prs: l.prs, aviso: l.aviso, executor: app.executor })); },
+        opcoes: { listarPessoas: o.listarPessoas },
+      });
+    }
   };
   // Idempotente: a drenagem para e o fechar() chama de novo (que só repete o parar do despachante, para o modo "só
   // ligações" que a drenagem pode ter ligado depois). O orquestrador (só existe no modo local) para só no fechar(): no
@@ -385,7 +406,7 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
     (parandoLacos ??= (async () => {
       await ligando?.catch(() => undefined);
       const pararDespachante = o.soLigacoes ? despachante?.soLigacoes(() => app.voz.pessoasComLigacao()) : despachante?.parar();
-      await Promise.all([scheduler.parar(), varredorLease.parar(), varredorExpiracao.parar(), varredorOciosidade.parar(), varredorMaquinas.parar(), lacoMinhaConta.parar(), lacoDisjuntor.parar(), pararDespachante]);
+      await Promise.all([scheduler.parar(), varredorLease.parar(), varredorExpiracao.parar(), varredorOciosidade.parar(), varredorMaquinas.parar(), lacoMinhaConta.parar(), lacoDisjuntor.parar(), lacoPrsDoQuadro.parar(), pararDespachante]);
       // Não religa: ligarLacos() já recusa com drenando/fechado; o estado() passa a dizer a verdade.
       lacosLigados = false;
     })());

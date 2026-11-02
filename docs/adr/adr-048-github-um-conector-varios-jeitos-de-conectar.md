@@ -210,3 +210,8 @@ Nenhum segredo do nod (`NOD_*`) chega ao gh.
   agente não recebe o resultado por retomada; a fala aparece na conversa.
 - **Validação real.** Não houve UAT com dois Macs nem gh real contra um PR: só o gh falso e a ponte
   de verdade nos testes.
+
+## Emenda de 2026-11-02 (NOD-421, [ADR-145](adr-145-token-do-servidor-para-os-prs-do-quadro.md))
+
+O laço dos PRs do quadro usa um token GitHub do servidor, só de leitura e fora deste conector, escopado pela lista
+`NOD_QUADRO_GITHUB_TENANTS` (vazia = nenhum tenant). É provisório: sai quando o conector por tenant servir a um laço de fundo.

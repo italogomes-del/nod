@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { QuadroDto, TarefaDto } from "../../../src/contracts/quadro.ts";
 import { acesos, atalhosDePrazo, codigoDaTarefa, faltaParaOPrazo, fraseDoPrazo, historicoDaFaixa, linhaUnica, respostaDoBot, tarefaNoQuadro, tarefasPorStatus } from "../../../web/lib/quadro-dados.ts";
-import { cardDaTarefa, faixaDoQuadro, menuDePrazo, pilulaDoQuadro, quadroDaMeta, semQuadro, tarefaAberta, topoDoQuadro } from "../../../web/telas/quadro-real.ts";
-import { confiar } from "../../../web/telas/quadro.ts";
+import { avisoDoGithub, cardDaTarefa, faixaDoQuadro, menuDePrazo, pilulaDoQuadro, prMaisProblematico, quadroDaMeta, semQuadro, tarefaAberta, tomDoPr, topoDoQuadro } from "../../../web/telas/quadro-real.ts";
+import { card, confiar } from "../../../web/telas/quadro.ts";
 import { COLUNAS_PADRAO, colunasDto } from "../../../src/domain/colunas.ts";
 
 /** NOD-442: o quadro de verdade na tela, sem DOM (o Chrome real fica em tests/concurrency/quadro-jornada-chrome.test.ts). */
@@ -107,6 +107,56 @@ describe("quadro-real (o html)", () => {
     expect(ruim).not.toContain("javascript:");
   });
 
+  it("NOD-421: os PRs ligados nos Entregáveis (estado em texto), as linhas de sistema em Atividade e o +1 no card", () => {
+    const prs = [
+      { repo: "gamefik/nod", numero: 612, url: "https://github.com/gamefik/nod/pull/612", estado: "aberto" as const, ci: "falhou" as const, conflito: true },
+      { repo: "gamefik/nod", numero: 613, url: "javascript:alert(1)", estado: "mergeado" as const, ci: null, conflito: false },
+    ];
+    const linhas = [{ tipo: "ci_falhou" as const, texto: `GitHub · CI falhou no #612 ${MAL}`, criadoEm: Date.parse("2026-11-02T14:02:00Z") }];
+    const h = String(tarefaAberta({ t: t("1", { prs, linhas }), q: q([]), agente }));
+    expect(h).toContain(`href="https://github.com/gamefik/nod/pull/612"`);
+    expect(h).toContain("gamefik/nod #612</a><span class=\"qd-pr-estado\"> · CI falhou · conflito · aberto</span>");
+    expect(h).not.toContain("javascript:");
+    expect(h).toContain(`Entregáveis <span class="qd-n">1</span>`);
+    expect(h).toContain("Atividade");
+    expect(h).toContain("GitHub · CI falhou no #612");
+    expect(h).not.toMatch(/onerror="/);
+    // 🧭 da Ada: o card mostra o PR mais problemático (o #612, CI falhou) com o ponto, mais "+N".
+    const c = cardDaTarefa(t("1", { prUrl: "https://github.com/gamefik/nod/pull/613", prs }), agente);
+    expect(c.pr).toEqual({ texto: "PR #612 +1", tom: "falhou", titulo: "CI falhou · conflito · aberto" });
+    expect(c.tags).toBeUndefined();
+    expect(String(card(c))).toContain(`<i class="qd-pr-ponto qd-pr-falhou" aria-hidden="true"></i>PR #612 +1<span class="qd-sr"> (CI falhou · conflito · aberto)</span></span>`);
+    // Sem PR ligado nem linha: como antes (o pr_url do agente, sem Atividade).
+    const antes = String(tarefaAberta({ t: t("1", { prUrl: "https://github.com/o/r/pull/3" }), q: q([]), agente }));
+    expect(antes).toContain(`Entregáveis <span class="qd-n">1</span>`);
+    expect(antes).not.toContain("Atividade");
+  });
+
+  it("3ª revisão do PR #621: o ícone de cada PR em Entregáveis segue o estado (CI falhando, fechado sem merge, aberto, mergeado)", () => {
+    const pr = (numero: number, o: Partial<NonNullable<TarefaDto["prs"]>[number]>) => ({ repo: "o/r", numero, url: `https://github.com/o/r/pull/${numero}`, estado: "aberto" as const, ci: null, conflito: false, ...o });
+    const prs = [pr(1, { ci: "falhou" }), pr(2, { estado: "fechado" }), pr(3, { ci: "ok" }), pr(4, { estado: "mergeado" })];
+    const h = String(tarefaAberta({ t: t("1", { prs }), q: q([]), agente }));
+    const icones = [...h.matchAll(/<li><svg[^>]*class="([^"]*)"[^>]*>.*?o\/r #(\d+)<\/a>/g)].map((m) => [m[2], /qd-ic-[a-z]+/.exec(m[1]!)?.[0]]);
+    expect(icones).toEqual([["1", "qd-ic-falhou"], ["2", "qd-ic-fechado"], ["3", "qd-ic-fila"], ["4", "qd-ic-mergeado"]]);
+  });
+
+  it("NOD-421 (🧭): o tom do ponto e o PR mais problemático do card", () => {
+    const pr = (numero: number, o: Partial<{ estado: "aberto" | "mergeado" | "fechado"; ci: "pendente" | "ok" | "falhou" | null; conflito: boolean }>) =>
+      ({ repo: "o/r", numero, url: `https://github.com/o/r/pull/${numero}`, branch: "x", estado: "aberto" as const, ci: null, conflito: false, ...o });
+    expect(tomDoPr(pr(1, { ci: "falhou" }))).toBe("falhou");
+    expect(tomDoPr(pr(1, { ci: "ok", conflito: true }))).toBe("conflito");
+    expect(tomDoPr(pr(1, { ci: "pendente" }))).toBe("pendente");
+    expect(tomDoPr(pr(1, {}))).toBe("pendente");
+    expect(tomDoPr(pr(1, { ci: "ok" }))).toBe("ok");
+    expect(tomDoPr(pr(1, { estado: "mergeado", ci: "falhou" }))).toBe("mergeado");
+    expect(tomDoPr(pr(1, { estado: "fechado" }))).toBe("fechado");
+    expect(prMaisProblematico([pr(1, { estado: "mergeado" }), pr(2, { ci: "ok" }), pr(3, { conflito: true })]).numero).toBe(3);
+    expect(prMaisProblematico([pr(1, { estado: "mergeado" }), pr(2, { estado: "fechado" })]).numero).toBe(1);
+    expect(prMaisProblematico([pr(4, { ci: "ok" }), pr(9, { ci: "ok" })]).numero).toBe(9);
+    // Sem PR ligado: a tag de antes, sem ponto.
+    expect(cardDaTarefa(t("1", { prUrl: "https://github.com/o/r/pull/3" }), agente).tags).toEqual(["PR #3"]);
+  });
+
   it("coluna recolhida por padrão abre quando tem tarefa; vazia continua recolhida", () => {
     const vazio = quadroDaMeta({ q: q([t("1")]), nome: "Ada", agente, filtro: "todos", alternadas: new Set(), acesas: new Set() });
     const comCancelada = quadroDaMeta({ q: q([t("1", { status: "cancelado" })]), nome: "Ada", agente, filtro: "todos", alternadas: new Set(), acesas: new Set() });
@@ -119,6 +169,25 @@ describe("quadro-real (o html)", () => {
     expect(faixaDoQuadro({ ...base, faixa: { tipo: "aguardando", pedidoId: "p" } })).toContain("Mexendo no quadro");
     expect(faixaDoQuadro({ ...base, faixa: { tipo: "resposta", texto: "ok", loteId: "L1", mensagemId: "m" } })).toContain(`data-act="qc-desfazer" data-id="L1"`);
     expect(faixaDoQuadro({ ...base, faixa: { tipo: "resposta", texto: "ok", loteId: null, mensagemId: "m" } })).not.toContain("qc-desfazer");
+  });
+});
+
+describe("revisão do PR #621: o estado do PR para leitor de tela e o aviso do GitHub no topo", () => {
+  it("o estado do PR do card vai num qd-sr (o ponto é aria-hidden e o title não é lido por todo leitor)", () => {
+    const prs = [{ repo: "gamefik/nod", numero: 7, url: "https://github.com/gamefik/nod/pull/7", estado: "mergeado" as const, ci: "ok" as const, conflito: false }];
+    const h = String(card(cardDaTarefa(t("1", { prs }), agente)));
+    expect(h).toMatch(/<span class="qd-sr"> \([^)]*mergeado[^)]*\)<\/span>/);
+  });
+
+  it("o aviso é uma linha discreta (p, sem role de alerta), escapada; sem aviso, nada", () => {
+    expect(avisoDoGithub({ avisoGithub: null })).toBe("");
+    expect(avisoDoGithub({})).toBe("");
+    const h = String(avisoDoGithub({ avisoGithub: "GitHub não conectado no servidor: os PRs não sincronizam" }));
+    expect(h).toBe(`<p class="qd-aviso-gh">GitHub não conectado no servidor: os PRs não sincronizam</p>`);
+    expect(String(avisoDoGithub({ avisoGithub: MAL }))).not.toContain("<img");
+    const tela = String(quadroDaMeta({ q: q([], { avisoGithub: "GitHub · sem acesso a gamefik/privado" }), nome: "Ana", agente, filtro: "todos", alternadas: new Set(), acesas: new Set() }));
+    expect(tela).toContain(`<p class="qd-aviso-gh">GitHub · sem acesso a gamefik/privado</p>`);
+    expect(tela).not.toMatch(/role="alert"|aria-live="assertive"/);
   });
 });
 

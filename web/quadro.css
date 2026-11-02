@@ -560,3 +560,19 @@ a.qd-chip:hover { background: var(--surface-raised); }
   .qd-seg-bt[aria-selected="true"] { outline: 1px solid CanvasText; }
   .qd-col-in { outline: 2px solid CanvasText; outline-offset: 1px; }
 }
+/* NOD-421: as linhas de sistema da tarefa (GitHub) e o estado do PR: texto menor, cinza, sem alerta. */
+.qd-t-linhas { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; font-size: 12px; color: var(--ink-3); }
+.qd-pr-estado { font-size: 12px; color: var(--ink-3); }
+/* O ícone do PR em Entregáveis (3ª revisão): fechado sem merge em cinza, mergeado em violeta, como o ponto do card. */
+.qd-ic-fechado { color: var(--ink-3); }
+.qd-ic-mergeado { color: var(--agent-violet); }
+.qd-tag-pr { gap: 5px; }
+/* O ponto do PR no card (🧭 da Ada): só o ponto tem cor, sem fundo chapado. Conflito em âmbar, mergeado em violeta. */
+.qd-pr-ponto { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--ink-3); }
+.qd-pr-ok { background: var(--success); }
+.qd-pr-falhou { background: var(--danger); }
+.qd-pr-conflito { background: var(--warning); }
+.qd-pr-mergeado { background: var(--agent-violet); }
+@media (forced-colors: active) { .qd-pr-ponto { background: CanvasText; } }
+/* NOD-421 (revisão do PR 621): o aviso do GitHub no topo do quadro: uma linha de texto, cinza, sem caixa nem ícone. */
+.qd-aviso-gh { margin: 2px 0 0; font-size: 12px; line-height: 18px; color: var(--ink-3); }

@@ -3858,6 +3858,14 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       lote: async () => null,
       ultimoLote: async () => null,
       marcarDesfeito: soNoPostgres,
+      prsDoQuadro: async () => [],
+      salvarPr: soNoPostgres,
+      definirMergePendente: soNoPostgres,
+      definirPrUrlSeVazio: soNoPostgres,
+      inserirLinha: soNoPostgres,
+      linhasDoQuadro: async () => [],
+      avisoGithub: async () => null,
+      definirAvisoGithub: soNoPostgres,
     },
     // NOD-417 (0138): os comentários das tarefas são do Postgres (tests/integration/quadro-comentarios.test.ts).
     quadroComentarios: {

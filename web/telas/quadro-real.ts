@@ -30,10 +30,30 @@ const numeroDoPr = (url: string): string => {
 /** Só http(s) vira link (a rota já valida; aqui é a segunda trava, para um dado velho). */
 const linkSeguro = (url: string | null): string | null => (url && /^https?:\/\//i.test(url) ? url : null);
 
+/** NOD-421: o PR em texto, sem cor nem alerta ("CI ok · aberto", "conflito" como palavra). */
+const estadoDoPr = (p: NonNullable<TarefaDto["prs"]>[number]): string =>
+  [p.estado === "aberto" && p.ci ? `CI ${p.ci}` : "", p.estado === "aberto" && p.conflito ? "conflito" : "", p.estado === "fechado" ? "fechado sem merge" : p.estado].filter(Boolean).join(" · ");
+type PrDto = NonNullable<TarefaDto["prs"]>[number];
+type TomDoPr = NonNullable<Card["pr"]>["tom"];
+/** O tom do ponto: falhou (vermelho), conflito (âmbar), pendente/sem CI (cinza), ok (verde), mergeado (violeta), fechado (cinza). */
+export const tomDoPr = (p: PrDto): TomDoPr =>
+  p.estado === "mergeado" ? "mergeado" : p.estado === "fechado" ? "fechado" : p.ci === "falhou" ? "falhou" : p.conflito ? "conflito" : p.ci === "ok" ? "ok" : "pendente";
+/** 3ª revisão do PR #621: o ícone do PR em Entregáveis. CI falhando = falhou; fechado sem merge; aberto (pendente, ok ou em conflito) = em espera; mergeado. */
+const iconeDoPr = (p: PrDto): Html =>
+  p.estado === "mergeado" ? ICONE.mergeado : p.estado === "fechado" ? ICONE.fechado : p.ci === "falhou" ? ICONE.falhou : ICONE.fila;
+const GRAVIDADE: Record<TomDoPr, number> = { falhou: 0, conflito: 1, pendente: 2, ok: 3, mergeado: 4, fechado: 5 };
+/** O PR que o card mostra: o mais problemático (empate = o de número maior, o mais novo). */
+export const prMaisProblematico = (prs: readonly PrDto[]): PrDto =>
+  [...prs].sort((a, b) => GRAVIDADE[tomDoPr(a)] - GRAVIDADE[tomDoPr(b)] || b.numero - a.numero)[0]!;
+const horaDaLinha = (ms: number): string => new Date(ms).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+
 /** A tarefa como card: o responsável (bot ou você), a execução, o motivo do bloqueio e a pergunta para você. */
 export function cardDaTarefa(t: TarefaDto, agente: AgenteDoQuadro, acesa = false): Card {
   const resp = t.status === "voce" ? VOCE : t.agenteId ? agente(t.agenteId) : null;
-  const tags = [t.prUrl ? numeroDoPr(t.prUrl) : "", t.linearId ? "Linear" : ""].filter(Boolean);
+  // NOD-421 (🧭 da Ada): o PR mais problemático com o ponto do estado, mais "+N"; sem PR ligado, o pr_url do agente, como antes.
+  const pior = t.prs?.length ? prMaisProblematico(t.prs) : null;
+  const pr = pior ? { texto: `PR #${pior.numero}${t.prs!.length > 1 ? ` +${t.prs!.length - 1}` : ""}`, tom: tomDoPr(pior), titulo: estadoDoPr(pior) } : null;
+  const tags = [!pr && t.prUrl ? numeroDoPr(t.prUrl) : "", t.linearId ? "Linear" : ""].filter(Boolean);
   return {
     id: t.id,
     codigo: codigoDaTarefa(t),
@@ -42,6 +62,7 @@ export function cardDaTarefa(t: TarefaDto, agente: AgenteDoQuadro, acesa = false
     ...(t.execucao ? { estado: t.execucao } : {}),
     ...(t.status === "bloqueado" ? { motivo: t.pergunta ?? "bloqueada" } : {}),
     ...(t.status === "voce" ? { voce: t.pergunta ?? "Precisa de você" } : {}),
+    ...(pr ? { pr } : {}),
     ...(tags.length ? { tags } : {}),
     ...(acesa ? { brilho: true } : {}),
   };
@@ -107,6 +128,14 @@ export function topoDoQuadro(q: QuadroDto, o: { agora: number; editandoMeta?: bo
   return confiar(`<div class="qd-meta${q.meta ? "" : " qd-meta-fluxo"}">${partes.join("")}${seloEmTeste()}</div>`);
 }
 
+/**
+ * NOD-421 (revisão do PR #621): o aviso do GitHub no topo do quadro, uma linha de texto que parece mensagem e não alerta
+ * ("GitHub não conectado no servidor: os PRs não sincronizam", "GitHub · sem acesso a dono/repo"). Sem aviso, nada.
+ */
+export function avisoDoGithub(q: Pick<QuadroDto, "avisoGithub">): Html {
+  return confiar(q.avisoGithub ? `<p class="qd-aviso-gh">${esc(q.avisoGithub)}</p>` : "");
+}
+
 const rotuloDoQuadro = (q: QuadroDto, nome: string): string => (q.meta ? `Quadro ${q.meta} de ${nome}` : `Quadro de ${nome}`);
 
 /**
@@ -159,6 +188,7 @@ export function quadroDaMeta(o: { q: QuadroDto; nome: string; agente: AgenteDoQu
   const ordem = `<button type="button" class="qd-link qd-lg-ordem" data-act="col-folha">Ordem das colunas</button>`;
   return confiar([
     topoDoQuadro(o.q, { agora: o.agora ?? Date.now(), ...(o.editandoMeta ? { editandoMeta: true } : {}) }),
+    avisoDoGithub(o.q),
     barra({ filtro: o.filtro, trabalhando: trabalhando(o.q, o.agente) }),
     quadro({ rotulo, classe: "qd-so-largo", colunas, extras }),
     `<div class="qd-so-estreito">${lista({ rotulo, antes: confiar(ordem), grupos: cols.map(({ c, tarefas, recolhida }) => ({ status: c.id, nome: c.nome, icone: iconeDaColuna(c), pessoa: c.daPessoa, recolhido: recolhida, linhas: [...solta(c), ...cartoes(tarefas, true).map(linha)], vazio: vazio(c.id) })) })}` +
@@ -217,12 +247,20 @@ export function tarefaAberta(o: { t: TarefaDto; q: QuadroDto; agente: AgenteDoQu
   const pergunta = t.pergunta && (t.status === "voce" || t.status === "bloqueado")
     ? `<h2 class="qd-t-sec">${t.status === "voce" ? "Precisa de você" : "Bloqueada"}</h2><p class="qd-voce-frase">${esc(t.pergunta)}</p>${t.status === "voce" ? formResposta(t) : ""}` : "";
   const resposta = t.resposta ? `<h2 class="qd-t-sec">Sua resposta</h2><p class="qd-t-resposta">${esc(t.resposta)}</p>` : "";
-  const entregaveis = `<section class="qd-lado-sec"><h2 class="qd-rotulo">Entregáveis <span class="qd-n">${pr ? 1 : 0}</span></h2>` +
-    (pr ? `<ul><li>${ICONE.ok}<a class="qd-link" href="${esc(pr)}" target="_blank" rel="noopener noreferrer">${esc(numeroDoPr(pr))}</a></li></ul>` : `<p class="qd-lado-vazio">Nada ainda</p>`) + `</section>`;
+  // NOD-421: os PRs que o laço ligou (repo #N · estado); sem nenhum, o pr_url que o agente gravou, como antes.
+  const prs = (t.prs ?? []).flatMap((p) => { const u = linkSeguro(p.url); return u ? [{ ...p, url: u }] : []; });
+  const itensPr = prs.length
+    ? prs.map((p) => `<li>${iconeDoPr(p)}<a class="qd-link" href="${esc(p.url)}" target="_blank" rel="noopener noreferrer">${esc(`${p.repo} #${p.numero}`)}</a><span class="qd-pr-estado"> · ${esc(estadoDoPr(p))}</span></li>`)
+    : pr ? [`<li>${ICONE.ok}<a class="qd-link" href="${esc(pr)}" target="_blank" rel="noopener noreferrer">${esc(numeroDoPr(pr))}</a></li>`] : [];
+  const entregaveis = `<section class="qd-lado-sec"><h2 class="qd-rotulo">Entregáveis <span class="qd-n">${itensPr.length}</span></h2>` +
+    (itensPr.length ? `<ul>${itensPr.join("")}</ul>` : `<p class="qd-lado-vazio">Nada ainda</p>`) + `</section>`;
+  // NOD-421: as linhas de sistema (CI, conflito, merge), discretas, até o histórico da NOD-416.
+  const linhas = t.linhas?.length
+    ? `<h2 class="qd-t-sec">Atividade</h2><ul class="qd-t-linhas">${t.linhas.map((l) => `<li>${esc(l.texto)} · <time datetime="${new Date(l.criadoEm).toISOString()}">${esc(horaDaLinha(l.criadoEm))}</time></li>`).join("")}</ul>` : "";
   const noLinear = t.linearId ? `<section class="qd-lado-sec"><h2 class="qd-rotulo">No Linear</h2><ul><li>${lin ? `<a class="qd-link" href="${esc(lin)}" target="_blank" rel="noopener noreferrer">${esc(t.linearId)}</a>` : `<span>${esc(t.linearId)}</span>`}</li></ul></section>` : "";
   return confiar(`<article class="qd-tarefa qd-com-lado" aria-labelledby="qd-t-tit" data-tarefa="${esc(t.id)}">` +
     `<div class="qd-t-cab"><button type="button" class="qd-voltar" data-act="voltar-ao-quadro">${ICONE.voltar}<span>${esc(o.q.meta ?? "Quadro")}</span></button><span class="qd-t-sep" aria-hidden="true">/</span><span class="qd-id">${esc(codigo)}</span></div>` +
-    `<div class="qd-t-corpo"><div class="qd-t-principal"><h1 class="qd-t-tit" id="qd-t-tit" tabindex="-1">${esc(t.titulo)}</h1><div class="qd-chips">${chipSt}${chipResp}${chipPr}</div>${desc}${pergunta}${resposta}${o.comentarios ?? ""}</div>` +
+    `<div class="qd-t-corpo"><div class="qd-t-principal"><h1 class="qd-t-tit" id="qd-t-tit" tabindex="-1">${esc(t.titulo)}</h1><div class="qd-chips">${chipSt}${chipResp}${chipPr}</div>${desc}${pergunta}${resposta}${linhas}${o.comentarios ?? ""}</div>` +
     `<aside class="qd-lado" aria-label="Detalhes da tarefa"><section class="qd-lado-sec"><h2 class="qd-rotulo">Propriedades</h2><dl class="qd-props">` +
     `<dt>Status</dt><dd>${esc(nomeSt)}</dd><dt>Responsável</dt><dd>${esc(resp?.nome ?? "ninguém")}</dd><dt>Quadro</dt><dd>${esc(o.q.meta ?? "sem meta")}</dd></dl></section>` +
     `${entregaveis}${noLinear}</aside></div></article>`);

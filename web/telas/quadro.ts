@@ -41,6 +41,9 @@ export const ICONE = {
   falhou: svg('<circle cx="12" cy="12" r="8.5"/><path d="m9 9 6 6M15 9l-6 6"/>', "qd-ic-falhou", 13, 2),
   pausa: svg('<circle cx="12" cy="12" r="8.5"/><path d="m6.5 17.5 11-11"/>', "qd-ic-bloq", 12, 2),
   ok: svg('<circle cx="12" cy="12" r="8.5"/><path d="m8.5 12.2 2.4 2.4 4.6-4.8"/>', "qd-ic-ok", 14, 1.9),
+  // NOD-421 (3ª revisão do PR #621): o PR em Entregáveis. Fechado sem merge = círculo com um traço; mergeado = o merge.
+  fechado: svg('<circle cx="12" cy="12" r="8.5"/><path d="M8.5 12h7"/>', "qd-ic-fechado", 14, 1.9),
+  mergeado: svg('<circle cx="7" cy="6" r="2"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="12" r="2"/><path d="M7 8v8M7 8c0 3 4 4 8 4"/>', "qd-ic-mergeado", 14, 1.8),
   voltar: svg('<path d="m15 5-7 7 7 7"/>', "qd-ic-voltar", 16, 1.9),
   chev: svg('<path d="m9 6 6 6-6 6"/>', "qd-ic-chev", 12, 2),
   trava: svg('<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>', "qd-ic-trava", 12, 2),
@@ -129,6 +132,8 @@ export interface Card {
   /** Precisa de você: a pergunta, em azul, na linha 3. */
   voce?: string;
   tags?: string[];
+  /** NOD-421: o PR do card com o ponto discreto do estado (antes das tags); o estado em texto vai no title e no qd-sr. */
+  pr?: { texto: string; tom: "pendente" | "ok" | "falhou" | "conflito" | "mergeado" | "fechado"; titulo: string };
   quando?: string;
   /** Quem executa agora. Sem isto, com estado "rodando", é o próprio responsável. */
   rodam?: QuemRoda[];
@@ -199,7 +204,7 @@ export function card(c: Card): Html {
   const quando = c.quando ? `<span class="qd-quando">${esc(c.quando)}</span>` : "";
   const l1 = c.aviso ? aviso(c.aviso) : estadoDoCard(c);
   const l3 = c.voce ? `<span class="qd-voce-frase">${esc(c.voce)}</span>`
-    : c.tags?.length ? `<span class="qd-tags">${c.tags.map((t) => `<span class="qd-tag">${esc(t)}</span>`).join("")}</span>` : "";
+    : c.pr || c.tags?.length ? `<span class="qd-tags">${c.pr ? `<span class="qd-tag qd-tag-pr" title="${esc(c.pr.titulo)}"><i class="qd-pr-ponto qd-pr-${c.pr.tom}" aria-hidden="true"></i>${esc(c.pr.texto)}<span class="qd-sr"> (${esc(c.pr.titulo)})</span></span>` : ""}${(c.tags ?? []).map((t) => `<span class="qd-tag">${esc(t)}</span>`).join("")}</span>` : "";
   const classe = cl("qd-card", c.menu && "qd-com-menu", c.motivo && "qd-bloqueado", c.voce && "qd-precisa", c.brilho && "qd-brilho", c.aviso && "qd-com-aviso", c.classe && esc(c.classe));
   return h(`<li class="${classe}" data-tarefa="${esc(c.id)}"${c.arrastavel ? ' draggable="true"' : ""}>` +
     `<div class="qd-card-l1"><span class="qd-id">${esc(c.codigo ?? c.id)}</span>${l1}</div>` +

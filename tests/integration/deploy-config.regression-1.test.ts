@@ -117,3 +117,59 @@ describe("login por e-mail ligado em produção (ADR-124 §6, NOD-406, 2026-10-2
     expect(provisionar).toMatch(/nod-resend-api-key; do\n\s+gc secrets describe "\$s" [^\n]*\|\| gc secrets create "\$s"/);
   });
 });
+
+describe("PRs do GitHub no quadro no deploy: REPOS configurado, laço desligado até o 🧭 (NOD-421, ADR-145)", () => {
+  it("o config.env liga NOD_QUADRO_GITHUB_REPOS=gamefik/nod; o token só mora no Secret Manager e é opcional", async () => {
+    const { readFile } = await import("node:fs/promises");
+    const config = await readFile(fileURLToPath(new URL("../../infra/gcp/config.env", import.meta.url)), "utf8");
+    expect(config).toMatch(/^NOD_QUADRO_GITHUB_REPOS=gamefik\/nod$/m);
+    expect(config.match(/^NOD_QUADRO_GITHUB_REPOS=/gm)).toHaveLength(1);
+    expect(config).not.toMatch(/^NOD_QUADRO_GITHUB_TOKEN=/m);
+    const script = await readFile(DEPLOY, "utf8");
+    expect(script).toMatch(/^NOD_QUADRO_GITHUB_REPOS=\$NOD_QUADRO_GITHUB_REPOS$/m);
+    expect(script).toMatch(/^NOD_QUADRO_GITHUB_TOKEN=\$QUADRO_GITHUB_TOKEN$/m);
+    // Sem o segredo, o deploy segue (o laço tolera a falta de acesso).
+    expect(script).toMatch(/segredo nod-github-quadro-token 2>\/dev\/null \|\| true/);
+  });
+
+  it("3ª revisão do PR #621: o config.env traz a lista de tenants VAZIA (sem 🧭, o laço não sobe) e o deploy.sh a repassa ao nod.env", async () => {
+    const { readFile } = await import("node:fs/promises");
+    const config = await readFile(fileURLToPath(new URL("../../infra/gcp/config.env", import.meta.url)), "utf8");
+    expect(config).toMatch(/^NOD_QUADRO_GITHUB_TENANTS=$/m);
+    expect(config.match(/^NOD_QUADRO_GITHUB_TENANTS=/gm)).toHaveLength(1);
+    const script = await readFile(DEPLOY, "utf8");
+    expect(script).toMatch(/^NOD_QUADRO_GITHUB_TENANTS="\$\(limpo "\$\{NOD_QUADRO_GITHUB_TENANTS:-\}"\)"$/m);
+    expect(script).toMatch(/^NOD_QUADRO_GITHUB_TENANTS=\$NOD_QUADRO_GITHUB_TENANTS$/m);
+    // As envs do config.env (REPOS ligada, sem token, sem tenants) no plano do boot: o laço não sobe.
+    const env = Object.fromEntries([...config.matchAll(/^(NOD_QUADRO_GITHUB_\w+)=(.*)$/gm)].map((m) => [m[1]!, m[2]!]));
+    expect(env.NOD_QUADRO_GITHUB_REPOS).toBe("gamefik/nod");
+    const { planoPrsDoQuadro } = await import("../../src/adapters/fundo/prs-do-quadro.ts");
+    expect(planoPrsDoQuadro({ ...env, PATH: process.env.PATH })).toBeNull();
+  });
+
+  it("revisão do PR #621: REPOS ligado sem o token = aviso no stderr (o deploy segue); com token ou sem REPOS, calado", async () => {
+    const { readFile } = await import("node:fs/promises");
+    const script = await readFile(DEPLOY, "utf8");
+    // Só o trecho do token, com limpo de verdade e um segredo falso (o deploy inteiro para antes, nos segredos do gcloud).
+    const limpo = script.match(/^limpo\(\) \{.*\}$/m)![0];
+    const inicio = script.indexOf('NOD_QUADRO_GITHUB_REPOS="$(limpo');
+    const fim = script.indexOf("\nfi\n", script.indexOf("aviso: NOD_QUADRO_GITHUB_REPOS ligado sem o segredo", inicio));
+    // Sem o bloco do aviso, nada roda (um trecho maior do deploy.sh escreveria o nod.env).
+    expect(inicio).toBeGreaterThan(0);
+    expect(fim - inicio).toBeGreaterThan(0);
+    expect(fim - inicio).toBeLessThan(600);
+    const trecho = script.slice(inicio, fim + 4);
+    const T = "172e1fdf-428d-48cb-b052-3bd7d2573e18";
+    const rodar = (repos: string, token: string, tenants = T) =>
+      spawnSync("bash", ["-c", `${limpo}\nsegredo() { [ -n "$TK" ] && printf '%s' "$TK" || return 1; }\n${trecho}\nprintf 'TENANTS=%s' "$NOD_QUADRO_GITHUB_TENANTS"`], { cwd: dir, env: { PATH: process.env.PATH ?? "", NOD_QUADRO_GITHUB_REPOS: repos, NOD_QUADRO_GITHUB_TENANTS: tenants, TK: token }, encoding: "utf8" });
+    const sem = rodar("gamefik/nod", "");
+    expect(sem.status).toBe(0);
+    expect(sem.stderr).toMatch(/^aviso: NOD_QUADRO_GITHUB_REPOS ligado sem o segredo nod-github-quadro-token/);
+    // 3ª revisão: sem o segredo, a lista vai vazia ao nod.env, mesmo com o tenant no config.env (nada sobe em produção).
+    expect(sem.stdout).toBe("TENANTS=");
+    const com = rodar("gamefik/nod", "tk-1");
+    expect(com.stderr).toBe("");
+    expect(com.stdout).toBe(`TENANTS=${T}`);
+    expect(rodar("", "").stderr).toBe("");
+  });
+});

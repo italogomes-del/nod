@@ -7,6 +7,9 @@
  * pessoa mexe nele pelas mesmas ações (ADR-135, domínio `quadro`).
  */
 
+import type { LinhaDeSistema, PrNaTela } from "./prs-da-tarefa.ts";
+export type { CiPr, EstadoPr, LinhaDeSistema, PrDaTarefa, PrLido, PrNaTela, TipoLinhaTarefa } from "./prs-da-tarefa.ts";
+
 /**
  * As colunas padrão, na ordem (os mesmos de web/lib/quadro.ts, que a NOD-429 já desenha). Definido em 2026-11-01
  * (NOD-448): são ids reservados com o comportamento de sempre; "Precisa de você" passa a ser a última do andamento.
@@ -106,7 +109,7 @@ export type LoteQuadro = {
 };
 
 /** O que a web e o bot recebem: o quadro com as tarefas, a execução de cada uma e o último lote que dá para desfazer. */
-export type TarefaDto = TarefaQuadro & { execucao: ExecucaoTarefa; agenteNome: string | null };
+export type TarefaDto = TarefaQuadro & { execucao: ExecucaoTarefa; agenteNome: string | null; prs?: PrNaTela[]; linhas?: LinhaDeSistema[] };
 export type QuadroDto = Omit<Quadro, "colunas"> & {
   agenteNome: string;
   /** As colunas de verdade (as padrão quando o quadro não tem as dele). */
@@ -116,6 +119,7 @@ export type QuadroDto = Omit<Quadro, "colunas"> & {
   ultimoLote: LoteQuadro | null;
   feitas: number;
   total: number;
+  avisoGithub?: string | null; // NOD-421: a linha do GitHub no topo ("não conectado", "sem acesso a dono/repo")
 };
 
 /** Uma operação no quadro (a ferramenta manda uma lista; a rota, uma). Cada tipo é um id do registro `quadro.*`. */
@@ -164,7 +168,8 @@ export type ResumoQuadroParaBot = {
   cumprida: boolean;
   resumo: string | null;
   colunas: { id: string; nome: string; grupo: GrupoColuna; passa_para?: string; instrucoes?: string }[];
-  tarefas: { id: string; titulo: string; status: IdColuna; agente: string | null; linear: string | null; pr: string | null; pergunta: string | null; execucao: ExecucaoTarefa }[];
+  tarefas: { id: string; titulo: string; status: IdColuna; agente: string | null; linear: string | null; pr: string | null; pergunta: string | null; execucao: ExecucaoTarefa; prs?: string[] }[];
+  avisoGithub?: string; // NOD-421: por que os PRs não aparecem
 };
 
 /** Os tetos do quadro (a ferramenta, o domínio e a tela usam os mesmos). */

@@ -259,6 +259,31 @@ das outras" ou por senha nova voltam a valer, e os cookies dos espaços provisó
 conta comprometida ou abuso, troque também o `nod-sessao-segredo` (nova versão no Secret Manager e deploy): todo mundo
 entra de novo. Para só fechar a porta aos visitantes, esvazie apenas `NOD_BOOTSTRAP`.
 
+### Token dos PRs do quadro (NOD-421)
+
+**Desligado em produção até o 🧭 da Ada/Marlon (ADR-145 é proposta). Ligar exige: secret + tenant na lista + 🧭.**
+Com `NOD_QUADRO_GITHUB_REPOS` no `config.env` (hoje `gamefik/nod`), o servidor lê os PRs desses repos a cada 30 s pela
+API GraphQL do GitHub, com o token do segredo `nod-github-quadro-token`. Sem o segredo, o deploy segue, avisa no stderr
+e grava `NOD_QUADRO_GITHUB_TENANTS` vazio no env da cor nova: o laço não sobe. Use um fine-grained token só de leitura (Pull requests: read, Commit
+statuses: read, Checks: read; Metadata: read) restrito aos repos da lista, ou o token de instalação de um GitHub App.
+
+```bash
+gcloud secrets describe nod-github-quadro-token --project=nod-producao >/dev/null 2>&1 || \
+  gcloud secrets create nod-github-quadro-token --replication-policy=user-managed --locations=southamerica-east1 --project=nod-producao
+gcloud secrets add-iam-policy-binding nod-github-quadro-token --member="serviceAccount:nod-vm@nod-producao.iam.gserviceaccount.com" \
+  --role=roles/secretmanager.secretAccessor --project=nod-producao
+printf %s 'github_pat_…' | gcloud secrets versions add nod-github-quadro-token --data-file=- --project=nod-producao
+```
+
+O token entra no próximo deploy (o env da cor nova é montado nele). Sem o segredo, o deploy avisa no stderr e segue.
+
+**Quem sincroniza:** o token é do servidor e lê o repo privado, então só os tenants de `NOD_QUADRO_GITHUB_TENANTS`
+(ids separados por vírgula, no `config.env`) recebem os PRs, em qualquer jeito (o `gh` e um `GH_TOKEN` no ambiente
+também; ADR-145). Vazio = nenhum tenant sincroniza (o laço nem sobe; `prs_do_quadro_sem_tenants` no log). Hoje está
+vazia; o tenant do Marlon, para quando houver o 🧭, é `172e1fdf-428d-48cb-b052-3bd7d2573e18`. Para achar o de outra pessoa, só leitura:
+`select tenant_id from pessoas where lower(email) = '…'`. Decisão provisória: quando o conector GitHub por tenant (app >
+token > composio) existir, o laço passa a usar a credencial de cada tenant e esta lista sai.
+
 ## Computador da pessoa no motor (NOD-96, ADR-122)
 
 Ligado em produção em 2026-10-28: `NOD_COMPUTADORES=motor` no `config.env`, que o `deploy.sh` leva ao env da cor nova

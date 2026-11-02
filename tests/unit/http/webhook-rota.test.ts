@@ -123,11 +123,24 @@ describe("rota do webhook: limites, corpo, moldura e log", () => {
   });
 
   it("revisão 5: a redação roda só na janela de 16 KB + margem; corpo adversarial de 256 KB sai rápido e cortado", () => {
+    // Tempo relativo, não absoluto: o limite fixo de 60 ms falhava no runner carregado (PRs #621, #625,
+    // #628, #631) sem regressão. Com a janela, 256 KB custam o mesmo que um corpo do tamanho da janela;
+    // sem ela, ~16× mais. O menor de 5 tira o ruído de um GC ou de uma pausa do runner.
+    const token = "gt_x.segredoSegredoSegredo123";
+    const menor = (c: string): number => {
+      let m = Infinity;
+      for (let i = 0; i < 5; i++) {
+        const ini = performance.now();
+        entradaDoPayload(c, token);
+        m = Math.min(m, performance.now() - ini);
+      }
+      return m;
+    };
     const corpo = "gt_".repeat(87_000);
-    const ini = performance.now();
-    const saida = entradaDoPayload(corpo, "gt_x.segredoSegredoSegredo123");
-    expect(performance.now() - ini).toBeLessThan(60);
-    expect(saida).toContain("[… payload cortado em 16 KB]");
+    const naJanela = "gt_".repeat(Math.floor(PAYLOAD_NO_TURNO / 3));
+    menor(naJanela);
+    expect(menor(corpo)).toBeLessThan(4 * menor(naJanela) + 10);
+    expect(entradaDoPayload(corpo, token)).toContain("[… payload cortado em 16 KB]");
   });
 
   it("revisão 5: um segredo que cruza o corte de 16 KB não vaza o começo", () => {

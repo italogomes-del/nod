@@ -15,7 +15,7 @@ export { LIMITES_QUADRO };
 
 const PRAZO = /^\d{4}-\d{2}-\d{2}$/;
 /** Só o PR do GitHub (o card mostra o número; nenhum outro endereço vira link). */
-const PR_GITHUB = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/(\d+)$/;
+export const PR_GITHUB = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/(\d+)$/;
 const LINEAR = /^https:\/\/linear\.app\/[\w-]+\/issue\/[A-Za-z][A-Za-z0-9]*-\d+(\/[\w-]*)?$/;
 /** Quantos turnos um lote abre de uma vez, no máximo (revisão rodada 4): um lote de 50 itens não vira 50 bots rodando. */
 export const MAX_COMECOS_POR_LOTE = 8;

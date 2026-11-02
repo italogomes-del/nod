@@ -1,4 +1,4 @@
-import type { AutorLote, ColunaQuadro, IdColuna, LoteQuadro, Quadro, TarefaQuadro } from "../contracts/quadro.ts";
+import type { AutorLote, ColunaQuadro, IdColuna, LinhaDeSistema, LoteQuadro, PrDaTarefa, Quadro, TarefaQuadro, TipoLinhaTarefa } from "../contracts/quadro.ts";
 import type { EstadoTurno } from "../contracts/turno.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
 import { jsonb, ms, msOuNull } from "./conversao.ts";
@@ -284,5 +284,76 @@ export function quadrosRepo(conn: Conn, escopo: Escopo) {
       const r = await conn`update quadro_lotes set desfeito_em = clock_timestamp() where ${dona()} and id = ${id} and desfeito_em is null`;
       return r.count > 0;
     },
+    /**
+     * NOD-421 (0142): os PRs ligados às tarefas do quadro, no último estado visto. Lê pelas tarefas que estão no quadro
+     * agora (revisão do PR #621): a tarefa que mudou de quadro leva os PRs junto, sem "PR ligado" de novo.
+     */
+    async prsDoQuadro(quadroId: string): Promise<(PrDaTarefa & { tarefaId: string; mergePendente: boolean })[]> {
+      const ls = await conn<LinhaPr[]>`
+        select tarefa_id, repo, numero, url, branch, estado, ci, conflito, merge_pendente from quadro_tarefa_prs
+        where ${dona()} and tarefa_id in (select id from quadro_tarefas where ${dona()} and quadro_id = ${quadroId}) order by repo, numero`;
+      return ls.map((l) => ({ tarefaId: l.tarefa_id, repo: l.repo, numero: l.numero, url: l.url, branch: l.branch, estado: l.estado, ci: l.ci, conflito: l.conflito, mergePendente: l.merge_pendente }));
+    },
+    /** 4ª revisão do PR #621: o merge pendente da tarefa (fimDosPrs), o mesmo valor em todos os PRs dela. */
+    async definirMergePendente(tarefaId: string, pendente: boolean): Promise<void> {
+      await conn`update quadro_tarefa_prs set merge_pendente = ${pendente} where ${dona()} and tarefa_id = ${tarefaId} and merge_pendente is distinct from ${pendente}`;
+    },
+    /**
+     * 2ª revisão do PR #621: insert … select da tarefa da DONA. O RLS do insert só confere o owner da linha nova e a FK
+     * não passa pelo RLS: com `values`, a Ana gravava um PR na tarefa do Marlon. Tarefa que não é dela = nada (false).
+     */
+    async salvarPr(quadroId: string, tarefaId: string, p: PrDaTarefa): Promise<boolean> {
+      const r = await conn`
+        insert into quadro_tarefa_prs (tenant_id, owner_id, quadro_id, tarefa_id, repo, numero, url, branch, estado, ci, conflito)
+        select ${escopo.tenantId}, ${escopo.pessoaId}, ${quadroId}, id, ${p.repo}, ${p.numero}, ${p.url}, ${p.branch}, ${p.estado}, ${p.ci}, ${p.conflito}
+        from quadro_tarefas where ${dona()} and id = ${tarefaId}
+        on conflict (tenant_id, tarefa_id, repo, numero) do update set quadro_id = excluded.quadro_id, url = excluded.url, branch = excluded.branch,
+          estado = excluded.estado, ci = excluded.ci, conflito = excluded.conflito, visto_em = clock_timestamp()`;
+      return r.count > 0;
+    },
+    /** O card e o resumo da meta leem pr_url: sem PR gravado, o primeiro PR ligado entra (não mexe no mudado_em). */
+    async definirPrUrlSeVazio(tarefaId: string, url: string): Promise<boolean> {
+      const r = await conn`update quadro_tarefas set pr_url = ${url} where ${dona()} and id = ${tarefaId} and pr_url is null`;
+      return r.count > 0;
+    },
+    /** Como salvarPr: só na tarefa da dona (false = a tarefa não é dela, nada gravado). */
+    async inserirLinha(quadroId: string, tarefaId: string, l: { tipo: TipoLinhaTarefa; texto: string; dados: object }): Promise<boolean> {
+      const r = await conn`
+        insert into quadro_tarefa_linhas (tenant_id, owner_id, quadro_id, tarefa_id, tipo, texto, dados)
+        select ${escopo.tenantId}, ${escopo.pessoaId}, ${quadroId}, id, ${l.tipo}, ${l.texto}, ${jsonb(conn, l.dados)}
+        from quadro_tarefas where ${dona()} and id = ${tarefaId}`;
+      return r.count > 0;
+    },
+    /** NOD-421 (revisão do PR #621): o aviso do GitHub no topo do quadro (null = nada a avisar). */
+    async avisoGithub(quadroId: string): Promise<string | null> {
+      const [l] = await conn<{ aviso_github: string | null }[]>`select aviso_github from quadros where ${dona()} and id = ${quadroId}`;
+      return l?.aviso_github ?? null;
+    },
+    /** Grava só se mudou (true = mudou): o aviso aparece uma vez até mudar. Não mexe no atualizado_em do quadro. */
+    async definirAvisoGithub(quadroId: string, aviso: string | null): Promise<boolean> {
+      const r = await conn`update quadros set aviso_github = ${aviso} where ${dona()} and id = ${quadroId} and aviso_github is distinct from ${aviso}`;
+      return r.count > 0;
+    },
+    /** As linhas de sistema das tarefas do quadro (as da tarefa, mesmo de antes de ela mudar de quadro): as `porTarefa` mais recentes de cada, da mais antiga para a mais nova. */
+    async linhasDoQuadro(quadroId: string, porTarefa = 20): Promise<(LinhaDeSistema & { tarefaId: string })[]> {
+      const ls = await conn<{ tarefa_id: string; tipo: TipoLinhaTarefa; texto: string; criado_em: Date }[]>`
+        select tarefa_id, tipo, texto, criado_em from (
+          select tarefa_id, tipo, texto, criado_em, row_number() over (partition by tarefa_id order by criado_em desc, id desc) as n
+          from quadro_tarefa_linhas where ${dona()} and tarefa_id in (select id from quadro_tarefas where ${dona()} and quadro_id = ${quadroId})
+        ) x where n <= ${porTarefa} order by criado_em, tarefa_id`;
+      return ls.map((l) => ({ tarefaId: l.tarefa_id, tipo: l.tipo, texto: l.texto, criadoEm: ms(l.criado_em) }));
+    },
   };
+}
+
+interface LinhaPr {
+  tarefa_id: string;
+  repo: string;
+  numero: number;
+  url: string;
+  branch: string;
+  estado: PrDaTarefa["estado"];
+  ci: PrDaTarefa["ci"];
+  conflito: boolean;
+  merge_pendente: boolean;
 }

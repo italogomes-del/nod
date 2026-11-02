@@ -214,6 +214,18 @@ NOD_COMPUTADORES="$(limpo "${NOD_COMPUTADORES:-}")"
 NOD_COMPUTADOR_VERSAO_MINIMA="$(limpo "${NOD_COMPUTADOR_VERSAO_MINIMA:-}")"
 NOD_MAQUINA_NUVEM="$(limpo "${NOD_MAQUINA_NUVEM:-}")"
 NOD_NUVEM_CONTA_FATURAMENTO="$(limpo "${NOD_NUVEM_CONTA_FATURAMENTO:-}")"
+# NOD-421: o laço dos PRs do quadro (até 5 dono/repo). Só estes tenants sincronizam pelo token do servidor (vazio =
+# nenhum, e o laço não sobe). Ligar exige o segredo nod-github-quadro-token + o tenant na lista + o 🧭 da Ada/Marlon
+# (ADR-145, proposta). 3ª revisão do PR #621: sem o segredo, a lista sai VAZIA no nod.env, então nada sobe em produção
+# mesmo com REPOS e um tenant no config.env (o deploy segue e avisa no stderr).
+NOD_QUADRO_GITHUB_REPOS="$(limpo "${NOD_QUADRO_GITHUB_REPOS:-}")"
+NOD_QUADRO_GITHUB_TENANTS="$(limpo "${NOD_QUADRO_GITHUB_TENANTS:-}")"
+QUADRO_GITHUB_TOKEN=""
+if [ -n "$NOD_QUADRO_GITHUB_REPOS" ]; then QUADRO_GITHUB_TOKEN="$(limpo "$(segredo nod-github-quadro-token 2>/dev/null || true)")"; fi
+if [ -n "$NOD_QUADRO_GITHUB_REPOS" ] && [ -z "$QUADRO_GITHUB_TOKEN" ]; then
+  echo "aviso: NOD_QUADRO_GITHUB_REPOS ligado sem o segredo nod-github-quadro-token: os PRs do quadro não sincronizam (docs/deploy-gcp.md, Token dos PRs do quadro)" >&2
+  NOD_QUADRO_GITHUB_TENANTS=""
+fi
 # Só o env da cor nova muda: a velha, que ainda drena, nunca recebe config nova.
 cat >"nod-$NOVA.env.novo" <<EOF
 NOD_LOGIN=google
@@ -242,6 +254,10 @@ NOD_LIGACAO=${NOD_LIGACAO:-admins}
 NOD_ADMINS=${NOD_ADMINS:-}
 # NOD-415 (ADR-141): quadros só para os admins até o Marlon liberar (desligado | admins | todos).
 NOD_QUADROS=${NOD_QUADROS:-admins}
+# NOD-421: os PRs do GitHub na tarefa (config.env); o token vem do Secret Manager, se existir.
+NOD_QUADRO_GITHUB_REPOS=$NOD_QUADRO_GITHUB_REPOS
+NOD_QUADRO_GITHUB_TOKEN=$QUADRO_GITHUB_TOKEN
+NOD_QUADRO_GITHUB_TENANTS=$NOD_QUADRO_GITHUB_TENANTS
 NOD_ONBOARDING_VOZ=${NOD_ONBOARDING_VOZ:-0}
 NOD_MODELO_LIGACAO_CLAUDE=${NOD_MODELO_LIGACAO_CLAUDE:-}
 NOD_MODELO_LIGACAO_CODEX=${NOD_MODELO_LIGACAO_CODEX:-}

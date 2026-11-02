@@ -1,11 +1,12 @@
 import { createHash } from "node:crypto";
 import type { Agente } from "../contracts/agente.ts";
 import type { Executor, RuntimeEvent } from "../contracts/evento.ts";
-import type { AutorLote, ColunaQuadro, ComentarioTarefa, LoteQuadro, OpQuadro, Quadro, QuadroDto, ResumoQuadroParaBot, TarefaDto, TarefaQuadro } from "../contracts/quadro.ts";
+import type { AutorLote, ColunaQuadro, ComentarioTarefa, LinhaDeSistema, LoteQuadro, PrNaTela, OpQuadro, Quadro, QuadroDto, ResumoQuadroParaBot, TarefaDto, TarefaQuadro } from "../contracts/quadro.ts";
 import { ehNod } from "../domain/nod.ts";
 import { type AgenteDoQuadro, chaveDeBusca, entradaDaResposta, entradaDaTarefa, etapaDaTarefa, execucaoDoTurno, metaCumprida, planejarLote, progresso, tarefasDaMeta, resumoDaMeta, resumoDoLote, terminou } from "../domain/quadro.ts";
 import { acionaNaColuna, colunaDeEspera, colunasDe, colunasDto, papelDe, responsavelDe } from "../domain/colunas.ts";
 import { TAREFA_PASSOU_A_VOCE } from "../domain/comentarios-quadro.ts";
+import { resumoDoPr } from "../domain/prs-da-tarefa.ts";
 import type { FotoLote } from "../repositories/quadros.repo.ts";
 import { autoriaAgente, autoriaPessoa, ehUuid, evento, PRAZO_DECISAO_MS } from "./apoio-l7.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
@@ -111,12 +112,21 @@ export async function montarQuadro(deps: Pick<Deps, "repos">, q: Quadro): Promis
     if (a) nomes.set(id, a.nome);
   }
   const ultimo = await repo.ultimoLote(q.id);
+  // NOD-421: os PRs ligados e as linhas de sistema (uma consulta cada, agrupadas por tarefa).
+  // O branch fica de fora do DTO: nome de fora que a tela não mostra (o casamento é no servidor).
+  const prs = new Map<string, PrNaTela[]>();
+  for (const { tarefaId, branch: _branch, mergePendente: _pendente, ...p } of await repo.prsDoQuadro(q.id)) prs.set(tarefaId, [...(prs.get(tarefaId) ?? []), p]);
+  const avisoGithub = await repo.avisoGithub(q.id);
+  const linhas = new Map<string, LinhaDeSistema[]>();
+  for (const { tarefaId, ...l } of await repo.linhasDoQuadro(q.id)) linhas.set(tarefaId, [...(linhas.get(tarefaId) ?? []), l]);
   const dtos: TarefaDto[] = tarefas.map((t) => ({
     ...t,
     // Só o que ainda está em jogo mostra a execução (um turno concluído de uma tarefa feita não acende nada).
     // A coluna com passagem (ADR-142) é uma etapa em andamento onde ela aciona (revisão 3: o Backlog com passagem não).
     execucao: ["fazendo", "afazer"].includes(papelDe(colunas, t.status)) || (responsavelDe(colunas, t.status) && acionaNaColuna(colunas, t.status)) ? execucaoDoTurno(t.turnoId ? estados.get(t.turnoId) : null) : null,
     agenteNome: t.agenteId ? nomes.get(t.agenteId) ?? null : null,
+    prs: prs.get(t.id) ?? [],
+    linhas: linhas.get(t.id) ?? [],
   }));
   // NOD-415 (ADR-141): o que terminou antes de a meta ser posta não entra no "N de M".
   const { feitas, total } = progresso(tarefasDaMeta(tarefas, q.metaDesde, colunas), colunas);
@@ -128,6 +138,7 @@ export async function montarQuadro(deps: Pick<Deps, "repos">, q: Quadro): Promis
     ultimoLote: ultimo ? { id: ultimo.id, quadroId: ultimo.quadroId, autor: ultimo.autor, resumo: ultimo.resumo, tarefaIds: ultimo.tarefaIds, desfeitoEm: ultimo.desfeitoEm, criadoEm: ultimo.criadoEm } : null,
     feitas,
     total,
+    avisoGithub,
   };
 }
 
@@ -140,7 +151,8 @@ export function resumoParaBot(q: QuadroDto): ResumoQuadroParaBot {
     cumprida: q.cumpridoEm !== null,
     resumo: q.resumo,
     colunas: q.colunas.map((c) => ({ id: c.id, nome: c.nome, grupo: c.grupo, ...(c.responsavelNome ? { passa_para: c.responsavelNome } : {}), ...(c.instrucoes ? { instrucoes: c.instrucoes } : {}) })),
-    tarefas: q.tarefas.map((t) => ({ id: t.id, titulo: t.titulo, status: t.status, agente: t.agenteNome, linear: t.linearId, pr: t.prUrl, pergunta: t.status === "voce" ? t.pergunta : null, execucao: t.execucao })),
+    tarefas: q.tarefas.map((t) => ({ id: t.id, titulo: t.titulo, status: t.status, agente: t.agenteNome, linear: t.linearId, pr: t.prUrl, pergunta: t.status === "voce" ? t.pergunta : null, execucao: t.execucao, ...(t.prs?.length ? { prs: t.prs.map(resumoDoPr) } : {}) })),
+    ...(q.avisoGithub ? { avisoGithub: q.avisoGithub } : {}),
   };
 }
 

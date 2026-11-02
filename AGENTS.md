@@ -240,6 +240,23 @@ vários bots rodam `npm run check` ao mesmo tempo sem um contaminar o tenant pad
   laço da exportação e a seção em Seu espaço (o modo da sessão diz `contas.minhaConta`); `NOD_PURGA_CONTA=1` (exige a
   anterior) liga a purga 30 dias depois da exclusão. Em produção a purga fica desligada até a revisão LGPD: a exclusão
   fica programada e a tela diz isso.
+- **PRs do GitHub no quadro atrás de env** (NOD-421): `NOD_QUADRO_GITHUB_REPOS="dono/repo,…"` (até 5) liga o laço
+  `src/adapters/fundo/prs-do-quadro.ts`. A cada 30 s ele lê os PRs de cada repo, com `NOD_QUADRO_GITHUB_TOKEN` por uma
+  chamada GraphQL (produção: a imagem não tem `gh`; o token vem do segredo `nod-github-quadro-token`; a base é
+  `NOD_QUADRO_GITHUB_API`, padrão `https://api.github.com`, só https, nunca a `NOD_GITHUB_API` do conector) ou, sem ele, pelo
+  `gh pr list` logado na máquina (desenvolvimento; no modo compartilhado sem token o `gh` nunca roda e o quadro mostra
+  "não conectado"). **Trava entre tenants (ADR-145):** só os tenants de
+  `NOD_QUADRO_GITHUB_TENANTS` sincronizam, em qualquer jeito (token, `gh` com `GH_TOKEN`, `gh` local) e modo; vazia =
+  nenhum, o laço nem sobe e o boot loga `prs_do_quadro_sem_tenants`. A ADR-145 é proposta: em produção a lista fica vazia e,
+  sem o segredo, o `deploy.sh` a esvazia; ligar exige secret + tenant na lista + 🧭. No dev, ponha o `TENANT_PADRAO` do seed (`.env.example`).
+  PR de fork (`isCrossRepository`) não casa. Sem acesso, o quadro ganha uma linha no topo
+  ("GitHub não conectado no servidor: os PRs não sincronizam" / "GitHub · sem acesso a dono/repo"), gravada só quando
+  muda, e o código vai para o log uma vez por mudança. Liga
+  cada PR à tarefa cujo item do Linear aparece no branch, ou cujo `pr_url` é o do PR. CI, conflito e merge viram linhas de
+  sistema (`quadro_tarefa_linhas`, 0142); o merge do último PR leva a tarefa para Feito por um lote comum, se a coluna anda.
+  Sem a env, nada sobe. **Para integrar com a NOD-416:** o casamento passa a aceitar também o id da tarefa
+  (`casaComTarefa`, campo `ids`), e o histórico da tarefa passa a ler `quadro_tarefa_linhas` (ou copia dela, com autor
+  GitHub). Os textos já saem prontos (`textoDaLinha`).
 
 ## Cloud Agents e gstack
 
