@@ -1126,6 +1126,9 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async acessoDeRotinaAberto(agenteId, conector) {
         return acessoDeRotinaAberto(agenteId, conector);
       },
+      async exclusoesPendentesDoQuadro(quadroId) {
+        return doTenant(b.propostas).filter((p) => p.payload.kind === "quadro_exclusao" && p.estado === "pendente" && p.payload.quadroId === quadroId).sort((x, y) => x.criadoEm - y.criadoEm);
+      },
       async pendentesDeAcessoDaRotina(rotinaId) {
         return doTenant(b.propostas).filter((p) => p.payload.kind === "acesso" && p.estado === "pendente" && p.payload.rotinaId === rotinaId);
       },
@@ -3855,6 +3858,8 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       estadosDosTurnos: async () => new Map(),
       cadeiaDoTurno: async () => [],
       inserirLote: soNoPostgres,
+      lotesDaTarefa: async () => [],
+      primeiroLoteDaTarefa: async () => null,
       lote: async () => null,
       ultimoLote: async () => null,
       marcarDesfeito: soNoPostgres,
@@ -3872,6 +3877,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       inserir: soNoPostgres,
       registrarTurnos: async () => {},
       daTarefa: async () => [],
+      temDeOutroNoQuadro: async () => false,
       pedidoAbertoNaTarefa: async () => false,
       turnoNaFila: async () => null,
     },

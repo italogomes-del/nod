@@ -42,6 +42,7 @@ interface LinhaLote {
   quadro_id: string;
   autor: "pessoa" | "agente";
   autor_agente_id: string | null;
+  pedido_por: string | null;
   resumo: string;
   antes: FotoLote;
   tarefa_ids: string[];
@@ -59,7 +60,7 @@ export type FotoLote = {
 
 const COLUNAS_Q = "id, agente_id, to_char(prazo, 'YYYY-MM-DD') as prazo, meta, cumprido_em, resumo, colunas, criado_em, atualizado_em, meta_desde";
 const COLUNAS_T = "id, quadro_id, titulo, descricao, status, voltar_para, agente_id, ordem, linear_id, linear_url, pr_url, pergunta, resposta, de_fora, turno_id, criado_em, mudado_em, terminada_em";
-const COLUNAS_L = "id, quadro_id, autor, autor_agente_id, resumo, antes, tarefa_ids, desfeito_em, criado_em";
+const COLUNAS_L = "id, quadro_id, autor, autor_agente_id, pedido_por, resumo, antes, tarefa_ids, desfeito_em, criado_em";
 
 const paraQuadro = (l: LinhaQuadro): Quadro => ({
   id: l.id,
@@ -105,6 +106,7 @@ const paraLote = (l: LinhaLote): LoteQuadro & { antes: FotoLote } => ({
   id: l.id,
   quadroId: l.quadro_id,
   autor: (l.autor === "agente" && l.autor_agente_id ? { tipo: "agente", agenteId: l.autor_agente_id } : { tipo: "pessoa" }) satisfies AutorLote,
+  pedidoPor: l.pedido_por,
   resumo: l.resumo,
   antes: l.antes,
   tarefaIds: l.tarefa_ids,
@@ -262,13 +264,38 @@ export function quadrosRepo(conn: Conn, escopo: Escopo) {
         select t.id, t.estado from desce d join turnos t on t.tenant_id = ${escopo.tenantId} and t.id = d.id`;
     },
 
-    async inserirLote(l: { quadroId: string; autor: AutorLote; resumo: string; antes: FotoLote; tarefaIds: readonly string[] }): Promise<LoteQuadro> {
+    /** NOD-430: `pedidoPor` = a pessoa que pediu ao bot autor na conversa (só com autor agente; o bot é o `autor_agente_id`). */
+    async inserirLote(l: { quadroId: string; autor: AutorLote; pedidoPor?: string | null; resumo: string; antes: FotoLote; tarefaIds: readonly string[] }): Promise<LoteQuadro> {
+      const pedidoPor = l.autor.tipo === "agente" && l.pedidoPor ? l.pedidoPor : null;
       const [r] = await conn<LinhaLote[]>`
-        insert into quadro_lotes (tenant_id, owner_id, quadro_id, autor, autor_agente_id, resumo, antes, tarefa_ids)
+        insert into quadro_lotes (tenant_id, owner_id, quadro_id, autor, autor_agente_id, pedido_por, resumo, antes, tarefa_ids)
         values (${escopo.tenantId}, ${escopo.pessoaId}, ${l.quadroId}, ${l.autor.tipo}, ${l.autor.tipo === "agente" ? l.autor.agenteId : null},
+          ${pedidoPor},
           ${l.resumo}, ${jsonb(conn, l.antes)}, ${conn.array([...l.tarefaIds])}::uuid[])
         returning ${conn.unsafe(COLUNAS_L)}`;
       const { antes: _antes, ...lote } = paraLote(r!);
+      return lote;
+    },
+    /**
+     * NOD-430: a Atividade da tarefa aberta: os `limite` lotes MAIS RECENTES que a tocaram (os desfeitos fora), em ordem
+     * de criação. Desc com limite e vira na aplicação (revisão 1 do PR #627): com `order by criado_em limit 50`, uma
+     * tarefa com mais de 50 lotes mostrava os 50 primeiros e nunca o que acabou de acontecer.
+     */
+    async lotesDaTarefa(quadroId: string, tarefaId: string, limite = 50): Promise<LoteQuadro[]> {
+      const rs = await conn<LinhaLote[]>`
+        select ${conn.unsafe(COLUNAS_L)} from quadro_lotes
+        where ${dona()} and quadro_id = ${quadroId} and ${tarefaId}::uuid = any(tarefa_ids) and desfeito_em is null
+        order by criado_em desc, id desc limit ${limite}`;
+      return rs.reverse().map((r) => { const { antes: _antes, ...lote } = paraLote(r); return lote; });
+    },
+    /** NOD-430 (revisão 2 do PR #627): o lote mais antigo da tarefa (o "criada por"), fora da janela dos 50 recentes. */
+    async primeiroLoteDaTarefa(quadroId: string, tarefaId: string): Promise<LoteQuadro | null> {
+      const [r] = await conn<LinhaLote[]>`
+        select ${conn.unsafe(COLUNAS_L)} from quadro_lotes
+        where ${dona()} and quadro_id = ${quadroId} and ${tarefaId}::uuid = any(tarefa_ids) and desfeito_em is null
+        order by criado_em, id limit 1`;
+      if (!r) return null;
+      const { antes: _antes, ...lote } = paraLote(r);
       return lote;
     },
     async lote(id: string): Promise<(LoteQuadro & { antes: FotoLote }) | null> {

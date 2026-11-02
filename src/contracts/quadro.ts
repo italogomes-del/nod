@@ -6,6 +6,7 @@
  * Um quadro por bot anfitrião (quem o criou): ele mora na aba Quadro da conversa desse bot (NOD-429). Qualquer bot da
  * pessoa mexe nele pelas mesmas ações (ADR-135, domínio `quadro`).
  */
+import type { LinkDeTarefa } from "./quadro-pela-conversa.ts";
 
 import type { LinhaDeSistema, PrNaTela } from "./prs-da-tarefa.ts";
 export type { CiPr, EstadoPr, LinhaDeSistema, PrDaTarefa, PrLido, PrNaTela, TipoLinhaTarefa } from "./prs-da-tarefa.ts";
@@ -92,7 +93,7 @@ export type Quadro = {
  * NOD-417 (definido em 2026-11-02): um comentário numa tarefa. `deFora`: escrito por um bot (ADR-062): quem o recebe recebe
  * dado de fora. `acionados`: os bots que o comentário acionou (abriu turno ou se juntou ao que já estava na fila).
  */
-export type ComentarioTarefa = { id: string; quadroId: string; tarefaId: string; autor: AutorLote; texto: string; deFora: boolean; criadoEm: number };
+export type ComentarioTarefa = { id: string; quadroId: string; tarefaId: string; autor: AutorLote; texto: string; deFora: boolean; criadoEm: number; /** NOD-430: "Você, pela <bot>". */ pedidoPor?: string | null };
 export type ComentarioDto = ComentarioTarefa & { autorNome: string | null; acionados: string[] };
 
 /** Quem fez o lote: a pessoa (na tela) ou um bot (pela ferramenta). */
@@ -102,6 +103,7 @@ export type LoteQuadro = {
   id: string;
   quadroId: string;
   autor: AutorLote;
+  /** NOD-430: a pessoa que pediu ao bot autor, na conversa ("Você, pela <bot>"); null = o bot sozinho, ou a tela. */ pedidoPor?: string | null;
   resumo: string;
   tarefaIds: string[];
   desfeitoEm: number | null;
@@ -156,7 +158,7 @@ export type ArgsGerirQuadro = {
 };
 
 export type ResultadoGerirQuadro =
-  | { ok: true; quadro: ResumoQuadroParaBot | null; lote_id: string | null; comecaram: { tarefa_id: string; agente: string }[]; instrucao: string; ajustada?: boolean; proposta_id?: string }
+  | { ok: true; quadro: ResumoQuadroParaBot | null; lote_id: string | null; comecaram: { tarefa_id: string; agente: string }[]; instrucao: string; ajustada?: boolean; proposta_id?: string; /** NOD-430: o link de cada tarefa tocada. */ tarefas?: LinkDeTarefa[]; aplicada?: boolean }
   | { ok: false; erro: "experimento_desligado" | "sem_quadro" | "entrada_invalida" | "nao_encontrado"; instrucao: string };
 
 /** O quadro como o bot o lê: curto, com os ids que ele usa na próxima chamada. */

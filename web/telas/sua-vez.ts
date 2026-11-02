@@ -34,6 +34,7 @@ const TIPO_HUMANO: Record<TipoDecisao, string> = {
   permissao: "pedido de permissão",
   credencial: "pedido de chave",
   colunas_quadro: "colunas do quadro",
+  quadro_exclusao: "excluir quadro",
 };
 
 const recusaAutomatica = (em: string): string => `recusa automática ${em}`;
@@ -69,6 +70,7 @@ const PRAZO_POR_TIPO: Record<TipoDecisao, (em: string, item: Item) => string> = 
   permissao: vence,
   credencial: vence,
   colunas_quadro: nadaMudaSemVoce,
+  quadro_exclusao: nadaMudaSemVoce,
 };
 
 /** Regras que fecham decisão sem pessoa (ADR-042), em frase curta; regra sem tradução cai no genérico. */
@@ -477,6 +479,10 @@ function renderAcoes(item: Item, aberta: boolean, estado: Pick<Estado, "conector
       const p = item.proposta?.payload.kind === "colunas_quadro" ? item.proposta.payload : null;
       return `${p ? listaDasColunasParaSuaVez(p) : ""}<div class="acoes">${botao("decidir-proposta", "Trocar colunas", { classe: "pri", id: d.id })}${botao("recusar-decisao", "Manter", { id: d.id })}</div>`;
     }
+    // NOD-430: o mesmo verbo do card da conversa; não tem Desfazer. Sutil como ele (pedido da Ada, revisão 1 do PR #627):
+    // botão neutro com só o verbo em vermelho (`danger`), sem o botão cheio (`pri`).
+    case "quadro_exclusao":
+      return `<p class="p50-para">Não dá para desfazer.</p><div class="acoes">${botao("decidir-proposta", "Excluir", { classe: "danger", id: d.id })}${botao("recusar-decisao", "Agora não", { id: d.id })}</div>`;
     // Verbo próprio: "Confirmar" não diz que o que se confirma é uma exclusão.
     case "rotina_exclusao":
       return `<div class="acoes">${botao("decidir-proposta", "Excluir rotina", { classe: "pri", id: d.id })}${botao("recusar-decisao", "Manter rotina", { id: d.id })}</div>`;

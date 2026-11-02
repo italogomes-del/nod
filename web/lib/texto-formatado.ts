@@ -245,6 +245,9 @@ function quebras(texto: string): string {
 
 /** Cópia de LINK_ANEXO (src/domain/midia.ts; a web só importa tipos de src/): tests/unit/web/midia.test.ts confere. */
 export const LINK_ANEXO_WEB = /^nod-anexo:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
+const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
+/** NOD-430: o código da tarefa na resposta do gerir_quadro (`nod-tarefa:<anfitrião>:<tarefa>`, src/use-cases/gerir-quadro.ts). */
+export const LINK_TAREFA_WEB = new RegExp(`^nod-tarefa:(${UUID}):(${UUID})$`, "i");
 
 function token(t: string, opcoes: OpcoesTexto, dentroDeEnfase: boolean): string {
   if (t.startsWith("`")) return `<code>${esc(t.slice(1, -1))}</code>`;
@@ -259,6 +262,10 @@ function token(t: string, opcoes: OpcoesTexto, dentroDeEnfase: boolean): string 
     // NOD-323 (J6): o link para um arquivo da pasta do bot virou `nod-anexo:<id>` — abre a mídia anexada nesta fala.
     const anexo = LINK_ANEXO_WEB.exec(t.slice(meio + 2, -1));
     if (anexo) return `<button type="button" class="md-midia-link" data-act="midia-abrir" data-anexo-id="${esc(anexo[1]!.toLowerCase())}">${esc(t.slice(1, meio))}</button>`;
+    // NOD-430: o código da tarefa abre a tarefa no quadro do bot dono dela (no celular, em folha).
+    const tarefa = LINK_TAREFA_WEB.exec(t.slice(meio + 2, -1));
+    // O aria-label diz o que o botão abre (revisão 3 do PR #627); o texto é o código que o bot escreveu.
+    if (tarefa) return `<button type="button" class="md-midia-link md-tarefa-link" data-act="abrir-tarefa-quadro" data-agente="${esc(tarefa[1]!.toLowerCase())}" data-tarefa="${esc(tarefa[2]!.toLowerCase())}" aria-label="Abrir tarefa ${esc(t.slice(1, meio))} no quadro">${esc(t.slice(1, meio))}</button>`;
     // NOD-85: o link da mini-agenda (`ver_agenda`) abre Configurações › Rotinas no dia, com o filtro de problema.
     const agenda = lerLinkDaAgenda(t.slice(meio + 2, -1));
     if (agenda) return `<button type="button" class="md-midia-link md-agenda-link" data-act="abrir-agenda" data-dia="${agenda.dia}"${agenda.soProblema ? ' data-problema="1"' : ""}>${esc(t.slice(1, meio))}</button>`;

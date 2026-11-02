@@ -1,4 +1,5 @@
 import { renderCardColunas } from "./card-colunas.ts";
+import { renderCardQuadroExclusao } from "./card-quadro-exclusao.ts";
 import { renderAnexosDaMensagem, type Aceita } from "../lib/anexos.ts";
 import { lembrancaDaMidia, linhaRecusas, renderMidiasDoBot } from "../lib/midia.ts";
 import type { FrotaDto, SuaVezDto } from "../../src/contracts/api.ts";
@@ -698,6 +699,7 @@ function renderProposta(p: Proposta, estado: Estado, propostas: readonly Propost
   // definido em 2026-10-07 (ADR-082): as mudanças em vários bots que o Nod pediu de uma vez — um card, uma linha por ação.
   if (p.payload.kind === "lote_bots") return renderCardLote(p, p.payload, p.estado === "pendente" && decisaoAbertaDoCard(p, estado) !== null);
   if (p.payload.kind === "colunas_quadro") return renderCardColunas(p, p.payload, p.estado === "pendente" && decisaoAbertaDoCard(p, estado) !== null);
+  if (p.payload.kind === "quadro_exclusao") return renderCardQuadroExclusao(p, p.payload, p.estado === "pendente" && decisaoAbertaDoCard(p, estado) !== null);
   return cardDaProposta(p, estado, a);
 }
 

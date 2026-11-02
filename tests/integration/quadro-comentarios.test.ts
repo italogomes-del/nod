@@ -375,7 +375,7 @@ describeIntegracao("comentários da tarefa do quadro (NOD-417)", () => {
       expect(deBot.data).toMatchObject({ ok: true, juntados: 1 });
       expect((await m.repos.turnos.buscar(turno))?.profundidade).toBe(2);
       // O lote de um bot em profundidade 2 que manda a tarefa para A fazer junta e leva o turno a 3 (o limite da corrente).
-      const l = await aplicarLoteQuadro(m.deps, { autor: { tipo: "agente", agenteId: m.ana.agenteId }, anfitriaoId: m.ana.agenteId, executor: "catcher", profundidade: 2, ops: [{ tipo: "mudar_tarefa", tarefa: "T", status: "afazer" }] });
+      const l = await aplicarLoteQuadro(m.deps, { autor: { tipo: "agente", agenteId: m.ana.agenteId }, anfitriaoId: m.ana.agenteId, executor: "catcher", limite: "total", profundidade: 2, ops: [{ tipo: "mudar_tarefa", tarefa: "T", status: "afazer" }] });
       expect(l.data).toMatchObject({ ok: true, juntados: 1 });
       expect((await m.repos.turnos.buscar(turno))?.profundidade).toBe(3);
     });

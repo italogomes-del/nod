@@ -55,7 +55,7 @@ export type TipoFrame =
   | "reacao.mudou"
   /** NOD-54 (ADR-134): o checkpoint de uma fala mudou: {conversaId, mensagem_id, estado}. A web relê a conversa. */
   | "checkpoint.mudou"
-  /** NOD-442: o quadro mudou: {quadroId, agenteId, loteId, tarefas (ids separados por vírgula), autor}. A web relê o quadro. */
+  /** NOD-442: o quadro mudou: {quadroId, agenteId, loteId, tarefas (ids separados por vírgula), autor, removido? (NOD-430)}. A web relê o quadro. */
   | "quadro.mudou"
   /** NOD-351: abra o cartão de conta nesta conversa: {conversaId, etapa}. A web confere a etapa contra a lista dela. */
   | "conta.abrir"

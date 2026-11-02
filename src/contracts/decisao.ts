@@ -18,6 +18,8 @@ export type TipoDecisao =
   | "credencial"
   /** definido em 2026-11-01 (NOD-448, 0135): trocar as colunas do quadro pela conversa (substituir_colunas). */
   | "colunas_quadro"
+  /** definido em 2026-11-02 (NOD-430, 0143): excluir o quadro de um bot pela conversa (remover_quadro). */
+  | "quadro_exclusao"
   | "pergunta"
   | "falta_de_dado"
   | "permissao";

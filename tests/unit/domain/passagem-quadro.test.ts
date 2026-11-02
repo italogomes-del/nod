@@ -24,7 +24,7 @@ const planejar = (ops: unknown[], o: { colunas?: ColunaQuadro[]; tarefas?: Taref
   const lidas = lerOps(ops);
   if (!Array.isArray(lidas)) throw new Error(lidas.erro);
   return planejarLote({
-    quadro: { meta: null, prazo: null, colunas: o.colunas ?? null }, quadroId: "q", tarefas: o.tarefas ?? [tarefa()], agentes: AGENTES, autorAgenteId: o.autor ?? null, ops: lidas, agora: AGORA,
+    quadro: { meta: null, prazo: null, colunas: o.colunas ?? null }, quadroId: "q", tarefas: o.tarefas ?? [tarefa()], agentes: AGENTES, autorAgenteId: o.autor ?? null, ops: lidas, agora: AGORA, limite: "total",
     ...(o.autorNaConversa ? { autorNaConversa: true } : {}), ...(o.tarefaDoTurno !== undefined ? { tarefaDoTurno: o.tarefaDoTurno } : {}), ...(o.origemConfiavel !== undefined ? { origemConfiavel: o.origemConfiavel } : {}),
   });
 };

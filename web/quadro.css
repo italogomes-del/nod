@@ -425,6 +425,12 @@ a.qd-chip:hover { background: var(--surface-raised); }
 .qd-com-cab time { color: var(--ink-3); }
 .qd-com-txt { margin: 0; font-size: 14px; line-height: 1.5; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
 .qd-com-acao, .qd-com-vazio { margin: 2px 0 0; font-size: 12px; color: var(--ink-3); }
+/* NOD-430: a Atividade da tarefa ("Você, pela Ada criou 1 tarefa"), linhas finas acima dos comentários. */
+.qd-ativ { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+.qd-at-criada { margin: 0; font-size: 12.5px; color: var(--ink-2); }
+.qd-at-lista { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; color: var(--ink-2); }
+.qd-at-quem { font-weight: 600; color: var(--ink); }
+.qd-at time { margin-left: 8px; color: var(--ink-3); }
 .qd-com-form { display: flex; align-items: flex-end; gap: 8px; border-bottom: 1px solid var(--line); padding: 2px 0 6px; }
 .qd-com-in { flex: 1; min-height: 32px; max-height: 160px; padding: 6px 0; border: 0; background: transparent; color: var(--ink); font: 14px/1.45 var(--font-sans); resize: none; field-sizing: content; }
 .qd-com-form:focus-within { border-bottom-color: var(--line-strong); }
@@ -536,10 +542,13 @@ a.qd-chip:hover { background: var(--surface-raised); }
   .cabecalho.cabecalho-pilula .qd-pil.bnc-cutuca { animation: bnc-cutuca .9s cubic-bezier(.2, .8, .2, 1) 1; }
   .cabecalho.cabecalho-pilula .qd-pil { background: color-mix(in srgb, var(--surface) 82%, transparent); -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px);
     box-shadow: var(--shadow-pop); }
+  /* NOD-430: no celular a tarefa aberta (pelo quadro ou pelo código num chat) sobe como folha. */
+  .qd-tarefa { min-height: calc(100% - 8px); padding: 14px 14px calc(env(safe-area-inset-bottom) + 16px); border-radius: 16px 16px 0 0;
+    background: var(--surface); box-shadow: var(--shadow-pop); animation: qd-sobe .22s cubic-bezier(.2, .8, .2, 1) both; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .qd-col-nova, .qd-menu, .qd-pop, .qd-folha { animation: none; }
+  .qd-col-nova, .qd-menu, .qd-pop, .qd-folha, .qd-tarefa { animation: none; }
   .qd-arrastando { transform: none; }
   /* A troca vira um fade curto: o indicador não anda, a aba escolhida acende no lugar. */
   .qd-seg-ind { transition: opacity 120ms ease-out; transform: none !important; opacity: 0; }

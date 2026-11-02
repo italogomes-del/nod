@@ -10,12 +10,13 @@ interface LinhaComentario {
   tarefa_id: string;
   autor: "pessoa" | "agente";
   autor_agente_id: string | null;
+  pedido_por: string | null;
   texto: string;
   de_fora: boolean;
   criado_em: Date;
 }
 
-const COLUNAS = "c.id, c.quadro_id, c.tarefa_id, c.autor, c.autor_agente_id, c.texto, c.de_fora, c.criado_em";
+const COLUNAS = "c.id, c.quadro_id, c.tarefa_id, c.autor, c.autor_agente_id, c.pedido_por, c.texto, c.de_fora, c.criado_em";
 
 const paraComentario = (l: LinhaComentario): ComentarioTarefa => ({
   id: l.id,
@@ -25,6 +26,7 @@ const paraComentario = (l: LinhaComentario): ComentarioTarefa => ({
   texto: l.texto,
   deFora: l.de_fora,
   criadoEm: ms(l.criado_em),
+  pedidoPor: l.pedido_por,
 });
 
 /**
@@ -34,10 +36,11 @@ const paraComentario = (l: LinhaComentario): ComentarioTarefa => ({
 export function quadroComentariosRepo(conn: Conn, escopo: Escopo) {
   const dona = () => conn`c.tenant_id = ${escopo.tenantId} and c.owner_id = ${escopo.pessoaId}`;
   return {
-    async inserir(c: { quadroId: string; tarefaId: string; autor: AutorLote; texto: string; deFora: boolean }): Promise<ComentarioTarefa> {
+    async inserir(c: { quadroId: string; tarefaId: string; autor: AutorLote; texto: string; deFora: boolean; pedidoPor?: string | null }): Promise<ComentarioTarefa> {
+      const pedidoPor = c.autor.tipo === "agente" && c.pedidoPor ? c.pedidoPor : null;
       const [l] = await conn<LinhaComentario[]>`
-        insert into quadro_comentarios as c (tenant_id, owner_id, quadro_id, tarefa_id, autor, autor_agente_id, texto, de_fora)
-        values (${escopo.tenantId}, ${escopo.pessoaId}, ${c.quadroId}, ${c.tarefaId}, ${c.autor.tipo}, ${c.autor.tipo === "agente" ? c.autor.agenteId : null}, ${c.texto}, ${c.deFora})
+        insert into quadro_comentarios as c (tenant_id, owner_id, quadro_id, tarefa_id, autor, autor_agente_id, pedido_por, texto, de_fora)
+        values (${escopo.tenantId}, ${escopo.pessoaId}, ${c.quadroId}, ${c.tarefaId}, ${c.autor.tipo}, ${c.autor.tipo === "agente" ? c.autor.agenteId : null}, ${pedidoPor}, ${c.texto}, ${c.deFora})
         returning ${conn.unsafe(COLUNAS)}`;
       return paraComentario(l!);
     },
@@ -56,6 +59,17 @@ export function quadroComentariosRepo(conn: Conn, escopo: Escopo) {
         where ${dona()} and c.tarefa_id = ${tarefaId}
         order by c.criado_em, c.id`;
       return ls.map((l) => ({ ...paraComentario(l), autorNome: l.autor_nome, acionados: l.acionados ?? [] }));
+    },
+    /**
+     * Revisão 4 do PR #627: há no quadro algum comentário que não é deste bot (da pessoa ou de outro bot)? Uma consulta só
+     * pelo quadro, no lugar de uma por tarefa (o Desfazer da criação pelo bot, soDoBot em use-cases/quadro.ts).
+     */
+    async temDeOutroNoQuadro(quadroId: string, agenteId: string): Promise<boolean> {
+      const [l] = await conn<{ ok: boolean }[]>`
+        select exists(select 1 from quadro_comentarios c
+          where ${dona()} and c.quadro_id = ${quadroId}
+            and (c.autor <> 'agente' or c.autor_agente_id is distinct from ${agenteId}::uuid)) as ok`;
+      return l?.ok ?? false;
     },
     /**
      * Revisão 4 do PR #622: há um pedido aberto (pedidoAbertoSql) de `de` para `para` nesta tarefa — o handoff cujo turno do

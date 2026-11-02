@@ -41,6 +41,7 @@ import type { ExecucaoRotina } from "../../src/contracts/rotina.ts";
 import type { MembroSala, Sala } from "../../src/contracts/sala.ts";
 import type { FaixaParada, Turno } from "../../src/contracts/turno.ts";
 import type { ComentarioDto, ComentarioTarefa, GrupoColuna, LoteQuadro, QuadroDto, StatusTarefa } from "../../src/contracts/quadro.ts";
+import type { AtividadeTarefa } from "../../src/contracts/quadro-pela-conversa.ts";
 import type { EventoLinha, TaxaDeAbertura, TrabalhoDetalheDto, TrabalhosDto } from "../../src/contracts/trabalho.ts";
 import type { DisponibilidadeLigacao, FalaLigacao, Ligacao, LigacaoCriada } from "../../src/contracts/ligacao.ts";
 import type { IaDaLigacao } from "../../src/contracts/voz.ts";
@@ -260,7 +261,7 @@ export function criarApi(escopo: Escopo) {
       post<MutacaoQuadro>(`agentes/${encodeURIComponent(agenteId)}/quadro/tarefas/${encodeURIComponent(tarefaId)}/resposta`, { resposta }),
     /** NOD-417: os comentários da tarefa; o da pessoa aciona o responsável e @nome aciona outro bot. */
     comentariosDaTarefa: (agenteId: string, tarefaId: string) =>
-      get<{ comentarios: ComentarioDto[] }>(`agentes/${encodeURIComponent(agenteId)}/quadro/tarefas/${encodeURIComponent(tarefaId)}/comentarios`),
+      get<{ comentarios: ComentarioDto[]; atividade?: AtividadeTarefa[]; criadaPor?: string | null }>(`agentes/${encodeURIComponent(agenteId)}/quadro/tarefas/${encodeURIComponent(tarefaId)}/comentarios`),
     comentarTarefa: (agenteId: string, tarefaId: string, texto: string) =>
       post<MutacaoQuadro & { comentario: ComentarioTarefa }>(`agentes/${encodeURIComponent(agenteId)}/quadro/tarefas/${encodeURIComponent(tarefaId)}/comentarios`, { texto }),
     desfazerLoteQuadro: (agenteId: string, loteId: string) =>

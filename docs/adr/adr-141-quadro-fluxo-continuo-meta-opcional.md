@@ -33,6 +33,16 @@ meta é opcional e só ela mostra progresso.
    com o nome dele em `bot` (a confirmação explícita). **Emenda à ADR-135 §3** (registrada lá): sem cartão no chat, porque o `gerir_quadro`
    não tem a fila de cartões do `gerir_bots`. Gatilho de reversão: um quadro removido sem a pessoa querer → vira cartão
    (ou ganha lixeira com Desfazer).
+   **Emenda NOD-430 (2026-11-02):** pelo chat, qualquer bot da pessoa pode pedir para excluir o quadro de outro bot, mas
+   só num turno da pessoa (conversa ou ligação, de primeira mão, sem procuração) e limpo, com o nome do dono em `bot`.
+   A exclusão não sai na hora: vira o cartão `quadro_exclusao` (Excluir / Agora não), reaproveitado se já houver um
+   pendente para o mesmo quadro e fechado quando o quadro é removido. Vale a regra de revisão obsoleta: o quadro que
+   mudou ou sumiu entre o pedido e a decisão não é apagado (o cartão fecha recusado, 409). No modo automático o modo
+   confirma na hora e o resultado volta `aplicada: true`. Registrada também na ADR-135 (Emenda NOD-430).
+   Revisão 3 do PR #627: a impressão do card (`revisao`) é a lista de tarefas e o último lote; um comentário novo numa
+   tarefa não a muda e não torna o card obsoleto (aceito: o comentário não muda o que sai, e ele some junto). Só a dona
+   decide o card (a rota recusa a decisora designada com 404, como na credencial): excluir não tem Desfazer e o caso
+   grava a dona como quem decidiu. O `colunas_quadro`, que tem Desfazer, segue aceitando a decisora.
 5. **A meta conta de quando foi posta** (`quadros.meta_desde`, 0136): de sem meta para com meta. A tarefa que
    terminou (feito ou cancelado, `quadro_tarefas.terminada_em`) antes disso não entra na fração, não cumpre a meta nova e
    o período do risco começa ali. Uma meta de texto novo posta depois de a anterior ser cumprida também recomeça
@@ -42,6 +52,23 @@ meta é opcional e só ela mostra progresso.
 6. **Flag `NOD_QUADROS`** (`desligado | admins | todos`; `admins` lê `NOD_ADMINS`; o deploy fixa `admins`, em produção só
    o Marlon; fora de produção o padrão é `todos`): fora dela, o experimento lê desligado mesmo com a
    chave gravada — sem pílula, sem tela e sem `gerir_quadro`. O bot sem quadro não muda.
+
+## Emenda NOD-430 (2026-11-02): o limite do bot no quadro
+
+Qualquer bot da pessoa mexe em qualquer quadro dela pelo `gerir_quadro`. **Total** (o controle da tela) só num turno da
+pessoa (conversa ou ligação, de primeira mão, sem procuração) e limpo; o lote grava `pedido_por` e assina "Você, pela
+<bot>". **Normal** em todo o resto (tarefa, rotina, pedido de colega, procuração, turno contaminado, lote de bot sem
+`limite`): cria só no Backlog, sem atribuir a outro bot, e só mexe na tarefa de que já era o responsável no começo do
+lote (status, Cancelado, PR, pergunta e `terminei`; não título, descrição nem "não iniciar"); não exclui tarefa, não
+mexe em colunas, meta nem prazo e não remove o quadro.
+
+- O turno de conversa retomado (origem `retomada`) cai no limite normal: a pessoa não falou com o bot nesse turno.
+- Revisão 3 do PR #627: **a passagem a outro agente é atribuir.** No normal, o `mudar_tarefa` com status (ou o `pr_url`
+  que leva à Revisão) para uma coluna cuja passagem daria a tarefa a OUTRO agente é recusado com a frase do limite;
+  para a coluna do próprio bot, passa. O `terminei` segue passando a tarefa à etapa seguinte (ADR-142 §3): é o fluxo
+  que a pessoa configurou, e sem ele o bot de uma etapa não entrega à próxima no turno da tarefa.
+- Revisão 3 do PR #627: **Desfazer no normal**, só o lote que o bot faria nele: o dele sem `pedido_por`. O lote feito a
+  pedido da pessoa (total), o da pessoa e o de outro bot só se desfazem na conversa limpa.
 
 ## Consequências
 

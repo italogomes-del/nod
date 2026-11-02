@@ -424,6 +424,17 @@ function painelVisivel(): boolean {
 }
 
 /** NOD-429: o par Conversa | Quadro aparece na conversa com um bot da pessoa, com o experimento Quadro ligado. */
+/**
+ * NOD-430: os bots cujo quadro foi excluído nesta sessão (o frame quadro.mudou com `removido`). Continuam na barra, e a linha
+ * diz "Sem quadro" no lugar da prévia até a próxima mensagem dele (a conversa e a memória ficam).
+ */
+const semQuadroAgora = new Map<string, number | null>();
+
+function previaDoBot(a: { id: string; ultimaMensagem?: { em?: number; previa?: string } | null; descricaoEstado?: string | null }): string {
+  if (semQuadroAgora.has(a.id) && semQuadroAgora.get(a.id) === (a.ultimaMensagem?.em ?? null)) return "Sem quadro";
+  return a.ultimaMensagem?.previa || a.descricaoEstado || "acabamos de nos conhecer";
+}
+
 function comQuadro(agenteId: string): boolean {
   return quadroDoEstado(estado, botGerido(agenteId)?.ownerId);
 }
@@ -906,6 +917,12 @@ function receberFrame(frame: FrameSse): void {
   estado = reduzir(estado, { tipo: "frame", frame, agora: Date.now() });
   if (mudouNaTela(antes, estado)) renderNoQuadro();
   quadroNaTela.aoFrame(frame);
+  if (frame.tipo === "quadro.mudou" && typeof frame.dados["agenteId"] === "string") {
+    const ag = frame.dados["agenteId"];
+    if (frame.dados["removido"] === true) semQuadroAgora.set(ag, botGerido(ag)?.ultimaMensagem?.em ?? null);
+    else if (frame.dados["loteId"]) semQuadroAgora.delete(ag);
+    renderNoQuadro();
+  }
   telaOnboarding.aoFrame();
   // Só quem marcou algo para buscar precisa do REST; um pedaço de texto nunca marca.
   if (estado.invalidacoes === antes.invalidacoes) return;
@@ -1573,7 +1590,7 @@ function renderSidebar(estado: Estado): string {
     // baixo é a última mensagem; os estados que pedem ação (fora do ar, pergunta, rotina parada) ganham dela.
     // definido em 2026-10-04 (ADR-071): "Em ligação" ganha da última mensagem, discreto, com o fone.
     const emLigacao = estado.ligacaoViva?.agenteId === a.id;
-    const subtitulo = emLigacao ? `<span class="sub-em-ligacao">${ICONE_LIGACAO.fone(12)}Em ligação</span>` : a.computadorForaDoAr && a.ownerId === estado.sessao?.pessoaId ? '<span class="sub-fora-do-ar">computador fora do ar</span>' : perguntando ? SUBTITULO_ESPERANDO : paradas.has(a.id) ? SUBTITULO_ROTINA_PARADA : `<span${nova ? ' class="previa-nova"' : ""}>${esc(a.ultimaMensagem?.previa || a.descricaoEstado || "acabamos de nos conhecer")}</span>`;
+    const subtitulo = emLigacao ? `<span class="sub-em-ligacao">${ICONE_LIGACAO.fone(12)}Em ligação</span>` : a.computadorForaDoAr && a.ownerId === estado.sessao?.pessoaId ? '<span class="sub-fora-do-ar">computador fora do ar</span>' : perguntando ? SUBTITULO_ESPERANDO : paradas.has(a.id) ? SUBTITULO_ROTINA_PARADA : `<span${nova ? ' class="previa-nova"' : ""}>${esc(previaDoBot(a))}</span>`;
     // ADR-083 (#196, K8 variante 3): com trabalho aberto, o chip com o número e o ponto na cor do bot ao lado do nome.
     const chip = (a.titulo ? `<i class="chip">${esc(a.titulo)}</i>` : "") + sinalDoBot(estado, a);
     if (ehCelular) return linhaDoCelular(a, { escondida, aviso, nova, emLigacao, chip, estadoVisual, rotuloAviso, perguntando: perguntando > 0 });
@@ -1594,7 +1611,7 @@ function renderSidebar(estado: Estado): string {
    */
   const linhaDoCelular = (a: (typeof agentes)[number], o: { escondida: boolean; aviso: AvisoBot; nova: boolean; emLigacao: boolean; chip: string; estadoVisual: ReturnType<typeof mascoteComAviso>; rotuloAviso: string; perguntando: boolean }) => {
     const prefixo = PREFIXO_DO_PEDIDO[o.aviso];
-    const previa = `<span class="inicio-previa">${prefixo ? `<i>${prefixo}</i> ` : ""}${esc(a.ultimaMensagem?.previa || a.descricaoEstado || "acabamos de nos conhecer")}</span>`;
+    const previa = `<span class="inicio-previa">${prefixo ? `<i>${prefixo}</i> ` : ""}${esc(previaDoBot(a))}</span>`;
     const sub = o.emLigacao ? `<span class="sub-em-ligacao">${ICONE_LIGACAO.fone(12)}Em ligação</span>` : a.computadorForaDoAr && a.ownerId === estado.sessao?.pessoaId ? '<span class="sub-fora-do-ar">computador fora do ar</span>' : !prefixo && paradas.has(a.id) ? SUBTITULO_ROTINA_PARADA : !prefixo && o.perguntando ? SUBTITULO_ESPERANDO : previa;
     const em = a.ultimaMensagem?.em;
     const hora = em ? `<time class="inicio-hora" datetime="${new Date(em).toISOString()}">${horaDaLinha(em, Date.now(), fusoLocal())}</time>` : "";
@@ -2018,7 +2035,7 @@ function renderPrincipal(): void {
   marcarPainelNaPilula();
   quadroNaTela.sincronizar(t.tipo === "conversa" && comQuadro(t.agenteId)
     ? { chave: t.conversaId, nome: botGerido(t.agenteId)?.nome ?? "agente", agenteId: t.agenteId }
-    : { chave: null, nome: "" });
+    : { chave: null, nome: "", agenteId: t.tipo === "conversa" ? t.agenteId : null });
   regiao("erro", erro);
   const cascaMuda = regiaoMudaria("timeline", corpo);
   const historicoMuda = cascaMuda || (partes !== null && blocosMudariam("timeline-historico", partes.historico));
@@ -5601,6 +5618,15 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     dispatch({ tipo: "invalidar", quais: ["rotinas", ...(r.ids.bloqueada ? (["sua-vez", `conversa:${r.ids.conversaId ?? ""}`] as const) : [])] });
     navegar({ tipo: "conversa", conversaId: r.ids.conversaId ?? "", agenteId: el.dataset.agente ?? "" });
   }),
+  // NOD-430: o código da tarefa na resposta de um bot abre a conversa do dono do quadro, já na tarefa.
+  "abrir-tarefa-quadro": (el) => {
+    const agenteId = el.dataset.agente ?? "";
+    const tarefaId = el.dataset.tarefa ?? "";
+    const dono = botGerido(agenteId);
+    if (!dono || !tarefaId) { dispatch({ tipo: "erro", erro: { codigo: "tarefa_sem_quadro", mensagem: "Esse bot não está mais na sua frota." } }); return; }
+    quadroNaTela.abrirTarefaDe(agenteId, tarefaId);
+    navegar({ tipo: "conversa", conversaId: dono.conversaId, agenteId });
+  },
   "abrir-conversa": (el) => {
     // NOD-119: escolher um bot na barra aberta por cima (recolhida + busca) fecha a busca, para a barra voltar a recolher.
     if (document.documentElement.dataset.sobreposta && el.closest("#sidebar")) fecharBusca();

@@ -91,13 +91,14 @@ export const ACOES_QUADRO = [
     casoDeUso: "quadro.desfazer",
   },
   {
-    // NOD-415 (ADR-141): virar quadro e voltar. Arriscada: sem Desfazer. A tela confirma antes; o bot só remove o PRÓPRIO
-    // quadro, num turno limpo em que a pessoa falou com ele, com o nome dele em `bot` (src/use-cases/quadro.ts, removerQuadro).
+    // NOD-415 (ADR-141): virar quadro e voltar. Arriscada: sem Desfazer. A tela confirma antes. NOD-430: pela conversa,
+    // qualquer bot pede (o do próprio quadro ou de outro), num turno limpo da pessoa, com o nome do dono em `bot` — e vira
+    // o card 'quadro_exclusao' (src/use-cases/quadro-exclusao.ts); no automático/total o modo confirma sozinho.
     id: "quadro.remover",
     titulo: "Remover o quadro (o bot volta a ser um agente comum; conversa e memória ficam)",
     schema: objeto({ bot: P.bot }, []),
     risco: "arriscada",
-    cartaoNoChat: false,
+    cartaoNoChat: true,
     chat: vivo,
     casoDeUso: "quadro.remover",
   },

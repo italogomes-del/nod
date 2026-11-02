@@ -1,9 +1,10 @@
 import { createHash } from "node:crypto";
 import type { Agente } from "../contracts/agente.ts";
+import type { Decisao } from "../contracts/decisao.ts";
 import type { Executor, RuntimeEvent } from "../contracts/evento.ts";
 import type { AutorLote, ColunaQuadro, ComentarioTarefa, LinhaDeSistema, LoteQuadro, PrNaTela, OpQuadro, Quadro, QuadroDto, ResumoQuadroParaBot, TarefaDto, TarefaQuadro } from "../contracts/quadro.ts";
 import { ehNod } from "../domain/nod.ts";
-import { type AgenteDoQuadro, chaveDeBusca, entradaDaResposta, entradaDaTarefa, etapaDaTarefa, execucaoDoTurno, metaCumprida, planejarLote, progresso, tarefasDaMeta, resumoDaMeta, resumoDoLote, terminou } from "../domain/quadro.ts";
+import { type AgenteDoQuadro, chaveDeBusca, entradaDaResposta, entradaDaTarefa, etapaDaTarefa, execucaoDoTurno, metaCumprida, planejarLote, progresso, recusaDoLimite, tarefasDaMeta, resumoDaMeta, resumoDoLote, terminou } from "../domain/quadro.ts";
 import { acionaNaColuna, colunaDeEspera, colunasDe, colunasDto, papelDe, responsavelDe } from "../domain/colunas.ts";
 import { TAREFA_PASSOU_A_VOCE } from "../domain/comentarios-quadro.ts";
 import { resumoDoPr } from "../domain/prs-da-tarefa.ts";
@@ -14,6 +15,7 @@ import { podeRepassar, proximaProfundidade } from "../domain/profundidade.ts";
 import type { Profundidade } from "../contracts/turno.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
 import { avisarRiscoDoQuadro } from "./risco-quadro.ts";
+import { sincronizarDasDecisoes } from "./trabalhos.ts";
 
 /**
  * O quadro-agente (definido em 2026-10-31, NOD-442). Um só caminho para a pessoa (as rotas) e para qualquer bot (a
@@ -48,7 +50,27 @@ export type PedidoLote = {
   origemConfiavel?: boolean;
   /** O bot fala num turno da pessoa (conversa/ligação): começa até a tarefa que já é dele. */
   autorNaConversa?: boolean;
+  /**
+   * NOD-430: "total" = a pessoa pela tela (o padrão dela), ou o bot a pedido dela na conversa, num turno limpo (o lote grava
+   * pedido_por = a pessoa, via = o bot). "normal" = o bot sozinho (tarefa, rotina, colega, turno contaminado); é o padrão do bot (limiteDe).
+   */
+  limite?: "total" | "normal";
+  /**
+   * NOD-430: o id do card 'quadro_exclusao' confirmado (pela pessoa ou pelo modo): o remover_quadro do bot passa, e os
+   * outros cards abertos do mesmo quadro fecham (este o caso de uso fecha como confirmado). Só o caso de uso põe.
+   */
+  exclusaoConfirmada?: string;
 };
+
+/**
+ * O limite do lote (NOD-430). Sem `limite`, a pessoa (a tela) tem o total e o bot o normal: o total do bot só vem de quem
+ * conferiu a conversa e o turno limpo e o diz de propósito (gerir_quadro). Revisão 1 do PR #627: antes, todo pedido
+ * sem limite valia total, e um caminho novo de bot esquecido abriria o controle da tela.
+ */
+export const limiteDe = (p: Pick<PedidoLote, "autor" | "limite">): "total" | "normal" => p.limite ?? (p.autor.tipo === "agente" ? "normal" : "total");
+
+/** NOD-430: o bot age a pedido da pessoa, na conversa e num turno limpo: o histórico mostra "Você, pela <bot>". */
+export const pedidoDaPessoa =(p: PedidoLote): boolean => p.autor.tipo === "agente" && limiteDe(p) !== "normal" && p.autorNaConversa === true && p.origemConfiavel !== false;
 
 export type Comecou = { tarefaId: string; agenteId: string; agenteNome: string; turnoId: string };
 
@@ -77,14 +99,20 @@ function anfitriaoPeloNome(ref: string, agentes: readonly Agente[]): string | nu
 }
 
 /** Acha o quadro: id do quadro, ou o bot anfitrião (id ou nome); sem referência, o do bot da tela ou do autor, senão o único. */
-export async function acharQuadro(deps: Deps, p: PedidoLote, agentes: readonly Agente[]): Promise<Quadro | null | { ambiguo: Quadro[] }> {
+export async function acharQuadro(deps: Deps, p: PedidoLote, agentes: readonly Agente[]): Promise<Quadro | null | { ambiguo: Quadro[] } | { semNome: string; nomes: string[] }> {
   const repo = deps.repos.quadros;
   if (p.quadro !== undefined && p.quadro.trim() !== "") {
     const ref = p.quadro.trim().replace(/^@/, "");
     if (ehUuid(ref)) return (await repo.buscar(ref)) ?? (await repo.doAgente(ref));
     const donos = agentes.filter((a) => chaveDeBusca(a.nome) === chaveDeBusca(ref));
-    if (donos.length !== 1) return null;
-    return repo.doAgente(donos[0]!.id);
+    if (donos.length === 1) return repo.doAgente(donos[0]!.id);
+    // NOD-430: o nome que não bate devolve os quadros da pessoa (o bot pergunta em qual); o repetido, as candidatas.
+    const todos = await repo.listar();
+    if (donos.length > 1) {
+      const deles = todos.filter((q) => donos.some((a) => a.id === q.agenteId));
+      return deles.length === 1 ? deles[0]! : deles.length === 0 ? null : { ambiguo: deles };
+    }
+    return { semNome: ref, nomes: todos.map((q) => agentes.find((a) => a.id === q.agenteId)?.nome).filter((n): n is string => !!n) };
   }
   if (p.anfitriaoId) return repo.doAgente(p.anfitriaoId);
   if (p.autor.tipo === "agente") {
@@ -97,6 +125,16 @@ export async function acharQuadro(deps: Deps, p: PedidoLote, agentes: readonly A
   const todos = await repo.listar();
   if (todos.length === 1) return todos[0]!;
   return todos.length === 0 ? null : { ambiguo: todos };
+}
+
+/** A falha de um quadro que não se achou de primeira (vários, ou nome que não bate), já com o que o bot pergunta. */
+export function falhaDoAchado(achado: { ambiguo: Quadro[] } | { semNome: string; nomes: string[] }, agentes: readonly Agente[]): { erro: FalhaQuadro; detalhe: string } {
+  if ("semNome" in achado) {
+    const lista = achado.nomes.length ? `Os quadros da pessoa: ${achado.nomes.join(", ")}. Pergunte em qual deles` : "A pessoa ainda não tem quadro";
+    return { erro: "nao_encontrado", detalhe: `não há um quadro "${achado.semNome}". ${lista}` };
+  }
+  const nomes = achado.ambiguo.map((x) => `${agentes.find((a) => a.id === x.agenteId)?.nome ?? "?"} (${x.id})`).slice(0, 5).join(", ");
+  return { erro: "sem_quadro", detalhe: `a pessoa tem ${achado.ambiguo.length} quadros: diga qual em quadro (o nome do bot anfitrião ou o id): ${nomes}. Se ela não disse, pergunte` };
 }
 
 /** O quadro como a tela e o bot leem (tarefas, execução de cada uma, nomes, o último lote). */
@@ -156,12 +194,11 @@ export function resumoParaBot(q: QuadroDto): ResumoQuadroParaBot {
   };
 }
 
-export function eventoQuadro(deps: Deps, p: PedidoLote, q: { id: string; agenteId: string }, loteId: string | null, tarefas: readonly string[]): RuntimeEvent {
+export function eventoQuadro(deps: Deps, p: PedidoLote, q: { id: string; agenteId: string }, loteId: string | null, tarefas: readonly string[], removido = false): RuntimeEvent {
   const autoria = p.autor.tipo === "agente" ? autoriaAgente(p.autor.agenteId, deps.escopo.pessoaId, deps.escopo.pessoaId) : autoriaPessoa(deps.escopo.pessoaId);
-  return evento(deps, "quadro_mudou", autoria, { quadroId: q.id, agenteId: q.agenteId, loteId, tarefas: tarefas.join(","), autor: p.autor.tipo }, { conversaId: p.conversaId ?? null, turnoId: p.turnoId ?? null });
+  return evento(deps, "quadro_mudou", autoria, { quadroId: q.id, agenteId: q.agenteId, loteId, tarefas: tarefas.join(","), autor: p.autor.tipo, ...(removido ? { removido: true } : {}) }, { conversaId: p.conversaId ?? null, turnoId: p.turnoId ?? null });
 }
 
-/** Abre o turno do bot responsável (o começo da tarefa ou a volta depois da resposta). null = o bot não tem conversa. */
 /**
  * O turno na fila serve para juntar mais um gatilho (NOD-417, revisão do PR #622)? Não quando ele já atende o pedido de
  * OUTRO bot (o `peer_pedido` dele): a entrega do resultado é pelo turno, e iria ao bot errado. `de` é quem pede agora
@@ -181,6 +218,7 @@ async function tarefaDoTurnoDe(deps: Deps, tarefas: readonly TarefaQuadro[], age
   return null;
 }
 
+/** Abre o turno do bot responsável (o começo da tarefa ou a volta depois da resposta). null = o bot não tem conversa. */
 export async function abrirTurno(deps: Deps, p: PedidoLote, agente: Agente, entradaTexto: string, deFora: boolean): Promise<{ turnoId: string; events: RuntimeEvent[] } | null> {
   const conversa = await deps.repos.conversas.buscarPropriaDoAgente(agente.id);
   if (!conversa) return null;
@@ -246,6 +284,13 @@ async function avisarComVoce(deps: Deps, t: TarefaQuadro, quemPergunta: string):
   return m ? evento(deps, "mensagem_criada", autoria, { mensagem_id: m.id, kind: "texto", aviso: true }, { conversaId: conversa.id, turnoId: null }) : null;
 }
 
+/** O quadro é todo do bot: ele fez o lote da criação e nenhum comentário das tarefas é de outro (a pessoa ou outro bot). */
+async function soDoBot(deps: Deps, q: Quadro, autorDoLote: AutorLote, agenteId: string): Promise<boolean> {
+  if (autorDoLote.tipo !== "agente" || autorDoLote.agenteId !== agenteId) return false;
+  // Revisão 4 do PR #627: uma consulta pelo quadro (antes, uma por tarefa).
+  return !(await deps.repos.quadroComentarios.temDeOutroNoQuadro(q.id, agenteId));
+}
+
 /** Desfaz o último lote do quadro: volta à foto do antes e cancela os turnos que ele abriu e ainda não começaram. */
 async function desfazer(deps: Deps, p: PedidoLote, q: Quadro, loteId: string | undefined): Promise<{ data: ResultadoLote; events?: RuntimeEvent[] }> {
   const repo = deps.repos.quadros;
@@ -257,6 +302,9 @@ async function desfazer(deps: Deps, p: PedidoLote, q: Quadro, loteId: string | u
     if (p.origemConfiavel === false) return falha("entrada_invalida", "desfazer só num turno limpo, em que nada de fora entrou");
     const meu = ultimo.autor.tipo === "agente" && ultimo.autor.agenteId === p.autor.agenteId;
     if (!meu && p.autorNaConversa !== true) return falha("entrada_invalida", "o último lote não é seu: o da pessoa ou de outro bot só se desfaz a pedido dela, na conversa com você");
+    // Revisão 3 do PR #627: no limite normal o bot só desfaz o que ele poderia ter feito nele, o lote dele sem a pessoa
+    // (pedido_por nulo). O lote feito a pedido dela (o controle da tela) ou o de outro só se desfaz na conversa limpa.
+    if (limiteDe(p) === "normal" && (!meu || ultimo.pedidoPor != null)) return falha("entrada_invalida", recusaDoLimite("desfazer um lote feito a pedido da pessoa ou por outro"));
   }
   const foto: FotoLote = ultimo.antes;
   const atuais = new Map((await repo.tarefas(q.id)).map((t) => [t.id, t]));
@@ -265,8 +313,13 @@ async function desfazer(deps: Deps, p: PedidoLote, q: Quadro, loteId: string | u
     if (atual?.turnoId && atual.turnoId !== (antes?.turnoId ?? null)) await pararTurno(deps, p, atual.turnoId);
   }
   if (foto.quadro === null) {
+    // Revisão 2 do PR #627: desfazer a criação apaga o quadro, sem Desfazer. O bot só faz isso no quadro que ele criou e
+    // que só tem conteúdo dele; o da pessoa, de outro bot ou com comentário de outro vai pelo card (remover_quadro).
+    if (p.autor.tipo === "agente" && !(await soDoBot(deps, q, ultimo.autor, p.autor.agenteId))) {
+      return falha("entrada_invalida", "desfazer a criação apagaria um quadro com conteúdo da pessoa ou de outro bot: para excluí-lo, peça com remover_quadro (vira o card que a pessoa confirma)");
+    }
     await repo.apagar(q.id);
-    return { data: { ok: true, quadro: null, lote: null, comecaram: [], desfeito: true }, events: [eventoQuadro(deps, p, q, ultimo.id, [])] };
+    return { data: { ok: true, quadro: null, lote: null, comecaram: [], desfeito: true }, events: [eventoQuadro(deps, p, q, ultimo.id, []), ...(await fecharExclusoesPendentes(deps, q.id))] };
   }
   const estadosAntes = await repo.estadosDosTurnos(foto.tarefas.map((t) => t.antes?.turnoId).filter((id): id is string => !!id));
   // As colunas da foto (ou as de agora, na foto de antes da NOD-448): a tarefa restaurada cai numa coluna que existe.
@@ -323,7 +376,7 @@ export async function aplicarLoteQuadro(deps: Deps, p: PedidoLote): Promise<{ da
     }
   } else {
     const achado = await acharQuadro(deps, p, agentes);
-    if (achado && "ambiguo" in achado) return falha("sem_quadro", `a pessoa tem ${achado.ambiguo.length} quadros: diga qual em quadro (o nome do bot anfitrião ou o id): ${achado.ambiguo.map((x) => x.id).join(", ")}`);
+    if (achado && ("ambiguo" in achado || "semNome" in achado)) { const f = falhaDoAchado(achado, agentes); return falha(f.erro, f.detalhe); }
     q = achado;
   }
   if (!q) return falha("sem_quadro", "não há quadro: crie com criar_quadro (meta e prazo são opcionais)");
@@ -342,7 +395,7 @@ export async function aplicarLoteQuadro(deps: Deps, p: PedidoLote): Promise<{ da
   }
   if (so.tipo === "remover_quadro") {
     if (p.ops.length > 1) return falha("entrada_invalida", "remover_quadro vai sozinho na chamada");
-    return removerQuadro(deps, p, travado, so.bot);
+    return removerQuadro(deps, p, travado);
   }
   return aplicarNoQuadro(deps, p, travado, agentes, false);
 }
@@ -352,19 +405,40 @@ export async function aplicarLoteQuadro(deps: Deps, p: PedidoLote): Promise<{ da
  * quadro (tarefas e lotes vão junto, em cascata). A conversa, a memória, as rotinas e os acessos do bot não são do quadro
  * e ficam. Não tem Desfazer: um bot só remove a pedido da pessoa, agora, na conversa com ele e num turno limpo.
  */
-async function removerQuadro(deps: Deps, p: PedidoLote, q: Quadro, bot: string | undefined): Promise<{ data: ResultadoLote; events?: RuntimeEvent[] }> {
-  if (p.autor.tipo === "agente") {
-    // Revisão rodada 1: arriscada e sem Desfazer. Só o quadro do próprio bot (nunca o de um colega), num turno limpo da
-    // pessoa, e com o nome dele em `bot` — a confirmação explícita, para um "tira isso" mal entendido não apagar o quadro.
-    if (!(p.autorNaConversa === true && p.origemConfiavel !== false)) return falha("entrada_invalida", "remover o quadro só a pedido da pessoa, num turno em que ela falou com você e nada de fora entrou (não tem Desfazer)");
-    if (q.agenteId !== p.autor.agenteId) return falha("entrada_invalida", "um bot só remove o próprio quadro; o de outro bot a pessoa remove na aba Quadro dele ou pedindo a ele");
-    const meu = await deps.repos.agentes.buscar(p.autor.agenteId);
-    if (!bot || !meu || chaveDeBusca(bot.replace(/^@/, "")) !== chaveDeBusca(meu.nome)) return falha("entrada_invalida", "confirme com a pessoa antes (não tem Desfazer) e passe em bot o seu nome");
-  }
+async function removerQuadro(deps: Deps, p: PedidoLote, q: Quadro): Promise<{ data: ResultadoLote; events?: RuntimeEvent[] }> {
+  // NOD-430: o bot não apaga na hora. O remover_quadro dele vira o card 'quadro_exclusao' (gerir_quadro →
+  // proporExclusaoDoQuadro, que confere o pedido, o turno limpo e o nome em `bot`); aqui só chega o card confirmado.
+  if (p.autor.tipo === "agente" && p.exclusaoConfirmada === undefined) return falha("entrada_invalida", "remover o quadro pela conversa vira um card que a pessoa confirma (gerir_quadro)");
   const tarefas = await deps.repos.quadros.tarefas(q.id);
   for (const t of tarefas) if (t.turnoId) await pararTurno(deps, p, t.turnoId);
   await deps.repos.quadros.apagar(q.id);
-  return { data: { ok: true, quadro: null, lote: null, comecaram: [], desfeito: false, removido: true }, events: [eventoQuadro(deps, p, q, null, tarefas.map((t) => t.id))] };
+  const fechados = await fecharExclusoesPendentes(deps, q.id, p.exclusaoConfirmada);
+  return { data: { ok: true, quadro: null, lote: null, comecaram: [], desfeito: false, removido: true }, events: [eventoQuadro(deps, p, q, null, tarefas.map((t) => t.id), true), ...fechados] };
+}
+
+/** NOD-430 (revisão 1 do PR #627): o quadro saiu, o card de excluí-lo não tem mais o que pedir. */
+export const REGRA_QUADRO_JA_REMOVIDO = "regra:quadro_ja_removido" as const;
+/** NOD-430 (revisão 1 do PR #627): a pessoa pediu de novo depois de o quadro mudar; o card velho dá lugar ao novo. */
+export const REGRA_EXCLUSAO_SUBSTITUIDA = "regra:quadro_exclusao_substituida" as const;
+
+/**
+ * Fecha por regra os cards 'quadro_exclusao' ainda abertos do quadro que saiu (pela tela, pelo Desfazer da criação ou
+ * por outro card), menos o `exceto` (o card que está sendo confirmado agora fecha como confirmado no caso de uso dele).
+ * A proposta vai a recusada: nada foi excluído por ela. Sem isto o card ficava na Sua vez com botões mortos.
+ */
+export async function fecharExclusoesPendentes(deps: Deps, quadroId: string, exceto?: string, regra: typeof REGRA_QUADRO_JA_REMOVIDO | typeof REGRA_EXCLUSAO_SUBSTITUIDA = REGRA_QUADRO_JA_REMOVIDO): Promise<RuntimeEvent[]> {
+  const agora = deps.agora();
+  const events: RuntimeEvent[] = [];
+  const fechadas: Decisao[] = [];
+  for (const proposta of await deps.repos.propostas.exclusoesPendentesDoQuadro(quadroId)) {
+    if (proposta.id === exceto) continue;
+    await deps.repos.propostas.decidir(proposta.id, "recusada");
+    const d = await deps.repos.decisoes.fecharPorRegra(proposta.id, { regra, regraVersao: 1, agora });
+    if (!d) continue;
+    fechadas.push(d);
+    events.push(evento(deps, "decisao_decidida", autoriaPessoa(deps.escopo.pessoaId, regra), { decisao_id: d.id, tipo: d.tipo, regra }, { conversaId: d.conversaId, turnoId: d.turnoId }));
+  }
+  return [...events, ...(fechadas.length ? await sincronizarDasDecisoes(deps, fechadas) : [])];
 }
 
 /**
@@ -375,10 +449,10 @@ export async function preverLoteQuadro(deps: Deps, p: PedidoLote): Promise<{ ok:
   if (!(await experimentoLigado(deps))) return { ok: false, erro: "experimento_desligado", detalhe: "o quadro está desligado nos experimentos da pessoa" };
   const agentes = await agentesDaPessoa(deps);
   const achado = await acharQuadro(deps, p, agentes);
-  if (achado && "ambiguo" in achado) return { ok: false, erro: "sem_quadro", detalhe: `a pessoa tem ${achado.ambiguo.length} quadros: diga qual em quadro (o nome do bot anfitrião ou o id): ${achado.ambiguo.map((x) => x.id).join(", ")}` };
+  if (achado && ("ambiguo" in achado || "semNome" in achado)) return { ok: false, ...falhaDoAchado(achado, agentes) };
   if (!achado) return { ok: false, erro: "sem_quadro", detalhe: "não há quadro: crie com criar_quadro (meta e prazo são opcionais)" };
   const tarefas = await deps.repos.quadros.tarefas(achado.id);
-  const plano = planejarLote({ quadro: { meta: achado.meta, prazo: achado.prazo, colunas: achado.colunas }, quadroId: achado.id, tarefas, agentes: agentes.map(paraAgenteDoQuadro), autorAgenteId: p.autor.tipo === "agente" ? p.autor.agenteId : null, ops: p.ops, agora: deps.agora(), origemConfiavel: p.origemConfiavel !== false, autorNaConversa: p.autorNaConversa === true });
+  const plano = planejarLote({ quadro: { meta: achado.meta, prazo: achado.prazo, colunas: achado.colunas }, quadroId: achado.id, tarefas, agentes: agentes.map(paraAgenteDoQuadro), autorAgenteId: p.autor.tipo === "agente" ? p.autor.agenteId : null, ops: p.ops, agora: deps.agora(), origemConfiavel: p.origemConfiavel !== false, autorNaConversa: p.autorNaConversa === true, limite: limiteDe(p) });
   if ("erro" in plano) return { ok: false, erro: "entrada_invalida", detalhe: plano.indice >= 0 ? `ação ${plano.indice + 1}: ${plano.erro}` : plano.erro };
   return { ok: true, quadro: achado, tarefas, colunas: colunasDe(plano.quadro) };
 }
@@ -388,7 +462,7 @@ async function criarComLote(deps: Deps, p: PedidoLote, anfitriao: string, agente
   const op = p.ops[0]!;
   if (op.tipo !== "criar_quadro") return falha("entrada_invalida", "criar_quadro primeiro");
   // Planeja antes de criar: um passo inválido não deixa quadro órfão.
-  const plano = planejarLote({ quadro: null, quadroId: "novo", tarefas: [], agentes: agentes.map(paraAgenteDoQuadro), autorAgenteId: p.autor.tipo === "agente" ? p.autor.agenteId : null, ops: p.ops, agora: deps.agora(), origemConfiavel: p.origemConfiavel !== false, autorNaConversa: p.autorNaConversa === true });
+  const plano = planejarLote({ quadro: null, quadroId: "novo", tarefas: [], agentes: agentes.map(paraAgenteDoQuadro), autorAgenteId: p.autor.tipo === "agente" ? p.autor.agenteId : null, ops: p.ops, agora: deps.agora(), origemConfiavel: p.origemConfiavel !== false, autorNaConversa: p.autorNaConversa === true, limite: limiteDe(p) });
   if ("erro" in plano) return falha("entrada_invalida", plano.indice >= 0 ? `ação ${plano.indice + 1}: ${plano.erro}` : plano.erro);
   const criado = await deps.repos.quadros.criar({ agenteId: anfitriao, meta: op.meta ?? null, prazo: op.prazo ?? null, metaDesde: deps.agora() });
   // Outro lote criou no mesmo instante (o índice único): o segundo lê o quadro dele e aplica o resto por cima.
@@ -407,7 +481,7 @@ async function aplicarNoQuadro(deps: Deps, p: PedidoLote, q: Quadro, agentes: re
   const estados = await repo.estadosDosTurnos(tarefasAntes.map((t) => t.turnoId).filter((id): id is string => id !== null));
   const vivas = new Set(tarefasAntes.filter((t) => t.turnoId && ["pendente", "despachando"].includes(estados.get(t.turnoId) ?? "")).map((t) => t.id));
   const tarefaDoTurno = autorAgenteId && p.turnoId && p.ops.some((o) => o.tipo === "terminei" && !o.tarefa) ? await tarefaDoTurnoDe(deps, tarefasAntes, autorAgenteId, p.turnoId) : null;
-  const plano = planejarLote({ quadro: { meta: q.meta, prazo: q.prazo, colunas: q.colunas }, quadroId: q.id, tarefas: tarefasAntes, agentes: agentes.map(paraAgenteDoQuadro), autorAgenteId, ops: p.ops, agora, podeComecar, vivas, origemConfiavel: p.origemConfiavel !== false, autorNaConversa: p.autorNaConversa === true, tarefaDoTurno });
+  const plano = planejarLote({ quadro: { meta: q.meta, prazo: q.prazo, colunas: q.colunas }, quadroId: q.id, tarefas: tarefasAntes, agentes: agentes.map(paraAgenteDoQuadro), autorAgenteId, ops: p.ops, agora, podeComecar, vivas, origemConfiavel: p.origemConfiavel !== false, autorNaConversa: p.autorNaConversa === true, limite: limiteDe(p), tarefaDoTurno });
   if ("erro" in plano) {
     // O quadro que nasceu neste lote não fica de pé sem o resto (tudo ou nada). Não acontece: criarComLote já planejou.
     if (nasceuAgora) await repo.apagar(q.id);
@@ -541,7 +615,7 @@ async function aplicarNoQuadro(deps: Deps, p: PedidoLote, q: Quadro, agentes: re
     tarefas: tarefaIds.map((id) => ({ id, antes: antesPorId.get(id) ?? null })),
   };
   const opsDoResumo: OpQuadro[] = nasceuAgora ? [{ tipo: "criar_quadro", meta: q.meta }, ...p.ops] : [...p.ops];
-  const lote = nasceuAgora || tarefaIds.length > 0 || mudouQuadro || mudouColunas ? await repo.inserirLote({ quadroId: q.id, autor: p.autor, resumo: resumoDoLote(opsDoResumo, plano.frasesDasColunas), antes: foto, tarefaIds }) : null;
+  const lote = nasceuAgora || tarefaIds.length > 0 || mudouQuadro || mudouColunas ? await repo.inserirLote({ quadroId: q.id, autor: p.autor, ...(pedidoDaPessoa(p) ? { pedidoPor: deps.escopo.pessoaId } : {}), resumo: resumoDoLote(opsDoResumo, plano.frasesDasColunas), antes: foto, tarefaIds }) : null;
   const atualizado = (await repo.buscar(q.id)) ?? q;
   events.unshift(eventoQuadro(deps, p, atualizado, lote?.id ?? null, tarefaIds));
   // NOD-415 (ADR-141): o risco de prazo (só com meta e prazo), uma vez por (quadro, meta, prazo).

@@ -162,3 +162,26 @@ cartões do `gerir_bots`. No lugar do cartão, três travas no servidor: o bot s
 limpo em que a pessoa falou com ele (conversa ou ligação, profundidade 0, nada de fora); e com o nome dele em `bot`
 (o bot tem de perguntar antes e repetir quem é). A tela confirma antes. Gatilho de reversão: um quadro removido sem a
 pessoa querer → `quadro.remover` ganha cartão (ou lixeira com Desfazer).
+
+### Emenda NOD-430 (2026-11-02): pelo chat, excluir o quadro vira cartão `quadro_exclusao`
+
+A emenda acima (sem cartão) valeu enquanto o bot só removia o **próprio** quadro. Com a NOD-430 qualquer bot da pessoa
+pode pedir para excluir o quadro de **outro** bot, e o caminho do chat passa a ser um cartão, como o `excluir_rotina`:
+
+- **Quando o bot propõe:** só num turno da pessoa (conversa ou ligação, profundidade 0, sem procuração) e limpo
+  (confiável e nada de fora entrou), com o nome do dono do quadro em `bot`. Tarefa, rotina, pedido de colega ou turno
+  contaminado recebem a recusa e nada é proposto (`proporExclusaoDoQuadro`, `src/use-cases/quadro-exclusao.ts`).
+- **Como sai:** o `remover_quadro` do `gerir_quadro` não apaga; abre o cartão `quadro_exclusao` (proposta + decisão,
+  mesmo id) na conversa e na Sua vez (Excluir / Agora não). Um segundo pedido para o mesmo quadro, com o cartão ainda
+  pendente, reaproveita o cartão; remover o quadro (pela tela ou pelo cartão) fecha os pendentes dele.
+- **Revisão obsoleta:** o cartão guarda a impressão do quadro (ids das tarefas e último lote). Na decisão, com o quadro
+  travado, se ele mudou ou sumiu o cartão fecha como recusado e a rota responde 409 (o molde da NOD-159), sem apagar.
+- **Modo automático (ou total):** confirma na hora pelo modo (`arriscada: true`, só porque a pessoa pediu agora na
+  conversa) e o resultado volta com `aplicada: true`.
+- **Quem fica registrado:** remover o quadro não gera lote (`lote: null`), e os lotes do quadro saem junto com ele
+  (`ON DELETE CASCADE`); não há Atividade para mostrar quem removeu. O registro é o evento `quadro_mudou` com
+  `removido: true` (autoria: a pessoa quando ela clica Excluir; o bot quando o modo confirma, ADR-042: a regra não vira
+  ato da pessoa) e a decisão do cartão (`confirmada` pela pessoa ou fechada pela regra do modo).
+
+A tela continua removendo direto (aba Quadro → Remover quadro, com confirmação). O gatilho de reversão da emenda
+NOD-415 está cumprido pelo cartão.

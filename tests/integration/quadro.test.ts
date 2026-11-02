@@ -22,7 +22,7 @@ async function montar(trx: Tx, o: { experimento?: boolean } = {}) {
   const relogio = { agora: AGORA };
   const { deps, repos } = depsSobre(trx, MARLON, { agora: () => relogio.agora });
   if (o.experimento !== false) await repos.preferencias.gravar({ experimentos: { quadro: true } });
-  const lote = (p: Partial<PedidoLote> & Pick<PedidoLote, "ops">) => aplicarLoteQuadro(deps, { autor: { tipo: "agente", agenteId: ana.agenteId }, executor: "catcher", ...p });
+  const lote = (p: Partial<PedidoLote> & Pick<PedidoLote, "ops">) => aplicarLoteQuadro(deps, { autor: { tipo: "agente", agenteId: ana.agenteId }, executor: "catcher", limite: "total", ...p });
   return { ana, beto, anaNome: `Ana ${sufixo}`, betoNome: `Beto ${sufixo}`, deps, repos, lote, relogio };
 }
 
@@ -157,24 +157,19 @@ describeIntegracao("quadro-agente (NOD-442)", () => {
     });
   });
 
-  it("remover_quadro: vai sozinho; um bot só remove o PRÓPRIO quadro, a pedido da pessoa, num turno limpo dela e com o nome confirmado", async () => {
+  it("remover_quadro: vai sozinho; o lote do bot não apaga na hora (NOD-430: vira o card quadro_exclusao), só o card confirmado", async () => {
     await withRollback(MARLON, async (trx) => {
       const m = await montar(trx);
       await m.lote({ ops: [{ tipo: "criar_quadro" }] });
       await m.lote({ autor: { tipo: "agente", agenteId: m.beto.agenteId }, ops: [{ tipo: "criar_quadro" }] });
       const limpo = { autorNaConversa: true, origemConfiavel: true } as const;
       expect((await m.lote({ ops: [{ tipo: "remover_quadro", bot: m.anaNome }, { tipo: "criar_tarefa", titulo: "x" }] })).data).toMatchObject({ ok: false, erro: "entrada_invalida" });
-      expect((await m.lote({ ops: [{ tipo: "remover_quadro", bot: m.anaNome }] })).data).toMatchObject({ ok: false, detalhe: expect.stringContaining("só a pedido da pessoa") });
-      expect((await m.lote({ ops: [{ tipo: "remover_quadro", bot: m.anaNome }], autorNaConversa: true, origemConfiavel: false })).data).toMatchObject({ ok: false });
-      // Sem o nome, ou com outro nome: recusa (a confirmação explícita).
-      expect((await m.lote({ ops: [{ tipo: "remover_quadro" }], ...limpo })).data).toMatchObject({ ok: false, detalhe: expect.stringContaining("passe em bot o seu nome") });
-      expect((await m.lote({ ops: [{ tipo: "remover_quadro", bot: m.betoNome }], ...limpo })).data).toMatchObject({ ok: false, detalhe: expect.stringContaining("passe em bot o seu nome") });
-      // O quadro de outro bot: nunca, nem com o nome dele.
-      expect((await m.lote({ quadro: m.betoNome, ops: [{ tipo: "remover_quadro", bot: m.betoNome }], ...limpo })).data).toMatchObject({ ok: false, detalhe: expect.stringContaining("só remove o próprio quadro") });
-      expect(await m.repos.quadros.doAgente(m.beto.agenteId)).not.toBeNull();
+      // Mesmo limpo e com o nome: o bot passa pelo card (gerir_quadro → proporExclusaoDoQuadro, quadro-pedir-a-qualquer-agente.test.ts).
+      expect((await m.lote({ ops: [{ tipo: "remover_quadro", bot: m.anaNome }], ...limpo })).data).toMatchObject({ ok: false, detalhe: expect.stringContaining("vira um card") });
       expect(await m.repos.quadros.doAgente(m.ana.agenteId)).not.toBeNull();
-      expect((await m.lote({ ops: [{ tipo: "remover_quadro", bot: `@${m.anaNome.toUpperCase()}` }], ...limpo })).data).toMatchObject({ ok: true, removido: true });
-      expect(await m.repos.quadros.doAgente(m.beto.agenteId)).not.toBeNull();
+      expect((await m.lote({ quadro: m.betoNome, ops: [{ tipo: "remover_quadro", bot: m.betoNome }], exclusaoConfirmada: "card-confirmado" })).data).toMatchObject({ ok: true, removido: true });
+      expect(await m.repos.quadros.doAgente(m.beto.agenteId)).toBeNull();
+      expect(await m.repos.quadros.doAgente(m.ana.agenteId)).not.toBeNull();
     });
   });
 

@@ -26,7 +26,7 @@ async function montar(trx: Tx, o: { meta?: string | null } = {}) {
   const relogio = { agora: CRIACAO };
   const { deps, repos } = depsSobre(trx, MARLON, { agora: () => relogio.agora });
   await repos.preferencias.gravar({ experimentos: { quadro: true } });
-  const lote = (p: Partial<PedidoLote> & Pick<PedidoLote, "ops">) => aplicarLoteQuadro(deps, { autor: { tipo: "agente", agenteId: ana.agenteId }, executor: "catcher", ...p });
+  const lote = (p: Partial<PedidoLote> & Pick<PedidoLote, "ops">) => aplicarLoteQuadro(deps, { autor: { tipo: "agente", agenteId: ana.agenteId }, executor: "catcher", limite: "total", ...p });
   const r = await lote({ ops: [{ tipo: "criar_quadro", meta: o.meta === undefined ? "Lançar" : o.meta, prazo: PRAZO }, { tipo: "criar_tarefa", titulo: "Copy" }, { tipo: "criar_tarefa", titulo: "Tela" }] });
   if (!r.data.ok) throw new Error(r.data.detalhe);
   const avisos = async () => (await repos.mensagens.listarDaConversa(ana.conversaId)).filter((x) => x.payload?.kind === "aviso_pessoa");

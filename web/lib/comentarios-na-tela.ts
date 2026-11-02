@@ -1,4 +1,5 @@
 import type { ComentarioDto, QuadroDto } from "../../src/contracts/quadro.ts";
+import type { AtividadeTarefa } from "../../src/contracts/quadro-pela-conversa.ts";
 import { comentariosDaTarefa, type CargaDosComentarios } from "../telas/comentarios-tarefa.ts";
 import type { AgenteDoQuadro } from "../telas/quadro-real.ts";
 
@@ -7,12 +8,12 @@ import type { AgenteDoQuadro } from "../telas/quadro-real.ts";
  * tarefa e a cada `quadro.mudou` dela, e manda o comentário novo. Uma leitura velha (outra tarefa, outro bot) é descartada.
  */
 export interface ApiDosComentarios {
-  comentariosDaTarefa?(agenteId: string, tarefaId: string): Promise<{ comentarios: ComentarioDto[] }>;
+  comentariosDaTarefa?(agenteId: string, tarefaId: string): Promise<{ comentarios: ComentarioDto[]; atividade?: AtividadeTarefa[]; criadaPor?: string | null }>;
   comentarTarefa?(agenteId: string, tarefaId: string, texto: string): Promise<{ quadro: QuadroDto | null }>;
 }
 
 export function criarComentariosNaTela(o: { api: () => ApiDosComentarios | null; redesenhar: () => void }) {
-  let estado: { agenteId: string; tarefaId: string; lista: ComentarioDto[]; carga: CargaDosComentarios } | null = null;
+  let estado: { agenteId: string; tarefaId: string; lista: ComentarioDto[]; carga: CargaDosComentarios; atividade?: AtividadeTarefa[]; criadaPor?: string | null } | null = null;
   let leitura = 0;
 
   async function reler(): Promise<void> {
@@ -23,7 +24,7 @@ export function criarComentariosNaTela(o: { api: () => ApiDosComentarios | null;
     try {
       const r = await a.comentariosDaTarefa(e.agenteId, e.tarefaId);
       if (n !== leitura || estado !== e) return;
-      estado = { ...e, lista: r.comentarios, carga: "ok" };
+      estado = { ...e, lista: r.comentarios, carga: "ok", atividade: r.atividade ?? [], criadaPor: r.criadaPor ?? null };
     } catch {
       if (n !== leitura || estado !== e) return;
       estado = { ...e, carga: "erro" };
@@ -44,7 +45,7 @@ export function criarComentariosNaTela(o: { api: () => ApiDosComentarios | null;
     html(tarefaId: string, agente: AgenteDoQuadro, hora: (em: number) => string): string | undefined {
       if (!o.api()?.comentariosDaTarefa) return undefined;
       const e = estado?.tarefaId === tarefaId ? estado : null;
-      return comentariosDaTarefa({ tarefaId, lista: e?.lista ?? [], carga: e?.carga ?? "carregando", agente, hora });
+      return comentariosDaTarefa({ tarefaId, lista: e?.lista ?? [], carga: e?.carga ?? "carregando", agente, hora, atividade: e?.atividade ?? [], criadaPor: e?.criadaPor ?? null });
     },
     /** Manda o comentário; devolve o quadro novo (o card do responsável acende) ou null se falhou (o texto fica no campo). */
     async enviar(form: HTMLFormElement): Promise<{ quadro: QuadroDto | null } | null> {

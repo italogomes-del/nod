@@ -3,9 +3,10 @@ import type { OpQuadro } from "../contracts/quadro.ts";
 import { entradaDoComentario, mencionados, quemAcionar } from "../domain/comentarios-quadro.ts";
 import { colunasDe, papelDe } from "../domain/colunas.ts";
 import { podeRepassar, proximaProfundidade } from "../domain/profundidade.ts";
-import { andando, resolverTarefa } from "../domain/quadro.ts";
-import { abrirTurno, acharQuadro, agentesDaPessoa, type Comecou, eventoQuadro, experimentoLigado, montarQuadro, paraAgenteDoQuadro, type PedidoLote, type ResultadoLote } from "./quadro.ts";
+import { andando, quemFez, resolverTarefa } from "../domain/quadro.ts";
+import { abrirTurno, acharQuadro, agentesDaPessoa, falhaDoAchado, pedidoDaPessoa, type Comecou, eventoQuadro, experimentoLigado, montarQuadro, paraAgenteDoQuadro, type PedidoLote, type ResultadoLote } from "./quadro.ts";
 import type { ComentarioDto } from "../contracts/quadro.ts";
+import type { AtividadeTarefa } from "../contracts/quadro-pela-conversa.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { ehNod } from "../domain/nod.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
@@ -35,7 +36,7 @@ export async function comentarTarefa(deps: Deps, p: PedidoLote, op: Comentar, ex
   if (!(await experimentoLigado(deps))) return falha("experimento_desligado", "o quadro está desligado nos experimentos da pessoa");
   const agentes = await agentesDaPessoa(deps);
   const achado = await acharQuadro(deps, p, agentes);
-  if (achado && "ambiguo" in achado) return falha("sem_quadro", `a pessoa tem ${achado.ambiguo.length} quadros: diga qual em quadro (o nome do bot anfitrião ou o id): ${achado.ambiguo.map((x) => x.id).join(", ")}`);
+  if (achado && ("ambiguo" in achado || "semNome" in achado)) { const f = falhaDoAchado(achado, agentes); return falha(f.erro, f.detalhe); }
   if (!achado) return falha("sem_quadro", "não há quadro: crie com criar_quadro (meta e prazo são opcionais)");
   const repo = deps.repos.quadros;
   // A mesma trava do lote: o comentário e uma troca de responsável não se cruzam.
@@ -46,12 +47,12 @@ export async function comentarTarefa(deps: Deps, p: PedidoLote, op: Comentar, ex
     if (meu && (meu.pararSolicitadoEm != null || meu.estado === "interrompido")) return falha("entrada_invalida", "este turno foi parado: a tarefa mudou de mão ou foi desfeita");
   }
   const tarefas = await repo.tarefas(q.id);
-  const achada = resolverTarefa(tarefas.map((t) => ({ ...t, nova: false })), op.tarefa);
+  const achada = resolverTarefa(tarefas.map((t) => ({ ...t, nova: false })), op.tarefa, { colunas: colunasDe(q), agentes: agentes.map(paraAgenteDoQuadro) });
   if ("erro" in achada) return falha(achada.erro.includes("não está no quadro") ? "nao_encontrado" : "entrada_invalida", achada.erro);
   let tarefa = tarefas.find((t) => t.id === achada.id)!;
 
   const deBot = p.autor.tipo === "agente";
-  const comentario = await deps.repos.quadroComentarios.inserir({ quadroId: q.id, tarefaId: tarefa.id, autor: p.autor, texto: op.texto, deFora: deBot });
+  const comentario = await deps.repos.quadroComentarios.inserir({ quadroId: q.id, tarefaId: tarefa.id, autor: p.autor, texto: op.texto, deFora: deBot, ...(pedidoDaPessoa(p) ? { pedidoPor: deps.escopo.pessoaId } : {}) });
   if (deBot && p.origemConfiavel === false && !tarefa.deFora) tarefa = (await repo.salvarTarefa(tarefa.id, { ...tarefa, deFora: true })) ?? tarefa;
 
   const porId = new Map(agentes.map((a) => [a.id, a]));
@@ -118,10 +119,18 @@ export async function comentarTarefa(deps: Deps, p: PedidoLote, op: Comentar, ex
   };
 }
 
-/** Os comentários de uma tarefa do quadro do bot da tela (NOD-417), do mais antigo ao mais novo. Só lê. */
-export const verComentarios: CasoDeUso<{ agenteId: string; tarefaId: string }, { comentarios: ComentarioDto[] }> = async (deps, input) => {
+/**
+ * O que a tarefa aberta mostra embaixo (NOD-417; NOD-430): os comentários, a Atividade (os lotes que a tocaram, com quem
+ * fez: "Você", "Você, pela Ada" ou o bot sozinho) e quem a criou (o primeiro desses lotes).
+ */
+export const verComentarios: CasoDeUso<{ agenteId: string; tarefaId: string }, { comentarios: ComentarioDto[]; atividade: AtividadeTarefa[]; criadaPor: string | null }> = async (deps, input) => {
   if (!(await experimentoLigado(deps))) throw new ErroDeDominio("nao_permitido", { cause: "experimento quadro desligado" });
   const q = await deps.repos.quadros.doAgente(input.agenteId);
   if (!q || !(await deps.repos.quadros.tarefas(q.id)).some((t) => t.id === input.tarefaId)) throw new ErroDeDominio("nao_encontrado", { cause: "tarefa fora do quadro" });
-  return { data: { comentarios: await deps.repos.quadroComentarios.daTarefa(input.tarefaId) } };
+  const nomes = new Map((await agentesDaPessoa(deps)).map((a) => [a.id, a.nome]));
+  const nomeDe = (autor: { tipo: "pessoa" } | { tipo: "agente"; agenteId: string }) => (autor.tipo === "agente" ? (nomes.get(autor.agenteId) ?? null) : null);
+  const atividade = (await deps.repos.quadros.lotesDaTarefa(q.id, input.tarefaId)).map((l) => ({ loteId: l.id, resumo: l.resumo, quem: quemFez(l.autor, l.pedidoPor, nomeDe(l.autor)), criadoEm: l.criadoEm }));
+  // O primeiro lote numa consulta própria (revisão 2 do PR #627): a Atividade traz só os 50 mais recentes.
+  const primeiro = await deps.repos.quadros.primeiroLoteDaTarefa(q.id, input.tarefaId);
+  return { data: { comentarios: await deps.repos.quadroComentarios.daTarefa(input.tarefaId), atividade, criadaPor: primeiro ? quemFez(primeiro.autor, primeiro.pedidoPor, nomeDe(primeiro.autor)) : null } };
 };

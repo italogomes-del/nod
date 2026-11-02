@@ -111,6 +111,16 @@ export function propostasRepo(conn: Conn, escopo: Escopo) {
       return linhas.map(paraProposta);
     },
 
+    /** NOD-430: os cards 'quadro_exclusao' ainda abertos de um quadro (reaproveitar no pedido repetido; fechar quando ele sai). */
+    async exclusoesPendentesDoQuadro(quadroId: string): Promise<Proposta[]> {
+      const linhas = await conn<Linha[]>`
+        select ${conn.unsafe(COLUNAS)} from propostas
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and kind = 'quadro_exclusao' and estado = 'pendente'
+          and payload->>'quadroId' = ${quadroId}
+        order by criado_em, id`;
+      return linhas.map(paraProposta);
+    },
+
     async pendentesDaConversa(conversaId: string): Promise<Proposta[]> {
       const linhas = await conn<Linha[]>`
         select ${conn.unsafe(COLUNAS)} from propostas where tenant_id = ${escopo.tenantId} and conversa_id = ${conversaId} and estado = 'pendente' order by criado_em`;

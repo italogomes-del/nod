@@ -10,6 +10,7 @@ import { EXECUTORES_QUADRO } from "../../src/use-cases/acoes/quadro.ts";
 import { garantirNod } from "../../src/use-cases/onboarding.ts";
 import { gerirQuadro } from "../../src/use-cases/gerir-quadro.ts";
 import { decidirColunasDoQuadro } from "../../src/use-cases/colunas-do-quadro.ts";
+import { decidirQuadroExclusao } from "../../src/use-cases/quadro-exclusao.ts";
 import { aplicarLoteQuadro, montarQuadro } from "../../src/use-cases/quadro.ts";
 import type { Deps } from "../../src/use-cases/tipos.ts";
 import { depsSobreTrx, executar, MARLON, servicosDeTeste, useCasesDeTeste } from "../helpers/deps-l6.ts";
@@ -81,7 +82,7 @@ describeIntegracao("paridade tela × chat do quadro.* (NOD-442, ADR-135)", () =>
     // O bot que faz pelo chat (comum) e o que executa as tarefas dos dois quadros.
     const gil = await agenteComConversa(trx, MARLON, { nome: `Gil ${sufixo}` });
     const caio = await agenteComConversa(trx, MARLON, { nome: `Caio ${sufixo}` });
-    return { d, tela, chat, gil, caio, nomeChat: `Chat ${sufixo}`, nomeCaio: `Caio ${sufixo}` };
+    return { d, tela, chat, gil, caio, nomeChat: `Chat ${sufixo}`, nomeCaio: `Caio ${sufixo}`, nomeGil: `Gil ${sufixo}` };
   }
 
   type M = Awaited<ReturnType<typeof montar>>;
@@ -100,10 +101,8 @@ describeIntegracao("paridade tela × chat do quadro.* (NOD-442, ADR-135)", () =>
     chat: (m: M) => OpQuadro;
     /** A ação apaga o quadro: os dois lados terminam sem quadro. */
     semQuadroNoFim?: boolean;
-    /** Quem chama o gerir_quadro é o próprio anfitrião (o remover é só do próprio quadro). */
-    peloAnfitriao?: boolean;
-    /** O chat abre um card: a pessoa confirma antes da comparação. */
-    confirmar?: true;
+    /** O chat abre um card: a pessoa confirma antes da comparação (as colunas, ou a exclusão do quadro da NOD-430). */
+    confirmar?: "colunas" | "exclusao";
   };
   const DOCES = [
     { nome: "Pedido", grupo: "nao_iniciado" as const }, { nome: "Compras", grupo: "iniciado" as const }, { nome: "Produção", grupo: "iniciado" as const },
@@ -153,9 +152,10 @@ describeIntegracao("paridade tela × chat do quadro.* (NOD-442, ADR-135)", () =>
       id: "quadro.remover",
       preparar: (m) => [...BASE(m), [{ tipo: "mudar_tarefa", tarefa: "T1", status: "afazer", agente: m.nomeCaio }]],
       tela: async (_m, q) => ({ metodo: "DELETE", caminho: `/agentes/${q.anfitriao}/quadro`, status: 200 }),
+      // NOD-430: qualquer bot pede (aqui o Gil, o quadro é do Chat) e vira o card 'quadro_exclusao' (Excluir / Agora não).
       chat: (m) => ({ tipo: "remover_quadro", bot: m.nomeChat }),
       semQuadroNoFim: true,
-      peloAnfitriao: true,
+      confirmar: "exclusao",
     },
     // NOD-448 (ADR-140): as colunas.
     {
@@ -189,7 +189,7 @@ describeIntegracao("paridade tela × chat do quadro.* (NOD-442, ADR-135)", () =>
       preparar: BASE,
       tela: async (_m, q) => ({ metodo: "PUT", caminho: `/agentes/${q.anfitriao}/quadro/colunas`, corpo: { colunas: DOCES }, status: 200 }),
       chat: () => ({ tipo: "substituir_colunas", colunas: DOCES }),
-      confirmar: true,
+      confirmar: "colunas",
     },
     // ADR-142: a passagem por coluna e o fim da etapa (o terminei leva T1 a Em revisão, e o Caio começa).
     {
@@ -231,15 +231,20 @@ describeIntegracao("paridade tela × chat do quadro.* (NOD-442, ADR-135)", () =>
       const resp = await servidor.chamar(sessao, t.metodo, t.caminho, t.corpo);
       expect(resp.status, await resp.clone().text()).toBe(t.status);
 
-      const quem = c.peloAnfitriao ? m.chat : m.gil;
+      const quem = m.gil;
       const ctx = await turnoDe(m.d, quem.agenteId, quem.conversaId);
       const r = await executar(m.d, gerirQuadro, { ...ctx, quadro: m.nomeChat, acoes: [c.chat(m)] });
       expect(r.data, JSON.stringify(r.data)).toMatchObject({ ok: true });
       if (c.confirmar) {
         if (!r.data.ok || !r.data.proposta_id) throw new Error("sem card");
         // Antes de confirmar, nada mudou no quadro do chat.
-        expect((await estado(m, m.chat.agenteId))?.colunas).not.toEqual((await estado(m, m.tela.agenteId))?.colunas);
-        expect((await executar(m.d, decidirColunasDoQuadro, { decisaoId: r.data.proposta_id, recusar: false, executor: "catcher" })).data).toMatchObject({ aplicado: true });
+        if (c.confirmar === "colunas") {
+          expect((await estado(m, m.chat.agenteId))?.colunas).not.toEqual((await estado(m, m.tela.agenteId))?.colunas);
+          expect((await executar(m.d, decidirColunasDoQuadro, { decisaoId: r.data.proposta_id, recusar: false, executor: "catcher" })).data).toMatchObject({ aplicado: true });
+        } else {
+          expect(await estado(m, m.chat.agenteId)).not.toBeNull();
+          expect((await executar(m.d, decidirQuadroExclusao, { decisaoId: r.data.proposta_id, recusar: false, executor: "catcher" })).data).toMatchObject({ aplicado: true });
+        }
       }
 
       const doLadoDaTela = await estado(m, m.tela.agenteId);
@@ -359,9 +364,10 @@ describeIntegracao("paridade tela × chat do quadro.* (NOD-442, ADR-135)", () =>
       expect(r.data).toMatchObject({ ok: false, erro: "entrada_invalida" });
       expect(JSON.stringify(r.data)).toContain("entre donos diferentes");
       expect(await m.d.repos.quadros.doAgente(m.tela.agenteId)).toBeNull();
-      // Do mesmo dono, um salto adiante, vale.
+      // Do mesmo dono, um salto adiante, vale — no limite normal (NOD-430): sozinho, só cria no Backlog, sem atribuir.
+      expect((await pessoa(m.d, m.tela.agenteId, [{ tipo: "criar_quadro", meta: "M" }])).data).toMatchObject({ ok: true });
       const doDono = await m.d.repos.turnos.enfileirar({ executor: "catcher", conversaId: m.gil.conversaId, agenteId: m.gil.agenteId, origem: "delegacao", prazoEm: Date.now() + 600_000, profundidade: 1, entradaTexto: "x", entradaConfianca: "confiavel", sobProcuracaoDe: MARLON.pessoaId, modelo: "auto" });
-      const ok = await executar(m.d, gerirQuadro, { turnoId: doDono!.id, agenteId: m.gil.agenteId, conversaId: m.gil.conversaId, quadro: m.tela.agenteId, acoes });
+      const ok = await executar(m.d, gerirQuadro, { turnoId: doDono!.id, agenteId: m.gil.agenteId, conversaId: m.gil.conversaId, quadro: m.tela.agenteId, acoes: [{ tipo: "criar_tarefa", titulo: "T" }] });
       expect(ok.data).toMatchObject({ ok: true });
     });
   });
@@ -381,13 +387,17 @@ describeIntegracao("paridade tela × chat do quadro.* (NOD-442, ADR-135)", () =>
       // Um bot num turno contaminado: o turno que ele começa nasce contaminado também.
       const ctx = await turnoDe(m.d, m.gil.agenteId, m.gil.conversaId);
       await m.d.repos.turnos.contaminar(ctx.turnoId, Date.now());
-      const r = await executar(m.d, gerirQuadro, { ...ctx, quadro: m.tela.agenteId, acoes: [{ tipo: "criar_tarefa", titulo: "Do bot", agente: m.nomeCaio }] });
+      // NOD-430 × NOD-417: contaminado = limite normal (não atribui a outro) e não pega tarefa para si (ERRO_SE_TOMA).
+      // Ele só escreve no Backlog; quando a pessoa passa a tarefa a ele, o turno que começa nasce contaminado.
+      const tomar = await executar(m.d, gerirQuadro, { ...ctx, quadro: m.tela.agenteId, acoes: [{ tipo: "criar_tarefa", titulo: "Do bot", agente: m.nomeGil }] });
+      expect(JSON.stringify(tomar.data)).toContain("você só pega uma tarefa que não é sua num turno limpo");
+      const r = await executar(m.d, gerirQuadro, { ...ctx, quadro: m.tela.agenteId, acoes: [{ tipo: "criar_tarefa", titulo: "Do bot" }] });
       if (!r.data.ok) throw new Error(JSON.stringify(r.data));
-      // Revisão 4 do PR #622 (achado 2): o bot de fora que cria a tarefa para outro não aciona ninguém; quando a pessoa a
+      // Revisão 4 do PR #622 (achado 2): o bot de fora que cria a tarefa não aciona ninguém; quando a pessoa a passa e a
       // começa, o turno nasce contaminado.
       expect(r.data).toMatchObject({ comecaram: [] });
-      expect((await m.d.repos.quadros.tarefas((await m.d.repos.quadros.doAgente(m.tela.agenteId))!.id)).find((t) => t.titulo === "Do bot")).toMatchObject({ agenteId: m.caio.agenteId, turnoId: null, deFora: true });
-      expect((await pessoa(m.d, m.tela.agenteId, [{ tipo: "mudar_tarefa", tarefa: "Do bot", status: "fazendo" }])).data).toMatchObject({ ok: true });
+      expect((await m.d.repos.quadros.tarefas((await m.d.repos.quadros.doAgente(m.tela.agenteId))!.id)).find((t) => t.titulo === "Do bot")).toMatchObject({ agenteId: null, turnoId: null, deFora: true });
+      expect((await pessoa(m.d, m.tela.agenteId, [{ tipo: "mudar_tarefa", tarefa: "Do bot", agente: m.nomeGil, status: "afazer" }])).data).toMatchObject({ ok: true });
       expect(await m.d.repos.turnos.contaminado(await turnoDa("Do bot"))).toBe(true);
       // A tarefa que o bot contaminado escreveu em Backlog continua de fora quando a pessoa a começa depois (codex, rodada 3).
       const sujo = await executar(m.d, gerirQuadro, { ...ctx, quadro: m.tela.agenteId, acoes: [{ tipo: "criar_tarefa", titulo: "Guardada", status: "backlog" }] });

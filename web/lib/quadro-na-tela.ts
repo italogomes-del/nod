@@ -63,13 +63,18 @@ export const LADO_DA_CONVERSA = ["timeline", "pilula-novas", "faixa-trabalhos", 
 
 
 export interface QuadroNaTela {
-  /** Depois de cada desenho: `chave` é a conversa à vista com o quadro liberado, ou null (outra tela, flag desligada). */
+  /**
+   * Depois de cada desenho: `chave` é a conversa à vista com o quadro liberado, ou null (outra tela, flag desligada).
+   * `agenteId` com `chave` null: a conversa desse bot está na tela, mas ele não tem quadro.
+   */
   sincronizar(o: { chave: string | null; nome: string; agenteId?: string | null }): void;
   /** NOD-442: cada frame do SSE. `quadro.mudou` relê o quadro (os cards que mudaram acendem); a fala do bot sobe na faixa. */
   aoFrame(frame: { tipo: string; dados: Record<string, unknown> }): void;
   trocar(para: ModoDaConversa, o?: { foco?: boolean }): void;
   /** A conexão voltou sem o replay: relê o quadro (e a conversa, com um pedido esperando). */
   reler(): void;
+  /** NOD-430: o código da tarefa num chat — abre a tarefa no quadro de `agenteId` quando a conversa dele estiver na tela. */
+  abrirTarefaDe(agenteId: string, tarefaId: string): void;
   modo(): ModoDaConversa;
 }
 
@@ -116,6 +121,8 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
   let editandoMeta = false;
   /** NOD-448: o pedaço da edição das colunas que está aberto (menu, renomear, remover, coluna nova, a folha do celular). */
   let edicao: EdicaoDeColuna | null = null;
+  /** NOD-430: a tarefa pedida pelo código num chat (`nod-tarefa:`): abre quando a conversa do dono dela estiver na tela. */
+  let pendente: { agenteId: string; tarefaId: string } | null = null;
   /** NOD-417: os comentários da tarefa aberta. */
   const coms = criarComentariosNaTela({ api: () => dd?.api() ?? null, redesenhar: () => { if (aberta) desenharVista(); } });
 
@@ -571,6 +578,22 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     }
   }
 
+  /** NOD-430: abre a tarefa do quadro de `agente`; se a conversa dele ainda não está na tela, espera o sincronizar. */
+  function abrirTarefaDe(agente: string, tarefaId: string): void {
+    pendente = { agenteId: agente, tarefaId };
+    abrirPendente();
+  }
+
+  function abrirPendente(): void {
+    if (!pendente || chave === null || agenteId !== pendente.agenteId) return;
+    const { tarefaId } = pendente;
+    pendente = null;
+    aberta = tarefaId;
+    histAberto = false;
+    if (agenteId) coms.abrir(agenteId, tarefaId);
+    if (modo === "quadro") { desenharVista(); void lerQuadro(); } else trocar("quadro");
+  }
+
   function abrirTarefa(id: string): void {
     aberta = id;
     histAberto = false;
@@ -687,6 +710,9 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
   }
 
   function sincronizar(s: { chave: string | null; nome: string; agenteId?: string | null }): void {
+    // NOD-430 (revisão 1 do PR #627): a conversa do dono da tarefa pedida chegou sem quadro (excluído): o pedido cai aqui,
+    // senão a tarefa velha abriria sozinha quando ele ganhasse um quadro novo.
+    if (pendente && s.chave === null && s.agenteId === pendente.agenteId) pendente = null;
     // Fora de uma conversa com quadro, e já sem quadro: nada a mexer (o palco é de outra tela).
     if (s.chave === null && chave === null) return;
     if (s.chave !== chave) {
@@ -705,6 +731,7 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     // No meio de uma animação o estado é dela; só o segmento (o cabeçalho pode ter sido regravado) é remarcado.
     if (animacoes.length) marcar();
     else assentar();
+    abrirPendente();
   }
 
   // As ações do segmento e do quadro vazio moram aqui, não no mapa de ações do main: são só da tela.
@@ -1029,5 +1056,5 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     if (faixa.tipo === "aguardando" || histAberto) void lerConversa();
   }
 
-  return { sincronizar, trocar, aoFrame, reler, modo: () => modo };
+  return { sincronizar, trocar, aoFrame, reler, abrirTarefaDe, modo: () => modo };
 }

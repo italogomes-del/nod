@@ -28,6 +28,8 @@ export function tituloDaProposta(p: Pick<Proposta, "payload">): string {
       return com("Mudanças nos bots", c.resumo);
     case "colunas_quadro":
       return com("Colunas do quadro", c.anfitriaoNome);
+    case "quadro_exclusao":
+      return `Excluir o quadro do ${c.anfitriaoNome}`;
     // NOD-50: o título do cartão aberto, sem o valor (o payload nunca o tem).
     case "credencial":
       return c.alvo === "github_token" ? "Token do GitHub" : c.alvo === "composio" ? "Chave do Composio do time" : `Chave para ${c.app}`;

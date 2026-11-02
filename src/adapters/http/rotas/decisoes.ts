@@ -1,5 +1,6 @@
 import { decidirLoteDeBots } from "../../../use-cases/gerir-bots.ts";
 import { decidirColunasDoQuadro } from "../../../use-cases/colunas-do-quadro.ts";
+import { decidirQuadroExclusao } from "../../../use-cases/quadro-exclusao.ts";
 import { randomUUID } from "node:crypto";
 import type { RespostaMutacao } from "../../../contracts/api.ts";
 import type { Decisao } from "../../../contracts/decisao.ts";
@@ -214,6 +215,20 @@ export function criarRotasDecisoes(d: DepsRotasDecisoes): Rota[] {
           const r = await comoDona(ctx.escopo, atual, (deps) => executar(deps, decidirLoteDeBots, { decisaoId: atual.id, recusar: recusada(corpo), selecionados: c.selecionados }));
           ids.feitas = String(r.feitas);
           if (r.falhas > 0) ids.falhas = String(r.falhas);
+          const resposta: RespostaMutacao = { ok: true, ids };
+          ctx.json(200, resposta);
+          return;
+        }
+
+        if (atual.tipo === "quadro_exclusao") {
+          // NOD-430: excluir o quadro de um bot pela conversa. Roda como a DONA; o quadro que mudou depois do card fecha
+          // como recusa e avisa sem lançar, e o 409 sai DEPOIS do commit (padrão NOD-159).
+          // Revisão 3 do PR #627: só a dona decide (como a credencial). Excluir não tem Desfazer e o caso grava a dona como
+          // quem decidiu; uma decisora designada não apaga o quadro dela em nome dela. (O colunas_quadro, com Desfazer, segue
+          // aceitando a decisora pelo comoDona.)
+          if (atual.ownerId !== ctx.escopo.pessoaId) throw new ErroDeDominio("nao_encontrado", { cause: "exclusão de quadro de outra pessoa" });
+          const r = await comoDona(ctx.escopo, atual, (deps) => executar(deps, decidirQuadroExclusao, { decisaoId: atual.id, recusar: recusada(corpo), executor: d.executor ?? "catcher" }));
+          if (r.obsoleta) throw new ErroDeDominio("estado_invalido", { cause: "quadro_mudou" });
           const resposta: RespostaMutacao = { ok: true, ids };
           ctx.json(200, resposta);
           return;
