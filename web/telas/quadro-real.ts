@@ -7,12 +7,12 @@
  * - `pilulaDoQuadro`: a conversa no próprio quadro (passo 9 do protótipo), que fala com o bot anfitrião.
  * Todo texto (título, descrição, pergunta, resposta, meta) é dado e passa por `esc`.
  */
-import type { QuadroDto, TarefaDto } from "../../src/contracts/quadro.ts";
+import type { EntradaHistoricoDto, QuadroDto, TarefaDto } from "../../src/contracts/quadro.ts";
 import { esc } from "../lib/escape.ts";
 import { NOME_DO_STATUS, type Status } from "../lib/quadro.ts";
 import { comColunas, iconeDaColuna, inicioDoFimPreso, LIMITE_COLUNAS, type EdicaoDeColuna } from "../lib/colunas.ts";
 import { aposDoCabecalho, botaoDeNova, campoDeRenomear, colunaNova, confirmacaoDeSoltar, folhaDasColunas, menuDeMover, naFolha, type AgenteDaPassagem } from "./colunas-quadro.ts";
-import { atalhosDePrazo, codigoDaTarefa, faltaParaOPrazo, fraseDoPrazo, tarefasPorStatus, type Faixa } from "../lib/quadro-dados.ts";
+import { RESP_VOCE, atalhosDePrazo, codigoDaTarefa, faltaParaOPrazo, fraseDoPrazo, linhaDoHistorico, opcoesDeStatus, tarefasPorStatus, type Faixa } from "../lib/quadro-dados.ts";
 import { anel, avatar, barra, card, confiar, ICONE, ICONE_DO_STATUS, linha, lista, quadro, seloEmTeste, type Card, type Coluna, type ExtraDaGrade, type Filtro, type Html, type QuemRoda } from "./quadro.ts";
 
 /** Quem é o agente de um id (o avatar com o mascote dele e o nome); null = não é um bot da pessoa. */
@@ -22,6 +22,14 @@ const VOCE = { avatar: anel("V", "Você", true), nome: "Você" };
 const VAZIO_DO_BACKLOG = "Diga o que entra, ou peça para trazer do Linear.";
 const LIMITE_RESPOSTA = 4000;
 const LIMITE_PEDIDO = 4000;
+const LIMITE_TITULO = 200;
+
+/** NOD-416: "Nova tarefa…" na barra. Cai no Backlog e ninguém começa (para começar, mude o status). */
+export function formNovaTarefa(): Html {
+  return confiar(`<form class="qd-nova-tarefa" data-form="nova-tarefa"><label class="qd-sr" for="qd-nova-tit">Nova tarefa</label>` +
+    `<input id="qd-nova-tit" class="qd-nova-in" name="titulo" maxlength="${LIMITE_TITULO}" required autocomplete="off" placeholder="Nova tarefa…">` +
+    `<button type="submit" class="qd-bt">Criar</button></form>`);
+}
 
 const numeroDoPr = (url: string): string => {
   const m = /\/pull\/(\d+)/.exec(url);
@@ -189,7 +197,7 @@ export function quadroDaMeta(o: { q: QuadroDto; nome: string; agente: AgenteDoQu
   return confiar([
     topoDoQuadro(o.q, { agora: o.agora ?? Date.now(), ...(o.editandoMeta ? { editandoMeta: true } : {}) }),
     avisoDoGithub(o.q),
-    barra({ filtro: o.filtro, trabalhando: trabalhando(o.q, o.agente) }),
+    barra({ filtro: o.filtro, trabalhando: trabalhando(o.q, o.agente), extra: formNovaTarefa() }),
     quadro({ rotulo, classe: "qd-so-largo", colunas, extras }),
     `<div class="qd-so-estreito">${lista({ rotulo, antes: confiar(ordem), grupos: cols.map(({ c, tarefas, recolhida }) => ({ status: c.id, nome: c.nome, icone: iconeDaColuna(c), pessoa: c.daPessoa, recolhido: recolhida, linhas: [...solta(c), ...cartoes(tarefas, true).map(linha)], vazio: vazio(c.id) })) })}` +
       `${naFolha(ed) ? folhaDasColunas(cs, ed, contagem, o.nome) : ""}</div>`,
@@ -230,7 +238,34 @@ function formResposta(t: TarefaDto): string {
  * O detalhe de uma tarefa (o clique no card): à esquerda o título, os chips, a descrição e, se trava em você, a pergunta
  * com o campo da resposta; à direita o painel (Propriedades, Entregáveis, No Linear). Abaixo de 700px o painel desce.
  */
-export function tarefaAberta(o: { t: TarefaDto; q: QuadroDto; agente: AgenteDoQuadro; /** NOD-417: a seção dos comentários (comentarios-tarefa.ts). */ comentarios?: string }): Html {
+export type ExtrasDaTarefa = {
+  /** Os bots que podem ser responsáveis (a frota da pessoa). Sem a lista, o Responsável fica só leitura. */
+  responsaveis?: readonly { id: string; nome: string }[];
+  /** Os outros quadros da pessoa ("Mover para…"); vazio ou sem a lista, o campo não aparece. */
+  destinos?: readonly { id: string; nome: string }[];
+  /** O destino já escolhido no "Mover para…" (sobrevive a um redesenho; o botão Mover fica ligado). */
+  moverPara?: string | null;
+  /** O histórico da tarefa; null = ainda carregando. */
+  historico?: readonly EntradaHistoricoDto[] | null;
+  /** NOD-417: a seção dos comentários (comentarios-tarefa.ts). */
+  comentarios?: string;
+  /**
+   * Revisão 7 do PR #623: o Status escolhido é uma coluna com responsável que aciona (ADR-142). A mesma linha do card
+   * solto ("Confirmar · Não iniciar ainda") aparece logo abaixo do Status, antes de mandar a mudança.
+   */
+  soltar?: string;
+};
+
+const opcao = (valor: string, rotulo: string, marcada: boolean, titulo?: string): string => `<option value="${esc(valor)}"${marcada ? " selected" : ""}${titulo ? ` title="${esc(titulo)}"` : ""}>${esc(rotulo)}</option>`;
+
+function secaoDoHistorico(h: ExtrasDaTarefa["historico"]): string {
+  const corpo = h === undefined ? "" : h === null ? `<p class="qd-lado-vazio">Carregando…</p>`
+    : !h.length ? `<p class="qd-lado-vazio">Sem histórico antes desta versão</p>`
+    : `<ol class="qd-hist">${[...h].reverse().map((e) => { const l = linhaDoHistorico(e); return `<li><span class="qd-hist-quem">${esc(l.quem)}</span> <span class="qd-hist-oque">${esc(l.oque)}</span> <time class="qd-hist-quando" datetime="${esc(new Date(e.criadoEm).toISOString())}">${esc(l.quando)}</time></li>`; }).join("")}</ol>`;
+  return corpo ? `<h2 class="qd-t-sec">Histórico</h2>${corpo}` : "";
+}
+
+export function tarefaAberta(o: { t: TarefaDto; q: QuadroDto; agente: AgenteDoQuadro } & ExtrasDaTarefa): Html {
   const { t } = o;
   const codigo = codigoDaTarefa(t);
   const resp = t.status === "voce" ? VOCE : t.agenteId ? o.agente(t.agenteId) : null;
@@ -254,15 +289,39 @@ export function tarefaAberta(o: { t: TarefaDto; q: QuadroDto; agente: AgenteDoQu
     : pr ? [`<li>${ICONE.ok}<a class="qd-link" href="${esc(pr)}" target="_blank" rel="noopener noreferrer">${esc(numeroDoPr(pr))}</a></li>`] : [];
   const entregaveis = `<section class="qd-lado-sec"><h2 class="qd-rotulo">Entregáveis <span class="qd-n">${itensPr.length}</span></h2>` +
     (itensPr.length ? `<ul>${itensPr.join("")}</ul>` : `<p class="qd-lado-vazio">Nada ainda</p>`) + `</section>`;
-  // NOD-421: as linhas de sistema (CI, conflito, merge), discretas, até o histórico da NOD-416.
+  // NOD-421: as linhas de sistema (CI, conflito, merge), discretas. Merge da main no PR #623: ficam logo abaixo do
+  // Histórico da NOD-416, cada uma com o seu título ("Histórico" e "Atividade", sem repetir). Podem contar o mesmo fato
+  // por dois lados (o merge do PR na Atividade e a ida a Feito no Histórico); juntar as duas numa lista só (o histórico
+  // lendo quadro_tarefa_linhas, como a 0142 prevê) fica para depois.
   const linhas = t.linhas?.length
     ? `<h2 class="qd-t-sec">Atividade</h2><ul class="qd-t-linhas">${t.linhas.map((l) => `<li>${esc(l.texto)} · <time datetime="${new Date(l.criadoEm).toISOString()}">${esc(horaDaLinha(l.criadoEm))}</time></li>`).join("")}</ul>` : "";
   const noLinear = t.linearId ? `<section class="qd-lado-sec"><h2 class="qd-rotulo">No Linear</h2><ul><li>${lin ? `<a class="qd-link" href="${esc(lin)}" target="_blank" rel="noopener noreferrer">${esc(t.linearId)}</a>` : `<span>${esc(t.linearId)}</span>`}</li></ul></section>` : "";
+  // NOD-416: Status e Responsável mudam aqui mesmo (cada mudança é um lote com Desfazer, como no card).
+  const campoStatus = `<select id="qd-t-status" class="qd-sel" data-campo="status" data-id="${esc(t.id)}">` +
+    opcoesDeStatus(comColunas(o.q).colunas).map((g) => `<optgroup label="${esc(g.grupo)}">${g.colunas.filter((c) => c.id !== "voce" || c.id === t.status).map((c) => opcao(c.id, c.nome, c.id === t.status)).join("")}</optgroup>`).join("") +
+    (col ? "" : opcao(t.status, nomeSt, true)) + `</select>`;
+  const lista = o.responsaveis ?? null;
+  // Revisão 2 do PR #623: em Precisa de você o select mostra Você (o responsável efetivo, como o chip); o bot segue na lista.
+  const comVoce = t.status === "voce";
+  const campoResp = !lista ? `<span id="qd-t-resp">${esc(resp?.nome ?? "ninguém")}</span>`
+    : `<select id="qd-t-resp" class="qd-sel" data-campo="agente" data-id="${esc(t.id)}">` +
+      `${comVoce ? `<option value="${RESP_VOCE}" selected disabled>Você</option>` : ""}${opcao("", "Ninguém", !comVoce && !t.agenteId)}` +
+      `${lista.map((a) => opcao(a.id, a.nome, !comVoce && a.id === t.agenteId)).join("")}${t.agenteId && !lista.some((a) => a.id === t.agenteId) ? opcao(t.agenteId, t.agenteNome ?? "Outro bot", !comVoce) : ""}</select>`;
+  // O label só aponta para o select; sem a lista, o Responsável é texto e o rótulo é um dt simples.
+  const rotuloResp = lista ? `<label for="qd-t-resp">Responsável</label>` : "Responsável";
+  const soltar = o.soltar ? comColunas(o.q).colunas.find((c) => c.id === o.soltar) : undefined;
+  const escolhido = o.destinos?.find((d) => d.id === o.moverPara);
+  const campoMover = o.destinos?.length
+    // Revisão do PR #623 (WCAG 3.2.2): escolher o quadro não move; o botão Mover confirma (e fica desligado sem escolha).
+    ? `<dt><label for="qd-t-mover">Mover para</label></dt><dd class="qd-mover"><select id="qd-t-mover" class="qd-sel" data-campo="mover" data-id="${esc(t.id)}" title="${esc(escolhido?.nome ?? "Outro quadro…")}">${opcao("", "Outro quadro…", !escolhido)}${o.destinos.map((d) => opcao(d.id, d.nome, d.id === escolhido?.id, d.nome)).join("")}</select>` +
+      `<button type="button" class="qd-bt" data-act="mover-quadro" data-id="${esc(t.id)}"${escolhido ? "" : " disabled"}>Mover</button></dd>` : "";
   return confiar(`<article class="qd-tarefa qd-com-lado" aria-labelledby="qd-t-tit" data-tarefa="${esc(t.id)}">` +
     `<div class="qd-t-cab"><button type="button" class="qd-voltar" data-act="voltar-ao-quadro">${ICONE.voltar}<span>${esc(o.q.meta ?? "Quadro")}</span></button><span class="qd-t-sep" aria-hidden="true">/</span><span class="qd-id">${esc(codigo)}</span></div>` +
-    `<div class="qd-t-corpo"><div class="qd-t-principal"><h1 class="qd-t-tit" id="qd-t-tit" tabindex="-1">${esc(t.titulo)}</h1><div class="qd-chips">${chipSt}${chipResp}${chipPr}</div>${desc}${pergunta}${resposta}${linhas}${o.comentarios ?? ""}</div>` +
+    `<div class="qd-t-corpo"><div class="qd-t-principal"><h1 class="qd-t-tit" id="qd-t-tit" tabindex="-1">${esc(t.titulo)}</h1><div class="qd-chips">${chipSt}${chipResp}${chipPr}</div>${desc}${pergunta}${resposta}${secaoDoHistorico(o.historico)}${linhas}${o.comentarios ?? ""}</div>` +
     `<aside class="qd-lado" aria-label="Detalhes da tarefa"><section class="qd-lado-sec"><h2 class="qd-rotulo">Propriedades</h2><dl class="qd-props">` +
-    `<dt>Status</dt><dd>${esc(nomeSt)}</dd><dt>Responsável</dt><dd>${esc(resp?.nome ?? "ninguém")}</dd><dt>Quadro</dt><dd>${esc(o.q.meta ?? "sem meta")}</dd></dl></section>` +
+    `<dt><label for="qd-t-status">Status</label></dt><dd>${campoStatus}${soltar ? `<ul class="qd-t-soltar">${confirmacaoDeSoltar(soltar, t.id, t.titulo)}</ul>` : ""}</dd><dt>${rotuloResp}</dt><dd>${campoResp}</dd>` +
+    `<dt>Quadro</dt><dd>${esc(o.q.agenteNome)}${o.q.meta ? ` · ${esc(o.q.meta)}` : ""}</dd>${campoMover}` +
+    `${t.branch ? `<dt>Branch</dt><dd><code class="qd-branch">${esc(t.branch)}</code></dd>` : ""}</dl></section>` +
     `${entregaveis}${noLinear}</aside></div></article>`);
 }
 

@@ -5,7 +5,7 @@ import type { IdAcao } from "../../domain/acoes/index.ts";
 import type { CodigoErro } from "../../domain/erro.ts";
 import { ErroDeDominio } from "../../domain/erro.ts";
 import { comentarTarefa } from "../comentar-tarefa.ts";
-import { aplicarLoteQuadro, type FalhaQuadro, type ResultadoLote } from "../quadro.ts";
+import { aplicarLoteQuadro, type FalhaQuadro, type RecusaDoMover, type ResultadoLote } from "../quadro.ts";
 import type { CasoDeUso } from "../tipos.ts";
 
 /**
@@ -23,7 +23,21 @@ const CODIGO: Record<FalhaQuadro, CodigoErro> = {
   sem_quadro: "nao_encontrado",
   nao_encontrado: "nao_encontrado",
   entrada_invalida: "entrada_invalida",
+  // Revisão 2 do PR #623: a tarefa mudou de quadro no meio do mover (409).
+  conflito: "estado_invalido",
 };
+
+/**
+ * Revisão 7 do PR #623: a recusa do mover que a tela distingue. A chave vem tipada do caso de uso (`motivo` da falha) e
+ * vai no erro; a rota a lê daqui em vez de achar a chave pelo texto do detalhe. A causa segue sendo o texto (só no log).
+ */
+export class ErroDoMover extends ErroDeDominio {
+  readonly motivo: RecusaDoMover;
+  constructor(codigo: CodigoErro, motivo: RecusaDoMover, cause: string) {
+    super(codigo, { cause });
+    this.motivo = motivo;
+  }
+}
 
 /**
  * Um lote de uma ação pela tela. O corpo da rota chega sem tipo: passa pelo mesmo lerOp da ferramenta (tetos, status,
@@ -37,7 +51,10 @@ function umaAcao<I extends object>(tipo: OpQuadro["tipo"]): CasoDeUso<Base & I, 
     const pedido = { autor: { tipo: "pessoa" } as const, anfitriaoId, executor, ops: [op] };
     // NOD-417: comentar não é lote (sem Desfazer): grava e aciona o responsável e os @mencionados.
     const r = op.tipo === "comentar" ? await comentarTarefa(deps, pedido, op) : await aplicarLoteQuadro(deps, pedido);
-    if (!r.data.ok) throw new ErroDeDominio(CODIGO[r.data.erro], { cause: r.data.detalhe });
+    if (!r.data.ok) {
+      if (r.data.motivo) throw new ErroDoMover(CODIGO[r.data.erro], r.data.motivo, r.data.detalhe);
+      throw new ErroDeDominio(CODIGO[r.data.erro], { cause: r.data.detalhe });
+    }
     return { data: r.data, events: r.events };
   };
 }
@@ -53,6 +70,7 @@ export const EXECUTORES_QUADRO = {
   "quadro.responder": umaAcao<{ tarefa: string; resposta: string }>("responder"),
   "quadro.comentar": umaAcao<{ tarefa: string; texto: string }>("comentar"),
   "quadro.desfazer": umaAcao<{ lote?: string }>("desfazer"),
+  "quadro.mover_tarefa": umaAcao<{ tarefa: string; quadro: string }>("mover_quadro"),
   "quadro.remover": umaAcao<{ bot?: string }>("remover_quadro"),
   "quadro.criar_coluna": umaAcao<{ nome: string; grupo: string; depois_de?: string }>("criar_coluna"),
   "quadro.renomear_coluna": umaAcao<{ coluna: string; nome: string }>("renomear_coluna"),

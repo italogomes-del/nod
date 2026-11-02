@@ -1,9 +1,10 @@
 import type { AutorLote, ColunaQuadro, ExecucaoTarefa, GrupoColuna, IdColuna, ItemLinear, OpQuadro, TarefaQuadro } from "../contracts/quadro.ts";
 import { LIMITES_QUADRO } from "../contracts/quadro.ts";
 import {
-  acionaNaColuna, COLUNAS_PADRAO, colunaDeAndamento, colunaDeEspera, colunasDe, criarColuna, definirPassagem, ehGrupo, ehReservada, grupoDe, moverColuna, papelDe,
+  acionaNaColuna, COLUNAS_PADRAO, colunaDeAndamento, colunaDeEntrada, colunaDeEspera, colunasDe, criarColuna, definirPassagem, ehGrupo, ehReservada, grupoDe, moverColuna, papelDe,
   proximaColuna, removerColuna, normalizarNome, renomearColuna, resolverColuna, responsavelDe, saoPadrao, substituirColunas,
 } from "./colunas.ts";
+import { formatarCodigo, lerCodigo } from "./codigo-tarefa.ts";
 
 /**
  * O quadro-agente, puro (definido em 2026-10-31, NOD-442). Lê e confere as operações que chegam de fora (a ferramenta do
@@ -243,6 +244,13 @@ export function lerOp(v: unknown): OpQuadro | ErroOp {
       if (falhou(lote)) return lote;
       return { tipo: "desfazer", ...(lote ? { lote } : {}) };
     }
+    case "mover_quadro": {
+      const tarefa = textoObrigatorio(v.tarefa, "tarefa", 200);
+      if (falhou(tarefa)) return tarefa;
+      const quadro = textoObrigatorio(v.quadro, "quadro", 200);
+      if (falhou(quadro)) return quadro;
+      return { tipo: "mover_quadro", tarefa, quadro };
+    }
     case "remover_quadro": {
       const bot = textoOpcional(v.bot, "bot", 200);
       if (falhou(bot)) return bot;
@@ -265,6 +273,8 @@ export function lerOps(v: unknown): OpQuadro[] | (ErroOp & { indice: number }) {
   }
   const desfazer = ops.filter((o) => o.tipo === "desfazer").length;
   if (desfazer > 0 && ops.length > 1) return { erro: "desfazer vai sozinho na chamada", indice: ops.findIndex((o) => o.tipo === "desfazer") };
+  const mover = ops.findIndex((o) => o.tipo === "mover_quadro");
+  if (mover >= 0 && ops.length > 1) return { erro: "mover_quadro vai sozinho na chamada", indice: mover };
   const remover = ops.findIndex((o) => o.tipo === "remover_quadro");
   if (remover >= 0 && ops.length > 1) return { erro: "remover_quadro vai sozinho na chamada", indice: remover };
   const troca = ops.findIndex((o) => o.tipo === "substituir_colunas");
@@ -512,6 +522,12 @@ export type PlanoLote = {
   comecam: string[];
   /** As que começariam, mas a corrente de bots chegou ao limite (ficam onde o trabalho espera). */
   seguradas: string[];
+  /** NOD-416: o estado que o autor pediu de cada tocada (antes do motor), para o histórico separar autor e regra. */
+  pedidos: ReadonlyMap<string, { status: IdColuna; agenteId: string | null }>;
+  /** NOD-416: as que mudaram de coluna só porque a coluna saiu (a mudança é da regra). */
+  porRegra: ReadonlySet<string>;
+  /** Revisão 3 do PR #623: o id (no plano) da tarefa de cada criar_tarefa, na ordem dos passos. */
+  criadas: string[];
 };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -540,29 +556,47 @@ export function quemFez(autor: AutorLote, pedidoPor: string | null | undefined, 
 export const MAX_CANDIDATAS = 5;
 
 /**
- * Uma candidata de pedido ambíguo: código (Linear) ou id · coluna · responsável. Sem o título (são todas o mesmo, e ele
+ * Uma candidata de pedido ambíguo: código (ZE-12, NOD-416; senão o do Linear ou o id) · coluna · responsável. Sem o título (são todas o mesmo, e ele
  * pode ter vindo de fora: o erro entra na instrução, fora de cerca — ADR-047/062, revisão 1 do PR #627).
  */
-export function descreverCandidata(t: Pick<TarefaQuadro, "id" | "status" | "agenteId" | "linearId">, colunas: readonly ColunaQuadro[], agentes: readonly AgenteDoQuadro[]): string {
+export function descreverCandidata(t: Pick<TarefaQuadro, "id" | "status" | "agenteId" | "linearId"> & { numero?: number | null }, colunas: readonly ColunaQuadro[], agentes: readonly AgenteDoQuadro[], prefixo: string | null = null): string {
+  const codigo = prefixo !== null && t.numero != null ? formatarCodigo(prefixo, t.numero) : (t.linearId ?? t.id);
   const coluna = colunas.find((c) => c.id === t.status)?.nome ?? t.status;
   const dono = t.agenteId ? agentes.find((a) => a.id === t.agenteId)?.nome ?? "outro bot" : "sem responsável";
-  return `${t.linearId ?? t.id} · ${coluna} · ${dono}`;
+  return `${codigo} · ${coluna} · ${dono}`;
 }
 
+/** Como achar a tarefa: o prefixo e os códigos antigos (NOD-416); as colunas e os bots descrevem as candidatas (NOD-430). */
+export type BuscaDeTarefa = { prefixo?: string | null; codigosAntigos?: ReadonlyMap<string, string> | undefined; colunas?: readonly ColunaQuadro[]; agentes?: readonly AgenteDoQuadro[] };
+
 /**
- * A tarefa por id, identificador do Linear ou título exato. Título repetido não escolhe: o erro lista até
- * MAX_CANDIDATAS (código ou id · coluna · responsável) para o bot perguntar qual (NOD-430).
+ * A tarefa por id, código (ZE-12, NOD-416), identificador do Linear ou título exato. Título repetido não escolhe: o erro
+ * lista até MAX_CANDIDATAS (código ou id · coluna · responsável) para o bot perguntar qual (NOD-430).
+ * `codigosAntigos` (revisão 5 do PR #623): o código de outro prefixo que a tarefa teve antes de vir para este quadro
+ * (código formatado → id), lido do histórico de códigos pelo caso de uso.
  */
-export function resolverTarefa(tarefas: readonly TarefaPlanejada[], ref: string, ctx?: { colunas: readonly ColunaQuadro[]; agentes: readonly AgenteDoQuadro[] }): TarefaPlanejada | ErroOp {
+export function resolverTarefa<T extends TarefaQuadro>(tarefas: readonly T[], ref: string, busca: BuscaDeTarefa = {}): T | ErroOp {
+  const { prefixo = null, codigosAntigos, colunas, agentes } = busca;
   const r = chaveDeBusca(ref);
   const porId = tarefas.filter((t) => t.id.toLowerCase() === r);
   if (porId.length === 1) return porId[0]!;
+  // O id do Linear antes do código do quadro (revisão do PR #623): o quadro de prefixo NOD não tapa o NOD-12 do Linear.
   const porLinear = tarefas.filter((t) => t.linearId !== null && chaveDeBusca(t.linearId) === r);
   if (porLinear.length === 1) return porLinear[0]!;
+  const codigo = prefixo !== null ? lerCodigo(ref) : null;
+  if (codigo && codigo.prefixo === prefixo) {
+    const porCodigo = tarefas.find((t) => t.numero === codigo.numero);
+    if (porCodigo) return porCodigo;
+  }
+  const antigo = codigo && codigo.prefixo !== prefixo ? codigosAntigos?.get(formatarCodigo(codigo.prefixo, codigo.numero)) : undefined;
+  if (antigo !== undefined) {
+    const porAntigo = tarefas.find((t) => t.id === antigo);
+    if (porAntigo) return porAntigo;
+  }
   const porTitulo = tarefas.filter((t) => chaveDeBusca(t.titulo) === r);
   if (porTitulo.length === 1) return porTitulo[0]!;
   if (porTitulo.length > 1) {
-    const lista = porTitulo.slice(0, MAX_CANDIDATAS).map((t) => descreverCandidata(t, ctx?.colunas ?? COLUNAS_PADRAO, ctx?.agentes ?? [])).join(" / ");
+    const lista = porTitulo.slice(0, MAX_CANDIDATAS).map((t) => descreverCandidata(t, colunas ?? COLUNAS_PADRAO, agentes ?? [], prefixo)).join(" / ");
     return { erro: `há mais de uma tarefa com esse título: ${lista}. Pergunte à pessoa qual delas e use o id` };
   }
   return { erro: `tarefa "${ref}" não está no quadro` };
@@ -582,7 +616,7 @@ export const recusaDoLimite = (o_que: string) => `sozinho (tarefa, rotina, coleg
  * quadro (null = ainda não existe), as tarefas dele, os bots da pessoa e quem é o autor (null = a pessoa, na tela).
  */
 export function planejarLote(p: {
-  quadro: { meta: string | null; prazo: string | null; colunas?: readonly ColunaQuadro[] | null } | null;
+  quadro: { meta: string | null; prazo: string | null; colunas?: readonly ColunaQuadro[] | null; prefixo?: string | null } | null;
   quadroId: string;
   tarefas: readonly TarefaQuadro[];
   agentes: readonly AgenteDoQuadro[];
@@ -597,6 +631,8 @@ export function planejarLote(p: {
   origemConfiavel?: boolean;
   /** O autor fala num turno da pessoa (conversa/ligação): pode começar a própria tarefa (revisão rodada 3). */
   autorNaConversa?: boolean;
+  /** Revisão 5 do PR #623: os códigos de outro prefixo que são de tarefas deste quadro (código → id), para o resolverTarefa. */
+  codigosAntigos?: ReadonlyMap<string, string>;
   /** A tarefa que o turno do autor executa: o `terminei` sem tarefa vale para ela (ADR-142). */
   tarefaDoTurno?: string | null;
   /**
@@ -629,6 +665,10 @@ export function planejarLote(p: {
   const pedidoDoRecomeco = new Map<string, string>();
   // As tarefas que mudaram de coluna porque a coluna saiu (remover/substituir): não acionam ninguém (decisão do Gil).
   const semAcionar = new Set<string>();
+  // Revisão 3 do PR #623: as movidas pela coluna que saiu, à parte de semAcionar (que perde a tarefa quando o passo troca só
+  // o responsável). Só sai daqui quem o autor mandou de coluna depois: aí o status é dele.
+  const pelaColunaQueSaiu = new Set<string>();
+  const criadas: string[] = [];
   // Passagem por coluna (ADR-142): as que entraram numa coluna com responsável e ficaram com ele; `terminei` destrava o
   // próprio autor (a etapa dele acabou e a seguinte é dele também).
   const passagens = new Set<string>();
@@ -636,6 +676,8 @@ export function planejarLote(p: {
   // Revisão 2 do PR #622: a mesma trava do `terminei` no mudar_tarefa com status. O bot que não cuida da tarefa, num turno
   // com conteúdo de fora, a muda de coluna (a passagem troca o responsável), mas não aciona ninguém por isso.
   const passagemSegurada = new Set<string>();
+  // NOD-416: o responsável que o autor deixou antes da passagem da coluna (a troca pela passagem é da regra, no histórico).
+  const agenteDoAutor = new Map<string, string | null>();
   let novas = 0;
   const tocar = (id: string) => { if (!tocadas.includes(id)) tocadas.push(id); };
   const ordemMax = () => tarefas.reduce((m, t) => Math.max(m, t.ordem), 0);
@@ -667,7 +709,7 @@ export function planejarLote(p: {
   const foraDeQuemNaoCuida = (t: TarefaPlanejada) => p.autorAgenteId !== null && p.origemConfiavel === false && (t.nova || !eraDoAutor(t.id));
   const passar = (t: TarefaPlanejada, de: IdColuna | null, agenteDoPasso: string | null | undefined): string | null => {
     // Revisão 4 do PR #622: a troca explícita de responsável é como a passagem: a mudança vale, sem acionar ninguém.
-    if (agenteDoPasso !== undefined) { if (agenteDoPasso !== null && foraDeQuemNaoCuida(t)) passagemSegurada.add(t.id); return null; }
+    if (agenteDoPasso !== undefined) { agenteDoAutor.delete(t.id); if (agenteDoPasso !== null && foraDeQuemNaoCuida(t)) passagemSegurada.add(t.id); return null; }
     if (t.status === de) return null;
     const dono = responsavelDe(colunas, t.status);
     if (!dono || !p.agentes.some((a) => a.id === dono && !a.nod)) return null;
@@ -675,15 +717,17 @@ export function planejarLote(p: {
     if (foraDeQuemNaoCuida(t) && dono === p.autorAgenteId) return ERRO_SE_TOMA;
     // Revisão 3: o responsável do INÍCIO do lote (se tomar a tarefa no mesmo lote não destrava).
     if (foraDeQuemNaoCuida(t)) passagemSegurada.add(t.id);
+    if (!agenteDoAutor.has(t.id)) agenteDoAutor.set(t.id, t.agenteId);
     t.agenteId = dono;
     passagens.add(t.id);
     return null;
   };
-  const nova = (c: { titulo: string; descricao?: string; status?: IdColuna; agenteId: string | null; linearId?: string | null; linearUrl?: string | null }): TarefaPlanejada | ErroOp => {
+  // `padrao`: onde a nova cai sem status (sem passagem, como sem status); sem ele, a de espera (o importar_linear).
+  const nova = (c: { titulo: string; descricao?: string; status?: IdColuna; padrao?: IdColuna; agenteId: string | null; linearId?: string | null; linearUrl?: string | null }): TarefaPlanejada | ErroOp => {
     const t: TarefaPlanejada = {
-      id: `novo:${novas++}`, quadroId: p.quadroId, titulo: c.titulo, descricao: c.descricao ?? "", status: c.status ?? colunaDeEspera(colunas), voltarPara: null, agenteId: c.agenteId,
+      id: `novo:${novas++}`, quadroId: p.quadroId, titulo: c.titulo, descricao: c.descricao ?? "", status: c.status ?? c.padrao ?? colunaDeEspera(colunas), voltarPara: null, agenteId: c.agenteId,
       ordem: ordemMax() + 1, linearId: c.linearId ?? null, linearUrl: c.linearUrl ?? null, prUrl: null, pergunta: null, resposta: null, deFora: p.origemConfiavel === false,
-      turnoId: null, criadoEm: p.agora, mudadoEm: p.agora, terminadaEm: null, nova: true,
+      turnoId: null, criadoEm: p.agora, mudadoEm: p.agora, terminadaEm: null, numero: null, nova: true,
     };
     t.terminadaEm = terminadaDepois(t, p.agora, colunas);
     tarefas.push(t);
@@ -698,7 +742,7 @@ export function planejarLote(p: {
   const mudarColunas = (novasColunas: ColunaQuadro[], mover: ReadonlyMap<string, IdColuna>) => {
     for (const t of tarefas) {
       const para = mover.get(t.id);
-      if (para !== undefined && para !== t.status) { t.status = para; semAcionar.add(t.id); tocar(t.id); }
+      if (para !== undefined && para !== t.status) { t.status = para; semAcionar.add(t.id); pelaColunaQueSaiu.add(t.id); tocar(t.id); }
       if (t.voltarPara !== null && !novasColunas.some((c) => c.id === t.voltarPara)) { t.voltarPara = null; tocar(t.id); }
     }
     colunas = novasColunas;
@@ -706,7 +750,7 @@ export function planejarLote(p: {
   };
 
   // Mudar uma tarefa: o ÚNICO caminho de status e responsável, da pessoa, do bot, da passagem e do `terminei` (ADR-142).
-  const ctxDeBusca = () => ({ colunas, agentes: p.agentes });
+  const busca = (): BuscaDeTarefa => ({ prefixo: p.quadro?.prefixo ?? null, codigosAntigos: p.codigosAntigos, colunas, agentes: p.agentes });
   // O limite normal ao criar (NOD-430): só no Backlog (sem status = Backlog), sem responsável ou com o próprio bot.
   const limiteNaCriacao = (agente: string | null | undefined, status: IdColuna | undefined): { status: IdColuna } | ErroOp => {
     if (agente != null && agente !== p.autorAgenteId) return { erro: recusaDoLimite("atribuir tarefa") };
@@ -731,7 +775,7 @@ export function planejarLote(p: {
   // seguinte que a pessoa configurou, ADR-142 §3) passa adiante; o status direto (ou o PR que leva à Revisão) é recusado.
   const PASSAR_A_OUTRO = recusaDoLimite("mover a tarefa para uma coluna que a passa a outro agente (isso é atribuir; para fechar a sua etapa, use terminei)");
   const mudar = (op: Extract<OpQuadro, { tipo: "mudar_tarefa" }>, viaTerminei = false): string | null => {
-    const t = resolverTarefa(tarefas, op.tarefa, ctxDeBusca());
+    const t = resolverTarefa(tarefas, op.tarefa, busca());
     if (falhou(t)) return t.erro;
     if (sozinho && op.excluir) return recusaDoLimite("excluir tarefa (para fechar uma duplicada, mude o status para cancelado)");
     if (op.excluir) {
@@ -773,6 +817,7 @@ export function planejarLote(p: {
     if (t.status === "voce" && !t.pergunta) return "status voce precisa da pergunta à pessoa";
     // Só volta a acionar quem o passo mandou de coluna ou de mão; editar o título não (revisão 3 do PR #615).
     if (status !== undefined || agenteId !== undefined) semAcionar.delete(t.id);
+    if (status !== undefined || t.status !== de) pelaColunaQueSaiu.delete(t.id);
     // "Não iniciar ainda" (o arrasto na tela): a tarefa muda de coluna e de mão, sem acionar ninguém.
     if (op.sem_iniciar) semAcionar.add(t.id);
     tocar(t.id);
@@ -781,7 +826,7 @@ export function planejarLote(p: {
 
   for (const [indice, op] of p.ops.entries()) {
     const erro = (e: string) => ({ erro: e, indice });
-    if (op.tipo === "desfazer" || op.tipo === "remover_quadro" || op.tipo === "comentar") return erro(`${op.tipo} vai sozinho na chamada`);
+    if (op.tipo === "desfazer" || op.tipo === "remover_quadro" || op.tipo === "comentar" || op.tipo === "mover_quadro") return erro(`${op.tipo} vai sozinho na chamada`);
     // A meta entra em todo turno de tarefa do quadro: só um turno confiável a escreve (revisão rodada 3, ADR-062).
     const escreveMeta = op.tipo === "criar_quadro" || (op.tipo === "editar_quadro" && op.meta !== undefined);
     if (escreveMeta && p.origemConfiavel === false) return erro("a meta só muda num turno limpo, em que a pessoa falou com você e nada de fora entrou: peça a ela");
@@ -812,8 +857,15 @@ export function planejarLote(p: {
           if (falhou(r)) return erro(r.erro);
           status = r.status;
         }
-        const criada = nova({ titulo: op.titulo, ...(op.descricao !== undefined ? { descricao: op.descricao } : {}), ...(status !== undefined ? { status } : {}), agenteId: agenteId ?? null });
+        // NOD-416: sem coluna, a tarefa nasce no Backlog e não aciona ninguém (antes caía em A fazer e começava sozinha).
+        // Revisão 2 do PR #623: o quadro sem espera que não aciona (Backlog removido, só andamento) cria sem iniciar.
+        // Definido em 2026-11-02: criar sem iniciar ganha de recusar; começar segue sendo pedir (`status afazer`).
+        const criada = nova({ titulo: op.titulo, ...(op.descricao !== undefined ? { descricao: op.descricao } : {}), ...(status !== undefined ? { status } : { padrao: colunaDeEntrada(colunas) }), agenteId: agenteId ?? null });
         if (falhou(criada)) return erro(criada.erro);
+        // Revisão 7 do PR #623: sem status nunca aciona, pela mesma regra do lote (acionaNaColuna, deveComecar), sem um
+        // predicado à parte: a coluna de entrada já evita as que acionam, e a marca cobre o quadro em que não há outra.
+        if (status === undefined) semAcionar.add(criada.id);
+        criadas.push(criada.id);
         break;
       }
       case "importar_linear":
@@ -846,6 +898,7 @@ export function planejarLote(p: {
             if (p.origemConfiavel === false) ja.deFora = true;
             // Só volta a acionar quem o passo mandou de coluna ou de mão; atualizar o título não (revisão 3 do PR #615).
             if (status !== undefined || agenteId !== undefined) semAcionar.delete(ja.id);
+            if (status !== undefined) pelaColunaQueSaiu.delete(ja.id);
             tocar(ja.id);
           } else {
             const criada = nova({ titulo: item.titulo, ...(item.descricao !== undefined ? { descricao: item.descricao } : {}), ...(status !== undefined ? { status } : {}), agenteId: agenteId ?? null, linearId: item.identificador, linearUrl: item.url ?? null });
@@ -862,7 +915,7 @@ export function planejarLote(p: {
         // A etapa acabou: a tarefa vai para a PRÓXIMA coluna pelo mesmo mudar_tarefa da pessoa e do bot (ADR-142).
         const ref = op.tarefa ?? p.tarefaDoTurno ?? null;
         if (!ref) return erro("terminei sem tarefa: diga qual (tarefa) ou chame no turno da tarefa");
-        const t = resolverTarefa(tarefas, ref, ctxDeBusca());
+        const t = resolverTarefa(tarefas, ref, busca());
         if (falhou(t)) return erro(t.erro);
         const limitado = limiteNaTarefa(t, undefined);
         if (limitado) return erro(limitado);
@@ -894,7 +947,7 @@ export function planejarLote(p: {
         break;
       }
       case "responder": {
-        const t = resolverTarefa(tarefas, op.tarefa, ctxDeBusca());
+        const t = resolverTarefa(tarefas, op.tarefa, busca());
         if (falhou(t)) return erro(t.erro);
         // Só a tarefa que espera a pessoa recebe resposta: a segunda resposta (outro aparelho, o mesmo lote) não reabre
         // o turno de novo (revisão do PR #612).
@@ -904,6 +957,7 @@ export function planejarLote(p: {
         t.voltarPara = null;
         respondidas.push({ id: t.id, resposta: op.resposta });
         semAcionar.delete(t.id);
+        pelaColunaQueSaiu.delete(t.id);
         tocar(t.id);
         break;
       }
@@ -959,6 +1013,8 @@ export function planejarLote(p: {
   const perdida = tarefas.find((t) => !colunas.some((c) => c.id === t.status));
   if (perdida) return { erro: `tarefa ${perdida.nova ? "nova" : perdida.id} ficaria fora das colunas: diga o destino`, indice: -1 };
 
+  const pedidos = new Map(tarefas.filter((t) => tocadas.includes(t.id)).map((t) => [t.id, { status: t.status, agenteId: agenteDoAutor.has(t.id) ? agenteDoAutor.get(t.id)! : t.agenteId }]));
+  const porRegra = new Set(pelaColunaQueSaiu);
   // Quem não se reinicia: o bot no turno da própria tarefa. Na conversa com a pessoa ele começa a tarefa dele.
   const autorQueTrava = p.autorNaConversa ? null : p.autorAgenteId;
   const espera = colunaDeEspera(colunas);
@@ -996,7 +1052,7 @@ export function planejarLote(p: {
   // terminada_em (NOD-415, revisão 3): pelo grupo da coluna em que a tarefa ficou, com as colunas finais do lote.
   for (const t of tarefas) if (tocadas.includes(t.id)) { t.mudadoEm = p.agora; t.terminadaEm = terminadaDepois(t, p.agora, colunas); }
   const colunasFinais = mudouColunas ? (saoPadrao(colunas) ? null : colunas) : (p.quadro?.colunas ? colunas : null);
-  return { quadro: { ...quadro, colunas: colunasFinais }, mudouColunas, frasesDasColunas, ajustada, tarefas, tocadas, apagadas, respondidas: respondidasVivas, comecam, seguradas };
+  return { quadro: { ...quadro, colunas: colunasFinais }, mudouColunas, frasesDasColunas, ajustada, tarefas, tocadas, apagadas, respondidas: respondidasVivas, comecam, seguradas, pedidos, porRegra, criadas };
 }
 
 /** A tarefa anda (o turno dela vale): no andamento, fora de "Precisa de você" e de Bloqueado. */

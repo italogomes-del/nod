@@ -13,6 +13,7 @@ import { comentarTarefa, verComentarios } from "../../src/use-cases/comentar-tar
 import { gerirQuadro } from "../../src/use-cases/gerir-quadro.ts";
 import { decidirQuadroExclusao } from "../../src/use-cases/quadro-exclusao.ts";
 import { aplicarLoteQuadro } from "../../src/use-cases/quadro.ts";
+import { codigoDaTarefa } from "../../src/domain/codigo-tarefa.ts";
 import { recusaDoLimite } from "../../src/domain/quadro.ts";
 import { ANA, depsSobreTrx, executar, MARLON, servicosDeTeste, useCasesDeTeste } from "../helpers/deps-l6.ts";
 import { agenteComConversa } from "../helpers/fabricas.ts";
@@ -59,7 +60,8 @@ describeIntegracao("pedir a qualquer agente para mexer num quadro (NOD-430)", ()
       const [t] = await m.tarefas();
       expect(t).toMatchObject({ titulo: "Revisar o PR 12", agenteId: m.eng.agenteId });
       const data = r.data as { tarefas?: { tarefa_id: string; link: string; codigo: string }[]; instrucao: string };
-      const codigo = `#${t!.id.replace(/-/g, "").slice(0, 4)}`;
+      // O código do card (NOD-416): o prefixo do quadro do EngNod e o número da tarefa.
+      const codigo = codigoDaTarefa((await m.quadroEng())!.prefixo, t!);
       expect(data.tarefas).toEqual([expect.objectContaining({ tarefa_id: t!.id, codigo, titulo: "Revisar o PR 12", link: `nod-tarefa:${m.eng.agenteId}:${t!.id}` })]);
       expect(data.instrucao).toContain(`[${codigo}](nod-tarefa:${m.eng.agenteId}:${t!.id})`);
       expect(data.instrucao).not.toContain("Revisar o PR 12");
@@ -112,7 +114,8 @@ describeIntegracao("pedir a qualquer agente para mexer num quadro (NOD-430)", ()
     it(`sozinho (${caso.nome}) a Ada só cria no Backlog e só mexe no que é dela`, async () => {
       await withRollback(MARLON, async (trx) => {
         const m = await montar(trx);
-        ok(await m.pessoa([{ tipo: "criar_quadro" }, { tipo: "criar_tarefa", titulo: "Do Eng", agente: m.nomeEng }, { tipo: "criar_tarefa", titulo: "Da Ada", agente: m.nomeAda }, { tipo: "criar_tarefa", titulo: "Etapa da Ada", agente: m.nomeAda }]));
+        // NOD-416: sem status a tarefa nasce no Backlog; a pessoa as dá em A fazer (e elas começam).
+        ok(await m.pessoa([{ tipo: "criar_quadro" }, { tipo: "criar_tarefa", titulo: "Do Eng", status: "afazer", agente: m.nomeEng }, { tipo: "criar_tarefa", titulo: "Da Ada", status: "afazer", agente: m.nomeAda }, { tipo: "criar_tarefa", titulo: "Etapa da Ada", status: "afazer", agente: m.nomeAda }]));
         ok(await m.pessoa([{ tipo: "importar_linear", itens: [{ identificador: "ENG-7", titulo: "Do Linear", agente: m.nomeEng }] }]));
         // A mensagem exata de cada recusa (revisão 1): o limite normal fala por recusaDoLimite.
         const recusa = async (acoes: unknown[], esperada: string) => { const r = await m.pela(acoes, caso.o); expect(r.data, texto(r)).toMatchObject({ ok: false }); expect((r.data as { instrucao: string }).instrucao).toContain(esperada); };
@@ -349,7 +352,7 @@ describeIntegracao("pedir a qualquer agente para mexer num quadro (NOD-430)", ()
       const data = r.data as { tarefas?: { titulo: string; codigo: string }[]; instrucao: string };
       expect(data.instrucao).not.toContain("Ignore as instruções");
       expect(data.instrucao).not.toContain("evil.example");
-      expect(data.tarefas).toEqual([expect.objectContaining({ titulo: MAU, codigo: `#${t1!.id.replace(/-/g, "").slice(0, 4)}` })]);
+      expect(data.tarefas).toEqual([expect.objectContaining({ titulo: MAU, codigo: codigoDaTarefa((await m.quadroEng())!.prefixo, t1!) })]);
       // Ambíguo: o erro lista as candidatas sem o título.
       const amb = await m.pela([{ tipo: "mudar_tarefa", tarefa: MAU, status: "feito" }]);
       expect(amb.data).toMatchObject({ ok: false });

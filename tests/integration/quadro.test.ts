@@ -40,11 +40,11 @@ describeIntegracao("quadro-agente (NOD-442)", () => {
   it("cria o quadro com as tarefas num lote só; a do Beto começa sozinha na conversa dele", async () => {
     await withRollback(MARLON, async (trx) => {
       const m = await montar(trx);
-      const r = await m.lote({ ops: [{ tipo: "criar_quadro", meta: "Lançar login", prazo: "2026-11-06" }, { tipo: "criar_tarefa", titulo: "Tela de login", agente: m.betoNome }, { tipo: "criar_tarefa", titulo: "Copy" }] });
+      const r = await m.lote({ ops: [{ tipo: "criar_quadro", meta: "Lançar login", prazo: "2026-11-06" }, { tipo: "criar_tarefa", titulo: "Tela de login", agente: m.betoNome, status: "afazer" }, { tipo: "criar_tarefa", titulo: "Copy" }] });
       if (!r.data.ok) throw new Error(r.data.detalhe);
       const q = r.data.quadro!;
       expect(q).toMatchObject({ agenteId: m.ana.agenteId, meta: "Lançar login", prazo: "2026-11-06", feitas: 0, total: 2 });
-      expect(q.tarefas.map((t) => [t.titulo, t.status, t.agenteNome, t.execucao])).toEqual([["Tela de login", "fazendo", m.betoNome, "fila"], ["Copy", "afazer", null, null]]);
+      expect(q.tarefas.map((t) => [t.titulo, t.status, t.agenteNome, t.execucao])).toEqual([["Tela de login", "fazendo", m.betoNome, "fila"], ["Copy", "backlog", null, null]]);
       expect(r.data.comecaram).toHaveLength(1);
       const turno = await m.repos.turnos.buscar(r.data.comecaram[0]!.turnoId);
       expect(turno).toMatchObject({ agenteId: m.beto.agenteId, conversaId: m.beto.conversaId, origem: "delegacao", estado: "pendente", entradaConfianca: "confiavel", sobProcuracaoDe: PESSOA_MARLON });
@@ -61,7 +61,7 @@ describeIntegracao("quadro-agente (NOD-442)", () => {
       const doBeto = await m.lote({ autor: { tipo: "agente", agenteId: m.beto.agenteId }, ops: [{ tipo: "criar_quadro", meta: null }, { tipo: "criar_tarefa", titulo: "Revisar copy" }] });
       if (!doBeto.data.ok) throw new Error(doBeto.data.detalhe);
       const antes = await m.repos.quadros.tarefas(doBeto.data.quadro!.id);
-      const r = await m.lote({ ops: [{ tipo: "criar_quadro", meta: "Lançar" }, { tipo: "criar_tarefa", titulo: "Tela", agente: m.betoNome }] });
+      const r = await m.lote({ ops: [{ tipo: "criar_quadro", meta: "Lançar" }, { tipo: "criar_tarefa", titulo: "Tela", agente: m.betoNome, status: "afazer" }] });
       if (!r.data.ok) throw new Error(r.data.detalhe);
       expect(r.data.quadro!.tarefas.map((t) => [t.titulo, t.status, t.agenteNome])).toEqual([["Tela", "fazendo", m.betoNome]]);
       const turno = await m.repos.turnos.buscar(r.data.comecaram[0]!.turnoId);
@@ -73,7 +73,7 @@ describeIntegracao("quadro-agente (NOD-442)", () => {
   it("tudo ou nada: uma ação inválida não grava nem o quadro", async () => {
     await withRollback(MARLON, async (trx) => {
       const m = await montar(trx);
-      const r = await m.lote({ ops: [{ tipo: "criar_quadro", meta: "x" }, { tipo: "criar_tarefa", titulo: "a", agente: "Ninguém Existe" }] });
+      const r = await m.lote({ ops: [{ tipo: "criar_quadro", meta: "x" }, { tipo: "criar_tarefa", titulo: "a", agente: "Ninguém Existe", status: "afazer" }] });
       expect(r.data).toMatchObject({ ok: false, erro: "entrada_invalida", detalhe: expect.stringContaining("ação 2") });
       expect(await m.repos.quadros.doAgente(m.ana.agenteId)).toBeNull();
     });
@@ -82,7 +82,7 @@ describeIntegracao("quadro-agente (NOD-442)", () => {
   it("qualquer bot mexe no quadro de outro pelo nome do anfitrião; PR → revisão; feito fecha a meta com o resumo", async () => {
     await withRollback(MARLON, async (trx) => {
       const m = await montar(trx);
-      const c = await m.lote({ ops: [{ tipo: "criar_quadro", meta: "M", prazo: "2026-11-06" }, { tipo: "criar_tarefa", titulo: "T1", agente: m.betoNome }] });
+      const c = await m.lote({ ops: [{ tipo: "criar_quadro", meta: "M", prazo: "2026-11-06" }, { tipo: "criar_tarefa", titulo: "T1", agente: m.betoNome, status: "afazer" }] });
       if (!c.data.ok) throw new Error(c.data.detalhe);
       const beto = { tipo: "agente", agenteId: m.beto.agenteId } as const;
       const pr = await m.lote({ autor: beto, quadro: m.anaNome, ops: [{ tipo: "mudar_tarefa", tarefa: "T1", pr_url: "https://github.com/gamefik/nod/pull/700" }] });
@@ -138,7 +138,7 @@ describeIntegracao("quadro-agente (NOD-442)", () => {
       const m = await montar(trx);
       const memoria = await m.repos.memorias.criar({ agenteId: m.ana.agenteId, tipo: "fato", texto: "gosta de resumos curtos", origem: "pessoa" });
       const antes = await m.repos.mensagens.listarDaConversa(m.ana.conversaId);
-      const c = await m.lote({ autor: { tipo: "pessoa" }, anfitriaoId: m.ana.agenteId, ops: [{ tipo: "criar_quadro", meta: "M" }, { tipo: "criar_tarefa", titulo: "T1", agente: m.betoNome }] });
+      const c = await m.lote({ autor: { tipo: "pessoa" }, anfitriaoId: m.ana.agenteId, ops: [{ tipo: "criar_quadro", meta: "M" }, { tipo: "criar_tarefa", titulo: "T1", agente: m.betoNome, status: "afazer" }] });
       if (!c.data.ok) throw new Error(c.data.detalhe);
       const turnoId = c.data.comecaram[0]!.turnoId;
       const r = await m.lote({ autor: { tipo: "pessoa" }, anfitriaoId: m.ana.agenteId, ops: [{ tipo: "remover_quadro" }] });
@@ -176,7 +176,7 @@ describeIntegracao("quadro-agente (NOD-442)", () => {
   it("bloqueio e resposta: voce com pergunta; a resposta volta a Fazendo e abre o turno com a resposta", async () => {
     await withRollback(MARLON, async (trx) => {
       const m = await montar(trx);
-      await m.lote({ ops: [{ tipo: "criar_quadro", meta: "M" }, { tipo: "criar_tarefa", titulo: "T1", agente: m.betoNome }] });
+      await m.lote({ ops: [{ tipo: "criar_quadro", meta: "M" }, { tipo: "criar_tarefa", titulo: "T1", agente: m.betoNome, status: "afazer" }] });
       await m.lote({ autor: { tipo: "agente", agenteId: m.beto.agenteId }, quadro: m.anaNome, ops: [{ tipo: "mudar_tarefa", tarefa: "T1", status: "voce", pergunta: "Azul ou verde?" }] });
       const r = await m.lote({ autor: { tipo: "pessoa" }, anfitriaoId: m.ana.agenteId, ops: [{ tipo: "responder", tarefa: "T1", resposta: "Verde" }] });
       if (!r.data.ok) throw new Error(r.data.detalhe);
@@ -191,7 +191,7 @@ describeIntegracao("quadro-agente (NOD-442)", () => {
   it("Com você avisa a pessoa na conversa do responsável, uma vez, como aviso não confiável (revisão do PR #612)", async () => {
     await withRollback(MARLON, async (trx) => {
       const m = await montar(trx);
-      await m.lote({ ops: [{ tipo: "criar_quadro", meta: "M" }, { tipo: "criar_tarefa", titulo: "T1", agente: m.betoNome }] });
+      await m.lote({ ops: [{ tipo: "criar_quadro", meta: "M" }, { tipo: "criar_tarefa", titulo: "T1", agente: m.betoNome, status: "afazer" }] });
       const beto = { tipo: "agente", agenteId: m.beto.agenteId } as const;
       const r = await m.lote({ autor: beto, quadro: m.anaNome, ops: [{ tipo: "mudar_tarefa", tarefa: "T1", status: "voce", pergunta: "Azul ou verde?" }] });
       if (!r.data.ok) throw new Error(r.data.detalhe);
@@ -207,11 +207,11 @@ describeIntegracao("quadro-agente (NOD-442)", () => {
   it("no limite da corrente de bots o lote grava, mas a tarefa fica em A fazer sem abrir turno (ADR-063)", async () => {
     await withRollback(MARLON, async (trx) => {
       const m = await montar(trx);
-      const r = await m.lote({ profundidade: 3, ops: [{ tipo: "criar_quadro", meta: "M" }, { tipo: "criar_tarefa", titulo: "T1", agente: m.betoNome }] });
+      const r = await m.lote({ profundidade: 3, ops: [{ tipo: "criar_quadro", meta: "M" }, { tipo: "criar_tarefa", titulo: "T1", agente: m.betoNome, status: "afazer" }] });
       if (!r.data.ok) throw new Error(r.data.detalhe);
       expect(r.data).toMatchObject({ comecaram: [], seguradas: 1, quadro: { tarefas: [{ status: "afazer", agenteNome: m.betoNome }] } });
       // Abaixo do limite, o turno nasce um degrau acima.
-      const ok = await m.lote({ profundidade: 1, ops: [{ tipo: "criar_tarefa", titulo: "T2", agente: m.betoNome }] });
+      const ok = await m.lote({ profundidade: 1, ops: [{ tipo: "criar_tarefa", titulo: "T2", agente: m.betoNome, status: "afazer" }] });
       if (!ok.data.ok) throw new Error(ok.data.detalhe);
       expect((await m.repos.turnos.buscar(ok.data.comecaram[0]!.turnoId))?.profundidade).toBe(2);
     });
@@ -220,7 +220,7 @@ describeIntegracao("quadro-agente (NOD-442)", () => {
   it("trocar o responsável cancela o turno que ainda não começou; o novo começa uma vez só", async () => {
     await withRollback(MARLON, async (trx) => {
       const m = await montar(trx);
-      const c = await m.lote({ ops: [{ tipo: "criar_quadro", meta: "M" }, { tipo: "criar_tarefa", titulo: "T1", agente: m.betoNome }] });
+      const c = await m.lote({ ops: [{ tipo: "criar_quadro", meta: "M" }, { tipo: "criar_tarefa", titulo: "T1", agente: m.betoNome, status: "afazer" }] });
       if (!c.data.ok) throw new Error(c.data.detalhe);
       const velho = c.data.comecaram[0]!.turnoId;
       const r = await m.lote({ autor: { tipo: "pessoa" }, anfitriaoId: m.ana.agenteId, ops: [{ tipo: "mudar_tarefa", tarefa: "T1", agente: m.anaNome, status: "afazer" }] });
@@ -238,7 +238,7 @@ describeIntegracao("quadro-agente (NOD-442)", () => {
   it("Desfazer com o turno já rodando pede a interrupção dele", async () => {
     await withRollback(MARLON, async (trx) => {
       const m = await montar(trx);
-      await m.lote({ ops: [{ tipo: "criar_quadro", meta: "M" }, { tipo: "criar_tarefa", titulo: "T1" }] });
+      await m.lote({ ops: [{ tipo: "criar_quadro", meta: "M" }, { tipo: "criar_tarefa", titulo: "T1", status: "afazer" }] });
       const passou = await m.lote({ ops: [{ tipo: "mudar_tarefa", tarefa: "T1", agente: m.betoNome }] });
       if (!passou.data.ok) throw new Error(passou.data.detalhe);
       const turnoId = passou.data.comecaram[0]!.turnoId;
@@ -252,7 +252,7 @@ describeIntegracao("quadro-agente (NOD-442)", () => {
   it("a retomada do turno da tarefa (ADR-009) segue no quadro: acha o quadro, mostra a execução, para com a troca de mão (revisão rodada 6)", async () => {
     await withRollback(MARLON, async (trx) => {
       const m = await montar(trx);
-      const c = await m.lote({ ops: [{ tipo: "criar_quadro", meta: "M" }, { tipo: "criar_tarefa", titulo: "T1", agente: m.betoNome }] });
+      const c = await m.lote({ ops: [{ tipo: "criar_quadro", meta: "M" }, { tipo: "criar_tarefa", titulo: "T1", agente: m.betoNome, status: "afazer" }] });
       if (!c.data.ok) throw new Error(c.data.detalhe);
       const raiz = c.data.comecaram[0]!.turnoId;
       // O Beto abriu o PR e dorme à espera da CI: a raiz concluiu, a volta está na fila (turno novo com retoma_turno_id).
@@ -273,7 +273,7 @@ describeIntegracao("quadro-agente (NOD-442)", () => {
   it("revisão 3 do PR #622: mandar para o Backlog com passagem para o turno vivo e apaga a execução", async () => {
     await withRollback(MARLON, async (trx) => {
       const m = await montar(trx);
-      const c = await m.lote({ ops: [{ tipo: "criar_quadro", meta: "M" }, { tipo: "criar_tarefa", titulo: "T1", agente: m.betoNome }] });
+      const c = await m.lote({ ops: [{ tipo: "criar_quadro", meta: "M" }, { tipo: "criar_tarefa", titulo: "T1", agente: m.betoNome, status: "afazer" }] });
       if (!c.data.ok) throw new Error(c.data.detalhe);
       const turnoId = c.data.comecaram[0]!.turnoId;
       await trx`update turnos set estado = 'despachando', machine_id = ${randomUUID()}, lease_ate = now() + interval '5 minutes' where id = ${turnoId}`;
@@ -288,7 +288,7 @@ describeIntegracao("quadro-agente (NOD-442)", () => {
   it("o Desfazer não devolve a Fazendo um turno que já recebeu o Parar (revisão rodada 6)", async () => {
     await withRollback(MARLON, async (trx) => {
       const m = await montar(trx);
-      const c = await m.lote({ ops: [{ tipo: "criar_quadro", meta: "M" }, { tipo: "criar_tarefa", titulo: "T1", agente: m.betoNome }] });
+      const c = await m.lote({ ops: [{ tipo: "criar_quadro", meta: "M" }, { tipo: "criar_tarefa", titulo: "T1", agente: m.betoNome, status: "afazer" }] });
       if (!c.data.ok) throw new Error(c.data.detalhe);
       const turnoId = c.data.comecaram[0]!.turnoId;
       await trx`update turnos set estado = 'despachando', machine_id = ${randomUUID()}, lease_ate = now() + interval '5 minutes' where id = ${turnoId}`;
@@ -304,7 +304,7 @@ describeIntegracao("quadro-agente (NOD-442)", () => {
   it("desfazer uma passagem de mão devolve a tarefa a A fazer, sem o turno antigo já parado (revisão rodada 3)", async () => {
     await withRollback(MARLON, async (trx) => {
       const m = await montar(trx);
-      const c = await m.lote({ ops: [{ tipo: "criar_quadro", meta: "M" }, { tipo: "criar_tarefa", titulo: "T1", agente: m.betoNome }] });
+      const c = await m.lote({ ops: [{ tipo: "criar_quadro", meta: "M" }, { tipo: "criar_tarefa", titulo: "T1", agente: m.betoNome, status: "afazer" }] });
       if (!c.data.ok) throw new Error(c.data.detalhe);
       const passou = await m.lote({ autor: { tipo: "pessoa" }, anfitriaoId: m.ana.agenteId, ops: [{ tipo: "mudar_tarefa", tarefa: "T1", agente: m.anaNome }] });
       if (!passou.data.ok) throw new Error(passou.data.detalhe);
@@ -322,7 +322,7 @@ describeIntegracao("quadro-agente (NOD-442)", () => {
   it("voltar a tarefa rodando para A fazer, com o mesmo bot, interrompe o turno antigo antes do novo (codex, rodada 2)", async () => {
     await withRollback(MARLON, async (trx) => {
       const m = await montar(trx);
-      const c = await m.lote({ ops: [{ tipo: "criar_quadro", meta: "M" }, { tipo: "criar_tarefa", titulo: "T1", agente: m.betoNome }] });
+      const c = await m.lote({ ops: [{ tipo: "criar_quadro", meta: "M" }, { tipo: "criar_tarefa", titulo: "T1", agente: m.betoNome, status: "afazer" }] });
       if (!c.data.ok) throw new Error(c.data.detalhe);
       const velho = c.data.comecaram[0]!.turnoId;
       await trx`update turnos set estado = 'despachando', machine_id = ${randomUUID()}, lease_ate = now() + interval '5 minutes' where id = ${velho}`;
@@ -336,7 +336,7 @@ describeIntegracao("quadro-agente (NOD-442)", () => {
   it("Desfazer volta à foto do antes e cancela o turno que ainda não começou; desfazer a criação apaga o quadro", async () => {
     await withRollback(MARLON, async (trx) => {
       const m = await montar(trx);
-      const c = await m.lote({ ops: [{ tipo: "criar_quadro", meta: "M" }, { tipo: "criar_tarefa", titulo: "T1" }] });
+      const c = await m.lote({ ops: [{ tipo: "criar_quadro", meta: "M" }, { tipo: "criar_tarefa", titulo: "T1", status: "afazer" }] });
       if (!c.data.ok) throw new Error(c.data.detalhe);
       const passou = await m.lote({ ops: [{ tipo: "mudar_tarefa", tarefa: "T1", agente: m.betoNome, titulo: "T1 novo" }, { tipo: "criar_tarefa", titulo: "T2" }] });
       if (!passou.data.ok) throw new Error(passou.data.detalhe);
@@ -354,7 +354,7 @@ describeIntegracao("quadro-agente (NOD-442)", () => {
     });
     await withRollback(MARLON, async (trx) => {
       const m = await montar(trx);
-      const c = await m.lote({ ops: [{ tipo: "criar_quadro", meta: "M" }, { tipo: "criar_tarefa", titulo: "T1", agente: m.betoNome }] });
+      const c = await m.lote({ ops: [{ tipo: "criar_quadro", meta: "M" }, { tipo: "criar_tarefa", titulo: "T1", agente: m.betoNome, status: "afazer" }] });
       if (!c.data.ok) throw new Error(c.data.detalhe);
       const d = await m.lote({ ops: [{ tipo: "desfazer" }] });
       expect(d.data).toMatchObject({ ok: true, quadro: null, desfeito: true });

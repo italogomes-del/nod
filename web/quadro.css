@@ -177,6 +177,8 @@
 .qd-soltar-tit b { color: var(--ink); font-weight: 500; }
 .qd-soltar .qd-pas-bts { margin-top: 3px; }
 .qd-lg-lista .qd-soltar { margin: 4px 0; }
+/* Revisão 7 do PR 623: a mesma linha sob o Status da tarefa aberta. */
+.qd-t-soltar { list-style: none; margin: 6px 0 0; padding: 0; }
 .qd-saindo { opacity: .45; }
 /* O "Mover para…" do card: aparece no hover e no foco (sempre no toque), acima do clique do card inteiro. */
 .qd-card-mover { position: relative; z-index: 1; align-self: flex-start; display: inline-flex; align-items: center; min-height: 24px; min-width: 24px; padding: 0 2px;
@@ -446,6 +448,18 @@ a.qd-chip:hover { background: var(--surface-raised); }
 .qd-props { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 6px 10px; margin: 0; align-items: center; }
 .qd-props dt { color: var(--ink-3); }
 .qd-props dd { margin: 0; min-width: 0; color: var(--ink); overflow-wrap: anywhere; }
+/* NOD-416: Status, Responsável e "Mover para" na tarefa aberta; o branch; o histórico; "Nova tarefa…" na barra. */
+.qd-sel { width: 100%; min-height: 28px; padding: 2px 6px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--ink); font: inherit; }
+/* QA do PR 623: o select de destino ocupa a linha inteira (o botão Mover desce) e corta com reticências; o title tem o nome. */
+.qd-mover { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.qd-mover .qd-sel { flex: 1 1 100%; min-width: 0; text-overflow: ellipsis; }
+.qd-branch { font-size: 12px; overflow-wrap: anywhere; }
+.qd-hist { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 13px; }
+.qd-hist-quem { font-weight: 600; color: var(--ink); }
+.qd-hist-oque { color: var(--ink-2, var(--ink)); }
+.qd-hist-quando { color: var(--ink-3); margin-left: 4px; }
+.qd-nova-tarefa { display: flex; gap: 6px; align-items: center; }
+.qd-nova-in { min-width: 0; width: 180px; min-height: 28px; padding: 2px 8px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--ink); font: inherit; }
 .qd-lado ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; color: var(--ink-2); }
 .qd-lado li { display: flex; align-items: flex-start; gap: 6px; min-width: 0; }
 .qd-lado li .qd-ic { color: var(--ink-3); margin-top: 2px; }

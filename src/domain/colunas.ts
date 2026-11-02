@@ -72,6 +72,38 @@ export function colunaDeEspera(colunas: readonly ColunaQuadro[]): IdColuna {
 
 const primeiraDo = (colunas: readonly ColunaQuadro[], g: GrupoColuna) => colunas.find((c) => c.grupo === g && c.id !== "voce")?.id ?? null;
 
+/**
+ * NOD-416: onde a tarefa nova nasce quando ninguém diz a coluna: a 1ª de Não iniciado que não aciona ninguém pela regra
+ * da main (`acionaNaColuna`: A fazer é pulada mesmo que a pessoa a tenha posto antes do Backlog) e sem passagem
+ * (`responsavelDe`: a espera com responsável passaria a tarefa a outro bot). Sem nenhuma assim, a 1ª de Não iniciado que
+ * não aciona, e por fim a de espera; quem cria a marca para não acionar (revisão 2 do PR #623). Começar é pedir:
+ * `status afazer`. revisto em 2026-11-02 (revisão 7 do PR #623): antes usava um predicado próprio (`acionaAoEntrar`).
+ */
+export function colunaDeEntrada(colunas: readonly ColunaQuadro[]): IdColuna {
+  const espera = colunas.filter((c) => c.grupo === "nao_iniciado" && c.id !== "voce" && !acionaNaColuna(colunas, c.id));
+  return (espera.find((c) => !c.responsavel) ?? espera[0])?.id ?? colunaDeEspera(colunas);
+}
+
+/** NOD-416: a coluna padrão de um grupo (a tarefa que muda de quadro cai nela quando o destino não tem a mesma coluna). */
+export function colunaPadraoDoGrupo(colunas: readonly ColunaQuadro[], g: GrupoColuna): IdColuna {
+  if (g === "nao_iniciado") return colunaDeEntrada(colunas);
+  if (g === "iniciado") return colunaDeAndamento(colunas) ?? primeiraDo(colunas, "iniciado") ?? colunaDeEntrada(colunas);
+  if (g === "feito") return primeiraDo(colunas, "feito") ?? colunaDeEntrada(colunas);
+  return "cancelado";
+}
+
+/**
+ * Revisão 7 do PR #623: a coluna do grupo `g` em que a tarefa de `agenteId` pode cair sem a passagem de outro bot
+ * (`responsavelDe` vazio ou o próprio responsável). A padrão do grupo primeiro; senão a 1ª assim; senão a padrão.
+ */
+export function colunaDoGrupoSemPassagem(colunas: readonly ColunaQuadro[], g: GrupoColuna, agenteId: string | null): IdColuna {
+  const livre = (id: IdColuna) => { const r = responsavelDe(colunas, id); return r === null || r === agenteId; };
+  const padrao = colunaPadraoDoGrupo(colunas, g);
+  if (livre(padrao)) return padrao;
+  // Em Não iniciado, sem a que aciona (A fazer): a tarefa que esperava não passa a "pode começar" só por mudar de quadro.
+  return colunas.find((c) => c.grupo === g && c.id !== "voce" && c.id !== "bloqueado" && livre(c.id) && (g !== "nao_iniciado" || !acionaNaColuna(colunas, c.id)))?.id ?? padrao;
+}
+
 /** Os apelidos que o bot já usa ("status feito") valem mesmo depois que a pessoa troca as colunas. */
 function porApelido(colunas: readonly ColunaQuadro[], chave: string): IdColuna | null {
   switch (chave) {

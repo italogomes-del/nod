@@ -21,10 +21,10 @@ const comDoces = (): ColunaQuadro[] => [
 ];
 const t = (id: string, extra: Partial<TarefaDto> = {}): TarefaDto => ({
   id, quadroId: "q1", titulo: `Tarefa ${id}`, descricao: "", status: "afazer", voltarPara: null, terminadaEm: null, agenteId: "a", ordem: 1, linearId: null, linearUrl: null, prUrl: null,
-  pergunta: null, resposta: null, deFora: false, turnoId: null, criadoEm: 1, mudadoEm: 1, execucao: null, agenteNome: "Ada", ...extra,
+  pergunta: null, resposta: null, deFora: false, turnoId: null, criadoEm: 1, mudadoEm: 1, execucao: null, agenteNome: "Ada", numero: null, codigo: `#${id}`, branch: "", ...extra,
 });
 const q = (tarefas: TarefaDto[], colunas: ColunaQuadro[] = [...COLUNAS_PADRAO]): QuadroDto => ({
-  id: "q1", agenteId: "a", meta: "Meta", prazo: null, cumpridoEm: null, metaDesde: 1, resumo: null, criadoEm: 1, atualizadoEm: 1, agenteNome: "Ada",
+  id: "q1", agenteId: "a", prefixo: null, meta: "Meta", prazo: null, cumpridoEm: null, metaDesde: 1, resumo: null, criadoEm: 1, atualizadoEm: 1, agenteNome: "Ada",
   colunas: colunasDto(colunas), tarefas, ultimoLote: null, feitas: 0, total: tarefas.length,
 });
 const tela = (qd: QuadroDto, edicao: Parameters<typeof quadroDaMeta>[0]["edicao"] = null) =>

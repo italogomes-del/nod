@@ -306,4 +306,27 @@ describeIntegracao("colunas do quadro (NOD-448, ADR-140)", () => {
       expect(progresso(q.tarefas, q.colunas)).toMatchObject({ feitas: 1, total: 2 });
     });
   });
+
+  it("NOD-416 (revisão do PR #623): criar_tarefa com agente e sem status avisa que ficou no Backlog e como começar", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      ok(await m.pessoa([{ tipo: "criar_quadro", meta: null }]));
+      const r = ok(await executar(m.d, gerirQuadro, { ...(await m.turno()), acoes: [{ tipo: "criar_tarefa", titulo: "Login", agente: m.nomeCaio }] }));
+      expect(r.data.ok && r.data.comecaram).toEqual([]);
+      expect(r.data.instrucao).toContain("\"Login\" ficou no Backlog; para começar, status afazer");
+      // Com status, ou sem agente, não há o aviso.
+      const s = ok(await executar(m.d, gerirQuadro, { ...(await m.turno()), acoes: [{ tipo: "criar_tarefa", titulo: "Sem ninguém" }, { tipo: "criar_tarefa", titulo: "Já vai", agente: m.nomeCaio, status: "afazer" }] }));
+      expect(s.data.instrucao).not.toContain("para começar, status afazer");
+    });
+  });
+
+  it("revisão 3 do PR #623: o aviso de que ficou no Backlog acha a criada pelo id, não pelo título (dois com o mesmo título)", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      ok(await m.pessoa([{ tipo: "criar_quadro", meta: null }]));
+      const r = ok(await executar(m.d, gerirQuadro, { ...(await m.turno()), acoes: [{ tipo: "criar_tarefa", titulo: "Dup", agente: m.nomeCaio }, { tipo: "criar_tarefa", titulo: "Dup", agente: m.nomeCaio, status: "afazer" }] }));
+      expect(r.data.ok && r.data.comecaram.length).toBe(1);
+      expect(r.data.instrucao).toContain("\"Dup\" ficou no Backlog; para começar, status afazer");
+    });
+  });
 });

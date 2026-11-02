@@ -317,3 +317,13 @@ describe("NOD-429 · web/quadro.css", () => {
     expect(index).toMatch(/<section class="qd-vista" id="quadro" role="tabpanel" aria-labelledby="qd-aba-quadro" hidden><\/section>/);
   });
 });
+
+describe("NOD-416 · o link da tarefa depois de qualquer entrada (revisão do PR #623)", () => {
+  it("toda entrada na sessão (boot, espaço provisório, entrar da SPA) abre a tarefa guardada do link", () => {
+    const main = readFileSync(new URL("main.ts", WEB), "utf8");
+    const entradas = main.split("\n").map((l, i) => ({ l, i })).filter(({ l }) => /await iniciarSessao\(await sessaoApi\./.test(l));
+    expect(entradas.length).toBeGreaterThanOrEqual(3);
+    const linhas = main.split("\n");
+    for (const { l, i } of entradas) expect(`${l}\n${linhas.slice(i + 1, i + 5).join("\n")}`, l.trim()).toContain("abrirTarefaGuardada()");
+  });
+});

@@ -5,7 +5,7 @@ import { colunasDe, substituirColunas } from "../domain/colunas.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { log } from "../obs/log.ts";
 import { autoriaPessoa, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
-import { aplicarLoteQuadro, preverLoteQuadro, type PedidoLote } from "./quadro.ts";
+import { aplicarLoteQuadro, preverLoteQuadro, type FalhaQuadro, type PedidoLote } from "./quadro.ts";
 import { autoriaDoAgente } from "./registrar-negacao.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
 
@@ -23,7 +23,7 @@ export const revisaoDasColunas = (cs: readonly ColunaQuadro[]): string => JSON.s
 
 const nomeDe = (cs: readonly ColunaQuadro[], id: string) => cs.find((c) => c.id === id)?.nome ?? id;
 
-export type PropostaDeColunas = { ok: true; propostaId: string; payload: PayloadPropostaColunasQuadro } | { ok: false; erro: "experimento_desligado" | "sem_quadro" | "entrada_invalida" | "nao_encontrado"; detalhe: string };
+export type PropostaDeColunas = { ok: true; propostaId: string; payload: PayloadPropostaColunasQuadro } | { ok: false; erro: FalhaQuadro; detalhe: string };
 
 /** O bot pediu substituir_colunas: valida como o lote validaria e abre o card. Nada muda até a pessoa confirmar. */
 export async function proporColunas(deps: Deps, p: PedidoLote & { op: OpSubstituir; agenteId: string; conversaId: string; turnoId: string }): Promise<{ data: PropostaDeColunas; events: RuntimeEvent[] }> {

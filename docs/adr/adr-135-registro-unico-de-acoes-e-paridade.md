@@ -186,6 +186,15 @@ pode pedir para excluir o quadro de **outro** bot, e o caminho do chat passa a s
 A tela continua removendo direto (aba Quadro → Remover quadro, com confirmação). O gatilho de reversão da emenda
 NOD-415 está cumprido pelo cartão.
 
+## Emenda (NOD-416, ADR-144): `quadro.mover_tarefa` muda sem cartão e sem Desfazer
+
+`quadro.mover_tarefa` é `muda`, mas não tem Desfazer (voltar é mover de novo) nem cartão: vai sozinho no lote. No lugar
+do Desfazer, duas travas no servidor quando o autor é um bot: só num turno limpo, em que nada de fora entrou
+(`origemConfiavel`, ADR-062), como o Desfazer e as colunas; e não no fim da corrente de bots (`podeRepassar`, ADR-063).
+A rota confere que a tarefa está no quadro do `:id` e não aceita como destino o quadro de um bot excluído. A tela pede
+a escolha do quadro e o botão "Mover" (sem agir no `change`). Gatilho de reversão: uma tarefa movida sem a pessoa
+querer → o mover vira lote com Desfazer (ou ganha cartão).
+
 ## Emenda (NOD-437): os times de bots pelo chat
 
 As ações `times.*` (criar, renomear, ordenar, recolher) e o `bots.mover` em lote são `muda` e, pelo `gerir_times` de

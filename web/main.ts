@@ -109,7 +109,7 @@ import { atualizarBorda, ligarBorda, ligarEtiqueta } from "./lib/borda-barra.ts"
 import { proximoDoSegmentado } from "./lib/linha-config.ts";
 import { conversaAVista, ehChaveDeExperimento, quadroDoEstado } from "./lib/quadro.ts";
 import { criarQuadroNaTela } from "./lib/quadro-na-tela.ts";
-import { agentesDaPassagem } from "./lib/colunas.ts";
+import { PARAMETRO_TAREFA, botDoLink, responsaveisDaTarefa } from "./lib/quadro-dados.ts";
 import { confiar as confiarHtml } from "./telas/quadro.ts";
 import type { DadosConta } from "./telas/config-conta.ts";
 import { estadoMascoteNaConversa, mascoteComAviso, proximaViradaDoMascote } from "./lib/mascote.ts";
@@ -467,9 +467,24 @@ const quadroNaTela = criarQuadroNaTela(document, {
   dados: {
     api: () => api,
     agente: (id) => { const b = botGerido(id); return b ? { avatar: confiarHtml(iconeAgente(b, "sm")), nome: b.nome } : null; },
-    // ADR-142: quem pode receber a passagem de uma coluna (os bots da pessoa).
-    agentes: () => agentesDaPassagem(estado.frota?.agentes ?? []),
     hora: horaDaFala,
+    // Os bots da pessoa: quem recebe a passagem de uma coluna (ADR-142) e quem pode ser o Responsável da tarefa aberta
+    // (NOD-416). O código da tarefa aberta vai para a URL.
+    agentes: () => responsaveisDaTarefa(estado.frota?.agentes ?? [], estado.sessao?.pessoaId),
+    naUrl: (codigo) => {
+      const u = new URL(window.location.href);
+      if (codigo) u.searchParams.set(PARAMETRO_TAREFA, codigo); else u.searchParams.delete(PARAMETRO_TAREFA);
+      const novo = u.pathname + u.search + u.hash;
+      if (novo !== window.location.pathname + window.location.search + window.location.hash) window.history.replaceState(window.history.state, "", novo);
+    },
+    // QA do PR #623 (D4): depois de mover, a conversa do bot destino com a tarefa aberta no Quadro (o caminho do link).
+    irParaTarefa: (agenteId, tarefaId) => {
+      const bot = botGerido(agenteId);
+      if (!bot) return false;
+      navegar({ tipo: "conversa", conversaId: bot.conversaId, agenteId: bot.id });
+      quadroNaTela.abrirTarefa(bot.id, tarefaId);
+      return true;
+    },
   },
 });
 
@@ -2969,6 +2984,8 @@ function regiaoReabrindo(id: string, html: string, rolagem?: { seletor: string; 
 
 /** ADR-090: o código de pareamento da máquina que veio na URL, guardado até a sessão existir. */
 const CHAVE_CODIGO_MAQUINA = "nod-parear-maquina";
+/** NOD-416 (ADR-144): o link da tarefa (`?tarefa=ZE-12`), guardado até a sessão existir. */
+const CHAVE_TAREFA_LINK = "nod-tarefa-link";
 const CHAVE_VOLTA_NUVEM = "nod-volta-nuvem";
 async function boot(): Promise<void> {
   dispatch({ tipo: "tick", agora: Date.now() });
@@ -3007,6 +3024,13 @@ async function boot(): Promise<void> {
   if (codigoMaquina !== null) {
     try { window.sessionStorage.setItem(CHAVE_CODIGO_MAQUINA, codigoMaquina.slice(0, 16)); } catch { /* sem storage: a pessoa digita o código */ }
     url.searchParams.delete("parear-maquina");
+    window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+  }
+  // NOD-416: o link da tarefa abre a conversa do bot dela, no Quadro, com a tarefa em tela cheia (depois do login se preciso).
+  const tarefaNaUrl = url.searchParams.get(PARAMETRO_TAREFA);
+  if (tarefaNaUrl !== null) {
+    try { window.sessionStorage.setItem(CHAVE_TAREFA_LINK, tarefaNaUrl.slice(0, 40)); } catch { /* sem storage: o link não abre */ }
+    url.searchParams.delete(PARAMETRO_TAREFA);
     window.history.replaceState(null, "", url.pathname + url.search + url.hash);
   }
   // ADR-121 (NOD-92): a volta do Google (`/maquinas?nuvem=preparando|recusado`) abre Máquinas com o aviso, depois do login.
@@ -3048,6 +3072,7 @@ async function boot(): Promise<void> {
     await iniciarSessao(await sessaoApi.atual());
     abrirCodigoDeMaquinaGuardado();
     abrirVoltaDaNuvemGuardada();
+    void abrirTarefaGuardada();
     await lerContas(voltaDaConta);
     if (confirmando) { await confirmando; if (contas?.minhaConta) abrirEspaco("conta"); }
   } catch (e) {
@@ -3064,6 +3089,8 @@ async function boot(): Promise<void> {
         // A marca da equipe: quem já entrou pelo Google da equipe neste navegador volta à tela de entrar.
         if (abreProvisorio({ saiu, recusado: entrada.recusado, bootstrap: modo.contas?.bootstrap ?? false, noApp: window.nodDesktop !== undefined, equipe: daEquipe(), pareando: pedidoPendente() !== null }) && (await provisorioDaWeb())) {
           await iniciarSessao(await sessaoApi.atual());
+          // O link da tarefa também vale na primeira visita, no espaço provisório (revisão do PR #623).
+          void abrirTarefaGuardada();
           await lerContas(voltaDaConta);
           return;
         }
@@ -4990,7 +5017,7 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     }
     setTimeout(() => { el.textContent = antes; }, 1500);
   },
-  entrar: (el) => agir(async () => { await iniciarSessao(await sessaoApi.entrar(el.dataset.pessoa ?? "")); await lerContas(null); }),
+  entrar: (el) => agir(async () => { await iniciarSessao(await sessaoApi.entrar(el.dataset.pessoa ?? "")); void abrirTarefaGuardada(); await lerContas(null); }),
   navegar: (el) => {
     const tela = el.dataset.tela;
     if (tela === "conectores") abrirMarketplace();
@@ -7947,6 +7974,30 @@ function abrirCodigoDeMaquinaGuardado(): void {
   abrirEspaco("maquinas");
   const guardado = codigo;
   void chavesAtuais().then((chavesAntes) => dispatch({ tipo: "conectar-maquina", conectar: { passo: "codigo", codigo: guardado, pedido: null, erro: null, chavesAntes, marcados: [] } }));
+}
+/**
+ * NOD-416 (ADR-144): o link da tarefa guardado no boot. O código (o atual ou o de antes de mudar de quadro) diz o bot; a
+ * frota chega depois da sessão, então espera por ele um pouco. A tarefa abre em tela cheia no Quadro.
+ */
+async function abrirTarefaGuardada(): Promise<void> {
+  let codigo: string | null = null;
+  try { codigo = window.sessionStorage.getItem(CHAVE_TAREFA_LINK); window.sessionStorage.removeItem(CHAVE_TAREFA_LINK); } catch { /* sem storage */ }
+  if (!codigo || !estado.sessao || !api) return;
+  try {
+    const r = await api.tarefaPorCodigo(codigo);
+    // Revisão 2 do PR #623: espera a lista de bots chegar (não o teto inteiro) e, sem o bot nela, diz em vez de calar.
+    const bot = await botDoLink(() => botGerido(r.agenteId), () => !!estado.frota, (ms) => new Promise((ok) => window.setTimeout(ok, ms)));
+    if (!bot) {
+      dispatch({ tipo: "erro", erro: { codigo: "nao_encontrado", mensagem: `A tarefa ${codigo} é de um bot que não está na sua lista (excluído, oculto ou de outra pessoa).`, status: 404 } });
+      return;
+    }
+    navegar({ tipo: "conversa", conversaId: bot.conversaId, agenteId: bot.id });
+    quadroNaTela.abrirTarefa(bot.id, r.tarefaId);
+  } catch (e) {
+    // Código que não existe (ou de outra pessoa: a RLS dá 404): diz qual; o resto (rede) segue o erro de sempre.
+    if (e instanceof ErroApi && e.status === 404) dispatch({ tipo: "erro", erro: { codigo: e.codigo, mensagem: `Tarefa ${codigo} não encontrada.`, status: 404 } });
+    else mostrarErro(e);
+  }
 }
 /** ADR-121 (NOD-92): a volta do Google guardada no boot abre Máquinas com o aviso (a conta é relida até o preparo acabar). */
 function abrirVoltaDaNuvemGuardada(): void {

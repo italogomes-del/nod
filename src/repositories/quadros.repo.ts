@@ -1,4 +1,4 @@
-import type { AutorLote, ColunaQuadro, IdColuna, LinhaDeSistema, LoteQuadro, PrDaTarefa, Quadro, TarefaQuadro, TipoLinhaTarefa } from "../contracts/quadro.ts";
+import type { AutorLote, CampoHistorico, ColunaQuadro, IdColuna, LinhaDeSistema, LoteQuadro, MudancaTarefa, PrDaTarefa, Quadro, TarefaQuadro, TipoLinhaTarefa } from "../contracts/quadro.ts";
 import type { EstadoTurno } from "../contracts/turno.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
 import { jsonb, ms, msOuNull } from "./conversao.ts";
@@ -14,6 +14,7 @@ interface LinhaQuadro {
   criado_em: Date;
   atualizado_em: Date;
   meta_desde: Date;
+  prefixo: string | null;
 }
 
 interface LinhaTarefa {
@@ -35,6 +36,7 @@ interface LinhaTarefa {
   criado_em: Date;
   mudado_em: Date;
   terminada_em: Date | null;
+  numero: number | null;
 }
 
 interface LinhaLote {
@@ -58,8 +60,8 @@ export type FotoLote = {
   tarefas: { id: string; antes: TarefaQuadro | null }[];
 };
 
-const COLUNAS_Q = "id, agente_id, to_char(prazo, 'YYYY-MM-DD') as prazo, meta, cumprido_em, resumo, colunas, criado_em, atualizado_em, meta_desde";
-const COLUNAS_T = "id, quadro_id, titulo, descricao, status, voltar_para, agente_id, ordem, linear_id, linear_url, pr_url, pergunta, resposta, de_fora, turno_id, criado_em, mudado_em, terminada_em";
+const COLUNAS_Q = "id, agente_id, to_char(prazo, 'YYYY-MM-DD') as prazo, meta, cumprido_em, resumo, colunas, criado_em, atualizado_em, meta_desde, prefixo";
+const COLUNAS_T = "id, quadro_id, titulo, descricao, status, voltar_para, agente_id, ordem, linear_id, linear_url, pr_url, pergunta, resposta, de_fora, turno_id, criado_em, mudado_em, terminada_em, numero";
 const COLUNAS_L = "id, quadro_id, autor, autor_agente_id, pedido_por, resumo, antes, tarefa_ids, desfeito_em, criado_em";
 
 const paraQuadro = (l: LinhaQuadro): Quadro => ({
@@ -73,6 +75,7 @@ const paraQuadro = (l: LinhaQuadro): Quadro => ({
   criadoEm: ms(l.criado_em),
   atualizadoEm: ms(l.atualizado_em),
   metaDesde: ms(l.meta_desde),
+  prefixo: l.prefixo ?? null,
 });
 
 /** O Desfazer devolve o `terminadaEm` da foto; a foto de antes da revisão 3 não tem o campo: fechada = o `mudadoEm` dela. */
@@ -100,6 +103,7 @@ const paraTarefa = (l: LinhaTarefa): TarefaQuadro => ({
   criadoEm: ms(l.criado_em),
   mudadoEm: ms(l.mudado_em),
   terminadaEm: l.terminada_em ? ms(l.terminada_em) : null,
+  numero: l.numero ?? null,
 });
 
 const paraLote = (l: LinhaLote): LoteQuadro & { antes: FotoLote } => ({
@@ -114,7 +118,7 @@ const paraLote = (l: LinhaLote): LoteQuadro & { antes: FotoLote } => ({
   criadoEm: ms(l.criado_em),
 });
 
-export type NovaTarefa = Pick<TarefaQuadro, "quadroId" | "titulo" | "descricao" | "status" | "agenteId"> & Partial<Pick<TarefaQuadro, "voltarPara" | "linearId" | "linearUrl" | "prUrl" | "pergunta" | "resposta" | "deFora" | "terminadaEm">>;
+export type NovaTarefa = Pick<TarefaQuadro, "quadroId" | "titulo" | "descricao" | "status" | "agenteId"> & Partial<Pick<TarefaQuadro, "voltarPara" | "linearId" | "linearUrl" | "prUrl" | "pergunta" | "resposta" | "deFora" | "terminadaEm" | "numero">>;
 
 /** O que muda numa tarefa (tudo menos ids e datas de criação). */
 export type CamposTarefa = Pick<TarefaQuadro, "titulo" | "descricao" | "status" | "voltarPara" | "agenteId" | "ordem" | "linearId" | "linearUrl" | "prUrl" | "pergunta" | "resposta" | "deFora" | "turnoId" | "terminadaEm">;
@@ -123,6 +127,23 @@ export type CamposTarefa = Pick<TarefaQuadro, "titulo" | "descricao" | "status" 
  * definido em 2026-10-31 (NOD-442): o quadro-agente, as tarefas e os lotes. Só primitivas: quem aplica um lote (e trava
  * o quadro com `buscarTravado` antes) é src/use-cases/quadro.ts.
  */
+/**
+ * Revisão 4 do PR #623: a consulta de `mudouDeQuadroDepois`, exportada para o teste rodar EXPLAIN sobre ela mesma.
+ * Parâmetros: $1 tenant, $2 dona, $3 quadro (uuid), $4 lote. Dois `exists`, um por índice parcial da 0137: com
+ * `(quadro_id = $3 or de = $3)` num só, o Postgres não combinava os dois índices (usava só `_saiu`, com o OR no Filter,
+ * e lia toda mudança de quadro do tenant). Cada ramo casa com o seu (`_entrou` por quadro_id, `_saiu` por de), já com a dona.
+ */
+export const SQL_MUDOU_DE_QUADRO_DEPOIS = `
+  select exists (
+      select 1 from quadro_tarefa_historico h
+      where h.tenant_id = $1 and h.owner_id = $2 and h.campo = 'quadro' and h.quadro_id = $3::uuid
+        and h.criado_em > (select l.criado_em from quadro_lotes l where l.tenant_id = $1 and l.owner_id = $2 and l.id = $4)
+    ) or exists (
+      select 1 from quadro_tarefa_historico h
+      where h.tenant_id = $1 and h.owner_id = $2 and h.campo = 'quadro' and h.de = $3::uuid::text
+        and h.criado_em > (select l.criado_em from quadro_lotes l where l.tenant_id = $1 and l.owner_id = $2 and l.id = $4)
+    ) as sim`;
+
 export function quadrosRepo(conn: Conn, escopo: Escopo) {
   const dona = () => conn`tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId}`;
   return {
@@ -159,17 +180,17 @@ export function quadrosRepo(conn: Conn, escopo: Escopo) {
     /** Os quadros da pessoa (de bots não excluídos), mais recente primeiro. */
     async listar(): Promise<Quadro[]> {
       const ls = await conn<LinhaQuadro[]>`
-        select q.id, q.agente_id, to_char(q.prazo, 'YYYY-MM-DD') as prazo, q.meta, q.cumprido_em, q.resumo, q.colunas, q.criado_em, q.atualizado_em, q.meta_desde
+        select q.id, q.agente_id, to_char(q.prazo, 'YYYY-MM-DD') as prazo, q.meta, q.cumprido_em, q.resumo, q.colunas, q.criado_em, q.atualizado_em, q.meta_desde, q.prefixo
         from quadros q join agentes a on a.tenant_id = q.tenant_id and a.id = q.agente_id
         where q.tenant_id = ${escopo.tenantId} and q.owner_id = ${escopo.pessoaId} and a.excluido_em is null
         order by q.atualizado_em desc`;
       return ls.map(paraQuadro);
     },
     /** null = o bot já tem quadro (um por anfitrião). */
-    async criar(q: { agenteId: string; meta: string | null; prazo: string | null; metaDesde?: number }): Promise<Quadro | null> {
+    async criar(q: { agenteId: string; meta: string | null; prazo: string | null; metaDesde?: number; prefixo?: string | null }): Promise<Quadro | null> {
       const [l] = await conn<LinhaQuadro[]>`
-        insert into quadros (tenant_id, owner_id, agente_id, meta, prazo, meta_desde)
-        values (${escopo.tenantId}, ${escopo.pessoaId}, ${q.agenteId}, ${q.meta}, ${q.prazo}::date, coalesce(${q.metaDesde === undefined ? null : new Date(q.metaDesde)}::timestamptz, now()))
+        insert into quadros (tenant_id, owner_id, agente_id, meta, prazo, meta_desde, prefixo)
+        values (${escopo.tenantId}, ${escopo.pessoaId}, ${q.agenteId}, ${q.meta}, ${q.prazo}::date, coalesce(${q.metaDesde === undefined ? null : new Date(q.metaDesde)}::timestamptz, now()), ${q.prefixo ?? null})
         on conflict (tenant_id, agente_id) do nothing
         returning ${conn.unsafe(COLUNAS_Q)}`;
       return l ? paraQuadro(l) : null;
@@ -196,16 +217,21 @@ export function quadrosRepo(conn: Conn, escopo: Escopo) {
       const ls = await conn<LinhaTarefa[]>`select ${conn.unsafe(COLUNAS_T)} from quadro_tarefas where ${dona()} and quadro_id = ${quadroId} order by ordem, criado_em, id`;
       return ls.map(paraTarefa);
     },
+    /** NOD-416 (revisão 5 do PR #623): só as tarefas sem número (as que o servidor de antes criou), na ordem do quadro. */
+    async tarefasSemNumero(quadroId: string): Promise<TarefaQuadro[]> {
+      const ls = await conn<LinhaTarefa[]>`select ${conn.unsafe(COLUNAS_T)} from quadro_tarefas where ${dona()} and quadro_id = ${quadroId} and numero is null order by ordem, criado_em, id`;
+      return ls.map(paraTarefa);
+    },
     async tarefa(id: string): Promise<TarefaQuadro | null> {
       const [l] = await conn<LinhaTarefa[]>`select ${conn.unsafe(COLUNAS_T)} from quadro_tarefas where ${dona()} and id = ${id}`;
       return l ? paraTarefa(l) : null;
     },
     async inserirTarefa(t: NovaTarefa): Promise<TarefaQuadro> {
       const [l] = await conn<LinhaTarefa[]>`
-        insert into quadro_tarefas (tenant_id, owner_id, quadro_id, titulo, descricao, status, voltar_para, agente_id, ordem, linear_id, linear_url, pr_url, pergunta, resposta, de_fora, terminada_em)
+        insert into quadro_tarefas (tenant_id, owner_id, quadro_id, titulo, descricao, status, voltar_para, agente_id, ordem, linear_id, linear_url, pr_url, pergunta, resposta, de_fora, terminada_em, numero)
         values (${escopo.tenantId}, ${escopo.pessoaId}, ${t.quadroId}, ${t.titulo}, ${t.descricao}, ${t.status}, ${t.voltarPara ?? null}, ${t.agenteId},
           (select coalesce(max(ordem), 0) + 1 from quadro_tarefas where ${dona()} and quadro_id = ${t.quadroId}),
-          ${t.linearId ?? null}, ${t.linearUrl ?? null}, ${t.prUrl ?? null}, ${t.pergunta ?? null}, ${t.resposta ?? null}, ${t.deFora ?? false}, ${t.terminadaEm == null ? null : new Date(t.terminadaEm)})
+          ${t.linearId ?? null}, ${t.linearUrl ?? null}, ${t.prUrl ?? null}, ${t.pergunta ?? null}, ${t.resposta ?? null}, ${t.deFora ?? false}, ${t.terminadaEm == null ? null : new Date(t.terminadaEm)}, ${t.numero ?? null})
         returning ${conn.unsafe(COLUNAS_T)}`;
       return paraTarefa(l!);
     },
@@ -226,12 +252,13 @@ export function quadrosRepo(conn: Conn, escopo: Escopo) {
     /** O Desfazer de uma exclusão: a tarefa volta com o mesmo id e as mesmas datas. */
     async restaurarTarefa(t: TarefaQuadro): Promise<TarefaQuadro> {
       const [l] = await conn<LinhaTarefa[]>`
-        insert into quadro_tarefas (tenant_id, owner_id, id, quadro_id, titulo, descricao, status, voltar_para, agente_id, ordem, linear_id, linear_url, pr_url, pergunta, resposta, de_fora, turno_id, criado_em, mudado_em, terminada_em)
+        insert into quadro_tarefas (tenant_id, owner_id, id, quadro_id, titulo, descricao, status, voltar_para, agente_id, ordem, linear_id, linear_url, pr_url, pergunta, resposta, de_fora, turno_id, criado_em, mudado_em, terminada_em, numero)
         values (${escopo.tenantId}, ${escopo.pessoaId}, ${t.id}, ${t.quadroId}, ${t.titulo}, ${t.descricao}, ${t.status}, ${t.voltarPara ?? null}, ${t.agenteId}, ${t.ordem},
-          ${t.linearId}, ${t.linearUrl}, ${t.prUrl}, ${t.pergunta}, ${t.resposta}, ${t.deFora ?? false}, ${t.turnoId}, ${new Date(t.criadoEm)}, clock_timestamp(), ${terminadaDaFoto(t)})
+          ${t.linearId}, ${t.linearUrl}, ${t.prUrl}, ${t.pergunta}, ${t.resposta}, ${t.deFora ?? false}, ${t.turnoId}, ${new Date(t.criadoEm)}, clock_timestamp(), ${terminadaDaFoto(t)}, ${t.numero ?? null})
         on conflict (tenant_id, id) do update set titulo = excluded.titulo, descricao = excluded.descricao, status = excluded.status, voltar_para = excluded.voltar_para,
           agente_id = excluded.agente_id, ordem = excluded.ordem, linear_id = excluded.linear_id, linear_url = excluded.linear_url,
-          pr_url = excluded.pr_url, pergunta = excluded.pergunta, resposta = excluded.resposta, de_fora = excluded.de_fora, turno_id = excluded.turno_id, mudado_em = clock_timestamp(), terminada_em = excluded.terminada_em
+          pr_url = excluded.pr_url, pergunta = excluded.pergunta, resposta = excluded.resposta, de_fora = excluded.de_fora, turno_id = excluded.turno_id, mudado_em = clock_timestamp(), terminada_em = excluded.terminada_em,
+          numero = coalesce(quadro_tarefas.numero, excluded.numero)
         returning ${conn.unsafe(COLUNAS_T)}`;
       return paraTarefa(l!);
     },
@@ -307,9 +334,129 @@ export function quadrosRepo(conn: Conn, escopo: Escopo) {
       const [r] = await conn<LinhaLote[]>`select ${conn.unsafe(COLUNAS_L)} from quadro_lotes where ${dona()} and quadro_id = ${quadroId} order by criado_em desc, id desc limit 1`;
       return r && r.desfeito_em === null ? paraLote(r) : null;
     },
+    /**
+     * Revisão 2 do PR #623: alguma tarefa entrou neste quadro ou saiu dele (mover_quadro) depois do lote? Aí o lote não se
+     * desfaz: a foto dele não conhece a tarefa que chegou (o Desfazer a apagaria com o quadro, ou a deixaria fora das
+     * colunas) nem volta por cima da que saiu. A linha `quadro` do histórico fica no quadro destino e leva a origem em `de`.
+     */
+    async mudouDeQuadroDepois(loteId: string, quadroId: string): Promise<boolean> {
+      const [r] = await conn.unsafe<{ sim: boolean }[]>(SQL_MUDOU_DE_QUADRO_DEPOIS, [escopo.tenantId, escopo.pessoaId, quadroId, loteId]);
+      return r?.sim === true;
+    },
     async marcarDesfeito(id: string): Promise<boolean> {
       const r = await conn`update quadro_lotes set desfeito_em = clock_timestamp() where ${dona()} and id = ${id} and desfeito_em is null`;
       return r.count > 0;
+    },
+
+    /* NOD-416 (ADR-144): o código da tarefa e o histórico. */
+
+    /** Serializa a escolha de prefixo da pessoa (dois quadros novos ao mesmo tempo não pegam o mesmo). Vale até o fim da transação. */
+    async travarPrefixos(): Promise<void> {
+      await conn`select pg_advisory_xact_lock(hashtextextended(${`quadro-prefixo:${escopo.tenantId}:${escopo.pessoaId}`}, 0))`;
+    },
+    /** Os prefixos que a pessoa já usa: os dos quadros e os dos códigos antigos (um link velho não muda de dono). */
+    async prefixosUsados(): Promise<Set<string>> {
+      const ls = await conn<{ prefixo: string }[]>`
+        select prefixo from quadros where ${dona()} and prefixo is not null
+        union select prefixo from quadro_tarefa_codigos where ${dona()}`;
+      return new Set(ls.map((l) => l.prefixo));
+    },
+    async definirPrefixo(quadroId: string, prefixo: string): Promise<void> {
+      await conn`update quadros set prefixo = ${prefixo} where ${dona()} and id = ${quadroId} and prefixo is null`;
+    },
+    /** Reserva `n` números seguidos no quadro (sob a trava do quadro) e devolve o primeiro. */
+    async reservarNumeros(quadroId: string, n: number): Promise<number> {
+      const [l] = await conn<{ primeiro: number }[]>`
+        update quadros set proximo_numero = proximo_numero + ${n} where ${dona()} and id = ${quadroId} returning proximo_numero - ${n} as primeiro`;
+      return l!.primeiro;
+    },
+    async numerarTarefa(id: string, numero: number): Promise<void> {
+      await conn`update quadro_tarefas set numero = ${numero} where ${dona()} and id = ${id}`;
+    },
+    /** Guarda o código (o atual e, depois de mudar de quadro, os antigos). Repetido não faz nada. */
+    async guardarCodigos(cs: readonly { prefixo: string; numero: number; tarefaId: string }[]): Promise<void> {
+      if (cs.length === 0) return;
+      await conn`
+        insert into quadro_tarefa_codigos (tenant_id, owner_id, prefixo, numero, tarefa_id)
+        select ${escopo.tenantId}, ${escopo.pessoaId}, c.prefixo, c.numero, c.tarefa_id
+          from unnest(${conn.array(cs.map((c) => c.prefixo))}::text[], ${conn.array(cs.map((c) => c.numero))}::int[], ${conn.array(cs.map((c) => c.tarefaId))}::uuid[])
+            as c(prefixo, numero, tarefa_id)
+        on conflict (tenant_id, owner_id, prefixo, numero) do nothing`;
+    },
+    /** A tarefa dona do código (atual ou antigo), ou null. */
+    async tarefaDoCodigo(prefixo: string, numero: number): Promise<string | null> {
+      const [l] = await conn<{ tarefa_id: string }[]>`
+        select tarefa_id from quadro_tarefa_codigos where ${dona()} and prefixo = ${prefixo} and numero = ${numero}`;
+      return l?.tarefa_id ?? null;
+    },
+    /** O número que a tarefa já teve com este prefixo (volta ao quadro de antes = o mesmo código). */
+    async numeroAntigo(tarefaId: string, prefixo: string): Promise<number | null> {
+      const [l] = await conn<{ numero: number }[]>`
+        select numero from quadro_tarefa_codigos where ${dona()} and tarefa_id = ${tarefaId} and prefixo = ${prefixo} order by criado_em limit 1`;
+      return l?.numero ?? null;
+    },
+    /** Muda a tarefa de quadro (o resto dela fica). */
+    async moverTarefa(id: string, c: { quadroId: string; status: IdColuna; voltarPara: IdColuna | null; ordem: number; numero: number; terminadaEm: number | null }): Promise<TarefaQuadro | null> {
+      const [l] = await conn<LinhaTarefa[]>`
+        update quadro_tarefas set quadro_id = ${c.quadroId}, status = ${c.status}, voltar_para = ${c.voltarPara}, ordem = ${c.ordem}, numero = ${c.numero},
+          terminada_em = ${c.terminadaEm === null ? null : new Date(c.terminadaEm)}, mudado_em = clock_timestamp()
+        where ${dona()} and id = ${id}
+        returning ${conn.unsafe(COLUNAS_T)}`;
+      if (!l) return null;
+      // Revisão 7 do PR #623: os comentários (0138) vão com a tarefa. Senão a FK com ON DELETE CASCADE para o quadro de
+      // origem os apagava quando esse quadro fosse removido, e a tarefa perdia a conversa no quadro novo.
+      await conn`update quadro_comentarios set quadro_id = ${c.quadroId}
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and tarefa_id = ${id}`;
+      // Merge da main (NOD-421) no PR #623: os PRs ligados e as linhas de sistema (0142) já seguem a tarefa (a leitura é
+      // por tarefa_id e a FK é para a tarefa); o quadro_id delas acompanha para não ficar apontando a origem.
+      await conn`update quadro_tarefa_prs set quadro_id = ${c.quadroId} where ${dona()} and tarefa_id = ${id}`;
+      await conn`update quadro_tarefa_linhas set quadro_id = ${c.quadroId} where ${dona()} and tarefa_id = ${id}`;
+      return paraTarefa(l);
+    },
+    /** As mudanças de um lote, num INSERT só. */
+    async registrarHistorico(quadroId: string, ms_: readonly MudancaTarefa[], loteId: string | null): Promise<void> {
+      if (ms_.length === 0) return;
+      const autorAgente = (m: MudancaTarefa) => (m.autor.tipo === "agente" ? m.autor.agenteId : null);
+      await conn`
+        insert into quadro_tarefa_historico (tenant_id, owner_id, tarefa_id, quadro_id, campo, de, para, autor, autor_agente_id, lote_id, criado_em)
+        select ${escopo.tenantId}, ${escopo.pessoaId}, h.tarefa_id, ${quadroId}, h.campo, x.de, x.para, h.autor, x.autor_agente_id, ${loteId},
+               clock_timestamp() + (h.ord * interval '1 microsecond')
+          from unnest(${conn.array(ms_.map((m) => m.tarefaId))}::uuid[], ${conn.array(ms_.map((m) => m.campo))}::text[],
+                      ${conn.array(ms_.map((m) => m.de ?? ""))}::text[], ${conn.array(ms_.map((m) => m.para ?? ""))}::text[],
+                      ${conn.array(ms_.map((m) => m.autor.tipo))}::text[], ${conn.array(ms_.map((m) => autorAgente(m) ?? ""))}::text[])
+            with ordinality as h(tarefa_id, campo, de_, para_, autor, autor_agente_, ord)
+          cross join lateral (select nullif(h.de_, '') as de, nullif(h.para_, '') as para, nullif(h.autor_agente_, '')::uuid as autor_agente_id) x`;
+    },
+    /** O histórico da tarefa, mais antigo primeiro (até 200 linhas, as mais recentes). */
+    /** `quadroId` = o quadro em que a mudança foi registrada (no mover, o destino; a origem vai em `de` da linha `quadro`). */
+    async historico(tarefaId: string): Promise<{ id: string; quadroId: string; campo: CampoHistorico; de: string | null; para: string | null; autor: "pessoa" | "agente" | "regra"; autorAgenteId: string | null; criadoEm: number }[]> {
+      const ls = await conn<{ id: string; quadro_id: string; campo: CampoHistorico; de: string | null; para: string | null; autor: "pessoa" | "agente" | "regra"; autor_agente_id: string | null; criado_em: Date }[]>`
+        select * from (
+          select id, quadro_id, campo, de, para, autor, autor_agente_id, criado_em from quadro_tarefa_historico
+          where ${dona()} and tarefa_id = ${tarefaId} order by criado_em desc, id desc limit 200
+        ) h order by criado_em, id`;
+      return ls.map((l) => ({ id: l.id, quadroId: l.quadro_id, campo: l.campo, de: l.de, para: l.para, autor: l.autor, autorAgenteId: l.autor_agente_id, criadoEm: ms(l.criado_em) }));
+    },
+    /** Vários quadros da pessoa numa leitura só (o de bot excluído também: o histórico ainda o cita). */
+    async buscarVarios(ids: readonly string[]): Promise<Quadro[]> {
+      if (ids.length === 0) return [];
+      const ls = await conn<LinhaQuadro[]>`select ${conn.unsafe(COLUNAS_Q)} from quadros where ${dona()} and id = any(${conn.array([...ids])}::uuid[])`;
+      return ls.map(paraQuadro);
+    },
+    /** A tarefa que o Desfazer apagou (o lote a criou): o código e o histórico dela saem junto. */
+    async apagarCodigosEHistorico(tarefaIds: readonly string[]): Promise<void> {
+      if (tarefaIds.length === 0) return;
+      await conn`delete from quadro_tarefa_codigos where ${dona()} and tarefa_id = any(${conn.array([...tarefaIds])}::uuid[])`;
+      await conn`delete from quadro_tarefa_historico where ${dona()} and tarefa_id = any(${conn.array([...tarefaIds])}::uuid[])`;
+    },
+    /**
+     * Remover o quadro (ou desfazer o lote que o criou): o histórico das tarefas sai (elas vão no CASCADE), e os códigos
+     * FICAM, sem tarefa (revisão 5 do PR #623). Eles reservam o prefixo (`prefixosUsados`) e o número: um quadro novo não
+     * pega o mesmo prefixo, e o link velho dá "não encontrada" em vez de abrir outra tarefa.
+     */
+    async apagarHistorico(tarefaIds: readonly string[]): Promise<void> {
+      if (tarefaIds.length === 0) return;
+      await conn`delete from quadro_tarefa_historico where ${dona()} and tarefa_id = any(${conn.array([...tarefaIds])}::uuid[])`;
     },
     /**
      * NOD-421 (0142): os PRs ligados às tarefas do quadro, no último estado visto. Lê pelas tarefas que estão no quadro

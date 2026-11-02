@@ -8,6 +8,7 @@
  */
 import type { LinkDeTarefa } from "./quadro-pela-conversa.ts";
 import type { LinhaDeSistema, PrNaTela } from "./prs-da-tarefa.ts";
+import type { ResumoQuadroParaBot } from "./quadro-resumo-bot.ts";
 export type { CiPr, EstadoPr, LinhaDeSistema, PrDaTarefa, PrLido, PrNaTela, TipoLinhaTarefa } from "./prs-da-tarefa.ts";
 
 /**
@@ -69,6 +70,8 @@ export type TarefaQuadro = {
   mudadoEm: number;
   /** Quando entrou em feito/cancelado (null enquanto aberta). Só muda com o status, não com título ou ordem (revisão 3). */
   terminadaEm: number | null;
+  /** NOD-416 (ADR-144): o número da tarefa no quadro (o código é o prefixo do quadro + ele). Null só na tarefa que o servidor de antes criou durante o deploy. */
+  numero: number | null;
 };
 
 export type Quadro = {
@@ -86,6 +89,8 @@ export type Quadro = {
   atualizadoEm: number;
   /** NOD-415 (revisão 2): quando a meta foi posta (de sem meta para com meta); o risco e o "N de M" partem dali. */
   metaDesde: number;
+  /** NOD-416 (ADR-144): o prefixo do código das tarefas (ex.: ZE), fixo depois de criado. Null só no quadro que o servidor de antes criou. */
+  prefixo: string | null;
 };
 
 /**
@@ -97,6 +102,9 @@ export type ComentarioDto = ComentarioTarefa & { autorNome: string | null; acion
 
 /** Quem fez o lote: a pessoa (na tela) ou um bot (pela ferramenta). */
 export type AutorLote = { tipo: "pessoa" } | { tipo: "agente"; agenteId: string };
+
+/** NOD-416 (ADR-144): o histórico, o link pelo código e os quadros da pessoa moram em quadro-historico.ts. */
+export type { AutorHistorico, CampoHistorico, MudancaTarefa, EntradaHistoricoDto, TarefaPorCodigoDto, QuadroDaPessoaDto } from "./quadro-historico.ts";
 
 export type LoteQuadro = {
   id: string;
@@ -110,7 +118,17 @@ export type LoteQuadro = {
 };
 
 /** O que a web e o bot recebem: o quadro com as tarefas, a execução de cada uma e o último lote que dá para desfazer. */
-export type TarefaDto = TarefaQuadro & { execucao: ExecucaoTarefa; agenteNome: string | null; prs?: PrNaTela[]; linhas?: LinhaDeSistema[] };
+export type TarefaDto = TarefaQuadro & {
+  execucao: ExecucaoTarefa;
+  agenteNome: string | null;
+  /** NOD-416: o código da tarefa (prefixo do quadro + número, ex.: ZE-12). */
+  codigo: string;
+  /** NOD-416: o branch sugerido (o código e o título em slug, ex.: ze-12-secao-de-planos). */
+  branch: string;
+  /** NOD-421: os PRs ligados e as linhas de sistema (CI, conflito, merge). */
+  prs?: PrNaTela[];
+  linhas?: LinhaDeSistema[];
+};
 export type QuadroDto = Omit<Quadro, "colunas"> & {
   agenteNome: string;
   /** As colunas de verdade (as padrão quando o quadro não tem as dele). */
@@ -136,6 +154,11 @@ export type OpQuadro =
   | { tipo: "desfazer"; lote?: string }
   /** NOD-415 (ADR-141): o bot volta a ser um agente comum. Apaga o quadro, as tarefas e o histórico; conversa e memória ficam. */
   | { tipo: "remover_quadro"; bot?: string }
+  /**
+   * NOD-416 (ADR-144): a tarefa vai para o quadro de outro bot. Ganha o código do destino (o antigo continua abrindo), cai
+   * na coluna de mesmo grupo e não aciona ninguém. `quadro` = o id do quadro, o nome do bot anfitrião ou o prefixo.
+   */
+  | { tipo: "mover_quadro"; tarefa: string; quadro: string }
   /* NOD-448: as colunas. `coluna`, `depois_de`, `antes_de`, `destino` = o id ou o nome da coluna. */
   | { tipo: "criar_coluna"; nome: string; grupo: GrupoColuna; depois_de?: string }
   | { tipo: "renomear_coluna"; coluna: string; nome: string }
@@ -157,43 +180,14 @@ export type ArgsGerirQuadro = {
 };
 
 export type ResultadoGerirQuadro =
-  | { ok: true; quadro: ResumoQuadroParaBot | null; lote_id: string | null; comecaram: { tarefa_id: string; agente: string }[]; instrucao: string; ajustada?: boolean; proposta_id?: string; /** NOD-430: o link de cada tarefa tocada. */ tarefas?: LinkDeTarefa[]; aplicada?: boolean }
-  | { ok: false; erro: "experimento_desligado" | "sem_quadro" | "entrada_invalida" | "nao_encontrado"; instrucao: string };
+  | { ok: true; quadro: ResumoQuadroParaBot | null; lote_id: string | null; comecaram: { tarefa_id: string; agente: string }[]; instrucao: string; ajustada?: boolean; proposta_id?: string; movida?: { tarefa_id: string; codigo: string; codigo_antigo: string }; /** NOD-430: o link de cada tarefa tocada. */ tarefas?: LinkDeTarefa[]; aplicada?: boolean }
+  | { ok: false; erro: "experimento_desligado" | "sem_quadro" | "entrada_invalida" | "nao_encontrado" | "conflito"; instrucao: string };
 
-/** O quadro como o bot o lê: curto, com os ids que ele usa na próxima chamada. */
-export type ResumoQuadroParaBot = {
-  id: string;
-  anfitriao: string;
-  meta: string | null;
-  prazo: string | null;
-  cumprida: boolean;
-  resumo: string | null;
-  colunas: { id: string; nome: string; grupo: GrupoColuna; passa_para?: string; instrucoes?: string }[];
-  tarefas: { id: string; titulo: string; status: IdColuna; agente: string | null; linear: string | null; pr: string | null; pergunta: string | null; execucao: ExecucaoTarefa; prs?: string[] }[];
-  avisoGithub?: string; // NOD-421: por que os PRs não aparecem
-};
+/** O quadro como o bot o lê mora em quadro-resumo-bot.ts (teto de linhas dos contratos, merge da main no PR #623). */
+export type { ResumoQuadroParaBot } from "./quadro-resumo-bot.ts";
 
 /** Os tetos do quadro (a ferramenta, o domínio e a tela usam os mesmos). */
 export const LIMITES_QUADRO = { meta: 200, titulo: 200, descricao: 4000, pergunta: 1000, resposta: 4000, comentario: 4000, ops: 50, itens: 50, identificador: 40, url: 500, coluna: 40, colunas: 30, instrucoes: 500 } as const;
 
-/**
- * definido em 2026-11-01 (NOD-448, ADR-140): trocar o conjunto de colunas pela conversa (substituir_colunas). O card mostra
- * o antes e o depois e para onde vão as tarefas; só aplica ao confirmar (proposta e decisão de mesmo id). `revisao` é a
- * lista de colunas de quando o card nasceu: se o quadro mudou depois, confirmar recusa.
- */
-export type ColunaNaProposta = { id: string; nome: string; grupo: GrupoColuna };
-export type PayloadPropostaColunasQuadro = {
-  kind: "colunas_quadro";
-  quadroId: string;
-  anfitriaoId: string;
-  anfitriaoNome: string;
-  colunas: { id?: string; nome: string; grupo: GrupoColuna }[];
-  destinos?: { de: string; para: string }[];
-  antes: ColunaNaProposta[];
-  depois: ColunaNaProposta[];
-  movidas: { de: string; para: string; tarefas: number }[];
-  revisao: string;
-  turnoId?: string;
-  /** Preenchido ao confirmar: o lote (para o Desfazer). */
-  loteId?: string | null;
-};
+/** NOD-448 (ADR-140): o card de substituir as colunas mora em quadro-proposta-colunas.ts (teto de linhas dos contratos). */
+export type { ColunaNaProposta, PayloadPropostaColunasQuadro } from "./quadro-proposta-colunas.ts";

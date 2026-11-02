@@ -135,7 +135,8 @@ describeIntegracao("e2e com catcher: a jornada do quadro-agente, da meta ao merg
     let q = await quadro(ada.agenteId);
     expect(q).toMatchObject({ meta: "Lançar as seções novas", prazo: "2026-11-06", agenteNome: "Ada", total: 2, feitas: 0, cumpridoEm: null });
     expect(tarefa(q, "Seção de depoimentos")).toMatchObject({ linearId: "NOD-900", agenteId: null });
-    expect(tarefa(q, "Seção de planos")).toMatchObject({ status: "afazer", agenteId: null, linearId: null });
+    // NOD-416: criada sem status vai para o Backlog e não aciona ninguém.
+    expect(tarefa(q, "Seção de planos")).toMatchObject({ status: "backlog", agenteId: null, linearId: null });
     const quadroId = q!.id;
 
     // 4. Cada tarefa vai para o bot certo e começa sozinha (em A fazer com responsável → Fazendo, com um turno dele).
@@ -157,10 +158,10 @@ describeIntegracao("e2e com catcher: a jornada do quadro-agente, da meta ao merg
     expect(q.cumpridoEm).toBeNull();
 
     // 8. A qualquer momento, outro bot (o Beto, no chat dele) mexe no quadro da Ada; a pessoa desfaz pelo Desfazer.
-    const t8 = await rodar(beto.conversaId, ["Põe uma tarefa de revisar os textos.", gerir([{ tipo: "criar_tarefa", titulo: "Revisar os textos" }]), "[[texto: Pus em A fazer.]]"].join("\n"));
+    const t8 = await rodar(beto.conversaId, ["Põe uma tarefa de revisar os textos.", gerir([{ tipo: "criar_tarefa", titulo: "Revisar os textos" }]), "[[texto: Pus no Backlog.]]"].join("\n"));
     expect(t8.estado).toBe("concluido");
     q = await quadro(ada.agenteId);
-    expect(tarefa(q, "Revisar os textos")).toMatchObject({ status: "afazer", agenteId: null });
+    expect(tarefa(q, "Revisar os textos")).toMatchObject({ status: "backlog", agenteId: null });
     const desfeito = await json<{ ok: true; desfeito: boolean; quadro: QuadroDto }>("POST", `agentes/${ada.agenteId}/quadro/lotes/${q!.ultimoLote!.id}/desfazer`);
     expect(desfeito.desfeito).toBe(true);
     expect(tarefa(desfeito.quadro, "Revisar os textos")).toBeUndefined();

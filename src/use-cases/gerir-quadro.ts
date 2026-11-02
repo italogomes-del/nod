@@ -20,6 +20,7 @@ const INSTRUCAO: Record<Extract<ResultadoGerirQuadro, { ok: false }>["erro"], st
   sem_quadro: "Nada mudou.",
   entrada_invalida: "Nada mudou: corrija a ação e chame de novo.",
   nao_encontrado: "Nada mudou: confira o id ou o nome e chame de novo.",
+  conflito: "Nada mudou: outra mudança chegou antes; leia o quadro e chame de novo.",
 };
 
 const recusa = (erro: keyof typeof INSTRUCAO, detalhe: string) => ({ data: { ok: false, erro, instrucao: `${detalhe}. ${INSTRUCAO[erro]}` } as ResultadoGerirQuadro });
@@ -28,14 +29,12 @@ const recusa = (erro: keyof typeof INSTRUCAO, detalhe: string) => ({ data: { ok:
 export const linkDaTarefa = (anfitriaoId: string, tarefaId: string) => `nod-tarefa:${anfitriaoId}:${tarefaId}`;
 
 /**
- * O código que a pessoa vê no canto do card (o mesmo `codigoDaTarefa` da web): o do Linear, senão `#` e os 4 primeiros
- * do id. Nunca o título: ele pode ter vindo de fora e o código entra na instrução, fora de cerca (ADR-047/062; revisão 1
+ * O código que a pessoa vê no canto do card (`TarefaDto.codigo`, NOD-416: `ZE-12`; sem número, o do Linear ou `#` e 4 do
+ * id). Nunca o título: ele pode ter vindo de fora e o código entra na instrução, fora de cerca (ADR-047/062; revisão 1
  * do PR #627). O título vai só nos dados (`tarefas[].titulo`).
  */
-const codigoDa = (t: { id: string; linearId: string | null }) => t.linearId ?? `#${t.id.replace(/-/g, "").slice(0, 4)}`;
-
 export function linksDasTarefas(q: QuadroDto, ids: ReadonlySet<string>): LinkDeTarefa[] {
-  return q.tarefas.filter((t) => ids.has(t.id)).slice(0, 20).map((t) => ({ tarefa_id: t.id, codigo: codigoDa(t), titulo: t.titulo, link: linkDaTarefa(q.agenteId, t.id) }));
+  return q.tarefas.filter((t) => ids.has(t.id)).slice(0, 20).map((t) => ({ tarefa_id: t.id, codigo: t.codigo, titulo: t.titulo, link: linkDaTarefa(q.agenteId, t.id) }));
 }
 
 /**
@@ -133,6 +132,19 @@ export const gerirQuadro: CasoNod<Deps, "gerir_quadro"> = async (deps, input) =>
   // (deFora), o turno de quem leu fica contaminado, como no buscar_conversas (ADR-062 §6; revisão rodada 5).
   if (limpo && quadro?.tarefas.some((t) => t.deFora)) await deps.repos.turnos.contaminar(turno.id, deps.agora());
   const partes = [r.data.removido ? "Quadro removido: o bot voltou a ser um agente comum (a conversa e a memória ficaram). Não tem Desfazer; para outro quadro, criar_quadro." : desfeito ? "Desfeito." : r.data.comentario ? "Comentário gravado na tarefa." : "Feito."];
+  // NOD-416: mudar de quadro não tem lote (nem Desfazer) e não aciona ninguém; o código antigo continua abrindo.
+  if (r.data.movida) partes.push(`A tarefa agora é ${r.data.movida.codigo}, no quadro de ${quadro?.agenteNome ?? "destino"} (${r.data.movida.codigoAntigo} continua abrindo). Ninguém começou nada; sem Desfazer: para voltar, mover_quadro de novo.`);
+  // Revisão do PR #623: o bot que pôs um responsável sem status pode achar que ele começou (antes da NOD-416 começava).
+  // Revisão 3 do PR #623: a criada vem pelo id que o lote devolve (na ordem dos criar_tarefa), não pelo título.
+  let k = 0;
+  for (const o of ops) {
+    if (o.tipo !== "criar_tarefa") continue;
+    const id = r.data.criadas?.[k++] ?? null;
+    if (!o.agente || o.status) continue;
+    const t = id ? quadro?.tarefas.find((x) => x.id === id) : undefined;
+    const col = t ? quadro?.colunas.find((c) => c.id === t.status)?.nome : undefined;
+    if (t && !t.turnoId) partes.push(`"${t.titulo}" ficou no ${col ?? "Backlog"}; para começar, status afazer (mudar_tarefa).`);
+  }
   if (r.data.comentario) {
     const juntados = r.data.juntados ?? 0;
     if (!r.data.seguradas) partes.push(comecaram.length ? `Acionou: ${comecaram.map((c) => c.agenteNome).join(", ")}${juntados ? ` (${juntados === 1 ? "um já estava" : `${juntados} já estavam`} na fila para esta tarefa e o comentário se juntou ao trabalho dele)` : ""}.` : "Ninguém foi acionado: o comentário aciona o responsável da tarefa e os @nomes de outros bots do quadro, nunca quem escreveu.");
@@ -144,8 +156,9 @@ export const gerirQuadro: CasoNod<Deps, "gerir_quadro"> = async (deps, input) =>
   if (r.data.ajustada) partes.push("Um passo de coluna foi para a posição válida mais próxima: as colunas só mudam de lugar dentro do próprio grupo.");
   if (quadro?.cumpridoEm) partes.push(`Meta cumprida: ${quadro.resumo ?? ""}`.trim());
   if (lote && !desfeito) partes.push(`A pessoa vê um Desfazer; para desfazer você mesmo: {tipo: "desfazer", lote: "${lote.id}"}.`);
-  // NOD-430: o link de cada tarefa tocada (abre o quadro do anfitrião com ela aberta), para a resposta à pessoa.
-  const tocadas = new Set(lote?.tarefaIds ?? (r.data.comentario ? [r.data.comentario.tarefaId] : []));
+  // NOD-430: o link de cada tarefa tocada (abre o quadro do anfitrião com ela aberta), para a resposta à pessoa. A movida
+  // (NOD-416) não tem lote: o link é o dela no quadro de destino.
+  const tocadas = new Set(lote?.tarefaIds ?? (r.data.comentario ? [r.data.comentario.tarefaId] : r.data.movida ? [r.data.movida.tarefaId] : []));
   const tarefas = quadro && !desfeito ? linksDasTarefas(quadro, tocadas) : [];
   if (tarefas.length) partes.push(`Na resposta, cite cada tarefa pelo link (o título de cada uma está em tarefas): ${tarefas.map((t) => `[${t.codigo}](${t.link})`).join(", ")}${quadro && quadro.agenteId !== input.agenteId ? ` (no quadro do ${quadro.agenteNome})` : ""}.`);
   return {
@@ -157,6 +170,8 @@ export const gerirQuadro: CasoNod<Deps, "gerir_quadro"> = async (deps, input) =>
       instrucao: partes.join(" "),
       ...(tarefas.length ? { tarefas } : {}),
       ...(r.data.ajustada ? { ajustada: true } : {}),
+      // O código novo estruturado, como a rota devolve em `movida` (paridade, QA do PR #623).
+      ...(r.data.movida ? { movida: { tarefa_id: r.data.movida.tarefaId, codigo: r.data.movida.codigo, codigo_antigo: r.data.movida.codigoAntigo } } : {}),
     },
     events: r.events,
   };

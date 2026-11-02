@@ -91,6 +91,17 @@ export const ACOES_QUADRO = [
     casoDeUso: "quadro.desfazer",
   },
   {
+    // NOD-416 (ADR-144): mudar a tarefa de quadro. Sem lote nem Desfazer, mas não aciona ninguém e volta com outro
+    // mover: "muda". O código antigo continua abrindo; o histórico vai junto.
+    id: "quadro.mover_tarefa",
+    titulo: "Mudar a tarefa para o quadro de outro bot",
+    schema: objeto({ tarefa: P.tarefa, quadro: P.quadro }, ["tarefa", "quadro"]),
+    risco: "muda",
+    cartaoNoChat: false,
+    chat: vivo,
+    casoDeUso: "quadro.mover_tarefa",
+  },
+  {
     // NOD-415 (ADR-141): virar quadro e voltar. Arriscada: sem Desfazer. A tela confirma antes. NOD-430: pela conversa,
     // qualquer bot pede (o do próprio quadro ou de outro), num turno limpo da pessoa, com o nome do dono em `bot` — e vira
     // o card 'quadro_exclusao' (src/use-cases/quadro-exclusao.ts); no automático/total o modo confirma sozinho.

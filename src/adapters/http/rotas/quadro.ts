@@ -1,6 +1,7 @@
-import { EXECUTORES_QUADRO } from "../../../use-cases/acoes/quadro.ts";
+import { ErroDoMover, EXECUTORES_QUADRO } from "../../../use-cases/acoes/quadro.ts";
 import { verComentarios } from "../../../use-cases/comentar-tarefa.ts";
-import { verQuadro } from "../../../use-cases/quadro.ts";
+import { historicoDaTarefa, listarQuadros, verQuadro, verTarefaPorCodigo } from "../../../use-cases/quadro.ts";
+import { TABELA_ERROS } from "../erros.ts";
 import type { Rota } from "../roteador.ts";
 import { corpoObjeto, criarExecutor, type DepsRotas } from "./executar-caso.ts";
 
@@ -11,6 +12,17 @@ const CID = "(?<cid>[^/]+)";
 /** O id da coluna (o nome também serve, como na conversa). O roteador já decodificou: decodificar de novo quebra "100%". */
 const coluna = (cid: string | undefined) => cid ?? "";
 const texto = (v: unknown) => (typeof v === "string" ? v : undefined);
+
+/**
+ * Revisão 2 do PR #623: a recusa do mover que a tela distingue sai com a chave como `motivo` (lista branca, como a NOD-346
+ * na Minha conta); a frase segue a da tabela e qualquer outra causa fica só no log (ADR-002). Revisão 7: a chave vem
+ * tipada no erro (ErroDoMover), não é deduzida do texto da causa; um erro qualquer com o mesmo texto não ganha motivo.
+ */
+export function motivoDoMover(erro: unknown): { status: number; corpo: { codigo: string; mensagem: string; motivo: string } } | null {
+  if (!(erro instanceof ErroDoMover)) return null;
+  const { status, mensagem } = TABELA_ERROS[erro.codigo];
+  return { status, corpo: { codigo: erro.codigo, mensagem, motivo: erro.motivo } };
+}
 
 /**
  * A aba Quadro de um bot (definido em 2026-10-31, NOD-442, ADR-135). Cada mutação é um lote de uma ação pelo executor
@@ -61,6 +73,26 @@ export function rotasQuadro(d: DepsRotas): Rota[] {
     { metodo: "POST", acao: "quadro.comentar", padrao: new RegExp(`^/agentes/${ID}/quadro/tarefas/${TID}/comentarios$`), async handler(ctx) {
       const c = corpoObjeto(await ctx.corpo());
       ctx.json(201, await executar(ctx.escopo, EXECUTORES_QUADRO["quadro.comentar"], { ...base(ctx.params.id ?? ""), tarefa: ctx.params.tid ?? "", texto: c.texto as string }));
+    } },
+    // NOD-416 (ADR-144): mudar de quadro, o histórico, o link pelo código (?tarefa=ZE-12) e a lista do "Mover para…".
+    { metodo: "POST", acao: "quadro.mover_tarefa", padrao: new RegExp(`^/agentes/${ID}/quadro/tarefas/${TID}/mover$`), async handler(ctx) {
+      const c = corpoObjeto(await ctx.corpo());
+      try {
+        ctx.json(200, await executar(ctx.escopo, EXECUTORES_QUADRO["quadro.mover_tarefa"], { ...base(ctx.params.id ?? ""), tarefa: ctx.params.tid ?? "", quadro: c.quadro as string }));
+      } catch (erro) {
+        const r = motivoDoMover(erro);
+        if (!r) throw erro;
+        ctx.json(r.status, r.corpo);
+      }
+    } },
+    { metodo: "GET", padrao: new RegExp(`^/agentes/${ID}/quadro/tarefas/${TID}/historico$`), async handler(ctx) {
+      ctx.json(200, await executar(ctx.escopo, historicoDaTarefa, { agenteId: ctx.params.id ?? "", tarefaId: ctx.params.tid ?? "" }));
+    } },
+    { metodo: "GET", padrao: /^\/quadro\/tarefas\/(?<codigo>[^/]+)$/, async handler(ctx) {
+      ctx.json(200, await executar(ctx.escopo, verTarefaPorCodigo, { codigo: ctx.params.codigo ?? "" }));
+    } },
+    { metodo: "GET", padrao: /^\/quadros$/, async handler(ctx) {
+      ctx.json(200, await executar(ctx.escopo, listarQuadros, {}));
     } },
     // NOD-448 (ADR-140): as colunas.
     { metodo: "POST", acao: "quadro.criar_coluna", padrao: new RegExp(`^/agentes/${ID}/quadro/colunas$`), async handler(ctx) {

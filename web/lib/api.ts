@@ -41,7 +41,7 @@ import type { ConfirmarEmailDto, ExportacaoDto, FormasDto, MinhaContaDto, Perfil
 import type { ExecucaoRotina } from "../../src/contracts/rotina.ts";
 import type { MembroSala, Sala } from "../../src/contracts/sala.ts";
 import type { FaixaParada, Turno } from "../../src/contracts/turno.ts";
-import type { ComentarioDto, ComentarioTarefa, GrupoColuna, LoteQuadro, QuadroDto, StatusTarefa } from "../../src/contracts/quadro.ts";
+import type { ComentarioDto, ComentarioTarefa, EntradaHistoricoDto, GrupoColuna, LoteQuadro, QuadroDaPessoaDto, QuadroDto, StatusTarefa, TarefaPorCodigoDto } from "../../src/contracts/quadro.ts";
 import type { AtividadeTarefa } from "../../src/contracts/quadro-pela-conversa.ts";
 import type { EventoLinha, TaxaDeAbertura, TrabalhoDetalheDto, TrabalhosDto } from "../../src/contracts/trabalho.ts";
 import type { DisponibilidadeLigacao, FalaLigacao, Ligacao, LigacaoCriada } from "../../src/contracts/ligacao.ts";
@@ -185,7 +185,8 @@ export function decidirPorVoz(tenantId: string, decisaoId: string, corpo: Decisa
 }
 
 /** NOD-442: a resposta de uma mutação do quadro (a rota devolve o lote inteiro; a web lê o quadro e o lote). */
-export type MutacaoQuadro = { ok: true; quadro: QuadroDto | null; lote: LoteQuadro | null; desfeito: boolean };
+/** `comecaram`: os bots que este lote fez começar (revisão do PR #623: o recibo diz "Ada começou", com Desfazer). */
+export type MutacaoQuadro = { ok: true; quadro: QuadroDto | null; lote: LoteQuadro | null; desfeito: boolean; comecaram?: { tarefaId: string; agenteId: string; agenteNome: string; turnoId: string }[] };
 
 export function criarApi(escopo: Escopo) {
   const base = `/api/t/${encodeURIComponent(escopo.tenantId)}`;
@@ -264,8 +265,19 @@ export function criarApi(escopo: Escopo) {
     criarQuadro: (agenteId: string, campos: { meta?: string | null; prazo?: string | null }) => post<MutacaoQuadro>(`agentes/${encodeURIComponent(agenteId)}/quadro`, campos),
     editarQuadro: (agenteId: string, campos: { meta?: string | null; prazo?: string | null }) => patch<MutacaoQuadro>(`agentes/${encodeURIComponent(agenteId)}/quadro`, campos),
     removerQuadro: (agenteId: string) => del<MutacaoQuadro>(`agentes/${encodeURIComponent(agenteId)}/quadro`),
-    mudarTarefa: (agenteId: string, tarefaId: string, campos: { status?: StatusTarefa; agente?: string | null; titulo?: string; descricao?: string; sem_iniciar?: boolean }) =>
+    mudarTarefa: (agenteId: string, tarefaId: string, campos: { status?: StatusTarefa | string; agente?: string | null; titulo?: string; descricao?: string; sem_iniciar?: boolean }) =>
       patch<MutacaoQuadro>(`agentes/${encodeURIComponent(agenteId)}/quadro/tarefas/${encodeURIComponent(tarefaId)}`, campos),
+    /** NOD-416 (ADR-144): sem status, a tarefa cai no Backlog e ninguém começa. */
+    criarTarefa: (agenteId: string, campos: { titulo: string; descricao?: string; status?: string; agente?: string | null }) =>
+      post<MutacaoQuadro>(`agentes/${encodeURIComponent(agenteId)}/quadro/tarefas`, campos),
+    /** NOD-416: muda a tarefa para o quadro de outro bot (sem lote nem Desfazer; ninguém começa). */
+    moverTarefa: (agenteId: string, tarefaId: string, quadro: string) =>
+      post<MutacaoQuadro & { movida?: { tarefaId: string; codigo: string; codigoAntigo: string } }>(`agentes/${encodeURIComponent(agenteId)}/quadro/tarefas/${encodeURIComponent(tarefaId)}/mover`, { quadro }),
+    historicoTarefa: (agenteId: string, tarefaId: string) =>
+      get<{ historico: EntradaHistoricoDto[] }>(`agentes/${encodeURIComponent(agenteId)}/quadro/tarefas/${encodeURIComponent(tarefaId)}/historico`),
+    /** NOD-416: o link `?tarefa=ZE-12` (o código antigo também resolve, para a tarefa que mudou de quadro). */
+    tarefaPorCodigo: (codigo: string) => get<TarefaPorCodigoDto>(`quadro/tarefas/${encodeURIComponent(codigo)}`),
+    quadros: () => get<{ quadros: QuadroDaPessoaDto[] }>("quadros"),
     responderTarefa: (agenteId: string, tarefaId: string, resposta: string) =>
       post<MutacaoQuadro>(`agentes/${encodeURIComponent(agenteId)}/quadro/tarefas/${encodeURIComponent(tarefaId)}/resposta`, { resposta }),
     /** NOD-417: os comentários da tarefa; o da pessoa aciona o responsável e @nome aciona outro bot. */

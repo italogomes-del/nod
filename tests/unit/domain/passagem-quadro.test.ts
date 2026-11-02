@@ -14,7 +14,7 @@ const TID = "10000000-0000-4000-8000-000000000001";
 
 const tarefa = (o: Partial<TarefaQuadro> = {}): TarefaQuadro => ({
   id: TID, quadroId: "q", titulo: "Login", descricao: "", status: "fazendo", voltarPara: null, agenteId: ZE.id, ordem: 1,
-  linearId: null, linearUrl: null, prUrl: null, pergunta: null, resposta: null, deFora: false, turnoId: null, criadoEm: AGORA, mudadoEm: AGORA, terminadaEm: null, ...o,
+  linearId: null, linearUrl: null, prUrl: null, pergunta: null, resposta: null, deFora: false, turnoId: null, criadoEm: AGORA, mudadoEm: AGORA, terminadaEm: null, numero: null, ...o,
 });
 
 const comPassagem = (id: string, responsavel: string | null, instrucoes?: string): ColunaQuadro[] =>

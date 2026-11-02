@@ -4,7 +4,7 @@ import { entradaDoComentario, mencionados, quemAcionar } from "../domain/comenta
 import { colunasDe, papelDe } from "../domain/colunas.ts";
 import { podeRepassar, proximaProfundidade } from "../domain/profundidade.ts";
 import { andando, quemFez, resolverTarefa } from "../domain/quadro.ts";
-import { abrirTurno, acharQuadro, agentesDaPessoa, falhaDoAchado, pedidoDaPessoa, type Comecou, eventoQuadro, experimentoLigado, montarQuadro, paraAgenteDoQuadro, type PedidoLote, type ResultadoLote } from "./quadro.ts";
+import { abrirTurno, acharQuadro, agentesDaPessoa, codigosAntigosDaqui, falhaDoAchado, pedidoDaPessoa, type Comecou, eventoQuadro, experimentoLigado, montarQuadro, paraAgenteDoQuadro, type PedidoLote, type ResultadoLote } from "./quadro.ts";
 import type { ComentarioDto } from "../contracts/quadro.ts";
 import type { AtividadeTarefa } from "../contracts/quadro-pela-conversa.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
@@ -47,7 +47,9 @@ export async function comentarTarefa(deps: Deps, p: PedidoLote, op: Comentar, ex
     if (meu && (meu.pararSolicitadoEm != null || meu.estado === "interrompido")) return falha("entrada_invalida", "este turno foi parado: a tarefa mudou de mão ou foi desfeita");
   }
   const tarefas = await repo.tarefas(q.id);
-  const achada = resolverTarefa(tarefas.map((t) => ({ ...t, nova: false })), op.tarefa, { colunas: colunasDe(q), agentes: agentes.map(paraAgenteDoQuadro) });
+  // NOD-416: a tarefa também pelo código (ZE-12) e pelo código que ela teve em outro quadro.
+  const codigosAntigos = await codigosAntigosDaqui(deps, [op], q, tarefas);
+  const achada = resolverTarefa(tarefas, op.tarefa, { prefixo: q.prefixo, codigosAntigos, colunas: colunasDe(q), agentes: agentes.map(paraAgenteDoQuadro) });
   if ("erro" in achada) return falha(achada.erro.includes("não está no quadro") ? "nao_encontrado" : "entrada_invalida", achada.erro);
   let tarefa = tarefas.find((t) => t.id === achada.id)!;
 

@@ -13,10 +13,11 @@
 import { direcaoDaTroca, ehModo, modoPelaTecla, movimentoDaTroca, type ModoDaConversa } from "./quadro.ts";
 import { comColunas, fraseDoErroDeColuna, nomeRepetido, passoDeMover, pedeConfirmacao, porqueNaoRecebeCard, porqueNaoRemove, reciboDeMover, saidaComErroDesiste, seletorDoFocoDaColuna, soltarEm, type EdicaoDeColuna, type Lado } from "./colunas.ts";
 import { ErroApi } from "./erro-api.ts";
-import type { GrupoColuna, QuadroDto } from "../../src/contracts/quadro.ts";
+import { anunciarEm } from "./posicao-da-lista.ts";
+import type { EntradaHistoricoDto, GrupoColuna, QuadroDaPessoaDto, QuadroDto, TarefaDto } from "../../src/contracts/quadro.ts";
 import type { ConversaDto, RespostaMutacao } from "../../src/contracts/api.ts";
 import type { MutacaoQuadro } from "./api.ts";
-import { acesos, historicoDaFaixa, respostaDoBot, tarefaNoQuadro, type Faixa } from "./quadro-dados.ts";
+import { RESP_VOCE, acesos, fraseDoErroDoMover, reciboDaNovaTarefa, codigoNaUrl, destinosDaTarefa, historicoDaFaixa, respostaDoBot, tarefaNoQuadro, type Faixa } from "./quadro-dados.ts";
 import { quadroVazio, type Filtro, type Html } from "../telas/quadro.ts";
 import { faixaDoQuadro, pilulaDoQuadro, quadroCarregando, quadroComErro, quadroDaMeta, semQuadro, tarefaAberta, type AgenteDoQuadro, type TrocaDaFaixa } from "../telas/quadro-real.ts";
 import { criarComentariosNaTela, type ApiDosComentarios } from "./comentarios-na-tela.ts";
@@ -40,14 +41,22 @@ export interface ApiDoQuadro extends ApiDosComentarios {
   removerColuna?(agenteId: string, coluna: string, destino?: string): Promise<MutacaoQuadro>;
   /** ADR-142: a passagem da coluna e o card arrastado (o mesmo mudar_tarefa; `sem_iniciar` = "Não iniciar ainda"). */
   definirPassagem?(agenteId: string, coluna: string, p: { agente: string | null; instrucoes: string | null }): Promise<MutacaoQuadro>;
-  mudarTarefa?(agenteId: string, tarefaId: string, campos: { status?: string; sem_iniciar?: boolean }): Promise<MutacaoQuadro>;
+  /** NOD-416 (ADR-144): criar (cai no Backlog), mudar status e responsável, mudar de quadro, o histórico e os quadros. */
+  criarTarefa?(agenteId: string, campos: { titulo: string }): Promise<MutacaoQuadro>;
+  mudarTarefa?(agenteId: string, tarefaId: string, campos: { status?: string; agente?: string | null; sem_iniciar?: boolean }): Promise<MutacaoQuadro>;
+  moverTarefa?(agenteId: string, tarefaId: string, quadro: string): Promise<MutacaoQuadro & { movida?: { codigo: string; codigoAntigo: string } }>;
+  historicoTarefa?(agenteId: string, tarefaId: string): Promise<{ historico: EntradaHistoricoDto[] }>;
+  quadros?(): Promise<{ quadros: QuadroDaPessoaDto[] }>;
 }
 
 /** NOD-442: o que o quadro de verdade precisa do main. Sem isto (os testes da NOD-429), a vista é o quadro vazio. */
 export interface DadosDoQuadro {
   api: () => ApiDoQuadro | null;
   agente: AgenteDoQuadro;
-  /** ADR-142: os agentes que podem receber a passagem de uma coluna. Sem isto, o cabeçalho não mostra a passagem. */
+  /**
+   * Os bots da pessoa: os que podem receber a passagem de uma coluna (ADR-142; sem isto, o cabeçalho não mostra a passagem)
+   * e os que podem ser o Responsável da tarefa aberta (NOD-416; sem isto, ele fica só leitura).
+   */
   agentes?: () => readonly { id: string; nome: string }[];
   hora: (em: number) => string;
   /** Quanto a faixa fica à vista depois da resposta (ms). */
@@ -56,6 +65,13 @@ export interface DadosDoQuadro {
   juntarEm?: number;
   /** NOD-415: a confirmação antes de remover o quadro (padrão: window.confirm). */
   confirmar?: (texto: string) => boolean;
+  /** NOD-416: o código da tarefa aberta vai para a URL (`?tarefa=ZE-12`); null = voltou ao quadro. */
+  naUrl?: (codigo: string | null) => void;
+  /**
+   * QA do PR #623 (D4): depois de mover, leva à conversa do bot destino e abre a tarefa lá (o mesmo caminho do link).
+   * false = o bot não está à mão (fica no quadro de origem, com o aviso).
+   */
+  irParaTarefa?: (agenteId: string, tarefaId: string) => boolean;
 }
 
 /** Os pedaços do palco que são "a conversa": saem juntos quando o Quadro entra. */
@@ -76,6 +92,11 @@ export interface QuadroNaTela {
   /** NOD-430: o código da tarefa num chat — abre a tarefa no quadro de `agenteId` quando a conversa dele estiver na tela. */
   abrirTarefaDe(agenteId: string, tarefaId: string): void;
   modo(): ModoDaConversa;
+  /**
+   * NOD-416: o link `?tarefa=`: abre a tarefa deste bot (a conversa dele já à vista) assim que o quadro chegar; o modo vira
+   * Quadro. Antes de o quadro ser liberado (as preferências ainda não chegaram), o pedido espera o próximo `sincronizar`.
+   */
+  abrirTarefa(agenteId: string, tarefaId: string): void;
 }
 
 export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; aoTrocar?: (m: ModoDaConversa) => void; dados?: DadosDoQuadro } = {}): QuadroNaTela {
@@ -121,14 +142,27 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
   let editandoMeta = false;
   /** NOD-448: o pedaço da edição das colunas que está aberto (menu, renomear, remover, coluna nova, a folha do celular). */
   let edicao: EdicaoDeColuna | null = null;
-  /** NOD-430: a tarefa pedida pelo código num chat (`nod-tarefa:`): abre quando a conversa do dono dela estiver na tela. */
+  /** NOD-416: o histórico da tarefa aberta (null = carregando), os quadros do "Mover para…" e o link que espera o quadro. */
+  let histTarefa: EntradaHistoricoDto[] | null = null;
+  let quadros: QuadroDaPessoaDto[] | null = null;
+  let leituraHist = 0;
   let pendente: { agenteId: string; tarefaId: string } | null = null;
+  /** QA do PR #623 (D4): o aviso do mover, dito no quadro destino quando a tarefa movida abre lá. */
+  let avisoDoMover: string | null = null;
+  /** Revisão 7 do PR #623: a coluna com responsável escolhida no Status da tarefa aberta, esperando "Confirmar · Não iniciar ainda". */
+  let soltarNaAberta: { tarefa: string; coluna: string } | null = null;
+  /** O quadro escolhido no "Mover para…" da tarefa aberta: um redesenho (o histórico, os comentários) não o apaga. */
+  let moverPara: string | null = null;
+  /** NOD-430: a tarefa pedida pelo código num chat (`nod-tarefa:`): abre quando a conversa do dono dela estiver na tela. */
+  let pedidoDoChat: { agenteId: string; tarefaId: string } | null = null;
   /** NOD-417: os comentários da tarefa aberta. */
   const coms = criarComentariosNaTela({ api: () => dd?.api() ?? null, redesenhar: () => { if (aberta) desenharVista(); } });
 
   function zerarDados(): void {
+    if (aberta) dd?.naUrl?.(null);
+    histTarefa = null; quadros = null; leituraHist++;
     agenteId = null; q = null; carga = "nada"; aberta = null; acesas = new Set(); faixa = { tipo: "nada" }; loteAntes = null;
-    historico = []; histAberto = false; leitura++; leituraConversa++; dica = []; editandoMeta = false; edicao = null; coms.fechar();
+    historico = []; histAberto = false; leitura++; leituraConversa++; dica = []; editandoMeta = false; edicao = null; soltarNaAberta = null; coms.fechar();
     if (timerReler) clearTimeout(timerReler);
     if (timerRecolher) clearTimeout(timerRecolher);
     timerReler = timerRecolher = null;
@@ -140,7 +174,11 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     if (carga === "erro") return quadroComErro();
     if (!q) return semQuadro(nome, Date.now());
     const t = tarefaNoQuadro(q, aberta);
-    if (t) return tarefaAberta({ t, q, agente: dd.agente, comentarios: coms.html(t.id, dd.agente, dd.hora) });
+    if (t) {
+      const resp = dd.agentes?.();
+      const soltar = soltarNaAberta?.tarefa === t.id ? { soltar: soltarNaAberta.coluna } : {};
+      return tarefaAberta({ t, q, agente: dd.agente, comentarios: coms.html(t.id, dd.agente, dd.hora), historico: dd.api()?.historicoTarefa ? histTarefa : undefined, ...(resp ? { responsaveis: resp } : {}), ...(quadros ? { destinos: destinosDaTarefa(quadros, q.id), moverPara } : {}), ...soltar });
+    }
     const agentes = dd.agentes && dd.api()?.definirPassagem ? dd.agentes() : undefined;
     return quadroDaMeta({ q, nome, agente: dd.agente, filtro, alternadas, acesas, edicao, agora: Date.now(), editandoMeta, ...(agentes ? { agentes } : {}) });
   }
@@ -155,7 +193,7 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     if (!dd) { v.innerHTML = quadroVazio({ nome, filtro, alternadas }); return; }
     let conteudo = v.querySelector<HTMLElement>(":scope > .qd-conteudo");
     if (!conteudo) {
-      v.innerHTML = `<div class="qd-conteudo"></div><footer class="qc-wrap">${pilulaDoQuadro({ meta: q?.meta ?? null, nome })}</footer>`;
+      v.innerHTML = `<div class="qd-conteudo"></div><footer class="qc-wrap">${pilulaDoQuadro({ meta: q?.meta ?? null, nome })}<p class="qd-sr qd-anuncio" role="status" aria-live="polite"></p></footer>`;
       conteudo = v.querySelector<HTMLElement>(":scope > .qd-conteudo");
     }
     if (!conteudo) return;
@@ -220,8 +258,187 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     dica = [];
     q = novo;
     carga = "ok";
-    if (aberta && !tarefaNoQuadro(q, aberta)) aberta = null;
+    if (aberta && !tarefaNoQuadro(q, aberta)) { aberta = null; dd?.naUrl?.(null); }
+    // NOD-416: o link `?tarefa=` esperava este quadro.
+    let linkSemTarefa = false;
+    let avisoSemTarefa: string | null = null;
+    if (pendente && pendente.agenteId === agenteId) {
+      const id = pendente.tarefaId;
+      pendente = null;
+      const aviso = avisoDoMover;
+      avisoDoMover = null;
+      if (tarefaNoQuadro(q, id)) {
+        abrirTarefa(id);
+        if (aviso) { mudarFaixa({ tipo: "resposta", texto: aviso, loteId: null, mensagemId: "" }); anunciar(aviso); }
+        return;
+      }
+      linkSemTarefa = true;
+      avisoSemTarefa = aviso;
+    }
+    if (aberta && novas.has(aberta)) void lerHistorico();
     desenharVista();
+    // Revisão 7 do PR #623: a tarefa do link saiu deste quadro entre a busca do código e a leitura (mudou, foi apagada).
+    // O quadro abre e o leitor de tela ouve por que a tarefa não abriu, em vez de silêncio.
+    // Revisão 8 do PR #623: se foi um mover que trouxe a pessoa até aqui (e a tarefa já saiu de novo, numa corrida), o
+    // aviso do mover também é dito e fica na faixa: ela sabe que o mover deu certo e por que a tarefa não abriu.
+    if (avisoSemTarefa) mudarFaixa({ tipo: "resposta", texto: avisoSemTarefa, loteId: null, mensagemId: "" });
+    if (linkSemTarefa) anunciar(avisoSemTarefa ? `${avisoSemTarefa}. Tarefa não encontrada neste quadro.` : "Tarefa não encontrada neste quadro.");
+  }
+
+  /** NOD-416: o histórico da tarefa aberta (relido quando ela muda). Leitura velha (outra tarefa) é descartada. */
+  async function lerHistorico(): Promise<void> {
+    const a = dd?.api();
+    if (!a?.historicoTarefa || !agenteId || !aberta) return;
+    const minha = ++leituraHist;
+    const de = agenteId;
+    const id = aberta;
+    try {
+      const r = await a.historicoTarefa(de, id);
+      if (minha !== leituraHist || de !== agenteId || id !== aberta) return;
+      histTarefa = r.historico;
+    } catch {
+      if (minha !== leituraHist) return;
+      histTarefa = [];
+    }
+    desenharVista();
+  }
+
+  /** Os quadros da pessoa, uma vez por conversa (o "Mover para…" só aparece com outro quadro). */
+  async function lerQuadros(): Promise<void> {
+    const a = dd?.api();
+    if (!a?.quadros || quadros) return;
+    const c = chave;
+    try {
+      const r = await a.quadros();
+      if (c !== chave) return;
+      quadros = r.quadros;
+      if (aberta) desenharVista();
+    } catch { /* sem a lista, o campo não aparece */ }
+  }
+
+  /** NOD-416: uma mudança na tarefa (criar, status, responsável): o lote volta com Desfazer, na faixa. */
+  async function mudarTarefa(fazer: (a: ApiDoQuadro, de: string) => Promise<MutacaoQuadro> | undefined, recibo: string | ((r: MutacaoQuadro) => string)): Promise<boolean> {
+    const a = dd?.api();
+    // Revisão 5 do PR #623: a mudança descartada (outra no ar) redesenha a tarefa, para o select não mostrar o que não valeu.
+    if (!a || !agenteId || mexendo) { desenharVista(); return false; }
+    const c = chave;
+    const de = agenteId;
+    mexendo = true;
+    try {
+      const p = fazer(a, de);
+      if (!p) { desenharVista(); return false; }
+      const r = await p;
+      if (c !== chave || de !== agenteId) return false;
+      aplicarQuadro(r.quadro);
+      mudarFaixa({ tipo: "resposta", texto: typeof recibo === "string" ? recibo : recibo(r), loteId: r.lote && !r.lote.desfeitoEm ? r.lote.id : null, mensagemId: "" });
+      return true;
+    } catch (e) {
+      if (c !== chave) return false;
+      const semRede = e instanceof ErroApi && (e.codigo === "servidor_indisponivel" || e.codigo === "sem_internet");
+      mudarFaixa({ tipo: "erro", texto: semRede ? "Sem conexão com o servidor agora. Tente de novo em instantes." : "Não deu para mudar a tarefa: o quadro mudou. Relendo." });
+      if (!semRede) void lerQuadro();
+      else desenharVista();
+      return false;
+    } finally {
+      mexendo = false;
+    }
+  }
+
+  /**
+   * Revisão do PR #623: o ponto ÚNICO por onde o Status e o Responsável da tarefa aberta mudam. Pôr A fazer, ou escolher
+   * um responsável numa tarefa em A fazer, faz o bot começar: aí o recibo diz "<Agente> começou", com o Desfazer do lote
+   * (que para o turno). Nos outros casos, o recibo de sempre. Revisão 7 do PR #623 (o merge com o PR #622, NOD-417): o
+   * Status numa coluna com responsável que aciona (`pedeConfirmacao`) mostra antes o "Confirmar · Não iniciar ainda" do
+   * card solto; `semIniciar` (o "Não iniciar ainda") muda e passa sem acionar, como no quadro.
+   */
+  function mudarNaTarefaAberta(t: TarefaDto, campos: { status: string } | { agente: string | null }, confirmado: { semIniciar: boolean } | null = null): void {
+    const ehStatus = "status" in campos;
+    const col = ehStatus ? colunaDe(campos.status) : undefined;
+    if (ehStatus && col && pedeConfirmacao(col) && !confirmado) {
+      soltarNaAberta = { tarefa: t.id, coluna: col.id };
+      desenharVista();
+      doc.querySelector<HTMLElement>('#quadro .qd-t-soltar [data-act="col-soltar"]')?.focus();
+      return;
+    }
+    soltarNaAberta = null;
+    const semIniciar = confirmado?.semIniciar === true;
+    const recibo = ehStatus
+      ? (col?.responsavel ? reciboDeMover(t.titulo, col, semIniciar) : `${t.titulo}: ${col?.nome ?? campos.status}`)
+      : `${t.titulo}: com ${campos.agente ? (dd?.agente(campos.agente)?.nome ?? "outro bot") : "ninguém"}`;
+    const comecou = (r: MutacaoQuadro): string => {
+      const nomes = [...new Set((r.comecaram ?? []).map((c) => c.agenteNome))];
+      return nomes.length ? `${nomes.join(" e ")} ${nomes.length === 1 ? "começou" : "começaram"}` : recibo;
+    };
+    const foco = ehStatus ? "qd-t-status" : "qd-t-resp";
+    const envio = semIniciar ? { ...campos, sem_iniciar: true } : campos;
+    void mudarTarefa((a, de) => a.mudarTarefa?.(de, t.id, envio), comecou).then((ok) => { if (ok) doc.getElementById(foco)?.focus(); });
+  }
+
+  /** Revisão 7 do PR #623: desiste da confirmação do Status (Esc, clique fora): o select volta à coluna de agora. */
+  function desistirDoSoltarNaAberta(): void {
+    soltarNaAberta = null;
+    desenharVista();
+    doc.getElementById("qd-t-status")?.focus();
+  }
+
+  /**
+   * Status e Responsável (revisão do PR #623, WCAG 3.2.2): o que o teclado escolhe fica pendente e só vale no Enter ou ao
+   * sair do campo; a escolha com o mouse (o popup do select) vale na hora.
+   */
+  function aplicarCampoDaTarefa(el: HTMLSelectElement): void {
+    delete el.dataset["teclado"];
+    const t = tarefaNoQuadro(q, el.dataset["id"] ?? "");
+    if (!t) return;
+    if (el.dataset["campo"] === "status") {
+      if (el.value !== t.status) mudarNaTarefaAberta(t, { status: el.value });
+    } else {
+      if (el.value === RESP_VOCE) return; // "Você" (Precisa de você) não é bot: nada a mudar.
+      const novo = el.value || null;
+      if (novo !== t.agenteId) mudarNaTarefaAberta(t, { agente: novo });
+    }
+  }
+  const ehCampoDaTarefa = (el: unknown): el is HTMLSelectElement =>
+    el instanceof HTMLSelectElement && !!el.closest("#quadro .qd-conteudo") && (el.dataset["campo"] === "status" || el.dataset["campo"] === "agente");
+
+  /**
+   * NOD-416: a tarefa vai para o quadro de outro bot. Não tem lote nem Desfazer e ninguém começa. A pessoa escolhe o
+   * quadro e confirma no botão Mover (revisão do PR #623). Este quadro é relido (a tarefa sai dele) e a faixa diz o
+   * código novo.
+   */
+  async function moverDeQuadro(tarefaId: string, destino: string): Promise<void> {
+    const a = dd?.api();
+    const t = tarefaNoQuadro(q, tarefaId);
+    const alvo = quadros?.find((x) => x.id === destino);
+    if (!a?.moverTarefa || !agenteId || !t || !alvo || mexendo) return;
+    const c = chave;
+    const de = agenteId;
+    mexendo = true;
+    try {
+      const r = await a.moverTarefa(de, tarefaId, destino);
+      if (c !== chave || de !== agenteId) return;
+      aberta = null;
+      dd?.naUrl?.(null);
+      const texto = `${t.titulo} foi para o quadro de ${alvo.agenteNome}${r.movida ? ` como ${r.movida.codigo} (${r.movida.codigoAntigo} continua abrindo)` : ""}`;
+      // QA do PR #623 (D4): a pessoa vai junto com a tarefa, aberta no quadro destino; o aviso é dito lá.
+      avisoDoMover = texto;
+      if (dd?.irParaTarefa?.(alvo.agenteId, tarefaId)) return;
+      avisoDoMover = null;
+      mudarFaixa({ tipo: "resposta", texto, loteId: null, mensagemId: "" });
+      await lerQuadro();
+      if (c !== chave || de !== agenteId || aberta) return;
+      // Revisão 5 do PR #623 (a11y): o select que tinha o foco sumiu com a tarefa. O foco vai para o quadro (o primeiro
+      // card à vista, ou o quadro inteiro, vazio) e o leitor de tela ouve para onde ela foi.
+      focarNoQuadro();
+      anunciar(texto);
+    } catch (e) {
+      if (c !== chave) return;
+      // Revisão 2 do PR #623: no 4xx, o porquê do servidor (o motivo da lista branca ou a frase dele), não um genérico.
+      const f = fraseDoErroDoMover(e instanceof ErroApi ? e : null);
+      mudarFaixa({ tipo: "erro", texto: f.texto });
+      if (f.reler) void lerQuadro();
+    } finally {
+      mexendo = false;
+    }
   }
 
   function pedirReleitura(): void {
@@ -580,32 +797,66 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
 
   /** NOD-430: abre a tarefa do quadro de `agente`; se a conversa dele ainda não está na tela, espera o sincronizar. */
   function abrirTarefaDe(agente: string, tarefaId: string): void {
-    pendente = { agenteId: agente, tarefaId };
+    pedidoDoChat = { agenteId: agente, tarefaId };
     abrirPendente();
   }
 
   function abrirPendente(): void {
-    if (!pendente || chave === null || agenteId !== pendente.agenteId) return;
-    const { tarefaId } = pendente;
-    pendente = null;
-    aberta = tarefaId;
-    histAberto = false;
-    if (agenteId) coms.abrir(agenteId, tarefaId);
+    if (!pedidoDoChat || chave === null || agenteId !== pedidoDoChat.agenteId) return;
+    const { tarefaId } = pedidoDoChat;
+    pedidoDoChat = null;
+    marcarAberta(tarefaId);
     if (modo === "quadro") { desenharVista(); void lerQuadro(); } else trocar("quadro");
   }
 
-  function abrirTarefa(id: string): void {
+  /** A tarefa aberta passa a ser `id` (o histórico, a lista do "Mover para…" e os comentários dela são lidos). */
+  function marcarAberta(id: string): void {
     aberta = id;
+    soltarNaAberta = null;
+    moverPara = null;
     histAberto = false;
+    histTarefa = null;
+    const t = tarefaNoQuadro(q, id);
+    if (t) dd?.naUrl?.(codigoNaUrl(t));
+    void lerHistorico();
+    void lerQuadros();
     if (agenteId) coms.abrir(agenteId, id);
+  }
+
+  function abrirTarefa(id: string): void {
+    marcarAberta(id);
     desenharVista();
     doc.getElementById("qd-t-tit")?.focus();
     vista()?.scrollTo?.({ top: 0 });
   }
 
+  /** O foco no quadro: o primeiro card à vista; sem card (quadro vazio, aviso), o conteúdo inteiro. */
+  function focarNoQuadro(): void {
+    const conteudo = vista()?.querySelector<HTMLElement>(":scope > .qd-conteudo");
+    if (!conteudo) return;
+    const card = [...conteudo.querySelectorAll<HTMLElement>('[data-act="abrir-tarefa"]')].find((e) => e.getClientRects().length > 0);
+    if (card) { card.focus(); return; }
+    conteudo.tabIndex = -1;
+    conteudo.focus();
+  }
+
+  /**
+   * O anúncio só para o leitor de tela (`.qd-sr`, polite). A região viva nasce vazia no rodapé com o quadro (que a
+   * regravação do conteúdo não troca): uma região criada já com o texto não é lida por todo leitor de tela. Revisão 6 do
+   * PR #623: esvazia e põe o texto no próximo quadro de animação (o mesmo texto de antes também é lido de novo).
+   */
+  function anunciar(texto: string): void {
+    const el = vista()?.querySelector<HTMLElement>(":scope > .qc-wrap > .qd-anuncio") ?? null;
+    const raf = doc.defaultView?.requestAnimationFrame?.bind(doc.defaultView);
+    anunciarEm(el, texto, (fn) => (raf ? raf(fn) : setTimeout(fn, 0)));
+  }
+
   function voltarAoQuadro(): void {
     const id = aberta;
     aberta = null;
+    soltarNaAberta = null;
+    leituraHist++;
+    dd?.naUrl?.(null);
     coms.fechar();
     desenharVista();
     if (id) vista()?.querySelector<HTMLElement>(`.qd-conteudo [data-act="abrir-tarefa"][data-id="${CSS.escape(id)}"]`)?.focus();
@@ -712,7 +963,7 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
   function sincronizar(s: { chave: string | null; nome: string; agenteId?: string | null }): void {
     // NOD-430 (revisão 1 do PR #627): a conversa do dono da tarefa pedida chegou sem quadro (excluído): o pedido cai aqui,
     // senão a tarefa velha abriria sozinha quando ele ganhasse um quadro novo.
-    if (pendente && s.chave === null && s.agenteId === pendente.agenteId) pendente = null;
+    if (pedidoDoChat && s.chave === null && s.agenteId === pedidoDoChat.agenteId) pedidoDoChat = null;
     // Fora de uma conversa com quadro, e já sem quadro: nada a mexer (o palco é de outra tela).
     if (s.chave === null && chave === null) return;
     if (s.chave !== chave) {
@@ -731,6 +982,11 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     // No meio de uma animação o estado é dela; só o segmento (o cabeçalho pode ter sido regravado) é remarcado.
     if (animacoes.length) marcar();
     else assentar();
+    // O link que chegou antes do quadro liberado: abre agora, na conversa do bot dele; em outra conversa, é esquecido.
+    if (pendente && chave !== null) {
+      if (pendente.agenteId !== agenteId) { pendente = null; avisoDoMover = null; }
+      else if (modo !== "quadro") trocar("quadro");
+    }
     abrirPendente();
   }
 
@@ -743,6 +999,7 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     // NOD-448: clicar fora do menu ou do popover fecha (a coluna nova e a folha fecham pelo Cancelar, Pronto ou Esc).
     const solta = edicao?.tipo === "menu" || edicao?.tipo === "passagem" || edicao?.tipo === "soltar" || edicao?.tipo === "mover" || (edicao?.tipo === "remover" && !edicao.naFolha);
     if (solta && alvo?.closest?.("#quadro") && !alvo.closest(".qd-menu, .qd-pop, .qd-col-mais, .qd-col-passa, .qd-soltar, .qd-card-mover")) { edicao = null; desenharVista(); }
+    if (soltarNaAberta && alvo?.closest?.("#quadro") && !alvo.closest(".qd-t-soltar, #qd-t-status")) desistirDoSoltarNaAberta();
     const el = alvo?.closest?.<HTMLElement>("[data-act]");
     if (!el) return;
     const act = el.dataset["act"];
@@ -751,6 +1008,11 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
       if (act === "abrir-tarefa" && id) { abrirTarefa(id); return; }
       if (act === "tarefa-mover" || act === "tarefa-mover-para") { aoMoverCard(el, act); return; }
       if (act === "voltar-ao-quadro") { voltarAoQuadro(); return; }
+      if (act === "mover-quadro" && id) {
+        const destino = el.closest(".qd-mover")?.querySelector<HTMLSelectElement>('[data-campo="mover"]')?.value ?? "";
+        if (destino) void moverDeQuadro(id, destino);
+        return;
+      }
       if (act === "qd-reler") { carga = "nada"; void lerQuadro(); return; }
       if (act === "editar-meta") { editarMeta(true); return; }
       if (act === "remover-quadro") { void removerQuadro(); return; }
@@ -829,7 +1091,12 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     }
     if (act === "col-remover") { pedirRemover(id, el); return; }
     if (act === "col-passagem") { editar(edicao?.tipo === "passagem" && edicao.coluna === id ? null : { tipo: "passagem", coluna: id }); return; }
-    if (act === "col-soltar" || act === "col-soltar-sem") { moverTarefa(el.dataset["tarefa"] ?? "", id, act === "col-soltar-sem"); return; }
+    if (act === "col-soltar" || act === "col-soltar-sem") {
+      const t = soltarNaAberta && el.closest(".qd-t-soltar") ? tarefaNoQuadro(q, soltarNaAberta.tarefa) : null;
+      if (t) { mudarNaTarefaAberta(t, { status: id }, { semIniciar: act === "col-soltar-sem" }); return; }
+      moverTarefa(el.dataset["tarefa"] ?? "", id, act === "col-soltar-sem");
+      return;
+    }
     if (act === "col-fechar") { fechar(); return; }
     if (act === "col-folha") { editar({ tipo: "ordem" }); return; }
     if (act === "col-fechar-folha") { editar(null, '.qd-so-estreito [data-act="col-folha"]'); return; }
@@ -847,6 +1114,17 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
       void coms.enviar(form).then((r) => {
         if (!r) mudarFaixa({ tipo: "erro", texto: "Não consegui mandar o comentário. Ele continua no campo." });
         else if (de === agenteId) aplicarQuadro(r.quadro, aberta ? [aberta] : []);
+      });
+      return;
+    }
+    if (qual === "nova-tarefa") {
+      ev.preventDefault();
+      const campo = form.querySelector<HTMLInputElement>('[name="titulo"]');
+      const titulo = campo?.value.trim() ?? "";
+      if (!titulo) return;
+      void mudarTarefa((a, de) => a.criarTarefa?.(de, { titulo }), (r) => reciboDaNovaTarefa(titulo, r)).then((ok) => {
+        const c = doc.getElementById("qd-nova-tit");
+        if (ok && c instanceof HTMLInputElement) { c.value = ""; c.focus(); }
       });
       return;
     }
@@ -880,6 +1158,18 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     const el = ev.target as Element | null;
     if (!dd || !el?.closest?.("#quadro .qd-conteudo")) return;
     const campo = (el as HTMLElement).dataset?.["campo"];
+    // NOD-416: Status e Responsável da tarefa aberta (pelo teclado, a escolha espera o Enter ou a saída do campo).
+    if (ehCampoDaTarefa(el)) { if (!el.dataset["teclado"]) aplicarCampoDaTarefa(el); return; }
+    // "Mover para…": escolher só liga o botão Mover (revisão do PR #623).
+    if (campo === "mover") {
+      moverPara = (el as HTMLSelectElement).value || null;
+      const bt = el.closest(".qd-mover")?.querySelector<HTMLButtonElement>('[data-act="mover-quadro"]');
+      if (bt) bt.disabled = !(el as HTMLSelectElement).value;
+      // QA do PR #623: o nome pode não caber no select; o title acompanha a escolha.
+      const sel = el as HTMLSelectElement;
+      sel.title = sel.selectedOptions[0]?.textContent ?? "";
+      return;
+    }
     if (campo !== "prazo" && campo !== "prazo-data") return;
     const caixa = el.closest<HTMLElement>(".qd-prazo");
     const data = caixa?.querySelector<HTMLInputElement>('[data-campo="prazo-data"]');
@@ -907,6 +1197,16 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
       if (sel?.value === "outra") { sel.value = el.closest('[data-form="criar-quadro"]') ? "" : q?.prazo ?? ""; el.hidden = true; }
     }
   });
+  // Revisão do PR #623: no select fechado, as setas, Home/End, PageUp/PageDown e a busca por letra trocam o valor (e o
+  // Chrome dispara o change a cada uma). Marca o campo; o Enter aplica. O clique do mouse tira a marca.
+  doc.addEventListener("keydown", (ev) => {
+    const el = ev.target;
+    if (!dd || !ehCampoDaTarefa(el) || ev.isComposing) return;
+    if (ev.key === "Enter") { ev.preventDefault(); aplicarCampoDaTarefa(el); return; }
+    if (/^(Arrow|Page)/.test(ev.key) || ev.key === "Home" || ev.key === "End" || (ev.key.length === 1 && ev.key !== " " && !ev.ctrlKey && !ev.metaKey)) el.dataset["teclado"] = "1";
+  });
+  doc.addEventListener("pointerdown", (ev) => { if (ehCampoDaTarefa(ev.target)) delete ev.target.dataset["teclado"]; });
+  doc.addEventListener("focusout", (ev) => { if (dd && ehCampoDaTarefa(ev.target) && ev.target.dataset["teclado"]) aplicarCampoDaTarefa(ev.target); });
   doc.addEventListener("keydown", (ev) => {
     if (!dd) return;
     const el = ev.target as Element | null;
@@ -920,6 +1220,9 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
       ev.preventDefault();
       if (edicao.tipo === "ordem") editar(null, '.qd-so-estreito [data-act="col-folha"]');
       else fechar();
+    } else if (ev.key === "Escape" && soltarNaAberta && aberta && el?.closest?.("#quadro .qd-conteudo")) {
+      ev.preventDefault();
+      desistirDoSoltarNaAberta();
     } else if (ev.key === "Escape" && aberta && el?.closest?.("#quadro .qd-conteudo")) {
       ev.preventDefault();
       voltarAoQuadro();
@@ -1056,5 +1359,24 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     if (faixa.tipo === "aguardando" || histAberto) void lerConversa();
   }
 
-  return { sincronizar, trocar, aoFrame, reler, abrirTarefaDe, modo: () => modo };
+  /**
+   * NOD-416: o link da tarefa. Com o quadro já lido, abre; senão espera a leitura (aplicarQuadro). Sem o quadro liberado
+   * ainda (chave nula: as preferências chegam depois da frota no boot), guarda o pedido; o próximo `sincronizar` com a
+   * conversa deste bot o consome, e o de outra conversa o esquece (revisão 5 do PR #623).
+   */
+  function abrirPeloLink(de: string, tarefaId: string): void {
+    if (!dd) return;
+    if (chave === null) { pendente = { agenteId: de, tarefaId }; return; }
+    if (agenteId !== de) return;
+    if (carga === "ok" && tarefaNoQuadro(q, tarefaId)) {
+      if (modo !== "quadro") trocar("quadro");
+      abrirTarefa(tarefaId);
+      return;
+    }
+    pendente = { agenteId: de, tarefaId };
+    if (modo !== "quadro") trocar("quadro");
+    else void lerQuadro();
+  }
+
+  return { sincronizar, trocar, aoFrame, reler, abrirTarefaDe, modo: () => modo, abrirTarefa: abrirPeloLink };
 }

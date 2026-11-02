@@ -1,19 +1,21 @@
 import { describe, expect, it } from "vitest";
-import type { QuadroDto, TarefaDto } from "../../../src/contracts/quadro.ts";
-import { acesos, atalhosDePrazo, codigoDaTarefa, faltaParaOPrazo, fraseDoPrazo, historicoDaFaixa, linhaUnica, respostaDoBot, tarefaNoQuadro, tarefasPorStatus } from "../../../web/lib/quadro-dados.ts";
-import { avisoDoGithub, cardDaTarefa, faixaDoQuadro, menuDePrazo, pilulaDoQuadro, prMaisProblematico, quadroDaMeta, semQuadro, tarefaAberta, tomDoPr, topoDoQuadro } from "../../../web/telas/quadro-real.ts";
+import type { EntradaHistoricoDto, QuadroDto, TarefaDto } from "../../../src/contracts/quadro.ts";
+import { lerCodigo } from "../../../src/domain/codigo-tarefa.ts";
+import { FORMATO_CODIGO, RESP_VOCE, botDoLink, fraseDoErroDoMover, reciboDaNovaTarefa, acesos, atalhosDePrazo, codigoDaTarefa, codigoNaUrl, destinosDaTarefa, responsaveisDaTarefa, faltaParaOPrazo, linhaDoHistorico, opcoesDeStatus, fraseDoPrazo, historicoDaFaixa, linhaUnica, respostaDoBot, tarefaNoQuadro, tarefasPorStatus } from "../../../web/lib/quadro-dados.ts";
+import { avisoDoGithub, cardDaTarefa, faixaDoQuadro, formNovaTarefa, menuDePrazo, pilulaDoQuadro, prMaisProblematico, quadroDaMeta, semQuadro, tarefaAberta, tomDoPr, topoDoQuadro } from "../../../web/telas/quadro-real.ts";
 import { card, confiar } from "../../../web/telas/quadro.ts";
 import { COLUNAS_PADRAO, colunasDto } from "../../../src/domain/colunas.ts";
+import { RECUSAS_DO_MOVER } from "../../../src/use-cases/quadro.ts";
 
 /** NOD-442: o quadro de verdade na tela, sem DOM (o Chrome real fica em tests/concurrency/quadro-jornada-chrome.test.ts). */
 
 const MAL = `<img src=x onerror="alert(1)">"'&`;
 const t = (id: string, extra: Partial<TarefaDto> = {}): TarefaDto => ({
   id, quadroId: "q1", titulo: `Tarefa ${id}`, descricao: "", status: "afazer", voltarPara: null, agenteId: "a", ordem: 1, linearId: null, linearUrl: null, prUrl: null,
-  pergunta: null, resposta: null, deFora: false, turnoId: null, criadoEm: 1, mudadoEm: 1, terminadaEm: null, execucao: null, agenteNome: "Ada", ...extra,
+  pergunta: null, resposta: null, deFora: false, turnoId: null, criadoEm: 1, mudadoEm: 1, terminadaEm: null, execucao: null, agenteNome: "Ada", numero: null, codigo: `#${id}`, branch: "", ...extra,
 });
 const q = (tarefas: TarefaDto[], extra: Partial<QuadroDto> = {}): QuadroDto => ({
-  id: "q1", agenteId: "a", meta: "Meta", prazo: null, cumpridoEm: null, resumo: null, criadoEm: 1, atualizadoEm: 1, metaDesde: 1, agenteNome: "Ada",
+  id: "q1", agenteId: "a", prefixo: null, meta: "Meta", prazo: null, cumpridoEm: null, resumo: null, criadoEm: 1, atualizadoEm: 1, metaDesde: 1, agenteNome: "Ada",
   colunas: colunasDto(COLUNAS_PADRAO), tarefas, ultimoLote: null, feitas: 0, total: tarefas.length, ...extra,
 });
 const agente = (id: string) => (id === "a" ? { avatar: confiar(`<span class="av">A</span>`), nome: "Ada" } : null);
@@ -23,9 +25,80 @@ const fala = (id: string, de: "eu" | "a" | "b", texto: string, extra = {}) => ({
 }) as never;
 
 describe("quadro-dados", () => {
-  it("o código do card: o do Linear; sem ele, # e os 4 primeiros do id", () => {
+  it("o código do card: o do quadro (NOD-416); de um servidor velho, o do Linear e, sem ele, # e os 4 primeiros do id", () => {
+    expect(codigoDaTarefa({ id: "ab-cd-ef", linearId: "NOD-1", codigo: "ZE-7" })).toBe("ZE-7");
     expect(codigoDaTarefa({ id: "ab-cd-ef", linearId: "NOD-1" })).toBe("NOD-1");
     expect(codigoDaTarefa({ id: "ab-cd-ef", linearId: null })).toBe("#abcd");
+  });
+
+  it("revisão 3 do PR #623: na URL vai o código do quadro; a tarefa sem número leva o uuid, nunca #ABCD nem o id do Linear", () => {
+    const id = "10000000-0000-4000-8000-000000000001";
+    expect(codigoNaUrl({ id, numero: 7, codigo: "ZE-7" })).toBe("ZE-7");
+    expect(codigoNaUrl({ id, numero: null, codigo: "NOD-1" })).toBe(id);
+    expect(codigoNaUrl({ id, numero: null, codigo: "#1000" })).toBe(id);
+    expect(codigoNaUrl({ id, numero: 3 })).toBe(id);
+  });
+
+  it("revisão 4 do PR #623: com número mas o quadro sem prefixo (janela de deploy), o código provisório não vai à URL", () => {
+    const id = "10000000-0000-4000-8000-000000000001";
+    // codigoDaTarefa do servidor sem prefixo: `#` + 4 do id, ou o id do Linear.
+    expect(codigoNaUrl({ id, numero: 4, codigo: "#ABCD", linearId: null })).toBe(id);
+    expect(codigoNaUrl({ id, numero: 4, codigo: "#1000", linearId: null })).toBe(id);
+    expect(codigoNaUrl({ id, numero: 4, codigo: "NOD-4", linearId: "NOD-4" })).toBe(id);
+    expect(codigoNaUrl({ id, numero: 4, codigo: "NOD-77", linearId: "NOD-77" })).toBe(id);
+    expect(codigoNaUrl({ id, numero: 4, codigo: "LIN-PROJ-1", linearId: "LIN-PROJ-1" })).toBe(id);
+    // O código do quadro vai, também com o Linear ligado.
+    expect(codigoNaUrl({ id, numero: 4, codigo: "ZE2-4", linearId: "NOD-77" })).toBe("ZE2-4");
+    expect(codigoNaUrl({ id, numero: 12, codigo: "ZE-12", linearId: null })).toBe("ZE-12");
+  });
+
+  it("revisão 4 do PR #623: FORMATO_CODIGO da web aceita o mesmo que lerCodigo do servidor", () => {
+    const casos = ["ZE-12", "ze-12", "#ZE-12", "ZE2-3", "Q-1", "ABCD-1", "ZE-0", "ZE-01", "#abcd", "#1000", "NOD-4", "LIN-PROJ-1", "", "-1", "ZE-1234567890", "ZE-123456789"];
+    for (const c of casos) expect([c, FORMATO_CODIGO.test(c.trim())]).toEqual([c, lerCodigo(c) !== null]);
+  });
+
+  it("revisão 2 do PR #623: o recibo de Nova tarefa diz a coluna e quem começou pela resposta, não um Backlog fixo", () => {
+    const lote = (ids: string[]) => ({ id: "l", quadroId: "q1", autor: { tipo: "pessoa" as const }, resumo: "", tarefaIds: ids, desfeitoEm: null, criadoEm: 1 });
+    // O quadro sem Backlog: a nova cai na primeira espera (Ideias), e ninguém começa.
+    const ideias = colunasDto([{ id: "ideias", nome: "Ideias", grupo: "nao_iniciado" }, ...COLUNAS_PADRAO.filter((c) => c.id !== "backlog")]);
+    const nova = t("n", { status: "ideias", titulo: "Planos" });
+    expect(reciboDaNovaTarefa("Planos", { quadro: q([t("1"), nova], { colunas: ideias }), lote: lote(["n"]), comecaram: [] }))
+      .toBe("Planos: em Ideias. Ninguém começou.");
+    // A que começou (quadro só com colunas que acionam ou uma regra do servidor): o recibo diz o bot.
+    const comecou = t("n", { status: "fazendo", titulo: "Planos" });
+    expect(reciboDaNovaTarefa("Planos", { quadro: q([comecou]), lote: lote(["n"]), comecaram: [{ agenteNome: "Ada" }] }))
+      .toBe("Planos: em Fazendo. Ada começou.");
+    // Sem quadro na resposta (servidor velho), só o título e ninguém.
+    expect(reciboDaNovaTarefa("Planos", { quadro: null, lote: null })).toBe("Planos: criada. Ninguém começou.");
+  });
+
+  it("revisão 2 do PR #623: o mover que falha diz o porquê do servidor no 4xx; sem rede, a de sempre", () => {
+    expect(fraseDoErroDoMover({ status: 409, codigo: "estado_invalido", motivo: "mudou_de_quadro", message: "Isso não pode ser feito agora." }))
+      .toEqual({ texto: "Não deu para mudar a tarefa de quadro: outra mudança levou a tarefa para outro quadro antes. Relendo.", reler: true });
+    expect(fraseDoErroDoMover({ status: 400, codigo: "entrada_invalida", motivo: "ja_neste_quadro" }).texto).toContain("ela já está nesse quadro");
+    // Sem motivo conhecido, a frase que o servidor mandou (a da tabela, nunca a causa).
+    expect(fraseDoErroDoMover({ status: 404, codigo: "nao_encontrado", motivo: "outro", message: "Não encontramos o que você pediu." }).texto)
+      .toBe("Não deu para mudar a tarefa de quadro. Não encontramos o que você pediu.");
+    expect(fraseDoErroDoMover({ status: 0, codigo: "sem_internet" })).toEqual({ texto: "Sem conexão com o servidor agora. Tente de novo em instantes.", reler: false });
+    expect(fraseDoErroDoMover(null).texto).toBe("Não deu para mudar a tarefa de quadro. Relendo.");
+    // Toda recusa que a rota manda como motivo tem frase na tela.
+    for (const motivo of Object.keys(RECUSAS_DO_MOVER)) expect(fraseDoErroDoMover({ status: 400, motivo }).texto, motivo).toMatch(/^Não deu para mudar a tarefa de quadro: /);
+  });
+
+  it("revisão 2 do PR #623: o link da tarefa de um bot que não está na lista avisa na hora, sem esperar o teto", async () => {
+    let esperas = 0;
+    const esperar = async () => { esperas++; };
+    // A lista já chegou e o bot não está: null sem esperar nada.
+    expect(await botDoLink(() => undefined, () => true, esperar)).toBeNull();
+    expect(esperas).toBe(0);
+    // A lista ainda não chegou: espera; quando chega com o bot, devolve o bot.
+    let lida = false;
+    const bot = await botDoLink(() => (lida ? { id: "a" } : undefined), () => lida, async () => { esperas++; if (esperas === 3) lida = true; });
+    expect(bot).toEqual({ id: "a" });
+    // A lista que nunca chega: o teto, e null.
+    esperas = 0;
+    expect(await botDoLink(() => undefined, () => false, esperar, 5)).toBeNull();
+    expect(esperas).toBe(5);
   });
 
   it("as tarefas por status, na ordem", () => {
@@ -80,7 +153,8 @@ describe("quadro-real (o html)", () => {
     expect(JSON.stringify(bloq)).toContain("Falta o token");
     const pr = cardDaTarefa(t("3", { prUrl: "https://github.com/o/r/pull/9", linearId: "NOD-9" }), agente);
     expect(pr.tags).toEqual(expect.arrayContaining(["PR #9", "Linear"]));
-    expect(pr.codigo).toBe("NOD-9");
+    // NOD-416: o código do card é o do quadro (estável); o do Linear fica na etiqueta e em "No Linear".
+    expect(pr.codigo).toBe("#3");
   });
 
   it("texto hostil (título, meta, descrição, pergunta, nome do bot) sai escapado em todo html", () => {
@@ -259,5 +333,118 @@ describe("NOD-415 (ADR-141): meta opcional, prazo e criar pela tela", () => {
     expect(h).toMatch(/<button type="submit" class="qd-bt qd-bt-pri">Criar quadro<\/button>/);
     expect(h).not.toMatch(/required|disabled/);
     expect(h).not.toContain("<img");
+  });
+});
+
+describe("NOD-416 (ADR-144): criar, Status e Responsável na tela, histórico e mudar de quadro", () => {
+  const h = (extra: Partial<EntradaHistoricoDto>): EntradaHistoricoDto => ({ id: "h1", autorAgenteId: null, campo: "status", de: "backlog", para: "afazer", deNome: "Backlog", paraNome: "A fazer", autor: "pessoa", autorNome: null, criadoEm: Date.UTC(2026, 10, 2, 17, 32), ...extra });
+
+  it("o card mostra o código do quadro, o título e o responsável", () => {
+    const c = cardDaTarefa(t("1", { codigo: "ADA-3", linearId: "NOD-9" }), agente);
+    expect(c.codigo).toBe("ADA-3");
+    expect(c.titulo).toBe("Tarefa 1");
+    expect(c.responsavel?.nome).toBe("Ada");
+  });
+
+  it("o histórico diz quem (Você, o bot, Regra), o que mudou e a hora", () => {
+    // A hora em São Paulo; a data só quando não é hoje.
+    const em = Date.UTC(2026, 10, 2, 17, 32);
+    expect(linhaDoHistorico(h({}), em + 60_000)).toEqual({ quem: "Você", oque: "Status: Backlog → A fazer", quando: "14:32" });
+    expect(linhaDoHistorico(h({}), em + 86_400_000).quando).toMatch(/^2 de nov, 14:32$/);
+    expect(linhaDoHistorico(h({ autor: "regra", deNome: "A fazer", paraNome: "Fazendo" })).quem).toBe("Regra");
+    expect(linhaDoHistorico(h({ autor: "agente", autorNome: "Caio", campo: "agente", de: null, deNome: null, para: "a", paraNome: "Ada" }))).toMatchObject({ quem: "Caio", oque: "Responsável: Ada" });
+    expect(linhaDoHistorico(h({ campo: "agente", de: "a", deNome: "Ada", para: null, paraNome: null })).oque).toBe("tirou o responsável (Ada)");
+    expect(linhaDoHistorico(h({ campo: "criada", de: null, deNome: null, para: "backlog", paraNome: "Backlog" })).oque).toBe("criou em Backlog");
+    // Revisão 5 do PR #623: o Desfazer que devolve a tarefa excluída.
+    expect(linhaDoHistorico(h({ campo: "restaurada", de: null, deNome: null, para: "backlog", paraNome: "Backlog" })).oque).toBe("restaurou em Backlog");
+    expect(linhaDoHistorico(h({ campo: "quadro", deNome: "Ada", paraNome: "Caio" })).oque).toBe("mudou de quadro: Ada → Caio");
+    expect(linhaDoHistorico(h({ autor: "agente", autorNome: null })).quem).toBe("Um bot");
+  });
+
+  it("o Status agrupa as colunas por grupo, na ordem do quadro; o Mover para tira o quadro da tarefa", () => {
+    const g = opcoesDeStatus(colunasDto(COLUNAS_PADRAO));
+    expect(g.map((x) => x.grupo)).toEqual(["Não iniciado", "Andamento", "Feito", "Fechado"]);
+    expect(g[0]?.colunas.map((c) => c.id)).toContain("backlog");
+    expect(destinosDaTarefa([{ id: "q1", agenteId: "a", agenteNome: "Ada", prefixo: "ADA" }, { id: "q2", agenteId: "c", agenteNome: "Caio", prefixo: "CA" }, { id: "q3", agenteId: "b", agenteNome: "Bia", prefixo: null }], "q1"))
+      .toEqual([{ id: "q3", nome: "Bia" }, { id: "q2", nome: "Caio (CA)" }]);
+  });
+
+  it("a tarefa aberta: o código no cabeçalho, Status e Responsável como campos, o branch, o Mover para e o histórico", () => {
+    const tm = t("1", { codigo: "ADA-3", branch: "ada-3-secao-de-planos", titulo: "Seção de planos", status: "backlog" });
+    const html = String(tarefaAberta({
+      t: tm, q: q([tm]), agente,
+      responsaveis: [{ id: "a", nome: "Ada" }, { id: "c", nome: "Caio" }],
+      destinos: [{ id: "q2", nome: "Caio (CA)" }],
+      historico: [h({ campo: "criada", de: null, deNome: null, para: "backlog", paraNome: "Backlog" })],
+    }));
+    expect(html).toContain(`<span class="qd-id">ADA-3</span>`);
+    expect(html).toMatch(/<select id="qd-t-status"[^>]*data-campo="status" data-id="1">/);
+    expect(html).toContain(`<option value="backlog" selected>Backlog</option>`);
+    expect(html).toMatch(/<select id="qd-t-resp"[^>]*data-campo="agente"/);
+    expect(html).toContain(`<option value="a" selected>Ada</option>`);
+    expect(html).toContain(`<option value="">Ninguém</option>`);
+    expect(html).toMatch(/data-campo="mover"[\s\S]*<option value="q2" title="Caio \(CA\)">Caio \(CA\)<\/option>/);
+    expect(html).toContain(`<code class="qd-branch">ada-3-secao-de-planos</code>`);
+    expect(html).toContain("Histórico");
+    expect(html).toContain("criou em Backlog");
+    // Sem a lista de bots, o Responsável é só leitura; sem outro quadro, sem o Mover para; carregando, o histórico diz.
+    const so = String(tarefaAberta({ t: tm, q: q([tm]), agente, historico: null }));
+    expect(so).not.toContain(`data-campo="agente"`);
+    expect(so).not.toContain(`data-campo="mover"`);
+    expect(so).toContain("Carregando…");
+    expect(String(tarefaAberta({ t: tm, q: q([tm]), agente, historico: [] }))).toContain("Sem histórico antes desta versão");
+  });
+
+  it("revisão do PR #623: Status sem \"Precisa de você\" (pede pergunta) e Mover só com o botão; Responsável sem o Nod", () => {
+    const tm = t("1", { status: "backlog" });
+    const html = String(tarefaAberta({ t: tm, q: q([tm]), agente, responsaveis: [{ id: "a", nome: "Ada" }], destinos: [{ id: "q2", nome: "Caio (CA)" }], historico: [] }));
+    expect(html).not.toContain(`<option value="voce"`);
+    // A tarefa que já está em Precisa de você mostra o status dela (sem sair dali pelo select).
+    const nv = t("2", { status: "voce", pergunta: "Qual?" });
+    expect(String(tarefaAberta({ t: nv, q: q([nv]), agente, historico: [] }))).toContain(`<option value="voce" selected>`);
+    // "Mover para": escolher não move; o botão Mover confirma (WCAG 3.2.2), desligado até haver escolha.
+    expect(html).toMatch(/<button type="button" class="[^"]*" data-act="mover-quadro" data-id="1" disabled>Mover<\/button>/);
+    // QA do PR #623: o nome do quadro pode não caber no select; a opção e o select levam o title.
+    expect(html).toContain(`<option value="q2" title="Caio (CA)">Caio (CA)</option>`);
+    expect(html).toMatch(/<select id="qd-t-mover"[^>]* title="Outro quadro…">/);
+    // A escolha sobrevive a um redesenho (o histórico ou os comentários chegam depois): o destino e o botão ficam.
+    const escolhido = String(tarefaAberta({ t: tm, q: q([tm]), agente, destinos: [{ id: "q2", nome: "Caio (CA)" }], moverPara: "q2", historico: [] }));
+    expect(escolhido).toContain(`<option value="q2" selected title="Caio (CA)">`);
+    expect(escolhido).toMatch(/data-act="mover-quadro" data-id="1">Mover<\/button>/);
+    expect(responsaveisDaTarefa([
+      { id: "a", nome: "Ada", papel: "geral", ownerId: "p", excluidoEm: null, oculto: false },
+      { id: "n", nome: "Nod", papel: "nod", ownerId: "p", excluidoEm: null, oculto: false },
+      { id: "x", nome: "Xis", papel: "geral", ownerId: "p", excluidoEm: 5, oculto: false },
+      { id: "o", nome: "Oculto", papel: "geral", ownerId: "p", excluidoEm: null, oculto: true },
+      { id: "z", nome: "Zé", papel: "geral", ownerId: "outra", excluidoEm: null, oculto: false },
+    ], "p")).toEqual([{ id: "a", nome: "Ada" }]);
+  });
+
+  it("revisão 2 do PR #623: o label do Responsável só aponta para o select, e em Precisa de você o select mostra Você", () => {
+    const tm = t("1", { status: "backlog", agenteId: "a" });
+    // Sem a lista, o Responsável é texto: nada de label for= apontando para um <span>.
+    const so = String(tarefaAberta({ t: tm, q: q([tm]), agente, historico: [] }));
+    expect(so).not.toContain(`for="qd-t-resp"`);
+    expect(so).toContain(`<dt>Responsável</dt>`);
+    expect(String(tarefaAberta({ t: tm, q: q([tm]), agente, responsaveis: [{ id: "a", nome: "Ada" }], historico: [] }))).toContain(`<label for="qd-t-resp">Responsável</label>`);
+    // Em Precisa de você o responsável efetivo é a pessoa: o select mostra Você (e não o bot, que segue como opção).
+    const nv = t("2", { status: "voce", agenteId: "a", pergunta: "Qual?" });
+    const html = String(tarefaAberta({ t: nv, q: q([nv]), agente, responsaveis: [{ id: "a", nome: "Ada" }], historico: [] }));
+    const sel = html.match(/<select id="qd-t-resp"[\s\S]*?<\/select>/)?.[0] ?? "";
+    expect(sel).toContain(`<option value="${RESP_VOCE}" selected disabled>Você</option>`);
+    expect(sel).toContain(`<option value="a">Ada</option>`);
+    expect(sel.match(/ selected/g)).toHaveLength(1);
+  });
+
+  it("o histórico e as opções escapam o texto hostil", () => {
+    const tm = t("1", { titulo: MAL });
+    const html = String(tarefaAberta({ t: tm, q: q([tm]), agente, responsaveis: [{ id: MAL, nome: MAL }], destinos: [{ id: MAL, nome: MAL }], historico: [h({ autor: "agente", autorNome: MAL, deNome: MAL, paraNome: MAL })] }));
+    expect(html).not.toContain("<img");
+    expect(html).not.toMatch(/onerror="/);
+  });
+
+  it("Nova tarefa… fica na barra do quadro", () => {
+    expect(String(formNovaTarefa())).toContain(`data-form="nova-tarefa"`);
+    expect(String(quadroDaMeta({ q: q([]), nome: "Ada", agente, filtro: "todos", alternadas: new Set(), acesas: new Set() }))).toContain(`data-form="nova-tarefa"`);
   });
 });
