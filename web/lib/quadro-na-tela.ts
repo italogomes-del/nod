@@ -26,7 +26,7 @@ import { RESP_VOCE, acesos, fraseDoErroDoMover, reciboDaNovaTarefa, codigoNaUrl,
 import { quadroVazio, type Aviso, type Filtro, type Html } from "../telas/quadro.ts";
 import { decidirSoltura, fraseDaTrava, RECUSA_MS, relogioDaRecusa, type RelogioDaRecusa } from "./freios.ts";
 import { faixaDoQuadro, pilulaDoQuadro, quadroCarregando, quadroComErro, quadroDaMeta, rotuloDoModo, semQuadro, tarefaAberta, type AgenteDoQuadro, type PainelDoQuadro, type TrocaDaFaixa } from "../telas/quadro-real.ts";
-import { anuncioDaOrdem, anuncioDaPagina, CONVERSA, ehForma, indicePeloId, moverNaOrdem, paginaPelaTecla, passoDaTeclaDeMover, presa, TAREFAS, type FormaDasTarefas, type Pagina } from "./paginas.ts";
+import { anuncioDaOrdem, anuncioDaPagina, CONVERSA, ehForma, indicePeloId, moverNaOrdem, paginaPelaTecla, presa, TAREFAS, type FormaDasTarefas, type Pagina } from "./paginas.ts";
 import { guardarOrdem, ordemDoAgente, paginasDtoDe } from "./ordem-das-paginas.ts";
 import { formaDasTarefas, menuDaPagina, paginaDoApp } from "../telas/paginas.ts";
 import { ligarGestosDaPilula } from "./paginas-na-tela.ts";
@@ -113,7 +113,9 @@ export interface QuadroNaTela {
   /** NOD-445: ir a uma página da pílula (índice de dentro: 0 = Conversa, depois Tarefas, se houver, e os apps). */
   irPara(i: number, o?: { foco?: boolean }): void;
   /** ⌘[ ⌘]: a página anterior/seguinte na ordem da pílula. */
-  andar(passo: -1 | 1): boolean;
+  andar(passo: -1 | 1, o?: { foco?: boolean; espiar?: boolean }): boolean;
+  /** NOD-461: ⌥⇧← → move a página atual na ordem da pílula. false = não moveu (sem pílula ou na ponta). */
+  moverAtual(passo: -1 | 1, o?: { foco?: boolean }): boolean;
   totalDePaginas(): number;
   /** Abre a página pelo id ("tarefas", "app:<id>"): o app que acabou de chegar. */
   abrirPagina(id: string): void;
@@ -2017,14 +2019,7 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     const alvo = ev.target as Element | null;
     const aba = alvo?.closest?.<HTMLElement>("#cabecalho .pg-ic");
     const noNome = !aba && !!alvo?.closest?.("#cabecalho .qd-pil > .pilula-bot") && (ev.key === "ArrowLeft" || ev.key === "ArrowRight");
-    // Alt+← → no ícone focado move a página na ordem (a alternativa ao arrasto).
-    const mover = aba && ev.altKey && !ev.ctrlKey && !ev.metaKey && !ev.shiftKey ? passoDaTeclaDeMover(ev.key) : null;
-    if (mover && aba) {
-      ev.preventDefault();
-      const de = posDe(Number(aba.dataset["pagina"]));
-      moverPagina(de, de + mover, { foco: true });
-      return;
-    }
+    // ⌥← → e ⌥⇧← → (também no ícone focado) são do despachante de atalhos (NOD-461: web/lib/atalhos.ts, setaDaPilula).
     if ((!aba && !noNome) || ev.altKey || ev.ctrlKey || ev.metaKey || ev.shiftKey) return;
     const prox = paginaPelaTecla(posDe(pagina), paginas.length, ev.key);
     if (prox === null) return;
@@ -2126,12 +2121,26 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     if (ic && (ev.key === "ContextMenu" || (ev.shiftKey && ev.key === "F10"))) { ev.preventDefault(); abrirMenu(Number(ic.dataset["pagina"]), ic); }
   });
 
-  /** false = não andou (sem pílula, uma página só ou já na ponta). */
-  function andar(passo: -1 | 1): boolean {
+  /**
+   * Anda uma página na ordem da pílula (a arrastada), parando nas pontas: ⌘[ ⌘] e ⌥← →. Com `foco` (a tecla veio do ícone
+   * da doca) o foco vai junto; longe da pílula, a doca abre por um instante (NOD-461). false = não andou (sem pílula, uma
+   * página só ou já na ponta).
+   */
+  function andar(passo: -1 | 1, op: { foco?: boolean; espiar?: boolean } = {}): boolean {
     if (chave === null || paginas.length < 2) return false;
     const pos = posDe(pagina) + passo;
     if (pos < 0 || pos >= paginas.length) return false;
-    irPara(naPos(pos));
+    irPara(naPos(pos), { foco: op.foco });
+    if (op.espiar && !op.foco) gestos.espiar();
+    return true;
+  }
+  /** NOD-461: ⌥⇧← → leva a página atual uma posição na ordem; longe da pílula, a doca abre por um instante. */
+  function moverAtual(passo: -1 | 1, op: { foco?: boolean } = {}): boolean {
+    if (!agenteId || chave === null || paginas.length < 2) return false;
+    const de = posDe(pagina);
+    if (de + passo < 0 || de + passo >= paginas.length) return false;
+    moverPagina(de, de + passo, { foco: op.foco });
+    if (!op.foco) gestos.espiar();
     return true;
   }
   /** Quantas páginas a pílula mostra agora (0 = sem pílula: experimento desligado ou outra tela). */
@@ -2145,7 +2154,7 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     marcar();
   }
 
-  ligarGestosDaPilula(doc, {
+  const gestos = ligarGestosDaPilula(doc, {
     irPara: (pos) => irPara(naPos(pos)), atual: () => posDe(pagina), total: totalDePaginas, reduzido,
     mover: (de, para) => moverPagina(de, para), menu: (pos, el) => abrirMenu(naPos(pos), el),
   });
@@ -2178,5 +2187,5 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     return Math.max(1, indicePeloId(paginas, TAREFAS.id));
   }
 
-  return { sincronizar, trocar, irPara, andar, totalDePaginas, abrirPagina, marcarChegada, aoFrame, reler, abrirTarefaDe, modo: () => modo, pagina: () => pagina, abrirTarefa: abrirPeloLink, aCaminhoDoQuadro };
+  return { sincronizar, trocar, irPara, andar, moverAtual, totalDePaginas, abrirPagina, marcarChegada, aoFrame, reler, abrirTarefaDe, modo: () => modo, pagina: () => pagina, abrirTarefa: abrirPeloLink, aCaminhoDoQuadro };
 }

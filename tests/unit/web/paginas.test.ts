@@ -118,7 +118,9 @@ describe("paginas (NOD-445)", () => {
 
   it("dica: texto pelo ponteiro, uma vez só e só com mais de uma página", () => {
     expect(textoDaDica(true)).toBe("deslize ou segure a pílula");
-    expect(textoDaDica(false)).toBe("role ou passe o mouse na pílula");
+    expect(textoDaDica(false)).toBe("role ou passe o mouse na pílula · Alt ← → troca");
+    expect(textoDaDica(false, true)).toBe("role ou passe o mouse na pílula · ⌥ ← → troca");
+    expect(textoDaDica(true, true)).toBe("deslize ou segure a pílula");
     expect(mostraDica(2, null)).toBe(true);
     expect(mostraDica(2, "1")).toBe(false);
     expect(mostraDica(1, null)).toBe(false);

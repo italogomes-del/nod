@@ -5,7 +5,7 @@
  * web/lib/quadro-na-tela.ts marca depois de cada desenho (o cabeçalho é regravado a toda hora). O par é web/paginas.css.
  */
 import { esc } from "../lib/escape.ts";
-import { linhaDoLimite, MAX_PONTOS, type IconeDaPagina, type Pagina } from "../lib/paginas.ts";
+import { ARIA_DAS_TECLAS, ehMac, linhaDoLimite, MAX_PONTOS, rotuloDasTeclas, type IconeDaPagina, type Pagina } from "../lib/paginas.ts";
 import type { AppDto, FormaDoApp, ItemDoRetrato } from "../../src/contracts/apps.ts";
 import { confiar, type Html } from "./quadro.ts";
 
@@ -34,22 +34,25 @@ export type PedirApp = { cabeMais: boolean; limite: number };
 /**
  * A doca e os pontinhos, para ir dentro da `.qd-pil`. Uma página só (só a conversa) não tem pontinho, e a doca leva só
  * o "+ pedir um app". Cada ícone é uma aba (`role=tab`); a selecionada tem `tabindex=0` e é por ela que o Tab entra (e o
- * foco abre a doca). Arrastar um ícone (ou Alt+← →) muda a ordem; a primeira posição é a página em que o agente abre.
- * Segurar (ou o botão direito, ou Shift+F10) abre o menu do ícone (web/lib/quadro-na-tela.ts).
+ * foco abre a doca). Arrastar um ícone (ou ⌥⇧← →, de qualquer lugar da conversa) muda a ordem; a primeira posição é a
+ * página em que o agente abre. Segurar (ou o botão direito, ou Shift+F10) abre o menu do ícone (web/lib/quadro-na-tela.ts).
+ * NOD-461: o tooltip ensina as teclas numa segunda linha apagada (⌥ no Mac, Alt fora; `mac` vem do navegador se faltar).
  */
-export function docaDePaginas(o: { nome: string; paginas: readonly Pagina[]; ordem?: readonly number[]; pedirApp?: PedirApp }): Html {
+export function docaDePaginas(o: { nome: string; paginas: readonly Pagina[]; ordem?: readonly number[]; pedirApp?: PedirApp; mac?: boolean }): Html {
   const total = o.paginas.length;
   if (total < 2 && !o.pedirApp) return confiar("");
   // A ordem de exibição (arrastável, por agente); `data-pagina` segue o índice de dentro e a 1ª posição é a casa do agente.
   const ordem = o.ordem && o.ordem.length === total ? o.ordem : o.paginas.map((_, i) => i);
+  const t = rotuloDasTeclas(o.mac ?? ehMac(globalThis.navigator?.platform));
+  const teclas = `<span class="pg-tip-tec">${esc(t.trocar)} troca · ${esc(t.mover)} move</span>`;
   const abas = total < 2 ? "" : ordem.map((i, pos) => {
     const p = o.paginas[i] as Pagina;
     // A casa só ganha marca quando a pessoa a escolheu (a conversa na frente é o de sempre, sem marca).
     const casa = pos === 0 && i !== 0;
     const rot = `${p.nome}${p.pedeVoce ? ", pede você" : ""}${p.apagado ? ", sem acesso à fonte" : ""}${casa ? ", abre primeiro" : ""}`;
     return `<button type="button" role="tab" class="pg-ic${casa ? " pg-casa" : ""}${p.apagado ? " pg-apagado" : ""}" style="--pg-i:${pos}" data-act="pagina" data-pagina="${i}" data-pg-id="${esc(p.id)}" data-pos="${pos}" id="pg-aba-${i}" aria-selected="${i === 0}" tabindex="${i === 0 ? 0 : -1}"` +
-      ` aria-label="${esc(rot)}" aria-haspopup="menu" aria-posinset="${pos + 1}" aria-setsize="${total}" aria-keyshortcuts="Alt+ArrowLeft Alt+ArrowRight Shift+F10"${i > 0 ? ' aria-controls="quadro"' : ""}>` +
-      `${ICONE_DA_PAGINA[p.icone] ?? ICONE_DA_PAGINA.app}${p.pedeVoce ? '<i class="pg-bd" aria-hidden="true"></i>' : ""}<span class="pg-tip" aria-hidden="true">${esc(p.nome)}${casa ? " · abre primeiro" : ""}</span></button>`;
+      ` aria-label="${esc(rot)}" aria-haspopup="menu" aria-posinset="${pos + 1}" aria-setsize="${total}" aria-keyshortcuts="${ARIA_DAS_TECLAS}"${i > 0 ? ' aria-controls="quadro"' : ""}>` +
+      `${ICONE_DA_PAGINA[p.icone] ?? ICONE_DA_PAGINA.app}${p.pedeVoce ? '<i class="pg-bd" aria-hidden="true"></i>' : ""}<span class="pg-tip" aria-hidden="true">${esc(p.nome)}${casa ? " · abre primeiro" : ""}${teclas}</span></button>`;
   }).join("");
   const pedir = o.pedirApp
     ? `<button type="button" class="pg-pedir" data-act="pedir-app" style="--pg-i:${total}"${o.pedirApp.cabeMais ? ' aria-label="Pedir um app"' : ` aria-disabled="true" aria-label="${esc(linhaDoLimite(o.pedirApp.limite))}"`}>` +

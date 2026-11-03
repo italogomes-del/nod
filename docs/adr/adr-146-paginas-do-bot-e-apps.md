@@ -43,7 +43,11 @@ Bloco 1 tinha apps de exemplo e a ordem guardada no navegador. A NOD-445 liga is
 6. **A web**: a doca desenha a ordem do servidor e mover é otimista (o PUT confirma; falhou, relê). Segurar o ícone (ou
    botão direito, Shift+F10) abre o menu: mover, editar pela conversa e remover (só app). "+ pedir um app" escreve a
    frase na caixa; no limite, uma linha explica. ⌘[ / ⌘] trocam de página no app do Mac (Ctrl+[ / Ctrl+] no navegador do Mac, Alt+[ / Alt+] fora do Mac: `MOD_DE` em
-   `web/lib/atalhos.ts`). A página do app desenha
+   `web/lib/atalhos.ts`). NOD-461: ⌥← / ⌥→ (Alt fora do Mac) trocam de página de qualquer lugar da conversa e
+   ⌥⇧← / ⌥⇧→ levam a página atual uma posição (`setaDaPilula`); a doca espia 1,4 s. Ficam com o campo que já tem texto
+   no Mac (onde andam por palavra; fora dele a tecla é engolida sem trocar, para não perder o texto nem voltar), com quem já tratou a tecla (o cabeçalho de coluna) e com um menu aberto; com a
+   pílula de uma página a tecla é engolida, para não virar o voltar do navegador num bot e não no outro. Alt+Shift é a
+   troca de layout do Windows só quando solto sozinho: com a seta, chega ao app. A página do app desenha
    pelo `AppDto.estado`, que o servidor calcula com `estadoDoApp`: vazio (uma frase e um exemplo; o app recém-criado, sem
    retrato, também), erro de fonte (uma linha e "Pedir acesso de novo", sem vermelho) e as quatro formas. O esqueleto
    (carregando) aparece só num app vazio enquanto o GET das páginas está no ar (revisão 4 do #626). Com mais de um app, o nome da página vai no topo.

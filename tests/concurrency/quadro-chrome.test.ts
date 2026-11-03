@@ -25,6 +25,8 @@ const descrever = chrome ? describe : describe.skip;
 const ENTRADA = `
 import { estadoInicial, reduzir } from "./web/estado/reducer.ts";
 import { criarQuadroNaTela } from "./web/lib/quadro-na-tela.ts";
+import { atalhoDoTeclado, SELETOR_CAMPO } from "./web/lib/atalhos.ts";
+import { contextoDaPilula, executarNaPilula } from "./web/lib/setas-da-pilula.ts";
 import { renderCabecalhoConversa } from "./web/telas/conversa.ts";
 import { aoGuardarOrdem, definirPaginas, esquecerPaginas, ordemDoAgente, paginasDoAgente } from "./web/lib/ordem-das-paginas.ts";
 import { cenario } from "./tests/helpers/paginas-do-bot.ts";
@@ -72,6 +74,14 @@ window.__montarComOrdem = () => {
   const q = criarQuadroNaTela(document, { aoMudarOrdem: () => { desenhar(); q.sincronizar({ chave: C, nome: "Ada", agenteId: "a", paginas: PAGINAS }); } });
   q.sincronizar({ chave: C, nome: "Ada", agenteId: "a", paginas: PAGINAS });
   window.__quadro = q;
+  // NOD-461: o despachante como o do main (registrado depois do quadro, como lá), com o mesmo contexto e a mesma execução.
+  window.__acoes = [];
+  document.addEventListener("keydown", (ev) => {
+    const alvo = ev.target;
+    const t = { code: ev.code, key: ev.key, metaKey: ev.metaKey, ctrlKey: ev.ctrlKey, altKey: ev.altKey, shiftKey: ev.shiftKey, isComposing: ev.isComposing, keyCode: ev.keyCode };
+    const a = atalhoDoTeclado(t, { lugar: window.__lugar ?? "outro", emCampo: !!alvo.closest?.(SELETOR_CAMPO), dialogo: false, celular: false, paginas: q.totalDePaginas(), ...contextoDaPilula(document, alvo, ev) });
+    if (a) { ev.preventDefault(); window.__acoes.push(a.tipo); executarNaPilula(document, a, q); }
+  });
 };
 /**
  * NOD-445 (revisão 2, achado 1): a primeira visita ao bot na sessão, como o main: a conversa abre ANTES de o GET das
@@ -411,10 +421,74 @@ descrever("NOD-429 no Chrome real", () => {
     // Abrir o agente de novo (outra montagem, como ao clicar nele na lista) cai direto em Tarefas, sem animação.
     await montar();
     expect(await estadoFinal()).toMatchObject({ atual: "quadro", quadroOculto: false, timelineInert: true });
-    // Alt+→ na aba focada devolve Tarefas à 2ª posição; aí o agente volta a abrir na conversa.
-    await avaliar(cdp, `document.querySelector('#cabecalho .pg-ic[data-pagina="1"]').focus()`);
-    await cdp.enviar("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39, modifiers: 1 });
+    // NOD-461: teclas de verdade (CDP), pelo despachante do palco (o mesmo caminho do main: atalhoDoTeclado e setas-da-pilula).
+    const tecla = (key: "ArrowLeft" | "ArrowRight", shift = false) => cdp.enviar("Input.dispatchKeyEvent", { type: "rawKeyDown", key, code: key, windowsVirtualKeyCode: key === "ArrowLeft" ? 37 : 39, modifiers: shift ? 9 : 1 });
+    const aberta = () => avaliar<boolean>(cdp, `new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(() => ok(document.querySelector("#cabecalho .qd-pil").classList.contains("pg-aberta")))))`);
+    await cdp.enviar("Input.dispatchMouseEvent", { type: "mouseMoved", x: 5, y: 700 });
+    await avaliar(cdp, `document.activeElement?.blur?.()`);
+    // Na ponta (Tarefas é a 1ª na ordem arrastada), ⌥← é engolida e nada muda.
+    await tecla("ArrowLeft");
+    expect(await avaliar<string[]>(cdp, `window.__acoes`)).toEqual(["pagina"]);
+    expect(await estadoFinal()).toMatchObject({ atual: "quadro" });
+    // ⌥→ do body anda na ordem ARRASTADA (Tarefas, Conversa…): vai à Conversa, e a doca espia e fecha sozinha.
+    await tecla("ArrowRight");
+    expect(await aberta()).toBe(true);
+    await acabar();
+    expect(await estadoFinal()).toMatchObject({ atual: "conversa" });
+    await esperar(1700);
+    expect(await aberta()).toBe(false);
+    await tecla("ArrowLeft");
+    await acabar();
+    expect(await estadoFinal()).toMatchObject({ atual: "quadro" });
+    // Campo com texto: no Mac a tecla é do campo (anda por palavra); fora dele é engolida sem trocar (nem voltar).
+    // (Um campo fora do palco: com Tarefas à vista a conversa e o composer ficam inert.)
+    await avaliar(cdp, `(() => { const t = document.createElement("textarea"); t.id = "campo-falso"; t.value = "oi"; document.body.append(t); t.focus(); window.__lugar = "app-mac"; })()`);
+    await tecla("ArrowRight");
+    await tecla("ArrowRight", true);
+    expect(await avaliar<string[]>(cdp, `window.__acoes`)).toEqual(["pagina", "pagina", "pagina"]);
+    await avaliar(cdp, `window.__lugar = "outro"`);
+    await tecla("ArrowRight");
+    expect(await avaliar<string>(cdp, `window.__acoes.at(-1)`)).toBe("engolir");
+    await avaliar(cdp, `document.getElementById("campo-falso").remove()`);
+    // Com um menu aberto, nada; quem já tratou a tecla (o cabeçalho de coluna dá preventDefault antes) também ganha.
+    await avaliar(cdp, `(() => { const m = document.createElement("div"); m.id = "menu-falso"; m.setAttribute("role", "menu"); m.textContent = "x"; document.body.append(m); })()`);
+    await tecla("ArrowRight");
+    await avaliar(cdp, `document.getElementById("menu-falso").remove()`);
+    await avaliar(cdp, `(() => { const b = document.createElement("button"); b.id = "col-falsa"; b.addEventListener("keydown", (e) => e.preventDefault()); document.body.append(b); b.focus(); })()`);
+    await tecla("ArrowRight");
+    await avaliar(cdp, `document.getElementById("col-falsa").remove()`);
+    expect(await avaliar<number>(cdp, `window.__acoes.length`)).toBe(4);
+    expect(await estadoFinal()).toMatchObject({ atual: "quadro" });
+    // ⌥⇧→ do body leva Tarefas à 2ª posição (grava a ordem, anuncia) e a doca espia.
+    await tecla("ArrowRight", true);
+    expect(await aberta()).toBe(true);
     expect(await avaliar<string[]>(cdp, `window.__salvos`)).toEqual(['a:["conversa","tarefas","app:id-painel","app:id-doc"]']);
+    expect(await avaliar<string>(cdp, `document.getElementById("pg-anuncio").textContent`)).toBe("Tarefas, página 2 de 4");
+    // No ícone focado, ⌥⇧← a traz de volta e o foco segue o ícone.
+    await avaliar(cdp, `document.querySelector('#cabecalho .pg-ic[data-pagina="1"]').focus()`);
+    await tecla("ArrowLeft", true);
+    expect(await avaliar<string>(cdp, `document.activeElement?.dataset?.pagina ?? ""`)).toBe("1");
+    expect(await avaliar<string[]>(cdp, `window.__salvos`)).toEqual(['a:["conversa","tarefas","app:id-painel","app:id-doc"]', 'a:["tarefas","conversa","app:id-painel","app:id-doc"]']);
+    // QA: na ponta, ⌥⇧← não grava nem espia; ⌥→ no ícone focado troca e o foco vai junto (sem espiar).
+    await tecla("ArrowLeft", true);
+    expect(await avaliar<number>(cdp, `window.__salvos.length`)).toBe(2);
+    await tecla("ArrowRight");
+    await acabar();
+    expect(await estadoFinal()).toMatchObject({ atual: "conversa" });
+    expect(await avaliar<string>(cdp, `document.activeElement?.dataset?.pagina ?? ""`)).toBe("0");
+    // QA: um menu escondido no DOM não trava; com o mouse em cima, a espiada não fecha a doca.
+    await avaliar(cdp, `(() => { document.activeElement?.blur?.(); const m = document.createElement("div"); m.id = "menu-oculto"; m.setAttribute("role", "menu"); m.hidden = true; document.body.append(m); })()`);
+    const naPil = await avaliar<{ x: number; y: number }>(cdp, `(() => { const r = document.querySelector("#cabecalho .qd-pil").getBoundingClientRect(); return { x: r.left + 6, y: r.top + r.height / 2 }; })()`);
+    // O mouse já em cima (a doca aberta pelo hover) quando a tecla chega: a espiada não a fecha por baixo dele.
+    await cdp.enviar("Input.dispatchMouseEvent", { type: "mouseMoved", x: naPil.x, y: naPil.y });
+    await esperar(600);
+    await tecla("ArrowLeft");
+    await avaliar(cdp, `document.getElementById("menu-oculto").remove()`);
+    await acabar();
+    expect(await estadoFinal()).toMatchObject({ atual: "quadro" });
+    await esperar(1700);
+    expect(await aberta()).toBe(true);
+    await cdp.enviar("Input.dispatchMouseEvent", { type: "mouseMoved", x: 5, y: 700 });
     await avaliar(cdp, `window.__zerarOrdem()`);
   }, 30_000);
 
@@ -468,7 +542,7 @@ descrever("NOD-429 no Chrome real", () => {
     await abrir(1440, false);
     await avaliar(cdp, `localStorage.removeItem("nod.paginas.dica"); window.__regravar()`);
     await avaliar(cdp, `new Promise((ok) => setTimeout(ok, 50))`);
-    expect(await avaliar<string>(cdp, `document.querySelector(".pg-dica")?.textContent ?? ""`)).toBe("role ou passe o mouse na pílula");
+    expect(await avaliar<string>(cdp, `document.querySelector(".pg-dica")?.textContent ?? ""`)).toBe("role ou passe o mouse na pílula · Alt ← → troca");
     await avaliar(cdp, `window.__quadro.irPara(1)`);
     // Abrir a doca (aqui pelo foco) guarda a marca.
     await avaliar(cdp, `document.querySelector('${aba("quadro")}').focus()`);

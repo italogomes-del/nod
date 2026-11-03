@@ -58,6 +58,15 @@ export type ContextoTecla = {
    * sem Shift só é nosso com mais de uma; senão ⌘[ / ⌃[ / Alt+[ seguem sendo o voltar do app ou do navegador.
    */
   paginas?: number;
+  /**
+   * NOD-461: o foco num campo que já tem texto (input/textarea com valor, contenteditable com texto). Aí ⌥← → anda por
+   * palavra e ⌥⇧← → seleciona: as setas da pílula ficam com o campo. Campo vazio (o composer recém-aberto) não conta.
+   */
+  campoComTexto?: boolean;
+  /** NOD-461: o alvo usa Alt+← → para si (o cabeçalho de coluna do quadro move a coluna): a pílula não pega. */
+  teclaDoAlvo?: boolean;
+  /** NOD-461: um menu aberto (o da pílula, o da coluna, o da mensagem): a página não troca por baixo dele. */
+  menuAberto?: boolean;
 };
 
 export type AcaoAtalho =
@@ -65,7 +74,11 @@ export type AcaoAtalho =
   | { tipo: "ir-ao-bot"; n: number }
   | { tipo: "vizinho"; passo: 1 | -1 }
   /** NOD-445: página anterior/próxima da pílula do bot (o mesmo colchete, sem Shift). */
-  | { tipo: "pagina"; passo: 1 | -1 }
+  | { tipo: "pagina"; passo: 1 | -1; /** NOD-461: veio de ⌥← → (a doca espia), não do colchete. */ seta?: true }
+  /** NOD-461: ⌥⇧← → leva a página atual uma posição na ordem da pílula. */
+  | { tipo: "mover-pagina"; passo: 1 | -1 }
+  /** NOD-461: fora do Mac, ⌥← → num campo com texto: não troca (o texto do quadro se perderia) nem vira o voltar. */
+  | { tipo: "engolir" }
   | { tipo: "folha" };
 
 type Mod = "meta" | "ctrl" | "alt";
@@ -77,6 +90,19 @@ const MOD_DA_FOLHA: Record<LugarTeclado, Mod> = { "app-mac": "meta", "navegador-
 function soCom(t: Tecla, mod: Mod): boolean {
   return t.metaKey === (mod === "meta") && t.ctrlKey === (mod === "ctrl") && t.altKey === (mod === "alt");
 }
+
+/**
+ * NOD-461: o foco está num campo que já tem texto? Input/textarea de digitar (SELETOR_CAMPO) com valor, ou
+ * contenteditable com texto. Campo vazio não conta: o composer recém-aberto deixa ⌥← → com a pílula.
+ */
+export function campoTemTexto(el: ElementoDeCampo | null): boolean {
+  if (!el) return false;
+  if (el.tagName === "INPUT" || el.tagName === "TEXTAREA") return el.matches(SELETOR_CAMPO) && (el.value ?? "").length > 0;
+  return el.isContentEditable === true && (el.textContent ?? "").length > 0;
+}
+
+/** O pedaço do elemento que campoTemTexto lê (este arquivo também compila sem o DOM). */
+export type ElementoDeCampo = { tagName: string; matches(s: string): boolean; value?: string; isContentEditable?: boolean; textContent: string | null };
 
 /** O atalho novo que a tecla pede, ou null (e aí o keydown segue como antes: ⌘K, ⌘⇧D, Esc…). */
 export function atalhoDoTeclado(t: Tecla, c: ContextoTecla): AcaoAtalho | null {
@@ -94,6 +120,16 @@ function acaoDaTecla(t: Tecla, c: ContextoTecla): AcaoAtalho | null {
   t = { ...t, key };
   // "?" sem modificador, só fora de campo: no campo de mensagem ele escreve "?".
   if (t.key === "?" && !t.metaKey && !t.ctrlKey && !t.altKey) return c.emCampo ? null : { tipo: "folha" };
+  // NOD-461: as setas da pílula, de qualquer lugar da conversa (antes só com o foco no ícone, que o mouse não foca).
+  // Com a pílula de uma página só, a tecla é engolida (andar não acha vizinho): ⌥← não vira o voltar do navegador num bot
+  // e não no outro. No campo com texto, no Mac a tecla é do campo (anda por palavra); fora dele, Alt+← seria o voltar do
+  // navegador e trocar de página jogaria fora o texto pela metade de um campo do quadro: engole sem agir.
+  const seta = setaDaPilula(t);
+  if (seta) {
+    if (!((c.paginas ?? 0) >= 1) || c.teclaDoAlvo || c.menuAberto) return null;
+    if (c.campoComTexto) return c.lugar === "outro" ? { tipo: "engolir" } : null;
+    return seta;
+  }
   const mod = MOD_DE[c.lugar];
   // A folha com modificador vale mesmo no campo. "/" pelo caractere (ABNT2, DE, ES…: na posição Slash do DE fica o "-",
   // e Ctrl+- é o zoom); a posição Slash só quando o caractere não veio (tecla morta ou não identificada).
@@ -109,6 +145,17 @@ function acaoDaTecla(t: Tecla, c: ContextoTecla): AcaoAtalho | null {
   }
   const col = colchete(t);
   return col ? { tipo: "vizinho", passo: col } : null;
+}
+
+/**
+ * NOD-461: ⌥← → troca de página e ⌥⇧← → move a página atual. As mesmas no Mac e fora dele (⌥ = Alt). Só Alt puro: ⌘⌥← →
+ * troca a aba do Chrome no Mac, Ctrl+Alt é o AltGr do Windows (e o AltGr do Linux nem chega com altKey).
+ */
+export function setaDaPilula(t: Pick<Tecla, "key" | "metaKey" | "ctrlKey" | "altKey" | "shiftKey">): AcaoAtalho | null {
+  if (!soCom({ ...t, code: "" }, "alt")) return null;
+  const passo = t.key === "ArrowLeft" ? -1 : t.key === "ArrowRight" ? 1 : null;
+  if (!passo) return null;
+  return t.shiftKey ? { tipo: "mover-pagina", passo } : { tipo: "pagina", passo, seta: true };
 }
 
 /** Colchete: primeiro pelo caractere (no ABNT2 o "[" fica na tecla BracketRight), depois pela posição. */
@@ -202,7 +249,7 @@ export type LinhaDaFolha = {
   falado: string;
 };
 
-/** As 8 linhas da folha, nas teclas do lugar. ⌘K e ⌘⇧D aceitam ⌘ ou Ctrl: no Mac mostram ⌘, fora dele Ctrl. */
+/** As 9 linhas da folha, nas teclas do lugar (⌥← → e ⌥⇧← → da pílula valem igual em todo lugar, `setaDaPilula`). ⌘K e ⌘⇧D aceitam ⌘ ou Ctrl: no Mac mostram ⌘, fora dele Ctrl. */
 export function linhasDaFolha(lugar: LugarTeclado): LinhaDaFolha[] {
   const m = MOD_DE[lugar];
   const f = MOD_DA_FOLHA[lugar];
@@ -215,7 +262,8 @@ export function linhasDaFolha(lugar: LugarTeclado): LinhaDaFolha[] {
     { titulo: "Nova conversa (novo bot)", combinacoes: [[k(m), "N"]], falado: `${fala(m)} N` },
     { titulo: "Ir ao bot 1 a 9 da barra", combinacoes: [[k(m), "1–9"]], falado: `${fala(m)} 1 a 9` },
     { titulo: "Bot anterior e próximo", combinacoes: [[k(m), shift, "["], [k(m), shift, "]"]], falado: `${fala(m)} Shift colchete esquerdo e ${fala(m)} Shift colchete direito` },
-    { titulo: "Página anterior e próxima do bot", combinacoes: [[k(m), "["], [k(m), "]"]], falado: `${fala(m)} colchete esquerdo e ${fala(m)} colchete direito` },
+    { titulo: "Página anterior e próxima do bot", combinacoes: [[k(m), "["], [k(m), "]"], [k("alt"), "←"], [k("alt"), "→"]], falado: `${fala(m)} colchete esquerdo e ${fala(m)} colchete direito, ou ${fala("alt")} seta para os lados` },
+    { titulo: "Mover a página atual na pílula", combinacoes: [[k("alt"), shift, "←"], [k("alt"), shift, "→"]], falado: `${fala("alt")} Shift seta para os lados` },
     { titulo: "Folha de atalhos", combinacoes: [["?"], [k(f), "/"]], falado: `Interrogação, ou ${fala(f)} barra` },
     { titulo: "Buscar agentes", combinacoes: [[k(busca), "K"]], falado: `${fala(busca)} K` },
     { titulo: "Modo dev", combinacoes: [[k(busca), shift, "D"]], falado: `${fala(busca)} Shift D` },

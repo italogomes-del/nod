@@ -6,8 +6,10 @@ import {
   moverNaOrdem,
   ordemDasPaginas,
   paginasDoDto,
-  passoDaTeclaDeMover,
   posicaoDoArrasto,
+  rotuloDasTeclas,
+  ehMac,
+  ARIA_DAS_TECLAS,
 } from "../../../web/lib/paginas.ts";
 
 const tres = paginasDoDto(cenario(2)); // Conversa, Tarefas, Painel
@@ -33,10 +35,7 @@ describe("ordem das páginas da pílula (arrastar para virar a casa)", () => {
     expect(posicaoDoArrasto([40, 70], 90)).toBe(2);
   });
 
-  it("Alt+setas movem; o anúncio é o texto da issue: \"Tarefas, página 1 de N\" (revisão 7 do #626)", () => {
-    expect(passoDaTeclaDeMover("ArrowLeft")).toBe(-1);
-    expect(passoDaTeclaDeMover("ArrowRight")).toBe(1);
-    expect(passoDaTeclaDeMover("Home")).toBeNull();
+  it("o anúncio é o texto da issue: \"Tarefas, página 1 de N\" (revisão 7 do #626; NOD-461 ao mover com ⌥⇧← →)", () => {
     expect(anuncioDaOrdem("Tarefas", 0, 3)).toBe("Tarefas, página 1 de 3");
     expect(anuncioDaOrdem("Tarefas", 2, 3)).toBe("Tarefas, página 3 de 3");
   });
@@ -78,5 +77,29 @@ describe("ordem por agente, guardada no servidor", () => {
     expect(m.definirPaginas(paginasDe([appDe("Painel")]))).toEqual([]);
     expect(m.definirPaginas(paginasDe([appDe("Painel"), appDe("Vagas")]))).toEqual(["id-vagas"]);
     expect(m.definirPaginas(paginasDe([appDe("Vagas")]))).toEqual([]);
+  });
+});
+
+describe("NOD-461: as teclas da pílula na doca", () => {
+  it("como a pessoa as vê: ⌥ e ⇧ no Mac, Alt e Shift fora dele", () => {
+    expect(rotuloDasTeclas(true)).toEqual({ trocar: "⌥ ← →", mover: "⌥⇧ ← →" });
+    expect(rotuloDasTeclas(false)).toEqual({ trocar: "Alt ← →", mover: "Alt Shift ← →" });
+    expect(ehMac("MacIntel")).toBe(true);
+    expect(ehMac("iPhone")).toBe(true);
+    expect(ehMac("iPad")).toBe(true);
+    expect(ehMac("Win32")).toBe(false);
+    expect(ehMac(undefined)).toBe(false);
+  });
+
+  it("o tooltip ensina as teclas numa segunda linha e o aria-keyshortcuts lista as quatro e o menu", async () => {
+    const { docaDePaginas } = await import("../../../web/telas/paginas.ts");
+    const mac = docaDePaginas({ nome: "Ada", paginas: tres, ordem: [1, 0, 2], mac: true });
+    expect(mac).toContain('· abre primeiro<span class="pg-tip-tec">⌥ ← → troca · ⌥⇧ ← → move</span></span>');
+    expect(mac.match(/class="pg-tip-tec"/g)).toHaveLength(3);
+    const pc = docaDePaginas({ nome: "Ada", paginas: tres, mac: false });
+    expect(pc).toContain('<span class="pg-tip-tec">Alt ← → troca · Alt Shift ← → move</span>');
+    expect(pc).not.toContain("⌥");
+    expect(ARIA_DAS_TECLAS).toBe("Alt+ArrowLeft Alt+ArrowRight Alt+Shift+ArrowLeft Alt+Shift+ArrowRight Shift+F10");
+    expect(pc.match(/aria-keyshortcuts="([^"]*)"/g)).toEqual(Array(3).fill(`aria-keyshortcuts="${ARIA_DAS_TECLAS}"`));
   });
 });

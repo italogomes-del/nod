@@ -92,6 +92,7 @@ import { criarCanalAvisos } from "./lib/canal-avisos.ts";
 import { criarPuxadorDeepLink, destinoDoAlvo, leituraConta } from "./lib/deep-link.ts";
 import { criarLiveEvents, type LiveEvents } from "./lib/live-events.ts";
 import { ehCelular, enterEnvia } from "./lib/celular.ts";
+import { contextoDaPilula, executarNaPilula } from "./lib/setas-da-pilula.ts";
 import { alvoDoAtalho, atalhoDoNovoBot, atalhoDoTeclado, lugarAtual, SELETOR_CAMPO, SELETOR_MODAL, type AcaoAtalho } from "./lib/atalhos.ts";
 import { rotuloDoMac } from "./lib/aparelho.ts";
 import { criarCelular } from "./lib/gaveta-bots.ts";
@@ -7121,6 +7122,8 @@ document.addEventListener("keydown", (ev) => {
       editando: !!alvo.closest?.("#detalhes") && !!alvo.closest?.(SELETOR_CAMPO),
       // NOD-445: ⌘[ só é nosso com a pílula de mais de uma página; senão é o voltar do app/navegador.
       paginas: quadroNaTela.totalDePaginas(),
+      // NOD-461: ⌥← → num campo com texto anda por palavra; no cabeçalho de coluna move a coluna (quem já usou ganha).
+      ...contextoDaPilula(document, alvo, ev),
     });
     // Atalho reconhecido sempre para aqui: ⌘5 com 3 bots não faz nada (critério 2), em vez de cair no navegador.
     if (atalho) { ev.preventDefault(); if (!ev.repeat) void executarAtalho(atalho); return; }
@@ -8444,7 +8447,9 @@ function executarAtalho(a: AcaoAtalho): boolean {
     return true;
   }
   // NOD-445: ⌘[ ⌘] andam pelas páginas da pílula; só chegam aqui com mais de uma página (atalhoDoTeclado, `paginas`).
-  if (a.tipo === "pagina") return quadroNaTela.andar(a.passo);
+  // NOD-461: ⌥← → (a mesma ação) e ⌥⇧← → valem de qualquer lugar; no ícone da doca o foco vai junto, longe dela a doca
+  // abre por um instante. ⌘[ ⌘] não espiam (como antes). Mesmo sem andar (na ponta) a tecla para aqui: não vira o voltar.
+  if (a.tipo === "pagina" || a.tipo === "mover-pagina" || a.tipo === "engolir") return executarNaPilula(document, a, quadroNaTela) ?? false;
   const bot = botaoDoBotNoAtalho(a);
   if (!bot) return false;
   const nome = bot.querySelector("b")?.textContent ?? "";

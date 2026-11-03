@@ -163,9 +163,9 @@ describe("Geral (critérios 4 e 5)", () => {
     expect(ler("main.ts")).toMatch(/ev\.shiftKey && ev\.key\.toLowerCase\(\) === "d"[^\n]*alternarModoDev/);
   });
 
-  it("NOD-117: o bloco Ajuda é a folha, com os 8 atalhos nas teclas do lugar e texto para leitor de tela", () => {
+  it("NOD-117: o bloco Ajuda é a folha, com os 9 atalhos nas teclas do lugar e texto para leitor de tela", () => {
     const ajudaDe = (html: string) => html.slice(html.indexOf('id="ajuda"'), html.indexOf("Avançado"));
-    const titulos = ["Nova conversa (novo bot)", "Ir ao bot 1 a 9 da barra", "Bot anterior e próximo", "Página anterior e próxima do bot", "Folha de atalhos", "Buscar agentes", "Modo dev", "Fechar e voltar"];
+    const titulos = ["Nova conversa (novo bot)", "Ir ao bot 1 a 9 da barra", "Bot anterior e próximo", "Página anterior e próxima do bot", "Mover a página atual na pílula", "Folha de atalhos", "Buscar agentes", "Modo dev", "Fechar e voltar"];
     const casos: [Parameters<typeof renderGeral>[3], string, string][] = [
       ["app-mac", "<kbd>⌘</kbd><kbd>N</kbd>", "Command N"],
       ["navegador-mac", "<kbd>⌃</kbd><kbd>N</kbd>", "Control N"],
@@ -174,8 +174,8 @@ describe("Geral (critérios 4 e 5)", () => {
     for (const [lugar, novo, falado] of casos) {
       const ajuda = ajudaDe(renderGeral(d, CONFIG_UI_INICIAL, false, lugar));
       for (const t of titulos) expect(ajuda, `${lugar}: ${t}`).toContain(t);
-      expect(ajuda.match(/class="cfg-kbd"/g)).toHaveLength(8);
-      expect(ajuda.match(/class="sr-only"/g)).toHaveLength(8);
+      expect(ajuda.match(/class="cfg-kbd"/g)).toHaveLength(9);
+      expect(ajuda.match(/class="sr-only"/g)).toHaveLength(9);
       expect(ajuda).toContain(novo);
       expect(ajuda).toContain(`<span class="sr-only">${falado}</span>`);
       expect(ajuda).toContain("<kbd>?</kbd> ou ");

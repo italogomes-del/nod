@@ -32,8 +32,10 @@
 .pg-svg { display: block; }
 .pg-bd { position: absolute; top: 3px; right: 3px; width: 7px; height: 7px; border-radius: 50%; background: var(--warning); box-shadow: 0 0 0 2px var(--surface); }
 .pg-tip { position: absolute; top: 36px; left: 50%; z-index: 2; padding: 3px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface);
-  box-shadow: var(--shadow-pop); color: var(--ink-2); font-size: 11.5px; line-height: 16px; white-space: nowrap; pointer-events: none;
+  box-shadow: var(--shadow-pop); color: var(--ink-2); font-size: 11.5px; line-height: 16px; text-align: center; white-space: nowrap; pointer-events: none;
   opacity: 0; transform: translateX(-50%) translateY(-3px); transition: opacity .15s, transform .15s; }
+/* NOD-461: a segunda linha do tooltip ensina as teclas, apagada (não é alerta). */
+.pg-tip-tec { display: block; margin-top: 1px; color: var(--ink-3); font-size: 10.5px; letter-spacing: .01em; }
 .pg-ic:hover .pg-tip, .pg-ic:focus-visible .pg-tip { opacity: 1; transform: translateX(-50%); }
 
 /* Os pontinhos, logo abaixo da cápsula; somem com a doca aberta (os ícones dizem o mesmo). */

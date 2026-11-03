@@ -141,8 +141,8 @@ export function passoDaMola(m: { x: number; v: number }, alvo: number, k: number
 }
 
 /** A dica da primeira vez, pelo tipo de ponteiro. */
-export function textoDaDica(toque: boolean): string {
-  return toque ? "deslize ou segure a pílula" : "role ou passe o mouse na pílula";
+export function textoDaDica(toque: boolean, mac = false): string {
+  return toque ? "deslize ou segure a pílula" : `role ou passe o mouse na pílula · ${rotuloDasTeclas(mac).trocar} troca`;
 }
 
 /** A dica aparece uma vez só: com mais de uma página e sem a marca guardada. */
@@ -199,9 +199,20 @@ export function posicaoDoArrasto(centrosDosOutros: readonly number[], x: number)
   return centrosDosOutros.filter((c) => c < x).length;
 }
 
-/** Alt+← / Alt+→ no ícone focado move a página uma posição. null = a tecla não move. */
-export function passoDaTeclaDeMover(tecla: string): -1 | 1 | null {
-  return tecla === "ArrowLeft" ? -1 : tecla === "ArrowRight" ? 1 : null;
+/**
+ * NOD-461: as teclas da pílula (⌥← → troca, ⌥⇧← → move; quem decide é `setaDaPilula` em web/lib/atalhos.ts) como a
+ * pessoa as vê: ⌥ e ⇧ no Mac, Alt e Shift fora dele.
+ */
+export function rotuloDasTeclas(mac: boolean): { trocar: string; mover: string } {
+  return mac ? { trocar: "⌥ ← →", mover: "⌥⇧ ← →" } : { trocar: "Alt ← →", mover: "Alt Shift ← →" };
+}
+
+/** O aria-keyshortcuts dos ícones da doca: trocar, mover e o menu. */
+export const ARIA_DAS_TECLAS = "Alt+ArrowLeft Alt+ArrowRight Alt+Shift+ArrowLeft Alt+Shift+ArrowRight Shift+F10"; // idioma-fixo: sintaxe do aria-keyshortcuts
+
+/** É Mac (as teclas se mostram com ⌥ e ⇧)? Pela plataforma do navegador. */
+export function ehMac(plataforma: string | undefined): boolean {
+  return /Mac|iPhone|iPad/.test(plataforma ?? "");
 }
 
 /**

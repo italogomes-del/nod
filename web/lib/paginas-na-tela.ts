@@ -10,7 +10,7 @@
  * - Com a doca aberta, arrastar um ícone de lado muda a ordem das páginas (a 1ª posição é onde o agente abre).
  * - "Reduzir movimento": sem mola nem esticada; a doca só aparece e some.
  */
-import { esticada, mostraDica, passoDaMola, passoDaRoda, passoDoArrasto, posicaoDoArrasto, presa, SEGURAR_MS, textoDaDica, TRAVA_DA_RODA_MS } from "./paginas.ts";
+import { ehMac, esticada, mostraDica, passoDaMola, passoDaRoda, passoDoArrasto, posicaoDoArrasto, presa, SEGURAR_MS, textoDaDica, TRAVA_DA_RODA_MS } from "./paginas.ts";
 
 /** Posições aqui são as da pílula (a ordem de exibição), não os índices de dentro das páginas. */
 export interface PilulaDePaginas {
@@ -27,8 +27,18 @@ export interface PilulaDePaginas {
 
 const CHAVE_DA_DICA = "nod.paginas.dica";
 
-export function ligarGestosDaPilula(doc: Document, p: PilulaDePaginas): void {
+/** O que o teclado pede à pílula (NOD-461). */
+export interface GestosDaPilula {
+  /** Abre a doca por um instante: a tecla trocou ou moveu a página longe da pílula e a pessoa precisa ver onde ela foi. */
+  espiar(): void;
+}
+
+/** Quanto a doca fica aberta depois de ⌥← → ou ⌥⇧← → (o bastante para ver o ícone chegar). */
+export const ESPIAR_MS = 1400;
+
+export function ligarGestosDaPilula(doc: Document, p: PilulaDePaginas): GestosDaPilula {
   const janela = doc.defaultView;
+  const mac = ehMac(janela?.navigator?.platform);
   const pil = (): HTMLElement | null => doc.querySelector<HTMLElement>("#cabecalho .qd-pil");
   const doca = (): HTMLElement | null => pil()?.querySelector<HTMLElement>(".pg-doca") ?? null;
   const ativa = (): boolean => p.total() > 1 && !!doca();
@@ -322,7 +332,7 @@ export function ligarGestosDaPilula(doc: Document, p: PilulaDePaginas): void {
     dica = doc.createElement("div");
     dica.className = "pg-dica";
     dica.setAttribute("aria-hidden", "true");
-    dica.textContent = textoDaDica(toqueGrosso);
+    dica.textContent = textoDaDica(toqueGrosso, mac);
     const r = c.getBoundingClientRect();
     dica.style.top = `${Math.round(r.bottom + 18)}px`;
     doc.body.append(dica);
@@ -336,7 +346,20 @@ export function ligarGestosDaPilula(doc: Document, p: PilulaDePaginas): void {
     if (guardar) { try { janela?.localStorage.setItem(CHAVE_DA_DICA, "1"); } catch { /* sem armazenamento: a dica volta na próxima */ } }
   }
 
+  /* ---------- o teclado: espiar a doca (NOD-461) ---------- */
+  // Fecha sozinha, salvo com o mouse em cima, o foco dentro dela ou um arrasto no meio (aí quem fecha é o gesto).
+  function espiar(): void {
+    if (!ativa()) return;
+    abrir(true);
+    timerFechar = setTimeout(() => {
+      timerFechar = null;
+      const c = pil();
+      if (!reordem && !c?.matches(":hover") && !doca()?.contains(doc.activeElement)) abrir(false);
+    }, ESPIAR_MS);
+  }
+
   // O cabeçalho já pode estar na tela: observa desde já e mostra a dica sem esperar o primeiro ponteiro.
   observar();
   mostrarDica();
+  return { espiar };
 }
