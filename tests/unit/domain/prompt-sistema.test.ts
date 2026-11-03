@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import type { Conector } from "../../../src/contracts/conector.ts";
 import type { FerramentaPlano } from "../../../src/contracts/plano-turno.ts";
 import { INSTRUCAO_ROTINA_NO_PROMPT, MEMORIAS_NO_PROMPT, montarPromptSistema, partesDoPromptSistema, secaoDaLinha } from "../../../src/domain/prompt-sistema.ts";
+import { aceitaPassagem, COLUNAS_PADRAO } from "../../../src/domain/colunas.ts";
+import { FERRAMENTAS_QUADRO } from "../../../src/contracts/ferramentas-quadro.ts";
 import { agente, f, mem } from "./_fixtures-prompt.ts";
 
 describe("montarPromptSistema: o modo de aprovação (ADR-059)", () => {
@@ -394,5 +396,40 @@ describe("ADR-130: o turno da pessoa vê o que o bot faz nos bastidores", () => 
 
   it("sem nada nos bastidores, o prompt não muda", () => {
     expect(montarPromptSistema({ ...base, bastidores: [] })).toBe(montarPromptSistema(base));
+  });
+});
+
+describe("ADR-142: o prompt ensina a passagem por coluna quando há gerir_quadro", () => {
+  const base = { agente, memorias: [], nativas: [], pessoaNome: "Marlon", modo: "conversa" as const };
+  it("com gerir_quadro, a linha Quadro: vai na parte estável, na seção ferramentas, e ensina definir_passagem", () => {
+    const { estavel, volatil } = partesDoPromptSistema({ ...base, ferramentas: [f("gerir_quadro")] });
+    const linha = estavel.find((l) => l.startsWith("Quadro:"));
+    expect(linha).toBeDefined();
+    expect(volatil.some((l) => l.startsWith("Quadro:"))).toBe(false);
+    expect(secaoDaLinha(linha!)).toBe("ferramentas");
+    expect(linha).toContain("cada coluna pode ter um responsável (a passagem, o handoff)");
+    // a assinatura é a mesma da descrição da ferramenta: se o contrato mudar, o prompt tem de acompanhar.
+    const assinatura = "definir_passagem {coluna, agente?, instrucoes?}";
+    expect(FERRAMENTAS_QUADRO.gerir_quadro.description).toContain(assinatura);
+    expect(linha).toContain(`gerir_quadro ${assinatura}`);
+    expect(linha).toContain("agente null tira");
+    // ADR-142 decisão 5: definir_passagem só a pedido da dona, na conversa; em turno de tarefa/colega o quadro recusa.
+    expect(linha).toContain("a pedido dela, na conversa com você");
+    // QA (mutante h): a frase das colunas sem passagem segue a regra do domínio (aceitaPassagem).
+    expect(linha).toContain("Só a dona do quadro define");
+    expect(linha).toContain("Bloqueado, Precisa de você e as colunas de fim não têm passagem");
+    const aceita = Object.fromEntries(COLUNAS_PADRAO.map((c) => [c.id, aceitaPassagem(c)]));
+    for (const id of ["bloqueado", "voce", "feito", "cancelado"]) expect(aceita[id]).toBe(false);
+    expect(aceita.backlog && aceita.afazer).toBe(true);
+    // ADR-142 decisão 2: Backlog recebe sem acionar; o prompt não pode prometer início em toda coluna.
+    expect(linha).toContain("nas outras de Não iniciado (como Backlog) só recebe, sem começar");
+    expect(linha).toContain("uma op por coluna no mesmo lote");
+    expect(linha).toContain("nem proponha rotina");
+    expect(linha).toContain("passa_para é o responsável da coluna");
+  });
+  it("sem gerir_quadro, nenhuma linha Quadro: nem definir_passagem", () => {
+    const prompt = montarPromptSistema({ ...base, ferramentas: [f("pedir_a_bot"), f("publicar_artefato")] });
+    expect(prompt.split("\n").some((l) => l.startsWith("Quadro:"))).toBe(false);
+    expect(prompt).not.toContain("definir_passagem");
   });
 });

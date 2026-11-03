@@ -83,7 +83,11 @@ describeIntegracao("chaves de experimento (ADR-111)", () => {
     // NOD-445 (ADR-146): as páginas do bot vêm no mesmo experimento, com gerir_apps.
     expect(desligado.texto).not.toContain("mcp__nod__gerir_quadro");
     expect(desligado.texto).not.toContain("mcp__nod__gerir_apps");
-    expect(ligado.texto.replace(" mcp__nod__gerir_apps,", "").replace(" mcp__nod__gerir_quadro,", "")).toBe(desligado.texto);
+    // NOD-462 (ADR-142): com gerir_quadro vem também a linha "Quadro:" (a passagem por coluna); fora ela, nada muda.
+    expect(desligado.texto).not.toMatch(/^Quadro:/m);
+    expect(ligado.texto).toMatch(/^Quadro: .*definir_passagem/m);
+    const semQuadro = ligado.texto.split("\n").filter((l) => !l.startsWith("Quadro:")).join("\n");
+    expect(semQuadro.replace(" mcp__nod__gerir_apps,", "").replace(" mcp__nod__gerir_quadro,", "")).toBe(desligado.texto);
     expect(ligado.composicao).toEqual({ calibracao: false, memoriaLonga: false, whatsapp: false, anexosAnteriores: 0 });
   });
 
