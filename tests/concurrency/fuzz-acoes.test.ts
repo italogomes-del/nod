@@ -284,8 +284,18 @@ for (const [ordem, config] of CONFIGURACOES.entries()) {
         // eslint-disable-next-line no-console
         console.log(`fuzz-acoes[${config.nome}]: ações do quadro com ${Math.ceil(N / 2)} entradas por rota: ${antes} → ${plano.casos.length} casos`);
       }
+      // A main ficou vermelha com a semente 1264666071: um `quadro.mudar_tarefa` sorteado com `excluir: true` apagou a
+      // tarefa do fuzz antes do primeiro `quadro.terminei`, que só deu 404. O `terminei` roda antes do `mudar_tarefa`
+      // (a ordem relativa do resto do plano não muda), e a tarefa ainda existe quando ele chega.
+      const primeiroMudar = plano.casos.findIndex((c) => c.acao === "quadro.mudar_tarefa");
+      if (primeiroMudar >= 0) {
+        const terminei = plano.casos.filter((c, i) => i > primeiroMudar && c.acao === "quadro.terminei");
+        const resto = plano.casos.filter((c, i) => !(i > primeiroMudar && c.acao === "quadro.terminei"));
+        resto.splice(primeiroMudar, 0, ...terminei);
+        plano.casos = resto;
+      }
       // eslint-disable-next-line no-console
-      console.log(`fuzz-acoes[${config.nome}]: ${plano.acoes} ações, ${plano.casos.length} casos; sem rota: ${plano.semRota.join(", ") || "nenhuma"}`);
+      console.log(`fuzz-acoes[${config.nome}]: ${plano.acoes} ações, ${plano.casos.length} casos; sem rota:${plano.semRota.join(", ") || "nenhuma"}`);
       expect(plano.casos.length, "o plano do fuzz saiu vazio: nada seria testado").toBeGreaterThan(0);
 
       // O cliente do fuzz age como o navegador: adota o cookie novo que o servidor manda (as rotas de conta trocam o
