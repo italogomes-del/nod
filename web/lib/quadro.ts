@@ -1,4 +1,5 @@
 import type { Experimentos } from "../../src/contracts/raio-x.ts";
+import type { TipoFrame } from "../../src/contracts/frame.ts";
 /**
  * NOD-429 (definido em 2026-10-30, protótipo base v3 aprovado pelo Marlon): o vocabulário do quadro-agente, sem DOM.
  * Os componentes (web/telas/quadro.ts) e a troca Conversa ↔ Quadro na pílula (web/lib/quadro-na-tela.ts) leem daqui;
@@ -119,3 +120,18 @@ export function conversaAVista(o: { naFrente: boolean; botsAbertos: boolean; mod
 export function ehModo(v: unknown): v is ModoDaConversa {
   return v === "conversa" || v === "quadro";
 }
+
+/** ADA-7: os frames de turno que mudam a execução de um card (e por isso releem o quadro à vista). */
+export const TURNO_MUDA_A_EXECUCAO: ReadonlySet<string> = new Set<TipoFrame>(["turno.iniciado", "turno.encerrado", "turno.interrompido"]);
+
+/**
+ * ADA-7: quanto tempo depois da última rolagem o gesto ainda conta, e o máximo que a releitura de um frame espera por ele.
+ * definido em 2026-11-03: 150 ms, folga sobre o intervalo de um quadro (16 ms) entre eventos de scroll do embalo; 3 s
+ * é o teto para a tela não ficar velha com a pessoa rolando sem parar (o dedo que segue mexendo segura até soltar).
+ */
+export const GESTO_MS = 150;
+export const ADIAR_ATE_MS = 3000;
+/** ADA-7, definido em 2026-11-03: o dedo parado (sem mexer nem rolar) além disso não segura mais a releitura. */
+export const TOQUE_PARADO_MS = 1000;
+/** ADA-7, definido em 2026-11-03: o arrasto de card ou de coluna segura a releitura até soltar; este teto só cobre um fim perdido. */
+export const ARRASTO_ATE_MS = 30_000;

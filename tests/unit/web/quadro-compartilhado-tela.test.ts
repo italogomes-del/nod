@@ -392,7 +392,9 @@ describe("o controlador", () => {
   const frame = (seq: number) => ({ streamId: "s", seq, pessoaId: EU, tipo: "quadro.mudou" as const, dados: { quadroId: "q1" } });
 
   it("a releitura ao vivo não apaga o que ela digita na edição (o campo nasce com o valor do servidor)", async () => {
-    const { c, caixa, disparar, porId } = montar({ quadroPorId: async () => ({ quadro: q([t("1", { pedidoPor: EU, titulo: "Minha" })]) }) });
+    // ADA-7: a releitura traz um quadro que mudou (outra tarefa chegou); o mesmo quadro nem regrava.
+    let lidas = 0;
+    const { c, caixa, disparar, porId } = montar({ quadroPorId: async () => ({ quadro: q([t("1", { pedidoPor: EU, titulo: "Minha" }), ...(lidas++ ? [t("2", { pedidoPor: ANA })] : [])]) }) });
     c.abrir("q1");
     await esperar();
     disparar("click", botao("abrir-tarefa", "1"));

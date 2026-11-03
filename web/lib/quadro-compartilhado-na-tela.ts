@@ -3,6 +3,9 @@ import type { LinhaMuralDto, QuadroDto, TarefaDto } from "../../src/contracts/qu
 import type { MutacaoQuadro } from "./api.ts";
 import { ErroApi } from "./erro-api.ts";
 import { deveRecarregar, donoDaTarefa, ehMinha, estadoDoErro, podeEditar, podeMudarStatus, textoDaRecusa } from "./quadro-compartilhado.ts";
+import { campoComFocoNoToque, criarGestoNaTela } from "./gesto-na-tela.ts";
+import { ADIAR_ATE_MS, ARRASTO_ATE_MS, GESTO_MS } from "./quadro.ts";
+import { focarSemRolar, guardarRolagem, restaurarRolagem } from "./rolagem-guardada.ts";
 import { quadroCompartilhado, type CargaDoCompartilhado, type VistaDoCompartilhado } from "../telas/quadro-compartilhado.ts";
 import type { AgenteDoQuadro } from "../telas/quadro-real.ts";
 
@@ -67,6 +70,32 @@ export function criarQuadroCompartilhadoNaTela(doc: Document, deps: DepsDoCompar
     return { carga, aberta: null, editando: null, recusa: null, alternadas: new Set(), ocupado: false };
   }
   const caixa = (): HTMLElement | null => doc.getElementById("qcp");
+  /**
+   * ADA-7 (revisão 4): quem rola o casco é um ancestral (a conversa) ou a página, não o #qcp: o primeiro ancestral com
+   * overflow que rola, senão a página (e,
+   * sem ela, o próprio casco).
+   */
+  const rolador = (el: HTMLElement): Element => {
+    for (let e: HTMLElement | null = el; e && e !== doc.body; e = e.parentElement) {
+      const o = doc.defaultView?.getComputedStyle(e).overflowY;
+      if ((o === "auto" || o === "scroll") && e.scrollHeight > e.clientHeight) return e;
+    }
+    return doc.scrollingElement ?? el;
+  };
+  // O gesto sobre o casco (o toque dentro dele, a rolagem de quem o rola) segura a releitura ao vivo.
+  const gesto = criarGestoNaTela(doc, (ev) => {
+    const el = caixa();
+    const t = ev.target;
+    if (!el) return false;
+    if (t === doc) return true;
+    return t instanceof Node && (el.contains(t) || t.contains(el));
+  });
+  /** O gesto segura até ADIAR_ATE_MS (o dedo que segue mexendo, até ARRASTO_ATE_MS); no toque, o campo com o foco, até sair. */
+  const segura = (desde: number): boolean =>
+    (gesto.ativo() && Date.now() - desde < (gesto.dedoMexendo() ? ARRASTO_ATE_MS : ADIAR_ATE_MS)) || campoComFocoNoToque(doc, caixa());
+  let aoVivoDesde = 0;
+  /** O minuto do último desenho: num minuto novo o mesmo quadro regrava (o tempo dos cards anda). */
+  let minutoDesenhado = -1;
   const quadroAtual = (): QuadroDto | null => (vista.carga.tipo === "pronto" ? vista.carga.q : null);
 
   /** Redesenha guardando o que a pessoa digita e o foco (a releitura ao vivo não apaga o campo). */
@@ -77,16 +106,25 @@ export function criarQuadroCompartilhadoNaTela(doc: Document, deps: DepsDoCompar
     const ativo = doc.activeElement instanceof HTMLElement && el.contains(doc.activeElement) ? doc.activeElement : null;
     const foco = ativo?.id || null;
     const sel = ativo instanceof HTMLInputElement || ativo instanceof HTMLTextAreaElement ? [ativo.selectionStart, ativo.selectionEnd] as const : null;
+    // ADA-7: a releitura do mesmo quadro (mesma tarefa aberta ou nenhuma) fica onde a pessoa rolou.
+    const vistaAgora = `${qid ?? ""}|${vista.aberta ?? ""}`;
+    const rol = rolador(el);
+    const rolagem = el.dataset["vista"] === vistaAgora ? guardarRolagem(rol, el) : null;
+    minutoDesenhado = Math.floor(Date.now() / 60_000);
     el.innerHTML = quadroCompartilhado(vista, { agente: deps.agente, hora: deps.hora });
     el.dataset["qid"] = qid ?? "";
+    el.dataset["vista"] = vistaAgora;
     for (const c of campos) {
       const novo = doc.getElementById(c.id);
       if ((novo instanceof HTMLInputElement || novo instanceof HTMLTextAreaElement) && el.contains(novo) && c.valor !== c.inicial) novo.value = c.valor;
     }
+    // ADA-7: depois dos campos (o que cresce com o texto mudaria a altura).
+    if (rolagem) restaurarRolagem(rol, el, rolagem);
     if (foco) {
       const novo = doc.getElementById(foco);
       if (novo && el.contains(novo)) {
-        novo.focus();
+        // ADA-7: sem rolar (o título da tarefa aberta, recriado e focado, levava a tela ao topo).
+        focarSemRolar(novo);
         if (sel && (novo instanceof HTMLInputElement || novo instanceof HTMLTextAreaElement)) { try { novo.setSelectionRange(sel[0], sel[1]); } catch { /* o tipo não tem seleção */ } }
       }
     }
@@ -97,7 +135,7 @@ export function criarQuadroCompartilhadoNaTela(doc: Document, deps: DepsDoCompar
     desenhar();
   }
 
-  async function ler(o: { esqueleto: boolean }): Promise<void> {
+  async function ler(o: { esqueleto: boolean; aoVivo?: boolean; desde?: number }): Promise<void> {
     const alvo = qid;
     if (!alvo) return;
     const n = ++leitura;
@@ -105,11 +143,22 @@ export function criarQuadroCompartilhadoNaTela(doc: Document, deps: DepsDoCompar
     try {
       const { quadro } = await deps.api().quadroPorId(alvo);
       if (n !== leitura || alvo !== qid) return;
-      const mural = vista.carga.tipo === "pronto" ? vista.carga.mural : null;
-      // A tarefa aberta que sumiu (excluída, desfeita) fecha o detalhe.
-      const aberta = vista.aberta && quadro.tarefas.some((t) => t.id === vista.aberta) ? vista.aberta : null;
-      mudar({ carga: { tipo: "pronto", q: quadro, mural }, aberta, editando: aberta ? vista.editando : null });
-      void lerMural(alvo, n);
+      // ADA-7 (revisão 6): a resposta ao vivo que chega com o gesto em curso (o dedo começou com o GET no ar) também
+      // espera; uma leitura ou ação mais nova (o contador) a descarta.
+      // Revisão 11: a espera segue contando de quando a releitura ao vivo foi pedida (o adiamento do GET e o daqui não somam).
+      const desde = o.desde ?? Date.now();
+      const aplicar = (): void => {
+        if (n !== leitura || alvo !== qid) return;
+        if (o.aoVivo && segura(desde)) { setTimeout(aplicar, GESTO_MS); return; }
+        const mural = vista.carga.tipo === "pronto" ? vista.carga.mural : null;
+        // A tarefa aberta que sumiu (excluída, desfeita) fecha o detalhe.
+        const aberta = vista.aberta && quadro.tarefas.some((t) => t.id === vista.aberta) ? vista.aberta : null;
+        // ADA-7 (revisão 4): a releitura ao vivo que traz o mesmo quadro não regrava (cortava o toque e o embalo).
+        const igual = o.aoVivo && vista.carga.tipo === "pronto" && Math.floor(Date.now() / 60_000) === minutoDesenhado && aberta === vista.aberta && JSON.stringify(vista.carga.q) === JSON.stringify(quadro);
+        if (!igual) mudar({ carga: { tipo: "pronto", q: quadro, mural }, aberta, editando: aberta ? vista.editando : null });
+        void lerMural(alvo, n);
+      };
+      aplicar();
     } catch (e) {
       if (n !== leitura || alvo !== qid) return;
       const estado = estadoDoErro(e);
@@ -124,6 +173,7 @@ export function criarQuadroCompartilhadoNaTela(doc: Document, deps: DepsDoCompar
     try {
       const { linhas } = await deps.api().atividadeDoQuadro(alvo);
       if (n !== leitura || alvo !== qid || vista.carga.tipo !== "pronto") return;
+      if (vista.carga.mural && JSON.stringify(vista.carga.mural) === JSON.stringify(linhas)) return;
       mudar({ carga: { ...vista.carga, mural: linhas } });
     } catch {
       if (n !== leitura || alvo !== qid || vista.carga.tipo !== "pronto") return;
@@ -189,12 +239,18 @@ export function criarQuadroCompartilhadoNaTela(doc: Document, deps: DepsDoCompar
     if (vista.ocupado) { releituraPendente = true; return; }
     if (agendada) return;
     agendada = true;
-    agendar(() => {
+    if (!aoVivoDesde) aoVivoDesde = Date.now();
+    const tentar = (): void => {
+      // ADA-7 (revisão 4): espera o gesto acabar, como a tela da dona (no máximo ADIAR_ATE_MS; o dedo que segue mexendo, até soltar).
+      if (qid && segura(aoVivoDesde)) { agendar(tentar); return; }
       agendada = false;
+      const desde = aoVivoDesde;
+      aoVivoDesde = 0;
       if (!qid) return;
       if (vista.ocupado) { releituraPendente = true; return; }
-      void ler({ esqueleto: false });
-    });
+      void ler({ esqueleto: false, aoVivo: true, desde });
+    };
+    agendar(tentar);
   }
 
   /** Relê o quadro e diz de quem a tarefa é agora (null = continua dela, ou sumiu). */

@@ -63,7 +63,9 @@
 /* A conversa (timeline e campo) fica no lugar, por baixo; o quadro cobre o palco abaixo da pílula. O main troca o
    `hidden` e o quadro-na-tela anima quem sai e quem entra. */
 .qd-vista { position: absolute; inset: 0; z-index: 3; display: flex; flex-direction: column; gap: 12px; min-width: 0; overflow: auto;
-  padding: 72px clamp(12px, 3vw, 24px) calc(env(safe-area-inset-bottom) + 24px); background: var(--qd-fundo); container-type: inline-size; }
+  padding: 72px clamp(12px, 3vw, 24px) calc(env(safe-area-inset-bottom) + 24px); background: var(--qd-fundo); container-type: inline-size;
+  /* ADA-7: a rolagem do quadro não escapa para a página (o puxar-para-atualizar e o quique do iOS). */
+  overscroll-behavior: contain; }
 .qd-vista[hidden] { display: none; }
 .qd-vista > * { width: 100%; max-width: 1240px; margin-left: auto; margin-right: auto; }
 /* NOD-418: o anúncio do trabalho (#qd-trab-anuncio) é filho da vista; sem isto a regra acima o esticava a 100% e ele vazava pela direita. */
@@ -133,7 +135,7 @@
 
 /* ---------- O quadro: colunas sem borda ---------- */
 .qd-quadro { position: relative; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
-.qd-grade { display: grid; column-gap: 8px; align-items: stretch; overflow-x: auto; padding-bottom: 6px; scrollbar-width: thin; }
+.qd-grade { display: grid; column-gap: 8px; align-items: stretch; overflow-x: auto; overscroll-behavior-x: contain; padding-bottom: 6px; scrollbar-width: thin; }
 .qd-col { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 6px 6px 8px; border-radius: 12px; background: var(--qd-col-fundo); }
 .qd-col-cab { display: flex; align-items: center; gap: 7px; min-width: 0; min-height: 28px; margin: 0; padding: 0 4px; font: inherit; font-size: 13px; font-weight: 600; color: var(--ink); }
 .qd-col-nome { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -179,7 +181,10 @@
 /* QA do PR 624, medido em 2026-11-02 (Chrome headless, coluna de 232 px com prazo, "Passar para…" e ⋯): sem piso o nome
    ficava com 17 px ("Fazendo"). O botão do nome guarda ~6 caracteres; quem encolhe antes é o "Passar para…". */
 .qd-col-cab > .qd-col-bt { flex: 1 1 auto; min-width: min(6.5em, 50%); }
-.qd-col-bt[data-arrasta] { touch-action: none; }
+/* ADA-7 (revisão 4): só com ponteiro fino. No toque (iPad, tablet, celular deitado com a grade larga) o dedo que começava
+   no cabeçalho, com 44 px de altura e a largura da coluna, não rolava o quadro em direção nenhuma; lá a coluna se move
+   pelo ⋯ e por Alt+setas. */
+@media (pointer: fine) { .qd-col-bt[data-arrasta] { touch-action: none; } }
 /* Decisão 6: o ⋯ só no hover ou no foco (no toque, sempre). */
 .qd-col-mais { flex: none; display: grid; place-items: center; width: 24px; height: 24px; margin-left: auto; padding: 0; border: 0; border-radius: 6px;
   background: transparent; color: var(--ink-2); cursor: pointer; opacity: 0; transition: opacity .12s ease-out, background-color .12s; }

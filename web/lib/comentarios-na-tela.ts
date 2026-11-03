@@ -29,7 +29,8 @@ export function criarComentariosNaTela(o: { api: () => ApiDosComentarios | null;
       if (n !== leitura || estado !== e) return;
       estado = { ...e, carga: "erro" };
     }
-    o.redesenhar();
+    // ADA-7 (revisão 3): os mesmos comentários não regravam a tarefa aberta.
+    if (JSON.stringify(estado) !== JSON.stringify(e)) o.redesenhar();
   }
 
   return {

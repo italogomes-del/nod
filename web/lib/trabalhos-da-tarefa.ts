@@ -10,6 +10,7 @@ import type { QuadroDto } from "../../src/contracts/quadro.ts";
 import type { ExecucoesDaTarefa } from "../../src/contracts/quadro-execucoes.ts";
 import { anuncioDoTrabalho, logDoTrabalho, secaoDoTrabalho, vivo } from "../telas/trabalhos-da-tarefa.ts";
 import { ErroApi } from "./erro-api.ts";
+import { GESTO_MS } from "./quadro.ts";
 import { comFerramenta, comFimDaAcao, comTexto, SEM_NOME_DA_FERRAMENTA, type AtividadeTurno, type FerramentaEmUso } from "./atividade.ts";
 
 export type SaidaDoTrabalho = { ok?: boolean; quadro?: QuadroDto | null; trabalho?: { entregue?: "agora" | "quando_comecar" | "novo" }; trabalhos?: ExecucoesDaTarefa; detalhe?: string };
@@ -57,6 +58,8 @@ const AVISO_DO_RECADO = { agora: "Recado mandado: entra no próximo passo.", qua
 export function criarTrabalhosDaTarefa(o: {
   api: () => ApiDosTrabalhos | null;
   redesenhar: () => void;
+  /** ADA-7: o redesenho depois de uma leitura que a pessoa não pediu (o frame); sem ele, o redesenhar. */
+  redesenharLido?: () => void;
   log: () => LugarDoLog | null;
   /** O quadro novo depois de uma ação (o card muda de coluna, no Repetir da Bloqueada). */
   aplicarQuadro?: (q: QuadroDto | null) => void;
@@ -66,6 +69,11 @@ export function criarTrabalhosDaTarefa(o: {
    */
   anuncio?: () => RegiaoDeAnuncio | null;
   juntarEm?: number;
+  /**
+   * ADA-7 (revisão 8): o gesto da pessoa segura a escrita do log desde `desde` (o quadro-na-tela decide o teto). Sem
+   * ela, o log regrava na hora. O delta que chega na espera só atualiza o estado: escreve uma vez, com o último.
+   */
+  segura?: (desde: number) => boolean;
 }) {
   let alvo: { agenteId: string; tarefaId: string } | null = null;
   let dados: ExecucoesDaTarefa | null = null;
@@ -78,6 +86,16 @@ export function criarTrabalhosDaTarefa(o: {
   let ocupado = false;
   let leitura = 0;
   let timer: ReturnType<typeof setTimeout> | null = null;
+  let logAdiado: ReturnType<typeof setTimeout> | null = null;
+  const escreverLog = (desde: number): void => {
+    logAdiado = null;
+    if (o.segura?.(desde)) { logAdiado = setTimeout(() => escreverLog(desde), GESTO_MS); return; }
+    // O estado da hora da escrita (o delta adiado pode ter ficado velho: outra execução, outro turno).
+    const e = dados?.execucoes[0];
+    const atividade = e ? atividades.get(e.turnoAtual) : undefined;
+    const lugar = o.log();
+    if (e && atividade && lugar && lugar.dataset["trabalho"] === e.id) lugar.innerHTML = logDoTrabalho(e, atividade, passos);
+  };
   const atividades = new Map<string, AtividadeTurno>();
 
   function falar(texto: string): void {
@@ -106,6 +124,9 @@ export function criarTrabalhosDaTarefa(o: {
     const de = alvo;
     if (!a?.trabalhosDaTarefa || !de) return;
     const n = ++leitura;
+    // ADA-7 (revisão 3): a releitura que traz o mesmo trabalho não regrava a tarefa aberta (cada turno.iniciado de
+    // qualquer bot relê).
+    const antes = JSON.stringify([dados, erro]);
     try {
       const r = await a.trabalhosDaTarefa(de.agenteId, de.tarefaId);
       if (n !== leitura || de !== alvo) return;
@@ -115,7 +136,7 @@ export function criarTrabalhosDaTarefa(o: {
       if (n !== leitura || de !== alvo) return;
       erro = true;
     }
-    o.redesenhar();
+    if (JSON.stringify([dados, erro]) !== antes) (o.redesenharLido ?? o.redesenhar)();
   }
 
   function relerLogo(): void {
@@ -159,11 +180,11 @@ export function criarTrabalhosDaTarefa(o: {
     abrir(agenteId: string, tarefaId: string): void {
       if (alvo?.agenteId === agenteId && alvo.tarefaId === tarefaId) { void ler(); return; }
       alvo = { agenteId, tarefaId };
-      dados = null; erro = false; passos = false; anteriores = false; aviso = null; ocupado = false; chave = null; atividades.clear();
+      dados = null; erro = false; passos = false; anteriores = false; aviso = null; ocupado = false; chave = null; atividades.clear(); if (logAdiado) { clearTimeout(logAdiado); logAdiado = null; }
       void ler();
     },
     fechar(): void {
-      alvo = null; dados = null; aviso = null; chave = null; leitura++; atividades.clear();
+      alvo = null; dados = null; aviso = null; chave = null; leitura++; atividades.clear(); if (logAdiado) { clearTimeout(logAdiado); logAdiado = null; }
       if (timer) { clearTimeout(timer); timer = null; }
     },
     reler: ler,
@@ -194,10 +215,8 @@ export function criarTrabalhosDaTarefa(o: {
       const nova = atividadeComFrame(antes, f);
       if (!nova || nova === antes) return;
       atividades.set(turno, nova);
-      // Só o log muda: o resto da tarefa (e o recado que a pessoa digita) fica.
-      const e = dados?.execucoes[0];
-      const lugar = o.log();
-      if (e && lugar && lugar.dataset["trabalho"] === e.id) lugar.innerHTML = logDoTrabalho(e, nova, passos);
+      // Só o log muda: o resto da tarefa (e o recado que a pessoa digita) fica. No gesto, espera o dedo (ADA-7).
+      if (logAdiado === null) escreverLog(Date.now());
     },
     /** true = o clique era do trabalho. */
     aoClicar(act: string): boolean {

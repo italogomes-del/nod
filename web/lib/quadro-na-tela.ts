@@ -10,10 +10,12 @@
  *   onde ela está (sem salto).
  * - O modo é por conversa e só em memória: trocar de conversa (ou sair dela) volta para Conversa, sem animação.
  */
-import { direcaoDaTroca, ehModo, movimentoDaTroca, type ModoDaConversa } from "./quadro.ts";
+import { direcaoDaTroca, ehModo, ADIAR_ATE_MS, ARRASTO_ATE_MS, GESTO_MS, movimentoDaTroca, TURNO_MUDA_A_EXECUCAO, type ModoDaConversa } from "./quadro.ts";
 import { comColunas, FAIXA_DO_PRAZO, fraseDoErroDeColuna, nomeRepetido, passoDeMover, pedeConfirmacao, porqueNaoRecebeCard, porqueNaoRemove, prazoEmMin, prazoLegivelMin, reciboDaResposta, reciboDeMover, saidaComErroDesiste, seletorDoFocoDaColuna, soltarEm, type EdicaoDeColuna, type Lado, type UnidadeDePrazo } from "./colunas.ts";
 import { ErroApi } from "./erro-api.ts";
 import { anunciarEm } from "./posicao-da-lista.ts";
+import { campoComFocoNoToque, criarGestoNaTela } from "./gesto-na-tela.ts";
+import { focarSemRolar, guardarRolagem, restaurarRolagem, seletorDoFocoDoCard } from "./rolagem-guardada.ts";
 import type { EntradaHistoricoDto, GrupoColuna, LinhaMuralDto, ModoConversa, QuadroDaPessoaDto, QuadroDto, TarefaDto } from "../../src/contracts/quadro.ts";
 import type { ConversaDto, RespostaMutacao } from "../../src/contracts/api.ts";
 import type { MutacaoQuadro } from "./api.ts";
@@ -101,7 +103,6 @@ export interface DadosDoQuadro {
 
 /** Os pedaços do palco que são "a conversa": saem juntos quando o Quadro entra. */
 export const LADO_DA_CONVERSA = ["timeline", "pilula-novas", "faixa-trabalhos", "composer"] as const;
-
 
 export interface QuadroNaTela {
   /**
@@ -247,12 +248,17 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
   /** NOD-430: a tarefa pedida pelo código num chat (`nod-tarefa:`): abre quando a conversa do dono dela estiver na tela. */
   let pedidoDoChat: { agenteId: string; tarefaId: string } | null = null;
   /** NOD-417: os comentários da tarefa aberta. */
-  const coms = criarComentariosNaTela({ api: () => dd?.api() ?? null, redesenhar: () => { if (aberta) desenharVista(); } });
+  // ADA-7 (revisão 3): a leitura que chega sozinha (o frame, o abrir) redesenha só com a tela livre do gesto.
+  const coms = criarComentariosNaTela({ api: () => dd?.api() ?? null, redesenhar: () => { if (aberta) redesenharQuandoLivre(); } });
   /** NOD-418: o trabalho da tarefa aberta (o atual ao vivo, os anteriores, Repetir, Cancelar e o recado). */
   const trabs = criarTrabalhosDaTarefa({
     api: () => dd?.api() ?? null,
     redesenhar: () => { if (aberta) desenharVista(); },
+    redesenharLido: () => { if (aberta) redesenharQuandoLivre(); },
     log: () => vista()?.querySelector<HTMLElement>(".qd-trab-log") ?? null,
+    // ADA-7 (revisão 8): o delta do log do trabalho também espera o dedo (o mesmo teto do redesenho).
+    // O log não recria o campo do recado: só o gesto o segura.
+    segura: (desde) => seguraGesto(desde),
     // Revisão 5 do PR #625: a região de status fica fora da .qd-conteudo (que o desenho recria): o mesmo nó, só o texto muda.
     anuncio: () => vista()?.querySelector<HTMLElement>(":scope > #qd-trab-anuncio") ?? null,
     aplicarQuadro: (novo) => aplicarQuadro(novo, aberta ? [aberta] : []),
@@ -269,7 +275,9 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     if (timerImportacao) clearTimeout(timerImportacao);
     timerImportacao = null;
     if (timerRecolher) clearTimeout(timerRecolher);
-    timerReler = timerRecolher = null;
+    if (timerDetalhe) clearTimeout(timerDetalhe);
+    timerReler = timerRecolher = timerDetalhe = null;
+    releituraDesde = detalheDesde = 0;
   }
 
   function conteudoHtml(): Html | string {
@@ -295,17 +303,28 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
    * Regrava só o conteúdo (o quadro ou a tarefa). A pílula fica: o rascunho e o foco nela sobrevivem a cada frame. O que a
    * pessoa digitava numa resposta também volta (o campo é o mesmo id), e o foco com ele.
    */
+  /** ADA-7: a vista do último desenho (página, tarefa aberta, forma); a regravação da mesma vista guarda a rolagem. */
+  let vistaDesenhada: string | null = null;
+  /** ADA-7: o minuto do último desenho; o quadro igual de outro minuto regrava (o "parada há", o prazo). */
+  let minutoDesenhado = -1;
+  let desenhoDevido = false;
+  /** ADA-7: o gesto na vista (o dedo, a última mexida e a última rolagem) e desde quando a releitura do frame espera. */
+  let releituraDesde = 0;
+  let timerDetalhe: ReturnType<typeof setTimeout> | null = null;
+  let detalheDesde = 0;
+
   function desenharVista(): void {
     const v = vista();
     if (!v) return;
     v.dataset["forma"] = forma;
     v.dataset["pagina"] = paginas[pagina]?.id ?? "";
-    if (!dd) { v.innerHTML = conteudoHtml(); return; }
+    if (!dd) { v.innerHTML = conteudoHtml(); vistaDesenhada = null; return; }
     let conteudo = v.querySelector<HTMLElement>(":scope > .qd-conteudo");
     if (!conteudo) {
       // Merge da main (#623): a região do quadro (rodapé) vem primeiro; a do trabalho (NOD-418) depois, as duas fora da .qd-conteudo.
       v.innerHTML = `<div class="qd-conteudo"></div><footer class="qc-wrap">${pilulaDoQuadro({ meta: q?.meta ?? null, nome })}<p class="qd-sr qd-anuncio" role="status" aria-live="polite"></p></footer><p class="qd-sr" id="qd-trab-anuncio" role="status" aria-atomic="true"></p>`;
       conteudo = v.querySelector<HTMLElement>(":scope > .qd-conteudo");
+      vistaDesenhada = null;
     }
     if (!conteudo) return;
     const rascunhos = new Map<string, string>();
@@ -313,13 +332,28 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     for (const c of conteudo.querySelectorAll<HTMLTextAreaElement | HTMLInputElement>("textarea[id], input.qd-col-in[id]")) if (c.value) rascunhos.set(c.id, c.value);
     const ativo = doc.activeElement;
     const focoId = ativo instanceof HTMLElement && conteudo.contains(ativo) && ativo.id ? ativo.id : null;
-    const focoColuna = ativo instanceof HTMLElement && conteudo.contains(ativo) && !ativo.id ? seletorDoFocoDaColuna(ativo) : null;
+    const focoColuna = ativo instanceof HTMLElement && conteudo.contains(ativo) && !ativo.id ? seletorDoFocoDaColuna(ativo) ?? seletorDoFocoDoCard(ativo) : null;
+    const sel = (ativo instanceof HTMLInputElement || ativo instanceof HTMLTextAreaElement) && focoId ? [ativo.selectionStart, ativo.selectionEnd] as const : null;
+    // ADA-7: a mesma vista (página, tarefa e forma) regravada pelo frame fica onde a pessoa rolou; trocar de vista
+    // (abrir a tarefa, voltar ao quadro, outra página) segue com quem a trocou (abrirTarefa e irPara levam ao topo).
+    const vistaAgora = `${paginas[pagina]?.id ?? ""}|${aberta ?? ""}|${forma}`;
+    const rolagem = vistaAgora === vistaDesenhada ? guardarRolagem(v, conteudo) : null;
+    vistaDesenhada = vistaAgora;
+    minutoDesenhado = Math.floor(Date.now() / 60_000);
+    desenhoDevido = false;
     conteudo.innerHTML = conteudoHtml();
     // NOD-445: Lista | Quadro em Tarefas, na barra dos filtros (só com o quadro de verdade e nenhuma tarefa aberta).
     conteudo.querySelector(".qd-barra-q .qd-barra-dir")?.insertAdjacentHTML("afterbegin", formaDasTarefas(forma));
-    if (focoColuna) conteudo.querySelector<HTMLElement>(focoColuna)?.focus();
     for (const [id, valor] of rascunhos) { const c = doc.getElementById(id); if (c instanceof HTMLTextAreaElement || c instanceof HTMLInputElement) c.value = valor; }
-    if (focoId) doc.getElementById(focoId)?.focus();
+    // ADA-7: a rolagem volta depois dos rascunhos (o campo que cresce com o texto mudaria a altura e a vista pularia).
+    if (rolagem) restaurarRolagem(v, conteudo, rolagem);
+    // ADA-7: o foco volta sem rolar (o título da tarefa aberta, recriado e focado, levava a vista ao topo).
+    if (focoColuna) focarSemRolar(conteudo.querySelector<HTMLElement>(focoColuna));
+    if (focoId) {
+      const novo = doc.getElementById(focoId);
+      focarSemRolar(novo);
+      if (sel && (novo instanceof HTMLInputElement || novo instanceof HTMLTextAreaElement)) { try { novo.setSelectionRange(sel[0], sel[1]); } catch { /* o tipo não tem seleção */ } }
+    }
     const form = v.querySelector<HTMLElement>('[data-form="conversa-no-quadro"]');
     const rot = q?.meta ? `Conversar com o quadro ${q.meta}` : `Conversar com ${nome} sobre o quadro`;
     if (form && form.getAttribute("aria-label") !== rot) form.setAttribute("aria-label", rot);
@@ -336,7 +370,10 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     const lugar = doc.getElementById("qc-faixa");
     if (!lugar || !dd) return;
     const bot = agenteId ? dd.agente(agenteId) : null;
+    // ADA-7: o histórico aberto (rolável) fica onde a pessoa rolou quando a faixa é regravada.
+    const rolagem = guardarRolagem(lugar, lugar);
     lugar.innerHTML = faixaDoQuadro({ faixa, avatarBot: bot?.avatar ?? null, historico, aberto: histAberto, hora: dd.hora });
+    restaurarRolagem(lugar, lugar, rolagem);
   }
 
   function mudarFaixa(f: Faixa): void {
@@ -350,23 +387,27 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
   }
 
   /** Lê o quadro do bot anfitrião; o que mudou desde a leitura anterior acende. Leitura velha (outra conversa) é descartada. */
-  async function lerQuadro(): Promise<void> {
+  /** `gestoDesde` (ADA-7): a leitura que a pessoa não pediu agora espera o gesto para regravar, contando desde então. */
+  async function lerQuadro(doFrame = false, gestoDesde: number | null = null): Promise<void> {
     const a = dd?.api();
     if (!a || !agenteId) return;
     const minha = ++leitura;
     const de = agenteId;
+    // Revisão 4: a leitura que deve redesenhar (a da recusa, a da resposta) e que um frame atropelou passa o dever à do
+    // frame; senão a do frame, com o quadro igual, não redesenhava e o select ficava no status recusado.
+    if (!doFrame) desenhoDevido = true;
     if (carga === "nada") { carga = "carregando"; desenharVista(); }
     try {
       const r = await a.quadro(de);
       if (minha !== leitura || de !== agenteId) return;
-      aplicarQuadro(r.quadro);
+      aplicarQuadro(r.quadro, [], doFrame, gestoDesde);
     } catch {
       if (minha !== leitura || de !== agenteId) return;
       if (carga !== "ok") { carga = "erro"; desenharVista(); }
     }
   }
 
-  function aplicarQuadro(novo: QuadroDto | null, extra: readonly string[] = []): void {
+  function aplicarQuadro(novo: QuadroDto | null, extra: readonly string[] = [], doFrame = false, gestoDesde: number | null = null): void {
     if (novo) novo = comColunas(novo);
     // NOD-445: Tarefas acende o laranja na pílula quando alguma tarefa está em "Precisa de você".
     const pedem = !!novo?.tarefas.some((t) => t.status === "voce");
@@ -374,6 +415,10 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     const novas = acesos(q, novo, [...dica, ...extra]);
     // Uma releitura sem mudança (a do frame e a da resposta chegam juntas) não apaga o brilho que a anterior acendeu.
     if (novas.size || !q || !novo || q.id !== novo.id) acesas = novas;
+    // ADA-7: a releitura de um frame que traz o mesmo quadro não regrava a tela (a regravação sem mudança interrompia o
+    // toque e o embalo da rolagem). Só a de frame: a releitura depois de uma recusa ou de uma resposta redesenha sempre,
+    // para fechar o menu e devolver o select ao valor real mesmo com o quadro igual.
+    const igual = doFrame && carga === "ok" && Math.floor(Date.now() / 60_000) === minutoDesenhado && !desenhoDevido && !novas.size && !pendente && !!novo && !!q && JSON.stringify(q) === JSON.stringify(novo);
     dica = [];
     q = novo;
     carga = "ok";
@@ -401,6 +446,11 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     if (q?.importacao?.estado === "trazendo") timerImportacao = setTimeout(() => { timerImportacao = null; void lerQuadro(); }, dd?.releImportacaoEm ?? 2000);
     // NOD-443: o mural aberto acompanha o quadro (cada pedido de qualquer pessoa entra nele).
     if (painel === "atividade" && novas.size) void lerMural();
+    if (igual) return;
+    // ADA-7 (revisão 6): a resposta do frame que chega com o gesto em curso (o dedo começou com o GET no ar) espera
+    // como o pedido esperou; o link que não achou a tarefa (abaixo) é da pessoa e desenha já.
+    // Revisão 10: a espera segue contando de quando a releitura foi pedida (o adiamento do GET e o do desenho não somam).
+    if ((doFrame || gestoDesde !== null) && !linkSemTarefa) { redesenharQuandoLivre(gestoDesde ?? undefined); return; }
     desenharVista();
     // Revisão 7 do PR #623: a tarefa do link saiu deste quadro entre a busca do código e a leitura (mudou, foi apagada).
     // O quadro abre e o leitor de tela ouve por que a tarefa não abriu, em vez de silêncio.
@@ -471,12 +521,14 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     try {
       const r = await a.historicoTarefa(de, id);
       if (minha !== leituraHist || de !== agenteId || id !== aberta) return;
+      // ADA-7 (revisão 4): o mesmo histórico não regrava a tarefa aberta.
+      if (histTarefa && JSON.stringify(histTarefa) === JSON.stringify(r.historico)) return;
       histTarefa = r.historico;
     } catch {
       if (minha !== leituraHist) return;
       histTarefa = [];
     }
-    desenharVista();
+    redesenharQuandoLivre();
   }
 
   /** Os quadros da pessoa, uma vez por conversa (o "Mover para…" só aparece com outro quadro). */
@@ -488,7 +540,7 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
       const r = await a.quadros();
       if (c !== chave) return;
       quadros = r.quadros;
-      if (aberta) desenharVista();
+      if (aberta) redesenharQuandoLivre();
     } catch { /* sem a lista, o campo não aparece */ }
   }
 
@@ -547,7 +599,7 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     };
     const foco = ehStatus ? "qd-t-status" : "qd-t-resp";
     const envio = semIniciar ? { ...campos, sem_iniciar: true } : campos;
-    void mudarTarefa((a, de) => a.mudarTarefa?.(de, t.id, envio), comecou).then((ok) => { if (ok) doc.getElementById(foco)?.focus(); });
+    void mudarTarefa((a, de) => a.mudarTarefa?.(de, t.id, envio), comecou).then((ok) => { if (ok) focarSemRolar(doc.getElementById(foco)); });
   }
 
   /** Revisão 7 do PR #623: desiste da confirmação do Status (Esc, clique fora): o select volta à coluna de agora. */
@@ -617,10 +669,41 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     }
   }
 
+  /**
+   * ADA-7: a releitura pedida por um frame espera o gesto acabar (o dedo na tela ou a rolagem de agora há pouco): a
+   * regravação recria a grade e mataria o arrasto entre colunas e o embalo. Adia no máximo ADIAR_ATE_MS.
+   */
   function pedirReleitura(): void {
     if (timerReler) return;
-    timerReler = setTimeout(() => { timerReler = null; void lerQuadro(); }, dd?.juntarEm ?? 250);
+    if (!releituraDesde) releituraDesde = Date.now();
+    timerReler = setTimeout(() => {
+      timerReler = null;
+      if (segura(releituraDesde)) { pedirReleitura(); return; }
+      const desde = releituraDesde;
+      releituraDesde = 0;
+      void lerQuadro(true, desde);
+    }, dd?.juntarEm ?? 250);
   }
+  /**
+   * Revisão 3 e 4: o que chega de uma leitura sem a pessoa pedir agora (os comentários, o trabalho e o histórico da
+   * tarefa aberta, a lista de quadros, a Atividade) espera o gesto como o quadro. Quem chama decide se há o que desenhar.
+   */
+  function redesenharQuandoLivre(desde?: number): void {
+    if (timerDetalhe) return;
+    if (!detalheDesde) detalheDesde = desde ?? Date.now();
+    if (!segura(detalheDesde)) { detalheDesde = 0; desenharVista(); return; }
+    timerDetalhe = setTimeout(() => { timerDetalhe = null; redesenharQuandoLivre(); }, GESTO_MS);
+  }
+  /** O gesto segura a regravação até ADIAR_ATE_MS; o arrasto de card ou de coluna e o dedo que segue mexendo, até soltar
+   * (revisão 3: a grade recriada no meio do arrasto mandava o dragend a um nó fora do documento e o card ficava preso;
+   * revisão 5: a `.qd-grade` recriada aos 3 s cortava a rolagem horizontal com o dedo ainda na tela). */
+  const arrastando = (): boolean => !!cardArrastado || !!arrasto?.ativo;
+  const seguraGesto = (desde: number): boolean => Date.now() - desde < (arrastando() || gesto.dedoMexendo() ? ARRASTO_ATE_MS : gestoAtivo() ? ADIAR_ATE_MS : 0);
+  // Revisão 10: só o que o desenho recria (a .qd-conteudo); a pílula do rodapé fica no lugar e não segura nada.
+  const segura = (desde: number): boolean => seguraGesto(desde) || campoComFocoNoToque(doc, vista()?.querySelector(":scope > .qd-conteudo"));
+  const naVista = (ev: Event): boolean => { const v = vista(); return !!v && ev.target instanceof Node && v.contains(ev.target); };
+  const gesto = criarGestoNaTela(doc, naVista);
+  const gestoAtivo = (): boolean => gesto.ativo();
 
   /** Relê a conversa do anfitrião: o histórico da faixa e, se há um pedido esperando, a resposta dele. */
   async function lerConversa(): Promise<void> {
@@ -638,8 +721,9 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
       if (pedidoId) {
         const resp = respostaDoBot(r.mensagens, de, pedidoId);
         if (resp && !(faixa.tipo === "resposta" && faixa.mensagemId === resp.id)) {
-          // A resposta chega depois do lote: relê o quadro antes, para o Desfazer apontar o lote deste pedido.
-          await lerQuadro();
+          // A resposta chega depois do lote: relê o quadro antes, para o Desfazer apontar o lote deste pedido. Revisão 10:
+          // quem traz a resposta é um frame (a pessoa pode estar rolando enquanto espera): o desenho espera o gesto.
+          await lerQuadro(false, Date.now());
           if (c !== chave) return;
           const lote = q?.ultimoLote ?? null;
           // Só o lote que o anfitrião gravou depois do pedido: o de outro bot ou de outro aparelho não ganha o Desfazer
@@ -734,7 +818,7 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
       aplicarQuadro(r.quadro);
       const texto = tipo === "criar" ? "Quadro criado." : campos.meta !== undefined ? (campos.meta ? "Meta trocada." : "Meta tirada: fluxo contínuo.") : campos.prazo ? "Prazo trocado." : "Prazo tirado.";
       mudarFaixa({ tipo: "resposta", texto, loteId: r.lote?.id ?? null, mensagemId: "" });
-      if (tipo === "editar" && campos.meta !== undefined) vista()?.querySelector<HTMLElement>('.qd-conteudo [data-act="editar-meta"]')?.focus();
+      if (tipo === "editar" && campos.meta !== undefined) focarSemRolar(vista()?.querySelector<HTMLElement>('.qd-conteudo [data-act="editar-meta"]'));
     } catch {
       if (c !== chave) return;
       mudarFaixa({ tipo: "erro", texto: tipo === "criar" ? "Não consegui criar o quadro." : "Não consegui mudar o quadro." });
@@ -796,13 +880,15 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     try {
       const r = await a.atividadeQuadro(de);
       if (n !== leituraMural || de !== agenteId) return;
+      // ADA-7 (revisão 4): a mesma Atividade não regrava a vista.
+      if (mural && JSON.stringify(mural) === JSON.stringify(r.linhas)) return;
       mural = r.linhas;
     } catch {
       if (n !== leituraMural) return;
       mural = [];
       erroPessoas = "Não consegui ler a Atividade agora.";
     }
-    if (painel === "atividade") desenharVista();
+    if (painel === "atividade") redesenharQuandoLivre();
   }
 
   function abrirPainel(qual: Exclude<PainelDoQuadro, null>): void {
@@ -829,7 +915,7 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
       aplicarQuadro(r.quadro);
       mudarFaixa({ tipo: "resposta", texto: recibo, loteId: r.lote && !r.lote.desfeitoEm ? r.lote.id : null, mensagemId: "" });
       desenharFaixa();
-      if (foco) vista()?.querySelector<HTMLElement>(foco)?.focus();
+      if (foco) focarSemRolar(vista()?.querySelector<HTMLElement>(foco));
       return true;
     } catch (e) {
       if (c !== chave) return false;
@@ -926,7 +1012,7 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
       edicao = depois;
       aplicarQuadro(r.quadro);
       mudarFaixa({ tipo: "resposta", texto: recibo, loteId: r.lote && !r.lote.desfeitoEm ? r.lote.id : null, mensagemId: "" });
-      if (foco) vista()?.querySelector<HTMLElement>(foco)?.focus();
+      if (foco) focarSemRolar(vista()?.querySelector<HTMLElement>(foco));
     } catch (e) {
       if (c !== chave) return;
       const aberta = edicao;
@@ -1084,8 +1170,10 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
       return;
     }
     if (aberta && frame.tipo.startsWith("turno.")) trabs.aoFrame(frame);
-    // A execução dos cards (rodando, na fila, falhou) vem dos turnos: com o quadro à vista e com tarefas, relê.
-    if (frame.tipo.startsWith("turno.") && q && q.tarefas.length && modo === "quadro") pedirReleitura();
+    // A execução dos cards (rodando, na fila, falhou) vem dos turnos: com o quadro à vista e com tarefas, relê. Só o
+    // começo e o fim de um turno mudam a execução; o delta, a fala e a atividade (várias por segundo enquanto qualquer
+    // bot escreve) regravavam o quadro inteiro e travavam a rolagem (ADA-7, ADR-061).
+    if (TURNO_MUDA_A_EXECUCAO.has(frame.tipo) && q && q.tarefas.length && modo === "quadro") pedirReleitura();
     const daConversa = d["conversaId"] === chave;
     if (daConversa && (frame.tipo === "mensagem.nova" || frame.tipo === "turno.encerrado" || frame.tipo === "turno.interrompido") && (faixa.tipo === "aguardando" || (faixa.tipo === "resposta" && !!faixa.pedidoId) || histAberto)) {
       // Com a resposta na faixa e o pedido ainda acompanhado, as falas seguintes do mesmo turno também sobem (a final traz o Desfazer).
@@ -1558,10 +1646,11 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     if (r.tipo === "recusa") {
       tirarRecusa();
       recusa = { tarefa, destino: r.destino.id, aviso: { texto: r.texto, acao: `Mandar para ${r.destino.nome}`, recusa: true, act: "tarefa-mandar", id: tarefa } };
-      relogio = relogioDaRecusa(RECUSA_MS, () => { relogio = null; sairDaRecusa(); }, () => naRecusa(doc.activeElement) || !!cardDaRecusa()?.matches(":hover"));
+      // Revisão 9: no gesto (ou no arrasto) a recusa não sai pelo tempo: a saída regrava a vista; conta de novo.
+      relogio = relogioDaRecusa(RECUSA_MS, () => { relogio = null; sairDaRecusa(); }, () => naRecusa(doc.activeElement) || !!cardDaRecusa()?.matches(":hover") || gestoAtivo() || arrastando());
       edicao = null;
       desenharVista();
-      visivel(vista() ?? doc, `[data-act="tarefa-mandar"][data-id="${CSS.escape(tarefa)}"]`)?.focus();
+      focarSemRolar(visivel(vista() ?? doc, `[data-act="tarefa-mandar"][data-id="${CSS.escape(tarefa)}"]`));
       return;
     }
     tirarRecusa();
@@ -1588,7 +1677,8 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     const tinhaFoco = naRecusa(ativo) || !ativo || ativo === doc.body;
     tirarRecusa();
     desenharVista();
-    if (tarefa && tinhaFoco) visivel(vista() ?? doc, `[data-act="abrir-tarefa"][data-id="${CSS.escape(tarefa)}"]`)?.focus();
+    // Revisão 9: o foco devolvido não rola a vista (a pessoa pode ter rolado nos 8 s da recusa).
+    if (tarefa && tinhaFoco) focarSemRolar(visivel(vista() ?? doc, `[data-act="abrir-tarefa"][data-id="${CSS.escape(tarefa)}"]`));
   }
 
   /** O Desfazer de um movimento (o eco do agente no card, ou o último do histórico da tarefa aberta). */
@@ -1673,7 +1763,7 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
       if (!titulo) return;
       void mudarTarefa((a, de) => a.criarTarefa?.(de, { titulo }), (r) => reciboDaNovaTarefa(titulo, r)).then((ok) => {
         const c = doc.getElementById("qd-nova-tit");
-        if (ok && c instanceof HTMLInputElement) { c.value = ""; c.focus(); }
+        if (ok && c instanceof HTMLInputElement) { c.value = ""; focarSemRolar(c); }
       });
       return;
     }
@@ -1857,6 +1947,9 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     const li = (ev.target as Element | null)?.closest?.<HTMLElement>("#quadro li.qd-card[draggable='true'][data-tarefa]");
     if (!li || !q) return;
     cardArrastado = li.dataset["tarefa"] ?? null;
+    // Revisão 9: o li pode sair do documento no meio do arrasto (um redesenho direto); o dragend dele não sobe ao doc e o
+    // arrasto ficava preso, segurando toda releitura por ARRASTO_ATE_MS. O próprio li também solta.
+    li.addEventListener("dragend", fimDoArrastoDoCard, { once: true });
     ev.dataTransfer?.setData("text/plain", cardArrastado ?? "");
     if (ev.dataTransfer) ev.dataTransfer.effectAllowed = "move";
     li.classList.add("qd-arrastando");
@@ -1868,10 +1961,13 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     vista()?.querySelectorAll(".qd-alvo").forEach((x) => { if (x !== sec) x.classList.remove("qd-alvo"); });
     sec.classList.add("qd-alvo");
   });
-  doc.addEventListener("dragend", () => {
+  function fimDoArrastoDoCard(): void {
     cardArrastado = null;
     vista()?.querySelectorAll(".qd-alvo, .qd-arrastando").forEach((x) => x.classList.remove("qd-alvo", "qd-arrastando"));
-  });
+  }
+  doc.addEventListener("dragend", fimDoArrastoDoCard);
+  // O navegador não manda eventos de ponteiro durante o arrasto nativo: um movimento sem botão depois dele é o fim perdido.
+  doc.addEventListener("pointermove", (ev) => { if (cardArrastado && ev.buttons === 0) fimDoArrastoDoCard(); }, { passive: true });
   doc.addEventListener("drop", (ev) => {
     const sec = cardArrastado ? colunaSob(ev.target) : null;
     const tarefa = cardArrastado;
