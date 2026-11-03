@@ -88,8 +88,8 @@ Escolhas de produto feitas na correção, sem decisão registrada antes. Cada um
   meta, no prazo ou nas colunas e não desfaz. O lote não entra no mural (não é um pedido dela, D8).
 - **Achado 3.** O turno limpo que lê o quadro de outra pessoa, ou um quadro com tarefa pedida por outra pessoa ou
   comentário de fora, fica contaminado (ADR-047).
-- **Achado 5.** Quem participa ainda não tem a tela do quadro: o aviso de "Com você" diz para responder pelo bot. A tela
-  dela fica para uma issue seguinte.
+- **Achado 5.** ~~Quem participa ainda não tem a tela do quadro~~: a NOD-455 a entregou (ver "A tela de quem participa"
+  abaixo); o aviso de "Com você" ganha o link "Abrir no quadro".
 - **Achado 6.** O turno que o próprio quadro abriu (sem quem pediu) só tira de Com você a tarefa dele; sem turno, nenhuma.
 - **Achado 7.** O modo `grupo` sai das escolhas (ferramenta e servidor) até a conversa do grupo existir.
 
@@ -202,6 +202,32 @@ Pendências de produto do merge com a NOD-417, mais as escolhas desta correção
   mais do quadro") e nenhum cartão nasce.
 - **"A pedido de" também no cartão do revisor** que aparece na conversa, e `listarSuaVez` lê cada turno uma vez e cada
   nome uma vez por chamada.
+
+## A tela de quem participa (NOD-455)
+
+- **Só as rotas do quadro.** A tela (`web/lib/quadro-compartilhado*.ts`, `web/telas/quadro-compartilhado.ts`) lê e muda
+  só por `/quadros/:qid…` e `GET /quadros/compartilhados`, nunca pelas `/agentes/:id/…` da dona. O gate da tela é espelho
+  do servidor (`regraDoModo`, `pendenciaAlheia`, `tarefaDeOutraPessoa`, `podeDesfazer`); a ação proibida não aparece
+  (ausente, não desligada). Quem não participa recebe 404 e vê "Você não participa deste quadro." sem nome nenhum.
+- **Vale o experimento da dona.** A porta (`src/db/porta-da-dona.ts`) confere que a pessoa é membro e que o experimento
+  `quadro` da DONA está ligado. O de quem participa não decide: com o dela desligado, ela continua vendo (e mexendo, pelo
+  gate) nos quadros de outras donas em que participa; com o da dona desligado, o quadro some para todo mundo.
+  **Quem decide é o quadro** (decisões 1 e 2 da Ada, revisão 6 do PR #634): a flag do servidor `NOD_QUADROS` (ADR-141
+  §6) que vale é a da DONA. O repo de preferências, lido no escopo dela dentro da porta, já junta a liberação dela à
+  chave; fora da flag a chave dela lê desligada e o quadro some para quem participa como um que não existe (tela, lista,
+  mural, lote e bot). Quem participa não precisa estar na flag nem ter a chave ligada. Isso não abre a flag para ela: o
+  quadro próprio, a chave em Experimentos, a pílula e o `criar_quadro` continuam presos à liberação e à chave dela.
+- **O bot de quem participa segue a dona.** O `gerir_quadro` entra no plano do bot dela quando ela participa de algum
+  quadro que a porta abre (`participaDeQuadroAberto`), mesmo com a chave dela desligada ou fora da flag. A consulta
+  (`acoes: []`) lê o quadro da dona pela porta, sem os trabalhos (as execuções são da dona), e contamina o turno; a
+  escrita é o mesmo lote de quem participa (o que a API permite). Com a chave dela desligada, os quadros próprios dela
+  não entram na escolha do quadro do pedido; repetir, cancelar e recado no quadro de outra pessoa voltam `nao_permitido`.
+- **Quem sai recebe o último frame.** O lote que tira alguém marca `dados.sairam` (`comSairam`); o `comMembros` junta essa
+  pessoa aos destinatários desse frame (e tira a marca), para a tela dela reler, receber o 404 e virar "sem acesso", e a
+  linha sair de "Compartilhados com você". Os frames seguintes já não chegam a ela.
+- **Ao vivo, agrupado.** O `quadro.mudou` deste quadro relê em 250 ms (uma rajada vira uma leitura); o frame que chega
+  com uma ação em voo relê quando ela acaba; o SSE que reconecta relê a tela e a lista. A releitura não apaga o que a
+  pessoa digita (o campo que ela mudou fica com o valor dela).
 
 ## Gatilho de reversão
 

@@ -189,6 +189,8 @@ describe("redigirAviso", () => {
     expect(aviso?.alvo).toEqual({ tipo: "conversa", conversaId: "c-Nina", agenteId: "ag-Nina" });
     expect(aviso?.grupo).toBe("ag-Nina");
     expect(redigirAviso([pedido("d1", "Nina", "  Posso\n ler o  Gmail? ")])?.corpo).toBe("Posso ler o Gmail?");
+    // NOD-455 (revisão 4): o link "Abrir no quadro" do aviso_pessoa vira só o texto na notificação.
+    expect(redigirAviso([pedido("d2", "Lia", "Espera você: ZE-1. [Abrir no quadro](nod-quadro:3f2a)")])?.corpo).toBe("Espera você: ZE-1. Abrir no quadro");
   });
 
   it("NOD-114: cada tipo sai com o seu título", () => {

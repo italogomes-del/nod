@@ -627,6 +627,10 @@ export type PlanoLote = {
   porRegra: ReadonlySet<string>;
   /** Revisão 3 do PR #623: o id (no plano) da tarefa de cada criar_tarefa, na ordem dos passos. */
   criadas: string[];
+  /** NOD-455 (revisão 5): as que trocaram de responsável pela passagem da coluna (ADR-142), não por quem pediu o lote. */
+  passagens: ReadonlySet<string>;
+  /** NOD-455 (revisão 7, A1): as tarefas cujo responsável algum passo trocou de propósito (agente explícito, até null). */
+  trocasDeResponsavel: ReadonlySet<string>;
 };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -793,6 +797,7 @@ export function planejarLote(p: {
   // Passagem por coluna (ADR-142): as que entraram numa coluna com responsável e ficaram com ele; `terminei` destrava o
   // próprio autor (a etapa dele acabou e a seguinte é dele também).
   const passagens = new Set<string>();
+  const trocasDeResponsavel = new Set<string>();
   const terminadas = new Set<string>();
   // Revisão 2 do PR #622: a mesma trava do `terminei` no mudar_tarefa com status. O bot que não cuida da tarefa, num turno
   // com conteúdo de fora, a muda de coluna (a passagem troca o responsável), mas não aciona ninguém por isso.
@@ -855,7 +860,7 @@ export function planejarLote(p: {
   const foraDeQuemNaoCuida = (t: TarefaPlanejada) => p.autorAgenteId !== null && turnoSujo && (t.nova || !eraDoAutor(t.id));
   const passar = (t: TarefaPlanejada, de: IdColuna | null, agenteDoPasso: string | null | undefined): string | null => {
     // Revisão 4 do PR #622: a troca explícita de responsável é como a passagem: a mudança vale, sem acionar ninguém.
-    if (agenteDoPasso !== undefined) { agenteDoAutor.delete(t.id); if (agenteDoPasso !== null && foraDeQuemNaoCuida(t)) passagemSegurada.add(t.id); return null; }
+    if (agenteDoPasso !== undefined) { trocasDeResponsavel.add(t.id); agenteDoAutor.delete(t.id); if (agenteDoPasso !== null && foraDeQuemNaoCuida(t)) passagemSegurada.add(t.id); return null; }
     if (t.status === de) return null;
     const dono = responsavelDe(colunas, t.status);
     if (!dono) return null;
@@ -1329,7 +1334,7 @@ export function planejarLote(p: {
   // terminada_em (NOD-415, revisão 3): pelo grupo da coluna em que a tarefa ficou, com as colunas finais do lote.
   for (const t of tarefas) if (tocadas.includes(t.id)) { t.mudadoEm = p.agora; t.terminadaEm = terminadaDepois(t, p.agora, colunas); }
   const colunasFinais = mudouColunas ? (saoPadrao(colunas) ? null : colunas) : (p.quadro?.colunas ? colunas : null);
-  return { quadro: { ...quadro, colunas: colunasFinais }, mudouColunas, frasesDasColunas, ajustada, tarefas, tocadas, apagadas, respondidas: respondidasVivas, comecam, seguradas, movimentos, movimentosDesfeitos, freadas: [...freadas].map(([id, f]) => ({ id, ...f })), recusas, pedidos, porRegra, criadas };
+  return { quadro: { ...quadro, colunas: colunasFinais }, mudouColunas, frasesDasColunas, ajustada, tarefas, tocadas, apagadas, respondidas: respondidasVivas, comecam, seguradas, movimentos, movimentosDesfeitos, freadas: [...freadas].map(([id, f]) => ({ id, ...f })), recusas, pedidos, porRegra, criadas, passagens, trocasDeResponsavel };
 }
 
 /** A tarefa anda (o turno dela vale): no andamento, fora de "Precisa de você" e de Bloqueado. */

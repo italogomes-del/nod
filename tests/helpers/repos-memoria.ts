@@ -3879,6 +3879,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       doAgente: async () => null,
       doTurno: async () => null,
       tarefaDoTurno: async () => null,
+      membrosDoTurno: async () => null,
       listar: async () => [],
       criar: soNoPostgres,
       salvar: soNoPostgres,

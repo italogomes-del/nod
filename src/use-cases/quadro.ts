@@ -599,14 +599,14 @@ async function desfazer(deps: Deps, p: PedidoLote, q: Quadro, loteId: string | u
   await repo.registrarHistorico(q.id, historico, null);
   await repo.salvar(q.id, foto.quadro);
   // NOD-443: o lote das pessoas ou do modo volta quem estava e o modo de antes.
-  if (foto.pessoas) await restaurarPessoas(deps, q.id, foto.pessoas);
+  const sairam = foto.pessoas ? await restaurarPessoas(deps, q.id, foto.pessoas) : [];
   await repo.marcarDesfeito(ultimo.id);
   // NOD-419: os movimentos do lote desfeito saem do jogo (o histórico os mostra riscados; não se desfazem de novo).
   await repo.desfazerMovimentosDoLote(ultimo.id);
   const atualizado = await repo.buscar(q.id);
   return {
     data: { ok: true, quadro: atualizado ? await montarQuadro(deps, atualizado, leitorDoLote(deps, p)) : null, lote: null, comecaram: [], desfeito: true },
-    events: [eventoQuadro(deps, p, q, ultimo.id, foto.tarefas.map((t) => t.id))],
+    events: [comSairam(eventoQuadro(deps, p, q, ultimo.id, foto.tarefas.map((t) => t.id)), sairam)],
   };
 }
 
@@ -634,16 +634,25 @@ export async function aplicarLoteQuadro(deps: Deps, p: PedidoLote): Promise<{ da
  * chegava só à dona.
  */
 export async function comMembros(deps: Deps, events: RuntimeEvent[]): Promise<RuntimeEvent[]> {
-  const cache = new Map<string, string>();
+  const cache = new Map<string, string[]>();
   const out: RuntimeEvent[] = [];
   for (const e of events) {
     const qid = e.kind === "quadro_mudou" ? e.dados.quadroId : null;
     if (typeof qid !== "string") { out.push(e); continue; }
-    if (!cache.has(qid)) cache.set(qid, (await deps.repos.quadros.membros(qid)).map((m) => m.pessoaId).join(","));
-    const membros = cache.get(qid)!;
-    out.push(membros ? { ...e, dados: { ...e.dados, membros } } : e);
+    if (!cache.has(qid)) cache.set(qid, (await deps.repos.quadros.membros(qid)).map((m) => m.pessoaId));
+    // NOD-455: quem acabou de sair (tirada ou o Desfazer da entrada) também recebe ESTE aviso, só com ids: a tela dela
+    // relê pela porta, recebe "não encontrado" e troca na hora para "Você não participa deste quadro".
+    const { sairam, ...dados } = e.dados;
+    const extra = typeof sairam === "string" && sairam ? sairam.split(",") : [];
+    const membros = [...new Set([...cache.get(qid)!, ...extra])].join(",");
+    out.push(membros ? { ...e, dados: { ...dados, membros } } : { ...e, dados });
   }
   return out;
+}
+
+/** NOD-455: marca no aviso quem saiu do quadro neste lote (o comMembros o junta aos destinatários e tira a marca). */
+export function comSairam(e: RuntimeEvent, sairam: readonly string[]): RuntimeEvent {
+  return sairam.length ? { ...e, dados: { ...e.dados, sairam: sairam.join(",") } } : e;
 }
 
 async function aplicarLoteDaDona(deps: Deps, p: PedidoLote): Promise<{ data: ResultadoLote; events?: RuntimeEvent[] }> {
@@ -873,10 +882,12 @@ async function removerQuadro(deps: Deps, p: PedidoLote, q: Quadro): Promise<{ da
   const tarefas = await deps.repos.quadros.tarefas(q.id);
   for (const t of tarefas) if (t.turnoId) await pararTurno(deps, p, t.turnoId);
   // Os códigos ficam, sem tarefa (revisão 5 do PR #623): reservam o prefixo, e o link velho dá "não encontrada".
+  // NOD-455: os membros caem em CASCADE com o quadro; lidos antes, eles recebem este último aviso (a tela vira "sem acesso").
+  const membros = (await deps.repos.quadros.membros(q.id)).map((m) => m.pessoaId);
   await deps.repos.quadros.apagarHistorico(tarefas.map((t) => t.id));
   await deps.repos.quadros.apagar(q.id);
   const fechados = await fecharExclusoesPendentes(deps, q.id, p.exclusaoConfirmada);
-  return { data: { ok: true, quadro: null, lote: null, comecaram: [], desfeito: false, removido: true }, events: [eventoQuadro(deps, p, q, null, tarefas.map((t) => t.id), true), ...fechados] };
+  return { data: { ok: true, quadro: null, lote: null, comecaram: [], desfeito: false, removido: true }, events: [comSairam(eventoQuadro(deps, p, q, null, tarefas.map((t) => t.id), true), membros), ...fechados] };
 }
 
 /** NOD-430 (revisão 1 do PR #627): o quadro saiu, o card de excluí-lo não tem mais o que pedir. */
@@ -1293,7 +1304,11 @@ function tarefaDeOutraPessoa(plano: Extract<ReturnType<typeof planejarLote>, { t
     const a = antesPorId.get(id);
     const t = plano.tarefas.find((x) => x.id === id);
     if (!a || !t || a.pedidoPor === quem) continue;
-    if (t.titulo !== a.titulo || t.descricao !== a.descricao || t.agenteId !== a.agenteId) return `"${a.titulo}" não foi você quem pediu: o título, a descrição e o responsável são de quem pediu e da dona. ${caminho}`;
+    // NOD-455 (revisão 5, achado M1): mudar o status é de quem participa, e a passagem da coluna (ADR-142) troca o
+    // responsável. Essa troca é da regra, não dela: vale quando o responsável final é o da coluna em que a tarefa ficou.
+    // Revisão 7, achado A1: uma troca explícita no lote (até para ninguém) não é da regra, e a coluna sem responsável não passa.
+    const pelaPassagem = plano.passagens.has(id) && !plano.trocasDeResponsavel.has(id) && t.agenteId !== null && t.agenteId === responsavelDe(colunasDe(plano.quadro), t.status);
+    if (t.titulo !== a.titulo || t.descricao !== a.descricao || (t.agenteId !== a.agenteId && !pelaPassagem)) return `"${a.titulo}" não foi você quem pediu: o título, a descrição e o responsável são de quem pediu e da dona. ${caminho}`;
     if (!porProcuracao && (t.pergunta !== a.pergunta || t.prUrl !== a.prUrl)) return `"${a.titulo}" não foi você quem pediu: a pergunta e o PR são de quem pediu e da dona. ${caminho}`;
     // Revisão 4 do PR #628, achado 1: trazer de novo do Linear (importar_linear) reescrevia o link e marcava a tarefa da dona
     // de fora sem mudar o título. O item do Linear e a proveniência também são de quem pediu e da dona; sob a procuração, o

@@ -9,7 +9,7 @@ import type { Deps } from "../use-cases/tipos.ts";
 import { vincularEscopo } from "./tx.ts";
 
 /** O mínimo que a porta lê para conferir a participação (nos deps de quem pede e nos da dona). */
-type ComQuadros = { repos: { quadros: { participacoes(): Promise<{ quadroId: string; donaId: string }[]>; ehMembro(quadroId: string, pessoaId: string): Promise<boolean>; buscar(id: string): Promise<Quadro | null> } } };
+type ComQuadros = { repos: { quadros: { participacoes(): Promise<{ quadroId: string; donaId: string }[]>; ehMembro(quadroId: string, pessoaId: string): Promise<boolean>; buscar(id: string): Promise<Quadro | null> }; preferencias: { buscar(): Promise<{ experimentos?: { quadro?: boolean } }> }; agentes: { buscar(id: string): Promise<unknown> } } };
 
 /**
  * NOD-443 (ADR-143, "a porta é a dona"): troca o escopo da transação para o da dona de UM quadro, roda `fn` com os deps
@@ -24,13 +24,23 @@ type ComQuadros = { repos: { quadros: { participacoes(): Promise<{ quadroId: str
 export function portaDaDona<D extends ComQuadros>(trx: Tx, escopo: Escopo, montar: (escopo: Escopo) => D): <T>(quadroId: string, fn: (deps: D, q: Quadro) => Promise<T>) => Promise<T> {
   return async (quadroId, fn) => {
     const id = quadroId.toLowerCase();
-    const minha = (await montar(escopo).repos.quadros.participacoes()).find((x) => x.quadroId === id);
+    const minhas = montar(escopo).repos;
+    // NOD-455 (decisão 2 da Ada, revisão 6): quem decide o acesso é o quadro. A flag NOD_QUADROS (ADR-141 §6) e o
+    // experimento que valem são os da DONA (lidos abaixo, já no escopo dela: o repo de preferências aplica a liberação
+    // dela à chave). Quem participa não precisa estar na flag nem ter a chave ligada.
+    const minha = (await minhas.quadros.participacoes()).find((x) => x.quadroId === id);
     if (!minha) throw new ErroDeDominio("nao_encontrado", { cause: "porta:quadro" });
     const daDona: Escopo = { tenantId: escopo.tenantId, pessoaId: minha.donaId };
     await vincularEscopo(trx, daDona);
     try {
       const dd = montar(daDona);
-      const q = (await dd.repos.quadros.ehMembro(id, escopo.pessoaId)) ? await dd.repos.quadros.buscar(id) : null;
+      // NOD-455 (decisão 2): vale o experimento da DONA (com a flag dela), não o de quem participa. Com o dela desligado
+      // ou a dona fora da flag, o quadro some
+      // para quem participa como se não existisse (o mesmo não encontrado), nunca um erro que diga que há um quadro.
+      const ligado = (await dd.repos.preferencias.buscar()).experimentos?.quadro === true;
+      const achado = ligado && (await dd.repos.quadros.ehMembro(id, escopo.pessoaId)) ? await dd.repos.quadros.buscar(id) : null;
+      // Revisão 9 do PR #634: o bot anfitrião que a dona excluiu (soft delete) leva o quadro junto, como na lista dela.
+      const q = achado && (await dd.repos.agentes.buscar(achado.agenteId)) ? achado : null;
       if (!q) throw new ErroDeDominio("nao_encontrado", { cause: "porta:quadro" });
       return await fn(dd, q);
     } finally {

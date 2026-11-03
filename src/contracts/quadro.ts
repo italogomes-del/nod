@@ -121,7 +121,7 @@ export type LoteQuadro = {
 };
 
 /** NOD-443 (ADR-143): as pessoas, quem decide, o mural e os comentários moram em quadro-pessoas.ts. */
-export type { MembroQuadroDto, QuemDecideDto, LinhaMuralDto, ComentarioQuadroDto, ComentarioTarefa, ComentarioDto } from "./quadro-pessoas.ts";
+export type { MembroQuadroDto, QuemDecideDto, LinhaMuralDto, ComentarioQuadroDto, ComentarioTarefa, ComentarioDto, QuadroCompartilhadoDto } from "./quadro-pessoas.ts";
 import type { ComentarioQuadroDto, MembroQuadroDto, ModoConversa, QuemDecideDto } from "./quadro-pessoas.ts";
 import type { ItemLinear } from "./quadro-bot.ts";
 

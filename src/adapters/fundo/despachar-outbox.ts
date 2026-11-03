@@ -82,6 +82,9 @@ export const FRAME_POR_EVENTO: Record<KindEvento, TipoFrame> = {
   linha_aberta: "agente.mudou",
 };
 
+/** Os eventos de turno que mudam a execução de um card do quadro (os mesmos que viram `turno.iniciado/encerrado/interrompido`). */
+const TURNO_DO_CARD: ReadonlySet<string> = new Set(["turno_criado", "turno_despachado", "turno_encerrado", "turno_interrompido"]);
+
 export function frameDoEvento(kind: string): TipoFrame {
   const tipo = Object.hasOwn(FRAME_POR_EVENTO, kind) ? FRAME_POR_EVENTO[kind as KindEvento] : undefined;
   if (!tipo) throw new ErroDeDominio("entrada_invalida", { cause: `kind de evento sem frame: ${kind}` });
@@ -138,6 +141,13 @@ export async function despacharPessoa(conn: Conn, escopo: Escopo, barramento: Ba
       if (item.tipo === "quadro_mudou" && typeof item.dados.membros === "string" && item.dados.membros) {
         const { membros: _m, ...dados } = item.dados;
         for (const membro of item.dados.membros.split(",")) barramento.publicar(membro, frameDoEvento(item.tipo), { ...dados, kind: item.tipo, eventoId: item.eventoId, conversaId: null, turnoId: null });
+      }
+      // NOD-455 (revisão 5, achado M2): a execução do card (na fila, rodando, falhou) vem dos turnos, e os frames de turno
+      // são da dona. Quem participa do quadro da tarefa do turno recebe só o aviso de que o card mudou (ids, sem a conversa
+      // nem o turno da dona) e relê pela porta.
+      if (TURNO_DO_CARD.has(item.tipo) && item.turnoId) {
+        const doCard = await repos.quadros.membrosDoTurno(item.turnoId);
+        for (const membro of doCard?.membros ?? []) barramento.publicar(membro, "quadro.mudou", { quadroId: doCard!.quadroId, tarefas: doCard!.tarefaId, kind: "quadro_mudou", eventoId: item.eventoId, conversaId: null, turnoId: null });
       }
       if (soPublicar) soPublicar.vistos.add(item.id);
       else await repos.outbox.marcarEntregue(item.id);

@@ -593,6 +593,15 @@ describe("reducer: resolverInicio e o onboarding", () => {
     expect(e.onboardingAberto).toBe(false);
   });
 
+  it("NOD-455: o link direto do quadro compartilhado não é engolido pelo onboarding (o guia abre por cima)", () => {
+    let e = reduzir(comSessao, { tipo: "navegar", tela: { tipo: "quadro-compartilhado", quadroId: "q1" } });
+    e = reduzir(e, { tipo: "hidratar-onboarding", onboarding: dados() });
+    expect(e.onboardingAberto).toBe(true);
+    expect(e.tela).toEqual({ tipo: "quadro-compartilhado", quadroId: "q1" });
+    e = reduzir(e, { tipo: "hidratar-frota", frota });
+    expect(e.tela).toEqual({ tipo: "quadro-compartilhado", quadroId: "q1" });
+  });
+
   it("concluído (ou falha na leitura): o app abre normal", () => {
     const e = reduzir(reduzir(comSessao, { tipo: "hidratar-onboarding", onboarding: dados({ mostrar: false, etapa: "concluido" }) }), { tipo: "hidratar-frota", frota });
     expect(e.onboardingAberto).toBe(false);

@@ -10,8 +10,9 @@ import { decidirAposTermino, entradaDoNovoTrabalho, entradaDoRecado, esperandoNa
 import type { DesfechoComFrase } from "../repositories/quadro-execucoes.repo.ts";
 import { autoriaPessoa, evento } from "./autoria-evento.ts";
 import { fecharPedidoSemAcordar } from "./entregar-resposta-peer.ts";
-import { abrirTurno, acharQuadro, agentesDaPessoa, avisarComVoce, eventoQuadro, experimentoLigado, falhaDoAchado, montarQuadro, pararTurno, type PedidoLote, type ResultadoLote } from "./quadro.ts";
+import { abrirTurno, acharQuadro, agentesDaPessoa, avisarComVoce, comMembros, eventoQuadro, experimentoLigado, falhaDoAchado, montarQuadro, pararTurno, type PedidoLote, type ResultadoLote } from "./quadro.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
+import { vaiParaQuadroDeOutraPessoa } from "./quadro-pessoas.ts";
 import type { Isolar } from "./turnos-orfaos.ts";
 
 /**
@@ -247,9 +248,10 @@ async function tratarTerminados(deps: Deps, execs: readonly ExecucaoQuadro[], de
  * pelo mesmo pedido. A resposta traz o trabalho que ficou (número e estado) e a vista inteira da tarefa.
  */
 export async function trabalhoDaTarefa(deps: Deps, p: PedidoLote, op: OpTrabalho): Promise<{ data: ResultadoLote; events?: RuntimeEvent[] }> {
-  if (!(await experimentoLigado(deps))) return falha("experimento_desligado", "o quadro está desligado nos experimentos da pessoa");
   // NOD-443 × NOD-418: o trabalho da tarefa (repetir, cancelar, recado) é da dona do quadro; quem participa comenta (D7).
-  if (p.pedidoPor) return falha("nao_permitido", "o trabalho da tarefa é da dona do quadro: deixe um comentário (comentar) para ela");
+  // NOD-455 (revisão 6, M3): pelo bot de quem participa, também, e antes da chave dela (o quadro é da dona).
+  if (p.pedidoPor || (await vaiParaQuadroDeOutraPessoa(deps, p))) return falha("nao_permitido", "o trabalho da tarefa é da dona do quadro: deixe um comentário (comentar) para ela");
+  if (!(await experimentoLigado(deps))) return falha("experimento_desligado", "o quadro está desligado nos experimentos da pessoa");
   const agentes = await agentesDaPessoa(deps);
   const achado = await acharQuadro(deps, p, agentes);
   if (achado && ("ambiguo" in achado || "semNome" in achado)) { const f = falhaDoAchado(achado, agentes); return falha(f.erro, f.detalhe); }
@@ -314,7 +316,7 @@ export async function trabalhoDaTarefa(deps: Deps, p: PedidoLote, op: OpTrabalho
   const atual = (await deps.repos.quadros.tarefa(t.id)) ?? t;
   const trabalhos = await trabalhosDaTarefa(deps, atual);
   const estado = trabalhos.execucoes.find((e) => e.numero === trabalho.numero)?.estado ?? null;
-  return { data: { ok: true, quadro: await montarQuadro(deps, q), lote: null, comecaram: [], desfeito: false, trabalho: { ...trabalho, estado }, trabalhos }, events };
+  return { data: { ok: true, quadro: await montarQuadro(deps, q), lote: null, comecaram: [], desfeito: false, trabalho: { ...trabalho, estado }, trabalhos }, events: await comMembros(deps, events) };
 }
 
 /** Os trabalhos de uma tarefa do quadro do bot da tela. Só lê. */
@@ -409,7 +411,8 @@ export async function cuidarDasExecucoesDoQuadro(deps: Deps, o: { isolar?: Isola
       log("erro", "execucoes_quadro_tarefa_falhou", { tarefa_id: antes.id, quadro_id: antes.quadroId, erro: ehErroDeDominio(e) ? e.codigo : e instanceof Error ? e.name : "desconhecido" });
     }
   }
-  return { tratadas, events, falharam };
+  // NOD-455 (revisão 5, achado M2): o quadro.mudou do varredor vai também a quem participa (como o do lote).
+  return { tratadas, events: await comMembros(deps, events), falharam };
 }
 
 /** Um passo do varredor numa tarefa, com o quadro travado. Os eventos só saem se a tarefa inteira passou. */

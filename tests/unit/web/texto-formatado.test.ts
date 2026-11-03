@@ -457,3 +457,18 @@ describe("diagrama no texto do bot", () => {
     expect(textoFormatado(MERMAID, { chave: "nod328-memo" })).toBe(sem);
   });
 });
+
+describe("NOD-455: o link 'Abrir no quadro' do aviso", () => {
+  const ID = "0B6F1C1E-1D2A-4C3B-9A8E-1234567890AB";
+  it("vira o botão que abre /quadros/:id, com o uuid em minúsculas e o rótulo escapado", () => {
+    const h = textoFormatado(`Com você. [Abrir <b>no</b> quadro](nod-quadro:${ID})`);
+    expect(h).toContain(`data-act="abrir-quadro-compartilhado" data-quadro="${ID.toLowerCase()}"`);
+    expect(h).toContain("Abrir &lt;b&gt;no&lt;/b&gt; quadro");
+    expect(h).not.toContain("<b>");
+  });
+  it("fora do padrão (não uuid, com sobra) continua texto", () => {
+    for (const alvo of ["nod-quadro:nao-e-uuid", `nod-quadro:${ID}/x`, `nod-quadro:${ID}"onclick="x`]) {
+      expect(textoFormatado(`[Abrir](${alvo})`)).not.toContain("abrir-quadro-compartilhado");
+    }
+  });
+});

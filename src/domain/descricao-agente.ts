@@ -14,11 +14,12 @@ export function descricaoEstado(_agente: Pick<Agente, "confirmado">, estado: { c
 export const PREVIA_MAX = 140;
 
 /**
- * A última mensagem da conversa como prévia de uma linha: sem marcação de ênfase/código, espaços e
+ * A última mensagem da conversa como prévia de uma linha: sem marcação de ênfase/código, o link `[x](url)` vira só
+ * `x` (NOD-455: o "Abrir no quadro" do aviso não aparece cru na barra), espaços e
  * quebras colapsados, cortada em PREVIA_MAX com reticências. Texto vazio vira null (a linha mostra o título).
  */
 export function previaDaMensagem(texto: string): string | null {
-  const limpo = texto.replace(/^\s*[#>]+\s*/gm, "").replace(/\*\*|__|`/g, "").replace(/\s+/g, " ").trim();
+  const limpo = texto.replace(/\[([^\]\n]*)\]\([^)\s]*\)/g, "$1").replace(/^\s*[#>]+\s*/gm, "").replace(/\*\*|__|`/g, "").replace(/\s+/g, " ").trim();
   if (!limpo) return null;
   return limpo.length > PREVIA_MAX ? `${limpo.slice(0, PREVIA_MAX - 1).trimEnd()}…` : limpo;
 }

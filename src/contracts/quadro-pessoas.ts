@@ -43,6 +43,9 @@ export type LinhaMuralDto = {
   desfeito: boolean;
 };
 
+/** NOD-455: um quadro de outra pessoa em que quem lê participa (a seção "Compartilhados com você" da barra). */
+export type QuadroCompartilhadoDto = { id: string; agenteId: string; agenteNome: string; prefixo: string | null; donaNome: string; modo: ModoConversa };
+
 /** NOD-443 (D7): o pedido de quem participa, no modo "só a dona": um comentário na tarefa, para ela. */
 /** `deFora`: escrito num turno não confiável ou por quem participa (revisão 1, achado 9). */
 export type ComentarioQuadroDto = { id: string; tarefaId: string | null; texto: string; assinatura: string; deFora: boolean; criadoEm: number };

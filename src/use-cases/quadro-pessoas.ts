@@ -1,12 +1,12 @@
 import type { RuntimeEvent } from "../contracts/evento.ts";
-import { LIMITES_QUADRO, type LinhaMuralDto, type LoteQuadro, type ModoConversa, type OpQuadro, type Quadro, type QuadroDto, type TarefaQuadro } from "../contracts/quadro.ts";
+import { LIMITES_QUADRO, type LinhaMuralDto, type LoteQuadro, type ModoConversa, type OpQuadro, type Quadro, type QuadroCompartilhadoDto, type QuadroDto, type TarefaQuadro } from "../contracts/quadro.ts";
 import { codigoDaTarefa, lerCodigo } from "../domain/codigo-tarefa.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { chaveDeBusca, erroDoModo, resolverTarefa } from "../domain/quadro.ts";
 import { acharPessoa, assinatura, muralDe, regraDoModo } from "../domain/quadro-pessoas.ts";
 import type { FotoLote } from "../repositories/quadros.repo.ts";
 import { ehUuid } from "./apoio-l7.ts";
-import { aplicarLoteQuadro, eventoQuadro, experimentoLigado, falha, leitorDoLote, montarQuadro, type PedidoLote, type ResultadoLote } from "./quadro.ts";
+import { aplicarLoteQuadro, comSairam, eventoQuadro, experimentoLigado, falha, leitorDoLote, montarQuadro, type PedidoLote, type ResultadoLote } from "./quadro.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
 
 /**
@@ -18,6 +18,8 @@ import type { CasoDeUso, Deps } from "./tipos.ts";
 
 type Saida = { data: ResultadoLote; events?: RuntimeEvent[] };
 type Participacao = { quadroId: string; donaId: string };
+/** NOD-455 (revisão 7, M1): sem referência e com mais de um quadro aberto para ela, os nomes (só os que ela já vê). */
+type Escolha = Participacao | { ambiguo: string[] } | null;
 
 const NOME_DO_MODO: Record<ModoConversa, string> = { so_dono: "Só quem criou", individual: "Cada um na sua conversa" };
 
@@ -51,10 +53,16 @@ async function espiar(deps: Deps, x: Participacao): Promise<{ id: string; agente
  * pelo id, pelo nome do bot anfitrião, da dona ou pelo prefixo; sem `quadro`, o código da tarefa (SEC-1) ou a única
  * participação de quem não tem quadro.
  */
-async function participacaoDoPedido(deps: Deps, p: PedidoLote): Promise<Participacao | null> {
+async function participacaoDoPedido(deps: Deps, p: PedidoLote): Promise<Escolha> {
+  // Revisão 8 do PR #634: o turno sob a procuração de quem participa só acha o quadro do turno (acharQuadro), nunca um
+  // quadro de outra pessoa em que a dona participa.
+  if (p.pedidoPor || p.porProcuracao) return null;
   const repo = deps.repos.quadros;
   const parts = await repo.participacoes();
   if (parts.length === 0) return null;
+  // NOD-455 (revisão 6, M2): com a chave dela desligada (ou fora da flag), os quadros dela não existem para o pedido: não
+  // tiram a vez do quadro compartilhado que a dona abriu (decisão 1 da Ada).
+  if (!(await experimentoLigado(deps))) return participacaoSemOsDela(deps, p, parts);
   const ref = p.quadro?.trim().replace(/^@/, "") ?? "";
   const bate = async (alvo: string): Promise<Participacao | null> => {
     const achados: Participacao[] = [];
@@ -84,7 +92,76 @@ async function participacaoDoPedido(deps: Deps, p: PedidoLote): Promise<Particip
     return bate(c.prefixo);
   }
   if ((await repo.listar()).length > 0) return null;
-  return parts.length === 1 ? parts[0]! : null;
+  return aUnicaAberta(deps, parts);
+}
+
+/**
+ * NOD-455 (revisão 7, M1): sem referência, a única participação que a porta abre (as de quadros desligados ou fora da
+ * flag não contam: para ela, não existem). Mais de uma, os nomes para o bot perguntar qual.
+ */
+async function aUnicaAberta(deps: Deps, parts: Participacao[]): Promise<Escolha> {
+  const abertas: { x: Participacao; nome: string }[] = [];
+  for (const x of parts) {
+    const e = await espiar(deps, x);
+    if (e) abertas.push({ x, nome: `${e.donaNome} (${e.agenteNome})` });
+  }
+  if (abertas.length > 1) return { ambiguo: abertas.map((a) => a.nome) };
+  return abertas[0]?.x ?? null;
+}
+
+/** A recusa da escolha ambígua: os quadros que ela já vê, e como dizer qual. */
+const detalheAmbiguo = (nomes: string[]) => `você participa de mais de um quadro (${nomes.join("; ")}): passe em quadro o nome da dona ou do bot`;
+
+/** NOD-455 (revisão 6, M2): a escolha só entre as participações, quando os quadros dela estão desligados. */
+async function participacaoSemOsDela(deps: Deps, p: PedidoLote, parts: Participacao[]): Promise<Escolha> {
+  const ref = p.quadro?.trim().replace(/^@/, "") ?? "";
+  const c = ref ? null : p.ops.map((op) => ("tarefa" in op && typeof op.tarefa === "string" ? lerCodigo(op.tarefa) : null)).find((x) => x) ?? null;
+  const alvo = ref || c?.prefixo || "";
+  if (alvo && ehUuid(alvo)) return parts.find((x) => x.quadroId === alvo.toLowerCase()) ?? null;
+  if (alvo) {
+    const achados: Participacao[] = [];
+    for (const x of parts) {
+      const e = await espiar(deps, x);
+      if (e && (e.prefixo === alvo.toUpperCase() || chaveDeBusca(e.agenteNome) === chaveDeBusca(alvo) || chaveDeBusca(e.donaNome) === chaveDeBusca(alvo))) achados.push(x);
+    }
+    return achados.length === 1 ? achados[0]! : null;
+  }
+  return aUnicaAberta(deps, parts);
+}
+
+/**
+ * NOD-455 (revisão 6, M3): o pedido vai para o quadro de outra pessoa (que a porta abre)? Para quem recusa antes de
+ * olhar os quadros dela (o trabalho da tarefa é sempre da dona).
+ */
+export async function vaiParaQuadroDeOutraPessoa(deps: Deps, p: PedidoLote): Promise<boolean> {
+  if (!deps.quadroDaDona) return false;
+  const alvo = await participacaoDoPedido(deps, p);
+  if (alvo && "ambiguo" in alvo) return true;
+  return !!alvo && !!(await pelaPortaOuNull(deps, alvo.quadroId, async () => true));
+}
+
+/**
+ * NOD-455 (decisão 1 da Ada, revisão 6): quem decide o acesso do bot de quem participa é o quadro. Ela participa de
+ * algum quadro que a porta abre (o experimento e a flag da DONA)? É o que leva o gerir_quadro ao turno do bot dela,
+ * mesmo com o experimento dela desligado. Para no primeiro.
+ */
+export async function participaDeQuadroAberto(deps: Deps): Promise<boolean> {
+  if (!deps.quadroDaDona) return false;
+  for (const x of await deps.repos.quadros.participacoes()) if (await pelaPortaOuNull(deps, x.quadroId, async () => true)) return true;
+  return false;
+}
+
+/**
+ * NOD-455 (decisão 1, revisão 6): a consulta do gerir_quadro (`acoes: []`) no quadro de outra pessoa, pela porta, com a
+ * mesma escolha do lote (participacaoDoPedido). null = não é um quadro de outra pessoa (segue a consulta de sempre).
+ */
+export async function consultarPelaPorta(deps: Deps, p: PedidoLote): Promise<QuadroDto | { ambiguo: string } | null> {
+  if (!deps.quadroDaDona) return null;
+  const alvo = await participacaoDoPedido(deps, p);
+  if (!alvo) return null;
+  if ("ambiguo" in alvo) return { ambiguo: detalheAmbiguo(alvo.ambiguo) };
+  const membro = deps.escopo.pessoaId;
+  return pelaPortaOuNull(deps, alvo.quadroId, (dd, q) => montarQuadro(dd, q, membro));
 }
 
 /**
@@ -94,9 +171,10 @@ async function participacaoDoPedido(deps: Deps, p: PedidoLote): Promise<Particip
 export async function pelaPorta(deps: Deps, p: PedidoLote): Promise<Saida | null> {
   const primeira = p.ops[0];
   if (!deps.quadroDaDona || !primeira || p.anfitriaoId || primeira.tipo === "criar_quadro" || primeira.tipo === "mover_quadro") return null;
-  if (!(await experimentoLigado(deps))) return null;
+  // NOD-455 (decisão 2): o experimento que vale é o da dona, conferido dentro da porta (src/db/porta-da-dona.ts).
   const alvo = await participacaoDoPedido(deps, p);
   if (!alvo) return null;
+  if ("ambiguo" in alvo) return falha("entrada_invalida", detalheAmbiguo(alvo.ambiguo));
   const membro = deps.escopo.pessoaId;
   const viaNome = p.autor.tipo === "agente" ? (await deps.repos.agentes.buscar(p.autor.agenteId, true))?.nome ?? null : null;
   const saida = await pelaPortaOuNull(deps, alvo.quadroId, async (dd, q): Promise<Saida> => {
@@ -109,7 +187,9 @@ export async function pelaPorta(deps: Deps, p: PedidoLote): Promise<Saida | null
     const atual = await dd.repos.quadros.buscar(alvo.quadroId);
     return { data: { ...r.data, quadro: atual ? await montarQuadro(dd, atual, membro) : null } };
   });
-  return saida ?? falha("nao_encontrado", "quadro não encontrado");
+  // Revisão 8 do PR #634 (médio): o quadro fechado (dona desligada ou fora da flag) segue o caminho de um quadro que não
+  // existe, com a mesma resposta (null = o caminho de sempre, no escopo dela).
+  return saida;
 }
 
 /**
@@ -117,8 +197,9 @@ export async function pelaPorta(deps: Deps, p: PedidoLote): Promise<Saida | null
  * ela mesma que pôs a tarefa em Com você), o aviso vai para a conversa DELA, no escopo dela: a do bot pelo qual ela pediu
  * a tarefa (senão o último bot dela neste quadro). Só o código e o nome da dona, sem a pergunta: a pergunta pode ter vindo
  * de fora (a tarefa de quem participa é deFora para os bots da dona) e quem decide a lê no card. Sem bot dela no quadro
- * (só pediu pela tela), só o card e o quadro.mudou ao vivo. Revisão 2 (achado 5): a tela do quadro de outra pessoa ainda
- * não existe (issue de seguimento), então o aviso manda responder pelo bot, não "abrir o quadro".
+ * (só pediu pela tela), só o card e o quadro.mudou ao vivo. Revisão 2 (achado 5): o aviso manda responder pelo bot; com a
+ * tela de quem participa (NOD-455, D6) ganha também o link discreto "Abrir no quadro" (`nod-quadro:<id>`, a web abre
+ * /quadros/:id; só o id, que ela já recebe no quadro.mudou).
  */
 export async function avisarQuemParticipa(deps: Deps, q: Quadro, t: TarefaQuadro, pessoaId: string): Promise<void> {
   if (!deps.avisoComVoce) return;
@@ -126,7 +207,7 @@ export async function avisarQuemParticipa(deps: Deps, q: Quadro, t: TarefaQuadro
   const via = pelosBots.find((l) => l.tarefaIds.includes(t.id)) ?? pelosBots[0];
   const bot = via?.autor.tipo === "agente" ? via.autor.agenteId : null;
   if (!bot) return;
-  const texto = `Uma tarefa que você pediu no quadro de ${await nomeDaDona(deps)} espera você: ${codigoDaTarefa(q.prefixo, t)}. Responda por aqui, a este bot (ele leva a resposta ao quadro).`;
+  const texto = `Uma tarefa que você pediu no quadro de ${await nomeDaDona(deps)} espera você: ${codigoDaTarefa(q.prefixo, t)}. Responda por aqui, a este bot (ele leva a resposta ao quadro). [Abrir no quadro](nod-quadro:${q.id})`;
   // Revisão 3 (achados 4 e 7): a volta só grava este aviso, assinado pela regra (src/db/porta-da-dona.ts).
   await deps.avisoComVoce(q.id, pessoaId, { agenteId: bot, texto, chave: `${t.id}:${t.mudadoEm}` });
 }
@@ -137,15 +218,20 @@ async function fotoDasPessoas(deps: Deps, q: Quadro): Promise<FotoLote> {
   return { quadro: { meta: q.meta, prazo: q.prazo, cumpridoEm: q.cumpridoEm, resumo: q.resumo, metaDesde: q.metaDesde, colunas: q.colunas }, tarefas: [], pessoas: { membros, modo: q.modoConversa } };
 }
 
-/** O Desfazer de um lote de pessoas/modo: volta quem estava (quem foi excluída do time não volta) e o modo. */
-export async function restaurarPessoas(deps: Deps, quadroId: string, foto: NonNullable<FotoLote["pessoas"]>): Promise<void> {
+/**
+ * O Desfazer de um lote de pessoas/modo: volta quem estava (quem foi excluída do time não volta) e o modo. Devolve quem
+ * saiu (NOD-455: recebe o aviso ao vivo e a tela dela troca para "sem acesso").
+ */
+export async function restaurarPessoas(deps: Deps, quadroId: string, foto: NonNullable<FotoLote["pessoas"]>): Promise<string[]> {
   const repo = deps.repos.quadros;
   const agora = new Set((await repo.membros(quadroId)).map((m) => m.pessoaId));
   const antes = new Set(foto.membros);
-  for (const id of agora) if (!antes.has(id)) await repo.tirarMembro(quadroId, id);
+  const sairam: string[] = [];
+  for (const id of agora) if (!antes.has(id)) { await repo.tirarMembro(quadroId, id); sairam.push(id); }
   const time = new Set((await deps.repos.pessoas.listarDoTenant()).map((x) => x.id));
   for (const id of antes) if (!agora.has(id) && time.has(id)) await repo.adicionarMembro(quadroId, id);
   await repo.mudarModo(quadroId, foto.modo);
+  return sairam;
 }
 
 /**
@@ -158,10 +244,11 @@ export async function aplicarPessoas(deps: Deps, p: PedidoLote, q: Quadro, op: O
   const dona = deps.escopo.pessoaId;
   const quem = p.pedidoPor ?? dona;
   const viaNome = p.viaNome ?? (p.autor.tipo === "agente" ? (await deps.repos.agentes.buscar(p.autor.agenteId, true))?.nome ?? null : null);
-  const pronto = async (loteId: string | null, lote: LoteQuadro | null): Promise<Saida> => {
+  const pronto = async (loteId: string | null, lote: LoteQuadro | null, sairam: string[] = []): Promise<Saida> => {
     const atual = (await repo.buscar(q.id)) ?? q;
-    return { data: { ok: true, quadro: await montarQuadro(deps, atual, leitorDoLote(deps, p)), lote, comecaram: [], desfeito: false }, events: [eventoQuadro(deps, p, atual, loteId, [])] };
+    return { data: { ok: true, quadro: await montarQuadro(deps, atual, leitorDoLote(deps, p)), lote, comecaram: [], desfeito: false }, events: [comSairam(eventoQuadro(deps, p, atual, loteId, []), sairam)] };
   };
+  const sairam: string[] = [];
   if (op.tipo === "comentar") {
     let tarefaId: string | null = null;
     if (op.tarefa) {
@@ -209,6 +296,7 @@ export async function aplicarPessoas(deps: Deps, p: PedidoLote, q: Quadro, op: O
     const achada = acharPessoa(op.pessoa, (await repo.membros(q.id)).map((m) => ({ id: m.pessoaId, nome: m.nome })));
     if ("erro" in achada) return falha("nao_encontrado", achada.erro.replace("ninguém do time", "ninguém do quadro"));
     await repo.tirarMembro(q.id, achada.id);
+    sairam.push(achada.id);
     resumo = `tirou ${achada.nome} do quadro`;
   } else if (op.tipo === "mudar_modo") {
     if (op.modo === q.modoConversa) return falha("entrada_invalida", `o quadro já está em "${NOME_DO_MODO[op.modo]}"`);
@@ -218,15 +306,22 @@ export async function aplicarPessoas(deps: Deps, p: PedidoLote, q: Quadro, op: O
     return falha("entrada_invalida", `${op.tipo} não é uma ação de pessoas`);
   }
   const lote = await repo.inserirLote({ quadroId: q.id, autor: p.autor, resumo, antes: foto, tarefaIds: [], pedidoPor: quem, viaNome });
-  return pronto(lote.id, lote);
+  return pronto(lote.id, lote, sairam);
 }
 
 /** O quadro e quem lê, na porta certa: o dela (pelo bot anfitrião ou pelo id) ou o de outra pessoa em que ela participa. */
 async function comQuadro<T>(deps: Deps, ref: { agenteId?: string; quadroId?: string }, fn: (dd: Deps, q: Quadro, leitor: string) => Promise<T>): Promise<T> {
-  if (!(await experimentoLigado(deps))) throw new ErroDeDominio("nao_permitido", { cause: "experimento quadro desligado" });
+  // NOD-455 (decisão 2): o próprio quadro (e a rota do bot) segue o experimento de quem lê; o de outra pessoa, o da dona
+  // (dentro da porta). Quem participa vê o quadro da dona mesmo com o experimento dela desligado e fora da flag
+  // NOD_QUADROS: valem a chave e a flag da dona (revisão 6, ADR-141 §6).
+  const ligado = await experimentoLigado(deps);
+  if (ref.agenteId && !ligado) throw new ErroDeDominio("nao_permitido", { cause: "experimento quadro desligado" });
   const repo = deps.repos.quadros;
   const proprio = ref.agenteId ? await repo.doAgente(ref.agenteId) : ref.quadroId && ehUuid(ref.quadroId) ? await repo.buscar(ref.quadroId) : null;
-  if (proprio) return fn(deps, proprio, deps.escopo.pessoaId);
+  if (proprio) {
+    if (!ligado) throw new ErroDeDominio("nao_permitido", { cause: "experimento quadro desligado" });
+    return fn(deps, proprio, deps.escopo.pessoaId);
+  }
   if (!ref.quadroId || !deps.quadroDaDona) throw new ErroDeDominio("nao_encontrado", { cause: "quadro" });
   const membro = deps.escopo.pessoaId;
   return deps.quadroDaDona(ref.quadroId, (dd, q) => fn(dd, q, membro));
@@ -238,9 +333,9 @@ export const verQuadroPorId: CasoDeUso<{ quadroId: string }, { quadro: QuadroDto
 };
 
 /** NOD-443: os quadros de outras pessoas em que quem lê participa (a lista "Com você"). */
-export const quadrosCompartilhados: CasoDeUso<Record<string, never>, { quadros: { id: string; agenteId: string; agenteNome: string; prefixo: string | null; donaNome: string; modo: ModoConversa }[] }> = async (deps) => {
-  if (!(await experimentoLigado(deps))) throw new ErroDeDominio("nao_permitido", { cause: "experimento quadro desligado" });
-  const quadros = [];
+export const quadrosCompartilhados: CasoDeUso<Record<string, never>, { quadros: QuadroCompartilhadoDto[] }> = async (deps) => {
+  // NOD-455 (decisão 2): sem o experimento de quem participa; a porta só abre o quadro da dona com o dela ligado.
+  const quadros: QuadroCompartilhadoDto[] = [];
   for (const x of await deps.repos.quadros.participacoes()) {
     const e = await espiar(deps, x);
     if (e) quadros.push(e);

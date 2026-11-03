@@ -7,6 +7,7 @@ import { proporColunas } from "./colunas-do-quadro.ts";
 import { proporExclusaoDoQuadro } from "./quadro-exclusao.ts";
 import { acharQuadro, agentesDaPessoa, aplicarLoteQuadro, experimentoLigado, falhaDoAchado, montarQuadro, type PedidoLote, resumoParaBot } from "./quadro.ts";
 import { trabalhoDaTarefa, trabalhosParaBot } from "./quadro-execucoes.ts";
+import { consultarPelaPorta, vaiParaQuadroDeOutraPessoa } from "./quadro-pessoas.ts";
 import type { Deps } from "./tipos.ts";
 import type { TrabalhoFeito } from "./quadro.ts";
 import type { Turno } from "../contracts/turno.ts";
@@ -18,7 +19,8 @@ import type { Turno } from "../contracts/turno.ts";
  */
 
 const INSTRUCAO: Record<Extract<ResultadoGerirQuadro, { ok: false }>["erro"], string> = {
-  experimento_desligado: "O quadro está desligado para esta pessoa (Experimentos → Quadro). Nada mudou; diga isso a ela.",
+  // NOD-455 (revisão 6, M1): quem está fora da flag NOD_QUADROS não vê a chave; num quadro de outra pessoa, quem liga é a dona.
+  experimento_desligado: "Nada mudou: o quadro não está disponível para esta pessoa (a chave Experimentos → Quadro está desligada ou os quadros ainda não foram liberados para ela; num quadro de outra pessoa, quem liga é a dona). Diga isso a ela.",
   sem_quadro: "Nada mudou.",
   entrada_invalida: "Nada mudou: corrija a ação e chame de novo.",
   nao_encontrado: "Nada mudou: confira o id ou o nome e chame de novo.",
@@ -69,6 +71,11 @@ async function tarefaDeQuemParticipa(deps: Deps, dono: string, turno: Pick<Turno
   return !!q && (await deps.repos.quadros.ehMembro(q.id, turno.sobProcuracaoDe));
 }
 
+/** Quem participa e pediu o turno da tarefa (a procuração), ou null: o mesmo corte na consulta e no lote. */
+async function procuracaoDoTurno(deps: Deps, dono: string, turno: Pick<Turno, "id" | "sobProcuracaoDe">): Promise<string | null> {
+  return turno.sobProcuracaoDe && turno.sobProcuracaoDe !== deps.escopo.pessoaId && (await tarefaDeQuemParticipa(deps, dono, turno)) ? turno.sobProcuracaoDe : null;
+}
+
 /** NOD-443 (revisão 2, achado 3): o quadro devolvido traz conteúdo que não é de quem lê (ADR-047). */
 function conteudoDeFora(q: QuadroDto, leitor: string): boolean {
   if (q.voce?.papel === "membro" || (q.dona && q.dona.pessoaId !== leitor)) return true;
@@ -77,7 +84,28 @@ function conteudoDeFora(q: QuadroDto, leitor: string): boolean {
 }
 
 /** Só leitura (acoes vazio): o resumo do quadro e os trabalhos; contamina o turno como a escrita (conteudoDeFora). */
-async function consultar(deps: Deps, agenteId: string, quadro: string | undefined, turno: Pick<Turno, "id" | "executor">, limpo: boolean): Promise<{ data: ResultadoGerirQuadro }> {
+async function consultar(deps: Deps, agenteId: string, quadro: string | undefined, turno: Pick<Turno, "id" | "executor">, limpo: boolean, procuracao: string | null): Promise<{ data: ResultadoGerirQuadro }> {
+  // Revisão 8 do PR #634 (bloqueante): sob a procuração de quem participa, a consulta acha só o quadro do turno, como o
+  // lote (acharQuadro com porProcuracao): nem o quadro de outra pessoa em que a dona participa, nem os outros dela.
+  if (procuracao) {
+    const q = await acharQuadro(deps, { autor: { tipo: "agente", agenteId }, ops: [], executor: turno.executor, turnoId: turno.id, pedidoPor: procuracao, porProcuracao: true }, []);
+    if (!q || "ambiguo" in q || "semNome" in q) return recusa("nao_encontrado", "quadro não encontrado");
+    const dto = await montarQuadro(deps, q, procuracao);
+    if (limpo && conteudoDeFora(dto, deps.escopo.pessoaId)) await deps.repos.turnos.contaminar(turno.id, deps.agora());
+    return { data: { ok: true, quadro: resumoParaBot(dto, await trabalhosParaBot(deps, dto.tarefas.map((t) => t.id))), lote_id: null, comecaram: [], instrucao: "Só leitura: nada mudou." } };
+  }
+  // NOD-455 (decisão 1 da Ada): o quadro de outra pessoa segue o experimento e a flag da DONA (dentro da porta), não os
+  // de quem participa; o resumo vai sem os trabalhos (as execuções são da dona). É sempre conteúdo de fora (ADR-047).
+  const compartilhado = await consultarPelaPorta(deps, { autor: { tipo: "agente", agenteId }, ops: [], executor: turno.executor, turnoId: turno.id, ...(quadro !== undefined ? { quadro } : {}) });
+  if (compartilhado && "ambiguo" in compartilhado) {
+    // Os nomes dos quadros de outras pessoas são conteúdo de fora (ADR-047).
+    if (limpo) await deps.repos.turnos.contaminar(turno.id, deps.agora());
+    return recusa("entrada_invalida", compartilhado.ambiguo);
+  }
+  if (compartilhado) {
+    if (limpo) await deps.repos.turnos.contaminar(turno.id, deps.agora());
+    return { data: { ok: true, quadro: resumoParaBot(compartilhado), lote_id: null, comecaram: [], instrucao: "Só leitura: nada mudou." } };
+  }
   if (!(await experimentoLigado(deps))) return recusa("experimento_desligado", "o quadro está desligado nos experimentos da pessoa");
   const agentes = await agentesDaPessoa(deps);
   const achado = await acharQuadro(deps, { autor: { tipo: "agente", agenteId }, ops: [], executor: turno.executor, ...(quadro !== undefined ? { quadro } : {}) }, agentes);
@@ -105,7 +133,7 @@ export const gerirQuadro: CasoNod<Deps, "gerir_quadro"> = async (deps, input) =>
   const limpo = turno.entradaConfianca === "confiavel" && !(await deps.repos.turnos.contaminado(turno.id));
   // Revisão 5 do PR #625: `acoes: []` só consulta: o resumo do quadro com o trabalho atual de cada tarefa (a mesma vista
   // da tela, verTrabalhos), sem lote nem Desfazer. Vem antes do lerOps (que recusa a lista vazia).
-  if (Array.isArray(input.acoes) && input.acoes.length === 0) return consultar(deps, input.agenteId, input.quadro, turno, limpo);
+  if (Array.isArray(input.acoes) && input.acoes.length === 0) return consultar(deps, input.agenteId, input.quadro, turno, limpo, await procuracaoDoTurno(deps, agente.ownerId, turno));
   const ops = lerOps(input.acoes);
   if ("erro" in ops) return recusa("entrada_invalida", ops.indice >= 0 ? `ação ${ops.indice + 1}: ${ops.erro}` : ops.erro);
   // Quem responde ao bloqueio é a pessoa (revisão do PR #612). O bot só repassa o que ela disse a ele agora, na
@@ -148,7 +176,7 @@ export const gerirQuadro: CasoNod<Deps, "gerir_quadro"> = async (deps, input) =>
   }
   // NOD-443 (revisão 2 do PR #628, achado 2): no turno que o pedido de quem participa abriu no bot da dona, o bot age sob
   // a procuração dela (as regras são as de quem pediu) e só na tarefa do turno. Sem isso, o lote sairia como da dona.
-  const procuracao = turno.sobProcuracaoDe && turno.sobProcuracaoDe !== deps.escopo.pessoaId && (await tarefaDeQuemParticipa(deps, agente.ownerId, turno)) ? turno.sobProcuracaoDe : null;
+  const procuracao = await procuracaoDoTurno(deps, agente.ownerId, turno);
   // NOD-430: remover o quadro (o do próprio bot ou o de outro bot da pessoa) vira o card 'quadro_exclusao', como o
   // excluir_rotina; no automático/total o modo confirma na hora e volta `aplicada: true`.
   const remover = ops[0]?.tipo === "remover_quadro" ? ops[0] : null;
@@ -186,7 +214,12 @@ export const gerirQuadro: CasoNod<Deps, "gerir_quadro"> = async (deps, input) =>
   // (nunca o autor). A escolha entre ele e o comentário de quem participa (NOD-443, D7) é do aplicarLoteQuadro.
   // NOD-418: Repetir, Cancelar e recado não são lote: o trabalho da tarefa.
   const r = trabalhoOp ? await trabalhoDaTarefa(deps, pedido, trabalhoOp) : await aplicarLoteQuadro(deps, pedido);
-  if (!r.data.ok) return { data: { ok: false, erro: r.data.erro, instrucao: `${r.data.detalhe}. ${INSTRUCAO[r.data.erro]}` }, events: r.events };
+  if (!r.data.ok) {
+    // Revisão 8 do PR #634 (alto): a recusa no quadro de outra pessoa traz o título da tarefa ou o nome da dona, que são
+    // conteúdo de fora (ADR-047): contamina o turno como a leitura. O quadro fechado não conta (não devolve nada dele).
+    if (limpo && !procuracao && (await vaiParaQuadroDeOutraPessoa(deps, pedido))) await deps.repos.turnos.contaminar(turno.id, deps.agora());
+    return { data: { ok: false, erro: r.data.erro, instrucao: `${r.data.detalhe}. ${INSTRUCAO[r.data.erro]}` }, events: r.events };
+  }
   const { quadro, lote, comecaram, desfeito } = r.data;
   // O resultado mostra ao bot o título e a pergunta de cada tarefa: se alguma foi escrita por um turno não confiável
   // (deFora), o turno de quem leu fica contaminado, como no buscar_conversas (ADR-062 §6; revisão rodada 5). NOD-443

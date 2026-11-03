@@ -17,6 +17,8 @@ import { vincularEscopo } from "../../src/db/tx.ts";
 import type { Escopo, Tx } from "../../src/shared/types.ts";
 import { EXECUTORES_QUADRO } from "../../src/use-cases/acoes/quadro.ts";
 import { gerirQuadro } from "../../src/use-cases/gerir-quadro.ts";
+import { INTERVALO_NOVA_TENTATIVA_MS } from "../../src/contracts/quadro-execucoes.ts";
+import { cuidarDasExecucoesDoQuadro, trabalhoDaTarefa } from "../../src/use-cases/quadro-execucoes.ts";
 import { muralDoQuadro, quadrosCompartilhados, verQuadroPorId } from "../../src/use-cases/quadro-pessoas.ts";
 import { aplicarLoteQuadro, montarQuadro } from "../../src/use-cases/quadro.ts";
 import type { Deps } from "../../src/use-cases/tipos.ts";
@@ -25,6 +27,8 @@ import { agenteComConversa } from "../helpers/fabricas.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { pessoaDeTeste } from "../helpers/pessoa-de-teste.ts";
 import { withRollback } from "../helpers/with-rollback.ts";
+import { configurarLiberacaoQuadros } from "../../src/repositories/raio-x.repo.ts";
+import { QUADROS_PARA_TODOS } from "../../src/domain/flag-quadros.ts";
 
 /**
  * NOD-443 (ADR-143): o quadro com várias pessoas. A porta é a dona: quem participa não lê nada do quadro direto (RLS de
@@ -390,8 +394,12 @@ describeIntegracao("quadro com várias pessoas (NOD-443, ADR-143)", () => {
       expect((await daTela(await como(trx, BIA.escopo), m.qid, [{ tipo: "responder", tarefa: "Da Ana", resposta: "Verde" }])).data).toMatchObject(recusada);
       let q = await quadroDaDona(trx, m);
       expect(q.tarefas.filter((t) => t.status === "voce").map((t) => t.titulo).sort()).toEqual(["Da Ana", "T1"]);
-      // Cada uma responde a sua.
-      expect((await executar(await como(trx, ANA.escopo), gerirQuadro, { ...ctx, quadro: m.qid, acoes: [{ tipo: "responder", tarefa: "Da Ana", resposta: "Azul" }] })).data).toMatchObject({ ok: true });
+      // A recusa trouxe o título da tarefa da dona: aquele turno ficou contaminado (revisão 8 do PR #634, ADR-047).
+      expect(await (await como(trx, ANA.escopo)).repos.turnos.contaminado(ctx.turnoId)).toBe(true);
+      // Cada uma responde a sua (num turno limpo: responder é a fala da pessoa).
+      const daOutra = await como(trx, ANA.escopo);
+      const ctxLimpo = await turnoDe(daOutra, m.lia.agenteId, m.lia.conversaId);
+      expect((await executar(daOutra, gerirQuadro, { ...ctxLimpo, quadro: m.qid, acoes: [{ tipo: "responder", tarefa: "Da Ana", resposta: "Azul" }] })).data).toMatchObject({ ok: true });
       expect((await lote(await como(trx, DONA.escopo), m.ada.agenteId, [{ tipo: "responder", tarefa: "T1", resposta: "Sim" }])).data).toMatchObject({ ok: true });
       q = await quadroDaDona(trx, m);
       expect(q.tarefas.filter((t) => t.status === "voce")).toEqual([]);
@@ -439,8 +447,9 @@ describeIntegracao("quadro com várias pessoas (NOD-443, ADR-143)", () => {
       expect(avisos).toHaveLength(1);
       expect(avisos[0]!.texto).toContain(codigo);
       expect(avisos[0]!.texto).toContain(DONA.nome);
-      // Revisão 2, achado 5: quem participa ainda não tem a tela do quadro: o aviso diz para responder pelo bot.
+      // Revisão 2, achado 5: o aviso diz para responder pelo bot; NOD-455 (D6): e ganha o link discreto para a tela.
       expect(avisos[0]!.texto).toContain("Responda por aqui");
+      expect(avisos[0]!.texto).toContain(`[Abrir no quadro](nod-quadro:${m.qid})`);
       expect(avisos[0]!.texto).not.toContain("link estranho");
       expect(avisos[0]!.confianca).toBe("nao_confiavel");
       expect((await trx`select current_setting('nod.pessoa_id') as p`)[0]!.p).toBe(ANA.id);
@@ -559,6 +568,70 @@ describeIntegracao("quadro com várias pessoas (NOD-443, ADR-143)", () => {
       expect((await quadroDaDona(trx, m)).tarefas.find((t) => t.titulo === "T1")!.pedidoPor).toBe(DONA.id);
       expect((await daTela(await como(trx, ANA.escopo), m.qid, [{ tipo: "mudar_tarefa", tarefa: "T1", excluir: true }])).data).toMatchObject({ ok: false, erro: "nao_permitido" });
       expect((await quadroDaDona(trx, m)).tarefas.map((t) => t.titulo)).toEqual(["T1"]);
+    });
+  });
+
+  it("NOD-455 (revisão 5, achado M1): quem participa muda a tarefa da dona para a coluna com passagem; a troca do responsável é da regra e vale; trocar ela mesma, não", async () => {
+    await withRollback(DONA.escopo, async (trx) => {
+      const m = await montar(trx);
+      await porNaAna(m);
+      const beto = await agenteComConversa(trx, DONA.escopo, { nome: `Beto ${m.adaNome}` });
+      const dd = await como(trx, DONA.escopo);
+      expect((await lote(dd, m.ada.agenteId, [{ tipo: "definir_passagem", coluna: "backlog", agente: `Beto ${m.adaNome}` }, { tipo: "mudar_tarefa", tarefa: "T1", agente: m.adaNome, status: "feito" }])).data).toMatchObject({ ok: true });
+      // O gate: a passagem não abre a troca do responsável que ela escolhe depois, no mesmo lote (para outro bot da dona).
+      await agenteComConversa(trx, DONA.escopo, { nome: `Cora ${m.adaNome}` });
+      const errada = await daTela(await como(trx, ANA.escopo), m.qid, [{ tipo: "mudar_tarefa", tarefa: "T1", status: "backlog" }, { tipo: "mudar_tarefa", tarefa: "T1", agente: `Cora ${m.adaNome}` }]);
+      expect(errada.data, JSON.stringify(errada.data)).toMatchObject({ ok: false, erro: "nao_permitido" });
+      expect((await quadroDaDona(trx, m)).tarefas.find((t) => t.titulo === "T1")).toMatchObject({ agenteId: m.ada.agenteId });
+      const r = await daTela(await como(trx, ANA.escopo), m.qid, [{ tipo: "mudar_tarefa", tarefa: "T1", status: "backlog" }]);
+      expect(r.data, JSON.stringify(r.data)).toMatchObject({ ok: true });
+      const t1 = (await quadroDaDona(trx, m)).tarefas.find((t) => t.titulo === "T1")!;
+      expect({ status: t1.status, agenteId: t1.agenteId, pedidoPor: t1.pedidoPor }).toEqual({ status: "backlog", agenteId: beto.agenteId, pedidoPor: DONA.id });
+      // Fora da passagem, trocar o responsável da tarefa da dona continua só de quem pediu e da dona.
+      expect((await daTela(await como(trx, ANA.escopo), m.qid, [{ tipo: "mudar_tarefa", tarefa: "T1", agente: m.adaNome }])).data).toMatchObject({ ok: false, erro: "nao_permitido" });
+      // Revisão 7, achado A1: a passagem e depois "ninguém" numa coluna sem responsável (null === null) não tira o
+      // responsável da tarefa da dona — nem pela tela nem pelo bot dela.
+      expect((await lote(await como(trx, DONA.escopo), m.ada.agenteId, [{ tipo: "mudar_tarefa", tarefa: "T1", agente: m.adaNome, status: "feito" }])).data).toMatchObject({ ok: true });
+      const semNinguem: OpQuadro[] = [{ tipo: "mudar_tarefa", tarefa: "T1", status: "backlog" }, { tipo: "mudar_tarefa", tarefa: "T1", agente: null, status: "feito" }];
+      expect((await daTela(await como(trx, ANA.escopo), m.qid, semNinguem)).data).toMatchObject({ ok: false, erro: "nao_permitido" });
+      const da = await como(trx, ANA.escopo);
+      const ctx = await turnoDe(da, m.lia.agenteId, m.lia.conversaId);
+      expect((await executar(da, gerirQuadro, { ...ctx, quadro: m.qid, acoes: semNinguem })).data).toMatchObject({ ok: false, erro: "nao_permitido" });
+      expect((await quadroDaDona(trx, m)).tarefas.find((t) => t.titulo === "T1")).toMatchObject({ agenteId: m.ada.agenteId, status: "feito" });
+    });
+  });
+
+  it("NOD-455 (revisão 5, achado M2): ao vivo do trabalho dos bots — o turno da tarefa, o Cancelar e o varredor avisam quem participa, só com ids", async () => {
+    await withRollback(DONA.escopo, async (trx) => {
+      const m = await montar(trx);
+      await porNaAna(m);
+      await agenteComConversa(trx, DONA.escopo, { nome: `Beto ${m.adaNome}` });
+      const dd = await como(trx, DONA.escopo);
+      const r = await lote(dd, m.ada.agenteId, [{ tipo: "mudar_tarefa", tarefa: "T1", status: "afazer", agente: `Beto ${m.adaNome}` }]);
+      expect(r.data, JSON.stringify(r.data)).toMatchObject({ ok: true, comecaram: [expect.anything()] });
+      const t1 = (await quadroDaDona(trx, m)).tarefas.find((t) => t.titulo === "T1")!;
+      // O turno: a dona recebe o turno.iniciado; a Ana, o quadro.mudou do mesmo evento, sem a conversa nem o turno da dona.
+      const barramento = criarBarramento();
+      const daDona: FrameSse[] = [];
+      const daAna: FrameSse[] = [];
+      barramento.inscrever(DONA.id, (f) => daDona.push(f));
+      barramento.inscrever(ANA.id, (f) => daAna.push(f));
+      await despacharPessoa(trx, DONA.escopo, barramento, { metricas: criarMetricas() });
+      const iniciado = daDona.find((f) => f.tipo === "turno.iniciado" && f.dados.turnoId === t1.turnoId);
+      expect(iniciado).toBeDefined();
+      const doTurno = daAna.find((f) => f.dados.eventoId === iniciado!.dados.eventoId);
+      expect(doTurno?.tipo).toBe("quadro.mudou");
+      expect(doTurno!.dados).toMatchObject({ quadroId: m.qid, tarefas: t1.id, conversaId: null, turnoId: null });
+      expect(daAna.some((f) => f.tipo.startsWith("turno."))).toBe(false);
+      // O varredor (a máquina caiu: nova tentativa) e o Cancelar levam a Ana nos membros, como o lote.
+      await trx`update turnos set estado = 'interrompido', motivo_interrupcao = 'maquina_sem_contato' where id = ${t1.turnoId!}`;
+      const varrido = [...(await cuidarDasExecucoesDoQuadro(dd)).events, ...(await cuidarDasExecucoesDoQuadro({ ...dd, agora: () => Date.now() + INTERVALO_NOVA_TENTATIVA_MS + 1_000 })).events];
+      const doVarredor = varrido.filter((e) => e.kind === "quadro_mudou");
+      expect(doVarredor.length).toBeGreaterThan(0);
+      expect(doVarredor.every((e) => e.dados.membros === ANA.id)).toBe(true);
+      const cancelou = await trabalhoDaTarefa(dd, { autor: { tipo: "pessoa" }, anfitriaoId: m.ada.agenteId, executor: "catcher", ops: [] }, { tipo: "cancelar_trabalho", tarefa: "T1" });
+      expect(cancelou.data, JSON.stringify(cancelou.data)).toMatchObject({ ok: true });
+      expect(cancelou.events?.find((e) => e.kind === "quadro_mudou")?.dados).toMatchObject({ membros: ANA.id });
     });
   });
 
@@ -817,6 +890,326 @@ describeIntegracao("quadro com várias pessoas (NOD-443, ADR-143)", () => {
       expect((await lote(dd, m.ada.agenteId, [{ tipo: "tirar_pessoa", pessoa: ANA.nome }])).data).toMatchObject({ ok: true });
       expect((await lote(dd, m.ada.agenteId, [{ tipo: "desfazer" }])).data).toMatchObject({ ok: true });
       expect((await dd.repos.quadros.membros(m.qid)).map((x) => x.pessoaId)).toEqual([ANA.id]);
+    });
+  });
+
+  it("NOD-455 (decisão 2): vale o experimento da dona — quem participa vê e mexe sem o dela; com o da dona desligado, o quadro some (não encontrado, sem nome)", async () => {
+    await withRollback(DONA.escopo, async (trx) => {
+      const m = await montar(trx);
+      await porNaAna(m);
+      let da = await como(trx, ANA.escopo);
+      await da.repos.preferencias.gravar({ experimentos: { quadro: false } });
+      expect((await quadroDaAna(trx, m)).tarefas.map((t) => t.titulo)).toEqual(["T1"]);
+      expect((await executar(await como(trx, ANA.escopo), quadrosCompartilhados, {})).data.quadros).toEqual([expect.objectContaining({ id: m.qid, donaNome: DONA.nome })]);
+      expect((await daTela(await como(trx, ANA.escopo), m.qid, [{ tipo: "criar_tarefa", titulo: "Sem a flag" }])).data).toMatchObject({ ok: true });
+      expect((await executar(await como(trx, ANA.escopo), muralDoQuadro, { quadroId: m.qid })).data.linhas.length).toBeGreaterThan(0);
+      // A dona desliga o dela: para a Ana, o quadro é o mesmo de um que não existe.
+      await (await como(trx, DONA.escopo)).repos.preferencias.gravar({ experimentos: { quadro: false } });
+      da = await como(trx, ANA.escopo);
+      const recusa = await executar(da, verQuadroPorId, { quadroId: m.qid }).catch((e: unknown) => e);
+      expect(recusa).toMatchObject({ codigo: "nao_encontrado" });
+      expect(JSON.stringify(recusa)).not.toContain(DONA.nome);
+      expect((await executar(da, quadrosCompartilhados, {})).data.quadros).toEqual([]);
+      await expect(executar(da, muralDoQuadro, { quadroId: m.qid })).rejects.toMatchObject({ codigo: "nao_encontrado" });
+      const pedido = await daTela(da, m.qid, [{ tipo: "criar_tarefa", titulo: "Intrusa" }]);
+      expect(pedido.data).toMatchObject({ ok: false });
+      expect(JSON.stringify(pedido.data)).not.toContain(DONA.nome);
+      expect((await trx`select current_setting('nod.pessoa_id') as p`)[0]!.p).toBe(ANA.id);
+      // O próprio quadro (a rota do bot) segue o experimento de quem lê.
+      await expect(executar(da, muralDoQuadro, { agenteId: m.lia.agenteId })).rejects.toMatchObject({ codigo: "nao_permitido" });
+      // E a dona, com o dela desligado, não lê o próprio quadro pelo id (/quadros/:qid).
+      await expect(executar(await como(trx, DONA.escopo), verQuadroPorId, { quadroId: m.qid })).rejects.toMatchObject({ codigo: "nao_permitido" });
+    });
+  });
+
+  it("NOD-455 (decisão 2 da Ada, revisão 6): a flag NOD_QUADROS que vale é a da DONA — quem participa vê fora da flag; com a dona fora, o quadro some (tela, lista, mural, lote e bot), sem nome", async () => {
+    await withRollback(DONA.escopo, async (trx) => {
+      const m = await montar(trx);
+      await porNaAna(m);
+      try {
+        // Só a dona liberada (como em produção, NOD_QUADROS=admins). A Ana, fora da flag, vê e mexe pela porta.
+        configurarLiberacaoQuadros({ modo: "admins", admins: [DONA.id] });
+        let da = await como(trx, ANA.escopo);
+        expect((await da.repos.preferencias.buscar()).quadroLiberado).toBe(false);
+        expect((await quadroDaAna(trx, m)).tarefas.map((t) => t.titulo)).toEqual(["T1"]);
+        da = await como(trx, ANA.escopo);
+        expect((await executar(da, quadrosCompartilhados, {})).data.quadros).toEqual([expect.objectContaining({ id: m.qid, donaNome: DONA.nome })]);
+        expect((await executar(da, muralDoQuadro, { quadroId: m.qid })).data.linhas.length).toBeGreaterThan(0);
+        expect((await daTela(da, m.qid, [{ tipo: "criar_tarefa", titulo: "Fora da flag" }])).data).toMatchObject({ ok: true });
+        const ctx = await turnoDe(da, m.lia.agenteId, m.lia.conversaId);
+        expect((await executar(da, gerirQuadro, { ...ctx, quadro: m.qid, acoes: [{ tipo: "criar_tarefa", titulo: "Pelo bot fora da flag", status: "backlog" }] })).data).toMatchObject({ ok: true });
+        expect((await quadroDaDona(trx, m)).tarefas.map((t) => t.titulo)).toEqual(expect.arrayContaining(["Fora da flag", "Pelo bot fora da flag"]));
+        // Não abre a flag para ela: o quadro PRÓPRIO dela continua fechado (a chave dela lê desligada).
+        da = await como(trx, ANA.escopo);
+        expect((await lote(da, m.lia.agenteId, [{ tipo: "criar_quadro", meta: "Meu" }])).data).toMatchObject({ ok: false, erro: "experimento_desligado" });
+
+        // Só a Ana liberada: a dona fora da flag, o quadro dela some para a Ana como um que não existe.
+        configurarLiberacaoQuadros({ modo: "admins", admins: [ANA.id] });
+        da = await como(trx, ANA.escopo);
+        const recusa = await executar(da, verQuadroPorId, { quadroId: m.qid }).catch((e: unknown) => e);
+        expect(recusa).toMatchObject({ codigo: "nao_encontrado" });
+        expect(JSON.stringify(recusa)).not.toContain(DONA.nome);
+        expect((await executar(da, quadrosCompartilhados, {})).data.quadros).toEqual([]);
+        await expect(executar(da, muralDoQuadro, { quadroId: m.qid })).rejects.toMatchObject({ codigo: "nao_encontrado" });
+        const pedido = await daTela(da, m.qid, [{ tipo: "criar_tarefa", titulo: "Dona sem liberação" }]);
+        expect(pedido.data).toMatchObject({ ok: false });
+        expect(JSON.stringify(pedido.data)).not.toContain(DONA.nome);
+        const ctxFechado = await turnoDe(da, m.lia.agenteId, m.lia.conversaId);
+        const peloBot = (await executar(da, gerirQuadro, { ...ctxFechado, quadro: m.qid, acoes: [{ tipo: "criar_tarefa", titulo: "Pelo bot sem a dona", status: "backlog" }] })).data;
+        // Revisão 8 (médio): o mesmo de um quadro que não existe.
+        const ctxInexistente = await turnoDe(da, m.lia.agenteId, m.lia.conversaId);
+        const inexistente = (await executar(da, gerirQuadro, { ...ctxInexistente, quadro: randomUUID(), acoes: [{ tipo: "criar_tarefa", titulo: "Pelo bot sem a dona", status: "backlog" }] })).data;
+        expect(peloBot).toEqual(inexistente);
+        expect(JSON.stringify(peloBot)).not.toContain(DONA.nome);
+        expect((await trx`select current_setting('nod.pessoa_id') as p`)[0]!.p).toBe(ANA.id);
+        const titulos = (await quadroDaDona(trx, m)).tarefas.map((t) => t.titulo);
+        expect(titulos).not.toContain("Dona sem liberação");
+        expect(titulos).not.toContain("Pelo bot sem a dona");
+      } finally {
+        configurarLiberacaoQuadros(QUADROS_PARA_TODOS);
+      }
+    });
+  });
+
+  it("NOD-455 (decisão 1 da Ada, revisão 6): o bot da participante segue o experimento da DONA — com o dela desligado, o gerir_quadro vem no plano, lê e mexe no quadro da dona; a dona desliga, some tudo", async () => {
+    await withRollback(DONA.escopo, async (trx) => {
+      const m = await montar(trx);
+      let da = await como(trx, ANA.escopo);
+      await da.repos.preferencias.gravar({ experimentos: { quadro: false } });
+      const PRONTO = { estado: "pronto" as const, versao: "t", em: 0 };
+      const turnoLocal = async (d: Deps) => (await d.repos.turnos.enfileirar({ executor: "local", conversaId: m.lia.conversaId, agenteId: m.lia.agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "pedido", entradaConfianca: "confiavel", modelo: "auto", harness: "auto" }))!.id;
+      const temGerir = async () => {
+        const d = await como(trx, ANA.escopo);
+        const comPorta: Deps = { ...depsSobre(trx, ANA.escopo).deps, quadroDaDona: d.quadroDaDona };
+        const p = (await emitirPlanoTurno(comPorta, { turnoId: await turnoLocal(d), machineId: randomUUID(), executor: "local", harnesses: { "claude-cli": PRONTO } })).data;
+        // A porta volta sempre ao escopo de quem pede, mesmo no plano do turno.
+        expect((await trx`select current_setting('nod.pessoa_id') as p`)[0]!.p).toBe(ANA.id);
+        return p.catalogo.ferramentas.some((f) => f.nome === "gerir_quadro");
+      };
+      // Sem quadro nenhum e com o experimento dela desligado: sem a ferramenta (o de sempre).
+      expect(await temGerir()).toBe(false);
+      await como(trx, DONA.escopo);
+      await porNaAna(m);
+      // Participa de um quadro aberto (o experimento da dona ligado): a ferramenta vem, com o dela desligado.
+      expect(await temGerir()).toBe(true);
+      // Fora da flag (só a dona liberada, como em produção): a ferramenta vem do mesmo jeito.
+      try {
+        configurarLiberacaoQuadros({ modo: "admins", admins: [DONA.id] });
+        expect(await temGerir()).toBe(true);
+        configurarLiberacaoQuadros({ modo: "admins", admins: [ANA.id] });
+        expect(await temGerir()).toBe(false);
+      } finally {
+        configurarLiberacaoQuadros(QUADROS_PARA_TODOS);
+      }
+      da = await como(trx, ANA.escopo);
+      const ctx = await turnoDe(da, m.lia.agenteId, m.lia.conversaId);
+      // Só leitura (acoes: []): o resumo do quadro da dona, pela porta; o turno fica contaminado (conteúdo de outra pessoa).
+      const leu = (await executar(da, gerirQuadro, { ...ctx, quadro: m.qid, acoes: [] })).data;
+      expect(leu, JSON.stringify(leu)).toMatchObject({ ok: true, quadro: { id: m.qid } });
+      expect(JSON.stringify(leu)).toContain("T1");
+      expect(await da.repos.turnos.contaminado(ctx.turnoId)).toBe(true);
+      // Sem `quadro`: a única participação de quem não tem quadro.
+      const ctx2 = await turnoDe(da, m.lia.agenteId, m.lia.conversaId);
+      expect((await executar(da, gerirQuadro, { ...ctx2, acoes: [] })).data).toMatchObject({ ok: true, quadro: { id: m.qid } });
+      // Escreve só o que a API permite: pedir sai; a meta (da dona) não.
+      const ctx3 = await turnoDe(da, m.lia.agenteId, m.lia.conversaId);
+      expect((await executar(da, gerirQuadro, { ...ctx3, quadro: m.qid, acoes: [{ tipo: "criar_tarefa", titulo: "Pela Lia sem experimento", status: "backlog" }] })).data).toMatchObject({ ok: true });
+      const ctxMeta = await turnoDe(da, m.lia.agenteId, m.lia.conversaId);
+      const meta = (await executar(da, gerirQuadro, { ...ctxMeta, quadro: m.qid, acoes: [{ tipo: "editar_quadro", meta: "Outra" }] })).data;
+      expect(meta).toMatchObject({ ok: false, erro: "entrada_invalida" });
+      expect(JSON.stringify(meta)).toContain(`editar_quadro é só da ${DONA.nome}`);
+      expect((await quadroDaDona(trx, m)).meta).toBe("Lançar login");
+      // O próprio quadro dela continua seguindo o experimento dela.
+      da = await como(trx, ANA.escopo);
+      expect((await lote(da, m.lia.agenteId, [{ tipo: "criar_quadro", meta: "Meu" }])).data).toMatchObject({ ok: false, erro: "experimento_desligado" });
+      // A dona desliga o dela: a ferramenta some do plano e a consulta não acha nada, sem nome.
+      await (await como(trx, DONA.escopo)).repos.preferencias.gravar({ experimentos: { quadro: false } });
+      expect(await temGerir()).toBe(false);
+      da = await como(trx, ANA.escopo);
+      const ctx4 = await turnoDe(da, m.lia.agenteId, m.lia.conversaId);
+      const fechado = (await executar(da, gerirQuadro, { ...ctx4, quadro: m.qid, acoes: [] })).data;
+      expect(fechado).toMatchObject({ ok: false });
+      expect(JSON.stringify(fechado)).not.toContain(DONA.nome);
+      expect(JSON.stringify(fechado)).not.toContain("T1");
+    });
+  });
+
+  it("NOD-455 (revisão 6, M1–M3): com a chave dela desligada, o quadro dela não tira a vez do da dona; o trabalho da tarefa é da dona; a recusa não aponta só a chave", async () => {
+    await withRollback(DONA.escopo, async (trx) => {
+      const m = await montar(trx);
+      let da = await como(trx, ANA.escopo);
+      // A Ana tem o quadro dela (da Lia), criado com a chave ligada; depois entra no da dona e desliga a chave.
+      expect((await lote(da, m.lia.agenteId, [{ tipo: "criar_quadro", meta: "Meu" }])).data).toMatchObject({ ok: true });
+      await como(trx, DONA.escopo);
+      await porNaAna(m);
+      da = await como(trx, ANA.escopo);
+      await da.repos.preferencias.gravar({ experimentos: { quadro: false } });
+      // M2: sem `quadro`, o bot dela (dona de um quadro desligado) cai na única participação aberta.
+      const ctx = await turnoDe(da, m.lia.agenteId, m.lia.conversaId);
+      expect((await executar(da, gerirQuadro, { ...ctx, acoes: [] })).data).toMatchObject({ ok: true, quadro: { id: m.qid } });
+      const ctx2 = await turnoDe(da, m.lia.agenteId, m.lia.conversaId);
+      expect((await executar(da, gerirQuadro, { ...ctx2, acoes: [{ tipo: "criar_tarefa", titulo: "Sem referência", status: "backlog" }] })).data).toMatchObject({ ok: true });
+      expect((await quadroDaDona(trx, m)).tarefas.map((t) => t.titulo)).toContain("Sem referência");
+      // M3: repetir, cancelar e recado no quadro da dona são da dona, com a chave dela desligada ou ligada.
+      for (const chave of [false, true]) {
+        da = await como(trx, ANA.escopo);
+        await da.repos.preferencias.gravar({ experimentos: { quadro: chave } });
+        for (const op of [{ tipo: "repetir_trabalho", tarefa: "T1" }, { tipo: "cancelar_trabalho", tarefa: "T1" }, { tipo: "recado", tarefa: "T1", texto: "outra" }] as const) {
+          const c = await turnoDe(da, m.lia.agenteId, m.lia.conversaId);
+          const r = (await executar(da, gerirQuadro, { ...c, quadro: m.qid, acoes: [op] })).data;
+          expect(r, `${op.tipo} chave=${chave}`).toMatchObject({ ok: false, erro: "nao_permitido" });
+          expect(JSON.stringify(r)).toContain("comentar");
+        }
+      }
+      // M1: o quadro dela, com a chave desligada: a recusa diz que pode ser a liberação, não só a chave.
+      da = await como(trx, ANA.escopo);
+      await da.repos.preferencias.gravar({ experimentos: { quadro: false } });
+      const c = await turnoDe(da, m.lia.agenteId, m.lia.conversaId);
+      const meu = (await executar(da, gerirQuadro, { ...c, quadro: m.liaNome, acoes: [{ tipo: "criar_tarefa", titulo: "No meu" }] })).data;
+      expect(meu).toMatchObject({ ok: false, erro: "experimento_desligado" });
+      expect(JSON.stringify(meu)).toContain("ainda não foram liberados");
+    });
+  });
+
+  it("NOD-455 (revisão 7, M1): sem `quadro`, só contam as participações que a porta abre; com duas abertas, a recusa lista as duas", async () => {
+    await withRollback(DONA.escopo, async (trx) => {
+      const m = await montar(trx);
+      await porNaAna(m);
+      // A Bia também é dona de um quadro e põe a Ana nele.
+      const db = await como(trx, BIA.escopo);
+      await db.repos.preferencias.gravar({ experimentos: { quadro: true } });
+      const bel = await agenteComConversa(trx, BIA.escopo, { nome: `Bel ${m.adaNome}` });
+      expect((await lote(db, bel.agenteId, [{ tipo: "criar_quadro", meta: "Outro" }, { tipo: "criar_tarefa", titulo: "B1" }])).data).toMatchObject({ ok: true });
+      expect((await lote(db, bel.agenteId, [{ tipo: "adicionar_pessoa", pessoa: ANA.nome }])).data).toMatchObject({ ok: true });
+      for (const chave of [true, false]) {
+        const da = await como(trx, ANA.escopo);
+        await da.repos.preferencias.gravar({ experimentos: { quadro: chave } });
+        // Duas abertas: pergunta qual, com os nomes que ela já vê.
+        const ctx = await turnoDe(da, m.lia.agenteId, m.lia.conversaId);
+        const duas = (await executar(da, gerirQuadro, { ...ctx, acoes: [] })).data;
+        expect(duas, `chave=${chave}`).toMatchObject({ ok: false, erro: "entrada_invalida" });
+        expect(JSON.stringify(duas)).toContain(DONA.nome);
+        expect(JSON.stringify(duas)).toContain(BIA.nome);
+        const c2 = await turnoDe(da, m.lia.agenteId, m.lia.conversaId);
+        expect((await executar(da, gerirQuadro, { ...c2, acoes: [{ tipo: "criar_tarefa", titulo: "Qual?" }] })).data).toMatchObject({ ok: false, erro: "entrada_invalida" });
+      }
+      // A Bia desliga o dela: o quadro dela não existe para a Ana, e sobra só o da dona (com a chave dela ligada ou não).
+      await (await como(trx, BIA.escopo)).repos.preferencias.gravar({ experimentos: { quadro: false } });
+      for (const chave of [true, false]) {
+        const da = await como(trx, ANA.escopo);
+        await da.repos.preferencias.gravar({ experimentos: { quadro: chave } });
+        const ctx = await turnoDe(da, m.lia.agenteId, m.lia.conversaId);
+        const uma = (await executar(da, gerirQuadro, { ...ctx, acoes: [] })).data;
+        expect(uma, `chave=${chave}`).toMatchObject({ ok: true, quadro: { id: m.qid } });
+        expect(JSON.stringify(uma)).not.toContain(BIA.nome);
+      }
+    });
+  });
+
+  it("revisão 8 do PR #634: sob a procuração da Ana, a consulta do bot da dona só acha o quadro do turno; a recusa no quadro da dona contamina o turno; o quadro fechado responde como um que não existe", async () => {
+    await withRollback(DONA.escopo, async (trx) => {
+      const m = await montar(trx);
+      await porNaAna(m);
+      const s = Math.random().toString(36).slice(2, 7);
+      // Bloqueante: a Bia tem um quadro com a dona dentro (sem a Ana); a dona tem outro quadro (do Ben), sem a Ana.
+      const db = await como(trx, BIA.escopo);
+      await db.repos.preferencias.gravar({ experimentos: { quadro: true } });
+      const caio = await agenteComConversa(trx, BIA.escopo, { nome: `Caio ${s}` });
+      expect((await lote(db, caio.agenteId, [{ tipo: "criar_quadro", meta: "META-DA-BIA" }, { tipo: "criar_tarefa", titulo: "SEGREDO-DA-BIA" }])).data).toMatchObject({ ok: true });
+      expect((await lote(db, caio.agenteId, [{ tipo: "adicionar_pessoa", pessoa: DONA.nome }])).data).toMatchObject({ ok: true });
+      const qBia = (await db.repos.quadros.doAgente(caio.agenteId))!.id;
+      const dd = await como(trx, DONA.escopo);
+      const ben = await agenteComConversa(trx, DONA.escopo, { nome: `Ben ${s}` });
+      expect((await lote(dd, ben.agenteId, [{ tipo: "criar_quadro", meta: "META-DO-BEN" }])).data).toMatchObject({ ok: true });
+      const r = await daTela(await como(trx, ANA.escopo), m.qid, [{ tipo: "criar_tarefa", titulo: "Pedido da Ana", agente: m.adaNome, status: "afazer" }]);
+      expect(r.data, JSON.stringify(r.data)).toMatchObject({ ok: true });
+      const turnoId = r.data.ok ? r.data.comecaram[0]!.turnoId : "";
+      expect(await (await como(trx, DONA.escopo)).repos.turnos.buscar(turnoId)).toMatchObject({ sobProcuracaoDe: ANA.id });
+      const naAda = async (quadro: string) => (await executar(await como(trx, DONA.escopo), gerirQuadro, { turnoId, agenteId: m.ada.agenteId, conversaId: m.ada.conversaId, quadro, acoes: [] })).data;
+      for (const ref of [qBia, `Caio ${s}`, BIA.nome, `Ben ${s}`]) {
+        const visto = JSON.stringify(await naAda(ref));
+        expect(visto, ref).not.toMatch(/SEGREDO-DA-BIA|META-DA-BIA|META-DO-BEN/);
+      }
+      expect(await naAda(qBia)).toMatchObject({ ok: true, quadro: { id: m.qid } });
+      expect((await trx`select current_setting('nod.pessoa_id') as p`)[0]!.p).toBe(DONA.id);
+
+      // Alto: a recusa no quadro da dona traz o título da tarefa dela: o turno do bot da Ana fica contaminado.
+      let da = await como(trx, ANA.escopo);
+      for (const acoes of [[{ tipo: "mudar_tarefa", tarefa: "T1", titulo: "Outro" }], [{ tipo: "mudar_tarefa", tarefa: "T1", excluir: true }]] as OpQuadro[][]) {
+        const ctx = await turnoDe(da, m.lia.agenteId, m.lia.conversaId);
+        const recusa = (await executar(da, gerirQuadro, { ...ctx, quadro: m.qid, acoes })).data;
+        expect(recusa).toMatchObject({ ok: false, erro: "nao_permitido" });
+        expect(await da.repos.turnos.contaminado(ctx.turnoId)).toBe(true);
+      }
+
+      // Médio: a dona desliga; para a Ana, o quadro fechado é igual a um que não existe (pela tela e pelo bot), e a
+      // recusa não contamina (não traz nada do quadro).
+      await (await como(trx, DONA.escopo)).repos.preferencias.gravar({ experimentos: { quadro: false } });
+      for (const chave of [true, false]) {
+        da = await como(trx, ANA.escopo);
+        await da.repos.preferencias.gravar({ experimentos: { quadro: chave } });
+        const op: OpQuadro[] = [{ tipo: "criar_tarefa", titulo: "x" }];
+        expect((await daTela(da, m.qid, op)).data, `tela chave=${chave}`).toEqual((await daTela(da, randomUUID(), op)).data);
+        const c1 = await turnoDe(da, m.lia.agenteId, m.lia.conversaId);
+        const c2 = await turnoDe(da, m.lia.agenteId, m.lia.conversaId);
+        const fechado = (await executar(da, gerirQuadro, { ...c1, quadro: m.qid, acoes: op })).data;
+        expect(fechado, `bot chave=${chave}`).toEqual((await executar(da, gerirQuadro, { ...c2, quadro: randomUUID(), acoes: op })).data);
+        expect(await da.repos.turnos.contaminado(c1.turnoId)).toBe(false);
+      }
+    });
+  });
+
+  it("revisão 9 do PR #634: a dona exclui o bot anfitrião; o quadro some para quem participa (tela, lista, bot) como um que não existe", async () => {
+    await withRollback(DONA.escopo, async (trx) => {
+      const m = await montar(trx);
+      await porNaAna(m);
+      const dd = await como(trx, DONA.escopo);
+      await dd.repos.agentes.excluir(m.ada.agenteId, Date.now());
+      expect(await dd.repos.quadros.listar()).toEqual([]);
+      const da = await como(trx, ANA.escopo);
+      await expect(executar(da, verQuadroPorId, { quadroId: m.qid })).rejects.toMatchObject({ codigo: "nao_encontrado" });
+      expect((await executar(da, quadrosCompartilhados, {})).data.quadros).toEqual([]);
+      const op: OpQuadro[] = [{ tipo: "criar_tarefa", titulo: "Depois da exclusão" }];
+      expect((await daTela(da, m.qid, op)).data).toEqual((await daTela(da, randomUUID(), op)).data);
+      const ctx = await turnoDe(da, m.lia.agenteId, m.lia.conversaId);
+      expect((await executar(da, gerirQuadro, { ...ctx, quadro: m.qid, acoes: op })).data).toMatchObject({ ok: false });
+      const ctx2 = await turnoDe(da, m.lia.agenteId, m.lia.conversaId);
+      expect((await executar(da, gerirQuadro, { ...ctx2, acoes: [] })).data).toMatchObject({ ok: false });
+      expect((await trx`select current_setting('nod.pessoa_id') as p`)[0]!.p).toBe(ANA.id);
+      const titulos = (await como(trx, DONA.escopo)).repos.quadros.buscar(m.qid).then(async (q) => (await montarQuadro(await como(trx, DONA.escopo), q!)).tarefas.map((t) => t.titulo));
+      expect(await titulos).not.toContain("Depois da exclusão");
+    });
+  });
+
+  it("NOD-455: quem sai do quadro (tirada ou o Desfazer da entrada) recebe o quadro.mudou desse lote, só com ids, e depois não recebe mais", async () => {
+    await withRollback(DONA.escopo, async (trx) => {
+      const m = await montar(trx);
+      await porNaAna(m);
+      const dd = await como(trx, DONA.escopo);
+      const tirou = await lote(dd, m.ada.agenteId, [{ tipo: "tirar_pessoa", pessoa: ANA.nome }]);
+      const ev = tirou.events.find((e) => e.kind === "quadro_mudou")!;
+      expect(ev.dados).toMatchObject({ quadroId: m.qid, membros: ANA.id });
+      expect("sairam" in ev.dados).toBe(false);
+      // O lote seguinte já não a leva.
+      const depois = await lote(dd, m.ada.agenteId, [{ tipo: "criar_tarefa", titulo: "Sem a Ana" }]);
+      expect(depois.events.find((e) => e.kind === "quadro_mudou")!.dados).not.toHaveProperty("membros");
+      // O Desfazer de "pôs a Ana" também a avisa.
+      await porNaAna(m);
+      const desfez = await lote(dd, m.ada.agenteId, [{ tipo: "desfazer" }]);
+      expect(desfez.data).toMatchObject({ ok: true, desfeito: true });
+      expect(desfez.events.find((e) => e.kind === "quadro_mudou")!.dados).toMatchObject({ membros: ANA.id });
+      expect(await dd.repos.quadros.membros(m.qid)).toEqual([]);
+    });
+  });
+
+  it("NOD-455 (revisão 3): a dona remove o quadro: quem participava recebe esse último quadro.mudou (os membros caem em CASCADE)", async () => {
+    await withRollback(DONA.escopo, async (trx) => {
+      const m = await montar(trx);
+      await porNaAna(m);
+      const dd = await como(trx, DONA.escopo);
+      const removeu = await lote(dd, m.ada.agenteId, [{ tipo: "remover_quadro" }]);
+      expect(removeu.data).toMatchObject({ ok: true, removido: true });
+      expect(removeu.events.find((e) => e.kind === "quadro_mudou")!.dados).toMatchObject({ quadroId: m.qid, removido: true, membros: ANA.id });
     });
   });
 });

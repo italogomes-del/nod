@@ -77,6 +77,8 @@ export type Tela =
   | { tipo: "sua-vez" }
   /** Não lidos (definido em 2026-09-29, 0039): tudo o que chegou, a conversa mais recente em cima. */
   | { tipo: "nao-lidos" }
+  /** NOD-455 (ADR-143): o quadro de outra pessoa em que quem lê participa (/quadros/:qid). */
+  | { tipo: "quadro-compartilhado"; quadroId: string }
   | { tipo: "nova-sala" }
   /** ADR-083 (#196): "Todos os trabalhos" — os de todos os bots da pessoa, com os filtros De você / Rotinas / Entre bots. */
   | { tipo: "trabalhos"; filtro?: FiltroTrabalhos }
@@ -2144,7 +2146,9 @@ export function resolverInicio(entrada: Estado): Estado {
     const o = estado.onboarding;
     if (o?.mostrar) {
       const guia = o.guia;
-      return { ...estado, onboardingResolvido: true, onboardingAberto: true, tela: guia ? { tipo: "conversa", conversaId: guia.conversaId, agenteId: guia.id } : estado.tela };
+      // NOD-455: o link direto /quadros/:qid já abriu a tela da participante; o guia abre por cima dela, sem trocá-la.
+      const fica = estado.tela.tipo === "quadro-compartilhado";
+      return { ...estado, onboardingResolvido: true, onboardingAberto: true, tela: guia && !fica ? { tipo: "conversa", conversaId: guia.conversaId, agenteId: guia.id } : estado.tela };
     }
     estado = { ...estado, onboardingResolvido: true };
   }

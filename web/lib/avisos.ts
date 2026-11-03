@@ -167,6 +167,11 @@ export function novasMensagens(conhecidas: ReadonlySet<string> | null, naoLidos:
   return { novas, conhecidas: todas, abertas };
 }
 
+/** O link `[x](url)` vira só `x` (a mesma regra do previaDaMensagem do servidor, src/domain/descricao-agente.ts). */
+function semLinks(texto: string): string {
+  return texto.replace(/\[([^\]\n]*)\]\([^)\s]*\)/g, "$1");
+}
+
 /** O título de cada tipo (NOD-114). O aviso do bot leva só o nome: o texto dele é o corpo. */
 function tituloDe(tipo: TipoAviso, bot: string): string {
   switch (tipo) {
@@ -205,7 +210,8 @@ export function redigirAviso(lote: readonly PedidoNovo[], pessoaId: string | nul
   const resto = ordenado.length - 1;
   const sufixo = resto > 0 ? ` · e mais ${resto}` : "";
   // A fala final só com mídia vem sem texto (NOD-323); a de um turno que leu conteúdo de fora vem marcada (ADR-026).
-  const frase = `${um.deFora ? AVISO_DE_FORA : ""}${um.frase.trim() || "Abra para ver."}`;
+  // NOD-455 (revisão 4): o "[Abrir no quadro](nod-quadro:…)" do aviso não aparece cru na notificação.
+  const frase = `${um.deFora ? AVISO_DE_FORA : ""}${semLinks(um.frase).trim() || "Abra para ver."}`;
   const corpo = `${cortar(frase, CORPO_MAX - Array.from(sufixo).length)}${sufixo}`;
   const deOutra = um.ownerId !== null && pessoaId !== null && um.ownerId !== pessoaId;
   const alvo: AlvoAviso = deOutra ? { tipo: "sua-vez" } : um.trabalhoId ? { tipo: "trabalho", trabalhoId: um.trabalhoId, agenteId: um.agenteId, conversaId: um.conversaId } : { tipo: "conversa", conversaId: um.conversaId, agenteId: um.agenteId };

@@ -112,8 +112,12 @@ import { caixaComFrase, FRASE_DE_PEDIR_APP, fraseDeEditarApp, fraseDeReconectar,
 import { aoGuardarOrdem, definirPaginas, ordemDoAgente, paginasDoAgente, paginasDtoDe } from "./lib/ordem-das-paginas.ts";
 import { criarPaginasDoServidor } from "./lib/paginas-do-servidor.ts";
 import { criarQuadroNaTela } from "./lib/quadro-na-tela.ts";
+import { criarQuadroCompartilhadoNaTela } from "./lib/quadro-compartilhado-na-tela.ts";
+import { caminhoDoQuadro, quadroDaUrl, releListaDosCompartilhados } from "./lib/quadro-compartilhado.ts";
+import { secaoDosCompartilhados } from "./telas/quadro-compartilhado.ts";
+import type { QuadroCompartilhadoDto } from "../src/contracts/quadro-pessoas.ts";
 import { PARAMETRO_TAREFA, botDoLink, responsaveisDaTarefa } from "./lib/quadro-dados.ts";
-import { confiar as confiarHtml } from "./telas/quadro.ts";
+import { anel, confiar as confiarHtml } from "./telas/quadro.ts";
 import type { DadosConta } from "./telas/config-conta.ts";
 import { estadoMascoteNaConversa, mascoteComAviso, proximaViradaDoMascote } from "./lib/mascote.ts";
 import { lembrar } from "./lib/lembrar.ts";
@@ -561,6 +565,43 @@ const quadroNaTela = criarQuadroNaTela(document, {
       return true;
     },
   },
+});
+
+// NOD-455 (ADR-143): os quadros de outras donas em que a pessoa participa ("Compartilhados com você", na barra) e a
+// tela que abre um deles (/quadros/:qid). Só lê as rotas /quadros/:qid… (nunca as /agentes/:id/… da dona).
+let compartilhados: QuadroCompartilhadoDto[] = [];
+let lendoCompartilhados = 0;
+let compartilhadosAgendado = false;
+/** A rajada de quadro.mudou de outras donas vira uma leitura só (250 ms, como a releitura do quadro). */
+function relerCompartilhados(): void {
+  if (compartilhadosAgendado) return;
+  compartilhadosAgendado = true;
+  setTimeout(() => { compartilhadosAgendado = false; void lerCompartilhados(); }, 250);
+}
+async function lerCompartilhados(): Promise<void> {
+  if (!api || !estado.sessao) return;
+  const n = ++lendoCompartilhados;
+  try {
+    const r = await api.compartilhados();
+    if (n !== lendoCompartilhados) return;
+    compartilhados = r.quadros;
+    render();
+  } catch { /* a barra fica com a lista que tinha; o próximo quadro.mudou relê */ }
+}
+const quadroCompartilhado = criarQuadroCompartilhadoNaTela(document, {
+  api: () => {
+    if (!api) throw new ErroApi(0, "sem_sessao", "Sem sessão");
+    return api;
+  },
+  agente: (id) => {
+    const b = botGerido(id);
+    if (b) return { avatar: confiarHtml(iconeAgente(b, "sm")), nome: b.nome };
+    const c = compartilhados.find((x) => x.agenteId === id);
+    return c ? { avatar: anel((c.agenteNome.trim()[0] ?? "?").toUpperCase(), c.agenteNome), nome: c.agenteNome } : null;
+  },
+  hora: horaDaFala,
+  aoSair: () => navegar({ tipo: "inicio" }),
+  aoPerderAcesso: (qid) => { compartilhados = compartilhados.filter((c) => c.id !== qid); render(); void lerCompartilhados(); },
 });
 
 /**
@@ -1016,6 +1057,9 @@ function receberFrame(frame: FrameSse): void {
   estado = reduzir(estado, { tipo: "frame", frame, agora: Date.now() });
   if (mudouNaTela(antes, estado)) renderNoQuadro();
   quadroNaTela.aoFrame(frame);
+  quadroCompartilhado.aoFrame(frame);
+  // NOD-455: o quadro de outra dona mudou (alguém entrou, saiu, o modo mudou): a barra relê os compartilhados.
+  if (frame.tipo === "quadro.mudou" && typeof frame.dados["agenteId"] === "string" && !botGerido(frame.dados["agenteId"]) && releListaDosCompartilhados(frame, compartilhados.map((c) => c.id))) relerCompartilhados();
   // NOD-445: um app chegou, saiu ou mudou (ou a ordem), ou o quadro nasceu: relê as páginas do bot.
   if (frame.tipo === "paginas.mudaram" || frame.tipo === "quadro.mudou") {
     const ag = (frame.dados as { agenteId?: unknown }).agenteId;
@@ -1786,7 +1830,8 @@ function renderSidebar(estado: Estado): string {
   const nodDiscreto = nod && !nod.fixado && !ehCelular
     ? `<button class="nod-topo" data-bot-contexto="${esc(nod.id)}"${atual(nod.conversaId)} data-act="abrir-conversa" data-conversa="${esc(nod.conversaId)}" data-agente="${esc(nod.id)}" aria-label="Abrir o Nod${avisoNod ? ` (${ESPERA[avisoNod]})` : ""}" title="Nod">${LOGO_NOD}<span>Nod</span>${avisoNod ? `<span class="nod-topo-aviso" data-aviso="${avisoNod}" aria-hidden="true"></span>` : ""}</button>`
     : "";
-  const equipe = daEquipe.length ? secaoDeBots("Agentes da equipe", chaveDaSecao(pessoaId, null), daEquipe, "") : "";
+  const deOutras = secaoDosCompartilhados(compartilhados, { aberto: t.tipo === "quadro-compartilhado" ? t.quadroId : null, celular: ehCelular });
+  const equipe = (daEquipe.length ? secaoDeBots("Agentes da equipe", chaveDaSecao(pessoaId, null), daEquipe, "") : "") + deOutras;
   // definido em 2026-10-04: a seção Salas saiu da barra — só poluía. As salas voltam como uma feature pensada na
   // jornada inteira; até lá, a tela da sala continua existindo e abre por Não lidos e pelos avisos.
 
@@ -1819,7 +1864,7 @@ function renderSidebar(estado: Estado): string {
     // O Nod está sempre lá: "vazio" é não ter nenhum outro bot (ele fica na grade, acima do convite).
     const lista = estadoDaLista({ temFrota: !!estado.frota, falhou: frotaFalhou, bots: comuns.length + daEquipe.length });
     const meio = lista === "carregando" ? ESQUELETO_DO_INICIO
-      : lista === "vazia" ? `${grade}${INICIO_VAZIO}`
+      : lista === "vazia" ? `${grade}${INICIO_VAZIO}${deOutras}`
       : lista === "erro" ? ""
       : `${grade}${bots}${equipe}`;
     // O erro com cache fica acima da lista; sem cache, é tudo o que há.
@@ -2102,6 +2147,10 @@ function renderPrincipal(): void {
     case "nao-lidos":
       corpo = renderNaoLidos(estado);
       break;
+    case "quadro-compartilhado":
+      // NOD-455: o casco; o controlador desenha dentro dele (e não é regravado enquanto a tela é a mesma).
+      corpo = '<div id="qcp" class="qcp-casco"></div>';
+      break;
     case "rotinas":
       corpo = renderRotinas(estado);
       break;
@@ -2173,6 +2222,16 @@ function renderPrincipal(): void {
   // Chat limpo (PR 7; QA do PR 398): o progresso das frentes muda só o bloco dele, dentro da fala, sem regravá-la. O bloco
   // trocado é medido de novo antes da pílula (PR 8): ela some com o bloco à vista, e a frente nova do lote muda o bloco.
   if (progressoNaTela.desenhar(conversaDaTela(estado), estado, memoriaNaFala()) > 0) rolagem.progressoTrocado();
+  // NOD-455: o quadro compartilhado vive fora do reducer, como o da dona; a URL /quadros/:qid é só desta tela.
+  if (t.tipo === "quadro-compartilhado") {
+    if (quadroCompartilhado.atual() !== t.quadroId) quadroCompartilhado.abrir(t.quadroId);
+    quadroCompartilhado.montar();
+    const caminho = caminhoDoQuadro(t.quadroId);
+    if (window.location.pathname !== caminho) window.history.replaceState(window.history.state, "", caminho + window.location.search + window.location.hash);
+  } else if (quadroCompartilhado.atual() !== null) {
+    quadroCompartilhado.fechar();
+    if (quadroDaUrl(window.location.pathname)) window.history.replaceState(window.history.state, "", "/" + window.location.search + window.location.hash);
+  }
   // NOD-348: o tempo da fala viva é escrito logo depois do render (a parte trocada nasce vazia) e o anunciador vê o estado novo.
   relogioDaFala.tocar();
   anunciadorDoTurno.observar(falasNaTela());
@@ -2886,7 +2945,7 @@ function prenderFocoNaGaveta(slug: string | null): void {
  * (digitar na busca filtra direto, no ouvinte de input).
  */
 function redesenharSidebar(): void {
-  const html = lembrar("sidebar", estado, [ambienteBanco, buscaAberta, termoBusca() !== "", naFrente(), deixarNaoLida, secoesRecolhidas, edicaoTime?.alvo ?? "", [...selecaoBots].join(","), celular.ativo(), celular.botsAbertos(), frotaFalhou, favoritosTodos, celular.ativo() ? new Date().toDateString() : "", serializar(barraAtual)], renderSidebar);
+  const html = lembrar("sidebar", estado, [ambienteBanco, buscaAberta, termoBusca() !== "", naFrente(), deixarNaoLida, secoesRecolhidas, edicaoTime?.alvo ?? "", [...selecaoBots].join(","), celular.ativo(), celular.botsAbertos(), frotaFalhou, favoritosTodos, celular.ativo() ? new Date().toDateString() : "", serializar(barraAtual), JSON.stringify(compartilhados)], renderSidebar);
   // NOD-119: no celular a barra é a gaveta de sempre; o <html> só leva a densidade no computador (virar o aparelho muda).
   pintarBarra(barraAtual, document.documentElement, celular.ativo(), buscaAberta || termoBusca() !== "");
   if (!regiaoMudaria("sidebar", html)) return;
@@ -2944,6 +3003,10 @@ async function iniciarSessao(escopo: Escopo): Promise<void> {
   api = criarApi(escopo);
   // NOD-324: a disponibilidade do ditado (e o aceite do aviso) é da sessão; a da anterior não decide o 🎤 desta.
   ditado.reiniciar();
+  // NOD-455: os compartilhados e o quadro aberto são da pessoa: outra sessão não herda a lista da anterior.
+  compartilhados = [];
+  lendoCompartilhados++;
+  quadroCompartilhado.fechar();
   // Outra sessão, outra fila: a primeira leitura volta a ser só a linha de base.
   avisador.reiniciar();
   canalAvisos.contador(0);
@@ -2972,8 +3035,10 @@ async function iniciarSessao(escopo: Escopo): Promise<void> {
   live = criarLiveEvents(api.urlEventos, {
     aoReidratar: () => {
       dispatch({ tipo: "invalidar", quais: invalidacoesAoRetomar(estado) });
-      quadroNaTela.reler(); // NOD-442: o quadro vive fora do reducer
-      // NOD-324: o aviso de voz pode ter mudado enquanto a conexão estava fora; relê sem descartar a fala em curso.
+      quadroNaTela.reler(); // NOD-442/455: fora do reducer
+      quadroCompartilhado.reler();
+      relerCompartilhados();
+      // NOD-324: o aviso de voz, sem descartar a fala.
       void ditado.reler();
     },
   });
@@ -3071,6 +3136,7 @@ function regiaoReabrindo(id: string, html: string, rolagem?: { seletor: string; 
 const CHAVE_CODIGO_MAQUINA = "nod-parear-maquina";
 /** NOD-416 (ADR-144): o link da tarefa (`?tarefa=ZE-12`), guardado até a sessão existir. */
 const CHAVE_TAREFA_LINK = "nod-tarefa-link";
+const CHAVE_QUADRO_LINK = "nod-quadro-link";
 const CHAVE_VOLTA_NUVEM = "nod-volta-nuvem";
 async function boot(): Promise<void> {
   dispatch({ tipo: "tick", agora: Date.now() });
@@ -3111,6 +3177,9 @@ async function boot(): Promise<void> {
     url.searchParams.delete("parear-maquina");
     window.history.replaceState(null, "", url.pathname + url.search + url.hash);
   }
+  // NOD-455: o link direto /quadros/:qid (no recarregar e no celular) abre o quadro compartilhado depois da sessão.
+  const quadroNaUrl = quadroDaUrl(url.pathname);
+  if (quadroNaUrl) { try { window.sessionStorage.setItem(CHAVE_QUADRO_LINK, quadroNaUrl); } catch { /* sem storage: o link não abre */ } }
   // NOD-416: o link da tarefa abre a conversa do bot dela, no Quadro, com a tarefa em tela cheia (depois do login se preciso).
   const tarefaNaUrl = url.searchParams.get(PARAMETRO_TAREFA);
   if (tarefaNaUrl !== null) {
@@ -3157,7 +3226,7 @@ async function boot(): Promise<void> {
     await iniciarSessao(await sessaoApi.atual());
     abrirCodigoDeMaquinaGuardado();
     abrirVoltaDaNuvemGuardada();
-    void abrirTarefaGuardada();
+    void abrirTarefaGuardada(); abrirQuadroGuardado();
     await lerContas(voltaDaConta);
     if (confirmando) { await confirmando; if (contas?.minhaConta) abrirEspaco("conta"); }
   } catch (e) {
@@ -3175,7 +3244,7 @@ async function boot(): Promise<void> {
         if (abreProvisorio({ saiu, recusado: entrada.recusado, bootstrap: modo.contas?.bootstrap ?? false, noApp: window.nodDesktop !== undefined, equipe: daEquipe(), pareando: pedidoPendente() !== null }) && (await provisorioDaWeb())) {
           await iniciarSessao(await sessaoApi.atual());
           // O link da tarefa também vale na primeira visita, no espaço provisório (revisão do PR #623).
-          void abrirTarefaGuardada();
+          void abrirTarefaGuardada(); abrirQuadroGuardado();
           await lerContas(voltaDaConta);
           return;
         }
@@ -5102,7 +5171,7 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     }
     setTimeout(() => { el.textContent = antes; }, 1500);
   },
-  entrar: (el) => agir(async () => { await iniciarSessao(await sessaoApi.entrar(el.dataset.pessoa ?? "")); void abrirTarefaGuardada(); await lerContas(null); }),
+  entrar: (el) => agir(async () => { await iniciarSessao(await sessaoApi.entrar(el.dataset.pessoa ?? "")); void abrirTarefaGuardada(); abrirQuadroGuardado(); await lerContas(null); }),
   navegar: (el) => {
     const tela = el.dataset.tela;
     if (tela === "conectores") abrirMarketplace();
@@ -5782,6 +5851,14 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     if (!dono || !tarefaId) { dispatch({ tipo: "erro", erro: { codigo: "tarefa_sem_quadro", mensagem: "Esse bot não está mais na sua frota." } }); return; }
     quadroNaTela.abrirTarefaDe(agenteId, tarefaId);
     navegar({ tipo: "conversa", conversaId: dono.conversaId, agenteId });
+  },
+  // NOD-455: a linha de "Compartilhados com você" e o "Abrir no quadro" do aviso.
+  "abrir-quadro-compartilhado": (el) => {
+    const qid = el.dataset.quadro ?? "";
+    if (!qid) return;
+    if (document.documentElement.dataset.sobreposta && el.closest("#sidebar")) fecharBusca();
+    if (estado.tela.tipo === "quadro-compartilhado" && estado.tela.quadroId === qid) { quadroCompartilhado.abrir(qid); return; }
+    navegar({ tipo: "quadro-compartilhado", quadroId: qid });
   },
   "abrir-conversa": (el) => {
     // NOD-119: escolher um bot na barra aberta por cima (recolhida + busca) fecha a busca, para a barra voltar a recolher.
@@ -8064,6 +8141,14 @@ function abrirCodigoDeMaquinaGuardado(): void {
   const guardado = codigo;
   void chavesAtuais().then((chavesAntes) => dispatch({ tipo: "conectar-maquina", conectar: { passo: "codigo", codigo: guardado, pedido: null, erro: null, chavesAntes, marcados: [] } }));
 }
+/** NOD-455: o link /quadros/:qid guardado no boot abre a tela (que mostra "sem acesso" a quem não participa). */
+function abrirQuadroGuardado(): void {
+  let qid: string | null = null;
+  try { qid = window.sessionStorage.getItem(CHAVE_QUADRO_LINK); window.sessionStorage.removeItem(CHAVE_QUADRO_LINK); } catch { /* sem storage */ }
+  void lerCompartilhados();
+  if (qid && estado.sessao && api) navegar({ tipo: "quadro-compartilhado", quadroId: qid });
+}
+
 /**
  * NOD-416 (ADR-144): o link da tarefa guardado no boot. O código (o atual ou o de antes de mudar de quadro) diz o bot; a
  * frota chega depois da sessão, então espera por ele um pouco. A tarefa abre em tela cheia no Quadro.

@@ -269,6 +269,12 @@ describe("NOD-429 · a pílula da conversa", () => {
   });
 });
 
+describe("NOD-455 · web/quadro.css", () => {
+  it("o casco da participante é container: a lista do celular (@container max-width 700px) vale lá também", () => {
+    expect(regra(CSS, ".qcp-casco")).toMatch(/container-type:\s*inline-size/);
+  });
+});
+
 describe("NOD-429 · web/quadro.css", () => {
   it("o Mover para… do card aparece com o foco dentro do card e tem alvo de 24px no desktop (revisão 2 do PR #622)", () => {
     expect(CSS).toMatch(/\.qd-card:focus-within \.qd-card-mover[^{]*\{[^}]*opacity:\s*1/);

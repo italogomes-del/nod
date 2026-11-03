@@ -239,6 +239,25 @@ export function quadrosRepo(conn: Conn, escopo: Escopo) {
         where qt.tenant_id = ${escopo.tenantId} and qt.owner_id = ${escopo.pessoaId} order by s.n limit 1`;
       return l?.id ?? null;
     },
+    /**
+     * NOD-455 (revisão 5, achado M2): a tarefa deste turno (a mesma subida do tarefaDoTurno), o quadro dela e quem participa
+     * dele. Só quando há alguém além da dona (null sem tarefa ou sem membros): o despacho avisa essas pessoas que o card
+     * mudou, porque os frames `turno.*` são da dona e não saem do escopo dela.
+     */
+    async membrosDoTurno(turnoId: string): Promise<{ quadroId: string; tarefaId: string; membros: string[] } | null> {
+      const [l] = await conn<{ quadro_id: string; tarefa_id: string; membros: string[] | null }[]>`
+        with recursive sobe(id, retoma, n) as (
+          select id, retoma_turno_id, 0 from turnos where tenant_id = ${escopo.tenantId} and id = ${turnoId}
+          union all
+          select t.id, t.retoma_turno_id, s.n + 1 from turnos t join sobe s on t.tenant_id = ${escopo.tenantId} and t.id = s.retoma where s.n < 50
+        ), tarefa as (
+          select qt.id, qt.quadro_id from quadro_tarefas qt join sobe s on qt.turno_id = s.id
+          where qt.tenant_id = ${escopo.tenantId} and qt.owner_id = ${escopo.pessoaId} order by s.n limit 1
+        )
+        select t.quadro_id, t.id as tarefa_id, (select array_agg(m.pessoa_id::text order by m.adicionado_em, m.id) from quadro_membros m
+          where m.tenant_id = ${escopo.tenantId} and m.owner_id = ${escopo.pessoaId} and m.quadro_id = t.quadro_id) as membros from tarefa t`;
+      return l && l.membros?.length ? { quadroId: l.quadro_id, tarefaId: l.tarefa_id, membros: l.membros } : null;
+    },
     /** Os quadros da pessoa (de bots não excluídos), mais recente primeiro. */
     async listar(): Promise<Quadro[]> {
       const ls = await conn<LinhaQuadro[]>`

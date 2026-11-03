@@ -51,7 +51,9 @@ meta é opcional e só ela mostra progresso.
    relógio (o da aplicação).
 6. **Flag `NOD_QUADROS`** (`desligado | admins | todos`; `admins` lê `NOD_ADMINS`; o deploy fixa `admins`, em produção só
    o Marlon; fora de produção o padrão é `todos`): fora dela, o experimento lê desligado mesmo com a
-   chave gravada — sem pílula, sem tela e sem `gerir_quadro`. O bot sem quadro não muda.
+   chave gravada — sem pílula, sem tela e sem `gerir_quadro`. O bot sem quadro não muda. Exceção (ADR-143, NOD-455,
+   decisões 1 e 2): o quadro de outra dona em que a pessoa participa segue a flag e a chave da DONA — ela vê a tela
+   desse quadro e o bot dela recebe o `gerir_quadro` para ele, mesmo fora da flag; o resto continua fechado.
 
 ## Emenda NOD-430 (2026-11-02): o limite do bot no quadro
 

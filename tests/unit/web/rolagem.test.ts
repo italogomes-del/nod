@@ -115,6 +115,7 @@ describe("rolar ao topo ao navegar", () => {
     conectores: true,
     "sua-vez": true,
     "nao-lidos": true,
+    "quadro-compartilhado": true,
     "nova-sala": true,
     trabalhos: true,
     linha: true,

@@ -1,4 +1,5 @@
 import { aPedidoDeOutraPessoa } from "../domain/modo-aprovacao.ts";
+import { participaDeQuadroAberto } from "./quadro-pessoas.ts";
 import { semCitacao } from "../domain/citacao.ts";
 import { COMANDO_CONFIGURAR, emReconfiguracao, podeReconfigurar } from "../domain/reconfiguracao.ts";
 import type { Memoria } from "../contracts/memoria.ts";
@@ -482,7 +483,9 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
     sessaoCli,
     anexos: [...metasDosAnexos, ...anteriores],
     ...(experimentos.calibracao ? { calibracao: true } : {}),
-    ...(experimentos.quadro ? { quadro: true } : {}),
+    // NOD-455 (decisão 1 da Ada): o gerir_quadro vai também ao bot de quem participa de um quadro aberto pela porta (o
+    // experimento e a flag da DONA), mesmo com o experimento dela desligado; o próprio quadro segue o dela.
+    ...(experimentos.quadro || (await participaDeQuadroAberto(deps)) ? { quadro: true } : {}),
     ...(whatsapp ? { whatsapp: true } : {}),
     ...(deps.services.revisor?.config.ligado ? { revisor: true } : {}),
     contextoConversa,

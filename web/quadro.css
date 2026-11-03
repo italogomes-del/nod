@@ -660,3 +660,35 @@ a.qd-chip:hover { background: var(--surface-raised); }
 @media (forced-colors: active) { .qd-pr-ponto { background: CanvasText; } }
 /* NOD-421 (revisão do PR 621): o aviso do GitHub no topo do quadro: uma linha de texto, cinza, sem caixa nem ícone. */
 .qd-aviso-gh { margin: 2px 0 0; font-size: 12px; line-height: 18px; color: var(--ink-3); }
+
+/* ---------- NOD-455 (definido em 2026-11-02): o quadro da dona na tela de quem participa (#qcp) ----------
+   Mesma base do quadro (NOD-429): colunas cinza, card branco discreto. Classes qcp-; só tokens do nod (ADR-070). */
+/* NOD-455 (QA): o casco é o container da grade/lista, como a .qd-vista; sem isto o celular via a grade larga. */
+.qcp-casco { min-height: 100%; padding: 20px 24px 32px; background: var(--qd-fundo); overflow: auto; container-type: inline-size; }
+.qcp { width: 100%; max-width: 1240px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.qcp-topo { display: flex; flex-direction: column; gap: 4px; }
+.qcp-tit { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -.01em; color: var(--ink); }
+.qcp-sub { font-weight: 400; color: var(--ink-2); }
+.qcp-meta { margin: 0; font-size: 14px; color: var(--ink); }
+.qcp-gente { margin: 0; font-size: 13px; color: var(--ink-2); display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.qcp-vazio { margin: 24px 0; font-size: 14px; color: var(--ink-2); }
+.qcp-mural { display: flex; flex-direction: column; gap: 8px; padding: 14px 16px; border-radius: var(--qd-raio); background: var(--qd-col-fundo); }
+.qcp-mural .qd-hist { margin: 0; }
+.qcp-pedir, .qcp-comentar { display: flex; gap: 8px; align-items: center; }
+.qcp-pedir { position: sticky; bottom: 0; padding: 10px 0 0; background: var(--qd-fundo); }
+.qcp-pedir .qd-meta-in, .qcp-comentar .qd-meta-in { flex: 1; min-width: 0; }
+.qcp-alheia { margin: 0; font-size: 13px; color: var(--ink-2); }
+.qcp-acoes { margin: 0; font-size: 13px; color: var(--ink-3, var(--ink-2)); }
+.qcp-editar { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.qcp-editar .qd-meta-in, .qcp-editar .qd-resp-in { width: 100%; }
+.qcp-esqueleto { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; max-width: 1240px; margin: 0 auto; }
+.qcp-esq-col { display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: var(--qd-raio); background: var(--qd-col-fundo); }
+.qcp-esq-col i { display: block; height: 56px; border-radius: 8px; background: var(--qd-card); animation: qcp-pulsa 1.4s ease-in-out infinite; }
+.qcp-esq-col i.curto { height: 32px; width: 60%; }
+@keyframes qcp-pulsa { 50% { opacity: .55; } }
+.qcp-secao .qd-anel { flex: none; }
+@media (prefers-reduced-motion: reduce) { .qcp-esq-col i { animation: none; } }
+@media (max-width: 699px) {
+  .qcp-casco { padding: 12px 12px 24px; }
+  .qcp-esqueleto { grid-template-columns: minmax(0, 1fr); }
+}

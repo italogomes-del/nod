@@ -71,6 +71,7 @@ export function rolaAoTopoAoNavegar(tela: Tela["tipo"]): boolean {
     case "nova-sala":
     case "trabalhos":
     case "linha":
+    case "quadro-compartilhado":
       return true;
     default: {
       // Uma tela nova não compila até alguém decidir se ela abre no topo ou colada no fim.

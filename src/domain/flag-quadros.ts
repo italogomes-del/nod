@@ -2,6 +2,7 @@
  * NOD-415 (ADR-141): a flag do servidor que libera os quadros. `NOD_QUADROS` = desligado | admins | todos; sem ela,
  * `admins` em produção (NOD_ADMINS, hoje só o Marlon) e `todos` fora dela. Quem não está liberado não vê a chave em
  * Experimentos, a pílula Conversa | Quadro, a tela do quadro nem o `gerir_quadro` — a chave guardada fica, mas lê desligada.
+ * Exceção (ADR-143, NOD-455): o quadro de outra dona em que a pessoa participa segue a flag e a chave da DONA.
  */
 export type ModoQuadros = "desligado" | "admins" | "todos";
 export type LiberacaoQuadros = { modo: ModoQuadros; admins: readonly string[] };
