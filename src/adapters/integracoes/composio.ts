@@ -134,6 +134,10 @@ export function criarClienteComposio(chave: string, f: typeof fetch = fetch, opc
     }
   }
 
+  /** O `error` do `successful: false` que diz recusa da conta (lido só para classificar; o texto não sai daqui). */
+  const ERRO_DE_AUTENTICACAO = /\b(401|403)\b|unauthori[sz]ed|forbidden|authenticat|expired|revoked|disconnected|not active|inactive|invalid[_ ](grant|token|credentials?)|reauthori[sz]|reconnect/i;
+
+  /** Só 401 e 403 são recusa da conta (integracao_autenticacao); o resto (400/404/410, 5xx, 408/429, rede) é indisponível. */
   async function pedir(path: string, body?: unknown): Promise<Record<string, unknown>> {
     try {
       const r = await requisitar(body ? "POST" : "GET", path, body);
@@ -226,6 +230,21 @@ export function criarClienteComposio(chave: string, f: typeof fetch = fetch, opc
       if (typeof r.redirect_url !== "string" || typeof r.connected_account_id !== "string") throw new ErroDeDominio("conector_indisponivel");
       const url = urlDoProvedor(r.redirect_url, ["app.composio.dev", "connect.composio.dev", "backend.composio.dev"]);
       return { url: url.href, contaId: r.connected_account_id };
+    },
+    /**
+     * NOD-422: executa uma ferramenta do Composio com a conta da pessoa (o servidor busca o time do Linear). Devolve o
+     * `data` da resposta, sem o texto do provedor. Revisão 7 do PR #630: só a recusa da conta (401/403 do Composio, ou
+     * `successful: false` cujo erro fala de autenticação, conta desconectada ou expirada) vira integracao_autenticacao (o
+     * caso de uso pede a reconexão). 400/404/410, erro do GraphQL e o `successful: false` sem esse sinal são
+     * conector_indisponivel, como prazo, 5xx, 429 e rede: pedir reconexão por um pedido errado mandaria a pessoa refazer
+     * uma conta que funciona.
+     */
+    async executar(ferramenta: string, p: { userId: string; contaId: string; argumentos: Record<string, unknown> }): Promise<Record<string, unknown>> {
+      if (!/^[A-Z0-9_]{1,80}$/.test(ferramenta)) throw new ErroDeDominio("conector_indisponivel");
+      const r = await pedir(`/tools/execute/${ferramenta}`, { user_id: p.userId, connected_account_id: p.contaId, arguments: p.argumentos });
+      if (r.successful === false) throw new ErroDeDominio(typeof r.error === "string" && ERRO_DE_AUTENTICACAO.test(r.error) ? "integracao_autenticacao" : "conector_indisponivel");
+      if (!r.data || typeof r.data !== "object" || Array.isArray(r.data)) throw new ErroDeDominio("conector_indisponivel");
+      return r.data as Record<string, unknown>;
     },
     async conectado(contaId: string, userId: string, toolkit: string) {
       const r = await pedir(`/connected_accounts/${encodeURIComponent(contaId)}`);

@@ -53,6 +53,9 @@ import { removerMaquina } from "../../use-cases/interromper-por-maquina.ts";
 import { repetirBarradosPorIa } from "../../use-cases/repetir-barrados-por-ia.ts";
 import { configGithubNativo, criarDetectorGh, sondaGithubNativa, type DetectorGh } from "../conectores-locais/github/nativo.ts";
 import { criarSubidaComposio } from "../integracoes/arquivo-composio.ts";
+import { criarClienteComposio } from "../integracoes/composio.ts";
+import { criarFonteLinearComposio } from "../integracoes/linear-composio.ts";
+import type { FonteLinear } from "../../contracts/quadro-importacao.ts";
 import { criarCofreDeTokensDoApp, criarTokenDeInstalacao } from "../integracoes/github-app.ts";
 import { criarInterruptor, type InterruptorNod } from "../../services/interruptor.ts";
 import { criarInventario, type ServicoInventario } from "../../services/inventario.ts";
@@ -80,7 +83,7 @@ import { pedirAcesso } from "../../use-cases/pedir-acesso.ts";
 import { pedirCredencial } from "../../use-cases/pedir-credencial.ts";
 import { avisarPessoa } from "../../use-cases/avisar-pessoa.ts";
 import { ajustarBarraLateral } from "../../use-cases/ajustar-barra-lateral.ts";
-import { gerirQuadro } from "../../use-cases/gerir-quadro.ts";
+import { gerirQuadro, gerirQuadroEmFases } from "../../use-cases/gerir-quadro.ts";
 import { gerirApps } from "../../use-cases/gerir-apps.ts";
 import { gerirTimes } from "../../use-cases/gerir-times.ts";
 import { naoLidosNoChat } from "../../use-cases/nao-lidos-no-chat.ts";
@@ -151,7 +154,8 @@ import { lerPoolMax } from "../../db/client.ts";
 import { criarRotasConversas } from "./rotas/conversas.ts";
 import { criarRotasRelatos } from "./rotas/relatos.ts";
 import { criarRotasDecisoes } from "./rotas/decisoes.ts";
-import type { DentroDeTx } from "./rotas/dentro-de-tx.ts";
+import { executar, type DentroDeTx } from "./rotas/dentro-de-tx.ts";
+import { type RodarNaTx, trazerImportacao } from "../../use-cases/importar-linear.ts";
 import { criarClienteAnthropic } from "../revisor/cliente-anthropic.ts";
 import { criarExecutorRevisor, type ExecutorRevisor } from "../revisor/executor.ts";
 import { lerConfigRevisor, VAR_REVISOR_CHAVE } from "../../domain/revisor.ts";
@@ -212,6 +216,8 @@ import { atenderLigacao, encerrarLigacao, gravarFalaLigacao, leituraDaDecisao, m
 import { cancelarTurno } from "../../use-cases/cancelar-turno.ts";
 import { lerLiberacaoQuadros } from "../../domain/flag-quadros.ts";
 import { configurarLiberacaoQuadros } from "../../repositories/raio-x.repo.ts";
+import { lerRotinasFora } from "../../domain/quadro-assumir.ts";
+import { configurarRotinasFora } from "../../use-cases/assumir-quadro.ts";
 import type { IncomingMessage, Server } from "node:http";
 
 /**
@@ -255,6 +261,8 @@ export type OpcoesCompor = {
   revisor?: { url?: string; fetchImpl?: typeof fetch; emVoo?: number };
   /** NOD-398: só em teste — o capturador de tela falso. Vale só com NOD_CAPTURA_TELA=1. Default: o Chrome via CDP. */
   capturador?: Capturador;
+  /** NOD-422: só em teste — a busca falsa do Linear (vale sem a flag). Default: o Composio, só com NOD_LINEAR_SERVIDOR=1. */
+  linear?: FonteLinear;
 };
 
 export type App = {
@@ -412,7 +420,7 @@ export function comporApp(o: OpcoesCompor): App {
     return tenants.get(pessoaId) ?? null;
   }
 
-  const useCases: UseCasesNod = { lembrar, atualizarPerfil, pedirAcesso, criarRotina, listarRotinasDoAgente, verAgendaPeloAgente, pausarRotinaPeloAgente, reativarRotinaPeloAgente, atualizarRotinaPeloAgente, excluirRotinaPeloAgente, pedirAprovacao, pedirAPessoa, passar, encaminhar, semNovidade, pedirABot, verColegas, publicarArtefato, lerArtefato, iniciarTarefa, desligar, anotarEntrevista, concluirEntrevista, proporBot, abrirTask, mandarParaTask, meChameAs, esperarComando, abrirFrentes, mandarParaFrente, devolverResumo, gerirBots, verAppsConectados, registrarRelatoDoNod, criarBots, responderPedido, pedirCredencial, avisarPessoa, abrirConta, buscarConversas, lerConversa, ajustarBarraLateral, gerirQuadro, gerirApps, naoLidosNoChat, gerirTimes };
+  const useCases: UseCasesNod = { lembrar, atualizarPerfil, pedirAcesso, criarRotina, listarRotinasDoAgente, verAgendaPeloAgente, pausarRotinaPeloAgente, reativarRotinaPeloAgente, atualizarRotinaPeloAgente, excluirRotinaPeloAgente, pedirAprovacao, pedirAPessoa, passar, encaminhar, semNovidade, pedirABot, verColegas, publicarArtefato, lerArtefato, iniciarTarefa, desligar, anotarEntrevista, concluirEntrevista, proporBot, abrirTask, mandarParaTask, meChameAs, esperarComando, abrirFrentes, mandarParaFrente, devolverResumo, gerirBots, verAppsConectados, registrarRelatoDoNod, criarBots, responderPedido, pedirCredencial, avisarPessoa, abrirConta, buscarConversas, lerConversa, ajustarBarraLateral, gerirQuadro, gerirQuadroEmFases, gerirApps, naoLidosNoChat, gerirTimes };
 
   // NOD-351: a situação da conta para abrir_conta, lida na transação do turno (sem outra conexão do pool). Liga tarde: as
   // contas nascem depois, sobre `dentro`; false = desligadas, e abrir_conta volta `indisponivel`.
@@ -420,6 +428,8 @@ export function comporApp(o: OpcoesCompor): App {
   const contasLigadas = env.NOD_CONTAS === "1";
   // NOD-415 (ADR-141): NOD_QUADROS libera os quadros (desligado | admins | todos; produção = admins).
   configurarLiberacaoQuadros(lerLiberacaoQuadros(env));
+  // NOD-422 (PR 2): as rotinas que o "quadro assume" nunca pausa (padrão: a bc381ef2).
+  configurarRotinasFora(lerRotinasFora(env));
   const depsSemPorta = (trx: Tx, escopo: Escopo): Deps => ({ repos: criarRepos(trx, escopo), services, useCases, tx: (fn) => fn(trx), escopo, agora: relogio, fusoPadrao, modeloPadrao, ...(contasLigadas ? { situacaoConta: () => situacaoDaConta(trx, escopo) } : {}) });
   // NOD-443 (ADR-143): a porta para o quadro da dona, na mesma transação (o turno do bot de quem participa).
   const depsDe = (trx: Tx, escopo: Escopo): Deps => comPortas(trx, escopo, (e) => depsSemPorta(trx, e));
@@ -525,6 +535,8 @@ export function comporApp(o: OpcoesCompor): App {
   const fundoLinuxSoVermelha = env.NOD_FUNDO_LINUX_SO_VERMELHA === "1";
   const services: Services = {
     trabalhosVivos,
+    // NOD-422: o servidor traz o time do Linear pelo Composio só com a flag (a ferramenta do provedor é suposição do PR).
+    ...(o.linear ? { linear: o.linear } : env.NOD_LINEAR_SERVIDOR === "1" ? { linear: criarFonteLinearComposio((c) => (f, p) => criarClienteComposio(decifrar(c, chave)).executar(f, p)) } : {}),
     ...(compartilhado ? { webhooks: { cifrar: (s: string) => cifrar(s, chave) } } : {}),
     // A tela fala por máquina (2026-10-09): o nome de cada máquina e se é um Mac. Com o servidor no Mac (ADR-092), a
     // máquina deste processo é "Este Mac" e o turno sem alvo é dela.
@@ -593,7 +605,7 @@ export function comporApp(o: OpcoesCompor): App {
     const efeitos: EfeitoAposCommit[] = [];
     const r = await abrirTxEscopada(db, escopo)((trx) => fn({ ...depsDe(trx, escopo), aposCommit: (e) => void efeitos.push(e) }));
     // Pelo Nod (e no clique do cartão do lote), a ação já commitou: a falha do efeito vira aviso no log, não erro do lote.
-    for (const e of efeitos) await rodarAposCommit(escopo, e).catch((erro: unknown) => log("aviso", "efeito_apos_commit_falhou", { tipo: e.tipo, agente_id: e.agenteId, erro: erro instanceof Error ? erro.message : String(erro) }));
+    for (const e of efeitos) await rodarAposCommit(escopo, e).catch((erro: unknown) => log("aviso", "efeito_apos_commit_falhou", { tipo: e.tipo, ...(e.tipo === "desligar_computador" ? { agente_id: e.agenteId } : { importacao_id: e.importacaoId }), erro: erro instanceof Error ? erro.message : String(erro) }));
     return r;
   };
   // NOD-374: a sonda de fundo roda fora de tx, sob o contexto de log da dona (o `carregar` do conector precisa dele).
@@ -726,7 +738,12 @@ export function comporApp(o: OpcoesCompor): App {
     // `saude` (emenda da ADR-037): o computador entrou ou saiu do ar — a web relê a frota só nesse caso.
     mudou: (escopo, agenteId, saude) => { barramento.publicar(escopo.pessoaId, "computador.mudou", { agenteId, ...(saude ? { saude: true } : {}) }); } });
   if (o.computador || env.NOD_COMPUTADORES === "docker" || computadorNoMotor) services.computadores = computadores;
-  rodarAposCommit = (escopo, efeito) => computadores.desligarExcluido(escopo, efeito.agenteId);
+  rodarAposCommit = async (escopo, efeito) => {
+    if (efeito.tipo === "desligar_computador") return computadores.desligarExcluido(escopo, efeito.agenteId);
+    // NOD-422: a busca do Linear roda em segundo plano (minutos, com progresso); quem confirmou não espera por ela.
+    const rodar: RodarNaTx = (fn) => dentro(escopo, async (d) => executar(d, (dd) => fn(dd), undefined));
+    void trazerImportacao(rodar, efeito.importacaoId).catch((erro: unknown) => log("erro", "importar_linear_falhou", { importacao_id: efeito.importacaoId, erro: erro instanceof Error ? erro.message : String(erro) }));
+  };
   services.capturas = criarCapturas({ ligado: capturaNoTranscript, fonte: computadores });
   // definido em 2026-09-18: login web remoto não autoriza o filesystem do host; stub só escuta loopback.
   const workspaces = compartilhado || env.NOD_LOGIN !== "stub" ? undefined : criarWorkspaces({ dentro, machineId, imagem: env.NOD_COMPUTADOR_IMAGEM, ...(env.NOD_BUSCA_BASE ? { baseBusca: env.NOD_BUSCA_BASE } : {}), raiz: join(expandirTil(env.NOD_HOME ?? "~/.nod", homedir()), "workspaces") });

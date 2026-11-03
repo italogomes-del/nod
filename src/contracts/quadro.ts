@@ -1,3 +1,5 @@
+import type { ImportacaoDto, OpImportarTimeLinear } from "./quadro-importacao.ts";
+import type { OpAssumirQuadro } from "./quadro-assumir.ts";
 import type { MovimentoDto, OpFreio, TravaColuna } from "./freios-quadro.ts";
 /**
  * O quadro-agente (definido em 2026-10-31, NOD-442; base visual NOD-429): uma meta com prazo, tarefas em colunas de
@@ -24,18 +26,10 @@ export type StatusTarefa = (typeof STATUS_TAREFA)[number];
 export const GRUPOS_COLUNA = ["nao_iniciado", "iniciado", "feito", "fechado"] as const;
 export type GrupoColuna = (typeof GRUPOS_COLUNA)[number];
 
-/** Uma coluna do quadro. `id` é uma das chaves de STATUS_TAREFA ou `c-<slug>` (criada pela pessoa; não muda ao renomear). */
-export type ColunaQuadro = {
-  id: string;
-  nome: string;
-  grupo: GrupoColuna;
-  /** Passagem (ADR-142): o bot que pega a tarefa ao entrar na coluna; null/ausente = o responsável continua. */
-  responsavel?: string | null;
-  /** "O que essa etapa faz": vai no contexto do turno de quem pega a tarefa nesta coluna. */
-  instrucoes?: string | null;
-  trava?: TravaColuna; // NOD-419: a trava ("só sai para…", "só a pessoa tira daqui"); ausente = flexível
-  prazoMin?: number; // NOD-420 (só onde o trabalho anda): a tarefa parada além disso nesta coluna faz o quadro cobrar o responsável
-};
+/** Uma coluna do quadro. `id` é uma das chaves de STATUS_TAREFA ou `c-<slug>` (criada pela pessoa; não muda ao renomear).
+ * Passagem (ADR-142): `responsavel` = o bot que pega a tarefa ao entrar (null/ausente = o responsável continua); `instrucoes` = "o que essa etapa faz", no contexto do turno.
+ * `trava` (NOD-419): "só sai para…", "só a pessoa tira daqui"; ausente = flexível. `prazoMin` (NOD-420, só onde o trabalho anda): a tarefa parada além disso nesta coluna faz o quadro cobrar o responsável. */
+export type ColunaQuadro = { id: string; nome: string; grupo: GrupoColuna; responsavel?: string | null; instrucoes?: string | null; trava?: TravaColuna; prazoMin?: number };
 
 /** A coluna como a web e o bot a recebem: `fixa` = não move nem sai (Precisa de você, Cancelado). */
 export type ColunaDto = ColunaQuadro & { fixa: boolean; daPessoa: boolean; recolhida: boolean; responsavelNome?: string | null };
@@ -104,7 +98,7 @@ export type Quadro = {
 export type AutorLote = { tipo: "pessoa" } | { tipo: "agente"; agenteId: string };
 
 /** NOD-416 (ADR-144): o histórico, o link pelo código e os quadros da pessoa moram em quadro-historico.ts. */
-export type { AutorHistorico, CampoHistorico, MudancaTarefa, EntradaHistoricoDto, TarefaPorCodigoDto, QuadroDaPessoaDto } from "./quadro-historico.ts";
+export type { AutorHistorico, CampoHistorico, MudancaTarefa, EntradaHistoricoDto, TarefaPorCodigoDto, TarefaAchadaDto, OpcaoDeTarefaDto, QuadroDaPessoaDto } from "./quadro-historico.ts";
 
 export type LoteQuadro = {
   id: string;
@@ -121,7 +115,7 @@ export type LoteQuadro = {
 };
 
 /** NOD-443 (ADR-143): as pessoas, quem decide, o mural e os comentários moram em quadro-pessoas.ts. */
-export type { MembroQuadroDto, QuemDecideDto, LinhaMuralDto, ComentarioQuadroDto, ComentarioTarefa, ComentarioDto, QuadroCompartilhadoDto } from "./quadro-pessoas.ts";
+export type { MembroQuadroDto, QuemDecideDto, LinhaMuralDto, ComentarioQuadroDto, AutorComentario, ComentarioTarefa, ComentarioDto, QuadroCompartilhadoDto } from "./quadro-pessoas.ts";
 import type { ComentarioQuadroDto, MembroQuadroDto, ModoConversa, QuemDecideDto } from "./quadro-pessoas.ts";
 import type { ItemLinear } from "./quadro-bot.ts";
 
@@ -150,7 +144,8 @@ export type QuadroDto = Omit<Quadro, "colunas"> & {
   /** O último lote ainda não desfeito (o Desfazer da faixa e do aviso). */
   ultimoLote: LoteQuadro | null;
   feitas: number;
-  total: number;
+  total: number; /** NOD-422: a última importação do Linear (a linha de progresso e o resultado); null = nunca houve. */ importacao?: ImportacaoDto | null;
+  /** NOD-422 (PR 2): quando o quadro assumiu a esteira (as rotinas dos bots pausadas); null = não assumiu. */ assumidoEm?: number | null;
   /** NOD-443: quem lê (a dona ou quem participa), a dona e as pessoas do quadro. Ausente no quadro de uma pessoa só. */
   voce?: { pessoaId: string; papel: "dona" | "membro"; podeDesfazer: boolean };
   dona?: { pessoaId: string; nome: string };
@@ -164,6 +159,8 @@ export type OpQuadro =
   | { tipo: "criar_quadro"; meta?: string | null; prazo?: string | null }
   | { tipo: "criar_tarefa"; titulo: string; descricao?: string; status?: string; agente?: string | null }
   | { tipo: "importar_linear"; itens: ItemLinear[] }
+  | OpImportarTimeLinear
+  | OpAssumirQuadro
   | { tipo: "mudar_tarefa"; tarefa: string; titulo?: string; descricao?: string; status?: string; agente?: string | null; pr_url?: string | null; pergunta?: string | null; excluir?: boolean; sem_iniciar?: boolean; /** NOD-419: o porquê de bloquear ou cancelar (o agente precisa dizer). */ motivo?: string }
   | { tipo: "responder"; tarefa: string; resposta: string }
   /** NOD-418: o trabalho da tarefa (sozinhos, sem Desfazer). Repetir abre um novo; cancelar para o vivo; o recado entra nele. */

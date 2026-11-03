@@ -60,9 +60,12 @@ interface LinhaLote {
 /** A foto do antes de um lote (o Desfazer volta a ela). `antes: null` = nasceu no lote; `quadro: null` = o quadro nasceu no lote. */
 export type FotoLote = {
   /** `metaDesde` falta nas fotos de antes da 0136: o Desfazer mantém o valor atual. `colunas` ausente = foto de antes da
-   *  NOD-448 (o Desfazer não mexe nas colunas). */
-  quadro: (Pick<Quadro, "meta" | "prazo" | "cumpridoEm" | "resumo"> & { metaDesde?: number; colunas?: ColunaQuadro[] | null }) | null;
+   *  NOD-448 (o Desfazer não mexe nas colunas). `prefixo` só na foto da importação do Linear que trocou o prefixo
+   *  (NOD-422): o Desfazer o devolve. */
+  quadro: (Pick<Quadro, "meta" | "prazo" | "cumpridoEm" | "resumo"> & { metaDesde?: number; colunas?: ColunaQuadro[] | null; prefixo?: string | null }) | null;
   tarefas: { id: string; antes: TarefaQuadro | null }[];
+  /** Revisão 3 do PR #630: os códigos do time que a importação guardou em tarefas que já existiam; o Desfazer os apaga. */
+  codigos?: { prefixo: string; numero: number; tarefaId: string }[];
   /** NOD-443: o lote que mexeu nas pessoas ou no modo guarda o de antes (ausente = o lote não mexeu). */
   pessoas?: { membros: string[]; modo: ModoConversa };
 };
@@ -307,6 +310,26 @@ export function quadrosRepo(conn: Conn, escopo: Escopo) {
       const [l] = await conn<LinhaTarefa[]>`select ${conn.unsafe(COLUNAS_T)} from quadro_tarefas where ${dona()} and id = ${id}`;
       return l ? paraTarefa(l) : null;
     },
+    /** As tarefas trazidas do Linear com este id (NOD-12), em qualquer quadro da pessoa. */
+    async tarefasDoLinear(linearId: string): Promise<TarefaQuadro[]> {
+      const ls = await conn<LinhaTarefa[]>`select ${conn.unsafe(COLUNAS_T)} from quadro_tarefas where ${dona()} and linear_id is not null and lower(linear_id) = lower(${linearId.trim()}) order by criado_em, id`;
+      return ls.map(paraTarefa);
+    },
+    /**
+     * Revisão 8 do PR #630: dos ids do Linear, os de uma tarefa da pessoa que SAIU deste quadro (mover_quadro: a linha
+     * 'quadro' do histórico com `de` = este quadro) e hoje está em outro. A reimportação não a recria aqui. A trazida por
+     * outra importação noutro quadro (o mesmo time em dois quadros) não conta: cada quadro tem a sua. Ids em maiúsculas.
+     */
+    async linearIdsQueSairam(quadroId: string, linearIds: readonly string[]): Promise<Set<string>> {
+      if (linearIds.length === 0) return new Set();
+      const ls = await conn<{ linear_id: string }[]>`
+        select distinct upper(t.linear_id) as linear_id from quadro_tarefas t
+        where t.tenant_id = ${escopo.tenantId} and t.owner_id = ${escopo.pessoaId} and t.quadro_id <> ${quadroId} and t.linear_id is not null
+          and lower(t.linear_id) = any(${conn.array(linearIds.map((x) => x.trim().toLowerCase()))}::text[])
+          and exists (select 1 from quadro_tarefa_historico h
+                       where h.tenant_id = t.tenant_id and h.owner_id = t.owner_id and h.campo = 'quadro' and h.de = ${quadroId}::text and h.tarefa_id = t.id)`;
+      return new Set(ls.map((l) => l.linear_id));
+    },
     async inserirTarefa(t: NovaTarefa): Promise<TarefaQuadro> {
       const [l] = await conn<LinhaTarefa[]>`
         insert into quadro_tarefas (tenant_id, owner_id, quadro_id, titulo, descricao, status, voltar_para, agente_id, ordem, linear_id, linear_url, pr_url, pergunta, resposta, de_fora, terminada_em, numero, pedido_por)
@@ -332,14 +355,19 @@ export function quadrosRepo(conn: Conn, escopo: Escopo) {
       return r.count > 0;
     },
     /** O Desfazer de uma exclusão: a tarefa volta com o mesmo id e as mesmas datas. */
-    async restaurarTarefa(t: TarefaQuadro): Promise<TarefaQuadro> {
+    /**
+     * `manterMudadoEm`: o Desfazer da importação do Linear devolve o mudado_em da foto. Com a hora de agora, a tarefa
+     * passaria a contar como mexida pela pessoa e a reimportação nunca mais a atualizaria (revisão do PR #630).
+     */
+    async restaurarTarefa(t: TarefaQuadro, o: { manterMudadoEm?: boolean } = {}): Promise<TarefaQuadro> {
+      const mudado = o.manterMudadoEm ? conn`${new Date(t.mudadoEm)}::timestamptz` : conn`clock_timestamp()`;
       const [l] = await conn<LinhaTarefa[]>`
         insert into quadro_tarefas (tenant_id, owner_id, id, quadro_id, titulo, descricao, status, voltar_para, agente_id, ordem, linear_id, linear_url, pr_url, pergunta, resposta, de_fora, turno_id, criado_em, mudado_em, terminada_em, numero, pedido_por)
         values (${escopo.tenantId}, ${escopo.pessoaId}, ${t.id}, ${t.quadroId}, ${t.titulo}, ${t.descricao}, ${t.status}, ${t.voltarPara ?? null}, ${t.agenteId}, ${t.ordem},
-          ${t.linearId}, ${t.linearUrl}, ${t.prUrl}, ${t.pergunta}, ${t.resposta}, ${t.deFora ?? false}, ${t.turnoId}, ${new Date(t.criadoEm)}, clock_timestamp(), ${terminadaDaFoto(t)}, ${t.numero ?? null}, ${t.pedidoPor ?? null})
+          ${t.linearId}, ${t.linearUrl}, ${t.prUrl}, ${t.pergunta}, ${t.resposta}, ${t.deFora ?? false}, ${t.turnoId}, ${new Date(t.criadoEm)}, ${mudado}, ${terminadaDaFoto(t)}, ${t.numero ?? null}, ${t.pedidoPor ?? null})
         on conflict (tenant_id, id) do update set titulo = excluded.titulo, descricao = excluded.descricao, status = excluded.status, voltar_para = excluded.voltar_para,
           agente_id = excluded.agente_id, ordem = excluded.ordem, linear_id = excluded.linear_id, linear_url = excluded.linear_url,
-          pr_url = excluded.pr_url, pergunta = excluded.pergunta, resposta = excluded.resposta, de_fora = excluded.de_fora, turno_id = excluded.turno_id, mudado_em = clock_timestamp(), terminada_em = excluded.terminada_em,
+          pr_url = excluded.pr_url, pergunta = excluded.pergunta, resposta = excluded.resposta, de_fora = excluded.de_fora, turno_id = excluded.turno_id, mudado_em = excluded.mudado_em, terminada_em = excluded.terminada_em,
           numero = coalesce(quadro_tarefas.numero, excluded.numero), pedido_por = excluded.pedido_por
         returning ${conn.unsafe(COLUNAS_T)}`;
       return paraTarefa(l!);
@@ -562,6 +590,16 @@ export function quadrosRepo(conn: Conn, escopo: Escopo) {
         union select prefixo from quadro_tarefa_codigos where ${dona()}`;
       return new Set(ls.map((l) => l.prefixo));
     },
+    /** Outro quadro da pessoa já usa o prefixo (o Desfazer da importação só devolve o prefixo antigo se estiver livre). */
+    async prefixoDeOutroQuadro(quadroId: string, prefixo: string): Promise<boolean> {
+      const [l] = await conn`select 1 from quadros where ${dona()} and prefixo = ${prefixo} and id <> ${quadroId} limit 1`;
+      return !!l;
+    },
+    /** Os números já reservados com o prefixo (códigos atuais e antigos, de qualquer tarefa): a importação não os reusa. */
+    async numerosReservados(prefixo: string): Promise<number[]> {
+      const ls = await conn<{ numero: number }[]>`select numero from quadro_tarefa_codigos where ${dona()} and prefixo = ${prefixo}`;
+      return ls.map((l) => l.numero);
+    },
     async definirPrefixo(quadroId: string, prefixo: string): Promise<void> {
       await conn`update quadros set prefixo = ${prefixo} where ${dona()} and id = ${quadroId} and prefixo is null`;
     },
@@ -574,15 +612,23 @@ export function quadrosRepo(conn: Conn, escopo: Escopo) {
     async numerarTarefa(id: string, numero: number): Promise<void> {
       await conn`update quadro_tarefas set numero = ${numero} where ${dona()} and id = ${id}`;
     },
-    /** Guarda o código (o atual e, depois de mudar de quadro, os antigos). Repetido não faz nada. */
-    async guardarCodigos(cs: readonly { prefixo: string; numero: number; tarefaId: string }[]): Promise<void> {
-      if (cs.length === 0) return;
-      await conn`
+    /** Guarda o código (o atual e, depois de mudar de quadro, os antigos). Repetido não faz nada. Devolve os que entraram. */
+    async guardarCodigos(cs: readonly { prefixo: string; numero: number; tarefaId: string }[]): Promise<{ prefixo: string; numero: number; tarefaId: string }[]> {
+      if (cs.length === 0) return [];
+      const ls = await conn<{ prefixo: string; numero: number; tarefa_id: string }[]>`
         insert into quadro_tarefa_codigos (tenant_id, owner_id, prefixo, numero, tarefa_id)
         select ${escopo.tenantId}, ${escopo.pessoaId}, c.prefixo, c.numero, c.tarefa_id
           from unnest(${conn.array(cs.map((c) => c.prefixo))}::text[], ${conn.array(cs.map((c) => c.numero))}::int[], ${conn.array(cs.map((c) => c.tarefaId))}::uuid[])
             as c(prefixo, numero, tarefa_id)
-        on conflict (tenant_id, owner_id, prefixo, numero) do nothing`;
+        on conflict (tenant_id, owner_id, prefixo, numero) do nothing
+        returning prefixo, numero, tarefa_id`;
+      return ls.map((l) => ({ prefixo: l.prefixo, numero: l.numero, tarefaId: l.tarefa_id }));
+    },
+    /** Apaga exatamente esses códigos (o par prefixo/número da mesma tarefa): o Desfazer da importação que os guardou. */
+    async apagarCodigos(cs: readonly { prefixo: string; numero: number; tarefaId: string }[]): Promise<void> {
+      if (cs.length === 0) return;
+      await conn`delete from quadro_tarefa_codigos c using unnest(${conn.array(cs.map((x) => x.prefixo))}::text[], ${conn.array(cs.map((x) => x.numero))}::int[], ${conn.array(cs.map((x) => x.tarefaId))}::uuid[]) as x(prefixo, numero, tarefa_id)
+        where c.tenant_id = ${escopo.tenantId} and c.owner_id = ${escopo.pessoaId} and c.prefixo = x.prefixo and c.numero = x.numero and c.tarefa_id = x.tarefa_id`;
     },
     /** A tarefa dona do código (atual ou antigo), ou null. */
     async tarefaDoCodigo(prefixo: string, numero: number): Promise<string | null> {

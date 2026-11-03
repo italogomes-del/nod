@@ -29,6 +29,7 @@ import { versoesPerfilRepo } from "./versoes-perfil.repo.ts";
 import { quadrosRepo } from "./quadros.repo.ts";
 import { appsDoBotRepo } from "./apps-do-bot.repo.ts";
 import { quadroComentariosRepo } from "./quadro-comentarios.repo.ts";
+import { quadroImportacoesRepo } from "./quadro-importacoes.repo.ts";
 import { quadroExecucoesRepo } from "./quadro-execucoes.repo.ts";
 import { mensagensRepo } from "./mensagens.repo.ts";
 import { outboxRepo } from "./outbox.repo.ts";
@@ -85,6 +86,7 @@ export function criarRepos(conn: Conn, escopo: Escopo): Repos {
     quadros: quadrosRepo(conn, escopo),
     appsDoBot: appsDoBotRepo(conn, escopo),
     quadroComentarios: quadroComentariosRepo(conn, escopo),
+    quadroImportacoes: quadroImportacoesRepo(conn, escopo),
     quadroExecucoes: quadroExecucoesRepo(conn, escopo),
     conversas: conversasRepo(conn, escopo),
     mensagens: mensagensRepo(conn, escopo),

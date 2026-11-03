@@ -1146,6 +1146,9 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async exclusoesPendentesDoQuadro(quadroId) {
         return doTenant(b.propostas).filter((p) => p.payload.kind === "quadro_exclusao" && p.estado === "pendente" && p.payload.quadroId === quadroId).sort((x, y) => x.criadoEm - y.criadoEm);
       },
+      async assumirDoQuadro(quadroId, estado) {
+        return doTenant(b.propostas).filter((p) => p.payload.kind === "assumir_quadro" && p.estado === estado && p.payload.quadroId === quadroId).sort((x, y) => y.criadoEm - x.criadoEm);
+      },
       async pendentesDeAcessoDaRotina(rotinaId) {
         return doTenant(b.propostas).filter((p) => p.payload.kind === "acesso" && p.estado === "pendente" && p.payload.rotinaId === rotinaId);
       },
@@ -3916,10 +3919,15 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       travarPrefixos: soNoPostgres,
       prefixosUsados: async () => new Set<string>(),
       definirPrefixo: soNoPostgres,
+      prefixoDeOutroQuadro: soNoPostgres,
+      numerosReservados: soNoPostgres,
       reservarNumeros: soNoPostgres,
       numerarTarefa: soNoPostgres,
       guardarCodigos: soNoPostgres,
+      apagarCodigos: soNoPostgres,
       tarefaDoCodigo: async () => null,
+      tarefasDoLinear: async () => [],
+      linearIdsQueSairam: async () => new Set<string>(),
       numeroAntigo: async () => null,
       moverTarefa: soNoPostgres,
       registrarHistorico: soNoPostgres,
@@ -3955,6 +3963,35 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       temDeOutroNoQuadro: async () => false,
       pedidoAbertoNaTarefa: async () => false,
       turnoNaFila: async () => null,
+    },
+    // NOD-422 (0148): a importação do Linear é do Postgres (tests/integration/importar-linear.test.ts).
+    quadroImportacoes: {
+      criar: soNoPostgres,
+      vencerParadas: async () => 0,
+      escritasPelaImportacao: async () => new Map<string, number>(),
+      importadas: async () => new Set<string>(),
+      maisNovaQue: async () => false,
+      comPrDepois: async () => new Set<string>(),
+      buscar: async () => null,
+      trazendo: async () => null,
+      ultima: async () => null,
+      doLote: async () => null,
+      progresso: soNoPostgres,
+      falhar: soNoPostgres,
+      aplicar: soNoPostgres,
+      desfazer: soNoPostgres,
+      assumido: async () => false,
+      assumidoEm: async () => null,
+      marcarAssumido: async () => false,
+      trocarPrefixo: soNoPostgres,
+      subirProximo: soNoPostgres,
+      proximo: async () => 1,
+      inserirComentarios: soNoPostgres,
+      apagarComentariosDoLote: soNoPostgres,
+      registrarLinhas: soNoPostgres,
+      ultimasLinhas: async () => new Map<string, string | null>(),
+      apagarLinhasDoLote: soNoPostgres,
+      comentadasDepois: soNoPostgres,
     },
     // NOD-418 (0139): os trabalhos e recados das tarefas são do Postgres (tests/integration/quadro-execucoes.test.ts).
     quadroExecucoes: {

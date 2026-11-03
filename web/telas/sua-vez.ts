@@ -1,4 +1,6 @@
 import { listaDasColunasParaSuaVez } from "./card-colunas.ts";
+import { previaParaSuaVez } from "./card-importacao.ts";
+import { previaAssumirParaSuaVez } from "./card-assumir-quadro.ts";
 import type { SuaVezDto } from "../../src/contracts/api.ts";
 import type { Proposta } from "../../src/contracts/conversa.ts";
 import type { TIPOS_DISPENSAVEIS_ABERTOS, TipoDecisao } from "../../src/contracts/decisao.ts";
@@ -34,6 +36,8 @@ const TIPO_HUMANO: Record<TipoDecisao, string> = {
   permissao: "pedido de permissão",
   credencial: "pedido de chave",
   colunas_quadro: "colunas do quadro",
+  importacao_linear: "trazer do Linear",
+  assumir_quadro: "o quadro assume",
   app: "app do bot",
   quadro_exclusao: "excluir quadro",
 };
@@ -71,6 +75,8 @@ const PRAZO_POR_TIPO: Record<TipoDecisao, (em: string, item: Item) => string> = 
   permissao: vence,
   credencial: vence,
   colunas_quadro: nadaMudaSemVoce,
+  importacao_linear: nadaMudaSemVoce,
+  assumir_quadro: nadaMudaSemVoce,
   app: nadaMudaSemVoce,
   quadro_exclusao: nadaMudaSemVoce,
 };
@@ -491,6 +497,16 @@ function renderAcoes(item: Item, aberta: boolean, estado: Pick<Estado, "conector
     case "colunas_quadro": {
       const p = item.proposta?.payload.kind === "colunas_quadro" ? item.proposta.payload : null;
       return `${p ? listaDasColunasParaSuaVez(p) : ""}<div class="acoes">${botao("decidir-proposta", "Trocar colunas", { classe: "pri", id: d.id })}${botao("recusar-decisao", "Manter", { id: d.id })}</div>`;
+    }
+    // NOD-422: a mesma prévia do card da conversa (as linhas e o mapa das colunas) antes do Trazer.
+    case "importacao_linear": {
+      const p = item.proposta?.payload.kind === "importacao_linear" ? item.proposta.payload : null;
+      return `${p ? previaParaSuaVez(p) : ""}<div class="acoes">${botao("decidir-proposta", "Trazer", { classe: "pri", id: d.id })}${botao("recusar-decisao", "Agora não", { id: d.id })}</div>`;
+    }
+    // NOD-422 (PR 2): a lista das rotinas que pausam antes do Assumir.
+    case "assumir_quadro": {
+      const p = item.proposta?.payload.kind === "assumir_quadro" ? item.proposta.payload : null;
+      return `${p ? previaAssumirParaSuaVez(p) : ""}<div class="acoes">${botao("decidir-proposta", "Assumir", { classe: "pri", id: d.id })}${botao("recusar-decisao", "Agora não", { id: d.id })}</div>`;
     }
     // NOD-445: o card Criar app (o Ajustar é pela conversa): o nome, a forma e o bot que ganha a página.
     case "app": {

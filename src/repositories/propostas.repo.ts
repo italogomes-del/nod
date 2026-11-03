@@ -121,6 +121,16 @@ export function propostasRepo(conn: Conn, escopo: Escopo) {
       return linhas.map(paraProposta);
     },
 
+    /** NOD-422 (PR 2): os cards 'assumir_quadro' de um quadro num estado, o mais novo primeiro (o pendente a reaproveitar; o confirmado a desfazer). */
+    async assumirDoQuadro(quadroId: string, estado: "pendente" | "confirmada"): Promise<Proposta[]> {
+      const linhas = await conn<Linha[]>`
+        select ${conn.unsafe(COLUNAS)} from propostas
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and kind = 'assumir_quadro' and estado = ${estado}
+          and payload->>'quadroId' = ${quadroId}
+        order by criado_em desc, id desc`;
+      return linhas.map(paraProposta);
+    },
+
     async pendentesDaConversa(conversaId: string): Promise<Proposta[]> {
       const linhas = await conn<Linha[]>`
         select ${conn.unsafe(COLUNAS)} from propostas where tenant_id = ${escopo.tenantId} and conversa_id = ${conversaId} and estado = 'pendente' order by criado_em`;

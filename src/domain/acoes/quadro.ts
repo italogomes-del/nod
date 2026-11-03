@@ -55,6 +55,29 @@ export const ACOES_QUADRO = [
     casoDeUso: "quadro.importar_linear",
   },
   {
+    // NOD-422: o servidor traz o time do Linear (só lê o Linear). Pela conversa vira o card de prévia (importacao_linear);
+    // pela tela a pessoa vê a prévia e o clique é a confirmação. Tem Desfazer e não aciona ninguém.
+    id: "quadro.importar_time_linear",
+    titulo: "Trazer um time do Linear para o quadro (com prévia)",
+    schema: objeto({ time: P.time, filtro: P.filtro }, ["time"]),
+    risco: "muda",
+    cartaoNoChat: true,
+    chat: vivo,
+    casoDeUso: "quadro.importar_time_linear",
+  },
+  {
+    // NOD-422 (PR 2): o quadro assume a esteira. Lista as rotinas ativas dos bots do quadro (a bc381ef2 e a lista de
+    // exclusão ficam de fora) e só pausa com a confirmação da pessoa: pela conversa o card 'assumir_quadro'; pela tela a
+    // lista e o clique. Tem Desfazer (reativa só as que pausou): "muda".
+    id: "quadro.assumir",
+    titulo: "O quadro assume a esteira: pausar as rotinas dos bots do quadro (com confirmação e Desfazer)",
+    schema: objeto({ desfazer: P.desfazer }, []),
+    risco: "muda",
+    cartaoNoChat: true,
+    chat: vivo,
+    casoDeUso: "quadro.assumir",
+  },
+  {
     id: "quadro.mudar_tarefa",
     titulo: "Mudar uma tarefa (status, responsável, PR, pergunta) ou tirá-la do quadro",
     schema: objeto({ tarefa: P.tarefa, titulo: P.titulo, descricao: P.descricao, status: P.status, agente: P.agente, pr_url: P.pr_url, pergunta: P.pergunta, excluir: P.excluir, sem_iniciar: P.sem_iniciar, motivo: P.motivo }, ["tarefa"]),

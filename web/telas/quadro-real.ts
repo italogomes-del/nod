@@ -15,6 +15,7 @@ import { aposDoCabecalho, botaoDeNova, campoDeRenomear, colunaNova, confirmacaoD
 import { RESP_VOCE, atalhosDePrazo, codigoDaTarefa, faltaParaOPrazo, fraseDoPrazo, linhaDoHistorico, opcoesDeStatus, tarefasPorStatus, type Faixa } from "../lib/quadro-dados.ts";
 import { ecoDoAgente, fraseDaTrava, fraseDoMovimento, porqueNaoDesfaz } from "../lib/freios.ts";
 import { anel, avatar, barra, card, confiar, ICONE, ICONE_DO_STATUS, linha, lista, quadro, seloEmTeste, type Aviso, type Card, type Coluna, type ExtraDaGrade, type Filtro, type Html, type QuemRoda } from "./quadro.ts";
+import { linhaDaImportacao, painelDeImportacao, type PainelImportacao } from "./card-importacao.ts";
 
 /** Quem é o agente de um id (o avatar com o mascote dele e o nome); null = não é um bot da pessoa. */
 export type AgenteDoQuadro = (agenteId: string) => { avatar: Html; nome: string } | null;
@@ -131,7 +132,7 @@ export function menuDePrazo(prazo: string | null, agora: number, id = "qd-prazo"
  * meta: a meta (clicável), o prazo, a barra e "N de M feitas", e quanto falta (ou "cumprida"). `editandoMeta` troca a
  * meta pelo campo (Enter salva, Esc desiste, vazio tira a meta).
  */
-export function topoDoQuadro(q: QuadroDto, o: { agora: number; editandoMeta?: boolean }): Html {
+export function topoDoQuadro(q: QuadroDto, o: { agora: number; editandoMeta?: boolean; importando?: PainelImportacao | null }): Html {
   const partes: string[] = [];
   if (o.editandoMeta) {
     partes.push(`<form class="qd-meta-form" data-form="editar-meta"><label class="qd-sr" for="qd-meta-in">Meta do quadro (vazio tira)</label>` +
@@ -151,8 +152,25 @@ export function topoDoQuadro(q: QuadroDto, o: { agora: number; editandoMeta?: bo
   }
   const falta = q.meta && q.cumpridoEm ? "cumprida" : faltaParaOPrazo(q.prazo, o.agora);
   if (falta) partes.push(`<span class="qd-meta-falta">${esc(falta)}</span>`);
+  // NOD-422: a linha de progresso da importação do Linear (e o resultado), e o "Trazer do Linear…" enquanto não traz.
+  const imp = linhaDaImportacao(q.importacao);
+  // role=status também na falha (revisão 5 do PR #630): o topo é redesenhado a cada releitura e role=alert re-anunciaria.
+  if (imp) partes.push(`<span class="qd-imp qd-imp-${imp.tipo}" role="status">${esc(imp.texto)}</span>`);
+  // Revisão 11: trazer do Linear é só da dona (a op recusa quem participa); a participante nem vê o botão.
+  if (imp?.tipo !== "andando" && !o.importando && q.voce?.papel !== "membro") partes.push(`<button type="button" class="qd-link qd-trazer" data-act="trazer-linear">Trazer do Linear…</button>`);
   partes.push(`<button type="button" class="qd-link qd-remover" data-act="remover-quadro" title="O bot volta a ser um agente comum; a conversa e a memória ficam">Remover quadro</button>`);
-  return confiar(`<div class="qd-meta${q.meta ? "" : " qd-meta-fluxo"}">${partes.join("")}${seloEmTeste()}</div>`);
+  const painel = o.importando ? painelDeImportacao(o.importando) : "";
+  return confiar(`<div class="qd-meta${q.meta ? "" : " qd-meta-fluxo"}">${partes.join("")}${seloEmTeste()}</div>${painel}`);
+}
+
+/**
+ * Se a coluna começa recolhida (a pessoa inverte com um clique). A padrão recolhida fica fechada enquanto vazia. NOD-422
+ * (decisão 5 da Ada): no quadro que veio do Linear (11 colunas), a vazia e a sem responsável também começam recolhidas;
+ * "Precisa de você" (da pessoa) fica aberta quando tem tarefa.
+ */
+export function recolhidaPorPadrao(c: Pick<ColunaDto, "recolhida" | "responsavel" | "daPessoa">, tarefas: number, importado: boolean): boolean {
+  if (tarefas === 0) return c.recolhida || importado;
+  return importado && !c.responsavel && !c.daPessoa;
 }
 
 /**
@@ -172,7 +190,7 @@ const rotuloDoQuadro = (q: QuadroDto, nome: string): string => (q.meta ? `Quadro
  * NOD-448: as colunas são as do quadro (`q.colunas`), com o cabeçalho que edita, o "+" e as tiras de Feito e Fechado
  * presas à direita (NOD-429). `edicao` é o pedaço aberto (menu, renomear, remover, coluna nova, a folha do celular).
  */
-export function quadroDaMeta(o: { q: QuadroDto; nome: string; agente: AgenteDoQuadro; filtro: Filtro; alternadas: ReadonlySet<string>; acesas: ReadonlySet<string>; edicao?: EdicaoDeColuna | null; agora?: number; editandoMeta?: boolean; pessoas?: PessoasNaTela; agentes?: readonly AgenteDaPassagem[]; /** NOD-419: a recusa da trava no card que a pessoa soltou. */ avisos?: ReadonlyMap<string, Aviso> }): Html {
+export function quadroDaMeta(o: { q: QuadroDto; nome: string; agente: AgenteDoQuadro; filtro: Filtro; alternadas: ReadonlySet<string>; acesas: ReadonlySet<string>; edicao?: EdicaoDeColuna | null; agora?: number; editandoMeta?: boolean; pessoas?: PessoasNaTela; agentes?: readonly AgenteDaPassagem[]; /** NOD-419: a recusa da trava no card que a pessoa soltou. */ avisos?: ReadonlyMap<string, Aviso>; importando?: PainelImportacao | null }): Html {
   const por = tarefasPorStatus(o.q);
   const ed = o.edicao ?? null;
   // NOD-443 (D6): com gente no quadro, a pendência pode ser de outra pessoa: o nome padrão vira "Precisa de alguém".
@@ -180,9 +198,10 @@ export function quadroDaMeta(o: { q: QuadroDto; nome: string; agente: AgenteDoQu
   const cs = comColunas(o.q).colunas.map((c) => (varias && c.id === "voce" && c.nome === "Precisa de você" ? { ...c, nome: "Precisa de alguém" } : c));
   const rotulo = rotuloDoQuadro(o.q, o.nome);
   const contagem: Record<string, number> = Object.fromEntries(cs.map((c) => [c.id, (por[c.id] ?? []).length]));
+  const importado = o.q.importacao?.estado === "aplicada";
   const cols = cs.map((c) => {
     const tarefas = (por[c.id] ?? []).filter((t) => passaNoFiltro(t, o.filtro));
-    const padrao = c.recolhida && (contagem[c.id] ?? 0) === 0;
+    const padrao = recolhidaPorPadrao(c, contagem[c.id] ?? 0, importado);
     // Renomear ou remover (o popover) abre a coluna, para o campo ter onde ficar.
     const editando = !naFolha(ed) && (ed?.tipo === "renomear" || ed?.tipo === "remover" || ed?.tipo === "passagem" || ed?.tipo === "trava" || ed?.tipo === "soltar" || ed?.tipo === "prazo") && ed.coluna === c.id;
     return { c, tarefas, recolhida: !editando && padrao !== o.alternadas.has(c.id) };
@@ -220,7 +239,7 @@ export function quadroDaMeta(o: { q: QuadroDto; nome: string; agente: AgenteDoQu
   }
   const ordem = `<button type="button" class="qd-link qd-lg-ordem" data-act="col-folha">Ordem das colunas</button>`;
   return confiar([
-    topoDoQuadro(o.q, { agora: o.agora ?? Date.now(), ...(o.editandoMeta ? { editandoMeta: true } : {}) }),
+    topoDoQuadro(o.q, { agora: o.agora ?? Date.now(), ...(o.editandoMeta ? { editandoMeta: true } : {}), ...(o.importando ? { importando: o.importando } : {}) }),
     o.pessoas ? pessoasDoQuadro(o.q, o.pessoas) : "",
     avisoDoGithub(o.q),
     barra({ filtro: o.filtro, trabalhando: trabalhando(o.q, o.agente), extra: formNovaTarefa() }),
@@ -328,13 +347,10 @@ export function tarefaAberta(o: { t: TarefaDto; q: QuadroDto; agente: AgenteDoQu
     : pr ? [`<li>${ICONE.ok}<a class="qd-link" href="${esc(pr)}" target="_blank" rel="noopener noreferrer">${esc(numeroDoPr(pr))}</a></li>`] : [];
   const entregaveis = `<section class="qd-lado-sec"><h2 class="qd-rotulo">Entregáveis <span class="qd-n">${itensPr.length}</span></h2>` +
     (itensPr.length ? `<ul>${itensPr.join("")}</ul>` : `<p class="qd-lado-vazio">Nada ainda</p>`) + `</section>`;
-  // NOD-421: as linhas de sistema (CI, conflito, merge), discretas. Merge da main no PR #623: ficam logo abaixo do
-  // Histórico da NOD-416, cada uma com o seu título ("Histórico" e "Atividade", sem repetir). Podem contar o mesmo fato
-  // por dois lados (o merge do PR na Atividade e a ida a Feito no Histórico); juntar as duas numa lista só (o histórico
-  // lendo quadro_tarefa_linhas, como a 0142 prevê) fica para depois.
+  // NOD-421: as linhas de sistema (CI, conflito, merge), discretas, até o histórico da NOD-416.
   const linhas = t.linhas?.length
     ? `<h2 class="qd-t-sec">Atividade</h2><ul class="qd-t-linhas">${t.linhas.map((l) => `<li>${esc(l.texto)} · <time datetime="${new Date(l.criadoEm).toISOString()}">${esc(horaDaLinha(l.criadoEm))}</time></li>`).join("")}</ul>` : "";
-  const noLinear = t.linearId ? `<section class="qd-lado-sec"><h2 class="qd-rotulo">No Linear</h2><ul><li>${lin ? `<a class="qd-link" href="${esc(lin)}" target="_blank" rel="noopener noreferrer">${esc(t.linearId)}</a>` : `<span>${esc(t.linearId)}</span>`}</li></ul></section>` : "";
+  const noLinear = t.linearId ? `<section class="qd-lado-sec"><h2 class="qd-rotulo">No Linear</h2><ul><li>${lin ? `<span>Veio do Linear (${esc(t.linearId)}) · </span><a class="qd-link" href="${esc(lin)}" target="_blank" rel="noopener noreferrer">abrir</a>` : `<span>${esc(t.linearId)}</span>`}</li></ul></section>` : "";
   // NOD-416: Status e Responsável mudam aqui mesmo (cada mudança é um lote com Desfazer, como no card).
   const campoStatus = `<select id="qd-t-status" class="qd-sel" data-campo="status" data-id="${esc(t.id)}">` +
     opcoesDeStatus(comColunas(o.q).colunas).map((g) => `<optgroup label="${esc(g.grupo)}">${g.colunas.filter((c) => c.id !== "voce" || c.id === t.status).map((c) => opcao(c.id, c.nome, c.id === t.status)).join("")}</optgroup>`).join("") +
@@ -356,7 +372,7 @@ export function tarefaAberta(o: { t: TarefaDto; q: QuadroDto; agente: AgenteDoQu
       `<button type="button" class="qd-bt" data-act="mover-quadro" data-id="${esc(t.id)}"${escolhido ? "" : " disabled"}>Mover</button></dd>` : "";
   return confiar(`<article class="qd-tarefa qd-com-lado" aria-labelledby="qd-t-tit" data-tarefa="${esc(t.id)}">` +
     `<div class="qd-t-cab"><button type="button" class="qd-voltar" data-act="voltar-ao-quadro">${ICONE.voltar}<span>${esc(o.q.meta ?? "Quadro")}</span></button><span class="qd-t-sep" aria-hidden="true">/</span><span class="qd-id">${esc(codigo)}</span></div>` +
-    `<div class="qd-t-corpo"><div class="qd-t-principal"><h1 class="qd-t-tit" id="qd-t-tit" tabindex="-1">${esc(t.titulo)}</h1><div class="qd-chips">${chipSt}${chipResp}${chipPr}${porQuem}</div>${desc}${pergunta}${resposta}${o.trabalhos ?? ""}${secaoDoHistorico(o.historico)}${linhas}${historicoDaTarefa(t, comColunas(o.q).colunas, o.hora)}${o.comentarios ?? ""}${secComentarios}</div>` +
+    `<div class="qd-t-corpo"><div class="qd-t-principal"><h1 class="qd-t-tit" id="qd-t-tit" tabindex="-1">${esc(t.titulo)}</h1><div class="qd-chips">${chipSt}${chipResp}${chipPr}${porQuem}</div>${desc}${pergunta}${resposta}${linhas}${o.trabalhos ?? ""}${secaoDoHistorico(o.historico)}${historicoDaTarefa(t, comColunas(o.q).colunas, o.hora)}${o.comentarios ?? ""}${secComentarios}</div>` +
     `<aside class="qd-lado" aria-label="Detalhes da tarefa"><section class="qd-lado-sec"><h2 class="qd-rotulo">Propriedades</h2><dl class="qd-props">` +
     `<dt><label for="qd-t-status">Status</label></dt><dd>${campoStatus}${soltar ? `<ul class="qd-t-soltar">${confirmacaoDeSoltar(soltar, t.id, t.titulo)}</ul>` : ""}</dd><dt>${rotuloResp}</dt><dd>${campoResp}</dd>` +
     `<dt>Quadro</dt><dd>${esc(o.q.agenteNome)}${o.q.meta ? ` · ${esc(o.q.meta)}` : ""}</dd>${campoMover}` +

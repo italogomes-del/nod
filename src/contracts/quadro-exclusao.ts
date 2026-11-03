@@ -1,3 +1,7 @@
+import type { PayloadPropostaColunasQuadro } from "./quadro.ts";
+import type { PayloadPropostaImportacaoLinear } from "./quadro-importacao.ts";
+import type { PayloadPropostaAssumirQuadro } from "./quadro-assumir.ts";
+
 /**
  * NOD-430 (definido em 2026-11-02): excluir o quadro de um bot pela conversa. O bot (o anfitrião ou qualquer outro, a
  * pedido da pessoa) não apaga na hora: vira o card 'quadro_exclusao' (proposta + decisão, mesmo id), o mesmo fluxo do
@@ -18,3 +22,6 @@ export type PayloadPropostaQuadroExclusao = {
   /** Quem pediu na conversa (a pessoa do escopo). */
   pedidoPor?: string | null;
 };
+
+/** As propostas do quadro num tipo só (colunas, NOD-448; importação e assumir, NOD-422; exclusão, NOD-430): o teto de linhas do conversa.ts. */
+export type PayloadPropostaDoQuadro = PayloadPropostaColunasQuadro | PayloadPropostaImportacaoLinear | PayloadPropostaQuadroExclusao | PayloadPropostaAssumirQuadro;

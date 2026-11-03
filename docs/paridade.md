@@ -2,7 +2,7 @@
 
 <!-- Gerado por `npm run paridade` a partir de src/domain/acoes/ (NOD-391, ADR-135). Não edite à mão: a catraca (tests/conformidade/paridade.test.ts) compara. -->
 
-Ações de pessoa que mudam algo: **171**, mais 2 só de leitura. No chat: **46 vivas**, 3 parciais, 90 faltando e 34 que nunca vão para o chat. Piso de vivas: 46.
+Ações de pessoa que mudam algo: **173**, mais 2 só de leitura. No chat: **48 vivas**, 3 parciais, 90 faltando e 34 que nunca vão para o chat. Piso de vivas: 48.
 
 Estados: **vivo** = o chat faz pelo mesmo executor da tela, com teste de contrato; **parcial** = o chat faz, mas diverge ou falta parâmetro; **falta** = a onda dona ainda vai ligar; **nunca** = exceção escrita.
 
@@ -227,7 +227,7 @@ Estados: **vivo** = o chat faz pelo mesmo executor da tela, com teste de contrat
 
 | Ação | O que faz | Risco | No chat | Rotas |
 | --- | --- | --- | --- | --- |
-| `telemetria.registrar` | Registrar linhas de telemetria da tela | muda | nunca: estado da própria tela, sem efeito para os bots | `POST ^\/telemetria\/linhas$` |
+| `telemetria.registrar` | Registrar linhas de telemetria da tela | muda | nunca: estado da própria tela, sem efeito para os bots | `POST ^\/telemetria\/linhas$`<br>`POST ^\/telemetria\/quadro$` |
 
 ## onboarding
 
@@ -272,6 +272,8 @@ Estados: **vivo** = o chat faz pelo mesmo executor da tela, com teste de contrat
 | `quadro.editar` | Mudar a meta ou o prazo do quadro | muda | vivo (`gerir_quadro`) | `PATCH ^\/agentes\/(?<id>[^/]+)\/quadro$` |
 | `quadro.criar_tarefa` | Criar uma tarefa no quadro | muda | vivo (`gerir_quadro`) | `POST ^\/agentes\/(?<id>[^/]+)\/quadro\/tarefas$`<br>`POST ^\/quadros\/(?<qid>[^/]+)\/tarefas$` |
 | `quadro.importar_linear` | Trazer itens do Linear para o quadro | muda | vivo (`gerir_quadro`) | `POST ^\/agentes\/(?<id>[^/]+)\/quadro\/linear$` |
+| `quadro.importar_time_linear` | Trazer um time do Linear para o quadro (com prévia) | muda | vivo (`gerir_quadro`) | `POST ^\/agentes\/(?<id>[^/]+)\/quadro\/importacao$` |
+| `quadro.assumir` | O quadro assume a esteira: pausar as rotinas dos bots do quadro (com confirmação e Desfazer) | muda | vivo (`gerir_quadro`) | `DELETE ^\/agentes\/(?<id>[^/]+)\/quadro\/assumir$`<br>`POST ^\/agentes\/(?<id>[^/]+)\/quadro\/assumir$` |
 | `quadro.mudar_tarefa` | Mudar uma tarefa (status, responsável, PR, pergunta) ou tirá-la do quadro | muda | vivo (`gerir_quadro`) | `DELETE ^\/agentes\/(?<id>[^/]+)\/quadro\/tarefas\/(?<tid>[^/]+)$`<br>`PATCH ^\/agentes\/(?<id>[^/]+)\/quadro\/tarefas\/(?<tid>[^/]+)$`<br>`PATCH ^\/quadros\/(?<qid>[^/]+)\/tarefas\/(?<tid>[^/]+)$` |
 | `quadro.responder` | Responder a pergunta de uma tarefa bloqueada | muda | vivo (`gerir_quadro`) | `POST ^\/agentes\/(?<id>[^/]+)\/quadro\/tarefas\/(?<tid>[^/]+)\/resposta$`<br>`POST ^\/quadros\/(?<qid>[^/]+)\/tarefas\/(?<tid>[^/]+)\/resposta$` |
 | `quadro.comentar` | Comentar uma tarefa (aciona o responsável ou o bot @mencionado; no quadro de outra pessoa, fica para a dona) | muda | vivo (`gerir_quadro`) | `POST ^\/agentes\/(?<id>[^/]+)\/quadro\/comentarios$`<br>`POST ^\/agentes\/(?<id>[^/]+)\/quadro\/tarefas\/(?<tid>[^/]+)\/comentarios$`<br>`POST ^\/quadros\/(?<qid>[^/]+)\/comentarios$` |

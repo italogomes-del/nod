@@ -4,6 +4,10 @@ import { ehOpDeTrabalho, lerOp } from "../../domain/quadro.ts";
 import type { IdAcao } from "../../domain/acoes/index.ts";
 import type { CodigoErro } from "../../domain/erro.ts";
 import { ErroDeDominio } from "../../domain/erro.ts";
+import { assumirPelaTela } from "../assumir-quadro.ts";
+import type { ResultadoAssumir } from "../../contracts/quadro-assumir.ts";
+import type { ImportacaoDto, IssueLinear } from "../../contracts/quadro-importacao.ts";
+import { type FalhaDaImportacao, iniciarImportacao, prepararImportacao } from "../importar-linear.ts";
 import { trabalhoDaTarefa } from "../quadro-execucoes.ts";
 import { aplicarLoteQuadro, type FalhaQuadro, type RecusaDoMover, type ResultadoLote } from "../quadro.ts";
 import type { CasoDeUso } from "../tipos.ts";
@@ -65,6 +69,61 @@ function umaAcao<I extends object>(tipo: OpQuadro["tipo"]): CasoDeUso<Base & I, 
   };
 }
 
+const CODIGO_IMPORTACAO: Record<FalhaDaImportacao, CodigoErro> = {
+  ...CODIGO,
+  sem_conector: "integracao_nao_configurada",
+  // Revisão 6 do PR #630: o Linear não respondeu (502, como a falha do conector): a tela diz "tente de novo".
+  linear_indisponivel: "conector_indisponivel",
+  // Revisão 4 do PR #630: o servidor sem a importação é recurso desligado (403, como experimento_desligado), não falha
+  // do Linear (502): a tela diz que este servidor não traz, e não "tente de novo".
+  importacao_indisponivel: "nao_permitido",
+  importacao_em_andamento: "estado_invalido",
+  demais: "entrada_invalida",
+};
+
+/** QA do PR #630: a recusa da importação leva a falha tipada (`motivo`); a rota do Trazer a devolve como a prévia. */
+export class ErroDaImportacao extends ErroDeDominio {
+  readonly motivo: FalhaDaImportacao;
+  constructor(motivo: FalhaDaImportacao, cause: string) {
+    super(CODIGO_IMPORTACAO[motivo], { cause });
+    this.motivo = motivo;
+  }
+}
+
+/** A recusa da importação como erro da ação (a rota que buscou fora da transação usa o mesmo mapa). */
+export function erroDaImportacao(f: { erro: FalhaDaImportacao; detalhe: string }): ErroDaImportacao {
+  return new ErroDaImportacao(f.erro, f.detalhe);
+}
+
+/**
+ * NOD-422: trazer o time do Linear pela tela. A pessoa viu a prévia (GET .../importacao/previa) e o clique em Trazer é a
+ * confirmação; pela conversa o gerir_quadro abre o card com a mesma prévia e o Confirmar chega à mesma importação.
+ */
+const importarTimeLinear: CasoDeUso<Base & { anfitriaoId: string; time: string; filtro?: string | null; issues?: readonly IssueLinear[] }, { ok: true; importacao: ImportacaoDto }> = async (deps, input) => {
+  const op = lerOp({ tipo: "importar_time_linear", time: input.time, ...(input.filtro ? { filtro: input.filtro } : {}) });
+  if ("erro" in op || op.tipo !== "importar_time_linear") throw new ErroDeDominio("entrada_invalida", { cause: "erro" in op ? op.erro : "op" });
+  // `issues` = a busca leve que a rota fez fora da transação (revisão do PR #630); sem ela, busca aqui.
+  const prep = await prepararImportacao(deps, { autor: { tipo: "pessoa" }, anfitriaoId: input.anfitriaoId, time: op.time, filtro: op.filtro ?? null, ...(input.issues ? { issues: input.issues } : {}) });
+  if (!prep.ok) throw erroDaImportacao(prep);
+  const r = await iniciarImportacao(deps, { quadro: prep.quadro, time: prep.time, filtro: prep.filtro, total: prep.previa.total, conversaId: null });
+  if (!r.data.ok) throw erroDaImportacao(r.data);
+  return { data: r.data, events: r.events };
+};
+
+/**
+ * NOD-422 (PR 2): o quadro assume a esteira pela tela. A pessoa viu a lista (GET .../quadro/assumir) e o clique é a
+ * confirmação: pausa só as rotinas da prévia (`rotinas`). `desfazer` reativa as que este assumir pausou. Pela conversa o
+ * gerir_quadro abre o card 'assumir_quadro' e o Confirmar chega ao mesmo estado. Importar e assumir são só da dona: entram
+ * pelo bot dela (anfitriaoId), nunca pela porta de quem participa (quadroId, NOD-443).
+ */
+const assumirQuadro: CasoDeUso<Base & { anfitriaoId: string; desfazer?: boolean; rotinas?: unknown }, ResultadoAssumir> = async (deps, input) => {
+  const rotinas = Array.isArray(input.rotinas) ? input.rotinas.filter((x): x is string => typeof x === "string").slice(0, 500) : undefined;
+  if (input.desfazer !== undefined && typeof input.desfazer !== "boolean") throw new ErroDeDominio("entrada_invalida", { cause: "desfazer" });
+  const r = await assumirPelaTela(deps, { anfitriaoId: input.anfitriaoId, ...(input.desfazer ? { desfazer: true } : {}), ...(rotinas ? { rotinas } : {}) });
+  if (!r.data.ok) throw new ErroDeDominio(CODIGO[r.data.erro], { cause: r.data.detalhe });
+  return { data: r.data, events: r.events };
+};
+
 type CamposTarefa = { titulo?: string; descricao?: string; status?: string; agente?: string | null };
 
 export const EXECUTORES_QUADRO = {
@@ -72,6 +131,8 @@ export const EXECUTORES_QUADRO = {
   "quadro.editar": umaAcao<{ meta?: string | null; prazo?: string | null }>("editar_quadro"),
   "quadro.criar_tarefa": umaAcao<CamposTarefa & { titulo: string }>("criar_tarefa"),
   "quadro.importar_linear": umaAcao<{ itens: ItemLinear[] }>("importar_linear"),
+  "quadro.importar_time_linear": importarTimeLinear,
+  "quadro.assumir": assumirQuadro,
   "quadro.mudar_tarefa": umaAcao<CamposTarefa & { tarefa: string; pr_url?: string | null; pergunta?: string | null; excluir?: boolean; sem_iniciar?: boolean; motivo?: string }>("mudar_tarefa"),
   "quadro.responder": umaAcao<{ tarefa: string; resposta: string }>("responder"),
   "quadro.comentar": umaAcao<{ texto: string; tarefa?: string }>("comentar"),

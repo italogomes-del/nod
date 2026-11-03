@@ -9,7 +9,10 @@ import type { AutorLote } from "./quadro.ts";
  * NOD-417 (definido em 2026-11-02): um comentário numa tarefa. `deFora`: escrito por um bot (ADR-062): quem o recebe recebe
  * dado de fora. `acionados`: os bots que o comentário acionou (abriu turno ou se juntou ao que já estava na fila).
  */
-export type ComentarioTarefa = { id: string; quadroId: string; tarefaId: string; autor: AutorLote; texto: string; deFora: boolean; criadoEm: number; /** NOD-430: "Você, pela <bot>". */ pedidoPor?: string | null };
+/** Quem escreveu o comentário: a pessoa, um bot ou o Linear (NOD-422: trazido de lá; o nome de quem escreveu vem em autorNome). */
+export type AutorComentario = AutorLote | { tipo: "linear" };
+export type ComentarioTarefa = { id: string; quadroId: string; tarefaId: string; autor: AutorComentario; texto: string; deFora: boolean; criadoEm: number; /** NOD-430: "Você, pela <bot>". */ pedidoPor?: string | null };
+/** `autorNome`: o nome do bot, ou de quem escreveu no Linear (autor `linear`, NOD-422). */
 export type ComentarioDto = ComentarioTarefa & { autorNome: string | null; acionados: string[] };
 
 /**

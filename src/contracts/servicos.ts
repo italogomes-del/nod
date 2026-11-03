@@ -5,6 +5,7 @@ import type { ContratoFerramentaNod, NomeFerramentaNod } from "./ferramentas-nod
 import type { FrameSse, TipoFrame } from "./frame.ts";
 import type { MotivoNegacao, MotivoPasse } from "./motivos.ts";
 import type { PlanoTurno } from "./plano-turno.ts";
+import type { ServicosLinear } from "./quadro-importacao.ts";
 import type { ServicoRevisor } from "./revisao.ts";
 import type { Rotina } from "./rotina.ts";
 import type { LeituraDisco, NivelPressao, ServicoDasMaquinas } from "./trabalho.ts";
@@ -17,12 +18,11 @@ export type IdentidadeSemTurno = Omit<IdentidadeDeTurno, "turnoId">;
 export type ResultadoSonda = { ok: true; ferramentas: CapacidadeConector[] } | { ok: false; motivo: MotivoNegacao; causa?: "acesso_recusado" };
 
 /**
- * Contrato `Services` completo (EMENDA 18). Genérico em `Trx` porque src/contracts não importa
- * nada de fora (nem src/shared/types.ts); src/use-cases/tipos.ts fixa `Services = ServicesNod<Tx>`.
+ * Contrato `Services` completo (EMENDA 18). Genérico em `Trx` porque src/contracts não importa nada de fora (nem src/shared/types.ts); src/use-cases/tipos.ts fixa `Services = ServicesNod<Tx>`.
  * Fatias: planos/conectores/tokenTurno ← L5; interruptor ← L6; rotinas/sala ← L7; barramento ← L8;
  * catcher ← L4/L3; relogio ← L9 (relogio-sistema). L9 compõe.
  */
-export interface ServicesNod<Trx> {
+export interface ServicesNod<Trx> extends ServicosLinear {
   workspaces?: {
     id(i: { tenantId: string; pessoaId: string; conversaId: string }): Promise<string | null>;
     /** Pasta onde o harness abre e as que ele alcança; null quando não há projeto autorizado. */

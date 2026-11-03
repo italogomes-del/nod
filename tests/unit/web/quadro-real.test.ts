@@ -263,6 +263,13 @@ describe("revisão do PR #621: o estado do PR para leitor de tela e o aviso do G
     expect(tela).toContain(`<p class="qd-aviso-gh">GitHub · sem acesso a gamefik/privado</p>`);
     expect(tela).not.toMatch(/role="alert"|aria-live="assertive"/);
   });
+
+  it("revisão 5 do PR #630: a importação que falhou é role=status (a releitura do quadro não re-anuncia como alerta)", () => {
+    const importacao = { id: "i1", quadroId: "q1", time: "NOD", filtro: null, estado: "falhou" as const, total: 190, trazidas: 120, erro: "Parei em 120 de 190: o Linear não respondeu.", loteId: null, colunas: null, criadoEm: 0, atualizadoEm: 0 };
+    const h = String(topoDoQuadro(q([], { importacao }), { agora: 0 }));
+    expect(h).toContain(`<span class="qd-imp qd-imp-erro" role="status">Parei em 120 de 190: o Linear não respondeu.</span>`);
+    expect(h).not.toContain('role="alert"');
+  });
 });
 
 describe("NOD-415 (ADR-141): meta opcional, prazo e criar pela tela", () => {

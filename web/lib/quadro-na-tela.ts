@@ -17,6 +17,9 @@ import { anunciarEm } from "./posicao-da-lista.ts";
 import type { EntradaHistoricoDto, GrupoColuna, LinhaMuralDto, ModoConversa, QuadroDaPessoaDto, QuadroDto, TarefaDto } from "../../src/contracts/quadro.ts";
 import type { ConversaDto, RespostaMutacao } from "../../src/contracts/api.ts";
 import type { MutacaoQuadro } from "./api.ts";
+import type { FiltroImportacao, ImportacaoDto, PreviaDaTela } from "../../src/contracts/quadro-importacao.ts";
+import type { EventoTrilhaQuadro } from "../../src/contracts/trilha-quadro.ts";
+import { ehRecusaDoPainel, type PainelImportacao } from "../telas/card-importacao.ts";
 import { RESP_VOCE, acesos, fraseDoErroDoMover, reciboDaNovaTarefa, codigoNaUrl, destinosDaTarefa, historicoDaFaixa, respostaDoBot, tarefaNoQuadro, type Faixa } from "./quadro-dados.ts";
 import { quadroVazio, type Aviso, type Filtro, type Html } from "../telas/quadro.ts";
 import { decidirSoltura, fraseDaTrava, RECUSA_MS, relogioDaRecusa, type RelogioDaRecusa } from "./freios.ts";
@@ -57,6 +60,9 @@ export interface ApiDoQuadro extends ApiDosComentarios, ApiDosTrabalhos {
   moverTarefa?(agenteId: string, tarefaId: string, quadro: string): Promise<MutacaoQuadro & { movida?: { codigo: string; codigoAntigo: string } }>;
   historicoTarefa?(agenteId: string, tarefaId: string): Promise<{ historico: EntradaHistoricoDto[] }>;
   quadros?(): Promise<{ quadros: QuadroDaPessoaDto[] }>;
+  /** NOD-422: "Trazer do Linear…" pela tela. A prévia só lê; o importar começa a trazer em segundo plano. */
+  previaImportacao?(agenteId: string, time: string, filtro: FiltroImportacao | null): Promise<PreviaDaTela>;
+  importarTimeLinear?(agenteId: string, time: string, filtro: FiltroImportacao | null): Promise<{ ok: true; importacao: ImportacaoDto }>;
   /** NOD-443 (ADR-143): as pessoas, o modo e o mural. Opcionais: sem elas, o quadro não mostra "Pessoas" nem "Atividade". */
   adicionarPessoa?(agenteId: string, pessoa: string, modo?: ModoConversa): Promise<MutacaoQuadro>;
   tirarPessoa?(agenteId: string, pessoaId: string): Promise<MutacaoQuadro>;
@@ -82,11 +88,15 @@ export interface DadosDoQuadro {
   confirmar?: (texto: string) => boolean;
   /** NOD-416: o código da tarefa aberta vai para a URL (`?tarefa=ZE-12`); null = voltou ao quadro. */
   naUrl?: (codigo: string | null) => void;
+  /** NOD-422 (PR 2): a trilha do quadro (só ids): a tarefa aberta pelo card ou por um link. */
+  trilha?: (e: EventoTrilhaQuadro) => void;
   /**
    * QA do PR #623 (D4): depois de mover, leva à conversa do bot destino e abre a tarefa lá (o mesmo caminho do link).
    * false = o bot não está à mão (fica no quadro de origem, com o aviso).
    */
   irParaTarefa?: (agenteId: string, tarefaId: string) => boolean;
+  /** NOD-422: de quanto em quanto tempo a linha "Trazendo do Linear" se relê (ms). */
+  releImportacaoEm?: number;
 }
 
 /** Os pedaços do palco que são "a conversa": saem juntos quando o Quadro entra. */
@@ -122,6 +132,11 @@ export interface QuadroNaTela {
    * Quadro. Antes de o quadro ser liberado (as preferências ainda não chegaram), o pedido espera o próximo `sincronizar`.
    */
   abrirTarefa(agenteId: string, tarefaId: string): void;
+  /**
+   * NOD-422 (revisão do PR #630): o Quadro deste bot vai abrir (um link ou um código de tarefa esperando o quadro chegar).
+   * A trilha "conversa aberta" não conta a conversa que só passou por baixo a caminho do Quadro.
+   */
+  aCaminhoDoQuadro(agenteId: string): boolean;
 }
 
 /** NOD-445: o que a pílula de páginas pede ao main (a conversa, a API dos apps). */
@@ -181,6 +196,12 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
   let q: QuadroDto | null = null;
   let carga: "nada" | "carregando" | "ok" | "erro" = "nada";
   let aberta: string | null = null;
+  /** NOD-422 (PR 2): a tarefa aberta por link antes de o quadro chegar; a trilha sai quando ele chega (com o quadroId). */
+  let trilhaPendente: string | null = null;
+  const trilhar = (tarefaId: string, via: "card" | "link"): void => {
+    if (q && tarefaNoQuadro(q, tarefaId)) { trilhaPendente = null; dd?.trilha?.({ acao: "tarefa_aberta", quadroId: q.id, tarefaId, via }); }
+    else trilhaPendente = tarefaId;
+  };
   let acesas = new Set<string>();
   let faixa: Faixa = { tipo: "nada" };
   /** O último lote antes do pedido na pílula: o Desfazer da faixa é o lote que nasceu depois dele. */
@@ -194,6 +215,9 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
   let dica: string[] = [];
   /** NOD-415: a meta no topo virou campo (Enter salva, Esc desiste). */
   let editandoMeta = false;
+  /** NOD-422: o painel "Trazer do Linear…" aberto no topo, e a releitura enquanto a importação traz. */
+  let importando: PainelImportacao | null = null;
+  let timerImportacao: ReturnType<typeof setTimeout> | null = null;
   /** NOD-448: o pedaço da edição das colunas que está aberto (menu, renomear, remover, coluna nova, a folha do celular). */
   let edicao: EdicaoDeColuna | null = null;
   let tarefasPedem = false;
@@ -240,8 +264,10 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     histTarefa = null; quadros = null; leituraHist++;
     agenteId = null; q = null; carga = "nada"; aberta = null; acesas = new Set(); faixa = { tipo: "nada" }; loteAntes = null;
     painel = null; mural = null; erroPessoas = null; leituraMural++;
-    historico = []; histAberto = false; tarefasPedem = false; leitura++; leituraConversa++; dica = []; editandoMeta = false; edicao = null; soltarNaAberta = null; coms.fechar(); trabs.fechar();
+    historico = []; histAberto = false; tarefasPedem = false; leitura++; leituraConversa++; dica = []; editandoMeta = false; edicao = null; importando = null; soltarNaAberta = null; coms.fechar(); trabs.fechar();
     if (timerReler) clearTimeout(timerReler);
+    if (timerImportacao) clearTimeout(timerImportacao);
+    timerImportacao = null;
     if (timerRecolher) clearTimeout(timerRecolher);
     timerReler = timerRecolher = null;
   }
@@ -262,7 +288,7 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     }
     const comPessoas = !!dd.api()?.adicionarPessoa;
     const agentes = dd.agentes && dd.api()?.definirPassagem ? dd.agentes() : undefined;
-    return quadroDaMeta({ q, nome, agente: dd.agente, filtro, alternadas, acesas, edicao, agora: Date.now(), editandoMeta, ...(comPessoas ? { pessoas: { painel, mural, hora: dd.hora, erro: erroPessoas } } : {}), ...(agentes ? { agentes } : {}) , ...(recusa ? { avisos: new Map([[recusa.tarefa, recusa.aviso]]) } : {}) });
+    return quadroDaMeta({ q, nome, agente: dd.agente, filtro, alternadas, acesas, edicao, agora: Date.now(), editandoMeta, ...(comPessoas ? { pessoas: { painel, mural, hora: dd.hora, erro: erroPessoas } } : {}), ...(agentes ? { agentes } : {}), ...(importando ? { importando } : {}), ...(recusa ? { avisos: new Map([[recusa.tarefa, recusa.aviso]]) } : {}) });
   }
 
   /**
@@ -352,6 +378,7 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     q = novo;
     carga = "ok";
     if (aberta && !tarefaNoQuadro(q, aberta)) { aberta = null; dd?.naUrl?.(null); }
+    if (trilhaPendente && aberta === trilhaPendente) trilhar(trilhaPendente, "link");
     // NOD-416: o link `?tarefa=` esperava este quadro.
     let linkSemTarefa = false;
     let avisoSemTarefa: string | null = null;
@@ -369,6 +396,9 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
       avisoSemTarefa = aviso;
     }
     if (aberta && novas.has(aberta)) void lerHistorico();
+    // NOD-422: enquanto traz do Linear, a linha "Trazendo · N de M" se relê sozinha (o progresso não vira frame).
+    if (timerImportacao) { clearTimeout(timerImportacao); timerImportacao = null; }
+    if (q?.importacao?.estado === "trazendo") timerImportacao = setTimeout(() => { timerImportacao = null; void lerQuadro(); }, dd?.releImportacaoEm ?? 2000);
     // NOD-443: o mural aberto acompanha o quadro (cada pedido de qualquer pessoa entra nele).
     if (painel === "atividade" && novas.size) void lerMural();
     desenharVista();
@@ -378,6 +408,57 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     // aviso do mover também é dito e fica na faixa: ela sabe que o mover deu certo e por que a tarefa não abriu.
     if (avisoSemTarefa) mudarFaixa({ tipo: "resposta", texto: avisoSemTarefa, loteId: null, mensagemId: "" });
     if (linkSemTarefa) anunciar(avisoSemTarefa ? `${avisoSemTarefa}. Tarefa não encontrada neste quadro.` : "Tarefa não encontrada neste quadro.");
+  }
+
+  /** NOD-422: abre ou fecha o painel "Trazer do Linear…"; o foco vai para o campo do time (ou volta ao botão). */
+  function painelImportacao(p: PainelImportacao | null): void {
+    importando = p;
+    desenharVista();
+    const alvo = vista()?.querySelector<HTMLElement>(p ? (p.fase === "previa" ? '[data-act="importar-confirmar"]' : "#ci-time-in") : '[data-act="trazer-linear"]');
+    alvo?.focus();
+  }
+
+  const RECUSA_DO_CODIGO: Record<string, PainelImportacao["erro"]> = {
+    integracao_nao_configurada: "sem_conector", conector_indisponivel: "linear_indisponivel", nao_permitido: "importacao_indisponivel", estado_invalido: "importacao_em_andamento", entrada_invalida: "entrada_invalida",
+  };
+
+  async function lerPreviaImportacao(time: string, filtro: FiltroImportacao | null): Promise<void> {
+    const a = dd?.api();
+    if (!a?.previaImportacao || !agenteId) return;
+    const c = chave;
+    const de = agenteId;
+    painelImportacao({ fase: "lendo", time, filtro });
+    try {
+      const r = await a.previaImportacao(de, time, filtro);
+      if (c !== chave || de !== agenteId || !importando) return;
+      if (r.ok) painelImportacao({ fase: "previa", time: r.time, filtro: r.filtro, previa: r.previa, anfitriaoNome: r.anfitriaoNome });
+      else {
+        const erro = ehRecusaDoPainel(r.erro) ? r.erro : undefined;
+        painelImportacao({ fase: "recusa", time, filtro, ...(erro ? { erro } : {}), detalhe: r.detalhe });
+      }
+    } catch (e) {
+      if (c !== chave || !importando) return;
+      painelImportacao({ fase: "recusa", time, filtro, erro: RECUSA_DO_CODIGO[(e as { codigo?: string }).codigo ?? ""] ?? "rede" });
+    }
+  }
+
+  async function confirmarImportacao(): Promise<void> {
+    const a = dd?.api();
+    const p = importando;
+    if (!a?.importarTimeLinear || !agenteId || p?.fase !== "previa") return;
+    const c = chave;
+    const de = agenteId;
+    painelImportacao({ ...p, fase: "enviando" });
+    try {
+      await a.importarTimeLinear(de, p.time, p.filtro);
+      if (c !== chave || de !== agenteId) return;
+      importando = null;
+      mudarFaixa({ tipo: "resposta", texto: `Trazendo do Linear (${p.time}). O quadro só muda no fim, num lote com Desfazer.`, loteId: null, mensagemId: "" });
+      await lerQuadro();
+    } catch (e) {
+      if (c !== chave) return;
+      painelImportacao({ ...p, fase: "recusa", erro: RECUSA_DO_CODIGO[(e as { codigo?: string }).codigo ?? ""] ?? "rede" });
+    }
   }
 
   /** NOD-416: o histórico da tarefa aberta (relido quando ela muda). Leitura velha (outra tarefa) é descartada. */
@@ -1025,19 +1106,25 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     if (!pedidoDoChat || chave === null || agenteId !== pedidoDoChat.agenteId) return;
     const { tarefaId } = pedidoDoChat;
     pedidoDoChat = null;
+    // NOD-422: a trilha (tarefa_aberta pelo link) sai quando o quadro do agente chegar (o sincronizar).
     // NOD-445 (merge com o #627): a tarefa abre na página Tarefas da pílula, não na última página da vista (um app).
     const t = paginaDasTarefas();
-    if (modo !== "quadro") { marcarAberta(tarefaId); trocar("quadro", { pagina: t }); return; }
+    if (modo !== "quadro") { marcarAberta(tarefaId, null); trocar("quadro", { pagina: t }); return; }
     // O irPara entre páginas da vista fecha a tarefa aberta: a pedida é marcada depois.
     if (pagina !== t) irPara(t);
-    marcarAberta(tarefaId);
+    marcarAberta(tarefaId, null);
     desenharVista();
     void lerQuadro();
   }
 
-  /** A tarefa aberta passa a ser `id` (o histórico, a lista do "Mover para…" e os comentários dela são lidos). */
-  function marcarAberta(id: string): void {
+  /**
+   * A tarefa aberta passa a ser `id` (o histórico, a lista do "Mover para…" e os comentários dela são lidos). NOD-422: a
+   * trilha da abertura sai já com `via`; sem `via`, fica pendente até o quadro chegar.
+   */
+  function marcarAberta(id: string, via: "card" | "link" | null): void {
     aberta = id;
+    if (via) trilhar(id, via);
+    else trilhaPendente = id;
     soltarNaAberta = null;
     moverPara = null;
     histAberto = false;
@@ -1049,8 +1136,8 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     if (agenteId) { coms.abrir(agenteId, id); trabs.abrir(agenteId, id); }
   }
 
-  function abrirTarefa(id: string): void {
-    marcarAberta(id);
+  function abrirTarefa(id: string, via: "card" | "link" = "link"): void {
+    marcarAberta(id, via);
     desenharVista();
     doc.getElementById("qd-t-tit")?.focus();
     vista()?.scrollTo?.({ top: 0 });
@@ -1376,7 +1463,7 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     const act = el.dataset["act"];
     if (dd && el.closest("#quadro")) {
       const id = el.dataset["id"] ?? "";
-      if (act === "abrir-tarefa" && id) { abrirTarefa(id); return; }
+      if (act === "abrir-tarefa" && id) { abrirTarefa(id, "card"); return; }
       if (act === "tarefa-mover" || act === "tarefa-mover-para") { aoMoverCard(el, act); return; }
       if (act === "voltar-ao-quadro") { voltarAoQuadro(); return; }
       if (act?.startsWith("trab-") && trabs.aoClicar(act)) return;
@@ -1388,6 +1475,10 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
       if (act === "qd-reler") { carga = "nada"; void lerQuadro(); return; }
       if (act === "editar-meta") { editarMeta(true); return; }
       if (act === "remover-quadro") { void removerQuadro(); return; }
+      if (act === "trazer-linear") { painelImportacao({ fase: "time", time: "", filtro: null }); return; }
+      if (act === "importar-fechar") { painelImportacao(null); return; }
+      if (act === "importar-confirmar") { void confirmarImportacao(); return; }
+      if (act === "importar-sem-backlog" && importando) { void lerPreviaImportacao(importando.time, "sem_backlog"); return; }
       if (act === "qc-desfazer" && id) { void desfazer(id); return; }
       if (act === "painel-pessoas") { abrirPainel("pessoas"); return; }
       if (act === "painel-atividade") { abrirPainel("atividade"); return; }
@@ -1557,6 +1648,12 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     const form = ev.target instanceof HTMLFormElement ? ev.target : null;
     if (!dd || !form?.closest("#quadro")) return;
     const qual = form.dataset["form"];
+    if (qual === "importar-previa") {
+      ev.preventDefault();
+      const time = form.querySelector<HTMLInputElement>('[name="time"]')?.value.trim().toUpperCase() ?? "";
+      if (time) void lerPreviaImportacao(time, null);
+      return;
+    }
     if (qual === "col-renomear" || qual === "col-nova" || qual === "col-remover" || qual === "col-passagem" || qual === "col-trava" || qual === "col-prazo") { ev.preventDefault(); enviarColuna(form); return; }
     if (qual === "adicionar-pessoa") { ev.preventDefault(); void adicionarPessoa(form); return; }
     if (qual === "recado-trabalho") { ev.preventDefault(); trabs.enviarRecado(form); return; }
@@ -1978,10 +2075,12 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     else void lerQuadro();
   }
 
+  const aCaminhoDoQuadro = (de: string): boolean => pendente?.agenteId === de || pedidoDoChat?.agenteId === de;
+
   /** NOD-445: a página Tarefas da pílula (a 1 sem pílula). */
   function paginaDasTarefas(): number {
     return Math.max(1, indicePeloId(paginas, TAREFAS.id));
   }
 
-  return { sincronizar, trocar, irPara, andar, totalDePaginas, abrirPagina, marcarChegada, aoFrame, reler, abrirTarefaDe, modo: () => modo, pagina: () => pagina, abrirTarefa: abrirPeloLink };
+  return { sincronizar, trocar, irPara, andar, totalDePaginas, abrirPagina, marcarChegada, aoFrame, reler, abrirTarefaDe, modo: () => modo, pagina: () => pagina, abrirTarefa: abrirPeloLink, aCaminhoDoQuadro };
 }

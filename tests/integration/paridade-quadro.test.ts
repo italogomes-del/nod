@@ -12,7 +12,10 @@ import { EXECUTORES_QUADRO } from "../../src/use-cases/acoes/quadro.ts";
 import { garantirNod } from "../../src/use-cases/onboarding.ts";
 import { gerirQuadro } from "../../src/use-cases/gerir-quadro.ts";
 import { decidirColunasDoQuadro } from "../../src/use-cases/colunas-do-quadro.ts";
+import { decidirImportacaoLinear, trazerImportacao, type RodarNaTx } from "../../src/use-cases/importar-linear.ts";
+import type { FonteLinear, IssueLinear } from "../../src/contracts/quadro-importacao.ts";
 import { decidirQuadroExclusao } from "../../src/use-cases/quadro-exclusao.ts";
+import { decidirAssumirQuadro } from "../../src/use-cases/assumir-quadro.ts";
 import { aplicarLoteQuadro, historicoDaTarefa, montarQuadro } from "../../src/use-cases/quadro.ts";
 import { varrerAvisosDosQuadros } from "../../src/use-cases/avisos-quadro.ts";
 import type { Deps } from "../../src/use-cases/tipos.ts";
@@ -30,8 +33,25 @@ import { withRollback } from "../helpers/with-rollback.ts";
  * bot comum chegam ao mesmo quadro. É o arquivo que o registro cita como `contrato` (src/domain/acoes/quadro.ts).
  */
 
-type Retrato = { meta: string | null; prazo: string | null; cumprida: boolean; resumo: string | null; colunas: unknown[]; tarefas: unknown[]; turnosAbertos: number; modo: string; membros: string[]; comentarios: unknown[] };
-const retrato = (q: QuadroDto | null, turnos: number): Retrato | null =>
+type Retrato = { meta: string | null; prazo: string | null; cumprida: boolean; resumo: string | null; colunas: unknown[]; tarefas: unknown[]; turnosAbertos: number; importacao: unknown[] | null; assumido: boolean; rotinas: string[]; modo: string; membros: string[]; comentarios: unknown[] };
+
+/** NOD-422: o Linear de mentira (as duas pontas recebem as mesmas issues abertas do time). */
+const issueFalsa = (n: number, estado: string, o: Partial<IssueLinear> = {}): IssueLinear => ({
+  identificador: `NOD-${n}`, numero: n, titulo: `Issue ${n}`, url: `https://linear.app/gamefik/issue/NOD-${n}`, descricao: "corpo", estado,
+  noEstadoDesde: Date.UTC(2026, 9, 30), etiquetas: [], mae: null, bloqueadaPor: [], comentarios: [], anexos: [], ...o,
+});
+const LINEAR_FALSO: FonteLinear = {
+  async listar(_cred, p) {
+    const todas = [
+      issueFalsa(901, "Implementando", { comentarios: [{ id: "c1", autor: "Ada", texto: "começa por aqui", criadoEm: Date.UTC(2026, 9, 31) }] }),
+      issueFalsa(902, "Backlog"),
+      issueFalsa(903, "Revisando", { anexos: [{ url: "https://github.com/gamefik/nod/pull/9", criadoEm: Date.UTC(2026, 9, 31) }] }),
+    ];
+    await p.aoAvancar?.(todas.length);
+    return todas;
+  },
+};
+const retrato = (q: QuadroDto | null, turnos: number, rotinas: string[] = []): Retrato | null =>
   q
     ? {
         meta: q.meta,
@@ -41,6 +61,10 @@ const retrato = (q: QuadroDto | null, turnos: number): Retrato | null =>
         colunas: q.colunas.map((c) => [c.id, c.nome, c.grupo, c.responsavelNome ?? null, c.instrucoes ?? null, c.trava ?? null, c.prazoMin ?? null]),
         tarefas: q.tarefas.map((t) => [t.titulo, t.descricao, t.status, t.agenteNome, t.linearId, t.prUrl, t.pergunta, t.resposta, t.execucao]),
         turnosAbertos: turnos,
+        importacao: q.importacao ? [q.importacao.estado, q.importacao.time, q.importacao.total, q.importacao.trazidas, q.importacao.colunas] : null,
+        // NOD-422 (PR 2): o quadro assumido e o estado das rotinas do anfitrião (pela instrução, na ordem).
+        assumido: (q.assumidoEm ?? null) !== null,
+        rotinas,
         // NOD-443: o modo, quem está no quadro e os comentários (o texto e a tarefa; a assinatura diz o bot, e difere).
         modo: q.modoConversa,
         membros: (q.membros ?? []).map((m) => m.nome),
@@ -68,7 +92,7 @@ describeIntegracao("paridade tela × chat do quadro.* (NOD-442, ADR-135)", () =>
           });
           return caixa.valor as T;
         },
-      services: servicosDeTeste((t) => criarRepos(t, MARLON), MARLON),
+      services: { ...servicosDeTeste((t) => criarRepos(t, MARLON), MARLON), linear: LINEAR_FALSO },
       useCases: useCasesDeTeste(),
       executor: "catcher",
     };
@@ -86,7 +110,7 @@ describeIntegracao("paridade tela × chat do quadro.* (NOD-442, ADR-135)", () =>
   }
 
   async function montar(trx: Tx) {
-    const d = depsSobreTrx(trx, MARLON);
+    const d = depsSobreTrx(trx, MARLON, { services: { ...servicosDeTeste((t) => criarRepos(t, MARLON), MARLON), linear: LINEAR_FALSO } });
     await d.repos.preferencias.gravar({ experimentos: { quadro: true } });
     const sufixo = Math.random().toString(36).slice(2, 7);
     const tela = await agenteComConversa(trx, MARLON, { nome: `Tela ${sufixo}` });
@@ -102,7 +126,8 @@ describeIntegracao("paridade tela × chat do quadro.* (NOD-442, ADR-135)", () =>
   const estado = async (m: M, anfitriaoId: string) => {
     const q = await m.d.repos.quadros.doAgente(anfitriaoId);
     const tarefas = q ? await m.d.repos.quadros.tarefas(q.id) : [];
-    const r = retrato(q ? await montarQuadro(m.d, q) : null, tarefas.filter((t) => t.turnoId).length);
+    const rotinas = (await m.d.repos.rotinas.listarDoAgente(anfitriaoId)).map((r) => `${r.instrucao}:${r.estado}`).sort();
+    const r = retrato(q ? await montarQuadro(m.d, q) : null, tarefas.filter((t) => t.turnoId).length, rotinas);
     // NOD-418: os trabalhos de cada tarefa (estado, origem, recados) entram na comparação.
     const trabalhos: unknown[] = [];
     for (const t of tarefas) {
@@ -133,8 +158,12 @@ describeIntegracao("paridade tela × chat do quadro.* (NOD-442, ADR-135)", () =>
     ultimoPreparoPeloBot?: true;
     /** A ação apaga o quadro: os dois lados terminam sem quadro. */
     semQuadroNoFim?: boolean;
-    /** O chat abre um card: a pessoa confirma antes da comparação (as colunas, ou a exclusão do quadro da NOD-430). */
-    confirmar?: "colunas" | "exclusao";
+    /** O chat abre um card: a pessoa confirma antes da comparação (as colunas, a importação ou a exclusão do quadro da NOD-430). */
+    confirmar?: "colunas" | "importacao" | "exclusao" | "assumir";
+    /** NOD-422 (PR 2): uma rotina ativa em cada anfitrião (o assumir pausa as duas igual). */
+    rotina?: true;
+    /** NOD-422: o Linear da pessoa conectado (chave e sessão do Composio); a busca pós-commit roda nas duas pontas. */
+    linear?: true;
     /** Depois do preparo, os turnos dos trabalhos terminam (o Repetir só vale sem trabalho rodando). */
     terminarTrabalhos?: true;
     /** A ação leva a tarefa a outro quadro: o destino da tela e o do chat (criados vazios antes) também terminam iguais. */
@@ -156,6 +185,25 @@ describeIntegracao("paridade tela × chat do quadro.* (NOD-442, ADR-135)", () =>
       preparar: BASE,
       tela: async (_m, q) => ({ metodo: "POST", caminho: `/agentes/${q.anfitriao}/quadro/linear`, corpo: { itens: [{ identificador: "NOD-9", titulo: "Do Linear", url: "https://linear.app/gamefik/issue/NOD-9" }] }, status: 200 }),
       chat: () => ({ tipo: "importar_linear", itens: [{ identificador: "NOD-9", titulo: "Do Linear", url: "https://linear.app/gamefik/issue/NOD-9" }] }),
+    },
+    {
+      // NOD-422: pela tela o clique em Trazer (depois da prévia) é a confirmação; pelo chat vira o card de prévia e só
+      // inicia ao confirmar. Nas duas, a busca roda depois do commit e aplica num lote só, sem acionar ninguém.
+      id: "quadro.importar_time_linear",
+      preparar: BASE,
+      linear: true,
+      tela: async (_m, q) => ({ metodo: "POST", caminho: `/agentes/${q.anfitriao}/quadro/importacao`, corpo: { time: "nod" }, status: 202 }),
+      chat: () => ({ tipo: "importar_time_linear", time: "nod" }),
+      confirmar: "importacao",
+    },
+    {
+      // NOD-422 (PR 2): pela tela o clique depois da prévia é a confirmação; pelo chat vira o card e só pausa ao confirmar.
+      id: "quadro.assumir",
+      preparar: BASE,
+      rotina: true,
+      tela: async (_m, q) => ({ metodo: "POST", caminho: `/agentes/${q.anfitriao}/quadro/assumir`, corpo: {}, status: 200 }),
+      chat: () => ({ tipo: "assumir_quadro" }),
+      confirmar: "assumir",
     },
     {
       id: "quadro.mudar_tarefa",
@@ -319,6 +367,19 @@ describeIntegracao("paridade tela × chat do quadro.* (NOD-442, ADR-135)", () =>
       };
       if (c.terminarTrabalhos) await trx`update turnos set estado = 'concluido' where id in (select turno_id from quadro_execucoes where owner_id = ${MARLON.pessoaId})`;
       expect(await estado(m, m.tela.agenteId)).toEqual(await estado(m, m.chat.agenteId));
+      if (c.linear) {
+        await m.d.repos.composio.salvarChave("cifrada-de-teste");
+        const [conector] = await trx<{ id: string }[]>`
+          insert into conectores (tenant_id, owner_id, nome, slug, transporte, url, declaracao)
+          values (${MARLON.tenantId}, ${MARLON.pessoaId}, 'Linear', 'linear', 'http', 'https://exemplo.invalid/mcp', 'toca')
+          returning id`;
+        await m.d.repos.composio.salvarSessao({ toolkit: "linear", sessaoId: "sess_l", contaId: "ca_l", conectorId: conector!.id });
+      }
+      if (c.rotina) {
+        for (const a of [m.tela, m.chat]) {
+          await m.d.repos.rotinas.criar({ agenteId: a.agenteId, conversaId: a.conversaId, cron: "0 8 * * *", fusoIana: "UTC", instrucao: "Rodar a esteira", fonte: "f", entregavel: "e", limitesAprovacao: "", politicaSemDado: "", proximaExecucao: Date.now() + 3_600_000 });
+        }
+      }
       for (const destino of c.destinos?.(m) ?? []) expect((await pessoa(m.d, destino, [{ tipo: "criar_quadro", meta: "Lançar login", prazo: "2026-11-06" }])).data).toMatchObject({ ok: true });
 
       const sessao = await servidor.entrar("marlon");
@@ -337,23 +398,41 @@ describeIntegracao("paridade tela × chat do quadro.* (NOD-442, ADR-135)", () =>
 
       const quem = m.gil;
       const ctx = await turnoDe(m.d, quem.agenteId, quem.conversaId);
+      const antes = await estado(m, m.chat.agenteId);
       const r = await executar(m.d, gerirQuadro, { ...ctx, quadro: m.nomeChat, acoes: [await c.chat(m, { movimentoNaSaida })] });
       expect(r.data, JSON.stringify(r.data)).toMatchObject({ ok: true });
       if (c.confirmar) {
         if (!r.data.ok || !r.data.proposta_id) throw new Error("sem card");
         // Antes de confirmar, nada mudou no quadro do chat.
-        if (c.confirmar === "colunas") {
-          expect((await estado(m, m.chat.agenteId))?.colunas).not.toEqual((await estado(m, m.tela.agenteId))?.colunas);
-          expect((await executar(m.d, decidirColunasDoQuadro, { decisaoId: r.data.proposta_id, recusar: false, executor: "catcher" })).data).toMatchObject({ aplicado: true });
-        } else {
-          expect(await estado(m, m.chat.agenteId)).not.toBeNull();
-          expect((await executar(m.d, decidirQuadroExclusao, { decisaoId: r.data.proposta_id, recusar: false, executor: "catcher" })).data).toMatchObject({ aplicado: true });
+        expect(await estado(m, m.chat.agenteId)).toEqual(antes);
+        if (c.confirmar === "colunas") expect((await executar(m.d, decidirColunasDoQuadro, { decisaoId: r.data.proposta_id, recusar: false, executor: "catcher" })).data).toMatchObject({ aplicado: true });
+        else if (c.confirmar === "assumir") expect((await executar(m.d, decidirAssumirQuadro, { decisaoId: r.data.proposta_id, recusar: false })).data).toMatchObject({ assumido: true });
+        else if (c.confirmar === "exclusao") expect((await executar(m.d, decidirQuadroExclusao, { decisaoId: r.data.proposta_id, recusar: false, executor: "catcher" })).data).toMatchObject({ aplicado: true });
+        else expect((await executar(m.d, decidirImportacaoLinear, { decisaoId: r.data.proposta_id, recusar: false })).data).toMatchObject({ iniciada: true });
+      }
+      if (c.linear) {
+        // O efeito pós-commit (importar_linear) das duas pontas: a busca e a aplicação, como o compor faria.
+        const rodar: RodarNaTx = async (fn) => {
+          const x = await fn(m.d);
+          if (x.events?.length) await m.d.repos.events.gravarComOutbox(x.events);
+          return x.data;
+        };
+        for (const a of [m.tela.agenteId, m.chat.agenteId]) {
+          const i = await m.d.repos.quadroImportacoes.ultima((await m.d.repos.quadros.doAgente(a))!.id);
+          expect(await trazerImportacao(rodar, i!.id)).toBe("aplicada");
         }
       }
 
       const doLadoDaTela = await estado(m, m.tela.agenteId);
       if (c.semQuadroNoFim) expect(doLadoDaTela).toBeNull();
       else expect(doLadoDaTela).not.toBeNull();
+      if (c.rotina) expect(doLadoDaTela).toMatchObject({ assumido: true, rotinas: ["Rodar a esteira:pausada"] });
+      if (c.linear) {
+        // As 3 issues entraram (T1 e T2 ficam), aplicada, e ninguém foi acionado.
+        expect(doLadoDaTela?.tarefas).toHaveLength(5);
+        expect(doLadoDaTela?.importacao?.[0]).toBe("aplicada");
+        expect(doLadoDaTela?.turnosAbertos).toBe(0);
+      }
       expect(await estado(m, m.chat.agenteId)).toEqual(doLadoDaTela);
       if (c.destinos) {
         const [daTela, doChat] = c.destinos(m);
@@ -679,6 +758,31 @@ describeIntegracao("paridade tela × chat do quadro.* (NOD-442, ADR-135)", () =>
       // E de novo com a trava na mão (codex rodada 4): o turno parado enquanto esperava a trava também não escreve.
       const r3 = await executar(m.d, aplicarLoteQuadro, { autor: { tipo: "agente", agenteId: m.gil.agenteId }, quadro: m.tela.agenteId, executor: "catcher", turnoId: parado.turnoId, ops: [{ tipo: "mudar_tarefa", tarefa: "Da pessoa", status: "feito" }] });
       expect(JSON.stringify(r3.data)).toContain("este turno foi parado");
+    });
+  });
+
+  it("revisão do PR #630: o código que acha a nativa e a importada pede a escolha na tela (link) e no chat (mover), com as mesmas duas", async () => {
+    await withRollback(MARLON, async (trx) => {
+      trxAtual = trx;
+      const m = await montar(trx);
+      expect((await pessoa(m.d, m.tela.agenteId, [{ tipo: "criar_quadro", meta: "M" }, { tipo: "criar_tarefa", titulo: "Nativa" }])).data).toMatchObject({ ok: true });
+      const qTela = (await m.d.repos.quadros.doAgente(m.tela.agenteId))!;
+      const codigo = `${qTela.prefixo}-1`;
+      expect((await pessoa(m.d, m.caio.agenteId, [{ tipo: "criar_quadro", meta: "N" }, { tipo: "importar_linear", itens: [{ identificador: codigo, titulo: "Importada" }] }])).data).toMatchObject({ ok: true });
+      const ids = [
+        (await m.d.repos.quadros.tarefas(qTela.id))[0]!.id,
+        (await m.d.repos.quadros.tarefas((await m.d.repos.quadros.doAgente(m.caio.agenteId))!.id))[0]!.id,
+      ].sort();
+      const sessao = await servidor.entrar("marlon");
+      const tela = await servidor.chamar(sessao, "GET", `/quadro/tarefas/${codigo}`);
+      expect(tela.status).toBe(200);
+      const corpo = (await tela.json()) as { ambigua?: { tarefaId: string }[] };
+      expect(corpo.ambigua?.map((o) => o.tarefaId).sort()).toEqual(ids);
+      const chat = (await executar(m.d, gerirQuadro, { ...(await turnoDe(m.d, m.gil.agenteId, m.gil.conversaId)), quadro: m.caio.agenteId, acoes: [{ tipo: "mover_quadro", tarefa: codigo, quadro: m.tela.agenteId }] })).data;
+      expect(JSON.stringify(chat)).toContain("entrada_invalida");
+      for (const id of ids) expect(JSON.stringify(chat)).toContain(id);
+      // Nada mudou de quadro.
+      expect((await m.d.repos.quadros.tarefas(qTela.id)).map((t) => t.titulo)).toEqual(["Nativa"]);
     });
   });
 

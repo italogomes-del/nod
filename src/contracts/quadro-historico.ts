@@ -7,8 +7,11 @@ import type { AutorLote } from "./quadro.ts";
 
 /** Quem fez uma mudança no histórico: a pessoa, um bot ou o próprio quadro (a regra). */
 export type AutorHistorico = AutorLote | { tipo: "regra" };
-/** `restaurada` = o Desfazer devolveu a tarefa que o lote tinha excluído (`para` = a coluna em que ela voltou). */
-export type CampoHistorico = "criada" | "status" | "agente" | "quadro" | "restaurada";
+/**
+ * `restaurada` = o Desfazer devolveu a tarefa que o lote tinha excluído (`para` = a coluna em que ela voltou).
+ * NOD-422: `linear` = a linha da importação ("No Linear em X desde dd/mm", criado_em = a data do Linear; ou "fechada no Linear").
+ */
+export type CampoHistorico = "criada" | "status" | "agente" | "quadro" | "restaurada" | "linear";
 
 /** Uma mudança da tarefa. `de`/`para` = o id da coluna (status), do bot (agente; null = ninguém) ou do quadro. */
 export type MudancaTarefa = { tarefaId: string; campo: CampoHistorico; de: string | null; para: string | null; autor: AutorHistorico };
@@ -29,7 +32,14 @@ export type EntradaHistoricoDto = {
 };
 
 /** O link da tarefa (`?tarefa=ZE-12`) resolvido: onde ela está hoje e o código atual (difere quando ela mudou de quadro). */
-export type TarefaPorCodigoDto = { agenteId: string; quadroId: string; tarefaId: string; codigo: string; codigoAtual: string };
+export type TarefaAchadaDto = { agenteId: string; quadroId: string; tarefaId: string; codigo: string; codigoAtual: string };
+/** Uma das tarefas que o mesmo código acha (o código do quadro de uma e o id do Linear de outra): a pessoa escolhe. */
+export type OpcaoDeTarefaDto = TarefaAchadaDto & { titulo: string; doLinear: boolean };
+/**
+ * NOD-422 (revisão do PR #630): quando o código é o de uma tarefa do quadro e o id do Linear de outra, o link não escolhe
+ * por ela (como o mover_quadro): devolve as duas para a pessoa escolher.
+ */
+export type TarefaPorCodigoDto = TarefaAchadaDto | { ambigua: OpcaoDeTarefaDto[] };
 
 /** Um quadro da pessoa, para o "Mover para…" da tarefa aberta. */
 export type QuadroDaPessoaDto = { id: string; agenteId: string; agenteNome: string; prefixo: string | null };

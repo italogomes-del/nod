@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { TarefaQuadro } from "../../../src/contracts/quadro.ts";
-import { cercado, colunaDoBacklog, recusaDoLimite, deveComecar, MAX_CANDIDATAS, quemFez, resolverTarefa, entradaDaResposta, entradaDaTarefa, lerOps, metaCumprida, numeroDoPr, planejarLote, MAX_COMECOS_POR_LOTE, prazoValido, resumoDaMeta, resumoDoLote } from "../../../src/domain/quadro.ts";
+import { cercado, colunaDoBacklog, recusaDoLimite, deveComecar, MAX_CANDIDATAS, quemFez, entradaDaResposta, entradaDaTarefa, lerOps, metaCumprida, numeroDoPr, planejarLote, MAX_COMECOS_POR_LOTE, prazoValido, progresso, resolverTarefa, resumoDaMeta, resumoDoLote, tarefasDaMeta } from "../../../src/domain/quadro.ts";
 import { COLUNAS_PADRAO } from "../../../src/domain/colunas.ts";
 
 /** NOD-442: o quadro-agente puro — a leitura das ações, quem começa sozinho, o lote tudo ou nada e o fecho da meta. */
@@ -332,6 +332,20 @@ describe("meta, resumo e textos", () => {
     expect(metaCumprida([{ status: "feito" }, { status: "cancelado" }])).toBe(true);
     expect(metaCumprida([{ status: "feito" }, { status: "revisao" }])).toBe(false);
     expect(metaCumprida([{ status: "cancelado" }])).toBe(false);
+  });
+
+  it("revisão 4 do PR #630 (decisão 3 da Ada): as tarefas importadas do Linear ficam fora da meta (N de M e cumprimento)", () => {
+    const nativa = tarefa({ id: "n1", status: "feito", terminadaEm: AGORA });
+    const importadas = [tarefa({ id: "i1", status: "afazer" }), tarefa({ id: "i2", status: "fazendo" })];
+    const todas = [nativa, ...importadas];
+    // Sem saber quais vieram do Linear, o backlog importado entra na conta e a meta não fecha.
+    expect(progresso(tarefasDaMeta(todas, AGORA - 1, COLUNAS_PADRAO), COLUNAS_PADRAO)).toEqual({ feitas: 1, total: 3 });
+    const daMeta = tarefasDaMeta(todas, AGORA - 1, COLUNAS_PADRAO, new Set(["i1", "i2"]));
+    expect(daMeta.map((t) => t.id)).toEqual(["n1"]);
+    expect(progresso(daMeta, COLUNAS_PADRAO)).toEqual({ feitas: 1, total: 1 });
+    expect(metaCumprida(daMeta, COLUNAS_PADRAO)).toBe(true);
+    // Só importadas: nada conta, a meta não fecha sozinha.
+    expect(metaCumprida(tarefasDaMeta(importadas, AGORA - 1, COLUNAS_PADRAO, new Set(["i1", "i2"])), COLUNAS_PADRAO)).toBe(false);
   });
 
   it("o resumo diz quantas, o prazo, quem e os PRs", () => {

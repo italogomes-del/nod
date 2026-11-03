@@ -44,3 +44,24 @@ describe("trechoDeRollback (NOD-195)", () => {
     ]);
   });
 });
+
+describe("a 0148 (NOD-422, revisão 11 do PR #630): os CHECKs recriados entram NOT VALID e são validados em seguida", () => {
+  const TABELAS = ["quadro_comentarios", "quadro_tarefa_historico"];
+  /** Cada ADD CONSTRAINT ... CHECK das tabelas vem com NOT VALID e é seguido do VALIDATE da mesma constraint. */
+  const conferir = (sql: string) => {
+    const comandos = sql.split(";").map((c) => c.replace(/\s+/g, " ").trim()).filter(Boolean);
+    const checks = comandos.filter((c) => TABELAS.some((t) => c.startsWith(`ALTER TABLE ${t} ADD CONSTRAINT`)) && / CHECK /.test(c));
+    expect(checks.length).toBeGreaterThan(0);
+    for (const c of checks) {
+      expect(c, c).toMatch(/ NOT VALID$/);
+      const [, tabela, nome] = /^ALTER TABLE (\S+) ADD CONSTRAINT (\S+)/.exec(c)!;
+      expect(comandos.slice(comandos.indexOf(c) + 1), c).toContain(`ALTER TABLE ${tabela} VALIDATE CONSTRAINT ${nome}`);
+    }
+  };
+
+  it("na ida e no ROLLBACK", async () => {
+    const conteudo = await readFile(new URL("../../../src/db/migrations/0148_importar_linear_no_quadro.sql", import.meta.url), "utf8");
+    conferir(trechoAplicavel(conteudo));
+    conferir(trechoDeRollback(conteudo) ?? "");
+  });
+});

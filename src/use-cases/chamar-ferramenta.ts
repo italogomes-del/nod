@@ -21,6 +21,8 @@ import { assentarLoteAutomatico, pedirAprovacaoFase1, type LoteAutomatico } from
 import { semprePermitirVivo } from "./regras-vivas.ts";
 import { executarItens, type DesfechoExecutado } from "./decidir.ts";
 import { classificarFalhaDaChamada, limparFalhaAposSucesso, registrarFalhaDaChamada } from "./disjuntor-conector.ts";
+import type { gerirQuadroEmFases } from "./gerir-quadro.ts";
+import { buscarPreviaNoLinear, type BuscaDaPrevia } from "./importar-linear.ts";
 import { nomeParaTrilha, registrarNegacao, type EntradaRegistrarNegacao } from "./registrar-negacao.ts";
 import type { CasoDeUso, Deps, Services } from "./tipos.ts";
 import { sincronizarTrabalho } from "./trabalhos.ts";
@@ -69,7 +71,12 @@ export type EfeitoPendente =
      */
     comFalha?: boolean;
   }
-  | { tipo: "lote"; lote: LoteAutomatico };
+  | { tipo: "lote"; lote: LoteAutomatico }
+  /**
+   * Revisão do PR #630 (item 6): o gerir_quadro com importar_time_linear. A fase 1 conferiu as recusas; a busca da prévia
+   * no Linear roda aqui fora, e a fase 2 abre o card com o que ela deu. A credencial nunca sai da rota interna.
+   */
+  | { tipo: "previa_linear"; entrada: Parameters<typeof gerirQuadroEmFases>[1]; busca: BuscaDaPrevia };
 
 /**
  * `emRevisao` (ADR-115, PR 5 dos modos de aprovação): a ação foi ao revisor — a rota responde `{ aguardar }` ao proxy (que
@@ -83,7 +90,8 @@ type RespostaConector = Awaited<ReturnType<Services["conectores"]["chamar"]>>;
 export type DesfechoEfeito =
   | { tipo: "conector"; ok: true; resposta: RespostaConector }
   | { tipo: "conector"; ok: false; erro: unknown }
-  | { tipo: "lote"; desfechos: DesfechoExecutado[] };
+  | { tipo: "lote"; desfechos: DesfechoExecutado[] }
+  | { tipo: "previa_linear"; busca: Awaited<ReturnType<typeof buscarPreviaNoLinear>> };
 
 export const REGRA_CHAMADA = "regra:chamar_ferramenta" as const;
 export const VERSAO_REGRA_CHAMADA = 1 as const;
@@ -212,6 +220,15 @@ async function despacharNod(deps: Deps, ctx: ContextoFerramenta, nome: NomeFerra
     // ADR-115 (PR 5): o lote foi ao revisor — a mesma espera do `pendente`, sem a tela ver nada até o veredito.
     if ("revisao" in f) return { resultado: { emRevisao: f.revisao }, events: f.events };
     saida = f.saida;
+  } else if (nome === "gerir_quadro" && deps.useCases.gerirQuadroEmFases) {
+    // Revisão do PR #630 (item 6): a prévia do Linear não é buscada dentro da tx; a importação volta como efeito. Revisão 3:
+    // pelo caso injetado (deps.useCases), como o resto do despacho; sem ele, o gerir_quadro direto (a tabela).
+    const v = validarArgsNod("gerir_quadro", args);
+    if (!v.ok) return { erros: v.erros };
+    const entrada = { ...ctx, ...v.args };
+    const r = await deps.useCases.gerirQuadroEmFases(deps, entrada, { fase: "conferir" });
+    if ("buscarLinear" in r) return { resultado: { efeito: { tipo: "previa_linear", entrada, busca: r.buscarLinear } }, events: [] };
+    saida = r;
   } else saida = await rodarValidado(deps, ctx, nome, args);
   if ("erros" in saida) return saida;
   const data: unknown = saida.data;
@@ -405,8 +422,12 @@ export const chamarFerramentaFase1: CasoDeUso<EntradaChamarFerramenta, SaidaFase
  * falha); banco ocupado ou tx encerrada — o `carregar` do conector abre a própria tx curta — é falha NOSSA e relança sem
  * marcar o conector (NOD-266). Quem chama roda isto sob o contexto de log da fase 1 (mesmo correlation_id).
  */
-export async function executarEfeito(services: Pick<Services, "conectores" | "computadores" | "github">, efeito: EfeitoPendente): Promise<DesfechoEfeito> {
+export async function executarEfeito(services: Pick<Services, "conectores" | "computadores" | "github"> & Partial<Pick<Services, "linear">>, efeito: EfeitoPendente): Promise<DesfechoEfeito> {
   if (efeito.tipo === "lote") return { tipo: "lote", desfechos: await executarItens(services, efeito.lote.aExecutar) };
+  if (efeito.tipo === "previa_linear") {
+    if (!services.linear) return { tipo: "previa_linear", busca: { ok: false, erro: "importacao_indisponivel", detalhe: "a importação do Linear não está disponível neste servidor" } };
+    return { tipo: "previa_linear", busca: await buscarPreviaNoLinear(services.linear, efeito.busca.cred, efeito.busca) };
+  }
   try {
     return { tipo: "conector", ok: true, resposta: await services.conectores.chamar(efeito.conectorId, efeito.tool, efeito.argumentos, { rotina: efeito.rotina, somenteLeitura: efeito.somenteLeitura }) };
   } catch (e) {
@@ -444,6 +465,14 @@ export const concluirChamada: CasoDeUso<EntradaConcluirChamada, ResultadoChamada
     const data = s.data;
     const resultado: ResultadoChamada = data.estado === "pendente" ? { aguardar: data.decisao_id } : { ok: true, conteudo: JSON.stringify(data), confianca: "confiavel" };
     return { data: resultado, events: s.events ?? [] };
+  }
+  if (efeito.tipo === "previa_linear" && desfecho.tipo === "previa_linear") {
+    const b = desfecho.busca;
+    const emFases = deps.useCases.gerirQuadroEmFases;
+    if (!emFases) throw new Error("previa_linear sem o gerirQuadroEmFases injetado");
+    const r = await emFases(deps, efeito.entrada, b.ok ? { fase: "aplicar", issues: b.issues } : { fase: "aplicar", falha: { erro: b.erro, detalhe: b.detalhe } });
+    if ("buscarLinear" in r) throw new Error("fase 2 do gerir_quadro pediu outra busca");
+    return { data: { ok: true, conteudo: JSON.stringify(r.data), confianca: "confiavel" }, events: r.events ?? [] };
   }
   if (efeito.tipo === "conector" && desfecho.tipo === "conector") {
     const sem = respostaSemFase2(efeito, desfecho);

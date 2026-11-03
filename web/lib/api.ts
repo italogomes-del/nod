@@ -42,6 +42,9 @@ import type { ExecucaoRotina } from "../../src/contracts/rotina.ts";
 import type { MembroSala, Sala } from "../../src/contracts/sala.ts";
 import type { FaixaParada, Turno } from "../../src/contracts/turno.ts";
 import type { ComentarioDto, ComentarioTarefa, EntradaHistoricoDto, GrupoColuna, LinhaMuralDto, LoteQuadro, ModoConversa, QuadroCompartilhadoDto, QuadroDaPessoaDto, QuadroDto, StatusTarefa, TarefaPorCodigoDto } from "../../src/contracts/quadro.ts";
+import type { FiltroImportacao, ImportacaoDto, PreviaDaTela } from "../../src/contracts/quadro-importacao.ts";
+import type { PreviaAssumir, ResultadoAssumir } from "../../src/contracts/quadro-assumir.ts";
+import type { EventoTrilhaQuadro } from "../../src/contracts/trilha-quadro.ts";
 import type { EstadoExecucao, ExecucoesDaTarefa } from "../../src/contracts/quadro-execucoes.ts";
 import type { AppDto, PaginasDto } from "../../src/contracts/apps.ts";
 import type { AtividadeTarefa } from "../../src/contracts/quadro-pela-conversa.ts";
@@ -287,6 +290,17 @@ export function criarApi(escopo: Escopo) {
     /** NOD-416: o link `?tarefa=ZE-12` (o código antigo também resolve, para a tarefa que mudou de quadro). */
     tarefaPorCodigo: (codigo: string) => get<TarefaPorCodigoDto>(`quadro/tarefas/${encodeURIComponent(codigo)}`),
     quadros: () => get<{ quadros: QuadroDaPessoaDto[] }>("quadros"),
+    /** NOD-422: "Trazer do Linear…" pela tela. A prévia só lê; o importar começa a trazer (o progresso vem no quadro). */
+    previaImportacao: (agenteId: string, time: string, filtro: FiltroImportacao | null) =>
+      get<PreviaDaTela>(`agentes/${encodeURIComponent(agenteId)}/quadro/importacao/previa?time=${encodeURIComponent(time)}${filtro ? `&filtro=${encodeURIComponent(filtro)}` : ""}`),
+    importarTimeLinear: (agenteId: string, time: string, filtro: FiltroImportacao | null) =>
+      post<{ ok: true; importacao: ImportacaoDto }>(`agentes/${encodeURIComponent(agenteId)}/quadro/importacao`, { time, ...(filtro ? { filtro } : {}) }),
+    /** NOD-422 (PR 2): o quadro assume a esteira. A lista só lê; o Assumir (só as `rotinas` vistas) e o Desfazer. */
+    previaAssumir: (agenteId: string) => get<PreviaAssumir | { ok: false; erro: string; detalhe: string }>(`agentes/${encodeURIComponent(agenteId)}/quadro/assumir`),
+    assumirQuadro: (agenteId: string, rotinas: readonly string[]) => post<ResultadoAssumir>(`agentes/${encodeURIComponent(agenteId)}/quadro/assumir`, { rotinas }),
+    desfazerAssumir: (agenteId: string) => del<ResultadoAssumir>(`agentes/${encodeURIComponent(agenteId)}/quadro/assumir`),
+    /** NOD-422 (PR 2): a trilha do quadro (só ids). Fundo, como a telemetria das linhas: a falha some em silêncio. */
+    trilhaQuadro: (eventos: readonly EventoTrilhaQuadro[]) => pedir<{ gravados: number }>("POST", `${base}/telemetria/quadro`, { eventos }, { keepalive: true, silencioso: true }),
     responderTarefa: (agenteId: string, tarefaId: string, resposta: string) =>
       post<MutacaoQuadro>(`agentes/${encodeURIComponent(agenteId)}/quadro/tarefas/${encodeURIComponent(tarefaId)}/resposta`, { resposta }),
     /** NOD-417: os comentários da tarefa; o da pessoa aciona o responsável e @nome aciona outro bot. */

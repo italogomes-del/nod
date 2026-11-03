@@ -8,6 +8,7 @@ import {
 } from "./colunas.ts";
 import { conferirExclusao, conferirSaidaDaEspera, conferirTravas, type DadoDoMovimento, desfazerMovimento, esperar, frearDepois, limparPerguntaDoFreio, movimentosDoLote, nomeDaParada, paradaDaPessoa, recusarTarefa, travarColuna } from "./freios-quadro.ts";
 import { formatarCodigo, lerCodigo } from "./codigo-tarefa.ts";
+import { identificadorDaUrl } from "./importar-linear.ts";
 
 /**
  * O quadro-agente, puro (definido em 2026-10-31, NOD-442). Lê e confere as operações que chegam de fora (a ferramenta do
@@ -145,6 +146,18 @@ export function lerOp(v: unknown): OpQuadro | ErroOp {
         itens.push(item);
       }
       return { tipo: "importar_linear", itens };
+    }
+    case "importar_time_linear": {
+      const time = textoObrigatorio(v.time, "time", 20);
+      if (falhou(time)) return time;
+      if (!/^[A-Za-z][A-Za-z0-9]{0,9}$/.test(time)) return { erro: "time é a chave do time no Linear (ex.: NOD)" };
+      if (v.filtro !== undefined && v.filtro !== null && v.filtro !== "sem_backlog") return { erro: "filtro: só sem_backlog" };
+      return { tipo: "importar_time_linear", time: time.toUpperCase(), ...(v.filtro === "sem_backlog" ? { filtro: "sem_backlog" as const } : {}) };
+    }
+    // NOD-422 (PR 2): o quadro assume a esteira (vira o card; `desfazer: true` desfaz o último assumir).
+    case "assumir_quadro": {
+      if (v.desfazer !== undefined && typeof v.desfazer !== "boolean") return { erro: "desfazer é true ou false" };
+      return { tipo: "assumir_quadro", ...(v.desfazer === true ? { desfazer: true } : {}) };
     }
     case "mudar_tarefa": {
       const tarefa = textoObrigatorio(v.tarefa, "tarefa", 200);
@@ -365,6 +378,10 @@ export function lerOps(v: unknown): OpQuadro[] | (ErroOp & { indice: number }) {
   if (remover >= 0 && ops.length > 1) return { erro: "remover_quadro vai sozinho na chamada", indice: remover };
   const troca = ops.findIndex((o) => o.tipo === "substituir_colunas");
   if (troca >= 0 && ops.length > 1) return { erro: "substituir_colunas vai sozinho na chamada", indice: troca };
+  const importar = ops.findIndex((o) => o.tipo === "importar_time_linear");
+  if (importar >= 0 && ops.length > 1) return { erro: "importar_time_linear vai sozinho na chamada", indice: importar };
+  const assumir = ops.findIndex((o) => o.tipo === "assumir_quadro");
+  if (assumir >= 0 && ops.length > 1) return { erro: "assumir_quadro vai sozinho na chamada", indice: assumir };
   const pessoas = ops.findIndex((o) => (OPS_DE_PESSOAS as readonly string[]).includes(o.tipo));
   if (pessoas >= 0 && ops.length > 1) return { erro: `${ops[pessoas]!.tipo} vai sozinho na chamada`, indice: pessoas };
   const trabalho = ops.findIndex((o) => ehOpDeTrabalho(o));
@@ -432,9 +449,11 @@ export function deveComecar(antes: Corte | null, depois: Corte, autorAgenteId: s
  * (feito ou cancelado) antes de a meta ser posta — num quadro de fluxo contínuo que ganha meta depois, o histórico não
  * entra no "N de M", no cumprimento nem no risco. Decide pelo `terminadaEm` (revisão 3), não pelo `mudadoEm`: renomear
  * uma tarefa feita antiga não a devolve à meta.
+ * Revisão 4 do PR #630 (NOD-422, decisão 3 da Ada): as que vieram de uma importação do Linear (`importadas`, os ids que
+ * um lote de importação aplicado criou) ficam fora da meta: o backlog do Linear não entra no "N de M" nem no cumprimento.
  */
-export function tarefasDaMeta<T extends Pick<TarefaQuadro, "status" | "terminadaEm">>(tarefas: readonly T[], metaDesde: number, colunas: readonly ColunaQuadro[]): T[] {
-  return tarefas.filter((t) => !(terminou(colunas, t.status) && t.terminadaEm !== null && t.terminadaEm < metaDesde));
+export function tarefasDaMeta<T extends Pick<TarefaQuadro, "id" | "status" | "terminadaEm">>(tarefas: readonly T[], metaDesde: number, colunas: readonly ColunaQuadro[], importadas: ReadonlySet<string> = new Set()): T[] {
+  return tarefas.filter((t) => !importadas.has(t.id) && !(terminou(colunas, t.status) && t.terminadaEm !== null && t.terminadaEm < metaDesde));
 }
 
 /** Terminou = numa coluna do grupo Feito ou Fechado (NOD-448): a classificação é pelo grupo, não pelo id. */
@@ -687,7 +706,10 @@ export function resolverTarefa<T extends TarefaQuadro>(tarefas: readonly T[], re
   const porId = tarefas.filter((t) => t.id.toLowerCase() === r);
   if (porId.length === 1) return porId[0]!;
   // O id do Linear antes do código do quadro (revisão do PR #623): o quadro de prefixo NOD não tapa o NOD-12 do Linear.
-  const porLinear = tarefas.filter((t) => t.linearId !== null && chaveDeBusca(t.linearId) === r);
+  // NOD-422: a URL da issue do Linear também acha a tarefa trazida de lá.
+  const daUrl = identificadorDaUrl(ref);
+  const alvoLinear = daUrl ? chaveDeBusca(daUrl) : r;
+  const porLinear = tarefas.filter((t) => t.linearId !== null && chaveDeBusca(t.linearId) === alvoLinear);
   if (porLinear.length === 1) return porLinear[0]!;
   const codigo = prefixo !== null ? lerCodigo(ref) : null;
   if (codigo && codigo.prefixo === prefixo) {
@@ -1270,6 +1292,11 @@ export function planejarLote(p: {
         if (levou) return erro(levou);
         break;
       }
+      // NOD-422: a importação não é um passo do lote; vira o card de prévia e o servidor aplica (use-cases/importar-linear.ts).
+      case "importar_time_linear":
+        return erro("importar_time_linear não entra num lote: vira o card de prévia na conversa");
+      case "assumir_quadro":
+        return erro("assumir_quadro não entra num lote: vira o card que a pessoa confirma");
     }
   }
   if (!quadro) return { erro: "lote vazio", indice: -1 };

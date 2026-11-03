@@ -27,7 +27,7 @@ import { PESSOA_ANA, PESSOA_MARLON, TENANT_PADRAO } from "./ids.ts";
 import { criarBancoMemoria, type BancoMemoria } from "./repos-memoria.ts";
 import { avisarPessoa } from "../../src/use-cases/avisar-pessoa.ts";
 import { ajustarBarraLateral } from "../../src/use-cases/ajustar-barra-lateral.ts";
-import { gerirQuadro } from "../../src/use-cases/gerir-quadro.ts";
+import { gerirQuadro, gerirQuadroEmFases } from "../../src/use-cases/gerir-quadro.ts";
 import { gerirApps } from "../../src/use-cases/gerir-apps.ts";
 import { gerirTimes } from "../../src/use-cases/gerir-times.ts";
 import { naoLidosNoChat } from "../../src/use-cases/nao-lidos-no-chat.ts";
@@ -169,6 +169,7 @@ export function useCasesDeTeste(): UseCasesNod {
     avisarPessoa,
     ajustarBarraLateral,
     gerirQuadro,
+    gerirQuadroEmFases,
     gerirApps,
     naoLidosNoChat,
     gerirTimes,

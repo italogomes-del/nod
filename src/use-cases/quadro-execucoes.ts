@@ -12,6 +12,7 @@ import { autoriaPessoa, evento } from "./autoria-evento.ts";
 import { fecharPedidoSemAcordar } from "./entregar-resposta-peer.ts";
 import { abrirTurno, acharQuadro, agentesDaPessoa, avisarComVoce, comMembros, eventoQuadro, experimentoLigado, falhaDoAchado, montarQuadro, pararTurno, type PedidoLote, type ResultadoLote } from "./quadro.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
+import { registrarHistoricoComTrilha } from "./trilha-quadro.ts";
 import { vaiParaQuadroDeOutraPessoa } from "./quadro-pessoas.ts";
 import type { Isolar } from "./turnos-orfaos.ts";
 
@@ -225,6 +226,8 @@ async function novoTrabalho(deps: Deps, p: PedidoLote, q: Quadro, t: TarefaQuadr
   // O trabalho novo toma o lugar da nova tentativa agendada (o Repetir, o recado, a própria tentativa).
   await deps.repos.quadroExecucoes.desagendarNovaTentativa({ tarefaId: t.id });
   await deps.repos.quadros.salvarTarefa(t.id, { ...t, status, turnoId: aberto.turnoId, ...(bloqueada ? { pergunta: null, voltarPara: null } : {}) });
+  // Revisão 4 do PR #630: a volta da Bloqueada muda a coluna; entra no histórico e na trilha (tarefa_movida, autor regra).
+  if (status !== t.status) await registrarHistoricoComTrilha(deps, q.id, [{ tarefaId: t.id, campo: "status", de: t.status, para: status, autor: { tipo: "regra" } }], null);
   const execucao = await deps.repos.quadroExecucoes.inserir({ tarefaId: t.id, origem, turnoId: aberto.turnoId });
   if (!execucao) throw new ErroDeDominio("estado_invalido", { cause: "o turno novo já era um trabalho" });
   const levados = [...pendentes.map((r) => r.id)];
@@ -442,6 +445,8 @@ async function cuidarDaTarefa(deps: Deps, antes: TarefaQuadro): Promise<{ tratad
     const atual = (await deps.repos.quadros.tarefa(t.id)) ?? t;
     const destino = colunasDe(q).some((c) => c.id === "bloqueado") ? "bloqueado" : "voce";
     const salva = await deps.repos.quadros.salvarTarefa(t.id, { ...atual, status: destino, voltarPara: atual.status, pergunta: motivo });
+    // Revisão 4 do PR #630: a ida para Bloqueado (ou Precisa de você) entra no histórico e na trilha, autor regra.
+    if (salva && destino !== atual.status) await registrarHistoricoComTrilha(deps, q.id, [{ tarefaId: t.id, campo: "status", de: atual.status, para: destino, autor: { tipo: "regra" } }], null);
     events.push(eventoQuadro(deps, DO_VARREDOR, q, null, [t.id]));
     // Revisão 5 do PR #625: a tarefa escrita de fora (deFora) não leva o título ao aviso: o texto dela fica fora da conversa.
     const texto = atual.deFora ? `Uma tarefa parou no quadro. ${motivo}` : `"${atual.titulo}" parou no quadro. ${motivo}`;

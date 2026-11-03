@@ -20,6 +20,10 @@ export type TipoDecisao =
   | "colunas_quadro"
   /** definido em 2026-11-02 (NOD-430, 0143): excluir o quadro de um bot pela conversa (remover_quadro). */
   | "quadro_exclusao"
+  /** definido em 2026-11-02 (NOD-422, 0148): trazer um time do Linear para o quadro (a prévia e o Confirmar). */
+  | "importacao_linear"
+  /** definido em 2026-11-02 (NOD-422, 0148): reservado para o PR 2 (o quadro assume o lugar das rotinas). */
+  | "assumir_quadro"
   /** definido em 2026-11-02 (NOD-445, 0145): o card Criar/Ajustar de um app novo do bot (gerir_apps propor). */
   | "app"
   | "pergunta"

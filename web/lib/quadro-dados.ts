@@ -68,6 +68,7 @@ const FRASE_DO_MOVER: Record<string, string> = {
   tarefa_sumiu: "ela não existe mais.",
   quadro_sumiu: "a tarefa ou o quadro não existe mais.",
   mudou_de_quadro: "outra mudança levou a tarefa para outro quadro antes.",
+  linear_no_destino: "o quadro de destino já tem esta tarefa do Linear.",
 };
 export function fraseDoErroDoMover(e: { status?: number; codigo?: string; motivo?: string | null; message?: string } | null | undefined): { texto: string; reler: boolean } {
   if (e?.codigo === "servidor_indisponivel" || e?.codigo === "sem_internet") return { texto: "Sem conexão com o servidor agora. Tente de novo em instantes.", reler: false };
@@ -122,6 +123,8 @@ function quandoFoi(em: number, agora: number): string {
  * começo leva a Fazendo, a coluna que saiu leva as tarefas dela); o autor sem nome é o bot que já saiu.
  */
 export function linhaDoHistorico(e: Pick<EntradaHistoricoDto, "campo" | "de" | "para" | "deNome" | "paraNome" | "autor" | "autorNome" | "criadoEm">, agora: number = Date.now()): { quem: string; oque: string; quando: string } {
+  // NOD-422: a linha da importação é do Linear ("No Linear em Implementando", com a data de lá; ou "fechada no Linear").
+  if (e.campo === "linear") return { quem: "Linear", oque: e.para ? `em ${e.para}` : "fechada no Linear", quando: quandoFoi(e.criadoEm, agora) };
   const quem = e.autor === "pessoa" ? "Você" : e.autor === "regra" ? "Regra" : (e.autorNome ?? "Um bot");
   const de = e.deNome ?? e.de;
   const para = e.paraNome ?? e.para;

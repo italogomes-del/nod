@@ -1,4 +1,6 @@
 import { renderCardColunas } from "./card-colunas.ts";
+import { renderCardImportacao } from "./card-importacao.ts";
+import { renderCardAssumir } from "./card-assumir-quadro.ts";
 import { renderCardApp } from "./card-app.ts";
 import { renderCardQuadroExclusao } from "./card-quadro-exclusao.ts";
 import { renderAnexosDaMensagem, type Aceita } from "../lib/anexos.ts";
@@ -701,6 +703,9 @@ function renderProposta(p: Proposta, estado: Estado, propostas: readonly Propost
   // definido em 2026-10-07 (ADR-082): as mudanças em vários bots que o Nod pediu de uma vez — um card, uma linha por ação.
   if (p.payload.kind === "lote_bots") return renderCardLote(p, p.payload, p.estado === "pendente" && decisaoAbertaDoCard(p, estado) !== null);
   if (p.payload.kind === "colunas_quadro") return renderCardColunas(p, p.payload, p.estado === "pendente" && decisaoAbertaDoCard(p, estado) !== null);
+  // NOD-422: a prévia de trazer o time do Linear (a mesma do ⋯ do quadro).
+  if (p.payload.kind === "importacao_linear") return renderCardImportacao(p, p.payload, p.estado === "pendente" && decisaoAbertaDoCard(p, estado) !== null);
+  if (p.payload.kind === "assumir_quadro") return renderCardAssumir(p, p.payload, p.estado === "pendente" && decisaoAbertaDoCard(p, estado) !== null);
   // NOD-445: o card Criar / Ajustar do app pedido pela conversa.
   if (p.payload.kind === "app") return renderCardApp(p, p.payload, p.estado === "pendente" && decisaoAbertaDoCard(p, estado) !== null);
   if (p.payload.kind === "quadro_exclusao") return renderCardQuadroExclusao(p, p.payload, p.estado === "pendente" && decisaoAbertaDoCard(p, estado) !== null);

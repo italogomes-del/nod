@@ -24,6 +24,8 @@ import { abrirRaioX } from "./telas/raio-x.ts";
 import { ondeDoTurno } from "./telas/modo-dev.ts";
 import { iasDaTela, mudarRascunho, ordemDaPessoa, destinoDoPedido, mudaAIaDoBot, pedidoDoMenu, pedidoDoRascunho, rascunhoDe, type MudancaRascunho, type RascunhoInteligencia } from "./telas/inteligencia.ts";
 import { abrirPreviaDaTroca } from "./telas/previa-troca-dialogo.ts";
+import { htmlEscolherTarefa } from "./telas/escolher-tarefa.ts";
+import type { OpcaoDeTarefaDto } from "../src/contracts/quadro.ts";
 import { ehIaMac, type UiIas } from "./telas/cartao-ia.ts";
 import { abrirAvisoDosTermos } from "./telas/aviso-termos-dialogo.ts";
 import { abrirRodarMaisUma } from "./telas/rodar-mais-uma-dialogo.ts";
@@ -112,6 +114,7 @@ import { caixaComFrase, FRASE_DE_PEDIR_APP, fraseDeEditarApp, fraseDeReconectar,
 import { aoGuardarOrdem, definirPaginas, ordemDoAgente, paginasDoAgente, paginasDtoDe } from "./lib/ordem-das-paginas.ts";
 import { criarPaginasDoServidor } from "./lib/paginas-do-servidor.ts";
 import { criarQuadroNaTela } from "./lib/quadro-na-tela.ts";
+import { conversaDaTrilha, criarTrilhaDaConversa } from "./lib/trilha-conversa.ts";
 import { criarQuadroCompartilhadoNaTela } from "./lib/quadro-compartilhado-na-tela.ts";
 import { caminhoDoQuadro, quadroDaUrl, releListaDosCompartilhados } from "./lib/quadro-compartilhado.ts";
 import { secaoDosCompartilhados } from "./telas/quadro-compartilhado.ts";
@@ -204,6 +207,7 @@ import { aceitaDoBot } from "./lib/capacidades.ts";
 import { mimeDe, motivoRecusa, POR_MENSAGEM, renderItens as renderItensAnexo, resumo as resumoAnexos, type Aceita, type ItemAnexo } from "./lib/anexos.ts";
 import type { EstadoTrabalho, TipoLinha } from "../src/contracts/trabalho.ts";
 import { aberto, abertosDoBot, leituraDoMac, listaPararTasks, telaAoFechar, telaDaTask, textoPararTasks, trabalhoPorId, trabalhosConhecidos } from "./lib/trabalhos.ts";
+import type { EventoTrilhaQuadro } from "../src/contracts/trilha-quadro.ts";
 import { criarTelemetria } from "./lib/telemetria-linhas.ts";
 import { chaveDaAtividade, criarVigiaDaAtividade, diaLocal, ehFiltroAtividade, fusoLocal, rotuloDoDia } from "./lib/atividade-do-bot.ts";
 import { anuncioDoFiltro, chaveDasDecisoes, diaDoDeslize, ehFiltroDecisoes, ehPeriodoDoCsv, periodoDoCsv, totalDoFiltro, type ExportarCsv } from "./lib/decisoes-do-bot.ts";
@@ -331,7 +335,15 @@ let painelAbertoNaHora = false;
 // ADR-094 (definido em 2026-10-10): no celular a barra de bots vira gaveta, aberta pelo ☰ do cabeçalho.
 // NOD-379 (emenda da ADR-094): a gaveta virou a tela inicial do celular; o ☰ virou o ‹ que volta a ela.
 // A pílula da conversa diz se a gaveta do bot está aberta; mostrar a inicial fecha a gaveta (gaveta-bots.ts).
-const celular = criarCelular(() => { render(); marcarPainelNaPilula(); });
+// Revisão 3 do PR #630: a inicial à vista (o ‹ ou o voltar do sistema) fecha o perfil do bot também no estado; sem isto,
+// o perfil guardado voltava "encobrindo" a conversa do mesmo bot e a trilha não contava mais a abertura dela.
+const celular = criarCelular(() => {
+  if (celular.botsAbertos() && estado.perfilCelular) dispatch({ tipo: "perfil-celular", perfil: null });
+  else render();
+  marcarPainelNaPilula();
+});
+// A busca do celular aberta a partir da inicial: a conversa escolhida nela é uma escolha nova (NOD-422).
+let buscaDaInicial = false;
 // NOD-119: a densidade e a largura da barra (web/lib/densidade.ts). O index.html já pintou antes do primeiro quadro;
 // mudarBarra é o caminho único da escolha em Configurações, da borda e do card do chat.
 let barraAtual: Barra = lerBarra();
@@ -400,6 +412,7 @@ const termoBusca = (): string => (document.getElementById("busca-bots") as HTMLI
 function abrirBusca(): void {
   // NOD-380: no celular a busca é a tela cheia (bots, salas e mensagens); no computador continua o filtro da barra.
   if (celular.ativo()) {
+    buscaDaInicial = celular.botsAbertos();
     celular.fecharBots();
     buscaCelular.abrir();
     return;
@@ -526,7 +539,10 @@ window.matchMedia("(max-width: 1099px)").addEventListener("change", marcarPainel
 // NOD-429: Conversa | Quadro na pílula, só com o experimento Quadro ligado (Configurações › Geral › Avançado) e no bot da própria pessoa (web/lib/quadro.ts).
 // NOD-429: de volta à Conversa, a conversa passa a estar "na tela" de novo e é lida.
 const quadroNaTela = criarQuadroNaTela(document, {
-  aoTrocar: (m) => { if (m === "conversa") { lerConversaDaTela(); render(); } },
+  aoTrocar: (m) => {
+    // Revisão 3 do PR #630: voltar do Quadro à Conversa é escolher a conversa, também a que o app abriu sozinho.
+    if (m === "conversa") { if (estado.tela.tipo === "conversa") conversaEscolhida = estado.tela.conversaId; lerConversaDaTela(); render(); } else trilhaDaConversa.observar();
+  },
   // A pessoa arrastou um ícone da pílula: a doca é redesenhada na ordem nova.
   aoMudarOrdem: () => render(),
   aoTarefasPedirem: (pedem) => {
@@ -556,6 +572,8 @@ const quadroNaTela = criarQuadroNaTela(document, {
       const novo = u.pathname + u.search + u.hash;
       if (novo !== window.location.pathname + window.location.search + window.location.hash) window.history.replaceState(window.history.state, "", novo);
     },
+    // NOD-422 (PR 2): a trilha do quadro (só ids); fundo, a falha some em silêncio.
+    trilha: (e) => trilharQuadro(e),
     // QA do PR #623 (D4): depois de mover, a conversa do bot destino com a tarefa aberta no Quadro (o caminho do link).
     irParaTarefa: (agenteId, tarefaId) => {
       const bot = botGerido(agenteId);
@@ -602,6 +620,17 @@ const quadroCompartilhado = criarQuadroCompartilhadoNaTela(document, {
   hora: horaDaFala,
   aoSair: () => navegar({ tipo: "inicio" }),
   aoPerderAcesso: (qid) => { compartilhados = compartilhados.filter((c) => c.id !== qid); render(); void lerCompartilhados(); },
+});
+
+/**
+ * NOD-422 (revisão do PR #630): "conversa de membro aberta" conta a Conversa do bot à vista, nunca o Quadro dele (a aba, o
+ * link da tarefa ou o código num chat, que passam pela conversa a caminho do Quadro).
+ */
+/** A conversa que a pessoa escolheu (o último `navegar` até uma conversa); a que o reducer escolhe ao abrir o app não conta. */
+let conversaEscolhida: string | null = null;
+const trilhaDaConversa = criarTrilhaDaConversa({
+  aVista: () => conversaDaTrilha({ tela: estado.tela, escolhida: conversaEscolhida, botsAbertos: celular.botsAbertos(), espaco: !!estado.espaco, perfil: !!estado.perfilCelular, modo: quadroNaTela.modo(), aCaminhoDoQuadro: (a) => quadroNaTela.aCaminhoDoQuadro(a) }),
+  emitir: (e) => trilharQuadro(e),
 });
 
 /**
@@ -2214,6 +2243,7 @@ function renderPrincipal(): void {
   quadroNaTela.sincronizar(t.tipo === "conversa" && comQuadro(t.agenteId)
     ? { chave: t.conversaId, nome: botGerido(t.agenteId)?.nome ?? "agente", agenteId: t.agenteId, paginas: paginasDaPilula(t.agenteId) }
     : { chave: null, nome: "", agenteId: t.tipo === "conversa" ? t.agenteId : null });
+  trilhaDaConversa.observar();
   regiao("erro", erro);
   const cascaMuda = regiaoMudaria("timeline", corpo);
   const historicoMuda = cascaMuda || (partes !== null && blocosMudariam("timeline-historico", partes.historico));
@@ -3406,16 +3436,33 @@ function abrirRotinas(): void {
   abrirEspaco("rotinas");
 }
 
+/** NOD-422 (PR 2): a trilha do quadro, só com o quadro ligado nos experimentos (o servidor confere de novo). */
+function trilharQuadro(e: EventoTrilhaQuadro): void {
+  if (!api || estado.experimentos.quadro !== true) return;
+  try {
+    void api.trilhaQuadro([e]).catch(() => undefined);
+  } catch {
+    // Sem rede ou sem sessão: a trilha some, a tela segue.
+  }
+}
+
 function navegar(tela: Tela): void {
   // NOD-85: a tela antiga de Rotinas virou a agenda das Configurações; todo caminho que levava a ela abre a seção.
   if (tela.tipo === "rotinas") { abrirRotinas(); return; }
   const antes = estado.tela;
+  // NOD-422: vindo da inicial do celular, é uma visita nova (pode contar outra vez). Antes do entrarNaConversa, que já
+  // redesenha e observa (revisão 4 do PR #630: depois dele, a mesma visita agendava duas contas).
+  if (celular.botsAbertos()) trilhaDaConversa.nova();
   // NOD-379: no celular o "início" é a tela inicial (fechar um Trabalho, voltar da conexão), não a conversa que o reducer
   // escolhe para ele; saindo dela, empilha uma entrada no histórico (o voltar do navegador volta a ela).
   const paraInicial = celular.ativo() && tela.tipo === "inicio";
   if (!paraInicial) celular.entrarNaConversa();
   aoTrocarDeTela(antes, tela);
   dispatch({ tipo: "navegar", tela });
+  conversaEscolhida = tela.tipo === "conversa" ? tela.conversaId : null;
+  // NOD-422 (PR 2): a conversa de um bot aberta (a trilha do quadro; "sem mensagem em 60 s" sai na consulta). Só a
+  // Conversa à vista conta, não o Quadro do bot (revisão do PR #630): web/lib/trilha-conversa.ts.
+  trilhaDaConversa.observar();
   // Antes de ler a conversa: a que o reducer põe por baixo da inicial não conta como lida.
   if (paraInicial) celular.voltarAoInicio();
   lembrarTaskAberta(tela);
@@ -4411,7 +4458,12 @@ const buscaCelular = criarBuscaCelular({
     if (!a) return Promise.reject(new Error("sem sessão"));
     return buscarSemOcupado((s) => a.buscarMensagens(termo, cursor, s), signal, (ms) => new Promise((ok) => window.setTimeout(ok, ms)));
   },
-  abrirBot: (agenteId, conversaId) => navegar({ tipo: "conversa", conversaId, agenteId }),
+  abrirBot: (agenteId, conversaId) => {
+    // A busca aberta a partir da inicial: a conversa escolhida nela conta de novo, como na lista (NOD-422).
+    if (buscaDaInicial) trilhaDaConversa.nova();
+    buscaDaInicial = false;
+    navegar({ tipo: "conversa", conversaId, agenteId });
+  },
   abrirSala: (salaId, conversaId) => navegar({ tipo: "sala", salaId, conversaId }),
   abrirMensagem: abrirMensagemAchada,
   reduzido: () => movimentoReduzido(),
@@ -8149,6 +8201,20 @@ function abrirQuadroGuardado(): void {
   if (qid && estado.sessao && api) navegar({ tipo: "quadro-compartilhado", quadroId: qid });
 }
 
+/** O diálogo de escolha do link que acha duas tarefas; fechar sem tocar responde null. */
+function escolherTarefa(codigo: string, opcoes: OpcaoDeTarefaDto[]): Promise<OpcaoDeTarefaDto | null> {
+  return new Promise((responder) => {
+    let escolhida: OpcaoDeTarefaDto | null = null;
+    const d = dialogo(htmlEscolherTarefa(codigo, opcoes));
+    d.addEventListener("click", (e) => {
+      const i = (e.target as HTMLElement).closest<HTMLElement>("[data-escolher-tarefa]")?.dataset.escolherTarefa;
+      if (i === undefined) return;
+      escolhida = opcoes[Number(i)] ?? null;
+      d.close();
+    });
+    d.addEventListener("close", () => responder(escolhida));
+  });
+}
 /**
  * NOD-416 (ADR-144): o link da tarefa guardado no boot. O código (o atual ou o de antes de mudar de quadro) diz o bot; a
  * frota chega depois da sessão, então espera por ele um pouco. A tarefa abre em tela cheia no Quadro.
@@ -8158,7 +8224,10 @@ async function abrirTarefaGuardada(): Promise<void> {
   try { codigo = window.sessionStorage.getItem(CHAVE_TAREFA_LINK); window.sessionStorage.removeItem(CHAVE_TAREFA_LINK); } catch { /* sem storage */ }
   if (!codigo || !estado.sessao || !api) return;
   try {
-    const r = await api.tarefaPorCodigo(codigo);
+    const achado = await api.tarefaPorCodigo(codigo);
+    // Revisão do PR #630: o código de uma tarefa do quadro que também é o id do Linear de outra: a pessoa escolhe.
+    const r = "ambigua" in achado ? await escolherTarefa(codigo, achado.ambigua) : achado;
+    if (!r) return;
     // Revisão 2 do PR #623: espera a lista de bots chegar (não o teto inteiro) e, sem o bot nela, diz em vez de calar.
     const bot = await botDoLink(() => botGerido(r.agenteId), () => !!estado.frota, (ms) => new Promise((ok) => window.setTimeout(ok, ms)));
     if (!bot) {

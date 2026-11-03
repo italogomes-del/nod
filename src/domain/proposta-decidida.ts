@@ -28,11 +28,15 @@ export function tituloDaProposta(p: Pick<Proposta, "payload">): string {
       return com("Mudanças nos bots", c.resumo);
     case "colunas_quadro":
       return com("Colunas do quadro", c.anfitriaoNome);
+    case "importacao_linear":
+      return com("Trazer do Linear", `${c.previa.total} do time ${c.time}`);
     // NOD-445: "Novo app · Vagas".
     case "app":
       return com("Novo app", c.nome);
     case "quadro_exclusao":
       return `Excluir o quadro do ${c.anfitriaoNome}`;
+    case "assumir_quadro":
+      return `O quadro do ${c.anfitriaoNome} assume a esteira`;
     // NOD-50: o título do cartão aberto, sem o valor (o payload nunca o tem).
     case "credencial":
       return c.alvo === "github_token" ? "Token do GitHub" : c.alvo === "composio" ? "Chave do Composio do time" : `Chave para ${c.app}`;

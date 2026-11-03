@@ -1,5 +1,7 @@
 import { decidirLoteDeBots } from "../../../use-cases/gerir-bots.ts";
+import { decidirAssumirQuadro } from "../../../use-cases/assumir-quadro.ts";
 import { decidirColunasDoQuadro } from "../../../use-cases/colunas-do-quadro.ts";
+import { decidirImportacaoLinear } from "../../../use-cases/importar-linear.ts";
 import { EXECUTORES_APPS, RecusaDasPaginas } from "../../../use-cases/acoes/apps.ts";
 import { decidirQuadroExclusao } from "../../../use-cases/quadro-exclusao.ts";
 import { randomUUID } from "node:crypto";
@@ -217,6 +219,31 @@ export function criarRotasDecisoes(d: DepsRotasDecisoes): Rota[] {
           const r = await comoDona(ctx.escopo, atual, (deps) => executar(deps, decidirLoteDeBots, { decisaoId: atual.id, recusar: recusada(corpo), selecionados: c.selecionados }));
           ids.feitas = String(r.feitas);
           if (r.falhas > 0) ids.falhas = String(r.falhas);
+          const resposta: RespostaMutacao = { ok: true, ids };
+          ctx.json(200, resposta);
+          return;
+        }
+
+        if (atual.tipo === "importacao_linear") {
+          // NOD-422: confirmar grava a importação 'trazendo' e o servidor busca depois do commit (Deps.aposCommit). Quadro
+          // removido ou importação já em andamento: recusa sem lançar; o 409 sai DEPOIS do commit (padrão NOD-159).
+          // Revisão 6 do PR #630: só a dona (o quadro e a conta do Linear são dela), como assumir_quadro e quadro_exclusao.
+          if (atual.ownerId !== ctx.escopo.pessoaId) throw new ErroDeDominio("nao_encontrado", { cause: "importação no quadro de outra pessoa" });
+          const r = await comoDona(ctx.escopo, atual, (deps) => executar(deps, decidirImportacaoLinear, { decisaoId: atual.id, recusar: recusada(corpo) }));
+          if (r.obsoleta) throw new ErroDeDominio("estado_invalido", { cause: "importacao_obsoleta" });
+          if (r.importacaoId) ids.importacao = r.importacaoId;
+          const resposta: RespostaMutacao = { ok: true, ids };
+          ctx.json(200, resposta);
+          return;
+        }
+
+        if (atual.tipo === "assumir_quadro") {
+          // NOD-422 (PR 2): o quadro assume a esteira. Confirmar pausa as rotinas listadas e marca assumido_em na mesma
+          // transação. Só a dona (pausar é dela). Quadro removido ou já assumido: recusa sem lançar; o 409 sai depois do commit.
+          if (atual.ownerId !== ctx.escopo.pessoaId) throw new ErroDeDominio("nao_encontrado", { cause: "assumir o quadro de outra pessoa" });
+          const r = await comoDona(ctx.escopo, atual, (deps) => executar(deps, decidirAssumirQuadro, { decisaoId: atual.id, recusar: recusada(corpo) }));
+          if (r.obsoleta) throw new ErroDeDominio("estado_invalido", { cause: "quadro_assumido" });
+          ids.pausadas = String(r.pausadas.length);
           const resposta: RespostaMutacao = { ok: true, ids };
           ctx.json(200, resposta);
           return;

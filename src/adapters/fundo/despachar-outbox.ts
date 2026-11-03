@@ -80,6 +80,10 @@ export const FRAME_POR_EVENTO: Record<KindEvento, TipoFrame> = {
   // linha dessas cair no outbox por engano, o frame inofensivo "agente.mudou" só faz a web reler o bot.
   linha_mostrada: "agente.mudou",
   linha_aberta: "agente.mudou",
+  // NOD-422 (PR 2): a trilha do quadro vai só para events (sem outbox); a entrada existe porque a união é fechada.
+  tarefa_movida: "agente.mudou",
+  tarefa_aberta: "agente.mudou",
+  conversa_aberta: "agente.mudou",
 };
 
 /** Os eventos de turno que mudam a execução de um card do quadro (os mesmos que viram `turno.iniciado/encerrado/interrompido`). */

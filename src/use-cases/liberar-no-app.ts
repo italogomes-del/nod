@@ -31,7 +31,9 @@ export async function assentarComNovaTentativa<T>(gravar: () => Promise<T>, o: {
           correlation_id: o.correlationId,
           tentativas: tentativa,
           tipo: o.efeito.tipo,
-          ...(o.efeito.tipo === "lote" ? { decisao_id: o.efeito.lote.decisaoId, turno_id: o.efeito.lote.turnoId } : { conector_id: o.efeito.conectorId, ferramenta: o.efeito.tool, turno_id: o.efeito.negacao.turnoId }),
+          ...(o.efeito.tipo === "lote" ? { decisao_id: o.efeito.lote.decisaoId, turno_id: o.efeito.lote.turnoId }
+            : o.efeito.tipo === "previa_linear" ? { ferramenta: "gerir_quadro", turno_id: o.efeito.entrada.turnoId }
+              : { conector_id: o.efeito.conectorId, ferramenta: o.efeito.tool, turno_id: o.efeito.negacao.turnoId }),
         });
         throw e;
       }

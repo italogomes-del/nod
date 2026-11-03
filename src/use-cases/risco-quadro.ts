@@ -25,9 +25,11 @@ function idEnvioDe(chave: string): string {
 }
 
 /** Avisa se o quadro está em risco e ainda não avisou nesta (meta, prazo). null = sem risco, já avisado ou sem conversa. */
-export async function avisarRiscoDoQuadro(deps: Deps, q: Quadro, tarefas: readonly TarefaQuadro[]): Promise<RuntimeEvent | null> {
+export async function avisarRiscoDoQuadro(deps: Deps, q: Quadro, tarefas: readonly TarefaQuadro[], importadas?: ReadonlySet<string>): Promise<RuntimeEvent | null> {
   const colunas = colunasDe(q);
-  const r = riscoDoQuadro(q, tarefasDaMeta(tarefas, q.metaDesde, colunas).map((t) => tarefaParaRisco(t, colunas)), deps.agora());
+  // Revisão 4 do PR #630 (decisão 3 da Ada): o que veio do Linear fica fora da meta, e do risco dela.
+  const fora = importadas ?? (await deps.repos.quadroImportacoes.importadas(q.id));
+  const r = riscoDoQuadro(q, tarefasDaMeta(tarefas, q.metaDesde, colunas, fora).map((t) => tarefaParaRisco(t, colunas)), deps.agora());
   if (!r || !q.meta || !q.prazo) return null;
   const conversa = await deps.repos.conversas.buscarPropriaDoAgente(q.agenteId);
   if (!conversa) return null;

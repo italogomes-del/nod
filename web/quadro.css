@@ -91,6 +91,21 @@
 .qd-meta-mais { color: var(--ink-3); text-decoration: none; }
 .qd-remover { margin-left: auto; color: var(--ink-3); font-size: 12px; text-decoration: none; }
 .qd-remover:hover { color: var(--ink-2); }
+/* NOD-422: "Trazer do Linear…", a linha de progresso da importação e o painel com a prévia (direção A do protótipo). */
+.qd-trazer { margin-left: auto; color: var(--ink-3); font-size: 12px; text-decoration: none; }
+.qd-trazer:hover { color: var(--ink-2); }
+.qd-trazer + .qd-remover { margin-left: 0; }
+.qd-imp { color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.qd-imp-erro { color: var(--danger); }
+.ci-painel { max-width: 560px; margin: 8px 0 4px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; font-size: 13px; line-height: 20px; color: var(--ink-2); }
+.ci-painel .ci-tit { margin: 0 0 4px; color: var(--ink); font-weight: 600; }
+.ci-painel .ci-linha { margin: 0 0 4px; }
+.ci-painel .ci-erro { color: var(--danger); }
+.ci-time, .ci-acoes { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 6px 0 0; }
+.ci-time .qd-meta-in { min-width: 96px; width: 96px; text-transform: uppercase; }
+.ci-det summary { cursor: pointer; color: var(--ink-3); }
+.ci-colunas { margin: 4px 0 0; padding-left: 18px; }
+.ci-quem { color: var(--ink); }
 .qd-meta-mais:hover { color: var(--ink-2); }
 .qd-meta-form { display: inline-flex; }
 .qd-meta-in { min-width: 220px; max-width: 100%; height: 28px; padding: 0 8px; border: 1px solid var(--line-strong); border-radius: 6px; background: transparent; color: var(--ink); font: inherit; font-size: 13px; }

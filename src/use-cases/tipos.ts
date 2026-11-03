@@ -56,6 +56,10 @@ export interface Deps {
   avisoComVoce?: (quadroId: string, pessoaId: string, aviso: AvisoComVoce) => Promise<boolean>;
 }
 
-export type UseCasesNod = UseCasesNodContrato<Deps>;
+/**
+ * Revisão 3 do PR #630: o gerir_quadro em fases (o importar_time_linear busca a prévia do Linear fora da transação) também
+ * vem injetado, como o caso inteiro. Opcional: sem ele, o chamar-ferramenta usa o `gerirQuadro` direto (a busca na tx).
+ */
+export type UseCasesNod = UseCasesNodContrato<Deps> & { gerirQuadroEmFases?: typeof import("./gerir-quadro.ts").gerirQuadroEmFases };
 
 export type CasoDeUso<I, O> = (deps: Deps, input: I) => Promise<{ data: O; events?: RuntimeEvent[] }>;

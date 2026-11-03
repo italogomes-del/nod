@@ -18,8 +18,10 @@ import { retomarAposAcesso } from "./retomar-apos-acesso.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
 import { sincronizarDasDecisoes } from "./trabalhos.ts";
 import { fecharPedidoDeCredencial } from "./guardar-credencial.ts";
+import { decidirAssumirQuadro } from "./assumir-quadro.ts";
 import { decidirColunasDoQuadro } from "./colunas-do-quadro.ts";
 import { decidirQuadroExclusao } from "./quadro-exclusao.ts";
+import { decidirImportacaoLinear } from "./importar-linear.ts";
 
 export type EntradaDecidirAcesso = {
   decisaoId: string;
@@ -139,11 +141,15 @@ export const recusarPropostaPelaConversa: CasoDeUso<{ propostaId: string; execut
   // Revisão 4 do PR #627: os cards do quadro (colunas e exclusão) recusam pelo caso deles, que fecha a decisão de mesmo id
   // em "Sua vez" na ordem deles (a exclusão trava o QUADRO antes da proposta). Pelo recusarProposta genérico a decisão
   // ficava aberta e o card pendente para sempre. Só a dona (a mesma regra da rota da decisão); quem não é dona segue o 409.
-  if ((lida?.payload.kind === "quadro_exclusao" || lida?.payload.kind === "colunas_quadro") && lida.estado === "pendente") {
+  // Revisão 7 do PR #630: a importação do Linear também (decidirImportacaoLinear com recusa fecha a decisão de mesmo id).
+  const kind = lida?.payload.kind;
+  if ((kind === "quadro_exclusao" || kind === "colunas_quadro" || kind === "assumir_quadro" || kind === "importacao_linear") && lida?.estado === "pendente") {
     const aberta = await deps.repos.decisoes.buscar(lida.id);
     if (aberta && aberta.ownerId === deps.escopo.pessoaId && (aberta.estado === "pendente" || aberta.estado === "reaberta")) {
       const r = lida.payload.kind === "quadro_exclusao"
         ? await decidirQuadroExclusao(deps, { decisaoId: lida.id, recusar: true, executor: input.executor })
+        : lida.payload.kind === "assumir_quadro" ? await decidirAssumirQuadro(deps, { decisaoId: lida.id, recusar: true })
+        : lida.payload.kind === "importacao_linear" ? await decidirImportacaoLinear(deps, { decisaoId: lida.id, recusar: true })
         : await decidirColunasDoQuadro(deps, { decisaoId: lida.id, recusar: true, executor: input.executor });
       const proposta = await deps.repos.propostas.buscar(lida.id);
       if (!proposta) throw new ErroDeDominio("nao_encontrado");

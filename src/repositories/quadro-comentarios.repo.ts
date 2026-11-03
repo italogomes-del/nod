@@ -8,7 +8,7 @@ interface LinhaComentario {
   id: string;
   quadro_id: string;
   tarefa_id: string;
-  autor: "pessoa" | "agente";
+  autor: "pessoa" | "agente" | "linear";
   autor_agente_id: string | null;
   pedido_por: string | null;
   texto: string;
@@ -22,7 +22,8 @@ const paraComentario = (l: LinhaComentario): ComentarioTarefa => ({
   id: l.id,
   quadroId: l.quadro_id,
   tarefaId: l.tarefa_id,
-  autor: l.autor === "agente" && l.autor_agente_id ? { tipo: "agente", agenteId: l.autor_agente_id } : { tipo: "pessoa" },
+  // Revisão do PR #630: o comentário trazido do Linear não é da pessoa.
+  autor: l.autor === "linear" ? { tipo: "linear" } : l.autor === "agente" && l.autor_agente_id ? { tipo: "agente", agenteId: l.autor_agente_id } : { tipo: "pessoa" },
   texto: l.texto,
   deFora: l.de_fora,
   criadoEm: ms(l.criado_em),
@@ -52,7 +53,7 @@ export function quadroComentariosRepo(conn: Conn, escopo: Escopo) {
     /** Os comentários da tarefa, do mais antigo ao mais novo, com o nome do autor e de quem cada um acionou. */
     async daTarefa(tarefaId: string): Promise<ComentarioDto[]> {
       const ls = await conn<(LinhaComentario & { autor_nome: string | null; acionados: string[] })[]>`
-        select ${conn.unsafe(COLUNAS)}, a.nome as autor_nome,
+        select ${conn.unsafe(COLUNAS)}, coalesce(c.autor_nome, a.nome) as autor_nome,
           array(select distinct ag.nome from turnos t join agentes ag on ag.tenant_id = t.tenant_id and ag.id = t.agente_id
                 where t.tenant_id = c.tenant_id and t.id = any(c.turnos)) as acionados
         from quadro_comentarios c left join agentes a on a.tenant_id = c.tenant_id and a.id = c.autor_agente_id

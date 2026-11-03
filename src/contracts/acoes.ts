@@ -85,5 +85,8 @@ export type DefinicaoAcao = {
   semRotaDePessoa?: string;
 };
 
-/** O que só roda depois do commit da transação (o efeito fora do banco, ADR-135 §4). */
-export type EfeitoAposCommit = { tipo: "desligar_computador"; agenteId: string };
+/**
+ * O que só roda depois do commit da transação (o efeito fora do banco, ADR-135 §4). `importar_linear` (NOD-422): a
+ * importação confirmada é trazida do Linear em segundo plano (não segura a resposta do Confirmar).
+ */
+export type EfeitoAposCommit = { tipo: "desligar_computador"; agenteId: string } | { tipo: "importar_linear"; importacaoId: string };

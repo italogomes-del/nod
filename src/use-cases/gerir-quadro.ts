@@ -4,7 +4,11 @@ import { LIMITE_ACIONAMENTOS_HORA } from "../domain/freios-quadro.ts";
 import type { LinkDeTarefa } from "../contracts/quadro-pela-conversa.ts";
 import { ehOpDeTrabalho, lerOps, MAX_COMECOS_POR_LOTE } from "../domain/quadro.ts";
 import { proporColunas } from "./colunas-do-quadro.ts";
+import type { IssueLinear } from "../contracts/quadro-importacao.ts";
+import { type BuscaDaPrevia, conferirImportacaoDoBot, type FalhaDaImportacao, proporImportacaoLinear } from "./importar-linear.ts";
 import { proporExclusaoDoQuadro } from "./quadro-exclusao.ts";
+import { desfazerAssumir, proporAssumirQuadro } from "./assumir-quadro.ts";
+import { autoriaDoAgente } from "./registrar-negacao.ts";
 import { acharQuadro, agentesDaPessoa, aplicarLoteQuadro, experimentoLigado, falhaDoAchado, montarQuadro, type PedidoLote, resumoParaBot } from "./quadro.ts";
 import { trabalhoDaTarefa, trabalhosParaBot } from "./quadro-execucoes.ts";
 import { consultarPelaPorta, vaiParaQuadroDeOutraPessoa } from "./quadro-pessoas.ts";
@@ -24,6 +28,14 @@ const INSTRUCAO: Record<Extract<ResultadoGerirQuadro, { ok: false }>["erro"], st
   sem_quadro: "Nada mudou.",
   entrada_invalida: "Nada mudou: corrija a ação e chame de novo.",
   nao_encontrado: "Nada mudou: confira o id ou o nome e chame de novo.",
+  // NOD-422: as recusas da importação do Linear.
+  sem_conector: "Nada foi importado: peça à pessoa o acesso de leitura ao Linear (pedir_acesso, conector linear) e chame de novo depois.",
+  // Revisão 6 do PR #630: o Linear fora do ar (prazo, 5xx, rede) é passageiro: pedir_acesso não resolve.
+  linear_indisponivel: "Nada foi importado: não é falta de acesso (não chame pedir_acesso). Diga à pessoa que o Linear não respondeu e tente de novo em instantes.",
+  // Revisão 4 do PR #630: a busca desligada no servidor não é falta de acesso: pedir_acesso não resolve.
+  importacao_indisponivel: "Nada foi importado: não é falta de acesso (não chame pedir_acesso). Diga à pessoa, em uma frase, que este servidor não traz o time do Linear.",
+  importacao_em_andamento: "Já há uma importação trazendo neste quadro: espere ela terminar (a linha de progresso está no quadro).",
+  demais: "Nada foi importado: chame de novo com filtro sem_backlog, ou pergunte à pessoa qual filtro usar.",
   nao_permitido: "Nada mudou: não é você (nem a pessoa desta conversa) quem decide. Não tente de novo; diga isso a ela.",
   estado_invalido: "Nada mudou: conte à pessoa o motivo; só chame de novo depois que ela resolver.",
   conflito: "Nada mudou: outra mudança chegou antes; leia o quadro e chame de novo.",
@@ -61,6 +73,19 @@ export function linksDasTarefas(q: QuadroDto, ids: ReadonlySet<string>): LinkDeT
 const naConversa = (t: Pick<Turno, "origem" | "profundidade" | "sobProcuracaoDe">): boolean =>
   (t.origem === "conversa" || t.origem === "ligacao") && t.profundidade === 0 && t.sobProcuracaoDe == null;
 
+/**
+ * O importar_time_linear em fases (revisão do PR #630, item 6): "direto" busca a prévia na própria transação (quem chama o
+ * caso inteiro: os testes e o despacho direto); "conferir" para antes da busca e devolve `buscarLinear` para a rota interna
+ * buscar FORA da transação; "aplicar" usa o que a busca deu (as issues ou a falha). As outras ações ignoram o modo.
+ */
+export type ModoImportacao =
+  | { fase: "direto" }
+  | { fase: "conferir" }
+  | { fase: "aplicar"; issues: readonly IssueLinear[] }
+  | { fase: "aplicar"; falha: { erro: FalhaDaImportacao; detalhe: string } };
+
+type EntradaGerirQuadro = Parameters<CasoNod<Deps, "gerir_quadro">>[1];
+type SaidaGerirQuadro = Awaited<ReturnType<CasoNod<Deps, "gerir_quadro">>>;
 /**
  * NOD-443 (revisão 1, achado 1): o turno da tarefa que quem participa pediu nasce sob a procuração dela. O bot da dona,
  * nesse turno, ainda mexe no quadro da dona (o card da própria tarefa): o quadro do turno é dela e quem pediu participa.
@@ -119,6 +144,12 @@ async function consultar(deps: Deps, agenteId: string, quadro: string | undefine
 }
 
 export const gerirQuadro: CasoNod<Deps, "gerir_quadro"> = async (deps, input) => {
+  const r = await gerirQuadroEmFases(deps, input, { fase: "direto" });
+  if ("buscarLinear" in r) throw new Error("gerir_quadro direto não devolve busca");
+  return r;
+};
+
+export async function gerirQuadroEmFases(deps: Deps, input: EntradaGerirQuadro, modo: ModoImportacao): Promise<SaidaGerirQuadro | { buscarLinear: BuscaDaPrevia }> {
   const turno = await deps.repos.turnos.buscar(input.turnoId);
   if (!turno || turno.agenteId !== input.agenteId) return recusa("nao_encontrado", "turno de outro bot");
   // ADR-063 entre donos (revisão do PR #612): o quadro é da pessoa do escopo. Um bot de outro dono só mexe nele de
@@ -177,6 +208,58 @@ export const gerirQuadro: CasoNod<Deps, "gerir_quadro"> = async (deps, input) =>
   // NOD-443 (revisão 2 do PR #628, achado 2): no turno que o pedido de quem participa abriu no bot da dona, o bot age sob
   // a procuração dela (as regras são as de quem pediu) e só na tarefa do turno. Sem isso, o lote sairia como da dona.
   const procuracao = await procuracaoDoTurno(deps, agente.ownerId, turno);
+  // NOD-422: trazer um time do Linear vira o card de prévia na conversa; só a pedido da pessoa (não numa tarefa, rotina ou
+  // pedido de colega). O servidor busca e aplica depois que ela confirma, num lote só com Desfazer.
+  const importar = ops[0]?.tipo === "importar_time_linear" ? ops[0] : null;
+  if (importar) {
+    if (!naConversa(turno)) return recusa("entrada_invalida", "a importação do Linear só sai a pedido da pessoa, num turno em que ela falou com você. Diga a ela que pode pedir");
+    const autor = { tipo: "agente" as const, agenteId: input.agenteId };
+    const noQuadro = input.quadro !== undefined ? { quadro: input.quadro } : {};
+    if (modo.fase === "conferir") {
+      const c = await conferirImportacaoDoBot(deps, { autor, ...noQuadro, op: importar, turnoId: turno.id });
+      if (!c.ok) return recusa(c.erro, c.detalhe);
+      return { buscarLinear: { cred: c.cred, time: c.time, filtro: c.filtro } };
+    }
+    if (modo.fase === "aplicar" && "falha" in modo) return recusa(modo.falha.erro, modo.falha.detalhe);
+    const pr = await proporImportacaoLinear(deps, {
+      autor, ...noQuadro,
+      op: importar, agenteId: input.agenteId, conversaId: input.conversaId, turnoId: turno.id,
+      ...(modo.fase === "aplicar" && "issues" in modo ? { issues: modo.issues } : {}),
+    });
+    if (!pr.data.ok) return { data: { ok: false, erro: pr.data.erro, instrucao: `${pr.data.detalhe}. ${INSTRUCAO[pr.data.erro]}` }, events: pr.events };
+    const pv = pr.data.payload.previa;
+    return {
+      data: {
+        ok: true, quadro: null, lote_id: null, comecaram: [], proposta_id: pr.data.propostaId,
+        instrucao: `Nada mudou ainda: a prévia (${pv.total} ${pv.total === 1 ? "tarefa" : "tarefas"} do time ${pr.data.payload.time}${pv.precisamDeVoce ? `, ${pv.precisamDeVoce} precisam da pessoa` : ""}) espera a pessoa no card desta conversa. Diga isso em uma frase e encerre.`,
+      },
+      events: pr.events,
+    };
+  }
+  // NOD-422 (PR 2): o quadro assume a esteira. Só a pedido da pessoa, na conversa; vira o card com as rotinas e nada pausa
+  // até ela confirmar. O desfazer (reativa só as que o assumir pausou) sai na hora, também só a pedido dela e num turno limpo.
+  const assumir = ops[0]?.tipo === "assumir_quadro" ? ops[0] : null;
+  if (assumir) {
+    if (!naConversa(turno)) return recusa("entrada_invalida", "o quadro só assume a esteira a pedido da pessoa, num turno em que ela falou com você. Diga a ela que pode pedir");
+    const noQuadro = input.quadro !== undefined ? { quadro: input.quadro } : {};
+    if (assumir.desfazer) {
+      if (!limpo) return recusa("entrada_invalida", "desfazer o assumir reativa rotinas: só num turno em que a pessoa falou com você e nada de fora entrou");
+      const d = await desfazerAssumir(deps, { autor: { tipo: "agente", agenteId: input.agenteId }, turnoId: turno.id, autoria: autoriaDoAgente(deps.escopo, input.agenteId), ...noQuadro });
+      if (!d.data.ok) return { data: { ok: false, erro: d.data.erro, instrucao: `${d.data.detalhe}. ${INSTRUCAO[d.data.erro]}` }, events: d.events };
+      const n = d.data.reativadas.length;
+      return { data: { ok: true, quadro: null, lote_id: null, comecaram: [], instrucao: `Desfeito: o quadro do ${d.data.anfitriaoNome} deixou de assumir a esteira e ${n === 0 ? "nenhuma rotina precisou voltar" : `${n === 1 ? "1 rotina voltou" : `${n} rotinas voltaram`} a rodar`}. Diga isso em uma frase.` }, events: d.events };
+    }
+    const pa = await proporAssumirQuadro(deps, { agenteId: input.agenteId, conversaId: input.conversaId, turnoId: turno.id, ...noQuadro });
+    if (!pa.data.ok) return { data: { ok: false, erro: pa.data.erro, instrucao: `${pa.data.detalhe}. ${INSTRUCAO[pa.data.erro]}` }, events: pa.events };
+    const n = pa.data.payload.rotinas.length;
+    return {
+      data: {
+        ok: true, quadro: null, lote_id: null, comecaram: [], proposta_id: pa.data.propostaId,
+        instrucao: `Nada mudou ainda: o quadro do ${pa.data.payload.anfitriaoNome} assumir a esteira (${n === 0 ? "nenhuma rotina a pausar" : `pausar ${n} ${n === 1 ? "rotina" : "rotinas"}`}) espera a pessoa ${pa.data.jaAberto ? "num card já aberto" : "no card desta conversa"}. Diga isso em uma frase e encerre.`,
+      },
+      events: pa.events,
+    };
+  }
   // NOD-430: remover o quadro (o do próprio bot ou o de outro bot da pessoa) vira o card 'quadro_exclusao', como o
   // excluir_rotina; no automático/total o modo confirma na hora e volta `aplicada: true`.
   const remover = ops[0]?.tipo === "remover_quadro" ? ops[0] : null;
@@ -272,4 +355,4 @@ export const gerirQuadro: CasoNod<Deps, "gerir_quadro"> = async (deps, input) =>
     },
     events: r.events,
   };
-};
+}

@@ -1,6 +1,12 @@
+import { FRASE_SEM_CONECTOR, type CredencialLinear, type FiltroImportacao } from "../../../contracts/quadro-importacao.ts";
+import type { Escopo } from "../../../shared/types.ts";
+import { log } from "../../../obs/log.ts";
+import { ErroDaImportacao, ErroDoMover, erroDaImportacao, EXECUTORES_QUADRO } from "../../../use-cases/acoes/quadro.ts";
+import { previaAssumir } from "../../../use-cases/assumir-quadro.ts";
+import { registrarTrilhaQuadro } from "../../../use-cases/trilha-quadro.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
-import { ErroDoMover, EXECUTORES_QUADRO } from "../../../use-cases/acoes/quadro.ts";
 import { verComentarios } from "../../../use-cases/comentar-tarefa.ts";
+import { buscarPreviaNoLinear, conferirPreviaDaTela, previaDaTela } from "../../../use-cases/importar-linear.ts";
 import { verTrabalhos } from "../../../use-cases/quadro-execucoes.ts";
 import { historicoDaTarefa, listarQuadros, verQuadro, verTarefaPorCodigo } from "../../../use-cases/quadro.ts";
 import { muralDoQuadro, quadrosCompartilhados, verQuadroPorId } from "../../../use-cases/quadro-pessoas.ts";
@@ -39,6 +45,48 @@ export function motivoDoMover(erro: unknown): { status: number; corpo: { codigo:
 }
 
 /**
+ * QA do PR #630: sem o Linear conectado (sem a chave do Composio ou sem a sessão do Linear) a prévia diz "O Linear não
+ * está conectado" e o Trazer dizia "Configure sua chave Composio", a frase genérica do 409. O Trazer agora diz a mesma
+ * causa da prévia, com o `motivo` que a tela já conhece; o código e o status seguem os do mapa.
+ */
+export function recusaDoTrazer(erro: unknown): { status: number; corpo: { codigo: string; mensagem: string; motivo: string } } | null {
+  if (!(erro instanceof ErroDaImportacao) || erro.motivo !== "sem_conector") return null;
+  log("aviso", "requisicao_recusada", { codigo: erro.codigo, motivo: erro.motivo, rota: "/agentes/:id/quadro/importacao" });
+  return { status: TABELA_ERROS[erro.codigo].status, corpo: { codigo: erro.codigo, mensagem: FRASE_SEM_CONECTOR, motivo: erro.motivo } };
+}
+
+type BuscaDaPrevia = Awaited<ReturnType<typeof buscarPreviaNoLinear>>;
+
+/**
+ * Revisão do PR #630 (definido em 2026-11-02): a busca leve da prévia por (pessoa, quadro, time, filtro) vale
+ * PREVIA_CACHE_MS. Reabrir o "Trazer do Linear…", trocar o filtro e voltar ou clicar em Trazer logo depois não refazem
+ * até 30 páginas no Composio; duas abas ao mesmo tempo dividem a mesma busca em voo. A falha não fica guardada (a
+ * próxima tentativa busca de novo) e o mapa tem teto (o mais antigo sai primeiro).
+ */
+export const PREVIA_CACHE_MS = 30_000;
+const PREVIA_CACHE_MAX = 200;
+
+export function cacheDaPrevia(agora: () => number = Date.now) {
+  const m = new Map<string, { ate: number; busca: Promise<BuscaDaPrevia> }>();
+  return (chave: string, buscar: () => Promise<BuscaDaPrevia>): Promise<BuscaDaPrevia> => {
+    const t = agora();
+    const achada = m.get(chave);
+    if (achada && achada.ate > t) return achada.busca;
+    m.delete(chave);
+    const busca = buscar().then((r) => {
+      if (!r.ok && m.get(chave)?.busca === busca) m.delete(chave);
+      return r;
+    }, (e: unknown) => {
+      if (m.get(chave)?.busca === busca) m.delete(chave);
+      throw e;
+    });
+    m.set(chave, { ate: t + PREVIA_CACHE_MS, busca });
+    while (m.size > PREVIA_CACHE_MAX) m.delete(m.keys().next().value!);
+    return busca;
+  };
+}
+
+/**
  * A aba Quadro de um bot (definido em 2026-10-31, NOD-442, ADR-135). Cada mutação é um lote de uma ação pelo executor
  * único do id (src/use-cases/acoes/quadro.ts), o mesmo lote do gerir_quadro; o corpo passa pelo lerOp do domínio. A
  * resposta traz o quadro montado e o lote (para o Desfazer); o outro aparelho atualiza pelo frame quadro.mudou.
@@ -55,6 +103,20 @@ function camposDaTarefa(c: Record<string, unknown>): Partial<Record<(typeof CAMP
 export function rotasQuadro(d: DepsRotas): Rota[] {
   const executar = criarExecutor(d);
   const base = (agenteId: string) => ({ anfitriaoId: agenteId, executor: d.executor ?? "catcher" });
+  const naCache = cacheDaPrevia(d.agora);
+  /**
+   * As duas fases da prévia e do Trazer (o padrão de rotas/decisoes.ts): as recusas numa transação curta, a busca no
+   * Linear FORA de qualquer transação (não segura conexão do banco enquanto o Composio pagina) e a fase 2 com as issues.
+   */
+  const buscarFora = async (escopo: Escopo, agenteId: string, time: string, filtro: string | null) => {
+    const f1 = await executar(escopo, conferirPreviaDaTela, { agenteId, time, filtro });
+    if (!f1.ok) return f1;
+    const fonte = d.services.linear;
+    if (!fonte) return { ok: false as const, erro: "importacao_indisponivel" as const, detalhe: "a importação do Linear não está disponível neste servidor" };
+    const cred: CredencialLinear = f1.cred;
+    const p: { time: string; filtro: FiltroImportacao | null } = { time: f1.time, filtro: f1.filtro };
+    return naCache(`${escopo.tenantId}:${escopo.pessoaId}:${f1.quadroId}:${p.time}:${p.filtro ?? ""}`, () => buscarPreviaNoLinear(fonte, cred, p));
+  };
   // O corpo não escolhe o quadro: vem da URL (o id; um id que não é uuid não acha nada).
   const doQuadro = (qid: string | undefined) => ({ quadroId: qid ?? "", executor: d.executor ?? "catcher" });
   return [
@@ -79,6 +141,45 @@ export function rotasQuadro(d: DepsRotas): Rota[] {
     { metodo: "POST", acao: "quadro.importar_linear", padrao: new RegExp(`^/agentes/${ID}/quadro/linear$`), async handler(ctx) {
       const c = corpoObjeto(await ctx.corpo());
       ctx.json(200, await executar(ctx.escopo, EXECUTORES_QUADRO["quadro.importar_linear"], { ...base(ctx.params.id ?? ""), itens: c.itens as never }));
+    } },
+    // NOD-422: "Trazer do Linear…": a prévia (só lê; a recusa volta como dado) e o Trazer (a importação em segundo plano).
+    { metodo: "GET", padrao: new RegExp(`^/agentes/${ID}/quadro/importacao/previa$`), async handler(ctx) {
+      const q = new URL(ctx.req.url ?? "/", "http://127.0.0.1").searchParams;
+      const pedido = { agenteId: ctx.params.id ?? "", time: q.get("time") ?? "", filtro: q.get("filtro") || null };
+      const b = await buscarFora(ctx.escopo, pedido.agenteId, pedido.time, pedido.filtro);
+      if (!b.ok) return ctx.json(200, b);
+      ctx.json(200, await executar(ctx.escopo, previaDaTela, { ...pedido, issues: b.issues }));
+    } },
+    { metodo: "POST", acao: "quadro.importar_time_linear", padrao: new RegExp(`^/agentes/${ID}/quadro/importacao$`), async handler(ctx) {
+      const c = corpoObjeto(await ctx.corpo());
+      const time = typeof c.time === "string" ? c.time : "";
+      const filtro = texto(c.filtro) ?? null;
+      try {
+        const b = await buscarFora(ctx.escopo, ctx.params.id ?? "", time, filtro);
+        if (!b.ok) throw erroDaImportacao(b);
+        ctx.json(202, await executar(ctx.escopo, EXECUTORES_QUADRO["quadro.importar_time_linear"], { ...base(ctx.params.id ?? ""), time, filtro, issues: b.issues }));
+      } catch (erro) {
+        const r = recusaDoTrazer(erro);
+        if (!r) throw erro;
+        ctx.json(r.status, r.corpo);
+      }
+    } },
+    // NOD-422 (PR 2): o quadro assume a esteira. A lista (só lê; a recusa volta como dado), o Assumir (o clique é a
+    // confirmação; `rotinas` = as que a pessoa viu) e o Desfazer (reativa só as que o assumir pausou).
+    { metodo: "GET", padrao: new RegExp(`^/agentes/${ID}/quadro/assumir$`), async handler(ctx) {
+      ctx.json(200, await executar(ctx.escopo, previaAssumir, { agenteId: ctx.params.id ?? "" }));
+    } },
+    { metodo: "POST", acao: "quadro.assumir", padrao: new RegExp(`^/agentes/${ID}/quadro/assumir$`), async handler(ctx) {
+      const c = corpoObjeto(await ctx.corpo());
+      ctx.json(200, await executar(ctx.escopo, EXECUTORES_QUADRO["quadro.assumir"], { ...base(ctx.params.id ?? ""), rotinas: c.rotinas }));
+    } },
+    { metodo: "DELETE", acao: "quadro.assumir", padrao: new RegExp(`^/agentes/${ID}/quadro/assumir$`), async handler(ctx) {
+      ctx.json(200, await executar(ctx.escopo, EXECUTORES_QUADRO["quadro.assumir"], { ...base(ctx.params.id ?? ""), desfazer: true }));
+    } },
+    // NOD-422 (PR 2): a trilha do quadro que só a tela sabe (tarefa aberta, conversa aberta); só ids, só em events.
+    { metodo: "POST", acao: "telemetria.registrar", padrao: /^\/telemetria\/quadro$/, async handler(ctx) {
+      const c = corpoObjeto(await ctx.corpo());
+      ctx.json(200, await executar(ctx.escopo, registrarTrilhaQuadro, { eventos: c.eventos }));
     } },
     { metodo: "PATCH", acao: "quadro.mudar_tarefa", padrao: new RegExp(`^/agentes/${ID}/quadro/tarefas/${TID}$`), async handler(ctx) {
       const c = corpoObjeto(await ctx.corpo());

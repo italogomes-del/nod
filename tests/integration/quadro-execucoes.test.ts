@@ -869,4 +869,39 @@ describeIntegracao("trabalhos da tarefa do quadro (NOD-418)", () => {
       expect(avisos[0]).not.toContain(`"T"`);
     });
   });
+
+  it("revisão 4 do PR #630: ir para Bloqueado e voltar pelo Repetir entra no histórico e na trilha (tarefa_movida, autor regra)", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const t = await m.tarefa();
+      // Tudo na mesma transação (o now() não anda): as linhas novas saem pelo id, não pela hora.
+      const vistos = new Set<string>();
+      const novas = async () => {
+        const hs = await trx<{ id: string; de: string | null; para: string | null; autor: string; lote: string | null }[]>`
+          select id, de, para, autor, lote_id as lote from quadro_tarefa_historico where tarefa_id = ${t.id} and campo = 'status'`;
+        const es = await trx<{ id: string; de: string | null; para: string | null; autor: string; lote: string | null }[]>`
+          select id, dados->>'de' as de, dados->>'para' as para, dados->>'autor' as autor, dados->>'lote_id' as lote from events
+           where kind = 'tarefa_movida' and dados->>'tarefa_id' = ${t.id}`;
+        const so = (ls: typeof hs) => ls.filter((l) => !vistos.has(l.id)).map((l) => [l.de, l.para, l.autor, l.lote]);
+        const r = { historico: so(hs), trilha: so(es) };
+        for (const l of [...hs, ...es]) vistos.add(l.id);
+        return r;
+      };
+      await novas();
+      await m.terminar("do_agente");
+      await m.varrer();
+      expect((await m.tarefa()).status).toBe("bloqueado");
+      expect(await novas()).toEqual({ historico: [["fazendo", "bloqueado", "regra", null]], trilha: [["fazendo", "bloqueado", "regra", null]] });
+
+      await m.op({ tipo: "repetir_trabalho" });
+      expect((await m.tarefa()).status).toBe("fazendo");
+      expect(await novas()).toEqual({ historico: [["bloqueado", "fazendo", "regra", null]], trilha: [["bloqueado", "fazendo", "regra", null]] });
+
+      // O Repetir de uma tarefa que não estava bloqueada não muda a coluna: nada novo.
+      await m.terminar("concluido");
+      await m.varrer();
+      await m.op({ tipo: "repetir_trabalho" });
+      expect(await novas()).toEqual({ historico: [], trilha: [] });
+    });
+  });
 });

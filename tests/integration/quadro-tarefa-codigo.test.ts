@@ -4,6 +4,8 @@ import { vincularEscopo } from "../../src/db/tx.ts";
 import { ErroDeDominio } from "../../src/domain/erro.ts";
 import { SQL_MUDOU_DE_QUADRO_DEPOIS } from "../../src/repositories/quadros.repo.ts";
 import { comentarTarefa, verComentarios } from "../../src/use-cases/comentar-tarefa.ts";
+import type { IssueLinear } from "../../src/contracts/quadro-importacao.ts";
+import { aplicarImportacao, iniciarImportacao } from "../../src/use-cases/importar-linear.ts";
 import { aplicarLoteQuadro, historicoDaTarefa, listarQuadros, montarQuadro, verTarefaPorCodigo, type PedidoLote } from "../../src/use-cases/quadro.ts";
 import { depsSobre } from "../helpers/deps-l7.ts";
 import { agenteComConversa } from "../helpers/fabricas.ts";
@@ -384,14 +386,31 @@ describeIntegracao("tarefa: código, histórico e mover de quadro (NOD-416)", ()
     });
   });
 
-  it("revisão do PR #623: no mover, o id do Linear também ganha do código de outro quadro", async () => {
+  it("revisão do PR #630: o código de uma tarefa que é o id do Linear de outra não escolhe, nem no mover nem no link", async () => {
     await withRollback(MARLON, async (trx) => {
       const m = await montar(trx);
       const dz = await m.ok({ anfitriaoId: m.ze.agenteId, ops: [{ tipo: "criar_quadro", meta: null }, { tipo: "criar_tarefa", titulo: "Da casa" }] });
       const pz = dz.quadro!.prefixo!;
-      await m.ok({ anfitriaoId: m.ma.agenteId, ops: [{ tipo: "criar_quadro", meta: null }, { tipo: "importar_linear", itens: [{ identificador: `${pz}-1`, titulo: "Do Linear" }] }] });
-      const r = await m.ok({ anfitriaoId: m.ma.agenteId, ops: [{ tipo: "mover_quadro", tarefa: `${pz}-1`, quadro: m.zeNome }] });
-      expect(r.quadro!.tarefas.map((t) => t.titulo).sort()).toEqual(["Da casa", "Do Linear"]);
+      const dm = await m.ok({ anfitriaoId: m.ma.agenteId, ops: [{ tipo: "criar_quadro", meta: null }, { tipo: "importar_linear", itens: [{ identificador: `${pz}-1`, titulo: "Do Linear" }] }] });
+      const daCasa = dz.quadro!.tarefas[0]!;
+      const doLinear = dm.quadro!.tarefas[0]!;
+      // O mover pelo chat: recusa e diz as duas (com os ids) para o bot perguntar.
+      const r = (await m.lote({ anfitriaoId: m.ma.agenteId, ops: [{ tipo: "mover_quadro", tarefa: `${pz}-1`, quadro: m.zeNome }] })).data;
+      expect(r).toMatchObject({ ok: false, erro: "entrada_invalida" });
+      if (r.ok) throw new Error("moveu");
+      expect(r.detalhe).toContain(daCasa.id);
+      expect(r.detalhe).toContain(doLinear.id);
+      // O link: as mesmas duas, para a pessoa escolher.
+      const link = (await verTarefaPorCodigo(m.deps, { codigo: `${pz}-1` })).data;
+      if (!("ambigua" in link)) throw new Error("o link escolheu");
+      expect(link.ambigua.map((o) => [o.tarefaId, o.doLinear]).sort()).toEqual([[daCasa.id, false], [doLinear.id, true]].sort());
+      // Pelo id, o mover passa.
+      const movida = await m.ok({ anfitriaoId: m.ma.agenteId, ops: [{ tipo: "mover_quadro", tarefa: doLinear.id, quadro: m.zeNome }] });
+      expect(movida.quadro!.tarefas.map((t) => t.titulo).sort()).toEqual(["Da casa", "Do Linear"]);
+      // Sem colisão, o id do Linear acha a importada nos dois caminhos.
+      const dm2 = await m.ok({ anfitriaoId: m.ma.agenteId, ops: [{ tipo: "importar_linear", itens: [{ identificador: "LIN-77", titulo: "Só do Linear" }] }] });
+      const so = dm2.quadro!.tarefas.find((t) => t.linearId === "LIN-77")!;
+      expect((await verTarefaPorCodigo(m.deps, { codigo: "lin-77" })).data).toMatchObject({ tarefaId: so.id });
     });
   });
 
@@ -547,6 +566,57 @@ describeIntegracao("tarefa: código, histórico e mover de quadro (NOD-416)", ()
     });
   });
 
+  it("revisão 11 do PR #630: a importação que troca o prefixo; a tarefa antiga abre pelo código novo e pelo velho, antes e depois do Desfazer", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      // A chave do time: 3 letras que nenhum quadro nem código da pessoa usa (o banco de teste guarda os de outras rodadas;
+      // um prefixo já reservado faria o bot "<chave>inho" ganhar outro prefixo e o teste cair sem bug).
+      const usados = new Set((await trx<{ prefixo: string }[]>`select prefixo from quadros where prefixo is not null union select prefixo from quadro_tarefa_codigos`).map((r) => r.prefixo));
+      const sortear = () => Array.from({ length: 3 }, () => String.fromCharCode(65 + Math.floor(Math.random() * 26))).join("");
+      let time = sortear();
+      while (usados.has(time)) time = sortear();
+      const issue = (n: number): IssueLinear => ({
+        identificador: `${time}-${n}`, numero: n, titulo: `Issue ${n}`, url: `https://linear.app/gamefik/issue/${time}-${n}/issue-${n}`, descricao: "corpo",
+        estado: "Backlog", noEstadoDesde: AGORA, etiquetas: [], mae: null, bloqueadaPor: [], comentarios: [], anexos: [],
+      });
+      const importar = async (issues: IssueLinear[]) => {
+        const q = (await m.repos.quadros.doAgente(m.ze.agenteId))!;
+        const i = await iniciarImportacao(m.deps, { quadro: q, time, filtro: null, total: issues.length, conversaId: null });
+        if (!i.data.ok) throw new Error(i.data.detalhe);
+        expect((await aplicarImportacao(m.deps, i.data.importacao.id, issues)).data).toBe("aplicada");
+        return (await m.repos.quadroImportacoes.ultima(q.id))!;
+      };
+      const abre = async (codigo: string) => (await verTarefaPorCodigo(m.deps, { codigo })).data;
+
+      const dono = await agenteComConversa(trx, MARLON, { nome: `${time}inho` });
+      const ocupa = await m.ok({ anfitriaoId: dono.agenteId, ops: [{ tipo: "criar_quadro", meta: null }] });
+      expect(ocupa.quadro!.prefixo).toBe(time);
+      const dz = await m.ok({ anfitriaoId: m.ze.agenteId, ops: [{ tipo: "criar_quadro", meta: null }] });
+      const velho = dz.quadro!.prefixo!;
+      // 1ª importação: outro quadro usa a chave do time, o prefixo fica; a tarefa ganha o número da issue (livre).
+      await importar([issue(901)]);
+      const antiga = (await m.repos.quadros.tarefas(dz.quadro!.id)).find((t) => t.linearId === `${time}-901`)!;
+      expect(antiga.numero).toBe(901);
+      expect(await abre(`${velho}-901`)).toMatchObject({ tarefaId: antiga.id, codigoAtual: `${velho}-901` });
+      // O quadro que ocupava a chave sai (vazio, não reserva o prefixo): a 2ª importação troca o prefixo pelo do time.
+      await m.ok({ anfitriaoId: dono.agenteId, ops: [{ tipo: "remover_quadro" }] });
+      const imp = await importar([issue(901), issue(902)]);
+      expect((await m.repos.quadros.doAgente(m.ze.agenteId))!.prefixo).toBe(time);
+      expect(await abre(`${time}-901`)).toMatchObject({ tarefaId: antiga.id, codigoAtual: `${time}-901` });
+      expect(await abre(`${velho}-901`)).toMatchObject({ tarefaId: antiga.id, codigoAtual: `${time}-901` });
+      const nova = (await m.repos.quadros.tarefas(dz.quadro!.id)).find((t) => t.linearId === `${time}-902`)!;
+      expect(await abre(`${time}-902`)).toMatchObject({ tarefaId: nova.id, codigoAtual: `${time}-902` });
+
+      // O Desfazer devolve o prefixo velho: a antiga abre pelos dois códigos, com o código atual de volta ao velho.
+      expect(await m.ok({ anfitriaoId: m.ze.agenteId, ops: [{ tipo: "desfazer", lote: imp.loteId! }] })).toMatchObject({ desfeito: true });
+      expect((await m.repos.quadros.doAgente(m.ze.agenteId))!.prefixo).toBe(velho);
+      expect(await abre(`${velho}-901`)).toMatchObject({ tarefaId: antiga.id, codigoAtual: `${velho}-901` });
+      expect(await abre(`${time}-901`)).toMatchObject({ tarefaId: antiga.id, codigoAtual: `${velho}-901` });
+      // A criada pela importação desfeita não abre mais por código nenhum.
+      await expect(abre(`${time}-902`)).rejects.toMatchObject({ codigo: "nao_encontrado" });
+    });
+  });
+
   it("revisão 5 do PR #623: o código antigo (de outro quadro) resolve a tarefa que voltou para este quadro", async () => {
     await withRollback(MARLON, async (trx) => {
       const m = await montar(trx);
@@ -604,7 +674,7 @@ describeIntegracao("tarefa: código, histórico e mover de quadro (NOD-416)", ()
       const r = await m.ok({ anfitriaoId: m.ze.agenteId, ops: [{ tipo: "criar_tarefa", titulo: "Nova" }] });
       const p = r.quadro!.prefixo!;
       expect(r.quadro!.tarefas.map((t) => [t.titulo, t.codigo])).toEqual([["Velha", `${p}-2`], ["Nova", `${p}-3`]]);
-      expect((await verTarefaPorCodigo(m.deps, { codigo: `${p}-2` })).data.tarefaId).toBe(dz.quadro!.tarefas[0]!.id);
+      expect(((await verTarefaPorCodigo(m.deps, { codigo: `${p}-2` })).data as { tarefaId: string }).tarefaId).toBe(dz.quadro!.tarefas[0]!.id);
     });
   });
 

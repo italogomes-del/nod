@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import type { Agente } from "../contracts/agente.ts";
 import type { Decisao } from "../contracts/decisao.ts";
 import type { Autoria, Executor, RuntimeEvent } from "../contracts/evento.ts";
-import type { AutorLote, ColunaQuadro, ComentarioQuadroDto, ComentarioTarefa, EntradaHistoricoDto, LinhaDeSistema, LoteQuadro, MudancaTarefa, OpQuadro, PrNaTela, Quadro, QuadroDaPessoaDto, QuadroDto, ResumoQuadroParaBot, TarefaDto, TarefaPorCodigoDto, TarefaQuadro } from "../contracts/quadro.ts";
+import type { AutorLote, ColunaQuadro, ComentarioQuadroDto, ComentarioTarefa, EntradaHistoricoDto, LinhaDeSistema, LoteQuadro, MudancaTarefa, OpQuadro, PrNaTela, Quadro, QuadroDaPessoaDto, OpcaoDeTarefaDto, QuadroDto, ResumoQuadroParaBot, TarefaDto, TarefaPorCodigoDto, TarefaQuadro } from "../contracts/quadro.ts";
 import { ehNod } from "../domain/nod.ts";
 import type { MovimentoParaBot, MovimentoTarefa } from "../contracts/freios-quadro.ts";
 import { fraseDaTrava, MOTIVO_LACO_SEM_NOMES, mudouATarefa, nomeDaParada, paradaDaPessoa } from "../domain/freios-quadro.ts";
@@ -11,6 +11,7 @@ import { mudancasDaTarefa, statusNoDestino } from "../domain/historico-tarefa.ts
 import { type AgenteDoQuadro, chaveDeBusca, entradaDaResposta, entradaDaTarefa, etapaDaTarefa, execucaoDoTurno, metaCumprida, planejarLote, progresso, recusaDoLimite, resolverTarefa, tarefasDaMeta, resumoDaMeta, resumoDoLote, terminadaDepois, terminou } from "../domain/quadro.ts";
 import { acionaNaColuna, colunaDeEspera, colunasDe, colunasDto, COLUNAS_PADRAO, papelDe, responsavelDe } from "../domain/colunas.ts";
 import { TAREFA_PASSOU_A_VOCE } from "../domain/comentarios-quadro.ts";
+import { ERRO_IMPORTACAO_PARADA, identificadorDaUrl, importacaoParada } from "../domain/importar-linear.ts";
 import { resumoDoPr } from "../domain/prs-da-tarefa.ts";
 import type { FotoLote } from "../repositories/quadros.repo.ts";
 import type { EstadoExecucao, ExecucoesDaTarefa, TrabalhoParaBot } from "../contracts/quadro-execucoes.ts";
@@ -27,6 +28,7 @@ import { comentarTarefa } from "./comentar-tarefa.ts";
 import { avisarNoLote } from "./avisos-quadro.ts";
 import { esperaPessoa } from "../domain/avisos-quadro.ts";
 import { sincronizarDasDecisoes } from "./trabalhos.ts";
+import { registrarHistoricoComTrilha } from "./trilha-quadro.ts";
 
 /**
  * O quadro-agente (definido em 2026-10-31, NOD-442). Um só caminho para a pessoa (as rotas) e para qualquer bot (a
@@ -254,7 +256,7 @@ export function falhaDoAchado(achado: { ambiguo: Quadro[] } | { semNome: string;
  * O quadro como a tela e o bot leem (tarefas, execução de cada uma, nomes, o último lote). Sempre no escopo da dona;
  * NOD-443: `leitor` é quem lê (a dona, ou quem participa e entrou pela porta), para o "Você", o Desfazer e quem decide.
  */
-export async function montarQuadro(deps: Pick<Deps, "repos" | "escopo">, q: Quadro, leitor: string = deps.escopo.pessoaId): Promise<QuadroDto> {
+export async function montarQuadro(deps: Pick<Deps, "repos" | "agora" | "escopo">, q: Quadro, leitor: string = deps.escopo.pessoaId): Promise<QuadroDto> {
   const repo = deps.repos.quadros;
   const donaId = deps.escopo.pessoaId;
   const tarefas = await repo.tarefas(q.id);
@@ -321,7 +323,14 @@ export async function montarQuadro(deps: Pick<Deps, "repos" | "escopo">, q: Quad
     movimentos: movs.filter((m) => m.tarefaId === t.id).map((m) => ({ ...m, autorNome: m.autor.tipo === "agente" ? nomes.get(m.autor.agenteId) ?? null : null, agenteAntesNome: m.agenteAntes ? nomes.get(m.agenteAntes) ?? null : null, agenteDepoisNome: m.agenteDepois ? nomes.get(m.agenteDepois) ?? null : null })),
   }));
   // NOD-415 (ADR-141): o que terminou antes de a meta ser posta não entra no "N de M".
-  const { feitas, total } = progresso(tarefasDaMeta(tarefas, q.metaDesde, colunas), colunas);
+  // Revisão 4 do PR #630 (decisão 3 da Ada): nem o que veio do Linear.
+  const { feitas, total } = progresso(tarefasDaMeta(tarefas, q.metaDesde, colunas, await deps.repos.quadroImportacoes.importadas(q.id)), colunas);
+  // NOD-422: a última importação do Linear (sem a conversa de onde veio, que a tela não usa).
+  const imp = await deps.repos.quadroImportacoes.ultima(q.id);
+  // Revisão do PR #630: a 'trazendo' parada (o processo caiu no meio) já aparece como falhou, e a tela para de reler; a
+  // próxima tentativa a marca no banco (conferirImportacao).
+  const parada = imp ? importacaoParada(imp, deps.agora()) : false;
+  const importacao = imp ? { id: imp.id, quadroId: imp.quadroId, time: imp.time, filtro: imp.filtro, estado: parada ? "falhou" as const : imp.estado, total: imp.total, trazidas: imp.trazidas, erro: parada ? ERRO_IMPORTACAO_PARADA : imp.erro, loteId: imp.loteId, colunas: imp.colunas, criadoEm: imp.criadoEm, atualizadoEm: imp.atualizadoEm } : null;
   return {
     ...q,
     agenteNome: nomes.get(q.agenteId) ?? "",
@@ -330,6 +339,9 @@ export async function montarQuadro(deps: Pick<Deps, "repos" | "escopo">, q: Quad
     ultimoLote: ultimo ? { id: ultimo.id, quadroId: ultimo.quadroId, autor: ultimo.autor, resumo: ultimo.resumo, tarefaIds: ultimo.tarefaIds, desfeitoEm: ultimo.desfeitoEm, criadoEm: ultimo.criadoEm } : null,
     feitas,
     total,
+    importacao,
+    // NOD-422 (PR 2): o quadro assumiu a esteira (a tela mostra e oferece o Desfazer).
+    assumidoEm: await deps.repos.quadroImportacoes.assumidoEm(q.id),
     ...(varias || leitor !== donaId
       ? {
           voce: { pessoaId: leitor, papel: leitor === donaId ? ("dona" as const) : ("membro" as const), podeDesfazer: ultimo !== null && ultimo.desfeitoEm === null && podeDesfazer({ lotePedidoPor: ultimo.pedidoPor, quemPede: leitor, donaId }) },
@@ -497,6 +509,21 @@ export async function avisarComVoce(deps: Deps, t: TarefaQuadro, quemPergunta: s
 }
 
 /**
+ * NOD-422: a importação do Linear só se desfaz inteira. As tarefas da foto dela que mudaram depois (mudado_em) ou ganharam
+ * um comentário que não veio do Linear (revisão 3 do PR #630: o Desfazer apagaria a tarefa com o comentário) impedem, e a
+ * recusa diz quais. null = nenhuma mexida.
+ */
+async function recusaDaImportacao(deps: Deps, q: Quadro, lote: LoteQuadro & { antes: FotoLote }, atuais: ReadonlyMap<string, TarefaQuadro>): Promise<string | null> {
+  const daFoto = lote.antes.tarefas.map((t) => atuais.get(t.id)).filter((t): t is TarefaQuadro => !!t);
+  const comentadas = await deps.repos.quadroImportacoes.comentadasDepois(lote.id, daFoto.map((t) => t.id));
+  // Revisão 4: o PR ligado depois (o laço do NOD-421 grava pr_url sem mexer no mudado_em) também é mexida.
+  const comPr = await deps.repos.quadroImportacoes.comPrDepois(lote.id, daFoto.map((t) => t.id));
+  const mexidas = daFoto.filter((t) => t.mudadoEm > lote.criadoEm || comentadas.has(t.id) || comPr.has(t.id));
+  if (!mexidas.length) return null;
+  return `a importação do Linear não se desfaz: ${mexidas.slice(0, 5).map((t) => codigoDaTarefa(q.prefixo, t)).join(", ")}${mexidas.length > 5 ? ` e mais ${mexidas.length - 5}` : ""} ${mexidas.length === 1 ? "mudou" : "mudaram"} depois dela`;
+}
+
+/**
  * Revisão 7 do PR #629: o aviso do laço e do freio na conversa. O texto é do sistema; o título da tarefa é o único conteúdo
  * que pode ter vindo de fora, e sai quando a tarefa é de fora ou o turno que a mexeu não era confiável. `bloqueou` = o
  * freio levou a tarefa a Bloqueado (o do comentário a deixa na coluna).
@@ -525,6 +552,17 @@ async function soDoBot(deps: Deps, q: Quadro, autorDoLote: AutorLote, agenteId: 
 async function desfazer(deps: Deps, p: PedidoLote, q: Quadro, loteId: string | undefined): Promise<{ data: ResultadoLote; events?: RuntimeEvent[] }> {
   const repo = deps.repos.quadros;
   const ultimo = await repo.ultimoLote(q.id);
+  if (loteId && loteId !== ultimo?.id) {
+    // Revisão 3 do PR #630: pediu o Desfazer de uma importação depois de alguém mexer nas tarefas dela (o caso comum: um
+    // lote novo, da tela ou do chat). A recusa diz qual tarefa mudou, como quando a mexida foi fora de lote.
+    const pedido = await repo.lote(loteId);
+    const importada = pedido && pedido.quadroId === q.id && pedido.desfeitoEm === null ? await deps.repos.quadroImportacoes.doLote(pedido.id) : null;
+    // Revisão 4: reimportou depois (a mais nova também mexe nas mesmas tarefas): a recusa aponta a mais nova, a única que
+    // se desfaz (o Desfazer volta um lote só; desfeita a mais nova, a primeira não volta a ser desfazível).
+    if (importada && (await deps.repos.quadroImportacoes.maisNovaQue(q.id, pedido!.id))) return falha("entrada_invalida", "há uma importação do Linear mais nova neste quadro: só a mais nova se desfaz (o Desfazer volta um lote só)");
+    const recusa = importada ? await recusaDaImportacao(deps, q, pedido!, new Map((await repo.tarefas(q.id)).map((t) => [t.id, t]))) : null;
+    if (recusa) return falha("entrada_invalida", recusa);
+  }
   if (!ultimo) return falha("nao_encontrado", "não há o que desfazer neste quadro");
   if (loteId && loteId !== ultimo.id) return falha("entrada_invalida", "só o último lote do quadro se desfaz");
   // NOD-443 (D9): quem participa desfaz só o que ela mesma pediu; a dona, qualquer um.
@@ -550,6 +588,12 @@ async function desfazer(deps: Deps, p: PedidoLote, q: Quadro, loteId: string | u
   if (await repo.mudouDeQuadroDepois(ultimo.id, q.id)) return falha("entrada_invalida", "uma tarefa mudou de quadro (entrou ou saiu deste) depois do último lote: ele não se desfaz mais. Para voltar a tarefa, use mover_quadro; o resto, desfaça mudando à mão");
   const foto: FotoLote = ultimo.antes;
   const atuais = new Map((await repo.tarefas(q.id)).map((t) => [t.id, t]));
+  // NOD-422: o Desfazer da importação do Linear só volta inteiro; se alguém mexeu numa tarefa depois, recusa e diz quais.
+  const importacao = await deps.repos.quadroImportacoes.doLote(ultimo.id);
+  if (importacao) {
+    const recusa = await recusaDaImportacao(deps, q, ultimo, atuais);
+    if (recusa) return falha("entrada_invalida", recusa);
+  }
   for (const { id, antes } of foto.tarefas) {
     const atual = atuais.get(id);
     if (atual?.turnoId && atual.turnoId !== (antes?.turnoId ?? null)) await pararTurno(deps, p, atual.turnoId);
@@ -587,7 +631,7 @@ async function desfazer(deps: Deps, p: PedidoLote, q: Quadro, loteId: string | u
     const andava = papelDe(colunasDaFoto, antes.status) === "fazendo" && (mexeuNoTurno || turnoMorto);
     // A foto de antes da 0136 não tem `terminadaEm`: terminada = o grupo da coluna dela, desde o `mudadoEm` (revisão do merge).
     const daFoto = (antes.terminadaEm as number | null | undefined) !== undefined ? antes : { ...antes, terminadaEm: terminou(colunasDaFoto, antes.status) ? antes.mudadoEm : null };
-    const restaurada = await repo.restaurarTarefa(andava && !vivo ? { ...daFoto, status: colunaDeEspera(colunasDaFoto), turnoId: null, terminadaEm: null } : daFoto);
+    const restaurada = await repo.restaurarTarefa(andava && !vivo ? { ...daFoto, status: colunaDeEspera(colunasDaFoto), turnoId: null, terminadaEm: null } : daFoto, { manterMudadoEm: !!importacao });
     // NOD-416: o Desfazer também é uma mudança, de quem desfez.
     const de = atuais.get(id);
     if (de) historico.push(...mudancasDaTarefa({ tarefaId: id, antes: de, pedido: restaurada, final: restaurada, autor: p.autor }));
@@ -596,11 +640,25 @@ async function desfazer(deps: Deps, p: PedidoLote, q: Quadro, loteId: string | u
   }
   // A tarefa que o lote criou e o Desfazer apagou não deixa o código nem o histórico para trás.
   await repo.apagarCodigosEHistorico(criadasNoLote);
-  await repo.registrarHistorico(q.id, historico, null);
+  await registrarHistoricoComTrilha(deps, q.id, historico, null);
   await repo.salvar(q.id, foto.quadro);
   // NOD-443: o lote das pessoas ou do modo volta quem estava e o modo de antes.
   const sairam = foto.pessoas ? await restaurarPessoas(deps, q.id, foto.pessoas) : [];
   await repo.marcarDesfeito(ultimo.id);
+  // A importação que trocou o prefixo pelo do time o devolve, se nenhum outro quadro o pegou nesse meio-tempo (revisão do PR #630).
+  const prefixoDaFoto = foto.quadro.prefixo;
+  if (importacao && prefixoDaFoto && prefixoDaFoto !== q.prefixo) {
+    await repo.travarPrefixos();
+    if (!(await repo.prefixoDeOutroQuadro(q.id, prefixoDaFoto))) await deps.repos.quadroImportacoes.trocarPrefixo(q.id, prefixoDaFoto);
+  }
+  if (importacao) {
+    // Os comentários e as linhas 'linear' que ela trouxe às tarefas que já existiam (as criadas já foram com a tarefa).
+    await deps.repos.quadroImportacoes.apagarComentariosDoLote(ultimo.id);
+    await deps.repos.quadroImportacoes.apagarLinhasDoLote(ultimo.id);
+    // Revisão 3 do PR #630: e os códigos do time que ela guardou nas tarefas que já existiam (os das criadas já foram).
+    await repo.apagarCodigos(foto.codigos ?? []);
+    await deps.repos.quadroImportacoes.desfazer(importacao.id);
+  }
   // NOD-419: os movimentos do lote desfeito saem do jogo (o histórico os mostra riscados; não se desfazem de novo).
   await repo.desfazerMovimentosDoLote(ultimo.id);
   const atualizado = await repo.buscar(q.id);
@@ -630,8 +688,8 @@ export async function aplicarLoteQuadro(deps: Deps, p: PedidoLote): Promise<{ da
 
 /**
  * NOD-443: o quadro.mudou vai também a cada pessoa do quadro (o despacho lê `membros`, depois do commit). Revisão 8: todo
- * emissor de quadro_mudou passa por aqui (o lote, o comentário na tarefa e o laço dos PRs do GitHub); sem isso o frame
- * chegava só à dona.
+ * emissor de quadro_mudou passa por aqui (o lote, o comentário na tarefa e o laço dos PRs do GitHub; revisão 11 do PR
+ * #630: a importação do Linear e o assumir); sem isso o frame chegava só à dona.
  */
 export async function comMembros(deps: Deps, events: RuntimeEvent[]): Promise<RuntimeEvent[]> {
   const cache = new Map<string, string[]>();
@@ -722,20 +780,22 @@ async function tarefaDoMover(deps: Deps, p: PedidoLote, ref: string, agentes: re
   const r = ref.trim();
   if (ehUuid(r)) return (await repo.tarefa(r.toLowerCase())) ?? { erro: "nao_encontrado", detalhe: `tarefa "${r}" não encontrada` };
   const achado = await acharQuadro(deps, p, agentes);
-  const quadroAchado = achado && !("ambiguo" in achado) && !("semNome" in achado) ? achado : null;
-  const daqui = quadroAchado ? await repo.tarefas(quadroAchado.id) : null;
-  const doLinear = daqui?.filter((t) => t.linearId !== null && chaveDeBusca(t.linearId) === chaveDeBusca(r)) ?? [];
-  if (doLinear.length === 1) return doLinear[0]!;
-  const c = lerCodigo(r);
-  if (c) {
-    const id = await repo.tarefaDoCodigo(c.prefixo, c.numero);
-    const t = id ? await repo.tarefa(id) : null;
-    if (t) return t;
+  const noQuadro = achado && !("ambiguo" in achado) && !("semNome" in achado) ? achado : null;
+  const daqui = noQuadro ? await repo.tarefas(noQuadro.id) : null;
+  // O código e o id do Linear pela mesma regra do link (`?tarefa=`): uma só acha; as duas (o código do quadro de uma e o
+  // id do Linear de outra) recusam com as duas para a pessoa escolher (revisão do PR #630).
+  const pelo = await tarefasDoCodigo(deps, r);
+  if (pelo.length === 1) return pelo[0]!;
+  if (pelo.length > 1) {
+    // Revisão 10: da URL, o identificador (como no verTarefaPorCodigo): a opção "do Linear" e a frase dizem NOD-451.
+    const ident = identificadorDaUrl(r) ?? r;
+    const opcoes = await opcoesDeTarefa(deps, ident, pelo);
+    return { erro: "entrada_invalida", detalhe: `"${ident}" acha ${opcoes.length} tarefas: ${opcoes.map((o) => `"${o.titulo}" (${o.codigoAtual}${o.doLinear ? `, do Linear ${ident.toUpperCase()}` : ""}, id ${o.tarefaId})`).join(" e ")}. Pergunte à pessoa qual e diga pelo id` };
   }
   if (achado && "ambiguo" in achado) return { erro: "sem_quadro", detalhe: `diga a tarefa pelo código (ex.: ZE-12) ou pelo id: a pessoa tem ${achado.ambiguo.length} quadros` };
   if (achado && "semNome" in achado) return falhaDoAchado(achado, agentes);
-  if (!quadroAchado || !daqui) return { erro: "nao_encontrado", detalhe: `tarefa "${r}" não encontrada` };
-  const t = resolverTarefa(daqui, r, { prefixo: quadroAchado.prefixo });
+  if (!noQuadro || !daqui) return { erro: "nao_encontrado", detalhe: `tarefa "${r}" não encontrada` };
+  const t = resolverTarefa(daqui, r, { prefixo: noQuadro.prefixo });
   return "erro" in t ? { erro: "nao_encontrado", detalhe: t.erro } : t;
 }
 
@@ -787,6 +847,7 @@ export const RECUSAS_DO_MOVER = {
   tarefa_sumiu: "a tarefa sumiu",
   quadro_sumiu: "a tarefa ou o quadro sumiu",
   mudou_de_quadro: "a tarefa mudou de quadro enquanto este pedido esperava: leia o quadro de novo e repita, se ainda quiser",
+  linear_no_destino: "o quadro de destino já tem esta tarefa do Linear",
 } as const;
 export type RecusaDoMover = keyof typeof RECUSAS_DO_MOVER;
 
@@ -835,6 +896,15 @@ async function moverDeQuadro(deps: Deps, p: PedidoLote, op: OpQuadro, agentes: r
   // terceiro quadro (não travado aqui) recusa; seguir leria e escreveria aquele quadro sem trava, e o prefixo dele
   // pegaria o advisory depois do FOR UPDATE (a ordem invertida que trava com a criação).
   if (t.quadroId !== achada.quadroId) return recusaDoMover("conflito", "mudou_de_quadro");
+  // Revisão 10 do PR #630: o mesmo time importado nos dois quadros. O destino já tem a sua cópia da issue (o índice único
+  // quadro_tarefas_linear daria 23505, um 500): recusa antes, dizendo qual. Lido sob a trava do destino.
+  if (t.linearId !== null) {
+    const doLinear = chaveDeBusca(t.linearId);
+    if ((await repo.tarefas(alvo.id)).some((x) => x.linearId !== null && chaveDeBusca(x.linearId) === doLinear)) {
+      const nome = agentes.find((a) => a.id === destinoSemPrefixo.agenteId)?.nome ?? destinoSemPrefixo.prefixo ?? "de destino";
+      return { data: { ok: false, erro: "conflito", detalhe: `o quadro ${nome} já tem a tarefa do Linear ${t.linearId.trim().toUpperCase()}: abra a de lá, ou exclua uma das duas antes de mover`, motivo: "linear_no_destino" } };
+    }
+  }
   const origem = await comPrefixo(deps, origemSemPrefixo, agentes);
   const destino = await comPrefixo(deps, destinoSemPrefixo, agentes);
   await numerarFaltantes(deps, origem);
@@ -856,11 +926,11 @@ async function moverDeQuadro(deps: Deps, p: PedidoLote, op: OpQuadro, agentes: r
   await repo.guardarCodigos([{ prefixo: destino.prefixo!, numero, tarefaId: t.id }]);
   const historico: MudancaTarefa[] = [{ tarefaId: t.id, campo: "quadro", de: origem.id, para: destino.id, autor: p.autor }];
   if (status !== daOrigem.status) historico.push({ tarefaId: t.id, campo: "status", de: daOrigem.status, para: status, autor: { tipo: "regra" } });
-  await repo.registrarHistorico(destino.id, historico, null);
+  await registrarHistoricoComTrilha(deps, destino.id, historico, null);
   // A meta dos dois quadros muda com a tarefa: a origem pode fechar e o destino reabrir (revisão 2 do PR #623).
   const nomes = new Map(agentes.map((a) => [a.id, a.nome]));
   for (const q of [origem, destino]) {
-    const fecho = fechoDaMeta({ meta: q.meta, prazo: q.prazo, metaDesde: q.metaDesde, anterior: q }, await repo.tarefas(q.id), colunasDe(q), nomes, deps.agora());
+    const fecho = fechoDaMeta({ meta: q.meta, prazo: q.prazo, metaDesde: q.metaDesde, anterior: q }, await repo.tarefas(q.id), colunasDe(q), nomes, deps.agora(), await deps.repos.quadroImportacoes.importadas(q.id));
     await repo.salvar(q.id, { meta: q.meta, prazo: q.prazo, ...fecho });
   }
   const atual = (await repo.buscar(destino.id)) ?? destino;
@@ -976,8 +1046,8 @@ async function criarComLote(deps: Deps, p: PedidoLote, anfitriao: string, agente
  * A meta fecha (ou reabre) pelo estado final das tarefas; sem meta (fluxo contínuo, ADR-141) nada fecha. A meta que já
  * estava cumprida guarda o momento e o resumo de quando fechou. Usado pelo lote e pelo mover (revisão 2 do PR #623).
  */
-function fechoDaMeta(q: { meta: string | null; prazo: string | null; metaDesde: number; anterior: { cumpridoEm: number | null; resumo: string | null } }, finais: readonly TarefaQuadro[], colunas: readonly ColunaQuadro[], nomes: ReadonlyMap<string, string>, agora: number): { cumpridoEm: number | null; resumo: string | null } {
-  const daMeta = tarefasDaMeta(finais, q.metaDesde, colunas);
+function fechoDaMeta(q: { meta: string | null; prazo: string | null; metaDesde: number; anterior: { cumpridoEm: number | null; resumo: string | null } }, finais: readonly TarefaQuadro[], colunas: readonly ColunaQuadro[], nomes: ReadonlyMap<string, string>, agora: number, importadas: ReadonlySet<string>): { cumpridoEm: number | null; resumo: string | null } {
+  const daMeta = tarefasDaMeta(finais, q.metaDesde, colunas, importadas);
   if (q.meta === null || !metaCumprida(daMeta, colunas)) return { cumpridoEm: null, resumo: null };
   const { anterior } = q;
   return { cumpridoEm: anterior.cumpridoEm ?? agora, resumo: anterior.cumpridoEm !== null && anterior.resumo ? anterior.resumo : resumoDaMeta({ prazo: q.prazo, colunas }, daMeta, nomes, agora) };
@@ -1188,7 +1258,8 @@ async function aplicarNoQuadro(deps: Deps, p: PedidoLote, qSemPrefixo: Quadro, a
   const metaNova = meta !== null && (q.meta === null || (q.cumpridoEm !== null && meta !== q.meta));
   const metaDesde = metaNova ? agora : q.metaDesde;
   const nomes = new Map(agentes.map((a) => [a.id, a.nome]));
-  const { cumpridoEm, resumo } = fechoDaMeta({ meta, prazo, metaDesde, anterior: metaNova ? { cumpridoEm: null, resumo: null } : q }, finais, colunasFinais, nomes, agora);
+  const importadas = await deps.repos.quadroImportacoes.importadas(q.id);
+  const { cumpridoEm, resumo } = fechoDaMeta({ meta, prazo, metaDesde, anterior: metaNova ? { cumpridoEm: null, resumo: null } : q }, finais, colunasFinais, nomes, agora, importadas);
   const mudouQuadro = meta !== q.meta || prazo !== q.prazo || cumpridoEm !== q.cumpridoEm || resumo !== q.resumo;
   const mudouColunas = plano.mudouColunas;
   if (mudouQuadro || mudouColunas || plano.tocadas.length > 0 || plano.apagadas.length > 0) await repo.salvar(q.id, { meta, prazo, cumpridoEm, resumo, metaDesde, ...(mudouColunas ? { colunas: plano.quadro.colunas } : {}) });
@@ -1212,11 +1283,11 @@ async function aplicarNoQuadro(deps: Deps, p: PedidoLote, qSemPrefixo: Quadro, a
     if (!final || !pedido) continue;
     historicoDasTarefas.push(...mudancasDaTarefa({ tarefaId: real, antes: antesPorId.get(real) ?? null, pedido, final, autor: p.autor, statusPorRegra: plano.porRegra.has(id) }));
   }
-  await repo.registrarHistorico(q.id, historicoDasTarefas, lote?.id ?? null);
+  await registrarHistoricoComTrilha(deps, q.id, historicoDasTarefas, lote?.id ?? null);
   const atualizado = (await repo.buscar(q.id)) ?? q;
   events.unshift(eventoQuadro(deps, p, atualizado, lote?.id ?? null, tarefaIds));
   // NOD-415 (ADR-141): o risco de prazo (só com meta e prazo), uma vez por (quadro, meta, prazo).
-  const risco = await avisarRiscoDoQuadro(deps, atualizado, finais);
+  const risco = await avisarRiscoDoQuadro(deps, atualizado, finais, importadas);
   if (risco) events.push(risco);
   // NOD-420: o que espera a pessoa (avisos-quadro.ts). A janela junta as decisões: a que acabou de entrar sai com as
   // outras no próximo lote ou na volta do varredor, não agora. A cobrança do prazo fica só no varredor e o aviso corre
@@ -1337,15 +1408,53 @@ async function exigirQuadroLigado(deps: Deps): Promise<void> {
 export const verTarefaPorCodigo: CasoDeUso<{ codigo: string }, TarefaPorCodigoDto> = async (deps, input) => {
   await exigirQuadroLigado(deps);
   const repo = deps.repos.quadros;
-  const ref = input.codigo.trim();
-  const c = lerCodigo(ref);
-  const id = c ? await repo.tarefaDoCodigo(c.prefixo, c.numero) : ehUuid(ref) ? ref.toLowerCase() : null;
-  const t = id ? await repo.tarefa(id) : null;
-  const q = t ? await repo.buscar(t.quadroId) : null;
-  if (!t || !q) throw new ErroDeDominio("nao_encontrado", { cause: `tarefa ${ref}` });
-  const codigoAtual = codigoDaTarefa(q.prefixo, t);
-  return { data: { agenteId: q.agenteId, quadroId: q.id, tarefaId: t.id, codigo: c ? formatarCodigo(c.prefixo, c.numero) : codigoAtual, codigoAtual } };
+  // Revisão 6 do PR #630: a URL da issue no Linear também abre a tarefa importada (o mesmo que o mover_quadro aceita).
+  const ref = identificadorDaUrl(input.codigo) ?? input.codigo.trim();
+  const uuid = ehUuid(ref) ? await repo.tarefa(ref.toLowerCase()) : null;
+  // A entrada crua: tarefasDoCodigo distingue a URL do Linear (só pode ser a importada) do código puro.
+  const achadas = uuid ? [uuid] : await tarefasDoCodigo(deps, input.codigo.trim());
+  const opcoes = await opcoesDeTarefa(deps, ref, achadas);
+  if (opcoes.length === 0) throw new ErroDeDominio("nao_encontrado", { cause: `tarefa ${ref}` });
+  if (opcoes.length > 1) return { data: { ambigua: opcoes } };
+  const { titulo: _t, doLinear: _l, ...achada } = opcoes[0]!;
+  return { data: achada };
 };
+
+/**
+ * Revisão do PR #630: as tarefas que um código acha, a mesma regra no link e no mover_quadro. O código do quadro (atual
+ * ou antigo, em `quadro_tarefa_codigos`) e o id do Linear (a tarefa trazida de lá, em qualquer quadro). Quando são
+ * tarefas diferentes, nenhuma ganha: quem chamou pede a escolha. Revisão 8: a URL da issue no Linear só pode ser da
+ * importada; com ela, a tarefa de mesmo linear_id ganha da que tem o código no quadro (a nativa NOD-451 criada no quadro
+ * de prefixo NOD antes de a issue NOD-451 chegar). O código puro segue perguntando qual.
+ */
+async function tarefasDoCodigo(deps: Deps, entrada: string): Promise<TarefaQuadro[]> {
+  const repo = deps.repos.quadros;
+  const daUrl = identificadorDaUrl(entrada);
+  const ref = daUrl ?? entrada;
+  const importadas = /^[a-z][a-z0-9]{0,9}-\d+$/i.test(ref.trim()) ? await repo.tarefasDoLinear(ref) : [];
+  // Revisão 10: a URL sem importada não cai no código do quadro (abriria, e o mover_quadro moveria, a nativa de mesmo
+  // código, sem Desfazer): é nao_encontrado.
+  if (daUrl) return importadas;
+  const c = lerCodigo(ref);
+  const id = c ? await repo.tarefaDoCodigo(c.prefixo, c.numero) : null;
+  const nativa = id ? await repo.tarefa(id) : null;
+  const porId = new Map<string, TarefaQuadro>();
+  for (const t of [...importadas, ...(nativa ? [nativa] : [])]) porId.set(t.id, t);
+  return [...porId.values()];
+}
+
+/** Cada tarefa achada com o quadro em que está hoje (a de quadro sumido sai) e o código atual. */
+async function opcoesDeTarefa(deps: Deps, ref: string, tarefas: readonly TarefaQuadro[]): Promise<OpcaoDeTarefaDto[]> {
+  const c = lerCodigo(ref);
+  const quadros = new Map((await deps.repos.quadros.buscarVarios([...new Set(tarefas.map((t) => t.quadroId))])).map((q) => [q.id, q]));
+  return tarefas.flatMap((t) => {
+    const q = quadros.get(t.quadroId);
+    if (!q) return [];
+    const codigoAtual = codigoDaTarefa(q.prefixo, t);
+    const doLinear = t.linearId !== null && chaveDeBusca(t.linearId) === chaveDeBusca(ref);
+    return [{ agenteId: q.agenteId, quadroId: q.id, tarefaId: t.id, codigo: c ? formatarCodigo(c.prefixo, c.numero) : codigoAtual, codigoAtual, titulo: t.titulo, doLinear }];
+  });
+}
 
 /** NOD-416: o histórico da tarefa aberta, com os nomes resolvidos (a coluna, o bot, o anfitrião do quadro). */
 export const historicoDaTarefa: CasoDeUso<{ agenteId: string; tarefaId: string }, { historico: EntradaHistoricoDto[] }> = async (deps, input) => {
@@ -1381,7 +1490,7 @@ export const historicoDaTarefa: CasoDeUso<{ agenteId: string; tarefaId: string }
   for (const l of linhas) {
     const deQuadro = l.campo === "status" && origemDoMover !== undefined ? origemDoMover : l.quadroId;
     origemDoMover = l.campo === "quadro" && ehId(l.de) ? l.de : undefined;
-    const nome = (v: string | null, quadroId: string) => (l.campo === "agente" ? nomeDoBot(v) : l.campo === "quadro" ? nomeDoQuadro(v) : nomeDaColuna(quadroId, v));
+    const nome = (v: string | null, quadroId: string) => (l.campo === "agente" ? nomeDoBot(v) : l.campo === "quadro" ? nomeDoQuadro(v) : l.campo === "linear" ? v : nomeDaColuna(quadroId, v));
     const { quadroId: _quadroId, ...linha } = l;
     historico.push({ ...linha, deNome: nome(l.de, deQuadro), paraNome: nome(l.para, l.quadroId), autorNome: l.autor === "agente" ? nomeDoBot(l.autorAgenteId) : null });
   }

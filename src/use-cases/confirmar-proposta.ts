@@ -112,8 +112,12 @@ export const confirmarProposta: CasoDeUso<{ propostaId: string; prazoMs?: number
   if (existente.payload.kind === "lote_bots") throw new ErroDeDominio("estado_invalido", { cause: "lote do Nod se decide pela decisão do card" });
   // NOD-448: a troca de colunas se decide pela decisão do card (POST decisoes/:id/decidir → decidirColunasDoQuadro).
   if (existente.payload.kind === "colunas_quadro") throw new ErroDeDominio("estado_invalido", { cause: "colunas do quadro se decidem pela decisão do card" });
+  // NOD-422: a importação do Linear também (POST decisoes/:id/decidir → decidirImportacaoLinear).
+  if (existente.payload.kind === "importacao_linear") throw new ErroDeDominio("estado_invalido", { cause: "a importação do Linear se decide pela decisão do card" });
   // NOD-430: excluir o quadro também (POST decisoes/:id/decidir → decidirQuadroExclusao).
   if (existente.payload.kind === "quadro_exclusao") throw new ErroDeDominio("estado_invalido", { cause: "excluir o quadro se decide pela decisão do card" });
+  // NOD-422 (PR 2): o quadro assume a esteira também (POST decisoes/:id/decidir → decidirAssumirQuadro).
+  if (existente.payload.kind === "assumir_quadro") throw new ErroDeDominio("estado_invalido", { cause: "assumir o quadro se decide pela decisão do card" });
   if (existente.payload.kind === "app") throw new ErroDeDominio("estado_invalido", { cause: "o app se decide pela decisão do card" });
   // NOD-50: o cartão de credencial só se resolve guardando o valor (POST propostas/:id/credencial) ou recusando; confirmar
   // sem valor não tem o que aplicar.
@@ -159,8 +163,10 @@ export const confirmarProposta: CasoDeUso<{ propostaId: string; prazoMs?: number
     throw new ErroDeDominio("estado_invalido", { cause: "lote do Nod se decide pela decisão do card" });
   } else if (proposta.payload.kind === "credencial") {
     throw new ErroDeDominio("estado_invalido", { cause: "credencial se guarda pelo cartão" });
-  } else if (proposta.payload.kind === "colunas_quadro" || proposta.payload.kind === "quadro_exclusao") {
+  } else if (proposta.payload.kind === "colunas_quadro" || proposta.payload.kind === "quadro_exclusao" || proposta.payload.kind === "assumir_quadro") {
     throw new ErroDeDominio("estado_invalido", { cause: "o quadro se decide pela decisão do card" });
+  } else if (proposta.payload.kind === "importacao_linear") {
+    throw new ErroDeDominio("estado_invalido", { cause: "a importação do Linear se decide pela decisão do card" });
   } else if (proposta.payload.kind === "app") {
     throw new ErroDeDominio("estado_invalido", { cause: "o app se decide pela decisão do card" });
   } else {
