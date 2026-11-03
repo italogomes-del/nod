@@ -297,11 +297,31 @@ for (const [ordem, config] of CONFIGURACOES.entries()) {
       // A main ficou vermelha com a semente 1264666071: um `quadro.mudar_tarefa` sorteado com `excluir: true` apagou a
       // tarefa do fuzz antes do primeiro `quadro.terminei`, que só deu 404. O `terminei` roda antes do `mudar_tarefa`
       // (a ordem relativa do resto do plano não muda), e a tarefa ainda existe quando ele chega.
-      const primeiroMudar = plano.casos.findIndex((c) => c.acao === "quadro.mudar_tarefa");
-      if (primeiroMudar >= 0) {
-        const terminei = plano.casos.filter((c, i) => i > primeiroMudar && c.acao === "quadro.terminei");
-        const resto = plano.casos.filter((c, i) => !(i > primeiroMudar && c.acao === "quadro.terminei"));
-        resto.splice(primeiroMudar, 0, ...terminei);
+      // A main ficou vermelha de novo com a semente 477150545, agora no `quadro.cancelar_trabalho`: o mesmo
+      // `mudar_tarefa` com `excluir` apagou a tarefa antes dele. Cancelar sem trabalho vivo não muda nada e responde
+      // 200, então basta a tarefa existir: as ações que só saem do 404 com a tarefa do fuzz (não leem corpo) rodam
+      // antes do primeiro `mudar_tarefa`. `repetir_trabalho` (400 "sem agente") e `desfazer_movimento` (o movimento
+      // semeado) estavam no mesmo caso e só passavam na semente que sorteava o id de 300 caracteres.
+      const PRECISAM_DA_TAREFA = new Set(["quadro.terminei", "quadro.desfazer_movimento", "quadro.repetir_trabalho", "quadro.cancelar_trabalho"]);
+      // O PR #643 ficou vermelho com a semente 2453916776 no `desfazer_movimento`: nenhum dos casos sorteados juntava o
+      // bot, a tarefa e o movimento do fuzz (o `enxugarCasos` só guarda um caso fundo se o sorteio fizer um). Cada uma
+      // destas ações ganha um caso com os ids semeados, na posição do primeiro caso dela, para passar com qualquer semente.
+      const SEMEADOS: Record<string, string> = { agentes: meu.agente.id, tarefas: tarefaDoFuzz, movimentos: movimentoDoFuzz };
+      for (const acao of PRECISAM_DA_TAREFA) {
+        const i = plano.casos.findIndex((c) => c.acao === acao);
+        if (i < 0) continue;
+        // A entrada é a plausível do gerador (o corpo não importa: estas rotas não o leem); só o caminho muda.
+        const base = plano.casos.find((c) => c.acao === acao && c.entrada.rotulo === "base plausível") ?? plano.casos[i]!;
+        const segs = base.caminho.split("/");
+        const caminho = segs.map((s, j) => (j > 0 && SEMEADOS[segs[j - 1]!] !== undefined ? encodeURIComponent(SEMEADOS[segs[j - 1]!]!) : s)).join("/");
+        plano.casos.splice(i, 0, { ...base, caminho });
+      }
+      const primeiraQueTira = plano.casos.findIndex((c) => c.acao === "quadro.mudar_tarefa");
+      if (primeiraQueTira >= 0) {
+        const depois = (c: (typeof plano.casos)[number], i: number) => i > primeiraQueTira && PRECISAM_DA_TAREFA.has(c.acao);
+        const antecipados = plano.casos.filter(depois);
+        const resto = plano.casos.filter((c, i) => !depois(c, i));
+        resto.splice(primeiraQueTira, 0, ...antecipados);
         plano.casos = resto;
       }
       // eslint-disable-next-line no-console
