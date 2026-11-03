@@ -382,6 +382,10 @@ describeIntegracao("fila do dono: a triagem na entrada (ADR-099, I7 revista)", (
       // A trava da fila da pessoa ANTES do pedido (QA do #385): `pedirABot` pega a trava `pedir_a_bot` do tenant e o
       // `reivindicar` logo abaixo pede a da pessoa. Os outros arquivos sob o mesmo tenant e pessoa (turnos-fila,
       // interrupcao-por-parada) pegam na ordem pessoa → pedir_a_bot; na ordem inversa a suíte paralela dava `deadlock detected`.
+      // E a linha de preferências da pessoa ANTES das duas travas (CI da main @7fecdff3): o limite grava `ias_no_limite`
+      // nela já com a `pedir_a_bot` na mão, e os arquivos do quadro gravam as preferências (o experimento) antes de pedir.
+      await trx`insert into preferencias (tenant_id, owner_id) values (${MARLON.tenantId}, ${MARLON.pessoaId})
+        on conflict (tenant_id, owner_id) do update set atualizado_em = preferencias.atualizado_em`;
       await trx`select pg_advisory_xact_lock(hashtext(${`${MARLON.tenantId}:${MARLON.pessoaId}`}))`;
       const triagem = tarefaDoPedido((await m.pedir(m.chico, (await m.turnoDe(m.chico)).id, await m.nome(m.dev.agenteId))).data);
       const T0 = Date.now();

@@ -367,8 +367,10 @@ describeIntegracao("paridade tela × chat do quadro.* (NOD-442, ADR-135)", () =>
   it("qualquer bot: o Nod e um bot comum fazem a mesma jornada e chegam ao mesmo quadro", async () => {
     await withRollback(MARLON, async (trx) => {
       trxAtual = trx;
+      // A trava do Nod ANTES das preferências (o montar grava): o garantirNod trava e depois grava as preferências (a guia);
+      // na ordem inversa, outro arquivo em paralelo com o Nod da mesma pessoa fazia deadlock (CI da main @0d2345b4).
+      const { nod } = (await executar(depsSobreTrx(trx, MARLON), garantirNod, {})).data;
       const m = await montar(trx);
-      const { nod } = (await executar(m.d, garantirNod, {})).data;
       const ops: OpQuadro[][] = [
         [{ tipo: "criar_quadro", meta: "Meta", prazo: "2026-11-06" }, { tipo: "importar_linear", itens: [{ identificador: "NOD-1", titulo: "A" }, { identificador: "NOD-2", titulo: "B" }] }],
         [{ tipo: "mudar_tarefa", tarefa: "NOD-1", agente: m.nomeCaio, status: "afazer" }],

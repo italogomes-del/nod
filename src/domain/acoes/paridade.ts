@@ -66,6 +66,16 @@ export function verificarPisoSobe(piso: PisoDeParidade, daMain: PisoDeParidade |
   return [];
 }
 
+/**
+ * A base com que a catraca C compara o piso: a do PRÓPRIO commit, não a main de agora. Comparar com a origin/main fazia
+ * o rerun de um commit antigo da main cair quando a main já tinha subido o piso (run 41540469246, @3162df76). No CI o
+ * checkout é o merge do PR (pai 1 = a main que o PR recebe) ou o push da main (pai 1 = o commit de antes): `HEAD^1`.
+ * Fora do CI, o merge-base com a origin/main (null sem ela).
+ */
+export function baseDoPiso(o: { ci: boolean; mergeBase: () => string | null }): string | null {
+  return o.ci ? "HEAD^1" : o.mergeBase();
+}
+
 function rotulo(a: DefinicaoAcao): string {
   const c = a.chat;
   switch (c.estado) {

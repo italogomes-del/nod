@@ -92,8 +92,9 @@ jobs:
       - run: psql postgres://postgres:postgres@127.0.0.1:5434/postgres -v ON_ERROR_STOP=1 -f infra/postgres/init/01_roles.sql
       - run: npm run db:migrate:test
       - run: npm run test:integration
-      # A catraca C da paridade (NOD-391) compara o piso com o da main: o checkout raso não traz a origin/main.
-      - run: git fetch --no-tags --depth=1 origin +main:refs/remotes/origin/main
+      # A catraca C da paridade (NOD-391) compara o piso com o da base do commit (HEAD^1: no PR, a main que o merge recebe;
+      # na main, o commit de antes). O checkout raso traz só o HEAD: busca o pai.
+      - run: git fetch --no-tags --depth=2 origin "$(git rev-parse HEAD)"
       # NOD-398: o bot de QA e a tela.capturar precisam da web montada (dist/web) e de um Chromium. O playwright NÃO é
       # dependência do projeto (a issue pede assim): a versão fica fixa aqui para o Chromium não mudar de um run para o
       # outro, e o binário fica no cache do runner (~/.cache/ms-playwright), baixado só na primeira vez. As libs do

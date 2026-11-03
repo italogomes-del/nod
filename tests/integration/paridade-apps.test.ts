@@ -196,8 +196,10 @@ describeIntegracao("paridade tela × chat das páginas do bot, paginas.* (NOD-44
   it("qualquer bot: o Nod e um bot comum fazem a mesma jornada e chegam às mesmas páginas", async () => {
     await withRollback(MARLON, async (trx) => {
       trxAtual = trx;
+      // A trava do Nod ANTES das preferências (o montar grava): o garantirNod trava e depois grava as preferências (a guia);
+      // na ordem inversa, outro arquivo em paralelo com o Nod da mesma pessoa fazia deadlock (CI da main @0d2345b4).
+      const { nod } = (await executar(depsSobreTrx(trx, MARLON), garantirNod, {})).data;
       const m = await montar(trx);
-      const { nod } = (await executar(m.d, garantirNod, {})).data;
       const jornada = async (quem: { agenteId: string; conversaId: string }, alvo: string) => {
         const p = await peloChat(m, quem, { op: "propor", bot: alvo, nome: "Vagas", forma: "lista", regra_pede: "vaga parada" });
         if (!p.ok) throw new Error("sem card");
