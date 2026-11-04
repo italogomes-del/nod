@@ -86,6 +86,8 @@ import { ajustarBarraLateral } from "../../use-cases/ajustar-barra-lateral.ts";
 import { gerirQuadro, gerirQuadroEmFases } from "../../use-cases/gerir-quadro.ts";
 import { gerirApps } from "../../use-cases/gerir-apps.ts";
 import { gerirTimes } from "../../use-cases/gerir-times.ts";
+import { gerirCanvas } from "../../use-cases/gerir-canvas.ts";
+import { criarImportador, origensDoAmbiente } from "../canvas/importador.ts";
 import { naoLidosNoChat } from "../../use-cases/nao-lidos-no-chat.ts";
 import { buscarConversas, lerConversa } from "../../use-cases/buscar-conversas.ts";
 import { abrirConta } from "../../use-cases/abrir-conta.ts";
@@ -150,6 +152,7 @@ import { rotasMarketplace } from "./rotas/marketplace.ts";
 import { rotasTela } from "./rotas/tela.ts";
 import { rotasQuadro } from "./rotas/quadro.ts";
 import { rotasApps } from "./rotas/apps.ts";
+import { rotasCanvas } from "./rotas/canvas.ts";
 import { criarCapturadorCdp, type Capturador } from "../tela/capturador-cdp.ts";
 import { rotasConectores } from "./rotas/conectores.ts";
 import { rotasCredencial } from "./rotas/credencial.ts";
@@ -429,7 +432,7 @@ export function comporApp(o: OpcoesCompor): App {
     return tenants.get(pessoaId) ?? null;
   }
 
-  const useCases: UseCasesNod = { lembrar, atualizarPerfil, pedirAcesso, criarRotina, listarRotinasDoAgente, verAgendaPeloAgente, pausarRotinaPeloAgente, reativarRotinaPeloAgente, atualizarRotinaPeloAgente, excluirRotinaPeloAgente, pedirAprovacao, pedirAPessoa, passar, encaminhar, semNovidade, pedirABot, verColegas, publicarArtefato, lerArtefato, iniciarTarefa, desligar, anotarEntrevista, concluirEntrevista, proporBot, abrirTask, mandarParaTask, meChameAs, esperarComando, abrirFrentes, mandarParaFrente, devolverResumo, gerirBots, verAppsConectados, registrarRelatoDoNod, criarBots, responderPedido, pedirCredencial, avisarPessoa, abrirConta, buscarConversas, lerConversa, ajustarBarraLateral, gerirQuadro, gerirQuadroEmFases, gerirApps, naoLidosNoChat, gerirTimes };
+  const useCases: UseCasesNod = { lembrar, atualizarPerfil, pedirAcesso, criarRotina, listarRotinasDoAgente, verAgendaPeloAgente, pausarRotinaPeloAgente, reativarRotinaPeloAgente, atualizarRotinaPeloAgente, excluirRotinaPeloAgente, pedirAprovacao, pedirAPessoa, passar, encaminhar, semNovidade, pedirABot, verColegas, publicarArtefato, lerArtefato, iniciarTarefa, desligar, anotarEntrevista, concluirEntrevista, proporBot, abrirTask, mandarParaTask, meChameAs, esperarComando, abrirFrentes, mandarParaFrente, devolverResumo, gerirBots, verAppsConectados, registrarRelatoDoNod, criarBots, responderPedido, pedirCredencial, avisarPessoa, abrirConta, buscarConversas, lerConversa, ajustarBarraLateral, gerirQuadro, gerirQuadroEmFases, gerirApps, naoLidosNoChat, gerirTimes, gerirCanvas };
 
   // NOD-351: a situação da conta para abrir_conta, lida na transação do turno (sem outra conexão do pool). Liga tarde: as
   // contas nascem depois, sobre `dentro`; false = desligadas, e abrir_conta volta `indisponivel`.
@@ -544,6 +547,8 @@ export function comporApp(o: OpcoesCompor): App {
   const fundoLinuxSoVermelha = env.NOD_FUNDO_LINUX_SO_VERMELHA === "1";
   const services: Services = {
     trabalhosVivos,
+    // ADA-13: o importar do gerir_canvas busca o protótipo só nas origens da allowlist (NOD_CANVAS_ORIGENS; padrão o nod-prototipos).
+    canvas: { importar: criarImportador({ origens: origensDoAmbiente(env.NOD_CANVAS_ORIGENS) }) },
     // NOD-422: o servidor traz o time do Linear pelo Composio só com a flag (a ferramenta do provedor é suposição do PR).
     ...(o.linear ? { linear: o.linear } : env.NOD_LINEAR_SERVIDOR === "1" ? { linear: criarFonteLinearComposio((c) => (f, p) => criarClienteComposio(decifrar(c, chave)).executar(f, p)) } : {}),
     ...(compartilhado ? { webhooks: { cifrar: (s: string) => cifrar(s, chave) } } : {}),
@@ -1440,6 +1445,7 @@ export function comporApp(o: OpcoesCompor): App {
     ...criarRotasArtefatos(depsRotas),
     ...rotasQuadro(depsRotas),
     ...rotasApps(depsRotas),
+    ...rotasCanvas(depsRotas),
     ...criarRotasRelatos(depsRotas),
     ...criarRotasPropostas(depsRotas),
     ...criarRotasTurnos(depsRotas),

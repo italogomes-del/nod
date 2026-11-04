@@ -31,6 +31,7 @@ const ROTULO: Readonly<Record<Assunto, string>> = {
   "rotina.falhou": "A rotina não rodou",
   "aviso.pessoa": "Aviso do bot",
   "barra.ajuste": "Sugeriu mudar a barra lateral",
+  canvas: "Publicou um canvas",
   "leitura.lista": "Mostrou os não lidos",
   "leitura.recibo": "Marcou conversas como lidas",
   "times.organizados": "Organizou os times",
@@ -117,6 +118,8 @@ function tituloDoPayload(m: Mensagem): string | null {
       return ROTULO.passe;
     case "parada":
       return p.nadaRodando ? "Parar: nada estava rodando" : `Parado por você · ${p.interrompidas} ${plural(p.interrompidas, "turno interrompido", "turnos interrompidos")}`;
+    case "canvas":
+      return p.importado ? "Importou um protótipo para o canvas" : null;
     default:
       return null;
   }

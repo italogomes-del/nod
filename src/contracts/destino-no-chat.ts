@@ -77,6 +77,7 @@ export const ASSUNTOS = [
   "aviso.pessoa",
   // NOD-119: o card que pergunta se muda a barra lateral (ajustar_barra_lateral); a pessoa confirma nele.
   "barra.ajuste",
+  "canvas",
   // NOD-449: o card com a lista de não lidos e o recibo de "marcadas como lidas" (nao_lidos); a pessoa age neles.
   "leitura.lista",
   "leitura.recibo",

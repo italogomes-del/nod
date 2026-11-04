@@ -77,7 +77,9 @@ export type KindEvento =
   | "tarefa_aberta"
   | "conversa_aberta"
   /** definido em 2026-11-02 (NOD-445, ADR-146): as páginas de um bot mudaram ({agenteId, motivo}). Só ids. */
-  | "paginas_mudaram";
+  | "paginas_mudaram"
+  /** definido em 2026-11-04 (ADA-13, ADR-150): um canvas mudou ({canvasId, agenteId, motivo}: versao|comentario). Só ids. */
+  | "canvas_mudou";
 
 /** Dados do evento: só escalares (o CHECK da trilha e o outbox não aceitam prosa aninhada). */
 export type DadosEvento = Record<string, string | number | boolean | null>;

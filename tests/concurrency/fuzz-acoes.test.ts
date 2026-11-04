@@ -13,11 +13,14 @@ import { CORPOS_QUEBRADOS, gerarEntradas, lerSemente, type CasoDeFuzz } from "..
 import { ehErroDeDominio } from "../../src/domain/erro.ts";
 import type { AcaoLote } from "../../src/contracts/ferramentas-do-nod.ts";
 import type { ModoAprovacao } from "../../src/contracts/agente.ts";
+import { criarRepos } from "../../src/repositories/index.ts";
+import { publicar } from "../../src/use-cases/canvas.ts";
 import { gerirBots } from "../../src/use-cases/gerir-bots.ts";
 import { gerirTimes } from "../../src/use-cases/gerir-times.ts";
 import { garantirNod } from "../../src/use-cases/onboarding.ts";
 import { CAMINHOS_DAS_ACOES_DE_CONTA, acoesNovasSemLeitura, acoesSemHandler, bloquearRedeExterna, rotasPublicasSemHandler, vereditoDeDecisao, sementeDoPr, chegouNoHandler, custoDoFuzz, enxugarCasos, executarFuzz, lerN, marcaDoBanco, processosBloqueados, quietude, planoDoServidor, relatarViolacoes, sqlDoRetrato, sqlDoRetratoDaConta, zerarCustoDoFuzz, type AlvoDoFuzz, type Retrato } from "../helpers/fuzz.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
+import { depsSobre } from "../helpers/l5.ts";
 import { servidorCompleto, type ServidorCompleto, type SessaoDeTeste } from "../helpers/servidor-completo.ts";
 import { limparPessoaE2E, limparTenantE2E, varrerSobrasDaPessoa } from "./limpeza-e2e.ts";
 
@@ -234,6 +237,22 @@ for (const [ordem, config] of CONFIGURACOES.entries()) {
       const timeDoFuzz = (await srv.json<ComTime>("POST", "times", { nome: "Time do fuzz" })).time.id;
       const timeDela = (await srv.json<ComTime>("POST", "times", { nome: "Time dela" }, outra)).time.id;
       const semTimeDoFuzz = (await srv.json<{ times: { id: string; semTime: boolean }[] }>("POST", "times/sincronizar", {})).times.find((t) => t.semTime)!.id;
+      // ADA-13 (#649): um canvas com uma tela e um comentário em cada pessoa, para `canvas.comentar` (`/canvas/:id`) e
+      // `canvas.resolver_comentario` (`/canvas/comentarios/:id`) passarem da busca.
+      const canvasDe = (s: SessaoDeTeste, b: Criado) =>
+        srv.app.dentro({ tenantId: s.tenantId, pessoaId: s.pessoaId }, (d) =>
+          d.tx(async (trx) => {
+            const escopo = { tenantId: s.tenantId, pessoaId: s.pessoaId };
+            const repos = criarRepos(trx, escopo);
+            const r = await publicar(depsSobre(repos, escopo, { trx }), { agenteId: b.agente.id, bruto: { titulo: "Canvas do fuzz", jornadas: [{ titulo: "J", telas: [{ html: "<p>fuzz</p>" }] }] }, origemUrl: null, confianca: "confiavel" });
+            if (!r.ok) throw new Error(`canvas do fuzz: ${r.detalhe}`);
+            const c = await repos.canvas.comentar({ canvasId: r.canvas.id, telaId: "J1-1", jornada: null, tipo: "pino", x: 0.5, y: 0.5, texto: "do fuzz", autorTipo: "pessoa", autorId: s.pessoaId, autorNome: null, paiId: null, versao: 1, confianca: "confiavel", criadoEm: Date.now() });
+            return { canvas: r.canvas.id, comentario: c.id };
+          }),
+        );
+      const [meuCanvas, canvasDela] = [await canvasDe(sessao, meu), await canvasDe(outra, dela)];
+      // O app instalado, para o `canvas.dar_acesso` (`/canvas/app/acessos/:bot`) passar da guarda "instale antes".
+      await srv.json("PUT", "canvas/app", {});
       const plano = planoDoServidor({
         registro: REGISTRO_DE_ACOES as readonly DefinicaoAcao[],
         pendentes: faltando,
@@ -255,6 +274,9 @@ for (const [ordem, config] of CONFIGURACOES.entries()) {
             pessoas: { daPessoa: [outraEscopo.pessoaId], deOutraPessoa: [] },
             apps: { daPessoa: [meuApp, meuAppRemovido], deOutraPessoa: [appDela] },
             times: { daPessoa: [timeDoFuzz, semTimeDoFuzz], deOutraPessoa: [timeDela] },
+            canvas: { daPessoa: [meuCanvas.canvas], deOutraPessoa: [canvasDela.canvas] },
+            comentarios: { daPessoa: [meuCanvas.comentario], deOutraPessoa: [canvasDela.comentario] },
+            acessos: { daPessoa: [meu.agente.id], deOutraPessoa: [dela.agente.id] },
           },
         },
       });

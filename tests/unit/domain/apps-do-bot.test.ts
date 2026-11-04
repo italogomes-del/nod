@@ -15,6 +15,7 @@ describe("apps do bot (NOD-445): nome", () => {
     expect(validarNome("Conversa", [])).toMatchObject({ ok: false, motivo: "duplicado" });
     // Revisão 2 do #626: "quadro" é o apelido de Tarefas no chat; um app com esse nome ficaria inalcançável por lá.
     expect(validarNome("Quadro", [])).toEqual({ ok: false, motivo: "duplicado", sugestao: "Quadro 2" });
+    expect(validarNome("canvas", [])).toEqual({ ok: false, motivo: "duplicado", sugestao: "canvas 2" }); // #649 revisão 4: a página do app Canvas
     expect(validarNome(" QUÁDRO ", [])).toMatchObject({ ok: false, motivo: "duplicado" });
   });
   it("de 1 a 20 caracteres, aparado; renomear o próprio app não é duplicado", () => {
@@ -45,6 +46,11 @@ describe("apps do bot: ordem das páginas", () => {
   it("a padrão: Conversa, Tarefas e os apps na ordem de criação", () => {
     expect(padrao).toEqual(["conversa", "tarefas", "app:a", "app:b"]);
     expect(paginasPadrao({ temTarefas: false, apps: [] })).toEqual(["conversa"]);
+  });
+  it("ADA-13: o Canvas entra depois de Tarefas no bot com acesso, e a ordem guardada antiga o recebe no fim", () => {
+    expect(paginasPadrao({ temTarefas: true, temCanvas: true, apps })).toEqual(["conversa", "tarefas", "canvas", "app:a", "app:b"]);
+    expect(paginasPadrao({ temTarefas: false, temCanvas: true, apps: [] })).toEqual(["conversa", "canvas"]);
+    expect(ordemQueVale(["app:b", "conversa"], paginasPadrao({ temTarefas: false, temCanvas: true, apps }))).toEqual(["app:b", "conversa", "canvas", "app:a"]);
   });
   it("a guardada vale; o que sumiu sai, o que é novo entra no fim; a Conversa nunca some", () => {
     expect(ordemQueVale(["tarefas", "conversa", "app:x", "tarefas"], padrao)).toEqual(["tarefas", "conversa", "app:a", "app:b"]);

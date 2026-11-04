@@ -29,6 +29,8 @@ export const MAX_REGRA = 300;
 /** Os ids das páginas fixas; app é `app:<uuid>`. */
 export const PAGINA_CONVERSA = "conversa";
 export const PAGINA_TAREFAS = "tarefas";
+/** ADA-13 (ADR-150): a página embutida do app Canvas, no bot com acesso; fora do limite de 12 (não é app do bot). */
+export const PAGINA_CANVAS = "canvas";
 export const idDaPaginaDoApp = (appId: string): string => `app:${appId}`;
 export function appDaPagina(id: string): string | null {
   return id.startsWith("app:") && id.length > 4 ? id.slice(4) : null;
@@ -65,14 +67,15 @@ export type ValidacaoDoNome = { ok: true; nome: string } | { ok: false; motivo: 
 /**
  * O nome do app: aparado, de 1 a 20 caracteres e sem repetir outro app do bot (ignorando maiúsculas e acentos). As
  * páginas fixas também contam ("Conversa", "Tarefas"), e "Quadro" também (revisão 2 do #626): no chat ele é o apelido
- * de Tarefas (`paginaPelaRef` em src/use-cases/apps-do-bot.ts), e um app com esse nome ficaria inalcançável por lá.
+ * de Tarefas (`paginaPelaRef` em src/use-cases/apps-do-bot.ts), e um app com esse nome ficaria inalcançável por lá;
+ * "Canvas" é a página do app Canvas (ADA-13, #649 revisão 4).
  * `ignorar` é o próprio app ao renomear. No duplicado, a sugestão é o nome com o primeiro número livre ("Vagas 2").
  */
 export function validarNome(nome: string, existentes: readonly { id?: string; nome: string }[], ignorar?: string): ValidacaoDoNome {
   const limpo = nome.replace(/\s+/g, " ").trim();
   if (!limpo) return { ok: false, motivo: "vazio" };
   if ([...limpo].length > MAX_NOME_DO_APP) return { ok: false, motivo: "longo" };
-  const tomadas = new Set([chaveDoNome("Conversa"), chaveDoNome("Tarefas"), chaveDoNome("Quadro"), ...existentes.filter((e) => !ignorar || e.id !== ignorar).map((e) => chaveDoNome(e.nome))]);
+  const tomadas = new Set([chaveDoNome("Conversa"), chaveDoNome("Tarefas"), chaveDoNome("Quadro"), chaveDoNome("Canvas"), ...existentes.filter((e) => !ignorar || e.id !== ignorar).map((e) => chaveDoNome(e.nome))]);
   if (!tomadas.has(chaveDoNome(limpo))) return { ok: true, nome: limpo };
   return { ok: false, motivo: "duplicado", sugestao: sugerirNome(limpo, tomadas) };
 }
@@ -93,12 +96,12 @@ export function cabeMaisUmApp(o: { apps: number }): boolean {
 }
 
 /**
- * As páginas que existem agora, na ordem padrão: a Conversa, Tarefas (se o bot tem quadro) e os apps na ordem de
- * criação.
+ * As páginas que existem agora, na ordem padrão: a Conversa, Tarefas (se o bot tem quadro), o Canvas (se o bot tem
+ * acesso ao app Canvas, ADA-13) e os apps na ordem de criação.
  */
-export function paginasPadrao(o: { temTarefas: boolean; apps: readonly Pick<AppDoBot, "id" | "criadoEm">[] }): string[] {
+export function paginasPadrao(o: { temTarefas: boolean; temCanvas?: boolean; apps: readonly Pick<AppDoBot, "id" | "criadoEm">[] }): string[] {
   const apps = [...o.apps].sort((a, b) => a.criadoEm - b.criadoEm || a.id.localeCompare(b.id)).map((a) => idDaPaginaDoApp(a.id));
-  return [PAGINA_CONVERSA, ...(o.temTarefas ? [PAGINA_TAREFAS] : []), ...apps];
+  return [PAGINA_CONVERSA, ...(o.temTarefas ? [PAGINA_TAREFAS] : []), ...(o.temCanvas ? [PAGINA_CANVAS] : []), ...apps];
 }
 
 /**

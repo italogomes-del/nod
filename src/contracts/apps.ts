@@ -71,6 +71,8 @@ export type PaginasDto = {
   apps: AppDto[];
   /** O bot tem quadro (a página Tarefas existe). */
   temTarefas: boolean;
+  /** ADA-13: o bot tem acesso ao app Canvas (a página "canvas" existe, fora do limite). */
+  temCanvas?: boolean;
   /** Cabe mais um app (até 11: a 12ª página é de Tarefas, reservada mesmo sem quadro). */
   cabeMais: boolean;
   /** O limite de páginas além da Conversa (12, Tarefas conta). */

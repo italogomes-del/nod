@@ -42,6 +42,8 @@ export const DESTINO: Readonly<Record<Assunto, RegraDeDestino>> = {
   "aviso.pessoa": { destino: "chat", categoria: null },
   // NOD-119: o card da barra lateral pede o clique da pessoa.
   "barra.ajuste": { destino: "chat", categoria: null },
+  // ADA-13: o card do canvas publicado ou importado (Abrir leva à página Canvas).
+  canvas: { destino: "chat", categoria: null },
   // NOD-449: o card dos não lidos tem ✓ por item; o recibo tem Desfazer.
   "leitura.lista": { destino: "chat", categoria: null },
   "leitura.recibo": { destino: "chat", categoria: null },
@@ -219,6 +221,8 @@ export function assuntoDe(kind: KindMensagem, payload: PayloadMensagem | null, a
         return "aviso.pessoa";
       case "ajuste_barra":
         return "barra.ajuste";
+      case "canvas":
+        return "canvas";
       case "nao_lidos_lista":
         return "leitura.lista";
       case "recibo_leitura":

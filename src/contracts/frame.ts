@@ -59,6 +59,8 @@ export type TipoFrame =
   | "quadro.mudou"
   /** NOD-445 (ADR-146): as páginas de um bot mudaram: {agenteId, motivo}. A web relê as páginas. */
   | "paginas.mudaram"
+  /** ADA-13 (ADR-150): um canvas mudou: {canvasId, agenteId, motivo}. A web relê o canvas aberto e a lista. */
+  | "canvas.mudou"
   /** NOD-351: abra o cartão de conta nesta conversa: {conversaId, etapa}. A web confere a etapa contra a lista dela. */
   | "conta.abrir"
   /** definido em 2026-10-27 (NOD-374): um app da pessoa entrou ou saiu de "Fora do ar" ({}). A web relê a frota e os conectores. */

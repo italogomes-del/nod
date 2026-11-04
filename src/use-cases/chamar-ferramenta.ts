@@ -22,6 +22,8 @@ import { semprePermitirVivo } from "./regras-vivas.ts";
 import { executarItens, type DesfechoExecutado } from "./decidir.ts";
 import { classificarFalhaDaChamada, limparFalhaAposSucesso, registrarFalhaDaChamada } from "./disjuntor-conector.ts";
 import type { gerirQuadroEmFases } from "./gerir-quadro.ts";
+import { concluirImportarCanvas, conferirImportarCanvas } from "./gerir-canvas.ts";
+import type { ResultadoImportarCanvas } from "../contracts/ferramentas-canvas.ts";
 import { buscarPreviaNoLinear, type BuscaDaPrevia } from "./importar-linear.ts";
 import { nomeParaTrilha, registrarNegacao, type EntradaRegistrarNegacao } from "./registrar-negacao.ts";
 import type { CasoDeUso, Deps, Services } from "./tipos.ts";
@@ -76,7 +78,9 @@ export type EfeitoPendente =
    * Revisão do PR #630 (item 6): o gerir_quadro com importar_time_linear. A fase 1 conferiu as recusas; a busca da prévia
    * no Linear roda aqui fora, e a fase 2 abre o card com o que ela deu. A credencial nunca sai da rota interna.
    */
-  | { tipo: "previa_linear"; entrada: Parameters<typeof gerirQuadroEmFases>[1]; busca: BuscaDaPrevia };
+  | { tipo: "previa_linear"; entrada: Parameters<typeof gerirQuadroEmFases>[1]; busca: BuscaDaPrevia }
+  /** ADA-13 (ADR-150): o gerir_canvas importar. A fase 1 conferiu o acesso; a busca do protótipo roda aqui fora (até 24 MB). */
+  | { tipo: "importar_canvas"; entrada: Parameters<typeof concluirImportarCanvas>[1]; url: string };
 
 /**
  * `emRevisao` (ADR-115, PR 5 dos modos de aprovação): a ação foi ao revisor — a rota responde `{ aguardar }` ao proxy (que
@@ -91,7 +95,8 @@ export type DesfechoEfeito =
   | { tipo: "conector"; ok: true; resposta: RespostaConector }
   | { tipo: "conector"; ok: false; erro: unknown }
   | { tipo: "lote"; desfechos: DesfechoExecutado[] }
-  | { tipo: "previa_linear"; busca: Awaited<ReturnType<typeof buscarPreviaNoLinear>> };
+  | { tipo: "previa_linear"; busca: Awaited<ReturnType<typeof buscarPreviaNoLinear>> }
+  | { tipo: "importar_canvas"; resultado: ResultadoImportarCanvas };
 
 export const REGRA_CHAMADA = "regra:chamar_ferramenta" as const;
 export const VERSAO_REGRA_CHAMADA = 1 as const;
@@ -174,6 +179,7 @@ const DESPACHO: Despacho = {
   gerir_quadro: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.gerir_quadro](deps, { ...ctx, ...args }),
   gerir_apps: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.gerir_apps](deps, { ...ctx, ...args }),
   gerir_times: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.gerir_times](deps, { ...ctx, ...args }),
+  gerir_canvas: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.gerir_canvas](deps, { ...ctx, ...args }),
   nao_lidos: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.nao_lidos](deps, { ...ctx, ...args }),
   abrir_conta: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.abrir_conta](deps, { ...ctx, ...args }),
   buscar_conversas: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.buscar_conversas](deps, { ...ctx, ...args }),
@@ -229,14 +235,24 @@ async function despacharNod(deps: Deps, ctx: ContextoFerramenta, nome: NomeFerra
     const r = await deps.useCases.gerirQuadroEmFases(deps, entrada, { fase: "conferir" });
     if ("buscarLinear" in r) return { resultado: { efeito: { tipo: "previa_linear", entrada, busca: r.buscarLinear } }, events: [] };
     saida = r;
+  } else if (nome === "gerir_canvas" && typeof args === "object" && args !== null && (args as { op?: unknown }).op === "importar") {
+    const v = validarArgsNod("gerir_canvas", args);
+    if (!v.ok) return { erros: v.erros };
+    const entrada = { ...ctx, ...v.args };
+    const r = await conferirImportarCanvas(deps, entrada);
+    if ("url" in r) return { resultado: { efeito: { tipo: "importar_canvas", entrada, url: r.url } }, events: [] };
+    saida = r;
   } else saida = await rodarValidado(deps, ctx, nome, args);
   if ("erros" in saida) return saida;
   const data: unknown = saida.data;
   if (nome === "pedir_aprovacao" && typeof data === "object" && data !== null && (data as { estado?: unknown }).estado === "pendente") {
     return { resultado: { aguardar: String((data as { decisao_id: string }).decisao_id) }, events: saida.events ?? [] };
   }
-  return { resultado: { ok: true, conteudo: JSON.stringify(data), confianca: NOD_DE_CONTEUDO_NAO_CONFIAVEL.has(nome) ? "nao_confiavel" : "confiavel" }, events: saida.events ?? [] };
+  return { resultado: { ok: true, conteudo: JSON.stringify(data), confianca: NOD_DE_CONTEUDO_NAO_CONFIAVEL.has(nome) || leCanvas(nome, args) ? "nao_confiavel" : "confiavel" }, events: saida.events ?? [] };
 }
+
+/** ADA-13: o ler (e listar, comentar, resolver, que trazem o título) do gerir_canvas traz telas e comentários que podem ter vindo de fora (importados, turno sujo): não confiável. */
+const leCanvas = (nome: NomeFerramentaNod, args: unknown): boolean => nome === "gerir_canvas" && typeof args === "object" && args !== null && ["ler", "listar", "comentar", "resolver"].includes(String((args as { op?: unknown }).op));
 
 // ---------------------------------------------------------------------------------------------
 
@@ -422,7 +438,11 @@ export const chamarFerramentaFase1: CasoDeUso<EntradaChamarFerramenta, SaidaFase
  * falha); banco ocupado ou tx encerrada — o `carregar` do conector abre a própria tx curta — é falha NOSSA e relança sem
  * marcar o conector (NOD-266). Quem chama roda isto sob o contexto de log da fase 1 (mesmo correlation_id).
  */
-export async function executarEfeito(services: Pick<Services, "conectores" | "computadores" | "github"> & Partial<Pick<Services, "linear">>, efeito: EfeitoPendente): Promise<DesfechoEfeito> {
+export async function executarEfeito(services: Pick<Services, "conectores" | "computadores" | "github"> & Partial<Pick<Services, "linear" | "canvas">>, efeito: EfeitoPendente): Promise<DesfechoEfeito> {
+  if (efeito.tipo === "importar_canvas") {
+    if (!services.canvas) return { tipo: "importar_canvas", resultado: { ok: false, erro: "a importação não está disponível neste servidor" } };
+    return { tipo: "importar_canvas", resultado: await services.canvas.importar(efeito.url) };
+  }
   if (efeito.tipo === "lote") return { tipo: "lote", desfechos: await executarItens(services, efeito.lote.aExecutar) };
   if (efeito.tipo === "previa_linear") {
     if (!services.linear) return { tipo: "previa_linear", busca: { ok: false, erro: "importacao_indisponivel", detalhe: "a importação do Linear não está disponível neste servidor" } };
@@ -473,6 +493,10 @@ export const concluirChamada: CasoDeUso<EntradaConcluirChamada, ResultadoChamada
     const r = await emFases(deps, efeito.entrada, b.ok ? { fase: "aplicar", issues: b.issues } : { fase: "aplicar", falha: { erro: b.erro, detalhe: b.detalhe } });
     if ("buscarLinear" in r) throw new Error("fase 2 do gerir_quadro pediu outra busca");
     return { data: { ok: true, conteudo: JSON.stringify(r.data), confianca: "confiavel" }, events: r.events ?? [] };
+  }
+  if (efeito.tipo === "importar_canvas" && desfecho.tipo === "importar_canvas") {
+    const r = await concluirImportarCanvas(deps, efeito.entrada, desfecho.resultado);
+    return { data: { ok: true, conteudo: JSON.stringify(r.data), confianca: "nao_confiavel" }, events: r.events ?? [] };
   }
   if (efeito.tipo === "conector" && desfecho.tipo === "conector") {
     const sem = respostaSemFase2(efeito, desfecho);

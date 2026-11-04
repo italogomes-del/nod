@@ -115,6 +115,8 @@ import { caixaComFrase, FRASE_DE_PEDIR_APP, fraseDeEditarApp, fraseDeReconectar,
 import { aoGuardarOrdem, definirPaginas, ordemDoAgente, paginasDoAgente, paginasDtoDe } from "./lib/ordem-das-paginas.ts";
 import { criarPaginasDoServidor } from "./lib/paginas-do-servidor.ts";
 import { criarQuadroNaTela } from "./lib/quadro-na-tela.ts";
+import { criarCanvasNaTela } from "./lib/canvas-na-tela.ts";
+import { configurarAppCanvas, esquecerErroDoCanvas, guardarAppCanvas } from "./telas/marketplace-canvas.ts";
 import { conversaDaTrilha, criarTrilhaDaConversa } from "./lib/trilha-conversa.ts";
 import { criarQuadroCompartilhadoNaTela } from "./lib/quadro-compartilhado-na-tela.ts";
 import { caminhoDoQuadro, quadroDaUrl, releListaDosCompartilhados } from "./lib/quadro-compartilhado.ts";
@@ -543,6 +545,9 @@ window.matchMedia("(max-width: 1099px)").addEventListener("change", marcarPainel
 
 // NOD-429: Conversa | Quadro na pílula, só com o experimento Quadro ligado (Configurações › Geral › Avançado) e no bot da própria pessoa (web/lib/quadro.ts).
 // NOD-429: de volta à Conversa, a conversa passa a estar "na tela" de novo e é lida.
+// ADA-13 (ADR-150): a página Canvas do bot (a pílula a mostra quando o bot tem acesso ao app).
+const canvasNaTela = criarCanvasNaTela(document, { api: () => api });
+configurarAppCanvas({ ler: () => (api ? api.appCanvas() : null), aoMudar: () => render() });
 const quadroNaTela = criarQuadroNaTela(document, {
   aoTrocar: (m) => {
     // Revisão 3 do PR #630: voltar do Quadro à Conversa é escolher a conversa, também a que o app abriu sozinho.
@@ -562,6 +567,7 @@ const quadroNaTela = criarQuadroNaTela(document, {
     removerApp: (p) => removerAppDaPilula(p),
     reconectar: (p) => fraseNaConversa(fraseDeReconectar(p.nome)),
     lendo: (agenteId) => paginasDoServidor.lendo(agenteId),
+    canvas: { montar: (host, agenteId, nome) => canvasNaTela.montar(host, agenteId, nome) },
   },
   // NOD-442: o quadro de verdade (busca, frames, a pílula). O avatar é o mascote do próprio nod (HTML que o nod gera).
   dados: {
@@ -1091,6 +1097,7 @@ function receberFrame(frame: FrameSse): void {
   estado = reduzir(estado, { tipo: "frame", frame, agora: Date.now() });
   if (mudouNaTela(antes, estado)) renderNoQuadro();
   quadroNaTela.aoFrame(frame);
+  canvasNaTela.aoFrame(frame);
   quadroCompartilhado.aoFrame(frame);
   // NOD-455: o quadro de outra dona mudou (alguém entrou, saiu, o modo mudou): a barra relê os compartilhados.
   if (frame.tipo === "quadro.mudou" && typeof frame.dados["agenteId"] === "string" && !botGerido(frame.dados["agenteId"]) && releListaDosCompartilhados(frame, compartilhados.map((c) => c.id))) relerCompartilhados();
@@ -3503,6 +3510,7 @@ function aoTrocarDeTela(antes: Tela, tela: Tela): void {
  * Andar dentro dele (Avançado, voltar ao Marketplace, clicar no botão de novo) não esquece a origem.
  */
 function abrirMarketplace(avancado = false): void {
+  esquecerErroDoCanvas();
   const t = telaDeOrigem();
   const voltar = t.tipo === "conectores" ? t.voltar : t.tipo === "inicio" ? undefined : t;
   navegar({ tipo: "conectores", ...(avancado ? { avancado: true as const } : {}), ...(voltar ? { voltar } : {}) });
@@ -5471,6 +5479,17 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   "limpar-selecao": () => limparSelecao(true),
   "abrir-avancado": () => abrirMarketplace(true),
   "navegar-marketplace": () => abrirMarketplace(),
+  // ADA-13 (ADR-150): o app Canvas (instalar, desinstalar e o nível por bot; só pela tela).
+  "instalar-canvas": () => agir(async () => { guardarAppCanvas(await api!.instalarCanvas()); }),
+  "desinstalar-canvas": () => agir(async () => {
+    if (!window.confirm("Desinstalar o Canvas? Os bots perdem o acesso e a página some da pílula. Os canvas e os comentários ficam guardados.")) return;
+    guardarAppCanvas(await api!.desinstalarCanvas());
+  }),
+  "nivel-canvas": (el) => agir(async () => {
+    const n = el.dataset.nivel;
+    if (n !== "nenhum" && n !== "ver_comentar" && n !== "criar_publicar") return;
+    guardarAppCanvas(await api!.acessoCanvas(el.dataset.id ?? "", n === "nenhum" ? null : n));
+  }),
   "nivel-bot": (el) => agir(async () => {
     const agenteId = el.dataset.id ?? "";
     const nivel = el.dataset.nivel;
@@ -5549,6 +5568,12 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   // NOD-327: o card de CSV/PDF abre a prévia num modal claro sobre a conversa.
   "previa-arquivo": (el) => { abrirPreviaArquivo(el); },
   // NOD-96 (v2): Abrir leva à tela cheia em Assistindo (no pedido de ajuda, já no controle). Sem v2, o diálogo de antes.
+  // ADA-13: o card do canvas no chat abre a página Canvas do bot, já nesse canvas.
+  "abrir-canvas": (el) => {
+    if (!el.dataset.id) return;
+    canvasNaTela.querAbrir(el.dataset.id);
+    quadroNaTela.abrirPagina("canvas");
+  },
   "abrir-computador": (el) => {
     const a = botGerido(el.dataset.id);
     if (!a || !api || a.ownerId !== estado.sessao?.pessoaId) return;

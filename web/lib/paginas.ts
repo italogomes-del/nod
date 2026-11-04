@@ -6,7 +6,7 @@
  */
 import type { AppDto, IconeDoApp, PaginasDto } from "../../src/contracts/apps.ts";
 
-export type IconeDaPagina = "conversa" | "tarefas" | IconeDoApp;
+export type IconeDaPagina = "conversa" | "tarefas" | "canvas" | IconeDoApp;
 
 export interface Pagina {
   /** "conversa", "tarefas" ou "app:<uuid>" (os ids da ordem do servidor). */
@@ -23,6 +23,8 @@ export interface Pagina {
 
 export const CONVERSA: Pagina = { id: "conversa", nome: "Conversa", icone: "conversa" };
 export const TAREFAS: Pagina = { id: "tarefas", nome: "Tarefas", icone: "tarefas" };
+/** ADA-13 (ADR-150): a página do app Canvas, quando o bot tem acesso (o servidor manda `temCanvas`). */
+export const CANVAS: Pagina = { id: "canvas", nome: "Canvas", icone: "canvas" };
 
 export const idDoApp = (appId: string): string => `app:${appId}`;
 
@@ -35,6 +37,7 @@ export function paginasDoDto(dto: PaginasDto | null | undefined, o: { tarefasPed
   if (!dto) return [CONVERSA];
   const lista: Pagina[] = [CONVERSA];
   if (dto.temTarefas) lista.push(o.tarefasPedem ? { ...TAREFAS, pedeVoce: true } : TAREFAS);
+  if (dto.temCanvas) lista.push(CANVAS);
   for (const a of [...dto.apps].sort((x, y) => x.criadoEm - y.criadoEm)) {
     lista.push({ id: idDoApp(a.id), nome: a.nome, icone: a.icone, app: a, ...(a.pedeVoce ? { pedeVoce: true } : {}), ...(a.erroFonte ? { apagado: true } : {}) });
   }

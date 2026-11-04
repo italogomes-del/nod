@@ -88,6 +88,20 @@ describeIntegracao("apps do bot (NOD-445)", () => {
     });
   });
 
+  it("revisão 5 do #649 (baixo 8): o app antigo chamado Canvas segue alcançável pelo nome quando o bot não tem o Canvas", async () => {
+    await withRollback(MARLON, async (trx) => {
+      trxAtual = trx;
+      const { d, bot } = await montar(trx);
+      await criarDireto(d, bot.agenteId, "Leituras");
+      const antigo = await criarDireto(d, bot.agenteId, "Canvas");
+      await executar(d, EXECUTORES_APPS["paginas.ordenar"], { agenteId: bot.agenteId, pagina: "canvas", posicao: 1 });
+      expect((await paginas(d, bot.agenteId)).ordem[0]).toBe(`app:${antigo!.id}`);
+      // Revisão 6 do #649 (baixo): e sai pelo nome, sem a recusa do Canvas nativo.
+      const r = await executar(d, EXECUTORES_APPS["paginas.remover_app"], { agenteId: bot.agenteId, app: "Canvas" });
+      expect(r.data.app.id).toBe(antigo!.id);
+    });
+  });
+
   it("revisão 3 do #626: o card novo fecha só o pendente do mesmo nome no mesmo bot; dois nomes na conversa ficam confirmáveis", async () => {
     await withRollback(MARLON, async (trx) => {
       trxAtual = trx;

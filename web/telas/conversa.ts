@@ -237,6 +237,11 @@ function corpoMensagem(m: Mensagem, estado: Estado): string {
   // NOD-449: o card dos não lidos e o recibo de "marcada como lida", da ferramenta nao_lidos de qualquer bot.
   if (m.kind === "sistema" && p?.kind === "nao_lidos_lista") return cartaoNaoLidos(p, estado);
   if (m.kind === "sistema" && p?.kind === "recibo_leitura") return reciboLeitura(m, p);
+  // ADA-13 (ADR-150): o canvas publicado pelo bot (só ids e contagens); Abrir leva à página Canvas do bot.
+  if (p?.kind === "canvas") {
+    const meta = `v${p.versao} · ${p.jornadas} jornada${p.jornadas === 1 ? "" : "s"} · ${p.telas} tela${p.telas === 1 ? "" : "s"}${p.importado ? " · importado" : ""}`;
+    return `<div class="cv-card" data-canvas="${esc(p.canvasId)}"><span class="cv-card-ic" aria-hidden="true"></span><span class="cv-card-txt"><b>${esc(p.titulo)}</b><span>${esc(meta)}${p.confiavel === false ? ' · <span class="cv-fora">não confiável</span>' : ""}</span></span>${botao("abrir-canvas", "Abrir", { classe: "cv-bt sm", id: p.canvasId, dados: { agente: p.agenteId } })}</div>`;
+  }
   if (m.kind === "sistema") return cartaoRitmoRotina(m) ?? linhaDeIa(m, estado) ?? linhaDaMemoria(m, estado) ?? linhaDoTurnoPreso(m, estado) ?? `<div class="msg-sistema">${paragrafos(m.texto)}</div>`;
   if (p?.kind === "handoff") {
     // definido em 2026-09-24 (ADR-047): a tarefa delegada assina "Taga · por você" — autoria composta (ADR-023).

@@ -112,6 +112,7 @@ const TIPOS: Record<TipoFrame, true> = {
   "conta.abrir": true,
   "quadro.mudou": true,
   "paginas.mudaram": true,
+  "canvas.mudou": true,
   "conector.mudou": true,
   resumed: true,
 };

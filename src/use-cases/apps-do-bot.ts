@@ -3,7 +3,7 @@ import type { Autoria, RuntimeEvent } from "../contracts/evento.ts";
 import type { AppDoBot, FonteDoApp, FormaDoApp, IconeDoApp, PedeQuando, RetratoDoApp } from "../domain/apps-do-bot.ts";
 import {
   appDaPagina, appPedeVoce, cabeMaisUmApp, chaveDoNome, descreverPedeQuando, ehFonte, estadoDoApp, ehForma, ehIcone, iconePadrao, idDaPaginaDoApp, itensComPede,
-  LIMITE_DE_APPS, MAX_ORDEM_GUARDADA, MAX_REGRA, moverPagina, moverRelativo, normalizarPedeQuando, normalizarRetrato, ordemParaGravar, ordemPedida, ordemQueVale, PAGINA_CONVERSA, PAGINA_TAREFAS, paginasPadrao, validarNome,
+  LIMITE_DE_APPS, MAX_ORDEM_GUARDADA, MAX_REGRA, moverPagina, moverRelativo, normalizarPedeQuando, normalizarRetrato, ordemParaGravar, ordemPedida, ordemQueVale, PAGINA_CANVAS, PAGINA_CONVERSA, PAGINA_TAREFAS, paginasPadrao, validarNome,
 } from "../domain/apps-do-bot.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { log } from "../obs/log.ts";
@@ -63,10 +63,11 @@ export const paraDto = (a: AppDoBot, agora: number): AppDto => ({
 
 /** As páginas que valem agora para o bot: a ordem guardada normalizada, os apps vivos e se Tarefas existe. */
 async function montar(deps: Deps, agenteId: string): Promise<PaginasDto> {
-  const [apps, quadro, guardada] = await Promise.all([deps.repos.appsDoBot.doAgente(agenteId), deps.repos.quadros.doAgente(agenteId), deps.repos.appsDoBot.ordem(agenteId)]);
+  const [apps, quadro, guardada, canvas] = await Promise.all([deps.repos.appsDoBot.doAgente(agenteId), deps.repos.quadros.doAgente(agenteId), deps.repos.appsDoBot.ordem(agenteId), deps.repos.canvas.nivelDe(agenteId)]);
   const temTarefas = quadro !== null;
-  const ordem = ordemQueVale(guardada, paginasPadrao({ temTarefas, apps }));
-  return { agenteId, ordem, apps: apps.map((a) => paraDto(a, deps.agora())), temTarefas, cabeMais: cabeMaisUmApp({ apps: apps.length }), limite: LIMITE_DE_APPS };
+  const temCanvas = canvas !== null;
+  const ordem = ordemQueVale(guardada, paginasPadrao({ temTarefas, temCanvas, apps }));
+  return { agenteId, ordem, apps: apps.map((a) => paraDto(a, deps.agora())), temTarefas, temCanvas, cabeMais: cabeMaisUmApp({ apps: apps.length }), limite: LIMITE_DE_APPS };
 }
 
 /** O app do bot pelo id, pela página (`app:<id>`) ou pelo nome (sem acento nem caixa; removido, o mais recente). */
@@ -90,6 +91,8 @@ function paginaPelaRef(p: PaginasDto, ref: string): string | null {
   const chave = chaveDoNome(r);
   if (chave === "conversa") return PAGINA_CONVERSA;
   if (chave === "tarefas" || chave === "quadro") return p.temTarefas ? PAGINA_TAREFAS : null;
+  // Sem acesso ao Canvas, "canvas" ainda pode ser um app antigo com esse nome (revisão 5 do #649).
+  if (chave === "canvas" && p.temCanvas) return PAGINA_CANVAS;
   const a = p.apps.find((x) => x.id === r || chaveDoNome(x.nome) === chave);
   return a ? idDaPaginaDoApp(a.id) : null;
 }
@@ -177,8 +180,8 @@ async function gravar(deps: Deps, agenteId: string, nova: readonly string[]): Pr
   // Sem ordem guardada, o lugar dos removidos sai da ordem padrão com eles dentro (a de criação).
   let padrao: string[] = [];
   if (!guardada && removidos.length) {
-    const [vivos, quadro] = await Promise.all([deps.repos.appsDoBot.doAgente(agenteId), deps.repos.quadros.doAgente(agenteId)]);
-    padrao = paginasPadrao({ temTarefas: quadro !== null, apps: [...vivos, ...removidos] });
+    const [vivos, quadro, canvas] = await Promise.all([deps.repos.appsDoBot.doAgente(agenteId), deps.repos.quadros.doAgente(agenteId), deps.repos.canvas.nivelDe(agenteId)]);
+    padrao = paginasPadrao({ temTarefas: quadro !== null, temCanvas: canvas !== null, apps: [...vivos, ...removidos] });
   }
   await deps.repos.appsDoBot.gravarOrdem(agenteId, ordemParaGravar(nova, guardada, removidos.map((r) => idDaPaginaDoApp(r.id)), padrao));
 }
@@ -192,6 +195,8 @@ export async function removerApp(deps: Deps, input: Comum & { app: string }): Pr
   const ck = chaveDoNome(ref);
   if (ref === PAGINA_CONVERSA || ck === "conversa") return { data: falha("conversa_fica", "a Conversa não sai das páginas (dá para mudar de lugar)"), events: [] };
   if (ref === PAGINA_TAREFAS || ck === "tarefas") return { data: falha("entrada_invalida", "Tarefas é o quadro do bot: some quando o quadro é removido (gerir_quadro remover_quadro)"), events: [] };
+  // Sem acesso ao Canvas, "canvas" pode ser um app antigo com esse nome, que sai normalmente (revisão 6 do #649).
+  if (ref === PAGINA_CANVAS || (ck === "canvas" && (await montar(deps, input.agenteId)).temCanvas)) return { data: falha("entrada_invalida", "o Canvas é o app nativo: sai quando a pessoa tira o acesso deste bot em Apps → Canvas"), events: [] };
   // A trava do bot, como em ordenar, restaurar e no card: quem grava a ordem ou conta os apps ao mesmo tempo espera.
   await deps.repos.appsDoBot.travar(input.agenteId);
   const app = await acharApp(deps, input.agenteId, ref);

@@ -126,6 +126,8 @@ export const FORA_DO_PEDIDO_DE_OUTRA_PESSOA: readonly NomeFerramentaNod[] = [
   // Revisão 6 do PR #628, achados 2 e 4: nem lê o que é da dona — os bots dela com rotinas e apps (ver_colegas), as rotinas
   // do bot (listar_rotinas) e os artefatos da conversa dela (ler_artefato).
   "ver_colegas", "listar_rotinas", "ler_artefato",
+  // ADA-13: os canvas são da dona (protótipos e comentários dela).
+  "gerir_canvas",
 ];
 
 /**
@@ -325,6 +327,11 @@ export type EntradaPlano = {
    */
   quadro?: boolean;
   /**
+   * ADA-13 (ADR-150): o bot tem o app Canvas instalado e acesso concedido (o nível). Põe gerir_canvas na conversa, na
+   * criação, na rotina e na delegação. Sem acesso, a ferramenta nem aparece (o caso de uso confere de novo).
+   */
+  canvas?: boolean;
+  /**
    * definido em 2026-10-15 (NOD-262): os pedidos de colegas na fila do bot (delegações pendentes), os mais antigos
    * primeiro. Na conversa e na sala, com ao menos um, entram a linha do prompt e responder_pedido; ausente ou vazio = nada.
    */
@@ -347,6 +354,8 @@ const MODOS_DA_CONTA: readonly ModoTurno[] = ["conversa", "criacao", "sala"];
 const FERRAMENTA_ABRIR_CONTA: NomeFerramentaNod = "abrir_conta";
 /** NOD-442: os modos com gerir_quadro (com o experimento ligado): onde a pessoa fala, a rotina e a tarefa delegada. */
 export const MODOS_DO_QUADRO: readonly ModoTurno[] = ["conversa", "criacao", "rotina", "delegacao"];
+/** ADA-13: onde o gerir_canvas entra (os do quadro: onde a pessoa ou a tarefa pede um protótipo). */
+export const MODOS_DO_CANVAS: readonly ModoTurno[] = MODOS_DO_QUADRO;
 /** NOD-445: os modos com gerir_apps (o mesmo experimento): a conversa (pedir, ordenar, remover) e a rotina (o retrato do app). */
 export const MODOS_DOS_APPS: readonly ModoTurno[] = ["conversa", "criacao", "rotina"];
 
@@ -378,7 +387,8 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
   const reconfigura = emReconfiguracaoNoPlano(entrada);
   const abreConta: readonly NomeFerramentaNod[] = entrada.contas && MODOS_DA_CONTA.includes(modo) && !entrada.trabalho ? [FERRAMENTA_ABRIR_CONTA] : [];
   const geraQuadro: readonly NomeFerramentaNod[] = entrada.quadro && MODOS_DO_QUADRO.includes(modo) ? ["gerir_quadro", ...(MODOS_DOS_APPS.includes(modo) ? (["gerir_apps"] as const) : [])] : [];
-  const nod = [...(reconfigura ? [FERRAMENTA_RECONFIGURACAO] : []), ...FERRAMENTAS_NOD_POR_MODO[modo], ...esperaComando, ...(modo === "ligacao" && entrada.onboarding ? FERRAMENTAS_NOD_ONBOARDING : []), ...doNod, ...criaBots, ...respondePedido, ...abreConta, ...geraQuadro]
+  const usaCanvas: readonly NomeFerramentaNod[] = entrada.canvas && MODOS_DO_CANVAS.includes(modo) ? ["gerir_canvas"] : [];
+  const nod = [...(reconfigura ? [FERRAMENTA_RECONFIGURACAO] : []), ...FERRAMENTAS_NOD_POR_MODO[modo], ...esperaComando, ...(modo === "ligacao" && entrada.onboarding ? FERRAMENTAS_NOD_ONBOARDING : []), ...doNod, ...criaBots, ...respondePedido, ...abreConta, ...geraQuadro, ...usaCanvas]
     .filter((n) => (n !== "abrir_frentes" || podeAbrirTask(entrada.trabalho ?? null)) && (n !== "mandar_para_frente" || podeMandarParaTask(entrada.trabalho ?? null)))
     .filter((n) => !frente || !FERRAMENTAS_FORA_DA_FRENTE.includes(n))
     // NOD-61 (revisões 2 e 3 do PR #594): pedido de outro bot (sobProcuracaoDe, herdado por frente/retomada/lote) não leva o

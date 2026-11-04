@@ -6,6 +6,7 @@ import { avisoErro } from "../lib/card-proposta.ts";
 import { haQuanto } from "../lib/relogio.ts";
 import { ICONE } from "../lib/icones.ts";
 import { voltaDaTela } from "../lib/volta.ts";
+import { cartaoCanvas, gavetaCanvas, SLUG_CANVAS } from "./marketplace-canvas.ts";
 import { acoes, blocoEsperando, blocoFalhou, botsQueUsam, conectorDoApp, gruposDe, meusBots, nivelDoBot, podeENao, ROTULO_NIVEL, SETA_EXTERNA, situacaoDoApp, type Nivel, type NivelAtual, type SituacaoApp } from "./app-acesso.ts";
 
 /**
@@ -207,7 +208,7 @@ export function renderMarketplace(estado: Estado): string {
     ${aviso}${semComposio}
     ${filtros(filtro, conectados, atencao.length)}
     ${filtro === "todos" ? faixaAtencao(estado, atencao.map((x) => x.app)) : ""}
-    <div class="apps-grid">${principais.map((x) => cartao(estado, x.app, x.s, selecionado(x.app.slug))).join("")}</div>
+    <div class="apps-grid">${filtro === "todos" ? cartaoCanvas(estado, selecionado(SLUG_CANVAS)) : ""}${principais.map((x) => cartao(estado, x.app, x.s, selecionado(x.app.slug))).join("")}</div>
     ${mais.length ? `<section class="mkt-mais" data-secao-apps aria-labelledby="mkt-mais-titulo">
       <div class="mkt-mais-topo"><h2 id="mkt-mais-titulo">Mais apps <span class="mudo">· ${mais.length}</span></h2><p>O Composio cuida do login destes apps: é só conectar.</p></div>
       <div class="apps-grid">${mais.map((x) => cartao(estado, x.app, x.s, selecionado(x.app.slug))).join("")}</div>
@@ -215,6 +216,6 @@ export function renderMarketplace(estado: Estado): string {
     <p id="marketplace-vazio" class="mudo" hidden>Nenhum app encontrado.</p>
     <p class="mkt-rodape mudo">Não achou o app? ${botao("abrir-avancado", "Conectar um servidor MCP próprio", { classe: "link" })} · ${botao("abrir-avancado", "Configurações avançadas", { classe: "link" })}</p>
   </div>
-  ${aberta && tela?.gaveta ? gaveta(estado, aberta, tela.gaveta.passo) : ""}`;
+  ${tela?.gaveta?.slug === SLUG_CANVAS ? gavetaCanvas(estado) : aberta && tela?.gaveta ? gaveta(estado, aberta, tela.gaveta.passo) : ""}`;
 }
 

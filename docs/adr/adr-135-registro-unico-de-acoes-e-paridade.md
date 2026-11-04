@@ -75,6 +75,12 @@ dois caminhos já divergiam: excluir um bot pela tela desligava o computador del
   marca; o turno de fora só lista, e procuração de outra pessoa ou corrente (profundidade > 0) nem lista. Gatilho de
   reversão: uma marcação feita por bot que a pessoa não pediu e precisou desfazer mais de uma vez por semana passa as
   marcações pelo chat a seguir o modo do bot.
+- **As ações `canvas.comentar` e `canvas.resolver_comentario` (ADA-13, 2026-11-04, ADR-150) são `muda` com
+  `cartaoNoChat: false`**: o `gerir_canvas` aplica direto, sem o cartão do modo do bot. O canvas é da pessoa, comentar
+  não tem efeito fora, e resolver tem o reabrir (`resolvido: false`) na tela e no chat. O turno que leu conteúdo de fora
+  comenta (o comentário fica `nao_confiavel`, marcado de fora na tela) e resolve ou reabre os comentários de bot e de
+  importação, mas não resolve o da pessoa: esse só sai num turno limpo ou pela tela. Gatilho de reversão: a pessoa
+  precisar reabrir um comentário resolvido por bot por engano mais de uma vez por semana passa o resolver a seguir o modo.
 
 ## Alternativas descartadas
 

@@ -47,6 +47,7 @@ import type { PreviaAssumir, ResultadoAssumir } from "../../src/contracts/quadro
 import type { EventoTrilhaQuadro } from "../../src/contracts/trilha-quadro.ts";
 import type { EstadoExecucao, ExecucoesDaTarefa } from "../../src/contracts/quadro-execucoes.ts";
 import type { AppDto, PaginasDto } from "../../src/contracts/apps.ts";
+import type { AppCanvasDto, CanvasItemDto, ComentarioCanvasDto, NivelCanvasDto, NovoComentarioDto, VistaCanvasDto } from "../../src/contracts/canvas.ts";
 import type { AtividadeTarefa } from "../../src/contracts/quadro-pela-conversa.ts";
 import type { EventoLinha, TaxaDeAbertura, TrabalhoDetalheDto, TrabalhosDto } from "../../src/contracts/trabalho.ts";
 import type { DisponibilidadeLigacao, FalaLigacao, Ligacao, LigacaoCriada } from "../../src/contracts/ligacao.ts";
@@ -271,6 +272,16 @@ export function criarApi(escopo: Escopo) {
     ordenarPaginas: (agenteId: string, ordem: string[]) => pedir<{ paginas: PaginasDto }>("PUT", `${base}/agentes/${encodeURIComponent(agenteId)}/paginas/ordem`, { ordem }),
     removerApp: (agenteId: string, appId: string) => del<{ paginas: PaginasDto; app: AppDto }>(`agentes/${encodeURIComponent(agenteId)}/apps/${encodeURIComponent(appId)}`),
     restaurarApp: (agenteId: string, appId: string) => post<{ paginas: PaginasDto; app: AppDto }>(`agentes/${encodeURIComponent(agenteId)}/apps/${encodeURIComponent(appId)}/restaurar`),
+    /** ADA-13 (ADR-150): o app Canvas. A gaveta do Marketplace (instalar, desinstalar, o nível por bot) e a página do bot. */
+    appCanvas: () => get<AppCanvasDto>("canvas/app"),
+    instalarCanvas: () => pedir<AppCanvasDto>("PUT", `${base}/canvas/app`, {}),
+    desinstalarCanvas: () => del<AppCanvasDto>("canvas/app"),
+    acessoCanvas: (agenteId: string, nivel: NivelCanvasDto | null) => pedir<AppCanvasDto>("PUT", `${base}/canvas/app/acessos/${encodeURIComponent(agenteId)}`, { nivel }),
+    canvasDoAgente: (agenteId: string) => get<{ canvas: CanvasItemDto[] }>(`agentes/${encodeURIComponent(agenteId)}/canvas`),
+    verCanvas: (canvasId: string) => get<VistaCanvasDto>(`canvas/${encodeURIComponent(canvasId)}`),
+    blobsCanvas: (canvasId: string, hashes: readonly string[]) => get<{ blobs: Record<string, string> }>(`canvas/${encodeURIComponent(canvasId)}/blobs?hashes=${hashes.map(encodeURIComponent).join(",")}`),
+    comentarCanvas: (canvasId: string, c: NovoComentarioDto) => post<{ comentario: ComentarioCanvasDto }>(`canvas/${encodeURIComponent(canvasId)}/comentarios`, c),
+    resolverComentarioCanvas: (comentarioId: string, resolvido: boolean) => post<{ comentario: ComentarioCanvasDto }>(`canvas/comentarios/${encodeURIComponent(comentarioId)}/resolver`, { resolvido }),
     /** NOD-442 (ADR-135): a aba Quadro de um bot. Cada mutação devolve o quadro montado e o lote (o Desfazer usa o id dele). */
     quadro: (agenteId: string) => get<{ quadro: QuadroDto | null }>(`agentes/${encodeURIComponent(agenteId)}/quadro`),
     /** NOD-415 (ADR-141): meta e prazo opcionais; meta null tira (fluxo contínuo). */

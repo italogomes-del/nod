@@ -166,6 +166,8 @@ export interface AcoesDasPaginas {
   reconectar(p: Pagina): void;
   /** O GET das páginas do bot está no ar: um app ainda vazio mostra o esqueleto, não o "Nada aqui ainda". */
   lendo?(agenteId: string): boolean;
+  /** ADA-13 (ADR-150): a página Canvas mora num host estável (o módulo dela cuida do DOM de dentro e dos frames). */
+  canvas?: { montar(host: HTMLElement, agenteId: string, nome: string): void };
 }
 
 export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; aoTrocar?: (m: ModoDaConversa) => void; aoMudarOrdem?: () => void; aoTarefasPedirem?: (pedem: boolean) => void; dados?: DadosDoQuadro; paginas?: AcoesDasPaginas } = {}): QuadroNaTela {
@@ -362,6 +364,21 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     if (!v) return;
     v.dataset["forma"] = forma;
     v.dataset["pagina"] = paginas[pagina]?.id ?? "";
+    if (paginas[pagina]?.id === "canvas" && o.paginas?.canvas && agenteId) {
+      // ADA-13: o host do canvas não é regravado a cada frame (os iframes e a vista ficam); as outras páginas o trocam.
+      let host = v.querySelector<HTMLElement>(":scope > .cv-host");
+      if (!host || host.dataset["agente"] !== agenteId) {
+        v.innerHTML = "";
+        host = doc.createElement("div");
+        host.className = "cv-host";
+        host.dataset["agente"] = agenteId;
+        v.append(host);
+        vistaDesenhada = null;
+      }
+      o.paginas.canvas.montar(host, agenteId, nome);
+      return;
+    }
+    if (v.querySelector(":scope > .cv-host")) v.innerHTML = "";
     if (!dd) { v.innerHTML = conteudoHtml(); vistaDesenhada = null; return; }
     let conteudo = v.querySelector<HTMLElement>(":scope > .qd-conteudo");
     if (!conteudo) {

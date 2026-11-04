@@ -487,6 +487,8 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
     // experimento e a flag da DONA), mesmo com o experimento dela desligado; o próprio quadro segue o dela.
     ...(experimentos.quadro || (await participaDeQuadroAberto(deps)) ? { quadro: true } : {}),
     ...(whatsapp ? { whatsapp: true } : {}),
+    // ADA-13: o gerir_canvas só vai ao bot com o app Canvas e o acesso (o nível confere de novo no caso de uso).
+    ...((await deps.repos.canvas.nivelDe(agente.id)) ? { canvas: true } : {}),
     ...(deps.services.revisor?.config.ligado ? { revisor: true } : {}),
     contextoConversa,
     pessoaNome,

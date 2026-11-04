@@ -65,4 +65,9 @@ describe("itens da Atividade", () => {
     expect(diaNoFuso(Date.UTC(2026, 9, 18, 2, 30), "UTC")).toBe("2026-10-18");
     expect(() => diaNoFuso(0, "Marte/Olimpo")).toThrow(RangeError);
   });
+  it("revisão 6 do #649: o card do canvas diz se publicou ou importou", () => {
+    const base = { kind: "canvas", canvasId: "c", agenteId: "a", versao: 1, titulo: "T", jornadas: 1, telas: 1, confiavel: false } as const;
+    expect(itemDaMensagem(msg({ kind: "sistema", texto: "x", payload: { ...base, importado: true } as never }), "canvas").titulo).toBe("Importou um protótipo para o canvas");
+    expect(itemDaMensagem(msg({ kind: "sistema", texto: "x", payload: { ...base, importado: false } as never }), "canvas").titulo).toBe("Publicou um canvas");
+  });
 });
