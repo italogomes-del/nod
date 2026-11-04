@@ -27,17 +27,20 @@ describeIntegracao("métricas: coleta por pessoa e exposição em /metrics", () 
       expect(m.ler({ metrica: "pendencia_mais_velha_s", tenant_id: TENANT_PADRAO, pessoa_id: PESSOA_MARLON })).toBe(0);
 
       const velha = await repos.decisoes.criar({ tipo: "aprovacao", agenteId, conversaId, prazoDecisaoEm: Date.now() + 10 * H, frase: "velha" });
-      await repos.decisoes.criar({ tipo: "pergunta", agenteId, conversaId, prazoDecisaoEm: Date.now() + 10 * H, frase: "nova" });
+      const nova = await repos.decisoes.criar({ tipo: "pergunta", agenteId, conversaId, prazoDecisaoEm: Date.now() + 10 * H, frase: "nova" });
       const [linha] = await trx<{ criado_em: Date }[]>`select criado_em from decisoes where id = ${velha?.id ?? ""}`;
       const agora = (linha?.criado_em.getTime() ?? 0) + 6 * H;
       await coletarGauges(trx, MARLON, agora, m);
       expect(m.ler({ metrica: "pendencia_mais_velha_s", tenant_id: TENANT_PADRAO, pessoa_id: PESSOA_MARLON })).toBe(21_600);
       expect(m.ler({ metrica: "custo_servidor_mes", tenant_id: TENANT_PADRAO })).toBe(0);
 
-      // Decidida deixa de contar; vencida também (o que conta é o que ainda espera decisão).
+      // Decidida deixa de contar; vencida também (o que conta é o que ainda espera decisão). O que sobra é a "nova",
+      // e a idade dela é exata: numa máquina rápida as duas nascem no mesmo segundo e "menor que 21 600" caía
+      // (CI no Blacksmith, 2026-11-04) — a métrica arredonda para baixo em segundos.
       await repos.decisoes.decidir(velha?.id ?? "", { por: PESSOA_MARLON, agora });
       await coletarGauges(trx, MARLON, agora, m);
-      expect(m.ler({ metrica: "pendencia_mais_velha_s", tenant_id: TENANT_PADRAO, pessoa_id: PESSOA_MARLON })).toBeLessThan(21_600);
+      const [linhaNova] = await trx<{ criado_em: Date }[]>`select criado_em from decisoes where id = ${nova?.id ?? ""}`;
+      expect(m.ler({ metrica: "pendencia_mais_velha_s", tenant_id: TENANT_PADRAO, pessoa_id: PESSOA_MARLON })).toBe(Math.floor((agora - (linhaNova?.criado_em.getTime() ?? 0)) / 1000));
     });
   });
 

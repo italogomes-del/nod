@@ -2,7 +2,7 @@
 // valor nunca é decifrado aqui: viaja como BLOB em base64 e volta byte a byte igual.
 import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, utimes } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { DatabaseSync } from "node:sqlite";
 import { homedir, tmpdir } from "node:os";
@@ -149,8 +149,12 @@ describe("senhas salvas: no Login Data sintético", () => {
     expect(await recolherSenhas(arq, CHAVE, perfil, tmp, 1000, marcas)).toBe("gravou");
     // Nada mudou no arquivo: nem copia (a cópia + integrity_check saem do caminho de toda ação).
     expect(await recolherSenhas(arq, CHAVE, perfil, tmp, 2000, marcas)).toBe("parado");
-    // O Chrome gravou uma senha nova: a marca muda e recolhe de novo.
+    // O Chrome gravou uma senha nova: a marca muda e recolhe de novo. A marca é mtime + tamanho, e o tamanho de um
+    // SQLite com uma linha a mais pode não mudar; o mtime do kernel tem granulação de alguns ms, e numa máquina
+    // rápida (CI no Blacksmith, 2026-11-04) as duas gravações caíam na mesma marca. O Chrome real grava segundos
+    // depois: aqui o relógio do arquivo anda 1 s de propósito.
     importarNoPerfil(perfil, lojaCom(linha("https://a.com/", "beto", 20, "ZG9pcw==")));
+    await utimes(loginDataDo(perfil), new Date(), new Date(Date.now() + 1000));
     expect(await recolherSenhas(arq, CHAVE, perfil, tmp, 3000, marcas)).toBe("gravou");
     expect(Object.keys((await lerSenhas(arq, CHAVE)).linhas).length).toBe(2);
     // Sem marcas (quem chama não guarda), lê sempre, como antes.
