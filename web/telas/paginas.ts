@@ -52,7 +52,7 @@ export function docaDePaginas(o: { nome: string; paginas: readonly Pagina[]; ord
     const casa = pos === 0 && i !== 0;
     const rot = `${p.nome}${p.pedeVoce ? ", pede você" : ""}${p.apagado ? ", sem acesso à fonte" : ""}${casa ? ", abre primeiro" : ""}`;
     return `<button type="button" role="tab" class="pg-ic${casa ? " pg-casa" : ""}${p.apagado ? " pg-apagado" : ""}" style="--pg-i:${pos}" data-act="pagina" data-pagina="${i}" data-pg-id="${esc(p.id)}" data-pos="${pos}" id="pg-aba-${i}" aria-selected="${i === 0}" tabindex="${i === 0 ? 0 : -1}"` +
-      ` aria-label="${esc(rot)}" aria-haspopup="menu" aria-posinset="${pos + 1}" aria-setsize="${total}" aria-keyshortcuts="${ARIA_DAS_TECLAS}"${i > 0 ? ' aria-controls="quadro"' : ""}>` +
+      ` aria-label="${esc(rot)}" aria-haspopup="menu" aria-posinset="${pos + 1}" aria-setsize="${total}" aria-keyshortcuts="${ARIA_DAS_TECLAS}"${i > 0 ? ' aria-controls="quadro"' : ""} data-nome="${esc(p.nome)}">` +
       `${ICONE_DA_PAGINA[p.icone] ?? ICONE_DA_PAGINA.app}${p.pedeVoce ? '<i class="pg-bd" aria-hidden="true"></i>' : ""}<span class="pg-tip" aria-hidden="true">${esc(p.nome)}${casa ? " · abre primeiro" : ""}${teclas}</span></button>`;
   }).join("");
   const pedir = o.pedirApp

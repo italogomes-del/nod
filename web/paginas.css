@@ -3,7 +3,13 @@
    Sutil como mensagem: a aba atual acende em superfície, sem bloco cheio; "pede você" é laranja (--warning), como no protótipo
    aprovado. O quadro (.qd-st-voce, .qd-anel-voce) segue azul: suposição a confirmar com o Gil (revisão 6 do PR 626). */
 
-.qd-pil.pg-pil { position: relative; padding: 2px; will-change: transform; touch-action: pan-y; }
+.qd-pil.pg-pil { position: relative; padding: 2px; will-change: transform; }
+/* ADA-8: no toque a cápsula inteira é um gesto só (web/lib/gesto-da-pilula-na-tela.ts): o navegador não rola, não
+   seleciona nem abre a lupa/o menu dele ao segurar. Rolar a conversa continua no corpo, nunca na cápsula.
+   Revisão do #651: `any-pointer` (o notebook de tela de toque tem o ponteiro principal fino e perdia o arrasto lateral). */
+@media (any-pointer: coarse) {
+  .cabecalho .qd-pil.pg-pil { touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+}
 
 /* A doca: fechada tem largura 0 (o JS anima a largura até a do conteúdo). */
 .pg-doca { display: flex; align-items: center; flex: none; width: 0; height: 30px; overflow: hidden; }
@@ -38,10 +44,20 @@
 .pg-tip-tec { display: block; margin-top: 1px; color: var(--ink-3); font-size: 10.5px; letter-spacing: .01em; }
 .pg-ic:hover .pg-tip, .pg-ic:focus-visible .pg-tip { opacity: 1; transform: translateX(-50%); }
 
-/* Os pontinhos, logo abaixo da cápsula; somem com a doca aberta (os ícones dizem o mesmo). */
+/* Os pontinhos, logo abaixo da cápsula; somem com a doca aberta (os ícones dizem o mesmo). ADA-8: no toque, tocar
+   neles abre e fecha a doca (a alternativa visível ao gesto; o alvo mora no bloco do toque logo abaixo). */
 .pg-pontos { position: absolute; top: calc(100% + 6px); left: 50%; display: flex; align-items: center; gap: 4px; height: 6px; transform: translateX(-50%);
   pointer-events: none; transition: opacity .2s; }
 .qd-pil.pg-aberta .pg-pontos { opacity: 0; }
+@media (any-pointer: coarse) {
+  /* Os pontinhos recebem o toque só aqui: no mouse o hover já abre a doca, e o alvo debaixo do cursor fazia a doca
+     piscar. O alvo de 44×24 px sobe 8 px por dentro da cápsula e desce só 4 px além dos pontinhos (revisão 2 do #651: a
+     conversa rola por baixo do topo e a faixa tomava o começo da rolagem). Com a doca aberta os pontinhos somem e o
+     alvo também (tocar fora ou no nome fecha). */
+  .pg-pontos { pointer-events: auto; cursor: pointer; }
+  .pg-pontos::before { content: ""; position: absolute; left: 50%; top: -14px; width: max(44px, calc(100% + 16px)); height: 24px; transform: translateX(-50%); }
+  .qd-pil.pg-aberta .pg-pontos { pointer-events: none; }
+}
 .pg-pt { width: 5px; height: 5px; border-radius: 3px; background: var(--ink-3); opacity: .35;
   transition: width .35s cubic-bezier(.34, 1.56, .64, 1), opacity .2s, background-color .2s; }
 /* O "pede você" é laranja (--warning), como no protótipo aprovado; o azul (--signal) é do foco e da seleção. */

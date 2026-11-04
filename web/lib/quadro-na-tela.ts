@@ -38,7 +38,8 @@ import { faixaDoQuadro, ICONE_ENVIAR_PILULA, ICONE_PARAR_PILULA, idDaNovaTarefa,
 import { anuncioDaOrdem, anuncioDaPagina, CONVERSA, ehForma, indicePeloId, moverNaOrdem, paginaPelaTecla, presa, TAREFAS, type FormaDasTarefas, type Pagina } from "./paginas.ts";
 import { guardarOrdem, ordemDoAgente, paginasDtoDe } from "./ordem-das-paginas.ts";
 import { formaDasTarefas, menuDaPagina, paginaDoApp } from "../telas/paginas.ts";
-import { ligarGestosDaPilula } from "./paginas-na-tela.ts";
+import type { BuscaDaPilula } from "./gesto-da-pilula-na-tela.ts";
+import { ligarGestosDaPilula, type PilulaDePaginas } from "./paginas-na-tela.ts";
 import { criarComentariosNaTela, type ApiDosComentarios } from "./comentarios-na-tela.ts";
 import { criarTrabalhosDaTarefa, type ApiDosTrabalhos } from "./trabalhos-da-tarefa.ts";
 
@@ -224,7 +225,7 @@ export interface AcoesDasPaginas {
   canvas?: { montar(host: HTMLElement, agenteId: string, nome: string): void };
 }
 
-export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; aoTrocar?: (m: ModoDaConversa) => void; aoMudarOrdem?: () => void; aoTarefasPedirem?: (pedem: boolean) => void; dados?: DadosDoQuadro; paginas?: AcoesDasPaginas } = {}): QuadroNaTela {
+export function criarQuadroNaTela(doc: Document, o: { busca?: BuscaDaPilula; menuDaPilula?: PilulaDePaginas["menuDaPilula"]; reduzido?: () => boolean; aoTrocar?: (m: ModoDaConversa) => void; aoMudarOrdem?: () => void; aoTarefasPedirem?: (pedem: boolean) => void; dados?: DadosDoQuadro; paginas?: AcoesDasPaginas } = {}): QuadroNaTela {
   // Revisão 5 do ADA-5 (definido em 2026-11-04): a troca de vista descarta o ditado aberto (ADR-095) aqui, e não no
   // main, para que o teste do Chrome prove a regra; depois avisa quem ouve.
   const avisarTroca = (m: ModoDaConversa): void => {
@@ -2710,6 +2711,7 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
   const gestos = ligarGestosDaPilula(doc, {
     irPara: (pos) => irPara(naPos(pos)), atual: () => posDe(pagina), total: totalDePaginas, reduzido,
     mover: (de, para) => moverPagina(de, para), menu: (pos, el) => abrirMenu(naPos(pos), el),
+    busca: o.busca, menuDaPilula: o.menuDaPilula,
   });
 
   /**

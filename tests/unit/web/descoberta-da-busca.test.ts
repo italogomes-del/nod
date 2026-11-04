@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  cliqueDepoisDoGesto, conversaLonga, criarFiltroDeEco, deslocamentoDoPuxar, deveCutucar, deveMostrarDica, escFechaABusca, ECO_DO_MENU_MS, ecoDoMenu, fimDoGesto, gravarMarca, lerMarca, tremeu, type Marcas,
+  cliqueDepoisDoGesto, conversaLonga, criarFiltroDeEco, deslocamentoDoPuxar, deveCutucar, deveMostrarDica, escFechaABusca, ECO_DO_MENU_MS, ecoDoMenu, gravarMarca, lerMarca, type Marcas,
 } from "../../../web/lib/descoberta-da-busca.ts";
 
 /** NOD-42: como a busca se revela (dica ⌘F, cutucão) e o gesto da pílula no celular. */
@@ -31,24 +31,10 @@ describe("cutucão", () => {
 });
 
 describe("gesto da pílula", () => {
-  it("puxar 36 px para baixo abre; menos que isso, nada", () => {
-    expect(fimDoGesto(36, false)).toBe("abrir");
-    expect(fimDoGesto(35, false)).toBe("nada");
-    expect(fimDoGesto(-80, false)).toBe("nada");
-  });
-  it("com a busca aberta, empurrar 36 px para cima fecha; puxar para baixo não faz nada", () => {
-    expect(fimDoGesto(-36, true)).toBe("fechar");
-    expect(fimDoGesto(-35, true)).toBe("nada");
-    expect(fimDoGesto(80, true)).toBe("nada");
-  });
   it("a pílula acompanha metade do dedo, até 30 px, e nunca sobe", () => {
     expect(deslocamentoDoPuxar(20)).toBe(10);
     expect(deslocamentoDoPuxar(200)).toBe(30);
     expect(deslocamentoDoPuxar(-50)).toBe(0);
-  });
-  it("tremida de até 10 px ainda é toque longo", () => {
-    expect(tremeu(6, 8)).toBe(false);
-    expect(tremeu(0, 11)).toBe(true);
   });
 });
 

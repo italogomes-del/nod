@@ -58,8 +58,14 @@ window.__montar = (comQuadro) => {
   document.getElementById("timeline").innerHTML = "<p>conversa</p>";
   document.getElementById("composer").innerHTML = "<textarea></textarea>";
   window.__trocas = [];
+  // ADA-8: a busca e o menu do segurar, como o main liga (aqui contados).
+  window.__busca = { abriu: 0, fechou: 0 };
+  window.__menus = [];
+  window.__buscaAberta = false;
+  const busca = { ativa: () => true, aberta: () => window.__buscaAberta, pode: () => true, abrir: () => { window.__busca.abriu++; }, fechar: () => { window.__busca.fechou++; } };
+  const menuDaPilula = (_el, itens, ir) => { window.__menus.push(itens.map((i) => i.tipo === "buscar" ? "buscar" : i.nome + (i.atual ? "*" : ""))); window.__irPara = ir; };
   // Quem ouve a troca (o main lê a conversa na volta) precisa ver o modo novo no momento da chamada.
-  const q = criarQuadroNaTela(document, { aoTrocar: (m) => window.__trocas.push(m + ":" + q.modo()) });
+  const q = criarQuadroNaTela(document, { busca, menuDaPilula, aoTrocar: (m) => window.__trocas.push(m + ":" + q.modo()) });
   q.sincronizar(comQuadro ? { chave: C, nome: "Ada", paginas: PAGINAS } : { chave: null, nome: "" });
   window.__quadro = q;
 };
@@ -156,6 +162,7 @@ descrever("NOD-429 no Chrome real", () => {
     await cdp.enviar("Emulation.setEmulatedMedia", { features: [
       { name: "prefers-reduced-motion", value: reduzido ? "reduce" : "no-preference" },
       { name: "hover", value: celular ? "none" : "hover" }, { name: "pointer", value: celular ? "coarse" : "fine" },
+      { name: "any-hover", value: celular ? "none" : "hover" }, { name: "any-pointer", value: celular ? "coarse" : "fine" },
     ] });
     await cdp.enviar("Page.navigate", { url });
     for (let i = 0; i < 100 && !(await avaliar<boolean>(cdp, "!!window.__montar")); i++) await esperar(50);
@@ -342,7 +349,7 @@ descrever("NOD-429 no Chrome real", () => {
         const alvo = document.querySelector("#cabecalho .pilula-bot");
         let canceladas = 0;
         for (let i = 0; i < 8; i++, t += 100) {
-          if (!alvo.dispatchEvent(new WheelEvent("wheel", { deltaY: 30, bubbles: true, cancelable: true }))) canceladas++;
+          if (!alvo.dispatchEvent(new WheelEvent("wheel", { deltaX: 30, bubbles: true, cancelable: true }))) canceladas++;
           await Promise.all(document.getAnimations().map((a) => a.finished.catch(() => null)));
         }
         return canceladas;
@@ -350,8 +357,14 @@ descrever("NOD-429 no Chrome real", () => {
     })()`)).toBe(8);
     await acabar();
     expect(await estadoFinal()).toMatchObject({ atual: "quadro" });
-    // Um gesto novo, pela roda de verdade (CDP), anda mais uma.
+    // ADA-8: a roda vertical do mouse sobre a pílula não troca (passar rolando pelo topo trocava sem querer).
+    await avaliar(cdp, `new Promise((ok) => setTimeout(ok, 500))`);
     await cdp.enviar("Input.dispatchMouseEvent", { type: "mouseWheel", x: nome.x, y: nome.y, deltaX: 0, deltaY: 30 });
+    await acabar();
+    expect(await estadoFinal()).toMatchObject({ atual: "quadro" });
+    // Um gesto novo de lado, pela roda de verdade (CDP), anda mais uma.
+    await avaliar(cdp, `new Promise((ok) => setTimeout(ok, 500))`);
+    await cdp.enviar("Input.dispatchMouseEvent", { type: "mouseWheel", x: nome.x, y: nome.y, deltaX: 30, deltaY: 0 });
     await acabar();
     expect(await estadoFinal()).toMatchObject({ atual: "painel" });
     await cdp.enviar("Input.dispatchMouseEvent", { type: "mouseMoved", x: 700, y: 600 });
@@ -371,24 +384,346 @@ descrever("NOD-429 no Chrome real", () => {
     expect(f.fim).toBeLessThan(1);
   }, 30_000);
 
-  it("NOD-445 · 390px (toque): arrastar a pílula para a esquerda estica e vai à próxima página; o toque não abre o painel", async () => {
-    await abrir(390, false);
+  /** ADA-8: o centro do nome do bot (a alça da pílula) e um dedo por CDP nele. */
+  async function dedo(): Promise<{ c: { x: number; y: number }; toque: (type: string, x: number, y: number) => Promise<unknown> }> {
     const c = await avaliar<{ x: number; y: number }>(cdp, `(() => { const r = document.querySelector("#cabecalho .pilula-bot").getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
     await avaliar(cdp, `window.__painel = 0; document.addEventListener("click", (e) => { if (e.target.closest('[data-act="alternar-detalhes"]')) window.__painel++; })`);
-    const toque = (type: string, x: number) => cdp.enviar("Input.dispatchTouchEvent", { type, touchPoints: type === "touchEnd" ? [] : [{ x, y: c.y, id: 1 }] });
-    await toque("touchStart", c.x);
-    for (const dx of [-10, -25, -45, -60]) await toque("touchMove", c.x + dx);
-    const esticada = await avaliar<string>(cdp, `document.querySelector("#cabecalho .qd-pil").style.transform`);
-    const [sx, sy] = (esticada.match(/scale\(([\d.]+), ([\d.]+)\)/) ?? []).slice(1).map(Number);
-    expect(sx).toBeGreaterThan(1.05);
-    expect(sy).toBeLessThan(0.98);
-    await toque("touchEnd", c.x - 60);
+    const toque = (type: string, x: number, y: number) => cdp.enviar("Input.dispatchTouchEvent", { type, touchPoints: type === "touchEnd" ? [] : [{ x, y, id: 1 }] });
+    return { c, toque };
+  }
+  const transformDaPilula = () => avaliar<string>(cdp, `document.querySelector("#cabecalho .qd-pil").style.transform`);
+  /** Espera a condição na página (o evento do CDP chega à página depois de o comando voltar; prazo fixo falha no CI). */
+  async function ate(expr: string, ms = 4000): Promise<void> {
+    for (let t = 0; t < ms && !(await avaliar<boolean>(cdp, `!!(${expr})`)); t += 50) await esperar(50);
+  }
+
+  it("ADA-8 · 390px (toque): deslizar ↔ segue o dedo (só translateX, até 30 px, sem esticar) e vai à próxima página; não abre a busca nem o painel", async () => {
+    await abrir(390, false);
+    const { c, toque } = await dedo();
+    await toque("touchStart", c.x, c.y);
+    for (const dx of [-12, -25, -45, -60, -90]) await toque("touchMove", c.x + dx, c.y + 3);
+    await ate(`document.querySelector("#cabecalho .qd-pil").style.transform === "translateX(-30px)"`);
+    const t = await transformDaPilula();
+    expect(t).toMatch(/^translateX\(-30px\)$/);
+    await toque("touchEnd", c.x - 90, c.y + 3);
     await acabar();
     expect(await estadoFinal()).toMatchObject({ atual: "quadro" });
     expect(await avaliar<number>(cdp, `window.__painel`)).toBe(0);
-    // A mola devolve a pílula ao tamanho.
+    expect(await avaliar<{ abriu: number }>(cdp, `window.__busca`)).toMatchObject({ abriu: 0 });
+    // A mola devolve a pílula ao lugar.
     await avaliar(cdp, `new Promise((ok) => setTimeout(ok, 1200))`);
-    expect(await avaliar<string>(cdp, `document.querySelector("#cabecalho .qd-pil").style.transform`)).toBe("");
+    expect(await transformDaPilula()).toBe("");
+  }, 30_000);
+
+  it("ADA-8 · 390px (toque): ↔ abaixo de 36 px volta sem trocar", async () => {
+    await abrir(390, false);
+    const { c, toque } = await dedo();
+    await toque("touchStart", c.x, c.y);
+    for (const dx of [-12, -24, -34]) await toque("touchMove", c.x + dx, c.y);
+    await toque("touchEnd", c.x - 34, c.y);
+    await acabar();
+    expect(await estadoFinal()).toMatchObject({ atual: "conversa" });
+    expect(await avaliar<number>(cdp, `window.__painel`)).toBe(0);
+  }, 30_000);
+
+  it("ADA-8 · 390px (toque): a diagonal (40 → e 40 ↓) não troca de página nem abre a busca", async () => {
+    await abrir(390, false);
+    const { c, toque } = await dedo();
+    await toque("touchStart", c.x, c.y);
+    for (const d of [8, 16, 28, 40]) await toque("touchMove", c.x - d, c.y + d);
+    expect(await transformDaPilula()).toBe("");
+    await toque("touchEnd", c.x - 40, c.y + 40);
+    await acabar();
+    expect(await estadoFinal()).toMatchObject({ atual: "conversa" });
+    expect(await avaliar<{ abriu: number }>(cdp, `window.__busca`)).toMatchObject({ abriu: 0 });
+    expect(await avaliar<number>(cdp, `window.__painel`)).toBe(0);
+  }, 30_000);
+
+  it("ADA-8 · 390px (toque): puxar ↓ abre só a busca (a pílula desce, nunca troca a página)", async () => {
+    await abrir(390, false);
+    const { c, toque } = await dedo();
+    await toque("touchStart", c.x, c.y);
+    for (const dy of [12, 25, 45, 60]) await toque("touchMove", c.x - dy / 5, c.y + dy);
+    await ate(`document.querySelector("#cabecalho .qd-pil").style.transform === "translateY(30px)"`);
+    expect(await transformDaPilula()).toBe("translateY(30px)");
+    await toque("touchEnd", c.x - 12, c.y + 60);
+    await ate(`window.__busca.abriu > 0`);
+    await acabar();
+    expect(await avaliar<{ abriu: number }>(cdp, `window.__busca`)).toMatchObject({ abriu: 1 });
+    expect(await estadoFinal()).toMatchObject({ atual: "conversa" });
+    expect(await avaliar<number>(cdp, `window.__painel`)).toBe(0);
+  }, 30_000);
+
+  it("ADA-8 · 390px (toque): segurar abre só o menu (busca + páginas, a atual marcada), a doca não abre; escolher uma página vai a ela", async () => {
+    await abrir(390, false);
+    const { c, toque } = await dedo();
+    await toque("touchStart", c.x, c.y);
+    await ate(`window.__menus.length > 0`);
+    expect(await avaliar<string[][]>(cdp, `window.__menus`)).toEqual([["buscar", "Conversa*", "Tarefas", "Painel", "Doc"]]);
+    expect(await avaliar<boolean>(cdp, `document.querySelector("#cabecalho .qd-pil").classList.contains("pg-aberta")`)).toBe(false);
+    await toque("touchEnd", c.x, c.y);
+    await acabar();
+    expect(await avaliar<number>(cdp, `window.__painel`)).toBe(0);
+    await avaliar(cdp, `window.__irPara(2)`);
+    await acabar();
+    expect(await estadoFinal()).toMatchObject({ atual: "painel" });
+  }, 30_000);
+
+  // QA do #651 (2026-11-04): os mutantes do tempo do segurar (150 e 1500 ms no lugar de SEGURAR_MS) passavam no teste
+  // acima, que só espera o menu chegar. Aqui o relógio é o da página, do pointerdown ao menu.
+  it("ADA-8 · 390px (toque): o menu do segurar abre aos 450 ms do toque, nem antes nem muito depois", async () => {
+    await abrir(390, false);
+    const { c, toque } = await dedo();
+    await avaliar(cdp, `(() => {
+      document.addEventListener("pointerdown", () => { window.__t0 = performance.now(); }, true);
+      const a = window.__menus, push = a.push.bind(a);
+      a.push = (...x) => { window.__tMenu = performance.now() - window.__t0; return push(...x); };
+    })()`);
+    await toque("touchStart", c.x, c.y);
+    await ate(`window.__menus.length > 0`);
+    await toque("touchEnd", c.x, c.y);
+    const t = await avaliar<number>(cdp, `window.__tMenu`);
+    expect(t).toBeGreaterThanOrEqual(440);
+    expect(t).toBeLessThan(1000);
+  }, 30_000);
+
+  it("ADA-8 · 390px (toque): o ↔ lento (o dedo trava o eixo e passa dos 450 ms no caminho) não abre o menu e troca a página", async () => {
+    await abrir(390, false);
+    const { c, toque } = await dedo();
+    await toque("touchStart", c.x, c.y);
+    await toque("touchMove", c.x - 14, c.y);
+    await avaliar(cdp, `new Promise((ok) => setTimeout(ok, 700))`);
+    for (const dx of [-30, -60]) await toque("touchMove", c.x + dx, c.y);
+    await toque("touchEnd", c.x - 60, c.y);
+    await acabar();
+    expect(await avaliar<unknown[]>(cdp, `window.__menus`)).toEqual([]);
+    expect(await estadoFinal()).toMatchObject({ atual: "quadro" });
+  }, 30_000);
+
+  it("ADA-8 · 390px (toque): segurar no miolo da busca aberta não abre o menu da pílula", async () => {
+    await abrir(390, false);
+    await dedo();
+    await avaliar(cdp, `(() => { window.__buscaAberta = true; const b = document.createElement("div"); b.className = "pilula-bot bnc-pb bnc-pilula"; b.style.cssText = "position:fixed;top:4px;left:60px;width:270px;height:44px;pointer-events:auto;touch-action:none"; b.innerHTML = "<span>miolo</span>"; document.getElementById("cabecalho").append(b); })()`);
+    await cdp.enviar("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: 195, y: 26, id: 1 }] });
+    await avaliar(cdp, `new Promise((ok) => setTimeout(ok, 900))`);
+    await cdp.enviar("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await acabar();
+    expect(await avaliar<unknown[]>(cdp, `window.__menus`)).toEqual([]);
+    expect(await avaliar<{ abriu: number; fechou: number }>(cdp, `window.__busca`)).toEqual({ abriu: 0, fechou: 0 });
+  }, 30_000);
+
+  it("ADA-8 · 390px (toque): tocar nos pontinhos abre a doca; tocar num ícone vai à página e a doca fecha", async () => {
+    await abrir(390, false);
+    await dedo();
+    const p = await avaliar<{ x: number; y: number; w: number; h: number }>(cdp, `(() => { const r = document.querySelector("#cabecalho .pg-pontos").getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width, h: r.height }; })()`);
+    // O alvo é maior que o desenho (44×24) e sobe por dentro da cápsula: um toque 9 px acima do centro ainda acerta.
+    await cdp.enviar("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: p.x, y: p.y - 9, id: 1 }] });
+    await cdp.enviar("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await ate(`document.querySelector("#cabecalho .qd-pil").classList.contains("pg-aberta")`);
+    await acabar();
+    expect(await avaliar<boolean>(cdp, `document.querySelector("#cabecalho .qd-pil").classList.contains("pg-aberta")`)).toBe(true);
+    expect(await avaliar<number>(cdp, `window.__painel`)).toBe(0);
+    await avaliar(cdp, `new Promise((ok) => setTimeout(ok, 600))`);
+    const ic = await avaliar<{ x: number; y: number }>(cdp, `(() => { const r = document.querySelector('#cabecalho .pg-ic[data-pagina="1"]').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+    await cdp.enviar("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: ic.x, y: ic.y, id: 1 }] });
+    await cdp.enviar("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await ate(`document.querySelector("#cabecalho .qd-pil").dataset.pagina === "1"`);
+    await acabar();
+    expect(await estadoFinal()).toMatchObject({ atual: "quadro" });
+    await ate(`!document.querySelector("#cabecalho .qd-pil").classList.contains("pg-aberta")`);
+    expect(await avaliar<boolean>(cdp, `document.querySelector("#cabecalho .qd-pil").classList.contains("pg-aberta")`)).toBe(false);
+  }, 30_000);
+
+  it("ADA-8 · 390px (toque): a diagonal de dedo de verdade (começa de lado, termina a 45°) não troca nem busca, e a pílula volta ao lugar", async () => {
+    await abrir(390, false);
+    const { c, toque } = await dedo();
+    await toque("touchStart", c.x, c.y);
+    // Trava no x (−9, 4 → −14, 6) e entorta até (−40, 40).
+    for (const [dx, dy] of [[-9, 4], [-14, 6], [-20, 15], [-30, 28], [-40, 40]] as const) await toque("touchMove", c.x + dx, c.y + dy);
+    await ate(`document.querySelector("#cabecalho .qd-pil").style.transform === ""`);
+    expect(await transformDaPilula()).toBe("");
+    await toque("touchEnd", c.x - 40, c.y + 40);
+    await acabar();
+    expect(await estadoFinal()).toMatchObject({ atual: "conversa" });
+    expect(await avaliar<{ abriu: number }>(cdp, `window.__busca`)).toMatchObject({ abriu: 0 });
+    // E o que começa para baixo e entorta para o lado também não abre a busca.
+    await toque("touchStart", c.x, c.y);
+    for (const [dx, dy] of [[4, 9], [6, 14], [20, 22], [40, 40]] as const) await toque("touchMove", c.x + dx, c.y + dy);
+    await toque("touchEnd", c.x + 40, c.y + 40);
+    await acabar();
+    expect(await avaliar<{ abriu: number }>(cdp, `window.__busca`)).toMatchObject({ abriu: 0 });
+    expect(await estadoFinal()).toMatchObject({ atual: "conversa" });
+    expect(await avaliar<number>(cdp, `window.__painel`)).toBe(0);
+  }, 30_000);
+
+  it("ADA-8 · 390px (toque): o cabeçalho regravado no meio do gesto não trava a pílula nem abre o menu sozinho", async () => {
+    await abrir(390, false);
+    const { c, toque } = await dedo();
+    await toque("touchStart", c.x, c.y);
+    await toque("touchMove", c.x - 14, c.y);
+    await avaliar(cdp, `window.__regravar()`);
+    for (const dx of [-30, -60]) await toque("touchMove", c.x + dx, c.y);
+    await toque("touchEnd", c.x - 60, c.y);
+    await acabar();
+    await avaliar(cdp, `new Promise((ok) => setTimeout(ok, 700))`);
+    expect(await avaliar<unknown[]>(cdp, `window.__menus`)).toEqual([]);
+    // O toque seguinte é um gesto novo (nada ficou preso): deslizar de volta anda uma página.
+    // Revisão 2 do #651: o primeiro gesto troca (o fim chega mesmo com o nó regravado) e o seguinte volta.
+    expect(await estadoFinal()).toMatchObject({ atual: "quadro" });
+    expect(await transformDaPilula()).not.toMatch(/translate/);
+    await toque("touchStart", c.x, c.y);
+    for (const dx of [14, 30, 60]) await toque("touchMove", c.x + dx, c.y);
+    await toque("touchEnd", c.x + 60, c.y);
+    await acabar();
+    expect(await estadoFinal()).toMatchObject({ atual: "conversa" });
+    expect(await avaliar<unknown[]>(cdp, `window.__menus`)).toEqual([]);
+  }, 30_000);
+
+  it("ADA-8 · 390px (toque, WebKit): regravado com o dedo parado, o ↔ que o Safari entrega ao nó solto troca a página e não abre o menu", async () => {
+    await abrir(390, false);
+    await dedo();
+    // O WebKit (iOS) entrega move e up ao nó em que o toque começou, mesmo fora do DOM; o Chrome do CDP redireciona ao nó
+    // vivo, então os eventos vão à mão para o nó antigo (que não leva ao documento).
+    await avaliar(cdp, `(() => {
+      const el = document.querySelector("#cabecalho .pilula-bot");
+      const r = el.getBoundingClientRect();
+      const x = r.left + r.width / 2, y = r.top + r.height / 2;
+      const ev = (tipo, dx) => new PointerEvent(tipo, { pointerId: 41, pointerType: "touch", isPrimary: true, clientX: x + dx, clientY: y, bubbles: true, cancelable: true });
+      el.dispatchEvent(ev("pointerdown", 0));
+      window.__regravar();
+      for (const dx of [-14, -30, -60]) el.dispatchEvent(ev("pointermove", dx));
+      el.dispatchEvent(ev("pointerup", -60));
+    })()`);
+    await acabar();
+    await avaliar(cdp, `new Promise((ok) => setTimeout(ok, 700))`);
+    expect(await avaliar<unknown[]>(cdp, `window.__menus`)).toEqual([]);
+    expect(await estadoFinal()).toMatchObject({ atual: "quadro" });
+  }, 30_000);
+
+  it("ADA-8 · 390px (toque): depois do ↔, um clique sem toque no cabeçalho (teclado, leitor de tela) não é engolido", async () => {
+    await abrir(390, false);
+    const { c, toque } = await dedo();
+    await toque("touchStart", c.x, c.y);
+    for (const dx of [-14, -30, -60]) await toque("touchMove", c.x + dx, c.y);
+    await toque("touchEnd", c.x - 60, c.y);
+    await acabar();
+    expect(await estadoFinal()).toMatchObject({ atual: "quadro" });
+    await avaliar(cdp, `new Promise((ok) => setTimeout(ok, 500))`);
+    // O Enter do teclado (ou o toque duplo do TalkBack) gera o clique sem pointerdown.
+    await avaliar(cdp, `document.querySelector('#cabecalho [data-act="alternar-detalhes"]').click()`);
+    expect(await avaliar<number>(cdp, `window.__painel`)).toBe(1);
+  }, 30_000);
+
+  it("ADA-8 · 390px (toque): dois dedos (a pinça) não trocam a página nem abrem o menu", async () => {
+    await abrir(390, false);
+    const { c } = await dedo();
+    const t = (type: string, pts: { x: number; y: number; id: number }[]) => cdp.enviar("Input.dispatchTouchEvent", { type, touchPoints: pts });
+    await t("touchStart", [{ x: c.x, y: c.y, id: 1 }]);
+    await t("touchMove", [{ x: c.x - 14, y: c.y, id: 1 }]);
+    await t("touchStart", [{ x: c.x - 14, y: c.y, id: 1 }, { x: c.x + 40, y: c.y + 4, id: 2 }]);
+    for (const dx of [-30, -60]) await t("touchMove", [{ x: c.x + dx, y: c.y, id: 1 }, { x: c.x + 40 - dx, y: c.y + 4, id: 2 }]);
+    await t("touchEnd", []);
+    await acabar();
+    await avaliar(cdp, `new Promise((ok) => setTimeout(ok, 700))`);
+    expect(await estadoFinal()).toMatchObject({ atual: "conversa" });
+    expect(await avaliar<unknown[]>(cdp, `window.__menus`)).toEqual([]);
+    expect(await transformDaPilula()).toBe("");
+  }, 30_000);
+
+  it("ADA-8 · 390px (toque): com a doca aberta os pontinhos somem e deixam de ser alvo (nenhum alvo invisível); tocar fora fecha", async () => {
+    await abrir(390, false);
+    await dedo();
+    const p = await avaliar<{ x: number; y: number }>(cdp, `(() => { const r = document.querySelector("#cabecalho .pg-pontos").getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+    const tocar = async (): Promise<void> => {
+      await cdp.enviar("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: p.x, y: p.y, id: 1 }] });
+      await cdp.enviar("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    };
+    await tocar();
+    await ate(`document.querySelector("#cabecalho .qd-pil").classList.contains("pg-aberta")`);
+    await avaliar(cdp, `new Promise((ok) => setTimeout(ok, 600))`);
+    expect(await avaliar<string>(cdp, `getComputedStyle(document.querySelector("#cabecalho .pg-pontos")).pointerEvents`)).toBe("none");
+    await cdp.enviar("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: p.x, y: p.y + 200, id: 1 }] });
+    await cdp.enviar("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await ate(`!document.querySelector("#cabecalho .qd-pil").classList.contains("pg-aberta")`);
+    expect(await avaliar<boolean>(cdp, `document.querySelector("#cabecalho .qd-pil").classList.contains("pg-aberta")`)).toBe(false);
+    expect(await estadoFinal()).toMatchObject({ atual: "conversa" });
+    expect(await avaliar<number>(cdp, `window.__painel`)).toBe(0);
+  }, 30_000);
+
+  it("ADA-8 · 390px (toque): um segundo dedo na pílula, com o primeiro na conversa, não começa gesto", async () => {
+    await abrir(390, false);
+    const { c } = await dedo();
+    const t = (type: string, pts: { x: number; y: number; id: number }[]) => cdp.enviar("Input.dispatchTouchEvent", { type, touchPoints: pts });
+    const longe = { x: c.x, y: c.y + 300, id: 1 };
+    await t("touchStart", [longe]);
+    await t("touchStart", [longe, { x: c.x, y: c.y, id: 2 }]);
+    for (const dx of [-14, -30, -60]) await t("touchMove", [longe, { x: c.x + dx, y: c.y, id: 2 }]);
+    await t("touchEnd", [longe]);
+    await t("touchEnd", []);
+    await acabar();
+    await avaliar(cdp, `new Promise((ok) => setTimeout(ok, 700))`);
+    expect(await estadoFinal()).toMatchObject({ atual: "conversa" });
+    expect(await avaliar<unknown[]>(cdp, `window.__menus`)).toEqual([]);
+    expect(await transformDaPilula()).toBe("");
+  }, 30_000);
+
+  it("ADA-8 · 390px (toque): o touchcancel no meio do ↔ solta sem trocar e a pílula volta ao lugar", async () => {
+    await abrir(390, false);
+    const { c, toque } = await dedo();
+    await toque("touchStart", c.x, c.y);
+    for (const dx of [-14, -30, -60]) await toque("touchMove", c.x + dx, c.y);
+    await ate(`document.querySelector("#cabecalho .qd-pil").style.transform !== ""`);
+    await cdp.enviar("Input.dispatchTouchEvent", { type: "touchCancel", touchPoints: [] });
+    await acabar();
+    await avaliar(cdp, `new Promise((ok) => setTimeout(ok, 1200))`);
+    expect(await estadoFinal()).toMatchObject({ atual: "conversa" });
+    expect(await transformDaPilula()).toBe("");
+    expect(await avaliar<unknown[]>(cdp, `window.__menus`)).toEqual([]);
+  }, 30_000);
+
+  it("ADA-8 · 390px (toque): na busca aberta, empurrar ↑ 36 px no miolo fecha; ↓ e ↔ não fazem nada", async () => {
+    await abrir(390, false);
+    await dedo();
+    // A pílula da busca aberta, como o main a desenha no topo (o miolo é a alça; campo e botões não).
+    await avaliar(cdp, `(() => { window.__buscaAberta = true; const b = document.createElement("div"); b.className = "pilula-bot bnc-pb bnc-pilula"; b.style.cssText = "position:fixed;top:4px;left:60px;width:270px;height:44px;pointer-events:auto;touch-action:none"; b.innerHTML = "<span>miolo</span>"; document.getElementById("cabecalho").append(b); })()`);
+    const m = { x: 195, y: 26 };
+    const t = (type: string, x: number, y: number) => cdp.enviar("Input.dispatchTouchEvent", { type, touchPoints: type === "touchEnd" ? [] : [{ x, y, id: 1 }] });
+    // ↓ na busca aberta: nada.
+    await t("touchStart", m.x, m.y);
+    for (const dy of [12, 30, 60]) await t("touchMove", m.x, m.y + dy);
+    await t("touchEnd", m.x, m.y + 60);
+    await acabar();
+    // ↔ na busca aberta: nada.
+    await t("touchStart", m.x, m.y);
+    for (const dx of [-12, -30, -60]) await t("touchMove", m.x + dx, m.y);
+    await t("touchEnd", m.x - 60, m.y);
+    await acabar();
+    expect(await avaliar<{ abriu: number; fechou: number }>(cdp, `window.__busca`)).toEqual({ abriu: 0, fechou: 0 });
+    expect(await estadoFinal()).toMatchObject({ atual: "conversa" });
+    // ↑ 40: fecha.
+    await t("touchStart", m.x, m.y + 10);
+    for (const dy of [-12, -25, -40]) await t("touchMove", m.x, m.y + 10 + dy);
+    await t("touchEnd", m.x, m.y - 30);
+    await ate(`window.__busca.fechou > 0`);
+    await acabar();
+    expect(await avaliar<{ abriu: number; fechou: number }>(cdp, `window.__busca`)).toEqual({ abriu: 0, fechou: 1 });
+    expect(await avaliar<unknown[]>(cdp, `window.__menus`)).toEqual([]);
+  }, 30_000);
+
+  it("ADA-8 · 390px (toque, movimento reduzido): ↔ troca a página sem a pílula seguir o dedo", async () => {
+    await abrir(390, true);
+    const { c, toque } = await dedo();
+    await toque("touchStart", c.x, c.y);
+    for (const dx of [-14, -30, -60]) { await toque("touchMove", c.x + dx, c.y); expect(await transformDaPilula()).toBe(""); }
+    await toque("touchEnd", c.x - 60, c.y);
+    await acabar();
+    expect(await estadoFinal()).toMatchObject({ atual: "quadro" });
+    expect(await transformDaPilula()).toBe("");
+  }, 30_000);
+
+  it("ADA-8 · 1440px (mouse): os pontinhos não recebem o ponteiro (o hover já abre a doca; nada pisca)", async () => {
+    await abrir(1440, false);
+    expect(await avaliar<string>(cdp, `getComputedStyle(document.querySelector("#cabecalho .pg-pontos")).pointerEvents`)).toBe("none");
   }, 30_000);
 
   it("Arrastar o ícone de Tarefas para a 1ª posição: ela vira a casa (guardada no servidor) e o agente passa a abrir nela", async () => {
@@ -542,7 +877,7 @@ descrever("NOD-429 no Chrome real", () => {
     await abrir(1440, false);
     await avaliar(cdp, `localStorage.removeItem("nod.paginas.dica"); window.__regravar()`);
     await avaliar(cdp, `new Promise((ok) => setTimeout(ok, 50))`);
-    expect(await avaliar<string>(cdp, `document.querySelector(".pg-dica")?.textContent ?? ""`)).toBe("role ou passe o mouse na pílula · Alt ← → troca");
+    expect(await avaliar<string>(cdp, `document.querySelector(".pg-dica")?.textContent ?? ""`)).toBe("passe o mouse ou deslize de lado na pílula · Alt ← → troca");
     await avaliar(cdp, `window.__quadro.irPara(1)`);
     // Abrir a doca (aqui pelo foco) guarda a marca.
     await avaliar(cdp, `document.querySelector('${aba("quadro")}').focus()`);

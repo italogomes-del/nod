@@ -221,7 +221,8 @@ import { executarRotinaComConfirmacao } from "./lib/executar-rotina.ts";
 import { copiarPorSelecao, type DocParaCopiar } from "./lib/copiar-por-selecao.ts";
 import { criarBuscaNaConversa } from "./telas/busca-na-conversa.ts";
 import { ligarTopoEncolhe, ROLAVEIS_DO_TOPO } from "./lib/topo-encolhe.ts";
-import { DICA_MS, MARCA_CUTUCAO, MARCA_DICA, SEGURAR_MS, deslocamentoDoPuxar, deveCutucar, cliqueDepoisDoGesto, criarFiltroDeEco, deveMostrarDica, escFechaABusca, fimDoGesto, gravarMarca, lerMarca, tremeu, type GestoAnterior, type Marcas, type ViaDaBusca } from "./lib/descoberta-da-busca.ts";
+import type { ItemDoMenuDaPilula } from "./lib/gesto-da-pilula.ts";
+import { DICA_MS, MARCA_CUTUCAO, MARCA_DICA, deveCutucar, criarFiltroDeEco, deveMostrarDica, escFechaABusca, gravarMarca, lerMarca, type Marcas, type ViaDaBusca } from "./lib/descoberta-da-busca.ts";
 // NOD-117: as teclas dos atalhos mudam com o lugar (app do Mac, navegador no Mac, Windows/Linux): web/lib/atalhos.ts.
 const LUGAR_TECLADO = lugarAtual();
 const ATALHO_NOVO_BOT = atalhoDoNovoBot(LUGAR_TECLADO);
@@ -549,6 +550,15 @@ window.matchMedia("(max-width: 1099px)").addEventListener("change", marcarPainel
 const canvasNaTela = criarCanvasNaTela(document, { api: () => api });
 configurarAppCanvas({ ler: () => (api ? api.appCanvas() : null), aoMudar: () => render() });
 const quadroNaTela = criarQuadroNaTela(document, {
+  // ADA-8: a pílula tem um dono só para o dedo (web/lib/gesto-da-pilula-na-tela.ts); a busca e o menu entram por aqui.
+  busca: {
+    ativa: () => celular.ativo() && chaveDaTelaDeBusca() !== null,
+    aberta: () => buscaNaConversa.aberta(),
+    pode: () => podeBuscarNaConversa(),
+    abrir: () => abrirBuscaNaConversa(),
+    fechar: () => buscaNaConversa.fechar(false),
+  },
+  menuDaPilula: (ancora, itens, irPara) => abrirMenuDaPilula(ancora, itens, irPara),
   aoTrocar: (m) => {
     // Revisão 3 do PR #630: voltar do Quadro à Conversa é escolher a conversa, também a que o app abriu sozinho.
     if (m === "conversa") { if (estado.tela.tipo === "conversa") conversaEscolhida = estado.tela.conversaId; lerConversaDaTela(); render(); } else trilhaDaConversa.observar();
@@ -2129,83 +2139,38 @@ document.getElementById("timeline")?.addEventListener("scroll", (ev) => {
   pilula.addEventListener("animationend", () => pilula.classList.remove("bnc-cutuca"), { once: true });
 }, { passive: true });
 
-/** O menu do toque longo na pílula (o da NOD-382 ainda não existe: nasce com o item da busca). */
-function abrirMenuDaPilula(ancora: HTMLElement): void {
-  const d = dialogo(`<div role="menu" aria-label="Conversa"><button type="button" role="menuitem" data-pilula="buscar"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>Buscar na conversa</button></div>`, true);
+/**
+ * ADA-8: o menu do segurar na pílula (o reconhecedor é web/lib/gesto-da-pilula-na-tela.ts): "Buscar na conversa" e,
+ * com mais de uma página, cada página na ordem da pílula, com a atual marcada. Escolher uma página vai a ela.
+ */
+function abrirMenuDaPilula(ancora: HTMLElement, itens: readonly ItemDoMenuDaPilula[], irPara: (posicao: number) => void): void {
+  const lupa = '<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>';
+  const botoes = itens.map((it) => it.tipo === "buscar"
+    ? `<button type="button" role="menuitem" data-pilula="buscar">${lupa}Buscar na conversa</button>`
+    : `<button type="button" role="menuitemradio" data-pilula="pagina" data-pos="${it.pos}" aria-checked="${it.atual}">${esc(it.nome)}</button>`).join("");
+  const d = dialogo(`<div role="menu" aria-label="Conversa">${botoes}</div>`, true);
   d.classList.add("menu-pilula");
   const r = ancora.getBoundingClientRect();
   d.style.left = `${Math.max(12, Math.min(r.left + r.width / 2 - d.offsetWidth / 2, window.innerWidth - d.offsetWidth - 12))}px`;
   d.style.top = `${Math.min(r.bottom + 8, window.innerHeight - d.offsetHeight - 12)}px`;
   d.querySelector<HTMLButtonElement>("[data-pilula]")?.focus();
+  // Revisão 2 do #651: com as páginas o menu cresceu; as setas, Home e End andam nele como nos outros menus.
+  d.addEventListener("keydown", (e) => {
+    const bs = [...d.querySelectorAll<HTMLButtonElement>("[data-pilula]")];
+    const i = bs.indexOf(document.activeElement as HTMLButtonElement);
+    const k = e.key === "ArrowDown" ? (i + 1) % bs.length : e.key === "ArrowUp" ? (i - 1 + bs.length) % bs.length : e.key === "Home" ? 0 : e.key === "End" ? bs.length - 1 : -1;
+    if (k < 0 || !bs.length) return;
+    e.preventDefault();
+    bs[k]?.focus();
+  });
   d.addEventListener("click", (e) => {
-    if (!(e.target as HTMLElement).closest("[data-pilula='buscar']")) return;
+    const b = (e.target as HTMLElement).closest<HTMLElement>("[data-pilula]");
+    if (!b) return;
     d.close();
-    abrirBuscaNaConversa();
+    if (b.dataset.pilula === "buscar") abrirBuscaNaConversa();
+    else irPara(Number(b.dataset.pos));
   });
 }
-
-/**
- * Celular: puxar a pílula para baixo abre a busca, empurrar o miolo aberto para cima fecha, e segurar a pílula abre o
- * menu. O clique que vem depois de um gesto não abre o painel do bot.
- */
-let gestoDaPilula: { x: number; y: number; id: number; aberta: boolean; el: HTMLElement; segurar: number; tremeu: boolean } | null = null;
-let engolirClique: GestoAnterior = null;
-document.addEventListener("pointerdown", (ev) => {
-  // Depois de um arrasto o navegador não gera clique: o flag do gesto anterior morre no toque seguinte, qualquer que
-  // seja o alvo (3ª revisão do PR 560: o primeiro toque no ✕ depois de puxar era engolido).
-  engolirClique = null;
-  if (!celular.ativo() || ev.pointerType === "mouse" || chaveDaTelaDeBusca() === null) return;
-  const alvo = ev.target as HTMLElement;
-  const aberta = buscaNaConversa.aberta();
-  const bot = aberta ? null : alvo.closest?.<HTMLElement>("#cabecalho .pilula-bot:not(.bnc-pb)");
-  // Puxar move a cápsula inteira quando há quadro (o bot e o segmento juntos); o segmento em si não é alça.
-  const el = aberta ? alvo.closest?.<HTMLElement>("#cabecalho .bnc-pilula") : bot?.closest<HTMLElement>(".qd-pil") ?? bot;
-  // Aberta: empurrar vale de qualquer ponto do miolo (inclusive a pílula do bot nele), menos o campo e os botões da busca.
-  if (!el || (aberta && alvo.closest("input, .bnc-bt"))) return;
-  const segurar = aberta ? 0 : window.setTimeout(() => {
-    if (!gestoDaPilula || gestoDaPilula.tremeu) return;
-    gestoDaPilula = null;
-    el.style.transform = "";
-    engolirClique = "segurar";
-    if (podeBuscarNaConversa()) abrirMenuDaPilula(el);
-  }, SEGURAR_MS);
-  gestoDaPilula = { x: ev.clientX, y: ev.clientY, id: ev.pointerId, aberta, el, segurar, tremeu: false };
-}, true);
-document.addEventListener("pointermove", (ev) => {
-  const g = gestoDaPilula;
-  if (!g || ev.pointerId !== g.id) return;
-  const dx = ev.clientX - g.x;
-  const dy = ev.clientY - g.y;
-  if (!g.tremeu && tremeu(dx, dy)) { g.tremeu = true; window.clearTimeout(g.segurar); }
-  if (!g.aberta && g.tremeu) { g.el.classList.add("bnc-puxando"); g.el.style.transform = `translateY(${deslocamentoDoPuxar(dy)}px)`; }
-}, true);
-function soltarPilula(ev: PointerEvent, cancelado: boolean): void {
-  const g = gestoDaPilula;
-  if (!g || ev.pointerId !== g.id) return;
-  gestoDaPilula = null;
-  window.clearTimeout(g.segurar);
-  g.el.classList.remove("bnc-puxando");
-  g.el.style.transform = "";
-  if (cancelado || !g.tremeu) return;
-  engolirClique = "arrastar";
-  const fim = fimDoGesto(ev.clientY - g.y, g.aberta);
-  if (fim === "abrir" && podeBuscarNaConversa()) abrirBuscaNaConversa();
-  else if (fim === "fechar") buscaNaConversa.fechar(false);
-}
-document.addEventListener("pointerup", (ev) => soltarPilula(ev, false), true);
-document.addEventListener("pointercancel", (ev) => soltarPilula(ev, true), true);
-document.addEventListener("click", (ev) => {
-  const gesto = engolirClique;
-  if (!gesto) return;
-  engolirClique = null;
-  const alvo = ev.target as HTMLElement;
-  if (!cliqueDepoisDoGesto(gesto, { noCabecalho: !!alvo.closest?.("#cabecalho"), noMenu: !!alvo.closest?.("[data-pilula]") })) return;
-  ev.preventDefault();
-  ev.stopPropagation();
-}, true);
-document.addEventListener("contextmenu", (ev) => {
-  if (celular.ativo() && (ev.target as HTMLElement).closest?.("#cabecalho .pilula-bot:not(.bnc-pb)")) ev.preventDefault();
-}, true);
 
 function renderPrincipal(): void {
   const t = estado.tela;

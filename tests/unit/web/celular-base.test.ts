@@ -43,11 +43,24 @@ describe("ADA-2 F1: base do celular", () => {
   });
 
   it("o vidro do topo encolhido cobre os pontos do paginador (pílula a 4 + 44, pontos a +6 com 6 de altura)", () => {
-    const pontos = decls(ler("paginas.css"), ".pg-pontos").at(-1)!;
+    const pontos = decls(ler("paginas.css"), ".pg-pontos").filter((d) => d.top).at(-1)!;
     const folga = Number(pontos.top!.match(/\+ (\d+)px/)![1]) + parseFloat(pontos.height!);
     const altura = ultimo(base, ".cabecalho.cabecalho-pilula.topo-encolhido:has(.pg-pontos)", "height");
     expect(altura).toBeDefined();
     expect(Number(altura!.match(/\+ (\d+)px/)![1])).toBeGreaterThanOrEqual(4 + 44 + folga);
+  });
+
+  it("ADA-8: o alvo de toque dos pontinhos sobe por dentro da cápsula, cabe no vidro e passa no máximo 4 px dos pontinhos", () => {
+    const alvo = decls(ler("paginas.css"), ".pg-pontos::before").at(-1)!;
+    const pontos = decls(ler("paginas.css"), ".pg-pontos").filter((d) => d.top).at(-1)!;
+    const topoDosPontos = Number(pontos.top!.match(/\+ (\d+)px/)![1]);
+    const fim = topoDosPontos + parseFloat(alvo.top!) + parseFloat(alvo.height!);
+    // Revisão 2 do #651: a conversa rola por baixo do topo; o alvo começa dentro da cápsula (≤ 0) e quase não desce.
+    expect(topoDosPontos + parseFloat(alvo.top!)).toBeLessThanOrEqual(0);
+    expect(fim).toBeLessThanOrEqual(topoDosPontos + parseFloat(pontos.height!) + 4);
+    const altura = ultimo(base, ".cabecalho.cabecalho-pilula.topo-encolhido:has(.pg-pontos)", "height");
+    expect(4 + 44 + fim).toBeLessThanOrEqual(Number(altura!.match(/\+ (\d+)px/)![1]));
+    expect(parseFloat(alvo.height!)).toBeGreaterThanOrEqual(24);
   });
 
   it("o cartão do comentário se vê nos dois temas (contraste com a folha da tarefa de pelo menos 1,1:1)", () => {

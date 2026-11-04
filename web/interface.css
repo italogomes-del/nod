@@ -2368,7 +2368,12 @@ img.luz-midia { display: block; flex: none; width: min(var(--w), calc(100cqw - 1
 @media (prefers-reduced-motion: reduce) { .bnc-pilula.bnc-abre { animation: none; } }
 /* NOD-42: o menu do toque longo na pílula (celular), no molde do menu da fala. */
 .bot-menu.menu-pilula { width: 220px; }
-.bot-menu.menu-pilula button[role="menuitem"] { gap: 10px; padding: 10px; min-height: 44px; }
+.bot-menu.menu-pilula button[role="menuitem"], .bot-menu.menu-pilula button[role="menuitemradio"] { gap: 10px; padding: 10px; min-height: 44px; }
+/* ADA-8: as páginas no menu do segurar; a atual leva o ✓ à direita (e o peso), o resto fica no tom do menu. */
+.bot-menu.menu-pilula button[role="menuitemradio"] { justify-content: space-between; }
+.bot-menu.menu-pilula button[role="menuitemradio"][aria-checked="true"] { font-weight: 600; }
+.bot-menu.menu-pilula button[role="menuitemradio"][aria-checked="true"]::after { content: "✓" / ""; color: var(--ink-2); }
+.bot-menu.menu-pilula [data-pilula="buscar"] + button[role="menuitemradio"] { margin-top: 4px; border-top: 1px solid var(--line); border-radius: 0 0 10px 10px; padding-top: 12px; }
 .bot-menu.menu-pilula button svg { flex: none; color: var(--ink-2); }
 /* NOD-54 (ADR-134): desfazer o que o bot mudou num turno — o item no ⋯ da fala, o cartão de confirmação e a linha de
    progresso, resultado ou falha embaixo da fala (protótipo nod-prototipos/nod-54, classes dft-). Só tokens do nod. */

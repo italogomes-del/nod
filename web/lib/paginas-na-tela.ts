@@ -3,14 +3,17 @@
  * delegado no documento e o estado é reaplicado no nó novo).
  *
  * - Doca: abre no hover (120 ms) e no foco; fecha 260 ms depois de sair. A largura anda numa mola: macia ao abrir (k 240, c 27), sem rebote ao fechar (k 300, c 36).
- * - Roda/trackpad sobre a pílula troca de página, uma por gesto (o gesto acaba após 380 ms sem evento da roda).
- * - Toque: segurar 380 ms abre a doca; arrastar de lado estica a pílula "como líquido" e, além de 36 px, troca de
- *   página; tocar fora fecha. O clique que vem depois de um arrasto ou de segurar não abre o painel do bot.
+ * - Roda/trackpad sobre a pílula troca de página, uma por gesto (o gesto acaba após 380 ms sem evento da roda). ADA-8:
+ *   só o eixo horizontal (o trackpad de lado); a roda vertical do mouse passando pelo topo não troca mais.
+ * - Toque (ADA-8): o dono do dedo é web/lib/gesto-da-pilula-na-tela.ts (↓ busca, ↔ página, segurar = menu). Aqui fica
+ *   o toque nos pontinhos, que abre e fecha a doca (a alternativa visível), e tocar fora, que fecha.
  * - A dica aparece uma vez (guardada no localStorage).
  * - Com a doca aberta, arrastar um ícone de lado muda a ordem das páginas (a 1ª posição é onde o agente abre).
- * - "Reduzir movimento": sem mola nem esticada; a doca só aparece e some.
+ * - "Reduzir movimento": sem mola; a doca só aparece e some.
  */
-import { ehMac, esticada, mostraDica, passoDaMola, passoDaRoda, passoDoArrasto, posicaoDoArrasto, presa, SEGURAR_MS, textoDaDica, TRAVA_DA_RODA_MS } from "./paginas.ts";
+import { passoDaRodaHorizontal, SEGURAR_MS, type ItemDoMenuDaPilula } from "./gesto-da-pilula.ts";
+import { ligarToqueDaPilula, type BuscaDaPilula } from "./gesto-da-pilula-na-tela.ts";
+import { ehMac, mostraDica, passoDaMola, posicaoDoArrasto, presa, textoDaDica, TRAVA_DA_RODA_MS } from "./paginas.ts";
 
 /** Posições aqui são as da pílula (a ordem de exibição), não os índices de dentro das páginas. */
 export interface PilulaDePaginas {
@@ -23,6 +26,10 @@ export interface PilulaDePaginas {
   reduzido(): boolean;
   /** Segurar um ícone da doca aberta (sem arrastar) abre o menu dele. */
   menu?(posicao: number, ancora: HTMLElement): void;
+  /** ADA-8: a busca na conversa (o puxar ↓ da pílula). */
+  busca?: BuscaDaPilula;
+  /** ADA-8: segurar a pílula abre um menu só (a busca e as páginas); `irPara` leva à posição escolhida. */
+  menuDaPilula?(ancora: HTMLElement, itens: ItemDoMenuDaPilula[], irPara: (posicao: number) => void): void;
 }
 
 const CHAVE_DA_DICA = "nod.paginas.dica";
@@ -138,7 +145,7 @@ export function ligarGestosDaPilula(doc: Document, p: PilulaDePaginas): GestosDa
     // Um gesto só acaba depois de TRAVA_DA_RODA_MS sem evento: cada evento dele (a inércia do trackpad inclusive) empurra
     // a trava. Contada só do primeiro evento, um gesto mais longo que a trava (ou eventos espaçados) andava duas páginas.
     if (agora < travadaAte) { travadaAte = agora + TRAVA_DA_RODA_MS; return; }
-    const passo = passoDaRoda(ev.deltaX, ev.deltaY);
+    const passo = passoDaRodaHorizontal(ev.deltaX, ev.deltaY);
     if (!passo) return;
     travadaAte = agora + TRAVA_DA_RODA_MS;
     puxar(passo);
@@ -151,36 +158,15 @@ export function ligarGestosDaPilula(doc: Document, p: PilulaDePaginas): GestosDa
     p.irPara(i);
   }
 
-  /* ---------- toque: segurar, arrastar e esticar ---------- */
-  let toque: { id: number; x: number; y: number; arrastando: boolean; segurou: boolean; timer: ReturnType<typeof setTimeout> | null } | null = null;
-  let engolir = false;
-  let esticar = { x: 0, v: 0 };
-  let quadroEstica = 0;
-
-  function aplicarEsticada(dx: number): void {
-    const c = pil();
-    if (!c) return;
-    if (!dx || p.reduzido()) { c.style.transform = ""; c.style.transformOrigin = ""; return; }
-    const e = esticada(dx);
-    c.style.transformOrigin = e.origem;
-    c.style.transform = `translateX(${e.tx}px) scale(${e.sx}, ${e.sy})`;
-  }
-  function soltarEsticada(de: number): void {
-    if (p.reduzido() || !janela?.requestAnimationFrame) { aplicarEsticada(0); return; }
-    if (quadroEstica) janela.cancelAnimationFrame(quadroEstica);
-    esticar = { x: de, v: 0 };
-    let antes = 0;
-    const passo = (t: number): void => {
-      const dt = antes ? (t - antes) / 1000 : 1 / 60;
-      antes = t;
-      const r = passoDaMola(esticar, 0, 300, 18, dt);
-      esticar = { x: r.x, v: r.v };
-      aplicarEsticada(r.parou ? 0 : r.x);
-      quadroEstica = r.parou ? 0 : janela.requestAnimationFrame(passo);
-    };
-    quadroEstica = janela.requestAnimationFrame(passo);
-  }
-  function tranco(lado: -1 | 1): void { soltarEsticada(-lado * 28); }
+  /* ---------- toque: o dono do dedo (ADA-8) ---------- */
+  const toque = ligarToqueDaPilula(doc, {
+    busca: p.busca, total: p.total, atual: p.atual, irPara: p.irPara, reduzido: p.reduzido,
+    nomes: () => [...(doca()?.querySelectorAll<HTMLElement>(".pg-ic") ?? [])].map((e) => e.dataset.nome ?? e.getAttribute("aria-label") ?? ""),
+    menu: p.menuDaPilula ? (ancora, itens) => p.menuDaPilula?.(ancora, itens, p.irPara) : undefined,
+    // O ícone da doca aberta é da ordem (arrastar) e do menu dele (segurar).
+    deOutro: (alvo) => aberta && !!alvo.closest("#cabecalho .qd-pil.pg-aberta .pg-ic"),
+  });
+  const tranco = (lado: -1 | 1): void => toque.tranco(lado);
 
   /* ---------- arrastar um ícone da doca aberta: muda a ordem ---------- */
   type Reordem = { id: number; mouse: boolean; el: HTMLElement; px0: number; x0: number; pos: number; passo: number; outros: HTMLElement[]; centros: number[]; alvo: number; ativo: boolean; segurar?: ReturnType<typeof setTimeout> };
@@ -259,63 +245,22 @@ export function ligarGestosDaPilula(doc: Document, p: PilulaDePaginas): GestosDa
 
   doc.addEventListener("pointerdown", (ev) => {
     observar();
-    const c = naPilula(ev.target);
     // Tocar fora fecha a doca aberta pelo toque.
-    if (!c) { if (aberta && ev.pointerType !== "mouse") abrir(false); return; }
-    if (ev.pointerType === "mouse" || !temDoca() || toque) return;
-    toque = { id: ev.pointerId, x: ev.clientX, y: ev.clientY, arrastando: false, segurou: false, timer: null };
-    const meu = toque;
-    meu.timer = setTimeout(() => {
-      if (toque !== meu || meu.arrastando) return;
-      meu.segurou = true;
-      janela?.navigator?.vibrate?.(8);
-      abrir(true);
-    }, SEGURAR_MS);
+    if (!naPilula(ev.target) && aberta && ev.pointerType !== "mouse") abrir(false);
   });
-  doc.addEventListener("pointermove", (ev) => {
-    const t = toque;
-    if (!t || ev.pointerId !== t.id) return;
-    const dx = ev.clientX - t.x;
-    const dy = ev.clientY - t.y;
-    if (!t.arrastando) {
-      if (Math.abs(dx) < 6 || Math.abs(dx) < Math.abs(dy)) {
-        // Puxar para baixo é a busca do main (bnc-puxando): o toque deixa de ser da pílula.
-        if (Math.abs(dy) > 6) { if (t.timer) clearTimeout(t.timer); toque = null; }
-        return;
-      }
-      t.arrastando = true;
-      if (t.timer) { clearTimeout(t.timer); t.timer = null; }
-      if (quadroEstica) { janela?.cancelAnimationFrame(quadroEstica); quadroEstica = 0; }
-    }
-    aplicarEsticada(dx);
-  });
-  const fimDoToque = (ev: PointerEvent, valeu: boolean): void => {
-    const t = toque;
-    if (!t || ev.pointerId !== t.id) return;
-    toque = null;
-    if (t.timer) clearTimeout(t.timer);
-    if (t.arrastando) {
-      const dx = ev.clientX - t.x;
-      soltarEsticada(dx);
-      const passo = valeu ? passoDoArrasto(dx) : 0;
-      if (passo) puxar(passo);
-    }
-    if (t.arrastando || t.segurou) engolirClique();
-  };
-  doc.addEventListener("pointerup", (ev) => fimDoToque(ev, true));
-  doc.addEventListener("pointercancel", (ev) => fimDoToque(ev, false));
 
-  function engolirClique(): void {
-    engolir = true;
-    setTimeout(() => { engolir = false; }, 350);
-  }
-  // Na fase de captura: o clique do fim do gesto não chega ao `alternar-detalhes` do main. O de um ícone da doca aberta
-  // pelo toque passa, e a doca fecha logo depois.
+  // Na fase de captura: o clique do segurar/arrastar um ícone não troca de página. O de um ícone da doca aberta pelo
+  // toque passa, e a doca fecha logo depois. ADA-8: tocar nos pontinhos abre e fecha a doca.
   doc.addEventListener("click", (ev) => {
     const alvo = ev.target as Element | null;
     const ic = alvo?.closest?.("#cabecalho .pg-ic");
     if (engolirIcone && ic) { ev.preventDefault(); ev.stopPropagation(); engolirIcone = false; return; }
-    if (engolir && naPilula(alvo) && !ic) { ev.preventDefault(); ev.stopPropagation(); engolir = false; return; }
+    if (!ev.defaultPrevented && alvo?.closest?.("#cabecalho .qd-pil .pg-pontos")) {
+      ev.preventDefault(); ev.stopPropagation();
+      // Revisão 2 do #651: no aparelho híbrido o mouse também chega aqui, e o hover já abriu a doca; alternar a fechava.
+      abrir((ev as PointerEvent).pointerType === "mouse" ? true : !aberta);
+      return;
+    }
     if (ic && (ev as PointerEvent).pointerType && (ev as PointerEvent).pointerType !== "mouse") setTimeout(() => abrir(false), 220);
   }, true);
 
@@ -328,7 +273,7 @@ export function ligarGestosDaPilula(doc: Document, p: PilulaDePaginas): GestosDa
     if (!mostraDica(p.total(), jaViu)) return;
     const c = pil();
     if (!c) return;
-    const toqueGrosso = janela?.matchMedia?.("(pointer: coarse)").matches ?? false;
+    const toqueGrosso = janela?.matchMedia?.("(any-pointer: coarse)").matches ?? false;
     dica = doc.createElement("div");
     dica.className = "pg-dica";
     dica.setAttribute("aria-hidden", "true");

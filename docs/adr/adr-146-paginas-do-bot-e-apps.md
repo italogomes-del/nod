@@ -104,8 +104,33 @@ Bloco 1 tinha apps de exemplo e a ordem guardada no navegador. A NOD-445 liga is
   com `quadro` = o nome do outro bot); a ordem inteira da tela segue tolerante (§3). Gatilho: a pessoa mudando a casa
   sem querer pelo chat → o `ordenar` da posição 1 vira card.
 
+## Emenda ADA-8 (2026-11-04): o mapa de gestos da pílula
+
+O toque na pílula tinha dois donos (a busca no `main.ts` e as páginas no `paginas-na-tela.ts`): segurar abria a doca aos
+380 ms e o menu da busca aos 500 ms, a diagonal trocava a página **e** abria a busca, e os dois escreviam o `transform`
+da cápsula. Agora há um reconhecedor só (`web/lib/gesto-da-pilula-na-tela.ts`, regras puras em `gesto-da-pilula.ts`),
+com a física da busca, que era a referência que funcionava (plano em `docs/plano-gestos-da-pilula.md`):
+
+- o eixo trava a 10 px e só com dominância de 1,5×, e o fim confere de novo com o deslocamento inteiro: a diagonal (também
+  a que começa reta e entorta) não faz nada, e a pílula volta ao lugar assim que o arrasto entorta. Um segundo dedo larga
+  o gesto; um toque novo com o gesto antigo aberto (o fim perdido no nó que a regravação tirou) começa do zero;
+- ↓ 36 px é só a busca (↑ 36 px no miolo dela fecha); ↔ 36 px é só a página, e a pílula segue o dedo pela metade, até
+  30 px (a "esticada de líquido" da NOD-445 sai); na ponta, um tranco;
+- segurar 450 ms abre **um menu só**: "Buscar na conversa" e as páginas, com a atual marcada; não abre mais a doca;
+- no toque (`any-pointer: coarse`), os pontinhos recebem toque (alvo de 44×24 px, a partir da borda da cápsula) e abrem e
+  fecham a doca: é a alternativa visível ao gesto. Ficam um `span` com `aria-hidden` (desvio do plano, que previa um
+  botão): repetem as abas, e teclado e leitor de tela já abrem a doca pelo foco na tablist. No mouse não recebem o
+  ponteiro (o hover já abre a doca);
+- segurar o ícone da doca aberta (o menu do ícone) passa de 380 ms para os mesmos 450 ms do segurar da pílula;
+- a cápsula é `touch-action: none` quando há toque (`any-pointer: coarse`) (nenhum gesto novo no corpo; a rolagem da ADA-7 não muda);
+- na web, a roda só troca no eixo horizontal (o trackpad de lado); a roda vertical do mouse passava pelo topo e trocava
+  sem querer. Hover, foco e teclado seguem iguais.
+
 ## Gatilho de reversão
 
 - Uma pessoa perde um app sem querer → remover vira card ou ganha lixeira com prazo.
 - Pedido de dividir um app entre pessoas do mesmo bot antes da NOD-443 → `quem_ve` ganha `todos` e a ordem deixa de ser
   por pessoa.
+- ADA-8: queixa de que trocar de página ficou mais difícil no celular (o eixo travado perde arrastos tortos) → baixar a
+  dominância para 1,2× antes de voltar a esticada; pedido da roda vertical no mouse → volta só com um modificador
+  (Shift + roda).

@@ -105,33 +105,8 @@ export function anuncioDaPagina(i: number, total: number, nome: string): string 
   return `página ${i + 1} de ${total}, ${nome}`;
 }
 
-/** Rolar sobre a pílula: o eixo dominante decide; menos de 4 px é tremida. +1 = próxima página. */
-export function passoDaRoda(dx: number, dy: number): -1 | 0 | 1 {
-  const d = Math.abs(dx) > Math.abs(dy) ? dx : dy;
-  if (Math.abs(d) < 4) return 0;
-  return d > 0 ? 1 : -1;
-}
-
 /** O gesto da roda acaba depois deste tanto sem evento (o trackpad manda dezenas por gesto, a inércia inclusive). */
 export const TRAVA_DA_RODA_MS = 380;
-
-/** Arrastar a pílula de lado: além de 36 px troca de página. Arrastar para a esquerda vai para a próxima. */
-export function passoDoArrasto(dx: number): -1 | 0 | 1 {
-  if (Math.abs(dx) <= 36) return 0;
-  return dx < 0 ? 1 : -1;
-}
-
-/** Segurar a pílula no celular por este tanto abre a doca. */
-export const SEGURAR_MS = 380;
-
-/**
- * A pílula esticada "como líquido" enquanto é arrastada: alarga até 18% e afina até 8%, puxada para o lado do dedo.
- * A origem fica do lado oposto ao do movimento, para a pílula esticar para o lado do dedo.
- */
-export function esticada(dx: number): { sx: number; sy: number; tx: number; origem: "left" | "right" } {
-  const a = Math.abs(dx);
-  return { sx: 1 + Math.min(0.18, a / 500), sy: 1 - Math.min(0.08, a / 1100), tx: dx * 0.12, origem: dx < 0 ? "right" : "left" };
-}
 
 /** Um passo da mola (massa 1): devolve a nova posição e a velocidade. `dt` em segundos, preso em 32 ms. */
 export function passoDaMola(m: { x: number; v: number }, alvo: number, k: number, c: number, dt: number): { x: number; v: number; parou: boolean } {
@@ -145,7 +120,8 @@ export function passoDaMola(m: { x: number; v: number }, alvo: number, k: number
 
 /** A dica da primeira vez, pelo tipo de ponteiro. */
 export function textoDaDica(toque: boolean, mac = false): string {
-  return toque ? "deslize ou segure a pílula" : `role ou passe o mouse na pílula · ${rotuloDasTeclas(mac).trocar} troca`;
+  // ADA-8: a dica ensina o caminho visível (os pontos) junto do gesto; no computador, o trackpad de lado (a roda não troca).
+  return toque ? "deslize para o lado ou toque nos pontos" : `passe o mouse ou deslize de lado na pílula · ${rotuloDasTeclas(mac).trocar} troca`;
 }
 
 /** A dica aparece uma vez só: com mais de uma página e sem a marca guardada. */

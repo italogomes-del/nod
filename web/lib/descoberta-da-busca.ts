@@ -3,14 +3,11 @@
  * - Computador: "⌘F busca" aparece na pílula por 3 s, uma vez só, na primeira conversa longa (> 3 alturas da área).
  * - Celular: a pílula desce 6 px uma vez, na primeira rolagem longa para trás (> 1,5 altura acima do fim); com movimento
  *   reduzido, não desce (e a marca não é gasta: o dia em que a pessoa desligar a preferência, ela ainda vê).
- * - Puxar a pílula 36 px para baixo abre; empurrar o miolo aberto 36 px para cima fecha. Segurar 500 ms parado (até
- *   10 px de tremida) abre o menu do toque longo.
+ * - Puxar a pílula 36 px para baixo abre; empurrar o miolo aberto 36 px para cima fecha. O segurar e o eixo do gesto
+ *   moram, desde a ADA-8, em web/lib/gesto-da-pilula.ts (um tempo só, 450 ms, para a pílula inteira).
  */
 
 export const DICA_MS = 3000;
-export const PUXAR_PX = 36;
-export const SEGURAR_MS = 500;
-export const TREMIDA_PX = 10;
 export const MARCA_DICA = "nod.busca.dica";
 export const MARCA_CUTUCAO = "nod.busca.cutucao";
 
@@ -32,20 +29,6 @@ export function deveCutucar(c: { jaCutucou: boolean; celular: boolean; reduzido:
 /** Quanto a pílula acompanha o dedo enquanto puxa: metade do arrasto, até 30 px (o protótipo). */
 export function deslocamentoDoPuxar(dy: number): number {
   return Math.max(0, Math.min(30, dy / 2));
-}
-
-export type FimDoGesto = "abrir" | "fechar" | "nada";
-
-/** O que o fim do arrasto faz. `aberta` = o gesto começou no miolo da busca já aberta. */
-export function fimDoGesto(dy: number, aberta: boolean): FimDoGesto {
-  if (!aberta && dy >= PUXAR_PX) return "abrir";
-  if (aberta && dy <= -PUXAR_PX) return "fechar";
-  return "nada";
-}
-
-/** O dedo saiu do lugar o bastante para não ser mais um toque longo (nem um toque simples). */
-export function tremeu(dx: number, dy: number): boolean {
-  return Math.hypot(dx, dy) > TREMIDA_PX;
 }
 
 export type Marcas = { ler(chave: string): string | null; gravar(chave: string, valor: string): void };

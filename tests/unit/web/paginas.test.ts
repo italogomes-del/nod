@@ -3,7 +3,6 @@ import { appDe, cenario, paginasDe } from "../../helpers/paginas-do-bot.ts";
 import {
   anuncioDaPagina,
   caixaComFrase,
-  esticada,
   FRASE_DE_PEDIR_APP,
   fraseDeEditarApp,
   fraseDeReconectar,
@@ -12,8 +11,6 @@ import {
   paginaPelaTecla,
   paginasDoDto,
   passoDaMola,
-  passoDaRoda,
-  passoDoArrasto,
   pontos,
   textoDaDica,
 } from "../../../web/lib/paginas.ts";
@@ -83,27 +80,6 @@ describe("paginas (NOD-445)", () => {
     expect(anuncioDaPagina(1, 3, "Tarefas")).toBe("página 2 de 3, Tarefas");
   });
 
-  it("roda: eixo dominante, tremida abaixo de 4 px", () => {
-    expect(passoDaRoda(0, 10)).toBe(1);
-    expect(passoDaRoda(0, -10)).toBe(-1);
-    expect(passoDaRoda(-12, 3)).toBe(-1);
-    expect(passoDaRoda(2, 3)).toBe(0);
-  });
-
-  it("arrasto: mais de 36 px troca; para a esquerda é a próxima", () => {
-    expect(passoDoArrasto(-40)).toBe(1);
-    expect(passoDoArrasto(40)).toBe(-1);
-    expect(passoDoArrasto(36)).toBe(0);
-  });
-
-  it("esticada tem teto e estica para o lado do dedo", () => {
-    const e = esticada(-1000);
-    expect(e.sx).toBeCloseTo(1.18);
-    expect(e.sy).toBeCloseTo(0.92);
-    expect(e.origem).toBe("right");
-    expect(esticada(0)).toMatchObject({ sx: 1, sy: 1, tx: 0 });
-  });
-
   it("a mola chega e para no alvo", () => {
     let m = { x: 0, v: 0 };
     let parou = false;
@@ -117,10 +93,10 @@ describe("paginas (NOD-445)", () => {
   });
 
   it("dica: texto pelo ponteiro, uma vez só e só com mais de uma página", () => {
-    expect(textoDaDica(true)).toBe("deslize ou segure a pílula");
-    expect(textoDaDica(false)).toBe("role ou passe o mouse na pílula · Alt ← → troca");
-    expect(textoDaDica(false, true)).toBe("role ou passe o mouse na pílula · ⌥ ← → troca");
-    expect(textoDaDica(true, true)).toBe("deslize ou segure a pílula");
+    expect(textoDaDica(true)).toBe("deslize para o lado ou toque nos pontos");
+    expect(textoDaDica(false)).toBe("passe o mouse ou deslize de lado na pílula · Alt ← → troca");
+    expect(textoDaDica(false, true)).toBe("passe o mouse ou deslize de lado na pílula · ⌥ ← → troca");
+    expect(textoDaDica(true, true)).toBe("deslize para o lado ou toque nos pontos");
     expect(mostraDica(2, null)).toBe(true);
     expect(mostraDica(2, "1")).toBe(false);
     expect(mostraDica(1, null)).toBe(false);
