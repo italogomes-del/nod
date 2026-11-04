@@ -145,7 +145,7 @@
   .qd-meta > .qd-meta-obj { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .qd-meta > .qd-meta-prazo, .qd-meta > .qd-meta-falta { flex: none; }
   .qd-meta > .qd-barra { flex: 0 1 48px; min-width: 24px; }
-  .qd-vista > .qd-conteudo { padding-bottom: 56px; }
+  .qd-vista > .qd-conteudo { padding-bottom: max(56px, var(--qc-faixa-alto, 0px)); /* ADA-6: o cartão aberto reserva a altura dele */ }
 }
 
 /* Lista | Quadro em Tarefas (só no computador; o celular é sempre a lista). */

@@ -421,6 +421,9 @@ li.qd-card[draggable="true"] { cursor: grab; }
 .qd-bt:hover { background: var(--surface-raised); }
 .qd-bt-pri { border-color: transparent; background: var(--action); color: var(--on-action); }
 .qd-bt-pri:hover { background: var(--action); opacity: .9; }
+/* ADA-6: o Responder da tarefa sem fundo cheio (o protótipo do Gil: a tarefa parece conversa, não alerta). */
+.qd-bt-leve { border-color: transparent; background: none; color: var(--ink-2); font-weight: 600; }
+.qd-bt-leve:hover { background: var(--surface-raised); color: var(--ink); }
 .qd-bt:disabled { opacity: .55; cursor: default; }
 .qd-bt:focus-visible, .qd-voltar:focus-visible, .qd-chip:focus-visible, .qd-resp-in:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 
@@ -578,8 +581,9 @@ a.qd-chip:hover { background: var(--surface-raised); }
 .qc-bt.qc-enviar:hover { opacity: .9; }
 .qc-bt.qc-enviar svg { width: 18px; height: 18px; }
 .qc-bt:focus-visible, .qc-hist-bt:focus-visible, .qc-link:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
-.qc-faixa { position: absolute; z-index: 1; left: 16px; right: 16px; bottom: calc(100% - 4px); }
-.qc-faixa:empty { display: none; }
+/* ADA-6: o cartão-mensagem e a faixa sobem juntos por cima da pílula; o cartão fica fora da região viva (#qc-faixa). */
+.qc-sobre { position: absolute; z-index: 1; left: 16px; right: 16px; bottom: calc(100% - 4px); }
+.qc-faixa:empty, .qc-cartao:empty { display: none; }
 .qc-resp { border-radius: 14px; background: var(--qc-vidro-forte); -webkit-backdrop-filter: var(--qc-desfoque); backdrop-filter: var(--qc-desfoque);
   border: 1px solid color-mix(in srgb, var(--line) 80%, transparent); box-shadow: 0 6px 20px -8px color-mix(in srgb, var(--ink) 18%, transparent); animation: qc-sobe .24s ease-out both; }
 @keyframes qc-sobe { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
@@ -607,6 +611,32 @@ a.qd-chip:hover { background: var(--surface-raised); }
 .qc-h-bot { color: var(--ink-2); }
 .qc-hist-abrir { margin-top: 10px; font-size: 13px; }
 
+/* ADA-6: o recibo com ações (Ler tudo, Abrir · Mover, Desfazer), o cartão-mensagem, as sugestões e o contador. Tudo
+   sutil: parece uma mensagem (superfície, borda fina), nunca um alerta (sem cor chapada). */
+.qc-acoes { flex: none; display: inline-flex; align-items: center; gap: 6px; }
+.qc-ponto { color: var(--ink-3); }
+.qc-msg { margin-bottom: 6px; border-radius: 14px; background: var(--qc-vidro-forte); -webkit-backdrop-filter: var(--qc-desfoque); backdrop-filter: var(--qc-desfoque);
+  border: 1px solid color-mix(in srgb, var(--line) 80%, transparent); box-shadow: 0 6px 20px -8px color-mix(in srgb, var(--ink) 18%, transparent); animation: qc-sobe .2s ease-out both; }
+.qc-msg-topo { display: flex; align-items: center; gap: 8px; padding: 8px 6px 0 12px; font-size: 13px; color: var(--ink-3); }
+.qc-msg-topo .icon.mascote { width: 20px !important; height: 20px !important; min-width: 20px; flex: none; }
+.qc-msg-nome { flex: 1; min-width: 0; font-weight: 600; color: var(--ink-2); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.qc-msg-fechar { flex: none; width: 28px; height: 28px; border-radius: 8px; border: 0; background: none; color: var(--ink-3); font: 18px/1 var(--font-sans); cursor: pointer; }
+.qc-msg-fechar:hover { background: var(--surface-raised); color: var(--ink); }
+.qc-msg-fechar:focus-visible, .qc-msg-corpo:focus-visible, .qc-ideia:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.qc-msg-corpo { max-height: min(420px, 50vh); overflow-y: auto; overscroll-behavior: contain; padding: 6px 14px 12px; font-size: 14px; line-height: 1.5; color: var(--ink); overflow-wrap: anywhere; }
+.qc-msg-corpo > :first-child { margin-top: 0; }
+.qc-msg-corpo > :last-child { margin-bottom: 0; }
+.qc-ideias { display: flex; gap: 6px; margin: 0 4px 8px; overflow-x: auto; scrollbar-width: none; }
+.qc-ideias[hidden] { display: none; }
+.qc-ideias::-webkit-scrollbar { display: none; }
+.qc-ideia { flex: none; min-height: 30px; padding: 4px 12px; border-radius: 15px; border: 1px solid color-mix(in srgb, var(--line) 85%, transparent);
+  background: var(--qc-vidro); -webkit-backdrop-filter: var(--qc-desfoque); backdrop-filter: var(--qc-desfoque); color: var(--ink-2); font: 500 13px var(--font-sans); cursor: pointer; white-space: nowrap; }
+.qc-ideia:hover { color: var(--ink); border-color: var(--line-strong); }
+.qc-conta { margin: 0 14px 4px; text-align: right; font-size: 12px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.qc-conta[hidden] { display: none; }
+/* ADA-6 (critério 2): a faixa (e o cartão) ficam por cima da pílula; o fim do conteúdo reserva a altura deles, medida na
+   tela (--qc-faixa-alto), para nenhum card terminar debaixo da caixa. */
+.qd-vista > .qd-conteudo { padding-bottom: var(--qc-faixa-alto, 0px); }
 /* ADA-4: a fala da pessoa numa linha pequena acima do status (enviando → ✓); a falha é texto secundário + "Tentar de novo",
    sem vermelho; o ■ Parar é o mesmo círculo do enviar; o card do lote pisca a borda uma vez. */
 .qc-fala { display: flex; justify-content: flex-end; align-items: baseline; gap: 6px; margin: 0; padding: 8px 10px 0 40px; font-size: 12.5px; line-height: 1.35; color: var(--ink-3); }
@@ -639,10 +669,14 @@ a.qd-chip:hover { background: var(--surface-raised); }
   .qd-t-principal { padding: 18px 16px 20px; }
   .qd-t-tit { font-size: 22px; }
   .qd-vista > .qc-wrap { padding: 8px 0 calc(env(safe-area-inset-bottom) + 12px); }
-  .qc-faixa { left: 8px; right: 8px; }
+  .qc-sobre { left: 8px; right: 8px; }
   /* A resposta quebra em até 3 linhas em vez de cortar; o histórico cresce até metade da tela. */
   .qc-resp-txt { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
   .qc-hist { max-height: 50vh; }
+  /* ADA-6: as ações do recibo descem para a linha de baixo, alinhadas ao texto. */
+  .qc-linha { flex-wrap: wrap; row-gap: 2px; }
+  .qc-acoes { order: 3; flex-basis: 100%; padding-left: 28px; flex-wrap: wrap; }
+  .qc-ideias { margin-inline: 8px; }
 }
 
 /* ---------- Celular (a mesma CONSULTA_CELULAR do mobile.css, ADR-094) ---------- */
@@ -656,6 +690,9 @@ a.qd-chip:hover { background: var(--surface-raised); }
   .qd-q-mais { width: 44px; height: 44px; }
   .qd-bt, .qd-voltar, .qd-chip { min-height: 44px; }
   .qc-bt, .qc-bt.qc-enviar, .qc-hist-bt, .qc-pil .mic { width: 44px; height: 44px; }
+  .qc-ideia { min-height: 44px; font-size: 14px; }
+  .qc-msg-fechar { width: 44px; height: 44px; }
+  .qc-acoes .qc-link { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; }
   /* ADA-5: 16 px no campo (o iOS não dá zoom no foco); o 🎤 sai quando há texto ou anexo, como no chat. */
   .qc-txt { font-size: 16px; }
   .qc-pil:has(.qc-txt:not(:placeholder-shown)) .mic, .qc-pil:has(.qc-anexos:not([hidden])) .mic { display: none; }
@@ -760,6 +797,12 @@ a.qd-chip:hover { background: var(--surface-raised); }
 @media (max-width: 699px) {
   .qcp-casco { padding: 12px 12px 24px; }
   .qcp-esqueleto { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* ADA-6 (revisão 3, alto): numa tela baixa (o celular deitado, ou de pé com o teclado aberto) as sugestões somariam ~52 px
+   à pílula, que cobriria o cabeçalho das colunas. Ali elas não aparecem: a pílula fica do tamanho de antes. */
+@media (hover: none) and (pointer: coarse) and (max-height: 500px) {
+  .qc-ideias { display: none; }
 }
 
 /* ====================================================================================================================

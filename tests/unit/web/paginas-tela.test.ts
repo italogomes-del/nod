@@ -176,6 +176,7 @@ describe("celular (as duas ressalvas do protótipo)", () => {
     const celular = css.slice(css.indexOf("@container (max-width: 700px)"));
     expect(celular).toMatch(/\.qd-meta \{[^}]*flex-wrap: nowrap/);
     expect(celular).toMatch(/\.qd-meta > \.qd-meta-obj \{[^}]*text-overflow: ellipsis/);
-    expect(celular).toMatch(/\.qd-vista > \.qd-conteudo \{ padding-bottom: 56px; \}/);
+    // ADA-6: no mínimo 56px; com o cartão-mensagem aberto, a altura medida da faixa.
+    expect(celular).toMatch(/\.qd-vista > \.qd-conteudo \{ padding-bottom: max\(56px, var\(--qc-faixa-alto, 0px\)\);/);
   });
 });

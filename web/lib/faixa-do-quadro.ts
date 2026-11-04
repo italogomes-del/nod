@@ -52,7 +52,7 @@ export type EventoDaFaixa =
    * curso ou na fila (null = o servidor não disse). `conferir`: a leitura veio da conferência (demora ou reconexão) e
    * pode concluir que o turno acabou sem frame.
    */
-  | { tipo: "conversa"; resposta: { id: string; texto: string } | null; vivos: readonly string[] | null; conferir: boolean; agora: number };
+  | { tipo: "conversa"; resposta: { id: string; texto: string; /** ADA-6: a fala inteira (o Ler tudo). */ completo?: string } | null; vivos: readonly string[] | null; conferir: boolean; agora: number };
 
 const texto = (v: unknown): string | null => (typeof v === "string" && v.trim() ? v.trim() : null);
 
@@ -210,7 +210,7 @@ function naConversa(f: Faixa, ev: Extract<EventoDaFaixa, { tipo: "conversa" }>):
   const r = ev.resposta;
   // A faixa já com a resposta (a fala seguinte do mesmo turno troca o texto e o Desfazer) é da tela, que relê o lote.
   if (f.tipo !== "trabalhando") return f;
-  const resposta = (texto: string, mensagemId: string): Faixa => ({ tipo: "resposta", texto, loteId: null, mensagemId, ...(f.pedidoId ? { pedidoId: f.pedidoId } : {}) });
+  const resposta = (texto: string, mensagemId: string): Faixa => ({ tipo: "resposta", texto, loteId: null, mensagemId, ...(f.pedidoId ? { pedidoId: f.pedidoId } : {}), ...(r?.completo !== undefined ? { completo: r.completo } : {}) });
   if (f.encerrado) return r ? resposta(r.texto, r.id) : f;
   // Retomando (a janela da falha, a cota, a troca de conta): quem decide é o próximo frame ou o prazo da janela. Revisão 3
   // do #646: a troca de conta no teto avisa sem turno novo; na conferência, sem nada rodando nem na fila, a faixa conclui.

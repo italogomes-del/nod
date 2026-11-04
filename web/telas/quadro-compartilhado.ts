@@ -127,7 +127,7 @@ function detalhe(q: QuadroDto, t: TarefaDto, v: VistaDoCompartilhado, agente: Ag
       (podeResponder(q, t)
         ? `<form class="qd-resp-form" data-form="qcp-responder" data-id="${id}"><label class="qd-sr" for="qcp-resp">Sua resposta</label>` +
           `<textarea id="qcp-resp" class="qd-resp-in" name="resposta" rows="2" maxlength="4000" required placeholder="Sua resposta"></textarea>` +
-          `<button type="submit" class="qd-bt qd-bt-pri"${v.ocupado ? " disabled" : ""}>Responder</button></form>` : "") : "";
+          `<button type="submit" class="qd-bt qd-bt-leve"${v.ocupado ? " disabled" : ""}>Responder</button></form>` : "") : "";
   const comentarios = (q.comentarios ?? []).filter((c) => c.tarefaId === t.id);
   const lista = comentarios.length
     ? `<ol class="qd-hist">${comentarios.map((c) => `<li><span class="qd-hist-quem">${esc(c.assinatura)}</span> <span class="qd-hist-oque">${esc(c.texto)}</span></li>`).join("")}</ol>` : "";

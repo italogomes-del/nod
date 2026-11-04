@@ -182,8 +182,32 @@ export type Faixa =
   | { tipo: "falhou"; fala: string; texto: string; idEnvio: string; /** Revisão 7 do #646: o prazo venceu e o POST pode ter chegado. */ duvida?: boolean }
   | { tipo: "trabalhando"; fala: string; pedidoId: string | null; turnoId: string | null; status: string | null; desde: number; ultimoFrameEm: number; demorando: boolean; retomando: boolean; segue: string | null; desisteEm: number | null; parando: boolean; encerrado: boolean; /** Revisão 4 do #646: a volta marcada acorda aqui (ms). */ acordaEm?: number | null; /** Revisão 7 do #646: o 1º turno do pedido (a troca de conta repete este, não a cópia adiada). */ origem?: string | null }
   | { tipo: "parou"; fala: string; pedidoId: string | null; porVoce: boolean; /** Revisão 3 do #646: a conferência viu o turno acabar sem frame do fim nem resposta. */ semFim?: boolean }
-  | { tipo: "resposta"; texto: string; loteId: string | null; mensagemId: string; pedidoId?: string }
+  | { tipo: "resposta"; texto: string; loteId: string | null; mensagemId: string; pedidoId?: string; completo?: string; acoes?: AcoesDoRecibo }
   | { tipo: "erro"; texto: string; /** Revisão 12 do #646 (M1): a fala recusada (4xx) com o campo ocupado fica à vista aqui. */ fala?: string };
+
+/**
+ * ADA-6: o que o recibo da nova tarefa oferece: Abrir e, se o quadro tem a coluna A fazer (id "afazer", a única de Não
+ * iniciado que aciona, NOD-448; o nome pode ter sido trocado) e a tarefa não está nela, Mover para ela (o mesmo
+ * quadro.mudar_tarefa do card; o responsável da coluna começa). Quadro sem ela: só o Abrir.
+ */
+export type AcoesDoRecibo = { abrir: string; mover: { coluna: string; nome: string } | null };
+export function acoesDaNovaTarefa(r: { quadro: QuadroDto | null; lote: Pick<LoteQuadro, "tarefaIds"> | null }): AcoesDoRecibo | undefined {
+  const id = r.lote?.tarefaIds[0];
+  const nova = id ? r.quadro?.tarefas.find((x) => x.id === id) : undefined;
+  if (!nova || !r.quadro) return undefined;
+  const afazer = comColunas(r.quadro).colunas.find((c) => c.id === "afazer");
+  return { abrir: nova.id, mover: afazer && nova.status !== afazer.id ? { coluna: afazer.id, nome: afazer.nome } : null };
+}
+
+/**
+ * ADA-6: a resposta cabe na linha da faixa? Não cabe (ganha o Ler tudo, que abre o cartão-mensagem com o markdown) quando
+ * tem mais de uma linha, formatação que a linha perde, ou passa de 60 caracteres (no celular, 60 já quebram a linha).
+ */
+export function respostaLonga(completo: string | undefined): boolean {
+  if (!completo) return false;
+  const t = completo.trim();
+  return t.includes("\n") || t.length > 60 || linhaUnica(t) !== t;
+}
 
 /**
  * A resposta que sobe na faixa: a primeira fala do bot anfitrião depois do pedido da pessoa (`pedidoId`, o id que o envio
@@ -196,19 +220,19 @@ type Fala = Pick<Mensagem, "id" | "autoria" | "texto" | "criadoEm" | "parcial" |
  * a fala de outro turno do anfitrião (um pedido pela Conversa, uma rotina) não vira o status nem a resposta dele. Vazio ou
  * ausente = sem filtro (o envio sem turno, o servidor antigo); a fala sem turno passa.
  */
-export function respostaDoBot(mensagens: readonly Fala[], agenteId: string, pedidoId: string, turnos?: ReadonlySet<string>): { id: string; texto: string } | null {
+export function respostaDoBot(mensagens: readonly Fala[], agenteId: string, pedidoId: string, turnos?: ReadonlySet<string>): { id: string; texto: string; completo: string } | null {
   const i = mensagens.findIndex((m) => m.id === pedidoId);
   if (i < 0) return null;
   // A última fala final dele antes da próxima fala da pessoa: o "Vou organizar" do meio do turno dá lugar ao fecho (codex
   // rodada 5).
-  let achada: { id: string; texto: string } | null = null;
+  let achada: { id: string; texto: string; completo: string } | null = null;
   for (const m of mensagens.slice(i + 1)) {
     if (m.autoria.autor_tipo === "pessoa") break;
     if (m.kind !== "texto" || m.parcial || m.autoria.autor_tipo !== "agente" || m.autoria.autor_id !== agenteId || !m.texto.trim()) continue;
     // O aviso "Com você" que o quadro grava não é a resposta ao pedido.
     if (m.payload && typeof m.payload === "object" && "kind" in m.payload && m.payload.kind === "aviso_pessoa") continue;
     if (turnos && turnos.size > 0 && m.turnoId && !turnos.has(m.turnoId)) continue;
-    achada = { id: m.id, texto: linhaUnica(m.texto) };
+    achada = { id: m.id, texto: linhaUnica(m.texto), completo: m.texto };
   }
   return achada;
 }

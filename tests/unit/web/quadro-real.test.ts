@@ -123,19 +123,19 @@ describe("quadro-dados", () => {
 
   it("a resposta do bot: a última fala final dele depois do pedido, sem markdown; de outro bot ou parcial não conta", () => {
     const ms = [fala("0", "a", "antes"), fala("p", "eu", "pedido"), fala("1", "b", "outro bot"), fala("2", "a", "parcial", { parcial: true }), fala("3", "a", "Pus **X** em [A fazer](u).\n\nok")];
-    expect(respostaDoBot(ms, "a", "p")).toEqual({ id: "3", texto: "Pus X em A fazer. ok" });
+    expect(respostaDoBot(ms, "a", "p")).toEqual({ id: "3", texto: "Pus X em A fazer. ok", completo: "Pus **X** em [A fazer](u).\n\nok" });
     expect(respostaDoBot(ms.slice(0, 3), "a", "p")).toBeNull();
     expect(respostaDoBot(ms, "a", "sumiu")).toBeNull();
     // A fala do meio do turno dá lugar à última; a próxima fala da pessoa encerra a busca (codex rodada 5).
     const depois = [...ms, fala("4", "a", "Pronto: 3 tarefas."), fala("5", "eu", "outro pedido"), fala("6", "a", "de outro pedido")];
-    expect(respostaDoBot(depois, "a", "p")).toEqual({ id: "4", texto: "Pronto: 3 tarefas." });
+    expect(respostaDoBot(depois, "a", "p")).toEqual({ id: "4", texto: "Pronto: 3 tarefas.", completo: "Pronto: 3 tarefas." });
   });
 
   it("revisão 12 do #646: com os turnos do pedido, a fala de outro turno do anfitrião não é a resposta; a sem turno passa", () => {
     const ms = [fala("p", "eu", "pedido"), fala("1", "a", "do pedido", { turnoId: "T1" }), fala("2", "a", "de outro turno", { turnoId: "T9" })];
-    expect(respostaDoBot(ms, "a", "p", new Set(["T1"]))).toEqual({ id: "1", texto: "do pedido" });
-    expect(respostaDoBot(ms, "a", "p", new Set())).toEqual({ id: "2", texto: "de outro turno" });
-    expect(respostaDoBot([...ms, fala("3", "a", "sem turno")], "a", "p", new Set(["T1"]))).toEqual({ id: "3", texto: "sem turno" });
+    expect(respostaDoBot(ms, "a", "p", new Set(["T1"]))).toEqual({ id: "1", texto: "do pedido", completo: "do pedido" });
+    expect(respostaDoBot(ms, "a", "p", new Set())).toEqual({ id: "2", texto: "de outro turno", completo: "de outro turno" });
+    expect(respostaDoBot([...ms, fala("3", "a", "sem turno")], "a", "p", new Set(["T1"]))).toEqual({ id: "3", texto: "sem turno", completo: "sem turno" });
   });
 
   it("linhaUnica tira bloco de código e colapsa espaços; o histórico guarda só a pessoa e o anfitrião, até n", () => {

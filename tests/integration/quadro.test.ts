@@ -691,6 +691,28 @@ describeIntegracao("quadro-agente (NOD-442)", () => {
     });
   });
 
+  it("ADA-6: o Desfazer do recibo do Responder volta a tarefa a Precisa de você, com a pergunta e sem a resposta, e para o turno", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const c = await m.lote({ ops: [{ tipo: "criar_quadro", meta: "M" }, { tipo: "criar_tarefa", titulo: "T1", agente: m.betoNome, status: "afazer" }] });
+      if (!c.data.ok) throw new Error(c.data.detalhe);
+      await m.lote({ autor: { tipo: "agente", agenteId: m.beto.agenteId }, quadro: m.anaNome, ops: [{ tipo: "mudar_tarefa", tarefa: "T1", status: "voce", pergunta: "Azul ou verde?" }] });
+      // O turno em que o Beto perguntou já acabou (é o caso real): a resposta abre um turno novo.
+      await trx`update turnos set estado = 'concluido' where id = ${c.data.comecaram[0]!.turnoId}`;
+      const r = await m.lote({ autor: { tipo: "pessoa" }, anfitriaoId: m.ana.agenteId, ops: [{ tipo: "responder", tarefa: "T1", resposta: "Verde" }] });
+      if (!r.data.ok) throw new Error(r.data.detalhe);
+      expect(r.data.comecaram[0]!.turnoId).not.toBe(c.data.comecaram[0]!.turnoId);
+      // O recibo leva o lote que o Responder devolveu (o mesmo que a tela usa no Desfazer).
+      expect(r.data.lote?.id).toBeTruthy();
+      expect(r.data.lote?.desfeitoEm ?? null).toBeNull();
+      const turnoId = r.data.comecaram[0]!.turnoId;
+      const d = await m.lote({ autor: { tipo: "pessoa" }, anfitriaoId: m.ana.agenteId, ops: [{ tipo: "desfazer", lote: r.data.lote!.id }] });
+      if (!d.data.ok) throw new Error(d.data.detalhe);
+      expect(d.data.quadro?.tarefas[0]).toMatchObject({ status: "voce", pergunta: "Azul ou verde?", resposta: null });
+      expect((await m.repos.turnos.buscar(turnoId))?.estado).toBe("interrompido");
+    });
+  });
+
   it("Desfazer volta à foto do antes e cancela o turno que ainda não começou; desfazer a criação apaga o quadro", async () => {
     await withRollback(MARLON, async (trx) => {
       const m = await montar(trx);

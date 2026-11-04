@@ -63,6 +63,9 @@ describe("a tela da participante", () => {
     const minhaVez = t("4", { status: "voce", pergunta: "Qual cor?", decide: { pessoaId: EU, nome: "Bia", voce: true, saiu: null } });
     const vezDaAna = t("5", { status: "voce", pergunta: "Qual?", decide: { pessoaId: ANA, nome: "Ana", voce: false, saiu: null } });
     expect(html(vista(q([minhaVez, vezDaAna]), { aberta: "4" }))).toContain('data-form="qcp-responder"');
+    // ADA-6 critério 4: o Responder é leve, sem fundo cheio.
+    expect(html(vista(q([minhaVez, vezDaAna]), { aberta: "4" }))).toMatch(/class="qd-bt qd-bt-leve">Responder</);
+    expect(html(vista(q([minhaVez, vezDaAna]), { aberta: "4" }))).not.toMatch(/qd-bt-pri">Responder/);
     const outra = html(vista(q([minhaVez, vezDaAna]), { aberta: "5" }));
     expect(outra).not.toContain("qcp-responder");
     expect(outra).not.toContain('data-campo="qcp-status"');

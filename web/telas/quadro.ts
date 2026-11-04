@@ -231,7 +231,7 @@ function formDoResponder(c: Card, onde: "card" | "linha"): string {
   const id = `qd-cresp-${onde}-${esc(c.id)}`;
   return `<form class="qd-card-resp" data-form="responder-tarefa" data-id="${esc(c.id)}">` +
     `<textarea id="${id}" class="qd-resp-in qd-card-resp-in" name="resposta" rows="1" maxlength="${c.responder}" required placeholder="Responder" aria-label="${esc(`Responder: ${c.titulo}`)}"></textarea>` +
-    `<button type="submit" class="qd-bt qd-bt-pri qd-card-resp-bt" aria-label="${esc(`Enviar resposta: ${c.titulo}`)}">Enviar</button></form>`;
+    `<button type="submit" class="qd-bt qd-bt-leve qd-card-resp-bt" aria-label="${esc(`Enviar resposta: ${c.titulo}`)}">Enviar</button></form>`;
 }
 
 /**

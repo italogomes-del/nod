@@ -14,7 +14,9 @@ import { htmlBotaoDitado, htmlPilulaDitado } from "./ditado.ts";
 import { NOME_DO_STATUS, type Status } from "../lib/quadro.ts";
 import { comColunas, iconeDaColuna, paradaHa, podeTerPrazo, prazoLegivelMin, inicioDoFimPreso, LIMITE_COLUNAS, type EdicaoDeColuna } from "../lib/colunas.ts";
 import { aposDoCabecalho, botaoDeNova, campoDeRenomear, colunaNova, confirmacaoDeSoltar, folhaDasColunas, menuDeMover, naFolha, type AgenteDaPassagem } from "./colunas-quadro.ts";
-import { RESP_VOCE, atalhosDePrazo, codigoDaTarefa, faltaParaOPrazo, fraseDoPrazo, linhaDoHistorico, opcoesDeStatus, tarefasPorStatus, type Faixa } from "../lib/quadro-dados.ts";
+import { RESP_VOCE, atalhosDePrazo, codigoDaTarefa, faltaParaOPrazo, fraseDoPrazo, linhaDoHistorico, opcoesDeStatus, respostaLonga, tarefasPorStatus, type Faixa } from "../lib/quadro-dados.ts";
+import { textoFormatado } from "../lib/texto-formatado.ts";
+import type { Sugestao } from "../lib/sugestoes-do-quadro.ts";
 import { ecoDoAgente, fraseDaTrava, fraseDoMovimento, porqueNaoDesfaz } from "../lib/freios.ts";
 import { anel, avatar, barra, card, confiar, ICONE, ICONE_DO_STATUS, linha, lista, quadro, seloEmTeste, type Aviso, type Card, type ChipDaBarra, type Coluna, type ExibirDaBarra, type ExtraDaGrade, type Filtro, type Html, type QuemRoda } from "./quadro.ts";
 import { chipsDaBarra, ehComigo, fraseDoVazio, marcar, passaNaVista, termoDaBusca, type ChipDeAgente } from "../lib/vista-do-quadro.ts";
@@ -336,7 +338,8 @@ function formResposta(t: TarefaDto): string {
   const id = `qd-resp-${esc(t.id)}`;
   return `<form class="qd-resp-form" data-form="responder-tarefa" data-id="${esc(t.id)}"><label class="qd-sr" for="${id}">Sua resposta</label>` +
     `<textarea id="${id}" class="qd-resp-in" name="resposta" rows="2" maxlength="${LIMITE_RESPOSTA}" required placeholder="Sua resposta"></textarea>` +
-    `<button type="submit" class="qd-bt qd-bt-pri">Responder</button></form>`;
+    // ADA-6: o Responder é leve (sem fundo cheio), como o Enviar do comentário: a tarefa parece conversa, não alerta.
+    `<button type="submit" class="qd-bt qd-bt-leve">Responder</button></form>`;
 }
 
 /**
@@ -473,7 +476,7 @@ export type TrocaDaFaixa = { id: string; de: "eu" | "bot"; texto: string; em: nu
 /** Revisão 7 do #646: o recibo de outra ação (mover, criar, desfazer) com um pedido em curso: uma linha ao lado, sem tirar a faixa do pedido. */
 export type AvisoDaFaixa = { texto: string; erro: boolean; loteId: string | null };
 
-export function faixaDoQuadro(o: { faixa: Faixa; avatarBot: Html | null; historico: readonly TrocaDaFaixa[]; aberto: boolean; hora: (em: number) => string; agora?: number; aviso?: AvisoDaFaixa | null }): Html {
+export function faixaDoQuadro(o: { faixa: Faixa; avatarBot: Html | null; historico: readonly TrocaDaFaixa[]; aberto: boolean; hora: (em: number) => string; agora?: number; aviso?: AvisoDaFaixa | null; /** ADA-6: o cartão-mensagem aberto. */ lendo?: boolean; nomeBot?: string }): Html {
   const f = o.faixa;
   if (f.tipo === "nada" && !o.aberto) return confiar("");
   const histBt = o.historico.length ? `<button type="button" class="qc-hist-bt" data-act="qc-historico" aria-expanded="${o.aberto}" aria-controls="qc-hist" aria-label="${o.aberto ? "Fechar o histórico" : "Ver as últimas trocas"}">${SETA}</button>` : "";
@@ -504,8 +507,18 @@ export function faixaDoQuadro(o: { faixa: Faixa; avatarBot: Html | null; histori
     classe = f.porVoce ? "qc-ok" : "qc-falhou";
     linha1 = f.porVoce ? `<span class="qc-resp-txt">Parado por você.</span>` : `<span class="qc-resp-txt">${f.semFim ? "Acabou sem resposta." : "Parou no meio."}</span>${verNaConversa}`;
   } else if (f.tipo === "resposta") {
+    // ADA-6: a resposta que não cabe na linha ganha o Ler tudo; o cartão-mensagem abre acima, com o markdown inteiro.
+    const longa = respostaLonga(f.completo);
+    const lendo = !!o.lendo && longa;
+    const acoes: string[] = [];
+    if (longa) acoes.push(`<button type="button" class="qd-link qc-link qc-ler" data-act="qc-ler" aria-expanded="${lendo}"${lendo ? ' aria-controls="qc-msg"' : ""}>${lendo ? "Fechar" : "Ler tudo"}</button>`);
+    if (f.acoes) {
+      acoes.push(`<button type="button" class="qd-link qc-link" data-act="abrir-tarefa" data-id="${esc(f.acoes.abrir)}">Abrir</button>`);
+      if (f.acoes.mover) acoes.push(`<button type="button" class="qd-link qc-link" data-act="qc-mover" data-id="${esc(f.acoes.abrir)}" data-coluna="${esc(f.acoes.mover.coluna)}">${esc(`Mover para ${f.acoes.mover.nome}`)}</button>`);
+    }
+    if (f.loteId) acoes.push(`<button type="button" class="qd-link qc-link qc-desfazer" data-act="qc-desfazer" data-id="${esc(f.loteId)}">Desfazer</button>`);
     linha1 = `${o.avatarBot ?? ""}<span class="qc-resp-txt" title="${esc(f.texto)}">${esc(f.texto)}</span>` +
-      (f.loteId ? `<button type="button" class="qd-link qc-link qc-desfazer" data-act="qc-desfazer" data-id="${esc(f.loteId)}">Desfazer</button>` : "");
+      (acoes.length ? `<span class="qc-acoes">${acoes.join('<span class="qc-ponto" aria-hidden="true">·</span>')}</span>` : "");
   } else if (f.tipo === "erro") {
     classe = "qc-erro";
     linha1 = `<i class="qc-erro-ic" aria-hidden="true">!</i><span class="qc-resp-txt">${esc(f.texto)}</span>`;
@@ -553,11 +566,25 @@ export function tempoDoTurno(desde: number, agora: number): string {
 }
 
 /**
+ * ADA-6 (critério 1): o cartão-mensagem, a resposta inteira em markdown, acima da faixa. Fica fora da região viva
+ * (#qc-vivo, ADA-4): o leitor de tela anuncia a linha, não o texto todo. Vazio quando fechado ou curto.
+ */
+export function cartaoDaResposta(o: { faixa: Faixa; avatarBot: Html | null; lendo: boolean; nomeBot?: string }): string {
+  const f = o.faixa;
+  if (f.tipo !== "resposta" || !o.lendo || !respostaLonga(f.completo)) return "";
+  return `<section class="qc-msg" id="qc-msg" aria-label="${esc(`Resposta de ${o.nomeBot || "o bot"}`)}">` +
+    `<div class="qc-msg-topo">${o.avatarBot ?? ""}<span class="qc-msg-nome">${esc(o.nomeBot ?? "")}</span>` +
+    `<button type="button" class="qc-msg-fechar" data-act="qc-ler" aria-label="Fechar a resposta">×</button></div>` +
+    `<div class="qc-msg-corpo" tabindex="0">${textoFormatado(f.completo ?? f.texto, f.mensagemId ? { chave: `qc:${f.mensagemId}` } : {})}</div></section>`;
+}
+
+/**
  * A pílula: "Nova tarefa ou mensagem" e Enviar. Com uma tarefa aberta, o pedido vai sobre ela (o placeholder diz qual).
  * ADA-5: as peças do composer do chat (web/lib/composer.ts), por `data-composer` e sem ids que colidam com o `#composer`
  * (os dois ficam no DOM): a lista @, a lista "/", a dica, a fila de anexos, o clipe (`anexos`: o que o bot lê), o 🎤 e a
  * pílula do ditado. O mesmo botão é o Enviar e o Parar (quadro-na-tela troca o rótulo). ADA-4 (revisão 2 do #646): a
  * faixa não é região viva (o histórico e os botões não são lidos a cada frame); a frase curta vai à #qc-vivo.
+ * ADA-6: o cartão e a faixa ficam juntos em #qc-sobre; as sugestões e o contador ficam fora do form (o form é do composer).
  */
 export function pilulaDoQuadro(o: { meta: string | null; nome: string; modo?: string | null; anexos?: Aceita }): Html {
   const rot = o.meta ? `Conversar com o quadro ${o.meta}` : `Conversar com ${o.nome} sobre o quadro`;
@@ -566,8 +593,10 @@ export function pilulaDoQuadro(o: { meta: string | null; nome: string; modo?: st
     ? `<button type="button" class="qc-bt qc-clipe" data-act="anexar" data-composer="clipe" aria-label="Anexar arquivo">${CLIPE}</button>` +
       `<input type="file" class="qd-sr" data-composer="arquivos" multiple accept="${accept}" hidden tabindex="-1" aria-hidden="true" data-aceita="${o.anexos}" />`
     : "";
-  return confiar(`<div class="qc-caixa"><div class="qc-faixa" id="qc-faixa"></div><p class="qd-sr" id="qc-vivo" role="status" aria-live="polite"></p>` +
+  return confiar(`<div class="qc-caixa"><div class="qc-sobre" id="qc-sobre"><div class="qc-cartao" id="qc-cartao"></div>` +
+    `<div class="qc-faixa" id="qc-faixa"></div></div><p class="qd-sr" id="qc-vivo" role="status" aria-live="polite"></p>` +
     `<p class="qc-modo" id="qc-modo"${o.modo ? "" : " hidden"}>${esc(o.modo ?? "")}</p>` +
+    `<div class="qc-ideias" id="qc-ideias" hidden></div><p class="qc-conta" id="qc-conta" hidden></p>` +
     `<form class="qc-pil" role="group" aria-label="${esc(rot)}" data-form="conversa-no-quadro" data-composer="caixa">` +
     `<div class="autocomplete qc-sug" data-composer="mencao" hidden></div>` +
     `<div class="barra-lista qc-barra" data-composer="barra" role="listbox" aria-label="Comandos" hidden></div>` +
@@ -578,6 +607,13 @@ export function pilulaDoQuadro(o: { meta: string | null; nome: string; modo?: st
     `${htmlPilulaDitado(true)}${htmlBotaoDitado()}` +
     `<button type="button" class="qc-bt qc-parar" data-act="parar-conversa" data-composer="parar" aria-label="Parar a resposta" hidden>${ICONE_PARAR_PILULA}</button>` +
     `<button type="submit" class="qc-bt qc-enviar" data-composer="enviar" aria-label="Enviar ao quadro">${ENVIAR}</button></form></div>`);
+}
+
+/** ADA-6: as sugestões da pílula vazia (sugestoes-do-quadro.ts). Abrir abre a tarefa; as outras só preenchem a pílula. */
+export function ideiasDaPilula(s: readonly Sugestao[]): string {
+  return s.map((x) => x.tipo === "abrir"
+    ? `<button type="button" class="qc-ideia" data-act="abrir-tarefa" data-id="${esc(x.tarefaId)}">${esc(x.rotulo)}</button>`
+    : `<button type="button" class="qc-ideia" data-act="qc-ideia" data-texto="${esc(x.texto)}">${esc(x.rotulo)}</button>`).join("");
 }
 
 /** O Parar da pílula (ADA-5): o mesmo botão do Enviar, com o quadrado (como o do chat). */
