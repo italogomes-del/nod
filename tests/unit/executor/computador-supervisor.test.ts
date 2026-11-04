@@ -202,6 +202,22 @@ describe("supervisor", () => {
     expect((await lerTudo(storage, chaveSt)).itens).toHaveLength(0);
   });
 
+  it("dois comandos do mesmo computador novo chegando juntos criam UMA X25519, e os dois relatos mostram a mesma", async () => {
+    // O e2e do computador na CI em máquina rápida (2026-11-04): dois bots no boot, duas sondas do servidor, o supervisor
+    // criava o computador duas vezes com chaves diferentes; o servidor fixava a primeira (TOFU) e recusava o iniciar.
+    const { sup } = await montar();
+    const relatadas: string[] = [];
+    sup.ouvir((m) => {
+      const f = m as { tipo: string; computadorId?: string; supervisorPub?: string };
+      if (f.tipo === "estado" && f.computadorId === ID && f.supervisorPub) relatadas.push(f.supervisorPub);
+    });
+    await Promise.all([sup.tratar(cmd({ tipo: "parar" })), sup.tratar(cmd({ tipo: "parar" }))]);
+    const fixa = sup.estados().find((e) => e.computadorId === ID)!.supervisorPub;
+    expect(relatadas.length).toBeGreaterThan(0);
+    expect(new Set(relatadas)).toEqual(new Set([fixa]));
+    expect((await iniciar(sup)).desfecho).toBe("ok");
+  });
+
   it("as etapas que o supervisor emite em Sair de todos e Esquecer senhas são as que a web lista (ETAPAS)", async () => {
     const { sup } = await montar();
     await iniciar(sup);

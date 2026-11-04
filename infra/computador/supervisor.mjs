@@ -233,9 +233,27 @@ export function criarSupervisor(op) {
     return createPrivateKey(par.privadaPem);
   }
 
+  /**
+   * Criações em curso, por id. Dois comandos do mesmo computador novo chegando juntos (dois bots agindo no boot: o
+   * servidor manda uma sonda por bot) entravam os dois em `obter`, cada um gerava a própria X25519 e relatava a sua; o
+   * servidor fixava a primeira (TOFU) e recusava o `iniciar` com a segunda ("supervisor diferente"). Na CI em máquina
+   * rápida isso derrubava o e2e do computador em metade dos runs (2026-11-04). Quem chega durante a criação espera a
+   * mesma promessa e recebe o mesmo `c`.
+   */
+  const criando = new Map();
+
   async function obter(id) {
-    let c = computadores.get(id);
-    if (c) return c;
+    const pronto = computadores.get(id);
+    if (pronto) return pronto;
+    const emCurso = criando.get(id);
+    if (emCurso) return emCurso;
+    const p = criar(id).finally(() => criando.delete(id));
+    criando.set(id, p);
+    return p;
+  }
+
+  async function criar(id) {
+    let c;
     const d = dirs(id);
     // NOD-365: uma importação que caiu entre os renames termina aqui, ANTES de criar as pastas (o mkdir criaria uma
     // principal vazia e a recuperação descartaria a loja nova completa).
