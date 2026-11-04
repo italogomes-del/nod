@@ -23,7 +23,11 @@ jobs:
       DATABASE_URL_DONO: postgres://nod_dono:nod@127.0.0.1:5434/nod
       DATABASE_URL_TEST: postgres://nod_app:nod@127.0.0.1:5434/nod_test
     steps:
+      # A catraca C da paridade (NOD-391, #635) compara o piso com o do pai do commit (HEAD^1) no CI: o checkout raso
+      # da tag não o traz e o verify caía com "invalid object name 'HEAD^1'" (v1.0.0-rc.3, 2026-11-04).
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 2
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '24.19.0'
