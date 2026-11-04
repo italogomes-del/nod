@@ -2,12 +2,16 @@
 # Postgres, cada um no próprio service container (porta sorteada pelo Docker: .github/actions/banco-de-teste).
 # Os jobs com banco MIGRAM e NÃO rodam seed (Práticas §6): cada teste cria as próprias linhas.
 # CI=1 (padrão do GitHub) faz o skip de integração virar ERRO em tests/helpers/integracao.ts.
-# Roda no runner próprio na GCP (infra/gcp/runner/): o repo é privado e o runner hospedado cobra minutos. Qualquer
-# runner das VMs serve os jobs com banco (definido em 2026-11-04; antes só o `nod-integracao`, pela porta fixa 5434).
-# Actions pinadas por SHA imutável (verificados em 2026-09-16 na API do GitHub):
+# Roda no Blacksmith (definido em 2026-11-04, piloto): runner novo por job, escala com a fila, sem VM para administrar.
+# Antes rodava nas VMs próprias da GCP (infra/gcp/runner/, docs/deploy-gcp.md): com 2 runners vivos a fila passava de
+# 3 h por PR. O app `blacksmith-sh` está instalado na organização Gamefik para todos os repositórios (a ADR 037 do
+# monorepo gamefik registra a adoção lá). Voltar às VMs é trocar o `runs-on` de volta para `[self-hosted, linux]`.
+# O `deploy.yml` continua nas VMs (autentica pelo WIF a partir delas); fora do escopo deste piloto.
+# Actions pinadas por SHA imutável (verificados em 2026-09-16 na API do GitHub; actions/cache em 2026-11-04):
 #   actions/checkout v4.2.2  = 11bd71901bbe5b1630ceea73d27597364c9af683
 #   actions/setup-node v4.4.0 = 49933ea5288caeca8642d1e84afbd3f7d6820020
 #   actions/upload-artifact   = ea165f8d65b6e75b540449e92b4886f43607fa02 (o mesmo do desktop-release.yml)
+#   actions/cache v4.2.3      = 5a3ec84eff668545956fd18022155c47e93e2684 (no Blacksmith usa o backend de cache deles)
 name: ci
 on:
   push:
@@ -35,7 +39,7 @@ concurrency:
 jobs:
   lint-typecheck:
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
-    runs-on: [self-hosted, linux, nod-ci]
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -50,7 +54,7 @@ jobs:
 
   unit:
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
-    runs-on: [self-hosted, linux, nod-ci]
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -66,7 +70,7 @@ jobs:
   # rodando tudo em sequência. O service container repete nos quatro: o Actions não aceita âncora YAML.
   integracao:
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
-    runs-on: [self-hosted, linux]
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 30
     services:
       postgres:
@@ -102,7 +106,7 @@ jobs:
   concorrencia:
     name: e2e ${{ matrix.fatia }}/2
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
-    runs-on: [self-hosted, linux]
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -144,7 +148,7 @@ jobs:
   # montada (dist/web) e do binário; medidos em 2026-11-04 somam ~5 min.
   navegador:
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
-    runs-on: [self-hosted, linux]
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 30
     services:
       postgres:
@@ -171,11 +175,14 @@ jobs:
           porta: ${{ job.services.postgres.ports['5432'] }}
       # NOD-398: o bot de QA e a tela.capturar precisam da web montada (dist/web) e de um Chromium. O playwright NÃO é
       # dependência do projeto (a issue pede assim): a versão fica fixa aqui para o Chromium não mudar de um run para o
-      # outro, e o binário fica no cache do runner (~/.cache/ms-playwright), baixado só na primeira vez. As libs do
-      # sistema vêm do startup.sh do runner; o runner provisionado antes desta issue não as tem (o startup só roda uma vez),
-      # então, faltando alguma, o job instala pelo apt da distro a lista FIXA de infra/gcp/runner/libs-chromium.txt. O sudo
-      # do runner é amplo (startup.sh); este passo só o usa para o apt dessa lista.
+      # outro. O runner nasce limpo a cada job, então o binário (~/.cache/ms-playwright, ~170 MB) vem do cache do
+      # Actions com a versão do playwright na chave; sem cache, o `install` baixa. Faltando alguma lib do sistema, o
+      # job instala pelo apt a lista FIXA de infra/gcp/runner/libs-chromium.txt (o sudo do runner hospedado permite).
       - run: npx vite build
+      - uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-1.64.1-chromium-${{ runner.os }}
       - run: |
           npx --yes playwright@1.64.1 install chromium
           # O binário DA versão fixada (o cache do runner pode ter revisões mais novas de outros jobs), exportado como
@@ -223,7 +230,7 @@ jobs:
   # runner próprio) e não em on.paths: um job pulado conta como sucesso, e o ci da main continua liberando o deploy.
   windows-filtro:
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
-    runs-on: [self-hosted, linux, nod-ci]
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     outputs:
       roda: ${{ steps.filtro.outputs.roda }}
     steps:

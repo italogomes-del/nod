@@ -392,6 +392,15 @@ de ter papel e a integração foi dividida em quatro jobs paralelos (`integracao
 runners por VM, uma `e2-standard-4` aguenta três jobs com banco ao mesmo tempo (medido: 12 GB livres em repouso). Se a
 fila crescer, o caminho é registrar mais runners por VM (`RUNNERS` do script abaixo) antes de criar outra VM.
 
+**Piloto Blacksmith (2026-11-04).** No mesmo dia a VM 1 estava sem runners (registro apagado em 2026-11-03) e a fila do
+`ci` passava de 3 h por PR com 2 runners vivos. O `ci.yml` passou a rodar no Blacksmith (`runs-on:
+blacksmith-4vcpu-ubuntu-2404`; `2vcpu` só no `windows-filtro`): runner novo por job, escala com a fila, cache do Actions no
+backend deles, sem VM para administrar. O app `blacksmith-sh` já estava instalado na organização Gamefik para todos os
+repositórios, e o monorepo gamefik usa desde 2026-10-10 (ADR 037 de lá: 54% menos tempo e 67% menos custo medidos por
+run, a US$ 0,004/min em 2 vCPU). O `deploy.yml` segue nas VMs (autentica pelo WIF). Critério para fechar o piloto: uma
+semana de runs sem fila, e2e do computador e `navegador` estáveis, e a fatura no painel do Blacksmith conferida pelo
+Marlon. Se aprovar, migrar o `deploy` e desligar as VMs; se não, voltar o `runs-on` para `[self-hosted, linux]`.
+
 ```bash
 # Criar ou recriar (idempotente; precisa do gh com admin no repo)
 infra/gcp/runner/provisionar-runner.sh
