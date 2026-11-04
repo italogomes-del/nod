@@ -4,7 +4,7 @@ import type { DepsRotas } from "../../src/adapters/http/rotas/executar-caso.ts";
 import type { PaginasDto } from "../../src/contracts/apps.ts";
 import { vincularEscopo } from "../../src/db/tx.ts";
 import { PROPRIEDADES_APPS } from "../../src/contracts/ferramentas-apps.ts";
-import { MAX_ORDEM_GUARDADA } from "../../src/domain/apps-do-bot.ts";
+import { homeDoBot, MAX_ORDEM_GUARDADA, PAGINA_CONVERSA, PAGINA_TAREFAS } from "../../src/domain/apps-do-bot.ts";
 import { ehNomeRepetido } from "../../src/repositories/apps-do-bot.repo.ts";
 import { criarRepos } from "../../src/repositories/index.ts";
 import type { Escopo, Tx } from "../../src/shared/types.ts";
@@ -630,6 +630,88 @@ describeIntegracao("apps do bot (NOD-445)", () => {
       await esperarErro(() => executar(d, EXECUTORES_APPS["paginas.ordenar"], { agenteId: bot.agenteId, ordem: demais }), "entrada_invalida");
       expect((await executar(d, gerirApps, { ...(await turno(d, bot)), op: "ordenar", ordem: demais })).data).toMatchObject({ ok: false, erro: "entrada_invalida" });
       expect((await executar(d, gerirApps, { ...(await turno(d, bot)), op: "ordenar", ordem: demais.slice(1) })).data).toMatchObject({ ok: true });
+    });
+  });
+  it("ADA-9: \"coloque o quadro como sua view padrão\" pelo chat põe Tarefas em primeiro (a casa) e volta para a Conversa", async () => {
+    await withRollback(MARLON, async (trx) => {
+      trxAtual = trx;
+      const { d, bot } = await montar(trx);
+      await criarDireto(d, bot.agenteId, "Vagas");
+      expect((await executar(d, aplicarLoteQuadro, { autor: { tipo: "pessoa" }, anfitriaoId: bot.agenteId, executor: "catcher", ops: [{ tipo: "criar_quadro" }] })).data).toMatchObject({ ok: true });
+      expect(homeDoBot((await paginas(d, bot.agenteId)).ordem)).toBe(PAGINA_CONVERSA);
+      // O que o prompt ensina (linha Tela inicial:): ordenar {pagina: "tarefas" | "quadro", posicao: 1}.
+      for (const pagina of ["quadro", "tarefas"]) {
+        // Cada volta parte da Conversa em primeiro: senão a segunda não moveria nada e passaria com o código errado.
+        await executar(d, EXECUTORES_APPS["paginas.ordenar"], { agenteId: bot.agenteId, pagina: "conversa", posicao: 1 });
+        expect(homeDoBot((await paginas(d, bot.agenteId)).ordem)).toBe(PAGINA_CONVERSA);
+        const r = await executar(d, gerirApps, { ...(await turno(d, bot)), op: "ordenar", pagina, posicao: 1 });
+        expect(r.data).toMatchObject({ ok: true, tela_inicial: "Tarefas" });
+        if (!r.data.ok) throw new Error("ordenar");
+        expect(r.data.paginas[0]).toEqual({ pagina: PAGINA_TAREFAS, nome: "Tarefas", posicao: 1 });
+        expect(r.data.instrucao).toContain("Ao abrir o bot, Tarefas aparece primeiro");
+        // Guardado no servidor: é o que a web lê para abrir o bot (irParaCasa abre na primeira página).
+        expect(homeDoBot((await paginas(d, bot.agenteId)).ordem)).toBe(PAGINA_TAREFAS);
+      }
+      const volta = await executar(d, gerirApps, { ...(await turno(d, bot)), op: "ordenar", pagina: "conversa", posicao: 1 });
+      expect(volta.data).toMatchObject({ ok: true, tela_inicial: "Conversa" });
+      expect(homeDoBot((await paginas(d, bot.agenteId)).ordem)).toBe(PAGINA_CONVERSA);
+      // Listar também diz a tela inicial, para o bot responder "o que abre primeiro?" sem adivinhar.
+      expect((await executar(d, gerirApps, { ...(await turno(d, bot)), op: "listar" })).data).toMatchObject({ ok: true, tela_inicial: "Conversa" });
+    });
+  });
+
+  it("ADA-9: bot sem quadro, \"abra no quadro\" recusa dizendo o caminho (criar o quadro) e nada muda", async () => {
+    await withRollback(MARLON, async (trx) => {
+      trxAtual = trx;
+      const { d, bot } = await montar(trx);
+      await criarDireto(d, bot.agenteId, "Vagas");
+      const antes = (await paginas(d, bot.agenteId)).ordem;
+      const pedidos = [
+        { pagina: "quadro", posicao: 1 },
+        { pagina: "Tarefas", posicao: 1 },
+        { ordem: ["quadro", "conversa"] },
+        { pagina: "Vagas", antes_de: "quadro" },
+      ];
+      for (const p of pedidos) {
+        const r = await executar(d, gerirApps, { ...(await turno(d, bot)), op: "ordenar", ...p });
+        expect(r.data).toMatchObject({ ok: false, erro: "nao_encontrado" });
+        if (r.data.ok) throw new Error("devia recusar");
+        expect(r.data.instrucao).toContain("ainda não tem quadro");
+        expect(r.data.instrucao).toContain("gerir_quadro criar_quadro");
+        expect(r.data.instrucao).not.toContain("confira o nome");
+      }
+      expect((await paginas(d, bot.agenteId)).ordem).toEqual(antes);
+      // Revisão 1 do #648 (M1): a tela segue tolerante (ADR-146 §3): a ordem inteira com um "tarefas" velho (o quadro
+      // saiu em outra aba) ignora o que sobra e grava, em vez de recusar o arrasto.
+      const tela = await executar(d, EXECUTORES_APPS["paginas.ordenar"], { agenteId: bot.agenteId, ordem: ["tarefas", "conversa", ...antes.filter((x) => x !== "conversa")] });
+      expect(tela.data.paginas.ordem).toEqual(["conversa", ...antes.filter((x) => x !== "conversa")]);
+      // Página que não existe, sem ser o quadro, segue com a recusa de sempre.
+      const outra = await executar(d, gerirApps, { ...(await turno(d, bot)), op: "ordenar", pagina: "Inexistente", posicao: 1 });
+      if (outra.data.ok) throw new Error("devia recusar");
+      expect(outra.data.instrucao).toContain("confira o nome");
+    });
+  });
+
+  it("ADA-9 (revisão 1 do #648, M2): a view padrão de outro bot: sem quadro, a recusa manda criar o quadro DELE; com quadro, diz qual bot", async () => {
+    await withRollback(MARLON, async (trx) => {
+      trxAtual = trx;
+      const { d, bot } = await montar(trx);
+      const zeNome = `Ze ${Math.random().toString(36).slice(2, 7)}`;
+      const ze = { ...(await agenteComConversa(trx, MARLON, { nome: zeNome })), nome: zeNome };
+      const r = await executar(d, gerirApps, { ...(await turno(d, bot)), op: "ordenar", bot: ze.nome, pagina: "quadro", posicao: 1 });
+      if (r.data.ok) throw new Error("devia recusar");
+      expect(r.data.instrucao).toContain(`gerir_quadro criar_quadro e quadro: "${ze.nome}" (não no seu)`);
+      // O do próprio bot não leva quadro: (criar_quadro sem quadro cria no próprio bot).
+      const proprio = await executar(d, gerirApps, { ...(await turno(d, bot)), op: "ordenar", pagina: "quadro", posicao: 1 });
+      if (proprio.data.ok) throw new Error("devia recusar");
+      expect(proprio.data.instrucao).not.toContain("quadro: \"");
+      expect((await executar(d, aplicarLoteQuadro, { autor: { tipo: "pessoa" }, anfitriaoId: ze.agenteId, executor: "catcher", ops: [{ tipo: "criar_quadro" }] })).data).toMatchObject({ ok: true });
+      const ok = await executar(d, gerirApps, { ...(await turno(d, bot)), op: "ordenar", bot: ze.nome, pagina: "quadro", posicao: 1 });
+      expect(ok.data).toMatchObject({ ok: true, tela_inicial: "Tarefas" });
+      if (!ok.data.ok) throw new Error("ordenar");
+      expect(ok.data.instrucao).toContain(`Ao abrir o ${ze.nome}, Tarefas aparece primeiro`);
+      expect(homeDoBot((await paginas(d, ze.agenteId)).ordem)).toBe(PAGINA_TAREFAS);
+      expect(homeDoBot((await paginas(d, bot.agenteId)).ordem)).toBe(PAGINA_CONVERSA);
     });
   });
 });

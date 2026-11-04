@@ -2,7 +2,7 @@ import type { PaginasDto, ResultadoGerirApps } from "../contracts/apps.ts";
 import type { RuntimeEvent } from "../contracts/evento.ts";
 import type { CasoNod } from "../contracts/servicos.ts";
 import type { Turno } from "../contracts/turno.ts";
-import { appDaPagina, PAGINA_CONVERSA, PAGINA_TAREFAS } from "../domain/apps-do-bot.ts";
+import { appDaPagina, homeDoBot, PAGINA_CONVERSA, PAGINA_TAREFAS } from "../domain/apps-do-bot.ts";
 import { editarApp, listarPaginas, ordenarPaginas, proporApp, removerApp, restaurarApp, type Autor, type Falha } from "./apps-do-bot.ts";
 import type { Deps } from "./tipos.ts";
 
@@ -35,11 +35,14 @@ const recusa = (f: Falha, events: RuntimeEvent[] = []): { data: ResultadoGerirAp
 
 const naConversa = (t: Pick<Turno, "origem" | "profundidade">): boolean => t.origem === "conversa" && t.profundidade === 0;
 
+/** O nome da página como a pessoa a vê na pílula. */
+const nome = (p: PaginasDto, id: string): string => (id === PAGINA_CONVERSA ? "Conversa" : id === PAGINA_TAREFAS ? "Tarefas" : p.apps.find((a) => a.id === appDaPagina(id))?.nome ?? id);
+
 function resumo(p: PaginasDto, instrucao: string, extra: { proposta_id?: string; cards_fechados?: { proposta_id: string; nome: string }[]; app_id?: string } = {}): ResultadoGerirApps {
-  const nome = (id: string) => (id === PAGINA_CONVERSA ? "Conversa" : id === PAGINA_TAREFAS ? "Tarefas" : p.apps.find((a) => a.id === appDaPagina(id))?.nome ?? id);
   return {
     ok: true,
-    paginas: p.ordem.map((id, i) => ({ pagina: id, nome: nome(id), posicao: i + 1 })),
+    paginas: p.ordem.map((id, i) => ({ pagina: id, nome: nome(p, id), posicao: i + 1 })),
+    tela_inicial: nome(p, homeDoBot(p.ordem)),
     apps: p.apps.map((a) => ({ id: a.id, nome: a.nome, forma: a.forma, fonte: a.fonte, regra_pede: a.regraPede, pede_quando: a.pedeQuando, pede_voce: a.pedeVoce, erro_fonte: a.erroFonte })),
     cabe_mais: p.cabeMais,
     ...extra,
@@ -81,11 +84,13 @@ export const gerirApps: CasoNod<Deps, "gerir_apps"> = async (deps, input) => {
   const conversa = naConversa(turno);
   // O bot dono das páginas: `bot` (o nome ou o id) ou o próprio bot do turno.
   let agenteId = input.agenteId;
+  let nomeDoAlvo: string | null = null;
   if (input.bot !== undefined && input.op !== "propor") {
     const l = await deps.repos.agentes.buscar(/^[0-9a-f-]{36}$/i.test(input.bot) ? input.bot : "00000000-0000-0000-0000-000000000000");
     const a = l ?? (await deps.repos.agentes.buscarPorNome(input.bot));
     if (!a || a.ownerId !== deps.escopo.pessoaId) return recusa({ ok: false, erro: "nao_encontrado", detalhe: `a pessoa não tem um bot chamado ${input.bot}` });
     agenteId = a.id;
+    if (a.id !== input.agenteId) nomeDoAlvo = a.nome;
   }
   // Fora da conversa (rotina, tarefa, pedido de colega) o bot só mexe nas próprias páginas, nem para ler as de outro
   // bot: a ramificação do retrato não pode virar um jeito de uma rotina regravar o app de outro bot (revisão 1 do #626).
@@ -123,9 +128,15 @@ export const gerirApps: CasoNod<Deps, "gerir_apps"> = async (deps, input) => {
     case "ordenar": {
       if (!conversa) return recusa({ ok: false, erro: "entrada_invalida", detalhe: SO_NA_CONVERSA });
       if (!limpo) return recusa({ ok: false, erro: "entrada_invalida", detalhe: SO_LIMPO });
-      const r = await ordenarPaginas(deps, { ...comum, ordem: input.ordem, pagina: input.pagina, posicao: input.posicao, antes_de: input.antes_de, depois_de: input.depois_de });
+      // ADA-9 (revisão 1 do #648, M2), definido em 2026-11-04: o quadro de outro bot se cria com quadro = o nome dele; sem isso, criar_quadro faria um no seu.
+      const semQuadro = nomeDoAlvo === null
+        ? "Nada mudou: se a pessoa quiser, crie o quadro com gerir_quadro criar_quadro e ordene de novo."
+        : `Nada mudou: se a pessoa quiser, crie o quadro do ${nomeDoAlvo} com gerir_quadro criar_quadro e quadro: "${nomeDoAlvo}" (não no seu) e ordene de novo.`;
+      const r = await ordenarPaginas(deps, { ...comum, ordem: input.ordem, pagina: input.pagina, posicao: input.posicao, antes_de: input.antes_de, depois_de: input.depois_de, semQuadro });
       if (!r.data.ok) return recusa(r.data, r.events);
-      return { data: resumo(r.data.paginas, "Feito. Conte a ordem nova em uma frase (a primeira é a tela inicial do bot)."), events: r.events };
+      // ADA-9, definido em 2026-11-04: a pessoa pede a "view padrão"; o resultado diz qual página abre primeiro agora, para o bot contar sem adivinhar.
+      const casa = nome(r.data.paginas, homeDoBot(r.data.paginas.ordem));
+      return { data: resumo(r.data.paginas, `Feito. Ao abrir ${nomeDoAlvo === null ? "o bot" : `o ${nomeDoAlvo}`}, ${casa} aparece primeiro (a tela inicial, a view padrão). Conte isso em uma frase.`), events: r.events };
     }
     case "remover": {
       if (!conversa) return recusa({ ok: false, erro: "entrada_invalida", detalhe: SO_NA_CONVERSA });

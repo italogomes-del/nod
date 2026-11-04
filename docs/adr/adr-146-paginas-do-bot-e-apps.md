@@ -98,6 +98,12 @@ Bloco 1 tinha apps de exemplo e a ordem guardada no navegador. A NOD-445 liga is
   Gatilho: um bot com dezenas de removidos, ou a lista de removidos aparecendo no tempo do `gravar` da ordem → prazo
   para os removidos (a lixeira com prazo do gatilho abaixo).
 
+- Emenda ADA-9 (definido em 2026-11-04): a "view padrão" do bot é a primeira página (a casa) e se muda pelo chat com
+  `gerir_apps ordenar` (Tarefas na posição 1 = abrir no Quadro), sem card e sem ferramenta própria, como o resto da ordem
+  (§4). O resultado traz `tela_inicial`. Pelo chat, pedir o quadro num bot sem quadro recusa com o caminho (`criar_quadro`,
+  com `quadro` = o nome do outro bot); a ordem inteira da tela segue tolerante (§3). Gatilho: a pessoa mudando a casa
+  sem querer pelo chat → o `ordenar` da posição 1 vira card.
+
 ## Gatilho de reversão
 
 - Uma pessoa perde um app sem querer → remover vira card ou ganha lixeira com prazo.

@@ -5,6 +5,9 @@ import type { FerramentaPlano } from "../../../src/contracts/plano-turno.ts";
 import { INSTRUCAO_ROTINA_NO_PROMPT, MEMORIAS_NO_PROMPT, montarPromptSistema, partesDoPromptSistema, secaoDaLinha } from "../../../src/domain/prompt-sistema.ts";
 import { aceitaPassagem, COLUNAS_PADRAO } from "../../../src/domain/colunas.ts";
 import { FERRAMENTAS_QUADRO } from "../../../src/contracts/ferramentas-quadro.ts";
+import { FERRAMENTAS_APPS } from "../../../src/contracts/ferramentas-apps.ts";
+import { validarArgsNod } from "../../../src/use-cases/chamar-ferramenta.ts";
+import { PAGINA_CONVERSA, PAGINA_TAREFAS } from "../../../src/domain/apps-do-bot.ts";
 import { agente, f, mem } from "./_fixtures-prompt.ts";
 
 describe("montarPromptSistema: o modo de aprovação (ADR-059)", () => {
@@ -431,5 +434,37 @@ describe("ADR-142: o prompt ensina a passagem por coluna quando há gerir_quadro
     const prompt = montarPromptSistema({ ...base, ferramentas: [f("pedir_a_bot"), f("publicar_artefato")] });
     expect(prompt.split("\n").some((l) => l.startsWith("Quadro:"))).toBe(false);
     expect(prompt).not.toContain("definir_passagem");
+  });
+});
+
+describe("ADA-9: o prompt ensina a mudar a view padrão (a tela inicial) quando há gerir_apps", () => {
+  const base = { agente, memorias: [], nativas: [], pessoaNome: "Marlon", modo: "conversa" as const };
+  it("com gerir_apps, a linha Tela inicial: vai na parte estável, na seção ferramentas, e manda ordenar Tarefas para a posição 1", () => {
+    const { estavel, volatil } = partesDoPromptSistema({ ...base, ferramentas: [f("gerir_apps")] });
+    const linha = estavel.find((l) => l.startsWith("Tela inicial:"));
+    expect(linha).toBeDefined();
+    expect(volatil.some((l) => l.startsWith("Tela inicial:"))).toBe(false);
+    expect(secaoDaLinha(linha!)).toBe("ferramentas");
+    expect(linha).toContain("view padrão");
+    expect(linha).toContain("é a primeira página");
+    // os ids batem com o domínio e a assinatura com a descrição da ferramenta: se o contrato mudar, o prompt acompanha.
+    expect(linha).toContain(`gerir_apps ordenar {pagina: "${PAGINA_TAREFAS}", posicao: 1}`);
+    expect(linha).toContain(`gerir_apps ordenar {pagina: "${PAGINA_CONVERSA}", posicao: 1}`);
+    expect(FERRAMENTAS_APPS.gerir_apps.description).toContain("{bot?, pagina, posicao | antes_de | depois_de}");
+    // A descrição da ferramenta diz o mesmo, para o bot que não lê a linha: Tarefas na posição 1 = abrir no Quadro.
+    expect(FERRAMENTAS_APPS.gerir_apps.description).toContain("a primeira é a tela inicial, a view padrão: o que abre primeiro no bot; abrir no quadro = pagina tarefas, posicao 1");
+    // Revisão 1 do #648 (B4): os exemplos da linha passam no schema de verdade da ferramenta, não só no texto.
+    for (const pagina of [PAGINA_TAREFAS, PAGINA_CONVERSA]) expect(validarArgsNod("gerir_apps", { op: "ordenar", pagina, posicao: 1 }).ok).toBe(true);
+    expect(linha).toContain("Pedido de só ver o quadro agora não muda a ordem");
+    expect(linha).toContain("o de outro bot, com quadro = o nome dele");
+    expect(linha).toContain("gerir_quadro criar_quadro");
+    expect(FERRAMENTAS_QUADRO.gerir_quadro.description).toContain("criar_quadro {meta?, prazo?}");
+    expect(linha).toContain("sem card");
+    expect(linha).toContain("Não diga que a view padrão não se muda pelo chat");
+  });
+  it("sem gerir_apps, nenhuma linha Tela inicial:", () => {
+    const prompt = montarPromptSistema({ ...base, ferramentas: [f("gerir_quadro"), f("publicar_artefato")] });
+    expect(prompt.split("\n").some((l) => l.startsWith("Tela inicial:"))).toBe(false);
+    expect(prompt).not.toContain("view padrão");
   });
 });

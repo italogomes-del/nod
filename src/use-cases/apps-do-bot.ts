@@ -94,6 +94,17 @@ function paginaPelaRef(p: PaginasDto, ref: string): string | null {
   return a ? idDaPaginaDoApp(a.id) : null;
 }
 
+/**
+ * ADA-9, definido em 2026-11-04: "abra no quadro" pelo chat num bot sem quadro não acha a página Tarefas. Com `semQuadro` (só o gerir_apps passa),
+ * a recusa diz o caminho (criar o quadro) em vez do "confira o nome", que fazia o bot procurar um app chamado Quadro.
+ * A tela não passa: a ordem inteira dela segue tolerante ("o que sobra é ignorado", ADR-146 §3; revisão 1 do #648).
+ */
+function semQuadro(p: PaginasDto, ref: string, instrucao: string | undefined): Falha | null {
+  const chave = chaveDoNome(ref.trim());
+  if (instrucao === undefined || p.temTarefas || (chave !== "tarefas" && chave !== "quadro")) return null;
+  return falha("nao_encontrado", "este bot ainda não tem quadro (a página Tarefas)", undefined, instrucao);
+}
+
 const eventoPaginas = (deps: Deps, autor: Autor, agenteId: string, motivo: string, conversaId?: string | null): RuntimeEvent =>
   evento(deps.escopo, { kind: "paginas_mudaram", autoria: autoriaDe(deps, autor), agora: deps.agora(), conversaId: conversaId ?? null, dados: { agenteId, motivo } });
 
@@ -124,6 +135,8 @@ export type PedidoOrdem = Comum & {
   posicao?: number;
   antes_de?: string;
   depois_de?: string;
+  /** ADA-9, definido em 2026-11-04: a instrução ao bot quando ele pede o quadro num bot sem quadro (só o chat; a tela não manda). */
+  semQuadro?: string;
 };
 
 /**
@@ -138,14 +151,16 @@ export async function ordenarPaginas(deps: Deps, input: PedidoOrdem): Promise<{ 
   let nova: string[];
   if (Array.isArray(input.ordem)) {
     if (input.ordem.length > MAX_ORDEM_GUARDADA || input.ordem.some((x) => typeof x !== "string")) return { data: falha("entrada_invalida", "ordem: uma lista de ids de página"), events: [] };
+    const pedeQuadro = input.ordem.map((x) => semQuadro(atual, x, input.semQuadro)).find((x) => x !== null);
+    if (pedeQuadro) return { data: pedeQuadro, events: [] };
     nova = ordemPedida(input.ordem.map((x) => paginaPelaRef(atual, x) ?? x), atual.ordem);
   } else if (typeof input.pagina === "string") {
     const id = paginaPelaRef(atual, input.pagina);
-    if (!id) return { data: falha("nao_encontrado", `a página ${input.pagina} não existe neste bot`), events: [] };
+    if (!id) return { data: semQuadro(atual, input.pagina, input.semQuadro) ?? falha("nao_encontrado", `a página ${input.pagina} não existe neste bot`), events: [] };
     const alvoRef = input.antes_de ?? input.depois_de;
     if (alvoRef !== undefined) {
       const alvo = paginaPelaRef(atual, alvoRef);
-      if (!alvo) return { data: falha("nao_encontrado", `a página ${alvoRef} não existe neste bot`), events: [] };
+      if (!alvo) return { data: semQuadro(atual, alvoRef, input.semQuadro) ?? falha("nao_encontrado", `a página ${alvoRef} não existe neste bot`), events: [] };
       nova = moverRelativo(atual.ordem, id, alvo, input.antes_de !== undefined ? "antes" : "depois");
     } else if (typeof input.posicao === "number" && Number.isFinite(input.posicao)) {
       // Posição para a pessoa começa em 1 ("a primeira página").
