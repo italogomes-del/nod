@@ -53,3 +53,30 @@ export function conferirGitForWindows(o: { plataforma?: NodeJS.Platform; env?: R
   const r = (o.bash ?? bashDeVerdade)(bash, script);
   return r.status === 0 && r.stdout.trim() === RESPOSTA_DO_AUTOTESTE ? null : "hook_nao_roda";
 }
+
+/**
+ * ADA-32 (ADR-151): o comando que reinstala/atualiza o motor, como a pessoa o roda nesta plataforma. No Windows é o
+ * `irm …/windows | iex` do PowerShell; no Linux, o `curl … | sh` de sempre (ADR-090).
+ */
+export function comandoDeReinstalar(url: string, plataforma: NodeJS.Platform = process.platform): string {
+  return ehWindows(plataforma) ? `irm ${url}/windows | iex` : `curl -fsSL ${url}/motor | sh`;
+}
+
+/** O comando de parear de novo: no Windows o instalador põe o `nod` no Path (nod.cmd); no Linux é o `nod-motor`. */
+export function comandoDeParear(servidor: string, plataforma: NodeJS.Platform = process.platform): string {
+  return `${ehWindows(plataforma) ? "nod" : "nod-motor"} parear ${servidor}`;
+}
+
+/**
+ * ADA-32: `parear --abrir` abre o link do pareamento no navegador padrão. Só no Windows (a máquina da pessoa, com tela),
+ * pelo `explorer.exe` do sistema com caminho absoluto, e só para um link HTTP(S) já montado pelo motor. Fora do
+ * Windows (VM sem tela) devolve null e o link só aparece no terminal.
+ */
+export function comandoParaAbrir(link: string, o: { plataforma?: NodeJS.Platform; env?: Readonly<Record<string, string | undefined>> } = {}): { exe: string; args: string[] } | null {
+  if (!ehWindows(o.plataforma ?? process.platform)) return null;
+  let u: URL;
+  try { u = new URL(link); } catch { return null; }
+  if (u.protocol !== "https:" && u.protocol !== "http:") return null;
+  const raiz = (o.env ?? process.env).SystemRoot ?? "C:\\Windows";
+  return { exe: `${raiz.replace(/[\\/]+$/, "")}\\explorer.exe`, args: [u.href] };
+}

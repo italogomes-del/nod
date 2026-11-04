@@ -50,7 +50,7 @@ import { anuncioDoComputador, sondaLocal } from "./computador.ts";
 import { arquivoDasAtualizacoes, arquivoDoEstadoDeIa, arquivoDoPedidoDeIa, ESPERA_DA_RESPOSTA_MS, ESPERA_DO_SERVICO_MS, gravarJson, IA_DO_TERMINAL, lerEstadoDoPedido, passoNpmLocal, vigiarPedidosDoTerminal } from "./atualizar-ias.ts";
 import { criarPreparoNoMotor } from "./preparo-do-login.ts";
 import { criarIasDoMotor, esperarNoTerminal, quemNaoPodeAtualizar } from "./ias-do-motor.ts";
-import { conferirGitForWindows, MENSAGEM_SEM_GIT_FOR_WINDOWS, plataformaDoMotor, SAIDA_SEM_GIT_FOR_WINDOWS, servidorAceitaPlataforma } from "./windows.ts";
+import { comandoDeParear, comandoDeReinstalar, comandoParaAbrir, conferirGitForWindows, MENSAGEM_SEM_GIT_FOR_WINDOWS, plataformaDoMotor, SAIDA_SEM_GIT_FOR_WINDOWS, servidorAceitaPlataforma } from "./windows.ts";
 import { AJUDA, aposentarChaveAntiga, arquivoDaConexao, carregarConexao, comandoDeEntrar, guardarConexao, lerComando, pastaDoExecutor, pastaDoMotor, type ConexaoMotor } from "./conexao.ts";
 
 /**
@@ -446,7 +446,7 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
 /** Chave inválida ou motor desatualizado: um log e uma mensagem só, e o código 2 (o systemd não reinicia, RestartPreventExitStatus). */
 function sairPor(codigo: "chave_invalida" | "atualize_app", url: string): number {
   log("erro", `motor_${codigo}`, {});
-  process.stderr.write(codigo === "chave_invalida" ? "A chave desta máquina não vale mais (cancelada?). Rode: nod-motor parear <servidor>\n" : `O servidor pede um motor mais novo. Rode de novo: curl -fsSL ${url}/motor | sh\n`);
+  process.stderr.write(codigo === "chave_invalida" ? `A chave desta máquina não vale mais (cancelada?). Rode: ${comandoDeParear(url)}\n` : `O servidor pede um motor mais novo. Rode de novo: ${comandoDeReinstalar(url)}\n`);
   return 2;
 }
 
@@ -466,7 +466,7 @@ async function sairPorVersao(url: string, pasta: string): Promise<number> {
 async function rodar(): Promise<number> {
   const pasta = pastaDoMotor(process.env);
   const c = await carregarConexao(pasta);
-  if (!c) { process.stderr.write("Esta máquina ainda não está conectada. Rode: nod-motor parear https://seu-nod\n"); return 2; }
+  if (!c) { process.stderr.write(`Esta máquina ainda não está conectada. Rode: ${comandoDeParear("https://seu-nod")}\n`); return 2; }
   const versao = await versaoDoMotor();
   // ADA-11 (ADR-147): no Windows o motor só sobe com o Git for Windows e o hook rodando pelo Git Bash (falha fechada).
   const semGit = conferirGitForWindows({ nodePath: process.execPath, hookPath: caminhoAoLado("hook-nativas.mjs", "hook-nativas.ts") });
@@ -510,7 +510,7 @@ async function rodar(): Promise<number> {
       if (motivo === "parado") return 0;
       if (motivo === "desconectada") {
         log("info", "motor_desconectado", {});
-        process.stderr.write("Esta máquina foi desconectada do Nod (pela tela). Para conectar de novo: nod-motor parear <servidor>\n");
+        process.stderr.write(`Esta máquina foi desconectada do Nod (pela tela). Para conectar de novo: ${comandoDeParear(c.url)}\n`);
         return 2;
       }
     } catch (e) {
@@ -527,8 +527,14 @@ async function rodar(): Promise<number> {
   return 0;
 }
 
+function abrirNoNavegador(link: string): void {
+  const cmd = comandoParaAbrir(link);
+  if (!cmd) return;
+  try { spawn(cmd.exe, cmd.args, { detached: true, stdio: "ignore", windowsHide: true }).on("error", () => undefined).unref(); } catch { /* o link está no terminal */ }
+}
+
 /** Pareamento por código (ADR-090): pede o código, mostra, e pergunta ao servidor até a pessoa aprovar. */
-async function parear(servidorBruto: string, nomeBruto: string | null, convite: string | null = null): Promise<number> {
+async function parear(servidorBruto: string, nomeBruto: string | null, convite: string | null = null, abrir = false): Promise<number> {
   let url: string;
   // http só em loopback (o próprio servidor nesta máquina, testes); qualquer outro endereço precisa de HTTPS.
   try { url = urlServidor(servidorBruto, true); } catch { process.stderr.write("Use o endereço HTTPS do seu Nod, por exemplo https://nod.seudominio.com\n"); return 1; }
@@ -540,6 +546,9 @@ async function parear(servidorBruto: string, nomeBruto: string | null, convite: 
   process.stdout.write(convite
     ? `\nPronto: volte à tela do Nod e confirme a conexão de ${nome}.\nAntes de confirmar, confira se a tela mostra este código:\n\n        ${p.codigoPessoa}\n\nSe o código for outro, não confirme: feche o Conectar e gere um novo.\n\nAguardando a confirmação…\n`
     : `\nPara conectar esta máquina (${nome}) ao seu Nod, abra Seu espaço › Máquinas › Conectar e digite o código:\n\n        ${p.codigoPessoa}\n\nOu abra: ${url}/?parear-maquina=${encodeURIComponent(p.codigoPessoa)}  (vale por ${Math.round(p.prazoS / 60)} min)\n\nAguardando a confirmação…\n`);
+  // ADA-32 (ADR-151): o instalador do Windows pede `--abrir` — o navegador já abre no link (com o convite, a tela já vê a
+  // máquina chegar e nada abre). Falhar em abrir não para o pareamento: o link e o código estão no terminal.
+  if (abrir && !convite) abrirNoNavegador(`${url}/?parear-maquina=${encodeURIComponent(p.codigoPessoa)}`);
   const ate = Date.now() + p.prazoS * 1000;
   while (Date.now() < ate) {
     await esperar(p.intervaloS * 1000);
@@ -638,11 +647,11 @@ async function estado(): Promise<number> {
   const pasta = pastaDoMotor(process.env);
   const c = await carregarConexao(pasta);
   process.stdout.write(`Motor ${await versaoDoMotor()} · ${hostname()}\n`);
-  process.stdout.write(c ? `Conectado a ${c.url}\n` : "Ainda não conectado: nod-motor parear https://seu-nod\n");
+  process.stdout.write(c ? `Conectado a ${c.url}\n` : `Ainda não conectado: ${comandoDeParear("https://seu-nod")}\n`);
   const marca = await atualizacaoLigada();
   const mesmoServidor = !c || await atualizacaoLigada({ url: c.url });
   process.stdout.write(!marca ? `Atualização automática: desligada (sem ${MARCA_DA_ATUALIZACAO})\n`
-    : !mesmoServidor ? `Atualização automática: parada (a instalação é de outro servidor; rode de novo: curl -fsSL ${c?.url}/motor | sh)\n`
+    : !mesmoServidor ? `Atualização automática: parada (a instalação é de outro servidor; rode de novo: ${comandoDeReinstalar(c?.url ?? "")})\n`
       : "Atualização automática: ligada (espera um momento sem turno)\n");
   const lig = { urlNod: c?.url ?? "https://127.0.0.1", proxyPath: caminhoAoLado("proxy.mjs", "proxy.ts"), sondaSemTurno: true, electronComoNode: false };
   const envExecutor = { ...process.env, NOD_HOME: pastaDoExecutor(process.env) };
@@ -656,7 +665,7 @@ async function estado(): Promise<number> {
 const comando = lerComando(process.argv.slice(2));
 const saida =
   comando.tipo === "rodar" ? rodar()
-  : comando.tipo === "parear" ? parear(comando.servidor, comando.nome, comando.convite)
+  : comando.tipo === "parear" ? parear(comando.servidor, comando.nome, comando.convite, comando.abrir)
   : comando.tipo === "entrar" ? entrar(comando.ia)
   : comando.tipo === "estado" ? estado()
   : comando.tipo === "atualizar-ia" ? atualizarIa(comando.ia)

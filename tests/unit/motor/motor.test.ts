@@ -11,12 +11,14 @@ describe("motor sem janela (ADR-090)", () => {
   it("lê os comandos do nod-motor", () => {
     expect(lerComando([])).toEqual({ tipo: "ajuda", erro: null });
     expect(lerComando(["rodar"])).toEqual({ tipo: "rodar" });
-    expect(lerComando(["parear", "https://nod.exemplo.com", "--nome", "vm-sp"])).toEqual({ tipo: "parear", servidor: "https://nod.exemplo.com", nome: "vm-sp", convite: null });
-    expect(lerComando(["parear", "--nome", "vm-sp", "https://nod.exemplo.com"])).toEqual({ tipo: "parear", servidor: "https://nod.exemplo.com", nome: "vm-sp", convite: null });
+    expect(lerComando(["parear", "https://nod.exemplo.com", "--nome", "vm-sp"])).toEqual({ tipo: "parear", servidor: "https://nod.exemplo.com", nome: "vm-sp", convite: null, abrir: false });
+    expect(lerComando(["parear", "--nome", "vm-sp", "https://nod.exemplo.com"])).toEqual({ tipo: "parear", servidor: "https://nod.exemplo.com", nome: "vm-sp", convite: null, abrir: false });
     // ADR-102: o convite do comando de instalação; um valor fora do formato é ignorado (vale o código de sempre).
     const convite = "A".repeat(32);
-    expect(lerComando(["parear", "https://nod.exemplo.com", "--convite", convite])).toEqual({ tipo: "parear", servidor: "https://nod.exemplo.com", nome: null, convite });
+    expect(lerComando(["parear", "https://nod.exemplo.com", "--convite", convite])).toEqual({ tipo: "parear", servidor: "https://nod.exemplo.com", nome: null, convite, abrir: false });
     expect(lerComando(["parear", "--convite", "x; rm -rf /", "https://nod.exemplo.com"])).toMatchObject({ servidor: "https://nod.exemplo.com", convite: null });
+    // ADA-32 (ADR-151): `--abrir` (o instalador do Windows) não é confundido com o servidor.
+    expect(lerComando(["parear", "--abrir", "https://nod.exemplo.com", "--convite", convite])).toEqual({ tipo: "parear", servidor: "https://nod.exemplo.com", nome: null, convite, abrir: true });
     expect(lerComando(["parear"]).tipo).toBe("ajuda");
     expect(lerComando(["entrar", "claude"])).toEqual({ tipo: "entrar", ia: "claude" });
     expect(lerComando(["entrar", "gemini"]).tipo).toBe("ajuda");

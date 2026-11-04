@@ -66,4 +66,34 @@ describe("rotas do motor (ADR-090)", () => {
     expect(script).toContain(`NOD_CONVITE="${convite}"`);
     expect(await (await fetch(`${srv.url}/api/motor/instalar?papel=motor`)).text()).not.toContain("NOD-ETAPA");
   });
+
+  it("ADR-151: /api/motor/instalar-windows devolve o PowerShell (text/plain, no-store) com o servidor do pedido; HTTP fora do loopback dá 400", async () => {
+    const r = await fetch(`${srv.url}/api/motor/instalar-windows`);
+    expect(r.status).toBe(200);
+    expect(r.headers.get("content-type")).toBe("text/plain; charset=utf-8");
+    expect(r.headers.get("cache-control")).toBe("no-store");
+    expect(await r.text()).toContain(`$NodServidor = '${srv.url}'`);
+    const https = await (await fetch(`${srv.url}/api/motor/instalar-windows`, { headers: { "x-forwarded-proto": "https", "x-forwarded-host": "nod.exemplo.com" } })).text();
+    expect(https).toContain("$NodServidor = 'https://nod.exemplo.com'");
+    const http = await fetch(`${srv.url}/api/motor/instalar-windows`, { headers: { "x-forwarded-proto": "http", "x-forwarded-host": "nod.exemplo.com" } });
+    expect(http.status).toBe(400);
+    expect(((await http.json()) as { codigo: string }).codigo).toBe("entrada_invalida");
+    expect(await (await fetch(`${comPublica.url}/api/motor/instalar-windows`)).text()).toContain("$NodServidor = 'https://nod.exemplo.com'");
+  });
+
+  it("ADR-151: o convite válido chega ao script do Windows; o inválido some", async () => {
+    const convite = "Ab_-".repeat(8);
+    expect(await (await fetch(`${srv.url}/api/motor/instalar-windows?convite=${convite}`)).text()).toContain(`$NodConvite = '${convite}'`);
+    expect(await (await fetch(`${srv.url}/api/motor/instalar-windows?convite=x'%3Bcalc`)).text()).toContain("$NodConvite = ''");
+  });
+
+  it("ADR-151: /windows redireciona para o script do Windows e só leva o convite válido", async () => {
+    const convite = "Ab_-".repeat(8);
+    const r = await fetch(`${srv.url}/windows`, { redirect: "manual" });
+    expect(r.status).toBe(302);
+    expect(r.headers.get("location")).toBe("/api/motor/instalar-windows");
+    expect(r.headers.get("cache-control")).toBe("no-store");
+    expect((await fetch(`${srv.url}/windows/?convite=${convite}&papel=computador`, { redirect: "manual" })).headers.get("location")).toBe(`/api/motor/instalar-windows?convite=${convite}`);
+    expect((await fetch(`${srv.url}/windows?convite=curto`, { redirect: "manual" })).headers.get("location")).toBe("/api/motor/instalar-windows");
+  });
 });

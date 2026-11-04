@@ -167,7 +167,7 @@ jobs:
           if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ] || ! git fetch --no-tags --depth=1 origin "$BASE"; then
             echo "roda=true" >> "$GITHUB_OUTPUT"; exit 0
           fi
-          if git diff --name-only "$BASE" HEAD | grep -qE '^(motor/|src/adapters/executor/|src/adapters/mcp-proxy/|src/adapters/conectores-locais/|src/contracts/|src/shared/|src/domain/|scripts/motor/|tests/windows/|tsconfig(\.motor)?\.json$|\.github/workflows/ci\.yml$|package(-lock)?\.json$|vitest\.config\.ts$)'; then
+          if git diff --name-only "$BASE" HEAD | grep -qE '^(motor/|src/adapters/executor/|src/adapters/mcp-proxy/|src/adapters/conectores-locais/|src/contracts/|src/shared/|src/domain/|scripts/motor/|scripts/windows/|src/adapters/http/motor-instalacao(-windows)?\.ts$|src/adapters/http/rotas/motor\.ts$|src/adapters/http/servidor\.ts$|tests/windows/|tsconfig(\.motor)?\.json$|\.github/workflows/ci\.yml$|package(-lock)?\.json$|vitest\.config\.ts$)'; then
             echo "roda=true" >> "$GITHUB_OUTPUT"
           else
             echo "roda=false" >> "$GITHUB_OUTPUT"
@@ -196,3 +196,45 @@ jobs:
       # Os unitários do caminho Windows que não supõem caminho POSIX também rodam no Windows de verdade (separador,
       # maiúsculas e PATHEXT reais). Os outros fingem a plataforma e ficam só no Linux.
       - run: npx vitest run --project unit tests/unit/motor/bundle-motor.test.ts tests/unit/executor/executor-windows.test.ts
+      # ADA-32 (ADR-151): o instalador `irm …/windows | iex`. Primeiro o PSScriptAnalyzer (zero avisos e erros; o Write-Host
+      # é de propósito: o script fala com quem colou o comando), depois a instalação de verdade no Windows PowerShell 5.1
+      # (o da pessoa) contra o servidor em loopback, até antes do pareamento, duas vezes: a segunda é a atualização, que
+      # recria a tarefa (-Force) e não toca o conexao.json.
+      - name: instalador do Windows (PSScriptAnalyzer)
+        shell: pwsh
+        run: |
+          npx tsx scripts/windows/gerar-instalador.ts "$env:RUNNER_TEMP\instalar-nod.ps1"
+          Install-Module PSScriptAnalyzer -RequiredVersion 1.25.0 -Scope CurrentUser -Force
+          $achados = @("$env:RUNNER_TEMP\instalar-nod.ps1", 'scripts\windows\conferir-instalacao.ps1') | ForEach-Object { Invoke-ScriptAnalyzer -Path $_ -Severity Warning,Error -ExcludeRule PSAvoidUsingWriteHost }
+          $achados | Format-Table ScriptName, RuleName, Line, Message -Wrap | Out-String -Width 200 | Write-Host
+          if (@($achados).Count -gt 0) { throw "PSScriptAnalyzer: $(@($achados).Count) achado(s)" }
+      - name: instalador do Windows (duas execuções até o pareamento)
+        shell: powershell
+        env:
+          NOD_INSTALAR_ATE: pareamento
+          NOD_SEM_CODEX: "1"
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $versao = node -p "require('./package.json').version"
+          $servidor = 'http://127.0.0.1:8765'
+          $srv = Start-Process -FilePath 'node' -ArgumentList @('node_modules\tsx\dist\cli.mjs', 'scripts\windows\servidor-de-teste.ts', '8765') -PassThru -NoNewWindow -RedirectStandardOutput "$env:RUNNER_TEMP\srv.log" -RedirectStandardError "$env:RUNNER_TEMP\srv.err"
+          try {
+            $ate = (Get-Date).AddSeconds(60)
+            while ($true) {
+              try { $null = Invoke-WebRequest -Uri "$servidor/api/motor/manifesto" -UseBasicParsing; break } catch { if ((Get-Date) -gt $ate) { Get-Content "$env:RUNNER_TEMP\srv.err"; throw 'o servidor de teste não subiu' }; Start-Sleep -Seconds 1 }
+            }
+            irm "$servidor/windows" | iex
+            & .\scripts\windows\conferir-instalacao.ps1 -Servidor $servidor -Versao $versao
+            # a segunda vez é a atualização: com uma conexão no lugar, que o instalador não pode tocar
+            $conexao = Join-Path $env:APPDATA 'nod-motor\conexao.json'
+            New-Item -ItemType Directory -Path (Split-Path $conexao) -Force | Out-Null
+            Set-Content -LiteralPath $conexao -Value '{"url":"https://nod.exemplo.com","chave":"nao-mexa"}' -Encoding ASCII
+            $antes = (Get-FileHash -LiteralPath $conexao).Hash
+            irm "$servidor/windows" | iex
+            & .\scripts\windows\conferir-instalacao.ps1 -Servidor $servidor -Versao $versao
+            if ((Get-FileHash -LiteralPath $conexao).Hash -ne $antes) { throw 'o instalador mexeu no conexao.json' }
+          } finally {
+            Stop-Process -Id $srv.Id -Force -ErrorAction SilentlyContinue
+            $log = Join-Path $env:LOCALAPPDATA 'nod\instalador.log'
+            if (Test-Path $log) { Get-Content $log -Tail 80 }
+          }

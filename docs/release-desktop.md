@@ -198,6 +198,35 @@ servidor nem entra no relato.
 6. Cancelar o diálogo de salvar não grava nada. Salvar numa pasta sem permissão mostra "Não foi possível salvar o
    diagnóstico. Escolha outra pasta e tente de novo."
 
+## O motor no Windows (ADA-32, ADR-151)
+
+A pessoa instala o motor num Windows 10 22H2/11 x64 colando no PowerShell (sem admin):
+
+```powershell
+irm https://app.nodbot.ai/windows | iex
+```
+
+`https://nodbot.ai/windows` também funciona quando o site estiver publicado (`site/_redirects` manda um 302 para
+`https://app.nodbot.ai/windows`). O servidor responde `/windows` com um 302 para `GET /api/motor/instalar-windows`, que
+devolve o PowerShell com o endereço e a versão do próprio servidor (o mesmo contrato do `/motor` do Linux, ADR-090).
+
+O script instala o Git for Windows se faltar (winget no escopo do usuário, winget, ou o instalador oficial com a
+assinatura do projeto), um Node portátil 24.19.0 em `%LOCALAPPDATA%\nod\node` (sha256 do SHASUMS256), o Claude Code e
+o Codex pelo npm desse Node (`NOD_SEM_CODEX=1` pula o Codex), o motor da versão do servidor em
+`%LOCALAPPDATA%\nod\motor\app` (sha256 do manifesto, troca com volta), `nod.cmd`/`nod-motor.cmd` em
+`%LOCALAPPDATA%\nod\bin` (no Path do usuário) e a Tarefa Agendada `\nod-motor-<SID>` do usuário (uma por conta do Windows) no login (ou a chave `Run`
+do HKCU se a política recusar). Depois roda `nod parear <servidor> --abrir`, que abre o navegador no link do pareamento.
+
+- **Rodar de novo atualiza**: para o motor, troca o que mudou, recria a tarefa e sobe o motor. A conexão
+  (`%APPDATA%\nod-motor\conexao.json`) nunca é tocada; com ela no lugar, o pareamento é pulado.
+- **Falhas** saem como `✗ mensagem` sem fechar a janela; o detalhe fica em `%LOCALAPPDATA%\nod\instalador.log`.
+- **Suporte e CI**: `NOD_INSTALAR_ATE=pareamento` para antes do pareamento; `NOD_PASTA` troca `%LOCALAPPDATA%\nod`.
+- **Na CI** (job `windows`): o PSScriptAnalyzer exige zero avisos/erros no script gerado
+  (`scripts/windows/gerar-instalador.ts`) e o instalador roda duas vezes no Windows PowerShell 5.1 contra
+  `scripts/windows/servidor-de-teste.ts`, conferido por `scripts/windows/conferir-instalacao.ps1`.
+- **Publicar o atalho do site** depende de uma pessoa: `npx wrangler deploy` na pasta `site/` (conta Cloudflare do
+  nodbot.ai). Até lá, divulgue `irm https://app.nodbot.ai/windows | iex`.
+
 ## Gerar e publicar
 
 Uma preview sem assinatura usa uma tag `desktop-v<VERSÃO>` (a última publicada está na [lista de releases](https://github.com/gamefik/nod/releases); a primeira foi `desktop-v0.2.0-rc.1`), dois DMGs sem assinatura e o manifesto SHA-256 anexado à release. As tags `desktop-v*` não disparam o workflow de distribuição assinada; os controles abaixo continuam exigidos para a futura versão estável.

@@ -82,14 +82,14 @@ export async function aposentarChaveAntiga(
 
 export type ComandoMotor =
   | { tipo: "rodar" }
-  | { tipo: "parear"; servidor: string; nome: string | null; convite: string | null }
+  | { tipo: "parear"; servidor: string; nome: string | null; convite: string | null; abrir: boolean }
   | { tipo: "entrar"; ia: "claude" | "codex" | "github" }
   | { tipo: "estado" }
   | { tipo: "atualizar-ia"; ia: "claude" | "codex" }
   | { tipo: "versao" }
   | { tipo: "ajuda"; erro: string | null };
 
-/** `nod-motor [rodar] | parear <servidor> [--nome N] [--convite C] | entrar claude|codex|github | atualizar-ia claude|codex | estado | versao`. */
+/** `nod-motor [rodar] | parear <servidor> [--nome N] [--convite C] [--abrir] | entrar claude|codex|github | atualizar-ia claude|codex | estado | versao`. */
 export function lerComando(args: readonly string[]): ComandoMotor {
   const [cmd, ...resto] = args;
   // Sem argumento mostra a ajuda: quem digita "nod-motor" não quer subir um segundo motor ao lado do serviço.
@@ -103,7 +103,8 @@ export function lerComando(args: readonly string[]): ComandoMotor {
     if (!servidor) return { tipo: "ajuda", erro: "Diga o endereço do seu Nod: nod-motor parear https://seu-nod" };
     // ADR-102: o convite do comando de instalação (só o formato dele; outro valor é ignorado e vale o código).
     const convite = valor("--convite");
-    return { tipo: "parear", servidor, nome: valor("--nome"), convite: conviteValido(convite) ? convite : null };
+    // ADA-32 (ADR-151): `--abrir` abre o link do pareamento no navegador (o instalador do Windows usa).
+    return { tipo: "parear", servidor, nome: valor("--nome"), convite: conviteValido(convite) ? convite : null, abrir: resto.includes("--abrir") };
   }
   if (cmd === "atualizar-ia") {
     const ia = resto[0];
@@ -121,6 +122,7 @@ export function lerComando(args: readonly string[]): ComandoMotor {
 export const AJUDA = `nod-motor — o motor do Nod nesta máquina (ADR-090)
 
   nod-motor parear <https://seu-nod> [--nome vm-sp]   conecta esta máquina à sua conta (mostra um código)
+                   [--abrir]                          no Windows, abre o link do pareamento no navegador
   nod-motor entrar claude | codex | github            entra numa conta da IA (uma conta nova a cada vez) ou no GitHub
                                                       — o jeito fácil é pela tela: Seu espaço › Provedores de IA
   nod-motor atualizar-ia claude | codex               atualiza a IA (no ~/.local, sem sudo); espera os turnos dela

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type { Rota } from "../roteador.ts";
 import { ARQUIVOS_DO_COMPUTADOR } from "../computador-instalacao.ts";
 import { ARQUIVOS_DO_MOTOR, papelDoScript, scriptDeInstalacao, servidorParaScript } from "../motor-instalacao.ts";
+import { scriptDeInstalacaoWindows, servidorDoWindowsValido } from "../motor-instalacao-windows.ts";
 
 /**
  * ADR-090: o servidor distribui o motor da própria versão. `GET /api/motor/instalar` (e `/motor`, que redireciona para
@@ -29,6 +30,25 @@ export function rotasMotor(o: { pasta: string; versao: string; urlPublica?: stri
         // NOD-94: `papel=computador` instala a máquina só computador (sem IAs, com as linhas NOD-ETAPA/NOD-ERRO).
         const busca = new URL(ctx.req.url ?? "/", "http://x").searchParams;
         ctx.res.end(scriptDeInstalacao({ servidor, versao: o.versao, convite: busca.get("convite"), papel: papelDoScript(busca.get("papel")), ...(o.computador ? { computador: true } : {}) }));
+      },
+    },
+    {
+      // ADR-151 (ADA-32): `irm https://<nod>/windows | iex`. O mesmo contrato do script do Linux, em PowerShell; só HTTPS
+      // (HTTP só em loopback, para o servidor de teste da CI).
+      metodo: "GET",
+      padrao: /^\/motor\/instalar-windows$/,
+      publica: true,
+      async handler(ctx) {
+        const h = ctx.req.headers;
+        const proto = String(h["x-forwarded-proto"] ?? ("encrypted" in ctx.req.socket && ctx.req.socket.encrypted ? "https" : "http"));
+        const servidor = o.urlPublica ?? servidorParaScript(proto, String(h["x-forwarded-host"] ?? h.host ?? ""));
+        if (!servidorDoWindowsValido(servidor)) { ctx.json(400, { codigo: "entrada_invalida", mensagem: "Abra este endereço pelo HTTPS do seu Nod." }); return; }
+        const convite = new URL(ctx.req.url ?? "/", "http://x").searchParams.get("convite");
+        let script: string;
+        try { script = scriptDeInstalacaoWindows({ servidor, versao: o.versao, convite }); }
+        catch { ctx.json(400, { codigo: "entrada_invalida", mensagem: "A versão deste servidor não cabe no script do Windows." }); return; }
+        ctx.res.writeHead(200, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" });
+        ctx.res.end(script);
       },
     },
     {

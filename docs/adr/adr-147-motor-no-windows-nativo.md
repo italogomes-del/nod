@@ -161,7 +161,7 @@ ou parênteses) são texto, não caminho. Na cerca, o `@` do cmd sai antes da le
   limpeza do nome não mudou, para não mover a pasta dos bots que já existem no Mac e no Linux.
 - O Codex fica sem terminal no Windows até a sonda (item de Desvios, ADR-103).
 - O job `windows` da CI só vira obrigatório com a proteção da branch, que é configuração do repositório (de uma pessoa).
-- Sem instalador, serviço, atualização, computador e app desktop: Fases 2–4, que dependem do Marlon.
+- Sem atualização automática, computador e app desktop: Fases 2–4, que dependem do Marlon. O instalador e a subida no login vieram na [ADR-151](adr-151-instalador-do-motor-no-windows.md).
 - A chave fica em `%APPDATA%\nod-motor` com a ACL herdada do perfil (só o usuário, SYSTEM e Admins); `icacls` na Fase 2.
 
 ## Gatilho de reversão

@@ -132,6 +132,11 @@ describe("site estático (site/)", () => {
     }
   });
 
+  it("10. ADA-32 (ADR-151): /windows redireciona (302) para o script do Windows no servidor oficial", () => {
+    const linhas = ler("_redirects").split("\n").map((l) => l.trim().split(/\s+/));
+    expect(linhas).toContainEqual(["/windows", "https://app.nodbot.ai/windows", "302"]);
+  });
+
   it.each(["privacidade", "termos"])("9. /%s existe em pt-BR, sem meta robots, com canonical e links para as duas páginas e a home", (slug) => {
     const pagina = ler(`${slug}.html`);
     expect(pagina).toContain('<html lang="pt-BR">');

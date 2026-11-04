@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 import { pastaDoExecutor, pastaDoMotor } from "../../../motor/conexao.ts";
-import { conferirGitForWindows, plataformaDoMotor, servidorAceitaPlataforma } from "../../../motor/windows.ts";
+import { comandoDeParear, comandoDeReinstalar, comandoParaAbrir, conferirGitForWindows, plataformaDoMotor, servidorAceitaPlataforma } from "../../../motor/windows.ts";
 import { RESPOSTA_DO_AUTOTESTE, type Disco } from "../../../src/adapters/executor/plataforma.ts";
 
 /** ADA-11 (ADR-147): o motor no Windows, com a plataforma, o disco e o bash injetados. */
@@ -55,5 +55,23 @@ describe("servidor que conhece o win32 (revisão do PR #642, M4)", () => {
     expect(servidorAceitaPlataforma({ plataformas: ["darwin", "linux"] }, "win32")).toBe(false);
     expect(servidorAceitaPlataforma({ plataformas: "win32" }, "win32")).toBe(false);
     expect(servidorAceitaPlataforma({}, "linux")).toBe(true);
+  });
+});
+
+describe("mensagens e o navegador do Windows (ADA-32, ADR-151)", () => {
+  it("o comando de reinstalar e o de parear seguem a plataforma", () => {
+    expect(comandoDeReinstalar("https://app.nodbot.ai", "win32")).toBe("irm https://app.nodbot.ai/windows | iex");
+    expect(comandoDeReinstalar("https://app.nodbot.ai", "linux")).toBe("curl -fsSL https://app.nodbot.ai/motor | sh");
+    expect(comandoDeParear("https://app.nodbot.ai", "win32")).toBe("nod parear https://app.nodbot.ai");
+    expect(comandoDeParear("https://app.nodbot.ai", "linux")).toBe("nod-motor parear https://app.nodbot.ai");
+  });
+
+  it("--abrir usa o explorer.exe do SystemRoot só no Windows e só com link http(s)", () => {
+    const link = "https://app.nodbot.ai/?parear-maquina=ABCD-1234";
+    expect(comandoParaAbrir(link, { plataforma: "win32", env: { SystemRoot: "C:\\Windows\\" } })).toEqual({ exe: "C:\\Windows\\explorer.exe", args: [link] });
+    expect(comandoParaAbrir(link, { plataforma: "win32", env: {} })?.exe).toBe("C:\\Windows\\explorer.exe");
+    expect(comandoParaAbrir(link, { plataforma: "linux", env: {} })).toBeNull();
+    expect(comandoParaAbrir("file:///C:/Windows/System32/calc.exe", { plataforma: "win32", env: {} })).toBeNull();
+    expect(comandoParaAbrir("não é link", { plataforma: "win32", env: {} })).toBeNull();
   });
 });
