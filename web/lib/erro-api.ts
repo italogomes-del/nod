@@ -69,3 +69,11 @@ export class AppDesatualizado extends Error {
     this.name = "AppDesatualizado";
   }
 }
+
+/**
+ * ADA-4 (revisão 9 do #646): o servidor recusou pela regra (4xx): tentar o mesmo falha igual. A rede (status 0), o 5xx,
+ * o 408 e o 429 não são recusa: esses ganham o "Tentar de novo".
+ */
+export function ehRecusaDoServidor(e: unknown): boolean {
+  return e instanceof ErroApi && e.status >= 400 && e.status < 500 && e.status !== 408 && e.status !== 429;
+}

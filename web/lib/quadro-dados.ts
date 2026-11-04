@@ -168,20 +168,35 @@ export function fraseDoPrazo(prazo: string | null): string {
   return `até ${Number(m[3])} ${MESES[Number(m[2]) - 1] ?? ""}`.trim();
 }
 
-/** O estado da faixa da conversa no quadro (o passo 9 do protótipo: carregando, a resposta, o erro). */
+/**
+ * O estado da faixa da conversa no quadro (o passo 9 do protótipo). ADA-4: o envio é otimista e o turno é seguido ao vivo;
+ * as transições moram em web/lib/faixa-do-quadro.ts (`proximaFaixa`).
+ *  - enviando: a fala da pessoa já subiu, o POST está em voo (os frames que chegam antes dele ficam em `guardados`);
+ *  - falhou: o POST não saiu; "Tentar de novo" reusa `idEnvio` (o servidor deduplica);
+ *  - trabalhando: o turno do pedido roda (status vivo, Parar, "Ainda trabalhando…" depois do silêncio);
+ *  - parou: o turno acabou sem concluir (`porVoce`: o Parar da pessoa).
+ */
 export type Faixa =
   | { tipo: "nada" }
-  | { tipo: "aguardando"; pedidoId: string | null }
+  | { tipo: "enviando"; fala: string; texto: string; idEnvio: string; guardados: readonly { tipo: string; dados: Record<string, unknown> }[] }
+  | { tipo: "falhou"; fala: string; texto: string; idEnvio: string; /** Revisão 7 do #646: o prazo venceu e o POST pode ter chegado. */ duvida?: boolean }
+  | { tipo: "trabalhando"; fala: string; pedidoId: string | null; turnoId: string | null; status: string | null; desde: number; ultimoFrameEm: number; demorando: boolean; retomando: boolean; segue: string | null; desisteEm: number | null; parando: boolean; encerrado: boolean; /** Revisão 4 do #646: a volta marcada acorda aqui (ms). */ acordaEm?: number | null; /** Revisão 7 do #646: o 1º turno do pedido (a troca de conta repete este, não a cópia adiada). */ origem?: string | null }
+  | { tipo: "parou"; fala: string; pedidoId: string | null; porVoce: boolean; /** Revisão 3 do #646: a conferência viu o turno acabar sem frame do fim nem resposta. */ semFim?: boolean }
   | { tipo: "resposta"; texto: string; loteId: string | null; mensagemId: string; pedidoId?: string }
-  | { tipo: "erro"; texto: string };
+  | { tipo: "erro"; texto: string; /** Revisão 12 do #646 (M1): a fala recusada (4xx) com o campo ocupado fica à vista aqui. */ fala?: string };
 
 /**
  * A resposta que sobe na faixa: a primeira fala do bot anfitrião depois do pedido da pessoa (`pedidoId`, o id que o envio
  * devolveu; o relógio do aparelho não serve, o do servidor é outro). Uma linha: o texto sem a formatação de markdown, com
  * os espaços colapsados. null = ainda não respondeu (ou o pedido não está na janela).
  */
-type Fala = Pick<Mensagem, "id" | "autoria" | "texto" | "criadoEm" | "parcial" | "kind"> & { payload?: Mensagem["payload"] };
-export function respostaDoBot(mensagens: readonly Fala[], agenteId: string, pedidoId: string): { id: string; texto: string } | null {
+type Fala = Pick<Mensagem, "id" | "autoria" | "texto" | "criadoEm" | "parcial" | "kind"> & { payload?: Mensagem["payload"]; turnoId?: string | null };
+/**
+ * Revisão 12 do #646 (M2): `turnos`, os turnos deste pedido (o aceito, a origem, a continuação, o leitor que o absorveu):
+ * a fala de outro turno do anfitrião (um pedido pela Conversa, uma rotina) não vira o status nem a resposta dele. Vazio ou
+ * ausente = sem filtro (o envio sem turno, o servidor antigo); a fala sem turno passa.
+ */
+export function respostaDoBot(mensagens: readonly Fala[], agenteId: string, pedidoId: string, turnos?: ReadonlySet<string>): { id: string; texto: string } | null {
   const i = mensagens.findIndex((m) => m.id === pedidoId);
   if (i < 0) return null;
   // A última fala final dele antes da próxima fala da pessoa: o "Vou organizar" do meio do turno dá lugar ao fecho (codex
@@ -192,6 +207,7 @@ export function respostaDoBot(mensagens: readonly Fala[], agenteId: string, pedi
     if (m.kind !== "texto" || m.parcial || m.autoria.autor_tipo !== "agente" || m.autoria.autor_id !== agenteId || !m.texto.trim()) continue;
     // O aviso "Com você" que o quadro grava não é a resposta ao pedido.
     if (m.payload && typeof m.payload === "object" && "kind" in m.payload && m.payload.kind === "aviso_pessoa") continue;
+    if (turnos && turnos.size > 0 && m.turnoId && !turnos.has(m.turnoId)) continue;
     achada = { id: m.id, texto: linhaUnica(m.texto) };
   }
   return achada;

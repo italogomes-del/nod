@@ -44,6 +44,8 @@ export const vivo = (e: Pick<ExecucaoDto, "estado">): boolean => e.estado === "r
 
 export type VistaDoTrabalho = {
   tarefaId: string;
+  /** ADA-4: o recado que foi e não voltou (ou que não saiu). */
+  recadoPendente?: { texto: string; falhou: boolean; motivo?: "duvida" | "recusado" } | null;
   /** null = lendo. */
   dados: ExecucoesDaTarefa | null;
   erro: boolean;
@@ -157,5 +159,9 @@ export function secaoDoTrabalho(v: VistaDoTrabalho, hora: (em: number) => string
   // Revisão 5 do PR #625: nenhuma região role=status aqui (o bloco é recriado a cada desenho e o leitor de tela não lê
   // a região nova). O anúncio do estado e do aviso vai à região persistente do quadro (#qd-trab-anuncio).
   const aviso = v.aviso ? `<p class="qd-trab-nota">${esc(v.aviso)}</p>` : "";
-  return `${abre}${corpo}${notasDosRecados(d)}${aviso}${recado}</section>`;
+  const p = v.recadoPendente;
+  const pend = p ? `<p class="qd-trab-nota qd-trab-pend">Seu recado <span class="qd-trab-pend-txt">“${esc(p.texto.length > 80 ? `${p.texto.slice(0, 80)}…` : p.texto)}”</span> · ` +
+    (p.falhou && p.motivo === "duvida" ? "sem resposta: pode ter saído" : p.falhou && p.motivo === "recusado" ? "não entrou" : p.falhou ? `não saiu · <button type="button" class="qd-link" data-act="trab-recado-tentar">Tentar de novo</button>` : "enviando") + `</p>` : "";
+  // Revisão 1 do #646: o aviso (o porquê) fica à vista também com o recado que não saiu.
+  return `${abre}${corpo}${notasDosRecados(d)}${pend}${aviso}${recado}</section>`;
 }

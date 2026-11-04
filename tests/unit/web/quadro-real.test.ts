@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { EntradaHistoricoDto, QuadroDto, TarefaDto } from "../../../src/contracts/quadro.ts";
 import { lerCodigo } from "../../../src/domain/codigo-tarefa.ts";
-import { FORMATO_CODIGO, RESP_VOCE, botDoLink, fraseDoErroDoMover, reciboDaNovaTarefa, acesos, atalhosDePrazo, codigoDaTarefa, codigoNaUrl, destinosDaTarefa, responsaveisDaTarefa, faltaParaOPrazo, linhaDoHistorico, opcoesDeStatus, fraseDoPrazo, historicoDaFaixa, linhaUnica, respostaDoBot, tarefaNoQuadro, tarefasPorStatus } from "../../../web/lib/quadro-dados.ts";
-import { avisoDoGithub, cardDaTarefa, esperandoOutro, faixaDoQuadro, formNovaTarefa, menuDePrazo, pessoasDoQuadro, pilulaDoQuadro, prMaisProblematico, quadroDaMeta, rotuloDoModo, semQuadro, tarefaAberta, tomDoPr, topoDoQuadro } from "../../../web/telas/quadro-real.ts";
+import { FORMATO_CODIGO, RESP_VOCE, botDoLink, fraseDoErroDoMover, reciboDaNovaTarefa, acesos, atalhosDePrazo, codigoDaTarefa, codigoNaUrl, destinosDaTarefa, responsaveisDaTarefa, faltaParaOPrazo, linhaDoHistorico, opcoesDeStatus, fraseDoPrazo, historicoDaFaixa, linhaUnica, respostaDoBot, tarefaNoQuadro, tarefasPorStatus, type Faixa } from "../../../web/lib/quadro-dados.ts";
+import { avisoDoGithub, cardDaTarefa, esperandoOutro, faixaDoQuadro, formNovaTarefa, menuDePrazo, pessoasDoQuadro, pilulaDoQuadro, prMaisProblematico, quadroDaMeta, rotuloDoModo, semQuadro, tarefaAberta, tempoDoTurno, tomDoPr, topoDoQuadro } from "../../../web/telas/quadro-real.ts";
 import { card, confiar } from "../../../web/telas/quadro.ts";
 import { COLUNAS_PADRAO, colunasDto } from "../../../src/domain/colunas.ts";
 import { RECUSAS_DO_MOVER } from "../../../src/use-cases/quadro.ts";
@@ -131,6 +131,13 @@ describe("quadro-dados", () => {
     expect(respostaDoBot(depois, "a", "p")).toEqual({ id: "4", texto: "Pronto: 3 tarefas." });
   });
 
+  it("revisão 12 do #646: com os turnos do pedido, a fala de outro turno do anfitrião não é a resposta; a sem turno passa", () => {
+    const ms = [fala("p", "eu", "pedido"), fala("1", "a", "do pedido", { turnoId: "T1" }), fala("2", "a", "de outro turno", { turnoId: "T9" })];
+    expect(respostaDoBot(ms, "a", "p", new Set(["T1"]))).toEqual({ id: "1", texto: "do pedido" });
+    expect(respostaDoBot(ms, "a", "p", new Set())).toEqual({ id: "2", texto: "de outro turno" });
+    expect(respostaDoBot([...ms, fala("3", "a", "sem turno")], "a", "p", new Set(["T1"]))).toEqual({ id: "3", texto: "sem turno" });
+  });
+
   it("linhaUnica tira bloco de código e colapsa espaços; o histórico guarda só a pessoa e o anfitrião, até n", () => {
     expect(linhaUnica("a ```x\ny``` b")).toBe("a b");
     const h = historicoDaFaixa([fala("1", "eu", "oi"), fala("2", "b", "outro"), fala("3", "a", "ok"), fala("4", "a", "fim")], "a", 2);
@@ -240,11 +247,45 @@ describe("quadro-real (o html)", () => {
 
   it("a faixa: aguardando mostra o giro; resposta com lote mostra Desfazer; sem lote, não", () => {
     const base = { avatarBot: null, historico: [], aberto: false, hora: () => "10:00" };
-    expect(faixaDoQuadro({ ...base, faixa: { tipo: "aguardando", pedidoId: "p" } })).toContain("Mexendo no quadro");
+    expect(faixaDoQuadro({ ...base, faixa: trab() })).toContain("Mexendo no quadro");
     expect(faixaDoQuadro({ ...base, faixa: { tipo: "resposta", texto: "ok", loteId: "L1", mensagemId: "m" } })).toContain(`data-act="qc-desfazer" data-id="L1"`);
     expect(faixaDoQuadro({ ...base, faixa: { tipo: "resposta", texto: "ok", loteId: null, mensagemId: "m" } })).not.toContain("qc-desfazer");
   });
+
+  it("ADA-4: a fala da pessoa sobe acima do status; cada estado tem saída (Tentar de novo, Ver na Conversa)", () => {
+    const base = { avatarBot: null, historico: [], aberto: false, hora: () => "10:00" };
+    const s = (f: Faixa, agora?: number): string => String(faixaDoQuadro({ ...base, faixa: f, ...(agora !== undefined ? { agora } : {}) }));
+    const env = s({ tipo: "enviando", fala: "Cria <X>", texto: "Cria <X>", idEnvio: "K", guardados: [] });
+    expect(env).toContain(`<span class="qc-fala-txt" title="Cria &lt;X&gt;">Cria &lt;X&gt;</span><span class="qc-fala-est">enviando</span>`);
+    expect(env).toContain("Enviando…");
+    const fal = s({ tipo: "falhou", fala: "Cria X", texto: "Cria X", idEnvio: "K" });
+    expect(fal).toContain("Não saiu.");
+    expect(fal).toContain(`data-act="qc-tentar"`);
+    expect(fal).not.toMatch(/qc-erro|role="alert"/);
+    expect(s(trab({ status: "Usando Linear" }))).toContain("Usando Linear");
+    // A fala da pessoa fica fora da região viva (o leitor de tela não a repete a cada status: revisão 1 do #646).
+    expect(s(trab({ status: "Usando Linear" }))).toContain(`<p class="qc-fala" aria-hidden="true">`);
+    expect(s(trab({ status: "Usando Linear" }))).toContain(`<span class="qd-sr">enviada</span>`);
+    expect(s(trab({ retomando: true }))).toContain("Retomando…");
+    expect(s(trab({ parando: true }))).toContain("Parando…");
+    const dem = s(trab({ demorando: true, parando: true }));
+    expect(dem).toContain("Ainda trabalhando…");
+    expect(dem).toContain(`data-act="qc-abrir-conversa"`);
+    expect(s(trab({ encerrado: true }))).toContain("Terminando…");
+    expect(s({ tipo: "parou", fala: "x", pedidoId: "m", porVoce: true })).toContain("Parado por você.");
+    const meio = s({ tipo: "parou", fala: "x", pedidoId: "m", porVoce: false });
+    expect(meio).toContain("Parou no meio.");
+    expect(meio).toContain(`data-act="qc-abrir-conversa"`);
+    // O tempo do turno é aria-hidden (a região viva não anuncia a cada segundo) e só aparece depois de 10 s.
+    expect(s(trab({ desde: 0 }), 14_000)).toContain(`<span class="qc-tempo" aria-hidden="true" data-desde="0"> · 14 s</span>`);
+    expect(tempoDoTurno(0, 9_999)).toBe("");
+    expect(tempoDoTurno(0, 125_000)).toBe(" · 2 min");
+  });
 });
+
+function trab(o: Partial<Extract<Faixa, { tipo: "trabalhando" }>> = {}): Faixa {
+  return { tipo: "trabalhando", fala: "Cria X", pedidoId: "m", turnoId: "T", status: null, desde: 0, ultimoFrameEm: 0, demorando: false, retomando: false, segue: null, desisteEm: null, parando: false, encerrado: false, ...o };
+}
 
 describe("revisão do PR #621: o estado do PR para leitor de tela e o aviso do GitHub no topo", () => {
   it("o estado do PR do card vai num qd-sr (o ponto é aria-hidden e o title não é lido por todo leitor)", () => {

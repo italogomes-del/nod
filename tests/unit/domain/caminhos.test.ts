@@ -1284,7 +1284,11 @@ describe("confirmação da revisão final do PR #642: classe de curinga ilegíve
     const inicio = Date.now();
     posix(s);
     win(s);
-    expect(Date.now() - inicio).toBeLessThan(1_000);
+    // medido em 2026-11-04: linear, ~100 ms (posix+win) a 100 KB e ~200 ms a 200 KB numa máquina sem carga; no
+    // runner do CI sob o unit inteiro em paralelo (collect 533 s) deu 1300 ms e estourou o teto antigo de 1 s
+    // (run 41871672575, PR #646). O teste guarda contra a volta do custo quadrático (segundos a dezenas de
+    // segundos com ~14 mil heredocs), então 3 s mantém ~30x de folga sobre o normal e ainda pega a regressão.
+    expect(Date.now() - inicio).toBeLessThan(3_000);
   });
   it("desempenho: muitos `[` sem fecho e muitos heredocs sem fim saem rápido", () => {
     const inicio = Date.now();

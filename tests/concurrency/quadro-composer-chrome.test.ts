@@ -16,7 +16,7 @@ import { abrirChrome, avaliar, type Cdp } from "../../scripts/carga-tela/cdp.ts"
  *  - no celular o Enter quebra a linha e o envio é pelo botão; no computador o Enter envia;
  *  - Esc com texto não fecha a tarefa; "/" fora de campo foca a pílula;
  *  - o rascunho da pílula, da resposta e do comentário volta depois de trocar de bot e de recarregar;
- *  - a faixa é aria-live="polite" e o botão alterna Enviar ⇄ Parar.
+ *  - a faixa é anunciada (aria-live="polite", na #qc-vivo) e o botão alterna Enviar ⇄ Parar.
  * Sem Chrome na máquina, o teste é pulado; no CI (NOD_QA_EXIGE_CHROME=1) a falta é erro.
  */
 
@@ -402,7 +402,8 @@ descrever("ADA-5: a pílula é o composer (Chrome real)", () => {
 
   it("a faixa é aria-live polite e o botão alterna Enviar ⇄ Parar com o bot respondendo", async () => {
     await abrir();
-    expect(await avaliar(cdp, `document.getElementById("qc-faixa").getAttribute("aria-live")`)).toBe("polite");
+    // ADA-4 (revisão 2 do #646): a frase curta da faixa vai à região viva #qc-vivo; a faixa em si não é lida a cada frame.
+    expect(await avaliar(cdp, `document.getElementById("qc-vivo").getAttribute("aria-live")`)).toBe("polite");
     const rot = () => avaliar<string>(cdp, `document.querySelector('#quadro [data-composer="enviar"]').getAttribute("aria-label")`);
     expect(await rot()).toBe("Enviar ao quadro");
     await focar("#qc-txt");
@@ -537,12 +538,14 @@ descrever("ADA-5: a pílula é o composer (Chrome real)", () => {
     await avaliar(cdp, `window.__soltar = null; window.__segurar = new Promise((r) => { window.__soltar = r; }); 0`);
     await avaliar(cdp, `document.querySelector(${JSON.stringify(sel)}).form.requestSubmit()`);
     await ate(`window.__chamadas.some((c) => c[0] === "comentar")`);
+    // ADA-4: o envio é otimista: o campo esvazia na hora (o comentário fica "enviando" na lista).
+    expect(await valor(sel)).toBe("");
     await focar(sel);
     await digitar("def");
     await avaliar(cdp, `window.__soltar(); window.__segurar = undefined`);
     await esperar(250);
-    expect(await valor(sel)).toBe("abcdef");
-    expect(await avaliar<string>(cdp, `sessionStorage.getItem("r:quadro:c1:t2:" + document.querySelector(${JSON.stringify(sel)}).id) ?? ""`)).toContain("abcdef");
+    expect(await valor(sel)).toBe("def");
+    expect(await avaliar<string>(cdp, `sessionStorage.getItem("r:quadro:c1:t2:" + document.querySelector(${JSON.stringify(sel)}).id) ?? ""`)).toBe("def");
   });
 
   it("revisão 7: o campo regravado no voo e editado pela pessoa fica com a edição", async () => {
@@ -686,7 +689,9 @@ descrever("ADA-5: a pílula é o composer (Chrome real)", () => {
     await ate(`window.__chamadas.some((c) => c[0] === "enviar")`);
     await avaliar(cdp, `window.__chave = "c2"; window.__q.sincronizar({ chave: "c2", nome: "Gil", agenteId: "g" }); window.__q.trocar("quadro")`);
     await avaliar(cdp, `window.__chave = "c1"; window.__q.sincronizar({ chave: "c1", nome: "Ada", agenteId: "a" }); window.__q.trocar("quadro")`);
-    await ate(`document.getElementById("qc-txt")?.value === "vai e volta"`);
+    // ADA-4: o campo esvaziou no Enter (otimista) e o rascunho junto: a fala em voo não volta ao campo para sair de novo.
+    await ate(`document.getElementById("qc-txt")`);
+    expect(await valor("#qc-txt")).toBe("");
     await avaliar(cdp, `window.__soltar(); window.__segurar = undefined`);
     await ate(`document.getElementById("qc-txt").value === ""`);
     expect(await avaliar(cdp, `sessionStorage.getItem("r:quadro:c1")`)).toBe(null);
@@ -720,16 +725,18 @@ descrever("ADA-5: a pílula é o composer (Chrome real)", () => {
     await segurar();
     await tecla("Enter");
     await ate(`window.__chamadas.some((c) => c[0] === "enviar")`);
+    // ADA-4: o campo esvaziou no Enter (otimista); o que a pessoa escreve no voo é um recado novo.
+    expect(await valor("#qc-txt")).toBe("");
     await focar("#qc-txt");
-    await digitar(" e mais");
+    await digitar("e mais");
     await soltar();
     await esperar(150);
-    expect(await valor("#qc-txt")).toBe("primeiro e mais");
-    expect(await avaliar(cdp, `sessionStorage.getItem("r:quadro:c1")`)).toBe("primeiro e mais");
+    expect(await valor("#qc-txt")).toBe("e mais");
+    expect(await avaliar(cdp, `sessionStorage.getItem("r:quadro:c1")`)).toBe("e mais");
     await paraB();
     await paraA();
     await ate(`document.getElementById("qc-txt")`);
-    expect(await valor("#qc-txt")).toBe("primeiro e mais");
+    expect(await valor("#qc-txt")).toBe("e mais");
   });
 
   it("QA (M04): o envio de A que falha depois da troca para B não põe o erro na faixa de B", async () => {
@@ -821,14 +828,16 @@ descrever("ADA-5: a pílula é o composer (Chrome real)", () => {
     await segurar();
     await avaliar(cdp, `document.querySelector(${JSON.stringify(sel)}).form.requestSubmit()`);
     await ate(`window.__chamadas.filter((c) => c[0] === "recado").length === 2`);
+    // ADA-4: o campo do recado esvaziou no envio (otimista); o digitado no voo é o recado seguinte.
+    expect(await valor(sel)).toBe("");
     await focar(sel);
-    await digitar(" e três");
+    await digitar("e três");
     // ...e troca de tarefa antes da volta: o campo sai da tela, e o texto novo fica no rascunho de t1.
     await avaliar(cdp, `window.__q.abrirTarefa("a", "t2")`);
     await ate(`document.querySelector('#quadro .qd-trab-form[data-id="t2"]')`);
     await soltar();
     await esperar(150);
-    expect(await avaliar(cdp, `sessionStorage.getItem(${JSON.stringify(`r:${k}`)})`)).toBe("recado dois e três");
+    expect(await avaliar(cdp, `sessionStorage.getItem(${JSON.stringify(`r:${k}`)})`)).toBe("e três");
   });
 
   it("QA: o Esc da composição do IME (keyCode 229) não tira o foco do campo nem fecha a tarefa", async () => {

@@ -12,7 +12,7 @@
  */
 import { direcaoDaTroca, ehModo, ADIAR_ATE_MS, ARRASTO_ATE_MS, ECO_DA_PESSOA_MS, GESTO_MS, RESERVA_MS, movimentoDaTroca, TURNO_MUDA_A_EXECUCAO, type ModoDaConversa } from "./quadro.ts";
 import { comColunas, FAIXA_DO_PRAZO, fraseDoErroDeColuna, nomeRepetido, passoDeMover, pedeConfirmacao, porqueNaoRecebeCard, porqueNaoRemove, prazoEmMin, prazoLegivelMin, reciboDaResposta, reciboDeMover, saidaComErroDesiste, seletorDoFocoDaColuna, soltarEm, type EdicaoDeColuna, type Lado, type UnidadeDePrazo } from "./colunas.ts";
-import { ErroApi } from "./erro-api.ts";
+import { ErroApi, ehRecusaDoServidor } from "./erro-api.ts";
 import { anunciarEm } from "./posicao-da-lista.ts";
 import { campoComFocoNoToque, criarGestoNaTela } from "./gesto-na-tela.ts";
 import { focarSemRolar, guardarRolagem, restaurarRolagem, seletorDoFocoDoCard } from "./rolagem-guardada.ts";
@@ -34,7 +34,7 @@ import { comandoNoTexto } from "./barra.ts";
 import { ligarComposer, type ComposerLigado } from "./composer-ligado.ts";
 import { enterEnvia } from "./celular.ts";
 import type { Aceita } from "./anexos.ts";
-import { faixaDoQuadro, ICONE_ENVIAR_PILULA, ICONE_PARAR_PILULA, idDaNovaTarefa, pilulaDoQuadro, quadroCarregando, quadroComErro, quadroDaMeta, rotuloDoModo, semQuadro, tarefaAberta, type AgenteDoQuadro, type PainelDoQuadro, type TrocaDaFaixa } from "../telas/quadro-real.ts";
+import { anuncioDaFaixa, faixaDoQuadro, ICONE_ENVIAR_PILULA, ICONE_PARAR_PILULA, idDaNovaTarefa, pilulaDoQuadro, quadroCarregando, quadroComErro, quadroDaMeta, rotuloDoModo, semQuadro, tarefaAberta, tempoDoTurno, type AgenteDoQuadro, type AvisoDaFaixa, type PainelDoQuadro, type TrocaDaFaixa } from "../telas/quadro-real.ts";
 import { anuncioDaOrdem, anuncioDaPagina, CONVERSA, ehForma, indicePeloId, moverNaOrdem, paginaPelaTecla, presa, TAREFAS, type FormaDasTarefas, type Pagina } from "./paginas.ts";
 import { guardarOrdem, ordemDoAgente, paginasDtoDe } from "./ordem-das-paginas.ts";
 import { formaDasTarefas, menuDaPagina, paginaDoApp } from "../telas/paginas.ts";
@@ -42,6 +42,12 @@ import type { BuscaDaPilula } from "./gesto-da-pilula-na-tela.ts";
 import { ligarGestosDaPilula, type PilulaDePaginas } from "./paginas-na-tela.ts";
 import { criarComentariosNaTela, type ApiDosComentarios } from "./comentarios-na-tela.ts";
 import { criarTrabalhosDaTarefa, type ApiDosTrabalhos } from "./trabalhos-da-tarefa.ts";
+import { criarEnvios } from "./envio-idempotente.ts";
+import { PRAZO_DO_ENVIO_MS, comPrazo } from "./com-prazo.ts";
+
+/** Revisão 11 do #646: a janela de reenvio da mesma fala com a mesma chave (depois dela, o mesmo texto é pedido novo). */
+const VALIDADE_DA_CHAVE_MS = 2 * 60_000;
+import { ANUNCIO_MS, ARMAR_PARAR_MS, pedidoSeguido, podeParar, proximaFaixa, silencioEm, soORelogio, vivosDoPedido, type EventoDaFaixa } from "./faixa-do-quadro.ts";
 
 /** O pedaço da API que o quadro usa (NOD-442); null = sem sessão ainda. */
 /** NOD-460: o Exibir de um quadro sem nada guardado (as recolhidas à mostra, a densidade normal). */
@@ -49,8 +55,10 @@ const EXIBIR_PADRAO: ExibirDoQuadro = { recolhidas: true, compacto: false };
 
 export interface ApiDoQuadro extends ApiDosComentarios, ApiDosTrabalhos {
   quadro(agenteId: string): Promise<{ quadro: QuadroDto | null }>;
-  conversa(conversaId: string): Promise<Pick<ConversaDto, "mensagens">>;
+  conversa(conversaId: string): Promise<Pick<ConversaDto, "mensagens"> & Partial<Pick<ConversaDto, "turnosEmCurso" | "turnosPendentes">>>;
   enviar(conversaId: string, texto: string, anexos?: readonly string[], idEnvio?: string): Promise<RespostaMutacao>;
+  /** ADA-4: o ■ Parar da pílula (o mesmo POST do chat). Sem isto, o botão fica sempre Enviar. */
+  pararConversa?(conversaId: string): Promise<{ nadaRodando?: boolean }>;
   responderTarefa(agenteId: string, tarefaId: string, resposta: string): Promise<MutacaoQuadro>;
   desfazerLoteQuadro(agenteId: string, loteId: string): Promise<MutacaoQuadro>;
   /** NOD-415 (ADR-141): criar o quadro e mudar a meta e o prazo pela tela (meta null tira). */
@@ -100,6 +108,10 @@ export interface DadosDoQuadro {
   hora: (em: number) => string;
   /** Quanto a faixa fica à vista depois da resposta (ms). */
   recolherEm?: number;
+  /** ADA-4 (revisão 1 do #646): o envio da pílula que não volta neste prazo vira "Não saiu · Tentar de novo" (ms). */
+  envioEm?: number;
+  /** Revisão 11 do #646: por quanto tempo a chave da fala que falhou é reusada para o mesmo texto (ms). */
+  validadeDaChaveMs?: number;
   /** A janela que junta frames em rajada numa releitura só (ms). */
   juntarEm?: number;
   /** NOD-415: a confirmação antes de remover o quadro (padrão: window.confirm). */
@@ -330,6 +342,55 @@ export function criarQuadroNaTela(doc: Document, o: { busca?: BuscaDaPilula; men
   let leituraConversa = 0;
   let timerReler: ReturnType<typeof setTimeout> | null = null;
   let timerRecolher: ReturnType<typeof setTimeout> | null = null;
+  /** ADA-4: a trava e a chave do envio pela pílula (o 2º Enter com um envio em voo não manda nada). */
+  const novaChave = (): string => globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
+  const envios = criarEnvios(novaChave);
+  /** ADA-4: o relógio dos 90 s sem frame, o tique do tempo do turno e a faixa segura pelo ponteiro ou pelo foco. */
+  /** Revisão 6 do #646: a fala que não saiu já voltou ao campo (o campo manda); `perdidos`: a que falhou noutra conversa. */
+  let falhaNoCampo = false;
+  /** Revisão 7 do #646: o recibo de outra ação com um pedido em curso (fica ao lado, a faixa do pedido não sai). */
+  let aviso: AvisoDaFaixa | null = null;
+  let timerAviso: ReturnType<typeof setTimeout> | null = null;
+  /**
+   * Revisão 7 do #646: as falas novas da conversa (`mensagem.nova`, com o id e o turno) desde que o pedido saiu: o prazo
+   * que vence confere nelas se o pedido chegou mesmo.
+   */
+  let novasDoEnvio: { mensagemId: string; turnoId: string | null }[] = [];
+  const perdidosDaPilula = new Map<string, string>();
+  /**
+   * Revisão 9 do #646 (M1): a chave da fala que falhou sem recusa (a rede, o 5xx, o prazo: o POST pode ter chegado), por
+   * conversa e texto. Mandar a mesma fala de novo — do campo, depois de outro pedido no meio, ou ao voltar à conversa —
+   * reusa a chave, e o servidor deduplica em vez de o bot fazer o pedido duas vezes.
+   */
+  const chavesQueFalharam = new Map<string, { id: string; em: number; lote: string | null }>();
+  const chaveDaFala = (c: string, texto: string): string => `${c}\n${texto}`;
+  /**
+   * Revisão 11 (M1): a chave guardada só vale na janela de reenvio. Passado o prazo, o mesmo texto é um pedido novo (um
+   * "sim" de agora não pode cair no turno antigo, já encerrado). Outro pedido no meio não a apaga (revisão 9: a fala que
+   * voltou ao campo e sai depois dele ainda pode ter chegado). A pílula sempre dá a chave ao `envios` (o dele reusaria a
+   * da última fala igual sem prazo).
+   */
+  const chaveQueFalhou = (c: string, texto: string): string | undefined => {
+    const k = chavesQueFalharam.get(chaveDaFala(c, texto));
+    if (k && Date.now() - k.em <= (dd?.validadeDaChaveMs ?? VALIDADE_DA_CHAVE_MS)) return k.id;
+    chavesQueFalharam.delete(chaveDaFala(c, texto));
+    return undefined;
+  };
+  /** Revisão 11 (M2): o lote do pedido que já pulsou (o card pulsa quando o pedido vira trabalho, uma vez só). */
+  let lotePulsado: string | null = null;
+  /** Revisão 12 do #646 (M2): os turnos que o pedido da faixa já teve (a resposta só vem deles). */
+  let turnosDoPedido = new Set<string>();
+
+  let timerSilencio: ReturnType<typeof setTimeout> | null = null;
+  let timerAnuncio: ReturnType<typeof setTimeout> | null = null;
+  let anunciadoEm = 0;
+  /** Revisão 2 do #646: a nova tentativa do pulso (o gesto segurava o desenho); cai no reset e na troca de bot. */
+  let timerPulso: ReturnType<typeof setTimeout> | null = null;
+  let timerArmar: ReturnType<typeof setTimeout> | null = null;
+  let timerTempo: ReturnType<typeof setInterval> | null = null;
+  const faixaSegura = { ponteiro: false, foco: false };
+  /** O último HTML gravado em cada #qc-faixa: a faixa igual não é regravada (ADR-061: a atividade chega várias vezes por segundo). */
+  const faixaGravada = new WeakMap<Element, string>();
   let dica: string[] = [];
   /** NOD-415: a meta no topo virou campo (Enter salva, Esc desiste). */
   let editandoMeta = false;
@@ -388,13 +449,34 @@ export function criarQuadroNaTela(doc: Document, o: { busca?: BuscaDaPilula; men
   function zerarDados(): void {
     if (aberta) dd?.naUrl?.(null);
     histTarefa = null; quadros = null; leituraHist++;
+    // Revisão 7 do #646 (B1): a fala que não saiu e ficou só na faixa volta ao campo quando a pessoa retornar à conversa.
+    // Revisão 8 (A1): a que voltou ao campo também: o campo é recriado vazio na troca. Vale o que está nele (a pessoa pode
+    // tê-la editado); campo esvaziado pela pessoa não volta.
+    if (chave && faixa.tipo === "falhou") {
+      const noCampo = doc.getElementById("qc-txt") as HTMLTextAreaElement | null;
+      const guardar = falhaNoCampo ? (noCampo?.value.trim() ?? "") : faixa.fala;
+      if (guardar) perdidosDaPilula.set(chave, guardar);
+    } else if (chave && faixa.tipo === "erro" && faixa.fala) perdidosDaPilula.set(chave, faixa.fala);
     agenteId = null; q = null; carga = "nada"; aberta = null; acesas = new Set(); faixa = { tipo: "nada" }; loteAntes = null;
+    aviso = null; novasDoEnvio = [];
+    if (timerAviso) clearTimeout(timerAviso);
+    timerAviso = null;
+    doc.querySelector('#quadro [data-form="conversa-no-quadro"]')?.removeAttribute("aria-busy");
     painel = null; mural = null; erroPessoas = null; leituraMural++;
     historico = []; histAberto = false; tarefasPedem = false; leitura++; leituraConversa++; dica = []; editandoMeta = false; edicao = null; importando = null; soltarNaAberta = null; coms.fechar(); trabs.fechar();
     if (timerReler) clearTimeout(timerReler);
     if (timerImportacao) clearTimeout(timerImportacao);
     timerImportacao = null;
     if (timerRecolher) clearTimeout(timerRecolher);
+    if (timerSilencio) clearTimeout(timerSilencio);
+    if (timerArmar) clearTimeout(timerArmar);
+    timerArmar = null;
+    if (timerAnuncio) clearTimeout(timerAnuncio);
+    timerAnuncio = null; anunciadoEm = 0;
+    if (timerPulso) clearTimeout(timerPulso);
+    timerPulso = null;
+    if (timerTempo) clearInterval(timerTempo);
+    timerSilencio = timerTempo = null;
     if (timerDetalhe) clearTimeout(timerDetalhe);
     timerReler = timerRecolher = timerDetalhe = null;
     releituraDesde = detalheDesde = 0;
@@ -555,6 +637,9 @@ export function criarQuadroNaTela(doc: Document, o: { busca?: BuscaDaPilula; men
     const txt = v.querySelector<HTMLTextAreaElement>("#qc-txt");
     const t = tarefaNoQuadro(q, aberta);
     if (txt) txt.placeholder = t ? `Recado sobre ${t.linearId ?? t.titulo}` : "Nova tarefa ou mensagem";
+    // Revisão 6 do #646: o pedido que falhou com a pessoa noutra conversa volta ao campo quando ela retorna.
+    const perdido = chave !== null ? perdidosDaPilula.get(chave) : undefined;
+    if (txt && perdido !== undefined && chave !== null) { perdidosDaPilula.delete(chave); if (!txt.value.trim()) { txt.value = perdido; atualizarBotaoDaPilula(); } }
     // NOD-443 (D2): o rótulo diz quem vê esta conversa, com gente no quadro.
     const modo = v.querySelector<HTMLElement>("#qc-modo");
     if (modo) { const m = q ? rotuloDoModo(q) : null; modo.hidden = !m; modo.textContent = m ?? ""; }
@@ -607,58 +692,179 @@ export function criarQuadroNaTela(doc: Document, o: { busca?: BuscaDaPilula; men
   /** Quando a pílula mandou o último pedido de cada conversa (revisão 4 do ADA-5, definido em 2026-11-04). */
   const enviouEm = new Map<string, number>();
   const pilulaNaTela = (): HTMLFormElement | null => vista()?.querySelector<HTMLFormElement>('.qc-pil[data-form="conversa-no-quadro"]') ?? null;
-  /** O bot desta conversa está trabalhando (o critério do Parar do chat; sem ele, a faixa aguardando). */
-  function trabalhando(): boolean {
+  /**
+   * O bot desta conversa está trabalhando. ADA-5: com o composer, o critério do Parar do chat (o turno vivo, venha de onde
+   * vier); sem ele, o turno do pedido da faixa (ADA-4), já armado (ARMAR_PARAR_MS depois do aceito).
+   */
+  function trabalhando(agora = Date.now()): boolean {
     const cp = dd?.composer;
-    if (!cp?.parar || !chave) return false;
-    return cp.trabalhando ? cp.trabalhando() : faixa.tipo === "aguardando";
+    if (!chave) return false;
+    if (cp?.parar) return cp.trabalhando ? cp.trabalhando() : podeParar(faixa, agora);
+    return !!dd?.api()?.pararConversa && podeParar(faixa, agora);
   }
   function temConteudo(): boolean {
     const txt = pilulaNaTela()?.querySelector<HTMLTextAreaElement>("#qc-txt");
     return !!txt?.value.trim() || (!!chave && (dd?.composer?.anexos?.quantos(chave) ?? 0) > 0);
   }
   /** ADA-5: com o bot respondendo e nada para mandar, o botão da pílula é o Parar (o mesmo botão, outro rótulo). */
-  function podeParar(): boolean {
-    return !!pilulaNaTela()?.querySelector("#qc-txt") && trabalhando() && !temConteudo();
+  function pararNaPilula(agora = Date.now()): boolean {
+    return !!pilulaNaTela()?.querySelector("#qc-txt") && trabalhando(agora) && !temConteudo();
   }
+  /** ADA-4 + ADA-5: o botão da pílula alterna Enviar ⇄ ■ Parar; com texto e o bot trabalhando, o Parar fica ao lado. */
   function atualizarBotaoDaPilula(): void {
     const pil = pilulaNaTela();
     const bt = pil?.querySelector<HTMLButtonElement>('[data-composer="enviar"]');
-    // Revisão 3 (como botoesDoCampo no chat): com o bot trabalhando e algo no campo, o Parar fica ao lado do Enviar.
+    // Revisão 3 (como botoesDoCampo no chat): com o bot trabalhando e algo no campo, o Parar fica ao lado do Enviar. O
+    // segundo botão é a ação do chat (`parar-conversa`): só com o composer.
     const segundo = pil?.querySelector<HTMLButtonElement>('[data-composer="parar"]');
     if (segundo) {
-      const ver = trabalhando() && (temConteudo() || bt?.dataset["modo"] === "ditado");
+      const ver = !!dd?.composer?.parar && trabalhando() && (temConteudo() || bt?.dataset["modo"] === "ditado");
       if (segundo.hidden === ver) segundo.hidden = !ver;
       const rotSeg = `Parar a resposta de ${nome}`;
       if (segundo.getAttribute("aria-label") !== rotSeg) segundo.setAttribute("aria-label", rotSeg);
     }
+    if (timerArmar) { clearTimeout(timerArmar); timerArmar = null; }
     // Gravando, o botão é do ditado ("Parar e enviar"); ele devolve o rótulo no fim.
     if (!bt || bt.dataset["modo"] === "ditado") return;
-    const parar = podeParar();
+    const agora = Date.now();
+    const parar = pararNaPilula(agora);
+    // Revisão 1 do #646: pela faixa, o Parar arma ARMAR_PARAR_MS depois do aceito (o Enter + clique não para o pedido).
+    // Revisão 4: só enquanto ainda não armou (com texto no campo, o 0 ms virava um laço).
+    if (!parar && !dd?.composer?.trabalhando && !temConteudo() && podeParar(faixa) && faixa.tipo === "trabalhando" && agora < faixa.desde + ARMAR_PARAR_MS) {
+      timerArmar = setTimeout(() => { timerArmar = null; atualizarBotaoDaPilula(); }, Math.max(0, faixa.desde + ARMAR_PARAR_MS - agora));
+    }
     const rot = parar ? `Parar a resposta de ${nome}` : "Enviar ao quadro";
     if (bt.getAttribute("aria-label") !== rot) { bt.setAttribute("aria-label", rot); bt.innerHTML = parar ? ICONE_PARAR_PILULA : ICONE_ENVIAR_PILULA; }
-    bt.dataset["modo"] = parar ? "parar" : "";
+    // Revisão 3 do #646: nada é regravado igual (a atividade chega várias vezes por segundo; ADR-061).
+    if (bt.dataset["modo"] !== (parar ? "parar" : "")) bt.dataset["modo"] = parar ? "parar" : "";
+    // ADA-4: o Parar é um botão (o clique não submete a pílula vazia); o `qc-parar` leva a pararPedido.
+    const tipo = parar ? "button" : "submit";
+    if (bt.type !== tipo) bt.type = tipo;
+    if (parar && bt.dataset["act"] !== "qc-parar") bt.dataset["act"] = "qc-parar";
+    else if (!parar && bt.dataset["act"] !== undefined) delete bt.dataset["act"];
   }
 
   function desenharFaixa(): void {
     const lugar = doc.getElementById("qc-faixa");
     if (!lugar || !dd) return;
-    atualizarBotaoDaPilula();
     const bot = agenteId ? dd.agente(agenteId) : null;
     // ADA-7: o histórico aberto (rolável) fica onde a pessoa rolou quando a faixa é regravada.
-    const rolagem = guardarRolagem(lugar, lugar);
-    lugar.innerHTML = faixaDoQuadro({ faixa, avatarBot: bot?.avatar ?? null, historico, aberto: histAberto, hora: dd.hora });
-    restaurarRolagem(lugar, lugar, rolagem);
+    // ADA-4: o HTML sai sem o relógio (o tempo do turno é do tique, só no textContent): a faixa igual não regrava.
+    const html = String(faixaDoQuadro({ faixa, avatarBot: bot?.avatar ?? null, historico, aberto: histAberto, hora: dd.hora, aviso }));
+    if (faixaGravada.get(lugar) !== html) {
+      const rolagem = guardarRolagem(lugar, lugar);
+      lugar.innerHTML = html;
+      faixaGravada.set(lugar, html);
+      restaurarRolagem(lugar, lugar, rolagem);
+    }
+    marcarTempo();
+    atualizarBotaoDaPilula();
+    anunciarFaixa();
   }
 
-  function mudarFaixa(f: Faixa): void {
-    faixa = f;
+  /**
+   * Revisão 2 do #646: a região viva só da frase curta. As trocas de ferramenta seguidas ("Usando Linear" → "Rodando um
+   * comando" → …) saem no máximo uma a cada ANUNCIO_MS; o resto (fim, falha, resposta) sai na hora.
+   */
+  function anunciarFaixa(): void {
+    if (timerAnuncio) { clearTimeout(timerAnuncio); timerAnuncio = null; }
+    const el = doc.getElementById("qc-vivo");
+    if (!el) return;
+    const frase = anuncioDaFaixa(faixa);
+    if (el.textContent === frase) return;
+    const espera = faixa.tipo === "trabalhando" ? anunciadoEm + ANUNCIO_MS - Date.now() : 0;
+    if (espera > 0) { timerAnuncio = setTimeout(() => { timerAnuncio = null; anunciarFaixa(); }, espera); return; }
+    el.textContent = frase;
+    anunciadoEm = Date.now();
+  }
+
+  /** ADA-4: o tempo do turno ("· 14 s") sem regravar a faixa. */
+  function marcarTempo(): void {
+    const el = doc.querySelector<HTMLElement>("#qc-faixa .qc-tempo[data-desde]");
+    if (!el) return;
+    const t = tempoDoTurno(Number(el.dataset["desde"]), Date.now());
+    if (el.textContent !== t) el.textContent = t;
+  }
+
+  /** A faixa que recolhe sozinha: a resposta e o "Parado por você". O resto (falha, demora, parou no meio) fica. */
+  const recolhe = (f: Faixa): boolean => f.tipo === "resposta" || (f.tipo === "parou" && f.porVoce);
+
+  /** ADA-4: os 12 s só correm com a faixa sem o ponteiro em cima e sem o foco dentro; ao sair, recomeçam. */
+  function agendarRecolher(): void {
     if (timerRecolher) { clearTimeout(timerRecolher); timerRecolher = null; }
-    // A resposta fica alguns segundos e recolhe sozinha (passo 9); com o histórico aberto, fica até a pessoa fechar.
-    if (f.tipo === "resposta") {
-      timerRecolher = setTimeout(() => { timerRecolher = null; if (!histAberto && faixa === f) { faixa = { tipo: "nada" }; desenharFaixa(); } }, dd?.recolherEm ?? 12000);
+    if (!recolhe(faixa) || faixaSegura.ponteiro || faixaSegura.foco) return;
+    const f = faixa;
+    // Com o histórico aberto, fica até a pessoa fechar (passo 9).
+    timerRecolher = setTimeout(() => { timerRecolher = null; if (!histAberto && faixa === f) trocarFaixa({ tipo: "nada" }); }, dd?.recolherEm ?? 12000);
+  }
+
+  /** O pedido da pílula ainda não chegou ao fim (em voo, rodando ou "Não saiu" com o texto só na faixa). */
+  // Revisão 13 do #646 (M2): a fala recusada que ficou só na faixa (`erro` com `fala`) também: o recibo vai para o lado.
+  const pedidoEmCurso = (f: Faixa): boolean => f.tipo === "enviando" || f.tipo === "trabalhando" || f.tipo === "falhou" || (f.tipo === "erro" && !!f.fala);
+
+  /**
+   * O recibo ou o erro de uma ação do quadro (mover, criar, desfazer, regra). Revisão 7 do #646: com um pedido em curso, ele
+   * vai para uma linha ao lado (e para o leitor de tela) e a faixa continua seguindo o pedido: o status, o Parar, o
+   * "Não saiu" e a resposta não se perdem.
+   */
+  function mudarFaixa(f: Faixa): void {
+    if (pedidoEmCurso(faixa) && (f.tipo === "erro" || (f.tipo === "resposta" && !f.pedidoId))) {
+      mostrarAviso(f.texto, f.tipo === "erro", f.tipo === "resposta" ? f.loteId : null);
+      return;
     }
+    trocarFaixa(f);
+  }
+
+  /** A linha de aviso sob o pedido em curso: recolhe sozinha e é dita. */
+  function mostrarAviso(texto: string, erro: boolean, loteId: string | null): void {
+    aviso = { texto, erro, loteId };
+    if (timerAviso) clearTimeout(timerAviso);
+    const meu = aviso;
+    timerAviso = setTimeout(() => { timerAviso = null; if (aviso === meu) { aviso = null; desenharFaixa(); } }, dd?.recolherEm ?? 12000);
     desenharFaixa();
+    anunciar(texto);
+  }
+
+  /** A faixa nova (o pedido ou, sem pedido em curso, o recibo). */
+  function trocarFaixa(f: Faixa): void {
+    faixa = f;
+    if (f.tipo === "enviando") turnosDoPedido = new Set();
+    if (f.tipo === "trabalhando") for (const t of [f.turnoId, f.origem, f.segue]) if (t) turnosDoPedido.add(t);
+    agendarRecolher();
+    // ADA-4: o relógio do silêncio, um só por faixa (todo frame do turno traz uma faixa nova e o recomeça).
+    armarSilencio(f);
+    const comTempo = f.tipo === "trabalhando" && !f.demorando && !f.parando;
+    if (comTempo && !timerTempo) timerTempo = setInterval(marcarTempo, 1000);
+    if (!comTempo && timerTempo) { clearInterval(timerTempo); timerTempo = null; }
+    const form = doc.querySelector<HTMLElement>('#quadro [data-form="conversa-no-quadro"]');
+    if (form) { if (f.tipo === "enviando") form.setAttribute("aria-busy", "true"); else form.removeAttribute("aria-busy"); }
+    desenharFaixa();
+  }
+
+  function armarSilencio(f: Faixa): void {
+    if (timerSilencio) { clearTimeout(timerSilencio); timerSilencio = null; }
+    const falta = silencioEm(f, Date.now());
+    if (falta !== null) {
+      timerSilencio = setTimeout(() => {
+        timerSilencio = null;
+        const antes = faixa;
+        despachar({ tipo: "silencio", agora: Date.now() });
+        // Revisão 2 do #646: em "Ainda trabalhando…" a tela confere a conversa (o fim pode ter chegado sem frame).
+        if (faixa.tipo === "trabalhando" && faixa.demorando) {
+          void lerConversa(true);
+          if (faixa === antes) armarSilencio(faixa);
+        }
+      }, falta);
+    }
+  }
+
+  /** ADA-4: um evento da faixa (envio, frame, silêncio, parar); a faixa que não muda não regrava nem mexe nos relógios. */
+  function despachar(ev: EventoDaFaixa): void {
+    const nova = proximaFaixa(faixa, ev);
+    if (nova === faixa) return;
+    // ADR-061: o `turno.delta` (várias vezes por segundo) só empurra o relógio do silêncio; a faixa igual não é redesenhada.
+    if (soORelogio(faixa, nova)) { faixa = nova; armarSilencio(nova); return; }
+    trocarFaixa(nova);
   }
 
   /** Lê o quadro do bot anfitrião; o que mudou desde a leitura anterior acende. Leitura velha (outra conversa) é descartada. */
@@ -722,6 +928,8 @@ export function criarQuadroNaTela(doc: Document, o: { busca?: BuscaDaPilula; men
     if (q?.importacao?.estado === "trazendo") timerImportacao = setTimeout(() => { timerImportacao = null; void lerQuadro(false, null, true); }, dd?.releImportacaoEm ?? 2000);
     // NOD-443: o mural aberto acompanha o quadro (cada pedido de qualquer pessoa entra nele).
     if (painel === "atividade" && novas.size) void lerMural();
+    // Revisão 11 (M2): o lote do pedido aparece no meio do turno: o card pulsa já (depois do desenho), não só no fim.
+    setTimeout(pulsarDoPedido, 0);
     if (igual) return;
     // ADA-7 (revisão 6): a resposta do frame que chega com o gesto em curso (o dedo começou com o GET no ar) espera
     // como o pedido esperou; o link que não achou a tarefa (abaixo) é da pessoa e desenha já.
@@ -997,7 +1205,7 @@ export function criarQuadroNaTela(doc: Document, o: { busca?: BuscaDaPilula; men
   doc.addEventListener("click", (ev) => { if (!naVista(ev) || !(ev.target instanceof Element) || !ev.target.closest("details.qd-hist > summary")) return; rol?.esquecer(); reserva.soltar(); }, true);
 
   /** Relê a conversa do anfitrião: o histórico da faixa e, se há um pedido esperando, a resposta dele. */
-  async function lerConversa(): Promise<void> {
+  async function lerConversa(conferir = false): Promise<void> {
     const a = dd?.api();
     if (!a || !chave || !agenteId) return;
     const minha = ++leituraConversa;
@@ -1008,22 +1216,43 @@ export function criarQuadroNaTela(doc: Document, o: { busca?: BuscaDaPilula; men
       if (minha !== leituraConversa || c !== chave) return;
       historico = historicoDaFaixa(r.mensagens, de);
       // Segue o pedido até o fim do turno: uma fala nova do bot depois da primeira troca o texto e o Desfazer (codex rodada 5).
-      const pedidoId = faixa.tipo === "aguardando" ? faixa.pedidoId : faixa.tipo === "resposta" ? faixa.pedidoId : null;
+      const pedidoId = pedidoSeguido(faixa);
       if (pedidoId) {
-        const resp = respostaDoBot(r.mensagens, de, pedidoId);
-        if (resp && !(faixa.tipo === "resposta" && faixa.mensagemId === resp.id)) {
+        const resp = respostaDoBot(r.mensagens, de, pedidoId, turnosDoPedido);
+        // Revisão 2 do #646: com o turno rodando, a fala do meio não encerra a faixa (vira o status); só o fim do turno.
+        // Revisão 5 do #646: só os turnos deste pedido contam (a frente ou outro pedido vivo na conversa não seguram a faixa).
+        const vivos = vivosDoPedido(faixa, pedidoId, r.turnosEmCurso, r.turnosPendentes);
+        const ev: EventoDaFaixa = { tipo: "conversa", resposta: resp, vivos, conferir, agora: Date.now() };
+        const prox = proximaFaixa(faixa, ev);
+        const responde = resp && (faixa.tipo === "resposta" ? faixa.mensagemId !== resp.id : prox.tipo === "resposta" && prox.mensagemId === resp.id);
+        if (!responde && prox !== faixa) { despachar(ev); return; }
+        if (resp && responde) {
           // A resposta chega depois do lote: relê o quadro antes, para o Desfazer apontar o lote deste pedido. Revisão 10:
           // quem traz a resposta é um frame (a pessoa pode estar rolando enquanto espera): o desenho espera o gesto.
           await lerQuadro(false, Date.now());
-          if (c !== chave) return;
+          // Revisão 5 do #646: um pedido novo saiu durante a leitura: a resposta do anterior não pisa no "Enviando…" dele.
+          // Revisão 8 (M1): nem uma leitura da conversa mais nova (a resposta dela é a que vale).
+          if (minha !== leituraConversa || c !== chave || pedidoSeguido(faixa) !== pedidoId) return;
           const lote = q?.ultimoLote ?? null;
           // Só o lote que o anfitrião gravou depois do pedido: o de outro bot ou de outro aparelho não ganha o Desfazer
           // aqui (revisão do PR #612; o servidor ainda recusa o que não for o último).
           const doAnfitriao = lote?.autor.tipo === "agente" && lote.autor.agenteId === de;
           const loteId = lote && doAnfitriao && lote.id !== loteAntes && !lote.desfeitoEm ? lote.id : null;
-          mudarFaixa({ tipo: "resposta", texto: resp.texto, loteId, mensagemId: resp.id, pedidoId });
+          trocarFaixa({ tipo: "resposta", texto: resp.texto, loteId, mensagemId: resp.id, pedidoId });
+          if (loteId && lote && lotePulsado !== loteId) { lotePulsado = loteId; pulsarCard(lote.tarefaIds); }
           return;
         }
+      }
+      // ADA-4: o turno acabou bem e o bot não falou nada: a faixa não fica girando ("Feito.", com o Desfazer do lote).
+      if (faixa.tipo === "trabalhando" && faixa.encerrado) {
+        const f = faixa;
+        await lerQuadro(false, Date.now());
+        if (minha !== leituraConversa || c !== chave || faixa !== f) return;
+        const lote = q?.ultimoLote ?? null;
+        const loteId = lote && lote.autor.tipo === "agente" && lote.autor.agenteId === de && lote.id !== loteAntes && !lote.desfeitoEm ? lote.id : null;
+        trocarFaixa({ tipo: "resposta", texto: "Feito.", loteId, mensagemId: "", ...(f.pedidoId ? { pedidoId: f.pedidoId } : {}) });
+        if (loteId && lote && lotePulsado !== loteId) { lotePulsado = loteId; pulsarCard(lote.tarefaIds); }
+        return;
       }
       desenharFaixa();
     } catch {
@@ -1031,11 +1260,17 @@ export function criarQuadroNaTela(doc: Document, o: { busca?: BuscaDaPilula; men
     }
   }
 
-  async function enviarPedido(form: HTMLFormElement): Promise<void> {
+  /**
+   * ADA-4: o envio pela pílula é otimista. O campo esvazia e a fala sobe na faixa antes do POST (síncrono); o 2º Enter
+   * (ou Enter + clique) com o envio em voo não manda nada (`envios.iniciar` → null). Na falha, o texto volta ao campo
+   * (se ele ainda estiver vazio) e a faixa oferece "Tentar de novo" com a MESMA chave (o servidor deduplica).
+   * ADA-5: o ditado, os anexos da fila e os comandos "/" do composer do chat entram aqui.
+   */
+  function enviarPedido(form: HTMLFormElement): void {
     const a = dd?.api();
     const txt = form.querySelector<HTMLTextAreaElement>("#qc-txt");
     if (!a || !chave || !txt) return;
-    // Revisão 2: com um envio da pílula em voo nesta conversa, o segundo (Enter + botão, duplo clique) é ignorado.
+    // Revisão 2 do ADA-5: com um comando "/" da pílula em voo nesta conversa, o segundo é ignorado.
     if (enviandoEm.has(chave)) return;
     const cp = dd?.composer;
     // ADR-095: com o ditado gravando, o Enviar (e o Enter) param a gravação e enviam o texto direto.
@@ -1045,63 +1280,239 @@ export function criarQuadroNaTela(doc: Document, o: { busca?: BuscaDaPilula; men
     const ids = cp?.anexos ? cp.anexos.prontos(chave) : [];
     if (ids === null) return;
     if (!bruto && ids.length === 0) {
-      // Revisão 4: o segundo clique de um clique duplo em Enviar não vira Parar do turno que acabou de começar.
-      if (podeParar() && Date.now() - (enviouEm.get(chave) ?? 0) >= SEM_PARAR_DEPOIS_DE_ENVIAR_MS) void cp?.parar?.();
+      if (pararNaPilula()) void pararPedido();
       return;
     }
-    // Revisão 3: a trava entra antes do primeiro await (o comando "/" também não roda duas vezes).
     const c = chave;
-    enviandoEm.add(c);
-    try {
-      await enviarComTrava(txt, c, bruto, ids);
-    } finally {
-      enviandoEm.delete(c);
-      enviouEm.set(c, Date.now());
-    }
-  }
-
-  async function enviarComTrava(txt: HTMLTextAreaElement, c: string, bruto: string, ids: readonly string[]): Promise<void> {
-    const a = dd?.api();
-    const cp = dd?.composer;
-    if (!a) return;
     // ADA-5 (revisão 1): "/nova-sessao" e "/modelo" rodam na hora, como no chat (a lista "/" promete isso).
     const ehComando = bruto.startsWith("/") && !!comandoNoTexto(cp?.barra?.contexto().dto ?? null, bruto);
     if (ids.length === 0 && ehComando && cp?.comando) {
-      if (await cp.comando(bruto, c)) {
+      // Revisão 3 do ADA-5: a trava entra antes do primeiro await (o comando "/" não roda duas vezes).
+      enviandoEm.add(c);
+      void (async () => {
+        let rodou = false;
+        try { rodou = await cp.comando!(bruto, c); } finally { enviandoEm.delete(c); }
+        if (!rodou) { if (c === chave) pedir(c, txt, bruto, ids, ehComando); return; }
         if (cp.rascunhos?.ler(chaveDoRascunho(c, null)).trim() === bruto) cp.rascunhos.guardar(chaveDoRascunho(c, null), "");
         // Revisão 6: o campo da tela agora (A→B→A recria a pílula), como no envio comum.
         const agora = c === chave ? pilulaNaTela()?.querySelector<HTMLTextAreaElement>("#qc-txt") ?? txt : null;
         if (agora && agora.value.trim() === bruto) { agora.value = ""; composer?.atualizar(agora); }
-        return;
-      }
+      })();
+      return;
     }
+    pedir(c, txt, bruto, ids, ehComando);
+  }
+
+  /** O pedido otimista da pílula (a fala, os anexos prontos): a trava, a chave e o campo que esvazia na hora. */
+  function pedir(c: string, txt: HTMLTextAreaElement, bruto: string, ids: readonly string[], ehComando: boolean): void {
     const t = tarefaNoQuadro(q, aberta);
     // Com uma tarefa aberta o recado vai sobre ela: só o id, que o bot lê pelo gerir_quadro. O título e o id do Linear
     // podem ter vindo de fora e não entram na fala confiável da pessoa (revisão do PR #612). Um comando "/" do CLI vai
     // cru: com o prefixo, o "/" deixaria de estar no começo e o CLI não o rodaria (ADA-5, revisão 1).
     const texto = t && !ehComando ? `Sobre a tarefa ${t.id} do quadro: ${bruto}` : bruto;
-    loteAntes = q?.ultimoLote?.id ?? null;
+    // Revisão 14 do #646 (M1): reenviar pelo Enter com a chave da fala que falhou é repetir o pedido, como o Tentar.
+    const reuso = ids.length === 0 ? chaveQueFalhou(c, texto) : undefined;
+    const idEnvio = envios.iniciar(c, texto, ids, undefined, reuso ?? novaChave());
+    // Revisão 8 (M3): com o envio anterior em voo, o Enter não manda nada, mas diz por quê (não parece quebrado).
+    if (idEnvio === null) {
+      const espera = "Aguarde: o envio anterior ainda não voltou.";
+      if (pedidoEmCurso(faixa)) mostrarAviso(espera, false, null);
+      // Revisão 9 (B1): sem pedido na faixa (a pessoa voltou à conversa com o POST em voo), o aviso é um recibo que recolhe.
+      else { trocarFaixa({ tipo: "resposta", texto: espera, loteId: null, mensagemId: "" }); anunciar(espera); }
+      return;
+    }
+    // Revisão 4 do ADA-5: o segundo clique de um clique duplo em Enviar não vira Parar do turno que acabou de começar.
+    enviouEm.set(c, Date.now());
+    // Revisão 5 do #646: o envio novo tira a fala que não saiu da faixa: ela volta ao campo, não some. Revisão 6: só a
+    // que ficou só na faixa; a que já voltou ao campo é o que a pessoa editou (repor a antiga duplicaria o pedido).
+    const soNaFaixa = faixa.tipo === "falhou" && !falhaNoCampo ? faixa.fala : faixa.tipo === "erro" ? (faixa.fala ?? "") : "";
+    const naoSaiu = soNaFaixa !== bruto ? soNaFaixa : "";
+    txt.value = naoSaiu;
+    composer?.atualizar(txt);
+    // ADA-5: o rascunho acompanha o campo (A→B→A no voo não traz a fala enviada de volta para sair duas vezes).
+    guardarRascunho(txt);
+    void mandarPedido(c, bruto, texto, idEnvio, !!reuso, ids);
+  }
+
+  /** ADA-4: "Tentar de novo" da faixa: a mesma fala, com a chave que ela já tem. */
+  function tentarDeNovo(): void {
+    if (faixa.tipo !== "falhou" || !chave) return;
+    const f = faixa;
+    const idEnvio = envios.iniciar(chave, f.texto, [], undefined, f.idEnvio);
+    if (idEnvio === null) return;
+    // O texto que voltou ao campo na falha sai de lá (senão o Enter mandaria a mesma fala outra vez).
+    const txt = doc.getElementById("qc-txt") as HTMLTextAreaElement | null;
+    if (txt && txt.value.trim() === f.fala) { txt.value = ""; composer?.atualizar(txt); }
+    // ADA-5: os anexos que voltaram à fila na falha vão de novo com a fala.
+    const ids = dd?.composer?.anexos?.prontos(chave) ?? [];
+    void mandarPedido(chave, f.fala, f.texto, idEnvio, true, ids ?? []);
+  }
+
+  async function mandarPedido(c: string, fala: string, texto: string, idEnvio: string, repetido = false, ids: readonly string[] = []): Promise<void> {
+    const a = dd?.api();
+    const cp = dd?.composer;
+    if (!a) { envios.concluir(c, false); return; }
+    // Revisão 13 do #646 (B2): o "Tentar de novo" guarda o lote de antes do 1º envio (o retry deduplicado não o perde).
+    // Revisão 14 (M1): o lote vem com a chave que falhou (outro pedido no meio pode ter trocado o `loteAntes`).
+    const guardada = repetido ? chavesQueFalharam.get(chaveDaFala(c, texto)) : undefined;
+    if (guardada) loteAntes = guardada.lote;
+    else if (!repetido) loteAntes = q?.ultimoLote?.id ?? null;
     histAberto = false;
-    mudarFaixa({ tipo: "aguardando", pedidoId: null });
+    despachar({ tipo: "enviou", fala, texto, idEnvio });
+    falhaNoCampo = false;
+    novasDoEnvio = [];
+    let ok = false;
+    // ADA-5 (revisão 2): os anexos saem da fila antes do POST (o envio do chat ou outro da pílula não os mandam de novo).
     const saem = ids.length > 0 ? cp?.anexos?.retirar(c, ids) ?? null : null;
     try {
-      const r = await a.enviar(c, texto, ids, globalThis.crypto?.randomUUID?.());
+      // Revisão 1 do #646: o POST que não volta (conexão meio aberta) não segura a faixa nem a trava do envio.
+      const r = await comPrazo(a.enviar(c, texto, ids, idEnvio), dd?.envioEm ?? PRAZO_DO_ENVIO_MS);
+      ok = true;
       saem?.confirmar();
-      // O rascunho do que foi mandado não volta (mesmo que a pessoa esteja noutro bot), salvo se ela já escreveu outro.
-      if (cp?.rascunhos?.ler(chaveDoRascunho(c, null)).trim() === bruto) cp.rascunhos.guardar(chaveDoRascunho(c, null), "");
+      chavesQueFalharam.delete(chaveDaFala(c, texto));
+      // ADA-5: o rascunho do que foi mandado não volta (mesmo noutro bot), salvo se a pessoa já escreveu outro.
+      if (cp?.rascunhos?.ler(chaveDoRascunho(c, null)).trim() === fala) cp.rascunhos.guardar(chaveDoRascunho(c, null), "");
       if (c !== chave) return;
-      // Revisão 2: o campo é o da tela agora (A→B→A recria a pílula; o nó do começo pode ter saído do DOM). Só limpa se a
-      // pessoa não começou outro recado enquanto este ia (codex, rodada 3).
-      const agora = pilulaNaTela()?.querySelector<HTMLTextAreaElement>("#qc-txt");
-      if (agora && agora.value.trim() === bruto) { agora.value = ""; composer?.atualizar(agora); }
-      const pedidoId = r.ids["mensagem"] ?? null;
-      mudarFaixa({ tipo: "aguardando", pedidoId });
-      void lerConversa();
-    } catch {
+      despachar({ tipo: "aceito", pedidoId: r.ids["mensagem"] ?? null, turnoId: r.ids["turno"] ?? null, agora: Date.now() });
+      // Revisão 3 do #646: o "Tentar de novo" pode cair num turno que já acabou (o 1º POST tinha chegado e os frames dele
+      // foram descartados): a leitura confere se ele ainda está vivo.
+      void lerConversa(repetido);
+    } catch (erro) {
       saem?.devolver();
-      if (c !== chave) return;
-      mudarFaixa({ tipo: "erro", texto: "Não consegui mandar. O texto continua na pílula." });
+      // Revisão 7 do #646: o servidor recusou pela regra (4xx): tentar o mesmo falha igual. A faixa diz o porquê, sem
+      // "Tentar de novo", e a chave sai (a próxima fala ganha outra). Só a rede, o 5xx e o prazo ganham o Tentar.
+      const recusado = ehRecusaDoServidor(erro);
+      if (recusado) { ok = true; chavesQueFalharam.delete(chaveDaFala(c, texto)); } else chavesQueFalharam.set(chaveDaFala(c, texto), { id: idEnvio, em: Date.now(), lote: loteAntes });
+      // Revisão 6 do #646: a pessoa já está noutra conversa: a fala fica guardada e volta quando ela retornar.
+      if (c !== chave) { perdidosDaPilula.set(c, fala); return; }
+      // Revisão 13 do #646 (M1): a pessoa saiu e voltou com o POST em voo (a troca zerou a faixa): a falha volta a ter o
+      // pedido na faixa, para o "Não saiu" (ou a fala recusada) aparecer em vez de sumir.
+      if (!(faixa.tipo === "enviando" && faixa.idEnvio === idEnvio) && !pedidoEmCurso(faixa)) trocarFaixa({ tipo: "enviando", fala, texto, idEnvio, guardados: [] });
+      // Só volta ao campo vazio: o que a pessoa começou a escrever enquanto este ia não é sobrescrito.
+      const txt = doc.getElementById("qc-txt") as HTMLTextAreaElement | null;
+      const voltou = !!txt && !txt.value.trim();
+      if (txt && voltou) { txt.value = fala; falhaNoCampo = true; composer?.atualizar(txt); guardarRascunho(txt); }
+      if (recusado) {
+        const porque = erro instanceof ErroApi ? erro.message : "";
+        // Revisão 12 do #646 (M1): com o campo ocupado, a fala recusada fica na faixa (não some).
+        if (faixa.tipo === "enviando") trocarFaixa({ tipo: "erro", texto: `Não saiu: ${porque || "o servidor recusou o pedido."}`, ...(voltou ? {} : { fala }) });
+        atualizarBotaoDaPilula();
+        return;
+      }
+      // Revisão 7 do #646: o prazo venceu, mas o POST pode ter chegado: a conversa decide (senão a fala editada e
+      // reenviada ganharia outra chave e o bot faria o pedido duas vezes).
+      const duvida = erro instanceof Error && erro.message === "envio_sem_resposta";
+      despachar({ tipo: "recusado", duvida });
+      if (duvida) void conferirEnvio(c, texto, fala);
+    } finally {
+      envios.concluir(c, ok);
     }
+  }
+
+  /**
+   * Revisão 7 do #646: o "Não saiu" em dúvida (o prazo venceu) confere a conversa: a fala da pessoa que apareceu depois do
+   * envio, com o mesmo texto, é este pedido, e a faixa passa a seguir o turno dele.
+   */
+  async function conferirEnvio(c: string, texto: string, fala: string): Promise<void> {
+    const a = dd?.api();
+    const novas = novasDoEnvio.slice();
+    if (!a || c !== chave || !novas.length) return;
+    const f0 = faixa;
+    try {
+      const r = await a.conversa(c);
+      if (c !== chave || faixa !== f0 || faixa.tipo !== "falhou" || !faixa.duvida || faixa.texto !== texto) return;
+      const ids = new Set(novas.map((n) => n.mensagemId));
+      const m = r.mensagens.find((x) => ids.has(x.id) && x.autoria.autor_tipo === "pessoa" && x.texto.trim() === texto.trim());
+      if (!m) return;
+      const turno = novas.find((n) => n.mensagemId === m.id)?.turnoId ?? (r.turnosEmCurso ?? []).find((t) => t.mensagemId === m.id)?.id ?? null;
+      const txt = doc.getElementById("qc-txt") as HTMLTextAreaElement | null;
+      if (txt && falhaNoCampo && txt.value.trim() === fala) txt.value = "";
+      falhaNoCampo = false;
+      chavesQueFalharam.delete(chaveDaFala(c, texto));
+      envios.concluir(c, true);
+      despachar({ tipo: "aceito", pedidoId: m.id, turnoId: turno, agora: Date.now() });
+      void lerConversa(true);
+    } catch { /* sem a conversa, vale o "Não saiu" (o Tentar reusa a chave) */ }
+  }
+
+  /** ADA-4: o ■ Parar da pílula. A faixa diz "Parando…" até o `turno.interrompido` (parado_pela_pessoa). */
+  async function pararPedido(): Promise<void> {
+    const a = dd?.api();
+    const cp = dd?.composer;
+    if (!chave || !pararNaPilula()) return;
+    const c = chave;
+    if (cp?.parar) {
+      // ADA-5: o mesmo Parar do chat. Revisão 4: o segundo clique de um clique duplo em Enviar não para o turno novo.
+      if (Date.now() - (enviouEm.get(c) ?? 0) < SEM_PARAR_DEPOIS_DE_ENVIAR_MS) return;
+      // ADA-4: a faixa do pedido diz "Parando…" até o `turno.interrompido`.
+      if (podeParar(faixa)) despachar({ tipo: "parar" });
+      try { await cp.parar(); } catch { if (c === chave && faixa.tipo === "trabalhando" && faixa.parando) despachar({ tipo: "parar_falhou" }); }
+      return;
+    }
+    if (!a?.pararConversa || !podeParar(faixa, Date.now())) return;
+    despachar({ tipo: "parar" });
+    try {
+      const r = await a.pararConversa(c);
+      if (c !== chave) return;
+      // Nada rodava (o turno acabou no caminho): volta ao turno e relê a conversa, que traz a resposta.
+      if (r?.nadaRodando) { despachar({ tipo: "parar_falhou" }); void lerConversa(); }
+    } catch {
+      if (c === chave) despachar({ tipo: "parar_falhou" });
+    }
+  }
+
+  /**
+   * ADA-4: o card do lote do anfitrião pisca uma vez e, fora da vista, rola até ela. Na coluna recolhida, a coluna abre
+   * antes. Nunca durante um gesto (ADA-7): a pessoa que está rolando não perde o lugar.
+   */
+  /** Revisão 11 (M2): com o pedido seguido, o lote novo do anfitrião (gravado depois do pedido) pulsa o card dele. */
+  function pulsarDoPedido(): void {
+    const lote = q?.ultimoLote ?? null;
+    if (!lote || (faixa.tipo !== "trabalhando" && faixa.tipo !== "enviando") || lote.id === loteAntes || lote.id === lotePulsado || lote.desfeitoEm) return;
+    if (lote.autor.tipo !== "agente" || lote.autor.agenteId !== agenteId) return;
+    lotePulsado = lote.id;
+    pulsarCard(lote.tarefaIds);
+  }
+
+  function pulsarCard(ids: readonly string[], tentativas = 20): void {
+    const v = vista();
+    if (!v || !q || aberta || paginas[pagina]?.app) return;
+    // Revisão 1 do #646: no gesto o desenho do lote espera (ADA-7) e o card ainda não está lá: tenta de novo depois.
+    if (seguraGesto(Date.now()) && tentativas > 0) {
+      if (timerPulso) clearTimeout(timerPulso);
+      timerPulso = setTimeout(() => { timerPulso = null; pulsarCard(ids, tentativas - 1); }, 500);
+      return;
+    }
+    const id = ids.find((i) => !!tarefaNoQuadro(q, i));
+    if (!id) return;
+    const sel = `.qd-card[data-tarefa="${CSS.escape(id)}"]`;
+    const visivel = (): HTMLElement | null => [...v.querySelectorAll<HTMLElement>(sel)].find((el) => el.getClientRects().length > 0) ?? null;
+    let card = visivel();
+    const parado = !seguraGesto(Date.now());
+    if (!card && parado) {
+      const t = tarefaNoQuadro(q, id);
+      const col = t ? v.querySelector<HTMLElement>(`.qd-col-recolhida[data-coluna="${CSS.escape(t.status)}"]`) : null;
+      if (t && col) {
+        if (alternadas.has(t.status)) alternadas.delete(t.status); else alternadas.add(t.status);
+        desenharVista();
+        card = visivel();
+      }
+    }
+    if (!card) return;
+    if (parado) {
+      const r = card.getBoundingClientRect();
+      const g = card.closest(".qd-grade")?.getBoundingClientRect();
+      const alto = doc.defaultView?.innerHeight ?? 0;
+      const fora = r.top < 0 || r.bottom > alto || (!!g && (r.left < g.left || r.right > g.right));
+      if (fora) card.scrollIntoView({ block: "nearest", inline: "center", behavior: reduzido() ? "auto" : "smooth" });
+    }
+    card.classList.remove("pulsa");
+    void card.offsetWidth;
+    card.classList.add("pulsa");
+    const el = card;
+    const tirar = (): void => el.classList.remove("pulsa");
+    el.addEventListener("animationend", tirar, { once: true });
+    setTimeout(tirar, 1400);
   }
 
   async function responder(form: HTMLFormElement): Promise<void> {
@@ -1513,12 +1924,18 @@ export function criarQuadroNaTela(doc: Document, o: { busca?: BuscaDaPilula; men
     // bot escreve) regravavam o quadro inteiro e travavam a rolagem (ADA-7, ADR-061).
     if (TURNO_MUDA_A_EXECUCAO.has(frame.tipo) && q && q.tarefas.length && modo === "quadro") pedirReleitura();
     const daConversa = d["conversaId"] === chave;
-    if (daConversa && (frame.tipo === "mensagem.nova" || frame.tipo === "turno.encerrado" || frame.tipo === "turno.interrompido") && (faixa.tipo === "aguardando" || (faixa.tipo === "resposta" && !!faixa.pedidoId) || histAberto)) {
+    // ADA-4: os frames do turno da conversa vão à faixa (só o turno do pedido muda algo; outro bot ou turno é ignorado).
+    if (daConversa && frame.tipo.startsWith("turno.")) despachar({ tipo: "frame", frame, agora: Date.now() });
+    // Revisão 7 do #646: a fala nova da conversa durante o envio (ou com o "Não saiu" em dúvida) pode ser o pedido que
+    // chegou sem a resposta HTTP.
+    const emDuvida = faixa.tipo === "falhou" && faixa.duvida === true;
+    if (daConversa && frame.tipo === "mensagem.nova" && typeof d["mensagem_id"] === "string" && (faixa.tipo === "enviando" || emDuvida)) {
+      novasDoEnvio.push({ mensagemId: d["mensagem_id"], turnoId: typeof d["turnoId"] === "string" ? d["turnoId"] : null });
+      if (faixa.tipo === "falhou") void conferirEnvio(chave, faixa.texto, faixa.fala);
+    }
+    if (daConversa && (frame.tipo === "mensagem.nova" || frame.tipo === "turno.encerrado" || frame.tipo === "turno.interrompido") && (pedidoSeguido(faixa) !== null || histAberto)) {
       // Com a resposta na faixa e o pedido ainda acompanhado, as falas seguintes do mesmo turno também sobem (a final traz o Desfazer).
       void lerConversa();
-    }
-    if (daConversa && frame.tipo === "turno.interrompido" && faixa.tipo === "aguardando") {
-      mudarFaixa({ tipo: "erro", texto: "O pedido parou no meio. Veja na Conversa." });
     }
   }
 
@@ -1922,6 +2339,16 @@ export function criarQuadroNaTela(doc: Document, o: { busca?: BuscaDaPilula; men
       if (act === "importar-confirmar") { void confirmarImportacao(); return; }
       if (act === "importar-sem-backlog" && importando) { void lerPreviaImportacao(importando.time, "sem_backlog"); return; }
       if (act === "qc-desfazer" && id) { void desfazer(id); return; }
+      // Revisão 1 do #646: o "Tentar de novo" some no redesenho; o foco vai ao campo (não cai no body).
+      if (act === "qc-tentar") { tentarDeNovo(); (doc.getElementById("qc-txt") as HTMLElement | null)?.focus(); return; }
+      if (act === "com-tentar") {
+        const de = agenteId;
+        const ida = coms.tentar(doc);
+        if (aberta) (doc.getElementById(`qd-com-${aberta}`) as HTMLElement | null)?.focus();
+        void ida.then((r) => { if (r && de === agenteId) aplicarQuadro(r.quadro, aberta ? [aberta] : []); });
+        return;
+      }
+      if (act === "qc-parar") { void pararPedido(); return; }
       if (act === "painel-pessoas") { abrirPainel("pessoas"); return; }
       if (act === "painel-atividade") { abrirPainel("atividade"); return; }
       if (act === "tirar-pessoa" && id) {
@@ -2223,8 +2650,16 @@ export function criarQuadroNaTela(doc: Document, o: { busca?: BuscaDaPilula; men
       const enviado = form.querySelector<HTMLTextAreaElement>("textarea.qd-com-in");
       const chaveCom = enviado?.dataset["rascunho"];
       const textoCom = enviado?.value.trim() ?? "";
-      void coms.enviar(form).then((r) => {
-        if (!r) { daPessoaAte = 0; fimDoComentarioAte = 0; mudarFaixa({ tipo: "erro", texto: "Não consegui mandar o comentário. Ele continua no campo." }); }
+      // ADA-4: a falha fica no próprio comentário ("Não saiu · Tentar de novo"), não na faixa. O campo esvazia na hora
+      // (otimista) e o rascunho o acompanha; na falha, o texto que voltou ao campo volta ao rascunho.
+      const ida = coms.enviar(form);
+      if (enviado) guardarRascunho(enviado);
+      void ida.then((r) => {
+        if (!r) {
+          daPessoaAte = 0; fimDoComentarioAte = 0;
+          const atual = enviado ? doc.getElementById(enviado.id) : null;
+          if (atual instanceof HTMLTextAreaElement && atual.value.trim()) guardarRascunho(atual);
+        }
         else {
           // ADA-5: o comentário foi: o rascunho dele sai (o campo, se ainda está na tela, já está limpo).
           // A vista pode ter se redesenhado no meio: o campo da tela que ainda tem o texto enviado é limpo também.
@@ -2259,7 +2694,7 @@ export function criarQuadroNaTela(doc: Document, o: { busca?: BuscaDaPilula; men
     }
     if (qual !== "conversa-no-quadro" && qual !== "responder-tarefa" && qual !== "criar-quadro" && qual !== "editar-meta") return;
     ev.preventDefault();
-    if (qual === "conversa-no-quadro") void enviarPedido(form);
+    if (qual === "conversa-no-quadro") enviarPedido(form);
     else if (qual === "responder-tarefa") void responder(form);
     else if (qual === "criar-quadro") {
       const meta = form.querySelector<HTMLInputElement>('[name="meta"]')?.value.trim() ?? "";
@@ -2590,6 +3025,20 @@ export function criarQuadroNaTela(doc: Document, o: { busca?: BuscaDaPilula; men
   doc.addEventListener("focusin", (ev) => { if (naRecusa(ev.target)) relogio?.segurar("foco"); else relogio?.soltar("foco"); });
   doc.addEventListener("focusout", (ev) => { if (!naRecusa(ev.relatedTarget)) relogio?.soltar("foco"); });
   doc.addEventListener("pointerover", (ev) => { if (naRecusa(ev.target)) relogio?.segurar("ponteiro"); else relogio?.soltar("ponteiro"); });
+  // ADA-4: a faixa não recolhe com o ponteiro em cima nem com o foco dentro; ao sair, os 12 s recomeçam.
+  const naFaixa = (n: EventTarget | null): boolean => n instanceof Node && !!doc.getElementById("qc-faixa")?.contains(n);
+  const segurarFaixa = (qual: "ponteiro" | "foco", sim: boolean): void => {
+    if (faixaSegura[qual] === sim) return;
+    faixaSegura[qual] = sim;
+    if (dd) agendarRecolher();
+  };
+  // Revisão 2 do #646: o toque não segura (não há "sair" dele), e o ponteiro que sai da janela solta.
+  doc.addEventListener("pointerover", (ev) => { if (ev.pointerType !== "touch") segurarFaixa("ponteiro", naFaixa(ev.target)); });
+  doc.addEventListener("pointerout", (ev) => { if (!ev.relatedTarget) segurarFaixa("ponteiro", false); });
+  doc.addEventListener("focusin", (ev) => segurarFaixa("foco", naFaixa(ev.target)));
+  doc.addEventListener("focusout", (ev) => { if (!naFaixa(ev.relatedTarget)) segurarFaixa("foco", false); });
+  // ADA-4: com texto no campo, o ■ Parar volta a Enviar (e vice-versa), como no chat.
+  doc.addEventListener("input", (ev) => { if (dd && ev.target instanceof HTMLTextAreaElement && ev.target.id === "qc-txt") atualizarBotaoDaPilula(); });
   // A pessoa tirou o foco da aba com um clique ou toque fora dela (no vazio o foco cai no body, sem focusin): esquece.
   // Não dá para usar o focusout: o Chrome também o dispara quando a regravação tira o nó, e aí o foco tem de voltar.
   doc.addEventListener("pointerdown", (ev) => { if (!abaDe(ev.target)) abaFocada = null; }, true);
@@ -2598,7 +3047,8 @@ export function criarQuadroNaTela(doc: Document, o: { busca?: BuscaDaPilula; men
   function reler(): void {
     if (!dd || chave === null || !agenteId) return;
     pedirReleitura();
-    if (faixa.tipo === "aguardando" || histAberto) void lerConversa();
+    // Revisão 2 do #646: os frames perdidos na queda podem ter sido o fim do turno: a leitura confere.
+    if (pedidoSeguido(faixa) !== null || histAberto) void lerConversa(true);
   }
 
   /* ---------- NOD-445: o menu do ícone (segurar, botão direito, Shift+F10 ou a tecla de menu) ---------- */

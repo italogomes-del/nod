@@ -222,7 +222,9 @@ describe("o controle", () => {
     await esperar();
     // Revisão 7: o texto enviado vai junto, para quem limpa o rascunho conferir que ainda é ele.
     expect(aceitos).toEqual([[enviado, "use a branch y"]]);
-    expect(limpos).toEqual([]);
+    // ADA-4: o campo esvaziou no envio (otimista) e só aí foi "limpo" (o rascunho acompanha); o da outra tarefa não.
+    expect(enviado.value).toBe("");
+    expect(limpos).toEqual([enviado]);
     expect(daOutra.value).toBe("rascunho da outra");
   });
 
@@ -234,13 +236,16 @@ describe("o controle", () => {
     await esperar();
     const campo = { value: "use a branch y" };
     const limpos: unknown[] = [];
-    m.t.enviarRecado({ dataset: { id: "tar" }, querySelector: () => campo, ownerDocument: { getElementById: () => campo } }, (c) => limpos.push(c));
+    m.t.enviarRecado({ dataset: { id: "tar" }, querySelector: () => campo, ownerDocument: { getElementById: () => campo } }, (c) => limpos.push(structuredClone(c)));
+    // ADA-4: o campo esvazia no envio (otimista); o que a pessoa escreve no voo é o recado seguinte.
+    expect(campo.value).toBe("");
     campo.value = "e roda o lint";
     soltar();
     await esperar();
     expect(m.chamadas.at(-1)).toBe("recado:use a branch y");
     expect(campo.value).toBe("e roda o lint");
-    expect(limpos).toEqual([]);
+    // Só o esvaziar do envio avisou (com o campo vazio); a volta do servidor não mexe no que a pessoa escreveu.
+    expect(limpos).toEqual([{ value: "" }]);
   });
 
   it("revisão 5 do PR #625: a mudança de estado vai à região persistente (só o textContent, só quando a chave muda); a primeira leitura não", async () => {

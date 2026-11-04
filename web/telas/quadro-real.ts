@@ -470,7 +470,10 @@ export type TrocaDaFaixa = { id: string; de: "eu" | "bot"; texto: string; em: nu
  * A faixa por cima da pílula: uma linha só (a última resposta). A seta abre as últimas trocas (até 40% da altura) e o
  * Abrir na Conversa leva à aba Conversa, que é a mesma conversa. O Desfazer volta o lote inteiro do pedido.
  */
-export function faixaDoQuadro(o: { faixa: Faixa; avatarBot: Html | null; historico: readonly TrocaDaFaixa[]; aberto: boolean; hora: (em: number) => string }): Html {
+/** Revisão 7 do #646: o recibo de outra ação (mover, criar, desfazer) com um pedido em curso: uma linha ao lado, sem tirar a faixa do pedido. */
+export type AvisoDaFaixa = { texto: string; erro: boolean; loteId: string | null };
+
+export function faixaDoQuadro(o: { faixa: Faixa; avatarBot: Html | null; historico: readonly TrocaDaFaixa[]; aberto: boolean; hora: (em: number) => string; agora?: number; aviso?: AvisoDaFaixa | null }): Html {
   const f = o.faixa;
   if (f.tipo === "nada" && !o.aberto) return confiar("");
   const histBt = o.historico.length ? `<button type="button" class="qc-hist-bt" data-act="qc-historico" aria-expanded="${o.aberto}" aria-controls="qc-hist" aria-label="${o.aberto ? "Fechar o histórico" : "Ver as últimas trocas"}">${SETA}</button>` : "";
@@ -479,9 +482,27 @@ export function faixaDoQuadro(o: { faixa: Faixa; avatarBot: Html | null; histori
       `<button type="button" class="qd-link qc-hist-abrir" data-act="qc-abrir-conversa">Abrir na Conversa</button></div>` : "";
   let linha1 = "";
   let classe = "qc-ok";
-  if (f.tipo === "aguardando") {
+  // ADA-4: a fala da pessoa, numa linha pequena acima do status (enviando → ✓ quando o servidor aceitou).
+  const fala = f.tipo === "enviando" || f.tipo === "falhou" || f.tipo === "trabalhando" || f.tipo === "parou" ? f.fala : f.tipo === "erro" ? (f.fala ?? null) : null;
+  const marca = f.tipo === "enviando" ? `<span class="qc-fala-est">enviando</span>` : f.tipo === "falhou" ? `<span class="qc-fala-est">não saiu</span>` : f.tipo === "erro" ? `<span class="qc-fala-est">não entrou</span>` : `<span class="qc-fala-est"><span aria-hidden="true">✓</span><span class="qd-sr">enviada</span></span>`;
+  // Revisão 1 do #646: a fala da pessoa fica fora do que a região viva lê (o leitor de tela não a repete a cada status).
+  const linhaFala = fala ? `<p class="qc-fala" aria-hidden="true"><span class="qc-fala-txt" title="${esc(fala)}">${esc(fala)}</span>${marca}</p>` : "";
+  const verNaConversa = `<button type="button" class="qd-link qc-link" data-act="qc-abrir-conversa">Ver na Conversa</button>`;
+  const giro = `<span class="qc-giro" aria-hidden="true"></span>`;
+  if (f.tipo === "enviando") {
     classe = "qc-aguarda";
-    linha1 = `<span class="qc-giro" aria-hidden="true"></span><span class="qc-resp-txt">Mexendo no quadro…</span>`;
+    linha1 = `${giro}<span class="qc-resp-txt">Enviando…</span>`;
+  } else if (f.tipo === "falhou") {
+    classe = "qc-falhou";
+    linha1 = `<span class="qc-resp-txt">Não saiu.</span><button type="button" class="qd-link qc-link" data-act="qc-tentar">Tentar de novo</button>`;
+  } else if (f.tipo === "trabalhando") {
+    classe = "qc-aguarda";
+    const tempo = f.demorando || f.parando ? "" : `<span class="qc-tempo" aria-hidden="true" data-desde="${f.desde}">${esc(tempoDoTurno(f.desde, o.agora ?? f.desde))}</span>`;
+    // Revisão 2 do #646: "Ainda trabalhando…" não gira (a tela confere a conversa de tempos em tempos).
+    linha1 = `${f.demorando ? "" : giro}<span class="qc-resp-txt">${esc(statusDaFaixa(f))}${tempo}</span>${f.demorando ? verNaConversa : ""}`;
+  } else if (f.tipo === "parou") {
+    classe = f.porVoce ? "qc-ok" : "qc-falhou";
+    linha1 = f.porVoce ? `<span class="qc-resp-txt">Parado por você.</span>` : `<span class="qc-resp-txt">${f.semFim ? "Acabou sem resposta." : "Parou no meio."}</span>${verNaConversa}`;
   } else if (f.tipo === "resposta") {
     linha1 = `${o.avatarBot ?? ""}<span class="qc-resp-txt" title="${esc(f.texto)}">${esc(f.texto)}</span>` +
       (f.loteId ? `<button type="button" class="qd-link qc-link qc-desfazer" data-act="qc-desfazer" data-id="${esc(f.loteId)}">Desfazer</button>` : "");
@@ -491,14 +512,52 @@ export function faixaDoQuadro(o: { faixa: Faixa; avatarBot: Html | null; histori
   } else {
     linha1 = `<span class="qc-resp-txt">Últimas trocas</span>`;
   }
-  return confiar(`<div class="qc-resp ${classe}">${hist}<div class="qc-linha">${linha1}${histBt}</div></div>`);
+  const av = o.aviso;
+  const linhaAviso = av ? `<div class="qc-linha qc-aviso${av.erro ? " qc-aviso-erro" : ""}">${av.erro ? `<i class="qc-erro-ic" aria-hidden="true">!</i>` : ""}<span class="qc-resp-txt" title="${esc(av.texto)}">${esc(av.texto)}</span>` +
+    (av.loteId ? `<button type="button" class="qd-link qc-link qc-desfazer" data-act="qc-desfazer" data-id="${esc(av.loteId)}">Desfazer</button>` : "") + `</div>` : "";
+  return confiar(`<div class="qc-resp ${classe}">${hist}${linhaFala}<div class="qc-linha">${linha1}${histBt}</div>${linhaAviso}</div>`);
+}
+
+/** O status do turno na faixa (a demora, o parar, a retomada ou a cota, o fim, a ferramenta ou a fala do meio). */
+function statusDaFaixa(f: Extract<Faixa, { tipo: "trabalhando" }>): string {
+  // Revisão 3 do #646: a espera da cota diz até quando, mesmo depois do silêncio longo (é esperado).
+  if (f.retomando && f.status) return f.status;
+  if (f.demorando) return "Ainda trabalhando…";
+  if (f.parando) return "Parando…";
+  if (f.retomando) return f.status ?? "Retomando…";
+  if (f.encerrado) return "Terminando…";
+  return f.status ?? "Mexendo no quadro…";
+}
+
+/**
+ * Revisão 2 do #646: o que o leitor de tela ouve da faixa: uma frase curta, numa região viva só dela (a faixa em si, com
+ * o histórico e os botões, fica fora). Vazio = nada a dizer.
+ */
+export function anuncioDaFaixa(f: Faixa): string {
+  switch (f.tipo) {
+    case "enviando": return "Enviando…";
+    case "falhou": return "Não saiu. Tentar de novo.";
+    case "trabalhando": return statusDaFaixa(f);
+    case "parou": return f.porVoce ? "Parado por você." : f.semFim ? "Acabou sem resposta." : "Parou no meio.";
+    case "resposta": return f.texto;
+    case "erro": return f.texto;
+    default: return "";
+  }
+}
+
+/** ADA-4: o tempo do turno depois de 10 s ("· 14 s", "· 2 min"); antes, nada (o giro basta). */
+export function tempoDoTurno(desde: number, agora: number): string {
+  const s = Math.floor((agora - desde) / 1000);
+  if (s < 10) return "";
+  return s < 60 ? ` · ${s} s` : ` · ${Math.floor(s / 60)} min`;
 }
 
 /**
  * A pílula: "Nova tarefa ou mensagem" e Enviar. Com uma tarefa aberta, o pedido vai sobre ela (o placeholder diz qual).
  * ADA-5: as peças do composer do chat (web/lib/composer.ts), por `data-composer` e sem ids que colidam com o `#composer`
  * (os dois ficam no DOM): a lista @, a lista "/", a dica, a fila de anexos, o clipe (`anexos`: o que o bot lê), o 🎤 e a
- * pílula do ditado. O mesmo botão é o Enviar e o Parar (quadro-na-tela troca o rótulo).
+ * pílula do ditado. O mesmo botão é o Enviar e o Parar (quadro-na-tela troca o rótulo). ADA-4 (revisão 2 do #646): a
+ * faixa não é região viva (o histórico e os botões não são lidos a cada frame); a frase curta vai à #qc-vivo.
  */
 export function pilulaDoQuadro(o: { meta: string | null; nome: string; modo?: string | null; anexos?: Aceita }): Html {
   const rot = o.meta ? `Conversar com o quadro ${o.meta}` : `Conversar com ${o.nome} sobre o quadro`;
@@ -507,7 +566,7 @@ export function pilulaDoQuadro(o: { meta: string | null; nome: string; modo?: st
     ? `<button type="button" class="qc-bt qc-clipe" data-act="anexar" data-composer="clipe" aria-label="Anexar arquivo">${CLIPE}</button>` +
       `<input type="file" class="qd-sr" data-composer="arquivos" multiple accept="${accept}" hidden tabindex="-1" aria-hidden="true" data-aceita="${o.anexos}" />`
     : "";
-  return confiar(`<div class="qc-caixa"><div class="qc-faixa" id="qc-faixa" role="status" aria-live="polite"></div>` +
+  return confiar(`<div class="qc-caixa"><div class="qc-faixa" id="qc-faixa"></div><p class="qd-sr" id="qc-vivo" role="status" aria-live="polite"></p>` +
     `<p class="qc-modo" id="qc-modo"${o.modo ? "" : " hidden"}>${esc(o.modo ?? "")}</p>` +
     `<form class="qc-pil" role="group" aria-label="${esc(rot)}" data-form="conversa-no-quadro" data-composer="caixa">` +
     `<div class="autocomplete qc-sug" data-composer="mencao" hidden></div>` +

@@ -472,6 +472,13 @@ a.qd-chip:hover { background: var(--surface-raised); }
 .qd-com-nome { font-weight: 600; color: var(--ink); }
 .qd-com-cab time { color: var(--ink-3); }
 .qd-com-txt { margin: 0; font-size: 14px; line-height: 1.5; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+/* ADA-4: o comentário que foi e não voltou fica meio apagado; o que não saiu, com "Tentar de novo" em texto. */
+.qd-com-pendente .qd-com-txt { color: var(--ink-2); }
+.qd-com-pendente:not(.qd-com-falhou) { opacity: .7; }
+.qd-com-est { font-size: 12px; color: var(--ink-3); }
+.qd-com-tentar { font-size: 12px; }
+.qd-trab-pend { margin: 6px 0 0; font-size: 12.5px; color: var(--ink-3); }
+.qd-trab-pend-txt { color: var(--ink-2); }
 .qd-com-acao, .qd-com-vazio { margin: 2px 0 0; font-size: 12px; color: var(--ink-3); }
 /* NOD-430: a Atividade da tarefa ("Você, pela Ada criou 1 tarefa"), linhas finas acima dos comentários. */
 .qd-ativ { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
@@ -577,6 +584,7 @@ a.qd-chip:hover { background: var(--surface-raised); }
   border: 1px solid color-mix(in srgb, var(--line) 80%, transparent); box-shadow: 0 6px 20px -8px color-mix(in srgb, var(--ink) 18%, transparent); animation: qc-sobe .24s ease-out both; }
 @keyframes qc-sobe { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 .qc-linha { display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 4px 6px 8px 10px; font-size: 13.5px; line-height: 1.35; color: var(--ink-2); }
+.qc-aviso { min-height: 28px; padding-top: 0; font-size: 12.5px; color: var(--ink-3, var(--ink-2)); }
 .qc-linha .icon.mascote { width: 20px !important; height: 20px !important; min-width: 20px; flex: none; }
 .qc-resp-txt { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .qc-giro { width: 14px; height: 14px; flex: none; border-radius: 50%; border: 2px solid var(--line-strong); border-top-color: var(--ink-2); animation: qd-giro .9s linear infinite; }
@@ -598,6 +606,17 @@ a.qd-chip:hover { background: var(--surface-raised); }
 .qc-h-eu { color: var(--ink); }
 .qc-h-bot { color: var(--ink-2); }
 .qc-hist-abrir { margin-top: 10px; font-size: 13px; }
+
+/* ADA-4: a fala da pessoa numa linha pequena acima do status (enviando → ✓); a falha é texto secundário + "Tentar de novo",
+   sem vermelho; o ■ Parar é o mesmo círculo do enviar; o card do lote pisca a borda uma vez. */
+.qc-fala { display: flex; justify-content: flex-end; align-items: baseline; gap: 6px; margin: 0; padding: 8px 10px 0 40px; font-size: 12.5px; line-height: 1.35; color: var(--ink-3); }
+.qc-fala-txt { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--ink-2); }
+.qc-fala-est { flex: none; font-size: 11.5px; color: var(--ink-3); }
+.qc-falhou .qc-resp-txt { color: var(--ink-2); }
+.qc-tempo { color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.qc-bt.qc-enviar.qc-parar svg { width: 14px; height: 14px; }
+.qd-card.pulsa { animation: qd-pulsa 1.2s ease-out 1; }
+@keyframes qd-pulsa { 0% { box-shadow: 0 0 0 2px var(--action); } 70% { box-shadow: 0 0 0 2px var(--action); } 100% { box-shadow: 0 0 0 0 transparent; } }
 
 /* Issue 247 (NOD-429 v4, Gil a pedido do Marlon): com o painel ao lado, a caixa de recado segue o eixo e a largura da coluna
    da tarefa (.qd-t-principal) e o painel vira uma coluna própria à direita. As contas repetem as da .qd-tarefa (no
@@ -661,6 +680,8 @@ a.qd-chip:hover { background: var(--surface-raised); }
 
 @media (prefers-reduced-motion: reduce) {
   .qd-col-nova, .qd-menu, .qd-pop, .qd-folha, .qd-tarefa { animation: none; }
+  /* ADA-4: o card do lote não pisca: só a borda, por um instante. */
+  .qd-card.pulsa { animation: none; outline: 2px solid var(--action); outline-offset: -1px; }
   .qd-arrastando { transform: none; }
   /* A troca vira um fade curto: o indicador não anda, a aba escolhida acende no lugar. */
   .qd-seg-ind { transition: opacity 120ms ease-out; transform: none !important; opacity: 0; }
