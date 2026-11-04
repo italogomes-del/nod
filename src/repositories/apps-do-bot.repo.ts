@@ -157,6 +157,16 @@ export function appsDoBotRepo(conn: Conn, escopo: Escopo) {
       const [l] = await conn<LinhaApp[]>`select ${conn.unsafe(COLUNAS)} from apps_do_bot where ${dona()} and agente_id = ${agenteId} and nome_chave = ${chaveDoNome(nome)} and removido_em is not null order by removido_em desc, id limit 1`;
       return l ? paraApp(l) : null;
     },
+    /**
+     * Todos os apps do bot, vivos e removidos, na ordem de criação do banco (microssegundos, depois id): a base da
+     * ordem padrão quando ela precisa dos removidos dentro (o lugar para o Desfazer). `criadoEm` chega em
+     * milissegundos; dois apps no mesmo ms empatam no domínio e o sort estável fica com a ordem daqui, por isso
+     * vivos e removidos vêm de UMA consulta ordenada, e não de duas listas coladas (CI em máquina rápida, 2026-11-04).
+     */
+    async todosParaOrdem(agenteId: string): Promise<{ id: string; criadoEm: number }[]> {
+      const ls = await conn<{ id: string; criado_em: Date }[]>`select id, criado_em from apps_do_bot where ${dona()} and agente_id = ${agenteId} order by criado_em, id`;
+      return ls.map((l) => ({ id: l.id, criadoEm: ms(l.criado_em) }));
+    },
     /** Os apps removidos do bot (id e criação), do removido mais recente ao mais antigo (o Desfazer traz de volta). */
     async removidos(agenteId: string): Promise<{ id: string; criadoEm: number }[]> {
       const ls = await conn<{ id: string; criado_em: Date }[]>`select id, criado_em from apps_do_bot where ${dona()} and agente_id = ${agenteId} and removido_em is not null order by removido_em desc, id`;

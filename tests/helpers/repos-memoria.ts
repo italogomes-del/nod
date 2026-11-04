@@ -3878,6 +3878,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       restaurar: soNoPostgres,
       nomeTomado: async () => false,
       removidos: async () => [],
+      todosParaOrdem: async () => [],
       removidoPorNome: async () => null,
       apagarRemovidosAntigos: soNoPostgres,
       ordem: async () => null,

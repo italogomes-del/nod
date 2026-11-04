@@ -180,8 +180,10 @@ async function gravar(deps: Deps, agenteId: string, nova: readonly string[]): Pr
   // Sem ordem guardada, o lugar dos removidos sai da ordem padrão com eles dentro (a de criação).
   let padrao: string[] = [];
   if (!guardada && removidos.length) {
-    const [vivos, quadro, canvas] = await Promise.all([deps.repos.appsDoBot.doAgente(agenteId), deps.repos.quadros.doAgente(agenteId), deps.repos.canvas.nivelDe(agenteId)]);
-    padrao = paginasPadrao({ temTarefas: quadro !== null, temCanvas: canvas !== null, apps: [...vivos, ...removidos] });
+    // Vivos e removidos numa consulta só, já na ordem de criação do banco: colar duas listas embaralhava os que
+    // nasceram no mesmo milissegundo (o domínio desempata pela ordem recebida).
+    const [todos, quadro, canvas] = await Promise.all([deps.repos.appsDoBot.todosParaOrdem(agenteId), deps.repos.quadros.doAgente(agenteId), deps.repos.canvas.nivelDe(agenteId)]);
+    padrao = paginasPadrao({ temTarefas: quadro !== null, temCanvas: canvas !== null, apps: todos });
   }
   await deps.repos.appsDoBot.gravarOrdem(agenteId, ordemParaGravar(nova, guardada, removidos.map((r) => idDaPaginaDoApp(r.id)), padrao));
 }
