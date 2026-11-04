@@ -6,7 +6,7 @@ import { build } from "esbuild";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { acharChrome } from "../../src/adapters/tela/capturador-cdp.ts";
 import { abrirChrome, avaliar, type Cdp } from "../../scripts/carga-tela/cdp.ts";
-import { ADIAR_ATE_MS, GESTO_MS, TOQUE_PARADO_MS } from "../../web/lib/quadro.ts";
+import { ADIAR_ATE_MS, GESTO_MS, RESERVA_MS, TOQUE_PARADO_MS } from "../../web/lib/quadro.ts";
 
 /**
  * ADA-7 no Chrome de verdade, em 390×844 (toque) e 1440×900: a pessoa rola o quadro e a tarefa aberta até o fim, um
@@ -39,12 +39,19 @@ Date.now = () => relogio() + desvio;
 window.__inicioDoMinuto = () => { desvio += 60_000 - (Date.now() % 60_000) + 200; };
 window.__virarMinuto = () => { desvio += 60_000; };
 const STS = ["backlog", "afazer", "fazendo", "revisao", "voce", "feito"];
-const tarefa = (i) => ({ id: "t" + i, quadroId: "q1", titulo: "Tarefa número " + i + " com um título razoável", descricao: "linha\\n".repeat(80),
+const tarefa = (i) => ({ id: "t" + i, quadroId: "q1", titulo: "Tarefa número " + i + " com um título razoável", descricao: "linha\\n".repeat(window.__linhas ?? 80),
   status: STS[i % STS.length], agenteId: "a", ordem: i, linearId: null, linearUrl: null, prUrl: null, pergunta: null, resposta: null, deFora: false,
-  turnoId: "tu1", criadoEm: agora, mudadoEm: agora, terminadaEm: null, execucao: "rodando", agenteNome: "Ada" });
+  turnoId: "tu1", criadoEm: agora, mudadoEm: agora, terminadaEm: null, execucao: "rodando", agenteNome: "Ada",
+  // ADA-12 revisão 4: com __movs, o histórico de movimentos da t3 (o <details> que a pessoa abre).
+  ...(i === 3 && window.__movs ? { movimentos: Array.from({ length: window.__movs }, (_, k) => ({ id: "mv" + k, tarefaId: "t3", tipo: "mover", de: "fazendo", para: "revisao",
+    agenteAntes: "a", agenteDepois: "a", autor: { tipo: "agente", agenteId: "a" }, motivo: null, acionou: false, loteId: null, desfeitoEm: null, desfaz: null, deFora: false,
+    criadoEm: agora - k * 60_000, autorNome: "Ada", agenteAntesNome: "Ada", agenteDepoisNome: "Ada" })) } : {}) });
 let versao = 0;
+// ADA-12 revisão 2: a grade estreita por um instante — só duas colunas abertas, o resto recolhido.
+const colunasEstreitas = () => STS.map((id, i) => ({ id, nome: id, grupo: id === "feito" ? "feito" : id === "backlog" || id === "afazer" ? "nao_iniciado" : "iniciado",
+  fixa: id === "voce", daPessoa: false, recolhida: i > 2 }));
 const q = () => ({ id: "q1", agenteId: "a", meta: window.__meta ?? "Meta", prazo: null, cumpridoEm: null, resumo: null, criadoEm: agora, atualizadoEm: agora + versao,
-  agenteNome: "Ada", ultimoLote: null, feitas: 0, total: 90, tarefas: Array.from({ length: 90 }, (_, i) => ({ ...tarefa(i), mudadoEm: agora + (i === 3 ? versao : 0) })) });
+  agenteNome: "Ada", ultimoLote: null, feitas: 0, total: 90, ...(window.__estreita ? { colunas: colunasEstreitas() } : {}), tarefas: Array.from({ length: 90 }, (_, i) => ({ ...tarefa(i), mudadoEm: agora + (i === 3 ? versao : 0) })) });
 window.__lidas = 0;
 const api = {
   quadro: async () => { window.__lidas++; await new Promise((r) => setTimeout(r, window.__latencia ?? 0)); return { quadro: q() }; },
@@ -54,17 +61,22 @@ const api = {
     ...(window.__respondeu ? [{ id: "m9", autoria: { autor_tipo: "pessoa", autor_id: "p" }, texto: "oi", criadoEm: agora + 9, kind: "texto", parcial: false },
       { id: "m10", autoria: { autor_tipo: "agente", autor_id: "a" }, texto: "Feito", criadoEm: agora + 10, kind: "texto", parcial: false }] : [])] }),
   // A recusa do servidor (o quadro não mudou): a releitura redesenha e o select volta ao valor real.
-  mudarTarefa: async () => { await new Promise((r) => setTimeout(r, window.__latencia ?? 0)); if (window.__mudarOk) { versao++; return { quadro: q() }; } throw new Error("recusada"); },
+  mudarTarefa: async () => { await new Promise((r) => setTimeout(r, window.__latencia ?? 0)); if (window.__mudarOk) { versao++; window.__mudancas = (window.__mudancas ?? 0) + 1; return { quadro: q() }; } throw new Error("recusada"); },
   enviar: async () => ({ ids: { mensagem: "m9" } }),
   // Muda a cada __mudou: a tarefa aberta tem o que redesenhar quando o frame a cita.
   // Com __trabVivo, um trabalho rodando (o turno "tv"): os deltas dele reescrevem o log da tarefa aberta.
-  trabalhosDaTarefa: async () => ({ execucoes: window.__trabVivo ? [{ id: "e1", numero: 1, origem: "inicio", turnoId: "tv", motivo: null, criadoEm: agora,
-    estado: "rodando", turnoAtual: "tv", comecouEm: agora, ultimaFrase: null, tentativa: null, esperando: false, novaTentativaEm: null }] : [],
+  // Com __trabN, o trabalho de número N (o turno "tv" no 1, "tvN" depois): o trabalho novo que começa de log vazio.
+  // Com __latTrab, a leitura do trabalho demora (chega depois dos comentários).
+  trabalhosDaTarefa: async () => (window.__latTrab ? await new Promise((r) => setTimeout(r, window.__latTrab)) : undefined, { execucoes: window.__trabVivo ? [{ id: "e" + (window.__trabN ?? 1), numero: window.__trabN ?? 1, origem: "inicio", turnoId: "tv", motivo: null, criadoEm: agora,
+    estado: "rodando", turnoAtual: (window.__trabN ?? 1) > 1 ? "tv" + window.__trabN : "tv", comecouEm: agora, ultimaFrase: null, tentativa: null, esperando: false, novaTentativaEm: null }] : [],
     recados: [], conversaId: "c" + versao, semAgente: false }),
   historicoTarefa: async () => ({ historico: [] }),
   // Os comentários mudam só com __comentou(): a tarefa aberta tem o que redesenhar sem o trabalho mudar.
-  comentariosDaTarefa: async () => ({ comentarios: Array.from({ length: window.__coms ?? 0 }, (_, i) => ({ id: "k" + i, quadroId: "q1", tarefaId: "t3", autor: { tipo: "pessoa" },
+  // Com __latComs, a primeira leitura dos comentários demora (a tarefa recém-aberta ainda carregando).
+  comentariosDaTarefa: async () => (window.__latComs ? await new Promise((r) => setTimeout(r, window.__latComs)) : undefined, { comentarios: Array.from({ length: window.__coms ?? 0 }, (_, i) => ({ id: "k" + i, quadroId: "q1", tarefaId: "t3", autor: { tipo: "pessoa" },
     texto: "comentário " + i, deFora: false, criadoEm: agora + i, autorNome: "Marlon", acionados: [] })), atividade: [], criadaPor: null }),
+  // O comentário da pessoa (POST rápido): a releitura traz um comentário a mais.
+  comentarTarefa: async () => { await new Promise((r) => setTimeout(r, 50)); window.__coms = (window.__coms ?? 0) + 1; return { quadro: q() }; },
   // Com a passagem, os cards nascem arrastáveis (o arrasto entre colunas).
   definirPassagem: async () => ({ quadro: q() }),
 };
@@ -78,13 +90,13 @@ window.__mesmo = () => frame("quadro.mudou", { quadroId: "q1", agenteId: "a", lo
 window.__meta2 = () => { window.__meta = "Meta nova"; frame("quadro.mudou", { quadroId: "q1", agenteId: "a", loteId: null, tarefas: "" }); };
 window.__encerrou = () => frame("turno.encerrado", { conversaId: "c9", turnoId: "x" });
 window.__delta = () => frame("turno.delta", { conversaId: "c9", turnoId: "x", texto: "abc" });
-window.__passoVivo = (n) => frame("turno.atividade", { conversaId: "c0", turnoId: "tv", rotulo: "Passo " + n, id: "p" + n });
+window.__passoVivo = (n, turno = "tv") => frame("turno.atividade", { conversaId: "c0", turnoId: turno, rotulo: "Passo " + n, id: turno + "p" + n });
 window.__montar = () => {
   window.__inicioDoMinuto();
   document.getElementById("timeline").innerHTML = "<p>conversa</p>";
   document.getElementById("composer").innerHTML = "<textarea></textarea>";
   const t = criarQuadroNaTela(document, { reduzido: () => true, dados: { api: () => api, agente: () => ({ avatar: "<span>A</span>", nome: "Ada" }),
-    hora: () => "10:00", recolherEm: 60_000, juntarEm: 10, agentes: () => [{ id: "a", nome: "Ada" }] } });
+    hora: () => "10:00", recolherEm: 60_000, juntarEm: 10, reservaMs: window.__reservaMs ?? 800, agentes: () => [{ id: "a", nome: "Ada" }] } });
   t.sincronizar({ chave: "c1", nome: "Ada", agenteId: "a" });
   t.trocar("quadro");
   window.__q = t;
@@ -92,9 +104,11 @@ window.__montar = () => {
 // O quadro da dona na tela de quem participa (NOD-455): o casco #qcp na conversa, como o main o põe.
 window.__montarQcp = () => {
   document.getElementById("timeline").innerHTML = '<div id="qcp" class="qcp-casco"></div>';
-  const apiQcp = { quadroPorId: async () => { window.__lidas++; await new Promise((r) => setTimeout(r, window.__latencia ?? 0)); return { quadro: q() }; }, atividadeDoQuadro: async () => ({ linhas: [] }) };
+  const apiQcp = { quadroPorId: async () => { window.__lidas++; await new Promise((r) => setTimeout(r, window.__latencia ?? 0)); return { quadro: q() }; }, atividadeDoQuadro: async () => ({ linhas: [] }),
+    // O comentário de quem participa: a tarefa cresce (o quadro volta com a descrição maior).
+    comentarNoQuadro: async () => { await new Promise((r) => setTimeout(r, 50)); window.__linhas += 3; versao++; return { quadro: q() }; } };
   const c = criarQuadroCompartilhadoNaTela(document, { api: () => apiQcp, agente: () => ({ avatar: "<span>A</span>", nome: "Ada" }), hora: () => "10:00",
-    agendar: (f) => setTimeout(f, 10), aoSair: () => {}, aoPerderAcesso: () => {} });
+    agendar: (f) => setTimeout(f, 10), reservaMs: window.__reservaMs ?? 800, aoSair: () => {}, aoPerderAcesso: () => {} });
   c.abrir("q1");
   window.__qcp = c;
   window.__mudouQcp = () => { versao++; c.aoFrame({ streamId: "s", seq: 1, pessoaId: "p", tipo: "quadro.mudou", dados: { quadroId: "q1", agenteId: "a", loteId: null, tarefas: "t3" } }); };
@@ -111,6 +125,8 @@ window.__rolador = () => {
 
 type Medida = { top: number; max: number; left: number | null; ativo: string };
 const esperar = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+/** ADA-12: a reserva da altura encurtada no teste (o app usa RESERVA_MS; o caso do trabalho novo abaixo usa o de verdade). */
+const RESERVA_TESTE = 800;
 
 descrever("ADA-7: a atualização do quadro preserva a rolagem (Chrome real)", () => {
   let cdp: Cdp;
@@ -259,15 +275,20 @@ descrever("ADA-7: a atualização do quadro preserva a rolagem (Chrome real)", (
     await esperar(150);
     expect(await avaliar<number>(cdp, "window.__regravacoes"), "o quadro que mudou regrava").toBeGreaterThan(0);
   }, 60_000);
-  const montar = async (w: number, h: number, toque: boolean): Promise<void> => {
+  const montar = async (w: number, h: number, toque: boolean, reservaMs = RESERVA_TESTE): Promise<void> => {
     await cdp.enviar("Emulation.setDeviceMetricsOverride", { width: w, height: h, deviceScaleFactor: 1, mobile: toque });
     await cdp.enviar("Emulation.setTouchEmulationEnabled", { enabled: toque, maxTouchPoints: toque ? 5 : 1 });
     await cdp.enviar("Page.navigate", { url });
     await ate("window.__montar");
-    await avaliar(cdp, "window.__montar()");
+    await avaliar(cdp, `window.__reservaMs = ${reservaMs}; window.__montar()`);
     await ate(`document.querySelector("#quadro [data-act='abrir-tarefa']")`);
     await esperar(200);
   };
+  /**
+   * ADA-12 (revisão 3): sem o scroll anchoring do Chrome (o Safari não tem), que escondia o corte em alguns casos e deixava
+   * o teste passar sem a correção.
+   */
+  const semAncora = (): Promise<unknown> => avaliar(cdp, `(() => { for (const e of [document.documentElement, document.body, document.getElementById("quadro")]) if (e) e.style.overflowAnchor = "none"; })()`);
   const observar = (): Promise<unknown> => avaliar(cdp, `(() => { window.__lidas = 0; window.__regravacoes = 0;
     new MutationObserver(() => window.__regravacoes++).observe(document.querySelector("#quadro > .qd-conteudo"), { childList: true }); })()`);
 
@@ -804,4 +825,595 @@ descrever("ADA-7: a atualização do quadro preserva a rolagem (Chrome real)", (
     await ate("window.__regravacoes > 0");
     expect(await avaliar<string>(cdp, `document.getElementById("qcp-com").value`), "o texto sobrevive").toBe("comentando");
   }, 60_000);
+
+  // ADA-12: o conteúdo que encolhe por um instante (a releitura, o trabalho novo de log vazio) não leva a rolagem junto.
+  // Antes da correção o navegador cortava o scrollTop no máximo do conteúdo menor e o desenho seguinte guardava o valor
+  // cortado: a posição descia como uma catraca (medido em 2026-11-02 no app real: 1718 → 1633 em 1440 e 2618 → 2391 em 390).
+  const abrirT3 = async (coms: number): Promise<void> => {
+    await avaliar(cdp, `window.__coms = ${coms}`);
+    await avaliar(cdp, `[...document.querySelectorAll("#quadro [data-act='abrir-tarefa'][data-id='t3']")].find((e) => e.offsetParent).click()`);
+    await ate(`document.getElementById("qd-t-tit")`);
+    if (coms) await ate(`document.querySelector("#quadro .qd-conteudo").textContent.includes("comentário ${coms - 1}")`);
+    await esperar(300);
+  };
+  /** Uma atualização que muda a descrição e os comentários e espera as duas leituras chegarem à tela. */
+  const atualizarCom = async (linhas: number, coms: number): Promise<void> => {
+    await avaliar(cdp, `(() => { window.__linhas = ${linhas}; window.__coms = ${coms}; })()`);
+    await atualizar();
+    await ate(`document.querySelector("#quadro .qd-conteudo").textContent.includes(${coms ? `"comentário ${coms - 1}"` : `"linha"`})`);
+    await esperar(250);
+  };
+
+  for (const [w, h, toque] of [[390, 844, true], [1440, 900, false]] as const) {
+    it(`${w}×${h}${toque ? " (toque)" : ""}: ADA-12 CA2 — a tarefa rolada até o meio fica no lugar quando o conteúdo encolhe e volta`, async () => {
+      await montar(w, h, toque);
+      await semAncora();
+      await abrirT3(30);
+      await avaliar(cdp, `(() => { document.activeElement?.blur(); const v = document.getElementById("quadro"); v.scrollTop = Math.floor((v.scrollHeight - v.clientHeight) * 0.7); })()`);
+      await esperar(120);
+      const t0 = await medir();
+      expect(t0.max, "o detalhe precisa rolar para o teste valer").toBeGreaterThan(600);
+      for (let i = 0; i < 3; i++) {
+        await atualizarCom(4, 0);
+        // A reserva da altura: logo depois da releitura mais curta, a vista não pulou.
+        if (i === 0) expect(Math.abs((await medir()).top - t0.top), "a tela não pula dentro da reserva").toBeLessThanOrEqual(1);
+        // Passada a reserva, o conteúdo encolheu de verdade e o navegador cortou a rolagem.
+        await esperar(RESERVA_TESTE + 200);
+        expect((await medir()).max, "o conteúdo encolheu abaixo da posição (senão o teste não prova nada)").toBeLessThan(t0.top);
+        await atualizarCom(80, 30);
+      }
+      const t1 = await medir();
+      expect(Math.abs(t1.top - t0.top), `scrollTop da tarefa ${t0.top} → ${t1.top} (antes da correção descia a cada encolhida)`).toBeLessThanOrEqual(1);
+    }, 90_000);
+
+    it(`${w}×${h}${toque ? " (toque)" : ""}: ADA-12 CA3 — a tarefa colada no fim segue o fim quando chega um comentário`, async () => {
+      await montar(w, h, toque);
+      await semAncora();
+      await abrirT3(5);
+      await avaliar(cdp, `(() => { document.activeElement?.blur(); const v = document.getElementById("quadro"); v.scrollTop = v.scrollHeight; })()`);
+      await esperar(120);
+      const t0 = await medir();
+      expect(t0.top, "colada no fim").toBeGreaterThan(t0.max - 2);
+      await avaliar(cdp, "window.__comentou()");
+      await ate(`document.querySelector("#quadro .qd-conteudo").textContent.includes("comentário 5")`);
+      await esperar(250);
+      const t1 = await medir();
+      expect(t1.max, "o comentário novo aumentou o conteúdo").toBeGreaterThan(t0.max);
+      expect(t1.top, `colada no fim: scrollTop ${t1.top} de ${t1.max}`).toBeGreaterThan(t1.max - 2);
+    }, 60_000);
+  }
+
+  // QA da ADA-12: o lado negativo de COLADO_PX (o mutante COLADO_PX = 200 passava em tudo) e os casos com o scroll
+  // anchoring do navegador LIGADO, como o app real roda no Chrome e no Firefox (os de cima desligam, como o Safari).
+  for (const ancora of [false, true]) {
+    const rot = ancora ? "com scroll anchoring" : "sem scroll anchoring";
+    it(`1440×900 (${rot}): ADA-12 QA — parada a 100 px do fim (fora do colado), o comentário novo não a leva ao fim`, async () => {
+      await montar(1440, 900, false);
+      if (!ancora) await semAncora();
+      await abrirT3(30);
+      await avaliar(cdp, `(() => { document.activeElement?.blur(); const v = document.getElementById("quadro"); v.scrollTop = v.scrollHeight - v.clientHeight - 100; })()`);
+      await esperar(120);
+      const t0 = await medir();
+      expect(t0.max - t0.top, "a 100 px do fim").toBeGreaterThan(90);
+      await avaliar(cdp, "window.__comentou()");
+      await ate(`document.querySelector("#quadro .qd-conteudo").textContent.includes("comentário 30")`);
+      await esperar(250);
+      const t1 = await medir();
+      expect(t1.max, "o comentário novo aumentou o conteúdo").toBeGreaterThan(t0.max);
+      expect(Math.abs(t1.top - t0.top), `scrollTop ${t0.top} → ${t1.top} (não estava no fim, não segue o fim)`).toBeLessThanOrEqual(1);
+    }, 60_000);
+
+    it(`1440×900 (${rot}): ADA-12 QA — a 10 px do fim conta como colada e segue o fim`, async () => {
+      await montar(1440, 900, false);
+      if (!ancora) await semAncora();
+      await abrirT3(30);
+      await avaliar(cdp, `(() => { document.activeElement?.blur(); const v = document.getElementById("quadro"); v.scrollTop = v.scrollHeight - v.clientHeight - 10; })()`);
+      await esperar(120);
+      await avaliar(cdp, "window.__comentou()");
+      await ate(`document.querySelector("#quadro .qd-conteudo").textContent.includes("comentário 30")`);
+      await esperar(250);
+      const t1 = await medir();
+      expect(t1.top, `colada no fim: scrollTop ${t1.top} de ${t1.max}`).toBeGreaterThan(t1.max - 2);
+    }, 60_000);
+  }
+
+  for (const [w, h, toque] of [[390, 844, true], [1440, 900, false]] as const) {
+    it(`${w}×${h}${toque ? " (toque)" : ""} (com scroll anchoring): ADA-12 CA2 — a tarefa rolada até o meio fica no lugar quando o conteúdo encolhe e volta`, async () => {
+      await montar(w, h, toque);
+      await abrirT3(30);
+      await avaliar(cdp, `(() => { document.activeElement?.blur(); const v = document.getElementById("quadro"); v.scrollTop = Math.floor((v.scrollHeight - v.clientHeight) * 0.7); })()`);
+      await esperar(120);
+      const t0 = await medir();
+      for (let i = 0; i < 3; i++) {
+        await atualizarCom(4, 0);
+        await esperar(RESERVA_TESTE + 200);
+        await atualizarCom(80, 30);
+      }
+      const t1 = await medir();
+      expect(Math.abs(t1.top - t0.top), `scrollTop da tarefa ${t0.top} → ${t1.top}`).toBeLessThanOrEqual(1);
+    }, 90_000);
+  }
+
+  it("1440×900 (com scroll anchoring): ADA-12 CA1 — a grade rolada para o lado fica em 400 durante 30 atualizações ao vivo", async () => {
+    await montar(1440, 900, false);
+    const grade = `[...document.querySelectorAll("#quadro .qd-grade")].find((e) => e.offsetParent)`;
+    await avaliar(cdp, `${grade}.scrollLeft = 400`);
+    await esperar(120);
+    expect(await avaliar<number>(cdp, `${grade}.scrollLeft`)).toBe(400);
+    for (let i = 0; i < 30; i++) {
+      await avaliar(cdp, i % 3 === 2 ? "window.__comentou()" : "window.__mudou()");
+      await esperar(60);
+    }
+    await esperar(600);
+    expect(await avaliar<number>(cdp, `${grade}.scrollLeft`), "scrollLeft da grade depois de 30 atualizações").toBe(400);
+  }, 60_000);
+
+  it("390×844 (toque): ADA-12 revisão 1 — o conteúdo que só volta depois de 3 s (o trabalho novo de log vazio) não leva a tela, com a reserva de verdade", async () => {
+    await montar(390, 844, true, RESERVA_MS);
+    await semAncora();
+    await abrirT3(30);
+    await avaliar(cdp, `(() => { document.activeElement?.blur(); const v = document.getElementById("quadro"); v.scrollTop = Math.floor((v.scrollHeight - v.clientHeight) * 0.7); })()`);
+    await esperar(120);
+    const t0 = await medir();
+    await atualizarCom(4, 0);
+    await esperar(3000);
+    expect(Math.abs((await medir()).top - t0.top), "3 s depois do encolher, a tela segue onde estava").toBeLessThanOrEqual(1);
+    await atualizarCom(80, 30);
+    expect(Math.abs((await medir()).top - t0.top), "o conteúdo voltou e a tela não pulou").toBeLessThanOrEqual(1);
+  }, 60_000);
+
+  it("390×844 (toque): ADA-12 revisão 1 — o filtro da pessoa que encolhe a lista não reserva a altura (sem espaço em branco)", async () => {
+    await montar(390, 844, true);
+    await semAncora();
+    await avaliar(cdp, `(() => { document.activeElement?.blur(); const v = document.getElementById("quadro"); v.scrollTop = v.scrollHeight; })()`);
+    await esperar(120);
+    const antes = await avaliar<number>(cdp, `document.querySelector("#quadro > .qd-conteudo").getBoundingClientRect().height`);
+    expect((await medir()).max, "o quadro precisa rolar para o teste valer").toBeGreaterThan(200);
+    await avaliar(cdp, `document.querySelector('#quadro [data-act="filtro-do-quadro"][data-filtro="pessoas"]').click()`);
+    await esperar(250);
+    expect(await avaliar<number>(cdp, `document.querySelector("#quadro > .qd-conteudo").scrollHeight`), "o filtro encolheu a lista na hora (a reserva deixaria o espaço em branco)").toBeLessThan(antes - 100);
+    expect(await avaliar<string>(cdp, `document.querySelector("#quadro > .qd-conteudo").style.minHeight`), "sem reserva na regravação da pessoa").toBe("");
+    await avaliar(cdp, `document.querySelector('#quadro [data-act="filtro-do-quadro"][data-filtro="todos"]').click()`);
+    await esperar(150);
+  }, 60_000);
+
+  it("390×844 (toque): ADA-12 revisão 2 — só os comentários relidos curtos (a descrição igual) não levam a tarefa rolada", async () => {
+    await montar(390, 844, true);
+    await semAncora();
+    await avaliar(cdp, "window.__linhas = 4");
+    await atualizar(); // a descrição curta já no quadro (senão ela encolheria junto na primeira releitura)
+    await abrirT3(60);
+    await avaliar(cdp, `(() => { document.activeElement?.blur(); const v = document.getElementById("quadro"); v.scrollTop = Math.floor((v.scrollHeight - v.clientHeight) * 0.7); })()`);
+    await esperar(120);
+    const t0 = await medir();
+    expect(t0.max, "os comentários fazem a tarefa rolar").toBeGreaterThan(600);
+    for (let i = 0; i < 2; i++) {
+      await avaliar(cdp, `(() => { window.__coms = 2; window.__q.aoFrame({ streamId: "s", seq: 1, pessoaId: "p", tipo: "quadro.mudou", dados: { quadroId: "q1", agenteId: "a", loteId: null, tarefas: "t3" } }); })()`);
+      await ate(`!document.querySelector("#quadro .qd-conteudo").textContent.includes("comentário 2")`);
+      await esperar(RESERVA_TESTE + 200);
+      expect((await medir()).max, "os comentários relidos curtos encolheram abaixo da posição").toBeLessThan(t0.top);
+      await avaliar(cdp, `(() => { window.__coms = 60; window.__q.aoFrame({ streamId: "s", seq: 1, pessoaId: "p", tipo: "quadro.mudou", dados: { quadroId: "q1", agenteId: "a", loteId: null, tarefas: "t3" } }); })()`);
+      await ate(`document.querySelector("#quadro .qd-conteudo").textContent.includes("comentário 59")`);
+      await esperar(250);
+    }
+    expect(Math.abs((await medir()).top - t0.top), "a tarefa voltou ao lugar").toBeLessThanOrEqual(1);
+  }, 60_000);
+
+  it("390×844 (toque): ADA-12 revisão 2 — o trabalho novo que começa de log vazio e enche de passos não leva a tarefa rolada", async () => {
+    await montar(390, 844, true);
+    await semAncora();
+    await avaliar(cdp, "(() => { window.__linhas = 4; window.__trabVivo = true; window.__trabN = 1; })()");
+    await atualizar(); // a descrição curta já no quadro (senão ela encolheria junto na primeira releitura)
+    await abrirT3(0);
+    for (let i = 0; i < 40; i++) await avaliar(cdp, `window.__passoVivo(${i})`);
+    await ate(`document.querySelector("#quadro [data-act='trab-passos']")`);
+    await avaliar(cdp, `document.querySelector("#quadro [data-act='trab-passos']").click()`);
+    await ate(`document.querySelectorAll("#quadro .qd-trab-passo").length >= 40`);
+    await esperar(200);
+    await avaliar(cdp, `(() => { document.activeElement?.blur(); const v = document.getElementById("quadro"); v.scrollTop = Math.floor((v.scrollHeight - v.clientHeight) * 0.7); })()`);
+    await esperar(150);
+    const t0 = await medir();
+    expect(t0.max, "o log faz a tarefa rolar").toBeGreaterThan(600);
+    // O trabalho novo: a releitura do frame traz o #2, de log vazio (redesenharLido).
+    await avaliar(cdp, "(() => { window.__trabN = 2; window.__mudou(); })()");
+    await ate(`document.querySelector("#quadro .qd-conteudo").textContent.includes("#2")`);
+    await esperar(RESERVA_TESTE + 300);
+    expect((await medir()).max, "o log vazio encolheu a tarefa abaixo da posição").toBeLessThan(t0.top);
+    for (let i = 0; i < 40; i++) await avaliar(cdp, `window.__passoVivo(${i}, "tv2")`);
+    await ate(`document.querySelectorAll("#quadro .qd-trab-passo").length >= 40`);
+    await esperar(400);
+    expect(Math.abs((await medir()).top - t0.top), "com os passos do trabalho novo, a tarefa volta ao lugar").toBeLessThanOrEqual(1);
+    await avaliar(cdp, "(() => { window.__trabVivo = false; window.__trabN = 1; })()");
+  }, 60_000);
+
+  it("1440×900: ADA-12 revisão 2 — a grade que estreita por um instante (menos colunas abertas) e volta deixa o scrollLeft em 400", async () => {
+    await montar(1440, 900, false);
+    await semAncora();
+    const grade = `[...document.querySelectorAll("#quadro .qd-grade")].find((e) => e.offsetParent)`;
+    await avaliar(cdp, `${grade}.scrollLeft = 400`);
+    await esperar(120);
+    expect(await avaliar<number>(cdp, `${grade}.scrollLeft`)).toBe(400);
+    for (let i = 0; i < 3; i++) {
+      await avaliar(cdp, "(() => { window.__estreita = true; window.__mudou(); })()");
+      await ate(`(() => { const g = ${grade}; return g && g.scrollWidth - g.clientWidth < 400; })()`);
+      await esperar(150);
+      expect(await avaliar<number>(cdp, `${grade}.scrollLeft`), "o navegador cortou a grade estreita").toBeLessThan(400);
+      await avaliar(cdp, "(() => { window.__estreita = false; window.__mudou(); })()");
+      await ate(`(() => { const g = ${grade}; return g && g.scrollWidth - g.clientWidth >= 400; })()`);
+      await esperar(250);
+    }
+    expect(await avaliar<number>(cdp, `${grade}.scrollLeft`), "a grade voltou a 400").toBe(400);
+  }, 60_000);
+
+  it("390×844 (toque): ADA-12 revisão 3 — colada no fim, os comentários relidos curtos não deixam a tela em branco (sem reserva)", async () => {
+    await montar(390, 844, true);
+    await semAncora();
+    await avaliar(cdp, "window.__linhas = 4");
+    await atualizar();
+    await abrirT3(60);
+    await avaliar(cdp, `(() => { document.activeElement?.blur(); const v = document.getElementById("quadro"); v.scrollTop = v.scrollHeight; })()`);
+    await esperar(120);
+    const t0 = await medir();
+    expect(t0.max, "os comentários fazem a tarefa rolar").toBeGreaterThan(600);
+    expect(t0.top, "colada no fim").toBeGreaterThan(t0.max - 2);
+    await avaliar(cdp, `(() => { window.__coms = 2; window.__q.aoFrame({ streamId: "s", seq: 1, pessoaId: "p", tipo: "quadro.mudou", dados: { quadroId: "q1", agenteId: "a", loteId: null, tarefas: "t3" } }); })()`);
+    await ate(`!document.querySelector("#quadro .qd-conteudo").textContent.includes("comentário 2")`);
+    await esperar(250);
+    expect(await avaliar<string>(cdp, `document.querySelector("#quadro > .qd-conteudo").style.minHeight`), "colada no fim não reserva").toBe("");
+    // O fim do conteúdo (o último comentário) está na tela, não abaixo de um branco.
+    const fim = JSON.parse(await avaliar<string>(cdp, `(() => { const v = document.getElementById("quadro"); const c = v.querySelector(":scope > .qd-conteudo");
+      const r = c.getBoundingClientRect(); const rv = v.getBoundingClientRect(); return JSON.stringify({ fundo: r.bottom, topo: rv.top, base: rv.bottom }); })()`)) as { fundo: number; topo: number; base: number };
+    expect(fim.fundo, "o fim do conteúdo está dentro da vista").toBeGreaterThan(fim.topo);
+    expect(fim.fundo).toBeLessThanOrEqual(fim.base + 1);
+  }, 60_000);
+
+  it("390×844 (toque): ADA-12 revisão 4 — o toque no fim da tarefa recém-aberta (os comentários ainda carregando) não a leva ao fim quando eles chegam", async () => {
+    await montar(390, 844, true);
+    await semAncora();
+    await avaliar(cdp, "window.__linhas = 30; window.__latComs = 1500");
+    await atualizar();
+    await abrirT3(0);
+    await avaliar(cdp, "window.__coms = 60");
+    expect(await avaliar<boolean>(cdp, `document.querySelector("#quadro .qd-conteudo").textContent.includes("comentário 0")`), "os comentários ainda não chegaram").toBe(false);
+    await avaliar(cdp, `(() => { document.activeElement?.blur(); const v = document.getElementById("quadro"); v.scrollTop = v.scrollHeight; })()`);
+    await esperar(120);
+    const t0 = await medir();
+    expect(t0.max, "a tarefa rola até o fim antes de os comentários chegarem").toBeGreaterThan(24);
+    expect(t0.top).toBeGreaterThan(t0.max - 2);
+    await ate(`document.querySelector("#quadro .qd-conteudo").textContent.includes("comentário 59")`);
+    await esperar(250);
+    const t1 = await medir();
+    expect(t1.max, "os comentários fazem a tarefa rolar").toBeGreaterThan(t0.max + 600);
+    expect(Math.abs(t1.top - t0.top), "fica onde a pessoa estava, não pula ao fim").toBeLessThanOrEqual(30);
+  }, 60_000);
+
+  it("390×844 (toque): ADA-12 revisão 5 — CA3 numa tarefa curta (pouco para rolar): colada no fim, segue o fim quando chega um comentário", async () => {
+    await montar(390, 844, true);
+    await semAncora();
+    await avaliar(cdp, "window.__linhas = 1");
+    await atualizar();
+    await abrirT3(1);
+    await avaliar(cdp, `(() => { document.activeElement?.blur(); const v = document.getElementById("quadro"); v.scrollTop = v.scrollHeight; })()`);
+    await esperar(120);
+    const t0 = await medir();
+    expect(t0.max, "a tarefa rola pouco (menos de meia tela)").toBeGreaterThan(24);
+    expect(t0.max).toBeLessThan(400);
+    await avaliar(cdp, `(() => { window.__coms = 3; window.__q.aoFrame({ streamId: "s", seq: 1, pessoaId: "p", tipo: "quadro.mudou", dados: { quadroId: "q1", agenteId: "a", loteId: null, tarefas: "t3" } }); })()`);
+    await ate(`document.querySelector("#quadro .qd-conteudo").textContent.includes("comentário 2")`);
+    await esperar(250);
+    const t1 = await medir();
+    expect(t1.max).toBeGreaterThan(t0.max);
+    expect(t1.top, "segue o fim").toBeGreaterThan(t1.max - 2);
+  }, 60_000);
+
+  it("1440×900: ADA-12 revisão 6 — CA3 na tarefa que cabe inteira na tela: chega um comentário e ela segue o fim", async () => {
+    await montar(1440, 900, false);
+    await semAncora();
+    await avaliar(cdp, "window.__linhas = 1");
+    await atualizar();
+    await abrirT3(1);
+    await avaliar(cdp, `document.activeElement?.blur()`);
+    const t0 = await medir();
+    expect(t0.max, "a tarefa cabe inteira (não rola)").toBeLessThanOrEqual(24);
+    await avaliar(cdp, `(() => { window.__coms = 14; window.__q.aoFrame({ streamId: "s", seq: 1, pessoaId: "p", tipo: "quadro.mudou", dados: { quadroId: "q1", agenteId: "a", loteId: null, tarefas: "t3" } }); })()`);
+    await ate(`document.querySelector("#quadro .qd-conteudo").textContent.includes("comentário 13")`);
+    await esperar(250);
+    const t1 = await medir();
+    expect(t1.max, "o comentário novo faz a tarefa rolar").toBeGreaterThan(24);
+    expect(t1.top, "segue o fim").toBeGreaterThan(t1.max - 2);
+  }, 60_000);
+
+  it("1440×900: ADA-12 revisão 8 — CA3 na tarefa que mal rola (12 px): quem desceu até o fim segue o fim", async () => {
+    await montar(1440, 900, false);
+    await semAncora();
+    await avaliar(cdp, "window.__linhas = 1");
+    await atualizar();
+    await abrirT3(1);
+    // Um espaço no fim da tarefa deixa 12 px para rolar (o desenho seguinte o recria sem ele; os comentários crescem mais).
+    await avaliar(cdp, `(() => { document.activeElement?.blur(); const v = document.getElementById("quadro"); const e = document.createElement("div");
+      v.querySelector(":scope > .qd-conteudo").appendChild(e); for (let h = 0; h < 2000 && v.scrollHeight - v.clientHeight < 12; h += 2) e.style.height = h + "px"; })()`);
+    await esperar(60);
+    await avaliar(cdp, `(() => { const v = document.getElementById("quadro"); v.scrollTop = v.scrollHeight; })()`);
+    await esperar(120);
+    const t0 = await medir();
+    expect(t0.max, "a tarefa rola até 24 px").toBeGreaterThan(0);
+    expect(t0.max).toBeLessThanOrEqual(24);
+    expect(t0.top, "no fim").toBeGreaterThan(t0.max - 2);
+    await avaliar(cdp, `(() => { window.__coms = 14; window.__q.aoFrame({ streamId: "s", seq: 1, pessoaId: "p", tipo: "quadro.mudou", dados: { quadroId: "q1", agenteId: "a", loteId: null, tarefas: "t3" } }); })()`);
+    await ate(`document.querySelector("#quadro .qd-conteudo").textContent.includes("comentário 13")`);
+    await esperar(250);
+    const t1 = await medir();
+    expect(t1.max).toBeGreaterThan(200);
+    expect(t1.top, "segue o fim").toBeGreaterThan(t1.max - 2);
+  }, 60_000);
+
+  it("1440×900: ADA-12 revisão 9 — CA3 colada no fim: o próprio comentário e a resposta que chega depois seguem o fim", async () => {
+    await montar(1440, 900, false);
+    await semAncora();
+    await avaliar(cdp, "window.__linhas = 30; window.__coms = 3");
+    await atualizar();
+    await abrirT3(3);
+    await avaliar(cdp, `(() => { const v = document.getElementById("quadro"); v.scrollTop = v.scrollHeight; })()`);
+    await esperar(250);
+    const t0 = await medir();
+    expect(t0.max, "a tarefa precisa rolar para o teste valer").toBeGreaterThan(200);
+    expect(t0.top, "colada no fim").toBeGreaterThan(t0.max - 2);
+    await avaliar(cdp, `(() => { const f = document.querySelector('#quadro [data-form="comentar-tarefa"]'); f.querySelector("textarea").value = "meu comentário"; f.requestSubmit(); })()`);
+    await ate(`document.querySelector("#quadro .qd-conteudo").textContent.includes("comentário 3")`);
+    await esperar(250);
+    const t1 = await medir();
+    expect(t1.max, "o próprio comentário faz a tarefa crescer").toBeGreaterThan(t0.max);
+    expect(t1.top, "o próprio comentário segue o fim").toBeGreaterThan(t1.max - 2);
+    // A resposta do bot chega depois da janela do eco (o caso comum).
+    await esperar(2100);
+    await avaliar(cdp, "window.__comentou()");
+    await ate(`document.querySelector("#quadro .qd-conteudo").textContent.includes("comentário 4")`);
+    await esperar(250);
+    const t2 = await medir();
+    expect(t2.max, "a resposta faz a tarefa crescer").toBeGreaterThan(t1.max);
+    expect(t2.top, "a resposta que chega depois segue o fim").toBeGreaterThan(t2.max - 2);
+  }, 60_000);
+
+  it("1440×900: ADA-12 revisão 7 — a tarefa curta recém-aberta não desce sozinha quando o trabalho chega depois dos comentários", async () => {
+    await montar(1440, 900, false);
+    await semAncora();
+    await avaliar(cdp, "window.__linhas = 8; window.__trabVivo = true; window.__latTrab = 800");
+    await atualizar();
+    await abrirT3(2);
+    await avaliar(cdp, `document.activeElement?.blur()`);
+    await ate(`document.querySelector("#quadro .qd-trab, #quadro [class*='trab']") && document.getElementById("quadro").scrollHeight > document.getElementById("quadro").clientHeight + 24`);
+    await esperar(250);
+    const t1 = await medir();
+    expect(t1.max, "o trabalho que chegou faz a tarefa rolar").toBeGreaterThan(24);
+    expect(t1.top, "fica no topo (o título à vista)").toBe(0);
+  }, 60_000);
+
+  it("390×844 (toque): ADA-12 revisão 4 — o histórico que a pessoa abriu continua aberto na atualização (sem branco nem pulo)", async () => {
+    await montar(390, 844, true);
+    await semAncora();
+    await avaliar(cdp, "window.__linhas = 4; window.__movs = 40");
+    await atualizar();
+    await abrirT3(0);
+    await avaliar(cdp, `(() => { document.activeElement?.blur(); document.querySelector("#quadro details.qd-hist").open = true; })()`);
+    await esperar(120);
+    await avaliar(cdp, `(() => { const v = document.getElementById("quadro"); v.scrollTop = Math.floor((v.scrollHeight - v.clientHeight) * 0.7); })()`);
+    await esperar(120);
+    const t0 = await medir();
+    expect(t0.max, "o histórico aberto faz a tarefa rolar").toBeGreaterThan(600);
+    await avaliar(cdp, `(() => { window.__coms = 1; window.__q.aoFrame({ streamId: "s", seq: 1, pessoaId: "p", tipo: "quadro.mudou", dados: { quadroId: "q1", agenteId: "a", loteId: null, tarefas: "t3" } }); })()`);
+    await ate(`document.querySelector("#quadro .qd-conteudo").textContent.includes("comentário 0")`);
+    await esperar(250);
+    expect(await avaliar<boolean>(cdp, `document.querySelector("#quadro details.qd-hist").open`), "o histórico segue aberto").toBe(true);
+    const t1 = await medir();
+    expect(Math.abs(t1.top - t0.top), "a vista fica onde estava").toBeLessThanOrEqual(2);
+    expect(t1.max, "o conteúdo não encolheu").toBeGreaterThanOrEqual(t0.max);
+  }, 60_000);
+
+  it("390×844 (toque): ADA-12 revisão 5 — fechar o histórico é gesto da pessoa: o conteúdo novo não puxa a vista ao lugar de antes de fechar", async () => {
+    await montar(390, 844, true);
+    await semAncora();
+    await avaliar(cdp, "window.__linhas = 4; window.__movs = 40");
+    await atualizar();
+    await abrirT3(0);
+    await avaliar(cdp, `(() => { document.activeElement?.blur(); document.querySelector("#quadro details.qd-hist").open = true; })()`);
+    await esperar(120);
+    // No fim do histórico aberto (não colada no fim da tarefa: os comentários vêm depois).
+    await avaliar(cdp, `(() => { const v = document.getElementById("quadro"); const l = v.querySelector("details.qd-hist .qd-hist-lista");
+      v.scrollTop += l.getBoundingClientRect().bottom - v.getBoundingClientRect().bottom + 10; })()`);
+    await esperar(120);
+    await avaliar(cdp, `document.querySelector("#quadro details.qd-hist > summary").click()`);
+    await esperar(250);
+    expect(await avaliar<boolean>(cdp, `document.querySelector("#quadro details.qd-hist").open`)).toBe(false);
+    const t0 = await medir();
+    await avaliar(cdp, `(() => { window.__coms = 30; window.__q.aoFrame({ streamId: "s", seq: 1, pessoaId: "p", tipo: "quadro.mudou", dados: { quadroId: "q1", agenteId: "a", loteId: null, tarefas: "t3" } }); })()`);
+    await ate(`document.querySelector("#quadro .qd-conteudo").textContent.includes("comentário 29")`);
+    await esperar(250);
+    const t1 = await medir();
+    // Fechado, a tarefa encolhe e ela fica no fim: segue o fim (CA3), não volta ao lugar de antes de fechar (medido em
+    // 2026-11-03 no Chrome a 390 px: sem a correção, 772 de 2016).
+    expect(t0.top, "fechado, ela fica no fim").toBeGreaterThan(t0.max - 2);
+    expect(t1.top, "segue o fim, não volta ao lugar de antes de fechar").toBeGreaterThan(t1.max - 2);
+  }, 60_000);
+
+  it("390×844 (toque): ADA-12 QA — a ação da pessoa (tirar o responsável) que encolhe a tarefa não reserva a altura", async () => {
+    await montar(390, 844, true);
+    await semAncora();
+    await abrirT3(30);
+    await avaliar(cdp, `(() => { document.activeElement?.blur(); const v = document.getElementById("quadro"); v.scrollTop = Math.floor((v.scrollHeight - v.clientHeight) * 0.85); })()`);
+    await esperar(120);
+    const t0 = await medir();
+    expect(t0.max, "o detalhe precisa rolar para o teste valer").toBeGreaterThan(600);
+    const alturaAntes = await avaliar<number>(cdp, `document.querySelector("#quadro > .qd-conteudo").getBoundingClientRect().height`);
+    // A resposta da ação traz a descrição curta: o desenho da pessoa encolhe a tarefa.
+    await avaliar(cdp, `(() => { window.__mudarOk = true; window.__linhas = 4; const s = document.getElementById("qd-t-resp");
+      s.value = ""; s.dispatchEvent(new Event("change", { bubbles: true })); })()`);
+    await ate(`document.querySelector("#quadro > .qd-conteudo").getBoundingClientRect().height < ${alturaAntes} - 300`);
+    expect(await avaliar<string>(cdp, `document.querySelector("#quadro > .qd-conteudo").style.minHeight`), "o desenho da ação não reserva").toBe("");
+  }, 60_000);
+
+  it("390×844 (toque): ADA-12 QA — no quadro compartilhado, a coluna que a pessoa recolhe não reserva a altura", async () => {
+    await cdp.enviar("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+    await cdp.enviar("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
+    await cdp.enviar("Page.navigate", { url });
+    await ate("window.__montarQcp");
+    await avaliar(cdp, "window.__montarQcp()");
+    await ate(`document.querySelector("#qcp [data-act='abrir-tarefa']")`);
+    await esperar(200);
+    await avaliar(cdp, `(() => { for (const e of [document.documentElement, document.body, window.__rolador()]) e.style.overflowAnchor = "none";
+      const r = window.__rolador(); r.scrollTop = Math.floor((r.scrollHeight - r.clientHeight) * 0.85); })()`);
+    await esperar(150);
+    const antes = await avaliar<number>(cdp, `document.getElementById("qcp").getBoundingClientRect().height`);
+    // A maior coluna aberta: recolher ela encolhe o quadro bem mais que o que está abaixo da tela.
+    await avaliar(cdp, `(() => { const bts = [...document.querySelectorAll('#qcp [data-act="abrir-coluna"][aria-expanded="true"]')].filter((b) => b.offsetParent);
+      const n = (b) => Number(b.querySelector(".qd-n")?.textContent ?? 0); bts.sort((a, b) => n(b) - n(a)); bts[0].click(); })()`);
+    await esperar(200);
+    const altura = await avaliar<number>(cdp, `(() => { const c = document.getElementById("qcp"); const m = c.style.minHeight; c.style.minHeight = ""; const h = c.getBoundingClientRect().height; c.style.minHeight = m; return h; })()`);
+    expect(altura, "recolher encolheu o quadro").toBeLessThan(antes - 300);
+    expect(await avaliar<string>(cdp, `document.getElementById("qcp").style.minHeight`), "a regravação da pessoa não reserva").toBe("");
+  }, 60_000);
+
+  it("390×844 (toque): ADA-12 QA — os comentários relidos curtos logo depois da ação da pessoa são eco dela (sem reserva)", async () => {
+    await montar(390, 844, true);
+    await semAncora();
+    await avaliar(cdp, "window.__linhas = 4");
+    await atualizar();
+    await abrirT3(60);
+    await avaliar(cdp, `(() => { document.activeElement?.blur(); const v = document.getElementById("quadro"); v.scrollTop = Math.floor((v.scrollHeight - v.clientHeight) * 0.7); })()`);
+    await esperar(120);
+    expect((await medir()).max, "os comentários fazem a tarefa rolar").toBeGreaterThan(600);
+    // A ação (tirar o responsável) não muda a altura; o eco dela traz os comentários curtos (dentro de ECO_DA_PESSOA_MS).
+    await avaliar(cdp, `(() => { window.__mudarOk = true; const s = document.getElementById("qd-t-resp"); s.value = ""; s.dispatchEvent(new Event("change", { bubbles: true })); })()`);
+    await ate("window.__mudancas >= 1");
+    await esperar(100);
+    await avaliar(cdp, `(() => { window.__coms = 2; window.__q.aoFrame({ streamId: "s", seq: 1, pessoaId: "p", tipo: "quadro.mudou", dados: { quadroId: "q1", agenteId: "a", loteId: null, tarefas: "t3" } }); })()`);
+    await ate(`!document.querySelector("#quadro .qd-conteudo").textContent.includes("comentário 2")`);
+    await esperar(150);
+    expect(await avaliar<string>(cdp, `document.querySelector("#quadro > .qd-conteudo").style.minHeight`), "o eco da ação não reserva").toBe("");
+  }, 60_000);
+
+  it("1440×900: ADA-12 CA1 — a grade rolada para o lado fica em 400 durante 30 atualizações ao vivo seguidas", async () => {
+    await montar(1440, 900, false);
+    await semAncora();
+    const grade = `[...document.querySelectorAll("#quadro .qd-grade")].find((e) => e.offsetParent)`;
+    await avaliar(cdp, `${grade}.scrollLeft = 400`);
+    await esperar(120);
+    expect(await avaliar<number>(cdp, `${grade}.scrollLeft`)).toBe(400);
+    for (let i = 0; i < 30; i++) {
+      await avaliar(cdp, i % 3 === 2 ? "window.__comentou()" : "window.__mudou()");
+      await esperar(60);
+    }
+    await esperar(600);
+    expect(await avaliar<number>(cdp, `${grade}.scrollLeft`), "scrollLeft da grade depois de 30 atualizações").toBe(400);
+  }, 60_000);
+
+  it("1440×900: ADA-12 revisão 8 — CA3 no quadro compartilhado: a tarefa que cabia inteira segue o fim quando cresce", async () => {
+    await cdp.enviar("Emulation.setDeviceMetricsOverride", { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+    await cdp.enviar("Emulation.setTouchEmulationEnabled", { enabled: false, maxTouchPoints: 1 });
+    await cdp.enviar("Page.navigate", { url });
+    await ate("window.__montarQcp");
+    await avaliar(cdp, "window.__linhas = 1; window.__montarQcp()");
+    await ate(`document.querySelector("#qcp [data-act='abrir-tarefa']")`);
+    await avaliar(cdp, `[...document.querySelectorAll("#qcp [data-act='abrir-tarefa'][data-id='t3']")].find((e) => e.offsetParent).click()`);
+    await ate(`document.activeElement?.id === "qcp-t-tit"`);
+    await avaliar(cdp, `(() => { for (const e of [document.documentElement, document.body, window.__rolador()]) e.style.overflowAnchor = "none"; document.activeElement?.blur(); })()`);
+    await esperar(120);
+    const medirQcp = async (): Promise<{ top: number; max: number }> => JSON.parse(await avaliar<string>(cdp,
+      `(() => { const r = window.__rolador(); return JSON.stringify({ top: r.scrollTop, max: r.scrollHeight - r.clientHeight }); })()`)) as { top: number; max: number };
+    const a0 = await medirQcp();
+    expect(a0.max, "a tarefa cabe inteira").toBeLessThanOrEqual(24);
+    const antes = await avaliar<number>(cdp, "window.__lidas");
+    await avaliar(cdp, "window.__linhas = 40; window.__mudouQcp()");
+    await ate(`window.__lidas > ${antes} && window.__rolador().scrollHeight - window.__rolador().clientHeight > 200`);
+    await esperar(250);
+    const a1 = await medirQcp();
+    expect(a1.top, "segue o fim").toBeGreaterThan(a1.max - 2);
+  }, 60_000);
+
+  it("1440×900: ADA-12 revisão 10 — CA3 no quadro compartilhado: colada no fim, o próprio comentário e a resposta seguem o fim", async () => {
+    await cdp.enviar("Emulation.setDeviceMetricsOverride", { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+    await cdp.enviar("Emulation.setTouchEmulationEnabled", { enabled: false, maxTouchPoints: 1 });
+    await cdp.enviar("Page.navigate", { url });
+    await ate("window.__montarQcp");
+    await avaliar(cdp, "window.__linhas = 40; window.__montarQcp()");
+    await ate(`document.querySelector("#qcp [data-act='abrir-tarefa']")`);
+    await avaliar(cdp, `[...document.querySelectorAll("#qcp [data-act='abrir-tarefa'][data-id='t3']")].find((e) => e.offsetParent).click()`);
+    await ate(`document.getElementById("qcp-com")`);
+    await avaliar(cdp, `(() => { for (const e of [document.documentElement, document.body, window.__rolador()]) e.style.overflowAnchor = "none"; document.activeElement?.blur(); const r = window.__rolador(); r.scrollTop = r.scrollHeight; })()`);
+    await esperar(250);
+    const medirQcp = async (): Promise<{ top: number; max: number }> => JSON.parse(await avaliar<string>(cdp,
+      `(() => { const r = window.__rolador(); return JSON.stringify({ top: r.scrollTop, max: r.scrollHeight - r.clientHeight }); })()`)) as { top: number; max: number };
+    const a0 = await medirQcp();
+    expect(a0.max, "a tarefa precisa rolar para o teste valer").toBeGreaterThan(200);
+    expect(a0.top, "colada no fim").toBeGreaterThan(a0.max - 2);
+    const antes = await avaliar<number>(cdp, "window.__lidas");
+    await avaliar(cdp, `(() => { const c = document.getElementById("qcp-com"); c.value = "meu comentário"; c.form.requestSubmit(); })()`);
+    await ate(`window.__lidas > ${antes}`);
+    await esperar(300);
+    const a1 = await medirQcp();
+    expect(a1.max, "o próprio comentário faz a tarefa crescer").toBeGreaterThan(a0.max);
+    expect(a1.top, "o próprio comentário segue o fim").toBeGreaterThan(a1.max - 2);
+    const antes2 = await avaliar<number>(cdp, "window.__lidas");
+    await esperar(2100);
+    await avaliar(cdp, "window.__linhas += 3; window.__mudouQcp()");
+    await ate(`window.__lidas > ${antes2}`);
+    await esperar(300);
+    const a2 = await medirQcp();
+    expect(a2.max, "a resposta faz a tarefa crescer").toBeGreaterThan(a1.max);
+    expect(a2.top, "a resposta que chega depois segue o fim").toBeGreaterThan(a2.max - 2);
+  }, 60_000);
+
+  it("1440×900: ADA-12 revisão 10 — colada no fim, abrir os passos do trabalho não leva a vista ao fim (sem pulo da pessoa)", async () => {
+    await montar(1440, 900, false);
+    await semAncora();
+    await avaliar(cdp, "window.__linhas = 30; window.__trabVivo = true");
+    await atualizar();
+    await abrirT3(2);
+    for (let i = 1; i <= 30; i++) await avaliar(cdp, `window.__passoVivo(${i})`);
+    await esperar(400);
+    await avaliar(cdp, `(() => { document.activeElement?.blur(); const v = document.getElementById("quadro"); v.scrollTop = v.scrollHeight; })()`);
+    await esperar(250);
+    const botao = `[...document.querySelectorAll("#quadro button")].find((b) => /passos/.test(b.textContent) && b.offsetParent)`;
+    const y0 = await avaliar<number | null>(cdp, `(${botao})?.getBoundingClientRect().top ?? null`);
+    expect(y0, "o botão dos passos precisa existir para o teste valer").not.toBeNull();
+    await avaliar(cdp, `(${botao}).click()`);
+    await esperar(400);
+    const y1 = await avaliar<number | null>(cdp, `(${botao})?.getBoundingClientRect().top ?? null`);
+    expect(Math.abs((y1 ?? -9999) - (y0 ?? 0)), "o botão fica no lugar").toBeLessThan(4);
+  }, 60_000);
+
+  it("390×844 (toque): ADA-12 — no quadro compartilhado, a tarefa rolada até o meio fica no lugar quando a descrição encolhe e volta", async () => {
+    await cdp.enviar("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+    await cdp.enviar("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
+    await cdp.enviar("Page.navigate", { url });
+    await ate("window.__montarQcp");
+    await avaliar(cdp, "window.__linhas = 160; window.__montarQcp()");
+    await ate(`document.querySelector("#qcp [data-act='abrir-tarefa']")`);
+    await avaliar(cdp, `[...document.querySelectorAll("#qcp [data-act='abrir-tarefa'][data-id='t3']")].find((e) => e.offsetParent).click()`);
+    await ate(`document.activeElement?.id === "qcp-t-tit"`);
+    await avaliar(cdp, `(() => { for (const e of [document.documentElement, document.body, window.__rolador()]) e.style.overflowAnchor = "none"; })()`);
+    await avaliar(cdp, `(() => { document.activeElement?.blur(); const r = window.__rolador(); r.scrollTop = Math.floor((r.scrollHeight - r.clientHeight) * 0.7); })()`);
+    await esperar(120);
+    const medirQcp = async (): Promise<{ top: number; max: number }> => JSON.parse(await avaliar<string>(cdp,
+      `(() => { const r = window.__rolador(); return JSON.stringify({ top: r.scrollTop, max: r.scrollHeight - r.clientHeight }); })()`)) as { top: number; max: number };
+    const a0 = await medirQcp();
+    expect(a0.max, "o detalhe precisa rolar para o teste valer").toBeGreaterThan(600);
+    const mudar = async (linhas: number): Promise<void> => {
+      const antes = await avaliar<number>(cdp, "window.__lidas");
+      await avaliar(cdp, `(() => { window.__linhas = ${linhas}; window.__regravouQcp = 0; window.__obsQcp?.disconnect();
+        window.__obsQcp = new MutationObserver(() => window.__regravouQcp++); window.__obsQcp.observe(document.getElementById("qcp"), { childList: true }); window.__mudouQcp(); })()`);
+      await ate(`window.__lidas > ${antes}`);
+      await ate("window.__regravouQcp > 0");
+      await esperar(200);
+    };
+    for (let i = 0; i < 3; i++) {
+      await mudar(4);
+      if (i === 0) expect(Math.abs((await medirQcp()).top - a0.top), "a tela não pula dentro da reserva").toBeLessThanOrEqual(1);
+      await esperar(RESERVA_TESTE + 200);
+      expect((await medirQcp()).max, "o conteúdo encolheu abaixo da posição").toBeLessThan(a0.top);
+      await mudar(160);
+    }
+    const a1 = await medirQcp();
+    expect(Math.abs(a1.top - a0.top), `scrollTop do compartilhado ${a0.top} → ${a1.top}`).toBeLessThanOrEqual(1);
+    await avaliar(cdp, "window.__linhas = 80");
+  }, 90_000);
 });

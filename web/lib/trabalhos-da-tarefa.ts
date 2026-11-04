@@ -188,6 +188,8 @@ export function criarTrabalhosDaTarefa(o: {
       if (timer) { clearTimeout(timer); timer = null; }
     },
     reler: ler,
+    /** ADA-12: a primeira leitura da tarefa aberta ainda não chegou. */
+    carregando: (): boolean => !!alvo && !!api() && dados === null && !erro,
     /** A seção; undefined = a API não tem os trabalhos (ou outra tarefa). */
     html(tarefaId: string, h: { bloqueada: boolean; agenteId: string | null; conversaAtual: string | null; hora: (em: number) => string }): string | undefined {
       if (!api() || alvo?.tarefaId !== tarefaId) return undefined;

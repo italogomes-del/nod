@@ -133,5 +133,21 @@ export const GESTO_MS = 150;
 export const ADIAR_ATE_MS = 3000;
 /** ADA-7, definido em 2026-11-03: o dedo parado (sem mexer nem rolar) além disso não segura mais a releitura. */
 export const TOQUE_PARADO_MS = 1000;
+/**
+ * ADA-12: quanto tempo a vista guarda a altura do conteúdo que encolheu no redesenho ao vivo antes de soltar; dentro dele a
+ * tela não pula.
+ * definido em 2026-11-03: o caso mais longo é o trabalho novo, que aparece com o log vazio e só enche com os passos do
+ * turno (o primeiro passo de um turno costuma chegar em poucos segundos); 10 s cobre isso, e o espaço em branco do
+ * conteúdo que encolheu de verdade some no prazo. Revisão 3: o prazo não foi medido no app; o branco possível é pequeno
+ * porque a reserva só guarda até o fundo da tela, quem está colada no fim não reserva e a rolagem da pessoa solta.
+ */
+export const RESERVA_MS = 10_000;
+/**
+ * ADA-12 (QA, bug 1): depois de uma ação da pessoa na tarefa aberta (status, responsável), por quanto tempo o redesenho
+ * dos comentários e do trabalho relidos é eco dela (sem alvo nem reserva), não ao vivo.
+ * definido em 2026-11-03: a releitura que a ação dispara sai junto da resposta dela (um GET a mais); 2 s cobre a rede
+ * lenta sem engolir o comentário ao vivo que chega depois.
+ */
+export const ECO_DA_PESSOA_MS = 2000;
 /** ADA-7, definido em 2026-11-03: o arrasto de card ou de coluna segura a releitura até soltar; este teto só cobre um fim perdido. */
 export const ARRASTO_ATE_MS = 30_000;

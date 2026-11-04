@@ -20,6 +20,11 @@ export const CAMPOS_ROLAVEIS = "textarea[id]";
 type Rolavel = { scrollTop: number; scrollLeft: number; id?: string };
 type Raiz = { querySelectorAll(sel: string): ArrayLike<Rolavel> };
 
+/** ADA-12: os roláveis de dentro pela chave (a mesma da guarda), para a memória dos alvos ligar o evento ao rolável. */
+export function rolaveisPorChave<R extends Rolavel>(raiz: { querySelectorAll(sel: string): ArrayLike<R> }): Map<string, R> {
+  return chaves(raiz) as Map<string, R>;
+}
+
 function chaves(raiz: Raiz): Map<string, Rolavel> {
   const m = new Map<string, Rolavel>();
   for (const sel of ROLAVEIS_INTERNOS) {

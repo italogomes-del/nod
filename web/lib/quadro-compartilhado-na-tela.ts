@@ -4,7 +4,9 @@ import type { MutacaoQuadro } from "./api.ts";
 import { ErroApi } from "./erro-api.ts";
 import { deveRecarregar, donoDaTarefa, ehMinha, estadoDoErro, podeEditar, podeMudarStatus, textoDaRecusa } from "./quadro-compartilhado.ts";
 import { campoComFocoNoToque, criarGestoNaTela } from "./gesto-na-tela.ts";
-import { ADIAR_ATE_MS, ARRASTO_ATE_MS, GESTO_MS } from "./quadro.ts";
+import { ADIAR_ATE_MS, ARRASTO_ATE_MS, ECO_DA_PESSOA_MS, GESTO_MS, RESERVA_MS } from "./quadro.ts";
+import { criarAlvosDeRolagem, criarReservaDeAltura } from "./alvo-de-rolagem-na-tela.ts";
+import { COLADO_PX } from "./alvo-de-rolagem.ts";
 import { focarSemRolar, guardarRolagem, restaurarRolagem } from "./rolagem-guardada.ts";
 import { quadroCompartilhado, type CargaDoCompartilhado, type VistaDoCompartilhado } from "../telas/quadro-compartilhado.ts";
 import type { AgenteDoQuadro } from "../telas/quadro-real.ts";
@@ -33,6 +35,8 @@ export type DepsDoCompartilhado = {
   hora: (em: number) => string;
   /** O agrupador das releituras ao vivo (padrão: 250 ms, como a tela da dona). */
   agendar?: (f: () => void) => void;
+  /** ADA-12: o prazo da reserva da altura (o teste encurta; o app usa RESERVA_MS). */
+  reservaMs?: number;
   /** "Voltar para o início". */
   aoSair: () => void;
   /** O acesso mudou (saiu do quadro): a barra relê a lista de compartilhados. */
@@ -82,6 +86,16 @@ export function criarQuadroCompartilhadoNaTela(doc: Document, deps: DepsDoCompar
     }
     return doc.scrollingElement ?? el;
   };
+  /**
+   * ADA-12: o rolador não muda só porque o conteúdo encolheu por um instante (o ancestral deixa de ter o que rolar e a
+   * busca cairia na página): o último que rolava vale enquanto o casco estiver dentro dele.
+   */
+  let rolFixo: Element | null = null;
+  const roladorEstavel = (el: HTMLElement): Element => {
+    const r = rolador(el);
+    if (r.scrollHeight > r.clientHeight || !rolFixo?.contains(el)) rolFixo = r;
+    return rolFixo;
+  };
   // O gesto sobre o casco (o toque dentro dele, a rolagem de quem o rola) segura a releitura ao vivo.
   const gesto = criarGestoNaTela(doc, (ev) => {
     const el = caixa();
@@ -94,12 +108,26 @@ export function criarQuadroCompartilhadoNaTela(doc: Document, deps: DepsDoCompar
   const segura = (desde: number): boolean =>
     (gesto.ativo() && Date.now() - desde < (gesto.dedoMexendo() ? ARRASTO_ATE_MS : ADIAR_ATE_MS)) || campoComFocoNoToque(doc, caixa());
   let aoVivoDesde = 0;
+  // ADA-12: a posição escolhida pela pessoa (o corte do navegador não a muda) e a altura reservada no redesenho mais curto.
+  const alvos = criarAlvosDeRolagem(doc, {
+    caixa: () => { const el = caixa(); const r = el ? roladorEstavel(el) : null; return r instanceof HTMLElement ? r : null; },
+    conteudo: caixa,
+    segura: () => gesto.ativo(),
+    esperaMs: GESTO_MS,
+    aoRolarDaPessoa: () => reserva.aoRolarDaPessoa(),
+  });
+  const reserva = criarReservaDeAltura({ ms: deps.reservaMs ?? RESERVA_MS, segura: () => gesto.ativo(), esperaMs: GESTO_MS });
   /** O minuto do último desenho: num minuto novo o mesmo quadro regrava (o tempo dos cards anda). */
   let minutoDesenhado = -1;
   const quadroAtual = (): QuadroDto | null => (vista.carga.tipo === "pronto" ? vista.carga.q : null);
 
-  /** Redesenha guardando o que a pessoa digita e o foco (a releitura ao vivo não apaga o campo). */
-  function desenhar(): void {
+  /** ADA-12 (revisão 10): até quando os desenhos seguem o fim depois do comentário que a pessoa mandou colada no fim (como no quadro da dona). */
+  let fimDoComentarioAte = 0;
+  /**
+   * Redesenha guardando o que a pessoa digita e o foco (a releitura ao vivo não apaga o campo). `aoVivo`: o desenho é de
+   * uma leitura, não de um clique; só ele reserva a altura e leva a tela ao alvo (ADA-12).
+   */
+  function desenhar(aoVivo = false): void {
     const el = caixa();
     if (!el) return;
     const campos = [...el.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("input[id], textarea[id]")].map((c) => ({ id: c.id, valor: c.value, inicial: c.defaultValue }));
@@ -108,8 +136,16 @@ export function criarQuadroCompartilhadoNaTela(doc: Document, deps: DepsDoCompar
     const sel = ativo instanceof HTMLInputElement || ativo instanceof HTMLTextAreaElement ? [ativo.selectionStart, ativo.selectionEnd] as const : null;
     // ADA-7: a releitura do mesmo quadro (mesma tarefa aberta ou nenhuma) fica onde a pessoa rolou.
     const vistaAgora = `${qid ?? ""}|${vista.aberta ?? ""}`;
-    const rol = rolador(el);
-    const rolagem = el.dataset["vista"] === vistaAgora ? guardarRolagem(rol, el) : null;
+    const rol = roladorEstavel(el);
+    const mesmaVista = el.dataset["vista"] === vistaAgora;
+    const doAlvo = mesmaVista && aoVivo;
+    if (doAlvo) alvos.antes(); else { alvos.esquecer(); reserva.soltar(); }
+    const rolagem = mesmaVista ? guardarRolagem(rol, el) : null;
+    // Revisão 3: colada no fim segue o fim do desenho novo, sem reserva.
+    const alturaAntes = doAlvo && !alvos.alvo("caixa")?.colado ? reserva.antes(el, rol instanceof HTMLElement ? rol : null) : 0;
+    // Revisão 8: a tarefa aberta que cabia inteira na tela (sem rolagem) segue o fim, como no quadro da dona (aqui não há
+    // leitura que chega depois da abertura: o quadro já traz os comentários).
+    const cabiaInteira = doAlvo && !!vista.aberta && !alvos.alvo("caixa") && rol.scrollHeight - rol.clientHeight <= COLADO_PX;
     minutoDesenhado = Math.floor(Date.now() / 60_000);
     el.innerHTML = quadroCompartilhado(vista, { agente: deps.agente, hora: deps.hora });
     el.dataset["qid"] = qid ?? "";
@@ -118,8 +154,11 @@ export function criarQuadroCompartilhadoNaTela(doc: Document, deps: DepsDoCompar
       const novo = doc.getElementById(c.id);
       if ((novo instanceof HTMLInputElement || novo instanceof HTMLTextAreaElement) && el.contains(novo) && c.valor !== c.inicial) novo.value = c.valor;
     }
+    if (alturaAntes > 0) reserva.depois(el, alturaAntes);
     // ADA-7: depois dos campos (o que cresce com o texto mudaria a altura).
     if (rolagem) restaurarRolagem(rol, el, rolagem);
+    alvos.depois(doAlvo);
+    if (cabiaInteira || (mesmaVista && !!vista.aberta && Date.now() < fimDoComentarioAte)) rol.scrollTop = rol.scrollHeight;
     if (foco) {
       const novo = doc.getElementById(foco);
       if (novo && el.contains(novo)) {
@@ -130,9 +169,9 @@ export function criarQuadroCompartilhadoNaTela(doc: Document, deps: DepsDoCompar
     }
   }
 
-  function mudar(p: Partial<VistaDoCompartilhado>): void {
+  function mudar(p: Partial<VistaDoCompartilhado>, aoVivo = false): void {
     vista = { ...vista, ...p };
-    desenhar();
+    desenhar(aoVivo);
   }
 
   async function ler(o: { esqueleto: boolean; aoVivo?: boolean; desde?: number }): Promise<void> {
@@ -155,7 +194,7 @@ export function criarQuadroCompartilhadoNaTela(doc: Document, deps: DepsDoCompar
         const aberta = vista.aberta && quadro.tarefas.some((t) => t.id === vista.aberta) ? vista.aberta : null;
         // ADA-7 (revisão 4): a releitura ao vivo que traz o mesmo quadro não regrava (cortava o toque e o embalo).
         const igual = o.aoVivo && vista.carga.tipo === "pronto" && Math.floor(Date.now() / 60_000) === minutoDesenhado && aberta === vista.aberta && JSON.stringify(vista.carga.q) === JSON.stringify(quadro);
-        if (!igual) mudar({ carga: { tipo: "pronto", q: quadro, mural }, aberta, editando: aberta ? vista.editando : null });
+        if (!igual) mudar({ carga: { tipo: "pronto", q: quadro, mural }, aberta, editando: aberta ? vista.editando : null }, !!o.aoVivo);
         void lerMural(alvo, n);
       };
       aplicar();
@@ -174,10 +213,10 @@ export function criarQuadroCompartilhadoNaTela(doc: Document, deps: DepsDoCompar
       const { linhas } = await deps.api().atividadeDoQuadro(alvo);
       if (n !== leitura || alvo !== qid || vista.carga.tipo !== "pronto") return;
       if (vista.carga.mural && JSON.stringify(vista.carga.mural) === JSON.stringify(linhas)) return;
-      mudar({ carga: { ...vista.carga, mural: linhas } });
+      mudar({ carga: { ...vista.carga, mural: linhas } }, true);
     } catch {
       if (n !== leitura || alvo !== qid || vista.carga.tipo !== "pronto") return;
-      mudar({ carga: { ...vista.carga, mural: [] } });
+      mudar({ carga: { ...vista.carga, mural: [] } }, true);
     }
   }
 
@@ -201,16 +240,25 @@ export function criarQuadroCompartilhadoNaTela(doc: Document, deps: DepsDoCompar
     if (!alvo || !antes || vista.ocupado) { desenhar(); return false; }
     // A mudança invalida a leitura em voo (ela traria o quadro de antes por cima do otimista).
     leitura++;
+    if (acao === "comentar" && tarefaId) {
+      const el = caixa();
+      const r = el ? roladorEstavel(el) : null;
+      alvos.antes();
+      fimDoComentarioAte = r && (alvos.alvo("caixa")?.colado || r.scrollHeight - r.clientHeight <= COLADO_PX) ? Date.now() + ECO_DA_PESSOA_MS : 0;
+    } else fimDoComentarioAte = 0;
     mudar({ ocupado: true, recusa: null, ...(otimista && vista.carga.tipo === "pronto" ? { carga: { ...vista.carga, q: otimista } } : {}) });
     try {
       const r = await chamar(deps.api(), alvo);
       if (!valendo()) return false;
+      // A releitura do próprio comentário ainda segue o fim (a janela conta a partir da resposta).
+      if (fimDoComentarioAte) fimDoComentarioAte = Date.now() + ECO_DA_PESSOA_MS;
       depois?.();
       if (r.quadro && vista.carga.tipo === "pronto") mudar({ carga: { ...vista.carga, q: r.quadro }, ocupado: false });
       else mudar({ ocupado: false });
       void ler({ esqueleto: false });
       return true;
     } catch (e) {
+      fimDoComentarioAte = 0;
       if (!valendo()) return false;
       if (vista.carga.tipo === "pronto") vista = { ...vista, carga: { ...vista.carga, q: antes } };
       if (e instanceof ErroApi && (e.status === 404 || e.codigo === "nao_encontrado")) {
@@ -385,7 +433,7 @@ export function criarQuadroCompartilhadoNaTela(doc: Document, deps: DepsDoCompar
       desenhar();
       void ler({ esqueleto: true });
     },
-    fechar() { qid = null; leitura++; abertura++; releituraPendente = false; vista = vazia({ tipo: "carregando" }); },
+    fechar() { reserva.soltar(); alvos.esquecer(); qid = null; leitura++; abertura++; releituraPendente = false; vista = vazia({ tipo: "carregando" }); },
     atual: () => qid,
     montar() {
       const el = caixa();

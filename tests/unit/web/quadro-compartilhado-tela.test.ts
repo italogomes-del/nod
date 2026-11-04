@@ -205,6 +205,9 @@ class FEl {
   contains(): boolean { return true; }
   querySelectorAll(): FEl[] { return this.campos; }
   focus(): void { /* nada */ }
+  /** ADA-12: a reserva da altura mede o conteúdo e põe o min-height. */
+  style: Record<string, string> = {};
+  getBoundingClientRect(): { height: number } { return { height: 0 }; }
 }
 class FForm extends FEl {
   nomeados: Record<string, FEl> = {};

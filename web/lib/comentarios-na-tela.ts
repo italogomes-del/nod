@@ -42,6 +42,8 @@ export function criarComentariosNaTela(o: { api: () => ApiDosComentarios | null;
       void reler();
     },
     fechar(): void { estado = null; leitura++; },
+    /** ADA-12: a primeira leitura da tarefa aberta ainda não chegou. */
+    carregando: (): boolean => !!o.api()?.comentariosDaTarefa && estado?.carga === "carregando",
     reler,
     html(tarefaId: string, agente: AgenteDoQuadro, hora: (em: number) => string): string | undefined {
       if (!o.api()?.comentariosDaTarefa) return undefined;

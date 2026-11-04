@@ -10,12 +10,14 @@
  *   onde ela está (sem salto).
  * - O modo é por conversa e só em memória: trocar de conversa (ou sair dela) volta para Conversa, sem animação.
  */
-import { direcaoDaTroca, ehModo, ADIAR_ATE_MS, ARRASTO_ATE_MS, GESTO_MS, movimentoDaTroca, TURNO_MUDA_A_EXECUCAO, type ModoDaConversa } from "./quadro.ts";
+import { direcaoDaTroca, ehModo, ADIAR_ATE_MS, ARRASTO_ATE_MS, ECO_DA_PESSOA_MS, GESTO_MS, RESERVA_MS, movimentoDaTroca, TURNO_MUDA_A_EXECUCAO, type ModoDaConversa } from "./quadro.ts";
 import { comColunas, FAIXA_DO_PRAZO, fraseDoErroDeColuna, nomeRepetido, passoDeMover, pedeConfirmacao, porqueNaoRecebeCard, porqueNaoRemove, prazoEmMin, prazoLegivelMin, reciboDaResposta, reciboDeMover, saidaComErroDesiste, seletorDoFocoDaColuna, soltarEm, type EdicaoDeColuna, type Lado, type UnidadeDePrazo } from "./colunas.ts";
 import { ErroApi } from "./erro-api.ts";
 import { anunciarEm } from "./posicao-da-lista.ts";
 import { campoComFocoNoToque, criarGestoNaTela } from "./gesto-na-tela.ts";
 import { focarSemRolar, guardarRolagem, restaurarRolagem, seletorDoFocoDoCard } from "./rolagem-guardada.ts";
+import { criarAlvosDeRolagem, criarReservaDeAltura } from "./alvo-de-rolagem-na-tela.ts";
+import { COLADO_PX } from "./alvo-de-rolagem.ts";
 import type { EntradaHistoricoDto, GrupoColuna, LinhaMuralDto, ModoConversa, QuadroDaPessoaDto, QuadroDto, TarefaDto } from "../../src/contracts/quadro.ts";
 import type { ConversaDto, RespostaMutacao } from "../../src/contracts/api.ts";
 import type { MutacaoQuadro } from "./api.ts";
@@ -99,6 +101,8 @@ export interface DadosDoQuadro {
   irParaTarefa?: (agenteId: string, tarefaId: string) => boolean;
   /** NOD-422: de quanto em quanto tempo a linha "Trazendo do Linear" se relê (ms). */
   releImportacaoEm?: number;
+  /** ADA-12: o prazo da reserva da altura (o teste encurta; o app usa RESERVA_MS). */
+  reservaMs?: number;
 }
 
 /** Os pedaços do palco que são "a conversa": saem juntos quando o Quadro entra. */
@@ -309,6 +313,22 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
   let vistaDesenhada: string | null = null;
   /** ADA-7: o minuto do último desenho; o quadro igual de outro minuto regrava (o "parada há", o prazo). */
   let minutoDesenhado = -1;
+  /** ADA-12: a posição que a pessoa escolheu na vista (o corte do navegador no conteúdo que encolheu não a muda). */
+  let rol: ReturnType<typeof criarAlvosDeRolagem> | null = null;
+  const reserva = criarReservaDeAltura({ ms: dd?.reservaMs ?? RESERVA_MS, segura: () => gesto.ativo(), esperaMs: GESTO_MS });
+  /** ADA-12: o próximo desenho é de uma leitura (o frame, os comentários, o trabalho), não de um clique da pessoa. Só ele
+   * reserva a altura e leva a vista ao alvo; a regravação da pessoa (filtro, painel, edição) segue com ela (revisão 1). */
+  let aoVivo = false;
+  /** ADA-12 (QA, bug 1): até quando o redesenho de uma leitura é eco da ação da pessoa (sem alvo nem reserva). */
+  let daPessoaAte = 0;
+  /** ADA-12 (revisão 10): até quando os desenhos seguem o fim depois do comentário que a pessoa mandou colada no fim. */
+  let fimDoComentarioAte = 0;
+  /** A tarefa do comentário: fechar e reabrir na janela não leva a tarefa recém-aberta ao fim. */
+  let fimDoComentarioDe: string | null = null;
+  /** ADA-12 (revisão 5): o último desenho mostrou a tarefa aberta ainda lendo os comentários. */
+  let carregavaNoDesenho = false;
+  /** ADA-12 (revisão 7): o último desenho mostrou a tarefa aberta com todas as leituras da abertura já chegadas. */
+  let abertaCompletaNoDesenho = false;
   let desenhoDevido = false;
   /** ADA-7: o gesto na vista (o dedo, a última mexida e a última rolagem) e desde quando a releitura do frame espera. */
   let releituraDesde = 0;
@@ -316,6 +336,8 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
   let detalheDesde = 0;
 
   function desenharVista(): void {
+    const vivo = aoVivo;
+    aoVivo = false;
     const v = vista();
     if (!v) return;
     v.dataset["forma"] = forma;
@@ -339,16 +361,46 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     // ADA-7: a mesma vista (página, tarefa e forma) regravada pelo frame fica onde a pessoa rolou; trocar de vista
     // (abrir a tarefa, voltar ao quadro, outra página) segue com quem a trocou (abrirTarefa e irPara levam ao topo).
     const vistaAgora = `${paginas[pagina]?.id ?? ""}|${aberta ?? ""}|${forma}`;
-    const rolagem = vistaAgora === vistaDesenhada ? guardarRolagem(v, conteudo) : null;
+    const mesmaVista = vistaAgora === vistaDesenhada;
+    // ADA-12: a rolagem que o evento ainda não contou entra no alvo antes de o conteúdo mudar; a vista nova começa sem alvo.
+    const doAlvo = mesmaVista && vivo;
+    // ADA-12 (revisões 9 e 10): quem comentou colada no fim (ou com a tarefa inteira na tela) segue o fim nos desenhos do
+    // eco do comentário, como num chat; senão a resposta que chega depois não aparece. Só o comentário: abrir os passos,
+    // repetir ou mudar o status no fim da tarefa fica onde a pessoa estava.
+    if (!mesmaVista) fimDoComentarioAte = 0;
+    const seguirFim = mesmaVista && !!aberta && aberta === fimDoComentarioDe && Date.now() < fimDoComentarioAte;
+    if (doAlvo) rol?.antes(); else { rol?.esquecer(); reserva.soltar(); }
+    // ADA-12 (revisão 5): o fim tocado enquanto a tarefa recém-aberta ainda lia os comentários (o que vem no fim dela) não
+    // cola: ela não pula ao fim quando eles chegam; fica onde estava. Só os comentários: o trabalho, que vem acima deles,
+    // chegando depois não tira do fim quem desceu até os comentários já lidos (revisão 6).
+    if (doAlvo && carregavaNoDesenho && rol?.alvo("caixa")?.colado) rol.esquecer();
+    // Revisão 6: a tarefa aberta que cabia inteira na tela (sem rolagem, a pessoa vê o fim) segue o fim, como a colada.
+    // Revisão 7: só depois de a abertura inteira ter chegado num desenho anterior (os comentários, o trabalho e o
+    // histórico); senão a leitura que chega por último desceria a tarefa recém-aberta e o título sumiria.
+    const cabiaInteira = doAlvo && !!aberta && abertaCompletaNoDesenho && !rol?.alvo("caixa") && v.scrollHeight - v.clientHeight <= COLADO_PX;
+    carregavaNoDesenho = !!aberta && coms.carregando();
+    abertaCompletaNoDesenho = !!aberta && !coms.carregando() && !trabs.carregando() && !(dd?.api()?.historicoTarefa && histTarefa === null);
+    const rolagem = mesmaVista ? guardarRolagem(v, conteudo) : null;
+    // Revisão 3: colada no fim segue o fim do desenho novo, sem reserva (a reserva a deixaria no branco até ela soltar).
+    const alturaAntes = doAlvo && !rol?.alvo("caixa")?.colado ? reserva.antes(conteudo, v) : 0;
     vistaDesenhada = vistaAgora;
     minutoDesenhado = Math.floor(Date.now() / 60_000);
     desenhoDevido = false;
+    // ADA-12 (revisão 4): o histórico de movimentos aberto continua aberto (recriado fechado, a tarefa encolhia e a reserva
+    // ficava em branco).
+    const movimentosAbertos = mesmaVista && conteudo.querySelector<HTMLDetailsElement>("details.qd-hist")?.open === true;
     conteudo.innerHTML = conteudoHtml();
+    if (movimentosAbertos) { const d = conteudo.querySelector<HTMLDetailsElement>("details.qd-hist"); if (d) d.open = true; }
     // NOD-445: Lista | Quadro em Tarefas, na barra dos filtros (só com o quadro de verdade e nenhuma tarefa aberta).
     conteudo.querySelector(".qd-barra-q .qd-barra-dir")?.insertAdjacentHTML("afterbegin", formaDasTarefas(forma));
     for (const [id, valor] of rascunhos) { const c = doc.getElementById(id); if (c instanceof HTMLTextAreaElement || c instanceof HTMLInputElement) c.value = valor; }
+    // ADA-12: a releitura que volta mais curta por um instante não encolhe a vista (o navegador cortaria a rolagem).
+    if (alturaAntes > 0) reserva.depois(conteudo, alturaAntes);
     // ADA-7: a rolagem volta depois dos rascunhos (o campo que cresce com o texto mudaria a altura e a vista pularia).
     if (rolagem) restaurarRolagem(v, conteudo, rolagem);
+    // ADA-12: o alvo vence o valor guardado (que pode ser o corte de um conteúdo que encolheu no desenho anterior).
+    rol?.depois(doAlvo);
+    if (cabiaInteira || seguirFim) v.scrollTop = v.scrollHeight;
     // ADA-7: o foco volta sem rolar (o título da tarefa aberta, recriado e focado, levava a vista ao topo).
     if (focoColuna) focarSemRolar(conteudo.querySelector<HTMLElement>(focoColuna));
     if (focoId) {
@@ -390,7 +442,8 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
 
   /** Lê o quadro do bot anfitrião; o que mudou desde a leitura anterior acende. Leitura velha (outra conversa) é descartada. */
   /** `gestoDesde` (ADA-7): a leitura que a pessoa não pediu agora espera o gesto para regravar, contando desde então. */
-  async function lerQuadro(doFrame = false, gestoDesde: number | null = null): Promise<void> {
+  /** `vivo` (ADA-12): a leitura que a pessoa não pediu (a importação que se relê) leva a rolagem ao alvo e reserva a altura. */
+  async function lerQuadro(doFrame = false, gestoDesde: number | null = null, vivo = false): Promise<void> {
     const a = dd?.api();
     if (!a || !agenteId) return;
     const minha = ++leitura;
@@ -402,14 +455,14 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     try {
       const r = await a.quadro(de);
       if (minha !== leitura || de !== agenteId) return;
-      aplicarQuadro(r.quadro, [], doFrame, gestoDesde);
+      aplicarQuadro(r.quadro, [], doFrame, gestoDesde, vivo);
     } catch {
       if (minha !== leitura || de !== agenteId) return;
       if (carga !== "ok") { carga = "erro"; desenharVista(); }
     }
   }
 
-  function aplicarQuadro(novo: QuadroDto | null, extra: readonly string[] = [], doFrame = false, gestoDesde: number | null = null): void {
+  function aplicarQuadro(novo: QuadroDto | null, extra: readonly string[] = [], doFrame = false, gestoDesde: number | null = null, vivo = false): void {
     if (novo) novo = comColunas(novo);
     // NOD-445: Tarefas acende o laranja na pílula quando alguma tarefa está em "Precisa de você".
     const pedem = !!novo?.tarefas.some((t) => t.status === "voce");
@@ -445,7 +498,7 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     if (aberta && novas.has(aberta)) void lerHistorico();
     // NOD-422: enquanto traz do Linear, a linha "Trazendo · N de M" se relê sozinha (o progresso não vira frame).
     if (timerImportacao) { clearTimeout(timerImportacao); timerImportacao = null; }
-    if (q?.importacao?.estado === "trazendo") timerImportacao = setTimeout(() => { timerImportacao = null; void lerQuadro(); }, dd?.releImportacaoEm ?? 2000);
+    if (q?.importacao?.estado === "trazendo") timerImportacao = setTimeout(() => { timerImportacao = null; void lerQuadro(false, null, true); }, dd?.releImportacaoEm ?? 2000);
     // NOD-443: o mural aberto acompanha o quadro (cada pedido de qualquer pessoa entra nele).
     if (painel === "atividade" && novas.size) void lerMural();
     if (igual) return;
@@ -453,6 +506,9 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     // como o pedido esperou; o link que não achou a tarefa (abaixo) é da pessoa e desenha já.
     // Revisão 10: a espera segue contando de quando a releitura foi pedida (o adiamento do GET e o do desenho não somam).
     if ((doFrame || gestoDesde !== null) && !linkSemTarefa) { redesenharQuandoLivre(gestoDesde ?? undefined); return; }
+    // ADA-12 (revisão 2): a releitura depois de uma ação da pessoa (mover, status, edição, a resposta da ação) é dela, não
+    // ao vivo: sem alvo nem reserva. Ao vivo só o frame (por redesenharQuandoLivre) e a importação que se relê.
+    aoVivo = vivo && !linkSemTarefa;
     desenharVista();
     // Revisão 7 do PR #623: a tarefa do link saiu deste quadro entre a busca do código e a leitura (mudou, foi apagada).
     // O quadro abre e o leitor de tela ouve por que a tarefa não abriu, em vez de silêncio.
@@ -554,15 +610,21 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     const c = chave;
     const de = agenteId;
     mexendo = true;
+    // ADA-12 (revisão 4): o frame da própria ação pode chegar antes da resposta; a janela do eco começa já.
+    daPessoaAte = Date.now() + ECO_DA_PESSOA_MS;
     try {
       const p = fazer(a, de);
-      if (!p) { desenharVista(); return false; }
+      // ADA-12 (revisão 5): a ação que não sai, ou que falha, não deixa a janela do eco aberta.
+      if (!p) { daPessoaAte = 0; desenharVista(); return false; }
       const r = await p;
       if (c !== chave || de !== agenteId) return false;
+      // ADA-12 (QA, bug 1): os comentários e o trabalho que a ação faz reler chegam logo depois; são eco dela, não ao vivo.
+      daPessoaAte = Date.now() + ECO_DA_PESSOA_MS;
       aplicarQuadro(r.quadro);
       mudarFaixa({ tipo: "resposta", texto: typeof recibo === "string" ? recibo : recibo(r), loteId: r.lote && !r.lote.desfeitoEm ? r.lote.id : null, mensagemId: "" });
       return true;
     } catch (e) {
+      daPessoaAte = 0;
       if (c !== chave) return false;
       const semRede = e instanceof ErroApi && (e.codigo === "servidor_indisponivel" || e.codigo === "sem_internet");
       mudarFaixa({ tipo: "erro", texto: semRede ? "Sem conexão com o servidor agora. Tente de novo em instantes." : "Não deu para mudar a tarefa: o quadro mudou. Relendo." });
@@ -693,7 +755,7 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
   function redesenharQuandoLivre(desde?: number): void {
     if (timerDetalhe) return;
     if (!detalheDesde) detalheDesde = desde ?? Date.now();
-    if (!segura(detalheDesde)) { detalheDesde = 0; desenharVista(); return; }
+    if (!segura(detalheDesde)) { detalheDesde = 0; aoVivo = Date.now() >= daPessoaAte; desenharVista(); return; }
     timerDetalhe = setTimeout(() => { timerDetalhe = null; redesenharQuandoLivre(); }, GESTO_MS);
   }
   /** O gesto segura a regravação até ADIAR_ATE_MS; o arrasto de card ou de coluna e o dedo que segue mexendo, até soltar
@@ -706,6 +768,12 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
   const naVista = (ev: Event): boolean => { const v = vista(); return !!v && ev.target instanceof Node && v.contains(ev.target); };
   const gesto = criarGestoNaTela(doc, naVista);
   const gestoAtivo = (): boolean => gesto.ativo();
+  rol = criarAlvosDeRolagem(doc, { caixa: () => vista(), conteudo: () => vista()?.querySelector<HTMLElement>(":scope > .qd-conteudo") ?? null, segura: () => gesto.ativo(), esperaMs: GESTO_MS, aoRolarDaPessoa: () => reserva.aoRolarDaPessoa() });
+  // ADA-12 (revisão 5): abrir ou fechar o histórico de movimentos (o clique no summary; o teclado também vira clique) é
+  // gesto da pessoa: o corte que ele causa não é do navegador (a vista não volta ao lugar de antes) e a reserva de altura
+  // sai. Não o toggle: o desenho que reabre o histórico também o dispara. Só ele (revisão 6): os outros details da vista
+  // (o card de importação) não apagam o alvo da grade.
+  doc.addEventListener("click", (ev) => { if (!naVista(ev) || !(ev.target instanceof Element) || !ev.target.closest("details.qd-hist > summary")) return; rol?.esquecer(); reserva.soltar(); }, true);
 
   /** Relê a conversa do anfitrião: o histórico da faixa e, se há um pedido esperando, a resposta dele. */
   async function lerConversa(): Promise<void> {
@@ -1752,8 +1820,14 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     if (qual === "comentar-tarefa") {
       ev.preventDefault();
       const de = agenteId;
+      // ADA-12 (revisão 8): a releitura do próprio comentário é eco da pessoa, não ao vivo.
+      daPessoaAte = Date.now() + ECO_DA_PESSOA_MS;
+      const vq = vista();
+      rol?.antes();
+      fimDoComentarioDe = aberta;
+      fimDoComentarioAte = vq && (rol?.alvo("caixa")?.colado || vq.scrollHeight - vq.clientHeight <= COLADO_PX) ? daPessoaAte : 0;
       void coms.enviar(form).then((r) => {
-        if (!r) mudarFaixa({ tipo: "erro", texto: "Não consegui mandar o comentário. Ele continua no campo." });
+        if (!r) { daPessoaAte = 0; fimDoComentarioAte = 0; mudarFaixa({ tipo: "erro", texto: "Não consegui mandar o comentário. Ele continua no campo." }); }
         else if (de === agenteId) aplicarQuadro(r.quadro, aberta ? [aberta] : []);
       });
       return;
