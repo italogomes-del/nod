@@ -40,14 +40,16 @@ window.__inicioDoMinuto = () => { desvio += 60_000 - (Date.now() % 60_000) + 200
 window.__virarMinuto = () => { desvio += 60_000; };
 const STS = ["backlog", "afazer", "fazendo", "revisao", "voce", "feito"];
 const tarefa = (i) => ({ id: "t" + i, quadroId: "q1", titulo: "Tarefa número " + i + " com um título razoável", descricao: "linha\\n".repeat(window.__linhas ?? 80),
-  status: STS[i % STS.length], agenteId: "a", ordem: i, linearId: null, linearUrl: null, prUrl: null, pergunta: null, resposta: null, deFora: false,
+  status: window.__estreita ? STS[i % 3] : STS[i % STS.length], agenteId: "a", ordem: i, linearId: null, linearUrl: null, prUrl: null, pergunta: null, resposta: null, deFora: false,
   turnoId: "tu1", criadoEm: agora, mudadoEm: agora, terminadaEm: null, execucao: "rodando", agenteNome: "Ada",
   // ADA-12 revisão 4: com __movs, o histórico de movimentos da t3 (o <details> que a pessoa abre).
   ...(i === 3 && window.__movs ? { movimentos: Array.from({ length: window.__movs }, (_, k) => ({ id: "mv" + k, tarefaId: "t3", tipo: "mover", de: "fazendo", para: "revisao",
     agenteAntes: "a", agenteDepois: "a", autor: { tipo: "agente", agenteId: "a" }, motivo: null, acionou: false, loteId: null, desfeitoEm: null, desfaz: null, deFora: false,
     criadoEm: agora - k * 60_000, autorNome: "Ada", agenteAntesNome: "Ada", agenteDepoisNome: "Ada" })) } : {}) });
 let versao = 0;
-// ADA-12 revisão 2: a grade estreita por um instante — só duas colunas abertas, o resto recolhido.
+// ADA-12 revisão 2: a grade estreita por um instante — só três colunas abertas, o resto recolhido. Desde o NOD-460 (#645,
+// coluna de 264 sem o teto de 1240) e com o recolhidaPorPadrao (coluna com tarefa abre sozinha), a releitura estreita também
+// tira as tarefas das recolhidas: senão elas abriam e a grade não estreitava.
 const colunasEstreitas = () => STS.map((id, i) => ({ id, nome: id, grupo: id === "feito" ? "feito" : id === "backlog" || id === "afazer" ? "nao_iniciado" : "iniciado",
   fixa: id === "voce", daPessoa: false, recolhida: i > 2 }));
 const q = () => ({ id: "q1", agenteId: "a", meta: window.__meta ?? "Meta", prazo: null, cumpridoEm: null, resumo: null, criadoEm: agora, atualizadoEm: agora + versao,
@@ -962,14 +964,14 @@ descrever("ADA-7: a atualização do quadro preserva a rolagem (Chrome real)", (
     expect(Math.abs((await medir()).top - t0.top), "o conteúdo voltou e a tela não pulou").toBeLessThanOrEqual(1);
   }, 60_000);
 
-  it("390×844 (toque): ADA-12 revisão 1 — o filtro da pessoa que encolhe a lista não reserva a altura (sem espaço em branco)", async () => {
+  it("390×844 (toque): ADA-12 revisão 1 — o filtro da pessoa (Comigo, NOD-460) que encolhe a lista não reserva a altura (sem espaço em branco)", async () => {
     await montar(390, 844, true);
     await semAncora();
-    await avaliar(cdp, `(() => { document.activeElement?.blur(); const v = document.getElementById("quadro"); v.scrollTop = v.scrollHeight; })()`);
+    await avaliar(cdp, `(() => { document.activeElement?.blur(); const v = document.getElementById("quadro"); v.scrollTop = Math.floor((v.scrollHeight - v.clientHeight) * 0.7); })()`); // no meio: colada no fim a revisão 3 já tira a reserva e esconderia o bug
     await esperar(120);
     const antes = await avaliar<number>(cdp, `document.querySelector("#quadro > .qd-conteudo").getBoundingClientRect().height`);
     expect((await medir()).max, "o quadro precisa rolar para o teste valer").toBeGreaterThan(200);
-    await avaliar(cdp, `document.querySelector('#quadro [data-act="filtro-do-quadro"][data-filtro="pessoas"]').click()`);
+    await avaliar(cdp, `document.querySelector('#quadro [data-act="filtro-do-quadro"][data-filtro="comigo"]').click()`);
     await esperar(250);
     expect(await avaliar<number>(cdp, `document.querySelector("#quadro > .qd-conteudo").scrollHeight`), "o filtro encolheu a lista na hora (a reserva deixaria o espaço em branco)").toBeLessThan(antes - 100);
     expect(await avaliar<string>(cdp, `document.querySelector("#quadro > .qd-conteudo").style.minHeight`), "sem reserva na regravação da pessoa").toBe("");
