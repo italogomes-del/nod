@@ -50,6 +50,13 @@ pushes quiser. Quando quiser a CI, uma vez, com o trabalho pronto: `gh pr ready 
 precisa mexer de novo: `gh pr ready <n> --undo`, corrija e repita. PR só de documentação também não roda (menos os
 docs que os testes leem; a lista está no `ci.yml`).
 
+**Teste instável na CI** (2026-11-04; a CI foi para máquinas rápidas e quatro testes de tempo caíram no mesmo dia). Na
+CI cada teste que falha roda uma segunda vez antes de reprovar o job (`retry` do vitest, só com `CI=1`); o resumo do
+vitest marca o que passou na segunda. Isso evita o rerun manual e a main vermelha, não dispensa a correção: um teste
+que precisou do retry duas vezes na mesma semana vira issue e é corrigido ou tirado do bloqueio até lá. Localmente o
+retry é 0: quem está mexendo no teste vê a instabilidade de perto. Um teste não pode depender de dois eventos caírem
+em milissegundos ou segundos diferentes (mtime, `criado_em` em ms, `Date.now()` entre duas gravações).
+
 ## Aviso: nvm/asdf ganham do mise
 
 Se o seu shell carrega nvm ou asdf, eles GANHAM do mise e você roda a suíte no Node errado, e o erro

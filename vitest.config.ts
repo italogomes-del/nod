@@ -20,7 +20,15 @@ apontarParaBancoDaWorktree();
 // medido em 2026-09-16: `fileParallelism: false` DENTRO de um projeto não é honrado pelo vitest 3.2.7
 // (dois arquivos de concurrency rodaram juntos e um reivindicou os turnos do outro); o que serializa
 // os arquivos do projeto é pool 'forks' com singleFork. O fileParallelism fica como documentação.
-const raiz = { exclude: ["node_modules", "dist", "prototypes", ".claude"] };
+//
+// definido em 2026-11-04: na CI, um teste que falha roda UMA segunda vez antes de reprovar o job. A CI saiu das VMs
+// lentas para máquinas rápidas (Blacksmith) e, no mesmo dia, quatro testes de tempo que nunca piscavam passaram a
+// cair (paridade-apps: dois apps no mesmo ms; computador-login-senhas: mtime; sessao-por-harness; o e2e do
+// computador) — cada queda era um rerun manual e uma main vermelha que pulava o deploy. O retry não é desculpa:
+// o relatório do vitest marca o que passou na segunda ("retry"), e o que cair duas vezes na semana vira issue
+// (AGENTS.md, "Teste instável na CI"). Fora da CI continua 0, para quem desenvolve ver a instabilidade de perto.
+const RETRY_NA_CI = process.env.CI ? 1 : 0;
+const raiz = { exclude: ["node_modules", "dist", "prototypes", ".claude"], retry: RETRY_NA_CI };
 
 /**
  * testTimeout dos projetos que tocam o banco (EMENDA-L9 §11, opção b): `npx vitest run` roda os quatro
