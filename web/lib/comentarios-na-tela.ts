@@ -61,7 +61,8 @@ export function criarComentariosNaTela(o: { api: () => ApiDosComentarios | null;
       if (botao) botao.disabled = true;
       try {
         const r = await a.comentarTarefa(e.agenteId, e.tarefaId, texto);
-        if (estado?.tarefaId === e.tarefaId) campo.value = "";
+        // ADA-5 (revisão 8): o que a pessoa digitou durante o envio fica no campo.
+        if (estado?.tarefaId === e.tarefaId && campo.value.trim() === texto) campo.value = "";
         await reler();
         return r;
       } catch {

@@ -67,4 +67,15 @@ describe("rascunho do campo por conversa", () => {
     expect(r.ler("conversa:clarice")).toBe("");
     expect(a.dados.size).toBe(0);
   });
+
+  it("ADA-5: os rascunhos do Quadro têm o limite deles e não tiram os do chat da lista", () => {
+    const r = criarRascunhos(() => armazem());
+    r.usar("t.marlon");
+    r.guardar("conversa:clarice", "o do chat");
+    for (let i = 0; i < 60; i++) r.guardar(`quadro:c1:t${i}:com`, `comentário ${i}`);
+    expect(r.ler("conversa:clarice")).toBe("o do chat");
+    expect(r.ler("quadro:c1:t59:com")).toBe("comentário 59");
+    expect(r.ler("quadro:c1:t9:com")).toBe("");
+    expect(r.ler("quadro:c1:t10:com")).toBe("comentário 10");
+  });
 });

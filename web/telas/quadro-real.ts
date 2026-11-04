@@ -8,7 +8,9 @@
  * Todo texto (título, descrição, pergunta, resposta, meta) é dado e passa por `esc`.
  */
 import type { ColunaDto, EntradaHistoricoDto, LinhaMuralDto, ModoConversa, QuadroDto, TarefaDto } from "../../src/contracts/quadro.ts";
+import type { Aceita } from "../lib/anexos.ts";
 import { esc } from "../lib/escape.ts";
+import { htmlBotaoDitado, htmlPilulaDitado } from "./ditado.ts";
 import { NOME_DO_STATUS, type Status } from "../lib/quadro.ts";
 import { comColunas, iconeDaColuna, paradaHa, podeTerPrazo, prazoLegivelMin, inicioDoFimPreso, LIMITE_COLUNAS, type EdicaoDeColuna } from "../lib/colunas.ts";
 import { aposDoCabecalho, botaoDeNova, campoDeRenomear, colunaNova, confirmacaoDeSoltar, folhaDasColunas, menuDeMover, naFolha, type AgenteDaPassagem } from "./colunas-quadro.ts";
@@ -492,15 +494,37 @@ export function faixaDoQuadro(o: { faixa: Faixa; avatarBot: Html | null; histori
   return confiar(`<div class="qc-resp ${classe}">${hist}<div class="qc-linha">${linha1}${histBt}</div></div>`);
 }
 
-/** A pílula: "Nova tarefa ou mensagem" e Enviar. Com uma tarefa aberta, o pedido vai sobre ela (o placeholder diz qual). */
-export function pilulaDoQuadro(o: { meta: string | null; nome: string; modo?: string | null }): Html {
+/**
+ * A pílula: "Nova tarefa ou mensagem" e Enviar. Com uma tarefa aberta, o pedido vai sobre ela (o placeholder diz qual).
+ * ADA-5: as peças do composer do chat (web/lib/composer.ts), por `data-composer` e sem ids que colidam com o `#composer`
+ * (os dois ficam no DOM): a lista @, a lista "/", a dica, a fila de anexos, o clipe (`anexos`: o que o bot lê), o 🎤 e a
+ * pílula do ditado. O mesmo botão é o Enviar e o Parar (quadro-na-tela troca o rótulo).
+ */
+export function pilulaDoQuadro(o: { meta: string | null; nome: string; modo?: string | null; anexos?: Aceita }): Html {
   const rot = o.meta ? `Conversar com o quadro ${o.meta}` : `Conversar com ${o.nome} sobre o quadro`;
+  const accept = o.anexos === "sem_pdf" ? "image/*,.txt,.md,.csv,.json" : "image/*,application/pdf,.pdf,.txt,.md,.csv,.json";
+  const clipe = o.anexos
+    ? `<button type="button" class="qc-bt qc-clipe" data-act="anexar" data-composer="clipe" aria-label="Anexar arquivo">${CLIPE}</button>` +
+      `<input type="file" class="qd-sr" data-composer="arquivos" multiple accept="${accept}" hidden tabindex="-1" aria-hidden="true" data-aceita="${o.anexos}" />`
+    : "";
   return confiar(`<div class="qc-caixa"><div class="qc-faixa" id="qc-faixa" role="status" aria-live="polite"></div>` +
     `<p class="qc-modo" id="qc-modo"${o.modo ? "" : " hidden"}>${esc(o.modo ?? "")}</p>` +
-    `<form class="qc-pil" role="group" aria-label="${esc(rot)}" data-form="conversa-no-quadro"><label class="qd-sr" for="qc-txt">${esc(rot)}</label>` +
+    `<form class="qc-pil" role="group" aria-label="${esc(rot)}" data-form="conversa-no-quadro" data-composer="caixa">` +
+    `<div class="autocomplete qc-sug" data-composer="mencao" hidden></div>` +
+    `<div class="barra-lista qc-barra" data-composer="barra" role="listbox" aria-label="Comandos" hidden></div>` +
+    `<div class="barra-dica qc-dica" data-composer="dica" hidden></div>` +
+    `<div class="anexos-fila qc-anexos" data-composer="fila" hidden></div>` +
+    `${clipe}<label class="qd-sr" for="qc-txt">${esc(rot)}</label>` +
     `<textarea id="qc-txt" class="qc-txt" rows="1" maxlength="${LIMITE_PEDIDO}" placeholder="Nova tarefa ou mensagem"></textarea>` +
-    `<button type="submit" class="qc-bt qc-enviar" aria-label="Enviar ao quadro">${ENVIAR}</button></form></div>`);
+    `${htmlPilulaDitado(true)}${htmlBotaoDitado()}` +
+    `<button type="button" class="qc-bt qc-parar" data-act="parar-conversa" data-composer="parar" aria-label="Parar a resposta" hidden>${ICONE_PARAR_PILULA}</button>` +
+    `<button type="submit" class="qc-bt qc-enviar" data-composer="enviar" aria-label="Enviar ao quadro">${ENVIAR}</button></form></div>`);
 }
+
+/** O Parar da pílula (ADA-5): o mesmo botão do Enviar, com o quadrado (como o do chat). */
+export const ICONE_PARAR_PILULA = '<svg viewBox="0 0 14 14" aria-hidden="true"><rect x="2" y="2" width="10" height="10" rx="2.5" fill="currentColor"/></svg>';
+export const ICONE_ENVIAR_PILULA = ENVIAR;
+const CLIPE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5 12.6 19.9a5.5 5.5 0 0 1-7.8-7.8l8.5-8.5a3.7 3.7 0 0 1 5.2 5.2l-8.5 8.5a1.8 1.8 0 0 1-2.6-2.6l7.8-7.8"/></svg>';
 
 /* ---------- NOD-443 (ADR-143): as pessoas do quadro, o modo e o mural de Atividade ---------- */
 

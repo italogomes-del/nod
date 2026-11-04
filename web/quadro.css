@@ -534,9 +534,36 @@ a.qd-chip:hover { background: var(--surface-raised); }
   background: var(--qc-vidro); -webkit-backdrop-filter: var(--qc-desfoque); backdrop-filter: var(--qc-desfoque);
   border: 1px solid color-mix(in srgb, var(--line) 85%, transparent); box-shadow: var(--shadow-pop); }
 .qc-pil:focus-within { border-color: var(--line-strong); }
+.qc-pil[data-soltando] { border-color: var(--line-strong); border-style: dashed; } /* revisão 4 do ADA-5: arrastando arquivo, a pílula mostra onde soltar */
 /* foco-ok: o campo não tem contorno próprio; a pílula inteira ganha a borda (:focus-within) e, no forced-colors, o contorno. */
 .qc-txt { flex: 1; min-width: 0; border: 0; outline: 0; resize: none; background: none; color: var(--ink); font: 15px/1.4 var(--font-sans); padding: 12px 4px;
-  field-sizing: content; min-height: 44px; max-height: 132px; overflow-y: auto; }
+  field-sizing: content; min-height: 44px; max-height: 170px; overflow-y: auto; }
+/* ADA-5: as peças do composer do chat na pílula. O campo cresce até 170 px (a altura vem do JS, web/lib/composer.ts: Safari e
+   Firefox não têm field-sizing); com mais de uma linha, os botões descem com a última. As listas @ e / abrem por cima. */
+.qc-pil { flex-wrap: wrap; align-items: flex-end; padding-block: 4px; }
+.qc-pil:has(.qc-anexos:not([hidden])) { border-radius: 18px; padding-top: 8px; }
+.qc-pil > .qc-bt, .qc-pil > .mic, .qc-pil > .ditado { margin-block: 0; align-self: flex-end; }
+.qc-pil > .qc-bt.qc-enviar { margin-bottom: 2px; }
+.qc-txt { padding-block: 10px; }
+.qc-clipe { margin-left: -8px; }
+.qc-anexos { order: -1; padding: 0 4px 4px 0; }
+.qc-sug, .qc-barra, .qc-dica { position: absolute; left: 0; bottom: calc(100% + 6px); z-index: 30; margin: 0; }
+.qc-dica { right: 0; }
+.qc-sug[hidden], .qc-barra[hidden], .qc-dica[hidden] { display: none; }
+.qc-pil .mic { width: 34px; height: 34px; border-radius: 50%; border: 0; background: none; color: var(--ink-2); display: grid; place-items: center; flex: none; cursor: pointer; margin-bottom: 2px; }
+.qc-pil .mic:hover, .qc-pil .mic:focus-visible { background: var(--surface-raised); color: var(--ink); }
+.qc-pil .mic:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.qc-pil .mic[hidden], .qc-pil .ditado[hidden], .qc-pil.gravando .mic { display: none; }
+.qc-pil .ditado { display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 12px 0 5px; border-radius: 17px; background: var(--surface-raised); flex: none; margin-bottom: 2px; }
+.qc-pil.gravando .qc-txt { cursor: default; }
+.qc-bt.qc-enviar[data-modo="parar"] { background: var(--surface-raised); color: var(--ink); }
+/* Revisão 3 do ADA-5 (2026-11-04): com o bot trabalhando e texto ou anexo no campo, o Parar fica ao lado do Enviar (como
+   no chat, botoesDoCampo). */
+.qc-bt.qc-parar { width: 34px; height: 34px; margin-bottom: 2px; background: var(--surface-raised); color: var(--ink); }
+.qc-bt.qc-parar svg { width: 14px; height: 14px; }
+.qc-bt.qc-parar[hidden] { display: none; }
+/* foco-ok: o conteúdo da tarefa só recebe o foco pelo código (Esc com texto), para o Esc seguinte fechá-la. */
+#quadro .qd-conteudo:focus { outline: none; }
 .qc-txt::placeholder { color: var(--ink-3); }
 .qc-bt { width: 38px; height: 38px; border-radius: 50%; display: inline-grid; place-items: center; flex: none; border: 0; background: none; color: var(--ink-2); cursor: pointer; }
 .qc-bt svg { width: 20px; height: 20px; }
@@ -609,7 +636,10 @@ a.qd-chip:hover { background: var(--surface-raised); }
   .qd-com-bt { min-height: 44px; min-width: 44px; }
   .qd-q-mais { width: 44px; height: 44px; }
   .qd-bt, .qd-voltar, .qd-chip { min-height: 44px; }
-  .qc-bt, .qc-bt.qc-enviar, .qc-hist-bt { width: 44px; height: 44px; }
+  .qc-bt, .qc-bt.qc-enviar, .qc-hist-bt, .qc-pil .mic { width: 44px; height: 44px; }
+  /* ADA-5: 16 px no campo (o iOS não dá zoom no foco); o 🎤 sai quando há texto ou anexo, como no chat. */
+  .qc-txt { font-size: 16px; }
+  .qc-pil:has(.qc-txt:not(:placeholder-shown)) .mic, .qc-pil:has(.qc-anexos:not([hidden])) .mic { display: none; }
   .qc-bt.qc-enviar { background: none; color: var(--on-action); position: relative; }
   .qc-bt.qc-enviar::before { content: ""; position: absolute; inset: 5px; border-radius: 50%; background: var(--action); }
   .qc-bt.qc-enviar svg { position: relative; }

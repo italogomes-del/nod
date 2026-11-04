@@ -206,6 +206,43 @@ describe("o controle", () => {
     expect(m.h()).toContain("entra no próximo passo");
   });
 
+  it("revisão 4 do ADA-5: trocou de tarefa no meio do recado, o rascunho da de origem sai e o campo da outra fica", async () => {
+    const m = montar(dados([exec({ id: "a", numero: 1, estado: "rodando" })]));
+    let soltar: () => void = () => {};
+    m.api.recadoTrabalho = (_a, _t, texto) => new Promise((r) => { soltar = () => { m.chamadas.push(`recado:${texto}`); r({ ok: true, quadro: null, trabalho: { entregue: "agora" }, trabalhos: dados([]) }); }; });
+    m.t.abrir("ag", "tar");
+    await esperar();
+    const enviado = { value: "use a branch y" };
+    const daOutra = { value: "rascunho da outra" };
+    const aceitos: unknown[] = [];
+    const limpos: unknown[] = [];
+    m.t.enviarRecado({ dataset: { id: "tar" }, querySelector: () => enviado, ownerDocument: { getElementById: () => daOutra } }, (c) => limpos.push(c), (c, texto) => aceitos.push([c, texto]));
+    m.t.abrir("ag", "outra");
+    soltar();
+    await esperar();
+    // Revisão 7: o texto enviado vai junto, para quem limpa o rascunho conferir que ainda é ele.
+    expect(aceitos).toEqual([[enviado, "use a branch y"]]);
+    expect(limpos).toEqual([]);
+    expect(daOutra.value).toBe("rascunho da outra");
+  });
+
+  it("revisão 5 do ADA-5: o que a pessoa digitou no recado durante o voo fica (e não vira rascunho vazio)", async () => {
+    const m = montar(dados([exec({ id: "a", numero: 1, estado: "rodando" })]));
+    let soltar: () => void = () => {};
+    m.api.recadoTrabalho = (_a, _t, texto) => new Promise((r) => { soltar = () => { m.chamadas.push(`recado:${texto}`); r({ ok: true, quadro: null, trabalho: { entregue: "agora" }, trabalhos: dados([]) }); }; });
+    m.t.abrir("ag", "tar");
+    await esperar();
+    const campo = { value: "use a branch y" };
+    const limpos: unknown[] = [];
+    m.t.enviarRecado({ dataset: { id: "tar" }, querySelector: () => campo, ownerDocument: { getElementById: () => campo } }, (c) => limpos.push(c));
+    campo.value = "e roda o lint";
+    soltar();
+    await esperar();
+    expect(m.chamadas.at(-1)).toBe("recado:use a branch y");
+    expect(campo.value).toBe("e roda o lint");
+    expect(limpos).toEqual([]);
+  });
+
   it("revisão 5 do PR #625: a mudança de estado vai à região persistente (só o textContent, só quando a chave muda); a primeira leitura não", async () => {
     const m = montar(dados([exec({ id: "a", numero: 1, estado: "falhou" })]));
     const escritas: string[] = [];

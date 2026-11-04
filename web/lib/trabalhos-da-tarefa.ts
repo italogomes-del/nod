@@ -144,7 +144,7 @@ export function criarTrabalhosDaTarefa(o: {
     timer = setTimeout(() => { timer = null; void ler(); }, o.juntarEm ?? 400);
   }
 
-  async function agir(fazer: (agenteId: string, tarefaId: string) => Promise<SaidaDoTrabalho> | undefined, aoDar?: () => void): Promise<void> {
+  async function agir(fazer: (agenteId: string, tarefaId: string) => Promise<SaidaDoTrabalho> | undefined, aoDar?: () => void, aoAceito?: () => void): Promise<void> {
     const de = alvo;
     if (!de || ocupado) return;
     const p = fazer(de.agenteId, de.tarefaId);
@@ -154,6 +154,8 @@ export function criarTrabalhosDaTarefa(o: {
     o.redesenhar();
     try {
       const r = await p;
+      // Revisão 4 do ADA-5: o que foi aceito vale mesmo se a pessoa trocou de tarefa ou de bot no meio (o rascunho sai).
+      if (r.ok !== false) aoAceito?.();
       if (de !== alvo) return;
       if (r.ok === false) { aviso = r.detalhe ?? "Não consegui. Tente de novo."; falar(aviso); return; }
       leitura++;
@@ -231,14 +233,19 @@ export function criarTrabalhosDaTarefa(o: {
       return false;
     },
     /** O envio do recado (o form `recado-trabalho`). O texto fica no campo se falhar. */
-    enviarRecado(form: { dataset: Record<string, string | undefined>; querySelector(s: string): unknown; ownerDocument: { getElementById(id: string): unknown } }): void {
+    /**
+     * `aoAceito` recebe o campo do envio (o da tarefa de origem, mesmo que a pessoa já tenha saído dela): quem guarda o
+     * rascunho o apaga por ele (revisão 4 do ADA-5, definido em 2026-11-04).
+     */
+    enviarRecado(form: { dataset: Record<string, string | undefined>; querySelector(s: string): unknown; ownerDocument: { getElementById(id: string): unknown } }, aoLimpar?: (campo: unknown) => void, aoAceito?: (campo: unknown, texto: string) => void): void {
       const campo = form.querySelector("textarea");
       const t = ehCampo(campo) ? campo.value.trim() : "";
       if (!t || form.dataset["id"] !== alvo?.tarefaId) return;
       const a = api();
       const doc = form.ownerDocument;
-      // O redesenho no meio troca o campo: limpa o que estiver na tela quando der certo.
-      void agir((ag, tid) => a?.recadoTrabalho?.(ag, tid, t), () => { const c = doc.getElementById("qd-trab-recado"); if (ehCampo(c)) c.value = ""; });
+      // O redesenho no meio troca o campo: limpa o que estiver na tela quando der certo, e só se ainda é o texto enviado
+      // (revisão 5 do ADA-5: o que a pessoa digitou durante o voo fica, como na pílula e no comentário).
+      void agir((ag, tid) => a?.recadoTrabalho?.(ag, tid, t), () => { const c = doc.getElementById("qd-trab-recado"); if (ehCampo(c) && c.value.trim() === t) { c.value = ""; aoLimpar?.(c); } }, () => aoAceito?.(campo, t));
     },
   };
 }

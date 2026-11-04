@@ -47,7 +47,10 @@ export function criarRascunhos(armazem: () => Armazem | null): Rascunhos {
       textos.delete(conversa);
       if (texto.trim()) {
         textos.set(conversa, texto);
-        for (const antiga of [...textos.keys()].slice(0, Math.max(0, textos.size - MAX_RASCUNHOS))) textos.delete(antiga);
+        // ADA-5 (definido em 2026-11-04): os do Quadro ("quadro:…") têm o limite deles; não tiram os do chat da lista.
+        const doQuadro = (k: string) => k.startsWith("quadro:");
+        const iguais = [...textos.keys()].filter((k) => doQuadro(k) === doQuadro(conversa));
+        for (const antiga of iguais.slice(0, Math.max(0, iguais.length - MAX_RASCUNHOS))) textos.delete(antiga);
       } else if (!tinha) return;
       gravar();
     },

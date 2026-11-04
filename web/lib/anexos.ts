@@ -49,6 +49,46 @@ export type ItemAnexo = {
   previa?: string;
 };
 
+/**
+ * O envio da pílula tira os anexos prontos da fila da conversa antes do await e os devolve se o envio falhar (ADA-5,
+ * definido em 2026-11-04). Mexe na MESMA lista (o upload em curso de outro arquivo segura a referência dela); o que
+ * sai volta para a frente da fila atual da conversa, que pode ter ganho arquivos durante o voo.
+ */
+export function retirarDaFila(filas: Map<string, ItemAnexo[]>, conversa: string, ids: readonly string[]): { saem: ItemAnexo[]; devolver(): void } {
+  const fila = filas.get(conversa) ?? [];
+  const saem = fila.filter((i) => !!i.meta && ids.includes(i.meta.id));
+  for (const i of saem) fila.splice(fila.indexOf(i), 1);
+  return {
+    saem,
+    devolver: () => {
+      const agora = filas.get(conversa) ?? [];
+      agora.unshift(...saem.filter((i) => !agora.includes(i)));
+      filas.set(conversa, agora);
+    },
+  };
+}
+
+/**
+ * ADA-5, revisão 5 (definido em 2026-11-04): as regras da fila que a pílula do Quadro pede ao main, aqui para que os
+ * testes as cubram. `contarNaFila`: o chip com erro não conta (não vai no envio e não pode esconder o Parar).
+ * `prontosDaFila`: com upload em curso, null (o envio espera); senão os ids prontos.
+ */
+export function contarNaFila(fila: readonly ItemAnexo[]): number {
+  return fila.filter((i) => i.estado !== "erro").length;
+}
+export function prontosDaFila(fila: readonly ItemAnexo[]): string[] | null {
+  if (fila.some((i) => i.estado === "enviando")) return null;
+  return fila.flatMap((i) => (i.estado === "pronto" && i.meta ? [i.meta.id] : []));
+}
+/** O soltar do chat: só com o campo do chat na página e se a pílula do Quadro já não o tomou (defaultPrevented). */
+export function soltarEhDoChat(ev: { defaultPrevented: boolean; dataTransfer: { types: readonly string[] } | null }, temCampoDoChat: boolean): boolean {
+  return !ev.defaultPrevented && temCampoDoChat && [...(ev.dataTransfer?.types ?? [])].includes("Files");
+}
+/** O clipe (data-act="anexar") dentro do Quadro abre o seletor da pílula; fora dele, o do chat. */
+export function seletorDoClipe(el: { closest(sel: string): unknown }): string {
+  return el.closest("#quadro") ? '#quadro .qc-pil [data-composer="arquivos"]' : "#composer-arquivos";
+}
+
 export function tamanhoHumano(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;

@@ -91,7 +91,7 @@ import { criarAvisador } from "./lib/avisador.ts";
 import { criarCanalAvisos } from "./lib/canal-avisos.ts";
 import { criarPuxadorDeepLink, destinoDoAlvo, leituraConta } from "./lib/deep-link.ts";
 import { criarLiveEvents, type LiveEvents } from "./lib/live-events.ts";
-import { ehCelular, enterEnvia } from "./lib/celular.ts";
+import { ehCelular } from "./lib/celular.ts";
 import { contextoDaPilula, executarNaPilula } from "./lib/setas-da-pilula.ts";
 import { alvoDoAtalho, atalhoDoNovoBot, atalhoDoTeclado, lugarAtual, SELETOR_CAMPO, SELETOR_MODAL, type AcaoAtalho } from "./lib/atalhos.ts";
 import { rotuloDoMac } from "./lib/aparelho.ts";
@@ -181,8 +181,8 @@ import { teclaNaoLidos } from "./lib/teclado-nao-lidos.ts";
 import { fraseDaContagemNoAviso, fraseDoAviso } from "./lib/frase-leitura.ts";
 import { frotaAoSoltar, ordemAoSoltar, velocidadeAutoRolagem, type Destino } from "./lib/arrastar.ts";
 import { rolagemDaBarra, type Faixa } from "./lib/rolagem-barra.ts";
-import { comandoNoTexto, listaDaBarra, nomeDigitado, recentesDaConversa, type ItemDaBarra } from "./lib/barra.ts";
-import { renderDicaBarra, renderListaBarra } from "./telas/barra.ts";
+import { comandoNoTexto, recentesDaConversa } from "./lib/barra.ts";
+import { ajustarAltura, arquivosDaColagem, criarBarra, escolherMencao, htmlSugestoes, sugestoesDaMencao, teclaDoCampo, type ContextoDaBarra } from "./lib/composer.ts";
 import type { ComandosDto } from "../src/contracts/comandos.ts";
 import { destinoDoEnvio, enviarPeloComposer, idsDaResposta, modoDoComposer, opcoesDaPergunta, proximaDoComposer, textoDaLetra } from "./lib/perguntas.ts";
 import { acharBotao, aplicarFocoDaFila, botaoEmFoco, proximoDaFila, VALIDADE_DO_FOCO_MS, type FocoDaFila } from "./lib/foco-da-fila.ts";
@@ -196,7 +196,7 @@ import { criarTelaLigacao } from "./telas/ligacao-controle.ts";
 import { pedirConsentimentoVoz } from "./telas/consentimento-voz.ts";
 import { anuncioDaLeitura, criarTocadorDeLeitura, TEXTO_FALHA_LEITURA, type LeituraAtual, type MotivoParada } from "./lib/ouvir.ts";
 import { criarControleDitado } from "./telas/ditado-controle.ts";
-import { juntarAoCampo, textoDaFalha } from "./telas/ditado.ts";
+import { ditadoNaPilula, juntarAoCampo, textoDaFalha } from "./telas/ditado.ts";
 import { criarTelaOnboarding, guardarFocoDaCamada } from "./telas/onboarding-controle.ts";
 import { movimentoReduzido } from "./lib/movimento.ts";
 import { alvoDoQueEspera, levarAoAlvo, passoDoAtalho, type AlvoDoAtalho } from "./lib/levar-ao-alvo.ts";
@@ -207,7 +207,7 @@ import { gavetaPrendeFoco, irmaosAteARaiz, seletoresDaOrigem, voltaDoTab } from 
 import type { Ligacao } from "../src/contracts/ligacao.ts";
 import type { MotivoAvaliacaoLigacao } from "./lib/api.ts";
 import { aceitaDoBot } from "./lib/capacidades.ts";
-import { mimeDe, motivoRecusa, POR_MENSAGEM, renderItens as renderItensAnexo, resumo as resumoAnexos, type Aceita, type ItemAnexo } from "./lib/anexos.ts";
+import { mimeDe, motivoRecusa, POR_MENSAGEM, renderItens as renderItensAnexo, resumo as resumoAnexos, retirarDaFila, contarNaFila, prontosDaFila, soltarEhDoChat, seletorDoClipe, type Aceita, type ItemAnexo } from "./lib/anexos.ts";
 import type { EstadoTrabalho, TipoLinha } from "../src/contracts/trabalho.ts";
 import { aberto, abertosDoBot, leituraDoMac, listaPararTasks, telaAoFechar, telaDaTask, textoPararTasks, trabalhoPorId, trabalhosConhecidos } from "./lib/trabalhos.ts";
 import type { EventoTrilhaQuadro } from "../src/contracts/trilha-quadro.ts";
@@ -593,6 +593,44 @@ const quadroNaTela = criarQuadroNaTela(document, {
       quadroNaTela.abrirTarefa(bot.id, tarefaId);
       return true;
     },
+    // ADA-5 (definido em 2026-11-04): a pílula é o composer do chat: a mesma lista "/", os mesmos rascunhos e a mesma fila de
+    // anexos da conversa (a do quadro é a conversa da tela), o Parar do chat e o ditado.
+    composer: {
+      celular: () => celular.ativo(),
+      sugestoes: () => {
+        const t = estado.tela;
+        return (estado.frota?.agentes ?? []).filter((a) => (t.tipo !== "conversa" || a.id !== t.agenteId) && a.ownerId === estado.sessao?.pessoaId && a.confirmado).map((a) => a.nome);
+      },
+      barra: { contexto: () => contextoDaBarra(), recarregar: () => recarregarComandos() },
+      rascunhos: { ler: (chave) => rascunhos.ler(chave), guardar: (chave, texto) => rascunhos.guardar(chave, texto) },
+      anexos: {
+        aceita: () => (estado.tela.tipo === "conversa" ? aceitaDo(botGerido(estado.tela.agenteId)?.harness) : undefined),
+        adicionar: (arquivos) => {
+          const t = estado.tela;
+          const aceita = t.tipo === "conversa" ? aceitaDo(botGerido(t.agenteId)?.harness) : undefined;
+          if (aceita) adicionarArquivos(arquivos, aceita);
+        },
+        // Por conversa (revisão 1): o envio limpa a fila da conversa enviada, mesmo que a tela já esteja noutro bot.
+        prontos: (conversa) => prontosDaFila(anexosPendentes.get(conversa) ?? []),
+        // Revisão 3: o chip com erro não conta (ele não vai no envio e não pode esconder o Parar).
+        quantos: (conversa) => contarNaFila(anexosPendentes.get(conversa) ?? []),
+        retirar: (conversa, ids) => {
+          const r = retirarDaFila(anexosPendentes, conversa, ids);
+          redesenharAnexos();
+          return {
+            confirmar: () => { for (const i of r.saem) if (i.previa) URL.revokeObjectURL(i.previa); },
+            devolver: () => { r.devolver(); redesenharAnexos(); },
+          };
+        },
+      },
+      comando: (texto, conversa) => comandoDoNod(texto, { conversaId: conversa }),
+      // O mesmo Parar do chat (a ação e o critério do turno vivo), com outro botão.
+      parar: async () => { await ACOES["parar-conversa"]?.(document.body); },
+      trabalhando: () => pararNoCampoDaTela(estado),
+      // ADR-095: a troca de vista (pílula ⇄ chat) descarta a gravação aberta (quadro-na-tela, revisão 5 do ADA-5).
+      ditado: { ativo: () => ditado.ativo(), concluirEnviando: () => ditado.concluir("enviar"), descartar: () => ditado.descartar() },
+      aoCriarPilula: () => { redesenharAnexos(); ditado.atualizar(); },
+    },
   },
 });
 
@@ -769,7 +807,11 @@ const ditado = criarControleDitado({
   tenantId: () => estado.sessao?.tenantId ?? null,
   disponibilidade: () => (api ? api.disponibilidadeDitado() : Promise.resolve(null)),
   consentir: (versao) => (api ? api.consentirVoz(versao) : Promise.reject(new ErroApi(401, "nao_permitido", "sem sessão"))),
-  aoTexto: (texto, destino) => {
+  // ADA-5: com o Quadro na tela, o 🎤 é o da pílula; o texto entra nela (o "input" liga altura, rascunho e Enviar⇄Parar).
+  raiz: () => (quadroNaTela.modo() === "quadro" ? quadroNaTela.pilula() : document.getElementById("composer")),
+  aoParar: () => quadroNaTela.atualizarPilula(),
+  aoTexto: (texto, destino, campo) => {
+    if (campo?.closest("#quadro")) return ditadoNaPilula(campo, texto, destino);
     const ta = document.getElementById("composer-texto") as HTMLTextAreaElement | null;
     if (!ta) return;
     escreverNoCampo(ta, juntarAoCampo(ta.value, texto));
@@ -2520,6 +2562,8 @@ function atualizarComposer(): void {
  * quando o Enviar também aparece. Com o campo vazio, só o Parar. Quem decide é `botoesDoCampo` (web/telas/conversa.ts).
  */
 function atualizarParar(): void {
+  // ADA-5: o Enviar ⇄ Parar da pílula segue o mesmo turno vivo (e volta ao rótulo certo depois do ditado).
+  quadroNaTela.atualizarPilula();
   const t = estado.tela;
   const parar = document.querySelector<HTMLButtonElement>('#composer .parar-envio[data-act="parar-conversa"]');
   const enviar = document.querySelector<HTMLButtonElement>('#composer .send[data-act="enviar"]');
@@ -3654,8 +3698,6 @@ function anunciarPergunta(texto: string): void {
 // O catálogo vem do servidor (o que o Mac mandou no último turno) e é relido quando a lista abre, no máximo por minuto.
 let comandosDto: ComandosDto | null = null;
 let comandosLidosEm = 0;
-let itensDaBarra: ItemDaBarra[] = [];
-let selecionadoNaBarra = 0;
 
 async function carregarComandos(): Promise<void> {
   if (!api || Date.now() - comandosLidosEm < 60_000) return;
@@ -3672,70 +3714,22 @@ function nomeDoBotDaTela(): string {
   return t.tipo === "conversa" ? botGerido(t.agenteId)?.nome ?? "o bot" : "o bot";
 }
 
-/** Abre, filtra ou fecha a lista pelo que está no campo; sem lista, a dica diz o que o comando escrito faz. */
-function atualizarBarra(ta: HTMLTextAreaElement): void {
-  const lista = document.getElementById("barra-lista");
-  const dica = document.getElementById("barra-dica");
-  if (!lista || !dica) return;
-  const filtro = nomeDigitado(ta.value, ta.selectionStart);
-  if (filtro !== null) {
-    const recentes = recentesDaConversa(conversaDaTela(estado)?.mensagens ?? []);
-    const bot = estado.tela.tipo === "conversa" ? botGerido(estado.tela.agenteId) : undefined;
-    const botProprio = Boolean(bot && bot.ownerId === estado.sessao?.pessoaId && bot.confirmado && bot.papel !== "nod");
-    const l = listaDaBarra(comandosDto, filtro, recentes, estado.tela.tipo === "conversa", botProprio);
-    itensDaBarra = l.itens;
-    selecionadoNaBarra = Math.min(selecionadoNaBarra, Math.max(0, l.itens.length - 1));
-    lista.innerHTML = renderListaBarra(l, { filtro, selecionado: selecionadoNaBarra, bot: nomeDoBotDaTela(), doMacEm: comandosDto?.doMacEm ?? null });
-    lista.hidden = false;
-    dica.hidden = true;
-    // A primeira abertura busca a lista; quando ela chega, redesenha com o que estiver no campo.
-    if (Date.now() - comandosLidosEm >= 60_000) void carregarComandos().then(() => { if (!lista.hidden) atualizarBarra(ta); });
-    return;
-  }
-  fecharListaBarra();
-  const c = comandoNoTexto(comandosDto, ta.value);
-  dica.innerHTML = c ? renderDicaBarra(c, nomeDoBotDaTela()) : "";
-  dica.hidden = !c;
+/** O contexto da lista "/" do chat: o catálogo, as recentes da conversa e de quem é o bot (ADA-5: a pílula usa o mesmo). */
+function contextoDaBarra(): ContextoDaBarra {
+  const bot = estado.tela.tipo === "conversa" ? botGerido(estado.tela.agenteId) : undefined;
+  return {
+    dto: comandosDto,
+    recentes: recentesDaConversa(conversaDaTela(estado)?.mensagens ?? []),
+    atalhos: estado.tela.tipo === "conversa",
+    botProprio: Boolean(bot && bot.ownerId === estado.sessao?.pessoaId && bot.confirmado && bot.papel !== "nod"),
+    bot: nomeDoBotDaTela(),
+  };
 }
-
-function fecharListaBarra(): void {
-  const lista = document.getElementById("barra-lista");
-  if (lista) lista.hidden = true;
-  itensDaBarra = [];
-  selecionadoNaBarra = 0;
-}
-
-/** Troca o nome digitado pelo escolhido, deixa o cursor depois dele e mostra a dica. */
-function escolherNaBarra(ta: HTMLTextAreaElement, item: ItemDaBarra): void {
-  const depois = ta.value.slice(ta.selectionStart).replace(/^\S*/, "");
-  // ADR-125: o atalho vira o começo do pedido (sem o "/"), e a pessoa completa.
-  const inicio = item.texto ?? `/${item.nome} `;
-  ta.value = inicio + depois.trimStart();
-  ta.selectionStart = ta.selectionEnd = inicio.length;
-  fecharListaBarra();
-  atualizarBarra(ta);
-  ta.focus();
-}
-
-/** Com a lista aberta, as setas andam, Enter e Tab escolhem, Esc fecha. Devolve true quando tratou a tecla. */
-function teclaNaBarra(ev: KeyboardEvent, ta: HTMLTextAreaElement): boolean {
-  const lista = document.getElementById("barra-lista");
-  if (!lista || lista.hidden) return false;
-  if (ev.key === "Escape") { fecharListaBarra(); return true; }
-  if (itensDaBarra.length === 0) return false;
-  if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
-    selecionadoNaBarra = (selecionadoNaBarra + (ev.key === "ArrowDown" ? 1 : itensDaBarra.length - 1)) % itensDaBarra.length;
-    atualizarBarra(ta);
-    lista.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: "nearest" });
-    return true;
-  }
-  if ((ev.key === "Enter" && !ev.shiftKey) || ev.key === "Tab") {
-    const item = itensDaBarra[selecionadoNaBarra];
-    if (item) escolherNaBarra(ta, item);
-    return true;
-  }
-  return false;
-}
+const recarregarComandos = (): Promise<void> | null => (Date.now() - comandosLidosEm >= 60_000 ? carregarComandos() : null);
+// ADA-5: a lista "/" do chat é a do composer (web/lib/composer.ts); os ids do #composer seguem os mesmos.
+const barraDoChat = criarBarra({ lista: () => document.getElementById("barra-lista"), dica: () => document.getElementById("barra-dica"), contexto: contextoDaBarra, recarregar: recarregarComandos });
+const atualizarBarra = (ta: HTMLTextAreaElement): void => barraDoChat.atualizar(ta);
+const teclaNaBarra = (ev: KeyboardEvent, ta: HTMLTextAreaElement): boolean => barraDoChat.tecla(ev, ta);
 
 /**
  * Os comandos que o nod resolve sem turno: /nova-sessao zera a sessão do bot (o /clear do CLI não esquece — medido)
@@ -3758,12 +3752,6 @@ async function comandoDoNod(texto: string, alvo: { conversaId: string; salaId?: 
     return true;
   }
   return false;
-}
-
-/** A altura do campo acompanha o texto, até 170 px. */
-function ajustarAltura(ta: HTMLTextAreaElement): void {
-  ta.style.height = "auto";
-  ta.style.height = `${Math.min(ta.scrollHeight, 170)}px`;
 }
 
 /**
@@ -3951,9 +3939,14 @@ function aceitaDo(harness: string | undefined): Aceita | undefined {
 
 function redesenharAnexos(): void {
   const alvo = conversaAtual();
-  const fila = document.getElementById("composer-anexos");
-  if (!fila || !alvo || alvo.salaId) return;
+  if (!alvo || alvo.salaId) return;
   const itens = anexosPendentes.get(alvo.conversaId) ?? [];
+  // ADA-5: a fila é uma só (a da conversa); aparece no campo do chat e na pílula do Quadro.
+  const pilula = document.querySelector<HTMLElement>('#quadro [data-composer="fila"]');
+  if (pilula) { pilula.innerHTML = renderItensAnexo(itens); pilula.hidden = itens.length === 0; }
+  quadroNaTela.atualizarPilula();
+  const fila = document.getElementById("composer-anexos");
+  if (!fila) return;
   fila.innerHTML = renderItensAnexo(itens);
   fila.hidden = itens.length === 0;
   const r = document.getElementById("composer-resumo");
@@ -3967,11 +3960,11 @@ function limparAnexos(conversaId: string): void {
   redesenharAnexos();
 }
 
-function adicionarArquivos(arquivos: readonly File[]): void {
+function adicionarArquivos(arquivos: readonly File[], doQuadro?: Aceita): void {
   const alvo = conversaAtual();
   const input = document.getElementById("composer-arquivos") as HTMLInputElement | null;
-  if (!alvo || alvo.salaId || !api || !input || arquivos.length === 0) return;
-  const aceita = (input.dataset.aceita as Aceita | undefined) ?? "tudo";
+  if (!alvo || alvo.salaId || !api || (!input && !doQuadro) || arquivos.length === 0) return;
+  const aceita = doQuadro ?? (input?.dataset.aceita as Aceita | undefined) ?? "tudo";
   const conversaId = alvo.conversaId;
   const fila = anexosPendentes.get(conversaId) ?? [];
   anexosPendentes.set(conversaId, fila);
@@ -5677,7 +5670,10 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     const alvo = todas ? card?.querySelectorAll<HTMLElement>("input[data-pasta-de]")[CURTA] : card?.querySelector<HTMLElement>("input[data-pasta-de]:checked");
     alvo?.focus({ preventScroll: true });
   },
-  anexar: () => document.getElementById("composer-arquivos")?.click(),
+  // ADA-5 (revisão 2): o clipe da pílula do Quadro é a mesma ação; abre o seletor da pílula.
+  anexar: (el) => {
+    document.querySelector<HTMLInputElement>(seletorDoClipe(el))?.click();
+  },
   ditar: () => ditado.comecar(),
   "ditado-parar": () => ditado.concluir("campo"),
   "remover-anexo": (el) => removerAnexo(el.dataset.id ?? ""),
@@ -7025,7 +7021,7 @@ document.addEventListener("change", (ev) => {
 // Colar um print no campo (⌘V) anexa; texto colado segue normal.
 document.addEventListener("paste", (ev) => {
   if ((ev.target as HTMLElement).id !== "composer-texto" || !document.getElementById("composer-arquivos")) return;
-  const arquivos = [...(ev.clipboardData?.files ?? [])];
+  const arquivos = arquivosDaColagem(ev.clipboardData);
   if (arquivos.length === 0) return;
   ev.preventDefault();
   adicionarArquivos(arquivos);
@@ -7048,23 +7044,24 @@ function areaSoltar(visivel: boolean): void {
   timeline.parentElement?.appendChild(area);
 }
 document.addEventListener("dragenter", (ev) => {
-  if (!temArquivos(ev) || !document.getElementById("composer-arquivos")) return;
+  // Revisão 4 do ADA-5: a pílula do Quadro trata o próprio soltar (composer-ligado.ts) e marca defaultPrevented.
+  if (!soltarEhDoChat(ev, !!document.getElementById("composer-arquivos"))) return;
   arrastando += 1;
   areaSoltar(true);
 });
-document.addEventListener("dragover", (ev) => { if (temArquivos(ev) && document.getElementById("composer-arquivos")) ev.preventDefault(); });
+document.addEventListener("dragover", (ev) => { if (soltarEhDoChat(ev, !!document.getElementById("composer-arquivos"))) ev.preventDefault(); });
 document.addEventListener("dragleave", (ev) => {
   if (!temArquivos(ev)) return;
   arrastando = Math.max(0, arrastando - 1);
   if (arrastando === 0) areaSoltar(false);
 });
 document.addEventListener("drop", (ev) => {
-  if (!temArquivos(ev) || !document.getElementById("composer-arquivos")) return;
+  // ADA-5 (revisto em 2026-11-04, era a NOD-429 voltar à Conversa): no Quadro, a pílula anexa o que soltou e marca
+  // defaultPrevented (composer-ligado.ts); aqui fica só o soltar do chat.
+  if (!soltarEhDoChat(ev, !!document.getElementById("composer-arquivos"))) return;
   ev.preventDefault();
   arrastando = 0;
   areaSoltar(false);
-  // NOD-429: soltou no modo Quadro: volta para a Conversa, onde o anexo aparece no campo (como a busca faz).
-  quadroNaTela.trocar("conversa");
   adicionarArquivos([...(ev.dataTransfer?.files ?? [])]);
 });
 
@@ -7235,7 +7232,8 @@ document.addEventListener("keydown", (ev) => {
     if (escFechaABusca({ aberta: buscaNaConversa.aberta(), camadaPorCima: camadaSobreABusca(), ditado: ditado.ativo(), emCampo: false })) { ev.preventDefault(); buscaNaConversa.fechar(true); }
     return;
   }
-  if (enterEnvia(ev, celular.ativo())) {
+  // ADA-5: a mesma decisão do Enter da pílula (teclaDoCampo, web/lib/composer.ts); o Esc do chat tem os ramos dele acima.
+  if (teclaDoCampo(ev, { celular: celular.ativo(), valor: ta.value }) === "enviar") {
     ev.preventDefault();
     void enviarComposer();
   }
@@ -7304,32 +7302,27 @@ document.addEventListener("input", (ev) => {
   atualizarBarra(ta);
   const caixa = document.getElementById("autocomplete");
   if (!caixa) return;
-  const sugestoes = JSON.parse(ta.dataset.sugestoes ?? "[]") as string[];
-  const m = /(^|\s)@([\p{L}\d_-]*)$/u.exec(ta.value.slice(0, ta.selectionStart));
-  const lista = m ? sugestoes.filter((n) => n.toLowerCase().startsWith((m[2] ?? "").toLowerCase())) : [];
+  const lista = sugestoesDaMencao(ta.value, ta.selectionStart, JSON.parse(ta.dataset.sugestoes ?? "[]") as string[]);
   caixa.hidden = lista.length === 0;
-  caixa.innerHTML = lista.map((n) => `<button type="button" class="sug" data-nome="${esc(n)}">@${esc(n)}</button>`).join("");
+  caixa.innerHTML = htmlSugestoes(lista);
 });
 
 document.addEventListener("mousedown", (ev) => {
   const item = (ev.target as HTMLElement).closest<HTMLElement>(".barra-item");
   const campo = document.getElementById("composer-texto") as HTMLTextAreaElement | null;
-  if (item && campo) {
+  // ADA-5: a lista do composer da pílula (.qc-pil) é dela; aqui só a do #composer.
+  if (item && campo && item.closest("#composer")) {
     ev.preventDefault();
-    const escolhido = itensDaBarra[Number(item.dataset.indice)];
-    if (escolhido) escolherNaBarra(campo, escolhido);
+    barraDoChat.escolherIndice(campo, Number(item.dataset.indice));
     return;
   }
   const sug = (ev.target as HTMLElement).closest<HTMLElement>(".sug");
   const ta = document.getElementById("composer-texto") as HTMLTextAreaElement | null;
-  if (!sug || !ta) return;
+  if (!sug || !ta || !sug.closest("#composer")) return;
   ev.preventDefault();
-  const antes = ta.value.slice(0, ta.selectionStart).replace(/@[\p{L}\d_-]*$/u, `@${sug.dataset.nome ?? ""} `);
-  ta.value = antes + ta.value.slice(ta.selectionStart);
-  ta.selectionStart = ta.selectionEnd = antes.length;
+  escolherMencao(ta, sug.dataset.nome ?? "");
   const caixa = document.getElementById("autocomplete");
   if (caixa) caixa.hidden = true;
-  ta.focus();
 });
 
 // definido em 2026-09-24 ("aviso no Mac"): a leitura feita com a janela atrás não carimbou vista_em

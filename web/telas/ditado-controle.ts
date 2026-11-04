@@ -14,10 +14,20 @@ export type DepsDitado = {
   tenantId(): string | null;
   disponibilidade(): Promise<DisponibilidadeDitado | null>;
   consentir(versao: number): Promise<unknown>;
-  /** O texto chegou: põe no campo (`campo`) ou põe e envia (`enviar`). Só é chamado com texto. */
-  aoTexto(texto: string, destino: "campo" | "enviar"): void;
+  /**
+   * O texto chegou: põe no campo (`campo`) ou põe e envia (`enviar`). Só é chamado com texto. `ta` é o campo do composer
+   * em que a gravação começou (ADA-5: o do chat ou o da pílula do Quadro).
+   */
+  aoTexto(texto: string, destino: "campo" | "enviar", ta: HTMLTextAreaElement | null): void;
   avisar(texto: string): void;
   noApp(): boolean;
+  /**
+   * ADA-5: o composer que está na tela (o `#composer` do chat ou a pílula do Quadro). A gravação fica no composer em que
+   * começou. Sem isto, o do chat.
+   */
+  raiz?(): HTMLElement | null;
+  /** A gravação acabou (enviada, descartada ou com erro): quem tem o botão Enviar ⇄ Parar o redesenha (ADA-5, revisão 3). */
+  aoParar?(): void;
 };
 
 export type ControleDitado = {
@@ -59,8 +69,13 @@ export function criarControleDitado(d: DepsDitado): ControleDitado {
   let relogio: number | null = null;
   let placeholderAntes = "";
 
-  const caixa = () => document.querySelector<HTMLElement>("#composer .composer .box");
-  const ta = () => document.getElementById("composer-texto") as HTMLTextAreaElement | null;
+  /** O composer da gravação em curso (fixado no começo); parado, o que está na tela. */
+  let raizDaGravacao: HTMLElement | null = null;
+  const raiz = (): HTMLElement | null => (raizDaGravacao?.isConnected ? raizDaGravacao : null) ?? d.raiz?.() ?? document.getElementById("composer");
+  const peca = <T extends HTMLElement>(sel: string): T | null => raiz()?.querySelector<T>(sel) ?? null;
+  // A pílula do Quadro é a própria caixa (a raiz é o form [data-composer="caixa"]); no chat, a .box dentro do #composer.
+  const caixa = (): HTMLElement | null => { const r = raiz(); return r?.matches('[data-composer="caixa"]') ? r : r?.querySelector<HTMLElement>('.composer .box, [data-composer="caixa"]') ?? null; };
+  const ta = () => peca<HTMLTextAreaElement>("#composer-texto") ?? peca<HTMLTextAreaElement>("textarea");
 
   function lerDisponibilidade(): Promise<boolean> {
     if (lendo) return lendo;
@@ -111,10 +126,10 @@ export function criarControleDitado(d: DepsDitado): ControleDitado {
   }
 
   function atualizar(): void {
-    const mic = document.querySelector<HTMLButtonElement>('#composer [data-act="ditar"]');
-    if (!mic) return;
+    const mics = document.querySelectorAll<HTMLButtonElement>('#composer [data-act="ditar"], [data-composer="caixa"] [data-act="ditar"]');
+    if (mics.length === 0) return;
     if (disp === null && !lendo) void lerDisponibilidade();
-    mic.hidden = !disp?.disponivel;
+    for (const mic of mics) mic.hidden = !disp?.disponivel;
     // O render do campo reescreve o placeholder; com a gravação aberta ele volta a dizer "Ouvindo…".
     if (fase !== "parado") mostrar(fase);
   }
@@ -122,16 +137,18 @@ export function criarControleDitado(d: DepsDitado): ControleDitado {
   function mostrar(f: typeof fase): void {
     fase = f;
     const box = caixa();
-    const pilula = document.getElementById("composer-ditado");
+    const pilula = peca<HTMLElement>('#composer-ditado, [data-composer="ditado"]');
     const campo = ta();
     const gravando = f !== "parado";
     box?.classList.toggle("gravando", gravando);
     box?.classList.toggle("transcrevendo", f === "transcrevendo");
     if (pilula) pilula.hidden = !gravando;
-    const enviar = box?.querySelector<HTMLButtonElement>('[data-act="enviar"]');
+    const enviar = box?.querySelector<HTMLButtonElement>('[data-act="enviar"], [data-composer="enviar"]');
     if (enviar) {
+      // O rótulo de sempre volta no fim (o da pílula é "Enviar ao quadro").
+      if (gravando && enviar.dataset.modo !== "ditado") enviar.dataset.rotulo = enviar.getAttribute("aria-label") ?? "Enviar";
+      enviar.setAttribute("aria-label", gravando ? "Parar e enviar" : enviar.dataset.rotulo ?? "Enviar");
       enviar.dataset.modo = gravando ? "ditado" : "";
-      enviar.setAttribute("aria-label", gravando ? "Parar e enviar" : "Enviar");
     }
     if (campo) {
       if (gravando && !campo.readOnly) placeholderAntes = campo.placeholder;
@@ -141,6 +158,10 @@ export function criarControleDitado(d: DepsDitado): ControleDitado {
     if (!gravando && relogio !== null) {
       window.clearInterval(relogio);
       relogio = null;
+    }
+    if (!gravando) {
+      raizDaGravacao = null;
+      d.aoParar?.();
     }
   }
 
@@ -154,11 +175,13 @@ export function criarControleDitado(d: DepsDitado): ControleDitado {
     else if (ev.t === "transcrevendo") mostrar("transcrevendo");
     else if (ev.t === "texto") {
       motor = null;
+      // O campo da gravação, antes de ela soltar o composer.
+      const campo = ta();
       mostrar("parado");
       const texto = ev.texto.trim();
       if (!texto) return d.avisar(textoDaFalha("vazio", d.noApp()));
       // O teto (5 min) nunca envia sozinho: o texto vai ao campo, para a pessoa conferir.
-      d.aoTexto(texto, ev.teto ? "campo" : destino);
+      d.aoTexto(texto, ev.teto ? "campo" : destino, campo);
       if (ev.teto) d.avisar(textoDaFalha("teto", d.noApp()));
     } else {
       motor = null;
@@ -170,7 +193,7 @@ export function criarControleDitado(d: DepsDitado): ControleDitado {
   }
 
   function pulsar(valor: number): void {
-    const nivel = document.getElementById("ditado-nivel");
+    const nivel = peca<HTMLElement>('#ditado-nivel, [data-composer="nivel"]');
     if (!nivel) return;
     // As barras andam da direita para a esquerda: a última é o quadro de agora.
     const barras = [...nivel.children] as HTMLElement[];
@@ -202,12 +225,13 @@ export function criarControleDitado(d: DepsDitado): ControleDitado {
     viaDialogo = antesDeConectar !== undefined;
     destino = "campo";
     desde = Date.now();
-    const tempo = document.getElementById("ditado-tempo");
+    raizDaGravacao = d.raiz?.() ?? null;
+    const tempo = peca<HTMLElement>('#ditado-tempo, [data-composer="tempo"]');
     if (tempo) tempo.textContent = "0:00";
-    for (const b of document.querySelectorAll<HTMLElement>("#ditado-nivel i")) b.style.setProperty("--nivel-ditado", "0");
+    for (const b of raiz()?.querySelectorAll<HTMLElement>('#ditado-nivel i, [data-composer="nivel"] i') ?? []) b.style.setProperty("--nivel-ditado", "0");
     mostrar("abrindo");
     relogio = window.setInterval(() => {
-      const t = document.getElementById("ditado-tempo");
+      const t = peca<HTMLElement>('#ditado-tempo, [data-composer="tempo"]');
       if (t && fase === "gravando") t.textContent = formatarTempo(Date.now() - desde);
     }, 250);
     motor = iniciarDitado({ tenantId, aoEvento, antesDeConectar });

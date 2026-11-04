@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ANEXOS_POR_MENSAGEM, MIME_PDF as MIME_PDF_SRC, MIMES_IMAGEM as IMAGEM_SRC, MIMES_TEXTO as TEXTO_SRC, TAMANHO_MAX_ANEXO } from "../../../src/contracts/anexo.ts";
-import { MIME_PDF, MIMES_IMAGEM, MIMES_TEXTO, mimeDe, motivoRecusa, POR_MENSAGEM, renderAnexosDaMensagem, renderCardArquivo, renderItens, resumo, TAMANHO_MAX } from "../../../web/lib/anexos.ts";
+import { MIME_PDF, MIMES_IMAGEM, MIMES_TEXTO, mimeDe, motivoRecusa, POR_MENSAGEM, renderAnexosDaMensagem, renderCardArquivo, renderItens, resumo, retirarDaFila, contarNaFila, prontosDaFila, soltarEhDoChat, seletorDoClipe, TAMANHO_MAX, type ItemAnexo } from "../../../web/lib/anexos.ts";
 import { htmlComposer } from "../../../web/telas/conversa.ts";
 
 describe("anexos na web (ADR-046)", () => {
@@ -69,5 +69,59 @@ describe("anexos na web (ADR-046)", () => {
     const codex = htmlComposer("x", [], { anexos: "sem_pdf" });
     expect(codex).not.toContain("application/pdf");
     expect(codex).toContain("Este agente roda no Codex");
+  });
+});
+
+describe("retirarDaFila (ADA-5: o envio da pílula tira os anexos antes do await e devolve na falha)", () => {
+  const item = (id: string, estado: ItemAnexo["estado"] = "pronto"): ItemAnexo => ({ chave: id, nome: `${id}.png`, mime: "image/png", tamanho: 1, estado, progresso: 1, ...(estado === "pronto" ? { meta: { id, nome: `${id}.png`, mime: "image/png", tamanho: 1 } as NonNullable<ItemAnexo["meta"]> } : {}) });
+  it("tira só os ids pedidos, da mesma lista e só da conversa dada", () => {
+    const a = item("a"); const b = item("b"); const subindo = item("c", "enviando"); const outra = item("x");
+    const lista = [a, subindo, b];
+    const filas = new Map([["c1", lista], ["c2", [outra]]]);
+    const r = retirarDaFila(filas, "c1", ["a", "b"]);
+    expect(r.saem).toEqual([a, b]);
+    expect(filas.get("c1")).toBe(lista);
+    expect(lista).toEqual([subindo]);
+    expect(filas.get("c2")).toEqual([outra]);
+  });
+  it("devolver põe de volta na frente, sem perder o que chegou durante o voo nem duplicar", () => {
+    const a = item("a"); const novo = item("n");
+    const filas = new Map([["c1", [a]]]);
+    const r = retirarDaFila(filas, "c1", ["a"]);
+    filas.get("c1")!.push(novo);
+    r.devolver();
+    r.devolver();
+    expect(filas.get("c1")).toEqual([a, novo]);
+  });
+  it("devolver recria a fila da conversa que foi limpa durante o voo", () => {
+    const a = item("a");
+    const filas = new Map([["c1", [a]]]);
+    const r = retirarDaFila(filas, "c1", ["a"]);
+    filas.delete("c1");
+    r.devolver();
+    expect(filas.get("c1")).toEqual([a]);
+  });
+});
+
+describe("revisão 5 do ADA-5: as regras da fila que a pílula pede ao main", () => {
+  const item = (estado: ItemAnexo["estado"], id?: string): ItemAnexo => ({ chave: id ?? estado, nome: "a.png", mime: "image/png", tamanho: 1, estado, progresso: 1,
+    ...(id ? { meta: { id, nome: "a.png", mime: "image/png", tamanho: 1 } as unknown as NonNullable<ItemAnexo["meta"]> } : {}) });
+  it("o chip com erro não conta (não esconde o Parar)", () => {
+    expect(contarNaFila([item("erro"), item("pronto", "a"), item("enviando")])).toBe(2);
+  });
+  it("prontos: com upload em curso, null; senão só os ids prontos", () => {
+    expect(prontosDaFila([item("pronto", "a"), item("enviando")])).toBeNull();
+    expect(prontosDaFila([item("pronto", "a"), item("erro"), item("pronto", "b")])).toEqual(["a", "b"]);
+  });
+  it("o soltar do chat cede ao da pílula (defaultPrevented) e pede o campo do chat e arquivos", () => {
+    const ev = (defaultPrevented: boolean, types = ["Files"]) => ({ defaultPrevented, dataTransfer: { types } });
+    expect(soltarEhDoChat(ev(false), true)).toBe(true);
+    expect(soltarEhDoChat(ev(true), true)).toBe(false);
+    expect(soltarEhDoChat(ev(false), false)).toBe(false);
+    expect(soltarEhDoChat(ev(false, ["text/plain"]), true)).toBe(false);
+  });
+  it("o clipe no Quadro abre o seletor da pílula; fora, o do chat", () => {
+    expect(seletorDoClipe({ closest: (s) => (s === "#quadro" ? {} : null) })).toBe('#quadro .qc-pil [data-composer="arquivos"]');
+    expect(seletorDoClipe({ closest: () => null })).toBe("#composer-arquivos");
   });
 });

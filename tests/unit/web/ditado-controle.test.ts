@@ -43,7 +43,7 @@ type Deps = {
   tenantId(): string | null;
   disponibilidade(): Promise<DisponibilidadeDitado | null>;
   consentir(versao: number): Promise<unknown>;
-  aoTexto(texto: string, destino: "campo" | "enviar"): void;
+  aoTexto(texto: string, destino: "campo" | "enviar", ta: unknown): void;
   avisar(texto: string): void;
   noApp(): boolean;
 };
@@ -103,7 +103,8 @@ beforeEach(() => {
   vi.stubGlobal("document", {
     querySelector: (sel: string) => (sel.includes('data-act="ditar"') ? mic : null),
     getElementById: () => null,
-    querySelectorAll: () => [],
+    // ADA-5: o 🎤 do chat e o da pílula do Quadro (um seletor só).
+    querySelectorAll: (sel: string) => (sel.includes('data-act="ditar"') ? [mic] : []),
   });
   vi.stubGlobal("window", { setInterval: () => 1, clearInterval: () => undefined });
 });

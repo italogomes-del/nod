@@ -29,7 +29,12 @@ import type { ExibirDoQuadro } from "../../src/contracts/raio-x.ts";
 import { quadroVazio, type Aviso, type ExibirDaBarra, type Filtro, type Html } from "../telas/quadro.ts";
 import { contarNaVista, ehFiltro, termoDaBusca } from "./vista-do-quadro.ts";
 import { decidirSoltura, fraseDaTrava, RECUSA_MS, relogioDaRecusa, type RelogioDaRecusa } from "./freios.ts";
-import { faixaDoQuadro, idDaNovaTarefa, pilulaDoQuadro, quadroCarregando, quadroComErro, quadroDaMeta, rotuloDoModo, semQuadro, tarefaAberta, type AgenteDoQuadro, type PainelDoQuadro, type TrocaDaFaixa } from "../telas/quadro-real.ts";
+import { ajustarAltura, type ContextoDaBarra } from "./composer.ts";
+import { comandoNoTexto } from "./barra.ts";
+import { ligarComposer, type ComposerLigado } from "./composer-ligado.ts";
+import { enterEnvia } from "./celular.ts";
+import type { Aceita } from "./anexos.ts";
+import { faixaDoQuadro, ICONE_ENVIAR_PILULA, ICONE_PARAR_PILULA, idDaNovaTarefa, pilulaDoQuadro, quadroCarregando, quadroComErro, quadroDaMeta, rotuloDoModo, semQuadro, tarefaAberta, type AgenteDoQuadro, type PainelDoQuadro, type TrocaDaFaixa } from "../telas/quadro-real.ts";
 import { anuncioDaOrdem, anuncioDaPagina, CONVERSA, ehForma, indicePeloId, moverNaOrdem, paginaPelaTecla, presa, TAREFAS, type FormaDasTarefas, type Pagina } from "./paginas.ts";
 import { guardarOrdem, ordemDoAgente, paginasDtoDe } from "./ordem-das-paginas.ts";
 import { formaDasTarefas, menuDaPagina, paginaDoApp } from "../telas/paginas.ts";
@@ -109,9 +114,54 @@ export interface DadosDoQuadro {
   irParaTarefa?: (agenteId: string, tarefaId: string) => boolean;
   /** NOD-422: de quanto em quanto tempo a linha "Trazendo do Linear" se relê (ms). */
   releImportacaoEm?: number;
+  /** ADA-5: o composer do chat na pílula (web/lib/composer.ts). Sem isto, a pílula é só o campo e o Enviar. */
+  composer?: ComposerDoQuadro;
   /** ADA-12: o prazo da reserva da altura (o teste encurta; o app usa RESERVA_MS). */
   reservaMs?: number;
 }
+
+/** ADA-5: o que a pílula do Quadro usa do composer do chat (o main dá as peças que são dele: anexos, ditado, Parar). */
+export interface ComposerDoQuadro {
+  /** No celular o Enter quebra a linha e o envio é pelo botão. */
+  celular(): boolean;
+  /** Os nomes da menção @. */
+  sugestoes(): readonly string[];
+  barra?: { contexto(): ContextoDaBarra; recarregar?(): Promise<void> | null };
+  /** Os rascunhos da pessoa (web/lib/rascunhos.ts): a pílula, a resposta, o comentário e o recado sobrevivem à troca de bot e ao recarregar. */
+  rascunhos?: { ler(chave: string): string; guardar(chave: string, texto: string): void };
+  /** A fila de anexos da conversa (a mesma do chat). `aceita` undefined = o bot não lê anexo (sem clipe). */
+  anexos?: {
+    aceita(): Aceita | undefined;
+    adicionar(arquivos: File[]): void;
+    /** Os ids prontos da conversa; null = um arquivo ainda sobe (o Enviar espera). */
+    prontos(conversa: string): readonly string[] | null;
+    quantos(conversa: string): number;
+    /**
+     * Tira da fila da conversa só os anexos que vão no envio, antes do POST (revisão 2: um segundo envio, o do chat ou
+     * a troca de bot no meio não os mandam de novo; o que foi colado durante o voo fica). `devolver` = o POST falhou.
+     */
+    retirar(conversa: string, ids: readonly string[]): { confirmar(): void; devolver(): void };
+  };
+  /** Os comandos que o nod resolve sem turno (/nova-sessao, /modelo), os mesmos do chat. true = era um deles e já rodou. */
+  comando?(texto: string, conversa: string): Promise<boolean>;
+  /** O Parar: para o turno da conversa do quadro. */
+  parar?(): Promise<void>;
+  /** Há turno vivo do chat nesta conversa (o mesmo critério do Parar do chat); sem isto, vale a faixa da pílula. */
+  trabalhando?(): boolean;
+  /** `descartar`: a vista trocou (pílula ⇄ chat) com a gravação aberta; ADR-095, a gravação não cai no campo escondido. */
+  ditado?: { ativo(): boolean; concluirEnviando(): void; descartar?(): void };
+  /** A pílula acabou de nascer (outro bot): o main desenha a fila de anexos e o 🎤 nela. */
+  aoCriarPilula?(): void;
+}
+
+/** ADA-5: as chaves dos rascunhos do Quadro, separadas das do chat (que são a própria conversa). */
+export function chaveDoRascunho(conversa: string, campo: { tarefa: string | null; id: string } | null): string {
+  return campo ? `quadro:${conversa}:${campo.tarefa ?? "-"}:${campo.id}` : `quadro:${conversa}`;
+}
+/** Os campos de texto da vista cujo rascunho fica: a resposta, o comentário e o recado. */
+const CAMPOS_COM_RASCUNHO = "textarea.qd-resp-in[id], textarea.qd-com-in[id]";
+/** Depois de um envio da pílula, o Parar espera este tanto: o clique duplo em Enviar não cancela o turno novo (revisão 4). */
+const SEM_PARAR_DEPOIS_DE_ENVIAR_MS = 600;
 
 /** Os pedaços do palco que são "a conversa": saem juntos quando o Quadro entra. */
 export const LADO_DA_CONVERSA = ["timeline", "pilula-novas", "faixa-trabalhos", "composer"] as const;
@@ -139,6 +189,10 @@ export interface QuadroNaTela {
   trocar(para: ModoDaConversa, o?: { foco?: boolean }): void;
   /** A conexão voltou sem o replay: relê o quadro (e a conversa, com um pedido esperando). */
   reler(): void;
+  /** ADA-5: a fila de anexos ou o turno mudou por fora: o botão da pílula volta a decidir entre Enviar e Parar. */
+  atualizarPilula(): void;
+  /** ADA-5: a pílula (o composer do Quadro) quando o Quadro está na tela; null com a Conversa. */
+  pilula(): HTMLFormElement | null;
   /** NOD-430: o código da tarefa num chat — abre a tarefa no quadro de `agenteId` quando a conversa dele estiver na tela. */
   abrirTarefaDe(agenteId: string, tarefaId: string): void;
   modo(): ModoDaConversa;
@@ -171,6 +225,13 @@ export interface AcoesDasPaginas {
 }
 
 export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; aoTrocar?: (m: ModoDaConversa) => void; aoMudarOrdem?: () => void; aoTarefasPedirem?: (pedem: boolean) => void; dados?: DadosDoQuadro; paginas?: AcoesDasPaginas } = {}): QuadroNaTela {
+  // Revisão 5 do ADA-5 (definido em 2026-11-04): a troca de vista descarta o ditado aberto (ADR-095) aqui, e não no
+  // main, para que o teste do Chrome prove a regra; depois avisa quem ouve.
+  const avisarTroca = (m: ModoDaConversa): void => {
+    const dt = o.dados?.composer?.ditado;
+    if (dt?.ativo()) dt.descartar?.();
+    o.aoTrocar?.(m);
+  };
   const reduzido = o.reduzido ?? (() => doc.defaultView?.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false);
   let chave: string | null = null;
   let nome = "";
@@ -212,6 +273,36 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
 
   /* ---------- NOD-442: o quadro de verdade ---------- */
   const dd = o.dados;
+  /**
+   * ADA-5 (definido em 2026-11-04): a pílula é o composer do chat (web/lib/composer.ts): altura até 170 px, @, /, colar e
+   * clipe, Enter (no celular quebra a linha), Esc. A delegação é no document filtrada pela pílula: sobrevive à regravação.
+   */
+  const cp = dd?.composer;
+  const composer: ComposerLigado | null = cp
+    ? ligarComposer(doc, {
+        raiz: '#quadro .qc-pil[data-form="conversa-no-quadro"]',
+        // Revisão 5 do ADA-5: de volta à Conversa a pílula fica no DOM (#quadro hidden); o soltar é do chat.
+        ativo: () => modo === "quadro",
+        celular: () => cp.celular(),
+        sugestoes: () => cp.sugestoes(),
+        ...(cp.barra ? { barra: cp.barra } : {}),
+        // Bot que não lê anexo: a colagem segue como texto (revisão 1), como no chat sem clipe.
+        ...(cp.anexos ? { anexar: (f: File[]) => cp.anexos?.adicionar(f), aceitaAnexo: () => !!cp.anexos?.aceita() } : {}),
+        ...(cp.ditado ? { gravando: () => !!cp.ditado?.ativo() } : {}),
+        sair: (ta) => sairDoCampo(ta),
+        aoMudar: (ta) => { guardarRascunho(ta); atualizarBotaoDaPilula(); },
+        // Revisão 2: o Enter com a pílula vazia não faz nada (como no chat); o Parar é só o clique no botão.
+        enviar: (ta) => {
+          if (!ta.value.trim() && !cp.ditado?.ativo() && (!chave || (cp.anexos?.quantos(chave) ?? 0) === 0)) return;
+          ta.form?.requestSubmit();
+        },
+      })
+    : null;
+  // ADA-5: a resposta, o comentário e o recado guardam o rascunho a cada tecla (voltam depois de trocar de bot e recarregar).
+  if (cp?.rascunhos) doc.addEventListener("input", (ev) => {
+    const el = ev.target;
+    if (el instanceof HTMLTextAreaElement && el.matches(CAMPOS_COM_RASCUNHO) && el.closest("#quadro")) guardarRascunho(el);
+  });
   let agenteId: string | null = null;
   /**
    * NOD-445 (revisão 2, achado 1): a casa (1ª posição da pílula) ainda não foi decidida porque as páginas do servidor não
@@ -383,14 +474,25 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     let conteudo = v.querySelector<HTMLElement>(":scope > .qd-conteudo");
     if (!conteudo) {
       // Merge da main (#623): a região do quadro (rodapé) vem primeiro; a do trabalho (NOD-418) depois, as duas fora da .qd-conteudo.
-      v.innerHTML = `<div class="qd-conteudo"></div><footer class="qc-wrap">${pilulaDoQuadro({ meta: q?.meta ?? null, nome })}<p class="qd-sr qd-anuncio" role="status" aria-live="polite"></p></footer><p class="qd-sr" id="qd-trab-anuncio" role="status" aria-atomic="true"></p>`;
+      const aceita = dd.composer?.anexos?.aceita();
+      v.innerHTML = `<div class="qd-conteudo"></div><footer class="qc-wrap">${pilulaDoQuadro({ meta: q?.meta ?? null, nome, ...(aceita ? { anexos: aceita } : {}) })}<p class="qd-sr qd-anuncio" role="status" aria-live="polite"></p></footer><p class="qd-sr" id="qd-trab-anuncio" role="status" aria-atomic="true"></p>`;
       conteudo = v.querySelector<HTMLElement>(":scope > .qd-conteudo");
       vistaDesenhada = null;
+      // ADA-5: o rascunho da pílula volta (outro bot, recarregar); a fila de anexos e o 🎤 vêm do main.
+      const txtNovo = v.querySelector<HTMLTextAreaElement>("#qc-txt");
+      if (txtNovo && chave) {
+        txtNovo.dataset["rascunho"] = chaveDoRascunho(chave, null);
+        const r = dd.composer?.rascunhos?.ler(txtNovo.dataset["rascunho"]) ?? "";
+        if (r) { txtNovo.value = r; composer?.atualizar(txtNovo); }
+      }
+      dd.composer?.aoCriarPilula?.();
     }
     if (!conteudo) return;
     const rascunhos = new Map<string, string>();
     // NOD-448: o nome que a pessoa digita numa coluna (renomear, nova) sobrevive ao frame que regrava o quadro.
     for (const c of conteudo.querySelectorAll<HTMLTextAreaElement | HTMLInputElement>("textarea[id], input.qd-col-in[id], input.qd-nova-in[id]")) if (c.value) rascunhos.set(c.id, c.value);
+    // ADA-5: o que está nos campos é o rascunho de cada um (o campo limpo pelo envio apaga o dele).
+    for (const c of conteudo.querySelectorAll<HTMLTextAreaElement>(CAMPOS_COM_RASCUNHO)) guardarRascunho(c);
     const ativo = doc.activeElement;
     const focoId = ativo instanceof HTMLElement && conteudo.contains(ativo) && ativo.id ? ativo.id : null;
     const focoColuna = ativo instanceof HTMLElement && conteudo.contains(ativo) && !ativo.id ? seletorDoFocoDaColuna(ativo) ?? seletorDoFocoDoCard(ativo) : null;
@@ -431,6 +533,7 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     // NOD-445: Lista | Quadro em Tarefas, na barra dos filtros (só com o quadro de verdade e nenhuma tarefa aberta).
     conteudo.querySelector(".qd-barra-q .qd-barra-dir")?.insertAdjacentHTML("afterbegin", formaDasTarefas(forma));
     for (const [id, valor] of rascunhos) { const c = doc.getElementById(id); if (c instanceof HTMLTextAreaElement || c instanceof HTMLInputElement) c.value = valor; }
+    restaurarRascunhos(conteudo);
     // ADA-12: a releitura que volta mais curta por um instante não encolhe a vista (o navegador cortaria a rolagem).
     if (alturaAntes > 0) reserva.depois(conteudo, alturaAntes);
     // ADA-7: a rolagem volta depois dos rascunhos (o campo que cresce com o texto mudaria a altura e a vista pularia).
@@ -457,9 +560,89 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     desenharFaixa();
   }
 
+  /** ADA-5: a chave de rascunho do campo da vista (a resposta, o comentário, o recado), marcada nele quando ele nasce. */
+  function restaurarRascunhos(conteudo: HTMLElement): void {
+    const r = dd?.composer?.rascunhos;
+    if (!chave) return;
+    for (const c of conteudo.querySelectorAll<HTMLTextAreaElement>(CAMPOS_COM_RASCUNHO)) {
+      // Revisão 6 do ADA-5 (definido em 2026-11-04): a resposta é da tarefa que pergunta (o card e a tarefa aberta), não
+      // da tarefa aberta na hora; assim o envio limpa todas as chaves dela.
+      const daTarefa = c.closest<HTMLElement>('form[data-form="responder-tarefa"]')?.dataset["id"] ?? aberta;
+      c.dataset["rascunho"] = chaveDoRascunho(chave, { tarefa: daTarefa, id: c.id });
+      if (!c.value && r) c.value = r.ler(c.dataset["rascunho"]);
+    }
+  }
+  /**
+   * Revisão 6 do ADA-5 (definido em 2026-11-04): a resposta foi aceita, a pergunta acabou. Saem os rascunhos de todos os
+   * campos de resposta da tarefa (o card, a linha do celular, a tarefa aberta) e, na mesma conversa, o texto dos campos
+   * que estão na tela agora (o nó do começo do envio pode ter sido regravado por um frame no meio).
+   */
+  function limparRespostaEnviada(conv: string, tarefa: string, resposta: string): void {
+    const ids = [`qd-resp-${tarefa}`, `qd-cresp-card-${tarefa}`, `qd-cresp-linha-${tarefa}`];
+    for (const id of ids) cp?.rascunhos?.guardar(chaveDoRascunho(conv, { tarefa, id }), "");
+    if (conv !== chave) return;
+    for (const id of ids) {
+      const el = doc.getElementById(id);
+      // Revisão 7: o campo regravado no voo pode ter sido editado; a edição fica.
+      if (el instanceof HTMLTextAreaElement && el.value.trim() === resposta) el.value = "";
+    }
+  }
+  function guardarRascunho(c: HTMLTextAreaElement): void {
+    const k = c.dataset["rascunho"];
+    if (k) dd?.composer?.rascunhos?.guardar(k, c.value);
+  }
+  /**
+   * Esc com texto sai do campo e o rascunho fica (ADA-5). Com uma tarefa aberta o foco vai ao conteúdo dela, para o Esc
+   * seguinte fechá-la (QA do ADA-5, 2026-11-04: com o foco no body o segundo Esc não fazia nada).
+   */
+  function sairDoCampo(el: HTMLElement): void {
+    const c = aberta ? vista()?.querySelector<HTMLElement>(":scope > .qd-conteudo") : null;
+    if (!c) { el.blur(); return; }
+    if (!c.hasAttribute("tabindex")) c.tabIndex = -1;
+    c.focus({ preventScroll: true });
+  }
+  /** As conversas com um envio da pílula em voo (revisão 2 do ADA-5). */
+  const enviandoEm = new Set<string>();
+  /** Quando a pílula mandou o último pedido de cada conversa (revisão 4 do ADA-5, definido em 2026-11-04). */
+  const enviouEm = new Map<string, number>();
+  const pilulaNaTela = (): HTMLFormElement | null => vista()?.querySelector<HTMLFormElement>('.qc-pil[data-form="conversa-no-quadro"]') ?? null;
+  /** O bot desta conversa está trabalhando (o critério do Parar do chat; sem ele, a faixa aguardando). */
+  function trabalhando(): boolean {
+    const cp = dd?.composer;
+    if (!cp?.parar || !chave) return false;
+    return cp.trabalhando ? cp.trabalhando() : faixa.tipo === "aguardando";
+  }
+  function temConteudo(): boolean {
+    const txt = pilulaNaTela()?.querySelector<HTMLTextAreaElement>("#qc-txt");
+    return !!txt?.value.trim() || (!!chave && (dd?.composer?.anexos?.quantos(chave) ?? 0) > 0);
+  }
+  /** ADA-5: com o bot respondendo e nada para mandar, o botão da pílula é o Parar (o mesmo botão, outro rótulo). */
+  function podeParar(): boolean {
+    return !!pilulaNaTela()?.querySelector("#qc-txt") && trabalhando() && !temConteudo();
+  }
+  function atualizarBotaoDaPilula(): void {
+    const pil = pilulaNaTela();
+    const bt = pil?.querySelector<HTMLButtonElement>('[data-composer="enviar"]');
+    // Revisão 3 (como botoesDoCampo no chat): com o bot trabalhando e algo no campo, o Parar fica ao lado do Enviar.
+    const segundo = pil?.querySelector<HTMLButtonElement>('[data-composer="parar"]');
+    if (segundo) {
+      const ver = trabalhando() && (temConteudo() || bt?.dataset["modo"] === "ditado");
+      if (segundo.hidden === ver) segundo.hidden = !ver;
+      const rotSeg = `Parar a resposta de ${nome}`;
+      if (segundo.getAttribute("aria-label") !== rotSeg) segundo.setAttribute("aria-label", rotSeg);
+    }
+    // Gravando, o botão é do ditado ("Parar e enviar"); ele devolve o rótulo no fim.
+    if (!bt || bt.dataset["modo"] === "ditado") return;
+    const parar = podeParar();
+    const rot = parar ? `Parar a resposta de ${nome}` : "Enviar ao quadro";
+    if (bt.getAttribute("aria-label") !== rot) { bt.setAttribute("aria-label", rot); bt.innerHTML = parar ? ICONE_PARAR_PILULA : ICONE_ENVIAR_PILULA; }
+    bt.dataset["modo"] = parar ? "parar" : "";
+  }
+
   function desenharFaixa(): void {
     const lugar = doc.getElementById("qc-faixa");
     if (!lugar || !dd) return;
+    atualizarBotaoDaPilula();
     const bot = agenteId ? dd.agente(agenteId) : null;
     // ADA-7: o histórico aberto (rolável) fica onde a pessoa rolou quando a faixa é regravada.
     const rolagem = guardarRolagem(lugar, lugar);
@@ -851,25 +1034,70 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     const a = dd?.api();
     const txt = form.querySelector<HTMLTextAreaElement>("#qc-txt");
     if (!a || !chave || !txt) return;
+    // Revisão 2: com um envio da pílula em voo nesta conversa, o segundo (Enter + botão, duplo clique) é ignorado.
+    if (enviandoEm.has(chave)) return;
+    const cp = dd?.composer;
+    // ADR-095: com o ditado gravando, o Enviar (e o Enter) param a gravação e enviam o texto direto.
+    if (cp?.ditado?.ativo()) { cp.ditado.concluirEnviando(); return; }
     const bruto = txt.value.trim();
-    if (!bruto) return;
+    // ADA-5: os anexos da fila (a mesma do chat); com um arquivo subindo, o Enviar não manda nada, como no chat.
+    const ids = cp?.anexos ? cp.anexos.prontos(chave) : [];
+    if (ids === null) return;
+    if (!bruto && ids.length === 0) {
+      // Revisão 4: o segundo clique de um clique duplo em Enviar não vira Parar do turno que acabou de começar.
+      if (podeParar() && Date.now() - (enviouEm.get(chave) ?? 0) >= SEM_PARAR_DEPOIS_DE_ENVIAR_MS) void cp?.parar?.();
+      return;
+    }
+    // Revisão 3: a trava entra antes do primeiro await (o comando "/" também não roda duas vezes).
+    const c = chave;
+    enviandoEm.add(c);
+    try {
+      await enviarComTrava(txt, c, bruto, ids);
+    } finally {
+      enviandoEm.delete(c);
+      enviouEm.set(c, Date.now());
+    }
+  }
+
+  async function enviarComTrava(txt: HTMLTextAreaElement, c: string, bruto: string, ids: readonly string[]): Promise<void> {
+    const a = dd?.api();
+    const cp = dd?.composer;
+    if (!a) return;
+    // ADA-5 (revisão 1): "/nova-sessao" e "/modelo" rodam na hora, como no chat (a lista "/" promete isso).
+    const ehComando = bruto.startsWith("/") && !!comandoNoTexto(cp?.barra?.contexto().dto ?? null, bruto);
+    if (ids.length === 0 && ehComando && cp?.comando) {
+      if (await cp.comando(bruto, c)) {
+        if (cp.rascunhos?.ler(chaveDoRascunho(c, null)).trim() === bruto) cp.rascunhos.guardar(chaveDoRascunho(c, null), "");
+        // Revisão 6: o campo da tela agora (A→B→A recria a pílula), como no envio comum.
+        const agora = c === chave ? pilulaNaTela()?.querySelector<HTMLTextAreaElement>("#qc-txt") ?? txt : null;
+        if (agora && agora.value.trim() === bruto) { agora.value = ""; composer?.atualizar(agora); }
+        return;
+      }
+    }
     const t = tarefaNoQuadro(q, aberta);
     // Com uma tarefa aberta o recado vai sobre ela: só o id, que o bot lê pelo gerir_quadro. O título e o id do Linear
-    // podem ter vindo de fora e não entram na fala confiável da pessoa (revisão do PR #612).
-    const texto = t ? `Sobre a tarefa ${t.id} do quadro: ${bruto}` : bruto;
+    // podem ter vindo de fora e não entram na fala confiável da pessoa (revisão do PR #612). Um comando "/" do CLI vai
+    // cru: com o prefixo, o "/" deixaria de estar no começo e o CLI não o rodaria (ADA-5, revisão 1).
+    const texto = t && !ehComando ? `Sobre a tarefa ${t.id} do quadro: ${bruto}` : bruto;
     loteAntes = q?.ultimoLote?.id ?? null;
     histAberto = false;
     mudarFaixa({ tipo: "aguardando", pedidoId: null });
-    const c = chave;
+    const saem = ids.length > 0 ? cp?.anexos?.retirar(c, ids) ?? null : null;
     try {
-      const r = await a.enviar(c, texto, [], globalThis.crypto?.randomUUID?.());
+      const r = await a.enviar(c, texto, ids, globalThis.crypto?.randomUUID?.());
+      saem?.confirmar();
+      // O rascunho do que foi mandado não volta (mesmo que a pessoa esteja noutro bot), salvo se ela já escreveu outro.
+      if (cp?.rascunhos?.ler(chaveDoRascunho(c, null)).trim() === bruto) cp.rascunhos.guardar(chaveDoRascunho(c, null), "");
       if (c !== chave) return;
-      // Só limpa se a pessoa não começou outro recado enquanto este ia (codex, rodada 3).
-      if (txt.value.trim() === bruto) txt.value = "";
+      // Revisão 2: o campo é o da tela agora (A→B→A recria a pílula; o nó do começo pode ter saído do DOM). Só limpa se a
+      // pessoa não começou outro recado enquanto este ia (codex, rodada 3).
+      const agora = pilulaNaTela()?.querySelector<HTMLTextAreaElement>("#qc-txt");
+      if (agora && agora.value.trim() === bruto) { agora.value = ""; composer?.atualizar(agora); }
       const pedidoId = r.ids["mensagem"] ?? null;
       mudarFaixa({ tipo: "aguardando", pedidoId });
       void lerConversa();
     } catch {
+      saem?.devolver();
       if (c !== chave) return;
       mudarFaixa({ tipo: "erro", texto: "Não consegui mandar. O texto continua na pílula." });
     }
@@ -892,6 +1120,8 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     const de = agenteId;
     try {
       const r = await a.responderTarefa(de, id, resposta);
+      // O rascunho do que foi respondido não volta quando a tarefa pedir de novo (revisões 1 e 6).
+      if (c) limparRespostaEnviada(c, id, resposta);
       if (c !== chave || de !== agenteId) return;
       campo.value = "";
       aplicarQuadro(r.quadro, [id]);
@@ -1375,7 +1605,12 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     for (const e of els) {
       e.classList.remove("qd-saiu");
       e.inert = false;
-      if (e.id === "quadro") e.hidden = false;
+      if (e.id === "quadro") {
+        e.hidden = false;
+        // Revisão 5 do ADA-5: o rascunho volta com o #quadro escondido (scrollHeight 0); a altura só se mede à vista.
+        const ta = e.querySelector<HTMLTextAreaElement>("#qc-txt");
+        if (ta?.value) ajustarAltura(ta);
+      }
     }
   }
   function esconder(els: HTMLElement[]): void {
@@ -1515,7 +1750,7 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
       if (outra) desenharVista();
       marcar();
       anunciarPagina();
-      o.aoTrocar?.(para);
+      avisarTroca(para);
       [saindo, entrando] = [entrando, saindo];
       for (const e of saindo) e.inert = true;
       for (const e of entrando) e.inert = false;
@@ -1534,7 +1769,7 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     marcar();
     anunciarPagina();
     // Depois de `modo = para`: quem ouve (o main, que marca a conversa como lida na volta) já vê o modo novo.
-    o.aoTrocar?.(para);
+    avisarTroca(para);
     const sai = para === "quadro" ? conversa() : [v];
     const entra = para === "quadro" ? [v] : conversa();
     saindo = sai;
@@ -1600,7 +1835,7 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
           modo = "conversa";
           // Fora do desenho em curso (o main desenha de novo ao ouvir a volta): numa microtarefa, se nada mudou no meio.
           const c = chave;
-          if (estava !== "conversa") queueMicrotask(() => { if (c === chave && modo === "conversa") o.aoTrocar?.("conversa"); });
+          if (estava !== "conversa") queueMicrotask(() => { if (c === chave && modo === "conversa") avisarTroca("conversa"); });
         } else pagina = i;
         const u = indicePeloId(paginas, idUltima);
         ultimaDaVista = u > 0 ? u : 1;
@@ -1968,7 +2203,13 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     }
     if (qual === "col-renomear" || qual === "col-nova" || qual === "col-remover" || qual === "col-passagem" || qual === "col-trava" || qual === "col-prazo") { ev.preventDefault(); enviarColuna(form); return; }
     if (qual === "adicionar-pessoa") { ev.preventDefault(); void adicionarPessoa(form); return; }
-    if (qual === "recado-trabalho") { ev.preventDefault(); trabs.enviarRecado(form); return; }
+    if (qual === "recado-trabalho") { ev.preventDefault(); trabs.enviarRecado(form, (c) => { if (c instanceof HTMLTextAreaElement) guardarRascunho(c); }, (c, texto) => {
+      // Revisão 4: a chave é a do campo do envio; a pessoa pode ter trocado de bot ou de tarefa antes da volta. Revisão 7:
+      // só sai se ainda é o texto enviado (o recado novo, digitado durante o voo, fica).
+      const k = c instanceof HTMLTextAreaElement ? c.dataset["rascunho"] : undefined;
+      const r = dd?.composer?.rascunhos;
+      if (k && r && r.ler(k).trim() === texto) r.guardar(k, "");
+    }); return; }
     if (qual === "comentar-tarefa") {
       ev.preventDefault();
       const de = agenteId;
@@ -1978,9 +2219,19 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
       rol?.antes();
       fimDoComentarioDe = aberta;
       fimDoComentarioAte = vq && (rol?.alvo("caixa")?.colado || vq.scrollHeight - vq.clientHeight <= COLADO_PX) ? daPessoaAte : 0;
+      const enviado = form.querySelector<HTMLTextAreaElement>("textarea.qd-com-in");
+      const chaveCom = enviado?.dataset["rascunho"];
+      const textoCom = enviado?.value.trim() ?? "";
       void coms.enviar(form).then((r) => {
         if (!r) { daPessoaAte = 0; fimDoComentarioAte = 0; mudarFaixa({ tipo: "erro", texto: "Não consegui mandar o comentário. Ele continua no campo." }); }
-        else if (de === agenteId) aplicarQuadro(r.quadro, aberta ? [aberta] : []);
+        else {
+          // ADA-5: o comentário foi: o rascunho dele sai (o campo, se ainda está na tela, já está limpo).
+          // A vista pode ter se redesenhado no meio: o campo da tela que ainda tem o texto enviado é limpo também.
+          const atual = enviado ? doc.getElementById(enviado.id) : null;
+          if (atual instanceof HTMLTextAreaElement && atual.value.trim() === textoCom) atual.value = "";
+          if (chaveCom && (!(atual instanceof HTMLTextAreaElement) || !atual.value.trim())) dd.composer?.rascunhos?.guardar(chaveCom, "");
+          if (de === agenteId) aplicarQuadro(r.quadro, aberta ? [aberta] : []);
+        }
       });
       return;
     }
@@ -2089,16 +2340,35 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     if (/^(Arrow|Page)/.test(ev.key) || ev.key === "Home" || ev.key === "End" || (ev.key.length === 1 && ev.key !== " " && !ev.ctrlKey && !ev.metaKey)) el.dataset["teclado"] = "1";
   });
   doc.addEventListener("pointerdown", (ev) => { if (ehCampoDaTarefa(ev.target)) delete ev.target.dataset["teclado"]; });
+  // ADA-5: "/" fora de campo, com uma tarefa aberta, foca a pílula (como no chat). Sem tarefa aberta e com a busca à vista,
+  // o "/" é da busca (NOD-460), que anuncia o atalho no aria-keyshortcuts — revisão 4 do ADA-5, definido em 2026-11-04.
+  doc.addEventListener("keydown", (ev) => {
+    if (!dd || ev.key !== "/" || ev.ctrlKey || ev.metaKey || ev.altKey || ev.isComposing || ev.defaultPrevented || modo !== "quadro") return;
+    if (!aberta && vista()?.querySelector("#qd-busca")) return;
+    const el = ev.target;
+    if (el instanceof Element && el.closest('input, textarea, select, [contenteditable=""], [contenteditable="true"]')) return;
+    if (doc.querySelector("dialog[open]")) return;
+    const txt = pilulaNaTela()?.querySelector<HTMLTextAreaElement>("#qc-txt");
+    if (!txt) return;
+    ev.preventDefault();
+    txt.focus();
+  });
   doc.addEventListener("focusout", (ev) => { if (dd && ehCampoDaTarefa(ev.target) && ev.target.dataset["teclado"]) aplicarCampoDaTarefa(ev.target); });
   doc.addEventListener("keydown", (ev) => {
     if (!dd) return;
     const el = ev.target as Element | null;
-    // NOD-420: a resposta também (no card e na tarefa aberta); a composição do IME (keyCode 229) não envia.
-    if (ev.key === "Enter" && !ev.shiftKey && !ev.isComposing && ev.keyCode !== 229 && el instanceof HTMLTextAreaElement && (el.id === "qc-txt" || el.classList.contains("qd-com-in") || el.classList.contains("qd-resp-in"))) {
+    // NOD-420: a resposta também (no card e na tarefa aberta); a composição do IME (keyCode 229) não envia. ADA-5: no
+    // celular o Enter quebra a linha (envia pelo botão); a pílula ligada ao composer decide no composer.
+    const queEnvia = el instanceof HTMLTextAreaElement && ((el.id === "qc-txt" && !composer) || el.classList.contains("qd-com-in") || el.classList.contains("qd-resp-in"));
+    if (queEnvia && ev.key === "Enter" && ev.keyCode !== 229 && enterEnvia(ev, dd.composer?.celular() ?? false)) {
       ev.preventDefault();
       // Responder vazio não envia (revisão do PR #624): o Enter só não pula linha.
       if (el.classList.contains("qd-resp-in") && !el.value.trim()) return;
       el.form?.requestSubmit();
+    } else if (ev.key === "Escape" && (ev.isComposing || ev.keyCode === 229)) {
+      // QA do ADA-5: o Esc da composição do IME é do IME (não sai do campo nem fecha a tarefa).
+    } else if (ev.key === "Escape" && dd.composer?.ditado?.ativo()) {
+      // ADR-095: Esc com o ditado aberto descarta a gravação (o main faz isso); aqui não sai do campo nem fecha a tarefa.
     } else if (ev.key === "Escape" && naRecusa(el)) {
       ev.preventDefault();
       sairDaRecusa();
@@ -2112,6 +2382,10 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     } else if (ev.key === "Escape" && soltarNaAberta && aberta && el?.closest?.("#quadro .qd-conteudo")) {
       ev.preventDefault();
       desistirDoSoltarNaAberta();
+    } else if (ev.key === "Escape" && el instanceof HTMLTextAreaElement && el.value.trim() && el.closest("#quadro")) {
+      // ADA-5: Esc com texto num campo do Quadro só tira o foco (o rascunho fica); fechar a tarefa é o Esc seguinte.
+      ev.preventDefault();
+      sairDoCampo(el);
     } else if (ev.key === "Escape" && aberta && el?.closest?.("#quadro .qd-conteudo")) {
       ev.preventDefault();
       voltarAoQuadro();
@@ -2466,5 +2740,6 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     return Math.max(1, indicePeloId(paginas, TAREFAS.id));
   }
 
-  return { sincronizar, trocar, irPara, andar, moverAtual, totalDePaginas, abrirPagina, marcarChegada, aoFrame, reler, abrirTarefaDe, modo: () => modo, pagina: () => pagina, abrirTarefa: abrirPeloLink, aCaminhoDoQuadro };
+  return { sincronizar, trocar, irPara, andar, moverAtual, totalDePaginas, abrirPagina, marcarChegada, aoFrame, reler, abrirTarefaDe, modo: () => modo, pagina: () => pagina, abrirTarefa: abrirPeloLink, aCaminhoDoQuadro,
+    atualizarPilula: atualizarBotaoDaPilula, pilula: () => (modo === "quadro" ? pilulaNaTela() : null) };
 }

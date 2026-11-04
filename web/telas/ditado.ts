@@ -23,9 +23,11 @@ export function htmlBotaoDitado(): string {
   return `<button type="button" class="mic" data-act="ditar" aria-label="Ditar mensagem" title="Ditar" hidden>${ICONE_LIGACAO.microfone(20)}</button>`;
 }
 
-export function htmlPilulaDitado(): string {
+/** `semId` (ADA-5): a pílula do Quadro, que fica no DOM junto com a do chat; as peças vão por `data-composer`. */
+export function htmlPilulaDitado(semId = false): string {
   const barras = Array.from({ length: BARRAS }, () => "<i></i>").join("");
-  return `<div class="ditado" id="composer-ditado" hidden><button type="button" class="ditado-parar" data-act="ditado-parar" aria-label="Parar e revisar o texto" title="Parar e revisar">${QUADRADO}</button><span class="ditado-ouvindo" role="timer" aria-live="off"><span class="ditado-tempo" id="ditado-tempo">0:00</span><span class="ditado-nivel" id="ditado-nivel" aria-hidden="true">${barras}</span></span></div>`;
+  const marca = (id: string, nome: string) => (semId ? `data-composer="${nome}"` : `id="${id}"`);
+  return `<div class="ditado" ${marca("composer-ditado", "ditado")} hidden><button type="button" class="ditado-parar" data-act="ditado-parar" aria-label="Parar e revisar o texto" title="Parar e revisar">${QUADRADO}</button><span class="ditado-ouvindo" role="timer" aria-live="off"><span class="ditado-tempo" ${marca("ditado-tempo", "tempo")}>0:00</span><span class="ditado-nivel" ${marca("ditado-nivel", "nivel")} aria-hidden="true">${barras}</span></span></div>`;
 }
 
 /** 0:08, 1:05, 4:59. */
@@ -40,6 +42,26 @@ export function juntarAoCampo(campo: string, ditado: string): string {
   if (!novo) return campo;
   const antes = campo.replace(/\s+$/, "");
   return antes ? `${antes} ${novo}` : novo;
+}
+
+/**
+ * ADA-5 (definido em 2026-11-04): o texto ditado na pílula do Quadro. O "input" liga o que o composer faz a cada mudança
+ * (altura, rascunho, Enviar ⇄ Parar); "enviar" manda pelo form da pílula, como o botão.
+ */
+type CampoDaPilula = {
+  value: string;
+  form: { requestSubmit(): void } | null;
+  dispatchEvent(ev: Event): boolean;
+  focus(): void;
+  setSelectionRange(inicio: number, fim: number): void;
+};
+
+export function ditadoNaPilula(campo: CampoDaPilula, texto: string, destino: "campo" | "enviar"): void {
+  campo.value = juntarAoCampo(campo.value, texto);
+  campo.dispatchEvent(new Event("input", { bubbles: true }));
+  if (destino === "enviar") { campo.form?.requestSubmit(); return; }
+  campo.focus();
+  campo.setSelectionRange(campo.value.length, campo.value.length);
 }
 
 /** O aviso de cada falha. `noApp` muda onde liberar o microfone (Ajustes do Sistema × navegador). */

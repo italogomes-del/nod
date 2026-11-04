@@ -3,7 +3,7 @@ import { ERROS_DITADO } from "../../../src/contracts/ditado.ts";
 import { TEXTO_CONSENTIMENTO_VOZ, VERSAO_CONSENTIMENTO_VOZ } from "../../../src/contracts/ligacao.ts";
 import { energiaPcm, lerMsgDitado } from "../../../web/lib/ditado-protocolo.ts";
 import { htmlComposer } from "../../../web/telas/conversa.ts";
-import { formatarTempo, juntarAoCampo, passoAposSemConsentimento, passoDoToque, textoDaFalha } from "../../../web/telas/ditado.ts";
+import { ditadoNaPilula, formatarTempo, juntarAoCampo, passoAposSemConsentimento, passoDoToque, textoDaFalha } from "../../../web/telas/ditado.ts";
 import { TEXTO_CONSENTIMENTO, VERSAO_CONSENTIMENTO } from "../../../web/telas/ligacao.ts";
 
 describe("ditado na web (ADR-095)", () => {
@@ -87,5 +87,33 @@ describe("ditado na web (ADR-095)", () => {
   it("o aviso de versão nova diz como atualizar no app e no navegador", () => {
     expect(textoDaFalha("aviso-mudou", true)).toBe("O aviso sobre a voz mudou. Feche e abra o app para ditar.");
     expect(textoDaFalha("aviso-mudou", false)).toBe("O aviso sobre a voz mudou. Atualize a página para ditar.");
+  });
+
+  describe("ADA-5: o texto ditado na pílula do Quadro", () => {
+    const campo = (value: string) => {
+      const ev: string[] = [];
+      const c = { value, enviou: 0, focou: 0, cursor: -1, eventos: ev,
+        form: { requestSubmit: () => { c.enviou++; } },
+        dispatchEvent: (e: Event) => { ev.push(`${e.type}:${e.bubbles}`); return true; },
+        focus: () => { c.focou++; },
+        setSelectionRange: (i: number) => { c.cursor = i; } };
+      return c;
+    };
+    it("campo: junta ao que estava, avisa o composer (input que sobe) e põe o cursor no fim, sem enviar", () => {
+      const c = campo("já tinha");
+      ditadoNaPilula(c, " e ditei ", "campo");
+      expect(c.value).toBe("já tinha e ditei");
+      expect(c.eventos).toEqual(["input:true"]);
+      expect(c.enviou).toBe(0);
+      expect(c.focou).toBe(1);
+      expect(c.cursor).toBe(c.value.length);
+    });
+    it("enviar: manda pelo form da pílula (como o botão)", () => {
+      const c = campo("");
+      ditadoNaPilula(c, "manda", "enviar");
+      expect(c.value).toBe("manda");
+      expect(c.enviou).toBe(1);
+      expect(c.focou).toBe(0);
+    });
   });
 });
