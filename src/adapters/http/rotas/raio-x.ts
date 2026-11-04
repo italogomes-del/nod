@@ -1,4 +1,4 @@
-import { fecharAviso, gravarPreferencias, lerPreferencias, raioXDaConversa, raioXDoTurno } from "../../../use-cases/raio-x.ts";
+import { exibirDoQuadro, fecharAviso, gravarPreferencias, lerPreferencias, raioXDaConversa, raioXDoTurno } from "../../../use-cases/raio-x.ts";
 import type { Rota } from "../roteador.ts";
 import { corpoObjeto, criarExecutor, type DepsRotas } from "./executar-caso.ts";
 
@@ -38,6 +38,15 @@ export function criarRotasRaioX(d: DepsRotas): Rota[] {
       async handler(ctx) {
         const corpo = corpoObjeto(await ctx.corpo());
         ctx.json(200, await executar(ctx.escopo, fecharAviso, { chave: corpo.chave }));
+      },
+    },
+    {
+      // NOD-460 (0149): o Exibir do quadro em tela cheia, da pessoa e por quadro (o id na URL).
+      metodo: "PUT", acao: "preferencias.exibir_quadro",
+      padrao: new RegExp(`^/preferencias/quadros/${ID}/exibir$`),
+      async handler(ctx) {
+        const corpo = corpoObjeto(await ctx.corpo());
+        ctx.json(200, await executar(ctx.escopo, exibirDoQuadro, { quadroId: ctx.params.id ?? "", recolhidas: corpo.recolhidas, compacto: corpo.compacto }));
       },
     },
     {

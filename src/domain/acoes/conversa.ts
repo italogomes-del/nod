@@ -69,6 +69,8 @@ export const ACOES_CONVERSA = [
   { id: "voz.consentir", titulo: "Dar o consentimento de voz", risco: "pessoa_confirma", cartaoNoChat: false, chat: { estado: "nunca", motivo: "consentimento é ato da pessoa na tela, não um pedido ao bot" } },
   { id: "preferencias.salvar", titulo: "Salvar as preferências", risco: "muda", cartaoNoChat: false, chat: falta },
   { id: "preferencias.fechar_aviso", titulo: "Fechar um aviso", risco: "muda", cartaoNoChat: false, chat: ESTADO_DA_TELA },
+  // NOD-460: mostrar as colunas recolhidas e a densidade compacta do quadro em tela cheia (só a tela da pessoa lê).
+  { id: "preferencias.exibir_quadro", titulo: "Mudar o Exibir do quadro em tela cheia", risco: "muda", cartaoNoChat: false, chat: ESTADO_DA_TELA },
   { id: "artefatos.salvar_estado", titulo: "Salvar o que a pessoa marcou num artefato", risco: "muda", cartaoNoChat: false, chat: ESTADO_DA_TELA },
   { id: "telemetria.registrar", titulo: "Registrar linhas de telemetria da tela", risco: "muda", cartaoNoChat: false, chat: ESTADO_DA_TELA },
   { id: "onboarding.etapa", titulo: "Avançar uma etapa do onboarding", risco: "muda", cartaoNoChat: false, chat: ONBOARDING },

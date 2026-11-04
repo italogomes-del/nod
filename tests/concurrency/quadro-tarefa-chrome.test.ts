@@ -9,7 +9,7 @@ import { abrirChrome, avaliar, type Cdp } from "../../scripts/carga-tela/cdp.ts"
 
 /**
  * NOD-416 (ADR-144) no Chrome de verdade, com o CSS e o JS do app e uma API falsa na página (sem servidor):
- *  - "Nova tarefa…" na barra cria pelo título; o card cai no Backlog com o código do quadro (ADA-1), o título e o responsável;
+ *  - o "+" da coluna (NOD-460) cria pelo título; o card cai no Backlog com o código do quadro (ADA-1), o título e o responsável;
  *  - o link (`?tarefa=ADA-1`, aqui o `abrirTarefa` que o main chama) abre a tarefa em tela cheia, e o código vai para a URL;
  *  - Status e Responsável mudam na tarefa aberta; o histórico mostra quem e quando. Pelo teclado (revisão do PR #623,
  *    WCAG 3.2.2), a seta só escolhe: vale no Enter ou ao sair do campo; com o mouse, na hora. Quando a mudança faz o bot
@@ -51,8 +51,10 @@ const api = {
   removerQuadro: async () => mutacao([]),
   criarTarefa: async (a, campos) => {
     chamadas.push(["criar", campos]);
+    // Revisão do PR #645: o teste segura a criação para provar que o Enter duplo não cria duas.
+    if (window.__segurarCriar) await window.__segurarCriar;
     const i = q.tarefas.length + 1;
-    const t = { id: "t" + i, quadroId: "q1", titulo: campos.titulo, descricao: "", status: "backlog", voltarPara: null, agenteId: "a", ordem: i, linearId: null, linearUrl: null, prUrl: null,
+    const t = { id: "t" + i, quadroId: "q1", titulo: campos.titulo, descricao: "", status: campos.status ?? "backlog", voltarPara: null, agenteId: "a", ordem: i, linearId: null, linearUrl: null, prUrl: null,
       pergunta: null, resposta: null, deFora: false, turnoId: null, criadoEm: agora, mudadoEm: agora, terminadaEm: null, execucao: null, agenteNome: "Ada", numero: i,
       codigo: "ADA-" + i, branch: "ada-" + i + "-revisar-a-copy" };
     q.tarefas.push(t);
@@ -86,6 +88,13 @@ const api = {
   },
   historicoTarefa: async (a, id) => ({ historico: structuredClone(historico.get(id) ?? []) }),
   quadros: async () => ({ quadros: [{ id: "q1", agenteId: "a", agenteNome: "Ada", prefixo: "ADA" }, { id: "q2", agenteId: "c", agenteNome: "Caio", prefixo: "CA" }] }),
+  // NOD-460 (0149): o Exibir guardado por quadro e a gravação (\`__exibirFalha\` = o servidor recusa).
+  preferencias: async () => ({ quadroExibir: structuredClone(window.__exibirGuardado ?? {}) }),
+  exibirQuadro: async (quadroId, e) => {
+    chamadas.push(["exibir", quadroId, e]);
+    if (window.__exibirFalha) throw new ErroApi(500, "erro_interno", "falhou");
+    return { quadroExibir: { [quadroId]: e } };
+  },
 };
 window.__chamadas = chamadas;
 window.__q2 = q2;
@@ -171,19 +180,29 @@ descrever("NOD-416 no Chrome real: criar, abrir pelo link, mudar status e respon
     await cdp.enviar("Page.navigate", { url });
     await ate("window.__montar");
     await avaliar(cdp, "window.__montar()");
-    await ate(`document.querySelector('#quadro [data-form="nova-tarefa"]')`);
+    // NOD-460: o "+" do Backlog abre o campo no topo da coluna, com o foco nele.
+    const mais = `#quadro .qd-so-largo [data-act="col-nova-tarefa"][data-status="backlog"]`;
+    // O Backlog vazio começa recolhido (tira, sem "+"): abre a coluna antes.
+    await ate(`document.querySelector('#quadro .qd-so-largo [data-act="abrir-coluna"][data-status="backlog"]')`);
+    if (!(await avaliar<boolean>(cdp, `!!document.querySelector('${mais}')`))) await avaliar(cdp, `document.querySelector('#quadro .qd-so-largo [data-act="abrir-coluna"][data-status="backlog"]').click()`);
+    await ate(`document.querySelector('${mais}')`);
+    await avaliar(cdp, `document.querySelector('${mais}').click()`);
+    await ate(`document.activeElement?.id === "qd-nova-grade-backlog"`);
 
-    // Nova tarefa…: cai no Backlog, com o código do quadro, o título e o responsável; o campo limpa.
-    await avaliar(cdp, `document.querySelector("#qd-nova-tit").value = "Revisar a copy"`);
+    // Cai no Backlog, com o código do quadro, o título e o responsável; o campo fica aberto e limpo para a próxima.
+    await avaliar(cdp, `document.querySelector("#qd-nova-grade-backlog").value = "Revisar a copy"`);
     await avaliar(cdp, `document.querySelector('#quadro [data-form="nova-tarefa"]').requestSubmit()`);
     await ate(`document.querySelector('#quadro .qd-so-largo [data-act="abrir-tarefa"][data-id="t1"]')`);
-    expect((await chamadas())[0]).toEqual(["criar", { titulo: "Revisar a copy" }]);
+    expect((await chamadas())[0]).toEqual(["criar", { titulo: "Revisar a copy", status: "backlog" }]);
     const card = await avaliar<string>(cdp, `document.querySelector('#quadro .qd-so-largo [data-act="abrir-tarefa"][data-id="t1"]').closest(".qd-col").textContent`);
     expect(card).toContain("Backlog");
     expect(card).toContain("ADA-1");
     expect(card).toContain("Revisar a copy");
     expect(card).toContain("Ada");
-    expect(await avaliar<string>(cdp, `document.querySelector("#qd-nova-tit").value`)).toBe("");
+    expect(await avaliar<string>(cdp, `document.querySelector("#qd-nova-grade-backlog").value`)).toBe("");
+    // Esc fecha o campo e o foco volta ao "+".
+    await tecla("Escape", "Escape", 27);
+    await ate(`!document.querySelector("#qd-nova-grade-backlog") && document.activeElement?.matches('${mais}')`);
     // Revisão 2 do PR #623: o recibo vem da resposta (a coluna onde caiu e quem começou), não de um "no Backlog" fixo.
     expect(await texto("#qc-faixa")).toContain("Revisar a copy: em Backlog. Ninguém começou.");
 
@@ -323,6 +342,86 @@ descrever("NOD-416 no Chrome real: criar, abrir pelo link, mudar status e respon
     await avaliar(cdp, "window.__soltar()");
     await ate(`document.querySelector("#qd-t-status").value === "afazer"`);
     expect(await avaliar<string>(cdp, `document.querySelector("#qd-t-resp").value`)).toBe("a");
+  }, 30_000);
+
+  it("NOD-460: o Exibir guardado no servidor vale ao abrir, e mudar grava só o deste quadro (a falha avisa e a tela fica com o novo)", async () => {
+    await cdp.enviar("Emulation.setDeviceMetricsOverride", { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+    await cdp.enviar("Page.navigate", { url });
+    await ate("window.__montar");
+    await avaliar(cdp, `window.__exibirGuardado = { q1: { recolhidas: false, compacto: true }, q2: { recolhidas: true, compacto: false } }`);
+    await avaliar(cdp, `window.__api.criarTarefa("a", { titulo: "Uma", status: "afazer" })`);
+    await avaliar(cdp, "window.__montar()");
+    // Compacto e sem as colunas recolhidas (o Backlog vazio nasce recolhido: some).
+    await ate(`document.querySelector("#quadro .qd-compacto")`);
+    expect(await avaliar<boolean>(cdp, `!document.querySelector('#quadro .qd-so-largo [data-act="abrir-coluna"][data-status="backlog"]')`)).toBe(true);
+    await avaliar(cdp, `document.querySelector('#quadro [data-act="exibir-abrir"]').click()`);
+    await ate(`document.querySelector('#qd-menu-exibir [data-chave="compacto"]')`);
+    await avaliar(cdp, `document.querySelector('#qd-menu-exibir [data-chave="compacto"]').click()`);
+    await ate(`!document.querySelector("#quadro .qd-compacto")`);
+    await ate(`window.__chamadas.some((c) => c[0] === "exibir")`);
+    expect((await chamadas()).filter((c) => c[0] === "exibir")).toEqual([["exibir", "q1", { recolhidas: false, compacto: false }]]);
+    // O servidor recusa: a faixa avisa, e a tela fica com o que a pessoa escolheu.
+    await avaliar(cdp, "window.__exibirFalha = true");
+    await avaliar(cdp, `document.querySelector('#qd-menu-exibir [data-chave="recolhidas"]').click()`);
+    await ate(`document.querySelector("#qc-faixa")?.textContent.includes("Não consegui guardar o Exibir")`);
+    await ate(`document.querySelector('#quadro .qd-so-largo [data-act="abrir-coluna"][data-status="backlog"]')`);
+    await avaliar(cdp, "window.__exibirFalha = false; window.__exibirGuardado = null");
+  }, 30_000);
+
+  it("revisão do PR #645: Enter duplo cria uma tarefa só, a busca espera a composição (IME), clicar num chip com o Exibir aberto filtra, e as setas andam no menu", async () => {
+    await cdp.enviar("Emulation.setDeviceMetricsOverride", { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+    await cdp.enviar("Page.navigate", { url });
+    await ate("window.__montar");
+    await avaliar(cdp, `window.__api.criarTarefa("a", { titulo: "Uma", status: "afazer" })`);
+    await avaliar(cdp, "window.__chamadas.length = 0");
+    await avaliar(cdp, "window.__montar()");
+    const mais = `#quadro .qd-so-largo [data-act="col-nova-tarefa"][data-status="afazer"]`;
+    await ate(`document.querySelector('${mais}')`);
+    await avaliar(cdp, `document.querySelector('${mais}').click()`);
+    await ate(`document.activeElement?.id === "qd-nova-grade-afazer"`);
+    // Enter duplo com a criação no ar: uma chamada só.
+    await avaliar(cdp, `window.__soltarCriar = null; window.__segurarCriar = new Promise((r) => { window.__soltarCriar = r; }); 0`);
+    await avaliar(cdp, `document.querySelector("#qd-nova-grade-afazer").value = "Dupla"`);
+    await avaliar(cdp, `document.querySelector('#quadro [data-form="nova-tarefa"]').requestSubmit()`);
+    await avaliar(cdp, `document.querySelector('#quadro [data-form="nova-tarefa"]')?.requestSubmit()`);
+    await avaliar(cdp, "window.__soltarCriar(); window.__segurarCriar = null");
+    await ate(`[...document.querySelectorAll('#quadro .qd-so-largo [data-act="abrir-tarefa"]')].some((b) => b.textContent.includes("Dupla"))`);
+    expect((await chamadas()).filter((c) => c[0] === "criar")).toHaveLength(1);
+    // E não mostra um erro que não houve: o campo segue aberto, vazio e sem o aviso.
+    await esperar(100);
+    expect(await avaliar<boolean>(cdp, `!document.querySelector("#quadro .qd-nova-erro") && document.querySelector("#qd-nova-grade-afazer")?.value === ""`)).toBe(true);
+    await tecla("Escape", "Escape", 27);
+
+    // IME: o input no meio da composição não filtra; o compositionend filtra.
+    const busca = `document.querySelector("#qd-busca")`;
+    await avaliar(cdp, `(() => { const b = ${busca}; b.value = "zz"; b.dispatchEvent(new InputEvent("input", { bubbles: true, isComposing: true })); })()`);
+    await esperar(150);
+    expect(await avaliar<boolean>(cdp, `!document.querySelector("#quadro .qd-vazio-1")`)).toBe(true);
+    await avaliar(cdp, `${busca}.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true, data: "zz" }))`);
+    await ate(`document.querySelector("#quadro .qd-vazio-1")?.textContent.includes("zz")`);
+    await avaliar(cdp, `document.querySelector('#quadro .qd-vazio-1 [data-act="busca-limpar"]').click()`);
+    await ate(`!document.querySelector("#quadro .qd-vazio-1")`);
+
+    // Com o Exibir aberto, o clique no chip não se perde: filtra e fecha o menu.
+    await avaliar(cdp, `document.querySelector('#quadro [data-act="exibir-abrir"]').click()`);
+    await ate(`document.querySelector("#qd-menu-exibir")`);
+    await avaliar(cdp, `document.querySelector('#quadro [data-act="filtro-do-quadro"][data-filtro="agente:a"]').click()`);
+    await ate(`document.querySelector('#quadro [data-filtro="agente:a"]')?.getAttribute("aria-pressed") === "true"`);
+    expect(await avaliar<boolean>(cdp, `!document.querySelector("#qd-menu-exibir")`)).toBe(true);
+    await avaliar(cdp, `document.querySelector('#quadro [data-act="filtro-do-quadro"][data-filtro="todos"]').click()`);
+
+    // Setas, Home e End andam entre os itens do Exibir.
+    await avaliar(cdp, `document.querySelector('#quadro [data-act="exibir-abrir"]').click()`);
+    await ate(`document.querySelector('#qd-menu-exibir [role="menuitemcheckbox"]')`);
+    const itens = `[...document.querySelectorAll('#qd-menu-exibir [role="menuitemcheckbox"]')]`;
+    await avaliar(cdp, `${itens}[0].focus()`);
+    await tecla("ArrowDown", "ArrowDown", 40);
+    expect(await avaliar<boolean>(cdp, `document.activeElement === ${itens}[1]`)).toBe(true);
+    await tecla("Home", "Home", 36);
+    expect(await avaliar<boolean>(cdp, `document.activeElement === ${itens}[0]`)).toBe(true);
+    await tecla("End", "End", 35);
+    expect(await avaliar<boolean>(cdp, `document.activeElement === ${itens}.at(-1)`)).toBe(true);
+    await tecla("Escape", "Escape", 27);
   }, 30_000);
 
   it("revisão 5 do PR #623: o link abre a tarefa mesmo quando o quadro é liberado depois (as preferências chegam por último)", async () => {

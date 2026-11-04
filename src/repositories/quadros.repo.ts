@@ -390,6 +390,25 @@ export function quadrosRepo(conn: Conn, escopo: Escopo) {
         order by d.raiz, (t.estado in ('pendente', 'despachando') and t.parar_solicitado_em is null) desc, t.criado_em desc, d.n desc`;
       return new Map(ls.map((l) => [l.raiz, l.parado && (l.estado === "pendente" || l.estado === "despachando") ? "interrompido" : l.estado]));
     },
+    /**
+     * NOD-460 (revisão 2 do PR #645): desde quando o agente trabalha em cada tarefa, pelo turno vivo da mesma cadeia do
+     * `estadosDosTurnos` (a retomada mais recente). Conta do despacho, como o "Trabalhando · há N" da conversa (NOD-276);
+     * sem despacho ainda, da criação. Só entram as cadeias com turno vivo.
+     */
+    async desdeDosTurnos(ids: readonly string[]): Promise<Map<string, number>> {
+      if (ids.length === 0) return new Map();
+      const ls = await conn<{ raiz: string; desde: Date }[]>`
+        with recursive desce(raiz, id, n) as (
+          select id, id, 0 from turnos where tenant_id = ${escopo.tenantId} and id = any(${conn.array([...ids])}::uuid[])
+          union all
+          select d.raiz, t.id, d.n + 1 from turnos t join desce d on t.tenant_id = ${escopo.tenantId} and t.retoma_turno_id = d.id where d.n < 50
+        )
+        select distinct on (d.raiz) d.raiz, coalesce(t.despachado_em, t.criado_em) as desde
+        from desce d join turnos t on t.tenant_id = ${escopo.tenantId} and t.id = d.id
+        where t.estado in ('pendente', 'despachando') and t.parar_solicitado_em is null
+        order by d.raiz, t.criado_em desc, d.n desc`;
+      return new Map(ls.map((l) => [l.raiz, new Date(l.desde).getTime()]));
+    },
     /** A cadeia de retomadas que desce do turno de uma tarefa (ele incluso): o Parar vale para ela inteira. */
     async cadeiaDoTurno(turnoId: string): Promise<{ id: string; estado: EstadoTurno }[]> {
       return conn<{ id: string; estado: EstadoTurno }[]>`

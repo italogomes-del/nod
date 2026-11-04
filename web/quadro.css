@@ -522,8 +522,6 @@ a.qd-chip:hover { background: var(--surface-raised); }
 .qd-hist-quem { font-weight: 600; color: var(--ink); }
 .qd-hist-oque { color: var(--ink-2, var(--ink)); }
 .qd-hist-quando { color: var(--ink-3); margin-left: 4px; }
-.qd-nova-tarefa { display: flex; gap: 6px; align-items: center; }
-.qd-nova-in { min-width: 0; width: 180px; min-height: 28px; padding: 2px 8px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--ink); font: inherit; }
 .qd-lado ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; color: var(--ink-2); }
 .qd-lado li { display: flex; align-items: flex-start; gap: 6px; min-width: 0; }
 .qd-lado li .qd-ic { color: var(--ink-3); margin-top: 2px; }
@@ -711,4 +709,132 @@ a.qd-chip:hover { background: var(--surface-raised); }
 @media (max-width: 699px) {
   .qcp-casco { padding: 12px 12px 24px; }
   .qcp-esqueleto { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* ====================================================================================================================
+   NOD-460: o quadro em tela cheia (coluna de 264, sem o teto de 1240), a barra (chips, busca, Exibir), o "+" por coluna,
+   o selo "Trabalhando · há N min", o compacto e o vazio inline. Do protótipo nod-460 (q460-*), com o prefixo qd-.
+   ==================================================================================================================== */
+.qd-vista > .qd-conteudo:has(.qd-grade) { --qd-col-min: 264px; max-width: none; }
+.qd-vista > .qd-conteudo .qd-col-lista { overscroll-behavior-y: contain; }
+/* A grade de 264 rola de lado: o card trazido à vista (o foco, o scrollIntoView) não para embaixo das tiras presas à direita. */
+.qd-vista > .qd-conteudo .qd-grade { scroll-padding-inline: 8px calc(2 * var(--qd-tira) + 24px); }
+
+/* A barra: Todas · Comigo · um chip por agente · +N | Buscar · n trabalhando · Exibir · ⋯ */
+.qd-barra-q:has(.qd-busca) { flex-wrap: wrap; row-gap: 6px; }
+.qd-barra-q .qd-filtros { flex-wrap: wrap; min-width: 0; }
+.qd-barra-q .qd-chip { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 11px; border: 0; border-radius: 999px; background: transparent; white-space: nowrap; flex-shrink: 0; }
+.qd-barra-q .qd-chip:hover { background: transparent; color: var(--ink); }
+.qd-barra-q .qd-chip[aria-pressed="true"] { background: var(--surface-raised); color: var(--ink); }
+.qd-chip-av { display: inline-grid; place-items: center; line-height: 0; }
+.qd-chip-av .icon.mascote, .qd-chip-av nod-mascote { width: 16px !important; height: 16px !important; min-width: 16px; border-radius: 5px; }
+.qd-chip-av .icon.mascote svg { width: 13px; height: 13px; }
+.qd-chip-av .qd-anel { width: 16px; height: 16px; font-size: 7.5px; border-width: 1.5px; }
+.qd-chip-n { font-size: 12px; font-weight: 500; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.qd-chip[aria-pressed="true"] .qd-chip-n { color: var(--ink-2); }
+.qd-barra-q .qd-chip-mais { padding: 0 9px; }
+.qd-chip-mais-l, .qd-exibir-l { position: relative; display: inline-flex; }
+.qd-menu-ag { left: 0; right: auto; width: auto; min-width: 200px; }
+.qd-menu-ag .qd-menu-it { flex-wrap: nowrap; }
+.qd-menu-ag .qd-chip-nome { flex: 1; }
+.qd-barra-q .qd-trab { height: 28px; padding: 0 10px 0 8px; border: 0; border-radius: 999px; background: transparent; font: inherit; font-size: 12.5px; color: var(--ink-2); cursor: pointer; flex-shrink: 0; }
+.qd-barra-q .qd-trab:hover { color: var(--ink); }
+.qd-barra-q .qd-trab[aria-pressed="true"] { background: var(--surface-raised); color: var(--ink); font-weight: 600; }
+
+.qd-busca { display: inline-flex; align-items: center; gap: 6px; width: 168px; height: 30px; padding: 0 5px 0 9px; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--qd-card); color: var(--ink-3); cursor: text; transition: width .16s ease; }
+.qd-busca:focus-within, .qd-busca:has(.qd-busca-in:not(:placeholder-shown)) { width: 220px; border-color: var(--line-strong); color: var(--ink-2); }
+.qd-busca:has(.qd-busca-in:focus-visible) { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+/* foco-ok: a pílula .qd-busca ganha o contorno pelo :has(:focus-visible); no forced-colors o campo tem contorno Highlight. */
+.qd-busca-in { flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; outline: 0; background: none; color: var(--ink); font: inherit; font-size: 13px; }
+.qd-busca-in::placeholder { color: var(--ink-3); }
+.qd-busca-in::-webkit-search-cancel-button { display: none; }
+.qd-kbd { padding: 0 5px; border: 1px solid var(--line); border-radius: 4px; font: 500 11px/16px var(--font-mono); color: var(--ink-3); }
+.qd-busca:focus-within .qd-kbd { display: none; }
+/* QA do PR 645: o × fica dentro da pílula (é irmão do label, para não ser o rótulo do campo), à direita. */
+.qd-busca-l { position: relative; display: inline-flex; align-items: center; }
+.qd-busca-l:has(.qd-busca-limpar) .qd-busca { padding-right: 30px; }
+.qd-busca-limpar { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); display: grid; place-items: center; flex: none; width: 22px; height: 22px; border: 0; border-radius: 50%; background: none; color: var(--ink-3); font: inherit; font-size: 15px; line-height: 1; cursor: pointer; }
+.qd-busca-limpar:hover { background: var(--surface-raised); color: var(--ink); }
+.qd-mark { padding: 0 1px; border-radius: 3px; background: var(--signal-soft); color: inherit; }
+
+.qd-exibir { position: relative; display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent;
+  color: var(--ink-2); font: inherit; font-size: 13px; font-weight: 500; white-space: nowrap; flex-shrink: 0; cursor: pointer; }
+.qd-exibir:hover, .qd-exibir[aria-expanded="true"] { background: var(--surface-raised); color: var(--ink); }
+.qd-ponto { width: 6px; height: 6px; border-radius: 50%; background: var(--signal); }
+.qd-menu-ex { width: auto; min-width: 232px; }
+.qd-menu-ex .qd-menu-it { flex-wrap: nowrap; }
+.qd-caixa { display: grid; place-items: center; flex: none; width: 16px; height: 16px; border: 1.5px solid var(--line-strong); border-radius: 4px; color: var(--on-action); }
+[aria-checked="true"] > .qd-caixa { border-color: var(--action); background: var(--action); }
+.qd-menu-nota { margin: 4px 0 0; padding: 7px 10px 4px; border-top: 1px solid var(--line); font-size: 12px; line-height: 1.4; color: var(--ink-3); }
+
+/* O "+" do cabeçalho da coluna: sempre visível e apagado; forte no hover e no foco. */
+.qd-col-add { display: grid; place-items: center; flex: none; width: 24px; height: 24px; margin-left: auto; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--ink-3); cursor: pointer; }
+.qd-col:hover .qd-col-add, .qd-col-add:hover, .qd-col-add:focus-visible, .qd-col-add[aria-expanded="true"] { color: var(--ink); }
+.qd-col-add:hover { background: color-mix(in srgb, var(--qd-col-fundo) 55%, var(--line)); }
+.qd-col-add + .qd-col-mais { margin-left: 0; }
+.qd-chip:focus-visible, .qd-trab:focus-visible, .qd-exibir:focus-visible, .qd-col-add:focus-visible, .qd-busca-limpar:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+
+/* O selo: bolinha verde parada + "Trabalhando · há N min", no lugar do horário. */
+.qd-selo { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; line-height: 1.35; color: var(--ink-2); white-space: nowrap; }
+.qd-selo i { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--success); }
+
+/* Compacto (Exibir): código, título e selo; a pergunta de "Precisa de você" fica. */
+.qd-compacto .qd-tags, .qd-compacto .qd-card-pe { display: none; }
+.qd-compacto .qd-card { gap: 3px; padding: 7px 10px 8px; }
+.qd-compacto .qd-card-tit { -webkit-line-clamp: 1; line-clamp: 1; }
+
+/* O campo de nova tarefa no topo da coluna. */
+.qd-nova { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px 9px; border: 1px solid var(--signal); border-radius: var(--qd-raio); background: var(--qd-card);
+  box-shadow: 0 0 0 3px var(--signal-soft); list-style: none; }
+.qd-nova form { display: contents; }
+.qd-nova:has(.qd-nova-in:focus-visible) { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+/* foco-ok: o cartão .qd-nova ganha o contorno pelo :has(:focus-visible); no forced-colors o campo tem contorno Highlight. */
+.qd-nova-in { width: 100%; padding: 2px 0; border: 0; outline: 0; background: none; color: var(--ink); font: inherit; font-size: 13px; font-weight: 500; }
+.qd-nova-in::placeholder { color: var(--ink-3); font-weight: 400; }
+.qd-nova-dica, .qd-nova-msg { margin: 0; font-size: 11.5px; line-height: 1.35; color: var(--ink-3); }
+.qd-nova kbd { font: inherit; font-weight: 600; color: var(--ink-2); }
+.qd-nova-erro { border-color: var(--danger); box-shadow: 0 0 0 3px var(--danger-soft); }
+.qd-nova-msg { color: var(--danger); font-weight: 500; }
+
+/* Nada encontrado: uma linha inline sobre a grade (sem modal), com Limpar busca e Ver em todas. */
+.qd-vazio-1 { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; padding: 10px 12px; border: 1px dashed var(--line-strong); border-radius: 10px;
+  font-size: 13px; line-height: 1.45; color: var(--ink-2); }
+.qd-vazio-1 > span { margin-right: auto; }
+
+/* Telas estreitas: a barra quebra; no celular (a lista) os chips viram uma linha que rola de lado. */
+@media (max-width: 760px) {
+  .qd-barra-q:has(.qd-busca) { align-items: flex-start; }
+  .qd-busca { width: 140px; }
+  .qd-barra-q .qd-trab .qd-avs-pilha { display: none; }
+}
+@container (max-width: 640px) {
+  .qd-barra-q .qd-filtros { flex: 1 1 100%; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; overscroll-behavior-x: contain; }
+  .qd-barra-q .qd-filtros { -webkit-mask-image: linear-gradient(90deg, #000 86%, transparent); mask-image: linear-gradient(90deg, #000 86%, transparent); } /* cor-fixa: canal alfa da máscara, não é cor visível */
+  .qd-barra-q .qd-filtros::-webkit-scrollbar { display: none; }
+  .qd-barra-q .qd-barra-dir { flex: 1 1 100%; margin-left: 0; }
+  .qd-busca-l { flex: 1; min-width: 0; }
+  .qd-busca { flex: 1; width: auto; }
+  .qd-busca:focus-within, .qd-busca:has(.qd-busca-in:not(:placeholder-shown)) { width: auto; }
+  .qd-busca .qd-kbd { display: none; }
+}
+/* No celular (ADR-094): alvos de toque de 44px e a busca em 16px (o iOS não dá zoom no campo). */
+@media (hover: none) and (pointer: coarse) and (max-width: 600px), (hover: none) and (pointer: coarse) and (max-height: 500px) {
+  .qd-barra-q .qd-chip, .qd-barra-q .qd-trab { min-height: 44px; font-size: 14px; }
+  .qd-busca { height: 44px; border-radius: 10px; }
+  .qd-busca-in { font-size: 16px; }
+  .qd-exibir, .qd-col-add { min-height: 44px; min-width: 44px; }
+  .qd-busca-limpar { right: 0; width: 44px; height: 44px; }
+  .qd-busca-l:has(.qd-busca-limpar) .qd-busca { padding-right: 46px; }
+}
+
+@media (prefers-reduced-motion: reduce) { .qd-busca { transition: none; } }
+@media (forced-colors: active) {
+  .qd-barra-q .qd-chip[aria-pressed="true"], .qd-barra-q .qd-trab[aria-pressed="true"] { outline: 1px solid CanvasText; }
+  .qd-selo i, .qd-ponto { background: CanvasText; forced-color-adjust: none; }
+  .qd-mark { background: Highlight; color: HighlightText; forced-color-adjust: none; }
+  .qd-nova, .qd-busca, .qd-vazio-1 { border: 1px solid CanvasText; }
+  /* O campo da busca e o do "+" tiram o outline (o anel é do contêiner): no alto contraste o foco volta no próprio campo. */
+  .qd-busca-in:focus-visible, .qd-nova-in:focus-visible { outline: 2px solid Highlight; outline-offset: 2px; }
+  [aria-checked="true"] > .qd-caixa { background: Highlight; border-color: Highlight; color: HighlightText; forced-color-adjust: none; }
 }

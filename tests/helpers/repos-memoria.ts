@@ -3519,6 +3519,14 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           b.preferencias.set(chave, nova);
           return nova;
         },
+        async exibirQuadro(quadroId, e, max) {
+          const a = atual();
+          const m = a.quadroExibir ?? {};
+          if (!(quadroId in m) && Object.keys(m).length >= max) return null;
+          const nova = { ...a, quadroExibir: { ...(a.quadroExibir ?? {}), [quadroId]: { recolhidas: e.recolhidas, compacto: e.compacto } } };
+          b.preferencias.set(chave, nova);
+          return nova;
+        },
         async fecharAviso(aviso) {
           const a = atual();
           const nova = a.avisosFechados.includes(aviso) ? a : { ...a, avisosFechados: [...a.avisosFechados, aviso] };
@@ -3895,6 +3903,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       apagarTarefa: soNoPostgres,
       restaurarTarefa: soNoPostgres,
       estadosDosTurnos: async () => new Map(),
+      desdeDosTurnos: async () => new Map(),
       cadeiaDoTurno: async () => [],
       inserirLote: soNoPostgres,
       lotesDaTarefa: async () => [],

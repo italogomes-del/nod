@@ -131,6 +131,8 @@ export type TarefaDto = TarefaQuadro & {
   /** NOD-443 (D5): quem responde a pergunta, só com a tarefa esperando alguém ("Precisa de alguém"). */
   decide?: QuemDecideDto | null;
   naColunaDesde?: number | null; // NOD-420: epoch ms da entrada na coluna atual; null fora do Postgres
+  /** NOD-460: epoch ms de quando o agente começou o trabalho em curso (o despacho do turno vivo); null = não está rodando. */
+  trabalhandoDesde?: number | null;
   /** NOD-421: os PRs ligados e as linhas de sistema (CI, conflito, merge). */
   prs?: PrNaTela[];
   linhas?: LinhaDeSistema[];

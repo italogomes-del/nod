@@ -25,9 +25,11 @@ import type { FiltroImportacao, ImportacaoDto, PreviaDaTela } from "../../src/co
 import type { EventoTrilhaQuadro } from "../../src/contracts/trilha-quadro.ts";
 import { ehRecusaDoPainel, type PainelImportacao } from "../telas/card-importacao.ts";
 import { RESP_VOCE, acesos, fraseDoErroDoMover, reciboDaNovaTarefa, codigoNaUrl, destinosDaTarefa, historicoDaFaixa, respostaDoBot, tarefaNoQuadro, type Faixa } from "./quadro-dados.ts";
-import { quadroVazio, type Aviso, type Filtro, type Html } from "../telas/quadro.ts";
+import type { ExibirDoQuadro } from "../../src/contracts/raio-x.ts";
+import { quadroVazio, type Aviso, type ExibirDaBarra, type Filtro, type Html } from "../telas/quadro.ts";
+import { contarNaVista, ehFiltro, termoDaBusca } from "./vista-do-quadro.ts";
 import { decidirSoltura, fraseDaTrava, RECUSA_MS, relogioDaRecusa, type RelogioDaRecusa } from "./freios.ts";
-import { faixaDoQuadro, pilulaDoQuadro, quadroCarregando, quadroComErro, quadroDaMeta, rotuloDoModo, semQuadro, tarefaAberta, type AgenteDoQuadro, type PainelDoQuadro, type TrocaDaFaixa } from "../telas/quadro-real.ts";
+import { faixaDoQuadro, idDaNovaTarefa, pilulaDoQuadro, quadroCarregando, quadroComErro, quadroDaMeta, rotuloDoModo, semQuadro, tarefaAberta, type AgenteDoQuadro, type PainelDoQuadro, type TrocaDaFaixa } from "../telas/quadro-real.ts";
 import { anuncioDaOrdem, anuncioDaPagina, CONVERSA, ehForma, indicePeloId, moverNaOrdem, paginaPelaTecla, presa, TAREFAS, type FormaDasTarefas, type Pagina } from "./paginas.ts";
 import { guardarOrdem, ordemDoAgente, paginasDtoDe } from "./ordem-das-paginas.ts";
 import { formaDasTarefas, menuDaPagina, paginaDoApp } from "../telas/paginas.ts";
@@ -36,6 +38,9 @@ import { criarComentariosNaTela, type ApiDosComentarios } from "./comentarios-na
 import { criarTrabalhosDaTarefa, type ApiDosTrabalhos } from "./trabalhos-da-tarefa.ts";
 
 /** O pedaço da API que o quadro usa (NOD-442); null = sem sessão ainda. */
+/** NOD-460: o Exibir de um quadro sem nada guardado (as recolhidas à mostra, a densidade normal). */
+const EXIBIR_PADRAO: ExibirDoQuadro = { recolhidas: true, compacto: false };
+
 export interface ApiDoQuadro extends ApiDosComentarios, ApiDosTrabalhos {
   quadro(agenteId: string): Promise<{ quadro: QuadroDto | null }>;
   conversa(conversaId: string): Promise<Pick<ConversaDto, "mensagens">>;
@@ -56,7 +61,7 @@ export interface ApiDoQuadro extends ApiDosComentarios, ApiDosTrabalhos {
   /** ADR-142: a passagem da coluna e o card arrastado (o mesmo mudar_tarefa; `sem_iniciar` = "Não iniciar ainda"). */
   definirPassagem?(agenteId: string, coluna: string, p: { agente: string | null; instrucoes: string | null }): Promise<MutacaoQuadro>;
   /** NOD-416 (ADR-144): criar (cai no Backlog), mudar status e responsável, mudar de quadro, o histórico e os quadros. */
-  criarTarefa?(agenteId: string, campos: { titulo: string }): Promise<MutacaoQuadro>;
+  criarTarefa?(agenteId: string, campos: { titulo: string; status?: string }): Promise<MutacaoQuadro>;
   mudarTarefa?(agenteId: string, tarefaId: string, campos: { status?: string; agente?: string | null; sem_iniciar?: boolean }): Promise<MutacaoQuadro>;
   /** NOD-419: a trava da coluna e o Desfazer de um movimento (o eco do agente e o histórico da tarefa). */
   travarColuna?(agenteId: string, coluna: string, t: { sai_para?: string[] | null; so_pessoa?: boolean }): Promise<MutacaoQuadro>;
@@ -72,6 +77,9 @@ export interface ApiDoQuadro extends ApiDosComentarios, ApiDosTrabalhos {
   tirarPessoa?(agenteId: string, pessoaId: string): Promise<MutacaoQuadro>;
   mudarModo?(agenteId: string, modo: ModoConversa): Promise<MutacaoQuadro>;
   atividadeQuadro?(agenteId: string): Promise<{ linhas: LinhaMuralDto[] }>;
+  /** NOD-460 (0149): o Exibir guardado de cada quadro (nas preferências de quem lê) e a gravação de um. */
+  preferencias?(): Promise<{ quadroExibir?: Record<string, ExibirDoQuadro> }>;
+  exibirQuadro?(quadroId: string, e: ExibirDoQuadro): Promise<unknown>;
 }
 
 /** NOD-442: o que o quadro de verdade precisa do main. Sem isto (os testes da NOD-429), a vista é o quadro vazio. */
@@ -175,6 +183,15 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
   let ultimaDaVista = 1;
   let forma: FormaDasTarefas = "quadro";
   let filtro: Filtro = "todos";
+  /** NOD-460: a busca da barra, os menus abertos (o "+N" e o Exibir), o Exibir da pessoa e o campo "+" aberto numa coluna. */
+  let busca = "";
+  let maisAberto = false;
+  let exibirAberto = false;
+  /** NOD-460: o Exibir por id do quadro (o guardado no servidor, e o que a pessoa mudou nesta tela por cima). */
+  let exibirPorQuadro: Record<string, ExibirDoQuadro> = {};
+  let exibirPedido = false;
+  let gravacaoDoExibir: Promise<void> = Promise.resolve();
+  let nova: { coluna: string; estreito?: boolean; erro?: boolean } | null = null;
   /** As colunas que a pessoa abriu ou recolheu, ao contrário do padrão. */
   let alternadas = new Set<string>();
   let animacoes: Animation[] = [];
@@ -271,6 +288,9 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     ...(dd?.juntarEm !== undefined ? { juntarEm: dd.juntarEm } : {}),
   });
 
+  /** Os itens de menu que andam pelas setas: o menu da coluna e os da barra do quadro (NOD-460). */
+  const ITEM_DE_MENU = '#qd-menu [role="menuitem"], #qd-menu-exibir [role="menuitemcheckbox"], #qd-menu-agentes [role="menuitemradio"], #qd-menu-agentes [role="menuitem"]';
+
   function zerarDados(): void {
     if (aberta) dd?.naUrl?.(null);
     histTarefa = null; quadros = null; leituraHist++;
@@ -302,7 +322,7 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     }
     const comPessoas = !!dd.api()?.adicionarPessoa;
     const agentes = dd.agentes && dd.api()?.definirPassagem ? dd.agentes() : undefined;
-    return quadroDaMeta({ q, nome, agente: dd.agente, filtro, alternadas, acesas, edicao, agora: Date.now(), editandoMeta, ...(comPessoas ? { pessoas: { painel, mural, hora: dd.hora, erro: erroPessoas } } : {}), ...(agentes ? { agentes } : {}), ...(importando ? { importando } : {}), ...(recusa ? { avisos: new Map([[recusa.tarefa, recusa.aviso]]) } : {}) });
+    return quadroDaMeta({ q, nome, agente: dd.agente, filtro, alternadas, acesas, edicao, agora: Date.now(), editandoMeta, ...(comPessoas ? { pessoas: { painel, mural, hora: dd.hora, erro: erroPessoas } } : {}), ...(agentes ? { agentes } : {}), ...(importando ? { importando } : {}), ...(recusa ? { avisos: new Map([[recusa.tarefa, recusa.aviso]]) } : {}), busca, exibir: { ...exibirDoQuadro(), aberto: exibirAberto }, maisAberto, nova, podeCriar: !!dd.api()?.criarTarefa });
   }
 
   /**
@@ -353,7 +373,7 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     if (!conteudo) return;
     const rascunhos = new Map<string, string>();
     // NOD-448: o nome que a pessoa digita numa coluna (renomear, nova) sobrevive ao frame que regrava o quadro.
-    for (const c of conteudo.querySelectorAll<HTMLTextAreaElement | HTMLInputElement>("textarea[id], input.qd-col-in[id]")) if (c.value) rascunhos.set(c.id, c.value);
+    for (const c of conteudo.querySelectorAll<HTMLTextAreaElement | HTMLInputElement>("textarea[id], input.qd-col-in[id], input.qd-nova-in[id]")) if (c.value) rascunhos.set(c.id, c.value);
     const ativo = doc.activeElement;
     const focoId = ativo instanceof HTMLElement && conteudo.contains(ativo) && ativo.id ? ativo.id : null;
     const focoColuna = ativo instanceof HTMLElement && conteudo.contains(ativo) && !ativo.id ? seletorDoFocoDaColuna(ativo) ?? seletorDoFocoDoCard(ativo) : null;
@@ -1582,6 +1602,9 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
       pagina = 0;
       ultimaDaVista = 1;
       filtro = "todos";
+      busca = "";
+      maisAberto = exibirAberto = false;
+      nova = null;
       alternadas = new Set();
       edicao = null;
       const v = vista();
@@ -1616,6 +1639,14 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
     const solta = edicao?.tipo === "menu" || edicao?.tipo === "passagem" || edicao?.tipo === "trava" || edicao?.tipo === "soltar" || edicao?.tipo === "mover" || (edicao?.tipo === "remover" && !edicao.naFolha);
     if (solta && alvo?.closest?.("#quadro") && !alvo.closest(".qd-menu, .qd-pop, .qd-col-mais, .qd-col-passa, .qd-soltar, .qd-card-mover")) { edicao = null; desenharVista(); }
     if (soltarNaAberta && alvo?.closest?.("#quadro") && !alvo.closest(".qd-t-soltar, #qd-t-status")) desistirDoSoltarNaAberta();
+    // NOD-460: clicar fora do "+N" ou do Exibir fecha o menu.
+    // Revisão do PR #645: quando o clique tem ação, ela redesenha (redesenhar antes soltaria o alvo do DOM e o clique se
+    // perderia); sem ação, ou se a ação não redesenhou, o menu fecha aqui.
+    if ((maisAberto || exibirAberto) && !alvo?.closest?.(".qd-chip-mais-l, .qd-exibir-l")) {
+      maisAberto = exibirAberto = false;
+      if (!alvo?.closest?.("#quadro [data-act]")) { if (vista()?.firstElementChild) desenharVista(); }
+      else queueMicrotask(() => { if (vista()?.querySelector("#qd-menu-exibir, #qd-menu-agentes")) desenharVista(); });
+    }
     const el = alvo?.closest?.<HTMLElement>("[data-act]");
     if (!el) return;
     const act = el.dataset["act"];
@@ -1656,6 +1687,7 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
         return;
       }
       if (act === "qc-abrir-conversa") { histAberto = false; desenharFaixa(); trocar("conversa", { foco: true }); return; }
+      if (aoClicarNaBarra(el, act)) return;
       if (act?.startsWith("col-")) { aoClicarColuna(el, act); return; }
       // Clique simples no nome de uma coluna que edita: espera o duplo (que renomeia) antes de recolher.
       if (act === "abrir-coluna" && el.matches(".qd-col-bt[aria-keyshortcuts]") && ev.detail >= 1) {
@@ -1674,14 +1706,117 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
       const m = el.dataset["modo"];
       if (ehModo(m)) trocar(m);
     } else if (el.closest("#quadro") && (act === "abrir-coluna" || act === "filtro-do-quadro")) {
-      if (act === "filtro-do-quadro") {
-        const f = el.dataset["filtro"];
-        if (f === "todos" || f === "pessoas" || f === "agentes") filtro = f;
-        desenharVista();
-        vista()?.querySelector<HTMLElement>(`.qd-barra-q [data-act="filtro-do-quadro"][data-filtro="${filtro}"]`)?.focus();
-      } else alternarColuna(el);
+      if (act === "filtro-do-quadro") escolherFiltro(el.dataset["filtro"]);
+      else alternarColuna(el);
     }
   });
+
+  /* ---------- NOD-460: a barra (filtro, busca, Exibir) e o "+" por coluna ---------- */
+  /** O Exibir que vale neste quadro: o que a pessoa guardou (ou mudou aqui); sem nada, o padrão. */
+  function exibirDoQuadro(): Omit<ExibirDaBarra, "aberto"> {
+    lerExibirGuardado();
+    return (q && exibirPorQuadro[q.id]) || EXIBIR_PADRAO;
+  }
+
+  /** Uma vez por tela: o Exibir guardado. O que a pessoa mudou antes de ele chegar vale por cima. */
+  function lerExibirGuardado(): void {
+    const a = dd?.api();
+    if (exibirPedido || !a?.preferencias) return;
+    exibirPedido = true;
+    // Revisão do PR #645: uma leitura só; se falhar, vale o padrão (sem repetir o pedido a cada desenho). Com uma tarefa
+    // aberta, o Exibir não aparece: o próximo desenho do quadro já o usa.
+    void a.preferencias().then((p) => {
+      const guardado = p.quadroExibir ?? {};
+      const antes = q ? exibirPorQuadro[q.id] ?? EXIBIR_PADRAO : null;
+      exibirPorQuadro = { ...guardado, ...exibirPorQuadro };
+      const depois = q ? exibirPorQuadro[q.id] ?? EXIBIR_PADRAO : null;
+      if (q && !aberta && (antes?.recolhidas !== depois?.recolhidas || antes?.compacto !== depois?.compacto) && vista()?.firstElementChild) desenharVista();
+    }, () => { /* sem as preferências, o padrão */ });
+  }
+
+  const focarNaVista = (seletor: string): void => { const e = vista()?.querySelector<HTMLElement>(seletor); if (e) focarSemRolar(e); };
+
+  /** Diz a quem não vê quantas tarefas o filtro e a busca deixaram (a região viva do rodapé). */
+  function anunciarVista(): void {
+    if (!q) return;
+    // A linha do vazio, quando há, é o que se diz (inclusive o "N em colunas recolhidas").
+    const vazia = vista()?.querySelector(".qd-vazio-1 span")?.textContent;
+    if (vazia) { anunciar(vazia); return; }
+    const n = contarNaVista(q.tarefas, filtro, termoDaBusca(busca));
+    anunciar(filtro === "todos" && !busca.trim() ? `Todas as ${n === 1 ? "tarefa" : "tarefas"} à vista: ${n}.` : n === 0 ? "Nenhuma tarefa com esse filtro." : `${n} ${n === 1 ? "tarefa" : "tarefas"} à vista.`);
+  }
+
+  function escolherFiltro(f: string | undefined): void {
+    if (!ehFiltro(f)) return;
+    // Clicar no chip ligado volta a Todas.
+    filtro = f === filtro && f !== "todos" ? "todos" : f;
+    maisAberto = exibirAberto = false;
+    desenharVista();
+    focarNaVista(`.qd-barra-q [data-act="filtro-do-quadro"][data-filtro="${CSS.escape(filtro)}"]`);
+    anunciarVista();
+  }
+
+  /** Revisão do PR #645: a busca anuncia a contagem quando a pessoa para de digitar, não a cada letra. */
+  let timerAnuncioBusca: ReturnType<typeof setTimeout> | null = null;
+  function mudarBusca(texto: string, foco = true): void {
+    if (texto === busca) return;
+    busca = texto;
+    desenharVista();
+    if (foco) focarNaVista("#qd-busca");
+    if (timerAnuncioBusca) clearTimeout(timerAnuncioBusca);
+    timerAnuncioBusca = setTimeout(() => { timerAnuncioBusca = null; if (q) anunciarVista(); }, 400);
+  }
+
+  function abrirNova(el: HTMLElement): void {
+    const st = el.dataset["status"] ?? "";
+    const estreito = !!el.closest(".qd-so-estreito");
+    if (!st) return;
+    nova = nova?.coluna === st && !!nova.estreito === estreito ? null : { coluna: st, estreito };
+    edicao = null;
+    desenharVista();
+    if (nova) focarNaVista(`#${CSS.escape(idDaNovaTarefa(st, estreito ? "lista" : "grade"))}`);
+    else focarNaVista(`${estreito ? ".qd-so-estreito" : ".qd-so-largo"} [data-act="col-nova-tarefa"][data-status="${CSS.escape(st)}"]`);
+  }
+
+  function fecharNova(): void {
+    if (!nova) return;
+    const { coluna, estreito } = nova;
+    nova = null;
+    desenharVista();
+    // A tarefa criada pode mudar o padrão da coluna (o Backlog vazio nasce recolhido) e a alternância a recolheria: quem
+    // acabou de criar nela continua vendo a coluna aberta.
+    const mais = `${estreito ? ".qd-so-estreito" : ".qd-so-largo"} [data-act="col-nova-tarefa"][data-status="${CSS.escape(coluna)}"]`;
+    if (!vista()?.querySelector(mais)) { if (alternadas.has(coluna)) alternadas.delete(coluna); else alternadas.add(coluna); desenharVista(); }
+    focarNaVista(mais);
+  }
+
+  async function alternarExibir(chave: string | undefined): Promise<void> {
+    if ((chave !== "recolhidas" && chave !== "compacto") || !q) return;
+    const atual = exibirDoQuadro();
+    const novo: ExibirDoQuadro = { recolhidas: atual.recolhidas, compacto: atual.compacto, [chave]: !atual[chave] };
+    const quadroId = q.id;
+    // A tela já mostra o novo; o servidor só guarda (a falha avisa, e o Exibir vale nesta tela até ela fechar).
+    exibirPorQuadro = { ...exibirPorQuadro, [quadroId]: novo };
+    desenharVista();
+    focarNaVista(`#qd-menu-exibir [data-chave="${chave}"]`);
+    const a = dd?.api();
+    if (!a?.exibirQuadro) return;
+    // Revisão do PR #645: as gravações vão em fila, para a última escolha chegar por último ao servidor.
+    const gravar = gravacaoDoExibir.then(() => a.exibirQuadro!(quadroId, novo));
+    gravacaoDoExibir = gravar.then(() => undefined, () => undefined);
+    try { await gravar; }
+    catch { if (q?.id === quadroId) mudarFaixa({ tipo: "erro", texto: "Não consegui guardar o Exibir. Ele vale só nesta tela." }); }
+  }
+
+  /** As ações da barra e do "+" da coluna; true = tratou. */
+  function aoClicarNaBarra(el: HTMLElement, act: string | undefined): boolean {
+    if (act === "filtro-mais-agentes") { maisAberto = !maisAberto; exibirAberto = false; desenharVista(); focarNaVista(maisAberto ? "#qd-menu-agentes .qd-menu-it" : '[data-act="filtro-mais-agentes"]'); return true; }
+    if (act === "busca-limpar") { mudarBusca(""); return true; }
+    if (act === "exibir-abrir") { exibirAberto = !exibirAberto; maisAberto = false; desenharVista(); focarNaVista(exibirAberto ? "#qd-menu-exibir .qd-menu-it" : '[data-act="exibir-abrir"]'); return true; }
+    if (act === "exibir-alternar") { void alternarExibir(el.dataset["chave"]); return true; }
+    if (act === "col-nova-tarefa") { abrirNova(el); return true; }
+    return false;
+  }
 
   function alternarColuna(el: HTMLElement): void {
     const st = el.dataset["status"];
@@ -1836,10 +1971,20 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
       ev.preventDefault();
       const campo = form.querySelector<HTMLInputElement>('[name="titulo"]');
       const titulo = campo?.value.trim() ?? "";
-      if (!titulo) return;
-      void mudarTarefa((a, de) => a.criarTarefa?.(de, { titulo }), (r) => reciboDaNovaTarefa(titulo, r)).then((ok) => {
-        const c = doc.getElementById("qd-nova-tit");
-        if (ok && c instanceof HTMLInputElement) { c.value = ""; focarSemRolar(c); }
+      const status = form.dataset["status"] ?? "";
+      // Revisão do PR #645: com uma mudança no ar (o Enter duplo, um arrasto), o Enter não faz nada: nem cria de novo nem
+      // mostra um erro que não houve.
+      if (!titulo || !nova || nova.coluna !== status || mexendo) return;
+      const id = campo?.id ?? "";
+      const pedido = nova;
+      void mudarTarefa((a, de) => a.criarTarefa?.(de, { titulo, ...(status ? { status } : {}) }), (r) => reciboDaNovaTarefa(titulo, r)).then((ok) => {
+        if (nova !== pedido) return;
+        // Deu certo: o campo fica aberto e vazio, para a próxima; falhou: o título fica e o erro aparece no campo.
+        nova = ok ? { coluna: pedido.coluna, ...(pedido.estreito ? { estreito: true } : {}) } : { ...pedido, erro: true };
+        if (ok) { const c = doc.getElementById(id); if (c instanceof HTMLInputElement) c.value = ""; }
+        desenharVista();
+        const c = doc.getElementById(id);
+        if (c instanceof HTMLInputElement) { if (ok) c.value = ""; focarSemRolar(c); }
       });
       return;
     }
@@ -1961,9 +2106,10 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
         ev.preventDefault();
         moverColuna(id, ev.key === "ArrowLeft" ? "esquerda" : "direita", `.qd-so-largo .qd-col-bt[data-coluna="${CSS.escape(id)}"]`);
       }
-    } else if (el instanceof HTMLElement && el.matches('#qd-menu [role="menuitem"]') && (ev.key === "ArrowDown" || ev.key === "ArrowUp" || ev.key === "Home" || ev.key === "End")) {
+    } else if (el instanceof HTMLElement && el.matches(ITEM_DE_MENU) && (ev.key === "ArrowDown" || ev.key === "ArrowUp" || ev.key === "Home" || ev.key === "End")) {
       ev.preventDefault();
-      const itens = [...(el.parentElement?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [])];
+      // NOD-460 (revisão do PR #645): também os menus da barra (Exibir, com caixas, e o "+N", com a escolha única).
+      const itens = [...(el.closest('[role="menu"]')?.querySelectorAll<HTMLElement>('[role="menuitem"], [role="menuitemcheckbox"], [role="menuitemradio"]') ?? [])];
       const i = itens.indexOf(el);
       const j = ev.key === "Home" ? 0 : ev.key === "End" ? itens.length - 1 : (i + (ev.key === "ArrowDown" ? 1 : -1) + itens.length) % itens.length;
       itens[j]?.focus();
@@ -2086,6 +2232,48 @@ export function criarQuadroNaTela(doc: Document, o: { reduzido?: () => boolean; 
   };
   doc.addEventListener("pointerup", () => fimDoArrasto(true));
   doc.addEventListener("pointercancel", () => fimDoArrasto(false));
+
+  // NOD-460: a busca filtra a cada letra; "/" leva à busca (fora de um campo); Esc limpa a busca, fecha o "+" e os menus.
+  doc.addEventListener("input", (ev) => {
+    const el = ev.target;
+    if (!dd || !(el instanceof HTMLInputElement) || el.id !== "qd-busca") return;
+    // Revisão do PR #645: a tecla morta (´ ~ ^) abre uma composição; regravar o campo no meio dela quebra o acento. A busca
+    // espera a composição acabar (o compositionend abaixo).
+    if ((ev as InputEvent).isComposing) return;
+    mudarBusca(el.value);
+  });
+  doc.addEventListener("compositionend", (ev) => {
+    const el = ev.target;
+    if (!dd || !(el instanceof HTMLInputElement) || el.id !== "qd-busca") return;
+    mudarBusca(el.value);
+  });
+  doc.addEventListener("keydown", (ev) => {
+    if (!dd || ev.defaultPrevented || ev.isComposing) return;
+    const el = ev.target as Element | null;
+    const v = vista();
+    if (!v || !v.querySelector("#qd-busca")) return;
+    const digitando = el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement || (el instanceof HTMLElement && el.isContentEditable);
+    if (ev.key === "/" && !digitando && !ev.ctrlKey && !ev.metaKey && !ev.altKey && modo === "quadro") {
+      ev.preventDefault();
+      focarNaVista("#qd-busca");
+      return;
+    }
+    if (ev.key !== "Escape") return;
+    if (el instanceof HTMLInputElement && el.id === "qd-busca") {
+      if (!busca) return;
+      ev.preventDefault();
+      mudarBusca("");
+      return;
+    }
+    if (el instanceof HTMLInputElement && el.classList.contains("qd-nova-in")) { ev.preventDefault(); fecharNova(); return; }
+    if (maisAberto || exibirAberto) {
+      ev.preventDefault();
+      const volta = maisAberto ? '[data-act="filtro-mais-agentes"]' : '[data-act="exibir-abrir"]';
+      maisAberto = exibirAberto = false;
+      desenharVista();
+      focarNaVista(volta);
+    }
+  });
 
   // O teclado do tablist (APG, ativação automática): ← → Home End trocam de página e levam o foco. No nome do bot (a
   // pílula), só as setas: Home e End ficam para quem lê.

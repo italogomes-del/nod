@@ -604,6 +604,29 @@ describeIntegracao("quadro-agente (NOD-442)", () => {
     });
   });
 
+  it("NOD-460 (revisão 2 do PR #645): o selo conta do despacho do turno vivo, não da entrada na coluna; sem turno vivo, nada", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const c = await m.lote({ ops: [{ tipo: "criar_quadro", meta: "M" }, { tipo: "criar_tarefa", titulo: "T1", agente: m.betoNome, status: "afazer" }] });
+      if (!c.data.ok) throw new Error(c.data.detalhe);
+      const raiz = c.data.comecaram[0]!.turnoId;
+      const desde = new Date("2026-11-04T10:00:00Z");
+      await trx`update turnos set estado = 'despachando', despachado_em = ${desde}, machine_id = ${randomUUID()}, lease_ate = now() + interval '5 minutes' where id = ${raiz}`;
+      expect((await m.repos.quadros.desdeDosTurnos([raiz])).get(raiz)).toBe(desde.getTime());
+      const q = await m.lote({ autor: { tipo: "pessoa" }, anfitriaoId: m.ana.agenteId, ops: [{ tipo: "mudar_tarefa", tarefa: "T1", descricao: "d" }] });
+      expect(q.data).toMatchObject({ ok: true, quadro: { tarefas: [{ execucao: "rodando", trabalhandoDesde: desde.getTime() }] } });
+      // A retomada viva vale por cima da raiz que concluiu.
+      await trx`update turnos set estado = 'concluido' where id = ${raiz}`;
+      const volta = await m.repos.turnos.enfileirar({ executor: "catcher", conversaId: m.beto.conversaId, agenteId: m.beto.agenteId, origem: "retomada", retomaTurnoId: raiz, prazoEm: AGORA + 600_000, profundidade: 1, entradaTexto: "a CI terminou", entradaConfianca: "confiavel", modelo: "sonnet", acordarEm: AGORA + 60_000 });
+      const depois = new Date("2026-11-04T11:00:00Z");
+      await trx`update turnos set estado = 'despachando', despachado_em = ${depois}, machine_id = ${randomUUID()}, lease_ate = now() + interval '5 minutes' where id = ${volta!.id}`;
+      expect((await m.repos.quadros.desdeDosTurnos([raiz])).get(raiz)).toBe(depois.getTime());
+      // Parado: sai do mapa.
+      await trx`update turnos set parar_solicitado_em = now() where id = ${volta!.id}`;
+      expect((await m.repos.quadros.desdeDosTurnos([raiz])).has(raiz)).toBe(false);
+    });
+  });
+
   it("revisão 3 do PR #622: mandar para o Backlog com passagem para o turno vivo e apaga a execução", async () => {
     await withRollback(MARLON, async (trx) => {
       const m = await montar(trx);

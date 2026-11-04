@@ -261,6 +261,8 @@ export async function montarQuadro(deps: Pick<Deps, "repos" | "agora" | "escopo"
   const donaId = deps.escopo.pessoaId;
   const tarefas = await repo.tarefas(q.id);
   const estados = await repo.estadosDosTurnos(tarefas.map((t) => t.turnoId).filter((id): id is string => id !== null));
+  // NOD-460: desde quando cada turno vivo trabalha (o selo "Trabalhando · há N min" do card).
+  const desdes = await repo.desdeDosTurnos(tarefas.flatMap((t) => (t.turnoId && estados.get(t.turnoId) === "despachando" ? [t.turnoId] : [])));
   const colunas = colunasDe(q);
   // NOD-419: os últimos movimentos de cada tarefa (de quem e para quem, com os nomes).
   const movs = await repo.ultimosMovimentos(q.id, MOVIMENTOS_NA_TELA);
@@ -316,6 +318,7 @@ export async function montarQuadro(deps: Pick<Deps, "repos" | "agora" | "escopo"
     // Só o que ainda está em jogo mostra a execução (um turno concluído de uma tarefa feita não acende nada).
     // A coluna com passagem (ADR-142) é uma etapa em andamento onde ela aciona (revisão 3: o Backlog com passagem não).
     execucao: ["fazendo", "afazer"].includes(papelDe(colunas, t.status)) || (responsavelDe(colunas, t.status) && acionaNaColuna(colunas, t.status)) ? execucaoDoTurno(t.turnoId ? estados.get(t.turnoId) : null) : null,
+    trabalhandoDesde: t.turnoId ? desdes.get(t.turnoId) ?? null : null,
     agenteNome: t.agenteId ? nomes.get(t.agenteId) ?? null : null,
     ...(extras.get(t.id) ?? {}),
     prs: prs.get(t.id) ?? [],

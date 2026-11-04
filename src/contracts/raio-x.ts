@@ -177,4 +177,11 @@ export const USO_DO_MAC_PADRAO: UsoDoMac = "equilibrado";
 export type Experimentos = { calibracao: boolean; memoriaLonga: boolean; whatsapp: boolean; quadro: boolean };
 export const EXPERIMENTOS_DESLIGADOS: Experimentos = { calibracao: false, memoriaLonga: false, whatsapp: false, quadro: false };
 /** NOD-415 (ADR-141): `quadroLiberado` = a flag NOD_QUADROS libera os quadros para esta pessoa (a web só mostra a chave assim). */
-export type Preferencias = { modoDev: boolean; avisosFechados: string[]; usoDoMac?: UsoDoMac; maquinaPadraoId?: string | null; ordemIas?: IdHarness[] | null; iasNoLimite?: LimitesIa; experimentos?: Experimentos; quadroLiberado?: boolean };
+/**
+ * `quadroExibir` (definido em 2026-11-04, NOD-460, 0149): o Exibir do quadro em tela cheia por quadro (a chave é o id):
+ * mostrar as colunas recolhidas e a densidade compacta. Ausente = o padrão da tela (recolhidas à mostra, sem compacto).
+ */
+export type ExibirDoQuadro = { recolhidas: boolean; compacto: boolean };
+/** Quantos quadros guardam o Exibir por pessoa (é linha de banco de quem clica). */
+export const QUADROS_COM_EXIBIR_MAX = 200;
+export type Preferencias = { modoDev: boolean; avisosFechados: string[]; usoDoMac?: UsoDoMac; maquinaPadraoId?: string | null; ordemIas?: IdHarness[] | null; iasNoLimite?: LimitesIa; experimentos?: Experimentos; quadroLiberado?: boolean; quadroExibir?: Record<string, ExibirDoQuadro> };

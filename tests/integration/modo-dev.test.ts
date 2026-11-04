@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { expect, it } from "vitest";
-import type { ExecucaoRaioX } from "../../src/contracts/raio-x.ts";
+import { QUADROS_COM_EXIBIR_MAX, type ExecucaoRaioX } from "../../src/contracts/raio-x.ts";
 import type { ResultadoTurno } from "../../src/contracts/turno.ts";
 import { vincularEscopo } from "../../src/db/tx.ts";
 import { assentarTurno } from "../../src/use-cases/assentar-turno.ts";
@@ -8,7 +8,7 @@ import { criarAgente } from "../../src/use-cases/criar-agente.ts";
 import { despacharTurno } from "../../src/use-cases/despachar-turno.ts";
 import { emitirPlanoTurno } from "../../src/use-cases/emitir-plano-turno.ts";
 import { enviarMensagem } from "../../src/use-cases/enviar-mensagem.ts";
-import { fecharAviso, gravarPreferencias, lerPreferencias, raioXDaConversa, raioXDoTurno } from "../../src/use-cases/raio-x.ts";
+import { exibirDoQuadro, fecharAviso, gravarPreferencias, lerPreferencias, raioXDaConversa, raioXDoTurno } from "../../src/use-cases/raio-x.ts";
 import { ANA, depsSobreTrx, esperarErro, executar, MARLON } from "../helpers/deps-l6.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { withRollback } from "../helpers/with-rollback.ts";
@@ -91,8 +91,8 @@ describeIntegracao("modo dev (0035 + 0036): o custo de cada turno e o Raio-X", (
       expect(semTexto.execucao).toBeNull();
       await executar(deps, assentarTurno, { turnoId: t1, machineId: maquina, seqLocal: 1, fala: { tipo: "texto", texto: "ok" }, resultado: resultado(0.5, randomUUID()) });
 
-      expect((await executar(deps, lerPreferencias, {})).data).toEqual({ modoDev: false, avisosFechados: [], usoDoMac: "equilibrado", maquinaPadraoId: null, ordemIas: null, iasNoLimite: {}, quadroLiberado: true, experimentos: { calibracao: false, memoriaLonga: false, whatsapp: false, quadro: false } });
-      expect((await executar(deps, gravarPreferencias, { modoDev: true })).data).toEqual({ modoDev: true, avisosFechados: [], usoDoMac: "equilibrado", maquinaPadraoId: null, ordemIas: null, iasNoLimite: {}, quadroLiberado: true, experimentos: { calibracao: false, memoriaLonga: false, whatsapp: false, quadro: false } });
+      expect((await executar(deps, lerPreferencias, {})).data).toEqual({ modoDev: false, avisosFechados: [], usoDoMac: "equilibrado", maquinaPadraoId: null, ordemIas: null, iasNoLimite: {}, quadroLiberado: true, experimentos: { calibracao: false, memoriaLonga: false, whatsapp: false, quadro: false }, quadroExibir: {} });
+      expect((await executar(deps, gravarPreferencias, { modoDev: true })).data).toEqual({ modoDev: true, avisosFechados: [], usoDoMac: "equilibrado", maquinaPadraoId: null, ordemIas: null, iasNoLimite: {}, quadroLiberado: true, experimentos: { calibracao: false, memoriaLonga: false, whatsapp: false, quadro: false }, quadroExibir: {} });
       // Corpo vazio é recusado. ADR-099 (I10): `faixaTrabalhosRecolhida` saiu do contrato — vinda sozinha, é corpo vazio.
       await expect(executar(deps, gravarPreferencias, {})).rejects.toMatchObject({ codigo: "entrada_invalida" });
       await expect(executar(deps, gravarPreferencias, { faixaTrabalhosRecolhida: true } as never)).rejects.toMatchObject({ codigo: "entrada_invalida" });
@@ -132,7 +132,7 @@ describeIntegracao("modo dev (0035 + 0036): o custo de cada turno e o Raio-X", (
       const daAna = depsSobreTrx(trx, ANA);
       await esperarErro(() => raioXDoTurno(daAna, { turnoId }), "nao_encontrado");
       expect(await trx`select 1 from turno_raio_x where turno_id = ${turnoId}`).toHaveLength(0);
-      expect((await executar(daAna, lerPreferencias, {})).data).toEqual({ modoDev: false, avisosFechados: [], usoDoMac: "equilibrado", maquinaPadraoId: null, ordemIas: null, iasNoLimite: {}, quadroLiberado: true, experimentos: { calibracao: false, memoriaLonga: false, whatsapp: false, quadro: false } });
+      expect((await executar(daAna, lerPreferencias, {})).data).toEqual({ modoDev: false, avisosFechados: [], usoDoMac: "equilibrado", maquinaPadraoId: null, ordemIas: null, iasNoLimite: {}, quadroLiberado: true, experimentos: { calibracao: false, memoriaLonga: false, whatsapp: false, quadro: false }, quadroExibir: {} });
       expect((await executar(daAna, raioXDaConversa, { conversaId: criado.conversa.id, desde: 0 })).data).toEqual({ turnos: [], desde: { custoUsd: 0, turnos: 0 } });
     });
   });
@@ -140,15 +140,64 @@ describeIntegracao("modo dev (0035 + 0036): o custo de cada turno e o Raio-X", (
   it("0059: o aviso fechado fica com a pessoa — sem repetir, sem apagar o modo dev, privado e com chave fechada", async () => {
     await withRollback(MARLON, async (trx) => {
       const deps = depsSobreTrx(trx, MARLON);
-      expect((await executar(deps, fecharAviso, { chave: "modo:total" })).data).toEqual({ modoDev: false, avisosFechados: ["modo:total"], usoDoMac: "equilibrado", maquinaPadraoId: null, ordemIas: null, iasNoLimite: {}, quadroLiberado: true, experimentos: { calibracao: false, memoriaLonga: false, whatsapp: false, quadro: false } });
+      expect((await executar(deps, fecharAviso, { chave: "modo:total" })).data).toEqual({ modoDev: false, avisosFechados: ["modo:total"], usoDoMac: "equilibrado", maquinaPadraoId: null, ordemIas: null, iasNoLimite: {}, quadroLiberado: true, experimentos: { calibracao: false, memoriaLonga: false, whatsapp: false, quadro: false }, quadroExibir: {} });
       await executar(deps, gravarPreferencias, { modoDev: true });
       await executar(deps, fecharAviso, { chave: "modo:total" });
-      expect((await executar(deps, fecharAviso, { chave: "modo:automatico" })).data).toEqual({ modoDev: true, avisosFechados: ["modo:total", "modo:automatico"], usoDoMac: "equilibrado", maquinaPadraoId: null, ordemIas: null, iasNoLimite: {}, quadroLiberado: true, experimentos: { calibracao: false, memoriaLonga: false, whatsapp: false, quadro: false } });
+      expect((await executar(deps, fecharAviso, { chave: "modo:automatico" })).data).toEqual({ modoDev: true, avisosFechados: ["modo:total", "modo:automatico"], usoDoMac: "equilibrado", maquinaPadraoId: null, ordemIas: null, iasNoLimite: {}, quadroLiberado: true, experimentos: { calibracao: false, memoriaLonga: false, whatsapp: false, quadro: false }, quadroExibir: {} });
       expect((await executar(deps, lerPreferencias, {})).data.avisosFechados).toEqual(["modo:total", "modo:automatico"]);
       for (const chave of ["", "Modo:total", "modo:total; drop", "x".repeat(80), 42]) await esperarErro(() => fecharAviso(deps, { chave }), "entrada_invalida");
 
       await vincularEscopo(trx, ANA);
       expect((await executar(depsSobreTrx(trx, ANA), lerPreferencias, {})).data.avisosFechados).toEqual([]);
+    });
+  });
+
+  it("0149 (NOD-460): o Exibir do quadro é da pessoa e de cada quadro — substitui o daquele, guarda os outros e recusa o inválido", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const deps = depsSobreTrx(trx, MARLON);
+      const q1 = randomUUID();
+      const q2 = randomUUID();
+      await executar(deps, gravarPreferencias, { modoDev: true });
+      expect((await executar(deps, exibirDoQuadro, { quadroId: q1.toUpperCase(), recolhidas: false, compacto: true })).data.quadroExibir).toEqual({ [q1]: { recolhidas: false, compacto: true } });
+      await executar(deps, exibirDoQuadro, { quadroId: q2, recolhidas: true, compacto: true });
+      const lido = (await executar(deps, exibirDoQuadro, { quadroId: q1, recolhidas: true, compacto: false })).data;
+      expect(lido.quadroExibir).toEqual({ [q1]: { recolhidas: true, compacto: false }, [q2]: { recolhidas: true, compacto: true } });
+      // Não apaga o resto das preferências.
+      expect(lido.modoDev).toBe(true);
+      expect((await executar(deps, lerPreferencias, {})).data.quadroExibir).toEqual(lido.quadroExibir);
+      for (const e of [{ quadroId: "q1", recolhidas: true, compacto: true }, { quadroId: q1, recolhidas: "sim", compacto: true }, { quadroId: q1, recolhidas: true }, { quadroId: 42, recolhidas: true, compacto: false }]) {
+        await esperarErro(() => exibirDoQuadro(deps, e as never), "entrada_invalida");
+      }
+
+      await vincularEscopo(trx, ANA);
+      expect((await executar(depsSobreTrx(trx, ANA), lerPreferencias, {})).data.quadroExibir).toEqual({});
+    });
+  });
+
+  it("0149 (NOD-460): o teto de quadros com Exibir guardado recusa o novo, mas o já guardado ainda muda", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const deps = depsSobreTrx(trx, MARLON);
+      const cheio = Object.fromEntries(Array.from({ length: QUADROS_COM_EXIBIR_MAX }, () => [randomUUID(), { recolhidas: true, compacto: false }]));
+      await trx`insert into preferencias (tenant_id, owner_id, quadro_exibir) values (${MARLON.tenantId}, ${MARLON.pessoaId}, ${trx.json(cheio)})
+        on conflict (tenant_id, owner_id) do update set quadro_exibir = excluded.quadro_exibir`;
+      await esperarErro(() => exibirDoQuadro(deps, { quadroId: randomUUID(), recolhidas: false, compacto: false }), "entrada_invalida");
+      const um = Object.keys(cheio)[0]!;
+      expect((await executar(deps, exibirDoQuadro, { quadroId: um, recolhidas: false, compacto: true })).data.quadroExibir?.[um]).toEqual({ recolhidas: false, compacto: true });
+    });
+  });
+
+  it("0149 (QA do PR #645): um abaixo do teto ainda aceita o novo (chega a 200) e o seguinte é recusado no próprio upsert", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const deps = depsSobreTrx(trx, MARLON);
+      const quase = Object.fromEntries(Array.from({ length: QUADROS_COM_EXIBIR_MAX - 1 }, () => [randomUUID(), { recolhidas: true, compacto: false }]));
+      await trx`insert into preferencias (tenant_id, owner_id, quadro_exibir) values (${MARLON.tenantId}, ${MARLON.pessoaId}, ${trx.json(quase)})
+        on conflict (tenant_id, owner_id) do update set quadro_exibir = excluded.quadro_exibir`;
+      const r = await executar(deps, exibirDoQuadro, { quadroId: randomUUID(), recolhidas: false, compacto: false });
+      expect(Object.keys(r.data.quadroExibir ?? {})).toHaveLength(QUADROS_COM_EXIBIR_MAX);
+      // O repositório sozinho (sem o caso de uso) também recusa: o teto mora no SQL.
+      expect(await deps.repos.preferencias.exibirQuadro(randomUUID(), { recolhidas: true, compacto: true }, QUADROS_COM_EXIBIR_MAX)).toBeNull();
+      const [n] = await trx<{ n: number }[]>`select count(*)::int as n from preferencias, jsonb_object_keys(quadro_exibir) where tenant_id = ${MARLON.tenantId} and owner_id = ${MARLON.pessoaId}`;
+      expect(n!.n).toBe(QUADROS_COM_EXIBIR_MAX);
     });
   });
 });

@@ -450,9 +450,105 @@ describe("NOD-416 (ADR-144): criar, Status e Responsável na tela, histórico e 
     expect(html).not.toMatch(/onerror="/);
   });
 
-  it("Nova tarefa… fica na barra do quadro", () => {
-    expect(String(formNovaTarefa())).toContain(`data-form="nova-tarefa"`);
-    expect(String(quadroDaMeta({ q: q([]), nome: "Ada", agente, filtro: "todos", alternadas: new Set(), acesas: new Set() }))).toContain(`data-form="nova-tarefa"`);
+  it("NOD-460: o \"+\" mora em cada coluna aberta e abre o campo no topo dela (a barra não tem mais Nova tarefa…)", () => {
+    expect(String(formNovaTarefa({ id: "afazer", nome: "A fazer" }))).toContain(`data-form="nova-tarefa" data-status="afazer"`);
+    const base = { q: q([]), nome: "Ada", agente, filtro: "todos" as const, alternadas: new Set<string>(), acesas: new Set<string>() };
+    expect(String(quadroDaMeta(base))).not.toContain(`data-form="nova-tarefa"`);
+    expect(String(quadroDaMeta(base))).not.toContain(`data-act="col-nova-tarefa"`);
+    const com = String(quadroDaMeta({ ...base, podeCriar: true }));
+    expect(com).toContain(`data-act="col-nova-tarefa" data-status="afazer"`);
+    const aberto = String(quadroDaMeta({ ...base, podeCriar: true, nova: { coluna: "afazer" } }));
+    expect(aberto.match(/data-form="nova-tarefa"/g)).toHaveLength(1);
+    expect(aberto).toContain(`id="qd-nova-grade-afazer"`);
+    expect(String(quadroDaMeta({ ...base, podeCriar: true, nova: { coluna: "afazer", estreito: true, erro: true } }))).toContain(`id="qd-nova-lista-afazer"`);
+    expect(String(quadroDaMeta({ ...base, podeCriar: true, nova: { coluna: "afazer", erro: true } }))).toContain("Não deu para criar. Enter tenta de novo.");
+  });
+});
+
+describe("NOD-460: a barra do quadro em tela cheia", () => {
+  const base = { nome: "Ada", agente, alternadas: new Set<string>(), acesas: new Set<string>() };
+  const ts = [t("1", { titulo: "Login no Safari", status: "voce" }), t("2", { titulo: "Ação de onboarding", agenteId: "b", agenteNome: "Bia", execucao: "rodando", status: "fazendo", naColunaDesde: 1, trabalhandoDesde: 1 }), t("3", { titulo: "Outra" })];
+
+  it("os chips (Todas, Comigo com a contagem, um por agente) e o Comigo fica à vista com 0 quando ninguém espera você", () => {
+    const html = String(quadroDaMeta({ ...base, q: q(ts), filtro: "todos" }));
+    expect(html).toContain(`data-filtro="todos" aria-pressed="true"`);
+    expect(html).toContain(`data-filtro="comigo"`);
+    expect(html).toContain(`data-filtro="agente:a"`);
+    expect(html).toContain(`data-filtro="agente:b"`);
+    expect(html).toContain(`data-filtro="trabalhando"`);
+    expect(String(quadroDaMeta({ ...base, q: q([t("3")]), filtro: "todos" }))).toContain(`aria-label="Comigo, 0"`);
+  });
+
+  it("o filtro e a busca escondem os cards de fora e marcam o trecho achado", () => {
+    const html = String(quadroDaMeta({ ...base, q: q(ts), filtro: "todos", busca: "acao" }));
+    expect(html).toContain(`<mark class="qd-mark">Ação</mark> de onboarding`);
+    expect(html).not.toContain("Login no Safari");
+    expect(html).toContain(`value="acao"`);
+    const so = String(quadroDaMeta({ ...base, q: q(ts), filtro: "agente:b" }));
+    expect(so).not.toContain("Login no Safari");
+    expect(so).toContain("Ação de onboarding");
+  });
+
+  it("sem resultado: uma linha inline (anunciada pela região viva, sem role próprio) com Limpar busca e Ver em todas, sem modal", () => {
+    const html = String(quadroDaMeta({ ...base, q: q(ts), filtro: "agente:b", busca: "zzz" }));
+    expect(html).toContain(`class="qd-vazio-1"`);
+    expect(html).not.toMatch(/class="qd-vazio-1"[^>]*role=/);
+    expect(html).toContain("Nada com “zzz” nas tarefas de Bia.");
+    expect(html).toContain(`data-act="busca-limpar"`);
+    expect(html).toContain(`data-act="filtro-do-quadro" data-filtro="todos">Ver em todas`);
+    expect(html).not.toMatch(/role="dialog"|aria-modal/);
+    expect(String(quadroDaMeta({ ...base, q: q(ts), filtro: "todos" }))).not.toContain("qd-vazio-1");
+  });
+
+  it("QA do PR #645: título, código e termo hostis saem escapados no card, na marca e na linha do vazio", () => {
+    const mal = [t("7", { titulo: "Antes <img src=x onerror=alert(1)> depois", codigo: "<s>ZE-7</s>" })];
+    const html = String(quadroDaMeta({ ...base, q: q(mal), filtro: "todos", busca: "depois" }));
+    expect(html).not.toContain("<img src=x");
+    expect(html).not.toContain("<s>ZE-7");
+    expect(html).toContain("&lt;img src=x onerror=alert(1)&gt;");
+    expect(html).toContain("&lt;s&gt;ZE-7&lt;/s&gt;");
+    const codigo = String(quadroDaMeta({ ...base, q: q(mal), filtro: "todos", busca: "ze-7" }));
+    expect(codigo).not.toContain("<s>");
+    const vazio = String(quadroDaMeta({ ...base, q: q(mal), filtro: "todos", busca: "<b>nada" }));
+    expect(vazio).toContain("Nada com “&lt;b&gt;nada” no quadro.");
+    expect(vazio).not.toContain("<b>nada");
+  });
+
+  it("revisão 2 do PR #645: a busca que só acha numa coluna recolhida diz onde está e oferece abrir (não deixa a grade em branco)", () => {
+    const comFeita = [...ts, t("9", { titulo: "Zebra feita", status: "feito" })];
+    // A pessoa recolheu o Feito (com tarefa, ele nasce aberto).
+    const rec = new Set(["feito"]);
+    const html = String(quadroDaMeta({ ...base, q: q(comFeita), filtro: "todos", busca: "zebra", alternadas: rec }));
+    expect(html).toContain("Nada nas colunas abertas; 1 tarefa em Feito.");
+    expect(html).toContain(`data-act="abrir-coluna" data-status="feito">Abrir Feito</button>`);
+    // Sem as recolhidas à vista (Exibir), o mesmo.
+    expect(String(quadroDaMeta({ ...base, q: q(comFeita), filtro: "todos", busca: "zebra", alternadas: rec, exibir: { recolhidas: false, compacto: false } }))).toContain("1 tarefa em Feito.");
+    // Aberta a coluna, a tarefa aparece e a linha some.
+    expect(String(quadroDaMeta({ ...base, q: q(comFeita), filtro: "todos", busca: "zebra" }))).not.toContain("qd-vazio-1");
+  });
+
+  it("o card rodando diz \"Trabalhando · há N min\"; Exibir compacto e sem recolhidas mudam a grade", () => {
+    const html = String(quadroDaMeta({ ...base, q: q(ts), filtro: "todos", agora: 1 + 5 * 60_000 }));
+    expect(html).toContain("Trabalhando · há 5 min");
+    // Revisão 2 do PR #645: conta do começo do trabalho, não de quando a tarefa entrou na coluna.
+    const velha = ts.map((x) => (x.id === "2" ? { ...x, naColunaDesde: 1, trabalhandoDesde: 1 + 3 * 60_000 } : x));
+    expect(String(quadroDaMeta({ ...base, q: q(velha), filtro: "todos", agora: 1 + 5 * 60_000 }))).toContain("Trabalhando · há 2 min");
+    const semInicio = ts.map((x) => (x.id === "2" ? { ...x, trabalhandoDesde: null } : x));
+    const so = String(quadroDaMeta({ ...base, q: q(semInicio), filtro: "todos", agora: 1 + 5 * 60_000 }));
+    expect(so).toContain("Trabalhando");
+    expect(so).not.toContain("Trabalhando · há");
+    const ajust = String(quadroDaMeta({ ...base, q: q(ts), filtro: "todos", exibir: { recolhidas: false, compacto: true } }));
+    expect(ajust).toContain("qd-compacto");
+    expect(ajust).toContain("qd-ponto");
+    expect(ajust).not.toContain(`data-status="feito"`);
+    const menu = String(quadroDaMeta({ ...base, q: q(ts), filtro: "todos", exibir: { recolhidas: true, compacto: false, aberto: true } }));
+    expect(menu).toContain(`id="qd-menu-exibir"`);
+    expect(menu).toContain(`data-chave="compacto" aria-checked="false"`);
+  });
+
+  it("o texto hostil no título e na busca não vira tag", () => {
+    const html = String(quadroDaMeta({ ...base, q: q([t("9", { titulo: MAL })]), filtro: "todos", busca: MAL }));
+    expect(html).not.toContain("<img");
   });
 });
 

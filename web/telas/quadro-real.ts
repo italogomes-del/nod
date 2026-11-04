@@ -14,7 +14,8 @@ import { comColunas, iconeDaColuna, paradaHa, podeTerPrazo, prazoLegivelMin, ini
 import { aposDoCabecalho, botaoDeNova, campoDeRenomear, colunaNova, confirmacaoDeSoltar, folhaDasColunas, menuDeMover, naFolha, type AgenteDaPassagem } from "./colunas-quadro.ts";
 import { RESP_VOCE, atalhosDePrazo, codigoDaTarefa, faltaParaOPrazo, fraseDoPrazo, linhaDoHistorico, opcoesDeStatus, tarefasPorStatus, type Faixa } from "../lib/quadro-dados.ts";
 import { ecoDoAgente, fraseDaTrava, fraseDoMovimento, porqueNaoDesfaz } from "../lib/freios.ts";
-import { anel, avatar, barra, card, confiar, ICONE, ICONE_DO_STATUS, linha, lista, quadro, seloEmTeste, type Aviso, type Card, type Coluna, type ExtraDaGrade, type Filtro, type Html, type QuemRoda } from "./quadro.ts";
+import { anel, avatar, barra, card, confiar, ICONE, ICONE_DO_STATUS, linha, lista, quadro, seloEmTeste, type Aviso, type Card, type ChipDaBarra, type Coluna, type ExibirDaBarra, type ExtraDaGrade, type Filtro, type Html, type QuemRoda } from "./quadro.ts";
+import { chipsDaBarra, ehComigo, fraseDoVazio, marcar, passaNaVista, termoDaBusca, type ChipDeAgente } from "../lib/vista-do-quadro.ts";
 import { linhaDaImportacao, painelDeImportacao, type PainelImportacao } from "./card-importacao.ts";
 
 /** Quem é o agente de um id (o avatar com o mascote dele e o nome); null = não é um bot da pessoa. */
@@ -22,15 +23,25 @@ export type AgenteDoQuadro = (agenteId: string) => { avatar: Html; nome: string 
 
 const VOCE = { avatar: anel("V", "Você", true), nome: "Você" };
 const VAZIO_DO_BACKLOG = "Diga o que entra, ou peça para trazer do Linear.";
+/** NOD-460 (estados do protótipo): o quadro sem tarefa nenhuma diz, em A fazer, como começar. */
+const VAZIO_DO_QUADRO = "Nada por aqui ainda. Use + ou escreva na pílula: cria em A fazer: …";
 const LIMITE_RESPOSTA = 4000;
 const LIMITE_PEDIDO = 4000;
 const LIMITE_TITULO = 200;
 
-/** NOD-416: "Nova tarefa…" na barra. Cai no Backlog e ninguém começa (para começar, mude o status). */
-export function formNovaTarefa(): Html {
-  return confiar(`<form class="qd-nova-tarefa" data-form="nova-tarefa"><label class="qd-sr" for="qd-nova-tit">Nova tarefa</label>` +
-    `<input id="qd-nova-tit" class="qd-nova-in" name="titulo" maxlength="${LIMITE_TITULO}" required autocomplete="off" placeholder="Nova tarefa…">` +
-    `<button type="submit" class="qd-bt">Criar</button></form>`);
+/** O id do campo de nova tarefa de uma coluna (o rascunho sobrevive à regravação pelo id). */
+export const idDaNovaTarefa = (coluna: string, onde: "grade" | "lista" = "grade"): string => `qd-nova-${onde}-${coluna.replace(/[^a-z0-9_-]/gi, "_")}`;
+
+/**
+ * NOD-460: o "+" do cabeçalho abre este campo no topo da coluna. Enter cria naquela coluna (como o chat, com status);
+ * Esc cancela e devolve o foco ao "+". `erro`: a criação falhou e o título voltou ao campo.
+ */
+export function formNovaTarefa(coluna: { id: string; nome: string }, o: { onde?: "grade" | "lista"; erro?: boolean } = {}): Html {
+  const id = idDaNovaTarefa(coluna.id, o.onde);
+  const erro = o.erro ? `<p class="qd-nova-msg" id="${id}-erro" role="alert">Não deu para criar. Enter tenta de novo.</p>` : "";
+  return confiar(`<li class="${o.erro ? "qd-nova qd-nova-erro" : "qd-nova"}"><form data-form="nova-tarefa" data-status="${esc(coluna.id)}">` +
+    `<input id="${id}" class="qd-nova-in" name="titulo" maxlength="${LIMITE_TITULO}" required autocomplete="off" placeholder="Título da tarefa" aria-label="${esc(`Título da nova tarefa em ${coluna.nome}`)}"${o.erro ? ` aria-invalid="true" aria-describedby="${id}-erro"` : ""}>` +
+    `${erro}<p class="qd-nova-dica" aria-hidden="true"><kbd>Enter</kbd> cria · <kbd>Esc</kbd> cancela</p></form></li>`);
 }
 
 const numeroDoPr = (url: string): string => {
@@ -78,6 +89,7 @@ export function cardDaTarefa(t: TarefaDto, agente: AgenteDoQuadro, acesa = false
     titulo: t.titulo,
     ...(resp ? { responsavel: resp } : {}),
     ...(t.execucao ? { estado: t.execucao } : {}),
+    ...(t.execucao === "rodando" && o.agora && t.trabalhandoDesde ? { rodandoHa: haQuanto(t.trabalhandoDesde, o.agora) } : {}),
     ...(t.status === "bloqueado" ? { motivo: t.pergunta ?? "bloqueada" } : {}),
     ...(t.status === "voce" && !outro ? { voce: t.pergunta ?? "Precisa de você" } : {}),
     ...(pr ? { pr } : {}),
@@ -96,7 +108,21 @@ export function esperandoOutro(t: TarefaDto): string | null {
   return t.status === "voce" && t.decide && !t.decide.voce ? t.decide.nome : null;
 }
 
-const passaNoFiltro = (t: TarefaDto, f: Filtro): boolean => (f === "todos" ? true : f === "pessoas" ? t.status === "voce" || !t.agenteId : !!t.agenteId && t.status !== "voce");
+/** NOD-460: "há 2 min" do selo Trabalhando (o DTO não tem o início da execução: vale a entrada na coluna). */
+const haQuanto = (desde: number, agora: number): string => paradaHa(desde, agora).replace(/^parada /, "");
+
+/** O chip de um agente do quadro: o mascote e o nome dele; o bot que não é da pessoa vira o anel com a inicial. */
+function chipDe(c: ChipDeAgente, q: QuadroDto, agente: AgenteDoQuadro): ChipDaBarra {
+  const a = agente(c.agenteId);
+  if (a) return { agenteId: c.agenteId, avatar: a.avatar, nome: a.nome, n: c.n };
+  const nome = q.tarefas.find((t) => t.agenteId === c.agenteId)?.agenteNome ?? "Agente";
+  return { agenteId: c.agenteId, avatar: anel(nome.slice(0, 1).toUpperCase(), nome), nome, n: c.n };
+}
+
+/** O nome do agente de um filtro (o chip, a frase do vazio). */
+export function nomeDoAgente(q: QuadroDto, agente: AgenteDoQuadro, id: string): string | null {
+  return agente(id)?.nome ?? q.tarefas.find((t) => t.agenteId === id)?.agenteNome ?? null;
+}
 
 /** Quem roda agora (o anel na barra), sem repetir o mesmo bot. */
 function trabalhando(q: QuadroDto, agente: AgenteDoQuadro): QuemRoda[] {
@@ -105,8 +131,9 @@ function trabalhando(q: QuadroDto, agente: AgenteDoQuadro): QuemRoda[] {
   for (const t of q.tarefas) {
     if (t.execucao !== "rodando" || !t.agenteId || vistos.has(t.agenteId)) continue;
     vistos.add(t.agenteId);
-    const a = agente(t.agenteId);
-    if (a) r.push(a);
+    // NOD-460: o bot que o diretório não conhece (saiu, outro dono) também conta: o anel leva a inicial do nome.
+    const c = chipDe({ agenteId: t.agenteId, n: 1 }, q, agente);
+    r.push({ avatar: c.avatar, nome: c.nome });
   }
   return r;
 }
@@ -190,8 +217,14 @@ const rotuloDoQuadro = (q: QuadroDto, nome: string): string => (q.meta ? `Quadro
  * NOD-448: as colunas são as do quadro (`q.colunas`), com o cabeçalho que edita, o "+" e as tiras de Feito e Fechado
  * presas à direita (NOD-429). `edicao` é o pedaço aberto (menu, renomear, remover, coluna nova, a folha do celular).
  */
-export function quadroDaMeta(o: { q: QuadroDto; nome: string; agente: AgenteDoQuadro; filtro: Filtro; alternadas: ReadonlySet<string>; acesas: ReadonlySet<string>; edicao?: EdicaoDeColuna | null; agora?: number; editandoMeta?: boolean; pessoas?: PessoasNaTela; agentes?: readonly AgenteDaPassagem[]; /** NOD-419: a recusa da trava no card que a pessoa soltou. */ avisos?: ReadonlyMap<string, Aviso>; importando?: PainelImportacao | null }): Html {
+export function quadroDaMeta(o: { q: QuadroDto; nome: string; agente: AgenteDoQuadro; filtro: Filtro; alternadas: ReadonlySet<string>; acesas: ReadonlySet<string>; edicao?: EdicaoDeColuna | null; agora?: number; editandoMeta?: boolean; pessoas?: PessoasNaTela; agentes?: readonly AgenteDaPassagem[]; /** NOD-419: a recusa da trava no card que a pessoa soltou. */ avisos?: ReadonlyMap<string, Aviso>; importando?: PainelImportacao | null;
+  /** NOD-460: a busca, o Exibir (com o menu aberto ou não), o "+N" aberto e o campo de nova tarefa aberto numa coluna. */
+  busca?: string; exibir?: ExibirDaBarra; maisAberto?: boolean; nova?: { coluna: string; estreito?: boolean; erro?: boolean } | null; podeCriar?: boolean }): Html {
   const por = tarefasPorStatus(o.q);
+  const busca = o.busca ?? "";
+  const termo = termoDaBusca(busca);
+  const exibir: ExibirDaBarra = o.exibir ?? { recolhidas: true, compacto: false };
+  const nova = o.nova ?? null;
   const ed = o.edicao ?? null;
   // NOD-443 (D6): com gente no quadro, a pendência pode ser de outra pessoa: o nome padrão vira "Precisa de alguém".
   const varias = (o.q.membros?.length ?? 0) > 0;
@@ -200,11 +233,13 @@ export function quadroDaMeta(o: { q: QuadroDto; nome: string; agente: AgenteDoQu
   const contagem: Record<string, number> = Object.fromEntries(cs.map((c) => [c.id, (por[c.id] ?? []).length]));
   const importado = o.q.importacao?.estado === "aplicada";
   const cols = cs.map((c) => {
-    const tarefas = (por[c.id] ?? []).filter((t) => passaNoFiltro(t, o.filtro));
+    const tarefas = (por[c.id] ?? []).filter((t) => passaNaVista(t, o.filtro, termo));
     const padrao = recolhidaPorPadrao(c, contagem[c.id] ?? 0, importado);
     // Renomear ou remover (o popover) abre a coluna, para o campo ter onde ficar.
     const editando = !naFolha(ed) && (ed?.tipo === "renomear" || ed?.tipo === "remover" || ed?.tipo === "passagem" || ed?.tipo === "trava" || ed?.tipo === "soltar" || ed?.tipo === "prazo") && ed.coluna === c.id;
-    return { c, tarefas, recolhida: !editando && padrao !== o.alternadas.has(c.id) };
+    // NOD-460: a coluna com o "+" aberto fica aberta (criar a 1ª tarefa no Backlog vazio mudaria o padrão e a recolheria).
+    const criando = nova?.coluna === c.id;
+    return { c, tarefas, recolhida: !editando && !criando && padrao !== o.alternadas.has(c.id) };
   });
   // O prazo dormente (coluna que passou a "só a pessoa tira daqui") não marca atraso (revisão 4 do PR #624).
   const prazoDe = new Map(cs.flatMap((c) => (c.prazoMin && podeTerPrazo(c) ? [[c.id, c.prazoMin] as const] : [])));
@@ -214,37 +249,60 @@ export function quadroDaMeta(o: { q: QuadroDto; nome: string; agente: AgenteDoQu
     const menu = o.agentes && ed?.tipo === "mover" && ed.tarefa === t.id && !!ed.estreito === estreito ? { menu: menuDeMover(cs, t, o.nome) } : {};
     const saindo = ed?.tipo === "soltar" && ed.tarefa === t.id ? { classe: "qd-saindo" } : {};
     const av = o.avisos?.get(t.id);
-    return { ...cardDaTarefa(t, o.agente, o.acesas.has(t.id), { eco: { colunas: cs, agora: o.agora ?? Date.now() }, ...(av ? { aviso: av } : {}), ...(o.agora ? { agora: o.agora } : {}), ...(prazoDe.has(t.status) ? { prazoMin: prazoDe.get(t.status)! } : {}), responder: true }), ...(o.agentes ? { arrastavel: true } : {}), ...menu, ...saindo };
+    const marcado = termo ? { tituloHtml: confiar(marcar(t.titulo, termo)), codigoHtml: confiar(marcar(codigoDaTarefa(t), termo)) } : {};
+    return { ...cardDaTarefa(t, o.agente, o.acesas.has(t.id), { eco: { colunas: cs, agora: o.agora ?? Date.now() }, ...(av ? { aviso: av } : {}), ...(o.agora ? { agora: o.agora } : {}), ...(prazoDe.has(t.status) ? { prazoMin: prazoDe.get(t.status)! } : {}), responder: true }), ...(o.agentes ? { arrastavel: true } : {}), ...menu, ...saindo, ...marcado };
   });
   const solta = (c: (typeof cs)[number]): Html[] => {
     if (ed?.tipo !== "soltar" || ed.coluna !== c.id) return [];
     return [confirmacaoDeSoltar(c, ed.tarefa, o.q.tarefas.find((t) => t.id === ed.tarefa)?.titulo)];
   };
-  const vazio = (id: string): string => (id === "backlog" && o.q.total === 0 ? VAZIO_DO_BACKLOG : "Nada aqui");
-  const preso = inicioDoFimPreso(cols.map((x) => ({ grupo: x.c.grupo, recolhida: x.recolhida })));
+  // NOD-460: com filtro ou busca, a coluna vazia não diz nada (a linha do vazio, sobre a grade, diz uma vez só).
+  const filtrando = !!termo || o.filtro !== "todos";
+  const vazio = (id: string): string => (filtrando ? "" : o.q.tarefas.length === 0 ? (id === "afazer" ? VAZIO_DO_QUADRO : id === "backlog" ? VAZIO_DO_BACKLOG : "Nada aqui") : "Nada aqui");
+  const formDa = (c: (typeof cs)[number], estreito: boolean): Html[] => (nova?.coluna === c.id && !!nova.estreito === estreito ? [formNovaTarefa(c, { onde: estreito ? "lista" : "grade", ...(nova.erro ? { erro: true } : {}) })] : []);
+  // NOD-460 (Exibir): sem as recolhidas, as tiras saem e as abertas ganham a largura.
+  const vistas = exibir.recolhidas ? cols : cols.filter((x) => !x.recolhida);
+  const preso = inicioDoFimPreso(vistas.map((x) => ({ grupo: x.c.grupo, recolhida: x.recolhida })));
   const larguraPresa = (depois: number) => `calc(${depois} * (var(--qd-tira) + 8px) + var(--qd-tira) + 8px)`;
-  const colunas: Coluna[] = cols.map(({ c, tarefas, recolhida }, i) => ({
+  const colunas: Coluna[] = vistas.map(({ c, tarefas, recolhida }, i) => ({
     status: c.id, nome: c.nome, grupo: c.grupo, icone: iconeDaColuna(c), pessoa: c.daPessoa, recolhida, recolhivel: true,
-    editavel: { fixa: c.fixa }, ...(c.prazoMin && podeTerPrazo(c) ? { prazo: prazoLegivelMin(c.prazoMin) } : {}), n: tarefas.length, cards: [...solta(c), ...cartoes(tarefas, false).map(card)], vazio: vazio(c.id),
+    editavel: { fixa: c.fixa }, ...(c.prazoMin && podeTerPrazo(c) ? { prazo: prazoLegivelMin(c.prazoMin) } : {}), n: tarefas.length, cards: [...formDa(c, false), ...solta(c), ...cartoes(tarefas, false).map(card)], vazio: nova?.coluna === c.id && !nova.estreito ? "" : vazio(c.id),
+    ...(o.podeCriar && !recolhida ? { novaTarefa: { aberta: nova?.coluna === c.id && !nova.estreito } } : {}),
     ...(!recolhida ? { apos: aposDoCabecalho(cs, c, ed, contagem[c.id] ?? 0, o.nome, o.agentes) } : {}),
     ...(ed?.tipo === "renomear" && ed.coluna === c.id && !naFolha(ed) ? { cab: campoDeRenomear(c, ed.erro) } : {}),
-    ...(i >= preso ? { presa: larguraPresa(cols.length - 1 - i) } : {}),
+    ...(i >= preso ? { presa: larguraPresa(vistas.length - 1 - i) } : {}),
     ...(c.trava && fraseDaTrava(cs, c.trava) ? { trava: `Travada: ${fraseDaTrava(cs, c.trava)}` } : {}),
   }));
   const cheio = cs.length >= LIMITE_COLUNAS;
   const extras: ExtraDaGrade[] = [{ html: botaoDeNova(cheio), trilha: "var(--qd-tira)" }];
   if (ed?.tipo === "nova" && !naFolha(ed)) {
-    const depois = ed.depoisDe ? cs.findIndex((c) => c.id === ed.depoisDe) : -1;
+    const depois = ed.depoisDe ? vistas.findIndex((x) => x.c.id === ed.depoisDe) : -1;
     extras.unshift({ html: confiar(`<section class="qd-col qd-col-nova" aria-label="Nova coluna">${colunaNova(ed)}</section>`), trilha: "minmax(var(--qd-col-min), 1fr)", em: depois >= 0 && depois < preso ? depois + 1 : preso });
   }
   const ordem = `<button type="button" class="qd-link qd-lg-ordem" data-act="col-folha">Ordem das colunas</button>`;
+  // NOD-460: a barra (Todas · Comigo · chips · busca · trabalhando · Exibir) e a linha do vazio inline (sem modal).
+  const chips = chipsDaBarra(o.q.tarefas, o.filtro);
+  const ag = (c: ChipDeAgente) => chipDe(c, o.q, o.agente);
+  // Revisão 2 do PR #645: conta só o que está à vista (colunas abertas). O que a busca acha só nas recolhidas vira um
+  // "Abrir <coluna>" na mesma linha, em vez de uma grade em branco.
+  const naVista = cols.reduce((n, x) => n + (x.recolhida ? 0 : x.tarefas.length), 0);
+  const escondidas = cols.filter((x) => x.recolhida && x.tarefas.length);
+  const nEscondidas = escondidas.reduce((n, x) => n + x.tarefas.length, 0);
+  const frase = naVista === 0 && filtrando
+    ? nEscondidas ? `Nada nas colunas abertas; ${nEscondidas === 1 ? "1 tarefa" : `${nEscondidas} tarefas`} em ${escondidas.map((x) => x.c.nome).join(", ")}.` : fraseDoVazio(o.filtro, busca, (id) => nomeDoAgente(o.q, o.agente, id))
+    : null;
+  const abrirEscondidas = escondidas.map((x) => `<button type="button" class="qd-link" data-act="abrir-coluna" data-status="${esc(x.c.id)}">Abrir ${esc(x.c.nome)}</button>`).join("");
+  const linhaVazia = frase ? `<div class="qd-vazio-1"><span>${esc(frase)}</span>${abrirEscondidas}${busca.trim() ? `<button type="button" class="qd-link" data-act="busca-limpar">Limpar busca</button>` : ""}${o.filtro !== "todos" ? `<button type="button" class="qd-link" data-act="filtro-do-quadro" data-filtro="todos">Ver em todas</button>` : ""}</div>` : "";
+  const compacto = exibir.compacto ? " qd-compacto" : "";
+  const barraHtml = barra({ filtro: o.filtro, trabalhando: trabalhando(o.q, o.agente), comigo: o.q.tarefas.filter(ehComigo).length, chips: chips.vista.map(ag), maisChips: chips.mais.map(ag), busca, exibir, ...(o.maisAberto ? { maisAberto: true } : {}) });
   return confiar([
     topoDoQuadro(o.q, { agora: o.agora ?? Date.now(), ...(o.editandoMeta ? { editandoMeta: true } : {}), ...(o.importando ? { importando: o.importando } : {}) }),
     o.pessoas ? pessoasDoQuadro(o.q, o.pessoas) : "",
     avisoDoGithub(o.q),
-    barra({ filtro: o.filtro, trabalhando: trabalhando(o.q, o.agente), extra: formNovaTarefa() }),
-    quadro({ rotulo, classe: "qd-so-largo", colunas, extras }),
-    `<div class="qd-so-estreito">${lista({ rotulo, antes: confiar(ordem), grupos: cols.map(({ c, tarefas, recolhida }) => ({ status: c.id, nome: c.nome, icone: iconeDaColuna(c), pessoa: c.daPessoa, recolhido: recolhida, linhas: [...solta(c), ...cartoes(tarefas, true).map(linha)], vazio: vazio(c.id) })) })}` +
+    barraHtml,
+    linhaVazia,
+    quadro({ rotulo, classe: `qd-so-largo${compacto}`, colunas, extras }),
+    `<div class="qd-so-estreito${compacto}">${lista({ rotulo, antes: confiar(ordem), ...(o.podeCriar ? { novaTarefa: true } : {}), grupos: vistas.map(({ c, tarefas, recolhida }) => ({ status: c.id, nome: c.nome, icone: iconeDaColuna(c), pessoa: c.daPessoa, recolhido: recolhida, n: tarefas.length, linhas: [...formDa(c, true), ...solta(c), ...cartoes(tarefas, true).map(linha)], vazio: nova?.coluna === c.id && nova.estreito ? "" : vazio(c.id) })) })}` +
       `${naFolha(ed) ? folhaDasColunas(cs, ed, contagem, o.nome) : ""}</div>`,
   ].join(""));
 }

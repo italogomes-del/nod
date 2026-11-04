@@ -197,7 +197,9 @@ describe("NOD-429 · componentes (web/telas/quadro.ts)", () => {
     expect(html).toContain('aria-label="Quadro de Ada"');
     const aberto = quadroVazio({ nome: "Ada", alternadas: new Set(["feito"]) });
     expect(aberto).not.toContain('data-act="abrir-coluna" data-status="feito" aria-expanded="false"');
-    expect(barra({ filtro: "agentes" })).toContain('data-filtro="agentes" aria-pressed="true"');
+    expect(barra({ filtro: "comigo", comigo: 2 })).toContain('data-filtro="comigo" aria-pressed="true"');
+    // Revisão 2 do PR #645: com 0 o Comigo continua à vista, com o número.
+    expect(barra({ filtro: "todos", comigo: 0 })).toContain('aria-label="Comigo, 0"');
     expect(quadro({ colunas: [{ status: "voce", nome: "x" }] })).toContain("grid-template-columns: minmax(calc(var(--qd-col-min) + 20px), 1fr)");
   });
 

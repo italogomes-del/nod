@@ -1,4 +1,4 @@
-import { USOS_DO_MAC, type Experimentos, type Preferencias, type RaioXConversa, type RaioXTurno, type UsoDoMac } from "../contracts/raio-x.ts";
+import { QUADROS_COM_EXIBIR_MAX, USOS_DO_MAC, type Experimentos, type Preferencias, type RaioXConversa, type RaioXTurno, type UsoDoMac } from "../contracts/raio-x.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { lerOrdemDaPessoa } from "../domain/inteligencia.ts";
 import { resumoDoRaioX } from "../domain/raio-x.ts";
@@ -61,6 +61,22 @@ export const fecharAviso: CasoDeUso<{ chave: unknown }, Preferencias> = async (d
   if (atual.avisosFechados.includes(input.chave)) return { data: atual };
   if (atual.avisosFechados.length >= AVISOS_FECHADOS_MAX) throw new ErroDeDominio("entrada_invalida", { cause: "avisos_fechados cheio" });
   return { data: await deps.repos.preferencias.fecharAviso(input.chave) };
+};
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * NOD-460: o Exibir do quadro em tela cheia (colunas recolhidas à mostra e densidade compacta), da pessoa e por quadro.
+ * Estado da própria tela: não muda o quadro nem os bots, por isso não passa pelo lote nem tem Desfazer. O id não precisa
+ * ser de um quadro que a pessoa vê (a chave é só dela e não revela nada); o teto de quadros guardados vem antes do banco.
+ */
+export const exibirDoQuadro: CasoDeUso<{ quadroId: unknown; recolhidas: unknown; compacto: unknown }, Preferencias> = async (deps, input) => {
+  if (typeof input.quadroId !== "string" || !UUID.test(input.quadroId)) throw new ErroDeDominio("entrada_invalida", { cause: "quadro" });
+  if (typeof input.recolhidas !== "boolean" || typeof input.compacto !== "boolean") throw new ErroDeDominio("entrada_invalida", { cause: "exibir" });
+  const quadroId = input.quadroId.toLowerCase();
+  const p = await deps.repos.preferencias.exibirQuadro(quadroId, { recolhidas: input.recolhidas, compacto: input.compacto }, QUADROS_COM_EXIBIR_MAX);
+  if (!p) throw new ErroDeDominio("entrada_invalida", { cause: "quadro_exibir cheio" });
+  return { data: p };
 };
 
 /** O Raio-X inteiro de um turno (a gaveta). Turno que a pessoa não vê é nao_encontrado, como em GET turnos/:id. */

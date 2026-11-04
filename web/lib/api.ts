@@ -21,7 +21,7 @@ import type { CadastroDto, EntrarDto, EsperaPareamentoDto, EstadoContaDto, Estad
 import type { ContaNuvemDto, DormirAposMin, MaquinaCriandoDto, TamanhoMaquinaNuvem } from "../../src/contracts/provedor-nuvem.ts";
 import type { CodigoCifrado, ContasIaDto, FrenteAtivaDaConta, IaComConta, LoginNaMaquina, ModoDasContas, MotivoDaNota } from "../../src/contracts/contas-ia.ts";
 import type { EntradaRelato, Relato } from "../../src/contracts/relato.ts";
-import type { Experimentos, Preferencias, RaioXConversa, RaioXTurno } from "../../src/contracts/raio-x.ts";
+import type { Experimentos, ExibirDoQuadro, Preferencias, RaioXConversa, RaioXTurno } from "../../src/contracts/raio-x.ts";
 import type { ComandosDto } from "../../src/contracts/comandos.ts";
 import type { LeituraMarcada, NaoLidosDto, RespostaLeitura } from "../../src/contracts/nao-lidos.ts";
 import type { Conector } from "../../src/contracts/conector.ts";
@@ -391,6 +391,8 @@ export function criarApi(escopo: Escopo) {
     // ADR-083: a faixa de Trabalhos recolhida também é preferência (só o campo que mudou vai no corpo).
     // ADR-111: `experimentos` leva só a chave que mudou ({ calibracao }, { memoriaLonga } ou, ADR-112, { whatsapp }; NOD-429, { quadro }).
     gravarPreferencias: (p: Partial<Pick<Preferencias, "modoDev" | "usoDoMac">> & { experimentos?: Partial<Experimentos> }) => pedir<Preferencias>("PUT", `${base}/preferencias`, p),
+    // NOD-460 (0149): o Exibir do quadro em tela cheia, da pessoa e por quadro.
+    exibirQuadro: (quadroId: string, e: ExibirDoQuadro) => pedir<Preferencias>("PUT", `${base}/preferencias/quadros/${encodeURIComponent(quadroId)}/exibir`, e),
     raioXDaConversa: (id: string, desde: number) => get<RaioXConversa>(`conversas/${encodeURIComponent(id)}/raio-x?desde=${desde}`),
     raioXDoTurno: (id: string) => get<RaioXTurno>(`turnos/${encodeURIComponent(id)}/raio-x`),
     // O "/" do chat (0038): o catálogo do Mac e os comandos da conversa; a nova sessão é do nod.

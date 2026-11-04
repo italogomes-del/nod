@@ -1,6 +1,6 @@
 import type { IdHarness } from "../contracts/harness.ts";
 import type { LimiteDaIa, LimitesIa } from "../contracts/inteligencia.ts";
-import { EXPERIMENTOS_DESLIGADOS, USO_DO_MAC_PADRAO, type ComposicaoRaioX, type ExecucaoRaioX, type Experimentos, type Preferencias, type UsoDoMac } from "../contracts/raio-x.ts";
+import { EXPERIMENTOS_DESLIGADOS, USO_DO_MAC_PADRAO, type ComposicaoRaioX, type ExecucaoRaioX, type ExibirDoQuadro, type Experimentos, type Preferencias, type UsoDoMac } from "../contracts/raio-x.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
 import { QUADROS_PARA_TODOS, quadroLiberadoPara, type LiberacaoQuadros } from "../domain/flag-quadros.ts";
 import { data, jsonb, ms } from "./conversao.ts";
@@ -101,7 +101,7 @@ export function raioXRepo(conn: Conn, escopo: Escopo) {
 
 /** Preferências da pessoa (0036). Sem linha = tudo desligado. */
 /** ADR-111 (0088): `exp_calibracao` e `exp_memoria_longa`, as chaves de experimento. ADR-112 (0089): `exp_whatsapp`. NOD-429 (0130): `exp_quadro`. */
-const COLUNAS_PREFERENCIAS = "modo_dev, avisos_fechados, uso_do_mac, maquina_padrao_id, ordem_ias, ias_no_limite, exp_calibracao, exp_memoria_longa, exp_whatsapp, exp_quadro";
+const COLUNAS_PREFERENCIAS = "modo_dev, avisos_fechados, uso_do_mac, maquina_padrao_id, ordem_ias, ias_no_limite, exp_calibracao, exp_memoria_longa, exp_whatsapp, exp_quadro, quadro_exibir";
 
 /**
  * NOD-415 (ADR-141): a liberação dos quadros (NOD_QUADROS) deste processo, que o compor configura ao subir. Fica aqui,
@@ -126,8 +126,8 @@ export function preferenciasRepo(conn: Conn, escopo: Escopo) {
     const lib = await quadroLiberado();
     return { ...p, quadroLiberado: lib, experimentos: { ...(p.experimentos ?? EXPERIMENTOS_DESLIGADOS), quadro: lib && (p.experimentos?.quadro ?? false) } };
   };
-  type Linha = { modo_dev: boolean; avisos_fechados: string[]; uso_do_mac: UsoDoMac; maquina_padrao_id: string | null; ordem_ias: IdHarness[] | null; ias_no_limite: LimitesIa | null; exp_calibracao: boolean; exp_memoria_longa: boolean; exp_whatsapp: boolean; exp_quadro: boolean };
-  const paraPreferencias = (l: Linha | undefined): Preferencias => ({ modoDev: l?.modo_dev ?? false, avisosFechados: l?.avisos_fechados ?? [], usoDoMac: l?.uso_do_mac ?? USO_DO_MAC_PADRAO, maquinaPadraoId: l?.maquina_padrao_id ?? null, ordemIas: l?.ordem_ias ?? null, iasNoLimite: l?.ias_no_limite ?? {}, experimentos: { calibracao: l?.exp_calibracao ?? false, memoriaLonga: l?.exp_memoria_longa ?? false, whatsapp: l?.exp_whatsapp ?? false, quadro: l?.exp_quadro ?? false } });
+  type Linha = { modo_dev: boolean; avisos_fechados: string[]; uso_do_mac: UsoDoMac; maquina_padrao_id: string | null; ordem_ias: IdHarness[] | null; ias_no_limite: LimitesIa | null; exp_calibracao: boolean; exp_memoria_longa: boolean; exp_whatsapp: boolean; exp_quadro: boolean; quadro_exibir?: Record<string, ExibirDoQuadro> | null };
+  const paraPreferencias = (l: Linha | undefined): Preferencias => ({ modoDev: l?.modo_dev ?? false, avisosFechados: l?.avisos_fechados ?? [], usoDoMac: l?.uso_do_mac ?? USO_DO_MAC_PADRAO, maquinaPadraoId: l?.maquina_padrao_id ?? null, ordemIas: l?.ordem_ias ?? null, iasNoLimite: l?.ias_no_limite ?? {}, experimentos: { calibracao: l?.exp_calibracao ?? false, memoriaLonga: l?.exp_memoria_longa ?? false, whatsapp: l?.exp_whatsapp ?? false, quadro: l?.exp_quadro ?? false }, quadroExibir: l?.quadro_exibir ?? {} });
   return {
     async buscar(): Promise<Preferencias> {
       const [l] = await conn<Linha[]>`
@@ -191,6 +191,26 @@ export function preferenciasRepo(conn: Conn, escopo: Escopo) {
       const r = await conn`update preferencias set ias_no_limite = ias_no_limite - ${ia}::text, atualizado_em = clock_timestamp()
         where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and ias_no_limite ? ${ia}::text`;
       return r.count > 0;
+    },
+
+    /** NOD-460 (0149): o Exibir de um quadro (substitui o daquele quadro; os outros ficam). Quem chama já conferiu o teto. */
+    /**
+     * NOD-460 (0149): grava o Exibir de um quadro. O teto (`max` quadros com Exibir) vale dentro do próprio upsert: o
+     * ON CONFLICT trava a linha e confere a contagem na versão mais nova, então pedidos simultâneos não passam do teto
+     * (QA do PR #645). Null = cheio, e o quadro é novo no mapa.
+     */
+    async exibirQuadro(quadroId: string, e: ExibirDoQuadro, max: number): Promise<Preferencias | null> {
+      const valor = jsonb(conn, { [quadroId]: { recolhidas: e.recolhidas, compacto: e.compacto } });
+      const [l] = await conn<Linha[]>`
+        insert into preferencias (tenant_id, owner_id, quadro_exibir)
+        values (${escopo.tenantId}, ${escopo.pessoaId}, ${valor}::jsonb)
+        on conflict (tenant_id, owner_id) do update set
+          quadro_exibir = preferencias.quadro_exibir || ${valor}::jsonb,
+          atualizado_em = clock_timestamp()
+        where preferencias.quadro_exibir ? ${quadroId}
+          or (select count(*) from jsonb_object_keys(preferencias.quadro_exibir)) < ${max}
+        returning ${conn.unsafe(COLUNAS_PREFERENCIAS)}`;
+      return l ? comLiberacao(paraPreferencias(l)) : null;
     },
 
     /** 0059: guarda a chave do aviso fechado, sem repetir. Idempotente: fechar de novo não muda nada. */
