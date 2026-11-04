@@ -1,6 +1,6 @@
 {
   "name": "nod",
-  "version": "1.0.0-rc.2",
+  "version": "1.0.0-rc.3",
   "private": true,
   "description": "Um lugar onde agentes preparam decisões e uma pessoa decide.",
   "type": "module",

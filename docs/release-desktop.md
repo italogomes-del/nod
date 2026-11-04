@@ -163,6 +163,21 @@ Uma preview sem assinatura usa uma tag `desktop-v<VERSÃO>` (a última publicada
 
 O workflow `.github/workflows/desktop-release.yml` roda o gate completo com Postgres limpo, roda o smoke da janela (`scripts/desktop/smoke-window.mjs`) antes de empacotar, cria os dois DMGs em runners nativos (cada job empacota só a própria arquitetura com `--mac dmg --<arch>` e confere com `lipo -archs` que o app testado é dela; sem o alvo explícito, o `arch` do `electron-builder.yml` vence a CLI e o job arm64 testava o app x64 pelo Rosetta, NOD-133), testa o proxy com o runtime empacotado (`smoke-proxy.mjs`, prazo em `NOD_SMOKE_PROXY_PRAZO_MS`, padrão 60 s; na falha imprime tempo, stdout, stderr e um `sample` do processo), verifica assinatura e notarização e cria uma **release em rascunho** nas tags `v<VERSÃO>` que correspondem ao `package.json`. Execução manual guarda apenas os artefatos do workflow.
 
+### O disco da VM local (NOD-93, ADR-127)
+
+Com a variável de repositório `NOD_VM_LOCAL=1`, o job `vm-local` constrói um disco por arquitetura
+(`nod-vm-<VERSÃO>-{arm64,amd64}.img.zst`, ~1 GB cada) e o app sai com o sha256 dele embutido. O rascunho da release
+recebe os discos como anexo, mas o app **não baixa do GitHub** (o repositório é privado): ele baixa de
+`https://storage.googleapis.com/nodbot-downloads/v<VERSÃO>/` (`URL_DISCO_PADRAO`, desktop/vm-local/origem.ts), o
+bucket público dos DMGs do site. Antes de publicar, copie os dois discos e os `.sha256` para lá:
+
+```sh
+gcloud storage cp release/nod-vm-<VERSÃO>-*.img.zst* gs://nodbot-downloads/v<VERSÃO>/
+```
+
+Sem o disco no bucket o preparo da VM fica em `falhou` (404) na primeira abertura. A conta de deploy do Actions não
+escreve nesse bucket; o passo é manual até ganhar permissão (definido em 2026-11-04, release 1.0.0-rc.3).
+
 ### Secrets e variável da release assinada (NOD-203)
 
 Cadastre em **Settings › Secrets and variables › Actions** do repositório, sem colocá-los no repositório. O nome é o
