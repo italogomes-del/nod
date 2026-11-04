@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { tocaChaveDoNod } from "../../../src/domain/comando.ts";
+import { tocaChaveDoNod, tocaCredencial } from "../../../src/domain/comando.ts";
 import { decidirNativa, NATIVAS_DE_ARQUIVO, NATIVAS_DO_TERMINAL, nativasDoTurno, pastaDoBot } from "../../../src/domain/nativas.ts";
 
 const decidir = (ferramenta: string, entrada: Record<string, unknown>) => decidirNativa({ ferramenta, entrada });
@@ -103,5 +103,62 @@ describe("kit do terminal (ADR-052, revisto pelas ADR-055 e ADR-066)", () => {
     expect(decidirNativa({ ferramenta: "Monitor", entrada: { command: "git checkout main && npm test" }, pasta })).toMatchObject({ permitir: false });
     expect(decidirNativa({ ferramenta: "Bash", entrada: { command: "git checkout main && npm test" }, pasta })).toMatchObject({ permitir: false });
     expect(decidir("TaskStop", { task_id: "b1" })).toMatchObject({ permitir: true, contamina: false });
+  });
+});
+
+describe("hook do Windows: credencial sem caixa (revisão 10 do PR #642, médio 1)", () => {
+  const pasta = { cwd: "C:\\Users\\bia\\nod\\ze", pastaDoBot: "C:\\Users\\bia\\nod\\ze", home: "C:\\Users\\bia", windows: true };
+  it("no win32 nega o `.AWS` em maiúsculas, que no Linux é outra pasta", () => {
+    expect(decidirNativa({ ferramenta: "Bash", entrada: { command: "cat ~/.AWS/credentials" }, pasta }).permitir).toBe(false);
+    expect(decidirNativa({ ferramenta: "Bash", entrada: { command: "cat ~/.AWS/credentials" }, pasta: { ...pasta, windows: false } }).permitir).not.toBe(false);
+  });
+});
+
+describe("hook do Windows: o padrão de busca não é caminho (revisão 13 do PR #642, médio 4)", () => {
+  const pasta = { cwd: "C:\\Users\\bia\\nod\\ze", pastaDoBot: "C:\\Users\\bia\\nod\\ze", home: "C:\\Users\\bia", windows: true };
+  const bash = (command: string) => decidirNativa({ ferramenta: "Bash", entrada: { command }, pasta });
+  it.each([`rg -n "cmdkey" src`, `rg -n "\\.SSH" docs`, `findstr /s "cmdkey" src\\*.ts`, `git grep -n "\\.AWS"`])("busca no código segue para o servidor: %s", (command) => {
+    expect(bash(command).permitir).toBe(true);
+  });
+  it.each([`rg -n key ~/.AWS/credentials`, `rg -e x ~/.AWS/credentials`, `grep -f ~/.AWS/credentials x`, `rg "x" ; cmdkey /list`, `Select-String -Path ~\\.AWS\\credentials -Pattern key`])("o caminho continua pego (negado no hook ou credencial no servidor): %s", (command) => {
+    expect(bash(command).permitir === false || tocaCredencial(command)).toBe(true);
+  });
+});
+
+describe("hook do Windows: texto que só cita o cofre não nega seco (revisão 15 do PR #642, médio 3)", () => {
+  const pasta = { cwd: "C:\\Users\\bia\\nod\\ze", pastaDoBot: "C:\\Users\\bia\\nod\\ze", home: "C:\\Users\\bia", windows: true };
+  const bash = (command: string) => decidirNativa({ ferramenta: "Bash", entrada: { command }, pasta });
+  it.each([
+    `cat docs/cmdkey.md`,
+    `git log --grep cmdkey`,
+    `git log -S "cmdkey" --oneline`,
+    `git commit -m "docs: como usar o cmdkey no Windows"`,
+    `git commit --message="fix: nao chamar git credential fill"`,
+    `echo "veja Microsoft/Credentials" > notas.md`,
+  ])("segue para o servidor: %s", (command) => {
+    expect(bash(command).permitir).toBe(true);
+  });
+  it.each([
+    `cmdkey /list`,
+    `git commit -m "$(cmdkey /list)"`,
+    `echo x; cmdkey /list`,
+    `echo x > ~/.AWS/credentials`,
+    `git log --grep x ~/.AWS/credentials`,
+    `cat %APPDATA%\\Microsoft\\Credentials\\x`,
+    `cmd /c "cmdkey /list"`,
+  ])("continua negado: %s", (command) => {
+    const d = bash(command);
+    expect(d.permitir === false || tocaCredencial(command)).toBe(true);
+  });
+});
+
+describe("hook do Windows: o eco por pipe não é texto livre (revisão 19 do PR #642, médio 2)", () => {
+  const pasta = { cwd: "C:\\Users\\bia\\nod\\ze", pastaDoBot: "C:\\Users\\bia\\nod\\ze", home: "C:\\Users\\bia", windows: true };
+  const bash = (command: string) => decidirNativa({ ferramenta: "Bash", entrada: { command }, pasta });
+  it.each([`echo "/c/Users/bia/.AWS/credentials" | xargs cat`, `echo "cmdkey" | xargs -I{} {} /list`, `printf '%s' "~/.aws./credentials" | xargs cat`])("nega: %s", (command) => {
+    expect(bash(command).permitir).toBe(false);
+  });
+  it("o eco que vai para arquivo segue texto livre", () => {
+    expect(bash(`echo "veja Microsoft/Credentials" > notas.md`).permitir).toBe(true);
   });
 });

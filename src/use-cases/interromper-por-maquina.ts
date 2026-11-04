@@ -20,6 +20,7 @@ import { registrarInterrupcaoPorParada } from "./interrupcao-por-parada.ts";
 import type { Deps } from "./tipos.ts";
 import { sincronizarDoTurno } from "./trabalhos.ts";
 import { propagarSessaoDoTurno } from "./sessao-do-turno.ts";
+import { ehMaquinaDoMotor } from "../domain/plataforma-maquina.ts";
 
 /** O que a regra de queda usa de Deps: o varredor de lease (laço de fundo) monta só isto. */
 export type DepsQueda = Pick<Deps, "repos" | "escopo" | "agora"> & {
@@ -183,7 +184,7 @@ async function aposQuedaNoFundo(deps: DepsQueda, c: Caido & { rotinaId: string |
     }
   } else if (motivo === "maquina_sem_contato") {
     const identificada = turno.machineId ? await deps.repos.maquinaTokens.identificar(turno.machineId) : null;
-    const maquina = identificada?.plataforma === "linux" ? `A máquina ${identificada.nome}` : "O Mac";
+    const maquina = identificada && ehMaquinaDoMotor(identificada.plataforma) ? `A máquina ${identificada.nome}` : "O Mac";
     if (chave === "frente" || !jaAvisado) {
       const linha = await deps.repos.mensagens.criar({ conversaId: turno.conversaId, turnoId: turno.id, autoria, kind: "sistema", assunto: "fundo.espera", texto: redigir("fundo-espera-maquina", agora, { maquina, pedido }), confianca: "confiavel" });
       if (linha) events.push(evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { mensagem_id: linha.id, kind: "sistema" } }));

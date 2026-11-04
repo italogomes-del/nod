@@ -1,4 +1,4 @@
-import { tocaCredencial } from "./comando.ts";
+import { semPadraoDeBusca, tocaCredencial } from "./comando.ts";
 import { arquivoForaDaPastaDoBot, gitForaDaPastaDoBot, type ContextoDaPasta } from "./git-na-pasta-do-bot.ts";
 import { FERRAMENTAS_DE_TAREFA } from "./tarefas-do-bot.ts";
 import type { Confianca } from "../contracts/mensagem.ts";
@@ -143,6 +143,7 @@ export type DecisaoNativa = { permitir: boolean; motivo: string; contamina: bool
 /** A frase de sempre quando a credencial não passa (manual, servidor antigo, resposta sem a confirmação explícita). */
 export const FRASE_ARQUIVO_DE_CREDENCIAL = "arquivo de credencial (chaves, tokens, Keychain): o nod não abre; se a tarefa precisar, peça à pessoa";
 export const FRASE_MCP_COM_CREDENCIAL = "o pedido toca uma credencial (chaves, tokens, Keychain): o nod não manda; se a tarefa precisar, peça à pessoa";
+const FRASE_CREDENCIAL_NO_WINDOWS = "o comando toca um arquivo de credencial do Windows (chaves, tokens, o cofre): o nod não roda; se a tarefa precisar, peça à pessoa";
 const MOTIVO_CREDENCIAL = "credencial do Mac: o servidor do nod decide pelo modo de aprovação";
 
 /**
@@ -151,8 +152,8 @@ const MOTIVO_CREDENCIAL = "credencial do Mac: o servidor do nod decide pelo modo
  * `~/.config/nod-motor/conexao.json` (ou um Grep com `path` em `~/.ssh` e `pattern` na chave do nod) passar no total
  * como se fosse só a chave SSH. O cartão do Automático também mostra todos.
  */
-function credencialDosCaminhos(caminhos: readonly string[]): string | undefined {
-  const tocam = caminhos.filter(tocaCredencial);
+function credencialDosCaminhos(caminhos: readonly string[], windows = false): string | undefined {
+  const tocam = caminhos.filter((c) => tocaCredencial(c, { windows }));
   return tocam.length > 0 ? tocam.join(" ") : undefined;
 }
 
@@ -196,7 +197,7 @@ export function decidirNativa(p: { ferramenta: string; entrada: Record<string, u
   // ADR-103: no Codex, os MCPs da pessoa carregam junto com o do nod; cada chamada vai ao servidor, que decide pelo modo.
   if (p.ferramenta.startsWith("mcp__")) {
     const texto = textoDoMcp(p.ferramenta, p.entrada);
-    if (tocaCredencial(texto)) return { permitir: true, motivo: MOTIVO_CREDENCIAL, contamina: true, mcp: texto, credencial: texto };
+    if (tocaCredencial(texto, { windows: p.pasta?.windows === true })) return { permitir: true, motivo: MOTIVO_CREDENCIAL, contamina: true, mcp: texto, credencial: texto };
     return { permitir: true, motivo: "app da pessoa: o servidor do nod decide", contamina: true, mcp: texto };
   }
   switch (p.ferramenta) {
@@ -205,14 +206,14 @@ export function decidirNativa(p: { ferramenta: string; entrada: Record<string, u
       const patch = typeof p.entrada.command === "string" ? p.entrada.command : "";
       const caminhos = caminhosDoPatch(patch);
       if (caminhos.length === 0) return { permitir: false, motivo: "patch sem arquivo reconhecível", contamina: false };
-      const credencialNoPatch = credencialDosCaminhos(caminhos);
+      const credencialNoPatch = credencialDosCaminhos(caminhos, p.pasta?.windows === true);
       if (credencialNoPatch !== undefined) return { permitir: true, motivo: MOTIVO_CREDENCIAL, contamina: false, credencial: credencialNoPatch };
       const fora = p.pasta ? caminhos.map((c) => arquivoForaDaPastaDoBot(c, p.pasta!)).find((f) => f !== null) ?? null : null;
       return { permitir: true, motivo: "arquivos do Mac da pessoa", contamina: false, ...(fora ? { arquivo: fora } : {}) };
     }
     case "view_image": {
       const caminho = typeof p.entrada.path === "string" ? p.entrada.path : "";
-      if (tocaCredencial(caminho)) return { permitir: true, motivo: MOTIVO_CREDENCIAL, contamina: false, credencial: caminho };
+      if (tocaCredencial(caminho, { windows: p.pasta?.windows === true })) return { permitir: true, motivo: MOTIVO_CREDENCIAL, contamina: false, credencial: caminho };
       return { permitir: true, motivo: "arquivos do Mac da pessoa", contamina: false };
     }
     case "spawn_agent":
@@ -226,7 +227,7 @@ export function decidirNativa(p: { ferramenta: string; entrada: Record<string, u
       // ADR-055: o Mac inteiro; onde moram as credenciais, o servidor decide pelo modo (PR 6 dos modos de aprovação) —
       // lê-las é o primeiro passo para vazá-las, e só o "Ignorar todas as aprovações" lê sem a pessoa.
       const caminhos = ["file_path", "notebook_path", "path", "pattern", "glob"].map((k) => p.entrada[k]).filter((v): v is string => typeof v === "string");
-      const credencial = credencialDosCaminhos(caminhos);
+      const credencial = credencialDosCaminhos(caminhos, p.pasta?.windows === true);
       if (credencial !== undefined) return { permitir: true, motivo: MOTIVO_CREDENCIAL, contamina: false, credencial };
       // ADR-066: gravar fora da pasta do bot segue o modo de aprovação (o servidor decide); ler continua livre.
       const grava = p.ferramenta === "Write" || p.ferramenta === "Edit" || p.ferramenta === "NotebookEdit";
@@ -241,6 +242,9 @@ export function decidirNativa(p: { ferramenta: string; entrada: Record<string, u
       if (comando.trim() === "") return { permitir: false, motivo: "comando vazio", contamina: false };
       // ADR-065: git que mexe na pasta de trabalho só na pasta do bot — cerca local, antes do servidor, em qualquer modo.
       const fora = p.pasta ? gitForaDaPastaDoBot(comando, p.pasta) : null;
+      // Revisão 10 do PR #642 (médio 1): o servidor não sabe a plataforma e confere o comando só pelo texto. O que só a
+      // regra do Windows pega (`cat ~/.AWS/credentials` no Git Bash, `~/.aws./credentials`) o hook do win32 nega aqui.
+      if (!fora && p.pasta?.windows === true && tocaCredencial(semPadraoDeBusca(comando), { windows: true }) && !tocaCredencial(comando)) return { permitir: false, motivo: FRASE_CREDENCIAL_NO_WINDOWS, contamina: false };
       return fora ? { permitir: false, motivo: fora, contamina: false } : { permitir: true, motivo: "o servidor do nod decide o comando", contamina: false, comando };
     }
     case "WebFetch":

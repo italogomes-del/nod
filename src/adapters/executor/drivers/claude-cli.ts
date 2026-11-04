@@ -14,6 +14,7 @@ import { ultimoUsoDoPlano } from "../../../domain/uso-do-plano.ts";
 import type { CatalogoDeComandos } from "../../../contracts/comandos.ts";
 import { lerCatalogoDoMac } from "../catalogo-comandos.ts";
 import { log } from "../../../obs/log.ts";
+import { pastaValidaNoWindows } from "../../../domain/caminhos.ts";
 import { baixarAnexos, mensagemClaude } from "../anexos-turno.ts";
 import { rodarLigacaoClaude } from "./claude-ligacao.ts";
 import { classificarSessao, fimDoStderr, eventosDaLinhaStreamJson, reduzirSinais, SINAIS_ZERADOS, textoDaRodada } from "../../../domain/stream-json.ts";
@@ -48,6 +49,13 @@ export type LigacaoClaudeCli = {
    */
   hookPath?: string;
   nodePath?: string;
+  /** ADA-11 (ADR-147): a plataforma do motor; default `process.platform`. No win32 o hook é obrigatório (falha fechada). */
+  plataforma?: NodeJS.Platform;
+  /**
+   * ADA-11 (ADR-147): o kit do terminal do Codex no Windows só liga com esta flag (NOD_CODEX_TERMINAL_WINDOWS=1), depois
+   * que uma sonda numa máquina Windows provar que o Codex roda o PreToolUse lá. Sem ela o Codex roda isolado no win32.
+   */
+  codexTerminalNoWindows?: boolean;
   electronComoNode?: boolean;
   /** definido em 2026-09-16: a sonda usa o modelo mais barato (EMENDA 35). */
   modeloSonda?: string;
@@ -237,14 +245,21 @@ export function settingsDoTerminal(p: { comandoHook: string }): string {
   });
 }
 
+/**
+ * ADA-11 (ADR-147): no Windows o Claude Code roda o hook no Git Bash; o caminho vai com `/` (`C:/…`), que o bash e o
+ * Node entendem sem ambiguidade, nas mesmas aspas POSIX.
+ */
+export const paraOGitBash = (caminho: string, windows: boolean): string => (windows ? caminho.replace(/\\/g, "/") : caminho);
+
 /** O comando que o CLI roda para o hook: o mesmo Node do proxy, o script do hook e a config 0600 do turno. */
-export function comandoDoHook(p: { nodePath: string; hookPath: string; config: string; electronComoNode?: boolean }): string {
-  return `${invocarDoHook(p)} ${aspas(p.config)}`;
+export function comandoDoHook(p: { nodePath: string; hookPath: string; config: string; electronComoNode?: boolean; windows?: boolean }): string {
+  return `${invocarDoHook(p)} ${aspas(paraOGitBash(p.config, p.windows === true))}`;
 }
 
 /** O node e o script do hook, sem a config: é como o comando do bot chama o nod-vaga (ADR-097). */
-export function invocarDoHook(p: { nodePath: string; hookPath: string; electronComoNode?: boolean }): string {
-  return `${p.electronComoNode ? "ELECTRON_RUN_AS_NODE=1 " : ""}${aspas(p.nodePath)} ${aspas(p.hookPath)}`;
+export function invocarDoHook(p: { nodePath: string; hookPath: string; electronComoNode?: boolean; windows?: boolean }): string {
+  const w = p.windows === true;
+  return `${p.electronComoNode ? "ELECTRON_RUN_AS_NODE=1 " : ""}${aspas(paraOGitBash(p.nodePath, w))} ${aspas(paraOGitBash(p.hookPath, w))}`;
 }
 
 /** ADR-097: a pasta da fila do forno, uma por máquina: ao lado de `turnos`, em NOD_HOME. */
@@ -270,14 +285,17 @@ export const FERRAMENTA_DE_BUSCA = "ToolSearch";
  * Só com a flag no help (`bifurcar` = o driver conferiu): sem ela, quem chama recusa o turno antes, para nunca continuar
  * a mesma sessão em dois processos.
  */
-export function montarArgs(entrada: { plano: PlanoTurno; mcpJson: string; sessaoNova?: () => string; compactar?: boolean; streamJson?: boolean; terminal?: TurnoTerminal; esforco?: boolean; systemPrompt?: boolean; snapshotOff?: boolean; bifurcar?: boolean }): { args: string[]; sessaoCli: string | null } {
+export function montarArgs(entrada: { plano: PlanoTurno; mcpJson: string; sessaoNova?: () => string; compactar?: boolean; streamJson?: boolean; terminal?: TurnoTerminal; esforco?: boolean; systemPrompt?: boolean; snapshotOff?: boolean; bifurcar?: boolean; windows?: boolean }): { args: string[]; sessaoCli: string | null } {
   const { plano, terminal } = entrada;
   const pastas = terminal ? null : plano.workspacePastas ?? null;
   // Sem projeto autorizado nada muda: nativas desligadas e cwd no diretório temporário vazio. As nativas vêm
   // do plano (nativasDoTurno, 2026-09-28); plano de servidor antigo sem o campo cai na regra anterior.
   // ADR-052: no kit do terminal elas são exatamente as do plano, sob o hook do nod (ADR-055: sem sandbox).
   const nativas = terminal ? (plano.nativas ?? []) : pastas ? (plano.nativas ?? NATIVAS_DE_ARQUIVO).filter((n) => (NATIVAS_DE_ARQUIVO as readonly string[]).includes(n)) : [];
-  const permitidas = [...plano.catalogo.ferramentas.map((f) => f.nomeMcp), ...nativas, FERRAMENTA_DE_BUSCA].join(",");
+  // ADA-11 (ADR-147): no Windows o hook roda pelo Git Bash e, se ele não rodar, a nativa do terminal não pode passar
+  // pela lista de aprovadas: só o `allow` do hook a libera (falha fechada; em -p o CLI nega o que ninguém aprovou).
+  const aprovadas = terminal && entrada.windows === true ? nativas.filter((n) => !(NATIVAS_DO_TERMINAL as readonly string[]).includes(n)) : nativas;
+  const permitidas = [...plano.catalogo.ferramentas.map((f) => f.nomeMcp), ...aprovadas, FERRAMENTA_DE_BUSCA].join(",");
   const bifurca = entrada.bifurcar === true && plano.entrada.bifurcar === true && plano.entrada.sessaoCli !== null;
   const sessaoCli = plano.entrada.sessaoCli ?? (entrada.sessaoNova ?? randomUUID)();
   // Todos os projetos aprovados entram: o bot transita entre eles sem reautorizar (decisão de 2026-09-18).
@@ -565,7 +583,11 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
               try {
                 // ADR-052: o kit do terminal só liga com o hook do nod e a pasta do bot; senão, as nativas de arquivo de antes.
                 const pedeTerminal = (plano.nativas ?? []).some((n) => !(NATIVAS_DE_ARQUIVO as readonly string[]).includes(n));
-                const pastaBot = pedeTerminal && lig.hookPath && confinavel && plano.pastaDoBot ? join(home, "nod", plano.pastaDoBot) : null;
+                const windows = (lig.plataforma ?? process.platform) === "win32";
+                // ADA-11 (ADR-147): no Windows, a pasta com nome que o NTFS não aceita deixa o turno sem o terminal.
+                const pastaNoWindowsInvalida = windows && plano.pastaDoBot !== undefined && plano.pastaDoBot !== null && !pastaValidaNoWindows(plano.pastaDoBot);
+                if (pastaNoWindowsInvalida && pedeTerminal) log("aviso", "pasta_invalida_no_windows", { turno_id: plano.turnoId });
+                const pastaBot = pedeTerminal && lig.hookPath && confinavel && plano.pastaDoBot && !pastaNoWindowsInvalida ? join(home, "nod", plano.pastaDoBot) : null;
                 let terminal: TurnoTerminal | undefined;
                 if (pastaBot && lig.hookPath) {
                   await mkdir(pastaBot, { recursive: true });
@@ -573,8 +595,10 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
                   // ADR-065: a pasta do bot e a home vão para a cerca do git fora da pasta (hook-nativas.ts). ADR-088: com
                   // task, o plano traz `<bot>/<slug>` (ehPastaDeTask) e a worktree nasce ali.
                   // ADR-097: a fila do forno da máquina, que todos os turnos daqui dividem.
-                  const nodeDoHook = { nodePath: lig.nodePath ?? process.execPath, hookPath: lig.hookPath, electronComoNode: lig.electronComoNode };
-                  const vaga = lig.filaDoForno === false ? undefined : { dir: pastaDaFila(cfg.cwdBase), invocar: invocarDoHook(nodeDoHook) };
+                  const nodeDoHook = { nodePath: lig.nodePath ?? process.execPath, hookPath: lig.hookPath, electronComoNode: lig.electronComoNode, windows };
+                  // ADA-11 (ADR-147): a fila do forno mede a árvore pelo `ps` e o `$$` do Git Bash não é o pid do Windows:
+                  // na Fase 1 ela fica desligada no win32 e o comando roda direto.
+                  const vaga = lig.filaDoForno === false || windows ? undefined : { dir: pastaDaFila(cfg.cwdBase), invocar: invocarDoHook(nodeDoHook) };
                   await writeFile(config, JSON.stringify({ url: lig.urlNod, token: plano.tokenDeTurno, pastaDoBot: pastaBot, home, daTask: ehPastaDeTask(plano.pastaDoBot!), ...(vaga ? { vaga } : {}), checkpoint: { turnoId: plano.turnoId, pastaDoBot: plano.pastaDoBot!, home: homedir() } }), { mode: 0o600 });
                   const comandoHook = comandoDoHook({ ...nodeDoHook, config });
                   // ADR-055: o Mac inteiro da pessoa, a começar pela pasta dela; os projetos autorizados continuam juntos.
@@ -634,7 +658,7 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
                 const entradaStdin = streamJson
                   ? mensagemClaude(texto, anexos)
                   : [texto, ...anexos.map((a) => `[anexo "${a.meta.nome}" não pôde ser lido: esta versão do Claude Code não aceita arquivos. Diga isso à pessoa.]`)].join("\n\n");
-                const { args } = montarArgs({ plano: { ...planoDoTurno, ...(pastas || terminal ? {} : { workspacePastas: null }) }, mcpJson, compactar, streamJson, terminal, esforco, systemPrompt, snapshotOff, bifurcar });
+                const { args } = montarArgs({ plano: { ...planoDoTurno, ...(pastas || terminal ? {} : { workspacePastas: null }) }, mcpJson, compactar, streamJson, terminal, esforco, systemPrompt, snapshotOff, bifurcar, windows });
                 const env = montarEnvDoFilho(cfg.env, home, plano.politicaExecucao.prazoMs, { claudeMdDasPastas: Boolean(terminal) });
 
                 const pendentes: Promise<void>[] = [];

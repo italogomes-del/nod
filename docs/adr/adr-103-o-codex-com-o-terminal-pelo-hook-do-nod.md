@@ -1,5 +1,7 @@
 # ADR-103 — O Codex com o terminal, pelo hook do nod (paridade, etapa 1)
 
+> Emendada pela [ADR-147](adr-147-motor-no-windows-nativo.md): no Windows o terminal do Codex fica atrás de `NOD_CODEX_TERMINAL_WINDOWS`.
+
 Status: aceito (pedido do Marlon, 2026-10-14: "dar as capacidades do Codex que estão recomendadas") · Data: 2026-10-14 ·
 Emenda a [ADR-036](adr-036-harnesses-e-modelos.md) (o Codex "só com o proxy"), a
 [ADR-052](adr-052-o-kit-do-terminal-com-o-nod-decidindo.md) e a

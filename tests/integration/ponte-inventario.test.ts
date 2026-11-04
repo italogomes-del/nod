@@ -1,4 +1,5 @@
 import { IncomingMessage, ServerResponse } from "node:http";
+import { randomBytes } from "node:crypto";
 import { Socket } from "node:net";
 import { expect, it } from "vitest";
 import type { PlanoTurno } from "../../src/contracts/plano-turno.ts";
@@ -108,6 +109,32 @@ describeIntegracao("NOD-199: anúncio de inventário persiste no banco", () => {
       expect(m).not.toHaveProperty("planos");
       expect(Object.keys(p.harnessesDaPessoa(escopo.pessoaId)).sort()).toEqual(["claude-cli", "codex-cli"]);
       expect((await repos.inventario.buscar("claude-cli"))?.estado).toBe("pronto");
+    });
+  });
+});
+
+describeIntegracao("ADA-11 (ADR-147): a plataforma win32 na ponte e no banco", () => {
+  it("conectar com win32 entra; plataforma desconhecida é recusada (não vira Mac); ausente segue Mac", async () => {
+    await withRollback(escopo, async (trx) => {
+      const { repos } = await agenteComConversa(trx, escopo);
+      const { chamar, maquinas } = montar(repos);
+      const anuncio = { versaoContrato: 1, nome: "PC da Bia", inventario: pronto, harnesses: { "claude-cli": pronto, "codex-cli": pronto } };
+      await expect(chamar("conectar", { ...anuncio, plataforma: "freebsd" })).rejects.toThrow("entrada_invalida");
+      expect(maquinas.size).toBe(0);
+      expect((await chamar("conectar", { ...anuncio, plataforma: "win32" })).status).toBe(200);
+      expect(maquinas.get("m1")).toBeDefined();
+    });
+  });
+
+  it("0149: a chave grava win32 e o CHECK segue recusando valor fora da lista", async () => {
+    await withRollback(escopo, async (trx) => {
+      const { repos } = await agenteComConversa(trx, escopo);
+      const c = await repos.maquinaTokens.criar({ nome: "PC da Bia", prefixo: randomBytes(4).toString("hex"), hash: randomBytes(32) });
+      if (!c) throw new Error("chave");
+      await repos.maquinaTokens.registrarPlataforma(c.id, "win32");
+      expect(await repos.maquinaTokens.identificar(c.id)).toMatchObject({ plataforma: "win32" });
+      // Último comando do envelope: o erro aborta a transação, que o withRollback desfaz de qualquer jeito.
+      await expect(trx`UPDATE maquina_tokens SET plataforma = 'freebsd' WHERE id = ${c.id}`).rejects.toThrow(/maquina_tokens_plataforma/);
     });
   });
 });

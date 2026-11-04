@@ -50,6 +50,8 @@ describeIntegracao("ponte HTTP com servidor compartilhado e duas máquinas", () 
     }
     const sessao = await pedir("sessao");
     expect(sessao.headers.get("set-cookie")).toContain("HttpOnly");
+    // ADA-11 (ADR-147): a sessão lista as plataformas, e o motor do Windows só conecta com o win32 nela.
+    expect(((await sessao.clone().json()) as { plataformas?: string[] }).plataformas).toContain("win32");
     const enviada = await srv.json<RespostaMutacao>("POST", `conversas/${conversaId}/mensagens`, { texto: "Olá" });
     const pull = await pedir("puxar");
     const { plano } = await pull.json() as { plano: PlanoTurno };

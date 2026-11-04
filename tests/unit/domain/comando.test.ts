@@ -108,3 +108,12 @@ describe("classificarComando (ADR-055): o que só lê roda direto, o resto pede"
     expect(classificarComando("echo x > y").motivo).toBe("grava em arquivo pelo redirecionamento");
   });
 });
+
+describe("revisão 27 do PR #642: a \\ antes do \\r\\n não esconde a linha seguinte", () => {
+  it.each(["ls \\\r\nrm -rf src", "ls \\\r\ngit push origin HEAD"])("%j não é leitura", (c) => {
+    expect(tipo(c)).not.toBe("leitura");
+  });
+  it("a \\ com o \\n sozinho segue continuando a linha", () => {
+    expect(tipo("ls \\\n  -la")).toBe("leitura");
+  });
+});

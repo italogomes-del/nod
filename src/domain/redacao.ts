@@ -1,5 +1,6 @@
 import type { MotivoFalha, MotivoInterrupcao } from "../contracts/motivos.ts";
 import type { PlataformaMaquina } from "../contracts/ponte.ts";
+import { ehMaquinaDoMotor } from "./plataforma-maquina.ts";
 
 export type ChaveRedacao =
   | "capacidade-desligada"
@@ -224,7 +225,7 @@ export type MaquinaDaQueda = { nome: string; plataforma: PlataformaMaquina | nul
  * disse o sistema e o Mac sem chave do modo local ficam com a frase de sempre.
  */
 export function motivoDaQuedaEmPortugues(maquina: MaquinaDaQueda | null): string {
-  return maquina?.plataforma === "linux" ? `a máquina ${maquina.nome} parou de responder (desligada, sem rede ou motor parado)` : MOTIVO_EM_PORTUGUES.maquina_sem_contato;
+  return maquina && ehMaquinaDoMotor(maquina.plataforma) ? `a máquina ${maquina.nome} parou de responder (desligada, sem rede ou motor parado)` : MOTIVO_EM_PORTUGUES.maquina_sem_contato;
 }
 
 /**

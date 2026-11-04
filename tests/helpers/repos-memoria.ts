@@ -178,7 +178,7 @@ export type BancoMemoria = {
   /** NOD-84 (0130): endereço secreto e log de chamadas do webhook. */
   rotinaGatilhos: (GatilhoVivo & { tenantId: string; ownerId: string; revogadoEm: number | null })[];
   rotinaChamadas: (ChamadaWebhook & { tenantId: string; ownerId: string; entregaId: string | null })[];
-  maquinaTokens: { tenantId: string; ownerId: string; id: string; nome: string; prefixo: string; hash: Buffer; criadaEm: number; ultimoUsoEm: number | null; expiraEm: number | null; revogadaEm: number | null; plataforma?: "darwin" | "linux" | null; papel?: "motor" | "computador" }[];
+  maquinaTokens: { tenantId: string; ownerId: string; id: string; nome: string; prefixo: string; hash: Buffer; criadaEm: number; ultimoUsoEm: number | null; expiraEm: number | null; revogadaEm: number | null; plataforma?: "darwin" | "linux" | "win32" | null; papel?: "motor" | "computador" }[];
   /** NOD-94 (0105): máquinas instaladas por SSH. */
   maquinasSsh: (MaquinaSsh & { tenantId: string; ownerId: string })[];
   /** 0071 (ADR-099, partes 3/4): os lotes de frentes, com a dona (o comportamento completo se prova no Postgres). */

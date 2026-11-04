@@ -4,6 +4,7 @@ import { ErroDeDominio } from "../domain/erro.ts";
 import { INCIDENTE_VISIVEL_MS, incidenteVisivel } from "../domain/incidente.ts";
 import type { Repos } from "../repositories/tipos.ts";
 import type { Deps } from "./tipos.ts";
+import { ehMaquinaDoMotor } from "../domain/plataforma-maquina.ts";
 
 /**
  * "Entendi" no aviso de queda (ADR-045): some da tela. Fechado e dispensado, não recebe queda nova — a
@@ -28,7 +29,7 @@ export async function incidentesVisiveis(repos: Repos, agora: number): Promise<I
   const linux = new Map<string, string>();
   for (const id of new Set(visiveis.flatMap((i) => (i.machineId ? [i.machineId] : [])))) {
     const m = await repos.maquinaTokens.identificar(id);
-    if (m?.plataforma === "linux") linux.set(id, m.nome);
+    if (m && ehMaquinaDoMotor(m.plataforma)) linux.set(id, m.nome);
   }
   return visiveis.map((i) => ({
     id: i.id,

@@ -1,6 +1,6 @@
 import { ehPontoDeEntrada } from "../../shared/entrada.ts";
 import { log } from "../../obs/log.ts";
-import { arquivoDeGruposDoServidor, encerrarGruposOrfaos } from "../executor/grupos-orfaos.ts";
+import { arquivoDeGruposDoServidor, encerrarGruposOrfaos, type ResultadoDaLimpeza } from "../executor/grupos-orfaos.ts";
 import { encerrarFugitivosDaInstancia } from "../executor/fugitivos.ts";
 import { homeDaPessoa } from "../executor/caminho.ts";
 import { registrarGruposEm } from "../executor/processo.ts";
@@ -66,11 +66,11 @@ if (ehPontoDeEntrada(import.meta.url)) {
   const servidor = await boot({
     aposEscutar: async () => {
       const arquivoDeGrupos = arquivoDeGruposDoServidor(nodHome(process.env, homeDaPessoa(process.env)), process.env);
-      const limpeza = await encerrarGruposOrfaos({ arquivo: arquivoDeGrupos }).catch(() => ({ assumiu: true }));
+      const limpeza: Pick<ResultadoDaLimpeza, "assumiu" | "herdados"> = await encerrarGruposOrfaos({ arquivo: arquivoDeGrupos }).catch(() => ({ assumiu: true }));
       if (!limpeza.assumiu) return;
       // ADR-097: o que saiu dos grupos com a marca desta instância (o Postgres de teste de uma task) e ficou de outra vida.
       await encerrarFugitivosDaInstancia(arquivoDeGrupos);
-      registrarGruposEm(arquivoDeGrupos);
+      registrarGruposEm(arquivoDeGrupos, limpeza.herdados);
     },
   });
   // SIGTERM e depois Ctrl+C (ou o contrário) também é "segundo sinal".

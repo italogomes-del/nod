@@ -236,6 +236,23 @@ describe("args do turno com o kit do terminal (ADR-052, revisto pela ADR-055)", 
   it("aspas simples no caminho não quebram o comando do hook", () => {
     expect(comandoDoHook({ nodePath: "/n", hookPath: "/a/it's/h.mjs", config: "/c", electronComoNode: true })).toBe("ELECTRON_RUN_AS_NODE=1 '/n' '/a/it'\\''s/h.mjs' '/c'");
   });
+
+  it("ADA-11 (ADR-147): no Windows as nativas do terminal saem de --allowedTools (só o allow do hook libera) e seguem em --tools", () => {
+    const win = montarArgs({ plano: { ...planoDeTeste(), nativas: NATIVAS_DO_TERMINAL, pastaDoBot: "Ada" }, mcpJson: "/tmp/mcp.json", terminal: { settings, dirsExtras: [] }, windows: true }).args;
+    const aprovadas = win[win.indexOf("--allowedTools") + 1]!.split(",");
+    for (const n of NATIVAS_DO_TERMINAL) expect(aprovadas).not.toContain(n);
+    expect(aprovadas).toContain("ToolSearch");
+    expect(win[win.indexOf("--tools") + 1]!.split(",")).toEqual([...NATIVAS_DO_TERMINAL, "ToolSearch"]);
+    expect(win).toContain("--settings");
+    // Sem o kit do terminal (nativas de arquivo com --restricted), o Windows não muda nada.
+    const semKit = montarArgs({ plano: { ...planoDeTeste(), nativas: ["Read"], workspacePastas: { ativa: "C:\\w", aprovadas: ["C:\\w"] } }, mcpJson: "m", windows: true }).args;
+    expect(semKit[semKit.indexOf("--allowedTools") + 1]!.split(",")).toContain("Read");
+  });
+
+  it("ADA-11 (ADR-147): no Windows o comando do hook vai com `/` para o Git Bash", () => {
+    expect(comandoDoHook({ nodePath: "C:\\Program Files\\nodejs\\node.exe", hookPath: "C:\\U\\Bia's\\hook.mjs", config: "C:\\U\\AppData\\Local\\t\\hook.json", windows: true }))
+      .toBe("'C:/Program Files/nodejs/node.exe' 'C:/U/Bia'\\''s/hook.mjs' 'C:/U/AppData/Local/t/hook.json'");
+  });
 });
 
 /**

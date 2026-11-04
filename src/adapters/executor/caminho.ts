@@ -2,8 +2,9 @@ import { spawn } from "node:child_process";
 import { constants, readdirSync, readFileSync, statSync } from "node:fs";
 import { access } from "node:fs/promises";
 import { homedir, userInfo } from "node:os";
-import { delimiter, isAbsolute, join } from "node:path";
+import { delimiter, isAbsolute, join, win32 } from "node:path";
 import type { OrigemDoBinario } from "../../contracts/estado-ia.ts";
+import { BinarioSemSuporte, comoRodar, variavel } from "./plataforma.ts";
 
 /**
  * Resolução do caminho do binário (ADR-014 invertido): app aberto pelo Finder herda PATH pelado
@@ -48,7 +49,26 @@ export type OpcoesCaminho = {
   depois?: readonly string[];
   /** Ler as versões do nvm em ~/.nvm (default true). */
   nvm?: boolean;
+  /** ADR-147: as pastas fixas no lugar de DIRETORIOS_EXTRAS (no Windows, `diretoriosExtrasDoWindows`). */
+  extras?: readonly string[];
 };
+
+/**
+ * ADA-11 (ADR-147): onde o npm global (`%APPDATA%\npm`), o instalador nativo do Claude (`%USERPROFILE%\.local\bin`), o
+ * Node e o Git for Windows deixam o binário. Sem nvm nem shell de login (o Windows não tem `$SHELL -l`).
+ */
+export function diretoriosExtrasDoWindows(env: Readonly<Record<string, string | undefined>>): string[] {
+  const v = (n: string) => variavel(env, n, "win32")?.trim() || "";
+  const junta = (base: string, ...resto: string[]) => (base === "" ? "" : win32.join(base, ...resto));
+  return [
+    junta(v("APPDATA"), "npm"),
+    junta(v("USERPROFILE"), ".local", "bin"),
+    junta(v("LOCALAPPDATA"), "Programs", "nodejs"),
+    junta(v("ProgramFiles"), "nodejs"),
+    junta(v("ProgramFiles"), "Git", "cmd"),
+    junta(v("LOCALAPPDATA"), "Programs", "Git", "cmd"),
+  ].filter((d) => d !== "");
+}
 
 /**
  * A casa da PESSOA (passwd via os.userInfo), não `$HOME`. definido em 2026-09-16: `~` na configuração
@@ -152,7 +172,7 @@ export function camadasDoPath(pathAtual: string | undefined, home: string, pathD
   };
   acrescentar(o.antes ?? [], "nod");
   acrescentar((pathAtual ?? "").split(delimiter), "processo");
-  acrescentar(DIRETORIOS_EXTRAS, "extra");
+  acrescentar(o.extras ?? DIRETORIOS_EXTRAS, "extra");
   if (o.nvm !== false) acrescentar(diretoriosDoNvm(home), "nvm");
   acrescentar((pathDoShellDeLogin ?? "").split(delimiter), "shell");
   acrescentar(o.depois ?? [], "node_do_nod");
@@ -298,10 +318,31 @@ export async function resolverBinarioDetalhado(bin: string | undefined, path: st
     if (isAbsolute(caminho)) return (await executavel(caminho)) ? { caminho, origem: "configurado" } : null;
     return null;
   }
+  // ADR-147: no Windows o nome ganha as extensões (`.exe` antes do `.cmd`), e pasta relativa (a cwd) não conta.
+  const windows = process.platform === "win32";
+  const nomes = windows ? EXTENSOES_DO_WINDOWS.map((e) => nome + e) : [nome];
   for (const dir of path.split(delimiter)) {
-    if (dir === "") continue;
-    const candidato = join(dir, nome);
-    if (await executavel(candidato)) return { caminho: candidato, origem: camadas.find((c) => c.dir === dir)?.origem ?? "path" };
+    if (dir === "" || (windows && !win32.isAbsolute(dir))) continue;
+    for (const n of nomes) {
+      const candidato = join(dir, n);
+      if (!(await executavel(candidato))) continue;
+      // Revisão 7 do PR #642 (médio 12): um `.cmd` que o nod não roda sem o cmd.exe não para a busca (como no
+      // `resolverBinario` de plataforma.ts): o `.ps1` ao lado ou outra pasta podem servir.
+      if (windows && !rodavelNoWindows(candidato)) continue;
+      return { caminho: candidato, origem: camadas.find((c) => c.dir === dir)?.origem ?? "path" };
+    }
   }
   return null;
 }
+
+function rodavelNoWindows(arquivo: string): boolean {
+  try {
+    return comoRodar(arquivo, { plataforma: "win32" }) !== null;
+  } catch (e) {
+    if (e instanceof BinarioSemSuporte) return false;
+    throw e;
+  }
+}
+
+/** ADR-147: o que o nod sabe rodar no Windows sem `cmd.exe`, na ordem do PATHEXT padrão (o `.ps1` por último). */
+const EXTENSOES_DO_WINDOWS = [".exe", ".cmd", ".bat", ".ps1"] as const;

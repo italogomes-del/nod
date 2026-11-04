@@ -5,6 +5,7 @@ import { ondeRodaDaRotina, type MaquinaViva } from "../../../src/domain/onde-rod
 const mac: MaquinaViva = { id: "k-mac", nome: "MacBook da Bia", plataforma: "darwin" };
 const antiga: MaquinaViva = { id: "k-antiga", nome: "Mac antigo", plataforma: null };
 const vm: MaquinaViva = { id: "k-vm", nome: "vm-sp", plataforma: "linux" };
+const pc: MaquinaViva = { id: "k-pc", nome: "PC da Bia", plataforma: "win32" };
 
 describe("ondeRodaDaRotina", () => {
   it.each([
@@ -14,6 +15,9 @@ describe("ondeRodaDaRotina", () => {
     ["qualquer com Linux viva", null, [mac, vm], { modo: "qualquer", maquina: null, dependeDoMac: false }],
     ["qualquer só com Mac nomeia o Mac", null, [mac], { modo: "qualquer", maquina: mac, dependeDoMac: true }],
     ["qualquer sem máquina nenhuma = seu Mac", null, [], { modo: "qualquer", maquina: null, dependeDoMac: true }],
+    // ADA-11 (ADR-147): o PC com Windows não é o Mac — não depende dele nem vira "seu Mac" no qualquer.
+    ["alvo Windows", { id: pc.id, nome: pc.nome }, [mac, pc], { modo: "maquina", maquina: pc, dependeDoMac: false }],
+    ["qualquer com Windows e Mac nomeia o Mac", null, [pc, mac], { modo: "qualquer", maquina: mac, dependeDoMac: true }],
   ] as const)("%s", (_, alvo, vivas, esperado) => {
     expect(ondeRodaDaRotina(alvo, vivas)).toEqual(esperado);
   });

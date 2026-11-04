@@ -39,7 +39,7 @@ export function configGithubNativo(p: {
   const escolha = escolherJeitoGithub({ ghNaMaquina: false, prontos: { token: !!token, composio: !!composio, app: !!p.app }, rotina: p.rotina });
   if (!escolha.ok) return escolha;
   const base = { comando: process.execPath, args: [CAMINHO_SERVIDOR_GITHUB] };
-  const env = montarAmbienteConectorNativo(p.ambiente);
+  const env = montarAmbienteConectorNativo(p.ambiente, process.platform);
   const api: Record<string, string> = p.apiBase ? { NOD_GITHUB_API: p.apiBase } : {};
   switch (escolha.jeito) {
     case "token":

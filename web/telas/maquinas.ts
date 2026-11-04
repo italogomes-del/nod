@@ -15,6 +15,11 @@ import { linhaEmSegundoPlano, renderInstalarSsh } from "./instalar-ssh.ts";
 import { acoesDaFalha, avisoDaConta, criandoDaConta, fraseDaCriacao, motivoLegivel, nomeDaZona, nuvemLigada, OPCOES_SONO, REGIOES_CRIAR, rotuloEstadoNuvem, rotuloSono, TAMANHOS_CRIAR, temLinhaDeFalha, urlConsoleGoogle } from "../lib/maquina-nuvem.ts";
 import type { MaquinaCriandoDto } from "../../src/contracts/provedor-nuvem.ts";
 
+/** ADR-147 (2026-11-03): o nome do sistema na lista e no pareamento; null (não conectada) segue como Mac. */
+function nomeDaPlataforma(p: string | null | undefined): string {
+  return p === "linux" ? "Linux" : p === "win32" ? "Windows" : "Mac";
+}
+
 /**
  * Seu espaço › Máquinas (ADR-090; protótipo "Nod — Motor na VM", pranchas 1 e 2): as máquinas da pessoa (o Mac e as VMs
  * em que o motor roda), o que cada uma anunciou, onde cada bot trabalha e o "Conectar uma máquina" por código. A janela
@@ -25,7 +30,7 @@ const NOME_IA: Record<string, string> = { "claude-cli": "Claude Code", "codex-cl
 
 function nomePlataforma(m: MaquinaDto): string {
   if (!m.conectada) return "não conectada agora";
-  return `${m.plataforma === "linux" ? "Linux" : "Mac"}${soComputador(m) ? " · só computador" : ""}`;
+  return `${nomeDaPlataforma(m.plataforma)}${soComputador(m) ? " · só computador" : ""}`;
 }
 
 /** NOD-94: a máquina "só computador" hospeda o computador dos bots e não pega trabalho (não entra nos seletores). */
@@ -292,7 +297,7 @@ function linhaDaMaquina(estado: Estado, m: MaquinaDto, usoEm: DonoDoUso | null, 
   const linha = linhaConfig({
     titulo: m.nome,
     detalhe: detalheDaMaquina(estado, m, ehEsteMac),
-    icone: m.plataforma === "darwin" ? ICONE.laptop : ICONE.servidor,
+    icone: m.plataforma === "darwin" || m.plataforma === "win32" ? ICONE.laptop : ICONE.servidor,
     status: statusDaMaquina(estado, m),
     controle: { tipo: "menu", acao: "maq-menu", aberto: estado.contasUi.maquinaMenu === m.id, rotulo: m.nome, itens: itensDaMaquina(estado, m, usoEm, ehEsteMac), dados: { maquina: m.id } },
   });
@@ -557,7 +562,7 @@ function renderConectar(estado: Estado, c: ConectarMaquina): string {
       <div class="cx-rodape">${botao("passo-conectar-maquina", "Voltar", { classe: "link", dados: { passo: "comando" } })}${botao("ver-codigo-maquina", "Continuar", { classe: "pri" })}</div>`;
   } else if (c.passo === "confirmar" && c.pedido) {
     corpo = `<h3>Conectar ${esc(c.pedido.nome)}?</h3>
-      <div class="cx-confirma"><span class="maq-ic" aria-hidden="true">${ICONE.servidor}</span><div><b>${esc(c.pedido.nome)}</b><small>${c.pedido.plataforma === "linux" ? "Linux" : "Mac"} · código ${esc(c.codigo.toUpperCase())} · pediu ${esc(haQuantoPediu(c.pedido.pedidoHaS))}</small></div></div>
+      <div class="cx-confirma"><span class="maq-ic" aria-hidden="true">${ICONE.servidor}</span><div><b>${esc(c.pedido.nome)}</b><small>${nomeDaPlataforma(c.pedido.plataforma)} · código ${esc(c.codigo.toUpperCase())} · pediu ${esc(haQuantoPediu(c.pedido.pedidoHaS))}</small></div></div>
       <p class="cx-nota">Confira se o terminal da máquina mostra o código <b>${esc(c.codigo.toUpperCase())}</b>. Conecte só se foi você quem rodou o comando nessa máquina agora. Quem conecta uma máquina passa a receber o trabalho dos bots que você mover para ela.</p>
       ${erro}
       <div class="cx-rodape">${botao("passo-conectar-maquina", "Voltar", { classe: "link", dados: { passo: comConvite ? "comando" : "codigo" } })}${botao("aprovar-maquina", `Conectar ${esc(c.pedido.nome)}`, { classe: "pri" })}</div>`;

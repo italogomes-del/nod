@@ -35,16 +35,142 @@ const SIMPLES = new Set([
 // `:` e termina num separador). `\.(pem|…|key)\b` casava `e.key` em JavaScript embutido: 11 blocos das skills do
 // Marlon (gstack-learn) paravam por credencial, e credencial pedia a pessoa até no modo total (até o PR 6 dos modos de
 // aprovação, 2026-10-19: no total, só a chave do nod ainda pede).
-const CREDENCIAL = /(^|[\s"'=/:~])(\.ssh|\.aws|\.gnupg|\.config\/gh|\.config\/nod-motor|\.netrc|\.git-credentials|\.npmrc|\.docker\/config\.json|\.kube|\.claude\/\.credentials\.json|\.codex\/auth\.json)(\/|$|[\s"'])|(^|[\s"'=/:~])conexao\.json(?=$|[\s"';|&)])|id_(rsa|ed25519|ecdsa|dsa)\b|(^|[\s"'=:])[\w./~*?-]*[\w*?]\.(pem|p12|pfx|key)(?=$|[\s"';|&)])|(^|[\s;&|])security\s+(find|dump|export)|gh\s+auth\s+token|Library\/Keychains/;
+const CREDENCIAL = /(^|[\s"'=/:~])(\.ssh|\.aws|\.gnupg|\.config\/gh|\.config\/nod-motor|\.netrc|_netrc|\.git-credentials|\.npmrc|\.docker\/config\.json|\.kube|\.claude\/\.credentials\.json|\.codex\/auth\.json)(\/|$|[\s"'])|(^|[\s"'=/:~])conexao\.json(?=$|[\s"';|&)])|id_(rsa|ed25519|ecdsa|dsa)\b|(^|[\s"'=:])[\w./~*?-]*[\w*?]\.(pem|p12|pfx|key)(?=$|[\s"';|&)])|(^|[\s;&|])security\s+(find|dump|export)|[gG][hH](\.([eE][xX][eE]|[cC][mM][dD]|[bB][aA][tT]|[cC][oO][mM]))?["']?\s+auth\s+token|Library\/Keychains/;
 
 /**
  * O comando ou o caminho toca uma credencial da pessoa (chaves SSH, AWS, login do gh, Keychain)? revisto em 2026-10-09
  * (ADR-090): numa máquina Linux o login do Claude Code e do Codex é arquivo (~/.claude/.credentials.json, ~/.codex/auth.json),
  * e a chave do motor fica em ~/.config/nod-motor/conexao.json — o bot não lê nenhum deles sem a pessoa.
  */
-export function tocaCredencial(texto: string): boolean {
-  return CREDENCIAL.test(texto);
+// Revisão 10 do PR #642 (médio 1): as regras só do Windows (sem caixa, `cmdkey` e `git credential fill` no meio do texto,
+// as pastas do DPAPI, o nome curto 8.3 em minúsculas) valem só quando o comando é de Windows: a máquina é win32
+// (`windows`, que o hook e o executor sabem) ou o texto tem cara de Windows. No Linux, `rg "cmdkey" src`, `echo "Use
+// ~/.SSH"` e `ls Microsoft/Credentials` voltam a ser o que eram antes do PR. Fora disso, só soma casos.
+export function tocaCredencial(texto: string, opcoes: OpcoesDaGuarda = {}): boolean {
+  if (CREDENCIAL.test(texto) || tocaChaveDoNod(texto, opcoes)) return true;
+  // Revisão 14 do PR #642 (M2): a `\` do bash e as aspas no meio do nome (`~/.a\ws/credentials`, `~/.a"w"s/…`) nas duas
+  // plataformas — o shell as tira antes de abrir o arquivo.
+  if (CREDENCIAL.test(comoOBashLe(texto))) return true;
+  const windows = opcoes.windows === true || pareceWindows(texto);
+  const formas = formasDoTexto(texto, windows);
+  if (formas.some((x) => COFRE_NO_PROGRAMA.test(x) || PASSWORDVAULT.test(x) || NOME_CURTO_EM_MAIUSCULAS.test(x) || GH_COM_BARRA.test(x))) return true;
+  return windows && formas.some((x) => CREDENCIAL_SEM_CAIXA.test(x) || GH_NO_WINDOWS.test(x) || COFRE_DE_CREDENCIAIS.test(x) || NOME_CURTO_DE_CREDENCIAL.test(x));
 }
+
+/**
+ * Revisão 14 do PR #642 (M2): o texto como o bash (o Git Bash no win32) o entrega ao programa — sem as aspas e sem a `\`
+ * de escape. Fora das aspas `\x` vira `x`; nas duplas a `\` só cai antes de `$`, crase, `"` e `\`; nas simples nada muda
+ * (`rg '\.ssh'`, `grep "\.aws"` continuam com a `\` do regex).
+ */
+export function comoOBashLe(texto: string): string {
+  let saida = "";
+  let aspas: "" | '"' | "'" = "";
+  for (let i = 0; i < texto.length; i++) {
+    const c = texto[i]!;
+    if (aspas === "'") {
+      if (c === "'") aspas = "";
+      else saida += c;
+    } else if (c === "\\" && i + 1 < texto.length) {
+      const prox = texto[i + 1]!;
+      if (aspas === '"' && !/[$`"\\\n]/.test(prox)) {
+        saida += c;
+        continue;
+      }
+      i++;
+      if (prox !== "\n") saida += prox;
+    } else if (c === '"' || (c === "'" && aspas === "")) {
+      aspas = aspas === c ? "" : (c as '"' | "'");
+    } else saida += c;
+  }
+  return saida;
+}
+
+/** `windows`: a máquina que roda o comando é win32 (o hook e o executor sabem; o servidor, não, e fica com o texto). */
+export type OpcoesDaGuarda = { windows?: boolean };
+
+/**
+ * O texto tem cara de Windows: drive, `~\`, UNC, `%VAR%`, `$env:`, PowerShell/cmd, `.exe`/`.ps1`, `AppData`. Revisão 12
+ * do PR #642 (alto A): a `\` sozinha não conta — no Linux ela é escape de regex (`rg "\.aws\b"`, `printf "ok\n"`).
+ */
+// Revisão 13 do PR #642 (médio 3): só pistas fortes — `%H%` do `git log`, um `app.exe` de argumento e `rg "AppData"`
+// não são Windows. O `%VAR%` só com as variáveis de pasta, o `.exe` só como programa e o AppData só como pasta.
+const pareceWindows = (t: string): boolean =>
+  /(^|[\s"'=(])~\\|(^|[\s"'=(])\\\\\w|(^|[\s"'=(])[a-z]:[\\/]|%(userprofile|(local)?appdata|homepath|homedrive|home|temp|tmp|programdata|systemdrive|systemroot|windir|cd)%|\$\{?env:|\$\{?(local)?appdata\b|\$\{?userprofile\b|(^|[\s;&|("'/\\])(powershell|pwsh|cmd)(\.exe)?(\s|$)|(^|[;&|(]\s*)["']?[^\s"';&|]*\.(exe|ps1|cmd|bat)\b|\b(local)?appdata[\\/]/i.test(t);
+
+/**
+ * O texto como o Windows o leria, para os padrões de `/` (só soma formas, nunca tira): as barras viradas e sem aspas e,
+ * no Windows, também a `\` de começo de palavra como pasta (`Join-Path $HOME "\.aws\credentials"`, revisão 10, alto 3),
+ * o ponto ou espaço no fim de cada nome (`~/.aws./credentials`, que o Win32 apara) e o fluxo do NTFS (`auth.json::$DATA`,
+ * revisão 10, alto 2).
+ */
+function formasDoTexto(texto: string, windows: boolean): string[] {
+  // Revisão 14 do PR #642 (M2): a `\` de escape do bash (`g\it credential fill`, `~/.a\ws/credentials`) — no win32 o
+  // terminal roda no Git Bash, onde `\x` vira `x`. Forma a mais, sem a `\` e sem as aspas; a com `\` continua.
+  const semEscape = comoOBashLe(texto);
+  const formas = [barras(texto), semAspas(texto), semEscape];
+  if (!windows) return formas;
+  const todas = texto.replace(/\\ /g, " ").replace(/`(?=\S| )/g, "").replace(/\\/g, "/");
+  // Revisão 13 do PR #642 (médio 1): o `^` é o escape do cmd (`.a^ws`, `^cmdkey`) — também sem ele.
+  const semCircunflexo = todas.replace(/\^(.)/g, "$1");
+  for (const x of [todas, todas.replace(/["']/g, ""), semCircunflexo, semCircunflexo.replace(/["']/g, ""), semEscape]) {
+    const aparado = x.replace(/(?<=[^/\s.])[. ]+(?=\/)/g, "").replace(/(?<=[^/\s.])\.+(?=$|[\s"';|&)])/g, "");
+    // Revisão 12 do PR #642 (alto B): o fluxo também no meio do caminho (`.aws::$INDEX_ALLOCATION/credentials`,
+    // `.aws:$I30:$INDEX_ALLOCATION`).
+    formas.push(x, aparado, aparado.replace(/(?<=[^/\s:])(:{1,2}\$?\w*)+(?=$|\/|[\s"';|&)])/g, ""));
+  }
+  return formas;
+}
+
+/**
+ * Revisão 3 do PR #642 (médio 4): onde o token mora de verdade no Windows — o Git Credential Manager (`git credential
+ * fill`), o Gerenciador de Credenciais (`cmdkey`, `vaultcmd`, `Get-StoredCredential`) e as pastas do DPAPI.
+ */
+// Revisão 7 do PR #642 (médio 14): o git com opções antes do subcomando (`git -c credential.helper= credential fill`), o
+// gerenciador por caminho absoluto (`…/mingw64/bin/git-credential-manager.exe get`) e os nomes curtos 8.3 (`GITHUB~1`).
+const COFRE_DE_CREDENCIAIS = /(^|[\s;&|"'(/])(git(\.exe)?(\s+(-c\s+\S+|-C\s+\S+|--?[\w-]+(=\S*)?))*\s+credential(-[\w-]+)?(\.exe)?\s+(fill|get)\b|git-credential-[\w-]+(\.exe)?["']?\s+get\b|cmdkey(\.exe)?(?![\w.-])|vaultcmd(\.exe)?(?![\w.-])|get-storedcredential\b|git-credential-wincred(\.exe)?|credential-wincred\s+get\b)|passwordvault\b|microsoft\/(protect|credentials|vault)(\/|$|[\s"'])/i;
+/**
+ * Revisão 10 do PR #642 (médio 1): o cofre como PROGRAMA (no começo do comando, depois de `;`/`&`/`|`/`(` ou do `-c` do
+ * PowerShell), nas duas plataformas — `git credential fill` lê o token também no Linux. No meio de um texto
+ * (`rg "cmdkey"`, `git commit -m "… git credential fill"`) só conta no Windows.
+ */
+const COFRE_NO_PROGRAMA = /(^|[;&|({\n]|\s-(c|command)\s+["']?|^["'])\s*(["'][^"']*\/|[^\s"';&|]*\/)?(git(\.exe)?(\s+(-c\s+\S+|-C\s+\S+|--?[\w-]+(=\S*)?))*\s+credential(-[\w-]+)?(\.exe)?\s+(fill|get)\b|git-credential-[\w-]+(\.exe)?["']?\s+get\b|cmdkey(\.exe)?(\s|$)|vaultcmd(\.exe)?(\s|$)|get-storedcredential\b)/i;
+const PASSWORDVAULT = /security\.credentials\.passwordvault\b/i;
+/** Os nomes curtos 8.3 das pastas de credencial (`%APPDATA%\GITHUB~1`, `%USERPROFILE%\AWS~1`). */
+// Revisão 8 do PR #642 (baixo 1): `.CREDE~1.JSO` (`.claude/.credentials.json`), `GITCRE~1`/`.GIT-C~1` (`.git-credentials`),
+// `CLAUDE~1` e `CODEX~1` (as pastas com o login das IAs).
+const NOME_CURTO_DE_CREDENCIAL = /(^|[\s"'=/:~])\.?(github|aws|ssh|gnupg|docker|nod-mo|nodmot|crede|creden|gitcre|git-c|git-cr|claude|codex|kube|npmrc|netrc)~\d+(\.[a-z0-9]{1,3})?(\/|$|[\s"'])/i;
+/** Fora do Windows, só o nome curto como o Windows o escreve (em maiúsculas): `src/GitHub~1.ts` não é pasta de credencial. */
+// Revisão 13 do PR #642 (médio 3): só depois de uma barra (`$APPDATA/GITHUB~1`); `rg "GITHUB~1" src` é busca de texto.
+const NOME_CURTO_EM_MAIUSCULAS = /(\/)\.?(GITHUB|AWS|SSH|GNUPG|DOCKER|NOD-MO|NODMOT|CREDE|CREDEN|GITCRE|GIT-C|GIT-CR|CLAUDE|CODEX|KUBE|NPMRC|NETRC)~\d+(\.[A-Z0-9]{1,3})?(\/|$|[\s"'])/;
+
+/** O login do gh no Windows mora em `%APPDATA%\GitHub CLI\hosts.yml` (não em `.config\gh`). */
+// Revisão 8 do PR #642 (médio 4): `$LOCALAPPDATA/../Roaming` e o glob (`GitHub*`, `GitHub?CLI`).
+const APPDATA = String.raw`(appdata\/roaming|%appdata%|\$\{?(env:)?appdata\}?|(%|\$\{?(env:)?)localappdata%?\}?\/\.\.\/roaming)`;
+// Revisão 9 do PR #642 (médio 1): `Join-Path $env:APPDATA 'GitHub CLI' 'hosts.yml'` e `cd $env:APPDATA; gc 'GitHub
+// CLI\hosts.yml'` — a pasta e o arquivo do login juntos, com qualquer separador entre eles.
+const GH_NO_WINDOWS = new RegExp(String.raw`${APPDATA}\/github( cli|[^/\s]*[*?[][^/\s]*)(\/|$|[\s"'])|github[ ?*]cli["',\s/]+hosts\.yml`, "i");
+/** Fora do Windows, a pasta e o arquivo do login do gh só como caminho (`GitHub CLI/hosts.yml`), não soltos num texto. */
+const GH_COM_BARRA = /github[ ?*]cli["']?\/["']?hosts\.yml/i;
+
+/**
+ * ADA-11 (ADR-147; revisão do PR #642, alto 2): no Windows o caminho vem com `\` e sem caixa
+ * (`C:\Users\bia\.AWS\credentials`), e a chave do motor mora em `%APPDATA%\nod-motor`. Os padrões acima só
+ * entendem `/`: o texto também é conferido com as barras viradas e sem caixa. Só soma casos (falha fechada), nunca tira.
+ */
+// Revisão 3 do PR #642 (médio 4): o espaço escapado do bash (`GitHub\\ CLI`) e a crase do PowerShell (``GitHub` CLI``) também.
+// Revisão 9 do PR #642 (médio 2): a `\` no começo de uma palavra antes de `.`, `*`, `?`, `[` ou `(` é escape de regex
+// (`grep "\.aws"`, `rg '\.ssh'`), não pasta — fica como está. Dentro de um caminho (`bia\.aws`, `%USERPROFILE%\.ssh`) vira `/`.
+const barras = (texto: string): string =>
+  texto
+    .replace(/\\ /g, " ")
+    .replace(/`(?=\S| )/g, "")
+    .replace(/\\/g, (barra, i: number, todo: string) => ((i === 0 || /[\s"'=(]/.test(todo[i - 1]!)) && /[.*?[(]/.test(todo[i + 1] ?? "") ? barra : "/"));
+/**
+ * Revisão 8 do PR #642 (médio 4): `cat "$APPDATA"/GitHub\ CLI/hosts.yml` e `gc $env:APPDATA\'GitHub CLI'\hosts.yml` —
+ * a aspa no meio do caminho quebrava os padrões. Conferido também sem aspas (só soma casos).
+ */
+const semAspas = (texto: string): string => barras(texto).replace(/["']/g, "");
+const CREDENCIAL_SEM_CAIXA = new RegExp(CREDENCIAL.source, "i");
 
 /**
  * A chave do PRÓPRIO nod nesta máquina (definido em 2026-10-19, plano dos modos de aprovação, PR 6): a do motor da VM
@@ -54,8 +180,86 @@ export function tocaCredencial(texto: string): boolean {
  */
 const CHAVE_DO_NOD = /(^|[\s"'=/:~])\.config\/nod-motor(\/|$|[\s"'])|(^|[\s"'=/:~])conexao\.json(?=$|[\s"';|&)])/;
 
-export function tocaChaveDoNod(texto: string): boolean {
-  return CHAVE_DO_NOD.test(texto);
+/** A pasta da chave do motor no Windows (`%APPDATA%\nod-motor`, ADR-147), conferida com as barras viradas e sem caixa. */
+const CHAVE_DO_NOD_NO_WINDOWS = new RegExp(String.raw`(^|[\s"'=/:~])appdata\/roaming\/nod-motor(\/|$|[\s"'])|(^|[\s"'=/:~])(nod-mo|nodmot)~\d+(\/|$|[\s"'])|${APPDATA}\/nod-m[^/\s]*(\/|$|[\s"'])`, "i");
+const CHAVE_DO_NOD_SEM_CAIXA = new RegExp(CHAVE_DO_NOD.source, "i");
+
+/**
+ * Revisão 13 do PR #642 (médio 4): o padrão de uma busca (`rg -n "cmdkey" src`, `findstr "\.SSH" docs`) é texto, não um
+ * caminho. Sai só o primeiro argumento solto do programa de busca, sem barra, sem substituição e sem `-e`/`-f` antes; os
+ * caminhos ficam. Usado na regra que só o Windows tem, que no hook do win32 nega seco.
+ */
+// Revisão 15 do PR #642 (médio 3): o texto livre que só cita o cofre (`git commit -m "… cmdkey"`, `git log --grep cmdkey`,
+// `echo "… Microsoft/Credentials" > notas.md`) também sai: só o que não tem substituição (`$`, crase, `%`, parênteses).
+const SO_TEXTO = (p: string): boolean => !/[$`%()]/.test(p) && !p.startsWith("-") && (/^["']/.test(p) || !/[/\\<>]/.test(p));
+function semTextoLivre(seg: string): string | null {
+  const git = /^(\s*git(?:\.exe)?)(\s.*)$/is.exec(seg);
+  const eco = git ? null : /^(\s*(?:echo|printf|write-output|write-host)(?:\.exe)?)(\s.*)$/is.exec(seg);
+  const m = git ?? eco;
+  if (!m) return null;
+  // Revisão 19 do PR #642 (médio 2): o eco que vai por pipe (`echo "…/.AWS/credentials" | xargs cat`) não é texto livre:
+  // vira o argumento do comando seguinte.
+  if (eco && /(^|[^|])\|\s*$/.test(seg)) return null;
+  const partes = m[2]!.match(/\s+|"[^"]*"|'[^']*'|[^\s"']+/g) ?? [];
+  for (let i = 0; i < partes.length; i++) {
+    const p = partes[i]!;
+    if (/^\s+$/.test(p)) continue;
+    if (eco) { if (/[<>]/.test(p) && !/^["']/.test(p)) break; if (SO_TEXTO(p)) partes[i] = '""'; continue; }
+    const igual = /^(--message|--grep)=(.+)$/.exec(p);
+    if (igual && SO_TEXTO(igual[2]!)) { partes[i] = `${igual[1]}=""`; continue; }
+    if (!/^(-m|--message|--grep|-S|-G|--message=|--grep=)$/.test(p)) continue;
+    let j = i + 1;
+    while (!p.endsWith("=") && j < partes.length && /^\s+$/.test(partes[j]!)) j++;
+    if (j < partes.length && SO_TEXTO(partes[j]!)) { partes[j] = '""'; i = j; }
+  }
+  return m[1]! + partes.join("");
+}
+
+export function semPadraoDeBusca(texto: string): string {
+  return texto.split(/(?<=[;&|\n])/).map((seg) => {
+    const m = /^(\s*(?:git\s+)?(?:rg|grep|egrep|fgrep|ag|ack|findstr|select-string|sls)(?:\.exe)?)(\s.*)$/is.exec(seg);
+    if (!m) return semTextoLivre(seg) ?? seg;
+    const partes = m[2]!.match(/\s+|"[^"]*"|'[^']*'|[^\s"']+/g) ?? [];
+    for (let i = 0; i < partes.length; i++) {
+      const p = partes[i]!;
+      if (/^\s+$/.test(p)) continue;
+      if (/^(-e|-f|--regexp|--file|-pattern|\/g:.*)$/i.test(p) || /^--(regexp|file)=/.test(p)) return seg;
+      if (p.startsWith("-") || /^\/[a-z]$/i.test(p)) continue;
+      if (/[$`%]/.test(p) || (!/^["']/.test(p) && /[/\\]/.test(p))) return seg;
+      partes[i] = '""';
+      return m[1]! + partes.join("");
+    }
+    return seg;
+  }).join("");
+}
+
+export function tocaChaveDoNod(texto: string, opcoes: OpcoesDaGuarda = {}): boolean {
+  if (CHAVE_DO_NOD.test(texto)) return true;
+  const windows = opcoes.windows === true || pareceWindows(texto);
+  return formasDoTexto(texto, windows).some((x) => CHAVE_DO_NOD_NO_WINDOWS.test(x) || globNaChaveDoNod(x) || (windows && CHAVE_DO_NOD_SEM_CAIXA.test(x)));
+}
+
+/**
+ * Revisão 10 do PR #642 (médio 3): a pasta da chave escrita com glob (`~/.config/nod-motor*`, `$APPDATA/nod?motor`,
+ * `~/AppData/Roaming/n*`): a pasta logo abaixo de `.config` ou do Roaming com `*`, `?` ou `[` que o shell abriria em
+ * `nod-motor`.
+ */
+const PASTA_DE_CONFIG = new RegExp(String.raw`(\.config|${APPDATA})\/([^/\s"';|&)]+)`, "gi");
+function globNaChaveDoNod(texto: string): boolean {
+  for (const m of texto.matchAll(PASTA_DE_CONFIG)) {
+    const nome = m[m.length - 1]!;
+    if (!/[*?[]/.test(nome)) continue;
+    // Revisão 13 do PR #642 (médio 2): o glob sem nenhuma letra (`~/.config/*`, `[a-z]*`) é a pasta inteira (`ls`, `du`),
+    // como no main; só o que mira o nome (`n*`, `nod?motor`) é a chave.
+    if (!/[a-z0-9-]/i.test(nome.replace(/\[[^\]]*\]/g, ""))) continue;
+    const re = nome.replace(/[.+^${}()|\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".").replace(/\[!/g, "[^");
+    try {
+      if (new RegExp(`^${re}$`, "i").test("nod-motor")) return true;
+    } catch {
+      return true;
+    }
+  }
+  return false;
 }
 
 /**
@@ -65,7 +269,8 @@ export function tocaChaveDoNod(texto: string): boolean {
  * credencial sem padrão próprio (`.netrc`, `.pem`, `.kube`…) é "uma credencial"; o que não toca nenhuma, null.
  */
 const QUAL_CREDENCIAL: readonly (readonly [RegExp, string])[] = [
-  [/gh\s+auth\s+token|(^|[\s"'=/:~])\.config\/gh(\/|$|[\s"'])/, "o token do GitHub"],
+  [/[gG][hH](\.([eE][xX][eE]|[cC][mM][dD]|[bB][aA][tT]|[cC][oO][mM]))?["']?\s+auth\s+token|(^|[\s"'=/:~])\.config\/gh(\/|$|[\s"'])/, "o token do GitHub"],
+  [GH_NO_WINDOWS, "o token do GitHub"],
   [/(^|[\s"'=/:~])\.aws(\/|$|[\s"'])/, "as credenciais da AWS"],
   [/(^|[\s"'=/:~])\.ssh(\/|$|[\s"'])|id_(rsa|ed25519|ecdsa|dsa)\b/, "uma chave SSH"],
   [/(^|[\s;&|])security\s+(find|dump|export)|Library\/Keychains/, "o Keychain"],
@@ -74,11 +279,15 @@ const QUAL_CREDENCIAL: readonly (readonly [RegExp, string])[] = [
   [/(^|[\s"'=/:~])\.claude\/\.credentials\.json(\/|$|[\s"'])/, "o login do Claude"],
   [/(^|[\s"'=/:~])\.codex\/auth\.json(\/|$|[\s"'])/, "o login do Codex"],
   [CHAVE_DO_NOD, "a chave do nod nesta máquina"],
+  [/(^|[\s;&|"'(/])(git(\.exe)?(\s+(-c\s+\S+|-C\s+\S+|--?[\w-]+(=\S*)?))*\s+credential(-manager(-core)?)?(\.exe)?\s+(fill|get)\b|git-credential-manager(-core)?(\.exe)?["']?\s+get\b)/i, "o token do Git"],
+  [/(^|[\s"'=/:~])github~\d+(\/|$|[\s"'])/i, "o token do GitHub"],
+  [COFRE_DE_CREDENCIAIS, "o cofre de credenciais do Windows"],
 ];
 
 export function qualCredencial(texto: string): string | null {
   if (!tocaCredencial(texto)) return null;
-  for (const [re, nome] of QUAL_CREDENCIAL) if (re.test(texto)) return nome;
+  for (const [re, nome] of QUAL_CREDENCIAL) if (re.test(texto) || new RegExp(re.source, "i").test(barras(texto)) || new RegExp(re.source, "i").test(semAspas(texto))) return nome;
+  if (tocaChaveDoNod(texto)) return "a chave do nod nesta máquina";
   return "uma credencial";
 }
 
@@ -119,45 +328,89 @@ const GH: Record<string, readonly string[]> = {
 const SCRIPTS_DE_VERIFICAR = /^(test|lint|typecheck|check|format:check)(:[\w:-]+)?$/;
 const NPX_DE_VERIFICAR = new Set(["vitest", "jest", "tsc", "eslint", "prettier", "biome"]);
 
-type Token = { texto: string; operador: boolean };
+/**
+ * `abre`/`fecha`: quantos `(` no começo e `)` no fim da palavra estavam fora de aspas e sem `\` (revisão 22 do PR #642,
+ * bloqueante 1): só esses abrem e fecham um subshell; `"("`, `echo ")"` e `"fix(x)"` são texto.
+ */
+type Token = { texto: string; operador: boolean; abre?: number; fecha?: number };
 
 /**
  * Quebra o comando em palavras e operadores respeitando aspas. Devolve null quando algo exige o shell inteiro:
  * substituição de comando (`$(…)`, crase, `<(…)`) — inclusive dentro de aspas duplas, onde ela também roda.
  */
-export function tokenizar(comando: string): Token[] | null {
+export function tokenizar(comando: string, semComentario = false): Token[] | null {
   const tokens: Token[] = [];
   let atual = "";
   let temAtual = false;
+  let abre = 0;
+  let soParenteses = true;
+  let fecha = 0;
+  // Revisão 23 do PR #642 (alto 2): o `(` no meio da palavra (o array `a=(1 2)`, o `@(…)` do PowerShell) não abre
+  // subshell, e o `)` que o fecha também não fecha.
+  let internos = 0;
   const fechar = () => {
-    if (temAtual) tokens.push({ texto: atual, operador: false });
+    if (temAtual) tokens.push({ texto: atual, operador: false, abre, fecha });
     atual = "";
     temAtual = false;
+    abre = 0;
+    soParenteses = true;
+    fecha = 0;
   };
+  const citado = () => { soParenteses = false; fecha = 0; };
   for (let i = 0; i < comando.length; i++) {
     const c = comando[i]!;
     const prox = comando[i + 1] ?? "";
+    // Revisão 25 do PR #642 (médio 1): com `semComentario` (a cerca do git), o `#` no começo de uma palavra comenta até
+    // o fim da linha, como no bash e no PowerShell (no cmd ele é texto). `a#b`, `$#` e `"#"` não comentam.
+    // Revisão 26 (altos 1 e 2): só depois de espaço, quebra de linha ou `;&|(` — não depois do `\r` solto (no bash ele é
+    // parte da palavra: `true\r# ; git …` roda o git) nem do `<` (`<# … #>` é o comentário de bloco do PowerShell, e o
+    // que vem depois roda). O comentário acaba no `\n` ou no `\r` (o PowerShell termina a linha nele).
+    const antes = i === 0 ? "" : comando[i - 1]!;
+    // O `<# … #>` some inteiro (no bash ele vira `< #… > palavra` e a palavra seguinte deixaria de ser o programa); sem o
+    // `#>`, falha fechada.
+    if (semComentario && c === "<" && prox === "#" && !temAtual) { const fim = comando.indexOf("#>", i + 2); if (fim < 0) return null; fechar(); i = fim + 1; continue; }
+    if (semComentario && c === "#" && ((!temAtual && (antes === "" || " \t\n;&|(".includes(antes))) || (antes === ")" && fecha > 0))) {
+      fechar();
+      // Revisão 27: o `\r` solto no comentário acaba a linha no PowerShell e não no bash — sem saber quem lê, falha fechada.
+      const m = /\r\n|\r|\n/.exec(comando.slice(i));
+      if (m?.[0] === "\r") return null;
+      i = (m ? i + m.index : comando.length) - 1;
+      continue;
+    }
     if (c === "'") {
       const fim = comando.indexOf("'", i + 1);
       if (fim < 0) return null;
       atual += comando.slice(i + 1, fim);
       temAtual = true;
+      citado();
       i = fim;
       continue;
     }
     if (c === '"') {
       let j = i + 1;
       for (; j < comando.length && comando[j] !== '"'; j++) {
-        if (comando[j] === "\\") { atual += comando[j + 1] ?? ""; j++; continue; }
+        // ADA-11 (ADR-147): como no bash, dentro de aspas duplas a `\\` só escapa `$`, `` ` ``, `"`, `\\` e a quebra de
+        // linha; nas outras fica (`"C:\\Users\\bia"` chega ao git com as barras, e a cerca as confere).
+        if (comando[j] === "\\") {
+          const n = comando[j + 1] ?? "";
+          // Revisão 24 do PR #642 (alto 1): a `\\` com a quebra de linha só continua a linha (some), como no bash.
+          atual += n === "\n" ? "" : "$`\"\\".includes(n) && n !== "" ? n : `\\${n}`;
+          j++;
+          continue;
+        }
         if (comando[j] === "`" || (comando[j] === "$" && comando[j + 1] === "(")) return null;
         atual += comando[j];
       }
       if (j >= comando.length) return null;
       temAtual = true;
+      citado();
       i = j;
       continue;
     }
-    if (c === "\\") { atual += prox; temAtual = true; i++; continue; }
+    // Revisão 24 do PR #642 (alto 1): fora de aspas, a `\\` com a quebra de linha também some. Revisão 27 (bloqueante):
+    // só com o `\\n` — no bash a `\\` antes do `\\r\\n` escapa o `\\r` e o `\\n` acaba o comando.
+    if (c === "\\" && prox === "\n") { i += 1; continue; }
+    if (c === "\\") { atual += prox; temAtual = true; citado(); i++; continue; }
     if (c === "`" || (c === "$" && prox === "(") || ((c === "<" || c === ">") && prox === "(")) return null;
     if (c === " " || c === "\t") { fechar(); continue; }
     if (c === "\n" || c === "\r") { fechar(); tokens.push({ texto: ";", operador: true }); continue; }
@@ -175,6 +428,10 @@ export function tokenizar(comando: string): Token[] | null {
       tokens.push({ texto: c, operador: true });
       continue;
     }
+    if (c === "(" && soParenteses) abre += 1;
+    else { soParenteses = false; if (c === "(") internos += 1; }
+    if (c === ")" && internos > 0) { internos -= 1; fecha = 0; }
+    else fecha = c === ")" ? fecha + 1 : 0;
     atual += c;
     temAtual = true;
   }

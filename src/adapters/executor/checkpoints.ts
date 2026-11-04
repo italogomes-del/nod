@@ -12,6 +12,7 @@ import { pedacoDeRef } from "../../domain/guardado.ts";
 import { comparavel } from "../../domain/git-na-pasta-do-bot.ts";
 import { tocaCredencial } from "../../domain/comando.ts";
 import { log } from "../../obs/log.ts";
+import { resolverBinario, type Disco } from "./plataforma.ts";
 
 /**
  * definido em 2026-10-28 (NOD-54, ADR-134): o checkpoint de arquivos do turno, na máquina dele. Um git sombra BARE por bot
@@ -42,12 +43,26 @@ function ambiente(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
   return { ...env, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null", GIT_TERMINAL_PROMPT: "0", ...extra };
 }
 
+/**
+ * ADA-11 (ADR-147), revisão do PR #642 (M3): no Windows o CreateProcess procura `git` na pasta atual antes do PATH, e a
+ * pasta do turno é do modelo. O git sombra roda pelo caminho absoluto do `git.exe` do PATH (resolvido uma vez).
+ */
+export function binarioDoGit(o: { plataforma?: NodeJS.Platform; env?: Readonly<Record<string, string | undefined>>; disco?: Disco } = {}): string {
+  try {
+    return resolverBinario("git", { ...o, soExe: true })?.bin ?? "git";
+  } catch {
+    return "git";
+  }
+}
+let gitResolvido: string | undefined;
+
 type Saida = { codigo: number; stdout: Buffer };
 function git(args: string[], o: { repo?: string; stdin?: Buffer | string; env?: Record<string, string>; ate?: number } = {}): Promise<Saida> {
   return new Promise((resolve, reject) => {
     const resta = o.ate === undefined ? 0 : o.ate - Date.now();
     if (o.ate !== undefined && resta <= 0) return reject(new TempoEsgotado());
-    const filho = spawn("git", [...(o.repo ? [`--git-dir=${o.repo}`] : []), "-c", "gc.auto=0", "-c", "core.hooksPath=/dev/null", ...args], {
+    gitResolvido ??= binarioDoGit();
+    const filho = spawn(gitResolvido, [...(o.repo ? [`--git-dir=${o.repo}`] : []), "-c", "gc.auto=0", "-c", "core.hooksPath=/dev/null", ...args], {
       env: ambiente(o.env), stdio: ["pipe", "pipe", "ignore"], ...(o.ate !== undefined ? { timeout: resta } : {}),
     });
     const partes: Buffer[] = [];
@@ -265,7 +280,7 @@ async function fotografarArquivos(repo: string, home: string, abs: readonly stri
  * Credencial pelo caminho inteiro OU pelo nome: a cerca do comando exige o nome de `*.key`/`*.pem` depois de um separador
  * e sem acento no caminho, e `~/nod/Léo/certs/server.key` escaparia (revisão 11, M3).
  */
-const ehCredencial = (abs: string): boolean => tocaCredencial(abs) || tocaCredencial(basename(abs)) || CHAVE_PELO_NOME.test(basename(abs));
+const ehCredencial = (abs: string): boolean => tocaCredencial(abs, { windows: process.platform === "win32" }) || tocaCredencial(basename(abs), { windows: process.platform === "win32" }) || CHAVE_PELO_NOME.test(basename(abs));
 /** A chave pelo nome, com qualquer letra, espaço e caixa (`Léo.key`, `server (1).KEY`; revisão 12, M2). */
 const CHAVE_PELO_NOME = /\.(pem|key|p12|pfx)$|^id_(rsa|ed25519|ecdsa|dsa)/iu;
 /**

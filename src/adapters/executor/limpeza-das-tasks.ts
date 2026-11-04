@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 import { link, lstat, readdir, readFile, realpath, rename, rmdir, stat, statfs, unlink, writeFile } from "node:fs/promises";
-import { basename, isAbsolute, join, relative, resolve } from "node:path";
+import { basename, isAbsolute, join, relative, resolve, win32 } from "node:path";
 import type { MotivoPuladaLimpeza, PastaParaLimpar, PonteInterna, RelatoLimpeza } from "../../contracts/ponte.ts";
 import type { LeituraDisco, NivelPressao } from "../../contracts/trabalho.ts";
 import { caminhoDoRemotoLocal, temArquivoEscondidoDoStatus } from "../../domain/clone-refazivel.ts";
@@ -11,6 +11,7 @@ import { classificarIgnorado, motivoDaRecusa, ORFA_PARADA_MS, PASTAS_DA_MAQUINA_
 import { acabaEmMs, comPonto, discoDoStatfs, nivelDoDisco, type PontoDoDisco } from "../../domain/memoria-mac.ts";
 import { log } from "../../obs/log.ts";
 import { caminhoAumentado } from "./caminho.ts";
+import { ehWindows, resolverBinario, type Alvo, type Plataforma } from "./plataforma.ts";
 import { cloneSumiu, guardarEApagar, provaNoRemoto, remotosRefazem, temProcessoVivo, vencerGuardados, type OpcoesGuardar } from "./guardar-antes-de-apagar.ts";
 
 /**
@@ -95,12 +96,33 @@ const TRAVA_ILEGIVEL_VIVA_MS = 30_000;
 /** Segunda revisão do #225: a busca de `.env*` dentro de uma pasta regenerável inteira (`dist/`) para aqui e recusa. */
 const ENV_MAX_PASTAS = 5_000;
 
-export function criarExecutarComando(env: Readonly<Record<string, string | undefined>>, home: string, fundo: readonly string[] = prefixoDeFundo(process.platform, existsSync)): ExecutarComando {
+/**
+ * ADA-11 (ADR-147): no Windows o `CreateProcess` procura o programa na cwd antes do PATH, e a cwd aqui é a worktree do
+ * bot: um `git.exe`/`gh.exe` gravado nela rodaria com os poderes do motor. Lá o programa sai sempre do `resolverBinario`
+ * (PATH absoluto, sem a cwd); o que ele não achar volta como "não achou" (-1), nunca pelo nome solto.
+ */
+export type OpcoesExecutarComando = { plataforma?: Plataforma; resolver?: (nome: string) => Alvo | null };
+
+export function criarExecutarComando(
+  env: Readonly<Record<string, string | undefined>>,
+  home: string,
+  fundo: readonly string[] = prefixoDeFundo(process.platform, existsSync),
+  opcoes: OpcoesExecutarComando = {},
+): ExecutarComando {
+  const plataforma = opcoes.plataforma ?? process.platform;
   const ambiente = { ...env, PATH: caminhoAumentado(env.PATH, home), GIT_TERMINAL_PROMPT: "0", GH_PROMPT_DISABLED: "1", GIT_OPTIONAL_LOCKS: "0" };
+  const acharBinario = opcoes.resolver ?? ((nome: string) => resolverBinario(nome, { env: ambiente, plataforma }));
   return (bin, args, o) =>
     new Promise((resolver) => {
-      const prefixo = o?.fundo === true ? fundo : [];
-      const [programa, ...resto] = [...prefixo, bin, ...args];
+      let alvo: Alvo = { bin, args: [] };
+      if (ehWindows(plataforma)) {
+        let achado: Alvo | null = null;
+        try { achado = acharBinario(bin); } catch { achado = null; }
+        if (achado === null || !win32.isAbsolute(achado.bin)) { resolver({ codigo: -1, stdout: "", stderr: `${bin}: não achado no PATH` }); return; }
+        alvo = achado;
+      }
+      const prefixo = o?.fundo === true && !ehWindows(plataforma) ? fundo : [];
+      const [programa, ...resto] = [...prefixo, alvo.bin, ...alvo.args, ...args];
       execFile(programa!, resto, { cwd: o?.cwd, env: ambiente, timeout: o?.prazoMs ?? PRAZO_CURTO_MS, maxBuffer: 16 * 1024 * 1024, signal: o?.sinal }, (erro, stdout, stderr) => {
         if (!erro) { resolver({ codigo: 0, stdout: String(stdout), stderr: String(stderr) }); return; }
         const e = erro as NodeJS.ErrnoException & { killed?: boolean; code?: unknown };

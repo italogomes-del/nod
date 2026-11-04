@@ -8,8 +8,10 @@ import { caminhosDoPatch, decidirNativa, FRASE_ARQUIVO_DE_CREDENCIAL, FRASE_MCP_
 import { ESPERA_APROVACAO_NO_TURNO_MS, LONGPOLL_APROVACAO_MS, VARIAVEL_CONFIG_HOOK } from "../../shared/constantes.ts";
 import { mainDaVaga } from "./vaga.ts";
 import { guardarOriginal } from "./checkpoints.ts";
-import { caminhoGravado, comparavel } from "../../domain/git-na-pasta-do-bot.ts";
+import { ehWindows, resolverBinario } from "./plataforma.ts";
+import { caminhoDentroDe, caminhoGravado, comparavel } from "../../domain/git-na-pasta-do-bot.ts";
 import { ehPastaDeFrente } from "../../domain/checkpoints.ts";
+import { RESPOSTA_DO_AUTOTESTE } from "./plataforma.ts";
 
 /**
  * Hook PreToolUse do nod (ADR-052): o Claude Code o chama ANTES de cada ferramenta nativa do turno, e é ele
@@ -79,21 +81,24 @@ export type Fila = (comando: string, cwd: string | null) => string | null;
 /** As nativas que gravam arquivo (as que o hook guarda antes). */
 const GRAVAM = new Set(["Write", "Edit", "MultiEdit", "NotebookEdit", "apply_patch"]);
 
-function foraDaFoto(caminho: string, pasta: { pastaDoBot: string; daTask: boolean }): boolean {
-  const c = comparavel(caminho);
-  const raiz = comparavel(pasta.pastaDoBot);
-  if (!c.startsWith(`${raiz}/`)) return true;
+function foraDaFoto(caminho: string, pasta: { pastaDoBot: string; daTask: boolean; windows?: boolean }): boolean {
+  // ADA-11 (ADR-147): no Windows `C:\\Users\\…` e `c:/users/…` são a mesma pasta; compara normalizado.
+  const w = pasta.windows === true;
+  const norm = (x: string) => comparavel(w ? x.replaceAll("\\", "/").replace(/\/+$/, "") : x);
+  const c = norm(caminho);
+  const raiz = norm(pasta.pastaDoBot);
+  if (c === raiz || !caminhoDentroDe(pasta.pastaDoBot, caminho, w)) return true;
   // A raiz do bot é a pasta que não é de task (revisão 8, M2: no Codex a pasta vem real, e `~/nod` pode ser um link).
   if (pasta.daTask) return false;
   return ehPastaDeFrente(c.slice(raiz.length + 1).split("/")[0] ?? "");
 }
 
-export async function decidirHook(evento: unknown, confirmar: Confirmar, pastas?: Pick<ConfigHook, "pastaDoBot" | "home" | "daTask" | "mcpDaPessoa">, fila?: Fila, guardar?: Guardar): Promise<SaidaHook> {
+export async function decidirHook(evento: unknown, confirmar: Confirmar, pastas?: Pick<ConfigHook, "pastaDoBot" | "home" | "daTask" | "mcpDaPessoa"> & { plataforma?: NodeJS.Platform }, fila?: Fila, guardar?: Guardar): Promise<SaidaHook> {
   const e = (typeof evento === "object" && evento !== null ? evento : {}) as { tool_name?: unknown; tool_input?: unknown; cwd?: unknown };
   const ferramenta = typeof e.tool_name === "string" ? e.tool_name : "";
   const entrada = typeof e.tool_input === "object" && e.tool_input !== null ? (e.tool_input as Record<string, unknown>) : {};
   // ADR-065: o `cwd` do evento é a pasta em que o Bash está agora (o Claude Code a mantém entre comandos).
-  const pasta = pastas?.pastaDoBot && pastas.home ? { cwd: typeof e.cwd === "string" ? e.cwd : null, pastaDoBot: pastas.pastaDoBot, home: pastas.home, daTask: pastas.daTask === true } : undefined;
+  const pasta = pastas?.pastaDoBot && pastas.home ? { cwd: typeof e.cwd === "string" ? e.cwd : null, pastaDoBot: pastas.pastaDoBot, home: pastas.home, daTask: pastas.daTask === true, windows: (pastas.plataforma ?? process.platform) === "win32" } : undefined;
   const d = decidirNativa({ ferramenta, entrada, ...(pasta ? { pasta } : {}), ...(pastas?.mcpDaPessoa ? { mcpDaPessoa: true } : {}) });
   if (!d.permitir) return saida(false, d.motivo);
   // MCP do nod: o proxy já decide e registra; o hook não confirma de novo no servidor (a rota só aceita nativas).
@@ -153,7 +158,10 @@ export function filaDaMaquina(
 function repositorioDoGit(cwd: string | null): string | null {
   if (!cwd) return null;
   try {
-    return repositorioDaOrigem(execFileSync("git", ["-C", cwd, "config", "--get", "remote.origin.url"], { encoding: "utf8", timeout: 2_000, stdio: ["ignore", "pipe", "ignore"] }));
+    // ADR-147 (revisão do plano, item 4): no Windows o git pelo caminho absoluto, senão um git.exe na worktree rodaria.
+    const git = ehWindows() ? resolverBinario("git", { soExe: true })?.bin : "git";
+    if (!git) return null;
+    return repositorioDaOrigem(execFileSync(git, ["-C", cwd, "config", "--get", "remote.origin.url"], { encoding: "utf8", timeout: 2_000, stdio: ["ignore", "pipe", "ignore"], windowsHide: true }));
   } catch {
     return null;
   }
@@ -317,9 +325,14 @@ export const avisoNoStderr = (evento: string, dados: { turno_id: string; erro: s
   process.stderr.write(`${JSON.stringify({ nivel: "aviso", evento, ...dados })}\n`);
 };
 
+
 export async function main(): Promise<void> {
   // ADR-097: o nod-vaga mora neste mesmo script (o motor e o app já o instalam): `… hook-nativas.mjs vaga pegar …`.
   if (process.argv[2] === "vaga") return mainDaVaga(process.argv.slice(3));
+  if (process.argv[2] === "autoteste") {
+    process.stdout.write(`${RESPOSTA_DO_AUTOTESTE}\n`);
+    return;
+  }
   let resposta: SaidaHook;
   let cfg: ConfigHook | null = null;
   let evento: unknown = null;

@@ -1,5 +1,7 @@
 # ADR-097 — Agentes entram, trabalho pesado faz fila
 
+> Emendada pela [ADR-147](adr-147-motor-no-windows-nativo.md): a fila do forno fica desligada no Windows.
+
 Status: proposta, com as fases 0 e 1 em produção desde 12/10 (ver "Entrega") · Data: 2026-10-11 · Emenda a [ADR-085](adr-085-uso-do-mac-segura-trabalho-novo.md) (o portão que
 segura trabalho novo) e a [ADR-091](adr-091-regua-do-processador-cpu-e-fila.md) (a régua do processador). Plano de
 entrega em [plano-agentes-e-trabalho-pesado.md](../plano-agentes-e-trabalho-pesado.md); telas em

@@ -1,5 +1,6 @@
-import { existsSync, statSync } from "node:fs";
+import { statSync } from "node:fs";
 import { resolve, sep } from "node:path";
+import { shellDoNod } from "./plataforma.ts";
 import type { EsperaParaRodar, RelatoEspera, RespostaRelatoEspera } from "../../contracts/espera.ts";
 import type { PonteInterna } from "../../contracts/ponte.ts";
 import { SAIDA_ESPERA_MAX, ultimasLinhas } from "../../domain/espera-comando.ts";
@@ -54,8 +55,9 @@ export function pastaDaEspera(home: string, pasta: string | null): string | null
 }
 
 /** O shell do comando: o bash da máquina (o do Bash do bot), senão o sh. */
-function shellPadrao(): string {
-  return ["/bin/bash", "/usr/bin/bash"].find((b) => existsSync(b)) ?? "/bin/sh";
+function shellPadrao(): { bin: string; args(script: string): string[] } {
+  // ADR-147: no Windows o Git Bash (as esperas são escritas em bash); sem ele, o PowerShell.
+  return shellDoNod();
 }
 
 export type OpcoesEsperas = {
@@ -79,7 +81,7 @@ export type Esperas = { parar(): void; passada(): Promise<void> };
  */
 export function iniciarEsperas(o: OpcoesEsperas): Esperas {
   const iniciar = o.iniciar ?? iniciarProcesso;
-  const shell = o.shell ?? shellPadrao();
+  const shell = o.shell !== undefined ? { bin: o.shell, args: (c: string) => ["-c", c] } : shellPadrao();
   let parado = false;
   let ocupado = false;
 
@@ -119,7 +121,7 @@ export function iniciarEsperas(o: OpcoesEsperas): Esperas {
       cauda += texto;
       if (cauda.length > CAUDA_MAX) cauda = cauda.slice(cauda.length - CAUDA_MAX);
     };
-    const proc = iniciar({ bin: shell, args: ["-c", e.comando], env: o.env, cwd, stdin: "ignore", aoLinha: (l) => guardar(`${l}\n`), aoStderr: guardar });
+    const proc = iniciar({ bin: shell.bin, args: shell.args(e.comando), env: o.env, cwd, stdin: "ignore", aoLinha: (l) => guardar(`${l}\n`), aoStderr: guardar });
     const viva: Viva = { dono: o.pessoaId, proc, iniciouConfirmado: false };
     vivas.set(e.id, viva);
     log("info", "espera_comecou", { espera_id: e.id, relancada: e.iniciada });

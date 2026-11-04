@@ -1,5 +1,7 @@
 # ADR-090 — O motor numa máquina Linux da pessoa: "traga sua VM"
 
+> Emendada pela [ADR-147](adr-147-motor-no-windows-nativo.md): "uma máquina Linux" vira "uma máquina Linux ou Windows".
+
 **Status** aceito · decidido e implementado em 2026-10-09 (decisões do Marlon na conversa de estudo; aula em
 https://claude.ai/artifact/9s7Evq2HLyixCeMncVSnaV) · plano em [docs/plano-motor-na-vm.md](../plano-motor-na-vm.md)
 

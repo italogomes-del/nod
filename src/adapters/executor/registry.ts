@@ -1,9 +1,10 @@
 import { delimiter, join } from "node:path";
 import { HARNESS_LEGADO, HARNESSES } from "../../contracts/harness.ts";
 import type { Inventario } from "../../contracts/inventario.ts";
-import { montarAmbiente } from "../../domain/ambiente-executor.ts";
+import { montarAmbiente, comPath } from "../../domain/ambiente-executor.ts";
 import { log } from "../../obs/log.ts";
-import { camadasDoPath, expandirTil, homeDaPessoa, lerPathDoShell } from "./caminho.ts";
+import { camadasDoPath, diretoriosExtrasDoWindows, expandirTil, homeDaPessoa, lerPathDoShell } from "./caminho.ts";
+import { variavel } from "./plataforma.ts";
 import type { ConfigDriver, Driver, IdDriver, Instance, Registry } from "./spi.ts";
 
 /**
@@ -40,13 +41,16 @@ export function nodHome(env: EnvRegistry, home: string): string {
 export async function configDosDrivers(env: EnvRegistry, o: OpcoesRegistry = {}): Promise<ConfigDriver> {
   const home = o.home ?? homeDaPessoa(env);
   // revisto em 2026-10-09: o PATH do shell não segura mais o boot — espera pouco e, se não veio, a próxima config o traz.
-  const pathLogin = o.shellDeLogin === false ? null : await lerPathDoShell(env.SHELL, o.esperaShellMs);
+  // ADR-147: o Windows não tem shell de login nem nvm; as pastas fixas são as dele.
+  const windows = process.platform === "win32";
+  const pathLogin = o.shellDeLogin === false || windows ? null : await lerPathDoShell(env.SHELL, o.esperaShellMs);
   const limpo = montarAmbiente("local", env);
-  const camadas = camadasDoPath(env.PATH, home, pathLogin);
+  const camadas = camadasDoPath(windows ? variavel(env, "PATH") : env.PATH, home, pathLogin, windows ? { extras: diretoriosExtrasDoWindows(env), nvm: false } : {});
   return {
     bin: env.NOD_CLAUDE_BIN ? expandirTil(env.NOD_CLAUDE_BIN, home) : undefined,
     bins: { "codex-cli": env.NOD_CODEX_BIN ? expandirTil(env.NOD_CODEX_BIN, home) : undefined },
-    env: { ...limpo, PATH: camadas.map((c) => c.dir).join(delimiter), HOME: limpo.HOME ?? home },
+    // ADR-147: no Windows o `Path` herdado e o `PATH` montado são a mesma variável; fica só um.
+    env: { ...comPath(limpo, camadas.map((c) => c.dir).join(delimiter), windows), HOME: limpo.HOME ?? home },
     camadas,
     cwdBase: join(nodHome(env, home), "turnos"),
   };

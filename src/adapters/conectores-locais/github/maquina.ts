@@ -20,7 +20,7 @@ type Ambiente = Readonly<Record<string, string | undefined>>;
  * pelado e o gh mora no Homebrew) e HOME/USER da pessoa, que o Keychain exige, quando faltarem.
  */
 export function ambienteDoGh(ambiente: Ambiente): Record<string, string> {
-  const env = montarAmbienteConectorNativo(ambiente);
+  const env = montarAmbienteConectorNativo(ambiente, process.platform);
   const home = homeDaPessoa(ambiente);
   env.PATH = caminhoAumentado(ambiente.PATH, home);
   env.HOME ??= home;

@@ -10,8 +10,8 @@ export type { CotaNosTrabalhos, CotaNoTrabalho } from "./cota.ts";
 export const PAPEIS_MAQUINA = ["motor", "computador"] as const;
 export type PapelMaquina = (typeof PAPEIS_MAQUINA)[number];
 
-/** ADR-090: as plataformas em que o motor roda — o app do Mac e o motor sem janela numa máquina Linux. */
-export const PLATAFORMAS_MAQUINA = ["darwin", "linux"] as const;
+/** ADR-090: as plataformas em que o motor roda — o app do Mac e o motor sem janela numa máquina Linux; ADR-147: e no Windows. */
+export const PLATAFORMAS_MAQUINA = ["darwin", "linux", "win32"] as const;
 export type PlataformaMaquina = (typeof PLATAFORMAS_MAQUINA)[number];
 
 /**

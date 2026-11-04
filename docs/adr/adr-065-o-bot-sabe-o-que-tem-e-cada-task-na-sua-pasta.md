@@ -1,5 +1,7 @@
 # ADR-065 — O bot sabe o que tem neste turno, e cada task na sua pasta
 
+> Emendada pela [ADR-147](adr-147-motor-no-windows-nativo.md): a cerca do git no Windows.
+
 Status: aceito, revista pela [ADR-066](adr-066-o-bot-tem-o-que-voce-deu-o-modo-decide.md) no mesmo dia (o terminal
 vale em todo modo, então a linha "Terminal:" só aparece no peer legado; os itens 5 e 7 abaixo foram feitos lá);
 emendada pela [ADR-088](adr-088-limpeza-das-pastas-de-task.md) em 2026-10-09 (o `worktree add` também é cercado: a

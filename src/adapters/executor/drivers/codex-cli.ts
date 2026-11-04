@@ -23,6 +23,22 @@ import { rodarChatCodex, type SessaoChatCodex, type TerminalChatCodex } from "./
 import { rodarLigacaoCodex } from "./codex-ligacao.ts";
 import { capacidadesDe } from "../../../domain/harness.ts";
 
+/**
+ * ADR-103: o kit do terminal do Codex nesta máquina (o hook do nod), ou null. ADA-11 (ADR-147): o Codex falha aberto se
+ * o hook não rodar, então no Windows ele só liga com `codexTerminalNoWindows` (NOD_CODEX_TERMINAL_WINDOWS=1, depois que a
+ * sonda provar o PreToolUse lá); e a fila do forno (ps + $$) fica desligada no win32.
+ */
+export function terminalDoCodex(lig: Pick<LigacaoClaudeCli, "hookPath" | "nodePath" | "electronComoNode" | "filaDoForno" | "plataforma" | "codexTerminalNoWindows">, home: string, cwdBase: string): TerminalChatCodex | null {
+  if (!lig.hookPath) return null;
+  const windows = (lig.plataforma ?? process.platform) === "win32";
+  if (windows && lig.codexTerminalNoWindows !== true) return null;
+  const nodePath = lig.nodePath ?? process.execPath;
+  return {
+    hookPath: lig.hookPath, nodePath, electronComoNode: lig.electronComoNode, home, windows,
+    ...(lig.filaDoForno === false || windows ? {} : { vaga: { dir: pastaDaFila(cwdBase), invocar: invocarDoHook({ nodePath, hookPath: lig.hookPath, electronComoNode: lig.electronComoNode }) } }),
+  };
+}
+
 export { configMcpCodex } from "./codex-comum.ts";
 
 export const FLAGS_CODEX = ["--json", "--ephemeral", "--ignore-user-config", "--ignore-rules", "--strict-config", "--sandbox", "--skip-git-repo-check"] as const;
@@ -132,10 +148,7 @@ export function criarCodexCliDriver(lig: LigacaoClaudeCli): Driver {
        * ADR-103: o kit do terminal no Codex precisa do script do hook do nod nesta máquina (o app e o motor o instalam;
        * o servidor de desenvolvimento também). Sem ele, o chat roda isolado e o prompt diz que não há terminal.
        */
-      const terminalDaMaquina = (): TerminalChatCodex | null => lig.hookPath
-        ? { hookPath: lig.hookPath, nodePath: lig.nodePath ?? process.execPath, electronComoNode: lig.electronComoNode, home,
-            ...(lig.filaDoForno === false ? {} : { vaga: { dir: pastaDaFila(cfg.cwdBase), invocar: invocarDoHook({ nodePath: lig.nodePath ?? process.execPath, hookPath: lig.hookPath, electronComoNode: lig.electronComoNode }) } }) }
-        : null;
+      const terminalDaMaquina = (): TerminalChatCodex | null => terminalDoCodex(lig, home, cfg.cwdBase);
       // ADR-076: piso do laço de voz = `codex app-server --help` responde; as flags listadas ali decidem as opcionais.
       let flagsAppServer: { bin: string; flags: string[] | null } | null = null;
       async function sondarAppServer(b: string): Promise<string[] | null> {

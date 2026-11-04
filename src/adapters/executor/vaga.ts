@@ -1,7 +1,7 @@
 import { execFile, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile, rename, rm, rmdir, stat, writeFile } from "node:fs/promises";
-import { getPriority, platform, setPriority } from "node:os";
+import { freemem, getPriority, platform, setPriority } from "node:os";
 import { join } from "node:path";
 import {
   avisoDeEspera, cabe, comPico, estimativaMb, faltouMemoria, lerArvoreDoPs, livreDoMeminfo, livreDoVmStat, memoriaDaArvoreMb, podarHistorico,
@@ -86,6 +86,8 @@ export async function livreDaMaquinaMb(): Promise<number | null> {
   try {
     if (platform() === "linux") return livreDoMeminfo(await readFile("/proc/meminfo", "utf8"));
     if (platform() === "darwin") return livreDoVmStat(await rodar("/usr/bin/vm_stat", []));
+    // ADA-11 (ADR-147): no Windows a memória livre do sistema (a fila fica desligada lá na Fase 1, mas a medida não quebra).
+    if (platform() === "win32") return Math.floor(freemem() / 1048576);
   } catch {
     return null;
   }
@@ -260,7 +262,7 @@ export function criarVaga(deps: DepsDaVaga) {
   function soltarVigiaPadrao(id: string): number | null {
     const script = process.argv[1];
     if (!script) return null;
-    const filho = spawn(process.execPath, [script, "vaga", "vigiar", id, deps.dir], { detached: true, stdio: "ignore", env: process.env });
+    const filho = spawn(process.execPath, [script, "vaga", "vigiar", id, deps.dir], { detached: true, stdio: "ignore", env: process.env, windowsHide: true });
     filho.unref();
     return filho.pid ?? null;
   }

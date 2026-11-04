@@ -1,5 +1,7 @@
 # ADR-083 — Trabalhos em paralelo: a conversa coordena, cada trabalho longo roda à parte
 
+> Emendada pela [ADR-147](adr-147-motor-no-windows-nativo.md): no Windows o grupo de processo vira a árvore vista.
+
 Status: aceito · Data: 2026-10-07 · Emenda a [ADR-010](adr-010-fila-por-conversa-no-postgres-prazo-absoluto.md) (emenda 13,
 "agente serial") e a [ADR-067](adr-067-sessao-viva-o-turno-segue-ate-o-bot-terminar.md) (mensagem no meio do turno).
 Decisões do Marlon em 2026-10-07 (épico #188, protótipo na página "Chat limpo" do canvas do Nod).

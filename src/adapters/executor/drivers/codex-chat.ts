@@ -27,6 +27,7 @@ import { ehPastaDeTask, NATIVA_MCP_DA_PESSOA } from "../../../domain/nativas.ts"
 import { redigirECortar } from "../../../domain/segredos.ts";
 import { causaDoCodexChat, classificarSessao, reduzirSinais, SINAIS_ZERADOS, textoDaRodada } from "../../../domain/stream-json.ts";
 import { log } from "../../../obs/log.ts";
+import { pastaValidaNoWindows } from "../../../domain/caminhos.ts";
 import { ESPERA_APROVACAO_NO_TURNO_MS, VARIAVEL_CONFIG_HOOK } from "../../../shared/constantes.ts";
 import { baixarAnexos, entradaCodex } from "../anexos-turno.ts";
 import type { ConfigHook } from "../hook-nativas.ts";
@@ -95,7 +96,7 @@ type ItemDaFila = { texto: string; ids: string[] };
  * ADR-103: o que a máquina tem para o kit do terminal no Codex — o script do hook do nod, o node que o roda, a home (a
  * pasta do bot é ~/nod/<bot>) e a fila do forno (ADR-097). Ausente = esta máquina não liga o terminal no Codex.
  */
-export type TerminalChatCodex = { hookPath: string; nodePath: string; electronComoNode?: boolean; home: string; vaga?: { dir: string; invocar: string } };
+export type TerminalChatCodex = { hookPath: string; nodePath: string; electronComoNode?: boolean; home: string; vaga?: { dir: string; invocar: string }; windows?: boolean };
 
 export type ContextoChatCodex = {
   plano: PlanoTurno;
@@ -145,7 +146,10 @@ export async function rodarChatCodex(c: ContextoChatCodex): Promise<ResultadoTur
 async function rodarUmaVez(c: ContextoChatCodex, comTerminal: boolean): Promise<ResultadoTurno | null | "sem_hook"> {
   const { plano, sinks } = c;
   const pastas = plano.workspacePastas ?? null;
-  const terminal = comTerminal ? c.terminal! : null;
+  // ADA-11 (ADR-147): no Windows, a pasta com nome que o NTFS não aceita deixa o turno sem o terminal (falha fechada).
+  const pastaInvalida = comTerminal && c.terminal?.windows === true && !pastaValidaNoWindows(plano.pastaDoBot ?? "");
+  if (pastaInvalida) log("aviso", "pasta_invalida_no_windows", { turno_id: plano.turnoId });
+  const terminal = comTerminal && !pastaInvalida ? c.terminal! : null;
   // ADR-103: com o terminal, a pasta do bot (ou a da task); sem pasta, o cwd estável por bot (NOD-188); com pasta, a ativa.
   const pastaBot = terminal ? join(terminal.home, "nod", plano.pastaDoBot!) : null;
   const pasta = pastaBot ?? pastas?.ativa ?? join(c.cwdBase, `texto-${plano.agenteId}`);
@@ -180,7 +184,7 @@ async function rodarUmaVez(c: ContextoChatCodex, comTerminal: boolean): Promise<
       const caminhoConfig = join(dir, "hook-nativas.json");
       await writeFile(caminhoConfig, JSON.stringify(config), { mode: 0o600 });
       env = { ...c.env, [VARIAVEL_CONFIG_HOOK]: caminhoConfig };
-      comandoHook = comandoHookCodex({ nodePath: terminal.nodePath, hookPath: terminal.hookPath, electronComoNode: terminal.electronComoNode });
+      comandoHook = comandoHookCodex({ nodePath: terminal.nodePath, hookPath: terminal.hookPath, electronComoNode: terminal.electronComoNode, windows: terminal.windows === true });
       argTerminal = { hooks: hooksDoTerminalCodex({ comando: comandoHook, timeoutS: TIMEOUT_HOOK_CODEX_S }), argMcp: argMcpCodex(plano, lig, { recusadas: c.recusadas, mcpDaPessoa }), mcpDaPessoa };
     }
     const args = argsAppServer({ configMcp, flagsNoHelp: c.flagsNoHelp, recusadas: c.recusadas, sandbox, ...(argTerminal ? { terminal: argTerminal } : {}) });

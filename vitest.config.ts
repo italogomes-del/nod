@@ -55,6 +55,8 @@ export default defineConfig({
     maxWorkers: MAX_WORKERS,
     projects: [
       { test: { ...raiz, name: "unit", include: ["tests/unit/**/*.test.ts"] } },
+      // ADA-11 (ADR-147): o smoke do Windows de verdade; só roda no job `windows` da CI (fora do win32 os testes pulam).
+      { test: { ...raiz, name: "windows", include: ["tests/windows/**/*.test.ts"] } },
       { test: { ...raiz, ...BANCO, name: "integration", include: ["tests/integration/**/*.test.ts"] } },
       { test: { ...raiz, ...BANCO, name: "conformidade", include: ["tests/conformidade/**/*.test.ts"] } },
       {

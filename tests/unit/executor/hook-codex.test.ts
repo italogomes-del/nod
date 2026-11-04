@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { argMcpCodex, comandoHookCodex, hooksDoTerminalCodex, MATCHER_HOOK_CODEX, OVERRIDES_TERMINAL_CODEX } from "../../../src/adapters/executor/drivers/codex-comum.ts";
 import { PRAZO_HOOK_CODEX_MS, TIMEOUT_HOOK_CODEX_S } from "../../../src/adapters/executor/drivers/codex-chat.ts";
 import { argsAppServer } from "../../../src/adapters/executor/drivers/codex-ligacao.ts";
+import { terminalDoCodex } from "../../../src/adapters/executor/drivers/codex-cli.ts";
 import { AINDA_ESPERANDO, decidirComPrazo, decidirHook, textoDaSaida, type Confirmar, type SaidaHook } from "../../../src/adapters/executor/hook-nativas.ts";
 import { NATIVA_MCP_DA_PESSOA } from "../../../src/domain/nativas.ts";
 import { ESPERA_APROVACAO_NO_TURNO_MS } from "../../../src/shared/constantes.ts";
@@ -50,6 +51,20 @@ describe("ADR-103: o hook do nod no Codex", () => {
     expect(hooks).toBe(`hooks={PreToolUse=[{matcher=${JSON.stringify(MATCHER_HOOK_CODEX)}, hooks=[{type="command", command="'/opt/node' '/h.mjs'", timeout=480}]}]}`);
     for (const nome of ["Bash", "apply_patch", "view_image", "spawn_agent", "mcp__nod__lembrar", "mcp__linear__x"]) expect(new RegExp(MATCHER_HOOK_CODEX).test(nome), nome).toBe(true);
     for (const nome of ["update_plan", "BashX", "web_search"]) expect(new RegExp(MATCHER_HOOK_CODEX).test(nome), nome).toBe(false);
+  });
+
+  it("ADA-11 (ADR-147): no Windows o terminal do Codex só liga com a flag, sem a fila do forno, e o comando usa aspas duplas e /", () => {
+    const lig = { hookPath: "C:\\nod\\hook-nativas.mjs", nodePath: "C:\\node\\node.exe" };
+    expect(terminalDoCodex({ ...lig, plataforma: "win32" }, "C:\\h", "C:\\b")).toBeNull();
+    expect(terminalDoCodex({ ...lig, plataforma: "win32", codexTerminalNoWindows: false }, "C:\\h", "C:\\b")).toBeNull();
+    const win = terminalDoCodex({ ...lig, plataforma: "win32", codexTerminalNoWindows: true }, "C:\\h", "C:\\b");
+    expect(win).toMatchObject({ windows: true, hookPath: lig.hookPath });
+    expect(win?.vaga).toBeUndefined();
+    const linux = terminalDoCodex({ hookPath: "/h.mjs", nodePath: "/opt/node", plataforma: "linux" }, "/home/n", "/base");
+    expect(linux?.windows).toBe(false);
+    expect(linux?.vaga?.dir).toBeTruthy();
+    expect(terminalDoCodex({ plataforma: "linux" }, "/home/n", "/base")).toBeNull();
+    expect(comandoHookCodex({ nodePath: "C:\\Program Files\\nodejs\\node.exe", hookPath: "C:\\nod\\hook-nativas.mjs", windows: true })).toBe('"C:/Program Files/nodejs/node.exe" "C:/nod/hook-nativas.mjs"');
   });
 
   it("argsAppServer com o terminal: sem sandbox, o hook, o navegador desligado, e o MCP do nod junto dos da pessoa só nos modos dela", () => {

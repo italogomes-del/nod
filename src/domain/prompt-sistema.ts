@@ -9,6 +9,7 @@ import type { Profundidade } from "../contracts/turno.ts";
 import type { OrigemTrabalho } from "../contracts/trabalho.ts";
 import type { FormaTrabalho } from "../contracts/frente.ts";
 import type { PlataformaMaquina } from "../contracts/ponte.ts";
+import { ehMaquinaDoMotor, noSistemaDaMaquina } from "./plataforma-maquina.ts";
 import type { IdHarness } from "../contracts/harness.ts";
 import { BRANCH_NA_FRENTE_ATUAL, DONO_INTEGRA, ehFrente, worktreeDaFrente } from "./frente.ts";
 import { ehPastaDeTask, NATIVA_MCP_DA_PESSOA, type MotivoSemTerminal } from "./nativas.ts";
@@ -519,9 +520,9 @@ export function partesDoPromptSistema(entrada: EntradaPromptSistema): { estavel:
     ? `Para mexer num repositório, trabalhe numa worktree dentro da pasta desta task, a partir do clone que ela já tem: git -C <clone> fetch origin && git -C <clone> worktree add ~/nod/${entrada.pastaDoBot}/<repo> -b <branch> origin/main (quando a task acaba, o nod apaga a worktree que não tem alteração por commitar; a branch fica no clone); a worktree fora desta pasta e o git que troca de branch ou grava fora dela são negados, para não atropelar o trabalho dela e dos colegas.`
     : `Para mexer num repositório, trabalhe numa worktree sua, uma por task, a partir do clone que ela já tem: git -C <clone> fetch origin && git -C <clone> worktree add ~/nod/${entrada.pastaDoBot}/<repo>-<task> -b <branch> origin/main; o git que troca de branch ou grava fora da sua pasta é negado, para não atropelar o trabalho dela e dos colegas.`;
   const comNativas = entrada.pastaDoBot && entrada.harness === "codex-cli" && nativas.includes("Bash")
-    ? terminalNoCodex({ pastaDoBot: entrada.pastaDoBot, pessoaNome: entrada.pessoaNome, regraDoModo: regraDoTerminal(entrada, modoAprovacao), worktree, maquina: naMaquinaLinux(entrada) ? entrada.maquina!.nome : null, mcpDaPessoa: nativas.includes(NATIVA_MCP_DA_PESSOA) })
+    ? terminalNoCodex({ pastaDoBot: entrada.pastaDoBot, pessoaNome: entrada.pessoaNome, regraDoModo: regraDoTerminal(entrada, modoAprovacao), worktree, maquina: naMaquinaLinux(entrada) ? entrada.maquina!.nome : null, mcpDaPessoa: nativas.includes(NATIVA_MCP_DA_PESSOA), plataforma: entrada.maquina?.plataforma ?? null })
     : entrada.pastaDoBot && naMaquinaLinux(entrada)
-    ? terminalNaMaquinaLinux({ nativas, pastaDoBot: entrada.pastaDoBot, pessoaNome: entrada.pessoaNome, maquina: entrada.maquina!.nome, regraDoModo: regraDoTerminal(entrada, modoAprovacao), worktree })
+    ? noSistemaDaMaquina(terminalNaMaquinaLinux({ nativas, pastaDoBot: entrada.pastaDoBot, pessoaNome: entrada.pessoaNome, maquina: entrada.maquina!.nome, regraDoModo: regraDoTerminal(entrada, modoAprovacao), worktree }), entrada.maquina?.plataforma)
     : entrada.pastaDoBot
     ? `Também há as ferramentas nativas ${nativas.join(", ")}, como no Claude Code do terminal. O diretório atual é a sua pasta no Mac de ${entrada.pessoaNome}: ~/nod/${entrada.pastaDoBot} (o que você grava ali ela abre no Finder); você lê e grava arquivos em qualquer lugar do Mac dela. O Bash é o terminal de verdade do Mac: tem rede e o gh, o git e o npm logados dela — use gh para o GitHub (por exemplo gh pr list -R dono/repo). ${worktree} Comando que só lê (git status/diff/log, gh pr list/view/diff, ls, rg, rodar testes) roda direto; ${regraDoTerminal(entrada, modoAprovacao)} Gravar arquivo fora da sua pasta segue a mesma regra do comando que muda algo. Comando demorado do seu trabalho (testes, build, QA) não tem limite de tempo: rode em segundo plano (run_in_background) ou acompanhe com Monitor e siga trabalhando — quando ele terminar, você é chamado de novo nesta mesma sessão. Não encerre dizendo que vai acompanhar depois: acompanhe agora, até concluir. ${MAQUINA_DIVIDIDA} A pessoa pode mandar mensagem enquanto você trabalha; ela chega no meio do trabalho. Para mandar um arquivo do Mac (vídeo, print, PDF) a um app, chame a ferramenta do app que recebe arquivo e ponha o caminho no campo s3key: o nod envia o arquivo. Nunca peça à pessoa para rodar um comando por você. Para entregar algo visual ou marcável, use publicar_artefato.`
     : `Também há as ferramentas nativas ${nativas.join(", ")}, só dentro das pastas de projeto autorizadas nesta conversa.`;
@@ -599,9 +600,9 @@ export function secaoDaLinha(linha: string): SecaoDoPrompt | null {
   return null;
 }
 
-/** ADR-090: o turno roda no motor de uma máquina Linux da pessoa (uma VM), não no app do Mac. */
+/** ADR-090: o turno roda no motor de uma máquina Linux da pessoa (uma VM), não no app do Mac; ADR-147: ou num PC Windows. */
 function naMaquinaLinux(entrada: Pick<EntradaPromptSistema, "maquina">): boolean {
-  return entrada.maquina?.plataforma === "linux";
+  return ehMaquinaDoMotor(entrada.maquina?.plataforma);
 }
 const semMac = (linha: string): string => linha.replaceAll("credencial do Mac", "credencial desta máquina");
 
@@ -628,9 +629,9 @@ export function trechoComClone(p: { pastaDoBot: string; caminho: string; repo: s
  * e entram o AGENTS.md (o Codex só lê o da pasta atual para cima, e a worktree fica abaixo dela) e os apps da pessoa.
  * `maquina` = o nome da máquina Linux (ADR-090); null = o Mac da pessoa.
  */
-export function terminalNoCodex(p: { pastaDoBot: string; pessoaNome: string; regraDoModo: string; worktree: string; maquina: string | null; mcpDaPessoa: boolean }): string {
+export function terminalNoCodex(p: { pastaDoBot: string; pessoaNome: string; regraDoModo: string; worktree: string; maquina: string | null; mcpDaPessoa: boolean; plataforma?: PlataformaMaquina | null }): string {
   const onde = p.maquina
-    ? `Você trabalha na máquina ${p.maquina} de ${p.pessoaNome}, um Linux sempre ligado, e não no Mac dela. O diretório atual é a sua pasta nessa máquina: ~/nod/${p.pastaDoBot}; você lê e grava arquivos em qualquer lugar dela. Os arquivos ficam aqui: ${p.pessoaNome} não os vê no Mac, então entregue o resultado na resposta, num artefato (publicar_artefato) ou num app. O terminal é o de verdade dessa máquina: tem rede e o gh e o git logados nela — use gh para o GitHub (por exemplo gh pr list -R dono/repo). ${trechoDoClone(p)}`
+    ? noSistemaDaMaquina(`Você trabalha na máquina ${p.maquina} de ${p.pessoaNome}, um Linux sempre ligado, e não no Mac dela. O diretório atual é a sua pasta nessa máquina: ~/nod/${p.pastaDoBot}; você lê e grava arquivos em qualquer lugar dela. Os arquivos ficam aqui: ${p.pessoaNome} não os vê no Mac, então entregue o resultado na resposta, num artefato (publicar_artefato) ou num app. O terminal é o de verdade dessa máquina: tem rede e o gh e o git logados nela — use gh para o GitHub (por exemplo gh pr list -R dono/repo). ${trechoDoClone(p)}`, p.plataforma)
     : `O diretório atual é a sua pasta no Mac de ${p.pessoaNome}: ~/nod/${p.pastaDoBot} (o que você grava ali ela abre no Finder); você lê e grava arquivos em qualquer lugar do Mac dela. O terminal é o de verdade do Mac: tem rede e o gh, o git e o npm logados dela — use gh para o GitHub (por exemplo gh pr list -R dono/repo). ${p.worktree}`;
   const apps = p.mcpDaPessoa ? ` Os apps que ${p.pessoaNome} configurou no Codex dela (servidores MCP) também estão aqui; cada uso passa pelo nod e segue a mesma regra do comando que muda algo.` : "";
   return `Você tem o terminal e os arquivos do Codex, como no Codex do terminal: rode comandos de shell e crie ou edite arquivos com apply_patch. ${onde} Ao entrar num repositório, leia o AGENTS.md dele antes de mexer. Comando que só lê (git status/diff/log, gh pr list/view/diff, ls, rg, rodar testes) roda direto; ${p.regraDoModo} Gravar arquivo fora da sua pasta segue a mesma regra do comando que muda algo.${apps} Comando demorado do seu trabalho (testes, build, QA) não tem limite de tempo: acompanhe a saída até ele terminar antes de encerrar. Não encerre dizendo que vai acompanhar depois: acompanhe agora, até concluir. ${MAQUINA_DIVIDIDA} A pessoa pode mandar mensagem enquanto você trabalha; ela chega no meio do trabalho.${p.maquina ? "" : " Para mandar um arquivo do Mac (vídeo, print, PDF) a um app, chame a ferramenta do app que recebe arquivo e ponha o caminho no campo s3key: o nod envia o arquivo."} Nunca peça à pessoa para rodar um comando por você. Para entregar algo visual ou marcável, use publicar_artefato.`;

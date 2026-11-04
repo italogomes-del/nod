@@ -1,3 +1,4 @@
+import { FOLGA_DO_INICIO_MS, FOLGA_DO_VISTO_MS, matarArvoreSync, processosDoWindows, type ProcessoVisto } from "./plataforma.ts";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
@@ -24,7 +25,11 @@ export const VARIAVEL_DA_MARCA = "NOD_GRUPO";
  * líder tem de cair entre os dois. `programa` é o nome do binário (claude, codex, node), conferido na linha de comando.
  * `marca` é o valor de NOD_GRUPO dado a este grupo — única por spawn, com o prefixo da instância.
  */
-export type GrupoRegistrado = { pid: number; desdeMs: number; ateMs: number; programa: string; marca: string };
+/**
+ * `vistos` (ADA-11, ADR-147): no Windows não há grupo de processos nem a marca legível no ambiente; a posse é o pid +
+ * início do líder e de cada descendente visto durante o turno.
+ */
+export type GrupoRegistrado = { pid: number; desdeMs: number; ateMs: number; programa: string; marca: string; vistos?: { pid: number; inicioMs: number }[] };
 
 /** O dono é o processo do nod que anotou: vivo, o arquivo é dele e ninguém mexe (duas cópias da mesma instância). */
 export type ArquivoDeGrupos = { dono: { pid: number; inicioMs: number } | null; grupos: GrupoRegistrado[] };
@@ -186,7 +191,10 @@ export function lerArquivoDeGrupos(arquivo: string): ArquivoDeGrupos {
   try {
     const lido = JSON.parse(readFileSync(arquivo, "utf8")) as Partial<ArquivoDeGrupos>;
     const grupos = Array.isArray(lido.grupos)
-      ? lido.grupos.filter((g): g is GrupoRegistrado => typeof g?.pid === "number" && g.pid > 1 && typeof g.desdeMs === "number" && typeof g.ateMs === "number" && typeof g.programa === "string" && typeof g.marca === "string")
+      ? lido.grupos
+          .filter((g): g is GrupoRegistrado => typeof g?.pid === "number" && g.pid > 1 && typeof g.desdeMs === "number" && typeof g.ateMs === "number" && typeof g.programa === "string" && typeof g.marca === "string")
+          // Revisão 14 do PR #642 (B3): `vistos` de outra versão ou corrompido não derruba o boot; só fica o que é pid + início.
+          .map((g) => (g.vistos === undefined ? g : { ...g, vistos: Array.isArray(g.vistos) ? g.vistos.filter((v) => typeof v?.pid === "number" && v.pid > 1 && typeof v.inicioMs === "number") : [] }))
       : [];
     const dono = lido.dono && typeof lido.dono.pid === "number" && typeof lido.dono.inicioMs === "number" ? lido.dono : null;
     return { dono, grupos };
@@ -241,7 +249,11 @@ export function gruposDesteProcesso(processos: readonly ProcessoDoSistema[], pid
   return grupos;
 }
 
-export type ResultadoDaLimpeza = { assumiu: boolean; encerrados: Sobra[] };
+/**
+ * `herdados`: revisão 14b do PR #642 (M2) — no Windows, o boot sem foto não confere nada; os grupos anotados voltam para
+ * o arquivo pelo `registrarGruposEm` e esperam um boot com foto, em vez de sumir na primeira anotação.
+ */
+export type ResultadoDaLimpeza = { assumiu: boolean; encerrados: Sobra[]; herdados?: GrupoRegistrado[] };
 
 /**
  * O boot (servidor, depois do listen; app do Mac, antes do primeiro turno) chama: mata com SIGKILL os grupos que sobraram
@@ -256,7 +268,12 @@ export async function encerrarGruposOrfaos(o: {
   matar?: (pgid: number) => void;
   agora?: () => number;
   pidAtual?: number;
+  /** ADR-147: a plataforma (padrão a real); no win32 a limpeza é por pid + início. */
+  plataforma?: NodeJS.Platform;
+  listarNoWindows?: () => Promise<ProcessoVisto[]>;
+  matarNoWindows?: (pid: number) => void;
 }): Promise<ResultadoDaLimpeza> {
+  if ((o.plataforma ?? process.platform) === "win32") return encerrarArvoresOrfasDoWindows(o);
   const anotado = lerArquivoDeGrupos(o.arquivo);
   const pidAtual = o.pidAtual ?? process.pid;
   const donoAlheio = anotado.dono && anotado.dono.pid !== pidAtual ? anotado.dono : null;
@@ -264,7 +281,7 @@ export async function encerrarGruposOrfaos(o: {
   const processos = await (o.listar ?? listarProcessosDoSistema)();
   if (!processos) {
     log("aviso", "orfaos_sem_ps", { grupos: anotado.grupos.length });
-    return { assumiu: true, encerrados: [] };
+    return { assumiu: true, encerrados: [], herdados: anotado.grupos };
   }
   if (donoAlheio && processos.some((p) => p.pid === donoAlheio.pid && Math.abs(p.inicioMs - donoAlheio.inicioMs) <= FOLGA_DONO_MS)) {
     log("aviso", "grupos_de_outra_copia_viva", { dono_pid: donoAlheio.pid, grupos: anotado.grupos.length });
@@ -298,6 +315,53 @@ export async function encerrarGruposOrfaos(o: {
     } catch {
       // acabou entre o `ps` e o kill
     }
+  }
+  return { assumiu: true, encerrados };
+}
+
+/** Sem `/T`: no boot só o que está na lista morre (o líder e cada visto pelo próprio pid), nada além dela (critério 3). */
+export function matarNoBootDoWindows(pid: number, executar?: (bin: string, args: readonly string[]) => void): void {
+  matarArvoreSync(pid, { plataforma: "win32", arvore: false, ...(executar ? { executar } : {}) });
+}
+
+/**
+ * ADA-11 (ADR-147): o boot no Windows. O dono anotado vivo (pid + início) fica com o arquivo; senão morre o líder anotado
+ * e cada descendente visto no turno cujo início ainda bate com o guardado — e nada além dessa lista (critério 3).
+ */
+async function encerrarArvoresOrfasDoWindows(o: {
+  arquivo: string;
+  pidAtual?: number;
+  listarNoWindows?: () => Promise<ProcessoVisto[]>;
+  matarNoWindows?: (pid: number) => void;
+}): Promise<ResultadoDaLimpeza> {
+  const anotado = lerArquivoDeGrupos(o.arquivo);
+  const pidAtual = o.pidAtual ?? process.pid;
+  const donoAlheio = anotado.dono && anotado.dono.pid !== pidAtual ? anotado.dono : null;
+  if (anotado.grupos.length === 0 && !donoAlheio) return { assumiu: true, encerrados: [] };
+  const foto = await (o.listarNoWindows ?? (() => processosDoWindows()))();
+  if (foto.length === 0) {
+    log("aviso", "orfaos_sem_ps", { grupos: anotado.grupos.length });
+    return { assumiu: true, encerrados: [], herdados: anotado.grupos };
+  }
+  const inicio = new Map(foto.map((p) => [p.pid, p.inicioMs]));
+  const bate = (pid: number, ms: number, folga: number) => { const i = inicio.get(pid); return i !== undefined && Math.abs(i - ms) <= folga; };
+  // Revisão do PR #642 (médio 5): o início do dono vem do relógio do Node (`timeOrigin`), que sob carga (e com o Defender)
+  // passa de 2 s do CreationDate; a mesma folga do POSIX evita tomar uma cópia viva por morta.
+  if (donoAlheio && bate(donoAlheio.pid, donoAlheio.inicioMs, FOLGA_DONO_MS)) {
+    log("aviso", "grupos_de_outra_copia_viva", { dono_pid: donoAlheio.pid, grupos: anotado.grupos.length });
+    return { assumiu: false, encerrados: [] };
+  }
+  const matar = o.matarNoWindows ?? ((pid: number) => matarNoBootDoWindows(pid));
+  const encerrados: Sobra[] = [];
+  for (const g of anotado.grupos) {
+    const i = inicio.get(g.pid);
+    const liderVivo = i !== undefined && i >= g.desdeMs - FOLGA_DO_INICIO_MS && i <= g.ateMs + FOLGA_DO_INICIO_MS;
+    const netos = (g.vistos ?? []).filter((v) => v.pid !== pidAtual && bate(v.pid, v.inicioMs, FOLGA_DO_VISTO_MS));
+    if (!liderVivo && netos.length === 0) continue;
+    log("aviso", "orfao_encerrado", { pgid: g.pid, programa: g.programa, membros: netos.length + (liderVivo ? 1 : 0), lider_vivo: liderVivo, idade_min: Math.round((Date.now() - g.desdeMs) / 60_000) });
+    if (liderVivo && g.pid !== pidAtual) matar(g.pid);
+    for (const v of netos) matar(v.pid);
+    encerrados.push({ pgid: g.pid, programa: g.programa, marca: g.marca, membros: netos.length + (liderVivo ? 1 : 0), lider: liderVivo, desdeMs: g.desdeMs });
   }
   return { assumiu: true, encerrados };
 }

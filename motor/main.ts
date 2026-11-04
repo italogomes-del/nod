@@ -9,13 +9,14 @@ import { criarAcompanhanteDeTarefas } from "../src/adapters/executor/acompanhar-
 import { criarAcompanhanteDeSubagentes } from "../src/adapters/executor/acompanhar-subagentes.ts";
 import { criarAmostradorMemoria } from "../src/adapters/executor/amostrador-memoria.ts";
 import { resolverBinario } from "../src/adapters/executor/caminho.ts";
+import { BinarioSemSuporte, comoRodar, type Alvo } from "../src/adapters/executor/plataforma.ts";
 import { criarClaudeCliDriver } from "../src/adapters/executor/drivers/claude-cli.ts";
 import { criarCodexCliDriver } from "../src/adapters/executor/drivers/codex-cli.ts";
 import { driverDoPlano, iniciarLaco } from "../src/adapters/executor/laco.ts";
 import { iniciarPoolDeLacos, type PoolDeLacos } from "../src/adapters/executor/pool-lacos.ts";
 import { criarPonteHttp, FalhaPonte, urlServidor } from "../src/adapters/executor/ponte-http.ts";
 import { encerrarGruposVivos, executarColetando, registrarGruposEm } from "../src/adapters/executor/processo.ts";
-import { encerrarGruposOrfaos } from "../src/adapters/executor/grupos-orfaos.ts";
+import { encerrarGruposOrfaos, type ResultadoDaLimpeza } from "../src/adapters/executor/grupos-orfaos.ts";
 import { encerrarFugitivosDaInstancia } from "../src/adapters/executor/fugitivos.ts";
 import { prepararGruposDaMaquina } from "../src/adapters/executor/grupos-da-maquina.ts";
 import { criarExecutarComando, iniciarLimpezaDasTasks, modoDaLimpeza, type LimpezaDasTasks } from "../src/adapters/executor/limpeza-das-tasks.ts";
@@ -49,6 +50,7 @@ import { anuncioDoComputador, sondaLocal } from "./computador.ts";
 import { arquivoDasAtualizacoes, arquivoDoEstadoDeIa, arquivoDoPedidoDeIa, ESPERA_DA_RESPOSTA_MS, ESPERA_DO_SERVICO_MS, gravarJson, IA_DO_TERMINAL, lerEstadoDoPedido, passoNpmLocal, vigiarPedidosDoTerminal } from "./atualizar-ias.ts";
 import { criarPreparoNoMotor } from "./preparo-do-login.ts";
 import { criarIasDoMotor, esperarNoTerminal, quemNaoPodeAtualizar } from "./ias-do-motor.ts";
+import { conferirGitForWindows, MENSAGEM_SEM_GIT_FOR_WINDOWS, plataformaDoMotor, SAIDA_SEM_GIT_FOR_WINDOWS, servidorAceitaPlataforma } from "./windows.ts";
 import { AJUDA, aposentarChaveAntiga, arquivoDaConexao, carregarConexao, comandoDeEntrar, guardarConexao, lerComando, pastaDoExecutor, pastaDoMotor, type ConexaoMotor } from "./conexao.ts";
 
 /**
@@ -83,6 +85,9 @@ function caminhoAoLado(bundle: string, fonte: string): string {
 }
 
 const INTERVALO_ITENS_GITHUB_MS = 5_000;
+/** ADA-11 (ADR-147): a plataforma de verdade no anúncio e no pareamento. */
+const PLATAFORMA = plataformaDoMotor();
+const NO_WINDOWS = PLATAFORMA === "win32";
 /** Depois de uma queda (servidor fora, deploy), o motor tenta de novo: 5 s, 10 s, ... até 1 min. */
 const ESPERAS_RECONEXAO_MS = [5_000, 10_000, 20_000, 40_000, 60_000];
 /** Chave recusada (401/403): três vezes seguidas, a 1 min uma da outra, antes de desistir com o código 2. */
@@ -123,8 +128,12 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
   if (r.status === 426 || (minima && !versaoAceita(versao, minima))) throw new FalhaPonte("atualize_app");
   if (r.status === 401 || r.status === 403) throw new FalhaPonte("chave_invalida");
   if (!r.ok) throw new FalhaPonte("servidor_fora");
-  const dados = (await r.json()) as { escopo: { pessoaId: string }; machineId: string; papel?: unknown; instalacoes?: unknown };
+  const dados = (await r.json()) as { escopo: { pessoaId: string }; machineId: string; papel?: unknown; instalacoes?: unknown; plataformas?: unknown };
   if (!dados.escopo?.pessoaId || !dados.machineId) throw new FalhaPonte("resposta_invalida");
+  if (!servidorAceitaPlataforma(dados)) {
+    log("aviso", "servidor_sem_windows", {});
+    throw new FalhaPonte("servidor_fora");
+  }
   // NOD-94 (emenda 11 da ADR-090): a máquina só-computador hospeda o computador do bot e nunca pega turno — sem laço e
   // sem itens do gh. Servidor antigo (sem papel) = motor. O servidor também recusa o puxar dela (segunda camada).
   const papel = PAPEIS_MAQUINA.find((p) => p === dados.papel) ?? "motor";
@@ -150,7 +159,7 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
   /** NOD-9 PR4: a atualização das IAs desta máquina (npm do motor no ~/.local); criada depois dos drivers. */
   let atualizadorIas: AtualizadorDeIas | null = null;
 
-  const lig = { urlNod: c.url, proxyPath: caminhoAoLado("proxy.mjs", "proxy.ts"), hookPath: caminhoAoLado("hook-nativas.mjs", "hook-nativas.ts"), nodePath: process.execPath, electronComoNode: false, sondaSemTurno: true, prazoSondaMs: prazoSondaDoEnv(process.env), filaDoForno: process.env.NOD_FILA_DO_FORNO !== "0" };
+  const lig = { urlNod: c.url, proxyPath: caminhoAoLado("proxy.mjs", "proxy.ts"), hookPath: caminhoAoLado("hook-nativas.mjs", "hook-nativas.ts"), nodePath: process.execPath, electronComoNode: false, sondaSemTurno: true, prazoSondaMs: prazoSondaDoEnv(process.env), filaDoForno: process.env.NOD_FILA_DO_FORNO !== "0", plataforma: process.platform, codexTerminalNoWindows: process.env.NOD_CODEX_TERMINAL_WINDOWS === "1" };
   // A pasta do executor (sessões e turnos do CLI) fica fora da pasta da chave (pastaDoExecutor): um turno não está a um `../` dela.
   const envExecutor = { ...process.env, NOD_HOME: executor };
   // NOD-9 PR4: o mesmo portão do Mac (desktop/main.ts): o turno do Claude espera a atualização e pede a versão do modelo.
@@ -240,13 +249,14 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
   // ADR-099 (I5): a frente que terminou sem trabalho sai na hora (a resposta do entregar traz a pasta).
   const ponteHttp = criarPonteHttp({ url: c.url, chave: c.chave, versao, aoFalhar, aoLimparAgora: (pastas) => void limpeza?.limparAgora(pastas) });
   const gh = await criarDetectorGh({ ambiente: process.env }).logado();
-  const anuncio = { machineId: dados.machineId, nome: hostname(), versaoContrato: 1, github: { gh: gh && papel === "motor" }, ligacao: papel === "motor", plataforma: "linux", papel, atualizaIas: true } as const;
+  const anuncio = { machineId: dados.machineId, nome: hostname(), versaoContrato: 1, github: { gh: gh && papel === "motor" }, ligacao: papel === "motor", plataforma: PLATAFORMA, papel, atualizaIas: !NO_WINDOWS } as const;
   // NOD-96 PR 2/3 (ADR-122): o computador da pessoa nesta máquina (só quando a instalação o trouxe). Relido a cada
   // reanúncio (a instalação pode ter terminado depois); a prova do bwrap roda uma vez só (não muda com o motor no ar).
   const sonda = sondaLocal();
   let isola: boolean | undefined;
   const sondaComCache = { ...sonda, bwrapIsola: () => (isola ??= sonda.bwrapIsola()) };
-  const comComputador = () => { const a = anuncioDoComputador(sondaComCache); return a ? { computador: a } : {}; };
+  // ADA-11 (ADR-147): o computador do bot não roda no Windows nesta fase; o servidor responde sem_suporte pela plataforma.
+  const comComputador = () => { const a = NO_WINDOWS ? undefined : anuncioDoComputador(sondaComCache); return a ? { computador: a } : {}; };
 
   if (gh && papel === "motor") {
     const relatos = new Map<string, "executado" | "falhou_na_execucao">();
@@ -284,7 +294,7 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
   desfazeres = iniciarDesfazeres({ ponte: ponteHttp.ponte, pessoaId: dados.escopo.pessoaId, machineId: dados.machineId, home: cfg.env.HOME ?? homedir() });
   // NOD-96 PR 3 (ADR-122): o computador da pessoa. Puxa os comandos e repassa ao supervisor; servidor sem a flag (404)
   // deixa o laço quieto, tentando de novo a cada 10 min.
-  computador = iniciarComputador({ canal: ponteHttp.computador });
+  computador = NO_WINDOWS ? null : iniciarComputador({ canal: ponteHttp.computador });
 
   const subirLaco = (reg: Registry) => {
     if (papel === "computador") { log("info", "motor_so_computador", { machine_id: dados.machineId }); return; }
@@ -306,7 +316,8 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
         void vigiaAtual.reprovar(ia, r.causaSemIa).catch(() => undefined);
       } }), ponteHttp.ponte);
     log("info", "motor_laco_no_ar", { machine_id: dados.machineId });
-    if (import.meta.url.endsWith(".mjs")) {
+    // ADA-11 (ADR-147): a atualização automática do motor (root + systemd) não existe no Windows nesta fase.
+    if (import.meta.url.endsWith(".mjs") && !NO_WINDOWS) {
       void atualizacaoLigada({ url: c.url }).then((ligada) => {
         if (!ligada || encerrado || atualizador) return;
         // NOD-9 PR4: a atualização de uma IA conta como um turno rodando (o motor não reinicia no meio do npm). ADR-131: e
@@ -398,7 +409,7 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
   });
 
   // NOD-94 (emenda 11 da ADR-090): esta máquina instala a "só computador" da pessoa por SSH, quando a tela pede.
-  if (papel === "motor" && dados.instalacoes === true) {
+  if (papel === "motor" && dados.instalacoes === true && !NO_WINDOWS) {
     instaladora = iniciarInstaladora({ ponte: ponteHttp.instalacoes, sistema: sistemaDeVerdade(), agendar: (fn, ms) => { const t = setTimeout(fn, ms); return { cancelar: () => clearTimeout(t) }; }, servidor: c.url });
   }
 
@@ -445,7 +456,7 @@ function sairPor(codigo: "chave_invalida" | "atualize_app", url: string): number
  * a sessão já foi recusada.
  */
 async function sairPorVersao(url: string, pasta: string): Promise<number> {
-  if (!import.meta.url.endsWith(".mjs") || !(await atualizacaoLigada({ url }))) return sairPor("atualize_app", url);
+  if (NO_WINDOWS || !import.meta.url.endsWith(".mjs") || !(await atualizacaoLigada({ url }))) return sairPor("atualize_app", url);
   await writeFile(arquivoDoPedido(pasta), `${JSON.stringify({ versao: null, em: Date.now(), motivo: "atualize_app" })}\n`, { mode: 0o600 }).catch(() => undefined);
   log("info", "motor_atualizacao", { motivo: "atualize_app" });
   process.stderr.write("O servidor pede um motor mais novo: a atualização automática foi pedida.\n");
@@ -457,14 +468,21 @@ async function rodar(): Promise<number> {
   const c = await carregarConexao(pasta);
   if (!c) { process.stderr.write("Esta máquina ainda não está conectada. Rode: nod-motor parear https://seu-nod\n"); return 2; }
   const versao = await versaoDoMotor();
+  // ADA-11 (ADR-147): no Windows o motor só sobe com o Git for Windows e o hook rodando pelo Git Bash (falha fechada).
+  const semGit = conferirGitForWindows({ nodePath: process.execPath, hookPath: caminhoAoLado("hook-nativas.mjs", "hook-nativas.ts") });
+  if (semGit) {
+    log("erro", "motor_sem_git_for_windows", { motivo: semGit });
+    process.stderr.write(MENSAGEM_SEM_GIT_FOR_WINDOWS);
+    return SAIDA_SEM_GIT_FOR_WINDOWS;
+  }
   // ADR-089 (#217): os grupos de turno que a vida anterior do motor deixou (queda, SIGKILL do systemd) morrem antes do
   // primeiro turno desta; os novos ficam anotados, e saem junto com o processo.
   const arquivoGrupos = join(pastaDoExecutor(process.env), "grupos-vivos.json");
-  const orfaos = await encerrarGruposOrfaos({ arquivo: arquivoGrupos }).catch(() => ({ assumiu: true }));
+  const orfaos: Pick<ResultadoDaLimpeza, "assumiu" | "herdados"> = await encerrarGruposOrfaos({ arquivo: arquivoGrupos }).catch(() => ({ assumiu: true }));
   if (orfaos.assumiu) {
     // ADR-097: o que saiu dos grupos com a marca do motor (os Postgres de teste das tasks) e ficou de outra vida.
     await encerrarFugitivosDaInstancia(arquivoGrupos);
-    registrarGruposEm(arquivoGrupos);
+    registrarGruposEm(arquivoGrupos, orfaos.herdados);
   }
   // ADR-097 (fase 2): com Delegate=yes na unidade, cada turno roda no próprio grupo de controle; sem, nada muda.
   await prepararGruposDaMaquina();
@@ -515,7 +533,7 @@ async function parear(servidorBruto: string, nomeBruto: string | null, convite: 
   // http só em loopback (o próprio servidor nesta máquina, testes); qualquer outro endereço precisa de HTTPS.
   try { url = urlServidor(servidorBruto, true); } catch { process.stderr.write("Use o endereço HTTPS do seu Nod, por exemplo https://nod.seudominio.com\n"); return 1; }
   const nome = (nomeBruto ?? hostname()).trim().slice(0, 60) || "maquina";
-  const pedido = await fetch(`${url}/api/pareamento/dispositivo`, { method: "POST", redirect: "error", headers: { "content-type": "application/json" }, body: JSON.stringify({ nome, plataforma: "linux", ...(convite ? { convite } : {}) }), signal: AbortSignal.timeout(15_000) });
+  const pedido = await fetch(`${url}/api/pareamento/dispositivo`, { method: "POST", redirect: "error", headers: { "content-type": "application/json" }, body: JSON.stringify({ nome, plataforma: PLATAFORMA, ...(convite ? { convite } : {}) }), signal: AbortSignal.timeout(15_000) });
   if (!pedido.ok) { process.stderr.write(`O servidor recusou o pareamento (HTTP ${pedido.status}). Confira o endereço.\n`); return 1; }
   const p = (await pedido.json()) as { codigoDispositivo: string; codigoPessoa: string; intervaloS: number; prazoS: number };
   // ADR-102: com o convite, a tela já vê esta máquina chegar; o código fica de reserva.
@@ -564,8 +582,13 @@ async function entrar(ia: "claude" | "codex" | "github"): Promise<number> {
   }
   const bin = nome === "gh" ? await resolverBinario(undefined, cfg.env.PATH ?? "", home, "gh") : await resolverBinario(nome === "claude" ? cfg.bin : cfg.bins?.["codex-cli"], cfg.env.PATH ?? "", home, nome as "claude" | "codex");
   if (!bin) { process.stderr.write(`${nome} não está instalado nesta máquina. Rode a instalação de novo com a opção dele.\n`); return 1; }
+  // Revisão do PR #642 (médio 6): no Windows o CLI do npm é um `.cmd`, que o spawn sem shell não roda.
+  let alvo: Alvo | null;
+  try { alvo = comoRodar(bin, { env: cfg.env }); } catch (e) { if (!(e instanceof BinarioSemSuporte)) throw e; process.stderr.write(`${e.message}\n`); return 1; }
+  if (!alvo) { process.stderr.write(`${nome} não está instalado nesta máquina. Rode a instalação de novo com a opção dele.\n`); return 1; }
+  const rodar = alvo;
   return new Promise((resolver) => {
-    const filho = spawn(bin, args, { stdio: "inherit", env: { ...ambienteDoLogin(cfg.env), ...envConta, PATH: cfg.env.PATH ?? process.env.PATH ?? "" }, cwd: home || undefined });
+    const filho = spawn(rodar.bin, [...rodar.args, ...args], { stdio: "inherit", env: { ...ambienteDoLogin(cfg.env), ...envConta, PATH: cfg.env.PATH ?? process.env.PATH ?? "" }, cwd: home || undefined });
     // ADR-102: o serviço relê a lista quando o arquivo muda — tocá-lo no fim faz o login novo valer em segundos.
     filho.once("exit", (codigo) => { const agora = new Date(); void utimes(join(pastaDoExecutor(process.env), "contas-locais.json"), agora, agora).catch(() => undefined).finally(() => resolver(codigo ?? 1)); });
     filho.once("error", () => resolver(1));

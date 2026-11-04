@@ -1,5 +1,7 @@
 # ADR-089 — Ciclo de vida dos processos: órfãos no religar, hook que solta, laço de sleep
 
+> Emendada pela [ADR-147](adr-147-motor-no-windows-nativo.md): no Windows o grupo de processo vira a árvore vista (pid + início) e o `taskkill`.
+
 Status: aceito · Data: 2026-10-09 · Issue #217, parte do épico #221 (performance no Mac). Emenda a
 [ADR-083](adr-083-trabalhos-paralelos-a-conversa-coordena.md) (grupos de processo) e a
 [ADR-055](adr-055-terminal-de-verdade-como-o-inhouse.md) (o hook do terminal); conversa com a

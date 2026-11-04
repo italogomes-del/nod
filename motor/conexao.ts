@@ -1,7 +1,7 @@
 import { conviteValido } from "../src/shared/convite.ts";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { pastasDoMotor } from "../src/adapters/executor/plataforma.ts";
 
 /**
  * O que o motor sem janela guarda (ADR-090): o endereço do servidor e a chave da máquina (ADR-031). No Mac isso fica
@@ -10,9 +10,12 @@ import { dirname, join } from "node:path";
  */
 export type ConexaoMotor = { url: string; chave: string };
 
-/** `NOD_MOTOR_HOME` ou `~/.config/nod-motor`: a conexão, os vereditos das IAs e o `NOD_HOME` do executor. */
-export function pastaDoMotor(env: Readonly<Record<string, string | undefined>>): string {
-  return env.NOD_MOTOR_HOME?.trim() || join(env.HOME?.trim() || homedir(), ".config", "nod-motor");
+/**
+ * `NOD_MOTOR_HOME` ou `~/.config/nod-motor`: a conexão, os vereditos das IAs e o `NOD_HOME` do executor.
+ * ADA-11 (ADR-147): no Windows, `%APPDATA%\nod-motor` (o perfil é só do usuário; o modo 0600 lá não vale, a ACL do perfil sim).
+ */
+export function pastaDoMotor(env: Readonly<Record<string, string | undefined>>, plataforma: NodeJS.Platform = process.platform): string {
+  return env.NOD_MOTOR_HOME?.trim() || pastasDoMotor(env, plataforma).config;
 }
 
 export const arquivoDaConexao = (pasta: string) => join(pasta, "conexao.json");
@@ -21,9 +24,9 @@ export const arquivoDaConexao = (pasta: string) => join(pasta, "conexao.json");
  * Onde o executor guarda sessões e turnos do CLI (NOD_HOME): fora da pasta da chave, para nenhum turno ficar a um `../` do
  * conexao.json (revisão do PR). Com NOD_MOTOR_HOME (testes, instalação fora do padrão), dentro dela.
  */
-export function pastaDoExecutor(env: Readonly<Record<string, string | undefined>>): string {
+export function pastaDoExecutor(env: Readonly<Record<string, string | undefined>>, plataforma: NodeJS.Platform = process.platform): string {
   if (env.NOD_MOTOR_HOME?.trim()) return join(env.NOD_MOTOR_HOME.trim(), "executor");
-  return join(env.HOME?.trim() || homedir(), ".local", "share", "nod-motor", "executor");
+  return join(pastasDoMotor(env, plataforma).dados, "executor");
 }
 
 export function lerConexao(texto: string): ConexaoMotor | null {

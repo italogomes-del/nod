@@ -5,7 +5,7 @@ import { chmod, mkdir, mkdtemp, readFile, realpath, rename, rm, stat, symlink, t
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { RETEM_NA_MAQUINA, abrirCheckpoint, aplicarRetencao, desfazerTurno, esquecerCoordenacao, guardarOriginal, modoAoVoltar, retencaoTerminou, sombraDoBot } from "../../../src/adapters/executor/checkpoints.ts";
+import { RETEM_NA_MAQUINA, abrirCheckpoint, binarioDoGit, aplicarRetencao, desfazerTurno, esquecerCoordenacao, guardarOriginal, modoAoVoltar, retencaoTerminou, sombraDoBot } from "../../../src/adapters/executor/checkpoints.ts";
 import { MAX_BYTES_NO_CHECKPOINT, RETEM_CHECKPOINTS } from "../../../src/domain/checkpoints.ts";
 
 // NOD-54 (ADR-134): git de verdade em pasta temporária (vários processos por teste). Medido em ~9 s o arquivo inteiro
@@ -629,5 +629,19 @@ describe("checkpoint do turno (NOD-54)", () => {
     }
     expect(avisos).toEqual(["checkpoint_guarda_saiu"]);
     expect(escrito).not.toHaveBeenCalled();
+  });
+});
+
+describe("git sombra no Windows (ADA-11, ADR-147, revisão do PR #642 M3)", () => {
+  const disco = (arquivos: string[]) => ({ existe: (p: string) => arquivos.some((a) => a.toLowerCase() === p.toLowerCase()), ler: () => "" });
+  it("roda pelo git.exe absoluto do PATH, nunca o da pasta atual; fora do Windows segue `git`", () => {
+    const env = { Path: "C:\\Program Files\\Git\\cmd", PATHEXT: ".EXE" };
+    expect(binarioDoGit({ plataforma: "win32", env, disco: disco(["C:\\Program Files\\Git\\cmd\\git.exe", ".\\git.exe", "git.exe"]) })).toBe("C:\\Program Files\\Git\\cmd\\git.exe");
+    expect(binarioDoGit({ plataforma: "linux" })).toBe("git");
+    expect(binarioDoGit({ plataforma: "win32", env, disco: disco([]) })).toBe("git");
+  });
+  it("revisão 7 do PR #642 (médio 11): um git.ps1 antes no PATH não vira o git dos checkpoints", () => {
+    const env = { Path: "C:\\Users\\Bia\\AppData\\Roaming\\npm;C:\\Program Files\\Git\\cmd", PATHEXT: ".EXE;.CMD" };
+    expect(binarioDoGit({ plataforma: "win32", env, disco: disco(["C:\\Users\\Bia\\AppData\\Roaming\\npm\\git.ps1", "C:\\Program Files\\Git\\cmd\\git.exe"]) })).toBe("C:\\Program Files\\Git\\cmd\\git.exe");
   });
 });

@@ -6,6 +6,7 @@ import { ORCAMENTO_CONECTOR_MS } from "../../shared/constantes.ts";
 import { CODIGO, interpretar, notificacao, requisicao, type ErroJsonRpc } from "./jsonrpc.ts";
 import { lerRespostaHttp, TETO_CATALOGO_MCP_BYTES, TETO_RESPOSTA_MCP_BYTES } from "./resposta-http.ts";
 import { criarLineSplitter } from "./line-splitter.ts";
+import { BinarioSemSuporte, resolverBinario } from "../executor/plataforma.ts";
 
 /**
  * Cliente MCP do SERVIDOR do nod para os conectores registrados (ADR-013: o env decifrado nunca sai
@@ -109,7 +110,15 @@ function transporteStdio(cfg: ConfigClienteMcp, timeoutMs: number): Transporte {
 
   function garantir(): ChildProcess {
     if (filho && filho.exitCode === null && !filho.killed) return filho;
-    const p = spawn(cfg.comando ?? "", cfg.args ?? [], { env: cfg.env ?? {}, stdio: ["pipe", "pipe", "pipe"] });
+    // ADA-11 (ADR-147): no Windows o `npx` é um `.cmd`; ele vira node + script pelo PATH do conector, nunca `cmd.exe /c`.
+    let alvo: { bin: string; args: string[] } | null;
+    try {
+      alvo = resolverBinario(cfg.comando ?? "", { env: cfg.env ?? {} });
+    } catch (e) {
+      throw new ErroTransporteMcp("conector_indisponivel", e instanceof BinarioSemSuporte ? e.message : "comando do conector sem suporte nesta máquina");
+    }
+    if (alvo === null) throw new ErroTransporteMcp("conector_indisponivel", `comando não encontrado: ${cfg.comando ?? ""}`);
+    const p = spawn(alvo.bin, [...alvo.args, ...(cfg.args ?? [])], { env: cfg.env ?? {}, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
     p.stdout?.on("data", (chunk: Buffer) => {
       for (const linha of splitter.alimentar(chunk)) {
         const m = interpretar(linha);

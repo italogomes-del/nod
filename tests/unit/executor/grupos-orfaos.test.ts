@@ -184,11 +184,11 @@ describe("quais grupos anotados são candidatos (puro)", () => {
     expect(mortos).toEqual([]);
   });
 
-  it("sem ps, nada é morto", async () => {
+  it("sem ps, nada é morto e os grupos anotados voltam como herdados (revisão 14b, M2)", async () => {
     const arquivo = join(dir, "sem-ps.json");
     gravarArquivoDeGrupos(arquivo, { dono: null, grupos: [grupo(501)] });
     const mortos: number[] = [];
-    expect(await encerrarGruposOrfaos({ arquivo, matar: (g) => mortos.push(g), listar: async () => null })).toEqual({ assumiu: true, encerrados: [] });
+    expect(await encerrarGruposOrfaos({ arquivo, matar: (g) => mortos.push(g), listar: async () => null })).toEqual({ assumiu: true, encerrados: [], herdados: [grupo(501)] });
     expect(mortos).toEqual([]);
   });
 

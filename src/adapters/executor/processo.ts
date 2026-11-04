@@ -4,6 +4,7 @@ import { randomBytes } from "node:crypto";
 import { encerrarFugitivosDoTurno } from "./fugitivos.ts";
 import { abrirGrupoDoTurno, fecharGrupoDoTurno } from "./grupos-da-maquina.ts";
 import { spawnNoGrupo } from "../../domain/grupos-da-maquina.ts";
+import { BinarioSemSuporte, descendentesDoLider, FOLGA_DO_INICIO_MS, matarArvore, temFilhoMaisVelhoQueOPai, ehWindows, matarArvoreSync, processosDoWindows, processosDoWindowsSync, resolverBinario, vistosQueBatem, type ProcessoVisto } from "./plataforma.ts";
 import { gravarArquivoDeGrupos, inicioDesteProcesso, prefixoDaMarca, VARIAVEL_DA_MARCA, type GrupoRegistrado } from "./grupos-orfaos.ts";
 
 /**
@@ -39,6 +40,14 @@ const DEPOIS_DO_SIGKILL_MS = 1_000;
 const STDERR_MAX_CHARS = 65_536;
 
 const dormir = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+/** Revisão 13 do PR #642 (C1): as fotos do `interromper` no Windows, com prazo (a do CIM sozinha vai a 15 s). */
+export const FOTO_ANTES_DO_T_MS = 2_000;
+export const FOTO_DEPOIS_DO_T_MS = 3_000;
+/** Revisão 16 do PR #642 (médio 5): o prazo de cada `taskkill` do Parar e o teto do Parar inteiro antes de esperar o fim. */
+export const TASKKILL_DO_PARAR_MS = 1_500;
+export const ORCAMENTO_DO_PARAR_MS = 5_000;
+export const fotoComPrazo = (ms: number, tirar: () => Promise<ProcessoVisto[]> = () => processosDoWindows({ prazoMs: ms })): Promise<ProcessoVisto[]> =>
+  Promise.race([tirar().catch(() => []), dormir(ms).then(() => [] as ProcessoVisto[])]);
 
 /**
  * Grupos de processo vivos (definido em 2026-10-07, ADR-083, #194). Cada filho nasce líder do próprio grupo
@@ -55,12 +64,22 @@ let ganchoDeSaida = false;
 let arquivoDeGrupos: string | null = null;
 /** Com o registro ligado, cada spawn leva NOD_GRUPO=<prefixo da instância>-<aleatório>: a prova que o boot lê (revisão do #223). */
 let prefixoDeMarca: string | null = null;
+/**
+ * ADR-147: os líderes do Windows que já saíram (`exit`) e ainda estão na lista à espera da foto dos vistos. O pid deles
+ * pode já ser de outro processo: ninguém mais manda `taskkill /T` nele (revisão do PR #642, A1).
+ */
+const lideresQueSairam = new Set<number>();
+/**
+ * Revisão 14b do PR #642 (M2): os grupos de outra vida que o boot do Windows não conseguiu conferir (sem foto). Ninguém
+ * os mata nesta vida (o pid pode já ser de outro); só ficam no arquivo para o boot seguinte.
+ */
+let gruposHerdados: GrupoRegistrado[] = [];
 
 /** Anota a lista no arquivo da instância; uma falha de disco não pode derrubar o turno (o `exit` ainda mata). */
 function anotarGrupos(): void {
   if (arquivoDeGrupos === null) return;
   try {
-    gravarArquivoDeGrupos(arquivoDeGrupos, { dono: { pid: process.pid, inicioMs: inicioDesteProcesso() }, grupos: [...gruposVivos.values()] });
+    gravarArquivoDeGrupos(arquivoDeGrupos, { dono: { pid: process.pid, inicioMs: inicioDesteProcesso() }, grupos: [...gruposHerdados, ...gruposVivos.values()] });
   } catch {
     // disco cheio ou sem permissão: segue só com o `exit`, como antes da ADR-089
   }
@@ -70,8 +89,9 @@ function anotarGrupos(): void {
  * Liga o registro em arquivo (ADR-089). O boot chama depois de `encerrarGruposOrfaos` dizer que este processo assumiu o
  * arquivo; null desliga (os testes).
  */
-export function registrarGruposEm(arquivo: string | null): void {
+export function registrarGruposEm(arquivo: string | null, herdados: readonly GrupoRegistrado[] = []): void {
   arquivoDeGrupos = arquivo;
+  gruposHerdados = arquivo === null ? [] : [...herdados];
   prefixoDeMarca = arquivo === null ? null : prefixoDaMarca(arquivo);
   anotarGrupos();
 }
@@ -81,7 +101,26 @@ export function registrarGruposEm(arquivo: string | null): void {
  * sair (will-quit). Síncrono e idempotente.
  */
 export function encerrarGruposVivos(): void {
-  for (const g of gruposVivos.keys()) {
+  // ADR-147: no Windows, uma foto síncrona (só se houver visto) para conferir pid + início antes de matar.
+  const windows = ehWindows();
+  let foto: ProcessoVisto[] = [];
+  if (windows && [...gruposVivos.values()].some((g) => (g.vistos ?? []).length > 0)) {
+    try {
+      foto = processosDoWindowsSync();
+    } catch {
+      // sem foto: os vistos ficam no arquivo para o boot seguinte (revisão 14, M1)
+    }
+  }
+  const pendentes: [number, GrupoRegistrado][] = [];
+  for (const [g, grupo] of gruposVivos) {
+    if (windows) {
+      // Sem grupo no Windows: a árvore do líder que ainda é nosso, e cada visto que ainda bate, pelo próprio pid.
+      if (!lideresQueSairam.has(g)) matarArvoreSync(g, arvoreDaRaiz(g, foto.length > 0 ? foto : ultimaFotoDaVigia, grupo));
+      const { matar, soltar } = decidirVistos(g, grupo.vistos ?? [], foto);
+      for (const v of matar) matarArvoreSync(v, { arvore: false });
+      if (!soltar) pendentes.push([g, grupo]);
+      continue;
+    }
     try {
       process.kill(-g, "SIGKILL");
     } catch {
@@ -89,11 +128,16 @@ export function encerrarGruposVivos(): void {
     }
   }
   gruposVivos.clear();
+  lideresQueSairam.clear();
+  // Revisão 14 do PR #642 (M1): sem foto, os vistos não foram conferidos; o grupo continua no arquivo para o boot.
+  for (const [g, grupo] of pendentes) { gruposVivos.set(g, grupo); lideresQueSairam.add(g); }
+  pararVigiaCompartilhada();
   anotarGrupos();
 }
 
 /** Sinal para o grupo inteiro; sem grupo (plataforma sem `-pid`) ou já morto, cai no próprio processo. */
 function sinalizarGrupo(pid: number, sinal: NodeJS.Signals, sozinho: () => void): void {
+  if (ehWindows()) return; // ADR-147: no Windows quem mata é o `matarArvoreNoWindows` (taskkill), não sinal
   try {
     process.kill(-pid, sinal);
   } catch {
@@ -106,6 +150,11 @@ function sinalizarGrupo(pid: number, sinal: NodeJS.Signals, sozinho: () => void)
 }
 
 function vigiarGrupo(pid: number, grupo: GrupoRegistrado): void {
+  // Revisão 14 do PR #642 (M1): um grupo antigo com o mesmo pid (líder que saiu, vistos ainda sem foto) não se perde:
+  // os vistos dele passam para o novo registro e seguem conferidos por pid + início.
+  const antigo = gruposVivos.get(pid);
+  if (antigo && (antigo.vistos ?? []).length > 0) grupo.vistos = [...(antigo.vistos ?? []), ...(grupo.vistos ?? [])];
+  lideresQueSairam.delete(pid);
   gruposVivos.set(pid, grupo);
   anotarGrupos();
   if (ganchoDeSaida) return;
@@ -113,11 +162,104 @@ function vigiarGrupo(pid: number, grupo: GrupoRegistrado): void {
   process.on("exit", encerrarGruposVivos);
 }
 
+/**
+ * Revisão 14b do PR #642 (M1): solta só se o registro do pid ainda é este (por identidade). No Windows o pid fica livre
+ * logo no `exit`; o `interromper()` tardio de um turno não pode soltar (nem matar) o turno novo que herdou o pid.
+ */
+function soltarSeForOMesmo(grupo: GrupoRegistrado): boolean {
+  return gruposVivos.get(grupo.pid) === grupo && soltarGrupo(grupo.pid);
+}
+
 /** Tira o grupo da lista (e do arquivo); true se ele estava lá — só então o pid ainda é nosso. */
 function soltarGrupo(pid: number): boolean {
+  lideresQueSairam.delete(pid);
+  vigiados.delete(pid);
+  if (vigiados.size === 0) pararVigiaCompartilhada();
   if (!gruposVivos.delete(pid)) return false;
   anotarGrupos();
   return true;
+}
+
+/**
+ * Revisão 14 do PR #642 (M1): o que fazer com os vistos de um líder que saiu ou foi parado. Mata os que batem pid +
+ * início na foto; só solta o grupo (e apaga do arquivo) se a foto existe ou não havia visto. Sem foto (o CIM falhou ou
+ * estourou o prazo), nada foi conferido: o grupo fica para uma nova foto, o `exit` e o boot seguinte.
+ */
+export function decidirVistos(lider: number, vistos: readonly { pid: number; inicioMs: number }[], foto: readonly ProcessoVisto[]): { matar: number[]; soltar: boolean } {
+  return { matar: vistosQueBatem(vistos, foto).filter((v) => v !== lider), soltar: vistos.length === 0 || foto.length > 0 };
+}
+
+/**
+ * Confere os vistos do grupo com uma foto e solta o grupo só se a foto deu certo — e só se o registro ainda é o mesmo
+ * (um spawn novo com o pid reaproveitado não é solto por engano).
+ */
+async function conferirVistosESoltar(grupo: GrupoRegistrado, tirar: () => Promise<ProcessoVisto[]> = () => processosDoWindows()): Promise<boolean> {
+  if (gruposVivos.get(grupo.pid) !== grupo) return true;
+  const foto = await tirar().catch(() => [] as ProcessoVisto[]);
+  // Depois da foto o registro pode ser de outro turno (pid reaproveitado): os vistos lidos são os deste grupo.
+  const { matar, soltar } = decidirVistos(grupo.pid, grupo.vistos ?? [], foto);
+  for (const v of matar) matarArvoreSync(v, { arvore: false });
+  if (soltar) soltarSeForOMesmo(grupo);
+  return soltar;
+}
+
+/**
+ * ADA-11 (ADR-147): de quanto em quanto o turno no Windows fotografa os descendentes do CLI. Com o pai morto o
+ * `taskkill /T` não acha os filhos; o que foi visto aqui (pid + início) morre no Parar e no boot seguinte.
+ */
+export const VIGIA_DE_DESCENDENTES_MS = 3_000;
+
+/**
+ * Uma vigia só para todos os turnos do Windows (revisão do PR #642, M7): uma foto do CIM a cada batida, repartida entre
+ * os líderes vigiados, em vez de um PowerShell por turno. Uma foto por vez; para quando não sobra ninguém.
+ */
+const vigiados = new Set<number>();
+/** A última foto da vigia: para conferir, antes do `taskkill /T`, que a árvore da raiz não tem pai velho (revisão 4, M4). */
+let ultimaFotoDaVigia: readonly ProcessoVisto[] = [];
+/**
+ * Revisão 12 do PR #642 (médio F): o `/T` só com o líder na foto — a árvore dele conferida. Sem o líder (turno de menos
+ * de 3 s, foto que falhou), a raiz morre sem `/T` e os descendentes pelos vistos.
+ */
+// Revisão 16 do PR #642 (médio 4): com a janela do spawn, o líder da foto só vale com o início dentro dela (± folga) —
+// numa foto velha o pid pode já ser de outro processo, com filhos que o `/T` levaria.
+export const arvoreDaRaiz = (pid: number, foto: readonly ProcessoVisto[] = ultimaFotoDaVigia, janela?: { desdeMs: number; ateMs: number }): { arvore: boolean } => ({
+  arvore: foto.some((p) => p.pid === pid && (janela === undefined || (p.inicioMs >= janela.desdeMs - FOLGA_DO_INICIO_MS && p.inicioMs <= janela.ateMs + FOLGA_DO_INICIO_MS))) && !temFilhoMaisVelhoQueOPai(pid, foto),
+});
+let vigiaCompartilhada: ReturnType<typeof setInterval> | null = null;
+let fotoEmCurso: Promise<void> | null = null;
+function fotografarVigiados(): Promise<void> {
+  fotoEmCurso ??= processosDoWindows()
+    .then((foto) => { if (foto.length > 0) ultimaFotoDaVigia = foto; for (const pid of vigiados) anotarVistos(pid, foto); })
+    .finally(() => { fotoEmCurso = null; });
+  return fotoEmCurso;
+}
+function vigiarDescendentes(pid: number): void {
+  vigiados.add(pid);
+  if (vigiaCompartilhada) return;
+  vigiaCompartilhada = setInterval(() => void fotografarVigiados(), VIGIA_DE_DESCENDENTES_MS);
+  vigiaCompartilhada.unref();
+}
+function pararVigiaCompartilhada(): void {
+  if (vigiaCompartilhada) clearInterval(vigiaCompartilhada);
+  vigiaCompartilhada = null;
+  ultimaFotoDaVigia = []; // revisão 16 (médio 4): sem vigia, a foto envelhece e o pid nela pode ser de outro
+}
+
+/** Junta os descendentes de `pid` na foto ao que o grupo já tinha visto, e regrava o arquivo se apareceu alguém. */
+function anotarVistos(pid: number, foto: readonly ProcessoVisto[]): void {
+  const grupo = gruposVivos.get(pid);
+  if (!grupo || lideresQueSairam.has(pid)) return;
+  const antes = new Map((grupo.vistos ?? []).map((v) => [v.pid, v]));
+  let novo = false;
+  for (const d of descendentesDoLider(pid, grupo, foto)) {
+    const ja = antes.get(d.pid);
+    if (ja && ja.inicioMs === d.inicioMs) continue;
+    antes.set(d.pid, { pid: d.pid, inicioMs: d.inicioMs });
+    novo = true;
+  }
+  if (!novo) return;
+  grupo.vistos = [...antes.values()];
+  anotarGrupos();
 }
 
 /** Os grupos que este processo do nod ainda tem vivos (os testes conferem que o Parar os solta). */
@@ -204,11 +346,49 @@ export function iniciarProcesso(o: {
   const desdeMs = Date.now();
   // ADR-097 (fase 2): o `sh` do spawnNoGrupo entra no grupo e vira o programa (exec): mesmo pid, mesmo grupo de processos.
   const grupo = (o.repartir ?? o.encerrarFugitivos !== false) ? abrirGrupoDoTurno() : null;
-  const alvo = grupo ? spawnNoGrupo(join(grupo, "cgroup.procs"), o.bin, o.args) : { bin: o.bin, args: [...o.args] };
-  const filho = spawn(alvo.bin, alvo.args, { cwd: o.cwd, env, stdio: [o.stdin ?? "pipe", "pipe", "pipe"], detached: true });
+  const windows = ehWindows();
+  // ADR-147: no Windows o `.cmd` do npm vira `node <script>` e o `.ps1` vai pelo PowerShell (nunca `cmd.exe /c`).
+  let alvo: { bin: string; args: string[] };
+  try {
+    const noWindows = windows ? resolverBinario(o.bin) : null;
+    // Revisão 7 do PR #642 (médio 13): no Windows o nome solto no `spawn` acharia um `.exe` da cwd (a worktree do bot).
+    if (windows && noWindows === null && !grupo) throw new BinarioSemSuporte(`${o.bin} não foi achado no PATH.`);
+    alvo = grupo ? spawnNoGrupo(join(grupo, "cgroup.procs"), o.bin, o.args) : noWindows ? { bin: noWindows.bin, args: [...noWindows.args, ...o.args] } : { bin: o.bin, args: [...o.args] };
+  } catch (erro) {
+    if (!(erro instanceof BinarioSemSuporte)) throw erro;
+    return processoQueNaoNasceu(erro);
+  }
+  // ADR-147: `detached` no Windows abre um console novo e não cria grupo; lá a árvore é do taskkill.
+  const filho = spawn(alvo.bin, alvo.args, { cwd: o.cwd, env, stdio: [o.stdin ?? "pipe", "pipe", "pipe"], detached: !windows, windowsHide: true });
   const pid = filho.pid;
   // ADR-089: o relógio antes e depois do spawn cerca o início que o `ps` vai mostrar para este líder.
-  if (pid !== undefined) vigiarGrupo(pid, { pid, desdeMs, ateMs: Date.now(), programa: basename(o.bin), marca });
+  // Revisão 14b do PR #642 (M1): o registro deste spawn, por identidade — o pid sozinho pode já ser de outro turno.
+  const meu: GrupoRegistrado | null = pid === undefined ? null : { pid, desdeMs, ateMs: Date.now(), programa: basename(o.bin), marca };
+  const ehMeu = (): boolean => meu !== null && gruposVivos.get(meu.pid) === meu;
+  if (pid !== undefined && meu) vigiarGrupo(pid, meu);
+  // ADR-147: a vigia dos descendentes no Windows (a compartilhada; o turno sai dela ao soltar o grupo). A sonda não vigia.
+  if (windows && pid !== undefined && o.encerrarFugitivos !== false) vigiarDescendentes(pid);
+  const pararVigia = () => { if (pid !== undefined && (ehMeu() || !gruposVivos.has(pid))) vigiados.delete(pid); if (vigiados.size === 0) pararVigiaCompartilhada(); };
+  /**
+   * ADR-147: primeiro o `taskkill /T /F` na raiz enquanto ela é nossa (o Node segura o handle até o `exit`, então o pid
+   * não foi reaproveitado) — com a foto da vigia, sem esperar outra; sem o líder nela, uma foto de até 2 s (revisão 16,
+   * médio 5). Depois uma foto, e cada visto que ainda bate pid + início morre pelo próprio pid, sem `/T`.
+   */
+  const matarArvoreNoWindows = async (): Promise<boolean> => {
+    if (pid === undefined) return true;
+    const limite = Date.now() + ORCAMENTO_DO_PARAR_MS;
+    // Sem o líder na última foto da vigia (turno curto), uma foto agora (até 2 s) para conferir a árvore antes do `/T`.
+    // Revisão 13 do PR #642 (C1): cada foto com prazo curto, para o "Parar" caber nos 7 s. Revisão 14 (médio 3): sem foto
+    // nenhuma (o CIM falhou ou demorou) não dá para provar a árvore — o `/T` poderia levar um processo alheio cujo pai
+    // registrado é um pid reaproveitado. Vai só a raiz; os descendentes saem pelos vistos da vigia (pid + início).
+    // Revisão 16 (médio 5): `taskkill` assíncrono com prazo, e as fotos e os kills cabem num orçamento só.
+    const fotoAntes = ultimaFotoDaVigia.some((p) => p.pid === pid) ? ultimaFotoDaVigia : await fotoComPrazo(FOTO_ANTES_DO_T_MS);
+    if (!saiu) await matarArvore(pid, { ...arvoreDaRaiz(pid, fotoAntes, meu ?? undefined), prazoMs: TASKKILL_DO_PARAR_MS });
+    const foto = await fotoComPrazo(Math.max(500, Math.min(FOTO_DEPOIS_DO_T_MS, limite - Date.now() - TASKKILL_DO_PARAR_MS)));
+    const { matar, soltar } = decidirVistos(pid, meu?.vistos ?? [], foto);
+    await Promise.all(matar.map((v) => matarArvore(v, { arvore: false, prazoMs: TASKKILL_DO_PARAR_MS })));
+    return soltar;
+  };
   let stderr = "";
   const linhas = criarDivisorDeLinhas((linha) => o.aoLinha(linha));
   let terminou = false;
@@ -243,6 +423,9 @@ export function iniciarProcesso(o: {
     filho.on("error", (erro) => concluir({ exitCode: null, signal: null, stderr, erroSpawn: erro }));
     filho.on("exit", () => {
       saiu = true;
+      if (windows && pid !== undefined && ehMeu()) lideresQueSairam.add(pid);
+      // Revisão 3 do PR #642 (médio 3): o líder saiu; a vigia não fotografa mais o pid dele (pode ser reaproveitado).
+      if (windows && pid !== undefined) pararVigia();
     });
     // 'close' (e não 'exit'): garante que o stdout foi drenado até a última linha
     filho.on("close", (code, signal) => concluir({ exitCode: code, signal, stderr, erroSpawn: null }));
@@ -252,7 +435,14 @@ export function iniciarProcesso(o: {
     // revisto em 2026-10-08 (revisão do épico #188, X6): o líder que sai sozinho pode deixar neto no grupo (um
     // `sleep 60 &` do Bash do modelo, um servidor MCP). Fora da lista, o `exit` do app não o mataria mais: o grupo é
     // levado agora, enquanto o pid ainda é nosso (o grupo vive enquanto houver membro, então não foi reusado).
-    if (pid !== undefined && !interrompido && soltarGrupo(pid)) {
+    pararVigia();
+    if (pid !== undefined && !interrompido && windows) {
+      // ADR-147: o líder saiu sozinho; os vistos que ainda batem pid + início morrem antes de soltar o grupo.
+      // Revisão 14 (M1): sem foto, o grupo não sai do arquivo — o boot seguinte confere os vistos.
+      if (meu) void conferirVistosESoltar(meu);
+      return r;
+    }
+    if (pid !== undefined && !interrompido && meu && soltarSeForOMesmo(meu)) {
       try {
         process.kill(-pid, "SIGKILL");
       } catch {
@@ -283,10 +473,29 @@ export function iniciarProcesso(o: {
     async interromper() {
       interrompido = true;
       if (pid === undefined) return;
+      if (windows) {
+        // ADR-147: sem SIGTERM para a árvore no Windows: `taskkill /T /F` direto, na raiz e nos vistos (pid + início).
+        const conferido = ehMeu() ? await matarArvoreNoWindows() : true;
+        if (!terminou) {
+          const fechou = await Promise.race([fim.then(() => true), dormir(esperaAteSigkill).then(() => false)]);
+          if (!fechou) {
+            if (!saiu) filho.kill("SIGKILL");
+            const fechouDepois = await Promise.race([fim.then(() => true), dormir(DEPOIS_DO_SIGKILL_MS).then(() => false)]);
+            if (!fechouDepois) fecharStdio();
+            await fim;
+          }
+        }
+        pararVigia();
+        // Revisão 14 do PR #642 (M1): a foto do Parar falhou ou estourou o prazo — os vistos não foram conferidos. O grupo
+        // fica no arquivo e uma foto sem prazo tenta de novo, fora dos 7 s; se ela também falhar, sobra para o boot.
+        if (conferido) { if (meu) soltarSeForOMesmo(meu); }
+        else if (meu) void conferirVistosESoltar(meu);
+        return;
+      }
       if (terminou) {
         // O líder já saiu; um neto do grupo pode estar vivo (Bash do modelo). Leva o grupo, sem esperar — só se ele
         // ainda é nosso (fora da lista, o pid pode já ser de outro).
-        if (soltarGrupo(pid)) {
+        if (meu && soltarSeForOMesmo(meu)) {
           sinalizarGrupo(pid, "SIGKILL", () => undefined);
           levarFugitivos();
         }
@@ -303,10 +512,16 @@ export function iniciarProcesso(o: {
       }
       // Quem saiu no SIGTERM pode ter deixado neto no grupo: o SIGKILL final não custa nada se não houver.
       sinalizarGrupo(pid, "SIGKILL", () => undefined);
-      if (soltarGrupo(pid)) levarFugitivos();
+      if (meu && soltarSeForOMesmo(meu)) levarFugitivos();
     },
     fim,
   };
+}
+
+/** ADR-147: o binário que o nod não roda no Windows sem `cmd.exe` vira um fim com erro de spawn, como um ENOENT. */
+function processoQueNaoNasceu(erro: Error): Processo {
+  const fim = Promise.resolve<FimProcesso>({ exitCode: null, signal: null, stderr: "", erroSpawn: erro });
+  return { pid: null, escrever: () => undefined, fecharStdin: () => undefined, interrompido: () => false, interromper: async () => undefined, fim };
 }
 
 /** Roda até o fim (ou até `timeoutMs`, quando mata com SIGKILL) e devolve stdout inteiro. Para sonda e `--version`. */

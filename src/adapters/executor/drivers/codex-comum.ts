@@ -108,7 +108,10 @@ export const MATCHER_HOOK_CODEX = "^(Bash|apply_patch|view_image|spawn_agent)$|^
  * variável VARIAVEL_CONFIG_HOOK. O Codex não roda o comando num shell (medido: `cmd || exit 2` não negou), então o
  * ELECTRON_RUN_AS_NODE do app do Mac vai pelo `/usr/bin/env`.
  */
-export function comandoHookCodex(p: { nodePath: string; hookPath: string; electronComoNode?: boolean }): string {
+export function comandoHookCodex(p: { nodePath: string; hookPath: string; electronComoNode?: boolean; windows?: boolean }): string {
+  // ADA-11 (ADR-147): no Windows, aspas duplas e barras "/" (o que o CreateProcess, o Git Bash e o cmd leem igual; o
+  // caminho do Windows não aceita `"`). Fica atrás de NOD_CODEX_TERMINAL_WINDOWS até a sonda provar.
+  if (p.windows) return [p.nodePath, p.hookPath].map((c) => `"${c.replace(/\\/g, "/")}"`).join(" ");
   const aspas = (s: string) => `'${s.replace(/'/g, "'\\''")}'`;
   return `${p.electronComoNode ? "/usr/bin/env ELECTRON_RUN_AS_NODE=1 " : ""}${aspas(p.nodePath)} ${aspas(p.hookPath)}`;
 }

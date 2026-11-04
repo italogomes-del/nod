@@ -172,6 +172,8 @@ export function encerrarFugitivosDoTurno(
  * existe ainda, então tudo que tem o prefixo e não é ancestral é sobra.
  */
 export function encerrarFugitivosDaInstancia(arquivo: string, dep: DependenciasDosFugitivos = {}): Promise<AlvoFugitivo[]> {
+  // ADR-147: no Windows o ambiente dos outros processos não é legível; a posse lá é pid + início (grupos-orfaos.ts).
+  if (process.platform === "win32") return Promise.resolve([]);
   const prefixo = `${VARIAVEL_DA_MARCA}=${prefixoDaMarca(arquivo)}-`;
   return encerrar({
     momento: "boot",

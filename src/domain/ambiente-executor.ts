@@ -22,7 +22,27 @@ export function chaveNegada(nome: string): boolean {
   return PREFIXOS_NEGADOS.some((p) => nome.startsWith(p));
 }
 
-export function montarAmbiente(regime: RegimeAmbiente, source: Readonly<Record<string, string | undefined>>): Record<string, string> {
+/**
+ * ADA-11 (ADR-147): no Windows o filho sem `SystemRoot` não acha nem o Winsock, e o nome das variáveis não tem caixa
+ * (`Path` = `PATH`). A allowlist do servidor ganha o mínimo do Windows, lido sem caixa e gravado com o nome de sempre.
+ */
+const ALLOWLIST_WINDOWS = ["SystemRoot", "windir", "SystemDrive", "APPDATA", "LOCALAPPDATA", "USERPROFILE", "ComSpec", "PATHEXT", "TEMP", "TMP", "ProgramData", "ProgramFiles"] as const;
+
+function lerSemCaixa(source: Readonly<Record<string, string | undefined>>, nome: string): string | undefined {
+  const alvo = nome.toUpperCase();
+  for (const [k, v] of Object.entries(source)) if (k.toUpperCase() === alvo && v !== undefined) return v;
+  return undefined;
+}
+
+/** ADR-147: grava `PATH` tirando as outras grafias (`Path`), que no Windows são a mesma variável e duplicariam. */
+export function comPath(env: Readonly<Record<string, string>>, valor: string, windows: boolean): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(env)) if (!(windows && k.toUpperCase() === "PATH")) out[k] = v;
+  out.PATH = valor;
+  return out;
+}
+
+export function montarAmbiente(regime: RegimeAmbiente, source: Readonly<Record<string, string | undefined>>, plataforma?: string): Record<string, string> {
   const out: Record<string, string> = {};
   if (regime === "local") {
     for (const [k, v] of Object.entries(source)) {
@@ -31,8 +51,9 @@ export function montarAmbiente(regime: RegimeAmbiente, source: Readonly<Record<s
     }
     return out;
   }
-  for (const k of ALLOWLIST_SERVIDOR) {
-    const v = source[k];
+  const windows = plataforma === "win32";
+  for (const k of windows ? [...ALLOWLIST_SERVIDOR, ...ALLOWLIST_WINDOWS] : ALLOWLIST_SERVIDOR) {
+    const v = windows ? lerSemCaixa(source, k) : source[k];
     if (v !== undefined) out[k] = v;
   }
   return out;
@@ -48,8 +69,8 @@ export const ALLOWLIST_AMBIENTE_SERVIDOR = ALLOWLIST_SERVIDOR;
  */
 const ALLOWLIST_NATIVO_EXTRA = ["USER", "LOGNAME", "XDG_CONFIG_HOME", "GH_CONFIG_DIR", "GH_HOST"] as const;
 
-export function montarAmbienteConectorNativo(source: Readonly<Record<string, string | undefined>>): Record<string, string> {
-  const out = montarAmbiente("servidor", source);
+export function montarAmbienteConectorNativo(source: Readonly<Record<string, string | undefined>>, plataforma?: string): Record<string, string> {
+  const out = montarAmbiente("servidor", source, plataforma);
   for (const k of ALLOWLIST_NATIVO_EXTRA) {
     const v = source[k];
     if (v !== undefined) out[k] = v;

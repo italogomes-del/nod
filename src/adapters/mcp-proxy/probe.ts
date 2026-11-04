@@ -96,7 +96,7 @@ export function causaDaFalhaDeSonda(e: unknown): string {
 }
 
 export async function sondarConector(cfg: ConfigSonda, opcoes: OpcoesSonda = {}): Promise<ResultadoSonda> {
-  const env = cfg.transporte === "http" ? { ...(cfg.env ?? {}) } : { ...montarAmbiente("servidor", opcoes.ambiente ?? process.env), ...(cfg.env ?? {}) };
+  const env = cfg.transporte === "http" ? { ...(cfg.env ?? {}) } : { ...montarAmbiente("servidor", opcoes.ambiente ?? process.env, process.platform), ...(cfg.env ?? {}) };
   const cliente = criarClienteMcp({
     nome: cfg.nome,
     transporte: cfg.transporte,

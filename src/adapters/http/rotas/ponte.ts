@@ -250,15 +250,20 @@ export function criarPonteHttpServidor(d: {
       ctx.res.setHeader("set-cookie", cabecalhoCookieSessao(ctx.escopo, d.segredo, d.seguro, undefined, sid));
       // NOD-94: o papel da chave vai junto — a máquina só-computador não sobe o laço de turnos.
       const papel = (await d.papelDaChave?.(ctx.escopo, ctx.params.chaveId!)) ?? "motor";
-      ctx.json(200, { escopo: ctx.escopo, machineId: ctx.params.chaveId, papel });
+      // ADA-11 (ADR-147): as plataformas que este servidor conhece. O motor do Windows só conecta se o win32 está aqui
+      // (um servidor antigo, num rollback, o trataria como Mac).
+      ctx.json(200, { escopo: ctx.escopo, machineId: ctx.params.chaveId, papel, plataformas: PLATAFORMAS_MAQUINA });
     }),
     rota("conectar", async (ctx, b) => {
       exigir(b.versaoContrato === 1 && texto(b.nome, 100) && b.nome.trim());
       const id = ctx.params.chaveId!;
       const antes = assinaturaDasIas(ctx.escopo.pessoaId);
-      // ADR-090: o nome e o sistema da máquina (o motor sem janela manda "linux"). Ausente ou desconhecido = app do Mac.
+      // ADR-090: o nome e o sistema da máquina (o motor sem janela manda "linux"). Ausente = app do Mac.
+      // ADR-147 (definido em 2026-11-03): desconhecido é recusado — virar Mac em silêncio era o que um servidor antigo
+      // fazia com o motor do Windows (voz e VM locais erradas).
       const nome = b.nome.trim();
-      const plataforma = PLATAFORMAS_MAQUINA.find((x) => x === b.plataforma) ?? "darwin";
+      const plataforma = b.plataforma === undefined ? "darwin" : PLATAFORMAS_MAQUINA.find((x) => x === b.plataforma);
+      exigir(plataforma !== undefined);
       let c = conexoes.get(id);
       if (!c) {
         c = { escopo: ctx.escopo, ponte: d.criar(ctx.escopo), inv: ausente(), ultimo: d.agora(), puxando: false, planos: new Map(), recebidas: new Map(), gh: false, nome, plataforma, anuncio: null, rebaixada: false, papel: "motor" };

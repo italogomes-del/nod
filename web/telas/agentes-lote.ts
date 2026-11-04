@@ -85,7 +85,7 @@ export function opcoesDeMaquinaLote(estado: Estado): OpcaoLote[] {
       : `${m.ultimoUsoEm ? `Offline desde ${dataHora(m.ultimoUsoEm)}` : "Offline"}: reconecte para escolher`;
     return {
       valor: m.id, nome: m.nome, icone, status: statusDaMaquina(estado, m), desabilitada,
-      detalhe: desabilitada ? motivo : m.nuvem ? "VM na nuvem" : m.plataforma === "darwin" ? "Mac" : "Linux",
+      detalhe: desabilitada ? motivo : m.nuvem ? "VM na nuvem" : m.plataforma === "darwin" ? "Mac" : m.plataforma === "win32" ? "Windows" : "Linux",
     };
   })];
 }
