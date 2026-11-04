@@ -2,8 +2,8 @@
 # Startup da VM do runner (provisionar-runner.sh). Roda como root a cada boot; só instala e registra uma vez.
 # Os runners da VM vêm da metadata "runners" (nome:label separados por espaço). Sem ela, os três da 1ª VM:
 #   nod-ci-1 e nod-ci-2 (label nod-ci): lint, unit e deploy;
-#   nod-ci-integracao (label nod-integracao): sobe o Postgres na porta 5434 do host, então cada VM tem no
-#   máximo um runner de integração e dois jobs de integração nunca disputam a porta.
+#   nod-ci-integracao (label nod-integracao): até 2026-11-04 era o único que subia o Postgres (porta fixa 5434);
+#   desde então o Postgres de cada job sobe em porta sorteada e qualquer runner serve os jobs com banco.
 set -euo pipefail
 MARCA=/var/lib/nod-runner-pronto
 [ -f "$MARCA" ] && exit 0

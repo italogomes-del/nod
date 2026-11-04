@@ -157,7 +157,7 @@ linhas com `randomUUID` dentro do envelope; só `tests/helpers/ids.ts` (identida
 contra o servidor de verdade: `FUZZ_N` entradas por ação (20 no PR, 200 no `fuzz-noturno.yml`) e `FUZZ_SEMENTE` para
 reproduzir (no PR ela sai do `GITHUB_SHA`; a falha imprime a linha de comando). `tests/concurrency/qa-pelas-acoes.test.ts`
 e `tela-capturar.test.ts` precisam da web montada (`npx vite build`) e de um Chromium (`NOD_CHROME`); sem eles pulam,
-menos com `NOD_QA_EXIGE_CHROME=1` (só o job integration). A ação `tela.capturar` fica atrás de `NOD_CAPTURA_TELA=1`,
+menos com `NOD_QA_EXIGE_CHROME=1` (só o job navegador da CI). A ação `tela.capturar` fica atrás de `NOD_CAPTURA_TELA=1`,
 desligada em produção (503 `indisponivel`).
 
 **Teste sob carga** (NOD-194, 2026-10-07). O Mac roda a suíte de vários bots ao mesmo tempo (load 600–950),

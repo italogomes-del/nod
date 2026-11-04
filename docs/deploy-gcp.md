@@ -384,7 +384,13 @@ account; o deploy se autentica pelo WIF, como antes. O `desktop-release` continu
 
 Desde 2026-10-21 há uma segunda VM igual, `nod-ci-runner-2`, com `nod-ci-3` (label `nod-ci`) e
 `nod-ci-integracao-2` (label `nod-integracao`): a integração era o gargalo, com PRs de bots esperando na fila do
-único runner com Postgres. Cada VM tem no máximo um runner de integração, por causa da porta 5434.
+único runner com Postgres.
+
+Desde 2026-11-04 o Postgres de cada job sobe na porta que o Docker sorteia (`.github/actions/banco-de-teste`), então
+**qualquer runner das VMs serve os jobs com banco** (`runs-on: [self-hosted, linux]`); o label `nod-integracao` deixou
+de ter papel e a integração foi dividida em quatro jobs paralelos (`integracao`, `concorrencia` ×2, `navegador`). Com 3
+runners por VM, uma `e2-standard-4` aguenta três jobs com banco ao mesmo tempo (medido: 12 GB livres em repouso). Se a
+fila crescer, o caminho é registrar mais runners por VM (`RUNNERS` do script abaixo) antes de criar outra VM.
 
 ```bash
 # Criar ou recriar (idempotente; precisa do gh com admin no repo)
