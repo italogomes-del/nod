@@ -214,6 +214,10 @@ NOD_COMPUTADORES="$(limpo "${NOD_COMPUTADORES:-}")"
 NOD_COMPUTADOR_VERSAO_MINIMA="$(limpo "${NOD_COMPUTADOR_VERSAO_MINIMA:-}")"
 NOD_MAQUINA_NUVEM="$(limpo "${NOD_MAQUINA_NUVEM:-}")"
 NOD_NUVEM_CONTA_FATURAMENTO="$(limpo "${NOD_NUVEM_CONTA_FATURAMENTO:-}")"
+# NOD-132 (ADR-149): a versão anunciada aos apps do Mac e o bucket dos ZIPs (vazio = desligada; o boot valida o formato).
+NOD_APP_VERSAO_PUBLICADA="$(limpo "${NOD_APP_VERSAO_PUBLICADA:-}")"
+NOD_APP_ATUALIZACAO_BUCKET="$(limpo "${NOD_APP_ATUALIZACAO_BUCKET:-}")"
+NOD_APP_ATUALIZACAO_SHA256="$(limpo "${NOD_APP_ATUALIZACAO_SHA256:-}")"
 # NOD-421: o laço dos PRs do quadro (até 5 dono/repo). Só estes tenants sincronizam pelo token do servidor (vazio =
 # nenhum, e o laço não sobe). Ligar exige o segredo nod-github-quadro-token + o tenant na lista + o 🧭 da Ada/Marlon
 # (ADR-145, proposta). 3ª revisão do PR #621: sem o segredo, a lista sai VAZIA no nod.env, então nada sobe em produção
@@ -282,6 +286,10 @@ NOD_COMPUTADOR_VERSAO_MINIMA=$NOD_COMPUTADOR_VERSAO_MINIMA
 NOD_MAQUINA_NUVEM=$NOD_MAQUINA_NUVEM
 NOD_NUVEM_REDIRECT_URI=https://$NOD_DOMINIO/api/nuvem/google/callback
 NOD_NUVEM_CONTA_FATURAMENTO=${NOD_NUVEM_CONTA_FATURAMENTO:-}
+# NOD-132 (ADR-149): a atualização automática do app do Mac (config.env). Vazio = o feed responde 204.
+NOD_APP_VERSAO_PUBLICADA=$NOD_APP_VERSAO_PUBLICADA
+NOD_APP_ATUALIZACAO_BUCKET=$NOD_APP_ATUALIZACAO_BUCKET
+NOD_APP_ATUALIZACAO_SHA256=$NOD_APP_ATUALIZACAO_SHA256
 # ADR-124 §6 (NOD-406): contas com e-mail e senha, recuperação e o espaço provisório. Vazio = desligado. O link de
 # recuperação usa o NOD_URL_PUBLICA acima.
 NOD_CONTAS=$NOD_CONTAS

@@ -99,11 +99,12 @@ jobs:
       - name: Empacotar, assinar e notarizar o .app
         run: |
           set -euo pipefail
-          npx electron-builder --mac dmg --"$ARCH" --publish never --config.forceCodeSigning=true
+          npx electron-builder --mac dmg zip --"$ARCH" --publish never --config.forceCodeSigning=true
           shopt -s nullglob
           apps=(release/*/nod.app)
           dmgs=(release/*.dmg)
-          if [ "${#apps[@]}" -ne 1 ] || [ "${#dmgs[@]}" -ne 1 ]; then echo "::error::esperava só o app e o DMG $ARCH, veio: ${apps[*]} ${dmgs[*]}"; exit 1; fi
+          zips=(release/nod-*-mac-"$ARCH".zip)
+          if [ "${#apps[@]}" -ne 1 ] || [ "${#dmgs[@]}" -ne 1 ] || [ "${#zips[@]}" -ne 1 ]; then echo "::error::esperava só o app, o DMG e o ZIP $ARCH, veio: ${apps[*]} ${dmgs[*]} ${zips[*]}"; exit 1; fi
       # NOD-203: o electron-builder notariza só o .app; o DMG é notarizado e grampeado aqui. O `--wait` sai com 0
       # mesmo com status Invalid, então o status é conferido pelo verificador. A senha só passa pela expansão do env.
       - name: Notarizar e grampear o DMG
@@ -130,6 +131,19 @@ jobs:
           if [ "$VEIO" != "$LIPO" ] || [ "$(uname -m)" != "$LIPO" ]; then echo "::error::$APP é $VEIO, o job é $LIPO e o runner é $(uname -m)"; exit 1; fi
           node scripts/desktop/smoke-proxy.mjs "$APP/Contents/MacOS/nod" "$APP/Contents/Resources/app.asar.unpacked/dist/desktop/proxy.mjs"
           node scripts/desktop/verificar-pacote-mac.mjs pacote "$APP" release/nod-*-mac-"$ARCH".dmg
+      # NOD-132 (ADR-149): o ZIP é o que o Squirrel.Mac baixa e instala sem perguntar. O .app de dentro passa pela mesma
+      # verificação de assinatura, grampo e Gatekeeper antes de subir.
+      - name: Verificar o .app do ZIP da atualização
+        run: |
+          set -euo pipefail
+          ZIP=$(ls release/nod-*-mac-"$ARCH".zip)
+          DIR=$(mktemp -d)
+          ditto -x -k "$ZIP" "$DIR"
+          test -d "$DIR/nod.app"
+          codesign --verify --deep --strict --verbose=2 "$DIR/nod.app"
+          xcrun stapler validate "$DIR/nod.app"
+          spctl -a -vv -t exec "$DIR/nod.app"
+          rm -rf "$DIR"
       - name: Diagnóstico do pacote
         if: failure()
         run: |
@@ -141,14 +155,15 @@ jobs:
             spctl -a -vv "$A" || true
           done
           ls -la release || true
-      # Depois do grampo e da verificação: o hash publicado é o do DMG final.
-      - name: SHA-256 do DMG
-        run: shasum -a 256 release/nod-*-mac-"$ARCH".dmg > "release/SHA256-${ARCH}.txt"
+      # Depois do grampo e da verificação: o hash publicado é o do DMG e do ZIP finais.
+      - name: SHA-256 do DMG e do ZIP
+        run: shasum -a 256 release/nod-*-mac-"$ARCH".dmg release/nod-*-mac-"$ARCH".zip > "release/SHA256-${ARCH}.txt"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: nod-mac-${{ matrix.arch }}
           path: |
             release/*.dmg
+            release/nod-*-mac-*.zip
             release/SHA256-*.txt
           if-no-files-found: error
   # NOD-93 (ADR-127): o disco da VM local do Mac, um por arquitetura, com o computador da ADR-122 instalado pelo mesmo
@@ -249,5 +264,5 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          arquivos=(release/*.dmg release/SHA256-*.txt release/nod-vm-*.img.zst release/nod-vm-*.img.zst.sha256)
+          arquivos=(release/*.dmg release/nod-*-mac-*.zip release/SHA256-*.txt release/nod-vm-*.img.zst release/nod-vm-*.img.zst.sha256)
           gh release create "$TAG" "${arquivos[@]}" --verify-tag --draft --title "nod $TAG" --notes-file desktop/release-notes.md

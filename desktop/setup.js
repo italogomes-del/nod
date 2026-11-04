@@ -6,7 +6,13 @@ const conectar = document.querySelector('#conectar');
 const avancado = document.querySelector('#avancado');
 const botoes = [parear, conectar];
 const ocupar = (sim) => { for (const b of botoes) b.disabled = sim; };
-window.nod.estado().then((s) => { url.value = s.url; estado.textContent = s.mensagem; if (!s.url) avancado.open = true; });
+// NOD-132: a linha da atualização do app e o botão de reiniciar quando a versão nova está pronta.
+const atualizacao = document.querySelector('#atualizacao');
+const reiniciar = document.querySelector('#reiniciar');
+const mostrarAtualizacao = (linha, pronta) => { atualizacao.textContent = linha; atualizacao.hidden = !linha; reiniciar.hidden = !pronta; };
+window.nod.estado().then((s) => { url.value = s.url; estado.textContent = s.mensagem; if (!s.url) avancado.open = true; mostrarAtualizacao(s.atualizacao || '', !!s.prontaParaReiniciar); });
+window.nod.aoMudarAtualizacao((linha) => { window.nod.estado().then((s) => mostrarAtualizacao(linha, !!s.prontaParaReiniciar)); });
+reiniciar.addEventListener('click', async () => { reiniciar.disabled = true; try { await window.nod.reiniciarParaAtualizar(); } finally { reiniciar.disabled = false; } });
 document.querySelector('#form').addEventListener('submit', async (e) => {
   e.preventDefault();
   if (!url.reportValidity()) { avancado.open = true; return; }

@@ -10,11 +10,22 @@ function componentes(valor: unknown): number[] | null {
   return Number.isSafeInteger(rc) ? [...partes, rc] : null;
 }
 
-export function versaoAceita(atual: unknown, minima: string): boolean {
-  const a = componentes(atual), b = componentes(minima);
-  if (!a || !b) return false;
-  for (let i = 0; i < a.length; i++) {
-    if (a[i] !== b[i]) return a[i]! > b[i]!;
+/** Ordem entre duas versões do app: >0 se `a` é maior, 0 se iguais, <0 se menor; null se alguma é inválida (NOD-132). */
+export function compararVersoesDoApp(a: unknown, b: unknown): number | null {
+  const x = componentes(a), y = componentes(b);
+  if (!x || !y) return null;
+  for (let i = 0; i < x.length; i++) {
+    if (x[i] !== y[i]) return x[i]! > y[i]! ? 1 : -1;
   }
-  return true;
+  return 0;
+}
+
+export function versaoAceita(atual: unknown, minima: string): boolean {
+  const c = compararVersoesDoApp(atual, minima);
+  return c !== null && c >= 0;
+}
+
+/** NOD-132: a versão tem o formato que o app e o servidor entendem (x.y.z ou x.y.z-rc.N). */
+export function versaoDoAppValida(valor: unknown): valor is string {
+  return componentes(valor) !== null;
 }

@@ -49,7 +49,9 @@ não roda. As rc.1 a rc.9 da 0.4.0 saíram assim.
    - copia os DMGs para `~/Downloads/nod-X/`.
 4. **A publicação fecha a issue.** Se a versão subir de novo antes da release, a issue antiga fecha como substituída.
 
-O app não se atualiza sozinho: cada pessoa baixa e instala o DMG. Só precisa de versão nova o que roda no Mac
+Desde a NOD-132 (ADR-149) o app do Mac se atualiza sozinho depois que a versão é publicada no bucket e anunciada no
+`config.env` (seção abaixo); os apps anteriores a ela precisam do DMG uma vez. Rollback: não há downgrade; esvazie
+`NOD_APP_VERSAO_PUBLICADA` para parar o anúncio e publique uma versão maior com a correção. Só precisa de versão nova o que roda no Mac
 (`desktop/`, o executor local, o proxy). A tela e o servidor chegam a todos pelo deploy, porque o app carrega a página
 do servidor.
 
@@ -121,7 +123,7 @@ shasum -a 256 ./*.dmg > SHA256SUMS.txt
 shasum -a 256 -c SHA256SUMS.txt
 ```
 
-Compare com os hashes originados no build; gerar um novo manifesto de um download, sozinho, não prova correspondência com o build. Anexe o manifesto final ao rascunho e confira que todos os assets estão `uploaded` e com tamanho esperado. O mínimo por versão é: DMG Intel, DMG ARM, guia e SHA-256. Nunca inclua `.env`, credenciais, `conexao.enc` ou arquivos de outra versão.
+Compare com os hashes originados no build; gerar um novo manifesto de um download, sozinho, não prova correspondência com o build. Anexe o manifesto final ao rascunho e confira que todos os assets estão `uploaded` e com tamanho esperado. O mínimo por versão é: DMG Intel, DMG ARM, ZIP Intel e ZIP ARM (os da atualização automática), guia e SHA-256. Nunca inclua `.env`, credenciais, `conexao.enc` ou arquivos de outra versão.
 
 Se um upload falhar, consulte primeiro os assets existentes. Reenvie apenas o arquivo ausente; substitua arquivo parcial somente no rascunho e confira o hash novamente. Não reconstrua nem recomprima um artefato assinado para contornar upload: isso exige nova validação de assinatura, notarização e checksums.
 
@@ -148,7 +150,7 @@ gh release view "$RELEASE_TAG" --json url,isDraft,isPrerelease,assets
 
 Os exemplos usam `gh` dentro do checkout do repositório e reutilizam `RELEASE_TAG` da etapa 2. Em outra sessão, defina a tag explicitamente. Confirme a página de download e atualize via PR o README da main para apontar à release e ao guia daquela tag. Preserve as releases antigas para rastreabilidade. Considere habilitar [releases imutáveis do GitHub](https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases); com essa opção, todos os assets precisam estar anexados antes de publicar.
 
-Não há atualização automática no app da preview. Oriente o time a baixar e instalar a nova versão; só aumente a versão mínima exigida pelo servidor depois de disponibilizar e validar os clientes correspondentes.
+Depois de publicar, anuncie a versão à atualização automática (NOD-132, ADR-149): `scripts/desktop/publicar-atualizacao.sh "$RELEASE_TAG"` e `NOD_APP_VERSAO_PUBLICADA=<versão>` com o `NOD_APP_ATUALIZACAO_SHA256` que o script imprime no `infra/gcp/config.env`, por PR, com deploy ([guia](release-desktop.md#atualização-automática-do-app-nod-132-adr-149)). Os apps anteriores à atualização automática não se atualizam: oriente quem os usa a baixar e instalar a nova versão uma vez. Só aumente a versão mínima exigida pelo servidor depois de disponibilizar e validar os clientes correspondentes.
 
 ## Recuperação e lições por versão
 

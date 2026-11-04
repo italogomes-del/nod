@@ -25,3 +25,9 @@ local. O proxy MCP é executado pelo runtime Electron empacotado, sem Node exter
 A conta Google entra no navegador do sistema; a pessoa copia uma chave de **Chaves** para o app,
 que a cifra com Keychain e obtém uma sessão web pelo servidor. A publicação assinada depende de
 configurar os secrets Apple e validar os DMGs nos dois processadores. Ver [guia](../release-desktop.md).
+
+## Emenda de 2026-11-04 (NOD-132): o item (4) passa a ter atualização automática
+
+O app do Mac se atualiza pelo `autoUpdater` nativo do Electron (Squirrel.Mac), com o feed no servidor e os ZIPs num
+bucket privado; continua sem `electron-updater` e sem dependência nova. A versão mínima e o 426 seguem iguais. Detalhes,
+alternativas e gatilho de reversão em [ADR-149](adr-149-atualizacao-automatica-do-app-do-mac.md).

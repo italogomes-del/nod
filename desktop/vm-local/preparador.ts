@@ -52,6 +52,8 @@ export type Preparador = {
   usar(uso: ModoMemoria): void;
   /** Quantas telas o supervisor relata abertas (o sono por falta de tela conta a partir disso). */
   telas(abertas: number): void;
+  /** NOD-132: as telas abertas agora (o reinício para atualizar pergunta antes de fechá-las). */
+  telasAbertas(): number;
   /** O supervisor de dentro da VM relatou: ela já está de pé, então o preparo não mede memória para religá-la. */
   vmRespondeu(): void;
   /** Um comando do bot chegou: o sono sem tela recomeça a contar. */
@@ -171,6 +173,7 @@ export function criarPreparador(d: DepsPreparador): Preparador {
         if (p.telas === antes) break;
       }
     },
+    telasAbertas: () => (parado ? 0 : p.telas),
     vmRespondeu: () => aplicar({ tipo: "vm_respondeu" }),
     atividade: () => aplicar({ tipo: "atividade" }),
     parar() {

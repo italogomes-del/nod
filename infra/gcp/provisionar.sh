@@ -156,3 +156,15 @@ gc iam service-accounts add-iam-policy-binding "$SA_VM" --member="serviceAccount
 gc iam service-accounts add-iam-policy-binding "$SA_ENSAIO" --role=roles/iam.workloadIdentityUser \
   --member="principalSet://iam.googleapis.com/projects/$NUMERO/locations/global/workloadIdentityPools/github/attribute.repository/$GITHUB_REPO" >/dev/null
 echo "Conta do ensaio: $SA_ENSAIO (grave na variável GCP_ENSAIO_SA do repositório)"
+
+passo "Atualização do app do Mac (NOD-132, ADR-149)"
+# Bucket privado dos ZIPs; a VM só lê e assina URL curta com um papel que tem só o signBlob (menor privilégio: com
+# signBlob sobre si mesma a SA ainda assina um JWT e troca por token, mas é a própria VM, sem escalada). Quem publica é
+# a conta de quem roda o script de publicação.
+BUCKET_ATUALIZACOES="gs://$PROJETO-atualizacoes"
+gc storage buckets describe "$BUCKET_ATUALIZACOES" >/dev/null 2>&1 ||
+  gc storage buckets create "$BUCKET_ATUALIZACOES" --location="$REGIAO" --uniform-bucket-level-access --public-access-prevention
+gc storage buckets add-iam-policy-binding "$BUCKET_ATUALIZACOES" --member="serviceAccount:$SA_VM" --role=roles/storage.objectViewer >/dev/null
+papel_customizado nodAssinarBlob "nod: assinar URL do bucket" iam.serviceAccounts.signBlob
+gc iam service-accounts add-iam-policy-binding "$SA_VM" --member="serviceAccount:$SA_VM" \
+  --role="projects/$PROJETO/roles/nodAssinarBlob" >/dev/null

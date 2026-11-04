@@ -114,7 +114,7 @@ import { montarAmbiente } from "../../domain/ambiente-executor.ts";
 import { lerNodExecutor, MOTIVO_NAO_REGISTRADO } from "../executor/registry.ts";
 import type { IdDriver, Registry } from "../executor/spi.ts";
 import type { IniciarLaco } from "../fundo/orquestrador-turnos.ts";
-import { criarPonteInterna, type PonteInternaNod } from "../fundo/ponte-interna.ts";
+import { criarPonteInterna, VERSAO_MINIMA_APP, type PonteInternaNod } from "../fundo/ponte-interna.ts";
 import { autorizarChaveMaquina } from "./autorizar-chave-maquina.ts";
 import { segredoEfetivo } from "./sessao.ts";
 import { comporContas, type ContasMontadas } from "./compor-contas.ts";
@@ -139,6 +139,10 @@ import { ErroNuvemLancado, servidorPublicoValido } from "../../domain/maquina-nu
 import { comPortas } from "../../db/porta-da-dona.ts";
 import { criarRepos } from "../../repositories/index.ts";
 import { rotasMotor } from "./rotas/motor.ts";
+import { rotasAtualizacaoApp } from "./rotas/atualizacao-app.ts";
+import { cachearAssinador, criarAssinadorGcs, type AssinadorDeUrl } from "../atualizacao-app/assinador-gcs.ts";
+import { lerConfigAtualizacaoApp } from "../../domain/atualizacao-app.ts";
+import { criarFonteDeToken } from "../voz/token-google.ts";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { rotasConcessoes } from "./rotas/concessoes.ts";
@@ -263,6 +267,8 @@ export type OpcoesCompor = {
   capturador?: Capturador;
   /** NOD-422: só em teste — a busca falsa do Linear (vale sem a flag). Default: o Composio, só com NOD_LINEAR_SERVIDOR=1. */
   linear?: FonteLinear;
+  /** NOD-132: só em teste — o assinador falso da URL do ZIP. Default: signBlob do IAM, com a flag ligada. */
+  assinadorAtualizacaoApp?: AssinadorDeUrl;
 };
 
 export type App = {
@@ -358,6 +364,9 @@ export function comporApp(o: OpcoesCompor): App {
   // NOD-164: o modelo da ligação vem do env do servidor. O boot já validou; aqui lança antes de qualquer efeito se
   // alguém compôs sem o boot.
   const modelosLigacao = lerModelosLigacao(env);
+  // NOD-132: configuração inválida da atualização do app lança aqui (o boot já validou antes do
+  // primeiro efeito; aqui cobre quem compôs sem o boot).
+  const configAtualizacaoApp = lerConfigAtualizacaoApp(env);
   // definido em 2026-10-07 (ADR-082): as mãos do Nod ligadas por padrão; NOD_GERIR_BOTS=0 as tira do catálogo sem deploy de código.
   const semFerramentasDoNod = env.NOD_GERIR_BOTS?.trim() === "0";
   // definido em 2026-10-13 (ADR-104, revisão do PR #309): o mesmo interruptor para o criar_bots dos bots comuns.
@@ -1486,6 +1495,9 @@ export function comporApp(o: OpcoesCompor): App {
     ...rotasCredencial({ dentro, cifrar: (t) => cifrar(t, chave), decifrar: (t) => decifrar(t, chave) }),
     ...rotasTrilha({ dentro }),
     // ADR-090: o motor sem janela da versão deste servidor (dist/motor) e o script que o instala numa máquina Linux.
+    // NOD-132 (ADR-149): o feed da atualização do app do Mac, fora da trava 426. Versão vazia = 204 para todos.
+    ...rotasAtualizacaoApp({ config: configAtualizacaoApp, versaoMinima: VERSAO_MINIMA_APP, publicadaEm: new Date(relogio()).toISOString().replace(/\.\d{3}Z$/, "Z"),
+      assinar: configAtualizacaoApp ? cachearAssinador(o.assinadorAtualizacaoApp ?? criarAssinadorGcs({ bucket: configAtualizacaoApp.bucket, fonteToken: criarFonteDeToken({ env }) }), { agora: relogio }) : null }),
     ...rotasMotor({ pasta: env.NOD_MOTOR_DIR ?? resolve("dist/motor"), versao: versaoDoServidor(), ...(env.NOD_COMPUTADORES === "motor" ? { computador: true } : {}), ...(env.NOD_URL_PUBLICA ? { urlPublica: env.NOD_URL_PUBLICA } : {}) }),
     ...rotasContasIa({ dentro, logins, dispositivo, compartilhado, avisar: avisarContas, maquinaViva: (escopo, id) => ponteHttp.maquinasDaPessoa(escopo).some((m) => m.machineId === id), maquinaAtualizaIas: (escopo, id) => ponteHttp.maquinasDaPessoa(escopo).some((m) => m.machineId === id && m.atualizaIas), aoRenomear: (escopo, id, nome) => ponteHttp.renomear(escopo, id, nome) }),
     ...(compartilhado ? rotasInstalacoesSsh({ dentro, instalacoes, dispositivo, ...(env.NOD_URL_PUBLICA ? { urlPublica: env.NOD_URL_PUBLICA } : {}) }) : []),

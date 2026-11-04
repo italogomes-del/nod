@@ -33,6 +33,7 @@ import { INTERVALO_VARREDOR_LEASE_MS, iniciarVarredorLease } from "../fundo/varr
 import { comporApp, type App, type AtivarDriver, type EnvApp, type OpcoesCompor } from "./compor.ts";
 import { lerModelosLigacao } from "../../domain/modelo-ligacao.ts";
 import { lerDominiosAdmitidos } from "../../domain/dominios-admitidos.ts";
+import { lerConfigAtualizacaoApp } from "../../domain/atualizacao-app.ts";
 import { identidadeDoEmail } from "../../domain/identidade-do-email.ts";
 import { encerrarLigacao } from "../../use-cases/ligacoes.ts";
 import { criarBatimentos, criarVerificacaoSaude, INTERVALOS_ATE_LACO_PARADO } from "./rotas/saude.ts";
@@ -88,6 +89,8 @@ export type OpcoesBoot = {
   varredorMaquinasMs?: number;
   /** NOD-398, só em teste: o capturador de tela (vale com NOD_CAPTURA_TELA=1). Default: o Chrome via CDP. */
   capturador?: OpcoesCompor["capturador"];
+  /** NOD-132, só em teste: o assinador falso da URL do ZIP (vale com NOD_APP_VERSAO_PUBLICADA). Default: signBlob do IAM. */
+  assinadorAtualizacaoApp?: OpcoesCompor["assinadorAtualizacaoApp"];
 };
 
 /** `lacos_prazo_vencido` (NOD-331): parar os laços de fundo passou de `PRAZO_PARAR_LACOS_MS` e a drenagem seguiu. */
@@ -186,6 +189,8 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
   lerModelosLigacao(env);
   // NOD_ADMISSAO_DOMINIOS inválido também impede o boot (um domínio digitado errado deixaria o time de fora em silêncio).
   const dominiosAdmitidos = lerDominiosAdmitidos(env);
+  // NOD-132: a config da atualização do app inválida (versão, bucket, hash) também impede o boot, antes de qualquer efeito.
+  lerConfigAtualizacaoApp(env);
   const donoEmprestado = o.dbDono !== undefined;
   const dbEmprestado = o.db !== undefined;
   const agora = () => Date.now();
@@ -201,7 +206,7 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
 
   // 2. composição + 3. listen (a URL do servidor é insumo do driver catcher e do claude-cli).
   let canaisVoz: { fechar(): Promise<void> } | null = null;
-  const app = comporApp({ db, computador: o.computador, voz: o.voz, env: { ...env, NOD_MACHINE_ID: machineId, NOD_HOST: o.host ?? env.NOD_HOST }, relogio: agora, listarPessoas: o.listarPessoas, redeMs: o.redeMs, inicioDoProcesso, capturador: o.capturador });
+  const app = comporApp({ db, computador: o.computador, voz: o.voz, env: { ...env, NOD_MACHINE_ID: machineId, NOD_HOST: o.host ?? env.NOD_HOST }, relogio: agora, listarPessoas: o.listarPessoas, redeMs: o.redeMs, inicioDoProcesso, capturador: o.capturador, assinadorAtualizacaoApp: o.assinadorAtualizacaoApp });
   // NOD-267 (emenda à ADR-017): a saúde olha o banco e, só no compartilhado, o batimento do agendador e do varredor de
   // lease — no Mac, acordar do sono deixaria o batimento velho e daria 503 falso. A rota e o watchdog usam a MESMA
   // verificação, para compartilharem o `select 1` em voo.

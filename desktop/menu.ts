@@ -5,10 +5,24 @@
  * vitest (tests/unit/desktop/menu.test.ts). Ferramentas de desenvolvedor só fora do app empacotado.
  */
 import type { MenuItemConstructorOptions } from "electron";
+import { TEXTOS_ATUALIZACAO, type EstadoAtualizacaoApp } from "./atualizacao.ts";
 
 export type AcaoDeBusca = "abrir" | "proxima" | "anterior";
-export type AcoesDoMenu = { conexao: () => void; definirAvisos: (ligado: boolean) => void; exportarDiagnostico: () => void; buscar?: (acao: AcaoDeBusca) => void };
-export type OpcoesDoMenu = { avisos: boolean; empacotado: boolean };
+export type AcoesDoMenu = { conexao: () => void; definirAvisos: (ligado: boolean) => void; exportarDiagnostico: () => void; buscar?: (acao: AcaoDeBusca) => void; procurarAtualizacao?: () => void; reiniciarParaAtualizar?: () => void };
+export type OpcoesDoMenu = { avisos: boolean; empacotado: boolean; atualizacao?: EstadoAtualizacaoApp };
+
+/** NOD-132: o item da atualização do app no menu nod, conforme o estado (desligada mostra o motivo, desabilitado). */
+export function itensDaAtualizacao(estado: EstadoAtualizacaoApp | undefined, acoes: AcoesDoMenu): MenuItemConstructorOptions[] {
+  if (!estado) return [];
+  switch (estado.fase) {
+    case "desligada": return [{ label: estado.motivo, enabled: false }];
+    case "procurando": return [{ label: TEXTOS_ATUALIZACAO.procurando, enabled: false }];
+    case "baixando": return [{ label: TEXTOS_ATUALIZACAO.baixando, enabled: false }];
+    case "pronta": return [{ label: TEXTOS_ATUALIZACAO.reiniciar(estado.versao), click: () => acoes.reiniciarParaAtualizar?.() }];
+    case "ociosa":
+    case "erro": return [{ label: TEXTOS_ATUALIZACAO.procurar, click: () => acoes.procurarAtualizacao?.() }];
+  }
+}
 
 /** O idioma que o Chromium usa no menu de contexto, nos diálogos nativos e na validação da página. */
 export const IDIOMA_DO_APP = "pt-BR";
@@ -31,6 +45,7 @@ export function templateDoMenu(opcoes: OpcoesDoMenu, acoes: AcoesDoMenu): MenuIt
         { label: "Conexão / verificar conta de IA", click: () => acoes.conexao() },
         // NOD-138: só pelo menu nativo, funciona na tela de conexão e com a janela web fora do ar.
         { label: "Exportar diagnóstico…", click: () => acoes.exportarDiagnostico() },
+        ...itensDaAtualizacao(opcoes.atualizacao, acoes),
         { type: "separator" },
         { label: "Avisos no Mac", type: "checkbox", checked: opcoes.avisos, click: (item) => acoes.definirAvisos(item.checked) },
         { type: "separator" },

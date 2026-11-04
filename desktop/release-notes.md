@@ -9,7 +9,8 @@ Antes de publicar, troque este texto pelas mudanças da versão e preencha o reg
 Versão / tag / SHA:
 PR e execução do Actions:
 Servidor e migrações compatíveis:
-DMGs e hashes:
+DMGs, ZIPs e hashes:
+Atualização automática (ZIPs no bucket, NOD_APP_VERSAO_PUBLICADA e NOD_APP_ATUALIZACAO_SHA256, deploy):
 Assinatura e notarização:
 Aceite Intel (pessoa, Mac, macOS, resultado):
 Aceite ARM (pessoa, Mac, macOS, resultado):

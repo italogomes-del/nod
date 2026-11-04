@@ -1,5 +1,5 @@
 import { criarCodexCliDriver } from "../src/adapters/executor/drivers/codex-cli.ts";
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, Notification, powerMonitor, powerSaveBlocker, safeStorage, screen, session, shell, systemPreferences, type IpcMainInvokeEvent } from "electron";
+import { app, autoUpdater, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, Notification, powerMonitor, powerSaveBlocker, safeStorage, screen, session, shell, systemPreferences, type IpcMainInvokeEvent } from "electron";
 import { spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { createWriteStream, existsSync } from "node:fs";
@@ -63,6 +63,7 @@ import { criarDetectorGh, executarGithubNaMaquina } from "../src/adapters/conect
 import { pedirProvisorio, segredoDeTroca, servidorOfereceProvisorio, trocarChaveDoApp, verificadorNovo, verificadorValido } from "./conta-provisoria.ts";
 import { FalhaPareamento, parearPeloNavegador } from "./parear.ts";
 import { IDIOMA_DO_APP, templateDoMenu } from "./menu.ts";
+import { aoRecusarVersao, confirmarReinicio, sairAoFecharJanelas, criarAtualizacaoDoApp, servidorDeAtualizacao, linhaDaAtualizacao, linkDownloadMac, type CaixaReinicio, TEXTOS_ATUALIZACAO, type AtualizacaoDoApp, type EstadoAtualizacaoApp } from "./atualizacao.ts";
 import { criarArquivoDeLog, escreverDiagnostico, instalarOuvintesDeQueda, lerCaudaDoLog, MAX_BYTES_LOG } from "./diagnostico.ts";
 import { montarVmLocal, type VmLocalDoApp } from "./vm-local/ligar.ts";
 import { montarDiagnostico, nomeArquivoDiagnostico, TETO_REGISTROS_BYTES, type EntradaDiagnostico } from "../src/domain/diagnostico-app.ts";
@@ -198,7 +199,7 @@ function vigiarItensGithub(c: ReturnType<typeof criarPonteHttp>) {
 const mensagens: Record<string, string> = {
   servidor_fora: "O servidor não respondeu. Confira sua conexão; o app tentará novamente.",
   chave_invalida: "Esta chave não é mais válida. Gere uma nova em Chaves no navegador.",
-  atualize_app: "Atualize o nod para continuar. Peça ao time o DMG mais recente.",
+  atualize_app: TEXTOS_ATUALIZACAO.atualizeApp(linkDownloadMac(process.arch)),
   reconectar: "Reconectando ao servidor…",
   resposta_invalida: "Confira o endereço HTTPS do servidor do seu time.",
   sem_resposta: "O navegador não confirmou a tempo. Clique em Entrar com Google de novo.",
@@ -288,7 +289,44 @@ async function definirSom(ligado: boolean): Promise<PreferenciasDesktop> {
   return estadoPreferencias();
 }
 function montarMenu() {
-  Menu.setApplicationMenu(Menu.buildFromTemplate(templateDoMenu({ avisos: preferencias.avisos, empacotado: app.isPackaged }, { conexao: () => { void parar().then(mostrarSetup); }, definirAvisos: (ligado) => { void definirAvisos(ligado); }, exportarDiagnostico: () => { void exportarDiagnostico(); }, buscar: (acao) => { janelaWeb()?.webContents.send(CANAIS_DESKTOP.buscar, acao); } })));
+  Menu.setApplicationMenu(Menu.buildFromTemplate(templateDoMenu({ avisos: preferencias.avisos, empacotado: app.isPackaged, atualizacao: atualizacaoApp?.estado() }, {
+    conexao: () => { void parar().then(mostrarSetup); }, definirAvisos: (ligado) => { void definirAvisos(ligado); }, exportarDiagnostico: () => { void exportarDiagnostico(); }, buscar: (acao) => { janelaWeb()?.webContents.send(CANAIS_DESKTOP.buscar, acao); },
+    procurarAtualizacao: () => { atualizacaoApp?.procurar(true, true); }, reiniciarParaAtualizar: () => { void atualizacaoApp?.reiniciar(); },
+  })));
+}
+// ---- Atualização do app do Mac (NOD-132, ADR-149) --------------------------------------------------------------------
+// O autoUpdater nativo (Squirrel.Mac) lê o feed do servidor com a chave da máquina; o estado aparece no menu nod, numa
+// notificação quando a versão nova fica pronta e na tela de conexão. A web não sabe de nada (decisão de produto).
+let atualizacaoApp: AtualizacaoDoApp | null = null;
+/** O servidor e a chave da conexão atual ou da última tentativa: o app recusado com 426 ainda precisa do feed. */
+let conexaoDaAtualizacao: { url: string; chave: string } | null = null;
+let avisoDaAtualizacao: Notification | null = null;
+function aoMudarAtualizacao(e: EstadoAtualizacaoApp) {
+  montarMenu();
+  const w = janela;
+  if (w && !w.isDestroyed() && w !== janelaWeb()) w.webContents.send("nod:atualizacao", linhaDaAtualizacao(e, process.arch));
+  if (e.fase === "pronta" && !avisoDaAtualizacao && preferencias.avisos && Notification.isSupported()) {
+    const n = new Notification({ title: TEXTOS_ATUALIZACAO.avisoTitulo, body: TEXTOS_ATUALIZACAO.pronta(e.versao), silent: !preferencias.som });
+    avisoDaAtualizacao = n; // referência viva: sem ela o coletor leva o objeto e o clique se perde
+    n.on("click", () => { void atualizacaoApp?.reiniciar(); });
+    n.show();
+  }
+}
+/** Ligação aberta: recusa com aviso. Bot trabalhando neste Mac: confirma (reiniciar interrompe). */
+async function podeReiniciarParaAtualizar(): Promise<boolean> {
+  const w = janela && !janela.isDestroyed() ? janela : null;
+  const caixa: CaixaReinicio = async (c) => {
+    const o: Electron.MessageBoxOptions = { type: c.tipo, message: c.mensagem, detail: c.detalhe, buttons: c.botoes, defaultId: c.padrao ?? 0, cancelId: c.padrao ?? 0 };
+    return (await (w ? dialog.showMessageBox(w, o) : dialog.showMessageBox(o))).response;
+  };
+  return confirmarReinicio({ emLigacao: () => emLigacao, turnos: () => planosNoMac.size, telas: () => vmLocal?.preparador.telasAbertas() ?? 0, caixa });
+}
+/** O mesmo encerramento do Cmd+Q (before-quit), antes de o Squirrel fechar o app. */
+async function antesDeInstalarAtualizacao(): Promise<void> {
+  encerrando = true;
+  const w = janelaWeb();
+  if (w) capturarEstadoJanela(w);
+  await Promise.all([parar(), gravacaoJanela, vmLocal?.parar()]);
 }
 // ---- Diagnóstico para suporte (definido em 2026-10-05, NOD-138) -------------------------------------------------------
 // Só pelo menu nativo: funciona na tela de conexão e com a janela web fora do ar, e não aumenta a ponte da página. O texto
@@ -471,6 +509,7 @@ async function mostrarSetup() {
   anterior?.close();
 }
 async function parar() {
+  atualizacaoApp?.desconectado(); // NOD-132: o ciclo de 4 h volta só no próximo conectado()
   if (itensGithub) clearInterval(itensGithub);
   itensGithub = null;
   limpezaDasTasks?.parar();
@@ -519,9 +558,16 @@ function falha(codigo: FalhaPonte["codigo"]) {
     ultimoReanuncio = Date.now();
     void vigiaIas.reanunciar().then(() => { if (mensagem === mensagens.reconectar) mensagem = "Conectado."; }).catch(() => undefined);
   }
+  if (codigo === "atualize_app") atualizacaoApp?.procurar(true);
+  if (codigo === "chave_invalida") conexaoDaAtualizacao = null; // chave revogada: o feed daria 401 calado
   if (!["chave_invalida", "atualize_app"].includes(codigo) || falhando || encerrando) return;
   falhando = true;
-  setTimeout(() => { void parar().then(mostrarSetup).finally(() => { falhando = false; }); }, 0);
+  setTimeout(() => {
+    void parar()
+      // NOD-132: abaixo da mínima o app fica na tela de conexão; o ciclo de procura segue (a flag pode ligar depois).
+      .then(() => { if (codigo === "atualize_app") atualizacaoApp?.conectado(); return mostrarSetup(); })
+      .finally(() => { falhando = false; });
+  }, 0);
 }
 /**
  * ADR-089 (#217): os grupos dos turnos que a vida anterior do app deixou (Forçar Encerrar, queda, SIGKILL) morrem antes
@@ -540,12 +586,16 @@ function limparOrfaosUmaVez(): Promise<void> {
   return limpezaDeOrfaos;
 }
 async function conectar(c: Config) {
+  conexaoDaAtualizacao = { url: c.url, chave: c.chave };
   await limparOrfaosUmaVez();
   await parar();
   const r = await fetch(`${c.url}/api/maquina/sessao`, { method: "POST", redirect: "error", headers: { authorization: `Bearer ${c.chave}`, "x-nod-versao": app.getVersion(), "content-type": "application/json" }, body: "{}", signal: AbortSignal.timeout(15_000) });
   const minima = r.headers.get("x-nod-versao-minima");
-  if (r.status === 426 || (minima && !versaoAceita(app.getVersion(), minima))) throw new FalhaPonte("atualize_app");
-  if (r.status === 401 || r.status === 403) throw new FalhaPonte("chave_invalida");
+  if (r.status === 426 || (minima && !versaoAceita(app.getVersion(), minima))) {
+    aoRecusarVersao(atualizacaoApp); // NOD-132: procura na hora e arma o ciclo (o feed fica fora do 426)
+    throw new FalhaPonte("atualize_app");
+  }
+  if (r.status === 401 || r.status === 403) { conexaoDaAtualizacao = null; throw new FalhaPonte("chave_invalida"); }
   if (!r.ok) throw new FalhaPonte("servidor_fora");
   const dados = await r.json() as { escopo: { pessoaId: string }; machineId: string; instalacoes?: unknown };
   const cookie = r.headers.get("set-cookie")?.match(/(?:^|;\s*)nod_sessao=([^;]+)/)?.[1];
@@ -717,7 +767,8 @@ async function conectar(c: Config) {
   nova.on("enter-full-screen", () => { cancelarEstado(); capturarEstadoJanela(nova); });
   nova.on("close", (e) => {
     cancelarEstado(); capturarEstadoJanela(nova);
-    if (!emLigacao) return;
+    // Saindo (Cmd+Q já confirmado, ou o reinício da atualização): a pergunta da ligação seguraria o quitAndInstall.
+    if (!emLigacao || encerrando) return;
     e.preventDefault();
     void confirmarFecharEmLigacao(nova).then((sim) => { if (sim) { definirEmLigacao(false); nova.close(); } });
   });
@@ -725,6 +776,7 @@ async function conectar(c: Config) {
   nova.webContents.on("did-fail-load", (_e, code, _description, _url, main) => { if (main && code !== -3) { mensagem = mensagens.servidor_fora!; void mostrarSetup(); } });
   await nova.loadURL(c.url);
   anterior?.close(); mensagem = "Conectado.";
+  atualizacaoApp?.conectado();
 }
 /**
  * "Entrar" num card de IA (ADR-077): o login do próprio CLI, sem shell, desanexado e com o ambiente limpo dos drivers
@@ -1311,7 +1363,8 @@ else {
   const deepLinkInicial = deepLinkDoArgv(process.argv);
   if (deepLinkInicial) receberDeepLink(deepLinkInicial);
   app.on("activate", () => focarJanela(janela));
-  app.on("window-all-closed", () => app.quit());
+  // NOD-132: durante o reinício da atualização o Squirrel relança no OnWindowAllClosed; um app.quit() aqui correria com ele.
+  app.on("window-all-closed", () => { if (sairAoFecharJanelas(atualizacaoApp)) app.quit(); });
   app.on("before-quit", (event) => {
     if (encerrando) return;
     event.preventDefault();
@@ -1327,6 +1380,9 @@ else {
     void Promise.all([parar(), gravacaoJanela, vmLocal?.parar()]).finally(() => app.quit());
   });
   // ADR-089: o `exit` do Node também leva os grupos, mas o will-quit é o fim garantido do app (Cmd+Q, SIGTERM, SIGHUP).
+  // NOD-137/NOD-132: o Squirrel reabre o app logo depois de trocar o pacote; com o lock ainda preso, a cópia nova sairia
+  // como segunda instância. Solta SÓ aqui: no before-quit comum o lock segura um segundo clique no Dock durante a saída.
+  if (process.platform === "darwin") autoUpdater.on("before-quit-for-update", () => { app.releaseSingleInstanceLock(); });
   app.on("will-quit", () => { atualizador.parar(); encerrarGruposVivos(); });
   void app.whenReady().then(async () => {
     // ADR-101: o contas.json antes de qualquer config dos drivers (a conta em uso vai no ambiente deles).
@@ -1350,6 +1406,24 @@ else {
     await carregarPreferencias();
     await carregarEstadoJanela();
     aplicarTemaNativo();
+    atualizacaoApp = criarAtualizacaoDoApp({
+      updater: autoUpdater, empacotado: app.isPackaged, plataforma: process.platform, arquitetura: process.arch,
+      naPastaAplicativos: () => { try { return app.isInApplicationsFolder(); } catch { return false; } },
+      versao: app.getVersion(), conexao: () => (conexaoDaAtualizacao && servidorDeAtualizacao(conexaoDaAtualizacao.url, SERVIDOR_PADRAO) ? conexaoDaAtualizacao : null),
+      agendar: (f, ms) => { const t = setTimeout(f, ms); t.unref(); return () => clearTimeout(t); },
+      agora: Date.now,
+      registrar: (evento, campos) => log(evento === "atualizacao_app_erro" || evento === "atualizacao_app_prazo" ? "aviso" : "info", evento, campos),
+      aoMudar: aoMudarAtualizacao,
+      podeReiniciar: podeReiniciarParaAtualizar,
+      antesDeInstalar: antesDeInstalarAtualizacao,
+      // O vigia do reinício chega aqui com o app ainda aberto: tenta sair; se nem isso fechar em 10 s, sai à força.
+      sair: () => { app.quit(); setTimeout(() => app.exit(0), 10_000).unref(); },
+      avisar: (texto) => {
+        const w = janela && !janela.isDestroyed() ? janela : null;
+        const o: Electron.MessageBoxOptions = { type: "info", message: texto, buttons: ["OK"] };
+        void (w ? dialog.showMessageBox(w, o) : dialog.showMessageBox(o));
+      },
+    });
     montarMenu();
     ipcMain.handle(CANAIS_DESKTOP.avisar, (e, dados: unknown) => {
       validarRemetenteWeb(e);
@@ -1519,7 +1593,9 @@ else {
     ipcMain.handle(CANAIS_DESKTOP.contasRenomear, (e, ia: unknown, posicao: unknown, apelido: unknown) => contasDoApp.renomear(iaDasContasDoPedido(e, ia), posicao, apelido));
     ipcMain.handle(CANAIS_DESKTOP.contasDefinirModo, (e, ia: unknown, modo: unknown) => contasDoApp.definirModo(iaDasContasDoPedido(e, ia), modo));
     ipcMain.handle(CANAIS_DESKTOP.contasDefinirTroca, (e, ia: unknown, posicao: unknown, ligado: unknown) => contasDoApp.definirTrocaAutomatica(iaDasContasDoPedido(e, ia), posicao, ligado));
-    ipcMain.handle("nod:estado", (e) => { validarRemetente(e); return { url: configuracao?.url ?? SERVIDOR_PADRAO, mensagem }; });
+    ipcMain.handle("nod:estado", (e) => { validarRemetente(e); return { url: configuracao?.url ?? SERVIDOR_PADRAO, mensagem, atualizacao: atualizacaoApp ? linhaDaAtualizacao(atualizacaoApp.estado(), process.arch) : "", prontaParaReiniciar: atualizacaoApp?.estado().fase === "pronta" }; });
+    // NOD-132: o botão "Reiniciar para atualizar" da tela de conexão.
+    ipcMain.handle("nod:reiniciarParaAtualizar", (e) => { validarRemetente(e); return atualizacaoApp?.reiniciar() ?? false; });
     // ADR-069: entrar pelo navegador e voltar com a chave, sem copiar nada. A invocação dura até a pessoa confirmar (ou o prazo vencer).
     ipcMain.handle("nod:parear", async (e, valor: unknown) => {
       validarRemetente(e);

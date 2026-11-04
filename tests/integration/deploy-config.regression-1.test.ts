@@ -173,3 +173,34 @@ describe("PRs do GitHub no quadro no deploy: REPOS configurado, laço desligado 
     expect(rodar("", "").stderr).toBe("");
   });
 });
+
+describe("atualização automática do app do Mac no deploy: desligada até publicar (NOD-132, ADR-149)", () => {
+  it("o config.env traz a versão VAZIA e o bucket; o deploy.sh limpa e repassa as duas ao nod.env; o boot aceita", async () => {
+    const { readFile } = await import("node:fs/promises");
+    const config = await readFile(fileURLToPath(new URL("../../infra/gcp/config.env", import.meta.url)), "utf8");
+    expect(config).toMatch(/^NOD_APP_VERSAO_PUBLICADA=$/m);
+    expect(config.match(/^NOD_APP_VERSAO_PUBLICADA=/gm)).toHaveLength(1);
+    expect(config).toMatch(/^NOD_APP_ATUALIZACAO_BUCKET=nod-producao-atualizacoes$/m);
+    expect(config).toMatch(/^NOD_APP_ATUALIZACAO_SHA256=$/m);
+    const script = await readFile(DEPLOY, "utf8");
+    for (const v of ["NOD_APP_VERSAO_PUBLICADA", "NOD_APP_ATUALIZACAO_BUCKET", "NOD_APP_ATUALIZACAO_SHA256"]) {
+      expect(script).toContain(`${v}="$(limpo "\${${v}:-}")"`);
+      expect(script).toMatch(new RegExp(`^${v}=\\$${v}$`, "m"));
+    }
+    const env = Object.fromEntries([...config.matchAll(/^(NOD_APP_\w+)=(.*)$/gm)].map((m) => [m[1]!, m[2]!]));
+    const { lerConfigAtualizacaoApp } = await import("../../src/domain/atualizacao-app.ts");
+    expect(lerConfigAtualizacaoApp(env)).toBeNull();
+    // Versão sem o hash dos ZIPs derruba o boot; com o hash, liga.
+    expect(() => lerConfigAtualizacaoApp({ ...env, NOD_APP_VERSAO_PUBLICADA: "1.2.3" })).toThrow(/exige NOD_APP_ATUALIZACAO_SHA256/);
+    const sha = `arm64=${"a".repeat(64)},x64=${"b".repeat(64)}`;
+    expect(lerConfigAtualizacaoApp({ ...env, NOD_APP_VERSAO_PUBLICADA: "1.2.3", NOD_APP_ATUALIZACAO_SHA256: sha }))
+      .toEqual({ versao: "1.2.3", bucket: "nod-producao-atualizacoes", sha256: { arm64: "a".repeat(64), x64: "b".repeat(64) } });
+  });
+
+  it("CRLF e espaço nas pontas saem pelo limpo do deploy.sh (a versão `1.2.3\\r` derrubaria o boot)", async () => {
+    const { readFile } = await import("node:fs/promises");
+    const limpo = (await readFile(DEPLOY, "utf8")).match(/^limpo\(\) \{.*\}$/m)![0];
+    const r = spawnSync("bash", ["-c", `${limpo}\nNOD_APP_VERSAO_PUBLICADA="$(limpo "\${NOD_APP_VERSAO_PUBLICADA:-}")"\nprintf '[%s]' "$NOD_APP_VERSAO_PUBLICADA"`], { env: { PATH: process.env.PATH ?? "", NOD_APP_VERSAO_PUBLICADA: " 1.2.3\r" }, encoding: "utf8" });
+    expect(r.stdout).toBe("[1.2.3]");
+  });
+});

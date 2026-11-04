@@ -84,3 +84,23 @@ describe("templateDoMenu", () => {
     expect(itens(templateDoMenu({ avisos: true, empacotado: true }, semBusca)).some((i) => i.label === "Buscar")).toBe(false);
   });
 });
+
+describe("NOD-132: a atualização do app no menu nod", () => {
+  const rotulosCom = (atualizacao: Parameters<typeof templateDoMenu>[0]["atualizacao"]) => itens(templateDoMenu({ avisos: true, empacotado: true, atualizacao }, nada)).filter((i) => i.type !== "separator").map((i) => [i.label, i.enabled !== false]);
+  it("mostra o item conforme o estado, depois de Exportar diagnóstico", () => {
+    expect(rotulosCom({ fase: "ociosa", procuradaEm: null }).slice(1, 4)).toEqual([["Conexão / verificar conta de IA", true], ["Exportar diagnóstico…", true], ["Procurar atualizações…", true]]);
+    expect(rotulosCom({ fase: "erro", mensagem: "x" })[3]).toEqual(["Procurar atualizações…", true]);
+    expect(rotulosCom({ fase: "procurando", manual: true })[3]).toEqual(["Procurando atualização…", false]);
+    expect(rotulosCom({ fase: "baixando", manual: false })[3]).toEqual(["Baixando atualização…", false]);
+    expect(rotulosCom({ fase: "pronta", versao: "1.2.0" })[3]).toEqual(["Reiniciar para atualizar (1.2.0)", true]);
+    expect(rotulosCom({ fase: "desligada", motivo: "Mova o nod para Aplicativos para receber atualizações." })[3]).toEqual(["Mova o nod para Aplicativos para receber atualizações.", false]);
+    expect(rotulosCom(undefined)[3]).toEqual(["Avisos no Mac", true]);
+  });
+  it("os cliques chamam as ações", () => {
+    let procurou = 0, reiniciou = 0;
+    const acoes = { ...nada, procurarAtualizacao: () => { procurou++; }, reiniciarParaAtualizar: () => { reiniciou++; } };
+    itens(templateDoMenu({ avisos: true, empacotado: true, atualizacao: { fase: "ociosa", procuradaEm: null } }, acoes)).find((i) => i.label === "Procurar atualizações…")?.click?.({} as never, undefined, {} as never);
+    itens(templateDoMenu({ avisos: true, empacotado: true, atualizacao: { fase: "pronta", versao: "1.2.0" } }, acoes)).find((i) => i.label === "Reiniciar para atualizar (1.2.0)")?.click?.({} as never, undefined, {} as never);
+    expect([procurou, reiniciou]).toEqual([1, 1]);
+  });
+});

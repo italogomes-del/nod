@@ -74,7 +74,7 @@ pt-BR e outra com o macOS em inglês, e anexe as fotos a esta seção:
 
 ## Atualizar a partir da preview
 
-**No Mac.** Não há atualização automática (NOD-132). Baixe o DMG novo, abra e arraste **nod** para **Aplicativos**,
+**No Mac.** Do app com a atualização automática em diante (NOD-132, seção abaixo), o nod se atualiza sozinho. Vindo de uma versão anterior, baixe o DMG novo, abra e arraste **nod** para **Aplicativos**,
 escolhendo **Substituir**. Na primeira abertura, o macOS pode pedir a senha do Mac uma vez para o app novo usar o
 Keychain: digite a senha e clique em **Sempre permitir**. Com **Permitir**, o macOS pergunta de novo a cada abertura;
 isso não é falha do app, basta repetir com **Sempre permitir**. Depois disso, um destes dois desfechos é o esperado:
@@ -89,6 +89,49 @@ Travar, abrir tela branca ou ficar alternando entre a tela de conexão e o nod n
 casos é a seção H de [aceite-desktop.md](aceite-desktop.md).
 
 **No servidor.** Faça backup do Postgres e valide as migrações em uma cópia antes de atualizar o servidor. Se falhar, preserve logs sem segredos, suspenda a indicação da candidata e restaure o servidor pelo backup testado ou por migração corretiva; reinstalar o DMG antigo não desfaz o banco.
+
+## Atualização automática do app (NOD-132, ADR-149)
+
+O app instalado em **Aplicativos** procura versão nova 30 s depois de conectar, a cada 4 h e em **nod › Procurar
+atualizações…**. Quando o servidor recusa a versão (`atualize_app`), procura na hora. Baixou, o menu mostra
+**Reiniciar para atualizar (x.y.z)**, sai uma notificação e a tela de conexão avisa. Em ligação, o app pede para
+terminar antes; com bot trabalhando no Mac, pergunta antes de interromper. Fora de **Aplicativos** (aberto do DMG ou de
+Downloads), a atualização fica desligada e o menu diz por quê. O log fica em `~/Library/Logs/nod`, sem a chave e sem a URL
+assinada.
+
+**Uma vez, na GCP** (owner do projeto `nod-producao`):
+
+```bash
+SA=$(gcloud compute instances describe nod-vm --zone southamerica-east1-b --format='value(serviceAccounts[0].email)')
+gcloud storage buckets create gs://nod-producao-atualizacoes --location=southamerica-east1 \
+  --uniform-bucket-level-access --public-access-prevention
+gcloud storage buckets add-iam-policy-binding gs://nod-producao-atualizacoes \
+  --member="serviceAccount:$SA" --role=roles/storage.objectViewer
+gcloud iam roles create nodAssinarBlob --project nod-producao \
+  --title="nod: assinar URL do bucket" --permissions=iam.serviceAccounts.signBlob
+gcloud iam service-accounts add-iam-policy-binding "$SA" \
+  --member="serviceAccount:$SA" --role=projects/nod-producao/roles/nodAssinarBlob
+```
+
+A VM precisa do escopo `cloud-platform` (o padrão do `provisionar.sh`). Só o `signBlob`, sem o `serviceAccountTokenCreator` inteiro: é menor privilégio, não isolamento (com `signBlob` sobre si mesma a SA ainda assina um JWT e troca por token, mas é a própria VM, sem escalada). Sem essas permissões o feed responde 503 (o app mostra o erro com o link do download) e o
+servidor loga `atualizacao_app_assinatura_falhou` com o código (`sign_blob_403`, por exemplo).
+
+**A cada versão**, depois de publicar a release assinada:
+
+1. `scripts/desktop/publicar-atualizacao.sh v<versão>`: baixa os ZIPs da release, confere o SHA-256 e copia para
+   `gs://nod-producao-atualizacoes/<versão>/` (nunca sobrescreve). No fim imprime as duas linhas do config.env.
+2. Em `infra/gcp/config.env`, `NOD_APP_VERSAO_PUBLICADA=<versão>` e `NOD_APP_ATUALIZACAO_SHA256=arm64=…,x64=…` (as
+   linhas que o script imprimiu, só depois do upload), por PR, e o deploy. O feed manda o hash; o Squirrel.Mac do Electron 43
+   ainda não o confere (a defesa é a assinatura de código), e ele passa a valer quando o Electron trouxer o Squirrel
+   novo. Versão sem hash derruba o boot.
+   Atenção: sem canal beta, uma versão `-rc.N` publicada vai para todo app mais velho. Esvaziar a flag não recolhe o
+   que já baixou (o ShipIt instala no próximo encerramento). Só o servidor oficial do build é fonte de atualização:
+   o app ligado a "Outro servidor" não procura (o Squirrel do Electron 43 não confere versão nem hash).
+3. Confira: um Mac com a versão anterior, em **Aplicativos**, mostra **Reiniciar para atualizar** em até 4 h (ou na
+   hora, pelo menu).
+
+**Parar o anúncio:** esvazie `NOD_APP_VERSAO_PUBLICADA` (o hash pode ficar) e rode o deploy. Não há downgrade: uma versão ruim se corrige
+publicando outra mais nova.
 
 ## O Claude Code se atualiza pelo app (NOD-9)
 
@@ -226,7 +269,7 @@ As funções que interpretam essas saídas são testadas no Linux com saídas de
 
 `npm run desktop:mac` exige as variáveis equivalentes `CSC_LINK`, `CSC_KEY_PASSWORD`, `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID` e assinatura válida. Não publica automaticamente. Confirme instalação, conexão ao servidor e um turno real em um Mac Intel e outro com chip M antes de publicar o rascunho. A assinatura/notarização e esse aceite não foram realizados neste ambiente.
 
-A página da release fornece os dois DMGs e SHA-256. Quem instala precisa ter acesso ao repositório se ele for privado. Não há atualização automática: o servidor anuncia a versão mínima e o app exige uma atualização quando necessário.
+A página da release fornece os dois DMGs e SHA-256. Quem instala precisa ter acesso ao repositório se ele for privado. Desde a NOD-132 (ADR-149) o app instalado em Aplicativos se atualiza sozinho quando `NOD_APP_VERSAO_PUBLICADA` está preenchida; o DMG segue para a primeira instalação e para quem está numa versão anterior à atualização automática.
 
 ## Contratos e limites desta etapa
 
