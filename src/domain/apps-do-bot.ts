@@ -100,7 +100,10 @@ export function cabeMaisUmApp(o: { apps: number }): boolean {
  * acesso ao app Canvas, ADA-13) e os apps na ordem de criação.
  */
 export function paginasPadrao(o: { temTarefas: boolean; temCanvas?: boolean; apps: readonly Pick<AppDoBot, "id" | "criadoEm">[] }): string[] {
-  const apps = [...o.apps].sort((a, b) => a.criadoEm - b.criadoEm || a.id.localeCompare(b.id)).map((a) => idDaPaginaDoApp(a.id));
+  // `criadoEm` vem em milissegundos; o banco guarda microssegundos e já devolve os apps por (criado_em, id). Dois apps
+  // criados no mesmo milissegundo (CI em máquina rápida, 2026-11-04: "Vagas" e "Leituras" trocavam de lugar entre dois
+  // bots) empatam aqui, e o sort estável mantém a ordem do banco. Desempatar por id embaralhava: o id é aleatório.
+  const apps = [...o.apps].sort((a, b) => a.criadoEm - b.criadoEm).map((a) => idDaPaginaDoApp(a.id));
   return [PAGINA_CONVERSA, ...(o.temTarefas ? [PAGINA_TAREFAS] : []), ...(o.temCanvas ? [PAGINA_CANVAS] : []), ...apps];
 }
 

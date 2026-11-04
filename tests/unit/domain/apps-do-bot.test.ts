@@ -47,6 +47,12 @@ describe("apps do bot: ordem das páginas", () => {
     expect(padrao).toEqual(["conversa", "tarefas", "app:a", "app:b"]);
     expect(paginasPadrao({ temTarefas: false, apps: [] })).toEqual(["conversa"]);
   });
+  it("dois apps criados no mesmo milissegundo ficam na ordem em que o banco os devolveu (não por id)", () => {
+    // CI em máquina rápida (2026-11-04): "Vagas" e "Leituras" nasciam no mesmo ms e o desempate por id (aleatório)
+    // trocava a ordem entre bots. O banco ordena por microssegundo e id; o domínio só respeita.
+    const mesmoMs = [{ id: "zzz", criadoEm: 5 }, { id: "aaa", criadoEm: 5 }];
+    expect(paginasPadrao({ temTarefas: false, apps: mesmoMs })).toEqual(["conversa", "app:zzz", "app:aaa"]);
+  });
   it("ADA-13: o Canvas entra depois de Tarefas no bot com acesso, e a ordem guardada antiga o recebe no fim", () => {
     expect(paginasPadrao({ temTarefas: true, temCanvas: true, apps })).toEqual(["conversa", "tarefas", "canvas", "app:a", "app:b"]);
     expect(paginasPadrao({ temTarefas: false, temCanvas: true, apps: [] })).toEqual(["conversa", "canvas"]);
