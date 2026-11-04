@@ -135,6 +135,12 @@
   /* Extensões do app, fora do tokens.json: o botão das chaves e do segmentado, e o fundo atrás de diálogos */
   --shadow-knob: 0 1px 2px rgba(24, 24, 27, .22);
   --backdrop: rgba(24, 24, 27, .28);
+
+  /* ADA-2 (ADR-148): a forma do celular — alvo de toque, campo (16 px: o iOS não dá zoom ao focar) e corpo de leitura.
+     Usados só dentro da consulta do celular (web/celular-base.css). */
+  --cel-alvo: 44px;
+  --cel-campo: 16px;
+  --cel-corpo: 16px;
 }
 
 @media (prefers-color-scheme: dark) {

@@ -218,6 +218,7 @@ import { temDonos } from "./lib/dono.ts";
 import { executarRotinaComConfirmacao } from "./lib/executar-rotina.ts";
 import { copiarPorSelecao, type DocParaCopiar } from "./lib/copiar-por-selecao.ts";
 import { criarBuscaNaConversa } from "./telas/busca-na-conversa.ts";
+import { ligarTopoEncolhe, ROLAVEIS_DO_TOPO } from "./lib/topo-encolhe.ts";
 import { DICA_MS, MARCA_CUTUCAO, MARCA_DICA, SEGURAR_MS, deslocamentoDoPuxar, deveCutucar, cliqueDepoisDoGesto, criarFiltroDeEco, deveMostrarDica, escFechaABusca, fimDoGesto, gravarMarca, lerMarca, tremeu, type GestoAnterior, type Marcas, type ViaDaBusca } from "./lib/descoberta-da-busca.ts";
 // NOD-117: as teclas dos atalhos mudam com o lugar (app do Mac, navegador no Mac, Windows/Linux): web/lib/atalhos.ts.
 const LUGAR_TECLADO = lugarAtual();
@@ -256,6 +257,9 @@ const rascunhos = criarRascunhos(() => { try { return localStorage; } catch { re
  * vista (web/lib/pilula.ts).
  */
 let progressoDaFala: ProgressoNaTela = SEM_PROGRESSO;
+// ADA-2 (ADR-148): rolado, o topo da conversa, do quadro e da tarefa vira vidro (só pinta no celular: web/celular-base.css).
+const topoEncolhe = ligarTopoEncolhe(() => document.getElementById("cabecalho"),
+  ROLAVEIS_DO_TOPO.map((id) => document.getElementById(id)).filter((e): e is HTMLElement => e !== null));
 /** A conversa acompanha o fim e a pílula da base sobe às não lidas (definido em 2026-10-05, web/lib/rolagem-na-tela.ts). */
 const rolagem = criarRolagem(document.getElementById("timeline") as HTMLElement, document.getElementById("pilula-novas") as HTMLElement, () => !movimentoReduzido(), (p) => {
   progressoDaFala = p;
@@ -2241,6 +2245,7 @@ function renderPrincipal(): void {
   // Plano "tela limpa" (2026-10-16, T1): na conversa própria o cabeçalho é a pílula flutuante sobre o chat.
   document.getElementById("cabecalho")?.classList.toggle("cabecalho-pilula", t.tipo === "conversa");
   marcarPainelNaPilula();
+  topoEncolhe.reavaliar();
   quadroNaTela.sincronizar(t.tipo === "conversa" && comQuadro(t.agenteId)
     ? { chave: t.conversaId, nome: botGerido(t.agenteId)?.nome ?? "agente", agenteId: t.agenteId, paginas: paginasDaPilula(t.agenteId) }
     : { chave: null, nome: "", agenteId: t.tipo === "conversa" ? t.agenteId : null });

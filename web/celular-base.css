@@ -1,0 +1,121 @@
+/* ADA-2 (ADR-148, F1 da base do celular): a forma do Nod a 390 px — alvo de 44, campo de 16 (o iOS não dá zoom), corpo de
+   16, topo de vidro que só aparece quando o conteúdo passa por baixo, o quadro sem transbordo e a tarefa sem caixa.
+   Carregada depois de mobile.css. Toda regra entra na consulta canônica (web/lib/celular.ts, tests/unit/web/celular.test.ts):
+   janela estreita no computador nunca vê nada daqui (critério 13). Cor só por var(--…) (ADR-070). */
+@media (hover: none) and (pointer: coarse) and (max-width: 600px), (hover: none) and (pointer: coarse) and (max-height: 500px) {
+
+  /* ---------- Topo de vidro (web/lib/topo-encolhe.ts) ----------
+     Parado no topo, a faixa da pílula some (o conteúdo começa limpo); rolado, ela vira vidro sob o ‹ e a pílula, que já
+     têm o próprio. Sem transição: nada anima, então não há o que desligar com prefers-reduced-motion. */
+  .cabecalho.cabecalho-pilula:not(.topo-encolhido) { background: none; }
+  .cabecalho.cabecalho-pilula.topo-encolhido { height: calc(env(safe-area-inset-top) + 56px);
+    background: color-mix(in srgb, var(--surface) 72%, transparent); -webkit-backdrop-filter: blur(20px) saturate(1.6); backdrop-filter: blur(20px) saturate(1.6);
+    box-shadow: 0 1px 0 var(--line); }
+  /* Com o paginador, os pontos (top: 100% + 6 da pílula) e a folga deles ficam dentro do vidro: 72 em vez de 56. */
+  .cabecalho.cabecalho-pilula.topo-encolhido:has(.pg-pontos) { height: calc(env(safe-area-inset-top) + 72px); }
+  .stage.qd-no-quadro .cabecalho.cabecalho-pilula.topo-encolhido { background: color-mix(in srgb, var(--qd-fundo) 72%, transparent); }
+  /* Com a tarefa aberta a página é --surface: o vidro segue a página. */
+  .stage.qd-no-quadro:has(.qd-tarefa) .cabecalho.cabecalho-pilula.topo-encolhido { background: color-mix(in srgb, var(--surface) 72%, transparent); }
+
+  /* ---------- Quadro: nada passa de 390 ---------- */
+  /* A meta volta a quebrar linha (o nowrap de paginas.css somava 755 px a 390): objetivo com reticências na 1ª linha, o
+     progresso e "Trazer do Linear… · Remover quadro" descem. */
+  .qd-meta { flex-wrap: wrap; white-space: normal; gap: 0 14px; font-size: 13px; }
+  /* Quebrando linha, o "·" entre as partes começava linha; no celular o espaço separa. */
+  .qd-meta > * + *::before { content: none; }
+  .qd-meta > .qd-barra { margin: 0; }
+  .qd-meta > .qd-meta-obj { flex: 1 1 100%; max-width: 100%; white-space: nowrap; }
+  /* A meta e o prazo: 44 de toque (a meta tem overflow: hidden, então cresce o próprio botão; o select também, com 16 px). */
+  .qd-meta > .qd-meta-obj { display: block; line-height: var(--cel-alvo); min-height: var(--cel-alvo); }
+  .qd-criar .qd-prazo-sel, .qd-meta-in { min-height: var(--cel-alvo); font-size: var(--cel-campo); }
+  .qd-prazo-sel { height: var(--cel-alvo); font-size: var(--cel-campo); }
+  /* "Outra data…": o campo de data (24 na quadro.css) também com 44 e 16. */
+  .qd-prazo-data { height: var(--cel-alvo); min-height: var(--cel-alvo); font-size: var(--cel-campo); }
+  /* "Trazer do Linear…" e "Remover quadro" numa linha só deles, embaixo, com 44 de toque (o ::after quebra a linha). */
+  .qd-meta::after { content: ""; order: 1; flex-basis: 100%; height: 0; }
+  .qd-meta > .qd-trazer, .qd-meta > .qd-remover { order: 2; display: inline-flex; align-items: center; min-height: var(--cel-alvo); margin: 0 20px 0 0; font-size: 13px; }
+  .qd-meta > .qd-trazer::before, .qd-meta > .qd-remover::before { content: none; }
+  /* A linha: o título fica com o espaço; o fim (quando, estado, avisos) no máximo 40 %, e o aviso "Movido por… · Desfazer"
+     desce para a 2ª linha inteira. */
+  .qd-l { flex-wrap: wrap; column-gap: 8px; }
+  .qd-l-bt { font-size: var(--cel-corpo); }
+  /* O fim (quando, ID) fica com o limite do desktop (55%): o "quando" e o ID não encolhem (nowrap) e, com menos, passavam por cima do Mover. */
+  .qd-l:has(.qd-l-fim .qd-aviso) .qd-l-fim { order: 3; flex-basis: 100%; max-width: 100%; padding: 0 0 6px 32px; }
+  .qd-l-fim .qd-aviso { min-width: 0; max-width: 100%; flex-wrap: nowrap; }
+  .qd-l-fim .qd-aviso-txt { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* A recusa explica o caminho: quebra linha e mostra o texto inteiro (o title não aparece no toque). */
+  .qd-l-fim .qd-aviso-recusa { flex-wrap: wrap; }
+  .qd-l-fim .qd-aviso-recusa .qd-aviso-txt { overflow: visible; white-space: normal; }
+  /* O "Desfazer" não encolhe com o texto (sem isso quebra no meio da palavra): quem cede é o "Movido por…", com reticências.
+     Na recusa, a ação vai para a linha de baixo inteira e sem o "·" na frente. */
+  .qd-l-fim .qd-aviso:not(.qd-aviso-recusa) .qd-aviso-acao { flex: none; }
+  .qd-l-fim .qd-aviso-recusa .qd-aviso-acao { flex-basis: 100%; }
+  .qd-l-fim .qd-aviso-recusa > span + .qd-link::before { content: none; }
+  /* "Precisa de você": a pergunta em até 2 linhas e o Responder leve (campo sem caixa, Enviar em texto). */
+  /* "Precisa de você": o fim (quando, estado) desce para a 2ª linha e o título fica com a linha ao lado do Mover; o Responder por último. */
+  .qd-l:has(.qd-card-resp) .qd-l-fim { order: 3; flex-basis: 100%; max-width: 100%; padding: 0 0 6px 32px; }
+  .qd-l:has(.qd-card-resp) > .qd-card-resp { order: 4; }
+  .qd-l:has(.qd-card-resp) .qd-l-tit { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
+  .qd-l .qd-card-resp { align-items: center; padding-left: 32px; border-top: 1px solid var(--line); }
+  .qd-l .qd-card-resp-in { flex: 1; min-width: 0; min-height: var(--cel-alvo); padding: 11px 0; border: 0; background: transparent; font-size: var(--cel-campo); resize: none; }
+  .qd-l .qd-card-resp-bt { min-height: var(--cel-alvo); min-width: var(--cel-alvo); padding: 0 4px; border: 0; background: none; color: var(--ink); font-weight: 600; }
+  .qd-lg-bt { font-size: 15px; }
+
+  /* ---------- A tarefa aberta: sem caixa, título grande, comentários em cartão suave ---------- */
+  /* A folha da tarefa vai de ponta a ponta, sem fundo, sombra nem raio: não é cartão dentro de cartão (padrão do Linear iOS). */
+  .qd-vista:has(> .qd-conteudo > .qd-tarefa) { padding-inline: 0; background: var(--surface); }
+  /* O composer sticky tirava a margem lateral do padding da vista: com a tarefa aberta ele volta a ter a mesma do quadro (12 a 390). */
+  .qd-vista:has(> .qd-conteudo > .qd-tarefa) > .qc-wrap { padding-inline: clamp(12px, 3vw, 24px); }
+  .qd-tarefa { padding-inline: 16px; background: var(--surface); box-shadow: none; border-radius: 0; }
+  .qd-t-principal { padding: 0; border: 0; border-radius: 0; background: transparent; gap: 16px; }
+  .qd-t-tit { font-size: 26px; line-height: 1.2; letter-spacing: -.02em; }
+  .qd-t-desc { font-size: 17px; line-height: 1.55; }
+  .qd-chip { min-height: var(--cel-alvo); font-size: 13px; }
+  /* Na folha --surface o fundo do quadro (--qd-col-fundo) some no escuro (1,05:1): o chip usa o cinza do cartão. */
+  .qd-tarefa .qd-chip { background: var(--surface-raised); }
+  .qd-com { padding: 12px; border-radius: 14px; background: var(--surface-raised); }
+  .qd-com-txt { font-size: var(--cel-corpo); }
+  /* A hora do comentário em --ink-2: folga de contraste no cartão (o teste mede 4,5:1 contra o fundo declarado, nos dois temas). */
+  .qd-com-cab time { color: var(--ink-2); }
+  .qd-com-acao { padding-left: 12px; }
+  .qd-com-form { min-height: var(--cel-alvo); }
+  .qd-com-in, .qd-nova-in, .qd-sel, .qd-prz-valor { font-size: var(--cel-campo); min-height: var(--cel-alvo); }
+  .qd-resp-in, .qc-txt, .qd-pas-inst { font-size: var(--cel-campo); }
+  .qd-com-in { padding: 11px 0; }
+  .qd-com-bt { min-height: var(--cel-alvo); min-width: var(--cel-alvo); font-size: 15px; }
+  .qd-sel, .qd-nova-in { border-radius: 10px; padding: 0 10px; }
+  .qd-nova-in { width: auto; flex: 1; }
+  /* O histórico: linhas com um ponto de 6 px, sem traço de cima. */
+  .qd-hist { border-top: 0; }
+  .qd-hist-l, .qd-hist > li, .qd-at-lista > li { position: relative; padding-left: 14px; }
+  .qd-hist-l::before, .qd-hist > li::before, .qd-at-lista > li::before { content: ""; position: absolute; left: 0; top: calc(.75em - 3px); width: 6px; height: 6px; border-radius: 50%; background: var(--line-strong); }
+  /* A linha "N movimentos" tem 44 (o Desfazer): o ponto e o texto se alinham pelo centro. */
+  .qd-hist-l { align-items: center; }
+  .qd-hist-l::before { top: calc(50% - 3px); }
+  .qd-hist-sum { min-height: var(--cel-alvo); padding-block: 12px; box-sizing: border-box; }
+
+  /* ---------- Conversa e cards ---------- */
+  /* O corpo da conversa em 16. */
+  .bubble { font-size: var(--cel-corpo); }
+  /* "Pensou por N s · M ações": o pronto (min-height 20 na interface.css, mais específico que o 44 da mobile.css) volta a 44. */
+  .pensar > summary, .pensar[data-fase="pronto"] > summary { min-height: var(--cel-alvo); }
+  /* O enviar (e o parar, no mesmo lugar): o círculo de 44 enche a caixa (46 com a borda), igual ao microfone. */
+  .composer .box:not(.gravando) .send, .composer .box:not(.gravando) .parar-envio { width: var(--cel-alvo); min-width: var(--cel-alvo); height: var(--cel-alvo); min-height: var(--cel-alvo); margin: 0; }
+  .composer .box:not(.gravando) .send::after, .composer .box:not(.gravando) .parar-envio::after { inset: 0; }
+  /* As ações do artefato quebram linha dentro do card em vez de empurrar o título para fora. */
+  .artefato-cab { flex-wrap: wrap; row-gap: 0; }
+  .artefato-acoes { flex-wrap: wrap; flex-shrink: 1; min-width: 0; margin-left: auto; gap: 4px 12px; }
+  .pq-campo .pq-enviar { height: var(--cel-alvo); }
+  .cp .cp-sim, .cp .cp-nao, .cp-erro .cp-acao { min-height: var(--cel-alvo); padding-left: 16px; padding-right: 16px; font-size: 15px; }
+  /* O chip de link: 44 de toque de verdade. A margem de 9 + 26 + 9 abre a linha do chip para 44, e a área estendida fica
+     dentro dela: não invade a linha de cima nem a de baixo (um toque no texto vizinho não abre o link). */
+  a.lk-chip { position: relative; margin-block: 9px; }
+  /* O inset do ::after conta da caixa de padding: -10 = 9 de margem + 1 de borda (fica 44 da borda para fora, sem passar da margem). */
+  a.lk-chip::after { content: ""; position: absolute; inset: -10px -3px; }
+  /* A pílula de novas mensagens / "perguntou algo": 44. */
+  .pilula-novas, .pilula-novas.pilula-pergunta { min-height: var(--cel-alvo); font-size: 14px; }
+  /* A dica da primeira vez vira uma pílula sólida: não fica escrita por cima das mensagens. */
+  .pg-dica { padding: 6px 12px; border-radius: 999px; background: var(--surface-raised); color: var(--ink-2); box-shadow: var(--shadow-pop); font-size: 13px; }
+  /* A barra lateral: "+ Novo time" com 44. */
+  .novo-time.nova-secao-alvo { min-height: var(--cel-alvo); font-size: 15px; }
+}

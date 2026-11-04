@@ -28,6 +28,7 @@ no toque, sem 🐞 fixo e sem •••.
    grosso, e largura ≤ 600 px (em pé) ou altura ≤ 500 px (deitado). A mesma string está em `web/mobile.css`, e
    `tests/unit/web/celular.test.ts` confere. Janela estreita no Mac continua desktop. O iPad continua com as colunas.
 3. **O layout do celular só reorganiza o que existe** (`web/mobile.css`, a última folha):
+   (Emenda 2026-11-03, ADA-2, ADR-148: no celular a forma pode mudar — alvo de 44, campo de 16, topo de vidro —, as ações não; `web/celular-base.css` carrega depois de `mobile.css`.)
    - a barra de bots vira gaveta pela esquerda. Ela abre pelo ☰, que entra no próprio cabeçalho da tela (um cabeçalho
      só). Tela sem cabeçalho ganha uma faixa só com o ☰;
    - a conversa ocupa a tela, e a gaveta do bot cobre a tela inteira com o próprio topo;

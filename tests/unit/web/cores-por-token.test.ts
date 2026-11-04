@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
  * "cor-fixa: <motivo>" quando for de propósito igual nos dois temas.
  */
 const RAIZ = new URL("../../../web/", import.meta.url);
-const CSS = ["estilos.css", "interface.css", "navegacao.css", "ligacao.css", "onboarding.css", "computador-do-bot.css", "conta.css", "configuracoes.css", "agentes-lote.css", "quadro.css", "mobile.css"] as const;
+const CSS = ["estilos.css", "interface.css", "navegacao.css", "ligacao.css", "onboarding.css", "computador-do-bot.css", "conta.css", "configuracoes.css", "agentes-lote.css", "quadro.css", "mobile.css", "celular-base.css"] as const;
 const LITERAL = /#[0-9a-fA-F]{3,8}\b|\b(?:rgba?|hsla?)\(/;
 const ler = (nome: string): string => readFileSync(new URL(nome, RAIZ), "utf8");
 
@@ -68,7 +68,8 @@ describe("cores só por token", () => {
     const nomes = (texto: string): string[] => [...texto.matchAll(/(--[a-z0-9-]+)\s*:/g)].map((m) => m[1] ?? "");
     // --balao-* (NOD-431) são calculados de --agent-* e só mudam no escuro onde o cálculo muda (creme); o teste
     // tests/unit/domain/contraste-do-balao.test.ts confere os dois temas.
-    const fixos = /^--(agent-|font-|balao-)/;
+    // --cel-* (ADA-2, ADR-148) são medidas do celular (alvo, campo, corpo), não cor: iguais nos dois temas.
+    const fixos = /^--(agent-|font-|balao-|cel-)/;
     const claro = nomes(bloco(":root {")).filter((n) => !fixos.test(n) && n !== "--focus-ring");
     for (const escuro of [bloco(':root:not([data-theme="light"])'), bloco(':root[data-theme="dark"]')]) {
       expect(claro.filter((n) => !nomes(escuro).includes(n))).toEqual([]);

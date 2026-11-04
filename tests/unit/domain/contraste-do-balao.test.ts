@@ -151,7 +151,8 @@ describe("a cascata: nenhuma folha posterior tira a cor ou o contraste do balão
   const ehFalhou = (s: string): boolean => /\[data-envio="falhou"\]|\.fila-(na_fila|cancelando|cancelada)\b/.test(s);
 
   it("o balão da pessoa é pintado pelos tokens: a última regra de .message.you .bubble e qualquer regra mais específica", () => {
-    expect(folhas.at(-1)).toBe("mobile.css");
+    // As folhas do celular por último: mobile.css e, depois dela, a base do celular (ADA-2, ADR-148).
+    expect(folhas.slice(-2)).toEqual(["mobile.css", "celular-base.css"]);
     const pinturas = regras.flatMap((r) =>
       r.seletores
         .filter((s) => ehOBalao(s) && !ehFalhou(s))
