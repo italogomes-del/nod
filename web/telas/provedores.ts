@@ -3,6 +3,7 @@ import { botao, esc, hora } from "../lib/render.ts";
 import { haQuanto } from "../lib/relogio.ts";
 import { grupoConfig, itemMenu, linhaConfig, menuLinha, type TomStatus } from "../lib/linha-config.ts";
 import { ICONE } from "../lib/icones.ts";
+import { nesteMac } from "../lib/plataforma-da-tela.ts";
 import { chaveDoMenuDaIa } from "../lib/ordem.ts";
 import { abaixoDaIa, acoesDaIa, alcaDaIa, logoDaIa, ordemDasIas, pilhaDeAvatares, renderCartaoIa, UI_IAS_INICIAL, vistaDaIa, type ContextoCartao, type UiIas, type VistaIa } from "./cartao-ia.ts";
 import { renderContasDaIa } from "./contas-ia.ts";
@@ -42,7 +43,7 @@ export function renderProvedores(estado: Estado): string {
   return `<section class="espaco-secao cfg-secao provedores">
       <h2 class="prov-titulo">${pilhaDeAvatares()}Provedores de IA</h2>
       ${estado.contasIa?.disponivel ? '<p class="cl-faixa" role="status">Atualize o app do nod para ver e gerenciar as contas de todas as máquinas numa lista só.</p>' : ""}
-      <p class="intro">As IAs que seus bots usam${ui.noApp ? " neste Mac" : ""}. No automático, a primeira pronta responde e, se ela parar ou chegar ao limite, a próxima assume.</p>
+      <p class="intro">As IAs que seus bots usam${ui.noApp ? ` ${nesteMac()}` : ""}. No automático, a primeira pronta responde e, se ela parar ou chegar ao limite, a próxima assume.</p>
       ${grupoConfig("Ordem dos seus bots", linhas, { classe: "prov-ordem-grupo", listaAttrs: 'data-ordem-lista="pessoa"', notaHtml: nota })}
       ${executor}
       ${foraDoAr(estado)}

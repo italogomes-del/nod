@@ -27,8 +27,13 @@ describe("QA #678: o IPC só atende a tela de conexão", () => {
   it("todo ipcMain.handle do main passa pela guarda", () => {
     const handles = main.split("ipcMain.handle(").length - 1;
     const guardados = main.match(/ipcMain\.handle\("nodwin:\w+", \(e\) => \{?\s*(?:\(|if \()daTelaDeSetup\(e\)/g) ?? [];
-    expect(handles).toBeGreaterThanOrEqual(5);
-    expect(guardados).toHaveLength(handles);
+    // 5/11: os canais da janela web (`nod:ia-*`) passam pela guarda da janela (login-ia-windows.ts `daJanelaWeb`).
+    const daJanela = main.match(/ipcMain\.handle\(CANAIS_DESKTOP\.ia\w+, \(e, ia: unknown\) => \{\s*const lida = iaDaJanela\(e, ia\);\s*if \(!lida\) throw new Error\("entrada_invalida"\);/g) ?? [];
+    expect(handles).toBeGreaterThanOrEqual(7);
+    expect(guardados.length + daJanela.length).toBe(handles);
+    expect(daJanela).toHaveLength(2);
+    expect(main).toMatch(/const iaDaJanela = \(e: IpcMainInvokeEvent, ia: unknown\) => \(daJanelaWeb\(e, janela, conexao \? new URL\(conexao\.url\)\.origin : null\) \? lerIaDesktop\(ia\) : null\);/);
+    expect(main).toMatch(/preload: join\(dir, "preload-web-windows\.cjs"\)/);
     expect(main).toMatch(/const daTelaDeSetup = \(e: IpcMainInvokeEvent\) => daTelaDeSetupPura\(e, setup, setupUrl\);/);
     expect(main).toContain('setup.webContents.on("will-navigate", (e, url) => { if (url !== setupUrl) e.preventDefault(); });');
   });

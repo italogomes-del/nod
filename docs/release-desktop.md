@@ -247,6 +247,7 @@ Instruções para a pessoa (3 passos):
 
 - **Primeira abertura sem conta** (5/11/2026): o app pede o espaço provisório ao servidor, como o Mac, e abre direto;
   a conta é criada de dentro. O Conectar por código é para quem já tem conta em outro aparelho.
+- **Entrar nas IAs:** o "Entrar" do cartão de IA abre o login do próprio CLI (`claude auth login` / `codex login`) e o navegador; o motor percebe o login em segundos. Sem a IA instalada, o cartão abre a página oficial.
 - **Montar**: `npm run desktop:windows` (num Windows; grava `release/nod-<v>-win-x64.exe`).
 - **Atualização automática**: o feed `?plataforma=windows&arch=x64` anuncia `<v>/nod-<v>-win-x64.exe` quando a linha de
   `NOD_APP_ATUALIZACAO_SHA256` tem `win-x64=`. O `publicar-atualizacao.sh` sobe o `.exe` e acrescenta a chave quando a

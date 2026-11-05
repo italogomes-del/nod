@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, safeStorage, session, shell, Tray, type IpcMainInvokeEvent } from "electron";
 import { execFile, spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { hostname, userInfo } from "node:os";
 import { dirname, join } from "node:path";
@@ -8,7 +8,10 @@ import { fileURLToPath } from "node:url";
 import { arquivoDaConexao, carregarConexao, guardarConexao, pastaDoMotor, type ConexaoMotor } from "../../motor/conexao.ts";
 import { criarAtualizacaoDoApp, linhaDaAtualizacao, servidorDeAtualizacao, TEXTOS_ATUALIZACAO, type AtualizacaoDoApp } from "../atualizacao.ts";
 import { pedirProvisorio, servidorOfereceProvisorio, verificadorNovo, verificadorValido } from "../conta-provisoria.ts";
+import { lerIaDesktop } from "../ia-mac.ts";
 import { abreNoNavegador } from "../links-externos.ts";
+import { CANAIS_DESKTOP } from "../../src/contracts/desktop.ts";
+import { abrirInstalacao, daJanelaWeb, entrarNaIa } from "./login-ia-windows.ts";
 import { ARGS_DO_INSTALADOR, criarAtualizadorWindows, gravadorConferindo } from "./atualizador.ts";
 import { daTelaDeSetup as daTelaDeSetupPura, deveTentarProvisorio, maisUmaLinha, passoAoAbrir, passoDaSessao, servidorDoApp, telaDaFalhaDePareamento, TEXTOS_WINDOWS, travarPermissoes, urlDaTelaDeSetup, type TelaDoSetup } from "./fluxo.ts";
 import { rodarInstalacao } from "./instalacao.ts";
@@ -157,7 +160,8 @@ async function entrar(c: ConexaoMotor) {
 function abrirJanela(url: string) {
   const origem = new URL(url).origin;
   if (janela && !janela.isDestroyed()) { void janela.loadURL(`${origem}/`); janela.show(); return; }
-  janela = new BrowserWindow({ width: 1280, height: 820, minWidth: 900, minHeight: 600, title: "nod", icon: icone(), autoHideMenuBar: true, webPreferences: { partition: PARTITION_DA_JANELA, contextIsolation: true, sandbox: true, nodeIntegration: false } });
+  // 5/11: a ponte mínima dos cartões de IA (preload-web-windows.ts); sem ela a web mandava a pessoa ao PowerShell.
+  janela = new BrowserWindow({ width: 1280, height: 820, minWidth: 900, minHeight: 600, title: "nod", icon: icone(), autoHideMenuBar: true, webPreferences: { partition: PARTITION_DA_JANELA, preload: join(dir, "preload-web-windows.cjs"), contextIsolation: true, sandbox: true, nodeIntegration: false } });
   // ADR-053: link para fora (target=_blank) abre no navegador; a janela nunca abre outra no app.
   janela.webContents.setWindowOpenHandler(({ url: u }) => { if (abreNoNavegador(u)) void shell.openExternal(u); return { action: "deny" }; });
   janela.webContents.on("will-navigate", (e, u) => {
@@ -266,6 +270,18 @@ else {
       if (daTelaDeSetup(e) && telaAtual.tela === "aguardando") void shell.openExternal(telaAtual.link);
     });
     ipcMain.handle("nodwin:baixar", (e) => { if (daTelaDeSetup(e)) void shell.openExternal("https://nodbot.ai/download/windows"); });
+    // 5/11: os cartões de IA da janela web (ADR-077 no Mac): só a página do servidor conectado, só os ids conhecidos.
+    const iaDaJanela = (e: IpcMainInvokeEvent, ia: unknown) => (daJanelaWeb(e, janela, conexao ? new URL(conexao.url).origin : null) ? lerIaDesktop(ia) : null);
+    ipcMain.handle(CANAIS_DESKTOP.iaEntrar, (e, ia: unknown) => {
+      const lida = iaDaJanela(e, ia);
+      if (!lida) throw new Error("entrada_invalida");
+      return entrarNaIa(lida, { env: process.env, execPath: process.execPath, gerar: spawn, disco: { existe: existsSync, ler: (p) => readFileSync(p, "utf8") }, registrar });
+    });
+    ipcMain.handle(CANAIS_DESKTOP.iaInstalar, (e, ia: unknown) => {
+      const lida = iaDaJanela(e, ia);
+      if (!lida) throw new Error("entrada_invalida");
+      return abrirInstalacao(lida, (u) => shell.openExternal(u));
+    });
     bandeja = new Tray(icone().resize({ width: 16, height: 16 }));
     bandeja.on("click", () => { if (janela && !janela.isDestroyed()) janela.show(); else void abrir(); });
     atualizacao = montarAtualizacao();

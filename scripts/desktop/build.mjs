@@ -14,6 +14,11 @@ if (windows) {
     if (/src\/(db|repositories|use-cases)\/|src\/adapters\/(http|fundo)\//.test(arquivo)) throw new Error(`Servidor não pode entrar no app desktop: ${arquivo}`);
   }
   await build({ entryPoints: ["desktop/windows/preload-windows.ts"], outfile: "dist/desktop/preload-windows.cjs", bundle: true, platform: "node", format: "cjs", external: ["electron"], logLevel: "warning" });
+  // 5/11: a ponte mínima da janela web do Windows (só contratos, como o preload-web do Mac).
+  const webWin = await build({ metafile: true, entryPoints: ["desktop/windows/preload-web-windows.ts"], outfile: "dist/desktop/preload-web-windows.cjs", bundle: true, platform: "node", format: "cjs", external: ["electron"], logLevel: "warning" });
+  for (const arquivo of Object.keys(webWin.metafile.inputs)) {
+    if (!/^(desktop\/windows\/preload-web-windows\.ts|src\/contracts\/[a-z-]+\.ts)$/.test(arquivo)) throw new Error(`O preload da janela web do Windows só leva contratos: ${arquivo}`);
+  }
   for (const nome of ["setup-windows.html", "setup-windows.css", "setup-windows.js"]) await copyFile(`desktop/windows/${nome}`, `dist/desktop/${nome}`);
   await copyFile("desktop/setup.css", "dist/desktop/setup.css");
   await copyFile("desktop/resources/icon.png", "dist/desktop/icon.png");

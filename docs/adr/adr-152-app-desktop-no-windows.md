@@ -46,6 +46,13 @@ um instalador, um ícone e a conversa numa janela, com a máquina conectada sem 
 9. **Assinatura atrás de flag** (`NOD_WINDOWS_ASSINAR=1` + `WIN_CSC_LINK`), desligada até o certificado (NOD-471). Até lá o
    SmartScreen avisa na primeira execução, como no OpenMausBot.
 
+10. **Login das IAs pela janela (revisão de 5/11/2026, segundo teste real).** A janela web levava zero ponte, então o
+    "Entrar" dos cartões de IA caía no texto de fora do app ("rode `claude auth login`") e a pessoa travava. A janela
+    passa a ter a ponte mínima `window.nodDesktop` com `iaEntrar`/`iaInstalar` (`preload-web-windows.ts`, só contratos),
+    e o processo principal roda o login do próprio CLI como o Mac (ADR-077): sem shell, desanexado, sem janela, ambiente
+    limpo; o `.cmd` do npm vira `node <script>` (ADR-147) com o Node do motor. Quem percebe o login é a vigia do motor.
+    O resto da ponte do Mac (avisos, contas, mídia, teste das IAs) segue de fora: a web trata tudo como opcional.
+
 ## Consequências
 
 - Dois processos principais no desktop: correção de navegação ou sessão feita num deve ser conferida no outro.

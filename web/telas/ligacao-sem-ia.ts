@@ -1,5 +1,6 @@
 import type { CausaCerebroCaiu, EstadoIaDaLigacao, IaDaLigacao, IAS_DA_LIGACAO as IasDaLigacao } from "../../src/contracts/voz.ts";
 import { avisoDeEstado } from "../lib/aviso-estado.ts";
+import { desteMac, terminalDaqui } from "../lib/plataforma-da-tela.ts";
 import { botao, esc } from "../lib/render.ts";
 import { COMANDO_ATUALIZAR_IA, versaoLegivel } from "./ia-fora.ts";
 import { LOGOS_IA } from "./onboarding-logos.ts";
@@ -51,10 +52,10 @@ export type EstadoIaVoltou = { ia: IaDaLigacao | null; trocou: boolean };
  * outra falha, um texto verdadeiro e genérico (nunca o texto do fornecedor, nunca um palpite).
  */
 export function motivoSemIa(causa: CausaCerebroCaiu, ia: IaDaLigacao | null): string {
-  if (causa === "conta_sem_acesso" && ia) return `A conta do ${NOME_CLI[ia]} deste Mac está sem acesso: a organização dela desativou o uso por assinatura.`;
+  if (causa === "conta_sem_acesso" && ia) return `A conta do ${NOME_CLI[ia]} ${desteMac()} está sem acesso: a organização dela desativou o uso por assinatura.`;
   // NOD-168 (ADR-078): a assinatura no teto é dita como é; "parou de responder" faria a pessoa tentar de novo à toa.
-  if (causa === "limite") return ia ? `A assinatura do ${NOME_CLI[ia]} deste Mac chegou ao limite.` : "A assinatura de IA deste Mac chegou ao limite.";
-  return "A IA deste Mac parou de responder.";
+  if (causa === "limite") return ia ? `A assinatura do ${NOME_CLI[ia]} ${desteMac()} chegou ao limite.` : `A assinatura de IA ${desteMac()} chegou ao limite.`;
+  return `A IA ${desteMac()} parou de responder.`;
 }
 
 /** As IAs prontas no Mac que podem assumir: a outra, quando se sabe qual caiu; sem saber, qualquer uma pronta. */
@@ -66,8 +67,8 @@ export function iasQuePodemAssumir(s: Pick<EstadoSemIa, "ia" | "ias">): IaDaLiga
 export function notaNoTerminal(ia: IaDaLigacao, acao: "entrar" | "instalar"): string {
   const entrar = `rode “${LOGIN_NO_TERMINAL[ia]}” e entre na conta`;
   return acao === "entrar"
-    ? `No Terminal deste Mac, ${entrar}. Depois, tente de novo com o ${NOME_IA[ia]}.`
-    : `Instale o ${NOME_CLI[ia]} (${ONDE_INSTALAR[ia]}) e, no Terminal deste Mac, ${entrar}. A ligação percebe quando ficar pronto.`;
+    ? `${terminalDaqui()}, ${entrar}. Depois, tente de novo com o ${NOME_IA[ia]}.`
+    : `Instale o ${NOME_CLI[ia]} (${ONDE_INSTALAR[ia]}) e, ${terminalDaqui().replace(/^No/, "no")}, ${entrar}. A ligação percebe quando ficar pronto.`;
 }
 
 export const artigoDoBot = (genero: "feminina" | "masculina"): string => (genero === "feminina" ? "A" : "O");
