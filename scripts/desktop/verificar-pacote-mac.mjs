@@ -182,6 +182,22 @@ function rodar(comando, args) {
   return { codigo: r.status ?? 1, saida: `${r.stdout ?? ""}${r.stderr ?? ""}` };
 }
 
+/** 5/11/2026: o stapler busca o bilhete no CloudKit da Apple a cada `validate`; a queda de rede sai com 68 e passa (scripts/desktop/stapler.sh). */
+export const STAPLER_TENTATIVAS = 6;
+export const STAPLER_ESPERA_MS = 20_000;
+export function deveRepetirStapler({ codigo }, tentativa, tentativas = STAPLER_TENTATIVAS) {
+  return codigo === 68 && tentativa < tentativas;
+}
+function rodarStapler(alvo, esperar = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)) {
+  let r = rodar("xcrun", ["stapler", "validate", alvo]);
+  for (let tentativa = 1; deveRepetirStapler(r, tentativa); tentativa++) {
+    process.stderr.write(`stapler validate (${alvo}): CloudKit da Apple não respondeu (saída 68), tentativa ${tentativa} de ${STAPLER_TENTATIVAS}\n`);
+    esperar(STAPLER_ESPERA_MS);
+    r = rodar("xcrun", ["stapler", "validate", alvo]);
+  }
+  return r;
+}
+
 function relatar(falhas) {
   const prefixo = process.env.GITHUB_ACTIONS === "true" ? "::error::" : "";
   process.stderr.write(`${falhas.map((f) => `${prefixo}${f}`).join("\n")}\n`);
@@ -200,8 +216,8 @@ function verificarPacote(app, dmg) {
     microfone: rodar("plutil", ["-extract", "NSMicrophoneUsageDescription", "raw", "-o", "-", join(app, "Contents", "Info.plist")]),
     esquemaUrl: rodar("plutil", ["-extract", "CFBundleURLTypes.0.CFBundleURLSchemes.0", "raw", "-o", "-", join(app, "Contents", "Info.plist")]),
     lipo: rodar("lipo", ["-archs", join(app, "Contents", "MacOS", "nod")]).saida,
-    staplerApp: rodar("xcrun", ["stapler", "validate", app]),
-    staplerDmg: rodar("xcrun", ["stapler", "validate", dmg]),
+    staplerApp: rodarStapler(app),
+    staplerDmg: rodarStapler(dmg),
     spctlApp: rodar("spctl", ["--assess", "--type", "execute", "--verbose=2", app]),
     spctlDmg: rodar("spctl", ["--assess", "--type", "open", "--context", "context:primary-signature", "--verbose=2", dmg]),
   };

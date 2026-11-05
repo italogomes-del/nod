@@ -235,3 +235,22 @@ describe("verificar-pacote-mac.mjs (NOD-203)", () => {
     });
   });
 });
+
+describe("5/11/2026: o stapler repete só a queda do CloudKit (saída 68)", () => {
+  it("68 repete até o teto; outra saída ou sucesso não", async () => {
+    const { deveRepetirStapler, STAPLER_TENTATIVAS } = await import("../../../scripts/desktop/verificar-pacote-mac.mjs");
+    expect(deveRepetirStapler({ codigo: 68 }, 1)).toBe(true);
+    expect(deveRepetirStapler({ codigo: 68 }, STAPLER_TENTATIVAS - 1)).toBe(true);
+    expect(deveRepetirStapler({ codigo: 68 }, STAPLER_TENTATIVAS)).toBe(false);
+    expect(deveRepetirStapler({ codigo: 0 }, 1)).toBe(false);
+    expect(deveRepetirStapler({ codigo: 65 }, 1)).toBe(false);
+    expect(deveRepetirStapler({ codigo: 68 }, 2, 2)).toBe(false);
+  });
+  it("o workflow usa o script com retry nos dois stapler e repete o electron-builder", () => {
+    const wf = readFileSync(new URL("../../../.github/workflows/desktop-release.yml", import.meta.url), "utf8");
+    expect(wf).not.toMatch(/xcrun stapler (staple|validate)/);
+    expect(wf).toMatch(/scripts\/desktop\/stapler\.sh staple "\$DMG"/);
+    expect(wf).toMatch(/scripts\/desktop\/stapler\.sh validate "\$DIR\/nod\.app"/);
+    expect(wf).toMatch(/for tentativa in 1 2 3; do\s*if npx electron-builder --mac dmg zip/);
+  });
+});

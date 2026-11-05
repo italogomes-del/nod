@@ -16,6 +16,9 @@ export type SaidasPacote = {
 export type EsperadoPacote = { teamId: string; arch: string; entitlements: readonly string[]; microfone: string };
 
 export const ARCH_DO_LIPO: Readonly<Record<string, string>>;
+export const STAPLER_TENTATIVAS: number;
+export const STAPLER_ESPERA_MS: number;
+export function deveRepetirStapler(saida: Pick<SaidaComando, "codigo">, tentativa: number, tentativas?: number): boolean;
 export function interpretarVerify(alvo: string, saida: SaidaComando): Conferencia;
 export function interpretarCodesign(alvo: string, saida: string, teamId: string): Conferencia[];
 export function interpretarFlags(alvo: string, saida: string): Conferencia;

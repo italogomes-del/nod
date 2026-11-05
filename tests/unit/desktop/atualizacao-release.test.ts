@@ -23,7 +23,7 @@ describe("release do ZIP da atualização (NOD-132)", () => {
     expect(wf).toContain('npx electron-builder --mac dmg zip --"$ARCH"');
     const passo = wf.slice(wf.indexOf("Verificar o .app do ZIP da atualização"), wf.indexOf("Diagnóstico do pacote"));
     expect(passo).toContain('codesign --verify --deep --strict');
-    expect(passo).toContain('xcrun stapler validate "$DIR/nod.app"');
+    expect(passo).toContain('scripts/desktop/stapler.sh validate "$DIR/nod.app"');
     expect(passo).toContain('spctl -a -vv -t exec "$DIR/nod.app"');
     expect(wf).toMatch(/shasum -a 256 release\/nod-\*-mac-"\$ARCH"\.dmg release\/nod-\*-mac-"\$ARCH"\.zip/);
     expect(wf).toContain("release/nod-*-mac-*.zip");
