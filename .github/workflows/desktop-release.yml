@@ -16,6 +16,11 @@ jobs:
   # docs/processo-de-release.md já pede antes da tag); aqui ficam só os builds que o release precisa.
   verify:
     runs-on: blacksmith-4vcpu-ubuntu-2404
+    # Ler os runs do ci.yml pela API exige `actions: read`; o padrão do workflow (contents: read) dava HTTP 403
+    # ("Resource not accessible by integration", run 41950972119, 2026-11-05).
+    permissions:
+      contents: read
+      actions: read
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
       - name: O commit da tag passou na CI
