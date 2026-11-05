@@ -21,6 +21,11 @@ async function janelaWeb() {
   const recebidos = [];
   ipcMain.handle("nod:contador", (_e, n) => { recebidos.push(n); });
   ipcMain.handle("nod:ia-estados", () => [{ ia: "codex-cli", estado: "procurando" }]);
+  // NOD-119 (#597): o preload da web pede a densidade da barra e as decisões do card de forma SÍNCRONA ao carregar.
+  // Um sendSync sem resposta trava o renderer para sempre: o loadURL abaixo nunca voltava e o smoke estourava os
+  // 5 min (release v1.0.0-rc.3, 2026-11-04, os dois Macs). Toda chamada síncrona nova do preload precisa de resposta aqui.
+  ipcMain.on("nod:barra-inicial", (e) => { e.returnValue = null; });
+  ipcMain.on("nod:decisoes-barra-iniciais", (e) => { e.returnValue = {}; });
   const w = new BrowserWindow({ show: false, webPreferences: { preload: resolve("dist/desktop/preload-web.cjs"), partition: "nod-web-smoke", ...isolada } });
   try {
     await w.loadURL("data:text/html;charset=utf-8,<!doctype html><title>nod</title><body>web</body>");
