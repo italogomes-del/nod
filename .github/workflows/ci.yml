@@ -225,6 +225,49 @@ jobs:
       - if: success() || failure()
         run: if [ -f qa-relatorio/qa-relatorio.md ]; then cat qa-relatorio/qa-relatorio.md >> "$GITHUB_STEP_SUMMARY"; fi
 
+  # definido em 2026-11-05: o smoke da janela do app do Mac (scripts/desktop/smoke-window.mjs) só rodava no
+  # desktop-release, e três das seis releases vermelhas desde a rc.1 caíram nele por PRs que mexeram no preload dias
+  # antes (a lista de chaves em 28/10; o sendSync do #597 na rc.3). Cada queda custava 1 h 40 de esteira. Roda aqui,
+  # num macOS hospedado (minutos 10× o Linux, por isso atrás do filtro), só quando o diff toca o app do desktop ou os
+  # contratos que o preload leva. Mesmo build e mesmo comando do release; sem assinatura, sem secret.
+  desktop-filtro:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    outputs:
+      roda: ${{ steps.filtro.outputs.roda }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - id: filtro
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ] || ! git fetch --no-tags --depth=1 origin "$BASE"; then
+            echo "roda=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          if git diff --name-only "$BASE" HEAD | grep -qE '^(desktop/|scripts/desktop/|src/contracts/|tsconfig\.desktop\.json$|electron-builder\.yml$|\.github/workflows/ci\.yml$|package(-lock)?\.json$)'; then
+            echo "roda=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "roda=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  desktop-smoke:
+    needs: desktop-filtro
+    if: needs.desktop-filtro.outputs.roda == 'true'
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24.19.0"
+          cache: npm
+      - run: npm ci
+      - run: npm run desktop:build
+      # O mesmo passo do desktop-release.yml, com o mesmo prazo: um Electron travado não prende o runner.
+      - name: Smoke da janela
+        timeout-minutes: 5
+        run: npx electron scripts/desktop/smoke-window.mjs
+
   # ADA-11 (ADR-147): o smoke do motor no Windows de verdade. O windows-latest é hospedado (o runner próprio é Linux) e
   # cobra minutos, então só roda quando o diff toca o que roda no motor. O filtro fica aqui dentro (num job barato no
   # runner próprio) e não em on.paths: um job pulado conta como sucesso, e o ci da main continua liberando o deploy.
