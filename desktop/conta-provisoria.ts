@@ -67,8 +67,9 @@ export async function pedirProvisorio(o: { servidor: string; verificador: string
     const chamar = (prova?: { desafio: string; resposta: string }) => (o.fetchImpl ?? fetch)(new URL("/api/conta/provisorio", o.servidor), {
       method: "POST",
       redirect: "error",
-      // O rótulo do aparelho (a chave em Máquinas, a sessão em Sessões) vem do user-agent: "macOS · app do nod".
-      headers: { "content-type": "application/json", "user-agent": `nod/${o.versao} (${process.platform === "darwin" ? "Macintosh" : process.platform})` },
+      // O rótulo do aparelho (a chave em Máquinas, a sessão em Sessões) vem do user-agent: "macOS · app do nod",
+      // "Windows · app do nod" (ADA-229: o rotuloDoAparelho procura "Windows", não "win32").
+      headers: { "content-type": "application/json", "user-agent": `nod/${o.versao} (${process.platform === "darwin" ? "Macintosh" : process.platform === "win32" ? "Windows" : process.platform})` },
       // `nome` é o da pessoa (o usuário do sistema), só para o espaço não nascer "Você"; ela troca depois.
       body: JSON.stringify({ verificador: o.verificador, forma: "app", nome: o.nome.slice(0, 80), ...prova }),
       signal: AbortSignal.timeout(15_000),

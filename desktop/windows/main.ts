@@ -1,14 +1,16 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, session, shell, Tray, type IpcMainInvokeEvent } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, safeStorage, session, shell, Tray, type IpcMainInvokeEvent } from "electron";
 import { execFile, spawn } from "node:child_process";
-import { rm } from "node:fs/promises";
-import { hostname } from "node:os";
+import { existsSync } from "node:fs";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { hostname, userInfo } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { arquivoDaConexao, carregarConexao, guardarConexao, pastaDoMotor, type ConexaoMotor } from "../../motor/conexao.ts";
 import { criarAtualizacaoDoApp, linhaDaAtualizacao, servidorDeAtualizacao, TEXTOS_ATUALIZACAO, type AtualizacaoDoApp } from "../atualizacao.ts";
+import { pedirProvisorio, servidorOfereceProvisorio, verificadorNovo, verificadorValido } from "../conta-provisoria.ts";
 import { abreNoNavegador } from "../links-externos.ts";
 import { ARGS_DO_INSTALADOR, criarAtualizadorWindows, gravadorConferindo } from "./atualizador.ts";
-import { daTelaDeSetup as daTelaDeSetupPura, maisUmaLinha, passoAoAbrir, passoDaSessao, servidorDoApp, telaDaFalhaDePareamento, TEXTOS_WINDOWS, travarPermissoes, urlDaTelaDeSetup, type TelaDoSetup } from "./fluxo.ts";
+import { daTelaDeSetup as daTelaDeSetupPura, deveTentarProvisorio, maisUmaLinha, passoAoAbrir, passoDaSessao, servidorDoApp, telaDaFalhaDePareamento, TEXTOS_WINDOWS, travarPermissoes, urlDaTelaDeSetup, type TelaDoSetup } from "./fluxo.ts";
 import { rodarInstalacao } from "./instalacao.ts";
 import { comandoDeReligar, comandoDeStatus, INTERVALO_DO_VIGIA_MS, TEXTO_DO_ESTADO, vigiar, type EstadoDoMotor } from "./motor-status.ts";
 import { FalhaPareamentoWindows, linkDePareamento, parearPorDispositivo } from "./pareamento.ts";
@@ -42,6 +44,42 @@ const registrar = (evento: string, campos: Record<string, string | number | bool
 };
 
 function icone() { return nativeImage.createFromPath(join(dir, "icon.png")); }
+
+/**
+ * ADA-229 (5/11/2026): pessoa nova no Windows. O mesmo caminho do Mac (desktop/main.ts, NOD-345/NOD-406): o verificador
+ * desta instalação fica cifrado pelo DPAPI (safeStorage) e nunca muda, então reabrir, ou perder a chave, devolve o
+ * MESMO espaço provisório; a marca `equipe` diz que esta instalação já conectou por conta, e aí a conexão perdida volta
+ * ao Conectar em vez de abrir um provisório por cima da conta.
+ */
+async function verificadorDaInstalacao(): Promise<string | null> {
+  if (!safeStorage.isEncryptionAvailable()) return null;
+  const arquivo = join(app.getPath("userData"), "instalacao.enc");
+  try {
+    const v = safeStorage.decryptString(await readFile(arquivo));
+    if (verificadorValido(v)) return v;
+  } catch { /* primeira abertura */ }
+  const novo = verificadorNovo();
+  await mkdir(app.getPath("userData"), { recursive: true });
+  await writeFile(`${arquivo}.tmp`, safeStorage.encryptString(novo), { mode: 0o600 });
+  await rename(`${arquivo}.tmp`, arquivo);
+  return novo;
+}
+function caminhoEquipe() { return join(app.getPath("userData"), "equipe"); }
+async function marcarEquipeDoApp(): Promise<void> {
+  await mkdir(app.getPath("userData"), { recursive: true }).then(() => writeFile(caminhoEquipe(), "1\n", { mode: 0o600 })).catch(() => undefined);
+}
+/** Primeira abertura sem chave: o espaço provisório, se o servidor oferece. null = segue a tela Conectar de antes. */
+async function provisorioAutomatico(): Promise<ConexaoMotor | null> {
+  if (!(await servidorOfereceProvisorio(SERVIDOR))) return null;
+  const verificador = await verificadorDaInstalacao().catch(() => null);
+  if (!verificador) return null;
+  const chave = await pedirProvisorio({ servidor: SERVIDOR, verificador, nome: userInfo().username, versao: app.getVersion() });
+  if (!chave) return null;
+  const c: ConexaoMotor = { url: SERVIDOR, chave };
+  await guardarConexao(pastaMotor(), c);
+  registrar("espaco_provisorio_no_app", {});
+  return c;
+}
 
 function mostrar(t: TelaDoSetup) {
   telaAtual = t;
@@ -82,6 +120,7 @@ async function abrir() {
   try {
     if (!janela || janela.isDestroyed() || !janela.isVisible()) mostrar({ tela: "abrindo" });
     conexao = await carregarConexao(pastaMotor());
+    if (deveTentarProvisorio(conexao, existsSync(caminhoEquipe()))) conexao = await provisorioAutomatico();
     const passo = passoAoAbrir(conexao, conexao ? await lerMotor() : motor);
     if (passo.tipo === "setup") { mostrar(passo.tela); return; }
     if (passo.tipo === "instalar") { await instalar(); return; }
@@ -148,6 +187,8 @@ async function conectar() {
     });
     conexao = { url: SERVIDOR, chave };
     await guardarConexao(pastaMotor(), conexao);
+    // NOD-406: conectou por conta, então não é um provisório; uma conexão perdida volta ao Conectar.
+    await marcarEquipeDoApp();
     registrar("pareado", {});
   } catch (e) {
     // Fechou a janela no meio: não reabre com "O código venceu" (o app segue na bandeja).

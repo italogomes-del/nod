@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { abrirSessao, cookieDaSessao } from "../../../../desktop/windows/sessao.ts";
-import { maisUmaLinha, MAX_LINHAS, passoAoAbrir, passoDaSessao, servidorDoApp, SERVIDOR_OFICIAL, telaDaFalhaDePareamento, TEXTOS_WINDOWS, urlDaTelaDeSetup } from "../../../../desktop/windows/fluxo.ts";
+import { deveTentarProvisorio, maisUmaLinha, MAX_LINHAS, passoAoAbrir, passoDaSessao, servidorDoApp, SERVIDOR_OFICIAL, telaDaFalhaDePareamento, TEXTOS_WINDOWS, urlDaTelaDeSetup } from "../../../../desktop/windows/fluxo.ts";
 
 const c = { url: "https://nod.x", chave: "chave-1" };
 const comStatus = (status: number, setCookie?: string) => (async () => new Response("{}", { status, headers: setCookie ? { "set-cookie": setCookie } : {} })) as unknown as typeof fetch;
@@ -32,6 +32,11 @@ describe("ADA-229: sessão da janela no Windows", () => {
 });
 
 describe("ADA-229: o fluxo do app do Windows", () => {
+  it("pessoa nova (5/11): sem conexão e sem a marca de equipe, tenta o espaço provisório; com a marca ou com conexão, não", () => {
+    expect(deveTentarProvisorio(null, false)).toBe(true);
+    expect(deveTentarProvisorio(null, true)).toBe(false);
+    expect(deveTentarProvisorio(c, false)).toBe(false);
+  });
   it("abrir: sem conexão = Conectar; motor ausente = instalar; senão = sessão", () => {
     expect(passoAoAbrir(null, "rodando")).toEqual({ tipo: "setup", tela: { tela: "conectar", aviso: null } });
     expect(passoAoAbrir(c, "ausente")).toEqual({ tipo: "instalar" });

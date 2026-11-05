@@ -28,6 +28,16 @@ export const TEXTOS_WINDOWS = {
 
 export type Passo = { tipo: "setup"; tela: TelaDoSetup } | { tipo: "instalar" } | { tipo: "sessao"; conexao: ConexaoMotor };
 
+/**
+ * ADA-229 (5/11/2026, primeiro teste real no Windows): sem conexão guardada, o app tenta o espaço provisório como o Mac
+ * faz (desktop/conta-provisoria.ts), em vez de mandar a pessoa ao Conectar, que exige uma conta já existente: pessoa
+ * nova não tinha caminho nenhum. Só não tenta quando esta instalação já conectou por conta (a marca `equipe`, NOD-406):
+ * aí uma conexão perdida volta ao Conectar, sem abrir um provisório vazio por cima da conta.
+ */
+export function deveTentarProvisorio(conexao: ConexaoMotor | null, equipe: boolean): boolean {
+  return conexao === null && !equipe;
+}
+
 /** O que fazer ao abrir o app (ou depois de conectar). */
 export function passoAoAbrir(conexao: ConexaoMotor | null, motor: EstadoDoMotor): Passo {
   if (!conexao) return { tipo: "setup", tela: { tela: "conectar", aviso: null } };

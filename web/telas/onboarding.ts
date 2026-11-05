@@ -5,6 +5,7 @@ import { VIVO } from "../lib/copiar.ts";
 import { COMANDO_ATUALIZAR_IA, desatualizado, versaoLegivel } from "./ia-fora.ts";
 import { LOGOS_IA } from "./onboarding-logos.ts";
 import { IAS_MAC, logoDaIa, renderCartaoIa, vistaDaIa, type ContextoCartao, type UiIas } from "./cartao-ia.ts";
+import { desteMac, nesteMac, terminalDaqui } from "../lib/plataforma-da-tela.ts";
 
 /**
  * O onboarding por ligação na web (definido em 2026-10-04, ADR-077; protótipo "HiFiMac" da Proposta 2, aprovado em
@@ -321,7 +322,7 @@ export function estadoDoCardIa(ia: IaDesktop, ias: readonly IaNoMac[], entrando:
     case "sonda_lenta":
       return card(`${cli} demorou para responder · tentando de novo`, "mudo", "Esperando", null, true);
     case "procurando":
-      return card(`Procurando o ${cli} neste Mac…`, "mudo", null, null, true);
+      return card(`Procurando o ${cli} ${nesteMac()}…`, "mudo", null, null, true);
     case "conta_sem_acesso":
       return card(`Conta sem acesso ao ${cli}`, "aviso", "Entrar com outra conta", "onboarding-ia-entrar", false, `A organização desta conta desativou o ${cli} por assinatura. Entre com uma conta pessoal ou peça ao administrador para liberar.`);
     case "teste_falhou":
@@ -332,11 +333,11 @@ export function estadoDoCardIa(ia: IaDesktop, ias: readonly IaNoMac[], entrando:
       // NOD-171 (protótipo do Gil, estado 1): a versão instalada, a mínima e o comando. "Atualizar" abre a página
       // oficial (`iaInstalar`); quem atualiza é a pessoa, no Terminal, e a sonda percebe sozinha a versão nova.
       const d = desatualizado(ias.find((i) => i.id === ia));
-      const versoes = d ? `${cli} ${d.versao} · o nod precisa da ${versaoLegivel(d.minima)} ou mais nova` : `${cli} desatualizado neste Mac`;
+      const versoes = d ? `${cli} ${d.versao} · o nod precisa da ${versaoLegivel(d.minima)} ou mais nova` : `${cli} desatualizado ${nesteMac()}`;
       return card(versoes, "aviso", "Atualizar", "onboarding-ia-instalar", false, null, COMANDO_ATUALIZAR_IA[ia]);
     }
     case "ausente":
-      return card(`${cli} não está neste Mac`, "mudo", "Instalar e entrar", "onboarding-ia-instalar");
+      return card(`${cli} não está ${nesteMac()}`, "mudo", "Instalar e entrar", "onboarding-ia-instalar");
   }
 }
 
@@ -347,7 +348,7 @@ export function textoComoLiberar(ia: IaDesktop): { titulo: string; paragrafos: s
   return {
     titulo: `Como liberar o ${cli}`,
     paragrafos: [
-      `A conta que entrou no ${cli} deste Mac é de uma organização que desativou o uso do ${cli} por assinatura. Por isso ela não respondeu ao teste.`,
+      `A conta que entrou no ${cli} ${desteMac()} é de uma organização que desativou o uso do ${cli} por assinatura. Por isso ela não respondeu ao teste.`,
       `Quem libera é o administrador dessa organização: peça a ele para ativar o ${cli} para a sua conta. Depois, teste de novo por aqui.`,
       `Se você tem uma conta pessoal do ${nome} com assinatura, use “Entrar com outra conta”.`,
     ],
@@ -383,10 +384,10 @@ export function passosDaConexao(c: ConexaoIa, inv: IaNoMac | undefined, testando
     ? lento
       // NOD-178: ausente só porque o CLI demorou a responder; não manda instalar o que provavelmente está lá.
       ? { id: "instalar", estado: "ativo", titulo: `Procurando o ${cli}`, texto: `O ${cli} demorou para responder; o Mac está carregado. Isto tenta de novo sozinho.`, acoes: [] }
-      : { id: "instalar", estado: "feito", titulo: `${cli} instalado`, texto: `O ${cli} está neste Mac.`, acoes: [] }
+      : { id: "instalar", estado: "feito", titulo: `${cli} instalado`, texto: `O ${cli} está ${nesteMac()}.`, acoes: [] }
     : {
         id: "instalar", estado: "ativo", titulo: `Instale o ${cli}`,
-        texto: c.nota ?? `A página de instalação abriu. Quando o ${cli} estiver instalado neste Mac, isto continua sozinho.`,
+        texto: c.nota ?? `A página de instalação abriu. Quando o ${cli} estiver instalado ${nesteMac()}, isto continua sozinho.`,
         acoes: [{ act: "onboarding-ia-pagina", rotulo: "Abrir a página de novo", fora: true }, { act: "onboarding-ia-login", rotulo: "Conferir a instalação" }],
       };
   const tituloEntrar = c.outraConta ? `Entre com outra conta do ${nome}` : `Entre na sua conta do ${nome}`;
@@ -421,7 +422,7 @@ export function proximoDaConexao(c: ConexaoIa, inv: IaNoMac | undefined): "abrir
 /** A conexão depois de pedir o login ao Mac. */
 export function conexaoDepoisDoLogin(c: ConexaoIa, r: ResultadoIaDesktop): ConexaoIa {
   if (r.ok) return { ...c, login: "aberto", nota: null };
-  const nota = r.motivo === "nao_instalado" ? `O ${NOME_CLI[c.ia]} ainda não apareceu neste Mac.` : `Não deu para abrir o login do ${NOME_IA[c.ia]}. ${notaForaDoApp(c.ia, "entrar")}`;
+  const nota = r.motivo === "nao_instalado" ? `O ${NOME_CLI[c.ia]} ainda não apareceu ${nesteMac()}.` : `Não deu para abrir o login do ${NOME_IA[c.ia]}. ${notaForaDoApp(c.ia, "entrar")}`;
   return { ...c, login: "falhou", nota };
 }
 
@@ -430,8 +431,8 @@ export function conexaoDepoisDoVeredito(c: ConexaoIa, v: TesteDeIa): ConexaoIa |
   // NOD-178: o CLI só demorou; a conexão continua aberta, sem "ainda não apareceu neste Mac".
   if (v.causa === "sonda_lenta") return c;
   if (v.estado === "pronto" || v.causa) return null;
-  if (v.estado === "ausente") return { ...c, outraConta: false, login: "falhou", nota: `O ${NOME_CLI[c.ia]} ainda não apareceu neste Mac.` };
-  return { ...c, nota: `Ainda não há uma conta do ${NOME_IA[c.ia]} neste Mac. Termine o login no navegador e teste de novo.` };
+  if (v.estado === "ausente") return { ...c, outraConta: false, login: "falhou", nota: `O ${NOME_CLI[c.ia]} ainda não apareceu ${nesteMac()}.` };
+  return { ...c, nota: `Ainda não há uma conta do ${NOME_IA[c.ia]} ${nesteMac()}. Termine o login no navegador e teste de novo.` };
 }
 
 // ---- 2c. as telas da IA -----------------------------------------------------------------------------------------------------
@@ -449,7 +450,7 @@ function htmlProva(nome: string | null, nomeIa: string, resposta: string | null)
  */
 function htmlComandoDeAtualizar(ia: IaDesktop, comando: string): string {
   const cli = NOME_CLI[ia];
-  return `<div class="ob-ia-explica ob-ia-atualizar"><p>“Atualizar” abre a página oficial do ${esc(cli)} no navegador. No Terminal deste Mac, rode:</p><div class="ob-comando"><code>${esc(comando)}</code><button type="button" class="ob-link" data-act="onboarding-ia-copiar" data-texto="${esc(comando)}" ${VIVO}>Copiar</button></div><p>O nod percebe sozinho quando a versão nova estiver instalada.</p></div>`;
+  return `<div class="ob-ia-explica ob-ia-atualizar"><p>“Atualizar” abre a página oficial do ${esc(cli)} no navegador. ${terminalDaqui()}, rode:</p><div class="ob-comando"><code>${esc(comando)}</code><button type="button" class="ob-link" data-act="onboarding-ia-copiar" data-texto="${esc(comando)}" ${VIVO}>Copiar</button></div><p>O nod percebe sozinho quando a versão nova estiver instalada.</p></div>`;
 }
 
 function htmlCardIa(p: ProvedorIa & { ia: IaDesktop }, s: EstadoCardIa, nome: string | null, opcoes: { menor?: boolean } = {}): string {
@@ -479,8 +480,8 @@ function htmlListaDeIas(e: TelaExecutor, t: TesteNaTela, tela: "testando" | "sem
   const guia = nomeDaGuia(e.dados);
   const reprovada = ORDEM_IAS.some((ia) => { const causa = t.vereditos[ia]?.causa; return causa !== undefined && causa !== "sonda_lenta"; });
   const cabeca = tela === "testando"
-    ? cabecaIa("A IA dos seus bots", "Seus bots trabalham com a conta que você já assina, aqui neste Mac. Estou testando cada uma com uma pergunta curta.")
-    : cabecaIa("Falta conectar uma IA", `${reprovada ? "Testei as IAs deste Mac e nenhuma respondeu." : "Não achei uma IA conectada neste Mac."} Conecte uma e o ${guia} te liga em seguida.`);
+    ? cabecaIa("A IA dos seus bots", `Seus bots trabalham com a conta que você já assina, aqui ${nesteMac()}. Estou testando cada uma com uma pergunta curta.`)
+    : cabecaIa("Falta conectar uma IA", `${reprovada ? `Testei as IAs ${desteMac()} e nenhuma respondeu.` : `Não achei uma IA conectada ${nesteMac()}.`} Conecte uma e o ${guia} te liga em seguida.`);
   const cards = CARDS_IA.filter(comIa).map((p) => htmlCardIa(p, estadoDoCardIa(p.ia, e.dados.executor.ias, e.iaEntrando, t), t.nome)).join("");
   const breves = CARDS_IA.filter((p) => !comIa(p)).map((p) => `<div class="ob-breve" aria-disabled="true"><span class="ob-breve-logo">${LOGOS_IA[p.id]}</span><b>${esc(p.nome)}</b><span>Em breve</span></div>`).join("");
   const nota = e.notaIa ?? (tela === "testando" ? `${SEM_SENHA} O teste gasta uma resposta curta da sua assinatura.` : `${SEM_SENHA} ${DEPOIS_EM_AJUSTES}`);
@@ -522,7 +523,7 @@ function htmlConectada(e: TelaExecutor, t: TesteNaTela, ia: IaDesktop): string {
   const outros = cards.filter((c) => c.p.ia !== ia).map((c) => htmlCardIa(c.p, c.s, t.nome, { menor: true })).join("");
   const respondeu = principal?.s.resposta ? "respondeu ao teste" : "está conectado";
   const titulo = "Seus bots já têm uma IA";
-  return `<section class="ob-tela ob-executor" aria-label="${titulo}">${cabecaIa(titulo, `O ${nome} ${respondeu} neste Mac. O ${guia} vai te ligar para montar o seu primeiro bot.`)}
+  return `<section class="ob-tela ob-executor" aria-label="${titulo}">${cabecaIa(titulo, `O ${nome} ${respondeu} ${nesteMac()}. O ${guia} vai te ligar para montar o seu primeiro bot.`)}
     <div class="ob-cards-ia largo">${principal ? htmlCardIa(principal.p, principal.s, t.nome) : ""}${outros}</div>
     <div class="ob-seguir"><button type="button" class="ob-pilula grande" data-act="onboarding-ia-continuar"${t.seguindo ? " disabled" : ""}>${t.seguindo ? GIRA : ""}Continuar</button><p class="ob-nota" role="status">${esc(e.notaIa ?? DEPOIS_EM_AJUSTES)}</p></div></section>`;
 }
@@ -542,8 +543,8 @@ export function htmlExecutor(e: TelaExecutor): string {
     if (tela === "conectada" && pronta) return htmlConectada(e, t, pronta);
     return htmlListaDeIas(e, t, tela === "testando" ? "testando" : "sem_ia");
   }
-  const cabeca = `<div class="ob-cabeca"><h1>A IA dos seus bots</h1><p>Seus bots trabalham com a conta que você já assina, aqui neste Mac. O nod nunca vê sua senha nem sua chave.</p></div>`;
-  if (e.procurando) return `<section class="ob-tela ob-executor" aria-label="A IA dos seus bots">${cabeca}<div class="ob-procurando" role="status">${GIRA}Procurando o Claude Code e o Codex neste Mac…</div><p class="ob-nota"></p></section>`;
+  const cabeca = `<div class="ob-cabeca"><h1>A IA dos seus bots</h1><p>Seus bots trabalham com a conta que você já assina, aqui ${nesteMac()}. O nod nunca vê sua senha nem sua chave.</p></div>`;
+  if (e.procurando) return `<section class="ob-tela ob-executor" aria-label="A IA dos seus bots">${cabeca}<div class="ob-procurando" role="status">${GIRA}Procurando o Claude Code e o Codex ${nesteMac()}…</div><p class="ob-nota"></p></section>`;
   const cards = CARDS_IA.map((c) => {
     if (!comIa(c)) {
       return `<div class="ob-card-ia em-breve" aria-disabled="true"><div class="ob-ia-linha"><span class="ob-logo">${LOGOS_IA[c.id]}</span><div class="ob-ia-txt"><b>${esc(c.nome)}</b><span>Em breve</span></div></div></div>`;
@@ -568,8 +569,8 @@ function htmlExecutorNoApp(e: TelaExecutor, t: TesteNaTela, ui: UiIas): string {
   const prontas = ORDEM_IAS.filter((ia) => t.vereditos[ia]?.estado === "pronto");
   const procurando = IAS_MAC.every((ia) => !ui.estados[ia] || ui.estados[ia]?.estado === "procurando");
   const titulo = prontas.length ? "Seus bots já têm uma IA" : "A IA dos seus bots";
-  const cabeca = cabecaIa(titulo, "Seus bots trabalham com a conta que você já assina, aqui neste Mac. O nod nunca vê sua senha.");
-  if (procurando) return `<section class="ob-tela ob-executor" aria-label="${titulo}">${cabeca}<div class="ob-procurando" role="status">${GIRA}Procurando o Claude e o ChatGPT neste Mac…</div><p class="ob-nota"></p></section>`;
+  const cabeca = cabecaIa(titulo, `Seus bots trabalham com a conta que você já assina, aqui ${nesteMac()}. O nod nunca vê sua senha.`);
+  if (procurando) return `<section class="ob-tela ob-executor" aria-label="${titulo}">${cabeca}<div class="ob-procurando" role="status">${GIRA}Procurando o Claude e o ChatGPT ${nesteMac()}…</div><p class="ob-nota"></p></section>`;
   const cards = ORDEM_IAS.map((ia) => {
     const v = vistaDaIa(ia, c);
     return `<div class="ob-card-ia${v.passos ? " aberto" : ""}${v.tom === "aviso" ? " aviso" : ""}">${renderCartaoIa(v, ui, { verificar: false })}</div>`;
@@ -593,8 +594,8 @@ function htmlExecutorNoApp(e: TelaExecutor, t: TesteNaTela, ui: UiIas): string {
 
 /** A orientação quando o clique não chega a um app do Mac (navegador comum ou app antigo). */
 export function notaForaDoApp(ia: IaDesktop, acao: "entrar" | "instalar"): string {
-  if (ia === "claude-cli") return acao === "entrar" ? "No Terminal deste Mac, rode “claude auth login” e entre na sua conta; o nod percebe sozinho." : "Instale o Claude Code (claude.com/product/claude-code) e rode “claude auth login”; o nod percebe sozinho.";
-  return acao === "entrar" ? "No Terminal deste Mac, rode “codex login” e entre na sua conta; o nod percebe sozinho." : "Instale o Codex (developers.openai.com/codex/cli) e rode “codex login”; o nod percebe sozinho.";
+  if (ia === "claude-cli") return acao === "entrar" ? `${terminalDaqui()}, rode “claude auth login” e entre na sua conta; o nod percebe sozinho.` : "Instale o Claude Code (claude.com/product/claude-code) e rode “claude auth login”; o nod percebe sozinho.";
+  return acao === "entrar" ? `${terminalDaqui()}, rode “codex login” e entre na sua conta; o nod percebe sozinho.` : "Instale o Codex (developers.openai.com/codex/cli) e rode “codex login”; o nod percebe sozinho.";
 }
 
 // ---- 3. "está te ligando" --------------------------------------------------------------------------------------------------
@@ -605,7 +606,7 @@ export function htmlChamando(e: Pick<EstadoTelaOnboarding, "dados" | "atendendo"
   const desab = e.atendendo ? " disabled" : "";
   // definido em 2026-10-05: a pessoa vê com qual conta dela a guia vai pensar (some quando quem roda é o servidor).
   const ia = iaDaLigacao(e.dados.executor.ias, e.teste?.vereditos);
-  const pensa = ia ? `<p class="ob-pensa"><span class="ob-pensa-logo">${LOGOS_IA[LOGO_IA[ia]]}</span>${esc(nome)} vai pensar com o ${esc(NOME_IA[ia])} deste Mac</p>` : "";
+  const pensa = ia ? `<p class="ob-pensa"><span class="ob-pensa-logo">${LOGOS_IA[LOGO_IA[ia]]}</span>${esc(nome)} vai pensar com o ${esc(NOME_IA[ia])} ${desteMac()}</p>` : "";
   return `<section class="ob-tela ob-chamando" aria-label="${esc(nome)} está te ligando">
     <div class="ob-toque"><span class="ob-anel"></span><span class="ob-anel b"></span><div class="ob-toque-mascote">${mascote}</div></div>
     <div class="ob-quem"><b>${esc(nome)}</b><span>está te ligando</span></div>

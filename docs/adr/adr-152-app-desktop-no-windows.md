@@ -19,6 +19,15 @@ um instalador, um ícone e a conversa numa janela, com a máquina conectada sem 
 3. **Conectar pelo fluxo de dispositivo** (`/api/pareamento/dispositivo`, `plataforma: "win32"`). O app abre o navegador
    sozinho e mostra o código só para conferência; a chave vai para `%APPDATA%\nod-motor\conexao.json` com
    `guardarConexao`, o mesmo arquivo que o motor lê.
+   **Revisto em 2026-11-05 (primeiro teste real, vídeo do Marlon):** o fluxo de dispositivo exige uma conta já
+   existente para confirmar o código, e o link `?parear-maquina=` aberto numa aba sem sessão caía no espaço provisório
+   da web (sem máquina), travando no onboarding. Pessoa nova não tinha caminho. Agora o app faz como o Mac
+   (NOD-345/NOD-406): sem conexão guardada e sem a marca `equipe`, pede `POST /api/conta/provisorio` (forma "app") com
+   o verificador da instalação cifrado pelo DPAPI (`safeStorage`) e recebe a chave de máquina do espaço provisório, que
+   vai ao mesmo `conexao.json`; a conta é criada de dentro (o provisório vira a conta, a chave segue válida). O Conectar
+   por código fica para quem já tem conta (e marca `equipe`, para uma conexão perdida não virar provisório). Na web, o
+   código de máquina pendente conta como pareamento e vai à tela de entrar (#679), e os textos "neste Mac" do
+   onboarding leem o sistema do user-agent (`web/lib/plataforma-da-tela.ts`).
 4. **Instalar = o script `/windows` num PowerShell oculto.** Como a conexão já existe, o script pula o pareamento e só
    instala Git, Node, IAs e motor e sobe a tarefa. O app mostra o progresso e o resultado (`NOD_INSTALACAO_RESULTADO`).
 5. **Janela = `POST /api/maquina/sessao`** com a chave da máquina, cookie `nod_sessao` na partition `nod-web`. 401 apaga a
