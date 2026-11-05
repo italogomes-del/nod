@@ -130,7 +130,7 @@ describe("infra/vm-local/construir-disco.sh (NOD-93)", () => {
     expect(wf).toContain("node scripts/vm-local/origem-do-disco.ts");
     expect(wf).not.toContain("scripts/computador/build.ts");
     expect(wf).toContain("::warning::disco");
-    expect(wf).toContain("needs: [mac, vm-local]");
+    expect(wf).toContain("needs: [mac, windows, vm-local]");
     expect(wf).toContain("release/nod-vm-*.img.zst.sha256");
   });
 });

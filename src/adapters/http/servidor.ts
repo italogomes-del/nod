@@ -19,6 +19,9 @@ import { criarSessao, exigirConfiguracaoSegura, segredoEfetivo, type ContasNaSes
  * `/metrics` por convenção e o roteador só casa públicas sob `/api`; a resposta é montada aqui,
  * antes do roteador, e a Rota da L8 continua servindo `/api/metrics`. A tabela ROTAS fica com "/metrics".
  */
+/** ADA-226: o nod-windows-x64.exe mais novo (gs://nodbot-downloads, como os .dmg do site). */
+export const URL_DO_EXE_WINDOWS = "https://storage.googleapis.com/nodbot-downloads/nod-windows-x64.exe";
+
 export interface OpcoesServidor {
   rotas?: Rota[];
   segredoSessao?: string;
@@ -80,6 +83,12 @@ export function criarServidor(opcoes: OpcoesServidor = {}) {
       const convite = new URL(req.url ?? "/", "http://x").searchParams.get("convite");
       const query = conviteValido(convite) ? `?${new URLSearchParams({ convite }).toString()}` : "";
       res.writeHead(302, { location: `/api/motor/instalar-windows${query}`, "cache-control": "no-store" });
+      res.end();
+      return;
+    }
+    // ADA-226: o link fixo do instalador do Windows (o .exe público fica no mesmo bucket dos .dmg; a release é privada).
+    if ((req.method === "GET" || req.method === "HEAD") && (caminhoMotor === "/download/windows" || caminhoMotor === "/download/windows/")) {
+      res.writeHead(302, { location: URL_DO_EXE_WINDOWS, "cache-control": "no-store" });
       res.end();
       return;
     }

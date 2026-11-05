@@ -227,6 +227,37 @@ do HKCU se a política recusar). Depois roda `nod parear <servidor> --abrir`, qu
 - **Publicar o atalho do site** depende de uma pessoa: `npx wrangler deploy` na pasta `site/` (conta Cloudflare do
   nodbot.ai). Até lá, divulgue `irm https://app.nodbot.ai/windows | iex`.
 
+## O instalador .exe do Windows (ADA-226)
+
+Para quem não usa terminal: `https://app.nodbot.ai/download/windows` responde 302 para o
+`nod-windows-x64.exe` mais novo (`gs://nodbot-downloads/nod-windows-x64.exe`, público como os .dmg; a release do
+GitHub é privada). O .exe é um instalador NSIS por usuário, sem admin, que roda **o mesmo** instalador da ADA-32 num
+PowerShell escondido, com a saída na própria janela (`scripts/windows/instalador.nsi` e `instalar-pelo-exe.ps1`),
+cria o atalho **Nod** no Menu Iniciar e na Área de Trabalho e entra em Configurações › Aplicativos com desinstalador
+(`desinstalar-pelo-exe.ps1`: tira a tarefa, o Path e a pasta; guarda a conexão). O Electron no Windows segue na Fase 3:
+"Abrir o Nod" abre o Nod web com o motor desta máquina conectado.
+
+Instruções para a pessoa (3 passos):
+
+1. Baixe em **app.nodbot.ai/download/windows**.
+2. Abra o arquivo baixado. Se o Windows mostrar "O Windows protegeu o computador", clique em **Mais informações** e
+   depois em **Executar assim mesmo** (o .exe ainda não é assinado).
+3. Clique em **Instalar**. Quando o navegador abrir com um código, entre na sua conta e confirme; depois clique em
+   **Concluir** com "Abrir o Nod" marcado.
+
+- **Montar**: `node scripts/windows/gerar-exe.mjs [--saida dist/windows] [--versao X]` (NSIS 3; `NSIS_MAKENSIS`
+  aponta outro makensis). Grava o `.exe` e o `.exe.sha256`. `/S` instala em silêncio; `/SERVIDOR=https://…` troca o
+  servidor (só https com host simples ou `http://127.0.0.1:<porta>`; inválido sai com 2). Códigos: 1 a instalação da
+  ADA-32 falhou, 3 o servidor não respondeu, 4 outro, 5 outro instalador ou desinstalador do Nod já está aberto (um por
+  vez). A pasta é sempre `%LOCALAPPDATA%\nod`: o `/D=` do NSIS é ignorado.
+- **Na CI** (job `windows` e job `windows` do `desktop-release.yml`): `scripts/windows/testar-exe.ps1` confere o
+  endereço inválido, instala com `/S`, desinstala com `/S` e instala pela janela só com Enter, com prints de cada passo
+  no artefato (`nod-windows-exe` na CI, `prints-windows-exe` na release). O rascunho da tag `v*` leva o `.exe` e o `.sha256`.
+- **Publicar** (manual, como o disco da VM): baixe o artefato `nod-windows-x64` do `desktop-release` e
+  `gcloud storage cp nod-windows-x64.exe nod-windows-x64.exe.sha256 gs://nodbot-downloads/ --cache-control=no-store`.
+- **Assinatura**: sem certificado de code signing ainda. Com ele, assinar o .exe com `signtool` antes do sha256
+  (pendente de uma pessoa: comprar o certificado e guardá-lo nos secrets).
+
 ## Gerar e publicar
 
 Uma preview sem assinatura usa uma tag `desktop-v<VERSÃO>` (a última publicada está na [lista de releases](https://github.com/gamefik/nod/releases); a primeira foi `desktop-v0.2.0-rc.1`), dois DMGs sem assinatura e o manifesto SHA-256 anexado à release. As tags `desktop-v*` não disparam o workflow de distribuição assinada; os controles abaixo continuam exigidos para a futura versão estável.

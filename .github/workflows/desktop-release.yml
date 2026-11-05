@@ -247,10 +247,52 @@ jobs:
           name: vm-sha-${{ matrix.arch }}
           path: release/nod-vm-*.img.zst.sha256
           if-no-files-found: error
+  # ADA-226: o instalador do Windows (NSIS, por usuário, sem admin) que roda o instalador da ADA-32 sem terminal. Sem
+  # certificado de assinatura ainda: sai sem assinar e o SmartScreen pede "Mais informações > Executar assim mesmo".
+  # Testado aqui como na CI (instala, desinstala e instala pela janela) antes de subir.
+  windows:
+    needs: verify
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24.19.0'
+          cache: npm
+      - run: npm ci
+      - run: npm run motor:build
+      - name: Montar o .exe
+        shell: pwsh
+        run: |
+          $mk = "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
+          if (-not ((Test-Path $mk) -and ((& $mk /VERSION) -eq 'v3.13'))) { choco install nsis --version=3.13.0 -y --force --no-progress; if ($LASTEXITCODE -ne 0) { throw 'choco install nsis falhou' } }
+          if ((& $mk /VERSION) -ne 'v3.13') { throw "makensis fora da versão fixada: $(& $mk /VERSION)" }
+          node scripts/windows/gerar-exe.mjs --saida release
+          if ($LASTEXITCODE -ne 0) { throw 'gerar-exe falhou' }
+      - name: Testar o .exe
+        shell: powershell
+        env:
+          NOD_INSTALAR_ATE: pareamento
+          NOD_SEM_CODEX: "1"
+        run: .\scripts\windows\testar-exe.ps1 -Exe release\nod-windows-x64.exe -Prints "$env:RUNNER_TEMP\prints-exe"
+      - if: success() || failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: prints-windows-exe
+          path: ${{ runner.temp }}/prints-exe/*.png
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: nod-windows-x64
+          path: |
+            release/nod-windows-x64.exe
+            release/nod-windows-x64.exe.sha256
+          if-no-files-found: error
   draft:
     # O vm-local pulado (sem NOD_VM_LOCAL) não segura o rascunho; falho, segura.
-    if: ${{ !cancelled() && startsWith(github.ref, 'refs/tags/v') && needs.mac.result == 'success' && (needs.vm-local.result == 'success' || needs.vm-local.result == 'skipped') }}
-    needs: [mac, vm-local]
+    if: ${{ !cancelled() && startsWith(github.ref, 'refs/tags/v') && needs.mac.result == 'success' && needs.windows.result == 'success' && (needs.vm-local.result == 'success' || needs.vm-local.result == 'skipped') }}
+    needs: [mac, windows, vm-local]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -268,5 +310,5 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          arquivos=(release/*.dmg release/nod-*-mac-*.zip release/SHA256-*.txt release/nod-vm-*.img.zst release/nod-vm-*.img.zst.sha256)
+          arquivos=(release/*.dmg release/nod-*-mac-*.zip release/SHA256-*.txt release/nod-vm-*.img.zst release/nod-vm-*.img.zst.sha256 release/nod-windows-x64.exe release/nod-windows-x64.exe.sha256)
           gh release create "$TAG" "${arquivos[@]}" --verify-tag --draft --title "nod $TAG" --notes-file desktop/release-notes.md

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { rotasMotor } from "../../../src/adapters/http/rotas/motor.ts";
+import { URL_DO_EXE_WINDOWS } from "../../../src/adapters/http/servidor.ts";
 import { servidorDeTeste, type ServidorDeTeste } from "../../helpers/servidor-de-teste.ts";
 
 /** ADR-090: o servidor serve o script de instalação e os três arquivos do motor; `/motor` é o endereço curto. */
@@ -95,5 +96,16 @@ describe("rotas do motor (ADR-090)", () => {
     expect(r.headers.get("cache-control")).toBe("no-store");
     expect((await fetch(`${srv.url}/windows/?convite=${convite}&papel=computador`, { redirect: "manual" })).headers.get("location")).toBe(`/api/motor/instalar-windows?convite=${convite}`);
     expect((await fetch(`${srv.url}/windows?convite=curto`, { redirect: "manual" })).headers.get("location")).toBe("/api/motor/instalar-windows");
+  });
+
+  it("ADA-226: /download/windows redireciona (302, no-store) para o .exe público, com ou sem barra e com query", async () => {
+    for (const caminho of ["/download/windows", "/download/windows/", "/download/windows?ref=site"]) {
+      const r = await fetch(`${srv.url}${caminho}`, { redirect: "manual" });
+      expect(r.status).toBe(302);
+      expect(r.headers.get("location")).toBe(URL_DO_EXE_WINDOWS);
+      expect(r.headers.get("cache-control")).toBe("no-store");
+    }
+    expect((await fetch(`${srv.url}/download/windows`, { method: "HEAD", redirect: "manual" })).status).toBe(302);
+    expect(URL_DO_EXE_WINDOWS).toBe("https://storage.googleapis.com/nodbot-downloads/nod-windows-x64.exe");
   });
 });

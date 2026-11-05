@@ -57,3 +57,15 @@ e deixar um terminal aberto. Nada volta depois de reiniciar. No Linux é um coma
 
 Se a ADA-31 ou o suporte mostrarem a Tarefa Agendada recusada, janela aberta ou o Defender bloqueando o `irm | iex` em
 mais de 1 de cada 5 máquinas, trocar por instalador assinado ou app desktop com login item (Fase 3 da ADR-147).
+
+## Emenda (2026-11-05, ADA-226): o `.exe` sem assinatura
+
+A alternativa descartada acima (`.exe`/MSI assinado) volta em parte: para quem não usa terminal, um
+`nod-windows-x64.exe` (NSIS, por usuário, `RequestExecutionLevel user`) roda **este mesmo** instalador num PowerShell
+escondido (`scripts/windows/instalador.nsi` e `instalar-pelo-exe.ps1`), cria os atalhos e o desinstalador. Não é um
+instalador novo: só HTTPS (ou o loopback da CI) para baixar `<servidor>/windows`, o servidor pelo ambiente e nunca na
+linha de comando, pasta fixa em `%LOCALAPPDATA%\nod` e um instalador por vez. Sai **sem assinatura** (sem certificado
+de código ainda): o SmartScreen pede "Mais informações › Executar assim mesmo", documentado em
+`docs/release-desktop.md`. Link fixo `app.nodbot.ai/download/windows` (302 para o bucket `nodbot-downloads`).
+Gatilho de reversão: o SmartScreen ou o Defender bloqueando o `.exe` sem a opção de executar, ou o certificado
+comprado (aí o `.exe` passa a ser assinado com `signtool` antes do sha256).
