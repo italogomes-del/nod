@@ -2732,6 +2732,16 @@ function abrirModoAprovacao(el: HTMLElement): void {
 function pedidoPendente(): PedidoPareamento | null {
   try { return lerGuardado(window.sessionStorage.getItem(CHAVE_GUARDADA)); } catch { return null; }
 }
+/**
+ * ADA-229 (5/11, primeiro teste no Windows): o link `?parear-maquina=CÓDIGO` que o app do Windows (e o `nod-motor parear`)
+ * abre no navegador chegava numa aba sem sessão, e a tela abria um espaço provisório, que começa pelo onboarding ("olá",
+ * "A IA dos seus bots", que supõe o app do Mac). O código ficava guardado e nunca era usado; o app esperava até vencer e
+ * voltava ao Conectar, e a pessoa via o código piscar. Um código de máquina pendente é um pareamento como o do Mac: a
+ * máquina se liga à conta de quem entra, nunca a um provisório.
+ */
+function codigoDeMaquinaPendente(): boolean {
+  try { return window.sessionStorage.getItem(CHAVE_CODIGO_MAQUINA) !== null; } catch { return false; }
+}
 function esquecerPedido(): void {
   try { window.sessionStorage.removeItem(CHAVE_GUARDADA); } catch { /* sem storage, nada guardado */ }
 }
@@ -3293,7 +3303,7 @@ async function boot(): Promise<void> {
         // tela, sem executor. Sessão do app que caiu volta à tela de entrar.
         // NOD-406: a volta recusada do Google da equipe fica na tela de entrada, com o motivo, sem abrir um provisório.
         // A marca da equipe: quem já entrou pelo Google da equipe neste navegador volta à tela de entrar.
-        if (abreProvisorio({ saiu, recusado: entrada.recusado, bootstrap: modo.contas?.bootstrap ?? false, noApp: window.nodDesktop !== undefined, equipe: daEquipe(), pareando: pedidoPendente() !== null }) && (await provisorioDaWeb())) {
+        if (abreProvisorio({ saiu, recusado: entrada.recusado, bootstrap: modo.contas?.bootstrap ?? false, noApp: window.nodDesktop !== undefined, equipe: daEquipe(), pareando: pedidoPendente() !== null || codigoDeMaquinaPendente() }) && (await provisorioDaWeb())) {
           await iniciarSessao(await sessaoApi.atual());
           // O link da tarefa também vale na primeira visita, no espaço provisório (revisão do PR #623).
           void abrirTarefaGuardada(); abrirQuadroGuardado();
