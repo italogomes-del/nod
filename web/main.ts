@@ -702,7 +702,7 @@ const canalAvisos = criarCanalAvisos((alvo) => abrirAlvoDoAviso(alvo), () => { i
 const deepLink = criarPuxadorDeepLink(window.nodDesktop, () => !!estado.sessao, (alvo) => abrirAlvoDoAviso(alvo));
 // definido em 2026-10-04 (ADR-070): no app do Mac, a escolha de tema mora em preferencias.json (o localStorage é apagado a
 // cada conexão); ao abrir, ela volta para o localStorage e para o data-theme, e Preferências mostra o botão certo.
-void window.nodDesktop?.preferencias().then((p) => { if (p.tema) aplicarTema(p.tema, document.documentElement); }, () => undefined);
+void window.nodDesktop?.preferencias?.().then((p) => { if (p.tema) aplicarTema(p.tema, document.documentElement); }, () => undefined);
 const avisador = criarAvisador({
   relogio: { agora: () => Date.now(), esperar: (ms, fn) => { const t = window.setTimeout(fn, ms); return () => window.clearTimeout(t); } },
   temFoco: () => document.hasFocus(),

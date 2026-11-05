@@ -1,6 +1,6 @@
 import type { AlvoAviso } from "../../src/contracts/desktop.ts";
 import { tagDoAviso, type EstadoAvisos } from "./avisos.ts";
-import { canalMac, type CanalAvisos } from "./canal-avisos-mac.ts";
+import { canalMac, temAvisosDoApp, type CanalAvisos } from "./canal-avisos-mac.ts";
 
 export type { CanalAvisos } from "./canal-avisos-mac.ts";
 
@@ -15,7 +15,8 @@ const CHAVE_PREFERENCIA = "nod:avisos";
 
 export function criarCanalAvisos(aoAbrir: (alvo: AlvoAviso) => void, aoMudar: () => void): CanalAvisos {
   const mac = window.nodDesktop;
-  return mac ? canalMac(mac, aoAbrir, aoMudar) : canalNavegador(aoAbrir, aoMudar);
+  // A janela do app do Windows tem `nodDesktop`, mas sem os avisos do app: lá vale o canal do navegador.
+  return temAvisosDoApp(mac) ? canalMac(mac, aoAbrir, aoMudar) : canalNavegador(aoAbrir, aoMudar);
 }
 
 function canalNavegador(aoAbrir: (alvo: AlvoAviso) => void, aoMudar: () => void): CanalAvisos {

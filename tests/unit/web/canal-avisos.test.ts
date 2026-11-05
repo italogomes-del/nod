@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { NodDesktop, PreferenciasDesktop } from "../../../src/contracts/desktop.ts";
-import { canalMac } from "../../../web/lib/canal-avisos-mac.ts";
+import { canalMac, temAvisosDoApp, type PonteAvisosDesktop } from "../../../web/lib/canal-avisos-mac.ts";
 import { TAG_AVISO, tagDoAviso } from "../../../web/lib/avisos.ts";
 
 /**
@@ -9,10 +9,10 @@ import { TAG_AVISO, tagDoAviso } from "../../../web/lib/avisos.ts";
  */
 const PADRAO: PreferenciasDesktop = { avisos: true, tema: "sistema", som: true, bloqueados: false };
 
-function ponte(p: { prefs?: Partial<PreferenciasDesktop>; definirSom?: NodDesktop["definirSom"] } = {}): NodDesktop & { chamadas: boolean[] } {
+function ponte(p: { prefs?: Partial<PreferenciasDesktop>; definirSom?: NodDesktop["definirSom"] } = {}): PonteAvisosDesktop & { chamadas: boolean[] } {
   let atual: PreferenciasDesktop = { ...PADRAO, ...p.prefs };
   const chamadas: boolean[] = [];
-  const base: NodDesktop & { chamadas: boolean[] } = {
+  const base: PonteAvisosDesktop & { chamadas: boolean[] } = {
     chamadas,
     avisar: async () => true,
     contador: async () => undefined,
@@ -30,7 +30,7 @@ function ponte(p: { prefs?: Partial<PreferenciasDesktop>; definirSom?: NodDeskto
   return base;
 }
 
-function canal(mac: NodDesktop) {
+function canal(mac: PonteAvisosDesktop) {
   const aoMudar = vi.fn();
   return { canal: canalMac(mac, () => undefined, aoMudar), aoMudar };
 }
@@ -140,5 +140,27 @@ describe("canal do Mac: alvo da task no app antigo (NOD-114)", () => {
     canal(mac).canal.mostrar(aviso);
     await esperarMicrotarefas();
     expect(enviados).toEqual([aviso]);
+  });
+});
+
+describe("canal de avisos: qual ponte tem os avisos do app (app do Windows, rc.5)", () => {
+  it("a ponte do Mac tem", () => {
+    expect(temAvisosDoApp(ponte())).toBe(true);
+  });
+
+  it("sem ponte (navegador): não tem", () => {
+    expect(temAvisosDoApp(undefined)).toBe(false);
+  });
+
+  it("a ponte mínima do Windows (só iaEntrar/iaInstalar) não tem: a janela usa os avisos do navegador e não quebra", () => {
+    // desktop/windows/preload-web-windows.ts: antes, a web escolhia o canal do Mac, `aoAbrir is not a function` e a janela
+    // do Windows abria em branco.
+    const windows: NodDesktop = { iaEntrar: async () => ({ ok: true }), iaInstalar: async () => ({ ok: true }) };
+    expect(temAvisosDoApp(windows)).toBe(false);
+  });
+
+  it("uma ponte com só parte dos avisos não tem", () => {
+    const { aoAbrir: _semAoAbrir, ...parcial } = ponte();
+    expect(temAvisosDoApp(parcial)).toBe(false);
   });
 });

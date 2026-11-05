@@ -24,7 +24,27 @@ export type CanalAvisos = {
   alternarSom?(): Promise<void>;
 };
 
-export function canalMac(mac: NodDesktop, aoAbrir: (alvo: AlvoAviso) => void, aoMudar: () => void): CanalAvisos {
+/**
+ * A ponte tem os avisos do app? Só o app do Mac tem. A janela do app do Windows também tem `window.nodDesktop`, mas só
+ * com `iaEntrar`/`iaInstalar` (desktop/windows/preload-web-windows.ts): lá os avisos são os do navegador. Antes desta
+ * conferência a web escolhia o canal do Mac só por a ponte existir, `mac.aoAbrir` não era função e a janela do Windows
+ * abria em branco.
+ */
+/** Os avisos do app (todo membro de NodDesktop é opcional; o Windows não tem estes). */
+export type PonteAvisosDesktop = NodDesktop & Required<Pick<NodDesktop, "avisar" | "contador" | "preferencias" | "definirAvisos" | "aoAbrir">>;
+
+export function temAvisosDoApp(ponte: NodDesktop | undefined): ponte is PonteAvisosDesktop {
+  return (
+    !!ponte &&
+    typeof ponte.avisar === "function" &&
+    typeof ponte.contador === "function" &&
+    typeof ponte.preferencias === "function" &&
+    typeof ponte.definirAvisos === "function" &&
+    typeof ponte.aoAbrir === "function"
+  );
+}
+
+export function canalMac(mac: PonteAvisosDesktop, aoAbrir: (alvo: AlvoAviso) => void, aoMudar: () => void): CanalAvisos {
   let prefs: PreferenciasDesktop = { avisos: true, tema: "sistema", som: true, bloqueados: false };
   const aplicar = (lido: PreferenciasDesktop): void => {
     // App de antes de 2026-10-07 não devolve `som`: vale o padrão (ligado), sem disparar um aoMudar à toa.

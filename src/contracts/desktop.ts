@@ -93,11 +93,11 @@ export type { ContaNaTela, ContasNaTela, DetalheDaConta, DetalhesDasContas, Pont
 
 export type NodDesktop = import("./desktop-barra.ts").PonteBarraDesktop & { // NOD-119: definirBarra, definirDecisaoBarra
   /** Mostra o aviso só se a janela do nod não estiver na frente; devolve se mostrou. */
-  avisar(aviso: AvisoDesktop): Promise<boolean>;
+  avisar?(aviso: AvisoDesktop): Promise<boolean>;
   /** O número no ícone do Dock: pedidos abertos (0 apaga). */
-  contador(n: number): Promise<void>;
-  preferencias(): Promise<PreferenciasDesktop>;
-  definirAvisos(ligado: boolean): Promise<PreferenciasDesktop>;
+  contador?(n: number): Promise<void>;
+  preferencias?(): Promise<PreferenciasDesktop>;
+  definirAvisos?(ligado: boolean): Promise<PreferenciasDesktop>;
   /**
    * Grava o tema fora da página: o localStorage da janela web é apagado a cada conexão. Opcional porque o app
    * instalado antes de 2026-10-04 não tem: a web confere antes de chamar.
@@ -147,7 +147,7 @@ export type NodDesktop = import("./desktop-barra.ts").PonteBarraDesktop & { // N
   desafioConta?(): Promise<string>; // O desafio (SHA-256) do segredo de troca: a página o manda no login para receber o código.
   souDaEquipe?(): Promise<boolean>; // NOD-406: sai do espaço provisório para a tela de conexão (false = cancelado/ocupado/não provisória).
   vmTentarAgora?(): Promise<void>; // NOD-93: retoma já o download pausado da VM local (sem a VM: nada). Ausente = app antigo.
-  aoAbrir(fn: (alvo: AlvoAviso) => void): void; // a pessoa clicou num aviso: a web abre o alvo.
+  aoAbrir?(fn: (alvo: AlvoAviso) => void): void; // a pessoa clicou num aviso: a web abre o alvo.
   aoBuscar?(fn: (acao: "abrir" | "proxima" | "anterior") => void): void; // NOD-42: Editar › Buscar (ausente = app antigo).
   aoDeepLink?(fn: () => void): void; deepLinkPendente?(): Promise<AlvoAviso | null>; // NOD-136: aviso sem dado; o pull esvazia a fila.
 };
