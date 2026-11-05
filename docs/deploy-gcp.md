@@ -399,7 +399,13 @@ backend deles, sem VM para administrar. O app `blacksmith-sh` já estava instala
 repositórios, e o monorepo gamefik usa desde 2026-10-10 (ADR 037 de lá: 54% menos tempo e 67% menos custo medidos por
 run, a US$ 0,004/min em 2 vCPU). O `deploy.yml` segue nas VMs (autentica pelo WIF). Critério para fechar o piloto: uma
 semana de runs sem fila, e2e do computador e `navegador` estáveis, e a fatura no painel do Blacksmith conferida pelo
-Marlon. Se aprovar, migrar o `deploy` e desligar as VMs; se não, voltar o `runs-on` para `[self-hosted, linux]`.
+Marlon. Se aprovar, desligar as VMs; se não, voltar o `runs-on` para `[self-hosted, linux]`.
+
+No mesmo dia o `deploy.yml` também foi para o Blacksmith (pedido do Marlon): o deploy não depende da rede interna da
+GCP — a imagem vai ao Artifact Registry e os comandos chegam à VM de produção pelo túnel IAP, autenticados por WIF, que
+vale de qualquer runner do GitHub. Como cada deploy roda num runner novo, o `gcloud compute ssh` gera uma chave SSH por
+run e a registra no OS Login da conta de deploy; `--ssh-key-expire-after=1h` evita acumular chaves no perfil. Com isso
+as duas VMs de runner não têm mais nenhum job: ficam ligadas só até o piloto fechar.
 
 ```bash
 # Criar ou recriar (idempotente; precisa do gh com admin no repo)
