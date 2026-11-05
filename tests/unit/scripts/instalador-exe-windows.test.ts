@@ -200,9 +200,11 @@ describe("ADA-226: o que o desinstalador limpa (critério 4)", () => {
 });
 
 describe("ADA-226: makensis fixado", () => {
-  it("a CI e a release instalam e conferem o NSIS 3.13 (sem usar o que vier no runner)", () => {
+  // ADA-229: a release passou a levar o app desktop (electron-builder, que traz o próprio NSIS); o .exe da ADA-226 segue
+  // testado só na CI.
+  it("a CI instala e confere o NSIS 3.13 (sem usar o que vier no runner)", () => {
     const ci = readFileSync(new URL("../../../.github/workflows/ci.yml", import.meta.url), "utf8");
-    for (const wf of [ci, workflow]) {
+    for (const wf of [ci]) {
       expect(wf).toContain("choco install nsis --version=3.13.0 -y --force --no-progress");
       expect(wf).toContain("if ((& $mk /VERSION) -ne 'v3.13') { throw");
       expect(wf).not.toMatch(/choco install nsis -y/);

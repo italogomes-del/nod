@@ -51,6 +51,7 @@
     "desktop:build": "tsc -p tsconfig.desktop.json --noEmit && node scripts/desktop/build.mjs",
     "desktop:dev": "npm run desktop:build && electron .",
     "desktop:mac": "node scripts/desktop/release-preflight.mjs && npm run desktop:build && electron-builder --mac --publish never --config.forceCodeSigning=true",
+    "desktop:windows": "npm run desktop:build -- --windows && electron-builder --win --x64 --publish never --config electron-builder-windows.yml",
     "desktop:pack": "npm run desktop:build && electron-builder --mac --dir --publish never",
     "release:mac": "bash scripts/desktop/release-mac.sh",
     "computador:build": "node scripts/computador/build.ts",

@@ -5,6 +5,20 @@ await mkdir("dist/desktop", { recursive: true });
 // definido em 2026-10-03 (ADR-069): NOD_SERVIDOR_PADRAO embute o endereço do servidor no app; vazio, a pessoa informa na primeira abertura.
 const servidorPadrao = process.env.NOD_SERVIDOR_PADRAO ?? "";
 if (servidorPadrao && !FORMATO_SERVIDOR_PADRAO.test(servidorPadrao)) throw new Error(`NOD_SERVIDOR_PADRAO precisa ser https://host, sem caminho: ${servidorPadrao}`);
+// ADA-229 (ADR-152): `--windows` troca o processo principal pelo do Windows (desktop/windows/main.ts) no mesmo
+// dist/desktop/main.mjs; o build do Mac não muda.
+const windows = process.argv.includes("--windows");
+if (windows) {
+  const win = await build({ metafile: true, entryPoints: { main: "desktop/windows/main.ts" }, outdir: "dist/desktop", outExtension: { ".js": ".mjs" }, bundle: true, platform: "node", target: "node24", format: "esm", external: ["electron"], logLevel: "warning", define: { __NOD_SERVIDOR_PADRAO__: JSON.stringify(servidorPadrao) } });
+  for (const arquivo of Object.keys(win.metafile.inputs)) {
+    if (/src\/(db|repositories|use-cases)\/|src\/adapters\/(http|fundo)\//.test(arquivo)) throw new Error(`Servidor não pode entrar no app desktop: ${arquivo}`);
+  }
+  await build({ entryPoints: ["desktop/windows/preload-windows.ts"], outfile: "dist/desktop/preload-windows.cjs", bundle: true, platform: "node", format: "cjs", external: ["electron"], logLevel: "warning" });
+  for (const nome of ["setup-windows.html", "setup-windows.css", "setup-windows.js"]) await copyFile(`desktop/windows/${nome}`, `dist/desktop/${nome}`);
+  await copyFile("desktop/setup.css", "dist/desktop/setup.css");
+  await copyFile("desktop/resources/icon.png", "dist/desktop/icon.png");
+  process.exit(0);
+}
 const compilado = await build({ metafile: true, entryPoints: ["desktop/main.ts", "desktop/proxy.ts", "desktop/hook-nativas.ts"], outdir: "dist/desktop", outExtension: { ".js": ".mjs" }, bundle: true, platform: "node", target: "node24", format: "esm", external: ["electron"], logLevel: "warning", define: { __NOD_SERVIDOR_PADRAO__: JSON.stringify(servidorPadrao) } });
 for (const arquivo of Object.keys(compilado.metafile.inputs)) {
   if (/src\/(db|repositories|use-cases)\/|src\/adapters\/(http|fundo)\//.test(arquivo)) throw new Error(`Servidor não pode entrar no app desktop: ${arquivo}`);

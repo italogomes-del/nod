@@ -287,13 +287,20 @@ jobs:
           name: vm-sha-${{ matrix.arch }}
           path: release/nod-vm-*.img.zst.sha256
           if-no-files-found: error
-  # ADA-226: o instalador do Windows (NSIS, por usuário, sem admin) que roda o instalador da ADA-32 sem terminal. Sem
-  # certificado de assinatura ainda: sai sem assinar e o SmartScreen pede "Mais informações > Executar assim mesmo".
-  # Testado aqui como na CI (instala, desinstala e instala pela janela) antes de subir.
+  # ADA-229 (ADR-152): o app desktop do Windows (Electron, a mesma base do Mac), em NSIS de 1 clique por usuário.
+  # Sai como nod-<v>-win-x64.exe (o feed da atualização) e como nod-windows-x64.exe (o nome estável do /download/windows),
+  # testado aqui como na CI (instala, abre, desinstala) antes de subir.
+  # Assinatura (NOD-471): desligada; só com vars.NOD_WINDOWS_ASSINAR == '1' o certificado entra. Sem ele, o SmartScreen
+  # pede "Mais informações > Executar assim mesmo".
   windows:
     needs: verify
     runs-on: windows-latest
     timeout-minutes: 45
+    env:
+      NOD_SERVIDOR_PADRAO: ${{ vars.NOD_SERVIDOR_PADRAO }}
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      WIN_CSC_LINK: ${{ vars.NOD_WINDOWS_ASSINAR == '1' && secrets.WIN_CSC_LINK || '' }}
+      WIN_CSC_KEY_PASSWORD: ${{ vars.NOD_WINDOWS_ASSINAR == '1' && secrets.WIN_CSC_KEY_PASSWORD || '' }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
@@ -301,26 +308,34 @@ jobs:
           node-version: '24.19.0'
           cache: npm
       - run: npm ci
-      - run: npm run motor:build
-      - name: Montar o .exe
+      - name: Montar o app
         shell: pwsh
-        run: |
-          $mk = "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
-          if (-not ((Test-Path $mk) -and ((& $mk /VERSION) -eq 'v3.13'))) { choco install nsis --version=3.13.0 -y --force --no-progress; if ($LASTEXITCODE -ne 0) { throw 'choco install nsis falhou' } }
-          if ((& $mk /VERSION) -ne 'v3.13') { throw "makensis fora da versão fixada: $(& $mk /VERSION)" }
-          node scripts/windows/gerar-exe.mjs --saida release
-          if ($LASTEXITCODE -ne 0) { throw 'gerar-exe falhou' }
-      - name: Testar o .exe
-        shell: powershell
         env:
-          NOD_INSTALAR_ATE: pareamento
-          NOD_SEM_CODEX: "1"
-        run: .\scripts\windows\testar-exe.ps1 -Exe release\nod-windows-x64.exe -Prints "$env:RUNNER_TEMP\prints-exe"
+          NOD_WINDOWS_ASSINAR: ${{ vars.NOD_WINDOWS_ASSINAR }}
+        run: |
+          # Flag ligada sem o certificado não sai sem assinar calada: falha aqui, e o electron-builder força a assinatura.
+          if ($env:NOD_WINDOWS_ASSINAR -eq '1') {
+            if (-not $env:WIN_CSC_LINK) { throw "NOD_WINDOWS_ASSINAR == '1' sem o secret WIN_CSC_LINK" }
+            npm run desktop:windows -- -c.forceCodeSigning=true
+          } else {
+            npm run desktop:windows
+          }
+          if ($LASTEXITCODE -ne 0) { throw 'desktop:windows falhou' }
+          $v = (node -p "require('./package.json').version" | Out-String).Trim()
+          $exe = "release\nod-$v-win-x64.exe"
+          if (-not (Test-Path -LiteralPath $exe)) { throw "sem $exe" }
+          Copy-Item -LiteralPath $exe -Destination release\nod-windows-x64.exe
+          $h = (Get-FileHash -Algorithm SHA256 -LiteralPath $exe).Hash.ToLower()
+          Set-Content -LiteralPath release\SHA256-win-x64.txt -Value "$h  nod-$v-win-x64.exe" -Encoding ascii
+          Set-Content -LiteralPath release\nod-windows-x64.exe.sha256 -Value "$h  nod-windows-x64.exe" -Encoding ascii -NoNewline
+      - name: Testar o app
+        shell: powershell
+        run: .\scripts\windows\testar-app.ps1 -Exe release\nod-windows-x64.exe -Prints "$env:RUNNER_TEMP\prints-app"
       - if: success() || failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: prints-windows-exe
-          path: ${{ runner.temp }}/prints-exe/*.png
+          name: prints-windows-app
+          path: ${{ runner.temp }}/prints-app/*.png
           if-no-files-found: warn
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
@@ -328,6 +343,8 @@ jobs:
           path: |
             release/nod-windows-x64.exe
             release/nod-windows-x64.exe.sha256
+            release/nod-*-win-x64.exe
+            release/SHA256-win-x64.txt
           if-no-files-found: error
   draft:
     # O vm-local pulado (sem NOD_VM_LOCAL) não segura o rascunho; falho, segura.
@@ -350,5 +367,5 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          arquivos=(release/*.dmg release/nod-*-mac-*.zip release/SHA256-*.txt release/nod-vm-*.img.zst release/nod-vm-*.img.zst.sha256 release/nod-windows-x64.exe release/nod-windows-x64.exe.sha256)
+          arquivos=(release/*.dmg release/nod-*-mac-*.zip release/SHA256-*.txt release/nod-vm-*.img.zst release/nod-vm-*.img.zst.sha256 release/nod-windows-x64.exe release/nod-windows-x64.exe.sha256 release/nod-*-win-x64.exe)
           gh release create "$TAG" "${arquivos[@]}" --verify-tag --draft --title "nod $TAG" --notes-file desktop/release-notes.md

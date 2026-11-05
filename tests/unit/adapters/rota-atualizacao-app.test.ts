@@ -42,3 +42,33 @@ describe("rota do feed da atualização: o log nunca leva a URL assinada", () =>
     expect(tudo).not.toMatch(/SEGREDO123|storage\.googleapis|at .*\.ts/);
   });
 });
+
+describe("ADA-229: a rota com plataforma=windows", () => {
+  const cfgWin = { ...config, sha256: { ...config.sha256, "win-x64": "c3".repeat(32) } };
+  async function pedir(url: string, c: typeof cfgWin | typeof config = cfgWin) {
+    const [rota] = rotasAtualizacaoApp({ config: c, assinar: async (o) => `https://s/${o}`, versaoMinima: "1.0.0" });
+    const resposta: { status?: number; corpo?: unknown } = {};
+    const ctx = {
+      req: { url, headers: { "x-nod-versao": "1.0.0" } },
+      res: { setHeader: () => undefined, writeHead: (s: number) => { resposta.status = s; return { end: () => undefined }; } },
+      json: (s: number, corpo: unknown) => { resposta.status = s; resposta.corpo = corpo; },
+    };
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    await rota!.handler(ctx as never);
+    return resposta;
+  }
+  afterEach(() => vi.restoreAllMocks());
+
+  it("anuncia o .exe assinado com o hash do Windows", async () => {
+    const r = await pedir("/atualizacao?plataforma=windows&arch=x64");
+    expect(r.status).toBe(200);
+    expect(r.corpo).toMatchObject({ url: "https://s/1.1.0/nod-1.1.0-win-x64.exe", name: "1.1.0", sha256: "c3".repeat(32) });
+  });
+  it("sem win-x64 na config: 204", async () => {
+    expect((await pedir("/atualizacao?plataforma=windows&arch=x64", config)).status).toBe(204);
+  });
+  it("plataforma desconhecida: 400; sem plataforma segue o Mac", async () => {
+    expect((await pedir("/atualizacao?plataforma=linux&arch=x64")).status).toBe(400);
+    expect((await pedir("/atualizacao?arch=x64")).corpo).toMatchObject({ url: "https://s/1.1.0/nod-1.1.0-mac-x64.zip" });
+  });
+});

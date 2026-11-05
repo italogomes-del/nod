@@ -227,6 +227,37 @@ do HKCU se a política recusar). Depois roda `nod parear <servidor> --abrir`, qu
 - **Publicar o atalho do site** depende de uma pessoa: `npx wrangler deploy` na pasta `site/` (conta Cloudflare do
   nodbot.ai). Até lá, divulgue `irm https://app.nodbot.ai/windows | iex`.
 
+## O app desktop do Windows (ADA-229, ADR-152)
+
+`https://app.nodbot.ai/download/windows` responde 302 para o `nod-windows-x64.exe` mais novo
+(`gs://nodbot-downloads/nod-windows-x64.exe`). Desde a ADA-229 esse `.exe` é o **app desktop** (Electron, a mesma base
+do Mac, processo principal em `desktop/windows/main.ts`), num NSIS de 1 clique por usuário do electron-builder
+(`electron-builder-windows.yml`): instala em `%LOCALAPPDATA%\Programs\nod` sem pedir admin, cria o atalho **nod** no Menu
+Iniciar e na Área de Trabalho e abre o app no fim. Na primeira abertura o app conecta o computador (o código aparece na
+janela e o navegador abre para confirmar), instala o motor pelo mesmo script `/windows` da ADA-32 num PowerShell
+oculto, vigia o motor a cada 30 s (religa pela tarefa agendada) e abre o nod com a sessão da máquina. Fechar a janela
+deixa o app na bandeja.
+
+Instruções para a pessoa (3 passos):
+
+1. Baixe em **app.nodbot.ai/download/windows**.
+2. Abra o arquivo baixado. Se o Windows mostrar "O Windows protegeu o computador", clique em **Mais informações** e
+   depois em **Executar assim mesmo** (o app ainda não é assinado, NOD-471).
+3. No app, clique em **Conectar**, entre na sua conta no navegador e confirme o código.
+
+- **Montar**: `npm run desktop:windows` (num Windows; grava `release/nod-<v>-win-x64.exe`).
+- **Atualização automática**: o feed `?plataforma=windows&arch=x64` anuncia `<v>/nod-<v>-win-x64.exe` quando a linha de
+  `NOD_APP_ATUALIZACAO_SHA256` tem `win-x64=`. O `publicar-atualizacao.sh` sobe o `.exe` e acrescenta a chave quando a
+  release o traz. O app confere o sha256 e roda o instalador com `/S --updated --force-run`.
+- **Na CI** (job `windows` e job `windows` do `desktop-release.yml`): `scripts/windows/testar-app.ps1` instala com `/S`,
+  confere o `nod.exe`, os atalhos e Aplicativos, abre e fecha o app (print no artefato) e desinstala com `/S`.
+- **Publicar**: baixe o artefato `nod-windows-x64` do `desktop-release` e
+  `gcloud storage cp nod-windows-x64.exe nod-windows-x64.exe.sha256 gs://nodbot-downloads/ --cache-control=no-store`.
+- **Assinatura (NOD-471)**: desligada. Com `vars.NOD_WINDOWS_ASSINAR = '1'` e os secrets `WIN_CSC_LINK` e
+  `WIN_CSC_KEY_PASSWORD` (o .pfx em base64), o electron-builder assina no job `windows` da release.
+
+O instalador `.exe` da ADA-226 abaixo (só o motor, sem app) saiu da release e segue testado na CI até ser removido.
+
 ## O instalador .exe do Windows (ADA-226)
 
 Para quem não usa terminal: `https://app.nodbot.ai/download/windows` responde 302 para o
@@ -250,7 +281,7 @@ Instruções para a pessoa (3 passos):
   servidor (só https com host simples ou `http://127.0.0.1:<porta>`; inválido sai com 2). Códigos: 1 a instalação da
   ADA-32 falhou, 3 o servidor não respondeu, 4 outro, 5 outro instalador ou desinstalador do Nod já está aberto (um por
   vez). A pasta é sempre `%LOCALAPPDATA%\nod`: o `/D=` do NSIS é ignorado.
-- **Na CI** (job `windows` e job `windows` do `desktop-release.yml`): `scripts/windows/testar-exe.ps1` confere o
+- **Na CI** (job `windows`): `scripts/windows/testar-exe.ps1` confere o
   endereço inválido, instala com `/S`, desinstala com `/S` e instala pela janela só com Enter, com prints de cada passo
   no artefato (`nod-windows-exe` na CI, `prints-windows-exe` na release). O rascunho da tag `v*` leva o `.exe` e o `.sha256`.
 - **Publicar** (manual, como o disco da VM): baixe o artefato `nod-windows-x64` do `desktop-release` e

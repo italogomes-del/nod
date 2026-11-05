@@ -83,6 +83,8 @@ try {
   $tinhaConexao = Test-Path -LiteralPath $conexao
   # A chave Run e a reserva da ADA-32 quando a politica recusa a tarefa; aqui a tarefa sobe, entao ela e plantada.
   $chaveRun = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+  # Nem toda imagem do runner traz a chave Run no HKCU (run 41962535864): cria antes de plantar.
+  if (-not (Test-Path $chaveRun)) { New-Item -Path $chaveRun -Force | Out-Null }
   New-ItemProperty -Path $chaveRun -Name $nomeDaTarefa -Value 'nod-teste' -PropertyType String -Force | Out-Null
   $null = Start-Process -FilePath (Join-Path $pasta 'desinstalar-nod.exe') -ArgumentList '/S' -PassThru -Wait
   # O NSIS roda uma copia do desinstalador no temporario e o original sai antes: espera a chave e a pasta sumirem.

@@ -5,6 +5,9 @@
 #
 #   scripts/desktop/publicar-atualizacao.sh v0.9.0
 #
+# ADA-229 (ADR-152): se a release tiver o instalador do app do Windows (nod-<v>-win-x64.exe), ele vai junto e a linha
+# ganha `win-x64=<hash>`; sem ele, o Windows fica sem anúncio (o feed responde 204).
+#
 # Confere o SHA-256 de cada ZIP contra o SHA256-<arch>.txt da própria release antes de copiar. Nunca apaga nem
 # sobrescreve: um objeto que já existe no bucket com outro conteúdo faz o script parar.
 # Precisa de: `gh` logado com leitura no repositório e `gcloud` logado com escrita no bucket.
@@ -25,25 +28,31 @@ command -v gcloud >/dev/null || falha "falta o gcloud"
 
 DIR=$(mktemp -d)
 trap 'rm -rf "$DIR"' EXIT
-gh release download "$TAG" -R "$REPO_GH" -D "$DIR" -p "nod-$VERSAO-mac-*.zip" -p "SHA256-*.txt"
+gh release download "$TAG" -R "$REPO_GH" -D "$DIR" -p "nod-$VERSAO-mac-*.zip" -p "nod-$VERSAO-win-x64.exe" -p "SHA256-*.txt"
 
 if command -v sha256sum >/dev/null; then SHA=(sha256sum); else SHA=(shasum -a 256); fi
-HASH_arm64=""; HASH_x64=""
-# Primeiro confere as duas arquiteturas; só depois sobe alguma (nada de objeto órfão de uma só no bucket).
-for ARCH in arm64 x64; do
-  ZIP="nod-$VERSAO-mac-$ARCH.zip"
+HASH_arm64=""; HASH_x64=""; HASH_win=""
+EXE="nod-$VERSAO-win-x64.exe"
+ALVOS="arm64 x64"
+[ -f "$DIR/$EXE" ] && ALVOS="$ALVOS win-x64"
+arquivo() { if [ "$1" = win-x64 ]; then echo "$EXE"; else echo "nod-$VERSAO-mac-$1.zip"; fi; }
+# Primeiro confere todos; só depois sobe algum (nada de objeto órfão de uma só arquitetura no bucket).
+for ARCH in $ALVOS; do
+  ZIP=$(arquivo "$ARCH")
   [ -f "$DIR/$ZIP" ] || falha "a release $TAG não tem $ZIP"
-  ESPERADO=$(cat "$DIR"/SHA256-*.txt | awk -v f="$ZIP" '{ n=$2; sub(/^.*\//, "", n); if (n == f) print $1 }' | head -n1)
+  # O awk lê cada arquivo (um arquivo sem quebra de linha no fim não cola na primeira linha do próximo, como no `cat`)
+  # e tira o \r do CRLF que o Set-Content do runner Windows escreve.
+  ESPERADO=$(awk -v f="$ZIP" '{ sub(/\r$/, ""); n=$2; sub(/^.*\//, "", n); if (n == f) print $1 }' "$DIR"/SHA256-*.txt | head -n1)
   [ -n "$ESPERADO" ] || falha "nenhum SHA256-*.txt da release lista $ZIP"
   VEIO=$("${SHA[@]}" "$DIR/$ZIP" | awk '{print $1}')
   [ "$VEIO" = "$ESPERADO" ] || falha "SHA-256 de $ZIP não confere ($VEIO ≠ $ESPERADO)"
-  if [ "$ARCH" = arm64 ]; then HASH_arm64=$VEIO; else HASH_x64=$VEIO; fi
+  case "$ARCH" in arm64) HASH_arm64=$VEIO ;; x64) HASH_x64=$VEIO ;; *) HASH_win=$VEIO ;; esac
 done
 
 # crc32c: objeto composto (upload paralelo) não tem MD5.
 crc() { gcloud storage hash "$1" --hex --skip-md5 --format='value(crc32c_hash)'; }
-for ARCH in arm64 x64; do
-  ZIP="nod-$VERSAO-mac-$ARCH.zip"
+for ARCH in $ALVOS; do
+  ZIP=$(arquivo "$ARCH")
   DESTINO="gs://$BUCKET/$VERSAO/$ZIP"
   LOCAL=$(crc "$DIR/$ZIP")
   if gcloud storage objects describe "$DESTINO" >/dev/null 2>&1; then
@@ -56,12 +65,15 @@ for ARCH in arm64 x64; do
   fi
 done
 
+LINHA="arm64=$HASH_arm64,x64=$HASH_x64"
+if [ -n "$HASH_win" ]; then LINHA="$LINHA,win-x64=$HASH_win"; else echo "== a release não tem $EXE: o Windows fica sem anúncio"; fi
+
 cat <<EOF
 
-ZIPs de $VERSAO no bucket. Para anunciar a versão aos apps, ponha em infra/gcp/config.env:
+Pacotes de $VERSAO no bucket. Para anunciar a versão aos apps, ponha em infra/gcp/config.env:
 
   NOD_APP_VERSAO_PUBLICADA=$VERSAO
-  NOD_APP_ATUALIZACAO_SHA256=arm64=$HASH_arm64,x64=$HASH_x64
+  NOD_APP_ATUALIZACAO_SHA256=$LINHA
 
 e rode o deploy. Para parar o anúncio, deixe a linha vazia e rode o deploy de novo.
 EOF

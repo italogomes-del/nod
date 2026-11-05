@@ -22,7 +22,7 @@ export default tseslint.config(
   {
     ignores: ["dist/**", "release/**", "node_modules/**", "prototypes/**", "docs/**", "web/public/**", ".claude/**", "**/.wrangler/**"],
   },
-  { files: ["desktop/setup.js"], languageOptions: { globals: { window: "readonly", document: "readonly" } } },
+  { files: ["desktop/setup.js", "desktop/windows/setup-windows.js"], languageOptions: { globals: { window: "readonly", document: "readonly" } } },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {

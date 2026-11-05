@@ -32,6 +32,12 @@ export const LINK_DOWNLOAD_MAC = "https://nodbot.ai/download/mac";
 export function linkDownloadMac(arquitetura: string): string {
   return arquitetura === "x64" ? "https://nodbot.ai/download/mac-intel" : LINK_DOWNLOAD_MAC;
 }
+/** ADA-229 (ADR-152): o instalador do Windows (nome estável no bucket, site/_redirects). */
+export const LINK_DOWNLOAD_WINDOWS = "https://nodbot.ai/download/windows";
+/** O link de download do app para a plataforma e a arquitetura (win32 = o .exe; o resto = o DMG). */
+export function linkDownloadDoApp(arquitetura: string, plataforma: string = "darwin"): string {
+  return plataforma === "win32" ? LINK_DOWNLOAD_WINDOWS : linkDownloadMac(arquitetura);
+}
 
 export type EstadoAtualizacaoApp =
   | { fase: "desligada"; motivo: string }
@@ -84,7 +90,7 @@ export const TEXTOS_ATUALIZACAO = {
   pronta: (v: string) => `A versão ${v} está pronta. Reinicie o nod para usar.`,
   semPacote: "Atualização automática só no app instalado.",
   foraDeAplicativos: "Mova o nod para Aplicativos para receber atualizações.",
-  semMac: "Atualização automática só no Mac.",
+  semMac: "Atualização automática só no Mac e no Windows.",
   semConexao: "Conecte o nod para procurar atualizações.",
   emLigacao: "Termine a ligação para reiniciar o nod.",
   comTurnos: (n: number) => (n === 1 ? "Um bot está trabalhando neste Mac." : `${n} bots estão trabalhando neste Mac.`),
@@ -144,12 +150,12 @@ export function servidorDeAtualizacao(url: string, oficial: string): boolean {
 }
 
 /** A linha da tela de conexão para o estado (vazia quando não há nada a dizer). */
-export function linhaDaAtualizacao(e: EstadoAtualizacaoApp, arquitetura = "arm64"): string {
+export function linhaDaAtualizacao(e: EstadoAtualizacaoApp, arquitetura = "arm64", plataforma = "darwin"): string {
   switch (e.fase) {
     case "procurando": return e.manual ? TEXTOS_ATUALIZACAO.procurando : "";
     case "baixando": return TEXTOS_ATUALIZACAO.baixando;
     case "pronta": return TEXTOS_ATUALIZACAO.pronta(e.versao);
-    case "erro": return `${e.mensagem} Se precisar, baixe em ${linkDownloadMac(arquitetura)}.`;
+    case "erro": return `${e.mensagem} Se precisar, baixe em ${linkDownloadDoApp(arquitetura, plataforma)}.`;
     // Fora de Aplicativos é o único motivo que a pessoa resolve sozinha; os outros (dev, outro sistema) não aparecem.
     case "desligada": return e.motivo === TEXTOS_ATUALIZACAO.foraDeAplicativos ? e.motivo : "";
     case "ociosa": return "";
@@ -167,7 +173,8 @@ export function redigir(texto: string): string {
 }
 
 function motivoDesligada(d: DepsAtualizacao): string | null {
-  if (d.plataforma !== "darwin") return TEXTOS_ATUALIZACAO.semMac;
+  // ADA-229 (ADR-152): o Windows usa o updater próprio (desktop/windows/atualizador.ts), com o mesmo coordenador.
+  if (d.plataforma !== "darwin" && d.plataforma !== "win32") return TEXTOS_ATUALIZACAO.semMac;
   if (!d.empacotado) return TEXTOS_ATUALIZACAO.semPacote;
   if (!d.naPastaAplicativos()) return TEXTOS_ATUALIZACAO.foraDeAplicativos;
   return null;
@@ -271,7 +278,8 @@ export function criarAtualizacaoDoApp(d: DepsAtualizacao) {
       return false;
     }
     try {
-      const url = `${c.url.replace(/\/+$/, "")}/api/maquina/atualizacao?arch=${encodeURIComponent(d.arquitetura)}`;
+      const plataforma = d.plataforma === "win32" ? "&plataforma=windows" : "";
+      const url = `${c.url.replace(/\/+$/, "")}/api/maquina/atualizacao?arch=${encodeURIComponent(d.arquitetura)}${plataforma}`;
       erroAoConfigurar = null;
       configurando = true;
       try {

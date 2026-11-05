@@ -47,7 +47,7 @@ describe("NOD-132: atualização do app do Mac", () => {
   it("desligada fora de Aplicativos, sem pacote ou fora do Mac, com o motivo; não ouve o updater", () => {
     expect(montar({ naApps: false }).a.estado()).toEqual({ fase: "desligada", motivo: TEXTOS_ATUALIZACAO.foraDeAplicativos });
     expect(montar({ empacotado: false }).a.estado()).toEqual({ fase: "desligada", motivo: TEXTOS_ATUALIZACAO.semPacote });
-    const win = montar({ plataforma: "win32" });
+    const win = montar({ plataforma: "linux" });
     expect(win.a.estado()).toEqual({ fase: "desligada", motivo: TEXTOS_ATUALIZACAO.semMac });
     expect(win.a.procurar(true)).toBe(false);
     win.a.conectado(); win.avancar(ESPERA_PRIMEIRA_PROCURA_MS);
@@ -462,5 +462,18 @@ describe("NOD-132: rodada 5 da revisão", () => {
     expect(linhaDaAtualizacao({ fase: "desligada", motivo: TEXTOS_ATUALIZACAO.foraDeAplicativos })).toBe(TEXTOS_ATUALIZACAO.foraDeAplicativos);
     expect(linhaDaAtualizacao({ fase: "desligada", motivo: TEXTOS_ATUALIZACAO.semPacote })).toBe("");
     expect(linhaDaAtualizacao({ fase: "erro", mensagem: TEXTOS_ATUALIZACAO.erro }, "x64")).toContain("/download/mac-intel");
+  });
+});
+
+describe("ADA-229: o coordenador no Windows", () => {
+  it("liga no win32 e pede o feed com plataforma=windows", () => {
+    const t = montar({ plataforma: "win32", arquitetura: "x64" });
+    expect(t.a.estado().fase).toBe("ociosa");
+    expect(t.a.procurar(true)).toBe(true);
+    expect(t.chamadas.feed).toEqual([{ url: "https://nod.exemplo/api/maquina/atualizacao?arch=x64&plataforma=windows", headers: { authorization: "Bearer chave-secreta", "x-nod-versao": "1.0.0" }, serverType: "default" }]);
+  });
+  it("o erro aponta o download do Windows", () => {
+    expect(linhaDaAtualizacao({ fase: "erro", mensagem: "x" }, "x64", "win32")).toContain("https://nodbot.ai/download/windows");
+    expect(linhaDaAtualizacao({ fase: "erro", mensagem: "x" }, "x64")).toContain(linkDownloadMac("x64"));
   });
 });
