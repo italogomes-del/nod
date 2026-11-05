@@ -13,6 +13,22 @@
 -- - A conversa_aberta só sai com a Conversa do bot à vista (web/lib/trilha-conversa.ts), nunca com o Quadro dele.
 -- - O tempo em coluna sai do histórico (quadro_tarefa_historico), sem evento novo: a entrada numa coluna até a próxima
 --   mudança de status (ou agora, se a tarefa ainda está nela). A tarefa excluída sai da conta.
+--
+-- NOD-343 (o plano do dogfood, métricas 3, 4, 5, 6, 7 e 10): `parada_h` = as horas na mesma coluna para contar como
+-- parada (padrão 24; a foto diária roda com -v dias=1). Suposições (registradas no PR #688):
+-- - O grupo de cada coluna sai de quadros.colunas (as colunas da pessoa); os ids reservados têm o grupo fixo de
+--   src/domain/colunas.ts (GRUPO_PADRAO). Terminar = entrar numa coluna do grupo Feito (Cancelado fica de fora do ciclo).
+-- - Passagem = movimento 'mover' para uma coluna do grupo Iniciado (fora Bloqueado e Precisa de você) com responsável
+--   depois que não é quem moveu, trocando de mão ou entrando no andamento vindo de fora (a regra de deveComecar;
+--   revisão do PR #688). Começou sozinha = um trabalho de origem 'inicio' na tarefa entre 1 min antes e 5 min depois do movimento
+--   (o trabalho abre depois do lote; o minuto antes cobre o relógio do mesmo lote). O que acontece com ele depois (a
+--   pessoa cancelar, falhar) não desfaz o começo: conta nas intervenções e nos erros.
+-- - Recados, trabalhos e o join pelo quadro ATUAL da tarefa: a tarefa que foi para outro quadro sai das métricas 5 e 7.
+--   Repetir e Cancelar não guardam se vieram da tela ou do bot: contam todos como intervenção.
+-- - Rotinas: a última linha rotina_executou de cada execução (o desfecho pode ser regravado), por bot e por período em
+--   relação a quadros.assumido_em. Rodou = executou, passou_em_branco, sem_novidade ou falhou. O desfecho vem do
+--   evento, não de rotina_sem_novidade (que não diz a rotina e não sai em voltas_sem_novidade).
+-- - Só contagens e horas: nenhum título nem texto (ADR-004).
 
 \if :{?anfitriao}
 \else
@@ -33,6 +49,10 @@
 \else
   \set dias 7
 \endif
+\if :{?parada_h}
+\else
+  \set parada_h 24
+\endif
 
 BEGIN;
 -- O mesmo escopo que o app abre em cada transação (src/db/tx.ts): o RLS mostra só as linhas desta pessoa.
@@ -44,6 +64,16 @@ SELECT q.tenant_id, q.id AS quadro_id, q.agente_id AS anfitriao_id, q.assumido_e
        now() - make_interval(days => :dias) AS desde
   FROM quadros q JOIN agentes a ON a.tenant_id = q.tenant_id AND a.id = q.agente_id
  WHERE a.nome = :'anfitriao' AND q.owner_id = :'pessoa'::uuid;
+
+-- O grupo de cada coluna do quadro: as da pessoa (quadros.colunas) e os ids reservados com o grupo fixo deles.
+CREATE TEMP TABLE dcol ON COMMIT DROP AS
+SELECT c->>'id' AS id, c->>'grupo' AS grupo
+  FROM quadros q JOIN dq ON q.tenant_id = dq.tenant_id AND q.id = dq.quadro_id, jsonb_array_elements(coalesce(q.colunas, '[]'::jsonb)) c
+ WHERE c->>'id' NOT IN ('backlog', 'afazer', 'fazendo', 'revisao', 'bloqueado', 'voce', 'feito', 'cancelado')
+UNION ALL
+SELECT v.id, v.grupo
+  FROM (VALUES ('backlog', 'nao_iniciado'), ('afazer', 'nao_iniciado'), ('fazendo', 'iniciado'), ('revisao', 'iniciado'),
+               ('bloqueado', 'iniciado'), ('voce', 'iniciado'), ('feito', 'feito'), ('cancelado', 'fechado')) v(id, grupo);
 
 \echo '== O quadro (assumido_em vazio = ainda não assumiu a esteira)'
 SELECT quadro_id, assumido_em, desde FROM dq;
@@ -174,6 +204,130 @@ SELECT count(*) FILTER (WHERE h.campo = 'criada' AND h.criado_em >= dq.desde) AS
        (SELECT count(*) FROM quadro_tarefas t WHERE t.tenant_id = dq.tenant_id AND t.quadro_id = dq.quadro_id AND t.status = 'voce') AS esperando_voce
   FROM quadro_tarefa_historico h JOIN dq ON h.tenant_id = dq.tenant_id AND h.quadro_id = dq.quadro_id
  GROUP BY dq.tenant_id, dq.quadro_id;
+
+\echo '== Tempo de ciclo (horas, da criação ao 1º Feito, das tarefas terminadas na janela)'
+-- O começo é o da linha 'criada' (a importada: desde o Linear, como no tempo em coluna); o fim, a 1ª entrada numa coluna
+-- do grupo Feito. Só as tarefas que ainda existem. Revisão do PR #688: o começo é procurado em qualquer quadro (a tarefa
+-- que veio de outro quadro tem a linha 'criada' lá; filtrar por este quadro a tirava do ciclo sem aviso).
+WITH fim AS (
+  SELECT h.tarefa_id, min(h.criado_em) AS terminou
+    FROM quadro_tarefa_historico h JOIN dq ON h.tenant_id = dq.tenant_id AND h.quadro_id = dq.quadro_id
+    JOIN dcol c ON c.id = h.para AND c.grupo = 'feito'
+   WHERE h.campo = 'status'
+   GROUP BY 1
+), inicio AS (
+  SELECT h.tarefa_id, least(min(h.criado_em), coalesce(min(li.criado_em), min(h.criado_em))) AS comecou
+    FROM quadro_tarefa_historico h JOIN dq ON h.tenant_id = dq.tenant_id JOIN fim f ON f.tarefa_id = h.tarefa_id
+    LEFT JOIN quadro_tarefa_historico li ON li.tenant_id = h.tenant_id AND li.tarefa_id = h.tarefa_id AND li.quadro_id = h.quadro_id
+         AND li.campo = 'linear' AND li.para IS NOT NULL AND li.lote_id = h.lote_id
+   WHERE h.campo = 'criada'
+   GROUP BY 1
+), ciclos AS (
+  SELECT extract(epoch FROM f.terminou - i.comecou) / 3600 AS h
+    FROM fim f JOIN inicio i ON i.tarefa_id = f.tarefa_id
+    JOIN quadro_tarefas t ON t.id = f.tarefa_id, dq
+   WHERE t.tenant_id = dq.tenant_id AND f.terminou >= dq.desde
+)
+SELECT count(*) AS terminadas,
+       round(avg(h)::numeric, 1) AS media_h,
+       round((percentile_cont(0.5) WITHIN GROUP (ORDER BY h))::numeric, 1) AS mediana_h,
+       round((percentile_cont(0.9) WITHIN GROUP (ORDER BY h))::numeric, 1) AS p90_h
+  FROM ciclos;
+
+\echo '== Passagens automáticas que começaram sozinhas (por quem moveu)'
+-- Revisão do PR #688: passagem é o movimento que DEVE começar (deveComecar, src/domain/quadro.ts): o responsável novo não
+-- é quem moveu (o bot que leva a própria tarefa para Em revisão não se aciona) e troca de mão, ou, em Fazendo e nas
+-- colunas de andamento da pessoa, entra vindo de fora do grupo Iniciado. Sem isso, cada "terminei, vai para revisão" do
+-- bot entrava como passagem que não começou e afundava a %. (O turno vivo, que também segura o começo, não fica gravado.)
+-- QA do PR #688: A fazer também aciona (deveComecar). A que começa já sai gravada em Fazendo; a que fica (a segurada pelo
+-- teto de começos do lote ou pelo limite da corrente volta para A fazer, colunaDeEspera) sumia da conta e inflava a %.
+-- Limite: no quadro sem A fazer a segurada volta para a 1ª coluna de Não iniciado e segue fora.
+WITH passagens AS (
+  SELECT m.tenant_id, m.tarefa_id, m.autor, m.acionou, m.criado_em
+    FROM quadro_movimentos m JOIN dq ON m.tenant_id = dq.tenant_id AND m.quadro_id = dq.quadro_id
+    JOIN dcol c ON c.id = m.para AND (c.grupo = 'iniciado' OR m.para = 'afazer')
+    LEFT JOIN dcol cd ON cd.id = m.de
+   WHERE m.tipo = 'mover' AND m.para NOT IN ('bloqueado', 'voce') AND m.agente_depois IS NOT NULL AND m.criado_em >= dq.desde
+     AND m.agente_depois IS DISTINCT FROM m.autor_agente_id
+     AND (m.agente_antes IS DISTINCT FROM m.agente_depois OR (m.para = 'afazer' AND m.de <> 'afazer')
+          OR (m.para NOT IN ('revisao', 'afazer') AND coalesce(cd.grupo, '') <> 'iniciado'))
+), marcadas AS (
+  SELECT p.autor, p.acionou, EXISTS (
+           SELECT 1 FROM quadro_execucoes e
+            WHERE e.tenant_id = p.tenant_id AND e.tarefa_id = p.tarefa_id AND e.origem = 'inicio'
+              AND e.criado_em BETWEEN p.criado_em - interval '1 minute' AND p.criado_em + interval '5 minutes') AS comecou
+    FROM passagens p
+)
+SELECT coalesce(autor, 'total') AS autor, count(*) AS passagens,
+       count(*) FILTER (WHERE acionou) AS acionaram,
+       count(*) FILTER (WHERE comecou) AS comecaram,
+       round(100.0 * count(*) FILTER (WHERE comecou) / nullif(count(*), 0), 1) AS pct_comecaram
+  FROM marcadas
+ GROUP BY ROLLUP (autor) ORDER BY autor NULLS LAST;
+
+\echo '== Intervenções manuais (por tarefa terminada na janela)'
+-- Terminada = a tarefa entrou numa coluna do grupo Feito ou Fechado na janela (cada tarefa uma vez).
+WITH n AS (
+  SELECT
+    (SELECT count(*) FROM quadro_movimentos m
+      WHERE m.tenant_id = dq.tenant_id AND m.quadro_id = dq.quadro_id AND m.autor = 'pessoa' AND m.tipo IN ('mover', 'desfazer')
+        AND m.criado_em >= dq.desde) AS movimentos_da_pessoa,
+    (SELECT count(*) FROM quadro_recados r JOIN quadro_tarefas t ON t.tenant_id = r.tenant_id AND t.id = r.tarefa_id
+      WHERE t.tenant_id = dq.tenant_id AND t.quadro_id = dq.quadro_id AND r.criado_em >= dq.desde) AS recados,
+    (SELECT count(*) FROM quadro_execucoes e JOIN quadro_tarefas t ON t.tenant_id = e.tenant_id AND t.id = e.tarefa_id
+      WHERE t.tenant_id = dq.tenant_id AND t.quadro_id = dq.quadro_id AND e.origem = 'repetir' AND e.criado_em >= dq.desde) AS repeticoes,
+    (SELECT count(*) FROM quadro_execucoes e JOIN quadro_tarefas t ON t.tenant_id = e.tenant_id AND t.id = e.tarefa_id
+      WHERE t.tenant_id = dq.tenant_id AND t.quadro_id = dq.quadro_id AND e.origem = 'resposta' AND e.criado_em >= dq.desde) AS respostas,
+    (SELECT count(*) FROM quadro_execucoes e JOIN quadro_tarefas t ON t.tenant_id = e.tenant_id AND t.id = e.tarefa_id
+      WHERE t.tenant_id = dq.tenant_id AND t.quadro_id = dq.quadro_id AND e.cancelada_em >= dq.desde) AS cancelamentos,
+    (SELECT count(DISTINCT h.tarefa_id) FROM quadro_tarefa_historico h JOIN dcol c ON c.id = h.para AND c.grupo IN ('feito', 'fechado')
+      WHERE h.tenant_id = dq.tenant_id AND h.quadro_id = dq.quadro_id AND h.campo = 'status' AND h.criado_em >= dq.desde) AS terminadas
+  FROM dq
+)
+SELECT movimentos_da_pessoa, recados, repeticoes, respostas, cancelamentos,
+       movimentos_da_pessoa + recados + repeticoes + respostas + cancelamentos AS total, terminadas,
+       round((movimentos_da_pessoa + recados + repeticoes + respostas + cancelamentos)::numeric / nullif(terminadas, 0), 2) AS por_terminada
+  FROM n;
+
+\echo '== Paradas há mais de' :parada_h 'h na mesma coluna (agora; fora Backlog, Feito e Fechado)'
+SELECT t.status AS coluna, count(*) AS paradas,
+       round(max(extract(epoch FROM now() - t.na_coluna_desde)) / 3600, 1) AS max_h
+  FROM quadro_tarefas t JOIN dq ON t.tenant_id = dq.tenant_id AND t.quadro_id = dq.quadro_id
+  LEFT JOIN dcol c ON c.id = t.status
+ WHERE t.status <> 'backlog' AND coalesce(c.grupo, '') NOT IN ('feito', 'fechado')
+   AND t.na_coluna_desde < now() - make_interval(hours => :parada_h)
+ GROUP BY 1 ORDER BY 2 DESC, 1;
+
+\echo '== Erros e freios (trabalhos que falharam, novas tentativas, laços, freios e recusas)'
+SELECT
+  (SELECT count(*) FROM quadro_execucoes e JOIN quadro_tarefas t ON t.tenant_id = e.tenant_id AND t.id = e.tarefa_id
+    WHERE t.tenant_id = dq.tenant_id AND t.quadro_id = dq.quadro_id AND e.desfecho = 'falhou' AND coalesce(e.tratada_em, e.criado_em) >= dq.desde) AS falharam,
+  (SELECT count(*) FROM quadro_execucoes e JOIN quadro_tarefas t ON t.tenant_id = e.tenant_id AND t.id = e.tarefa_id
+    WHERE t.tenant_id = dq.tenant_id AND t.quadro_id = dq.quadro_id AND e.origem = 'automatica' AND e.criado_em >= dq.desde) AS novas_tentativas,
+  count(*) FILTER (WHERE m.tipo = 'laco') AS lacos,
+  count(*) FILTER (WHERE m.tipo = 'freio') AS freios,
+  count(*) FILTER (WHERE m.tipo = 'nao_e_comigo') AS recusas
+  FROM dq LEFT JOIN quadro_movimentos m ON m.tenant_id = dq.tenant_id AND m.quadro_id = dq.quadro_id AND m.criado_em >= dq.desde
+ GROUP BY dq.tenant_id, dq.quadro_id, dq.desde;
+
+\echo '== Rotinas sem novidade (por bot, antes e depois de assumir a esteira)'
+-- Para ter a semana de antes, rode com -v dias=14.
+WITH ex AS (
+  SELECT DISTINCT ON (e.dados->>'execucaoId') e.dados->>'rotinaId' AS rotina_id, e.dados->>'desfecho' AS desfecho, e.created_at
+    FROM events e JOIN dq ON e.tenant_id = dq.tenant_id
+   WHERE e.kind = 'rotina_executou' AND e.owner_id = :'pessoa'::uuid AND e.created_at >= dq.desde AND e.dados ? 'execucaoId'
+   ORDER BY e.dados->>'execucaoId', e.created_at DESC, e.id DESC
+)
+SELECT coalesce(a.nome, '(rotina apagada)') AS bot,
+       CASE WHEN dq.assumido_em IS NULL THEN 'sem assumir' WHEN ex.created_at < dq.assumido_em THEN 'antes' ELSE 'depois' END AS periodo,
+       count(*) FILTER (WHERE ex.desfecho IN ('executou', 'passou_em_branco', 'sem_novidade', 'falhou')) AS rodaram,
+       count(*) FILTER (WHERE ex.desfecho = 'sem_novidade') AS sem_novidade,
+       round(100.0 * count(*) FILTER (WHERE ex.desfecho = 'sem_novidade')
+             / nullif(count(*) FILTER (WHERE ex.desfecho IN ('executou', 'passou_em_branco', 'sem_novidade', 'falhou')), 0), 1) AS pct_sem_novidade
+  FROM ex CROSS JOIN dq
+  LEFT JOIN rotinas r ON r.tenant_id = dq.tenant_id AND r.id::text = ex.rotina_id
+  LEFT JOIN agentes a ON a.tenant_id = r.tenant_id AND a.id = r.agente_id
+ GROUP BY 1, 2 ORDER BY 1, 2;
 
 ROLLBACK;
 
