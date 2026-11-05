@@ -6,6 +6,7 @@ import { tarefasDaMeta } from "../domain/quadro.ts";
 import { colunasDe, grupoDe } from "../domain/colunas.ts";
 import { autoriaAgente, evento } from "./apoio-l7.ts";
 import type { Deps } from "./tipos.ts";
+import { registrarAvisoDoQuadro } from "./trilha-quadro.ts";
 
 /**
  * NOD-415 (ADR-141): o aviso de risco de prazo do quadro. Sai na conversa do bot anfitrião, como o avisar_pessoa (o sino
@@ -45,6 +46,7 @@ export async function avisarRiscoDoQuadro(deps: Deps, q: Quadro, tarefas: readon
     confianca: "nao_confiavel",
     idEnvio: idEnvioDe(chaveDoRisco({ id: q.id, meta: q.meta, prazo: q.prazo })),
   });
+  if (m) await registrarAvisoDoQuadro(deps, { quadroId: q.id, tipo: "risco", tarefas: tarefas.length, mensagemId: m.id, autoria });
   return m ? evento(deps, "mensagem_criada", autoria, { mensagem_id: m.id, kind: "texto", aviso: true }, { conversaId: conversa.id, turnoId: null }) : null;
 }
 

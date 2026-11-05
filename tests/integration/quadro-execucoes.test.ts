@@ -131,6 +131,7 @@ describeIntegracao("trabalhos da tarefa do quadro (NOD-418)", () => {
       expect(t).toMatchObject({ status: "bloqueado", voltarPara: "fazendo" });
       expect(t.pergunta).toContain("sem contato");
       expect((await m.avisos()).filter((x) => x.includes(`"T" parou no quadro.`))).toHaveLength(1);
+      expect(await trx`select dados from events where kind = 'quadro_avisou'`).toMatchObject([{ dados: { tipo: "atraso", tarefas: 1 } }]);
       // Varrer de novo não repete nem avisa outra vez.
       await m.varrer();
       expect((await m.trabalhos()).execucoes).toHaveLength(3);

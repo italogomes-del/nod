@@ -909,6 +909,13 @@ describeIntegracao("paridade tela × chat do quadro.* (NOD-442, ADR-135)", () =>
         expect(t.trabalho ? [t.trabalho.numero, t.trabalho.estado, t.trabalho.novaTentativaEm] : null, t.titulo).toEqual(atual ? [atual.numero, atual.estado, atual.novaTentativaEm === null ? null : new Date(atual.novaTentativaEm).toISOString()] : null);
       }
       expect(resumo.tarefas.find((t) => t.titulo === "T1")?.trabalho).toMatchObject({ numero: 1 });
+      const consultas = await trx<{ dados: Record<string, unknown> }[]>`select dados from events where kind = 'quadro_consultado'`;
+      expect(consultas.map((e) => e.dados)).toEqual([{ quadro_id: (await m.d.repos.quadros.doAgente(m.tela.agenteId))!.id, agente_id: m.gil.agenteId }]);
+
+      // NOD-474: chamada com ação e consulta recusada não contam como consulta de estado.
+      expect((await executar(m.d, gerirQuadro, { ...(await turnoDe(m.d, m.gil.agenteId, m.gil.conversaId)), quadro: m.tela.agenteId, acoes: [{ tipo: "criar_tarefa", titulo: "T3" }] })).data).toMatchObject({ ok: true });
+      expect((await executar(m.d, gerirQuadro, { ...(await turnoDe(m.d, m.gil.agenteId, m.gil.conversaId)), quadro: "não existe", acoes: [] })).data).toMatchObject({ ok: false });
+      expect(await trx`select 1 from events where kind = 'quadro_consultado'`).toHaveLength(1);
     });
   });
 });

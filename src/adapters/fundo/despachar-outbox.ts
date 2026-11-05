@@ -84,8 +84,11 @@ export const FRAME_POR_EVENTO: Record<KindEvento, TipoFrame> = {
   linha_aberta: "agente.mudou",
   // NOD-422 (PR 2): a trilha do quadro vai só para events (sem outbox); a entrada existe porque a união é fechada.
   tarefa_movida: "agente.mudou",
+  quadro_aberto: "agente.mudou",
   tarefa_aberta: "agente.mudou",
   conversa_aberta: "agente.mudou",
+  quadro_consultado: "agente.mudou",
+  quadro_avisou: "agente.mudou",
 };
 
 /** Os eventos de turno que mudam a execução de um card do quadro (os mesmos que viram `turno.iniciado/encerrado/interrompido`). */

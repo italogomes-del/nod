@@ -15,6 +15,7 @@ import { consultarPelaPorta, vaiParaQuadroDeOutraPessoa } from "./quadro-pessoas
 import type { Deps } from "./tipos.ts";
 import type { TrabalhoFeito } from "./quadro.ts";
 import type { Turno } from "../contracts/turno.ts";
+import { registrarConsultaDoQuadro } from "./trilha-quadro.ts";
 
 /**
  * gerir_quadro (definido em 2026-10-31, NOD-442, ADR-135): a via do chat das ações `quadro.*`, para QUALQUER bot. É o
@@ -164,7 +165,11 @@ export async function gerirQuadroEmFases(deps: Deps, input: EntradaGerirQuadro, 
   const limpo = turno.entradaConfianca === "confiavel" && !(await deps.repos.turnos.contaminado(turno.id));
   // Revisão 5 do PR #625: `acoes: []` só consulta: o resumo do quadro com o trabalho atual de cada tarefa (a mesma vista
   // da tela, verTrabalhos), sem lote nem Desfazer. Vem antes do lerOps (que recusa a lista vazia).
-  if (Array.isArray(input.acoes) && input.acoes.length === 0) return consultar(deps, input.agenteId, input.quadro, turno, limpo, await procuracaoDoTurno(deps, agente.ownerId, turno));
+  if (Array.isArray(input.acoes) && input.acoes.length === 0) {
+    const r = await consultar(deps, input.agenteId, input.quadro, turno, limpo, await procuracaoDoTurno(deps, agente.ownerId, turno));
+    if (r.data.ok && r.data.quadro) await registrarConsultaDoQuadro(deps, r.data.quadro.id, input.agenteId);
+    return r;
+  }
   const ops = lerOps(input.acoes);
   if ("erro" in ops) return recusa("entrada_invalida", ops.indice >= 0 ? `ação ${ops.indice + 1}: ${ops.erro}` : ops.erro);
   // Quem responde ao bloqueio é a pessoa (revisão do PR #612). O bot só repassa o que ela disse a ele agora, na

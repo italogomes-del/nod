@@ -138,7 +138,7 @@ export async function comentarTarefa(deps: Deps, p: PedidoLote, op: Comentar, ex
   // lote; o texto é do sistema e o título sai se a tarefa ou o turno são de fora. Um aviso por tarefa e hora (o idEnvio).
   const daConversa = tarefa.agenteId ?? autorBot;
   if (freado && daConversa) {
-    const ev = await avisarComVoce(deps, tarefa, autorBot ?? daConversa, avisoDoFreio(tarefa, { tipo: "freio", motivo: motivoDoFreio }, p.origemConfiavel === false, false), daConversa, `quadro-freio-comentario:${tarefa.id}:${Math.floor(deps.agora() / 3_600_000)}`);
+    const ev = await avisarComVoce(deps, tarefa, autorBot ?? daConversa, avisoDoFreio(tarefa, { tipo: "freio", motivo: motivoDoFreio }, p.origemConfiavel === false, false), daConversa, `quadro-freio-comentario:${tarefa.id}:${Math.floor(deps.agora() / 3_600_000)}`, "freio");
     if (ev) events.push(ev);
   }
   events.unshift(eventoQuadro(deps, p, q, null, [tarefa.id]));

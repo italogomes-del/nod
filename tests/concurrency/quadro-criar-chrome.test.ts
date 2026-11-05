@@ -27,6 +27,7 @@ const agora = 1_700_000_000_000;
 let q = null;
 let n = 0;
 const chamadas = [];
+window.__trilha = [];
 const lote = () => ({ id: "L" + (++n), quadroId: "q1", autor: { tipo: "pessoa" }, resumo: "mudou", tarefaIds: [], desfeitoEm: null, criadoEm: agora });
 const api = {
   quadro: async () => ({ quadro: q && structuredClone(q) }),
@@ -51,11 +52,13 @@ const api = {
 };
 window.__chamadas = chamadas;
 window.__confirma = true;
+window.__comQuadro = () => { q = { id: "33333333-3333-4333-8333-333333333333", agenteId: "a", meta: null, prazo: null, cumpridoEm: null, resumo: null, criadoEm: agora, atualizadoEm: agora,
+  agenteNome: "Ada", ultimoLote: null, feitas: 0, total: 0, tarefas: [] }; };
 window.__montar = () => {
   document.getElementById("timeline").innerHTML = "<p>conversa</p>";
   document.getElementById("composer").innerHTML = "<textarea></textarea>";
   const t = criarQuadroNaTela(document, { reduzido: () => true, dados: { api: () => api, agente: () => null, hora: () => "10:00", recolherEm: 60_000, juntarEm: 10,
-    confirmar: (texto) => { chamadas.push(["confirmar", texto]); return window.__confirma; } } });
+    trilha: (e) => window.__trilha.push(e), confirmar: (texto) => { chamadas.push(["confirmar", texto]); return window.__confirma; } } });
   t.sincronizar({ chave: "c1", nome: "Ada", agenteId: "a" });
   t.trocar("quadro");
   window.__q = t;
@@ -162,4 +165,21 @@ descrever("NOD-415 no Chrome real: criar, meta, prazo e remover pela tela", () =
     expect((await chamadas()).at(-1)).toEqual(["remover"]);
     expect(await texto("#qc-faixa")).toContain("voltou a ser um bot comum");
   }, 60_000);
+  it("NOD-474: abrir Tarefas grava uma vez; blur/focus e redraw não duplicam", async () => {
+    await cdp.enviar("Page.navigate", { url });
+    await ate("window.__montar");
+    await avaliar(cdp, "window.__comQuadro(); window.__montar()");
+    await ate("window.__trilha.length === 1");
+    expect(await avaliar(cdp, "window.__trilha")).toEqual([{ acao: "quadro_aberto", quadroId: "33333333-3333-4333-8333-333333333333", via: "tela" }]);
+    await avaliar(cdp, `window.dispatchEvent(new Event("blur")); window.dispatchEvent(new Event("focus")); window.__q.sincronizar({ chave: "c1", nome: "Ada", agenteId: "a" })`);
+    expect(await avaliar<number>(cdp, "window.__trilha.length")).toBe(1);
+    await avaliar(cdp, "window.__q.reler()");
+    await esperar(100);
+    expect(await avaliar<number>(cdp, "window.__trilha.length")).toBe(1);
+
+    // Um link destinado a outro bot é ignorado por inteiro: não pode contaminar a origem da próxima abertura manual.
+    await avaliar(cdp, `window.__q.abrirTarefa("outro-bot", "t1"); window.__q.trocar("conversa"); window.__q.trocar("quadro")`);
+    await ate("window.__trilha.length === 2");
+    expect(await avaliar(cdp, "window.__trilha[1]")).toEqual({ acao: "quadro_aberto", quadroId: "33333333-3333-4333-8333-333333333333", via: "tela" });
+  });
 });

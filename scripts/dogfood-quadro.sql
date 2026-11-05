@@ -73,6 +73,39 @@ SELECT e.dados->>'via' AS via, count(*) AS aberturas, count(DISTINCT e.dados->>'
  WHERE e.kind = 'tarefa_aberta' AND e.created_at >= dq.desde
  GROUP BY 1 ORDER BY 2 DESC;
 
+\echo '== Tempo para achar trabalho (quadro aberto -> primeiro card em até 10 min)'
+WITH pares AS (
+  SELECT qa.id, qa.created_at AS abriu, primeira.created_at AS achou
+    FROM events qa JOIN dq ON qa.tenant_id = dq.tenant_id AND qa.dados->>'quadro_id' = dq.quadro_id::text
+    CROSS JOIN LATERAL (
+      SELECT ta.created_at
+        FROM events ta
+       WHERE ta.tenant_id = qa.tenant_id AND ta.owner_id = qa.owner_id AND ta.kind = 'tarefa_aberta'
+         AND ta.dados->>'quadro_id' = qa.dados->>'quadro_id' AND ta.dados->>'via' = 'card'
+         AND ta.created_at >= qa.created_at AND ta.created_at <= qa.created_at + interval '10 minutes'
+       ORDER BY ta.created_at, ta.id LIMIT 1
+    ) primeira
+   WHERE qa.kind = 'quadro_aberto' AND qa.created_at >= dq.desde
+)
+SELECT count(*) AS aberturas_com_trabalho,
+       round((percentile_cont(0.5) WITHIN GROUP (ORDER BY extract(epoch FROM achou - abriu)))::numeric, 1) AS mediana_seg
+  FROM pares;
+
+\echo '== Consultas de estado por dia (tela + chat)'
+SELECT e.created_at::date AS dia,
+       count(*) FILTER (WHERE e.kind = 'quadro_aberto') AS pela_tela,
+       count(*) FILTER (WHERE e.kind = 'quadro_consultado') AS pelo_chat,
+       count(*) AS total
+  FROM events e JOIN dq ON e.tenant_id = dq.tenant_id AND e.dados->>'quadro_id' = dq.quadro_id::text
+ WHERE e.kind IN ('quadro_aberto', 'quadro_consultado') AND e.created_at >= dq.desde
+ GROUP BY 1 ORDER BY 1;
+
+\echo '== Avisos do quadro por tipo'
+SELECT e.dados->>'tipo' AS tipo, count(*) AS avisos, sum((e.dados->>'tarefas')::int) AS tarefas
+  FROM events e JOIN dq ON e.tenant_id = dq.tenant_id AND e.dados->>'quadro_id' = dq.quadro_id::text
+ WHERE e.kind = 'quadro_avisou' AND e.created_at >= dq.desde
+ GROUP BY 1 ORDER BY 1;
+
 \echo '== Tempo em coluna (horas, das entradas na janela; aberta = a tarefa ainda está lá)'
 -- Entrada = 'criada' ou 'status' neste quadro; saída = a próxima mudança de status ou a ida para outro quadro (a linha
 -- 'quadro' fica no destino, com `de` = este quadro). Tarefa importada: a entrada na primeira coluna começa na data da

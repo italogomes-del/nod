@@ -329,6 +329,14 @@ export function criarQuadroNaTela(doc: Document, o: { busca?: BuscaDaPilula; men
   let aberta: string | null = null;
   /** NOD-422 (PR 2): a tarefa aberta por link antes de o quadro chegar; a trilha sai quando ele chega (com o quadroId). */
   let trilhaPendente: string | null = null;
+  let aberturaRegistrada = false;
+  let viaDaAbertura: "tela" | "link" = "tela";
+  const trilharAbertura = (): void => {
+    if (aberturaRegistrada || modo !== "quadro" || !ehTarefas(pagina) || !q) return;
+    aberturaRegistrada = true;
+    dd?.trilha?.({ acao: "quadro_aberto", quadroId: q.id, via: viaDaAbertura });
+    viaDaAbertura = "tela";
+  };
   const trilhar = (tarefaId: string, via: "card" | "link"): void => {
     if (q && tarefaNoQuadro(q, tarefaId)) { trilhaPendente = null; dd?.trilha?.({ acao: "tarefa_aberta", quadroId: q.id, tarefaId, via }); }
     else trilhaPendente = tarefaId;
@@ -1002,6 +1010,7 @@ export function criarQuadroNaTela(doc: Document, o: { busca?: BuscaDaPilula; men
     dica = [];
     q = novo;
     carga = "ok";
+    trilharAbertura();
     if (aberta && !tarefaNoQuadro(q, aberta)) { aberta = null; dd?.naUrl?.(null); }
     if (trilhaPendente && aberta === trilhaPendente) trilhar(trilhaPendente, "link");
     // NOD-416: o link `?tarefa=` esperava este quadro.
@@ -2234,6 +2243,7 @@ export function criarQuadroNaTela(doc: Document, o: { busca?: BuscaDaPilula; men
       return;
     }
     pagina = alvo;
+    aberturaRegistrada = false;
     aberta = null;
     edicao = null;
     desenharVista();
@@ -2277,11 +2287,13 @@ export function criarQuadroNaTela(doc: Document, o: { busca?: BuscaDaPilula; men
       if (op.foco) focarPagina(pagina);
       return;
     }
+    if (para === "conversa" || !ehTarefas(alvo)) aberturaRegistrada = false;
     if (animacoes.length) {
       // Volta no meio: a mesma animação anda para trás, do ponto onde está; quem saía passa a entrar.
       modo = para;
       const outra = alvo !== pagina && para === "quadro";
       pagina = alvo;
+      trilharAbertura();
       if (outra) desenharVista();
       marcar();
       anunciarPagina();
@@ -2301,6 +2313,7 @@ export function criarQuadroNaTela(doc: Document, o: { busca?: BuscaDaPilula; men
     if (para === "quadro" && (!v.firstElementChild || outraPagina || v.dataset["pagina"] !== paginas[pagina]?.id)) desenharVista();
     if (para === "quadro" && dd && ehTarefas(pagina)) void lerQuadro();
     modo = para;
+    trilharAbertura();
     marcar();
     anunciarPagina();
     // Depois de `modo = para`: quem ouve (o main, que marca a conversa como lida na volta) já vê o modo novo.
@@ -2386,6 +2399,8 @@ export function criarQuadroNaTela(doc: Document, o: { busca?: BuscaDaPilula; men
       agenteId = s.chave === null ? null : (s.agenteId ?? null);
       chave = s.chave;
       modo = "conversa";
+      aberturaRegistrada = false;
+      viaDaAbertura = "tela";
       pagina = 0;
       ultimaDaVista = 1;
       filtro = "todos";
@@ -3322,17 +3337,17 @@ export function criarQuadroNaTela(doc: Document, o: { busca?: BuscaDaPilula; men
    */
   function abrirPeloLink(de: string, tarefaId: string): void {
     if (!dd) return;
-    if (chave === null) { pendente = { agenteId: de, tarefaId }; return; }
+    if (chave === null) { viaDaAbertura = "link"; pendente = { agenteId: de, tarefaId }; return; }
     if (agenteId !== de) return;
     if (carga === "ok" && tarefaNoQuadro(q, tarefaId)) {
-      if (modo !== "quadro") trocar("quadro", { pagina: paginaDasTarefas() });
-      else if (pagina !== paginaDasTarefas()) irPara(paginaDasTarefas());
+      if (modo !== "quadro") { viaDaAbertura = "link"; trocar("quadro", { pagina: paginaDasTarefas() }); }
+      else if (pagina !== paginaDasTarefas()) { viaDaAbertura = "link"; irPara(paginaDasTarefas()); }
       abrirTarefa(tarefaId);
       return;
     }
     pendente = { agenteId: de, tarefaId };
-    if (modo !== "quadro") trocar("quadro", { pagina: paginaDasTarefas() });
-    else if (pagina !== paginaDasTarefas()) irPara(paginaDasTarefas());
+    if (modo !== "quadro") { viaDaAbertura = "link"; trocar("quadro", { pagina: paginaDasTarefas() }); }
+    else if (pagina !== paginaDasTarefas()) { viaDaAbertura = "link"; irPara(paginaDasTarefas()); }
     else void lerQuadro();
   }
 

@@ -501,6 +501,8 @@ describeIntegracao("freios e travas do quadro (NOD-419)", () => {
         expect(r.events!.filter((e) => e.kind === "mensagem_criada")).toMatchObject([{ dados: { aviso: true }, conversaId: conversaAda.id }]);
         const avisos = (await d.repos.mensagens.listarDaConversa(conversaAda.id)).filter((x) => x.payload?.kind === "aviso_pessoa");
         expect(avisos).toMatchObject([{ texto: origemConfiavel ? expect.stringMatching(/^Em "Login": Freio/) : expect.stringMatching(/^Numa tarefa do quadro: Freio/) }]);
+        const telemetria = await trx<{ dados: Record<string, unknown> }[]>`select dados from events where kind = 'quadro_avisou'`;
+        expect(telemetria.map((e) => e.dados)).toEqual([{ quadro_id: q.id, tipo: "freio", tarefas: 1, mensagem_id: avisos[0]!.id }]);
         // O segundo comentário freado na mesma hora não repete o aviso.
         ok(await comentar());
         expect((await d.repos.mensagens.listarDaConversa(conversaAda.id)).filter((x) => x.payload?.kind === "aviso_pessoa")).toHaveLength(1);

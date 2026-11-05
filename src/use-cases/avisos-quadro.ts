@@ -10,6 +10,7 @@ import { autoriaAgente, evento } from "./apoio-l7.ts";
 import { abrirTurno } from "./quadro.ts";
 import { emSavepoint } from "./savepoint.ts";
 import type { Deps } from "./tipos.ts";
+import { registrarAvisoDoQuadro, type TipoAvisoDoQuadro } from "./trilha-quadro.ts";
 
 /**
  * NOD-420 (definido em 2026-11-02): o quadro chama a pessoa só quando precisa dela (regras puras em
@@ -47,7 +48,7 @@ function uuidDe(chave: string): string {
  * Fala na conversa de um bot, como o avisar_pessoa (o sino e o push da web): a do responsável de todas; senão, ou se ele
  * não tem conversa, a do anfitrião. Sem nenhuma, registra e segue (a marca fica: não tenta a cada passada).
  */
-async function falar(deps: Deps, q: Quadro, tarefas: readonly TarefaComMarcas[], texto: (quadroDe?: string) => string, chave: string, nomes: ReadonlyMap<string, string>): Promise<RuntimeEvent | null> {
+async function falar(deps: Deps, q: Quadro, tarefas: readonly TarefaComMarcas[], tipo: TipoAvisoDoQuadro, texto: (quadroDe?: string) => string, chave: string, nomes: ReadonlyMap<string, string>): Promise<RuntimeEvent | null> {
   const donos = new Set(tarefas.map((t) => t.agenteId));
   const unico = donos.size === 1 ? [...donos][0] : null;
   let agenteId = unico ?? q.agenteId;
@@ -64,6 +65,7 @@ async function falar(deps: Deps, q: Quadro, tarefas: readonly TarefaComMarcas[],
   // Na conversa de outro bot, o texto diz de qual quadro é (revisão do PR #624); na do anfitrião, "no quadro" basta.
   const quadroDe = agenteId === q.agenteId ? undefined : (nomes.get(q.agenteId) ?? undefined);
   const m = await deps.repos.mensagens.criar({ conversaId: conversa.id, turnoId: null, autoria, kind: "texto", texto: texto(quadroDe), payload: { kind: "aviso_pessoa" }, confianca: "confiavel", idEnvio: uuidDe(chave) });
+  if (m) await registrarAvisoDoQuadro(deps, { quadroId: q.id, tipo, tarefas: tarefas.length, mensagemId: m.id, autoria });
   return m ? evento(deps, "mensagem_criada", autoria, { mensagem_id: m.id, kind: "texto", aviso: true }, { conversaId: conversa.id, turnoId: null }) : null;
 }
 
@@ -114,7 +116,7 @@ export async function avisarDoQuadro(deps: Deps, q: Quadro, opcoes: { executor?:
   const marcadas = new Set(await repo.marcarAviso(decisoes.map((t) => t.id), "avisada_em", agora));
   const avisar = decisoes.filter((t) => marcadas.has(t.id));
   if (avisar.length) {
-    const ev = await falar(deps, q, avisar, (quadroDe) => textoDasDecisoes(avisar, colunas, nomes, quadroDe), chaveDe("quadro-decisoes", avisar), nomes);
+    const ev = await falar(deps, q, avisar, "decisao", (quadroDe) => textoDasDecisoes(avisar, colunas, nomes, quadroDe), chaveDe("quadro-decisoes", avisar), nomes);
     if (ev) events.push(ev);
   }
 
@@ -156,7 +158,7 @@ export async function avisarDoQuadro(deps: Deps, q: Quadro, opcoes: { executor?:
   const paraPessoa = escalar.filter((a) => escaladas.has(a.tarefa.id));
   if (paraPessoa.length) {
     const ts = paraPessoa.map((a) => a.tarefa);
-    const ev = await falar(deps, q, ts, (quadroDe) => textoDosAtrasos(paraPessoa, colunas, nomes, quadroDe), chaveDe("quadro-atrasos", ts), nomes);
+    const ev = await falar(deps, q, ts, "escalada", (quadroDe) => textoDosAtrasos(paraPessoa, colunas, nomes, quadroDe), chaveDe("quadro-atrasos", ts), nomes);
     if (ev) events.push(ev);
   }
   return events;

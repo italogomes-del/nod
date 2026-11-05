@@ -39,6 +39,7 @@ describeIntegracao("avisar_pessoa (NOD-114): o bot avisa a pessoa por conta pró
       expect(avisos[0]).toMatchObject({ kind: "texto", texto: "A NOD-12 foi aprovada; falta o deploy.", turnoId: m.turno.id, confianca: "confiavel", autoria: { autor_tipo: "agente", autor_id: m.tuca.agenteId } });
       const [linha] = await trx<{ assunto: string }[]>`select assunto from mensagens where id = ${avisos[0]!.id}`;
       expect(linha?.assunto).toBe("aviso.pessoa");
+      expect(await trx`select 1 from events where kind = 'quadro_avisou'`).toEqual([]);
 
       const outra = await avisarPessoa(m.deps, { ...contexto(m.tuca.agenteId, m.tuca.conversaId, m.turno.id), texto: "de novo" });
       expect(outra.data).toMatchObject({ ok: false, erro: "ja_avisou_neste_turno" });

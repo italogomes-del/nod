@@ -45,6 +45,8 @@ describeIntegracao("risco de prazo do quadro (NOD-415)", () => {
       expect(await m.avisos()).toMatchObject([
         { texto: expect.stringMatching(/^O quadro "Lançar" está em risco: 0 de 2 tarefas feitas e falta menos de 1 dia para o prazo \(.+\)\. Para caber, dá para cortar o que ainda não começou: "Copy", "Tela"\.$/), confianca: "nao_confiavel", autoria: { autor_tipo: "agente", autor_id: m.ana.agenteId } },
       ]);
+      const [telemetria] = await trx<{ dados: Record<string, unknown> }[]>`select dados from events where kind = 'quadro_avisou'`;
+      expect(telemetria?.dados).toMatchObject({ quadro_id: expect.any(String), tipo: "risco", tarefas: 2, mensagem_id: (await m.avisos())[0]!.id });
       // Outro lote e o varredor, na mesma (meta, prazo): não avisa de novo.
       await m.lote({ ops: [{ tipo: "mudar_tarefa", tarefa: "Tela", descricao: "x" }] });
       expect((await varrerRiscosDosQuadros(m.deps)).avisos).toBe(0);

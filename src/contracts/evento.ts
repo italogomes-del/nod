@@ -70,12 +70,18 @@ export type KindEvento =
   /**
    * definido em 2026-11-02 (NOD-422, PR 2): a trilha do quadro, só ids (ADR-004), sem frame (gravarSemOutbox).
    * `tarefa_movida` {quadro_id, tarefa_id, de, para, autor, autor_agente_id, lote_id}: a tarefa mudou de coluna.
+   * `quadro_aberto` {quadro_id, via: tela|link}: a pessoa abriu a página Tarefas do bot.
    * `tarefa_aberta` {quadro_id, tarefa_id, via: card|link}: a pessoa abriu a tarefa na tela.
    * `conversa_aberta` {agente_id, conversa_id}: a pessoa abriu a conversa de um bot (com o quadro ligado).
+   * `quadro_consultado` {quadro_id, agente_id}: um bot consultou o quadro pelo gerir_quadro.
+   * `quadro_avisou` {quadro_id, tipo, tarefas, mensagem_id}: um aviso específico do quadro chegou à pessoa.
    */
   | "tarefa_movida"
+  | "quadro_aberto"
   | "tarefa_aberta"
   | "conversa_aberta"
+  | "quadro_consultado"
+  | "quadro_avisou"
   /** definido em 2026-11-02 (NOD-445, ADR-146): as páginas de um bot mudaram ({agenteId, motivo}). Só ids. */
   | "paginas_mudaram"
   /** definido em 2026-11-04 (ADA-13, ADR-150): um canvas mudou ({canvasId, agenteId, motivo}: versao|comentario). Só ids. */

@@ -94,22 +94,25 @@ describeIntegracao("a trilha do quadro (NOD-422, PR 2)", () => {
     });
   });
 
-  it("tarefa aberta e conversa aberta: só os ids validados; o que vier a mais não é gravado", async () => {
+  it("quadro, tarefa e conversa abertos: só os ids e enums validados; o que vier a mais não é gravado", async () => {
     await withRollback(MARLON, async (trx) => {
       const m = await montar(trx);
       const q = "33333333-3333-4333-8333-333333333333";
       const t = "22222222-2222-4222-8222-222222222222";
       const r = await executar(m.d, registrarTrilhaQuadro, { eventos: [
+        { acao: "quadro_aberto", quadroId: q, via: "tela", titulo: "Título secreto" },
         { acao: "tarefa_aberta", quadroId: q, tarefaId: t, via: "card", titulo: "Título secreto" },
         { acao: "tarefa_aberta", quadroId: q, tarefaId: t, via: "link" },
         { acao: "conversa_aberta", agenteId: m.host.agenteId, conversaId: m.host.conversaId, texto: "oi secreto" },
       ] });
-      expect(r.data).toEqual({ gravados: 3 });
+      expect(r.data).toEqual({ gravados: 4 });
+      expect((await m.eventos("quadro_aberto")).map((e) => e.dados)).toEqual([{ quadro_id: q, via: "tela" }]);
       expect((await m.eventos("tarefa_aberta")).map((e) => e.dados).sort((a, b) => String(a.via).localeCompare(String(b.via)))).toEqual([{ quadro_id: q, tarefa_id: t, via: "card" }, { quadro_id: q, tarefa_id: t, via: "link" }]);
       expect((await m.eventos("conversa_aberta")).map((e) => e.dados)).toEqual([{ agente_id: m.host.agenteId, conversa_id: m.host.conversaId }]);
       // Um inválido recusa o lote inteiro.
       await esperarErro(() => executar(m.d, registrarTrilhaQuadro, { eventos: [{ acao: "tarefa_aberta", quadroId: "Título", tarefaId: t, via: "card" }] }), "entrada_invalida");
       await esperarErro(() => executar(m.d, registrarTrilhaQuadro, { eventos: [{ acao: "tarefa_aberta", quadroId: q, tarefaId: t, via: "chat" }] }), "entrada_invalida");
+      await esperarErro(() => executar(m.d, registrarTrilhaQuadro, { eventos: [{ acao: "quadro_aberto", quadroId: q, via: "foco" }] }), "entrada_invalida");
     });
   });
 
@@ -117,9 +120,13 @@ describeIntegracao("a trilha do quadro (NOD-422, PR 2)", () => {
     await withRollback(MARLON, async (trx) => {
       const m = await montar(trx);
       await m.d.repos.preferencias.gravar({ experimentos: { quadro: false } });
-      const r = await executar(m.d, registrarTrilhaQuadro, { eventos: [{ acao: "conversa_aberta", agenteId: m.host.agenteId, conversaId: m.host.conversaId }] });
+      const r = await executar(m.d, registrarTrilhaQuadro, { eventos: [
+        { acao: "quadro_aberto", quadroId: "33333333-3333-4333-8333-333333333333", via: "tela" },
+        { acao: "conversa_aberta", agenteId: m.host.agenteId, conversaId: m.host.conversaId },
+      ] });
       expect(r.data).toEqual({ gravados: 0 });
       expect(await m.eventos("conversa_aberta")).toEqual([]);
+      expect(await m.eventos("quadro_aberto")).toEqual([]);
     });
   });
 });

@@ -4,7 +4,8 @@ import { criarRepos } from "../../src/repositories/index.ts";
 import type { Tx } from "../../src/shared/types.ts";
 import { aplicarLoteQuadro } from "../../src/use-cases/quadro.ts";
 import { autoriaPessoa } from "../../src/use-cases/autoria-evento.ts";
-import { registrarTrilhaQuadro } from "../../src/use-cases/trilha-quadro.ts";
+import { registrarAvisoDoQuadro, registrarConsultaDoQuadro, registrarTrilhaQuadro } from "../../src/use-cases/trilha-quadro.ts";
+import { autoriaAgente } from "../../src/use-cases/apoio-l7.ts";
 import { depsSobreTrx, executar, MARLON, servicosDeTeste } from "../helpers/deps-l6.ts";
 import { agenteComConversa } from "../helpers/fabricas.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
@@ -78,9 +79,13 @@ describeIntegracao("as consultas do dogfood do quadro (NOD-422, PR 2)", () => {
       // A linha do Linear: "No Linear em Backlog desde" há 3 dias (a importação grava a data de lá, no lote que criou a tarefa).
       await linhaDoLinear(trx, q!.id, imp!.id, "Backlog", "now() - interval '3 days'");
       await executar(d, registrarTrilhaQuadro, { eventos: [
+        { acao: "quadro_aberto", quadroId: q!.id, via: "tela" },
         { acao: "tarefa_aberta", quadroId: q!.id, tarefaId: imp!.id, via: "card" },
         { acao: "conversa_aberta", agenteId: host.agenteId, conversaId: host.conversaId },
       ] });
+      await trx`update events set created_at = now() - interval '2 minutes' where kind = 'quadro_aberto' and dados->>'quadro_id' = ${q!.id}`;
+      await registrarConsultaDoQuadro(d, q!.id, host.agenteId);
+      await registrarAvisoDoQuadro(d, { quadroId: q!.id, tipo: "decisao", tarefas: 2, mensagemId: "44444444-4444-4444-8444-444444444444", autoria: autoriaAgente(host.agenteId, MARLON.pessoaId) });
       await aberturaHa2Minutos(trx, host.conversaId);
 
       const r = await rodar(trx, `Host ${sufixo}`);
@@ -89,6 +94,11 @@ describeIntegracao("as consultas do dogfood do quadro (NOD-422, PR 2)", () => {
       expect(t("Tarefas movidas por autor").map((l) => [l.autor, Number(l.movidas)])).toEqual([["pessoa", 1]]);
       expect(t("Fluxo entre colunas").map((l) => [l.de, l.para])).toEqual([["backlog", "feito"]]);
       expect(t("Tarefas abertas").map((l) => [l.via, Number(l.aberturas)])).toEqual([["card", 1]]);
+      const achar = t("Tempo para achar trabalho")[0]!;
+      expect(Number(achar.aberturas_com_trabalho)).toBe(1);
+      expect(Number(achar.mediana_seg)).toBeGreaterThanOrEqual(119);
+      expect(t("Consultas de estado").map((l) => [Number(l.pela_tela), Number(l.pelo_chat), Number(l.total)])).toEqual([[1, 1, 2]]);
+      expect(t("Avisos do quadro").map((l) => [l.tipo, Number(l.avisos), Number(l.tarefas)])).toEqual([["decisao", 1, 2]]);
       const colunas = new Map(t("Tempo em coluna").map((l) => [String(l.coluna), l]));
       expect(Number(colunas.get("backlog")?.passagens)).toBe(2);
       expect(Number(colunas.get("backlog")?.max_h)).toBeGreaterThanOrEqual(71); // a importada: desde o Linear, não desde agora

@@ -450,7 +450,7 @@ async function cuidarDaTarefa(deps: Deps, antes: TarefaQuadro): Promise<{ tratad
     events.push(eventoQuadro(deps, DO_VARREDOR, q, null, [t.id]));
     // Revisão 5 do PR #625: a tarefa escrita de fora (deFora) não leva o título ao aviso: o texto dela fica fora da conversa.
     const texto = atual.deFora ? `Uma tarefa parou no quadro. ${motivo}` : `"${atual.titulo}" parou no quadro. ${motivo}`;
-    const aviso = salva && atual.agenteId ? await avisarComVoce(deps, salva, atual.agenteId, texto, salva.agenteId, `quadro-aviso:${e.id}`) : null;
+    const aviso = salva && atual.agenteId ? await avisarComVoce(deps, salva, atual.agenteId, texto, salva.agenteId, `quadro-aviso:${e.id}`, "atraso") : null;
     if (aviso) events.push(aviso);
     bloqueou = true;
   };

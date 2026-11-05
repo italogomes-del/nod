@@ -1,4 +1,5 @@
 import type { MudancaTarefa } from "../contracts/quadro.ts";
+import type { Autoria } from "../contracts/evento.ts";
 import type { EventoTrilhaQuadro } from "../contracts/trilha-quadro.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { STATUS_TAREFA } from "../contracts/quadro.ts";
@@ -46,6 +47,7 @@ const id = (v: unknown): v is string => typeof v === "string" && UUID.test(v);
 
 function validar(v: unknown): EventoTrilhaQuadro {
   const o = typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
+  if (o.acao === "quadro_aberto" && id(o.quadroId) && (o.via === "tela" || o.via === "link")) return { acao: o.acao, quadroId: o.quadroId, via: o.via };
   if (o.acao === "tarefa_aberta" && id(o.quadroId) && id(o.tarefaId) && (o.via === "card" || o.via === "link")) return { acao: o.acao, quadroId: o.quadroId, tarefaId: o.tarefaId, via: o.via };
   if (o.acao === "conversa_aberta" && id(o.agenteId) && id(o.conversaId)) return { acao: o.acao, agenteId: o.agenteId, conversaId: o.conversaId };
   throw new ErroDeDominio("entrada_invalida", { cause: "evento da trilha do quadro" });
@@ -59,8 +61,27 @@ export const registrarTrilhaQuadro: CasoDeUso<{ eventos: unknown }, { gravados: 
   if ((await deps.repos.preferencias.buscar()).experimentos?.quadro !== true) return { data: { gravados: 0 } };
   const agora = deps.agora();
   const autoria = autoriaPessoa(deps.escopo);
-  const gravados = await deps.repos.events.gravarSemOutbox(eventos.map((e) => e.acao === "tarefa_aberta"
-    ? evento(deps.escopo, { kind: "tarefa_aberta", autoria, agora, dados: { quadro_id: e.quadroId, tarefa_id: e.tarefaId, via: e.via } })
-    : evento(deps.escopo, { kind: "conversa_aberta", autoria, agora, dados: { agente_id: e.agenteId, conversa_id: e.conversaId } })));
+  const gravados = await deps.repos.events.gravarSemOutbox(eventos.map((e) => e.acao === "quadro_aberto"
+    ? evento(deps.escopo, { kind: "quadro_aberto", autoria, agora, dados: { quadro_id: e.quadroId, via: e.via } })
+    : e.acao === "tarefa_aberta"
+      ? evento(deps.escopo, { kind: "tarefa_aberta", autoria, agora, dados: { quadro_id: e.quadroId, tarefa_id: e.tarefaId, via: e.via } })
+      : evento(deps.escopo, { kind: "conversa_aberta", autoria, agora, dados: { agente_id: e.agenteId, conversa_id: e.conversaId } })));
   return { data: { gravados } };
 };
+
+export type TipoAvisoDoQuadro = "decisao" | "atraso" | "escalada" | "freio" | "risco";
+
+/** Telemetria do servidor: só ids, enum e contagem (ADR-004/047), sem frame SSE. */
+export async function registrarConsultaDoQuadro(deps: Deps, quadroId: string, agenteId: string): Promise<void> {
+  await deps.repos.events.gravarSemOutbox([evento(deps.escopo, {
+    kind: "quadro_consultado", autoria: autoriaDoAgente(deps.escopo, agenteId), agora: deps.agora(),
+    dados: { quadro_id: quadroId, agente_id: agenteId },
+  })]);
+}
+
+export async function registrarAvisoDoQuadro(deps: Deps, p: { quadroId: string; tipo: TipoAvisoDoQuadro; tarefas: number; mensagemId: string; autoria: Autoria }): Promise<void> {
+  await deps.repos.events.gravarSemOutbox([evento(deps.escopo, {
+    kind: "quadro_avisou", autoria: p.autoria, agora: deps.agora(),
+    dados: { quadro_id: p.quadroId, tipo: p.tipo, tarefas: p.tarefas, mensagem_id: p.mensagemId },
+  })]);
+}

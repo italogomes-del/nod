@@ -28,7 +28,7 @@ import { comentarTarefa } from "./comentar-tarefa.ts";
 import { avisarNoLote } from "./avisos-quadro.ts";
 import { esperaPessoa } from "../domain/avisos-quadro.ts";
 import { sincronizarDasDecisoes } from "./trabalhos.ts";
-import { registrarHistoricoComTrilha } from "./trilha-quadro.ts";
+import { registrarAvisoDoQuadro, registrarHistoricoComTrilha, type TipoAvisoDoQuadro } from "./trilha-quadro.ts";
 
 /**
  * O quadro-agente (definido em 2026-10-31, NOD-442). Um só caminho para a pessoa (as rotas) e para qualquer bot (a
@@ -491,7 +491,7 @@ export async function pararTurno(deps: Deps, p: PedidoLote, turnoId: string): Pr
  * O aviso vai pela conversa de `agenteDaConversa` (o responsável). Revisão 4 do PR #629: o "não é comigo" sem candidato
  * deixa a tarefa sem responsável; aí o aviso sai pela conversa de quem recusou, senão a pessoa não ficava sabendo.
  */
-export async function avisarComVoce(deps: Deps, t: TarefaQuadro, quemPergunta: string, texto?: string, agenteDaConversa: string | null = t.agenteId, chave = `quadro-${texto ? "freio" : "voce"}:${t.id}:${t.mudadoEm}`): Promise<RuntimeEvent | null> {
+export async function avisarComVoce(deps: Deps, t: TarefaQuadro, quemPergunta: string, texto?: string, agenteDaConversa: string | null = t.agenteId, chave = `quadro-${texto ? "freio" : "voce"}:${t.id}:${t.mudadoEm}`, tipo: TipoAvisoDoQuadro = "decisao"): Promise<RuntimeEvent | null> {
   if (!agenteDaConversa) return null;
   const conversa = await deps.repos.conversas.buscarPropriaDoAgente(agenteDaConversa);
   if (!conversa) return null;
@@ -508,6 +508,7 @@ export async function avisarComVoce(deps: Deps, t: TarefaQuadro, quemPergunta: s
     confianca: "nao_confiavel",
     idEnvio: `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-8${h.slice(17, 20)}-${h.slice(20, 32)}`,
   });
+  if (m) await registrarAvisoDoQuadro(deps, { quadroId: t.quadroId, tipo, tarefas: 1, mensagemId: m.id, autoria });
   return m ? evento(deps, "mensagem_criada", autoria, { mensagem_id: m.id, kind: "texto", aviso: true }, { conversaId: conversa.id, turnoId: null }) : null;
 }
 
@@ -1244,7 +1245,7 @@ async function aplicarNoQuadro(deps: Deps, p: PedidoLote, qSemPrefixo: Quadro, a
     const t = gravadas.get(idReal.get(f.id) ?? f.id);
     const daConversa = t ? t.agenteId ?? autorAgenteId : null;
     if (!t || !daConversa) continue;
-    const ev = await avisarComVoce(deps, t, autorAgenteId ?? daConversa, avisoDoFreio(t, f, p.origemConfiavel === false), daConversa);
+    const ev = await avisarComVoce(deps, t, autorAgenteId ?? daConversa, avisoDoFreio(t, f, p.origemConfiavel === false), daConversa, undefined, "freio");
     if (ev) events.push(ev);
   }
   // NOD-419: a recusa deixa o motivo em comentário na tarefa (a linha na atividade), além do histórico.

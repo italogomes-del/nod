@@ -220,6 +220,7 @@ describeIntegracao("quadro-agente (NOD-442)", () => {
       expect(lista[0]!.texto).toContain(`"T2" (Bloqueado), ${m.betoNome}: Cadê o acesso?`);
       expect(lista[0]!.texto).not.toContain("T3");
       expect(v.events.find((e) => e.kind === "mensagem_criada")?.dados).toMatchObject({ aviso: true });
+      expect(await trx`select dados from events where kind = 'quadro_avisou'`).toMatchObject([{ dados: { quadro_id: r.data.quadro!.id, tipo: "decisao", tarefas: 2, mensagem_id: lista[0]!.id } }]);
       // Outra volta do varredor, ou mexer no texto sem sair da coluna, não avisa de novo.
       await varrerAvisosDosQuadros(m.deps);
       await m.lote({ autor: beto, quadro: m.anaNome, ops: [{ tipo: "mudar_tarefa", tarefa: "T1", descricao: "mais" }] });
@@ -497,6 +498,7 @@ describeIntegracao("quadro-agente (NOD-442)", () => {
       await varrerAvisosDosQuadros(m.deps);
       const avisos = (await m.repos.mensagens.listarDaConversa(m.beto.conversaId)).filter((x) => x.payload?.kind === "aviso_pessoa");
       expect(avisos.map((x) => x.texto)).toEqual([expect.stringContaining("continua parada depois da cobrança")]);
+      expect(await trx`select dados from events where kind = 'quadro_avisou'`).toMatchObject([{ dados: { quadro_id: quadroId, tipo: "escalada", tarefas: 1, mensagem_id: avisos[0]!.id } }]);
     });
   });
 
