@@ -10,7 +10,7 @@ nem dependência: o `index.html` traz CSS e JS inline e não faz nenhuma requisi
 | `index.html` | A w4. Só o `<head>` difere do arquivo aprovado (canonical, ícones, OG, Twitter; sem meta robots). |
 | `404.html` | Resposta de qualquer caminho que não existe, com status 404 (`not_found_handling: "404-page"`). |
 | `_headers` | Segurança, cache e o interruptor do noindex (abaixo). |
-| `_redirects` | `/download/mac` e `/download/mac-intel` → .dmg no bucket `nodbot-downloads` (302). |
+| `_redirects` | `/download/mac` e `/download/mac-intel` → .dmg e `/download/windows` → .exe (ADA-226) no bucket `nodbot-downloads` (302). |
 | `robots.txt`, `sitemap.xml` | Tudo liberado; sitemap só com a home. |
 | `og.png` | Prévia de link 1200×630 (hero da w4). Para trocar, use um **nome novo**: fica 1 dia em cache, e Slack/WhatsApp guardam a prévia. |
 | `favicon.svg`, `icon-192.png`, `apple-touch-icon.png` | Copiados de `web/public`. |

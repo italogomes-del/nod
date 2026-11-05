@@ -114,7 +114,7 @@ describe("site estático (site/)", () => {
     expect(ignorados).toEqual(expect.arrayContaining(["wrangler.jsonc", "README.md", ".wrangler"]));
   });
 
-  it("8. todo link /download/* da página tem redirect 302 para um .dmg em https no _redirects", () => {
+  it("8. todo link /download/* da página tem redirect 302 para um .dmg (ou o .exe do Windows, ADA-226) em https no _redirects", () => {
     const destinos = new Map(
       ler("_redirects")
         .split("\n")
@@ -124,11 +124,11 @@ describe("site estático (site/)", () => {
         .map(([origem, destino, status]) => [origem!, { destino: destino!, status: status ?? "302" }]),
     );
     const caminhos = [...new Set([...html.matchAll(/href="(\/download\/[^"]*)"/g)].map((m) => m[1]!))];
-    expect(caminhos).toEqual(expect.arrayContaining(["/download/mac", "/download/mac-intel"]));
+    expect(caminhos).toEqual(expect.arrayContaining(["/download/mac", "/download/mac-intel", "/download/windows"]));
     for (const caminho of caminhos) {
       expect(destinos.get(caminho), caminho).toBeDefined();
       expect(destinos.get(caminho)!.status, caminho).toBe("302");
-      expect(destinos.get(caminho)!.destino, caminho).toMatch(/^https:\/\/[^/]+\/.+\.dmg$/);
+      expect(destinos.get(caminho)!.destino, caminho).toMatch(caminho === "/download/windows" ? /^https:\/\/[^/]+\/.+\.exe$/ : /^https:\/\/[^/]+\/.+\.dmg$/);
     }
   });
 
