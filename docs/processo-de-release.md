@@ -108,7 +108,7 @@ git push origin "$RELEASE_TAG"
 gh run list --workflow desktop-release.yml
 ```
 
-Confira previamente que a tag não existe localmente nem no remoto. Nunca mova uma tag publicada. Anote SHA e execução do Actions nas notas. O workflow de referência verifica a versão, roda o gate com Postgres limpo e gera `arm64` e `x64` em runners nativos. Depois verifica proxy empacotado, assinatura, ticket e Gatekeeper; apenas então cria um **rascunho** com os DMGs e checksums.
+Confira previamente que a tag não existe localmente nem no remoto. Nunca mova uma tag publicada. Anote SHA e execução do Actions nas notas. O workflow de referência confere que o commit da tag tem um run verde do `ci.yml` (desde 2026-11-05 ele não repete o `npm run check`: a CI da main já rodou os mesmos testes em paralelo; se o `ci` da main caiu num teste instável, rode-o de novo pelo Actions sem mover a tag), monta servidor, web, motor e desktop, e gera `arm64` e `x64` em runners nativos. Depois verifica proxy empacotado, assinatura, ticket e Gatekeeper; apenas então cria um **rascunho** com os DMGs e checksums.
 
 A execução manual (`workflow_dispatch`) desse workflow guarda artefatos, mas não cria release. O workflow também **não marca automaticamente uma tag `-rc.N` como pré-release**, nem anexa o guia: faça esses passos antes da publicação. Ajustes futuros na automação devem preservar esse comportamento seguro de rascunho e ser revisados por PR.
 

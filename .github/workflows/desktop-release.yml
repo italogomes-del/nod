@@ -9,35 +9,31 @@ concurrency:
   group: desktop-release-${{ github.ref }}
   cancel-in-progress: false
 jobs:
+  # definido em 2026-11-05: o verify repetia o `npm run check` inteiro, em série, num runner de 2 vCPU (36 min na
+  # rc.3) e caiu em duas das seis releases vermelhas desde a rc.1 por diferenças do checkout de tag (a catraca de
+  # paridade sem a main e sem o pai do commit, 28/10 e 4/11). O `ci.yml` já roda os mesmos testes em paralelo em
+  # ~6 min para cada commit da main. Então a tag só sobe se o commit dela tem um run verde do `ci` (é o que o
+  # docs/processo-de-release.md já pede antes da tag); aqui ficam só os builds que o release precisa.
   verify:
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-        ports: ['5434:5432']
-        options: --health-cmd "pg_isready -U postgres" --health-interval 2s --health-timeout 3s --health-retries 30
-    env:
-      DATABASE_URL_DONO: postgres://nod_dono:nod@127.0.0.1:5434/nod
-      DATABASE_URL_TEST: postgres://nod_app:nod@127.0.0.1:5434/nod_test
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
-      # A catraca C da paridade (NOD-391, #635) compara o piso com o do pai do commit (HEAD^1) no CI: o checkout raso
-      # da tag não o traz e o verify caía com "invalid object name 'HEAD^1'" (v1.0.0-rc.3, 2026-11-04).
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with:
-          fetch-depth: 2
+      - name: O commit da tag passou na CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          N=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$GITHUB_SHA&status=success&per_page=1" --jq '.total_count')
+          if [ "$N" != "0" ]; then echo "ci verde para $GITHUB_SHA"; exit 0; fi
+          # A execução manual numa branch (sonda) não cria release: avisa e segue. Numa tag, reprova.
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then echo "::warning::o commit $GITHUB_SHA não tem run verde do ci.yml (execução manual: segue sem o gate)"; exit 0; fi
+          echo "::error::o commit $GITHUB_SHA não tem run verde do ci.yml. Faça o merge na main, espere o ci passar e só então crie a tag (docs/processo-de-release.md §2). Se o ci da main caiu num teste instável, rode-o de novo: a tag não precisa mudar."
+          exit 1
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '24.19.0'
           cache: npm
       - run: npm ci
-      - run: psql postgres://postgres:postgres@127.0.0.1:5434/postgres -v ON_ERROR_STOP=1 -f infra/postgres/init/01_roles.sql
-      - run: npm run db:migrate:test
-      # A catraca C da paridade (NOD-391) compara o piso com o da main: o checkout raso da tag não traz a origin/main.
-      - run: git fetch --no-tags --depth=1 origin +main:refs/remotes/origin/main
-      - run: npm run check
       - run: npm run build
       - run: npm run desktop:build
   mac:
