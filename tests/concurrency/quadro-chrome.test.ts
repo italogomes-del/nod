@@ -167,7 +167,16 @@ descrever("NOD-429 no Chrome real", () => {
     await cdp.enviar("Page.navigate", { url });
     for (let i = 0; i < 100 && !(await avaliar<boolean>(cdp, "!!window.__montar")); i++) await esperar(50);
     await avaliar(cdp, montagem);
+    await pintado();
   }
+
+  /**
+   * NOD-465: espera a tela montada ser calculada e pintada, como a pessoa a vê antes de clicar. Sem isso, na máquina
+   * carregada o clique pode chegar antes de qualquer frame: os pontinhos (nós novos) nunca tiveram estilo calculado, o
+   * Chrome não tem de onde partir e não cria a transição de largura (getAnimations() vazio, "expected 0 to be greater than 0").
+   * A leitura do layout força o estilo de todo o cabeçalho; os dois rAF garantem um frame pintado depois dela.
+   */
+  const pintado = () => avaliar(cdp, `(document.body.getBoundingClientRect(), new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(null)))))`);
 
   /**
    * Clica numa aba e devolve os quadros-chave das animações de quem entra e de quem sai. Com `pausarEm`, para tudo (o
