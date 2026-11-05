@@ -120,7 +120,10 @@ construir() { # arch versao origem saida
 
   passo "compactar e publicar"
   ext virt-sparsify --in-place "$raw"
-  ext zstd -q -T0 -19 --long=27 -o "$disco" "$raw"
+  # medido em 2026-11-05 (release rc.3, run 41911353290): o -19 levava 14 min no amd64 e 9 min no arm64, com o disco
+  # pronto. Numa amostra de 400 MB: -19 em 72 s (105 MB), -12 em 6 s (118 MB). O -12 custa ~12% de download e
+  # devolve 10 a 20 min por release.
+  ext zstd -q -T0 -12 --long=27 -o "$disco" "$raw"
   if [ "$SIMULAR" = 1 ]; then echo "[simular] sha256 $disco" >&3; else (cd "$saida" && sha256sum "$(basename "$disco")" > "$(basename "$disco").sha256"); fi
   echo "$disco"
 }

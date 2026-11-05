@@ -191,7 +191,42 @@ jobs:
         with:
           node-version: '24.19.0'
           cache: npm
+      - run: npm ci
+      - name: Origem do disco (motor e computador.sh)
+        run: |
+          set -euo pipefail
+          VERSAO=$(node -p "require('./package.json').version")
+          echo "VERSAO=$VERSAO" >> "$GITHUB_ENV"
+          node scripts/motor/build.mjs
+          node scripts/vm-local/origem-do-disco.ts --saida dist/vm-local/origem
+      # definido em 2026-11-05: o disco só muda quando muda o que entra nele (a origem: computador-*.mjs, computador.sh
+      # e a versão do node; e infra/vm-local: base Debian, arquivos do convidado e o script). A versão do app fica só
+      # no NOME do arquivo. Então o disco é guardado no cache do Actions pela hash desses insumos e, quando nada
+      # mudou, o job renomeia o disco guardado em vez de montar outro: o arm64 levava 53 min (sem /dev/kvm no
+      # runner, o apt do convidado roda em emulação; o runner arm64 do Blacksmith também não tem KVM, sonda #674).
+      - name: Hash dos insumos do disco
+        id: insumos
+        run: |
+          set -euo pipefail
+          HASH=$( (find dist/vm-local/origem infra/vm-local -type f | sort | xargs sha256sum) | sha256sum | cut -c1-16)
+          echo "chave=vm-disco-$ARCH-$HASH" >> "$GITHUB_OUTPUT"
+          echo "chave do disco $ARCH: vm-disco-$ARCH-$HASH"
+      - name: Disco guardado
+        id: guardado
+        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684
+        with:
+          path: cache-disco
+          key: ${{ steps.insumos.outputs.chave }}
+      - name: Reaproveitar o disco guardado
+        if: steps.guardado.outputs.cache-hit == 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          cp cache-disco/disco.img.zst "release/nod-vm-$VERSAO-$ARCH.img.zst"
+          (cd release && sha256sum "nod-vm-$VERSAO-$ARCH.img.zst" > "nod-vm-$VERSAO-$ARCH.img.zst.sha256")
+          echo "disco $ARCH reaproveitado do cache (${{ steps.insumos.outputs.chave }})"
       - name: Ferramentas do disco
+        if: steps.guardado.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
           sudo apt-get update
@@ -206,19 +241,23 @@ jobs:
           # status 1" no virt-customize --network). Sem o passt, o libguestfs usa a rede SLIRP do qemu, que o
           # construir-disco.sh configura no appliance (REDE_DO_APPLIANCE).
           if [ -x /usr/bin/passt ]; then sudo mv /usr/bin/passt /usr/bin/passt.desligado; fi
-      - run: npm ci
-      - name: Origem do disco (motor e computador.sh)
-        run: |
-          set -euo pipefail
-          VERSAO=$(node -p "require('./package.json').version")
-          echo "VERSAO=$VERSAO" >> "$GITHUB_ENV"
-          node scripts/motor/build.mjs
-          node scripts/vm-local/origem-do-disco.ts --saida dist/vm-local/origem
       - name: Disco da VM
+        if: steps.guardado.outputs.cache-hit != 'true'
         run: sudo -E bash infra/vm-local/construir-disco.sh "$ARCH" "$VERSAO" dist/vm-local/origem release
       - name: Diagnóstico do libguestfs
-        if: failure()
+        if: failure() && steps.guardado.outputs.cache-hit != 'true'
         run: sudo libguestfs-test-tool 2>&1 | tail -120 || true
+      - name: Guardar o disco para a próxima release
+        if: steps.guardado.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p cache-disco
+          cp "release/nod-vm-$VERSAO-$ARCH.img.zst" cache-disco/disco.img.zst
+      - if: steps.guardado.outputs.cache-hit != 'true'
+        uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684
+        with:
+          path: cache-disco
+          key: ${{ steps.insumos.outputs.chave }}
       - name: Conferir o disco
         run: |
           set -euo pipefail
