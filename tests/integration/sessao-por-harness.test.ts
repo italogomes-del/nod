@@ -58,12 +58,19 @@ describeIntegracao("sessão do CLI pertence ao harness (0030)", () => {
     await withRollback(MARLON, async (trx) => {
       const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON, { nome: "Ada" });
       await repos.agentes.atualizarPerfil(agenteId, { confirmado: true });
-      await repos.mensagens.criar({ conversaId, autoria: autoriaPessoa(PESSOA_MARLON), kind: "texto", texto: "Antes da sessão: monte meu checklist", confianca: "confiavel" });
+      const antes = await repos.mensagens.criar({ conversaId, autoria: autoriaPessoa(PESSOA_MARLON), kind: "texto", texto: "Antes da sessão: monte meu checklist", confianca: "confiavel" });
       const sessao = randomUUID();
       await repos.conversas.atualizarSessaoCli(conversaId, sessao, "local", "claude-cli");
 
       // A rotina das 8h postou na conversa numa sessão própria (ADR-044): a sessão da conversa não viu.
-      await repos.mensagens.criar({ conversaId, autoria: autoriaAgente(agenteId, PESSOA_MARLON), kind: "texto", texto: "Checklist das 8h: [ ] RBAC [ ] Fechamento semanal", confianca: "confiavel" });
+      const rotina = await repos.mensagens.criar({ conversaId, autoria: autoriaAgente(agenteId, PESSOA_MARLON), kind: "texto", texto: "Checklist das 8h: [ ] RBAC [ ] Fechamento semanal", confianca: "confiavel" });
+      // O plano compara `criadoEm > sessaoEm` e `criadoEm < turno.criadoEm` em milissegundos. Numa máquina rápida as
+      // três gravações (fala de antes, sessão, rotina) e o turno cabem no mesmo ms e a rotina sumia do
+      // "desdeSuaUltimaVez" (3 quedas na CI em 2026-11-04). O teste fixa os instantes em vez de contar com o relógio.
+      const T = Date.now();
+      await trx`update mensagens set criado_em = ${new Date(T - 2000)} where id = ${antes?.id ?? ""}`;
+      await trx`update conversas set sessao_em = ${new Date(T - 1000)} where id = ${conversaId}`;
+      await trx`update mensagens set criado_em = ${new Date(T - 500)} where id = ${rotina?.id ?? ""}`;
       const pedido = await repos.mensagens.criar({ conversaId, autoria: autoriaPessoa(PESSOA_MARLON), kind: "texto", texto: "Marca o RBAC como feito", confianca: "confiavel" });
 
       const p = await plano(trx, repos, agenteId, conversaId, "claude-cli", { mensagemOrigemId: pedido?.id ?? "" });
