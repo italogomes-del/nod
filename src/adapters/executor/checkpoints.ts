@@ -214,9 +214,16 @@ async function lerCacheBruto(arquivo: string): Promise<Cache> {
     return new Map();
   }
 }
+/**
+ * O mtime do marcador do gc vem do relógio do sistema de arquivos, que é mais grosso que o Date.now() de quem leu o
+ * cache (um tick atrás no Linux, 1 s no HFS+): um gc gravado logo depois da leitura podia parecer anterior a ela e o
+ * cache era regravado apontando blobs apagados (CI em máquina rápida, 2026-11-04). Na dúvida não regrava: custa só um
+ * rehash no turno seguinte.
+ */
+const FOLGA_RELOGIO_MS = 1000;
 async function gravarCache(arquivo: string, cache: Cache, marcaDoGc: string): Promise<void> {
   const gc = await stat(marcaDoGc).then((x) => x.mtimeMs, () => 0);
-  if (gc >= (lidoEm.get(cache) ?? 0)) {
+  if (gc > 0 && gc + FOLGA_RELOGIO_MS >= (lidoEm.get(cache) ?? 0)) {
     cache.clear();
     return;
   }
