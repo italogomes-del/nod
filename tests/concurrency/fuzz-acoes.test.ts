@@ -328,8 +328,11 @@ for (const [ordem, config] of CONFIGURACOES.entries()) {
       // O PR #643 ficou vermelho com a semente 2453916776 no `desfazer_movimento`: nenhum dos casos sorteados juntava o
       // bot, a tarefa e o movimento do fuzz (o `enxugarCasos` só guarda um caso fundo se o sorteio fizer um). Cada uma
       // destas ações ganha um caso com os ids semeados, na posição do primeiro caso dela, para passar com qualquer semente.
-      const SEMEADOS: Record<string, string> = { agentes: meu.agente.id, tarefas: tarefaDoFuzz, movimentos: movimentoDoFuzz };
-      for (const acao of PRECISAM_DA_TAREFA) {
+      // A main ficou vermelha com a semente 806451066 (3011777, #689) no `quadro.tirar_pessoa`: a pessoa do fuzz está no
+      // quadro desde a NOD-443, mas nenhum caso sorteado levava o id dela no `:pid` (todos em 404). Ganha o caso semeado
+      // também; não entra em PRECISAM_DA_TAREFA porque não depende da tarefa e não precisa vir antes do `mudar_tarefa`.
+      const SEMEADOS: Record<string, string> = { agentes: meu.agente.id, tarefas: tarefaDoFuzz, movimentos: movimentoDoFuzz, pessoas: outraEscopo.pessoaId };
+      for (const acao of [...PRECISAM_DA_TAREFA, "quadro.tirar_pessoa"]) {
         const i = plano.casos.findIndex((c) => c.acao === acao);
         if (i < 0) continue;
         // A entrada é a plausível do gerador (o corpo não importa: estas rotas não o leem); só o caminho muda.
