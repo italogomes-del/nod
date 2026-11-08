@@ -27,6 +27,17 @@ celular. O item 3 da ADR-094 não deixava isso explícito.
    render.
 5. **Nada passa da largura**: a 390 px `scrollWidth` = 390 em conversa, barra, quadro e tarefa.
 
+## Emenda F2 (2026-11-08, ADA-17: a tarefa aberta)
+
+6. **Render por formato, não por CSS.** A tarefa aberta no celular tem render próprio (`web/telas/tarefa-celular.ts`),
+   escolhido por `ehCelular()` em `web/lib/quadro-na-tela.ts`; o do computador (`tarefaAberta`) não muda. A troca da
+   consulta redesenha. Esconder pedaços do computador por CSS deixaria dois DOMs para o leitor de tela e o teste.
+7. **Propriedades numa folha**, sem `<select>` nativo: cada chip da bandeja abre uma folha (`web/lib/folha.ts`) com o
+   valor atual marcado. Os toques caem no mesmo caminho do select (`quadro.mudar_tarefa`); nada de ação nova. A folha
+   fica acima do teclado por `--teclado` (`web/lib/teclado-visivel.ts`, `visualViewport`), nunca por `vh`.
+8. **Toque longo é atalho, nunca o único caminho.** No comentário, o toque longo abre Responder/Copiar; o Responder
+   também fica visível no cartão. A citação da resposta vai no texto do comentário (sem esquema novo).
+
 ## Gatilho de reversão
 
 Se uma fase do celular precisar de uma ação que o computador não tem, ela volta a esta ADR e decide aqui antes.

@@ -526,24 +526,24 @@ descrever("ADA-7: a atualização do quadro preserva a rolagem (Chrome real)", (
     await ate("window.__regravacoes > 0");
   }, 60_000);
 
-  it("390×844 (toque): o recado longo que rola por dentro fica onde a pessoa estava depois do quadro.mudou", async () => {
+  it("390×844 (toque): o comentário longo que rola por dentro fica onde a pessoa estava depois do quadro.mudou (ADA-17: no celular o campo é o composer da tarefa)", async () => {
     await montar(390, 844, true);
     await avaliar(cdp, `[...document.querySelectorAll("#quadro [data-act='abrir-tarefa'][data-id='t3']")].find((e) => e.offsetParent).click()`);
-    await ate(`document.getElementById("qd-trab-recado")`);
+    await ate(`document.getElementById("qd-com-t3")`);
     await esperar(300);
-    await avaliar(cdp, `(() => { const c = document.getElementById("qd-trab-recado"); c.value = Array.from({ length: 30 }, (_, i) => "linha " + i).join("\\n");
+    await avaliar(cdp, `(() => { const c = document.getElementById("qd-com-t3"); c.value = Array.from({ length: 30 }, (_, i) => "linha " + i).join("\\n");
       c.dispatchEvent(new Event("input", { bubbles: true })); c.focus({ preventScroll: true }); c.setSelectionRange(20, 20); c.scrollTop = 200; })()`);
     await esperar(80);
-    const r0 = await avaliar<number>(cdp, `document.getElementById("qd-trab-recado").scrollTop`);
+    const r0 = await avaliar<number>(cdp, `document.getElementById("qd-com-t3").scrollTop`);
     expect(r0, "o recado precisa rolar por dentro para o teste valer").toBeGreaterThan(100);
     await observar();
     await avaliar(cdp, "window.__mudou()");
     // Revisão 9: com o foco no recado, a releitura espera ela sair dele (no iPhone, o foco por código fecha o teclado).
     await esperar(1000);
     expect(await avaliar<number>(cdp, "window.__regravacoes"), "regravações com o foco no recado").toBe(0);
-    expect(await avaliar<string>(cdp, "document.activeElement?.id"), "o foco segue no recado").toBe("qd-trab-recado");
+    expect(await avaliar<string>(cdp, "document.activeElement?.id"), "o foco segue no recado").toBe("qd-com-t3");
     // Revisão 11: sem teto (o relógio passa 60 s): o campo não é recriado enquanto ela escreve.
-    await avaliar(cdp, `(() => { window.__recado = document.getElementById("qd-trab-recado"); window.__virarMinuto();
+    await avaliar(cdp, `(() => { window.__recado = document.getElementById("qd-com-t3"); window.__virarMinuto();
       window.__recado.dispatchEvent(new Event("input", { bubbles: true })); })()`);
     await esperar(600);
     expect(await avaliar<number>(cdp, "window.__regravacoes"), "regravações com ela escrevendo depois de 60 s").toBe(0);
@@ -559,8 +559,8 @@ descrever("ADA-7: a atualização do quadro preserva a rolagem (Chrome real)", (
     await cdp.enviar("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
     await ate("window.__regravacoes > 0");
     await esperar(150);
-    expect(await avaliar<string>(cdp, "document.activeElement?.id"), "o foco volta ao recado").toBe("qd-trab-recado");
-    const r1 = JSON.parse(await avaliar<string>(cdp, `(() => { const c = document.getElementById("qd-trab-recado");
+    expect(await avaliar<string>(cdp, "document.activeElement?.id"), "o foco volta ao recado").toBe("qd-com-t3");
+    const r1 = JSON.parse(await avaliar<string>(cdp, `(() => { const c = document.getElementById("qd-com-t3");
       return JSON.stringify({ top: c.scrollTop, linhas: c.value.split("\\n").length }); })()`)) as { top: number; linhas: number };
     expect(r1.linhas, "o rascunho do recado sobrevive").toBe(30);
     expect(Math.abs(r1.top - r0), `scrollTop do recado ${r0} → ${r1.top}`).toBeLessThanOrEqual(1);
@@ -1018,7 +1018,8 @@ descrever("ADA-7: a atualização do quadro preserva a rolagem (Chrome real)", (
     expect(t0.max, "o log faz a tarefa rolar").toBeGreaterThan(600);
     // O trabalho novo: a releitura do frame traz o #2, de log vazio (redesenharLido).
     await avaliar(cdp, "(() => { window.__trabN = 2; window.__mudou(); })()");
-    await ate(`document.querySelector("#quadro .qd-conteudo").textContent.includes("#2")`);
+    // ADA-17: no celular a execução é uma linha (#294), sem o "#2" do computador: o log do trabalho novo é o sinal.
+    await ate(`document.querySelector('#quadro .qd-trab-log[data-trabalho="e2"]')`);
     await esperar(RESERVA_TESTE + 300);
     expect((await medir()).max, "o log vazio encolheu a tarefa abaixo da posição").toBeLessThan(t0.top);
     for (let i = 0; i < 40; i++) await avaliar(cdp, `window.__passoVivo(${i}, "tv2")`);
@@ -1092,7 +1093,9 @@ descrever("ADA-7: a atualização do quadro preserva a rolagem (Chrome real)", (
   it("390×844 (toque): ADA-12 revisão 5 — CA3 numa tarefa curta (pouco para rolar): colada no fim, segue o fim quando chega um comentário", async () => {
     await montar(390, 844, true);
     await semAncora();
-    await avaliar(cdp, "window.__linhas = 1");
+    // ADA-17: o detalhe do celular é mais enxuto (sem caixas nem painel) e a descrição quebra como texto corrido: com 1 linha
+    // ele cabe inteiro; 12 rolam pouco.
+    await avaliar(cdp, "window.__linhas = 12");
     await atualizar();
     await abrirT3(1);
     await avaliar(cdp, `(() => { document.activeElement?.blur(); const v = document.getElementById("quadro"); v.scrollTop = v.scrollHeight; })()`);
@@ -1190,8 +1193,9 @@ descrever("ADA-7: a atualização do quadro preserva a rolagem (Chrome real)", (
     expect(t1.top, "fica no topo (o título à vista)").toBe(0);
   }, 60_000);
 
-  it("390×844 (toque): ADA-12 revisão 4 — o histórico que a pessoa abriu continua aberto na atualização (sem branco nem pulo)", async () => {
-    await montar(390, 844, true);
+  it("1440×900: ADA-12 revisão 4 — o histórico que a pessoa abriu continua aberto na atualização (sem branco nem pulo)", async () => {
+    // ADA-17: no celular a atividade é uma linha do tempo aberta, sem o <details> do histórico; ele segue no computador.
+    await montar(1440, 900, false);
     await semAncora();
     await avaliar(cdp, "window.__linhas = 4; window.__movs = 40");
     await atualizar();
@@ -1211,8 +1215,9 @@ descrever("ADA-7: a atualização do quadro preserva a rolagem (Chrome real)", (
     expect(t1.max, "o conteúdo não encolheu").toBeGreaterThanOrEqual(t0.max);
   }, 60_000);
 
-  it("390×844 (toque): ADA-12 revisão 5 — fechar o histórico é gesto da pessoa: o conteúdo novo não puxa a vista ao lugar de antes de fechar", async () => {
-    await montar(390, 844, true);
+  it("1440×900: ADA-12 revisão 5 — fechar o histórico é gesto da pessoa: o conteúdo novo não puxa a vista ao lugar de antes de fechar", async () => {
+    // ADA-17: no celular a atividade é uma linha do tempo aberta, sem o <details> do histórico; ele segue no computador.
+    await montar(1440, 900, false);
     await semAncora();
     await avaliar(cdp, "window.__linhas = 4; window.__movs = 40");
     await atualizar();
@@ -1247,8 +1252,10 @@ descrever("ADA-7: a atualização do quadro preserva a rolagem (Chrome real)", (
     expect(t0.max, "o detalhe precisa rolar para o teste valer").toBeGreaterThan(600);
     const alturaAntes = await avaliar<number>(cdp, `document.querySelector("#quadro > .qd-conteudo").getBoundingClientRect().height`);
     // A resposta da ação traz a descrição curta: o desenho da pessoa encolhe a tarefa.
-    await avaliar(cdp, `(() => { window.__mudarOk = true; window.__linhas = 4; const s = document.getElementById("qd-t-resp");
-      s.value = ""; s.dispatchEvent(new Event("change", { bubbles: true })); })()`);
+    await avaliar(cdp, `(() => { window.__mudarOk = true; window.__linhas = 4; document.getElementById("qd-t-resp").click(); })()`);
+    // ADA-17: no celular o responsável é o chip e a folha (sem select): "Sem responsável" na folha.
+    await ate(`document.querySelector('.qd-folha-cel [data-folha-acao="agente"][data-valor=""]')`);
+    await avaliar(cdp, `document.querySelector('.qd-folha-cel [data-folha-acao="agente"][data-valor=""]').click()`);
     await ate(`document.querySelector("#quadro > .qd-conteudo").getBoundingClientRect().height < ${alturaAntes} - 300`);
     expect(await avaliar<string>(cdp, `document.querySelector("#quadro > .qd-conteudo").style.minHeight`), "o desenho da ação não reserva").toBe("");
   }, 60_000);
@@ -1284,7 +1291,10 @@ descrever("ADA-7: a atualização do quadro preserva a rolagem (Chrome real)", (
     await esperar(120);
     expect((await medir()).max, "os comentários fazem a tarefa rolar").toBeGreaterThan(600);
     // A ação (tirar o responsável) não muda a altura; o eco dela traz os comentários curtos (dentro de ECO_DA_PESSOA_MS).
-    await avaliar(cdp, `(() => { window.__mudarOk = true; const s = document.getElementById("qd-t-resp"); s.value = ""; s.dispatchEvent(new Event("change", { bubbles: true })); })()`);
+    await avaliar(cdp, `(() => { window.__mudarOk = true; document.getElementById("qd-t-resp").click(); })()`);
+    // ADA-17: no celular o responsável é o chip e a folha (sem select): "Sem responsável" na folha.
+    await ate(`document.querySelector('.qd-folha-cel [data-folha-acao="agente"][data-valor=""]')`);
+    await avaliar(cdp, `document.querySelector('.qd-folha-cel [data-folha-acao="agente"][data-valor=""]').click()`);
     await ate("window.__mudancas >= 1");
     await esperar(100);
     await avaliar(cdp, `(() => { window.__coms = 2; window.__q.aoFrame({ streamId: "s", seq: 1, pessoaId: "p", tipo: "quadro.mudou", dados: { quadroId: "q1", agenteId: "a", loteId: null, tarefas: "t3" } }); })()`);

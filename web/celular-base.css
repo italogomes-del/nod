@@ -94,6 +94,89 @@
   .qd-hist-l::before { top: calc(50% - 3px); }
   .qd-hist-sum { min-height: var(--cel-alvo); padding-block: 12px; box-sizing: border-box; }
 
+  /* ---------- ADA-17: a tarefa aberta no celular (web/telas/tarefa-celular.ts) ---------- */
+  :root { --teclado: 0px; } /* o JS grava o valor no style do html (web/lib/teclado-visivel.ts), que vence esta regra */
+  /* Com a tarefa aberta o composer é o da tarefa: a pílula do quadro sai (o anúncio para o leitor de tela fica). */
+  .qd-vista:has(> .qd-conteudo > .qd-tarefa-cel) > .qc-wrap > :not(.qd-anuncio) { display: none; }
+  .qd-tarefa-cel { display: flex; flex-direction: column; min-height: 100%; padding-inline: 0; }
+  .qd-tarefa-cel > .qd-t-cab, .qd-tarefa-cel > .qd-t-principal { padding-inline: 16px; }
+  .qd-tarefa-cel .qd-t-principal { flex: 1; display: flex; flex-direction: column; gap: 16px; padding-bottom: 16px; }
+  .qd-tarefa-cel .qd-id { color: var(--ink-2); font-size: 13px; }
+  .qd-tarefa-cel .qd-t-desc-vazia { color: var(--ink-3); }
+  /* A bandeja: rola de lado (nunca a página), sem barra; chips de 44. */
+  .qd-bandeja { display: flex; gap: 8px; margin-inline: -16px; padding: 2px 16px; overflow-x: auto; scrollbar-width: none; overscroll-behavior-x: contain; }
+  .qd-bandeja::-webkit-scrollbar { display: none; }
+  .qd-chip-cel { flex: none; height: var(--cel-alvo); padding: 0 12px; border: 0; border-radius: 999px; font-size: 15px; color: var(--ink); white-space: nowrap; }
+  .qd-chip-cel svg { width: 16px; height: 16px; }
+  .qd-chip-cel.qd-chip-vazio { color: var(--ink-2); }
+  .qd-chip-cel:disabled { opacity: 1; color: var(--ink-2); }
+  .qd-chip-branch { max-width: 160px; overflow: hidden; text-overflow: ellipsis; font-family: var(--font-mono); font-size: 13px; }
+  .qd-cel-erro { margin: 0; color: var(--danger); font-size: 15px; }
+  .qd-cel-erro .qd-link { min-height: var(--cel-alvo); color: var(--danger); font-weight: 600; text-decoration: underline; }
+  /* A atividade: uma linha do tempo só. Evento com ponto de 6 px; execução como linha (issue 294); comentário em cartão cinza sem borda. */
+  .qd-ativ-cel { display: flex; flex-direction: column; gap: 10px; }
+  .qd-ativ-antigas { align-self: flex-start; min-height: var(--cel-alvo); font-size: 15px; }
+  .qd-ativ-nota { margin: 0; color: var(--ink-2); font-size: 15px; }
+  .qd-linha-tempo { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+  .qd-ev { position: relative; padding-left: 14px; color: var(--ink-2); font-size: 15px; line-height: 1.4; }
+  .qd-ev::before { content: ""; position: absolute; left: 0; top: calc(.7em - 3px); width: 6px; height: 6px; border-radius: 50%; background: var(--line-strong); }
+  .qd-ev strong { color: var(--ink); font-weight: 600; }
+  .qd-ev time { color: var(--ink-2); }
+  .qd-ev .qd-hist-desfazer { min-height: var(--cel-alvo); margin-left: 4px; }
+  .qd-exec { display: flex; gap: 10px; align-items: flex-start; }
+  .qd-exec-av { flex: none; width: 28px; height: 28px; display: inline-grid; place-items: center; }
+  .qd-exec-corpo { flex: 1; min-width: 0; }
+  .qd-exec-l { display: flex; align-items: center; gap: 8px; margin: 0; min-height: 28px; font-size: 15px; }
+  .qd-exec-txt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .qd-exec-meta, .qd-exec-l time { color: var(--ink-2); }
+  .qd-exec[data-estado="falhou"] .qd-exec-txt strong + * { color: var(--danger); }
+  .qd-exec-frase { margin: 2px 0 0; color: var(--ink-2); font-size: 15px; }
+  .qd-exec-acoes { margin: 0; display: flex; flex-wrap: wrap; align-items: center; }
+  .qd-exec-acoes .qd-link { min-height: var(--cel-alvo); font-size: 15px; }
+  .qd-linha-tempo > .qd-com { display: flex; gap: 10px; align-items: flex-start; -webkit-touch-callout: none; }
+  .qd-com-corpo { flex: 1; min-width: 0; }
+  .qd-com-cab { display: flex; align-items: center; gap: 8px; margin: 0; }
+  .qd-com-nome { font-weight: 600; }
+  .qd-com-resp { margin-left: auto; min-height: var(--cel-alvo); color: var(--ink-2); font-size: 13px; }
+  .qd-com-cita { margin: 4px 0; padding: 4px 0 4px 10px; border-left: 3px solid var(--line-strong); color: var(--ink-2); font-size: 15px; }
+  .qd-com-cita-nome { font-weight: 600; color: var(--ink); }
+  .qd-com-txt { margin: 2px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+  /* O composer único: colado embaixo da área visível (a .app já é a área acima do teclado, F1). */
+  .qd-cel-composer { position: sticky; bottom: 0; z-index: 2; display: flex; flex-direction: column; gap: 6px; padding: 8px 12px calc(env(safe-area-inset-bottom) + 8px);
+    background: var(--surface); box-shadow: 0 -1px 0 var(--line); }
+  .qd-cel-resp { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--ink-2); font-size: 13px; }
+  .qd-cel-resp strong { color: var(--ink); }
+  .qd-cel-resp-x { min-width: var(--cel-alvo); min-height: var(--cel-alvo); border: 0; background: none; color: var(--ink-2); font-size: 16px; }
+  .qd-cel-caixa { display: flex; align-items: flex-end; gap: 6px; padding: 0 4px 0 14px; border-radius: 22px; background: var(--surface-raised); }
+  .qd-cel-caixa .qd-com-in { flex: 1; min-width: 0; max-height: 40vh; border: 0; background: transparent; resize: none; color: var(--ink); }
+  .qd-cel-enviar { flex: none; display: inline-grid; place-items: center; width: var(--cel-alvo); height: var(--cel-alvo); padding: 0; border: 0; border-radius: 50%; background: none; color: var(--ink); }
+  .qd-cel-enviar svg { width: 22px; height: 22px; }
+  /* O topo encolhido mostra "VER-1 · título" numa linha, abaixo da pílula (web/lib/quadro-na-tela.ts, marcarTopo). */
+  .stage.qd-no-quadro:has(.qd-tarefa-cel) .cabecalho.topo-encolhido[data-titulo] { height: calc(env(safe-area-inset-top) + 80px); }
+  .stage.qd-no-quadro:has(.qd-tarefa-cel) .cabecalho.topo-encolhido[data-titulo]::after { content: attr(data-titulo); position: absolute; left: 56px; right: 56px; bottom: 6px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; color: var(--ink); font-size: 13px; font-weight: 600; pointer-events: none; }
+  /* A folha das propriedades: no body, acima do teclado, altura pela área visível (nunca vh). */
+  .qd-folha.qd-folha-cel { bottom: var(--teclado, 0px); max-height: calc(100dvh - var(--teclado, 0px) - env(safe-area-inset-top) - 12px); gap: 8px; padding-inline: 16px; overscroll-behavior: contain; }
+  .qd-folha-cel .qd-folha-alca { align-self: center; width: 36px; height: 5px; border-radius: 3px; background: var(--line-strong); touch-action: none; }
+  .qd-folha-cel .qd-folha-cab { touch-action: none; }
+  .qd-folha-cel .qd-folha-ok { min-height: var(--cel-alvo); font-size: 15px; font-weight: 600; }
+  .qd-fo-ops, .qd-props-cel { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+  .qd-fo-gtit { margin: 8px 0 2px; color: var(--ink-2); font-size: 13px; }
+  .qd-fo-op, .qd-prop { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 52px; padding: 0 4px; border: 0; border-bottom: 1px solid var(--line); background: none; color: var(--ink); font-size: 17px; text-align: left; }
+  .qd-fo-rot, .qd-prop-v { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .qd-fo-marca { color: var(--ink); font-weight: 600; }
+  .qd-fo-op-fixo { color: var(--ink-2); }
+  .qd-prop-k { flex: none; width: 112px; color: var(--ink-2); font-size: 15px; }
+  .qd-prop-v { text-align: right; }
+  .qd-prop-seta { flex: none; color: var(--ink-3); }
+  .qd-prop-branch, .qd-fo-branch { font-family: var(--font-mono); font-size: 13px; white-space: nowrap; }
+  .qd-fo-linha { margin: 0; overflow-x: auto; white-space: nowrap; }
+  .qd-fo-frase { margin: 0; font-size: 17px; }
+  .qd-fo-campo { width: 100%; box-sizing: border-box; min-height: var(--cel-alvo); padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink); font-size: var(--cel-campo); }
+  .qd-fo-acoes { display: flex; justify-content: flex-end; gap: 8px; }
+  .qd-fo-acoes .qd-bt { min-height: var(--cel-alvo); padding: 0 16px; font-size: 15px; }
+  .qd-bt-perigo { color: var(--danger); }
+
   /* ---------- Conversa e cards ---------- */
   /* O corpo da conversa em 16. */
   .bubble { font-size: var(--cel-corpo); }

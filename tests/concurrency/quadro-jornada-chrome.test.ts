@@ -220,13 +220,22 @@ descrever("NOD-442 no Chrome real", () => {
     });
   }
 
-  it("ajuste v2 do Gil · 390px (celular): nada muda — o painel desce para baixo da tarefa e a caixa fica com a largura da tela", async () => {
+  it("ADA-17 · 390px (celular): a tarefa usa a largura toda, sem o painel do lado; o composer da tarefa fica com a largura da tela", async () => {
     await abrir(390);
     await abrirTarefa("t3");
-    const e = await eixos();
-    expect(e.lado.y).toBeGreaterThanOrEqual(e.colunaFim - 1);
-    expect(e.caixa.w).toBeGreaterThan(300);
-    expect(Math.abs(e.caixa.x - 195)).toBeLessThanOrEqual(2);
+    const e = await avaliar<{ lado: boolean; bandeja: boolean; coluna: { x: number; w: number }; composer: { x: number; w: number }; pilula: boolean; rolagem: number }>(cdp, `(() => {
+      const r = (s) => { const b = document.querySelector(s).getBoundingClientRect(); return { x: (b.left + b.right) / 2, w: b.width }; };
+      const q = document.getElementById("quadro");
+      return { lado: !!document.querySelector("#quadro .qd-lado"), bandeja: !!document.querySelector("#quadro .qd-tarefa-cel .qd-bandeja"),
+        coluna: r("#quadro .qd-t-principal"), composer: r("#quadro .qd-cel-composer"),
+        pilula: [...document.querySelectorAll("#quadro .qc-pil")].some((p) => p.offsetParent), rolagem: q.scrollWidth - q.clientWidth };
+    })()`);
+    expect(e.lado, "as propriedades vão para a folha, não para um painel").toBe(false);
+    expect(e.bandeja).toBe(true);
+    expect(e.coluna.w).toBeGreaterThan(340);
+    expect(Math.abs(e.coluna.x - 195)).toBeLessThanOrEqual(2);
+    expect(e.composer.w).toBeGreaterThan(370);
+    expect(e.pilula, "com a tarefa aberta, o composer é o da tarefa").toBe(false);
     expect(e.rolagem).toBeLessThanOrEqual(0);
   });
 

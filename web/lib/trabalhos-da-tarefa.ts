@@ -8,7 +8,7 @@
  */
 import type { QuadroDto } from "../../src/contracts/quadro.ts";
 import type { ExecucoesDaTarefa } from "../../src/contracts/quadro-execucoes.ts";
-import { anuncioDoTrabalho, logDoTrabalho, secaoDoTrabalho, vivo } from "../telas/trabalhos-da-tarefa.ts";
+import { anuncioDoTrabalho, logDoTrabalho, secaoDoTrabalho, vivo, type VistaDoTrabalho } from "../telas/trabalhos-da-tarefa.ts";
 import { PRAZO_DO_ENVIO_MS, comPrazo } from "./com-prazo.ts";
 import { ErroApi, ehRecusaDoServidor } from "./erro-api.ts";
 import { GESTO_MS } from "./quadro.ts";
@@ -249,6 +249,15 @@ export function criarTrabalhosDaTarefa(o: {
         tarefaId, dados, erro, bloqueada: h.bloqueada, agenteId: h.agenteId, conversaAtual: h.conversaAtual,
         atividade: atual ? atividades.get(atual.turnoAtual) : undefined, passosAbertos: passos, anterioresAbertos: anteriores, aviso, ocupado, recadoPendente,
       }, h.hora);
+    },
+    /** ADA-17: a mesma vista, sem HTML (o celular desenha cada execução como uma linha da atividade, #294). */
+    vista(tarefaId: string, h: { bloqueada: boolean; agenteId: string | null; conversaAtual: string | null }): VistaDoTrabalho | undefined {
+      if (!api() || alvo?.tarefaId !== tarefaId) return undefined;
+      const atual = dados?.execucoes[0];
+      return {
+        tarefaId, dados, erro, bloqueada: h.bloqueada, agenteId: h.agenteId, conversaAtual: h.conversaAtual,
+        atividade: atual ? atividades.get(atual.turnoAtual) : undefined, passosAbertos: passos, anterioresAbertos: anteriores, aviso, ocupado, recadoPendente,
+      };
     },
     aoFrame(f: FrameDoTrabalho): void {
       if (!alvo) return;

@@ -91,6 +91,14 @@ export function criarComentariosNaTela(o: { api: () => ApiDosComentarios | null;
       const e = estado?.tarefaId === tarefaId ? estado : null;
       return comentariosDaTarefa({ tarefaId, lista: e?.lista ?? [], carga: e?.carga ?? "carregando", agente, hora, atividade: e?.atividade ?? [], criadaPor: e?.criadaPor ?? null, pendente: e?.pendente ?? null });
     },
+    /** ADA-17: os mesmos dados, sem HTML (a linha do tempo do celular mistura os comentários com os eventos). */
+    dados(tarefaId: string): { lista: ComentarioDto[]; carga: CargaDosComentarios; atividade: AtividadeTarefa[]; criadaPor: string | null; pendente: Pendente | null } | undefined {
+      if (!o.api()?.comentariosDaTarefa) return undefined;
+      const e = estado?.tarefaId === tarefaId ? estado : null;
+      return { lista: e?.lista ?? [], carga: e?.carga ?? "carregando", atividade: e?.atividade ?? [], criadaPor: e?.criadaPor ?? null, pendente: e?.pendente ?? null };
+    },
+    /** ADA-17: um comentário em voo (o 2º envio não sai): a citação da resposta não entra no texto que fica no campo. */
+    ocupado: (): boolean => !!estado?.pendente && !estado.pendente.falhou,
     /**
      * Manda o comentário (ADA-4: otimista). O campo esvazia e o comentário entra na lista como "enviando" na hora; com um
      * em voo, o 2º Enter não manda nada. Na falha, o texto volta ao campo (se vazio) e o item vira "Não saiu · Tentar de

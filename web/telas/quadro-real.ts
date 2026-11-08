@@ -48,12 +48,12 @@ export function formNovaTarefa(coluna: { id: string; nome: string }, o: { onde?:
     `${erro}<p class="qd-nova-dica" aria-hidden="true"><kbd>Enter</kbd> cria · <kbd>Esc</kbd> cancela</p></form></li>`);
 }
 
-const numeroDoPr = (url: string): string => {
+export const numeroDoPr = (url: string): string => {
   const m = /\/pull\/(\d+)/.exec(url);
   return m ? `PR #${m[1]}` : "PR";
 };
 /** Só http(s) vira link (a rota já valida; aqui é a segunda trava, para um dado velho). */
-const linkSeguro = (url: string | null): string | null => (url && /^https?:\/\//i.test(url) ? url : null);
+export const linkSeguro = (url: string | null): string | null => (url && /^https?:\/\//i.test(url) ? url : null);
 
 /** NOD-421: o PR em texto, sem cor nem alerta ("CI ok · aberto", "conflito" como palavra). */
 const estadoDoPr = (p: NonNullable<TarefaDto["prs"]>[number]): string =>
@@ -334,7 +334,7 @@ export function quadroComErro(): Html {
 
 /* ---------- A tarefa aberta ---------- */
 
-function formResposta(t: TarefaDto): string {
+export function formResposta(t: TarefaDto): string {
   const id = `qd-resp-${esc(t.id)}`;
   return `<form class="qd-resp-form" data-form="responder-tarefa" data-id="${esc(t.id)}"><label class="qd-sr" for="${id}">Sua resposta</label>` +
     `<textarea id="${id}" class="qd-resp-in" name="resposta" rows="2" maxlength="${LIMITE_RESPOSTA}" required placeholder="Sua resposta"></textarea>` +

@@ -221,6 +221,7 @@ import { executarRotinaComConfirmacao } from "./lib/executar-rotina.ts";
 import { copiarPorSelecao, type DocParaCopiar } from "./lib/copiar-por-selecao.ts";
 import { criarBuscaNaConversa } from "./telas/busca-na-conversa.ts";
 import { ligarTopoEncolhe, ROLAVEIS_DO_TOPO } from "./lib/topo-encolhe.ts";
+import { ligarTecladoVisivel } from "./lib/teclado-visivel.ts";
 import type { ItemDoMenuDaPilula } from "./lib/gesto-da-pilula.ts";
 import { DICA_MS, MARCA_CUTUCAO, MARCA_DICA, deveCutucar, criarFiltroDeEco, deveMostrarDica, escFechaABusca, gravarMarca, lerMarca, type Marcas, type ViaDaBusca } from "./lib/descoberta-da-busca.ts";
 // NOD-117: as teclas dos atalhos mudam com o lugar (app do Mac, navegador no Mac, Windows/Linux): web/lib/atalhos.ts.
@@ -263,6 +264,8 @@ let progressoDaFala: ProgressoNaTela = SEM_PROGRESSO;
 // ADA-2 (ADR-148): rolado, o topo da conversa, do quadro e da tarefa vira vidro (só pinta no celular: web/celular-base.css).
 const topoEncolhe = ligarTopoEncolhe(() => document.getElementById("cabecalho"),
   ROLAVEIS_DO_TOPO.map((id) => document.getElementById(id)).filter((e): e is HTMLElement => e !== null));
+// ADA-17 (ADR-148): quanto o teclado cobre, em --teclado; a folha da tarefa no celular fica acima dele.
+ligarTecladoVisivel(window);
 /** A conversa acompanha o fim e a pílula da base sobe às não lidas (definido em 2026-10-05, web/lib/rolagem-na-tela.ts). */
 const rolagem = criarRolagem(document.getElementById("timeline") as HTMLElement, document.getElementById("pilula-novas") as HTMLElement, () => !movimentoReduzido(), (p) => {
   progressoDaFala = p;

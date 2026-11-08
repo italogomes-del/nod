@@ -24,7 +24,7 @@ import type { MutacaoQuadro } from "./api.ts";
 import type { FiltroImportacao, ImportacaoDto, PreviaDaTela } from "../../src/contracts/quadro-importacao.ts";
 import type { EventoTrilhaQuadro } from "../../src/contracts/trilha-quadro.ts";
 import { ehRecusaDoPainel, type PainelImportacao } from "../telas/card-importacao.ts";
-import { RESP_VOCE, acesos, acoesDaNovaTarefa, fraseDoErroDoMover, reciboDaNovaTarefa, codigoNaUrl, destinosDaTarefa, historicoDaFaixa, respostaDoBot, respostaLonga, tarefaNoQuadro, type AcoesDoRecibo, type Faixa } from "./quadro-dados.ts";
+import { RESP_VOCE, acesos, codigoDaTarefa, acoesDaNovaTarefa, fraseDoErroDoMover, reciboDaNovaTarefa, codigoNaUrl, destinosDaTarefa, historicoDaFaixa, respostaDoBot, respostaLonga, tarefaNoQuadro, type AcoesDoRecibo, type Faixa } from "./quadro-dados.ts";
 import type { ExibirDoQuadro } from "../../src/contracts/raio-x.ts";
 import { quadroVazio, type Aviso, type ExibirDaBarra, type Filtro, type Html } from "../telas/quadro.ts";
 import { contarNaVista, ehFiltro, termoDaBusca } from "./vista-do-quadro.ts";
@@ -33,7 +33,10 @@ import { sugestoesDoQuadro, contadorDaPilula } from "./sugestoes-do-quadro.ts";
 import { ajustarAltura, type ContextoDaBarra } from "./composer.ts";
 import { comandoNoTexto } from "./barra.ts";
 import { ligarComposer, type ComposerLigado } from "./composer-ligado.ts";
-import { enterEnvia } from "./celular.ts";
+import { CONSULTA_CELULAR, ehCelular, enterEnvia } from "./celular.ts";
+import { abrirFolha, engolirCliqueDoToque, folhaAberta, type FolhaAberta } from "./folha.ts";
+import { autorDoComentario, fimDaTrocaCel, tarefaAbertaCelular, textoDaResposta, trechoDe, type NaoSalvouCel, type Respondendo, type TrocaCel } from "../telas/tarefa-celular.ts";
+import { casaNaBusca, folhaDeAjustes, folhaDeCancelar, folhaDeMover, folhaDeStatus, folhaDoBranch, folhaDoComentario, folhaDoResponsavel } from "../telas/folhas-da-tarefa.ts";
 import type { Aceita } from "./anexos.ts";
 import { anuncioDaFaixa, cartaoDaResposta, faixaDoQuadro, ICONE_ENVIAR_PILULA, ICONE_PARAR_PILULA, idDaNovaTarefa, ideiasDaPilula, pilulaDoQuadro, quadroCarregando, quadroComErro, quadroDaMeta, rotuloDoModo, semQuadro, tarefaAberta, tempoDoTurno, type AgenteDoQuadro, type AvisoDaFaixa, type PainelDoQuadro, type TrocaDaFaixa } from "../telas/quadro-real.ts";
 import { anuncioDaOrdem, anuncioDaPagina, CONVERSA, ehForma, indicePeloId, moverNaOrdem, paginaPelaTecla, presa, TAREFAS, type FormaDasTarefas, type Pagina } from "./paginas.ts";
@@ -438,6 +441,11 @@ export function criarQuadroNaTela(doc: Document, o: { busca?: BuscaDaPilula; men
   let avisoDoMover: string | null = null;
   /** Revisão 7 do PR #623: a coluna com responsável escolhida no Status da tarefa aberta, esperando "Confirmar · Não iniciar ainda". */
   let soltarNaAberta: { tarefa: string; coluna: string } | null = null;
+  /** ADA-17: no celular, a troca que ainda não voltou (o chip já mostra), a que não salvou e o comentário respondido. */
+  let otimistaCel: TrocaCel | null = null;
+  let naoSalvouCel: NaoSalvouCel | null = null;
+  let seqCel = 0;
+  let respondendo: ({ tarefa: string } & Respondendo) | null = null;
   /** O quadro escolhido no "Mover para…" da tarefa aberta: um redesenho (o histórico, os comentários) não o apaga. */
   let moverPara: string | null = null;
   /** NOD-430: a tarefa pedida pelo código num chat (`nod-tarefa:`): abre quando a conversa do dono dela estiver na tela. */
@@ -480,7 +488,7 @@ export function criarQuadroNaTela(doc: Document, o: { busca?: BuscaDaPilula; men
     timerAviso = null;
     doc.querySelector('#quadro [data-form="conversa-no-quadro"]')?.removeAttribute("aria-busy");
     painel = null; mural = null; erroPessoas = null; leituraMural++;
-    historico = []; histAberto = false; lendo = false; ultimaResposta = null; tarefasPedem = false; leitura++; leituraConversa++; dica = []; editandoMeta = false; edicao = null; importando = null; soltarNaAberta = null; coms.fechar(); trabs.fechar();
+    historico = []; histAberto = false; lendo = false; ultimaResposta = null; tarefasPedem = false; leitura++; leituraConversa++; dica = []; editandoMeta = false; edicao = null; importando = null; soltarNaAberta = null; otimistaCel = naoSalvouCel = respondendo = null; folhaAberta()?.fechar(false); coms.fechar(); trabs.fechar();
     if (timerReler) clearTimeout(timerReler);
     if (timerImportacao) clearTimeout(timerImportacao);
     timerImportacao = null;
@@ -511,6 +519,15 @@ export function criarQuadroNaTela(doc: Document, o: { busca?: BuscaDaPilula; men
       const trabalhos = trabs.html(t.id, { bloqueada: t.status === "bloqueado" || (t.status === "voce" && t.voltarPara !== null && t.voltarPara !== t.status), agenteId: t.agenteId, conversaAtual: chave, hora: dd.hora });
       const resp = dd.agentes?.();
       const soltar = soltarNaAberta?.tarefa === t.id ? { soltar: soltarNaAberta.coluna } : {};
+      if (ehCelular()) {
+        // ADA-17 (ADR-148): a mesma tarefa, os mesmos dados e handlers; só a árvore muda no celular.
+        const trabalho = trabs.vista(t.id, { bloqueada: t.status === "bloqueado" || (t.status === "voce" && t.voltarPara !== null && t.voltarPara !== t.status), agenteId: t.agenteId, conversaAtual: chave });
+        const cd = coms.dados(t.id);
+        return tarefaAbertaCelular({
+          t, q, agente: dd.agente, hora: dd.hora, historico: dd.api()?.historicoTarefa ? histTarefa : undefined, ...(resp ? { responsaveis: resp } : {}), ...(cd ? { coms: cd } : {}), ...(trabalho ? { trabalho } : {}), ...soltar,
+          respondendo: respondendo?.tarefa === t.id ? respondendo : null, otimista: otimistaCel?.tarefa === t.id ? otimistaCel : null, naoSalvou: naoSalvouCel?.tarefa === t.id ? naoSalvouCel.qual : null,
+        });
+      }
       return tarefaAberta({ t, q, agente: dd.agente, comentarios: coms.html(t.id, dd.agente, dd.hora), hora: dd.hora, historico: dd.api()?.historicoTarefa ? histTarefa : undefined, ...(resp ? { responsaveis: resp } : {}), ...(quadros ? { destinos: destinosDaTarefa(quadros, q.id), moverPara } : {}), ...soltar, ...(trabalhos !== undefined ? { trabalhos } : {}) });
     }
     const comPessoas = !!dd.api()?.adicionarPessoa;
@@ -553,6 +570,7 @@ export function criarQuadroNaTela(doc: Document, o: { busca?: BuscaDaPilula; men
     aoVivo = false;
     const v = vista();
     if (!v) return;
+    marcarTopo();
     v.dataset["forma"] = forma;
     v.dataset["pagina"] = paginas[pagina]?.id ?? "";
     if (paginas[pagina]?.id === "canvas" && o.paginas?.canvas && agenteId) {
@@ -1200,7 +1218,110 @@ export function criarQuadroNaTela(doc: Document, o: { busca?: BuscaDaPilula; men
     };
     const foco = ehStatus ? "qd-t-status" : "qd-t-resp";
     const envio = semIniciar ? { ...campos, sem_iniciar: true } : campos;
-    void mudarTarefa((a, de) => a.mudarTarefa?.(de, t.id, envio), comecou).then((ok) => { if (ok) focarSemRolar(doc.getElementById(foco)); });
+    // ADA-17: no celular o chip troca na hora (otimista); se não salvar, diz para onde voltou e oferece Tentar de novo.
+    const cel = ehCelular();
+    let minha: TrocaCel | null = null;
+    if (cel) {
+      // Revisão do PR #699: com outra mudança no ar esta não sai (mudarTarefa a descarta); não pode apagar o chip otimista
+      // da que está no ar nem dizer "Não salvou".
+      if (mexendo) { desenharVista(); return; }
+      minha = { tarefa: t.id, seq: ++seqCel, ...(ehStatus ? { status: campos.status } : { agente: campos.agente }) };
+      otimistaCel = minha;
+      naoSalvouCel = null;
+      desenharVista();
+    }
+    void mudarTarefa((a, de) => a.mudarTarefa?.(de, t.id, envio), comecou).then((ok) => {
+      if (minha) {
+        const fim = fimDaTrocaCel({ otimista: otimistaCel, naoSalvou: naoSalvouCel }, minha, ok, () => ({
+          tarefa: t.id, qual: ehStatus ? "status" : "resp", refazer: () => { const atual = tarefaNoQuadro(q, t.id); if (atual) mudarNaTarefaAberta(atual, campos, confirmado); },
+        }));
+        const mudou = fim.otimista !== otimistaCel || fim.naoSalvou !== naoSalvouCel;
+        otimistaCel = fim.otimista; naoSalvouCel = fim.naoSalvou;
+        if (mudou) desenharVista();
+      }
+      if (ok) focarSemRolar(doc.getElementById(foco));
+    });
+  }
+
+  /** ADA-17: a folha de um chip da tarefa aberta no celular (Status, Responsável, Branch, Ajustes, Mover). */
+  function abrirFolhaDaTarefa(qual: string, tarefaId: string, voltarPara?: string): void {
+    const t = tarefaNoQuadro(q, tarefaId);
+    if (!t || !q || !dd) return;
+    const cs = comColunas(q).colunas;
+    const bots = dd.agentes?.();
+    const destinos = quadros && dd.api()?.moverTarefa ? destinosDaTarefa(quadros, q.id) : [];
+    const volta = voltarPara ?? `#qd-t-${qual}`;
+    const nomeResp = t.status === "voce" ? "Você" : t.agenteId ? (dd.agente(t.agenteId)?.nome ?? t.agenteNome ?? "Outro bot") : "Ninguém";
+    const conteudo: { titulo: string; corpo: string } | null =
+      qual === "status" ? { titulo: "Status", corpo: folhaDeStatus(t, cs) }
+      : qual === "resp" ? (bots ? { titulo: "Responsável", corpo: folhaDoResponsavel(t, bots) } : null)
+      : qual === "branch" ? (t.branch ? { titulo: "Branch", corpo: folhaDoBranch(t.branch) } : null)
+      : qual === "mover" ? (destinos.length ? { titulo: "Mover para…", corpo: folhaDeMover(destinos) } : null)
+      : qual === "ajustes" ? { titulo: "Ajustes", corpo: folhaDeAjustes({ t, q, nomeStatus: colunaDe(t.status)?.nome ?? t.status, nomeResp, podeResp: !!bots, podeMover: destinos.length > 0 }) }
+      : null;
+    if (!conteudo) return;
+    const f = abrirFolha(doc, { id: "qd-folha-tarefa", titulo: conteudo.titulo, corpo: conteudo.corpo, voltarPara: volta, aoClicar: (el, fo) => acaoNaFolha(el, fo, t.id, qual) });
+    if (qual === "resp") {
+      f.el.addEventListener("input", (ev) => {
+        const busca = ev.target instanceof HTMLInputElement && ev.target.hasAttribute("data-folha-busca") ? ev.target.value : null;
+        if (busca === null) return;
+        for (const b of f.el.querySelectorAll<HTMLElement>("[data-busca]")) b.closest("li")!.hidden = !casaNaBusca(b.dataset["busca"] ?? "", busca);
+      });
+    }
+  }
+
+  function acaoNaFolha(el: HTMLElement, f: FolhaAberta, tarefaId: string, qual: string): void {
+    const t = tarefaNoQuadro(q, tarefaId);
+    if (!t || !q) { f.fechar(false); return; }
+    const acao = el.dataset["folhaAcao"] ?? "";
+    const valor = el.dataset["valor"] ?? "";
+    if (acao === "status") {
+      if (valor === t.status) { f.fechar(); return; }
+      if (valor === "cancelado") { f.trocarCorpo(folhaDeCancelar(t.titulo)); return; }
+      f.fechar();
+      mudarNaTarefaAberta(t, { status: valor });
+      return;
+    }
+    if (acao === "status-voltar") { f.trocarCorpo(folhaDeStatus(t, comColunas(q).colunas)); return; }
+    if (acao === "cancelar-ok") { f.fechar(); mudarNaTarefaAberta(t, { status: "cancelado" }); return; }
+    if (acao === "agente") {
+      const novo = valor || null;
+      f.fechar();
+      if (novo !== t.agenteId || t.status === "voce") mudarNaTarefaAberta(t, { agente: novo });
+      return;
+    }
+    if (acao === "copiar") { copiarNaFolha(el, valor, "Branch copiado"); return; }
+    if (acao === "mover") { f.fechar(false); void moverDeQuadro(t.id, valor); return; }
+    if (acao.startsWith("abrir-")) { abrirFolhaDaTarefa(acao.slice(6), t.id, qual === "ajustes" ? "#qd-t-ajustes" : undefined); return; }
+  }
+
+  function copiarNaFolha(el: HTMLElement, texto: string, anuncio: string): void {
+    const cb = doc.defaultView?.navigator?.clipboard;
+    const ok = (): void => { el.textContent = "Copiado"; anunciar(anuncio); };
+    const falhou = (): void => { el.textContent = "Não copiou"; };
+    if (!cb) { falhou(); return; }
+    cb.writeText(texto).then(ok, falhou);
+  }
+
+  /** ADA-17: responder a um comentário (o link do card ou o toque longo): o composer diz a quem e a citação vai no texto (S2). */
+  function responderA(comId: string): void {
+    const cd = aberta ? coms.dados(aberta) : undefined;
+    const c = cd?.lista.find((x) => x.id === comId);
+    if (!c || !aberta || !dd) return;
+    respondendo = { tarefa: aberta, comentario: c.id, nome: autorDoComentario(c, dd.agente).nome.replace(/ · no Linear$/, ""), trecho: trechoDe(c.texto) };
+    desenharVista();
+    focarSemRolar(doc.getElementById(`qd-com-${aberta}`));
+  }
+
+  /** ADA-17: o toque longo (500 ms, sem arrastar) num comentário abre Responder · Copiar texto. É atalho: o Responder também está no card. */
+  function folhaDoComentarioCel(comId: string): void {
+    const cd = aberta ? coms.dados(aberta) : undefined;
+    const c = cd?.lista.find((x) => x.id === comId);
+    if (!c) return;
+    abrirFolha(doc, { id: "qd-folha-comentario", titulo: "Comentário", corpo: folhaDoComentario(), voltarPara: `#c-${CSS.escape(comId)} .qd-com-resp`, aoClicar: (el, f) => {
+      if (el.dataset["folhaAcao"] === "responder") { f.fechar(false); responderA(comId); return; }
+      if (el.dataset["folhaAcao"] === "copiar-com") copiarNaFolha(el, c.texto, "Texto copiado");
+    } });
   }
 
   /** Revisão 7 do PR #623: desiste da confirmação do Status (Esc, clique fora): o select volta à coluna de agora. */
@@ -2458,6 +2579,10 @@ export function criarQuadroNaTela(doc: Document, o: { busca?: BuscaDaPilula; men
       if (act === "abrir-tarefa" && id) { abrirTarefa(id, "card"); return; }
       if (act === "tarefa-mover" || act === "tarefa-mover-para") { aoMoverCard(el, act); return; }
       if (act === "voltar-ao-quadro") { voltarAoQuadro(); return; }
+      if (act === "cel-folha" && id) { abrirFolhaDaTarefa(el.dataset["folha"] ?? "", id); return; }
+      if (act === "cel-tentar") { const n = naoSalvouCel; naoSalvouCel = null; if (n) n.refazer(); else desenharVista(); return; }
+      if (act === "cel-responder") { responderA(el.dataset["com"] ?? ""); return; }
+      if (act === "cel-responder-sair") { const de = aberta; respondendo = null; desenharVista(); focarSemRolar(doc.getElementById(`qd-com-${de ?? ""}`)); return; }
       if (act?.startsWith("trab-") && trabs.aoClicar(act)) return;
       if (act === "mover-quadro" && id) {
         const destino = el.closest(".qd-mover")?.querySelector<HTMLSelectElement>('[data-campo="mover"]')?.value ?? "";
@@ -2808,6 +2933,9 @@ export function criarQuadroNaTela(doc: Document, o: { busca?: BuscaDaPilula; men
       fimDoComentarioDe = aberta;
       fimDoComentarioAte = vq && (rol?.alvo("caixa")?.colado || vq.scrollHeight - vq.clientHeight <= COLADO_PX) ? daPessoaAte : 0;
       const enviado = form.querySelector<HTMLTextAreaElement>("textarea.qd-com-in");
+      // ADA-17 (S2): a resposta leva a citação no próprio texto ("> Ana: trecho"), sem campo novo no comentário.
+      const resp = respondendo?.tarefa === form.dataset["id"] ? respondendo : null;
+      if (resp && enviado?.value.trim() && !coms.ocupado()) { enviado.value = textoDaResposta(resp, enviado.value.trim()); respondendo = null; }
       const chaveCom = enviado?.dataset["rascunho"];
       const textoCom = enviado?.value.trim() ?? "";
       // ADA-4: a falha fica no próprio comentário ("Não saiu · Tentar de novo"), não na faixa. O campo esvazia na hora
@@ -3271,7 +3399,37 @@ export function criarQuadroNaTela(doc: Document, o: { busca?: BuscaDaPilula; men
       if (p) o.paginas?.reconectar(p);
     }
   });
+  /** ADA-17: no celular, o topo encolhido mostra "VER-1 · título" da tarefa aberta (web/celular-base.css). */
+  function marcarTopo(): void {
+    const cab = doc.getElementById("cabecalho");
+    if (!cab) return;
+    const t = ehCelular() && q && dd && (paginas[pagina]?.id ?? TAREFAS.id) === TAREFAS.id ? tarefaNoQuadro(q, aberta) : null;
+    const titulo = t ? `${codigoDaTarefa(t)} · ${t.titulo}` : null;
+    if (titulo) { if (cab.dataset["titulo"] !== titulo) cab.dataset["titulo"] = titulo; }
+    else if (cab.hasAttribute("data-titulo")) delete cab.dataset["titulo"];
+  }
+  // ADA-17: virar o aparelho (ou a janela entrar/sair da consulta) troca a árvore da tarefa aberta.
+  doc.defaultView?.matchMedia?.(CONSULTA_CELULAR).addEventListener?.("change", () => { folhaAberta()?.fechar(false); if (aberta) desenharVista(); else marcarTopo(); });
+  // ADA-17: o toque longo num comentário (500 ms parado) abre Responder · Copiar texto. Arrastar (rolar) mais de 8 px desiste.
+  let toqueLongo: { timer: ReturnType<typeof setTimeout>; x: number; y: number } | null = null;
+  const desistirDoToque = (): void => { if (toqueLongo) clearTimeout(toqueLongo.timer); toqueLongo = null; };
+  doc.addEventListener("pointerdown", (ev) => {
+    desistirDoToque();
+    const c = (ev.target as Element | null)?.closest?.<HTMLElement>("#quadro .qd-tarefa-cel .qd-com[data-com]");
+    if (!c || ev.pointerType === "mouse") return;
+    const comId = c.dataset["com"] ?? "";
+    toqueLongo = { x: ev.clientX, y: ev.clientY, timer: setTimeout(() => {
+      toqueLongo = null;
+      // O clique que vem ao soltar o dedo não pode cair na folha recém-aberta (o fundo a fecharia).
+      engolirCliqueDoToque(doc, setTimeout);
+      folhaDoComentarioCel(comId);
+    }, 500) };
+  });
+  doc.addEventListener("pointermove", (ev) => { if (toqueLongo && Math.hypot(ev.clientX - toqueLongo.x, ev.clientY - toqueLongo.y) > 8) desistirDoToque(); });
+  doc.addEventListener("pointerup", desistirDoToque);
+  doc.addEventListener("pointercancel", desistirDoToque);
   doc.addEventListener("contextmenu", (ev) => {
+    if ((ev.target as Element | null)?.closest?.("#quadro .qd-tarefa-cel .qd-com[data-com]")) { ev.preventDefault(); return; }
     const ic = (ev.target as Element | null)?.closest?.<HTMLElement>("#cabecalho .pg-ic");
     if (!ic) return;
     ev.preventDefault();
