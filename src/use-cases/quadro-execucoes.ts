@@ -15,6 +15,7 @@ import type { CasoDeUso, Deps } from "./tipos.ts";
 import { registrarHistoricoComTrilha } from "./trilha-quadro.ts";
 import { vaiParaQuadroDeOutraPessoa } from "./quadro-pessoas.ts";
 import type { Isolar } from "./turnos-orfaos.ts";
+import { ehUuid } from "./apoio-l7.ts";
 import { enfileirarVolta } from "./me-chame-as.ts";
 import { AVISO_SEM_SAIDA } from "../contracts/quadro-execucoes.ts";
 import { LIMITE_ACIONAMENTOS_HORA } from "../domain/freios-quadro.ts";
@@ -341,7 +342,9 @@ export async function trabalhoDaTarefa(deps: Deps, p: PedidoLote, op: OpTrabalho
 /** Os trabalhos de uma tarefa do quadro do bot da tela. Só lê. */
 export const verTrabalhos: CasoDeUso<{ agenteId: string; tarefaId: string }, ExecucoesDaTarefa> = async (deps, input) => {
   if (!(await experimentoLigado(deps))) throw new ErroDeDominio("nao_permitido", { cause: "experimento quadro desligado" });
-  const q = await deps.repos.quadros.doAgente(input.agenteId);
+  // ADA-14: a tarefa de qualquer quadro deste bot.
+  const t0 = ehUuid(input.tarefaId) ? await deps.repos.quadros.tarefa(input.tarefaId) : null;
+  const q = t0 ? await deps.repos.quadros.doBot(input.agenteId, t0.quadroId) : null;
   const t = q ? (await deps.repos.quadros.tarefas(q.id)).find((x) => x.id === input.tarefaId) : undefined;
   if (!t) throw new ErroDeDominio("nao_encontrado", { cause: "tarefa fora do quadro" });
   return { data: await trabalhosDaTarefa(deps, t) };

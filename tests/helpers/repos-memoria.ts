@@ -3503,7 +3503,17 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
     preferencias: (() => {
       const chave = `${escopo.tenantId}:${escopo.pessoaId}`;
       const atual = (): Preferencias => b.preferencias.get(chave) ?? { modoDev: false, avisosFechados: [], usoDoMac: "equilibrado", maquinaPadraoId: null, ordemIas: null, iasNoLimite: {} };
+      const abertos = new Map<string, string>();
       return {
+        async quadrosNLiberado() {
+          return true;
+        },
+        async quadroAberto(agenteId) {
+          return abertos.get(agenteId) ?? null;
+        },
+        async abrirQuadro(agenteId, quadroId) {
+          abertos.set(agenteId, quadroId);
+        },
         async buscar() {
           return atual();
         },
@@ -3935,10 +3945,32 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       desarquivar: soNoPostgres,
     },
     // NOD-442 (0133): o quadro-agente é do Postgres (tests/integration/quadro*.test.ts); aqui, nenhum quadro.
+    projetos: {
+      listar: async () => [],
+      buscar: async () => null,
+      contarAtivos: async () => 0,
+      criar: soNoPostgres,
+      editar: async () => null,
+      arquivar: async () => null,
+      travar: async () => {},
+    },
     quadros: {
       buscar: async () => null,
       buscarTravado: async () => null,
       doAgente: async () => null,
+      vinculadosAo: async () => [],
+      doBot: async () => null,
+      daTela: async () => null,
+      vinculos: async () => [],
+      vinculosDoBotTravados: async () => [],
+      travarBot: async () => {},
+      vincular: soNoPostgres,
+      desvincular: async () => null,
+      definirPadrao: async () => false,
+      transferirDono: soNoPostgres,
+      doDonoTravados: async () => [],
+      renomear: async () => null,
+      contar: async () => 0,
       doTurno: async () => null,
       tarefaDoTurno: async () => null,
       membrosDoTurno: async () => null,

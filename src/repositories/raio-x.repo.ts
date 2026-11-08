@@ -113,8 +113,15 @@ export function configurarLiberacaoQuadros(l: LiberacaoQuadros): void {
   liberacaoQuadros = l;
 }
 
+/** ADA-14 (ADR-153): a liberação do 2º quadro em diante (NOD_QUADROS_N), na mesma regra da NOD_QUADROS. */
+let liberacaoQuadrosN: LiberacaoQuadros = QUADROS_PARA_TODOS;
+export function configurarLiberacaoQuadrosN(l: LiberacaoQuadros): void {
+  liberacaoQuadrosN = l;
+}
+
 export function preferenciasRepo(conn: Conn, escopo: Escopo) {
   let liberado: Promise<boolean> | null = null;
+  let liberadoN: Promise<boolean> | null = null;
   const quadroLiberado = (): Promise<boolean> => (liberado ??= (async () => {
     const l = liberacaoQuadros;
     if (l.modo !== "admins") return quadroLiberadoPara(l, { id: escopo.pessoaId });
@@ -129,6 +136,28 @@ export function preferenciasRepo(conn: Conn, escopo: Escopo) {
   type Linha = { modo_dev: boolean; avisos_fechados: string[]; uso_do_mac: UsoDoMac; maquina_padrao_id: string | null; ordem_ias: IdHarness[] | null; ias_no_limite: LimitesIa | null; exp_calibracao: boolean; exp_memoria_longa: boolean; exp_whatsapp: boolean; exp_quadro: boolean; quadro_exibir?: Record<string, ExibirDoQuadro> | null };
   const paraPreferencias = (l: Linha | undefined): Preferencias => ({ modoDev: l?.modo_dev ?? false, avisosFechados: l?.avisos_fechados ?? [], usoDoMac: l?.uso_do_mac ?? USO_DO_MAC_PADRAO, maquinaPadraoId: l?.maquina_padrao_id ?? null, ordemIas: l?.ordem_ias ?? null, iasNoLimite: l?.ias_no_limite ?? {}, experimentos: { calibracao: l?.exp_calibracao ?? false, memoriaLonga: l?.exp_memoria_longa ?? false, whatsapp: l?.exp_whatsapp ?? false, quadro: l?.exp_quadro ?? false }, quadroExibir: l?.quadro_exibir ?? {} });
   return {
+    /** ADA-14: a pessoa pode ter o 2º quadro num bot (a flag NOD_QUADROS_N). */
+    quadrosNLiberado(): Promise<boolean> {
+      return (liberadoN ??= (async () => {
+        const l = liberacaoQuadrosN;
+        if (l.modo !== "admins") return quadroLiberadoPara(l, { id: escopo.pessoaId });
+        const [p] = await conn<{ email: string | null }[]>`select email from pessoas where tenant_id = ${escopo.tenantId} and id = ${escopo.pessoaId}`;
+        return quadroLiberadoPara(l, { id: escopo.pessoaId, email: p?.email ?? null });
+      })());
+    },
+    /** ADA-14: o último quadro aberto em cada bot (o app Quadro reabre nele). */
+    async quadroAberto(agenteId: string): Promise<string | null> {
+      const [l] = await conn<{ q: string | null }[]>`
+        select quadro_aberto ->> ${agenteId}::text as q from preferencias where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId}`;
+      return l?.q ?? null;
+    },
+    /** ADA-14: grava o quadro aberto no bot (substitui o daquele bot; os outros ficam). */
+    async abrirQuadro(agenteId: string, quadroId: string): Promise<void> {
+      const valor = jsonb(conn, { [agenteId]: quadroId });
+      await conn`
+        insert into preferencias (tenant_id, owner_id, quadro_aberto) values (${escopo.tenantId}, ${escopo.pessoaId}, ${valor}::jsonb)
+        on conflict (tenant_id, owner_id) do update set quadro_aberto = preferencias.quadro_aberto || ${valor}::jsonb, atualizado_em = clock_timestamp()`;
+    },
     async buscar(): Promise<Preferencias> {
       const [l] = await conn<Linha[]>`
         select ${conn.unsafe(COLUNAS_PREFERENCIAS)} from preferencias where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId}`;

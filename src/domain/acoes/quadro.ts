@@ -16,12 +16,14 @@ const objeto = (properties: Record<string, JsonSchema>, required: readonly strin
 const VIA = { ferramenta: "gerir_quadro" } as const;
 const CONTRATO = "tests/integration/paridade-quadro.test.ts";
 const vivo = { estado: "vivo", via: VIA, contrato: CONTRATO } as const;
+/** ADA-14: o contrato dos N quadros e dos projetos (cada lado num banco idêntico: os projetos são da pessoa toda). */
+const vivoN = { estado: "vivo", via: VIA, contrato: "tests/integration/paridade-quadros-do-bot.test.ts" } as const;
 
 export const ACOES_QUADRO = [
   {
     id: "quadro.criar",
-    titulo: "Criar o quadro de um bot (meta e prazo opcionais)",
-    schema: objeto({ meta: P.meta, prazo: P.prazo }, []),
+    titulo: "Criar o quadro de um bot (meta e prazo opcionais; com nome, outro quadro no mesmo bot, ADA-14)",
+    schema: objeto({ meta: P.meta, prazo: P.prazo, nome: P.nome, projeto: P.projeto }, []),
     risco: "muda",
     cartaoNoChat: false,
     chat: vivo,
@@ -29,8 +31,8 @@ export const ACOES_QUADRO = [
   },
   {
     id: "quadro.editar",
-    titulo: "Mudar a meta ou o prazo do quadro",
-    schema: objeto({ meta: P.meta, prazo: P.prazo }, []),
+    titulo: "Mudar a meta, o prazo, o nome ou o projeto do quadro",
+    schema: objeto({ meta: P.meta, prazo: P.prazo, nome: P.nome, projeto: P.projeto }, []),
     risco: "muda",
     cartaoNoChat: false,
     chat: vivo,
@@ -282,6 +284,17 @@ export const ACOES_QUADRO = [
     chat: vivo,
     casoDeUso: "quadro.recado_trabalho",
   },
+  // ADA-14 (ADR-153): os N quadros do bot e os projetos. Uma op por chamada (sem lote nem Desfazer: o inverso é a op
+  // contrária); a tela e o gerir_quadro passam pelo mesmo aplicarQuadrosDoBot (src/use-cases/quadros-do-bot.ts).
+  { id: "quadro.listar", titulo: "Listar os quadros do bot (ou de todos os bots) e os projetos", schema: objeto({ todos: P.todos }, []), risco: "leitura", cartaoNoChat: false, chat: vivoN, casoDeUso: "quadro.listar", semRotaDePessoa: "só leitura: a tela lê em GET /agentes/:id/quadros (a catraca B só conta as rotas que mudam algo)" },
+  { id: "quadro.abrir", titulo: "Escolher em qual quadro o app Quadro do bot abre", schema: objeto({ quadro: P.quadro }, ["quadro"]), risco: "muda", cartaoNoChat: false, chat: vivoN, casoDeUso: "quadro.abrir" },
+  { id: "quadro.definir_padrao", titulo: "Definir o quadro padrão de um bot", schema: objeto({ quadro: P.quadro, bot: P.bot }, ["quadro"]), risco: "muda", cartaoNoChat: false, chat: vivoN, casoDeUso: "quadro.definir_padrao" },
+  { id: "quadro.vincular_bot", titulo: "Pôr um quadro também em outro bot (quadro compartilhado)", schema: objeto({ quadro: P.quadro, bot: P.bot }, ["quadro", "bot"]), risco: "muda", cartaoNoChat: false, chat: vivoN, casoDeUso: "quadro.vincular_bot" },
+  { id: "quadro.desvincular_bot", titulo: "Tirar um bot de um quadro compartilhado (o próximo vira dono)", schema: objeto({ quadro: P.quadro, bot: P.bot }, ["quadro", "bot"]), risco: "muda", cartaoNoChat: false, chat: vivoN, casoDeUso: "quadro.desvincular_bot" },
+  { id: "quadro.criar_projeto", titulo: "Criar um projeto (agrupa quadros)", schema: objeto({ nome: P.nome, descricao: P.descricao, meta: P.meta, prazo: P.prazo }, ["nome"]), risco: "muda", cartaoNoChat: false, chat: vivoN, casoDeUso: "quadro.criar_projeto" },
+  { id: "quadro.editar_projeto", titulo: "Mudar o nome, a descrição, a meta ou o prazo de um projeto", schema: objeto({ projeto: P.projeto, nome: P.nome, descricao: P.descricao, meta: P.meta, prazo: P.prazo }, ["projeto"]), risco: "muda", cartaoNoChat: false, chat: vivoN, casoDeUso: "quadro.editar_projeto" },
+  { id: "quadro.arquivar_projeto", titulo: "Arquivar um projeto (os quadros ficam, soltos)", schema: objeto({ projeto: P.projeto }, ["projeto"]), risco: "muda", cartaoNoChat: false, chat: vivoN, casoDeUso: "quadro.arquivar_projeto" },
+  { id: "quadro.restaurar_projeto", titulo: "Restaurar um projeto arquivado", schema: objeto({ projeto: P.projeto }, ["projeto"]), risco: "muda", cartaoNoChat: false, chat: vivoN, casoDeUso: "quadro.restaurar_projeto" },
   // ADA-232 (ADR-155): "Acordar agora" no detalhe da tarefa — a volta marcada (hora ou CI) dispara já, na mesma cadeia.
   {
     id: "quadro.acordar_trabalho",

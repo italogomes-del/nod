@@ -2,7 +2,7 @@
 
 <!-- Gerado por `npm run paridade` a partir de src/domain/acoes/ (NOD-391, ADR-135). Não edite à mão: a catraca (tests/conformidade/paridade.test.ts) compara. -->
 
-Ações de pessoa que mudam algo: **183**, mais 2 só de leitura. No chat: **55 vivas**, 3 parciais, 93 faltando e 34 que nunca vão para o chat. Piso de vivas: 55.
+Ações de pessoa que mudam algo: **191**, mais 3 só de leitura. No chat: **64 vivas**, 3 parciais, 93 faltando e 34 que nunca vão para o chat. Piso de vivas: 64.
 
 Estados: **vivo** = o chat faz pelo mesmo executor da tela, com teste de contrato; **parcial** = o chat faz, mas diverge ou falta parâmetro; **falta** = a onda dona ainda vai ligar; **nunca** = exceção escrita.
 
@@ -272,8 +272,8 @@ Estados: **vivo** = o chat faz pelo mesmo executor da tela, com teste de contrat
 
 | Ação | O que faz | Risco | No chat | Rotas |
 | --- | --- | --- | --- | --- |
-| `quadro.criar` | Criar o quadro de um bot (meta e prazo opcionais) | muda | vivo (`gerir_quadro`) | `POST ^\/agentes\/(?<id>[^/]+)\/quadro$` |
-| `quadro.editar` | Mudar a meta ou o prazo do quadro | muda | vivo (`gerir_quadro`) | `PATCH ^\/agentes\/(?<id>[^/]+)\/quadro$` |
+| `quadro.criar` | Criar o quadro de um bot (meta e prazo opcionais; com nome, outro quadro no mesmo bot, ADA-14) | muda | vivo (`gerir_quadro`) | `POST ^\/agentes\/(?<id>[^/]+)\/quadro$` |
+| `quadro.editar` | Mudar a meta, o prazo, o nome ou o projeto do quadro | muda | vivo (`gerir_quadro`) | `PATCH ^\/agentes\/(?<id>[^/]+)\/quadro$` |
 | `quadro.criar_tarefa` | Criar uma tarefa no quadro | muda | vivo (`gerir_quadro`) | `POST ^\/agentes\/(?<id>[^/]+)\/quadro\/tarefas$`<br>`POST ^\/quadros\/(?<qid>[^/]+)\/tarefas$` |
 | `quadro.importar_linear` | Trazer itens do Linear para o quadro | muda | vivo (`gerir_quadro`) | `POST ^\/agentes\/(?<id>[^/]+)\/quadro\/linear$` |
 | `quadro.importar_time_linear` | Trazer um time do Linear para o quadro (com prévia) | muda | vivo (`gerir_quadro`) | `POST ^\/agentes\/(?<id>[^/]+)\/quadro\/importacao$` |
@@ -299,6 +299,15 @@ Estados: **vivo** = o chat faz pelo mesmo executor da tela, com teste de contrat
 | `quadro.repetir_trabalho` | Repetir o trabalho de uma tarefa (abre um novo; a Bloqueada volta para onde estava) | muda | vivo (`gerir_quadro`) | `POST ^\/agentes\/(?<id>[^/]+)\/quadro\/tarefas\/(?<tid>[^/]+)\/trabalhos\/repetir$` |
 | `quadro.cancelar_trabalho` | Cancelar o trabalho em andamento de uma tarefa (a tarefa fica onde está) | muda | vivo (`gerir_quadro`) | `POST ^\/agentes\/(?<id>[^/]+)\/quadro\/tarefas\/(?<tid>[^/]+)\/trabalhos\/cancelar$` |
 | `quadro.recado_trabalho` | Mandar um recado ao trabalho em andamento de uma tarefa | muda | vivo (`gerir_quadro`) | `POST ^\/agentes\/(?<id>[^/]+)\/quadro\/tarefas\/(?<tid>[^/]+)\/trabalhos\/recado$` |
+| `quadro.listar` | Listar os quadros do bot (ou de todos os bots) e os projetos | leitura | vivo (`gerir_quadro`) | só leitura: a tela lê em GET /agentes/:id/quadros (a catraca B só conta as rotas que mudam algo) |
+| `quadro.abrir` | Escolher em qual quadro o app Quadro do bot abre | muda | vivo (`gerir_quadro`) | `PUT ^\/agentes\/(?<id>[^/]+)\/quadros\/aberto$` |
+| `quadro.definir_padrao` | Definir o quadro padrão de um bot | muda | vivo (`gerir_quadro`) | `PUT ^\/agentes\/(?<id>[^/]+)\/quadros\/(?<qid>[^/]+)\/padrao$` |
+| `quadro.vincular_bot` | Pôr um quadro também em outro bot (quadro compartilhado) | muda | vivo (`gerir_quadro`) | `POST ^\/quadros\/(?<qid>[^/]+)\/bots$` |
+| `quadro.desvincular_bot` | Tirar um bot de um quadro compartilhado (o próximo vira dono) | muda | vivo (`gerir_quadro`) | `DELETE ^\/quadros\/(?<qid>[^/]+)\/bots\/(?<bot>[^/]+)$` |
+| `quadro.criar_projeto` | Criar um projeto (agrupa quadros) | muda | vivo (`gerir_quadro`) | `POST ^\/projetos$` |
+| `quadro.editar_projeto` | Mudar o nome, a descrição, a meta ou o prazo de um projeto | muda | vivo (`gerir_quadro`) | `PATCH ^\/projetos\/(?<pid>[^/]+)$` |
+| `quadro.arquivar_projeto` | Arquivar um projeto (os quadros ficam, soltos) | muda | vivo (`gerir_quadro`) | `POST ^\/projetos\/(?<pid>[^/]+)\/arquivar$` |
+| `quadro.restaurar_projeto` | Restaurar um projeto arquivado | muda | vivo (`gerir_quadro`) | `POST ^\/projetos\/(?<pid>[^/]+)\/restaurar$` |
 | `quadro.acordar_trabalho` | Acordar agora o trabalho de uma tarefa que espera uma volta (hora marcada ou CI) | muda | vivo (`gerir_quadro`) | `POST ^\/agentes\/(?<id>[^/]+)\/quadro\/tarefas\/(?<tid>[^/]+)\/trabalhos\/acordar$` |
 
 ## paginas

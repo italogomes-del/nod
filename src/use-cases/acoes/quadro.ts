@@ -11,6 +11,9 @@ import { type FalhaDaImportacao, iniciarImportacao, prepararImportacao } from ".
 import { trabalhoDaTarefa } from "../quadro-execucoes.ts";
 import { aplicarLoteQuadro, type FalhaQuadro, type RecusaDoMover, type ResultadoLote } from "../quadro.ts";
 import type { CasoDeUso } from "../tipos.ts";
+import type { OpQuadrosDoBot } from "../../contracts/quadros-do-bot.ts";
+import { lerOpQuadrosDoBot } from "../../domain/quadros-do-bot.ts";
+import { aplicarQuadrosDoBot, type ResultadoQuadrosDoBot } from "../quadros-do-bot.ts";
 
 /**
  * Os executores únicos do quadro (definido em 2026-10-31, NOD-442, ADR-135). Cada id é UM lote de uma ação só, pelo
@@ -22,7 +25,7 @@ import type { CasoDeUso } from "../tipos.ts";
  * O bot da aba Quadro (o anfitrião) e onde rodam os turnos que o lote começar. NOD-443: quem participa do quadro de outra
  * pessoa chega pelo id do quadro (`quadroId`; o `quadro` da entrada é o destino do mover_tarefa), e o lote entra pela porta da dona.
  */
-type Base = { anfitriaoId?: string; quadroId?: string; executor: Executor };
+type Base = { anfitriaoId?: string; quadroId?: string; /** ADA-14: o `?quadro=` da tela (um dos quadros do anfitrião). */ quadroDoBot?: string; executor: Executor };
 export type SaidaQuadro = Extract<ResultadoLote, { ok: true }>;
 
 const CODIGO: Record<FalhaQuadro, CodigoErro> = {
@@ -54,10 +57,10 @@ export class ErroDoMover extends ErroDeDominio {
  */
 function umaAcao<I extends object>(tipo: OpQuadro["tipo"]): CasoDeUso<Base & I, SaidaQuadro> {
   return async (deps, input) => {
-    const { anfitriaoId, quadroId, executor, ...resto } = input;
+    const { anfitriaoId, quadroId, quadroDoBot, executor, ...resto } = input;
     const op = lerOp({ ...resto, tipo });
     if ("erro" in op) throw new ErroDeDominio("entrada_invalida", { cause: op.erro });
-    const pedido = { autor: { tipo: "pessoa" } as const, ...(anfitriaoId ? { anfitriaoId } : {}), ...(quadroId ? { quadro: quadroId } : {}), executor, ops: [op] };
+    const pedido = { autor: { tipo: "pessoa" } as const, ...(anfitriaoId ? { anfitriaoId } : {}), ...(quadroId ? { quadro: quadroId } : {}), ...(quadroDoBot ? { quadroDoBot } : {}), executor, ops: [op] };
     // NOD-443: o comentar (na tarefa ou no mural) passa pelo aplicarLoteQuadro, que o despacha sem lote nem Desfazer.
     // NOD-418: Repetir, Cancelar e recado não são lote: o trabalho da tarefa.
     const r = ehOpDeTrabalho(op) ? await trabalhoDaTarefa(deps, pedido, op) : await aplicarLoteQuadro(deps, pedido);
@@ -103,7 +106,7 @@ const importarTimeLinear: CasoDeUso<Base & { anfitriaoId: string; time: string; 
   const op = lerOp({ tipo: "importar_time_linear", time: input.time, ...(input.filtro ? { filtro: input.filtro } : {}) });
   if ("erro" in op || op.tipo !== "importar_time_linear") throw new ErroDeDominio("entrada_invalida", { cause: "erro" in op ? op.erro : "op" });
   // `issues` = a busca leve que a rota fez fora da transação (revisão do PR #630); sem ela, busca aqui.
-  const prep = await prepararImportacao(deps, { autor: { tipo: "pessoa" }, anfitriaoId: input.anfitriaoId, time: op.time, filtro: op.filtro ?? null, ...(input.issues ? { issues: input.issues } : {}) });
+  const prep = await prepararImportacao(deps, { autor: { tipo: "pessoa" }, anfitriaoId: input.anfitriaoId, quadroDoBot: input.quadroDoBot ?? null, time: op.time, filtro: op.filtro ?? null, ...(input.issues ? { issues: input.issues } : {}) });
   if (!prep.ok) throw erroDaImportacao(prep);
   const r = await iniciarImportacao(deps, { quadro: prep.quadro, time: prep.time, filtro: prep.filtro, total: prep.previa.total, conversaId: null });
   if (!r.data.ok) throw erroDaImportacao(r.data);
@@ -119,16 +122,34 @@ const importarTimeLinear: CasoDeUso<Base & { anfitriaoId: string; time: string; 
 const assumirQuadro: CasoDeUso<Base & { anfitriaoId: string; desfazer?: boolean; rotinas?: unknown }, ResultadoAssumir> = async (deps, input) => {
   const rotinas = Array.isArray(input.rotinas) ? input.rotinas.filter((x): x is string => typeof x === "string").slice(0, 500) : undefined;
   if (input.desfazer !== undefined && typeof input.desfazer !== "boolean") throw new ErroDeDominio("entrada_invalida", { cause: "desfazer" });
-  const r = await assumirPelaTela(deps, { anfitriaoId: input.anfitriaoId, ...(input.desfazer ? { desfazer: true } : {}), ...(rotinas ? { rotinas } : {}) });
+  const r = await assumirPelaTela(deps, { anfitriaoId: input.anfitriaoId, quadroDoBot: input.quadroDoBot ?? null, ...(input.desfazer ? { desfazer: true } : {}), ...(rotinas ? { rotinas } : {}) });
   if (!r.data.ok) throw new ErroDeDominio(CODIGO[r.data.erro], { cause: r.data.detalhe });
   return { data: r.data, events: r.events };
 };
 
+/**
+ * ADA-14 (ADR-153): uma op dos N quadros pela tela. O corpo passa pelo mesmo lerOpQuadrosDoBot do gerir_quadro e chega
+ * ao mesmo aplicarQuadrosDoBot, com a pessoa de autor (a tela é a pessoa: sem o corte do turno limpo).
+ */
+function umaOpDosQuadros<I extends object>(tipo: OpQuadrosDoBot["tipo"]): CasoDeUso<{ anfitriaoId?: string } & I, Extract<ResultadoQuadrosDoBot, { ok: true }>> {
+  return async (deps, input) => {
+    const { anfitriaoId, ...resto } = input as { anfitriaoId?: string } & Record<string, unknown>;
+    delete resto.executor;
+    delete resto.quadroId;
+    delete resto.quadroDoBot;
+    const op = lerOpQuadrosDoBot({ ...resto, tipo });
+    if ("erro" in op) throw new ErroDeDominio("entrada_invalida", { cause: op.erro });
+    const r = await aplicarQuadrosDoBot(deps, { autor: { tipo: "pessoa" }, ...(anfitriaoId ? { anfitriaoId } : {}), op });
+    if (!r.data.ok) throw new ErroDeDominio(CODIGO[r.data.erro], { cause: r.data.detalhe });
+    return { data: r.data, ...(r.events ? { events: r.events } : {}) };
+  };
+}
+
 type CamposTarefa = { titulo?: string; descricao?: string; status?: string; agente?: string | null };
 
 export const EXECUTORES_QUADRO = {
-  "quadro.criar": umaAcao<{ meta?: string | null; prazo?: string | null }>("criar_quadro"),
-  "quadro.editar": umaAcao<{ meta?: string | null; prazo?: string | null }>("editar_quadro"),
+  "quadro.criar": umaAcao<{ meta?: string | null; prazo?: string | null; nome?: string; projeto?: string | null }>("criar_quadro"),
+  "quadro.editar": umaAcao<{ meta?: string | null; prazo?: string | null; nome?: string | null; projeto?: string | null }>("editar_quadro"),
   "quadro.criar_tarefa": umaAcao<CamposTarefa & { titulo: string }>("criar_tarefa"),
   "quadro.importar_linear": umaAcao<{ itens: ItemLinear[] }>("importar_linear"),
   "quadro.importar_time_linear": importarTimeLinear,
@@ -155,5 +176,14 @@ export const EXECUTORES_QUADRO = {
   "quadro.repetir_trabalho": umaAcao<{ tarefa: string }>("repetir_trabalho"),
   "quadro.cancelar_trabalho": umaAcao<{ tarefa: string }>("cancelar_trabalho"),
   "quadro.recado_trabalho": umaAcao<{ tarefa: string; texto: string }>("recado"),
+  "quadro.listar": umaOpDosQuadros<{ todos?: boolean }>("listar_quadros"),
+  "quadro.abrir": umaOpDosQuadros<{ quadro: string }>("abrir_quadro"),
+  "quadro.definir_padrao": umaOpDosQuadros<{ quadro: string; bot?: string }>("definir_padrao"),
+  "quadro.vincular_bot": umaOpDosQuadros<{ quadro: string; bot: string }>("vincular_bot"),
+  "quadro.desvincular_bot": umaOpDosQuadros<{ quadro: string; bot: string }>("desvincular_bot"),
+  "quadro.criar_projeto": umaOpDosQuadros<{ nome: string; descricao?: string; meta?: string | null; prazo?: string | null }>("criar_projeto"),
+  "quadro.editar_projeto": umaOpDosQuadros<{ projeto: string; nome?: string; descricao?: string; meta?: string | null; prazo?: string | null }>("editar_projeto"),
+  "quadro.arquivar_projeto": umaOpDosQuadros<{ projeto: string }>("arquivar_projeto"),
+  "quadro.restaurar_projeto": umaOpDosQuadros<{ projeto: string }>("restaurar_projeto"),
   "quadro.acordar_trabalho": umaAcao<{ tarefa: string }>("acordar_trabalho"),
 } as const satisfies Partial<Record<IdAcao, CasoDeUso<never, unknown>>>;

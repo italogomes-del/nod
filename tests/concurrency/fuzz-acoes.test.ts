@@ -263,6 +263,17 @@ for (const [ordem, config] of CONFIGURACOES.entries()) {
           }),
         );
       const [meuCanvas, canvasDela] = [await canvasDe(sessao, meu), await canvasDe(outra, dela)];
+      // ADA-14 (ADR-153): o quadro do fuzz com um segundo bot vinculado e um projeto, para `quadro.definir_padrao`
+      // (`/agentes/:id/quadros/:qid`), `quadro.desvincular_bot` (`/quadros/:qid/bots/:bot`, sem ser o último bot) e
+      // `quadro.arquivar_projeto`/`restaurar_projeto` (`/projetos/:pid`) passarem da busca.
+      const quadrosDoMeu = await srv.json<{ quadros?: { quadros?: { id: string }[] } }>("GET", `agentes/${meu.agente.id}/quadros`);
+      const quadroDoFuzz = quadrosDoMeu.quadros?.quadros?.[0]?.id;
+      if (!quadroDoFuzz) throw new Error(`o quadro do fuzz não veio na lista: ${JSON.stringify(quadrosDoMeu)}`);
+      const segundo = await srv.json<Criado>("POST", "agentes", { dono: "pessoa", nome: "Segundo do fuzz", descricao: "Divide o quadro do fuzz." });
+      await srv.json("POST", `quadros/${quadroDoFuzz}/bots`, { bot: segundo.agente.id });
+      const comProjeto = await srv.json<{ projeto?: { id: string }; quadros?: { projetos?: { id: string; nome: string }[] } }>("POST", "projetos", { nome: "Projeto do fuzz" });
+      const projetoDoFuzz = comProjeto.projeto?.id ?? comProjeto.quadros?.projetos?.find((p) => p.nome === "Projeto do fuzz")?.id;
+      if (!projetoDoFuzz) throw new Error(`o projeto do fuzz não foi criado: ${JSON.stringify(comProjeto)}`);
       // ADA-241 (CI do PR #706, semente 2570060255): um app conectado e um lote de acessos no bot da pessoa, para o
       // `acessos.desfazer_lote` (`/acessos/lotes/:id/desfazer`) passar da busca; sem o lote, o id sorteado só dava 404.
       const conectorDoFuzz = await conectorDe(sessao, `fuzz-${config.nome.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`);
@@ -293,6 +304,9 @@ for (const [ordem, config] of CONFIGURACOES.entries()) {
             canvas: { daPessoa: [meuCanvas.canvas], deOutraPessoa: [canvasDela.canvas] },
             comentarios: { daPessoa: [meuCanvas.comentario], deOutraPessoa: [canvasDela.comentario] },
             acessos: { daPessoa: [meu.agente.id], deOutraPessoa: [dela.agente.id] },
+            quadros: { daPessoa: [quadroDoFuzz], deOutraPessoa: [] },
+            bots: { daPessoa: [segundo.agente.id, meu.agente.id], deOutraPessoa: [dela.agente.id] },
+            projetos: { daPessoa: [projetoDoFuzz], deOutraPessoa: [] },
             lotes: { daPessoa: [loteDoFuzz], deOutraPessoa: [] },
             conectores: { daPessoa: [conectorDoFuzz.id], deOutraPessoa: [] },
           },
@@ -311,6 +325,35 @@ for (const [ordem, config] of CONFIGURACOES.entries()) {
           const n = (vistos.get(c.acao) ?? 0) + 1;
           vistos.set(c.acao, n);
           if (c.acao === "paginas.ordenar" && n > 10) continue;
+          // ADA-14: `quadro.definir_padrao` também não lê o corpo; fica com um caso por par (bot, quadro) que importa: o
+          // dono, o 2º bot vinculado, o bot da outra pessoa e um id quebrado.
+          if (c.acao === "quadro.definir_padrao") {
+            if (n > 1) continue;
+            const pares: [string, string][] = [[meu.agente.id, quadroDoFuzz], [segundo.agente.id, quadroDoFuzz], [dela.agente.id, quadroDoFuzz], [meu.agente.id, "nao-e-uuid"]];
+            for (const [b, q] of pares) enxuto.push({ ...c, caminho: `/agentes/${b}/quadros/${encodeURIComponent(q)}/padrao` });
+            continue;
+          }
+          // ADA-14: `quadro.desvincular_bot` também não lê o corpo, e o sorteio de (quadro, bot) podia nunca juntar o quadro
+          // real com o 2º bot (a CI do #697 caiu com a semente 945627893). Um caso por par que importa: o bot da outra
+          // pessoa, um quadro quebrado, o 2º bot (sai de verdade) e, por último, o dono, que aí é o último bot e fica (com o
+          // dono antes, ele saía, o quadro passava ao 2º bot e o `quadro.remover` só via 404: a semente 1882859186).
+          if (c.acao === "quadro.desvincular_bot") {
+            if (n > 1) continue;
+            const pares: [string, string][] = [[quadroDoFuzz, dela.agente.id], ["00000000-0000-4000-8000-000000000000", segundo.agente.id], [quadroDoFuzz, segundo.agente.id], [quadroDoFuzz, meu.agente.id]];
+            for (const [q, b] of pares) enxuto.push({ ...c, caminho: `/quadros/${q}/bots/${b}`, entrada: { rotulo: "base plausível", corpo: null } });
+            continue;
+          }
+          // ADA-14: as outras ações novas com o quadro ou o projeto na rota levam, além do sorteio, um caso válido com o id
+          // real ("base plausível": o enxugar das ações do quadro sempre o mantém). Sem ele, o sorteio de ids podia nunca
+          // acertar o quadro real (a CI do #697 caiu no `quadro.vincular_bot` com a semente 3626997374).
+          const validoDaAda14: Record<string, { caminho: string; corpo: unknown }> = {
+            "quadro.vincular_bot": { caminho: `/quadros/${quadroDoFuzz}/bots`, corpo: { bot: segundo.agente.id } },
+            "quadro.editar_projeto": { caminho: `/projetos/${projetoDoFuzz}`, corpo: { nome: "Projeto do fuzz" } },
+            "quadro.arquivar_projeto": { caminho: `/projetos/${projetoDoFuzz}/arquivar`, corpo: null },
+            "quadro.restaurar_projeto": { caminho: `/projetos/${projetoDoFuzz}/restaurar`, corpo: null },
+          };
+          const valido = validoDaAda14[c.acao];
+          if (valido && n === 1) enxuto.push({ ...c, caminho: valido.caminho, entrada: { rotulo: "base plausível", corpo: valido.corpo === null ? null : JSON.stringify(valido.corpo) } });
           if (c.acao === "paginas.remover_app" || c.acao === "paginas.restaurar_app") {
             if (n > 1) continue;
             const fim = c.acao === "paginas.restaurar_app" ? "/restaurar" : "";

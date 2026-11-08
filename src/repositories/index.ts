@@ -72,6 +72,7 @@ import { leiturasRepo } from "./leituras.repo.ts";
 import { ligacoesRepo } from "./ligacoes.repo.ts";
 import { liberacoesDispensadasRepo } from "./liberacoes-dispensadas.repo.ts";
 import { nativasIdempotenciaRepo } from "./nativas-idempotencia.repo.ts";
+import { projetosRepo } from "./projetos.repo.ts";
 
 /** Os 24 repositórios sobre a MESMA conexão/transação e o MESMO escopo (Práticas §1). */
 export function criarRepos(conn: Conn, escopo: Escopo): Repos {
@@ -86,6 +87,7 @@ export function criarRepos(conn: Conn, escopo: Escopo): Repos {
     memoriasDiario: memoriasDiarioRepo(conn, escopo),
     versoesPerfil: versoesPerfilRepo(conn, escopo),
     quadros: quadrosRepo(conn, escopo),
+    projetos: projetosRepo(conn, escopo),
     appsDoBot: appsDoBotRepo(conn, escopo),
     canvas: canvasRepo(conn, escopo),
     quadroComentarios: quadroComentariosRepo(conn, escopo),

@@ -5,6 +5,7 @@ import type { PayloadPropostaQuadroExclusao } from "../contracts/quadro-exclusao
 import { colunasDe } from "../domain/colunas.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { chaveDeBusca } from "../domain/quadro.ts";
+import { tituloDaExclusaoDoQuadro } from "../domain/quadros-do-bot.ts";
 import { log } from "../obs/log.ts";
 import { autoriaPessoa, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
 import { confirmacaoPeloModo, fecharDecisaoDaProposta, semCard, type PorRegra } from "./confirmar-pelo-modo.ts";
@@ -74,13 +75,13 @@ export async function proporExclusaoDoQuadro(deps: Deps, p: PedidoDeExclusao): P
   }
   const substituidos = abertos.length ? await fecharExclusoesPendentes(deps, achado.id, undefined, REGRA_EXCLUSAO_SUBSTITUIDA) : [];
   const payload: PayloadPropostaQuadroExclusao = {
-    kind: "quadro_exclusao", quadroId: achado.id, anfitriaoId: anfitriao.id, anfitriaoNome: anfitriao.nome,
+    kind: "quadro_exclusao", quadroId: achado.id, anfitriaoId: anfitriao.id, anfitriaoNome: anfitriao.nome, quadroNome: quadro.nome,
     tarefas, colunas: colunasDe(quadro).length, temMeta: quadro.meta !== null, revisao, turnoId: p.turnoId, pedidoPor: deps.escopo.pessoaId,
   };
   const proposta = await deps.repos.propostas.criar({ conversaId: p.conversaId, agenteId: p.agenteId, payload });
   if (!proposta) throw new ErroDeDominio("estado_invalido", { cause: "proposta não criada" });
   const agora = deps.agora();
-  const frase = `Excluir o quadro do ${anfitriao.nome}: ${tarefas} ${tarefas === 1 ? "tarefa" : "tarefas"}, ${payload.colunas} colunas${payload.temMeta ? " e a meta" : ""}`;
+  const frase = `${tituloDaExclusaoDoQuadro(payload)}: ${tarefas} ${tarefas === 1 ? "tarefa" : "tarefas"}, ${payload.colunas} colunas${payload.temMeta ? " e a meta" : ""}`;
   const decisao = await deps.repos.decisoes.criar({ id: proposta.id, tipo: "quadro_exclusao", agenteId: p.agenteId, conversaId: p.conversaId, turnoId: p.turnoId, prazoDecisaoEm: agora + PRAZO_DECISAO_PADRAO_MS, frase: frase.slice(0, 500) });
   const autoria = autoriaDoAgente(deps.escopo, p.agenteId);
   const events: RuntimeEvent[] = [...substituidos, evento(deps.escopo, { kind: "proposta_criada", autoria, agora, conversaId: p.conversaId, turnoId: p.turnoId, dados: { proposta_id: proposta.id, kind: "quadro_exclusao" } })];

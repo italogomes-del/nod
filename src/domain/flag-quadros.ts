@@ -24,3 +24,11 @@ export function quadroLiberadoPara(l: LiberacaoQuadros, pessoa: { id: string; em
   const email = pessoa.email?.trim().toLowerCase();
   return admins.includes(pessoa.id.toLowerCase()) || (!!email && admins.includes(email));
 }
+
+/**
+ * ADA-14 (ADR-153 §7): `NOD_QUADROS_N` libera o 2º quadro de um bot (e o vínculo a outro bot). Mesmos valores e o mesmo
+ * padrão da NOD_QUADROS (admins em produção, todos fora dela); desligado, cada bot segue com um quadro e tudo lê igual.
+ */
+export function lerLiberacaoQuadrosN(env: { NOD_QUADROS_N?: string; NOD_ADMINS?: string; NODE_ENV?: string }): LiberacaoQuadros {
+  return lerLiberacaoQuadros({ ...(env.NOD_QUADROS_N !== undefined ? { NOD_QUADROS: env.NOD_QUADROS_N } : {}), ...(env.NOD_ADMINS !== undefined ? { NOD_ADMINS: env.NOD_ADMINS } : {}), ...(env.NODE_ENV !== undefined ? { NODE_ENV: env.NODE_ENV } : {}) });
+}

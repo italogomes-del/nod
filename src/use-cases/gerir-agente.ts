@@ -2,6 +2,7 @@ import type { Agente } from "../contracts/agente.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { TETO_SECAO_BOT } from "../contracts/ferramentas-criar-bots.ts";
 import { ehNod } from "../domain/nod.ts";
+import { proximoDono } from "../domain/quadros-do-bot.ts";
 import type { RuntimeEvent } from "../contracts/evento.ts";
 import type { Trabalho } from "../contracts/trabalho.ts";
 import { delegacaoDoTurno } from "./apoio-l7.ts";
@@ -44,6 +45,7 @@ export const gerirAgente: CasoDeUso<{ agenteId: string; acao: "organizar" | "exc
     : input.acao === "restaurar" ? await deps.repos.agentes.restaurar(atual.id)
     : input.secao !== undefined ? await deps.repos.agentes.organizar(atual.id, { secao: input.secao.trim() })
     : atual;
+  if (input.acao === "excluir" && agente) await passarODonoDosQuadros(deps, atual.id);
   if (input.acao === "organizar" && agente && input.fixado !== undefined && input.fixado !== agente.fixado) agente = await deps.repos.agentes.fixar(atual.id, input.fixado);
   if (input.acao === "organizar" && agente && input.ordem !== undefined) {
     await deps.repos.agentes.ordenar(input.ordem);
@@ -53,6 +55,20 @@ export const gerirAgente: CasoDeUso<{ agenteId: string; acao: "organizar" | "exc
   const avisos = cortados && input.acao === "excluir" ? await avisarDoExcluir(deps, cortados) : [];
   return { data: { agente }, events: [...avisos, ...pendentes.map((t) => evento(deps.escopo, { kind: "turno_interrompido", autoria: autoriaPessoa(deps.escopo), agora, conversaId: t.conversaId, turnoId: t.id, dados: { motivo: "parado_pela_pessoa" } })), evento(deps.escopo, { kind: "agente_atualizado", conversaId: conversa?.id ?? null, autoria: autoriaPessoa(deps.escopo), agora, dados: { agente_id: agente.id, acao: input.acao } })] };
 };
+
+/**
+ * ADA-14 (ADR-153 §6): excluir o bot dono passa cada quadro compartilhado ao próximo vínculo vivo (pela posição). Sem
+ * isso o quadro some da lista (que junta pelo agente_id vivo) e do outro bot. O quadro só dele segue dele (volta com o
+ * restaurar). Ordem das travas: a do bot, depois a linha do quadro (a mesma do lote e do desvincular).
+ */
+async function passarODonoDosQuadros(deps: Deps, agenteId: string): Promise<void> {
+  const repo = deps.repos.quadros;
+  await repo.travarBot(agenteId);
+  for (const quadroId of await repo.doDonoTravados(agenteId)) {
+    const dono = proximoDono(await repo.vinculos(quadroId), agenteId);
+    if (dono) await repo.transferirDono(quadroId, dono.agenteId);
+  }
+}
 
 /** A ordem traz o próprio bot, sem repetir, e só ids em texto: o formato (uuid) o Postgres confere (22P02 → 400). */
 function ordemValida(ordem: unknown, agenteId: string): ordem is string[] {

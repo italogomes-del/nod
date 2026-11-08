@@ -17,6 +17,7 @@ import { resumoDoPr } from "../domain/prs-da-tarefa.ts";
 import type { FotoLote } from "../repositories/quadros.repo.ts";
 import type { EstadoExecucao, ExecucoesDaTarefa, TrabalhoParaBot } from "../contracts/quadro-execucoes.ts";
 import { autoriaAgente, autoriaPessoa, ehUuid, evento, PRAZO_DECISAO_MS } from "./apoio-l7.ts";
+import { quadroDoCriar, quadroPeloNome, renomeDoLote } from "./quadros-do-bot.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { podeRepassar, proximaProfundidade } from "../domain/profundidade.ts";
 import type { Profundidade } from "../contracts/turno.ts";
@@ -49,6 +50,8 @@ export type PedidoLote = {
   quadro?: string;
   /** O bot da tela (a rota é /agentes/:id/quadro): o anfitrião quando não veio `quadro`. */
   anfitriaoId?: string;
+  /** ADA-14 (ADR-153): qual dos quadros do anfitrião a tela abriu (`?quadro=`); sem ele, o padrão do bot. */
+  quadroDoBot?: string;
   ops: readonly OpQuadro[];
   /** Onde rodam os turnos que o lote começa (o do turno de quem chamou; a rota, o do servidor). */
   executor: Executor;
@@ -220,6 +223,12 @@ export async function acharQuadro(deps: Deps, p: PedidoLote, agentes: readonly A
   if (p.quadro !== undefined && p.quadro.trim() !== "") {
     const ref = p.quadro.trim().replace(/^@/, "");
     if (ehUuid(ref)) return (await repo.buscar(ref)) ?? (await repo.doAgente(ref));
+    const preferido = p.anfitriaoId ?? (p.autor.tipo === "agente" ? p.autor.agenteId : null);
+    // ADA-14: "Ana / Site" acha o quadro "Site" da Ana.
+    if (p.quadro.includes("/")) {
+      const a = await quadroPeloNome(deps, ref, agentes, preferido);
+      if (a) return a;
+    }
     const donos = agentes.filter((a) => chaveDeBusca(a.nome) === chaveDeBusca(ref));
     if (donos.length === 1) return repo.doAgente(donos[0]!.id);
     // NOD-430: o nome que não bate devolve os quadros da pessoa (o bot pergunta em qual); o repetido, as candidatas.
@@ -228,9 +237,12 @@ export async function acharQuadro(deps: Deps, p: PedidoLote, agentes: readonly A
       const deles = todos.filter((q) => donos.some((a) => a.id === q.agenteId));
       return deles.length === 1 ? deles[0]! : deles.length === 0 ? null : { ambiguo: deles };
     }
+    // ADA-14: o nome do quadro (ou o prefixo), preferindo os do bot da tela ou do autor.
+    const peloNome = await quadroPeloNome(deps, ref, agentes, preferido);
+    if (peloNome) return peloNome;
     return { semNome: ref, nomes: todos.map((q) => agentes.find((a) => a.id === q.agenteId)?.nome).filter((n): n is string => !!n) };
   }
-  if (p.anfitriaoId) return repo.doAgente(p.anfitriaoId);
+  if (p.anfitriaoId) return repo.daTela(p.anfitriaoId, p.quadroDoBot);
   if (p.autor.tipo === "agente") {
     // O bot no turno de uma tarefa mexe, por padrão, no quadro dessa tarefa, não no dele (revisão rodada 4).
     const daTarefa = p.turnoId ? await repo.doTurno(p.turnoId) : null;
@@ -662,6 +674,10 @@ async function desfazer(deps: Deps, p: PedidoLote, q: Quadro, loteId: string | u
   await repo.apagarCodigosEHistorico(criadasNoLote);
   await registrarHistoricoComTrilha(deps, q.id, historico, null);
   await repo.salvar(q.id, foto.quadro);
+  // ADA-14 (QA): o lote que renomeou ou trocou o projeto os volta (a foto sem eles não mexe).
+  if (foto.quadro.nome !== undefined || foto.quadro.projetoId !== undefined) {
+    await repo.renomear(q.id, { ...(foto.quadro.nome !== undefined ? { nome: foto.quadro.nome } : {}), ...(foto.quadro.projetoId !== undefined ? { projetoId: foto.quadro.projetoId } : {}) });
+  }
   // NOD-443: o lote das pessoas ou do modo volta quem estava e o modo de antes.
   const sairam = foto.pessoas ? await restaurarPessoas(deps, q.id, foto.pessoas) : [];
   await repo.marcarDesfeito(ultimo.id);
@@ -748,11 +764,16 @@ async function aplicarLoteDaDona(deps: Deps, p: PedidoLote): Promise<{ data: Res
     // O anfitrião: o bot da tela; senão o que a ferramenta nomeou em `quadro` (id ou nome); senão o próprio bot.
     const anfitriao = p.anfitriaoId ?? (p.quadro?.trim() ? anfitriaoPeloNome(p.quadro, agentes) : p.autor.tipo === "agente" ? p.autor.agenteId : null);
     if (!anfitriao || !agentes.some((a) => a.id === anfitriao)) return falha("nao_encontrado", "bot anfitrião do quadro");
-    q = await repo.doAgente(anfitriao);
+    // ADA-14 (ADR-153 §7): sem o índice "um por bot" (0156), a trava do bot é que impede dois "primeiro quadro" juntos.
+    await repo.travarBot(anfitriao);
+    // ADA-14: criar_quadro com um nome novo cria OUTRO quadro no bot (com a flag); sem nome, o de sempre.
+    const escolha = await quadroDoCriar(deps, anfitriao, p.ops[0] as Extract<OpQuadro, { tipo: "criar_quadro" }>, p.quadroDoBot);
+    if ("erro" in escolha) return falha(escolha.erro, escolha.detalhe);
+    q = escolha.quadro;
     if (!q) {
       const sozinha = p.ops.find((o) => o.tipo === "desfazer" || o.tipo === "remover_quadro" || o.tipo === "mover_quadro");
       if (sozinha) return falha("entrada_invalida", `${sozinha.tipo} vai sozinho na chamada`);
-      return criarComLote(deps, p, anfitriao, agentes);
+      return criarComLote(deps, p, anfitriao, agentes, { nome: escolha.nome, projetoId: escolha.projetoId });
     }
   } else if (p.ops[0]!.tipo === "mover_quadro") {
     if (p.ops.length > 1) return falha("entrada_invalida", "mover_quadro vai sozinho na chamada");
@@ -788,7 +809,11 @@ async function aplicarLoteDaDona(deps: Deps, p: PedidoLote): Promise<{ data: Res
     if (p.ops.length > 1) return falha("entrada_invalida", "remover_quadro vai sozinho na chamada");
     return removerQuadro(deps, p, travado);
   }
-  return aplicarNoQuadro(deps, p, travado, agentes, false);
+  // ADA-14: o nome e o projeto do editar_quadro, validados antes do lote e gravados só se ele passou.
+  const renome = await renomeDoLote(deps, travado, p.ops);
+  if (renome && "erro" in renome) return falha(renome.erro, renome.detalhe);
+  // QA da ADA-14: o nome e o projeto vão no lote (o plano §4.2: com Desfazer), não depois dele.
+  return aplicarNoQuadro(deps, p, travado, agentes, false, renome);
 }
 
 /**
@@ -835,7 +860,10 @@ async function quadroDoMover(deps: Deps, ref: string, agentes: readonly Agente[]
     if (q) return q;
   }
   const porPrefixo = (await repo.listar()).filter((q) => q.prefixo !== null && q.prefixo === prefixo);
-  return porPrefixo.length === 1 ? vivo(porPrefixo[0]!) : null;
+  if (porPrefixo.length === 1) return vivo(porPrefixo[0]!);
+  // ADA-14: o nome do quadro ("Site" ou "Ana / Site"); o ambíguo não é destino (o bot diz qual).
+  const peloNome = await quadroPeloNome(deps, r, agentes);
+  return peloNome && !("ambiguo" in peloNome) ? vivo(peloNome) : null;
 }
 
 /**
@@ -890,7 +918,7 @@ async function moverDeQuadro(deps: Deps, p: PedidoLote, op: OpQuadro, agentes: r
   if ("erro" in achada) return falha(achada.erro, achada.detalhe);
   // A rota é /agentes/:id/quadro/tarefas/:tid/mover: a tarefa tem de estar no quadro de :id (revisão do PR #623).
   if (p.anfitriaoId) {
-    const daRota = await repo.doAgente(p.anfitriaoId);
+    const daRota = await repo.daTela(p.anfitriaoId, p.quadroDoBot);
     if (!daRota || daRota.id !== achada.quadroId) return recusaDoMover("nao_encontrado", "fora_do_quadro");
   }
   const alvo = await quadroDoMover(deps, op.quadro, agentes);
@@ -1047,16 +1075,17 @@ export async function preverLoteQuadro(deps: Deps, p: PedidoLote): Promise<{ ok:
 }
 
 /** O lote que cria o quadro: o quadro nasce dentro dele (o Desfazer apaga o quadro). */
-async function criarComLote(deps: Deps, p: PedidoLote, anfitriao: string, agentes: readonly Agente[]): Promise<{ data: ResultadoLote; events?: RuntimeEvent[] }> {
+async function criarComLote(deps: Deps, p: PedidoLote, anfitriao: string, agentes: readonly Agente[], extra: { nome: string | null; projetoId: string | null } = { nome: null, projetoId: null }): Promise<{ data: ResultadoLote; events?: RuntimeEvent[] }> {
   const op = p.ops[0]!;
   if (op.tipo !== "criar_quadro") return falha("entrada_invalida", "criar_quadro primeiro");
   // Planeja antes de criar: um passo inválido não deixa quadro órfão.
   const plano = planejarLote({ quadro: null, quadroId: "novo", tarefas: [], agentes: agentes.map(paraAgenteDoQuadro), autorAgenteId: p.autor.tipo === "agente" ? p.autor.agenteId : null, ops: p.ops, agora: deps.agora(), origemConfiavel: p.origemConfiavel !== false, autorNaConversa: p.autorNaConversa === true, limite: limiteDe(p) });
   if ("erro" in plano) return falha("entrada_invalida", plano.indice >= 0 ? `ação ${plano.indice + 1}: ${plano.erro}` : plano.erro);
   const prefixo = await escolherPrefixo(deps, anfitriao, agentes);
-  const criado = await deps.repos.quadros.criar({ agenteId: anfitriao, meta: op.meta ?? null, prazo: op.prazo ?? null, metaDesde: deps.agora(), prefixo });
-  // Outro lote criou no mesmo instante (o índice único): o segundo lê o quadro dele e aplica o resto por cima.
-  const q = criado ?? (await deps.repos.quadros.doAgente(anfitriao));
+  const criado = await deps.repos.quadros.criar({ agenteId: anfitriao, meta: op.meta ?? null, prazo: op.prazo ?? null, metaDesde: deps.agora(), prefixo, nome: extra.nome, projetoId: extra.projetoId });
+  // Reserva do servidor de antes (o índice único): o segundo lê o quadro do bot e aplica o resto por cima. Com nome, não:
+  // o quadro com nome é outro, e a trava do bot (travarBot) já serializa.
+  const q = criado ?? (extra.nome === null ? await deps.repos.quadros.doAgente(anfitriao) : null);
   if (!q) return falha("sem_quadro", "o quadro não foi criado");
   const travado = (await deps.repos.quadros.buscarTravado(q.id)) ?? q;
   return aplicarNoQuadro(deps, { ...p, ops: p.ops.slice(1) }, travado, agentes, criado !== null);
@@ -1088,7 +1117,7 @@ async function falasUsadas(deps: Deps, tarefas: readonly TarefaQuadro[], falas: 
   return usadas;
 }
 
-async function aplicarNoQuadro(deps: Deps, p: PedidoLote, qSemPrefixo: Quadro, agentes: readonly Agente[], nasceuAgora: boolean): Promise<{ data: ResultadoLote; events?: RuntimeEvent[] }> {
+async function aplicarNoQuadro(deps: Deps, p: PedidoLote, qSemPrefixo: Quadro, agentes: readonly Agente[], nasceuAgora: boolean, renome?: { nome?: string | null; projetoId?: string | null } | null): Promise<{ data: ResultadoLote; events?: RuntimeEvent[] }> {
   const repo = deps.repos.quadros;
   const agora = deps.agora();
   // NOD-416: o quadro e as tarefas que o servidor de antes criou ganham prefixo e número antes de o lote os ler.
@@ -1303,14 +1332,17 @@ async function aplicarNoQuadro(deps: Deps, p: PedidoLote, qSemPrefixo: Quadro, a
   const mudouQuadro = meta !== q.meta || prazo !== q.prazo || cumpridoEm !== q.cumpridoEm || resumo !== q.resumo;
   const mudouColunas = plano.mudouColunas;
   if (mudouQuadro || mudouColunas || plano.tocadas.length > 0 || plano.apagadas.length > 0) await repo.salvar(q.id, { meta, prazo, cumpridoEm, resumo, metaDesde, ...(mudouColunas ? { colunas: plano.quadro.colunas } : {}) });
+  // ADA-14 (QA): o nome e o projeto do editar_quadro, no mesmo lote; a foto guarda os de antes para o Desfazer.
+  const mudouNome = !!renome && ((renome.nome !== undefined && renome.nome !== q.nome) || (renome.projetoId !== undefined && renome.projetoId !== q.projetoId));
+  if (mudouNome) await repo.renomear(q.id, renome!);
 
   const tarefaIds = [...plano.tocadas.map((id) => idReal.get(id) ?? id), ...plano.apagadas];
   const foto: FotoLote = {
-    quadro: nasceuAgora ? null : { meta: q.meta, prazo: q.prazo, cumpridoEm: q.cumpridoEm, resumo: q.resumo, metaDesde: q.metaDesde, colunas: q.colunas },
+    quadro: nasceuAgora ? null : { meta: q.meta, prazo: q.prazo, cumpridoEm: q.cumpridoEm, resumo: q.resumo, metaDesde: q.metaDesde, colunas: q.colunas, ...(mudouNome ? { nome: q.nome, projetoId: q.projetoId } : {}) },
     tarefas: tarefaIds.map((id) => ({ id, antes: antesPorId.get(id) ?? null })),
   };
   const opsDoResumo: OpQuadro[] = nasceuAgora ? [{ tipo: "criar_quadro", meta: q.meta }, ...p.ops] : [...p.ops];
-  const lote = nasceuAgora || tarefaIds.length > 0 || mudouQuadro || mudouColunas ? await repo.inserirLote({ quadroId: q.id, autor: p.autor, resumo: resumoDoLote(opsDoResumo, plano.frasesDasColunas), antes: foto, tarefaIds, pedidoPor: registraPedido, viaNome: deQuem }) : null;
+  const lote = nasceuAgora || tarefaIds.length > 0 || mudouQuadro || mudouColunas || mudouNome ? await repo.inserirLote({ quadroId: q.id, autor: p.autor, resumo: resumoDoLote(opsDoResumo, plano.frasesDasColunas), antes: foto, tarefaIds, pedidoPor: registraPedido, viaNome: deQuem }) : null;
   // NOD-419: o histórico do lote (a tarefa nova já com o id real) e os movimentos que ele desfez.
   await repo.inserirMovimentos(q.id, lote?.id ?? null, plano.movimentos.map((m) => ({ ...m, tarefaId: idReal.get(m.tarefaId) ?? m.tarefaId })));
   await repo.marcarMovimentosDesfeitos(plano.movimentosDesfeitos);
@@ -1433,9 +1465,10 @@ function tarefaDeOutraPessoa(plano: Extract<ReturnType<typeof planejarLote>, { t
 }
 
 /** A aba Quadro de um bot: o quadro dele montado (ou null, ainda sem quadro). Experimento desligado = nao_permitido. */
-export const verQuadro: CasoDeUso<{ agenteId: string }, { quadro: QuadroDto | null }> = async (deps, input) => {
+export const verQuadro: CasoDeUso<{ agenteId: string; quadro?: string | null }, { quadro: QuadroDto | null }> = async (deps, input) => {
   if (!(await experimentoLigado(deps))) throw new ErroDeDominio("nao_permitido", { cause: "experimento quadro desligado" });
-  const q = await deps.repos.quadros.doAgente(input.agenteId);
+  // ADA-14: o quadro que a tela escolheu (se ainda for deste bot); sem ele, o padrão.
+  const q = await deps.repos.quadros.daTela(input.agenteId, input.quadro);
   return { data: { quadro: q ? await montarQuadro(deps, q) : null } };
 };
 
@@ -1502,8 +1535,9 @@ async function opcoesDeTarefa(deps: Deps, ref: string, tarefas: readonly TarefaQ
 export const historicoDaTarefa: CasoDeUso<{ agenteId: string; tarefaId: string }, { historico: EntradaHistoricoDto[] }> = async (deps, input) => {
   await exigirQuadroLigado(deps);
   const repo = deps.repos.quadros;
-  const q = await repo.doAgente(input.agenteId);
   const t = ehUuid(input.tarefaId) ? await repo.tarefa(input.tarefaId) : null;
+  // ADA-14: a tarefa de qualquer quadro deste bot (não só do padrão).
+  const q = t ? await repo.doBot(input.agenteId, t.quadroId) : null;
   if (!q || !t || t.quadroId !== q.id) throw new ErroDeDominio("nao_encontrado", { cause: "tarefa fora deste quadro" });
   const linhas = await repo.historico(t.id);
   // Revisão 2 do PR #623: os quadros e os bots citados numa leitura só (antes, uma busca por linha), e a coluna pelo

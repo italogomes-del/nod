@@ -222,8 +222,8 @@ import { criarServicoDitado } from "../voz/ditado.ts";
 import { autorizarDitado, type ContextoDitado } from "../../use-cases/ditado.ts";
 import { atenderLigacao, encerrarLigacao, gravarFalaLigacao, leituraDaDecisao, mandarNoChatDaLigacao, reabrirCerebroDaLigacao, resultadoDaTarefaDaLigacao, type ContextoLigacao } from "../../use-cases/ligacoes.ts";
 import { cancelarTurno } from "../../use-cases/cancelar-turno.ts";
-import { lerLiberacaoQuadros } from "../../domain/flag-quadros.ts";
-import { configurarLiberacaoQuadros } from "../../repositories/raio-x.repo.ts";
+import { lerLiberacaoQuadros, lerLiberacaoQuadrosN } from "../../domain/flag-quadros.ts";
+import { configurarLiberacaoQuadros, configurarLiberacaoQuadrosN } from "../../repositories/raio-x.repo.ts";
 import { lerRotinasFora } from "../../domain/quadro-assumir.ts";
 import { configurarRotinasFora } from "../../use-cases/assumir-quadro.ts";
 import type { IncomingMessage, Server } from "node:http";
@@ -443,6 +443,8 @@ export function comporApp(o: OpcoesCompor): App {
   const onboardingTexto = env.NOD_ONBOARDING_TEXTO === "1";
   // NOD-415 (ADR-141): NOD_QUADROS libera os quadros (desligado | admins | todos; produção = admins).
   configurarLiberacaoQuadros(lerLiberacaoQuadros(env));
+  // ADA-14 (ADR-153): NOD_QUADROS_N libera o 2º quadro num bot (mesma regra; produção = admins).
+  configurarLiberacaoQuadrosN(lerLiberacaoQuadrosN(env));
   // NOD-422 (PR 2): as rotinas que o "quadro assume" nunca pausa (padrão: a bc381ef2).
   configurarRotinasFora(lerRotinasFora(env));
   const depsSemPorta = (trx: Tx, escopo: Escopo): Deps => ({ repos: criarRepos(trx, escopo), services, useCases, tx: (fn) => fn(trx), escopo, agora: relogio, fusoPadrao, modeloPadrao, ...(contasLigadas ? { situacaoConta: () => situacaoDaConta(trx, escopo) } : {}) });

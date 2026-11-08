@@ -12,6 +12,8 @@ export type PayloadPropostaQuadroExclusao = {
   quadroId: string;
   anfitriaoId: string;
   anfitriaoNome: string;
+  /** ADA-14: o nome do quadro (null = o sem nome, "Tarefas"): com N quadros no bot, o card diz qual sai. */
+  quadroNome?: string | null;
   /** O que sai com o quadro, como o card mostra ("Sai: 12 tarefas, 5 colunas e a meta"). */
   tarefas: number;
   colunas: number;

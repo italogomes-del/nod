@@ -23,7 +23,7 @@ const t = (extra: Partial<TarefaDto> = {}): TarefaDto => ({
   pergunta: null, resposta: null, deFora: false, turnoId: null, criadoEm: 1_000, mudadoEm: 1_000, terminadaEm: null, execucao: null, agenteNome: "Vera", numero: 1, codigo: "VER-1", branch: "", ...extra,
 });
 const q = (extra: Partial<QuadroDto> = {}): QuadroDto => ({
-  id: "q1", agenteId: "a", prefixo: "VER", modoConversa: "individual", meta: "Meta", prazo: null, cumpridoEm: null, resumo: null, criadoEm: 1, atualizadoEm: 1, metaDesde: 1, agenteNome: "Vera",
+  id: "q1", agenteId: "a", nome: null, projetoId: null, prefixo: "VER", modoConversa: "individual", meta: "Meta", prazo: null, cumpridoEm: null, resumo: null, criadoEm: 1, atualizadoEm: 1, metaDesde: 1, agenteNome: "Vera",
   colunas: colunasDto(COLUNAS_PADRAO), tarefas: [], ultimoLote: null, feitas: 0, total: 0, ...extra,
 });
 const agente = (id: string) => (id === "a" ? { avatar: confiar(`<span class="av">V</span>`), nome: "Vera" } : null);

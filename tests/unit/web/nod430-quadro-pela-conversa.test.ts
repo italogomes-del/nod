@@ -28,6 +28,8 @@ describe("card de excluir o quadro (NOD-430)", () => {
   it("aberto: o que sai, o que fica, sem Desfazer, Excluir e Agora não", () => {
     const h = renderCardQuadroExclusao({ id: "p1", estado: "pendente" }, PAYLOAD, true);
     expect(h).toContain("Excluir o quadro do EngNod");
+    // ADA-14: com N quadros, o card diz qual (o sem nome segue "o quadro do EngNod").
+    expect(renderCardQuadroExclusao({ id: "p1", estado: "pendente" }, { ...PAYLOAD, quadroNome: "Site" }, true)).toContain("Excluir o quadro &quot;Site&quot; do EngNod");
     expect(h).toContain("Sai: 12 tarefas, 5 colunas, a meta e o histórico");
     expect(h).toContain("Fica: a conversa e a memória do EngNod");
     expect(h).toContain("Não dá para desfazer.");

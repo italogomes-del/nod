@@ -935,3 +935,45 @@ a.qd-chip:hover { background: var(--surface-raised); }
   .qd-busca-in:focus-visible, .qd-nova-in:focus-visible { outline: 2px solid Highlight; outline-offset: 2px; }
   [aria-checked="true"] > .qd-caixa { background: Highlight; border-color: Highlight; color: HighlightText; forced-color-adjust: none; }
 }
+
+/* ---------- ADA-14 (ADR-153): o seletor de quadro (popover no computador, folha de baixo no estreito) ---------- */
+.qd-qs { position: relative; display: inline-flex; margin: 0 0 6px; max-width: 100%; }
+.qd-qs-bt { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; max-width: 100%; padding: 4px 8px 4px 6px; margin-left: -6px; border: 0; border-radius: 8px;
+  background: none; color: var(--ink); font: inherit; font-size: 15px; font-weight: 600; cursor: pointer; text-align: left; }
+.qd-qs-bt:hover, .qd-qs-bt[aria-expanded="true"] { background: color-mix(in srgb, var(--ink) 6%, transparent); }
+.qd-qs-proj { color: var(--ink-3); font-weight: 500; }
+.qd-qs-atual { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qd-qs-fundo { display: none; }
+.qd-qs-pop { position: absolute; top: calc(100% + 4px); left: -6px; z-index: 30; display: flex; flex-direction: column; gap: 8px; width: 320px; max-width: calc(100vw - 24px);
+  max-height: min(70vh, 520px); padding: 10px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow-pop); }
+.qd-qs-cab { display: none; align-items: center; justify-content: space-between; }
+.qd-qs-tit { font-size: 16px; font-weight: 600; }
+.qd-qs-fechar { width: 44px; height: 44px; border: 0; border-radius: 10px; background: none; color: var(--ink-2); font-size: 22px; line-height: 1; cursor: pointer; }
+.qd-qs-busca { height: 32px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: 8px; background: transparent; color: var(--ink); font: inherit; font-size: 13px; }
+.qd-qs-lista { display: flex; flex-direction: column; gap: 8px; overflow-y: auto; min-height: 0; }
+.qd-qs-gt { margin: 0; padding: 0 6px 2px; font-size: 11.5px; font-weight: 600; color: var(--ink-3); text-transform: uppercase; letter-spacing: .03em; }
+.qd-qs-ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.qd-qs-it { display: flex; align-items: center; gap: 6px; width: 100%; min-height: 34px; padding: 4px 8px; border: 0; border-radius: 8px; background: none; color: var(--ink);
+  font: inherit; font-size: 13.5px; text-align: left; cursor: pointer; }
+.qd-qs-it:hover, .qd-qs-it:focus-visible { background: color-mix(in srgb, var(--ink) 6%, transparent); }
+.qd-qs-it[aria-current="true"] { background: var(--surface-selected); font-weight: 600; }
+.qd-qs-nome { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qd-qs-tag { flex: none; padding: 0 6px; border: 1px solid var(--line); border-radius: 6px; font-size: 11px; line-height: 18px; color: var(--ink-3); font-weight: 400; }
+.qd-qs-n { flex: none; font-size: 11.5px; color: var(--ink-3); font-weight: 400; }
+.qd-qs-vazio { margin: 4px 6px; font-size: 13px; color: var(--ink-3); }
+.qd-qs-pe { display: flex; gap: 14px; padding: 6px 6px 2px; border-top: 1px solid var(--line); font-size: 13px; }
+.qd-qs-novo { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding-top: 8px; border-top: 1px solid var(--line); margin: 0; }
+.qd-qs-novo input, .qd-qs-novo select { flex: 1 1 100%; height: 32px; padding: 0 8px; border: 1px solid var(--line-strong); border-radius: 8px; background: transparent; color: var(--ink); font: inherit; font-size: 13px; }
+.qd-qs-erro { flex-basis: 100%; margin: 0; font-size: 12px; color: var(--danger); }
+@container (max-width: 700px) {
+  .qd-qs-fundo { display: block; position: fixed; inset: 0; z-index: 40; background: color-mix(in srgb, var(--ink) 30%, transparent); }
+  .qd-qs-pop { position: fixed; top: auto; left: 0; right: 0; bottom: 0; z-index: 41; width: auto; max-width: none; max-height: 85vh;
+    padding: 14px 14px calc(env(safe-area-inset-bottom) + 16px); border: 0; border-radius: 16px 16px 0 0; animation: qd-sobe .22s cubic-bezier(.2, .8, .2, 1) both; }
+  .qd-qs-cab { display: flex; }
+}
+/* O toque (CONSULTA_CELULAR, ADR-094): alvos de 44pt e campo de 16px (sem o zoom do iOS). */
+@media (hover: none) and (pointer: coarse) and (max-width: 600px), (hover: none) and (pointer: coarse) and (max-height: 500px) {
+  .qd-qs-bt, .qd-qs-it, .qd-qs-pe .qd-link { min-height: 44px; }
+  .qd-qs-busca, .qd-qs-novo input, .qd-qs-novo select, .qd-qs-novo .qd-bt { min-height: 44px; font-size: 16px; }
+}
+@media (prefers-reduced-motion: reduce) { .qd-qs-pop { animation: none; } }

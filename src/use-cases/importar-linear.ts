@@ -54,7 +54,7 @@ function responsaveisDaPrevia(q: Quadro, agentes: readonly Agente[]): Map<IdColu
 
 export type Preparada = { ok: true; quadro: Quadro; anfitriaoNome: string; time: string; filtro: FiltroImportacao | null; previa: PreviaImportacao };
 type Conferida = { ok: true; quadro: Quadro; agentes: Agente[]; cred: CredencialLinear; fonte: FonteLinear };
-type PedidoPrevia = { autor: AutorLote; quadro?: string; anfitriaoId?: string; turnoId?: string | null; time: string; filtro: FiltroImportacao | null };
+type PedidoPrevia = { autor: AutorLote; quadro?: string; anfitriaoId?: string; /** ADA-14: o `?quadro=` da tela. */ quadroDoBot?: string | null; turnoId?: string | null; time: string; filtro: FiltroImportacao | null };
 
 /**
  * As recusas antes de qualquer card (as mesmas pela tela e pela conversa), sem falar com o Linear. Uma importação
@@ -71,7 +71,7 @@ async function nomeDoQuadro(deps: Deps, q: Pick<Quadro, "agenteId">, agentes?: r
 async function conferirImportacao(deps: Deps, p: PedidoPrevia): Promise<Conferida | Falha> {
   if (!(await experimentoLigado(deps))) return falha("experimento_desligado", "o quadro está desligado nos experimentos da pessoa");
   const agentes = await agentesDaPessoa(deps);
-  const achado = await acharQuadro(deps, { autor: p.autor, ops: [], executor: "catcher", turnoId: p.turnoId ?? null, ...(p.quadro !== undefined ? { quadro: p.quadro } : {}), ...(p.anfitriaoId ? { anfitriaoId: p.anfitriaoId } : {}) }, agentes);
+  const achado = await acharQuadro(deps, { autor: p.autor, ops: [], executor: "catcher", turnoId: p.turnoId ?? null, ...(p.quadro !== undefined ? { quadro: p.quadro } : {}), ...(p.anfitriaoId ? { anfitriaoId: p.anfitriaoId } : {}), ...(p.quadroDoBot ? { quadroDoBot: p.quadroDoBot } : {}) }, agentes);
   if (!achado) return falha("sem_quadro", "não há quadro para receber a importação: crie um antes (criar_quadro)");
   if ("ambiguo" in achado) return falha("entrada_invalida", `a pessoa tem ${achado.ambiguo.length} quadros: passe quadro (o nome do bot anfitrião)`);
   // NOD-430: o nome que não bate com nenhum bot lista os quadros da pessoa (o bot pergunta em qual).
@@ -138,9 +138,9 @@ function timeEFiltro(input: { time: string; filtro: string | null }): { time: st
  * Fase 1 das rotas da tela (revisão do PR #630, o padrão de duas fases de rotas/decisoes.ts): as recusas numa transação
  * curta e a credencial para a rota buscar no Linear FORA da transação. A fase 2 é previaDaTela ou o Trazer com `issues`.
  */
-export const conferirPreviaDaTela: CasoDeUso<{ agenteId: string; time: string; filtro: string | null }, { ok: true; time: string; filtro: FiltroImportacao | null; quadroId: string; cred: CredencialLinear } | Falha> = async (deps, input) => {
+export const conferirPreviaDaTela: CasoDeUso<{ agenteId: string; quadro?: string | null; time: string; filtro: string | null }, { ok: true; time: string; filtro: FiltroImportacao | null; quadroId: string; cred: CredencialLinear } | Falha> = async (deps, input) => {
   const { time, filtro } = timeEFiltro(input);
-  const c = await conferirImportacao(deps, { autor: { tipo: "pessoa" }, anfitriaoId: input.agenteId, time, filtro });
+  const c = await conferirImportacao(deps, { autor: { tipo: "pessoa" }, anfitriaoId: input.agenteId, quadroDoBot: input.quadro ?? null, time, filtro });
   if (!c.ok) return { data: c };
   return { data: { ok: true, time, filtro, quadroId: c.quadro.id, cred: c.cred } };
 };
@@ -149,9 +149,9 @@ export const conferirPreviaDaTela: CasoDeUso<{ agenteId: string; time: string; f
  * A prévia pela tela (GET): só lê. A recusa volta como dado (a tela mostra a frase: "Conecte o Linear", "passa de 500,
  * tente sem o Backlog"); o detalhe é nosso, sem texto do Linear. `issues` = a busca da fase 1 (fora da transação).
  */
-export const previaDaTela: CasoDeUso<{ agenteId: string; time: string; filtro: string | null; issues?: readonly IssueLinear[] }, PreviaDaTela> = async (deps, input) => {
+export const previaDaTela: CasoDeUso<{ agenteId: string; quadro?: string | null; time: string; filtro: string | null; issues?: readonly IssueLinear[] }, PreviaDaTela> = async (deps, input) => {
   const { time, filtro } = timeEFiltro(input);
-  const prep = await prepararImportacao(deps, { autor: { tipo: "pessoa" }, anfitriaoId: input.agenteId, time, filtro, ...(input.issues ? { issues: input.issues } : {}) });
+  const prep = await prepararImportacao(deps, { autor: { tipo: "pessoa" }, anfitriaoId: input.agenteId, quadroDoBot: input.quadro ?? null, time, filtro, ...(input.issues ? { issues: input.issues } : {}) });
   if (!prep.ok) return { data: prep };
   return { data: { ok: true, time: prep.time, filtro: prep.filtro, anfitriaoNome: prep.anfitriaoNome, previa: prep.previa } };
 };

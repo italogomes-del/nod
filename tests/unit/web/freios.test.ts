@@ -24,7 +24,7 @@ const t = (extra: Partial<TarefaDto> = {}): TarefaDto => ({
   pergunta: null, resposta: null, deFora: false, turnoId: null, criadoEm: 1, mudadoEm: 1, execucao: null, agenteNome: "Caio", numero: null, codigo: "#1", branch: "", movimentos: [mov()], ...extra,
 });
 const q = (tarefas: TarefaDto[], cs = dto()): QuadroDto => ({
-  id: "q1", agenteId: "a", modoConversa: "individual", meta: "Meta", prazo: null, cumpridoEm: null, metaDesde: 1, resumo: null, prefixo: null, criadoEm: 1, atualizadoEm: 1, agenteNome: "Ada",
+  id: "q1", agenteId: "a", nome: null, projetoId: null, modoConversa: "individual", meta: "Meta", prazo: null, cumpridoEm: null, metaDesde: 1, resumo: null, prefixo: null, criadoEm: 1, atualizadoEm: 1, agenteNome: "Ada",
   colunas: cs, tarefas, ultimoLote: null, feitas: 0, total: tarefas.length,
 });
 const tela = (tarefas: TarefaDto[], o: Partial<Parameters<typeof quadroDaMeta>[0]> = {}) =>

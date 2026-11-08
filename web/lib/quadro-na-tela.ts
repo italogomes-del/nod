@@ -28,8 +28,10 @@ import { PARAMETRO_TAREFA, RESP_VOCE, acesos, codigoDaTarefa, acoesDaNovaTarefa,
 import type { ExibirDoQuadro, VisaoDoQuadro } from "../../src/contracts/raio-x.ts";
 import { VISOES_DO_QUADRO } from "../telas/quadro-celular.ts";
 import { criarCelularDoQuadro, seletorDoFocoDaFolha } from "./celular-do-quadro.ts";
-import { quadroVazio, type Aviso, type Filtro, type Html } from "../telas/quadro.ts";
+import { confiar, quadroVazio, type Aviso, type Filtro, type Html } from "../telas/quadro.ts";
 import { contarNaVista, ehFiltro, termoDaBusca } from "./vista-do-quadro.ts";
+import type { QuadrosDoBotDto } from "../../src/contracts/quadros-do-bot.ts";
+import { quadroQueAbre, seletorDeQuadro, type CriandoNoSeletor } from "../telas/seletor-de-quadro.ts";
 import { decidirSoltura, fraseDaTrava, RECUSA_MS, relogioDaRecusa, type RelogioDaRecusa } from "./freios.ts";
 import { sugestoesDoQuadro, contadorDaPilula } from "./sugestoes-do-quadro.ts";
 import { ajustarAltura, type ContextoDaBarra } from "./composer.ts";
@@ -71,7 +73,7 @@ export interface ApiDoQuadro extends ApiDosComentarios, ApiDosTrabalhos {
   responderTarefa(agenteId: string, tarefaId: string, resposta: string, avancar?: boolean): Promise<MutacaoQuadro>;
   desfazerLoteQuadro(agenteId: string, loteId: string): Promise<MutacaoQuadro>;
   /** NOD-415 (ADR-141): criar o quadro e mudar a meta e o prazo pela tela (meta null tira). */
-  criarQuadro(agenteId: string, campos: { meta?: string | null; prazo?: string | null }): Promise<MutacaoQuadro>;
+  criarQuadro(agenteId: string, campos: { meta?: string | null; prazo?: string | null; nome?: string; projeto?: string | null }): Promise<MutacaoQuadro>;
   editarQuadro(agenteId: string, campos: { meta?: string | null; prazo?: string | null }): Promise<MutacaoQuadro>;
   /** Voltar a agente comum: apaga o quadro (sem Desfazer); a conversa e a memória ficam. */
   removerQuadro(agenteId: string): Promise<MutacaoQuadro>;
@@ -103,6 +105,11 @@ export interface ApiDoQuadro extends ApiDosComentarios, ApiDosTrabalhos {
   /** NOD-460 (0149): o Exibir guardado de cada quadro (nas preferências de quem lê) e a gravação de um. */
   preferencias?(): Promise<{ quadroExibir?: Record<string, ExibirDoQuadro> }>;
   exibirQuadro?(quadroId: string, e: Partial<ExibirDoQuadro>): Promise<unknown>;
+  /** ADA-14 (ADR-153): os N quadros do bot. Sem eles, a tela tem o quadro único de antes (sem seletor). */
+  usarQuadro?(agenteId: string, quadroId: string | null): void;
+  quadrosDoBot?(agenteId: string): Promise<QuadrosDoBotDto>;
+  abrirQuadroDoBot?(agenteId: string, quadroId: string): Promise<unknown>;
+  criarProjeto?(campos: { nome: string }): Promise<{ id: string }>;
 }
 
 /** NOD-442: o que o quadro de verdade precisa do main. Sem isto (os testes da NOD-429), a vista é o quadro vazio. */
@@ -133,7 +140,7 @@ export interface DadosDoQuadro {
    * QA do PR #623 (D4): depois de mover, leva à conversa do bot destino e abre a tarefa lá (o mesmo caminho do link).
    * false = o bot não está à mão (fica no quadro de origem, com o aviso).
    */
-  irParaTarefa?: (agenteId: string, tarefaId: string) => boolean;
+  irParaTarefa?: (agenteId: string, tarefaId: string, quadroId?: string) => boolean;
   /** NOD-422: de quanto em quanto tempo a linha "Trazendo do Linear" se relê (ms). */
   releImportacaoEm?: number;
   /** ADA-5: o composer do chat na pílula (web/lib/composer.ts). Sem isto, a pílula é só o campo e o Enviar. */
@@ -224,7 +231,7 @@ export interface QuadroNaTela {
    * NOD-416: o link `?tarefa=`: abre a tarefa deste bot (a conversa dele já à vista) assim que o quadro chegar; o modo vira
    * Quadro. Antes de o quadro ser liberado (as preferências ainda não chegaram), o pedido espera o próximo `sincronizar`.
    */
-  abrirTarefa(agenteId: string, tarefaId: string): void;
+  abrirTarefa(agenteId: string, tarefaId: string, quadroId?: string): void;
   /**
    * NOD-422 (revisão do PR #630): o Quadro deste bot vai abrir (um link ou um código de tarefa esperando o quadro chegar).
    * A trilha "conversa aberta" não conta a conversa que só passou por baixo a caminho do Quadro.
@@ -362,6 +369,17 @@ export function criarQuadroNaTela(doc: Document, o: { busca?: BuscaDaPilula; men
     if (el instanceof HTMLTextAreaElement && el.matches(CAMPOS_COM_RASCUNHO) && el.closest("#quadro")) guardarRascunho(el);
   });
   let agenteId: string | null = null;
+  /**
+   * ADA-14: o seletor de quadro. `sel` é a lista do bot `selDe` (lida antes do 1º quadro); `quadroPedido` é o quadro que um
+   * link de tarefa pediu (vale na próxima leitura e vira o aberto).
+   */
+  let sel: QuadrosDoBotDto | null = null;
+  let selDe: string | null = null;
+  let selAberto = false;
+  let selBusca = "";
+  let selCriando: CriandoNoSeletor = null;
+  let selErro: string | null = null;
+  let quadroPedido: { agenteId: string; quadroId: string } | null = null;
   /**
    * NOD-445 (revisão 2, achado 1): a casa (1ª posição da pílula) ainda não foi decidida porque as páginas do servidor não
    * tinham chegado quando a conversa abriu (a primeira visita ao bot na sessão). Liga na troca de conversa sem o DTO e é
@@ -524,6 +542,7 @@ export function criarQuadroNaTela(doc: Document, o: { busca?: BuscaDaPilula; men
       if (guardar) perdidosDaPilula.set(chave, guardar);
     } else if (chave && faixa.tipo === "erro" && faixa.fala) perdidosDaPilula.set(chave, faixa.fala);
     agenteId = null; q = null; carga = "nada"; aberta = null; acesas = new Set(); faixa = { tipo: "nada" }; loteAntes = null;
+    sel = null; selDe = null; selAberto = false; selBusca = ""; selCriando = null; selErro = null;
     aviso = null; novasDoEnvio = [];
     if (timerAviso) clearTimeout(timerAviso);
     timerAviso = null;
@@ -573,7 +592,8 @@ export function criarQuadroNaTela(doc: Document, o: { busca?: BuscaDaPilula; men
     }
     const comPessoas = !!dd.api()?.adicionarPessoa;
     const agentes = dd.agentes && dd.api()?.definirPassagem ? dd.agentes() : undefined;
-    return quadroDaMeta({ q, nome, agente: dd.agente, filtro, alternadas, acesas, edicao, agora: Date.now(), editandoMeta, ...(comPessoas ? { pessoas: { painel, mural, hora: dd.hora, erro: erroPessoas } } : {}), ...(agentes ? { agentes } : {}), ...(importando ? { importando } : {}), ...(recusa ? { avisos: new Map([[recusa.tarefa, recusa.aviso]]) } : {}), busca, exibir: { ...exibirDoQuadro(), aberto: exibirAberto }, maisAberto, nova, podeCriar: !!dd.api()?.criarTarefa, ...(noCelular() ? { celular: { visao: visaoDoQuadro(), folha: cel.folha() } } : {}) });
+    const seletor = seletorDeQuadro(sel, { aberto: selAberto, busca: selBusca, criando: selCriando, erro: selErro });
+    return confiar(seletor + quadroDaMeta({ q, nome, agente: dd.agente, filtro, alternadas, acesas, edicao, agora: Date.now(), editandoMeta, ...(comPessoas ? { pessoas: { painel, mural, hora: dd.hora, erro: erroPessoas } } : {}), ...(agentes ? { agentes } : {}), ...(importando ? { importando } : {}), ...(recusa ? { avisos: new Map([[recusa.tarefa, recusa.aviso]]) } : {}), busca, exibir: { ...exibirDoQuadro(), aberto: exibirAberto }, maisAberto, nova, podeCriar: !!dd.api()?.criarTarefa, ...(noCelular() ? { celular: { visao: visaoDoQuadro(), folha: cel.folha() } } : {}) }));
   }
 
   /** ADA-18: o quadro do celular (o teste injeta; o app lê a consulta canônica a cada desenho). */
@@ -1060,6 +1080,8 @@ export function criarQuadroNaTela(doc: Document, o: { busca?: BuscaDaPilula; men
     if (!doFrame) desenhoDevido = true;
     if (carga === "nada") { carga = "carregando"; desenharVista(); }
     try {
+      await prepararSeletor(a, de);
+      if (minha !== leitura || de !== agenteId) return;
       const r = await a.quadro(de);
       if (minha !== leitura || de !== agenteId) return;
       aplicarQuadro(r.quadro, [], doFrame, gestoDesde, vivo);
@@ -1427,7 +1449,7 @@ export function criarQuadroNaTela(doc: Document, o: { busca?: BuscaDaPilula; men
       const texto = `${t.titulo} foi para o quadro de ${alvo.agenteNome}${r.movida ? ` como ${r.movida.codigo} (${r.movida.codigoAntigo} continua abrindo)` : ""}`;
       // QA do PR #623 (D4): a pessoa vai junto com a tarefa, aberta no quadro destino; o aviso é dito lá.
       avisoDoMover = texto;
-      if (dd?.irParaTarefa?.(alvo.agenteId, tarefaId)) return;
+      if (dd?.irParaTarefa?.(alvo.agenteId, tarefaId, alvo.id)) return;
       avisoDoMover = null;
       mudarFaixa({ tipo: "resposta", texto, loteId: null, mensagemId: "" });
       await lerQuadro();
@@ -2672,6 +2694,12 @@ export function criarQuadroNaTela(doc: Document, o: { busca?: BuscaDaPilula; men
         return;
       }
       if (act === "qd-reler") { carga = "nada"; void lerQuadro(); return; }
+      if (act === "quadro-seletor") { void abrirSeletor(!selAberto); return; }
+      if (act === "quadro-seletor-fechar") { void abrirSeletor(false); return; }
+      if (act === "quadro-escolher" && id) { void escolherQuadro(id); return; }
+      if (act === "quadro-novo") { selCriando = { tipo: "quadro", projeto: null }; selErro = null; desenharVista(); focarNaVista("#qd-qs-novo-in"); return; }
+      if (act === "projeto-novo") { selCriando = { tipo: "projeto" }; selErro = null; desenharVista(); focarNaVista("#qd-qs-novo-in"); return; }
+      if (act === "quadro-novo-cancelar") { selCriando = null; selErro = null; desenharVista(); focarNaVista('[data-act="quadro-novo"]'); return; }
       if (act === "editar-meta") { editarMeta(true); return; }
       if (act === "remover-quadro") { void removerQuadro(); return; }
       if (act === "trazer-linear") { painelImportacao({ fase: "time", time: "", filtro: null }); return; }
@@ -3050,6 +3078,7 @@ export function criarQuadroNaTela(doc: Document, o: { busca?: BuscaDaPilula; men
     }
     if (qual === "col-renomear" || qual === "col-nova" || qual === "col-remover" || qual === "col-passagem" || qual === "col-trava" || qual === "col-prazo") { ev.preventDefault(); enviarColuna(form); return; }
     if (qual === "adicionar-pessoa") { ev.preventDefault(); void adicionarPessoa(form); return; }
+    if (qual === "novo-quadro" || qual === "novo-projeto") { ev.preventDefault(); void criarNoSeletor(form, qual); return; }
     if (qual === "recado-trabalho") { ev.preventDefault(); trabs.enviarRecado(form, (c) => { if (c instanceof HTMLTextAreaElement) guardarRascunho(c); }, (c, texto) => {
       // Revisão 4: a chave é a do campo do envio; a pessoa pode ter trocado de bot ou de tarefa antes da volta. Revisão 7:
       // só sai se ainda é o texto enviado (o recado novo, digitado durante o voo, fica).
@@ -3634,15 +3663,159 @@ export function criarQuadroNaTela(doc: Document, o: { busca?: BuscaDaPilula; men
   });
 
   /**
+   * ADA-14 (ADR-153): a lista do seletor, lida antes do 1º quadro do bot. O quadro que a tela abre é o que um link pediu,
+   * senão o último aberto (o servidor guarda), senão o padrão. Sem a API dos N quadros (ou se a lista falhar), segue o
+   * quadro único de antes: o servidor dá o padrão.
+   */
+  async function prepararSeletor(a: ApiDoQuadro, de: string): Promise<void> {
+    const pedido = quadroPedido?.agenteId === de ? quadroPedido.quadroId : null;
+    if (pedido) quadroPedido = null;
+    if (!a.quadrosDoBot) { if (pedido) a.usarQuadro?.(de, pedido); return; }
+    if (selDe === de && !pedido) return;
+    try {
+      const lido = await a.quadrosDoBot(de);
+      if (de !== agenteId) return;
+      sel = lido; selDe = de;
+    } catch { if (de === agenteId) { sel = null; selDe = de; } }
+    const { alvo, gravar } = quadroQueAbre(sel, pedido);
+    a.usarQuadro?.(de, alvo);
+    if (gravar && sel && alvo) {
+      sel = { ...sel, aberto: alvo };
+      void a.abrirQuadroDoBot?.(de, alvo).catch(() => undefined);
+    }
+  }
+
+  /** Abre ou fecha o seletor. Aberto, relê a lista (as contagens mudam com o trabalho) e põe o foco no quadro atual. */
+  async function abrirSeletor(abrir: boolean): Promise<void> {
+    selAberto = abrir; selBusca = ""; selCriando = null; selErro = null;
+    desenharVista();
+    if (!abrir) { focarNaVista('[data-act="quadro-seletor"]'); return; }
+    focarNaVista('#qd-qs-busca, .qd-qs-it[aria-current="true"], .qd-qs-it');
+    const a = dd?.api();
+    const de = agenteId;
+    if (!a?.quadrosDoBot || !de) return;
+    try {
+      const lido = await a.quadrosDoBot(de);
+      if (de !== agenteId || !selAberto) return;
+      // A lista nova não troca o quadro na tela: o aberto continua o desta tela.
+      sel = { ...lido, aberto: sel?.aberto ?? lido.aberto };
+      if (!vista()?.querySelector("#qd-qs-pop")?.contains(doc.activeElement)) return void desenharVista();
+      const foco = doc.activeElement instanceof HTMLElement ? doc.activeElement : null;
+      const id = foco?.id || null;
+      const qid = foco?.dataset["id"] ?? null;
+      desenharVista();
+      focarNaVista(id ? `#${CSS.escape(id)}` : qid ? `.qd-qs-it[data-id="${CSS.escape(qid)}"]` : ".qd-qs-it");
+    } catch { /* fica a lista que já estava */ }
+  }
+
+  /** Troca o quadro na tela: o servidor guarda como o último aberto deste bot; a tarefa aberta fecha. */
+  async function escolherQuadro(quadroId: string): Promise<void> {
+    const a = dd?.api();
+    const de = agenteId;
+    if (!a || !de || !sel) return;
+    selAberto = false; selBusca = ""; selCriando = null; selErro = null;
+    if (quadroId === sel.aberto && q?.id === quadroId) { desenharVista(); focarNaVista('[data-act="quadro-seletor"]'); return; }
+    sel = { ...sel, aberto: quadroId };
+    a.usarQuadro?.(de, quadroId);
+    if (aberta) { aberta = null; dd?.naUrl?.(null); }
+    edicao = null; editandoMeta = false; nova = null; filtro = "todos"; busca = "";
+    carga = "carregando"; desenharVista();
+    void a.abrirQuadroDoBot?.(de, quadroId).catch(() => undefined);
+    await lerQuadro();
+    if (de === agenteId) { anunciar(`Quadro ${sel?.quadros.find((x) => x.id === quadroId)?.nome ?? ""} aberto`); focarNaVista('[data-act="quadro-seletor"]'); }
+  }
+
+  /** "+ Novo quadro" (no projeto escolhido) e "+ Novo projeto" pela tela: as mesmas ações do gerir_quadro. */
+  async function criarNoSeletor(form: HTMLFormElement, qual: "novo-quadro" | "novo-projeto"): Promise<void> {
+    const a = dd?.api();
+    const de = agenteId;
+    if (!a || !de) return;
+    const nomeNovo = (form.querySelector<HTMLInputElement>('[name="nome"]')?.value ?? "").trim().replace(/\s+/g, " ");
+    if (!nomeNovo) return;
+    if (form.dataset["enviando"] === "1") return;
+    form.dataset["enviando"] = "1";
+    const voltar = (erro: string) => {
+      if (de !== agenteId) return;
+      selErro = erro; desenharVista();
+      const c = vista()?.querySelector<HTMLInputElement>("#qd-qs-novo-in");
+      if (c) { c.value = nomeNovo; c.focus(); }
+    };
+    try {
+      if (qual === "novo-projeto") {
+        const p = await a.criarProjeto?.({ nome: nomeNovo });
+        if (de !== agenteId || !p) return;
+        sel = a.quadrosDoBot ? await a.quadrosDoBot(de).then((l) => ({ ...l, aberto: sel?.aberto ?? l.aberto })) : sel;
+        selCriando = { tipo: "quadro", projeto: p.id }; selErro = null;
+        desenharVista(); focarNaVista("#qd-qs-novo-in");
+        anunciar(`Projeto ${nomeNovo} criado. Agora o nome do quadro.`);
+        return;
+      }
+      const projeto = form.querySelector<HTMLSelectElement>('[name="projeto"]')?.value || null;
+      const r = await a.criarQuadro(de, { nome: nomeNovo, ...(projeto ? { projeto } : {}) });
+      if (de !== agenteId) return;
+      const novo = r.quadro;
+      if (!novo) throw new Error("sem quadro");
+      a.usarQuadro?.(de, novo.id);
+      void a.abrirQuadroDoBot?.(de, novo.id).catch(() => undefined);
+      selAberto = false; selCriando = null; selErro = null; selBusca = "";
+      if (aberta) { aberta = null; dd?.naUrl?.(null); }
+      if (a.quadrosDoBot) { try { sel = { ...(await a.quadrosDoBot(de)), aberto: novo.id }; } catch { /* a lista antiga serve */ } }
+      if (de !== agenteId) return;
+      aplicarQuadro(r.quadro);
+      mudarFaixa({ tipo: "resposta", texto: `Quadro ${nomeNovo} criado.`, loteId: r.lote?.id ?? null, mensagemId: "" });
+      focarNaVista('[data-act="quadro-seletor"]');
+    } catch (e) {
+      voltar(e instanceof ErroApi ? e.message : "Não deu para criar agora. Tente de novo.");
+    } finally { delete form.dataset["enviando"]; }
+  }
+
+  // ADA-14: a busca do seletor filtra a cada tecla (o foco e o cursor voltam ao campo depois do desenho).
+  doc.addEventListener("input", (ev) => {
+    const el = ev.target;
+    if (!dd || !selAberto || !(el instanceof HTMLInputElement) || el.id !== "qd-qs-busca") return;
+    selBusca = el.value;
+    const fim = el.selectionStart ?? el.value.length;
+    desenharVista();
+    const c = vista()?.querySelector<HTMLInputElement>("#qd-qs-busca");
+    if (c) { focarSemRolar(c); c.setSelectionRange(fim, fim); }
+  });
+  // Esc fecha o seletor (o formulário de criar primeiro); Enter na busca abre o único quadro que sobrou.
+  doc.addEventListener("keydown", (ev) => {
+    if (!dd || !selAberto) return;
+    const el = ev.target instanceof Element ? ev.target : null;
+    if (ev.key === "Escape" && el?.closest("#qd-qs-pop, .qd-qs")) {
+      ev.preventDefault(); ev.stopPropagation();
+      if (selCriando) { selCriando = null; selErro = null; desenharVista(); focarNaVista('[data-act="quadro-novo"]'); }
+      else void abrirSeletor(false);
+      return;
+    }
+    if (ev.key === "Enter" && el instanceof HTMLInputElement && el.id === "qd-qs-busca") {
+      ev.preventDefault();
+      const itens = vista()?.querySelectorAll<HTMLElement>(".qd-qs-it") ?? [];
+      if (itens.length === 1) void escolherQuadro(itens[0]!.dataset["id"] ?? "");
+    }
+  }, true);
+  // Clique fora do seletor fecha (no computador; no celular o fundo da folha faz o mesmo).
+  doc.addEventListener("click", (ev) => {
+    if (!dd || !selAberto || !(ev.target instanceof Element)) return;
+    if (ev.target.closest(".qd-qs")) return;
+    selAberto = false; selCriando = null; selErro = null; selBusca = "";
+    desenharVista();
+  }, true);
+
+  /**
    * NOD-416: o link da tarefa. Com o quadro já lido, abre; senão espera a leitura (aplicarQuadro). Sem o quadro liberado
    * ainda (chave nula: as preferências chegam depois da frota no boot), guarda o pedido; o próximo `sincronizar` com a
    * conversa deste bot o consome, e o de outra conversa o esquece (revisão 5 do PR #623).
    */
-  function abrirPeloLink(de: string, tarefaId: string): void {
+  function abrirPeloLink(de: string, tarefaId: string, quadroId?: string): void {
     if (!dd) return;
+    // ADA-14: o link sabe o quadro da tarefa (um dos N do bot): a próxima leitura abre nele.
+    if (quadroId) quadroPedido = { agenteId: de, quadroId };
     if (chave === null) { viaDaAbertura = "link"; pendente = { agenteId: de, tarefaId }; return; }
     if (agenteId !== de) return;
     if (carga === "ok" && tarefaNoQuadro(q, tarefaId)) {
+      quadroPedido = null;
       if (modo !== "quadro") { viaDaAbertura = "link"; trocar("quadro", { pagina: paginaDasTarefas() }); }
       else if (pagina !== paginaDasTarefas()) { viaDaAbertura = "link"; irPara(paginaDasTarefas()); }
       abrirTarefa(tarefaId);
@@ -3651,7 +3824,9 @@ export function criarQuadroNaTela(doc: Document, o: { busca?: BuscaDaPilula; men
     pendente = { agenteId: de, tarefaId };
     if (modo !== "quadro") { viaDaAbertura = "link"; trocar("quadro", { pagina: paginaDasTarefas() }); }
     else if (pagina !== paginaDasTarefas()) { viaDaAbertura = "link"; irPara(paginaDasTarefas()); }
-    else void lerQuadro();
+    else { void lerQuadro(); return; }
+    // O quadro já lido é outro dos N do bot: relê no quadro do link.
+    if (quadroPedido?.agenteId === de && carga === "ok") void lerQuadro();
   }
 
   const aCaminhoDoQuadro = (de: string): boolean => pendente?.agenteId === de || pedidoDoChat?.agenteId === de;

@@ -1,4 +1,5 @@
 import type { Proposta } from "../contracts/conversa.ts";
+import { tituloDaExclusaoDoQuadro } from "./quadros-do-bot.ts";
 
 /**
  * O título do cartão encolhido de uma proposta (definido em 2026-10-18, chat limpo, PR 4; plano, Parte 3 · 3A): o mesmo
@@ -34,7 +35,7 @@ export function tituloDaProposta(p: Pick<Proposta, "payload">): string {
     case "app":
       return com("Novo app", c.nome);
     case "quadro_exclusao":
-      return `Excluir o quadro do ${c.anfitriaoNome}`;
+      return tituloDaExclusaoDoQuadro(c);
     case "assumir_quadro":
       return `O quadro do ${c.anfitriaoNome} assume a esteira`;
     // NOD-50: o título do cartão aberto, sem o valor (o payload nunca o tem).

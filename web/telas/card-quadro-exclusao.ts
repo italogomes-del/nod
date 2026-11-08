@@ -18,7 +18,8 @@ export function renderCardQuadroExclusao(p: Pick<Proposta, "id" | "estado">, c: 
   return cardProposta({
     id: p.id,
     classe: "card-quadro-exclusao",
-    titulo: `Excluir o quadro do ${c.anfitriaoNome}`,
+    // ADA-14: com N quadros, o título diz qual (o mesmo texto de tituloDaExclusaoDoQuadro, no domínio).
+    titulo: c.quadroNome ? `Excluir o quadro "${c.quadroNome}" do ${c.anfitriaoNome}` : `Excluir o quadro do ${c.anfitriaoNome}`,
     linhas,
     acoes: aberto ? `${botao("decidir-proposta", "Excluir", { classe: "cp-sim cp-perigo", id: p.id })}${botao("recusar-decisao", "Agora não", { classe: "cp-nao", id: p.id })}` : "",
     rodape: desfecho,

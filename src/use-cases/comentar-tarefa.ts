@@ -12,6 +12,7 @@ import type { AtividadeTarefa } from "../contracts/quadro-pela-conversa.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { ehNod } from "../domain/nod.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
+import { ehUuid } from "./apoio-l7.ts";
 
 /**
  * Comentar uma tarefa do quadro (definido em 2026-11-02, NOD-417): o gatilho além da atribuição. O comentário da pessoa
@@ -159,7 +160,9 @@ export async function comentarTarefa(deps: Deps, p: PedidoLote, op: Comentar, ex
  */
 export const verComentarios: CasoDeUso<{ agenteId: string; tarefaId: string }, { comentarios: ComentarioDto[]; atividade: AtividadeTarefa[]; criadaPor: string | null }> = async (deps, input) => {
   if (!(await experimentoLigado(deps))) throw new ErroDeDominio("nao_permitido", { cause: "experimento quadro desligado" });
-  const q = await deps.repos.quadros.doAgente(input.agenteId);
+  // ADA-14: a tarefa de qualquer quadro deste bot.
+  const t0 = ehUuid(input.tarefaId) ? await deps.repos.quadros.tarefa(input.tarefaId) : null;
+  const q = t0 ? await deps.repos.quadros.doBot(input.agenteId, t0.quadroId) : null;
   if (!q || !(await deps.repos.quadros.tarefas(q.id)).some((t) => t.id === input.tarefaId)) throw new ErroDeDominio("nao_encontrado", { cause: "tarefa fora do quadro" });
   const nomes = new Map((await agentesDaPessoa(deps)).map((a) => [a.id, a.nome]));
   // NOD-443: o bot de quem participa não é da dona (o escopo dela não o lê): vale o nome gravado no lote (via_nome).

@@ -26,6 +26,7 @@ import type { memoriasRepo } from "./memorias.repo.ts";
 import type { memoriasDiarioRepo } from "./memorias-diario.repo.ts";
 import type { versoesPerfilRepo } from "./versoes-perfil.repo.ts";
 import type { quadrosRepo } from "./quadros.repo.ts";
+import type { projetosRepo } from "./projetos.repo.ts";
 import type { appsDoBotRepo } from "./apps-do-bot.repo.ts";
 import type { canvasRepo } from "./canvas.repo.ts";
 import type { acessosRepo } from "./acessos.repo.ts";
@@ -94,6 +95,7 @@ export interface Repos {
   memoriasDiario: ReturnType<typeof memoriasDiarioRepo>;
   versoesPerfil: ReturnType<typeof versoesPerfilRepo>;
   quadros: ReturnType<typeof quadrosRepo>;
+  projetos: ReturnType<typeof projetosRepo>;
   appsDoBot: ReturnType<typeof appsDoBotRepo>;
   canvas: ReturnType<typeof canvasRepo>;
   acessos: ReturnType<typeof acessosRepo>;

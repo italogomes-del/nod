@@ -18,6 +18,8 @@ interface LinhaQuadro {
   meta_desde: Date;
   prefixo: string | null;
   modo_conversa: ModoConversa;
+  nome: string | null;
+  projeto_id: string | null;
 }
 
 interface LinhaTarefa {
@@ -64,8 +66,8 @@ interface LinhaLote {
 export type FotoLote = {
   /** `metaDesde` falta nas fotos de antes da 0136: o Desfazer mantém o valor atual. `colunas` ausente = foto de antes da
    *  NOD-448 (o Desfazer não mexe nas colunas). `prefixo` só na foto da importação do Linear que trocou o prefixo
-   *  (NOD-422): o Desfazer o devolve. */
-  quadro: (Pick<Quadro, "meta" | "prazo" | "cumpridoEm" | "resumo"> & { metaDesde?: number; colunas?: ColunaQuadro[] | null; prefixo?: string | null }) | null;
+   *  (NOD-422): o Desfazer o devolve. `nome`/`projetoId` só no lote que os mudou (ADA-14): o Desfazer os devolve. */
+  quadro: (Pick<Quadro, "meta" | "prazo" | "cumpridoEm" | "resumo"> & { metaDesde?: number; colunas?: ColunaQuadro[] | null; prefixo?: string | null; nome?: string | null; projetoId?: string | null }) | null;
   tarefas: { id: string; antes: TarefaQuadro | null }[];
   /** Revisão 3 do PR #630: os códigos do time que a importação guardou em tarefas que já existiam; o Desfazer os apaga. */
   codigos?: { prefixo: string; numero: number; tarefaId: string }[];
@@ -73,7 +75,10 @@ export type FotoLote = {
   pessoas?: { membros: string[]; modo: ModoConversa };
 };
 
-const COLUNAS_Q = "id, agente_id, to_char(prazo, 'YYYY-MM-DD') as prazo, meta, cumprido_em, resumo, colunas, criado_em, atualizado_em, meta_desde, prefixo, modo_conversa";
+const CAMPOS_Q = ["id", "agente_id", "to_char(prazo, 'YYYY-MM-DD') as prazo", "meta", "cumprido_em", "resumo", "colunas", "criado_em", "atualizado_em", "meta_desde", "prefixo", "modo_conversa", "nome", "projeto_id"];
+const COLUNAS_Q = CAMPOS_Q.join(", ");
+/** As colunas do quadro com o apelido da tabela (o join com quadro_bots repete id, agente_id, posicao e criado_em). */
+const colunasQ = (a: string) => CAMPOS_Q.map((c) => (c.startsWith("to_char(") ? c.replace("to_char(", `to_char(${a}.`) : `${a}.${c}`)).join(", ");
 const COLUNAS_T = "id, quadro_id, titulo, descricao, status, voltar_para, agente_id, ordem, linear_id, linear_url, pr_url, pergunta, resposta, de_fora, turno_id, criado_em, mudado_em, terminada_em, numero, pedido_por, resposta_mensagem_id, resposta_conversa_id, resposta_agente_id";
 interface LinhaMovimento {
   id: string;
@@ -127,6 +132,8 @@ const paraQuadro = (l: LinhaQuadro): Quadro => ({
   metaDesde: ms(l.meta_desde),
   prefixo: l.prefixo ?? null,
   modoConversa: l.modo_conversa ?? "individual",
+  nome: l.nome ?? null,
+  projetoId: l.projeto_id ?? null,
 });
 
 /** O Desfazer devolve o `terminadaEm` da foto; a foto de antes da revisão 3 não tem o campo: fechada = o `mudadoEm` dela. */
@@ -202,7 +209,7 @@ export const SQL_MUDOU_DE_QUADRO_DEPOIS = `
 
 export function quadrosRepo(conn: Conn, escopo: Escopo) {
   const dona = () => conn`tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId}`;
-  return {
+  const r = {
     async buscar(id: string): Promise<Quadro | null> {
       const [l] = await conn<LinhaQuadro[]>`select ${conn.unsafe(COLUNAS_Q)} from quadros where ${dona()} and id = ${id}`;
       return l ? paraQuadro(l) : null;
@@ -212,9 +219,101 @@ export function quadrosRepo(conn: Conn, escopo: Escopo) {
       const [l] = await conn<LinhaQuadro[]>`select ${conn.unsafe(COLUNAS_Q)} from quadros where ${dona()} and id = ${id} for update`;
       return l ? paraQuadro(l) : null;
     },
+    /**
+     * ADA-14 (ADR-153): o quadro padrão do bot (o que o chat e o agendamento usam sem quadro nomeado). Com N quadros, o de
+     * `padrao` em quadro_bots; o quadro que o servidor de antes criou sem linha conta como do `agente_id`.
+     */
     async doAgente(agenteId: string): Promise<Quadro | null> {
-      const [l] = await conn<LinhaQuadro[]>`select ${conn.unsafe(COLUNAS_Q)} from quadros where ${dona()} and agente_id = ${agenteId}`;
+      const [q] = await r.vinculadosAo(agenteId);
+      return q ?? null;
+    },
+    /**
+     * Os quadros em que o bot aparece: com linha em quadro_bots ou (sem linha nenhuma) do agente_id. O padrão primeiro,
+     * depois a posição e o mais antigo.
+     */
+    async vinculadosAo(agenteId: string): Promise<(Quadro & { padrao: boolean; posicao: number })[]> {
+      const ls = await conn<(LinhaQuadro & { padrao_v: boolean; posicao_v: number })[]>`
+        select ${conn.unsafe(colunasQ("q"))}, coalesce(b.padrao, true) as padrao_v, coalesce(b.posicao, 0) as posicao_v
+        from quadros q left join quadro_bots b on b.tenant_id = q.tenant_id and b.quadro_id = q.id and b.agente_id = ${agenteId}
+        where q.tenant_id = ${escopo.tenantId} and q.owner_id = ${escopo.pessoaId}
+          and (b.id is not null or (q.agente_id = ${agenteId} and not exists (select 1 from quadro_bots x where x.tenant_id = q.tenant_id and x.quadro_id = q.id)))
+        order by padrao_v desc, posicao_v, q.criado_em, q.id`;
+      return ls.map((l) => ({ ...paraQuadro(l), padrao: l.padrao_v, posicao: l.posicao_v }));
+    },
+    /** ADA-14: o quadro que a tela abriu (`?quadro=`) se for deste bot; sem ele, o padrão. */
+    async daTela(agenteId: string, quadroId?: string | null): Promise<Quadro | null> {
+      return quadroId ? r.doBot(agenteId, quadroId) : r.doAgente(agenteId);
+    },
+    /** O quadro `quadroId` se ele aparece neste bot (o `?quadro=` da rota é escopado ao bot da URL); senão null. */
+    async doBot(agenteId: string, quadroId: string): Promise<Quadro | null> {
+      return (await r.vinculadosAo(agenteId)).find((q) => q.id === quadroId) ?? null;
+    },
+    /** Os bots de um quadro (as linhas de quadro_bots), na ordem de posição e do mais antigo. */
+    async vinculos(quadroId: string): Promise<{ agenteId: string; padrao: boolean; posicao: number; criadoEm: number }[]> {
+      const ls = await conn<{ agente_id: string; padrao: boolean; posicao: number; criado_em: Date }[]>`
+        select b.agente_id, b.padrao, b.posicao, b.criado_em from quadro_bots b join agentes a on a.tenant_id = b.tenant_id and a.id = b.agente_id
+        where b.tenant_id = ${escopo.tenantId} and b.owner_id = ${escopo.pessoaId} and b.quadro_id = ${quadroId} and a.excluido_em is null
+        order by b.posicao, b.criado_em, b.agente_id`;
+      return ls.map((l) => ({ agenteId: l.agente_id, padrao: l.padrao, posicao: l.posicao, criadoEm: ms(l.criado_em) }));
+    },
+    /** Os vínculos de um bot (todos os quadros dele), travados: padrão e posição mudam um de cada vez. */
+    async vinculosDoBotTravados(agenteId: string): Promise<{ quadroId: string; padrao: boolean; posicao: number; criadoEm: number }[]> {
+      const ls = await conn<{ quadro_id: string; padrao: boolean; posicao: number; criado_em: Date }[]>`
+        select quadro_id, padrao, posicao, criado_em from quadro_bots where ${dona()} and agente_id = ${agenteId}
+        order by posicao, criado_em, quadro_id for update`;
+      return ls.map((l) => ({ quadroId: l.quadro_id, padrao: l.padrao, posicao: l.posicao, criadoEm: ms(l.criado_em) }));
+    },
+    /**
+     * Serializa o que muda os quadros de um bot (criar o 1º, vincular, desvincular, padrão) até o fim da transação: sem o
+     * índice "um por bot" (0156), é esta trava que impede dois "primeiro quadro" ao mesmo tempo.
+     */
+    async travarBot(agenteId: string): Promise<void> {
+      await conn`select pg_advisory_xact_lock(hashtextextended(${`quadros-do-bot:${escopo.tenantId}:${agenteId}`}, 0))`;
+    },
+    /** Põe o quadro no bot (no fim da lista). Padrão se o bot não tem outro. false = já estava. */
+    async vincular(quadroId: string, agenteId: string): Promise<boolean> {
+      const r = await conn`
+        insert into quadro_bots (tenant_id, owner_id, quadro_id, agente_id, padrao, posicao)
+        select ${escopo.tenantId}, ${escopo.pessoaId}, ${quadroId}, ${agenteId},
+          not exists (select 1 from quadro_bots where ${dona()} and agente_id = ${agenteId} and padrao),
+          coalesce((select max(posicao) + 1 from quadro_bots where ${dona()} and agente_id = ${agenteId}), 0)
+        on conflict do nothing`;
+      return r.count > 0;
+    },
+    /** Tira o quadro do bot. Devolve se era o padrão (quem chama escolhe o próximo), ou null se não estava. */
+    async desvincular(quadroId: string, agenteId: string): Promise<{ eraPadrao: boolean } | null> {
+      const [l] = await conn<{ padrao: boolean }[]>`delete from quadro_bots where ${dona()} and quadro_id = ${quadroId} and agente_id = ${agenteId} returning padrao`;
+      return l ? { eraPadrao: l.padrao } : null;
+    },
+    /** O quadro vira o padrão do bot (o de antes deixa de ser; a ordem respeita o índice parcial de um padrão por bot). */
+    async definirPadrao(agenteId: string, quadroId: string): Promise<boolean> {
+      await conn`update quadro_bots set padrao = false where ${dona()} and agente_id = ${agenteId} and padrao and quadro_id <> ${quadroId}`;
+      const r = await conn`update quadro_bots set padrao = true where ${dona()} and agente_id = ${agenteId} and quadro_id = ${quadroId}`;
+      return r.count > 0;
+    },
+    /** Os ids dos quadros de que o bot é dono (quadros.agente_id), travados: o excluir do bot passa o dono adiante. */
+    async doDonoTravados(agenteId: string): Promise<string[]> {
+      const ls = await conn<{ id: string }[]>`select id from quadros where ${dona()} and agente_id = ${agenteId} order by criado_em, id for update`;
+      return ls.map((l) => l.id);
+    },
+    /** O dono do quadro (o anfitrião, quadros.agente_id) passa a outro bot vinculado: o dono saiu ou foi excluído. */
+    async transferirDono(quadroId: string, agenteId: string): Promise<void> {
+      await conn`update quadros set agente_id = ${agenteId}, atualizado_em = clock_timestamp() where ${dona()} and id = ${quadroId}`;
+    },
+    /** Muda o nome e o projeto (undefined = mantém). */
+    async renomear(quadroId: string, c: { nome?: string | null; projetoId?: string | null }): Promise<Quadro | null> {
+      const [l] = await conn<LinhaQuadro[]>`
+        update quadros set nome = case when ${c.nome !== undefined}::boolean then ${c.nome ?? null} else nome end,
+          projeto_id = case when ${c.projetoId !== undefined}::boolean then ${c.projetoId ?? null}::uuid else projeto_id end,
+          atualizado_em = clock_timestamp()
+        where ${dona()} and id = ${quadroId}
+        returning ${conn.unsafe(COLUNAS_Q)}`;
       return l ? paraQuadro(l) : null;
+    },
+    /** Quantos quadros a pessoa tem (o teto por pessoa, S10). */
+    async contar(): Promise<number> {
+      const [l] = await conn<{ n: number }[]>`select count(*)::int as n from quadros where ${dona()}`;
+      return l?.n ?? 0;
     },
     /**
      * O quadro da tarefa que este turno executa (o turno de uma tarefa mexe no quadro dela). A tarefa guarda o turno que a
@@ -270,20 +369,26 @@ export function quadrosRepo(conn: Conn, escopo: Escopo) {
     /** Os quadros da pessoa (de bots não excluídos), mais recente primeiro. */
     async listar(): Promise<Quadro[]> {
       const ls = await conn<LinhaQuadro[]>`
-        select q.id, q.agente_id, to_char(q.prazo, 'YYYY-MM-DD') as prazo, q.meta, q.cumprido_em, q.resumo, q.colunas, q.criado_em, q.atualizado_em, q.meta_desde, q.prefixo, q.modo_conversa
+        select ${conn.unsafe(colunasQ("q"))}
         from quadros q join agentes a on a.tenant_id = q.tenant_id and a.id = q.agente_id
         where q.tenant_id = ${escopo.tenantId} and q.owner_id = ${escopo.pessoaId} and a.excluido_em is null
         order by q.atualizado_em desc`;
       return ls.map(paraQuadro);
     },
-    /** null = o bot já tem quadro (um por anfitrião). */
-    async criar(q: { agenteId: string; meta: string | null; prazo: string | null; metaDesde?: number; prefixo?: string | null }): Promise<Quadro | null> {
+    /**
+     * Cria o quadro e põe o dono em quadro_bots (padrão se o bot não tem outro). null = o índice "um por bot" (0133) ainda
+     * existe e o bot já tem quadro (antes da 0156): o `on conflict` sem alvo pega qualquer índice único sem abortar a
+     * transação.
+     */
+    async criar(q: { agenteId: string; meta: string | null; prazo: string | null; metaDesde?: number; prefixo?: string | null; nome?: string | null; projetoId?: string | null }): Promise<Quadro | null> {
       const [l] = await conn<LinhaQuadro[]>`
-        insert into quadros (tenant_id, owner_id, agente_id, meta, prazo, meta_desde, prefixo)
-        values (${escopo.tenantId}, ${escopo.pessoaId}, ${q.agenteId}, ${q.meta}, ${q.prazo}::date, coalesce(${q.metaDesde === undefined ? null : new Date(q.metaDesde)}::timestamptz, now()), ${q.prefixo ?? null})
-        on conflict (tenant_id, agente_id) do nothing
+        insert into quadros (tenant_id, owner_id, agente_id, meta, prazo, meta_desde, prefixo, nome, projeto_id)
+        values (${escopo.tenantId}, ${escopo.pessoaId}, ${q.agenteId}, ${q.meta}, ${q.prazo}::date, coalesce(${q.metaDesde === undefined ? null : new Date(q.metaDesde)}::timestamptz, now()), ${q.prefixo ?? null}, ${q.nome ?? null}, ${q.projetoId ?? null}::uuid)
+        on conflict do nothing
         returning ${conn.unsafe(COLUNAS_Q)}`;
-      return l ? paraQuadro(l) : null;
+      if (!l) return null;
+      await r.vincular(l.id, q.agenteId);
+      return paraQuadro(l);
     },
     /** `metaDesde` ausente = mantém. `colunas` ausente = não mexe nelas (a foto de antes da NOD-448 e quem só muda a meta). */
     async salvar(id: string, q: Pick<Quadro, "meta" | "prazo" | "cumpridoEm" | "resumo"> & { metaDesde?: number; colunas?: ColunaQuadro[] | null }): Promise<Quadro | null> {
@@ -923,6 +1028,7 @@ export function quadrosRepo(conn: Conn, escopo: Escopo) {
       return ls.map((l) => ({ tarefaId: l.tarefa_id, tipo: l.tipo, texto: l.texto, criadoEm: ms(l.criado_em) }));
     },
   };
+  return r;
 }
 
 interface LinhaPr {

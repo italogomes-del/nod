@@ -18,7 +18,7 @@ const t = (id: string, extra: Partial<TarefaDto> = {}): TarefaDto => ({
   pergunta: null, resposta: null, deFora: false, turnoId: null, criadoEm: 1, mudadoEm: 1, terminadaEm: null, execucao: null, agenteNome: "Ada", numero: 1, codigo: `ZE-${id}`, branch: "", ...extra,
 });
 const q = (tarefas: TarefaDto[], extra: Partial<QuadroDto> = {}): QuadroDto => ({
-  id: "q1", agenteId: "a", prefixo: "ZE", modoConversa: "individual", meta: "Lançar o app", prazo: null, cumpridoEm: null, resumo: null, criadoEm: 1, atualizadoEm: 1, metaDesde: 1, agenteNome: "Ada",
+  id: "q1", agenteId: "a", nome: null, projetoId: null, prefixo: "ZE", modoConversa: "individual", meta: "Lançar o app", prazo: null, cumpridoEm: null, resumo: null, criadoEm: 1, atualizadoEm: 1, metaDesde: 1, agenteNome: "Ada",
   colunas: colunasDto(COLUNAS_PADRAO), tarefas, ultimoLote: null, feitas: 0, total: tarefas.length,
   voce: { pessoaId: EU, papel: "membro", podeDesfazer: false }, dona: { pessoaId: DONA, nome: "Marlon" },
   membros: [{ pessoaId: EU, nome: "Bia", adicionadoEm: 1 }, { pessoaId: ANA, nome: "Ana", adicionadoEm: 1 }], comentarios: [], ...extra,

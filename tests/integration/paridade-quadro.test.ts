@@ -357,7 +357,9 @@ describeIntegracao("paridade tela × chat do quadro.* (NOD-442, ADR-135)", () =>
   ];
 
   it("cobre exatamente as ações do quadro, e o executor de cada uma existe", () => {
-    expect(CENARIOS.map((c) => c.id).sort()).toEqual(ACOES_QUADRO.map((a) => a.id).sort());
+    // ADA-14: as dos N quadros têm o contrato próprio (paridade-quadros-do-bot.test.ts), que cobre as dele.
+    const deste = ACOES_QUADRO.filter((a) => a.chat.contrato === "tests/integration/paridade-quadro.test.ts");
+    expect(CENARIOS.map((c) => c.id).sort()).toEqual(deste.map((a) => a.id).sort());
     expect(Object.keys(EXECUTORES_QUADRO).sort()).toEqual(ACOES_QUADRO.map((a) => a.id).sort());
   });
 

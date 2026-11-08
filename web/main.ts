@@ -607,11 +607,11 @@ const quadroNaTela = criarQuadroNaTela(document, {
     // NOD-422 (PR 2): a trilha do quadro (só ids); fundo, a falha some em silêncio.
     trilha: (e) => trilharQuadro(e),
     // QA do PR #623 (D4): depois de mover, a conversa do bot destino com a tarefa aberta no Quadro (o caminho do link).
-    irParaTarefa: (agenteId, tarefaId) => {
+    irParaTarefa: (agenteId, tarefaId, quadroId) => {
       const bot = botGerido(agenteId);
       if (!bot) return false;
       navegar({ tipo: "conversa", conversaId: bot.conversaId, agenteId: bot.id });
-      quadroNaTela.abrirTarefa(bot.id, tarefaId);
+      quadroNaTela.abrirTarefa(bot.id, tarefaId, quadroId);
       return true;
     },
     // ADA-5 (definido em 2026-11-04): a pílula é o composer do chat: a mesma lista "/", os mesmos rascunhos e a mesma fila de
@@ -8573,7 +8573,7 @@ async function abrirTarefaGuardada(): Promise<void> {
       return;
     }
     navegar({ tipo: "conversa", conversaId: bot.conversaId, agenteId: bot.id });
-    quadroNaTela.abrirTarefa(bot.id, r.tarefaId);
+    quadroNaTela.abrirTarefa(bot.id, r.tarefaId, r.quadroId);
   } catch (e) {
     // Código que não existe (ou de outra pessoa: a RLS dá 404): diz qual; o resto (rede) segue o erro de sempre.
     if (e instanceof ErroApi && e.status === 404) dispatch({ tipo: "erro", erro: { codigo: e.codigo, mensagem: `Tarefa ${codigo} não encontrada.`, status: 404 } });

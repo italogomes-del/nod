@@ -45,6 +45,7 @@ import type { ComentarioDto, ComentarioTarefa, EntradaHistoricoDto, GrupoColuna,
 import type { FiltroImportacao, ImportacaoDto, PreviaDaTela } from "../../src/contracts/quadro-importacao.ts";
 import type { PreviaAssumir, ResultadoAssumir } from "../../src/contracts/quadro-assumir.ts";
 import type { EventoTrilhaQuadro } from "../../src/contracts/trilha-quadro.ts";
+import type { Projeto, QuadrosDoBotDto } from "../../src/contracts/quadros-do-bot.ts";
 import type { EstadoExecucao, ExecucoesDaTarefa } from "../../src/contracts/quadro-execucoes.ts";
 import type { AppDto, PaginasDto } from "../../src/contracts/apps.ts";
 import type { AppCanvasDto, CanvasItemDto, ComentarioCanvasDto, NivelCanvasDto, NovoComentarioDto, VistaCanvasDto } from "../../src/contracts/canvas.ts";
@@ -201,14 +202,38 @@ export type MutacaoQuadro = { ok: true; quadro: QuadroDto | null; lote: LoteQuad
 /** NOD-418: Repetir, Cancelar e recado devolvem o quadro, o trabalho que ficou e a vista da tarefa aberta. */
 export type MutacaoDoTrabalho = MutacaoQuadro & { trabalho?: { numero: number | null; estado: EstadoExecucao | null; entregue?: "agora" | "quando_comecar" | "novo"; cancelados?: number }; trabalhos?: ExecucoesDaTarefa };
 
+/**
+ * ADA-14 (ADR-153): toda rota `agentes/:id/quadro…` vai para o quadro aberto daquele bot (`?quadro=`). Sem quadro escolhido,
+ * o caminho fica como está e o servidor usa o padrão do bot. Assim as mutações da tela (tarefas, colunas, meta) não
+ * precisam carregar o id: quem troca de quadro é o seletor, com `usarQuadro`.
+ */
+export function comQuadroAberto(caminho: string, abertos: ReadonlyMap<string, string>): string {
+  const m = /^agentes\/([^/?]+)\/quadro(?=\/|\?|$)/.exec(caminho);
+  if (!m) return caminho;
+  let id: string;
+  try { id = decodeURIComponent(m[1]!); } catch { return caminho; }
+  const q = abertos.get(id);
+  if (!q || /[?&]quadro=/.test(caminho)) return caminho;
+  return `${caminho}${caminho.includes("?") ? "&" : "?"}quadro=${encodeURIComponent(q)}`;
+}
+
 export function criarApi(escopo: Escopo) {
   const base = `/api/t/${encodeURIComponent(escopo.tenantId)}`;
-  const get = <T>(caminho: string) => pedirDeNovoSeCair<T>("GET", `${base}/${caminho}`);
-  const post = <T>(caminho: string, corpo?: unknown) => pedir<T>("POST", `${base}/${caminho}`, corpo ?? {});
-  const patch = <T>(caminho: string, corpo: unknown) => pedir<T>("PATCH", `${base}/${caminho}`, corpo);
-  const del = <T>(caminho: string) => pedir<T>("DELETE", `${base}/${caminho}`);
+  /** ADA-14: o quadro aberto de cada bot (só em memória; o servidor guarda o último aberto). */
+  const abertos = new Map<string, string>();
+  const url = (caminho: string) => `${base}/${comQuadroAberto(caminho, abertos)}`;
+  const get = <T>(caminho: string) => pedirDeNovoSeCair<T>("GET", url(caminho));
+  const post = <T>(caminho: string, corpo?: unknown) => pedir<T>("POST", url(caminho), corpo ?? {});
+  const patch = <T>(caminho: string, corpo: unknown) => pedir<T>("PATCH", url(caminho), corpo);
+  const del = <T>(caminho: string) => pedir<T>("DELETE", url(caminho));
   return {
     escopo,
+    /** ADA-14: escolhe o quadro que as rotas do bot usam (null volta ao padrão). */
+    usarQuadro: (agenteId: string, quadroId: string | null) => { if (quadroId) abertos.set(agenteId, quadroId); else abertos.delete(agenteId); },
+    /** ADA-14: o seletor (os quadros do bot, os projetos e o aberto) e a troca, que o servidor guarda como o último aberto. */
+    quadrosDoBot: async (agenteId: string) => (await get<{ quadros: QuadrosDoBotDto }>(`agentes/${encodeURIComponent(agenteId)}/quadros`)).quadros,
+    abrirQuadroDoBot: (agenteId: string, quadroId: string) => pedir<{ ok: true }>("PUT", `${base}/agentes/${encodeURIComponent(agenteId)}/quadros/aberto`, { quadro: quadroId }),
+    criarProjeto: async (campos: { nome: string }) => (await post<{ projeto: Projeto }>("projetos", campos)).projeto,
     workspace: (id: string) => get<WorkspaceDto>(`conversas/${id}/workspace`),
     pastasWorkspace: (id: string, caminho?: string) => post<{ caminho: string; pai: string; selecionavel: boolean; pastas: { nome: string; caminho: string }[] }>(`conversas/${id}/workspace/pastas`, { caminho }),
     escolherWorkspace: (id: string, pasta: string) => post(`conversas/${id}/workspace`, { pasta }),
@@ -290,7 +315,7 @@ export function criarApi(escopo: Escopo) {
     /** NOD-442 (ADR-135): a aba Quadro de um bot. Cada mutação devolve o quadro montado e o lote (o Desfazer usa o id dele). */
     quadro: (agenteId: string) => get<{ quadro: QuadroDto | null }>(`agentes/${encodeURIComponent(agenteId)}/quadro`),
     /** NOD-415 (ADR-141): meta e prazo opcionais; meta null tira (fluxo contínuo). */
-    criarQuadro: (agenteId: string, campos: { meta?: string | null; prazo?: string | null }) => post<MutacaoQuadro>(`agentes/${encodeURIComponent(agenteId)}/quadro`, campos),
+    criarQuadro: (agenteId: string, campos: { meta?: string | null; prazo?: string | null; nome?: string; projeto?: string | null }) => post<MutacaoQuadro>(`agentes/${encodeURIComponent(agenteId)}/quadro`, campos),
     editarQuadro: (agenteId: string, campos: { meta?: string | null; prazo?: string | null }) => patch<MutacaoQuadro>(`agentes/${encodeURIComponent(agenteId)}/quadro`, campos),
     removerQuadro: (agenteId: string) => del<MutacaoQuadro>(`agentes/${encodeURIComponent(agenteId)}/quadro`),
     mudarTarefa: (agenteId: string, tarefaId: string, campos: { status?: StatusTarefa | string; agente?: string | null; titulo?: string; descricao?: string; sem_iniciar?: boolean }) =>

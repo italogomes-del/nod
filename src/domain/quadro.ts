@@ -10,6 +10,8 @@ import { conferirExclusao, conferirSaidaDaEspera, conferirTravas, type DadoDoMov
 import { codigoDaTarefa, formatarCodigo, lerCodigo } from "./codigo-tarefa.ts";
 import { ERROS_FALA, escolherFala, type Fala } from "./fala-da-pessoa.ts";
 import { identificadorDaUrl } from "./importar-linear.ts";
+import { validarNomeQuadro } from "./quadros-do-bot.ts";
+import { LIMITES_QUADROS } from "../contracts/quadros-do-bot.ts";
 
 /**
  * O quadro-agente, puro (definido em 2026-10-31, NOD-442). Lê e confere as operações que chegam de fora (a ferramenta do
@@ -106,6 +108,21 @@ export function erroDoModo(modo: unknown): string | null {
   return `modo inválido: use ${MODOS_ESCOLHIVEIS.join(" ou ")}`;
 }
 
+/** ADA-14 (ADR-153): o nome do quadro e o projeto (id ou nome; null = solto), só quando vierem. */
+function lerNomeEProjeto(v: Record<string, unknown>): { nome?: string | null; projeto?: string | null } | ErroOp {
+  const r: { nome?: string | null; projeto?: string | null } = {};
+  if (v.nome !== undefined) {
+    const n = validarNomeQuadro(v.nome);
+    if ("erro" in n) return n;
+    r.nome = n.nome;
+  }
+  if (v.projeto !== undefined) {
+    const p = nulavel(v.projeto, "projeto", LIMITES_QUADROS.nome);
+    if (falhou(p)) return p;
+    r.projeto = p ? p.trim() || null : null;
+  }
+  return r;
+}
 /** ADA-15: `pela_fala` (true) e `mensagem_id` (uuid). `mensagem_id` sem `pela_fala` não diz nada e é recusado. */
 function lerPelaFala(v: Record<string, unknown>): PelaFala | ErroOp {
   if (v.pela_fala !== undefined && typeof v.pela_fala !== "boolean") return { erro: "pela_fala não é booleano" };
@@ -125,7 +142,9 @@ export function lerOp(v: unknown): OpQuadro | ErroOp {
       const prazo = nulavel(v.prazo, "prazo", 10);
       if (falhou(prazo)) return prazo;
       if (prazo && !prazoValido(prazo)) return { erro: "prazo fora do formato AAAA-MM-DD" };
-      return { tipo: "criar_quadro", meta: meta || null, prazo: prazo ?? null };
+      const extra = lerNomeEProjeto(v);
+      if (falhou(extra)) return extra;
+      return { tipo: "criar_quadro", meta: meta || null, prazo: prazo ?? null, ...extra };
     }
     case "editar_quadro": {
       // null ou "" tira a meta (volta ao fluxo contínuo).
@@ -134,7 +153,9 @@ export function lerOp(v: unknown): OpQuadro | ErroOp {
       const prazo = nulavel(v.prazo, "prazo", 10);
       if (falhou(prazo)) return prazo;
       if (prazo && !prazoValido(prazo)) return { erro: "prazo fora do formato AAAA-MM-DD" };
-      return { tipo: "editar_quadro", ...(meta !== undefined ? { meta: meta || null } : {}), ...(prazo !== undefined ? { prazo } : {}) };
+      const extra = lerNomeEProjeto(v);
+      if (falhou(extra)) return extra;
+      return { tipo: "editar_quadro", ...(meta !== undefined ? { meta: meta || null } : {}), ...(prazo !== undefined ? { prazo } : {}), ...extra };
     }
     case "criar_tarefa": {
       const titulo = textoObrigatorio(v.titulo, "titulo", LIMITES_QUADRO.titulo);
@@ -531,20 +552,22 @@ export function resumoDaMeta(q: { prazo: string | null; colunas?: readonly Colun
 
 /** O que o lote fez, numa frase (a faixa do quadro e o histórico mostram). */
 export function resumoDoLote(ops: readonly OpQuadro[], frasesDasColunas: readonly string[] = []): string {
-  const n = { quadro: 0, criadas: 0, trazidas: 0, mudadas: 0, respostas: 0, meta: 0, prazo: 0 };
+  const n = { quadro: 0, criadas: 0, trazidas: 0, mudadas: 0, respostas: 0, meta: 0, prazo: 0, nome: 0, projeto: 0 };
   for (const o of ops) {
     if (o.tipo === "criar_quadro") n.quadro++;
     else if (o.tipo === "criar_tarefa") n.criadas++;
     else if (o.tipo === "importar_linear") n.trazidas += o.itens.length;
     else if (o.tipo === "mudar_tarefa" || o.tipo === "terminei") n.mudadas++;
     else if (o.tipo === "responder") n.respostas++;
-    else if (o.tipo === "editar_quadro") { if (o.meta !== undefined) n.meta++; if (o.prazo !== undefined) n.prazo++; }
+    else if (o.tipo === "editar_quadro") { if (o.meta !== undefined) n.meta++; if (o.prazo !== undefined) n.prazo++; if (o.nome !== undefined) n.nome++; if (o.projeto !== undefined) n.projeto++; }
   }
   const plural = (k: number, s: string, p: string) => `${k} ${k === 1 ? s : p}`;
   const tarefas = [
     n.quadro ? "Criou o quadro" : "",
     n.meta ? "Mudou a meta" : "",
     n.prazo ? "mudou o prazo" : "",
+    n.nome && !n.quadro ? "renomeou o quadro" : "",
+    n.projeto && !n.quadro ? "mudou o projeto" : "",
     n.criadas ? `criou ${plural(n.criadas, "tarefa", "tarefas")}` : "",
     n.trazidas ? `trouxe ${plural(n.trazidas, "tarefa", "tarefas")} do Linear` : "",
     n.mudadas ? `mudou ${plural(n.mudadas, "tarefa", "tarefas")}` : "",
@@ -1132,7 +1155,8 @@ export function planejarLote(p: {
     const erro = (e: string) => ({ erro: e, indice });
     if (op.tipo === "desfazer" || op.tipo === "remover_quadro" || op.tipo === "mover_quadro" || (OPS_DE_PESSOAS as readonly string[]).includes(op.tipo) || ehOpDeTrabalho(op)) return erro(`${op.tipo} vai sozinho na chamada`);
     // A meta entra em todo turno de tarefa do quadro: só um turno confiável a escreve (revisão rodada 3, ADR-062).
-    const escreveMeta = op.tipo === "criar_quadro" || (op.tipo === "editar_quadro" && op.meta !== undefined);
+    // ADA-14: o nome e o projeto do quadro são da organização da pessoa, como a meta: só num turno limpo.
+    const escreveMeta = op.tipo === "criar_quadro" || (op.tipo === "editar_quadro" && (op.meta !== undefined || op.nome !== undefined || op.projeto !== undefined));
     if (escreveMeta && p.origemConfiavel === false) return erro("a meta só muda num turno limpo, em que a pessoa falou com você e nada de fora entrou: peça a ela");
     // As colunas também (o nome de uma coluna entra no turno das tarefas, NOD-448): só num turno limpo.
     const mexeColuna = op.tipo === "criar_coluna" || op.tipo === "renomear_coluna" || op.tipo === "mover_coluna" || op.tipo === "remover_coluna" || op.tipo === "substituir_colunas" || op.tipo === "definir_passagem" || op.tipo === "travar_coluna";

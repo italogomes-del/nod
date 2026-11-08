@@ -17,6 +17,9 @@ import type { Deps } from "./tipos.ts";
 import type { TrabalhoFeito } from "./quadro.ts";
 import type { Turno } from "../contracts/turno.ts";
 import { registrarConsultaDoQuadro } from "./trilha-quadro.ts";
+import { OPS_QUADROS_DO_BOT, OPS_QUADROS_DO_BOT_DA_PESSOA } from "../contracts/quadros-do-bot.ts";
+import { lerOpQuadrosDoBot } from "../domain/quadros-do-bot.ts";
+import { aplicarQuadrosDoBot } from "./quadros-do-bot.ts";
 import { exibirDoQuadro } from "./raio-x.ts";
 
 /**
@@ -147,6 +150,26 @@ async function consultar(deps: Deps, agenteId: string, quadro: string | undefine
   };
 }
 
+const ehOpDosQuadros = (a: unknown): boolean => typeof a === "object" && a !== null && (OPS_QUADROS_DO_BOT as readonly unknown[]).includes((a as { tipo?: unknown }).tipo);
+
+/** As ops dos N quadros pelo chat: uma por chamada; as que mexem no que a pessoa organizou só num turno limpo dela. */
+async function opDosQuadros(deps: Deps, input: EntradaGerirQuadro, turno: Turno, limpo: boolean): Promise<SaidaGerirQuadro> {
+  const acoes = input.acoes as unknown[];
+  if (acoes.length > 1) return recusa("entrada_invalida", `${String((acoes.find(ehOpDosQuadros) as { tipo: string }).tipo)} vai sozinho na chamada`);
+  if (turno.sobProcuracaoDe != null && turno.sobProcuracaoDe !== deps.escopo.pessoaId) return recusa("nao_permitido", "neste turno, o bot só mexe na tarefa que foi pedida a ele");
+  const op = lerOpQuadrosDoBot(acoes[0]);
+  if ("erro" in op) return recusa("entrada_invalida", `ação 1: ${op.erro}`);
+  const daPessoa = (OPS_QUADROS_DO_BOT_DA_PESSOA as readonly string[]).includes(op.tipo) || op.tipo === "criar_projeto" || op.tipo === "editar_projeto" || op.tipo === "restaurar_projeto";
+  if (daPessoa && !(naConversa(turno) && limpo)) return recusa("entrada_invalida", `${op.tipo} mexe no que a pessoa organizou: só num turno em que ela falou com você e nada de fora entrou (não numa tarefa, rotina, pedido de colega ou depois de ler uma página). Diga a ela o que sugere e deixe que ela peça`);
+  const r = await aplicarQuadrosDoBot(deps, { autor: { tipo: "agente", agenteId: input.agenteId }, anfitriaoId: input.agenteId, conversaId: input.conversaId, turnoId: turno.id, op });
+  if (!r.data.ok) return { data: { ok: false, erro: r.data.erro, instrucao: `${r.data.detalhe}. ${INSTRUCAO[r.data.erro]}` }, events: r.events };
+  const d = r.data;
+  return {
+    data: { ok: true, quadro: null, lote_id: null, comecaram: [], instrucao: d.instrucao, ...(d.quadros ? { quadros_do_bot: d.quadros } : {}), ...(d.projeto ? { projeto: d.projeto } : {}), ...(d.quadroId ? { quadro_id: d.quadroId } : {}), ...(d.todos ? { todos: d.todos } : {}) },
+    ...(r.events ? { events: r.events } : {}),
+  };
+}
+
 export const gerirQuadro: CasoNod<Deps, "gerir_quadro"> = async (deps, input) => {
   const r = await gerirQuadroEmFases(deps, input, { fase: "direto" });
   if ("buscarLinear" in r) throw new Error("gerir_quadro direto não devolve busca");
@@ -173,6 +196,9 @@ export async function gerirQuadroEmFases(deps: Deps, input: EntradaGerirQuadro, 
     if (r.data.ok && r.data.quadro) await registrarConsultaDoQuadro(deps, r.data.quadro.id, input.agenteId);
     return r;
   }
+  // ADA-14 (ADR-153): as ops dos N quadros (listar, abrir, padrão, vincular, projetos) não são lote de um quadro.
+  const nQuadros = Array.isArray(input.acoes) ? (input.acoes as unknown[]).findIndex((a) => ehOpDosQuadros(a)) : -1;
+  if (nQuadros >= 0) return opDosQuadros(deps, input, turno, limpo);
   const ops = lerOps(input.acoes);
   if ("erro" in ops) return recusa("entrada_invalida", ops.indice >= 0 ? `ação ${ops.indice + 1}: ${ops.erro}` : ops.erro);
   // Quem responde ao bloqueio é a pessoa (revisão do PR #612). O bot só repassa o que ela disse a ele agora, na

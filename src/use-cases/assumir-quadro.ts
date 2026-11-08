@@ -30,13 +30,13 @@ export function configurarRotinasFora(fora: readonly string[]): void {
   ROTINAS_FORA = fora;
 }
 
-type Pedido = { autor: AutorLote; quadro?: string; anfitriaoId?: string; turnoId?: string | null };
+type Pedido = { autor: AutorLote; quadro?: string; anfitriaoId?: string; /** ADA-14: o `?quadro=` da tela. */ quadroDoBot?: string | null; turnoId?: string | null };
 type Achado = { ok: true; quadro: Quadro; agentes: Agente[]; anfitriaoNome: string };
 
 async function acharParaAssumir(deps: Deps, p: Pedido): Promise<Achado | Falha> {
   if (!(await experimentoLigado(deps))) return falha("experimento_desligado", "o quadro está desligado nos experimentos da pessoa");
   const agentes = await agentesDaPessoa(deps);
-  const achado = await acharQuadro(deps, { autor: p.autor, ops: [], executor: "catcher", turnoId: p.turnoId ?? null, ...(p.quadro !== undefined ? { quadro: p.quadro } : {}), ...(p.anfitriaoId ? { anfitriaoId: p.anfitriaoId } : {}) }, agentes);
+  const achado = await acharQuadro(deps, { autor: p.autor, ops: [], executor: "catcher", turnoId: p.turnoId ?? null, ...(p.quadro !== undefined ? { quadro: p.quadro } : {}), ...(p.anfitriaoId ? { anfitriaoId: p.anfitriaoId } : {}), ...(p.quadroDoBot ? { quadroDoBot: p.quadroDoBot } : {}) }, agentes);
   if (!achado) return falha("sem_quadro", "não há quadro para assumir a esteira");
   if ("ambiguo" in achado || "semNome" in achado) { const f = falhaDoAchado(achado, agentes); return falha(f.erro, f.detalhe); }
   const anfitriaoNome = agentes.find((a) => a.id === achado.agenteId)?.nome ?? (await deps.repos.agentes.buscar(achado.agenteId, true))?.nome ?? "quadro";
@@ -63,8 +63,8 @@ async function rotinasDoQuadro(deps: Deps, q: Quadro, agentes: readonly Agente[]
 const jaAssumiu = (nome: string) => falha("entrada_invalida", `o quadro do ${nome} já assumiu a esteira: para voltar, desfaça o assumir`);
 
 /** A prévia da tela (GET .../quadro/assumir): a mesma lista do card. Só lê. */
-export const previaAssumir: CasoDeUso<{ agenteId: string }, PreviaAssumir | Falha> = async (deps, input) => {
-  const a = await acharParaAssumir(deps, { autor: { tipo: "pessoa" }, anfitriaoId: input.agenteId });
+export const previaAssumir: CasoDeUso<{ agenteId: string; quadro?: string | null }, PreviaAssumir | Falha> = async (deps, input) => {
+  const a = await acharParaAssumir(deps, { autor: { tipo: "pessoa" }, anfitriaoId: input.agenteId, quadroDoBot: input.quadro ?? null });
   if (!a.ok) return { data: a };
   const { rotinas, fora } = await rotinasDoQuadro(deps, a.quadro, a.agentes);
   return { data: { ok: true, anfitriaoNome: a.anfitriaoNome, rotinas, fora, assumidoEm: await deps.repos.quadroImportacoes.assumidoEm(a.quadro.id) } };
@@ -191,13 +191,13 @@ export async function desfazerAssumir(deps: Deps, p: Pedido & { autoria?: Autori
  * A ação `quadro.assumir` pela tela. Sem `desfazer`, o clique é a confirmação: grava o card na conversa do anfitrião e o
  * decide na hora (só as rotinas da prévia que a pessoa viu, em `rotinas`). Com `desfazer`, desfaz.
  */
-export async function assumirPelaTela(deps: Deps, p: { anfitriaoId: string; desfazer?: boolean; rotinas?: readonly string[] }): Promise<{ data: ResultadoAssumir | Falha; events: RuntimeEvent[] }> {
+export async function assumirPelaTela(deps: Deps, p: { anfitriaoId: string; quadroDoBot?: string | null; desfazer?: boolean; rotinas?: readonly string[] }): Promise<{ data: ResultadoAssumir | Falha; events: RuntimeEvent[] }> {
   if (p.desfazer) {
-    const d = await desfazerAssumir(deps, { autor: { tipo: "pessoa" }, anfitriaoId: p.anfitriaoId });
+    const d = await desfazerAssumir(deps, { autor: { tipo: "pessoa" }, anfitriaoId: p.anfitriaoId, quadroDoBot: p.quadroDoBot ?? null });
     if (!d.data.ok) return { data: d.data, events: d.events };
     return { data: { ok: true, assumidoEm: null, pausadas: [], reativadas: d.data.reativadas, propostaId: null }, events: d.events };
   }
-  const a = await acharParaAssumir(deps, { autor: { tipo: "pessoa" }, anfitriaoId: p.anfitriaoId });
+  const a = await acharParaAssumir(deps, { autor: { tipo: "pessoa" }, anfitriaoId: p.anfitriaoId, quadroDoBot: p.quadroDoBot ?? null });
   if (!a.ok) return { data: a, events: [] };
   if (await deps.repos.quadroImportacoes.assumido(a.quadro.id)) return { data: jaAssumiu(a.anfitriaoNome), events: [] };
   const conversa = await deps.repos.conversas.buscarPropriaDoAgente(a.quadro.agenteId);

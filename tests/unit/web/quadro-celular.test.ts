@@ -16,7 +16,7 @@ const t = (id: string, extra: Partial<TarefaDto> = {}): TarefaDto => ({
   pergunta: null, resposta: null, deFora: false, turnoId: null, criadoEm: 1, mudadoEm: 1, execucao: null, agenteNome: "Ada", numero: null, codigo: `VER-${id}`, branch: "", ...extra,
 });
 const q = (tarefas: TarefaDto[]): QuadroDto => ({
-  id: "q1", agenteId: "a", modoConversa: "individual", prefixo: null, meta: "Meta", prazo: null, cumpridoEm: null, metaDesde: 1, resumo: null, criadoEm: 1, atualizadoEm: 1, agenteNome: "Ada",
+  id: "q1", agenteId: "a", modoConversa: "individual", prefixo: null, nome: null, projetoId: null, meta: "Meta", prazo: null, cumpridoEm: null, metaDesde: 1, resumo: null, criadoEm: 1, atualizadoEm: 1, agenteNome: "Ada",
   colunas: colunasDto(COLUNAS_PADRAO), tarefas, ultimoLote: null, feitas: 0, total: tarefas.length,
 });
 type Opcoes = Parameters<typeof quadroDaMeta>[0];

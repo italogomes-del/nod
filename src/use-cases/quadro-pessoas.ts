@@ -310,14 +310,15 @@ export async function aplicarPessoas(deps: Deps, p: PedidoLote, q: Quadro, op: O
 }
 
 /** O quadro e quem lê, na porta certa: o dela (pelo bot anfitrião ou pelo id) ou o de outra pessoa em que ela participa. */
-async function comQuadro<T>(deps: Deps, ref: { agenteId?: string; quadroId?: string }, fn: (dd: Deps, q: Quadro, leitor: string) => Promise<T>): Promise<T> {
+async function comQuadro<T>(deps: Deps, ref: { agenteId?: string; quadroId?: string; quadro?: string | null }, fn: (dd: Deps, q: Quadro, leitor: string) => Promise<T>): Promise<T> {
   // NOD-455 (decisão 2): o próprio quadro (e a rota do bot) segue o experimento de quem lê; o de outra pessoa, o da dona
   // (dentro da porta). Quem participa vê o quadro da dona mesmo com o experimento dela desligado e fora da flag
   // NOD_QUADROS: valem a chave e a flag da dona (revisão 6, ADR-141 §6).
   const ligado = await experimentoLigado(deps);
   if (ref.agenteId && !ligado) throw new ErroDeDominio("nao_permitido", { cause: "experimento quadro desligado" });
   const repo = deps.repos.quadros;
-  const proprio = ref.agenteId ? await repo.doAgente(ref.agenteId) : ref.quadroId && ehUuid(ref.quadroId) ? await repo.buscar(ref.quadroId) : null;
+  // ADA-14: pela rota do bot, o quadro escolhido (`?quadro=`, se for dele); sem ele, o padrão.
+  const proprio = ref.agenteId ? await repo.daTela(ref.agenteId, ref.quadro) : ref.quadroId && ehUuid(ref.quadroId) ? await repo.buscar(ref.quadroId) : null;
   if (proprio) {
     if (!ligado) throw new ErroDeDominio("nao_permitido", { cause: "experimento quadro desligado" });
     return fn(deps, proprio, deps.escopo.pessoaId);
@@ -347,7 +348,7 @@ export const quadrosCompartilhados: CasoDeUso<Record<string, never>, { quadros: 
  * NOD-443 (D1, D8): o mural de Atividade. Só os lotes que alguém pediu (a tarefa que um bot andou sozinho não entra),
  * agrupados e assinados ("Ana, pela Ada"). Filtros: a pessoa e a tarefa (código).
  */
-export const muralDoQuadro: CasoDeUso<{ agenteId?: string; quadroId?: string; pessoa?: string; tarefa?: string }, { linhas: LinhaMuralDto[] }> = async (deps, input) => {
+export const muralDoQuadro: CasoDeUso<{ agenteId?: string; quadroId?: string; quadro?: string | null; pessoa?: string; tarefa?: string }, { linhas: LinhaMuralDto[] }> = async (deps, input) => {
   const linhas = await comQuadro(deps, input, async (dd, q, leitor) => {
     const repo = dd.repos.quadros;
     const lotes = await repo.lotes(q.id);
