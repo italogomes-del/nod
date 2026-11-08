@@ -327,6 +327,8 @@ export function criarApi(escopo: Escopo) {
       post<MutacaoDoTrabalho>(`agentes/${encodeURIComponent(agenteId)}/quadro/tarefas/${encodeURIComponent(tarefaId)}/trabalhos/repetir`),
     cancelarTrabalho: (agenteId: string, tarefaId: string) =>
       post<MutacaoDoTrabalho>(`agentes/${encodeURIComponent(agenteId)}/quadro/tarefas/${encodeURIComponent(tarefaId)}/trabalhos/cancelar`),
+    acordarTrabalho: (agenteId: string, tarefaId: string) =>
+      post<MutacaoDoTrabalho>(`agentes/${encodeURIComponent(agenteId)}/quadro/tarefas/${encodeURIComponent(tarefaId)}/trabalhos/acordar`),
     recadoTrabalho: (agenteId: string, tarefaId: string, texto: string) =>
       post<MutacaoDoTrabalho>(`agentes/${encodeURIComponent(agenteId)}/quadro/tarefas/${encodeURIComponent(tarefaId)}/trabalhos/recado`, { texto }),
     desfazerLoteQuadro: (agenteId: string, loteId: string) =>

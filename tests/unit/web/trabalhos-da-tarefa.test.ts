@@ -2,14 +2,14 @@ import { describe, expect, it } from "vitest";
 import type { ExecucaoDto, ExecucoesDaTarefa } from "../../../src/contracts/quadro-execucoes.ts";
 import { ErroApi } from "../../../web/lib/erro-api.ts";
 import { atividadeComFrame, criarTrabalhosDaTarefa, turnoEscutado, type ApiDosTrabalhos } from "../../../web/lib/trabalhos-da-tarefa.ts";
-import { logDoTrabalho, secaoDoTrabalho, type VistaDoTrabalho } from "../../../web/telas/trabalhos-da-tarefa.ts";
+import { fraseDaVolta, logDoTrabalho, secaoDoTrabalho, type VistaDoTrabalho } from "../../../web/telas/trabalhos-da-tarefa.ts";
 
 /** NOD-418, direção C "só o atual": o trabalho da tarefa aberta (a linha, os passos ao vivo, os anteriores, as ações). */
 
 const MAL = `<img src=x onerror="alert(1)">`;
 const hora = () => "10:00";
 const exec = (p: Partial<ExecucaoDto> & Pick<ExecucaoDto, "id" | "numero" | "estado">): ExecucaoDto =>
-  ({ origem: "inicio", turnoId: `t-${p.id}`, turnoAtual: `t-${p.id}`, motivo: null, criadoEm: 0, comecouEm: null, ultimaFrase: null, tentativa: null, esperando: false, novaTentativaEm: null, ...p });
+  ({ origem: "inicio", turnoId: `t-${p.id}`, turnoAtual: `t-${p.id}`, motivo: null, criadoEm: 0, comecouEm: null, ultimaFrase: null, tentativa: null, esperando: false, novaTentativaEm: null, saida: null, volta: null, ...p });
 const dados = (execucoes: ExecucaoDto[], extra: Partial<ExecucoesDaTarefa> = {}): ExecucoesDaTarefa => ({ execucoes, recados: [], conversaId: "conv-beto", semAgente: false, ...extra });
 const vista = (p: Partial<VistaDoTrabalho>): VistaDoTrabalho => ({
   tarefaId: "tar", dados: null, erro: false, bloqueada: false, agenteId: "beto", conversaAtual: "conv-ana", atividade: undefined,
@@ -139,6 +139,7 @@ describe("o controle", () => {
       trabalhosDaTarefa: async () => { chamadas.push("listar"); return atual; },
       repetirTrabalho: async () => { chamadas.push("repetir"); if (falhaNoRepetir) throw falhaNoRepetir; atual = dados([exec({ id: "c", numero: 3, estado: "fila", origem: "repetir" }), ...atual.execucoes]); return { ok: true, quadro: null, trabalhos: atual }; },
       cancelarTrabalho: async () => { chamadas.push("cancelar"); return { ok: true, quadro: null, trabalhos: atual }; },
+      acordarTrabalho: async () => { chamadas.push("acordar"); return { ok: true, quadro: null, trabalhos: atual }; },
       recadoTrabalho: async (_a, _t, texto) => { chamadas.push(`recado:${texto}`); return { ok: true, quadro: null, trabalho: { entregue: "agora" }, trabalhos: atual }; },
     };
     const log = { dataset: { trabalho: "" } as Record<string, string | undefined>, innerHTML: "" };
@@ -192,6 +193,15 @@ describe("o controle", () => {
     parado.t.aoClicar("trab-repetir");
     await esperar();
     expect(parado.h()).toContain("A tarefa não está em andamento: mova-a antes.");
+  });
+
+  it("ADA-232: Acordar agora chama a API e relê", async () => {
+    const m = montar(dados([exec({ id: "a", numero: 1, estado: "rodando", esperando: true, volta: { motivo: "x", em: 1, quando: null, prUrl: null } })]));
+    m.t.abrir("ag", "tar");
+    await esperar();
+    expect(m.t.aoClicar("trab-acordar")).toBe(true);
+    await esperar();
+    expect(m.chamadas).toEqual(["listar", "acordar"]);
   });
 
   it("o recado manda o texto e avisa onde entrou", async () => {
@@ -276,5 +286,28 @@ describe("o controle", () => {
     m.t.aoFrame({ tipo: "turno.encerrado", dados: {} });
     await esperar();
     expect(m.chamadas).toEqual(["listar"]);
+  });
+});
+
+describe("ADA-232: Volto quando… · Acordar agora", () => {
+  const ci = { motivo: "a CI", em: 1, quando: "ci" as const, prUrl: "https://github.com/o/r/pull/705" };
+  it("a frase diz a condição e o motivo (escapado na seção)", () => {
+    expect(fraseDaVolta(ci, hora)).toBe("Volto quando a CI do PR #705 terminar · a CI");
+    expect(fraseDaVolta({ motivo: null, em: 5, quando: null, prUrl: null }, hora)).toBe("Volto às 10:00");
+    expect(fraseDaVolta({ motivo: MAL, em: null, quando: null, prUrl: null }, hora)).toBe(`Volto depois · ${MAL}`);
+    const h = secao({ dados: dados([exec({ id: "a", numero: 1, estado: "rodando", esperando: true, volta: { ...ci, motivo: MAL } })]) });
+    expect(h).not.toContain(MAL);
+    expect(h).toContain('data-act="trab-acordar"');
+    expect(h).toContain("Acordar agora");
+  });
+  it("sem volta marcada não há Acordar agora", () => {
+    expect(secao({ dados: dados([exec({ id: "a", numero: 1, estado: "rodando" })]) })).not.toContain("trab-acordar");
+  });
+  // Regression: QA do PR #705 — a espera de um comando de fundo (esperar_comando) não se acorda: o servidor recusa
+  // ("termina sozinho"). O botão aparecia e o clique dava erro. Found by /qa on 2026-11-08.
+  it("QA: o comando de fundo mostra Volto depois, sem Acordar agora (o servidor recusa)", () => {
+    const h = secao({ dados: dados([exec({ id: "a", numero: 1, estado: "rodando", esperando: true, volta: { motivo: "os testes", em: null, quando: null, prUrl: null } })]) });
+    expect(h).toContain("Volto depois · os testes");
+    expect(h).not.toContain("trab-acordar");
   });
 });

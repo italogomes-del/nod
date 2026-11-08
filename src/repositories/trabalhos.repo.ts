@@ -3,7 +3,7 @@ import type { LoteNaTela } from "../contracts/dono.ts";
 import type { MotivoInterrupcao } from "../contracts/motivos.ts";
 import type { Executor } from "../contracts/evento.ts";
 import type { FormaTrabalho, ResumoFrente } from "../contracts/frente.ts";
-import type { EstadoTrabalho, OrigemTrabalho, Trabalho } from "../contracts/trabalho.ts";
+import { ESTADOS_ABERTOS_TRABALHO, type EstadoTrabalho, type OrigemTrabalho, type Trabalho } from "../contracts/trabalho.ts";
 import type { EstadoTurno } from "../contracts/turno.ts";
 import { ENTRADA_DA_VOLTA_DA_COTA } from "../domain/cota-da-ia.ts";
 import { IDADE_MAX_PEDIDO_RETOMAVEL_MS, MOTIVOS_DE_QUEDA, MOTIVOS_FALHA_SEM_QUEDA, type PedidoParado } from "../domain/pedido-parado.ts";
@@ -105,6 +105,8 @@ export type NovoTrabalho = {
   loteId?: string | null;
   /** NOD-315 (0102): o `dono/nome` do GitHub da frente, já validado (`repoDoGithub`). */
   repo?: string | null;
+  /** ADA-232 (0153): a tarefa do quadro de onde a frente nasceu — o card conta a frente aberta como trabalhando. */
+  tarefaId?: string | null;
 };
 
 /** O que a faixa, as listas e o prompt mostram além da linha: lido junto, numa consulta. */
@@ -158,13 +160,21 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
     async criar(n: NovoTrabalho): Promise<Trabalho | null> {
       const [l] = await conn<Linha[]>`
         insert into trabalhos (tenant_id, id, owner_id, agente_id, conversa_id, titulo, origem, pedido_por_agente_id, rotina_id, trabalho_mae_id,
-          depois_de_trabalho_id, estado, sessao_cli, sessao_harness, sessao_executor, pasta, iniciado_em, pessoa_esperando, forma, lote_id, repo)
+          depois_de_trabalho_id, estado, sessao_cli, sessao_harness, sessao_executor, pasta, iniciado_em, pessoa_esperando, forma, lote_id, repo, tarefa_id)
         values (${escopo.tenantId}, ${n.id ?? conn`gen_random_uuid()`}, ${escopo.pessoaId}, ${n.agenteId}, ${n.conversaId}, ${n.titulo}, ${n.origem},
           ${n.pedidoPorAgenteId ?? null}, ${n.rotinaId ?? null}, ${n.trabalhoMaeId ?? null}, ${n.depoisDeTrabalhoId ?? null}, ${n.estado ?? "na_fila"},
           ${n.sessaoCli ?? null}, ${n.sessaoHarness ?? null}, ${n.sessaoCli ? (n.sessaoExecutor ?? null) : null}, ${n.pasta ?? null}, ${n.iniciadoEm === undefined || n.iniciadoEm === null ? null : data(n.iniciadoEm)}, ${n.pessoaEsperando === true},
-          ${n.forma ?? "task"}, ${n.loteId ?? null}, ${n.repo ?? null})
+          ${n.forma ?? "task"}, ${n.loteId ?? null}, ${n.repo ?? null}, ${n.tarefaId ?? null})
         returning ${conn.unsafe(COLUNAS)}`;
       return l ? paraTrabalho(l) : null;
+    },
+
+    /** ADA-232: das tarefas dadas, as que têm uma frente aberta (nascida delas, ainda em estado aberto). */
+    async tarefasComFrenteAberta(tarefaIds: string[]): Promise<Set<string>> {
+      if (tarefaIds.length === 0) return new Set();
+      const ls = await conn<{ tarefa_id: string }[]>`select distinct tarefa_id from trabalhos
+        where tenant_id = ${escopo.tenantId} and tarefa_id = any(${tarefaIds}::uuid[]) and forma = 'frente' and estado = any(${[...ESTADOS_ABERTOS_TRABALHO]}::text[])`;
+      return new Set(ls.map((l) => l.tarefa_id));
     },
 
     async buscar(id: string): Promise<Trabalho | null> {

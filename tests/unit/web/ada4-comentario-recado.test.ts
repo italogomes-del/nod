@@ -132,7 +132,7 @@ describe("ADA-4: comentário otimista", () => {
 
 describe("ADA-4: recado otimista", () => {
   const exec = (p: Partial<ExecucaoDto>): ExecucaoDto =>
-    ({ id: "a", numero: 1, estado: "rodando", origem: "inicio", turnoId: "t-a", turnoAtual: "t-a", motivo: null, criadoEm: 0, comecouEm: null, ultimaFrase: null, tentativa: null, esperando: false, novaTentativaEm: null, ...p });
+    ({ id: "a", numero: 1, estado: "rodando", origem: "inicio", turnoId: "t-a", turnoAtual: "t-a", motivo: null, criadoEm: 0, comecouEm: null, ultimaFrase: null, tentativa: null, esperando: false, novaTentativaEm: null, saida: null, volta: null, ...p });
   const dados = (): ExecucoesDaTarefa => ({ execucoes: [exec({})], recados: [], conversaId: "conv", semAgente: false });
 
   function montar() {
@@ -352,7 +352,7 @@ describe("ADA-4: revisão 4 — comentário e recado que não se perdem", () => 
   });
 
   it("recado: a pessoa troca de tarefa com o envio em voo e ele falha: ao reabrir, o texto volta ao campo", async () => {
-    const exec = { id: "a", numero: 1, estado: "rodando", origem: "inicio", turnoId: "t-a", turnoAtual: "t-a", motivo: null, criadoEm: 0, comecouEm: null, ultimaFrase: null, tentativa: null, esperando: false, novaTentativaEm: null } as ExecucaoDto;
+    const exec = { id: "a", numero: 1, estado: "rodando", origem: "inicio", turnoId: "t-a", turnoAtual: "t-a", motivo: null, criadoEm: 0, comecouEm: null, ultimaFrase: null, tentativa: null, esperando: false, novaTentativaEm: null, saida: null, volta: null } as ExecucaoDto;
     const dados = (): ExecucoesDaTarefa => ({ execucoes: [exec], recados: [], conversaId: "conv", semAgente: false });
     const post = adiado<void>();
     const api: ApiDosTrabalhos = {
@@ -397,7 +397,7 @@ describe("ADA-4: revisão 5 — o texto que não saiu não some com o envio segu
   });
 
   it("recado: 'A' falha, a pessoa manda 'B': o campo recebe 'A' de volta", async () => {
-    const exec = { id: "a", numero: 1, estado: "rodando", origem: "inicio", turnoId: "t-a", turnoAtual: "t-a", motivo: null, criadoEm: 0, comecouEm: null, ultimaFrase: null, tentativa: null, esperando: false, novaTentativaEm: null } as ExecucaoDto;
+    const exec = { id: "a", numero: 1, estado: "rodando", origem: "inicio", turnoId: "t-a", turnoAtual: "t-a", motivo: null, criadoEm: 0, comecouEm: null, ultimaFrase: null, tentativa: null, esperando: false, novaTentativaEm: null, saida: null, volta: null } as ExecucaoDto;
     const dados = (): ExecucoesDaTarefa => ({ execucoes: [exec], recados: [], conversaId: "conv", semAgente: false });
     const posts: string[] = [];
     let post = adiado<void>();
@@ -443,7 +443,7 @@ describe("ADA-4: revisão 6 — o texto devolvido e editado não volta duplicado
   });
 
   it("recado: 'A' falha e volta ao campo, a pessoa corrige para 'A2' e manda: o campo fica vazio", async () => {
-    const exec = { id: "a", numero: 1, estado: "rodando", origem: "inicio", turnoId: "t-a", turnoAtual: "t-a", motivo: null, criadoEm: 0, comecouEm: null, ultimaFrase: null, tentativa: null, esperando: false, novaTentativaEm: null } as ExecucaoDto;
+    const exec = { id: "a", numero: 1, estado: "rodando", origem: "inicio", turnoId: "t-a", turnoAtual: "t-a", motivo: null, criadoEm: 0, comecouEm: null, ultimaFrase: null, tentativa: null, esperando: false, novaTentativaEm: null, saida: null, volta: null } as ExecucaoDto;
     const dados = (): ExecucoesDaTarefa => ({ execucoes: [exec], recados: [], conversaId: "conv", semAgente: false });
     const posts: string[] = [];
     let post = adiado<void>();
@@ -505,7 +505,7 @@ describe("ADA-4: revisão 8 — falhou na tela, troca e volta; prazo vencido sem
   });
 
   it("recado: falha com a pessoa na tarefa (o texto voltou ao campo e foi editado), ela troca e reabre: o editado volta", async () => {
-    const exec = { id: "a", numero: 1, estado: "rodando", origem: "inicio", turnoId: "t-a", turnoAtual: "t-a", motivo: null, criadoEm: 0, comecouEm: null, ultimaFrase: null, tentativa: null, esperando: false, novaTentativaEm: null } as ExecucaoDto;
+    const exec = { id: "a", numero: 1, estado: "rodando", origem: "inicio", turnoId: "t-a", turnoAtual: "t-a", motivo: null, criadoEm: 0, comecouEm: null, ultimaFrase: null, tentativa: null, esperando: false, novaTentativaEm: null, saida: null, volta: null } as ExecucaoDto;
     const dados = (): ExecucoesDaTarefa => ({ execucoes: [exec], recados: [], conversaId: "conv", semAgente: false });
     const api: ApiDosTrabalhos = { trabalhosDaTarefa: async () => dados(), recadoTrabalho: async () => { throw rede(); } };
     const log = { dataset: {} as Record<string, string | undefined>, innerHTML: "" };
@@ -528,7 +528,7 @@ describe("ADA-4: revisão 8 — falhou na tela, troca e volta; prazo vencido sem
 /** Revisão 9 do #646: a rede real (ErroApi status 0) não é recusa; o comentário em dúvida que chega limpa o campo. */
 describe("ADA-4: revisão 9 — rede real e dúvida que chega", () => {
   it("recado: a queda de rede real (status 0) dá 'Tentar de novo' com o mesmo texto; o 409 continua sem", async () => {
-    const exec = { id: "a", numero: 1, estado: "rodando", origem: "inicio", turnoId: "t-a", turnoAtual: "t-a", motivo: null, criadoEm: 0, comecouEm: null, ultimaFrase: null, tentativa: null, esperando: false, novaTentativaEm: null } as ExecucaoDto;
+    const exec = { id: "a", numero: 1, estado: "rodando", origem: "inicio", turnoId: "t-a", turnoAtual: "t-a", motivo: null, criadoEm: 0, comecouEm: null, ultimaFrase: null, tentativa: null, esperando: false, novaTentativaEm: null, saida: null, volta: null } as ExecucaoDto;
     const dados = (): ExecucoesDaTarefa => ({ execucoes: [exec], recados: [], conversaId: "conv", semAgente: false });
     let erro: unknown = rede();
     const api: ApiDosTrabalhos = { trabalhosDaTarefa: async () => dados(), recadoTrabalho: async () => { throw erro; } };
@@ -563,7 +563,7 @@ describe("ADA-4: revisão 9 — rede real e dúvida que chega", () => {
 });
 
 describe("ADA-4: revisão 10 — recado recusado ou sem resposta com o campo já ocupado", () => {
-  const exec = { id: "a", numero: 1, estado: "rodando", origem: "inicio", turnoId: "t-a", turnoAtual: "t-a", motivo: null, criadoEm: 0, comecouEm: null, ultimaFrase: null, tentativa: null, esperando: false, novaTentativaEm: null } as ExecucaoDto;
+  const exec = { id: "a", numero: 1, estado: "rodando", origem: "inicio", turnoId: "t-a", turnoAtual: "t-a", motivo: null, criadoEm: 0, comecouEm: null, ultimaFrase: null, tentativa: null, esperando: false, novaTentativaEm: null, saida: null, volta: null } as ExecucaoDto;
   const dados = (): ExecucoesDaTarefa => ({ execucoes: [exec], recados: [], conversaId: "conv", semAgente: false });
   function montar(recado: ApiDosTrabalhos["recadoTrabalho"]) {
     const api: ApiDosTrabalhos = { trabalhosDaTarefa: async () => dados(), recadoTrabalho: recado };

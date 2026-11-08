@@ -282,4 +282,14 @@ export const ACOES_QUADRO = [
     chat: vivo,
     casoDeUso: "quadro.recado_trabalho",
   },
+  // ADA-232 (ADR-155): "Acordar agora" no detalhe da tarefa — a volta marcada (hora ou CI) dispara já, na mesma cadeia.
+  {
+    id: "quadro.acordar_trabalho",
+    titulo: "Acordar agora o trabalho de uma tarefa que espera uma volta (hora marcada ou CI)",
+    schema: objeto({ tarefa: P.tarefa }, ["tarefa"]),
+    risco: "muda",
+    cartaoNoChat: false,
+    chat: vivo,
+    casoDeUso: "quadro.acordar_trabalho",
+  },
 ] as const satisfies readonly DefinicaoAcao[];

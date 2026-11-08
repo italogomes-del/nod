@@ -51,12 +51,15 @@ export function decisoesParaAvisar<T extends TarefaComMarcas>(tarefas: readonly 
 
 export type Atraso<T> = { tarefa: T; acao: "cobrar" | "escalar"; prazoMin: number };
 
-/** As tarefas paradas além do prazo da coluna: a cobrança ao responsável primeiro, a pessoa depois de mais um prazo. */
-export function atrasosDePrazo<T extends TarefaComMarcas>(tarefas: readonly T[], colunas: readonly ColunaQuadro[], agora: number): Atraso<T>[] {
+/**
+ * As tarefas paradas além do prazo da coluna: a cobrança ao responsável primeiro, a pessoa depois de mais um prazo.
+ * ADA-232 (ADR-155): `ocupadas` = as tarefas com trabalho vivo ou volta marcada; não estão paradas e não são cobradas.
+ */
+export function atrasosDePrazo<T extends TarefaComMarcas>(tarefas: readonly T[], colunas: readonly ColunaQuadro[], agora: number, ocupadas: ReadonlySet<string> = new Set()): Atraso<T>[] {
   const saida: Atraso<T>[] = [];
   for (const t of tarefas) {
     const c = colunas.find((x) => x.id === t.status);
-    if (!c?.prazoMin || grupoDe(colunas, t.status) !== "iniciado" || esperaPessoa(colunas, t.status)) continue;
+    if (!c?.prazoMin || grupoDe(colunas, t.status) !== "iniciado" || esperaPessoa(colunas, t.status) || ocupadas.has(t.id)) continue;
     const prazoMs = c.prazoMin * 60_000;
     if (agora - t.naColunaDesde < prazoMs) continue;
     if (t.cobradaEm === null) saida.push({ tarefa: t, acao: "cobrar", prazoMin: c.prazoMin });

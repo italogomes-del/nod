@@ -1,6 +1,6 @@
 import type { MotivoFalha, MotivoInterrupcao } from "../contracts/motivos.ts";
 import type { Executor } from "../contracts/evento.ts";
-import type { DesfechoExecucao, ExecucaoQuadro, OrigemExecucao, RecadoQuadro } from "../contracts/quadro-execucoes.ts";
+import type { DesfechoExecucao, ExecucaoQuadro, OrigemExecucao, RecadoQuadro, SaidaTrabalho, VoltaDoTrabalho } from "../contracts/quadro-execucoes.ts";
 import type { EstadoTurno } from "../contracts/turno.ts";
 import type { DesfechoCadeia } from "../domain/quadro-execucoes.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
@@ -23,6 +23,8 @@ interface LinhaExecucao {
   cancelada_em: Date | null;
   tratada_em: Date | null;
   nova_tentativa_em: Date | null;
+  saida: SaidaTrabalho | null;
+  sem_saida: number;
   criado_em: Date;
 }
 interface LinhaRecado {
@@ -36,7 +38,7 @@ interface LinhaRecado {
   criado_em: Date;
 }
 
-const COLUNAS = "id, tarefa_id, numero, origem, turno_id, motivo, desfecho, cancelada_em, tratada_em, nova_tentativa_em, criado_em";
+const COLUNAS = "id, tarefa_id, numero, origem, turno_id, motivo, desfecho, cancelada_em, tratada_em, nova_tentativa_em, saida, sem_saida, criado_em";
 const COLUNAS_RECADO = "id, tarefa_id, texto, entregue_em, execucao_id, repassado_por, cancelado_em, criado_em";
 
 const paraExecucao = (l: LinhaExecucao): ExecucaoQuadro => ({
@@ -50,6 +52,8 @@ const paraExecucao = (l: LinhaExecucao): ExecucaoQuadro => ({
   canceladaEm: msOuNull(l.cancelada_em),
   tratadaEm: msOuNull(l.tratada_em),
   novaTentativaEm: msOuNull(l.nova_tentativa_em),
+  saida: l.saida,
+  semSaida: l.sem_saida,
   criadoEm: ms(l.criado_em),
 });
 const paraRecado = (l: LinhaRecado): RecadoQuadro => ({
@@ -143,6 +147,21 @@ export function quadroExecucoesRepo(conn: Conn, escopo: Escopo) {
       await conn`update quadro_execucoes set tratada_em = coalesce(tratada_em, clock_timestamp()), desfecho = coalesce(desfecho, ${desfecho}),
         motivo = coalesce(${motivo}, motivo) where ${dona()} and id = ${id}`;
     },
+    /**
+     * ADA-232: a saída do turno da cadeia que acabou de assentar concluído. Vale a última; a saída de verdade zera a conta
+     * dos reacionamentos sem saída da série (a próxima parada sem saída reaciona de novo).
+     */
+    async gravarSaida(id: string, saida: SaidaTrabalho, agora: number): Promise<void> {
+      await conn`update quadro_execucoes set saida = ${saida}, saida_em = ${new Date(agora)},
+        sem_saida = case when ${saida} = 'nenhuma' then sem_saida else 0 end
+        where ${dona()} and id = ${id}`;
+    },
+    /** ADA-232: o varredor reacionou o trabalho sem saída (a série conta mais um). Só o tratado: dois passes não contam 2x. */
+    async contarReacionamento(id: string): Promise<boolean> {
+      const r = await conn`update quadro_execucoes set sem_saida = sem_saida + 1, saida = null
+        where ${dona()} and id = ${id} and saida = 'nenhuma' and cancelada_em is null`;
+      return r.count === 1;
+    },
     /** Uma retomada nasceu na cadeia depois do tratamento: o trabalho volta a ser tratado quando ela acabar. */
     async reabrir(id: string): Promise<boolean> {
       const r = await conn`update quadro_execucoes set tratada_em = null, desfecho = null, motivo = null, nova_tentativa_em = null
@@ -201,6 +220,36 @@ export function quadroExecucoesRepo(conn: Conn, escopo: Escopo) {
       return new Map(
         ls.map((l) => [l.raiz, { estado: l.estado, motivoInterrupcao: l.motivo_interrupcao, motivoFalha: l.motivo_falha, parado: l.parado, turnoAtual: l.atual, despachadoEm: msOuNull(l.despachado_em), aguardando: l.aguardando, executor: l.executor, ultimaFrase: l.frase }]),
       );
+    },
+    /**
+     * ADA-232 (ADR-155): a volta que cada cadeia espera — a retomada pendente que ainda dorme (me_chame_as, com o motivo do
+     * turno que a marcou e a condição 'ci') ou o comando de fundo que roda (esperar_comando, com o motivo dele). Sem
+     * nenhuma das duas a cadeia não está na lista. `turnoId` = a retomada que "Acordar agora" traz para já (null no comando).
+     */
+    async voltasDasCadeias(raizes: readonly string[]): Promise<Map<string, VoltaDoTrabalho & { turnoId: string | null }>> {
+      if (raizes.length === 0) return new Map();
+      const ls = await conn<{ raiz: string; turno_id: string | null; em: Date | null; quando: "ci" | null; pr_url: string | null; motivo: string | null }[]>`
+        with recursive desce(raiz, id, n) as (
+          select id, id, 0 from turnos where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = any(${conn.array([...raizes])}::uuid[])
+          union all
+          select d.raiz, t.id, d.n + 1 from turnos t join desce d on t.tenant_id = ${escopo.tenantId} and t.retoma_turno_id = d.id where d.n < 50
+        ),
+        dorme as (
+          select distinct on (d.raiz) d.raiz, t.id as turno_id, t.acordar_em as em, t.acordar_quando as quando, t.acordar_pr_url as pr_url,
+            (select m.despertar_motivo from desce d2 join turnos m on m.tenant_id = ${escopo.tenantId} and m.id = d2.id
+              where d2.raiz = d.raiz and m.despertar_motivo is not null order by m.criado_em desc limit 1) as motivo
+          from desce d join turnos t on t.tenant_id = ${escopo.tenantId} and t.id = d.id
+          where t.estado = 'pendente' and t.parar_solicitado_em is null and t.acordar_em > clock_timestamp()
+          order by d.raiz, t.acordar_em
+        ),
+        comando as (
+          select distinct on (d.raiz) d.raiz, null::uuid as turno_id, null::timestamptz as em, null::text as quando, null::text as pr_url, x.motivo
+          from desce d join esperas x on x.tenant_id = ${escopo.tenantId} and x.turno_id = d.id and x.estado = 'rodando'
+          where d.raiz not in (select raiz from dorme)
+          order by d.raiz, x.criado_em desc
+        )
+        select * from dorme union all select * from comando`;
+      return new Map(ls.map((l) => [l.raiz, { turnoId: l.turno_id, em: msOuNull(l.em), quando: l.quando, prUrl: l.pr_url, motivo: l.motivo }]));
     },
     /**
      * O Repetir e o Cancelar soltam a cadeia antiga: as decisões abertas dela, também a `em_revisao` do revisor (ADR-115;

@@ -335,6 +335,7 @@ li.qd-card[draggable="true"] { cursor: grab; }
 .qd-ic-falhou, .qd-ic-bloq { color: var(--danger); }
 .qd-ic-ok { color: var(--success); }
 .qd-e-falhou { color: var(--ink-2); }
+.qd-e-esperando { color: var(--ink-2); } /* ADA-232: o bot marcou a volta */
 .qd-e-bloqueado { color: var(--ink-2); align-items: flex-start; }
 .qd-e-bloqueado .qd-ic { margin-top: 1px; }
 .qd-voce-frase { font-size: 12px; line-height: 1.35; color: var(--signal); font-weight: 500; overflow-wrap: anywhere; }

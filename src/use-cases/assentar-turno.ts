@@ -48,6 +48,7 @@ import { sincronizarDoTurno } from "./trabalhos.ts";
 import { propagarSessaoDoTurno } from "./sessao-do-turno.ts";
 import { esperaAoAssentar } from "./esperar-comando.ts";
 import { voltaMarcadaAoAssentar } from "./me-chame-as.ts";
+import { gravarSaidaDoTrabalho } from "./quadro-execucoes.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
 import { acoesDoTurno } from "../domain/acoes-do-turno.ts";
 
@@ -556,6 +557,8 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
   events.push(...(await continuarAprovacoesDoTurno(deps, assentado)));
   // NOD-261 (G3): o trabalho concluiu neste turno — os "Retomar" de turnos anteriores dele ficaram sem objeto.
   if (desfecho.estado === "concluido") events.push(...(await fecharRetomarSuperados(deps, assentado, agora)));
+  // ADA-232 (ADR-155): o turno de trabalho de tarefa grava a saída com que terminou (antes da volta: lê o despertar).
+  await gravarSaidaDoTrabalho(deps, turno, desfecho.estado === "concluido");
   // ADR-086: o turno marcou uma volta ("me chame às 16:00") — ela nasce agora, antes de o trabalho reler o estado.
   events.push(...(await voltaMarcadaAoAssentar(deps, turno, desfecho.estado === "concluido")));
   // ADR-099 (parte 2): o comando que o turno deixou esperando — se já acabou, a volta nasce agora; se o turno terminou

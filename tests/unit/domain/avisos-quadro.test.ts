@@ -140,6 +140,13 @@ describe("avisos do quadro: prazo da coluna", () => {
     expect(atrasosDePrazo([t], COM_PRAZO, T0 + 30 * MIN)).toEqual([{ tarefa: t, acao: "cobrar", prazoMin: 30 }]);
   });
 
+  it("ADA-232: tarefa com trabalho vivo ou volta marcada não está parada — nem cobra nem escala", () => {
+    const t = tarefa({ id: "t1", status: "revisao" });
+    const cobrada = tarefa({ id: "t2", status: "revisao", cobradaEm: T0 + 30 * MIN });
+    expect(atrasosDePrazo([t, cobrada], COM_PRAZO, T0 + 999 * MIN, new Set(["t1", "t2"]))).toEqual([]);
+    expect(atrasosDePrazo([t, cobrada], COM_PRAZO, T0 + 999 * MIN, new Set(["t2"]))).toEqual([{ tarefa: t, acao: "cobrar", prazoMin: 30 }]);
+  });
+
   it("cobrada e parada mais 30 min: avisa a pessoa uma vez; nada depois disso enquanto não muda de coluna", () => {
     const cobrada = tarefa({ id: "t1", status: "revisao", cobradaEm: T0 + 30 * MIN });
     expect(atrasosDePrazo([cobrada], COM_PRAZO, T0 + 59 * MIN)).toEqual([]);

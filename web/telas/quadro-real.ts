@@ -86,14 +86,18 @@ export function cardDaTarefa(t: TarefaDto, agente: AgenteDoQuadro, acesa = false
   // NOD-421 (🧭 da Ada): o PR mais problemático com o ponto do estado, mais "+N"; sem PR ligado, o pr_url do agente, como antes.
   const pior = t.prs?.length ? prMaisProblematico(t.prs) : null;
   const pr = pior ? { texto: `PR #${pior.numero}${t.prs!.length > 1 ? ` +${t.prs!.length - 1}` : ""}`, tom: tomDoPr(pior), titulo: estadoDoPr(pior) } : null;
+  // ADA-232: o estado numa linha. A frente aberta conta como trabalhando; a volta marcada mostra o motivo.
+  const linha = t.estadoLinha ?? null;
+  const execucao = t.execucao ?? (linha?.tipo === "trabalhando" ? "rodando" : undefined);
   const tags = [!pr && t.prUrl ? numeroDoPr(t.prUrl) : "", t.linearId ? "Linear" : "", outro ? `Esperando ${outro}` : ""].filter(Boolean);
   return {
     id: t.id,
     codigo: codigoDaTarefa(t),
     titulo: t.titulo,
     ...(resp ? { responsavel: resp } : {}),
-    ...(t.execucao ? { estado: t.execucao } : {}),
-    ...(t.execucao === "rodando" && o.agora && t.trabalhandoDesde ? { rodandoHa: haQuanto(t.trabalhandoDesde, o.agora) } : {}),
+    ...(execucao ? { estado: execucao } : {}),
+    ...(linha?.tipo === "esperando" ? { esperando: { motivo: linha.motivo } } : {}),
+    ...(execucao === "rodando" && o.agora && t.trabalhandoDesde ? { rodandoHa: haQuanto(t.trabalhandoDesde, o.agora) } : {}),
     ...(t.status === "bloqueado" ? { motivo: t.pergunta ?? "bloqueada" } : {}),
     ...(t.status === "voce" && !outro ? { voce: t.pergunta ?? "Precisa de você" } : {}),
     ...(pr ? { pr } : {}),

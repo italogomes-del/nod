@@ -54,10 +54,12 @@ export const FERRAMENTAS_TRABALHO = {
     description:
       "Sai do Mac e volta sozinho mais tarde, na mesma sessão e no mesmo ponto. Use para hora marcada (\"me chame amanhã às 9 h\") ou para esperar algo de fora que não tem comando que acompanhe — a resposta de alguém, um fornecedor — em vez de ficar num laço com sleep ou checando de tempos em tempos. Para CI, deploy ou processo que um comando acompanha até o fim, use esperar_comando se ele estiver disponível. Depois de chamar, pare os comandos que deixou em segundo plano e encerre o turno; a volta só é marcada quando o turno termina.",
     properties: {
-      em_minutos: { type: "integer", description: `Daqui a quantos minutos voltar, inteiro de ${ACORDAR_MIN_MINUTOS} a ${ACORDAR_MAX_MINUTOS} (24 h).` },
+      em_minutos: { type: "integer", description: `Daqui a quantos minutos voltar, inteiro de ${ACORDAR_MIN_MINUTOS} a ${ACORDAR_MAX_MINUTOS} (24 h). Dispensado com quando: "ci".` },
+      // ADA-232 (ADR-155): no trabalho de uma tarefa do quadro com PR, voltar quando a CI do PR terminar (prazo máximo 24 h).
+      quando: { type: "string", enum: ["ci"], description: "\"ci\": volta sozinho quando os checks do PR da tarefa do quadro terminarem (passou, falhou, mergeado ou fechado), no máximo em 24 h. Só no trabalho de uma tarefa que já tem PR; dispensa em_minutos." },
       motivo: { type: "string", description: "O que você vai conferir quando voltar, numa frase (ex.: \"ver se o CI do PR #212 passou\").", minLength: 1, maxLength: MOTIVO_MAX_DESPERTAR },
     },
-    required: ["em_minutos", "motivo"],
+    required: ["motivo"],
     additionalProperties: false,
   },
   // definido em 2026-10-12 (ADR-099 item 4, parte 2): esperar o que um comando acompanha até o fim. O Nod roda o comando
@@ -77,7 +79,7 @@ export const FERRAMENTAS_TRABALHO = {
 
 export type ArgsAbrirTask = { titulo: string; pedido: string; depois_de?: string };
 export type ArgsMandarParaTask = { trabalho_id: string; texto: string };
-export type ArgsMeChameAs = { em_minutos: number; motivo: string };
+export type ArgsMeChameAs = { em_minutos?: number; motivo: string; quando?: "ci" };
 export type ArgsEsperarComando = { comando: string; motivo: string };
 
 export type ResultadoAbrirTask =
@@ -89,7 +91,7 @@ export type ResultadoMandarParaTask =
 /** `volta_as`: a hora no fuso de São Paulo (horaDaFrase; o servidor não guarda o da pessoa); `acordar_em`: o instante (ISO). */
 export type ResultadoMeChameAs =
   | { ok: true; volta_as: string; acordar_em: string; instrucao: string }
-  | { ok: false; erro: "turno_parado" | "task_fechada" | "voltas_demais" | "ja_esperando"; instrucao: string };
+  | { ok: false; erro: "turno_parado" | "task_fechada" | "voltas_demais" | "ja_esperando" | "sem_pr"; instrucao: string };
 /** ADR-099 (parte 2): `espera_id` para a tela e o Raio-X; o resto é instrução. */
 export type ResultadoEsperarComando =
   | { ok: true; espera_id: string; instrucao: string }

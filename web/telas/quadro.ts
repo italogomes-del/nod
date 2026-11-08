@@ -157,7 +157,12 @@ export interface Card {
   codigoHtml?: Html;
   /** NOD-460: há quanto o agente roda ("há 2 min"), para o selo "Trabalhando" da linha 1. */
   rodandoHa?: string;
+  /** ADA-232: o bot marcou a volta; a linha 1 diz "Esperando · <motivo>" (sem motivo, só "Esperando"). */
+  esperando?: { motivo: string | null };
 }
+
+/** ADA-232: a frase da linha 1 de quem marcou a volta (o motivo vem do bot, sempre escapado). */
+export const fraseEsperando = (motivo: string | null): string => (motivo ? `Esperando · ${motivo}` : "Esperando");
 
 /** O "Mover para…" do card (ADR-142, revisão do PR #622): leva ao mesmo lugar que arrastar, sem precisar de mouse. */
 function botaoDeMover(c: Card): string {
@@ -185,6 +190,10 @@ function avataresDoCard(c: Card): { html: Html; rodam: QuemRoda[] } {
 function estadoDoCard(c: Card): Html {
   if (c.motivo) {
     return h(`<span class="qd-estado qd-e-bloqueado" title="${esc(`bloqueada: ${c.motivo}`)}">${ICONE.pausa}<span>${esc(c.motivo)}</span></span>`);
+  }
+  if (c.esperando) {
+    const f = fraseEsperando(c.esperando.motivo);
+    return h(`<span class="qd-estado qd-e-esperando" title="${esc(`o bot volta sozinho: ${f}`)}"><span>${esc(f)}</span></span>`);
   }
   if (c.estado === "rodando") return seloTrabalhando(c.rodandoHa);
   if (!c.estado) return h("");
@@ -215,8 +224,9 @@ export function rotuloDoCard(c: Card): string {
     c.codigo ?? c.id, c.titulo, c.responsavel?.nome,
     c.motivo ? `bloqueada: ${c.motivo}` : "",
     c.voce ? `precisa de você: ${c.voce}` : "",
+    !c.motivo && c.esperando ? fraseEsperando(c.esperando.motivo) : "",
     ...rodam.map((q) => rotuloDoAvatar(q.nome, "rodando", q.acao, q.tempo)),
-    !c.motivo && c.estado && c.estado !== "rodando" ? FRASE[c.estado].longa : "",
+    !c.motivo && !c.esperando && c.estado && c.estado !== "rodando" ? FRASE[c.estado].longa : "",
     c.aviso ? c.aviso.texto : "",
     c.atrasada ? PASSOU_DO_PRAZO : "",
   ].filter(Boolean).join(", ");

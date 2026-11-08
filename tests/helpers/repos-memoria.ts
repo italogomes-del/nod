@@ -289,7 +289,7 @@ const soNoPostgres = async (): Promise<never> => {
   throw new Error("só no Postgres: use tests/integration");
 };
 /** ADR-086: o pedido de volta anotado em cada turno (no Postgres, turnos.despertar_em/despertar_motivo). */
-const despertares = new Map<string, { em: number; motivo: string }>();
+const despertares = new Map<string, { em: number; motivo: string; prUrlCi: string | null }>();
 const iso = (n: number) => new Date(n).toISOString();
 const semDono = (l: Artefato & { tenantId: string; ownerId: string }): Artefato => ({ id: l.id, agenteId: l.agenteId, conversaId: l.conversaId, titulo: l.titulo, versaoAtual: l.versaoAtual, criadoEm: l.criadoEm, atualizadoEm: l.atualizadoEm });
 const semDonoEspera = ({ tenantId: _tenant, ownerId: _dona, ...e }: Espera & { tenantId: string; ownerId: string }): Espera => ({ ...e });
@@ -1408,6 +1408,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async quaisSobrevivem(ids) { return new Set(minhasCredenciais().filter((x) => ids.includes(x.turnoId) && x.sobreviveReinicio).map((x) => x.turnoId)); },
     },
     trabalhos: {
+      async tarefasComFrenteAberta() { return new Set<string>(); },
       async criar(n) {
         const linha: Trabalho & { ownerId: string } = {
           tenantId: escopo.tenantId,
@@ -1695,12 +1696,15 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async retomadaNaFila(retomaTurnoId: string) {
         return doTenant(b.turnos).filter((t) => t.ownerId === escopo.pessoaId && t.retomaTurnoId === retomaTurnoId && t.origem === "retomada" && t.estado === "pendente" && (t.acordarEm ?? 0) <= agora()).sort((x, y) => y.criadoEm - x.criadoEm)[0] ?? null;
       },
-      async marcarDespertar(id: string, em: number, motivo: string) {
+      async marcarDespertar(id: string, em: number, motivo: string, ci: { prUrl: string } | null = null) {
         const t = doTenant(b.turnos).find((x) => x.id === id && x.ownerId === escopo.pessoaId && x.estado === "despachando" && x.pararSolicitadoEm === null);
         if (!t) return false;
-        despertares.set(id, { em, motivo });
+        despertares.set(id, { em, motivo, prUrlCi: ci?.prUrl ?? null });
         return true;
       },
+      marcarVoltaCi: soNoPostgres,
+      voltasCiPendentes: async () => [],
+      acordarVolta: soNoPostgres,
       async despertarDoTurno(id: string) {
         return despertares.get(id) ?? null;
       },
@@ -3991,6 +3995,8 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       comentarios: async () => [],
       apagarHistorico: soNoPostgres,
       prsDoQuadro: async () => [],
+      prPorUrl: async () => null,
+      prMudouDesde: async () => false,
       salvarPr: soNoPostgres,
       definirMergePendente: soNoPostgres,
       definirPrUrlSeVazio: soNoPostgres,
@@ -4046,6 +4052,9 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       tarefasAbertas: async () => [],
       doTurnoRaiz: async () => null,
       tratar: soNoPostgres,
+      gravarSaida: soNoPostgres,
+      contarReacionamento: soNoPostgres,
+      voltasDasCadeias: async () => new Map(),
       reabrir: soNoPostgres,
       agendarNovaTentativa: soNoPostgres,
       desagendarNovaTentativa: async () => 0,

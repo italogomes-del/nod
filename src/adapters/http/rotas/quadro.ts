@@ -210,6 +210,9 @@ export function rotasQuadro(d: DepsRotas): Rota[] {
     { metodo: "POST", acao: "quadro.cancelar_trabalho", padrao: new RegExp(`^/agentes/${ID}/quadro/tarefas/${TID}/trabalhos/cancelar$`), async handler(ctx) {
       ctx.json(200, await executar(ctx.escopo, EXECUTORES_QUADRO["quadro.cancelar_trabalho"], { ...base(ctx.params.id ?? ""), tarefa: ctx.params.tid ?? "" }));
     } },
+    { metodo: "POST", acao: "quadro.acordar_trabalho", padrao: new RegExp(`^/agentes/${ID}/quadro/tarefas/${TID}/trabalhos/acordar$`), async handler(ctx) {
+      ctx.json(200, await executar(ctx.escopo, EXECUTORES_QUADRO["quadro.acordar_trabalho"], { ...base(ctx.params.id ?? ""), tarefa: ctx.params.tid ?? "" }));
+    } },
     { metodo: "POST", acao: "quadro.recado_trabalho", padrao: new RegExp(`^/agentes/${ID}/quadro/tarefas/${TID}/trabalhos/recado$`), async handler(ctx) {
       const c = corpoObjeto(await ctx.corpo());
       ctx.json(201, await executar(ctx.escopo, EXECUTORES_QUADRO["quadro.recado_trabalho"], { ...base(ctx.params.id ?? ""), tarefa: ctx.params.tid ?? "", texto: c.texto as string }));

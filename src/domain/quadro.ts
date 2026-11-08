@@ -212,7 +212,8 @@ export function lerOp(v: unknown): OpQuadro | ErroOp {
       return { tipo: "responder", tarefa, resposta, ...(v.avancar === true ? { avancar: true } : {}), ...fala };
     }
     case "repetir_trabalho":
-    case "cancelar_trabalho": {
+    case "cancelar_trabalho":
+    case "acordar_trabalho": {
       const tarefa = textoObrigatorio(v.tarefa, "tarefa", 200);
       if (falhou(tarefa)) return tarefa;
       return { tipo: v.tipo, tarefa };
@@ -408,8 +409,8 @@ export function lerOps(v: unknown): OpQuadro[] | (ErroOp & { indice: number }) {
 }
 
 /** NOD-418: as ops do trabalho da tarefa (Repetir, Cancelar, recado) não são lote: vão sozinhas, sem Desfazer. */
-export const ehOpDeTrabalho = (o: OpQuadro): o is Extract<OpQuadro, { tipo: "repetir_trabalho" | "cancelar_trabalho" | "recado" }> =>
-  o.tipo === "repetir_trabalho" || o.tipo === "cancelar_trabalho" || o.tipo === "recado";
+export const ehOpDeTrabalho = (o: OpQuadro): o is Extract<OpQuadro, { tipo: "repetir_trabalho" | "cancelar_trabalho" | "recado" | "acordar_trabalho" }> =>
+  o.tipo === "repetir_trabalho" || o.tipo === "cancelar_trabalho" || o.tipo === "recado" || o.tipo === "acordar_trabalho";
 
 /** A execução do card, pelo estado do turno ligado à tarefa (ou null sem turno). */
 export function execucaoDoTurno(estado: "pendente" | "despachando" | "concluido" | "interrompido" | null | undefined): ExecucaoTarefa {
@@ -579,8 +580,23 @@ export function entradaDaTarefa(p: {
       "",
       `Etapa: ${e.nome}.${e.instrucoes ? ` O que essa etapa faz: ${e.instrucoes}` : ""}`,
     ] : []),
+    "",
+    COMO_TERMINAR,
   ].filter((l, i, a) => !(l === "" && a[i - 1] === "")).join("\n");
 }
+
+/**
+ * ADA-232 (ADR-155): as 4 saídas do trabalho da tarefa. Parar sem nenhuma delas faz o quadro reacionar uma vez na mesma
+ * sessão e, na 2ª parada seguida, levar a tarefa para Precisa de você.
+ */
+export const COMO_TERMINAR = [
+  "Como terminar: todo trabalho desta tarefa termina numa destas 4 saídas, sempre com gerir_quadro ou a ferramenta de volta:",
+  "1. andou: mudar_tarefa de coluna (status) ou com pr_url;",
+  "2. precisa da pessoa: mudar_tarefa status voce com a pergunta;",
+  "3. bloqueado: mudar_tarefa status bloqueado com a pergunta (o motivo e do que você precisa);",
+  "4. volta depois: esperar_comando (o comando de fundo) ou me_chame_as (em_minutos, ou quando: \"ci\" para voltar quando a CI do PR da tarefa terminar).",
+  "Parar sem saída faz o quadro chamar você de novo, na mesma sessão; na 2ª vez a tarefa vai para Precisa de você.",
+].join("\n");
 
 /** A coluna em que a tarefa começa, quando ela tem passagem ou instruções (o turno conta a etapa e o `terminei`). */
 export type EtapaDaTarefa = { nome: string; instrucoes: string | null; proxima: string | null };

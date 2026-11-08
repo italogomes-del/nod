@@ -29,6 +29,8 @@ import { comentarTarefa } from "./comentar-tarefa.ts";
 import { avisarNoLote } from "./avisos-quadro.ts";
 import { esperaPessoa } from "../domain/avisos-quadro.ts";
 import { sincronizarDasDecisoes } from "./trabalhos.ts";
+import { situacaoDasTarefas } from "./situacao-trabalho.ts";
+import { estadoLinha, voltaNaTela } from "../domain/quadro-execucoes.ts";
 import { registrarAvisoDoQuadro, registrarHistoricoComTrilha, type TipoAvisoDoQuadro } from "./trilha-quadro.ts";
 
 /**
@@ -316,8 +318,12 @@ export async function montarQuadro(deps: Pick<Deps, "repos" | "agora" | "escopo"
   const avisoGithub = leitor === donaId ? await repo.avisoGithub(q.id) : null;
   const linhas = new Map<string, LinhaDeSistema[]>();
   for (const { tarefaId, ...l } of await repo.linhasDoQuadro(q.id)) linhas.set(tarefaId, [...(linhas.get(tarefaId) ?? []), l]);
+  // ADA-232: o estado do card numa linha (o trabalho vivo, a volta marcada e a frente aberta de cada tarefa).
+  const situacoes = await situacaoDasTarefas(deps, tarefas.map((t) => t.id));
+  const comFrente = await deps.repos.trabalhos.tarefasComFrenteAberta(tarefas.map((t) => t.id));
   const dtos: TarefaDto[] = tarefas.map((t) => ({
     ...t,
+    estadoLinha: estadoLinha({ status: t.status, vivo: situacoes.get(t.id)?.vivo ?? false, volta: voltaNaTela(situacoes.get(t.id)?.volta ?? null), frenteAberta: comFrente.has(t.id) }),
     naColunaDesde: marcas.get(t.id)?.naColunaDesde ?? null,
     codigo: codigoDaTarefa(q.prefixo, t),
     branch: branchSugerido(codigoDaTarefa(q.prefixo, t), t.titulo),

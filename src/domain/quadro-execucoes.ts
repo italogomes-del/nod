@@ -1,6 +1,7 @@
 import type { MotivoFalha, MotivoInterrupcao } from "../contracts/motivos.ts";
 import { cercado } from "./quadro.ts";
-import { type ClasseFalha, type EstadoExecucao, type ExecucaoQuadro, type OrigemExecucao, TENTATIVAS_AUTOMATICAS_MAX } from "../contracts/quadro-execucoes.ts";
+import { AVISO_SEM_SAIDA, type ClasseFalha, type EstadoExecucao, type EstadoLinhaTarefa, type ExecucaoQuadro, MOTIVO_SEM_SAIDA, type OrigemExecucao, type SaidaTrabalho, SEM_SAIDA_MAX, TENTATIVAS_AUTOMATICAS_MAX, VOLTA_CI_SEM_CHECKS_MS, type VoltaDoTrabalho } from "../contracts/quadro-execucoes.ts";
+import type { PrDaTarefa } from "../contracts/prs-da-tarefa.ts";
 import type { EstadoTurno } from "../contracts/turno.ts";
 
 /**
@@ -112,8 +113,43 @@ export function tentativasAutomaticasSeguidas(execucoes: readonly { numero: numb
   return n;
 }
 
+/** Os campos do histórico da tarefa que contam como "andou" (mudou de coluna, de mão ou ganhou PR). */
+const CAMPOS_QUE_ANDAM = new Set(["status", "agente", "pr_url", "quadro"]);
+
+/**
+ * ADA-232 (ADR-155): a saída com que um turno de trabalho de tarefa terminou concluído. Lê o efeito, nunca o nome da
+ * ferramenta chamada (revisão do PR #705: o me_chame_as/esperar_comando recusado — sem_pr, voltas_demais — deixava a
+ * tarefa parada como se esperasse uma volta que não existe) e o estado da tarefa depois dele:
+ * - a tarefa está em Precisa de você / Bloqueado → voce / bloqueado (a pergunta e o motivo já estão no card);
+ * - a volta existe (o despertar anotado pelo me_chame_as, a espera criada pelo esperar_comando) → volta;
+ * - a tarefa mudou de coluna, de mão, de quadro ou ganhou PR durante o turno (por quem for: a pessoa na tela também
+ *   conta, é a rede contra o falso "sem saída"), ou já saiu do andamento → andou;
+ * - senão → nenhuma.
+ */
+export function saidaDoTurno(p: {
+  /** O turno deixou uma volta de verdade: o despertar anotado (me_chame_as) ou a espera criada (esperar_comando). */
+  voltaMarcada: boolean;
+  papelAgora: "voce" | "bloqueado" | "andando" | "fora";
+  camposMudados: readonly string[];
+}): SaidaTrabalho {
+  if (p.papelAgora === "voce") return "voce";
+  if (p.papelAgora === "bloqueado") return "bloqueado";
+  if (p.voltaMarcada) return "volta";
+  if (p.papelAgora === "fora" || p.camposMudados.some((c) => CAMPOS_QUE_ANDAM.has(c))) return "andou";
+  return "nenhuma";
+}
+
+/** O pedido do reacionamento sem saída, na mesma sessão (o bot já tem o contexto da tarefa). */
+export function entradaDoReacionamento(p: { titulo: string; tarefaId: string; quadroId: string }): string {
+  return `${AVISO_SEM_SAIDA}\n\nTarefa ${p.tarefaId} do quadro ${p.quadroId}: ${cercado(p.titulo)}`;
+}
+
 export type DecisaoAposTermino =
   | { tipo: "nada" }
+  /** ADA-232: concluído sem saída, 1ª vez da série: retomada na mesma cadeia com o aviso. */
+  | { tipo: "reacionar_sem_saida" }
+  /** ADA-232: a 2ª parada seguida sem saída: Precisa de você com o motivo. */
+  | { tipo: "precisa_de_voce"; motivo: string }
   /** O recado pendente vira o próximo trabalho (vale também depois de uma falha: é a pessoa falando). */
   | { tipo: "entregar_recado" }
   | { tipo: "repetir" }
@@ -123,16 +159,41 @@ export type DecisaoAposTermino =
  * O que fazer quando o trabalho atual da tarefa termina. `andando` = a tarefa ainda está numa coluna de andamento
  * (a fazer/fazendo): fora dela (a pessoa moveu, cancelou) nada repete nem bloqueia.
  */
+/**
+ * ADA-232 (ADR-155): a volta por CI acorda quando os checks do PR terminam (ok ou falhou), quando o PR sai de aberto
+ * (mergeado, fechado) ou quando segue sem nenhum check depois de VOLTA_CI_SEM_CHECKS_MS. PR ainda não visto pelo laço de
+ * PRs ou com checks rodando: dorme (o prazo máximo de 24h acorda de qualquer jeito).
+ *
+ * Revisão do PR #705: o ok/falhou só vale se o laço o viu depois que a volta nasceu (`vistoEm`: o laço só regrava o PR na
+ * transição). O de antes é a CI do commit anterior ao push que o bot quer conferir: acordar com ele traz o bot de volta na
+ * hora, com a CI nova ainda nem começada. Ele conta como "sem checks": acorda só depois da mesma folga.
+ */
+export function voltaCiPronta(pr: (Pick<PrDaTarefa, "estado" | "ci"> & { vistoEm: number }) | null, desde: number, agora: number): boolean {
+  if (!pr) return false;
+  if (pr.estado !== "aberto") return true;
+  if (pr.ci === "pendente") return false;
+  if (pr.ci !== null && pr.vistoEm >= desde) return true;
+  return agora - desde >= VOLTA_CI_SEM_CHECKS_MS;
+}
+
 export function decidirAposTermino(p: {
   estado: EstadoExecucao;
   desfecho: DesfechoCadeia | undefined;
   automaticasSeguidas: number;
   haRecado: boolean;
   andando: boolean;
+  /** ADA-232: a saída gravada (null = dado anterior ou não gravada: nunca reaciona). */
+  saida?: SaidaTrabalho | null;
+  /** ADA-232: reacionamentos sem saída já feitos na série. */
+  semSaida?: number;
 }): DecisaoAposTermino {
   if (!terminada(p.estado)) return { tipo: "nada" };
   // Fora do andamento (a pessoa moveu para Feito, cancelou) o recado não reabre trabalho: quem chama o descarta.
   if (p.haRecado && p.estado !== "cancelado" && p.andando) return { tipo: "entregar_recado" };
+  // ADA-232: o concluído que não disse o porquê. Fora do andamento (a pessoa moveu) não há o que cobrar.
+  if (p.estado === "concluido" && p.saida === "nenhuma" && p.andando) {
+    return (p.semSaida ?? 0) < SEM_SAIDA_MAX ? { tipo: "reacionar_sem_saida" } : { tipo: "precisa_de_voce", motivo: `${MOTIVO_SEM_SAIDA[0]!.toUpperCase()}${MOTIVO_SEM_SAIDA.slice(1)}. Veja a conversa e diga o próximo passo.` };
+  }
   if (p.estado !== "falhou" || !p.andando || !p.desfecho) return { tipo: "nada" };
   const classe = classificarFalha(p.desfecho);
   const motivo = motivoDaFalha(p.desfecho);
@@ -198,4 +259,21 @@ function blocoDoRecado(p: { titulo: string; texto: string; pessoaNome: string; r
     cercado(p.texto),
     "</recado>",
   ].join("\n");
+}
+
+/**
+ * ADA-232 (ADR-155): o estado do card numa linha. A coluna de espera manda (Precisa de você, Bloqueado); depois a volta
+ * marcada (esperando + motivo); depois o trabalho vivo ou a frente aberta da tarefa (trabalhando). Fora disso, null.
+ */
+export function estadoLinha(p: { status: string; vivo: boolean; volta: VoltaDoTrabalho | null; frenteAberta: boolean }): EstadoLinhaTarefa | null {
+  if (p.status === "voce") return { tipo: "voce" };
+  if (p.status === "bloqueado") return { tipo: "bloqueado" };
+  if (p.volta) return { tipo: "esperando", motivo: p.volta.motivo, volta: p.volta };
+  if (p.vivo || p.frenteAberta) return { tipo: "trabalhando", frente: !p.vivo && p.frenteAberta };
+  return null;
+}
+
+/** ADA-232: a volta como a tela a lê — o id do turno que dorme fica no servidor. */
+export function voltaNaTela(v: (VoltaDoTrabalho & { turnoId?: string | null }) | null): VoltaDoTrabalho | null {
+  return v ? { motivo: v.motivo, em: v.em, quando: v.quando, prUrl: v.prUrl } : null;
 }

@@ -1,6 +1,7 @@
 import type { RuntimeEvent } from "../contracts/evento.ts";
 import { ACORDAR_MAX_MINUTOS, ACORDAR_MIN_MINUTOS, MOTIVO_MAX_DESPERTAR, VOLTAS_SEGUIDAS_MAX, VOLTAS_SEM_NOVIDADE } from "../contracts/ferramentas-trabalho.ts";
 import { REGRA_VOLTAS_SEM_NOVIDADE } from "../contracts/pedido.ts";
+import { MOTIVO_CI_EXPIROU, VOLTA_CI_MAX_MS } from "../contracts/quadro-execucoes.ts";
 import type { CasoNod } from "../contracts/servicos.ts";
 import type { Turno } from "../contracts/turno.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
@@ -40,7 +41,10 @@ export function origemDaVolta(turno: Turno): string {
 export const meChameAs: CasoNod<Deps, "me_chame_as"> = async (deps, input) => {
   const turno = await deps.repos.turnos.buscarTravado(input.turnoId);
   if (!turno || turno.agenteId !== input.agenteId) throw new ErroDeDominio("nao_permitido", { cause: "turno de outro bot" });
-  const minutos = Math.round(input.em_minutos);
+  const porCi = input.quando === "ci";
+  if (input.quando !== undefined && !porCi) throw new ErroDeDominio("entrada_invalida", { cause: "quando só aceita \"ci\"" });
+  // ADA-232: a volta por CI dorme até o prazo máximo (24h); o varredor a traz para agora quando os checks terminam.
+  const minutos = porCi ? VOLTA_CI_MAX_MS / 60_000 : Math.round(input.em_minutos ?? Number.NaN);
   if (!Number.isFinite(minutos) || minutos < ACORDAR_MIN_MINUTOS || minutos > ACORDAR_MAX_MINUTOS) throw new ErroDeDominio("entrada_invalida", { cause: `em_minutos fora de ${ACORDAR_MIN_MINUTOS}–${ACORDAR_MAX_MINUTOS}` });
   const motivo = input.motivo.trim().slice(0, MOTIVO_MAX_DESPERTAR);
   if (motivo === "") throw new ErroDeDominio("texto_vazio");
@@ -51,14 +55,25 @@ export const meChameAs: CasoNod<Deps, "me_chame_as"> = async (deps, input) => {
   }
   // ADR-099 (parte 2): uma volta por turno — quem já deixou um comando esperando volta quando ele terminar.
   if (await deps.repos.esperas.doTurnoTravada(turno.id)) return { data: { ok: false, erro: "ja_esperando", instrucao: "Você já deixou um comando esperando neste turno (esperar_comando) e volta quando ele terminar. Não marque outra volta: encerre o turno." } };
+  const prUrl = porCi ? await prDaTarefaDoTurno(deps, turno) : null;
+  if (porCi && !prUrl) return { data: { ok: false, erro: "sem_pr", instrucao: "quando: \"ci\" só vale no trabalho de uma tarefa do quadro que já tem PR. Ponha o PR na tarefa (gerir_quadro mudar_tarefa pr_url) ou use esperar_comando com gh pr checks --watch." } };
   const agora = deps.agora();
   const acordarEm = agora + minutos * 60_000;
-  if (!(await deps.repos.turnos.marcarDespertar(turno.id, acordarEm, motivo))) {
+  if (!(await deps.repos.turnos.marcarDespertar(turno.id, acordarEm, motivo, prUrl ? { prUrl } : null))) {
     return { data: { ok: false, erro: "turno_parado", instrucao: "A pessoa parou este trabalho. Não marque volta: encerre o turno." } };
   }
   const hora = quando(acordarEm, agora);
+  if (prUrl) return { data: { ok: true, volta_as: horaDaFrase(acordarEm, agora), acordar_em: new Date(acordarEm).toISOString(), instrucao: `Combinado: você volta sozinho nesta mesma sessão quando a CI de ${prUrl} terminar (no máximo ${hora}). Pare os comandos que deixou em segundo plano, diga em uma frase o que vai esperar e encerre o turno agora — não fique esperando.` } };
   return { data: { ok: true, volta_as: horaDaFrase(acordarEm, agora), acordar_em: new Date(acordarEm).toISOString(), instrucao: `Combinado: você volta sozinho ${hora}, nesta mesma sessão. Pare os comandos que deixou em segundo plano, diga em uma frase o que vai esperar e encerre o turno agora — não fique esperando.` } };
 };
+
+/** ADA-232: o PR da tarefa do quadro cujo trabalho este turno é (a raiz da cadeia); null = não é trabalho de tarefa ou sem PR. */
+async function prDaTarefaDoTurno(deps: Deps, turno: Turno): Promise<string | null> {
+  const raiz = turno.retomaTurnoId ? await deps.repos.turnos.raizDaCadeia(turno.id) : turno;
+  const e = raiz ? await deps.repos.quadroExecucoes.doTurnoRaiz(raiz.id) : null;
+  const t = e ? await deps.repos.quadros.tarefa(e.tarefaId) : null;
+  return t?.prUrl ?? null;
+}
 
 /**
  * ADR-086 (revisão do #212): o turno que marcou a volta terminou. Só quando ele concluiu (sem Parar, sem falha) e a task
@@ -72,11 +87,15 @@ export async function voltaMarcadaAoAssentar(deps: Deps, turno: Turno, concluiu:
   if (!pedido) return [];
   const agora = deps.agora();
   // A hora marcada é fato da criação; a hora de verdade da volta o plano já diz (o Mac pode ter estado fora).
+  // ADA-232: a volta por CI nasce dormindo até o prazo máximo, com a condição; a entrada cobre os dois jeitos de acordar.
   const r = await enfileirarVolta(deps, turno, {
     acordarEm: pedido.em,
     motivo: pedido.motivo,
-    entradaTexto: `[nod] Você marcou para voltar ${quando(pedido.em, agora)} para conferir: ${pedido.motivo}\nConfira e siga de onde parou. Se ainda não estiver pronto, marque outra volta com me_chame_as e encerre o turno.`,
+    entradaTexto: pedido.prUrlCi
+      ? `[nod] Você pediu para voltar quando a CI de ${pedido.prUrlCi} terminasse, para conferir: ${pedido.motivo}\nConfira os checks (gh pr checks) e siga de onde parou. Se eles ainda estiverem rodando, ${MOTIVO_CI_EXPIROU}: diga isso na tarefa (status bloqueado com o motivo) ou marque outra volta.`
+      : `[nod] Você marcou para voltar ${quando(pedido.em, agora)} para conferir: ${pedido.motivo}\nConfira e siga de onde parou. Se ainda não estiver pronto, marque outra volta com me_chame_as e encerre o turno.`,
   });
+  if (pedido.prUrlCi && r?.volta) await deps.repos.turnos.marcarVoltaCi(r.volta.id, pedido.prUrlCi);
   return r?.events ?? [];
 }
 

@@ -31,7 +31,7 @@ const q = { id: "q1", agenteId: "a", meta: "Meta", prazo: null, cumpridoEm: null
 let estado = "rodando";
 let leituras = 0;
 const exec = () => ({ id: "e1", numero: 1, origem: "inicio", turnoId: "tu1", turnoAtual: "tu1", motivo: estado === "falhou" ? "A máquina caiu." : null,
-  criadoEm: agora, comecouEm: agora, ultimaFrase: null, tentativa: null, esperando: false, novaTentativaEm: null, estado });
+  criadoEm: agora, comecouEm: agora, ultimaFrase: null, tentativa: null, esperando: false, novaTentativaEm: null, saida: null, volta: null, estado });
 const api = {
   quadro: async () => ({ quadro: structuredClone(q) }),
   conversa: async () => ({ mensagens: [] }),

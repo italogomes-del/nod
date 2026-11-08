@@ -542,14 +542,30 @@ export function quadrosRepo(conn: Conn, escopo: Escopo) {
      * (desfazê-lo não devolve os acionamentos de antes dele à conta).
      */
     async acionamentosNaHora(quadroId: string): Promise<Map<string, number>> {
+      // ADA-232 (ADR-155): as retomadas das cadeias da tarefa também contam (o reacionamento sem saída, a volta da CI, a
+      // resposta): cada uma acorda o bot de novo. Zeram no mesmo freio que zera os movimentos.
       const rs = await conn<{ tarefa_id: string; n: number }[]>`
-        select m.tarefa_id, count(*)::int as n from quadro_movimentos m
-        where ${dona()} and m.quadro_id = ${quadroId} and m.acionou and m.criado_em > clock_timestamp() - interval '1 hour'
-          and not exists (
-            select 1 from quadro_movimentos f
-            where ${dona()} and f.quadro_id = ${quadroId} and f.tarefa_id = m.tarefa_id and f.tipo = 'freio'
-              and f.de <> f.para and f.criado_em >= m.criado_em)
-        group by m.tarefa_id`;
+        with recursive desce(tarefa_id, id, n) as (
+          select e.tarefa_id, e.turno_id, 0 from quadro_execucoes e
+          where ${dona()} and e.criado_em > clock_timestamp() - interval '1 day'
+            and e.tarefa_id in (select id from quadro_tarefas where ${dona()} and quadro_id = ${quadroId})
+          union all
+          select d.tarefa_id, t.id, d.n + 1 from turnos t join desce d on t.tenant_id = ${escopo.tenantId} and t.retoma_turno_id = d.id where d.n < 50
+        ),
+        ultimo_freio as (
+          select f.tarefa_id, max(f.criado_em) as em from quadro_movimentos f
+          where ${dona()} and f.quadro_id = ${quadroId} and f.tipo = 'freio' and f.de <> f.para group by f.tarefa_id
+        ),
+        contas as (
+          select m.tarefa_id, m.criado_em from quadro_movimentos m
+          where ${dona()} and m.quadro_id = ${quadroId} and m.acionou and m.criado_em > clock_timestamp() - interval '1 hour'
+          union all
+          select d.tarefa_id, t.criado_em from desce d join turnos t on t.tenant_id = ${escopo.tenantId} and t.id = d.id
+          where d.n > 0 and t.origem = 'retomada' and t.criado_em > clock_timestamp() - interval '1 hour'
+        )
+        select c.tarefa_id, count(*)::int as n from contas c left join ultimo_freio f on f.tarefa_id = c.tarefa_id
+        where f.em is null or c.criado_em > f.em
+        group by c.tarefa_id`;
       return new Map(rs.map((r) => [r.tarefa_id, r.n]));
     },
     /** Os últimos `porTarefa` movimentos de cada tarefa (o histórico discreto da tarefa aberta). */
@@ -826,6 +842,31 @@ export function quadrosRepo(conn: Conn, escopo: Escopo) {
      * NOD-421 (0142): os PRs ligados às tarefas do quadro, no último estado visto. Lê pelas tarefas que estão no quadro
      * agora (revisão do PR #621): a tarefa que mudou de quadro leva os PRs junto, sem "PR ligado" de novo.
      */
+    /**
+     * ADA-232: o PR já sincronizado pelo laço de PRs (estado, CI e quando o laço gravou a última transição), pela url;
+     * null = ainda não visto. A mesma url em duas tarefas: vale a linha vista por último.
+     */
+    async prPorUrl(url: string): Promise<(Pick<PrDaTarefa, "estado" | "ci"> & { vistoEm: number }) | null> {
+      const [l] = await conn<{ estado: PrDaTarefa["estado"]; ci: PrDaTarefa["ci"]; visto_em: Date }[]>`
+        select estado, ci, visto_em from quadro_tarefa_prs where ${dona()} and url = ${url} order by visto_em desc limit 1`;
+      return l ? { estado: l.estado, ci: l.ci, vistoEm: ms(l.visto_em) } : null;
+    },
+    /**
+     * ADA-232 (revisão do PR #705): a tarefa ganhou ou trocou de PR desde `desde`. O pr_url não entra no histórico da tarefa:
+     * lê a foto de antes dos lotes desde então (o gerir_quadro, a tela) e o PR que o laço ligou desde então.
+     */
+    async prMudouDesde(quadroId: string, tarefaId: string, prAgora: string | null, desde: number): Promise<boolean> {
+      const [l] = await conn<{ sim: boolean }[]>`
+        select exists (
+            select 1 from quadro_lotes l cross join lateral jsonb_array_elements(l.antes->'tarefas') x
+            where l.tenant_id = ${escopo.tenantId} and l.owner_id = ${escopo.pessoaId} and l.quadro_id = ${quadroId}
+              and ${tarefaId}::uuid = any(l.tarefa_ids) and l.criado_em >= ${new Date(desde)} and l.desfeito_em is null
+              and x->>'id' = ${tarefaId} and (x->'antes'->>'prUrl') is distinct from ${prAgora}::text
+          ) or exists (
+            select 1 from quadro_tarefa_prs where ${dona()} and tarefa_id = ${tarefaId} and criado_em >= ${new Date(desde)}
+          ) as sim`;
+      return l?.sim === true;
+    },
     async prsDoQuadro(quadroId: string): Promise<(PrDaTarefa & { tarefaId: string; mergePendente: boolean })[]> {
       const ls = await conn<LinhaPr[]>`
         select tarefa_id, repo, numero, url, branch, estado, ci, conflito, merge_pendente from quadro_tarefa_prs

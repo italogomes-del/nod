@@ -46,7 +46,8 @@ const INSTRUCAO: Record<Extract<ResultadoGerirQuadro, { ok: false }>["erro"], st
 const recusa = (erro: keyof typeof INSTRUCAO, detalhe: string) => ({ data: { ok: false, erro, instrucao: `${detalhe}. ${INSTRUCAO[erro]}` } as ResultadoGerirQuadro });
 
 /** O que o bot conta à pessoa depois de Repetir, Cancelar ou recado (o número e o estado do trabalho). */
-function fraseDoTrabalho(tipo: "repetir_trabalho" | "cancelar_trabalho" | "recado", t: TrabalhoFeito): string {
+function fraseDoTrabalho(tipo: "repetir_trabalho" | "cancelar_trabalho" | "recado" | "acordar_trabalho", t: TrabalhoFeito): string {
+  if (tipo === "acordar_trabalho") return `Trabalho${t.numero !== null ? ` #${t.numero}` : ""} acordado: a volta marcada roda agora, na mesma sessão.`;
   if (tipo === "repetir_trabalho") return `Trabalho #${t.numero} aberto na tarefa (${t.estado === "rodando" ? "rodando" : "na fila"}).`;
   if (tipo === "cancelar_trabalho") {
     const recados = t.cancelados ? ` e ${t.cancelados === 1 ? "o recado que aguardava" : `${t.cancelados} recados que aguardavam`}` : "";

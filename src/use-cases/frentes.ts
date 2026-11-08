@@ -68,6 +68,10 @@ async function abrirLote(deps: Deps, ctx: ContextoFerramenta, frentes: readonly 
   // A marca de quem leu algo de fora (ADR-062) atravessa para cada frente, como no pedido a colega.
   const deFora = turno.entradaConfianca !== "confiavel" || (await deps.repos.turnos.contaminado(turno.id));
   const autoria = autoriaAgente({ agenteId: turno.agenteId, contaDeExecucao: deps.escopo.pessoaId, executor: "catcher" });
+  // ADA-232: a frente aberta por um trabalho do quadro guarda a tarefa — o card a conta como trabalhando.
+  const raiz = await deps.repos.turnos.raizDaCadeia(turno.id);
+  const execucao = raiz ? await deps.repos.quadroExecucoes.doTurnoRaiz(raiz.id) : null;
+  const tarefaId = execucao && execucao.canceladaEm === null ? execucao.tarefaId : null;
   const events: RuntimeEvent[] = [];
   const trabalhos: Trabalho[] = [];
   for (const f of frentes) {
@@ -85,6 +89,7 @@ async function abrirLote(deps: Deps, ctx: ContextoFerramenta, frentes: readonly 
       loteId: lote.id,
       // NOD-315 (ADR-119): o repo validado vai para o executor preparar o clone da máquina; inválido = como antes.
       repo: repoDoGithub(f.repo ?? ""),
+      tarefaId,
     });
     events.push(...criados);
     const novo = await deps.repos.turnos.enfileirar({

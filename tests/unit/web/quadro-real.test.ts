@@ -659,3 +659,24 @@ describe("NOD-443: o quadro com várias pessoas na tela", () => {
     expect(String(quadroDaMeta({ ...base, q: q([]) }))).not.toContain("Precisa de alguém");
   });
 });
+
+describe("ADA-232: o card numa linha", () => {
+  const MAL = `<img src=x onerror="alert(1)">`;
+  const volta = { motivo: MAL, em: null, quando: "ci" as const, prUrl: null };
+  it("esperando mostra o motivo (escapado) e vence o selo Trabalhando", () => {
+    const c = cardDaTarefa(t("1", { status: "fazendo", execucao: "rodando", estadoLinha: { tipo: "esperando", motivo: MAL, volta } }), agente);
+    expect(c.esperando).toEqual({ motivo: MAL });
+    const h = String(card(c));
+    expect(h).toContain("qd-e-esperando");
+    expect(h).not.toContain(MAL);
+    expect(h).not.toContain("qd-selo");
+  });
+  it("a frente aberta conta como trabalhando, sem execução própria", () => {
+    const c = cardDaTarefa(t("2", { status: "fazendo", estadoLinha: { tipo: "trabalhando", frente: true } }), agente);
+    expect(c.estado).toBe("rodando");
+    expect(String(card(c))).toContain("qd-selo");
+  });
+  it("sem estadoLinha, nada muda", () => {
+    expect(cardDaTarefa(t("3", { status: "fazendo" }), agente).estado).toBeUndefined();
+  });
+});

@@ -70,7 +70,7 @@ const api = {
   // Com __trabN, o trabalho de número N (o turno "tv" no 1, "tvN" depois): o trabalho novo que começa de log vazio.
   // Com __latTrab, a leitura do trabalho demora (chega depois dos comentários).
   trabalhosDaTarefa: async () => (window.__latTrab ? await new Promise((r) => setTimeout(r, window.__latTrab)) : undefined, { execucoes: window.__trabVivo ? [{ id: "e" + (window.__trabN ?? 1), numero: window.__trabN ?? 1, origem: "inicio", turnoId: "tv", motivo: null, criadoEm: agora,
-    estado: "rodando", turnoAtual: (window.__trabN ?? 1) > 1 ? "tv" + window.__trabN : "tv", comecouEm: agora, ultimaFrase: null, tentativa: null, esperando: false, novaTentativaEm: null }] : [],
+    estado: "rodando", turnoAtual: (window.__trabN ?? 1) > 1 ? "tv" + window.__trabN : "tv", comecouEm: agora, ultimaFrase: null, tentativa: null, esperando: false, novaTentativaEm: null, saida: null, volta: null }] : [],
     recados: [], conversaId: "c" + versao, semAgente: false }),
   historicoTarefa: async () => ({ historico: [] }),
   // Os comentários mudam só com __comentou(): a tarefa aberta tem o que redesenhar sem o trabalho mudar.

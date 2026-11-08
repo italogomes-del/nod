@@ -133,9 +133,8 @@ export type TarefaDto = TarefaQuadro & {
   naColunaDesde?: number | null; // NOD-420: epoch ms da entrada na coluna atual; null fora do Postgres
   /** NOD-460: epoch ms de quando o agente começou o trabalho em curso (o despacho do turno vivo); null = não está rodando. */
   trabalhandoDesde?: number | null;
-  /** NOD-421: os PRs ligados e as linhas de sistema (CI, conflito, merge). */
-  prs?: PrNaTela[];
-  linhas?: LinhaDeSistema[];
+  prs?: PrNaTela[]; // NOD-421: os PRs ligados e as linhas de sistema (CI, conflito, merge)
+  linhas?: LinhaDeSistema[]; estadoLinha?: import("./quadro-execucoes.ts").EstadoLinhaTarefa | null; // ADA-232: o card numa linha
   movimentos?: MovimentoDto[]; // NOD-419: os últimos movimentos (o mais novo primeiro)
   respostaAgenteNome?: string | null; // ADA-15: o bot com quem a pessoa falava (null = respondida no card)
 };
@@ -168,6 +167,7 @@ export type OpQuadro =
   | ({ tipo: "responder"; tarefa: string; resposta: string; /** ADA-15: responder e seguir (o "aprovado"). */ avancar?: true } & PelaFala)
   /** NOD-418: o trabalho da tarefa (sozinhos, sem Desfazer). Repetir abre um novo; cancelar para o vivo; o recado entra nele. */
   | { tipo: "repetir_trabalho"; tarefa: string } | { tipo: "cancelar_trabalho"; tarefa: string } | { tipo: "recado"; tarefa: string; texto: string }
+  | { tipo: "acordar_trabalho"; tarefa: string } /* ADA-232: "Acordar agora", a volta marcada dispara já */
   | { tipo: "editar_quadro"; meta?: string | null; prazo?: string | null }
   | { tipo: "desfazer"; lote?: string }
   /** NOD-415 (ADR-141): o bot volta a ser um agente comum. Apaga o quadro, as tarefas e o histórico; conversa e memória ficam. */

@@ -155,4 +155,5 @@ export const EXECUTORES_QUADRO = {
   "quadro.repetir_trabalho": umaAcao<{ tarefa: string }>("repetir_trabalho"),
   "quadro.cancelar_trabalho": umaAcao<{ tarefa: string }>("cancelar_trabalho"),
   "quadro.recado_trabalho": umaAcao<{ tarefa: string; texto: string }>("recado"),
+  "quadro.acordar_trabalho": umaAcao<{ tarefa: string }>("acordar_trabalho"),
 } as const satisfies Partial<Record<IdAcao, CasoDeUso<never, unknown>>>;

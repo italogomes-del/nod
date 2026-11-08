@@ -134,7 +134,9 @@ describeIntegracao("paridade tela × chat do quadro.* (NOD-442, ADR-135)", () =>
       const execs = await m.d.repos.quadroExecucoes.daTarefa(t.id);
       const recados = await m.d.repos.quadroExecucoes.recadosDaTela(t.id);
       const turnos = await Promise.all(execs.map((e) => m.d.repos.turnos.buscar(e.turnoId)));
-      trabalhos.push([t.titulo, execs.map((e, i) => [e.numero, e.origem, e.canceladaEm !== null, turnos[i]?.estado, turnos[i]?.pararSolicitadoEm != null, turnos[i]?.entradaTexto?.includes("use a branch y")]), recados.map((x) => [x.texto, x.entregueEm !== null, x.canceladoEm !== null])]);
+      // ADA-232: a volta que dorme na cadeia (o "Acordar agora" a traz para já).
+      const dormindo = await Promise.all(execs.map(async (e) => (await trxAtual!<{ n: number }[]>`select count(*)::int as n from turnos where retoma_turno_id = ${e.turnoId} and estado = 'pendente' and acordar_em > clock_timestamp()`)[0]!.n));
+      trabalhos.push([t.titulo, execs.map((e, i) => [e.numero, e.origem, e.canceladaEm !== null, turnos[i]?.estado, turnos[i]?.pararSolicitadoEm != null, turnos[i]?.entradaTexto?.includes("use a branch y"), dormindo[i]]), recados.map((x) => [x.texto, x.entregueEm !== null, x.canceladoEm !== null])]);
     }
     return r ? { ...r, trabalhos } : null;
   };
@@ -166,6 +168,8 @@ describeIntegracao("paridade tela × chat do quadro.* (NOD-442, ADR-135)", () =>
     linear?: true;
     /** Depois do preparo, os turnos dos trabalhos terminam (o Repetir só vale sem trabalho rodando). */
     terminarTrabalhos?: true;
+    /** ADA-232: depois do preparo, cada trabalho ganha uma volta que dorme 1 h na cadeia (o me_chame_as), nos dois quadros. */
+    dormir?: true;
     /** A ação leva a tarefa a outro quadro: o destino da tela e o do chat (criados vazios antes) também terminam iguais. */
     destinos?: (m: M) => [string, string];
   };
@@ -340,6 +344,15 @@ describeIntegracao("paridade tela × chat do quadro.* (NOD-442, ADR-135)", () =>
       tela: async (_m, q) => ({ metodo: "POST", caminho: `/agentes/${q.anfitriao}/quadro/tarefas/${await q.tarefa("T1")}/trabalhos/recado`, corpo: { texto: "use a branch y" }, status: 201 }),
       chat: () => ({ tipo: "recado", tarefa: "T1", texto: "use a branch y" }),
     },
+    // ADA-232: "Acordar agora" — o trabalho #1 terminou o turno marcando a volta (dorme 1 h); a ação a traz para já.
+    {
+      id: "quadro.acordar_trabalho",
+      preparar: (m) => [...BASE(m), [{ tipo: "mudar_tarefa", tarefa: "T1", status: "afazer", agente: m.nomeCaio }]],
+      terminarTrabalhos: true,
+      dormir: true,
+      tela: async (_m, q) => ({ metodo: "POST", caminho: `/agentes/${q.anfitriao}/quadro/tarefas/${await q.tarefa("T1")}/trabalhos/acordar`, status: 200 }),
+      chat: () => ({ tipo: "acordar_trabalho", tarefa: "T1" }),
+    },
   ];
 
   it("cobre exatamente as ações do quadro, e o executor de cada uma existe", () => {
@@ -366,6 +379,12 @@ describeIntegracao("paridade tela × chat do quadro.* (NOD-442, ADR-135)", () =>
         return id;
       };
       if (c.terminarTrabalhos) await trx`update turnos set estado = 'concluido' where id in (select turno_id from quadro_execucoes where owner_id = ${MARLON.pessoaId})`;
+      if (c.dormir) {
+        await trx`insert into turnos (tenant_id, id, owner_id, conversa_id, agente_id, origem, estado, prazo_em, profundidade, entrada_texto, entrada_confianca, retoma_turno_id, executor, modelo, acordar_em)
+          select tenant_id, gen_random_uuid(), owner_id, conversa_id, agente_id, 'retomada', 'pendente', prazo_em, profundidade, 'volta', entrada_confianca, id, executor, modelo, now() + interval '1 hour'
+          from turnos where id in (select turno_id from quadro_execucoes where owner_id = ${MARLON.pessoaId})`;
+        await trx`update turnos set despertar_em = now() + interval '1 hour', despertar_motivo = 'o deploy' where id in (select turno_id from quadro_execucoes where owner_id = ${MARLON.pessoaId})`;
+      }
       expect(await estado(m, m.tela.agenteId)).toEqual(await estado(m, m.chat.agenteId));
       if (c.linear) {
         await m.d.repos.composio.salvarChave("cifrada-de-teste");

@@ -110,6 +110,13 @@ function notasDosRecados(d: ExecucoesDaTarefa): string {
   }).join("");
 }
 
+/** ADA-232: o "Volto quando…" do trabalho que marcou a volta (a CI do PR, a hora ou só o motivo). */
+export function fraseDaVolta(v: NonNullable<ExecucaoDto["volta"]>, hora: (em: number) => string): string {
+  const pr = v.prUrl ? (/\/pull\/(\d+)/.exec(v.prUrl)?.[1] ?? null) : null;
+  const quando = v.quando === "ci" ? `Volto quando a CI ${pr ? `do PR #${pr}` : "do PR"} terminar` : v.em !== null ? `Volto às ${hora(v.em)}` : "Volto depois";
+  return v.motivo ? `${quando} · ${v.motivo}` : quando;
+}
+
 export function secaoDoTrabalho(v: VistaDoTrabalho, hora: (em: number) => string): string {
   const titulo = `<h2 class="qd-t-sec" id="qd-trab-tit">Execuções</h2>`;
   const abre = `<section class="qd-trab" aria-labelledby="qd-trab-tit" data-tarefa="${esc(v.tarefaId)}">${titulo}`;
@@ -140,8 +147,11 @@ export function secaoDoTrabalho(v: VistaDoTrabalho, hora: (em: number) => string
     // Revisão 5 do PR #625: a nova tentativa sozinha agendada (depois da queda), com a hora.
     const agenda = atual.novaTentativaEm !== null && !vivo(atual)
       ? `<p class="qd-trab-nota">Nova tentativa sozinha às <time datetime="${new Date(atual.novaTentativaEm).toISOString()}">${esc(hora(atual.novaTentativaEm))}</time></p>` : "";
+    // Sem hora (em null) é a espera de um comando de fundo: termina sozinha, o servidor recusa o acordar.
+    const acordar = atual.volta?.em != null ? `<span aria-hidden="true"> · </span><button type="button" class="qd-link" data-act="trab-acordar"${des}>Acordar agora</button>` : "";
+    const volta = atual.volta ? `<p class="qd-trab-nota qd-trab-volta">${esc(fraseDaVolta(atual.volta, hora))}${acordar}</p>` : "";
     const log = `<div class="qd-trab-log" data-trabalho="${esc(atual.id)}">${logDoTrabalho(atual, v.atividade, v.passosAbertos)}</div>`;
-    corpo = `<div class="qd-trab-atual" data-estado="${atual.estado}"><p class="qd-trab-linha">${linhaDoTrabalho(atual, hora)}</p>${fraseHtml}${agenda}${log}` +
+    corpo = `<div class="qd-trab-atual" data-estado="${atual.estado}"><p class="qd-trab-linha">${linhaDoTrabalho(atual, hora)}</p>${fraseHtml}${volta}${agenda}${log}` +
       (acoes.length ? `<p class="qd-trab-acoes">${acoes.join(`<span aria-hidden="true"> · </span>`)}</p>` : "") + `</div>`;
   }
   if (anteriores.length) {

@@ -21,6 +21,8 @@ export interface ApiDosTrabalhos {
   trabalhosDaTarefa?(agenteId: string, tarefaId: string): Promise<ExecucoesDaTarefa>;
   repetirTrabalho?(agenteId: string, tarefaId: string): Promise<SaidaDoTrabalho>;
   cancelarTrabalho?(agenteId: string, tarefaId: string): Promise<SaidaDoTrabalho>;
+  /** ADA-232: "Acordar agora", a volta marcada dispara já (na mesma sessão). */
+  acordarTrabalho?(agenteId: string, tarefaId: string): Promise<SaidaDoTrabalho>;
   recadoTrabalho?(agenteId: string, tarefaId: string, texto: string): Promise<SaidaDoTrabalho>;
 }
 
@@ -287,6 +289,7 @@ export function criarTrabalhosDaTarefa(o: {
       if (act === "trab-anteriores") { anteriores = !anteriores; o.redesenhar(); return true; }
       if (act === "trab-reler") { dados = null; erro = false; o.redesenhar(); void ler(); return true; }
       if (act === "trab-repetir") { void agir((ag, t) => a?.repetirTrabalho?.(ag, t)); return true; }
+      if (act === "trab-acordar") { void agir((ag, t) => a?.acordarTrabalho?.(ag, t)); return true; }
       if (act === "trab-cancelar") { void agir((ag, t) => a?.cancelarTrabalho?.(ag, t)); return true; }
       if (act === "trab-recado-tentar") {
         const p = recadoPendente;

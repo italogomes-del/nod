@@ -89,7 +89,13 @@ describeIntegracao("chaves de experimento (ADR-111)", () => {
     // ADA-9 (ADR-146): com gerir_apps vem a linha "Tela inicial:" (a view padrão pelo chat); desligado, ela some.
     expect(desligado.texto).not.toMatch(/^Tela inicial:/m);
     expect(ligado.texto).toMatch(/^Tela inicial: .*gerir_apps ordenar \{pagina: "tarefas", posicao: 1\}/m);
-    const semQuadro = ligado.texto.split("\n").filter((l) => !l.startsWith("Quadro:") && !l.startsWith("Tela inicial:")).join("\n");
+    // ADA-232 (ADR-155): com gerir_quadro vem também a linha das 4 saídas do trabalho de tarefa; desligado, ela some.
+    expect(desligado.texto).not.toMatch(/^Trabalho de tarefa do quadro termina/m);
+    expect(ligado.texto).toMatch(/^Trabalho de tarefa do quadro termina sempre numa de 4 saídas/m);
+    const semQuadro = ligado.texto
+      .split("\n")
+      .filter((l) => !l.startsWith("Quadro:") && !l.startsWith("Tela inicial:") && !l.startsWith("Trabalho de tarefa do quadro termina"))
+      .join("\n");
     expect(semQuadro.replace(" mcp__nod__gerir_apps,", "").replace(" mcp__nod__gerir_quadro,", "")).toBe(desligado.texto);
     expect(ligado.composicao).toEqual({ calibracao: false, memoriaLonga: false, whatsapp: false, anexosAnteriores: 0 });
   });
