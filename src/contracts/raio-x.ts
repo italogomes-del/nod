@@ -181,7 +181,13 @@ export const EXPERIMENTOS_DESLIGADOS: Experimentos = { calibracao: false, memori
  * `quadroExibir` (definido em 2026-11-04, NOD-460, 0149): o Exibir do quadro em tela cheia por quadro (a chave é o id):
  * mostrar as colunas recolhidas e a densidade compacta. Ausente = o padrão da tela (recolhidas à mostra, sem compacto).
  */
-export type ExibirDoQuadro = { recolhidas: boolean; compacto: boolean };
+export type ExibirDoQuadro = { recolhidas: boolean; compacto: boolean; visao?: VisaoDoQuadro };
+/**
+ * ADA-18 (definido em 2026-11-07): a visão do quadro no celular (o título do quadro troca): a lista agrupada por coluna, as
+ * colunas com snap ou só o que está com a pessoa. Ausente = lista. Fica no mesmo `quadro_exibir` (sem migração).
+ */
+export const VISOES_DO_QUADRO = ["lista", "colunas", "minhas"] as const;
+export type VisaoDoQuadro = (typeof VISOES_DO_QUADRO)[number];
 /** Quantos quadros guardam o Exibir por pessoa (é linha de banco de quem clica). */
 export const QUADROS_COM_EXIBIR_MAX = 200;
 export type Preferencias = { modoDev: boolean; avisosFechados: string[]; usoDoMac?: UsoDoMac; maquinaPadraoId?: string | null; ordemIas?: IdHarness[] | null; iasNoLimite?: LimitesIa; experimentos?: Experimentos; quadroLiberado?: boolean; quadroExibir?: Record<string, ExibirDoQuadro> };

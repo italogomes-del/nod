@@ -199,13 +199,17 @@ export function preferenciasRepo(conn: Conn, escopo: Escopo) {
      * ON CONFLICT trava a linha e confere a contagem na versão mais nova, então pedidos simultâneos não passam do teto
      * (QA do PR #645). Null = cheio, e o quadro é novo no mapa.
      */
-    async exibirQuadro(quadroId: string, e: ExibirDoQuadro, max: number): Promise<Preferencias | null> {
-      const valor = jsonb(conn, { [quadroId]: { recolhidas: e.recolhidas, compacto: e.compacto } });
+    async exibirQuadro(quadroId: string, e: Partial<ExibirDoQuadro>, max: number): Promise<Preferencias | null> {
+      // ADA-18: muda só os campos que vieram, por cima do que o quadro já tinha (o padrão da tela embaixo): trocar a
+      // visão no celular não apaga as recolhidas do computador, e vice-versa.
+      const padrao = jsonb(conn, { recolhidas: true, compacto: false });
+      const campos = jsonb(conn, e);
       const [l] = await conn<Linha[]>`
         insert into preferencias (tenant_id, owner_id, quadro_exibir)
-        values (${escopo.tenantId}, ${escopo.pessoaId}, ${valor}::jsonb)
+        values (${escopo.tenantId}, ${escopo.pessoaId}, jsonb_build_object(${quadroId}::text, ${padrao}::jsonb || ${campos}::jsonb))
         on conflict (tenant_id, owner_id) do update set
-          quadro_exibir = preferencias.quadro_exibir || ${valor}::jsonb,
+          quadro_exibir = preferencias.quadro_exibir || jsonb_build_object(${quadroId}::text,
+            ${padrao}::jsonb || coalesce(preferencias.quadro_exibir -> ${quadroId}, '{}'::jsonb) || ${campos}::jsonb),
           atualizado_em = clock_timestamp()
         where preferencias.quadro_exibir ? ${quadroId}
           or (select count(*) from jsonb_object_keys(preferencias.quadro_exibir)) < ${max}

@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { rotasQuadro } from "../../src/adapters/http/rotas/quadro.ts";
+import { criarRotasRaioX } from "../../src/adapters/http/rotas/raio-x.ts";
 import type { DepsRotas } from "../../src/adapters/http/rotas/executar-caso.ts";
 import { LIMITES_QUADRO, type OpQuadro, type QuadroDto, type ResultadoGerirQuadro } from "../../src/contracts/quadro.ts";
 import { vincularEscopo } from "../../src/db/tx.ts";
@@ -96,7 +97,7 @@ describeIntegracao("paridade tela × chat do quadro.* (NOD-442, ADR-135)", () =>
       useCases: useCasesDeTeste(),
       executor: "catcher",
     };
-    servidor = await servidorDeTeste(rotasQuadro(deps));
+    servidor = await servidorDeTeste([...rotasQuadro(deps), ...criarRotasRaioX(deps)]);
     // NOD-443: alguém do time para pôr no quadro.
     await COLEGA.criar();
   });
@@ -935,6 +936,43 @@ describeIntegracao("paridade tela × chat do quadro.* (NOD-442, ADR-135)", () =>
       expect((await executar(m.d, gerirQuadro, { ...(await turnoDe(m.d, m.gil.agenteId, m.gil.conversaId)), quadro: m.tela.agenteId, acoes: [{ tipo: "criar_tarefa", titulo: "T3" }] })).data).toMatchObject({ ok: true });
       expect((await executar(m.d, gerirQuadro, { ...(await turnoDe(m.d, m.gil.agenteId, m.gil.conversaId)), quadro: "não existe", acoes: [] })).data).toMatchObject({ ok: false });
       expect(await trx`select 1 from events where kind = 'quadro_consultado'`).toHaveLength(1);
+    });
+  });
+  it("ADA-18: preferencias.exibir_quadro pela tela (PUT) e pelo chat (gerir_quadro exibir) deixam o mesmo Exibir; inválido e fora da conversa recusam", async () => {
+    await withRollback(MARLON, async (trx) => {
+      trxAtual = trx;
+      const m = await montar(trx);
+      await pessoa(m.d, m.tela.agenteId, [{ tipo: "criar_quadro" }]);
+      await pessoa(m.d, m.chat.agenteId, [{ tipo: "criar_quadro" }]);
+      const qTela = (await m.d.repos.quadros.doAgente(m.tela.agenteId))!.id;
+      const qChat = (await m.d.repos.quadros.doAgente(m.chat.agenteId))!.id;
+      const exibir = async (id: string) => (await m.d.repos.preferencias.buscar()).quadroExibir?.[id];
+      const sessao = await servidor.entrar("marlon");
+      const passos: { visao?: "lista" | "colunas" | "minhas"; recolhidas?: boolean; compacto?: boolean }[] = [{ visao: "colunas" }, { recolhidas: false }, { visao: "minhas", compacto: true }];
+      for (const corpo of passos) {
+        const resp = await servidor.chamar(sessao, "PUT", `/preferencias/quadros/${qTela}/exibir`, corpo);
+        expect(resp.status, JSON.stringify(corpo)).toBe(200);
+        const r = await executar(m.d, gerirQuadro, { ...(await turnoDe(m.d, m.gil.agenteId, m.gil.conversaId)), quadro: m.nomeChat, acoes: [{ tipo: "exibir", ...corpo }] });
+        expect(r.data, JSON.stringify(corpo)).toMatchObject({ ok: true, lote_id: null });
+        expect(await exibir(qChat), JSON.stringify(corpo)).toEqual(await exibir(qTela));
+      }
+      expect(await exibir(qChat)).toEqual({ recolhidas: false, compacto: true, visao: "minhas" });
+      // Visão inválida: 400 na tela e entrada_invalida no chat, sem mudar nada.
+      expect((await servidor.chamar(sessao, "PUT", `/preferencias/quadros/${qTela}/exibir`, { visao: "grade" })).status).toBe(400);
+      const ruim = await executar(m.d, gerirQuadro, { ...(await turnoDe(m.d, m.gil.agenteId, m.gil.conversaId)), quadro: m.nomeChat, acoes: [{ tipo: "exibir", visao: "grade" } as unknown as OpQuadro] });
+      expect(ruim.data).toMatchObject({ ok: false, erro: "entrada_invalida" });
+      // Sozinho na chamada e só a pedido da pessoa, na conversa (não numa rotina ou tarefa).
+      const junto = await executar(m.d, gerirQuadro, { ...(await turnoDe(m.d, m.gil.agenteId, m.gil.conversaId)), quadro: m.nomeChat, acoes: [{ tipo: "exibir", visao: "lista" }, { tipo: "criar_tarefa", titulo: "X" }] });
+      expect(JSON.stringify(junto.data)).toContain("exibir vai sozinho na chamada");
+      const rotina = await m.d.repos.turnos.enfileirar({ executor: "catcher", conversaId: m.gil.conversaId, agenteId: m.gil.agenteId, origem: "rotina", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "auto" });
+      const fora = await executar(m.d, gerirQuadro, { turnoId: rotina!.id, agenteId: m.gil.agenteId, conversaId: m.gil.conversaId, quadro: m.nomeChat, acoes: [{ tipo: "exibir", visao: "lista" }] });
+      expect(fora.data).toMatchObject({ ok: false, erro: "entrada_invalida" });
+      expect(await exibir(qChat)).toEqual({ recolhidas: false, compacto: true, visao: "minhas" });
+      // QA do PR #700: com o quadro desligado nos experimentos, o chat também não mexe no Exibir.
+      await m.d.repos.preferencias.gravar({ experimentos: { quadro: false } });
+      const desligado = await executar(m.d, gerirQuadro, { ...(await turnoDe(m.d, m.gil.agenteId, m.gil.conversaId)), quadro: m.nomeChat, acoes: [{ tipo: "exibir", visao: "lista" }] });
+      expect(desligado.data).toMatchObject({ ok: false, erro: "experimento_desligado" });
+      expect(await exibir(qChat)).toEqual({ recolhidas: false, compacto: true, visao: "minhas" });
     });
   });
 });

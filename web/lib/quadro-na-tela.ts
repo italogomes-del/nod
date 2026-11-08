@@ -24,9 +24,11 @@ import type { MutacaoQuadro } from "./api.ts";
 import type { FiltroImportacao, ImportacaoDto, PreviaDaTela } from "../../src/contracts/quadro-importacao.ts";
 import type { EventoTrilhaQuadro } from "../../src/contracts/trilha-quadro.ts";
 import { ehRecusaDoPainel, type PainelImportacao } from "../telas/card-importacao.ts";
-import { RESP_VOCE, acesos, codigoDaTarefa, acoesDaNovaTarefa, fraseDoErroDoMover, reciboDaNovaTarefa, codigoNaUrl, destinosDaTarefa, historicoDaFaixa, respostaDoBot, respostaLonga, tarefaNoQuadro, type AcoesDoRecibo, type Faixa } from "./quadro-dados.ts";
-import type { ExibirDoQuadro } from "../../src/contracts/raio-x.ts";
-import { quadroVazio, type Aviso, type ExibirDaBarra, type Filtro, type Html } from "../telas/quadro.ts";
+import { PARAMETRO_TAREFA, RESP_VOCE, acesos, codigoDaTarefa, acoesDaNovaTarefa, fraseDoErroDoMover, reciboDaNovaTarefa, codigoNaUrl, destinosDaTarefa, historicoDaFaixa, respostaDoBot, respostaLonga, tarefaNoQuadro, type AcoesDoRecibo, type Faixa } from "./quadro-dados.ts";
+import type { ExibirDoQuadro, VisaoDoQuadro } from "../../src/contracts/raio-x.ts";
+import { VISOES_DO_QUADRO } from "../telas/quadro-celular.ts";
+import { criarCelularDoQuadro, seletorDoFocoDaFolha } from "./celular-do-quadro.ts";
+import { quadroVazio, type Aviso, type Filtro, type Html } from "../telas/quadro.ts";
 import { contarNaVista, ehFiltro, termoDaBusca } from "./vista-do-quadro.ts";
 import { decidirSoltura, fraseDaTrava, RECUSA_MS, relogioDaRecusa, type RelogioDaRecusa } from "./freios.ts";
 import { sugestoesDoQuadro, contadorDaPilula } from "./sugestoes-do-quadro.ts";
@@ -47,6 +49,9 @@ import { ligarGestosDaPilula, type PilulaDePaginas } from "./paginas-na-tela.ts"
 import { criarComentariosNaTela, type ApiDosComentarios } from "./comentarios-na-tela.ts";
 import { criarTrabalhosDaTarefa, type ApiDosTrabalhos } from "./trabalhos-da-tarefa.ts";
 import { criarEnvios } from "./envio-idempotente.ts";
+import { atualizarPontos } from "./pontos-das-colunas.ts";
+import { criarToqueLongo } from "./toque-longo.ts";
+import { TOQUE_LONGO_DA_LINHA_MS } from "./celular-do-quadro.ts";
 import { PRAZO_DO_ENVIO_MS, comPrazo } from "./com-prazo.ts";
 
 /** Revisão 11 do #646: a janela de reenvio da mesma fala com a mesma chave (depois dela, o mesmo texto é pedido novo). */
@@ -97,7 +102,7 @@ export interface ApiDoQuadro extends ApiDosComentarios, ApiDosTrabalhos {
   atividadeQuadro?(agenteId: string): Promise<{ linhas: LinhaMuralDto[] }>;
   /** NOD-460 (0149): o Exibir guardado de cada quadro (nas preferências de quem lê) e a gravação de um. */
   preferencias?(): Promise<{ quadroExibir?: Record<string, ExibirDoQuadro> }>;
-  exibirQuadro?(quadroId: string, e: ExibirDoQuadro): Promise<unknown>;
+  exibirQuadro?(quadroId: string, e: Partial<ExibirDoQuadro>): Promise<unknown>;
 }
 
 /** NOD-442: o que o quadro de verdade precisa do main. Sem isto (os testes da NOD-429), a vista é o quadro vazio. */
@@ -135,6 +140,8 @@ export interface DadosDoQuadro {
   composer?: ComposerDoQuadro;
   /** ADA-12: o prazo da reserva da altura (o teste encurta; o app usa RESERVA_MS). */
   reservaMs?: number;
+  /** ADA-18: a tela é de celular (o quadro do celular no lugar da grade). Padrão: a consulta canônica (web/lib/celular.ts). */
+  celular?: () => boolean;
 }
 
 /** ADA-5: o que a pílula do Quadro usa do composer do chat (o main dá as peças que são dele: anexos, ditado, Parar). */
@@ -271,7 +278,41 @@ export function criarQuadroNaTela(doc: Document, o: { busca?: BuscaDaPilula; men
   let exibirPorQuadro: Record<string, ExibirDoQuadro> = {};
   let exibirPedido = false;
   let gravacaoDoExibir: Promise<void> = Promise.resolve();
+  /** Sobe a cada mudança do Exibir feita nesta tela: a releitura que voltar depois de uma mudança local é descartada. */
+  let versaoDoExibir = 0;
   let nova: { coluna: string; estreito?: boolean; erro?: boolean } | null = null;
+  /** ADA-18: as folhas do celular (visão, toque longo, ⋯ do topo); web/lib/celular-do-quadro.ts. */
+  const cel = criarCelularDoQuadro({
+    trocarVisao, redesenhar: () => desenharVista(), focar: (s) => focarNaVista(s),
+    atribuir: (id, agente) => { const t = tarefaNoQuadro(q, id); if (t && agente !== t.agenteId) mudarNaTarefaAberta(t, { agente }); },
+    copiarLink: (id) => { void copiarLinkDaTarefa(id); },
+    definirPrazo: (prazo) => { if (q && prazo !== q.prazo) void mexerNoQuadro("editar", { prazo }); },
+  });
+  /** ADA-18 (S9): segurar a linha do celular abre o menu da tarefa. */
+  const toque = criarToqueLongo<string>(
+    { agendar: (fn, ms) => Number(setTimeout(fn, ms)), cancelar: (id) => clearTimeout(id), agora: () => Date.now() },
+    (id) => {
+      if (!tarefaNoQuadro(q, id)) return false;
+      (globalThis.navigator as { vibrate?: (ms: number) => boolean } | undefined)?.vibrate?.(10);
+      cel.menuDaTarefa(id);
+      return true;
+    },
+    TOQUE_LONGO_DA_LINHA_MS,
+  );
+  /** S5: o link da tarefa é o `?tarefa=` do NOD-416 (o código do quadro, ou o uuid). */
+  async function copiarLinkDaTarefa(id: string): Promise<void> {
+    const t = tarefaNoQuadro(q, id);
+    if (!t) return;
+    const url = new URL(globalThis.location.href);
+    url.search = "";
+    url.hash = "";
+    url.searchParams.set(PARAMETRO_TAREFA, codigoNaUrl(t));
+    let ok = false;
+    try { await globalThis.navigator.clipboard.writeText(url.toString()); ok = true; } catch { ok = false; }
+    const texto = ok ? `Link de ${t.titulo} copiado.` : "Não deu para copiar o link.";
+    mudarFaixa(ok ? { tipo: "resposta", texto, loteId: null, mensagemId: "" } : { tipo: "erro", texto });
+    anunciar(texto);
+  }
   /** As colunas que a pessoa abriu ou recolheu, ao contrário do padrão. */
   let alternadas = new Set<string>();
   let animacoes: Animation[] = [];
@@ -532,7 +573,17 @@ export function criarQuadroNaTela(doc: Document, o: { busca?: BuscaDaPilula; men
     }
     const comPessoas = !!dd.api()?.adicionarPessoa;
     const agentes = dd.agentes && dd.api()?.definirPassagem ? dd.agentes() : undefined;
-    return quadroDaMeta({ q, nome, agente: dd.agente, filtro, alternadas, acesas, edicao, agora: Date.now(), editandoMeta, ...(comPessoas ? { pessoas: { painel, mural, hora: dd.hora, erro: erroPessoas } } : {}), ...(agentes ? { agentes } : {}), ...(importando ? { importando } : {}), ...(recusa ? { avisos: new Map([[recusa.tarefa, recusa.aviso]]) } : {}), busca, exibir: { ...exibirDoQuadro(), aberto: exibirAberto }, maisAberto, nova, podeCriar: !!dd.api()?.criarTarefa });
+    return quadroDaMeta({ q, nome, agente: dd.agente, filtro, alternadas, acesas, edicao, agora: Date.now(), editandoMeta, ...(comPessoas ? { pessoas: { painel, mural, hora: dd.hora, erro: erroPessoas } } : {}), ...(agentes ? { agentes } : {}), ...(importando ? { importando } : {}), ...(recusa ? { avisos: new Map([[recusa.tarefa, recusa.aviso]]) } : {}), busca, exibir: { ...exibirDoQuadro(), aberto: exibirAberto }, maisAberto, nova, podeCriar: !!dd.api()?.criarTarefa, ...(noCelular() ? { celular: { visao: visaoDoQuadro(), folha: cel.folha() } } : {}) });
+  }
+
+  /** ADA-18: o quadro do celular (o teste injeta; o app lê a consulta canônica a cada desenho). */
+  function noCelular(): boolean {
+    return dd?.celular ? dd.celular() : ehCelular();
+  }
+  /** ADA-18: a visão do celular, guardada no Exibir do quadro; a desconhecida (ou ausente) cai em Lista. */
+  function visaoDoQuadro(): VisaoDoQuadro {
+    const v = exibirDoQuadro().visao;
+    return v && VISOES_DO_QUADRO.includes(v) ? v : "lista";
   }
 
   /**
@@ -614,6 +665,8 @@ export function criarQuadroNaTela(doc: Document, o: { busca?: BuscaDaPilula; men
     const ativo = doc.activeElement;
     const focoId = ativo instanceof HTMLElement && conteudo.contains(ativo) && ativo.id ? ativo.id : null;
     const focoColuna = ativo instanceof HTMLElement && conteudo.contains(ativo) && !ativo.id ? seletorDoFocoDaColuna(ativo) ?? seletorDoFocoDoCard(ativo) : null;
+    // QA do PR #700: o item focado da folha do celular volta a ter o foco no desenho (senão cai no body, fora da folha).
+    const focoFolha = ativo instanceof HTMLElement && conteudo.contains(ativo) && !ativo.id ? seletorDoFocoDaFolha(ativo) : null;
     const sel = (ativo instanceof HTMLInputElement || ativo instanceof HTMLTextAreaElement) && focoId ? [ativo.selectionStart, ativo.selectionEnd] as const : null;
     // ADA-7: a mesma vista (página, tarefa e forma) regravada pelo frame fica onde a pessoa rolou; trocar de vista
     // (abrir a tarefa, voltar ao quadro, outra página) segue com quem a trocou (abrirTarefa e irPara levam ao topo).
@@ -656,11 +709,14 @@ export function criarQuadroNaTela(doc: Document, o: { busca?: BuscaDaPilula; men
     if (alturaAntes > 0) reserva.depois(conteudo, alturaAntes);
     // ADA-7: a rolagem volta depois dos rascunhos (o campo que cresce com o texto mudaria a altura e a vista pularia).
     if (rolagem) restaurarRolagem(v, conteudo, rolagem);
+    // ADA-18: os pontos das colunas do celular seguem a coluna que a rolagem restaurada deixou à vista.
+    atualizarPontos(conteudo);
     // ADA-12: o alvo vence o valor guardado (que pode ser o corte de um conteúdo que encolheu no desenho anterior).
     rol?.depois(doAlvo);
     if (cabiaInteira || seguirFim) v.scrollTop = v.scrollHeight;
     // ADA-7: o foco volta sem rolar (o título da tarefa aberta, recriado e focado, levava a vista ao topo).
     if (focoColuna) focarSemRolar(conteudo.querySelector<HTMLElement>(focoColuna));
+    if (focoFolha) focarSemRolar(conteudo.querySelector<HTMLElement>(focoFolha) ?? conteudo.querySelector<HTMLElement>(".qd-cel-folha"));
     if (focoId) {
       const novo = doc.getElementById(focoId);
       focarSemRolar(novo);
@@ -2168,6 +2224,8 @@ export function criarQuadroNaTela(doc: Document, o: { busca?: BuscaDaPilula; men
     // começo e o fim de um turno mudam a execução; o delta, a fala e a atividade (várias por segundo enquanto qualquer
     // bot escreve) regravavam o quadro inteiro e travavam a rolagem (ADA-7, ADR-061).
     if (TURNO_MUDA_A_EXECUCAO.has(frame.tipo) && q && q.tarefas.length && modo === "quadro") pedirReleitura();
+    // Revisão do PR #700: o turno que acabou pode ter trocado o Exibir pelo chat (de qualquer conversa da pessoa).
+    if (frame.tipo === "turno.encerrado" && q && modo === "quadro") relerExibir();
     const daConversa = d["conversaId"] === chave;
     // ADA-4: os frames do turno da conversa vão à faixa (só o turno do pedido muda algo; outro bot ou turno é ignorado).
     if (daConversa && frame.tipo.startsWith("turno.")) despachar({ tipo: "frame", frame, agora: Date.now() });
@@ -2552,6 +2610,28 @@ export function criarQuadroNaTela(doc: Document, o: { busca?: BuscaDaPilula; men
     abrirPendente();
   }
 
+  // ADA-18 (S9): o toque longo na linha do celular. Só dedo (o mouse tem o clique); rolar ou mexer cancela.
+  const linhaDoToque = (alvo: EventTarget | null): HTMLElement | null =>
+    alvo instanceof Element ? alvo.closest<HTMLElement>("#quadro .qd-cel .qd-cl[data-tarefa]") : null;
+  doc.addEventListener("pointerdown", (ev) => {
+    const li = ev.pointerType === "mouse" ? null : linhaDoToque(ev.target);
+    if (li && noCelular() && !(ev.target as Element).closest("input, textarea, select, .qd-card-resp")) toque.comecar(li.dataset["tarefa"] ?? "", ev.clientX, ev.clientY);
+  }, { passive: true });
+  doc.addEventListener("pointermove", (ev) => { toque.mover(ev.clientX, ev.clientY); }, { passive: true });
+  doc.addEventListener("pointerup", () => { toque.soltar(); }, { passive: true });
+  doc.addEventListener("pointercancel", () => { toque.soltar(); }, { passive: true });
+  // O clique que o navegador manda ao soltar não abre a tarefa; o menu do sistema (Android) não aparece sobre a linha.
+  // O clique de soltar cai onde o dedo estava: já sobre o fundo da folha que abriu (não na linha). Engole qualquer alvo.
+  doc.addEventListener("click", (ev) => { if (toque.engolirClique()) { ev.preventDefault(); ev.stopImmediatePropagation(); } }, { capture: true });
+  doc.addEventListener("contextmenu", (ev) => { if (noCelular() && linhaDoToque(ev.target)) ev.preventDefault(); });
+
+  // ADA-18: a rolagem do carrossel de colunas do celular acende o ponto da coluna à vista (scroll não sobe: captura).
+  doc.addEventListener("scroll", (ev) => {
+    toque.soltar();
+    const el = ev.target;
+    if (el instanceof HTMLElement && el.classList.contains("qd-cel-cols") && el.parentElement) atualizarPontos(el.parentElement);
+  }, { capture: true, passive: true });
+
   // As ações do segmento e do quadro vazio moram aqui, não no mapa de ações do main: são só da tela.
   doc.addEventListener("click", (ev) => {
     const alvo = ev.target as Element | null;
@@ -2575,6 +2655,8 @@ export function criarQuadroNaTela(doc: Document, o: { busca?: BuscaDaPilula; men
     if (!el) return;
     const act = el.dataset["act"];
     if (dd && el.closest("#quadro")) {
+      // ADA-18: as folhas do celular primeiro; as ações do quadro de dentro delas fecham a folha e seguem abaixo.
+      if (noCelular() && cel.aoClicar(el, act)) return;
       const id = el.dataset["id"] ?? "";
       if (act === "abrir-tarefa" && id) { abrirTarefa(id, "card"); return; }
       if (act === "tarefa-mover" || act === "tarefa-mover-para") { aoMoverCard(el, act); return; }
@@ -2678,7 +2760,7 @@ export function criarQuadroNaTela(doc: Document, o: { busca?: BuscaDaPilula; men
 
   /* ---------- NOD-460: a barra (filtro, busca, Exibir) e o "+" por coluna ---------- */
   /** O Exibir que vale neste quadro: o que a pessoa guardou (ou mudou aqui); sem nada, o padrão. */
-  function exibirDoQuadro(): Omit<ExibirDaBarra, "aberto"> {
+  function exibirDoQuadro(): ExibirDoQuadro {
     lerExibirGuardado();
     return (q && exibirPorQuadro[q.id]) || EXIBIR_PADRAO;
   }
@@ -2695,8 +2777,43 @@ export function criarQuadroNaTela(doc: Document, o: { busca?: BuscaDaPilula; men
       const antes = q ? exibirPorQuadro[q.id] ?? EXIBIR_PADRAO : null;
       exibirPorQuadro = { ...guardado, ...exibirPorQuadro };
       const depois = q ? exibirPorQuadro[q.id] ?? EXIBIR_PADRAO : null;
-      if (q && !aberta && (antes?.recolhidas !== depois?.recolhidas || antes?.compacto !== depois?.compacto) && vista()?.firstElementChild) desenharVista();
+      if (q && !aberta && (antes?.recolhidas !== depois?.recolhidas || antes?.compacto !== depois?.compacto || antes?.visao !== depois?.visao) && vista()?.firstElementChild) desenharVista();
     }, () => { /* sem as preferências, o padrão */ });
+  }
+
+  /**
+   * Revisão do PR #700: o chat também muda o Exibir (gerir_quadro exibir, ADR-135) e não há frame disso. Quando um turno
+   * termina, relê o Exibir deste quadro depois das gravações da tela; o do servidor vale, a não ser que a pessoa tenha
+   * mudado algo aqui durante o pedido (a versão local mudou: o que ela escolheu vence e já está na fila).
+   */
+  function relerExibir(): void {
+    const a = dd?.api();
+    if (!q || !a?.preferencias) return;
+    const quadroId = q.id;
+    const versao = versaoDoExibir;
+    void gravacaoDoExibir.then(() => a.preferencias!()).then((p) => {
+      const doServidor = p.quadroExibir?.[quadroId];
+      if (!doServidor || versao !== versaoDoExibir || q?.id !== quadroId) return;
+      const antes = exibirPorQuadro[quadroId] ?? EXIBIR_PADRAO;
+      exibirPorQuadro = { ...exibirPorQuadro, [quadroId]: doServidor };
+      if (!aberta && (antes.recolhidas !== doServidor.recolhidas || antes.compacto !== doServidor.compacto || antes.visao !== doServidor.visao) && vista()?.firstElementChild) desenharVista();
+    }, () => { /* fica o que a tela tem */ });
+  }
+
+  /**
+   * Revisão do PR #700 (plano §7): a folha do celular é aria-modal e prende o foco; o Tab na última (ou o Shift+Tab na
+   * primeira), ou vindo de fora dela, volta para dentro em vez de ir ao quadro atrás.
+   */
+  function prenderFocoNaFolha(ev: KeyboardEvent): void {
+    const f = vista()?.querySelector<HTMLElement>(".qd-cel-folha");
+    if (!f) return;
+    const focaveis = [...f.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])')]
+      .filter((e) => e.getClientRects().length);
+    const i = focaveis.indexOf(doc.activeElement as HTMLElement);
+    if (i !== -1 && (ev.shiftKey ? i > 0 : i < focaveis.length - 1)) return;
+    ev.preventDefault();
+    const alvo = ev.shiftKey ? focaveis.at(-1) : focaveis[0];
+    focarSemRolar(alvo ?? f);
   }
 
   const focarNaVista = (seletor: string): void => { const e = vista()?.querySelector<HTMLElement>(seletor); if (e) focarSemRolar(e); };
@@ -2758,19 +2875,36 @@ export function criarQuadroNaTela(doc: Document, o: { busca?: BuscaDaPilula; men
   async function alternarExibir(chave: string | undefined): Promise<void> {
     if ((chave !== "recolhidas" && chave !== "compacto") || !q) return;
     const atual = exibirDoQuadro();
-    const novo: ExibirDoQuadro = { recolhidas: atual.recolhidas, compacto: atual.compacto, [chave]: !atual[chave] };
+    const novo: ExibirDoQuadro = { ...atual, [chave]: !atual[chave] };
     const quadroId = q.id;
     // A tela já mostra o novo; o servidor só guarda (a falha avisa, e o Exibir vale nesta tela até ela fechar).
     exibirPorQuadro = { ...exibirPorQuadro, [quadroId]: novo };
+    versaoDoExibir++;
     desenharVista();
     focarNaVista(`#qd-menu-exibir [data-chave="${chave}"]`);
     const a = dd?.api();
     if (!a?.exibirQuadro) return;
     // Revisão do PR #645: as gravações vão em fila, para a última escolha chegar por último ao servidor.
-    const gravar = gravacaoDoExibir.then(() => a.exibirQuadro!(quadroId, novo));
+    const gravar = gravacaoDoExibir.then(() => a.exibirQuadro!(quadroId, { recolhidas: novo.recolhidas, compacto: novo.compacto }));
     gravacaoDoExibir = gravar.then(() => undefined, () => undefined);
     try { await gravar; }
     catch { if (q?.id === quadroId) mudarFaixa({ tipo: "erro", texto: "Não consegui guardar o Exibir. Ele vale só nesta tela." }); }
+  }
+
+  /**
+   * ADA-18: troca a visão do celular. A tela muda na hora; o servidor guarda no Exibir do quadro, na mesma fila do Exibir.
+   * A falha é silenciosa (a visão vale nesta tela até ela fechar; não é um dado do quadro).
+   */
+  function trocarVisao(v: VisaoDoQuadro): void {
+    if (!q) return;
+    const quadroId = q.id;
+    exibirPorQuadro = { ...exibirPorQuadro, [quadroId]: { ...exibirDoQuadro(), visao: v } };
+    versaoDoExibir++;
+    desenharVista();
+    const a = dd?.api();
+    if (!a?.exibirQuadro) return;
+    const gravar = gravacaoDoExibir.then(() => a.exibirQuadro!(quadroId, { visao: v }));
+    gravacaoDoExibir = gravar.then(() => undefined, () => undefined);
   }
 
   /** As ações da barra e do "+" da coluna; true = tratou. */
@@ -3029,6 +3163,8 @@ export function criarQuadroNaTela(doc: Document, o: { busca?: BuscaDaPilula; men
       sel.title = sel.selectedOptions[0]?.textContent ?? "";
       return;
     }
+    // ADA-18: "Outra data" na folha do prazo do celular.
+    if (campo === "cel-prazo-data") { cel.aoEscolherData((el as HTMLInputElement).value); return; }
     if (campo !== "prazo" && campo !== "prazo-data") return;
     const caixa = el.closest<HTMLElement>(".qd-prazo");
     const data = caixa?.querySelector<HTMLInputElement>('[data-campo="prazo-data"]');
@@ -3103,6 +3239,14 @@ export function criarQuadroNaTela(doc: Document, o: { busca?: BuscaDaPilula; men
     } else if (ev.key === "Escape" && naRecusa(el)) {
       ev.preventDefault();
       sairDaRecusa();
+    } else if (ev.key === "Escape" && cel.folha() && el?.closest?.("#quadro")) {
+      cel.aoTeclar(ev);
+    } else if (ev.key === "Tab" && !ev.altKey && !ev.ctrlKey && !ev.metaKey && cel.folha() && noCelular()) {
+      prenderFocoNaFolha(ev);
+    } else if (((ev.key === "F10" && ev.shiftKey) || ev.key === "ContextMenu") && noCelular() && linhaDoToque(el)) {
+      // O teclado (e o leitor de tela) chega ao menu do toque longo pela linha focada.
+      ev.preventDefault();
+      cel.menuDaTarefa(linhaDoToque(el)?.dataset["tarefa"] ?? "");
     } else if (ev.key === "Escape" && editandoMeta && el instanceof HTMLInputElement && el.id === "qd-meta-in") {
       ev.preventDefault();
       editarMeta(false);

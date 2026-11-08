@@ -17,6 +17,7 @@ import type { Deps } from "./tipos.ts";
 import type { TrabalhoFeito } from "./quadro.ts";
 import type { Turno } from "../contracts/turno.ts";
 import { registrarConsultaDoQuadro } from "./trilha-quadro.ts";
+import { exibirDoQuadro } from "./raio-x.ts";
 
 /**
  * gerir_quadro (definido em 2026-10-31, NOD-442, ADR-135): a via do chat das ações `quadro.*`, para QUALQUER bot. É o
@@ -197,6 +198,22 @@ export async function gerirQuadroEmFases(deps: Deps, input: EntradaGerirQuadro, 
   const trabalhoOp = ops[0] && ehOpDeTrabalho(ops[0]) ? ops[0] : null;
   if (trabalhoOp && !(naConversa(turno) && limpo)) {
     return recusa("entrada_invalida", `${trabalhoOp.tipo} é pedido da pessoa: só num turno em que ela falou com você e nada de fora entrou (não numa tarefa, rotina, pedido de colega ou depois de ler uma página ou um e-mail)`);
+  }
+  // ADA-18: o Exibir do quadro é preferência da pessoa (só a pedido dela, na conversa, sem Desfazer). O executor é o mesmo
+  // caso de uso do PUT /preferencias/quadros/:id/exibir (exibirDoQuadro); o quadro é um dos dela (acharQuadro).
+  const exibir = ops[0]?.tipo === "exibir" ? ops[0] : null;
+  if (exibir) {
+    if (!naConversa(turno)) return recusa("entrada_invalida", "o Exibir do quadro é da pessoa: só a pedido dela, num turno em que ela falou com você");
+    if (!(await experimentoLigado(deps))) return recusa("experimento_desligado", "o quadro está desligado nos experimentos da pessoa");
+    const agentes = await agentesDaPessoa(deps);
+    const achado = await acharQuadro(deps, { autor: { tipo: "agente", agenteId: input.agenteId }, ops, executor: turno.executor, ...(input.quadro !== undefined ? { quadro: input.quadro } : {}) }, agentes);
+    if (achado && ("ambiguo" in achado || "semNome" in achado)) { const f = falhaDoAchado(achado, agentes); return recusa(f.erro, f.detalhe); }
+    if (!achado) return recusa("sem_quadro", "não há quadro: crie com criar_quadro");
+    const { visao, recolhidas, compacto } = exibir;
+    await exibirDoQuadro(deps, { quadroId: achado.id, visao, recolhidas, compacto });
+    const nomes = { lista: "Lista", colunas: "Colunas", minhas: "Minhas tarefas" } as const;
+    const o_que = [visao && `a visão do celular agora é ${nomes[visao]}`, recolhidas !== undefined && `as colunas recolhidas ${recolhidas ? "aparecem" : "somem"}`, compacto !== undefined && `os cards ${compacto ? "ficam compactos" : "voltam ao normal"}`].filter(Boolean).join("; ");
+    return { data: { ok: true, quadro: null, lote_id: null, comecaram: [], instrucao: `Feito: ${o_que} (só na tela da pessoa; não tem Desfazer, troca de novo se ela pedir). Diga isso em uma frase.` } };
   }
   // NOD-448 (ADR-140, decisão 3 do Gil): trocar o conjunto inteiro de colunas não sai sozinho — vira o card compacto na
   // conversa e só se aplica quando a pessoa confirma. Os outros passos de coluna saem na hora, com Desfazer.

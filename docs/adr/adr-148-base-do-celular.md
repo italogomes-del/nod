@@ -41,3 +41,20 @@ celular. O item 3 da ADR-094 não deixava isso explícito.
 ## Gatilho de reversão
 
 Se uma fase do celular precisar de uma ação que o computador não tem, ela volta a esta ADR e decide aqui antes.
+
+## Adendo (ADA-18, celular F3: o quadro)
+
+Aplicação do item 1 ao quadro, sem ação nova de domínio nem migração:
+
+- **Visão no título** (Lista, Colunas, Minhas tarefas) guardada em `exibir_quadro.visao` (o jsonb que já guardava
+  recolhidas e compacto). No chat, a mesma troca é a op `exibir` do `gerir_quadro` (registro em `src/domain/acoes`,
+  paridade). Minhas tarefas = o filtro Comigo.
+- **Colunas de 280 px com snap**: a rolagem lateral fica só no carrossel (`.qd-cel-cols`); pontos até 7 colunas,
+  contador `n/N` acima disso.
+- **Toque longo de 500 ms na linha** (o gesto do NOD-379, `web/lib/toque-longo.ts`) abre Mover para… (folha de 56 px,
+  o mesmo lote com Desfazer do computador), Atribuir e Copiar link (`?tarefa=`). Shift+F10/ContextMenu é o equivalente
+  de teclado. O clique de soltar é engolido em qualquer alvo (cai no fundo da folha recém-aberta).
+- **Prazo da tarefa** não existe no modelo: fica atrás de `PRAZO_DA_TAREFA = false` até uma fase decidir o campo aqui.
+- **O ⋯ do topo** reúne meta, prazo do quadro (folha, sem `select`), Pessoas, Atividade, Ordem das colunas, Trazer do
+  Linear e Remover quadro: as mesmas ações do topo do computador.
+- O CSS fica todo em `web/quadro-celular.css`, dentro da consulta canônica; o computador não muda (critério 13).

@@ -406,7 +406,7 @@ export function criarApi(escopo: Escopo) {
     // ADR-111: `experimentos` leva só a chave que mudou ({ calibracao }, { memoriaLonga } ou, ADR-112, { whatsapp }; NOD-429, { quadro }).
     gravarPreferencias: (p: Partial<Pick<Preferencias, "modoDev" | "usoDoMac">> & { experimentos?: Partial<Experimentos> }) => pedir<Preferencias>("PUT", `${base}/preferencias`, p),
     // NOD-460 (0149): o Exibir do quadro em tela cheia, da pessoa e por quadro.
-    exibirQuadro: (quadroId: string, e: ExibirDoQuadro) => pedir<Preferencias>("PUT", `${base}/preferencias/quadros/${encodeURIComponent(quadroId)}/exibir`, e),
+    exibirQuadro: (quadroId: string, e: Partial<ExibirDoQuadro>) => pedir<Preferencias>("PUT", `${base}/preferencias/quadros/${encodeURIComponent(quadroId)}/exibir`, e),
     raioXDaConversa: (id: string, desde: number) => get<RaioXConversa>(`conversas/${encodeURIComponent(id)}/raio-x?desde=${desde}`),
     raioXDoTurno: (id: string) => get<RaioXTurno>(`turnos/${encodeURIComponent(id)}/raio-x`),
     // O "/" do chat (0038): o catálogo do Mac e os comandos da conversa; a nova sessão é do nod.

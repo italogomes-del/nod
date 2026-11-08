@@ -332,6 +332,13 @@ export function lerOp(v: unknown): OpQuadro | ErroOp {
       if (v.sai_para === undefined && v.so_pessoa === undefined) return { erro: "travar_coluna precisa de sai_para ou so_pessoa" };
       return { tipo: "travar_coluna", coluna, ...(v.sai_para !== undefined ? { sai_para: v.sai_para === null ? null : (v.sai_para as string[]).map((x) => x.trim()) } : {}), ...(v.so_pessoa !== undefined ? { so_pessoa: v.so_pessoa } : {}) };
     }
+    // ADA-18: o Exibir do quadro (a mesma validação do PUT /preferencias/quadros/:id/exibir, no caso de uso exibirDoQuadro).
+    case "exibir": {
+      if (v.visao !== undefined && v.visao !== "lista" && v.visao !== "colunas" && v.visao !== "minhas") return { erro: "visao: lista, colunas ou minhas" };
+      if ((v.recolhidas !== undefined && typeof v.recolhidas !== "boolean") || (v.compacto !== undefined && typeof v.compacto !== "boolean")) return { erro: "recolhidas e compacto são true ou false" };
+      if (v.visao === undefined && v.recolhidas === undefined && v.compacto === undefined) return { erro: "exibir precisa de visao, recolhidas ou compacto" };
+      return { tipo: "exibir", ...(v.visao !== undefined ? { visao: v.visao } : {}), ...(v.recolhidas !== undefined ? { recolhidas: v.recolhidas } : {}), ...(v.compacto !== undefined ? { compacto: v.compacto } : {}) };
+    }
     case "desfazer": {
       const lote = textoOpcional(v.lote, "lote", 64);
       if (falhou(lote)) return lote;
@@ -403,6 +410,8 @@ export function lerOps(v: unknown): OpQuadro[] | (ErroOp & { indice: number }) {
   if (assumir >= 0 && ops.length > 1) return { erro: "assumir_quadro vai sozinho na chamada", indice: assumir };
   const pessoas = ops.findIndex((o) => (OPS_DE_PESSOAS as readonly string[]).includes(o.tipo));
   if (pessoas >= 0 && ops.length > 1) return { erro: `${ops[pessoas]!.tipo} vai sozinho na chamada`, indice: pessoas };
+  const exibir = ops.findIndex((o) => o.tipo === "exibir");
+  if (exibir >= 0 && ops.length > 1) return { erro: "exibir vai sozinho na chamada", indice: exibir };
   const trabalho = ops.findIndex((o) => ehOpDeTrabalho(o));
   if (trabalho >= 0 && ops.length > 1) return { erro: `${ops[trabalho]!.tipo} vai sozinho na chamada`, indice: trabalho };
   return ops;

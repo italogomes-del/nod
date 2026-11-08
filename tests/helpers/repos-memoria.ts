@@ -3534,7 +3534,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           const a = atual();
           const m = a.quadroExibir ?? {};
           if (!(quadroId in m) && Object.keys(m).length >= max) return null;
-          const nova = { ...a, quadroExibir: { ...(a.quadroExibir ?? {}), [quadroId]: { recolhidas: e.recolhidas, compacto: e.compacto } } };
+          const nova = { ...a, quadroExibir: { ...(a.quadroExibir ?? {}), [quadroId]: { recolhidas: true, compacto: false, ...m[quadroId], ...e } } };
           b.preferencias.set(chave, nova);
           return nova;
         },

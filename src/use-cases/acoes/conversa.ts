@@ -1,4 +1,5 @@
 import type { IdAcao } from "../../domain/acoes/index.ts";
+import { exibirDoQuadro } from "../raio-x.ts";
 import { desfazerLeitura, marcarConversaLida, marcarConversaNaoLida, marcarTudoLido } from "../nao-lidos.ts";
 import type { CasoDeUso } from "../tipos.ts";
 
@@ -12,4 +13,6 @@ export const EXECUTORES_CONVERSA = {
   "conversas.marcar_nao_lida": marcarConversaNaoLida,
   "conversas.marcar_tudo_lido": marcarTudoLido,
   "conversas.desfazer_leitura": desfazerLeitura,
+  // ADA-18: o PUT /preferencias/quadros/:id/exibir e a op exibir do gerir_quadro.
+  "preferencias.exibir_quadro": exibirDoQuadro,
 } as const satisfies Partial<Record<IdAcao, CasoDeUso<never, unknown>>>;

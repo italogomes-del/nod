@@ -165,12 +165,26 @@ describeIntegracao("modo dev (0035 + 0036): o custo de cada turno e o Raio-X", (
       // Não apaga o resto das preferências.
       expect(lido.modoDev).toBe(true);
       expect((await executar(deps, lerPreferencias, {})).data.quadroExibir).toEqual(lido.quadroExibir);
-      for (const e of [{ quadroId: "q1", recolhidas: true, compacto: true }, { quadroId: q1, recolhidas: "sim", compacto: true }, { quadroId: q1, recolhidas: true }, { quadroId: 42, recolhidas: true, compacto: false }]) {
+      for (const e of [{ quadroId: "q1", recolhidas: true, compacto: true }, { quadroId: q1, recolhidas: "sim", compacto: true }, { quadroId: q1 }, { quadroId: q1, visao: "grade" }, { quadroId: q1, visao: 1 }, { quadroId: q1, compacto: null }, { quadroId: 42, recolhidas: true, compacto: false }]) {
         await esperarErro(() => exibirDoQuadro(deps, e as never), "entrada_invalida");
       }
 
       await vincularEscopo(trx, ANA);
       expect((await executar(depsSobreTrx(trx, ANA), lerPreferencias, {})).data.quadroExibir).toEqual({});
+    });
+  });
+
+  it("ADA-18: a visão do celular entra no Exibir do quadro sem apagar as recolhidas, e as recolhidas não apagam a visão", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const deps = depsSobreTrx(trx, MARLON);
+      const q1 = randomUUID();
+      // Só a visão, num quadro sem Exibir: o padrão da tela embaixo.
+      expect((await executar(deps, exibirDoQuadro, { quadroId: q1, visao: "colunas" })).data.quadroExibir?.[q1]).toEqual({ recolhidas: true, compacto: false, visao: "colunas" });
+      // O computador muda as recolhidas: a visão fica.
+      expect((await executar(deps, exibirDoQuadro, { quadroId: q1, recolhidas: false, compacto: true })).data.quadroExibir?.[q1]).toEqual({ recolhidas: false, compacto: true, visao: "colunas" });
+      // O celular troca a visão: as recolhidas ficam.
+      expect((await executar(deps, exibirDoQuadro, { quadroId: q1, visao: "minhas" })).data.quadroExibir?.[q1]).toEqual({ recolhidas: false, compacto: true, visao: "minhas" });
+      expect((await executar(deps, lerPreferencias, {})).data.quadroExibir?.[q1]?.visao).toBe("minhas");
     });
   });
 

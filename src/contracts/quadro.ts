@@ -187,13 +187,13 @@ export type OpQuadro =
   | { tipo: "adicionar_pessoa"; pessoa: string; modo?: ModoConversa }
   | { tipo: "tirar_pessoa"; pessoa: string }
   | { tipo: "mudar_modo"; modo: ModoConversa }
-  | { tipo: "comentar"; texto: string; tarefa?: string };
+  | { tipo: "comentar"; texto: string; tarefa?: string }
+  | { tipo: "exibir"; visao?: "lista" | "colunas" | "minhas"; recolhidas?: boolean; compacto?: boolean }; // ADA-18: o Exibir da pessoa (sozinho, sem Desfazer)
 export type TipoOpQuadro = OpQuadro["tipo"];
 /** A ferramenta gerir_quadro (quadro-bot.ts) e o quadro como o bot o lê (quadro-resumo-bot.ts) moram fora (o teto de linhas). */
 export type { ItemLinear, ArgsGerirQuadro, ResultadoGerirQuadro, PelaFala, ProvenienciaResposta } from "./quadro-bot.ts";
 export type { ResumoQuadroParaBot } from "./quadro-resumo-bot.ts";
 /** Os tetos do quadro (a ferramenta, o domínio e a tela usam os mesmos). */
 export const LIMITES_QUADRO = { comentario: 4000, comentariosPorPessoa: 50, membros: 50, meta: 200, titulo: 200, descricao: 4000, pergunta: 1000, resposta: 4000, ops: 50, itens: 50, identificador: 40, url: 500, coluna: 40, colunas: 30, instrucoes: 500, motivo: 600, prazoMin: 30 * 24 * 60 } as const;
-
 /** NOD-448 (ADR-140): o card de substituir as colunas mora em quadro-proposta-colunas.ts (teto de linhas dos contratos). */
 export type { ColunaNaProposta, PayloadPropostaColunasQuadro } from "./quadro-proposta-colunas.ts";

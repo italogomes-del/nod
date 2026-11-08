@@ -6,7 +6,7 @@
  */
 
 /** Os roláveis que nascem de novo a cada regravação. A chave é o seletor e a posição entre os iguais. */
-export const ROLAVEIS_INTERNOS: readonly string[] = [".qd-grade", ".pg-colunas", ".qd-folha", ".qc-hist"];
+export const ROLAVEIS_INTERNOS: readonly string[] = [".qd-grade", ".pg-colunas", ".qd-folha", ".qc-hist", ".qd-cel-cols"];
 
 export type Posicao = { readonly topo: number; readonly esq: number };
 export type RolagemGuardada = { readonly caixa: Posicao; readonly internos: ReadonlyMap<string, Posicao> };

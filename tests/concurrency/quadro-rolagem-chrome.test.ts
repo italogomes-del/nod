@@ -456,8 +456,10 @@ descrever("ADA-7: a atualização do quadro preserva a rolagem (Chrome real)", (
     expect(await avaliar<number>(cdp, "window.__regravacoes"), "regravações com os mesmos comentários").toBe(0);
   }, 60_000);
 
-  it("844×390 (toque, grade larga): o dedo que começa no cabeçalho da coluna rola a grade", async () => {
-    await montar(844, 390, true);
+  // ADA-18: o celular deitado (844×390) virou a lista/carrossel do celular (ADR-094 + adendo da ADR-148); a grade larga com
+  // toque fica no tablet (1280×800, ponteiro grosso; a vista passa dos 700 px da container query), onde o gesto do cabeçalho continua valendo.
+  it("1280×800 (toque, grade larga): o dedo que começa no cabeçalho da coluna rola a grade", async () => {
+    await montar(1280, 800, true);
     const r = JSON.parse(await avaliar<string>(cdp, `(() => { const b = [...document.querySelectorAll("#quadro .qd-col-bt[data-arrasta]")].find((e) => e.offsetParent);
       if (!b) return "null"; const r = b.getBoundingClientRect(); return JSON.stringify({ x: r.left + r.width / 2, y: r.top + r.height / 2, ta: getComputedStyle(b).touchAction,
       coarse: matchMedia("(pointer: coarse)").matches }); })()`)) as { x: number; y: number; ta: string; coarse: boolean } | null;
@@ -504,8 +506,8 @@ descrever("ADA-7: a atualização do quadro preserva a rolagem (Chrome real)", (
     await ate("window.__regravacoes > 0");
   }, 60_000);
 
-  it("844×390 (toque real, grade larga): o dedo que segue mexendo segura a releitura além do teto do gesto (a grade não nasce de novo)", async () => {
-    await montar(844, 390, true);
+  it("1280×800 (toque real, grade larga): o dedo que segue mexendo segura a releitura além do teto do gesto (a grade não nasce de novo)", async () => {
+    await montar(1280, 800, true);
     const [x, y] = JSON.parse(await avaliar<string>(cdp, `(() => { const g = [...document.querySelectorAll("#quadro .qd-grade")].find((e) => e.offsetParent).getBoundingClientRect();
       return JSON.stringify([g.left + g.width / 2, g.top + 40]); })()`)) as [number, number];
     // Sem o navegador tomar o gesto para si (o Chrome headless não garante o embalo): só o touchmove diz que o dedo mexe.

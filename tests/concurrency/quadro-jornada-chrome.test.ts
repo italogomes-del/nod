@@ -156,7 +156,8 @@ descrever("NOD-442 no Chrome real", () => {
     await ate("window.__montar");
     if (passagem) await avaliar(cdp, "window.__comPassagem()");
     await avaliar(cdp, `window.__montar(${edita})`);
-    await ate(`document.querySelector("#quadro .qd-card")`);
+    // ADA-18: no celular o quadro abre na Lista (sem .qd-card); o que vale é a tarefa clicável à vista.
+    await ate(celular ? `[...document.querySelectorAll('#quadro [data-act="abrir-tarefa"]')].some((b) => b.offsetParent)` : `document.querySelector("#quadro .qd-card")`);
   }
 
   const abrirTarefa = async (id: string) => {

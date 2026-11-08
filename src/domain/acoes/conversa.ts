@@ -1,6 +1,7 @@
 import type { DefinicaoAcao } from "../../contracts/acoes.ts";
 import { FERRAMENTAS_DO_NOD } from "../../contracts/ferramentas-do-nod.ts";
 import { PROPRIEDADES_NAO_LIDOS } from "../../contracts/ferramentas-nao-lidos.ts";
+import { PROPRIEDADES_QUADRO } from "../../contracts/ferramentas-quadro.ts";
 import type { JsonSchema } from "../../contracts/json-schema.ts";
 
 /**
@@ -70,7 +71,16 @@ export const ACOES_CONVERSA = [
   { id: "preferencias.salvar", titulo: "Salvar as preferências", risco: "muda", cartaoNoChat: false, chat: falta },
   { id: "preferencias.fechar_aviso", titulo: "Fechar um aviso", risco: "muda", cartaoNoChat: false, chat: ESTADO_DA_TELA },
   // NOD-460: mostrar as colunas recolhidas e a densidade compacta do quadro em tela cheia (só a tela da pessoa lê).
-  { id: "preferencias.exibir_quadro", titulo: "Mudar o Exibir do quadro em tela cheia", risco: "muda", cartaoNoChat: false, chat: ESTADO_DA_TELA },
+  // ADA-18: ganha a visão do celular e fica viva pelo gerir_quadro (op exibir), com o mesmo executor do PUT.
+  {
+    id: "preferencias.exibir_quadro",
+    titulo: "Mudar o Exibir do quadro (a visão no celular, as recolhidas e o compacto)",
+    schema: objeto({ quadro: PROPRIEDADES_QUADRO.quadro, visao: PROPRIEDADES_QUADRO.visao, recolhidas: PROPRIEDADES_QUADRO.recolhidas, compacto: PROPRIEDADES_QUADRO.compacto }, []),
+    risco: "muda",
+    cartaoNoChat: false,
+    chat: { estado: "vivo", via: { ferramenta: "gerir_quadro" }, contrato: "tests/integration/paridade-quadro.test.ts" },
+    casoDeUso: "preferencias.exibir_quadro",
+  },
   { id: "artefatos.salvar_estado", titulo: "Salvar o que a pessoa marcou num artefato", risco: "muda", cartaoNoChat: false, chat: ESTADO_DA_TELA },
   { id: "telemetria.registrar", titulo: "Registrar linhas de telemetria da tela", risco: "muda", cartaoNoChat: false, chat: ESTADO_DA_TELA },
   { id: "onboarding.etapa", titulo: "Avançar uma etapa do onboarding", risco: "muda", cartaoNoChat: false, chat: ONBOARDING },

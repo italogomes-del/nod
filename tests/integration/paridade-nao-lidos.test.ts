@@ -98,7 +98,9 @@ describeIntegracao("paridade tela × chat das leituras (NOD-449, ADR-135)", () =
   it("cobre exatamente as ações de leitura vivas, e o executor de cada uma existe", () => {
     const vivas = ACOES_CONVERSA.filter((a) => a.chat.estado === "vivo" && "via" in a.chat && a.chat.via.ferramenta === "nao_lidos").map((a) => a.id);
     expect(CENARIOS.map((c) => c.id).sort()).toEqual([...vivas].sort());
-    expect(Object.keys(EXECUTORES_CONVERSA).sort()).toEqual([...LEITURA].sort());
+    expect([...vivas].sort()).toEqual([...LEITURA].sort());
+    // ADA-18: EXECUTORES_CONVERSA também guarda o preferencias.exibir_quadro (gerir_quadro); aqui só as leituras.
+    for (const id of LEITURA) expect(typeof EXECUTORES_CONVERSA[id]).toBe("function");
   });
 
   const pelaTela = async (m: M, passos: Passo[]) => {

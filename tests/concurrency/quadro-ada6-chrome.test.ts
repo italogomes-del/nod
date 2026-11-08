@@ -124,7 +124,7 @@ descrever("ADA-6: resposta legível, sugestões e recibos (Chrome real, 390×844
   /** Critério 2: rolado até o fim, o último card termina acima da faixa e da pílula; nada rola na horizontal. */
   const sobreposicao = (): Promise<{ sob: boolean; ultimo: number; topo: number; docX: [number, number]; rola: string[] }> => json(`(() => {
     const v = document.getElementById("quadro"); v.scrollTop = v.scrollHeight;
-    const cards = [...document.querySelectorAll("#quadro .qd-conteudo .qd-l, #quadro .qd-conteudo .qd-card")].filter((e) => e.getClientRects().length);
+    const cards = [...document.querySelectorAll("#quadro .qd-conteudo .qd-l, #quadro .qd-conteudo .qd-card, #quadro .qd-conteudo .qd-cl-bt")].filter((e) => e.getClientRects().length);
     const ult = cards.at(-1).getBoundingClientRect().bottom;
     const s = document.getElementById("qc-sobre").getBoundingClientRect(); const p = document.querySelector(".qc-pil").getBoundingClientRect();
     const topo = Math.min(p.top, s.height ? s.top : 1e9);

@@ -12,7 +12,7 @@ import type { Aceita } from "../lib/anexos.ts";
 import { esc } from "../lib/escape.ts";
 import { htmlBotaoDitado, htmlPilulaDitado } from "./ditado.ts";
 import { NOME_DO_STATUS, type Status } from "../lib/quadro.ts";
-import { comColunas, iconeDaColuna, paradaHa, podeTerPrazo, prazoLegivelMin, inicioDoFimPreso, LIMITE_COLUNAS, type EdicaoDeColuna } from "../lib/colunas.ts";
+import { comColunas, iconeDaColuna, paradaHa, porqueNaoRecebeCard, podeTerPrazo, prazoLegivelMin, inicioDoFimPreso, LIMITE_COLUNAS, type EdicaoDeColuna } from "../lib/colunas.ts";
 import { aposDoCabecalho, botaoDeNova, campoDeRenomear, colunaNova, confirmacaoDeSoltar, folhaDasColunas, menuDeMover, naFolha, type AgenteDaPassagem } from "./colunas-quadro.ts";
 import { RESP_VOCE, atalhosDePrazo, codigoDaTarefa, faltaParaOPrazo, fraseDoPrazo, linhaDoHistorico, opcoesDeStatus, respostaLonga, tarefasPorStatus, type Faixa } from "../lib/quadro-dados.ts";
 import { textoFormatado } from "../lib/texto-formatado.ts";
@@ -21,6 +21,7 @@ import { ecoDoAgente, fraseDaTrava, fraseDoMovimento, porqueNaoDesfaz } from "..
 import { anel, avatar, barra, card, confiar, ICONE, ICONE_DO_STATUS, linha, lista, quadro, seloEmTeste, type Aviso, type Card, type ChipDaBarra, type Coluna, type ExibirDaBarra, type ExtraDaGrade, type Filtro, type Html, type QuemRoda } from "./quadro.ts";
 import { chipsDaBarra, ehComigo, fraseDoVazio, marcar, passaNaVista, termoDaBusca, type ChipDeAgente } from "../lib/vista-do-quadro.ts";
 import { linhaDaImportacao, painelDeImportacao, type PainelImportacao } from "./card-importacao.ts";
+import { colunasDoCelular, folhaDaTarefa, folhaDaVisao, folhaDoTopo, linhaDoCelular, listaDoCelular, topoDoCelular, VAZIO_DAS_MINHAS, VAZIO_DO_GRUPO, type CelularDoQuadro } from "./quadro-celular.ts";
 
 /** Quem é o agente de um id (o avatar com o mascote dele e o nome); null = não é um bot da pessoa. */
 export type AgenteDoQuadro = (agenteId: string) => { avatar: Html; nome: string } | null;
@@ -227,7 +228,9 @@ const rotuloDoQuadro = (q: QuadroDto, nome: string): string => (q.meta ? `Quadro
  */
 export function quadroDaMeta(o: { q: QuadroDto; nome: string; agente: AgenteDoQuadro; filtro: Filtro; alternadas: ReadonlySet<string>; acesas: ReadonlySet<string>; edicao?: EdicaoDeColuna | null; agora?: number; editandoMeta?: boolean; pessoas?: PessoasNaTela; agentes?: readonly AgenteDaPassagem[]; /** NOD-419: a recusa da trava no card que a pessoa soltou. */ avisos?: ReadonlyMap<string, Aviso>; importando?: PainelImportacao | null;
   /** NOD-460: a busca, o Exibir (com o menu aberto ou não), o "+N" aberto e o campo de nova tarefa aberto numa coluna. */
-  busca?: string; exibir?: ExibirDaBarra; maisAberto?: boolean; nova?: { coluna: string; estreito?: boolean; erro?: boolean } | null; podeCriar?: boolean }): Html {
+  busca?: string; exibir?: ExibirDaBarra; maisAberto?: boolean; nova?: { coluna: string; estreito?: boolean; erro?: boolean } | null; podeCriar?: boolean;
+  /** ADA-18: no celular, o quadro do celular no lugar da grade e da lista estreita. Sem isto, o HTML do computador. */
+  celular?: CelularDoQuadro }): Html {
   const por = tarefasPorStatus(o.q);
   const busca = o.busca ?? "";
   const termo = termoDaBusca(busca);
@@ -302,16 +305,48 @@ export function quadroDaMeta(o: { q: QuadroDto; nome: string; agente: AgenteDoQu
   const abrirEscondidas = escondidas.map((x) => `<button type="button" class="qd-link" data-act="abrir-coluna" data-status="${esc(x.c.id)}">Abrir ${esc(x.c.nome)}</button>`).join("");
   const linhaVazia = frase ? `<div class="qd-vazio-1"><span>${esc(frase)}</span>${abrirEscondidas}${busca.trim() ? `<button type="button" class="qd-link" data-act="busca-limpar">Limpar busca</button>` : ""}${o.filtro !== "todos" ? `<button type="button" class="qd-link" data-act="filtro-do-quadro" data-filtro="todos">Ver em todas</button>` : ""}</div>` : "";
   const compacto = exibir.compacto ? " qd-compacto" : "";
+  // ADA-18: o bloco do celular reusa o caminho da lista estreita (a nova tarefa, o card solto, a folha das colunas).
+  const cel = o.celular;
+  const blocoDoCelular = (): string => {
+    if (!cel) return "";
+    const minhas = cel.visao === "minhas";
+    const grupos = vistas.flatMap(({ c, tarefas, recolhida }) => {
+      // Minhas tarefas: só o que está com a pessoa, só os grupos com alguma, todos abertos.
+      const ts = minhas ? tarefas.filter(ehComigo) : tarefas;
+      if (minhas && !ts.length) return [];
+      return [{ status: c.id, nome: c.nome, icone: iconeDaColuna(c), pessoa: c.daPessoa, recolhido: minhas ? false : recolhida, n: ts.length,
+        linhas: [...formDa(c, true), ...solta(c), ...cartoes(ts, true).map(linhaDoCelular)], vazio: (nova?.coluna === c.id && nova.estreito) || filtrando ? "" : VAZIO_DO_GRUPO }];
+    });
+    const novaTarefa = o.podeCriar ? { novaTarefa: true } : {};
+    // Colunas: as que o Exibir mostra (as recolhidas ficam de fora, como no computador), uma por tela.
+    const corpo = minhas && !grupos.length ? `<p class="qd-cl-vazio qd-cel-vazio">${esc(VAZIO_DAS_MINHAS)}</p>`
+      : cel.visao === "colunas" ? colunasDoCelular({ rotulo, grupos: grupos.some((g) => !g.recolhido) ? grupos.filter((g) => !g.recolhido) : grupos, ...novaTarefa })
+        : listaDoCelular({ rotulo, grupos, ...novaTarefa });
+    const f = cel.folha;
+    const daFolha = f?.tipo === "tarefa" ? o.q.tarefas.find((x) => x.id === f.tarefa) : undefined;
+    const folhaHtml = naFolha(ed) ? folhaDasColunas(cs, ed, contagem, o.nome) : f?.tipo === "visao" ? folhaDaVisao(cel.visao)
+      : f?.tipo === "tarefa" && daFolha ? folhaDaTarefa({ tarefa: daFolha, ...(f.passo ? { passo: f.passo } : {}), quem: o.agentes ?? null,
+        destinos: cs.map((c) => ({ id: c.id, nome: c.nome, icone: iconeDaColuna(c), porque: porqueNaoRecebeCard(c, o.nome) })) })
+        : f?.tipo === "topo" ? folhaDoTopo({ ...(f.passo ? { passo: f.passo } : {}), meta: o.q.meta, pessoas: !!o.pessoas,
+          // Revisão 11 do NOD-422: trazer do Linear é só da dona; com a importação andando, não oferece de novo.
+          trazer: o.q.voce?.papel !== "membro" && !o.importando && linhaDaImportacao(o.q.importacao)?.tipo !== "andando",
+          prazo: { atual: o.q.prazo, frase: o.q.prazo ? fraseDoPrazo(o.q.prazo) : null,
+            atalhos: atalhosDePrazo(o.agora ?? Date.now()).map((a) => ({ valor: a.valor, rotulo: `${a.rotulo} (${fraseDoPrazo(a.valor).replace(/^até /, "")})` })) } }) : "";
+    return `<div class="qd-so-estreito qd-cel${compacto}" data-visao="${cel.visao}">${corpo}${folhaHtml}</div>`;
+  };
   const barraHtml = barra({ filtro: o.filtro, trabalhando: trabalhando(o.q, o.agente), comigo: o.q.tarefas.filter(ehComigo).length, chips: chips.vista.map(ag), maisChips: chips.mais.map(ag), busca, exibir, ...(o.maisAberto ? { maisAberto: true } : {}) });
+  const topo = (): string => topoDoQuadro(o.q, { agora: o.agora ?? Date.now(), ...(o.editandoMeta ? { editandoMeta: true } : {}), ...(o.importando ? { importando: o.importando } : {}) });
   return confiar([
-    topoDoQuadro(o.q, { agora: o.agora ?? Date.now(), ...(o.editandoMeta ? { editandoMeta: true } : {}), ...(o.importando ? { importando: o.importando } : {}) }),
+    // ADA-18: no celular o título do quadro é o botão da visão; a meta e o prazo moram no ⋯ (e aparecem ao editar).
+    cel ? topoDoCelular({ titulo: o.q.meta?.trim() || `Quadro de ${o.nome}`, visao: cel.visao, folha: cel.folha ?? null }) + (o.editandoMeta || o.importando ? topo() : "") : topo(),
     o.pessoas ? pessoasDoQuadro(o.q, o.pessoas) : "",
     avisoDoGithub(o.q),
     barraHtml,
     linhaVazia,
-    quadro({ rotulo, classe: `qd-so-largo${compacto}`, colunas, extras }),
-    `<div class="qd-so-estreito${compacto}">${lista({ rotulo, antes: confiar(ordem), ...(o.podeCriar ? { novaTarefa: true } : {}), grupos: vistas.map(({ c, tarefas, recolhida }) => ({ status: c.id, nome: c.nome, icone: iconeDaColuna(c), pessoa: c.daPessoa, recolhido: recolhida, n: tarefas.length, linhas: [...formDa(c, true), ...solta(c), ...cartoes(tarefas, true).map(linha)], vazio: nova?.coluna === c.id && nova.estreito ? "" : vazio(c.id) })) })}` +
-      `${naFolha(ed) ? folhaDasColunas(cs, ed, contagem, o.nome) : ""}</div>`,
+    ...(o.celular ? [blocoDoCelular()] : [
+      quadro({ rotulo, classe: `qd-so-largo${compacto}`, colunas, extras }),
+      `<div class="qd-so-estreito${compacto}">${lista({ rotulo, antes: confiar(ordem), ...(o.podeCriar ? { novaTarefa: true } : {}), grupos: vistas.map(({ c, tarefas, recolhida }) => ({ status: c.id, nome: c.nome, icone: iconeDaColuna(c), pessoa: c.daPessoa, recolhido: recolhida, n: tarefas.length, linhas: [...formDa(c, true), ...solta(c), ...cartoes(tarefas, true).map(linha)], vazio: nova?.coluna === c.id && nova.estreito ? "" : vazio(c.id) })) })}` +
+      `${naFolha(ed) ? folhaDasColunas(cs, ed, contagem, o.nome) : ""}</div>`]),
   ].join(""));
 }
 

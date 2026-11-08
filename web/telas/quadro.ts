@@ -165,7 +165,7 @@ export interface Card {
 export const fraseEsperando = (motivo: string | null): string => (motivo ? `Esperando · ${motivo}` : "Esperando");
 
 /** O "Mover para…" do card (ADR-142, revisão do PR #622): leva ao mesmo lugar que arrastar, sem precisar de mouse. */
-function botaoDeMover(c: Card): string {
+export function botaoDeMover(c: Card): string {
   if (!c.arrastavel) return "";
   return `<button type="button" class="qd-card-mover" data-act="tarefa-mover" data-tarefa="${esc(c.id)}" aria-label="${esc(`Mover ${c.titulo} para…`)}" aria-haspopup="menu" aria-expanded="${!!c.menu}"${c.menu ? ' aria-controls="qd-menu"' : ""}>Mover para…</button>`;
 }
@@ -177,7 +177,7 @@ function quemRodaNoCard(c: Card): QuemRoda[] {
 }
 
 /** O responsável (com o anel se é ele quem roda, ou o relógio/⊗) e, por cima, quem roda no lugar dele. */
-function avataresDoCard(c: Card): { html: Html; rodam: QuemRoda[] } {
+export function avataresDoCard(c: Card): { html: Html; rodam: QuemRoda[] } {
   const rodam = quemRodaNoCard(c);
   const r = c.responsavel;
   const dele = r ? rodam.find((q) => q.nome === r.nome) : undefined;
@@ -211,7 +211,7 @@ export function seloTrabalhando(ha?: string): Html {
 export const PASSOU_DO_PRAZO = "passou do prazo";
 
 /** O "há quanto" do card e da linha; atrasada, com o relógio (aria-hidden) e o "passou do prazo" para o leitor de tela. */
-function quandoDoCard(c: Card): string {
+export function quandoDoCard(c: Card): string {
   if (!c.quando) return "";
   if (!c.atrasada) return `<span class="qd-quando">${esc(c.quando)}</span>`;
   return `<span class="qd-quando qd-atrasada" title="Passou do prazo da coluna">${ICONE.prazo}${esc(c.quando)}<span class="qd-sr">, ${PASSOU_DO_PRAZO}</span></span>`;
@@ -236,7 +236,7 @@ export function rotuloDoCard(c: Card): string {
  * NOD-420: o campo Responder no card (e na linha do celular). Enter envia, Shift+Enter quebra a linha; quem ouve o
  * teclado e o envio é web/lib/quadro-na-tela.ts. O id deixa o rascunho sobreviver à regravação do quadro.
  */
-function formDoResponder(c: Card, onde: "card" | "linha"): string {
+export function formDoResponder(c: Card, onde: "card" | "linha"): string {
   if (!c.responder) return "";
   const id = `qd-cresp-${onde}-${esc(c.id)}`;
   return `<form class="qd-card-resp" data-form="responder-tarefa" data-id="${esc(c.id)}">` +
@@ -307,7 +307,7 @@ export interface Coluna {
   presa?: string;
 }
 
-const iconeDe = (c: Pick<Coluna, "status" | "icone" | "pessoa">): Html => {
+export const iconeDe = (c: Pick<Coluna, "status" | "icone" | "pessoa">): Html => {
   const ic = ICONE_DO_STATUS[c.icone ?? (c.status as Status)] ?? ICONE_DO_STATUS.afazer;
   return c.pessoa ? h(ic.replace('class="qd-ic qd-st ', 'class="qd-ic qd-st qd-st-pessoa ')) : ic;
 };

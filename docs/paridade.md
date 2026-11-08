@@ -2,7 +2,7 @@
 
 <!-- Gerado por `npm run paridade` a partir de src/domain/acoes/ (NOD-391, ADR-135). Não edite à mão: a catraca (tests/conformidade/paridade.test.ts) compara. -->
 
-Ações de pessoa que mudam algo: **180**, mais 2 só de leitura. No chat: **51 vivas**, 3 parciais, 93 faltando e 35 que nunca vão para o chat. Piso de vivas: 51.
+Ações de pessoa que mudam algo: **180**, mais 2 só de leitura. No chat: **52 vivas**, 3 parciais, 93 faltando e 34 que nunca vão para o chat. Piso de vivas: 52.
 
 Estados: **vivo** = o chat faz pelo mesmo executor da tela, com teste de contrato; **parcial** = o chat faz, mas diverge ou falta parâmetro; **falta** = a onda dona ainda vai ligar; **nunca** = exceção escrita.
 
@@ -216,7 +216,7 @@ Estados: **vivo** = o chat faz pelo mesmo executor da tela, com teste de contrat
 | --- | --- | --- | --- | --- |
 | `preferencias.salvar` | Salvar as preferências | muda | falta (NOD-397) | `PUT ^\/preferencias$` |
 | `preferencias.fechar_aviso` | Fechar um aviso | muda | nunca: estado da própria tela, sem efeito para os bots | `POST ^\/preferencias\/avisos-fechados$` |
-| `preferencias.exibir_quadro` | Mudar o Exibir do quadro em tela cheia | muda | nunca: estado da própria tela, sem efeito para os bots | `PUT ^\/preferencias\/quadros\/(?<id>[^/]+)\/exibir$` |
+| `preferencias.exibir_quadro` | Mudar o Exibir do quadro (a visão no celular, as recolhidas e o compacto) | muda | vivo (`gerir_quadro`) | `PUT ^\/preferencias\/quadros\/(?<id>[^/]+)\/exibir$` |
 
 ## artefatos
 
