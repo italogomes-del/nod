@@ -129,7 +129,7 @@ describe("rolar ao topo ao navegar", () => {
 
   it("navegar() rola ao topo só pelo predicado (antes, a condição inline deixava a frente de fora e ela abria no topo)", () => {
     const main = readFileSync(new URL("../../../web/main.ts", import.meta.url), "utf8");
-    const inicio = main.indexOf("function navegar(tela: Tela): void {");
+    const inicio = main.indexOf("function navegar(tela: Tela, o: { filaDeSuaVez?: boolean } = {}): void {");
     expect(inicio).toBeGreaterThan(-1);
     const navegar = main.slice(inicio, main.indexOf("\n}\n", inicio));
     const rolagens = navegar.split("\n").filter((l) => /scrollTo|scrollTop/.test(l));

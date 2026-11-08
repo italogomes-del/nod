@@ -2630,6 +2630,7 @@ export function criarQuadroNaTela(doc: Document, o: { busca?: BuscaDaPilula; men
       else if (modo !== "quadro") trocar("quadro");
     }
     abrirPendente();
+    abrirPaginaPedida();
   }
 
   // ADA-18 (S9): o toque longo na linha do celular. Só dedo (o mouse tem o clique); rolar ou mexer cancela.
@@ -3647,9 +3648,23 @@ export function criarQuadroNaTela(doc: Document, o: { busca?: BuscaDaPilula; men
   }
   /** Quantas páginas a pílula mostra agora (0 = sem pílula: experimento desligado ou outra tela). */
   const totalDePaginas = (): number => (chave === null ? 0 : paginas.length);
+  /**
+   * ADA-19 (QA do PR #704): o quadro tocado na aba Quadros do celular abre a conversa e pede a página na mesma hora, antes
+   * de as páginas da pílula chegarem. Sem ela ainda, o pedido espera o `sincronizar` que as traz (o da conversa do mesmo
+   * bot); outra conversa, ou as páginas lidas sem ela, o esquecem.
+   */
+  let paginaPedida: { agenteId: string; id: string } | null = null;
   function abrirPagina(id: string): void {
     const i = indicePeloId(paginas, id);
+    paginaPedida = i < 0 && agenteId !== null && chave !== null ? { agenteId, id } : null;
     if (i >= 0) irPara(i);
+  }
+  function abrirPaginaPedida(): void {
+    if (!paginaPedida) return;
+    if (chave === null || paginaPedida.agenteId !== agenteId) { paginaPedida = null; return; }
+    const i = indicePeloId(paginas, paginaPedida.id);
+    if (i >= 0) { paginaPedida = null; irPara(i); }
+    else if (paginasDtoDe(agenteId)) paginaPedida = null;
   }
   function marcarChegada(id: string): void {
     chegou = { id, ate: Date.now() + 1200 };

@@ -226,7 +226,7 @@ describe("guardas da ligação no main (revisão do PR #548)", () => {
   });
 
   it("no celular, navegar ao início mostra a inicial (fechar um Trabalho) em vez de empilhar e cair numa conversa", () => {
-    const f = main.slice(main.indexOf("function navegar(tela: Tela)"), main.indexOf("function aoTrocarDeTela("));
+    const f = main.slice(main.indexOf("function navegar(tela: Tela"), main.indexOf("function aoTrocarDeTela("));
     expect(f).toMatch(/const paraInicial = celular\.ativo\(\) && tela\.tipo === "inicio";\s*if \(!paraInicial\) celular\.entrarNaConversa\(\);/);
     // A inicial aparece antes de ler a conversa: a que fica por baixo não é marcada como lida.
     expect(f.indexOf("if (paraInicial) celular.voltarAoInicio();")).toBeGreaterThan(-1);
@@ -288,5 +288,108 @@ describe("guardas da ligação no main (revisão do PR #548)", () => {
     expect(trecho).toContain("tentarFrotaAgora");
     expect(trecho).toContain("buscar: buscarFrota");
     expect(trecho).not.toContain('tipo: "invalidar"');
+  });
+});
+
+describe("ADA-19: tab bar da inicial do celular, ligada no main", () => {
+  const main = readFileSync(new URL("../../../web/main.ts", import.meta.url), "utf8");
+  const ramoCelular = main.slice(main.indexOf("  if (ehCelular) {\n    // O Nod está sempre lá"), main.indexOf('  const html = `<div class="search-wrap">'));
+
+  it("no celular, ir a Sua vez troca de aba na inicial (antes do empilhar da conversa); no computador segue tela", () => {
+    const f = main.slice(main.indexOf("function navegar(tela: Tela"), main.indexOf("function aoTrocarDeTela("));
+    const desvio = f.indexOf('if (celular.ativo() && abaDoDestino(tela) === "sua-vez" && !o.filaDeSuaVez) { trocarAbaDoInicio("sua-vez"); celular.voltarAoInicio(); return; }');
+    expect(desvio).toBeGreaterThan(-1);
+    expect(desvio).toBeLessThan(f.indexOf("const paraInicial = celular.ativo()"));
+  });
+
+  it("pedido na conversa de outra pessoa abre a fila de Sua vez (onde ela decide): a única entrada que passa pelo desvio da aba", () => {
+    expect(main).toContain("function navegar(tela: Tela, o: { filaDeSuaVez?: boolean } = {}): void {");
+    expect(main).toContain('"abrir-pedido-na-fila": () => navegar({ tipo: "sua-vez" }, { filaDeSuaVez: true }),');
+    expect(main).toContain("itensDaAbaSuaVez(estado.suaVez, agora, estado.sessao?.pessoaId ?? \"\")");
+  });
+
+  it("a folha de recentes (modal, fora da .app) deixa a .app inerte enquanto aberta e a solta ao fechar", () => {
+    expect(main).toContain("return !!estado.espaco || telaLigacao.cheia() || telaOnboarding.cobre() || folhaRecentes !== null;");
+    const abrir = main.slice(main.indexOf("function abrirRecentes("), main.indexOf("function fecharRecentes("));
+    expect(abrir.indexOf("pintarInerciaDoApp();")).toBeGreaterThan(abrir.indexOf("folhaRecentes = { camada, volta };"));
+    const fechar = main.slice(main.indexOf("function fecharRecentes("), main.indexOf("window.addEventListener(\"keydown\""));
+    // Solta antes de devolver o foco: num elemento inerte o focus() não pega.
+    expect(fechar.indexOf("pintarInerciaDoApp();")).toBeGreaterThan(fechar.indexOf("camada.remove();"));
+    expect(fechar.indexOf("pintarInerciaDoApp();")).toBeLessThan(fechar.indexOf("if (devolverFoco)"));
+    expect(main).toContain("  pintarInerciaDoApp();\n");
+  });
+
+  it("o topo do celular perde o Buscar, o sino e o botão de não lidas; entram o título grande, a aba e a tab bar", () => {
+    expect(ramoCelular).not.toContain("inicio-barra");
+    expect(ramoCelular).not.toContain("renderChamada(estado)");
+    expect(ramoCelular).not.toContain("${naoLidos}");
+    expect(ramoCelular).toContain("renderTituloGrande(abaDoInicio)");
+    expect(ramoCelular).toContain("renderTabBar(abaDoInicio, { pedidos: contagemDaAbaSuaVez(estado.suaVez), naoLidas: comNovas })");
+    // O guarda da busca que perde o foco fica (o campo pode voltar; tirar quebraria o teclado do iOS).
+    expect(main).toContain('closest(".inicio-busca")) { redesenharAdiada(); return; }');
+  });
+
+  it("a aba entra na memória da barra (trocar de aba redesenha) e o topo do início é religado a cada redesenho", () => {
+    expect(main).toMatch(/lembrar\("sidebar", estado, \[.*abaDoInicio, suaVezFalhou.*\], renderSidebar\)/);
+    const f = main.slice(main.indexOf("function redesenharSidebar("), main.indexOf("function redesenharSidebar(") + 2200);
+    expect(f).toContain("religarTopoDoInicio();");
+  });
+
+  it("tocar num pedido abre a conversa já no pedido; tocar na aba ativa rola ao topo", () => {
+    expect(main).toContain('"abrir-pedido": (el) => verPerguntaNaConversa(el.dataset.conversa ?? "", el.dataset.agente ?? "", el.dataset.decisaoId ?? "")');
+    const f = main.slice(main.indexOf("function trocarAbaDoInicio("), main.indexOf("function trocarAbaDoInicio(") + 400);
+    expect(f).toMatch(/if \(aba === abaDoInicio\) \{ lista\?\.scrollTo\(\{ top: 0/);
+  });
+
+  it("segurar o ‹ abre as recentes e engole o clique; Esc fecha a folha antes de qualquer outro Esc", () => {
+    expect(main).toMatch(/closest\?\.<HTMLElement>\("#cabecalho \.abrir-bots\.voltar-bots"\);\s*if \(bt && celular\.ativo\(\)\) toqueNoVoltar\.comecar/);
+    expect(main).toContain("if (toqueNoVoltar.engolirClique()) { ev.preventDefault(); ev.stopPropagation(); }");
+    expect(main).toMatch(/window\.addEventListener\("keydown", \(ev\) => \{\s*if \(!folhaRecentes\) return;\s*if \(ev\.key === "Escape"\) \{ ev\.preventDefault\(\); ev\.stopImmediatePropagation\(\); sairDasRecentes\(\); return; \}/);
+    expect(main).toContain('aria-label="Voltar para Conversas (segure para as recentes)"');
+  });
+
+  it("revisão do #704: trocar de aba (ou a contagem mudar) não joga o foco da tab bar no <body>", () => {
+    const f = main.slice(main.indexOf("function redesenharSidebar("), main.indexOf("function redesenharSidebar(") + 2600);
+    const antes = f.indexOf("const focoNaTabBar = alvoDoFocoNaTabBar(document.activeElement);");
+    expect(antes).toBeGreaterThan(-1);
+    expect(antes).toBeLessThan(f.indexOf('regiao("sidebar", html);'));
+    expect(f.indexOf('if (focoNaTabBar) document.querySelector<HTMLElement>(`#sidebar ${focoNaTabBar}`)?.focus({ preventScroll: true });')).toBeGreaterThan(f.indexOf('regiao("sidebar", html);'));
+  });
+
+  it("revisão do #704: escolher a recente já aberta fecha a folha devolvendo o foco ao ‹", () => {
+    const f = main.slice(main.indexOf('"abrir-recente": (el) => {'), main.indexOf('"aba-do-inicio": (el)'));
+    expect(f).toContain("const fica = ficaAoEscolherRecente(conversaId, estado.tela.tipo === \"conversa\" ? estado.tela.conversaId : null);");
+    expect(f).toContain("if (fica) { sairDasRecentes(true); return; }");
+    // A conversa escolhida abre só depois que o voltar tirou a entrada da folha (o histórico não guarda entrada morta).
+    expect(f).toContain('sairDasRecentes(false, () => navegar({ tipo: "conversa", conversaId, agenteId }));');
+  });
+
+  it("revisão do #704: a folha empilha entrada no histórico e o voltar do sistema com ela aberta só a fecha", () => {
+    const abrir = main.slice(main.indexOf("function abrirRecentes("), main.indexOf("function fecharRecentes("));
+    expect(abrir).toContain("historicoDaFolha.ocupado()");
+    expect(abrir).toContain("historicoDaFolha.abrir();");
+    expect(main).toMatch(/window\.addEventListener\("popstate", \(ev\) => \{\s*const r = historicoDaFolha\.aoVoltar\(\);\s*if \(r\.tipo === "seguir"\) return;\s*ev\.stopImmediatePropagation\(\);/);
+    expect(main).not.toContain('window.addEventListener("popstate", () => fecharRecentes(false), true);');
+    expect(main).toContain('"fechar-recentes": () => sairDasRecentes(),');
+  });
+
+  it("segurar o ‹ abre as recentes e diz que abriu (senão o clique do soltar volta e fecha a folha)", () => {
+    const ini = main.indexOf("const toqueNoVoltar = criarToqueLongo<HTMLElement>(");
+    expect(ini).toBeGreaterThan(0);
+    const cb = main.slice(main.indexOf("}, (bt) => {", ini), main.indexOf("\n});", ini));
+    expect(cb).toMatch(/if \(!bt\.isConnected \|\| !celular\.ativo\(\)\) return false;/);
+    const abre = cb.indexOf("abrirRecentes(bt);");
+    expect(abre).toBeGreaterThan(0);
+    expect(cb.indexOf("return true;")).toBeGreaterThan(abre);
+    expect(cb.slice(abre)).not.toContain("return false");
+  });
+
+  it("com a tab bar na inicial não aparece dica de gesto (plano: \"Sem dica de gesto\")", () => {
+    const f = main.slice(main.indexOf("function mostrarDicaToqueLongo("), main.indexOf("// ---- times de bots na barra"));
+    const guarda = f.indexOf('if (document.querySelector("#sidebar .tab-bar-celular")) return;');
+    expect(guarda).toBeGreaterThan(0);
+    expect(guarda).toBeLessThan(f.indexOf("document.createElement"));
+    const css = readFileSync(new URL("../../../web/tab-bar-celular.css", import.meta.url), "utf8");
+    expect(css).not.toContain(".dica-toque-longo");
   });
 });

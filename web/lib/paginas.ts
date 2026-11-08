@@ -124,9 +124,12 @@ export function textoDaDica(toque: boolean, mac = false): string {
   return toque ? "deslize para o lado ou toque nos pontos" : `passe o mouse ou deslize de lado na pílula · ${rotuloDasTeclas(mac).trocar} troca`;
 }
 
-/** A dica aparece uma vez só: com mais de uma página e sem a marca guardada. */
-export function mostraDica(total: number, jaViu: string | null): boolean {
-  return total > 1 && jaViu === null;
+/**
+ * A dica aparece uma vez só: com mais de uma página e sem a marca guardada. Com a conversa encoberta (a inicial do
+ * celular por cima, ADA-19: "sem dica de gesto") ela espera, em vez de pairar sobre a inicial e se gastar sem ser vista.
+ */
+export function mostraDica(total: number, jaViu: string | null, encoberta = false): boolean {
+  return total > 1 && jaViu === null && !encoberta;
 }
 
 /** Tarefas pode ser vista como Lista ou como Quadro (o celular fica sempre na lista). */

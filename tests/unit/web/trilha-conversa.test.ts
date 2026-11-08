@@ -81,7 +81,7 @@ describe("a trilha da conversa aberta (revisão do PR #630)", () => {
     const main = readFileSync(new URL("../../../web/main.ts", import.meta.url), "utf8");
     expect(main).not.toMatch(/trilharQuadro\(\{\s*acao:\s*"conversa_aberta"/);
     expect(main).toMatch(/criarTrilhaDaConversa\(\{[\s\S]{0,120}conversaDaTrilha\(\{[^}]*escolhida: conversaEscolhida, botsAbertos: celular\.botsAbertos\(\), espaco: !!estado\.espaco, perfil: !!estado\.perfilCelular, modo: quadroNaTela\.modo\(\)/);
-    const navegar = main.slice(main.indexOf("function navegar(tela: Tela)"), main.indexOf("function telaDeOrigem"));
+    const navegar = main.slice(main.indexOf("function navegar(tela: Tela"), main.indexOf("function telaDeOrigem"));
     expect(navegar).toMatch(/conversaEscolhida = tela\.tipo === "conversa" \? tela\.conversaId : null;[\s\S]*trilhaDaConversa\.observar\(\)/);
     // Só o navegar e a volta do Quadro à Conversa armam a conversa: o reducer (resolverInicio) a põe na tela sem passar por aqui.
     expect(main.match(/conversaEscolhida = /g)).toHaveLength(2);

@@ -101,7 +101,16 @@ export function ligarGestosDaPilula(doc: Document, p: PilulaDePaginas): GestosDa
     if (d.style.width === "" && (aberta || largura.x > 0)) pintar();
     mostrarDica();
   }) : null;
+  // A inicial do celular sai de cima da conversa sem regravar o cabeçalho: a dica que esperou aparece aí.
+  let appObservado: Element | null = null;
+  const vigiaDaInicial = typeof MutationObserver === "function" ? new MutationObserver(() => mostrarDica()) : null;
   function observar(): void {
+    const app = doc.querySelector(".app");
+    if (vigiaDaInicial && app && app !== appObservado) {
+      vigiaDaInicial.disconnect();
+      vigiaDaInicial.observe(app, { attributes: true, attributeFilter: ["class"] });
+      appObservado = app;
+    }
     const cab = doc.getElementById("cabecalho");
     if (!observador || !cab || cab === observado) return;
     observador.disconnect();
@@ -270,7 +279,7 @@ export function ligarGestosDaPilula(doc: Document, p: PilulaDePaginas): GestosDa
     if (dica || !ativa()) return;
     let jaViu: string | null = null;
     try { jaViu = janela?.localStorage.getItem(CHAVE_DA_DICA) ?? null; } catch { jaViu = "1"; }
-    if (!mostraDica(p.total(), jaViu)) return;
+    if (!mostraDica(p.total(), jaViu, !!doc.querySelector(".app.bots-abertos"))) return;
     const c = pil();
     if (!c) return;
     const toqueGrosso = janela?.matchMedia?.("(any-pointer: coarse)").matches ?? false;

@@ -138,7 +138,7 @@ describe("manifesto e página (ADR-094)", () => {
     expect(html).toMatch(/name="viewport" content="[^"]*viewport-fit=cover/);
     expect(html).toContain('name="apple-mobile-web-app-capable" content="yes"');
     const folhas = [...html.matchAll(/rel="stylesheet" href="\/([^"]+)"/g)].map((m) => m[1]);
-    // As folhas do celular por último: mobile.css e, depois dela, a base do celular (ADA-2, ADR-148).
-    expect(folhas.slice(-2)).toEqual(["mobile.css", "celular-base.css"]);
+    // As folhas do celular por último: mobile.css, a base do celular (ADA-2, ADR-148) e a tab bar (ADA-19).
+    expect(folhas.slice(-3)).toEqual(["mobile.css", "celular-base.css", "tab-bar-celular.css"]);
   });
 });

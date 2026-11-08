@@ -58,3 +58,13 @@ Aplicação do item 1 ao quadro, sem ação nova de domínio nem migração:
 - **O ⋯ do topo** reúne meta, prazo do quadro (folha, sem `select`), Pessoas, Atividade, Ordem das colunas, Trazer do
   Linear e Remover quadro: as mesmas ações do topo do computador.
 - O CSS fica todo em `web/quadro-celular.css`, dentro da consulta canônica; o computador não muda (critério 13).
+
+## Emenda F4 (2026-11-08, ADA-19)
+
+6. **No celular, Sua vez é aba da inicial, não tela.** A inicial ganha a tab bar em pílula de vidro (Conversas,
+   Quadros, Sua vez) com o botão redondo de busca; ir para `sua-vez` no celular troca de aba em vez de empilhar uma
+   tela. O computador mantém a tela de Sua vez. A aba mostra só "Precisa de você" (pedidos abertos não vencidos, um por
+   fio, a mesma conta do sino e do Dock), sem incidentes nem avisos. Nenhuma ação nova: as linhas usam
+   `verPerguntaNaConversa`, os quadros usam `quadroNaTela` e `abrir-quadro-compartilhado`, e segurar o ‹ abre as recentes
+   (até 8, pela última mensagem). A folha fica em `web/tab-bar-celular.css`, carregada depois de `celular-base.css`,
+   na mesma consulta canônica.

@@ -229,6 +229,8 @@ import { executarRotinaComConfirmacao } from "./lib/executar-rotina.ts";
 import { copiarPorSelecao, type DocParaCopiar } from "./lib/copiar-por-selecao.ts";
 import { criarBuscaNaConversa } from "./telas/busca-na-conversa.ts";
 import { ligarTopoEncolhe, ROLAVEIS_DO_TOPO } from "./lib/topo-encolhe.ts";
+import { abaDoDestino, alvoDoFocoNaTabBar, contagemDaAbaSuaVez, criarHistoricoDaFolha, ficaAoEscolherRecente, destinoDaAbaQuadros, ehAba, itensDaAbaSuaVez, lerListaDaAbaQuadros, recentes, type AbaDoInicio, type QuadroDaLista } from "./lib/tab-bar-celular.ts";
+import { renderAbaQuadros, renderAbaSuaVez, renderFolhaRecentes, renderTabBar, renderTituloCompacto, renderTituloGrande } from "./telas/tab-bar-celular.ts";
 import { ligarTecladoVisivel } from "./lib/teclado-visivel.ts";
 import type { ItemDoMenuDaPilula } from "./lib/gesto-da-pilula.ts";
 import { DICA_MS, MARCA_CUTUCAO, MARCA_DICA, deveCutucar, criarFiltroDeEco, deveMostrarDica, escFechaABusca, gravarMarca, lerMarca, type Marcas, type ViaDaBusca } from "./lib/descoberta-da-busca.ts";
@@ -424,6 +426,116 @@ const ESQUELETO_DO_INICIO = `<div class="inicio-esqueleto" role="status"><span c
 
 /** NOD-379: sem nenhum bot — o mascote, uma frase e o botão de contorno; a barra de Buscar continua. */
 const INICIO_VAZIO = `<div class="inicio-vazio">${iconeAgente({ nome: "Nod", cor: "c-black", forma: "shape-pebble" }, "lg")}<h2>Crie seu primeiro bot</h2><p>Diga o que ele faz e ele começa a trabalhar.</p><button type="button" class="bt inicio-contorno" data-act="navegar" data-tela="novo-bot">Criar bot</button></div>`;
+
+// ADA-19 (F4 do celular, protótipo ada-2 v2): a inicial do celular tem três abas — Conversas, Quadros e Sua vez — na
+// tab bar de vidro. A aba vive aqui (fora do reducer, como a busca): no computador nada disso existe.
+let abaDoInicio: AbaDoInicio = "conversas";
+/** A leitura de Sua vez falhou (a aba mostra "Não deu para atualizar" + Tentar de novo). */
+let suaVezFalhou = false;
+/** A lista da aba Quadros (`GET /quadros`), lida ao abrir a aba, com cache curto. */
+let quadrosDaAba: { tipo: "carregando" } | { tipo: "erro" } | { tipo: "pronto"; quadros: QuadroDaLista[]; em: number } = { tipo: "carregando" };
+let lendoQuadros = 0;
+/** Cache da aba Quadros: abrir de novo em menos que isso não relê. */
+const CACHE_QUADROS_MS = 30_000;
+async function lerQuadrosDaAba(forcar = false): Promise<void> {
+  if (!api || !estado.sessao) return;
+  if (!forcar && quadrosDaAba.tipo === "pronto" && Date.now() - quadrosDaAba.em < CACHE_QUADROS_MS) return;
+  const n = ++lendoQuadros;
+  if (quadrosDaAba.tipo !== "pronto") quadrosDaAba = { tipo: "carregando" };
+  try {
+    const cliente = api;
+    const quadros = await lerListaDaAbaQuadros(estado.experimentos.quadro, () => cliente.quadros());
+    if (n !== lendoQuadros) return;
+    quadrosDaAba = { tipo: "pronto", quadros, em: Date.now() };
+  } catch {
+    if (n !== lendoQuadros) return;
+    quadrosDaAba = { tipo: "erro" };
+  }
+  render();
+}
+/** Troca a aba da inicial do celular; tocar na aba que já está ativa rola a lista ao topo. */
+function trocarAbaDoInicio(aba: AbaDoInicio): void {
+  const lista = document.querySelector<HTMLElement>("#sidebar .list");
+  if (aba === abaDoInicio) { lista?.scrollTo({ top: 0, behavior: movimentoReduzido() ? "auto" : "smooth" }); return; }
+  abaDoInicio = aba;
+  if (aba === "quadros") void lerQuadrosDaAba();
+  if (aba === "sua-vez" && !estado.suaVez) dispatch({ tipo: "invalidar", quais: ["sua-vez"] });
+  render();
+  document.querySelector<HTMLElement>("#sidebar .list")?.scrollTo({ top: 0 });
+  topoDoInicio?.reavaliar();
+}
+/** A folha de recentes (segurar o ‹): fica fora do render(), presa no <body>; o foco fica nela e volta ao ‹ ao fechar. */
+let folhaRecentes: { camada: HTMLElement; volta: HTMLElement | null } | null = null;
+// Revisão do #704: a folha empilha uma entrada no histórico; o voltar do sistema com ela aberta só a fecha.
+const historicoDaFolha = criarHistoricoDaFolha(window.history);
+function abrirRecentes(volta: HTMLElement | null): void {
+  if (folhaRecentes || historicoDaFolha.ocupado() || !celular.ativo()) return;
+  const t = estado.tela;
+  const agora = Date.now();
+  const linhas = recentes(estado.frota?.agentes ?? [], t.tipo === "conversa" ? t.conversaId : null).map((l) => {
+    const bot = botGerido(l.agenteId);
+    return { ...l, mascote: bot ? iconeAgente(bot, "sm") : iconeAgente({ nome: l.nome, cor: "c-black", forma: "shape-pebble" }, "sm"), hora: horaDaLinha(l.em, agora, fusoLocal()), horaIso: new Date(l.em).toISOString() };
+  });
+  const camada = document.createElement("div");
+  camada.className = "recentes-camada";
+  camada.innerHTML = renderFolhaRecentes(linhas);
+  document.body.append(camada);
+  folhaRecentes = { camada, volta };
+  historicoDaFolha.abrir();
+  pintarInerciaDoApp();
+  camada.querySelector<HTMLElement>(".folha-recentes")?.focus({ preventScroll: true });
+}
+function fecharRecentes(devolverFoco = true): void {
+  if (!folhaRecentes) return;
+  const { camada, volta } = folhaRecentes;
+  folhaRecentes = null;
+  camada.remove();
+  // Solta a .app antes de devolver o foco: num elemento inerte o focus() não pega.
+  pintarInerciaDoApp();
+  if (devolverFoco) (volta?.isConnected ? volta : document.querySelector<HTMLElement>("#cabecalho .voltar-bots"))?.focus({ preventScroll: true });
+}
+/** Fecha por dentro (Esc, fundo, escolher): some na hora e tira a entrada do histórico; `depois` roda quando ela sair. */
+function sairDasRecentes(devolverFoco = true, depois?: () => void): void {
+  if (!folhaRecentes) return;
+  fecharRecentes(devolverFoco);
+  historicoDaFolha.sair(depois);
+}
+// Esc fecha a folha antes de qualquer outro Esc (na janela, em captura: antes dos ouvintes do document); o Tab fica
+// preso nela (role=dialog, aria-modal).
+window.addEventListener("keydown", (ev) => {
+  if (!folhaRecentes) return;
+  if (ev.key === "Escape") { ev.preventDefault(); ev.stopImmediatePropagation(); sairDasRecentes(); return; }
+  if (ev.key !== "Tab") return;
+  const folha = folhaRecentes.camada.querySelector<HTMLElement>(".folha-recentes");
+  const focaveis = [...folhaRecentes.camada.querySelectorAll<HTMLElement>("button")];
+  if (!folha || !focaveis.length) { ev.preventDefault(); folha?.focus(); return; }
+  const primeiro = focaveis[0]!, ultimo = focaveis[focaveis.length - 1]!;
+  const ativo = document.activeElement;
+  if (ev.shiftKey && (ativo === primeiro || ativo === folha)) { ev.preventDefault(); ultimo.focus(); }
+  else if (!ev.shiftKey && (ativo === ultimo || !folhaRecentes.camada.contains(ativo))) { ev.preventDefault(); primeiro.focus(); }
+}, true);
+// O voltar do navegador com a folha aberta só a fecha (a entrada era dela; a gaveta não sai da conversa). O voltar que a
+// própria folha pediu é engolido e só então abre a conversa escolhida. Em captura: antes da gaveta e da busca.
+window.addEventListener("popstate", (ev) => {
+  const r = historicoDaFolha.aoVoltar();
+  if (r.tipo === "seguir") return;
+  ev.stopImmediatePropagation();
+  if (r.tipo === "fechar") fecharRecentes();
+  else r.depois?.();
+}, true);
+
+/** O título grande encolhe quando a lista da aba rola: a lista é refeita a cada redesenho, então a escuta é religada. */
+let topoDoInicio: ReturnType<typeof ligarTopoEncolhe> | null = null;
+let listaDoTopoDoInicio: HTMLElement | null = null;
+function religarTopoDoInicio(): void {
+  const lista = celular.ativo() ? document.querySelector<HTMLElement>("#sidebar .list") : null;
+  if (lista !== listaDoTopoDoInicio) {
+    topoDoInicio?.desligar();
+    topoDoInicio = lista ? ligarTopoEncolhe(() => document.querySelector<HTMLElement>("#sidebar .inicio-topo"), [lista]) : null;
+    listaDoTopoDoInicio = lista;
+  }
+  topoDoInicio?.reavaliar();
+}
 
 // A busca da sidebar fica fechada até ser pedida (ícone ou ⌘K); aberta, fecha no Esc ou ao perder o foco vazia.
 let buscaAberta = false;
@@ -1631,7 +1743,9 @@ async function buscar(q: Invalidacao): Promise<Acao | null> {
   if (q === "sua-vez") {
     // definido em 2026-09-24 ("aviso no Mac"): atrás, a leitura serve ao Dock e ao aviso, e não conta como vista.
     const ver = naFrente();
-    const suaVez = await api.suaVez(ver);
+    // ADA-19: a falha fica marcada para a aba Sua vez do celular mostrar o erro com Tentar de novo.
+    const suaVez = await api.suaVez(ver).catch((e: unknown) => { suaVezFalhou = true; if (celular.ativo() && abaDoInicio === "sua-vez") render(); throw e; });
+    suaVezFalhou = false;
     suaVezSemVer = !ver;
     return { tipo: "hidratar-sua-vez", suaVez };
   }
@@ -1916,6 +2030,29 @@ function relevante(q: Invalidacao): boolean {
  * por `lembrar` (web/lib/lembrar.ts), que só enxerga o que passa pelo parâmetro. O que ela lê de fora do
  * estado entra nos extras de `redesenharSidebar`.
  */
+/** ADA-19: a aba Sua vez do celular — só "Precisa de você", com a mesma conta do sino (pedidosAbertos). */
+function conteudoDaAbaSuaVez(estado: Estado): string {
+  if (!estado.suaVez) return renderAbaSuaVez({ tipo: suaVezFalhou ? "erro" : "carregando" });
+  const agora = Date.now();
+  const linhas = itensDaAbaSuaVez(estado.suaVez, agora, estado.sessao?.pessoaId ?? "").map((l) => {
+    const bot = botGerido(l.agenteId);
+    return { ...l, mascote: bot ? iconeAgente(bot, "", "disponivel") : iconeAgente({ nome: l.quem, cor: "c-black", forma: "shape-pebble" }), hora: horaDaLinha(l.desde, agora, fusoLocal()), horaIso: new Date(l.desde).toISOString() };
+  });
+  return renderAbaSuaVez({ tipo: "pronta", linhas });
+}
+
+/** ADA-19: a aba Quadros do celular — os quadros da pessoa (GET /quadros) e os compartilhados com ela. */
+function conteudoDaAbaQuadros(): string {
+  if (quadrosDaAba.tipo !== "pronto") return renderAbaQuadros(quadrosDaAba);
+  const { quadros } = quadrosDaAba;
+  return renderAbaQuadros({
+    tipo: "pronta",
+    destino: destinoDaAbaQuadros(quadros, compartilhados),
+    nomeDoBot: (id) => botGerido(id)?.nome ?? quadros.find((q) => q.agenteId === id)?.agenteNome ?? "",
+    mascote: (id) => { const b = botGerido(id); return b ? iconeAgente(b) : iconeAgente({ nome: "?", cor: "c-black", forma: "shape-pebble" }); },
+  });
+}
+
 function renderSidebar(estado: Estado): string {
   // NOD-379: no celular a barra é a tela inicial (topo do web, favoritos em grade, conversas como num mensageiro e a barra
   // flutuante de Buscar). O HTML do computador não muda.
@@ -2087,16 +2224,17 @@ function renderSidebar(estado: Estado): string {
     const erroFrota = frotaFalhou ? '<p class="inicio-aviso" role="status">Não deu para carregar seus bots · <button type="button" class="inicio-link" data-act="tentar-frota">Tentar de novo</button></p>' : "";
     return `<div class="inicio-topo">
       <button class="me me-topo${falhaMotor ? " me-falha" : ""}" data-act="menu-conta" aria-haspopup="menu" aria-expanded="${estado.espaco ? "true" : "false"}" aria-label="Menu da conta: ${esc(situacaoMotor)}${avisoUso ? ` · ${esc(avisoUso.resumo)}` : ""}"><span class="av-me">eu</span>${avisoUso ? '<span class="me-ponto" aria-hidden="true"></span>' : ""}</button>
-      <span class="inicio-topo-acoes">${naoLidos}${renderIconeTrabalhos(estado)}${renderChamada(estado)}<button class="create-trigger" data-act="navegar" data-tela="novo-bot" aria-label="Nova conversa">${MAIS}</button></span>
+      ${renderTituloCompacto(abaDoInicio)}
+      <span class="inicio-topo-acoes">${renderIconeTrabalhos(estado)}<button class="create-trigger" data-act="navegar" data-tela="novo-bot" aria-label="Nova conversa">${MAIS}</button></span>
     </div>
     ${renderIncidentes(estado)}
     ${ambiente}
     ${avisoDoMotor}
-    <div class="list">
-      ${erroFrota}
-      ${meio}
+    <div class="list" data-aba="${abaDoInicio}">
+      ${renderTituloGrande(abaDoInicio)}
+      ${abaDoInicio === "sua-vez" ? conteudoDaAbaSuaVez(estado) : abaDoInicio === "quadros" ? conteudoDaAbaQuadros() : `${erroFrota}${meio}`}
     </div>
-    <div class="inicio-barra"><label class="search inicio-busca">${LUPA}<input id="busca-bots" type="search" enterkeyhint="search" placeholder="Buscar" aria-label="Buscar agentes" autocomplete="off" /></label></div>`;
+    ${renderTabBar(abaDoInicio, { pedidos: contagemDaAbaSuaVez(estado.suaVez), naoLidas: comNovas })}`;
   }
   const html = `<div class="search-wrap">
       <div class="sh">${nodDiscreto}<button class="icone-topo" data-act="abrir-busca" aria-label="Buscar agentes" aria-keyshortcuts="Meta+K Control+K" title="Buscar (⌘K)">${LUPA}</button>${naoLidos}${renderIconeTrabalhos(estado)}${renderChamada(estado)}<span class="create-actions"><button class="create-trigger" data-act="navegar" data-tela="novo-bot" data-segurar="segurar-mais" aria-label="Nova conversa (segure para criar um bot direto)" aria-keyshortcuts="${ATALHO_NOVO_BOT.aria} Shift+Enter Shift+Space" title="Nova conversa (${ATALHO_NOVO_BOT.texto})"><span class="segurar-anel" aria-hidden="true"></span>+</button></span></div>
@@ -2143,7 +2281,10 @@ const VOLTAR = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stro
  * tela inicial (era o ☰ da gaveta). No computador não aparece (`.abrir-bots` é escondido fora do celular, web/mobile.css).
  */
 function botaoAbrirBots(naConversa = false): string {
-  return `<button type="button" class="abrir-bots${naConversa ? " voltar-bots" : ""}" data-act="abrir-bots" aria-label="Voltar ao início">${naConversa ? VOLTAR : MENU}</button>`;
+  // ADA-19: na conversa, segurar o ‹ abre as recentes (Shift+Enter ou o menu de contexto também); o leitor de tela tem o
+  // botão "Recentes" logo depois, só para ele.
+  if (!naConversa) return `<button type="button" class="abrir-bots" data-act="abrir-bots" aria-label="Voltar ao início">${MENU}</button>`;
+  return `<button type="button" class="abrir-bots voltar-bots" data-act="abrir-bots" aria-label="Voltar para Conversas (segure para as recentes)" aria-keyshortcuts="Shift+Enter">${VOLTAR}</button>${celular.ativo() ? '<button type="button" class="sr-only abrir-recentes-leitor" data-act="abrir-recentes">Recentes</button>' : ""}`;
 }
 
 /**
@@ -3062,7 +3203,7 @@ function render(): void {
   devolverFoco?.();
   document.getElementById("onboarding")?.toggleAttribute("hidden", camadaOnboarding === "");
   // A busca do celular em tela cheia também (NOD-380): sem isto, o próximo render devolvia a .app ao Tab com o diálogo aberto.
-  document.querySelector(".app")?.toggleAttribute("inert", appInerte({ outraCamada: appInerteSemBusca(), buscaAberta: !!document.querySelector(".busca-celular:not(.saindo)") }));
+  pintarInerciaDoApp();
   document.getElementById("espaco")?.toggleAttribute("inert", telaLigacao.cheia());
   telaLigacao.render();
   const retomar = ligacaoParaRetomar;
@@ -3138,7 +3279,7 @@ function prenderFocoNaGaveta(slug: string | null): void {
  * (digitar na busca filtra direto, no ouvinte de input).
  */
 function redesenharSidebar(): void {
-  const html = lembrar("sidebar", estado, [ambienteBanco, buscaAberta, termoBusca() !== "", naFrente(), deixarNaoLida, secoesRecolhidas, edicaoTime?.alvo ?? "", [...selecaoBots].join(","), celular.ativo(), celular.botsAbertos(), frotaFalhou, favoritosTodos, celular.ativo() ? new Date().toDateString() : "", serializar(barraAtual), JSON.stringify(compartilhados)], renderSidebar);
+  const html = lembrar("sidebar", estado, [ambienteBanco, buscaAberta, termoBusca() !== "", naFrente(), deixarNaoLida, secoesRecolhidas, edicaoTime?.alvo ?? "", [...selecaoBots].join(","), celular.ativo(), celular.botsAbertos(), frotaFalhou, favoritosTodos, celular.ativo() ? new Date().toDateString() : "", serializar(barraAtual), JSON.stringify(compartilhados), abaDoInicio, suaVezFalhou, quadrosDaAba.tipo === "pronto" ? quadrosDaAba.em : quadrosDaAba.tipo], renderSidebar);
   // NOD-119: no celular a barra é a gaveta de sempre; o <html> só leva a densidade no computador (virar o aparelho muda).
   pintarBarra(barraAtual, document.documentElement, celular.ativo(), buscaAberta || termoBusca() !== "");
   if (!regiaoMudaria("sidebar", html)) return;
@@ -3150,12 +3291,15 @@ function redesenharSidebar(): void {
   if (focoBusca && celular.ativo()) { sidebarAdiada = true; return; }
   const rolagem = document.querySelector<HTMLElement>("#sidebar .list")?.scrollTop ?? 0;
   const focoNoTime = focoDoTime();
+  const focoNaTabBar = alvoDoFocoNaTabBar(document.activeElement);
   regiao("sidebar", html);
   devolverFocoDoTime(focoNoTime);
+  if (focoNaTabBar) document.querySelector<HTMLElement>(`#sidebar ${focoNaTabBar}`)?.focus({ preventScroll: true });
   const novaBusca = document.getElementById("busca-bots") as HTMLInputElement | null;
   if (novaBusca) { novaBusca.value = valorBusca; if (focoBusca) novaBusca.focus({ preventScroll: true }); }
   filtrarBots(valorBusca);
   manterRolagemDaBarra(rolagem);
+  religarTopoDoInicio();
 }
 
 /** A conversa cuja linha já foi trazida à vista: a barra só rola sozinha quando a conversa aberta muda. */
@@ -3609,7 +3753,7 @@ function trilharQuadro(e: EventoTrilhaQuadro): void {
   }
 }
 
-function navegar(tela: Tela): void {
+function navegar(tela: Tela, o: { filaDeSuaVez?: boolean } = {}): void {
   // NOD-85: a tela antiga de Rotinas virou a agenda das Configurações; todo caminho que levava a ela abre a seção.
   if (tela.tipo === "rotinas") { abrirRotinas(); return; }
   const antes = estado.tela;
@@ -3618,6 +3762,9 @@ function navegar(tela: Tela): void {
   if (celular.botsAbertos()) trilhaDaConversa.nova();
   // NOD-379: no celular o "início" é a tela inicial (fechar um Trabalho, voltar da conexão), não a conversa que o reducer
   // escolhe para ele; saindo dela, empilha uma entrada no histórico (o voltar do navegador volta a ela).
+  // ADA-19: no celular, Sua vez é aba da inicial, não tela (emenda da ADR-148): o sino, o aviso e o link levam à aba.
+  // A exceção é o pedido na conversa de outra pessoa (filaDeSuaVez): ela decide na fila, como no computador.
+  if (celular.ativo() && abaDoDestino(tela) === "sua-vez" && !o.filaDeSuaVez) { trocarAbaDoInicio("sua-vez"); celular.voltarAoInicio(); return; }
   const paraInicial = celular.ativo() && tela.tipo === "inicio";
   if (!paraInicial) celular.entrarNaConversa();
   aoTrocarDeTela(antes, tela);
@@ -4630,9 +4777,16 @@ function verPerguntaNaConversa(conversaId: string, agenteId: string, decisaoId: 
   window.setTimeout(tentar, 0);
 }
 
-/** O que deixa a .app inerte fora a busca do celular: Seu espaço, a ligação em tela cheia e o onboarding por cima. */
+/**
+ * O que deixa a .app inerte fora a busca do celular: Seu espaço, a ligação em tela cheia, o onboarding por cima e a
+ * folha de recentes (ADA-19: modal presa no <body>; sem isso o leitor de tela e o Tab do navegador saíam dela).
+ */
 function appInerteSemBusca(): boolean {
-  return !!estado.espaco || telaLigacao.cheia() || telaOnboarding.cobre();
+  return !!estado.espaco || telaLigacao.cheia() || telaOnboarding.cobre() || folhaRecentes !== null;
+}
+/** A .app fica inerte quando há outra camada por cima; o render() e a folha de recentes (que vive fora dele) repintam. */
+function pintarInerciaDoApp(): void {
+  document.querySelector(".app")?.toggleAttribute("inert", appInerte({ outraCamada: appInerteSemBusca(), buscaAberta: !!document.querySelector(".busca-celular:not(.saindo)") }));
 }
 
 /**
@@ -5971,6 +6125,32 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   "remover-anexo": (el) => removerAnexo(el.dataset.id ?? ""),
   "abrir-busca": () => abrirBusca(),
   "abrir-bots": () => celular.voltarAoInicio(),
+  "abrir-recentes": () => abrirRecentes(document.querySelector<HTMLElement>("#cabecalho .voltar-bots")),
+  "fechar-recentes": () => sairDasRecentes(),
+  "abrir-recente": (el) => {
+    const conversaId = el.dataset.conversa ?? "", agenteId = el.dataset.agente ?? "";
+    const fica = ficaAoEscolherRecente(conversaId, estado.tela.tipo === "conversa" ? estado.tela.conversaId : null);
+    if (fica) { sairDasRecentes(true); return; }
+    sairDasRecentes(false, () => navegar({ tipo: "conversa", conversaId, agenteId }));
+  },
+  // ADA-19: as abas da inicial do celular (tocar na ativa rola ao topo), os Tentar de novo delas e as linhas.
+  "aba-do-inicio": (el) => { if (ehAba(el.dataset.aba)) trocarAbaDoInicio(el.dataset.aba); },
+  "tentar-sua-vez": () => { suaVezFalhou = false; render(); dispatch({ tipo: "invalidar", quais: ["sua-vez"] }); },
+  "tentar-quadros": () => { quadrosDaAba = { tipo: "carregando" }; render(); void lerQuadrosDaAba(true); },
+  // Tocar num pedido abre a conversa já no pedido (o mesmo atalho do aviso: web/main.ts verPerguntaNaConversa).
+  // ADA-19: pedido na conversa de outra pessoa (a decisora não a lê): abre a fila de Sua vez, onde ela decide.
+  "abrir-pedido-na-fila": () => navegar({ tipo: "sua-vez" }, { filaDeSuaVez: true }),
+  // O id vai em data-decisao-id, não data-decisao: o atalho procura [data-decisao] no documento todo e a barra (com a
+  // linha da aba, escondida atrás da conversa) vem antes da timeline — ele rolaria até a linha, não até o pedido.
+  "abrir-pedido": (el) => verPerguntaNaConversa(el.dataset.conversa ?? "", el.dataset.agente ?? "", el.dataset.decisaoId ?? ""),
+  // Tocar num quadro abre a conversa do bot na página do quadro (ADA-8/ADR-146: o quadro em si é o de hoje).
+  "abrir-quadro-do-bot": (el) => {
+    const bot = botGerido(el.dataset.agente ?? "");
+    if (!bot) { dispatch({ tipo: "erro", erro: { codigo: "quadro_sem_bot", mensagem: "Esse bot não está mais na sua frota." } }); return; }
+    navegar({ tipo: "conversa", conversaId: bot.conversaId, agenteId: bot.id });
+    // As páginas da pílula podem não ter chegado: o pedido espera por elas (o trocar seria desfeito quando chegassem).
+    quadroNaTela.abrirPagina("tarefas");
+  },
   // NOD-379: a inicial do celular — reler a frota que falhou e abrir os favoritos além dos 8.
   "tentar-frota": () => {
     void tentarFrotaAgora<Acao>({
@@ -7837,6 +8017,36 @@ document.addEventListener("pointerdown", (ev) => {
   else toqueLongo.esquecer();
 }, true);
 // NOD-85: no celular, segurar uma linha da agenda abre o menu dela (Ver na conversa, Testar, Pausar).
+// ADA-19 (protótipo ada-2 v2, passo 2.6): segurar o ‹ da conversa abre a folha de recentes; o clique que vem depois do
+// toque longo é engolido (não volta para Conversas). Shift+Enter e o menu de contexto abrem a mesma folha.
+const toqueNoVoltar = criarToqueLongo<HTMLElement>({ agendar: (fn, ms) => window.setTimeout(fn, ms), cancelar: (id) => clearTimeout(id), agora: () => performance.now() }, (bt) => {
+  if (!bt.isConnected || !celular.ativo()) return false;
+  navigator.vibrate?.(10);
+  abrirRecentes(bt);
+  return true;
+});
+document.addEventListener("pointerdown", (ev) => {
+  const bt = (ev.target as HTMLElement).closest?.<HTMLElement>("#cabecalho .abrir-bots.voltar-bots");
+  if (bt && celular.ativo()) toqueNoVoltar.comecar(bt, ev.clientX, ev.clientY);
+  else toqueNoVoltar.esquecer();
+}, true);
+document.addEventListener("pointermove", (ev) => toqueNoVoltar.mover(ev.clientX, ev.clientY));
+document.addEventListener("pointerup", () => toqueNoVoltar.soltar());
+document.addEventListener("pointercancel", () => toqueNoVoltar.soltar());
+document.addEventListener("click", (ev) => {
+  if (toqueNoVoltar.engolirClique()) { ev.preventDefault(); ev.stopPropagation(); }
+}, true);
+document.addEventListener("contextmenu", (ev) => {
+  const bt = (ev.target as HTMLElement).closest?.<HTMLElement>("#cabecalho .abrir-bots.voltar-bots");
+  if (!bt || !celular.ativo()) return;
+  ev.preventDefault();
+  abrirRecentes(bt);
+});
+document.addEventListener("keydown", (ev) => {
+  const bt = (ev.target as HTMLElement).closest?.<HTMLElement>("#cabecalho .abrir-bots.voltar-bots");
+  if (bt && ev.key === "Enter" && ev.shiftKey) { ev.preventDefault(); ev.stopPropagation(); abrirRecentes(bt); }
+}, true);
+
 const toqueNaAgenda = criarToqueLongo<HTMLElement>({ agendar: (fn, ms) => window.setTimeout(fn, ms), cancelar: (id) => clearTimeout(id), agora: () => performance.now() }, (linha) => {
   const chave = linha.dataset.chave;
   if (!chave || !linha.isConnected) return false;
@@ -7898,6 +8108,8 @@ function esconderDicaToqueLongo(marcar: boolean): void {
 function mostrarDicaToqueLongo(): void {
   if (!celular.botsAbertos() || document.querySelector(".dica-toque-longo") || dicaJaVista(armazenamento())) return;
   if (!document.querySelector("#sidebar .inicio-linha, #sidebar .fixado")) return;
+  // ADA-19: com a tab bar na inicial não há dica de gesto (plano e protótipo ada-2: "sem dica para ensinar gesto").
+  if (document.querySelector("#sidebar .tab-bar-celular")) return;
   const dica = document.createElement("div");
   dica.className = "dica-toque-longo";
   dica.setAttribute("role", "status");

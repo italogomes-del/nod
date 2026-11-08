@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { appDe, cenario, paginasDe } from "../../helpers/paginas-do-bot.ts";
 import {
@@ -100,6 +101,13 @@ describe("paginas (NOD-445)", () => {
     expect(mostraDica(2, null)).toBe(true);
     expect(mostraDica(2, "1")).toBe(false);
     expect(mostraDica(1, null)).toBe(false);
+  });
+
+  it("dica: com a inicial do celular por cima da conversa (ADA-19, sem dica de gesto) ela não aparece nem se gasta", () => {
+    expect(mostraDica(2, null, true)).toBe(false);
+    expect(mostraDica(2, null, false)).toBe(true);
+    const tela = readFileSync(new URL("../../../web/lib/paginas-na-tela.ts", import.meta.url), "utf8");
+    expect(tela).toContain('mostraDica(p.total(), jaViu, !!doc.querySelector(".app.bots-abertos"))');
   });
 });
 
