@@ -149,7 +149,7 @@ type CamposTarefa = { titulo?: string; descricao?: string; status?: string; agen
 
 export const EXECUTORES_QUADRO = {
   "quadro.criar": umaAcao<{ meta?: string | null; prazo?: string | null; nome?: string; projeto?: string | null }>("criar_quadro"),
-  "quadro.editar": umaAcao<{ meta?: string | null; prazo?: string | null; nome?: string | null; projeto?: string | null }>("editar_quadro"),
+  "quadro.editar": umaAcao<{ meta?: string | null; prazo?: string | null; nome?: string | null; projeto?: string | null; quem_fecha?: "bot" | "pessoa" }>("editar_quadro"),
   "quadro.criar_tarefa": umaAcao<CamposTarefa & { titulo: string }>("criar_tarefa"),
   "quadro.importar_linear": umaAcao<{ itens: ItemLinear[] }>("importar_linear"),
   "quadro.importar_time_linear": importarTimeLinear,

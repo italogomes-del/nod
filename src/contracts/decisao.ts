@@ -89,6 +89,13 @@ export type Decisao = {
    * pertence — a rodada seguinte de uma pergunta respondida. null = a decisão começa o próprio fio.
    */
   fioId: string | null;
+  /**
+   * ADA-28 (ADR-159, 0157): a tarefa do quadro de que esta decisão é a espera (pedida num turno de tarefa, com
+   * NOD_TAREFA_CASA=1). Ausente = decisão solta, como antes. Responder no card ou na Sua vez resolve a mesma.
+   */
+  tarefaId?: string;
+  /** ADA-28 (escopo E): a decisão "pronta para o Done" do quadro em que quem fecha é a pessoa. */
+  tarefaPedeDone?: true;
 };
 
 export type EstadoColunaFila = "pendente" | "vencido" | "reaberto";

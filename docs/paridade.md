@@ -273,7 +273,7 @@ Estados: **vivo** = o chat faz pelo mesmo executor da tela, com teste de contrat
 | Ação | O que faz | Risco | No chat | Rotas |
 | --- | --- | --- | --- | --- |
 | `quadro.criar` | Criar o quadro de um bot (meta e prazo opcionais; com nome, outro quadro no mesmo bot, ADA-14) | muda | vivo (`gerir_quadro`) | `POST ^\/agentes\/(?<id>[^/]+)\/quadro$` |
-| `quadro.editar` | Mudar a meta, o prazo, o nome ou o projeto do quadro | muda | vivo (`gerir_quadro`) | `PATCH ^\/agentes\/(?<id>[^/]+)\/quadro$` |
+| `quadro.editar` | Mudar a meta, o prazo, o nome, o projeto ou quem dá o Done no quadro | muda | vivo (`gerir_quadro`) | `PATCH ^\/agentes\/(?<id>[^/]+)\/quadro$` |
 | `quadro.criar_tarefa` | Criar uma tarefa no quadro | muda | vivo (`gerir_quadro`) | `POST ^\/agentes\/(?<id>[^/]+)\/quadro\/tarefas$`<br>`POST ^\/quadros\/(?<qid>[^/]+)\/tarefas$` |
 | `quadro.importar_linear` | Trazer itens do Linear para o quadro | muda | vivo (`gerir_quadro`) | `POST ^\/agentes\/(?<id>[^/]+)\/quadro\/linear$` |
 | `quadro.importar_time_linear` | Trazer um time do Linear para o quadro (com prévia) | muda | vivo (`gerir_quadro`) | `POST ^\/agentes\/(?<id>[^/]+)\/quadro\/importacao$` |

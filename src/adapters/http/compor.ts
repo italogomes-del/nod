@@ -226,6 +226,7 @@ import { lerLiberacaoQuadros, lerLiberacaoQuadrosN } from "../../domain/flag-qua
 import { configurarLiberacaoQuadros, configurarLiberacaoQuadrosN } from "../../repositories/raio-x.repo.ts";
 import { lerRotinasFora } from "../../domain/quadro-assumir.ts";
 import { configurarRotinasFora } from "../../use-cases/assumir-quadro.ts";
+import { configurarTarefaCasa, lerTarefaCasa } from "../../shared/tarefa-casa.ts";
 import type { IncomingMessage, Server } from "node:http";
 
 /**
@@ -447,6 +448,8 @@ export function comporApp(o: OpcoesCompor): App {
   configurarLiberacaoQuadrosN(lerLiberacaoQuadrosN(env));
   // NOD-422 (PR 2): as rotinas que o "quadro assume" nunca pausa (padrão: a bc381ef2).
   configurarRotinasFora(lerRotinasFora(env));
+  // ADA-28 (ADR-159): NOD_TAREFA_CASA=1 liga a jornada chat × quadro (desligada até o protótipo e as suposições).
+  configurarTarefaCasa(lerTarefaCasa(env));
   const depsSemPorta = (trx: Tx, escopo: Escopo): Deps => ({ repos: criarRepos(trx, escopo), services, useCases, tx: (fn) => fn(trx), escopo, agora: relogio, fusoPadrao, modeloPadrao, ...(contasLigadas ? { situacaoConta: () => situacaoDaConta(trx, escopo) } : {}) });
   // NOD-443 (ADR-143): a porta para o quadro da dona, na mesma transação (o turno do bot de quem participa).
   const depsDe = (trx: Tx, escopo: Escopo): Deps => comPortas(trx, escopo, (e) => depsSemPorta(trx, e));

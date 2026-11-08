@@ -12,6 +12,7 @@ import { rotinaDoTurno } from "./apoio-l7.ts";
 import { autoriaPessoa, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
 import { enfileirarRetomada } from "./enfileirar-retomada.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
+import { responderPedidoDeDone } from "./tarefa-casa.ts";
 import { sincronizarDasDecisoes } from "./trabalhos.ts";
 
 /**
@@ -128,5 +129,7 @@ export const retomarComResposta: CasoDeUso<EntradaRetomarComResposta, SaidaRetom
   if (original && turno && turnoNovo) events.push(evento(deps.escopo, { kind: "turno_criado", autoria, agora, conversaId: d.conversaId, turnoId: turno.id, dados: { origem: "retomada", retoma_turno_id: original.id, decisao_id: d.id } }));
   // Revisão do épico (S2, 2026-10-08): a task da pergunta relê o estado (rodando com a retomada na fila).
   events.push(...(await sincronizarDasDecisoes(deps, [d])));
+  // ADA-28 (escopo E): a "pronta para o Done" — Dar Done leva a Feito; outra resposta volta à etapa anterior.
+  if (d.tarefaPedeDone) events.push(...(await responderPedidoDeDone(deps, d, input.texto, input.executor ?? "catcher")));
   return { data: { mensagem, turno }, events };
 };

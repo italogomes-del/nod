@@ -7,7 +7,9 @@ import type { Confianca, KindMensagem, Mensagem, PayloadMensagem } from "../cont
 import type { PedidoDeColega } from "../contracts/troca-entre-bots.ts";
 import type { MotivoRecomeco, OrigemTurno } from "../contracts/turno.ts";
 import { assuntoNaLeitura } from "../domain/assunto-do-texto.ts";
-import { ASSUNTOS_ANEXO, ASSUNTOS_ATIVIDADE, assuntoDe, destinoDe } from "../domain/destino-no-chat.ts";
+import { ASSUNTOS_ANEXO, ASSUNTOS_ATIVIDADE, assuntoDe, assuntoNoBastidor, destinoDe } from "../domain/destino-no-chat.ts";
+import { tarefaCasaLigada } from "../shared/tarefa-casa.ts";
+import { codigoDaTarefa } from "../domain/codigo-tarefa.ts";
 import type { Conn, Escopo, Tx } from "../shared/types.ts";
 import { PRAZO_DESFAZENDO_MS, RETEM_MS } from "../domain/checkpoints.ts";
 import { checkpointDaFala } from "./checkpoints.repo.ts";
@@ -118,6 +120,18 @@ export type NovaMensagem =
   | (BaseNovaMensagem & { kind: KindQueEscolheAssunto; payload: PayloadMensagem; assunto?: Assunto })
   | (BaseNovaMensagem & { kind: KindMensagem; payload?: PayloadMensagem | null; assunto: Assunto });
 
+/**
+ * ADA-28 (ADR-159): o assunto que vai para o insert. Com a flag ligada e um assunto que tem variante de bastidor
+ * (`seBastidor`), o próprio insert escolhe pela marca do turno (`turnos.bastidores`, ADR-130) — sem leitura a mais no
+ * caminho comum: sem variante ou sem turno, o valor puro. Linha antiga não muda (S6).
+ */
+function assuntoGravado(conn: Conn, tenantId: string, m: NovaMensagem) {
+  const assunto = assuntoDaNova(m);
+  const variante = assuntoNoBastidor(assunto);
+  if (!tarefaCasaLigada() || !m.turnoId || variante === assunto) return conn`${assunto}`;
+  return conn`(case when exists (select 1 from turnos tb where tb.tenant_id = ${tenantId} and tb.id = ${m.turnoId} and tb.bastidores) then ${variante}::text else ${assunto}::text end)`;
+}
+
 /** O assunto gravado: o do payload quando há; senão o que o produtor escolheu; senão o do kind (fala = null). */
 export function assuntoDaNova(m: { kind: KindMensagem; payload?: PayloadMensagem | null; autoria: Pick<Autoria, "decidido_por">; assunto?: Assunto }): Assunto | null {
   const payload = m.payload ?? null;
@@ -126,7 +140,9 @@ export function assuntoDaNova(m: { kind: KindMensagem; payload?: PayloadMensagem
 }
 
 /** A linha lida com o turno (ADR-083, S2): a origem do turno, o trabalho e se é a última fala de um turno encerrado. */
-type LinhaComTurno = LinhaMensagem & { midia_recusas?: RecusasMidia | null; turno_origem: OrigemTurno | null; turno_bastidores?: boolean | null; turno_criado_em?: Date | null; trabalho_id: string | null; fim_do_turno: boolean | null; raiz_id: string | null; raiz_origem: OrigemTurno | null; motivo_recomeco?: MotivoRecomeco | null; primeira?: boolean | null; frente_de_lote: boolean | null } & LinhaDoCheckpoint;
+type LinhaComTurno = LinhaMensagem & { midia_recusas?: RecusasMidia | null; turno_origem: OrigemTurno | null; turno_bastidores?: boolean | null; turno_criado_em?: Date | null; trabalho_id: string | null; fim_do_turno: boolean | null; raiz_id: string | null; raiz_origem: OrigemTurno | null; motivo_recomeco?: MotivoRecomeco | null; primeira?: boolean | null; frente_de_lote: boolean | null } & LinhaDoCheckpoint & LinhaDaTarefa;
+/** ADA-28 (ADR-159): a tarefa do turno que gravou a linha (left join; só com NOD_TAREFA_CASA=1). */
+type LinhaDaTarefa = { tq_id?: string | null; tq_quadro_id?: string | null; tq_numero?: number | null; tq_linear_id?: string | null; tq_prefixo?: string | null };
 /** NOD-54 (0120): o checkpoint da fala (left join; nulo sem checkpoint ou vencido). */
 type LinhaDoCheckpoint = { ck_estado?: EstadoCheckpoint | null; ck_arquivos?: ArquivoDoCheckpoint[] | null; ck_total?: number | null; ck_feitos?: number | null; ck_desfeito_em?: Date | null; ck_resultado?: ResultadoGuardado | null; ck_falha?: FalhaDesfazer | null };
 
@@ -169,7 +185,13 @@ function paraMensagemComTurno(l: LinhaComTurno): Mensagem {
   const checkpoint = l.ck_estado && l.ck_arquivos && l.ck_total != null
     ? { checkpoint: checkpointDaFala({ estado: l.ck_estado, arquivos: l.ck_arquivos, total: l.ck_total, feitos: l.ck_feitos ?? 0, desfeitoEm: l.ck_desfeito_em ? ms(l.ck_desfeito_em) : null, resultado: l.ck_resultado ?? null, falha: l.ck_falha ?? null }) }
     : {};
-  return { ...paraMensagem(l), origemTurno: l.turno_origem, trabalhoId: l.trabalho_id, fimDoTurno: l.fim_do_turno === true, ...(l.turno_bastidores === true && !l.trabalho_id ? { bastidores: true } : {}), ...(l.turno_criado_em ? { turnoDesde: new Date(l.turno_criado_em).getTime() } : {}), ...recusas, ...(l.motivo_recomeco ? { motivoRecomeco: l.motivo_recomeco } : {}), ...(l.raiz_id && l.raiz_origem ? { raiz: { turnoId: l.raiz_id, origem: l.raiz_origem } } : {}), ...checkpoint };
+  return { ...paraMensagem(l), origemTurno: l.turno_origem, trabalhoId: l.trabalho_id, fimDoTurno: l.fim_do_turno === true, ...(l.turno_bastidores === true && !l.trabalho_id ? { bastidores: true } : {}), ...(l.turno_criado_em ? { turnoDesde: new Date(l.turno_criado_em).getTime() } : {}), ...recusas, ...(l.motivo_recomeco ? { motivoRecomeco: l.motivo_recomeco } : {}), ...(l.raiz_id && l.raiz_origem ? { raiz: { turnoId: l.raiz_id, origem: l.raiz_origem } } : {}), ...checkpoint, ...tarefaDaLinha(l) };
+}
+
+/** ADA-28 (ADR-159): a marca `tarefa` da mensagem gravada num turno de tarefa (ou de frente dela). */
+function tarefaDaLinha(l: LinhaDaTarefa): Pick<Mensagem, "tarefa"> {
+  if (!l.tq_id || !l.tq_quadro_id) return {};
+  return { tarefa: { id: l.tq_id, quadroId: l.tq_quadro_id, codigo: codigoDaTarefa(l.tq_prefixo ?? null, { id: l.tq_id, numero: l.tq_numero ?? null, linearId: l.tq_linear_id ?? null }) } };
 }
 
 /**
@@ -190,6 +212,21 @@ function paraMensagemComTurno(l: LinhaComTurno): Mensagem {
  */
 const FILA_SEGURA_MS = 5 * 60_000;
 
+/**
+ * ADA-28 (ADR-159): a tarefa do turno. O turno raiz da cadeia (ou o próprio) está em `quadro_execucoes` (0139, não some
+ * com a passagem da tarefa, ao contrário de `quadro_tarefas.turno_id`); a frente aberta numa tarefa leva `trabalhos.tarefa_id`
+ * (0153, ADA-232). Fala da pessoa (sem turno) nunca é marcada: ela fica na conversa.
+ */
+function lateralDaTarefa(conn: Conn, tenantId: string) {
+  return conn`left join lateral (
+      select qt.id, qt.quadro_id, qt.numero, qt.linear_id, q.prefixo
+      from quadro_tarefas qt join quadros q on q.tenant_id = qt.tenant_id and q.id = qt.quadro_id
+      where qt.tenant_id = ${tenantId} and qt.id = coalesce(
+        (select qe.tarefa_id from quadro_execucoes qe where qe.tenant_id = ${tenantId} and qe.turno_id = coalesce(rz.raiz_id, t.id) order by qe.criado_em desc limit 1),
+        w.tarefa_id)
+    ) tq on t.id is not null`;
+}
+
 function selectComTurno(conn: Conn, tenantId: string, recorte: ReturnType<Conn>) {
   return conn<LinhaComTurno[]>`
     select m.*, t.origem as turno_origem, t.bastidores as turno_bastidores, case when t.despachado_em - greatest(t.criado_em, coalesce(t.acordar_em, t.criado_em)) >= make_interval(secs => ${FILA_SEGURA_MS / 1000}) then t.despachado_em else greatest(t.criado_em, coalesce(t.acordar_em, t.criado_em)) end as turno_criado_em, t.midia_recusas, t.motivo_recomeco, coalesce(t.trabalho_id, o.trabalho_id) as trabalho_id, rz.raiz_id, rz.raiz_origem,
@@ -201,6 +238,7 @@ function selectComTurno(conn: Conn, tenantId: string, recorte: ReturnType<Conn>)
       -- NOD-114: o aviso (avisar_pessoa) não é a fala final do turno, como em leituras.repo.ts.
       (t.estado in ('concluido', 'interrompido') and m.kind = 'texto' and m.autor_tipo = 'agente' and coalesce(m.payload->>'kind', '') <> 'aviso_pessoa'
         and m.criado_em = max(case when m.kind = 'texto' and m.autor_tipo = 'agente' and coalesce(m.payload->>'kind', '') <> 'aviso_pessoa' then m.criado_em end) over (partition by m.turno_id)) as fim_do_turno
+      ${tarefaCasaLigada() ? conn`, tq.id as tq_id, tq.quadro_id as tq_quadro_id, tq.numero as tq_numero, tq.linear_id as tq_linear_id, tq.prefixo as tq_prefixo` : conn``}
     from (${recorte}) m
     left join turnos t on t.tenant_id = m.tenant_id and t.id = m.turno_id
     left join trabalhos w on w.tenant_id = m.tenant_id and w.id = t.trabalho_id
@@ -218,6 +256,7 @@ function selectComTurno(conn: Conn, tenantId: string, recorte: ReturnType<Conn>)
         where c.origem = 'retomada' and c.n < 10
       ) select c.id as raiz_id, c.origem as raiz_origem from c where c.n > 0 order by c.n desc limit 1
     ) rz on true
+    ${tarefaCasaLigada() ? lateralDaTarefa(conn, tenantId) : conn``}
     order by m.criado_em, m.id`;
 }
 
@@ -328,7 +367,7 @@ export function mensagensRepo(conn: Conn, escopo: Escopo) {
         values (${escopo.tenantId}, ${m.id ?? conn`gen_random_uuid()`}, ${escopo.pessoaId}, ${m.conversaId}, ${m.turnoId ?? null}, ${a.autor_tipo}, ${a.autor_id},
           ${a.sob_procuracao_de}, ${a.conta_de_execucao}, ${a.executor}, ${a.locality}, ${a.locality_reason}, ${a.machine_id}, ${a.decidido_por},
           ${a.regra_versao}, ${m.kind}, ${m.texto}, ${m.payload === undefined || m.payload === null ? null : conn.json(m.payload)}, ${m.confianca}, ${m.parcial ?? false}, ${m.idEnvio ?? null},
-          ${assuntoDaNova(m)})
+          ${assuntoGravado(conn, escopo.tenantId, m)})
         ${m.idEnvio ? conn`on conflict (tenant_id, conversa_id, id_envio) where id_envio is not null do nothing` : conn``}
         returning ${conn.unsafe(COLUNAS_MENSAGEM)}`;
       return l ? paraMensagem(l) : null;

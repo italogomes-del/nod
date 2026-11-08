@@ -83,6 +83,16 @@ export const ASSUNTOS = [
   "leitura.recibo",
   // NOD-437: o recibo do gerir_times (o que mudou nos times e quem pediu por qual bot).
   "times.organizados",
+  // ADA-28 (ADR-159): a linha do chat que aponta para a tarefa ("ADA-28 precisa de você · abrir", "Xumbrega terminou ADA-28").
+  "tarefa.precisa",
+  "tarefa.resultado",
+  // ADA-28 (ADR-159): a variante de bastidor (turno de tarefa, rotina, colega ou procuração) do que fica no chat quando o
+  // turno é da conversa. A troca acontece na gravação (`seBastidor`), então linha antiga não muda de lugar (S6).
+  "bastidor.turno_falhou",
+  "bastidor.turno_orfao",
+  "bastidor.lote_retorno_caiu",
+  "bastidor.negacao_terminal",
+  "bastidor.aprovacao_recibo",
   // ADA-241: o recibo do gerir_acessos (quem ficou com qual nível no app e quem pediu por qual bot).
   "acessos.mudados",
   // O resto do que o sistema escreve (Atividade).
@@ -123,4 +133,23 @@ export type RegraDeDestino = {
    * `chat`, a web os esconde quando deixam de valer, e a Atividade os lista sempre.
    */
   temporal?: true;
+  /**
+   * ADA-28 (ADR-159): o assunto que a linha grava quando o turno é de bastidor (`turnos.bastidores`, ADR-130) e a flag
+   * `NOD_TAREFA_CASA` está ligada. A falha do turno da pessoa continua no chat; a do turno de tarefa ou rotina vai para a
+   * Atividade. Decide-se na gravação, não na leitura, porque as listas por destino (ASSUNTOS_ANEXO/ATIVIDADE) são fixas.
+   */
+  seBastidor?: Assunto;
 };
+
+/**
+ * ADA-28 (ADR-159): a linha do chat que aponta para a tarefa — `precisa` ("ADA-28 precisa de você · abrir") ou `resultado`
+ * ("Xumbrega terminou ADA-28 · abrir"). Só ids e o código: o título e o estado vêm da tarefa ao abrir; tarefa removida
+ * vira "ADA-28 (removida)" (U7).
+ */
+export type PayloadTarefaLinha = { kind: "tarefa_linha"; motivo: "precisa" | "resultado"; tarefaId: string; quadroId: string; codigo: string; agenteId: string };
+
+/**
+ * ADA-28 (ADR-159): a mensagem foi gravada num turno de tarefa (a cadeia chega a `quadro_execucoes`, ou a frente leva o
+ * `tarefa_id`). A web a tira da timeline do chat; o que a pessoa vê é a linha `tarefa.*`. Só com NOD_TAREFA_CASA=1.
+ */
+export type TarefaDaMensagem = { id: string; codigo: string; quadroId: string };

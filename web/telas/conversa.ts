@@ -243,6 +243,8 @@ function corpoMensagem(m: Mensagem, estado: Estado): string {
     const meta = `v${p.versao} · ${p.jornadas} jornada${p.jornadas === 1 ? "" : "s"} · ${p.telas} tela${p.telas === 1 ? "" : "s"}${p.importado ? " · importado" : ""}`;
     return `<div class="cv-card" data-canvas="${esc(p.canvasId)}"><span class="cv-card-ic" aria-hidden="true"></span><span class="cv-card-txt"><b>${esc(p.titulo)}</b><span>${esc(meta)}${p.confiavel === false ? ' · <span class="cv-fora">não confiável</span>' : ""}</span></span>${botao("abrir-canvas", "Abrir", { classe: "cv-bt sm", id: p.canvasId, dados: { agente: p.agenteId } })}</div>`;
   }
+  // ADA-28 (ADR-159, U1/U7): a linha cinza que aponta para a tarefa; o código abre a tarefa no quadro.
+  if (p?.kind === "tarefa_linha") return linhaDaTarefa(m, p);
   if (m.kind === "sistema") return cartaoRitmoRotina(m) ?? linhaDeIa(m, estado) ?? linhaDaMemoria(m, estado) ?? linhaDoTurnoPreso(m, estado) ?? `<div class="msg-sistema">${paragrafos(m.texto)}</div>`;
   if (p?.kind === "handoff") {
     // definido em 2026-09-24 (ADR-047): a tarefa delegada assina "Taga · por você" — autoria composta (ADR-023).
@@ -273,6 +275,20 @@ function corpoMensagem(m: Mensagem, estado: Estado): string {
   if (p?.kind === "peer_ask") return `<div class="msg-peer"><div class="handoff-titulo">↙ <b>${p.falhou ? "Não concluído por" : "Resposta de"} ${esc(p.nome)}</b></div><div>${textoFormatado(m.texto, { chave: m.id })}</div><small class="mudo">Contribuição de outro bot · confira as fontes</small></div>`;
   const naoConfiavel = m.confianca === "nao_confiavel" ? ' <span class="tag tag-ambar" title="conteúdo de conector ou de outro bot">não confiável</span>' : "";
   return `<div class="msg-texto">${paragrafos(m.texto)}${naoConfiavel}${m.parcial ? ' <span class="tag tag-cinza">parcial</span>' : ""}</div>`;
+}
+
+/**
+ * ADA-28 (ADR-159): "ADA-28 precisa de você · abrir" / "Xumbrega terminou ADA-28 · abrir". O texto gravado é a frase
+ * inteira (o servidor a escreve com o nome do bot e da etapa); o código vira botão que abre a tarefa no quadro do bot
+ * dono (o mesmo `abrir-tarefa-quadro` do código na resposta, NOD-430). Tarefa removida: o clique cai no erro de sempre.
+ */
+export function linhaDaTarefa(m: Pick<Mensagem, "texto" | "criadoEm">, p: Extract<NonNullable<Mensagem["payload"]>, { kind: "tarefa_linha" }>): string {
+  const texto = m.texto.trim() || (p.motivo === "precisa" ? `${p.codigo} precisa de você` : `${p.codigo} andou`);
+  const i = texto.indexOf(p.codigo);
+  const antes = i >= 0 ? texto.slice(0, i) : "";
+  const depois = i >= 0 ? texto.slice(i + p.codigo.length) : ` ${texto}`;
+  const codigo = `<button type="button" class="linha-link md-tarefa-link" data-act="abrir-tarefa-quadro" data-agente="${esc(p.agenteId)}" data-tarefa="${esc(p.tarefaId)}" aria-label="Abrir tarefa ${esc(p.codigo)} no quadro">${esc(p.codigo)}</button>`;
+  return `<div class="linha-centro-wrap"><span class="linha-centro estatica linha-tarefa linha-tarefa-${p.motivo}" data-tarefa="${esc(p.tarefaId)}">${esc(antes)}${codigo}${esc(depois)}<span class="linha-hora">· ${esc(hora(m.criadoEm))}</span></span></div>`;
 }
 
 /**

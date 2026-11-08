@@ -10,6 +10,7 @@
  *   onde ela está (sem salto).
  * - O modo é por conversa e só em memória: trocar de conversa (ou sair dela) volta para Conversa, sem animação.
  */
+import { previaDoComentario, textoDaPrevia } from "./previa-comentario.ts";
 import { direcaoDaTroca, ehModo, ADIAR_ATE_MS, ARRASTO_ATE_MS, ECO_DA_PESSOA_MS, GESTO_MS, RESERVA_MS, movimentoDaTroca, TURNO_MUDA_A_EXECUCAO, type ModoDaConversa } from "./quadro.ts";
 import { comColunas, FAIXA_DO_PRAZO, fraseDoErroDeColuna, nomeRepetido, passoDeMover, pedeConfirmacao, porqueNaoRecebeCard, porqueNaoRemove, prazoEmMin, prazoLegivelMin, reciboDaResposta, reciboDeMover, saidaComErroDesiste, seletorDoFocoDaColuna, soltarEm, type EdicaoDeColuna, type Lado, type UnidadeDePrazo } from "./colunas.ts";
 import { ErroApi, ehRecusaDoServidor } from "./erro-api.ts";
@@ -3247,6 +3248,19 @@ export function criarQuadroNaTela(doc: Document, o: { busca?: BuscaDaPilula; men
   doc.addEventListener("focusout", (ev) => { if (dd && ehCampoDaTarefa(ev.target) && ev.target.dataset["teclado"]) aplicarCampoDaTarefa(ev.target); });
   // ADA-6: digitar na pílula esconde as sugestões e mostra o contador perto do limite.
   doc.addEventListener("input", (ev) => { if (dd && ev.target instanceof HTMLTextAreaElement && ev.target.id === "qc-txt") desenharIdeias(); });
+  // ADA-28 (escopo D): a linha embaixo do campo diz se o comentário aciona alguém (local, sem rede).
+  const desenharPrevia = (campo: HTMLTextAreaElement): void => {
+    const form = campo.form;
+    const tid = form?.dataset["id"];
+    const linha = tid ? form?.parentElement?.querySelector<HTMLElement>(`[data-previa="${CSS.escape(tid)}"]`) : null;
+    const t = q && tid ? q.tarefas.find((x) => x.id === tid) : null;
+    if (!linha || !t || !q) return;
+    const agentes = dd?.agentes?.() ?? [];
+    const p = previaDoComentario({ tarefa: t, colunas: q.colunas, texto: campo.value, agentes });
+    linha.textContent = textoDaPrevia(p, q.colunas.find((c) => c.id === t.status)?.nome ?? null);
+  };
+  doc.addEventListener("input", (ev) => { if (dd && ev.target instanceof HTMLTextAreaElement && ev.target.classList.contains("qd-com-in")) desenharPrevia(ev.target); });
+  doc.addEventListener("focusin", (ev) => { if (dd && ev.target instanceof HTMLTextAreaElement && ev.target.classList.contains("qd-com-in")) desenharPrevia(ev.target); });
   doc.addEventListener("keydown", (ev) => {
     if (!dd) return;
     const el = ev.target as Element | null;

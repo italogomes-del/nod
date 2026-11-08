@@ -21,7 +21,7 @@ export const DESTINO: Readonly<Record<Assunto, RegraDeDestino>> = {
   "acesso.concedido": { destino: "chat", categoria: null },
   "acesso.revogado": { destino: "chat", categoria: null },
   "acesso.pasta": { destino: "chat", categoria: null },
-  "aprovacao.recibo": { destino: "chat", categoria: null },
+  "aprovacao.recibo": { destino: "chat", categoria: null, seBastidor: "bastidor.aprovacao_recibo" },
   "aprovacao.automatica_falhou": { destino: "chat", categoria: null },
   // PR 6 dos modos de aprovação: a mudança de regra que a pessoa precisa ver no chat, uma vez, nos bots já no total.
   "aprovacao.total_credenciais": { destino: "chat", categoria: null },
@@ -59,20 +59,20 @@ export const DESTINO: Readonly<Record<Assunto, RegraDeDestino>> = {
   "rotina.execucao": { destino: "anexo", categoria: null },
   "agente.criado": { destino: "chat", categoria: null },
   "bot.criado": { destino: "atividade", categoria: null },
-  "turno.orfao": { destino: "chat", categoria: null },
-  "turno.falhou": { destino: "chat", categoria: null },
+  "turno.orfao": { destino: "chat", categoria: null, seBastidor: "bastidor.turno_orfao" },
+  "turno.falhou": { destino: "chat", categoria: null, seBastidor: "bastidor.turno_falhou" },
   "turno.interrompido": { destino: "atividade", categoria: "bloqueios" },
   // A queda da máquina vem com o card "Retomar" e diz "você pode reabrir": pede ação (decidido pelo orquestrador em 18/10,
   // no lugar do Marlon, na QA do PR 1). Se o card for dispensado ou vencer, a linha continua dizendo o que houve.
   "turno.queda_da_maquina": { destino: "chat", categoria: null },
   "turno.retomado": { destino: "atividade", categoria: "bloqueios" },
-  "lote.retorno_caiu": { destino: "chat", categoria: null },
+  "lote.retorno_caiu": { destino: "chat", categoria: null, seBastidor: "bastidor.lote_retorno_caiu" },
   passe: { destino: "atividade", categoria: "bloqueios" },
   parada: { destino: "atividade", categoria: "bloqueios" },
   "negacao.ferramenta": { destino: "atividade", categoria: "bloqueios" },
   "negacao.conector": { destino: "atividade", categoria: "bloqueios" },
   // O turno parou (ADR-029): fica.
-  "negacao.terminal": { destino: "chat", categoria: null },
+  "negacao.terminal": { destino: "chat", categoria: null, seBastidor: "bastidor.negacao_terminal" },
   // Os quatro de destino temporal ficam no chat enquanto pedem ação e a Atividade os lista sempre, no filtro "Máquina e IA"
   // (plano, 1a; QA do PR 2: com categoria null eles só apareciam em "Tudo").
   "negacao.plano_ausente": { destino: "chat", categoria: "maquina_ia", temporal: true },
@@ -115,7 +115,30 @@ export const DESTINO: Readonly<Record<Assunto, RegraDeDestino>> = {
   // Marlon, na QA do PR 1; o plano mandava para a Atividade porque o cartão já diz "Sem resposta").
   "decisao.vencida": { destino: "chat", categoria: null },
   "sistema.generico": { destino: "atividade", categoria: null },
+  // ADA-28 (ADR-159): o chat só aponta para a tarefa — uma linha com link.
+  "tarefa.precisa": { destino: "chat", categoria: null },
+  "tarefa.resultado": { destino: "chat", categoria: null },
+  // ADA-28 (ADR-159, S7): o bastidor que falhou ou parou mora na Atividade; o que pede ação da pessoa chega pela tarefa.
+  "bastidor.turno_falhou": { destino: "atividade", categoria: "bloqueios" },
+  "bastidor.turno_orfao": { destino: "atividade", categoria: "bloqueios" },
+  "bastidor.lote_retorno_caiu": { destino: "atividade", categoria: "bloqueios" },
+  "bastidor.negacao_terminal": { destino: "atividade", categoria: "bloqueios" },
+  "bastidor.aprovacao_recibo": { destino: "atividade", categoria: "sem_aprovacao" },
 };
+
+/**
+ * ADA-28 (ADR-159): o assunto gravado quando o turno é de bastidor. Puro: quem grava sabe se o turno é de bastidor e se a
+ * flag está ligada. Sem variante (ou fala, `null`), o mesmo assunto.
+ */
+export function assuntoNoBastidor(assunto: Assunto | null): Assunto | null {
+  return assunto !== null ? (DESTINO[assunto].seBastidor ?? assunto) : null;
+}
+
+/** Os pares (assunto do chat → variante de bastidor), para o SQL da gravação trocar quando o turno é de bastidor. */
+export const TROCAS_DE_BASTIDOR: readonly (readonly [Assunto, Assunto])[] = ASSUNTOS.flatMap((a) => {
+  const v = DESTINO[a].seBastidor;
+  return v ? [[a, v] as const] : [];
+});
 
 /** `null` é fala ou linha sem backfill: fica no chat. Valor fora da tabela (gravado por um código mais novo) também. */
 export function destinoDe(assunto: string | null): Destino {
@@ -229,6 +252,8 @@ export function assuntoDe(kind: KindMensagem, payload: PayloadMensagem | null, a
         return "leitura.lista";
       case "recibo_leitura":
         return "leitura.recibo";
+      case "tarefa_linha":
+        return payload.motivo === "precisa" ? "tarefa.precisa" : "tarefa.resultado";
       case "boas_vindas":
       case "acoes_do_turno": // NOD-353: a fala final com o resumo das ações continua fala.
       case "pedido_a_pessoa":

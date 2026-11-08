@@ -161,7 +161,7 @@ export type PayloadMensagem =
   | PayloadPedidoRespondido
   /** Chat limpo, PR 4 (o cartão encolhido): cartao-encolhido.ts. */
   | PayloadRegraPermanente | import("./ferramentas-barra.ts").PayloadAjusteBarra | import("./ferramentas-nao-lidos.ts").PayloadNaoLidosLista | import("./ferramentas-nao-lidos.ts").PayloadReciboLeitura // NOD-119: o card do ajustar_barra_lateral; NOD-449: o card e o recibo do nao_lidos.
-  | PayloadPropostaDecidida | { kind: "aviso_pessoa" } // NOD-114: a fala `texto` com que o bot avisou a pessoa por conta própria (avisar_pessoa).
+  | PayloadPropostaDecidida | { kind: "aviso_pessoa" } | import("./destino-no-chat.ts").PayloadTarefaLinha // NOD-114: a fala `texto` com que o bot avisou a pessoa por conta própria (avisar_pessoa); ADA-28: a linha que aponta para a tarefa.
   | { kind: "turno_preso"; maquinaId: string; /** QA do NOD-314: a IA em que o turno está fixado (harnessFixado); null/ausente = Automático. */ ia?: string | null }; // NOD-314: pendente preso 24 h a uma máquina sem contato saiu da fila.
 
 export type Mensagem = {
@@ -194,6 +194,6 @@ export type Mensagem = {
   trabalhoId?: string | null; fimDoTurno?: boolean;
   bastidores?: boolean; turnoDesde?: number; // NOD-402 (ADR-130): gravada por turno dos bastidores da conversa; `turnos.criado_em` (relógio do banco, o das mensagens). Ausentes = não, ou servidor antigo.
   motivoRecomeco?: MotivoRecomeco; // NOD-312: o turno da fala recomeçou sem a sessão. Ausente = normal ou servidor antigo.
-  destino?: Destino; // ADR-114 (2026-10-18): o destino da tabela DESTINO, resolvido no servidor; só na conversa própria. Ausente = sala ou servidor antigo.
+  destino?: Destino; tarefa?: import("./destino-no-chat.ts").TarefaDaMensagem; // ADR-114: o destino da tabela DESTINO, resolvido no servidor (só na conversa própria); ADA-28: a tarefa do turno.
   checkpoint?: import("./checkpoint.ts").CheckpointDaFala; // NOD-54 (ADR-134): na fala final do turno que mudou arquivos, o "Desfazer N arquivos" do ⋯. Ausente = sem checkpoint ou vencido.
 };

@@ -1,5 +1,5 @@
 import type { MovimentoTarefa, NovoMovimento } from "../contracts/freios-quadro.ts";
-import type { AutorLote, ColunaQuadro, ExecucaoTarefa, GrupoColuna, IdColuna, ItemLinear, ModoConversa, OpQuadro, PelaFala, TarefaQuadro } from "../contracts/quadro.ts";
+import type { AutorLote, ColunaQuadro, ExecucaoTarefa, GrupoColuna, IdColuna, ItemLinear, ModoConversa, OpQuadro, PelaFala, QuemFecha, TarefaQuadro } from "../contracts/quadro.ts";
 import { LIMITES_QUADRO, MODOS_ESCOLHIVEIS } from "../contracts/quadro.ts";
 import { RECADO_MAX } from "../contracts/quadro-execucoes.ts";
 import {
@@ -153,9 +153,12 @@ export function lerOp(v: unknown): OpQuadro | ErroOp {
       const prazo = nulavel(v.prazo, "prazo", 10);
       if (falhou(prazo)) return prazo;
       if (prazo && !prazoValido(prazo)) return { erro: "prazo fora do formato AAAA-MM-DD" };
+      // ADA-28 (ADR-159, escopo E): quem dá o Done.
+      if (v.quem_fecha !== undefined && v.quem_fecha !== "bot" && v.quem_fecha !== "pessoa") return { erro: "quem_fecha é bot ou pessoa" };
+      const quemFecha = v.quem_fecha as "bot" | "pessoa" | undefined;
       const extra = lerNomeEProjeto(v);
       if (falhou(extra)) return extra;
-      return { tipo: "editar_quadro", ...(meta !== undefined ? { meta: meta || null } : {}), ...(prazo !== undefined ? { prazo } : {}), ...extra };
+      return { tipo: "editar_quadro", ...(meta !== undefined ? { meta: meta || null } : {}), ...(prazo !== undefined ? { prazo } : {}), ...(quemFecha ? { quem_fecha: quemFecha } : {}), ...extra };
     }
     case "criar_tarefa": {
       const titulo = textoObrigatorio(v.titulo, "titulo", LIMITES_QUADRO.titulo);
@@ -681,7 +684,7 @@ export type TarefaPlanejada = TarefaQuadro & { nova: boolean };
 
 export type PlanoLote = {
   /** O quadro como fica: `novo` = nasce no lote. `colunas` null = as padrão. */
-  quadro: { novo: boolean; meta: string | null; prazo: string | null; colunas: ColunaQuadro[] | null };
+  quadro: { novo: boolean; meta: string | null; prazo: string | null; colunas: ColunaQuadro[] | null; quemFecha?: QuemFecha };
   /** O lote mexeu nas colunas (grava e vira lote mesmo sem tarefa tocada). */
   mudouColunas: boolean;
   /** A frase de cada passo de coluna ("Embalagem criada depois de Finalização"), para o resumo do lote. */
@@ -716,6 +719,8 @@ export type PlanoLote = {
   passagens: ReadonlySet<string>;
   /** NOD-455 (revisão 7, A1): as tarefas cujo responsável algum passo trocou de propósito (agente explícito, até null). */
   trocasDeResponsavel: ReadonlySet<string>;
+  /** ADA-28 (escopo E): as que o bot terminou na última etapa de um quadro em que a pessoa dá o Done (ficam; ela é chamada). */
+  pedemDone: string[];
   /** ADA-15 (ADR-154): as tarefas que um passo `pela_fala` mexeu, com a fala da pessoa que o autorizou. */
   pelaFala: ReadonlyMap<string, Fala>;
 };
@@ -812,7 +817,7 @@ export const recusaDoLimite = (o_que: string) => `sozinho (tarefa, rotina, coleg
  * quadro (null = ainda não existe), as tarefas dele, os bots da pessoa e quem é o autor (null = a pessoa, na tela).
  */
 export function planejarLote(p: {
-  quadro: { meta: string | null; prazo: string | null; colunas?: readonly ColunaQuadro[] | null; prefixo?: string | null } | null;
+  quadro: { meta: string | null; prazo: string | null; colunas?: readonly ColunaQuadro[] | null; prefixo?: string | null; quemFecha?: QuemFecha } | null;
   quadroId: string;
   tarefas: readonly TarefaQuadro[];
   agentes: readonly AgenteDoQuadro[];
@@ -866,7 +871,12 @@ export function planejarLote(p: {
   const tiposDoHistorico = new Map<string, DadoDoMovimento>();
   const movimentosDesfeitos: string[] = [];
   const recusas: { id: string; agenteId: string; motivo: string }[] = [];
-  let quadro = p.quadro ? { novo: false, meta: p.quadro.meta, prazo: p.quadro.prazo } : null;
+  let quadro: { novo: boolean; meta: string | null; prazo: string | null; quemFecha?: QuemFecha } | null = p.quadro ? { novo: false, meta: p.quadro.meta, prazo: p.quadro.prazo, ...(p.quadro.quemFecha ? { quemFecha: p.quadro.quemFecha } : {}) } : null;
+  // ADA-28 (ADR-159, escopo E): com quem_fecha pessoa, o bot sozinho não leva a tarefa a Feito; o terminei da última etapa
+  // vira o pedido de Done (a decisão que o caso de uso cria). A pessoa (e o bot a pedido dela, limite total) fecha.
+  const pedemDone: string[] = [];
+  const pessoaFecha = () => quadro?.quemFecha === "pessoa" && sozinho;
+  const ERRO_QUEM_FECHA = "neste quadro quem dá o Done é a pessoa: use terminei (ela recebe o pedido de Done) em vez de mover para Feito";
   // NOD-448: as colunas andam no plano como as tarefas; cada passo de coluna confere o conjunto inteiro.
   let colunas = colunasDe({ colunas: p.quadro?.colunas ?? null });
   // O grupo de onde a tarefa SAIU é lido nas colunas de antes do lote: a coluna removida no mesmo lote ainda conta.
@@ -1101,6 +1111,7 @@ export function planejarLote(p: {
     if (seToma(t.nova ? null : t.id, agenteId)) return ERRO_SE_TOMA;
     const status = colunaDe(op.status);
     if (falhou(status)) return status.erro;
+    if (status !== undefined && status !== t.status && pessoaFecha() && grupoDe(colunas, status) === "feito") return ERRO_QUEM_FECHA;
     // A proveniência anda com o conteúdo (codex, rodada 3): escrito por turno não confiável, a tarefa fica de fora.
     // Revisão 3 do PR #628 (pós-merge), achado 2: o PR também (entra no turno da resposta, entradaDaResposta), e o pedido de
     // quem participa chega aqui como origemConfiavel false.
@@ -1173,6 +1184,11 @@ export function planejarLote(p: {
       case "editar_quadro":
         if (op.meta !== undefined) quadro.meta = op.meta;
         if (op.prazo !== undefined) quadro.prazo = op.prazo;
+        if (op.quem_fecha !== undefined) {
+          // O lote chega também sem passar pelo parse (a rota e os testes): o planejador recusa o valor fora do contrato.
+          if (op.quem_fecha !== "bot" && op.quem_fecha !== "pessoa") return erro("quem_fecha é bot ou pessoa");
+          quadro.quemFecha = op.quem_fecha;
+        }
         break;
       case "criar_tarefa": {
         const agenteId = agenteDe(op.agente);
@@ -1270,6 +1286,11 @@ export function planejarLote(p: {
         if (terminou(colunas, t.status)) return erro("a tarefa já terminou");
         const proxima = proximaColuna(colunas, t.status);
         if (!proxima) return erro("a tarefa está na última coluna: não há próxima etapa");
+        if (pessoaFecha() && grupoDe(colunas, proxima) === "feito") {
+          // A tarefa fica onde está; a pessoa recebe "CÓDIGO está pronta para o Done" (uma vez por tarefa no lote).
+          if (!pedemDone.includes(t.id)) pedemDone.push(t.id);
+          break;
+        }
         const r = mudar({ tipo: "mudar_tarefa", tarefa: t.id, status: proxima }, true);
         if (r) return erro(r);
         terminadas.add(t.id);
@@ -1498,7 +1519,7 @@ export function planejarLote(p: {
   // terminada_em (NOD-415, revisão 3): pelo grupo da coluna em que a tarefa ficou, com as colunas finais do lote.
   for (const t of tarefas) if (tocadas.includes(t.id)) { t.mudadoEm = p.agora; t.terminadaEm = terminadaDepois(t, p.agora, colunas); }
   const colunasFinais = mudouColunas ? (saoPadrao(colunas) ? null : colunas) : (p.quadro?.colunas ? colunas : null);
-  return { quadro: { ...quadro, colunas: colunasFinais }, mudouColunas, frasesDasColunas, ajustada, tarefas, tocadas, apagadas, respondidas: respondidasVivas, comecam, seguradas, movimentos, movimentosDesfeitos, freadas: [...freadas].map(([id, f]) => ({ id, ...f })), recusas, pedidos, porRegra, criadas, passagens, trocasDeResponsavel, pelaFala };
+  return { quadro: { ...quadro, colunas: colunasFinais }, mudouColunas, frasesDasColunas, ajustada, tarefas, tocadas, apagadas, respondidas: respondidasVivas, comecam, seguradas, movimentos, movimentosDesfeitos, freadas: [...freadas].map(([id, f]) => ({ id, ...f })), recusas, pedidos, porRegra, criadas, passagens, trocasDeResponsavel, pelaFala, pedemDone };
 }
 
 /** A tarefa anda (o turno dela vale): no andamento, fora de "Precisa de você" e de Bloqueado. */

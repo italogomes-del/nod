@@ -5,7 +5,8 @@ import type { Mensagem } from "../../../src/contracts/mensagem.ts";
 import type { TrabalhoDto } from "../../../src/contracts/trabalho.ts";
 import { estadoInicial, reduzir, type ConversaEstado, type Estado } from "../../../web/estado/reducer.ts";
 import { blocosAoVivo, blocosDoHistorico, pararNoCampoDaTela, tituloDoParar } from "../../../web/telas/conversa.ts";
-import { horariosDaRotina, planejarLinhas } from "../../../web/telas/linhas-do-chat.ts";
+import { daTarefa, horariosDaRotina, planejarLinhas } from "../../../web/telas/linhas-do-chat.ts";
+import { linhaDaTarefa } from "../../../web/telas/conversa.ts";
 
 /**
  * Chat limpo (#191, filha 03; #195, filha 07): a semente do épico, linha a linha, e a regra "tudo que não é balão fica no
@@ -902,5 +903,53 @@ describe("o aviso do bot à pessoa fica à vista (NOD-114)", () => {
     const { e, c } = cenario([...pedidoDoChico(t0), aviso("av2", "tk", "delegacao", "tb-k")]);
     const balao = itens(c, e).find((b) => b.chave === "av2");
     expect(balao && ehBalao(balao.html)).toBe(true);
+  });
+});
+
+describe("ADA-28 (ADR-159): o turno de tarefa sai da timeline e fica a linha da tarefa", () => {
+  const tarefa = { id: "tq-28", codigo: "ADA-28", quadroId: "q-ada" };
+  const doTurnoDeTarefa = (id: string, em: number, extra: Partial<Mensagem> = {}): Mensagem => msg(id, em, { turnoId: "tt", origemTurno: "quadro" as never, tarefa, ...extra });
+  const linha = (id: string, em: number, motivo: "precisa" | "resultado", texto: string): Mensagem =>
+    msg(id, em, { kind: "sistema", texto, tarefa: undefined, payload: { kind: "tarefa_linha", motivo, tarefaId: "tq-28", quadroId: "q-ada", codigo: "ADA-28", agenteId: "ada" } });
+
+  it("as falas, a pergunta e a falha do turno de tarefa somem; a linha 'precisa de você' fica e abre a tarefa", () => {
+    const mensagens = [
+      daPessoa("p1", t0), doBot("b1", t0 + MIN, "t1"),
+      doTurnoDeTarefa("x1", t0 + 2 * MIN, { texto: "Lendo a ADA-28" }),
+      doTurnoDeTarefa("x2", t0 + 3 * MIN, { kind: "sistema", texto: "O turno falhou", fimDoTurno: true }),
+      linha("l1", t0 + 3 * MIN, "precisa", "ADA-28 precisa de você"),
+    ];
+    const { e, c } = cenario(mensagens);
+    const blocos = itens(c, e);
+    const tudo = blocos.map((b) => b.html).join("");
+    expect(tudo).not.toContain("Lendo a ADA-28");
+    expect(tudo).not.toContain("O turno falhou");
+    expect(blocos.map((b) => b.chave)).toEqual(["p1", "b1", "l1"]);
+    const l = blocos.at(-1)!.html;
+    expect(l).toContain('class="linha-centro-wrap"');
+    expect(l).toContain('data-act="abrir-tarefa-quadro" data-agente="ada" data-tarefa="tq-28"');
+    expect(l).toMatch(/>ADA-28<\/button> precisa de você/);
+  });
+
+  it("a fala da pessoa escrita no chat fica mesmo marcada com a tarefa; o balão com payload do turno de tarefa sai", () => {
+    const daPessoaNaTarefa = { ...daPessoa("p9", t0), tarefa } as Mensagem;
+    expect(daTarefa(daPessoaNaTarefa)).toBe(false);
+    expect(daTarefa(doTurnoDeTarefa("x", t0))).toBe(true);
+    expect(daTarefa(doBot("b", t0, "t"))).toBe(false);
+    const comPayload = { ...daPessoaNaTarefa, payload: { kind: "peer_pedido", conversaOrigemId: "c", turnoOrigemId: "t" } } as Mensagem;
+    expect(daTarefa(comPayload)).toBe(true);
+  });
+
+  it("sem a marca (flag desligada no servidor), nada muda: o turno do quadro aparece como antes", () => {
+    const { e, c } = cenario([daPessoa("p1", t0), doTurnoDeTarefa("x1", t0 + MIN, { tarefa: undefined, texto: "Lendo a ADA-28", fimDoTurno: true })]);
+    const tudo = itens(c, e).map((b) => b.html).join("");
+    expect(tudo).toContain("Lendo a ADA-28");
+  });
+
+  it("a linha 'terminou' põe o código no meio da frase e escapa o texto", () => {
+    const m = linha("l2", t0, "resultado", "Xumbrega terminou ADA-28 <b>");
+    const html = linhaDaTarefa(m, m.payload as never);
+    expect(html).toMatch(/Xumbrega terminou <button[^>]*>ADA-28<\/button> &lt;b&gt;/);
+    expect(html).toContain("linha-tarefa-resultado");
   });
 });

@@ -31,8 +31,8 @@ export const ACOES_QUADRO = [
   },
   {
     id: "quadro.editar",
-    titulo: "Mudar a meta, o prazo, o nome ou o projeto do quadro",
-    schema: objeto({ meta: P.meta, prazo: P.prazo, nome: P.nome, projeto: P.projeto }, []),
+    titulo: "Mudar a meta, o prazo, o nome, o projeto ou quem dá o Done no quadro",
+    schema: objeto({ meta: P.meta, prazo: P.prazo, nome: P.nome, projeto: P.projeto, quem_fecha: P.quem_fecha }, []),
     risco: "muda",
     cartaoNoChat: false,
     chat: vivo,

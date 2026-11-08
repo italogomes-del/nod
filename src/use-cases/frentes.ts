@@ -15,6 +15,21 @@ import { conversaDoBot, enfileirarNoTrabalho } from "./coordenar-trabalhos.ts";
 import type { Deps } from "./tipos.ts";
 import { criarTrabalho } from "./trabalhos.ts";
 import { repoDoGithub } from "../domain/clone-da-maquina.ts";
+import { codigoDaTarefa } from "../domain/codigo-tarefa.ts";
+import { tarefaCasaLigada } from "../shared/tarefa-casa.ts";
+
+/** ADA-28: a tarefa do turno que abre as frentes, com o código (null fora de tarefa). */
+async function tarefaDaFrente(deps: Deps, turnoId: string): Promise<{ id: string; codigo: string } | null> {
+  const id = await deps.repos.quadros.tarefaDoTurno(turnoId);
+  const t = id ? await deps.repos.quadros.tarefa(id) : null;
+  const q = t ? await deps.repos.quadros.buscar(t.quadroId) : null;
+  return t && q ? { id: t.id, codigo: codigoDaTarefa(q.prefixo, t) } : null;
+}
+
+/** A linha que diz à frente de quem ela é. Sem o título: ele pode ser texto de fora (ADR-047); o código basta. */
+export function linhaDaTarefaNaFrente(t: { codigo: string }): string {
+  return `Esta frente é da tarefa ${t.codigo} do quadro: use gerir_quadro terminei e mudar_tarefa pr_url nela (sem passar a tarefa, vale a sua).`;
+}
 
 /**
  * As frentes (definido em 2026-10-12, ADR-099, partes 3/4, issue I2): o dono abre um lote por pedido, com N frentes que
@@ -59,6 +74,9 @@ async function abrirLote(deps: Deps, ctx: ContextoFerramenta, frentes: readonly 
   }
   const agente = await deps.repos.agentes.buscar(turno.agenteId);
   const conversaId = await conversaDoBot(deps, turno);
+  // ADA-28 (ADR-159, escopo B): a frente aberta num turno de tarefa é da tarefa — o `terminei` e o `pr_url` dela valem
+  // para a tarefa (tarefaDoTurno sobe pela frente). A frente de rotina (com mãe) não muda.
+  const daTarefa = tarefaCasaLigada() && !deRotina ? await tarefaDaFrente(deps, turno.id) : null;
   // Plano chat limpo (PR 5, 2026-10-18): o `titulo_do_lote` passa pela regra do título (primeira linha, até 80, com letra);
   // vazio ou sem letra vira null, e a tela cai no título da frente ou em "N frentes".
   const titulo = p.tituloDoLote === undefined ? null : tituloOuNada(p.tituloDoLote);
@@ -89,7 +107,7 @@ async function abrirLote(deps: Deps, ctx: ContextoFerramenta, frentes: readonly 
       loteId: lote.id,
       // NOD-315 (ADR-119): o repo validado vai para o executor preparar o clone da máquina; inválido = como antes.
       repo: repoDoGithub(f.repo ?? ""),
-      tarefaId,
+      tarefaId: tarefaId ?? daTarefa?.id ?? null,
     });
     events.push(...criados);
     const novo = await deps.repos.turnos.enfileirar({
@@ -99,7 +117,7 @@ async function abrirLote(deps: Deps, ctx: ContextoFerramenta, frentes: readonly 
       trabalhoId: trabalho.id,
       prazoEm: agora + PRAZO_DECISAO_PADRAO_MS,
       profundidade: turno.profundidade,
-      entradaTexto: entradaDaFrente({ titulo: trabalho.titulo, pedido: f.pedido, deRotina: deRotina || de?.origem === "rotina", pedidoDe: de?.pedidoPorNome ?? null, repo: f.repo, branchBase: f.branch_base, podeEmpurrar: f.pode_empurrar }),
+      entradaTexto: [entradaDaFrente({ titulo: trabalho.titulo, pedido: f.pedido, deRotina: deRotina || de?.origem === "rotina", pedidoDe: de?.pedidoPorNome ?? null, repo: f.repo, branchBase: f.branch_base, podeEmpurrar: f.pode_empurrar }), ...(daTarefa ? [linhaDaTarefaNaFrente(daTarefa)] : [])].join("\n\n"),
       // NOD-285 (2026-10-15): o arquivo que a pessoa anexou ao pedido vai junto para cada frente, que é quem faz o trabalho.
       entradaAnexos: turno.entradaAnexos,
       entradaConfianca: turno.entradaConfianca,

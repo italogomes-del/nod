@@ -1,10 +1,11 @@
 import type { Executor, RuntimeEvent } from "../contracts/evento.ts";
 import type { OpQuadro, PrDaTarefa, PrLido, TipoLinhaTarefa } from "../contracts/quadro.ts";
-import { colunasDe } from "../domain/colunas.ts";
+import { colunasDe, grupoDe } from "../domain/colunas.ts";
 import { casaComTarefa, type DestinoDoMerge, desfechoDoMerge, fimDosPrs, fixarConflito, textoDaLinha, transicoes } from "../domain/prs-da-tarefa.ts";
 import { log } from "../obs/log.ts";
 import { autoriaPessoa, evento } from "./apoio-l7.ts";
 import { aplicarLoteQuadro, comMembros } from "./quadro.ts";
+import { pedirODone } from "./tarefa-casa.ts";
 import type { CasoDeUso } from "./tipos.ts";
 
 /**
@@ -101,6 +102,12 @@ export const sincronizarPrsDoQuadro: CasoDeUso<{ prs: readonly PrLido[]; aviso?:
       continue;
     }
 
+    // ADA-28 (escopo E): com quem_fecha pessoa, o merge não leva a Feito: pede o Done (a tarefa fica onde está).
+    if (travado.quemFecha === "pessoa") {
+      const pedem = [...destinos].filter(([, d]) => "mover" in d && grupoDe(colunas, d.mover) === "feito").map(([id]) => id);
+      for (const id of pedem) destinos.delete(id);
+      if (pedem.length > 0) events.push(...(await pedirODone(deps, { quadroId: q.id, tarefaIds: pedem })));
+    }
     // Primeiro o lote (se ele falhar, a linha não diz "→ Feito"), depois os PRs e as linhas.
     const ops: OpQuadro[] = [...destinos].flatMap(([tarefa, d]) => ("mover" in d ? [{ tipo: "mudar_tarefa" as const, tarefa, status: d.mover }] : []));
     let lote = false;

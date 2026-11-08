@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { ligarDecisaoATarefa } from "./tarefa-casa.ts";
 import type { Concessao } from "../contracts/concessao.ts";
 import type { Assunto } from "../contracts/destino-no-chat.ts";
 import type { RuntimeEvent } from "../contracts/evento.ts";
@@ -220,7 +221,9 @@ const montarFase1 = (computador: boolean, comRevisor = false) => async (deps: De
     // NOD-70: cada item que parou no cartão vira linha `cartao` com o motivo, na tx em que o cartão nasce. O item que
     // seria automático e parou porque o lote tem outro que precisa da pessoa (ADR-042) leva `lote_misto`.
     await registrarCartoes(deps, { agenteId: input.agenteId, turnoId: input.turnoId, itens: itens.map((i, idx) => ({ destino: i.destino, motivo: motivoDe(porItem[idx]) ?? MOTIVO_LOTE_MISTO })) });
-    return { saida: { data: { estado: "pendente", decisao_id: decisao.id, instrucao: "encerre o turno; a decisão retoma depois" }, events: [eventoCriada(deps, input, decisao.id, itens, agora)] } };
+    // ADA-28 (ADR-159): a aprovação que parou na pessoa durante uma tarefa é a espera dela (um único "Precisa de você").
+    const daTarefa = await ligarDecisaoATarefa(deps, decisao);
+    return { saida: { data: { estado: "pendente", decisao_id: decisao.id, instrucao: "encerre o turno; a decisão retoma depois" }, events: [eventoCriada(deps, input, decisao.id, itens, agora), ...daTarefa] } };
   }
 
   // Lote automático (NOD-263): a fase 1 cria os itens e FECHA a decisão por regra; o efeito sai daqui sem banco.

@@ -90,10 +90,10 @@ export type Quadro = {
   metaDesde: number;
   /** NOD-416 (ADR-144): o prefixo do código das tarefas (ex.: ZE), fixo depois de criado. Null só no quadro que o servidor de antes criou. */
   prefixo: string | null;
-  /** NOD-443: como as pessoas conversam com o quadro (padrão: cada um na sua conversa). */
-  modoConversa: ModoConversa;
+  modoConversa: ModoConversa; // NOD-443: como as pessoas conversam com o quadro (padrão: cada um na sua conversa).
+  quemFecha?: QuemFecha; // ADA-28 (ADR-159, E): quem dá o Done — o bot (o padrão; ausente = bot) ou a pessoa (o bot para antes e pede).
   /** ADA-14 (ADR-153): o nome (null = "Tarefas") e o projeto (null = solto). */ nome: string | null; projetoId: string | null;
-};
+}; export type QuemFecha = "bot" | "pessoa";
 
 /** Quem fez o lote: a pessoa (na tela) ou um bot (pela ferramenta). */
 export type AutorLote = { tipo: "pessoa" } | { tipo: "agente"; agenteId: string };
@@ -169,7 +169,7 @@ export type OpQuadro =
   /** NOD-418: o trabalho da tarefa (sozinhos, sem Desfazer). Repetir abre um novo; cancelar para o vivo; o recado entra nele. */
   | { tipo: "repetir_trabalho"; tarefa: string } | { tipo: "cancelar_trabalho"; tarefa: string } | { tipo: "recado"; tarefa: string; texto: string }
   | { tipo: "acordar_trabalho"; tarefa: string } /* ADA-232: "Acordar agora", a volta marcada dispara já */
-  | { tipo: "editar_quadro"; meta?: string | null; prazo?: string | null; nome?: string | null; /** null = tira do projeto. */ projeto?: string | null } | { tipo: "desfazer"; lote?: string }
+  | { tipo: "editar_quadro"; meta?: string | null; prazo?: string | null; nome?: string | null; /** null = tira do projeto. */ projeto?: string | null; /** ADA-28 (E). */ quem_fecha?: QuemFecha } | { tipo: "desfazer"; lote?: string }
   /** NOD-415 (ADR-141): o bot volta a ser um agente comum. Apaga o quadro, as tarefas e o histórico; conversa e memória ficam. */
   | { tipo: "remover_quadro"; bot?: string }
   /** NOD-416 (ADR-144): para o quadro de outro bot, com o código do destino (o antigo abre), no mesmo grupo, sem acionar. `quadro` = id, nome do anfitrião ou prefixo. */

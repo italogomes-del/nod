@@ -19,9 +19,11 @@ interface Linha {
   vista_em: Date | null;
   criado_em: Date;
   fio_id: string | null;
+  tarefa_id: string | null;
+  tarefa_pede_done: boolean;
 }
 
-const COLUNAS = "tenant_id, id, owner_id, decisor_id, agente_id, conversa_id, turno_id, tipo, estado, prazo_decisao_em, prazo_execucao_em, frase, desfecho, vista_em, criado_em, fio_id";
+const COLUNAS = "tenant_id, id, owner_id, decisor_id, agente_id, conversa_id, turno_id, tipo, estado, prazo_decisao_em, prazo_execucao_em, frase, desfecho, vista_em, criado_em, fio_id, tarefa_id, tarefa_pede_done";
 
 function paraDecisao(l: Linha): Decisao {
   return {
@@ -41,6 +43,8 @@ function paraDecisao(l: Linha): Decisao {
     vistaEm: isoOuNull(l.vista_em),
     criadoEm: iso(l.criado_em),
     fioId: l.fio_id,
+    ...(l.tarefa_id ? { tarefaId: l.tarefa_id } : {}),
+    ...(l.tarefa_pede_done ? { tarefaPedeDone: true as const } : {}),
   };
 }
 
@@ -59,6 +63,9 @@ export type NovaDecisao = {
   fioId?: string | null;
   /** ADR-115 (0093): a decisão nasce esperando o revisor, não a pessoa. Ausente = 'pendente' (o default da coluna). */
   estado?: "em_revisao";
+  /** ADA-28 (ADR-159): a tarefa de que a decisão é a espera; `tarefaPedeDone`, a "pronta para o Done" (escopo E). */
+  tarefaId?: string | null;
+  tarefaPedeDone?: boolean;
 };
 
 /** definido em 2026-09-16: vencidas ficam visíveis em cinza por 7 dias (ADR-007: nunca suprimidas de imediato). */
@@ -80,11 +87,28 @@ export function decisoesRepo(conn: Conn, escopo: Escopo) {
   return {
     async criar(d: NovaDecisao): Promise<Decisao | null> {
       const [l] = await conn<Linha[]>`
-        insert into decisoes (tenant_id, id, owner_id, decisor_id, agente_id, conversa_id, turno_id, tipo, prazo_decisao_em, prazo_execucao_em, frase, fio_id, estado)
+        insert into decisoes (tenant_id, id, owner_id, decisor_id, agente_id, conversa_id, turno_id, tipo, prazo_decisao_em, prazo_execucao_em, frase, fio_id, estado, tarefa_id, tarefa_pede_done)
         values (${escopo.tenantId}, ${d.id ?? conn`gen_random_uuid()`}, ${escopo.pessoaId}, ${d.decisorId ?? escopo.pessoaId}, ${d.agenteId}, ${d.conversaId},
-          ${d.turnoId ?? null}, ${d.tipo}, ${data(d.prazoDecisaoEm)}, ${dataOuNull(d.prazoExecucaoEm)}, ${d.frase}, ${d.fioId ?? null}, ${d.estado ?? "pendente"})
+          ${d.turnoId ?? null}, ${d.tipo}, ${data(d.prazoDecisaoEm)}, ${dataOuNull(d.prazoExecucaoEm)}, ${d.frase}, ${d.fioId ?? null}, ${d.estado ?? "pendente"}, ${d.tarefaId ?? null}, ${d.tarefaPedeDone ?? false})
         returning ${conn.unsafe(COLUNAS)}`;
       return l ? paraDecisao(l) : null;
+    },
+
+    /** ADA-28 (ADR-159): liga a decisão recém-criada à tarefa do turno (só a dona; a decisão ainda aberta). */
+    async ligarATarefa(id: string, tarefaId: string): Promise<Decisao | null> {
+      const [l] = await conn<Linha[]>`update decisoes set tarefa_id = ${tarefaId}
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and estado in ('pendente', 'reaberta')
+        returning ${conn.unsafe(COLUNAS)}`;
+      return l ? paraDecisao(l) : null;
+    },
+
+    /** ADA-28 (ADR-159): as decisões abertas que são a espera destas tarefas (índice parcial decisoes_da_tarefa). */
+    async abertasDasTarefas(tarefaIds: readonly string[]): Promise<Decisao[]> {
+      if (tarefaIds.length === 0) return [];
+      const ls = await conn<Linha[]>`select ${conn.unsafe(COLUNAS)} from decisoes
+        where tenant_id = ${escopo.tenantId} and tarefa_id in ${conn(tarefaIds as string[])} and estado in ('pendente', 'reaberta')
+        order by criado_em, id`;
+      return ls.map(paraDecisao);
     },
 
     async buscar(id: string): Promise<Decisao | null> {

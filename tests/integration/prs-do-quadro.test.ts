@@ -7,6 +7,8 @@ import { definirDestinoDoLog } from "../../src/obs/log.ts";
 import type { Escopo, Tx } from "../../src/shared/types.ts";
 import { sincronizarPrsDoQuadro } from "../../src/use-cases/prs-do-quadro.ts";
 import { aplicarLoteQuadro, montarQuadro, resumoParaBot, type PedidoLote } from "../../src/use-cases/quadro.ts";
+import { fecharComResposta, retomarComResposta } from "../../src/use-cases/responder-decisao.ts";
+import { DAR_DONE } from "../../src/use-cases/tarefa-casa.ts";
 
 // 2ª revisão do PR #621: o espião só registra com que executor o caso de uso chama o lote; a chamada segue para o de verdade.
 vi.mock("../../src/use-cases/quadro.ts", async (original) => {
@@ -67,6 +69,23 @@ describeIntegracao("PRs na tarefa (NOD-421)", () => {
       expect(outra.prs).toEqual([]);
       expect(resumoParaBot(dto).tarefas.find((x) => x.id === t.id)?.prs).toEqual(["gamefik/nod #612 · aberto · CI pendente"]);
       expect((await m.sync([pr()])).data).toEqual({ ligados: 0, linhas: 0, movidas: 0 });
+    });
+  });
+
+  // QA do PR #702 (ADA-28, escopo E): o merge pede o Done com a tarefa ainda em Fazendo; "Dar Done" ia para a próxima
+  // coluna (Revisando), não para Feito, e o pedido fechava sem a tarefa terminar.
+  it("ADA-28: com quem_fecha pessoa, o merge em Fazendo pede o Done e Dar Done leva a Feito (não a Revisando)", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      expect((await m.lote({ ops: [{ tipo: "editar_quadro", quem_fecha: "pessoa" }] })).data.ok).toBe(true);
+      await m.sync([pr()]);
+      expect((await m.sync([pr({ ci: "ok", estado: "mergeado" })])).data.movidas).toBe(0);
+      expect((await m.ver()).t.status).toBe("fazendo");
+      const [p, ...resto] = await trx<{ id: string }[]>`select id from decisoes where tarefa_id = ${m.tarefa.id} and tarefa_pede_done and estado = 'pendente'`;
+      expect(resto).toEqual([]);
+      const fechada = await fecharComResposta(m.deps, { decisaoId: p!.id, texto: DAR_DONE });
+      await retomarComResposta(m.deps, { decisao: fechada.data.decisao, texto: DAR_DONE, respondidaPor: { id: PESSOA_MARLON, nome: "Marlon" }, executor: "catcher" });
+      expect((await m.ver()).t.status).toBe("feito");
     });
   });
 

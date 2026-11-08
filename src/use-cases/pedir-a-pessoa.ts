@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { ligarDecisaoATarefa } from "./tarefa-casa.ts";
 import type { Decisao, TipoDecisao } from "../contracts/decisao.ts";
 import type { RuntimeEvent } from "../contracts/evento.ts";
 import type { PayloadMensagem } from "../contracts/mensagem.ts";
@@ -218,5 +219,7 @@ async function criarPedidoAPessoa(deps: Deps, input: Parameters<typeof pedirAPes
     // chato), e a web desenha o cartão na hora, sem esperar a releitura. Cliente de antes ignora o campo.
     dados: { decisao_id: decisao.id, tipo, decisor_id: decisor.id, prazo_decisao_em: decisao.prazoDecisaoEm, ...(decisao.fioId ? { fio_id: decisao.fioId } : {}), ...(mensagem ? { mensagem_json: JSON.stringify(mensagem) } : {}) },
   };
-  return { data: { estado: "pendente", decisao_id: decisao.id, instrucao: "encerre o turno; a resposta retoma depois" }, events: [evento] };
+  // ADA-28 (ADR-159): a pergunta feita durante uma tarefa é a espera dela (um único "Precisa de você").
+  const daTarefa = await ligarDecisaoATarefa(deps, decisao);
+  return { data: { estado: "pendente", decisao_id: decisao.id, instrucao: "encerre o turno; a resposta retoma depois" }, events: [evento, ...daTarefa] };
 }

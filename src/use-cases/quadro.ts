@@ -9,7 +9,7 @@ import { fraseDaTrava, MOTIVO_LACO_SEM_NOMES, mudouATarefa, nomeDaParada, parada
 import { branchSugerido, codigoDaTarefa, formatarCodigo, lerCodigo, prefixoDoNome } from "../domain/codigo-tarefa.ts";
 import { mudancasDaTarefa, statusNoDestino } from "../domain/historico-tarefa.ts";
 import { type AgenteDoQuadro, chaveDeBusca, entradaDaResposta, entradaDaTarefa, etapaDaTarefa, execucaoDoTurno, metaCumprida, planejarLote, progresso, recusaDoLimite, resolverTarefa, tarefasDaMeta, resumoDaMeta, resumoDoLote, terminadaDepois, terminou } from "../domain/quadro.ts";
-import { acionaNaColuna, colunaDeEspera, colunasDe, colunasDto, COLUNAS_PADRAO, papelDe, responsavelDe } from "../domain/colunas.ts";
+import { acionaNaColuna, colunaDeEspera, colunasDe, colunasDto, COLUNAS_PADRAO, grupoDe, papelDe, responsavelDe } from "../domain/colunas.ts";
 import { TAREFA_PASSOU_A_VOCE } from "../domain/comentarios-quadro.ts";
 import { ERROS_FALA, type Fala } from "../domain/fala-da-pessoa.ts";
 import { ERRO_IMPORTACAO_PARADA, identificadorDaUrl, importacaoParada } from "../domain/importar-linear.ts";
@@ -30,6 +30,7 @@ import { comentarTarefa } from "./comentar-tarefa.ts";
 import { avisarNoLote } from "./avisos-quadro.ts";
 import { esperaPessoa } from "../domain/avisos-quadro.ts";
 import { sincronizarDasDecisoes } from "./trabalhos.ts";
+import { fecharPedidosDeDone, pedirODone, responderPelaDecisao } from "./tarefa-casa.ts";
 import { situacaoDasTarefas } from "./situacao-trabalho.ts";
 import { estadoLinha, voltaNaTela } from "../domain/quadro-execucoes.ts";
 import { registrarAvisoDoQuadro, registrarHistoricoComTrilha, type TipoAvisoDoQuadro } from "./trilha-quadro.ts";
@@ -93,6 +94,11 @@ export type PedidoLote = {
    * outros cards abertos do mesmo quadro fecham (este o caso de uso fecha como confirmado). Só o caso de uso põe.
    */
   exclusaoConfirmada?: string;
+  /**
+   * ADA-28 (ADR-159): a resposta deste lote é o espelho de uma decisão ligada que já fechou e já retomou o bot (Sua vez,
+   * cartão): a tarefa sai de "Precisa de você", mas o turno da resposta não abre (senão o bot acordava duas vezes).
+   */
+  respostaJaRetomada?: boolean;
   /**
    * ADA-15 (ADR-154): as falas da pessoa no turno de quem chamou (a de origem e as absorvidas), para os passos
    * `pela_fala`. Só o gerir_quadro põe, e só num turno da conversa com a pessoa; ausente = nenhum `pela_fala` vale.
@@ -1069,7 +1075,7 @@ export async function preverLoteQuadro(deps: Deps, p: PedidoLote): Promise<{ ok:
   if (!achado) return { ok: false, erro: "sem_quadro", detalhe: "não há quadro: crie com criar_quadro (meta e prazo são opcionais)" };
   const tarefas = await deps.repos.quadros.tarefas(achado.id);
   const codigosAntigos = await codigosAntigosDaqui(deps, p.ops, achado, tarefas);
-  const plano = planejarLote({ quadro: { meta: achado.meta, prazo: achado.prazo, colunas: achado.colunas, prefixo: achado.prefixo }, quadroId: achado.id, tarefas, agentes: agentes.map(paraAgenteDoQuadro), autorAgenteId: p.autor.tipo === "agente" ? p.autor.agenteId : null, ops: p.ops, agora: deps.agora(), origemConfiavel: p.origemConfiavel !== false, autorNaConversa: p.autorNaConversa === true, codigosAntigos, historico: await historicoDoLote(deps, achado.id, p.ops, tarefas), acionamentosNaHora: await deps.repos.quadros.acionamentosNaHora(achado.id), limite: limiteDe(p) });
+  const plano = planejarLote({ quadro: { meta: achado.meta, prazo: achado.prazo, colunas: achado.colunas, prefixo: achado.prefixo, ...(achado.quemFecha ? { quemFecha: achado.quemFecha } : {}) }, quadroId: achado.id, tarefas, agentes: agentes.map(paraAgenteDoQuadro), autorAgenteId: p.autor.tipo === "agente" ? p.autor.agenteId : null, ops: p.ops, agora: deps.agora(), origemConfiavel: p.origemConfiavel !== false, autorNaConversa: p.autorNaConversa === true, codigosAntigos, historico: await historicoDoLote(deps, achado.id, p.ops, tarefas), acionamentosNaHora: await deps.repos.quadros.acionamentosNaHora(achado.id), limite: limiteDe(p) });
   if ("erro" in plano) return { ok: false, erro: "entrada_invalida", detalhe: plano.indice >= 0 ? `ação ${plano.indice + 1}: ${plano.erro}` : plano.erro };
   return { ok: true, quadro: achado, tarefas, colunas: colunasDe(plano.quadro) };
 }
@@ -1147,7 +1153,7 @@ async function aplicarNoQuadro(deps: Deps, p: PedidoLote, qSemPrefixo: Quadro, a
   const comFala = p.ops.some((o) => "pela_fala" in o && o.pela_fala === true);
   if (comFala && (p.autor.tipo !== "agente" || !p.autorNaConversa || p.pedidoPor || p.porProcuracao || !p.falas)) return falha("nao_permitido", ERROS_FALA.semFala);
   const falas = comFala ? { doTurno: p.falas ?? [], perguntaEm: await perguntasDoQuadro(deps, q.id, tarefasAntes), usadas: await falasUsadas(deps, tarefasAntes, p.falas ?? []) } : null;
-  const plano = planejarLote({ quadro: { meta: q.meta, prazo: q.prazo, colunas: q.colunas, prefixo: q.prefixo }, quadroId: q.id, tarefas: tarefasAntes, agentes: agentes.map(paraAgenteDoQuadro), autorAgenteId, ops: p.ops, agora, podeComecar, vivas, origemConfiavel, turnoConfiavel: p.origemConfiavel !== false, autorNaConversa: p.autorNaConversa === true, codigosAntigos, limite: limiteDe(p), tarefaDoTurno, historico, acionamentosNaHora, falas });
+  const plano = planejarLote({ quadro: { meta: q.meta, prazo: q.prazo, colunas: q.colunas, prefixo: q.prefixo, ...(q.quemFecha ? { quemFecha: q.quemFecha } : {}) }, quadroId: q.id, tarefas: tarefasAntes, agentes: agentes.map(paraAgenteDoQuadro), autorAgenteId, ops: p.ops, agora, podeComecar, vivas, origemConfiavel, turnoConfiavel: p.origemConfiavel !== false, autorNaConversa: p.autorNaConversa === true, codigosAntigos, limite: limiteDe(p), tarefaDoTurno, historico, acionamentosNaHora, falas });
   if ("erro" in plano) {
     // O quadro que nasceu neste lote não fica de pé sem o resto (tudo ou nada). Não acontece: criarComLote já planejou.
     if (nasceuAgora) await repo.apagar(q.id);
@@ -1288,6 +1294,14 @@ async function aplicarNoQuadro(deps: Deps, p: PedidoLote, qSemPrefixo: Quadro, a
     await abrir(id, (t) => entradaDaTarefa({ quadroId: q.id, meta, prazo, tarefa: t, pessoaNome, deQuem: deQuem && t.agenteId !== autorAgenteId ? deQuem : null, etapa: etapaDaTarefa(colunasFinais, t.status) }), "inicio");
   }
   for (const r of plano.respondidas) {
+    // ADA-28 (ADR-159): a resposta que espelha uma decisão já respondida não acorda o bot de novo; a resposta pelo card
+    // de uma tarefa cuja espera é uma decisão ligada continua pela retomada da decisão (um turno só, o do pedido).
+    if (p.respostaJaRetomada) continue;
+    const pelaDecisao = await responderPelaDecisao(deps, { tarefaId: r.id, resposta: r.resposta, pessoaNome, executor: p.executor });
+    if (pelaDecisao) {
+      events.push(...pelaDecisao);
+      continue;
+    }
     await abrir(r.id, (t) => entradaDaResposta({ quadroId: q.id, tarefa: t, resposta: r.resposta, pessoaNome }), "resposta");
   }
 
@@ -1329,16 +1343,19 @@ async function aplicarNoQuadro(deps: Deps, p: PedidoLote, qSemPrefixo: Quadro, a
   const nomes = new Map(agentes.map((a) => [a.id, a.nome]));
   const importadas = await deps.repos.quadroImportacoes.importadas(q.id);
   const { cumpridoEm, resumo } = fechoDaMeta({ meta, prazo, metaDesde, anterior: metaNova ? { cumpridoEm: null, resumo: null } : q }, finais, colunasFinais, nomes, agora, importadas);
-  const mudouQuadro = meta !== q.meta || prazo !== q.prazo || cumpridoEm !== q.cumpridoEm || resumo !== q.resumo;
+  // ADA-28 (escopo E): quem dá o Done também é do quadro (ausente = bot).
+  const quemFecha = plano.quadro.quemFecha ?? "bot";
+  const mudouQuemFecha = quemFecha !== (q.quemFecha ?? "bot");
+  const mudouQuadro = meta !== q.meta || prazo !== q.prazo || cumpridoEm !== q.cumpridoEm || resumo !== q.resumo || mudouQuemFecha;
   const mudouColunas = plano.mudouColunas;
-  if (mudouQuadro || mudouColunas || plano.tocadas.length > 0 || plano.apagadas.length > 0) await repo.salvar(q.id, { meta, prazo, cumpridoEm, resumo, metaDesde, ...(mudouColunas ? { colunas: plano.quadro.colunas } : {}) });
+  if (mudouQuadro || mudouColunas || plano.tocadas.length > 0 || plano.apagadas.length > 0) await repo.salvar(q.id, { meta, prazo, cumpridoEm, resumo, metaDesde, ...(mudouColunas ? { colunas: plano.quadro.colunas } : {}), ...(mudouQuemFecha ? { quemFecha } : {}) });
   // ADA-14 (QA): o nome e o projeto do editar_quadro, no mesmo lote; a foto guarda os de antes para o Desfazer.
   const mudouNome = !!renome && ((renome.nome !== undefined && renome.nome !== q.nome) || (renome.projetoId !== undefined && renome.projetoId !== q.projetoId));
   if (mudouNome) await repo.renomear(q.id, renome!);
 
   const tarefaIds = [...plano.tocadas.map((id) => idReal.get(id) ?? id), ...plano.apagadas];
   const foto: FotoLote = {
-    quadro: nasceuAgora ? null : { meta: q.meta, prazo: q.prazo, cumpridoEm: q.cumpridoEm, resumo: q.resumo, metaDesde: q.metaDesde, colunas: q.colunas, ...(mudouNome ? { nome: q.nome, projetoId: q.projetoId } : {}) },
+    quadro: nasceuAgora ? null : { meta: q.meta, prazo: q.prazo, cumpridoEm: q.cumpridoEm, resumo: q.resumo, metaDesde: q.metaDesde, colunas: q.colunas, quemFecha: q.quemFecha ?? "bot", ...(mudouNome ? { nome: q.nome, projetoId: q.projetoId } : {}) },
     tarefas: tarefaIds.map((id) => ({ id, antes: antesPorId.get(id) ?? null })),
   };
   const opsDoResumo: OpQuadro[] = nasceuAgora ? [{ tipo: "criar_quadro", meta: q.meta }, ...p.ops] : [...p.ops];
@@ -1367,6 +1384,14 @@ async function aplicarNoQuadro(deps: Deps, p: PedidoLote, qSemPrefixo: Quadro, a
   // outras no próximo lote ou na volta do varredor, não agora. A cobrança do prazo fica só no varredor e o aviso corre
   // isolado (revisão do PR #624): nenhum dos dois falha a edição.
   events.push(...(await avisarNoLote(deps, atualizado)));
+  // ADA-28 (escopo E): com quem_fecha pessoa, o terminei da última etapa pede o Done (não move); e a tarefa que chegou a
+  // Feito por outro caminho resolve a "pronta para o Done" que estava aberta.
+  if (plano.pedemDone.length > 0) {
+    const agenteDoTurno = p.autor.tipo === "agente" ? p.autor.agenteId : null;
+    events.push(...(await pedirODone(deps, { quadroId: q.id, tarefaIds: plano.pedemDone, agenteId: agenteDoTurno, conversaId: p.conversaId ?? null })));
+  }
+  const fechadasAgora = [...gravadas.values()].filter((t) => { const g = grupoDe(colunasFinais, t.status); return g === "feito" || g === "fechado"; }).map((t) => t.id);
+  if (fechadasAgora.length > 0) await fecharPedidosDeDone(deps, fechadasAgora);
   // No limite da corrente: o que ia começar e ficou em A fazer (o bot avisa; a pessoa começa pelo quadro).
   const seguradas = plano.seguradas.length;
   const criadas = plano.criadas.map((id) => idReal.get(id) ?? null);
@@ -1423,7 +1448,7 @@ function pendenciaDeOutraTarefa(plano: Extract<ReturnType<typeof planejarLote>, 
  */
 function foraDaTarefaDoTurno(q: Quadro, plano: Extract<ReturnType<typeof planejarLote>, { tarefas: unknown }>, daTarefa: string | null): string | null {
   const caminho = "neste turno, o bot só mexe na tarefa que foi pedida a ele. Para o resto, peça a quem pediu ou à dona";
-  if (plano.quadro.meta !== q.meta || plano.quadro.prazo !== q.prazo || plano.mudouColunas) return `A meta, o prazo e as colunas são da dona: ${caminho}`;
+  if (plano.quadro.meta !== q.meta || plano.quadro.prazo !== q.prazo || plano.mudouColunas || (plano.quadro.quemFecha ?? "bot") !== (q.quemFecha ?? "bot")) return `A meta, o prazo e as colunas são da dona: ${caminho}`;
   const outra = [...plano.tocadas, ...plano.apagadas].find((id) => id !== daTarefa);
   if (outra === undefined) return null;
   const titulo = plano.tarefas.find((t) => t.id === outra)?.titulo;

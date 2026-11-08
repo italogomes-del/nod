@@ -85,6 +85,13 @@ const ROTULO: Readonly<Record<Assunto, string>> = {
   "acesso.automatico": "Acesso pela aprovação automática",
   "decisao.vencida": "Pedido vencido",
   "sistema.generico": "Aviso do sistema",
+  "tarefa.precisa": "Tarefa precisa de você",
+  "tarefa.resultado": "Terminou uma etapa da tarefa",
+  "bastidor.turno_falhou": "Turno de bastidor interrompido",
+  "bastidor.turno_orfao": "Pedido de bastidor tirado da fila",
+  "bastidor.lote_retorno_caiu": "O retorno do lote caiu",
+  "bastidor.negacao_terminal": "Negado",
+  "bastidor.aprovacao_recibo": "Aprovação decidida",
 };
 
 /** Teto do detalhe: a Atividade é lista; o texto inteiro abre no clique (alvo da mensagem). */

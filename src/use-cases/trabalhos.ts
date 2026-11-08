@@ -28,6 +28,7 @@ import { colegaComCota } from "./cota-do-colega.ts";
 import { donosDosBots, resolverDePresenca } from "./estado-do-dono.ts";
 import { fecharLoteSePronto } from "./fechar-lote.ts";
 import { resumoSeFaltar } from "./resumo-sem-chamada.ts";
+import { tarefasDasDecisoesFechadas } from "./tarefa-casa.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
 import { situacaoDasFalasNaFrente } from "../domain/fala-na-frente.ts";
 
@@ -128,7 +129,10 @@ export function sincronizarDoTurno(deps: DepsTrabalho, turno: Pick<Turno, "traba
  * a que esperava por ela (`depois_de`) nunca começava. É o ponto comum de todos esses caminhos; roda na transação da
  * DONA (mudarEstado exige owner = pessoa) e depois de a retomada, se houver, já estar na fila.
  */
-export async function sincronizarDasDecisoes(deps: DepsTrabalho, decisoes: readonly Pick<Decisao, "turnoId">[]): Promise<RuntimeEvent[]> {
+export async function sincronizarDasDecisoes(deps: DepsTrabalho & Partial<Pick<Deps, "services" | "useCases">>, decisoes: readonly Pick<Decisao, "turnoId" | "tarefaId" | "estado" | "desfecho">[]): Promise<RuntimeEvent[]> {
+  // ADA-28 (ADR-159): a decisão ligada a uma tarefa e respondida fora do card tira a tarefa de "Precisa de você".
+  // Quem chama sem services/useCases (a Sua vez ao dispensar ou reabrir) não responde: nada a espelhar na tarefa.
+  const daTarefa = deps.services && deps.useCases ? await tarefasDasDecisoesFechadas(deps as Deps, decisoes) : [];
   const trabalhos = new Set<string>();
   for (const d of decisoes) {
     const turno = d.turnoId ? await deps.repos.turnos.buscar(d.turnoId) : null;
@@ -136,7 +140,7 @@ export async function sincronizarDasDecisoes(deps: DepsTrabalho, decisoes: reado
   }
   const events: RuntimeEvent[] = [];
   for (const id of trabalhos) events.push(...(await sincronizarTrabalho(deps, id)));
-  return events;
+  return [...daTarefa, ...events];
 }
 
 /** A regra que fecha as decisões de uma task parada (revisão do épico, S1). */

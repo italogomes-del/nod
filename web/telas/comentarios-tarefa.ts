@@ -61,5 +61,7 @@ export function comentariosDaTarefa(o: { tarefaId: string; lista: readonly Comen
     (itens ? `<ol class="qd-com-lista">${itens}</ol>` : "") +
     `<form class="qd-com-form" data-form="comentar-tarefa" data-id="${esc(o.tarefaId)}"><label class="qd-sr" for="${id}">Comentar</label>` +
     `<textarea id="${id}" class="qd-com-in" name="texto" rows="1" maxlength="${LIMITE_COMENTARIO}" required placeholder="Comentar… @nome chama outro bot"></textarea>` +
-    `<button type="submit" class="qd-com-bt">Enviar</button></form></section>`;
+    `<button type="submit" class="qd-com-bt">Enviar</button></form>` +
+    // ADA-28 (escopo D): quem o comentário aciona, atualizado a cada tecla (web/lib/previa-comentario.ts).
+    `<p class="qd-com-previa" data-previa="${esc(o.tarefaId)}" aria-live="polite"></p></section>`;
 }

@@ -2239,9 +2239,20 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           criadoEm: iso(em + b.decisoes.length),
           decididaEm: null,
           fioId: d.fioId ?? null,
+          ...(d.tarefaId ? { tarefaId: d.tarefaId } : {}),
+          ...(d.tarefaPedeDone ? { tarefaPedeDone: true as const } : {}),
         };
         b.decisoes.push(decisao);
         return decisao;
+      },
+      async ligarATarefa(id, tarefaId) {
+        const i = b.decisoes.findIndex((d) => d.tenantId === escopo.tenantId && d.ownerId === escopo.pessoaId && d.id === id && (d.estado === "pendente" || d.estado === "reaberta"));
+        if (i < 0) return null;
+        b.decisoes[i] = { ...b.decisoes[i]!, tarefaId };
+        return b.decisoes[i]!;
+      },
+      async abertasDasTarefas(tarefaIds) {
+        return doTenant(b.decisoes).filter((d) => d.tarefaId !== undefined && tarefaIds.includes(d.tarefaId) && (d.estado === "pendente" || d.estado === "reaberta"));
       },
       async buscar(id) {
         return doTenant(b.decisoes).find((d) => d.id === id) ?? null;

@@ -512,12 +512,30 @@ export function planejarLinhas(mensagens: readonly Mensagem[], estado: Estado): 
   if (limpa) {
     const ordem = new Map(mensagens.map((m, i) => [m.id, i]));
     for (const t of trocasDaConversa({ recebidas, pedidas, mensagens, estado, pedidos: estado.conversas[conversaId]?.pedidosDeColega ?? {}, dono: donoDaConversa })) {
+      // ADA-28 (ADR-159): a troca de um turno de tarefa não vira "Conversou com um colega"; ela mora na tarefa e o chat
+      // tem a linha `tarefa.*`. Pedido de colega de verdade (fora de tarefa) segue igual.
+      if (t.fontes.every(daTarefa)) {
+        for (const m of t.fontes) planos.set(m.id, { tipo: "oculta" });
+        continue;
+      }
       const [ancora] = [...t.fontes].sort((a, b) => (ordem.get(a.id) ?? 0) - (ordem.get(b.id) ?? 0));
       for (const m of t.fontes) planos.set(m.id, { tipo: "oculta" });
       if (ancora && t.mensagens.length > 0) planos.set(ancora.id, { tipo: "troca", chave: t.chave, agenteId: donoDaConversa ?? "", mensagens: [...t.mensagens].sort((a, b) => a.em - b.em) });
     }
   }
+  // ADA-28 (ADR-159): o que o turno de tarefa gravou sai da timeline (a pergunta, as falas, a falha); o que a pessoa vê
+  // é a linha `tarefa.*`. A âncora de uma troca mista fica (ela desenha a troca inteira). Só o servidor com
+  // NOD_TAREFA_CASA=1 marca `tarefa`; sem a marca, nada muda.
+  for (const m of mensagens) if (daTarefa(m) && planos.get(m.id)?.tipo !== "troca") planos.set(m.id, { tipo: "oculta" });
   return planos;
+}
+
+/**
+ * ADA-28 (ADR-159): a mensagem foi gravada num turno de tarefa (a marca `tarefa` do servidor, só com NOD_TAREFA_CASA=1). A
+ * fala da pessoa sem payload fica: foi escrita no chat.
+ */
+export function daTarefa(m: Mensagem): boolean {
+  return m.tarefa !== undefined && !(m.autoria.autor_tipo === "pessoa" && !m.payload);
 }
 
 type Troca = { chave: string; fontes: Mensagem[]; mensagens: MensagemDaTroca[] };

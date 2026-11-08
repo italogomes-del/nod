@@ -105,7 +105,7 @@ export type NovoTrabalho = {
   loteId?: string | null;
   /** NOD-315 (0102): o `dono/nome` do GitHub da frente, já validado (`repoDoGithub`). */
   repo?: string | null;
-  /** ADA-232 (0153): a tarefa do quadro de onde a frente nasceu — o card conta a frente aberta como trabalhando. */
+  /** ADA-232 (0157): a tarefa do quadro de onde a frente nasceu — o card conta a frente aberta como trabalhando. ADA-28 (ADR-159): o `terminei` e o `pr_url` da frente valem para a tarefa. */
   tarefaId?: string | null;
 };
 

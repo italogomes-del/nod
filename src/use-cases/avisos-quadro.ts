@@ -9,6 +9,7 @@ import { log } from "../obs/log.ts";
 import { autoriaAgente, evento } from "./apoio-l7.ts";
 import { abrirTurno } from "./quadro.ts";
 import { emSavepoint } from "./savepoint.ts";
+import { tarefaCasaLigada } from "../shared/tarefa-casa.ts";
 import type { Deps } from "./tipos.ts";
 import { situacaoDasTarefas } from "./situacao-trabalho.ts";
 import { registrarAvisoDoQuadro, type TipoAvisoDoQuadro } from "./trilha-quadro.ts";
@@ -95,11 +96,15 @@ async function vencidos(deps: Deps, q: Quadro, agora: number) {
   // vai pelo bot dela (avisarQuemParticipa); a conversa da dona não a recebe.
   const membros = new Set((await repo.membros(q.id)).map((m) => m.pessoaId));
   const daDona = (t: (typeof tarefas)[number]) => t.status !== "voce" || quemDecide({ pedidoPor: t.pedidoPor, donaId: deps.escopo.pessoaId, membros }).pessoaId === deps.escopo.pessoaId;
+  // ADA-28 (ADR-159): a tarefa cuja espera é uma decisão ligada já está na Sua vez (o cartão da decisão); o aviso
+  // "Preciso de você no quadro" seria o segundo "Precisa de você" da mesma coisa.
+  const comDecisao = tarefaCasaLigada() ? new Set((await deps.repos.decisoes.abertasDasTarefas(tarefas.filter((t) => t.status === "voce").map((t) => t.id))).map((d) => d.tarefaId)) : new Set<string | undefined>();
+  const semDecisao = (t: (typeof tarefas)[number]) => t.status !== "voce" || !comDecisao.has(t.id);
   // ADA-232: a tarefa com volta marcada (hora, CI, comando de fundo) não está parada: o zelador não a cobra. O trabalho
   // vivo sem volta segue a regra antiga (o turno da tarefa na fila não abre outro; o turno limpo é cobrado).
   const situacoes = await situacaoDasTarefas(deps, tarefas.map((t) => t.id));
   const ocupadas = new Set([...situacoes].filter(([, s]) => s.volta !== null).map(([id]) => id));
-  return { colunas, tarefas, decisoes: decisoesParaAvisar(tarefas, colunas, agora).filter(daDona), atrasos: atrasosDePrazo(tarefas, colunas, agora, ocupadas) };
+  return { colunas, tarefas, decisoes: decisoesParaAvisar(tarefas, colunas, agora).filter(daDona).filter(semDecisao), atrasos: atrasosDePrazo(tarefas, colunas, agora, ocupadas) };
 }
 
 /**

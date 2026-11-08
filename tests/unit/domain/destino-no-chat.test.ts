@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { ASSUNTOS, type Assunto } from "../../../src/contracts/destino-no-chat.ts";
 import type { Autoria } from "../../../src/contracts/evento.ts";
 import type { KindMensagem, PayloadMensagem } from "../../../src/contracts/mensagem.ts";
-import { ASSUNTOS_DA_ATIVIDADE, assuntoDe, DESTINO, destinoDe } from "../../../src/domain/destino-no-chat.ts";
+import { ASSUNTOS_DA_ATIVIDADE, assuntoDe, assuntoNoBastidor, DESTINO, destinoDe } from "../../../src/domain/destino-no-chat.ts";
 import { assuntoDaNova } from "../../../src/repositories/mensagens.repo.ts";
 
 const pessoa: Pick<Autoria, "decidido_por"> = { decidido_por: "pessoa" };
@@ -129,5 +129,39 @@ describe("assuntoDaNova (o que o repositório grava)", () => {
     expect(assuntoDaNova({ kind: "sistema", payload: null, autoria: { decidido_por: "pessoa" }, assunto: "turno.orfao" })).toBe("turno.orfao");
     expect(assuntoDaNova({ kind: "resultado_aprovacao", autoria: { decidido_por: "pessoa" }, assunto: "aprovacao.automatica_falhou" })).toBe("aprovacao.automatica_falhou");
     expect(assuntoDaNova({ kind: "texto", payload: null, autoria: { decidido_por: "pessoa" } })).toBeNull();
+  });
+});
+
+describe("ADA-28 (ADR-159): o turno de bastidor e a linha da tarefa", () => {
+  it("o aviso de falha de um turno de bastidor vai para a Atividade; o mesmo aviso de um turno da conversa fica no chat", () => {
+    for (const a of ["turno.falhou", "turno.orfao", "lote.retorno_caiu", "negacao.terminal"] as const) {
+      expect(destinoDe(a), a).toBe("chat");
+      const v = assuntoNoBastidor(a);
+      expect(v, a).not.toBe(a);
+      expect(destinoDe(v), a).toBe("atividade");
+      expect(DESTINO[v!].categoria, a).toBe("bloqueios");
+    }
+    expect(DESTINO[assuntoNoBastidor("aprovacao.recibo")!]).toEqual({ destino: "atividade", categoria: "sem_aprovacao" });
+  });
+
+  it("o que não tem variante (a fala, a resposta da pessoa) fica igual no bastidor", () => {
+    expect(assuntoNoBastidor(null)).toBeNull();
+    expect(assuntoNoBastidor("pedido.respondido")).toBe("pedido.respondido");
+    expect(assuntoNoBastidor("ia.troca")).toBe("ia.troca");
+  });
+
+  it("a variante nunca tem variante (a troca é de um passo só)", () => {
+    for (const a of ASSUNTOS) {
+      const v = DESTINO[a].seBastidor;
+      if (v) expect(DESTINO[v].seBastidor, v).toBeUndefined();
+    }
+  });
+
+  it("a linha da tarefa fica no chat: 'precisa de você' e 'terminou'", () => {
+    const base = { kind: "tarefa_linha" as const, tarefaId: "tq", quadroId: "q", codigo: "ADA-28", agenteId: "ada" };
+    expect(assuntoDe("sistema", { ...base, motivo: "precisa" }, pessoa)).toBe("tarefa.precisa");
+    expect(assuntoDe("sistema", { ...base, motivo: "resultado" }, pessoa)).toBe("tarefa.resultado");
+    expect(destinoDe("tarefa.precisa")).toBe("chat");
+    expect(destinoDe("tarefa.resultado")).toBe("chat");
   });
 });
