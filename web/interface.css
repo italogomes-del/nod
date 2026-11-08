@@ -545,6 +545,15 @@
 .pensar[data-fase="silencio"] .fala-viva-estado { color: var(--warning); }
 .pensar[data-fase="pronto"] .fala-viva-estado { font-size: 12px; font-weight: 400; }
 .pensar[data-fase="pronto"] > summary { min-height: 20px; }
+/* ADA-2 F5 (issue 290, ADR-156): com ferramenta, o pronto é a linha "🔧 Usou N ferramentas ›" — 14 px --ink-3, sem fundo nem
+   borda, celular e computador; a seta › gira 90° ao abrir. A duração fica no title/aria-label. */
+.pensar[data-fase="pronto"] > .pensar-cab.pensar-ferr { display: inline-flex; gap: 6px; max-width: 100%; color: var(--ink-3); background: none; border: 0; }
+.pensar[data-fase="pronto"] > .pensar-ferr .fala-viva-estado { font-size: 14px; font-weight: 500; color: var(--ink-3); }
+.pensar[data-fase="pronto"] > .pensar-ferr:hover .fala-viva-estado { color: var(--ink-2); -webkit-text-fill-color: var(--ink-2); }
+.pensar-ferr-ic { flex: none; width: 16px; height: 16px; }
+.pensar-ferr .pensar-seta { font-size: 14px; }
+.pensar-ferr .pensar-seta::before { content: "›"; }
+.pensar[open] > .pensar-ferr .pensar-seta { transform: rotate(90deg); }
 .pensar-corpo { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .3s cubic-bezier(.2, .7, .2, 1); }
 .pensar-dentro { min-height: 0; overflow: hidden; }
 .pensar[open] > .pensar-corpo { grid-template-rows: 1fr; }

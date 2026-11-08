@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
 import type { SuaVezDto } from "../../../src/contracts/api.ts";
 import type { ConversaDto } from "../../../src/contracts/api.ts";
 import type { Mensagem } from "../../../src/contracts/mensagem.ts";
@@ -7,7 +8,7 @@ import { ATIVIDADE_VAZIA, comCabecalho, comFerramenta, comFimDaAcao, comFrentesE
 import { proximaViradaDoMascote } from "../../../web/lib/mascote.ts";
 import { criarRelogioDaFala, escreverEstados, TICK_CURTO_MS } from "../../../web/lib/fala-viva.ts";
 import { trocarConteudo, type NoDoMorph } from "../../../web/lib/morph.ts";
-import { esperaDaPessoa, frasePensou, renderPensar } from "../../../web/telas/conversa.ts";
+import { esperaDaPessoa, fraseDoPronto, fraseFerramentas, frasePensou, renderPensar, rotuloDasFerramentas } from "../../../web/telas/conversa.ts";
 
 /** Plano "o pensamento no chat", Parte 2 (2026-10-26, opção C): as peças puras do pensamento. */
 
@@ -183,6 +184,40 @@ describe("o cabeçalho pronto e a espera", () => {
     expect(frasePensou(9_400, { acoes: 2, falhas: 1 })).toBe("Pensou por 9 s · 2 ações · 1 falhou");
     expect(frasePensou(null, { acoes: 1, falhas: 0 })).toBe("1 ação");
     expect(frasePensou(70_000, { acoes: 105, falhas: 3 })).toBe("Pensou por 1 min 10 s · 105 ações · 3 falharam");
+  });
+
+  it("ADA-2 F5 (#290): fraseFerramentas conta as chamadas, no singular e no plural, com as falhas", () => {
+    expect(fraseFerramentas({ acoes: 1, falhas: 0 })).toBe("Usou 1 ferramenta");
+    expect(fraseFerramentas({ acoes: 3, falhas: 0 })).toBe("Usou 3 ferramentas");
+    expect(fraseFerramentas({ acoes: 3, falhas: 1 })).toBe("Usou 3 ferramentas · 1 falhou");
+    expect(fraseFerramentas({ acoes: 5, falhas: 2 })).toBe("Usou 5 ferramentas · 2 falharam");
+  });
+
+  it("ADA-2 F5 (S2): o pronto sem ferramenta (só pensou) mantém 'Pensou por N s'", () => {
+    expect(fraseDoPronto(12_000, { acoes: 0, falhas: 0 })).toBe("Pensou por 12 s");
+    expect(fraseDoPronto(12_000, { acoes: 3, falhas: 0 })).toBe("Usou 3 ferramentas");
+  });
+
+  it("ADA-2 F5 (#290): o cabeçalho pronto com ferramenta é a linha com chave e ›, a duração no title/aria", () => {
+    expect(rotuloDasFerramentas(12_000, { acoes: 3, falhas: 1 })).toBe("Ver as 3 ferramentas usadas, 1 falhou, pensou por 12 s");
+    expect(rotuloDasFerramentas(null, { acoes: 1, falhas: 0 })).toBe("Ver a ferramenta usada");
+    const html = renderPensar({ turnoId: "t1", fase: "pronto", cabecalho: { id: "pronto", texto: fraseDoPronto(12_000, { acoes: 3, falhas: 0 }) }, anuncio: "Respondeu", desde: null, contagem: { acoes: 3, falhas: 0 }, itens: [{ tipo: "grupo", rotulo: "Consultou Linear", vezes: 3, falhas: 0, rodando: false, emUso: null, frentes: false }], tarefas: [], duracaoMs: 12_000 });
+    expect(html).toContain('<summary class="pensar-cab pensar-ferr" aria-label="Ver as 3 ferramentas usadas, pensou por 12 s" title="Pensou por 12 s"><svg class="pensar-ferr-ic"');
+    expect(html).toContain('<span class="fala-viva-estado">Usou 3 ferramentas</span>');
+    expect(html).not.toContain("Pensou por 12 s</span>");
+    expect(html).not.toContain("pensar-meta");
+    // A lista continua a mesma dentro do <details>.
+    expect(html).toContain("<span>Consultou Linear</span>");
+    // Só pensou: o cabeçalho antigo, sem a chave.
+    const soPensou = renderPensar({ turnoId: "t2", fase: "pronto", cabecalho: { id: "pronto", texto: fraseDoPronto(12_000, { acoes: 0, falhas: 0 }) }, anuncio: "Respondeu", desde: null, contagem: { acoes: 0, falhas: 0 }, itens: [{ tipo: "nota", texto: "Pensei." }], tarefas: [], duracaoMs: 12_000 });
+    expect(soPensou).toContain('<summary class="pensar-cab"><span class="fala-viva-estado">Pensou por 12 s</span>');
+  });
+
+  it("ADA-2 F5 (#290): o CSS da linha é 14 px --ink-3 sem fundo, e a › gira 90° ao abrir", () => {
+    const css = readFileSync(new URL("../../../web/interface.css", import.meta.url), "utf8");
+    expect(css).toMatch(/\.pensar\[data-fase="pronto"\] > \.pensar-cab\.pensar-ferr \{[^}]*color: var\(--ink-3\); background: none; border: 0;/);
+    expect(css).toMatch(/\.pensar-ferr \.fala-viva-estado \{ font-size: 14px;/);
+    expect(css).toContain('.pensar[open] > .pensar-ferr .pensar-seta { transform: rotate(90deg); }');
   });
 
   it("esperaDaPessoa: a decisão pendente do turno diz aprovação ou resposta; vencida ou de outro turno, nada", () => {

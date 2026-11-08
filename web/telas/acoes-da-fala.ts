@@ -73,7 +73,7 @@ export const ICONE_DA_FALA = {
 } as const;
 
 const ehLinha = (m: Mensagem): boolean => m.kind !== "texto" && m.payload?.kind !== "artefato";
-const daPessoa = (m: Mensagem): boolean => m.autoria.autor_tipo === "pessoa";
+export const daPessoa = (m: Mensagem): boolean => m.autoria.autor_tipo === "pessoa";
 
 /** A fala está na conversa própria aberta agora? É lá que o campo existe para citar e o "Abrir task com isto" tem destino. */
 function naConversaAberta(m: Mensagem, estado: Estado): boolean {
@@ -102,7 +102,7 @@ const botaoDaBarra = (act: string, icone: string, rotulo: string, m: Mensagem, e
  * A barra ao lado da fala. Balão ou artefato do bot: reagir, responder, reportar e ⋯ (a ordem do protótipo). Fala da
  * pessoa: sem reagir. Linha de sistema (negação, parada…): só reportar e ⋯ — é JUSTAMENTE o que a categoria
  * 'travou_ou_parou' do relato descreve (ADR-041), e as outras ações não cabem numa linha. Aparece no hover e também com
- * foco (`.msg-actions:focus-within`, estilos.css); no celular, num toque na fala (web/lib/gaveta-bots.ts), com 44 px.
+ * foco (`.msg-actions:focus-within`, estilos.css); no celular, no menu do toque longo (ADA-2 F5, web/lib/menu-segurado-da-fala.ts).
  */
 /** `antes`: botões que entram no começo da barra (NOD-106: o Ouvir, desenhado em conversa.ts). */
 export function acoesDaFala(m: Mensagem, estado: Estado, antes = ""): string {
@@ -153,14 +153,18 @@ export function htmlSeletorDeReacao(m: Mensagem, estado: Estado, todas = false):
   return `<div role="menu" aria-label="Reagir a esta mensagem">${linhaDeEmojis(m, estado, todas)}</div>`;
 }
 
-type ItemDoMenu = { acao: "copiar" | "abrir-task" | "lembrar" | "raio-x" | "baixar-tudo" | "desfazer"; icone: string; texto: string; desabilitado?: boolean };
+type ItemDoMenu = { acao: "copiar" | "criar-tarefa" | "abrir-task" | "lembrar" | "raio-x" | "baixar-tudo" | "desfazer"; icone: string; texto: string; desabilitado?: boolean };
 
-/** Os itens do ⋯ que valem para esta fala, na ordem do protótipo. */
-export function itensDoMenu(m: Mensagem, estado: Estado): ItemDoMenu[] {
+/**
+ * Os itens do ⋯ que valem para esta fala, na ordem do protótipo. `temQuadro` (ADA-2 F5, ADR-156 §3): o bot da conversa
+ * aberta tem o quadro à mão; aí entra "Criar tarefa disto" (`quadro.criar_tarefa`), logo depois de Copiar.
+ */
+export function itensDoMenu(m: Mensagem, estado: Estado, temQuadro = false): ItemDoMenu[] {
   const itens: ItemDoMenu[] = [];
   // NOD-323 (J2): com duas ou mais mídias do bot que estão no nod, uma por uma para a pasta de downloads. No topo (p7_menu).
   if (baixaveis(m.anexos ?? []).length >= 2) itens.push({ acao: "baixar-tudo", icone: ICONE_DA_FALA.baixar, texto: "Baixar tudo" });
   if (m.texto.trim() !== "") itens.push({ acao: "copiar", icone: ICONE_DA_FALA.copiar, texto: "Copiar texto" });
+  if (m.texto.trim() !== "" && temQuadro && botDaFala(m, estado)) itens.push({ acao: "criar-tarefa", icone: ICONE_DA_FALA.task, texto: "Criar tarefa disto" });
   if (podeResponder(m, estado) && botDaFala(m, estado)) itens.push({ acao: "abrir-task", icone: ICONE_DA_FALA.task, texto: "Abrir task com isto" });
   // A fala não confiável (de conector ou de outro bot, ADR-062) não vira memória num clique: a memória entra em todo prompt
   // do bot e a linha "Anotei …" nasce confiável. Quem quiser guardar escreve em Memória (revisão do PR 392, 2026-10-18).
@@ -174,9 +178,9 @@ export function itensDoMenu(m: Mensagem, estado: Estado): ItemDoMenu[] {
 }
 
 /** O menu ⋯: as reações rápidas no topo (fala de bot) e os itens, cada um com o ícone à esquerda. */
-export function htmlMenuDaFala(m: Mensagem, estado: Estado): string {
+export function htmlMenuDaFala(m: Mensagem, estado: Estado, temQuadro = false): string {
   const emojis = podeReagir(m) ? linhaDeEmojis(m, estado) : "";
-  const itens = itensDoMenu(m, estado).map((i) => {
+  const itens = itensDoMenu(m, estado, temQuadro).map((i) => {
     const extra = i.acao === "desfazer" ? ` class="dft-mi"${i.desabilitado ? ' aria-disabled="true"' : ""}` : "";
     return `<button type="button" role="menuitem" data-fala="${i.acao}"${extra}>${i.icone}${esc(i.texto)}</button>`;
   }).join("");

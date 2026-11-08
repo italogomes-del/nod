@@ -577,6 +577,8 @@ a.qd-chip:hover { background: var(--surface-raised); }
 .qc-txt::placeholder { color: var(--ink-3); }
 .qc-bt { width: 38px; height: 38px; border-radius: 50%; display: inline-grid; place-items: center; flex: none; border: 0; background: none; color: var(--ink-2); cursor: pointer; }
 .qc-bt svg { width: 20px; height: 20px; }
+/* ADA-2 F5: o + do clipe só aparece no celular (celular-base.css). */
+.qc-clipe .qc-ic-mais { display: none; }
 .qc-bt.qc-enviar { width: 34px; height: 34px; margin-right: 2px; background: var(--action); color: var(--on-action); }
 .qc-bt.qc-enviar:hover { opacity: .9; }
 .qc-bt.qc-enviar svg { width: 18px; height: 18px; }

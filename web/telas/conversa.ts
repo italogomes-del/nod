@@ -1028,6 +1028,8 @@ export type Pensar = {
   tarefas: readonly TarefaDoBot[];
   /** `data-parte` da fala viva; a gravada não tem. */
   parte?: string;
+  /** ADA-2 F5 (ADR-156): no pronto com ferramentas, a duração sai do texto e vai para o `title`/`aria-label`. */
+  duracaoMs?: number | null;
 };
 
 /** O que a fala viva diz no pensamento, a partir do turno e da atividade (puro; os testes leem daqui). */
@@ -1037,7 +1039,7 @@ export function pensarDaFalaViva(t: TurnoVivo, a: AtividadeTurno | undefined, es
   if (saindo) {
     // No fim, o pensamento só fica quando houve o que contar (ações ou notas): a gravada sem resumo também não o tem.
     if (contagem.acoes === 0 && itens.length === 0) return null;
-    return { turnoId: t.turnoId, fase: "pronto", cabecalho: { id: "pronto", texto: frasePensou(saindo.em - t.desde, contagem) }, anuncio: "Respondeu", desde: null, contagem, itens, tarefas: [] };
+    return { turnoId: t.turnoId, fase: "pronto", cabecalho: { id: "pronto", texto: fraseDoPronto(saindo.em - t.desde, contagem) }, anuncio: "Respondeu", desde: null, contagem, itens, tarefas: [], duracaoMs: saindo.em - t.desde };
   }
   const estadoFala = estadoDaFala(a);
   const espera = esperaDaPessoa(estado, t.turnoId);
@@ -1058,6 +1060,32 @@ export function frasePensou(duracaoMs: number | null, contagem: { acoes: number;
   const partes = [duracaoMs === null ? "" : `Pensou por ${tempoDaFala(duracaoMs)}`, contagem.acoes ? `${contagem.acoes === 1 ? "1 ação" : `${contagem.acoes} ações`}` : "", contagem.falhas ? (contagem.falhas === 1 ? "1 falhou" : `${contagem.falhas} falharam`) : ""].filter(Boolean);
   return partes.join(" · ");
 }
+
+/**
+ * ADA-2 F5 (#290, ADR-156): "Usou 3 ferramentas · 1 falhou" — a linha do pensamento pronto quando houve ferramenta.
+ * N é o total de chamadas do turno (o mesmo número que antes saía como "N ações").
+ */
+export function fraseFerramentas(contagem: { acoes: number; falhas: number }): string {
+  const base = contagem.acoes === 1 ? "Usou 1 ferramenta" : `Usou ${contagem.acoes} ferramentas`;
+  const falhas = contagem.falhas ? (contagem.falhas === 1 ? " · 1 falhou" : ` · ${contagem.falhas} falharam`) : "";
+  return base + falhas;
+}
+
+/** O cabeçalho do pronto: com ferramenta, "Usou N ferramentas"; só pensou (notas, sem ferramenta), "Pensou por N s" (S2). */
+export function fraseDoPronto(duracaoMs: number | null, contagem: { acoes: number; falhas: number }): string {
+  return contagem.acoes > 0 ? fraseFerramentas(contagem) : frasePensou(duracaoMs, contagem);
+}
+
+/** O `aria-label` do cabeçalho pronto com ferramenta: "Ver as 3 ferramentas usadas, pensou por 12 s". */
+export function rotuloDasFerramentas(duracaoMs: number | null | undefined, contagem: { acoes: number; falhas: number }): string {
+  const qual = contagem.acoes === 1 ? "Ver a ferramenta usada" : `Ver as ${contagem.acoes} ferramentas usadas`;
+  const falhas = contagem.falhas ? (contagem.falhas === 1 ? ", 1 falhou" : `, ${contagem.falhas} falharam`) : "";
+  const tempo = duracaoMs === null || duracaoMs === undefined ? "" : `, pensou por ${tempoDaFala(duracaoMs)}`;
+  return qual + falhas + tempo;
+}
+
+/** O ícone de chave (16) do protótipo, na linha "Usou N ferramentas". */
+const ICONE_FERRAMENTA = `<svg class="pensar-ferr-ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4l-6 6a1.4 1.4 0 0 0 2 2l6-6a4 4 0 0 0 5.4-5.4l-2.5 2.5-2-2z"/></svg>`;
 
 /**
  * O turno espera a pessoa (aprovação ou pergunta aberta dele, em "Sua vez"): o cabeçalho diz, sem brilho. `null` = não.
@@ -1081,7 +1109,17 @@ export function renderPensar(p: Pensar | null): string {
   const contagem = p.contagem.acoes ? `<span class="pensar-contagem">${p.contagem.acoes === 1 ? "1 ação" : `${p.contagem.acoes} ações`}</span>` : "";
   const falhas = p.contagem.falhas ? `<span class="pensar-falhas">${p.contagem.falhas === 1 ? "1 falhou" : `${p.contagem.falhas} falharam`}</span>` : "";
   const meta = p.fase === "pronto" ? "" : `<span class="pensar-meta" aria-hidden="true">${tempo}${contagem}${falhas}</span>`;
+  const ferr = p.fase === "pronto" && p.contagem.acoes > 0;
+  if (ferr) {
+    const tempoTitulo = p.duracaoMs === null || p.duracaoMs === undefined ? "" : ` title="Pensou por ${esc(tempoDaFala(p.duracaoMs))}"`;
+    const cabF = `<summary class="pensar-cab pensar-ferr" aria-label="${esc(rotuloDasFerramentas(p.duracaoMs, p.contagem))}"${tempoTitulo}>${ICONE_FERRAMENTA}<span class="fala-viva-estado">${esc(p.cabecalho.texto)}</span><span class="sr-only fala-viva-anuncio">${esc(p.anuncio)}</span><span class="pensar-seta" aria-hidden="true"></span></summary>`;
+    return montarPensar(p, cabF, pendente);
+  }
   const cab = `<summary class="pensar-cab"><span class="fala-viva-estado">${esc(p.cabecalho.texto)}</span><span class="sr-only fala-viva-anuncio">${esc(p.anuncio)}</span>${meta}<span class="pensar-seta" aria-hidden="true"></span></summary>`;
+  return montarPensar(p, cab, pendente);
+}
+
+function montarPensar(p: Pensar, cab: string, pendente: string): string {
   const grupos = p.itens.filter((i) => i.tipo === "grupo").length;
   const escondidos = Math.max(0, grupos - GRUPOS_A_VISTA);
   // Os itens até o grupo de índice `escondidos` (exclusive) vão para "N anteriores": notas incluídas, na mesma ordem.
@@ -1128,7 +1166,7 @@ export function renderResumoDasAcoes(turnoId: string, linhas: readonly LinhaDoRe
   }
   const contagem = { acoes: itens.reduce((n, i) => n + (i.tipo === "grupo" ? i.vezes : 0), 0), falhas: itens.reduce((n, i) => n + (i.tipo === "grupo" ? i.falhas : 0), 0) };
   if (contagem.acoes === 0) return "";
-  return renderPensar({ turnoId, fase: "pronto", cabecalho: { id: "pronto", texto: frasePensou(duracaoMs, contagem) }, anuncio: "Respondeu", desde: null, contagem, itens, tarefas, ...(parte ? { parte } : {}) });
+  return renderPensar({ turnoId, fase: "pronto", cabecalho: { id: "pronto", texto: fraseDoPronto(duracaoMs, contagem) }, anuncio: "Respondeu", desde: null, contagem, itens, tarefas, duracaoMs, ...(parte ? { parte } : {}) });
 }
 
 /** NOD-353: o resumo gravado na fala final (payload `acoes_do_turno`), na forma das linhas da fala viva. */

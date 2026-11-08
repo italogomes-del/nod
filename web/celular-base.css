@@ -201,4 +201,69 @@
   .pg-dica { padding: 6px 12px; border-radius: 999px; background: var(--surface-raised); color: var(--ink-2); box-shadow: var(--shadow-pop); font-size: 13px; }
   /* A barra lateral: "+ Novo time" com 44. */
   .novo-time.nova-secao-alvo { min-height: var(--cel-alvo); font-size: 15px; }
+
+  /* ---------- ADA-2 F5 (ADR-156): toque longo na mensagem ---------- */
+  /* Durante o segurar o iOS não abre a lupa nem o menu dele; fora do gesto a seleção fica como é. */
+  .fala-segurando, .fala-segurando * { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+  .message.fala-segurada .bubble, .msg-linha.fala-segurada { visibility: hidden; }
+  /* O menu de vidro: 240, raio 14, itens de 46 em 16 px; a fala segurada sobe (cópia) por cima do fundo desfocado. */
+  .bot-menu.menu-fala-seg { width: 240px; border-radius: 14px; background: color-mix(in srgb, var(--surface) 72%, transparent);
+    -webkit-backdrop-filter: blur(20px) saturate(1.6); backdrop-filter: blur(20px) saturate(1.6); }
+  .bot-menu.menu-fala-seg button[role="menuitem"]:not(.emoji-mais) { min-height: 46px; font-size: 16px; }
+  .bot-menu.menu-fala-seg .linha-emojis button { min-width: var(--cel-alvo); min-height: var(--cel-alvo); }
+  .menu-fala-seg .mfs-divisor { height: 1px; margin: 4px 0; background: var(--line); }
+  .bot-menu.menu-fala-seg .fala-copia { position: fixed; box-sizing: border-box; margin: 0; overflow: hidden; pointer-events: none;
+    box-shadow: var(--shadow-pop); transform: scale(1.02); animation: inicio-segurar .18s cubic-bezier(.2, .8, .2, 1); }
+  /* ADA-2 F5 (ADR-156 §4): o card de aprovação (e o de lote, S8) em contorno. O verbo é uma pílula de contorno em --ink,
+     "Agora não" fica em texto; o perigo troca só a cor do contorno e do texto. `button.` vence o .cp .cp-sim e o :hover
+     da card-proposta.css sem !important (no toque o :hover gruda). */
+  .cp { border: 1px solid var(--line); border-radius: 16px; background: var(--surface); }
+  .cp button.cp-sim, .cp button.cp-sim:hover { min-height: var(--cel-alvo); border: 1.5px solid var(--ink); border-radius: 22px; background: transparent; color: var(--ink); font-size: 15px; font-weight: 600; filter: none; }
+  .cp button.cp-nao, .cp button.cp-nao:hover { min-height: var(--cel-alvo); border-color: transparent; background: none; color: var(--ink-2); }
+  .cp button.cp-sim.cp-perigo, .cp button.cp-sim.cp-perigo:hover { border-color: var(--danger); background: transparent; color: var(--danger); }
+  /* ADA-2 F5 (ADR-156 §5): o composer em três peças, + · campo · mic/enviar. O + e a ponta saem da pílula e viram redondos
+     de vidro de 46; a pílula é desenhada pelo ::before da .box entre eles, então a árvore e a ordem de foco (+, texto,
+     mic, parar, enviar) são as mesmas do computador. O parar, quando aparece, fica dentro da pílula, na ponta dela; a
+     troca mic ↔ enviar continua a da mobile.css (campo vazio + ditado = mic; senão enviar; sem ditado, enviar sempre). */
+  .composer { --cmp-redondo: 46px; --cmp-vao: 6px; --cmp-vidro: color-mix(in srgb, var(--surface) 72%, transparent); }
+  .composer .box:not(.gravando) { position: relative; isolation: isolate; gap: 0; padding: 0; border: 0; border-radius: 0; background: none; box-shadow: none;
+    -webkit-backdrop-filter: none; backdrop-filter: none; }
+  .composer .box:not(.gravando)::before { content: ""; position: absolute; z-index: -1; inset: 0 calc(var(--cmp-redondo) + var(--cmp-vao)); border: 1px solid var(--line);
+    border-radius: 23px; background: var(--cmp-vidro); -webkit-backdrop-filter: blur(20px) saturate(1.6); backdrop-filter: blur(20px) saturate(1.6); pointer-events: none; }
+  .composer .box:not(.gravando):has(> .mais-campo[hidden]), .composer .box.com-anexos:not(.gravando) { padding-left: 0; }
+  .composer .box:not(.gravando):not(.com-mais)::before, .composer .box:not(.gravando):has(> .mais-campo[hidden])::before { left: 0; }
+  /* O texto começa 14 px dentro da pílula, com ou sem o + (a mobile.css deixava 4 colado no + de dentro). */
+  .composer .box:not(.gravando) textarea, .composer .box.com-mais:not(.gravando) textarea { min-height: var(--cmp-redondo); padding: 12px 8px 12px 14px; }
+  .composer .box.com-mais:not(.gravando) > .mais-campo:not([hidden]) { margin-right: var(--cmp-vao); }
+  /* Os redondos: + e mic de vidro com borda --line; o enviar em contorno --ink, transparente. */
+  .composer .box:not(.gravando) > .mais-campo, .composer .box:not(.gravando) > .mic { width: var(--cmp-redondo); min-width: var(--cmp-redondo); height: var(--cmp-redondo);
+    border: 1px solid var(--line); border-radius: 50%; background: var(--cmp-vidro); color: var(--ink-2); -webkit-backdrop-filter: blur(20px) saturate(1.6); backdrop-filter: blur(20px) saturate(1.6); }
+  .composer .box:not(.gravando) > .mic, .composer .box:not(.gravando) > .send { margin: 0 0 0 calc(var(--cmp-vao) * 2); }
+  .composer .box:not(.gravando) > .send { width: var(--cmp-redondo); min-width: var(--cmp-redondo); height: var(--cmp-redondo); min-height: var(--cmp-redondo);
+    border: 1.5px solid var(--ink); border-radius: 50%; background: transparent; color: var(--ink); font-size: 17px; }
+  .composer .box:not(.gravando) > .parar-envio { margin: 1px 4px 1px 0; }
+  /* Com anexo, as miniaturas e o resumo ficam dentro da pílula (alinham com ela, não com o +). */
+  .composer .box.com-mais:not(.gravando) > .anexos-fila, .composer .box.com-mais:not(.gravando) > .anexos-resumo { margin-left: calc(var(--cmp-redondo) + var(--cmp-vao));
+    margin-right: calc(var(--cmp-redondo) + var(--cmp-vao)); }
+  /* ADA-2 F5 (ADR-156 §5): o mesmo composer de três peças na pílula do quadro e da tarefa. O clipe vira o + redondo (S6),
+     o enviar ganha o contorno e o ditado é o mic redondo; os mesmos data-act de antes (a suíte do quadro não muda). */
+  .qc-pil { --cmp-redondo: 46px; --cmp-vao: 6px; --cmp-vidro: color-mix(in srgb, var(--surface) 72%, transparent); }
+  .qc-pil:not(.gravando) { isolation: isolate; gap: 0; padding: 0; border: 0; border-radius: 0; background: none; box-shadow: none;
+    -webkit-backdrop-filter: none; backdrop-filter: none; }
+  .qc-pil:not(.gravando)::before { content: ""; position: absolute; z-index: -1; inset: 0 calc(var(--cmp-redondo) + var(--cmp-vao)); border: 1px solid var(--line);
+    border-radius: 23px; background: var(--cmp-vidro); box-shadow: var(--shadow-pop); -webkit-backdrop-filter: blur(20px) saturate(1.6); backdrop-filter: blur(20px) saturate(1.6);
+    pointer-events: none; }
+  .qc-pil:not(.gravando):focus-within::before { border-color: var(--line-strong); }
+  .qc-pil:not(.gravando):not(:has(> .qc-clipe))::before { left: 0; }
+  .qc-pil:not(.gravando) > .qc-txt { min-height: var(--cmp-redondo); padding: 12px 8px 12px 14px; }
+  .qc-clipe .qc-ic-mais { display: block; }
+  .qc-clipe svg:not(.qc-ic-mais) { display: none; }
+  .qc-pil:not(.gravando) > .qc-clipe, .qc-pil:not(.gravando) > .mic { width: var(--cmp-redondo); height: var(--cmp-redondo); margin: 0; border: 1px solid var(--line);
+    border-radius: 50%; background: var(--cmp-vidro); color: var(--ink-2); -webkit-backdrop-filter: blur(20px) saturate(1.6); backdrop-filter: blur(20px) saturate(1.6); }
+  .qc-pil:not(.gravando) > .qc-clipe { margin-right: var(--cmp-vao); }
+  .qc-pil:not(.gravando) > .mic, .qc-pil:not(.gravando) > .qc-bt.qc-enviar { margin: 0 0 0 calc(var(--cmp-vao) * 2); }
+  .qc-pil:not(.gravando) > .qc-bt.qc-enviar { width: var(--cmp-redondo); height: var(--cmp-redondo); border: 1.5px solid var(--ink); border-radius: 50%; background: transparent; color: var(--ink); }
+  .qc-pil:not(.gravando) > .qc-bt.qc-enviar::before { content: none; }
+  .qc-pil:not(.gravando) > .qc-parar { margin: 0 4px 1px 0; }
+  .qc-pil:not(.gravando) > .qc-anexos { margin-left: calc(var(--cmp-redondo) + var(--cmp-vao)); margin-right: calc(var(--cmp-redondo) + var(--cmp-vao)); padding: 8px 8px 0 14px; }
 }

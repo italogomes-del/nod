@@ -56,3 +56,32 @@ describe("o aviso só com a frase (sem Desfazer)", () => {
     expect(span).toMatch(/text-overflow: clip/);
   });
 });
+
+/** ADA-2 F5 (ADR-156 §3): "Tarefa criada · Abrir · Desfazer" — o Abrir vem antes do Desfazer e cada um chama o seu. */
+describe("o aviso com Abrir e Desfazer", () => {
+  it("dois botões, na ordem Abrir, Desfazer; cada clique fecha o aviso e chama a sua ação", () => {
+    const ouvintes: Record<string, () => void> = {};
+    let html = "";
+    vi.stubGlobal("document", {
+      createElement: () => ({
+        className: "", setAttribute: () => {}, remove: () => {},
+        set innerHTML(v: string) { html = v; }, get innerHTML() { return html; },
+        querySelector: (sel: string) => ({ addEventListener: (_: string, fn: () => void) => { ouvintes[sel] = fn; } }),
+      }),
+      body: { appendChild: () => {} },
+    });
+    const abriu = vi.fn();
+    const desfez = vi.fn();
+    const el = mostrarAvisoDesfazer({ texto: "Tarefa criada", abrir: { rotulo: "Abrir", aoAbrir: abriu }, aoDesfazer: desfez });
+    expect(el.className).toBe("nl-aviso");
+    expect(html.indexOf(">Abrir<")).toBeGreaterThan(0);
+    expect(html.indexOf(">Abrir<")).toBeLessThan(html.indexOf(">Desfazer<"));
+    ouvintes[".nl-abrir"]!();
+    expect(abriu).toHaveBeenCalledTimes(1);
+    expect(desfez).not.toHaveBeenCalled();
+    ouvintes[".nl-desfazer-acao"]!();
+    expect(desfez).toHaveBeenCalledTimes(1);
+    fecharAvisoDesfazer();
+    vi.unstubAllGlobals();
+  });
+});

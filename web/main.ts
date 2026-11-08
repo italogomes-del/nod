@@ -96,13 +96,13 @@ import { ehCelular } from "./lib/celular.ts";
 import { contextoDaPilula, executarNaPilula } from "./lib/setas-da-pilula.ts";
 import { alvoDoAtalho, atalhoDoNovoBot, atalhoDoTeclado, lugarAtual, SELETOR_CAMPO, SELETOR_MODAL, type AcaoAtalho } from "./lib/atalhos.ts";
 import { rotuloDoMac } from "./lib/aparelho.ts";
-import { criarCelular } from "./lib/gaveta-bots.ts";
+import { criarCelular, SELETOR_INTERATIVO } from "./lib/gaveta-bots.ts";
 import { tentarFrotaAgora } from "./lib/tentar-frota.ts";
 import { listaVaziaDaBarra } from "./lib/lista-vazia-da-barra.ts";
 import { criarToqueLongo, dicaJaVista, alturaDaLista, escolherRedesenhada, lugarDoMenuSegurado, marcarDicaVista, MS_DICA } from "./lib/toque-longo.ts";
 import { escondidosNoCelular, estadoDaLista, FAVORITOS_VISIVEIS, gruposSemResultado, horaDaLinha, PREFIXO_DO_PEDIDO } from "./lib/inicio-celular.ts";
 import "./pwa.ts";
-import { avatar, botao, esc, hora as horaDaFala, iconeAgente } from "./lib/render.ts";
+import { avatar, botao, dataHora, esc, hora as horaDaFala, iconeAgente } from "./lib/render.ts";
 import { COPIADO_MS, mostrarCopia, ROTULO_COPIADO, type RelogioDoCopiar } from "./lib/copiar.ts";
 import { avisoDeEstado } from "./lib/aviso-estado.ts";
 import { aplicarTema, lerTema, type EscolhaTema } from "./lib/tema.ts";
@@ -173,6 +173,7 @@ import { abertasPorAgente, perguntasPorAgente, renderChamada, renderIncidentes, 
 import { aparenciaDoComposer } from "./telas/pergunta.ts";
 import { BANDEJA, naoLidaDe, nomeDaConversa, renderNaoLidos, rotuloNaoLidos } from "./telas/nao-lidos.ts";
 import { mostrarAvisoDesfazer } from "./lib/aviso-desfazer.ts";
+import { ACTS_COBERTOS, htmlMenuSegurado, tarefaDaFala, type ExtraDaBarra } from "./lib/menu-segurado-da-fala.ts";
 import { tentarNoApp } from "./lib/recusa-de-app.ts";
 import { criarRecolherAdiado } from "./lib/recolher-adiado.ts";
 import { atalhoDoCabecalho, avisoDoNome, cabecalhoDoTime, campoDoNome, chaveDoTime, comCabecalho, destinoAoMover, ehCliqueDuplo, fraseDoExcluido, fraseDoMovido, itensDoMenuDoTime, juntarNomes, nomeDoTime, nomeLimpo, NOTA_SEM_TIME, ordemAoSoltarTime, recolhidosParaMigrar, selecionar, textoDaSelecao, textoDoVazio, timesComBots, type AcaoDoTime, type TimeDaBarra } from "./lib/times-da-barra.ts";
@@ -4191,7 +4192,8 @@ async function alternarReacao(fala: Mensagem, emoji: string): Promise<void> {
 function abrirMenuDaFala(ancora: HTMLElement, tipo: "reagir" | "mais"): void {
   const fala = falaPorId(ancora.dataset.id ?? "");
   if (!fala) return;
-  const d = dialogo(tipo === "reagir" ? htmlSeletorDeReacao(fala, estado) : htmlMenuDaFala(fala, estado), true);
+  const bot = botDaFala(fala, estado);
+  const d = dialogo(tipo === "reagir" ? htmlSeletorDeReacao(fala, estado) : htmlMenuDaFala(fala, estado, !!bot && comQuadro(bot)), true);
   d.classList.add("menu-fala");
   d.setAttribute("aria-label", tipo === "reagir" ? "Reagir a esta mensagem" : "Mais ações da mensagem");
   ancora.setAttribute("aria-expanded", "true");
@@ -4233,9 +4235,21 @@ function abrirMenuDaFala(ancora: HTMLElement, tipo: "reagir" | "mais"): void {
 function acaoDoMenuDaFala(fala: Mensagem, acao: string, ancora: HTMLElement): void {
   const bot = botDaFala(fala, estado);
   if (acao === "copiar") {
-    void navigator.clipboard.writeText(fala.texto).then(() => anunciar("Texto copiado"), () => anunciar("Não deu para copiar o texto"));
+    void copiarTexto(fala.texto).then((ok) => (ok ? anunciar("Texto copiado") : mostrarAvisoDesfazer({ texto: "Não deu para copiar" })));
     return;
   }
+  // ADA-2 F5 (ADR-156 §2): os itens que no computador são botões da barra, no menu do toque longo.
+  if (acao === "responder") { responderAFala(fala); return; }
+  if (acao === "relatar") {
+    if (api) abrirReportarBug(api, fala.id, __NOD_VERSAO__, null, () => dispatch({ tipo: "invalidar", quais: ["relatos"] }));
+    return;
+  }
+  if (acao.startsWith("proxy:")) {
+    const act = acao.slice("proxy:".length);
+    document.querySelector<HTMLElement>(`[data-mensagem="${CSS.escape(fala.id)}"] .msg-actions [data-act="${CSS.escape(act)}"]`)?.click();
+    return;
+  }
+  if (acao === "criar-tarefa") { if (bot) void criarTarefaDaFala(fala, bot); return; }
   if (acao === "baixar-tudo" && api) {
     // NOD-323 (J2): um download por vez, com folga (o navegador barra vários de uma vez).
     const urls = baixaveis(fala.anexos ?? []).map((x) => ({ url: `${api!.urlAnexo(fala.conversaId, x.id)}?baixar=1`, nome: x.nome }));
@@ -4275,6 +4289,151 @@ function acaoDoMenuDaFala(fala: Mensagem, acao: string, ancora: HTMLElement): vo
     anunciar(`Anotado na memória de ${botGerido(bot)?.nome ?? "o bot"}`);
   });
 }
+
+/** Copiar com a área de transferência; sem ela (http, permissão), a textarea oculta com `execCommand`. */
+async function copiarTexto(texto: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(texto);
+    return true;
+  } catch {
+    const ta = document.createElement("textarea");
+    ta.value = texto;
+    ta.setAttribute("readonly", "");
+    Object.assign(ta.style, { position: "fixed", opacity: "0", left: "-9999px" });
+    document.body.append(ta);
+    ta.select();
+    let ok = false;
+    try { ok = document.execCommand("copy"); } catch { ok = false; }
+    ta.remove();
+    return ok;
+  }
+}
+
+/**
+ * ADA-2 F5 (ADR-156 §3): "Criar tarefa disto" — a rota de sempre (`quadro.criar_tarefa`), sem agente nem status (Backlog,
+ * ninguém começa). O aviso traz Abrir (a tarefa no Quadro) e Desfazer (`quadro.desfazer` com o lote da criação). Dois
+ * toques seguidos não criam duas: a segunda chamada espera a primeira acabar e não sai.
+ */
+let criandoTarefaDaFala = false;
+async function criarTarefaDaFala(fala: Mensagem, botId: string): Promise<void> {
+  if (!api || criandoTarefaDaFala) return;
+  const a = api;
+  // A origem é a conversa com o bot, também quando a fala é da pessoa (QA ADA-20: "Da conversa com você" não diz de onde veio).
+  const autor = botGerido(botId)?.nome ?? "o bot";
+  const campos = tarefaDaFala(fala.texto, autor, dataHora(fala.criadoEm));
+  criandoTarefaDaFala = true;
+  try {
+    await agir(async () => {
+      const r = await a.criarTarefa(botId, campos);
+      const tarefaId = r.lote?.tarefaIds[0] ?? null;
+      const loteId = r.lote?.id ?? null;
+      const aviso = mostrarAvisoDesfazer({
+        texto: "Tarefa criada",
+        ...(tarefaId ? { abrir: { rotulo: "Abrir", aoAbrir: () => quadroNaTela.abrirTarefa(botId, tarefaId) } } : {}),
+        ...(loteId ? { aoDesfazer: () => agir(async () => { await a.desfazerLoteQuadro(botId, loteId); anunciar("Tarefa desfeita"); }) } : {}),
+      });
+      aviso.dataset.tarefa = tarefaId ?? "";
+      anunciar("Tarefa criada no quadro");
+    });
+  } finally {
+    criandoTarefaDaFala = false;
+  }
+}
+
+/**
+ * ADA-2 F5 (ADR-156 §2): no celular, segurar a mensagem 450 ms levanta a fala, desfoca o resto e abre o menu com tudo o
+ * que a fala tem (htmlMenuSegurado). Os itens usam o mesmo clique do ⋯ (`acaoDoMenuDaFala`).
+ */
+function abrirMenuSeguradoDaFala(segurada: HTMLElement): boolean {
+  const id = segurada.dataset.mensagem ?? "";
+  const el = segurada.isConnected ? segurada : document.querySelector<HTMLElement>(`[data-mensagem="${CSS.escape(id)}"]`);
+  const fala = falaPorId(id);
+  if (!el || !fala || fala.parcial) return false;
+  const bot = botDaFala(fala, estado);
+  const extras: ExtraDaBarra[] = [...el.querySelectorAll<HTMLElement>(".msg-actions [data-act]")]
+    .filter((b) => !(ACTS_COBERTOS as readonly string[]).includes(b.dataset.act ?? "") && b.getAttribute("aria-disabled") !== "true")
+    .map((b) => ({ act: b.dataset.act ?? "", rotulo: b.getAttribute("aria-label") ?? b.textContent?.trim() ?? "" }));
+  navigator.vibrate?.(10);
+  const d = dialogo(htmlMenuSegurado(fala, estado, !!bot && comQuadro(bot), extras), true);
+  d.classList.add("menu-fala", "menu-fala-seg", "menu-segurado");
+  d.setAttribute("aria-label", "Ações da mensagem");
+  el.classList.add("fala-segurada");
+  d.addEventListener("close", () => el.classList.remove("fala-segurada"));
+  // A fala do bot sai em um balão por parágrafo (NOD-358): o menu se mede pelo conjunto dos balões, não só pelo primeiro.
+  const baloes = [...el.querySelectorAll<HTMLElement>(".bubble")];
+  const origens = baloes.length ? baloes : [el];
+  const caixas = origens.map((o) => o.getBoundingClientRect());
+  const fora = baloes.length ? null : (el.querySelector<HTMLElement>(".bubble-wrap") ?? el).getBoundingClientRect();
+  const r = fora ?? { top: Math.min(...caixas.map((c) => c.top)), bottom: Math.max(...caixas.map((c) => c.bottom)), left: Math.min(...caixas.map((c) => c.left)) };
+  const lista = d.querySelector<HTMLElement>('[role="menu"]');
+  const lugar = lugarDoMenuSegurado({ topo: r.top, base: r.bottom }, d.offsetHeight, window.innerHeight);
+  d.style.top = `${lugar.topo}px`;
+  d.style.left = `${Math.max(12, Math.min(r.left, window.innerWidth - d.offsetWidth - 12))}px`;
+  if (lista && lugar.alturaMaxima !== null) Object.assign(lista.style, { maxHeight: `${Math.max(0, lugar.alturaMaxima - (d.offsetHeight - lista.offsetHeight))}px`, overflowY: "auto" });
+  // A fala segurada sobe por cima do fundo desfocado: uma cópia sem foco de cada balão, no mesmo lugar (o padrão do
+  // NOD-379). Todos os balões ficam escondidos (.fala-segurada), então todos ganham cópia.
+  d.prepend(...origens.map((origem, i) => {
+    const ro = caixas[i]!;
+    const copia = origem.cloneNode(true) as HTMLElement;
+    copia.classList.add("fala-copia");
+    copia.inert = true;
+    copia.setAttribute("aria-hidden", "true");
+    for (const x of copia.querySelectorAll("[id]")) x.removeAttribute("id");
+    Object.assign(copia.style, { left: `${ro.left}px`, top: `${ro.top}px`, width: `${ro.width}px`, maxHeight: `${Math.max(48, ro.height)}px` });
+    return copia;
+  }));
+  d.addEventListener("click", (e) => {
+    const alvo = e.target as HTMLElement;
+    if (alvo === d) { d.close(); return; }
+    if (alvo.closest("[data-reacao-mais]")) {
+      const linha = d.querySelector(".linha-emojis");
+      if (linha) linha.outerHTML = linhaDeEmojis(fala, estado, true);
+      d.querySelector<HTMLButtonElement>(".linha-emojis button")?.focus();
+      return;
+    }
+    const emoji = alvo.closest<HTMLElement>("[data-reacao]")?.dataset.reacao;
+    if (emoji) { d.close(); void alternarReacao(fala, emoji); return; }
+    const item = alvo.closest<HTMLElement>("[data-fala]");
+    if (item?.getAttribute("aria-disabled") === "true") return;
+    const acao = item?.dataset.fala;
+    if (acao) { d.close(); acaoDoMenuDaFala(fala, acao, el); }
+  });
+  d.addEventListener("keydown", (e) => {
+    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) return;
+    e.preventDefault();
+    // Só os botões do menu: a cópia da fala (inert) pode ter botões (o Copiar do bloco de código, a barra da linha de
+    // sistema) que não recebem foco e travariam as setas e o Home.
+    const itens = [...d.querySelectorAll<HTMLButtonElement>('[role="menu"] button')];
+    const atual = itens.indexOf(document.activeElement as HTMLButtonElement);
+    const proximo = e.key === "Home" ? 0 : e.key === "End" ? itens.length - 1 : (atual + (e.key === "ArrowDown" ? 1 : -1) + itens.length) % itens.length;
+    itens[proximo]?.focus();
+  });
+  requestAnimationFrame(() => d.querySelector<HTMLElement>('[role="menuitem"]')?.focus());
+  return true;
+}
+const toqueNaFala = criarToqueLongo<HTMLElement>({ agendar: (fn, ms) => window.setTimeout(fn, ms), cancelar: (id) => clearTimeout(id), agora: () => performance.now() }, abrirMenuSeguradoDaFala);
+document.addEventListener("pointerdown", (ev) => {
+  const alvo = ev.target as HTMLElement;
+  const fala = celular.ativo() && ev.pointerType !== "mouse" && ev.isPrimary && !alvo.closest(SELETOR_INTERATIVO)
+    ? alvo.closest<HTMLElement>("#timeline .message[data-mensagem], #timeline .msg-linha[data-mensagem]")
+    : null;
+  if (fala) { toqueNaFala.comecar(fala, ev.clientX, ev.clientY); fala.classList.add("fala-segurando"); }
+  else toqueNaFala.esquecer();
+}, true);
+const soltarFala = (): void => {
+  toqueNaFala.soltar();
+  for (const x of document.querySelectorAll(".fala-segurando")) x.classList.remove("fala-segurando");
+};
+document.addEventListener("pointermove", (ev) => toqueNaFala.mover(ev.clientX, ev.clientY));
+document.addEventListener("pointerup", soltarFala);
+document.addEventListener("pointercancel", soltarFala);
+document.addEventListener("click", (ev) => {
+  if (toqueNaFala.engolirClique()) { ev.preventDefault(); ev.stopPropagation(); }
+}, true);
+// O Android dispara contextmenu no toque longo da fala: o menu nosso já abriu (ou vai abrir), o do sistema não.
+document.addEventListener("contextmenu", (ev) => {
+  if (celular.ativo() && (ev.target as HTMLElement).closest?.("#timeline .message[data-mensagem], #timeline .msg-linha[data-mensagem]") && !(ev.target as HTMLElement).closest("a, img, video")) ev.preventDefault();
+});
 
 /**
  * NOD-54 (ADR-134): o cartão "Desfazer o que o bot mudou?" abre embaixo da fala e o foco vai ao título (não é modal: a

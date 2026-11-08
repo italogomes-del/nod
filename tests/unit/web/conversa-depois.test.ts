@@ -223,7 +223,7 @@ describe("2. a parte ao vivo é a Ada falando", () => {
     expect(reduzir(fim, { tipo: "tick", agora: AGORA + 15_000 }).falasSaindo).toEqual({});
   });
 
-  it("NOD-353 / Parte 2: com ferramenta, a fala parada final leva o pensamento pronto ('Pensou por · N ações'), na mesma chave de disclosure da viva", () => {
+  it("NOD-353 / Parte 2: com ferramenta, a fala parada final leva o pensamento pronto ('Usou N ferramentas', ADR-156), na mesma chave de disclosure da viva", () => {
     const { e: base, c } = cenario([msg("m1", "pessoa", 1)]);
     const a = comTexto(comFerramenta(ATIVIDADE_VAZIA, "Consultou GitHub", { texto: "Usando GitHub", frentes: false }), "Fechei o PR.");
     const comVivo: Estado = { ...base, turnosVivos: { t1: { turnoId: "t1", conversaId: C, estado: "rodando", executor: null, machineId: null, desde: AGORA - 9_000 } }, atividades: { [C]: { t1: a } } };
@@ -237,7 +237,7 @@ describe("2. a parte ao vivo é a Ada falando", () => {
     expect(parada.morfar!.partes.map((p) => p.chave)).toEqual(["nome", "pensar", "balao"]);
     const pensar = parada.morfar!.partes.find((p) => p.chave === "pensar")!.html;
     expect(pensar).toContain('data-disclosure="pensar-t1" data-fase="pronto"');
-    expect(pensar).toContain('<span class="fala-viva-estado">Pensou por 9 s · 1 ação</span>');
+    expect(pensar).toContain('<span class="fala-viva-estado">Usou 1 ferramenta</span>');
     expect(pensar).not.toContain("pensar-meta");
     expect(parada.html).toContain('<div class="bubble" data-parte="balao" data-no-lugar>Fechei o PR.</div>');
   });
@@ -607,12 +607,13 @@ describe("NOD-353: o resumo das ações na fala (viva, parada e gravada)", () =>
     const gravada = { ...msg("mv", "agente", 9), turnoId: T, payload: { kind: "acoes_do_turno", acoes: [{ rotulo: "Leu um arquivo", vezes: 5 }, { rotulo: "Rodou um comando" }] } } as Mensagem;
     const html = resumoDe(renderMensagem(gravada, cenario([]).e));
     // Parte 2: sem `duracaoMs` (servidor de antes), a linha diz só a contagem; as vezes contam nas ações.
-    expect(html).toContain('<span class="fala-viva-estado">6 ações</span>');
+    expect(html).toContain('<span class="fala-viva-estado">Usou 6 ferramentas</span>');
+    expect(html).not.toContain(' title="Pensou por');
     expect(html).toContain('<li class="pensar-acao" data-estado="feita"><i class="pensar-ic" aria-hidden="true"></i><span>Leu um arquivo</span><span class="pensar-vezes">×5</span></li>');
     expect(html).toContain('<li class="pensar-acao" data-estado="feita"><i class="pensar-ic" aria-hidden="true"></i><span>Rodou um comando</span></li>');
-    // Com a duração gravada, "Pensou por".
+    // Com a duração gravada, o texto continua "Usou N ferramentas" e a duração vai para o title e o aria-label (ADR-156).
     const comTempo = { ...gravada, payload: { ...gravada.payload, duracaoMs: 9_400 } } as Mensagem;
-    expect(resumoDe(renderMensagem(comTempo, cenario([]).e))).toContain('<span class="fala-viva-estado">Pensou por 9 s · 6 ações</span>');
+    expect(resumoDe(renderMensagem(comTempo, cenario([]).e))).toContain('<summary class="pensar-cab pensar-ferr" aria-label="Ver as 6 ferramentas usadas, pensou por 9 s" title="Pensou por 9 s">');
     // Fora da forma, a contagem cai (a linha fica).
     const ruim = { ...gravada, payload: { kind: "acoes_do_turno", acoes: [{ rotulo: "Leu um arquivo", vezes: "<b>" }] } } as unknown as Mensagem;
     expect(resumoDe(renderMensagem(ruim, cenario([]).e))).not.toContain("pensar-vezes");
@@ -659,7 +660,7 @@ describe("NOD-353: o resumo das ações na fala (viva, parada e gravada)", () =>
     a = comTexto(a, "Pronto.");
     const fim = reduzir(vivoCom(base, a), { tipo: "frame", frame: { tipo: "turno.encerrado", dados: { turnoId: T, conversaId: C } } as never, agora: AGORA });
     const parada = resumoDe(blocosAoVivo(fim.conversas[C]!, fim)[0]!.html);
-    expect(parada).toContain('<span class="fala-viva-estado">Pensou por 0 s · 2 ações · 1 falhou</span>');
+    expect(parada).toContain('<span class="fala-viva-estado">Usou 2 ferramentas · 1 falhou</span>');
     const gravada = renderMensagem(msg("m2", "agente", 2, { turnoId: T, texto: "Pronto.", payload: { kind: "acoes_do_turno", acoes: [{ rotulo: "Leu um arquivo" }, { rotulo: "Rodou um comando", falhou: true }], duracaoMs: 0 } } as Partial<Mensagem>), fim);
     // A parada é uma parte do morph (data-parte, data-no-lugar); o resto é igual, letra a letra.
     expect(resumoDe(gravada)).toBe(parada.replace(' data-parte="pensar" data-no-lugar', ""));

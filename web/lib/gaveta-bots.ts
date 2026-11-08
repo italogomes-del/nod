@@ -126,14 +126,8 @@ export function criarCelular(aoMudar: () => void = () => undefined): Celular {
     if (!consulta.matches || voltarPeloHistorico(ev.state)) return;
     mudar(true);
   });
-  // O toque numa mensagem mostra o "relatar" dela (no celular ele não fica à vista o tempo todo, nem apagado).
-  document.addEventListener("click", (ev) => {
-    if (!consulta.matches || !(ev.target instanceof Element) || ev.target.closest(SELETOR_INTERATIVO)) return;
-    const mensagem = ev.target.closest(".message, .msg-linha");
-    if (!mensagem) return;
-    for (const outra of document.querySelectorAll(".acoes-a-mostra")) if (outra !== mensagem) outra.classList.remove("acoes-a-mostra");
-    mensagem.classList.toggle("acoes-a-mostra");
-  });
+  // ADA-2 F5 (ADR-156 §2, emenda da ADR-113): o toque simples na mensagem não abre mais nada no celular; as ações da fala
+  // (a barra e o ⋯) vão para o menu do toque longo (web/main.ts, abrirMenuSeguradoDaFala).
   // Virar celular (girar, encolher a janela) começa na inicial; virar computador volta à coluna de sempre.
   consulta.addEventListener("change", () => {
     noInicio = true;

@@ -604,7 +604,7 @@ export function pilulaDoQuadro(o: { meta: string | null; nome: string; modo?: st
   const rot = o.meta ? `Conversar com o quadro ${o.meta}` : `Conversar com ${o.nome} sobre o quadro`;
   const accept = o.anexos === "sem_pdf" ? "image/*,.txt,.md,.csv,.json" : "image/*,application/pdf,.pdf,.txt,.md,.csv,.json";
   const clipe = o.anexos
-    ? `<button type="button" class="qc-bt qc-clipe" data-act="anexar" data-composer="clipe" aria-label="Anexar arquivo">${CLIPE}</button>` +
+    ? `<button type="button" class="qc-bt qc-clipe" data-act="anexar" data-composer="clipe" aria-label="Anexar arquivo">${CLIPE}${MAIS_DO_CELULAR}</button>` +
       `<input type="file" class="qd-sr" data-composer="arquivos" multiple accept="${accept}" hidden tabindex="-1" aria-hidden="true" data-aceita="${o.anexos}" />`
     : "";
   return confiar(`<div class="qc-caixa"><div class="qc-sobre" id="qc-sobre"><div class="qc-cartao" id="qc-cartao"></div>` +
@@ -633,6 +633,11 @@ export function ideiasDaPilula(s: readonly Sugestao[]): string {
 /** O Parar da pílula (ADA-5): o mesmo botão do Enviar, com o quadrado (como o do chat). */
 export const ICONE_PARAR_PILULA = '<svg viewBox="0 0 14 14" aria-hidden="true"><rect x="2" y="2" width="10" height="10" rx="2.5" fill="currentColor"/></svg>';
 export const ICONE_ENVIAR_PILULA = ENVIAR;
+/**
+ * ADA-2 F5 (ADR-156 §5, S6): no celular o clipe vira o + redondo (o computador continua com o clipe). A folha do + teria
+ * um item só (Anexar), então o + abre o seletor de arquivo direto, com o mesmo `data-act="anexar"`.
+ */
+const MAIS_DO_CELULAR = '<svg class="qc-ic-mais" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>';
 const CLIPE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5 12.6 19.9a5.5 5.5 0 0 1-7.8-7.8l8.5-8.5a3.7 3.7 0 0 1 5.2 5.2l-8.5 8.5a1.8 1.8 0 0 1-2.6-2.6l7.8-7.8"/></svg>';
 
 /* ---------- NOD-443 (ADR-143): as pessoas do quadro, o modo e o mural de Atividade ---------- */
