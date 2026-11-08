@@ -179,6 +179,7 @@ const DESPACHO: Despacho = {
   gerir_quadro: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.gerir_quadro](deps, { ...ctx, ...args }),
   gerir_apps: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.gerir_apps](deps, { ...ctx, ...args }),
   gerir_times: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.gerir_times](deps, { ...ctx, ...args }),
+  gerir_acessos: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.gerir_acessos](deps, { ...ctx, ...args }),
   gerir_canvas: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.gerir_canvas](deps, { ...ctx, ...args }),
   nao_lidos: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.nao_lidos](deps, { ...ctx, ...args }),
   abrir_conta: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.abrir_conta](deps, { ...ctx, ...args }),

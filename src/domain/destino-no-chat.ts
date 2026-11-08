@@ -49,6 +49,8 @@ export const DESTINO: Readonly<Record<Assunto, RegraDeDestino>> = {
   "leitura.recibo": { destino: "chat", categoria: null },
   // NOD-437: o recibo do gerir_times ("Time Marketing criado... Pedido por Marlon via Edu"), no chat e na Atividade.
   "times.organizados": { destino: "chat", categoria: null },
+  // ADA-241: o recibo do gerir_acessos ("3 bots com Ler no Gmail. Pedido por Marlon via Edu").
+  "acessos.mudados": { destino: "chat", categoria: null },
   // O aviso único de janelas adiadas (NOD-243): diz por que a rotina não roda e quando volta.
   "rotina.adiada": { destino: "chat", categoria: null },
   // A linha "Rotina executou" (ou "passou em branco"): a silenciosa (sem_novidade) não grava linha nenhuma, então é ela que

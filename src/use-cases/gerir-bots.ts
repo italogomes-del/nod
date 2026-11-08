@@ -12,6 +12,8 @@ import { autoriaPessoa, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento
 import { semCard, type PorRegra } from "./confirmar-pelo-modo.ts";
 import { EXECUTORES_BOTS } from "./acoes/bots.ts";
 import { EXECUTORES_TIMES } from "./acoes/times.ts";
+import { EXECUTORES_ACESSOS } from "./acoes/acessos.ts";
+import { fraseDoLote, ROTULO_DO_NIVEL } from "../domain/acessos-em-lote.ts";
 import { listaFalada } from "../domain/times.ts";
 import { criarRotinaPelaPessoa } from "./criar-rotina.ts";
 import { decidirAcesso } from "./decidir-acesso.ts";
@@ -50,17 +52,30 @@ const VERBO: Record<AcaoLote["tipo"], string> = {
   mudar_modo: "Mudar modo",
   restaurar_versao: "Restaurar versão do perfil de",
   excluir_time: "Excluir o time",
+  acessos_em_lote: "Mudar o acesso de vários bots",
+  padrao_acesso: "Mudar o padrão do app",
+  desfazer_acessos: "Desfazer o lote de acessos",
 };
 
+/** ADA-241: a linha do acesso em lote, do padrão e do Desfazer ("3 bots com Ler no Gmail"). */
+function linhaDeAcessos(a: Pick<AcaoNoLote, "tipo" | "app" | "nivel_lote" | "bots_nomes" | "todos">): string {
+  const app = a.app ?? "app";
+  const nivel = a.nivel_lote ?? "nenhum";
+  if (a.tipo === "padrao_acesso") return `Bots novos no ${app} começam com ${ROTULO_DO_NIVEL[nivel]}`;
+  if (a.tipo === "desfazer_acessos") return `Desfazer a última mudança de acesso no ${app}`;
+  return a.todos ? `Todos os bots com ${ROTULO_DO_NIVEL[nivel]} no ${app}` : `${fraseDoLote(a.bots_nomes?.length ?? 0, nivel, app)}${a.bots_nomes?.length ? ` (${listaFalada(a.bots_nomes)})` : ""}`;
+}
+
 /** Uma linha legível da ação (a mensagem de sistema do desfecho). */
-export function linhaDaAcao(a: Pick<AcaoNoLote, "tipo" | "alvoNome" | "secao" | "app" | "nivel" | "modo" | "versao" | "membros">): string {
+export function linhaDaAcao(a: Pick<AcaoNoLote, "tipo" | "alvoNome" | "secao" | "app" | "nivel" | "modo" | "versao" | "membros" | "nivel_lote" | "bots_nomes" | "todos">): string {
+  if (a.tipo === "acessos_em_lote" || a.tipo === "padrao_acesso" || a.tipo === "desfazer_acessos") return linhaDeAcessos(a);
   if (a.tipo === "excluir_time") return `Excluir o time ${a.alvoNome} (${a.membros?.length ? `${listaFalada(a.membros)} ${a.membros.length === 1 ? "foi" : "foram"} para Sem time` : "sem bots"})`;
   if (a.tipo === "restaurar_versao") return `Restaurar a versão ${a.versao ?? "?"} do perfil de ${a.alvoNome}`;
   const extra = a.tipo === "mover" ? ` para ${a.secao ? `"${a.secao}"` : "Sem time"}` : a.tipo === "dar_acesso" ? ` ao ${a.app} (${a.nivel === "escrita" ? "ler e alterar" : "ler"})` : a.tipo === "mudar_modo" ? ` para ${a.modo}` : "";
   return `${VERBO[a.tipo]} ${a.alvoNome}${extra}`;
 }
 
-type Feito = { botId: string | null; nome: string; events: RuntimeEvent[]; aviso?: string; membros?: string[] };
+type Feito = { botId: string | null; nome: string; events: RuntimeEvent[]; aviso?: string; membros?: string[]; loteId?: string };
 
 /** NOD-289 (M2): o que a pessoa precisa saber da cópia pedida ao Nod. */
 export const AVISO_ROTINAS_PAUSADAS = "rotinas da cópia vieram pausadas; ative em Rotinas";
@@ -132,6 +147,20 @@ async function executarAcao(deps: Deps, a: AcaoLote & { alvoNome: string }, botI
       // Revisão 1 (M6): o recibo diz quem foi de verdade para Sem time agora, não quem estava quando o card abriu.
       return { botId: null, nome: r.data.time.nome, events: r.events ?? [], membros: r.data.bots.map((b) => b.nome) };
     }
+    case "acessos_em_lote": {
+      // ADA-241: o mesmo executor da tela (POST /conectores/:id/acessos/lote). Ler e alterar só com o card aprovado pela
+      // pessoa (`pelaPessoa`): o modo do bot nunca o confirma (pessoa_confirma); isto é a segunda cerca.
+      const r = await EXECUTORES_ACESSOS["acessos.dar_em_lote"](deps, { conectorId: a.conector_id ?? "", nivel: a.nivel_lote ?? "nenhum", bots: a.todos ? "todos" : (a.bots_ids ?? []), chave: a.chave ?? "", confirmado: ctx.pelaPessoa, ...(ctx.porRegra ? { porRegra: ctx.porRegra } : {}), ...(ctx.pelaPessoa ? {} : { botId: ctx.nodId }) });
+      return { botId: null, nome: r.data.frase, events: r.events ?? [], ...(r.data.loteId ? { loteId: r.data.loteId } : {}) };
+    }
+    case "padrao_acesso": {
+      const r = await EXECUTORES_ACESSOS["apps.padrao"](deps, { conectorId: a.conector_id ?? "", nivel: a.nivel_lote ?? "nenhum", aplicar: a.aplicar !== false, confirmado: ctx.pelaPessoa, ...(ctx.porRegra ? { porRegra: ctx.porRegra } : {}) });
+      return { botId: null, nome: r.data.app, events: r.events ?? [] };
+    }
+    case "desfazer_acessos": {
+      const r = await EXECUTORES_ACESSOS["acessos.desfazer_lote"](deps, { loteId: a.lote_id ?? "", ...(ctx.porRegra ? { porRegra: ctx.porRegra } : {}) });
+      return { botId: null, nome: r.data.app, events: r.events ?? [] };
+    }
     default:
       throw new ErroDeDominio("entrada_invalida", { cause: "tipo de ação" });
   }
@@ -171,6 +200,8 @@ async function executarEmOrdem(
       a.botId = feito.botId;
       if (feito.aviso) a.aviso = feito.aviso;
       if (feito.membros) a.membros = feito.membros;
+      // ADA-241: o lote aplicado pelo card guarda o id (o Desfazer pelo chat o usa).
+      if (feito.loteId) a.lote_id = feito.loteId;
       // QA de 2026-10-07: no duplicar o card e o desfecho falam do ORIGINAL ("Duplicar Dev 1"); a cópia só vira alvo de "@ref".
       if (a.tipo === "criar") a.alvoNome = feito.nome;
       events.push(...feito.events);
@@ -189,6 +220,9 @@ async function linhaDoPedidoViaBot(deps: Deps, agenteId: string): Promise<string
   const [pessoa, bot] = await Promise.all([deps.repos.pessoas.buscar(deps.escopo.pessoaId), deps.repos.agentes.buscar(agenteId)]);
   return `Pedido por ${pessoa?.nome ?? "você"} ${bot ? `via bot ${bot.nome}` : "via um bot"}.`;
 }
+
+/** O que só outro bot põe no card (gerir_times, gerir_acessos): o recibo diz quem pediu e por qual bot. */
+const VEM_DE_OUTRO_BOT: ReadonlySet<AcaoNoLote["tipo"]> = new Set(["excluir_time", "acessos_em_lote", "padrao_acesso", "desfazer_acessos"]);
 
 const CAUSAS_DO_RESTAURAR: ReadonlySet<string> = new Set(["igual_a_atual", "versao_redigida", "perfil_mudou"]);
 
@@ -279,7 +313,7 @@ export const decidirLoteDeBots: CasoDeUso<{ decisaoId: string; recusar: boolean;
   const recusadas = daVez.filter((a) => a.estado === "recusada");
   const autoria = autoriaPessoa(deps.escopo);
   // NOD-437 (revisão 1, M6): o excluir_time veio de um bot (gerir_times); o histórico diz quem pediu e por qual bot.
-  const viaBot = feitas.some((a) => a.tipo === "excluir_time") ? await linhaDoPedidoViaBot(deps, proposta.agenteId) : null;
+  const viaBot = feitas.some((a) => VEM_DE_OUTRO_BOT.has(a.tipo)) ? await linhaDoPedidoViaBot(deps, proposta.agenteId) : null;
   const texto = input.recusar
     ? `Recusado: ${recusadas.length} ${recusadas.length === 1 ? "mudança" : "mudanças"} nos seus bots.`
     : [`${feitas.length} de ${daVez.length} ${daVez.length === 1 ? "mudança feita" : "mudanças feitas"}.`, ...feitas.map((a) => `✓ ${linhaDaAcao(a)}${a.aviso ? ` (${a.aviso})` : ""}`), ...falhas.map((a) => `✗ ${linhaDaAcao(a)} — não deu certo (${a.erro ?? "falhou"})`), ...recusadas.map((a) => `– ${linhaDaAcao(a)} (desmarcada)`), ...(viaBot ? [viaBot] : [])].join("\n");

@@ -71,12 +71,12 @@ export function tiposDoLoteNoRegistro(): TipoAcaoLote[] {
 }
 
 /** O risco desta chamada do lote, pelo registro: o `riscoDe` do id, senão o risco fixo. */
-export function riscoNoLote(a: Pick<AcaoLote, "tipo" | "descricao" | "titulo" | "modo">): RiscoAcao {
+export function riscoNoLote(a: Pick<AcaoLote, "tipo" | "descricao" | "titulo" | "modo" | "nivel_lote">): RiscoAcao {
   const def = acaoDoTipoDoLote(a.tipo);
   return def.lote?.riscoDe?.(a) ?? def.risco;
 }
 
 /** A cerca 3 do id para esta chamada do lote (ADR-082): depois de conteúdo de fora, vira cartão? */
-export function deForaNoLote(a: Pick<AcaoLote, "tipo" | "descricao" | "titulo" | "modo">, s: { alvoTemAcessos: boolean }): boolean {
+export function deForaNoLote(a: Pick<AcaoLote, "tipo" | "descricao" | "titulo" | "modo" | "nivel_lote">, s: { alvoTemAcessos: boolean }): boolean {
   return acaoDoTipoDoLote(a.tipo).lote?.deFora?.(a, s) ?? false;
 }

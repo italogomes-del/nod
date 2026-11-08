@@ -5,6 +5,7 @@ import { linhaDoDesfecho, mensagemDeNascimento, validarBotsNovos } from "../doma
 import { ehErroDeDominio, ErroDeDominio } from "../domain/erro.ts";
 import { log } from "../obs/log.ts";
 import { evento } from "./autoria-evento.ts";
+import { aplicarPadroes } from "./acoes/acessos.ts";
 import { secaoComTime } from "./acoes/times.ts";
 import { criarAgente } from "./criar-agente.ts";
 import { turnoComAPessoa } from "./nod.ts";
@@ -72,6 +73,8 @@ export async function criarBots(deps: Deps, input: ContextoFerramenta & ArgsCria
           mensagem: mensagemDeNascimento({ nome: b.nome, quem: quem.nome, pessoa, agora, descricao: b.descricao }),
         });
         events.push(...(r.events ?? []));
+        // ADA-241: o bot novo nasce com o padrão de cada app que a dona definiu (o mesmo do Criar bot da tela).
+        events.push(...(await aplicarPadroes(deps, r.data.agente.id)));
         const pedida = b.secao ?? secaoDeQuem;
         // NOD-437 (revisão 3): o time da seção nasce junto (a barra não fica com time provisório).
         const secao = pedida ? await secaoComTime(deps, pedida) : pedida;

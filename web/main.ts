@@ -173,6 +173,11 @@ import { abertasPorAgente, perguntasPorAgente, renderChamada, renderIncidentes, 
 import { aparenciaDoComposer } from "./telas/pergunta.ts";
 import { BANDEJA, naoLidaDe, nomeDaConversa, renderNaoLidos, rotuloNaoLidos } from "./telas/nao-lidos.ts";
 import { mostrarAvisoDesfazer } from "./lib/aviso-desfazer.ts";
+import { acessosNaTela, chaveDoClique } from "./lib/acessos-otimistas.ts";
+import { gavetaDeAcessos, loteDeEscritaPedeConfirmacao, ROTULO } from "./telas/acessos-do-app.ts";
+import { conectorDoApp, meusBots, nivelReal } from "./telas/app-acesso.ts";
+import type { LoteDeAcessosDto } from "./lib/api.ts";
+import type { Conector } from "../src/contracts/conector.ts";
 import { ACTS_COBERTOS, htmlMenuSegurado, tarefaDaFala, type ExtraDaBarra } from "./lib/menu-segurado-da-fala.ts";
 import { tentarNoApp } from "./lib/recusa-de-app.ts";
 import { criarRecolherAdiado } from "./lib/recolher-adiado.ts";
@@ -1450,6 +1455,105 @@ function marcarTudoComDesfazer(): Promise<void> {
 }
 
 /** Roda uma mutação: marca ocupado, traduz o erro em código fechado (nunca err.message cru). */
+// ------------------------------------------------------------------------------------------- ADA-241: acessos em lote
+
+/** O conector aberto na gaveta do marketplace (ou null). */
+function conectorDaGaveta(): Conector | null {
+  const t = estado.tela;
+  if (t.tipo !== "conectores" || !t.gaveta) return null;
+  return conectorDoApp(estado, t.gaveta.slug) ?? null;
+}
+
+/** Busca o padrão do app e quem segue o padrão quando a gaveta abre (ou depois de um lote, do padrão, do Desfazer). */
+function garantirAcessosDoApp(): void {
+  // A caixa "Selecionar todos" com só parte marcada fica no estado misto (o HTML não tem atributo para isso).
+  for (const i of document.querySelectorAll<HTMLInputElement>(".acessos-todos input[data-misto]")) i.indeterminate = true;
+  const c = conectorDaGaveta();
+  gavetaDeAcessos.abrir(c?.id ?? null);
+  if (!c || !api || !gavetaDeAcessos.precisaCarregar(c.id)) return;
+  void api.acessosDoApp(c.id).then(
+    (r) => { gavetaDeAcessos.guardar(c.id, { padrao: r.padrao, seguePadrao: new Set(r.bots.filter((b) => b.segue_padrao).map((b) => b.agenteId)) }); render(); },
+    () => gavetaDeAcessos.guardar(c.id, { padrao: "nenhum", seguePadrao: new Set() }),
+  );
+}
+
+function recarregarAcessos(conectorId: string, agentes: readonly string[]): void {
+  gavetaDeAcessos.esquecer(conectorId);
+  dispatch({ tipo: "invalidar", quais: [...new Set(agentes)].map((id) => `concessoes:${id}` as Invalidacao).concat(["frota"]) });
+}
+
+/**
+ * Critério 3: o nível dos pares aparece já no próximo desenho (síncrono, bem abaixo de 100 ms) e o pedido sai em seguida.
+ * Erro: só os pares que ainda são deste clique voltam (o último clique vence) e o aviso diz o que houve.
+ */
+async function mudarNivelOtimista(pares: { agenteId: string; conectorId: string }[], nivel: "nenhum" | "leitura" | "escrita", pedir: () => Promise<unknown>): Promise<void> {
+  avisador.acaoPropria();
+  const seq = acessosNaTela.marcar(pares, nivel);
+  render();
+  try {
+    // Na ordem dos cliques por par: o servidor aplica o último por último (revisão independente do PR #706).
+    await acessosNaTela.emOrdem(pares, pedir);
+    acessosNaTela.confirmar(pares, seq, Date.now());
+    recarregarAcessos(pares[0]?.conectorId ?? "", pares.map((p) => p.agenteId));
+  } catch (e) {
+    if (acessosNaTela.reverter(pares, seq)) {
+      render();
+      const erro = erroDe(e);
+      mostrarAvisoDesfazer({ texto: `Não deu para mudar o acesso${erro?.mensagem ? `: ${erro.mensagem}` : ""}. Voltou ao que era.` });
+    }
+  }
+}
+
+/** O lote: otimista em todos os alvos; no fim, o aviso com a frase do servidor e Desfazer (24 h no servidor). */
+async function aplicarLoteDeAcessos(conectorId: string, nivel: "nenhum" | "leitura" | "escrita", bots: "todos" | string[], confirmado: boolean): Promise<void> {
+  const c = estado.conectores.find((x) => x.id === conectorId);
+  if (!c || !api) return;
+  // "Todos" com Ler não rebaixa quem tem Ler e alterar ou personalizado (o servidor mantém, alvosDoLote); a tela também não.
+  const alvos = (bots === "todos" ? meusBots(estado).map((a) => a.id) : bots).filter((id) => !(bots === "todos" && nivel === "leitura" && ["escrita", "personalizado"].includes(nivelReal(estado, id, c))));
+  const pares = alvos.map((agenteId) => ({ agenteId, conectorId }));
+  const chave = chaveDoClique();
+  let lote: LoteDeAcessosDto | null = null;
+  await mudarNivelOtimista(pares, nivel, async () => { lote = await api!.acessosEmLote(conectorId, { nivel, bots, chave, confirmado }); });
+  const feito = lote as LoteDeAcessosDto | null;
+  if (!feito) return;
+  gavetaDeAcessos.limpar(conectorId);
+  render();
+  const loteId = feito.lote_id;
+  mostrarAvisoDesfazer({ texto: feito.frase, ...(loteId ? { aoDesfazer: () => desfazerLoteDeAcessos(conectorId, loteId, alvos) } : {}) });
+}
+
+async function desfazerLoteDeAcessos(conectorId: string, loteId: string, alvos: readonly string[]): Promise<void> {
+  try {
+    const r = await api!.desfazerLoteDeAcessos(loteId);
+    recarregarAcessos(conectorId, alvos);
+    if (r.mudaram_depois.length) mostrarAvisoDesfazer({ texto: `Desfeito. ${r.mudaram_depois.map((b) => b.nome).join(", ")} ${r.mudaram_depois.length === 1 ? "mudou" : "mudaram"} depois e ${r.mudaram_depois.length === 1 ? "ficou" : "ficaram"} como está.` });
+  } catch (e) {
+    mostrarErro(e);
+  }
+}
+
+async function definirPadraoDoApp(conectorId: string, nivel: "nenhum" | "leitura" | "escrita", confirmado: boolean): Promise<void> {
+  const antes = gavetaDeAcessos.acessos(conectorId);
+  // Otimista também: o segmentado do padrão acende na hora; erro volta ao de antes.
+  gavetaDeAcessos.guardar(conectorId, { padrao: nivel, seguePadrao: antes?.seguePadrao ?? new Set() });
+  render();
+  try {
+    const r = await api!.padraoDoApp(conectorId, { nivel, confirmado });
+    recarregarAcessos(conectorId, r.aplicados.map((a) => a.agenteId));
+    const n = r.aplicados.length;
+    mostrarAvisoDesfazer({ texto: `Bots novos começam com ${ROTULO[nivel]}${n ? ` · ${n === 1 ? "1 bot passou" : `${n} bots passaram`} junto` : ""}` });
+  } catch (e) {
+    if (antes) gavetaDeAcessos.guardar(conectorId, antes);
+    else gavetaDeAcessos.esquecer(conectorId);
+    render();
+    mostrarErro(e);
+  }
+}
+
+function focarConfirmacao(): void {
+  queueMicrotask(() => document.querySelector<HTMLElement>(".acessos-confirma [data-foco-inicial]")?.focus());
+}
+
 async function agir(fn: () => Promise<void>): Promise<void> {
   // O que nasce do próprio clique ela já sabe: nenhum aviso nos próximos 5 s (web/lib/avisador.ts).
   avisador.acaoPropria();
@@ -2967,6 +3071,7 @@ function render(): void {
     queueMicrotask(() => telaLigacao.retomar(retomar));
   }
   renderPrincipal();
+  garantirAcessosDoApp();
   // NOD-379: com a inicial do celular à vista (o voltar do navegador por cima do Marketplace), a gaveta de app não prende
   // o foco: ela deixaria a inicial inerte.
   prenderFocoNaGaveta(celular.botsAbertos() ? null : gavetaDoApp);
@@ -5642,13 +5747,41 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     if (n !== "nenhum" && n !== "ver_comentar" && n !== "criar_publicar") return;
     guardarAppCanvas(await api!.acessoCanvas(el.dataset.id ?? "", n === "nenhum" ? null : n));
   }),
-  "nivel-bot": (el) => agir(async () => {
+  // ADA-241 (ADR-158): o nível aparece na hora (camada otimista, web/lib/acessos-otimistas.ts) e não trava a tela com
+  // "ocupado": o clique seguinte (o mesmo bot ou outro) já sai. Erro: o par volta ao que o servidor diz, com aviso.
+  "nivel-bot": (el) => {
     const agenteId = el.dataset.id ?? "";
+    const conectorId = el.dataset.conector ?? "";
     const nivel = el.dataset.nivel;
     if (nivel !== "nenhum" && nivel !== "leitura" && nivel !== "escrita") return;
-    await api!.definirNivel(agenteId, el.dataset.conector ?? "", nivel);
-    dispatch({ tipo: "invalidar", quais: [`concessoes:${agenteId}`, "frota"] });
-  }),
+    void mudarNivelOtimista([{ agenteId, conectorId }], nivel, () => api!.definirNivel(agenteId, conectorId, nivel));
+  },
+  "selecionar-acesso": (el) => { gavetaDeAcessos.alternar(el.dataset.conector ?? "", el.dataset.id ?? ""); render(); },
+  "selecionar-todos-acessos": (el) => { gavetaDeAcessos.alternarTodos(el.dataset.conector ?? "", meusBots(estado).map((a) => a.id)); render(); },
+  "lote-acesso": (el) => {
+    const conectorId = el.dataset.conector ?? "";
+    const nivel = el.dataset.nivel;
+    if (nivel !== "nenhum" && nivel !== "leitura" && nivel !== "escrita") return;
+    const sel = [...gavetaDeAcessos.selecao(conectorId)].filter((id) => meusBots(estado).some((a) => a.id === id));
+    const bots: "todos" | string[] = sel.length ? sel : "todos";
+    if (loteDeEscritaPedeConfirmacao(nivel, bots, meusBots(estado).length)) { gavetaDeAcessos.pedirConfirmacao({ conectorId, alvo: "lote", bots }); render(); focarConfirmacao(); return; }
+    void aplicarLoteDeAcessos(conectorId, nivel, bots, nivel === "escrita");
+  },
+  "padrao-app": (el) => {
+    const conectorId = el.dataset.conector ?? "";
+    const nivel = el.dataset.nivel;
+    if (nivel !== "nenhum" && nivel !== "leitura" && nivel !== "escrita") return;
+    if (nivel === "escrita") { gavetaDeAcessos.pedirConfirmacao({ conectorId, alvo: "padrao", bots: "todos" }); render(); focarConfirmacao(); return; }
+    void definirPadraoDoApp(conectorId, nivel, false);
+  },
+  "confirmar-escrita": (el) => {
+    const c = gavetaDeAcessos.confirmacao();
+    gavetaDeAcessos.pedirConfirmacao(null);
+    if (!c || c.conectorId !== (el.dataset.conector ?? "")) { render(); return; }
+    if (c.alvo === "padrao") void definirPadraoDoApp(c.conectorId, "escrita", true);
+    else void aplicarLoteDeAcessos(c.conectorId, "escrita", c.bots, true);
+  },
+  "cancelar-escrita": () => { gavetaDeAcessos.pedirConfirmacao(null); render(); },
   "desconectar-app": (el) => agir(async () => {
     await api!.habilitarConector(el.dataset.id ?? "", false);
     dispatch({ tipo: "invalidar", quais: ["conectores"] });
@@ -7367,6 +7500,7 @@ document.addEventListener("keydown", (ev) => {
     return;
   }
   // definido em 2026-09-25 (revisão do PR #68): Esc fecha a gaveta do app e o "+ Dar acesso" do painel.
+  if (ev.key === "Escape" && gavetaDeAcessos.confirmacao()) { ev.preventDefault(); gavetaDeAcessos.pedirConfirmacao(null); render(); document.querySelector<HTMLElement>(".acessos-lote [data-act=\"lote-acesso\"], .acessos-padrao [data-act=\"padrao-app\"]")?.focus(); return; }
   if (ev.key === "Escape" && estado.tela.tipo === "conectores" && estado.tela.gaveta && !celular.botsAbertos()) { ev.preventDefault(); void ACOES["fechar-gaveta"]?.(document.body); return; }
   // NOD-122: com a gaveta aberta o Tab dá a volta nela, em vez de sair para a barra do navegador.
   if (ev.key === "Tab" && gavetaMontada && !ev.altKey && !ev.metaKey && !ev.ctrlKey) {

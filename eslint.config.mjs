@@ -94,12 +94,15 @@ export default tseslint.config(
   // (rota de pessoa); conceder-acessos-da-rotina.ts concede o que a rotina declarou quando a pessoa a
   // confirma (emenda de 2026-09-24, "rotina nasce com o acesso"); duplicar-agente.ts leva à cópia as
   // concessões do bot da PRÓPRIA dona quando ela clica em Duplicar — só a rota de pessoa o chama, nenhuma
-  // ferramenta (emenda de 2026-09-28 da ADR-034).
+  // ferramenta (emenda de 2026-09-28 da ADR-034). acoes/acessos.ts (emenda de 2026-11-07, ADA-241, ADR-158) é o
+  // executor único do nível em lote e do padrão do app: roda pelo clique da pessoa (tela ou card do lote) ou pelo
+  // modo do bot com porRegra registrado (como o dar_acesso, ADR-082); Ler e alterar sempre espera a pessoa, e o
+  // padrão que o bot novo herda foi a própria dona quem definiu.
   // Regra do núcleo (no-restricted-imports), não a do typescript-eslint: a mesma regra num segundo
   // bloco SUBSTITUIRIA as fronteiras de camada acima para estes arquivos.
   {
     files: ["src/**/*.ts"],
-    ignores: ["src/use-cases/conceder.ts", "src/use-cases/decidir-acesso.ts", "src/adapters/http/rotas/concessoes.ts", "src/**/conceder-acessos-da-rotina.ts", "src/use-cases/duplicar-agente.ts"],
+    ignores: ["src/use-cases/conceder.ts", "src/use-cases/decidir-acesso.ts", "src/adapters/http/rotas/concessoes.ts", "src/**/conceder-acessos-da-rotina.ts", "src/use-cases/duplicar-agente.ts", "src/use-cases/acoes/acessos.ts"],
     rules: {
       "no-restricted-imports": [
         "error",

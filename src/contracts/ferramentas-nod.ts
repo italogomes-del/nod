@@ -11,7 +11,7 @@ import { FERRAMENTAS_CRIAR_BOTS, type ContratoFerramentasCriarBots } from "./fer
 import { FERRAMENTAS_RESPONDER_PEDIDO, type ContratoFerramentasResponderPedido } from "./ferramentas-responder-pedido.ts";
 import { FERRAMENTAS_CREDENCIAL, type ContratoFerramentasCredencial } from "./ferramentas-credencial.ts";
 import { FERRAMENTAS_AVISO, type ContratoFerramentasAviso } from "./ferramentas-aviso.ts"; import { FERRAMENTAS_BARRA, type ContratoFerramentasBarra } from "./ferramentas-barra.ts";
-import { FERRAMENTAS_CONTA, type ContratoFerramentasConta } from "./ferramentas-conta.ts"; import { FERRAMENTAS_QUADRO, type ContratoFerramentasQuadro } from "./ferramentas-quadro.ts"; import { FERRAMENTAS_APPS, type ContratoFerramentasApps } from "./ferramentas-apps.ts"; import { FERRAMENTAS_CONVERSAS, type ContratoFerramentasConversas } from "./ferramentas-conversas.ts"; import { FERRAMENTAS_NAO_LIDOS, type ContratoFerramentasNaoLidos } from "./ferramentas-nao-lidos.ts"; import { FERRAMENTAS_TIMES, type ContratoFerramentasTimes } from "./ferramentas-times.ts"; import { FERRAMENTAS_CANVAS, type ContratoFerramentasCanvas } from "./ferramentas-canvas.ts";
+import { FERRAMENTAS_CONTA, type ContratoFerramentasConta } from "./ferramentas-conta.ts"; import { FERRAMENTAS_QUADRO, type ContratoFerramentasQuadro } from "./ferramentas-quadro.ts"; import { FERRAMENTAS_APPS, type ContratoFerramentasApps } from "./ferramentas-apps.ts"; import { FERRAMENTAS_CONVERSAS, type ContratoFerramentasConversas } from "./ferramentas-conversas.ts"; import { FERRAMENTAS_NAO_LIDOS, type ContratoFerramentasNaoLidos } from "./ferramentas-nao-lidos.ts"; import { FERRAMENTAS_TIMES, type ContratoFerramentasTimes } from "./ferramentas-times.ts"; import { FERRAMENTAS_ACESSOS, type ContratoFerramentasAcessos } from "./ferramentas-acessos.ts"; import { FERRAMENTAS_CANVAS, type ContratoFerramentasCanvas } from "./ferramentas-canvas.ts";
 import { SCHEMA_PEDIR_A_PESSOA, type ArgsPedirAPessoa } from "./pedido.ts";
 import type { ArgsAtualizarRotina, ArgsCriarRotina, ArgsExcluirRotina, ArgsListarRotinas, ArgsPausarRotina, ArgsReativarRotina, ArgsVerAgenda, ResultadoAlternarRotina, ResultadoCriarRotina, ResultadoListarRotinas, ResultadoPropostaRotina, ResultadoVerAgenda } from "./ferramentas-rotina.ts";
 import type { JsonSchema } from "./json-schema.ts";
@@ -21,7 +21,7 @@ export type { ArgsAtualizarPerfil, ArgsVerColegas, AppDoColega, ColegaListado, R
 export type { ArgsAtualizarRotina, ArgsCriarRotina, ArgsExcluirRotina, ArgsListarRotinas, ArgsPausarRotina, ArgsReativarRotina, ArgsVerAgenda, ResultadoAlternarRotina, ResultadoCriarRotina, ResultadoListarRotinas, ResultadoPropostaRotina, ResultadoVerAgenda, RotinaListada } from "./ferramentas-rotina.ts";
 
 /**
- * As ferramentas nod (quarenta e sete em 2026-11-04, com o gerir_canvas da ADA-13; quarenta e seis em 2026-11-02, com o gerir_times da NOD-437 e o gerir_apps da NOD-445; quarenta e quatro em 2026-11-01, com o nao_lidos da NOD-449; quarenta e três em 2026-10-31, com o gerir_quadro da NOD-442; quarenta e duas em 2026-10-29: ajustar_barra_lateral da NOD-119, buscar_conversas e ler_conversa da NOD-61 e ver_agenda da NOD-85; contadas pelo teste; eram VINTE E UMA na contagem original) (EMENDA 16 acrescenta pedir_a_pessoa; sem_novidade entra em 2026-09-21
+ * As ferramentas nod (quarenta e oito em 2026-11-07, com o gerir_acessos da ADA-241; quarenta e sete em 2026-11-04, com o gerir_canvas da ADA-13; quarenta e seis em 2026-11-02, com o gerir_times da NOD-437 e o gerir_apps da NOD-445; quarenta e quatro em 2026-11-01, com o nao_lidos da NOD-449; quarenta e três em 2026-10-31, com o gerir_quadro da NOD-442; quarenta e duas em 2026-10-29: ajustar_barra_lateral da NOD-119, buscar_conversas e ler_conversa da NOD-61 e ver_agenda da NOD-85; contadas pelo teste; eram VINTE E UMA na contagem original) (EMENDA 16 acrescenta pedir_a_pessoa; sem_novidade entra em 2026-09-21
  * para que uma rotina possa encerrar em silêncio; o ciclo de vida de rotina, do mesmo dia, mora em
  * ferramentas-rotina.ts pelo gatilho de 200 linhas da EMENDA 26; pedir_a_bot substitui perguntar_a_bot e
  * delegar_tarefa em 2026-09-29, ADR-058; ver_colegas entra em 2026-09-28, ADR-050, e mora com atualizar_perfil em
@@ -38,7 +38,7 @@ export const FERRAMENTAS_NOD = {
   ...FERRAMENTAS_LIGACAO,
   ...FERRAMENTAS_TRABALHO,
   ...FERRAMENTAS_FRENTE,
-  ...FERRAMENTAS_DO_NOD, ...FERRAMENTAS_CRIAR_BOTS, ...FERRAMENTAS_RESPONDER_PEDIDO, ...FERRAMENTAS_CREDENCIAL, ...FERRAMENTAS_AVISO, ...FERRAMENTAS_BARRA, ...FERRAMENTAS_CONTA, ...FERRAMENTAS_CONVERSAS, ...FERRAMENTAS_QUADRO, ...FERRAMENTAS_APPS, ...FERRAMENTAS_NAO_LIDOS, ...FERRAMENTAS_TIMES, ...FERRAMENTAS_CANVAS,
+  ...FERRAMENTAS_DO_NOD, ...FERRAMENTAS_CRIAR_BOTS, ...FERRAMENTAS_RESPONDER_PEDIDO, ...FERRAMENTAS_CREDENCIAL, ...FERRAMENTAS_AVISO, ...FERRAMENTAS_BARRA, ...FERRAMENTAS_CONTA, ...FERRAMENTAS_CONVERSAS, ...FERRAMENTAS_QUADRO, ...FERRAMENTAS_APPS, ...FERRAMENTAS_NAO_LIDOS, ...FERRAMENTAS_TIMES, ...FERRAMENTAS_ACESSOS, ...FERRAMENTAS_CANVAS,
   lembrar: {
     type: "object",
     description: "Guarda uma memória deste agente (preferência, fato ou resumo). A memória não substitui fonte autoritativa.",
@@ -149,7 +149,7 @@ export const NOMES_FERRAMENTAS_NOD = [
   "pedir_a_pessoa", "passar", "encaminhar", "sem_novidade", "pedir_a_bot", "ver_colegas", "publicar_artefato", "ler_artefato",
   "iniciar_tarefa", "desligar",
   "anotar_entrevista", "concluir_entrevista", "propor_bot", "abrir_task", "mandar_para_task",
-  "gerir_bots", "ver_apps_conectados", "registrar_relato", "me_chame_as", "esperar_comando", "abrir_frentes", "mandar_para_frente", "devolver_resumo", "criar_bots", "responder_pedido", "pedir_credencial", "avisar_pessoa", "abrir_conta", "buscar_conversas", "ler_conversa", "ajustar_barra_lateral", "gerir_quadro", "nao_lidos", "gerir_apps", "gerir_times", "gerir_canvas",
+  "gerir_bots", "ver_apps_conectados", "registrar_relato", "me_chame_as", "esperar_comando", "abrir_frentes", "mandar_para_frente", "devolver_resumo", "criar_bots", "responder_pedido", "pedir_credencial", "avisar_pessoa", "abrir_conta", "buscar_conversas", "ler_conversa", "ajustar_barra_lateral", "gerir_quadro", "nao_lidos", "gerir_apps", "gerir_times", "gerir_canvas", "gerir_acessos",
 ] as const satisfies readonly NomeFerramentaNod[];
 
 export type ArgsLembrar = { tipo: "preferencia" | "fato" | "resumo"; texto: string };
@@ -177,7 +177,7 @@ export type ResultadoOk = { ok: true };
 export type ResultadoPedirABot = { ok: true; tarefa_id: string; instrucao: string; livres: { id: string; nome: string }[] } | { ok: false; erro: "espera_circular" | "ja_pedido" | "experimento_desligado" | "sem_quadro" | "tarefa_invalida" | "colega_fora_do_quadro" | "colega_nao_acionado"; instrucao: string }; // ADR-099: espera circular; NOD-259: ja_pedido; NOD-417: os da tarefa
 
 /** Args ↔ resultado por nome: contrato entre proxy, chamar-ferramenta e UseCasesNod. */
-export type ContratoFerramentaNod = ContratoFerramentasArtefato & ContratoFerramentasLigacao & ContratoFerramentasTrabalho & ContratoFerramentasFrente & ContratoFerramentasDoNod & ContratoFerramentasCriarBots & ContratoFerramentasResponderPedido & ContratoFerramentasCredencial & ContratoFerramentasAviso & ContratoFerramentasBarra & ContratoFerramentasConta & ContratoFerramentasConversas & ContratoFerramentasQuadro & ContratoFerramentasApps & ContratoFerramentasNaoLidos & ContratoFerramentasTimes & ContratoFerramentasCanvas & {
+export type ContratoFerramentaNod = ContratoFerramentasArtefato & ContratoFerramentasLigacao & ContratoFerramentasTrabalho & ContratoFerramentasFrente & ContratoFerramentasDoNod & ContratoFerramentasCriarBots & ContratoFerramentasResponderPedido & ContratoFerramentasCredencial & ContratoFerramentasAviso & ContratoFerramentasBarra & ContratoFerramentasConta & ContratoFerramentasConversas & ContratoFerramentasQuadro & ContratoFerramentasApps & ContratoFerramentasNaoLidos & ContratoFerramentasTimes & ContratoFerramentasAcessos & ContratoFerramentasCanvas & {
   lembrar: { args: ArgsLembrar; resultado: ResultadoLembrar };
   atualizar_perfil: { args: ArgsAtualizarPerfil; resultado: ResultadoAtualizarPerfil };
   pedir_acesso: { args: ArgsPedirAcesso; resultado: ResultadoPedirAcesso };

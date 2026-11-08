@@ -15,11 +15,17 @@ const VERBO_DO_LOTE: Record<AcaoNoLote["tipo"], string> = {
   mudar_modo: "Mudar modo",
   restaurar_versao: "Restaurar versão de",
   excluir_time: "Excluir o time",
+  acessos_em_lote: "Mudar o acesso de",
+  padrao_acesso: "Padrão do app",
+  desfazer_acessos: "Desfazer acessos no",
 };
+const NIVEL_HUMANO: Record<NonNullable<AcaoNoLote["nivel_lote"]>, string> = { nenhum: "Nenhum", leitura: "Ler", escrita: "Ler e alterar" };
 const MODO_HUMANO: Record<NonNullable<AcaoNoLote["modo"]>, string> = { manual: "manual", automatico: "automático", total: "sem aprovações" };
 /** Por que a ação esperou você, quando não foi só o modo manual (QA de 2026-10-07: uma frase por tipo, não uma genérica). */
 function motivoDoLote(a: AcaoNoLote, motivo: Exclude<MotivoCardDoLote, "manual">): string {
   // Emenda de 2026-10-18 da ADR-059: ligar o total é sempre da pessoa, em qualquer modo do Nod.
+  // ADA-241: Ler e alterar para vários bots, ou como padrão do app, deixa cada um mudar coisas fora do nod.
+  if (motivo === "acesso_escrita") return a.tipo === "padrao_acesso" ? `Com Ler e alterar como padrão, cada bot novo já nasce podendo mudar coisas no ${a.app ?? "app"}. Por isso espera o seu ok.` : `Ler e alterar deixa cada bot mudar coisas no ${a.app ?? "app"} (enviar, apagar, editar). Por isso espera o seu ok.`;
   if (motivo === "ligar_total") return "Ignorar todas as aprovações só liga com o seu ok: o Nod nunca põe um bot nesse modo sozinho.";
   if (a.tipo === "excluir_time") return "Excluir um time com bots espera o seu ok. Dá para criar o time de novo depois.";
   if (motivo === "arriscada") return a.tipo === "excluir" ? "Excluir é arriscado: o Nod sempre pergunta antes. Dá para restaurar depois em Configurações › Agentes." : "Mudar o modo de um bot é arriscado: o Nod sempre pergunta antes.";
@@ -41,6 +47,9 @@ function detalheDaAcao(a: AcaoNoLote): string {
     case "dar_acesso": return `${a.app ?? ""}, ${a.nivel === "escrita" ? "ler e alterar" : "ler"}`;
     case "mudar_modo": return a.modo ? `para ${MODO_HUMANO[a.modo]}` : "";
     case "excluir_time": return a.membros?.length ? `${juntar(a.membros)} ${a.membros.length === 1 ? "vai" : "vão"} para Sem time, na mesma ordem. Nenhum bot é excluído.` : "o time está vazio";
+    case "acessos_em_lote": return a.todos ? `${a.app ?? ""}, ${NIVEL_HUMANO[a.nivel_lote ?? "nenhum"]} para todos os bots` : `${a.app ?? ""}, ${NIVEL_HUMANO[a.nivel_lote ?? "nenhum"]}: ${juntar(a.bots_nomes ?? [])}`;
+    case "padrao_acesso": return `${a.app ?? ""}: bots novos começam com ${NIVEL_HUMANO[a.nivel_lote ?? "nenhum"]}${a.aplicar === false ? "" : "; quem segue o padrão também muda"}`;
+    case "desfazer_acessos": return `${a.app ?? ""}: volta cada bot ao nível de antes`;
     case "restaurar_versao": return a.versao ? `volta o perfil à versão ${a.versao}; vira uma versão nova, dá para desfazer pelo Histórico` : "";
     default: return "";
   }
@@ -64,6 +73,21 @@ export function renderCardLote(p: Pick<Proposta, "id">, c: PayloadPropostaLoteBo
       linhas: [esc(detalheDaAcao(t))],
       extra: `<input type="checkbox" data-lote-i="${t.i}" checked hidden aria-hidden="true" />`,
       acoes: `${botao("decidir-lote", "Excluir time", { classe: "cp-sim", id: p.id })}${botao("recusar-decisao", "Agora não", { classe: "cp-nao", id: p.id })}`,
+    });
+  }
+  // ADA-241: o card de um lote de acesso (ou do padrão) também é pergunta direta, com o verbo no botão e o porquê.
+  if (aberto && soTime.length === 1 && (soTime[0]!.tipo === "acessos_em_lote" || soTime[0]!.tipo === "padrao_acesso")) {
+    const t = soTime[0]!;
+    const nivel = NIVEL_HUMANO[t.nivel_lote ?? "nenhum"];
+    const quem = t.todos ? "todos os bots" : `${t.bots_nomes?.length ?? 0} ${t.bots_nomes?.length === 1 ? "bot" : "bots"}`;
+    const titulo = t.tipo === "padrao_acesso" ? `Bots novos começam com ${nivel} no ${t.app ?? "app"}?` : `Dar ${nivel} no ${t.app ?? "app"} a ${quem}?`;
+    return cardProposta({
+      id: p.id,
+      classe: "card-lote card-acessos-lote",
+      titulo,
+      linhas: [esc(detalheDaAcao(t)), ...(t.motivo && t.motivo !== "manual" ? [`<small class="lote-motivo">${esc(motivoDoLote(t, t.motivo))}</small>`] : [])],
+      extra: `<input type="checkbox" data-lote-i="${t.i}" checked hidden aria-hidden="true" />`,
+      acoes: `${botao("decidir-lote", t.tipo === "padrao_acesso" ? "Definir padrão" : `Dar ${nivel}`, { classe: "cp-sim", id: p.id })}${botao("recusar-decisao", "Agora não", { classe: "cp-nao", id: p.id })}`,
     });
   }
   const linhas = c.acoes.map((a) => ({ espera: a.estado === "esperando", html: linhaDaAcao(a) }));

@@ -12,6 +12,7 @@ import { DESCRICAO_DO_NOD, ehNod, NOME_DO_NOD, TITULO_DO_NOD } from "../domain/n
 import { camposQueFaltam, modeloDoObjetivo, normalizarCampo, passoDaConfiguracao, PERGUNTAS_ENTREVISTA, resumoDaEntrevista } from "../domain/roteiro-onboarding.ts";
 import { log } from "../obs/log.ts";
 import type { LinhaOnboarding } from "../repositories/onboarding.repo.ts";
+import { aplicarPadroes } from "./acoes/acessos.ts";
 import { autoriaAgente, autoriaPessoa, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
 import { criarAgente, criarAgenteSemReserva } from "./criar-agente.ts";
 import { criarRotinaPelaPessoa } from "./criar-rotina.ts";
@@ -202,7 +203,8 @@ export const criarBotDoOnboarding: CasoDeUso<EntradaCriarBot, { bot: BotDoOnboar
   await deps.repos.onboarding.definirBot(r.data.agente.id);
   const bot = botDe(r.data.agente, r.data.conversa.id);
   if (!bot) throw new ErroDeDominio("estado_invalido", { cause: "bot não criado" });
-  return { data: { bot, agente: r.data.agente }, events: r.events };
+  // ADA-241: o bot do onboarding também nasce com os padrões dos apps (em geral ainda não há nenhum).
+  return { data: { bot, agente: r.data.agente }, events: [...(r.events ?? []), ...(await aplicarPadroes(deps, r.data.agente.id))] };
 };
 
 /**

@@ -62,6 +62,11 @@ import { corpoDoEnvio } from "./envio-idempotente.ts";
 import { podeRepetir, tentarDeNovo } from "./tentar-de-novo.ts";
 import { ErroApi, ehAbort, erroDaResposta, falhaDeTransporte, rotaDe } from "./erro-api.ts";
 
+/** ADA-241: GET /conectores/:id/acessos. */
+export type AcessosDoAppDto = { padrao: "nenhum" | "leitura" | "escrita"; bots: { agenteId: string; nivel: "nenhum" | "leitura" | "escrita" | "personalizado"; segue_padrao: boolean }[] };
+/** ADA-241: POST /conectores/:id/acessos/lote. `lote_id` nulo: nada mudou (não há o que desfazer). */
+export type LoteDeAcessosDto = { ok: true; lote_id: string | null; frase: string; aplicados: { agenteId: string; nome: string }[]; mantidos: { agenteId: string; nome: string }[]; ja_feito: boolean };
+
 export { ErroApi, FRASE_SEM_INTERNET, FRASE_SERVIDOR_INDISPONIVEL, rotaDe } from "./erro-api.ts";
 
 /**
@@ -518,6 +523,11 @@ export function criarApi(escopo: Escopo) {
     revogar: (concessaoId: string) => del<RespostaMutacao>(`concessoes/${concessaoId}`),
     // definido em 2026-09-25: Nenhum / Ler / Ler e alterar por bot e app (marketplace e painel do bot).
     definirNivel: (agenteId: string, conectorId: string, nivel: "nenhum" | "leitura" | "escrita") => post<RespostaMutacao>(`agentes/${agenteId}/acessos`, { conectorId, nivel }),
+    // ADA-241 (ADR-158): a gaveta "Quem pode usar": o padrão do app, o lote (com a chave do clique) e o Desfazer do lote.
+    acessosDoApp: (conectorId: string) => get<AcessosDoAppDto>(`conectores/${conectorId}/acessos`),
+    acessosEmLote: (conectorId: string, corpo: { nivel: "nenhum" | "leitura" | "escrita"; bots: "todos" | string[]; chave: string; confirmado?: boolean }) => post<LoteDeAcessosDto>(`conectores/${conectorId}/acessos/lote`, corpo),
+    desfazerLoteDeAcessos: (loteId: string) => post<{ ok: true; voltaram: { agenteId: string; nome: string }[]; mudaram_depois: { agenteId: string; nome: string }[] }>(`acessos/lotes/${loteId}/desfazer`),
+    padraoDoApp: (conectorId: string, corpo: { nivel: "nenhum" | "leitura" | "escrita"; aplicar?: boolean; confirmado?: boolean }) => post<{ ok: true; padrao: "nenhum" | "leitura" | "escrita"; anterior: "nenhum" | "leitura" | "escrita"; aplicados: { agenteId: string; nome: string }[] }>(`conectores/${conectorId}/padrao`, corpo),
     revogarAcessos: (agenteId: string, ids: string[]) => post<RespostaMutacao>(`agentes/${agenteId}/concessoes/revogar`, { ids }),
     // definido em 2026-09-24 ("aviso no Mac"): `ver: false` → `?ver=0`, a leitura da janela escondida ou
     // fora de foco, que não carimba vista_em (ADR-007, refinamento da mesma data).

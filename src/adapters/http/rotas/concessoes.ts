@@ -1,10 +1,12 @@
 import { ErroDeDominio } from "../../../domain/erro.ts";
-import { capacidadesDoNivel, doNivel, type NivelDeAcesso } from "../../../domain/grupos-de-acesso.ts";
+import { capacidadesDoNivel, type NivelDeAcesso } from "../../../domain/grupos-de-acesso.ts";
 import { conceder, concederLote } from "../../../use-cases/conceder.ts";
 import { dispensarLiberacao, MAX_APPS_POR_LIBERACAO } from "../../../use-cases/dispensar-liberacao.ts";
 import { retomarAposLiberar, type AppLiberado } from "../../../use-cases/retomar-apos-liberar.ts";
 import { revogar, revogarLote } from "../../../use-cases/revogar.ts";
 import type { Deps } from "../../../use-cases/tipos.ts";
+import { definirNivelDoBot, EXECUTORES_ACESSOS, verAcessosDoApp } from "../../../use-cases/acoes/acessos.ts";
+import { ehNivelDeAcesso } from "../../../domain/acessos-em-lote.ts";
 import type { Rota } from "../roteador.ts";
 import { executar, textoDoCorpo, type DentroDeTx } from "./dentro-de-tx.ts";
 
@@ -88,18 +90,9 @@ export function rotasConcessoes(deps: DepsRotasConcessoes): Rota[] {
         const conectorId = textoDoCorpo(corpo, "conectorId");
         const nivel = textoDoCorpo(corpo, "nivel");
         if (!conectorId || (nivel !== "nenhum" && nivel !== "leitura" && nivel !== "escrita")) throw new ErroDeDominio("entrada_invalida", { cause: "conectorId e nivel" });
-        const agenteId = ctx.params.id ?? "";
-        const r = await deps.dentro(ctx.escopo, async (d) => {
-          const { conector, desejadas, atuais } = await nivelDaDona(d, agenteId, conectorId, nivel);
-          // revisto em 2026-09-25 (revisão do PR #68): Ler / Ler e alterar só mexem no que é deles (ler, criar,
-          // editar, comentar). Apagar e "outras", dadas ação por ação ou pela rotina, ficam como estavam.
-          // "Nenhum" é sem acesso nenhum: tira tudo, as dadas uma a uma inclusive.
-          const sobram = atuais.filter((c) => !desejadas.has(c.capacidade) && (nivel === "nenhum" || doNivel(conector.catalogo, c.capacidade))).map((c) => c.id);
-          const faltam = [...desejadas].filter((cap) => !atuais.some((c) => c.capacidade === cap));
-          if (sobram.length > 0) await executar(d, revogarLote, { agenteId, concessaoIds: sobram });
-          if (faltam.length > 0) await executar(d, concederLote, { agenteId, conectorId: conector.id, capacidades: faltam, autorTipo: "pessoa" });
-          return { concedidas: faltam.length, revogadas: sobram.length };
-        });
+        // ADA-241: o executor único dos acessos (o mesmo do lote e do chat); marca o bot como escolhido pela pessoa,
+        // então ele deixa de seguir o padrão do app. A regra do nível (revisão do PR #68) mora em planoDoNivel.
+        const r = await deps.dentro(ctx.escopo, (d) => executar(d, definirNivelDoBot, { agenteId: ctx.params.id ?? "", conectorId, nivel }));
         ctx.json(200, { ok: true, ids: { concedidas: String(r.concedidas), revogadas: String(r.revogadas) } });
       },
     },
@@ -157,6 +150,56 @@ export function rotasConcessoes(deps: DepsRotasConcessoes): Rota[] {
         if (!Array.isArray(ids) || !ids.every((id): id is string => typeof id === "string")) throw new ErroDeDominio("entrada_invalida", { cause: "ids" });
         const r = await deps.dentro(ctx.escopo, (d) => executar(d, revogarLote, { agenteId: ctx.params.id ?? "", concessaoIds: ids }));
         ctx.json(200, { ok: true, ids: { revogadas: String(r.revogadas), ...(r.mensagemId ? { mensagem: r.mensagemId } : {}) } });
+      },
+    },
+    {
+      // ADA-241: a gaveta "Quem pode usar": o padrão do app e, por bot, o nível e se segue o padrão.
+      metodo: "GET",
+      padrao: /^\/conectores\/(?<id>[^/]+)\/acessos$/,
+      async handler(ctx) {
+        const r = await deps.dentro(ctx.escopo, (d) => verAcessosDoApp(d, ctx.params.id ?? ""));
+        ctx.json(200, { padrao: r.padrao, bots: r.bots.map((b) => ({ agenteId: b.agenteId, nivel: b.nivel, segue_padrao: b.seguePadrao })) });
+      },
+    },
+    {
+      /**
+       * ADA-241 (ADR-158): o mesmo nível para vários bots (ou "todos") num clique, numa transação só, com o lote gravado
+       * para o Desfazer. `chave` é a idempotência do clique (o reenvio devolve o mesmo lote). Ler e alterar exige
+       * `confirmado: true` (a tela pergunta antes). O mesmo executor do gerir_acessos.
+       */
+      metodo: "POST", acao: "acessos.dar_em_lote",
+      padrao: /^\/conectores\/(?<id>[^/]+)\/acessos\/lote$/,
+      async handler(ctx) {
+        const corpo = (await ctx.corpo()) as { nivel?: unknown; bots?: unknown; chave?: unknown; confirmado?: unknown } | null;
+        const nivel = corpo?.nivel;
+        const bots = corpo?.bots;
+        if (!ehNivelDeAcesso(nivel)) throw new ErroDeDominio("entrada_invalida", { cause: "nivel" });
+        if (bots !== "todos" && !(Array.isArray(bots) && bots.every((b) => typeof b === "string" && b.length > 0 && b.length <= 80))) throw new ErroDeDominio("entrada_invalida", { cause: "bots" });
+        if (typeof corpo?.chave !== "string") throw new ErroDeDominio("entrada_invalida", { cause: "chave" });
+        const r = await deps.dentro(ctx.escopo, (d) => executar(d, EXECUTORES_ACESSOS["acessos.dar_em_lote"], { conectorId: ctx.params.id ?? "", nivel, bots: bots as "todos" | string[], chave: corpo.chave as string, confirmado: corpo.confirmado === true }));
+        ctx.json(200, { ok: true, lote_id: r.loteId, frase: r.frase, aplicados: r.aplicados, mantidos: r.mantidos, ja_feito: r.jaFeito });
+      },
+    },
+    {
+      // ADA-241: o Desfazer do toast (24 h): volta cada bot que ainda está como o lote deixou.
+      metodo: "POST", acao: "acessos.desfazer_lote",
+      padrao: /^\/acessos\/lotes\/(?<id>[^/]+)\/desfazer$/,
+      async handler(ctx) {
+        const r = await deps.dentro(ctx.escopo, (d) => executar(d, EXECUTORES_ACESSOS["acessos.desfazer_lote"], { loteId: ctx.params.id ?? "" }));
+        ctx.json(200, { ok: true, voltaram: r.voltaram, mudaram_depois: r.mudaramDepois });
+      },
+    },
+    {
+      // ADA-241: o padrão do app ("Bots novos começam com"). `aplicar` (padrão: sim) leva também quem segue o padrão.
+      metodo: "POST", acao: "apps.padrao",
+      padrao: /^\/conectores\/(?<id>[^/]+)\/padrao$/,
+      async handler(ctx) {
+        const corpo = (await ctx.corpo()) as { nivel?: unknown; aplicar?: unknown; confirmado?: unknown } | null;
+        const nivel = corpo?.nivel;
+        if (!ehNivelDeAcesso(nivel)) throw new ErroDeDominio("entrada_invalida", { cause: "nivel" });
+        if (corpo?.aplicar !== undefined && typeof corpo.aplicar !== "boolean") throw new ErroDeDominio("entrada_invalida", { cause: "aplicar" });
+        const r = await deps.dentro(ctx.escopo, (d) => executar(d, EXECUTORES_ACESSOS["apps.padrao"], { conectorId: ctx.params.id ?? "", nivel, aplicar: corpo?.aplicar !== false, confirmado: corpo?.confirmado === true }));
+        ctx.json(200, { ok: true, padrao: r.padrao, anterior: r.anterior, aplicados: r.aplicados });
       },
     },
     {

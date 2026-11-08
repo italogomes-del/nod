@@ -28,6 +28,7 @@ import type { versoesPerfilRepo } from "./versoes-perfil.repo.ts";
 import type { quadrosRepo } from "./quadros.repo.ts";
 import type { appsDoBotRepo } from "./apps-do-bot.repo.ts";
 import type { canvasRepo } from "./canvas.repo.ts";
+import type { acessosRepo } from "./acessos.repo.ts";
 import type { quadroComentariosRepo } from "./quadro-comentarios.repo.ts";
 import type { quadroImportacoesRepo } from "./quadro-importacoes.repo.ts";
 import type { quadroExecucoesRepo } from "./quadro-execucoes.repo.ts";
@@ -95,6 +96,7 @@ export interface Repos {
   quadros: ReturnType<typeof quadrosRepo>;
   appsDoBot: ReturnType<typeof appsDoBotRepo>;
   canvas: ReturnType<typeof canvasRepo>;
+  acessos: ReturnType<typeof acessosRepo>;
   quadroComentarios: ReturnType<typeof quadroComentariosRepo>;
   quadroImportacoes: ReturnType<typeof quadroImportacoesRepo>;
   quadroExecucoes: ReturnType<typeof quadroExecucoesRepo>;

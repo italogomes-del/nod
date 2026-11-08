@@ -51,6 +51,7 @@ const NOD: Record<string, readonly [passado: string, presente: string]> = {
   gerir_apps: ["Mexeu nas páginas", "Mexendo nas páginas"],
   gerir_canvas: ["Mexeu no Canvas", "Mexendo no Canvas"],
   gerir_times: ["Organizou os times", "Organizando os times"],
+  gerir_acessos: ["Mudou quem usa o app", "Mudando quem usa o app"],
   // NOD-449: a tela Não lidos pela conversa (listar, marcar, desfazer).
   nao_lidos: ["Mexeu nos não lidos", "Mexendo nos não lidos"],
   // NOD-119: o card que muda a barra lateral só depois de a pessoa confirmar.

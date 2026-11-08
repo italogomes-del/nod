@@ -4,6 +4,7 @@ import { falhaVisivel } from "../lib/fora-do-ar.ts";
 import type { Estado } from "../estado/reducer.ts";
 import { esc } from "../lib/render.ts";
 import { avisoErro } from "../lib/card-proposta.ts";
+import { acessosNaTela } from "../lib/acessos-otimistas.ts";
 
 /**
  * O que o card do chat, o marketplace e o painel do bot dizem sobre um app (definido em 2026-09-25,
@@ -68,6 +69,12 @@ const mesmoConjunto = (a: ReadonlySet<string>, b: readonly string[]): boolean =>
  * uma ação de escrita dada pela rotina não pinta "Ler e alterar" como ativo — clicar nele concederia o resto.
  */
 export function nivelDoBot(estado: Pick<Estado, "concessoes">, agenteId: string, conector: Conector): NivelAtual {
+  // ADA-241: o clique ainda sem resposta (ou à espera da recarga) aparece na hora — web/lib/acessos-otimistas.ts.
+  return acessosNaTela.nivel({ agenteId, conectorId: conector.id }, nivelReal(estado, agenteId, conector), Date.now());
+}
+
+/** O nível que as concessões carregadas dizem (sem o clique otimista). */
+export function nivelReal(estado: Pick<Estado, "concessoes">, agenteId: string, conector: Conector): NivelAtual {
   const concedidas = new Set((estado.concessoes[agenteId] ?? []).filter((g) => g.conectorId === conector.id).map((g) => g.capacidade));
   if (concedidas.size === 0) return "nenhum";
   if (mesmoConjunto(concedidas, capacidadesDoNivel(conector.catalogo, "leitura"))) return "leitura";

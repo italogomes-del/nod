@@ -132,6 +132,12 @@ export function validarLote(acoes: readonly AcaoLote[], bots: readonly BotDoLote
         // NOD-437: excluir um time é do gerir_times (que monta o card); o gerir_bots não o recebe.
         erro("excluir um time é com gerir_times");
         break;
+      case "acessos_em_lote":
+      case "padrao_acesso":
+      case "desfazer_acessos":
+        // ADA-241: o acesso em lote e o padrão do app são do gerir_acessos (que monta o card); o gerir_bots não os recebe.
+        erro("acesso de vários bots ou padrão do app é com gerir_acessos");
+        break;
       default:
         break;
     }
@@ -159,7 +165,7 @@ export function resolverBot(alvo: string, bots: readonly BotDoLote[], pessoaId: 
  * (src/domain/acoes/), pelo mapa risco → modo: `pessoa_confirma` espera a pessoa em todo modo (`ligar_total`),
  * `arriscada` vira cartão no manual e no automático, e `leitura`/`muda` seguem o modo — salvo a cerca 3.
  */
-export function riscoDaAcao(a: Pick<AcaoLote, "tipo" | "descricao" | "titulo" | "modo">, s: { contaminado: boolean; alvoTemAcessos: boolean }): MotivoCardDoLote | null {
+export function riscoDaAcao(a: Pick<AcaoLote, "tipo" | "descricao" | "titulo" | "modo" | "nivel_lote">, s: { contaminado: boolean; alvoTemAcessos: boolean }): MotivoCardDoLote | null {
   const risco = riscoNoLote(a);
   if (risco === "pessoa_confirma") return "ligar_total";
   if (risco === "arriscada") return "arriscada";

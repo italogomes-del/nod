@@ -2,7 +2,7 @@
 
 <!-- Gerado por `npm run paridade` a partir de src/domain/acoes/ (NOD-391, ADR-135). Não edite à mão: a catraca (tests/conformidade/paridade.test.ts) compara. -->
 
-Ações de pessoa que mudam algo: **180**, mais 2 só de leitura. No chat: **52 vivas**, 3 parciais, 93 faltando e 34 que nunca vão para o chat. Piso de vivas: 52.
+Ações de pessoa que mudam algo: **183**, mais 2 só de leitura. No chat: **55 vivas**, 3 parciais, 93 faltando e 34 que nunca vão para o chat. Piso de vivas: 55.
 
 Estados: **vivo** = o chat faz pelo mesmo executor da tela, com teste de contrato; **parcial** = o chat faz, mas diverge ou falta parâmetro; **falta** = a onda dona ainda vai ligar; **nunca** = exceção escrita.
 
@@ -52,6 +52,8 @@ Estados: **vivo** = o chat faz pelo mesmo executor da tela, com teste de contrat
 | Ação | O que faz | Risco | No chat | Rotas |
 | --- | --- | --- | --- | --- |
 | `acessos.dar` | Dar a um bot acesso a um app (Nenhum / Ler / Ler e alterar) | muda | parcial (`gerir_bots dar_acesso`): o lote só concede (sem o nível Nenhum, sem revogar o que sobra) e passa pela decisão de acesso, não pelo executor da tela | `POST ^\/agentes\/(?<id>[^/]+)\/acessos$` |
+| `acessos.dar_em_lote` | Dar o mesmo nível de um app a vários bots (ou a todos) de uma vez | muda | vivo (`gerir_acessos acessos_em_lote`) | `POST ^\/conectores\/(?<id>[^/]+)\/acessos\/lote$` |
+| `acessos.desfazer_lote` | Desfazer um lote de acessos (até 24 horas) | muda | vivo (`gerir_acessos desfazer_acessos`) | `POST ^\/acessos\/lotes\/(?<id>[^/]+)\/desfazer$` |
 | `acessos.conceder` | Conceder uma capacidade de um app a um bot | muda | falta (NOD-394) | `POST ^\/agentes\/(?<id>[^/]+)\/concessoes$` |
 | `acessos.liberar` | Liberar num clique os apps que o bot ainda não tem | muda | falta (NOD-394) | `POST ^\/agentes\/(?<id>[^/]+)\/acessos\/liberar$` |
 | `acessos.dispensar` | Dispensar a oferta de liberar apps | muda | falta (NOD-394) | `POST ^\/agentes\/(?<id>[^/]+)\/acessos\/dispensar$` |
@@ -61,6 +63,7 @@ Estados: **vivo** = o chat faz pelo mesmo executor da tela, com teste de contrat
 
 | Ação | O que faz | Risco | No chat | Rotas |
 | --- | --- | --- | --- | --- |
+| `apps.padrao` | Definir o padrão do app (o nível com que os bots novos nascem) | muda | vivo (`gerir_acessos padrao_acesso`) | `POST ^\/conectores\/(?<id>[^/]+)\/padrao$` |
 | `apps.criar` | Adicionar um app (conector) | arriscada | falta (NOD-394) | `POST ^\/conectores$` |
 | `apps.sondar` | Testar um app de novo | muda | falta (NOD-394) | `POST ^\/conectores\/(?<id>[^/]+)\/sondar$` |
 | `apps.habilitar` | Ligar um app | muda | falta (NOD-394) | `POST ^\/conectores\/(?<id>[^/]+)\/habilitar$` |

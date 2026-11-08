@@ -161,7 +161,8 @@ export type PayloadPropostaBot = { kind: "bot"; nome: string; descricao: string;
  * conversa dele); confirmar executa as marcadas, na ordem (gerir-bots.ts, decidirLoteDeBots).
  */
 export type EstadoAcaoNoLote = "esperando" | "feita" | "recusada" | "falhou";
-export type MotivoCardDoLote = "manual" | "arriscada" | "conteudo_de_fora" | "ligar_total";
+/** ADA-241: `acesso_escrita` — Ler e alterar para vários bots ou como padrão do app espera a pessoa em todo modo. */
+export type MotivoCardDoLote = "manual" | "arriscada" | "conteudo_de_fora" | "ligar_total" | "acesso_escrita";
 export type AcaoNoLote = AcaoLote & {
   i: number;
   estado: EstadoAcaoNoLote;

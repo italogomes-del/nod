@@ -7,6 +7,7 @@ import { haQuanto } from "../lib/relogio.ts";
 import { ICONE } from "../lib/icones.ts";
 import { voltaDaTela } from "../lib/volta.ts";
 import { cartaoCanvas, gavetaCanvas, SLUG_CANVAS } from "./marketplace-canvas.ts";
+import { barraDeLote, caixaDoBot, linhaDoPadrao, seguePadrao } from "./acessos-do-app.ts";
 import { acoes, blocoEsperando, blocoFalhou, botsQueUsam, conectorDoApp, gruposDe, meusBots, nivelDoBot, podeENao, ROTULO_NIVEL, SETA_EXTERNA, situacaoDoApp, type Nivel, type NivelAtual, type SituacaoApp } from "./app-acesso.ts";
 
 /**
@@ -118,16 +119,18 @@ function seletorNivel(agenteId: string, conectorId: string, atual: NivelAtual, n
   return `<div class="segmentado" role="group" aria-label="${esc(`Acesso de ${nome}`)}">${op("nenhum")}${op("leitura")}${op("escrita")}</div>`;
 }
 
-function quemPodeUsar(estado: Estado, c: Conector, titulo: string): string {
+function quemPodeUsar(estado: Estado, c: Conector, titulo: string, nomeApp: string): string {
   const bots = meusBots(estado);
   const linhas = bots.map((a) => {
     const nivel = nivelDoBot(estado, a.id, c);
     // "Personalizado": ações dadas uma a uma (pela rotina, pelo card, na tela avançada). Nenhum botão aceso —
     // escolher um nível mexe só em ler, criar, editar e comentar; apagar e o resto ficam como estão.
-    const sub = nivel === "personalizado" ? "Personalizado · ações escolhidas uma a uma" : a.titulo || "Seu bot";
-    return `<div class="quem-linha">${iconeAgente(a, "sm")}<div class="quem-nome"><b>${esc(a.nome)}</b><small>${esc(sub)}</small></div>${seletorNivel(a.id, c.id, nivel, a.nome)}</div>`;
+    const sub = nivel === "personalizado" ? "Personalizado · ações escolhidas uma a uma" : seguePadrao(c.id, a.id) ? "Segue o padrão do app" : a.titulo || "Seu bot";
+    return `<div class="quem-linha">${caixaDoBot(c.id, a.id, a.nome)}${iconeAgente(a, "sm")}<div class="quem-nome"><b>${esc(a.nome)}</b><small>${esc(sub)}</small></div>${seletorNivel(a.id, c.id, nivel, a.nome)}</div>`;
   }).join("");
-  return `<section class="gaveta-secao"><h3>${esc(titulo)}</h3>${bots.length ? `<div class="quem-lista">${linhas}</div>` : '<p class="mudo">Você ainda não tem bots.</p>'}<p class="mudo">Quem ficar sem acesso pode pedir na conversa quando precisar; você decide ali, com um clique. Apagar fica sempre de fora de "Ler e alterar".</p></section>`;
+  // ADA-241: o padrão do app e a barra de lote (web/telas/acessos-do-app.ts).
+  const topo = bots.length ? `${linhaDoPadrao(c.id, nomeApp)}${barraDeLote(c.id, nomeApp, bots.map((a) => a.id))}` : "";
+  return `<section class="gaveta-secao"><h3>${esc(titulo)}</h3>${topo}${bots.length ? `<div class="quem-lista">${linhas}</div>` : '<p class="mudo">Você ainda não tem bots.</p>'}<p class="mudo">Quem ficar sem acesso pode pedir na conversa quando precisar; você decide ali, com um clique. Apagar fica sempre de fora de "Ler e alterar".</p></section>`;
 }
 
 function oQueLibera(estado: Estado, slug: string): string {
@@ -160,7 +163,7 @@ function gaveta(estado: Estado, app: AppComLogo, passo: "detalhes" | "quem-usa")
     const status = s === "atencao"
       ? `<div class="gaveta-status">${blocoFalhou(`O ${app.nome} ${motivoDaFalha(c)}.`, "", "Entrar de novo costuma resolver.")}</div>`
       : `<div class="gaveta-status"><span class="bolinha-ok" aria-hidden="true"></span><div><b>Conectado</b><small>${c.sondadoEm ? `Funcionando · verificado ${esc(haQuanto(estado.agora - c.sondadoEm))}` : "Funcionando"}</small></div></div>`;
-    corpo = `${status}${quemPodeUsar(estado, c, passo === "quem-usa" ? `Quem pode usar o ${app.nome}?` : "Quem usa")}${detalhesTecnicos(c)}`;
+    corpo = `${status}${quemPodeUsar(estado, c, passo === "quem-usa" ? `Quem pode usar o ${app.nome}?` : "Quem usa", app.nome)}${detalhesTecnicos(c)}`;
     rodape = passo === "quem-usa"
       ? botao("fechar-gaveta", "Pronto", { classe: "pri" })
       // revisto em 2026-09-25 (revisão do PR #68): "Entrar de novo" só com o app em atenção — refazer o login

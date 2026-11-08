@@ -54,12 +54,12 @@ export type EstadoNoChat =
 export type AcaoNoLoteDoRegistro = {
   tipo: TipoAcaoLote;
   /** O risco desta chamada, quando depende dos argumentos (mudar_modo para "total" → pessoa_confirma). Ausente = `risco`. */
-  riscoDe?: (a: Pick<AcaoLote, "tipo" | "descricao" | "titulo" | "modo">) => RiscoAcao;
+  riscoDe?: (a: Pick<AcaoLote, "tipo" | "descricao" | "titulo" | "modo" | "nivel_lote">) => RiscoAcao;
   /**
    * Cerca 3 (ADR-082): depois de conteúdo de fora no turno, esta chamada vira cartão também no automático? Ausente = não.
    * `alvoTemAcessos`: o bot alvo tem concessões (a cópia as levaria).
    */
-  deFora?: (a: Pick<AcaoLote, "tipo" | "descricao" | "titulo" | "modo">, s: { alvoTemAcessos: boolean }) => boolean;
+  deFora?: (a: Pick<AcaoLote, "tipo" | "descricao" | "titulo" | "modo" | "nivel_lote">, s: { alvoTemAcessos: boolean }) => boolean;
 };
 
 export type DefinicaoAcao = {

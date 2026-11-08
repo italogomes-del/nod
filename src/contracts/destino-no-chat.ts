@@ -83,6 +83,8 @@ export const ASSUNTOS = [
   "leitura.recibo",
   // NOD-437: o recibo do gerir_times (o que mudou nos times e quem pediu por qual bot).
   "times.organizados",
+  // ADA-241: o recibo do gerir_acessos (quem ficou com qual nível no app e quem pediu por qual bot).
+  "acessos.mudados",
   // O resto do que o sistema escreve (Atividade).
   "memoria.anotada",
   "memoria.task_fechada",

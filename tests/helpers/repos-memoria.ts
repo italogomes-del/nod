@@ -3895,6 +3895,20 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       ordem: async () => null,
       gravarOrdem: soNoPostgres,
     },
+    // ADA-241 (0156): padrão por app e lotes são do Postgres (tests/integration/acessos-lote.test.ts); aqui, sem padrão.
+    acessos: {
+      padrao: async () => "nenhum",
+      padroes: async () => [],
+      definirPadrao: soNoPostgres,
+      marca: async () => null,
+      marcas: async () => new Map(),
+      marcar: async () => undefined,
+      desmarcar: async () => undefined,
+      criarLote: soNoPostgres,
+      loteDaChave: async () => null,
+      loteTravado: async () => null,
+      marcarDesfeito: soNoPostgres,
+    },
     // ADA-13 (0151): o Canvas é do Postgres (tests/integration/canvas*.test.ts); aqui, desinstalado e sem canvas.
     canvas: {
       instalado: async () => false,

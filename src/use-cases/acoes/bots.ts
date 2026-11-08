@@ -1,5 +1,6 @@
 import { ehNod } from "../../domain/nod.ts";
 import { garantirTime } from "./times.ts";
+import { aplicarPadroes } from "./acessos.ts";
 import type { Agente } from "../../contracts/agente.ts";
 import type { IdAcao } from "../../domain/acoes/index.ts";
 import { criarAgente, type EntradaCriarAgente, type SaidaCriarAgente } from "../criar-agente.ts";
@@ -20,7 +21,9 @@ import { restaurarVersaoDoPerfil } from "../versoes-perfil.ts";
 /** bots.criar: cria o bot e, com `secao`, já o põe nela (o lote; a tela organiza depois, pelo bots.mover). */
 export const criarBot: CasoDeUso<EntradaCriarAgente & { secao?: string }, SaidaCriarAgente> = async (deps, input) => {
   const { secao, ...entrada } = input;
-  const r = await criarAgente(deps, { ...entrada, modelo: entrada.modelo ?? deps.modeloPadrao });
+  const criado = await criarAgente(deps, { ...entrada, modelo: entrada.modelo ?? deps.modeloPadrao });
+  // ADA-241: o bot novo nasce com o padrão de cada app ligado (sem padrão, nada muda).
+  const r = { data: criado.data, events: [...(criado.events ?? []), ...(await aplicarPadroes(deps, criado.data.agente.id))] };
   if (secao === undefined || secao.trim() === "") return r;
   // NOD-437: a seção é um time; o nome vira o do time (criado no fim se não existe).
   const { nome } = await garantirTime(deps, secao);

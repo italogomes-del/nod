@@ -15,6 +15,7 @@ import type { AcaoLote } from "../../src/contracts/ferramentas-do-nod.ts";
 import type { ModoAprovacao } from "../../src/contracts/agente.ts";
 import { criarRepos } from "../../src/repositories/index.ts";
 import { publicar } from "../../src/use-cases/canvas.ts";
+import { gerirAcessos } from "../../src/use-cases/gerir-acessos.ts";
 import { gerirBots } from "../../src/use-cases/gerir-bots.ts";
 import { gerirTimes } from "../../src/use-cases/gerir-times.ts";
 import { garantirNod } from "../../src/use-cases/onboarding.ts";
@@ -166,6 +167,17 @@ for (const [ordem, config] of CONFIGURACOES.entries()) {
       expect(sobras, "linhas do fuzz que a dona não consegue apagar").toEqual([]);
     }, 60_000);
 
+    // ADA-241: um app da pessoa com uma ferramenta de ler e uma de alterar (o nível Ler e alterar existe nele).
+    const conectorDe = (s: SessaoDeTeste, nome: string) =>
+      srv.app.dentro({ tenantId: s.tenantId, pessoaId: s.pessoaId }, async (d) => {
+        const suf = randomUUID().slice(0, 8);
+        const c = await d.repos.conectores.criar({ nome: `${nome} ${suf}`, slug: `${nome}-${suf}`, transporte: "http", url: "https://example.com/mcp", declaracao: "nao-toca" });
+        if (!c) throw new Error("conector do fuzz");
+        const cap = (n: string, readOnlyHint: boolean) => ({ nome: n, descricao: n.toLowerCase(), schema: { type: "object" as const }, readOnlyHint });
+        await d.repos.conectores.registrarSonda(c.id, { ok: true, catalogo: [cap("FUZZ_LER", true), cap("FUZZ_ALTERAR", false)], agora: d.agora() });
+        return { id: c.id, slug: c.slug };
+      });
+
     // O que o RLS da pessoa enxerga + as tabelas de conta dela (sem RLS, lidas pelo dono e filtradas pela pessoa). As de
     // conta só são escritas pelas rotas de conta, que só existem com NOD_CONTAS: no servidor sem contas o retrato delas
     // custaria uma consulta a mais por chamada (o orçamento de 90 s) sem poder pegar nada.
@@ -251,6 +263,10 @@ for (const [ordem, config] of CONFIGURACOES.entries()) {
           }),
         );
       const [meuCanvas, canvasDela] = [await canvasDe(sessao, meu), await canvasDe(outra, dela)];
+      // ADA-241 (CI do PR #706, semente 2570060255): um app conectado e um lote de acessos no bot da pessoa, para o
+      // `acessos.desfazer_lote` (`/acessos/lotes/:id/desfazer`) passar da busca; sem o lote, o id sorteado só dava 404.
+      const conectorDoFuzz = await conectorDe(sessao, `fuzz-${config.nome.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`);
+      const loteDoFuzz = (await srv.json<{ lote_id: string }>("POST", `conectores/${conectorDoFuzz.id}/acessos/lote`, { nivel: "leitura", bots: [meu.agente.id], chave: `fuzz:${randomUUID()}` })).lote_id;
       // O app instalado, para o `canvas.dar_acesso` (`/canvas/app/acessos/:bot`) passar da guarda "instale antes".
       await srv.json("PUT", "canvas/app", {});
       const plano = planoDoServidor({
@@ -277,6 +293,8 @@ for (const [ordem, config] of CONFIGURACOES.entries()) {
             canvas: { daPessoa: [meuCanvas.canvas], deOutraPessoa: [canvasDela.canvas] },
             comentarios: { daPessoa: [meuCanvas.comentario], deOutraPessoa: [canvasDela.comentario] },
             acessos: { daPessoa: [meu.agente.id], deOutraPessoa: [dela.agente.id] },
+            lotes: { daPessoa: [loteDoFuzz], deOutraPessoa: [] },
+            conectores: { daPessoa: [conectorDoFuzz.id], deOutraPessoa: [] },
           },
         },
       });
@@ -504,8 +522,13 @@ for (const [ordem, config] of CONFIGURACOES.entries()) {
       const antes = await ambas();
       const violacoes: { acao: string; caso: string; motivo: string }[] = [];
       const esperas = new Map<string, number>();
+      // ADA-241 (CI do PR #706): o acesso de vários bots e o padrão do app são do gerir_acessos (o gerir_bots os recusa), e o
+      // risco sai do nível (Ler e alterar é pessoa_confirma). A entrada fixa é válida: o app conectado com Ler e alterar.
+      const appDoInvariante = await conectorDe(srv.pessoa, "invariante");
+      const ACAO_DO_GERIR_ACESSOS: Record<string, "lote" | "padrao"> = { acessos_em_lote: "lote", padrao_acesso: "padrao" };
       for (const def of arriscadas) {
-        const fixos: Record<string, unknown>[] = def.lote!.tipo === "mudar_modo" ? [{ modo: "total" }, { modo: "manual" }, { modo: "automatico" }] : [{}];
+        const viaAcessos = def.chat.estado === "vivo" && def.chat.via.ferramenta === "gerir_acessos";
+        const fixos: Record<string, unknown>[] = def.lote!.tipo === "mudar_modo" ? [{ modo: "total" }, { modo: "manual" }, { modo: "automatico" }] : viaAcessos ? [{ app: appDoInvariante.slug, nivel: "escrita" }] : [{}];
         const doFuzz = gerarEntradas(def.schema, SEMENTE, N).flatMap((e) => {
           try { const v = e.corpo === null ? null : JSON.parse(e.corpo); return v && typeof v === "object" && !Array.isArray(v) ? [{ rotulo: e.rotulo, v: v as Record<string, unknown> }] : []; } catch { return []; }
         });
@@ -513,7 +536,8 @@ for (const [ordem, config] of CONFIGURACOES.entries()) {
         for (const { rotulo, v } of itens) {
           const viaTimes = def.chat.estado === "vivo" && def.chat.via.ferramenta === "gerir_times";
           const item = { ...v, tipo: def.lote!.tipo, bot: botId } as unknown as AcaoLote;
-          const risco = def.lote!.riscoDe?.(item) ?? def.risco;
+          // No gerir_acessos o nível chega como `nivel` e vira o `nivel_lote` do item do card.
+          const risco = def.lote!.riscoDe?.(viaAcessos ? ({ ...item, nivel_lote: v.nivel } as unknown as AcaoLote) : item) ?? def.risco;
           if (risco !== "arriscada" && risco !== "pessoa_confirma") continue;
           const modos: ModoAprovacao[] = risco === "pessoa_confirma" ? ["manual", "automatico", "total"] : ["manual", "automatico"];
           for (const modo of modos) {
@@ -525,6 +549,13 @@ for (const [ordem, config] of CONFIGURACOES.entries()) {
                 const nod = r0.data.nod;
                 await d.repos.agentes.definirModoAprovacao(nod.id, modo);
                 const t = await d.repos.turnos.enfileirar({ executor: "catcher", conversaId: nod.conversaId, agenteId: nod.id, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "fuzz do invariante", entradaConfianca: "confiavel", modelo: "auto" });
+                if (viaAcessos) {
+                  const r1 = await gerirAcessos(d, { ...v, turnoId: t!.id, agenteId: nod.id, conversaId: nod.conversaId, resumo: "fuzz", acao: ACAO_DO_GERIR_ACESSOS[def.lote!.tipo]! } as never);
+                  if (r1.events?.length) await d.repos.events.gravarComOutbox(r1.events);
+                  // O gerir_acessos devolve `esperando: true` (um item só), não a lista de índices do gerir_bots.
+                  const dado = r1.data as { ok: boolean; esperando?: boolean; decisao_id?: string | null; feito?: unknown };
+                  return { ok: dado.ok, ...(dado.esperando ? { esperando: [0], decisao_id: dado.decisao_id ?? null } : { feitas: dado.ok ? [dado.feito] : [] }) };
+                }
                 const lote = viaTimes
                   ? await gerirTimes(d, { turnoId: t!.id, agenteId: nod.id, conversaId: nod.conversaId, resumo: "fuzz", acoes: [{ time: TIME_DO_INVARIANTE, ...v, tipo: "excluir" } as never] })
                   : await gerirBots(d, { turnoId: t!.id, agenteId: nod.id, conversaId: nod.conversaId, resumo: "fuzz", acoes: [item] });

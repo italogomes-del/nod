@@ -15,9 +15,11 @@ import type { ModoAprovacao } from "./agente.ts";
 /** definido em 2026-10-07: um pedido do Nod mexe em até 20 bots — acima disso, é melhor ele dividir e a pessoa ver. */
 export const MAX_ACOES_LOTE = 20;
 
-export const TIPOS_ACAO_LOTE = ["criar", "duplicar", "editar", "mover", "excluir", "criar_rotina", "dar_acesso", "mudar_modo", "restaurar_versao", "excluir_time"] as const;
-/** NOD-437: o que o gerir_bots aceita — o lote sem o excluir_time, que só o gerir_times põe no card. */
-export const TIPOS_ACAO_GERIR_BOTS = TIPOS_ACAO_LOTE.filter((t) => t !== "excluir_time");
+export const TIPOS_ACAO_LOTE = ["criar", "duplicar", "editar", "mover", "excluir", "criar_rotina", "dar_acesso", "mudar_modo", "restaurar_versao", "excluir_time", "acessos_em_lote", "padrao_acesso", "desfazer_acessos"] as const;
+/** O que só outra ferramenta põe no card: excluir_time (gerir_times, NOD-437) e os de acesso em lote (gerir_acessos, ADA-241). */
+const SO_DE_OUTRA_FERRAMENTA: ReadonlySet<string> = new Set(["excluir_time", "acessos_em_lote", "padrao_acesso", "desfazer_acessos"]);
+/** NOD-437: o que o gerir_bots aceita — o lote sem o que só outra ferramenta põe no card. */
+export const TIPOS_ACAO_GERIR_BOTS = TIPOS_ACAO_LOTE.filter((t) => !SO_DE_OUTRA_FERRAMENTA.has(t));
 export type TipoAcaoLote = (typeof TIPOS_ACAO_LOTE)[number];
 
 /** Teto do título e do texto de um relato contado ao Nod (o texto é o mesmo teto do relato pelo botão, TETO_TEXTO_RELATO). */
@@ -107,6 +109,18 @@ export type AcaoLote = {
   /** NOD-437, só em excluir_time (o gerir_times monta): o time e os nomes dos bots dele, para o card ler sem consultar. */
   time_id?: string;
   membros?: string[];
+  /**
+   * ADA-241, só nos de acesso em lote (o gerir_acessos monta): o app, o nível (com Nenhum), os bots (ids e nomes, para o
+   * card ler sem consultar) ou `todos`, a chave do clique, o `aplicar` do padrão e o lote do Desfazer.
+   */
+  conector_id?: string;
+  nivel_lote?: "nenhum" | "leitura" | "escrita";
+  bots_ids?: string[];
+  bots_nomes?: string[];
+  todos?: boolean;
+  chave?: string;
+  aplicar?: boolean;
+  lote_id?: string;
 };
 export type ArgsGerirBots = { resumo: string; acoes: AcaoLote[] };
 

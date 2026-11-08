@@ -63,6 +63,8 @@ describe("o lote do Nod sai do registro", () => {
     if (a.tipo === "editar" && (a.descricao !== undefined || a.titulo !== undefined)) return "conteudo_de_fora";
     // NOD-20 (tipo novo, depois do oráculo): restaurar pode trazer de volta a descrição, como o editar com descrição.
     if (a.tipo === "restaurar_versao") return "conteudo_de_fora";
+    // ADA-241 (tipos novos): sem nível (o caso do laço) conta como dar acesso; o Desfazer pode devolver acesso.
+    if (a.tipo === "acessos_em_lote" || a.tipo === "padrao_acesso" || a.tipo === "desfazer_acessos") return "conteudo_de_fora";
     return null;
   }
 
@@ -88,5 +90,18 @@ describe("o lote do Nod sai do registro", () => {
     expect(riscoDaAcao({ tipo: "mudar_modo", modo: "automatico" }, limpo)).toBe("arriscada");
     expect(riscoDaAcao({ tipo: "mudar_modo", modo: "total" }, limpo)).toBe("ligar_total");
     for (const tipo of ["criar", "duplicar", "editar", "mover"] as const) expect(riscoDaAcao({ tipo, descricao: "x" }, limpo), tipo).toBeNull();
+  });
+
+  it("ADA-241: Ler e alterar em lote ou no padrão espera a pessoa em todo modo; Nenhum nunca vira card de conteúdo de fora", () => {
+    const limpo = { contaminado: false, alvoTemAcessos: false };
+    const sujo = { contaminado: true, alvoTemAcessos: false };
+    for (const tipo of ["acessos_em_lote", "padrao_acesso"] as const) {
+      expect(riscoDaAcao({ tipo, nivel_lote: "escrita" }, limpo), tipo).toBe("ligar_total");
+      expect(riscoDaAcao({ tipo, nivel_lote: "leitura" }, limpo), tipo).toBeNull();
+      expect(riscoDaAcao({ tipo, nivel_lote: "leitura" }, sujo), tipo).toBe("conteudo_de_fora");
+      expect(riscoDaAcao({ tipo, nivel_lote: "nenhum" }, sujo), tipo).toBeNull();
+    }
+    expect(riscoDaAcao({ tipo: "desfazer_acessos" }, limpo)).toBeNull();
+    expect(riscoDaAcao({ tipo: "desfazer_acessos" }, sujo)).toBe("conteudo_de_fora");
   });
 });

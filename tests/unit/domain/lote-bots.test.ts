@@ -78,6 +78,15 @@ describe("validarLote (ADR-082)", () => {
     if (!r.ok) expect(r.problemas.map((p) => p.i)).toEqual([0, 1]);
   });
 
+  it("QA independente do PR #706: acesso em lote, padrão do app e Desfazer não entram pelo gerir_bots (só pelo gerir_acessos, que monta o card)", () => {
+    // Pelo gerir_bots o executor rodaria com a regra do modo do Nod; a confirmação de Ler e alterar só vem do card.
+    for (const tipo of ["acessos_em_lote", "padrao_acesso", "desfazer_acessos"]) {
+      const r = valida([{ tipo, app: "github", nivel_lote: "escrita", todos: true, lote_id: "x" } as unknown as AcaoLote]);
+      expect(r.ok, tipo).toBe(false);
+      if (!r.ok) expect(r.problemas[0]?.motivo, tipo).toContain("gerir_acessos");
+    }
+  });
+
   it("mais de 20 ações, ou nenhuma, recusa", () => {
     const muitas = Array.from({ length: 21 }, (): AcaoLote => ({ tipo: "excluir", bot: "Dev 1" }));
     expect(valida(muitas).ok).toBe(false);
