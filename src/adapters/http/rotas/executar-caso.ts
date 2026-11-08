@@ -24,6 +24,8 @@ export type DepsRotas = {
   harnessesDaPessoa?: (pessoaId: string) => Partial<Record<IdHarness, Inventario>>;
   /** NOD-391 (ADR-135 §4): roda o efeito que o caso de uso agendou, depois do commit. Erro sobe para a rota. */
   rodarAposCommit?: (escopo: Escopo, efeito: EfeitoAposCommit) => Promise<void>;
+  /** Jornada C do onboarding (NOD_ONBOARDING_TEXTO=1): sem IA, a fala da pessoa fica guardada em vez de cair. */
+  guardarSemIa?: boolean;
 };
 
 export type Executar = <I, O>(escopo: Escopo, caso: CasoDeUso<I, O>, input: I) => Promise<O>;

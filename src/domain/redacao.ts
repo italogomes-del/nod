@@ -194,7 +194,8 @@ const MOTIVO_EM_PORTUGUES: Readonly<Record<MotivoFalha | MotivoInterrupcao, stri
   // ADR-131: o motor da máquina parou no meio (a atualização sozinha da VM, o restart, o app fechado).
   reinicio_do_motor: "o nod foi reiniciado na máquina",
   executor_indisponivel: "a inteligência não estava disponível",
-  lancamento_falhou: "a IA não conseguiu abrir neste Mac",
+  // Jornada C do onboarding (2026-11-07): "neste Mac" no Windows e no Linux era bug. A frase vale em qualquer sistema.
+  lancamento_falhou: "a IA não conseguiu abrir neste computador",
   sessao_rejeitada: "a IA recusou a conversa antes de começar",
   absorvido: "a mensagem foi lida junto com a seguinte",
   // Revisão 3 do PR #544: também o turno de um pedido a colega que o prazo fechou (NOD-377), não só a rotina.
@@ -203,8 +204,8 @@ const MOTIVO_EM_PORTUGUES: Readonly<Record<MotivoFalha | MotivoInterrupcao, stri
   maquina_removida: "a máquina foi removida; a frente parou",
   erro_max_turns: "o agente chegou ao limite de passos deste turno",
   erro_execucao: "a IA parou por um erro; tente de novo e, se repetir, relate o problema nesta mensagem",
-  motor_ausente: "a IA não está instalada neste Mac",
-  nao_autenticado: "a conta da IA não está conectada neste Mac",
+  motor_ausente: "a IA não está instalada neste computador",
+  nao_autenticado: "a conta da IA não está conectada neste computador",
   // NOD-171: sem a hora. O aviso do turno usa fraseDoLimiteDoPlano (erro-fornecedor.ts), que diz quando volta.
   limite_do_plano: "o plano da IA atingiu o limite de uso; espere o uso renovar e tente de novo",
   // NOD-269: nenhuma conta livre na máquina na hora do despacho; o trabalho de fundo espera sozinho.

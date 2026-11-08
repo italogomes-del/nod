@@ -57,6 +57,9 @@ describe("turno preso a uma máquina sem contato (NOD-314): encerra em 24 h", ()
     ["ligação nunca entra", preso(72 * H, { origem: "ligacao" }), { tipo: "manter" }],
     ["agente excluído tem precedência", preso(72 * H, { agenteExcluido: true }), { tipo: "encerrar", causa: "agente_excluido" }],
     ["geração antiga tem precedência", preso(72 * H, { geracaoAntiga: true }), { tipo: "encerrar", causa: "geracao_antiga" }],
+    // Jornada C do onboarding: a fala guardada sem IA promete esperar 7 dias; o Mac fechado por 3 dias não a tira da fila.
+    ["fala guardada sem IA, Mac fora há 3 dias: espera os 7 dias", preso(72 * H, { criadoEm: AGORA - 72 * H, prazoEm: AGORA + 96 * H, aguardaIa: true }), { tipo: "manter" }],
+    ["fala guardada sem IA, Mac fora há 7 dias: encerra", preso(7 * 24 * H, { criadoEm: AGORA - 7 * 24 * H, prazoEm: AGORA, aguardaIa: true }), { tipo: "encerrar", causa: "maquina_alvo_sem_contato" }],
   ])("%s", (_nome, f, esperado) => {
     expect(decidirTurnoOrfao(f, AGORA)).toEqual(esperado);
   });

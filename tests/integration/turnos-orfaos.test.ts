@@ -10,7 +10,7 @@ import { dispararRotina } from "../../src/use-cases/disparar-rotina.ts";
 import { pedirABot } from "../../src/use-cases/pedir-a-bot.ts";
 import { cuidarDosTurnosOrfaos, type TurnosObservados } from "../../src/use-cases/turnos-orfaos.ts";
 import { depsSobre } from "../helpers/deps-l7.ts";
-import { agenteComConversa } from "../helpers/fabricas.ts";
+import { agenteComConversa, autoriaAgente } from "../helpers/fabricas.ts";
 import { PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { withRollback } from "../helpers/with-rollback.ts";
@@ -343,6 +343,28 @@ describeIntegracao("turno preso a uma máquina sem contato (NOD-314)", () => {
 
       await cuidarDosTurnosOrfaos(deps);
       expect((await repos.mensagens.listarDaConversa(a.conversaId)).filter((m) => m.kind === "sistema")).toHaveLength(1);
+    });
+  });
+
+  it("jornada C: a fala guardada sem IA (negação aguardaIa) espera os 7 dias, não as 24 h — o varredor e o UPDATE condicional", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const agora = Date.now();
+      const a = await agenteComConversa(trx, MARLON, { nome: "Sem IA" });
+      const { deps, repos } = depsSobre(trx, MARLON, { agora: () => agora });
+      await presoAoMac(trx, repos, a.agenteId, agora, 3 * 24 * H);
+      const guardado = await pendente(repos, a.conversaId, a.agenteId, agora);
+      await repos.mensagens.criar({ conversaId: a.conversaId, turnoId: guardado.id, autoria: autoriaAgente(a.agenteId, PESSOA_MARLON), kind: "negacao", texto: "Recebi. Estou sem IA neste computador…", payload: { kind: "negacao", classe: "plano_ausente", nome: "claude-cli", motivo: "plano_ausente", terminal: false, aguardaIa: true }, confianca: "confiavel" });
+      await trx`update turnos set criado_em = ${new Date(agora - 3 * 24 * H)}, prazo_em = ${new Date(agora + 4 * 24 * H)} where id = ${guardado.id}`;
+
+      // QA do PR #693: a consulta já dá ao guardado os 7 dias (não entra como candidato) e leva o fato ao domínio.
+      expect((await repos.turnos.orfaosCandidatos(agora)).map((c) => c.id)).not.toContain(guardado.id);
+      expect((await repos.turnos.orfaosCandidatos(agora, { ids: [guardado.id] }))[0]).toMatchObject({ id: guardado.id, aguardaIa: true });
+      const r = await cuidarDosTurnosOrfaos(deps);
+      expect(r.data.encerrados.map((e) => e.turnoId)).not.toContain(guardado.id);
+      expect(await repos.turnos.buscar(guardado.id)).toMatchObject({ estado: "pendente" });
+      expect(await repos.turnos.encerrarPresoSemContato(guardado.id, agora)).toBeNull();
+      // Passados os 7 dias sem contato, sai como qualquer preso.
+      expect(await repos.turnos.encerrarPresoSemContato(guardado.id, agora + 4 * 24 * H)).toMatchObject({ estado: "interrompido", motivoInterrupcao: "maquina_sem_contato" });
     });
   });
 

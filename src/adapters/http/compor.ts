@@ -438,6 +438,8 @@ export function comporApp(o: OpcoesCompor): App {
   // contas nascem depois, sobre `dentro`; false = desligadas, e abrir_conta volta `indisponivel`.
   // NOD-351: a mesma regra de comporContas (null sem NOD_CONTAS=1): o catálogo e a situação da conta saem dela.
   const contasLigadas = env.NOD_CONTAS === "1";
+  // Jornada A/C do onboarding (ADR-153): o onboarding por texto e o "sem IA, o bot responde e guarda". Desligada por padrão.
+  const onboardingTexto = env.NOD_ONBOARDING_TEXTO === "1";
   // NOD-415 (ADR-141): NOD_QUADROS libera os quadros (desligado | admins | todos; produção = admins).
   configurarLiberacaoQuadros(lerLiberacaoQuadros(env));
   // NOD-422 (PR 2): as rotinas que o "quadro assume" nunca pausa (padrão: a bc381ef2).
@@ -1410,6 +1412,8 @@ export function comporApp(o: OpcoesCompor): App {
     agora: relogio,
     modeloPadrao,
     prazoDecisaoMs,
+    // Jornada C do onboarding: sem IA, a fala da pessoa fica guardada (flag NOD_ONBOARDING_TEXTO=1, desligada por padrão).
+    ...(onboardingTexto ? { guardarSemIa: true } : {}),
     get executor() {
       return executorAtual;
     },

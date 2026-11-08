@@ -53,6 +53,7 @@ export function criarRotasConversas(d: DepsRotas): Rota[] {
           prazoMs: d.prazoDecisaoMs,
           executor: d.executor,
           harnessesDaPessoa: d.harnessesDaPessoa?.(ctx.escopo.pessoaId),
+          ...(d.guardarSemIa ? { guardarSemIa: true } : {}),
         });
         const resposta: RespostaMutacao = { ok: true, ids: { mensagem: r.mensagem.id, turno: r.turno.id, ...(r.negacao ? { negacao: r.negacao.id } : {}) } };
         ctx.json(201, resposta);

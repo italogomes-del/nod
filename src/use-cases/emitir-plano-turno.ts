@@ -36,6 +36,7 @@ import { marcarExecucaoNaMaquina } from "../domain/github.ts";
 import { PEDIDOS_NO_PROMPT } from "../domain/pedidos-pendentes.ts";
 import { montarPlano, REGRA_MONTAGEM, saidaDoCloneDaMaquina } from "../domain/plano-turno.ts";
 import { anexosAnteriores, cortarFalas } from "../domain/historico-do-plano.ts";
+import { ehFalaSemIa } from "../domain/sem-ia.ts";
 import { textoParaOBot } from "../domain/citacao.ts";
 import { composicaoDoPlano } from "../domain/raio-x.ts";
 import type { BastidorNoPrompt, ComputadorFora } from "../domain/prompt-sistema.ts";
@@ -326,7 +327,9 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   // NOD-285 (K2): sem sessão, o modelo só sabe que uma fala trazia arquivo pelo histórico — a fala ganha "[anexou X]".
   // Com sessão, ela já viu o arquivo no turno dele; o histórico nem vai. Só a fala da pessoa: a captura de tela que o
   // bot anexa à própria fala (NOD-200) não volta ao modelo nem pelo nome.
-  const janela = !sessaoCli ? doHistorico.filter((m) => recomeco === null || m.criadoEm > recomeco).slice(-HISTORICO_NO_PLANO) : [];
+  // Jornada C do onboarding: a fala fixa do bot sem IA ("Recebi. Estou sem IA…") não vai ao modelo — com ela, a IA que
+  // acabou de conectar responderia ao "Recebi" e não à pergunta guardada.
+  const janela = !sessaoCli ? doHistorico.filter((m) => (recomeco === null || m.criadoEm > recomeco) && !ehFalaSemIa(m)).slice(-HISTORICO_NO_PLANO) : [];
   const daPessoa = janela.filter((m) => m.autoria.autor_tipo === "pessoa").map((m) => m.id);
   const anexosDaJanela = daPessoa.length ? await deps.repos.anexos.daMensagens(daPessoa) : new Map<string, AnexoMeta[]>();
   // ADR-111: a chave "Memória longa" da pessoa (0088) — as falas recentes até 8 mil caracteres e os anexos anteriores.
@@ -352,7 +355,7 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   // Na sessão da cadeia, o que mudou desde ela (a decisão, a resposta do colega) já vem na entrada da retomada.
   const vistaAte = sessaoDaConversa ? conversa?.sessaoEm ?? null : null;
   const desdeSuaUltimaVez = vistaAte === null ? [] : mensagens
-    .filter((m) => m.criadoEm > vistaAte && m.criadoEm < turno.criadoEm && m.id !== turno.mensagemOrigemId)
+    .filter((m) => m.criadoEm > vistaAte && m.criadoEm < turno.criadoEm && m.id !== turno.mensagemOrigemId && !ehFalaSemIa(m))
     .slice(-HISTORICO_NO_PLANO)
     .map((m) => ({ autor: autorDe(m), texto: textoParaOBot(m).slice(0, TEXTO_DESDE_A_SESSAO), confianca: m.confianca }));
   const contextoConversa = JSON.stringify({ ...(original ? { tarefaOriginal: original.entradaTexto.slice(0, 8000) } : {}), historico: deOutraPessoa ? [] : historico, ...(desdeSuaUltimaVez.length && !deOutraPessoa ? { desdeSuaUltimaVez } : {}) });

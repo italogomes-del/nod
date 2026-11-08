@@ -60,6 +60,7 @@ import { cartaoAjusteBarra } from "./card-barra.ts";
 import { lerBarra } from "../lib/densidade.ts";
 import { ehCelular } from "../lib/celular.ts";
 import { alvosDoRecomeco, marcaDoRecomeco, notaDasEtapas, type AlvoDoRecomeco } from "../lib/recomeco.ts";
+import { cardDaConversa, ehFalaSemIa, falaSemIaHtml, iasNoCard, turnosVivosDe } from "./sem-ia-conversa.ts";
 import { avisoContaSemAcesso, avisoHarnessFora, avisoModeloRecusado, ehIa, inventarioDaIa, cartaoTrocaDeIa, linhaContaSeguiu, linhaContaTrocada, linhaIaDoBotTrocada, linhaIaTrocada, linhaIaVoltou, linhaLimiteSemOutra, prontaDepois, type IdIa } from "./ia-fora.ts";
 import { escolhaEfetiva, iasDaTela, inteligenciaDoBot } from "./inteligencia.ts";
 import { htmlBotaoDitado, htmlPilulaDitado } from "./ditado.ts";
@@ -616,6 +617,13 @@ export function renderMensagem(m: Mensagem, estado: Estado, sala = false, opcoes
     const bot = m.autoria.autor_tipo === "agente" ? agenteDe(estado, m.autoria.autor_id) : undefined;
     const nome = esc(bot?.nome ?? assinatura(m.autoria, nomesDe(estado)));
     return `<article class="message bot com-artefato" data-mensagem="${esc(m.id)}">${bot ? iconeAgente(bot, "md") : ""}<div class="bubble-wrap">${acoesDaMensagem(m, estado, sala)}<div class="msg-autor"><b title="${nome}">${nome}</b><time>${hora(m.criadoEm)}</time></div>${corpoMensagem(m, estado)}${chipsDeReacao(m, estado)}${faixaDaMensagem(m, estado)}</div></article>`;
+  }
+  // Jornada C (NOD_ONBOARDING_TEXTO=1): a fala fixa sem IA é fala do bot (balão), não aviso de erro; a primeira da
+  // sequência mais recente leva o card "Conectar uma IA neste computador" (um por conversa; as seguintes dizem "card acima").
+  if (ehFalaSemIa(m)) {
+    const balao = renderMensagem({ ...m, kind: "texto", payload: null }, estado, sala, opcoes);
+    const card = cardDaConversa(estado.conversas[m.conversaId]?.mensagens ?? [], turnosVivosDe(estado));
+    return falaSemIaHtml({ mensagem: m, balao, comCard: card?.falaId === m.id, vivo: card?.vivo ?? false, ias: iasNoCard(estado) });
   }
   if (m.kind !== "texto") {
     // Chat limpo (PR 4): o recibo da decisão é o cartão do pedido, encolhido com o resultado — alinhado às falas do bot,

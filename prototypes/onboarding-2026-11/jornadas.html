@@ -1,0 +1,678 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Onboarding do Nod, jornadas</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: painel de jornadas à esquerda, a janela do Nod à direita, uma máquina de estados única por trás. Tokens do design system do Nod (direção D grafite). Movimento: curva crítica, transform/opacity, resposta no pointer-down. Escala: 5 tamanhos (30/15/14/13/12), raio 9 nos controles. */
+:root {
+  --surface: #ffffff; --surface-side: #f7f7f8; --surface-raised: #f0f0f2; --surface-selected: #ececef;
+  --line: #e5e5e9; --line-strong: #8e8e96; --ink: #18181b; --ink-2: #5d5d66; --ink-3: #6b6b74;
+  --action: #18181b; --on-action: #ffffff; --success: #177040; --danger: #c42b1c; --on-status: #ffffff;
+  --agent-encre: #0a0a0c; --agent-vert: #3ecf8e; --agent-bleu: #3b93f0; --agent-violet: #8b5cf6; --agent-ambre: #f0b429;
+  --canvas: #ebebee; --canvas-ink: #3c3c44;
+  --shadow-pop: 0 6px 20px rgba(24,24,27,.10), 0 1px 2px rgba(24,24,27,.06);
+  --shadow-composer: 0 6px 20px rgba(24,24,27,.07), 0 1px 2px rgba(24,24,27,.05);
+  --backdrop: rgba(24,24,27,.28);
+  --font-sans: "Geist", system-ui, -apple-system, "Segoe UI", sans-serif; --font-mono: "Geist Mono", ui-monospace, Menlo, monospace;
+  --mola: cubic-bezier(0.22, 1, 0.36, 1); --dur: 260ms;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  color-scheme: dark; --surface: #131315; --surface-side: #18181b; --surface-raised: #232327; --surface-selected: #2a2a2f;
+  --line: #2d2d32; --line-strong: #6a6a73; --ink: #ededef; --ink-2: #a4a4ac; --ink-3: #8b8b94; --action: #ededef; --on-action: #131315;
+  --success: #4cc38a; --danger: #f2796b; --on-status: #131315; --canvas: #0e0e10; --canvas-ink: #b4b4bc;
+  --shadow-pop: 0 6px 20px rgba(0,0,0,.5), 0 1px 2px rgba(0,0,0,.4); --shadow-composer: 0 6px 20px rgba(0,0,0,.35), 0 1px 2px rgba(0,0,0,.3); --backdrop: rgba(0,0,0,.5);
+} }
+:root[data-theme="dark"] {
+  color-scheme: dark; --surface: #131315; --surface-side: #18181b; --surface-raised: #232327; --surface-selected: #2a2a2f;
+  --line: #2d2d32; --line-strong: #6a6a73; --ink: #ededef; --ink-2: #a4a4ac; --ink-3: #8b8b94; --action: #ededef; --on-action: #131315;
+  --success: #4cc38a; --danger: #f2796b; --on-status: #131315; --canvas: #0e0e10; --canvas-ink: #b4b4bc;
+  --shadow-pop: 0 6px 20px rgba(0,0,0,.5), 0 1px 2px rgba(0,0,0,.4); --shadow-composer: 0 6px 20px rgba(0,0,0,.35), 0 1px 2px rgba(0,0,0,.3); --backdrop: rgba(0,0,0,.5);
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--canvas); color: var(--canvas-ink); font-family: var(--font-sans); font-size: 14px; line-height: 1.45; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 24px 64px; }
+h1, h2, h3 { margin: 0; text-wrap: balance; }
+button { font: inherit; }
+:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.pagina { max-width: 1240px; margin: 0 auto; display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 24px; align-items: start; }
+@media (max-width: 900px) { .pagina { grid-template-columns: 1fr; } .painel { position: static; } }
+.painel { position: sticky; top: 16px; display: grid; gap: 12px; }
+.painel h1 { font-size: 15px; font-weight: 600; color: var(--ink); letter-spacing: -.01em; }
+.painel p { margin: 0; color: var(--ink-2); font-size: 13px; }
+.eyebrow { font-family: var(--font-mono); font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
+.jornadas { display: grid; gap: 6px; }
+.jor { text-align: left; border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 9px; padding: 9px 11px; font-size: 13px; cursor: pointer; transition: transform 100ms ease-out, background 160ms; }
+.jor:hover { background: var(--surface-raised); } .jor.pressionado { transform: scale(.98); }
+.jor[aria-pressed="true"] { background: var(--surface-selected); border-color: var(--line-strong); }
+.jor small { display: block; color: var(--ink-3); font-size: 12px; }
+.trilha { display: grid; gap: 4px; font-size: 12px; color: var(--ink-3); border-top: 1px solid var(--line); padding-top: 10px; }
+.trilha .passo { display: flex; gap: 8px; align-items: center; } .trilha .passo i { width: 6px; height: 6px; border-radius: 50%; background: var(--line-strong); }
+.trilha .passo.atual { color: var(--ink); font-weight: 500; } .trilha .passo.atual i { background: var(--ink); }
+.trilha .passo.feito i { background: var(--success); }
+.opcoes { display: grid; gap: 6px; border-top: 1px solid var(--line); padding-top: 10px; font-size: 12px; color: var(--ink-2); }
+.opcoes label { display: flex; gap: 8px; align-items: center; cursor: pointer; }
+/* janela */
+.janela { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow-pop); color: var(--ink); min-width: 0; }
+.titulo-janela { display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 12px; border-bottom: 1px solid var(--line); background: var(--surface-side); font-size: 12px; color: var(--ink-3); }
+.titulo-janela .win { margin-left: auto; display: flex; gap: 18px; font-size: 12px; color: var(--ink-3); }
+.conteudo-janela { position: relative; min-height: 640px; }
+.tela { position: absolute; inset: 0; opacity: 0; pointer-events: none; transition: opacity 220ms ease, transform var(--dur) var(--mola), visibility 0s 220ms; transform: translateY(6px); visibility: hidden; }
+.tela.on { opacity: 1; pointer-events: auto; transform: none; visibility: visible; transition-delay: 0s; }
+/* setup */
+.setup { padding: 48px 64px 36px; min-height: 640px; display: grid; align-content: start; gap: 24px; }
+@media (max-width: 640px) { .setup { padding: 28px 20px; } }
+.marca { width: 36px; height: 36px; border-radius: 10px; background: var(--ink); position: relative; }
+.marca::before, .marca::after { content: ""; position: absolute; top: 11px; width: 6px; height: 12px; border-radius: 3px; background: var(--surface); transform: rotate(14deg); }
+.marca::before { left: 11px; } .marca::after { left: 19px; }
+.passo-topo { font-size: 12px; color: var(--ink-3); margin-bottom: 10px; }
+.h { font-size: 30px; font-weight: 600; letter-spacing: -.02em; line-height: 1.08; max-width: 24ch; }
+.h:focus-visible { outline: none; }
+.sub { margin: 0; color: var(--ink-2); font-size: 15px; line-height: 1.5; max-width: 52ch; }
+.lista { display: grid; max-width: 620px; }
+.item { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 16px; align-items: center; padding: 16px 0; border-top: 1px solid var(--line); }
+.item:last-child { border-bottom: 1px solid var(--line); }
+.item.apagado .t b { color: var(--ink-2); }
+.logo { width: 28px; height: 28px; border-radius: 9px; display: grid; place-items: center; font-weight: 700; font-size: 13px; flex: none; }
+.logo.claude { background: #fdf1ec; } .logo.gpt { background: var(--surface-raised); } .logo.neutro { background: var(--surface-raised); color: var(--ink-2); }
+.t { display: grid; gap: 2px; min-width: 0; } .t b { font-size: 15px; font-weight: 600; } .t .linha { font-size: 13px; color: var(--ink-2); }
+.t .sim { color: var(--ink); } .t .erro { color: var(--danger); font-weight: 600; }
+.ponto { width: 8px; height: 8px; border-radius: 50%; background: var(--success); display: inline-block; margin-right: 4px; }
+.giro { display: inline-block; width: 13px; height: 13px; border-radius: 50%; border: 1.5px solid var(--line-strong); border-top-color: var(--ink); vertical-align: -2px; margin-right: 6px; animation: giro 900ms linear infinite; }
+@keyframes giro { to { transform: rotate(360deg); } }
+.btn { display: inline-flex; align-items: center; justify-content: center; height: 36px; padding: 0 14px; border-radius: 9px; font-size: 13px; font-weight: 500; white-space: nowrap; border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink); cursor: pointer; transition: transform 100ms ease-out, background 160ms; text-decoration: none; gap: 8px; }
+.btn:hover { background: var(--surface-raised); } .btn.prim:hover { background: var(--ink-2); }
+.btn.pressionado { transform: scale(.96); }
+.btn.prim { background: var(--action); color: var(--on-action); border-color: var(--action); }
+.btn.perigo { background: var(--danger); color: var(--on-status); border-color: var(--danger); } .btn.perigo:hover { filter: brightness(.92); }
+.btn.link { border-color: transparent; background: none; color: var(--ink-2); }
+.btn.g { height: 44px; padding: 0 22px; font-size: 15px; }
+.btn[hidden] { display: none; }
+.btn.google i { width: 22px; height: 22px; border-radius: 50%; background: #ffffff; display: inline-flex; align-items: center; justify-content: center; font-style: normal; flex: none; }
+.acoes { display: flex; align-items: center; gap: 18px; max-width: 620px; min-height: 44px; flex-wrap: wrap; }
+.acoes .quieto { color: var(--ink-3); font-size: 13px; } .acoes .dir { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+.cod { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; color: var(--ink-2); margin-top: 8px; }
+.cod input { height: 32px; width: 140px; border: 1px solid var(--line-strong); border-radius: 9px; padding: 0 10px; font-family: var(--font-mono); font-size: 13px; background: var(--surface); color: var(--ink); }
+.escolha { display: grid; gap: 8px; max-width: 620px; }
+.escolha button { text-align: left; display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: center; padding: 14px 16px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); color: var(--ink); cursor: pointer; }
+.escolha button:hover { background: var(--surface-raised); } .escolha button b { display: block; font-size: 15px; font-weight: 600; } .escolha button span.d { display: block; font-size: 13px; color: var(--ink-2); margin-top: 2px; }
+/* páginas de conta (dentro do app) */
+.cartao { width: min(100%, 420px); background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 26px 26px 20px; display: flex; flex-direction: column; gap: 14px; }
+.centro { position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; background: var(--surface); }
+.cartao h2 { font-size: 22px; font-weight: 600; letter-spacing: -.015em; } .cartao p { margin: 0; font-size: 13px; color: var(--ink-2); line-height: 1.5; }
+.cartao label { display: grid; gap: 6px; font-size: 13px; color: var(--ink); }
+.cartao input { height: 40px; border: 1px solid var(--line-strong); border-radius: 9px; padding: 0 12px; font: inherit; font-size: 14px; color: var(--ink); background: var(--surface); }
+.btn.google { height: 44px; font-size: 14px; }
+.ou { display: flex; align-items: center; gap: 10px; color: var(--ink-3); font-size: 12px; } .ou::before, .ou::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+.cartao .linha { display: flex; align-items: center; gap: 12px; } .cartao .linha .btn { margin-left: auto; }
+.cartao .pe { font-size: 12px; color: var(--ink-3); text-align: center; }
+/* app */
+.app { display: grid; grid-template-columns: 236px minmax(0, 1fr); min-height: 640px; }
+@media (max-width: 640px) { .app { grid-template-columns: 1fr; } .barra { display: none; } .barra.aberta { display: flex; position: absolute; inset: 0; z-index: 2; } .so-celular { display: inline-flex !important; } }
+.so-celular { display: none !important; }
+.barra { background: var(--surface-side); border-right: 1px solid var(--line); padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.busca { display: flex; gap: 8px; align-items: center; }
+.busca .campo { flex: 1; height: 32px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); color: var(--ink-3); font-size: 13px; display: flex; align-items: center; padding: 0 10px; }
+.busca .mais { width: 32px; height: 32px; border-radius: 9px; background: var(--action); color: var(--on-action); display: grid; place-items: center; font-size: 18px; border: 0; cursor: pointer; }
+.secao { font-size: 12px; color: var(--ink-3); margin-top: 6px; }
+.bot { display: grid; grid-template-columns: 36px 1fr; gap: 10px; align-items: center; padding: 8px; border-radius: 9px; cursor: pointer; border: 0; background: none; text-align: left; color: var(--ink); width: 100%; }
+.bot:hover { background: var(--surface-raised); } .bot.ativo { background: var(--surface-selected); }
+.bot .nome { font-weight: 600; font-size: 13px; display: flex; gap: 6px; align-items: center; }
+.bot .tag { font-size: 12px; font-weight: 500; color: var(--ink-2); background: var(--surface-raised); border-radius: 6px; padding: 1px 6px; }
+.bot .previa { font-size: 12px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bot > div { min-width: 0; }
+.av { width: 36px; height: 36px; border-radius: 10px; position: relative; flex: none; }
+.av::before, .av::after { content: ""; position: absolute; top: 12px; width: 6px; height: 10px; border-radius: 3px; background: #fff; }
+.av::before { left: 11px; } .av::after { left: 19px; }
+.av.enc { background: var(--agent-encre); } .av.vert { background: var(--agent-vert); } .av.bleu { background: var(--agent-bleu); } .av.violet { background: var(--agent-violet); } .av.ambre { background: var(--agent-ambre); }
+.av.p { width: 28px; height: 28px; border-radius: 9px; } .av.p::before, .av.p::after { top: 9px; width: 5px; height: 8px; } .av.p::before { left: 9px; } .av.p::after { left: 15px; }
+.rodape-barra { margin-top: auto; display: grid; gap: 6px; }
+.rodape-barra .btn.link { justify-content: flex-start; padding: 0 8px; height: 32px; }
+.aviso-ia { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); font-size: 12px; color: var(--ink-2); width: 100%; cursor: pointer; text-align: left; }
+.aviso-ia b { color: var(--ink); font-weight: 500; }
+.conteudo { display: flex; flex-direction: column; min-width: 0; min-height: 640px; }
+.topo { height: 56px; display: flex; align-items: center; gap: 10px; padding: 0 16px; border-bottom: 1px solid var(--line); }
+.topo b { font-weight: 600; font-size: 14px; display: block; } .topo span { font-size: 12px; color: var(--ink-3); }
+.topo .direita { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+.conversa { flex: 1; padding: 20px 20px 8px; display: flex; flex-direction: column; gap: 12px; overflow: auto; }
+.balao { max-width: 560px; padding: 10px 14px; border-radius: 16px; font-size: 14px; line-height: 1.45; }
+.balao.novo { opacity: 0; transform: translateY(6px); animation: sobe var(--dur) var(--mola) forwards; }
+@keyframes sobe { to { opacity: 1; transform: none; } }
+.balao.bot { background: var(--surface-raised); border-bottom-left-radius: 6px; align-self: flex-start; }
+.balao.eu { background: var(--action); color: var(--on-action); border-bottom-right-radius: 6px; align-self: flex-end; }
+.linha-bot { display: flex; gap: 10px; align-items: flex-end; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { border: 1px solid var(--line-strong); border-radius: 999px; padding: 6px 12px; font-size: 13px; color: var(--ink); background: var(--surface); cursor: pointer; transition: transform 100ms ease-out, background 160ms; }
+.chip:hover { background: var(--surface-raised); } .chip.pressionado { transform: scale(.96); }
+.chip.quieto { border-color: var(--line); color: var(--ink-2); }
+/* card de proposta (padrão .cp do produto): continuação da fala do bot */
+.cp { width: min(440px, calc(100% - 38px)); margin: -4px 0 4px 38px; padding: 12px 14px 10px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-side); font-size: 13px; line-height: 1.45; color: var(--ink-2); }
+.cp.novo { opacity: 0; animation: sobe var(--dur) var(--mola) forwards; }
+.cp-titulo { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; color: var(--ink); }
+.cp ul { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 2px; } .cp .rot { color: var(--ink-3); }
+.cp .acoes-cp { display: flex; gap: 8px; align-items: center; margin-top: 10px; } .cp .acoes-cp .btn { height: 32px; } .cp .acoes-cp .link { margin-left: auto; }
+.cp .ia { display: flex; align-items: center; gap: 10px; margin-top: 8px; } .cp .ia .logo { width: 20px; height: 20px; border-radius: 5px; font-size: 11px; } .cp .ia span.tx { flex: 1; }
+.cp-linha { width: min(440px, calc(100% - 38px)); margin: -4px 0 4px 38px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-side); font-size: 13px; color: var(--ink-2); display: flex; align-items: center; gap: 8px; }
+.cp-linha .ponto { margin: 0; }
+.passos { display: grid; gap: 6px; margin-top: 8px; font-size: 13px; color: var(--ink-2); } .passos div { display: flex; gap: 8px; align-items: center; }
+.ok { width: 16px; height: 16px; border-radius: 50%; background: var(--surface); color: var(--success); display: inline-flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; border: 1px solid var(--line); flex: none; }
+.composer { margin: 8px 16px 16px; border: 1px solid var(--line); border-radius: 14px; padding: 8px 8px 8px 14px; display: flex; align-items: center; gap: 10px; box-shadow: var(--shadow-composer); }
+.composer:focus-within { border-color: var(--ink); }
+.composer input { flex: 1; border: 0; background: none; font: inherit; font-size: 14px; color: var(--ink); min-width: 0; } .composer input:focus-visible { outline: none; }
+.composer .dica { font-size: 12px; color: var(--ink-3); }
+.composer .enviar { width: 32px; height: 32px; border-radius: 50%; background: var(--action); color: var(--on-action); border: 0; display: grid; place-items: center; font-size: 14px; cursor: pointer; }
+.sistema { font-size: 12px; color: var(--ink-3); text-align: center; }
+/* diálogo */
+.scrim { position: absolute; inset: 0; background: var(--backdrop); opacity: 0; pointer-events: none; transition: opacity 220ms; }
+.scrim.on { opacity: 1; pointer-events: auto; }
+.dialogo { position: absolute; left: 50%; top: 50%; width: min(92%, 460px); transform: translate(-50%, -50%) scale(.96); opacity: 0; pointer-events: none; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow-pop); padding: 20px; display: grid; gap: 14px; transition: opacity 200ms, transform var(--dur) var(--mola); }
+.dialogo.on { opacity: 1; pointer-events: auto; transform: translate(-50%, -50%); }
+.dialogo h2 { font-size: 15px; font-weight: 600; } .dialogo h2:focus-visible { outline: none; } .dialogo p { margin: 0; color: var(--ink-2); font-size: 13px; }
+.check { display: flex; gap: 10px; align-items: flex-start; font-size: 13px; cursor: pointer; } .check input { margin: 3px 0 0; } .check span { color: var(--ink-2); display: block; font-size: 12px; }
+.config { padding: 32px 40px; display: grid; gap: 18px; max-width: 760px; }
+@media (max-width: 640px) { .config { padding: 20px; } }
+.lc { border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
+.lc-linha { display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 11px 16px; } .lc-linha + .lc-linha { border-top: 1px solid var(--line); }
+.lc-linha b { display: block; font-size: 14px; font-weight: 500; } .lc-linha small { display: block; margin-top: 2px; font-size: 12px; color: var(--ink-3); } .lc-linha .txt { flex: 1; min-width: 0; }
+.lc-status { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-2); white-space: nowrap; } .lc-status i { width: 6px; height: 6px; border-radius: 50%; background: var(--success); }
+.lc-status.off { color: var(--danger); } .lc-status.off i { background: var(--danger); }
+.menu { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow-pop); padding: 6px; max-width: 280px; display: grid; }
+.menu .btn.link { justify-content: flex-start; color: var(--ink); }
+.fim { padding: 48px 64px; display: grid; gap: 24px; min-height: 640px; align-content: start; }
+@media (max-width: 640px) { .fim { padding: 28px 20px; } }
+.fim p { color: var(--ink-2); max-width: 52ch; margin: 0; font-size: 15px; }
+@media (prefers-reduced-motion: reduce) {
+  :root { --dur: 180ms; --mola: ease; }
+  .tela, .balao, .cp, .dialogo { transition-property: opacity, visibility; animation-duration: 160ms; transform: none !important; }
+  .giro { animation: none; border-top-color: var(--line-strong); }
+  .btn.pressionado, .chip.pressionado, .jor.pressionado { transform: none; }
+}
+</style>
+</head>
+<body>
+<div class="pagina">
+  <aside class="painel">
+    <div class="eyebrow">Protótipo · jornadas do onboarding</div>
+    <h1>Do primeiro clique ao primeiro bot</h1>
+    <p>Escolha uma jornada e use a janela como se fosse o app. Tudo que você clica muda de verdade.</p>
+    <div class="jornadas" role="group" aria-label="Jornada">
+      <button class="jor" id="j-nova" type="button" aria-pressed="true">A · Pessoa nova, nada instalado<small>Conta no app, este computador, conversa com o Nod, primeiro bot</small></button>
+      <button class="jor" id="j-conta" type="button" aria-pressed="false">B · Já tem conta, computador novo<small>Entrar no app, este computador, onde os bots trabalham</small></button>
+      <button class="jor" id="j-pulou" type="button" aria-pressed="false">C · Pulou sem IA<small>O bot explica e oferece o card</small></button>
+      <button class="jor" id="j-remover" type="button" aria-pressed="false">D · Remover deste computador<small>Configurações › Computadores</small></button>
+    </div>
+    <div class="trilha" id="trilha"></div>
+    <div class="opcoes">
+      <label><input type="checkbox" id="falhas"> Simular falhas (instalação, login demorado, conta sem acesso)</label>
+      <button class="btn link" id="reiniciar" type="button" style="justify-content: flex-start; padding: 0 4px">↺ Reiniciar a jornada</button>
+    </div>
+  </aside>
+
+  <div class="janela">
+    <div class="titulo-janela" aria-hidden="true"><span>nod</span><span class="win"><span>—</span><span>☐</span><span>✕</span></span></div>
+    <div class="conteudo-janela" id="janela">
+
+      <!-- 1 abrir -->
+      <section class="tela" id="tela-abrir">
+        <div class="setup">
+          <div class="marca"></div>
+          <div><div class="passo-topo">nod</div><h2 class="h" tabindex="-1">Seus bots, neste computador.</h2></div>
+          <p class="sub">Bots que trabalham por você, pensando com a IA que você já assina. Entre na sua conta: é nela que ficam seus bots e conversas, em qualquer computador.</p>
+          <div class="acoes" style="margin-top: 8px"><button class="btn prim g" id="abrir-continuar" type="button">Entrar ou criar conta</button></div>
+          <p class="sub" style="font-size: 13px; color: var(--ink-3)">Com Google, ou com um código que chega no seu e-mail. O nod nunca vê sua senha.</p>
+        </div>
+      </section>
+
+      <!-- conta: entrar ou criar, no app -->
+      <section class="tela" id="tela-conta"><div class="centro">
+        <form class="cartao" id="form-conta">
+          <div class="marca"></div>
+          <div><h2 class="h" style="font-size: 22px" tabindex="-1">Entrar ou criar conta</h2><p>Seus bots e conversas ficam na sua conta, em qualquer computador. Se o e-mail for novo, a conta é criada na hora.</p></div>
+          <button class="btn prim google" type="button" id="conta-google"><i></i>Continuar com Google</button>
+          <div class="ou">ou com e-mail</div>
+          <label>E-mail<input id="conta-email" type="email" placeholder="voce@suaempresa.com.br" autocomplete="off"></label>
+          <div class="linha"><span class="pe" style="text-align: left">Mandamos um código de 6 dígitos; não tem senha.</span><button class="btn" type="submit">Continuar</button></div>
+          <div class="pe">O Google abre no seu navegador e volta sozinho para o app. A senha nunca passa pelo nod.</div>
+        </form>
+      </div></section>
+
+      <!-- conta: confira seu e-mail -->
+      <section class="tela" id="tela-email"><div class="centro">
+        <form class="cartao" id="form-email">
+          <div class="marca"></div>
+          <div><h2 class="h" style="font-size: 22px" tabindex="-1">Confira seu e-mail</h2><p>Mandamos um código de 6 dígitos para <b id="email-dito" style="color: var(--ink); font-weight: 500">ana@padaria.com.br</b>. Ele vale por 30 minutos.</p></div>
+          <label>Código<input id="codigo-email" inputmode="numeric" placeholder="000 000" style="font-family: var(--font-mono); font-size: 18px; letter-spacing: .18em; height: 44px"></label>
+          <div class="linha"><button class="btn link" type="button" id="email-outro">Mandar outro</button><button class="btn prim" type="submit">Continuar</button></div>
+          <div class="pe">Não chegou? Veja o spam, ou <button type="button" class="btn link" id="email-voltar" style="height: auto; padding: 0; font-size: 12px; text-decoration: underline">confira o e-mail digitado</button>.</div>
+        </form>
+      </div></section>
+
+      <!-- conta: esperando o Google -->
+      <section class="tela" id="tela-google">
+        <div class="setup">
+          <div class="marca"></div>
+          <div><div class="passo-topo">Entrar com Google</div><h2 class="h" tabindex="-1">Escolha sua conta Google no navegador.</h2></div>
+          <p class="sub">Abrimos o Google no seu navegador. Quando você escolher a conta, ele volta para o app sozinho. Se o e-mail já tem conta no nod, seus bots aparecem; se não, a conta é criada.</p>
+          <div class="lista"><div class="item"><div class="logo neutro"><span class="giro" style="margin: 0"></span></div><div class="t"><b>Esperando o Google</b><div class="linha" id="google-linha" role="status">Nada aparece? Use "Abrir de novo".</div></div><button class="btn" id="google-abrir" type="button">Abrir de novo</button></div></div>
+          <div class="acoes"><span class="quieto">O nod nunca vê sua senha do Google.</span><div class="dir"><button class="btn link" id="google-voltar" type="button">Voltar</button></div></div>
+        </div>
+      </section>
+
+      <!-- 2 este computador -->
+      <section class="tela" id="tela-computador">
+        <div class="setup">
+          <div class="marca"></div>
+          <div><div class="passo-topo" id="ec-passo">Este computador</div><h2 class="h" id="ec-titulo" tabindex="-1"></h2></div>
+          <p class="sub" id="ec-sub"></p>
+          <div class="lista" id="ec-lista">
+            <div class="item" id="ec-claude"><div class="logo claude" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24"><path d="M4.709 15.955l4.72-2.647.08-.23-.08-.128H9.2l-.79-.048-2.698-.073-2.339-.097-2.266-.122-.571-.121L0 11.784l.055-.352.48-.321.686.06 1.52.103 2.278.158 1.652.097 2.449.255h.389l.055-.157-.134-.098-.103-.097-2.358-1.596-2.552-1.688-1.336-.972-.724-.491-.364-.462-.158-1.008.656-.722.881.06.225.061.893.686 1.908 1.476 2.491 1.833.365.304.145-.103.019-.073-.164-.274-1.355-2.446-1.446-2.49-.644-1.032-.17-.619a2.97 2.97 0 01-.104-.729L6.283.134 6.696 0l.996.134.42.364.62 1.414 1.002 2.229 1.555 3.03.456.898.243.832.091.255h.158V9.01l.128-1.706.237-2.095.23-2.695.08-.76.376-.91.747-.492.584.28.48.685-.067.444-.286 1.851-.559 2.903-.364 1.942h.212l.243-.242.985-1.306 1.652-2.064.73-.82.85-.904.547-.431h1.033l.76 1.129-.34 1.166-1.064 1.347-.881 1.142-1.264 1.7-.79 1.36.073.11.188-.02 2.856-.606 1.543-.28 1.841-.315.833.388.091.395-.328.807-1.969.486-2.309.462-3.439.813-.042.03.049.061 1.549.146.662.036h1.622l3.02.225.79.522.474.638-.079.485-1.215.62-1.64-.389-3.829-.91-1.312-.329h-.182v.11l1.093 1.068 2.006 1.81 2.509 2.33.127.578-.322.455-.34-.049-2.205-1.657-.851-.747-1.926-1.62h-.128v.17l.444.649 2.345 3.521.122 1.08-.17.353-.608.213-.668-.122-1.374-1.925-1.415-2.167-1.143-1.943-.14.08-.674 7.254-.316.37-.729.28-.607-.461-.322-.747.322-1.476.389-1.924.315-1.53.286-1.9.17-.632-.012-.042-.14.018-1.434 1.967-2.18 2.945-1.726 1.845-.414.164-.717-.37.067-.662.401-.589 2.388-3.036 1.44-1.882.93-1.086-.006-.158h-.055L4.132 18.56l-1.13.146-.487-.456.061-.746.231-.243 1.908-1.312-.006.006z" fill="#D97757"/></svg></div><div class="t"><b>Claude</b><div class="linha" id="ec-claude-linha" role="status"></div><div class="cod" id="ec-codigo" hidden>Se o site do Claude mostrar um código, cole aqui:<input id="ec-cod" placeholder="Código" aria-label="Código do Claude"><button class="btn" id="ec-cod-enviar" type="button" style="height: 32px">Enviar ao Claude</button></div></div><div id="ec-claude-acao"></div></div>
+            <div class="item apagado" id="ec-gpt"><div class="logo gpt" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="var(--ink)" fill-rule="evenodd"><path d="M9.205 8.658v-2.26c0-.19.072-.333.238-.428l4.543-2.616c.619-.357 1.356-.523 2.117-.523 2.854 0 4.662 2.212 4.662 4.566 0 .167 0 .357-.024.547l-4.71-2.759a.797.797 0 00-.856 0l-5.97 3.473zm10.609 8.8V12.06c0-.333-.143-.57-.429-.737l-5.97-3.473 1.95-1.118a.433.433 0 01.476 0l4.543 2.617c1.309.76 2.189 2.378 2.189 3.948 0 1.808-1.07 3.473-2.76 4.163zM7.802 12.703l-1.95-1.142c-.167-.095-.239-.238-.239-.428V5.899c0-2.545 1.95-4.472 4.591-4.472 1 0 1.927.333 2.712.928L8.23 5.067c-.285.166-.428.404-.428.737v6.898zM12 15.128l-2.795-1.57v-3.33L12 8.658l2.795 1.57v3.33L12 15.128zm1.796 7.23c-1 0-1.927-.332-2.712-.927l4.686-2.712c.285-.166.428-.404.428-.737v-6.898l1.974 1.142c.167.095.238.238.238.428v5.233c0 2.545-1.974 4.472-4.614 4.472zm-5.637-5.303l-4.544-2.617c-1.308-.761-2.188-2.378-2.188-3.948A4.482 4.482 0 014.21 6.327v5.423c0 .333.143.571.428.738l5.947 3.449-1.95 1.118a.432.432 0 01-.476 0zm-.262 3.9c-2.688 0-4.662-2.021-4.662-4.519 0-.19.024-.38.047-.57l4.686 2.71c.286.167.571.167.856 0l5.97-3.448v2.26c0 .19-.07.333-.237.428l-4.543 2.616c-.619.357-1.356.523-2.117.523zm5.899 2.83a5.947 5.947 0 005.827-4.756C22.287 18.339 24 15.84 24 13.296c0-1.665-.713-3.282-1.998-4.448.119-.5.19-.999.19-1.498 0-3.401-2.759-5.947-5.946-5.947-.642 0-1.26.095-1.88.31A5.962 5.962 0 0010.205 0a5.947 5.947 0 00-5.827 4.757C1.713 5.447 0 7.945 0 10.49c0 1.666.713 3.283 1.998 4.448-.119.5-.19 1-.19 1.499 0 3.401 2.759 5.946 5.946 5.946.642 0 1.26-.095 1.88-.309a5.96 5.96 0 004.162 1.713z"/></svg></div><div class="t"><b>ChatGPT</b><div class="linha" id="ec-gpt-linha" role="status">Não está neste computador. Também funciona sozinho ou como reserva.</div></div><button class="btn" id="ec-gpt-acao" type="button">Instalar e entrar</button></div>
+          </div>
+          <div class="escolha" id="ec-escolha" hidden>
+            <button type="button" id="esc-aqui"><div><b>Trabalhar neste computador</b><span class="d">Este passa a ser o computador padrão. Os bots trabalham aqui, com o Claude que você acabou de conectar.</span></div><span class="btn prim" aria-hidden="true">Escolher</span></button>
+            <button type="button" id="esc-la"><div><b>Manter no MacBook de Ana</b><span class="d">Os bots ficam lá e esperam ele voltar. Aqui você só conversa e acompanha.</span></div><span class="btn" aria-hidden="true">Escolher</span></button>
+          </div>
+          <div class="acoes"><span class="quieto" id="ec-quieto"></span><div class="dir"><button class="btn link g" id="ec-pular" type="button">Pular por agora</button><button class="btn prim g" id="ec-continuar" type="button">Continuar</button></div></div>
+        </div>
+      </section>
+
+      <!-- 3 app -->
+      <section class="tela" id="tela-app">
+        <div class="app">
+          <div class="barra" id="barra">
+            <div class="busca"><div class="campo">Buscar</div><button class="mais" type="button" aria-label="Novo bot">+</button></div>
+            <div class="secao">Meus bots</div>
+            <div id="lista-bots"></div>
+            <div class="rodape-barra">
+              <button class="aviso-ia" id="aviso-ia" type="button" hidden><span class="ponto" style="background: var(--line-strong)"></span><span><b>Sem IA neste computador.</b> Conectar</span></button>
+              <button class="btn link" id="ir-config" type="button">Configurações</button>
+              <div style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ink-2); padding: 0 8px"><i style="width: 24px; height: 24px; border-radius: 50%; background: var(--surface-raised); border: 1px solid var(--line); display: inline-block"></i><span id="eu-nome">eu</span></div>
+            </div>
+          </div>
+          <div class="conteudo">
+            <div class="topo"><button class="btn link so-celular" id="abrir-barra" type="button" aria-label="Bots" style="padding: 0 8px; margin-left: -8px">☰</button><div class="av p enc" id="topo-av"></div><div><b id="topo-nome">Nod</b><span id="topo-sub">Online</span></div><div class="direita" id="topo-direita"></div></div>
+            <div class="conversa" id="conversa" role="log" aria-live="polite"></div>
+            <form class="composer" id="composer"><input id="entrada" placeholder="Escreva para o Nod…" aria-label="Mensagem" autocomplete="off"><span class="dica" id="dica" hidden></span><button class="enviar" type="submit" aria-label="Enviar">↑</button></form>
+          </div>
+        </div>
+      </section>
+
+      <!-- 4 configurações / computadores -->
+      <section class="tela" id="tela-config">
+        <div class="config">
+          <div><button class="btn link" id="config-voltar" type="button" style="padding: 0 6px; margin-left: -6px">‹ Voltar</button></div>
+          <h2 class="h" style="font-size: 22px" tabindex="-1">Computadores</h2>
+          <p class="sub" style="font-size: 14px">Onde seus bots trabalham. Cada bot roda o Claude ou o ChatGPT no computador dele; o computador de um bot se escolhe na ficha dele.</p>
+          <div class="lc">
+            <div class="lc-linha"><div class="txt"><b>Este computador</b><small id="maq-detalhe">Windows · 2 bots aqui · Claude conectado como ana@padaria.com.br</small></div><span class="lc-status" id="maq-status"><i></i>Conectado</span><button class="btn link" id="maq-menu" type="button" aria-label="Menu de Este computador" aria-expanded="false" style="padding: 0 8px">…</button></div>
+            <div class="lc-linha"><div class="txt"><b>MacBook de Ana</b><small>Mac · 2 bots lá · Claude conectado</small></div><span class="lc-status off"><i></i>Offline desde ontem, 22:34</span><button class="btn link" type="button" aria-label="Menu de MacBook de Ana" style="padding: 0 8px">…</button></div>
+          </div>
+          <div class="menu" id="menu-maq" hidden role="menu"><button class="btn link" role="menuitem" type="button">Renomear</button><button class="btn link" role="menuitem" type="button">Tornar padrão</button><button class="btn link" role="menuitem" type="button" id="maq-remover" style="color: var(--danger)">Remover o nod deste computador</button></div>
+        </div>
+        <div class="scrim" id="scrim"></div>
+        <div class="dialogo" id="dialogo" role="dialog" aria-modal="true" aria-labelledby="dlg-t" aria-hidden="true">
+          <h2 id="dlg-t" tabindex="-1">Remover o nod deste computador?</h2>
+          <p id="dlg-p">O nod para de rodar aqui e tira o que instalou. Os 2 bots daqui passam para o MacBook de Ana; se ele estiver desligado, eles esperam até um computador com IA conectar. Seus bots e conversas continuam na sua conta.</p>
+          <label class="check"><input type="checkbox" id="dlg-ias" checked><div>Tirar também o Claude e o ChatGPT instalados pelo nod<span>Seus logins neles são seus e ficam.</span></div></label>
+          <label class="check"><input type="checkbox" id="dlg-guardar"><div>Continuar ligado à minha conta<span>Para instalar de novo sem entrar outra vez. Sem isso, este computador sai da conta.</span></div></label>
+          <div style="display: flex; justify-content: flex-end; gap: 10px"><button class="btn" id="dlg-cancelar" type="button">Cancelar</button><button class="btn perigo" id="dlg-remover" type="button">Remover</button></div>
+        </div>
+      </section>
+
+      <!-- 5 fim -->
+      <section class="tela" id="tela-fim"><div class="fim"><div class="marca"></div><h2 class="h" id="fim-t" tabindex="-1"></h2><p id="fim-p"></p><div class="acoes"><button class="btn prim g" id="fim-fechar" type="button">Fechar</button><button class="btn link" id="fim-reiniciar" type="button">Rodar de novo</button></div></div></section>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const reduzido = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const timers = new Set();
+  const depois = (ms, fn) => { const t = setTimeout(() => { timers.delete(t); fn(); }, reduzido ? Math.min(ms, 400) : ms); timers.add(t); };
+  const limpar = () => { timers.forEach(clearTimeout); timers.clear(); };
+  const falhas = () => $('falhas').checked;
+  document.addEventListener('pointerdown', (e) => { const b = e.target.closest('.btn, .chip, .jor'); if (b) b.classList.add('pressionado'); });
+  ['pointerup', 'pointercancel'].forEach((ev) => document.addEventListener(ev, () => document.querySelectorAll('.pressionado').forEach((b) => b.classList.remove('pressionado')), true));
+  const GOOGLE = '<i><svg aria-hidden="true" height="18" viewBox="0 0 24 24" width="18"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/></svg></i>';
+  $('conta-google').innerHTML = GOOGLE + 'Continuar com Google';
+
+  // ---- estado ----
+  const EMAIL = 'ana@padaria.com.br';
+  const NOD = () => ({ id: 'nod', nome: 'Nod', tag: 'Ajudante', cor: 'enc', g: 'o', previa: 'Oi! Vamos começar.' });
+  const BOTS_DA_CONTA = () => [
+    { ...NOD(), previa: 'Seu time está em dia.' },
+    { id: 'lia', nome: 'Lia', tag: 'Assistente', cor: 'violet', g: 'a', previa: 'Agenda da semana pronta.' },
+    { id: 'otto', nome: 'Otto', tag: 'Financeiro', cor: 'vert', g: 'o', previa: 'Notas lançadas. Planilha fechada.' },
+  ];
+  const OPCOES = ['Atender clientes por e-mail', 'Organizar minha agenda', 'Cuidar do financeiro', 'Mexer em código', 'Só quero olhar'];
+  let S, aguardando = null, focoAntes = null;
+  function zerar(jornada) {
+    limpar(); aguardando = null;
+    S = { jornada, tela: 'abrir', ia: 'nada', iaPronta: false, nome: null, objetivo: null, bots: [NOD()], botAtivo: 'nod', msgs: {}, onboardingFeito: false, contaExistente: false, ecEstado: 'inicio', ondeTrabalha: null, email: EMAIL, contaNova: jornada !== 'conta' };
+    if (jornada === 'conta') S.ia = 'semlogin';
+    if (jornada === 'remover') { S.contaExistente = true; S.iaPronta = true; S.nome = 'Ana'; S.bots = BOTS_DA_CONTA(); S.onboardingFeito = true; S.tela = 'app'; S.ondeTrabalha = 'aqui'; }
+    S.msgs = Object.fromEntries(S.bots.map((b) => [b.id, []]));
+    marcarJornada();
+    ir(S.tela);
+  }
+  function marcarJornada() { document.querySelectorAll('.jor').forEach((b) => b.setAttribute('aria-pressed', String(b.id === 'j-' + S.jornada))); }
+  const TRILHAS = {
+    nova: ['Abrir', 'Conta', 'Este computador', 'Conversa com o Nod', 'Primeiro bot', 'Bots'],
+    conta: ['Abrir', 'Conta', 'Este computador', 'Onde os bots trabalham', 'Bots'],
+    pulou: ['Abrir', 'Conta', 'Este computador (pular)', 'Bots sem IA', 'Conectar pelo card'],
+    remover: ['Bots', 'Configurações › Computadores', 'Remover', 'Fim'],
+  };
+  function trilha(atual) {
+    const lista = TRILHAS[S.jornada];
+    const i = Math.max(0, lista.indexOf(atual));
+    $('trilha').innerHTML = lista.map((p, k) => `<div class="passo ${k < i ? 'feito' : k === i ? 'atual' : ''}"><i></i>${p}</div>`).join('');
+  }
+  function ir(tela) {
+    S.tela = tela;
+    document.querySelectorAll('.tela').forEach((t) => t.classList.toggle('on', t.id === 'tela-' + tela));
+    if (tela === 'computador') renderComputador();
+    if (tela === 'app') renderApp();
+    if (tela === 'config') renderConfig();
+    if (tela === 'abrir') trilha('Abrir');
+    if (tela === 'conta' || tela === 'email' || tela === 'google') trilha('Conta');
+    // acessibilidade: o foco vai para o título da tela nova
+    const h = document.querySelector('#tela-' + tela + ' .h'); if (h) h.focus({ preventScroll: true });
+  }
+
+  // ---- conta: entrar ou criar, no app ----
+  $('abrir-continuar').addEventListener('click', () => { ir('conta'); $('conta-email').focus(); });
+  function concluirLogin() {
+    if (S.contaNova) { S.contaExistente = false; S.nome = null; S.bots = [NOD()]; S.onboardingFeito = false; if (S.jornada === 'conta') S.jornada = 'nova'; }
+    else { S.contaExistente = true; S.nome = 'Ana'; S.bots = BOTS_DA_CONTA(); S.onboardingFeito = true; if (S.ia === 'nada') S.ia = 'semlogin'; if (S.jornada !== 'conta') S.jornada = 'conta'; }
+    S.msgs = Object.fromEntries(S.bots.map((b) => [b.id, []]));
+    marcarJornada();
+    ir('computador');
+  }
+  $('conta-google').addEventListener('click', () => { const b = $('conta-google'); b.innerHTML = '<span class="giro"></span>Abrindo o Google…'; depois(700, () => { b.innerHTML = GOOGLE + 'Continuar com Google'; ir('google'); $('google-linha').textContent = 'Nada aparece? Use "Abrir de novo".'; depois(2200, () => { $('google-linha').innerHTML = '<span class="ponto"></span><span class="sim">' + (S.contaNova ? 'Conta criada: ' : 'Entrou como ') + S.email + '</span>'; }); depois(3000, concluirLogin); }); });
+  $('google-voltar').addEventListener('click', () => { limpar(); ir('conta'); });
+  $('form-conta').addEventListener('submit', (e) => { e.preventDefault(); const v = $('conta-email').value.trim(); if (!v) { $('conta-email').focus(); return; } S.email = v; $('email-dito').textContent = v; ir('email'); $('codigo-email').focus(); });
+  $('form-email').addEventListener('submit', (e) => { e.preventDefault(); if (!$('codigo-email').value.trim()) { $('codigo-email').focus(); return; } concluirLogin(); });
+  $('email-voltar').addEventListener('click', () => ir('conta'));
+  $('email-outro').addEventListener('click', () => { $('email-outro').textContent = 'Mandamos outro'; });
+
+  // ---- 2 este computador ----
+  const ec = { titulo: $('ec-titulo'), sub: $('ec-sub'), linha: $('ec-claude-linha'), acao: $('ec-claude-acao'), codigo: $('ec-codigo'), quieto: $('ec-quieto'), pular: $('ec-pular'), continuar: $('ec-continuar'), passo: $('ec-passo'), gpt: $('ec-gpt'), gptLinha: $('ec-gpt-linha'), gptAcao: $('ec-gpt-acao'), escolha: $('ec-escolha'), lista: $('ec-lista') };
+  function acaoClaude(html, fn) { ec.acao.innerHTML = html; const b = ec.acao.querySelector('button'); if (b) b.addEventListener('click', fn); }
+  function rodape(cont, pul, quieto) { ec.continuar.hidden = !cont; ec.pular.hidden = !pul; ec.quieto.textContent = quieto; }
+  const QUIETO_SEM = 'Sem IA, você vê a plataforma; os bots avisam que estão sem IA.';
+  function renderComputador() {
+    const e = S.ecEstado;
+    ec.codigo.hidden = e !== 'login-demorou';
+    ec.passo.textContent = S.contaExistente ? `Oi de novo, ${S.nome} · este computador` : 'Este computador';
+    ec.escolha.hidden = true; ec.lista.hidden = false; ec.gptAcao.hidden = false;
+    trilha(S.jornada === 'pulou' ? 'Este computador (pular)' : 'Este computador');
+    if (e === 'escolher') {
+      trilha('Onde os bots trabalham');
+      const n = S.bots.length - 1;
+      ec.titulo.textContent = `Onde ${n === 1 ? 'seu bot trabalha' : 'seus ' + n + ' bots trabalham'} agora?`;
+      ec.sub.textContent = 'Hoje eles trabalham no MacBook de Ana, que está desligado desde ontem. Enquanto ele não volta, nada responde.';
+      ec.lista.hidden = true; ec.escolha.hidden = false;
+      rodape(false, false, 'Dá para mudar depois em Configurações › Computadores.');
+      return;
+    }
+    if (e === 'conectado' || (e === 'inicio' && S.ia === 'logado')) {
+      S.iaPronta = true;
+      ec.titulo.textContent = S.contaExistente ? 'O Claude já está aqui.' : 'O Claude já está aqui. Seus bots podem começar.';
+      ec.sub.textContent = 'Os bots pensam com a IA que você já assina, neste computador. O nod não vê sua senha.';
+      ec.linha.innerHTML = '<span class="ponto"></span><span class="sim">Conectado</span> como ' + S.email;
+      acaoClaude('');
+      ec.gptAcao.hidden = true; ec.gptLinha.textContent = 'Dá para ligar depois, em Configurações › Suas IAs. Se o Claude chegar ao limite, ele assume.';
+      rodape(true, false, 'Dá para mudar depois em Configurações › Suas IAs.');
+      return;
+    }
+    ec.gptLinha.textContent = 'Não está neste computador. Também funciona sozinho ou como reserva.';
+    if (e === 'inicio' && S.ia === 'semlogin') {
+      ec.titulo.textContent = 'Encontrei o Claude. Falta só entrar.';
+      ec.sub.textContent = S.contaExistente ? 'Sua conta do Claude já está conectada no MacBook de Ana. Aqui, falta entrar uma vez, no site da Anthropic; a senha fica lá.' : 'Use a mesma conta do Claude que você usa no navegador. O login é no site da Anthropic; a senha fica lá.';
+      ec.linha.textContent = 'A parte do Claude que trabalha neste computador já está instalada. Falta entrar na sua conta.';
+      acaoClaude('<button class="btn prim" type="button">Entrar</button>', () => { S.ecEstado = 'login'; renderComputador(); });
+      rodape(false, true, QUIETO_SEM);
+      return;
+    }
+    if (e === 'inicio') {
+      ec.titulo.textContent = 'Conecte uma IA e seus bots começam a responder.';
+      ec.sub.textContent = 'Use a mesma conta do Claude ou do ChatGPT que você usa no navegador. O nod instala a parte que trabalha neste computador; o login é no site deles.';
+      ec.linha.textContent = 'Recomendado. Instala em menos de um minuto.';
+      acaoClaude('<button class="btn prim" type="button">Instalar e entrar</button>', () => { S.ecEstado = 'instalando'; renderComputador(); });
+      rodape(false, true, QUIETO_SEM);
+      return;
+    }
+    if (e === 'instalando') {
+      ec.titulo.textContent = 'Instalando o Claude neste computador.';
+      ec.sub.textContent = 'Fica numa pasta do nod e não mexe no resto. Quando terminar, abro o login no navegador.';
+      ec.linha.innerHTML = '<span class="giro"></span>Baixando o Claude…';
+      acaoClaude('<button class="btn link" type="button">Cancelar</button>', () => { limpar(); S.ecEstado = 'inicio'; renderComputador(); });
+      rodape(false, false, 'Você pode cancelar a qualquer momento.');
+      depois(1200, () => { ec.linha.innerHTML = '<span class="giro"></span>Instalando…'; });
+      if (falhas()) { depois(2200, () => { S.ecEstado = 'erro-instalacao'; renderComputador(); }); return; }
+      depois(2400, () => { S.ecEstado = 'login'; renderComputador(); });
+      return;
+    }
+    if (e === 'erro-instalacao') {
+      ec.titulo.textContent = 'A instalação não terminou.';
+      ec.sub.textContent = 'Pode ser a internet ou o antivírus. Tente de novo; se continuar, pule por agora e volte depois em Configurações › Suas IAs.';
+      ec.linha.innerHTML = '<span class="erro">Não consegui baixar o Claude.</span> Nada foi alterado no computador.';
+      acaoClaude('<button class="btn prim" type="button">Tentar de novo</button>', () => { $('falhas').checked = false; S.ecEstado = 'instalando'; renderComputador(); });
+      rodape(false, true, QUIETO_SEM);
+      return;
+    }
+    if (e === 'login') {
+      ec.titulo.textContent = 'Entre no Claude no navegador. Eu continuo daqui.';
+      ec.sub.textContent = 'A página de login do Claude abriu no navegador. Quando você terminar lá, isto segue sozinho.';
+      ec.linha.innerHTML = '<span class="giro"></span>Esperando você entrar no site do Claude, que abriu no navegador';
+      acaoClaude('<button class="btn link" type="button">Abrir de novo</button>', () => {});
+      rodape(false, true, QUIETO_SEM);
+      if (falhas()) { depois(4000, () => { S.ecEstado = 'login-demorou'; renderComputador(); }); return; }
+      depois(3000, terminarLogin);
+      return;
+    }
+    if (e === 'login-demorou') {
+      ec.titulo.textContent = 'Ainda não vi o login terminar.';
+      ec.sub.textContent = 'Se você já entrou no site do Claude, confira de novo. Se a página não abriu, abra outra vez ou cole o código que ela mostrar.';
+      ec.linha.innerHTML = '<span class="erro">O login não chegou até aqui.</span> Nada aconteceu no navegador?';
+      acaoClaude('<button class="btn prim" type="button">Conferir de novo</button>', () => { S.ecEstado = 'sem-acesso'; renderComputador(); });
+      rodape(false, true, QUIETO_SEM);
+      return;
+    }
+    if (e === 'sem-acesso') {
+      ec.titulo.textContent = 'Sua conta entrou, mas não tem acesso ao Claude por aqui.';
+      ec.sub.textContent = 'A conta que entrou é de uma organização que não liberou o uso do Claude por assinatura. Peça ao administrador para liberar, ou entre com uma conta pessoal que assine o Claude.';
+      ec.linha.innerHTML = '<span class="erro">Conta sem acesso ao Claude.</span> ' + S.email;
+      acaoClaude('<button class="btn prim" type="button">Entrar com outra conta</button>', () => { $('falhas').checked = false; S.ecEstado = 'login'; renderComputador(); });
+      rodape(false, true, QUIETO_SEM);
+      return;
+    }
+  }
+  function terminarLogin() { ec.linha.innerHTML = '<span class="giro"></span>Conferindo a conta…'; depois(900, () => { S.ecEstado = 'conectado'; renderComputador(); }); }
+  $('ec-cod-enviar').addEventListener('click', () => { if ($('ec-cod').value.trim()) terminarLogin(); else $('ec-cod').focus(); });
+  ec.gptAcao.addEventListener('click', () => { ec.gptLinha.innerHTML = '<span class="giro"></span>Instalando o ChatGPT…'; depois(1800, () => { ec.gptLinha.innerHTML = '<span class="giro"></span>Esperando você entrar no site do ChatGPT'; }); depois(3600, () => { ec.gptLinha.innerHTML = '<span class="ponto"></span><span class="sim">Conectado</span> como ' + S.email; ec.gpt.classList.remove('apagado'); ec.gptAcao.hidden = true; S.iaPronta = true; if (S.ecEstado === 'inicio') rodape(true, false, 'Dá para mudar depois em Configurações › Suas IAs.'); }); });
+  ec.pular.addEventListener('click', () => { limpar(); ir('app'); });
+  ec.continuar.addEventListener('click', () => { limpar(); if (S.contaExistente && !S.ondeTrabalha) { S.ecEstado = 'escolher'; renderComputador(); return; } ir('app'); });
+  $('esc-aqui').addEventListener('click', () => { S.ondeTrabalha = 'aqui'; ir('app'); });
+  $('esc-la').addEventListener('click', () => { S.ondeTrabalha = 'la'; ir('app'); });
+
+  // ---- 3 app: conversa ----
+  const chat = { lista: $('lista-bots'), conv: $('conversa'), entrada: $('entrada'), dica: $('dica'), topoNome: $('topo-nome'), topoSub: $('topo-sub'), topoAv: $('topo-av'), topoDir: $('topo-direita'), aviso: $('aviso-ia') };
+  const botAtivo = () => S.bots.find((b) => b.id === S.botAtivo);
+  const art = (b) => (b.g === 'o' ? 'o' : 'a');
+  const pron = (b) => (b.g === 'o' ? 'ele' : 'ela');
+  $('abrir-barra').addEventListener('click', () => $('barra').classList.toggle('aberta'));
+  function renderBarra() {
+    chat.lista.innerHTML = S.bots.map((b) => `<button class="bot ${b.id === S.botAtivo ? 'ativo' : ''}" type="button" data-bot="${b.id}" aria-current="${b.id === S.botAtivo}"><div class="av ${b.cor}"></div><div><div class="nome">${b.nome} <span class="tag">${b.tag}</span></div><div class="previa">${b.previa}</div></div></button>`).join('');
+    chat.lista.querySelectorAll('.bot').forEach((el) => el.addEventListener('click', () => { S.botAtivo = el.dataset.bot; $('barra').classList.remove('aberta'); renderApp(); }));
+    $('eu-nome').textContent = S.nome || S.email;
+    chat.aviso.hidden = S.iaPronta;
+  }
+  function msg(papel, html) { S.msgs[S.botAtivo].push({ papel, html }); renderConversa(); }
+  function tirar(pred) { S.msgs[S.botAtivo] = S.msgs[S.botAtivo].filter((m) => !pred(m)); }
+  const ehChips = (m) => m.papel === 'html' && m.html.includes('data-chip');
+  const ehCard = (m) => m.papel === 'html' && m.html.includes('class="cp"');
+  function renderConversa() {
+    const b = botAtivo(); const lista = S.msgs[b.id];
+    chat.conv.innerHTML = lista.map((m, i) => { const novo = i === lista.length - 1 ? ' novo' : ''; return m.papel === 'eu' ? `<div class="balao eu${novo}">${m.html}</div>` : m.papel === 'bot' ? `<div class="linha-bot"><div class="av p ${b.cor}"></div><div class="balao bot${novo}">${m.html}</div></div>` : m.html.replace('class="cp"', `class="cp${novo}"`); }).join('');
+    chat.conv.querySelectorAll('[data-chip]').forEach((c) => c.addEventListener('click', () => responder(c.dataset.chip === '__pular' ? null : c.textContent)));
+    chat.conv.querySelectorAll('[data-act]').forEach((c) => c.addEventListener('click', () => acao(c.dataset.act)));
+    chat.conv.scrollTop = chat.conv.scrollHeight;
+  }
+  function chips(opcoes, comPular = true) { return `<div class="chips" role="group">${opcoes.map((o) => `<button class="chip" type="button" data-chip>${o}</button>`).join('')}${comPular ? '<button class="chip quieto" type="button" data-chip="__pular">Pular</button>' : ''}</div>`; }
+  function renderApp() {
+    renderBarra();
+    const b = botAtivo();
+    chat.topoNome.textContent = b.nome; chat.topoAv.className = 'av p ' + b.cor;
+    chat.topoSub.textContent = S.ondeTrabalha === 'la' ? 'Trabalha no MacBook de Ana, que está desligado' : S.iaPronta ? 'Online · pensa com o Claude deste computador' : 'Sem IA neste computador';
+    chat.topoDir.innerHTML = '';
+    chat.entrada.placeholder = `Escreva para ${b.nome}…`;
+    chat.dica.hidden = S.iaPronta; chat.dica.textContent = `${b.nome} responde quando uma IA estiver conectada aqui.`;
+    if (!S.onboardingFeito && b.id === 'nod' && S.msgs.nod.length === 0) comecarOnboarding();
+    else if (!S.onboardingFeito && b.id === 'nod') { trilha(S.objetivo ? 'Primeiro bot' : 'Conversa com o Nod'); botaoPular(); }
+    else trilha(S.jornada === 'pulou' ? (S.iaPronta ? 'Conectar pelo card' : 'Bots sem IA') : 'Bots');
+    renderConversa();
+  }
+  function botaoPular() { chat.topoDir.innerHTML = '<button class="btn link" type="button">Pular as perguntas</button>'; chat.topoDir.querySelector('button').addEventListener('click', () => acao('pular-onboarding')); }
+  function comecarOnboarding() {
+    trilha('Conversa com o Nod'); botaoPular();
+    const parte = S.email.split('@')[0].replace(/[._-].*/, ''); S.sugerido = parte.charAt(0).toUpperCase() + parte.slice(1);
+    msg('bot', S.iaPronta ? `Oi! Eu sou o Nod, seu ajudante aqui. Vou te fazer duas perguntas rápidas para montar seu primeiro bot. Posso te chamar de ${S.sugerido}?` : `Oi! Eu sou o Nod, seu ajudante aqui. Sem IA neste computador eu só consigo seguir pelas opções abaixo; com uma IA conectada, a gente conversa de verdade. Posso te chamar de ${S.sugerido}?`);
+    msg('html', chips(['Pode', 'Prefiro outro nome'], true));
+    aguardando = 'nome';
+  }
+  function perguntarObjetivo(prefixo) { depois(400, () => { msg('bot', `${prefixo}O que você quer que os bots façam por você?`); msg('html', chips(OPCOES)); aguardando = 'objetivo'; }); }
+  function responder(texto) {
+    tirar(ehChips);
+    if (texto) msg('eu', texto); else msg('html', '<div class="sistema">Pulado</div>');
+    if (aguardando === 'nome') {
+      if (texto === 'Prefiro outro nome') { msg('bot', 'Como quer que eu te chame?'); aguardando = 'nome-livre'; chat.entrada.focus(); return; }
+      S.nome = texto === 'Pode' ? S.sugerido : null; renderBarra();
+      perguntarObjetivo(S.nome ? `${S.nome}, o` : 'O'); return;
+    }
+    if (aguardando === 'nome-livre') { S.nome = texto || null; renderBarra(); perguntarObjetivo(S.nome ? `Prazer, ${S.nome}. ` : ''); return; }
+    if (aguardando === 'objetivo') {
+      aguardando = null;
+      if (!texto || texto === 'Só quero olhar') { S.objetivo = null; depois(400, () => { msg('bot', 'Combinado. Dá uma volta pela plataforma. Quando quiser um bot, é só me dizer o que ele deve fazer, ou usar o + ali na barra.'); concluir(); }); return; }
+      const m = modeloDoObjetivo(texto);
+      if (!m) { depois(300, () => { msg('bot', 'Essa eu ainda não sei montar sozinho. Escolha uma das opções, ou me conte depois com uma IA conectada.'); msg('html', chips(OPCOES, false)); aguardando = 'objetivo'; }); return; }
+      S.objetivo = m;
+      depois(500, () => { msg('bot', 'Boa. Montei um bot para isso. Dá uma olhada e ajuste o que quiser.'); msg('html', cardBot(m)); trilha('Primeiro bot'); });
+    }
+  }
+  function modeloDoObjetivo(o) {
+    if (/agenda/i.test(o)) return { id: 'lia', nome: 'Lia', tag: 'Assistente', cor: 'violet', g: 'a', faz: 'organiza sua agenda, confirma compromissos e avisa o que mudou', app: 'Google Agenda', sugestoes: ['Me mostra como você organizaria a minha semana', 'Confirma as reuniões de amanhã', 'Resume o que tenho nesta semana'] };
+    if (/financeiro/i.test(o)) return { id: 'otto', nome: 'Otto', tag: 'Financeiro', cor: 'vert', g: 'o', faz: 'lança notas, fecha a planilha do mês e aponta o que está fora do padrão', app: 'ClickUp', sugestoes: ['Me mostra como você lançaria uma nota', 'Fecha as notas do mês', 'O que está fora do padrão?'] };
+    if (/código|codigo/i.test(o)) return { id: 'max', nome: 'Max', tag: 'Código', cor: 'bleu', g: 'o', faz: 'revisa pull requests, abre issues e prepara releases', app: 'GitHub', sugestoes: ['Me mostra como você revisaria um trecho', 'Revisa o PR aberto', 'Prepara a release'] };
+    if (/e-mail|email|cliente|atend/i.test(o)) return { id: 'bruna', nome: 'Bruna', tag: 'Atendimento', cor: 'ambre', g: 'a', faz: 'lê os e-mails dos clientes, prepara a resposta e só envia com a sua aprovação', app: 'Gmail', sugestoes: ['Me mostra como você responderia um e-mail', 'Responde as dúvidas que chegaram ontem', 'Resume o que chegou esta semana'] };
+    return null;
+  }
+  function cardBot(m) {
+    return `<div class="cp"><div class="cp-titulo"><span class="av p ${m.cor}" style="width: 20px; height: 20px; border-radius: 5px"></span>Criar ${art(m)} ${m.nome}, bot de ${m.tag.toLowerCase()}</div><ul><li><span class="rot">Faz</span> &nbsp;${m.faz}</li><li><span class="rot">Usa</span> &nbsp;${m.app}, que ${pron(m)} pede para conectar quando precisar</li><li><span class="rot">Pensa com</span> &nbsp;o Claude deste computador</li></ul><div class="acoes-cp"><button class="btn prim" type="button" data-act="criar-bot">Criar</button><button class="btn link" type="button" data-act="agora-nao">Agora não</button></div></div>`;
+  }
+  function concluir() { S.onboardingFeito = true; chat.topoDir.innerHTML = ''; trilha('Bots'); }
+  function acao(a) {
+    if (a === 'pular-onboarding') { aguardando = null; tirar(ehChips); msg('html', '<div class="sistema">Perguntas puladas · dá para refazer em Configurações</div>'); msg('bot', 'Sem problema. Seus bots ficam na barra à esquerda; quando quiser um novo, me chama.'); concluir(); return; }
+    if (a === 'agora-nao') { tirar(ehCard); msg('bot', 'Tudo bem. Quando quiser, me chama e a gente monta.'); concluir(); return; }
+    if (a === 'criar-bot') {
+      const m = S.objetivo; if (!m) return;
+      tirar(ehCard);
+      const passos = [`${m.nome} sabe quem você é e o que quer d${pron(m) === 'ele' ? 'ele' : 'ela'}`, `${pron(m) === 'ele' ? 'Ele' : 'Ela'} pede sua aprovação antes de qualquer coisa sair`, `Preparando o que ${pron(m)} pode fazer primeiro`];
+      msg('bot', `Um instante. Estou apresentando ${art(m)} ${m.nome} ao que você já me contou.<div class="passos">${passos.map((p, i) => `<div data-passo="${i}"><span class="giro"></span>${p}</div>`).join('')}</div>`);
+      const marcar = (i) => { const el = chat.conv.querySelector(`[data-passo="${i}"]`); if (el) el.innerHTML = `<span class="ok">✓</span>${passos[i]}`; };
+      depois(700, () => marcar(0)); depois(1400, () => marcar(1)); depois(2100, () => marcar(2));
+      depois(2600, () => {
+        S.msgs.nod.pop();
+        S.msgs.nod.push({ papel: 'bot', html: `Pronto. ${art(m) === 'o' ? 'O' : 'A'} ${m.nome} já está na sua barra.` });
+        S.msgs.nod.push({ papel: 'html', html: `<div class="cp-linha"><span class="ponto"></span>${m.nome} criad${art(m)} · <button class="btn link" type="button" data-act="abrir-${m.id}" style="height: auto; padding: 0">Abrir</button></div>` });
+        S.bots.push({ ...m, previa: 'Por onde quer que eu comece?' }); S.msgs[m.id] = [];
+        concluir(); S.botAtivo = m.id;
+        S.msgs[m.id].push({ papel: 'html', html: `<div class="sistema">${m.nome} nasceu agora</div>` });
+        S.msgs[m.id].push({ papel: 'bot', html: `Oi${S.nome ? ', ' + S.nome : ''}. Sou ${art(m)} ${m.nome}. Eu ${m.faz}. Por onde quer que eu comece?` });
+        S.msgs[m.id].push({ papel: 'html', html: chips(m.sugestoes, false).replace('</div>', '<button class="chip quieto" type="button" data-chip>Outra coisa</button></div>') });
+        aguardando = 'primeira-tarefa';
+        renderApp(); trilha('Bots');
+      });
+      return;
+    }
+    if (a.startsWith('abrir-')) { S.botAtivo = a.slice(6); renderApp(); return; }
+    if (a === 'entrar-claude') {
+      const b = botAtivo();
+      tirar((m) => m.html.includes('data-act="entrar-claude"'));
+      msg('html', '<div class="cp-linha"><span class="giro"></span>Abrimos o login do Claude no navegador…</div>');
+      depois(2200, () => { tirar((m) => m.html.includes('Abrimos o login')); S.iaPronta = true; msg('html', `<div class="cp-linha"><span class="ponto"></span>Claude conectado como ${S.email}</div>`); const ultima = [...S.msgs[b.id]].reverse().find((m) => m.papel === 'eu'); renderApp(); depois(900, () => msg('bot', respostaReal(b, ultima ? ultima.html : ''))); });
+      return;
+    }
+    if (a === 'abrir-card-ia') { S.botAtivo = 'nod'; renderApp(); if (!S.msgs.nod.some((m) => m.html.includes('data-act="entrar-claude"'))) msg('html', cardConectar(S.ia === 'semlogin')); return; }
+  }
+  const LOGO_C = '<span class="logo claude" aria-hidden="true"><svg width="12" height="12" viewBox="0 0 24 24"><path d="M4.709 15.955l4.72-2.647.08-.23-.08-.128H9.2l-.79-.048-2.698-.073-2.339-.097-2.266-.122-.571-.121L0 11.784l.055-.352.48-.321.686.06 1.52.103 2.278.158 1.652.097 2.449.255h.389l.055-.157-.134-.098-.103-.097-2.358-1.596-2.552-1.688-1.336-.972-.724-.491-.364-.462-.158-1.008.656-.722.881.06.225.061.893.686 1.908 1.476 2.491 1.833.365.304.145-.103.019-.073-.164-.274-1.355-2.446-1.446-2.49-.644-1.032-.17-.619a2.97 2.97 0 01-.104-.729L6.283.134 6.696 0l.996.134.42.364.62 1.414 1.002 2.229 1.555 3.03.456.898.243.832.091.255h.158V9.01l.128-1.706.237-2.095.23-2.695.08-.76.376-.91.747-.492.584.28.48.685-.067.444-.286 1.851-.559 2.903-.364 1.942h.212l.243-.242.985-1.306 1.652-2.064.73-.82.85-.904.547-.431h1.033l.76 1.129-.34 1.166-1.064 1.347-.881 1.142-1.264 1.7-.79 1.36.073.11.188-.02 2.856-.606 1.543-.28 1.841-.315.833.388.091.395-.328.807-1.969.486-2.309.462-3.439.813-.042.03.049.061 1.549.146.662.036h1.622l3.02.225.79.522.474.638-.079.485-1.215.62-1.64-.389-3.829-.91-1.312-.329h-.182v.11l1.093 1.068 2.006 1.81 2.509 2.33.127.578-.322.455-.34-.049-2.205-1.657-.851-.747-1.926-1.62h-.128v.17l.444.649 2.345 3.521.122 1.08-.17.353-.608.213-.668-.122-1.374-1.925-1.415-2.167-1.143-1.943-.14.08-.674 7.254-.316.37-.729.28-.607-.461-.322-.747.322-1.476.389-1.924.315-1.53.286-1.9.17-.632-.012-.042-.14.018-1.434 1.967-2.18 2.945-1.726 1.845-.414.164-.717-.37.067-.662.401-.589 2.388-3.036 1.44-1.882.93-1.086-.006-.158h-.055L4.132 18.56l-1.13.146-.487-.456.061-.746.231-.243 1.908-1.312-.006.006z" fill="#D97757"/></svg></span>';
+  const LOGO_G = '<span class="logo gpt" aria-hidden="true" style="color: var(--ink); font-weight: 700">G</span>';
+  function cardConectar(instalado) {
+    return `<div class="cp"><div class="cp-titulo">Conectar uma IA neste computador</div><div style="margin-top: 2px">Os bots pensam com a IA que você já assina, a mesma do navegador. O nod nunca vê sua senha.</div><div class="ia">${LOGO_C}<span class="tx"><b style="font-weight: 600; color: var(--ink)">Claude</b> · ${instalado ? 'instalado, falta entrar' : 'instala em menos de um minuto'}</span><button class="btn prim" type="button" data-act="entrar-claude" style="height: 30px">${instalado ? 'Entrar' : 'Instalar e entrar'}</button></div><div class="ia">${LOGO_G}<span class="tx"><b style="font-weight: 600; color: var(--ink)">ChatGPT</b> · não está neste computador</span><button class="btn" type="button" data-act="entrar-claude" style="height: 30px">Instalar e entrar</button></div><div style="margin-top: 8px; font-size: 12px; color: var(--ink-3)">Outras IAs · Grok e Gemini em breve</div></div>`;
+  }
+  function respostaReal(b, pedido) {
+    if (S.ondeTrabalha === 'la') return 'Recebi. Eu trabalho no MacBook de Ana, que está desligado; começo assim que ele voltar, ou mude meu computador em Configurações › Computadores.';
+    if (b.id === 'nod') return 'Pode deixar. Vou ver isso e te conto por aqui.';
+    if (/mostra/i.test(pedido)) return 'Manda o texto aqui na conversa que eu te mostro como faria, antes de conectar qualquer coisa.';
+    return `Recebi. Para isso preciso do ${b.app || 'app'}: conecta e eu começo na hora, com você aprovando antes de qualquer envio.`;
+  }
+  chat.aviso.addEventListener('click', () => acao('abrir-card-ia'));
+  // chips de primeira tarefa viram mensagem da pessoa (captura antes do handler do chip)
+  chat.conv.addEventListener('click', (e) => { const c = e.target.closest('[data-chip]'); if (c && aguardando === 'primeira-tarefa') { e.stopImmediatePropagation(); chat.entrada.value = c.textContent; $('composer').requestSubmit(); } }, true);
+  $('composer').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const texto = chat.entrada.value.trim(); if (!texto) return; chat.entrada.value = '';
+    if (aguardando === 'primeira-tarefa') { tirar(ehChips); aguardando = null; }
+    else if (aguardando) { if (!S.iaPronta && aguardando !== 'nome-livre') { msg('eu', texto); depois(300, () => msg('bot', 'Sem IA aqui eu só consigo seguir pelas opções. Escolha uma delas por enquanto.')); return; } responder(texto); return; }
+    const b = botAtivo();
+    msg('eu', texto);
+    if (!S.iaPronta) {
+      const jaTem = S.msgs[b.id].some((m) => m.html.includes('data-act="entrar-claude"'));
+      depois(500, () => { if (jaTem) msg('bot', 'Ainda sem IA aqui. A mensagem fica guardada; é só conectar no card acima.'); else { msg('bot', 'Recebi. Estou sem IA neste computador, então ainda não consigo pensar nisso. Conecte uma e eu começo na hora; a mensagem fica guardada.'); msg('html', cardConectar(S.ia === 'semlogin')); } b.previa = 'Estou sem IA neste computador.'; renderBarra(); });
+      return;
+    }
+    depois(600, () => { const r = respostaReal(b, texto); msg('bot', r); b.previa = r; renderBarra(); });
+  });
+
+  // ---- 4 configurações / remover ----
+  function renderConfig() {
+    const n = S.bots.length - 1;
+    $('maq-detalhe').textContent = S.iaPronta ? `Windows · ${n === 0 ? 'nenhum bot' : n === 1 ? '1 bot' : n + ' bots'} aqui · Claude conectado como ${S.email}` : 'Windows · sem IA conectada';
+    $('dlg-p').textContent = `O nod para de rodar aqui e tira o que instalou. ${n === 0 ? 'Nenhum bot trabalha aqui hoje.' : (n === 1 ? 'O bot daqui passa' : 'Os ' + n + ' bots daqui passam') + ' para o MacBook de Ana; se ele estiver desligado, esperam até um computador com IA conectar.'} Seus bots e conversas continuam na sua conta.`;
+    $('menu-maq').hidden = true; $('maq-menu').setAttribute('aria-expanded', 'false');
+    trilha('Configurações › Computadores');
+  }
+  $('ir-config').addEventListener('click', () => ir('config'));
+  $('config-voltar').addEventListener('click', () => ir('app'));
+  $('maq-menu').addEventListener('click', () => { const m = $('menu-maq'); m.hidden = !m.hidden; $('maq-menu').setAttribute('aria-expanded', String(!m.hidden)); if (!m.hidden) m.querySelector('button').focus(); });
+  $('maq-remover').addEventListener('click', () => { focoAntes = $('maq-menu'); $('menu-maq').hidden = true; $('scrim').classList.add('on'); $('dialogo').classList.add('on'); $('dialogo').setAttribute('aria-hidden', 'false'); $('dlg-t').focus(); trilha('Remover'); });
+  const fecharDlg = () => { $('scrim').classList.remove('on'); $('dialogo').classList.remove('on'); $('dialogo').setAttribute('aria-hidden', 'true'); if (focoAntes) focoAntes.focus(); };
+  $('dlg-cancelar').addEventListener('click', fecharDlg); $('scrim').addEventListener('click', fecharDlg);
+  document.addEventListener('keydown', (e) => {
+    const aberto = $('dialogo').classList.contains('on');
+    if (e.key === 'Escape') { if (aberto) fecharDlg(); else if (!$('menu-maq').hidden) { $('menu-maq').hidden = true; $('maq-menu').focus(); } }
+    if (e.key === 'Tab' && aberto) { const f = [...$('dialogo').querySelectorAll('button, input')]; const i = f.indexOf(document.activeElement); if (e.shiftKey && i <= 0) { e.preventDefault(); f[f.length - 1].focus(); } else if (!e.shiftKey && i === f.length - 1) { e.preventDefault(); f[0].focus(); } }
+  });
+  $('dlg-remover').addEventListener('click', () => {
+    fecharDlg(); const guardar = $('dlg-guardar').checked, ias = $('dlg-ias').checked;
+    $('fim-t').textContent = 'O nod saiu deste computador.';
+    $('fim-p').textContent = `Parou de rodar aqui${ias ? ', e o Claude e o ChatGPT que ele instalou saíram junto' : ''}. ${guardar ? 'Este computador continua ligado à sua conta: ao instalar de novo, não precisa entrar outra vez.' : 'Este computador saiu da sua conta; ao instalar de novo, ele passa por "Este computador" como um computador novo.'} Seus bots e conversas continuam na sua conta.`;
+    ir('fim'); trilha('Fim');
+  });
+  $('fim-fechar').addEventListener('click', () => zerar(S.jornada));
+  $('fim-reiniciar').addEventListener('click', () => zerar(S.jornada));
+  $('reiniciar').addEventListener('click', () => zerar(S.jornada));
+
+  // ---- jornadas ----
+  [['j-nova', 'nova'], ['j-conta', 'conta'], ['j-pulou', 'pulou'], ['j-remover', 'remover']].forEach(([id, j]) => $(id).addEventListener('click', () => zerar(j)));
+  const porHash = { a: 'nova', b: 'conta', c: 'pulou', d: 'remover' };
+  zerar(porHash[location.hash.replace('#', '').toLowerCase()] || 'nova');
+  window.addEventListener('hashchange', () => { const j = porHash[location.hash.replace('#', '').toLowerCase()]; if (j && j !== S.jornada) zerar(j); });
+})();
+</script>
+
+</body>
+</html>

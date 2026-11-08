@@ -16,6 +16,7 @@ import { MOTIVOS_DE_QUEDA, MOTIVOS_FALHA_SEM_QUEDA, QUEDAS_FORA_DO_TETO } from "
 import { paraProfundidade } from "../domain/profundidade.ts";
 import { nasceNosBastidores } from "../domain/triagem.ts";
 import { ABERTURA_DA_ESPERA_DO_SERVIDOR } from "../domain/redacao.ts";
+import { PRAZO_SEM_IA_MS } from "../domain/sem-ia.ts";
 import { PRAZO_PRESO_SEM_CONTATO_MS, type FatosFundoPreso, type FatosTurnoOrfao, type FundoPreso } from "../domain/turno-orfao.ts";
 import type { VoltaDaCadeia } from "../domain/voltas-sem-novidade.ts";
 import { abrirTxEscopada } from "../db/tx.ts";
@@ -254,6 +255,14 @@ function faixaOcupadaSql(c: Conn) {
     else exists (select 1 from turnos d where d.tenant_id = t.tenant_id and d.trabalho_id = t.trabalho_id and d.estado = 'despachando') end)`;
 }
 
+/**
+ * Jornada C do onboarding: o turno `t` é a fala da pessoa guardada sem IA (tem a negação `aguardaIa`, domain/sem-ia.ts).
+ * O varredor de órfãos dá a ele os 7 dias da promessa, não as 24 h da máquina-alvo sem contato.
+ */
+function aguardaIaSql(c: Conn) {
+  return c`exists (select 1 from mensagens g where g.tenant_id = t.tenant_id and g.turno_id = t.id and g.kind = 'negacao' and g.payload->>'aguardaIa' = 'true')`;
+}
+
 /** ADR-108: o turno da task está na IA `ia` — fixado nela, ou no Automático com a sessão da task nela. null = qualquer. */
 function daIa(conn: Conn, ia: IdHarness | null) {
   if (ia === null) return conn`true`;
@@ -383,6 +392,12 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
               ${p.harnessesProntos === undefined ? trx`` : trx`and (${alvo} = ${p.machineId} or (t.harness = 'auto' and t.modelo = 'auto' and ${(p.harnessesAuto ?? p.harnessesProntos).length > 0}) or (not (t.harness = 'auto' and t.modelo = 'auto') and ${iaDoTurno} = any(${[...p.harnessesProntos]}::text[]))
                 ${p.harnessesProntosPessoa === undefined ? trx`` : trx`or (not (t.harness = 'auto' and t.modelo = 'auto') and ${iaDoTurno} <> all(${[...p.harnessesProntosPessoa]}::text[]))`})`}
               and exists (select 1 from agentes a where a.tenant_id = t.tenant_id and a.id = t.agente_id and a.excluido_em is null and a.geracao_execucao = t.geracao_execucao)
+              -- Jornada C do onboarding (2026-11-07): a fala da pessoa guardada sem IA (a negação aguardaIa do turno, gravada
+              -- só com NOD_ONBOARDING_TEXTO=1) espera uma máquina com a IA dela pronta — a máquina-alvo sem IA não a pega para
+              -- recusar, como faz com o resto (acima). Rotina, catcher, ligação e o turno sem a fala guardada não mudam.
+              ${p.harnessesProntos === undefined ? trx`` : trx`and not (t.origem = 'conversa'
+                and not ((t.harness = 'auto' and t.modelo = 'auto' and ${(p.harnessesAuto ?? p.harnessesProntos).length > 0}) or (not (t.harness = 'auto' and t.modelo = 'auto') and ${iaDoTurno} = any(${[...p.harnessesProntos]}::text[])))
+                and exists (select 1 from mensagens g where g.tenant_id = t.tenant_id and g.turno_id = t.id and g.kind = 'negacao' and g.payload->>'aguardaIa' = 'true'))`}
               -- definido em 2026-10-22 (ADR-121, NOD-92): a máquina na nuvem que adormece, dorme ou acorda não pega turno até
               -- falar com o servidor depois de ligar (ligou_em). Sob a mesma trava da pessoa que o dormir toma: o turno
               -- que chegou antes do sono a segura acordada; o que chega depois espera ela acordar.
@@ -1302,10 +1317,12 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
       // NOD-314 (definido em 2026-10-20): a máquina-alvo do turno (ADR-090, a mesma regra do `reivindicar`) e o último
       // contato dela; o preso há 24 h a um alvo sem contato entra como impossível (domain/turno-orfao.ts).
       const limitePreso = data(agora - PRAZO_PRESO_SEM_CONTATO_MS);
+      // Jornada C do onboarding: a fala guardada sem IA (a negação aguardaIa do turno) espera 7 dias, não 24 h.
+      const limiteDoTurno = conn`(case when x.aguarda_ia then ${data(agora - PRAZO_SEM_IA_MS)}::timestamptz else ${limitePreso}::timestamptz end)`;
       // ADR-121 (NOD-92): o contato da máquina na nuvem que dorme ou acorda é "agora" (o prazo não corre); fora disso conta
       // também da última troca de estado dela (relogioDaNuvem).
       const contatoDoAlvo = conn`greatest(coalesce(k.ultimo_uso_em, k.criado_em), ${relogioDaNuvem(conn, conn`k.tenant_id`, conn`k.id`, agora)})`;
-      const linhas = await conn<{ id: string; conversa_id: string; agente_id: string; origem: OrigemTurno; trabalho_id: string | null; criado_em: Date; prazo_em: Date; acordar_em: Date | null; agente_excluido: boolean; geracao_antiga: boolean; depois_de_aberto: boolean; faixa_ocupada: boolean; alvo_ultimo_contato: Date | null; alvo_nome: string | null; alvo_id: string | null }[]>`
+      const linhas = await conn<{ id: string; conversa_id: string; agente_id: string; origem: OrigemTurno; trabalho_id: string | null; criado_em: Date; prazo_em: Date; acordar_em: Date | null; agente_excluido: boolean; geracao_antiga: boolean; depois_de_aberto: boolean; faixa_ocupada: boolean; alvo_ultimo_contato: Date | null; alvo_nome: string | null; alvo_id: string | null; aguarda_ia: boolean }[]>`
         select x.*, case when k.id is null then null else ${contatoDoAlvo} end as alvo_ultimo_contato, k.nome as alvo_nome
         from (
           select t.id, t.tenant_id, t.conversa_id, t.agente_id, t.origem, t.trabalho_id, t.criado_em, t.prazo_em, t.acordar_em,
@@ -1314,7 +1331,8 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
             (t.trabalho_id is not null and exists (select 1 from trabalhos w join trabalhos dep on dep.tenant_id = w.tenant_id and dep.id = w.depois_de_trabalho_id
               where w.tenant_id = t.tenant_id and w.id = t.trabalho_id and dep.estado not in ('terminado', 'parado', 'falhou'))) as depois_de_aberto,
             ${faixaOcupadaSql(conn)} as faixa_ocupada,
-            ${alvoDoTurno(conn, agora)} as alvo_id
+            ${alvoDoTurno(conn, agora)} as alvo_id,
+            ${aguardaIaSql(conn)} as aguarda_ia
           from turnos t
           left join agentes a on a.tenant_id = t.tenant_id and a.id = t.agente_id
           where t.tenant_id = ${escopo.tenantId} and t.owner_id = ${escopo.pessoaId} and t.estado = 'pendente' and t.origem <> 'ligacao'
@@ -1323,9 +1341,9 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
         ) x
         left join maquina_tokens k on k.tenant_id = x.tenant_id and k.id::text = x.alvo_id
         where ${soEstes !== null} or x.agente_excluido or x.geracao_antiga
-          or (k.id is not null and greatest(x.criado_em, coalesce(x.acordar_em, x.criado_em), ${contatoDoAlvo}) <= ${limitePreso})
+          or (k.id is not null and greatest(x.criado_em, coalesce(x.acordar_em, x.criado_em), ${contatoDoAlvo}) <= ${limiteDoTurno})
           or (x.prazo_em <= ${data(agora)} and not (x.id::text = any(${jaObservados}::text[])))
-        order by (x.agente_excluido or x.geracao_antiga or (k.id is not null and greatest(x.criado_em, coalesce(x.acordar_em, x.criado_em), ${contatoDoAlvo}) <= ${limitePreso})) desc, x.criado_em asc, x.id asc
+        order by (x.agente_excluido or x.geracao_antiga or (k.id is not null and greatest(x.criado_em, coalesce(x.acordar_em, x.criado_em), ${contatoDoAlvo}) <= ${limiteDoTurno})) desc, x.criado_em asc, x.id asc
         limit ${o.limite ?? 50}`;
       return linhas.map((l) => ({
         id: l.id,
@@ -1343,6 +1361,7 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
         alvoUltimoContato: msOuNull(l.alvo_ultimo_contato),
         alvoNome: l.alvo_nome,
         alvoMaquinaId: l.alvo_id === null || l.alvo_ultimo_contato === null ? null : l.alvo_id,
+        ...(l.aguarda_ia ? { aguardaIa: true } : {}),
       }));
     },
 
@@ -1429,7 +1448,8 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
         where t.tenant_id = ${escopo.tenantId} and t.owner_id = ${escopo.pessoaId} and t.id = ${id} and t.estado = 'pendente' and t.origem <> 'ligacao'
           and (t.acordar_em is null or t.acordar_em <= ${data(agora)})
           and exists (select 1 from maquina_tokens k where k.tenant_id = t.tenant_id and k.id::text = ${alvo}
-            and greatest(t.criado_em, coalesce(t.acordar_em, t.criado_em), coalesce(k.ultimo_uso_em, k.criado_em), ${relogioDaNuvem(conn, conn`k.tenant_id`, conn`k.id`, agora)}) <= ${data(agora - PRAZO_PRESO_SEM_CONTATO_MS)})
+            and greatest(t.criado_em, coalesce(t.acordar_em, t.criado_em), coalesce(k.ultimo_uso_em, k.criado_em), ${relogioDaNuvem(conn, conn`k.tenant_id`, conn`k.id`, agora)})
+              <= (case when ${aguardaIaSql(conn)} then ${data(agora - PRAZO_SEM_IA_MS)}::timestamptz else ${data(agora - PRAZO_PRESO_SEM_CONTATO_MS)}::timestamptz end))
         returning ${conn.unsafe(COLUNAS.split(", ").map((c) => `t.${c}`).join(", "))}`;
       return l ? paraTurno(l) : null;
     },

@@ -317,3 +317,17 @@
 /* as marcas do pedido (rotina parada, ×N) e o rótulo das permissões dentro de Detalhes */
 .cp-marcas { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 0; }
 .cp-detalhes .cp-permissoes { margin: 8px 0 4px; font-size: 12.5px; }
+
+/* Jornada C (docs/specs/onboarding-jornada-c.md): o card "Conectar uma IA neste computador" na conversa, uma linha por IA
+   com o botão do cartão de Provedores de IA, e o aviso da barra como botão de verdade. */
+.cp-sem-ia .cp-linhas { display: grid; gap: 6px; margin-top: 8px; }
+.cp-sem-ia .cp-ia { display: flex; align-items: center; gap: 8px; }
+.cp-sem-ia .cp-ia-txt { flex: 1; min-width: 0; color: var(--ink); }
+.cp-sem-ia .cp-rodape { margin: 8px 0 0; font-size: 12px; }
+.cp-sem-ia:focus-visible { outline: 2px solid var(--line); outline-offset: 2px; }
+.aviso-sem-ia {
+  display: block; width: 100%; text-align: left; font: inherit; font-size: 12.5px; color: var(--ink-2);
+  padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-side); cursor: pointer;
+}
+.aviso-sem-ia:hover { color: var(--ink); background: var(--surface-raised); }
+.aviso-sem-ia b { color: var(--ink); font-weight: 600; }

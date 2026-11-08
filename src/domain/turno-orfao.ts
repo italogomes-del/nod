@@ -1,5 +1,6 @@
 import type { OrigemTurno } from "../contracts/turno.ts";
 import { prazoVenceu } from "./relogio.ts";
+import { PRAZO_SEM_IA_MS } from "./sem-ia.ts";
 
 /**
  * NOD-219: o turno `pendente` que nunca vai sair da fila. Definido em 2026-10-13 (plano de engenharia da Ada, D1–D3).
@@ -57,6 +58,11 @@ export interface FatosTurnoOrfao {
   alvoUltimoContato: number | null;
   /** O nome da máquina-alvo, para o texto; `null` sem alvo. */
   alvoNome: string | null;
+  /**
+   * Jornada C do onboarding: a fala da pessoa guardada sem IA (a negação `aguardaIa` do turno). Ela promete esperar
+   * 7 dias (`PRAZO_SEM_IA_MS`), então o preso sem contato só encerra depois disso, não nas 24 h de sempre.
+   */
+  aguardaIa?: boolean;
 }
 
 export type DecisaoTurnoOrfao =
@@ -84,9 +90,14 @@ export function presoDesde(f: Pick<FatosTurnoOrfao, "criadoEm" | "acordarEm" | "
   return Math.max(f.criadoEm, f.acordarEm ?? 0, f.alvoUltimoContato);
 }
 
-export function presoSemContato(f: Pick<FatosTurnoOrfao, "criadoEm" | "acordarEm" | "alvoUltimoContato">, agora: number): boolean {
+/** Quanto o pendente fica preso a uma máquina-alvo sem contato: 24 h, ou os 7 dias da fala guardada sem IA. */
+export function prazoPresoSemContato(f: Pick<FatosTurnoOrfao, "aguardaIa">): number {
+  return f.aguardaIa ? PRAZO_SEM_IA_MS : PRAZO_PRESO_SEM_CONTATO_MS;
+}
+
+export function presoSemContato(f: Pick<FatosTurnoOrfao, "criadoEm" | "acordarEm" | "alvoUltimoContato" | "aguardaIa">, agora: number): boolean {
   const desde = presoDesde(f);
-  return desde !== null && agora - desde >= PRAZO_PRESO_SEM_CONTATO_MS;
+  return desde !== null && agora - desde >= prazoPresoSemContato(f);
 }
 
 /** A causa em palavras, para a conversa, o pedido a colega e o evento. `maquina` nomeia o alvo (sem ele, "o computador do bot"). */

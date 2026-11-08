@@ -19,6 +19,7 @@ import { horaDaFrase } from "../domain/erro-fornecedor.ts";
 import { harnessFixado, iaDaNegacao, inventarioHarnessSemSonda, motivoHarnessIndisponivel, motivoSemIaPronta } from "../domain/harness.ts";
 import { resolverLocalidade } from "../domain/localidade-turno.ts";
 import { redigir } from "../domain/redacao.ts";
+import { aguardaIa, falaSemIa, PRAZO_SEM_IA_MS } from "../domain/sem-ia.ts";
 import { log } from "../obs/log.ts";
 import { autoriaAgente, autoriaPessoa, evento, inventarioAusente, motorDe, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
 import { fiosDaConversa } from "./fios-da-pergunta.ts";
@@ -47,6 +48,12 @@ export type EntradaEnviarMensagem = {
    * ações). Só o id: o trecho é recalculado aqui, da fala, que tem de ser da MESMA conversa.
    */
   respondeA?: string;
+  /**
+   * Jornada C do onboarding (NOD_ONBOARDING_TEXTO=1): sem IA pronta, a fala da pessoa na conversa própria fica guardada —
+   * o turno nasce `pendente` por PRAZO_SEM_IA_MS e o bot responde com a fala fixa (negação `aguardaIa`), em vez de nascer
+   * interrompido. Ausente/false = o caminho de sempre.
+   */
+  guardarSemIa?: boolean;
 };
 
 export type SaidaEnviarMensagem = { mensagem: Mensagem; turno: Turno; negacao: Mensagem | null };
@@ -112,12 +119,16 @@ export const enviarMensagem: CasoDeUso<EntradaEnviarMensagem, SaidaEnviarMensage
   const inventario = input.inventario ?? (await deps.repos.inventario.buscar(motorDe(executor))) ?? inventarioAusente(agora);
   const localidade = resolverLocalidade({ origem, tocaDadoPessoal: false, motorExigido: agente.modelo, inventario });
   const recusado = "recusado" in localidade;
+  // Jornada C: o turno recusado por falta de IA que só espera (spec, critério 1). Lê os guardados antes de enfileirar:
+  // a primeira fala é a da tela C; as seguintes, a linha curta que aponta o card (critério 2).
+  const guarda = recusado && aguardaIa({ ligado: input.guardarSemIa === true, origem, daPessoa: true, trabalho: false });
+  const jaHaGuardada = guarda && (await deps.repos.turnos.vivosDaConversa(conversa.id)).some((t) => t.estado === "pendente" && !!t.mensagemOrigemId && !t.trabalhoId);
 
   const turno = await deps.repos.turnos.enfileirar({
     conversaId: conversa.id,
     agenteId: agente.id,
     origem,
-    prazoEm: agora + (input.prazoMs ?? PRAZO_DECISAO_PADRAO_MS),
+    prazoEm: agora + (guarda ? PRAZO_SEM_IA_MS : (input.prazoMs ?? PRAZO_DECISAO_PADRAO_MS)),
     profundidade: 0,
     // ADR-113: com sessão retomada o bot só lê a entrada; a citação vai nela, e no histórico pelo payload.
     entradaTexto: respondeA ? comCitacao(texto, respondeA.trecho) : texto,
@@ -129,7 +140,7 @@ export const enviarMensagem: CasoDeUso<EntradaEnviarMensagem, SaidaEnviarMensage
     executor,
     localityReason: localidade.motivo,
     decididoPor: localidade.decididoPor,
-    interrompidoCom: recusado ? "executor_indisponivel" : undefined,
+    interrompidoCom: recusado && !guarda ? "executor_indisponivel" : undefined,
   });
   if (!turno) throw new ErroDeDominio("nao_permitido");
   // NOD-23: /configurar na conversa própria com bot elegível liga a reconfiguração na mesma transação do turno; o plano
@@ -141,7 +152,19 @@ export const enviarMensagem: CasoDeUso<EntradaEnviarMensagem, SaidaEnviarMensage
 
   const events = [evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: conversa.id, turnoId: turno.id, dados: { mensagem_id: mensagem.id, kind: "texto" } })];
   let negacao: Mensagem | null = null;
-  if (recusado) {
+  if (guarda) {
+    negacao = await deps.repos.mensagens.criar({
+      conversaId: conversa.id,
+      turnoId: turno.id,
+      autoria: autoriaAgente({ agenteId: agente.id, contaDeExecucao: deps.escopo.pessoaId, executor, localityReason: "motor_ausente" }),
+      kind: "negacao",
+      texto: falaSemIa({ jaHaGuardada }),
+      payload: { kind: "negacao", classe: "plano_ausente", nome: motorDe(executor), motivo: "plano_ausente", terminal: false, aguardaIa: true },
+      confianca: "confiavel",
+    });
+    events.push(evento(deps.escopo, { kind: "turno_criado", autoria, agora, conversaId: conversa.id, turnoId: turno.id, dados: { origem, agente_id: agente.id, aguarda_ia: true } }));
+    if (negacao) events.push(evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: conversa.id, turnoId: turno.id, dados: { mensagem_id: negacao.id, kind: "negacao" } }));
+  } else if (recusado) {
     // #313: o bot fixado nomeia a IA dele, com o estado dela (como o despacho, NOD-171); o Automático diz que nenhuma IA
     // está pronta — o `inventario` aqui é o da máquina, e chamá-lo de "Claude Code" confundia quem só tem o ChatGPT.
     const fixo = harnessFixado(agente.harness, agente.modelo);

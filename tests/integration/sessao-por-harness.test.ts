@@ -82,4 +82,28 @@ describeIntegracao("sessão do CLI pertence ao harness (0030)", () => {
       expect(p.promptSistema).not.toContain("Marca o RBAC como feito");
     });
   });
+
+  // Regression: QA do PR #693 (jornada C) — o filtro da fala fixa sem IA no "desdeSuaUltimaVez" não tinha teste: sem ele,
+  // a sessão retomada recebia "Recebi. Estou sem IA…" como novidade da conversa.
+  // Found by /qa on 2026-11-08
+  it("jornada C: a sessão retomada recebe a pergunta guardada sem IA, nunca a fala fixa do bot", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON, { nome: "Ada" });
+      await repos.agentes.atualizarPerfil(agenteId, { confirmado: true });
+      const sessao = randomUUID();
+      await repos.conversas.atualizarSessaoCli(conversaId, sessao, "local", "claude-cli");
+      const guardada = await repos.mensagens.criar({ conversaId, autoria: autoriaPessoa(PESSOA_MARLON), kind: "texto", texto: "Pergunta guardada sem IA", confianca: "confiavel" });
+      const fixa = await repos.mensagens.criar({ conversaId, autoria: autoriaAgente(agenteId, PESSOA_MARLON), kind: "negacao", texto: "Recebi. Estou sem IA neste computador, então ainda não consigo pensar nisso.", payload: { kind: "negacao", classe: "plano_ausente", nome: "claude-cli", motivo: "plano_ausente", terminal: false, aguardaIa: true }, confianca: "confiavel" });
+      const T = Date.now();
+      await trx`update conversas set sessao_em = ${new Date(T - 1000)} where id = ${conversaId}`;
+      await trx`update mensagens set criado_em = ${new Date(T - 700)} where id = ${guardada?.id ?? ""}`;
+      await trx`update mensagens set criado_em = ${new Date(T - 600)} where id = ${fixa?.id ?? ""}`;
+      const pedido = await repos.mensagens.criar({ conversaId, autoria: autoriaPessoa(PESSOA_MARLON), kind: "texto", texto: "E agora?", confianca: "confiavel" });
+
+      const p = await plano(trx, repos, agenteId, conversaId, "claude-cli", { mensagemOrigemId: pedido?.id ?? "" });
+      expect(p.entrada.sessaoCli).toBe(sessao);
+      expect(p.promptSistema).toContain("Pergunta guardada sem IA");
+      expect(p.promptSistema).not.toContain("Estou sem IA neste computador");
+    });
+  });
 });

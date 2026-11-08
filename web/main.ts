@@ -1,3 +1,4 @@
+import { botaoDaBarraSemIa, conversaAguardandoIa, dicaDoComposerSemIa, iasNoCard, idDoCardSemIa, turnosVivosDe } from "./telas/sem-ia-conversa.ts";
 import { escNoEspaco, focoAoAbrirEspaco, voltarParaLista } from "./lib/navegacao-config.ts";
 import { perfilMudou } from "./lib/perfil-mudou.ts";
 import "./lib/mascote-elemento.ts";
@@ -1941,6 +1942,10 @@ function renderSidebar(estado: Estado): string {
   const inv = inventarioEmUso(estado);
   const falhaMotor = !!inv && inv.estado !== "pronto";
   const avisoUso = avisoDoUso();
+  // Jornada C: com mensagem guardada sem IA (NOD_ONBOARDING_TEXTO=1), o aviso é um botão que leva ao card na conversa
+  // (a do Nod primeiro); sem ela, o aviso de sempre.
+  const aguardando = conversaAguardandoIa(Object.fromEntries(Object.entries(estado.conversas).map(([k, c]) => [k, c ? { mensagens: c.mensagens } : undefined])), iasNoCard(estado), turnosVivosDe(estado), nod?.conversaId);
+  const agenteAguardando = aguardando ? (estado.frota?.agentes ?? []).find((a) => a.conversaId === aguardando.conversaId) : undefined;
   const situacaoMotor = !estado.executor
     ? "Verificando conexão…"
     : falhaMotor
@@ -1948,6 +1953,9 @@ function renderSidebar(estado: Estado): string {
       : estado.executor.atual === "catcher"
         ? "Modo de simulação"
         : "Sua IA conectada";
+  const avisoDoMotor = agenteAguardando && aguardando
+    ? botaoDaBarraSemIa(aguardando.conversaId, agenteAguardando.id)
+    : falhaMotor ? avisoDeEstado({ tom: "alerta", texto: situacaoMotor, papel: "status", classe: "aviso-compacto", acao: botao("secao-espaco", motorDesatualizado(estado) ? "Atualizar" : "Conectar", { classe: "pri sm", dados: { secao: "conexao" } }) }) : "";
   // definido em 2026-09-24 (sidebar no estilo do Grok): sem marca e sem título — o topo tem só busca,
   // sino e +. A busca é um ícone; o campo aparece ao clicar, com ⌘K, ou enquanto tem texto.
   const buscando = buscaAberta || termoBusca() !== "";
@@ -1971,7 +1979,7 @@ function renderSidebar(estado: Estado): string {
     </div>
     ${renderIncidentes(estado)}
     ${ambiente}
-    ${falhaMotor ? avisoDeEstado({ tom: "alerta", texto: situacaoMotor, papel: "status", classe: "aviso-compacto", acao: botao("secao-espaco", motorDesatualizado(estado) ? "Atualizar" : "Conectar", { classe: "pri sm", dados: { secao: "conexao" } }) }) : ""}
+    ${avisoDoMotor}
     <div class="list">
       ${erroFrota}
       ${meio}
@@ -1989,7 +1997,7 @@ function renderSidebar(estado: Estado): string {
       ${equipe}
     </div>
     ${ambiente}
-    ${falhaMotor ? avisoDeEstado({ tom: "alerta", texto: situacaoMotor, papel: "status", classe: "aviso-compacto", acao: botao("secao-espaco", motorDesatualizado(estado) ? "Atualizar" : "Conectar", { classe: "pri sm", dados: { secao: "conexao" } }) }) : ""}
+    ${avisoDoMotor}
     <div class="rodape">
       <button class="me${falhaMotor ? " me-falha" : ""}" data-act="menu-conta" aria-haspopup="menu" aria-expanded="${estado.espaco ? "true" : "false"}"${falhaMotor ? ' data-etiqueta="Sua IA não está conectada"' : ""} aria-label="Menu da conta: ${esc(situacaoMotor)}${avisoUso ? ` · ${esc(avisoUso.resumo)}` : ""}" title="Menu da conta · ${esc(situacaoMotor)}${avisoUso ? ` · ${esc(avisoUso.resumo)}` : ""}"><span class="av-me">eu</span>${falhaMotor ? '<span class="me-fora" aria-hidden="true">!</span>' : avisoUso ? '<span class="me-ponto" aria-hidden="true"></span>' : ""}<span class="me-conexao conexao-${esc(estado.conexao.estado)}" title="eventos ao vivo: ${esc(estado.conexao.estado)}"></span></button>
       <button class="marketplace-bt" data-act="navegar" data-tela="conectores" aria-current="${t.tipo === "conectores" ? "true" : "false"}" data-etiqueta="Marketplace">${LOJA}<span class="marketplace-nome">Marketplace</span></button>
@@ -2493,7 +2501,12 @@ const PLACEHOLDER_SALA = "Mensagem para a sala — @Nome dirige a pergunta";
 
 function placeholderPadrao(): string {
   const t = estado.tela;
-  return t.tipo === "conversa" ? `Escreva uma mensagem para ${botGerido(t.agenteId)?.nome ?? "o bot"}…` : PLACEHOLDER_SALA;
+  if (t.tipo !== "conversa") return PLACEHOLDER_SALA;
+  const nome = botGerido(t.agenteId)?.nome ?? "o bot";
+  // Jornada C: com a fala guardada e nenhuma IA pronta, a dica diz quando o bot responde (o envio continua liberado).
+  const c = estado.conversas[t.conversaId];
+  if (c && conversaAguardandoIa({ [t.conversaId]: { mensagens: c.mensagens } }, iasNoCard(estado), turnosVivosDe(estado))) return `${dicaDoComposerSemIa(nome)}…`;
+  return `Escreva uma mensagem para ${nome}…`;
 }
 
 /**
@@ -5916,6 +5929,18 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     if (document.documentElement.dataset.sobreposta && el.closest("#sidebar")) fecharBusca();
     if (estado.tela.tipo === "quadro-compartilhado" && estado.tela.quadroId === qid) { quadroCompartilhado.abrir(qid); return; }
     navegar({ tipo: "quadro-compartilhado", quadroId: qid });
+  },
+  // Jornada C: o aviso da barra leva ao card "Conectar uma IA neste computador" da conversa e põe o foco nele.
+  "ir-card-sem-ia": (el) => {
+    const conversaId = el.dataset.conversa ?? "";
+    navegar({ tipo: "conversa", conversaId, agenteId: el.dataset.agente ?? "" });
+    let tentativas = 0;
+    const focar = (): void => {
+      const card = document.getElementById(idDoCardSemIa(conversaId));
+      if (card) { card.scrollIntoView({ block: "center" }); card.focus({ preventScroll: true }); return; }
+      if (++tentativas < 20) window.setTimeout(focar, 50);
+    };
+    window.setTimeout(focar, 0);
   },
   "abrir-conversa": (el) => {
     // NOD-119: escolher um bot na barra aberta por cima (recolhida + busca) fecha a busca, para a barra voltar a recolher.
